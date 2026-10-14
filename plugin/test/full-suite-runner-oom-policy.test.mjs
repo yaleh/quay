@@ -487,7 +487,7 @@ test("AC1/AC7 — a round where scheduled files produced no terminal record is `
     // ① 取假负控制（= 修法前的形态）：**没有计划集** ⇒ 判词只数 TAP ⇒ green，514/579 那种「少了一大半
     //    文件却全绿」的形态。
     const pre = runRunner({ root, command: `bash ${f}`, laneCount: 1, runId: "plan-pre" });
-    await waitExit(pre);
+    await waitExit(pre, { timeoutMs: 180_000 });
     const preState = readState(root);
     assert.equal(preState.state, "green", "pre-fix shape: no plan ⇒ green (this is the defect — the negative control MUST reproduce it)");
     assert.equal(preState.notEvaluated, undefined, "pre-fix shape carries no not-evaluated token");
@@ -500,7 +500,7 @@ test("AC1/AC7 — a round where scheduled files produced no terminal record is `
       root, command: `bash ${f}`, laneCount: 1, runId: "plan-post",
       env: { QUAY_TEST_PLANNED_FILES: [PLAN_A, PLAN_B, PLAN_C].join(",") },
     });
-    const { code } = await waitExit(post);
+    const { code } = await waitExit(post, { timeoutMs: 180_000 });
     assert.notEqual(code, 0, "an incomplete round exits non-zero (fan-in must treat it as red)");
     const s = readState(root);
     assert.equal(s.state, "red", "incomplete ⇒ red, ⛔ green");
@@ -539,7 +539,7 @@ test("AC7 — planned-manifest completeness: (a) never starts, (b) SIGKILLed mid
     // (a) 一个计划文件**从未开始**（一行都没有）。
     const a = fakeSuite(suiteBody(root, [PLAN_A]));
     const ra = runRunner({ root, command: `bash ${a.f}`, laneCount: 1, runId: "ac7-a", env: { QUAY_TEST_PLANNED_FILES: `${PLAN_A},${PLAN_B}` } });
-    await waitExit(ra);
+    await waitExit(ra, { timeoutMs: 180_000 });
     assert.equal(readState(root).notEvaluated, "incomplete (1/2 missing)");
     assert.deepEqual(readState(root).missingFiles, [PLAN_B], "(a) a planned file that never started is named");
 
@@ -551,7 +551,7 @@ test("AC7 — planned-manifest completeness: (a) never starts, (b) SIGKILLed mid
       "exit 0",
     ].join("\n"));
     const rb = runRunner({ root, command: `bash ${b.f}`, laneCount: 1, runId: "ac7-b", env: { QUAY_TEST_PLANNED_FILES: `${PLAN_A},${PLAN_B}` } });
-    await waitExit(rb);
+    await waitExit(rb, { timeoutMs: 180_000 });
     assert.equal(readState(root).notEvaluated, "incomplete (1/2 missing)");
     assert.deepEqual(readState(root).missingFiles, [PLAN_B], "(b) a SIGKILLed planned file is named");
 
@@ -562,7 +562,7 @@ test("AC7 — planned-manifest completeness: (a) never starts, (b) SIGKILLed mid
       "exit 0",
     ].join("\n"));
     const rc = runRunner({ root, command: `bash ${c.f}`, laneCount: 1, runId: "ac7-c", env: { QUAY_TEST_PLANNED_FILES: `${PLAN_A},${PLAN_B}` } });
-    await waitExit(rc);
+    await waitExit(rc, { timeoutMs: 180_000 });
     const sc = readState(root);
     assert.equal(sc.notEvaluated, "incomplete (1/2 missing)", "(c) a cancelled planned file still counts as NO terminal record");
     assert.deepEqual(sc.missingFiles, [PLAN_B], "(c) the cancelled file is named");
@@ -570,7 +570,7 @@ test("AC7 — planned-manifest completeness: (a) never starts, (b) SIGKILLed mid
     // (d) 完整夹具 ⇒ green，且 planned == terminal == N 被**印出来**（AC4/AC5 要的那个读数）。
     const d = fakeSuite(suiteBody(root, [PLAN_A, PLAN_B, PLAN_C]));
     const rd = runRunner({ root, command: `bash ${d.f}`, laneCount: 1, runId: "ac7-d", env: { QUAY_TEST_PLANNED_FILES: [PLAN_A, PLAN_B, PLAN_C].join(",") } });
-    const { code } = await waitExit(rd);
+    const { code } = await waitExit(rd, { timeoutMs: 180_000 });
     assert.equal(code, 0, "a complete suite is unaffected (AC4)");
     const sd = readState(root);
     assert.equal(sd.state, "green");
@@ -614,7 +614,12 @@ test(
           QUAY_TEST_CGROUP_DIR: cg,
         },
       });
-      const { code } = await waitExit(child);
+      // Under full-suite load a REAL `systemd-run --user --scope` + node + child spawn can exceed the
+      // harness's 60s default (measured: this stub took 60.5s in a loaded full run ⇒ waitExit rejected
+      // with a TIMEOUT, not an assertion failure — a load artifact, not a verdict defect). Same
+      // load-sensitivity family as this file's pre-existing AC2/AC5 systemd tests (@load-sensitive
+      // child-spawn header). Give the scope-spawning stubs headroom.
+      const { code } = await waitExit(child, { timeoutMs: 240_000 });
       assert.notEqual(code, 0, "an OOM round exits non-zero");
       const s = readState(root);
       assert.equal(s.state, "red", "OOM ⇒ red, ⛔ green (this is the round-2660 shape)");
@@ -677,7 +682,7 @@ test("AC9 — unreadable memory telemetry is recorded as `unknown`, ⛔ never 0 
     const { f, dir } = fakeSuite(suiteBody(root, [PLAN_A]));
     try {
       const child = runRunner({ root, command: `bash ${f}`, laneCount: 1, runId: "tel-noscope", env: { QUAY_TEST_PLANNED_FILES: PLAN_A } });
-      const { code } = await waitExit(child);
+      const { code } = await waitExit(child, { timeoutMs: 180_000 });
       assert.equal(code, 0, "the complete round is green");
       const s = readState(root);
       assert.equal(s.oomKill, undefined, "non-scope round: the dimension is ABSENT (缺键 ≠ unknown)");
