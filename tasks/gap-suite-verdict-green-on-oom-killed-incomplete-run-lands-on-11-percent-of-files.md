@@ -38,6 +38,11 @@ The full suite **never completed**. Host load was ~24 and there was no OOM signa
 2. `oomKill > 0` from the suite's own memory evidence is surfaced in the round record and in the fan-in reason. Combined with (1), it can never be absent from a green verdict.
 3. The in-round rerun channel (`rerun-green`) must not convert an *incomplete* round into green by re-running only the named failing files. Missing files are not "named failures".
 
+**Scope tightened 2026-10-14 (human-directed, coordinator).** The verdict must be **fail-closed on completeness**:
+4. **Planned manifest.** Before execution, the runner persists the scheduled set: every file, which phase it is in, and its expected terminal. A round is `green` only if **every** planned file has both (a) a per-file terminal record (`__PERFILE__` with `passed=`) and (b) an observed process outcome (exit code, or signal, or `cancelled`). Missing ⇒ `not-evaluated: incomplete (k/N missing)` with the list. A process killed by signal, OOM, or the watchdog is a recorded outcome, not "absent".
+5. **OOM is never a flake.** If the suite scope's `memory.events oom_kill` rose during the round (from the runner's own evidence), the in-round `rerun` channel is **not** allowed to convert the round to green. The round is `not-evaluated: oom-killed (n)`, regardless of whether the named files pass when re-run in isolation. Re-running in isolation removes the very concurrency that caused the kill, so it proves nothing.
+6. **Telemetry that could not be read is `unknown`, never 0.** If `memory.events` / `memory.peak` cannot be read (cgroup gone, no permission, not a systemd scope), the round records `oomKill: unknown` / `peakBytes: unknown` and the verdict for an otherwise-green round carries `telemetry: unknown`. The evidence file must not write a 0 that is shaped like "no OOM".
+
 ## Acceptance Criteria
 - [ ] AC1: fixture: a suite where N scheduled files are killed (SIGKILL fixture, or a cgroup OOM fixture where feasible) before emitting TAP. Pre-fix verdict is `green` with fewer files (pasted negative control); post-fix verdict is `not-evaluated: incomplete` listing the N files (pasted).
 - [ ] AC2: the fan-in on such a round does not land, and its reason names "incomplete suite (N/M files)" and the oomKill count when present (pasted).
@@ -45,6 +50,9 @@ The full suite **never completed**. Host load was ~24 and there was no OOM signa
 - [ ] AC4: a genuinely complete green suite is unaffected (one real full run pasted, file count = scheduled count).
 - [ ] AC5: `scripts/test.sh --for-task <this task>` green, plus one real full `scripts/test.sh` run with its exact scope, commit, file count and test count pasted (not a scoped count).
 - [ ] AC6: watchdog-killed suite (silence timeout fixture) followed by an in-round rerun of the named files: the fan-in does **not** land. A `verification-round.jsonl` record with a distinct `evaluated:false` / watchdog reason **is** written (regression check against `gap-watchdog-killed-round-writes-no-verification-round-record`). The names of any re-run files are persisted in a carrier that survives landing cleanup (pasted, pre-fix negative control included).
+- [ ] AC7: planned-manifest completeness: fixture suites where (a) one planned file never starts, (b) one is SIGKILLed mid-run, (c) one is cancelled. Each yields `not-evaluated: incomplete` naming that file. A fully complete fixture is `green` with `planned == terminal == N` printed (pasted, plus pre-fix negative control).
+- [ ] AC8: an OOM-killed round (cgroup OOM fixture, or `memory.events` oom_kill delta injected through the runner's evidence seam) whose named failures pass on in-round rerun is **not** landed. Reason `oom-killed (n)`, and no `suite-rerun-green` step (pasted, plus pre-fix negative control showing the old `rerun-green` landing).
+- [ ] AC9: unreadable memory telemetry is recorded as `unknown`, not `0`, in both the evidence file and the round record (fixture with the cgroup path absent, pasted).
 
 ## Definition of Done
 - AC1-AC5 checked with pasted evidence. Separately recorded, not done here: whether round 2660's landing (`87d513fe4`) needs re-certification. The next full round that contains `e18ec4b04` is that re-certification.
