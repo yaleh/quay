@@ -162,11 +162,3 @@ export function spawnKernelProcess(t, cmd, args, opts = {}) {
   }
   return { child, pid: child.pid, pgid, stop };
 }
-
-/**
- * Run `body` and return the process groups the body spawned that are STILL ALIVE afterwards — the
- * pre-fix negative-control reading (nothing reaps a bare `spawn`), used by the AC1 fixtures.
- */
-export function survivingGroups(pgids) {
-  return pgids.filter((pgid) => processGroupAlive(pgid));
-}
