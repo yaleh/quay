@@ -303,3 +303,49 @@ All six Acceptance Criteria are now satisfied with real, non-fixture evidence: A
 ### Resolved 2026-10-14 (round 4) — unparked
 
 The literal unpark trigger stated above ("续做只需验证并勾选 AC") and the real underlying condition (AC3's own criterion) are BOTH now satisfied, not just the proxy: human authorization was given this round, the swap was executed, and AC3's evidence was independently re-verified against the live carrier (three real post-swap rounds, re-checked ~2h45m apart) before this task was unparked — per the discipline that a stated unpark trigger is a proxy and must be checked against the real criterion, not trusted at face value. Status set to `ready`.
+
+## Round-5 — independent re-verification of AC3, and a re-run of the pre-exit gates (2026-10-14)
+
+This round wrote no code and ran no fresh clean-host observation: round 4 had already landed the work
+and ticked all six ACs. What it adds is the one thing round 4 could not supply about itself —
+**independent** re-checking, by a different worker, of the load-bearing AC3 claim, plus a re-run of the
+gates at the then-current develop tip.
+
+**AC3 re-verified against the live host, read-only (no writes to that project):**
+
+- `.quay/anchor.json` — pid `2402070`, startedAt `2026-10-13T23:43:20.408Z`, kinds
+  `[promotion,outer,goal,worker,quality]` all `declared`, kernel
+  `quay-scratch/official-dist-020-dev-r4-ccui-fix/scripts/dist/driver-anchor.js`
+  (builtAt `2026-10-13T23:39:48.550Z`), `takeover: null`. Matches round 4's claim exactly.
+- Its own carrier `.quay/architecture-review-round.jsonl` — rounds `1106` / `1109` / `1112` judged at
+  `23:43:43Z` / `00:43:56Z` / `01:44:13Z`, all `state: "not-triggered"`, reason
+  `"no candidate clusters (three detectors produced zero suspicious groupings)"`. Three clean,
+  naturally-scheduled rounds; byte-identical to what round 4 pasted, so the reading is stable and not a
+  single lucky round.
+- `.quay/config.yml` md5 `47b29e76a3b0c9022aeb408955a90670` — unchanged from the round-1/2/3/4 readings,
+  so AC4 continues to hold across the swap.
+
+**Gates re-run in the task worktree, at develop `f76b7cabf`:**
+
+```
+anti-drift-touches-check --merge-target develop
+  -> ANTI-DRIFT OK: 0 actual file(s), all within declared Touches (4 glob(s))            exit 0
+scripts/test.sh --for-task <id> --allow-thin
+  -> SCOPED_GATE_EXIT=0
+worker-driver --write-scoped-gate-cache --develop-sha f76b7cabf
+  -> scoped-gate-cache-written
+task_check  -> ok:true, acTotal 6, acChecked 6
+ready-pool-check --json -> this task in `ready` (len 1), `excluded` empty; all three depends_on
+                           prerequisites read `status: done`
+```
+
+The task branch carried **zero** commits of its own (`git merge-base --is-ancestor HEAD develop` = YES,
+measured before the merge), so merging develop into it was a fast-forward to `f76b7cabf`. No file
+outside the declared Touches was written; no budget key or host config was touched.
+
+**Nothing was force-ticked.** Every AC was already `[x]` on develop before this round began; this
+round's contribution is corroboration of an existing claim, not a new claim. The observation window is
+reported as it closed.
+
+**Verdict:** round 4's verdict stands, now independently corroborated rather than self-certified. All
+six ACs are satisfied with real, non-fixture evidence.
