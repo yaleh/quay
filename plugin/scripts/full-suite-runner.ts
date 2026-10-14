@@ -1961,6 +1961,24 @@ export function terminalFileSet(perFileLines: Iterable<string>, root: string): S
   return out;
 }
 
+/**
+ * 「**跑过且通过**」集：与 {@link terminalFileSet} 同一份行格式（⛔ 不各写一份正则 = 漂移），只收
+ * `passed=true` 的文件。
+ *
+ * gap-suite-verdict-green-on-oom-killed-incomplete-run-lands-on-11-percent-of-files AC13 — 这是判「一个
+ * 恢复轮里出现的失败，是否算【更低并发下新冒出来的回归】」的**分母**。判据只在有读数的文件上成立：
+ * 原轮**根本没产出终态行**的文件不在集合里（它们是「缺值」，硬规则 6 —— ⛔ 不得当作「通过」，否则一个
+ * 被 OOM 杀掉、降档后才第一次跑起来的文件会被误判成「新回归」，把每一次真实恢复都挡死）。
+ */
+export function passedFileSet(perFileLines: Iterable<string>, root: string): Set<string> {
+  const out = new Set<string>();
+  for (const line of perFileLines) {
+    const m = /^__PERFILE__ duration_ms=([0-9.]+) (\S+) passed=(true|false)/.exec(String(line).trim());
+    if (m && m[3] === "true") out.add(relTestPath(m[2], root));
+  }
+  return out;
+}
+
 /** 完整性读数（纯函数）。`evaluated:false` ⇒ 计划不可得 ⇒ 这一维**未评估**（⛔ 不是「完整」）。 */
 export interface PlannedCompleteness {
   evaluated: boolean;
@@ -4139,7 +4157,12 @@ export async function run(argv: string[]): Promise<number> {
       `${SUITE_LOG_PLAN_PREFIX} planned=${completeness.plannedCount ?? "unknown"} terminal=${completeness.terminalCount}` +
         ` missing=${completeness.missing.length} source=${plannedResolution.source}` +
         ` plan_error=${JSON.stringify(plannedResolution.error)} completeness=${completenessToken}` +
-        ` oomKill=${oomKillReading} telemetry=${telemetryAttempted ? (telemetryUnreadable ? "unknown" : "ok") : "absent"}\n`,
+        ` oomKill=${oomKillReading} telemetry=${telemetryAttempted ? (telemetryUnreadable ? "unknown" : "ok") : "absent"}` +
+        // gap-suite-verdict-green-on-oom-killed-incomplete-run-lands-on-11-percent-of-files AC10 — the
+        // round's own concurrency, so the fan-in can step DOWN from THIS value (⛔ not from a guessed
+        // default): a recovery re-run must be at a strictly lower concurrency than the round that failed,
+        // and 「哪一档才是更低」只有原轮的读数能回答。
+        ` laneCount=${laneCount}\n`,
       "utf8",
     );
     if (incomplete || oomKilled) {

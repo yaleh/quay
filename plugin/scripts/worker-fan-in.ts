@@ -67,7 +67,7 @@ import { normalizeRel } from "./gate-script-base.ts";
 import { computeDocCheckFaceKey, readDocCheckCache, writeDocCheckCache, readGreenCache, writeGreenCache } from "./doc-check-cache.ts";
 import type { GreenCacheEntry } from "./doc-check-cache.ts";
 import { buildMirrorState, writeMirrorState, shouldSkipMirrorWrite, readCurrentState } from "./mirror-full-suite-state.ts";
-import { defaultLaneCount, readLoadAvg } from "./full-suite-runner.ts";
+import { defaultLaneCount, readLoadAvg, passedFileSet } from "./full-suite-runner.ts";
 import { SUITE_LOG_NOT_RUN_PREFIX, SUITE_LOG_RUN_START_PREFIX, SUITE_LOG_INCOMPLETE_PREFIX, SUITE_LOG_PLAN_PREFIX } from "./full-suite-runner.ts";
 import { buildPreVerifiedRoundRecord, appendPreVerifiedRound } from "./pre-verified-round-record.ts";
 import { splitTaskFile, statusFromFrontmatter, patchStatusField, commitTaskFile } from "./task-ops.ts";
@@ -764,6 +764,88 @@ export function extractSuiteIncompleteMarker(combined: string): SuiteIncompleteR
     oomKill: oomRaw !== null && /^\d+$/.test(oomRaw) ? Number(oomRaw) : "unknown",
     files,
   };
+}
+
+/**
+ * gap-suite-verdict-green-on-oom-killed-incomplete-run-lands-on-11-percent-of-files AC10/AC11 — 读 runner
+ * 恒写的 `SUITE-PLAN` 行（绿轮也写）：本轮的**完整性读数**与**本轮的并发档位**。恢复轮（AC10）要用原轮
+ * 的 `laneCount` 决定「下一档更低的值」；恢复轮自己也写这一行 ⇒ AC11 的「用它自己的 planned/terminal/
+ * oomKill 计数、⛔ 不是原轮的」有唯一来源。
+ *
+ * 三态（硬规则 3b/6）：**读到行** ⇒ 返回读数；**没读到** ⇒ null（⛔ 不是 `planned=0` ——「没写」与
+ * 「写了 0」不得压平）。单个字段读不出 / 格式不认识 ⇒ 该字段 null（⛔ 不猜）。
+ */
+export interface SuitePlanReading {
+  planned: number | null;
+  terminal: number | null;
+  missing: number | null;
+  completeness: string | null;
+  oomKill: number | "unknown" | null;
+  laneCount: number | null;
+}
+
+export function extractSuitePlanMarker(combined: string): SuitePlanReading | null {
+  const line = String(combined ?? "")
+    .split("\n")
+    .map((l) => l.trim())
+    .find((l) => l.startsWith(SUITE_LOG_PLAN_PREFIX));
+  if (!line) return null;
+  const field = (k: string): string | null => {
+    const m = new RegExp(`(?:^|\\s)${k}=(\\S*)`).exec(line);
+    return m ? m[1] : null;
+  };
+  const num = (k: string): number | null => {
+    const v = field(k);
+    return v !== null && /^\d+$/.test(v) ? Number(v) : null;
+  };
+  const oomRaw = field("oomKill");
+  return {
+    planned: num("planned"),
+    terminal: num("terminal"),
+    missing: num("missing"),
+    completeness: field("completeness"),
+    oomKill: oomRaw !== null && /^\d+$/.test(oomRaw) ? Number(oomRaw) : oomRaw === "unknown" ? "unknown" : null,
+    laneCount: num("laneCount"),
+  };
+}
+
+/** AC10/AC13 — 恢复轮**声明式**的并发降档梯。降序；**最后一个是地板**（AC13 的「floor concurrency N」
+ *  就是它）。⛔ 声明式而非开放式：序列被这张表**有界**（AC13 的「不得无限重复同一组参数」）。 */
+export const SUITE_RECOVERY_CONCURRENCY_LADDER: readonly number[] = [64, 48, 32];
+
+/** AC13 — 梯子的地板档（最后一项）。 */
+export function suiteRecoveryFloor(): number {
+  return SUITE_RECOVERY_CONCURRENCY_LADDER[SUITE_RECOVERY_CONCURRENCY_LADDER.length - 1];
+}
+
+/**
+ * AC10 — 恢复轮的**并发序列**：梯子上**严格低于**原轮并发的每一档，降序（「下一档更低的值」排最前）。
+ *
+ * 三态（硬规则 3b/6）：`original === null`（读不到原轮并发）⇒ **整条梯子**，⛔ 不是空序列 —— 空序列会被
+ * 读成「已经在最低档下面、没什么可做的」，把「读不懂」伪装成「无需恢复」（零信息读数）。反之，原轮
+ * 并发读到了且已 ≤ 地板 ⇒ 序列确实为空（那是**真实**的「没有更低的档」）。
+ */
+export function recoveryConcurrencySteps(original: number | null): number[] {
+  if (original === null) return [...SUITE_RECOVERY_CONCURRENCY_LADDER];
+  return SUITE_RECOVERY_CONCURRENCY_LADDER.filter((v) => v < original);
+}
+
+/**
+ * AC10 — 恢复轮的 argv：**同一条 suite 命令** + 把本轮的并发旋钮调到更低。
+ *
+ * 本仓库形态（`full-suite-runner.ts --buckets …`）用 **`--lane-count <n>`** —— runner 的既有并发旋钮；
+ * runner 的 REPLACE splice（runner-concurrency.ts `spliceConcurrency`）把同一个值作为
+ * **`--test-concurrency=<n>`** 交给真正的 suite 入口 `bash scripts/test.sh`。⇒ ⛔ 不新造机制、⛔ 不另加
+ * 一层包装；「真正的 suite 入口收到 `--test-concurrency=<n>`」是 runner 既有行为的投影。
+ *
+ * 非本仓库形态（命令里没有 runner）⇒ **null**：那种轮次结构上不会写 SUITE-INCOMPLETE 标记（标记只有
+ * full-suite-runner 写），且没有已知的并发旋钮 ⇒ 调用方记一个**独立的**下一档 token，⛔ 不伪造「已降档」
+ * （硬规则 3b：降不了档必须与降了档可区分）。
+ */
+export function recoverySuiteCommand(base: string[], n: number): string[] | null {
+  const isRunner = base.some((a) => /(^|[\\/])full-suite-runner\.ts$/.test(a));
+  if (!isRunner) return null;
+  return [...base, "--lane-count", String(n)];
 }
 
 /** 失败信号行（node:test 的 not ok / ✖ / # fail、断言 expected/actual、anti-drift HARD FAIL、esbuild 的
@@ -2695,7 +2777,9 @@ export async function runMechanicalFanIn(opts: MechanicalFanInOptions): Promise<
 
       traceSuiteEvent("suite-start", { exit: 0, wall_ms: 0, ok: true });
       const suiteCmd = opts.suiteCommand ?? defaultMechanicalSuiteCommand({ task, worktree, root, suiteLogFile, runId: perSuiteRunId });
-      const sr: SuiteRunResult = await spawnSuiteAndWait({ slotBase, slotLib, suiteCommand: suiteCmd, logFile: suiteLogFile, silenceMs: opts.silenceMs });
+      // ⚠️ `let`：AC10/AC11 的恢复重跑认证后，**被记录的轮次换成恢复轮**（它才是本轮真正给出结论的那次
+      //    suite）——下游 capture / verification-round 镜像 / suiteOutcome·pid·epoch 一律指向它自己的读数。
+      let sr: SuiteRunResult = await spawnSuiteAndWait({ slotBase, slotLib, suiteCommand: suiteCmd, logFile: suiteLogFile, silenceMs: opts.silenceMs });
       suiteOutcome = sr.outcome;
       suiteFinishedEpoch = Math.floor(new Date(sr.finishedAt).getTime() / 1000);
       suitePid = sr.pid;
@@ -2744,6 +2828,10 @@ export async function runMechanicalFanIn(opts: MechanicalFanInOptions): Promise<
         // 成因 token**（`incomplete suite (N/M files)` / `oom-killed (n)`），⛔ 不是裸 `suite red`。
         // ⛔ 不补写 round 记录：quay 形态下 runner 是 verification-round 的唯一 writer，且它刚刚活着写下
         //    了这条标记（平行补写 = 同一轮两条记录、round 号虚增）。
+        // AC10/AC11 — 恢复轮认证 ⇒ 本轮**不再走下面任何「原轮红」的出口**（无结论 / 本轮内重跑 / A/B /
+        // 硬红）。那几档是给「原轮**给出了结论**且它是红的」用的；认证后 `sr` 已经换成**恢复轮**，再掉
+        // 进去只会以 `suite done`/`suite red` 这类自相矛盾的判词收场（而且会把恢复轮当红驳回）。
+        let recoveredCertified = false;
         const incompleteMarker = extractSuiteIncompleteMarker(suiteLogText);
         if (incompleteMarker !== null) {
           const oomNote =
@@ -2760,8 +2848,180 @@ export async function runMechanicalFanIn(opts: MechanicalFanInOptions): Promise<
             missing: incompleteMarker.missing, oomKill: incompleteMarker.oomKill,
             files: incompleteMarker.files.slice(0, 40),
           });
-          return failSuite(reason, sr.exitCode);
+
+          // ── AC10/AC11/AC12/AC13：完整的、更低并发的【恢复重跑】─────────────────────────────────
+          // ⛔ 不是点名失败文件的重跑（那正是 AC3/AC8 禁止的洗白通道：隔离重跑移除了造成 OOM 的并发
+          //    本身），⛔ 也不是基线 A/B（A/B 比对的是**真实失败签名**，而一条被杀死/从没跑过的文件根本
+          //    没有签名——拿它当红点去比对，就是本任务要消灭的 3b 违规，只是上移了一层）。
+          // 恢复轮跑的是【同一条 suite 命令】的**完整计划清单**，只是并发降到更低的一档；它用**自己的**
+          // 读数独立定论（AC11），⛔ 不继承原轮的任何结论。
+          const originalPlan = extractSuitePlanMarker(suiteLogText);
+          const originalConcurrency = originalPlan?.laneCount ?? null;
+          const steps = recoveryConcurrencySteps(originalConcurrency);
+          // AC13(b) 的分母：原轮**跑过且通过**的文件（⛔ 原轮没产出终态行的文件不在集合里——它们是
+          // 「缺值」，硬规则 6，⛔ 不得当作「通过」）。用 runner 的同一份 `__PERFILE__` 解析。
+          const originalPassed = passedFileSet(suiteLogText.split("\n"), worktree);
+          const origFailedReading = readFailedTestFiles(suiteLogText, worktree);
+          const originalRedFiles = new Set(origFailedReading.evaluated ? origFailedReading.files : []);
+
+          if (steps.length === 0) {
+            // AC13(a) — 梯子上没有低于**原轮并发**的档：已经到/低于地板 ⇒ 阻塞 + 具名下一步，
+            // ⛔ 绝不用同一组参数重试（这正是 AC13 要禁止的无限循环）。
+            const next =
+              `recovery exhausted at floor concurrency ${suiteRecoveryFloor()} — the round's own concurrency ` +
+              `(${originalConcurrency ?? "unknown"}) leaves no lower declared rung; needs a code/config fix, ` +
+              `see plugin/scripts/full-suite-runner.ts`;
+            traceSuiteEvent("suite-recovery-exhausted", {
+              exit: 0, wall_ms: 0, ok: false, reason: next,
+              originalConcurrency, ladder: [...SUITE_RECOVERY_CONCURRENCY_LADDER],
+            });
+            return failSuite(`${reason} — ${next}`, sr.exitCode);
+          }
+
+          let certifiedRun: SuiteRunResult | null = null;
+          let certifiedPlan: SuitePlanReading | null = null;
+          let exemptReading: BaselineEquivalenceReading | null = null;
+          let blockedNextStep: string | null = null;
+          for (const n of steps) {
+            const recArgv = recoverySuiteCommand(suiteCmd, n);
+            if (recArgv === null) {
+              // 这条 suite 命令没有已知的并发旋钮（而且结构上也写不出 SUITE-INCOMPLETE 标记）⇒ 记一个
+              // **独立的**下一档 token，⛔ 不伪造「已降档」（硬规则 3b：降不了档必须与降了档可区分）。
+              blockedNextStep =
+                `recovery unsupported for this suite entry (no --lane-count control): ${suiteCmd[0] ?? "?"}; ` +
+                `needs a code/config fix, see plugin/scripts/worker-fan-in.ts`;
+              traceSuiteEvent("suite-recovery-unsupported", { exit: 0, wall_ms: 0, ok: false, reason: blockedNextStep, originalConcurrency });
+              break;
+            }
+            const recLogFile = path.join(root, ".quay", suiteLogFileName(task, runId, `recovery-${n}-${newSuiteLogAttemptSuffix()}`));
+            const recT0 = Date.now();
+            const rec = await spawnSuiteAndWait({ slotBase, slotLib, suiteCommand: recArgv, logFile: recLogFile, silenceMs: opts.silenceMs });
+            let recLog = "";
+            try { recLog = fs.readFileSync(recLogFile, "utf8"); } catch { /* 日志读不出 ⇒ 下面判「无结论」 */ }
+            const recPlan = extractSuitePlanMarker(recLog);
+            const recMarker = extractSuiteIncompleteMarker(recLog);
+            const recWall = Date.now() - recT0;
+
+            if (rec.hungByWatchdog || rec.spawnFailed === true || recLog === "") {
+              // 恢复轮**自己也没有结论**（看门狗 SIGKILL 整组 / 没起来 / 日志 0 字节）⇒ ⛔ 不认证
+              //（硬规则 3b：读不懂 ≠ 合格）。仍在有界梯子内 ⇒ 降到下一档（AC13）。
+              // ⚠️ 判据**不是** `outcome !== "done"`：非零退出码是一轮**有**结论的真红（`outcome==="red"`），
+              //    把它当「没结论」会把每一次真红都退化成「再降一档」，永远走不到 AC12 的 A/B（3b 镜像）。
+              traceSuiteEvent("suite-recovery", {
+                exit: rec.exitCode, wall_ms: recWall, ok: false, concurrency: n, outcome: rec.outcome,
+                reason: `recovery round had no conclusion (${rec.hungByWatchdog ? "watchdog-killed" : rec.spawnFailed ? "spawn-failed" : "log-unreadable"}) — stepping down`,
+              });
+              continue;
+            }
+            if (recMarker !== null) {
+              // 降档后**还是**没跑全 / 又被 OOM 杀 ⇒ 继续降到下一档（AC11：要么继续降、要么耗尽边界）。
+              // ⛔ 不进 A/B：这条记录没有签名可比；这个 `continue` 就是 AC12 的**结构**闸——下面的
+              // baseline 分支只有 `recMarker === null` 的路径落得下来。
+              traceSuiteEvent("suite-recovery", {
+                exit: rec.exitCode, wall_ms: recWall, ok: false, concurrency: n,
+                reason: recMarker.reason, planned: recMarker.planned, terminal: recMarker.terminal,
+                missing: recMarker.missing, oomKill: recMarker.oomKill, files: recMarker.files.slice(0, 40),
+              });
+              continue;
+            }
+            if (rec.exitCode === 0) {
+              // AC11 — 干净的一轮：无 incomplete 标记（missing==0）、独立退出 0 ⇒ **认证**；记的是它
+              // **自己的** planned/terminal/oomKill 读数（⛔ 不是原轮的）。
+              certifiedRun = rec;
+              certifiedPlan = recPlan;
+              traceSuiteEvent("suite-recovery-certified", {
+                exit: 0, wall_ms: recWall, ok: true, concurrency: n,
+                reason: `recovery round complete at concurrency ${n} (${steps.indexOf(n) + 1}/${steps.length}) — landing on ITS OWN verdict`,
+                planned: recPlan?.planned ?? null, terminal: recPlan?.terminal ?? null,
+                missing: recPlan?.missing ?? null, oomKill: recPlan?.oomKill ?? null,
+                completeness: recPlan?.completeness ?? null,
+              });
+              break;
+            }
+            // ── 恢复轮**完整跑完、但真红**（不是 OOM、不是 missing）⇒ AC13(b) / AC12 两条出口 ────────
+            const recFailed = readFailedTestFiles(recLog, worktree);
+            const recRedFiles = recFailed.evaluated ? recFailed.files : [];
+            const newRegressions = recRedFiles.filter((f) => originalPassed.has(f) && !originalRedFiles.has(f));
+            if (newRegressions.length > 0) {
+              // AC13(b) — 一个**原轮跑过且通过**的文件在更低并发下变红：真正的回归信号。⛔ 不再继续降档
+              //（继续降就是用换参数掩盖新失败）。阻塞 + 具名下一步。
+              blockedNextStep =
+                `new regression at lower concurrency: ${newRegressions.slice(0, 20).join(",")} ` +
+                `(passed at the original concurrency ${originalConcurrency ?? "unknown"}, fails at ${n}) — needs a code fix`;
+              traceSuiteEvent("suite-recovery-new-regression", {
+                exit: rec.exitCode, wall_ms: recWall, ok: false, concurrency: n,
+                reason: blockedNextStep, files: newRegressions.slice(0, 40),
+              });
+              break;
+            }
+            // AC12 — 完整跑完的真红：**只在这一条路径上**走上既存 baseline-equivalence（⛔ 只喂真实签名）。
+            const be = await runBaselineEquivalence(recLog, recFailed);
+            if (be !== null && be.verdict.kind === "exempt") {
+              // AC12 — 「与 develop 基线等价」**本身不足以上床**：候选自己声明的 Touches 相关测试也必须
+              // 干净。用**既存的** scoped 门命令再取一次真实读数（⛔ 不靠「本步之前已经跑过一次」这句
+              // prose——那是个未被检验的断言）。
+              let touchesClean = false;
+              let touchesDetail = "";
+              if (scopedRes.kind === "run") {
+                const sg = await mechSh(scopedRes.argv, 600_000);
+                touchesClean = sg.ok;
+                touchesDetail = `scoped gate (${scopedRes.argv.join(" ")}) exit ${sg.status}`;
+              } else {
+                touchesDetail = `scoped gate not evaluable here (${scopedRes.kind})`;
+              }
+              traceSuiteEvent("suite-recovery-baseline-exempt", {
+                exit: 0, wall_ms: Date.now() - recT0, ok: touchesClean, concurrency: n,
+                reason: touchesClean
+                  ? `recovery red set is verbatim-equal to the ${mergeTarget} baseline red set (${be.verdict.unchanged} red point(s)) AND the candidate's own Touches-relevant tests are clean — landing (no gate relaxed)`
+                  : `recovery red set is baseline-equivalent but the candidate's own Touches-relevant tests are NOT clean — blocked`,
+                taskFiles: recRedFiles.length, baselineFiles: be.verdict.unchanged, touchesDetail,
+              });
+              if (touchesClean) {
+                certifiedRun = rec;
+                certifiedPlan = recPlan;
+                exemptReading = be;
+              } else {
+                blockedNextStep = `recovery baseline-equivalent but the candidate's own Touches-relevant tests are not clean (${touchesDetail}) — needs a code fix`;
+              }
+              break;
+            }
+            // A/B 判不出等价（硬红 / 未评估）⇒ 维持硬红（既有语义逐字不变，⛔ 不打折）。
+            blockedNextStep =
+              be !== null && be.verdict.kind === "hard-red"
+                ? `recovery red set is NOT a subset of the ${mergeTarget} baseline red set: added=${be.verdict.added.map((a) => a.file).join(",") || "-"} changed=${be.verdict.changed.map((c) => c.file).join(",") || "-"} — needs a code fix`
+                : `recovery baseline-equivalence not evaluable at concurrency ${n} — needs a code fix`;
+            break;
+          }
+
+          if (certifiedRun === null) {
+            const detail =
+              blockedNextStep ??
+              `recovery exhausted at floor concurrency ${suiteRecoveryFloor()} — still incomplete/OOM at every declared rung ` +
+                `(${steps.join(",")}); needs a code/config fix, see plugin/scripts/full-suite-runner.ts`;
+            traceSuiteEvent("suite-recovery-blocked", {
+              exit: 0, wall_ms: 0, ok: false, reason: detail,
+              originalConcurrency, steps: [...steps],
+            });
+            return failSuite(`${reason} — ${detail}`, sr.exitCode);
+          }
+          // 认证 ⇒ **落到下面的绿块**：本轮终态是「可继续」，而**被记录的轮次是恢复轮**（AC11）——把下游
+          // （capture / verification-round 镜像 / suiteOutcome·pid·epoch）都指向它**自己的**读数，⛔ 不是
+          // 原轮的。`certifiedPlan` 是它自己的完整性读数（AC11 的 planned/terminal/oomKill）。
+          sr = certifiedRun;
+          suiteOutcome = certifiedRun.outcome;
+          suiteFinishedEpoch = Math.floor(new Date(certifiedRun.finishedAt).getTime() / 1000);
+          suitePid = certifiedRun.pid;
+          if (exemptReading !== null) baselineEquivalence = exemptReading;
+          recoveredCertified = true;
+          traceSuiteEvent("suite-recovery-accepted", {
+            exit: 0, wall_ms: 0, ok: true,
+            concurrency: certifiedPlan?.laneCount ?? null,
+            planned: certifiedPlan?.planned ?? null, terminal: certifiedPlan?.terminal ?? null,
+            missing: certifiedPlan?.missing ?? null, oomKill: certifiedPlan?.oomKill ?? null,
+            reason: `landing on the recovery round's own complete verdict (original round stayed ${incompleteMarker.reason})`,
+          });
         }
+        if (!recoveredCertified) {
         // ── 本轮**无结论**（看门狗 SIGKILL 整组 / suite 从未起来）⇒ ⛔ 不进重跑、⛔ 不进 A/B ──────
         // gap-watchdog-killed-round-writes-no-verification-round-record + 本任务 AC6：被静默看门狗杀死的
         // 一轮**没有任何结论**（实测 2026-10-14 08:43 那轮：suite 从未跑完，wall 1156s），而旧控制流把
@@ -2844,6 +3104,7 @@ export async function runMechanicalFanIn(opts: MechanicalFanInOptions): Promise<
         return failSuite((firstFailure || `suite ${sr.outcome}${sr.error ? `: ${sr.error}` : ""}`) + baselineNote, sr.exitCode);
         }
         }
+        } // if (!recoveredCertified)
       }
       // ⚠️ `suite_exit: "0"` 在这里的语义与 rerun-green 相同：「本轮已获准落地」，⛔ 不是「全量套件绿」。
       //   两处（rerun-green / baseline-red-exempt）都如此——本轮的**真读数**在 outcome 的 rerun /

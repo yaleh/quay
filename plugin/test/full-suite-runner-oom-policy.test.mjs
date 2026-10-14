@@ -804,3 +804,311 @@ test("AC6 — a watchdog-killed suite followed by an in-round rerun of the named
   assert.equal(shared.filter((e) => e.step === "suite-rerun-green").length, 0, "no rerun certification happened");
   assert.equal(shared.filter((e) => e.reason && String(e.reason).includes(named)).length, 0, "…and nothing claims those files were re-run");
 });
+
+// ════════════════════════════════════════════════════════════════════════════════════════════════════
+// AC10-AC13：完整的、更低并发的【恢复重跑】——缺的不是检测，是**出口**（人 2026-10-14 裁定）。
+//
+// 缺陷：AC1-9 的 `incompleteMarker` 分支**无条件** return，绕过了既存 baseline A/B，也绕过了任何重试。
+// 而实测生产轮次 2668/2669/2670（都真完整）分别 oomKill 2/1/2 —— 3/4 的真实轮次在 16 GiB 压力基线
+// 下都会 oomKill>0 ⇒ 这个出口会让生产 fan-in **永远不落地**（"always red, nothing lands"）。
+// 修法**不是**把它接到 A/B（一条被杀死/没跑过的文件根本没有失败签名可比；比对它 = 把 3b 违规上移一层），
+// 而是：在**同一条 suite 命令**上、按一张**声明式降档梯**，完整重跑一遍更低并发的计划清单，并用**它自己
+// 的**读数独立定论；边界耗尽 ⇒ 阻塞 + 具名下一步。
+// ════════════════════════════════════════════════════════════════════════════════════════════════════
+
+import { SUITE_LOG_PLAN_PREFIX } from "../scripts/full-suite-runner.ts";
+import {
+  SUITE_RECOVERY_CONCURRENCY_LADDER,
+  recoveryConcurrencySteps,
+  recoverySuiteCommand,
+  suiteRecoveryFloor,
+} from "../scripts/worker-fan-in.ts";
+import { spliceConcurrency } from "../scripts/runner-concurrency.ts";
+
+/** runner 恒写的完整性读数行（绿轮也印）。laneCount 是本轮的**并发档位**，降档梯的起点。 */
+function planLine(o) {
+  return (
+    `${SUITE_LOG_PLAN_PREFIX} planned=${o.planned} terminal=${o.terminal} missing=${o.missing}` +
+    ` source=${o.source ?? "probe:bucket(gap-mfh)"} plan_error=null completeness=${o.completeness ?? "complete"}` +
+    ` oomKill=${o.oomKill ?? 0} telemetry=ok laneCount=${o.laneCount}`
+  );
+}
+
+/**
+ * 一个**行为取决于它收到了哪一档并发**的假 suite —— 于是夹具证明的是「真的把并发旗标送到了真的 suite
+ * 入口」（AC10），⛔ 不是「反正又起了一个子进程」。收到的旗标 `$*` 落盘供断言。
+ *
+ * ⚠️ 脚本走**文件**而不是 `bash -c <多行脚本>`：slot-holder 用 `JSON.stringify` 拼 inner argv，多行
+ * 脚本里的真换行会被转义成字面 `\n`（bash 双引号不解释它）⇒ inner bash 拿到一行被压扁的脚本、以
+ * exit 2 静默死掉。写文件是夹具侧的事，⛔ 与被测代码无关。
+ *
+ * argv 末元素是 `full-suite-runner.ts`（让 fan-in 认出这是 runner 形态；它同时是 `$0`，⛔ 不进 `$*`）。
+ */
+function concurrencyAwareSuite({ scriptFile, argvFile, firstLogFile, recoveryLogFile, recoveryExit }) {
+  const script = [
+    "set -u",
+    // `bash <script> full-suite-runner.ts …flags` ⇒ `$0` = 脚本本身、`$1` = runner 名、`$*`(shift 后) = 旗标。
+    "shift",
+    `printf '%s\\n' "$*" >> ${JSON.stringify(argvFile)}`,
+    'case "$*" in',
+    `  *--lane-count*) cat ${JSON.stringify(recoveryLogFile)}; exit ${recoveryExit} ;;`,
+    `  *) cat ${JSON.stringify(firstLogFile)}; exit 1 ;;`,
+    "esac",
+  ].join("\n");
+  fs.writeFileSync(scriptFile, `${script}\n`, "utf8");
+  return ["bash", scriptFile, "full-suite-runner.ts"];
+}
+
+/** 一次恢复重跑收到的旗标（每个恢复轮一行；文件不存在 ⇒ 空，⛔ 不是「读失败」）。 */
+function recoveryArgvSeen(argvFile) {
+  if (!fs.existsSync(argvFile)) return [];
+  return fs.readFileSync(argvFile, "utf8").trim().split("\n").filter(Boolean);
+}
+
+/** 某个 runId 的共享 step trace 事件。 */
+function trackedSteps(repo, runId) {
+  const p = path.join(repo, ".quay", "fan-in-step-trace.jsonl");
+  if (!fs.existsSync(p)) return [];
+  return fs.readFileSync(p, "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l)).filter((e) => e.runId === runId);
+}
+
+test("unit — the recovery ladder is DECLARED and bounded; the step-down is computed from the ROUND'S OWN concurrency (⛔ not a guessed default), and an unreadable concurrency never flattens to an empty step list", () => {
+  // 梯子降序、有界，地板是最后一项（AC13 的「floor concurrency N」）。
+  assert.ok(SUITE_RECOVERY_CONCURRENCY_LADDER.length >= 2, "a step-down ladder needs ≥2 declared rungs");
+  for (let i = 1; i < SUITE_RECOVERY_CONCURRENCY_LADDER.length; i++) {
+    assert.ok(SUITE_RECOVERY_CONCURRENCY_LADDER[i] < SUITE_RECOVERY_CONCURRENCY_LADDER[i - 1], "the ladder is strictly descending");
+  }
+  assert.equal(suiteRecoveryFloor(), SUITE_RECOVERY_CONCURRENCY_LADDER[SUITE_RECOVERY_CONCURRENCY_LADDER.length - 1]);
+
+  // 原轮并发 64 ⇒ 严格更低的档，降序（下一档 48 排最前）。原轮并发 16（低于地板）⇒ 空序列。
+  assert.deepEqual(recoveryConcurrencySteps(64), [48, 32]);
+  assert.deepEqual(recoveryConcurrencySteps(48), [32]);
+  assert.deepEqual(recoveryConcurrencySteps(16), [], "already below the floor ⇒ no lower declared rung exists");
+  // 三态：**读不到原轮并发**（`unknown`）⇒ 整条梯子，⛔ 不是空序列 —— 空序列会被读成「无需恢复」。
+  assert.deepEqual(recoveryConcurrencySteps(null), [...SUITE_RECOVERY_CONCURRENCY_LADDER]);
+
+  // AC10 — 恢复 argv = 同一条 suite 命令 + runner 的既有并发旋钮（`--lane-count <n>`），runner 的
+  // REPLACE splice 再把同一个值作为 `--test-concurrency=<n>` 交给真正的 suite 入口 `bash scripts/test.sh`。
+  const runnerCmd = ["node", "--no-warnings", "/x/plugin/scripts/full-suite-runner.ts", "--buckets", "gap-mfh"];
+  assert.deepEqual(recoverySuiteCommand(runnerCmd, 48), [...runnerCmd, "--lane-count", "48"]);
+  assert.equal(
+    spliceConcurrency("bash scripts/test.sh --buckets gap-mfh", 48),
+    "bash scripts/test.sh --buckets gap-mfh --test-concurrency=48",
+    "the SAME value really does reach the real suite entry as --test-concurrency=<n> (existing splice)",
+  );
+  // 非 runner 形态没有已知的并发旋钮 ⇒ null（调用方记独立 token，⛔ 不伪造「已降档」）。
+  assert.equal(recoverySuiteCommand(["bash", "-c", "true"], 48), null);
+});
+
+test("AC10/AC11 — an incomplete round triggers EXACTLY ONE independent, full, lower-concurrency recovery re-run on the SAME tree; a clean recovery is certified on ITS OWN counts (negative control: a recovery that is itself incomplete is NOT landed)", async (t) => {
+  const named = "plugin/test/flaky-under-load.test.mjs";
+  const scenario = (tag, recoveryIncomplete) => {
+    const m = makeMechRepo(tag);
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), `rec-${tag}-`));
+    const argvFile = path.join(dir, "argv.txt");
+    const firstLogFile = path.join(dir, "first.log");
+    const recoveryLogFile = path.join(dir, "recovery.log");
+    // 原轮：579 计划 / 只有 65 个产出终态 / oomKill=4 —— 而**它自己的并发是 64**（降档的起点就是这一行）。
+    fs.writeFileSync(firstLogFile, [
+      planLine({ planned: 579, terminal: 65, missing: 514, oomKill: 4, laneCount: 64, completeness: "not-evaluated" }),
+      formatSuiteIncompleteMarker({ reason: "oom-killed", planned: 579, terminal: 65, missing: 514, oomKill: 4, files: [named] }),
+      "",
+    ].join("\n"));
+    // 恢复轮：**它自己的**读数。干净那半 = 无 incomplete 标记 + 独立退出 0；不干净那半 = 又是 incomplete。
+    const recoveryLines = recoveryIncomplete
+      ? [planLine({ planned: 579, terminal: 100, missing: 479, oomKill: 2, laneCount: 48, completeness: "not-evaluated" }),
+         formatSuiteIncompleteMarker({ reason: "oom-killed", planned: 579, terminal: 100, missing: 479, oomKill: 2, files: [named] }),
+         ""]
+      : [planLine({ planned: 579, terminal: 579, missing: 0, oomKill: 0, laneCount: 48 }), ""];
+    fs.writeFileSync(recoveryLogFile, recoveryLines.join("\n"));
+    return { m, dir, argvFile, suiteCommand: concurrencyAwareSuite({ scriptFile: path.join(dir, "suite.sh"), argvFile, firstLogFile, recoveryLogFile, recoveryExit: recoveryIncomplete ? 1 : 0 }) };
+  };
+
+  // ① 干净恢复 ⇒ 认证落地。
+  const ok = scenario("rec-ok", false);
+  t.after(() => { rmSafe(ok.m.base); fs.rmSync(ok.dir, { recursive: true, force: true }); });
+  const r = await runMechanicalFanIn(mechOpts(ok.m, "mfi-rec-ok", {
+    task: "gap-mfh", perSuiteRunId: "mfi-rec-ok", rerunCommand: ["bash", "-c", "exit 0"],
+    suiteCommand: ok.suiteCommand,
+  }));
+  assert.equal(r.outcome, "landed", `a clean recovery round at the lower concurrency certifies landing (step=${r.step} reason=${r.reason})`);
+
+  // AC10 — **恰好一次**恢复，且发的是**下一档更低的值**（48），⛔ 不是原档、也不是随便一个数。
+  const seen = recoveryArgvSeen(ok.argvFile);
+  assert.deepEqual(seen, ["--lane-count 48"], "exactly ONE recovery re-run (bounded, ⛔ not a loop) at the NEXT declared lower value");
+  // …而那个值真的到达了真正的 suite 入口（既存 splice；⛔ 不是「又起了一个子进程」）。
+  assert.ok(spliceConcurrency("bash scripts/test.sh --buckets gap-mfh", 48).includes("--test-concurrency=48"), "the real entry receives --test-concurrency=48");
+
+  // AC11 — 认证记的是**恢复轮自己的**读数（planned/terminal/missing/oomKill/laneCount），⛔ 不是原轮的。
+  const steps = trackedSteps(ok.m.repo, "mfi-rec-ok");
+  const certified = steps.find((e) => e.step === "suite-recovery-certified");
+  assert.ok(certified, "the recovery's own verdict is traced durably");
+  assert.deepEqual(
+    { planned: certified.planned, terminal: certified.terminal, missing: certified.missing, oomKill: certified.oomKill, concurrency: certified.concurrency },
+    { planned: 579, terminal: 579, missing: 0, oomKill: 0, concurrency: 48 },
+  );
+  const accepted = steps.find((e) => e.step === "suite-recovery-accepted");
+  assert.ok(accepted, "the acceptance records the recovery round's OWN counts");
+  assert.equal(accepted.terminal, 579, "…i.e. the RECOVERY's terminal count, not the original round's 65");
+  assert.notEqual(accepted.missing, 514, "⛔ the original round's missing count is NOT what got recorded");
+  // ⛔ 原轮的 incomplete 判定仍然留痕（原轮本身保持阻塞语义，⛔ 没有被「洗白」）。
+  assert.ok(steps.some((e) => e.step === "suite-incomplete"), "the original round's incomplete reading is still recorded");
+
+  // ② 取假负控制：恢复轮**自己又是 incomplete** ⇒ ⛔ 不落地（证明认证来自恢复轮**自己的**读数，
+  //    ⛔ 不是「见到标记就放行」）。AC1 已钉死 pre-AC1-9 的旧行为（那份日志会被判 green）。
+  const bad = scenario("rec-bad", true);
+  t.after(() => { rmSafe(bad.m.base); fs.rmSync(bad.dir, { recursive: true, force: true }); });
+  const r2 = await runMechanicalFanIn(mechOpts(bad.m, "mfi-rec-bad", {
+    task: "gap-mfh", perSuiteRunId: "mfi-rec-bad", rerunCommand: ["bash", "-c", "exit 0"],
+    suiteCommand: bad.suiteCommand,
+  }));
+  assert.equal(r2.outcome, "red", "a recovery round that is itself incomplete is never certified");
+  assert.ok(!recoveryArgvSeen(bad.argvFile).includes("--lane-count 64"), "⛔ the recovery never re-runs at the ORIGINAL concurrency");
+});
+
+test("AC13(a) — bounded retry: exhausting the declared ladder at its FLOOR blocks with a concrete next step naming that floor (⛔ never the same parameters again); a round already at/below the floor blocks with the distinct exhausted token", async (t) => {
+  // ① 原轮并发 64 ⇒ 两档 (48, 32) 都**仍然 incomplete** ⇒ 在地板处阻塞。
+  const m = makeMechRepo("rec-floor");
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "rec-floor-"));
+  const argvFile = path.join(dir, "argv.txt");
+  const firstLogFile = path.join(dir, "first.log");
+  const recoveryLogFile = path.join(dir, "recovery.log");
+  fs.writeFileSync(firstLogFile, [planLine({ planned: 579, terminal: 65, missing: 514, oomKill: 4, laneCount: 64, completeness: "not-evaluated" }), formatSuiteIncompleteMarker({ reason: "oom-killed", planned: 579, terminal: 65, missing: 514, oomKill: 4, files: [] }), ""].join("\n"));
+  fs.writeFileSync(recoveryLogFile, [planLine({ planned: 579, terminal: 200, missing: 379, oomKill: 3, laneCount: 48, completeness: "not-evaluated" }), formatSuiteIncompleteMarker({ reason: "oom-killed", planned: 579, terminal: 200, missing: 379, oomKill: 3, files: [] }), ""].join("\n"));
+  t.after(() => { rmSafe(m.base); fs.rmSync(dir, { recursive: true, force: true }); });
+  const r = await runMechanicalFanIn(mechOpts(m, "mfi-rec-floor", {
+    task: "gap-mfh", perSuiteRunId: "mfi-rec-floor",
+    suiteCommand: concurrencyAwareSuite({ scriptFile: path.join(dir, "suite.sh"), argvFile, firstLogFile, recoveryLogFile, recoveryExit: 1 }),
+  }));
+  assert.equal(r.outcome, "red", "still incomplete at every declared rung ⇒ stays blocked");
+  assert.match(String(r.reason), /recovery exhausted at floor concurrency 32/, "the next step names the FLOOR");
+  assert.match(String(r.reason), /needs a code\/config fix/, "…and says what kind of fix is needed (⛔ not 'retry')");
+  assert.deepEqual(recoveryArgvSeen(argvFile), ["--lane-count 48", "--lane-count 32"], "each declared rung is tried EXACTLY once, descending, and the sequence then STOPS (⛔ no identical-parameter loop)");
+  const steps = trackedSteps(m.repo, "mfi-rec-floor");
+  assert.ok(steps.some((e) => e.step === "suite-recovery-blocked"), "the exhaustion is traced durably");
+
+  // ② 原轮并发**已经 ≤ 地板** ⇒ 空序列 ⇒ 另一条 token（⛔ 不用同一组参数重试）。
+  const m2 = makeMechRepo("rec-norung");
+  const dir2 = fs.mkdtempSync(path.join(os.tmpdir(), "rec-norung-"));
+  const f2 = path.join(dir2, "first.log");
+  fs.writeFileSync(f2, [planLine({ planned: 579, terminal: 65, missing: 514, oomKill: 4, laneCount: 16, completeness: "not-evaluated" }), formatSuiteIncompleteMarker({ reason: "incomplete", planned: 579, terminal: 65, missing: 514, oomKill: 0, files: [] }), ""].join("\n"));
+  t.after(() => { rmSafe(m2.base); fs.rmSync(dir2, { recursive: true, force: true }); });
+  const argv2 = path.join(dir2, "argv.txt");
+  const r2 = await runMechanicalFanIn(mechOpts(m2, "mfi-rec-norung", {
+    task: "gap-mfh", perSuiteRunId: "mfi-rec-norung",
+    suiteCommand: concurrencyAwareSuite({ scriptFile: path.join(dir2, "suite.sh"), argvFile: argv2, firstLogFile: f2, recoveryLogFile: f2, recoveryExit: 0 }),
+  }));
+  assert.equal(r2.outcome, "red", "no lower declared rung ⇒ blocked");
+  assert.match(String(r2.reason), /recovery exhausted at floor concurrency 32/, "…with the floor named");
+  assert.equal(recoveryArgvSeen(argv2).length, 0, "⛔ ZERO recovery attempts were spawned (no identical-parameter retry)");
+});
+
+test("AC13(b) — a file that RAN AND PASSED at the original concurrency and fails at a lower one is a genuine NEW regression: block with its own token, naming the file (⛔ no further step-down, ⛔ no A/B)", async (t) => {
+  const passedAt64 = "plugin/test/ran-at-64-and-passed.test.mjs";
+  const m = makeMechRepo("rec-newreg");
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "rec-newreg-"));
+  const argvFile = path.join(dir, "argv.txt");
+  const firstLogFile = path.join(dir, "first.log");
+  const recoveryLogFile = path.join(dir, "recovery.log");
+  // 原轮：并发 64、被 OOM 杀到只剩部分终态；`passedAt64` 在这一轮**跑过且通过**（⇒ 它在分母里）。
+  fs.writeFileSync(firstLogFile, [
+    planLine({ planned: 579, terminal: 65, missing: 514, oomKill: 4, laneCount: 64, completeness: "not-evaluated" }),
+    formatSuiteIncompleteMarker({ reason: "oom-killed", planned: 579, terminal: 65, missing: 514, oomKill: 4, files: [] }),
+    `__PERFILE__ duration_ms=10 ${passedAt64} passed=true end_ms=20`,
+    "",
+  ].join("\n"));
+  // 恢复轮：**完整**（无 incomplete 标记）但真红，而红点正是那个在 64 下通过的文件。
+  fs.writeFileSync(recoveryLogFile, [
+    planLine({ planned: 579, terminal: 579, missing: 0, oomKill: 0, laneCount: 48 }),
+    `__PERFILE__ duration_ms=10 ${passedAt64} passed=false end_ms=20`,
+    "",
+  ].join("\n"));
+  t.after(() => { rmSafe(m.base); fs.rmSync(dir, { recursive: true, force: true }); });
+  const r = await runMechanicalFanIn(mechOpts(m, "mfi-rec-newreg", {
+    task: "gap-mfh", perSuiteRunId: "mfi-rec-newreg",
+    suiteCommand: concurrencyAwareSuite({ scriptFile: path.join(dir, "suite.sh"), argvFile, firstLogFile, recoveryLogFile, recoveryExit: 1 }),
+  }));
+  assert.equal(r.outcome, "red", "a new regression at lower concurrency blocks the round");
+  assert.match(String(r.reason), /new regression at lower concurrency: plugin\/test\/ran-at-64-and-passed\.test\.mjs/, "the token names the file (its own distinct next-step token)");
+  assert.deepEqual(recoveryArgvSeen(argvFile), ["--lane-count 48"], "⛔ the step-down STOPS here — a new failure must not be hidden by changing parameters");
+  const steps = trackedSteps(m.repo, "mfi-rec-newreg");
+  assert.equal(steps.filter((e) => e.step === "baseline-red").length, 0, "⛔ the A/B never ran: a new regression is not a baseline-equivalence question");
+});
+
+test("AC12 — a COMPLETE-but-red recovery goes to the existing baseline-equivalence, and equivalence ALONE does not permit landing (the candidate's own Touches-relevant tests must also be clean); an OOM/missing record never reaches the signature comparator", async (t) => {
+  const redFile = "plugin/test/existing-red.test.mjs";
+  const sigLine = `__PERFILE__ duration_ms=10 ${redFile} passed=false end_ms=20`;
+  const firstLog = [planLine({ planned: 579, terminal: 65, missing: 514, oomKill: 4, laneCount: 64, completeness: "not-evaluated" }), formatSuiteIncompleteMarker({ reason: "oom-killed", planned: 579, terminal: 65, missing: 514, oomKill: 4, files: [] }), ""].join("\n");
+  const cleanRecoveryLog = [planLine({ planned: 579, terminal: 579, missing: 0, oomKill: 0, laneCount: 48 }), sigLine, ""].join("\n");
+
+  const mkScenario = (tag, { failScopedOnSecondRun }, recoveryLog) => {
+    const m = makeMechRepo(tag);
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), `rec12-${tag}-`));
+    const argvFile = path.join(dir, "argv.txt");
+    const firstLogFile = path.join(dir, "first.log");
+    const recoveryLogFile = path.join(dir, "recovery.log");
+    const baseRerunLog = path.join(dir, "baseline.log");
+    fs.writeFileSync(firstLogFile, firstLog);
+    fs.writeFileSync(recoveryLogFile, recoveryLog);
+    // 基线重跑：跑出**逐字相同**的失败签名（既存红 ⇒ exempt）。
+    fs.writeFileSync(baseRerunLog, `${sigLine}\n`);
+    // scoped 门（step 6 必须先绿，否则本轮根本到不了 suite）——`failScopedOnSecondRun` 时**第二次**
+    // 调用才红，用来单独验证 AC12 的「等价本身不足以上床」这半边。
+    const gateMarker = path.join(dir, "gate-ran.once");
+    const gateScript = path.join(dir, "scoped-gate.sh");
+    fs.writeFileSync(gateScript, [
+      "set -u",
+      'if [ ! -f "$1" ]; then touch "$1"; exit 0; fi',
+      failScopedOnSecondRun ? "exit 1" : "exit 0",
+    ].join("\n") + "\n");
+    return {
+      m, dir,
+      suiteCommand: concurrencyAwareSuite({ scriptFile: path.join(dir, "suite.sh"), argvFile, firstLogFile, recoveryLogFile, recoveryExit: 1 }),
+      rerunCommand: ["bash", "-c", `cat ${JSON.stringify(baseRerunLog)}`],
+      scopedGateCommand: ["bash", gateScript, gateMarker],
+    };
+  };
+
+  // ① 与 develop 基线等价 **且** 候选自己的 Touches 相关测试干净（scoped 门绿）⇒ 允许落地。
+  const ok = mkScenario("rec12-ok", { failScopedOnSecondRun: false }, cleanRecoveryLog);
+  t.after(() => { rmSafe(ok.m.base); fs.rmSync(ok.dir, { recursive: true, force: true }); });
+  const r = await runMechanicalFanIn(mechOpts(ok.m, "mfi-rec12-ok", {
+    task: "gap-mfh", perSuiteRunId: "mfi-rec12-ok",
+    suiteCommand: ok.suiteCommand, rerunCommand: ok.rerunCommand, scopedGateCommand: ok.scopedGateCommand,
+    baselineProvisionCommand: null,
+  }));
+  assert.equal(r.outcome, "landed", `baseline-equivalent + Touches clean ⇒ lands (step=${r.step} reason=${r.reason})`);
+  const okSteps = trackedSteps(ok.m.repo, "mfi-rec12-ok");
+  const exempt = okSteps.find((e) => e.step === "suite-recovery-baseline-exempt");
+  assert.ok(exempt, "the AC12 verdict is traced durably");
+  assert.equal(exempt.ok, true);
+  // AC12 — **两臂的真实计数**都落痕（⛔ 不是只在 prose 里断言）。
+  assert.equal(exempt.taskFiles, 1, "the recovery arm's real count");
+  assert.equal(exempt.baselineFiles, 1, "the baseline arm's real count");
+
+  // ② 等价**本身**不足以上床：候选自己的 Touches 相关测试**不干净** ⇒ 阻塞（新的独立 token）。
+  const bad = mkScenario("rec12-bad", { failScopedOnSecondRun: true }, cleanRecoveryLog);
+  t.after(() => { rmSafe(bad.m.base); fs.rmSync(bad.dir, { recursive: true, force: true }); });
+  const r2 = await runMechanicalFanIn(mechOpts(bad.m, "mfi-rec12-bad", {
+    task: "gap-mfh", perSuiteRunId: "mfi-rec12-bad",
+    suiteCommand: bad.suiteCommand, rerunCommand: bad.rerunCommand, scopedGateCommand: bad.scopedGateCommand,
+    baselineProvisionCommand: null,
+  }));
+  assert.equal(r2.outcome, "red", "baseline-equivalent WITHOUT clean Touches-relevant tests must NOT land");
+  assert.match(String(r2.reason), /Touches-relevant tests are not clean/, "…and the reason says exactly why (its own token)");
+
+  // ③ **结构**闸：候选日志里同时有一条真签名与一条 OOM 标记 ⇒ 标记先短路（继续降档），⛔ 那条「OOM 点」
+  //    永远进不了签名比较器 —— 证据 = 该 runId 下**一条 baseline-red 事件都没有**。
+  const mixed = [planLine({ planned: 579, terminal: 579, missing: 0, oomKill: 3, laneCount: 48, completeness: "not-evaluated" }), sigLine, formatSuiteIncompleteMarker({ reason: "oom-killed", planned: 579, terminal: 579, missing: 0, oomKill: 3, files: [] }), ""].join("\n");
+  const mix = mkScenario("rec12-mixed", { failScopedOnSecondRun: false }, mixed);
+  t.after(() => { rmSafe(mix.m.base); fs.rmSync(mix.dir, { recursive: true, force: true }); });
+  const r3 = await runMechanicalFanIn(mechOpts(mix.m, "mfi-rec12-mixed", {
+    task: "gap-mfh", perSuiteRunId: "mfi-rec12-mixed",
+    suiteCommand: mix.suiteCommand, rerunCommand: mix.rerunCommand, scopedGateCommand: mix.scopedGateCommand,
+    baselineProvisionCommand: null,
+  }));
+  assert.equal(r3.outcome, "red", "an OOM-marked recovery round is never certified (⛔ re-running in isolation proves nothing)");
+  const mixSteps = trackedSteps(mix.m.repo, "mfi-rec12-mixed");
+  assert.equal(mixSteps.filter((e) => e.step === "baseline-red").length, 0, "⛔ an OOM record NEVER reaches the signature comparator (structural: the marker path `continue`s before the A/B)");
+  assert.ok(mixSteps.some((e) => e.step === "suite-recovery" && e.reason === "oom-killed"), "the OOM marker IS what short-circuited (positive control for the zero above)");
+});
