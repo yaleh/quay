@@ -68,11 +68,11 @@ The full suite **never completed**. Host load was ~24 and there was no OOM signa
 - [x] AC8: an OOM-killed round (cgroup OOM fixture, or `memory.events` oom_kill delta injected through the runner's evidence seam) whose named failures pass on in-round rerun is **not** landed. Reason `oom-killed (n)`, and no `suite-rerun-green` step (pasted, plus pre-fix negative control showing the old `rerun-green` landing).
 - [x] AC9: unreadable memory telemetry is recorded as `unknown`, not `0`, in both the evidence file and the round record (fixture with the cgroup path absent, pasted).
 
-- [ ] AC10: on `incompleteMarker !== null` (either `incomplete` or `oom-killed`), the fan-in triggers ONE independent, full, lower-concurrency recovery re-run of the COMPLETE planned manifest on the SAME commit/tree — not a named-file rerun, not a baseline comparison — using the existing `--test-concurrency` CLI control (no new mechanism, no dependency on the host-adapter/telemetry-enrichment tasks). The concurrency step-down sequence and its bound are declared, not open-ended (e.g. a fixed list such as [64, 48, 32], stopping at the floor). Fixture: an OOM-killed round at concurrency 64 triggers exactly one recovery attempt at the next declared lower value, with real `--test-concurrency=<n>` passed to the real suite entry (pasted argv + exit).
-- [ ] AC11: the recovery round from AC10 is judged independently and in full: `missing == 0`, `oomKill == 0`, every planned phase completed, and the ORIGINAL per-test assertions apply unchanged — it is a fresh verdict, not an inherited green. A recovery round that itself goes incomplete/OOMs again is NOT certified (it either steps down further within the declared bound, per AC13, or exhausts the bound). Fixture: a clean recovery round at the lower concurrency is accepted and its OWN planned/terminal/oomKill counts are what get recorded, not the original round's (pasted, pre-fix negative control showing the OLD code would have accepted the ORIGINAL incomplete round instead).
-- [ ] AC12: IF — and only if — the AC10/AC11 recovery round completes cleanly (zero missing, zero OOM, all phases) but STILL shows genuine test failures (real assertion reds with a real signature, not OOM/incomplete), THEN the existing `runBaselineEquivalence` policy applies to THOSE failures exactly as it already does for ordinary suite reds (unchanged mechanism, AC1-9 untouched). An OOM, "unknown", or missing-file record is structurally excluded from ever entering the signature set `runBaselineEquivalence` compares — enforced by type/shape, not by convention (fixture: a candidate failure set containing one real signature and one OOM marker is compared using only the real signature; the OOM marker never reaches the comparator, pasted). Classification as baseline-equivalent does NOT by itself permit landing: the candidate's own declared Touches-relevant tests must also be clean, and both arms' real counts are pasted in the record, never asserted in prose alone.
-- [ ] AC13: bounded retry, never an infinite identical-parameter loop. If the recovery sequence's declared concurrency floor is reached while STILL incomplete/OOM, OR a genuinely NEW failure appears at a lower concurrency that was not present at the original concurrency, the round stays blocked and the record names a concrete next step (e.g. "recovery exhausted at floor concurrency N — needs a code/config fix, see <file>" or "new regression at lower concurrency: <file>") rather than silently repeating the same parameters (fixture: both the floor-exhausted case and the new-regression-at-lower-concurrency case, each with its own distinct recorded next-step token, pasted).
-- [ ] AC14: `scripts/test.sh --for-task <this task>` green, including the new fixtures from AC10-13. Existing test coverage and budget ceilings are unchanged (grep/diff showing no coverage removed, no budget value touched, pasted).
+- [x] AC10: on `incompleteMarker !== null` (either `incomplete` or `oom-killed`), the fan-in triggers ONE independent, full, lower-concurrency recovery re-run of the COMPLETE planned manifest on the SAME commit/tree — not a named-file rerun, not a baseline comparison — using the existing `--test-concurrency` CLI control (no new mechanism, no dependency on the host-adapter/telemetry-enrichment tasks). The concurrency step-down sequence and its bound are declared, not open-ended (e.g. a fixed list such as [64, 48, 32], stopping at the floor). Fixture: an OOM-killed round at concurrency 64 triggers exactly one recovery attempt at the next declared lower value, with real `--test-concurrency=<n>` passed to the real suite entry (pasted argv + exit).
+- [x] AC11: the recovery round from AC10 is judged independently and in full: `missing == 0`, `oomKill == 0`, every planned phase completed, and the ORIGINAL per-test assertions apply unchanged — it is a fresh verdict, not an inherited green. A recovery round that itself goes incomplete/OOMs again is NOT certified (it either steps down further within the declared bound, per AC13, or exhausts the bound). Fixture: a clean recovery round at the lower concurrency is accepted and its OWN planned/terminal/oomKill counts are what get recorded, not the original round's (pasted, pre-fix negative control showing the OLD code would have accepted the ORIGINAL incomplete round instead).
+- [x] AC12: IF — and only if — the AC10/AC11 recovery round completes cleanly (zero missing, zero OOM, all phases) but STILL shows genuine test failures (real assertion reds with a real signature, not OOM/incomplete), THEN the existing `runBaselineEquivalence` policy applies to THOSE failures exactly as it already does for ordinary suite reds (unchanged mechanism, AC1-9 untouched). An OOM, "unknown", or missing-file record is structurally excluded from ever entering the signature set `runBaselineEquivalence` compares — enforced by type/shape, not by convention (fixture: a candidate failure set containing one real signature and one OOM marker is compared using only the real signature; the OOM marker never reaches the comparator, pasted). Classification as baseline-equivalent does NOT by itself permit landing: the candidate's own declared Touches-relevant tests must also be clean, and both arms' real counts are pasted in the record, never asserted in prose alone.
+- [x] AC13: bounded retry, never an infinite identical-parameter loop. If the recovery sequence's declared concurrency floor is reached while STILL incomplete/OOM, OR a genuinely NEW failure appears at a lower concurrency that was not present at the original concurrency, the round stays blocked and the record names a concrete next step (e.g. "recovery exhausted at floor concurrency N — needs a code/config fix, see <file>" or "new regression at lower concurrency: <file>") rather than silently repeating the same parameters (fixture: both the floor-exhausted case and the new-regression-at-lower-concurrency case, each with its own distinct recorded next-step token, pasted).
+- [x] AC14: `scripts/test.sh --for-task <this task>` green, including the new fixtures from AC10-13. Existing test coverage and budget ceilings are unchanged (grep/diff showing no coverage removed, no budget value touched, pasted).
 
 ## Definition of Done
 - AC1-AC5 checked with pasted evidence. Separately recorded, not done here: whether round 2660's landing (`87d513fe4`) needs re-certification. The next full round that contains `e18ec4b04` is that re-certification.
@@ -130,6 +130,86 @@ rerun; watchdog / never-spawned gated **before** the rerun; re-run file NAMES on
   pinned by the AC7(d) fixture; the real-run half pins file count == scheduled count with no false incompleteness.
   The plan probe and the execution agreed exactly (`missing=0 unexpected=0` over 1001 files), and
   `plugin/test/full-suite-runner-oom-policy.test.mjs` itself passed in that full run (`passed=true`).
+
+## Evidence — AC10–AC14, Plan §7 (2026-10-14, retry worker, same worktree)
+
+Implementation (5 commits on the task branch; final HEAD `01036d464`):
+`plugin/scripts/full-suite-runner.ts` (the always-on `SUITE-PLAN` line now carries the round's **own**
+`laneCount`; new `passedFileSet`), `plugin/scripts/worker-fan-in.ts`
+(`SUITE_RECOVERY_CONCURRENCY_LADDER`, `recoveryConcurrencySteps`, `recoverySuiteCommand`,
+`classifyRecoveryRound`, and the bounded recovery sequence replacing the unconditional `return failSuite`),
+`plugin/test/full-suite-runner-oom-policy.test.mjs` (the AC10-AC13 fixtures).
+
+- **AC10** — the ladder is DECLARED and descending, and its last entry is the floor:
+  `SUITE_RECOVERY_CONCURRENCY_LADDER = [64, 48, 32]`. `recoveryConcurrencySteps(<the round's own laneCount>)`
+  yields every rung **strictly below** it (`64 ⇒ [48,32]`, `48 ⇒ [32]`, `16 ⇒ []`); an **unreadable** concurrency
+  (`null`) yields the WHOLE ladder, ⛔ never an empty list (an empty list would read as "no recovery needed",
+  硬规则 3b/6). `recoverySuiteCommand(<the same suite argv>, n)` appends `--lane-count <n>` — the runner's
+  EXISTING concurrency control, which its existing REPLACE splice turns into the real entry's flag: pasted
+  `assert.equal(spliceConcurrency("bash scripts/test.sh --buckets gap-mfh", 48), "bash scripts/test.sh --buckets gap-mfh --test-concurrency=48")`.
+  Fixture (real spawns; the fake suite RECORDS the argv it actually received and behaves differently *because*
+  of it): an `oom-killed` round at `laneCount=64` ⇒ the recorded recovery argv is exactly `["--lane-count 48"]` —
+  **one** attempt, at the next declared lower value. A non-runner suite entry ⇒ `recoverySuiteCommand(...) === null`
+  ⇒ a distinct `suite-recovery-unsupported` token (⛔ never a faked "已降档").
+- **AC11** — the recovery round is classified by `classifyRecoveryRound` from ITS OWN log: `suite-recovery-certified`
+  carries `{planned:579, terminal:579, missing:0, oomKill:0, concurrency:48}`, and `suite-recovery-accepted`
+  carries `terminal:579` (⛔ not the original round's `65`) with `missing != 514`. `sr` / `suiteOutcome` /
+  `suiteFinishedEpoch` / `suitePid` are all re-pointed at the recovery run before the green block, so the suite
+  capture and the `full-suite-state.json` mirror describe the round that actually concluded. Negative control: a
+  recovery round that is ITSELF incomplete ⇒ `outcome=red` (certification comes from the recovery's own reading,
+  ⛔ not from "saw a marker ⇒ let it through"). ⛔ A structural guard was added so a certified recovery does not
+  then fall through the ORIGINAL round's red-only exits (without it the reason degenerated to `suite done`).
+- **AC12** — `classifyRecoveryRound` returns a FOUR-WAY discriminated union; only `complete-red` carries
+  `failures`, so an OOM / `unknown` / missing-file record cannot reach `runBaselineEquivalence` **by shape**
+  (unit fixture: a log carrying one real `__PERFILE__ … passed=false` signature AND one SUITE-INCOMPLETE marker
+  classifies as `incomplete` and has **no** `failures` field at all). Integration fixture: that round emits ZERO
+  `baseline-red` events, with the `suite-recovery` `oom-killed` event present as the positive control for that
+  zero. A COMPLETE-but-red recovery DOES go to the existing A/B, and equivalence alone does not land: the scoped
+  gate is re-run and must be green (traced as `suite-recovery-baseline-exempt` with `taskFiles:1 baselineFiles:1`
+  — both arms' real counts on the record, ⛔ not prose); a second-run-red scoped gate blocks with its own token.
+- **AC13** — (a) every declared rung still producing no complete verdict ⇒
+  `recovery exhausted at floor concurrency 32 … needs a code/config fix, see plugin/scripts/full-suite-runner.ts`,
+  and the recorded argv is `["--lane-count 48","--lane-count 32"]` — each rung tried **exactly once**, then it
+  STOPS; a round already at/below the floor (`laneCount=16`) spawns **zero** recoveries. (b) a file that RAN AND
+  PASSED at the original concurrency and fails lower ⇒ `new regression at lower concurrency:
+  plugin/test/ran-at-64-and-passed.test.mjs`, the step-down stops there, and **no** A/B runs. The denominator is
+  `passedFileSet` (files with a `__PERFILE__ … passed=true` line in the ORIGINAL log) — a file that never produced
+  a terminal record is 缺值, ⛔ not a "pass", so a recovery that merely gets previously-killed files to run is not
+  misread as a regression (which would have re-created the "always red, nothing lands" deadlock).
+- **AC14** — `bash scripts/test.sh --for-task gap-suite-verdict-green-on-oom-killed-incomplete-run-lands-on-11-percent-of-files --allow-thin`
+  at HEAD `01036d464` ⇒ **exit 0, 28 tests / 28 pass / 0 fail / 0 cancelled**, including the 5 new fixtures.
+  Coverage/budget unchanged: the delta is 3 files (`+1816/-38`), no `test(` case was removed (the file went
+  **5 → 23** cases), the only two "replaced" AC9 assertions became STRONGER (`null`/`0` → the named `"unknown"`
+  **plus** a third `telemetry` assertion), and grepping the code delta for
+  `TIMEOUT_MS|SILENCE_MS|MAX_RUNTIME|MemoryMax|TasksMax|RERUN_TIMEOUT|budget` returns nothing.
+- **Plan §7 (the IMMEDIATE ACTION: ONE independent full re-run of this task's COMPLETE planned manifest at a
+  LOWER concurrency, on the current candidate commit, all phases)** — executed for real, at HEAD `01036d464`.
+  This task's bucket IS the full manifest (`suite-bucket-select --summary` ⇒ `full=1 buckets=full files=1002`),
+  so the run is `full-suite-runner.ts --buckets <this task> --lane-count 32` (host default `laneCount` = 128 ⇒
+  strictly lower), pids/state/log outside the worktree, real 16 GiB systemd scope. Readings:
+  `SUITE-PLAN planned=1002 terminal=1002 missing=0 source=probe:test.sh --list-files completeness=not-evaluated oomKill=0 telemetry=ok laneCount=32`;
+  `# tests 11678 / # pass 11677 / # fail 1 / # cancelled 0`; `durationMs 223044`; `treeMutatedMidRound false`.
+  ⇒ **zero missing, zero OOM, all phases completed**; the one red is
+  `packages/quay/test/serve-system-body-i18n.test.mjs` ("AC3: `Cookie: lang=zh` still renders the pre-existing
+  Chinese body copy", 22.3 s) and it **passes 11/11 when run in isolation** ⇒ a load-shaped flake; it is also one
+  of the files the PREVIOUS worker's fan-in hard-red'd on for the same reason. `notEvaluated: "leaked-processes
+  (14)"` — all 14 are `sleep 300` with `ppid=319121`, `cwd=/tmp/lwa-crit-* (deleted)`: a peer process's
+  leftovers, not this round's (round pid 2160022); the anchor-scope leak scan over-attributes them (the known
+  hand-run envelope artifact). ⛔ Not re-rolled until green: §7 asks for ONE run (an earlier one at `c0105389d`
+  was invalidated by the final wording-only commit), and the operative run already satisfies the axes §7 names —
+  a third roll would be p-hacking. The earlier `c0105389d` run read `planned=1002 terminal=1002 missing=0
+  oomKill=0` with 10 fails (same shape, heavier host load).
+
+**A red this task did NOT introduce (recorded, not fixed here).** The §7 runs also showed
+`plugin/test/shipped-set.test.mjs` red: the published artifact's totals exceed the committed ceiling
+(`files 287 vs 285`). Isolated: (a) it reads **287 identically at HEAD `01036d464` and at `bedc7e79c`** (this
+branch WITHOUT the AC10-13 commits) ⇒ the AC10-13 change does not move the shipped set; (b) a **pristine
+`develop`** worktree, given the main checkout's own real vendored dist, reads **`files 286 > 285`** ⇒ the
+committed `plugin/shipped-set-baseline.json` ceiling is stale for the current build inputs (the documented,
+already-shipped `vendor/quay/dist/dashboard-kernel-vectors.json` build output), i.e. a develop-wide red.
+⛔ The baseline was deliberately NOT re-anchored here: this task's change does not move the shipped set, so
+re-anchoring would be another task's scope — and editing a ratchet baseline without a task that moved it is
+exactly the drift the single-source rule forbids.
 
 ## Touches
 - tasks/gap-suite-verdict-green-on-oom-killed-incomplete-run-lands-on-11-percent-of-files.md
