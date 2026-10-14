@@ -125,3 +125,110 @@ $ diff old-files.txt current-files.txt
 - 未落地原因：step=suite: AssertionError [ERR_ASSERTION]: the real publish script FAILED (exit 1): [baseline A/B: HARD RED (changed-assertion) — the task's red set is NOT a subset of the develop baseline red set: added=plugin/test/goal-driver-s04.test.mjs,packages/quay/test/serve-ac95-views.test.mjs,packages/quay/test/serve-ac95-views.test.mjs,plugin/test/shipped-shell-reachability.test.mjs,plugin/test/shipped-shell-reachability.test.mjs,plugin/test/shipped-shell-reachability.test.mjs,plugin/test/shipped-shell-reachability.test.mjs,plugin/test/ownership-active-loop.test.mjs,packages/quay/test/observation.test.mjs,packages/quay/test/build-plugin-dist.test.mjs,packages/quay/test/build-plugin-dist.test.mjs,plugin/test/fan-in-driver-mechanical-orchestration.test.mjs,plugin/test/fan-in-driver-mechanical-orchestration.test.mjs,packages/quay/test/serve-board.test.mjs,plugin/test/supervisor-observe.test.mjs,plugin/test/supervisor-observe.test.mjs,plugin/test/supervisor-observe.test.mjs,plugin/test/full-suite-runner-s10.test.mjs,plugin/test/full-suite-runner-s10.test.mjs,plugin/test/full-suite-runner-s10.test.mjs,plugin/test/live-web-address.test.mjs,plugin/test/live-web-address.test.mjs,plugin/test/full-suite-runner-s12.test.mjs,plugin/test/full-suite-runner-s12.test.mjs,plugin/test/full-suite-runner-s07.test.mjs,plugin/test/full-suite-runner-s07.test.mjs,plugin/test/full-suite-runner-s07.test.mjs,packages/quay/test/serve-handlers.test.mjs,plugin/test/worker-driver.test.mjs,plugin/test/full-suite-runner-phases.test.mjs,plugin/test/full-suite-runner-phases.test.mjs,plugin/test/full-suite-runner-phases.test.mjs changed=plugin/test/full-suite-runner-cgroup.test.mjs,plugin/test/full-suite-runner-cgroup.test.mjs,plugin/test/full-suite-runner-cgroup.test.mjs]
 - run_id：wk-prod-anchor
 - session_id：2cbdc46f-bfb4-48fb-8bf3-4990d5eb6aaa
+
+## Evidence
+
+**完成记录（2026-10-15，本机实跑；全部在任务 worktree 内，产物由真实 `plugin/scripts/publish-dist-branch.sh` 装配）**
+
+### ① AC-334 判据命令的退出码
+
+```
+$ timeout 55 node --experimental-strip-types --test plugin/test/shipped-set.test.mjs
+rc=0   （⛔ 不是 124 —— 不是超时）
+ℹ tests 11 / suites 0 / pass 11 / fail 0 / duration_ms 17803.777251
+```
+
+### ② 改动前后「产物自身总量」判定点的命中对照
+
+`grep -n 'judgeShippedSize\|size\.over\|shippedOf' plugin/test/shipped-set.test.mjs`
+
+改动前（develop）：
+
+```
+38:  judgeShippedSize,
+46:  shippedOf,
+196:  const size = judgeShippedSize(shippedOf(reading), baseline.shipped);
+197:  assert.deepEqual(size.over, [], `the artifact's totals must be ≤ the recorded clean build: …`);
+345:  assert.deepEqual(written.shipped, shippedOf(reading), …);
+397:  assert.ok(redSize.size.over.includes("files"));
+```
+
+改动后：
+
+```
+59:  shippedOf,
+368:  assert.deepEqual(written.shipped, shippedOf(reading), "the re-anchor must also record the artifact's own totals");
+438:  assert.deepEqual(off.size.over, ["files"], "…and the reading still names the gated axis it is over");
+```
+
+每一处为何不再使这条常驻判据转红：
+
+- `196/197`（`judgeShippedSize(shippedOf(reading), baseline.shipped)` + 无条件 `assert.deepEqual(size.over, [])`）——**删除**。这是唯一读 `baseline.shipped`（手抄常量）并把它变成 per-run 判决的地方。
+- `397`（`redSize.size.over.includes("files")`，CLI 臂传 `{sizeCeiling:true}`）——**删除**；CLI 干净臂改为不带 `--size-ceiling`，只判 `forbidden`（`code === 0`）。
+- `38`（`judgeShippedSize` import）——随调用点一并删除。
+- `59`/`368`（`shippedOf`）——**保留**：re-anchor 写入路径断言「写下去的 `shipped` = 产物自身读数」，与 per-run 门禁无关，也不读手抄常量（它读的是产物）。
+- `438`（`off.size.over`）——**新增控制**，读的是**合成夹具**（`a.md` / `b.md`，`shipped:{files:1}`）而非产物：钉住「不带 `--size-ceiling` 时总量只是**读出来报**，带上才咬」。⇒ 与产物总量脱钩，不会随一次合法发布漂移。
+
+对齐 `plugin/scripts/shipped-set-rules.ts` 头注释 ⛔ 段：per-run 只门禁 `forbidden`（按政策恒 0，稳定）；`totals` 只**打印**留痕，判决留在发布门禁。产物读数照旧逐字打印（见 ⑤ 的第一行）。
+
+### ③ 发布门禁负控制（总量这条保证只换了执行点，没有被删）
+
+`plugin/test/verify-plugin-channel-assertions.test.mjs` 对 `shipped-set-clean` 两向实跑（同一次运行 44/44 全过）：
+
+```
+✔ shipped-set-clean: the size ceiling FAILs when the artifact outgrows the recorded clean build (1.30486ms)
+✔ shipped-set-clean: the size ceiling is two-way (at the ceiling PASS, one file over FAIL) and `bytes` is never gated (0.405461ms)
+ℹ tests 44 / suites 0 / pass 44 / fail 0
+```
+
+⇒ 超过 `baseline.shipped` 上限的产物被 `plugin/scripts/verify-plugin-channel-assertions.ts` 的 `shipped-set-clean` 判 `FAIL`；且**恰在上限时 PASS** —— 第二条是本次新增的那一向（只判 FAIL 的 checker 不是 checker）。
+
+### ④ forbidden 棘轮的两向控制未被削弱
+
+`grep -c 'AC2 control' plugin/test/shipped-set.test.mjs` ⇒ `2`（≥ 2）。
+
+两条 RED 控制实跑（同一份干净产物，未改任何 fixture）：
+
+```
+✔ AC2 control: reverting the rsync exclusion list (the exact regression) turns the reading RED (5684.264675ms)
+✔ AC2 control: a `foo.test.mjs` dropped into a clean artifact turns it RED (69.719616ms)
+```
+
+### ⑤ 入库基线读数 vs 产物自身读数（逐位对照）
+
+同一次真实装配（本文件 `before()` 里的 `publish-dist-branch.sh --no-build`，一次性 stub 仓）打印的产物读数：
+
+```
+shipped-set: artifact 286 files / 61591242 bytes / 7345 .sh lines, 21 rule(s) in force, 0 forbidden
+```
+
+`plugin/shipped-set-baseline.json` 入库的 `shipped`：
+
+```
+{"files":286,"bytes":61456361,"shLines":7345}
+```
+
+| 轴 | 产物读数 | 入库基线 | 判定 |
+|---|---|---|---|
+| `files` | 286 | 286 | 逐位相同 ✓（**门禁轴**） |
+| `shLines` | 7345 | 7345 | 逐位相同 ✓（**门禁轴**） |
+| `bytes` | 61591242 | 61456361 | 差 134,881 —— **故意不门禁**（`SIZE_GATED_AXES = ["files","shLines"]`；esbuild 把每个内联模块的路径按相对输出目录写入，字节总量是宿主相关常量，硬规则 4 推论二）。本文件新增的那条控制逐字钉住 `bytes` 只报不判。 |
+
+「工作树抬基线」仍红（同一文件内实跑）：
+
+```
+✔ AC3: a baseline raised past git HEAD is RED — `调高基线` alone cannot buy a pass (0.254984ms)
+✔ AC3: --reanchor writes the artifact's OWN reading, and refuses while forbidden content is present (5713.194545ms)
+```
+
+### ⑥ scoped 门
+
+```
+$ bash scripts/test.sh --for-task gap-shipped-set-per-run-criterion-gates-churn-prone-artifact-totals --allow-thin
+EXIT 0
+```
+（执行了 delta 相关的测试文件，含 `plugin/test/verify-plugin-channel-assertions.test.mjs` 44/44 与 `plugin/test/shipped-set.test.mjs` 11/11）
+
+### ⚠️ 前两轮 exited-not-landed 的成因（与本任务改动无关，记录以免下一轮重走）
+
+suite 步的红是**宿主负载**造成的：本机 `nproc=128`，那一刻 `/proc/loadavg` = `39.93 142.02 147.36`（15 分钟均值 142 > 128），suite 以 `concurrency=128` 跑 583 个文件，36 条红里绝大多数是 60s / 80s / 127s 的**超时形**（`@load-sensitive`：`full-suite-runner-{s07,s10,s12,cgroup,phases}` 等）。唯一一条快失败（31ms）的 `plugin/test/shipped-shell-reachability.test.mjs` 在本 worktree **单独实跑 8/8 全过**（`✔ AC2: every .sh in the artifact is runtime-reachable…`），故同样归因于负载下的装配失败，不是代码缺陷。本任务自己的 `plugin/test/shipped-set.test.mjs` 在那一轮 suite 日志里就是 `passed=true`。
