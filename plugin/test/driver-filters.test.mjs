@@ -1603,14 +1603,17 @@ const CONFIG_DEVELOP = "providers:\n  native:\n    enabled: true\n  # develop-si
 
 /** 生产同形夹具（ClaudeCodeUI 2026-10-14 的事件序列）：author 分支 **严格落后** develop（无独有提交
  *  ⇒ `git log develop..HEAD` 为空 ⇒ 终局解事件 `discardedCount:0`），工作树上带着会阻塞 merge 的状态。
- *  `dirtyConfig`：非 null ⇒ 在 author 检出的**已跟踪** `.quay/config.yml` 上写未提交改动。
- *  `untrackedBlocking`：非空 ⇒ author 检出上造出这些**未跟踪**文件（路径存在于 develop 树 ⇒
- *  `reset --hard` 会静默覆盖它们，也正是生产里阻塞 merge 的 `experiments/.../{README.md,digest.py}`）。 */
-function makeBehindFixture(tag, { dirtyConfig = null, untrackedBlocking = [] } = {}) {
+ *  `developSets`：develop 侧就地改写的已跟踪文件（⇒ 与 author 的未提交改动相撞，阻塞 merge）。
+ *  `dirtyFiles`：author 检出上的**已跟踪**未提交改动（reset --hard 会静默抹掉的那一类）。
+ *  `untrackedBlocking`：author 检出上的**未跟踪**文件（路径同时被 develop 提交 ⇒ `reset --hard` 会静默
+ *  覆盖它们，也正是生产里阻塞 merge 的 `experiments/.../{README.md,digest.py}`）。 */
+function makeBehindFixture(tag, { developSets = {}, dirtyFiles = {}, untrackedBlocking = [] } = {}) {
   const root = makeGitRoot(tag);
   writeTask(root, "gap-a", "---\nid: gap-a\nstatus: ready\n---");
   fs.mkdirSync(path.join(root, ".quay"), { recursive: true });
+  fs.mkdirSync(path.join(root, "docs"), { recursive: true });
   fs.writeFileSync(path.join(root, ".quay", "config.yml"), CONFIG_BASELINE, "utf8");
+  fs.writeFileSync(path.join(root, "docs", "notes.md"), "# notes\n", "utf8"); // 另一个已跟踪文件（develop 不碰）
   // 生产同形：同步自身的运行时事件日志（`.quay/doc-develop-sync.jsonl`）是 gitignored 的
   // （CLAUDE.md「gitignored 运行时日志」）——否则同步在 take-develop 前写下的自己的 log 会被
   // 脏态读数当成未跟踪文件（把它自己算成「工作树脏」）。
@@ -1620,19 +1623,19 @@ function makeBehindFixture(tag, { dirtyConfig = null, untrackedBlocking = [] } =
   git(root, "branch", "develop");
   git(root, "branch", "author");
   git(root, "checkout", "-q", "develop");
-  fs.writeFileSync(path.join(root, ".quay", "config.yml"), CONFIG_DEVELOP, "utf8");
+  for (const [rel, content] of Object.entries(developSets)) fs.writeFileSync(path.join(root, rel), content, "utf8");
   for (const rel of untrackedBlocking) {
     fs.mkdirSync(path.dirname(path.join(root, rel)), { recursive: true });
     fs.writeFileSync(path.join(root, rel), "from-develop\n", "utf8");
   }
   git(root, "add", ".");
-  git(root, "commit", "-q", "-m", "develop-side: config change + new paths");
+  git(root, "commit", "-q", "-m", "develop-side: edits + new paths");
   git(root, "checkout", "-q", "author"); // author = baseline（落后 develop，⛔ 无独有提交）
   for (const rel of untrackedBlocking) {
     fs.mkdirSync(path.dirname(path.join(root, rel)), { recursive: true });
     fs.writeFileSync(path.join(root, rel), "UNTRACKED-LOCAL\n", "utf8"); // ⛔ 未 add：author 侧的未跟踪形态
   }
-  if (dirtyConfig !== null) fs.writeFileSync(path.join(root, ".quay", "config.yml"), dirtyConfig, "utf8");
+  for (const [rel, content] of Object.entries(dirtyFiles)) fs.writeFileSync(path.join(root, rel), content, "utf8");
   return root;
 }
 
@@ -1661,7 +1664,8 @@ function makeStructuralConflictFixture(tag) {
 
 test("AC1 — author 检出上有【已跟踪文件的未提交改动】阻塞 merge ⇒ 拒绝 take-develop，改动存活（pre-fix 见 AC 证据）", (t) => {
   const root = makeBehindFixture("acws-ac1", {
-    dirtyConfig: "providers:\n  native:\n    enabled: true\n  arch_discovery:\n    enabled: true\n",
+    developSets: { ".quay/config.yml": CONFIG_DEVELOP },
+    dirtyFiles: { ".quay/config.yml": "providers:\n  native:\n    enabled: true\n  arch_discovery:\n    enabled: true\n" },
   });
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
 
@@ -1714,9 +1718,11 @@ test("AC2 — 干净工作树 + 同样走终局解 ⇒ 行为与 pre-fix 逐字�
 
 test("AC3 — 生产形态：未跟踪文件阻塞 merge（develop 树里有同名路径）被记录，且无已跟踪文件损失", (t) => {
   const blocking = "experiments/voice-realtime-relay-mode-replay/README.md";
+  // develop 只新增那个未跟踪同名路径（⛔ 不碰任何已跟踪文件）⇒ merge 的【唯一】阻塞者是未跟踪文件，
+  // ff-error 的 stderr 就是生产里那句「untracked working tree files would be overwritten by merge」。
   const root = makeBehindFixture("acws-ac3", {
     untrackedBlocking: [blocking],
-    dirtyConfig: "providers:\n  native:\n    enabled: true\n  discovery_method:\n    enabled: true\n",
+    dirtyFiles: { "docs/notes.md": "# notes\n\nlocal uncommitted edit\n" }, // 已跟踪、但不是 merge 的阻塞者
   });
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
 
@@ -1724,25 +1730,30 @@ test("AC3 — 生产形态：未跟踪文件阻塞 merge（develop 树里有同�
   assert.match(git(root, "status", "--porcelain", "--untracked-files=all"),
     new RegExp(`^\\?\\? ${blocking.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`, "m"),
     "前置：阻塞 merge 的未跟踪文件在场");
-  assert.match(git(root, "status", "--porcelain", "--untracked-files=all"), /^ M \.quay\/config\.yml$/m,
+  assert.match(git(root, "status", "--porcelain", "--untracked-files=all"), /^ M docs\/notes\.md$/m,
     "前置：已跟踪未提交改动在场");
 
   syncDocDevelopBidirectional(root);
 
-  // ① 无已跟踪文件损失（AC3 的直接量：那个未提交的已跟踪改动必须存活）。
+  // ① ff-error 记录的正是生产的未跟踪阻塞形态（可归因——这正是生产 06:43:39 那条事件）。
+  const ffErr = syncEvents(root).find((e) => e.event === "doc-develop-sync-ff-error" && e.phase === "merge");
+  assert.ok(ffErr, "必须落 ff-error（phase=merge）事件");
+  assert.match(String(ffErr.detail), /untracked working tree files would be overwritten by merge/,
+    `ff-error 须是生产的未跟踪阻塞形态，实得 ${JSON.stringify(ffErr.detail)}`);
+  // ② 无已跟踪文件损失（AC3 的直接量：那个未提交的已跟踪改动必须存活）。
   assert.match(
-    fs.readFileSync(path.join(root, ".quay", "config.yml"), "utf8"),
-    /discovery_method/,
+    fs.readFileSync(path.join(root, "docs", "notes.md"), "utf8"),
+    /local uncommitted edit/,
     "⛔ 已跟踪文件被 reset 抹掉 —— 这正是生产里丢掉 .quay/config.yml 的形态",
   );
-  // ② 阻塞 merge 的未跟踪路径被记进事件（⛔ 不是「被 reset 悄悄解决了」）。
+  // ③ 阻塞 merge 的未跟踪路径被记进事件（⛔ 不是「被 reset 悄悄解决了」）。
   const refused = syncEvents(root).find((e) => e.event === "doc-develop-sync-semantic-take-develop-refused");
   assert.ok(refused, "必须拒绝（落痕）");
   assert.ok(
     refused.workingTree.untracked.includes(blocking),
     `未跟踪阻塞路径须枚举，实得 ${JSON.stringify(refused.workingTree.untracked)}`,
   );
-  // ③ 未跟踪文件本身也存活（拒绝 ⇒ 未被 reset 静默覆盖）。
+  // ④ 未跟踪文件本身也存活（拒绝 ⇒ 未被 reset 静默覆盖）。
   assert.equal(fs.readFileSync(path.join(root, blocking), "utf8"), "UNTRACKED-LOCAL\n", "未跟踪文件未被覆盖");
 });
 
