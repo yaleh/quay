@@ -210,15 +210,6 @@ Neither file carries a `@load-sensitive` annotation (they are unregistered load 
 - .quay/config.yml
 - plugin/scripts/publish-dist-branch.sh
 
-## Blocker
-
-**2026-10-13T18:35:20.226Z — worker 未落地（exited-not-landed）**
-
-- 未落地原因：AC 未全勾（checked 5/6，剩余未勾 1）——续做只需验证并勾选 AC
-- run_id：wk-prod-anchor
-- session_id：c13e795c-3709-460a-8982-07c470a38dd7
-
-
 ## Round-3 re-check of AC3 (2026-10-14, this worker round)
 
 AC3 is still NOT satisfied and was again NOT forced. The readings below are freshly taken this round
