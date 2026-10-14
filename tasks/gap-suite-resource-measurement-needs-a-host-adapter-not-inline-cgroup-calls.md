@@ -1,7 +1,7 @@
 ---
 id: gap-suite-resource-measurement-needs-a-host-adapter-not-inline-cgroup-calls
 title: 套件资源测量/执行改走宿主 adapter 接口：Linux cgroup/systemd 只是一个实现，不硬编码跨项目路径、不建资源中心
-status: ready
+status: needs-human
 labels:
   - gap
 parent: null
@@ -204,3 +204,14 @@ with `SUITE-INCOMPLETE reason=oom-killed`. Both causes were read out of the arte
 - 未落地原因：step=suite: oom-killed (3) — recovery exhausted at floor concurrency 32 — no declared rung produced a complete verdict (64,48,32); needs a code/config fix, see plugin/scripts/full-suite-runner.ts
 - run_id：wk-prod-anchor
 - session_id：5c68a980-7f6d-407b-bfde-d69e57025aa9
+
+## Needs-Human
+
+**执行 2026-10-14T18:50:18.127Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：worker-driver 连续 3 次 exited-not-landed 未落地（重试上限）
+- 失败步/判词：step=suite: oom-killed (3) — recovery exhausted at floor concurrency 32 — no declared rung produced a complete verdict (64,48,32); needs a code/config fix, see plugin/scripts/full-suite-runner.ts
+- run_id：wk-prod-anchor
+- session_id：5c68a980-7f6d-407b-bfde-d69e57025aa9
+- suite 日志：/data/home/yale/work/quay/.quay/fan-in-suite-gap-suite-resource-measurement-needs-a-host-adapter-not-inline-cgroup-calls~wk-prod-anchor~1792002203765-0bf5af.log
+- fan-in 日志：/data/home/yale/work/quay/.quay/fan-in-gap-suite-resource-measurement-needs-a-host-adapter-not-inline-cgroup-calls-wk-prod-anchor.log
