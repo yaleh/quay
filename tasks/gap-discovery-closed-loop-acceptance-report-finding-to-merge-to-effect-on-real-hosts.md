@@ -2,7 +2,7 @@
 id: gap-discovery-closed-loop-acceptance-report-finding-to-merge-to-effect-on-real-hosts
 title: 架构发现真实自主闭环验收：逐条
   Finding→verifier/refuter→Task→merge→效果复测（quay+ClaudeCodeUI），来源/空轮/预算/调用失败分类计数
-status: ready
+status: done
 labels:
   - gap
   - architecture-discovery
@@ -131,10 +131,3 @@ with **origin** recorded as autonomous-routine / autonomous-experiment / operato
 - plugin/scripts/capability-catalog.sh
 - plugin/scripts/capability-catalog-declarations.json
 - docs/carrier-registry.json
-
-## Blocker
-
-**2026-10-14T10:24:46.111Z — worker 未落地（exited-not-landed）**
-
-- 未落地原因：step=suite: AssertionError [ERR_ASSERTION]: a private copy of the family reappeared (finding `lineof-lineat` is back) — got 1: ["discovery-closed-loop-report.ts:994 lineOf"]
-- run_id：wk-prod-anchor
