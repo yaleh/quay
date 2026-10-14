@@ -38,6 +38,10 @@ import {
   docBranchForkedFromDevelop,
   syncDocDevelopBidirectional,
   discardedCommitsAreDisposable,
+  // gap-develop-sync-take-develop-reset-hard-wipes-uncommitted-tracked-edits-in-shared-checkout:
+  // 终局解的【工作树】守卫（reset --hard 除丢提交外还静默丢工作树状态）。
+  workingTreeDirtiness,
+  parsePorcelain,
   // gap-task-status-events-contract-v1 AC(d): the second status writer this file owns (the
   // develop↔doc determinism alignment) is reached through this exported entry.
   semanticSyncDocToDevelop,
@@ -1578,6 +1582,200 @@ test("AC4 (端到端负控制) — meta-cc 副本形态上跑一次【真实任�
   const refused = syncEvents(root).find((e) => e.event === "doc-develop-sync-semantic-take-develop-refused");
   assert.ok(refused, "破坏性终局解被拒绝（落痕）");
 });
+
+// ════════════════════════════════════════════════════════════════════════════════════════════════════
+// 终局解的【工作树】守卫（gap-develop-sync-take-develop-reset-hard-wipes-uncommitted-tracked-edits-
+// in-shared-checkout）
+//
+// sibling 任务守的是 reset --hard 丢【提交】的那半边（`discardedCommitsAreDisposable`）。它不守
+// 【工作树】。而 `git reset --hard develop` 同时静默丢工作树状态：
+//   (1) 已跟踪文件的未提交改动（实测：reset 后内容复原为 develop 版本，exit 0）；
+//   (2) develop 树里有的未跟踪文件（实测：被 develop 版本静默替换；不在 develop 树里的则保留）。
+// 实测生产（ClaudeCodeUI 2026-10-14）：take-develop 的 reset 抹掉了人已授权、尚未提交的
+// `.quay/config.yml` 启用块（arch_discovery / discovery_method），两个 routine 静默停用，**事件只记
+// `discardedCount:0`**（它数提交，不数工作树——「reset 没丢东西」是假设而非测量）。
+// ════════════════════════════════════════════════════════════════════════════════════════════════════
+
+const CONFIG_BASELINE = "providers:\n  native:\n    enabled: true\n";
+// develop 侧也改 config.yml ⇒ author 检出上的未提交改动会阻塞 merge（「Your local changes … would be
+// overwritten by merge」），与生产里「未跟踪文件阻塞 merge」同形——两者都让 merge 抛错 ⇒ 走到终局解。
+const CONFIG_DEVELOP = "providers:\n  native:\n    enabled: true\n  # develop-side change\n";
+
+/** 生产同形夹具（ClaudeCodeUI 2026-10-14 的事件序列）：author 分支 **严格落后** develop（无独有提交
+ *  ⇒ `git log develop..HEAD` 为空 ⇒ 终局解事件 `discardedCount:0`），工作树上带着会阻塞 merge 的状态。
+ *  `dirtyConfig`：非 null ⇒ 在 author 检出的**已跟踪** `.quay/config.yml` 上写未提交改动。
+ *  `untrackedBlocking`：非空 ⇒ author 检出上造出这些**未跟踪**文件（路径存在于 develop 树 ⇒
+ *  `reset --hard` 会静默覆盖它们，也正是生产里阻塞 merge 的 `experiments/.../{README.md,digest.py}`）。 */
+function makeBehindFixture(tag, { dirtyConfig = null, untrackedBlocking = [] } = {}) {
+  const root = makeGitRoot(tag);
+  writeTask(root, "gap-a", "---\nid: gap-a\nstatus: ready\n---");
+  fs.mkdirSync(path.join(root, ".quay"), { recursive: true });
+  fs.writeFileSync(path.join(root, ".quay", "config.yml"), CONFIG_BASELINE, "utf8");
+  // 生产同形：同步自身的运行时事件日志（`.quay/doc-develop-sync.jsonl`）是 gitignored 的
+  // （CLAUDE.md「gitignored 运行时日志」）——否则同步在 take-develop 前写下的自己的 log 会被
+  // 脏态读数当成未跟踪文件（把它自己算成「工作树脏」）。
+  fs.writeFileSync(path.join(root, ".gitignore"), ".quay/*.jsonl\n", "utf8");
+  git(root, "add", ".");
+  git(root, "commit", "-q", "-m", "baseline");
+  git(root, "branch", "develop");
+  git(root, "branch", "author");
+  git(root, "checkout", "-q", "develop");
+  fs.writeFileSync(path.join(root, ".quay", "config.yml"), CONFIG_DEVELOP, "utf8");
+  for (const rel of untrackedBlocking) {
+    fs.mkdirSync(path.dirname(path.join(root, rel)), { recursive: true });
+    fs.writeFileSync(path.join(root, rel), "from-develop\n", "utf8");
+  }
+  git(root, "add", ".");
+  git(root, "commit", "-q", "-m", "develop-side: config change + new paths");
+  git(root, "checkout", "-q", "author"); // author = baseline（落后 develop，⛔ 无独有提交）
+  for (const rel of untrackedBlocking) {
+    fs.mkdirSync(path.dirname(path.join(root, rel)), { recursive: true });
+    fs.writeFileSync(path.join(root, rel), "UNTRACKED-LOCAL\n", "utf8"); // ⛔ 未 add：author 侧的未跟踪形态
+  }
+  if (dirtyConfig !== null) fs.writeFileSync(path.join(root, ".quay", "config.yml"), dirtyConfig, "utf8");
+  return root;
+}
+
+/** 结构冲突夹具（clean-tree 也能触发终局解）：develop 删 `tasks/gap-b.md` / author 改它 ⇒
+ *  modify/delete，`-X theirs` 消解不了。author 有 1 个独有提交（⇒ `discardedCount:1`）。 */
+function makeStructuralConflictFixture(tag) {
+  const root = makeGitRoot(tag);
+  writeTask(root, "gap-a", "---\nid: gap-a\nstatus: ready\n---");
+  writeTask(root, "gap-b", "---\nid: gap-b\nstatus: ready\n---");
+  fs.mkdirSync(path.join(root, ".quay"), { recursive: true });
+  fs.writeFileSync(path.join(root, ".quay", "config.yml"), CONFIG_BASELINE, "utf8");
+  fs.writeFileSync(path.join(root, ".gitignore"), ".quay/*.jsonl\n", "utf8");
+  git(root, "add", ".");
+  git(root, "commit", "-q", "-m", "baseline");
+  git(root, "branch", "develop");
+  git(root, "checkout", "-q", "-b", "author");
+  git(root, "checkout", "-q", "develop");
+  git(root, "rm", "-q", "tasks/gap-b.md");
+  git(root, "commit", "-q", "-m", "develop-side: delete gap-b");
+  git(root, "checkout", "-q", "author");
+  writeTask(root, "gap-b", "---\nid: gap-b\nstatus: done\n---");
+  git(root, "add", "tasks/gap-b.md");
+  git(root, "commit", "-q", "-m", "tasks: gap-b ready→done（promotion-driver 机械晋升）");
+  return root;
+}
+
+test("AC1 — author 检出上有【已跟踪文件的未提交改动】阻塞 merge ⇒ 拒绝 take-develop，改动存活（pre-fix 见 AC 证据）", (t) => {
+  const root = makeBehindFixture("acws-ac1", {
+    dirtyConfig: "providers:\n  native:\n    enabled: true\n  arch_discovery:\n    enabled: true\n",
+  });
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+
+  // 前置：工作树确有未提交的已跟踪改动（否则本控制空转）。
+  assert.match(git(root, "status", "--porcelain"), /^ M \.quay\/config\.yml$/m, "前置：.quay/config.yml 有未提交改动");
+
+  const result = syncDocDevelopBidirectional(root);
+  assert.equal(result, "synced", "同步确实跑到终局解路径（⛔ 未执行 ⇒ 本控制空转）");
+
+  // 直接量（⛔ 不经事件、不经代理量，硬规则 4b）：文件内容本身。
+  const content = fs.readFileSync(path.join(root, ".quay", "config.yml"), "utf8");
+  assert.match(content, /arch_discovery/, "⛔ 未提交的已跟踪改动被 reset 抹掉 —— 编辑必须存活");
+  assert.notEqual(git(root, "rev-parse", "HEAD").trim(), git(root, "rev-parse", "develop").trim(),
+    "拒绝 ⇒ ⛔ 未 reset（HEAD 未落在 develop）");
+
+  const refused = syncEvents(root).find((e) => e.event === "doc-develop-sync-semantic-take-develop-refused");
+  assert.ok(refused, "必须落一条可区分的【拒绝】事件（⛔ 与「已同步」同形则等于静默）");
+  assert.equal(refused.reason, "dirty-working-tree");
+  assert.ok(
+    refused.offendingPaths.includes(".quay/config.yml"),
+    `dirty 路径须枚举，实得 ${JSON.stringify(refused.offendingPaths)}`,
+  );
+  assert.deepEqual(refused.workingTree.trackedDirty, [".quay/config.yml"], "事件 schema 须记工作树读数（point 3）");
+  // 生产同形：作者无独有提交 ⇒ 事件里的 discardedCount 恒为 0（它只数提交，从不数工作树——这正是缺口）。
+  assert.equal(refused.discardedCount, 0, "生产同形：discardedCount:0 而工作树确有东西被保住");
+  assert.equal(syncEvents(root).find((e) => e.event === "doc-develop-sync-semantic-resolved"), undefined,
+    "⛔ 不得同时写「已解决/已丢弃」事件（拒绝与成功不同形）");
+});
+
+test("AC2 — 干净工作树 + 同样走终局解 ⇒ 行为与 pre-fix 逐字不变：reset 照常执行、无拒绝事件", (t) => {
+  const root = makeStructuralConflictFixture("acws-ac2");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  assert.equal(git(root, "status", "--porcelain").trim(), "", "前置：工作树干净");
+
+  const result = syncDocDevelopBidirectional(root);
+  assert.equal(result, "synced");
+  const resolved = syncEvents(root).find((e) => e.event === "doc-develop-sync-semantic-resolved");
+  assert.ok(resolved, "干净工作树仍走到终局解（事件存在）");
+  assert.equal(resolved.resolution, "discarded-doc-commits", "resolution 逐字保留（旧行为不变）");
+  assert.equal(resolved.branch, "author", "doc 分支运行时派生 = author");
+  assert.equal("workingTree" in resolved, false, "干净树 ⇒ 事件不带 workingTree 键（逐字不变）");
+  assert.equal(syncEvents(root).filter((e) => e.event === "doc-develop-sync-semantic-take-develop-refused").length, 0,
+    "干净树不产生拒绝事件");
+  assert.equal(
+    git(root, "rev-parse", "HEAD").trim(),
+    git(root, "rev-parse", "develop").trim(),
+    "reset --hard develop 照旧执行（HEAD 落在 develop）",
+  );
+});
+
+test("AC3 — 生产形态：未跟踪文件阻塞 merge（develop 树里有同名路径）被记录，且无已跟踪文件损失", (t) => {
+  const blocking = "experiments/voice-realtime-relay-mode-replay/README.md";
+  const root = makeBehindFixture("acws-ac3", {
+    untrackedBlocking: [blocking],
+    dirtyConfig: "providers:\n  native:\n    enabled: true\n  discovery_method:\n    enabled: true\n",
+  });
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+
+  // 前置：production 的两个读数同时在场——未跟踪阻塞文件 + 已跟踪未提交改动。
+  assert.match(git(root, "status", "--porcelain", "--untracked-files=all"),
+    new RegExp(`^\\?\\? ${blocking.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`, "m"),
+    "前置：阻塞 merge 的未跟踪文件在场");
+  assert.match(git(root, "status", "--porcelain", "--untracked-files=all"), /^ M \.quay\/config\.yml$/m,
+    "前置：已跟踪未提交改动在场");
+
+  syncDocDevelopBidirectional(root);
+
+  // ① 无已跟踪文件损失（AC3 的直接量：那个未提交的已跟踪改动必须存活）。
+  assert.match(
+    fs.readFileSync(path.join(root, ".quay", "config.yml"), "utf8"),
+    /discovery_method/,
+    "⛔ 已跟踪文件被 reset 抹掉 —— 这正是生产里丢掉 .quay/config.yml 的形态",
+  );
+  // ② 阻塞 merge 的未跟踪路径被记进事件（⛔ 不是「被 reset 悄悄解决了」）。
+  const refused = syncEvents(root).find((e) => e.event === "doc-develop-sync-semantic-take-develop-refused");
+  assert.ok(refused, "必须拒绝（落痕）");
+  assert.ok(
+    refused.workingTree.untracked.includes(blocking),
+    `未跟踪阻塞路径须枚举，实得 ${JSON.stringify(refused.workingTree.untracked)}`,
+  );
+  // ③ 未跟踪文件本身也存活（拒绝 ⇒ 未被 reset 静默覆盖）。
+  assert.equal(fs.readFileSync(path.join(root, blocking), "utf8"), "UNTRACKED-LOCAL\n", "未跟踪文件未被覆盖");
+});
+
+test("AC3② — 只有未跟踪文件（路径在 develop 树里）时也拒绝：成因可区分（untracked-would-be-overwritten）", (t) => {
+  const blocking = "src/added-by-develop.js";
+  const root = makeBehindFixture("acws-ac3b", { untrackedBlocking: [blocking] });
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+
+  syncDocDevelopBidirectional(root);
+  const refused = syncEvents(root).find((e) => e.event === "doc-develop-sync-semantic-take-develop-refused");
+  assert.ok(refused, "必须拒绝");
+  assert.equal(refused.reason, "untracked-would-be-overwritten", "成因与 dirty-working-tree 可区分（两条独立条件）");
+  assert.ok(refused.offendingPaths.includes(blocking), "越界路径须枚举");
+  assert.equal(fs.readFileSync(path.join(root, blocking), "utf8"), "UNTRACKED-LOCAL\n", "未被 reset 覆盖");
+  assert.equal(syncEvents(root).find((e) => e.event === "doc-develop-sync-semantic-resolved"), undefined, "无 resolved 事件");
+});
+
+test("AC3③ (纯函数) — parsePorcelain 按位置区分已跟踪改动 / 未跟踪 / rename；workingTreeDirtiness 读不懂 ⇒ readable:false", (t) => {
+  assert.deepEqual(
+    parsePorcelain(" M a.ts\n?? b.js\nA  c.md\nR  old.ts -> new.ts\n"),
+    { trackedDirty: ["a.ts", "c.md", "new.ts"], untracked: ["b.js"] },
+    "非 `??` 行 = 已跟踪改动（含 staged/rename 的新路径）；`??` 行 = 未跟踪",
+  );
+  assert.deepEqual(parsePorcelain(""), { trackedDirty: [], untracked: [] }, "空输出 = 干净（⛔ 非「读不懂」）");
+
+  const nongit = fs.mkdtempSync(path.join(os.tmpdir(), "acws-nongit-"));
+  t.after(() => fs.rmSync(nongit, { recursive: true, force: true }));
+  const d = workingTreeDirtiness(nongit);
+  assert.equal(d.readable, false, "非 git 目录 ⇒ readable:false（读不懂 ≠ 干净，硬规则 6）");
+  assert.deepEqual(d.trackedDirty, []);
+  assert.deepEqual(d.untracked, []);
+});
+
 
 // ════════════════════════════════════════════════════════════════════════════════════════════════════
 // gap-park-reason-mislabels-ac-precheck-as-suite-red 点 3 — markNeedsHuman 的小标题与提交消息必须由
