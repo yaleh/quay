@@ -8,6 +8,8 @@ labels:
 parent: null
 children: []
 extra: {}
+depends_on:
+  - gap-suite-resource-measurement-needs-a-host-adapter-not-inline-cgroup-calls
 ---
 ## Proposal
 **Read-only diagnosis 2026-10-14 (coordinator): the evidence needed to choose a suite memory policy was never collected.** What the runner records today (`full-suite-runner.ts` `readCgroupMemoryEvents` / `writeSuiteMemoryEvidence`, `:1276-1381`): `peakBytes`, `memoryMaxBytes`, `oom`, `oomKill`, `phase`, a sample **count**. `suite-load-*.jsonl` adds only `loadavg`, `cpu_stall`, `mem_avail`. Consequences measured in that diagnosis:
