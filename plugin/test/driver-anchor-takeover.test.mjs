@@ -63,7 +63,9 @@ const HEARTBEAT_KIND = "outer";
  *  `FAKE_IGNORE_STOP=1` ⇒ 不响应停机（模拟「在飞 worker 无超时」那种无界收尾）⇒ 旧 anchor 会**drain 到
  *  有界宽限的边界**才退出——这正是 AC3 要的那个旧 anchor 形态。
  *  `kind` 可覆盖（缺省 = 本文件既有用例用的 HEARTBEAT_KIND）：本任务的接管用例需要**两个** kind 才能
- *  造出「旧 anchor 托管两个、期望态只剩一个」的收窄形态。 */
+ *  造出「旧 anchor 托管两个、期望态只剩一个」的收窄形态。
+ *  `FAKE_STOP_LINGER_MS=n` ⇒ **响应**停机但收尾要 n ms（= 「循环会收尾，只是慢一点」那个正常路径形态，
+ *  见 AC2 的对照组：⛔ 与 FAKE_IGNORE_STOP 是**两个不同的**夹具形态，别混用）。 */
 function fakeDriverSource(kind = HEARTBEAT_KIND) {
   const spec = DRIVER_KINDS[kind];
   const carrier = spec.carriers.find((c) => c.endsWith("-round.jsonl")) ?? spec.carriers[0];
@@ -81,12 +83,14 @@ export async function main(argv) {
   const ctl = registerKindStop(${JSON.stringify(kind)});
   const file = path.join(root, ".quay", ${JSON.stringify(carrier)});
   const ignoreStop = process.env.FAKE_IGNORE_STOP === "1";
+  const lingerMs = Number(process.env.FAKE_STOP_LINGER_MS ?? "0");
   let round = 0;
   while (ignoreStop || !ctl.requested()) {
     round += 1;
     try { fs.appendFileSync(file, JSON.stringify({ round, ts: new Date().toISOString().slice(0, 19) + "Z", pid: process.pid }) + "\\n"); } catch {}
     await new Promise((r) => setTimeout(r, interval));
   }
+  if (lingerMs > 0) await new Promise((r) => setTimeout(r, lingerMs));
   return 0;
 }
 `;
@@ -165,6 +169,19 @@ async function waitFor(fn, ms, what) {
   throw new Error(`timed out waiting for ${what}`);
 }
 
+/** 轮询 `anchor.log` 直到 `re` 命中，返回**命中那一刻的墙钟**（ms）。
+ *  ⚠️ 20ms 粒度 ⇒ 读数带 ≤ ~20ms（重载下更大）的观测误差，故它只用于**量级**判据（本文件用它区分
+ *  「几百毫秒」与「一个宽限窗口」）；精确的顺序判据一律从**日志行序**取，⛔ 不靠两个观测时刻相减。
+ *  ⛔ `re` 不带 `g`：带 `g` 的正则 `.test()` 有 lastIndex 状态，第二次调用会从上次位置起找。 */
+async function waitForLogLine(root, re, ms, what) {
+  const deadline = Date.now() + ms;
+  while (Date.now() < deadline) {
+    if (re.test(logOf(root))) return Date.now();
+    await new Promise((r) => setTimeout(r, 20));
+  }
+  throw new Error(`timed out waiting for ${what}:\n${logOf(root).slice(-2000)}`);
+}
+
 /** 收掉夹具：SIGKILL 一切仍然活着的进程（anchor 与冒充旧 anchor 的 sleep）+ 删根。 */
 function killAll(root, extraPids = []) {
   for (const pid of [anchorPid(root), ...extraPids]) {
@@ -174,21 +191,32 @@ function killAll(root, extraPids = []) {
 
 // ── AC3 (D2)：预算的**派生**（快、且是这条修复的直接判据） ─────────────────────────────────────────
 
-test("AC3 (D2 派生) — 接管预算必须**严格超过**旧 anchor 的真实最坏退出；旧式 `grace + 60_000` 在 grace ≥ 60s 时只是**等于**它", () => {
+test("AC3 (D2 派生) — 预算从**真实最坏退出**派生；最坏退出 = 宽限本身（`+ min(60s, 宽限)` 那项随第二段等待一起下线）", () => {
   for (const grace of [1_000, 3_000, 60_000, 120_000]) {
     const worst = oldAnchorWorstExitMs(grace);
-    assert.equal(worst, grace + Math.min(60_000, grace), `最坏退出 = 宽限 + min(60s, 宽限)（grace=${grace}）`);
+    assert.equal(worst, grace, `最坏退出 = 宽限本身（宽限超时那条路⛔ 不再白等第二段 min(60s,宽限)；grace=${grace}）`);
     assert.equal(takeoverBudgetMs(grace, 100), worst + 100 + 20_000, `预算 = 最坏退出 + 察觉延迟 + 余量（grace=${grace}）`);
   }
-  // ⛔ **反例臂**（本条能取假的地方）：把 `takeoverBudgetMs` 改回修复前的字面量 `grace + 60_000`，
-  //    下面这条在 grace = 120_000（**生产值**）上立刻红——180000 > 180000 为假。
-  //    这正是实测那条：预算 180000ms，而旧 anchor 233s 才退出（宽限 + min(60s,宽限) + 察觉 + 清理 + 抖动）。
+  // ⛔ **反例臂**（本条能取假的地方）：把 `+ Math.min(60_000, grace)` 那一项**加回** `oldAnchorWorstExitMs`
+  //    （= 把那段白等也一并加回代码），下面第 2/3 条立刻红（生产宽限下 180000 ≠ 120000）。
+  //    ⚠️ 本块与 `AC2`（进程级）是**同一个事实的两处写法**（硬规则 5b），各自可取假、谁都不能单独覆盖：
+  //      只把**等待**加回、不动预算 ⇒ `AC2` 的滞后红（预算这块看不出来）；
+  //      只把**预算**改回旧式、不加回等待 ⇒ 本块红（滞后那块看不出来）。
   const grace = 120_000;
+  assert.equal(oldAnchorWorstExitMs(grace), grace, "生产宽限下最坏退出 = 宽限（⛔ 不含第二段等待）");
+  assert.notEqual(
+    oldAnchorWorstExitMs(grace), grace + Math.min(60_000, grace),
+    "旧式 `宽限 + min(60s, 宽限)` 已**不是**本函数的取值：那一段等待已经下线，预算⛔ 不得替它留位置",
+  );
+  assert.equal(
+    grace + Math.min(60_000, grace) - oldAnchorWorstExitMs(grace), 60_000,
+    "被去掉的那一项正是 min(60s, 宽限) = 60s（生产宽限 ≥ 60s ⇒ 取 cap；这就是实测那次交接里白等的量）",
+  );
   assert.ok(
     takeoverBudgetMs(grace, 100) > oldAnchorWorstExitMs(grace),
     `生产宽限下预算必须严格超过最坏退出（预算是接管与否的**分类**阈值，⛔ 不是一个恰好相等的数）`,
   );
-  assert.ok(!(grace + 60_000 > oldAnchorWorstExitMs(grace)), `旧式 grace+60_000 在生产宽限下**不是**上界（${grace + 60_000} ≤ ${oldAnchorWorstExitMs(grace)}）`);
+  assert.equal(takeoverBudgetMs(grace, 100), grace + 100 + 20_000, "生产宽限下预算 = 宽限 + 察觉 tick + 余量（⛔ 不是 200500ms）");
   // 观察窗的上限是**独立**读数（⛔ 不与预算共用一个值）：预算过点后仍要继续等，等的上限是另一个量。
   assert.ok(takeoverAbandonWatchMs() > 0, "放弃观察窗有正值缺省");
 });
@@ -204,8 +232,10 @@ test("AC3① — 旧 anchor 的循环 drain 到**宽限边界**才退 ⇒ 替换
   // ⛔ 必须等它的循环**真的在跑**再发信号（见 waitForLoopRunning 的注释：只等 anchor.pid 会撞上缺省处理器）。
   await waitForLoopRunning(root, HEARTBEAT_KIND);
 
-  // 旧 anchor 的循环**只**在宽限边界退出（FAKE_IGNORE_STOP=1）⇒ 它的真实退出时间落在「宽限 + 收尾等待」
-  // 这条最坏路径上——正是修复前会撞破预算的那个形态。
+  // 旧 anchor 的循环**只**在宽限边界退出（FAKE_IGNORE_STOP=1）⇒ 它的真实退出时间落在**最坏**那条路上
+  // （宽限 + 察觉 tick），正是修复前会撞破预算的那个形态。
+  // ⚠️ 修复（gap-anchor-grace-exceeded-exit-waits-another-60s-…）之后这条最坏路径**短了一个宽限窗口**：
+  //    旧 anchor 在宽限到点时直接退出，⛔ 不再为这些循环白等 `min(60s, 宽限)`（见下面 AC2 的进程级判据）。
   const t0 = Date.now();
   a.kill("SIGTERM");
   const b = spawnAnchor(root, ["--takeover", String(a.pid)], env);
@@ -225,6 +255,83 @@ test("AC3① — 旧 anchor 的循环 drain 到**宽限边界**才退 ⇒ 替换
   assert.ok(!log.includes("STILL ALIVE after"), "⛔ 也不该退化成「超预算但继续等」那条降级路（旧 anchor 是**正确但慢**，预算该容得下它）");
   assert.match(log, /takeover \d+ exited — taking over/, "走的是**正常**交接那条路");
   assert.ok(waited > 1_000, `旧 anchor 确实 drain 了一段时间才退（实测 ${waited}ms——⛔ 不是「它早就没了」的空过）`);
+});
+
+// ── 宽限超时那条路⛔ 不再白等第二段（gap-anchor-grace-exceeded-exit-waits-another-60s-widening-…）──
+//
+// 现场（2026-10-14，两台宿主的 `.quay/anchor.log` 逐条读出）：旧 anchor 打完
+// `shutdown grace …ms exceeded … — exiting anyway` 之后，**又**在收尾段等了 `min(60s, 宽限)`
+// ——实测 ClaudeCodeUI 7/7 次接管都落在 60–61s、quay 最近 12 次里 10 次 60–61s。那 ~60s 里
+// **没有任何 worker 循环在派发/收养**，而下一个收尾的 worker 恰好落进这个窗口变成孤儿。
+// 判据（逐条可取假）：
+//   AC2①  循环无视停机（宽限必然超时）⇒ 退出**不得**在宽限之外再等一个窗口：判据取
+//         `(SIGTERM→exit) - 宽限`（两个端点都是精确时刻）< 宽限/2。修复前该路径恒 ≥ min(60s, 宽限)。
+//         ⚠️ ⛔ 不用「`exiting anyway` 行 → 退出」的**观测**差做判据：该行是轮询 20ms 观测到的，而
+//         修复后这个量比观测粒度还小（实测过一次 -4ms）；它只进诊断。
+//   AC2②  **对照**：循环响应停机、收尾略慢 ⇒ anchor 仍**等它收尾**再退（日志行序 + SIGTERM→exit ≥ 收尾耗时）
+//         ——本修复⛔ 不得顺手把正常停机路径也变成「立刻丢下循环就退」。
+
+test("AC2① — 宽限超时 ⇒ anchor **立刻**退出（⛔ 不再为刚被判定不会收尾的循环白等 min(60s,宽限)）", async (t) => {
+  const graceMs = 2_000; // ≪ 生产 120s：这里测的是**结构**（有没有第二段等待），⛔ 不是「宽限该多长」
+  const root = makeFixture("no-second-wait");
+  const a = spawnAnchor(root, [], { FAKE_IGNORE_STOP: "1", QUAY_ANCHOR_SHUTDOWN_GRACE_MS: String(graceMs) });
+  t.after(() => { killAll(root, [a.pid]); fs.rmSync(root, { recursive: true, force: true }); });
+  await waitFor(() => anchorPid(root) === a.pid && alive(a.pid), 20_000, `the anchor to own anchor.pid (stderr: ${a.stderrText})`);
+  await waitForLoopRunning(root, HEARTBEAT_KIND);
+
+  const exited = new Promise((res) => a.on("exit", () => res(Date.now())));
+  const t0 = Date.now();
+  a.kill("SIGTERM");
+  // 该行的**出现**是判据的一半（宽限那条路真的被走到了）；它的**时刻**只进诊断 —— ⛔ 不用它做判据：
+  // 它是本测试轮询 20ms 观测到的，而修复后这个量（几毫秒）比观测粒度还小（实测过一次 -4ms 的负值）。
+  const tExceeded = await waitForLogLine(root, /shutdown grace \d+ms exceeded/, 30_000, "the grace-exceeded line");
+  const tExit = await exited;
+  const overGraceMs = (tExit - t0) - graceMs; // 宽限**之外**还多等了多久（两个端点的时刻都是精确的）
+  const log = logOf(root);
+  t.diagnostic(
+    `AC2① reading: grace=${graceMs}ms ⇒ SIGTERM→exit = ${tExit - t0}ms（宽限之外只多 ${overGraceMs}ms）；` +
+    `「exiting anyway」行出现于 +${tExceeded - t0}ms（观测粒度 20ms，⛔ 不作判据）。` +
+    `修复前同一夹具、同一宽限实测：宽限之外多 2048ms（= min(60s, 宽限) 那一整段）；` +
+    `生产宽限 120s ⇒ 那一段是 60s，正是 .quay/anchor.log 里 60–61s 的那批接管`,
+  );
+  // 忠实性两半（⛔ 不是判据，是「这条路径没被换成别的路径」的对照）：收尾语义未变，且退出时**如实**
+  // 记下还有循环在 drain（⛔ 不假装已收尾）。
+  assert.match(log, /exiting anyway \(their in-flight children are independent OS processes and are NOT killed/, "收尾语义逐字未变（在飞子进程不被杀，SPEC §6.9 inv.3）");
+  assert.match(log, /anchor: exited \(remaining loops=1\)/, "退出行如实记下「仍有 1 个循环在 drain」");
+  assert.ok(
+    overGraceMs < graceMs / 2,
+    `⛔ 宽限之外不得再等第二个窗口：实测多等了 ${overGraceMs}ms，阈值 grace/2=${graceMs / 2}ms` +
+    `（修复前该路径**恒** ≥ min(60s, 宽限) = ${graceMs}ms，因为那段收尾等待的 deadline 就是它）:\n${log.slice(-1500)}`,
+  );
+  assert.ok(!alive(a.pid), "此刻进程真的已经退了（⛔ 不是「日志写了但还活着」）");
+});
+
+test("AC2② (对照) — 正常停机路径不受影响：循环响应停机、收尾略慢 ⇒ anchor **等它收尾**再退出", async (t) => {
+  const graceMs = 5_000; // ≫ 收尾耗时 ⇒ 宽限那条路根本不该被走到（否则本对照测的不是正常路径）
+  const lingerMs = 600;  // 循环收到停机后仍要 600ms 才返回（= 「会收尾，只是慢一点」）
+  const root = makeFixture("normal-stop");
+  const a = spawnAnchor(root, [], { FAKE_STOP_LINGER_MS: String(lingerMs), QUAY_ANCHOR_SHUTDOWN_GRACE_MS: String(graceMs) });
+  t.after(() => { killAll(root, [a.pid]); fs.rmSync(root, { recursive: true, force: true }); });
+  await waitFor(() => anchorPid(root) === a.pid && alive(a.pid), 20_000, `the anchor to own anchor.pid (stderr: ${a.stderrText})`);
+  await waitForLoopRunning(root, HEARTBEAT_KIND);
+
+  const exited = new Promise((res) => a.on("exit", () => res(Date.now())));
+  const t0 = Date.now();
+  a.kill("SIGTERM");
+  const tExit = await exited;
+  const log = logOf(root);
+  assert.ok(!/shutdown grace \d+ms exceeded/.test(log), `宽限⛔ 不该被走到（收尾 ${lingerMs}ms ≪ 宽限 ${graceMs}ms）——否则本对照测的不是正常路径:\n${log.slice(-1500)}`);
+  // 顺序判据取自**日志行序**（⛔ 不是两个观测时刻相减：观测带的 20ms 粒度在重载下会超过这里要判的间隔）。
+  const idxStopped = log.indexOf(`anchor: kind=${HEARTBEAT_KIND} loop stopped`);
+  const idxExited = log.indexOf("anchor: exited");
+  assert.ok(idxStopped >= 0, `循环自己走完了收尾（打了 \`loop stopped\`）:\n${log.slice(-1500)}`);
+  assert.ok(idxExited > idxStopped, "日志行序：循环的收尾行在 anchor 的退出行**之前**（⛔ 不是 anchor 先把循环丢下就退）");
+  assert.match(log, /anchor: exited \(remaining loops=0\)/, "退出时**没有**循环被丢下（对照 AC2① 的 `remaining loops=1`）");
+  // 直接量：anchor 确实**等满**了循环的收尾（SIGTERM→exit ≥ 收尾耗时；structurally 还要多一个 reconcile tick）。
+  const total = tExit - t0;
+  t.diagnostic(`AC2② reading: 收尾 linger=${lingerMs}ms, SIGTERM→exit = ${total}ms（≥ 收尾耗时，< 宽限 ${graceMs}ms）`);
+  assert.ok(total >= lingerMs, `anchor 等满了循环的收尾（SIGTERM→exit = ${total}ms ≥ 收尾 ${lingerMs}ms）`);
+  assert.ok(total < graceMs, `而且没有等满一个宽限窗口（${total}ms < ${graceMs}ms）——正常路径是「等循环收尾」，不是「等宽限」`);
 });
 
 // ── AC3 ②：负控制 —— 旧 pid 始终不退 ⇒ 仍然拒绝起循环（双派发硬闸未被 D3 削弱） ──────────────────────
