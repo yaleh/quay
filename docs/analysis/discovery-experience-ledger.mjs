@@ -143,7 +143,7 @@ import { spawnSync } from "node:child_process";
 // Reuse the evidence store's primitives directly (content addressing, the carrier-read that counts
 // unparseable lines, and the ONE definition of where the evidence store lives) — re-implementing any
 // of them would be a second definition.
-import { sha256, recordId, readRecords, EVIDENCE_STORE_REL } from "./architecture-evidence-store.mjs";
+import { sha256, recordId, readRecords, subjectKey, EVIDENCE_STORE_REL } from "./architecture-evidence-store.mjs";
 
 // ── WHERE a Discovery Method carrier lives: the SHARED checkout, never the caller's worktree ──────
 //
@@ -1713,6 +1713,83 @@ function ingestCarrierSource(root, args) {
     : out;
 }
 
+// ── SOURCE 3, THE WRITE SIDE: a routine's own carrier cluster → the EVIDENCE STORE ────────────────
+//
+// ⛔ THE DEFECT THIS CLOSES (gap-evidence-store-has-no-resident-producer-so-discovery-method-ingests-
+//    nothing-forever). `ingestNewOutcomes` — the batch ingester `discovery_method` runs every round —
+//    reads the EVIDENCE STORE. Nothing resident ever WROTE that store: the only writers were manual
+//    `--write-store` CLI runs, so on a host where no human had ever run one, discovery_method reported
+//    `ingested 0` forever. After the bootstrap fix (gap-discovery-method-evidence-store-never-
+//    autonomously-populated) that perpetual zero stopped reading as `failed` and started reading as
+//    «nothing new this round» — the SAME shape a healthy empty round has, so a capability that could
+//    never ingest anything was indistinguishable from one that had simply nothing to do (硬规则 4).
+//
+// ⛔ WHAT THIS IS NOT. It is NOT a second finding path and it is NOT a summary of one. `ingestRoundClusters`
+//    (source 3's read side, in the OSD routine) files the SAME clusters into the Experience ledger
+//    directly; this projects the SAME carrier record into the store's own RECORD SHAPES so the store —
+//    the ONE carrier the batch ingester reads — stops being a permanently empty file. The verdict is
+//    `clusterVerdict` (the ONE derivation, reused), the claim is the cluster's own `claim`, the citations
+//    are the cluster's own `evidence_lines`: nothing here is written that the record does not already say.
+
+/** The `experiment` every store record this module projects is filed under — the routine's own name. */
+export const CLUSTER_OUTCOME_EXPERIMENT = "open-semantic-discovery";
+
+/**
+ * Project ONE round's carrier cluster records into evidence-store records (`{kind, rec}` for `emit`).
+ *
+ * For each verdict-bearing cluster:
+ *   • a `hypothesis` record carrying the cluster's OWN `claim` as `statement`, grounded in the cluster's
+ *     own `evidence_lines`. It is emitted because the store's `outcome` record cannot state a domain
+ *     claim, and the join (`joinOutcomeToClaims`) is what keeps a projected Experience from being the
+ *     pipeline's own bookkeeping — see the JOIN note above. A cluster whose claim or citations are
+ *     missing simply has no hypothesis record: nothing is invented to fill one.
+ *   • an `outcome` record carrying `clusterVerdict(rec)` — the SAME three-valued derivation the
+ *     Experience ingestion uses, never a second reading of the same three fields.
+ *
+ * ⛔ SHADOW AND BASELINE ARMS ARE EXCLUDED STRUCTURALLY, not by a flag a caller passes: a `shadow:true`
+ *    record is a draft method's measurement and a `paired_arm` baseline is an instrument reading, and
+ *    neither may reach the store (they reach neither the Portfolio nor the Experience ledger either).
+ *    A record with no `record_id` is skipped — the id is what the outcome's `experiment_ref` names, and
+ *    minting one here would produce a back-pointer that resolves to nothing (硬规则 3b).
+ *
+ * @param {readonly object[]} clusterRecords
+ * @param {{experiment?: string, runId?: string|null}} [opts]
+ * @returns {{kind: string, rec: object}[]}
+ */
+export function clusterStoreRecords(clusterRecords, { experiment = CLUSTER_OUTCOME_EXPERIMENT, runId = null } = {}) {
+  const out = [];
+  for (const rec of Array.isArray(clusterRecords) ? clusterRecords : []) {
+    if (!isObj(rec) || rec.kind !== CARRIER_CLUSTER_KIND) continue;
+    if (rec.shadow === true) continue;
+    if (!isStr(rec.record_id, 1)) continue;
+    const recordId = String(rec.record_id);
+    const verdict = clusterVerdict(rec);
+    if (verdict === null) continue;
+    const components = (Array.isArray(rec.components) ? rec.components : []).filter((c) => isStr(c, 1)).map(String);
+    // The concern-kind half of the key is the cluster's OWN `concept_kind` when the round recorded one,
+    // and the routine name otherwise — `componentsFromSubjectKey` reads only the half after the bar, so
+    // this never affects which files the projected Experience names.
+    const subject = subjectKey(isStr(rec.concept_kind, 1) ? String(rec.concept_kind) : experiment, components);
+    const ts = isStr(rec.ts, 4) ? String(rec.ts) : new Date().toISOString();
+    const claim = isStr(rec.claim, 10) ? String(rec.claim) : null;
+    const cited = (Array.isArray(rec.evidence_lines) ? rec.evidence_lines : []).filter((x) => isStr(x, 1)).map(String);
+    if (claim !== null && cited.length > 0) {
+      out.push({ kind: "hypothesis", rec: {
+        statement: claim, source_evidence: cited, subject_key: subject, ts,
+        hypothesis_id: recordId, case_id: recordId, experiment, run: runId,
+      } });
+    }
+    const att = isObj(rec.attribution) ? rec.attribution : null;
+    const reason = att !== null && isStr(att.blocking_step, 1) ? `${String(att.blocking_step)}${isStr(att.blocking_cause, 1) ? `:${String(att.blocking_cause)}` : ""}` : null;
+    out.push({ kind: "outcome", rec: {
+      experiment, experiment_ref: recordId, verdict, subject_key: subject, case_id: recordId, run: runId, ts,
+      ...(reason === null ? {} : { verdict_reason: reason }),
+      confirmed: rec.confirmed === true,
+    } });
+  }
+  return out;
+}
+
 // ── the AUTOMATIC BATCH INGESTER (Plan items 2–5): outcome records → Experiences, no human in the loop ─
 
 /** Split a store's text into lines, dropping ONLY the empty piece a trailing newline creates. */
@@ -1728,6 +1805,44 @@ function watermarkValue(lines, advancedTo) {
   const line = lines[advancedTo - 1];
   if (typeof line !== "string") return null;
   return { line: advancedTo, line_sha256: sha256(line) };
+}
+
+// ── WHAT THIS RUN'S ZERO MEANS (硬规则 3b / 4): four states, never one number ─────────────────────
+//
+// ⛔ THE DEFECT THIS CLOSES. `ingested 0` was ONE reading covering two states that are not the same
+//    fact: «this store has never held a single record — no producer is writing it» and «this store
+//    holds records and none of them is new since the watermark». The first is a WIRING defect that
+//    stays true forever until someone wires a producer; the second is the ordinary, healthy result of
+//    running twice. Reported identically, the first was invisible: a capability structurally unable to
+//    ingest anything looked exactly like one with nothing to do — a reading that cannot be non-zero,
+//    carrying no information (硬规则 4).
+//
+// ⛔ WHY AN ENUMERATION AND NOT A BOOLEAN. The three questions are independent — did the carrier hold
+//    anything at all, did this run look at anything past the watermark, did anything become an
+//    Experience — and a boolean over any two of them would collapse a pair that a reader needs to tell
+//    apart. `null` is its OWN value (a disabled round, an unresolvable shared checkout, a refusal that
+//    happened first): the state was never established, which is a different thing from any of the four.
+
+/** The store held NOTHING to read — no record line at all. The state that names a missing producer. */
+export const STORE_STATE_EMPTY = "empty";
+/** The store holds records; none of them is past the watermark. The ordinary second-run reading. */
+export const STORE_STATE_NO_NEW = "no-new-since-watermark";
+/** Records past the watermark were read and NONE became an Experience (all duplicates / not ingestible). */
+export const STORE_STATE_SCANNED_NONE = "scanned-none-ingested";
+/** At least one Experience was ingested this run. */
+export const STORE_STATE_INGESTED = "ingested";
+
+/**
+ * Name this run's relationship to the store, from three readings it already holds. PURE.
+ * @param {{store_records: number, scanned: number, ingested: number}} r
+ * @returns {string|null} one of `STORE_STATE_*`, or `null` when the store was never read.
+ */
+export function storeStateOf({ store_records: storeRecords, scanned, ingested } = {}) {
+  if (!isInt(storeRecords) || storeRecords < 0) return null;
+  if (storeRecords === 0) return STORE_STATE_EMPTY;
+  if (ingested > 0) return STORE_STATE_INGESTED;
+  if (scanned > 0) return STORE_STATE_SCANNED_NONE;
+  return STORE_STATE_NO_NEW;
 }
 
 /**
@@ -1802,10 +1917,14 @@ function watermarkMismatch(wm, lines) {
  *            duplicates, skipped_not_ingestible, skipped_blank_lines, malformed_lines, read_failed,
  *            stopped_at_malformed_line, stopped_at_read_failed_line, remainder, advanced_to, watermark,
  *            entries, ids, skips_recorded, skips_already_present, skipped_records,
- *            rewound_for_mapping, store_bootstrapped, reasons?}}
+ *            rewound_for_mapping, store_bootstrapped, store_records, store_state, reasons?}}
  *   `store_bootstrapped` is `true` only on the run that CREATED an absent store, `false` when the store
  *   was already present, and `null` when its existence was never established (disabled, an unresolvable
  *   shared checkout, a refusal that happened first). An absent store is NOT a refusal any more.
+ *   `store_records` is how many record-holding lines the store was read as having, and `store_state` is
+ *   the NAME of what this run's zero (or non-zero) means with them — `empty` (the store has never held a
+ *   record: no producer is writing it), `no-new-since-watermark` (the ordinary second run),
+ *   `scanned-none-ingested`, `ingested`; `null` when the store was never read. See `storeStateOf`.
  */
 export function ingestNewOutcomes(root, {
   maxPerRun = Infinity, enabled = true, verdictRole = VERDICT_ROLE,
@@ -1823,6 +1942,11 @@ export function ingestNewOutcomes(root, {
     // tell "we made it exist" from "it was already empty"; collapsing those into one boolean would make
     // the bootstrap invisible on exactly the round that performed it.
     store_bootstrapped: null,
+    // ⛔ …and the run's own `ingested 0`, NAMED (see `storeStateOf`): `null` until the store has been
+    // read, then one of `STORE_STATE_*`. `store_records` is the raw reading it is derived from, carried
+    // beside it so a reader can check the name against the count rather than trusting the name.
+    store_records: null,
+    store_state: null,
   };
   // ⛔ THE KILL SWITCH IS ANSWERED FIRST. Nothing below this line runs when it is off — not the store
   // read, not the watermark read, not the ledger read — so "zero reads and zero writes" is a property
@@ -1855,6 +1979,10 @@ export function ingestNewOutcomes(root, {
   // e.g. a dangling symlink appeared in between).
   const storeBootstrapped = ensured.bootstrapped;
   const lines = splitStoreLines(text);
+  // ⛔ A DIRECT READING OF THE CARRIER, taken before anything else looks at it: how many lines could
+  // hold a record. It is the ONE fact that separates «this store has never held a record» from «this
+  // store holds records and none of them is new» (see `storeStateOf`).
+  const storeLineCount = lines.filter((l) => l.trim().length > 0).length;
 
   // FAIL-CLOSED: the watermark names a line and a digest; BOTH must still hold. A rewritten or
   // truncated store is refused with its own code and NOTHING is written — never a silent restart at 0.
@@ -2040,6 +2168,8 @@ export function ingestNewOutcomes(root, {
     skips_recorded: recorded.length, skips_already_present: skipsAlready, skipped_records: recorded,
     rewound_for_mapping: rewoundForMapping,
     store_bootstrapped: storeBootstrapped,
+    store_records: storeLineCount,
+    store_state: storeStateOf({ store_records: storeLineCount, scanned, ingested }),
     claim_join: { linked: joinedClaims, no_linked_claim: noLinkedClaim, claim_records_indexed: storeRecords.filter((r) => isObj(r) && CLAIM_BEARING_KINDS.includes(r.kind)).length },
   };
 }

@@ -1739,6 +1739,16 @@ export interface HypothesisModule {
   defaultVerifierPrompt: (here?: string) => string;
   defaultInvestigatorPrompt: (here?: string) => string;
   TOOL: string;
+  /** ⛔ THE PRODUCTION VALIDATOR + STORE WRITER, consumed rather than re-implemented (硬规则 5b).
+   *  `emit` validates every record with the engine's own `validateRecord`, optionally appends it to the
+   *  production evidence store, and RETURNS the tally — accepted/refused counts, per-reason refusal
+   *  counts, and the per-record store refusals — so a caller can REPORT a refusal instead of losing it.
+   *  This routine passes `writeStore:true` (it is the ONE resident producer of that store); the `out`
+   *  artifact is not used, so `--write-store`'s manual CLI semantics are untouched. */
+  emit: (records: readonly { kind: string; rec: Record<string, unknown> }[], opts: { out?: string | null; writeStore?: boolean; root?: string | null }) => {
+    accepted: number; refused: number; reasons: Record<string, number>; stored: number;
+    storeRefused: { kind: string; reasons: string[] }[];
+  };
 }
 /** The narrow interface this file consumes from discovery-portfolio.mjs. The first two members are the
  *  gateway cost path (pre-existing); the rest are the post-round ingestion's RETRIEVAL and WRITE surface.
@@ -1802,6 +1812,15 @@ export interface LedgerModule {
    *  a round would hand the model is scanned with it BEFORE the method is selected. */
   experienceDenyList: (root: string, opts?: { scanText?: string }) => ExperienceDenyList;
   scanExperienceLeak: (denyList: unknown, text: string) => { flagged: boolean; matches: { kind: string; value: string | null }[] };
+  /** ⛔ THE SHARED-CHECKOUT RESOLVER THE LEDGER OWNS — reused, never re-derived (硬规则 5b). The
+   *  evidence store is read by `ingestNewOutcomes` through THIS resolution, so a projection written to
+   *  the caller's worktree would be invisible to the ingester: both sides must name the same checkout. */
+  resolveCarrierRoot: (root: string) => { ok: boolean; root?: string; reason?: string };
+  /** The WRITE side of the routine → evidence-store projection (see `clusterStoreRecords`). The store's
+   *  own record shapes and the verdict derivation live in the ledger module, beside the reader that
+   *  projects them back into Experiences. */
+  clusterStoreRecords: (clusterRecords: readonly Record<string, unknown>[], opts?: { experiment?: string; runId?: string | null }) => Array<{ kind: string; rec: Record<string, unknown> }>;
+  CLUSTER_OUTCOME_EXPERIMENT: string;
 }
 
 /** The narrow interface this file consumes from discovery-method-registry.mjs. The registry owns the
@@ -4850,6 +4869,67 @@ export async function runOpenSemanticDiscovery(root: string, opts: OpenSemanticD
       }]);
     }
     round.ingestion = { checked: noveltyOutcomes.length, outcomes: noveltyOutcomes, writes: ingestionWrites, error: ingestionError };
+
+    // ⑩c THE EVIDENCE-STORE PROJECTION — this routine IS the ONE resident producer that store has.
+    //     ⛔ WHY A RESIDENT ROUND MUST WRITE IT AT ALL: `discovery_method`'s ingest step reads
+    //     `.quay/architecture-evidence-store.jsonl`, and NO resident routine ever wrote it, so its
+    //     `ingested 0` was permanent — honest, and therefore permanently useless. This round's own
+    //     clusters ARE real outcome material; projecting them into the store's own shapes (a
+    //     `hypothesis` carrying the cluster's claim, an `outcome` carrying its derived verdict) is what
+    //     makes that zero (or non-zero) carry information (硬规则 4).
+    //     ⛔ THE PROJECTION IS THE LEDGER MODULE'S, NOT THIS FILE'S, and the VALIDATION is the engine's
+    //     production validator: a refused record is REPORTED in the tally below, never dropped and never
+    //     patched into something acceptable. Nothing here is synthesized — every field is read off the
+    //     cluster record the round just wrote.
+    //     ⛔ AFTER the carrier append, like the Experience writes above: an outcome's `experiment_ref`
+    //     names a cluster record that must really be resolvable on disk.
+    //     ⛔ And it is written under the SHARED checkout the batch ingester itself resolves, so what this
+    //     round projects and what the next round reads are the same file by construction.
+    let evidenceStoreWrite: Record<string, unknown>;
+    {
+      const storeRecords = modules.ledger.clusterStoreRecords(clusterRecords, { experiment: modules.ledger.CLUSTER_OUTCOME_EXPERIMENT, runId: roundId });
+      const shape = {
+        attempted: storeRecords.length,
+        hypotheses: storeRecords.filter((r) => r.kind === "hypothesis").length,
+        outcomes: storeRecords.filter((r) => r.kind === "outcome").length,
+      };
+      // A round with nothing verdict-bearing emits NOTHING and says so — it does not append an empty
+      // tally line to the carrier, and it does not touch the store.
+      if (storeRecords.length === 0) {
+        evidenceStoreWrite = { ...shape, accepted: 0, refused: 0, refused_reasons: {}, stored: 0, store_refused: [], error: null };
+      } else {
+        const rr = modules.ledger.resolveCarrierRoot(root);
+        if (rr.ok !== true || typeof rr.root !== "string") {
+          evidenceStoreWrite = { ...shape, accepted: 0, refused: 0, refused_reasons: {}, stored: 0, store_refused: [], error: `SHARED_CHECKOUT_UNRESOLVED:${String(rr.reason ?? "no reason reported")}` };
+        } else {
+          try {
+            const tally = modules.hyp.emit(storeRecords, { writeStore: true, root: rr.root });
+            evidenceStoreWrite = {
+              ...shape,
+              accepted: Number(tally.accepted ?? 0),
+              refused: Number(tally.refused ?? 0),
+              refused_reasons: tally.reasons ?? {},
+              stored: Number(tally.stored ?? 0),
+              store_refused: Array.isArray(tally.storeRefused) ? tally.storeRefused : [],
+              error: null,
+            };
+          } catch (e) {
+            // A store write that THREW is reported as its own failure and never as `stored: 0` — an
+            // un-written projection and an empty one must not share a shape (硬规则 3b).
+            evidenceStoreWrite = { ...shape, accepted: 0, refused: 0, refused_reasons: {}, stored: 0, store_refused: [], error: (e as Error)?.message ?? String(e) };
+          }
+        }
+      }
+      appendCarrierRecords(carrier, [{
+        kind: "evidence-store-write",
+        routine: OPEN_SEMANTIC_DISCOVERY_NAME,
+        invoked_by: invokedBy,
+        ts: new Date(now()).toISOString(),
+        round_ts: roundTs,
+        ...evidenceStoreWrite,
+      }]);
+      round.evidence_store = evidenceStoreWrite;
+    }
     // Plan 2b — CLOSING THE LOOP: the per-method OUTCOME is filled here, after the writes, so each
     // guided method's record names what its round actually produced (Experiences and Portfolio rows).
     const methodOutcome = Array.isArray((round.methods as Record<string, unknown>)?.outcome)

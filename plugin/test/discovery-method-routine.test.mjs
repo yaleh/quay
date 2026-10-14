@@ -72,6 +72,9 @@ import {
   BUDGET_LEDGER_REL,
   BUDGET_LOCK_REL,
   BUDGET_REFUSAL_CODE,
+  // ⛔ The token the round's own Fact carries when its `ingested 0` means «nothing has ever written this
+  // store» — imported from the module that mints it, never re-spelled here (硬规则 5b).
+  EVIDENCE_STORE_NO_PRODUCER,
   BUDGET_LOCK_STALE_MS,
   REFLECTION_TOOLS,
   REFLECTION_MAX_TURNS,
@@ -564,6 +567,74 @@ test("BOOTSTRAP — a round on a host with NO evidence store is `verified`, not 
   assert.equal(rounds(ws)[0].ingested.experiences, 0);
   assert.equal(rounds(ws)[0].ingested.store_bootstrapped, true, "and the line says THIS round created the store");
   assert.equal(rounds(ws)[0].reflected, null, "0 to ingest ⇒ the reflection step never ran, so no model seam was needed");
+});
+
+// ── WHAT THE ZERO MEANS (task gap-evidence-store-has-no-resident-producer-so-discovery-method-ingests-
+//    nothing-forever, Plan item 2) ─────────────────────────────────────────────────────────────────────
+// ⛔ THE DEFECT THIS PINS: `ingested 0` was ONE reading for TWO facts — «this store has never held a
+//    record, so no producer is writing it» (a wiring defect that stays true forever) and «this store
+//    holds records, none of them new since the watermark» (the ordinary second run). Reported in the
+//    same shape, the first was invisible: a capability structurally unable to ingest anything looked
+//    exactly like one with nothing to do (硬规则 3b/4).
+test("STORE STATE — «no producer has ever written this store» is NAMED, and is never the same reading as «nothing new since the watermark»", async () => {
+  // (1) the host whose store has NEVER HELD A RECORD.
+  const fresh = makeWorkspace();
+  writeConfig(fresh, ENABLED_YAML);
+  const f1 = await runDiscoveryMethod(fresh, runOpts(fresh, { now: () => Date.parse("2026-10-12T00:00:00Z") }));
+  assert.equal(f1.state, "verified", f1.reason);
+  const emptyRound = rounds(fresh)[0];
+  assert.equal(emptyRound.ingested.store_state, "empty", "the state this round reports is the EMPTY one");
+  assert.equal(emptyRound.ingested.store_records, 0, "…with the raw count it was derived from, on the same line");
+  assert.equal(emptyRound.ingested.experiences, 0);
+  assert.match(f1.reason, new RegExp(EVIDENCE_STORE_NO_PRODUCER), "the Fact NAMES the wiring condition");
+  assert.match(f1.reason, /NOT «nothing new since the watermark»/, "…and says what it is not");
+
+  // (2) the SAME config, a host whose store HOLDS RECORDS and whose watermark sits at the end of them.
+  const used = makeWorkspace();
+  writeConfig(used, ENABLED_YAML);
+  writeFixtureStore(used, FIXTURE_OUTCOMES);
+  const clock = { t: Date.parse("2026-10-12T00:00:00Z") };
+  const reflect = reflectStub();
+  const g1 = await runDiscoveryMethod(used, runOpts(used, { reflectFn: reflect, now: () => clock.t }));
+  assert.equal(g1.state, "verified");
+  assert.equal(rounds(used)[0].ingested.store_state, "ingested", "a round that really ingested says so");
+  clock.t += 2 * 360 * 60_000;
+  const g2 = await runDiscoveryMethod(used, runOpts(used, { reflectFn: reflect, now: () => clock.t }));
+  const noNewRound = rounds(used)[1];
+  assert.equal(noNewRound.ingested.store_state, "no-new-since-watermark");
+  assert.equal(noNewRound.ingested.store_records, FIXTURE_OUTCOMES.length, "the store really holds records — that is what makes this a different state");
+  assert.doesNotMatch(g2.reason, new RegExp(EVIDENCE_STORE_NO_PRODUCER), "a store WITH records never reports the missing-producer state");
+  assert.match(g2.reason, /no new outcome records since the watermark/);
+
+  // ⛔ THE POINT OF THE WHOLE CASE: both rounds ingested ZERO, and they are two DIFFERENT readings.
+  assert.equal(emptyRound.ingested.experiences, 0);
+  assert.equal(noNewRound.ingested.experiences, 0);
+  assert.notEqual(emptyRound.ingested.store_state, noNewRound.ingested.store_state, "0-new-from-empty ≠ 0-new-from-unchanged");
+  assert.notEqual(f1.reason, g2.reason, "…and the two Facts are not the same sentence");
+
+  // The vocabulary itself is the ledger module's, consumed rather than re-spelled: the raw ingester names
+  // the same states through its OWN exports, so a routine and a caller cannot drift apart.
+  const realLedger = await import("../../docs/analysis/discovery-experience-ledger.mjs");
+  assert.equal(emptyRound.ingested.store_state, realLedger.STORE_STATE_EMPTY);
+  assert.equal(noNewRound.ingested.store_state, realLedger.STORE_STATE_NO_NEW);
+  assert.equal(realLedger.storeStateOf({ store_records: 0, scanned: 0, ingested: 0 }), realLedger.STORE_STATE_EMPTY);
+});
+
+test("STORE STATE — a store whose outcomes are all NOT-INGESTIBLE is its own state (read, and none of them usable)", async () => {
+  const ws = makeWorkspace();
+  writeConfig(ws, ENABLED_YAML);
+  // An ownership-loop verdict: a perfectly valid store record that is NOT a discovery finding, so the
+  // deriver skips it by name rather than coercing it into a role (see `VERDICT_ROLE`).
+  writeFixtureStore(ws, [{ experiment_ref: "E-FIX cluster 1", verdict: "proposed", subject_key: "concern|plugin/scripts/alpha.ts" }]);
+  const f = await runDiscoveryMethod(ws, runOpts(ws, { now: () => Date.parse("2026-10-12T00:00:00Z") }));
+  assert.equal(f.state, "verified", f.reason);
+  const r = rounds(ws)[0];
+  assert.equal(r.ingested.experiences, 0);
+  assert.equal(r.ingested.scanned, 1, "the outcome WAS read past the watermark");
+  assert.equal(r.ingested.store_state, "scanned-none-ingested", "the third zero: records read, none usable");
+  assert.doesNotMatch(f.reason, new RegExp(EVIDENCE_STORE_NO_PRODUCER));
+  assert.match(f.reason, /NONE of them became an Experience/);
+  assert.equal(r.reflected, null, "nothing ingested ⇒ the reflection step never ran");
 });
 
 test("a round with new Experiences and NO model seam ⇒ failed (never a silent no-op)", async () => {
