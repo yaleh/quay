@@ -256,6 +256,132 @@ async function buildWorkerKernel(kernelDir) {
   return kernelDir;
 }
 
+// ── the AC2a-real kernel: the REAL worker loop, hosted by the anchor, with ONLY the four documented
+//    test seams injected ─────────────────────────────────────────────────────────────────────────────
+//
+// WHY A WRAPPER AND NOT THE BUNDLE DIRECTLY (and why this is still "the real worker loop")
+// ------------------------------------------------------------------------------------------
+// `restart --kind worker` is an ANCHOR verb: `stopKindViaAnchor` only runs when the anchor owns the kind,
+// and the anchor invokes each kind **in-process** by importing its module and calling `main(argv)`
+// (`driver-anchor.ts` `invokeKindDefault`). The anchor composes that argv from `driverArgvForKind` — it
+// forwards `--cap/--interval/--reconcile-interval/--pid-file/--run-id` and NOTHING else, so the fixture
+// seams (`--worker-cmd-exact` / `--ready-pool-cmd` / `--selector-cmd` / `--resource-gate-cmd`, all
+// documented test-only knobs) have no argv path in. A three-line wrapper as the kernel's
+// `scripts/dist/worker-driver.js` appends exactly those seams and forwards to the REAL bundle built by the
+// same esbuild invocation from `plugin/scripts/worker-driver.ts`. The loop under test — dispatch, the
+// detach exit, the dispatch record, adoption, the post-exit pipeline — is the real one.
+//
+// This is the same shape the dependency task's own dist harness used
+// (`/data/home/yale/work/quay-scratch/kindstop-dist/harness.mjs`, "The kernel's own `worker-driver.js` is a
+// thin wrapper that appends the fixture flags and forwards to the REAL bundle").
+const WORKER_REAL_BUNDLE = "worker-driver-real.js";
+
+/** The anchor-facing entry: append the fixture seams, then run the REAL worker loop. Reads the seams from
+ *  env (the anchor inherits its env from the FIRST `start`, so the fixture argv is fixed at anchor spawn). */
+function busyWorkerWrapperSource() {
+  return `export async function main(argv) {
+  const mod = await import("./${WORKER_REAL_BUNDLE}");
+  const e = process.env;
+  const extra = [];
+  if (e.QUAY_E2E_WORKER_CMD) extra.push("--worker-cmd-exact", e.QUAY_E2E_WORKER_CMD);
+  if (e.QUAY_E2E_READY_POOL) extra.push("--ready-pool-cmd", e.QUAY_E2E_READY_POOL);
+  if (e.QUAY_E2E_SELECTOR) extra.push("--selector-cmd", e.QUAY_E2E_SELECTOR);
+  if (e.QUAY_E2E_RESOURCE_GATE) extra.push("--resource-gate-cmd", e.QUAY_E2E_RESOURCE_GATE);
+  return mod.main([...argv, ...extra]);
+}
+`;
+}
+
+/** Bundle a module given as SOURCE TEXT, resolving its relative imports against `resolveDir`. Lets a
+ *  mutated copy of `worker-driver.ts` be bundled from outside the tree it imports from — ⛔ the copy is
+ *  never written into the repo (a stray file under `plugin/scripts/` would be an undeclared Touches write). */
+async function esbuildBundleFromSource(contents, resolveDir, sourcefile, outfile) {
+  const { build } = await import("esbuild");
+  await build({
+    stdin: { contents, resolveDir, sourcefile, loader: "ts" },
+    bundle: true,
+    format: "esm",
+    platform: "node",
+    target: "node20",
+    outfile,
+    banner: BUNDLE_BANNER,
+    logLevel: "silent",
+  });
+}
+
+/** The PRE-DETACH kernel source: the current `worker-driver.ts` with the kind-stop exit disabled.
+ *
+ *  The landed fix's whole content is that a kind stop makes the loop DETACH its in-flight workers and
+ *  return promptly instead of waiting them out through the `running.length === 0` branch. `stopRequestedNow`
+ *  is the single gate on that exit, so forcing it false reproduces exactly the pre-detach shape: the stop
+ *  request is still observed by the dispatch gate (no new worker) and by the sleep/wake probes, but the
+ *  loop never yields while anything is in flight ⇒ `stop-failed` / `restart-aborted`.
+ *
+ *  ⛔ fail-closed: the mutation anchor must be present and must change the source. If a future edit renames
+ *  it, this would hand back a source identical to the post-detach one — a negative control that cannot fail
+ *  (硬规则 3b) — so a missing anchor is an error here, not a silently-vacuous control. */
+function predetachWorkerSource() {
+  const anchor = "const stopRequestedNow = workerStopRequested();";
+  const src = fs.readFileSync(path.join(SCRIPTS, "worker-driver.ts"), "utf8");
+  assert.ok(
+    src.includes(anchor),
+    `the pre-detach mutation anchor is gone from worker-driver.ts ("${anchor}") — the negative control would ` +
+    `be vacuous (it would build the POST-detach kernel and then "fail" to reproduce the defect)`,
+  );
+  const mutated = src.replace(anchor, "const stopRequestedNow = false; // PRE-DETACH NEGATIVE CONTROL (see predetachWorkerSource)");
+  assert.notEqual(mutated, src, "the pre-detach mutation must actually apply");
+  return mutated;
+}
+
+/** A kernel whose worker kind is the REAL worker loop (optionally the pre-detach variant), hosted by the
+ *  anchor so `restart --kind worker` is the production-shaped path. The other kinds are the usual plain
+ *  fixtures (one of them must stay alive so the anchor outlives a worker-kind restart). */
+async function buildBusyKernel(kernelDir, { workerSourceContents } = {}) {
+  await buildAnchorKernel(kernelDir); // real driver-runtime + driver-anchor bundles + fixture kind drivers
+  const dist = path.join(kernelDir, "scripts", "dist");
+  if (workerSourceContents === undefined) {
+    await esbuildBundle(path.join(SCRIPTS, "worker-driver.ts"), path.join(dist, WORKER_REAL_BUNDLE));
+  } else {
+    await esbuildBundleFromSource(workerSourceContents, SCRIPTS, "worker-driver-predetach.ts", path.join(dist, WORKER_REAL_BUNDLE));
+  }
+  fs.writeFileSync(path.join(dist, "worker-driver.js"), busyWorkerWrapperSource(), "utf8");
+  return kernelDir;
+}
+
+/** Direct quantity: the live processes whose cmdline carries `marker` (the fixture worker command). "Was
+ *  this task dispatched twice?" is answered by the process table, not by a proxy. */
+function fixtureWorkerPids(marker) {
+  const out = execFileSync("ps", ["-eo", "pid,args"], { encoding: "utf8" });
+  return out
+    .split("\n")
+    .slice(1)
+    .map((l) => l.trim())
+    .filter((l) => l.includes(marker))
+    .map((l) => Number(l.split(/\s+/)[0]))
+    .filter((n) => Number.isInteger(n) && n > 0);
+}
+
+/** Capture everything the kernel writes to THIS process's stderr while `fn` runs, alongside `fn`'s result.
+ *  WHY: `stopKindViaAnchor` writes the `stop-failed:` half through `process.stderr.write` DIRECTLY — ⛔ not
+ *  through the writer `restartKind` was handed — so the in-process seam alone would drop exactly the line
+ *  that says "the pre-detach loop did not yield". Restored in a `finally` so the test runner's own stderr is
+ *  untouched outside the call. */
+async function capturingStderr(fn) {
+  const orig = process.stderr.write;
+  let buf = "";
+  process.stderr.write = ((chunk, ...rest) => {
+    buf += String(chunk);
+    const cb = rest.length ? rest[rest.length - 1] : null;
+    if (typeof cb === "function") cb();
+    return true;
+  });
+  try {
+    return { value: await fn(), stderr: buf };
+  } finally {
+    process.stderr.write = orig;
+  }
+}
+
 // ── the scratch host ───────────────────────────────────────────────────────────────────────────────
 
 function git(root, args) {
@@ -640,6 +766,182 @@ export async function main(argv) {
     child_alive_after_restart: pidAlive(childPid),
     worker_loop_started: `${startedBefore} -> ${loopStartedCount(host, "worker")}`,
     anchor_pid: `${anchorPidBefore} -> ${readAnchorPid(host)}`,
+  });
+});
+
+// ══════════════════════════════════════════════════════════════════════════════════════════════════
+// AC2a-real — a worker-kind restart with a GENUINELY in-flight dispatched worker
+// ══════════════════════════════════════════════════════════════════════════════════════════════════
+//
+// The AC2a arm above runs a fixture loop that `break`s the moment the stop record names `worker`,
+// regardless of in-flight work. It therefore certifies the right thing — "the anchor does not kill
+// in-flight children" (§6.9 inv.3) — but it can say NOTHING about the loop's EXIT CONDITION, because its
+// fixture never exercises the real one (`running.length === 0`). That condition is what made
+// `restart --kind worker` fail in production on ClaudeCodeUI at 2026-10-14T08:06Z (r6 kernel, anchor
+// 778542, 2 workers in flight: `stop-failed` after 60289ms → `restart-aborted`), i.e. the requirement
+// "Driver can be restarted at any time" was measurably false while AC2a was green.
+//
+// This arm drives the REAL shipped worker loop (see `buildBusyKernel`), with a genuinely in-flight
+// dispatched worker (the real loop wrote the dispatch record; the fixture worker is a live process), and
+// measures exactly that requirement. Its negative control is the SAME arm on a PRE-DETACH kernel built
+// from the same source with the kind-stop exit disabled (`predetachWorkerSource`) — so the green reading
+// is attributable to the detach exit and not to an always-green path.
+
+const BUSY_TASK = "gap-e2e-busy-restart";
+
+test("AC2a-real — `restart --kind worker` with a genuinely in-flight worker: the pre-detach loop aborts; the shipped loop confirms in seconds, keeps + adopts the worker, fans it in once, and never double-dispatches", async (t) => {
+  const postKernel = fs.mkdtempSync(path.join(os.tmpdir(), "e2e-restart-k2ar-post-"));
+  const preKernel = fs.mkdtempSync(path.join(os.tmpdir(), "e2e-restart-k2ar-pre-"));
+  const preSrcContents = predetachWorkerSource();
+  await buildBusyKernel(postKernel);
+  await buildBusyKernel(preKernel, { workerSourceContents: preSrcContents });
+
+  const arms = [];
+  t.after(() => {
+    for (const a of arms) {
+      // Kill the anchor FIRST (that stops the loop; a worker spawned after this can only be a leftover),
+      // then sweep the fixture workers BY MARKER — reading the process table before the anchor dies would
+      // race a re-dispatch.
+      cleanup(a.host, []);
+      for (const p of fixtureWorkerPids(a.marker)) { try { process.kill(p, "SIGKILL"); } catch { /* gone */ } }
+    }
+    fs.rmSync(postKernel, { recursive: true, force: true });
+    fs.rmSync(preKernel, { recursive: true, force: true });
+  });
+
+  /** One arm: start the anchor with the fixture seams, wait for the dispatched worker to be in flight,
+   *  then drive the SHIPPED `restartKind`. Returns the raw readings (assertions live in the cases below). */
+  async function runBusyArm(kernelDir, tag, sleepMs, stopTimeoutMs) {
+    const host = makeHost(kernelDir, tag);
+    const marker = `setTimeout(()=>{},${sleepMs})`;
+    arms.push({ host, marker });
+    assertCleanHostPremise(host, kernelDir);
+
+    // The worker-name profile (the loop resolves the worker process name from here, and reconcile's orphan
+    // classification needs it) + the launch settings + one ready task + a committed baseline.
+    fs.mkdirSync(path.join(host, "tasks"), { recursive: true });
+    fs.writeFileSync(path.join(host, "tasks", `${BUSY_TASK}.md`), `---\nid: ${BUSY_TASK}\nstatus: ready\n---\n\n## Proposal\n\nbusy-restart fixture\n`);
+    fs.writeFileSync(path.join(host, ".quay", "profiles.yml"),
+      `version: 1\nprofiles:\n  w:\n    launcher: claude\n    model: test-model\n    bare: false\n    auth: key\nroles:\n  task-worker:\n    profile: w\n    name: ${WORKER_PROCESS_NAME}\n`);
+    fs.mkdirSync(path.join(host, ".claude"), { recursive: true });
+    fs.writeFileSync(path.join(host, ".claude", "launch.settings.json"), JSON.stringify({ $schema: "x", permissions: {}, env: {} }));
+    git(host, ["add", "-A"]);
+    git(host, ["commit", "-q", "-m", "busy-restart host baseline"]);
+
+    // The four documented test seams, injected by the wrapper (see `busyWorkerWrapperSource`). The worker
+    // cmdline carries the worker name + the task id so reconcile classifies a live pid as a genuine worker.
+    // ⚠️ these land in argv via `splitArgs` (whitespace split, NO shell, NO quote stripping) ⇒ every command
+    // must be whitespace-free and unquoted, or node receives a literal-quoted `-e` program and dies.
+    const env = {
+      QUAY_E2E_WORKER_CMD: `node -e ${marker} ${WORKER_PROCESS_NAME} ${BUSY_TASK}`,
+      QUAY_E2E_READY_POOL: `node -e console.log(JSON.stringify({ready:['${BUSY_TASK}'],pool:1}))`,
+      QUAY_E2E_SELECTOR: `node -e console.log('${BUSY_TASK}')`,
+      QUAY_E2E_RESOURCE_GATE: "node -e process.exit(0)",
+    };
+    // worker FIRST — the fixture argv lives in the anchor's env, fixed at anchor spawn — then a second
+    // kind so the anchor outlives a worker-kind restart.
+    const r0 = runKernel(kernelDir, host, ["start", "--kind", "worker", "--confirm-timeout", "30"], env);
+    assert.equal(r0.status, 0, `start worker failed: ${r0.stdout}${r0.stderr}`);
+    const r1 = runKernel(kernelDir, host, ["start", "--kind", "quality", "--confirm-timeout", "20"]);
+    assert.equal(r1.status, 0, `start quality failed: ${r1.stdout}${r1.stderr}`);
+
+    // A genuinely in-flight worker: the REAL loop selected the task, wrote a REAL dispatch record, and
+    // spawned the fixture worker. Wait for the process table to show it (direct quantity).
+    await waitFor(() => fixtureWorkerPids(marker).length === 1, 30_000, "the dispatched fixture worker to appear");
+    const inFlightPid = fixtureWorkerPids(marker)[0];
+    assert.ok(pidAlive(inFlightPid), "the dispatched worker is alive before the restart");
+    const dispatchBefore = JSON.stringify(readDispatchStore(dispatchStoreFile(host))[BUSY_TASK] ?? null);
+    assert.notEqual(dispatchBefore, "null", "precondition: the loop wrote a REAL dispatch record for the in-flight task");
+    const startedBefore = loopStartedCount(host, "worker");
+    const anchorPidBefore = readAnchorPid(host);
+
+    // Drive the SHIPPED kernel's own `restartKind`. The CLI exposes no flag for the stop window, and the
+    // production window is 60000ms; shrinking it is a `StopOptions` test seam (same as AC5 above), ⛔ not a
+    // second mechanism.
+    const kernel = await import(new URL(`file://${kernelBin(kernelDir)}`).href);
+    let out = "";
+    let err = "";
+    const t0 = Date.now();
+    const cap = await capturingStderr(() =>
+      kernel.restartKind(host, "worker", { confirmTimeoutSecs: 20, stopTimeoutMs }, (s) => { out += s; }, (s) => { err += s; }),
+    );
+    const rc = cap.value;
+    const wallMs = Date.now() - t0;
+    const fullErr = err + cap.stderr;
+
+    return {
+      host, marker, inFlightPid, rc, out, err: fullErr, wallMs, dispatchBefore, startedBefore, anchorPidBefore,
+      pidsAfter: fixtureWorkerPids(marker),
+      confirmLine: out.split("\n").find((l) => l.startsWith("started:")) ?? null,
+      stopFailedLine: fullErr.split("\n").find((l) => l.startsWith("stop-failed:")) ?? null,
+      abortedLine: fullErr.split("\n").find((l) => l.startsWith("restart-aborted:")) ?? null,
+    };
+  }
+
+  // ── AC1: the PRE-DETACH kernel reproduces the production failure ─────────────────────────────────
+  const pre = await runBusyArm(preKernel, "ac2ar-pre", 611_000, 3_000);
+  assert.equal(pre.rc, 1, `the pre-detach loop must abort the restart: stdout=${pre.out} stderr=${pre.err}`);
+  assert.ok(pre.stopFailedLine, `⛔ pre-detach reproduces \`stop-failed\`: ${pre.err}`);
+  assert.ok(pre.abortedLine, `⛔ and the restart aborts: ${pre.err}`);
+  assert.equal(pre.confirmLine, null, "⛔ an aborted restart must NOT start a new loop (that would double-dispatch)");
+  assert.ok(pidAlive(pre.inFlightPid), "the pre-detach loop still never KILLED the in-flight worker (the defect is the exit, not a kill)");
+  // The stop request DID arrive — the loop simply cannot act on it — so the failure is the exit condition,
+  // not a lost signal (硬规则 3b: "the request never arrived" must not be readable as "the loop refused").
+  assert.ok(fs.existsSync(path.join(pre.host, ANCHOR_KIND_STOPS_REL)), "the on-disk stop record was written (the request arrived)");
+  evidence("AC1", {
+    kernel: "pre-detach (kind-stop exit disabled)",
+    rc: pre.rc,
+    wall_ms: pre.wallMs,
+    stop_failed: pre.stopFailedLine,
+    restart_aborted: pre.abortedLine,
+    in_flight_worker_pid: pre.inFlightPid, worker_alive_after: pidAlive(pre.inFlightPid),
+    stop_record_present: fs.existsSync(path.join(pre.host, ANCHOR_KIND_STOPS_REL)),
+  });
+
+  // ── AC2: the SAME arm on the SHIPPED kernel confirms, keeps/adopts the worker, fans it in once ────
+  const post = await runBusyArm(postKernel, "ac2ar-post", 612_000, 30_000);
+  assert.equal(post.rc, 0, `the shipped loop must confirm the restart: ${post.out}${post.err}`);
+  assert.ok(post.confirmLine, `the confirm line is present: ${post.out}`);
+  const confirmedMs = Number(/confirmed_ms=(\d+)/.exec(post.confirmLine ?? "")?.[1]);
+  assert.ok(Number.isFinite(confirmedMs), `the confirm line carries a bound: ${post.confirmLine}`);
+  assert.ok(confirmedMs < 15_000, `⛔ the restart confirms in seconds (confirmed_ms=${confirmedMs}, wall=${post.wallMs}ms)`);
+  assert.ok(!post.stopFailedLine, `⛔ no stop-failed on the shipped kernel: ${post.err}`);
+  assert.deepEqual(post.pidsAfter, [post.inFlightPid], "⛔ still exactly ONE fixture worker (the SAME pid) after the restart — no kill, no double dispatch");
+  assert.ok(pidAlive(post.inFlightPid), "the in-flight worker survives the restart");
+  await waitFor(() => loopStartedCount(post.host, "worker") === post.startedBefore + 1, 20_000, "exactly one new worker loop");
+  assert.equal(readAnchorPid(post.host), post.anchorPidBefore, "the anchor pid is unchanged");
+  assert.equal(
+    JSON.stringify(readDispatchStore(dispatchStoreFile(post.host))[BUSY_TASK] ?? null), post.dispatchBefore,
+    "⛔ no double dispatch: the dispatch record is byte-identical across the restart",
+  );
+
+  // The worker exits INSIDE the new loop's tenure ⇒ the ADOPTING loop runs the post-exit pipeline. That
+  // terminal carrier is the "exactly once" reading (the same one AC2b/AC3 use): one dispatch ⇒ one outcome.
+  process.kill(post.inFlightPid, "SIGKILL");
+  const outcomeFile = path.join(post.host, WORKER_OUTCOME_REL);
+  await waitFor(() => readLines(outcomeFile).some((o) => o.task === BUSY_TASK), 30_000, "the adopted worker's outcome");
+  const outcomes = readLines(outcomeFile).filter((o) => o.task === BUSY_TASK);
+  assert.equal(outcomes.length, 1, `⛔ exactly ONE post-exit outcome ⇒ the fan-in ran exactly once (got ${outcomes.length})`);
+  const o = outcomes[0];
+  assert.equal(o.adopted_after_exit, true, "the exit was observed by the ADOPTING loop (the original loop is gone)");
+  assert.equal(o.exit_code, null, "no fabricated exit code (硬规则 3b)");
+  assert.notEqual(o.final_state, "failed", `⛔ the adopted worker is not booked \`failed\` (got ${o.final_state})`);
+  // ⛔ No assertion on the dispatch record / the fixture-process count AFTER the exit: the task is still
+  // ready, so the loop may legitimately re-dispatch it (a NEW dispatch, not a double one). The
+  // no-double-dispatch readings are taken ABOVE, while the worker is in flight — that is the window the
+  // requirement is about, and there the task is excluded from the pool so the readings cannot race.
+  evidence("AC2", {
+    kernel: "shipped (current source)",
+    confirm_line: post.confirmLine,
+    confirmed_ms: confirmedMs,
+    restart_wall_ms: post.wallMs,
+    stop_failed_present: post.stopFailedLine !== null,
+    in_flight_worker_pid: post.inFlightPid,
+    workers_alive_after_restart: post.pidsAfter,
+    worker_loop_started: `${post.startedBefore} -> ${loopStartedCount(post.host, "worker")}`,
+    dispatch_record_unchanged: true,
+    adopted_outcome: o,
+    one_fan_in_outcome: outcomes.length,
   });
 });
 

@@ -13,7 +13,7 @@
 //   - No `.quay/config.yml` → returns {} (empty). The `suite:` section is OPTIONAL — a workspace
 //     without one keeps its host-derived / env-only behavior (AC4 pass/fail-neutral).
 //   - `.quay/config.yml` present but no `suite:` key → returns {} (same neutrality).
-//   - `.quay/config.yml` present with a `suite:` key → CLOSED schema: the only valid keys are the 7
+//   - `.quay/config.yml` present with a `suite:` key → CLOSED schema: the only valid keys are the 8
 //     below; an UNKNOWN key, a WRONG-TYPED value, or an OUT-OF-RANGE value throws FAIL-CLOSED
 //     (DIR-050 discipline — a malformed config must not silently degrade to env defaults; AC5).
 //   - `.quay/config.yml` present but malformed YAML → throws FAIL-CLOSED (same as loop-params.ts).
@@ -40,11 +40,19 @@ import YAML from "yaml";
 // `arg-parsing-helper-family`, routine `semantic-dedup-scan`).
 import { isDirectEntry, flagValue } from "./gate-script-base.ts";
 
-/** The 7 suite knobs: config key → env key (config-first per the same policy). `suite_scheduler`
+/** The 8 suite knobs: config key → env key (config-first per the same policy). `suite_scheduler`
  *  (gap-suite-dynamic-waterline-scheduler) turns the unified group-budget scheduler ON (default) /
  *  OFF (ONE-KEY ROLLBACK to the legacy phased path). `phase_overlap` / `main_tail_stall_pct` are
  *  RETIRED-BY-SCHEDULER: they stay in the CLOSED schema so an existing config that still sets them
- *  keeps validating — but they only take effect on the QUAY_SUITE_SCHEDULER=0 legacy fallback path. */
+ *  keeps validating — but they only take effect on the QUAY_SUITE_SCHEDULER=0 legacy fallback path.
+ *
+ *  `memory_max` (gap-suite-memorymax-literal-16g-cap-pinned-every-round-while-lanes-scale-with-nproc)
+ *  is the suite cgroup's `MemoryMax` — the ONE knob here whose unit is a size STRING, not a count.
+ *  It exists so the ceiling is DECLARED (per project, in config) instead of buried as a constant in
+ *  the runner: a host-specific memory ceiling is exactly the value a project must be able to set
+ *  without editing kernel code, and the 2026-09-24 human ruling (16G) is a DEFAULT, not the only
+ *  possible value. ⛔ It is deliberately ABSENT from the shipped config: writing it there would put
+ *  a machine-spec-dependent literal back into a tracked file (CLAUDE.md 硬规则 4 推论二). */
 export const SUITE_KNOBS = {
   suite_scheduler: "QUAY_SUITE_SCHEDULER",
   phase_overlap: "QUAY_PHASE_OVERLAP",
@@ -53,6 +61,7 @@ export const SUITE_KNOBS = {
   max_concurrent_suites: "QUAY_MAX_CONCURRENT_SUITES",
   max_oversubscription: "QUAY_MAX_OVERSUBSCRIPTION",
   main_tail_stall_pct: "QUAY_MAIN_TAIL_STALL_PCT",
+  memory_max: "QUAY_SUITE_MEMORY_MAX",
 } as const;
 
 export type SuiteKnobKey = keyof typeof SUITE_KNOBS;
@@ -67,6 +76,8 @@ export interface SuiteParams {
   max_concurrent_suites?: number;
   max_oversubscription?: number;
   main_tail_stall_pct?: number;
+  /** A systemd size string (`"16G"`, `"512M"`, `"17179869184"`) — the suite cgroup's MemoryMax. */
+  memory_max?: string;
 }
 
 /** Per-knob schema: validator + a human-readable "must be …" clause for the FAIL-CLOSED message. */
@@ -78,6 +89,13 @@ const KNOB_SPEC: Record<SuiteKnobKey, { ok: (v: unknown) => boolean; must: strin
   max_concurrent_suites: { ok: (v) => typeof v === "number" && Number.isInteger(v) && v >= 1, must: "an integer >= 1" },
   max_oversubscription: { ok: (v) => typeof v === "number" && Number.isFinite(v) && v > 0, must: "a positive number" },
   main_tail_stall_pct: { ok: (v) => typeof v === "number" && Number.isFinite(v) && v >= 0 && v <= 100, must: "a number in [0, 100] (PSI stall %)" },
+  // A systemd size string: bare bytes or a K/M/G/T/P suffix with an optional B (systemd's own table).
+  // Validated HERE rather than passed through: a malformed size would otherwise become an
+  // unparseable `-p MemoryMax=` property and systemd-run would refuse the whole scope.
+  memory_max: {
+    ok: (v) => typeof v === "string" && /^\d+(\.\d+)?\s*[kKmMgGtTpP]?[bB]?$/.test(v.trim()),
+    must: "a systemd size string (e.g. \"16G\", \"512M\", \"17179869184\")",
+  },
 };
 
 /** Read and validate the suite: section. Throws Error("FAIL-CLOSED: …") on a malformed/mistyped
@@ -121,7 +139,7 @@ export function readSuiteParams(workspaceRoot: string): SuiteParams {
         `FAIL-CLOSED: .quay/config.yml 'suite:${key}' value ${JSON.stringify(v)} is invalid — must be ${spec.must}`
       );
     }
-    (out as Record<string, number>)[key] = v as number;
+    (out as Record<string, number | string>)[key] = v as number | string;
   }
   return out;
 }
@@ -148,7 +166,8 @@ Usage:
       print shell assignment lines, one per PRESENT knob, of the form
         QUAY_X="\${QUAY_X:-<value>}"
       (env wins over config — the :- form leaves an already-set env var untouched). Safe to \`eval\`:
-      var names are the fixed 7-knob whitelist and values are schema-validated numbers.
+      var names are the fixed 8-knob whitelist and values are schema-validated (numbers, plus the
+      size string for memory_max).
 
 Exit codes: 0 ok; 1 FAIL-CLOSED (malformed suite: section — the suite must not silently degrade).`;
 
