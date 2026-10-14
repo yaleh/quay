@@ -2,7 +2,7 @@
 id: gap-quality-restart-waits-out-whole-round-so-osd-in-flight-exceeds-stop-window
 title: quality 的 per-kind restart 只在轮间检查停机，OSD 轮(92s–20min)在飞时必超 60s 停机窗 →
   stop-failed（安全但不可靠）
-status: todo
+status: ready
 labels:
   - gap
   - defect
