@@ -1396,7 +1396,7 @@ test("AC2 — suite-end backstop: a leaked resident child yields not-evaluated: 
   }
 });
 
-test("AC2 negative control — a clean round records leakedProcesses: [] and stays green", async () => {
+test("AC2 negative control — a clean round adds NO leak key and stays green", async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-noleak-"));
   const { f, dir } = fakeSuite(GREEN_SUITE);
   try {
@@ -1405,7 +1405,11 @@ test("AC2 negative control — a clean round records leakedProcesses: [] and sta
     assert.equal(code, 0, "a clean round is still green — the backstop adds no false positive");
     const state = readState(root);
     assert.equal(state.state, "green");
-    assert.deepEqual(state.leakedProcesses, [], "the sweep RAN and found nothing ([] ≠ an absent field)");
+    // The leak reading is absent-unless-applicable (the same contract this shape already uses for
+    // `void` / `staticCheck`): a clean round adds NO key, so the green state's shape is unchanged
+    // (full-suite-runner-s01.test.mjs pins that exact key set). The sweep's own "it ran" evidence for
+    // a clean round is the runner's `leak sweep — 0 survivor(s)` stderr line.
+    assert.equal(state.leakedProcesses, undefined, "a clean round adds no leakedProcesses key");
     assert.equal(state.notEvaluated, undefined, "no not-evaluated value on a clean round");
   } finally {
     fs.rmSync(root, { recursive: true, force: true });

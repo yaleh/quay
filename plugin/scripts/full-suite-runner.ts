@@ -3336,6 +3336,11 @@ export async function run(argv: string[]): Promise<number> {
     try { child.stdout?.destroy(); } catch { /* already closed */ }
     try { child.stderr?.destroy(); } catch { /* already closed */ }
   }
+  // The CLEAN half of the reading is durable here (not as a second state key — the green key set is
+  // pinned): round after round, the sweep self-reports that it ran and what it found.
+  process.stderr.write(
+    `full-suite-runner: leak sweep — ${leakedProcesses.length} survivor(s) in the suite's own process group ${suitePgid} (reaped=${leakSweep.reaped})\n`,
+  );
   if (leakedProcesses.length > 0) {
     process.stderr.write(
       `full-suite-runner: LEAKED ${leakedProcesses.length} process(es) in the suite's own process group ${suitePgid} ` +
@@ -3563,17 +3568,19 @@ export async function run(argv: string[]): Promise<number> {
       ? { failures: finalFailures }
       : segmentedFailureFields(finalFailures);
   // gap-test-spawned-resident-drivers-outlive-their-suite-no-process-group-reaping — the sweep's
-  // reading rides EVERY terminal state. `leakedProcesses: []` means "the sweep ran and found nothing"
-  // — DISTINCT from the field's absence (= "never measured", hard rule 3b). `notEvaluated` is its own
-  // value, so a leaked round can never be read as a qualified green OR as a code failure.
+  // reading rides the terminal state ONLY when it has something to say, the same absent-unless-
+  // applicable contract this shape already uses for `void` and `staticCheck` (a green state's key set
+  // is pinned by full-suite-runner-s01.test.mjs and must stay byte-identical, hard rule 5b territory:
+  // the clean half of the reading is durable in the run's stderr line written at the sweep, not as a
+  // second key on every round). `notEvaluated` is its own value, so a leaked round can never be read
+  // as a qualified green OR as a code failure.
   type SuiteStateWithLeakSweep = SuiteState & {
-    leakedProcesses: LeakedProcess[];
+    leakedProcesses?: LeakedProcess[];
     notEvaluated?: string;
   };
-  const leakedFields = {
-    leakedProcesses,
-    ...(leakedProcessesFound ? { notEvaluated: `leaked-processes (${leakedProcesses.length})` } : {}),
-  };
+  const leakedFields = leakedProcessesFound
+    ? { leakedProcesses, notEvaluated: `leaked-processes (${leakedProcesses.length})` }
+    : {};
   const finalState: SuiteStateWithLeakSweep = green
     ? {
         state: "green",
