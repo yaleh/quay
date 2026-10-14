@@ -156,13 +156,132 @@ export function scopeUnitName(prefix: string, root: string, nowMs: number): stri
   return `${prefix}${slug.slice(0, 180)}-${nowMs}.scope`;
 }
 
+/** Round a byte count DOWN to a page boundary, never below one page. The ONE page-alignment routine
+ *  every envelope derivation shares (⛔ not a second copy per derivation, 硬规则 5b). */
+export function pageAlignScopeBytes(bytes: number): number {
+  const aligned = Math.floor(Math.max(0, bytes) / SCOPE_ENVELOPE_PAGE_BYTES) * SCOPE_ENVELOPE_PAGE_BYTES;
+  return Math.max(SCOPE_ENVELOPE_PAGE_BYTES, aligned);
+}
+
 /** Default ceiling: `floor(totalmem × fraction)`, page-aligned, at least one page.
  *  ⛔ Pure (the input is a byte COUNT, not `os.totalmem()`) so two injected host sizes necessarily
  *  give two different values. */
 export function defaultScopeMemoryMax(totalmemBytes: number, fraction = SCOPE_ENVELOPE_HOST_FRACTION): string {
-  const bytes = Math.floor(Math.max(0, totalmemBytes) * fraction);
-  const aligned = Math.max(SCOPE_ENVELOPE_PAGE_BYTES, Math.floor(bytes / SCOPE_ENVELOPE_PAGE_BYTES) * SCOPE_ENVELOPE_PAGE_BYTES);
-  return String(aligned);
+  return String(pageAlignScopeBytes(Math.floor(Math.max(0, totalmemBytes) * fraction)));
+}
+
+// ── LANE-SCALED ENVELOPE (the two halves of one decision) ────────────────────────────────────────
+// A cgroup ceiling answers ONE question: how much memory may the process group running inside it
+// consume? That question has two inputs — HOW MANY members run concurrently inside it, and HOW MUCH
+// EACH needs. A ceiling written down as a literal answers it for one host shape only: on a machine
+// with more members it silently pins (`memory.max` reached every round, reclaim jitter, timing
+// assertions red in rotation), and on a smaller machine it silently stops existing (硬规则 4 推论二).
+// ⇒ derive it from both halves: `laneCount × perMemberHighWater × headroom`, and keep a
+// host-relative fraction as the runaway guardrail (⛔ never an absolute literal — the guardrail has
+// to be a fraction of the host, or it is the same defect one level up).
+//
+// THREE-VALUED OUTPUT (硬规则 3b): "no measurement" and "the host guard binds" are each their OWN
+// value (`bound` + a NAMED `reason`), never shaped like "derived and it is fine" — a caller that
+// cannot tell them apart cannot tell 「the derivation ran」 from 「it had nothing to derive from」.
+
+/** Headroom over the raw `laneCount × perMemberHighWater` estimate. The per-member figure is a HIGH
+ *  PERCENTILE of a heavy-tailed distribution, not a hard bound, so the estimate is already
+ *  conservative for the sum; this factor covers the residual (all lanes peaking in the same sample)
+ *  without re-inflating the number into a second literal. */
+export const SCOPE_ENVELOPE_LANE_HEADROOM = 1.25;
+
+/** Which of the two bounds produced `memoryMax`. */
+export type ScopeMemoryMaxBound = "lane-scaled" | "host-guard";
+
+export interface LaneScaledScopeMemoryMax {
+  /** The ceiling to pass as `-p MemoryMax=<v>` — a page-aligned byte count. */
+  memoryMax: string;
+  /** `"lane-scaled"` = the measured per-member figure × the member count won; `"host-guard"` = the
+   *  host-relative fraction won (see `reason`). */
+  bound: ScopeMemoryMaxBound;
+  /** Non-null iff `bound === "host-guard"`: the NAMED reason (⛔ a bare value is indistinguishable
+   *  from "not evaluated"). */
+  reason: string | null;
+  /** The host-relative guardrail in bytes (the fraction of the effective host total). */
+  hostGuardBytes: number;
+  /** `laneCount × perFileHighWaterBytes × headroom`, page-aligned — `null` when it could not be
+   *  computed (no member count and/or no measurement; 缺值 ≠ 0). */
+  laneScaledBytes: number | null;
+  laneCount: number;
+  perFileHighWaterBytes: number | null;
+  headroom: number;
+  hostFraction: number;
+}
+
+/**
+ * The lane-scaled envelope ceiling. **Pure** — every input is a number/size, so two injected host
+ * shapes necessarily give two different decisions (and a test can drive the small/multi-core corner
+ * without owning the hardware).
+ *
+ *   hostGuardBytes  = `hostGuardBytes` when supplied (the caller's own already-deriving guard — e.g.
+ *                     the shared-host step), else `floor(effective × hostFraction)`, page-aligned.
+ *   laneScaledBytes = `ceil(laneCount × perFileHighWaterBytes × headroom)`, page-aligned.
+ *   memoryMax       = `min(hostGuardBytes, laneScaledBytes)` — ⛔ the lane estimate can never exceed
+ *                     the host-relative guardrail, by construction, on ANY host shape.
+ *
+ * `perFileHighWaterBytes === null` (no measurement yet) ⇒ the host guard alone, with a named reason.
+ * That is the honest degrade: the guardrail still exists and is still host-relative; it is simply no
+ * longer scaled by the second half of the decision, and says so.
+ */
+export function laneScaledScopeMemoryMax(opts: {
+  effectiveTotalMemBytes: number;
+  laneCount: number;
+  perFileHighWaterBytes: number | null;
+  hostFraction?: number;
+  /** The caller's own host-relative guard (already page-aligned) — e.g. the shared-host tightening
+   *  of the same fraction. ⛔ Absent ⇒ derived here from `effectiveTotalMemBytes × hostFraction`. */
+  hostGuardBytes?: number;
+  headroom?: number;
+}): LaneScaledScopeMemoryMax {
+  const hostFraction = opts.hostFraction ?? SCOPE_ENVELOPE_HOST_FRACTION;
+  const headroom = opts.headroom ?? SCOPE_ENVELOPE_LANE_HEADROOM;
+  const hostGuardBytes =
+    opts.hostGuardBytes ?? pageAlignScopeBytes(Math.floor(Math.max(0, opts.effectiveTotalMemBytes) * hostFraction));
+  const laneCount = Number.isFinite(opts.laneCount) && opts.laneCount >= 1 ? Math.floor(opts.laneCount) : null;
+  const measured =
+    opts.perFileHighWaterBytes !== null && Number.isFinite(opts.perFileHighWaterBytes) && (opts.perFileHighWaterBytes as number) > 0
+      ? (opts.perFileHighWaterBytes as number)
+      : null;
+
+  const laneScaledBytes =
+    laneCount === null || measured === null ? null : pageAlignScopeBytes(Math.ceil(laneCount * measured * headroom));
+
+  const base = {
+    hostGuardBytes,
+    laneScaledBytes,
+    laneCount: laneCount ?? opts.laneCount,
+    perFileHighWaterBytes: measured,
+    headroom,
+    hostFraction,
+  };
+
+  if (laneScaledBytes === null) {
+    return {
+      memoryMax: String(hostGuardBytes),
+      bound: "host-guard",
+      reason:
+        laneCount === null
+          ? `no member count to scale by (laneCount=${opts.laneCount}) — the host-relative guardrail alone applies`
+          : "no per-member memory measurement available — the host-relative guardrail alone applies",
+      ...base,
+    };
+  }
+  if (laneScaledBytes >= hostGuardBytes) {
+    return {
+      memoryMax: String(hostGuardBytes),
+      bound: "host-guard",
+      reason:
+        `the lane-scaled estimate (${laneCount} × ${measured} B × ${headroom} = ${laneScaledBytes} B) reaches the ` +
+        `host guardrail (${hostGuardBytes} B) — the host-relative fraction is the binding runaway guard`,
+      ...base,
+    };
+  }
+  return { memoryMax: String(laneScaledBytes), bound: "lane-scaled", reason: null, ...base };
 }
 
 /** Pull the `MemoryMax` key out of an override string. Three INDEPENDENT states (⛔ never sharing one

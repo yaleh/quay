@@ -640,6 +640,48 @@ export interface SuiteRoundRecord {
  * `memoryMaxBytes` (the读数 the stop note must name), `phase` (the phase the OOM happened in),
  * `runId` (the identity that ties the file to one round).
  */
+/**
+ * The suite's applied MemoryMax policy + the measurements behind it (gap-suite-memorymax-literal-16g-
+ * cap-pinned-every-round-while-lanes-scale-with-nproc). Two INDEPENDENT halves, never conflated:
+ *   - the DECLARED ceiling (`memoryMax` + `bound` + `declared`/`declaredSource`): the value a project
+ *     declares or an operator overrides, bounded above by the host-relative guardrail;
+ *   - the MEASUREMENTS (`actualConcurrency` = max per-file interval overlap, `perFileHighWaterBytes` =
+ *     p95 per-file peak) and the lane-scaled ESTIMATE built from them. The estimate is EVIDENCE: it
+ *     answers "does the declared ceiling cover the measured shape of the run?" and ⛔ does not move the
+ *     ceiling (measured 2026-10-14: at the real concurrency of 64 the estimate is ~12.3 GiB, BELOW the
+ *     declared 16G, and the OOM kills are a recent regression rather than a chronically-small cap).
+ */
+export interface SuiteMemoryMaxPolicy {
+  /** The applied `MemoryMax` as a byte string (page-aligned). */
+  memoryMax: string;
+  /** `"declared"` = the declared value applied; `"host-guard"` = the host-relative guard lowered it. */
+  bound: "declared" | "host-guard";
+  /** Non-null iff `bound === "host-guard"`: the NAMED reason (硬规则 3b). */
+  reason: string | null;
+  /** The declared value that was in play (verbatim size string). */
+  declared: string;
+  /** Where the declared value came from — `"env"` (incl. a config-declared value promoted into env)
+   *  or `"default"`. ⛔ Never inferred: "16G" from a project's config and "16G" from the shipped
+   *  default are different facts. */
+  declaredSource: "env" | "default";
+  /** The host-relative guardrail in bytes (the upper bound the declared value was clamped to). */
+  hostGuardBytes: number;
+  /** Headroom factor the estimator applied to `actualConcurrency × perFileHighWaterBytes`. */
+  headroom: number;
+  /** MEASURED: the max number of per-file intervals overlapping at one instant (`null` = no usable
+   *  history). This is the direct reading of "how many files ran at once" — ⛔ not the requested lane
+   *  count (the scheduler's reliability cap holds the total at the lowest active group budget). */
+  actualConcurrency: number | null;
+  /** MEASURED: the high percentile of per-file peak RSS, in bytes (`null` = no usable history). */
+  perFileHighWaterBytes: number | null;
+  /** EVIDENCE (not the ceiling): `actualConcurrency × perFileHighWaterBytes × headroom`, page-aligned;
+   *  `null` when either measurement is absent. */
+  laneScaledEstimateBytes: number | null;
+  /** Whether that estimate reached/exceeded the host guardrail (i.e. the guard would have bound);
+   *  `null` when the estimate could not be computed. */
+  laneScaledExceedsHostGuard: boolean | null;
+}
+
 export interface SuiteMemoryEvidence {
   /** The per-suite runId (the same value the runner writes the state / round record under). */
   runId: string;
@@ -648,6 +690,15 @@ export interface SuiteMemoryEvidence {
   peakBytes: number | null;
   /** The scope's MemoryMax in BYTES (`null` when the scope passed no memory ceiling). */
   memoryMaxBytes: number | null;
+  /**
+   * gap-suite-memorymax-literal-16g-cap-pinned-every-round-while-lanes-scale-with-nproc — the MEMORY
+   * POLICY this run applied, and the MEASUREMENTS that inform it. Optional (an un-enveloped run has no
+   * policy), and NEVER inferred by a reader: `peakBytes < memoryMaxBytes` alone cannot distinguish
+   * 「the ceiling was declared and the run fit under it」 from 「the ceiling happened to be high
+   * enough」 (硬规则 3b). The declared half is three-valued (`declaredSource`); the measured half is
+   * `null` when the workspace has no usable history (缺值 ≠ 0).
+   */
+  memoryMaxPolicy?: SuiteMemoryMaxPolicy;
   /** `memory.events` `oom` counter at the last sample (0 = never observed). */
   oom: number;
   /** `memory.events` `oom_kill` counter at the last sample — the red-attribution trigger. */
