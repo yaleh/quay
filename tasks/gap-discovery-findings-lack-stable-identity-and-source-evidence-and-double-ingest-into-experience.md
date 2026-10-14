@@ -2,7 +2,7 @@
 id: gap-discovery-findings-lack-stable-identity-and-source-evidence-and-double-ingest-into-experience
 title: 架构发现 finding 无稳定身份(212 簇 212 个 record_id)、无真实源码证据(0/212)、同一簇经 OSD 直写与
   store→ingest 两路重复进 Experience
-status: todo
+status: ready
 labels:
   - gap
   - architecture-discovery
