@@ -32,6 +32,18 @@
 // reason; the round then appends NOTHING to the carrier and does NOT advance the last-run (so a failed
 // round does not consume the window — the next round retries).
 //
+// THE SPACE HALF'S CANDIDATE UNIVERSE (gap-arch-discovery-space-instrument-has-no-candidate-universe-
+// on-non-quay-hosts): the `space` instrument can only produce a finding for a (authority, surface) pair
+// the registry DECLARES. With no `--registry` it uses the registry shipped in its OWN checkout (quay's
+// own), which on any tree that is not quay's repo yields `candidates: 0` — an exit-0 reading that
+// STRUCTURALLY cannot be non-zero and therefore carries no information (硬规则 3b/4). The routine now
+// (a) reads the instrument's own `cost.candidates` from its `--json` report and records it on the
+// space sub-record, and (b) treats `candidates: 0` (and an unreadable count) as `not-evaluated` — the
+// round is NOT `verified` (it still APPENDS: the time half's findings are real), and
+// (c) accepts an OPTIONAL `loop.arch_discovery.space_registry: <workspace-relative path>` which is
+// passed to the instrument as `--registry`, so a foreign host can declare its own authorities/surfaces
+// AS DATA. ⛔ No host-specific analyzer ships in Quay.
+//
 // ⛔ NOT a hot-path gate (the `gap-fan-in-remove-archguard-gate` lesson): nothing here is called by
 // fan-in / scoped-gate / any per-task path. The only caller is the quality driver's routine table.
 
@@ -87,6 +99,61 @@ export function resolveInstrument(root: string, file: string): { path: string | 
   return { path: null, tried };
 }
 
+/** Shape-check a host-declared space registry (`loop.arch_discovery.space_registry`); returns the
+ *  fail-closed REASON, or null when it is usable. An absent file, unparseable JSON, or a registry with
+ *  no authorities is a NAMED refusal — the round is `failed` and NOTHING is spawned or appended
+ *  (硬规则 3b: "the host declared a registry" must never degrade into the same reading as "the
+ *  instrument scanned and found nothing"). The shape check mirrors the instrument's own guard
+ *  (`registry has no authorities — nothing would be evaluated`) so the failure is legible at the
+ *  ROUTINE layer instead of arriving as an opaque non-zero child exit. The routine deliberately does
+ *  NOT hand the parsed object to the instrument: the instrument reads the file itself by `--registry`,
+ *  so the routine and the instrument always see bit-identical bytes. */
+export function checkSpaceRegistry(absPath: string, relPath: string): string | null {
+  const refuse = (why: string) => `FAIL-CLOSED: loop.arch_discovery space_registry '${relPath}' ${why} (nothing spawned, nothing appended)`;
+  if (!fs.existsSync(absPath)) return refuse(`not found at ${absPath}`);
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(fs.readFileSync(absPath, "utf8"));
+  } catch (e) {
+    return refuse(`is not readable JSON — ${(e as Error).message}`);
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return refuse(`must be a JSON object with an 'authorities' array (got ${Array.isArray(parsed) ? "array" : parsed === null ? "null" : typeof parsed})`);
+  const authorities = (parsed as Record<string, unknown>).authorities;
+  if (!Array.isArray(authorities) || authorities.length === 0) return refuse("has no 'authorities' array — nothing would be evaluated");
+  return null;
+}
+
+/** The `space` instrument's OWN `cost.candidates` from its `--json` scan report. `null` means the
+ *  structured report was absent/unreadable — NEVER a fabricated 0 (硬规则 3b: a count we could not read
+ *  and a real zero must not share a shape; the round treats the two differently). */
+export function readScanCandidates(stdout: string): number | null {
+  let report: unknown;
+  try {
+    report = JSON.parse(String(stdout ?? ""));
+  } catch {
+    return null;
+  }
+  if (!report || typeof report !== "object" || Array.isArray(report)) return null;
+  const cost = (report as Record<string, unknown>).cost;
+  if (!cost || typeof cost !== "object" || Array.isArray(cost)) return null;
+  const n = (cost as Record<string, unknown>).candidates;
+  return typeof n === "number" && Number.isFinite(n) ? n : null;
+}
+
+/** The space half's evaluated / not-evaluated state, derived from the instrument's own candidate count.
+ *  `evaluated` = it had a candidate universe to read; the two `not-evaluated:` states are DISTINCT and
+ *  legible, and NEITHER is folded into a clean `exit:0` round (硬规则 3b/4). */
+export const SPACE_EVALUATED = "evaluated";
+export const SPACE_NO_UNIVERSE = "not-evaluated:no-candidate-universe";
+export const SPACE_UNREADABLE = "not-evaluated:candidate-count-unreadable";
+
+/** Map the instrument's candidate count to the space half's state. Exported so a test can pin the three
+ *  states (a non-zero count, a real zero, and an unreadable count) without a live spawn. */
+export function spaceStateFor(candidates: number | null): string {
+  if (candidates === null) return SPACE_UNREADABLE;
+  return candidates === 0 ? SPACE_NO_UNIVERSE : SPACE_EVALUATED;
+}
+
 /** The interval floor. A round spawns two node processes that stream large carriers; a cadence shorter
  *  than an hour is refused rather than silently rounded up (the config error names the value). */
 export const MIN_INTERVAL_MINUTES = 60;
@@ -115,6 +182,13 @@ export interface ArchDiscoveryConfig {
   maxMs: number;
   maxRecords: number;
   maxOldSpaceMb: number;
+  /** Optional WORKSPACE-RELATIVE path to a space-instrument registry (the checker's own registry file
+   *  format: `{authorities, surfaces, knownDrift}`). This is the ONLY way a host that is not quay's own
+   *  repo can give the `space` instrument a candidate universe: with no key the instrument falls back to
+   *  the registry shipped in its OWN checkout (quay's), which on a foreign tree yields `candidates: 0`
+   *  — a reading that cannot be non-zero and therefore carries no information (硬规则 3b/4).
+   *  ⛔ Data, not code: the host declares its authorities+surfaces; Quay ships no host-specific analyzer. */
+  spaceRegistry: string | null;
 }
 
 /** `present` = the section exists; `config` = the parsed section (null when malformed/disabled-null);
@@ -146,6 +220,7 @@ export function parseArchDiscoverySection(raw: unknown): { config: ArchDiscovery
     maxMs: DEFAULT_MAX_MS,
     maxRecords: DEFAULT_MAX_RECORDS,
     maxOldSpaceMb: DEFAULT_MAX_OLD_SPACE_MB,
+    spaceRegistry: null,
   };
   if (rec.enabled === false) return { config: disabled, error: null };
 
@@ -182,6 +257,17 @@ export function parseArchDiscoverySection(raw: unknown): { config: ArchDiscovery
   const maxOldSpaceMb = bound("max_old_space_mb", DEFAULT_MAX_OLD_SPACE_MB, 16);
   if (maxOldSpaceMb.error) return { config: null, error: maxOldSpaceMb.error };
 
+  // `space_registry`: OPTIONAL. Present ⇒ it must be a non-empty string (a workspace-relative path);
+  // its EXISTENCE/parseability is checked at round time with a legible refusal (see readSpaceRegistry)
+  // — this pure parse only refuses the wrong TYPE, so the kill switch keeps working without it.
+  let spaceRegistry: string | null = null;
+  if (rec.space_registry !== undefined && rec.space_registry !== null) {
+    if (typeof rec.space_registry !== "string" || rec.space_registry.trim() === "") {
+      return { config: null, error: cfgBad(`'space_registry' must be a non-empty workspace-relative path string (got ${JSON.stringify(rec.space_registry)})`) };
+    }
+    spaceRegistry = rec.space_registry;
+  }
+
   return {
     config: {
       enabled: true,
@@ -190,6 +276,7 @@ export function parseArchDiscoverySection(raw: unknown): { config: ArchDiscovery
       maxMs: maxMs.value as number,
       maxRecords: maxRecords.value as number,
       maxOldSpaceMb: maxOldSpaceMb.value as number,
+      spaceRegistry,
     },
     error: null,
   };
@@ -382,6 +469,18 @@ export async function runArchDiscovery(root: string, opts: ArchDiscoveryRunOptio
   // ⑤ spawn both instruments, SEQUENTIALLY (a serial run keeps the peak RSS bounded to one instrument
   //    and makes the peak reading attributable — see the emitted per-instrument facts).
   const spawnFn = opts.spawnFn ?? (runAsync as unknown as ArchDiscoverySpawnFn);
+
+  // ⑤a the host's optional space registry is validated BEFORE any spawn: a declared-but-missing or
+  //     malformed registry is a `failed` round naming the path — NOT an empty candidate set read as a
+  //     clean zero (硬规则 3b). Done at the ROUTINE layer so the refusal is legible here rather than
+  //     arriving as an opaque non-zero child exit carrying a node stack trace on stderr.
+  let spaceRegistryAbs: string | null = null;
+  if (config.spaceRegistry) {
+    spaceRegistryAbs = path.resolve(root, config.spaceRegistry);
+    const registryError = checkSpaceRegistry(spaceRegistryAbs, config.spaceRegistry);
+    if (registryError) return fact("failed", { ...base, enabled: true, space_registry: config.spaceRegistry }, registryError);
+  }
+
   // The instruments are resolved from DISK before the spawn (plugin root first, workspace root second —
   // see resolveInstrument), and an unresolvable one is refused HERE, naming both candidates, rather than
   // being handed to `node` as a path that does not exist (硬规则 3b: a spawn ENOENT and a real instrument
@@ -414,6 +513,17 @@ export async function runArchDiscovery(root: string, opts: ArchDiscoveryRunOptio
     for (const which of ["space", "time"] as const) {
       const outFile = path.join(tmp, `${which}-records.jsonl`);
       const modeArgs = ["--scan", "--root", root, "--out", outFile, "--max-ms", String(config.maxMs), "--max-records", String(config.maxRecords)];
+      if (which === "space") {
+        // `--json` makes the instrument print its structured report (including `cost.candidates`) on
+        // stdout, which is the only place the candidate-universe size is exposed. The `--out` carrier is
+        // written IDENTICALLY with or without it, so quay's own candidate set/results are unchanged.
+        modeArgs.push("--json");
+        // The declared registry (if any) is the foreign tree's candidate universe. Absent ⇒ the
+        // instrument falls back to the registry in its OWN checkout (quay's own) — correct for quay's
+        // root, and a structurally empty candidate set everywhere else (which the space-state below
+        // now records as `not-evaluated:no-candidate-universe` instead of a clean zero).
+        if (spaceRegistryAbs) modeArgs.push("--registry", spaceRegistryAbs);
+      }
       // The time instrument's window is `[--since, --until]`; `--until` is pinned to THIS round's start
       // so two rounds over the same interval read the SAME frozen window while the live loop keeps
       // appending carriers (the instrument's own scanWindow doc names exactly this reason). Without it,
@@ -443,7 +553,20 @@ export async function runArchDiscovery(root: string, opts: ArchDiscoveryRunOptio
       if (refused.length > 0) {
         return fact("failed", runBase, `${which} instrument produced ${refused.length} validator-REFUSED record(s) — nothing appended`);
       }
-      instruments[which] = { ...instruments[which], ok: true, records: rows.length };
+      const spaceFields: Record<string, unknown> = {};
+      if (which === "space") {
+        // The instrument's OWN `cost.candidates`. A zero here is the whole point of this task: it means
+        // the instrument had NO candidate universe to read (on a host that is not quay's own, the
+        // default registry resolves to nothing) — that is not a measurement of the host, and exit 0
+        // must not be recorded as a clean round (硬规则 3b/4: a reading that structurally cannot be
+        // non-zero carries no information).
+        const candidates = readScanCandidates(r.stdout);
+        const state = spaceStateFor(candidates);
+        spaceFields.candidates = candidates;
+        spaceFields.evaluated = state === SPACE_EVALUATED;
+        spaceFields.state = state;
+      }
+      instruments[which] = { ...instruments[which], ok: true, records: rows.length, ...spaceFields };
       for (const row of rows) allRows.push({ ...row, _instrument: which });
     }
   } finally {
@@ -508,11 +631,22 @@ export async function runArchDiscovery(root: string, opts: ArchDiscoveryRunOptio
   appendCarrierRecords(carrier, [...findingLines, round]);
   writeLastRun(lastRunPath, ARCH_DISCOVERY_NAME, now());
 
-  return fact(
-    "verified",
-    round,
-    `scan ran: ${current.size} finding_fp (${newFps.length} new, ${repeated} repeated, ${gone} gone), ${transitions.length} transition(s), wall ${wallMs}ms, peak RSS ${peakRssKb === null ? "not measured" : `${peakRssKb}kB`}; appended ${findingLines.length} finding + 1 scan-round line to ${asRel(root, carrier)}`,
-  );
+  // ⑦ the space half did NOT have a candidate universe (or its count could not be read) ⇒ the round is
+  //    `not-evaluated`, NOT `verified`. The scan DID run and its readings ARE appended (the time half's
+  //    findings are real and must not be discarded), but the round must not be reported as clean: on a
+  //    host that is not quay's own, `space` structurally reads zero, and folding that into `verified`
+  //    is exactly the false reading this routine used to produce (硬规则 3b/4).
+  const spaceState = String(instruments.space.state ?? SPACE_UNREADABLE);
+  const scanned = `scan ran: ${current.size} finding_fp (${newFps.length} new, ${repeated} repeated, ${gone} gone), ${transitions.length} transition(s), wall ${wallMs}ms, peak RSS ${peakRssKb === null ? "not measured" : `${peakRssKb}kB`}; appended ${findingLines.length} finding + 1 scan-round line to ${asRel(root, carrier)}`;
+  if (spaceState !== SPACE_EVALUATED) {
+    const count = typeof instruments.space.candidates === "number" ? String(instruments.space.candidates) : "unreadable";
+    return fact(
+      "not-evaluated",
+      round,
+      `space ${spaceState} (candidates=${count}${spaceRegistryAbs ? "" : `; no loop.arch_discovery.space_registry declared ⇒ the space instrument scanned with ITS OWN checkout's registry, which finds nothing outside quay's repo`}) — the space half is NOT a measurement of this host, so the round is not clean. ${scanned}`,
+    );
+  }
+  return fact("verified", round, scanned);
 }
 
 // ── RoutineSpec factories ────────────────────────────────────────────────────────────────────────────
