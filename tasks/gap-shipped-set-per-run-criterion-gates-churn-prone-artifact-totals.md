@@ -3,7 +3,7 @@ id: gap-shipped-set-per-run-criterion-gates-churn-prone-artifact-totals
 title: AC-334 的常驻判据每轮门禁产物【自身总量】——该量按 shipped-set-rules.ts
   头注释的设计只归发布门禁（有人在场），per-run 门禁会因无关改动误报并被盲目 re-anchor 直到失去意义（实测 6 天内 5
   次抬升、其中一次手抄错，本轮因一次合法新增 experiment-manifest.js 再红）
-status: ready
+status: done
 labels:
   - gap
   - defect
