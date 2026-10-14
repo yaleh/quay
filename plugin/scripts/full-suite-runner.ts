@@ -515,6 +515,7 @@ import {
   scopeHandleFromDir,
   resolveHostResourceAdapter,
   spawnBounded,
+  unavailable,
   LINUX_CGROUP_V2_KIND,
 } from "./host-resource-adapter.ts";
 import type {
@@ -1705,7 +1706,11 @@ export function startSuiteMemorySampler(opts: {
         adapter: {
           kind: adapter.kind,
           available: adapter.available().value !== null,
-          reason: lastUnavailableReason,
+          // The reason is reported only when NOTHING was produced. A round that DID read (arm: a real
+          // scope) routinely fails its FINAL sample — the transient scope is destroyed the moment the
+          // suite child exits — and reporting that expected teardown failure here would read as 「this
+          // round was blind」 while `samples > 0` says otherwise (硬规则 3b: 一个读数不得同时表示两件事).
+          reason: memory === null && oom === null ? lastUnavailableReason : null,
         },
         ...(memory ? { memory } : {}),
         ...(processTreePids ? { processTreePids } : {}),
@@ -2643,30 +2648,41 @@ export async function run(argv: string[]): Promise<number> {
   phaseAccount = new PhaseDifferentialAccounting(child.pid, phaseLanes);
   phaseAccount.init("static");
 
-  // gap-full-suite-scope-oom-policy-stops-whole-suite-unattributable — sample the suite scope's cgroup
-  // (memory.peak / memory.events) while it runs, so a round's peak + OOM counts survive the transient
-  // scope's destruction (the unit vanishes at suite exit ⇒ `Result=oom-kill` and `memory.events` are
-  // then unreadable). Only when a REAL scope wraps the suite — an un-enveloped run has no cgroup to
-  // sample. `cgroupDirProvider` resolves lazily (the scope unit may not exist yet at round start).
-  let memorySampler: SuiteMemorySampler | null = null;
-  if (useSystemdRun) {
-    memorySampler = startSuiteMemorySampler({
-      // The scope is resolved through the SAME host adapter that built the argv — ⛔ not a second,
-      // independently-resolved cgroup path (硬规则 5b). Lazily, because the transient scope unit does
-      // not exist yet at spawn time.
-      adapter: hostResourceAdapter(),
-      scopeProvider: () => hostResourceAdapter().scopeOf(child.pid as number),
-      stateDir,
-      runId,
-      memoryMaxBytes: parseSystemdBytesToBytes(systemdLimits.memoryMax),
-      // The policy is carried ONLY when the applied ceiling IS the policy's value — an explicit seam
-      // override would otherwise be documented with a deployment it did not use (the evidence would
-      // claim a provenance that is false).
-      memoryMaxPolicy: systemdLimits.memoryMax === suiteMemoryPolicy.memoryMax ? suiteMemoryPolicy : undefined,
-      scopeUnit: null,
-      phaseProvider: () => phaseAccount?.phase ?? "",
-    });
-  }
+  // gap-full-suite-scope-oom-policy-stops-whole-suite-unattributable — sample the suite's resource
+  // scope (memory.peak / memory.events) while it runs, so a round's peak + OOM counts survive the
+  // transient scope's destruction (the unit vanishes at suite exit ⇒ `Result=oom-kill` and
+  // `memory.events` are then unreadable). `scopeProvider` resolves lazily (the scope unit may not
+  // exist yet at round start).
+  //
+  // gap-suite-resource-measurement-needs-a-host-adapter-not-inline-cgroup-calls — the sampler runs on
+  // EVERY round, including the ones with NO attributable scope (an un-enveloped run, or a host whose
+  // adapter cannot measure). ⛔ Not gated on `useSystemdRun` any more: gating meant a blind round
+  // produced NO evidence FILE at all, and 「no file」 is indistinguishable from 「the runner died before
+  // teardown」 (硬规则 3b). A blind round now lands the file with every reading `null` + the adapter's
+  // NAMED reason, which is exactly the `unknown` (⛔ not `0`) the AC2 chain has to show.
+  const runAdapter = hostResourceAdapter();
+  // Why this round has no scope of its own — a NAMED reason, never an empty gap.
+  const noScopeReason = !skipSystemdRun
+    ? (hostResourceUnavailableReason() ?? "the host adapter reported no scope mechanism, without a reason")
+    : "the suite was run UN-ENVELOPED (--no-systemd-run / a hermetic seam), so its processes share this runner's own cgroup — no scope is attributable to the suite";
+  let memorySampler: SuiteMemorySampler | null = startSuiteMemorySampler({
+    // The scope is resolved through the SAME host adapter that built the argv — ⛔ not a second,
+    // independently-resolved cgroup path (硬规则 5b).
+    adapter: runAdapter,
+    scopeProvider: useSystemdRun
+      ? () => runAdapter.scopeOf(child.pid as number)
+      : () => unavailable<ResourceScopeHandle>(noScopeReason),
+    stateDir,
+    runId,
+    memoryMaxBytes: useSystemdRun ? parseSystemdBytesToBytes(systemdLimits.memoryMax) : null,
+    // The policy is carried ONLY when the applied ceiling IS the policy's value — an explicit seam
+    // override would otherwise be documented with a deployment it did not use (the evidence would
+    // claim a provenance that is false).
+    memoryMaxPolicy:
+      useSystemdRun && systemdLimits.memoryMax === suiteMemoryPolicy.memoryMax ? suiteMemoryPolicy : undefined,
+    scopeUnit: null,
+    phaseProvider: () => phaseAccount?.phase ?? "",
+  });
 
   // AC5 (reason axis) — a signal-kill ⇒ red + reason=aborted (NO correctness conclusion), so the
   // inner's stop-dispatch does NOT fire on an abort. A previously-detected real failure (redDetected)
