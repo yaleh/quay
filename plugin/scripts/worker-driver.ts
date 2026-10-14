@@ -4663,7 +4663,12 @@ export function computeOrphanFinalizedOutcome(opts: {
 /** adopt 后 worker 退出（含超时）的终态 outcome。⛔ 不直调 computeOutcome：adopted 孤儿非本驱动子进程、
  *  exit code 不可观测，computeOutcome 的 `exitCode !== 0` 分支会对 null 误判 "exited with code null"。
  *  三态：timed-out（沿用原始截止时刻到期 SIGTERM）/ completed（落地判定 verified）/ exited-not-landed
- *  （未落地，worktree 保留供续做）。exit_code 诚实记 null。 */
+ *  （未落地，worktree 保留供续做）。exit_code 诚实记 null。
+ *
+ *  ⚠️ 生产路径现只以 `timedOut:true` 调用（自然退出改走 resumeExitedOrphanFanIn 的退出后流水线——
+ *  gap-adopted-live-orphan-exits-without-fan-in…）。`timedOut:false` 的两条分支保留为【修前那条
+ *  "只读 task status" 终态】的可读参照：它是「被接管的 worker 结构上永远落不了地」的成因，负控制夹具
+ *  直接以同一状态调用本函数即复现（⛔ 不删——否则修前形态只剩文字描述，没有可跑的对照）。 */
 export function computeAdoptedOutcome(opts: {
   task: string;
   selectorReason: string;
@@ -4948,8 +4953,15 @@ export async function resumeExitedOrphanFanIn(opts: {
 
 /** adopt 一个孤儿 worker（pid 存活且 cmdline 吻合）：纳入超时监管——轮询 pid 存活性（代替 child_process
  *  close 事件，非本驱动子进程无 close），沿用记录里的 timeoutDeadlineMs（⛔ 不重置，防「每次重启续命」
- *  无限占位），到期 SIGTERM（grace 后 SIGKILL 兜底），退出后 computeAdoptedOutcome 算终态 + 清 dispatch
- *  记录。返回 Promise<WorkerRunResult>（调用方纳入 running，退出后照常走重试/退避记账）。 */
+ *  无限占位），到期 SIGTERM（grace 后 SIGKILL 兜底）。
+ *
+ *  ⛔ 【退出（非超时）⇒ 先跑机械 fan-in 再记终态】：与【正常退出的 worker】同一条退出后流水线（AC 短路闸
+ *  → spawnMechanicalFanIn → computeLandingState），复用 resumeExitedOrphanFanIn（⛔ 不写第三份）。
+ *  修前只读一次 task status 就记 `exited-not-landed`「adopted orphan worker exited」——而那个 status 没有
+ *  任何机件会推进它 ⇒ 被接管的 worker 结构上【永远落不了地】（实测 153 次；anchor 自刷新/接管必然触发）。
+ *  见 gap-adopted-live-orphan-exits-without-fan-in-so-adopted-work-never-lands。
+ *  超时分支（timed-out + worktree_preserved）逐字不变。
+ *  返回 Promise<WorkerRunResult>（调用方纳入 running，退出后照常走重试/退避记账）。 */
 export function adoptOrphanWorker(opts: {
   taskId: string;
   rootDir: string;
@@ -4961,6 +4973,9 @@ export function adoptOrphanWorker(opts: {
   pollMs?: number;
   /** SIGTERM → SIGKILL 升级 grace（测试缝）。 */
   sigkillGraceMs?: number;
+  /** 测试缝：替身化【退出后流水线】里的真机械 fan-in（缺省 spawnMechanicalFanIn）。透传给
+   *  resumeExitedOrphanFanIn（本仓库 suite 分钟级，单测不跑真 fan-in）。 */
+  fanInRunner?: MechanicalFanInRunner;
 }): Promise<WorkerRunResult> {
   const {
     taskId, rootDir, outcomeFile, record, procDir = "/proc",
@@ -4973,10 +4988,20 @@ export function adoptOrphanWorker(opts: {
     let finished = false;
     let timer: ReturnType<typeof setTimeout> | null = null;
 
-    const finish = (): void => {
-      if (finished) return;
-      finished = true;
-      if (timer) clearTimeout(timer);
+    // 【退出（非超时）⇒ 采纳】跑与【正常退出 worker】相同的退出后流水线（AC 短路闸 → 机械 fan-in →
+    // computeLandingState），而不是只读一次 task status 就记 exited-not-landed（修前行为：被接管的 worker
+    // 结构上永远落不了地）。复用 resumeExitedOrphanFanIn —— 它已含该流水线 + 落盘 + blocker 投影，且
+    // 【在机械 fan-in 的 outcome 写完之后】才清 dispatch 记录（AC3：接管全程单次 fan-in、不双派）。
+    // exit_code 诚实记 null + adopted_after_exit:true（worker 退出码从未被观测，硬规则 3b）。
+    const finishAdopted = (): Promise<void> =>
+      resumeExitedOrphanFanIn({
+        rootDir, outcomeFile, record, inFlightCount,
+        ...(opts.fanInRunner ? { fanInRunner: opts.fanInRunner } : {}),
+      }).then((r) => { resolve(r); });
+
+    // 【超时 ⇒ 逐字保持原行为】SIGTERM/SIGKILL 后算 timed-out 终态 + 保留 worktree；⛔ 不跑 fan-in
+    // （一个被强杀的 worker 没有「跑完」的产出可采纳）。
+    const finishTimedOut = (): void => {
       const endedAtMs = Date.now();
       const landing = computeLandingState(rootDir, taskId, null);
       const lock = readLockMetricsForRun(rootDir, record.runId, taskId);
@@ -5002,6 +5027,15 @@ export function adoptOrphanWorker(opts: {
       if (outcome.final_state === "timed-out") exitCode = 128 + signalExitCode("SIGTERM");
       else if (outcome.final_state === "exited-not-landed") exitCode = EXITED_NOT_LANDED_EXIT;
       resolve({ taskId, outcome, exitCode });
+    };
+
+    const finish = (): void => {
+      if (finished) return;
+      finished = true;
+      if (timer) clearTimeout(timer);
+      // 超时 ⇒ 原路径；自然退出 ⇒ 采纳（fan-in 接管）。两分支【互斥】且都不再走「只读 status」的旧路。
+      if (!timedOut) { void finishAdopted(); return; }
+      finishTimedOut();
     };
 
     const tick = (): void => {

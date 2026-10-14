@@ -3260,6 +3260,250 @@ test("AC4 (能取假) — 重试上限处置：接管结果与正常 worker 同�
   console.log("[AC4 no-commit outcome]", JSON.stringify(nc.outcome));
 });
 
+// ── gap-adopted-live-orphan-exits-without-fan-in-so-adopted-work-never-lands ──────────────────────
+// 实测 2026-10-14（quay 自身宿主）：一处 driver 修复落地 ⇒ 开发树 anchor 自刷新接管（06:57:37Z，新 host
+// pid 2429149）；在飞 worker 仍【存活】⇒ reconcile 走 adopt（不是 finalize）。该 worker 随后正常结束、4 条
+// AC 全勾、分支上有提交（e18ec4b04），但 adoptOrphanWorker 退出后【只调 computeLandingState 读一次 task
+// status】⇒ 记 `exited-not-landed`「adopted orphan worker exited (exit code unobservable)」，【没有任何机件
+// 跑机械 fan-in】⇒ 被接管的 worker 结构上永远落不了地，而那个 status 也没有任何路径会推进它（下一个派发
+// 付整个 worker 会话重做一次本可白得的 fan-in）。153 次：quay 146 / ClaudeCodeUI 7；每一次 anchor 接管或
+// driver 自刷新只要跨过 worker 的退出就产生一条 ⇒ 即使两个 restart 修复都已落地，「driver 随时可重启」仍不成立。
+// 修法：adopt 的 pid 【自然退出（⛔ 不是超时）】⇒ 跑【与正常退出 worker 相同的】退出后流水线（AC 短路闸 →
+// spawnMechanicalFanIn → computeLandingState），复用 resumeExitedOrphanFanIn；超时分支逐字不变。
+// 以下 AC1-AC4 逐条取假。
+
+const ADOPTED_LIVE_ORPHAN_TASK = "gap-adopted-live-orphan";
+
+/** 造「task/<id> 分支相对 develop 有提交」的工作树夹具（AC 全勾 / 未全勾两种任务体）。
+ *  ⚠️ AC 段 ∧ DoD 段【都必须有】：countCompletionCheckboxes 的 sectionFound = acFound && dodFound，
+ *  缺任一段 ⇒ not-evaluated ⇒ acShortCircuitVerdict 当「AC 未全勾」（走短路，而不是走真 fan-in）。
+ *  ⚠️ task/<id> 分支是【从 develop 分叉】的（worktree add -b … develop），与真实派发一致。 */
+function buildAdoptedOrphanWorktree(tag, { acComplete = true } = {}) {
+  const root = makeGitRoot(tag);
+  const wtPath = path.join(root, "..", `wt-${path.basename(root)}-adopt`);
+  const taskId = ADOPTED_LIVE_ORPHAN_TASK;
+  writeTaskFile(root, taskId, "ready"); // 主检出/develop 上的任务体（status=ready）
+  runGit(root, ["branch", "develop"]); // resolveTaskMergeTarget/落地判定的合并目标
+  runGit(root, ["worktree", "add", "-q", "-b", `task/${taskId}`, wtPath, "develop"]);
+  const box = acComplete ? "[x]" : "[ ]";
+  fs.writeFileSync(
+    path.join(wtPath, "tasks", `${taskId}.md`),
+    `---\nid: ${taskId}\nstatus: ready\n---\n\n## Proposal\n\nbody\n\n` +
+      `## Acceptance Criteria\n\n- ${box} AC1: only AC\n\n` +
+      `## Definition of Done\n\n- ${box} DoD1: only DoD\n`,
+  );
+  runGit(wtPath, ["add", `tasks/${taskId}.md`]);
+  runGit(wtPath, ["commit", "-q", "-m", "impl: adopted worker output"]);
+  const branchTip = runGit(wtPath, ["rev-parse", "HEAD"]).trim();
+  return { root, wtPath, taskId, branchTip };
+}
+
+function cleanupAdoptedOrphanFixture(t, fx) {
+  t.after(() => {
+    tryWorktreeRemove(fx.root, fx.wtPath);
+    fs.rmSync(fx.root, { recursive: true, force: true });
+    fs.rmSync(fx.wtPath, { recursive: true, force: true });
+  });
+}
+
+/** 起一个【真实存活、随后自然退出】的孤儿 worker 并返回它。⛔ 不是「编一个大数 pid」也不是超时 SIGTERM
+ *  ——本缺陷的主语正是【被 adopt 的存活孤儿随后退出】这条路径。cmdline 含 worker 名 + task id ⇒
+ *  classifyOrphanDispatch 判 "adopt"（真孤儿证据，不是伪造记录）。 */
+async function spawnLiveOrphanWorker(taskId, lifetimeMs) {
+  const orphan = spawn(
+    process.execPath,
+    ["-e", `setTimeout(()=>{},${lifetimeMs})`, WORKER_PROCESS_NAME, taskId],
+    { stdio: "ignore" },
+  );
+  await waitFor(() => probePidLiveness(orphan.pid) === "alive", 15000);
+  return orphan;
+}
+
+/** 被 adopt 的孤儿 + 已存活 ⇒ 造它的 dispatch 记录（原始超时截止【远未到期】⇒ 走自然退出分支）。 */
+function adoptedOrphanRecord(taskId, pid) {
+  return {
+    taskId,
+    runId: "fm-adopt-live",
+    workerPid: pid,
+    selectorReason: "adopt-live selector reason",
+    startedAtMs: Date.now() - 5_000,
+    timeoutDeadlineMs: Date.now() + 60_000, // ⛔ 不设过期：本夹具要的是【退出】分支，不是 timed-out 分支
+    cmdlineFingerprint: `claude -n ${WORKER_PROCESS_NAME} -p '... Task: ${taskId} ...'`,
+  };
+}
+
+/** 替身机械 fan-in：真 fan-in 在本仓库要跑分钟级 suite（单测不跑）。它执行 fan-in 的【落地动作】——
+ *  ff develop 到分支 tip + 移除 worktree（真 fan-in 的最后两步），使 computeLandingState 真判。
+ *  `onCall` 在 fan-in 【运行中】被调用（AC3 用它读「此刻 dispatch 记录是否仍被持有」）。 */
+function landingFanInRunner(root, onCall) {
+  let calls = 0;
+  const runner = async ({ worktree }) => {
+    calls += 1;
+    if (onCall) onCall();
+    const tip = runGit(worktree, ["rev-parse", "HEAD"]).trim();
+    runGit(root, ["update-ref", "refs/heads/develop", tip]); // ff develop → 落地提交
+    runGit(root, ["worktree", "remove", "--force", worktree]); // 落地后无残留 worktree
+    return {
+      outcome: "landed", landedSha: tip, verdict: null, step: null, reason: null,
+      lockHoldSecs: null, lockAcquireEpoch: null, lockReleaseEpoch: null, suiteFinishedEpoch: null,
+      suiteOutcome: null, suitePid: null, fanInLog: null, suiteLog: null,
+      mergeTreeSha: tip, developSha: tip, failedTestFiles: null, rerun: null,
+    };
+  };
+  return { runner, calls: () => calls };
+}
+
+test("AC1 (能取假) — 被 adopt 的存活孤儿自然退出：跑机械 fan-in 并落地；负控制=旧路径只读 status，记 exited-not-landed「adopted orphan worker exited」且无 fan-in", async (t) => {
+  const taskId = ADOPTED_LIVE_ORPHAN_TASK;
+
+  // ── 负控制臂：修前 adoptOrphanWorker.finish() 写的终态来自 computeAdoptedOutcome(timedOut:false)。
+  //    同一夹具的同一状态上直接调它 ⇒ exited-not-landed「adopted orphan worker exited」+ ⛔ 无
+  //    mechanical_fan_in —— 这就是修前落盘的那条记录，且没有任何机件推进其中的 task status。
+  const neg = buildAdoptedOrphanWorktree("adopt-ac1-neg");
+  cleanupAdoptedOrphanFixture(t, neg);
+  const negOutcome = computeAdoptedOutcome({
+    task: taskId, selectorReason: "neg selector reason", runId: "fm-neg", workerPid: 999999999,
+    startedAtMs: Date.now() - 60_000, endedAtMs: Date.now(), inFlightCount: 1,
+    timedOut: false, landing: computeLandingState(neg.root, taskId, null),
+  });
+  assert.equal(negOutcome.final_state, "exited-not-landed", "负控制：修前记 exited-not-landed");
+  assert.match(negOutcome.failure_reason, /adopted orphan worker exited \(exit code unobservable\)/,
+    "负控制：原因逐字「adopted orphan worker exited」（本缺陷的可读指纹）");
+  assert.equal(negOutcome.mechanical_fan_in, undefined, "负控制：⛔ 从未跑机械 fan-in（这正是缺陷）");
+  assert.equal(negOutcome.exit_code, null, "负控制：退出码不可观测 ⇒ 诚实 null");
+  console.log("[AC1 negative control outcome]", JSON.stringify(negOutcome));
+
+  // ── 正臂：真·存活孤儿被 adopt，随后【自然退出】（⛔ 不是超时）⇒ 跑 fan-in ⇒ 落地。
+  const pos = buildAdoptedOrphanWorktree("adopt-ac1-pos");
+  cleanupAdoptedOrphanFixture(t, pos);
+  const orphan = await spawnLiveOrphanWorker(taskId, 300);
+  t.after(() => { try { orphan.kill("SIGKILL"); } catch { /* gone */ } });
+  const record = adoptedOrphanRecord(taskId, orphan.pid);
+  upsertDispatchRecord(dispatchStoreFile(pos.root), record);
+
+  assert.equal(probePidLiveness(orphan.pid), "alive", "AC1 前置：孤儿 pid 【实测】存活（reconcile 会判 adopt）");
+  assert.equal(classifyOrphanDispatch(record), "adopt", "AC1 前置：pid 存活 + cmdline 吻合 ⇒ adopt（本缺陷入口）");
+  assert.equal(taskBranchHasCommits(pos.root, taskId), true, "AC1 前置：task/<id> 分支相对 develop 有提交（有产出）");
+  assert.ok(record.timeoutDeadlineMs > Date.now(), "AC1 前置：原始超时截止未到期（走【退出】分支而非 timed-out）");
+
+  const seam = landingFanInRunner(pos.root);
+  const r = await adoptOrphanWorker({
+    taskId, rootDir: pos.root, outcomeFile: path.join(pos.root, WORKER_OUTCOME_REL),
+    record, inFlightCount: 1, pollMs: 20, fanInRunner: seam.runner,
+  });
+
+  assert.equal(seam.calls(), 1, "AC1：机械 fan-in 确实跑了（⛔ 不是只记一个终态）");
+  assert.equal(r.outcome.final_state, "completed", "AC1：fan-in 落地 ⇒ completed（修前结构上永远落不了地）");
+  assert.equal(r.outcome.exit_code, null, "AC1：worker 退出码从未被观测 ⇒ 诚实 null（硬规则 3b）");
+  assert.equal(r.outcome.adopted_after_exit, true, "AC1：带 adopted_after_exit 标记（⛔ 不伪装成正常 exit 0）");
+  assert.ok(r.outcome.mechanical_fan_in, "AC1：载体的 mechanical_fan_in 非空（fan-in 真跑过的读数）");
+  assert.equal(r.exitCode, 0, "AC1：completed ⇒ 退出码 0");
+  assert.equal(runGit(pos.root, ["rev-parse", "develop"]).trim(), pos.branchTip, "AC1：develop 已 ff 到分支 tip（真落地）");
+  assert.equal(worktreePresentForTask(pos.root, taskId), false, "AC1：落地后无残留 worktree");
+  assert.ok(readOutcomeLines(pos.root).some((o) => o.task === taskId && o.final_state === "completed"),
+    "AC1：载体里有一条 completed（⛔ 不是只活在内存里）");
+  console.log("[AC1 post-fix outcome]", JSON.stringify(r.outcome));
+
+  // ── 两臂必须【不同形】：同一夹具、同一任务，修前 exited-not-landed+无 fan-in，修后 completed+fan-in。
+  assert.notEqual(r.outcome.final_state, negOutcome.final_state, "AC1：正/负两臂终态必须不同（否则这个对照什么也没测）");
+});
+
+test("AC2 (能取假) — 被 adopt 的存活孤儿 + AC 未全勾的 worktree：按【它自己的正常理由】拒绝（AC 短路），⛔ 不是「只读 status」；任务保持 ready、提交完好", async (t) => {
+  const taskId = ADOPTED_LIVE_ORPHAN_TASK;
+  const fx = buildAdoptedOrphanWorktree("adopt-ac2", { acComplete: false });
+  cleanupAdoptedOrphanFixture(t, fx);
+  const orphan = await spawnLiveOrphanWorker(taskId, 300);
+  t.after(() => { try { orphan.kill("SIGKILL"); } catch { /* gone */ } });
+  const record = adoptedOrphanRecord(taskId, orphan.pid);
+  upsertDispatchRecord(dispatchStoreFile(fx.root), record);
+  assert.equal(classifyOrphanDispatch(record), "adopt", "AC2 前置：仍然走 adopt 入口");
+
+  let fanInCalls = 0;
+  const r = await adoptOrphanWorker({
+    taskId, rootDir: fx.root, outcomeFile: path.join(fx.root, WORKER_OUTCOME_REL),
+    record, inFlightCount: 1, pollMs: 20,
+    fanInRunner: async () => { fanInCalls += 1; throw new Error("fan-in must not spawn when AC is incomplete"); },
+  });
+
+  assert.equal(fanInCalls, 0, "AC2：AC 未全勾 ⇒ 短路，⛔ 不 spawn fan-in（省整条链 + 锁排队）");
+  assert.equal(r.outcome.final_state, "exited-not-landed", "AC2：拒绝理由 = exited-not-landed（fan-in 的正常理由）");
+  assert.equal(r.outcome.short_circuit, "ac-not-checked", "AC2：结构化短路成因（⛔ 不是 orphaned）");
+  assert.match(r.outcome.failure_reason, /AC 未全勾/, "AC2：原因点名 AC 未全勾（续做只需勾选）");
+  assert.doesNotMatch(r.outcome.failure_reason, /orphaned|adopted orphan worker exited/,
+    "AC2：⛔ 不是「只读 status 的 adopted orphan」措辞（那正是本缺陷）");
+  assert.equal(r.outcome.adopted_after_exit, true, "AC2：仍带 adopted_after_exit 标记（退出码未被观测）");
+  assert.equal(r.exitCode, EXITED_NOT_LANDED_EXIT, "AC2：exited-not-landed ⇒ 标准退出码");
+  // 任务回 ready + 提交完好（worktree 保留、branch tip 不变）。
+  assert.equal(readTaskStatus(fx.root, taskId), "ready", "AC2：任务保持 ready");
+  assert.equal(worktreePresentForTask(fx.root, taskId), true, "AC2：worktree 保留（续做需要它）");
+  assert.equal(runGit(fx.wtPath, ["rev-parse", "HEAD"]).trim(), fx.branchTip, "AC2：分支提交完好（tip 未变、未丢产出）");
+  assert.notEqual(runGit(fx.root, ["rev-parse", "develop"]).trim(), fx.branchTip, "AC2：develop 未被推进（没落地）");
+  assert.equal(readDispatchStore(dispatchStoreFile(fx.root))[taskId], undefined, "AC2：dispatch 记录已清（不再被永久占位）");
+  console.log("[AC2 outcome]", JSON.stringify(r.outcome));
+});
+
+test("AC3 (能取假) — 接管全程单次 fan-in、不双派：fan-in 运行【中】dispatch 记录仍被持有，写完 outcome 后才清；outcome 恰一条", async (t) => {
+  const taskId = ADOPTED_LIVE_ORPHAN_TASK;
+  const fx = buildAdoptedOrphanWorktree("adopt-ac3", { acComplete: true });
+  cleanupAdoptedOrphanFixture(t, fx);
+  const orphan = await spawnLiveOrphanWorker(taskId, 300);
+  t.after(() => { try { orphan.kill("SIGKILL"); } catch { /* gone */ } });
+  const record = adoptedOrphanRecord(taskId, orphan.pid);
+  upsertDispatchRecord(dispatchStoreFile(fx.root), record);
+
+  // ① 孤儿【存活期间】：dispatch 记录在盘上、且该 task 正被内存 running 持有 ⇒ reconcile 的
+  //    orphanDispatchCandidates 跳过它、派发排除集含它 ⇒ ⛔ 不会同任务双派/双 fan-in。
+  assert.ok(readDispatchStore(dispatchStoreFile(fx.root))[taskId], "AC3①：接管期间 dispatch 记录在盘上（未被提前清）");
+  assert.deepEqual(orphanDispatchCandidates(readDispatchStore(dispatchStoreFile(fx.root)), [taskId]), [],
+    "AC3①：该 task 已在 running ⇒ reconcile ⛔ 不重复 adopt/finalize（单次接管）");
+
+  // ② fan-in 【运行中】：记录必须仍被持有 —— 这是「记录要到 fan-in 的 outcome 写完才释放」的直接测量。
+  let heldDuringFanIn = null;
+  const seam = landingFanInRunner(fx.root, () => {
+    heldDuringFanIn = readDispatchStore(dispatchStoreFile(fx.root))[taskId] ?? null;
+  });
+  const r = await adoptOrphanWorker({
+    taskId, rootDir: fx.root, outcomeFile: path.join(fx.root, WORKER_OUTCOME_REL),
+    record, inFlightCount: 1, pollMs: 20, fanInRunner: seam.runner,
+  });
+
+  assert.ok(heldDuringFanIn, "AC3②：fan-in 运行【中】dispatch 记录仍被持有（⛔ 不是先清记录再跑 fan-in）");
+  assert.equal(heldDuringFanIn.workerPid, orphan.pid, "AC3②：持有的正是本次接管的记录");
+  assert.equal(seam.calls(), 1, "AC3③：fan-in 恰好一次（⛔ 无第二次）");
+  assert.equal(r.outcome.final_state, "completed", "AC3：落地");
+  assert.equal(readDispatchStore(dispatchStoreFile(fx.root))[taskId], undefined, "AC3③：outcome 写完后记录才被清");
+  assert.equal(readOutcomeLines(fx.root).filter((o) => o.task === taskId).length, 1,
+    "AC3③：该 task 恰好一条终态 outcome（⛔ 无重复落盘）");
+
+  // ④ 接线（源文本）：resumeExitedOrphanFanIn 里 removeDispatchRecord 【晚于】appendOutcomeToFile
+  //    ——与 ② 的运行时测量互补（顺序若被改回去，② 会先红，这条给出成因）。
+  const src = fs.readFileSync(DRIVER, "utf8");
+  const start = src.indexOf("export async function resumeExitedOrphanFanIn");
+  const end = src.indexOf("export function adoptOrphanWorker");
+  assert.ok(start > 0 && end > start, "AC3：能定位到 resumeExitedOrphanFanIn 的函数体");
+  const body = src.slice(start, end);
+  assert.ok(body.indexOf("appendOutcomeToFile(outcomeFile, outcome)") < body.indexOf("removeDispatchRecord(dispatchStoreFile(rootDir), taskId)"),
+    "AC3④：appendOutcomeToFile 早于 removeDispatchRecord（记录持有到 outcome 写完为止）");
+  // ⑤ 接线：adopt 的自然退出分支【委派】给同一流水线（⛔ 不再有第二条「只读 status」的旧路）。
+  const adoptBody = src.slice(end, src.indexOf("\n}\n", end));
+  assert.match(adoptBody, /if \(!timedOut\) \{ void finishAdopted\(\); return; \}/,
+    "AC3⑤：adopt 退出（非超时）⇒ 委派 finishAdopted（跑退出后流水线），超时分支才走旧路");
+  console.log("[AC3 outcome]", JSON.stringify(r.outcome));
+});
+
+test("AC4 / DoD (能取假) — 死孤儿路径逐字不变：reconcile 的 finalize 分支仍走 shouldResumeExitedOrphan / finalizeOrphanDispatch", () => {
+  const src = fs.readFileSync(DRIVER, "utf8");
+  // 兄弟任务（gap-reconcile-books-exited-orphan-…）的接线必须原样：ls==="finalize" 时先判
+  // shouldResumeExitedOrphan（有产出 ⇒ 接管），否则回落 finalizeOrphanDispatch（逐字不变）。
+  assert.match(src, /if \(shouldResumeExitedOrphan\(\{ root: rootDir, taskId, record \}\)\) \{[\s\S]{0,600}?resumeExitedOrphanFanIn\(/,
+    "DoD：死孤儿【有产出】分支仍走 resumeExitedOrphanFanIn");
+  assert.match(src, /const res = finalizeOrphanDispatch\(\{ root: rootDir, outcomeFile, record, workerName \}\);/,
+    "DoD：死孤儿【无产出】分支逐字不变（finalizeOrphanDispatch）");
+  // 超时分支逐字不变（timed-out + worktree_preserved）——adopt 的旧语义只在超时时保留。
+  assert.match(src, /if \(outcome\.final_state === "timed-out"\) exitCode = 128 \+ signalExitCode\("SIGTERM"\);/,
+    "DoD：adopt 超时分支的退出码逐字不变");
+});
+
 // ── gap-fanin-gate-event-store-path-shipped-unsafe ────────────────────────────────────────────────
 // appendCompleteGateEvent 与 ffMergeModule 的 packages/quay/src 布局锚点原为仓库布局硬编码，shipped
 // npm 包（把 packages/quay/ 打平到包根）下 MODULE_NOT_FOUND 被 best-effort catch 静默吞 ⇒
