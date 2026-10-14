@@ -149,7 +149,7 @@ test("suiteParamsToEnv maps present knobs to their env vars (absent → omitted)
   );
 });
 
-test("SUITE_KNOBS declares exactly the 7 config→env mappings", () => {
+test("SUITE_KNOBS declares exactly the 8 config→env mappings", () => {
   assert.deepEqual(SUITE_KNOBS, {
     suite_scheduler: "QUAY_SUITE_SCHEDULER",
     phase_overlap: "QUAY_PHASE_OVERLAP",
@@ -158,5 +158,26 @@ test("SUITE_KNOBS declares exactly the 7 config→env mappings", () => {
     max_concurrent_suites: "QUAY_MAX_CONCURRENT_SUITES",
     max_oversubscription: "QUAY_MAX_OVERSUBSCRIPTION",
     main_tail_stall_pct: "QUAY_MAIN_TAIL_STALL_PCT",
+    // gap-suite-memorymax-literal-16g-cap-pinned-every-round-while-lanes-scale-with-nproc — the suite
+    // cgroup's MemoryMax becomes a DECLARED knob (a size string, not a count). Its absence from the
+    // shipped config is deliberate: a machine-spec-dependent literal must not live in a tracked file.
+    memory_max: "QUAY_SUITE_MEMORY_MAX",
   });
+});
+
+test("memory_max — a size string is the one non-numeric knob, and a malformed one is FAIL-CLOSED", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "sp-memmax-"));
+  try {
+    const write = (body) => fs.writeFileSync(path.join(dir, ".quay", "config.yml"), body);
+    fs.mkdirSync(path.join(dir, ".quay"), { recursive: true });
+    write("provider: native\nsuite:\n  memory_max: \"16G\"\n");
+    assert.deepEqual(readSuiteParams(dir), { memory_max: "16G" }, "a declared size string is read verbatim");
+    assert.deepEqual(suiteParamsToEnv({ memory_max: "16G" }), { QUAY_SUITE_MEMORY_MAX: "16G" }, "…and promotes into its env var");
+    write("provider: native\nsuite:\n  memory_max: 17179869184\n");
+    assert.throws(() => readSuiteParams(dir), /FAIL-CLOSED: \.quay\/config\.yml 'suite:memory_max' value 17179869184 is invalid/, "a NUMBER is not a size string (⛔ no silent unit guessing)");
+    write("provider: native\nsuite:\n  memory_max: \"16 gigabytes\"\n");
+    assert.throws(() => readSuiteParams(dir), /FAIL-CLOSED: \.quay\/config\.yml 'suite:memory_max'/, "an unparseable size is rejected, not forwarded to systemd-run");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 });

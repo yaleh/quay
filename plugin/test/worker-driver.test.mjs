@@ -167,6 +167,9 @@ import {
   runGoalMergeFanIn,
   pendingGoalMerges,
   readGoalMergeResults,
+  // gap-attempt-task-phase-timing-fields-incomplete-lock-wait-field-broken：分阶段时间戳的读入面。
+  readFanInTraceRecords,
+  readAttemptPhaseTimestamps,
 } from "../scripts/worker-driver.ts";
 import { recordGoalMergeRequest } from "../../packages/quay/src/goal-merge.ts";
 // gap-goal-merge-execution-writes-no-step-trace：判别键从【写手】取（⛔ 不在测试里重打一份字面量——
@@ -5097,4 +5100,162 @@ test("AC3 (能取假) — argv 在 plugin dist 布局下也解析得出：QUAY_P
     if (saved === undefined) delete process.env.QUAY_PLUGIN_ROOT;
     else process.env.QUAY_PLUGIN_ROOT = saved;
   }
+});
+
+// ── 分阶段时间戳（gap-attempt-task-phase-timing-fields-incomplete-lock-wait-field-broken）──────────
+// 这一组钉住的是**归属键**：新口径按「尝试窗口」选 acquire，旧口径按 (task, runId)。常驻 anchor 的
+// runId 是进程级常量（实测 wk-prod-anchor = 1148 条尝试 / 635 个任务），故「取最后一组」会跨轮配对——
+// 负控制就建在这个形态上：**同一个 (task, runId) 的日志里放两轮 fan-in**。
+
+function mkPhaseRoot() {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "wd-phases-"));
+  fs.mkdirSync(path.join(root, ".quay"), { recursive: true });
+  return root;
+}
+function appendTrace(root, task, runId, rec) {
+  fs.appendFileSync(path.join(root, ".quay", `fan-in-${task}-${runId}.log`), JSON.stringify(rec) + "\n", "utf8");
+}
+function appendLockEvent(root, rec) {
+  fs.appendFileSync(path.join(root, ".quay", "fan-in-lock-events.jsonl"), JSON.stringify(rec) + "\n", "utf8");
+}
+
+test("readFanInTraceRecords — 解析 ts/step/wall_ms；坏行跳过；缺 wall_ms ⇒ null（⛔ 不折成 0）", () => {
+  const root = mkPhaseRoot();
+  const file = path.join(root, ".quay", "fan-in-T-1-R.log");
+  fs.writeFileSync(file, [
+    JSON.stringify({ ts: "2026-10-14T10:00:00.000Z", step: "acquire-fan-in-lock", wall_ms: 7, ok: true }),
+    "{ not json",
+    "",
+    JSON.stringify({ ts: "2026-10-14T10:00:05.000Z", step: "merge-develop", exit: 0 }), // 无 wall_ms
+  ].join("\n"), "utf8");
+  const recs = readFanInTraceRecords(file);
+  assert.equal(recs.length, 2, "坏行与空行不产出记录");
+  assert.equal(recs[0].step, "acquire-fan-in-lock");
+  assert.equal(recs[0].wallMs, 7);
+  assert.equal(recs[1].wallMs, null, "缺 wall_ms ⇒ null（缺值 = 未查，硬规则 6/3b）");
+  assert.equal(readFanInTraceRecords(path.join(root, ".quay", "nope.log")).length, 0, "文件不在 ⇒ 空数组（fail-soft）");
+});
+
+test("readAttemptPhaseTimestamps — 归属键是【尝试窗口】：同一 (task,runId) 两轮时旧口径张冠李戴（负控制）", () => {
+  const root = mkPhaseRoot();
+  const task = "T-family";
+  const runId = "wk-prod-anchor"; // 常驻 anchor 的进程级常量 runId —— 正是缺陷形态
+  // 第 1 轮：10:00Z acquire（等待 5s），suite 10:00:10→10:00:20
+  appendTrace(root, task, runId, { ts: "2026-10-14T10:00:00.000Z", step: "acquire-fan-in-lock", exit: 0, wall_ms: 5000, ok: true });
+  appendTrace(root, task, runId, { ts: "2026-10-14T10:00:10.000Z", step: "suite-start", exit: 0, wall_ms: 0, ok: true });
+  appendTrace(root, task, runId, { ts: "2026-10-14T10:00:20.000Z", step: "suite-end", exit: 0, wall_ms: 10000, ok: true });
+  // 第 2 轮（两小时后）：12:00Z acquire。
+  appendTrace(root, task, runId, { ts: "2026-10-14T12:00:00.000Z", step: "acquire-fan-in-lock", exit: 0, wall_ms: 900, ok: true });
+  // 锁事件文件：event/epoch（**秒**）/taskId/runId —— 两轮都记在同一个 (task, runId) 下。
+  // epoch 用与 trace ts 同一真实时刻（差值只来自「秒」粒度的截断），使第 2 轮**恰好一致**、第 1 轮**差 2 小时**。
+  const r1Epoch = Math.floor(Date.parse("2026-10-14T10:00:00.000Z") / 1000);
+  const r2Epoch = Math.floor(Date.parse("2026-10-14T12:00:00.000Z") / 1000);
+  appendLockEvent(root, { event: "acquire", epoch: r1Epoch, taskId: task, runId });
+  appendLockEvent(root, { event: "release", epoch: r1Epoch + 1, taskId: task, runId });
+  appendLockEvent(root, { event: "acquire", epoch: r2Epoch, taskId: task, runId });
+  appendLockEvent(root, { event: "release", epoch: r2Epoch + 1, taskId: task, runId });
+
+  const r1Start = Date.parse("2026-10-14T09:59:00.000Z");
+  const r1End = Date.parse("2026-10-14T10:01:00.000Z");
+  const r2Start = Date.parse("2026-10-14T11:59:00.000Z");
+  const r2End = Date.parse("2026-10-14T12:01:00.000Z");
+
+  const r1 = readAttemptPhaseTimestamps(root, task, runId, r1Start, r1End);
+  const r2 = readAttemptPhaseTimestamps(root, task, runId, r2Start, r2End);
+
+  // ── 新口径：每一轮拿到**自己**那一条 acquire。
+  assert.equal(r1.lockAcquiredAtMs, Date.parse("2026-10-14T10:00:00.000Z"), "第 1 轮取到第 1 轮的 acquire");
+  assert.equal(r1.lockRequestedAtMs, Date.parse("2026-10-14T10:00:00.000Z") - 5000, "request = 该条记录自己的 ts − 它自己的 wall_ms");
+  assert.equal(r1.lockWaitMs, 5000, "锁等待 = acquired − requested");
+  assert.equal(r1.suiteStartedAtMs, Date.parse("2026-10-14T10:00:10.000Z"));
+  assert.equal(r1.suiteEndedAtMs, Date.parse("2026-10-14T10:00:20.000Z"));
+  assert.equal(r2.lockAcquiredAtMs, Date.parse("2026-10-14T12:00:00.000Z"), "第 2 轮取到第 2 轮的 acquire");
+  assert.equal(r2.lockWaitMs, 900);
+
+  // ── 负控制：旧口径对**两轮给出同一个值**（epoch 2000s ⇒ 2000000ms，第 2 轮的 acquire），
+  //    与第 1 轮的实际 acquire 相差 2 小时 ⇒ 归属错。这正是「锁等待被读成 > 整段尝试」的机制。
+  assert.equal(r1.legacyJoin.lockAcquireEpochMs, r2Epoch * 1000, "旧口径取最后一组 ⇒ 两轮都得到第 2 轮的值");
+  assert.equal(r2.legacyJoin.lockAcquireEpochMs, r2Epoch * 1000);
+  assert.equal(r1.legacyJoinMismatch, true, "第 1 轮：旧口径 ≠ 窗口口径 ⇒ 报错配（负控制命中）");
+  assert.equal(r2.legacyJoinMismatch, false, "第 2 轮：恰好一致 ⇒ 不误报");
+  assert.ok(
+    Math.abs(r1.legacyJoin.lockAcquireEpochMs - r1.lockAcquiredAtMs) >= 2 * 3600 * 1000,
+    "错配的量级是**小时**——大于任何一次尝试 ⇒ 旧读数不可能属于这次尝试",
+  );
+});
+
+test("readAttemptPhaseTimestamps — 窗口内没有 acquire ⇒ 全部 null 且 legacyJoinMismatch 为未评估(null)", () => {
+  const root = mkPhaseRoot();
+  const task = "T-none";
+  const runId = "R-none";
+  appendTrace(root, task, runId, { ts: "2026-10-14T10:00:00.000Z", step: "merge-develop", exit: 0, wall_ms: 3, ok: true });
+  // 锁事件存在（另一轮），但**不在窗口内**——⛔ 不得因此把旧口径当成本次读数。
+  appendLockEvent(root, { event: "acquire", epoch: 3000, taskId: task, runId });
+  appendLockEvent(root, { event: "release", epoch: 3001, taskId: task, runId });
+  const p = readAttemptPhaseTimestamps(root, task, runId, Date.parse("2026-10-14T09:00:00.000Z"), Date.parse("2026-10-14T11:00:00.000Z"));
+  assert.equal(p.lockAcquiredAtMs, null);
+  assert.equal(p.lockRequestedAtMs, null);
+  assert.equal(p.lockWaitMs, null);
+  assert.equal(p.suiteStartedAtMs, null);
+  assert.equal(
+    p.legacyJoinMismatch, null,
+    "窗口内无 acquire ⇒ 无对照可做 ⇒ **未评估**（⛔ 不落 false——那会与「比过且一致」同形，硬规则 3b）",
+  );
+  assert.equal(p.legacyJoin.lockAcquireEpochMs, 3_000_000, "旧口径照读（它不看窗口）——对比因此才有意义");
+});
+
+test("computeOutcome — 分阶段字段落盘：terminal 显式取值 + 新阶段具名 + 缺值 ⇒ null（⛔ 不顶替成 ended_at）", () => {
+  const t0 = Date.parse("2026-10-14T10:00:00.000Z");
+  const withPhases = computeOutcome({
+    task: "gap-x", selectorReason: "why", exitCode: 0, signal: null, workerPid: 42, runId: "fm-r",
+    startedAtMs: t0, endedAtMs: t0 + 900_000, landed: true,
+    workerExitedAtMs: t0 + 600_000, faninEndedAtMs: t0 + 880_000,
+    phases: {
+      lockRequestedAtMs: t0 + 600_000, lockAcquiredAtMs: t0 + 605_000, lockWaitMs: 5000,
+      suiteStartedAtMs: t0 + 610_000, suiteEndedAtMs: t0 + 870_000,
+      sourceLog: "fan-in-gap-x-fm-r.log",
+      legacyJoin: { lockAcquireEpochMs: null, lockReleaseEpochMs: null, lockHoldSecs: null },
+      legacyJoinMismatch: null,
+    },
+  });
+  assert.equal(withPhases.terminal, true, "写出点的每一条都是终态 ⇒ 显式 true（⛔ 不靠 ended_at 有无来推）");
+  assert.equal(withPhases.dispatched_at, new Date(t0).toISOString(), "dispatched_at = 派发时刻（与 started_at 同一读数）");
+  assert.equal(withPhases.started_at, withPhases.dispatched_at, "⛔ 不移除既有字段：二者同源，故逐字相等");
+  assert.equal(withPhases.worker_exited_at, new Date(t0 + 600_000).toISOString());
+  assert.equal(withPhases.fanin_ended_at, new Date(t0 + 880_000).toISOString());
+  assert.equal(withPhases.lock_requested_at, new Date(t0 + 600_000).toISOString());
+  assert.equal(withPhases.lock_acquired_at, new Date(t0 + 605_000).toISOString());
+  assert.equal(withPhases.fan_in_lock_wait_ms, 5000);
+  assert.equal(withPhases.suite_started_at, new Date(t0 + 610_000).toISOString());
+  assert.equal(withPhases.suite_ended_at, new Date(t0 + 870_000).toISOString());
+  // 三相位必须可分开：实现段（dispatch→exit）≠ fan-in 段（exit→fanin end）。
+  assert.equal(Date.parse(withPhases.worker_exited_at) - Date.parse(withPhases.dispatched_at), 600_000);
+  assert.equal(Date.parse(withPhases.fanin_ended_at) - Date.parse(withPhases.worker_exited_at), 280_000);
+
+  // 未观测相位 ⇒ 显式 null（未评估），⛔ 不落成 ended_at / 0。
+  const without = computeOutcome({
+    task: "gap-x", selectorReason: "why", exitCode: 1, signal: null, workerPid: 42, runId: "fm-r",
+    startedAtMs: t0, endedAtMs: t0 + 10_000, landed: null,
+  });
+  assert.equal(without.fanin_ended_at, null);
+  assert.equal(without.worker_exited_at, null);
+  assert.equal(without.lock_requested_at, null);
+  assert.equal(without.lock_acquired_at, null);
+  assert.equal(without.fan_in_lock_wait_ms, null);
+  assert.equal(without.suite_started_at, null);
+  assert.equal(without.suite_ended_at, null);
+  assert.equal("legacy_lock_join" in without, false, "未评估 ⇒ 缺键（⛔ 不落一个 mismatch:false 的假对照）");
+
+  // mismatch 有值时才发射 legacy_lock_join（它是负控制读数）。
+  const mismatch = computeOutcome({
+    task: "gap-x", selectorReason: "why", exitCode: 0, signal: null, workerPid: 42, runId: "fm-r",
+    startedAtMs: t0, endedAtMs: t0 + 10_000, landed: true,
+    phases: {
+      lockRequestedAtMs: null, lockAcquiredAtMs: null, lockWaitMs: null,
+      suiteStartedAtMs: null, suiteEndedAtMs: null, sourceLog: null,
+      legacyJoin: { lockAcquireEpochMs: 1, lockReleaseEpochMs: 2, lockHoldSecs: 1 },
+      legacyJoinMismatch: true,
+    },
+  });
+  assert.equal(mismatch.legacy_lock_join.mismatch, true);
 });

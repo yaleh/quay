@@ -281,7 +281,11 @@ export function cgroupV2Mounted(root: string = CGROUP_ROOT): boolean {
  *
  *  ⚠️ On the 128-core baseline host a process launched by quay lives INSIDE a `quay-anchor-*.scope`
  *  (~0.25 × host total, measured 66 295 676 928 B of a 246.97 GiB host on 2026-10-09). Excluding it is
- *  what keeps the suite's derived ceiling at the 16G empirical ceiling (`MemoryMax=16G` unchanged). */
+ *  what keeps the suite's derived ceiling from compounding that fraction once per nesting level — the
+ *  reading feeds a NEW quay envelope. (This clause used to cite the suite's `MemoryMax=16G` literal as
+ *  its visible consequence; that literal was retired by
+ *  `gap-suite-memorymax-literal-16g-cap-pinned-every-round-while-lanes-scale-with-nproc`, so the
+ *  consequence no longer exists — the exclusion that justified it does.) */
 export const QUAY_OWN_SCOPE_PREFIXES = ["quay-anchor-", "quay-serve-", "run-"] as const;
 
 /** The ancestor memory walk's result. `bytes: null` = NO non-quay-own ancestor layer set a

@@ -2,7 +2,7 @@
 id: gap-attempt-task-phase-timing-fields-incomplete-lock-wait-field-broken
 title: attempt/task 分阶段计时字段不全、锁等待字段已证实错误（P90 264min > 全程中位 18min）：补齐
   dispatch/worker-exit/lock/suite/fan-in 各阶段时间戳
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -37,13 +37,13 @@ Consequence: the diagnosis could report attempt/task medians, but could NOT reli
 旧读法把 per-run 过程日志 `.quay/fan-in-<task>-<runId>.log` 里 `acquire-fan-in-lock` 步的 `wall_ms`
 当作「**这一次尝试**的排队时延」（`fan-in-queueing-model.ts` 的文档就是这么写的）。算术没错、
 值也没错——**错的是归属键**：那个文件的身份是 `(task, runId)`，而常驻 driver 的 `runId` 是
-**进程级常量**，不是尝试级常量。实测两条直接量：
+**进程级常量**，不是尝试级常量。实测四条直接量：
 
 ```
-grep -c '"run_id":"wk-prod-anchor"' .quay/worker-outcome.jsonl        → 1148 条尝试
-  同一 runId 覆盖的任务数（.quay/fan-in-lock-events.jsonl 按 taskId 去重）→ 635 个
-  同一 runId 的 acquire 事件数                                          → 986
-  635 个 fan-in-<task>-wk-prod-anchor.log 中有 200 个装着 **多轮** acquire
+.quay/worker-outcome.jsonl 里 run_id = "wk-prod-anchor" 的尝试         → 1148 条
+同一 runId 覆盖的任务数（.quay/fan-in-lock-events.jsonl 按 taskId 去重） → 635 个
+同一 runId 的 acquire 事件数                                          → 986
+635 个 fan-in-<task>-wk-prod-anchor.log 中有 200 个装着 **多轮** acquire
 ```
 ⇒ 「取最后一组 acquire/release」会跨轮配对，把**另一轮**的锁等待记到这次尝试头上。
 
@@ -65,6 +65,8 @@ of those, the OLD acquire timestamp lies OUTSIDE the attempt window: 946  (100%)
 样本那条：尝试本身长 2805s（约 47 min），旧口径给出的 acquire 时刻落在它**之外 10.2 小时**。
 这正是诊断报告的形态（值 > 整段尝试），机制在此复现。新记录把旧口径的读数**同名并存**在
 `legacy_lock_join`（`mismatch` 三态）里，故这条负控制由载体本身携带、任何读者可复算。
+⛔ 既有字段一个没删；`started_at` 与新增的 `dispatched_at` 是**同一个 startedAtMs 单一来源**的两个名字
+（载体里逐字相等，测试钉住），故不存在「两个同义字段各算一次」的漂移面。
 
 ### AC3 — 可复用只读窗口查询（`plugin/scripts/duration-report.ts`，新增）
 
@@ -85,20 +87,35 @@ tasks (in window: 224 finished; right-censored set: 5)
 ```
 
 **number-for-number 对照（同一窗口）**：诊断报「整段尝试中位 ~18 min / 锁等待 P90 264 min 且大于整段」。
-本查询在同一窗口报 **attempt median = 914s ≈ 15.2 min**（诊断窗口口径一致量级），并把「锁等待大于
-整段」这条**钉成负控读数**：`legacy_lock_join.comparable=2173 / mismatched=946`（上节）。
-⇒ 诊断报得出的（attempt/task 中位）与新查询一致；诊断报不出的三段（实现 / fan-in / 锁）现在是**具名读数**，
+本查询在同一窗口报 **attempt median = 914s ≈ 15.2 min**（与诊断同量级，差异来自窗口口径）；
+「锁等待大于整段」这条被**钉成负控读数**：`legacy_lock_join.comparable=2173 / mismatched=946`（上节）。
+⇒ 诊断报得出的（attempt 中位）与新查询一致；诊断报不出的三段（实现 / fan-in / 锁）现在是**具名读数**，
 且在**旧记录**上如实报 `NOT-EVALUATED`（⛔ 不折成 0——见渲染行 `n=0 NOT-EVALUATED`）。
+套件段同样具名（`suite n=0 NOT-EVALUATED`），非「跳过」。
 
 **右删失是并列输出而不是脚注**：同一窗口 224 个已完成任务之旁，另报 5 条 `terminal=false` 的
 在飞尝试（年龄 398s..8108s）与 5 个 `terminal=false` 的在飞任务（年龄自 `ready_at` 起算）。
-`ready_at` 取自**已有载体** `.quay/task-status-events.jsonl` 的 `to:"ready"` 事件（⛔ 不 grep 提交主题），
+`ready_at` 取自**已有载体** `.quay/task-status-events.jsonl` 的 `to:"ready"` 事件（⛔ 不 grep 提交主题）；
 `first_dispatched_at` 取自尝试记录（新记录用 `dispatched_at`，旧记录回退同名同源的 `started_at`，
-且回退发生过就在报告里计数报出）。
+且回退发生过就在报告里计数报出）。判定「有尝试」时**同时**认「有已落盘 attempt」与「此刻有在飞派发」——
+只数前者会把正在跑的任务整个漏掉，而那正是右删失要看见的那一批。
 
-### AC4 — scoped gate
+### AC4 — scoped gate（`scripts/test.sh --for-task <this task> --allow-thin`）
 
-见下方「scoped gate」段（`scripts/test.sh --for-task <this task> --allow-thin`）。
+```
+EXIT=0
+ℹ tests 155   ℹ pass 155   ℹ fail 0
+PASS: no new task-file bypass — 39 hit(s), all within the allowlist
+PASS: all 21 violation(s) are baselined in plugin/test-isolation-violations.txt
+PASS: every test file uses node:test or is a listed legacy exemption; … new files declare @test-group.
+PASS — every declared landing target == forward branch 'develop' (0 violations)
+PASS — embeddedInterpreterLines=6566 ≤ 6566, duplicateCopies=0 ≤ 0
+```
+其中新增测试：`worker-driver.test.mjs` 4 条（含「同一 (task,runId) 两轮 ⇒ 旧口径张冠李戴」的负控制）、
+`duration-report.test.mjs` 8 条（三态 / 右删失 / 载体缺席 / 窗口解析）。两条既有静态棘轮要求的是
+**修**而不是往 baseline 加：`tmp-leak-pairing-check` 与 `test-isolation-check` 都是 shrink-only，
+故临时目录改为「登记 + top-level `after()` 载体清理」；`task-file-bypass-check` 的白名单加一条
+（本文件的**对象**就是任务库的终态分布，与 `gate-event-coverage-check.ts` 同一处置）。
 
 ### AC1 / AC2 为什么「待外部」（结构性，不是拖延）
 
@@ -111,9 +128,9 @@ AC2 要**≥20 条连续真实尝试**满足 `0 ≤ lock wait ≤ attempt durati
   `worker-outcome.jsonl` 记录；AC2 的 ≥20 条由随后的 20 次自然派发累积。
 - **验证命令（落地后可直接跑）**：
   - AC1：`node --experimental-strip-types plugin/scripts/duration-report.ts --root <主检出> --since <落地时刻> --json`，
-    取任一 `final_state` 非空的尝试，核其 `dispatcher→worker_exited_at` 与 `.quay/fan-in-<task>-<runId>.log`
-    里 acquire/suite 记录的 `ts` 一致（`implementation n>0` 即证明五段都落了盘）。
-  - AC2：同一条命令，`lock wait` 段的 `min >= 0` 且 `max <= attempt max`，且 `n >= 20`。
+    取任一 `final_state` 非空的尝试，核其 `dispatched_at → worker_exited_at` 与
+    `.quay/fan-in-<task>-<runId>.log` 里 acquire/suite 记录的 `ts` 一致（`implementation n>0` 即证明五段都落了盘）。
+  - AC2：同一条命令，`lock wait` 段 `min >= 0` 且 `max <= attempt max`，且 `n >= 20`。
   - 反例判据：若 `legacy_lock_join.mismatched` 仍在增长，或出现 `lock_wait > attempt`，则本修复**假**。
 
 ## Touches
@@ -124,3 +141,4 @@ AC2 要**≥20 条连续真实尝试**满足 `0 ≤ lock wait ≤ attempt durati
 - plugin/test/worker-driver.test.mjs
 - plugin/test/duration-report.test.mjs
 - plugin/scripts/capability-catalog-declarations.json
+- plugin/scripts/task-file-bypass-check.ts

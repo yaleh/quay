@@ -21,6 +21,9 @@ import path from "node:path";
 // there: `probe → runner-concurrency → driver-runtime` is an existing value-import chain, so adding
 // `driver-runtime → probe` would close a NEW cycle against a `valueSccs: 0` ratchet baseline).
 import { sharedHostCeilingBytes, listSharedHostScopes, SHARED_HOST_MIN_CEILING_BYTES, SHARED_HOST_OBSERVED_PEAK_BYTES } from "../scripts/driver-runtime.ts";
+// The ONE lane-scaled derivation lives in Core's systemd-scope.ts leaf (imported by both the plugin
+// side and the serve host) — the AC3 host-shape tests drive THAT function, ⛔ not a copy of it here.
+import { laneScaledScopeMemoryMax, SCOPE_ENVELOPE_LANE_HEADROOM, SCOPE_ENVELOPE_HOST_FRACTION } from "../../packages/quay/src/systemd-scope.ts";
 
 import {
   isFailureLine,
@@ -40,7 +43,11 @@ import {
   systemdRunAvailable,
   suiteMemoryMax,
   defaultSuiteMemoryMax,
-  SUITE_MEMORY_MAX_CEILING,
+  resolveSuiteMemoryMax,
+  declaredSuiteMemoryMax,
+  readSuiteMemoryMeasurements,
+  actualConcurrencyFromRows,
+  SUITE_MEMORY_MAX_DEFAULT,
   readEffectiveTotalMemBytes,
   parseSystemdConsumedLine,
   parseSystemdTimespanToSeconds,
@@ -334,8 +341,12 @@ test("AC1 unit — buildSystemdRunArgv wraps a command in systemd-run --user --s
   // DEFAULT has cpuQuota:"" ⇒ NO -p CPUQuota= (人裁定: 不设 CPU 上限; a literal only equals
   // "unlimited" on the machine it was written for — CLAUDE.md 推论二)
   // gap-full-suite-scope-oom-policy-stops-whole-suite-unattributable: the ALWAYS-present properties
-  // (MemoryAccounting=yes + OOMPolicy=continue, shared with the availability probe) now precede the
-  // conditional limits. MemoryMax=16G is STILL byte-identical (the 红线: 不打断生产测试).
+  // (MemoryAccounting=yes + OOMPolicy=continue, shared with the availability probe) precede the
+  // conditional limits.
+  // gap-suite-memorymax-literal-16g-cap-pinned-every-round-while-lanes-scale-with-nproc (re-scoped
+  // 2026-10-14): the MemoryMax is NO LONGER a code literal — it is the DECLARED value (`suite:
+  // memory_max:` / `QUAY_SUITE_MEMORY_MAX` / the declared default), clamped by the host guard. The
+  // assertion is on the value the constant HOLDS, never on a literal.
   assert.deepEqual(argv, [
     "systemd-run",
     "--user",
@@ -346,11 +357,17 @@ test("AC1 unit — buildSystemdRunArgv wraps a command in systemd-run --user --s
     "-p",
     "OOMPolicy=continue",
     "-p",
-    "MemoryMax=16G",
+    `MemoryMax=${DEFAULT_SYSTEMD_RUN_LIMITS.memoryMax}`,
     "bash",
     "-c",
     "bash scripts/test.sh",
   ]);
+  assert.ok(!argv.includes("MemoryMax=16G"), "the ceiling is no longer spelled as a code literal — it is the declared size in BYTES");
+  assert.equal(
+    DEFAULT_SYSTEMD_RUN_LIMITS.memoryMax,
+    String(Math.min(16 * 1024 ** 3, sharedHostCeilingBytes(readEffectiveTotalMemBytes(), listSharedHostScopes().count))),
+    "the declared 16 GiB baseline, clamped by the host guard (⛔ not 24/26 GiB)",
+  );
   assert.ok(argv.includes("OOMPolicy=continue"), "the scope sets OOMPolicy=continue (one OOM-killed process must not TERM the whole suite)");
   assert.ok(!argv.includes("CPUQuota="), "default argv carries NO CPUQuota — the cgroup has no CPU limit");
   assert.ok(!argv.includes("TasksMax="), "default argv carries NO TasksMax — the cgroup has no task limit (人 2026-08-12 裁定③)");
@@ -396,15 +413,39 @@ test(
       const s = readState(root);
       assert.equal(s.state, "green");
       assert.ok(s.systemdRun, "the state carries the systemdRun limits (suite ran inside a cgroup scope)");
-      assert.equal(s.systemdRun.memoryMax, "16G");
+      // gap-suite-memorymax-literal-16g-cap-pinned-every-round-while-lanes-scale-with-nproc — this root
+      // has no round history, so the MEASUREMENTS are absent (`null`, never 0). The ceiling is the
+      // DECLARED value, still clamped by the host guard. Asserted by RE-RESOLVING it here rather than
+      // by a literal — and the round's own evidence records the whole policy.
+      const policy = resolveSuiteMemoryMax(root);
+      assert.equal(s.systemdRun.memoryMax, policy.memoryMax);
+      assert.equal(policy.declared, "16G");
+      assert.equal(policy.declaredSource, "default");
+      assert.equal(policy.actualConcurrency, null, "缺值 ≠ 0 — no usable history ⇒ null, never a fabricated 0");
+      assert.equal(policy.perFileHighWaterBytes, null);
+      assert.equal(policy.laneScaledEstimateBytes, null);
       assert.equal(s.systemdRun.cpuQuota, "");
       assert.equal(s.systemdRun.tasksMax, "");
+      // …and the POLICY rides the durable per-run evidence (runId-keyed, never overwritten), so a reader
+      // can see the declaration, its source, the guard and the measurements instead of inferring them.
+      const memEvidence = JSON.parse(fs.readFileSync(path.join(root, ".quay", `suite-memory-evidence-${s.runId}.json`), "utf8"));
+      assert.equal(memEvidence.memoryMaxBytes, Number(policy.memoryMax), "the sampled ceiling is the declared one");
+      assert.equal(memEvidence.memoryMaxPolicy.declared, "16G");
+      assert.equal(memEvidence.memoryMaxPolicy.declaredSource, "default");
+      assert.equal(memEvidence.memoryMaxPolicy.bound, "declared");
+      assert.equal(memEvidence.memoryMaxPolicy.actualConcurrency, null, "the measurement rides the evidence as an explicit null");
+      assert.ok(memEvidence.memoryMaxPolicy.hostGuardBytes > 0, "the host guardrail that bounded it is recorded");
+      assert.equal(memEvidence.memoryMaxPolicy.laneScaledExceedsHostGuard, null, "un-computable ⇒ null, ⛔ not false");
       // AC1 observable — the applied cgroup attributes (systemctl --user show) land in the state dir
       const evidence = path.join(root, ".quay", "suite-cgroup-evidence.txt");
       await poll(() => fs.existsSync(evidence), { timeoutMs: 10_000 });
       const txt = fs.readFileSync(evidence, "utf8");
       assert.match(txt, /scope_unit=run-[a-z0-9]+\.scope/, "the transient scope unit name is recorded (systemd names it run-<id>.scope — cgroup-derived)");
-      assert.match(txt, /MemoryMax=17179869184/, "MemoryMax=16G applied (bytes)");
+      assert.match(
+        txt,
+        new RegExp(`MemoryMax=${policy.memoryMax}`),
+        `the applied cgroup ceiling is exactly the declared one (${policy.memoryMax}), read back from systemd`,
+      );
       assert.doesNotMatch(txt, /TasksMax=200/, "no TasksMax=200 passed (人 2026-08-12 裁定③: task limit canceled)");
       assert.match(txt, /CPUQuotaPerSecUSec=(max|infinity)/, "no CPUQuota passed ⇒ cgroup CPU unlimited (max/infinity per systemd)");
     } finally {
@@ -915,52 +956,221 @@ test("load-fields — a NON-systemd round (no scope unit) OMITS all four load fi
 });
 
 
-// ── gap-full-suite-runner-memory-max-host-derived-envelope ──────────────────────────────────────────
-// The suite's MemoryMax was a WRITTEN-DOWN "16G". A literal ceiling is only safe on the host it was
-// written for (CLAUDE.md 硬规则 4 推论二); on a small host it exceeds the host total and the cgroup
-// guardrail stops existing. The new default is HOST-DERIVED via the SAME page-aligned
-// `floor(totalmem × 0.25)` formula the driver anchor uses, clamped to the empirical 16G ceiling. The
-// RED LINE: on the 128-core baseline the derived value reaches the ceiling ⇒ the argv is byte-for-byte
-// unchanged (⛔ not "roughly the same").
-const GIB = 1024 ** 3;
 
-test("unit — suiteMemoryMax keeps the 16G ceiling on a big host; the default argv stays byte-identical", () => {
-  // Pure, host-independent: anything at or above the ceiling renders the ceiling STRING (not its bytes).
-  assert.equal(SUITE_MEMORY_MAX_CEILING, "16G");
-  assert.equal(suiteMemoryMax(64 * GIB), "16G", "exactly at the boundary ⇒ the ceiling string");
-  assert.equal(suiteMemoryMax(256 * GIB), "16G");
-  assert.equal(suiteMemoryMax(1024 * GIB), "16G");
-  // The concrete byte-identity claim, asserted ONLY where it holds (a <64G host correctly shrinks):
-  if (os.totalmem() >= 64 * GIB) {
-    assert.equal(DEFAULT_SYSTEMD_RUN_LIMITS.memoryMax, "16G", "on a ≥64G host the default reaches the ceiling");
-    // gap-full-suite-scope-oom-policy-stops-whole-suite-unattributable: the MemoryMax=16G half is
-    // byte-for-byte unchanged (红线: 不打断生产测试); the argv now additionally carries the shared
-    // always-present properties (MemoryAccounting=yes + OOMPolicy=continue).
-    assert.deepEqual(
-      buildSystemdRunArgv("bash scripts/test.sh"),
-      [
-        "systemd-run", "--user", "--scope", "--quiet",
-        "-p", "MemoryAccounting=yes",
-        "-p", "OOMPolicy=continue",
-        "-p", "MemoryMax=16G",
-        "bash", "-c", "bash scripts/test.sh",
-      ],
-      "the MemoryMax half must be byte-for-byte what it was (红线: 不打断生产测试); only the OOM/accounting pair was added",
-    );
+// ── gap-suite-memorymax-literal-16g-cap-pinned-every-round-while-lanes-scale-with-nproc ────────────
+// The suite cgroup's ceiling was a WRITTEN-DOWN `"16G"` constant in full-suite-runner.ts. Re-scoped
+// 2026-10-14 (human-directed): **16 GiB stays the default** — a deliberate pressure constraint that
+// drives test optimization — but it stops being a code literal: it becomes a project-declared
+// (`.quay/config.yml` `suite: memory_max:`) and host-overridable (`QUAY_SUITE_MEMORY_MAX`) setting,
+// with the host-relative fraction kept as the UPPER bound.
+//
+// The same re-scope overturned the task's original premise with read-only measurements, and these
+// tests encode the corrected reading:
+//   · `peak == memoryMax` is NORMAL (a cgroup's peak includes reclaimable page cache): 10-11 (14/42
+//     runs) and 10-12 (12/53) sat at the cap with ZERO `oom_kill`.
+//   · OOM kills are RECENT: 10-10 0/8, 10-11 0/42, 10-12 0/53, 10-13 3/25, 10-14 5/8.
+//   · The concurrency that actually holds is 64, NOT the requested lane count 128: the scheduler's
+//     reliability cap keeps total concurrency at the lowest ACTIVE group's budget, and the
+//     serial/lowconc budget is floor(nproc/(S×P)) = 64.
+// ⇒ the lane/per-file estimator stays (pure, host-shape-tested) but is a DIAGNOSTIC: it is fed the
+// MEASURED concurrency and it may never raise the effective ceiling.
+const GIB = 1024 ** 3;
+const MIB = 1024 ** 2;
+/** The production carrier (main checkout). Absent on a fresh clone ⇒ the tests that need it SKIP. */
+const PROD_STATE_DIR = path.join(REPO_ROOT, ".quay");
+const HAS_PROD_ROUNDS = fs.existsSync(path.join(PROD_STATE_DIR, "verification-round.jsonl"));
+
+test("AC2 — the effective MemoryMax comes from the DECLARED value, and the declaration is what moves it", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-decl-"));
+  try {
+    const resolved = resolveSuiteMemoryMax(dir);
+    assert.equal(resolved.declared, "16G", "the human-ruled baseline is the declared default");
+    assert.equal(resolved.declaredSource, "default", "…and it is the DEFAULT, not an env/config value");
+    assert.equal(resolved.bound, "declared", "the declared value is what applied (⛔ not raised to the host fraction)");
+    assert.equal(resolved.memoryMax, String(16 * GIB), "16 GiB, in bytes");
+    // The declared value is clamped only by the host bound (this host's is far above 16 GiB).
+    assert.ok(Number(resolved.memoryMax) <= resolved.hostGuardBytes, "never above the host guardrail");
+    assert.equal(Number(resolved.memoryMax), Math.min(16 * GIB, resolved.hostGuardBytes));
+    // The module-load template agrees (it resolves the same declaration, no state dir).
+    assert.equal(defaultSuiteMemoryMax(), String(Math.min(16 * GIB, sharedHostCeilingBytes(readEffectiveTotalMemBytes(), listSharedHostScopes().count))));
+    assert.equal(DEFAULT_SYSTEMD_RUN_LIMITS.memoryMax, defaultSuiteMemoryMax());
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
   }
-  assert.ok(os.totalmem() > 0);
 });
 
-test("unit — suiteMemoryMax shrinks PROPORTIONALLY below the ceiling on a memory-limited host", () => {
-  // floor(bytes × 0.25), page-aligned — the driver-anchor formula, reused (⛔ not re-derived).
-  assert.equal(suiteMemoryMax(4 * GIB), String(GIB), "4G ⇒ 1G");
-  assert.equal(suiteMemoryMax(2 * GIB), String(GIB / 2), "2G ⇒ 512M");
-  assert.equal(suiteMemoryMax(8 * GIB), String(2 * GIB), "8G ⇒ 2G");
-  assert.ok(Number(suiteMemoryMax(4 * GIB)) < Number("17179869184"), "a small host gives a value BELOW the 16G ceiling");
-  // proportional (not merely "different" — a literal would give the SAME value for both)
-  assert.equal(Number(suiteMemoryMax(4 * GIB)) / Number(suiteMemoryMax(2 * GIB)), 2, "the value scales with the host (2×)");
-  // page-aligned (a systemd/cgroup rounding difference must not surface as a few-KB mismatch)
-  assert.equal(Number(suiteMemoryMax(7 * GIB + 12345)) % 4096, 0, "the byte count is page-aligned");
+test("AC2 — an override CHANGES the effective ceiling (config/env is the mechanism, not the code)", () => {
+  // A fixed host guard keeps this deterministic on any host: 64 GiB.
+  const guard = 64 * GIB;
+  const withDeclared = (v) => suiteMemoryMax({ effectiveTotalMemBytes: 246 * GIB, declared: { value: v, source: "env" }, hostGuardBytes: guard });
+  assert.equal(withDeclared("2G").memoryMax, String(2 * GIB), "a 2G declaration is applied verbatim");
+  assert.equal(Number(withDeclared("20G").memoryMax), 20 * GIB, "the ceiling FOLLOWS the declaration (⛔ not pinned to 16G in code)");
+  assert.equal(withDeclared("20G").bound, "declared");
+  assert.notEqual(withDeclared("2G").memoryMax, withDeclared("20G").memoryMax, "two declarations ⇒ two ceilings");
+
+  // The env knob is the declared-source path the runner reads (config promotes into the same env).
+  assert.deepEqual(declaredSuiteMemoryMax("8G"), { value: "8G", source: "env" });
+  assert.deepEqual(declaredSuiteMemoryMax(" 16G "), { value: "16G", source: "env" }, "whitespace tolerated");
+  assert.deepEqual(declaredSuiteMemoryMax(""), { value: SUITE_MEMORY_MAX_DEFAULT, source: "default" }, "empty ⇒ the default");
+  assert.deepEqual(declaredSuiteMemoryMax(undefined), { value: SUITE_MEMORY_MAX_DEFAULT, source: "default" });
+  assert.deepEqual(declaredSuiteMemoryMax("banana"), { value: SUITE_MEMORY_MAX_DEFAULT, source: "default" }, "an unparseable value must NOT reach systemd-run (it would refuse the scope)");
+  // The runner's env is the knob the config promotes into (the SAME name, so config < env holds).
+  assert.equal(process.env.QUAY_SUITE_MEMORY_MAX === undefined || typeof process.env.QUAY_SUITE_MEMORY_MAX === "string", true);
+});
+
+test("AC2 — a declared value ABOVE the host fraction is CLAMPED, and a small fixture host never exceeds its bound", () => {
+  // An 8 GiB effective host with the 0.25 fraction ⇒ a 2 GiB bound.
+  const clamped = suiteMemoryMax({ effectiveTotalMemBytes: 8 * GIB, declared: { value: "16G", source: "env" }, hostGuardBytes: 2 * GIB });
+  assert.equal(clamped.bound, "host-guard", "an above-host declaration is the host-guard case");
+  assert.equal(clamped.memoryMax, String(2 * GIB), "…and the host bound is what applies");
+  assert.ok(Number(clamped.memoryMax) <= 2 * GIB, "⛔ never above the host bound");
+  assert.match(clamped.reason, /exceeds the host-relative guardrail/);
+
+  // The FIXTURE SMALL HOST (8 GB) end to end, via the real derivation (no injected guard): the declared
+  // 16 GiB cannot leak onto a host that has 8 GiB.
+  const smallHost = suiteMemoryMax({ effectiveTotalMemBytes: 8 * GIB, declared: declaredSuiteMemoryMax("16G") });
+  assert.equal(smallHost.memoryMax, String(2 * GIB), "8 GB host ⇒ 2 GiB, from the host fraction");
+  assert.ok(Number(smallHost.memoryMax) <= 8 * GIB, "never above the whole host, let alone 16 GiB");
+  assert.equal(suiteMemoryMax({ effectiveTotalMemBytes: 4 * GIB, declared: { value: "16G", source: "default" } }).memoryMax, String(GIB), "4 GB host ⇒ 1 GiB");
+  // …and a declaration UNDER the small host's bound still wins there (the clamp is an upper bound, not a rewrite).
+  assert.equal(suiteMemoryMax({ effectiveTotalMemBytes: 8 * GIB, declared: { value: "512M", source: "env" } }).memoryMax, String(512 * MIB));
+  // A malformed declaration degrades to the host guard (fail-safe: never forward garbage to systemd-run).
+  const bad = suiteMemoryMax({ effectiveTotalMemBytes: 4 * GIB, declared: { value: "sixteen gigs", source: "env" } });
+  assert.equal(bad.bound, "host-guard");
+  assert.equal(bad.memoryMax, String(GIB));
+  assert.match(bad.reason, /not a parseable size/);
+});
+
+test("AC3 — the concurrency input is the MEASURED overlap of per-file intervals, not the requested lane count", () => {
+  // Pure: three overlapping intervals + one disjoint ⇒ max overlap 3; the disjoint file does not count.
+  const rows = [
+    {
+      perFile: [
+        { startedAtMs: 0, endedAtMs: 100 },
+        { startedAtMs: 10, endedAtMs: 110 },
+        { startedAtMs: 20, endedAtMs: 30 },
+        { startedAtMs: 200, endedAtMs: 300 },
+      ],
+    },
+  ];
+  assert.equal(actualConcurrencyFromRows(rows), 3, "the max number of intervals overlapping at one instant");
+  // A file ENDING at t and another STARTING at t are not concurrent (the interval boundary is half-open).
+  assert.equal(actualConcurrencyFromRows([{ perFile: [{ startedAtMs: 0, endedAtMs: 10 }, { startedAtMs: 10, endedAtMs: 20 }] }]), 1);
+  // 缺值 ≠ 0: no usable timestamps ⇒ null, never a fabricated 0.
+  assert.equal(actualConcurrencyFromRows([{ perFile: [{ startedAtMs: 0 }] }]), null);
+  assert.equal(actualConcurrencyFromRows([]), null);
+  assert.equal(actualConcurrencyFromRows([{}]), null);
+});
+
+test(
+  "AC3 — a REAL round's measured concurrency equals an independent overlap computation, and the diagnostic is below 16 GiB",
+  { skip: HAS_PROD_ROUNDS ? false : "no .quay/verification-round.jsonl in this checkout (fresh clone) — nothing to measure" },
+  async () => {
+    const real = resolveSuiteMemoryMax(PROD_STATE_DIR);
+    assert.ok(real.actualConcurrency !== null && real.actualConcurrency > 0, `a real measured concurrency (${real.actualConcurrency})`);
+    assert.ok(real.actualConcurrency < 128, "…BELOW the requested lane count 128 — the scheduler's reliability cap is why");
+    assert.ok(real.perFileHighWaterBytes !== null && real.perFileHighWaterBytes > 0, "the per-file high-water is measured too");
+    assert.ok(real.laneScaledEstimateBytes !== null && real.laneScaledEstimateBytes > 0);
+    assert.ok(real.laneScaledEstimateBytes < 16 * GIB, `the diagnostic is below the declared 16 GiB (${(real.laneScaledEstimateBytes / GIB).toFixed(2)} GiB)`);
+    assert.equal(real.laneScaledExceedsHostGuard, false);
+    assert.equal(real.memoryMax, String(16 * GIB), "the effective ceiling is still the declared 16 GiB");
+
+    // INDEPENDENT overlap computation on the same carrier (a different algorithm: for every start
+    // timestamp, count the intervals containing it) — the reader and the carrier must agree numerically.
+    const text = fs.readFileSync(path.join(PROD_STATE_DIR, "verification-round.jsonl"), "utf8").trim().split("\n");
+    const rows = [];
+    for (let i = text.length - 1; i >= 0 && rows.length < 5; i--) {
+      try {
+        rows.push(JSON.parse(text[i]));
+      } catch {
+        /* torn line */
+      }
+    }
+    const iv = rows.flatMap((r) => (r.perFile || []).filter((f) => Number.isFinite(f.startedAtMs) && Number.isFinite(f.endedAtMs)).map((f) => [f.startedAtMs, f.endedAtMs]));
+    let bruteMax = 0;
+    for (const [s] of iv) {
+      let n = 0;
+      for (const [a, b] of iv) if (a <= s && s < b) n++;
+      if (n > bruteMax) bruteMax = n;
+    }
+    assert.equal(real.actualConcurrency, bruteMax, `the reader's ${real.actualConcurrency} equals the independent count ${bruteMax}`);
+  },
+);
+
+test("AC3/DoD — the diagnostic can NEVER raise the effective MemoryMax above the declared value", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-noraise-"));
+  try {
+    // A deliberately alarming measurement: ~1 TB of "measured" per-file demand, 200-way concurrency.
+    fs.writeFileSync(
+      path.join(dir, "verification-round.jsonl"),
+      `${JSON.stringify({
+        round: 1,
+        perFile: Array.from({ length: 200 }, (_, i) => ({ startedAtMs: 0, endedAtMs: 1000, memPeakKb: 5_000_000 + i })),
+      })}\n`,
+    );
+    const wild = resolveSuiteMemoryMax(dir);
+    assert.equal(wild.laneScaledEstimateBytes > 16 * GIB, true, `the diagnostic DOES react to the measurement (${(wild.laneScaledEstimateBytes / GIB).toFixed(1)} GiB)`);
+    assert.equal(wild.memoryMax, String(16 * GIB), "⛔ but the effective MemoryMax is STILL the declared 16 GiB");
+    assert.equal(wild.bound, "declared");
+
+    // A wide measured concurrency alone must not move it either.
+    fs.writeFileSync(
+      path.join(dir, "verification-round.jsonl"),
+      `${JSON.stringify({ round: 1, perFile: Array.from({ length: 128 }, (_, i) => ({ startedAtMs: 0, endedAtMs: 1000, memPeakKb: 900_000 + i })) })}\n`,
+    );
+    const wide = resolveSuiteMemoryMax(dir);
+    assert.equal(wide.actualConcurrency, 128, "the reader reports the wide concurrency it measured");
+    assert.equal(wide.memoryMax, String(16 * GIB), "…and the ceiling is untouched by it");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("DoD — no commit may raise the effective default above 16 GiB: the resolved default is PINNED here", () => {
+  // The human ruled 16 GiB a deliberate pressure baseline (2026-10-14). This is the mechanical half of
+  // "no commit on this branch raises the effective default": change SUITE_MEMORY_MAX_DEFAULT, or make
+  // the runner derive a bigger default, and THIS goes red.
+  assert.equal(SUITE_MEMORY_MAX_DEFAULT, "16G", "the declared default is 16G");
+  assert.equal(parseSystemdBytesToMb(SUITE_MEMORY_MAX_DEFAULT) * 1024 * 1024, 16 * GIB);
+  assert.ok(Number(defaultSuiteMemoryMax()) <= 16 * GIB, `the resolved default never exceeds 16 GiB (${defaultSuiteMemoryMax()})`);
+  assert.ok(Number(DEFAULT_SYSTEMD_RUN_LIMITS.memoryMax) <= 16 * GIB);
+  // On a host whose guardrail is at or above 16 GiB (this one), the default is EXACTLY 16 GiB.
+  if (sharedHostCeilingBytes(readEffectiveTotalMemBytes(), listSharedHostScopes().count) >= 16 * GIB) {
+    assert.equal(defaultSuiteMemoryMax(), String(16 * GIB), "16 GiB exactly — ⛔ not 24/26 GiB");
+  }
+});
+
+test("unit — readSuiteMemoryMeasurements reads the round record's own perFile (rows absent ⇒ both null)", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-meas-"));
+  try {
+    assert.deepEqual(readSuiteMemoryMeasurements(dir), { actualConcurrency: null, perFileHighWaterBytes: null }, "no carrier ⇒ nulls, never zeros");
+    // Distinct ABSOLUTE timestamps per round (real rounds do not share a time base): one file per
+    // round ⇒ the pooled overlap is 1, not one-per-row.
+    const rows = [];
+    for (let r = 1; r <= 8; r++) rows.push(JSON.stringify({ round: r, perFile: [{ startedAtMs: r * 1000, endedAtMs: r * 1000 + 10, memPeakKb: r * 1000 }] }));
+    fs.writeFileSync(path.join(dir, "verification-round.jsonl"), rows.join("\n") + "\n");
+    const m = readSuiteMemoryMeasurements(dir, { rounds: 3, percentile: 1 });
+    assert.equal(m.perFileHighWaterBytes, 8000 * 1024, "only the newest N rounds are pooled");
+    assert.equal(m.actualConcurrency, 1, "one file per round ⇒ overlap 1");
+    // A torn trailing line (the runner's own append observed mid-write) is skipped, never fabricated.
+    fs.appendFileSync(path.join(dir, "verification-round.jsonl"), '{"round": 9, "perFile": [{"memPeakKb"');
+    assert.equal(readSuiteMemoryMeasurements(dir, { rounds: 1, percentile: 1 }).perFileHighWaterBytes, 8000 * 1024);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("unit — a bounded tail window starts mid-record: the truncated first line is dropped, newer rounds still read", () => {
+  const small = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-tail-"));
+  try {
+    const body = [111, 222, 333, 444, 555].map((kb, i) => JSON.stringify({ round: i + 1, perFile: [{ memPeakKb: kb }] }));
+    assert.ok(body.every((l) => l.length === 41), "fixture rows are all 41 bytes so the window arithmetic holds");
+    fs.writeFileSync(path.join(small, "verification-round.jsonl"), body.join("\n") + "\n");
+    assert.equal(readSuiteMemoryMeasurements(small, { rounds: 5, percentile: 1, maxTailBytes: 60 }).perFileHighWaterBytes, 555 * 1024);
+    assert.equal(readSuiteMemoryMeasurements(small, { rounds: 5, percentile: 1 }).perFileHighWaterBytes, 555 * 1024, "the unbounded read agrees");
+  } finally {
+    fs.rmSync(small, { recursive: true, force: true });
+  }
 });
 
 test("unit — readEffectiveTotalMemBytes is fail-open (never throws, never 0, never above the host total)", () => {
@@ -970,12 +1180,11 @@ test("unit — readEffectiveTotalMemBytes is fail-open (never throws, never 0, n
 });
 
 test(
-  "REAL cgroup — a real MemoryMax=4G scope shrinks the default proportionally (< 16G), from the cgroup, not os.totalmem()",
+  "REAL cgroup — on a real MemoryMax=4G external scope the DEFAULT is clamped to the host bound, not 16 GiB",
   { skip: systemdRunAvailable() ? false : "not-evaluated: systemd-run --user --scope unavailable on this host" },
   async () => {
-    // A REAL cgroup construction (systemd-run --scope — the same technique as
-    // driver-anchor-memory-envelope AC4), ⛔ not a mock. The unit name deliberately does NOT match quay's
-    // own envelope prefixes ⇒ it stands in for an EXTERNAL cap (container / VM / slice).
+    // A REAL cgroup construction (systemd-run --scope), ⛔ not a mock. The unit name deliberately does
+    // NOT match quay's own envelope prefixes ⇒ it stands in for an EXTERNAL cap (container / VM / slice).
     const unit = `quay-suite-memtest-${Date.now()}-${process.pid}.scope`;
     const probe = `import(${JSON.stringify(RUNNER)}).then(m=>console.log(JSON.stringify({effective:m.readEffectiveTotalMemBytes(),memoryMax:m.DEFAULT_SYSTEMD_RUN_LIMITS.memoryMax,totalmem:require("os").totalmem()}))).catch(e=>{console.error(e);process.exit(1)})`;
     const { code, out, err } = await spawnCmd([
@@ -988,19 +1197,20 @@ test(
     assert.ok(line, `no reading from the scoped probe — stdout=${JSON.stringify(out)} stderr=${JSON.stringify(err)}`);
     const reading = JSON.parse(line);
     assert.equal(reading.effective, 4 * GIB, "the effective total is the cgroup cap (4G), read from the real cgroup");
-    assert.equal(reading.memoryMax, String(GIB), "the default MemoryMax is floor(4G × 0.25) = 1G — strictly below the 16G ceiling");
+    // The declared 16 GiB must NOT leak onto a 4 GiB host: the host fraction is the upper bound.
+    assert.equal(reading.memoryMax, String(GIB), "4 GiB effective ⇒ the declared 16 GiB is clamped to floor(4G × 0.25) = 1 GiB");
+    assert.notEqual(reading.memoryMax, String(16 * GIB), "⛔ the declared default must never exceed the host bound");
     assert.ok(reading.totalmem > reading.effective, "os.totalmem() is the big host total ⇒ the SMALL value came from the cgroup cap, not from a small host");
   },
 );
 
 test(
-  "REAL cgroup negative control — quay's OWN envelope scope name does NOT shrink the suite ceiling (⛔ not external capacity)",
+  "REAL cgroup negative control — quay's OWN envelope scope name does NOT shrink the declared ceiling (⛔ not external capacity)",
   { skip: systemdRunAvailable() ? false : "not-evaluated: systemd-run --user --scope unavailable on this host" },
   async () => {
-    // The RED-LINE mechanism, proved on a real cgroup: the 128-core baseline runs the suite INSIDE quay's
-    // own `quay-anchor-*` envelope scope (≈0.25 × host total). If the reading consumed it, the derived
-    // value would be ≈0.25 × 0.25 × host (< 16G) and the argv WOULD change. A scope named `quay-anchor-*`
-    // with a 1G cap must be IGNORED — the reading falls through to the host total.
+    // The exclusion is still load-bearing after the re-scope: if the reading consumed quay's own
+    // `quay-anchor-*` guardrail, a declared 16 GiB would be clamped to ≈0.25 × that (≈6.5 GiB) — the
+    // 2026-08-era bug in a new dress. A scope named `quay-anchor-*` with a 1G cap must be IGNORED.
     const unit = `quay-anchor-fsr-probe-${Date.now()}-${process.pid}.scope`;
     const probe = `import(${JSON.stringify(RUNNER)}).then(m=>console.log(JSON.stringify({effective:m.readEffectiveTotalMemBytes(),memoryMax:m.DEFAULT_SYSTEMD_RUN_LIMITS.memoryMax,totalmem:require("os").totalmem()}))).catch(e=>{console.error(e);process.exit(1)})`;
     const { code, out, err } = await spawnCmd([
@@ -1012,19 +1222,15 @@ test(
     const line = (out ?? "").trim().split("\n").filter((l) => l.startsWith("{")).pop();
     assert.ok(line, `no reading from the scoped probe — stdout=${JSON.stringify(out)} stderr=${JSON.stringify(err)}`);
     const reading = JSON.parse(line);
-    // gap-full-suite-runner-dedupe-memory-envelope-to-probe: the reading now comes from
-    // effective-capacity-probe.ts, whose OUTPUT CONTRACT is `effective_mem_mb` (MB precision), so the
-    // returned byte count is the host total TRUNCATED to whole MB (measured delta 991232 B = 0.95 MiB
-    // on the 128-core baseline). The assertion below is TIGHTENED to that documented shape: it still
-    // fails loudly if quay's own 1G anchor cap is consumed (effective would collapse to 1G), while
-    // pinning the ONLY difference from the pre-change exact-bytes value (< 1 MiB truncation).
+    // effective-capacity-probe.ts's output contract is MB precision, so the host total is truncated to
+    // whole MB (measured delta < 1 MiB on this host). The assertion pins that documented shape: it
+    // fails loudly if quay's own 1G anchor cap is consumed (effective would collapse to 1G).
     assert.ok(
       reading.effective <= reading.totalmem && reading.effective > reading.totalmem - 2 * 1024 * 1024,
       `a quay-anchor-* scope is our own guardrail ⇒ the reading falls through to the host total (MB-truncated), NOT the 1G we set; effective=${reading.effective} totalmem=${reading.totalmem}`,
     );
     assert.notEqual(reading.effective, 1024 * GIB, `effective (${reading.effective}) is the host total, ⛔ not the 1G we set on our own anchor-named scope`);
-    assert.equal(reading.memoryMax, "16G", "the derived default follows from the skipped-limit reading — still exactly the 16G ceiling string");
-    assert.equal(reading.memoryMax, suiteMemoryMax(reading.totalmem), "…and unchanged from the pre-change behaviour (both readings render the ceiling)");
+    assert.equal(reading.memoryMax, defaultSuiteMemoryMax(), "the scoped reading and the in-process constant agree");
   },
 );
 
@@ -1032,25 +1238,12 @@ test(
   "REAL cgroup NESTED — a quay-anchor-* ANCESTOR scope is skipped while a NON-quay child cgroup one level down IS consumed (gap-full-suite-runner-dedupe-memory-envelope-to-probe)",
   { skip: systemdRunAvailable() ? false : "not-evaluated: systemd-run --user --scope unavailable on this host" },
   async () => {
-    // The AC's "在一层嵌套 quay-anchor-* scope 内再跑一层" case, built on a REAL cgroup chain (⛔ not a
-    // mock): the outer scope is a quay-OWN `quay-anchor-*` envelope (1G), and INSIDE it a real CHILD
-    // cgroup is created through the scope's cgroup delegation with `memory.max=4G`.
-    //
-    // ⚠️ The two layers are chosen so the test DISCRIMINATES: the layer that must be EXCLUDED (the
-    // anchor, 1G) is TIGHTER than the layer that must be CONSUMED (the child, 4G). If the quay-own
-    // exclusion stopped working, the reading would collapse to 1G and this test would fail — the
-    // plain "only a quay-anchor scope, no child" negative control above cannot show that, because
-    // there the excluded layer is the only layer.
-    //
-    // Why the exclusion is still NECESSARY after the dedupe (recorded in the task body): the reading
-    // feeds the derivation of a NEW quay envelope, so consuming a quay-imposed ceiling would compound
-    // the same host fraction each nesting level (feedback loop) — and on the 128-core baseline the
-    // process really does run inside a `quay-anchor-*.scope`.
+    // Built on a REAL cgroup chain (⛔ not a mock): the outer scope is a quay-OWN `quay-anchor-*`
+    // envelope (1G), and INSIDE it a real CHILD cgroup is created through the scope's delegation with
+    // `memory.max=4G`. ⚠️ The two layers are chosen so the test DISCRIMINATES: the layer that must be
+    // EXCLUDED (the anchor, 1G) is TIGHTER than the layer that must be CONSUMED (the child, 4G).
     const unit = `quay-anchor-fsr-nested-${Date.now()}-${process.pid}.scope`;
     const probe = `import(${JSON.stringify(RUNNER)}).then(m=>console.log(JSON.stringify({effective:m.readEffectiveTotalMemBytes(),memoryMax:m.DEFAULT_SYSTEMD_RUN_LIMITS.memoryMax,totalmem:require("os").totalmem()}))).catch(e=>{console.error(e);process.exit(1)})`;
-    // Run a REAL nested cgroup by hand: move this shell into a freshly created child of the scope's
-    // own cgroup (delegated ⇒ writable), then enable the memory controller on the parent and cap the
-    // child. The three raw kernel readings are echoed so the assertion can be checked against them.
     const inner = [
       "set -e",
       'P=/sys/fs/cgroup$(cut -d: -f3 /proc/self/cgroup)',
@@ -1068,7 +1261,6 @@ test(
       { ...process.env, QUAY_NESTED_NODE: process.execPath, QUAY_NESTED_PROBE: probe },
     );
     assert.equal(code, 0, `the nested probe exits 0; stdout=${JSON.stringify(out)} stderr=${JSON.stringify(err)}`);
-    // The construction really produced a two-level chain: anchor 1G, child 4G, process in the child.
     assert.match(out, /NESTED_SELF=\S*quay-anchor-fsr-nested-[^\s/]*\.scope\/inner/, `the probe ran inside the nested child cgroup; stdout=${JSON.stringify(out)}`);
     assert.match(out, /NESTED_ANCHOR_MAX=1073741824/, `the ancestor scope's kernel memory.max really is 1G; stdout=${JSON.stringify(out)}`);
     assert.match(out, /NESTED_CHILD_MAX=4294967296/, `the child cgroup's kernel memory.max really is 4G; stdout=${JSON.stringify(out)}`);
@@ -1077,63 +1269,71 @@ test(
     const reading = JSON.parse(line);
     assert.equal(reading.effective, 4 * GIB, `the NON-quay child layer (4G) is CONSUMED and the TIGHTER quay-anchor ancestor (1G) is SKIPPED — effective=${reading.effective}`);
     assert.notEqual(reading.effective, GIB, "⛔ the quay-own ancestor's 1G was NOT consumed (that would be the feedback loop the exclusion exists to prevent)");
-    assert.equal(reading.memoryMax, String(GIB), "the derived default follows the consumed 4G layer: floor(4G × 0.25) = 1G");
+    assert.equal(reading.memoryMax, String(GIB), "the declared 16 GiB is clamped to the consumed 4G layer: floor(4G × 0.25) = 1G");
     assert.ok(reading.totalmem > reading.effective, "os.totalmem() is the big host total ⇒ the 4G came from the cgroup chain, not from a small host");
   },
 );
 
-
 // ── gap-independent-anchor-memory-envelope-oversubscribes-shared-host (suite half) ───────────────
 // The SUITE is a second long-lived consumer of the same host-derived fraction: it and the anchor
-// groups are alive at the same time, so the suite's `0.25 × effective` adds to the same sum. It is
-// wired through the SAME `sharedHostCeilingBytes` (⛔ one implementation, 硬规则 5b — this file owns
-// no second copy of the formula).
-//
-// ⚠️ The behaviour difference here is bounded by the suite's OWN empirical ceiling (16G): the shared
-// floor is 2 × the largest measured long-run anchor peak (13.0 GiB) = 26 GiB, i.e. ABOVE 16G, so
-//     min(0.25 × effective, max(effective/(N+1), 26 GiB))  renders as `16G`  ⟺  0.25 × effective ≥ 16 GiB
-// which is exactly when the project-blind value renders as `16G` too. The tests below pin that as an
-// INVARIANT rather than a coincidence — it is what keeps `buildSystemdRunArgv`'s argv byte-identical
-// (红线: 不打断生产测试).
+// groups are alive at the same time, so the suite's share adds to the same sum. It is wired through
+// the SAME `sharedHostCeilingBytes` (⛔ one implementation, 硬规则 5b — this file owns no second copy
+// of the formula), and it is the UPPER bound on the declared ceiling — so a declared value is never
+// above what the shared host can afford, while a declared value BELOW it (the 16 GiB baseline here)
+// is honoured unchanged.
 
-test("unit — the shared-host step NEVER changes the suite's MemoryMax (the byte-identity red line)", () => {
+test("unit — the shared-host step is the UPPER bound: it never RAISES the declared ceiling", () => {
   const effective = readEffectiveTotalMemBytes();
   const reading = listSharedHostScopes();
-  const sharedCeiling = sharedHostCeilingBytes(effective, reading.count);
-  // The wiring is real: the production default is the shared-host ceiling fed through suiteMemoryMax…
-  assert.equal(defaultSuiteMemoryMax(), suiteMemoryMax(effective, sharedCeiling));
-  assert.equal(DEFAULT_SYSTEMD_RUN_LIMITS.memoryMax, defaultSuiteMemoryMax());
-  // …and it renders the SAME value the project-blind derivation would, on any host.
-  assert.equal(defaultSuiteMemoryMax(), suiteMemoryMax(effective), "the suite's ceiling must be invariant under the sibling count");
-  // The invariant's REASON, asserted rather than asserted-about: the floor is at or above the suite's
-  // own empirical ceiling, so a tightened shared ceiling can never render below `16G` unless the
-  // project-blind one would have too.
-  assert.ok(SHARED_HOST_MIN_CEILING_BYTES >= suiteMemoryMaxCeilingBytes(), `${SHARED_HOST_MIN_CEILING_BYTES} must be ≥ the suite's own empirical ceiling`);
+  const blind = Math.floor((effective * SCOPE_ENVELOPE_HOST_FRACTION) / 4096) * 4096;
+  for (const n of [0, 1, 2, 8, 10 ** 6]) {
+    const guard = sharedHostCeilingBytes(effective, n);
+    const applied = Number(suiteMemoryMax({ effectiveTotalMemBytes: effective, declared: declaredSuiteMemoryMax(), hostGuardBytes: guard }).memoryMax);
+    assert.ok(applied > 0, `sibling count ${n}: a real positive ceiling`);
+    assert.ok(applied <= Math.min(16 * GIB, guard), `sibling count ${n}: the shared step must never RAISE the ceiling (${applied})`);
+    assert.ok(guard <= blind, `sibling count ${n}: the shared ceiling is never above the project-blind fraction`);
+  }
+  assert.equal(sharedHostCeilingBytes(1024 * GIB, 10 ** 6), SHARED_HOST_MIN_CEILING_BYTES);
+  assert.equal(SHARED_HOST_MIN_CEILING_BYTES, 2 * SHARED_HOST_OBSERVED_PEAK_BYTES);
   assert.equal(reading.count === null || reading.count >= 0, true, "the count is either a real reading or the explicit not-evaluated value");
 });
 
-/** The suite's own empirical ceiling in BYTES, read from the exported constant (⛔ not a literal here). */
-function suiteMemoryMaxCeilingBytes() {
-  return parseSystemdBytesToMb(SUITE_MEMORY_MAX_CEILING) * 1024 * 1024;
-}
+test("unit — suiteMemoryMax honours an explicitly supplied host guardrail and an explicit declaration (the wiring is not decorative)", () => {
+  const base = { effectiveTotalMemBytes: 1024 * GIB, declared: declaredSuiteMemoryMax() };
+  assert.equal(suiteMemoryMax({ ...base, hostGuardBytes: 12345 }).memoryMax, "12345", "a supplied guardrail is returned as-is when it is the binding one");
+  assert.equal(suiteMemoryMax({ ...base, hostGuardBytes: 1024 * GIB }).memoryMax, String(16 * GIB), "…and the declared 16 GiB applies under a huge guard");
+  assert.equal(suiteMemoryMax({ ...base, hostGuardBytes: GIB }).bound, "host-guard");
+  // Two different declarations ⇒ two different ceilings (⛔ not a constant in disguise).
+  assert.notEqual(
+    suiteMemoryMax({ ...base, declared: { value: "2G", source: "env" } }).memoryMax,
+    suiteMemoryMax({ ...base, declared: { value: "8G", source: "env" } }).memoryMax,
+  );
+  // …and a genuinely small EFFECTIVE memory (a container) bounds it — which is why the REAL-cgroup 4G
+  // test above keeps its `floor(4G × 0.25) = 1G` expectation.
+  const small = suiteMemoryMax({ effectiveTotalMemBytes: 4 * GIB, declared: { value: "16G", source: "default" } });
+  assert.equal(Number(small.memoryMax), GIB);
+  assert.equal(sharedHostCeilingBytes(4 * GIB, 10 ** 6), Number(small.memoryMax));
+});
 
-test("unit — suiteMemoryMax honours an explicitly supplied ceiling (the wiring is not decorative)", () => {
-  // Absent ⇒ byte-for-byte the pre-change 1-argument behaviour (that is why every existing caller and
-  // test in this file is untouched by this task).
-  assert.equal(suiteMemoryMax(4 * GIB, undefined), suiteMemoryMax(4 * GIB));
-  assert.equal(suiteMemoryMax(4 * GIB, undefined), String(GIB));
-  // Present ⇒ used verbatim (page-aligned by the caller, and compared against the empirical ceiling).
-  assert.equal(suiteMemoryMax(4 * GIB, GIB), String(GIB));
-  assert.equal(suiteMemoryMax(1024 * GIB, 12345), "12345", "a supplied ceiling below the empirical one is returned as-is");
-  assert.equal(suiteMemoryMax(1024 * GIB, 32 * GIB), "16G", "a supplied ceiling above the empirical one renders the ceiling STRING");
-  // Two different supplied ceilings ⇒ two different rendered values (⛔ not a constant in disguise).
-  assert.notEqual(suiteMemoryMax(1024 * GIB, 2 * GIB), suiteMemoryMax(1024 * GIB, 8 * GIB));
-  // The real producer of that argument, end to end: the measured peak bounds it, and it still renders `16G`.
-  assert.equal(sharedHostCeilingBytes(1024 * GIB, 10 ** 6), SHARED_HOST_MIN_CEILING_BYTES);
-  assert.equal(SHARED_HOST_MIN_CEILING_BYTES, 2 * SHARED_HOST_OBSERVED_PEAK_BYTES);
-  assert.equal(suiteMemoryMax(1024 * GIB, sharedHostCeilingBytes(1024 * GIB, 10 ** 6)), "16G");
-  // …and on a genuinely small EFFECTIVE memory (a container) the floor makes the shared step inert
-  // too — which is why the REAL-cgroup 4G test above keeps its `floor(4G × 0.25) = 1G` expectation.
-  assert.equal(suiteMemoryMax(4 * GIB, sharedHostCeilingBytes(4 * GIB, 10 ** 6)), suiteMemoryMax(4 * GIB));
-  assert.equal(sharedHostCeilingBytes(4 * GIB, 10 ** 6), Number(suiteMemoryMax(4 * GIB)));
+test("AC3 — the lane-scaled ESTIMATOR is pure and follows the host/concurrency shape (⛔ it is a diagnostic, not the ceiling)", () => {
+  // A big host at the REQUESTED 128 lanes: the estimate exceeds 16 GiB — exactly why it must not be the
+  // ceiling (it would raise the human-ruled baseline). It is reported as evidence instead.
+  const wide = laneScaledScopeMemoryMax({ effectiveTotalMemBytes: 246 * GIB, laneCount: 128, perFileHighWaterBytes: 160 * MIB });
+  assert.equal(wide.bound, "lane-scaled");
+  assert.equal(Number(wide.memoryMax), Math.floor(Math.ceil(128 * 160 * MIB * SCOPE_ENVELOPE_LANE_HEADROOM) / 4096) * 4096);
+  assert.ok(Number(wide.memoryMax) > 16 * GIB, "the 128-lane estimate is ABOVE 16 GiB");
+  // …at the MEASURED concurrency of 64 it is BELOW 16 GiB, i.e. the baseline covers the real shape.
+  const real = laneScaledScopeMemoryMax({ effectiveTotalMemBytes: 246 * GIB, laneCount: 64, perFileHighWaterBytes: 160 * MIB });
+  assert.equal(Number(real.memoryMax), Math.floor(Math.ceil(64 * 160 * MIB * SCOPE_ENVELOPE_LANE_HEADROOM) / 4096) * 4096);
+  assert.ok(Number(real.memoryMax) < 16 * GIB, "64 × 160 MiB × 1.25 = 12.5 GiB < 16 GiB");
+  assert.ok(Number(real.memoryMax) < Number(wide.memoryMax), "the estimator follows the concurrency input (⛔ not a constant)");
+  // A small host: the host guard binds (and both halves scale with the host, never as a literal).
+  const small = laneScaledScopeMemoryMax({ effectiveTotalMemBytes: 8 * GIB, laneCount: 4, perFileHighWaterBytes: 160 * MIB });
+  assert.equal(small.hostGuardBytes, 2 * GIB);
+  assert.ok(Number(small.memoryMax) < 16 * GIB, "an 8 GiB host must never get a 16 GiB ceiling");
+  // No measurement ⇒ its own value, not a zero.
+  const none = laneScaledScopeMemoryMax({ effectiveTotalMemBytes: 246 * GIB, laneCount: 64, perFileHighWaterBytes: null });
+  assert.equal(none.bound, "host-guard");
+  assert.equal(none.laneScaledBytes, null);
+  assert.match(none.reason, /no per-member memory measurement/);
 });
