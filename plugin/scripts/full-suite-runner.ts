@@ -506,6 +506,25 @@ import {
   SCOPE_ENVELOPE_HOST_FRACTION,
   SCOPE_PROPERTY_ARGS,
 } from "../../packages/quay/src/systemd-scope.ts";
+// gap-suite-resource-measurement-needs-a-host-adapter-not-inline-cgroup-calls — the HOST ADAPTER: the
+// ONE seam through which this runner measures a scope, launches a bounded child, and reads the OOM /
+// memory counters. Linux cgroup v2 + systemd-run (`createLinuxCgroupV2Adapter`) is ONE implementation
+// behind it; a host without cgroup v2 gets `createUnsupportedHostAdapter` and every reading comes back
+// `{ value: null, reason }` — an `unknown` reading, ⛔ never a fabricated 0 (硬规则 3b/6).
+import {
+  scopeHandleFromDir,
+  resolveHostResourceAdapter,
+  spawnBounded,
+  LINUX_CGROUP_V2_KIND,
+} from "./host-resource-adapter.ts";
+import type {
+  AdapterReading,
+  HostResourceAdapter,
+  MemoryEventReading,
+  MemoryReading,
+  ResourceLimits,
+  ResourceScopeHandle,
+} from "./host-resource-adapter.ts";
 // The cgroup-aware "effective total memory" reading is NOT re-implemented here: the ONE cgroup
 // hierarchy traversal (ancestor walk + quay-own-scope exclusion) and the ONE derivation live in
 // `effective-capacity-probe.ts` (the shared probe). ⛔ 硬规则 5b — 不重复发明第二份探测实现.
@@ -984,17 +1003,20 @@ export function checkResourceGate(root: string): { ok: boolean; output: string }
 // spawned suite in such a scope (MemoryMax/CPUQuota/TasksMax) when systemd-run is available, and
 // records the cgroup attributes as durable evidence (suite-cgroup-evidence.txt) — the AC1 observable.
 
-export interface SystemdRunLimits {
-  memoryMax: string; // -p MemoryMax=<v> — "" = no memory limit
-  cpuQuota: string; //  -p CPUQuota=<v> — "" = NO CPU limit (人 2026-08-11 裁定「取消 CPU 配额」; 400% 只是当时 4 核机上等价无限制的 measure-first 临时形态, 搬到多核机变成真限制 ⇒ 持久修法 = 不再传 -p CPUQuota=, 见 gap-systemd-run-cancel-cpuquota-keep-memory-guardrail + CLAUDE.md 推论二)
-  tasksMax: string; //  -p TasksMax=<v> — "" = NO task limit (人 2026-08-12 裁定③取消 TasksMax=200; 写死的 200 与 CPUQuota 同族, fork: EAGAIN 实证)
-  // gap-full-suite-scope-oom-policy-stops-whole-suite-unattributable — "" = NO swap ceiling (the
-  // pre-change default, byte-for-byte). Set it (e.g. "0") only to make a MemoryMax a REAL ceiling:
-  // with unlimited swap a cgroup can swap past its memory.max instead of OOM-killing, so a test that
-  // must reproduce an OOM sets `MemorySwapMax=0`. Production keeps "" (⛔ this task does not change the
-  // host-derived MemoryMax policy — only the OOM semantics/evidence).
-  memorySwapMax?: string; // -p MemorySwapMax=<v> — ""/absent = no swap limit
-}
+export type SystemdRunLimits = ResourceLimits;
+// ── gap-suite-resource-measurement-needs-a-host-adapter-not-inline-cgroup-calls ─────────────────
+// The limit TYPE, the argv construction and every cgroup read now live behind ONE host adapter
+// (`plugin/scripts/host-resource-adapter.ts`). `SystemdRunLimits` stays as the name the runner and its
+// tests have always used, bound to the adapter's host-neutral `ResourceLimits` (one declaration —
+// 硬规则 5b). The human rulings that shape the DEFAULTS below are unchanged by that move:
+//   · MemoryMax ""  = no memory limit  (declared per project, bounded by the host guardrail below)
+//   · CPUQuota  ""  = NO CPU limit (人 2026-08-11 裁定「取消 CPU 配额」; 400% 只是当时 4 核机上等价无限制
+//    的 measure-first 临时形态, 搬到多核机变成真限制 ⇒ 持久修法 = 不再传 -p CPUQuota=)
+//   · TasksMax  ""  = NO task limit (人 2026-08-12 裁定③取消 TasksMax=200; 写死的 200 与 CPUQuota 同族)
+//   · memorySwapMax ""/absent = NO swap ceiling (the pre-change default, byte-for-byte); `"0"` makes a
+//     MemoryMax a REAL ceiling (with unlimited swap a cgroup can swap past its memory.max instead of
+//     OOM-killing) — which is what the OOM negative-control test needs and production does NOT set
+//     (gap-full-suite-scope-oom-policy-stops-whole-suite-unattributable).
 
 // ── gap-suite-memorymax-literal-16g-cap-pinned-every-round-while-lanes-scale-with-nproc ─────────
 // THE DEFECT: the suite cgroup's ceiling was a WRITTEN-DOWN `"16G"` constant in THIS FILE. A memory
@@ -1370,69 +1392,59 @@ export function resolveSuiteMemoryMax(stateDir: string): SuiteMemoryMaxPolicy {
 }
 
 let _systemdRunAvailable: boolean | null = null;
+let _hostAdapter: HostResourceAdapter | null = null;
+
+/** The host adapter for THIS process, memoized (the selection reads the filesystem once). The runner
+ *  never constructs a cgroup path or a supervisor argv itself any more — every one of those goes
+ *  through this object (硬规则 5b: one mechanism, one place). */
+export function hostResourceAdapter(): HostResourceAdapter {
+  if (_hostAdapter === null) _hostAdapter = resolveHostResourceAdapter();
+  return _hostAdapter;
+}
+
+/** Test seam only: drop the memoized adapter so a test that changes the selection env between cases
+ *  observes the change. ⛔ Not called on any production path. */
+export function resetHostResourceAdapterMemo(): void {
+  _hostAdapter = null;
+  _systemdRunAvailable = null;
+}
 
 /**
- * Whether `systemd-run --user --scope` works on this host (memoized). The probe runs a real no-op
- * scope (`true`) — a transient scope is the ONLY reliable test that the user manager accepts
- * `--scope` + properties (binaries present is not enough; there must be a user session / D-Bus).
- * Seams: QUAY_TEST_SYSTEMD_RUN_AVAILABLE=0|1 forces the answer for hermetic tests.
+ * Whether this host can BOUND the suite in a scope (memoized). Delegates to the host adapter, whose
+ * `available()` answers BOTH halves of the question: whether the mechanism exists at all (a cgroup v2
+ * hierarchy) and whether it works on this host (a REAL no-op transient scope carrying exactly the
+ * properties the real invocation passes — the binary being on PATH is not the criterion; there must be
+ * a live user manager / D-Bus accepting `--scope` + those properties; 硬规则 3b: 探测绿不得与「真调用
+ * 能成」同形). Seams: QUAY_TEST_SYSTEMD_RUN_AVAILABLE=0|1 forces the answer for hermetic tests.
  */
 export function systemdRunAvailable(): boolean {
   if (_systemdRunAvailable !== null) return _systemdRunAvailable;
   const forced = process.env.QUAY_TEST_SYSTEMD_RUN_AVAILABLE;
   if (forced === "0") return (_systemdRunAvailable = false);
   if (forced === "1") return (_systemdRunAvailable = true);
-  try {
-    // gap-full-suite-scope-oom-policy-stops-whole-suite-unattributable — the probe carries EXACTLY the
-    // always-present properties the real invocation passes (`scopeProbeArgv()` = the shared
-    // SCOPE_PROPERTY_ARGS + a no-op member). The previous probe passed `-p TasksMax=100` — a property
-    // the real call does NOT pass (default tasksMax="") — so a host whose systemd rejects one of the
-    // REAL properties could still report 「available」 and silently run the suite un-enveloped
-    // (硬规则 3b: 探测绿不得与「真调用能成」同形). Sharing the property list makes the probe and the
-    // real call change together (改一处两处同变).
-    const probe = scopeProbeArgv();
-    execFileSync(probe[0], probe.slice(1), {
-      stdio: "ignore",
-      timeout: 10_000,
-    });
-    _systemdRunAvailable = true;
-  } catch {
-    _systemdRunAvailable = false;
-  }
-  return _systemdRunAvailable;
+  return (_systemdRunAvailable = hostResourceAdapter().available().value?.canBound === true);
+}
+
+/** The available adapter's NAMED reason for not being able to bound this host, or null when it can.
+ *  Carried into the round's warning line + the memory evidence so 「not bounded」 always says WHY
+ *  (硬规则 3b) instead of being inferred from a missing field. */
+export function hostResourceUnavailableReason(): string | null {
+  const reading = hostResourceAdapter().available();
+  return reading.value === null ? (reading.reason ?? "unavailable (no reason recorded)") : null;
 }
 
 /**
- * Build the argv that wraps `command` in `systemd-run --user --scope` with the limit properties.
- * `--quiet` suppresses systemd's "Running as unit: …" stdout line (it would be teed into the suite
- * log and pollute the failure-pattern matcher). `bash -c <command>` keeps the exact same command
- * string the un-limited path spawns (the --test-concurrency splice etc. are untouched).
+ * Build the argv that wraps `command` in a bounded scope. Thin, exported delegate to the host
+ * adapter's `launchArgv` — the runner ⛔ does not spell a `systemd-run` argv of its own (硬规则 5b);
+ * the adapter builds it through Core's ONE `boundedScopeArgv`, the same builder the serve/anchor
+ * envelope uses, so the property list and the `-p` ordering cannot drift between the two.
+ *
+ * On a host with no bounding mechanism the adapter returns the PLAIN `bash -c <command>` argv — the
+ * exact same command string the pre-existing un-limited path spawned (the `--test-concurrency` splice
+ * etc. are untouched), so no caller has to branch on it.
  */
 export function buildSystemdRunArgv(command: string, limits: SystemdRunLimits = DEFAULT_SYSTEMD_RUN_LIMITS): string[] {
-  const argv = [
-    "systemd-run",
-    "--user",
-    "--scope",
-    "--quiet",
-    // gap-full-suite-scope-oom-policy-stops-whole-suite-unattributable — the ALWAYS-present properties,
-    // taken from the ONE shared definition (SCOPE_PROPERTY_ARGS): `MemoryAccounting=yes` (so
-    // memory.peak / memory.events are readable for the per-run evidence) + `OOMPolicy=continue`.
-    // OOMPolicy is the load-bearing one: systemd's DEFAULT scope policy is `stop`, so ONE OOM-killed
-    // process TERMs the WHOLE suite scope — test.sh's abort trap then prints "terminated by an external
-    // signal" and every remaining test is cancelled with NO failing file to attribute (the 2026-10-10
-    // phenomenon). `continue` lets only the OOM'd process die, so its own test file's failure is
-    // attributed; the scope keeps running. Probe parity: `scopeProbeArgv()` (the availability probe)
-    // carries exactly these pairs, so 「probe green」 implies the real call accepts them.
-    ...SCOPE_PROPERTY_ARGS,
-  ];
-  // memoryMax/cpuQuota/tasksMax/memorySwapMax 为空 ⇒ 不传对应 -p — cgroup 对该维不设限制（人裁定：不设限制
-  // 就在机制上不传该参数，字面值只在写它的机器上等价于无限制，CLAUDE.md 推论二）。
-  if (limits.memoryMax) argv.push("-p", `MemoryMax=${limits.memoryMax}`);
-  if (limits.cpuQuota) argv.push("-p", `CPUQuota=${limits.cpuQuota}`);
-  if (limits.tasksMax) argv.push("-p", `TasksMax=${limits.tasksMax}`);
-  if (limits.memorySwapMax) argv.push("-p", `MemorySwapMax=${limits.memorySwapMax}`);
-  argv.push("bash", "-c", command);
-  return argv;
+  return hostResourceAdapter().launchArgv(command, limits);
 }
 
 /**
@@ -1535,32 +1547,32 @@ export function parseSystemdBytesToBytes(raw: string): number | null {
   return mb === null ? null : Math.round(mb * 1024 * 1024);
 }
 
-/** Read the cgroup v2 `memory.events` counters (`oom`, `oom_kill`). null when the file is unreadable /
- *  has neither key (⛔ never a fabricated 0 — 硬规则 6; the caller treats null as 「未读到」, not 「无 OOM」). */
+/** Read the scope's `oom` / `oom_kill` event counters through the HOST ADAPTER. null when the adapter
+ *  could not produce the reading (⛔ never a fabricated 0 — 硬规则 6; the caller treats null as
+ *  「未读到」, not 「无 OOM」). Narrow on purpose: this is the legacy two-key shape its callers use —
+ *  the adapter's fuller reading (incl. `max`) is available via `readMemoryEventsThroughAdapter`. */
 export function readCgroupMemoryEvents(cgroupDir: string): { oom: number; oomKill: number } | null {
-  try {
-    const text = fs.readFileSync(path.join(cgroupDir, "memory.events"), "utf8");
-    const oom = /^oom\s+(\d+)$/m.exec(text);
-    const oomKill = /^oom_kill\s+(\d+)$/m.exec(text);
-    if (!oom && !oomKill) return null;
-    return { oom: oom ? Number(oom[1]) : 0, oomKill: oomKill ? Number(oomKill[1]) : 0 };
-  } catch {
-    return null;
-  }
+  const r = readMemoryEventsThroughAdapter(cgroupDir);
+  return r.value === null ? null : { oom: r.value.oom, oomKill: r.value.oomKill };
 }
 
-/** Read the cgroup v2 `memory.peak` high-water mark (bytes), falling back to `memory.current` on older
- *  kernels. null when neither is readable (⛔ never a fabricated 0 — 硬规则 6). */
+/** The adapter's full `memory.events` reading for a scope DIRECTORY, with the three-valued shape
+ *  (value + reason) preserved for callers that must distinguish 「no OOM」 from 「not read」. */
+export function readMemoryEventsThroughAdapter(cgroupDir: string): AdapterReading<MemoryEventReading> {
+  return hostResourceAdapter().readMemoryEvents(scopeHandleFromDir(cgroupDir));
+}
+
+/** The scope's memory reading (current/peak/limit/swap/stat-breakdown/PSI) for a scope DIRECTORY,
+ *  through the adapter. */
+export function readMemoryThroughAdapter(cgroupDir: string): AdapterReading<MemoryReading> {
+  return hostResourceAdapter().readMemory(scopeHandleFromDir(cgroupDir));
+}
+
+/** Read the scope's memory high-water mark in bytes (`memory.peak`, falling back to `memory.current`
+ *  on older kernels) through the HOST ADAPTER. null when the adapter could not produce the reading
+ *  (⛔ never a fabricated 0 — 硬规则 6). */
 export function readCgroupMemoryPeak(cgroupDir: string): number | null {
-  for (const file of ["memory.peak", "memory.current"]) {
-    try {
-      const v = Number(String(fs.readFileSync(path.join(cgroupDir, file), "utf8")).trim());
-      if (Number.isFinite(v)) return v;
-    } catch {
-      /* try the next file */
-    }
-  }
-  return null;
+  return readMemoryThroughAdapter(cgroupDir).value?.peakBytes ?? null;
 }
 
 /** Write the per-run OOM evidence to `<stateDir>/suite-memory-evidence-<runId>.json`. Best-effort —
@@ -1585,17 +1597,27 @@ export interface SuiteMemorySampler {
 }
 
 /**
- * Start sampling the suite scope's cgroup every `intervalMs` (default 2s) and once more on `stop()`.
- * `cgroupDirProvider` is resolved lazily each sample: at round start the transient scope unit may not
- * exist yet, so a one-shot resolve would return null and make the whole evidence inert.
+ * Start sampling the suite scope through the HOST ADAPTER every `intervalMs` (default 2s) and once
+ * more on `stop()`.
+ * `scopeProvider` is resolved lazily each sample: at round start the transient scope unit may not
+ * exist yet, so a one-shot resolve would make the whole evidence inert.
  * `phaseProvider` reads the CURRENT suite phase (the runner's PhaseDifferentialAccounting) so the OOM
  * can be reported against the phase it happened in (`oomPhase` = the phase at the first sample whose
  * `oom_kill` was positive; else the last phase seen). The timer is `unref`'d so a missed stop() can
- * never hold the event loop. Hermetic + host-independent: when `cgroupDirProvider()` is null the
- * sampler still runs (phaseProvider advances) and lands `samples: 0` — a genuinely inert reading.
+ * never hold the event loop.
+ *
+ * ⚠️ 硬规则 6 / 3b — `oom` and `oomKill` are `number | null`, NOT `number`: they stay `null` until the
+ * adapter actually produces a reading. The pre-change sampler initialised them to `0`, so a host whose
+ * scope was never readable (or a host with no cgroup at all) wrote `"oomKill": 0` — a FABRICATED
+ * MEASUREMENT that reads exactly like 「measured: no OOM occurred」. `0` now means 「the adapter read a
+ * zero」; 「not read」 is `null`, and `adapter.reason` says why. Same for `samples: 0`, which remains
+ * the 「no sample was ever readable」 marker.
  */
 export function startSuiteMemorySampler(opts: {
-  cgroupDirProvider: () => string | null;
+  /** The host adapter to read through. Default: the process's resolved adapter. */
+  adapter?: HostResourceAdapter;
+  /** Resolve the scope of the RUNNING suite child (lazily, every sample). */
+  scopeProvider: () => AdapterReading<ResourceScopeHandle>;
   stateDir: string;
   runId: string;
   memoryMaxBytes: number | null;
@@ -1607,27 +1629,53 @@ export function startSuiteMemorySampler(opts: {
   intervalMs?: number;
 }): SuiteMemorySampler {
   const intervalMs = opts.intervalMs ?? 2000;
-  let peakBytes: number | null = null;
-  let oom = 0;
-  let oomKill = 0;
+  const adapter = opts.adapter ?? hostResourceAdapter();
+  let memory: MemoryReading | null = null;
+  let oom: number | null = null;
+  let oomKill: number | null = null;
   let lastPhase = "";
   let oomPhase: string | null = null;
   let samples = 0;
+  /** The LAST reason the adapter gave for not producing a reading — the round's evidence must say WHY
+   *  the counters are unknown, not merely that they are (硬规则 3b). */
+  let lastUnavailableReason: string | null = null;
+  let processTreePids: number[] | null = null;
 
   const sample = (): void => {
     lastPhase = opts.phaseProvider() || lastPhase;
-    const dir = opts.cgroupDirProvider();
-    if (!dir) return;
-    const peak = readCgroupMemoryPeak(dir);
-    if (peak !== null) peakBytes = peakBytes === null ? peak : Math.max(peakBytes, peak);
-    const ev = readCgroupMemoryEvents(dir);
-    if (ev) {
+    const scope = opts.scopeProvider();
+    if (scope.value === null) {
+      lastUnavailableReason = scope.reason ?? "scope unavailable (no reason recorded)";
+      return;
+    }
+    const handle = scope.value;
+    const mem = adapter.readMemory(handle);
+    if (mem.value !== null) {
+      // The high-water mark is a MAX over samples: a later, lower reading must not lower it. `peakBytes`
+      // already carries the kernel's own high-water mark, so the max is belt-and-braces across the
+      // legacy `memory.current` fallback.
+      if (mem.value.peakBytes !== null) {
+        memory = memory === null || memory.peakBytes === null ? mem.value : { ...mem.value, peakBytes: Math.max(memory.peakBytes, mem.value.peakBytes) };
+      } else {
+        memory = mem.value;
+      }
+    } else {
+      lastUnavailableReason = mem.reason ?? "memory reading unavailable (no reason recorded)";
+    }
+    const ev = adapter.readMemoryEvents(handle);
+    if (ev.value !== null) {
+      const evOom = ev.value.oom;
+      const evKill = ev.value.oomKill;
       // The phase at the moment oom_kill FIRST became positive is where the OOM happened. Only latch
       // it on the 0→>0 transition so a later sample in another phase cannot overwrite it.
-      if (ev.oomKill > 0 && oomKill === 0) oomPhase = lastPhase;
-      oom = Math.max(oom, ev.oom);
-      oomKill = Math.max(oomKill, ev.oomKill);
+      if (evKill > 0 && (oomKill === null || oomKill === 0)) oomPhase = lastPhase;
+      oom = oom === null ? evOom : Math.max(oom, evOom);
+      oomKill = oomKill === null ? evKill : Math.max(oomKill, evKill);
+    } else {
+      lastUnavailableReason = ev.reason ?? "memory-event reading unavailable (no reason recorded)";
     }
+    const tree = adapter.readProcessTree(handle);
+    if (tree.value !== null) processTreePids = tree.value.pids;
     samples += 1;
   };
 
@@ -1642,7 +1690,7 @@ export function startSuiteMemorySampler(opts: {
       sample();
       const evidence: SuiteMemoryEvidence = {
         runId: opts.runId,
-        peakBytes,
+        peakBytes: memory?.peakBytes ?? null,
         memoryMaxBytes: opts.memoryMaxBytes,
         ...(opts.memoryMaxPolicy ? { memoryMaxPolicy: opts.memoryMaxPolicy } : {}),
         oom,
@@ -1651,6 +1699,16 @@ export function startSuiteMemorySampler(opts: {
         scopeUnit: opts.scopeUnit ?? null,
         samples,
         capturedAt: new Date().toISOString(),
+        // gap-suite-resource-measurement-needs-a-host-adapter-not-inline-cgroup-calls — WHICH mechanism
+        // produced (or could not produce) the readings, and WHY. Without these a reader cannot tell
+        // 「the host has no accounting」 from 「accounting existed and reported zeros」.
+        adapter: {
+          kind: adapter.kind,
+          available: adapter.available().value !== null,
+          reason: lastUnavailableReason,
+        },
+        ...(memory ? { memory } : {}),
+        ...(processTreePids ? { processTreePids } : {}),
       };
       writeSuiteMemoryEvidence(opts.stateDir, evidence);
       return evidence;
@@ -2507,7 +2565,22 @@ export async function run(argv: string[]): Promise<number> {
     NODE_OPTIONS: withPerFileCpuPreload(process.env.NODE_OPTIONS),
   };
   if (useSystemdRun) {
-    const sdArgv = buildSystemdRunArgv(command, systemdLimits);
+    // The bounded child is started BY THE ADAPTER (Plan §1's second method): the runner hands it the
+    // command, the declared limits and the spawn context, and gets back the child + a lazy scope
+    // resolver. ⛔ This file no longer spells a `systemd-run` argv OR a spawn option set of its own.
+    const launched = spawnBounded(hostResourceAdapter(), {
+      command,
+      limits: systemdLimits,
+      cwd: root,
+      env: suiteEnv,
+      // The flags/seams that force the un-limited path ARE the caller's veto; the adapter applies its
+      // own availability veto independently (both must permit — see `spawnBounded`).
+      allowBounding: !skipSystemdRun,
+      // detached: the suite child becomes a process-group leader so killChildTree() can terminate
+      // the WHOLE tree (test.sh + its node --test children) — a hung subprocess can't leak the flock.
+      detached: true,
+    });
+    child = launched.child;
     process.stderr.write(
       `full-suite-runner: wrapping suite in systemd-run scope (MemoryMax=${systemdLimits.memoryMax} CPUQuota=${systemdLimits.cpuQuota} TasksMax=${systemdLimits.tasksMax})` +
         // The policy, on the SAME line as the value it produced: a reader sees the DECLARED value, where
@@ -2520,14 +2593,6 @@ export async function run(argv: string[]): Promise<number> {
         (suiteMemoryPolicy.reason ? ` reason=${JSON.stringify(suiteMemoryPolicy.reason)}` : "") +
         `]\n`,
     );
-    child = spawn(sdArgv[0], sdArgv.slice(1), {
-      cwd: root,
-      stdio: ["ignore", "pipe", "pipe"],
-      env: suiteEnv,
-      // detached: the suite child becomes a process-group leader so killChildTree() can terminate
-      // the WHOLE tree (test.sh + its node --test children) — a hung subprocess can't leak the flock.
-      detached: true,
-    });
     // AC1 evidence — fire-and-forget: find the scope unit, capture it into THIS round's record, and
     // dump its applied cgroup properties to <state-dir>/suite-cgroup-evidence.txt (best-effort; never
     // fails the run). `roundScopeUnit` is set as a side effect so the round-record write at the end
@@ -2586,7 +2651,11 @@ export async function run(argv: string[]): Promise<number> {
   let memorySampler: SuiteMemorySampler | null = null;
   if (useSystemdRun) {
     memorySampler = startSuiteMemorySampler({
-      cgroupDirProvider: () => resolveCgroupV2Dir(child.pid),
+      // The scope is resolved through the SAME host adapter that built the argv — ⛔ not a second,
+      // independently-resolved cgroup path (硬规则 5b). Lazily, because the transient scope unit does
+      // not exist yet at spawn time.
+      adapter: hostResourceAdapter(),
+      scopeProvider: () => hostResourceAdapter().scopeOf(child.pid as number),
       stateDir,
       runId,
       memoryMaxBytes: parseSystemdBytesToBytes(systemdLimits.memoryMax),

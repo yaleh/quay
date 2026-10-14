@@ -33,6 +33,17 @@ import {
   startSuiteMemorySampler,
 } from "../scripts/full-suite-runner.ts";
 import { scopeProbeArgv, SCOPE_PROPERTY_ARGS } from "../../packages/quay/src/systemd-scope.ts";
+import {
+  createLinuxCgroupV2Adapter,
+  ok,
+  scopeHandleFromDir,
+  unavailable,
+} from "../scripts/host-resource-adapter.ts";
+
+/** The sampler's LINEAR cgroup-dir scope provider (the pre-adapter test shape, now expressed through
+ *  the adapter's contract): a directory IS a scope handle for the linux-cgroup-v2 adapter. */
+const linuxDirScope = (dir) => () => ok(scopeHandleFromDir(dir));
+const LINUX = createLinuxCgroupV2Adapter();
 
 // ── helpers ─────────────────────────────────────────────────────────────────────────────────────────
 
@@ -129,6 +140,9 @@ test("AC3 unit — the per-run evidence file carries peakBytes/memoryMaxBytes/oo
   try {
     fs.writeFileSync(path.join(cgroupDir, "memory.peak"), `${321 * 1024 * 1024}\n`);
     fs.writeFileSync(path.join(cgroupDir, "memory.events"), "low 0\nhigh 4\nmax 0\noom 3\noom_kill 2\n");
+    // The process-tree dimension of the adapter contract (read through the SAME adapter as the
+    // counters, ⛔ not a second inline reader).
+    fs.writeFileSync(path.join(cgroupDir, "cgroup.procs"), "4242\n4243\n");
 
     // (a) the parsers read the REAL cgroup v2 shapes.
     assert.equal(readCgroupMemoryPeak(cgroupDir), 321 * 1024 * 1024);
@@ -145,7 +159,8 @@ test("AC3 unit — the per-run evidence file carries peakBytes/memoryMaxBytes/oo
     const writeEvents = () => fs.writeFileSync(path.join(cgroupDir, "memory.events"), `low 0\nhigh 0\nmax 0\noom ${oomKillNow > 0 ? 1 : 0}\noom_kill ${oomKillNow}\n`);
     writeEvents();
     const sampler = startSuiteMemorySampler({
-      cgroupDirProvider: () => cgroupDir,
+      adapter: LINUX,
+      scopeProvider: linuxDirScope(cgroupDir),
       stateDir,
       runId: "run-one",
       memoryMaxBytes: 314572800,
@@ -164,13 +179,18 @@ test("AC3 unit — the per-run evidence file carries peakBytes/memoryMaxBytes/oo
     assert.equal(ev1.phase, "main", "phase = the phase the OOM first became visible in (latched on the 0→>0 edge, not the start phase)");
     const f1 = path.join(stateDir, "suite-memory-evidence-run-one.json");
     assert.ok(fs.existsSync(f1), "the evidence lands at <stateDir>/suite-memory-evidence-<runId>.json");
+    // Every key is either a required field or one the adapter DID produce on this host (adapter /
+    // memory / processTreePids are present because the readings were readable — a host where they are
+    // not would omit them, ⛔ never zero-fill them).
     assert.deepEqual(Object.keys(JSON.parse(fs.readFileSync(f1, "utf8"))).sort(), [
-      "capturedAt", "memoryMaxBytes", "oom", "oomKill", "peakBytes", "phase", "runId", "samples", "scopeUnit",
+      "adapter", "capturedAt", "memory", "memoryMaxBytes", "oom", "oomKill", "peakBytes", "phase",
+      "processTreePids", "runId", "samples", "scopeUnit",
     ]);
 
     // (c) a SECOND run with a different runId ⇒ a SECOND file; the first is untouched (⛔ not a single slot).
     startSuiteMemorySampler({
-      cgroupDirProvider: () => cgroupDir,
+      adapter: LINUX,
+      scopeProvider: linuxDirScope(cgroupDir),
       stateDir,
       runId: "run-two",
       memoryMaxBytes: null,
@@ -180,9 +200,13 @@ test("AC3 unit — the per-run evidence file carries peakBytes/memoryMaxBytes/oo
     const files = fs.readdirSync(stateDir).filter((f) => f.startsWith("suite-memory-evidence-")).sort();
     assert.deepEqual(files, ["suite-memory-evidence-run-one.json", "suite-memory-evidence-run-two.json"], "two consecutive runs ⇒ two files, no overwrite");
 
-    // (d) an unreadable cgroup ⇒ samples:0 and peakBytes null (an INERT reading, ⛔ not a fabricated 0).
+    // (d) an unreadable scope ⇒ samples:0, peakBytes null AND oom/oomKill NULL (an INERT reading,
+    //     ⛔ not a fabricated 0). 硬规则 3b/6 + AC2 of
+    //     gap-suite-resource-measurement-needs-a-host-adapter-not-inline-cgroup-calls: `0` is a
+    //     MEASUREMENT (「no OOM occurred」) and a scope that was never read is not entitled to make it.
     const inert = startSuiteMemorySampler({
-      cgroupDirProvider: () => null,
+      adapter: LINUX,
+      scopeProvider: () => unavailable("no scope: the transient unit was never resolved"),
       stateDir,
       runId: "run-inert",
       memoryMaxBytes: null,
@@ -191,7 +215,10 @@ test("AC3 unit — the per-run evidence file carries peakBytes/memoryMaxBytes/oo
     }).stop();
     assert.equal(inert.samples, 0);
     assert.equal(inert.peakBytes, null, "no cgroup ⇒ peakBytes is null (缺值 ≠ 0, 硬规则 6)");
-    assert.equal(inert.oomKill, 0);
+    assert.equal(inert.oomKill, null, "⚠️ an unread scope ⇒ oomKill is UNKNOWN, not 0");
+    assert.equal(inert.oom, null, "⚠️ an unread scope ⇒ oom is UNKNOWN, not 0");
+    assert.match(inert.adapter.reason ?? "", /never resolved/, "the evidence names WHY the reading is unknown");
+    assert.equal(inert.adapter.kind, "linux-cgroup-v2");
   } finally {
     fs.rmSync(stateDir, { recursive: true, force: true });
     fs.rmSync(cgroupDir, { recursive: true, force: true });

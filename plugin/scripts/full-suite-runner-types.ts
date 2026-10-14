@@ -699,16 +699,57 @@ export interface SuiteMemoryEvidence {
    * `null` when the workspace has no usable history (缺值 ≠ 0).
    */
   memoryMaxPolicy?: SuiteMemoryMaxPolicy;
-  /** `memory.events` `oom` counter at the last sample (0 = never observed). */
-  oom: number;
-  /** `memory.events` `oom_kill` counter at the last sample — the red-attribution trigger. */
-  oomKill: number;
+  /** The scope's `oom` event counter, or `null` when the host adapter never produced a reading.
+   *  ⚠️ THREE-VALUED (gap-suite-resource-measurement-needs-a-host-adapter-not-inline-cgroup-calls):
+   *  `0` means 「the adapter READ a zero」 (no OOM event occurred); `null` means 「no reading was ever
+   *  obtained」 — a host with no resource surface, an unreadable scope, or a scope that never existed.
+   *  The pre-change field was `number` initialised to 0, so a completely blind host wrote `"oom": 0`,
+   *  i.e. a FABRICATED MEASUREMENT indistinguishable from the real one (硬规则 6/3b). */
+  oom: number | null;
+  /** The scope's `oom_kill` event counter (the red-attribution trigger), or `null` when no reading was
+   *  ever produced — same three-valued contract as `oom`. A consumer that treats `null` as `0` invents
+   *  「no OOM」; the reader in worker-driver already falls through on a non-number (硬规则 3b/6). */
+  oomKill: number | null;
   /** The suite phase NAME at the moment `oomKill` first became positive (else the last phase seen). */
   phase: string;
   /** The transient scope unit name when captured (`null` otherwise). */
   scopeUnit: string | null;
-  /** How many cgroup samples were taken (0 ⇒ the cgroup was never readable — evidence is inert). */
+  /** How many samples produced a readable scope (0 ⇒ the scope was never readable — evidence inert). */
   samples: number;
   /** ISO-8601 capture time (the last sample / the teardown read). */
   capturedAt: string;
+  /**
+   * WHICH host adapter produced these readings, whether it was available AT ALL on this host, and —
+   * when it produced nothing — the NAMED reason (硬规则 3b). Without this block a reader cannot
+   * distinguish 「this host has no resource accounting」 from 「accounting existed and reported zeros」,
+   * which is precisely the confusion the three-valued fields above exist to prevent.
+   */
+  adapter?: {
+    /** The adapter implementation's stable name, e.g. `linux-cgroup-v2` / `unsupported-host`. */
+    kind: string;
+    /** Whether the adapter reported this host as measurable/boundable at capture time. */
+    available: boolean;
+    /** The last reason a reading could not be produced, or `null` when every sample was readable. */
+    reason: string | null;
+  };
+  /** The adapter's full memory reading at the last sample (current/peak/limit/swap/`memory.stat`
+   *  breakdown/PSI) — the telemetry fields, read through the ONE adapter contract. Absent when the
+   *  adapter never produced one (⛔ not a zeroed block). */
+  memory?: {
+    currentBytes: number | null;
+    peakBytes: number | null;
+    limitBytes: number | null;
+    swapCurrentBytes: number | null;
+    stat: {
+      anonBytes: number | null;
+      fileBytes: number | null;
+      shmemBytes: number | null;
+      kernelBytes: number | null;
+      slabBytes: number | null;
+      inactiveFileBytes: number | null;
+    } | null;
+    pressure: string | null;
+  };
+  /** The pids in the scope's own process tree at the last readable sample. Absent when unreadable. */
+  processTreePids?: number[];
 }
