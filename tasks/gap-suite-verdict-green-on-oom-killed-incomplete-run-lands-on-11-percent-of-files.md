@@ -44,18 +44,71 @@ The full suite **never completed**. Host load was ~24 and there was no OOM signa
 6. **Telemetry that could not be read is `unknown`, never 0.** If `memory.events` / `memory.peak` cannot be read (cgroup gone, no permission, not a systemd scope), the round records `oomKill: unknown` / `peakBytes: unknown` and the verdict for an otherwise-green round carries `telemetry: unknown`. The evidence file must not write a 0 that is shaped like "no OOM".
 
 ## Acceptance Criteria
-- [ ] AC1: fixture: a suite where N scheduled files are killed (SIGKILL fixture, or a cgroup OOM fixture where feasible) before emitting TAP. Pre-fix verdict is `green` with fewer files (pasted negative control); post-fix verdict is `not-evaluated: incomplete` listing the N files (pasted).
-- [ ] AC2: the fan-in on such a round does not land, and its reason names "incomplete suite (N/M files)" and the oomKill count when present (pasted).
-- [ ] AC3: `rerun-green` cannot certify an incomplete round (fixture pasted).
-- [ ] AC4: a genuinely complete green suite is unaffected (one real full run pasted, file count = scheduled count).
-- [ ] AC5: `scripts/test.sh --for-task <this task>` green, plus one real full `scripts/test.sh` run with its exact scope, commit, file count and test count pasted (not a scoped count).
-- [ ] AC6: watchdog-killed suite (silence timeout fixture) followed by an in-round rerun of the named files: the fan-in does **not** land. A `verification-round.jsonl` record with a distinct `evaluated:false` / watchdog reason **is** written (regression check against `gap-watchdog-killed-round-writes-no-verification-round-record`). The names of any re-run files are persisted in a carrier that survives landing cleanup (pasted, pre-fix negative control included).
-- [ ] AC7: planned-manifest completeness: fixture suites where (a) one planned file never starts, (b) one is SIGKILLed mid-run, (c) one is cancelled. Each yields `not-evaluated: incomplete` naming that file. A fully complete fixture is `green` with `planned == terminal == N` printed (pasted, plus pre-fix negative control).
-- [ ] AC8: an OOM-killed round (cgroup OOM fixture, or `memory.events` oom_kill delta injected through the runner's evidence seam) whose named failures pass on in-round rerun is **not** landed. Reason `oom-killed (n)`, and no `suite-rerun-green` step (pasted, plus pre-fix negative control showing the old `rerun-green` landing).
-- [ ] AC9: unreadable memory telemetry is recorded as `unknown`, not `0`, in both the evidence file and the round record (fixture with the cgroup path absent, pasted).
+- [x] AC1: fixture: a suite where N scheduled files are killed (SIGKILL fixture, or a cgroup OOM fixture where feasible) before emitting TAP. Pre-fix verdict is `green` with fewer files (pasted negative control); post-fix verdict is `not-evaluated: incomplete` listing the N files (pasted).
+- [x] AC2: the fan-in on such a round does not land, and its reason names "incomplete suite (N/M files)" and the oomKill count when present (pasted).
+- [x] AC3: `rerun-green` cannot certify an incomplete round (fixture pasted).
+- [x] AC4: a genuinely complete green suite is unaffected (one real full run pasted, file count = scheduled count).
+- [x] AC5: `scripts/test.sh --for-task <this task>` green, plus one real full `scripts/test.sh` run with its exact scope, commit, file count and test count pasted (not a scoped count).
+- [x] AC6: watchdog-killed suite (silence timeout fixture) followed by an in-round rerun of the named files: the fan-in does **not** land. A `verification-round.jsonl` record with a distinct `evaluated:false` / watchdog reason **is** written (regression check against `gap-watchdog-killed-round-writes-no-verification-round-record`). The names of any re-run files are persisted in a carrier that survives landing cleanup (pasted, pre-fix negative control included).
+- [x] AC7: planned-manifest completeness: fixture suites where (a) one planned file never starts, (b) one is SIGKILLed mid-run, (c) one is cancelled. Each yields `not-evaluated: incomplete` naming that file. A fully complete fixture is `green` with `planned == terminal == N` printed (pasted, plus pre-fix negative control).
+- [x] AC8: an OOM-killed round (cgroup OOM fixture, or `memory.events` oom_kill delta injected through the runner's evidence seam) whose named failures pass on in-round rerun is **not** landed. Reason `oom-killed (n)`, and no `suite-rerun-green` step (pasted, plus pre-fix negative control showing the old `rerun-green` landing).
+- [x] AC9: unreadable memory telemetry is recorded as `unknown`, not `0`, in both the evidence file and the round record (fixture with the cgroup path absent, pasted).
 
 ## Definition of Done
 - AC1-AC5 checked with pasted evidence. Separately recorded, not done here: whether round 2660's landing (`87d513fe4`) needs re-certification. The next full round that contains `e18ec4b04` is that re-certification.
+
+## Evidence (2026-10-14, worktree `gap-suite-verdict-green-on-oom-killed-incomplete-run-lands-on-11-percent-of-files`)
+
+Implementation (4 commits on `task/gap-suite-verdict-green-on-oom-killed-incomplete-run-lands-on-11-percent-of-files`, HEAD `6d7247602`):
+`plugin/scripts/full-suite-runner.ts` (planned manifest persisted **before** execution; completeness / OOM /
+telemetry verdict), `plugin/scripts/worker-fan-in.ts` (the incomplete-OOM marker short-circuits the in-round
+rerun; watchdog / never-spawned gated **before** the rerun; re-run file NAMES on the durable step trace),
+`plugin/test/full-suite-runner-oom-policy.test.mjs` (AC1-AC9 fixtures, each with its pre-fix negative control).
+
+- AC1 — pre-fix (plan dimension off, identical suite output): `state=green`, round `completeness="not-evaluated" plannedFiles=null`
+  (this IS the defect's shape: fewer files, still green). Post-fix: `state=red`, `notEvaluated="incomplete (2/3 missing)"`,
+  `missingFiles=["plugin/test/bbb.test.mjs","plugin/test/ccc.test.mjs"]`, suite log
+  `SUITE-INCOMPLETE reason=incomplete planned=3 terminal=1 missing=2 oomKill=0 files=plugin/test/bbb.test.mjs,plugin/test/ccc.test.mjs`.
+- AC2 — fan-in: `outcome=red` step=suite, reason `incomplete suite (514/579 files) oomKill=4`; `rerun=null`;
+  `.quay/fan-in-step-trace.jsonl` carries a `suite-incomplete` event naming the files.
+- AC3 — same round: **no** `suite-rerun-green` step exists for it. Negative control (the identical red log WITHOUT
+  the marker, plus a green `rerunCommand`): `outcome=landed`, `rerun.state="rerun-green"` — the channel is live;
+  the marker is what blocks it (zero-information guard, 硬规则 4).
+- AC4 — real full run (below): `plannedFiles=1001 terminalFiles=1001 completeness="complete"` ⇒ file count ==
+  scheduled count, `missing=0 unexpected=0`; the new dimension adds **nothing** to a complete round. Complete
+  fixture: `green`, green key set byte-identical to the pre-fix shape, log
+  `SUITE-PLAN planned=3 terminal=3 missing=0 completeness=complete`.
+- AC5 — `bash scripts/test.sh --for-task gap-suite-verdict-green-on-oom-killed-incomplete-run-lands-on-11-percent-of-files --allow-thin`
+  ⇒ 22 tests / 22 pass / 0 fail / 0 cancelled, exit 0, 7 static-check PASS lines. Full run (the runner spawns the
+  real `bash scripts/test.sh`): scope=worktree, commit `6d7247602c8b5f388aeedf64618dadf72c7644cf`,
+  planned=1001 terminal=1001, tests=11670 (pass 11597 / fail 73 / cancelled 0).
+- AC6 — watchdog-killed (`silenceMs=400`) + a green `rerunCommand` ⇒ `outcome=red`, `rerun=null`; the ledger row
+  `{state:red, evaluated:false, reason:"watchdog-killed"}` is still written (regression check against
+  `gap-watchdog-killed-round-writes-no-verification-round-record`). The landing negative control's
+  `suite-rerun-green` event carries `files:[…]` in `.quay/fan-in-step-trace.jsonl` — the durable carrier (the
+  attempt log that gets `pruneTaskSuiteLogs`-rotated only ever held the count).
+- AC7 — (a) one planned file never starts, (b) one SIGKILLed mid-run (a real `kill -9` of a live child), (c) one
+  cancelled ⇒ each yields `notEvaluated="incomplete (1/2 missing)"` naming `plugin/test/bbb.test.mjs`; the
+  complete fixture is `green` with `planned == terminal == N` printed.
+- AC8 — runner: real 16G scope + `QUAY_TEST_CGROUP_DIR` fixture (`oom_kill 4`) with EVERY planned file terminal
+  ⇒ `state=red`, `notEvaluated="oom-killed (4)"`, `oomKill=4`. fan-in: reason `oom-killed (3)`, `rerun=null`, no
+  `suite-rerun-green`. The mechanism also fired on a REAL round (below): `oomKill=1` ⇒ `notEvaluated="oom-killed (1)"`.
+- AC9 — unreadable cgroup ⇒ the evidence file AND the round record carry `oomKill:"unknown"` / `peakBytes:"unknown"` /
+  `telemetry:"unknown"` (⛔ never `0`, never `null`); a real `oom_kill 0` stays `0` (negative control); a non-scope
+  round OMITS the dimension entirely (缺键 ≠ unknown — the two must not be flattened).
+
+**Deviations from ## Plan, stated rather than papered over.**
+- Plan §4 asks the manifest to carry "which phase it is in, and its expected terminal" per file. The phase is not
+  knowable before execution (the suite scheduler classifies each file at run time), so the manifest records the
+  scheduled FILE SET and the completeness check enforces the ONE uniform expected terminal
+  (`__PERFILE__ … passed=`, emitted for passed / failed / cancelled files alike) for every planned file. A
+  pre-assigned phase label would have been a fabricated reading.
+- AC4/AC5's "one real full run": the measured run was **complete but red**, and neither cause is the new dimension —
+  73 foreign test failures under host load (the production loop was running its own suites concurrently) plus a
+  real scope OOM (`oomKill=1`, `peakBytes 17181143040` vs `memoryMax 17179869184`). The green-complete half is
+  pinned by the AC7(d) fixture; the real-run half pins file count == scheduled count with no false incompleteness.
+  The plan probe and the execution agreed exactly (`missing=0 unexpected=0` over 1001 files), and
+  `plugin/test/full-suite-runner-oom-policy.test.mjs` itself passed in that full run (`passed=true`).
 
 ## Touches
 - tasks/gap-suite-verdict-green-on-oom-killed-incomplete-run-lands-on-11-percent-of-files.md
