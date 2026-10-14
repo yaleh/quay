@@ -506,6 +506,55 @@ test("the chain reports the furthest link REACHED, so an unfinished chain is not
   fs.rmSync(root, { recursive: true, force: true });
 });
 
+test("a record with NO subject is never keyed: an empty component list must not produce a matchable key", () => {
+  // MEASURED defect this pins: the routine-findings carrier keys its findings by `files`, not
+  // `components`. Deriving the concept key from such an origin record yields `<default-kind>|` — a
+  // NON-NULL key over an EMPTY subject, which would then match every other subject-less finding as "the
+  // same concept". A finding that cannot be keyed must say so, not carry a key that matches everything.
+  const root = tmpdir("nosubject");
+  git(root, ["init", "-q", "-b", "develop"]);
+  fs.mkdirSync(path.join(root, ".quay"), { recursive: true });
+  writeJsonl(root, ".quay/routine-findings.jsonl", [
+    {
+      kind: "finding",
+      routine: "semantic-dedup-scan",
+      runId: "semantic-dedup-scan-1",
+      findingId: "some-twin",
+      // ⛔ `files`, NOT `components` — exactly the real shape.
+      files: ["plugin/scripts/a.ts", "plugin/scripts/b.ts"],
+      verdict: "real-duplication",
+      ts: "2026-09-30T00:00:00.000Z",
+    },
+  ]);
+  writeJsonl(root, ".quay/discovery-portfolio.jsonl", [
+    {
+      kind: "portfolio_finding",
+      id: "portfolio_finding-nosubject",
+      finding_id: "F-nosubject",
+      origin: "autonomous-routine",
+      origin_ref: "semantic-dedup-scan-1#some-twin",
+      origin_carrier: ".quay/routine-findings.jsonl",
+      // ⛔ no `components` on the row either, and no `concept_key`.
+      outcome: "supported",
+      fix_task: null,
+      fix_landed_commit: null,
+      fix_landed_reason: "NO_FIX_TASK",
+      recurred: false,
+      recurred_reason: "NO_LATER_OUTCOME_ON_SAME_COMPONENTS",
+      duplicate_of: null,
+      ts: "2026-09-30T00:00:00.000Z",
+    },
+  ]);
+  const f = findingBy(runReport(root).hosts[0], "F-nosubject");
+  assert.equal(f.concept_key, null, "an empty subject must yield NO key, not a key that matches everything");
+  assert.match(String(f.concept_key_reason), /non-empty-subject/);
+  assert.equal(f.concept_key_from, null);
+  // The verdict link still resolves — the record WAS found; it is only the SUBJECT that is absent.
+  assert.equal(f.verifier, "real-duplication");
+  assert.equal(f.verifier_source.line, 1);
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
 // ── ⑥ read-only / deterministic contract ──────────────────────────────────────────────────────────
 
 test("the report writes NOTHING: carrier bytes are identical before and after", () => {
@@ -524,6 +573,50 @@ test("the report writes NOTHING: carrier bytes are identical before and after", 
   // Determinism: same carriers ⇒ byte-identical output (no wall-clock `now` enters it).
   const two = runReport(root);
   assert.equal(JSON.stringify(one), JSON.stringify(two), "two runs over unchanged carriers must agree byte for byte");
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test("`--json` survives a PIPE larger than the OS pipe buffer, instead of truncating", () => {
+  // MEASURED defect this pins: with `process.exit(main())` the JSON was TRUNCATED through a pipe
+  // (91,646 bytes to a file vs 73,392 through the pipe) and the consumer's parse failed — while the
+  // file-redirected run looked perfect. A report whose machine output silently truncates is worse than
+  // no machine output at all.
+  //
+  // The fixture is made LARGER THAN THE 64 KiB PIPE BUFFER on purpose: below that size the whole
+  // document can sit in the kernel buffer and the run looks fine even with the bug, so a small fixture
+  // would be a test that cannot fail.
+  const root = tmpdir("bigpipe");
+  git(root, ["init", "-q", "-b", "develop"]);
+  fs.mkdirSync(path.join(root, ".quay"), { recursive: true });
+  const rows = [];
+  for (let i = 0; i < 400; i++) {
+    rows.push({
+      kind: "portfolio_finding",
+      id: `portfolio_finding-pipe${i}`,
+      finding_id: `F-pipe-${i}`,
+      origin: "operator",
+      components: [`plugin/scripts/component-with-a-longish-name-${i}.ts`, `plugin/scripts/second-${i}.ts`],
+      outcome: "supported",
+      fix_task: null,
+      fix_landed_commit: null,
+      fix_landed_reason: "NO_FIX_TASK",
+      recurred: false,
+      recurred_reason: "NO_LATER_OUTCOME_ON_SAME_COMPONENTS",
+      duplicate_of: null,
+      ts: "2026-09-30T00:00:00.000Z",
+    });
+  }
+  writeJsonl(root, ".quay/discovery-portfolio.jsonl", rows);
+
+  const viaPipe = spawnSync("bash", ["-c", `${process.execPath} --experimental-strip-types '${SCRIPT}' '--host=fixture=${root}' --json 2>/dev/null | cat`], {
+    encoding: "utf8",
+    maxBuffer: 64 * 1024 * 1024,
+  });
+  assert.equal(viaPipe.status, 0, viaPipe.stderr);
+  assert.ok(viaPipe.stdout.length > 64 * 1024, `payload must exceed the pipe buffer (got ${viaPipe.stdout.length} bytes)`);
+  const parsed = JSON.parse(viaPipe.stdout); // ← throws if the pipe truncated the document
+  assert.equal(parsed.hosts.length, 1);
+  assert.equal(parsed.hosts[0].findings.length, 400, "every chain row survived the pipe");
   fs.rmSync(root, { recursive: true, force: true });
 });
 

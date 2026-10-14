@@ -217,6 +217,10 @@ export function sharedCheckoutOf(root: string): { ok: boolean; root: string | nu
 /** The narrow slice of `docs/analysis/discovery-experience-ledger.mjs` this report consumes. */
 export interface LedgerModule {
   conceptKeyOfCluster: (rec: unknown) => string | null;
+  /** The ledger's OWN component normalization (line suffixes stripped, deduped, sorted). Consumed here
+   *  so the report can ask "does this record carry a SUBJECT at all?" with the same normalization the
+   *  key is built from — a second normalizer would be a second answer to that question. */
+  normalizeConceptComponents: (components: unknown) => string[];
 }
 /** The narrow slice of `docs/analysis/discovery-portfolio.mjs` this report consumes. */
 export interface PortfolioModule {
@@ -275,7 +279,7 @@ export async function loadEngineModules(): Promise<EngineModules> {
   const ledger = await load("discovery-experience-ledger.mjs");
   const portfolio = await load("discovery-portfolio.mjs");
   const missing: string[] = [];
-  if (ledger === null || !isFn(ledger.conceptKeyOfCluster)) missing.push("discovery-experience-ledger.mjs");
+  if (ledger === null || !isFn(ledger.conceptKeyOfCluster) || !isFn(ledger.normalizeConceptComponents)) missing.push("discovery-experience-ledger.mjs");
   if (portfolio === null || !isFn(portfolio.readPortfolio) || !isFn(portfolio.deriveFixLandedCommit)) {
     missing.push("discovery-portfolio.mjs");
   }
@@ -694,19 +698,30 @@ function buildFinding(
     if (!host.modules.ok) {
       conceptKeyReason = String(host.modules.reason);
     } else {
+      // ⛔ A record must carry a SUBJECT before it can be keyed. `conceptKeyOfCluster` falls back to the
+      //    default concern-kind and happily returns `<kind>|` for a record with no `components` at all —
+      //    a non-null key over an EMPTY subject, which would then match every other subject-less finding
+      //    as "the same concept". MEASURED (this task's own run): the routine-findings carrier keys its
+      //    findings by `files`, not `components`, so deriving from those origin records produced
+      //    `open-semantic-discovery|` for F01–F03. The emptiness is checked with the ledger's OWN
+      //    normalization, so "has a subject" is the same question the key is built from.
+      const subjectOf = (rec: Record<string, unknown>): string | null => {
+        if (host.modules.ledger === null) return null;
+        const comps = host.modules.ledger.normalizeConceptComponents(rec.components);
+        return comps.length === 0 ? null : host.conceptKeyOf(rec);
+      };
       const origin = resolveOriginRecord(host, row);
       if (origin.ok) {
-        conceptKey = host.conceptKeyOf(origin.rec);
+        conceptKey = subjectOf(origin.rec);
         if (conceptKey !== null) conceptKeyFrom = `derived-from-origin-record:${origin.rel}:${origin.line}`;
       }
       if (conceptKey === null) {
-        conceptKey = host.conceptKeyOf(row);
+        conceptKey = subjectOf(row);
         if (conceptKey !== null) conceptKeyFrom = "derived-from-the-portfolio-row-itself (no origin record resolved)";
       }
-      if (conceptKey === null) conceptKeyReason = "neither-the-row-nor-its-origin-record-carries-a-subject-to-derive-a-key-from";
+      if (conceptKey === null) conceptKeyReason = "neither-the-row-nor-its-origin-record-carries-a-non-empty-subject-to-derive-a-key-from";
     }
   }
-
   const v = verdictsFor(host, row);
 
   // task id
@@ -1119,5 +1134,10 @@ export async function main(argv: string[] = process.argv): Promise<number> {
 }
 
 if (isDirectEntry(import.meta, process.argv[1], "discovery-closed-loop-report")) {
-  process.exit(await main());
+  // ⛔ `process.exitCode = …`, NEVER `process.exit(…)`. MEASURED on this report's own `--json` output:
+  // `process.exit()` does not wait for a pending write to a PIPE, so a consumer reading
+  // `… --json | jq` got a TRUNCATED document (91,646 bytes written to a file, 73,392 bytes through the
+  // pipe) that failed to parse — while the same run redirected to a file looked fine. Setting the exit
+  // code lets Node flush stdout and exit on its own.
+  process.exitCode = await main();
 }
