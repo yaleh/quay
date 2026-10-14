@@ -9,6 +9,11 @@ labels:
 parent: null
 children: []
 extra: {}
+depends_on:
+  - gap-suite-verdict-green-on-oom-killed-incomplete-run-lands-on-11-percent-of-files
+  - gap-suite-memory-telemetry-anon-file-shmem-swap-psi-concurrency-process-tree-unknown-not-zero
+  - gap-test-spawned-resident-drivers-outlive-their-suite-no-process-group-reaping
+  - gap-resumable-long-experiments-via-driver-adopt-restart-not-separate-scheduler
 ---
 ## Proposal
 **Capability requested 2026-10-14: a Quality-kind routine that continuously diagnoses the unified execution record (A: completeness/OOM, telemetry, process-lifecycle) for OOM/leak/hang/long-tail/repeated-expensive-experiment anomalies, mechanically collecting and filtering BEFORE any model call, and calling a model only on evidenced NEW anomalies — not re-diagnosing the whole history every round.**
