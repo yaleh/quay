@@ -11,6 +11,7 @@ children: []
 extra: {}
 depends_on:
   - gap-discovery-findings-lack-stable-identity-and-source-evidence-and-double-ingest-into-experience
+  - gap-develop-sync-take-develop-reset-hard-wipes-uncommitted-tracked-edits-in-shared-checkout
 ---
 ## Proposal
 **Real, continuous, autonomous closed-loop acceptance for Quay's architecture discovery, on both real hosts (quay + ClaudeCodeUI).** The question to answer per finding, mechanically and repeatably:
