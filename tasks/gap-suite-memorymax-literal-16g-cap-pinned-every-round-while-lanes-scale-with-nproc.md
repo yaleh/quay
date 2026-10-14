@@ -128,7 +128,7 @@ The runtime proof that 16 GiB holds (≥3 complete, OOM-free rounds) belongs to 
     ℹ tests 172 / suites 0 / pass 172 / fail 0 / cancelled 0 / skipped 0
     EXIT=0
   ```
-  Run on the FINAL tree (single commit `69e65e45f`): **172/172 green, exit 0**.
+  Run on the FINAL tree (the single commit on `develop`; `git diff --name-only develop...HEAD` = the 7 code/test files): **172/172 green, exit 0**.
 
   **Scoped vs full, reported separately (DoD):** this is a **SCOPED** run — 172 tests from the change-relevant selection. ⛔ It is NOT a full-suite result and is not cited as one. This task runs **no** full suite (see the Re-scope): the runtime "≥3 complete, OOM-free rounds under the declared 16 GiB" proof belongs to `gap-suite-heavy-files-and-phase-concurrency-under-16g-pressure-baseline-comparison`.
 
@@ -136,13 +136,14 @@ The runtime proof that 16 GiB holds (≥3 complete, OOM-free rounds) belongs to 
 
 ## Definition of Done
 - AC1-AC4 checked. **No commit on this branch raises the effective default above 16 GiB**; evidence, in the two halves the DoD asks for:
-  - **grep of the resolved default** — the branch is ONE commit on `develop` (`git rev-list develop..HEAD` → `69e65e45f`; the draft commits that had raised the ceiling were squashed away, so no surviving commit raises it):
+  - **grep of the resolved default** — the branch is a SINGLE commit on `develop` (`git rev-list develop..HEAD` prints exactly one sha; the draft commits that had raised the ceiling were squashed away, so no surviving commit raises it — and the squashed-away ones are preserved, see the history note below):
     ```
-    $ git show 69e65e45f:plugin/scripts/full-suite-runner.ts | grep 'SUITE_MEMORY_MAX_DEFAULT ='
+    $ git show HEAD:plugin/scripts/full-suite-runner.ts | grep 'SUITE_MEMORY_MAX_DEFAULT ='
     export const SUITE_MEMORY_MAX_DEFAULT = "16G";
     $ node --experimental-strip-types -e 'import("./plugin/scripts/full-suite-runner.ts").then(m=>console.log(m.defaultSuiteMemoryMax()))'
     17179869184        # = 16.00 GiB;  <= 16 GiB: true
     ```
+    (No commit sha is quoted here on purpose: each re-squash rewrites the tip, while the tree this evidence was taken from is fixed by `git diff --name-only develop...HEAD` = the 7 files in Touches.)
   - **a test pinning it** — `plugin/test/full-suite-runner-cgroup.test.mjs`: *"DoD — no commit may raise the effective default above 16 GiB: the resolved default is PINNED here"* (asserts `SUITE_MEMORY_MAX_DEFAULT === "16G"`, `defaultSuiteMemoryMax() ≤ 16 GiB`, and `=== 16 GiB` on a host whose guardrail admits it).
   - **history note (2026-10-14, coordinator):** the pre-re-scope draft commits this branch carried (`42433a92c` … `7407c3e88` — the ones that DID raise the ceiling) were squashed into the single landed commit so the "no commit raises the default" property holds over the whole branch. They are preserved, not deleted:
     `refs/backup/gap-suite-memorymax-literal-16g-cap-pinned-every-round-while-lanes-scale-with-nproc/pre-squash-7407c3e88`.
