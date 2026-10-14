@@ -54,7 +54,21 @@ import {
 } from "../scripts/quality-gate-driver.ts";
 // judge 调用的失败归因/重试是【从 OSD 复用】的（硬规则 5b）——测试直接断言那**同一个**清单与分类器，
 // ⛔ 不是断言本文件里另写的一份。
-import { RETRYABLE_CALL_FAILURES, callFailureClass } from "../scripts/open-semantic-discovery-routine.ts";
+import {
+  RETRYABLE_CALL_FAILURES, callFailureClass, spawnModelCall,
+  runOpenSemanticDiscovery, readOpenSemanticDiscoveryConfig,
+} from "../scripts/open-semantic-discovery-routine.ts";
+// AC3 的台账判据读的是**真**预留台账（`openModelBudget`：真锁 + 真 ledger 文件 + 真 reserve/outcome 两行），
+// ⛔ 不是记账替身 —— 替身只会证明替身自洽。
+import {
+  reservingModel, openModelBudget, BUDGET_LEDGER_REL, BUDGET_LOCK_REL,
+  runDiscoveryMethod, latestResidentRoundTs, INVOKED_BY_RESIDENT,
+} from "../scripts/discovery-method-routine.ts";
+import { ROUTINE_LAST_RUN_REL } from "../scripts/probe-routine.ts";
+import { StoppedMidRoundError } from "../scripts/driver-runtime.ts";
+// ⛔ 盘上停机记录的**单一路径**从 kernel 来（`ANCHOR_KIND_STOPS_REL`）：夹具自己拼一个路径字符串就会
+// 与生产读的那份漂移，而「夹具读的是生产写的那个文件」正是这条判据的全部意义。
+import { ANCHOR_KIND_STOPS_REL } from "../scripts/driver-runtime.ts";
 // 同族读函数的**形态对照**（Gap1 的判据：本轨的读函数与兄弟逐键同形）。
 import { readDiscoveryMethodConfig } from "../scripts/discovery-method-routine.ts";
 import { qualityRoundPath } from "../scripts/pool-quality-judge.ts";
@@ -1338,4 +1352,418 @@ test("AC4 — 三个机械检测器的 spawn 面【逐字未动】：失败仍 t
     assert.equal(spawnCount(detLog), 1, "identity 检测器恰一次（judge 重试不重跑机械聚类）");
     assert.equal(spawnCount(judge.log), 2, "judge 侧仍恰一次重试");
   }
+});
+
+// ══════════════════════════════════════════════════════════════════════════════════════════════════════
+// gap-quality-restart-waits-out-whole-round-so-osd-in-flight-exceeds-stop-window
+//
+// 停机过去只在**轮边界**被看见（`while (!stopCtl.isStopRequested())`），轮内的 `for (routine)` 与
+// `runRoutineWithWatchdog` 都不看停机 ⇒ 一次停机请求要等**整轮**跑完。实测（2026-10-14）：OSD 轮
+// 6/6 与 22/23 的 wall 都 > 60s、最长 1172s，而 `stopKindViaAnchor` 只等 60000ms ⇒ 在飞长例程期间的
+// `restart --kind quality` **必然** `stop-failed` / `restart-aborted`。
+//
+// 三条通道把延迟压到有界（Plan 步 1-2）：① 例程**之间**查停机；② 在飞例程收到 `AbortSignal`，
+// 在下一个可中断边界早退并交 `not-evaluated: stopped-mid-round`；③ 例程不响应时由调用方在
+// `stopGraceMs` 后**放弃等待**并记一条 `observed:false` 的 Fact（⇒ 上界不依赖例程行为）。
+// 判据逐条可取假：把 `runRoutineWithWatchdog` 的 stop 支去掉，下面每一条都会退化成「等满例程」。
+// ══════════════════════════════════════════════════════════════════════════════════════════════════════
+
+/** 把 `quality` 移进盘上停机记录 —— 生产上 `quay driver stop --kind quality` 写的**同一个**文件，
+ *  经 `quay driver start --kind quality` 清除（`updateDesired` 同一次调用里做两件事）。
+ *  ⛔ 这是**跨 bundle** 的停机通道（shipped 产物上进程内登记表恒失效），故轮内停机必须走它。 */
+function writeDiskKindStop(root, kind) {
+  fs.writeFileSync(
+    path.join(root, ANCHOR_KIND_STOPS_REL),
+    JSON.stringify({ [kind]: { at: new Date().toISOString(), by: "quay-driver-stop" } }),
+    "utf8",
+  );
+}
+
+function readRounds(roundLog) {
+  return fs.readFileSync(roundLog, "utf8").split("\n").filter((l) => l.trim()).map((l) => JSON.parse(l));
+}
+
+test("stop AC1（Plan 步 1）— 停机请求到达后【例程之间】不再启动任何 due 例程，名字进 skipped_routines", async (t) => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "qg-stop-between-"));
+  t.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
+  fs.mkdirSync(path.join(tmp, ".quay"), { recursive: true });
+  const ran = [];
+  const routines = ["a", "b", "c"].map((n) => ({
+    name: `r-${n}`,
+    schedule: { kind: "interval", minutes: 0 },
+    // 第一条例程自己触发停机（盘上通道，生产同源）——此后 b/c 都是 due，却**一个都不该启动**。
+    run: () => {
+      ran.push(n);
+      if (n === "a") writeDiskKindStop(tmp, "quality");
+      return [{ name: `r-${n}`, value: { seen: n }, state: "verified", reason: null }];
+    },
+  }));
+  const roundLog = path.join(tmp, "quality-round.jsonl");
+  const code = await runResidentQualityGateLoop({
+    root: tmp, intervalMs: 1, once: false, maxRounds: 1, roundLogFile: roundLog,
+    runId: "stop-between", json: false, routines, stopPollMs: 10,
+  });
+  assert.equal(code, 0);
+  assert.deepEqual(ran, ["a"], "⛔ 停机之后不再启动任何 due 例程（修复前 b/c 照跑）");
+  const rec = readRounds(roundLog)[0];
+  assert.deepEqual(rec.skipped_routines, ["r-b", "r-c"], "被跳过的 due 例程**具名**落进轮记录（硬规则 3b：没跑与跑过不同形）");
+  assert.equal(rec.facts.length, 1);
+});
+
+test("stop AC2/AC3（Plan 步 2）— 在飞例程收到 signal，交出自己的 not-evaluated: stopped-mid-round，⛔ 不记 verified", async (t) => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "qg-stop-midround-"));
+  t.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
+  fs.mkdirSync(path.join(tmp, ".quay"), { recursive: true });
+  let abortedAt = null;
+  const routine = {
+    name: "long-model-calling",
+    schedule: { kind: "interval", minutes: 0 },
+    // 一条「模型调用型」例程：在**可中断边界**（每个 50ms 的调用块之间）观察 signal，读到就早退并交出
+    // 它自己的 not-evaluated Fact（它知道自己持久化了什么，调用方不知道）。
+    run: async (ctx) => {
+      for (let i = 0; i < 200; i++) {
+        if (ctx?.signal?.aborted) {
+          abortedAt = Date.now();
+          return [{ name: "long-model-calling", value: { observed: true, blocks_done: i }, state: "not-evaluated", reason: "stopped-mid-round: the routine observed the signal at its next call boundary and returned what it had persisted" }];
+        }
+        await new Promise((r) => setTimeout(r, 50));
+      }
+      return [{ name: "long-model-calling", value: { observed: false }, state: "verified", reason: null }];
+    },
+  };
+  const roundLog = path.join(tmp, "quality-round.jsonl");
+  setTimeout(() => writeDiskKindStop(tmp, "quality"), 120);
+  const t0 = Date.now();
+  const code = await runResidentQualityGateLoop({
+    root: tmp, intervalMs: 1, once: false, maxRounds: 1, roundLogFile: roundLog,
+    runId: "stop-midround", json: false, routines: [routine], stopPollMs: 20, stopGraceMs: 5_000,
+  });
+  const elapsed = Date.now() - t0;
+  assert.equal(code, 0);
+  assert.ok(abortedAt !== null, "例程必须在它的下一个可中断边界看到取消信号");
+  assert.ok(elapsed < 5_000, `循环必须在有界时间内退出（实测 ${elapsed}ms；⛔ 修复前要等满 10s 的例程）`);
+  const rec = readRounds(roundLog)[0];
+  assert.equal(rec.stopped_mid_round, true, "轮记录把这一轮标成「没跑完」");
+  assert.equal(rec.facts.length, 1);
+  assert.equal(rec.facts[0].state, "not-evaluated", "⛔ 半轮**绝不**记 verified（硬规则 3b）");
+  assert.ok(rec.facts[0].reason.startsWith("stopped-mid-round"), "取词来自单一真相源 STOPPED_MID_ROUND");
+  assert.equal(rec.facts[0].value.observed, true, "交出的是**例程自己的**读数，不是调用方代笔的");
+});
+
+test("stop AC2（Plan 步 3 的反面）— 不响应取消的例程由调用方在 stopGraceMs 后放弃，且读数与协作那一支【不同形】", async (t) => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "qg-stop-abandon-"));
+  t.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
+  fs.mkdirSync(path.join(tmp, ".quay"), { recursive: true });
+  const routine = {
+    name: "never-observes-the-signal",
+    schedule: { kind: "interval", minutes: 0 },
+    // ⛔ 完全无视 ctx.signal，而且要跑很久——正是 `stopKindViaAnchor` 那个 60000ms 窗口装不下的形状。
+    // `unref` 只是让**本测试进程**不必等它（这一支要验的是循环的**决策**延迟，不是例程的下场）。
+    run: async () => {
+      await new Promise((r) => { const t = setTimeout(r, 60_000); t.unref(); });
+      return [{ name: "never-observes-the-signal", value: null, state: "verified", reason: null }];
+    },
+  };
+  const roundLog = path.join(tmp, "quality-round.jsonl");
+  setTimeout(() => writeDiskKindStop(tmp, "quality"), 100);
+  const t0 = Date.now();
+  const code = await runResidentQualityGateLoop({
+    root: tmp, intervalMs: 1, once: false, maxRounds: 1, roundLogFile: roundLog,
+    runId: "stop-abandon", json: false, routines: [routine], stopPollMs: 20, stopGraceMs: 400,
+  });
+  const elapsed = Date.now() - t0;
+  assert.equal(code, 0);
+  assert.ok(elapsed < 5_000, `放弃等待把上界压到 poll+grace（实测 ${elapsed}ms；⛔ 修复前 = 例程的 60000ms）`);
+  const rec = readRounds(roundLog)[0];
+  assert.equal(rec.facts[0].state, "not-evaluated");
+  assert.equal(rec.facts[0].value.observed, false, "⛔ 放弃那一支与协作那一支**不同形**（observed 是判别式）");
+  assert.equal(rec.facts[0].value.grace_ms, 400, "放弃 Fact 说出它等的是多久");
+  assert.match(rec.facts[0].reason, /abandoned by the caller-side stop grace/);
+  // ⛔ 半轮**绝不**记 verified —— 被放弃的例程哪怕以后自己返回了，它的 Facts 也不进这一轮。
+  assert.ok(rec.facts.every((f) => f.state !== "verified"));
+});
+
+test("stop AC3 — 无停机请求时循环行为【逐字不变】：四条例程全跑完、stopped_mid_round:false、skipped_routines 为空（负控制）", async (t) => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "qg-stop-none-"));
+  t.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
+  fs.mkdirSync(path.join(tmp, ".quay"), { recursive: true });
+  const routines = ["a", "b", "c", "d"].map((n) => ({
+    name: `r-${n}`,
+    schedule: { kind: "interval", minutes: 0 },
+    run: () => [{ name: `r-${n}`, value: { seen: n }, state: "verified", reason: null }],
+  }));
+  const roundLog = path.join(tmp, "quality-round.jsonl");
+  await runResidentQualityGateLoop({
+    root: tmp, intervalMs: 1, once: false, maxRounds: 1, roundLogFile: roundLog,
+    runId: "stop-none", json: false, routines, stopPollMs: 10,
+  });
+  const rec = readRounds(roundLog)[0];
+  assert.equal(rec.facts.length, 4, "⛔ 没有停机 ⇒ 一条例程都不许被跳过");
+  assert.deepEqual(rec.skipped_routines, []);
+  assert.equal(rec.stopped_mid_round, false);
+  assert.ok(rec.facts.every((f) => f.state === "verified"));
+});
+
+// ── AC3（模型调用例程）：停机在【下一个模型调用边界】生效，且台账自洽 ───────────────────────────────
+// 两条例程的每一次模型子进程都过同一个 choke point（`reservingModel` / `reservingStep` 的
+// `budget.reserve` 之前）。判据取假的方式：把那个 `signal?.aborted` 检查挪到 `reserve` **之后**，
+// 下面的 reserve 计数就会多一条（「停机之后一笔预留都不取」立刻变成假）。
+
+/** 一条**真**的 24h 预留台账（`openModelBudget` + 真锁 + 真 ledger 文件），⛔ 不是记账替身。 */
+function realBudget(root, cap = 50) {
+  return openModelBudget({
+    root, cap,
+    ledgerPath: path.join(root, BUDGET_LEDGER_REL),
+    lockPath: path.join(root, BUDGET_LOCK_REL),
+    carrierPath: path.join(root, "carrier.jsonl"),
+  });
+}
+const ledgerOf = (root) => (fs.existsSync(path.join(root, BUDGET_LEDGER_REL))
+  ? fs.readFileSync(path.join(root, BUDGET_LEDGER_REL), "utf8").split("\n").filter((l) => l.trim()).map((l) => JSON.parse(l))
+  : []);
+const reservesOf = (root) => ledgerOf(root).filter((l) => l.kind === "reserve");
+const outcomesOf = (root) => ledgerOf(root).filter((l) => l.kind === "outcome");
+
+test("AC3 — reservingModel：停机之后【零预留】、在飞那一笔**保持已支出**、且抛出的是具名的 stopped-mid-round", async (t) => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "qg-reserving-stop-"));
+  t.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
+  fs.mkdirSync(path.join(tmp, ".quay"), { recursive: true });
+  const budget = realBudget(tmp);
+  const ac = new AbortController();
+  let innerCalls = 0;
+  const inner = async () => { innerCalls++; return { stdout: "{}" }; };
+
+  // ① 停机**之前**的一次调用：取预留、记 outcome —— 这是「已支出的预留」基线。
+  const seam = reservingModel(inner, budget, { step: "reflection", tools: "", max_turns: 1 }, undefined, ac.signal);
+  await seam("first");
+  assert.equal(reservesOf(tmp).length, 1);
+  assert.equal(outcomesOf(tmp).length, 1, "已完成的调用记了 outcome（这一笔预留**已支出**）");
+
+  // ② 停机到达。之后**任何**一步都不得再取预留（AC3 的可核读数）。
+  ac.abort();
+  let threw = null;
+  try { await seam("second"); } catch (e) { threw = e; }
+  assert.ok(threw instanceof StoppedMidRoundError, `停机之后必须抛 StoppedMidRoundError，实得 ${threw}`);
+  assert.equal(threw.step, "reflection");
+  assert.equal(threw.afterStop, true, "停机**先到**、这一步是停机之后才被走到的");
+  assert.match(threw.message, /^stopped-mid-round: /, "取词来自单一真相源 STOPPED_MID_ROUND");
+  assert.equal(innerCalls, 1, "⛔ 停机之后连模型子进程都不该起（检查在 reserve 之前 ⇒ 也在 spawn 之前）");
+  assert.equal(reservesOf(tmp).length, 1, "⛔ 停机之后 reserve 计数**不动** —— 这一条把检查挪到 reserve 之后立刻变假");
+  assert.equal(outcomesOf(tmp).length, 1);
+  assert.equal(budget.grantedCount, 1);
+});
+
+test("AC3 — reservingModel：停机在**飞**时那一笔保持已支出（afterStop:false 与 true 不同形）", async (t) => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "qg-reserving-inflight-"));
+  t.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
+  fs.mkdirSync(path.join(tmp, ".quay"), { recursive: true });
+  const budget = realBudget(tmp);
+  const ac = new AbortController();
+  // 模型调用**在飞**时停机到达：inner 自己把 signal 置停，模拟「调用期间收到停机」。
+  const inner = async () => { ac.abort(); return { stdout: "{}" }; };
+  const seam = reservingModel(inner, budget, { step: "verification", tools: "", max_turns: 1 }, undefined, ac.signal);
+  let threw = null;
+  try { await seam("in-flight"); } catch (e) { threw = e; }
+  assert.ok(threw instanceof StoppedMidRoundError);
+  assert.equal(threw.afterStop, false, "停机到达时这一步**正在飞** —— ⛔ 与「停机之后才走到」不同形（硬规则 3b）");
+  assert.equal(reservesOf(tmp).length, 1, "这一笔预留**已经取过**");
+  assert.equal(outcomesOf(tmp).length, 1, "…而它的 outcome 也记了 ⇒ 台账自洽：花掉的算花掉");
+  assert.equal(budget.grantedCount, 1, "⛔ 不因停机回滚：一笔花掉的预留就是花掉了");
+});
+
+test("AC3 — spawnModelCall：停机 SIGKILL 在飞的模型子进程并交出 stopped-mid-round（⛔ 不是等它跑完）", async (t) => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "qg-spawn-abort-"));
+  t.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
+  const ac = new AbortController();
+  const t0 = Date.now();
+  // 一个「模型调用」：睡 60s。停机必须把它**杀掉**，而不是等满 timeoutMs。
+  const p = spawnModelCall([process.execPath, "-e", "setTimeout(()=>{}, 60000)"], { cwd: tmp, timeoutMs: 60_000 }, ac.signal);
+  setTimeout(() => ac.abort(), 150);
+  const res = await p;
+  const elapsed = Date.now() - t0;
+  assert.ok(elapsed < 5_000, `停机必须立刻收掉子进程（实测 ${elapsed}ms；⛔ 修复前 = timeoutMs 的 60000ms）`);
+  assert.equal(res.signal, "SIGKILL");
+  assert.match(String(res.error?.message ?? ""), /^stopped-mid-round: /, "死因**具名**为停机，⛔ 不与「超时」同形");
+  // 负控制：已停机的信号 ⇒ ⛔ 根本不 spawn（子进程建了也立刻收掉），promise 立刻 settle。
+  const t1 = Date.now();
+  const res2 = await spawnModelCall([process.execPath, "-e", "setTimeout(()=>{}, 60000)"], { cwd: tmp, timeoutMs: 60_000 }, ac.signal);
+  assert.ok(Date.now() - t1 < 2_000);
+  assert.equal(res2.signal, "SIGKILL");
+});
+
+// ── AC3（轮级）：一条**模型调用例程**被停机打断时，轮本身交出 not-evaluated: stopped-mid-round，
+//    ⛔ 不记 verified；已做过的事持久化成 partial 行；last-run 不推进 ─────────────────────────────────
+// 走的是**真的** `runDiscoveryMethod`（真的 config 读、真的载体、真的台账、真的 last-run 映射），
+// 只注入两个缝：ingest（让本轮有事可做 ⇒ 反射步真的会被走到）与 reflect（抛出真 `reservingModel`
+// 会抛的**同一个** `StoppedMidRoundError`）。
+function dmWorkspace() {
+  const ws = fs.mkdtempSync(path.join(os.tmpdir(), "qg-dm-stop-"));
+  fs.mkdirSync(path.join(ws, ".quay"), { recursive: true });
+  fs.writeFileSync(path.join(ws, ".quay", "config.yml"),
+    // ⛔ `max_model_calls_per_24h` 必须**声明**：声明了它 `runDiscoveryMethod` 才会建真预留台账
+    //    （`budget`），也才走 `reservingModel` —— 缺了它这一轮根本没有台账可判，本条 AC 就落空。
+    "loop:\n  discovery_method:\n    enabled: true\n    interval: interval:360m\n    max_experiences: 8\n    max_model_calls: 6\n    max_model_calls_per_24h: 120\n    max_wall_ms: 900000\n", "utf8");
+  return ws;
+}
+const DM_CARRIER = ".quay/discovery-method-findings.jsonl";
+const DM_LEDGER = ".quay/discovery-method-model-budget.jsonl";
+const ledgerOf2 = (ws) => (fs.existsSync(path.join(ws, DM_LEDGER))
+  ? fs.readFileSync(path.join(ws, DM_LEDGER), "utf8").split("\n").filter((l) => l.trim()).map((l) => JSON.parse(l))
+  : []);
+const dmRounds = (ws) => (fs.existsSync(path.join(ws, DM_CARRIER))
+  ? fs.readFileSync(path.join(ws, DM_CARRIER), "utf8").split("\n").filter((l) => l.trim()).map((l) => JSON.parse(l))
+  : []);
+
+test("AC3（轮级）— 模型调用例程被停机打断 ⇒ not-evaluated: stopped-mid-round + partial 行 + last-run 不推进", async (t) => {
+  const ws = dmWorkspace();
+  t.after(() => fs.rmSync(ws, { recursive: true, force: true }));
+  const model = async () => ({ stdout: JSON.stringify({ decision: "no-method" }) });
+  const fact = await runDiscoveryMethod(ws, {
+    config: readDiscoveryMethodConfig(ws).config,
+    configPresent: true, configError: null, halted: false, invokedBy: INVOKED_BY_RESIDENT,
+    model,
+    ingestFn: () => ({ ok: true, ingested: 1 }),
+    // 反射缝**先真的走一次模型调用**（经 `reservingModel` ⇒ 真取一笔预留、记一条 outcome），
+    // 再抛出真 `reservingModel` 会抛的**同一个** `StoppedMidRoundError`。
+    reflectFn: async (_root, o) => {
+      await o.model("a reflection prompt");
+      throw new StoppedMidRoundError("reflection", false, "the reflection call was interrupted mid-flight by the stop signal (reservation stays SPENT, its outcome is on the ledger)");
+    },
+  });
+  assert.equal(fact.state, "not-evaluated", "⛔ 半轮**绝不**记 verified（硬规则 3b）");
+  assert.match(fact.reason, /^stopped-mid-round: /);
+  assert.match(fact.reason, /1 reservation\(s\) already granted by this round stay SPENT/, "原因里说清那一笔预留的下场");
+  assert.equal(ledgerOf2(ws).filter((l) => l.kind === "reserve").length, 1, "这一轮真的取过一笔预留（⛔ 不是替身记的账）");
+  assert.match(fact.reason, /last-run was NOT advanced/);
+  const lines = dmRounds(ws);
+  assert.equal(lines.length, 1, "已做过的事持久化了一行");
+  assert.equal(lines[0].partial, true);
+  assert.equal(lines[0].partial_reason, "stopped-mid-round:reflection");
+  assert.equal(lines[0].stopped_mid_round.step, "reflection");
+  assert.equal(lines[0].stopped_mid_round.after_stop, false, "停机到达时那一步**正在飞**");
+  // ⛔ `partial:true` 让「没推进 last-run」**结构上**为真：due 基准跳过 partial 行。
+  assert.equal(fs.existsSync(path.join(ws, ROUTINE_LAST_RUN_REL)), false, "last-run 映射根本没被写");
+  assert.equal(latestResidentRoundTs(lines), null, "⛔ partial 行不是生产的时钟 —— 否则「停机不消费窗口」是名义上的");
+});
+
+test("AC3（轮级负控制）— 同一条码路上的**普通**异常仍记 failed（⛔ stopped 那一支不是什么都接）", async (t) => {
+  const ws = dmWorkspace();
+  t.after(() => fs.rmSync(ws, { recursive: true, force: true }));
+  const fact = await runDiscoveryMethod(ws, {
+    config: readDiscoveryMethodConfig(ws).config,
+    configPresent: true, configError: null, halted: false, invokedBy: INVOKED_BY_RESIDENT,
+    model: async () => ({ stdout: JSON.stringify({ decision: "no-method" }) }),
+    ingestFn: () => ({ ok: true, ingested: 1 }),
+    reflectFn: async () => { throw new Error("an ordinary engine death"); },
+  });
+  assert.equal(fact.state, "failed", "⛔ 普通异常**不得**被洗成 stopped-mid-round");
+  assert.match(fact.reason, /^reflection threw/);
+  assert.equal(dmRounds(ws).length, 0, "failed 支不写载体");
+});
+
+// ── AC3（OSD 轮级）：任务标题点名的**那个**例程 —— 在飞 OSD 轮是实测超窗的形态（6/6 与 22/23 > 60s）。
+//    走真的 `runOpenSemanticDiscovery`：真的 config 读、真的台账、真的载体。三条断言各取一个假面：
+//    ① 停机**之后**零预留（把检查挪到 reserve 之后即变假）；② 轮**不**记 verified；③ 已取得的那一笔
+//    预留**保持已支出**（不因停机回滚）。
+const OSD_CARRIER = ".quay/open-semantic-discovery-findings.jsonl";
+const OSD_LEDGER = ".quay/open-semantic-discovery-model-budget.jsonl";
+const osdRounds = (ws) => (fs.existsSync(path.join(ws, OSD_CARRIER))
+  ? fs.readFileSync(path.join(ws, OSD_CARRIER), "utf8").split("\n").filter((l) => l.trim()).map((l) => JSON.parse(l))
+  : []);
+const osdLedger = (ws) => (fs.existsSync(path.join(ws, OSD_LEDGER))
+  ? fs.readFileSync(path.join(ws, OSD_LEDGER), "utf8").split("\n").filter((l) => l.trim()).map((l) => JSON.parse(l))
+  : []);
+
+function osdWorkspace() {
+  const ws = fs.mkdtempSync(path.join(os.tmpdir(), "qg-osd-stop-"));
+  fs.mkdirSync(path.join(ws, ".quay"), { recursive: true });
+  fs.mkdirSync(path.join(ws, "plugin", "scripts"), { recursive: true });
+  fs.writeFileSync(path.join(ws, "plugin", "scripts", "capability-catalog.sh"), "#!/bin/bash\nexit 0\n", "utf8");
+  fs.writeFileSync(path.join(ws, ".quay", "config.yml"),
+    "loop:\n  open_semantic_discovery:\n    enabled: true\n    interval: interval:60m\n    interval_until: 2026-10-20T00:00:00Z\n    investigator_runs: 1\n    max_clusters_verified: 3\n    verifier_max_turns: 8\n    refutation_max_turns: 6\n    max_wall_ms: 1200000\n    max_model_calls_per_24h: 120\n    max_usd_per_24h: 30\n", "utf8");
+  return ws;
+}
+
+test("AC3（OSD 轮级）— 停机到达 ⇒ 不再取预留、轮记 not-evaluated: stopped-mid-round（⛔ 非 verified）、已花的那笔保持已支出", async (t) => {
+  const ws = osdWorkspace();
+  t.after(() => fs.rmSync(ws, { recursive: true, force: true }));
+  const ac = new AbortController();
+  const spawned = [];
+  const verifierPromptFile = path.join(ws, "verifier-prompt.txt");
+  fs.writeFileSync(verifierPromptFile, "verify {{HYP}} on the pin\n", "utf8");
+  const investigatorPromptFile = path.join(ws, "investigator-prompt.txt");
+  fs.writeFileSync(investigatorPromptFile, "explore the pin\n", "utf8");
+  // 一条「调查员」：真走一次 `reservingStep`（真预留 + 真子进程 + 真 outcome），**然后**停机到达。
+  // 第二次模型调用会在 choke point 上读到 aborted ⇒ 轮在**下一个模型调用边界**收尾（Plan 步 2）。
+  let n = 0;
+  const spawnFn = async (argv) => {
+    spawned.push(argv);
+    n += 1;
+    if (n === 1) ac.abort();
+    return { status: 0, signal: null, stdout: JSON.stringify({ type: "result", result: "{}" }), stderr: "", error: null };
+  };
+  const hyp = {
+    PIN_FORBIDDEN_DIRS: [], HARD_MAX_CLUSTERS: 8, DEFAULT_EVIDENCE_MAX_LINES: 40,
+    hardenedArgv: (_launch, _prompt, _root, o) => ["claude", "--tools", String(o.tools), "--max-turns", String(o.maxTurns)],
+    verifyCwdRefusal: () => ({ ok: true }),
+    buildInventory: () => ({ entries: [], text: "", sha256: null }),
+    parseVerifierStream: () => ({ ok: true, num_turns: 1, usage: null, model: null, turns: [], finalText: "" }),
+    streamDiagnostics: () => ({ bytes: 0, lines: 0, json_lines: 0, truncated_json: false, api_error_event: false, has_result: true, events_by_type: {}, unparsed_json_lines: 0 }),
+    toolUseSummary: () => ({}),
+    callText: (s) => String(s),
+    parseJsonObject: (s) => { try { return JSON.parse(String(s)); } catch { return null; } },
+    // `defaultVerifierPrompt()` 返回的是一个**提示词模板文件路径**（生产同形），故夹具先落一个真文件。
+    defaultVerifierPrompt: () => verifierPromptFile,
+    defaultInvestigatorPrompt: () => investigatorPromptFile, preregRefusal: () => null, TOOL: "Read",
+    // 两次 run：第 1 次真的取预留并 spawn（停机在它返回后到达）；第 2 次在 `budget.reserve` **之前**
+    // 就读到 aborted ⇒ 抛出。这正是 Plan 步 2 的「下一个模型调用边界」。
+    runInvestigator: async (o) => {
+      const recs = [];
+      for (let i = 0; i < o.runs; i++) {
+        const r = await o.runModel(o.prompt, i);
+        recs.push({ run: i + 1, hyps: [], stdout: r?.stdout ?? "", exit: r?.status ?? null });
+      }
+      return { ok: true, records: recs, parsed: 0, total: o.runs };
+    },
+    runVerifier: async () => ({ ok: true, clusters_total: 0, verified: 0, beyond_cap: 0, results: [] }),
+  };
+  const fact = await runOpenSemanticDiscovery(ws, {
+    config: readOpenSemanticDiscoveryConfig(ws).config,
+    configPresent: true, configError: null, halted: false, invokedBy: INVOKED_BY_RESIDENT,
+    signal: ac.signal,
+    // ⛔ 只替**读者**，不替判定：方法选取要的是「读不懂 ⇒ baseline」那三态，故这里给的是
+    // `file === null`（注册表未解析）——被选取的模块中**没有任何一条**抑制语义轮（其自身的契约）。
+    modules: {
+      hyp,
+      portfolio: {},
+      ledger: { experienceDenyList: () => ({ ok: false, ids: [] }) },
+      registry: {
+        readMethodRegistry: () => ({ file: null, reason: "REGISTRY_UNRESOLVABLE:fixture-has-no-registry", ok: false, latest: [], history: [], malformed_lines: 0 }),
+        activeMethods: () => ({ ok: false, active_ids: [], contaminated_verdicts_evaluated: null }),
+        contaminatedVerdictIds: () => ({ ok: false, ids: [] }),
+      },
+    },
+    launchArgvFn: () => ["claude"],
+    spawnFn,
+    revFn: () => "deadbeefdeadbeef",
+    pinFn: ({ dir }) => { fs.mkdirSync(dir, { recursive: true }); return { ok: true, dir }; },
+  });
+  assert.equal(fact.state, "not-evaluated", `⛔ 半轮**绝不**记 verified（硬规则 3b）— reason: ${fact.reason}`);
+  assert.match(fact.reason, /^stopped-mid-round: /);
+  assert.match(fact.reason, /stay RESERVED/);
+  assert.match(fact.reason, /the production last-run was NOT advanced/);
+  const reserves = osdLedger(ws).filter((l) => l.kind === "reserve");
+  const outcomes = osdLedger(ws).filter((l) => l.kind === "outcome");
+  assert.equal(spawned.length, 1, "⛔ 停机之后不再起第二个模型子进程（检查在 reserve 之前 ⇒ 也在 spawn 之前）");
+  assert.equal(reserves.length, 1, "⛔ 停机之后 reserve 计数**不动**（这一条把检查挪到 reserve 之后立刻变假）");
+  assert.equal(outcomes.length, 1, "已取的那一笔预留记了 outcome ⇒ 台账自洽：花掉的算花掉，⛔ 不回滚");
+  const lines = osdRounds(ws);
+  assert.equal(lines.length, 1, "已做过的事持久化了一行（硬规则 3b：半轮留痕，且**不**冒充完整轮）");
+  assert.equal(lines[0].partial, true);
+  assert.equal(lines[0].partial_reason, "stopped-mid-round:investigator");
+  // 停机**在飞**到达：这一笔预留已取、已 spawn，轮在**这次调用自己的边界**上收尾（⛔ 不继续走到验证步 ——
+  // 那一步会再取预留）。`after_stop:false` 与「停机之后才走到」的 `true` **不同形**（硬规则 3b）。
+  assert.equal(lines[0].stopped_mid_round.after_stop, false);
+  assert.equal(lines[0].stopped_mid_round.calls_made, 1);
+  assert.ok(!fs.existsSync(path.join(ws, ".quay", "routine-last-run.json")), "last-run 未被推进");
 });

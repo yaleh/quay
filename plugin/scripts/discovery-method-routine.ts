@@ -160,7 +160,7 @@ import { execFileSync } from "node:child_process";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import YAML from "yaml";
 import { isDue, parseTrigger } from "./routine-scheduler.ts";
-import { type Fact, type RoutineSpec } from "./driver-runtime.ts";
+import { isStoppedMidRound, STOPPED_MID_ROUND, StoppedMidRoundError, type Fact, type RoutineRunContext, type RoutineSpec } from "./driver-runtime.ts";
 // ⛔ `writeLastRun` is deliberately NOT imported: the resident advance must land the stamp in the SAME
 // write as the timestamp, so this routine uses its own `writeLastRunStamped` (see that function).
 import { ROUTINE_LAST_RUN_REL, readLastRunMap } from "./probe-routine.ts";
@@ -987,14 +987,22 @@ export function readRealizedTurns(stdout: unknown, parse?: (s: string) => { ok?:
 /** Wrap a model seam so EVERY subprocess goes through a pre-spawn reservation. The order inside is the
  *  whole point (defect ①/②): reserve → spawn → record outcome. A refusal THROWS before the spawn, so
  *  the engine step cannot spend a call the ledger did not grant; a failure/timeout records an outcome
- *  and re-throws, so the call stays counted and the round can still say what happened. */
+ *  and re-throws, so the call stays counted and the round can still say what happened.
+ *
+ *  `signal`（gap-quality-restart-waits-out-whole-round-so-osd-in-flight-exceeds-stop-window，Plan 步 2）：
+ *  常驻循环的协作式取消信号。读到时（**在 `budget.reserve` 之前**）抛 `StoppedMidRoundError` ⇒
+ *  ① 停机之后一笔预留都不取（AC3 的可核读数）；② 异常穿过引擎的回调上抛到本轮自己的 catch，
+ *  落成 `not-evaluated: stopped-mid-round`（⛔ 不记 `verified`）。缺省 `undefined` ⇒ 与从前逐字相同。 */
 export function reservingModel(
   inner: ModelFn,
   budget: ModelBudget,
   meta: ReservationMeta,
   turnReader?: (s: string) => { ok?: boolean; num_turns?: unknown } | null,
+  signal?: AbortSignal,
 ): ModelFn {
   return async (prompt: string) => {
+    // ⛔ 停机检查必须在 reserve **之前**：放在之后等于先花钱再问该不该花。
+    if (signal?.aborted) throw new StoppedMidRoundError(meta.step, true, `no reservation is taken after the stop (step ${meta.step} was reached after the stop signal)`);
     const r = await budget.reserve(meta);
     if (!r.ok) throw new BudgetRefusedError(r.used, r.cap, meta.step);
     let res: { stdout: string };
@@ -1006,6 +1014,8 @@ export function reservingModel(
     }
     const { turns, reason } = readRealizedTurns(res?.stdout, turnReader);
     budget.outcome(r.id, "completed", turns, reason);
+    // 停机到达时这次调用**已在飞**：outcome 已记（预留保持已支出），这里只把本轮立刻收尾。
+    if (signal?.aborted) throw new StoppedMidRoundError(meta.step, false, `the ${meta.step} call was interrupted mid-flight by the stop signal (reservation ${r.id} stays SPENT, its outcome is on the ledger)`);
     return res;
   };
 }
@@ -1204,6 +1214,10 @@ export interface DiscoveryMethodRunOptions {
   configError?: string | null;
   /** From the routine ctx: halt gates the spawn, never the routine track. */
   halted: boolean;
+  /** 常驻循环的**协作式取消信号**（`RoutineRunContext.signal`）。见 `reservingModel` 的 WHY
+   *  （gap-quality-restart-waits-out-whole-round-so-osd-in-flight-exceeds-stop-window）。
+   *  ⛔ 缺省 `undefined` ⇒ 与从前逐字相同。 */
+  signal?: AbortSignal;
   /** WHO invoked this round (see the header). Defaults to `manual` — an undeclared caller never advances
    *  the production last-run. `buildDiscoveryMethodRoutine` declares `resident-driver` for the driver's
    *  routine table; the `--once` CLI declares `manual`. */
@@ -1465,6 +1479,11 @@ export async function runDiscoveryMethod(root: string, opts: DiscoveryMethodRunO
   // cut short by the ceiling must not consume the window, so the last-run is NOT advanced (`budgetRefusal
   // !== null` is checked at ⑨). `null` = no mid-round refusal.
   let budgetRefusal: { step: string; used: number; cap: number } | null = null;
+  // ⛔ 停机打断（gap-quality-restart-waits-out-whole-round-so-osd-in-flight-exceeds-stop-window）：与
+  // `budgetRefusal` **同一条码路**——本轮已花的预留留在台账上，把已做过的事持久化成一行 `partial:true`
+  // 的 scan-round，⛔ **不**记 `verified`（半轮不是一轮，硬规则 3b），⛔ **不**推进 last-run。
+  // `null` = 本轮没被停机打断。`afterStop` 见 `StoppedMidRoundError`。
+  let stoppedMidRound: { step: string; afterStop: boolean } | null = null;
   // The two reserving seams. Declared at the ROUND's scope for the same reason `appendFn` is: ⑦ runs
   // outside the `ingested > 0` block and needs the verification seam.
   let reflectionSeam: ModelFn | null = null;
@@ -1597,6 +1616,44 @@ export async function runDiscoveryMethod(root: string, opts: DiscoveryMethodRunO
     return { record, persisted: true };
   };
 
+  /** The STOPPED half of `persistPartialOnBreach`
+   *  (gap-quality-restart-waits-out-whole-round-so-osd-in-flight-exceeds-stop-window, Plan item 2):
+   *  the resident loop's stop signal arrived mid-round ⇒ persist what the round ACHIEVED as a
+   *  `partial:true` line (so `latestResidentRoundTs` skips it and the window is NOT consumed — the
+   *  sentence "the last-run was not advanced" is then structurally true rather than merely asserted,
+   *  硬规则 4), and answer `not-evaluated: stopped-mid-round`. ⛔ **Never** `verified`: a half round is
+   *  not a round (硬规则 3b). ⛔ The reservations already granted stay RESERVED — a spent reservation is
+   *  never refunded (Plan item 2 末句) — and the reason names where they live so the next round's
+   *  `used_at_start` can be read against them. */
+  const persistStoppedMidRound = (step: string, afterStop: boolean): Fact => {
+    const record = buildRoundRecord({ partial: true, partial_reason: `${STOPPED_MID_ROUND}:${step}` });
+    record.stopped_mid_round = { step, after_stop: afterStop, calls_made: modelCalls, verdicts_made: verdicts.length };
+    // ⛔ 落痕的门是「这一轮**取得了什么**」——**已取到的预留也算**（`granted`）：一笔花掉的预留是这一轮
+    //    真实做过的事，而 `modelCalls` 只数**返回过结果**的调用（被打断的那一笔正好不在其中）。用
+    //    `modelCalls` 当门会让「停机时已花了 3 笔预留」的轮什么都不留（硬规则 4c：判据点的量必须穿过
+    //    所有中间层还取得到）。⛔ 什么都没取得 ⇒ 与 wall-breach 的既有契约一致，什么都不写。
+    const granted = budget === null ? 0 : budget.grantedCount;
+    let persisted = false;
+    if (granted > 0 || modelCalls > 0 || verdicts.length > 0) {
+      try {
+        appendCarrierRecords(carrier, [record]);
+        persisted = true;
+      } catch (err) {
+        // ⛔ 落痕失败**不静默**：读数是「试图持久化，失败了」，与「持久化了」不同形（硬规则 3b）。
+        process.stderr.write(`discovery-method: stopped-mid-round carrier append failed — ${(err as Error)?.message ?? String(err)}\n`);
+      }
+    }
+    const ledgerRel = asRel(root, opts.budgetLedgerPath ?? path.join(root, BUDGET_LEDGER_REL));
+    return fact(
+      "not-evaluated",
+      record,
+      `${STOPPED_MID_ROUND}: the resident loop's stop signal arrived during the ${step} step ` +
+      `(${afterStop ? "after the stop, before that step's reservation — no call was made for it" : "while that call was in flight; its outcome is on the ledger and its reservation stays SPENT"}) — ` +
+      `${granted} reservation(s) already granted by this round stay SPENT on ${ledgerRel} (⛔ a spent reservation is not refunded), ` +
+      `${persisted ? "the round persisted what it did (1 PARTIAL scan-round line)" : "nothing appended (no call had completed)"}, and the production last-run was NOT advanced (a stopped half-round is not a round that ran)${revertedNote}${legacyNote}`,
+    );
+  };
+
   // ⑤ (a) ingest. A refusal here (WATERMARK_MISMATCH / an unresolved shared checkout / a missing
   //    evidence store) is the round's own failure with the step's OWN reason code.
   const ingestFn = opts.ingestFn ?? engine.ledger.ingestNewOutcomes;
@@ -1651,10 +1708,10 @@ export async function runDiscoveryMethod(root: string, opts: DiscoveryMethodRunO
       ? (s: string) => engine.reflection.parseVerifierStream!(s)
       : undefined;
     reflectionSeam = typeof model === "function" && budget !== null
-      ? reservingModel(model, budget, { step: "reflection", tools: reflectionParams.tools, max_turns: reflectionParams.maxTurns }, turnReader)
+      ? reservingModel(model, budget, { step: "reflection", tools: reflectionParams.tools, max_turns: reflectionParams.maxTurns }, turnReader, opts.signal)
       : model;
     verificationSeam = typeof verifierModel === "function" && budget !== null
-      ? reservingModel(verifierModel, budget, { step: "verification", tools: VERIFIER_TOOLS, max_turns: config.verifierMaxTurns }, turnReader)
+      ? reservingModel(verifierModel, budget, { step: "verification", tools: VERIFIER_TOOLS, max_turns: config.verifierMaxTurns }, turnReader, opts.signal)
       : verifierModel;
     let reflectFn = opts.reflectFn ?? engine.reflection.runReflectionRound;
     let r: Record<string, unknown> | null = null;
@@ -1678,9 +1735,12 @@ export async function runDiscoveryMethod(root: string, opts: DiscoveryMethodRunO
       });
     } catch (e) {
       if (isBudgetRefused(e)) budgetRefusal = { step: "reflection", used: e.used, cap: e.cap };
+      else if (isStoppedMidRound(e)) stoppedMidRound = { step: e.step, afterStop: e.afterStop };
       else if (e instanceof BudgetLockError) return fact("failed", { ...base, enabled: true, ingest }, `budget lock unavailable — ${e.message} (nothing appended, last-run not advanced)`);
       else return fact("failed", { ...base, enabled: true, ingest }, `reflection threw — ${(e as Error)?.message ?? String(e)} (nothing appended, last-run not advanced)`);
     }
+    // ⛔ 停机打断 ⇒ **本轮的其余步骤一概不跑**（Plan 步 2：在下一个可中断边界停下，不是继续做完）。
+    if (stoppedMidRound !== null) return persistStoppedMidRound(stoppedMidRound.step, stoppedMidRound.afterStop);
     if (r !== null && r.ok !== true) {
       return fact("failed", { ...base, enabled: true, ingest }, `reflection refused — ${String(r.reason ?? "no reason reported")} (nothing appended, last-run not advanced)`);
     }
@@ -1790,6 +1850,7 @@ export async function runDiscoveryMethod(root: string, opts: DiscoveryMethodRunO
           // A refusal/death mid-verification STOPS the loop rather than failing the whole round: the
           // reflection calls already made are real work, and the round still persists them (see ⑧/⑨).
           if (isBudgetRefused(e)) budgetRefusal = { step: "verification", used: e.used, cap: e.cap };
+          else if (isStoppedMidRound(e)) stoppedMidRound = { step: e.step, afterStop: e.afterStop };
           else verdictError = e instanceof BudgetLockError ? e.message : `verification threw — ${(e as Error)?.message ?? String(e)}`;
           stopLoops = true;
           break;
@@ -1830,6 +1891,7 @@ export async function runDiscoveryMethod(root: string, opts: DiscoveryMethodRunO
       const p = persistPartialOnBreach("during-generalization");
       return fact("failed", p.record, `budget breach — wall ${p.record.wall_ms}ms >= max_wall_ms ${config.maxWallMs} during generalization (${p.persisted ? `persisted 1 PARTIAL scan-round line with the ${modelCalls} call(s) and ${verdicts.length} verdict(s) already made` : "nothing appended (no call completed)"}, last-run not advanced)`);
     }
+    if (stoppedMidRound !== null) return persistStoppedMidRound(stoppedMidRound.step, stoppedMidRound.afterStop);
     if (verdictError !== null) {
       return fact("failed", { ...base, enabled: true, ingest, reflection, budget_24h: budget24h }, `${verdictError} (nothing appended, last-run not advanced)`);
     }
@@ -1884,7 +1946,7 @@ export async function runDiscoveryMethod(root: string, opts: DiscoveryMethodRunO
  *  table, so the round it builds is `resident-driver` by construction and cannot be talked out of it
  *  (a routine spec is exactly the thing that may advance production). A caller that wants a manual round
  *  calls `runDiscoveryMethod` directly — the two paths must not be reachable by the same switch. */
-export interface DiscoveryMethodRoutineOptions extends Omit<DiscoveryMethodRunOptions, "config" | "configPresent" | "configError" | "halted" | "invokedBy" | "force"> {}
+export interface DiscoveryMethodRoutineOptions extends Omit<DiscoveryMethodRunOptions, "config" | "configPresent" | "configError" | "halted" | "invokedBy" | "force" | "signal"> {}
 
 /** Build the Layer-1b routine from an ALREADY-PARSED config read. `schedule` is the section's trigger
  *  when present, else the default interval — a disabled/absent section is still an evaluated routine
@@ -1907,6 +1969,8 @@ export function buildDiscoveryMethodRoutine(root: string, read: DiscoveryMethodC
         configPresent: read.present,
         configError: read.error,
         halted: ctx?.halted === true,
+        // 常驻循环的协作式取消信号。⛔ 只有循环会传它：手动单发 / `--once` 不带 signal ⇒ 与从前逐字相同。
+        signal: ctx?.signal,
         // The driver's routine table ⇒ the PRODUCTION scheduler. Declared here, at the one place that
         // knows the caller is the driver (see the header: the read is shared, the advance is ours).
         invokedBy: INVOKED_BY_RESIDENT,

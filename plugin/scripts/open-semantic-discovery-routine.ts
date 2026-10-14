@@ -150,7 +150,7 @@ import { execFileSync, spawn } from "node:child_process";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import YAML from "yaml";
 import { isDue, parseTrigger } from "./routine-scheduler.ts";
-import { launchArgv, readAnchorStart, type AnchorStartReading, type Fact, type RoutineSpec } from "./driver-runtime.ts";
+import { launchArgv, readAnchorStart, STOPPED_MID_ROUND, StoppedMidRoundError, isStoppedMidRound, type AnchorStartReading, type Fact, type RoutineSpec } from "./driver-runtime.ts";
 import { ROUTINE_LAST_RUN_REL, readLastRunMap } from "./probe-routine.ts";
 import { isDirectEntry } from "./gate-script-base.ts";
 // The task-status transition READ SURFACE (the same reader `quay task log` publishes). ⛔ NEVER a direct
@@ -950,10 +950,17 @@ export function stepArgv(
 /** The spawn primitive this routine drives every model subprocess with. It exists because the model must
  *  be ROOTED AT THE PIN, and the shared `runAsync` primitive has no `cwd` option: without it the child
  *  would inherit the driver's own cwd — the main checkout — and read an UNSTRIPPED tree. Timeout semantics
- *  mirror `runAsync` (finite ⇒ SIGKILL; every failure is returned, never thrown). */
+ *  mirror `runAsync` (finite ⇒ SIGKILL; every failure is returned, never thrown).
+ *
+ *  `signal`（gap-quality-restart-waits-out-whole-round-so-osd-in-flight-exceeds-stop-window，Plan 步 2）：
+ *  常驻循环请求停机时 `abort()` 它 ⇒ **在飞的模型子进程被立刻 SIGKILL**，而不是等它自己跑完
+ *  （实测 OSD 单轮 92s–1172s，等它跑完必然超出 60000ms 停机窗）。⛔ 这也把「停机延迟」从
+ *  「一次模型调用的长度」压到「取消信号的传播延迟」，是 `stopped-mid-round` 能在有界时间内被记下的
+ *  前提。缺省 `undefined` ⇒ 与从前逐字相同。 */
 export function spawnModelCall(
   argv: string[],
   opts: { cwd: string; timeoutMs: number; stdinData?: string },
+  signal?: AbortSignal,
 ): Promise<{ status: number | null; signal: string | null; stdout: string; stderr: string; error: Error | null }> {
   return new Promise((resolve) => {
     let child: ReturnType<typeof spawn>;
@@ -970,12 +977,30 @@ export function spawnModelCall(
     let stderr = "";
     let settled = false;
     let timer: ReturnType<typeof setTimeout> | null = null;
+    const abortSignal = signal ?? null;
+    let onAbort: (() => void) | null = null;
     const finish = (status: number | null, signal: string | null, error: Error | null) => {
       if (settled) return;
       settled = true;
       if (timer) clearTimeout(timer);
+      if (abortSignal && onAbort) abortSignal.removeEventListener("abort", onAbort);
       resolve({ status, signal, stdout, stderr, error });
     };
+    if (abortSignal) {
+      if (abortSignal.aborted) {
+        // ⛔ 已停机就**不 spawn**（子进程建了也立刻收掉）：把一次没人要的模型调用发出去，与
+        //    「停机后不再取预留」是同一条纪律（AC3）。
+        try { child.kill("SIGKILL"); } catch { /* already gone */ }
+      } else {
+        onAbort = () => {
+          // ⛔ 立刻 SIGKILL（不是 SIGTERM + 等宽限）：停机要的是**有界**延迟，宽限属于调用方的
+          //    `stopGraceMs`，不在这里再叠一层无界的等待。
+          try { child.kill("SIGKILL"); } catch { /* already gone */ }
+          finish(null, "SIGKILL", new Error(`${STOPPED_MID_ROUND}: the model call was killed by the resident loop's stop signal (${argv[0]})`));
+        };
+        abortSignal.addEventListener("abort", onAbort, { once: true });
+      }
+    }
     if (Number.isFinite(opts.timeoutMs)) {
       timer = setTimeout(() => {
         try { child.kill("SIGKILL"); } catch { /* already gone */ }
@@ -3154,6 +3179,16 @@ export interface OpenSemanticDiscoveryRunOptions {
   sleepFn?: ((ms: number) => Promise<void>) | null;
   /** How long that backoff is. Defaults to `RETRY_BACKOFF_MS`; a test sets `0` for determinism. */
   retryBackoffMs?: number;
+  /** 常驻循环的**协作式取消信号**（`RoutineRunContext.signal`）。见 `driver-runtime.ts` 的契约注释。
+   *
+   *  本轮的**可中断边界**是**每一次模型调用之前**（`reservingStep` 的第一行）：读到 `aborted` ⇒
+   *  ⛔ **不再取预留**（AC3：停机之后一笔预留都不取），抛 `StoppedMidRoundError`。在飞的调用由
+   *  `spawnModelCall` 的 signal 支 SIGKILL 掉，返回后同样上抛。异常一路穿过引擎回调（那里的
+   *  `await runModel(...)` 不吞异常）到本轮自己的 catch，落成一条 `not-evaluated: stopped-mid-round`
+   *  并**持久化这一轮已经做过的事**（与 `budget-24h` 中途拒绝同一条码路）。
+   *
+   *  ⛔ 缺省 `undefined` ⇒ 与从前逐字相同（手动单发 / `--once` / 非循环调用方不传它）。 */
+  signal?: AbortSignal;
 }
 
 const asRel = (root: string, p: string) => path.relative(root, p) || p;
@@ -3747,6 +3782,10 @@ export async function runOpenSemanticDiscovery(root: string, opts: OpenSemanticD
       argv: string[];
       rec: Record<string, unknown>;
     }> {
+      // ⛔ THE STOP BOUNDARY (gap-quality-restart-waits-out-whole-round-so-osd-in-flight-exceeds-stop-window,
+      // Plan item 2): 停机**之后**一笔预留都不取。这一条必须在 `budget.reserve` **之前** —— 检查放在
+      // 之后就等于先花了钱再问该不该花（AC3 要的正是「停机之后零预留」这个可核的读数）。
+      if (opts.signal?.aborted) throw new StoppedMidRoundError(kind, true, `no reservation is taken after the stop (step ${kind} was reached after the stop signal)`);
       // ⛔ The round id travels on the reservation (Plan item 4), so every ledger line this round writes is
       // attributable to it by a value the round ITSELF published on its scan-round line.
       const r = await budget.reserve({ step: kind, tools: payload.tools, max_turns: payload.maxTurns, round: roundId });
@@ -3756,7 +3795,9 @@ export async function runOpenSemanticDiscovery(root: string, opts: OpenSemanticD
       let res: { status: number | null; signal?: string | null; stdout: string; stderr: string; error: Error | null };
       const callStarted = now();
       try {
-        res = await spawn(argv, { cwd: pinned, timeoutMs: Math.max(1_000, config.maxWallMs), stdinData: payload.prompt });
+        // The signal rides into the spawn so an IN-FLIGHT child is killed on abort instead of being waited
+        // out — without it the round's stop latency would be one whole model call (minutes, measured).
+        res = await spawn(argv, { cwd: pinned, timeoutMs: Math.max(1_000, config.maxWallMs), stdinData: payload.prompt }, opts.signal);
       } catch (e) {
         budget.outcome(r.id, classifyModelFailure(e), null, `CALL_THREW:${(e as Error)?.name ?? "Error"}`);
         throw e;
@@ -3885,6 +3926,13 @@ export async function runOpenSemanticDiscovery(root: string, opts: OpenSemanticD
         }
       }
       callRecords.push(rec);
+      // ⛔ The stop boundary's SECOND half: 停机到达时这次调用**已在飞** ⇒ 它被 `spawnModelCall` 的
+      // signal 支 SIGKILL 掉。它的**预留已经花掉且已记 outcome**（上面 `budget.outcome`）——一笔花掉的
+      // 预留就是花掉了，不因停机回滚（Plan item 2 末句）；这里只负责把这一轮**立刻**收尾。
+      // 记录先 push（这一轮已做过的事有据可查），再上抛。
+      if (opts.signal?.aborted) {
+        throw new StoppedMidRoundError(kind, false, `the ${kind} call was interrupted mid-flight by the stop signal (reservation ${r.id} stays SPENT, its outcome is on the ledger)`);
+      }
       return { res, stream, argv, rec };
     }
 
@@ -4890,13 +4938,58 @@ export async function runOpenSemanticDiscovery(root: string, opts: OpenSemanticD
     if (e instanceof BudgetLockError) {
       return fact("failed", { ...base, enabled: true, interval: intervalInfo, due: dueInfo }, `budget lock unavailable — ${e.message} (nothing appended, last-run not advanced)`);
     }
+    if (isStoppedMidRound(e)) {
+      // ── 半轮被停机打断（gap-quality-restart-waits-out-whole-round-so-osd-in-flight-exceeds-stop-window）──
+      // ⛔ 与 `budget-24h` 中途拒绝**同一条码路**：这一轮已经花掉的预留留在台账上（一笔花掉的预留就是
+      // 花掉了），把**已经做过的事**持久化成一行 scan-round，但 ⛔ **绝不**记 `verified`——半轮不是一轮
+      // （硬规则 3b：`verified` 与 `stopped-mid-round` 必须不同形），也 ⛔ 不推进生产 last-run（停机不是
+      // 「这一轮跑过了」，下一轮该照常 due）。
+      const round: Record<string, unknown> = {
+        kind: "scan-round", routine: OPEN_SEMANTIC_DISCOVERY_NAME, invoked_by: invokedBy, ts: new Date(now()).toISOString(),
+        // ⛔ `partial:true` 让「未推进 last-run」这句话**结构上**为真而不是名义上为真（硬规则 4）：
+        //    due 基准 `latestResidentRoundTs` 跳过 `partial:true` 的行（见其注释），所以这一轮的行落在
+        //    载体上、可审计，却**不会**把生产时钟往前推——停机不是「这一轮跑过了」。
+        partial: true, partial_reason: `${STOPPED_MID_ROUND}:${e.step}`,
+        stopped_mid_round: {
+          step: e.step,
+          // `true` = 停机**先到**、这一步是在停机之后才被走到（因此**没有**取预留）；
+          // `false` = 停机到达时这一步**正在飞**（它的预留已花掉、outcome 已记）。
+          after_stop: e.afterStop,
+          // 这一轮**已做出**的读数（`calls` 就是它的直接量）——读者据此判断「停下来时做到哪了」。
+          calls_made: callRecords.length,
+          reservations_granted: budget.grantedCount,
+        },
+        interval: intervalInfo, due: dueInfo, pin: { rev, dir: asRel(root, pinned) }, inventory: { ok: inventory.ok, entries: inventory.entries, unavailable: inventory.unavailable },
+        investigator: investigatorBlock,
+        reservations: { cap: config.maxModelCallsPer24h, used_at_start: callsUsage.total, granted: budget.grantedCount, refused: budget.refusedCount, ledger: asRel(root, ledgerPath) },
+        task_log: taskLogContext,
+        methods: selectionBlock,
+        budget_24h: countBudgetBlock, budget_usd_24h: usdBudgetBlock, wall_ms: now() - started, round_id: roundId, model_calls: budget.grantedCount, calls: callRecords,
+        tokens: { input: tokensIn, output: tokensOut }, cost_usd: round6(costUsd),
+      };
+      let persisted = true;
+      try {
+        appendCarrierRecords(carrier, [round]);
+      } catch (err) {
+        // ⛔ 落痕失败**不静默**：这一支的读数是「试图持久化，失败了」，与「持久化了」不同形（硬规则 3b）。
+        persisted = false;
+        process.stderr.write(`open-semantic-discovery: stopped-mid-round carrier append failed — ${(err as Error)?.message ?? String(err)}\n`);
+      }
+      const reservationLedger = asRel(root, ledgerPath);
+      return fact(
+        "not-evaluated",
+        round,
+        `${STOPPED_MID_ROUND}: the resident loop's stop signal arrived during the ${e.step} step (${e.afterStop ? "after the stop, before its reservation — no call was made for it" : "while that call was in flight; the call was killed and its reservation stays SPENT"}) — ` +
+        `${callRecords.length} call(s) already made stay RESERVED on ${reservationLedger} (⛔ a spent reservation is not refunded), ${persisted ? "the round persisted what it did (1 scan-round line)" : "⛔ the round's scan-round line could NOT be persisted"}, and the production last-run was NOT advanced (a stopped half-round is not a round that ran)${revertedNote}${legacyNote}`,
+      );
+    }
     return fact("failed", { ...base, enabled: true, interval: intervalInfo, due: dueInfo }, `round threw — ${(e as Error)?.message ?? String(e)} (nothing appended, last-run not advanced)`);
   }
 }
 
 // ── RoutineSpec factories ────────────────────────────────────────────────────────────────────────────
 export interface OpenSemanticDiscoveryRoutineOptions
-  extends Omit<OpenSemanticDiscoveryRunOptions, "config" | "configPresent" | "configError" | "halted" | "invokedBy" | "force"> {}
+  extends Omit<OpenSemanticDiscoveryRunOptions, "config" | "configPresent" | "configError" | "halted" | "invokedBy" | "force" | "signal"> {}
 
 /** Build the Layer-1b routine from an ALREADY-PARSED config read. ⛔ `invokedBy` and `force` are OMITTED,
  *  not merely defaulted: this factory IS the driver's routine table, so the round it builds is
@@ -4914,6 +5007,9 @@ export function buildOpenSemanticDiscoveryRoutine(root: string, read: OpenSemant
         configPresent: read.present,
         configError: read.error,
         halted: ctx?.halted === true,
+        // 常驻循环的协作式取消信号（`RoutineRunContext.signal`）。⛔ 只有循环会传它：手动单发 / `--once`
+        // 不带 signal ⇒ 与从前逐字相同（一次偶发的停机不该打断运维手敲的 `--force` 轮）。
+        signal: ctx?.signal,
         invokedBy: INVOKED_BY_RESIDENT,
       })],
   };

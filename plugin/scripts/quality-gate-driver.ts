@@ -54,12 +54,15 @@ import {
   registerKindStop,
   kindStopProbe,
   residentLoopStop,
+  DISK_STOP_POLL_MS_DEFAULT,
+  STOPPED_MID_ROUND,
   resourceGateCheck,
   kernelSiblingArgv,
   splitArgs,
   isNonNegInt,
   type DriverKind,
   type Fact,
+  type RoutineRunContext,
   type RoutineSpec,
 } from "./driver-runtime.ts";
 // B15 判词聚合的单一实现（ADR-033：判定用 agent、聚合用 JS 算术）。⛔ 不复制一份平行版本——
@@ -1505,7 +1508,25 @@ export interface QualityGateLoopOptions {
   /** AC-255（SPEC §7 阶段 C）：本循环是哪个 kind 的。用来登记**进程内**停机信号（`registerKindStop`），
    *  使 anchor 能只停这一个 kind 的循环。缺省 "quality"（本循环的原生 kind）。 */
   kind?: DriverKind;
+  /** 停机时给**在飞例程**的协作宽限（ms）。见 `STOP_GRACE_MS_DEFAULT`。测试缝：传 0 复现「例程完全不
+   *  响应取消 ⇒ 由调用方放弃」那一支。 */
+  stopGraceMs?: number;
+  /** 轮内停机探针的轮询周期（ms，缺省 `DISK_STOP_POLL_MS_DEFAULT`）。 */
+  stopPollMs?: number;
 }
+
+/** 停机时给**在飞例程**的协作宽限（ms）。
+ *
+ *  WHY 5s，而不是「把 60000ms 调大」（硬规则 4 推论二：⛔ 不靠抬字面量）：
+ *  `stopKindViaAnchor` 的 60000ms 是**等待窗口**，不是**停机延迟**。把它调大只是把 `stop-failed`
+ *  推迟成一次更长的阻塞，且不封顶（例程看门狗缺省 30min ⇒ 一个不响应取消的例程能把停机拖到 30min）。
+ *  真正要的是让循环**真的停下来**：轮边界 + 轮内都查停机（立即），在飞例程收到 `AbortSignal`
+ *  （下一个模型调用边界），再加这一条**有界**的兜底宽限 ⇒ 停机延迟有一个**不依赖例程行为**的上界。
+ *
+ *  取值的依据（不是猜）：协作取消的粒度是**一次模型子进程调用**，而取消到达时那个子进程被
+ *  `SIGKILL`（`spawnModelCall` 的 signal 支），收尾是毫秒级；5s 是给「例程还要写一条收尾 Fact /
+ *  落一条 carrier 行」留的量级，同时把上界压到 60000ms 窗口的 ~1/10。 */
+export const STOP_GRACE_MS_DEFAULT = 5_000;
 
 /** 组装一条 round 记录（heartbeat carrier 的一行）。facts 是轮内跑出的全部例程读数。 */
 export function computeRoundRecord(args: {
@@ -1515,31 +1536,132 @@ export function computeRoundRecord(args: {
   at: string;
   facts: Fact<unknown>[];
   halted?: boolean;
+  /** 本轮因停机请求而**未跑**的 due 例程名（硬规则 3b：被截断的一轮必须与被跑完的一轮不同形）。 */
+  skippedRoutines?: readonly string[];
+  /** 本轮至少有**一条**例程交出 `not-evaluated: stopped-mid-round`。 */
+  stoppedMidRound?: boolean;
 }): Record<string, unknown> {
-  const { round, runId, pid, at, facts, halted = false } = args;
-  return { round, run_id: runId, pid, ts: at, halted, facts };
+  const { round, runId, pid, at, facts, halted = false, skippedRoutines = [], stoppedMidRound = false } = args;
+  return {
+    round, run_id: runId, pid, ts: at, halted, facts,
+    // ⛔ 两条**只描述「本轮没跑完」**的键：有了它们，「停机打断的一轮」与「正常跑完的一轮」不再同形
+    //   （硬规则 3b）。⛔ 不含任何「半轮当成完成」的字段——`facts` 里那条 not-evaluated 才是读数。
+    stopped_mid_round: stoppedMidRound,
+    skipped_routines: [...skippedRoutines],
+  };
+}
+
+/** 轮内 / 轮边界的**协作式停机**参数（Plan 步 1-2）。缺省 `undefined` ⇒ 例程侧行为逐字与从前相同。 */
+export interface RoutineStopCooperation {
+  /** 停机是否已被请求——与常驻 `while` 的条件是**同一个**判据（停机控制器）。 */
+  isStopRequested: () => boolean;
+  /** 探针轮询周期（ms）。 */
+  pollMs: number;
+  /** 协作宽限（ms）：发出取消信号之后例程还有多久可以自己收尾。 */
+  graceMs: number;
+}
+
+/** 停机到达后**放弃等待**那一条 Fact 的读数（`observed:false` 与例程自己交的 `observed:true` 不同形）。 */
+function abandonedMidRoundFact(name: string, graceMs: number): Fact<unknown> {
+  return {
+    name,
+    value: { stopped_mid_round: true, observed: false, grace_ms: graceMs },
+    state: "not-evaluated",
+    reason:
+      `${STOPPED_MID_ROUND}: the routine did not observe the stop within ${graceMs}ms — abandoned by the ` +
+      `caller-side stop grace. ⛔ This is NOT a completed round: the routine's own Facts are not recorded, ` +
+      `and any write it still performs after this point may land on disk.`,
+  };
+}
+
+/** 放弃等待之后，例程**迟到**收尾时的具名落痕（⛔ 不静默：迟到的 Facts **不**进这一轮，但「它到底有没有
+ *  收尾」是运维区分「例程只是慢」与「例程挂了」的唯一读数）。 */
+function noteLateSettlement(routineName: string, runP: Promise<Fact<unknown>[]>): void {
+  void runP.then(
+    () => process.stderr.write(
+      `quality-gate-driver: routine '${routineName}' settled AFTER the stop grace had abandoned it — its Facts ` +
+      `are NOT part of the stopped round (late settlement is not a late round).\n`,
+    ),
+    (e: unknown) => process.stderr.write(
+      `quality-gate-driver: routine '${routineName}' rejected AFTER the stop grace had abandoned it — ${(e as Error)?.message ?? String(e)}\n`,
+    ),
+  );
 }
 
 /** 单条例程的 caller 侧看门狗：race `r.run(ctx)` 对 `watchdogMs`。例程 wall-clock 超界 ⇒ 返回一条
  *  failed Fact（routine timed out）并继续——⛔ 不 await 已挂的 routine promise。judge spawn 是
  *  runAsync(Infinity)，挂死时该 promise 永不 settle，await 它会让常驻循环同死（心跳冻结）。
  *  Infinity / ≤0 ⇒ 直跑（显式不设限，测试负控制用）；例程自身 throw / reject 自然传播，交外层
- *  try/catch 记「routine threw」（与既有语义一致，⛔ 本函数只处理超时这一态）。 */
-async function runRoutineWithWatchdog(r: RoutineSpec, ctx: { halted: boolean }, watchdogMs: number): Promise<Fact<unknown>[]> {
+ *  try/catch 记「routine threw」（与既有语义一致，⛔ 本函数只处理超时这一态）。
+ *
+ *  `stop`（gap-quality-restart-waits-out-whole-round-so-osd-in-flight-exceeds-stop-window，Plan 步 2）：
+ *  多一条 racer——轮询停机标志，读到停机就 `abort()` 传给例程的 `signal`（把停机**传播成取消**），
+ *  然后给例程 `graceMs` 自己收尾。例程在宽限内 settle ⇒ 交出**它自己的** Facts（它知道自己持久化了
+ *  什么，调用方不知道）；过时不候 ⇒ 交一条 `observed:false` 的放弃 Fact。⇒ 停机延迟有一个**不依赖
+ *  例程行为**的上界 = 一个轮询周期 + 宽限。⛔ `stop` 缺省 undefined ⇒ 与从前逐字相同。 */
+async function runRoutineWithWatchdog(
+  r: RoutineSpec,
+  ctx: { halted: boolean },
+  watchdogMs: number,
+  stop?: RoutineStopCooperation,
+): Promise<Fact<unknown>[]> {
+  const ac = new AbortController();
+  const runCtx: RoutineRunContext = stop ? { ...ctx, signal: ac.signal } : ctx;
+  const runP = Promise.resolve().then(() => r.run(runCtx));
   if (!Number.isFinite(watchdogMs) || watchdogMs <= 0) {
-    return await r.run(ctx);
+    // ⛔ 无看门狗那一支仍接停机：看门狗与停机是两条独立的通道（负控制测的是**看门狗缺席**）。
+    if (!stop) return await runP;
   }
   let timer: ReturnType<typeof setTimeout> | null = null;
+  let stopPoll: ReturnType<typeof setTimeout> | null = null;
+  let stopGrace: ReturnType<typeof setTimeout> | null = null;
+  let stopSettled = false;
   try {
-    const timeoutFact: Fact<unknown>[] = [
-      { name: r.name, value: null, state: "failed", reason: `routine timed out after ${watchdogMs}ms (caller-side watchdog)` },
-    ];
-    return await Promise.race([
-      r.run(ctx),
-      new Promise<Fact<unknown>[]>((resolve) => { timer = setTimeout(() => resolve(timeoutFact), watchdogMs); }),
-    ]);
+    const racers: Promise<Fact<unknown>[]>[] = [];
+    if (Number.isFinite(watchdogMs) && watchdogMs > 0) {
+      racers.push(new Promise<Fact<unknown>[]>((resolve) => {
+        timer = setTimeout(() => resolve([
+          { name: r.name, value: null, state: "failed", reason: `routine timed out after ${watchdogMs}ms (caller-side watchdog)` },
+        ]), watchdogMs);
+      }));
+    }
+    if (stop) {
+      const coop = stop;
+      // ⛔ `resolve` 必须由**本函数这一次调用**捕获（闭包局部），⛔ 不放到模块作用域：两个并发调用会
+      //    互相覆盖对方的 resolve（那是把一次判定的结果投递给另一个判定）。
+      let resolveStop: ((facts: Fact<unknown>[]) => void) | null = null;
+      const settleStop = (facts: Fact<unknown>[]): void => {
+        if (stopSettled) return;
+        stopSettled = true;
+        if (stopPoll) { clearTimeout(stopPoll); stopPoll = null; }
+        if (stopGrace) { clearTimeout(stopGrace); stopGrace = null; }
+        resolveStop?.(facts);
+      };
+      racers.push(new Promise<Fact<unknown>[]>((resolve) => {
+        resolveStop = resolve;
+        const tick = (): void => {
+          if (stopSettled) return;
+          if (!coop.isStopRequested()) { stopPoll = setTimeout(tick, Math.max(1, coop.pollMs)); return; }
+          ac.abort();
+          // 例程若在宽限内自己收尾 ⇒ 交出**它自己的** Facts（应是 not-evaluated: stopped-mid-round）。
+          void runP.then((facts) => settleStop(facts), () => { /* reject 由 race 的 runP 支上抛 */ });
+          stopGrace = setTimeout(() => {
+            settleStop([abandonedMidRoundFact(r.name, coop.graceMs)]);
+            noteLateSettlement(r.name, runP);
+          }, Math.max(0, coop.graceMs));
+        };
+        stopPoll = setTimeout(tick, Math.max(1, coop.pollMs));
+      }));
+    }
+    if (racers.length === 0) return await runP;
+    // race 输掉的那一支若 reject 会是 unhandled rejection（Node 默认警告/未来报错）：挂一个 no-op
+    // handler 消噪。⛔ 不改语义——`runP` 仍在 race 里，它先 reject 时 race 照旧 reject 给调用方。
+    void runP.catch(() => { /* see above */ });
+    return await Promise.race([runP, ...racers]);
   } finally {
     if (timer) clearTimeout(timer);
+    if (stopPoll) clearTimeout(stopPoll);
+    if (stopGrace) clearTimeout(stopGrace);
   }
 }
 
@@ -1551,6 +1673,8 @@ export async function runResidentQualityGateLoop(opts: QualityGateLoopOptions): 
   const { root, intervalMs, once, maxRounds, roundLogFile, runId, json, pidFile, routines } = opts;
   const controlStateRel = opts.controlStateRel ?? QUALITY_CONTROL_STATE_REL;
   const routineWatchdogMs = opts.routineWatchdogMs ?? ROUTINE_WATCHDOG_MS_DEFAULT;
+  const stopGraceMs = opts.stopGraceMs ?? STOP_GRACE_MS_DEFAULT;
+  const stopPollMs = opts.stopPollMs ?? DISK_STOP_POLL_MS_DEFAULT;
   if (pidFile) {
     try { fs.writeFileSync(pidFile, `${process.pid}\n`, "utf8"); } catch { /* pid-file 只供外部观测，写失败不致命 */ }
   }
@@ -1583,19 +1707,45 @@ export async function runResidentQualityGateLoop(opts: QualityGateLoopOptions): 
     // 受闸动作（LLM spawn），机械读数照跑（goal 的 criterion/缺口、quality 的 --plan/聚类均零 LLM）。
     const halted = isHalted(root, process.env, controlStateRel);
     const facts: Fact<unknown>[] = [];
+    // ── 轮内的协作式停机（gap-quality-restart-waits-out-whole-round-so-osd-in-flight-exceeds-stop-window）──
+    // 停机过去**只**在轮边界被看见（本 `while` 的条件）⇒ 一条停机请求要等**整轮**跑完。实测
+    // （2026-10-14）：OSD 轮的 wall 6/6 与 22/23 都 > 60s、最长 1172s，而 `stopKindViaAnchor` 只等
+    // 60000ms ⇒ 在飞 OSD 轮期间的 `restart --kind quality` **必然** `stop-failed` / `restart-aborted`。
+    // 两条同时生效的通道把延迟压到有界：① 例程**之间**查停机（零成本，延迟 ≤ 最长单条例程）；
+    // ② 在飞例程收到 `AbortSignal`（Plan 步 2），下一个可中断边界早退并记 `stopped-mid-round`。
+    // ⛔ 取消信号**每次例程调用新建**（见 `runRoutineWithWatchdog`）：上一轮的 abort 不该让下一轮的
+    //    例程一进来就退出。
+    const skipped: string[] = [];
+    let stoppedMidRound = false;
     for (const r of routines) {
       const state = { now: Date.now(), lastRun: lastRun[r.name] };
       if (!scheduleIsDue(r.schedule, state)) continue;
+      // ① 轮内边界：停机请求到达之后**不再启动**任何 due 例程。⛔ `lastRun` 不为被跳过的例程推进
+      //    ——它没跑（硬规则 3b：没跑与跑过不得同形），名字进 `skipped_routines` 落进轮记录。
+      if (stopCtl.isStopRequested()) { skipped.push(r.name); continue; }
       lastRun[r.name] = state.now;
       try {
         // caller 侧看门狗（gap-meta-quality-gate-driver）：judge spawn runAsync(Infinity) 挂死时，
         // 看门狗在例程 wall-clock 超界后返回 failed Fact 继续写心跳，⛔ 不 await 已挂的 promise。
-        facts.push(...(await runRoutineWithWatchdog(r, { halted }, routineWatchdogMs)));
+        const rf = await runRoutineWithWatchdog(r, { halted }, routineWatchdogMs, {
+          isStopRequested: () => stopCtl.isStopRequested(),
+          pollMs: stopPollMs,
+          graceMs: stopGraceMs,
+        });
+        // ② 例程自己交出的「半轮被打断」读数（`not-evaluated: stopped-mid-round`）与调用方放弃那一支
+        //    共用同一个取词（`STOPPED_MID_ROUND`），轮记录据此把这一轮标成「没跑完」。
+        if (rf.some((f) => f.state === "not-evaluated" && typeof f.reason === "string" && f.reason.startsWith(STOPPED_MID_ROUND))) {
+          stoppedMidRound = true;
+        }
+        facts.push(...rf);
       } catch (e) {
         facts.push({ name: r.name, value: null, state: "failed", reason: `routine threw: ${(e as Error).message}` });
       }
     }
-    const rec = computeRoundRecord({ round, runId, pid: process.pid, at: new Date().toISOString(), facts, halted });
+    const rec = computeRoundRecord({
+      round, runId, pid: process.pid, at: new Date().toISOString(), facts, halted,
+      skippedRoutines: skipped, stoppedMidRound,
+    });
     try {
       fs.mkdirSync(path.dirname(roundLogFile), { recursive: true });
       fs.appendFileSync(roundLogFile, JSON.stringify(rec) + "\n", "utf8");
@@ -1603,6 +1753,9 @@ export async function runResidentQualityGateLoop(opts: QualityGateLoopOptions): 
     if (json) process.stdout.write(`${JSON.stringify({ event: "round", ...rec })}\n`);
     if (once) break;
     if (maxRounds !== null && round >= maxRounds) break;
+    // 停机已被看见（轮边界或轮内）⇒ ⛔ 不再睡一个 interval。`stopCtl.sleep` 自己也会被盘上探针唤醒，
+    // 但那条路要等到下一个分片（≤ pollMs）；这里是零延迟的那一半。
+    if (stopCtl.isStopRequested()) break;
     await stopCtl.sleep(intervalMs);
   }
   if (json && stopCtl.isStopRequested()) {

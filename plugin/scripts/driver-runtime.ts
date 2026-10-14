@@ -105,7 +105,7 @@ export {
 };
 // Layer 0 · 常驻循环停机控制器（residentLoopStop，单一实现于 driver-shared.ts）：outer / promotion /
 // quality-gate 三循环共用——finding `driver-sleep-requeststop-triple`（semantic-dedup-scan）抽出。
-export { residentLoopStop, type DiskStopReading, type ResidentLoopStop, type ResidentLoopStopOptions } from "./driver-shared.ts";
+export { residentLoopStop, DISK_STOP_POLL_MS_DEFAULT, type DiskStopReading, type ResidentLoopStop, type ResidentLoopStopOptions } from "./driver-shared.ts";
 // Layer 1a · filters（re-export，两 driver 经本文件消费同一谓词列表）。
 export { TASK_FILTERS, applyTaskFilters, makeFilterContext, allDepsDone, readTaskStatus };
 
@@ -2656,7 +2656,50 @@ export interface Fact<T = unknown> {
  *  终止条件——旧的 break 让例程型 driver 每 5s 起停一次）。 */
 export interface RoutineRunContext {
   halted: boolean;
+  /** 协作式**取消信号**（gap-quality-restart-waits-out-whole-round-so-osd-in-flight-exceeds-stop-window）。
+   *
+   *  WHY：常驻循环过去只在【轮边界】查停机标志（`quality-gate-driver.ts` 的 `while (!stopCtl…)`），
+   *  而轮内的 `for (routine)` 与 `runRoutineWithWatchdog` 都不看停机 ⇒ 一次停机请求要等**整轮**跑完
+   *  才被看见。实测（2026-10-14 ClaudeCodeUI + quay）：OSD scan-round `wall_ms` 6/6 与 22/23 都 > 60s、
+   *  最长 1172s，而 `stopKindViaAnchor` 只等 `ANCHOR_LOOP_STOP_TIMEOUT_MS`=60000ms
+   *  ⇒ 在飞 OSD 轮期间的 `restart --kind quality` **必然**落到 `stop-failed` / `restart-aborted`。
+   *
+   *  契约（例程侧的义务，硬规则 3b）：在**下一个可中断边界**（模型调用边界 / 例程块边界）观察
+   *  `signal.aborted`，早退并交出一条 `not-evaluated` Fact，其 reason 含 `STOPPED_MID_ROUND`
+   *  （`stopped-mid-round: …`）。⛔ **绝不**把半轮记成完成的一轮（不记 `verified`）；⛔ 已支出的
+   *  预算预留**保持已支出**（一笔预留被花掉就是花掉了，不因停机而回滚）。
+   *
+   *  ⛔ 缺省 `undefined` ⇒ 例程行为与从前**逐字**相同（手动单发 / `--once` / 非循环调用方不传它）。 */
+  signal?: AbortSignal;
 }
+
+/** 「半轮被停机打断」的**取词单一真相源**：例程交出的 `not-evaluated` Fact 的 reason 必须含本串，
+ *  而消费方（循环 / 测试 / 运维）按本串识别。⛔ 不写成布尔或另一个同形词——「被打断」与「跑完且合格」
+ *  必须不同形（硬规则 3b：`verified` 与 `stopped-mid-round` 永不同形）。 */
+export const STOPPED_MID_ROUND = "stopped-mid-round";
+
+/** 一个**模型调用例程**在停机信号下早退时抛出的具名错误（`open-semantic-discovery-routine.ts` /
+ *  `discovery-method-routine.ts` 共用同一份——硬规则 5b：两处各写一个类，捕获处就会漏一个）。
+ *
+ *  WHY 抛而不是返回哨兵值：两个例程的「模型调用」都嵌在**外部引擎**（`arch-hypothesis-generation.mjs`
+ *  的 `runInvestigator`/`runVerifier` 循环、`discovery-reflection.mjs` 的 reflect 循环）的回调里，那些
+ *  循环的返回形态是引擎定的、本仓库改不了 ⇒ 唯一能穿过所有中间层（硬规则 4c）的通道是**异常**：
+ *  引擎的 `await runModel(...)` 不吞异常（实测 `Promise.all` + `concurrency:1` 逐层上抛），一路到例程
+ *  自己的 `catch`。 */
+export class StoppedMidRoundError extends Error {
+  /** 被打断的那一步（供 reason 说出「停在哪」）。 */
+  readonly step: string;
+  /** 这一步**是否已经**在停机之后（`false` = 停机到达时它正在飞）。 */
+  readonly afterStop: boolean;
+  constructor(step: string, afterStop: boolean, detail: string) {
+    super(`${STOPPED_MID_ROUND}: ${detail}`);
+    this.name = "StoppedMidRoundError";
+    this.step = step;
+    this.afterStop = afterStop;
+  }
+}
+
+export const isStoppedMidRound = (e: unknown): e is StoppedMidRoundError => e instanceof StoppedMidRoundError;
 
 /** 一条例程（name + schedule 判定 + run(ctx) → Facts[]）。ctx 可选——不读 halt 的例程定义无需该参数；
  *  需按 halt 挡 spawn 的例程用 ctx.halted（只挡动作，不挡观测）。 */
