@@ -2,7 +2,7 @@
 id: gap-develop-sync-take-develop-reset-hard-wipes-uncommitted-tracked-edits-in-shared-checkout
 title: doc↔develop 同步的 take-develop 对共享主检出 reset --hard 前不查脏工作树：ClaudeCodeUI
   已授权的 .quay/config.yml 启用被静默抹掉（9+4 次 reset 历史）
-status: ready
+status: done
 labels:
   - gap
   - defect
