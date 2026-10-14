@@ -2,7 +2,7 @@
 id: gap-quality-gate-driver-loop-watchdog-test-hangs-since-e18ec4b04
 title: quality-gate-driver-loop-watchdog.test.mjs 自 e18ec4b04 起挂起，4/4
   全量套件命中，静默看门狗不回收挂起子进程（P0，阻塞一切全量验收）
-status: todo
+status: ready
 labels:
   - gap
   - defect
