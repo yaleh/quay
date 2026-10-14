@@ -124,3 +124,11 @@ with **origin** recorded as autonomous-routine / autonomous-experiment / operato
 - plugin/test/discovery-closed-loop-report.test.mjs
 - plugin/scripts/capability-catalog.sh
 - plugin/scripts/capability-catalog-declarations.json
+- docs/carrier-registry.json
+
+## Blocker
+
+**2026-10-14T10:24:46.111Z — worker 未落地（exited-not-landed）**
+
+- 未落地原因：step=suite: AssertionError [ERR_ASSERTION]: a private copy of the family reappeared (finding `lineof-lineat` is back) — got 1: ["discovery-closed-loop-report.ts:994 lineOf"]
+- run_id：wk-prod-anchor
