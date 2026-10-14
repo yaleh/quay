@@ -124,6 +124,7 @@ with **origin** recorded as autonomous-routine / autonomous-experiment / operato
 - plugin/test/discovery-closed-loop-report.test.mjs
 - plugin/scripts/capability-catalog.sh
 - plugin/scripts/capability-catalog-declarations.json
+- docs/carrier-registry.json
 
 ## Blocker
 
