@@ -21,6 +21,7 @@ This task does not change the declared-value work already landed; it extracts th
 3. The runner, the telemetry task's fields, and the memorymax declared-policy resolution all go through this one adapter, not three separate inline readers.
 4. **No cross-project resource center.** The adapter is per-process-tree (the suite's own scope), not a shared daemon; nothing in this task requires Quay and ClaudeCodeUI (or any other project) to coordinate through a shared service. Each project's own driver declares its own policy independently.
 5. Policy (declared memory/concurrency values) and the completeness/OOM gate (`gap-suite-verdict-green-on-oom-killed-incomplete-run-lands-on-11-percent-of-files`) stay separate modules: the gate reads adapter output and a declared policy value, but does not own either.
+6. Touches widened during implementation, declared through the task ABI (not hand-edited): `plugin/scripts/full-suite-runner-types.ts` (the `SuiteMemoryEvidence` readings become THREE-VALUED — `oom`/`oomKill` are `null` when the adapter never produced a reading, instead of the fabricated `0` that AC2 targets), `plugin/scripts/capability-catalog-declarations.json` (a new `plugin/scripts/*` file must be declared or the catalog exits non-zero), and `plugin/test/full-suite-runner-oom-policy.test.mjs` (it pins the old `oomKill: 0`-when-unreadable reading and the old evidence key set).
 
 ## Acceptance Criteria
 - [ ] AC1: the Linux adapter's readings are byte-for-byte equivalent to the current inline logic on a real round on this host (pasted comparison, both arms).
@@ -35,5 +36,8 @@ This task does not change the declared-value work already landed; it extracts th
 - tasks/gap-suite-resource-measurement-needs-a-host-adapter-not-inline-cgroup-calls.md
 - plugin/scripts/host-resource-adapter.ts
 - plugin/scripts/full-suite-runner.ts
+- plugin/scripts/full-suite-runner-types.ts
+- plugin/scripts/capability-catalog-declarations.json
 - packages/quay/src/systemd-scope.ts
 - plugin/test/host-resource-adapter.test.mjs
+- plugin/test/full-suite-runner-oom-policy.test.mjs
