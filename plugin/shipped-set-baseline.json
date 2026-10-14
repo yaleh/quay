@@ -144,6 +144,30 @@
         "shLines": 7345
       },
       "why": "gap-architecture-review-detectors-not-runnable-off-quay-repo: the dist-gated entry derivation now covers the kernelSiblingArgv/resolveKernelSibling spawn shapes so 4 more siblings ship as scripts/dist/*.js (guard-lineage-check, deletion-closure-check, judgment-consumer-check, suite-load-sampler). files 281 -> 285 (exactly +4). The prior entry in this log recorded 284, which was off by one (its own why text already said +4 bundles from 281, and 281+4=285) — this entry replaces that number with the artifact's own reading, re-measured 2026-10-14 in a throwaway stub repo from this branch's plugin/ tree. shLines unchanged; the three ratchet axes stay 0."
+    },
+    {
+      "when": "2026-10-14T15:21:41.284Z",
+      "from": {
+        "files": 0,
+        "bytes": 0,
+        "shLines": 0,
+        "shipped": {
+          "files": 285,
+          "bytes": 61116610,
+          "shLines": 7345
+        }
+      },
+      "to": {
+        "files": 0,
+        "bytes": 0,
+        "shLines": 0
+      },
+      "shipped": {
+        "files": 286,
+        "bytes": 61456361,
+        "shLines": 7345
+      },
+      "why": "AC-334 (tasks/gap-shipped-set-per-run-criterion-gates-churn-prone-artifact-totals): re-anchor to the artifact's OWN reading in the same task that moved the per-run gate OFF the totals. plugin/scripts/experiment-manifest.ts (landed 2026-10-14, commit 9218503f7) is a RUN-TIME dist entry — plugin/scripts/worker-driver.ts spawns it via kernelSiblingArgv('experiment-manifest.ts') and it carries an explicit 'export const ENTRY_BASE' — so the bundle set legitimately gained scripts/dist/experiment-manifest.js: files 285 -> 286 (+1; the same class as the 4 bundles the 2026-10-13 entry added). shLines unchanged (7345). The ratchet's three forbidden axes stay 0. Assembled by the real plugin/scripts/publish-dist-branch.sh in a throwaway stub repo from this worktree's plugin/ tree; recorded from the artifact's own reading, never hand-fitted."
     }
   ],
   "_axes": {
@@ -157,8 +181,8 @@
   "bytes": 0,
   "shLines": 0,
   "shipped": {
-    "files": 285,
-    "bytes": 61116610,
+    "files": 286,
+    "bytes": 61456361,
     "shLines": 7345
   }
 }

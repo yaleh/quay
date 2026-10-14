@@ -630,6 +630,37 @@ test("shipped-set-clean: the size ceiling FAILs when the artifact outgrows the r
   assert.match(r.detail, /files 3 > ceiling 2/);
 });
 
+// AC-334 (tasks/gap-shipped-set-per-run-criterion-gates-churn-prone-artifact-totals): the per-run
+// criterion (plugin/test/shipped-set.test.mjs) no longer gates the artifact's OWN totals — those
+// totals move with every regenerated `dist/*.js` bundle, so a per-run ceiling fires on unrelated and
+// on legitimate additions and is then re-anchored until it means nothing (plugin/scripts/
+// shipped-set-rules.ts, the ⛔ WHY THE RATCHET'S AXES ARE THE FORBIDDEN READING section; measured 6
+// re-anchors in 6 days). THIS is where that guarantee lives now — the release gate, a human in the
+// loop — so it is pinned TWO-WAY here: the relocation moved the execution point, it did not weaken
+// the check. (The pre-existing test above is the FAIL direction only; a checker that only ever says
+// FAIL is not a check, so the clean/PASS direction is asserted with the same baseline shape.)
+test("shipped-set-clean: the size ceiling is two-way (at the ceiling PASS, one file over FAIL) and `bytes` is never gated", () => {
+  const dir = ssFixture("ss-size-two-way", { "a.md": "1\n", "b.md": "2\n", "c.md": "3\n" });
+  const reading = readShippedSet(dir, SS_RULES);
+  // The artifact's own totals, as READ from the tree (never a hand-written expectation).
+  const shipped = { files: reading.totals.files, bytes: reading.totals.bytes, shLines: reading.totals.shLines };
+  assert.equal(shipped.files, 3, "the fixture's own reading is the baseline this test derives from");
+
+  const atCeiling = judgeShippedSetClean(reading, ssBaseline({ shipped }), dir);
+  assert.equal(atCeiling.state, "PASS", `at the recorded ceiling the artifact is PASS: ${atCeiling.detail}`);
+
+  const oneOver = judgeShippedSetClean(reading, ssBaseline({ shipped: { ...shipped, files: shipped.files - 1 } }), dir);
+  assert.equal(oneOver.state, "FAIL", "one file over the recorded clean build is FAIL");
+  assert.match(oneOver.detail, /files 3 > ceiling 2/);
+
+  // `bytes` is reported, never gated (SIZE_GATED_AXES): the recorded byte total is deliberately set
+  // BELOW the reading here, and the verdict must stay PASS — a byte-exact ceiling would be a
+  // host-dependent constant (esbuild writes each inlined module's path relative to the output dir).
+  const bytesUnder = judgeShippedSetClean(reading, ssBaseline({ shipped: { ...shipped, bytes: shipped.bytes - 1 } }), dir);
+  assert.equal(bytesUnder.state, "PASS", `a bytes-only excess must not gate: ${bytesUnder.detail}`);
+  assert.match(bytesUnder.detail, new RegExp(`≤ recorded ${shipped.files} / ${shipped.bytes - 1} / ${shipped.shLines}`));
+});
+
 test("shipped-set-clean: an unreadable input is NOT-EVALUATED, never PASS", () => {
   // ① no rules in force ⇒ the reading itself refuses to be "clean" (硬规则 3b)
   const dir = ssFixture("ss-norules", { "a.md": "x\n" });
