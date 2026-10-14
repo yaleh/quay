@@ -898,7 +898,7 @@ export async function reportHost(name: string, rootArg: string, routine: string,
   }
 
   const hostCtx = { root, branch: DEFAULT_BRANCH, carriers, modules, conceptKeyOf };
-  const findings = rows.map((rec, i) => buildFinding(hostCtx, rec, lineOf(portfolioCarrier, rec, i)));
+  const findings = rows.map((rec, i) => buildFinding(hostCtx, rec, carrierLineOf(portfolioCarrier, rec, i)));
 
   // ── origins (AC4) ─────────────────────────────────────────────────────────────────────────────
   const originCounts: Record<string, number> = {};
@@ -990,8 +990,13 @@ function countBy(xs: string[]): Record<string, number> {
 }
 
 /** The line of a folded row inside the raw carrier — matched by the record's own id (a correction never
- *  rewrites the line, so the id is stable). Falls back to the row's position. */
-function lineOf(carrier: CarrierRead, rec: Record<string, unknown>, fallbackIndex: number): number {
+ *  rewrites the line, so the id is stable). Falls back to the row's position.
+ *
+ *  ⛔ NOT named `lineOf`: that name belongs to `source-text-lib.ts`'s shared position family
+ *  (`lineOf(src, idx)` — the line an OFFSET falls on), which this is not — same name, different
+ *  argument, different question. `plugin/test/source-text-lib.test.mjs` pins the family to one home
+ *  and a private `lineOf` here reads (correctly) as a reappearing copy. */
+function carrierLineOf(carrier: CarrierRead, rec: Record<string, unknown>, fallbackIndex: number): number {
   const id = isStr(rec.id, 1) ? String(rec.id) : null;
   if (id !== null) {
     const hit = carrier.records.find(({ rec: r }) => r.id === id);

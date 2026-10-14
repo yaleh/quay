@@ -98,6 +98,12 @@
       "readers": "unaudited"
     },
     {
+      "name": "discovery-portfolio.jsonl",
+      "kind": "jsonl-log",
+      "owner": "docs/analysis/discovery-portfolio.mjs",
+      "readers": "unaudited"
+    },
+    {
       "name": "cross-project-dogfood-findings.jsonl",
       "kind": "jsonl-log",
       "owner": "plugin/scripts/cross-project-dogfood-routine.ts",
