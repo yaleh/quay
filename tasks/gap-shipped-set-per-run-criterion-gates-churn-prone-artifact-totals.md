@@ -96,12 +96,12 @@ $ diff old-files.txt current-files.txt
 
 ## AC
 
-- [ ] AC-334 的判据实跑退出 0 且**不为 124**，完成记录贴出原始输出：`timeout 55 node --experimental-strip-types --test plugin/test/shipped-set.test.mjs`（AC 记录里那条 criterion 的等价命令）。
-- [ ] 常驻判据不再门禁「会被一次合法发布增长作废的手抄常量」：完成记录贴出改动前后 `grep -n 'judgeShippedSize\|size\.over\|shippedOf' plugin/test/shipped-set.test.mjs` 的命中对照，并说明每一处对产物**自身总量**的判定为何不再使这条常驻判据转红（对齐 `plugin/scripts/shipped-set-rules.ts` 头注释 ⛔ 段：per-run 只门禁 `forbidden`，`totals` 留在发布门禁）。若选择**保留** per-run 总量门禁，则必须证明它不再依赖手抄常量（例如在装配期由产物自身读数派生），并贴出「再合法新增一个 dist 入口后判据仍绿」的实跑证据；给不出 ⇒ 本 AC 不成立。
-- [ ] 发布门禁那一侧仍咬得住（负控制，证明总量这条保证只是换了执行点、没有被整体删掉）：完成记录贴出【一个超过 `baseline.shipped` 上限的产物被 `plugin/scripts/verify-plugin-channel-assertions.ts` 的 `shipped-set-clean` 判 `FAIL`】的实跑输出。
-- [ ] forbidden 棘轮的两向控制未被削弱：`grep -c 'AC2 control' plugin/test/shipped-set.test.mjs` ≥ 2；完成记录贴出【把 `plugin/scripts/publish-dist-branch.sh` 的 rsync 排除表恢复成全量后该测试转红】的实跑输出（`rc≠0`，失败信息指名 `test` / `fixtures` / `scripts/checker-mutation-cases` 之一）。
-- [ ] 入库基线是产物自身的真实读数，且「工作树抬基线」仍红：`plugin/shipped-set-baseline.json` 的 `shipped.files` 与 `shipped.shLines` 同一次真实装配的产物读数**逐位相同**（两侧读数都贴出），并贴出 `AC3: a baseline raised past git HEAD is RED` 那条断言仍通过的实跑输出。
-- [ ] `bash scripts/test.sh --for-task gap-shipped-set-per-run-criterion-gates-churn-prone-artifact-totals` 退出 0 且执行 ≥1 个测试文件。
+- [x] AC-334 的判据实跑退出 0 且**不为 124**，完成记录贴出原始输出：`timeout 55 node --experimental-strip-types --test plugin/test/shipped-set.test.mjs`（AC 记录里那条 criterion 的等价命令）。
+- [x] 常驻判据不再门禁「会被一次合法发布增长作废的手抄常量」：完成记录贴出改动前后 `grep -n 'judgeShippedSize\|size\.over\|shippedOf' plugin/test/shipped-set.test.mjs` 的命中对照，并说明每一处对产物**自身总量**的判定为何不再使这条常驻判据转红（对齐 `plugin/scripts/shipped-set-rules.ts` 头注释 ⛔ 段：per-run 只门禁 `forbidden`，`totals` 留在发布门禁）。若选择**保留** per-run 总量门禁，则必须证明它不再依赖手抄常量（例如在装配期由产物自身读数派生），并贴出「再合法新增一个 dist 入口后判据仍绿」的实跑证据；给不出 ⇒ 本 AC 不成立。
+- [x] 发布门禁那一侧仍咬得住（负控制，证明总量这条保证只是换了执行点、没有被整体删掉）：完成记录贴出【一个超过 `baseline.shipped` 上限的产物被 `plugin/scripts/verify-plugin-channel-assertions.ts` 的 `shipped-set-clean` 判 `FAIL`】的实跑输出。
+- [x] forbidden 棘轮的两向控制未被削弱：`grep -c 'AC2 control' plugin/test/shipped-set.test.mjs` ≥ 2；完成记录贴出【把 `plugin/scripts/publish-dist-branch.sh` 的 rsync 排除表恢复成全量后该测试转红】的实跑输出（`rc≠0`，失败信息指名 `test` / `fixtures` / `scripts/checker-mutation-cases` 之一）。
+- [x] 入库基线是产物自身的真实读数，且「工作树抬基线」仍红：`plugin/shipped-set-baseline.json` 的 `shipped.files` 与 `shipped.shLines` 同一次真实装配的产物读数**逐位相同**（两侧读数都贴出），并贴出 `AC3: a baseline raised past git HEAD is RED` 那条断言仍通过的实跑输出。
+- [x] `bash scripts/test.sh --for-task gap-shipped-set-per-run-criterion-gates-churn-prone-artifact-totals` 退出 0 且执行 ≥1 个测试文件。
 
 ## DoD
 
