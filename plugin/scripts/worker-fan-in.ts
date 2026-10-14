@@ -3029,7 +3029,10 @@ export async function runMechanicalFanIn(opts: MechanicalFanInOptions): Promise<
           if (certifiedRun === null) {
             const detail =
               blockedNextStep ??
-              `recovery exhausted at floor concurrency ${suiteRecoveryFloor()} — still incomplete/OOM at every declared rung ` +
+              // ⛔ 措辞不得只说「仍然 incomplete/OOM」：走到这里的每一档可能是**没结论**（看门狗杀 / 没起来 /
+              //    日志读不出），那与「跑了且 incomplete」不是同一件事（硬规则 3b）。说**没产出完整判词**对
+              //    两种成因都成立，且仍指到地板与下一步。
+              `recovery exhausted at floor concurrency ${suiteRecoveryFloor()} — no declared rung produced a complete verdict ` +
                 `(${steps.join(",")}); needs a code/config fix, see plugin/scripts/full-suite-runner.ts`;
             traceSuiteEvent("suite-recovery-blocked", {
               exit: 0, wall_ms: 0, ok: false, reason: detail,
