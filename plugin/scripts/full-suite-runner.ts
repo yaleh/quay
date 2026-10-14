@@ -499,7 +499,13 @@ import type { PhaseDiffRecord, ScopeConsumedLoadRead } from "./suite-accounting.
 // `systemdRunAvailable` both consume them ⇒ 「探测绿」structurally implies the real suite scope accepts
 // the same properties (a host whose systemd rejects OOMPolicy=continue ⇒ probe unavailable ⇒ the
 // suite runs un-enveloped AND the OOM test reports an explicit not-evaluated skip, never a silent pass).
-import { defaultScopeMemoryMax, scopeProbeArgv, SCOPE_PROPERTY_ARGS } from "../../packages/quay/src/systemd-scope.ts";
+import {
+  laneScaledScopeMemoryMax,
+  pageAlignScopeBytes,
+  scopeProbeArgv,
+  SCOPE_ENVELOPE_HOST_FRACTION,
+  SCOPE_PROPERTY_ARGS,
+} from "../../packages/quay/src/systemd-scope.ts";
 // The cgroup-aware "effective total memory" reading is NOT re-implemented here: the ONE cgroup
 // hierarchy traversal (ancestor walk + quay-own-scope exclusion) and the ONE derivation live in
 // `effective-capacity-probe.ts` (the shared probe). ⛔ 硬规则 5b — 不重复发明第二份探测实现.
@@ -990,26 +996,35 @@ export interface SystemdRunLimits {
   memorySwapMax?: string; // -p MemorySwapMax=<v> — ""/absent = no swap limit
 }
 
-// ── gap-full-suite-runner-memory-max-host-derived-envelope ──────────────────────────────────────
-// The suite's MemoryMax used to be a WRITTEN-DOWN `"16G"` (人 2026-09-24 为本 128 核宿主裁定). A literal
-// ceiling only ever equals "the safe ceiling" on the host it was written for (CLAUDE.md 硬规则 4 推论二):
-// on a 2–8 GB host `MemoryMax=16G` exceeds the host's own total memory, so this cgroup guardrail stops
-// existing — the kill that fires is the kernel's uncontrolled/unaccounted OOM killer, not a controlled
-// `memory.max` oom_kill (the path gap-driver-anchor-runs-without-host-derived-memory-envelope proved for
-// the anchor group; THIS task gives the suite itself the same envelope).
+// ── gap-suite-memorymax-literal-16g-cap-pinned-every-round-while-lanes-scale-with-nproc ─────────
+// THE DEFECT: the suite cgroup's ceiling was a WRITTEN-DOWN `"16G"` constant in THIS FILE. A memory
+// ceiling is a host- AND project-shaped policy value; buried in kernel code it can only be changed by
+// editing the runner, which is exactly backwards. 人 2026-09-24 ruled 16G for the then-128-core host
+// (raised from the 6G of the old 4-core box), and that ruling was recorded in a constant.
 //
-// Formula = the driver-anchor formula, via the shared page-aligned pure function (⛔ not a re-derivation):
-//     memoryMax = min( floor(effective_total_mem × 0.25) 页对齐, 经验上限 16G )
-// 「经验上限不降低」= on the 128-core baseline host the result is exactly the ceiling STRING `16G` ⇒
-// `buildSystemdRunArgv`'s argv stays byte-for-byte what it was (人明确强调的红线：不打断生产测试).
-
-/** The empirical MemoryMax ceiling (人 2026-09-24 裁定). Kept as a systemd size STRING so the big host's
- *  argv stays byte-identical (`MemoryMax=16G`, ⛔ not `MemoryMax=17179869184`). */
-export const SUITE_MEMORY_MAX_CEILING = "16G";
-
-const SUITE_MEMORY_MAX_CEILING_MB = parseSystemdBytesToMb(SUITE_MEMORY_MAX_CEILING);
-// A malformed ceiling constant must fail SAFE (never shrink below the empirical ceiling).
-const SUITE_MEMORY_MAX_CEILING_BYTES = SUITE_MEMORY_MAX_CEILING_MB === null ? Infinity : SUITE_MEMORY_MAX_CEILING_MB * 1024 * 1024;
+// THE FIX: the ceiling is DECLARED — `.quay/config.yml` `suite: memory_max: <size>` (project-declared;
+// see suite-params.ts) with `QUAY_SUITE_MEMORY_MAX` as the env override (config < env), and the value
+// `"16G"` survives only as the declared DEFAULT (`SUITE_MEMORY_MAX_DEFAULT`), keeping the baseline the
+// human ruled — ⛔ no production behaviour change. The host-relative fraction remains the UPPER bound
+// (a declared value can never exceed the host's own capacity — 硬规则 4 推论二).
+//
+// ⚠️ WHAT THE OBVIOUS "just raise it to the host fraction" WOULD HAVE GOTTEN WRONG (measured 2026-10-14,
+// and the reason this file records a MEASUREMENT instead of a bigger number):
+//   ① `peak == memoryMax` does NOT mean "the cap is too small". Rounds 10-11 (14/42) and 10-12 (12/53)
+//      reached their 16 GiB ceiling with `oom_kill = 0`: a cgroup's `memory.peak` includes reclaimable
+//      page cache, so filling the cap is the NORMAL state.
+//   ② The OOM kills are RECENT, not chronic: days 10-10 / 10-11 / 10-12 logged 0/8, 0/42, 0/53 rounds
+//      with `oom_kill > 0`, then 10-13 3/25 and 10-14 5/8 — a regression (a heavy file), not a cap that
+//      was always too small.
+//   ③ The concurrency that actually holds is 64, NOT the requested lane count: `--test-concurrency=128`
+//      is what the runner passes, but the unified scheduler's reliability cap keeps total concurrency
+//      at the LOWEST active group budget, and serial/lowconc budget = floor(128/(S×P)) = 64. Max
+//      per-file interval overlap measured on rounds 2650-2659 = 64 (every round). So the estimator's
+//      input must be the MEASURED concurrency, not `laneCount` — with 64 the estimate is ~12.3 GiB,
+//      i.e. BELOW the declared 16G, which is why the measurement is recorded as EVIDENCE and is not
+//      used to move the ceiling (`suiteMemoryDiagnostics`).
+// The estimators (`laneScaledScopeMemoryMax` in Core's systemd-scope.ts) stay the ONE pure
+// implementation, tested across host shapes; they inform, they do not decide.
 
 /** quay 自己的 cgroup 包络 scope 前缀与「祖先链最紧 memory.max」的遍历，**正本在
  *  `plugin/scripts/effective-capacity-probe.ts`**（`QUAY_OWN_SCOPE_PREFIXES` /
@@ -1036,48 +1051,251 @@ export function readEffectiveTotalMemBytes(): number {
   return computeEffectiveCapacity(readings).effective_mem_mb * 1024 * 1024;
 }
 
-/** The suite's MemoryMax for a given effective-memory reading (PURE — the input is a byte COUNT, not
- *  `os.totalmem()`): `min(derived 页对齐, 16G 上限)`，其中 `derived` 缺省是项目盲的
- *  `floor(effective × 0.25)`。On a host whose effective memory reaches the ceiling (the 128-core
- *  baseline) this returns the ceiling STRING unchanged ⇒ argv byte-identical; on a genuinely
- *  memory-limited host it returns a proportional, page-aligned byte count.
- *
- *  `ceilingBytes`（可选）: the caller's OWN derived ceiling, **already page-aligned** — the shared-host
- *  path (see below) passes it so this file needs no second copy of the sibling-count formula
- *  (硬规则 5b). ⛔ Absent ⇒ byte-for-byte the pre-`gap-independent-anchor-memory-envelope-…` behaviour,
- *  which is why every existing 1-argument caller and test is untouched. */
-export function suiteMemoryMax(effectiveTotalMemBytes: number, ceilingBytes?: number): string {
-  const derived = ceilingBytes === undefined ? defaultScopeMemoryMax(effectiveTotalMemBytes) : String(ceilingBytes);
-  return Number(derived) >= SUITE_MEMORY_MAX_CEILING_BYTES ? SUITE_MEMORY_MAX_CEILING : derived;
+/** How many recent round records the per-file memory percentile is pooled from. */
+export const SUITE_PERFILE_MEMORY_ROUNDS = 5;
+/** The percentile of the pooled per-file peaks that stands in for "what ONE lane needs". A high
+ *  percentile of a heavy-tailed distribution (p50 ≈ 70 MB, p99 ≈ 700 MB, max ≈ 1.8 GB measured
+ *  2026-10-14) — the SUM over lanes is dominated by the body of the distribution, so p95 × lanes is
+ *  already conservative for the sum, and `SCOPE_ENVELOPE_LANE_HEADROOM` covers the residual. */
+export const SUITE_PERFILE_MEMORY_PERCENTILE = 0.95;
+/** Bound on the tail read of the round record: the file is ~185 MB / 2660 rounds, so a whole-file
+ *  parse on every round start is not affordable. 5 rounds ≈ 350 KB; 4 MiB is a ≥10× margin and the
+ *  read stays O(1) in the history size. */
+export const SUITE_PERFILE_MEMORY_TAIL_BYTES = 4 * 1024 * 1024;
+
+/** The last `rounds` state-of-the-art rows of a JSONL carrier, newest first — read from the TAIL only
+ *  (bounded), so a 185 MB history costs the same as a 1 KB one. A malformed trailing line is skipped
+ *  (the runner's own append can be observed mid-write); a partial FIRST line of the tail window is
+ *  dropped because it is byte-truncated, not a malformed record (缺值 ≠ 坏值). */
+function readRoundRowsFromTail(file: string, rounds: number, maxTailBytes: number): unknown[] {
+  let fd: number;
+  try {
+    fd = fs.openSync(file, "r");
+  } catch {
+    return [];
+  }
+  try {
+    const size = fs.fstatSync(fd).size;
+    const start = Math.max(0, size - maxTailBytes);
+    const len = size - start;
+    if (len <= 0) return [];
+    const buf = Buffer.allocUnsafe(len);
+    let got = 0;
+    while (got < len) {
+      const n = fs.readSync(fd, buf, got, len - got, start + got);
+      if (n <= 0) break;
+      got += n;
+    }
+    let text = buf.subarray(0, got).toString("utf8");
+    if (start > 0) {
+      const nl = text.indexOf("\n");
+      text = nl === -1 ? "" : text.slice(nl + 1);
+    }
+    const rows: unknown[] = [];
+    const lines = text.split("\n");
+    for (let i = lines.length - 1; i >= 0 && rows.length < rounds; i--) {
+      const line = lines[i].trim();
+      if (line === "") continue;
+      try {
+        rows.push(JSON.parse(line));
+      } catch {
+        /* a torn/partial line — skip it (never a fabricated row) */
+      }
+    }
+    return rows;
+  } catch {
+    return [];
+  } finally {
+    try {
+      fs.closeSync(fd);
+    } catch {
+      /* best-effort */
+    }
+  }
 }
 
-/** 套件的宿主推导 MemoryMax **算上共享宿主那一步**（`gap-independent-anchor-memory-envelope-
- *  oversubscribes-shared-host`）：套件与 anchor 同时挂着，各自 0.25 × host 的 ceiling 之和同样会超过宿主
- *  总内存，故套件也按宿主上活着的同类 scope 数收紧自己的那一份。
- *
- *  ⛔ 实现只有一份：公式与枚举都在 `driver-runtime.ts`（`sharedHostCeilingBytes` /
- *  `listSharedHostScopes`，那里有完整的实测与两个校准依据），本文件只做「取读数 → 交给
- *  `suiteMemoryMax`」。⛔ 不 import `effective-capacity-probe.ts` 的那份：`probe` 与
- *  `driver-runtime` 之间加边会闭合成新的值导入环（`import-graph-baseline.json` 的 `valueSccs` = 0）。
- *
- *  ⚠️ **这一步在套件上是 inert 的，而且是可证的**：收紧后的 ceiling 是
- *  `min(0.25 × effective, max(effective/(N+1), 26.0 GiB))`，而本套件自己还有 16G 的经验上限。
- *    · `0.25 × effective ≤ 26.0 GiB` ⇒ `min` 取到 `0.25 × effective` 本身 ⇒ 与项目盲值**逐字节相同**；
- *    · `0.25 × effective > 26.0 GiB` ⇒ 收紧后的值 ≥ 26.0 GiB > 16G ⇒ 渲染成 `16G`；项目盲值同样 > 16G
- *      ⇒ 也渲染成 `16G`。
- *  两个分支都相同 ⇒ **在任何宿主上，套件的 MemoryMax 都不因这一步而变**（下界 26.0 GiB 高于套件自己的
- *  16G 上限，收紧根本触不到它）。这正是红线「不打断生产测试」所需要的，且它不是巧合而是被
- *  `full-suite-runner-cgroup.test.mjs` 的「不变量」用例钉住的**性质**。 */
+/** The high percentile of `perFile[].memPeakKb` pooled over `rows` (pure) — BYTES, or `null` when no
+ *  row carries a per-file memory reading (缺值 ≠ 0 ⇒ never a fabricated 0-byte measurement). Rows
+ *  whose `perFile` is absent/empty (a legacy round, a crash-trap row, an OOM-truncated round) simply
+ *  contribute nothing; they do NOT reset the estimate to zero. */
+export function perFileMemoryHighWaterBytes(rows: unknown[], percentile = SUITE_PERFILE_MEMORY_PERCENTILE): number | null {
+  const samples: number[] = [];
+  for (const row of rows) {
+    const perFile = (row as { perFile?: unknown })?.perFile;
+    if (!Array.isArray(perFile)) continue;
+    for (const f of perFile) {
+      const kb = (f as { memPeakKb?: unknown })?.memPeakKb;
+      if (typeof kb === "number" && Number.isFinite(kb) && kb > 0) samples.push(kb);
+    }
+  }
+  if (samples.length === 0) return null;
+  samples.sort((a, b) => a - b);
+  const idx = Math.min(samples.length - 1, Math.max(0, Math.ceil(percentile * samples.length) - 1));
+  return samples[idx] * 1024;
+}
+
+/** The measured per-file memory high-water this host last recorded — read from the round record the
+ *  runner itself writes (`<stateDir>/verification-round.jsonl`), i.e. the SAME `memPeakKb` the
+ *  per-file cost collection already produces (⛔ no new instrument). `null` on a workspace with no
+ *  history yet → the caller degrades to the host-relative guardrail and says so. */
+export function readPerFileMemoryHighWaterBytes(
+  stateDir: string,
+  opts?: { rounds?: number; percentile?: number; maxTailBytes?: number },
+): number | null {
+  const rounds = opts?.rounds ?? SUITE_PERFILE_MEMORY_ROUNDS;
+  const rows = readRoundRowsFromTail(
+    path.join(stateDir, "verification-round.jsonl"),
+    rounds,
+    opts?.maxTailBytes ?? SUITE_PERFILE_MEMORY_TAIL_BYTES,
+  );
+  return perFileMemoryHighWaterBytes(rows, opts?.percentile ?? SUITE_PERFILE_MEMORY_PERCENTILE);
+}
+
+/** The concurrency that ACTUALLY held, measured from the round record (pure): the maximum number of
+ *  per-file intervals that overlap at one instant. This is the直接量 for "how many files ran at
+ *  once" — ⛔ NOT `laneCount`, and ⛔ NOT `defaultLaneCount()`: the runner REQUESTS `--test-concurrency
+ *  =<laneCount>` but the unified scheduler's reliability cap holds the total at the lowest ACTIVE
+ *  group's budget (`suite-scheduler.ts`), and serial/lowconc budget = `floor(nproc/(S×P))` = 64 here,
+ *  so a requested 128 has been measured at 64 in every round 2650-2659. Rows with fewer than two
+ *  timestamped entries contribute nothing (缺值 ≠ 0); `null` when no row is measurable. */
+export function actualConcurrencyFromRows(rows: unknown[]): number | null {
+  const events: Array<[number, number]> = [];
+  for (const row of rows) {
+    const perFile = (row as { perFile?: unknown })?.perFile;
+    if (!Array.isArray(perFile)) continue;
+    for (const f of perFile) {
+      const s = (f as { startedAtMs?: unknown })?.startedAtMs;
+      const e = (f as { endedAtMs?: unknown })?.endedAtMs;
+      if (typeof s === "number" && typeof e === "number" && Number.isFinite(s) && Number.isFinite(e) && e >= s) {
+        events.push([s, 1], [e, -1]);
+      }
+    }
+  }
+  if (events.length < 2) return null;
+  // End-events before start-events at the SAME timestamp (a file ending at t and another starting at t
+  // are not concurrent); the tuple's second element sorts -1 first.
+  events.sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+  let cur = 0;
+  let max = 0;
+  for (const [, d] of events) {
+    cur += d;
+    if (cur > max) max = cur;
+  }
+  return max > 0 ? max : null;
+}
+
+/** The measured concurrency and per-file memory high-water this workspace last recorded — read from
+ *  the round record the runner itself writes (`<stateDir>/verification-round.jsonl`), i.e. the SAME
+ *  `perFile[]` the per-file cost collection already produces (⛔ no new instrument). Both are `null`
+ *  on a workspace with no usable history (a fresh state dir), which the evidence records verbatim. */
+export function readSuiteMemoryMeasurements(
+  stateDir: string,
+  opts?: { rounds?: number; percentile?: number; maxTailBytes?: number },
+): { actualConcurrency: number | null; perFileHighWaterBytes: number | null } {
+  const rows = readRoundRowsFromTail(
+    path.join(stateDir, "verification-round.jsonl"),
+    opts?.rounds ?? SUITE_PERFILE_MEMORY_ROUNDS,
+    opts?.maxTailBytes ?? SUITE_PERFILE_MEMORY_TAIL_BYTES,
+  );
+  return {
+    actualConcurrency: actualConcurrencyFromRows(rows),
+    perFileHighWaterBytes: perFileMemoryHighWaterBytes(rows, opts?.percentile ?? SUITE_PERFILE_MEMORY_PERCENTILE),
+  };
+}
+
+/** The declared ceiling + where it came from (three-valued: `"env"` / `"default"`, ⛔ never a bare
+ *  string a reader must guess the provenance of). */
+export interface DeclaredSuiteMemoryMax {
+  value: string;
+  source: "env" | "default";
+}
+
+/** The DECLARED suite MemoryMax: `QUAY_SUITE_MEMORY_MAX` (populated from `.quay/config.yml`
+ *  `suite: memory_max:` by the config-promotion step, so config < env holds) or the DEFAULT
+ *  `SUITE_MEMORY_MAX_DEFAULT`. An unparseable env value is IGNORED (falls back to the default) rather
+ *  than forwarded: systemd-run would refuse the whole scope on a malformed size, and a bad env var
+ *  must never be able to take the suite down (`parseSystemdBytesToBytes` is the ONE size parser). */
+export function declaredSuiteMemoryMax(env = process.env.QUAY_SUITE_MEMORY_MAX): DeclaredSuiteMemoryMax {
+  const raw = typeof env === "string" ? env.trim() : "";
+  if (raw !== "" && parseSystemdBytesToBytes(raw) !== null) return { value: raw, source: "env" };
+  return { value: SUITE_MEMORY_MAX_DEFAULT, source: "default" };
+}
+
+/** The Applied ceiling for one run: the DECLARED value, bounded above by the host-relative fraction
+ *  (硬规则 4 推论二 — a declared ceiling may never exceed the host's own capacity). Distinct from the
+ *  lane-scaled ESTIMATE, which is recorded as evidence and does not move the ceiling (see the block
+ *  comment at the top of this section). */
+export interface SuiteMemoryMaxDecision {
+  memoryMax: string;
+  /** `"declared"` = the declared value applied; `"host-guard"` = the host-relative guard lowered it. */
+  bound: "declared" | "host-guard";
+  /** Non-null iff `bound === "host-guard"`: a NAMED reason (硬规则 3b). */
+  reason: string | null;
+  declared: DeclaredSuiteMemoryMax;
+  hostGuardBytes: number;
+  hostFraction: number;
+}
+
+export function suiteMemoryMax(opts: {
+  effectiveTotalMemBytes: number;
+  declared: DeclaredSuiteMemoryMax;
+  /** The caller's own host-relative guard (already page-aligned), e.g. the shared-host tightening.
+   *  ⛔ Absent ⇒ `floor(effective × 0.25)` from the shared pure function. */
+  hostGuardBytes?: number;
+  hostFraction?: number;
+}): SuiteMemoryMaxDecision {
+  const hostFraction = opts.hostFraction ?? SCOPE_ENVELOPE_HOST_FRACTION;
+  const hostGuardBytes =
+    opts.hostGuardBytes ?? pageAlignScopeBytes(Math.floor(Math.max(0, opts.effectiveTotalMemBytes) * hostFraction));
+  const declaredBytes = parseSystemdBytesToBytes(opts.declared.value);
+  const base = { declared: opts.declared, hostGuardBytes, hostFraction };
+  if (declaredBytes === null || declaredBytes <= 0) {
+    return {
+      memoryMax: String(hostGuardBytes),
+      bound: "host-guard",
+      reason: `the declared ceiling ${JSON.stringify(opts.declared.value)} is not a parseable size — the host-relative guardrail alone applies`,
+      ...base,
+    };
+  }
+  if (declaredBytes > hostGuardBytes) {
+    return {
+      memoryMax: String(hostGuardBytes),
+      bound: "host-guard",
+      reason:
+        `the declared ceiling (${opts.declared.value} = ${declaredBytes} B) exceeds the host-relative guardrail ` +
+        `(${hostGuardBytes} B = ${hostFraction} × the effective host total) — the host guard is the binding runaway bound`,
+      ...base,
+    };
+  }
+  return { memoryMax: String(declaredBytes), bound: "declared", reason: null, ...base };
+}
+
+/** The DECLARED default ceiling (人 2026-09-24 裁定 16G; raised from the 6G of the old 4-core host).
+ *  It is a DEFAULT, not a mechanism: a project declares its own in `.quay/config.yml` `suite:
+ *  memory_max:` and an operator overrides it via `QUAY_SUITE_MEMORY_MAX` — the value stops being a
+ *  constant only this file can change, which was the defect. */
+export const SUITE_MEMORY_MAX_DEFAULT = "16G";
+
+/** The suite's default MemoryMax with THIS host's readings (used by the module-load template: no
+ *  state dir, so no measurement). */
 export function defaultSuiteMemoryMax(): string {
-  const effective = readEffectiveTotalMemBytes();
-  return suiteMemoryMax(effective, sharedHostCeilingBytes(effective, listSharedHostScopes().count));
+  return suiteMemoryMax({
+    effectiveTotalMemBytes: readEffectiveTotalMemBytes(),
+    declared: declaredSuiteMemoryMax(),
+    hostGuardBytes: sharedHostCeilingBytes(readEffectiveTotalMemBytes(), listSharedHostScopes().count),
+  }).memoryMax;
 }
 
-/** The suite's default cgroup scope limits. cpuQuota/tasksMax 默认空 = 不设 CPU/任务上限（人裁定）;
- *  MemoryMax 宿主推导（公式见上）—— on the 128-core baseline host this resolves to the 16G ceiling
- *  (人 2026-09-24 裁定：6G 是 4 核旧机上定的；迁到 128 核宿主后 main lane 并发 64/128，suite 无上限时
- *  实测峰值 8–10.5G，6G 下每轮顶格数千次 memory.max 事件、回收抖动让时序断言轮换飘红。此前：
- *  人 2026-08-12 裁定④ 4G→6G, 04:45 真 cgroup OOM 实证 4G 不足）。 */
+/** The suite's default cgroup scope limits — the PROJECT-BLIND template. cpuQuota/tasksMax 默认空 =
+ *  不设 CPU/任务上限（人裁定）; MemoryMax 宿主相对推导（公式见上）。
+ *
+ *  ⚠️ This constant is the module-load TEMPLATE, so it resolves the DECLARED ceiling from env/default
+ *  only — no state dir, hence no measurements. The ceiling a real round runs under is resolved per run
+ *  by `resolveSuiteMemoryMax(stateDir)` and handed in via the `parseSystemdRunLimits` `ctx` parameter.
+ *
+ *  人 2026-09-24 的裁定链（4G→6G→16G）现在是**声明的默认值**（`SUITE_MEMORY_MAX_DEFAULT`），不再藏在本文件
+ *  的一个常量里：6G 是 4 核旧机上定的，迁到 128 核宿主后 main lane 并发 64/128，suite 无上限时实测峰值
+ *  8–10.5G，6G 下每轮顶格数千次 memory.max 事件、回收抖动让时序断言轮换飘红。16G 把症状压了下去。 */
 export const DEFAULT_SYSTEMD_RUN_LIMITS: SystemdRunLimits = {
   memoryMax: defaultSuiteMemoryMax(),
   cpuQuota: "",
@@ -1089,9 +1307,18 @@ export const DEFAULT_SYSTEMD_RUN_LIMITS: SystemdRunLimits = {
  * Parse a `MemoryMax=4G CPUQuota=400% TasksMax=200` override string (the QUAY_TEST_SYSTEMD_RUN_LIMITS
  * test seam) into a limits object. Unknown / malformed keys fall back to the defaults (fail-safe —
  * a bad seam value must never produce an unparseable scope property).
+ *
+ * `ctx` supplies the DEFAULT MemoryMax for THIS run — the DECLARED ceiling (config/env/default) bounded
+ * by the host guard, resolved by `resolveSuiteMemoryMax`. ⛔ Absent ⇒ byte-for-byte the pre-existing
+ * behaviour (the module-load `DEFAULT_SYSTEMD_RUN_LIMITS`), which is why every existing caller that
+ * passes only the seam string is untouched. An explicit `MemoryMax=` in the seam still
+ * wins over the derived default (that is the seam's whole purpose).
  */
-export function parseSystemdRunLimits(raw?: string): SystemdRunLimits {
-  const limits = { ...DEFAULT_SYSTEMD_RUN_LIMITS };
+export function parseSystemdRunLimits(raw?: string, ctx?: { memoryMaxDefault?: string }): SystemdRunLimits {
+  const limits =
+    ctx?.memoryMaxDefault === undefined
+      ? { ...DEFAULT_SYSTEMD_RUN_LIMITS }
+      : { ...DEFAULT_SYSTEMD_RUN_LIMITS, memoryMax: ctx.memoryMaxDefault };
   if (!raw) return limits;
   for (const part of raw.trim().split(/\s+/)) {
     const eq = part.indexOf("=");
@@ -1103,6 +1330,43 @@ export function parseSystemdRunLimits(raw?: string): SystemdRunLimits {
     else if (key === "MemorySwapMax") limits.memorySwapMax = value;
   }
   return limits;
+}
+
+/** The suite's memory POLICY for one round: the declared ceiling (bounded by the host guard) plus the
+ *  measured concurrency / per-file high-water and the estimate they imply. Kept as its own function so
+ *  the caller can (a) hand the ceiling to `parseSystemdRunLimits`, (b) carry the whole policy — and
+ *  the MEASUREMENTS, not a bare number — into the round's evidence, and (c) see, per run, whether the
+ *  declared ceiling covers the measured shape of the suite. */
+export function resolveSuiteMemoryMax(stateDir: string): SuiteMemoryMaxPolicy {
+  const effective = readEffectiveTotalMemBytes();
+  const declared = declaredSuiteMemoryMax();
+  const decision = suiteMemoryMax({
+    effectiveTotalMemBytes: effective,
+    declared,
+    hostGuardBytes: sharedHostCeilingBytes(effective, listSharedHostScopes().count),
+  });
+  const measured = readSuiteMemoryMeasurements(stateDir);
+  const estimate = laneScaledScopeMemoryMax({
+    effectiveTotalMemBytes: effective,
+    // The MEASURED concurrency, ⛔ not `defaultLaneCount()`: `NaN` when unmeasured ⇒ the estimator
+    // reports "no member count" and the evidence keeps `null` (缺值 ≠ 0).
+    laneCount: measured.actualConcurrency ?? Number.NaN,
+    perFileHighWaterBytes: measured.perFileHighWaterBytes,
+    hostGuardBytes: decision.hostGuardBytes,
+  });
+  return {
+    memoryMax: decision.memoryMax,
+    bound: decision.bound,
+    reason: decision.reason,
+    declared: declared.value,
+    declaredSource: declared.source,
+    hostGuardBytes: decision.hostGuardBytes,
+    headroom: estimate.headroom,
+    actualConcurrency: measured.actualConcurrency,
+    perFileHighWaterBytes: measured.perFileHighWaterBytes,
+    laneScaledEstimateBytes: estimate.laneScaledBytes,
+    laneScaledExceedsHostGuard: estimate.laneScaledBytes === null ? null : estimate.laneScaledBytes >= decision.hostGuardBytes,
+  };
 }
 
 let _systemdRunAvailable: boolean | null = null;
@@ -1335,6 +1599,9 @@ export function startSuiteMemorySampler(opts: {
   stateDir: string;
   runId: string;
   memoryMaxBytes: number | null;
+  /** The policy `memoryMaxBytes` came from, when this run's ceiling came from the declared value rather
+   *  than a seam override (see `SuiteMemoryMaxPolicy`). Optional ⇒ older callers unchanged. */
+  memoryMaxPolicy?: SuiteMemoryMaxPolicy;
   scopeUnit?: string | null;
   phaseProvider: () => string;
   intervalMs?: number;
@@ -1377,6 +1644,7 @@ export function startSuiteMemorySampler(opts: {
         runId: opts.runId,
         peakBytes,
         memoryMaxBytes: opts.memoryMaxBytes,
+        ...(opts.memoryMaxPolicy ? { memoryMaxPolicy: opts.memoryMaxPolicy } : {}),
         oom,
         oomKill,
         phase: oomPhase ?? lastPhase,
@@ -1810,7 +2078,15 @@ export async function run(argv: string[]): Promise<number> {
     argv.includes("--fail-fast-check") ||
     argv.includes("--static-check-check") ||
     argv.includes("--wait-check");
-  const systemdLimits = parseSystemdRunLimits(process.env.QUAY_TEST_SYSTEMD_RUN_LIMITS);
+  // gap-suite-memorymax-literal-16g-cap-pinned-every-round-while-lanes-scale-with-nproc — the DEFAULT
+  // MemoryMax for THIS round is the DECLARED ceiling (`.quay/config.yml` suite: memory_max: / env
+  // QUAY_SUITE_MEMORY_MAX / the declared default), bounded by the host-relative guardrail. Computed
+  // once here and handed to the parser so the seam override still wins over it; the whole policy —
+  // including the MEASUREMENTS — rides into the round evidence so nothing has to be inferred.
+  const suiteMemoryPolicy = resolveSuiteMemoryMax(stateDir);
+  const systemdLimits = parseSystemdRunLimits(process.env.QUAY_TEST_SYSTEMD_RUN_LIMITS, {
+    memoryMaxDefault: suiteMemoryPolicy.memoryMax,
+  });
   const sdAvailable = systemdRunAvailable();
   const useSystemdRun = !skipSystemdRun && sdAvailable;
   if (!skipSystemdRun && !sdAvailable) {
@@ -2110,7 +2386,16 @@ export async function run(argv: string[]): Promise<number> {
   if (useSystemdRun) {
     const sdArgv = buildSystemdRunArgv(command, systemdLimits);
     process.stderr.write(
-      `full-suite-runner: wrapping suite in systemd-run scope (MemoryMax=${systemdLimits.memoryMax} CPUQuota=${systemdLimits.cpuQuota} TasksMax=${systemdLimits.tasksMax})\n`,
+      `full-suite-runner: wrapping suite in systemd-run scope (MemoryMax=${systemdLimits.memoryMax} CPUQuota=${systemdLimits.cpuQuota} TasksMax=${systemdLimits.tasksMax})` +
+        // The policy, on the SAME line as the value it produced: a reader sees the DECLARED value, where
+        // it came from, the guard it was clamped to, and the MEASUREMENTS (not the requested lane count).
+        ` [memoryMax_bound=${suiteMemoryPolicy.bound} declared=${suiteMemoryPolicy.declared}` +
+        ` declared_source=${suiteMemoryPolicy.declaredSource} host_guard_bytes=${suiteMemoryPolicy.hostGuardBytes}` +
+        ` measured_concurrency=${suiteMemoryPolicy.actualConcurrency}` +
+        ` per_file_high_water_bytes=${suiteMemoryPolicy.perFileHighWaterBytes}` +
+        ` lane_scaled_estimate_bytes=${suiteMemoryPolicy.laneScaledEstimateBytes}` +
+        (suiteMemoryPolicy.reason ? ` reason=${JSON.stringify(suiteMemoryPolicy.reason)}` : "") +
+        `]\n`,
     );
     child = spawn(sdArgv[0], sdArgv.slice(1), {
       cwd: root,
@@ -2165,6 +2450,10 @@ export async function run(argv: string[]): Promise<number> {
       stateDir,
       runId,
       memoryMaxBytes: parseSystemdBytesToBytes(systemdLimits.memoryMax),
+      // The policy is carried ONLY when the applied ceiling IS the policy's value — an explicit seam
+      // override would otherwise be documented with a deployment it did not use (the evidence would
+      // claim a provenance that is false).
+      memoryMaxPolicy: systemdLimits.memoryMax === suiteMemoryPolicy.memoryMax ? suiteMemoryPolicy : undefined,
       scopeUnit: null,
       phaseProvider: () => phaseAccount?.phase ?? "",
     });
