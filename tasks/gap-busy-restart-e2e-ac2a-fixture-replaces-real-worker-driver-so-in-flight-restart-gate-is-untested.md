@@ -2,7 +2,7 @@
 id: gap-busy-restart-e2e-ac2a-fixture-replaces-real-worker-driver-so-in-flight-restart-gate-is-untested
 title: 忙时重启 E2E 的 AC2a 用 fixture 顶替真实 worker-driver.js，生产上失败的「有在飞 worker 时
   restart --kind worker」恰未被测
-status: todo
+status: ready
 labels:
   - gap
 parent: null
