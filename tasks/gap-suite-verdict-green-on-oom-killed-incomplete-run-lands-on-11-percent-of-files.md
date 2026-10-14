@@ -21,6 +21,18 @@ Every neighboring full round on the same tree shape ran **579 files / ~7,880 tes
 
 **Frequency.** 7 runs with `oomKill>0` in the last ~15h (rounds 2649, 2652, 2653, 2654, 2655, 2659, 2660). Six were recorded red because their kills did produce attributed failures. 2660 is the one where the kills took out most of the main phase. A broader check of green task-rounds with under 50% of the median file count is too noisy historically (suite size changed over time), which is exactly why the verdict needs an expected-set check rather than a heuristic.
 
+**Second occurrence, same class, different killer (2026-10-14 08:24-08:45Z).** Fan-in of `gap-driver-restart-anytime-busy-e2e-on-dist-kernel` (`.quay/fan-in-<id>-wk-prod-anchor.log`):
+```
+08:24:22 suite-start
+08:43:38 suite-end exit=null  "silence watchdog killed the suite (no output ≥ silence timeout)"  wall_ms=1156155
+08:44:43 rerun exit=0 state=rerun-green namedFiles=3
+08:44:43 suite-rerun-green  "in-round rerun green on 3 named file(s) — landing as green"
+08:44:45 flip-done → 08:45:02 ff
+```
+The full suite **never completed**. Host load was ~24 and there was no OOM signal, so this is not the memory case. It was certified green by re-running 3 files. Two further 3b gaps showed up in the same run:
+- **No `verification-round.jsonl` record was written** for this watchdog-killed round. `gap-watchdog-killed-round-writes-no-verification-round-record` (done) was supposed to make exactly this path write a distinct `evaluated:false` record, so either it regressed or it does not cover the fan-in suite path.
+- The suite attempt log was **pruned on landing**, so *which* 3 files were re-run is unrecoverable; only the count survives.
+
 ## Plan
 1. The verdict requires **completeness**. The runner already knows the expected file set it scheduled (per lane/bucket). A round where any scheduled file produced no `__PERFILE__` terminal line is `not-evaluated: incomplete` (missing files enumerated), never `green`. Fan-in treats `not-evaluated` like red for landing purposes, but with its own reason, not "suite red".
 2. `oomKill > 0` from the suite's own memory evidence is surfaced in the round record and in the fan-in reason. Combined with (1), it can never be absent from a green verdict.
@@ -32,6 +44,7 @@ Every neighboring full round on the same tree shape ran **579 files / ~7,880 tes
 - [ ] AC3: `rerun-green` cannot certify an incomplete round (fixture pasted).
 - [ ] AC4: a genuinely complete green suite is unaffected (one real full run pasted, file count = scheduled count).
 - [ ] AC5: `scripts/test.sh --for-task <this task>` green, plus one real full `scripts/test.sh` run with its exact scope, commit, file count and test count pasted (not a scoped count).
+- [ ] AC6: watchdog-killed suite (silence timeout fixture) followed by an in-round rerun of the named files: the fan-in does **not** land. A `verification-round.jsonl` record with a distinct `evaluated:false` / watchdog reason **is** written (regression check against `gap-watchdog-killed-round-writes-no-verification-round-record`). The names of any re-run files are persisted in a carrier that survives landing cleanup (pasted, pre-fix negative control included).
 
 ## Definition of Done
 - AC1-AC5 checked with pasted evidence. Separately recorded, not done here: whether round 2660's landing (`87d513fe4`) needs re-certification. The next full round that contains `e18ec4b04` is that re-certification.

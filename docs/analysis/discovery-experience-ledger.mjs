@@ -443,6 +443,13 @@ export const VERDICT_ROLE_MAPPING_VERSION = verdictRoleMappingVersion();
  *  a suffix (the verdict that had no role), so "which verdict" is in the record rather than implied. */
 export const SKIP_VERDICT_NOT_INGESTIBLE = "VERDICT_NOT_INGESTIBLE";
 export const SKIP_DUPLICATE_SOURCE_REF = "DUPLICATE_SOURCE_REF";
+/** ⛔ The SAME CLUSTER reached here by its SECOND path (gap-discovery-findings-lack-stable-identity-and-
+ *  source-evidence-and-double-ingest-into-experience, Plan item 3). The routine files each cluster into
+ *  this ledger DIRECTLY (`source_ref = <cluster record_id>`); the store projection of that same cluster is
+ *  then ingested by this batch ingester with `source_ref = <outcome id>`. The two refs never match, so the
+ *  `source_ref` dedup set cannot see that they are one finding. This code names that skip, and the
+ *  dedup that raises it keys on the CONCEPT KEY (the stable identity) within one ROUND. */
+export const SKIP_DUPLICATE_CONCEPT_KEY = "DUPLICATE_CONCEPT_KEY";
 export const SKIP_READ_FAILED = "READ_FAILED";
 export const SKIP_MALFORMED = "MALFORMED";
 
@@ -1505,6 +1512,11 @@ function systemRecord(rec, raw, fields, { caseId, ts, authoredBy, evidenceLevel,
     // through, because there the caller is asserting the case's provenance by hand.
     evidence_level: evidenceLevelOf({ evidence_level: evidenceLevel }),
     source_case_id: sourceCaseId ?? null,
+    // THE STABLE IDENTITY (Plan item 1), read off the OUTCOME RECORD the entry projects — never derived
+    // here from the entry's own components, because the whole point is that this entry and the routine's
+    // DIRECT projection of the same cluster carry ONE key. `null` when the record names none: a
+    // store written before this field existed must not be given an invented one (硬规则 3b).
+    concept_key: isStr(rec.concept_key, 1) ? String(rec.concept_key) : null,
   };
 }
 
@@ -1633,6 +1645,65 @@ export function clusterVerdict(rec) {
 /** The `case_id` convention for a carrier-sourced Experience: the carrier record's own id, prefixed. */
 export const clusterCaseId = (recordId) => `EXP-${String(recordId)}`;
 
+// ── THE CONCEPT KEY: the STABLE identity of a finding, across rounds and across both ingestion paths ──
+//
+// ⛔ THE DEFECT THIS CLOSES (gap-discovery-findings-lack-stable-identity-and-source-evidence-and-double-
+//    ingest-into-experience, Plan item 1). MEASURED on this repo's own carriers (2026-10-14): the 212
+//    `kind:"cluster"` records carried **212 distinct `record_id`s** of the form
+//    `open-semantic-discovery@<round-ts>#<n>` — identity was PER ROUND, so the same concept rediscovered
+//    next round was a NEW finding, and cross-round linkage existed only through the Portfolio's
+//    `duplicate_of`. `record_id` stays exactly what it was: the PER-ROUND OCCURRENCE id (a back-pointer
+//    to one carrier line). This is the OTHER half — an identity derived from WHAT the finding is about,
+//    so two occurrences of one concept are recognisable as one concept.
+//
+// ⛔ THE NORMALIZATION IS `subjectKey`'s, THE ONE arch-discovery ALREADY USES. A concept key has the
+//    shape `<concern-kind>|<comma-separated sorted components>` — the SAME shape as the evidence store's
+//    `subject_key`, read by the same `componentsFromSubjectKey`. It is NOT a second identity vocabulary:
+//    `clusterStoreRecords` writes this value as the projected outcome's `subject_key` too, so the key the
+//    store joins on and the key the ledger dedups on are ONE value rather than two that could drift.
+
+/** The `experiment` every store record this module projects is filed under — the routine's own name.
+ *  ⛔ Declared HERE (above its first consumer) rather than beside `clusterStoreRecords`: the concept-key
+ *  block below reads it as a module-level constant, and a `const` read before its declaration is a TDZ
+ *  error, not a `undefined`. */
+export const CLUSTER_OUTCOME_EXPERIMENT = "open-semantic-discovery";
+
+/** The concern-kind a cluster with NO `concept_kind` of its own is filed under — the routine's own name,
+ *  the SAME fallback `clusterStoreRecords` already used for `subject_key`. */
+export const CLUSTER_CONCEPT_KIND_FALLBACK = CLUSTER_OUTCOME_EXPERIMENT;
+
+/** A component's line suffix (`x.ts:88`) is a LOCATION, not an identity — the identical normalization
+ *  `discovery-portfolio.mjs`'s `normalizeComponents` applies. ⛔ It is spelled here rather than imported
+ *  because importing that module would close a cycle (it imports THIS one); the two are held in step by
+ *  a test that asserts they agree, element for element, on a fixture carrying line suffixes. */
+const componentOf = (s) => String(s ?? "").trim().replace(/:\d+(-\d+)?$/, "");
+
+/** Normalize a component list: line suffixes stripped, deduplicated, sorted. PURE. */
+export function normalizeConceptComponents(components) {
+  return [...new Set((Array.isArray(components) ? components : []).filter((c) => isStr(c, 1)).map(componentOf))].sort();
+}
+
+/**
+ * THE CONCEPT KEY of a cluster record (Plan item 1). PURE. `null` when the argument is not a record —
+ * never a key derived from an absent subject (硬规则 3b: "there is nothing to key" must not read as a key).
+ * @param {object} rec a `kind:"cluster"` carrier record (or any object carrying `concept_kind`/`components`)
+ * @returns {string|null}
+ */
+export function conceptKeyOfCluster(rec) {
+  if (!isObj(rec)) return null;
+  const kind = isStr(rec.concept_kind, 1) ? String(rec.concept_kind) : CLUSTER_CONCEPT_KIND_FALLBACK;
+  return subjectKey(kind, normalizeConceptComponents(rec.components));
+}
+
+/** The ROUND a carrier ref belongs to: everything before the LAST `#`. `null` for a ref that carries no
+ *  `#` at all — and `null` is its OWN value (a ref with no round segment cannot be judged as "the same
+ *  round", so it is never deduped by that rule — 硬规则 3b). */
+export const refRoundOf = (ref) => {
+  const s = String(ref ?? "");
+  const at = s.lastIndexOf("#");
+  return at > 0 ? s.slice(0, at) : null;
+};
+
 /**
  * Project a ROUTINE CARRIER record (a `kind:"cluster"` line) into an Experience entry.
  *
@@ -1707,6 +1778,12 @@ function ingestCarrierSource(root, args) {
     evaluation_pin: null,
     evidence_level: evidenceLevel,
     source_case_id: args.sourceCaseId ?? null,
+    // THE STABLE IDENTITY (Plan item 1): the SAME key the cluster record, the Portfolio row and the
+    // projected outcome carry — so two occurrences of one concept are one concept on read-back, and the
+    // batch ingester's dedup can see that a store outcome and this entry are about the same thing.
+    // Read off the RECORD (derived), never taken from the caller: an id a caller could state is not an
+    // identity, and `undefined` here would silently disable the dedup that depends on it.
+    concept_key: isStr(rec.concept_key, 1) ? String(rec.concept_key) : conceptKeyOfCluster(rec),
   });
   return out.ok
     ? { ...out, derived: true, derived_from: { record_id: rec.record_id, line: env.line, carrier: args.carrier, verdict } }
@@ -1731,8 +1808,9 @@ function ingestCarrierSource(root, args) {
 //    `clusterVerdict` (the ONE derivation, reused), the claim is the cluster's own `claim`, the citations
 //    are the cluster's own `evidence_lines`: nothing here is written that the record does not already say.
 
-/** The `experiment` every store record this module projects is filed under — the routine's own name. */
-export const CLUSTER_OUTCOME_EXPERIMENT = "open-semantic-discovery";
+/** The `experiment` every store record this module projects is filed under — the routine's own name.
+ *  ⛔ Its DECLARATION lives above (in the concept-key block), because that block reads it as a
+ *  module-level constant. */
 
 /**
  * Project ONE round's carrier cluster records into evidence-store records (`{kind, rec}` for `emit`).
@@ -1766,23 +1844,25 @@ export function clusterStoreRecords(clusterRecords, { experiment = CLUSTER_OUTCO
     const verdict = clusterVerdict(rec);
     if (verdict === null) continue;
     const components = (Array.isArray(rec.components) ? rec.components : []).filter((c) => isStr(c, 1)).map(String);
-    // The concern-kind half of the key is the cluster's OWN `concept_kind` when the round recorded one,
-    // and the routine name otherwise — `componentsFromSubjectKey` reads only the half after the bar, so
-    // this never affects which files the projected Experience names.
-    const subject = subjectKey(isStr(rec.concept_kind, 1) ? String(rec.concept_kind) : experiment, components);
+    // ⛔ ONE KEY, TWO READERS (Plan item 1). The concept key the ledger now dedups on and the store's own
+    // `subject_key` the JOIN reads are the SAME VALUE here — derived once, by the module's own
+    // `conceptKeyOfCluster`, so a projected outcome can never carry a subject that its own cluster record
+    // would not key to. `componentsFromSubjectKey` reads only the half after the bar, so this never
+    // affects which files the projected Experience names.
+    const subject = conceptKeyOfCluster({ ...rec, concept_kind: isStr(rec.concept_kind, 1) ? rec.concept_kind : experiment });
     const ts = isStr(rec.ts, 4) ? String(rec.ts) : new Date().toISOString();
     const claim = isStr(rec.claim, 10) ? String(rec.claim) : null;
     const cited = (Array.isArray(rec.evidence_lines) ? rec.evidence_lines : []).filter((x) => isStr(x, 1)).map(String);
     if (claim !== null && cited.length > 0) {
       out.push({ kind: "hypothesis", rec: {
-        statement: claim, source_evidence: cited, subject_key: subject, ts,
+        statement: claim, source_evidence: cited, subject_key: subject, concept_key: subject, ts,
         hypothesis_id: recordId, case_id: recordId, experiment, run: runId,
       } });
     }
     const att = isObj(rec.attribution) ? rec.attribution : null;
     const reason = att !== null && isStr(att.blocking_step, 1) ? `${String(att.blocking_step)}${isStr(att.blocking_cause, 1) ? `:${String(att.blocking_cause)}` : ""}` : null;
     out.push({ kind: "outcome", rec: {
-      experiment, experiment_ref: recordId, verdict, subject_key: subject, case_id: recordId, run: runId, ts,
+      experiment, experiment_ref: recordId, verdict, subject_key: subject, concept_key: subject, case_id: recordId, run: runId, ts,
       ...(reason === null ? {} : { verdict_reason: reason }),
       confirmed: rec.confirmed === true,
     } });
@@ -1932,7 +2012,7 @@ export function ingestNewOutcomes(root, {
 } = {}) {
   const base = {
     ok: true, enabled, store: null, watermark_file: null, skips_file: null, mapping_version: mappingVersion,
-    scanned: 0, ingested: 0, duplicates: 0, skipped_not_ingestible: 0, skipped_blank_lines: 0,
+    scanned: 0, ingested: 0, duplicates: 0, concept_duplicates: 0, skipped_not_ingestible: 0, skipped_blank_lines: 0,
     malformed_lines: 0, read_failed: 0, stopped_at_malformed_line: null, stopped_at_read_failed_line: null,
     remainder: 0, advanced_to: null, watermark: null, entries: [], ids: [],
     skips_recorded: 0, skips_already_present: 0, skipped_records: [], rewound_for_mapping: 0,
@@ -2002,6 +2082,23 @@ export function ingestNewOutcomes(root, {
   }
   const have = new Set();
   for (const r of ledger.records) if (isStr(r.source_ref, 1)) have.add(r.source_ref);
+  // ── THE CONCEPT-KEY DEDUP SET (Plan item 3) ─────────────────────────────────────────────────────
+  // `concept_key → the set of ROUNDS that key is already in this ledger for`. Only SYSTEM entries
+  // participate: a human report carries no concept key at all (`ingestUserSource` never writes one), and
+  // reading its absence as a match would dedupe two unrelated things that both name no subject.
+  // ⛔ SCOPED TO A ROUND ON PURPOSE. The same concept recurring in a LATER round is a legitimate new
+  // occurrence — the ledger's own recurrence reading is built on exactly that (a later outcome on the same
+  // `subject_key` becomes `recurred-after-fix`). Deduping the key globally would delete that reading.
+  // Within ONE round, two entries for one concept is the double count this closes: one round cannot
+  // legitimately find the same cluster twice.
+  const conceptRounds = new Map();
+  for (const r of ledger.records) {
+    if (r.reported_by !== "system" || !isStr(r.concept_key, 1)) continue;
+    const round = refRoundOf(r.source_ref);
+    if (round === null) continue;
+    if (!conceptRounds.has(r.concept_key)) conceptRounds.set(r.concept_key, new Set());
+    conceptRounds.get(r.concept_key).add(round);
+  }
 
   // The SKIP ledger — same fail-closed shape as the entry ledger, and for the same reason: an
   // incomplete dedup set would re-append a skip that is already recorded, so the carrier would grow a
@@ -2046,7 +2143,7 @@ export function ingestNewOutcomes(root, {
   const ids = [];
   let advancedTo = from;
   let attempted = 0;
-  let scanned = 0, ingested = 0, duplicates = 0, skipped = 0, blank = 0, malformed = 0, readFailed = 0;
+  let scanned = 0, ingested = 0, duplicates = 0, conceptDuplicates = 0, skipped = 0, blank = 0, malformed = 0, readFailed = 0;
   let stoppedAtMalformed = null;
   let stoppedAtReadFailed = null;
   // The JOIN READING. Counted per INGESTED entry, so the run reports how much of what it wrote carries
@@ -2114,7 +2211,7 @@ export function ingestNewOutcomes(root, {
         // Any OTHER derivation failure is not a skip and must not be filed as one (硬规则 3b): a shape
         // the deriver cannot handle is a defect to report, not an outcome we declined.
         const recorded = flushSkips();
-        return { ...base, ok: false, store, skips_file: skipsFile, watermark_file: wm.file, scanned, ingested, duplicates, skipped_not_ingestible: skipped, skipped_blank_lines: blank, malformed_lines: malformed, read_failed: readFailed, stopped_at_malformed_line: stoppedAtMalformed, stopped_at_read_failed_line: stoppedAtReadFailed, advanced_to: advancedTo, watermark: watermarkValue(lines, advancedTo), ids, entries, skips_recorded: recorded.length, skips_already_present: skipsAlready, skipped_records: recorded, rewound_for_mapping: rewoundForMapping, store_bootstrapped: storeBootstrapped, reasons: d.reasons };
+        return { ...base, ok: false, store, skips_file: skipsFile, watermark_file: wm.file, scanned, ingested, duplicates, concept_duplicates: conceptDuplicates, skipped_not_ingestible: skipped, skipped_blank_lines: blank, malformed_lines: malformed, read_failed: readFailed, stopped_at_malformed_line: stoppedAtMalformed, stopped_at_read_failed_line: stoppedAtReadFailed, advanced_to: advancedTo, watermark: watermarkValue(lines, advancedTo), ids, entries, skips_recorded: recorded.length, skips_already_present: skipsAlready, skipped_records: recorded, rewound_for_mapping: rewoundForMapping, store_bootstrapped: storeBootstrapped, reasons: d.reasons };
       }
       skipped++; advancedTo = lineNo;
       recordSkip(lineNo, isStr(rec.id, 1) ? rec.id : null, rec.verdict ?? null, `${SKIP_VERDICT_NOT_INGESTIBLE}:${String(rec.verdict)}`);
@@ -2126,6 +2223,19 @@ export function ingestNewOutcomes(root, {
       // of a rewind, the ledger already accounts for those lines, and re-reporting them would bury the
       // real skips under noise — a duplicate is an outcome that WAS ingested, so it is not a gap.
       if (lineNo > from0) recordSkip(lineNo, rec.id, rec.verdict ?? null, SKIP_DUPLICATE_SOURCE_REF);
+      continue;
+    }
+    // ── THE SECOND-PATH DUPLICATE (Plan item 3) ─────────────────────────────────────────────────────
+    // This outcome's concept is ALREADY in the ledger for this outcome's OWN round, by a route that is not
+    // this one — the routine's direct carrier→Experience projection. Ingesting it again would put TWO
+    // entries for ONE cluster in the ledger (the measured 2-vs-1 of AC1), and reflection then counts it
+    // twice. `duplicates` stays the reading of "this outcome did not become a second Experience"; the
+    // sub-count names WHICH KIND of duplicate it was, so the double count is visible as itself rather than
+    // folded into an undifferentiated total (硬规则 3b).
+    const incomingRound = refRoundOf(rec.experiment_ref);
+    if (isStr(rec.concept_key, 1) && incomingRound !== null && (conceptRounds.get(rec.concept_key)?.has(incomingRound) ?? false)) {
+      duplicates++; conceptDuplicates++; advancedTo = lineNo;
+      if (lineNo > from0) recordSkip(lineNo, rec.id, rec.verdict ?? null, SKIP_DUPLICATE_CONCEPT_KEY);
       continue;
     }
     const r = ingestExperience(root, { source: "system", outcome: { rec, raw: line, line: lineNo }, context });
@@ -2149,7 +2259,7 @@ export function ingestNewOutcomes(root, {
     // A REFUSAL is neither skipped nor advanced past: the record could not become an Experience, and
     // reporting it is the only behaviour that keeps the watermark honest about what was read.
     const recorded = flushSkips();
-    return { ...base, ok: false, store, skips_file: skipsFile, watermark_file: wm.file, scanned, ingested, duplicates, skipped_not_ingestible: skipped, skipped_blank_lines: blank, malformed_lines: malformed, read_failed: readFailed, stopped_at_malformed_line: stoppedAtMalformed, stopped_at_read_failed_line: stoppedAtReadFailed, advanced_to: advancedTo, watermark: watermarkValue(lines, advancedTo), ids, entries, skips_recorded: recorded.length, skips_already_present: skipsAlready, skipped_records: recorded, rewound_for_mapping: rewoundForMapping, store_bootstrapped: storeBootstrapped, reasons: r.reasons };
+    return { ...base, ok: false, store, skips_file: skipsFile, watermark_file: wm.file, scanned, ingested, duplicates, concept_duplicates: conceptDuplicates, skipped_not_ingestible: skipped, skipped_blank_lines: blank, malformed_lines: malformed, read_failed: readFailed, stopped_at_malformed_line: stoppedAtMalformed, stopped_at_read_failed_line: stoppedAtReadFailed, advanced_to: advancedTo, watermark: watermarkValue(lines, advancedTo), ids, entries, skips_recorded: recorded.length, skips_already_present: skipsAlready, skipped_records: recorded, rewound_for_mapping: rewoundForMapping, store_bootstrapped: storeBootstrapped, reasons: r.reasons };
   }
 
   const watermark = watermarkValue(lines, advancedTo);
@@ -2161,7 +2271,7 @@ export function ingestNewOutcomes(root, {
 
   return {
     ...base, ok: true, store, skips_file: skipsFile, watermark_file: wm.file,
-    scanned, ingested, duplicates, skipped_not_ingestible: skipped, skipped_blank_lines: blank,
+    scanned, ingested, duplicates, concept_duplicates: conceptDuplicates, skipped_not_ingestible: skipped, skipped_blank_lines: blank,
     malformed_lines: malformed, read_failed: readFailed,
     stopped_at_malformed_line: stoppedAtMalformed, stopped_at_read_failed_line: stoppedAtReadFailed,
     remainder, advanced_to: advancedTo, watermark, entries, ids,

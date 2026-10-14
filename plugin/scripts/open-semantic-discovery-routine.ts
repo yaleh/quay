@@ -1821,6 +1821,11 @@ export interface LedgerModule {
    *  projects them back into Experiences. */
   clusterStoreRecords: (clusterRecords: readonly Record<string, unknown>[], opts?: { experiment?: string; runId?: string | null }) => Array<{ kind: string; rec: Record<string, unknown> }>;
   CLUSTER_OUTCOME_EXPERIMENT: string;
+  /** ⛔ THE STABLE IDENTITY (Plan item 1), owned by the ledger module beside the dedup that consumes it
+   *  (硬规则 5b): `<concept kind>|<sorted normalized components>`. Reused here rather than re-derived, so
+   *  the key a cluster record carries, the key its Portfolio row carries, the key its projected store
+   *  outcome carries and the key the batch ingester dedups on are ONE value. */
+  conceptKeyOfCluster: (rec: unknown) => string | null;
 }
 
 /** The narrow interface this file consumes from discovery-method-registry.mjs. The registry owns the
@@ -2370,6 +2375,30 @@ export function parseNoveltyVerdict(rec: Record<string, unknown> | null): { verd
   return { verdict: verdict as NoveltyVerdict, duplicate_of: dup, reasoning, summary };
 }
 
+// ── THE STABLE IDENTITY AND ITS CROSS-ROUND FOLD (Plan item 1) ───────────────────────────────────────
+//
+// ⛔ THE DEFECT THIS CLOSES. `record_id` is a PER-ROUND OCCURRENCE id (`<round ts>#<index>`), so the same
+//    concept rediscovered next round was a NEW finding with a new identity — MEASURED 2026-10-14: 212
+//    clusters, 212 distinct `record_id`s. The stable identity is the CONCEPT KEY (the normalized subject),
+//    which the ledger module owns; this routine MINTS it onto every cluster record it writes and FOLDS the
+//    carrier's earlier production clusters by it, so an occurrence knows how many times this routine has
+//    found that concept before and WHICH records those were.
+//
+// ⛔ WHY A FOLD OVER THE CARRIER AND NOT A SECOND CARRIER. The carrier already holds every cluster record
+//    with its `concept_kind` and `components` — the exact inputs the key is derived from — so the map is
+//    already on disk. A separate index file would be a SECOND copy of that fact, free to drift from it
+//    (硬规则 5b). It also means the fold covers HISTORICAL records without rewriting one byte of them
+//    (Plan item 1: "Do not rewrite historical records") — a record written before this field existed is
+//    keyed by DERIVING the key from its own subject, exactly as a new one is.
+
+/** ⛔ The ONE filter naming a PRIOR PRODUCTION cluster: this routine's own resident rounds, excluding the
+ *  shadow arm (a draft method's unverified hypothesis) and a paired round's BASELINE arm (an instrument
+ *  reading). Both are MEASUREMENT records, and letting one link a production finding to another would
+ *  delete a finding on the strength of a measurement. Exported so the same predicate is used by the
+ *  mechanical-repeat dedup and by the concept fold rather than written twice (硬规则 5b). */
+export const isPriorProductionCluster = (r: Record<string, unknown>): boolean =>
+  r.kind === "cluster" && r.invoked_by === INVOKED_BY_RESIDENT && r.shadow !== true && r.paired_arm !== PAIRED_ARM_BASELINE;
+
 /** The byte-identical-repeat exception: an EARLIER cluster record on THIS routine's own carrier with the
  *  same component set AND the same claim. Returns that record, or `null`. ⛔ This is the ONE mechanical
  *  LABEL in the file, and it is only ever about this routine's own earlier round — never about another
@@ -2387,6 +2416,193 @@ export function findMechanicalRepeat(
     return r;
   }
   return null;
+}
+
+/** One concept's OCCURRENCE FOLD over the carrier's earlier production clusters. PURE. */
+export interface ConceptFold {
+  /** The cluster's stable identity — the value written onto every carrier of this finding. */
+  concept_key: string | null;
+  /** 1 + the number of earlier PRODUCTION clusters carrying the same key (this occurrence counted). */
+  concept_occurrences: number;
+  /** The `record_id` of every earlier occurrence, in carrier order. */
+  concept_linked_record_ids: string[];
+}
+
+/**
+ * Fold `this routine's own earlier production clusters` by the CONCEPT KEY of `subject` (Plan item 1).
+ *
+ * ⛔ THE KEY IS DERIVED FROM EACH EARLIER RECORD'S OWN SUBJECT, never read off a stored field: a record
+ *    written before the field existed is keyed exactly as a new one is, which is what makes the linkage
+ *    cover the whole carrier without rewriting it. A record whose key cannot be derived
+ *    (`conceptKeyOfCluster` returns `null`) simply does not match — it is not given a key here.
+ */
+export function foldConceptOccurrences(
+  priorClusters: readonly Record<string, unknown>[],
+  subject: { concept_kind: unknown; components: unknown },
+  opts: { conceptKeyOfCluster: (rec: unknown) => string | null },
+): ConceptFold {
+  const conceptKey = opts.conceptKeyOfCluster(subject);
+  if (conceptKey === null) return { concept_key: null, concept_occurrences: 1, concept_linked_record_ids: [] };
+  const linked: string[] = [];
+  for (const r of priorClusters) {
+    if (opts.conceptKeyOfCluster(r) !== conceptKey) continue;
+    if (typeof r.record_id === "string" && r.record_id !== "") linked.push(r.record_id);
+  }
+  return { concept_key: conceptKey, concept_occurrences: linked.length + 1, concept_linked_record_ids: linked };
+}
+
+// ── REAL SOURCE EVIDENCE: the citations a call ACTUALLY READ (Plan item 2) ───────────────────────────
+//
+// ⛔ THE DEFECT THIS CLOSES. MEASURED 2026-10-14 on this repo's own carriers: `.quay/open-semantic-
+//    discovery-findings.jsonl` held 212 `kind:"cluster"` records and **0 of 212** carried any evidence
+//    field. The one evidence-shaped field that DID exist, `evidence_lines`, is the MODEL'S OWN PROSE —
+//    `verifier.txt` asks the answer for `"evidence":[{"file":…,"line":…,"quote":…}]` and the routine
+//    copies that array straight onto the record (never re-read, never reconciled against the tree). A
+//    claim that points at prose is not checkable.
+//
+// ⛔ SO THE CITATION IS TAKEN FROM THE TOOL RESULT'S BYTES, not from the answer. Every verifier/refuter
+//    call runs with `Read` enabled and `--output-format stream-json`, so the call capture holds the
+//    `tool_use`/`tool_result` PAIR: which file the model opened, and the numbered lines the tool handed
+//    back. That pair is the reading. A citation is persisted ONLY if the quoted text is still on that
+//    line of that file AT THE PIN — re-read from the pin tree here, mechanically. Anything else is
+//    DROPPED AND COUNTED (`evidence_unverifiable`), never repaired into something plausible.
+//
+// ⛔ ABSENCE IS ITS OWN READING. A cluster whose calls read nothing, or whose citations all failed the
+//    check, records an EMPTY list and a nonzero count — it is never handed an invented citation, and an
+//    empty list here is not the same fact as "this round captured no calls at all" (the call list is what
+//    says that; 硬规则 3b).
+
+/** One citation that SURVIVED the mechanical check: a position, the text found there, and the pin it was
+ *  checked against. */
+export interface VerifiedCitation { file: string; line: number; commit: string | null; quote: string; }
+
+/** The candidate a call's tool results yield, before any check. */
+export interface CitationCandidate { file: string; line: number; quote: string; }
+
+/** A bound on what a cluster record CARRIES (the check itself is unbounded). */
+export const MAX_CLUSTER_CITATIONS = 8;
+/** A citation quote is a LINE, not a file: longer reads are truncated (the check is unaffected — a
+ *  truncated prefix of a real line is still on that line). */
+export const MAX_CITATION_QUOTE_CHARS = 200;
+
+/** The numbered-line shape the `Read` tool hands back (cat -n with an arrow separator; a tab is accepted
+ *  too so a variant rendering is not silently read as "no citations at all").
+ *  ⛔ Parsed BY POSITION, not by a pattern: this file is under a standing control (case (l)) that it
+ *  carries NO pattern machinery — the only pattern-shaped thing allowed here is the protocol marker — so
+ *  a regular expression is not available for this, and one is not needed for a fixed two-field shape. */
+function parseNumberedLine(raw: string): { line: number; text: string } | null {
+  let i = 0;
+  while (i < raw.length && (raw[i] === " " || raw[i] === "\t")) i++;
+  const start = i;
+  while (i < raw.length && raw[i] >= "0" && raw[i] <= "9") i++;
+  if (i === start) return null;
+  const sep = raw[i];
+  if (sep !== "→" && sep !== "\t") return null;
+  const n = Number(raw.slice(start, i));
+  if (!Number.isInteger(n) || n < 1) return null;
+  return { line: n, text: raw.slice(i + 1) };
+}
+
+const toolResultText = (content: unknown): string => {
+  if (typeof content === "string") return content;
+  if (Array.isArray(content)) return content.map((b) => (typeof b === "string" ? b : String((b as Record<string, unknown>)?.text ?? ""))).join("");
+  if (content == null) return "";
+  try { return JSON.stringify(content); } catch { return ""; }
+};
+
+/**
+ * The CANDIDATE citations one model call really read, extracted from its `stream-json` tool results.
+ * PURE. Only `Read` pairs produce candidates: its result is the numbered line rendering, which names a
+ * position AND the text at it. A `Grep` hit is deliberately NOT mined — its output is a match line whose
+ * file/line split is a different (and lossier) parse, and inventing one parse for it here would be a
+ * second citation vocabulary. A blank line is not a citation (`quote` empty after normalization is
+ * dropped): it can be produced by any file and would pad the count with nothing.
+ */
+export function citationsFromCallStream(stdout: unknown): CitationCandidate[] {
+  const text = typeof stdout === "string" ? stdout : "";
+  if (text === "") return [];
+  const pending = new Map<string, string>();
+  const out: CitationCandidate[] = [];
+  for (const raw of text.split("\n")) {
+    const line = raw.trim();
+    if (!line || line[0] !== "{") continue;
+    let ev: Record<string, unknown>;
+    try { ev = JSON.parse(line) as Record<string, unknown>; } catch { continue; }
+    const content = (ev as { message?: { content?: unknown } })?.message?.content;
+    if (!Array.isArray(content)) continue;
+    for (const b of content as Record<string, unknown>[]) {
+      if (b?.type === "tool_use" && b?.name === "Read") {
+        const input = b.input as Record<string, unknown> | undefined;
+        if (typeof input?.file_path === "string" && typeof b.id === "string" && b.id !== "") pending.set(b.id, input.file_path);
+        continue;
+      }
+      if (b?.type !== "tool_result" || typeof b.tool_use_id !== "string") continue;
+      const file = pending.get(b.tool_use_id);
+      if (file === undefined) continue;
+      for (const l of toolResultText(b.content).split("\n")) {
+        const parsed = parseNumberedLine(l);
+        if (parsed === null) continue;
+        const quote = parsed.text.slice(0, MAX_CITATION_QUOTE_CHARS);
+        if (quote.replace(/\s+/g, "").length === 0) continue;
+        out.push({ file, line: parsed.line, quote });
+      }
+    }
+  }
+  return out;
+}
+
+const normCitationText = (s: unknown) => String(s ?? "").replace(/\s+/g, " ").trim();
+
+/**
+ * Mechanically check ONE candidate against the pin tree. PURE apart from the file read.
+ *
+ * ⛔ The tree it reads is the PIN the call itself ran against, so "the line exists" is a claim about the
+ *    same bytes the model was shown rather than about whatever the working tree looks like now.
+ * @returns `{ok:true}` or `{ok:false, reason}` — a distinct code per failure, never a bare `false`.
+ */
+export function verifyCitation(pinDir: string, candidate: CitationCandidate): { ok: true } | { ok: false; reason: string } {
+  const file = String(candidate?.file ?? "");
+  if (file === "" || path.isAbsolute(file) || file.split("/").includes("..")) {
+    return { ok: false, reason: `CITATION_PATH_UNSAFE:${file}` };
+  }
+  const root = path.resolve(pinDir);
+  const abs = path.resolve(root, file);
+  // Belt and braces with the `..` test above: a citation may only name a file INSIDE the pin tree, so a
+  // crafted or accidental escape can never be "verified" against a file the call never read.
+  if (abs !== root && !abs.startsWith(root + path.sep)) return { ok: false, reason: `CITATION_PATH_UNSAFE:${file}` };
+  let text: string;
+  try { text = fs.readFileSync(abs, "utf8"); } catch (e) { return { ok: false, reason: `CITATION_FILE_ABSENT:${file}:${(e as NodeJS.ErrnoException)?.code ?? "read-failed"}` }; }
+  const lines = text.split("\n");
+  const n = Number(candidate?.line ?? 0);
+  if (!Number.isInteger(n) || n < 1 || n > lines.length) return { ok: false, reason: `CITATION_LINE_ABSENT:${file}:${String(candidate?.line)}` };
+  const quote = normCitationText(candidate?.quote);
+  if (quote === "" || !normCitationText(lines[n - 1]).includes(quote)) {
+    return { ok: false, reason: `CITATION_TEXT_NOT_AT_LINE:${file}:${n}` };
+  }
+  return { ok: true };
+}
+
+/**
+ * Check a call's candidate citations and keep the ones that survive. PURE apart from the file reads.
+ *
+ * `unverifiable` counts EVERY candidate that failed — including any past the carry bound, so the count is
+ * a reading of the call's evidence quality rather than of what fit on the record. `truncated` names the
+ * separate fact that verified citations existed beyond the bound (it is NOT a failure and MUST NOT be
+ * added to `unverifiable`).
+ */
+export function verifyCitations(pinDir: string, commit: string | null, candidates: readonly CitationCandidate[]): { citations: VerifiedCitation[]; unverifiable: number; truncated: number } {
+  const seen = new Set<string>();
+  const verified: VerifiedCitation[] = [];
+  let unverifiable = 0;
+  for (const c of Array.isArray(candidates) ? candidates : []) {
+    const key = `${c?.file}#${c?.line}#${normCitationText(c?.quote)}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    if (verifyCitation(pinDir, c).ok === true) verified.push({ file: c.file, line: c.line, commit, quote: normCitationText(c.quote) });
+    else unverifiable++;
+  }
+  verified.sort((a, b) => (a.file < b.file ? -1 : a.file > b.file ? 1 : a.line - b.line));
+  return { citations: verified.slice(0, MAX_CLUSTER_CITATIONS), unverifiable, truncated: Math.max(0, verified.length - MAX_CLUSTER_CITATIONS) };
 }
 
 // ── the post-round WRITES: carrier record → Experience → Portfolio ────────────────────────────────────
@@ -2536,6 +2752,11 @@ export function ingestRoundClusters(root: string, opts: {
         method_ref: guided.length > 0 ? guided.join(",") : null,
         claim,
         components: Array.isArray(cluster.components) ? cluster.components : [],
+        // THE SAME STABLE IDENTITY the carrier record and the Experience carry (Plan item 1) — read off
+        // the cluster record rather than re-derived, so a Portfolio row can be grouped by concept with
+        // the two other carriers. `null` when the record names none (a record written before the field
+        // existed is not given an invented key here either).
+        concept_key: typeof cluster.concept_key === "string" ? cluster.concept_key : null,
         outcome: "supported",
         // ⛔ NOT a filed task and NOT a rating: the operator files fixes, and a human rates. Both stay null.
         fix_task: null,
@@ -3566,6 +3787,9 @@ export async function runOpenSemanticDiscovery(root: string, opts: OpenSemanticD
   } catch (e) {
     return fact("failed", { ...base, enabled: true }, `unreadable carrier — ${(e as Error).message} (nothing appended)`);
   }
+  // The earlier clusters the concept fold and the mechanical-repeat check are BOTH judged against — read
+  // ONCE, by the one predicate that names a prior production cluster, so the two cannot drift.
+  const priorProductionClusters = carrierRounds.filter(isPriorProductionCluster);
 
   // ③a the effective interval: an expired `interval_until` reverts to the permanent default, re-derived
   //     EVERY round so a driver holding the old RoutineSpec in memory cannot keep a stale cadence alive.
@@ -4189,6 +4413,11 @@ export async function runOpenSemanticDiscovery(root: string, opts: OpenSemanticD
         return { ok: false, reason: `${armPrefix}budget breach — wall ${now() - started}ms >= max_wall_ms ${config.maxWallMs} after the investigator (nothing appended, last-run not advanced)` };
       }
 
+    // The CANDIDATE citations each 1-based cluster position's calls really read (Plan item 2), collected
+    // from the verifier AND the refuter — the two calls whose job is to look at the code. Keyed by the
+    // engine's own `cluster` position, so the record's citations are the ones ITS OWN calls produced.
+    const citationsByCluster = new Map<number, CitationCandidate[]>();
+
     // ⑦ (c) VERIFY at most K clusters, with Read,Grep on the pin and an explicit turn budget.
     let verification: Record<string, unknown> = { verified: 0, results: [] };
     if (armClusters.length > 0) {
@@ -4196,7 +4425,7 @@ export async function runOpenSemanticDiscovery(root: string, opts: OpenSemanticD
         clusters: armClusters, pinDir: pinned, cwd: pinned, promptTemplate: verifierPromptText,
         maxClusters: config.maxClustersVerified, concurrency: 1, maxMs: config.maxWallMs, // concurrency-default-fallback: ONE verifier call at a time — the engine can fan out, but concurrent calls reserve from several places at once and the per-step cost ledger stops being readable in call order
         strategy: "default", onlyCluster: null, evidence: null, model: requestedModel,
-        runModel: async (p: string) => {
+        runModel: async (p: string, ctx?: { cluster?: number }) => {
           const { res, rec } = await reservingStep(stepKind("verifier"), { prompt: p, tools: VERIFIER_TOOLS, maxTurns: config.verifierMaxTurns, model: requestedModel });
           noteArmCall(rec);
           // A verifier cut off at its OWN cap is the same failure as an investigator cut off at its own:
@@ -4204,6 +4433,15 @@ export async function runOpenSemanticDiscovery(root: string, opts: OpenSemanticD
           // as "verified 3, confirmed 0" for a reason that never appears on the record.
           const out = await reportIfCutOff(p, res, rec, stepKind("verifier-report"));
           noteArmCall(out.rec);
+          // THE REAL EVIDENCE (Plan item 2), taken at the CALL SITE from the FINAL stream this call
+          // returned (the rescue's, when the call was cut off — the same bytes the `tool_use`/`tool_result`
+          // pairs are in). The cluster it belongs to is the engine's own `ctx.cluster`, the SAME 1-based
+          // position the row and the cluster record are addressed by.
+          if (typeof ctx?.cluster === "number") {
+            const list = citationsByCluster.get(ctx.cluster) ?? [];
+            list.push(...citationsFromCallStream(out.res?.stdout));
+            citationsByCluster.set(ctx.cluster, list);
+          }
           return out.res;
         },
       });
@@ -4223,6 +4461,19 @@ export async function runOpenSemanticDiscovery(root: string, opts: OpenSemanticD
       const idx = Number(row.cluster ?? 0);
       const cluster = armClusters[idx - 1] ?? null;
       const rep = (cluster?.rep ?? {}) as Record<string, unknown>;
+      // ── THE STABLE IDENTITY (Plan item 1) ──────────────────────────────────────────────────────────
+      // Derived from THIS cluster's own subject and folded against the carrier's earlier production
+      // clusters: the key is what makes two rounds' occurrences of one concept ONE finding, and the fold
+      // is what LINKS them (which earlier record_ids, how many occurrences). `record_id` below is
+      // untouched — it remains the per-round OCCURRENCE id.
+      const fold = foldConceptOccurrences(
+        priorProductionClusters,
+        { concept_kind: rep.concept_kind ?? null, components: rep.components ?? [] },
+        { conceptKeyOfCluster: (r) => modules.ledger.conceptKeyOfCluster(r) },
+      );
+      // The mechanical check of what this cluster's calls READ (Plan item 2): every candidate is
+      // re-read from the pin tree and a mismatch is COUNTED, not repaired.
+      const citationCheck = verifyCitations(pinned, rev, citationsByCluster.get(idx) ?? []);
       const entry: Record<string, unknown> = {
         kind: "cluster",
         routine: OPEN_SEMANTIC_DISCOVERY_NAME,
@@ -4234,11 +4485,26 @@ export async function runOpenSemanticDiscovery(root: string, opts: OpenSemanticD
         cluster: idx,
         members: row.members ?? cluster?.members ?? [],
         concept_kind: rep.concept_kind ?? null,
+        // The stable identity + its cross-round linkage (see `foldConceptOccurrences`).
+        concept_key: fold.concept_key,
+        concept_occurrences: fold.concept_occurrences,
+        concept_linked_record_ids: fold.concept_linked_record_ids,
         claim: rep.claim ?? row.claim ?? null,
         components: rep.components ?? [],
         verifier_verdict: row.verdict ?? null,
         verifier_cause: row.verdict_cause ?? null,
+        // ⛔ THE MODEL'S OWN PROSE CLAIM, kept as what it is (`file`/`line`/`quote` the ANSWER stated).
+        // It is NOT evidence and nothing derives `citations` from it — see `citationsFromCallStream`.
         evidence_lines: Array.isArray(row.evidence) ? row.evidence : [],
+        // ── THE REAL SOURCE EVIDENCE (Plan item 2) ─────────────────────────────────────────────────
+        // The positions this cluster's OWN verifier/refuter calls actually READ, each re-checked against
+        // the pin so a citation whose line is absent, or whose text is not on that line, is dropped and
+        // counted rather than persisted. An empty list plus `evidence_unverifiable: 0` says "these calls
+        // read nothing"; an empty list plus a nonzero count says "what they read did not check out" —
+        // two different facts, which is why both are on the record (硬规则 3b).
+        citations: citationCheck.citations,
+        evidence_unverifiable: citationCheck.unverifiable,
+        citations_truncated: citationCheck.truncated,
         actual_model: row.actual_model ?? null,
         turns: row.turns_used ?? null,
         cost_usd: row.cost_usd ?? null,
@@ -4270,6 +4536,13 @@ export async function runOpenSemanticDiscovery(root: string, opts: OpenSemanticD
           maxClusters: 1, concurrency: 1, maxMs: config.maxWallMs, strategy: "default", onlyCluster: 1, // concurrency-default-fallback: ONE cluster, ONE call
           evidence: null, model: requestedModel,
           runModel: async (p: string) => {
+            // The refuter is the SECOND call that reads the tree for this cluster, so its reads are
+            // evidence too — merged into the SAME per-position list the verifier's went into.
+            const noteRefuterReads = (stdout: unknown): void => {
+              const list = citationsByCluster.get(idx) ?? [];
+              list.push(...citationsFromCallStream(stdout));
+              citationsByCluster.set(idx, list);
+            };
             const { res, rec } = await reservingStep(stepKind("refuter"), { prompt: p, tools: REFUTER_TOOLS, maxTurns: config.refutationMaxTurns, model: requestedModel });
             noteArmCall(rec);
             // ── THE TRUNCATED REFUTER GETS ONE FRESH-CONTEXT RETRY WITH A LARGER BUDGET (Plan item 2) ───
@@ -4293,6 +4566,10 @@ export async function runOpenSemanticDiscovery(root: string, opts: OpenSemanticD
               noteArmCall(retry.rec);
               last = retry;
             }
+            // The FINAL call's stream is the one whose reads are the refutation's evidence — a budget
+            // retry REPLACES the truncated attempt, and counting both attempts' reads as this cluster's
+            // evidence would credit it with reads that produced no verdict.
+            noteRefuterReads(last.res?.stdout);
             return last.res;
           },
         });
@@ -4394,8 +4671,7 @@ export async function runOpenSemanticDiscovery(root: string, opts: OpenSemanticD
     // A SHADOW cluster is never a prior production cluster, and neither is a PAIRED round's BASELINE
     // arm: both are measurement records, and letting one make a production finding look like a repeat of
     // something already seen would delete a finding on the strength of a measurement.
-    const priorClusterRecords = carrierRounds.filter((r) =>
-      r.kind === "cluster" && r.invoked_by === INVOKED_BY_RESIDENT && r.shadow !== true && r.paired_arm !== PAIRED_ARM_BASELINE);
+    const priorClusterRecords = priorProductionClusters;
     const noveltyOutcomes: NoveltyOutcome[] = [];
     const noveltyByCluster = new Map<number, NoveltyOutcome>();
     for (const c of clusterRecords) {

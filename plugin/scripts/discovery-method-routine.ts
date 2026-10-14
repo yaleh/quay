@@ -1588,7 +1588,13 @@ export async function runDiscoveryMethod(root: string, opts: DiscoveryMethodRunO
       //    different facts (a store no producer has ever written vs. a store with nothing new since the
       //    watermark), and a reader of this line must be able to tell them apart without re-reading the
       //    store by hand (gap-evidence-store-has-no-resident-producer-…). `null` = never established.
-      ingested: { experiences: ingested, scanned: Number(ingest.scanned ?? 0), duplicates: Number(ingest.duplicates ?? 0), advanced_to: ingest.advanced_to ?? null, store_bootstrapped: typeof ingest.store_bootstrapped === "boolean" ? ingest.store_bootstrapped : null, store_records: typeof ingest.store_records === "number" ? ingest.store_records : null, store_state: typeof ingest.store_state === "string" ? ingest.store_state : null },
+      // `concept_duplicates` names the SUBSET of `duplicates` that were skipped because the same cluster
+      // was already ingested by the routine that produced it (gap-discovery-findings-lack-stable-identity-
+      // and-source-evidence-and-double-ingest-into-experience, Plan item 3). It is reported SEPARATELY
+      // rather than folded into `duplicates`: «this record was already ingested» and «this record is the
+      // SECOND path of a cluster the round already filed» are different findings, and a reader of this
+      // line must be able to tell which one a round hit (硬规则 3b).
+      ingested: { experiences: ingested, scanned: Number(ingest.scanned ?? 0), duplicates: Number(ingest.duplicates ?? 0), concept_duplicates: Number(ingest.concept_duplicates ?? 0), advanced_to: ingest.advanced_to ?? null, store_bootstrapped: typeof ingest.store_bootstrapped === "boolean" ? ingest.store_bootstrapped : null, store_records: typeof ingest.store_records === "number" ? ingest.store_records : null, store_state: typeof ingest.store_state === "string" ? ingest.store_state : null },
       // ⛔ WHAT THE REFLECTION LAUNCHER ACTUALLY RAN WITH (Plan item 2). ⛔ `null` — not a fabricated
       // config-derived block — when NO live launcher was built (a caller injected its own `model`/
       // `reflectFn`: the tests do). "What the config asks for" and "what the launcher ran with" are

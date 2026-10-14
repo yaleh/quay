@@ -416,6 +416,11 @@ export function validateFindingRecord(rec) {
   if (rec.recurred !== null && !isBool(rec.recurred)) reasons.push("FIELD_INVALID:recurred");
   if (rec.recurred_reason !== null && !isStr(rec.recurred_reason, 1)) reasons.push("FIELD_INVALID:recurred_reason");
   if (rec.duplicate_of !== null && !isStr(rec.duplicate_of, 1)) reasons.push("FIELD_INVALID:duplicate_of");
+  // The stable identity (see `ingestFinding`). Optional — a row written before the field existed keeps
+  // reading — but a SUPPLIED one must be a non-empty string: `""`/`0` would read as "has an identity".
+  if (supplied(rec, "concept_key") && rec.concept_key !== null && !isStr(rec.concept_key, 1)) {
+    reasons.push("FIELD_INVALID:concept_key-needs-a-non-empty-string-or-null");
+  }
   if (!isStr(rec.ts, 4)) reasons.push("FIELD_INVALID:ts");
   if (rec.cost !== null) {
     if (!isObj(rec.cost)) reasons.push("FIELD_INVALID:cost");
@@ -882,6 +887,15 @@ export function ingestFinding(root, input, opts = {}) {
     method_ref: input.method_ref ?? null,
     claim: input.claim,
     components,
+    // ── THE STABLE IDENTITY (gap-discovery-findings-lack-stable-identity-and-source-evidence-and-
+    //    double-ingest-into-experience, Plan item 1) ────────────────────────────────────────────────
+    // The normalized-subject key the carrier record, the Experience entry and the projected store
+    // outcome carry too, so a Portfolio row can be grouped by CONCEPT rather than only by `finding_id`
+    // (per-round) or by the `duplicate_of` link (pairwise). ⛔ OPTIONAL and NOT defaulted to a derived
+    // value: a caller that names none gets `null`, and `null` is its own reading ("this row carries no
+    // stable identity") rather than an invented key (硬规则 3b). It is deliberately NOT in
+    // REQUIRED_RECORD_FIELDS — that would make every row written before the field existed unreadable.
+    concept_key: isStr(input.concept_key, 1) ? String(input.concept_key) : null,
     outcome: input.outcome,
     fix_task: input.fix_task ?? null,
     domain: input.domain ?? null,
