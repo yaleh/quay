@@ -164,8 +164,8 @@ with `SUITE-INCOMPLETE reason=oom-killed`. Both causes were read out of the arte
 
 ## Blocker
 
-**2026-10-14T17:29:57.975Z — worker 未落地（exited-not-landed）**
+**2026-10-14T18:11:00.014Z — worker 未落地（exited-not-landed）**
 
-- 未落地原因：step=suite: oom-killed (1) — recovery exhausted at floor concurrency 32 — no declared rung produced a complete verdict (64,48,32); needs a code/config fix, see plugin/scripts/full-suite-runner.ts
+- 未落地原因：step=suite: oom-killed (2) — recovery exhausted at floor concurrency 32 — no declared rung produced a complete verdict (64,48,32); needs a code/config fix, see plugin/scripts/full-suite-runner.ts
 - run_id：wk-prod-anchor
-- session_id：57fbcbc8-f58b-4e57-8e0f-a6feef0ff1c9
+- session_id：088715d7-b58f-4dae-b369-e54f5f535f40
