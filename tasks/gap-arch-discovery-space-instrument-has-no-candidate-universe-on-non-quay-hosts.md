@@ -2,7 +2,7 @@
 id: gap-arch-discovery-space-instrument-has-no-candidate-universe-on-non-quay-hosts
 title: arch_discovery 的 space 仪器在非 quay 宿主上 candidates 恒为 0（候选集是 quay 自己的
   enum-surface 注册表、routine 不传 --registry），却记成 exit:0 干净轮
-status: todo
+status: ready
 labels:
   - gap
   - architecture-discovery
