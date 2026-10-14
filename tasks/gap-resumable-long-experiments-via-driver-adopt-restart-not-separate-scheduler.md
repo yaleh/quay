@@ -105,3 +105,10 @@ $ experiment-manifest --plan      => run 0 / skip 3 / invalidated 0 / blocked 0
 ```
 
 **AC5** — `bash scripts/test.sh --for-task gap-resumable-long-experiments-via-driver-adopt-restart-not-separate-scheduler --allow-thin` ⇒ `GATE EXIT=0`, `ℹ tests 155 / ℹ pass 155 / ℹ fail 0`, zero `STATIC_CHECK_FAILED`. Also verified green: the new module is a shipped bundle entry (`scripts/dist/experiment-manifest.js` in the assembled artifact, raw `.ts` stripped → the prompt's CLI resolves in a third-party install) with the shipped-set ratchet still at its floor (285 files / 7345 .sh lines); `capability-catalog.sh` 380/380 declared / 0 unclassified; carrier-registry, source-text-lib, build-plugin-dist, shipped-set and the anti-drift Touches gate all pass.
+
+## Touches
+- tasks/gap-resumable-long-experiments-via-driver-adopt-restart-not-separate-scheduler.md
+- plugin/scripts/worker-driver.ts
+- plugin/scripts/experiment-manifest.ts
+- plugin/test/experiment-manifest.test.mjs
+- plugin/scripts/capability-catalog-declarations.json
