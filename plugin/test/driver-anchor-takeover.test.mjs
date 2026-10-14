@@ -65,12 +65,16 @@ const HEARTBEAT_KIND = "outer";
  *  `kind` 可覆盖（缺省 = 本文件既有用例用的 HEARTBEAT_KIND）：本任务的接管用例需要**两个** kind 才能
  *  造出「旧 anchor 托管两个、期望态只剩一个」的收窄形态。
  *  `FAKE_STOP_LINGER_MS=n` ⇒ **响应**停机但收尾要 n ms（= 「循环会收尾，只是慢一点」那个正常路径形态，
- *  见 AC2 的对照组：⛔ 与 FAKE_IGNORE_STOP 是**两个不同的**夹具形态，别混用）。 */
+ *  见 AC2 的对照组：⛔ 与 FAKE_IGNORE_STOP 是**两个不同的**夹具形态，别混用）。
+ *  `FAKE_SPAWN_CHILD=1` ⇒ 循环起跑时另起一个**独立 OS 进程**（`node -e setTimeout`，detached）并把它的
+ *  pid 写进 `.quay/fake-child.pid` —— 这是「在飞子进程」的直接量（§6.9 不变式 3）：判据读的是**那个 pid
+ *  此刻还活着**，⛔ 不是「日志里写了一句话」。 */
 function fakeDriverSource(kind = HEARTBEAT_KIND) {
   const spec = DRIVER_KINDS[kind];
   const carrier = spec.carriers.find((c) => c.endsWith("-round.jsonl")) ?? spec.carriers[0];
   return `import fs from "node:fs";
 import path from "node:path";
+import { spawn } from "node:child_process";
 import { registerKindStop } from ${JSON.stringify(DRIVER_RUNTIME_ABS)};
 
 export async function main(argv) {
@@ -84,6 +88,11 @@ export async function main(argv) {
   const file = path.join(root, ".quay", ${JSON.stringify(carrier)});
   const ignoreStop = process.env.FAKE_IGNORE_STOP === "1";
   const lingerMs = Number(process.env.FAKE_STOP_LINGER_MS ?? "0");
+  if (process.env.FAKE_SPAWN_CHILD === "1") {
+    const kid = spawn(process.execPath, ["-e", "setTimeout(() => {}, 60000)"], { detached: true, stdio: "ignore" });
+    kid.unref();
+    fs.writeFileSync(path.join(root, ".quay", "fake-child.pid"), String(kid.pid) + "\\n", "utf8");
+  }
   let round = 0;
   while (ignoreStop || !ctl.requested()) {
     round += 1;
@@ -268,16 +277,23 @@ test("AC3① — 旧 anchor 的循环 drain 到**宽限边界**才退 ⇒ 替换
 //         `(SIGTERM→exit) - 宽限`（两个端点都是精确时刻）< 宽限/2。修复前该路径恒 ≥ min(60s, 宽限)。
 //         ⚠️ ⛔ 不用「`exiting anyway` 行 → 退出」的**观测**差做判据：该行是轮询 20ms 观测到的，而
 //         修复后这个量比观测粒度还小（实测过一次 -4ms）；它只进诊断。
+//         DoD 半边：同一条夹具里另起一个**真**子进程 ⇒ 早退之后它必须仍活着（§6.9 inv.3 直接量）。
 //   AC2②  **对照**：循环响应停机、收尾略慢 ⇒ anchor 仍**等它收尾**再退（日志行序 + SIGTERM→exit ≥ 收尾耗时）
 //         ——本修复⛔ 不得顺手把正常停机路径也变成「立刻丢下循环就退」。
 
 test("AC2① — 宽限超时 ⇒ anchor **立刻**退出（⛔ 不再为刚被判定不会收尾的循环白等 min(60s,宽限)）", async (t) => {
   const graceMs = 2_000; // ≪ 生产 120s：这里测的是**结构**（有没有第二段等待），⛔ 不是「宽限该多长」
   const root = makeFixture("no-second-wait");
-  const a = spawnAnchor(root, [], { FAKE_IGNORE_STOP: "1", QUAY_ANCHOR_SHUTDOWN_GRACE_MS: String(graceMs) });
+  const a = spawnAnchor(root, [], { FAKE_IGNORE_STOP: "1", FAKE_SPAWN_CHILD: "1", QUAY_ANCHOR_SHUTDOWN_GRACE_MS: String(graceMs) });
   t.after(() => { killAll(root, [a.pid]); fs.rmSync(root, { recursive: true, force: true }); });
   await waitFor(() => anchorPid(root) === a.pid && alive(a.pid), 20_000, `the anchor to own anchor.pid (stderr: ${a.stderrText})`);
   await waitForLoopRunning(root, HEARTBEAT_KIND);
+  // 「在飞子进程」的直接量（§6.9 不变式 3）：一个**独立 OS 进程**，由循环起跑时另起。
+  const childPidFile = path.join(root, ".quay", "fake-child.pid");
+  await waitFor(() => fs.existsSync(childPidFile), 20_000, "the loop's in-flight child (a real independent OS process)");
+  const kidPid = Number(fs.readFileSync(childPidFile, "utf8").trim());
+  t.after(() => { try { process.kill(kidPid, "SIGKILL"); } catch { /* gone */ } });
+  assert.ok(alive(kidPid), "夹具前提：那个子进程此刻真的活着（⛔ 否则下面的判据是空过）");
 
   const exited = new Promise((res) => a.on("exit", () => res(Date.now())));
   const t0 = Date.now();
@@ -304,6 +320,9 @@ test("AC2① — 宽限超时 ⇒ anchor **立刻**退出（⛔ 不再为刚被�
     `（修复前该路径**恒** ≥ min(60s, 宽限) = ${graceMs}ms，因为那段收尾等待的 deadline 就是它）:\n${log.slice(-1500)}`,
   );
   assert.ok(!alive(a.pid), "此刻进程真的已经退了（⛔ 不是「日志写了但还活着」）");
+  // DoD：这条路径改成**早退**之后，在飞子进程仍必须活着（SPEC §6.9 inv.3）。⛔ 直接量是那个 pid 还活着，
+  // ⛔ 不是上面那行日志里的「NOT killed」——那行日志在修复前后逐字相同，它证明不了本修复没碰这条不变量。
+  assert.ok(alive(kidPid), `旧 anchor 退出后，它的在飞子进程仍是活的（pid=${kidPid}）——早退 ⛔ 不是杀掉它们`);
 });
 
 test("AC2② (对照) — 正常停机路径不受影响：循环响应停机、收尾略慢 ⇒ anchor **等它收尾**再退出", async (t) => {
