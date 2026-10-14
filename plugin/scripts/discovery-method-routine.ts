@@ -229,6 +229,13 @@ export const BUDGET_LOCK_MAX_RECOVERIES = 8;
  *  SAME token the round reports as its own reason, so the ledger line and the round failure agree. */
 export const BUDGET_REFUSAL_CODE = "BUDGET_24H";
 
+/** ⛔ THE TOKEN THIS ROUND'S FACT CARRIES WHEN ITS `ingested 0` MEANS «NOTHING HAS EVER WRITTEN THIS
+ *  STORE» — the state that is NOT «nothing new since the watermark» and must never be read as it.
+ *  It names a WIRING condition (no resident producer feeds the store), so it is a token of its own
+ *  rather than a phrase inside a sentence: a reader can grep for it, and a change in wording cannot
+ *  silently un-name the condition (gap-evidence-store-has-no-resident-producer-…). */
+export const EVIDENCE_STORE_NO_PRODUCER = "EVIDENCE_STORE_NO_PRODUCER";
+
 /** ⛔ THE REFLECTION LAUNCHER'S TOOLS, and why they are no longer empty (task
  *  gap-discovery-method-per-round-quota-verify-reserve-deep-reflection, Plan item 2). Reflection used to
  *  run with NO tools: it was shown an Experience's `summary`/`components` and could not read the code at
@@ -1113,6 +1120,14 @@ export interface HeldOutRead { ok: boolean; cases: Record<string, unknown>[]; re
 export interface DiscoveryLedgerModule {
   ingestNewOutcomes: IngestFn;
   readExperienceLedger: LedgerReadFn;
+  /** ⛔ The `store_state` VOCABULARY, consumed from the module that owns it rather than re-spelled
+   *  here. `ingestNewOutcomes` answers with one of these names, and a routine that compared against its
+   *  own string literals would be a SECOND definition of «this store has never held a record» — the
+   *  exact drift the state was introduced to remove (硬规则 5b). */
+  STORE_STATE_EMPTY: string;
+  STORE_STATE_NO_NEW: string;
+  STORE_STATE_SCANNED_NONE: string;
+  STORE_STATE_INGESTED: string;
 }
 export interface DiscoveryReflectionModule {
   runReflectionRound: ReflectFn;
@@ -1550,7 +1565,11 @@ export async function runDiscoveryMethod(root: string, opts: DiscoveryMethodRunO
       //    the round is not a distinction). Passed through as the ingester reported it — `null` when the
       //    reading was never established — rather than coerced to a boolean, so "not evaluated" never
       //    reaches the carrier wearing the same shape as "was already there" (硬规则 3b).
-      ingested: { experiences: ingested, scanned: Number(ingest.scanned ?? 0), duplicates: Number(ingest.duplicates ?? 0), advanced_to: ingest.advanced_to ?? null, store_bootstrapped: typeof ingest.store_bootstrapped === "boolean" ? ingest.store_bootstrapped : null },
+      // ⛔ …AND SO DOES `store_state`, for the SAME reason one level further on: `ingested 0` is TWO
+      //    different facts (a store no producer has ever written vs. a store with nothing new since the
+      //    watermark), and a reader of this line must be able to tell them apart without re-reading the
+      //    store by hand (gap-evidence-store-has-no-resident-producer-…). `null` = never established.
+      ingested: { experiences: ingested, scanned: Number(ingest.scanned ?? 0), duplicates: Number(ingest.duplicates ?? 0), advanced_to: ingest.advanced_to ?? null, store_bootstrapped: typeof ingest.store_bootstrapped === "boolean" ? ingest.store_bootstrapped : null, store_records: typeof ingest.store_records === "number" ? ingest.store_records : null, store_state: typeof ingest.store_state === "string" ? ingest.store_state : null },
       // ⛔ WHAT THE REFLECTION LAUNCHER ACTUALLY RAN WITH (Plan item 2). ⛔ `null` — not a fabricated
       // config-derived block — when NO live launcher was built (a caller injected its own `model`/
       // `reflectFn`: the tests do). "What the config asks for" and "what the launcher ran with" are
@@ -1864,6 +1883,37 @@ export async function runDiscoveryMethod(root: string, opts: DiscoveryMethodRunO
   const wallMs = round.wall_ms as number;
   const grantedThisRound = reservationsBlock === null ? 0 : Number(reservationsBlock.granted ?? 0);
 
+  /**
+   * ⛔ WHAT THIS ROUND'S ZERO (OR NON-ZERO) MEANS, as the round itself says it.
+   *
+   * `ingested 0` is TWO facts, and before this they shared ONE sentence (硬规则 3b/4): a store that
+   * holds no record at all — «no producer has ever written this, and none can» — and a store that holds
+   * records none of which is new since the watermark — «the ordinary second run». A capability that
+   * could never ingest anything therefore read exactly like one with nothing to do.
+   *
+   * The NAME comes from the ingester (`ingest.store_state`) and is compared against the LEDGER MODULE's
+   * own vocabulary, consumed off the loaded module — never re-spelled here, because a second spelling is
+   * a second definition of the same state. A `null` state is its OWN case: it means the reading was
+   * never established (a disabled round, an unreadable store), which is neither zero and says nothing.
+   * ⛔ An engine module too old to carry the vocabulary yields NO clause rather than a wrong one.
+   */
+  const storeStateClause = (): string => {
+    const state = typeof ingest.store_state === "string" ? ingest.store_state : null;
+    if (state === null) return "";
+    const records = typeof ingest.store_records === "number" ? String(ingest.store_records) : "?";
+    const L = engine.ledger;
+    if (state === L.STORE_STATE_EMPTY) {
+      return ` — ${EVIDENCE_STORE_NO_PRODUCER}: the evidence store holds ${records} record(s), so NOTHING has ever written it; this is NOT «nothing new since the watermark», it is a store with no resident producer, and it stays at 0 until one is wired`;
+    }
+    if (state === L.STORE_STATE_NO_NEW) {
+      return ` — no new outcome records since the watermark (the store holds ${records} record(s); this round read none past it)`;
+    }
+    if (state === L.STORE_STATE_SCANNED_NONE) {
+      return ` — ${records} record(s) in the store, ${Number(ingest.scanned ?? 0)} past the watermark, and NONE of them became an Experience (duplicates or not-ingestible verdicts)`;
+    }
+    return "";
+  };
+
   if (budgetRefusal !== null) {
     return fact(
       "not-evaluated",
@@ -1875,7 +1925,7 @@ export async function runDiscoveryMethod(root: string, opts: DiscoveryMethodRunO
   return fact(
     "verified",
     round,
-    `round ran (invoked_by:${invokedBy}, interval ${intervalMinutes}m): ingested ${ingested} experience(s), reflected ${reflection ? Number(reflection.decisions ?? 0) : 0} unit(s), minted ${candidates.length} candidate(s), ${verdicts.filter((v) => v.outcome === "evaluated").length} evaluated verdict(s) (${verdicts.filter((v) => v.correct === true).length} correct), ${promotions.length} promotion(s), ${retirements.length} retirement(s), ${modelCalls} model call(s), wall ${wallMs}ms; appended 1 scan-round line to ${asRel(root, carrier)}${resident ? " and advanced the production last-run" : " — MANUAL: the production last-run in .quay/routine-last-run.json was NOT advanced (this round did not move production's clock)"}${reservationsBlock === null ? "" : ` [24h ledger: cap ${reservationsBlock.cap}, used ${reservationsBlock.used_at_start} at round start, ${reservationsBlock.granted} reserved (reflection <= ${reservationsBlock.reflection_max_model_calls}, verify_reserve ${reservationsBlock.verify_reserve}), ${reservationsBlock.refused} refused${reservationsBlock.refusal_reason === null ? "" : ` (${reservationsBlock.refusal_reason})`}]`}${revertedNote}${legacyNote}${forcedPastDue ? " [--force: the due gate was ignored for this round only]" : ""}`,
+    `round ran (invoked_by:${invokedBy}, interval ${intervalMinutes}m): ingested ${ingested} experience(s)${storeStateClause()}, reflected ${reflection ? Number(reflection.decisions ?? 0) : 0} unit(s), minted ${candidates.length} candidate(s), ${verdicts.filter((v) => v.outcome === "evaluated").length} evaluated verdict(s) (${verdicts.filter((v) => v.correct === true).length} correct), ${promotions.length} promotion(s), ${retirements.length} retirement(s), ${modelCalls} model call(s), wall ${wallMs}ms; appended 1 scan-round line to ${asRel(root, carrier)}${resident ? " and advanced the production last-run" : " — MANUAL: the production last-run in .quay/routine-last-run.json was NOT advanced (this round did not move production's clock)"}${reservationsBlock === null ? "" : ` [24h ledger: cap ${reservationsBlock.cap}, used ${reservationsBlock.used_at_start} at round start, ${reservationsBlock.granted} reserved (reflection <= ${reservationsBlock.reflection_max_model_calls}, verify_reserve ${reservationsBlock.verify_reserve}), ${reservationsBlock.refused} refused${reservationsBlock.refusal_reason === null ? "" : ` (${reservationsBlock.refusal_reason})`}]`}${revertedNote}${legacyNote}${forcedPastDue ? " [--force: the due gate was ignored for this round only]" : ""}`,
   );
 }
 

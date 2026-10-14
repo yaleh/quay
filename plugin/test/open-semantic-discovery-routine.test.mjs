@@ -202,6 +202,10 @@ import * as realHyp from "../../docs/analysis/arch-hypothesis-generation.mjs";
 import * as realPortfolio from "../../docs/analysis/discovery-portfolio.mjs";
 import * as realLedger from "../../docs/analysis/discovery-experience-ledger.mjs";
 import * as realRegistry from "../../docs/analysis/discovery-method-registry.mjs";
+// The store's OWN validator, imported for REAL: the claim under test is «the records this round projects
+// into the evidence store are accepted by the PRODUCTION validator», and a locally re-stated schema would
+// agree with itself instead of with the store (硬规则 5b).
+import { validateRecord, EVIDENCE_STORE_REL } from "../../docs/analysis/architecture-evidence-store.mjs";
 // The PROMOTION PATH itself, imported for REAL: AC (e) is a claim about what THAT module decides, and a
 // re-implementation of its level rule here would agree with itself rather than with production.
 import { validateGeneralization, promotionStatusForLevel, PROMOTION_REPORT_ONLY_STATUS } from "../../docs/analysis/discovery-reflection.mjs";
@@ -447,6 +451,10 @@ function makeEngine({ hyps = HYPS, verdictFor = alwaysSupported } = {}) {
     // (硬规则 5b) — so the stub engine must carry it exactly as the real module does.
     preregRefusal: realHyp.preregRefusal,
     TOOL: realHyp.TOOL,
+    // ⛔ The engine's PRODUCTION validator + store writer, likewise carried whole: the routine projects
+    // its own clusters into the evidence store through this seam, and a stand-in would make the test
+    // agree with itself about what the store accepts.
+    emit: realHyp.emit,
     runInvestigator: investigatorStub(hyps, investigatorCalls),
     runVerifier: verifierStub(verifierCalls, verdictFor),
   };
@@ -1458,6 +1466,85 @@ test("ingestion (g) — refuted AND undetermined clusters are ingested as Experi
   const ing = carrierLines(ws).find((l) => l.kind === "ingestion");
   assert.deepEqual(ing.writes.map((w) => w.verdict).sort(), ["refuted", "undetermined"]);
   for (const w of ing.writes) assert.match(String(w.portfolio.skipped), /is-never-a-Portfolio-supported-row/);
+});
+
+// ── the EVIDENCE STORE projection: this routine is the ONE resident producer that store has ──────────
+// ⛔ THE DEFECT THIS PINS (gap-evidence-store-has-no-resident-producer-so-discovery-method-ingests-
+//    nothing-forever): `discovery_method`'s batch ingester reads `.quay/architecture-evidence-store.jsonl`
+//    and NO resident routine ever wrote it, so its `ingested 0` was permanent — a store that can never
+//    hold a record, reading exactly like an ordinary round with nothing new.
+test("EVIDENCE STORE — a round with verdict-bearing clusters APPENDS their real outcomes, validator-accepted", async () => {
+  const ws = makeWorkspace();
+  writeConfig(ws, cfgYaml());
+  const storeFile = path.join(ws, EVIDENCE_STORE_REL);
+  // The state this task is about, and the negative control for the whole test: BEFORE the round there is
+  // no store at all, and before this change a full round would have left it that way.
+  assert.equal(fs.existsSync(storeFile), false, "the fixture starts with NO evidence store");
+
+  const engine = makeEngine();
+  const fact = await runOpenSemanticDiscovery(ws, { ...runOpts(ws, { engine }), invokedBy: INVOKED_BY_MANUAL, spawnFn: countingSpawn(), pinFn: pinStub() });
+  assert.equal(fact.state, "verified", fact.reason);
+
+  // (1) THE ROUND'S OWN READING of what it projected, on the carrier.
+  const write = carrierLines(ws).find((l) => l.kind === "evidence-store-write");
+  assert.ok(write, "the round records its projection on the carrier");
+  const clusterRecs = productionClusters(ws);
+  assert.ok(clusterRecs.length > 0, "the fixture really produced production clusters");
+  assert.equal(write.attempted, clusterRecs.length * 2, "one hypothesis + one outcome per verdict-bearing cluster");
+  assert.equal(write.hypotheses, clusterRecs.length);
+  assert.equal(write.outcomes, clusterRecs.length);
+  assert.equal(write.refused, 0, `every projected record passed the PRODUCTION validator: ${JSON.stringify(write.refused_reasons)}`);
+  assert.equal(write.stored, write.attempted, "…and every accepted record really reached the store");
+  assert.deepEqual(write.store_refused, []);
+  assert.equal(write.error, null);
+  // The Fact carries the SAME tally the carrier line does, field for field (the carrier line adds only
+  // its own envelope), so «what the round reported» and «what it recorded» cannot drift.
+  for (const k of ["attempted", "hypotheses", "outcomes", "accepted", "refused", "stored", "error"]) {
+    assert.deepEqual(fact.value.evidence_store[k], write[k], `the Fact's evidence_store.${k} equals the carrier line's`);
+  }
+
+  // (2) THE STORE ITSELF — re-read from disk and re-validated with the production validator, so the claim
+  // is about the bytes that really landed rather than about what the round said it did.
+  const store = fs.readFileSync(storeFile, "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l));
+  assert.ok(store.length >= clusterRecs.length * 2, `the store holds the projected records (got ${store.length})`);
+  for (const rec of store) {
+    assert.equal(rec.kind === "hypothesis" || rec.kind === "outcome", true, `only the two projected kinds are written (got ${rec.kind})`);
+    const v = validateRecord(rec.kind, rec);
+    assert.equal(v.ok, true, `store record refused on read-back: ${JSON.stringify(v.reasons)}`);
+  }
+  const outcomes = store.filter((r) => r.kind === "outcome");
+  const ids = new Set(clusterRecs.map((c) => c.record_id));
+  for (const o of outcomes) {
+    assert.equal(ids.has(o.experiment_ref), true, "every outcome names a cluster record that is REALLY on the carrier");
+    assert.equal(["supported", "refuted", "undetermined"].includes(o.verdict), true, `…and carries a derived discovery verdict (got ${o.verdict})`);
+    assert.match(String(o.subject_key), /^[^|]+\|/, "…with the subject key the batch ingester reads components out of");
+  }
+  // The verdicts are the CLUSTERS' own — read off the same carrier records, not a second derivation.
+  const verdicts = new Map(clusterRecs.map((c) => [c.record_id, realLedger.clusterVerdict(c)]));
+  for (const o of outcomes) assert.equal(o.verdict, verdicts.get(o.experiment_ref), `the outcome's verdict is ${o.experiment_ref}'s own`);
+  // A SHADOW arm's clusters are measurements and must never reach the store (they reach neither ledger).
+  const shadowIds = new Set(carrierLines(ws).filter((l) => l.kind === "cluster" && l.shadow === true).map((l) => l.record_id));
+  for (const rec of store) assert.equal(shadowIds.has(rec.case_id), false, "no shadow cluster was projected");
+});
+
+test("EVIDENCE STORE — the projection is what makes the next discovery_method round ingest (end to end)", async () => {
+  const ws = makeWorkspace();
+  writeConfig(ws, cfgYaml());
+  const engine = makeEngine();
+  await runOpenSemanticDiscovery(ws, { ...runOpts(ws, { engine }), invokedBy: INVOKED_BY_MANUAL, spawnFn: countingSpawn(), pinFn: pinStub() });
+
+  // The store this round wrote is read by the ledger's OWN batch ingester — the reader production uses,
+  // not a stand-in — so «the zero stops being structural» is a reading rather than a claim.
+  const ingest = realLedger.ingestNewOutcomes(ws, { enabled: true });
+  assert.equal(ingest.ok, true, `the ingester refused: ${JSON.stringify(ingest.reasons)}`);
+  assert.ok(ingest.ingested >= 1, `the store's outcome records became Experiences (got ${ingest.ingested})`);
+  assert.equal(ingest.store_state, realLedger.STORE_STATE_INGESTED, "…and the ingester NAMES that state");
+  const experiences = experienceRecords(ws);
+  assert.ok(experiences.length >= 1, "the Experience ledger really holds the ingested entries");
+  for (const e of experiences) {
+    assert.equal(e.reported_by, "system", "the automatic source, not a human narration");
+    assert.ok(String(e.summary ?? "").trim().length >= 40, `each entry carries a real summary (got ${JSON.stringify(e.summary)})`);
+  }
 });
 
 // ── the ingestion's pure pieces ──────────────────────────────────────────────────────────────────────
