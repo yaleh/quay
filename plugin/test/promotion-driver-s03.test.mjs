@@ -29,7 +29,11 @@
 // SPLIT from promotion-driver.test.mjs by gap-suite-split-15-over-30s-test-files — shard 3/8 (6 tests). Shared fixtures: ./helpers/promotion-driver-harness.mjs (single source).
 
 import { test } from "node:test";
-import { DRIVER, assert, classifyCandidate, defaultPromotionCheckArgv, fs, isLlmInvocation, makeRoot, path, readRoundLines, readStatus, realReadyPoolCmd, runDriver, runPromotionRound, spawn, writeTask } from "./helpers/promotion-driver-harness.mjs";
+import { DRIVER, assert, classifyCandidate, defaultPromotionCheckArgv, fs, isLlmInvocation, makeRoot, path, readRoundLines, readStatus, realReadyPoolCmd, runDriver, runPromotionRound, writeTask } from "./helpers/promotion-driver-harness.mjs";
+// gap-test-spawned-resident-drivers-outlive-their-suite-no-process-group-reaping — the resident driver
+// below is spawned through the shared lifecycle helper (own process group + reaped on success, failure,
+// timeout AND cancellation), never a bare `spawn` that can outlive the suite.
+import { spawnKernelProcess } from "./helpers/spawn-kernel-process.mjs";
 
 test("AC2 — stop the driver (SIGTERM) ⇒ newly-eligible todo is not promoted; alive driver promotes it", async (t) => {
   const root = makeRoot("ac2");
@@ -37,7 +41,7 @@ test("AC2 — stop the driver (SIGTERM) ⇒ newly-eligible todo is not promoted;
   writeTask(root, "gap-eligible-1", "todo");
 
   const pidFile = path.join(root, "driver.pid");
-  const driver = spawn(process.execPath, [
+  const { child: driver } = spawnKernelProcess(t, process.execPath, [
     "--no-warnings", "--experimental-strip-types", DRIVER, "--root", root,
     "--ready-pool-cmd", realReadyPoolCmd(root),
     "--interval", "25", "--cap", "5", "--pid-file", pidFile, "--json",

@@ -137,7 +137,7 @@ import { runOnce, isRunnerInFlight, type SuiteState as TriggerSuiteState } from 
 // excluded). The runner snapshots that surface to DETECT a mid-round edit to a file the running round
 // reads — reuse the single source, never a hand-rolled copy (CLAUDE.md 硬规则 1).
 import { resolveAssertionSurface } from "./precommit-guard.ts";
-import { resolveKernelSibling, resolveKernelPluginRoot, sharedHostCeilingBytes, listSharedHostScopes } from "./driver-runtime.ts";
+import { resolveKernelSibling, resolveKernelPluginRoot, sharedHostCeilingBytes, listSharedHostScopes, procStartTimeMs } from "./driver-runtime.ts";
 import { getLoad1 } from "./checker-cost.ts";
 import { scanFamily, kindForFile } from "./known-load-sensitive.ts";
 // gap-leak-residue-per-run-namespace-isolation — the runner-level unified cleanup REUSES the
@@ -1696,6 +1696,129 @@ export function recordSuiteNotRun(logFile: string, branch: string, detail: strin
   );
 }
 
+// ── suite-end leaked-process sweep ───────────────────────────────────────────────────────────────────
+// gap-test-spawned-resident-drivers-outlive-their-suite-no-process-group-reaping.
+// Measured 2026-10-14: a TEST-spawned resident driver (a fixture `promotion-driver.ts --interval 25`)
+// kept a whole suite alive for 18 hours — its `node --test` parent and the runner never exited because
+// a live descendant held the stdio pipes, and the driver itself was invisible to the worktree-cwd
+// reaper (its task had landed `done` and the worktree was gone). The suite's own result could not
+// reflect the hang, because the fan-in had already moved on.
+//
+// The backstop below is the runner-side half of the fix (the test-side half is
+// `plugin/test/helpers/spawn-kernel-process.mjs`): after the DIRECT suite child exits, enumerate every
+// survivor still in the suite's OWN process group, kill the group, and record what was there. A round
+// that leaked is NOT green — it is `not-evaluated: leaked-processes (n)`.
+//
+// WHY THE PROCESS GROUP (and deliberately NOT the cgroup): the suite child is spawned `detached`, so
+// it leads a group that can only contain ITS descendants — killing `-pgid` can never reach a
+// production process (the task's "do not touch production drivers" constraint). A cgroup fallback was
+// rejected: without a real `systemd-run --scope`, resolving "the suite's cgroup" returns the RUNNER'S
+// OWN cgroup (the user session's), whose sweep would signal unrelated processes on the host.
+export interface LeakedProcess {
+  pid: number;
+  ppid: number;
+  pgid: number;
+  /** ISO start time from `/proc/<pid>/stat`; null when unreadable — never a fabricated value. */
+  startedAt: string | null;
+  cmdline: string;
+  cwd: string | null;
+}
+
+/** Linger after the direct child's `exit` before sweeping, so a normally-closing child's pipes drain
+ *  and `close` still wins the race in the (overwhelmingly common) no-leak case — zero added latency. */
+export const LEAK_SWEEP_LINGER_MS = Number(process.env.QUAY_TEST_LEAK_SWEEP_LINGER_MS ?? 250);
+/** Bound on the post-sweep wait for `close`: a leaked pipe holder can no longer hang the round. */
+export const LEAK_SWEEP_CLOSE_BOUND_MS = Number(process.env.QUAY_TEST_LEAK_SWEEP_CLOSE_BOUND_MS ?? 5000);
+/** Bounded TERM→KILL grace for the leaked group (the Plan's "killed by group, bounded wait, KILL"). */
+export const LEAK_SWEEP_TERM_GRACE_MS = 1000;
+
+const leakSweepDelay = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+
+/** Read ONE `/proc/<pid>` record. Field indices are into the post-`comm` remainder: field 3 (state) is
+ *  index 0, so ppid (field 4) is index 1 and pgrp (field 5) is index 2. */
+function readProcRecord(pid: number): LeakedProcess | null {
+  let stat: string;
+  try {
+    stat = fs.readFileSync(`/proc/${pid}/stat`, "utf8");
+  } catch {
+    return null; // raced to gone
+  }
+  const close = stat.lastIndexOf(")");
+  if (close < 0) return null;
+  const rest = stat.slice(close + 2).split(" ");
+  const ppid = Number(rest[1]);
+  const pgid = Number(rest[2]);
+  if (!Number.isInteger(ppid) || !Number.isInteger(pgid)) return null;
+  let cmdline = "";
+  try {
+    cmdline = fs.readFileSync(`/proc/${pid}/cmdline`, "utf8").split("\0").filter(Boolean).join(" ");
+  } catch { /* unreadable ⇒ empty, not fabricated */ }
+  let cwd: string | null = null;
+  try {
+    cwd = fs.readlinkSync(`/proc/${pid}/cwd`);
+  } catch {
+    cwd = null; // e.g. a deleted cwd — exactly the leak's own signature
+  }
+  return { pid, ppid, pgid, startedAt: readProcessStartIso(pid), cmdline, cwd };
+}
+
+/** Process start time as ISO, from `/proc/<pid>/stat` (the ONE derivation lives in driver-runtime.ts —
+ *  ⛔ no second implementation, and no `ps` subprocess on this hot path). An unreadable reading is
+ *  null (缺值 = 未查), never a 0. */
+function readProcessStartIso(pid: number): string | null {
+  const ms = procStartTimeMs(pid);
+  return ms === null ? null : new Date(ms).toISOString();
+}
+
+/** Every live process in the group `pgid`, excluding the runner itself and `exclude`. */
+export function listProcessGroupMembers(pgid: number, exclude: ReadonlySet<number> = new Set()): LeakedProcess[] {
+  const out: LeakedProcess[] = [];
+  if (!Number.isInteger(pgid) || pgid <= 1) return out;
+  let entries: string[];
+  try {
+    entries = fs.readdirSync("/proc");
+  } catch {
+    return out;
+  }
+  for (const name of entries) {
+    if (!/^\d+$/.test(name)) continue;
+    const pid = Number(name);
+    if (pid === process.pid || exclude.has(pid)) continue;
+    const rec = readProcRecord(pid);
+    if (rec && rec.pgid === pgid) out.push(rec);
+  }
+  return out;
+}
+
+export interface LeakSweepResult {
+  leaked: LeakedProcess[];
+  /** True iff the group was emptied within the bounds. false is the falsifiable "it survived" reading. */
+  reaped: boolean;
+}
+
+/**
+ * Enumerate the suite's own process group, TERM it, wait a bounded grace, KILL it, and report what was
+ * there. Called ONLY with the suite child's pgid (a group we created) — this never signals anything
+ * outside the round's own descendants.
+ */
+export async function reapLeakedSuiteProcesses(
+  pgid: number,
+  opts: { termGraceMs?: number } = {},
+): Promise<LeakSweepResult> {
+  const leaked = listProcessGroupMembers(pgid);
+  if (leaked.length === 0) return { leaked: [], reaped: true };
+  const termGraceMs = opts.termGraceMs ?? LEAK_SWEEP_TERM_GRACE_MS;
+  try { process.kill(-pgid, "SIGTERM"); } catch { /* raced to gone */ }
+  const deadline = Date.now() + termGraceMs;
+  while (Date.now() < deadline && listProcessGroupMembers(pgid).length > 0) await leakSweepDelay(25);
+  if (listProcessGroupMembers(pgid).length > 0) {
+    try { process.kill(-pgid, "SIGKILL"); } catch { /* raced to gone */ }
+    const killDeadline = Date.now() + 2000;
+    while (Date.now() < killDeadline && listProcessGroupMembers(pgid).length > 0) await leakSweepDelay(25);
+  }
+  return { leaked, reaped: listProcessGroupMembers(pgid).length === 0 };
+}
+
 // ── run ─────────────────────────────────────────────────────────────────────────────────────────────
 
 export async function run(argv: string[]): Promise<number> {
@@ -2430,6 +2553,23 @@ export async function run(argv: string[]): Promise<number> {
   // NOT set one (a real systemd run never has this env set, and a seam test never enters the
   // useSystemdRun branch — the two are mutually exclusive).
   if (!roundScopeUnit) roundScopeUnit = process.env.QUAY_TEST_SCOPE_UNIT ?? null;
+
+  // ── lifecycle capture, mounted IMMEDIATELY after the spawn ────────────────────────────────────────
+  // gap-test-spawned-resident-drivers-outlive-their-suite-no-process-group-reaping. The runner does
+  // hundreds of lines of SYNCHRONOUS work between the spawn and the verdict path (git reads, samplers,
+  // assertion-surface snapshots). A fast suite can exit inside that window, and Node does NOT replay
+  // `exit`/`close` to a listener attached afterwards (the same race `waitExit` in
+  // plugin/test/helpers/full-suite-runner-harness.mjs documents) — a missed event means the round
+  // never resolves and the runner hangs. Mounting both listeners here closes the window; the cached
+  // exit properties are the belt-and-braces half for a child that somehow already died.
+  const childExited = new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((resolve) => {
+    const done = () => resolve({ code: child.exitCode, signal: child.signalCode });
+    child.once("exit", done);
+    if (child.exitCode !== null || child.signalCode !== null) done();
+  });
+  const childClosed = new Promise<void>((resolve) => {
+    child.once("close", () => resolve());
+  });
 
   // gap-phase-boundary-differential-accounting — initialize the per-phase differential accumulator
   // with the SUITE CHILD's pid (the counter source: the child's cgroup accumulates the phase CPU).
@@ -3174,10 +3314,42 @@ export async function run(argv: string[]): Promise<number> {
     process.stderr.write(`full-suite-runner: spawn error -> state=red reason=aborted\n  ${String(err)}\n`);
   });
 
-  const exit: { code: number | null; signal: NodeJS.Signals | null } = await new Promise((resolve) => {
-    child.once("close", (code, signal) => resolve({ code, signal }));
-  });
+  // ── the round is gated on the DIRECT child's `exit`, not on an unbounded `close` ─────────────────
+  // `close` ALSO requires EOF on our stdio pipes, so a leaked descendant that inherited them keeps
+  // `close` pending FOREVER — the measured 18h round: the runner itself never got past this await.
+  // So: wait for `exit` (which always fires when the direct child dies), linger briefly (a normally
+  // closing child drains its pipes in milliseconds — zero added latency in the no-leak case), then
+  // sweep the suite's own process group. A survivor can no longer hold the round hostage.
+  const exit = await childExited;
   const exitCode = exit.code;
+  const suitePgid = child.pid;
+  let closedAfterExit = false;
+  const closed = childClosed.then(() => { closedAfterExit = true; });
+  await Promise.race([closed, leakSweepDelay(LEAK_SWEEP_LINGER_MS)]);
+  const leakSweep: LeakSweepResult =
+    suitePgid === undefined ? { leaked: [], reaped: true } : await reapLeakedSuiteProcesses(suitePgid);
+  const leakedProcesses = leakSweep.leaked;
+  if (!closedAfterExit) {
+    // The sweep has emptied the group, so `close` should follow promptly; bound it anyway (a pipe
+    // holder outside our group cannot be seen, but it must not be able to hang the round either).
+    await Promise.race([closed, leakSweepDelay(LEAK_SWEEP_CLOSE_BOUND_MS)]);
+    try { child.stdout?.destroy(); } catch { /* already closed */ }
+    try { child.stderr?.destroy(); } catch { /* already closed */ }
+  }
+  // The CLEAN half of the reading is durable here (not as a second state key — the green key set is
+  // pinned): round after round, the sweep self-reports that it ran and what it found.
+  process.stderr.write(
+    `full-suite-runner: leak sweep — ${leakedProcesses.length} survivor(s) in the suite's own process group ${suitePgid} (reaped=${leakSweep.reaped})\n`,
+  );
+  if (leakedProcesses.length > 0) {
+    process.stderr.write(
+      `full-suite-runner: LEAKED ${leakedProcesses.length} process(es) in the suite's own process group ${suitePgid} ` +
+        `(reaped=${leakSweep.reaped}) -> the round is not-evaluated, NOT green:\n` +
+        leakedProcesses
+          .map((p) => `  pid=${p.pid} ppid=${p.ppid} startedAt=${p.startedAt ?? "unknown"} cwd=${p.cwd ?? "unknown"} cmd=${p.cmdline}\n`)
+          .join(""),
+    );
+  }
 
   // gap-full-suite-scope-oom-policy-stops-whole-suite-unattributable — take the FINAL cgroup reading
   // (peak / memory.events) before the transient scope unit is destroyed, and land the per-run evidence
@@ -3188,8 +3360,9 @@ export async function run(argv: string[]): Promise<number> {
   }
 
   runDone = true;
-  // The suite child closed on its own — the liveness guards are no longer needed; clear them all so a
-  // stale timer can't fire after a normal completion (AC2/AC3 — the guards are only for a HUNG child).
+  // The direct suite child has exited and its group was swept — the liveness guards are no longer
+  // needed; clear them all so a stale timer can't fire after a normal completion (AC2/AC3 — the guards
+  // are only for a HUNG child).
   clearTimeout(maxRuntimeTimer);
   clearInterval(silenceTimer);
   if (redGraceTimer) clearTimeout(redGraceTimer);
@@ -3318,7 +3491,13 @@ export async function run(argv: string[]): Promise<number> {
   // would-be-green certificate, never the failed verdict).
   const treeMutated = treeMutatedMidRound === true;
   const voided = testsGreen && treeMutated;
-  const green = testsGreen && !treeMutated;
+  // gap-test-spawned-resident-drivers-outlive-their-suite-no-process-group-reaping — a round that
+  // LEAKED processes produced no verdict anyone can trust: the surviving fixture driver was still
+  // consuming CPU inside the round's own group while the result was being computed. Its tests may all
+  // have passed, but the round is `not-evaluated: leaked-processes (n)` — NEVER green (硬规则 3b: a
+  // reading we could not take must not be reported in the same shape as a qualified pass).
+  const leakedProcessesFound = leakedProcesses.length > 0;
+  const green = testsGreen && !treeMutated && !leakedProcessesFound;
   // No correctness conclusion (abort) iff: an abort marker was seen, OR the child was killed by a
   // signal (code null), OR it never spawned. A REAL failure conclusion (redDetected) — and now a
   // static-check conclusion (staticCheckDetected) — is never downgraded by an earlier abort marker:
@@ -3342,7 +3521,13 @@ export async function run(argv: string[]): Promise<number> {
             ? "infra-error" // the DIRECT test.sh child was signal-killed ⇒ environment problem (AC2, gap-infra-error-false-positive-from-test-internal-kill)
             : noCorrectnessConclusion
               ? "aborted"
-              : "failed";
+              // gap-test-spawned-resident-drivers-outlive-their-suite-no-process-group-reaping — a
+              // leaked-process round gets the "no correctness conclusion" reason, NOT the fail-closed
+              // "failed" catch-all: the round is not a code failure, so it must not drive the
+              // stop-dispatch veto that `failed` does. Its own value rides `notEvaluated` below.
+              : leakedProcessesFound
+                ? "aborted"
+                : "failed";
   // AC4 candidate B — on a static-check red, failures[] carries the violation details (task + type)
   // AND the fail-closed checkers (gap-static-check-red-failures-capture-only-task-contract-shape AC1:
   // the round-84 真因 — a checker that fail-closed has ZERO violation lines, so the old capture
@@ -3382,12 +3567,27 @@ export async function run(argv: string[]): Promise<number> {
     : staticCheckDetected && !redDetected
       ? { failures: finalFailures }
       : segmentedFailureFields(finalFailures);
-  const finalState: SuiteState = green
+  // gap-test-spawned-resident-drivers-outlive-their-suite-no-process-group-reaping — the sweep's
+  // reading rides the terminal state ONLY when it has something to say, the same absent-unless-
+  // applicable contract this shape already uses for `void` and `staticCheck` (a green state's key set
+  // is pinned by full-suite-runner-s01.test.mjs and must stay byte-identical, hard rule 5b territory:
+  // the clean half of the reading is durable in the run's stderr line written at the sweep, not as a
+  // second key on every round). `notEvaluated` is its own value, so a leaked round can never be read
+  // as a qualified green OR as a code failure.
+  type SuiteStateWithLeakSweep = SuiteState & {
+    leakedProcesses?: LeakedProcess[];
+    notEvaluated?: string;
+  };
+  const leakedFields = leakedProcessesFound
+    ? { leakedProcesses, notEvaluated: `leaked-processes (${leakedProcesses.length})` }
+    : {};
+  const finalState: SuiteStateWithLeakSweep = green
     ? {
         state: "green",
         ...base,
         finishedAt,
         durationMs,
+        ...leakedFields,
         // gap-not-evaluated-checkers-never-persisted — ALWAYS present on a terminal state (empty array
         // = "no inert checker this round", DISTINGUISHABLE from an absent field = "dimension never
         // recorded", hard rule 3b). On green this is the ONLY place an inert guard is visible (it exits
@@ -3415,6 +3615,7 @@ export async function run(argv: string[]): Promise<number> {
         ...base,
         finishedAt,
         durationMs,
+        ...leakedFields,
         // gap-not-evaluated-checkers-never-persisted — same as the green branch: ALWAYS present on a
         // terminal state, so a red round ALSO names any inert checker that ran alongside the failure
         // (a red does not erase the not-evaluated signal).
@@ -3646,6 +3847,11 @@ export async function run(argv: string[]): Promise<number> {
     // carries: this round's tests PASSED but its tree was MUTATED MID-ROUND ⇒ a VOIDED certificate
     // (state=red, reason=infra-error). Lets the round sequence distinguish voided-green from failed.
     ...(voided ? { void: true } : {}),
+    // gap-test-spawned-resident-drivers-outlive-their-suite-no-process-group-reaping — the sweep's
+    // reading rides the round's ledger row too (the state file is overwritten each round; the ledger
+    // is the queryable sequence). Present only when something leaked — a clean round's row keeps the
+    // established absent-field contract.
+    ...(leakedProcessesFound ? { leakedProcesses, notEvaluated: `leaked-processes (${leakedProcesses.length})` } : {}),
     ...(roundGate ? { gate: roundGate } : {}),
     runner: base.runner,
     scope,
