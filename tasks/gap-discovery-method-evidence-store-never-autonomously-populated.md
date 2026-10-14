@@ -2,7 +2,7 @@
 id: gap-discovery-method-evidence-store-never-autonomously-populated
 title: discovery_method 的 EVIDENCE_STORE_MISSING 不是启动期暂态——没有任何常驻 routine 会写
   architecture-evidence-store.jsonl
-status: todo
+status: ready
 labels:
   - gap
 parent: null
