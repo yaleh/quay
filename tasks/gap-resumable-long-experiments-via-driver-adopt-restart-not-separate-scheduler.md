@@ -1,7 +1,7 @@
 ---
 id: gap-resumable-long-experiments-via-driver-adopt-restart-not-separate-scheduler
 title: 可恢复长实验能力：复用 worker-driver adopt/restart，manifest+checkpoint+身份校验+短样本先验，不另造调度器
-status: todo
+status: ready
 labels:
   - gap
 parent: null
