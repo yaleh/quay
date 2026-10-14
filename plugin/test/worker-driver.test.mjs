@@ -186,7 +186,10 @@ import { bundleEntries } from "../../packages/quay/scripts/build-plugin-dist.mjs
 import { ensureBranchModel } from "../../packages/quay/src/branch-model.ts";
 // gap-worker-prompt-omits-anti-drift-pre-exit-check…：AC1 的期望 argv 必须与实现【同源】解析
 // （kernelSiblingArgv = fan-in 的 gateArgv 用的同一个函数），⛔ 不测试里手写一份路径。
-import { kernelSiblingArgv } from "../scripts/driver-runtime.ts";
+// gap-worker-kind-stop-waits-for-all-in-flight-workers-instead-of-detaching-for-adoption：`recordKindStop`
+// 是 `stop --kind worker` 的【写侧原语】——夹具经它触发停机，⛔ 不手写一份 JSON 形状（改天写侧变了，
+// 手写的夹具会继续「通过」，测的就不是那条通道了）。
+import { kernelSiblingArgv, recordKindStop, clearKindStop } from "../scripts/driver-runtime.ts";
 
 import {
   DRIVER,
@@ -203,6 +206,7 @@ import {
   writeTaskFile,
   writeTouchedTask,
   rmSafe,
+  WAIT_BASE_MS,
 } from "./helpers/worker-driver-harness.mjs";
 
 // gap-arch-worker-fan-in-extract-from-worker-driver：机械 fan-in 区域（fail()/step()/flipTaskDone 的
@@ -2678,6 +2682,129 @@ test("AC1 — halt mid-run stops NEW dispatch only; the in-flight worker complet
   const fast = records.find((r) => r.task === "gap-fast");
   assert.equal(slow.final_state, "completed", "AC1: the in-flight worker was NOT killed — it completed");
   assert.equal(fast.final_state, "not-dispatched", "AC1: the NEW dispatch was stopped after halt");
+});
+
+// ── gap-worker-kind-stop-waits-for-all-in-flight-workers-instead-of-detaching-for-adoption ──────────
+//
+// kind 停机（`stop|restart --kind worker`）过去要等**每个**在飞 worker 会话跑完（派发环只在
+// `running.length === 0` 时退出）⇒ 只要有一个在飞就必然 `stop-failed`（实测 60289ms）。
+// 修后：在飞 worker **脱钩**留在原地（独立 OS 进程 + 派发记录已落盘），循环立刻退环，归宿交给
+// 下一个循环的 reconcile（adopt → 退出后跑一次退出后流水线）。
+
+/** 一个「在飞 worker」夹具：长睡进程，cmdline 含 worker 名（`quay-test-worker`，profiles.yml 里那个）
+ *  与 task id ⇒ `classifyOrphanDispatch` 认得出它、会走 adopt 而不是 finalize。 */
+const KINDSTOP_TASK = "gap-kindstop-inflight";
+
+function startKindStopLoop(root, taskId) {
+  return spawnResident(root, [
+    "--ready-pool-cmd", `node -e console.log(JSON.stringify({ready:['${taskId}'],pool:1}))`,
+    "--selector-cmd", `node -e console.log('${taskId}')`,
+    "--resource-gate-cmd", "node -e process.exit(0)",
+    "--worker-cmd-exact", `node -e setTimeout(()=>{},60000) quay-test-worker ${taskId}`,
+    "--interval", "20",
+    "--reconcile-interval", "1",
+  ]);
+}
+
+/** 铺一个 scratch root + 一个任务，并起环直到 worker 真派出去。返回 { root, drv, workerPid }。 */
+async function dispatchOneInFlightWorker(t, tag) {
+  const root = makeGitRoot(tag);
+  const workerPids = [];
+  t.after(() => {
+    for (const pid of workerPids) { try { process.kill(pid, "SIGKILL"); } catch { /* gone */ } }
+    rmSafe(root);
+  });
+  writeProfileCarrier(root);
+  writeTaskFile(root, KINDSTOP_TASK, "ready");
+  const drv = startKindStopLoop(root, KINDSTOP_TASK);
+  // 常驻驱动必须**无条件**停（断言失败时测试体末尾那句 drv.stop() 不会跑到 —— 漏掉它，驱动会持着
+  // 本进程的 stdout 管道让整个测试文件永不退出）。stop() 幂等，测试体末尾再 await 一次只是等它收尾。
+  t.after(async () => { await drv.stop(); });
+  await waitFor(
+    () => drv.events().some((e) => e.event === "worker-spawned" && e.task === KINDSTOP_TASK),
+    WAIT_BASE_MS, "the fixture worker to be dispatched",
+  );
+  const workerPid = drv.events().find((e) => e.event === "worker-spawned" && e.task === KINDSTOP_TASK).worker_pid;
+  assert.ok(Number.isInteger(workerPid) && workerPid > 0, "the dispatch record names a real worker pid");
+  workerPids.push(workerPid);
+  return { root, drv, workerPid };
+}
+
+const pidAlive = (pid) => { try { process.kill(pid, 0); return true; } catch { return false; } };
+
+test("kind 停机 — 在飞 worker 被脱钩留在原地（⛔ 不杀、⛔ 不写 outcome），派发记录保留，循环秒级退环", async (t) => {
+  const { root, drv, workerPid } = await dispatchOneInFlightWorker(t, "kindstop-detach");
+  const startedAt = Date.now();
+  // `stop --kind worker` 的写侧原语（盘上停机记录 —— shipped 产物上唯一的跨 bundle 停机通道）。
+  recordKindStop(root, "worker", "worker-driver.test");
+  await waitFor(() => drv.child.exitCode !== null, WAIT_BASE_MS, "the loop to return after the kind stop");
+  const elapsedMs = Date.now() - startedAt;
+  assert.equal(drv.child.exitCode, 0, "a kind stop is a clean loop return (⛔ not a crash)");
+  assert.ok(elapsedMs < 10_000, `the loop must return promptly, ⛔ not wait the worker out (took ${elapsedMs}ms; the fixture sleeps 60s)`);
+  assert.equal(pidAlive(workerPid), true, "⛔ the in-flight worker SURVIVES the kind stop (§6.9 inv.3)");
+
+  // 退环决定的生产载体（生产 driver argv 无 --json ⇒ round 记录是唯一可观测面）。
+  const rounds = readRoundLines(root);
+  const last = rounds[rounds.length - 1];
+  assert.deepEqual(last.detached_workers, [KINDSTOP_TASK], "the round record names the detached worker");
+  assert.deepEqual(last.undetachable_workers, [], "nothing was mid-pipeline");
+  // 派发记录必须留住 —— 下一个循环的 reconcile 靠它 adopt。
+  assert.ok(readDispatchStore(dispatchStoreFile(root))[KINDSTOP_TASK], "the dispatch record survives (it is the next loop's adopt input)");
+  assert.deepEqual(
+    readOutcomeLines(root).filter((o) => o.task === KINDSTOP_TASK), [],
+    "⛔ the OLD loop writes NO outcome for a detached worker (its post-exit pipeline belongs to the adopter)",
+  );
+  await drv.stop();
+});
+
+test("被脱钩的 worker 由下一个循环 adopt；退出后其退出后流水线恰好跑一次（⛔ 不双派发、⛔ 不双 outcome）", async (t) => {
+  const { root, drv, workerPid } = await dispatchOneInFlightWorker(t, "kindstop-adopt");
+  recordKindStop(root, "worker", "worker-driver.test");
+  await waitFor(() => drv.child.exitCode !== null, WAIT_BASE_MS, "loop #1 to return after the kind stop");
+  assert.equal(pidAlive(workerPid), true, "precondition: the detached worker is still alive across the restart");
+
+  // 「重启」= stop 的写侧（停机记录）+ start 的写侧（清掉该记录）——⛔ 不能只起第二个循环：停机记录
+  // 还在时下一个循环会照它立刻脱钩退环（那正是停机记录该有的语义，是 `start` 负责清它）。
+  clearKindStop(root, "worker");
+  const drv2 = startKindStopLoop(root, KINDSTOP_TASK);
+  t.after(async () => { await drv2.stop(); });
+  await waitFor(
+    () => drv2.events().some((e) => e.event === "orphan-adopted" && e.task === KINDSTOP_TASK),
+    WAIT_BASE_MS, "the new loop to adopt the detached worker",
+  );
+  assert.equal(
+    drv2.events().some((e) => e.event === "worker-spawned" && e.task === KINDSTOP_TASK), false,
+    "⛔ no double dispatch: the adopted task is excluded from the selector",
+  );
+
+  // worker 退出 ⇒ 退出后流水线（机械 fan-in 的入口）由**接管它的**循环恰好跑一次。
+  process.kill(workerPid, "SIGKILL");
+  await waitFor(() => readOutcomeLines(root).some((o) => o.task === KINDSTOP_TASK), WAIT_BASE_MS, "the adopted worker's outcome");
+  const outcomes = readOutcomeLines(root).filter((o) => o.task === KINDSTOP_TASK);
+  assert.equal(outcomes.length, 1, `⛔ exactly ONE outcome for the task (got ${outcomes.length} — two would mean both loops ran the exit pipeline)`);
+  assert.equal(outcomes[0].adopted_after_exit, true, "the outcome came from the ADOPTING loop's post-exit pipeline");
+  assert.equal(outcomes[0].exit_code, null, "the exit code was never observed ⇒ that stays visible (硬规则 3b)");
+  await waitFor(() => readDispatchStore(dispatchStoreFile(root))[KINDSTOP_TASK] === undefined, WAIT_BASE_MS, "the dispatch record to be cleared");
+  await drv2.stop();
+});
+
+test("负控制 — drain/halt（⛔ 无停机记录）不脱钩：循环等在飞跑完并自己记 outcome（既有语义不变）", async (t) => {
+  const { root, drv, workerPid } = await dispatchOneInFlightWorker(t, "kindstop-drain");
+  // drain = halt 语义（`quay driver drain --kind worker` 的写侧）：⛔ 不是 kind 停机记录。
+  writeControlState(root, applyHalt(defaultControlState(), "quay-driver-drain", true));
+  await new Promise((r) => setTimeout(r, 3000));
+  assert.equal(drv.child.exitCode, null, "drain does NOT end the loop while a worker is in flight (it is not a kind stop)");
+  const mid = readRoundLines(root).at(-1);
+  assert.deepEqual(mid.detached_workers, [], "⛔ drain must not detach (it is the explicit 'finish what is in flight' verb)");
+  assert.equal(pidAlive(workerPid), true, "drain never kills the in-flight worker");
+
+  // 在飞结束 ⇒ 由本循环自己收尾（写 outcome），然后才退环。
+  process.kill(workerPid, "SIGKILL");
+  await waitFor(() => drv.child.exitCode !== null, WAIT_BASE_MS, "the loop to return once the in-flight worker is done");
+  const outcomes = readOutcomeLines(root).filter((o) => o.task === KINDSTOP_TASK);
+  assert.equal(outcomes.length, 1, "the loop that owned the worker wrote its outcome itself");
+  assert.equal(outcomes[0].final_state, "killed", "SIGKILL is booked as killed by the OWNING loop (⛔ not swallowed)");
+  await drv.stop();
 });
 
 // ── AC2/AC3（阶段 3, HTTP 层能取假）: 不带身份 ⇒ 拒；header/tool 参数 ⇒ 可核放行 ───────────────────
