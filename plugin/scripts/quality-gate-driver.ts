@@ -1598,7 +1598,13 @@ function noteLateSettlement(routineName: string, runP: Promise<Fact<unknown>[]>)
  *  多一条 racer——轮询停机标志，读到停机就 `abort()` 传给例程的 `signal`（把停机**传播成取消**），
  *  然后给例程 `graceMs` 自己收尾。例程在宽限内 settle ⇒ 交出**它自己的** Facts（它知道自己持久化了
  *  什么，调用方不知道）；过时不候 ⇒ 交一条 `observed:false` 的放弃 Fact。⇒ 停机延迟有一个**不依赖
- *  例程行为**的上界 = 一个轮询周期 + 宽限。⛔ `stop` 缺省 undefined ⇒ 与从前逐字相同。 */
+ *  例程行为**的上界 = 一个轮询周期 + 宽限。⛔ `stop` 缺省 undefined ⇒ 与从前逐字相同。
+ *
+ *  **进程存活不变式（`e18ec4b04` 的回归，勿再破）**：本函数加在事件循环上的**每一条**定时器，
+ *  `unref` 与否都要问一句「它凭什么是这个进程活着的理由？」。**看门狗**是——它有界且其产物是一轮的
+ *  结论；**停机探针**不是——它无界（见 `armStopPoll`），把它 ref 住就等于对任何「例程永不 settle 且
+ *  停机永不到来」的等待说「进程不许退出」。判别性代价：测试体跑完而进程不退 ⇒ `node --test` 挂死该
+ *  文件 ⇒ 全量套件静默停摆（硬规则 4b：观测器不得自己成为被测对象仍然活着的证据）。 */
 async function runRoutineWithWatchdog(
   r: RoutineSpec,
   ctx: { halted: boolean },
@@ -1637,20 +1643,46 @@ async function runRoutineWithWatchdog(
         if (stopGrace) { clearTimeout(stopGrace); stopGrace = null; }
         resolveStop?.(facts);
       };
+      /** 重新排定下一次停机探针。
+       *
+       *  ⛔ `unref()`：这条探针链是**纯观测**，⛔ 不得成为「这个进程为什么还活着」的答案。
+       *
+       *  WHY（本文件自 `e18ec4b04` 起挂起、4/4 全量套件命中的**根因**）：与看门狗不同，这条链是
+       *  **无界**的——例程可能永远不 settle（那正是看门狗存在的理由），而停机若永不到来，`tick`
+       *  就永远重排自己。`e18ec4b04` 建了这条链却没 `unref()` ⇒ 该 handle 成了事件循环的**存活
+       *  锚点**。判别性后果不在「测试逻辑」而在「进程退出」：`quality-gate-driver-loop-watchdog.test.mjs`
+       *  的负控制**故意**让 race 永不 settle（例程永不 settle + 看门狗 Infinity），于是 `finally`
+       *  那一组 `clearTimeout` 永远轮不到 ⇒ 四条断言**全部通过**、测试体已经跑完，node 进程却
+       *  **永不退出** ⇒ `node --test` 永远不结束这个文件 ⇒ 套件静默挂死（不是断言超时，也不是 CPU
+       *  自旋：实测挂起的 `node --test` 子进程 0% CPU）。观测器不得自己成为「被测对象仍然活着」的
+       *  证据（硬规则 4b）。
+       *
+       *  ⛔ 不改成「给探针链加一个上界」（Plan 步 3 禁的是抬高字面量，但更根本的是：**没有正确的
+       *  上界**）——例程合法在飞的时间就是看门狗的缺省 30min，而负控制里它是 Infinity；任何比它小的
+       *  上界都会把「还在跑」误判成「可以放它走」。要表达「不限制进程存活」的正确方式是**在机制上
+       *  不参与进程存活判定**，即 `unref()`，而不是挑一个数字。
+       *
+       *  ⛔ 生产不变：轮内的存活由**看门狗**（缺省 `ROUTINE_WATCHDOG_MS_DEFAULT` 有限 ⇒ 仍是 ref 态）
+       *  持有，轮间由 `stopCtl.sleep` 持有；停机探针只是搭在这二者之上的观测，本来就不是 liveness 的
+       *  来源。`stopGrace` 保持 ref 态——它有界且**必须**能 fire（它的产物是那条放弃 Fact）。 */
+      const armStopPoll = (): void => {
+        stopPoll = setTimeout(tick, Math.max(1, coop.pollMs));
+        if (typeof stopPoll.unref === "function") stopPoll.unref();
+      };
+      const tick = (): void => {
+        if (stopSettled) return;
+        if (!coop.isStopRequested()) { armStopPoll(); return; }
+        ac.abort();
+        // 例程若在宽限内自己收尾 ⇒ 交出**它自己的** Facts（应是 not-evaluated: stopped-mid-round）。
+        void runP.then((facts) => settleStop(facts), () => { /* reject 由 race 的 runP 支上抛 */ });
+        stopGrace = setTimeout(() => {
+          settleStop([abandonedMidRoundFact(r.name, coop.graceMs)]);
+          noteLateSettlement(r.name, runP);
+        }, Math.max(0, coop.graceMs));
+      };
       racers.push(new Promise<Fact<unknown>[]>((resolve) => {
         resolveStop = resolve;
-        const tick = (): void => {
-          if (stopSettled) return;
-          if (!coop.isStopRequested()) { stopPoll = setTimeout(tick, Math.max(1, coop.pollMs)); return; }
-          ac.abort();
-          // 例程若在宽限内自己收尾 ⇒ 交出**它自己的** Facts（应是 not-evaluated: stopped-mid-round）。
-          void runP.then((facts) => settleStop(facts), () => { /* reject 由 race 的 runP 支上抛 */ });
-          stopGrace = setTimeout(() => {
-            settleStop([abandonedMidRoundFact(r.name, coop.graceMs)]);
-            noteLateSettlement(r.name, runP);
-          }, Math.max(0, coop.graceMs));
-        };
-        stopPoll = setTimeout(tick, Math.max(1, coop.pollMs));
+        armStopPoll();
       }));
     }
     if (racers.length === 0) return await runP;
