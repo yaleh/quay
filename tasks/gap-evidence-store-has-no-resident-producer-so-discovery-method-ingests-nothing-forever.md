@@ -171,7 +171,7 @@ round ran (invoked_by:resident-driver, interval 360m): ingested 0 experience(s) 
 ingested={"experiences":0,"scanned":0,"duplicates":0,"advanced_to":3,"store_bootstrapped":false,"store_records":3,"store_state":"no-new-since-watermark"}
 ```
 
-Both rounds `ingested 0`; they are two different readings. Distinct `store_state`, distinct `store_records`, and two different sentences in the Fact — neither reachable from the other. (`advanced_to` 0 vs 3 is the watermark half of the same distinction.) The pre-fix kernel has nore of this: its `ingested` block stops at `store_bootstrapped` and both rounds read the identical `verified … ingested 0 experience(s) …` sentence.
+Both rounds `ingested 0`; they are two different readings. Distinct `store_state`, distinct `store_records`, and two different sentences in the Fact — neither reachable from the other. (`advanced_to` 0 vs 3 is the watermark half of the same distinction.) The pre-fix kernel has neither: its `ingested` block stops at `store_bootstrapped`, and both of its rounds read the identical `verified … ingested 0 experience(s) …` sentence.
 
 ### AC4 — PASS
 
