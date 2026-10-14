@@ -92,6 +92,13 @@ const ANCHOR_KIND_STOPS_REL = ".quay/anchor-kind-stops.json";
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+/** QUAY_E2E_EVIDENCE=1 prints the raw readings each case asserted on (the DoD asks for pasted evidence;
+ *  the assertions above are the gate, this is the transcript). */
+const EVIDENCE = process.env.QUAY_E2E_EVIDENCE === "1";
+function evidence(label, obj) {
+  if (EVIDENCE) console.log(`\n[evidence ${label}] ${JSON.stringify(obj, null, 1)}`);
+}
+
 async function esbuildBundle(entry, outfile) {
   const { build } = await import("esbuild");
   await build({
@@ -215,8 +222,15 @@ export async function main(argv) {
 async function buildAnchorKernel(kernelDir, { qualityFixture = true } = {}) {
   const dist = path.join(kernelDir, "scripts", "dist");
   fs.mkdirSync(dist, { recursive: true });
-  await esbuildBundle(path.join(SCRIPTS, "driver-runtime.ts"), path.join(dist, "driver-runtime.js"));
-  await esbuildBundle(path.join(SCRIPTS, "driver-anchor.ts"), path.join(dist, "driver-anchor.js"));
+  // If a kernel tree already carries the anchor/runtime bundles (e.g. a real `publish-dist-branch.sh`
+  // artifact, pointed at by QUAY_E2E_KERNEL_DIR), keep THOSE — only the kind drivers, which this file has
+  // to replace with fixtures, are written here. Same fixture driver, different kernel tree.
+  if (!fs.existsSync(path.join(dist, "driver-runtime.js"))) {
+    await esbuildBundle(path.join(SCRIPTS, "driver-runtime.ts"), path.join(dist, "driver-runtime.js"));
+  }
+  if (!fs.existsSync(path.join(dist, "driver-anchor.js"))) {
+    await esbuildBundle(path.join(SCRIPTS, "driver-anchor.ts"), path.join(dist, "driver-anchor.js"));
+  }
   for (const kind of KNOWN_KINDS) {
     if (kind === "quality" && qualityFixture) {
       const src = path.join(kernelDir, "fixture-quality-gate-driver.ts");
@@ -234,7 +248,11 @@ async function buildAnchorKernel(kernelDir, { qualityFixture = true } = {}) {
 async function buildWorkerKernel(kernelDir) {
   const dist = path.join(kernelDir, "scripts", "dist");
   fs.mkdirSync(dist, { recursive: true });
-  await esbuildBundle(path.join(SCRIPTS, "worker-driver.ts"), path.join(dist, "worker-driver.js"));
+  const own = path.join(dist, "worker-driver.js");
+  // A tree that already carries the worker bundle (a real artifact via QUAY_E2E_KERNEL_DIR) is used
+  // AS-IS — then this arm runs THAT kernel, not a source build.
+  if (fs.existsSync(own)) return kernelDir;
+  await esbuildBundle(path.join(SCRIPTS, "worker-driver.ts"), own);
   return kernelDir;
 }
 
@@ -343,11 +361,13 @@ function startAllKinds(kernelDir, host, env = {}) {
 
 let SHARED_KERNEL = null;
 before(async () => {
-  SHARED_KERNEL = fs.mkdtempSync(path.join(os.tmpdir(), "e2e-restart-kernel-"));
+  // QUAY_E2E_KERNEL_DIR points the harness at an already-built kernel tree (e.g. a real
+  // `publish-dist-branch.sh` artifact extracted `.git`-free); otherwise it builds the shipped layout.
+  SHARED_KERNEL = process.env.QUAY_E2E_KERNEL_DIR ?? fs.mkdtempSync(path.join(os.tmpdir(), "e2e-restart-kernel-"));
   await buildAnchorKernel(SHARED_KERNEL);
 });
 after(() => {
-  if (SHARED_KERNEL) fs.rmSync(SHARED_KERNEL, { recursive: true, force: true });
+  if (SHARED_KERNEL && !process.env.QUAY_E2E_KERNEL_DIR) fs.rmSync(SHARED_KERNEL, { recursive: true, force: true });
 });
 
 // ══════════════════════════════════════════════════════════════════════════════════════════════════
@@ -444,6 +464,17 @@ test("AC1 — mid-round `restart --kind quality` on the shipped-layout kernel co
     }
   }
   assert.equal(readAnchorPid(host), anchorPidBefore, "the anchor pid is unchanged across the restart");
+
+  evidence("AC1", {
+    confirm_line: confirmed[0],
+    elapsed_ms: elapsedMs,
+    round_record: rec,
+    ledger_round1_reserves: interrupted.length,
+    ledger_outcomes: ledger(host).filter((l) => l.kind === "outcome").length,
+    anchor_log_stop_start: log.split("\n").filter((l) => /kind=quality loop (stopped|started)|host pid=/.test(l)).slice(-3),
+    loop_started_before_after: Object.fromEntries(KNOWN_KINDS.map((k) => [k, `${before[k]} -> ${after[k]}`])),
+    anchor_pid: `${anchorPidBefore} -> ${readAnchorPid(host)}`,
+  });
 });
 
 // ══════════════════════════════════════════════════════════════════════════════════════════════════
@@ -481,6 +512,11 @@ test("AC4 — three consecutive `restart --kind quality` with no pause all confi
     }
   }
   assert.equal(readAnchorPid(host), anchorPidBefore, "the anchor pid is unchanged across all three restarts");
+  evidence("AC4", {
+    confirmed_ms_each: confirmations,
+    loop_started_before_after: Object.fromEntries(KNOWN_KINDS.map((k) => [k, `${before[k]} -> ${after[k]}`])),
+    anchor_pid: `${anchorPidBefore} -> ${readAnchorPid(host)}`,
+  });
 });
 
 // ══════════════════════════════════════════════════════════════════════════════════════════════════
@@ -524,6 +560,15 @@ test("AC5 — a loop that ignores every stop makes `restart` abort legibly, with
   await sleep(300);
   assert.equal(loopStartedCount(host, first), startedBefore, `⛔ exactly one loop (${startedBefore} -> ${loopStartedCount(host, first)})`);
   assert.equal(readAnchorPid(host), anchorPidBefore, "the anchor pid is unchanged");
+  evidence("AC5", {
+    rc,
+    stderr_first_line: err.split("\n")[0],
+    stdout: out.split("\n").filter(Boolean).slice(0, 2),
+    desired_before: desiredBefore,
+    desired_after: desiredAfter,
+    loop_started: `${startedBefore} -> ${loopStartedCount(host, first)}`,
+    anchor_pid: `${anchorPidBefore} -> ${readAnchorPid(host)}`,
+  });
 });
 
 // ══════════════════════════════════════════════════════════════════════════════════════════════════
@@ -589,17 +634,26 @@ export async function main(argv) {
   assert.ok(pidAlive(childPid), "⛔ the in-flight worker child SURVIVES `restart --kind worker` (§6.9 inv.3)");
   await waitFor(() => loopStartedCount(host, "worker") === startedBefore + 1, 20_000, "exactly one new worker loop");
   assert.equal(readAnchorPid(host), anchorPidBefore, "the anchor pid is unchanged");
+  evidence("AC2a", {
+    confirm_line: r.stdout.split("\n").find((l) => l.startsWith("started:")),
+    in_flight_worker_child_pid: childPid,
+    child_alive_after_restart: pidAlive(childPid),
+    worker_loop_started: `${startedBefore} -> ${loopStartedCount(host, "worker")}`,
+    anchor_pid: `${anchorPidBefore} -> ${readAnchorPid(host)}`,
+  });
 });
 
 test("AC2b — an orphan worker that exits is ADOPTED and fanned in exactly once (not booked `failed`), and its task is never dispatched twice", async (t) => {
-  const workerKernel = fs.mkdtempSync(path.join(os.tmpdir(), "e2e-restart-wkernel-"));
+  // QUAY_E2E_WORKER_KERNEL_DIR: a PRISTINE artifact tree whose own worker bundle this arm should run
+  // (the anchor-arm tree has its kind drivers replaced by fixtures, so it cannot double as the kernel).
+  const workerKernel = process.env.QUAY_E2E_WORKER_KERNEL_DIR ?? fs.mkdtempSync(path.join(os.tmpdir(), "e2e-restart-wk2b-"));
   const host = makeHost(workerKernel, "ac2b");
   let orphan = null;
   let resident = null;
   t.after(() => {
     if (resident && resident.exitCode === null) { try { resident.kill("SIGKILL"); } catch { /* gone */ } }
     cleanup(host, orphan ? [orphan.pid] : []);
-    fs.rmSync(workerKernel, { recursive: true, force: true });
+    if (!process.env.QUAY_E2E_WORKER_KERNEL_DIR) fs.rmSync(workerKernel, { recursive: true, force: true });
   });
   await buildWorkerKernel(workerKernel);
   assertCleanHostPremise(host, workerKernel);
@@ -686,6 +740,13 @@ test("AC2b — an orphan worker that exits is ADOPTED and fanned in exactly once
   assert.equal(preFix.final_state, "failed", "negative control: the pre-fix destination books `failed`");
   assert.match(preFix.failure_reason, /orphaned worker finalized by reconcile/, "negative control: with the orphaned reason");
   assert.notEqual(preFix.final_state, o.final_state, "⛔ the two arms must be differently-shaped, or the control measures nothing");
+  evidence("AC2b", {
+    adopted_outcome: o,
+    one_fan_in_outcome: outcomes.length,
+    worker_spawned_events_for_task: events.filter((e) => e.event === "worker-spawned" && e.task === taskId).length,
+    dispatch_record_cleared: dispatch[taskId] === undefined,
+    prefix_negative_control: preFix,
+  });
 });
 
 // ══════════════════════════════════════════════════════════════════════════════════════════════════
@@ -699,13 +760,13 @@ test("AC2b — an orphan worker that exits is ADOPTED and fanned in exactly once
 // bundle's resident reconcile and pins the boundary (no commits ⇒ unchanged `failed: orphaned`).
 
 test("AC3 — a dead orphan whose worktree carries commits resumes its fan-in (refused on its own AC grounds) and is NOT recorded `failed: orphaned`; a dead orphan with NO commits keeps the old outcome", async (t) => {
-  const workerKernel = fs.mkdtempSync(path.join(os.tmpdir(), "e2e-restart-wk3-"));
+  const workerKernel = process.env.QUAY_E2E_WORKER_KERNEL_DIR ?? fs.mkdtempSync(path.join(os.tmpdir(), "e2e-restart-wk3-"));
   const host = makeHost(workerKernel, "ac3");
   let resident = null;
   t.after(() => {
     if (resident && resident.exitCode === null) { try { resident.kill("SIGKILL"); } catch { /* gone */ } }
     cleanup(host);
-    fs.rmSync(workerKernel, { recursive: true, force: true });
+    if (!process.env.QUAY_E2E_WORKER_KERNEL_DIR) fs.rmSync(workerKernel, { recursive: true, force: true });
   });
   await buildWorkerKernel(workerKernel);
   assertCleanHostPremise(host, workerKernel);
@@ -776,7 +837,7 @@ test("AC3 — a dead orphan whose worktree carries commits resumes its fan-in (r
 
   const gap = readLines(outcomeFile).find((o) => o.task === taskId);
   assert.ok(gap, `the gap-exited orphan reached a terminal outcome: ${JSON.stringify(readLines(outcomeFile))}`);
-  assert.notEqual(gap.final_state, "failed", `⛔ the gap-exited orphan must NOT be booked failed (got ${gap.final_state})`);
+  assert.notEqual(gap.final_state, "failed", `⛔ the gap-exited orphan must NOT be booked failed — the pre-fix kernel books \`failed\` here (record: ${JSON.stringify(gap)})`);
   assert.ok(!/orphaned worker finalized by reconcile/.test(String(gap.failure_reason)), "⛔ not the orphaned-finalize reason");
   assert.equal(gap.adopted_after_exit, true, "the unobserved exit status stays visible");
   assert.equal(gap.short_circuit, "ac-not-checked", "refused on its own AC grounds (AC3's allowed outcome)");
@@ -786,4 +847,5 @@ test("AC3 — a dead orphan whose worktree carries commits resumes its fan-in (r
   assert.ok(none, "the no-commit orphan reached a terminal outcome");
   assert.equal(none.final_state, "failed", "no commits ⇒ unchanged `failed`");
   assert.match(String(none.failure_reason), /orphaned worker finalized by reconcile/, "no commits ⇒ the orphaned reason is unchanged");
+  evidence("AC3", { gap_exited_outcome: gap, no_commits_outcome: none });
 });
