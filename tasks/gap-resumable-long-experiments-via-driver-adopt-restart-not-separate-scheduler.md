@@ -7,6 +7,9 @@ labels:
 parent: null
 children: []
 extra: {}
+depends_on:
+  - gap-test-spawned-resident-drivers-outlive-their-suite-no-process-group-reaping
+  - gap-attempt-task-phase-timing-fields-incomplete-lock-wait-field-broken
 ---
 ## Proposal
 **Capability requested 2026-10-14: long-running measurement experiments (e.g. the 32/48/64-lane × ≥3-round comparison in `gap-suite-heavy-files-and-phase-concurrency-under-16g-pressure-baseline-comparison`) must be resumable across a driver restart or worker redispatch, without re-running work already paid for, and without a second scheduler competing with the worker-driver.**
