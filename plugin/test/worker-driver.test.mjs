@@ -128,6 +128,9 @@ import {
   computeAdoptedOutcome,
   finalizeOrphanDispatch,
   adoptOrphanWorker,
+  shouldResumeExitedOrphan,
+  resumeExitedOrphanFanIn,
+  computeResumedAfterExitOutcome,
   WORKER_DISPATCH_REL,
   scopedGateCommandFor,
   resolveScopedGateCommand,
@@ -3036,6 +3039,225 @@ test("④ (记录缺失不越权) — orphanDispatchCandidates：无记录 ⇒ �
   assert.deepEqual(orphanDispatchCandidates({ "gap-x": rec }, []), [{ taskId: "gap-x", record: rec }]);
   // 有记录但在 running（本驱动自己的在飞 dispatch）⇒ 跳过（runOneWorker 管理，⛔ 不重复 adopt/finalize）。
   assert.deepEqual(orphanDispatchCandidates({ "gap-x": rec }, ["gap-x"]), []);
+});
+
+// ── gap-reconcile-books-exited-orphan-with-commits-as-failed-instead-of-adopting-its-fan-in ────────
+// 实测 2026-10-14（人授权 r5 anchor 接管间隙，81 次里 66 次 worktree 有提交）：一个 worker 在 driver
+// 重启/anchor 接管的间隙内退出，其 worktree 已有提交。旧 reconcile 只按「pid 已死」判 finalize ⇒ 记
+// `failed: orphaned`、不跑机械 fan-in ⇒ 工作没丢（提交被保留、任务仍 ready）但①结果被记成失败、不采纳；
+// ②任务白烧一整个 worker 会话重做 landing；③那条 failed 混进重试上限读的连续未落地史。修法：已死 ∧
+// worktree 有产出 ⇒ 跑【与正常退出 worker 相同的】机械 fan-in 接管。以下 AC1-AC4 逐条取假。
+
+const EXITED_ORPHAN_TASK = "gap-resume-exited-orphan";
+
+/** 构造「pid 已死 + task/<id> 分支有提交」的孤儿夹具。acComplete=false ⇒ worktree 任务体 AC 未全勾。 */
+function buildExitedOrphanWithCommits(tag, { acComplete = true } = {}) {
+  const root = makeGitRoot(tag);
+  const wtPath = path.join(root, "..", `wt-${path.basename(root)}-resume`);
+  const taskId = EXITED_ORPHAN_TASK;
+  writeTaskFile(root, taskId, "ready"); // 主检出/develop 上的任务体（status=ready）
+  runGit(root, ["branch", "develop"]); // taskBranchHasCommits 的 `git log develop..task/<id>` 需要 develop
+  runGit(root, ["worktree", "add", "-q", "-b", `task/${taskId}`, wtPath, "develop"]); // 从 develop 分叉
+  // worktree 里的任务体（AC 全勾 / 未全勾）+ 一个实现提交 ⇒ task/<id> 相对 develop 有提交（有产出）。
+  // ⚠️ 必须 AC 段 ∧ DoD 段【都有】：countCompletionCheckboxes 的 sectionFound = acFound && dodFound
+  //（缺任一段 ⇒ not-evaluated，会被 acShortCircuitVerdict 当成「AC 未全勾」短路，而不是走真 fan-in）。
+  const box = acComplete ? "[x]" : "[ ]";
+  fs.writeFileSync(
+    path.join(wtPath, "tasks", `${taskId}.md`),
+    `---\nid: ${taskId}\nstatus: ready\n---\n\n## Proposal\n\nbody\n\n` +
+      `## Acceptance Criteria\n\n- ${box} AC1: only AC\n\n` +
+      `## Definition of Done\n\n- ${box} DoD1: only DoD\n`,
+  );
+  runGit(wtPath, ["add", `tasks/${taskId}.md`]);
+  runGit(wtPath, ["commit", "-q", "-m", "impl: task branch commit"]);
+  const branchTip = runGit(wtPath, ["rev-parse", "HEAD"]).trim();
+  const record = {
+    taskId, runId: "fm-resume", workerPid: 999999999, selectorReason: "resume selector reason",
+    startedAtMs: Date.now() - 60_000, timeoutDeadlineMs: Date.now() - 1000,
+    cmdlineFingerprint: `claude -n ${WORKER_PROCESS_NAME} -p '... Task: ${taskId} ...'`,
+  };
+  return { root, wtPath, taskId, record, branchTip };
+}
+
+/** best-effort `git worktree remove --force`（stdio 全吞：夹具的 worktree 可能已被 fan-in/清理移除，
+ *  此时 git 会往 stderr 打 "is not a working tree" —— 那是清理噪声，不是失败）。 */
+function tryWorktreeRemove(root, wtPath) {
+  try { execFileSync("git", ["-C", root, "worktree", "remove", "--force", wtPath], { stdio: "ignore" }); } catch { /* best-effort */ }
+}
+
+function cleanupExitedOrphanFixture(t, fx) {
+  t.after(() => {
+    tryWorktreeRemove(fx.root, fx.wtPath);
+    fs.rmSync(fx.root, { recursive: true, force: true });
+    fs.rmSync(fx.wtPath, { recursive: true, force: true });
+  });
+}
+
+test("AC1 (能取假) — 死孤儿 + worktree 有产出：跑机械 fan-in 接管并落地；负控制=旧 finalize 路径写 failed:orphaned", async (t) => {
+  const taskId = EXITED_ORPHAN_TASK;
+
+  // ── 负控制臂（修复【前】的行为）：同一夹具上跑 finalizeOrphanDispatch ⇒ failed:orphaned、不跑 fan-in。
+  const neg = buildExitedOrphanWithCommits("resume-ac1-neg");
+  cleanupExitedOrphanFixture(t, neg);
+  upsertDispatchRecord(dispatchStoreFile(neg.root), neg.record);
+  assert.equal(classifyOrphanDispatch(neg.record), "finalize", "负控制前置：pid 已死 ⇒ 分类判 finalize（缺陷入口）");
+  const negRes = finalizeOrphanDispatch({ root: neg.root, outcomeFile: path.join(neg.root, WORKER_OUTCOME_REL), record: neg.record });
+  assert.equal(negRes.outcome.final_state, "failed", "负控制：旧路径把它记成 failed");
+  assert.match(negRes.outcome.failure_reason, /orphaned worker finalized by reconcile/, "负控制：orphaned 原因（本缺陷）");
+  assert.equal(negRes.outcome.exit_code, null, "负控制：退出码不可观测");
+  assert.equal(negRes.outcome.mechanical_fan_in, undefined, "负控制：⛔ 从未跑机械 fan-in（这正是缺陷）");
+  assert.equal(negRes.outcome.adopted_after_exit, undefined, "负控制：没有接管标记");
+  assert.equal(negRes.cleanup.preservedForCommits, true, "负控制：有提交 ⇒ worktree 被保留（工作没丢，但没被采纳）");
+  console.log("[AC1 negative control outcome]", JSON.stringify(negRes.outcome));
+
+  // ── 正臂（修复后）：判定接管 ∧ resumeExitedOrphanFanIn 跑 fan-in ⇒ 落地（completed）。
+  const pos = buildExitedOrphanWithCommits("resume-ac1-pos");
+  cleanupExitedOrphanFixture(t, pos);
+  upsertDispatchRecord(dispatchStoreFile(pos.root), pos.record);
+  assert.equal(shouldResumeExitedOrphan({ root: pos.root, taskId, record: pos.record }), true,
+    "AC1：已死 ∧ worktree 有产出 ∧ worktree 在 ⇒ 判接管（⛔ 不再走 failed:orphaned）");
+
+  // 替身 fan-in：真机械 fan-in 在本仓库要跑分钟级 suite（单测不跑）；替身执行它的【落地动作】——
+  // ff develop 到 task 分支 tip + 移除 worktree（真 fan-in 的最后两步），使 computeLandingState 真判。
+  let fanInCalls = 0;
+  const fanInRunner = async ({ worktree }) => {
+    fanInCalls += 1;
+    const tip = runGit(worktree, ["rev-parse", "HEAD"]).trim();
+    runGit(pos.root, ["update-ref", "refs/heads/develop", tip]); // ff develop → 落地提交
+    runGit(pos.root, ["worktree", "remove", "--force", worktree]); // 落地后无残留 worktree
+    return {
+      outcome: "landed", landedSha: tip, verdict: null, step: null, reason: null,
+      lockHoldSecs: null, lockAcquireEpoch: null, lockReleaseEpoch: null, suiteFinishedEpoch: null,
+      suiteOutcome: null, suitePid: null, fanInLog: null, suiteLog: null,
+      mergeTreeSha: tip, developSha: tip, failedTestFiles: null, rerun: null,
+    };
+  };
+  const r = await resumeExitedOrphanFanIn({
+    rootDir: pos.root, outcomeFile: path.join(pos.root, WORKER_OUTCOME_REL), record: pos.record, inFlightCount: 1, fanInRunner,
+  });
+  assert.equal(fanInCalls, 1, "AC1：确实跑了机械 fan-in（⛔ 不是只记一个终态）");
+  assert.equal(r.outcome.final_state, "completed", "AC1：fan-in 落地 ⇒ completed（任务落地）");
+  assert.equal(r.outcome.adopted_after_exit, true, "AC1：带 adopted_after_exit 标记（⛔ 不伪装成正常 exit 0）");
+  assert.equal(r.outcome.exit_code, null, "AC1：worker 退出码从未被观测 ⇒ 诚实 null");
+  assert.equal(r.exitCode, 0, "AC1：completed ⇒ 退出码 0");
+  assert.equal(worktreePresentForTask(pos.root, taskId), false, "AC1：落地后无残留 worktree");
+  assert.equal(readDispatchStore(dispatchStoreFile(pos.root))[taskId], undefined, "AC1：dispatch 记录已清");
+  assert.ok(readOutcomeLines(pos.root).some((o) => o.task === taskId && o.final_state === "completed"), "AC1：载体里有一条 completed");
+  console.log("[AC1 post-fix outcome]", JSON.stringify(r.outcome));
+});
+
+test("AC2 (能取假) — 死孤儿 + AC 未全勾的 worktree：按【它自己的正常理由】拒绝（exited-not-landed / AC 短路），⛔ 不是 failed:orphaned；任务保持 ready、提交完好", async (t) => {
+  const taskId = EXITED_ORPHAN_TASK;
+  const fx = buildExitedOrphanWithCommits("resume-ac2", { acComplete: false });
+  cleanupExitedOrphanFixture(t, fx);
+  upsertDispatchRecord(dispatchStoreFile(fx.root), fx.record);
+  assert.equal(shouldResumeExitedOrphan({ root: fx.root, taskId, record: fx.record }), true,
+    "AC2：有产出 ⇒ 仍判接管（拒绝的理由来自 fan-in，而不是产出的有无）");
+
+  let fanInCalls = 0;
+  const r = await resumeExitedOrphanFanIn({
+    rootDir: fx.root, outcomeFile: path.join(fx.root, WORKER_OUTCOME_REL), record: fx.record, inFlightCount: 1,
+    fanInRunner: async () => { fanInCalls += 1; throw new Error("fan-in must not spawn when AC is incomplete"); },
+  });
+  assert.equal(fanInCalls, 0, "AC2：AC 未全勾 ⇒ 短路，⛔ 不 spawn fan-in（省整条链 + 锁排队）");
+  assert.equal(r.outcome.final_state, "exited-not-landed", "AC2：拒绝理由 = exited-not-landed（fan-in 的正常理由）");
+  assert.equal(r.outcome.short_circuit, "ac-not-checked", "AC2：结构化短路成因（⛔ 不是 orphaned）");
+  assert.match(r.outcome.failure_reason, /AC 未全勾/, "AC2：原因点名 AC 未全勾（续做只需勾选）");
+  assert.doesNotMatch(r.outcome.failure_reason, /orphaned worker finalized by reconcile/, "AC2：⛔ 不是 orphaned 的 failed 记录");
+  assert.equal(r.outcome.adopted_after_exit, true, "AC2：仍带 adopted_after_exit 标记");
+  assert.notEqual(r.outcome.final_state, "failed", "AC2：⛔ 不得与失败同形");
+  // 任务返回 ready + 提交完好（worktree 保留、branch tip 不变）。
+  assert.equal(readTaskStatus(fx.root, taskId), "ready", "AC2：任务保持 ready");
+  assert.equal(worktreePresentForTask(fx.root, taskId), true, "AC2：worktree 保留（续做需要它）");
+  assert.equal(runGit(fx.wtPath, ["rev-parse", "HEAD"]).trim(), fx.branchTip, "AC2：分支提交完好（tip 未变、未丢产出）");
+  assert.equal(readDispatchStore(dispatchStoreFile(fx.root))[taskId], undefined, "AC2：dispatch 记录已清（不再被永久占位）");
+  console.log("[AC2 outcome]", JSON.stringify(r.outcome));
+});
+
+test("AC3 (能取假) — 死孤儿【无提交】：行为逐字不变（failed: orphaned + 清 worktree），且 shouldResumeExitedOrphan 判 false", async (t) => {
+  const root = makeGitRoot("resume-ac3");
+  const wtPath = path.join(root, "..", `wt-${path.basename(root)}-ac3`);
+  t.after(() => {
+    tryWorktreeRemove(root, wtPath);
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(wtPath, { recursive: true, force: true });
+  });
+  const taskId = "gap-resume-ac3-none";
+  writeTaskFile(root, taskId, "ready");
+  runGit(root, ["branch", "develop"]);
+  runGit(root, ["worktree", "add", "-q", "-b", `task/${taskId}`, wtPath, "develop"]); // 无额外提交
+  const record = {
+    taskId, runId: "fm-ac3-none", workerPid: 999999999, selectorReason: "ac3 selector reason",
+    startedAtMs: Date.now() - 60_000, timeoutDeadlineMs: Date.now() - 1000,
+    cmdlineFingerprint: `claude -n ${WORKER_PROCESS_NAME} -p '... Task: ${taskId} ...'`,
+  };
+  upsertDispatchRecord(dispatchStoreFile(root), record);
+  assert.equal(taskBranchHasCommits(root, taskId), false, "AC3 前置：零提交（相对 develop）");
+  assert.equal(shouldResumeExitedOrphan({ root, taskId, record }), false, "AC3：零提交 ⇒ 不接管（回落原路径）");
+  const res = finalizeOrphanDispatch({ root, outcomeFile: path.join(root, WORKER_OUTCOME_REL), record });
+  assert.equal(res.outcome.final_state, "failed", "AC3：逐字保持 failed");
+  assert.match(res.outcome.failure_reason, /orphaned worker finalized by reconcile/, "AC3：orphaned 原因逐字不变");
+  assert.equal(res.cleanup.removed, true, "AC3：零提交 ⇒ worktree 被清（无产出可保）");
+  assert.equal(worktreePresentForTask(root, taskId), false, "AC3：worktree 已清");
+  assert.equal(readDispatchStore(dispatchStoreFile(root))[taskId], undefined, "AC3：记录已清");
+  console.log("[AC3 outcome]", JSON.stringify(res.outcome));
+});
+
+test("AC4 (能取假) — 重试上限处置：接管结果与正常 worker 同一归宿（exited-not-landed 才计数）；无产出死孤儿的 failed:orphaned 结构上不入计数", async (t) => {
+  const taskId = EXITED_ORPHAN_TASK;
+
+  // ① 接管路径的拒绝结果 = exited-not-landed —— 正是 onWorkerFinished 计数的那个 final_state，且【被测量】
+  //    （fan-in 真跑过、给出 red）⇒ 按任务质量规则记账（含既有豁免）。
+  const fx = buildExitedOrphanWithCommits("resume-ac4", { acComplete: true });
+  cleanupExitedOrphanFixture(t, fx);
+  upsertDispatchRecord(dispatchStoreFile(fx.root), fx.record);
+  const redRunner = async () => ({
+    outcome: "red", verdict: { step: "suite", verdict: "failed", exitCode: 1, summary: "suite red", logFile: null },
+    step: "suite", reason: "suite red", lockHoldSecs: null, lockAcquireEpoch: null, lockReleaseEpoch: null,
+    suiteFinishedEpoch: null, suiteOutcome: "red", suitePid: null, landedSha: null, fanInLog: null,
+    suiteLog: null, mergeTreeSha: null, developSha: null, failedTestFiles: null, rerun: null,
+  });
+  const r = await resumeExitedOrphanFanIn({
+    rootDir: fx.root, outcomeFile: path.join(fx.root, WORKER_OUTCOME_REL), record: fx.record, inFlightCount: 1,
+    fanInRunner: redRunner,
+  });
+  assert.equal(r.outcome.final_state, "exited-not-landed", "AC4：接管拒绝 ⇒ exited-not-landed");
+  assert.ok(r.outcome.mechanical_fan_in, "AC4：fan-in 真跑过（载体带 mechanical_fan_in 读数）");
+  assert.equal(isFfNotFastForwardFailure(r.outcome), false, "AC4：不是 ff-not-fast-forward 豁免态 ⇒ 按普通未落地计数（与正常 worker 同规则）");
+  // exited-not-landed 确是计数路径的输入（advanceRetryCap 对连续未落地计数，达上限标 needs-human）。
+  const retryState = { counts: new Map(), needsHuman: new Set() };
+  assert.deepEqual(advanceRetryCap(retryState, [taskId], 1), [taskId],
+    "AC4：exited-not-landed 走 advanceRetryCap ⇒ 达上限计一次（证明它是计数路径的输入）");
+
+  // ② 无产出死孤儿的 failed:orphaned 由 finalizeOrphanDispatch 直接落盘（返回值只用于 json 事件，不入
+  //    onWorkerFinished 的 results）⇒ 结构上不烧重试预算。可查判据：它的 final_state 不是计数路径的词表取值。
+  const noCommitRoot = makeGitRoot("resume-ac4-nocommit");
+  const noCommitWt = path.join(noCommitRoot, "..", `wt-${path.basename(noCommitRoot)}-ac4nc`);
+  t.after(() => {
+    tryWorktreeRemove(noCommitRoot, noCommitWt);
+    fs.rmSync(noCommitRoot, { recursive: true, force: true });
+    fs.rmSync(noCommitWt, { recursive: true, force: true });
+  });
+  const ncTask = "gap-resume-ac4-nocommit";
+  writeTaskFile(noCommitRoot, ncTask, "ready");
+  runGit(noCommitRoot, ["branch", "develop"]);
+  runGit(noCommitRoot, ["worktree", "add", "-q", "-b", `task/${ncTask}`, noCommitWt, "develop"]);
+  const ncRecord = {
+    taskId: ncTask, runId: "fm-ac4-nc", workerPid: 999999999, selectorReason: "s",
+    startedAtMs: Date.now() - 60_000, timeoutDeadlineMs: Date.now() - 1000, cmdlineFingerprint: "x",
+  };
+  const nc = finalizeOrphanDispatch({ root: noCommitRoot, outcomeFile: path.join(noCommitRoot, WORKER_OUTCOME_REL), record: ncRecord });
+  assert.equal(nc.outcome.final_state, "failed", "AC4：无产出死孤儿 ⇒ failed（基建事件）");
+  assert.notEqual(nc.outcome.final_state, "exited-not-landed", "AC4：failed:orphaned 不是计数路径计数的那个取值");
+  assert.match(nc.outcome.failure_reason, /orphaned worker finalized by reconcile/, "AC4：措辞仍是 orphaned（可区分于任务质量信号）");
+
+  // ③ 接线证据（源）：接管结果【与 adoptOrphanWorker 同形】经 onWorkerFinished 记账；finalizeOrphanDispatch
+  //    的返回值不进 results。两条断言直接读驱动源文本，与运行时行为互补。
+  const src = fs.readFileSync(DRIVER, "utf8");
+  assert.match(src, /resumeExitedOrphanFanIn\(\{[\s\S]{0,200}?\}\)\.then\(\(r\) => onWorkerFinished\(rw, r\)\)/,
+    "AC4 接线：接管结果经 onWorkerFinished（与 adoptOrphanWorker 同一归宿 ⇒ 同一重试上限处置）");
+  console.log("[AC4 resumed outcome]", JSON.stringify(r.outcome));
+  console.log("[AC4 no-commit outcome]", JSON.stringify(nc.outcome));
 });
 
 // ── gap-fanin-gate-event-store-path-shipped-unsafe ────────────────────────────────────────────────

@@ -4760,9 +4760,190 @@ export function finalizeOrphanDispatch(opts: {
         worktree_cleanup_sigterm_external: cleanup.sigtermExternal,
       }
     : base;
+  // AC4：本函数【直接】落盘并返回 outcome —— 调用方（reconcile）只拿它发 json 事件，⛔ 不入 onWorkerFinished
+  // 的 results ⇒ 这条 `failed: orphaned` 结构性不进重试上限计数（基建事件，不是任务质量信号）。
+  // 【有产出】的死孤儿不走本函数（走 resumeExitedOrphanFanIn，其 outcome 经 onWorkerFinished 照常记账）。
   appendOutcomeToFile(outcomeFile, outcome);
   removeDispatchRecord(dispatchStoreFile(root), record.taskId);
   return { outcome, cleanup, refusedLiveWorker: false };
+}
+
+// ── 死孤儿「有产出」⇒ 接管跑机械 fan-in（gap-reconcile-books-exited-orphan-with-commits-as-failed-
+//    instead-of-adopting-its-fan-in）────────────────────────────────────────────────────────────────
+// 缺陷（实测 2026-10-14，人授权 r5 anchor 接管间隙；81 次里 66 次 worktree 有提交）：一个 worker 在
+// 【driver 重启 / anchor 接管的间隙内】退出，其 worktree 已有提交。旧 reconcile 只按「pid 已死」判
+// finalize ⇒ 记 `failed: orphaned`、不跑机械 fan-in ⇒ 工作没丢（提交被保留、任务仍 ready），但
+// ①结果被记成失败、不采纳；②任务白烧一整个 worker 会话重做 landing；③那条 failed 混进重试上限读的
+// 连续未落地史。修法：已死 ∧ worktree 有产出 ⇒ 跑【与正常退出 worker 相同的】机械 fan-in——fan-in 本
+// 就从 worktree 自身状态判落地（AC precheck / anti-drift / suite / ff），⛔ 不需要死进程的退出码。
+
+/** 死孤儿「有产出」的接管判定（纯函数、可取假）：pid 实测【已退出】∧ worktree 目录仍在 ∧ 其 task
+ *  分支相对 develop 有提交 ⇒ 应跑机械 fan-in 接管，而非记 failed:orphaned。
+ *
+ *  ⛔ 三条都是【直接量】且缺一不可：liveness 用名字无关的 /proc 实测（同 finalizeOrphanDispatch 的存活
+ *  闸，硬规则 4b：代理量会偏、直接量不会）；hasCommits 用 `git log develop..task/<id>`（与
+ *  cleanupOrphanWorktree 保留 worktree 的判据【同源】——「清理会保留它」⇔「我们接管它」，⛔ 不新造第二
+ *  个产出判定）；worktree 目录存在（fan-in 要一个 worktree 才能跑，分支有提交但 worktree 已不在 ⇒ 不
+ *  接管，回落原 finalize 路径）。
+ *  回落到 finalize 的三类情形都逐字保持 today 的行为：liveness≠"exited"（alive / unknown，含 pid 被复用
+ *  ——那个由 finalizeOrphanDispatch 的存活闸拦下）；hasCommits≠true（零提交 / 读不懂=null）；无 worktree。 */
+export function shouldResumeExitedOrphan(opts: {
+  root: string;
+  taskId: string;
+  record: DispatchRecord;
+  /** /proc 存活探测的测试缝（缺省 /proc）。 */
+  procDir?: string;
+}): boolean {
+  if (probePidLiveness(opts.record.workerPid, opts.procDir ?? "/proc") !== "exited") return false;
+  const paths = worktreePathsForTask(opts.root, opts.taskId);
+  if (paths.length === 0 || !paths[0]) return false;
+  return taskBranchHasCommits(opts.root, opts.taskId) === true;
+}
+
+/** 机械 fan-in 运行器的注入面（测试缝）。生产缺省 = spawnMechanicalFanIn（每任务 fresh 进程加载
+ *  主检出 worker-driver.ts --mechanical-fan-in，与 finishAsync 同一入口、同一版本锚）。夹具据此
+ *  替身化「一条真跑 suite 的 fan-in」（本仓库 suite 分钟级，单测不跑），生产路径永远走真入口。 */
+export type MechanicalFanInRunner = (opts: {
+  task: string;
+  worktree: string;
+  root: string;
+  runId: string;
+  mergeTarget: string;
+}) => Promise<MechanicalFanInResult>;
+
+/** resumed-after-exit 孤儿经机械 fan-in 的终态 outcome。
+ *  ⛔ 不直调 computeOutcome：本路径的 worker 非本驱动子进程、**退出码从未被观测**（硬规则 3b），
+ *  computeOutcome 的 `exitCode !== 0` 分支会对 null 误判 "worker exited with code null"——与
+ *  computeAdoptedOutcome 同一个成因。终态词表与 finish() 的 exit-0 分支同形（verified ⇒ completed；
+ *  其余 ⇒ exited-not-landed），但带 `adopted_after_exit: true` 标记，使「worker 自己的退出状态从未被
+ *  观测」在载体里始终可见（⛔ 不伪装成一次正常的 exit 0）。exit_code 诚实记 null（读不懂，⛔ 不伪造）。 */
+export function computeResumedAfterExitOutcome(opts: {
+  task: string;
+  selectorReason: string;
+  runId: string;
+  workerPid: number;
+  startedAtMs: number;
+  endedAtMs: number;
+  inFlightCount: number;
+  landing: DriverResult<LandingEvidence>;
+  /** AC 未全勾短路成因（== acShortCircuitVerdict 的 reason）；null = 未短路（fan-in 真跑过 / 无 worktree）。 */
+  shortCircuitReason: string | null;
+}): ReturnType<typeof computeOutcome> & { adopted_after_exit: true } {
+  let finalState: string;
+  let failureReason: string | null;
+  if (opts.shortCircuitReason != null) {
+    // AC 未全勾：fan-in 连进程都没起（与正常 worker 的 AC 短路逐字同归宿），原因保留短路真因，
+    // ⛔ 不写成「orphaned」——AC2 要的正是「按它自己的正常理由拒绝」。
+    finalState = "exited-not-landed";
+    failureReason = opts.shortCircuitReason;
+  } else if (opts.landing.state === "verified") {
+    finalState = "completed";
+    failureReason = null;
+  } else {
+    finalState = "exited-not-landed";
+    failureReason = `resumed orphan worker (exit status unobservable) — ${opts.landing.reason ?? "task did not land"}`;
+  }
+  return {
+    ts: new Date(opts.endedAtMs).toISOString(),
+    task: opts.task,
+    selector_reason: opts.selectorReason,
+    exit_code: null,
+    signal: null,
+    wall_clock_ms: opts.endedAtMs - opts.startedAtMs,
+    final_state: finalState,
+    failure_reason: failureReason,
+    started_at: new Date(opts.startedAtMs).toISOString(),
+    ended_at: new Date(opts.endedAtMs).toISOString(),
+    worker_pid: opts.workerPid,
+    run_id: opts.runId,
+    in_flight_count: opts.inFlightCount,
+    timed_out: false,
+    session_id: null,
+    adopted_after_exit: true,
+    ...(opts.shortCircuitReason != null ? { short_circuit: "ac-not-checked" } : {}),
+  };
+}
+
+/** 接管一个【pid 实测已退出、worktree 有产出】的孤儿：跑与【正常退出 worker】相同的机械 fan-in，
+ *  把结果采纳为终态（completed / exited-not-landed），⛔ 不再记 `failed: orphaned`。
+ *
+ *  与 finishAsync 同序：先 AC 短路闸（未全勾 ⇒ 不 spawn fan-in，省整条链 + 锁排队），否则 spawn
+ *  每任务 fresh 机械 fan-in 进程（runMechanicalFanIn 从 worktree 加载，执行器锚在主检出同版）。
+ *  落地判定同 finish()：fan-in landed ⇒ 从 ff 结果派生（读 git <mergeTarget> 状态）；未跑 / red ⇒
+ *  status-based。终态写进 worker-outcome.jsonl（唯一落盘点）+ 清 dispatch 记录 + 把「为什么没落地」
+ *  投影到任务记录（与 finish() 同通道）。
+ *  返回 WorkerRunResult（调用方纳入 running，退出后照常走 onWorkerFinished 的重试/退避记账——见
+ *  reconcile 接线处对 AC4 的处置说明）。 */
+export async function resumeExitedOrphanFanIn(opts: {
+  rootDir: string;
+  outcomeFile: string;
+  record: DispatchRecord;
+  inFlightCount?: number;
+  /** 测试缝：替身化真 fan-in（缺省 spawnMechanicalFanIn）。 */
+  fanInRunner?: MechanicalFanInRunner;
+}): Promise<WorkerRunResult> {
+  const { rootDir, outcomeFile, record, inFlightCount = 1 } = opts;
+  const taskId = record.taskId;
+  const runId = record.runId;
+  const endedAtMs = Date.now();
+  const paths = worktreePathsForTask(rootDir, taskId);
+  let mechResult: MechanicalFanInResult | null = null;
+  let shortCircuitReason: string | null = null;
+  if (paths.length > 0 && paths[0]) {
+    const sc = acShortCircuitVerdict(paths[0], taskId);
+    if (sc.shortCircuit) {
+      shortCircuitReason = sc.reason;
+    } else {
+      const runner = opts.fanInRunner ?? spawnMechanicalFanIn;
+      mechResult = await runner({
+        task: taskId,
+        worktree: paths[0],
+        root: rootDir,
+        runId,
+        mergeTarget: resolveTaskMergeTarget(taskId, rootDir),
+      });
+    }
+  }
+  const landedSha = mechResult?.outcome === "landed" ? mechResult.landedSha : null;
+  const mergeTargetBranch = landedSha != null ? resolveTaskMergeTarget(taskId, rootDir) : "develop";
+  const landing = computeLandingState(rootDir, taskId, landedSha, mergeTargetBranch);
+  const lockMetrics = readLockMetricsForRun(rootDir, runId, taskId);
+  const base = computeResumedAfterExitOutcome({
+    task: taskId,
+    selectorReason: record.selectorReason,
+    runId,
+    workerPid: record.workerPid,
+    startedAtMs: record.startedAtMs,
+    endedAtMs,
+    inFlightCount,
+    landing,
+    shortCircuitReason,
+  });
+  // 机械 fan-in 结果落进载体（与 finish() 同一字段 mechanical_fan_in），⛔ 只在真跑过时非 null——
+  // 短路（AC 未全勾）与无 worktree 两条路径结构上没有 fan-in 结果。
+  const outcome = mechResult
+    ? { ...base, mechanical_fan_in: withRecordedSuiteSignatures(rootDir, mechResult) }
+    : base;
+  appendOutcomeToFile(outcomeFile, outcome);
+  // exited-not-landed ⇒ 把「为什么没落地」投影到任务记录（与 finish() 同通道，看板可见）；失败不致命
+  // （记录卡住不该搞死整轮），但结果落 stderr（⛔ 不静默）。completed ⇒ 清除（projectBlocker 自带该语义）。
+  let blockerNote: ReturnType<typeof projectBlockerToTaskRecord> | null = null;
+  try {
+    blockerNote = projectBlockerToTaskRecord(
+      rootDir,
+      taskId,
+      outcome.final_state,
+      formatExitedNotLandedReason(outcome.failure_reason, (outcome as { mechanical_fan_in?: unknown }).mechanical_fan_in),
+      { ts: outcome.ts, runId, sessionId: null },
+    );
+  } catch (e) {
+    blockerNote = { ok: false, changed: false, committed: false };
+    process.stderr.write(`worker-driver: blocker-note projection failed for ${taskId}: ${(e as Error)?.message ?? String(e)}\n`);
+  }
+  void blockerNote;
+  removeDispatchRecord(dispatchStoreFile(rootDir), taskId);
+  const exitCode = outcome.final_state === "completed" ? 0 : EXITED_NOT_LANDED_EXIT;
+  return { taskId, outcome, exitCode };
 }
 
 /** adopt 一个孤儿 worker（pid 存活且 cmdline 吻合）：纳入超时监管——轮询 pid 存活性（代替 child_process
@@ -5504,7 +5685,18 @@ export async function runResidentLoop(opts: ResidentOptions): Promise<number> {
 
   /** worker 终态记账（spawnSelected 与 adoptOrphanWorker 共用，⛔ 不各写一遍）：结果入 results + 重试上限
    *  （exited-not-landed 达上限标 needs-human）+ 快速死亡退避。spawnSelected 与 adopt 的 worker 退出后
-   *  走同一归宿。 */
+   *  走同一归宿。
+   *
+   *  AC4（gap-reconcile-books-exited-orphan-with-commits-as-failed-instead-of-adopting-its-fan-in）——
+   *  死孤儿的重试上限处置【已裁定】，两条路径据此分叉：
+   *   · 【有产出】死孤儿 ⇒ resumeExitedOrphanFanIn 真跑了机械 fan-in ⇒ 结果【与正常 worker 同一归宿】：
+   *     landed ⇒ completed（不计数，已落地）；fan-in 拒绝 ⇒ exited-not-landed（照常计数，含既有豁免：
+   *     ff-not-fast-forward / unrelated-flaky / AC 短路动作分叉）。理由：它现在是一条【被测量的落地尝试】，
+   *     是任务质量信号，理应按任务质量规则记账。
+   *   · 【无产出】死孤儿 ⇒ 保持今天的行为：finalizeOrphanDispatch 直接 appendOutcomeToFile 写
+   *     `failed: orphaned`，⛔ 返回值不入 results / 不进本函数 ⇒ 结构性不烧重试预算。理由：它是
+   *     【基建事件】（driver 重启夹住了 worker 的退出、worker 尚无任何产出），不是任务质量信号——把它
+   *     计入连续未落地会因基建原因把任务 park。 */
   const onWorkerFinished = (rw: RunningWorker, r: WorkerRunResult): WorkerRunResult => {
     rw.done = true;
     results.push(r);
@@ -5748,6 +5940,23 @@ export async function runResidentLoop(opts: ResidentOptions): Promise<number> {
     for (const { taskId, record } of orphanDispatchCandidates(store, running.map((r) => r.task))) {
       const cls = classifyOrphanDispatch(record, "/proc", workerName);
       if (cls === "finalize") {
+        // 死孤儿【有产出】⇒ 跑与正常退出 worker 相同的机械 fan-in 接管，而不是记 failed:orphaned
+        // （gap-reconcile-books-exited-orphan-with-commits-as-failed-instead-of-adopting-its-fan-in；
+        // 实测 81 次里 66 次 worktree 有提交）。fan-in 从 worktree 自身状态判落地，⛔ 不需要死进程的
+        // 退出码；结果经 onWorkerFinished 记账（AC4：与正常 worker 结果【同一】处置——见下）。
+        if (shouldResumeExitedOrphan({ root: rootDir, taskId, record })) {
+          const rw = {} as RunningWorker;
+          rw.task = taskId;
+          rw.done = false;
+          rw.startedAtMs = record.startedAtMs; // 原始派发时刻（⛔ 不是接管时刻——fan-in 窗口 elapsed 真起点）
+          rw.promise = resumeExitedOrphanFanIn({
+            rootDir, outcomeFile, record, inFlightCount: running.length + 1,
+          }).then((r) => onWorkerFinished(rw, r));
+          running.push(rw);
+          coldInflight.delete(taskId);
+          if (json) process.stdout.write(`${JSON.stringify({ event: "orphan-resumed-after-exit", task: taskId, worker_pid: record.workerPid, run_id: record.runId })}\n`);
+          continue;
+        }
         const res = finalizeOrphanDispatch({ root: rootDir, outcomeFile, record, workerName });
         if (res.refusedLiveWorker) {
           // 存活闸兜底（⛔ workerName 解析失败时这里仍拦住——闸用名字无关的 /proc 存在性）：pid 仍存活
