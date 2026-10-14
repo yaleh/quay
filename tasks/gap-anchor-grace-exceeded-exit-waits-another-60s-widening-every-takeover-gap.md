@@ -2,7 +2,7 @@
 id: gap-anchor-grace-exceeded-exit-waits-another-60s-widening-every-takeover-gap
 title: anchor 宽限超时「exiting anyway」后又白等 min(60s,grace)：每次接管多出 ~60s 无 driver
   间隙（ClaudeCodeUI 7/7、quay 多数）
-status: todo
+status: ready
 labels:
   - gap
   - defect
