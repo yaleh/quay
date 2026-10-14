@@ -2,7 +2,7 @@
 id: gap-reconcile-books-exited-orphan-with-commits-as-failed-instead-of-adopting-its-fan-in
 title: "driver 重启/anchor 接管间隙内退出的 worker（worktree 有提交）被 reconcile 记成 failed:
   orphaned，而不是接着跑它的机械 fan-in（81 次，66 次带提交）"
-status: todo
+status: ready
 labels:
   - gap
   - defect
