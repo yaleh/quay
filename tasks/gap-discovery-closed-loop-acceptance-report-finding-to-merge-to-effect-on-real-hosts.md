@@ -47,5 +47,6 @@ with **origin** recorded as autonomous-routine / autonomous-experiment / operato
 ## Touches
 - tasks/gap-discovery-closed-loop-acceptance-report-finding-to-merge-to-effect-on-real-hosts.md
 - plugin/scripts/discovery-closed-loop-report.ts
-- plugin/scripts/capability-catalog.sh
 - plugin/test/discovery-closed-loop-report.test.mjs
+- plugin/scripts/capability-catalog.sh
+- plugin/scripts/capability-catalog-declarations.json
