@@ -164,8 +164,8 @@ with `SUITE-INCOMPLETE reason=oom-killed`. Both causes were read out of the arte
 
 ## Blocker
 
-**2026-10-14T14:40:01.689Z — worker 未落地（exited-not-landed）**
+**2026-10-14T17:29:57.975Z — worker 未落地（exited-not-landed）**
 
-- 未落地原因：step=suite: AssertionError [ERR_ASSERTION]: the rebuild must be INTERLEAVED, not one long block (worst stall 6119 ms vs build wall 11977 ms over 580 turns; idle floor 13 ms) [baseline A/B: HARD RED (task-introduced-red) — the task's red set is NOT a subset of the develop baseline red set: added=packages/quay/test/gap-ac179-criterion-cold-miss-dashboard-snapshot.test.mjs,packages/quay/test/serve-system-body-i18n.test.mjs,packages/quay/test/serve-live-body-i18n.test.mjs,packages/quay/test/serve-live-body-i18n.test.mjs changed=-]
+- 未落地原因：step=suite: oom-killed (1) — recovery exhausted at floor concurrency 32 — no declared rung produced a complete verdict (64,48,32); needs a code/config fix, see plugin/scripts/full-suite-runner.ts
 - run_id：wk-prod-anchor
-- session_id：484bdc18-a960-47f3-b0e2-ac2f4e0de437
+- session_id：57fbcbc8-f58b-4e57-8e0f-a6feef0ff1c9
