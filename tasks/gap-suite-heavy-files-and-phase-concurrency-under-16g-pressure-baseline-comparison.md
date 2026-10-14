@@ -11,6 +11,8 @@ depends_on:
   - gap-suite-verdict-green-on-oom-killed-incomplete-run-lands-on-11-percent-of-files
   - gap-suite-memory-telemetry-anon-file-shmem-swap-psi-concurrency-process-tree-unknown-not-zero
   - gap-test-spawned-resident-drivers-outlive-their-suite-no-process-group-reaping
+  - gap-quality-gate-driver-loop-watchdog-test-hangs-since-e18ec4b04
+  - gap-suite-resource-measurement-needs-a-host-adapter-not-inline-cgroup-calls
 ---
 ## Proposal
 **Human direction 2026-10-14: the 16 GiB suite MemoryMax is a deliberate pressure constraint meant to drive test optimization. It must not be "fixed" just by raising it to 24/26 GiB.** This task does the optimization and the controlled concurrency comparison under 16 GiB. Only if that comparison shows 16 GiB cannot hold does it compare 20/24.

@@ -1738,6 +1738,13 @@ export function computeWorkerRoundRecord(opts: {
   /** SPEC-goal-branch §4.9（裁定⑧⑰）：本轮检出的「无 goal_ac 且 Touches 与 branch-mode goal 在飞任务
    *  重叠」读数（只报告不阻塞）。空数组 = 跑过且无重叠（⛔ 与「没跑」可区分——后者为 null）。 */
   goalBranchUntaggedOverlaps?: GoalBranchUntaggedOverlap[] | null;
+  /** 本轮因 kind 停机【脱钩】交给下一个循环的在飞 task（gap-worker-kind-stop-waits-for-all-in-flight-
+   *  workers-instead-of-detaching-for-adoption）。非空 = 本循环退环时把它们的 adopt / 退出后 fan-in
+   *  交给了下一个循环 ⇒ 「停机时留下在飞并退环」在盘上可读（生产 driver argv 无 --json，round 记录
+   *  是这件事唯一的可观测载体）。空 = 本轮没有脱钩发生。 */
+  detachedWorkers?: string[];
+  /** 同上，但【不可脱钩】（收尾流水线已在跑）：停机轮要等它们收尾才能退环。空 = 无。 */
+  undetachableWorkers?: string[];
 }) {
   return {
     ts: opts.at,
@@ -1770,6 +1777,9 @@ export function computeWorkerRoundRecord(opts: {
     merge_targets: opts.mergeTargets ?? {},
     // SPEC-goal-branch §4.9：未标注重叠读数（空数组 = 跑过且无；null = 没跑该步）。
     goal_branch_untagged_overlaps: opts.goalBranchUntaggedOverlaps ?? null,
+    // gap-worker-kind-stop-…：kind 停机轮的在飞归宿（脱钩 / 不可脱钩）。恒有该字段（空数组 = 本轮无）。
+    detached_workers: opts.detachedWorkers ?? [],
+    undetachable_workers: opts.undetachableWorkers ?? [],
   };
 }
 
@@ -4976,11 +4986,14 @@ export function adoptOrphanWorker(opts: {
   /** 测试缝：替身化【退出后流水线】里的真机械 fan-in（缺省 spawnMechanicalFanIn）。透传给
    *  resumeExitedOrphanFanIn（本仓库 suite 分钟级，单测不跑真 fan-in）。 */
   fanInRunner?: MechanicalFanInRunner;
+  /** 停机脱钩信号（常驻环注入）：同 runOneWorker——脱钩后本循环不再收尾这个被接管的 worker。 */
+  detachSignal?: WorkerDetachSignal;
 }): Promise<WorkerRunResult> {
   const {
     taskId, rootDir, outcomeFile, record, procDir = "/proc",
     inFlightCount = 1, pollMs = 100, sigkillGraceMs = 5000,
   } = opts;
+  const isDetached = (): boolean => opts.detachSignal?.detached === true;
   return new Promise((resolve) => {
     let timedOut = false;
     let sigtermSentAt: number | null = null;
@@ -5031,8 +5044,12 @@ export function adoptOrphanWorker(opts: {
 
     const finish = (): void => {
       if (finished) return;
+      // 已脱钩 ⇒ 接管方（本循环）不再收尾：不写 outcome、不删派发记录（下一个循环照常 adopt 它）。
+      if (isDetached()) return;
       finished = true;
       if (timer) clearTimeout(timer);
+      // 跨进收尾流水线 ⇒ 此后再不可脱钩（同 runOneWorker.finishAsync 的理由：双 fan-in 防护）。
+      if (opts.detachSignal) opts.detachSignal.pipelineStarted = true;
       // 超时 ⇒ 原路径；自然退出 ⇒ 采纳（fan-in 接管）。两分支【互斥】且都不再走「只读 status」的旧路。
       if (!timedOut) { void finishAdopted(); return; }
       finishTimedOut();
@@ -5040,6 +5057,8 @@ export function adoptOrphanWorker(opts: {
 
     const tick = (): void => {
       if (finished) return;
+      // 已脱钩 ⇒ ⛔ 停止轮询，尤其**不**按原始 deadline 杀这个 worker（超时监管随脱钩交给新循环）。
+      if (isDetached()) return;
       const now = Date.now();
       // 原始超时截止到期（adopt 前已过期 / 轮询中到期）⇒ SIGTERM 一次（沿用原始截止，⛔ 不重置）。
       if (!timedOut && record.timeoutDeadlineMs > 0 && now >= record.timeoutDeadlineMs) {
@@ -5126,6 +5145,47 @@ export function acShortCircuitVerdict(worktree: string, taskId: string): { short
   return { shortCircuit: true, reason: `AC 未全勾（任务体读不懂：tasks/${taskId}.md 缺失或不可读）——续做需补齐并勾选 AC` };
 }
 
+/** 停机脱钩信号（gap-worker-kind-stop-waits-for-all-in-flight-workers-instead-of-detaching-for-
+ *  adoption）：kind 停机时，本循环把在飞 worker【脱钩】留给下一个循环，而不是等它跑完。
+ *
+ *  WHY（实测 2026-10-14 08:06Z，r6 dist 内核，两个 worker 在飞）：`restart --kind worker` 等了
+ *  60289ms 后 `stop-failed` → `restart-aborted`。成因是派发环**只在 `running.length === 0` 时退出**
+ *  （见环尾那两支），而 worker 会话是分钟~小时级的 ⇒ 「有在飞就重启不了」，在繁忙主机上几乎恒真。
+ *
+ *  为什么脱钩不丢工作：worker 会话是**独立 OS 进程**（SPEC §6.9 不变式 3），派发记录已落盘；下一个
+ *  循环的 reconcile 会 adopt 存活的孤儿、并在它退出后跑机械 fan-in（两条都已落地），整机 SIGTERM
+ *  接管走的正是这条路。**唯一**不能脱钩的时刻是收尾流水线（机械 fan-in）已经开跑——那时产出只能由
+ *  跑它的循环收尾，否则下一个循环会把这同一个 dispatch 当孤儿再跑一次 fan-in（双 fan-in）。
+ *
+ *  `pipelineStarted` 由 worker 侧在**跨进流水线的同一同步步**里置位（`finishAsync` / adopt 的
+ *  `finish()` 顶部），`detached` 由循环侧经 `makeDetachFn` 置位；二者都是同步读写的同一份状态。
+ *  ⛔ 缺省（两个字段都 falsy）= 「可脱钩」。 */
+export interface WorkerDetachSignal {
+  /** 已脱钩：本循环对该 worker 的全部收尾路径失效（不写 outcome / 不跑 fan-in / 不删派发记录 / 不杀）。 */
+  detached?: boolean;
+  /** 收尾流水线已开跑（机械 fan-in / 终态写盘）⇒ 不可再脱钩。 */
+  pipelineStarted?: boolean;
+  /** 脱钩时跑的**一次性清理**（worker 侧注册，`makeDetachFn` 调用）。存在的理由：脱钩后旧循环虽然
+   *  不再管这个 worker，但它挂在本进程事件循环上的 handle 仍会把进程钉住——而「循环已停」这个判据
+   *  读的正是进程退出（legacy）或 pid 文件摘除（anchor）。见 runOneWorker 里那条注册。 */
+  onDetach?: Array<() => void>;
+}
+
+/** 由 worker 侧共享的脱钩信号造出 `RunningWorker.detach`（**单一实现**，⛔ 三个创建点不各写一遍）。
+ *  返回 `true` = 已脱钩（留给下一个循环）；`false` = 不可脱钩（收尾流水线已在跑，退环要等它收尾）。
+ *  ⚠️ 判定与置位之间**没有 await**（`pipelineStarted` 由 worker 侧在跨进流水线的同一同步步里置位）
+ *  ⇒ 「fan-in 已开跑却仍被判可脱钩」在时序上不存在（JS 单线程）。 */
+export function makeDetachFn(sig: WorkerDetachSignal): () => boolean {
+  return () => {
+    if (sig.pipelineStarted) return false;
+    sig.detached = true;
+    for (const fn of sig.onDetach ?? []) {
+      try { fn(); } catch { /* 清理失败 ⛔ 不能让脱钩本身失败（脱钩的语义由 detached 承载） */ }
+    }
+    return true;
+  };
+}
+
 /**
  * spawn 一个 worker 并等待其终态（含超时 SIGTERM）。超时 ⇒ kill("SIGTERM")，close 事件带 signal=SIGTERM，
  * timedOut 标记落 outcome final_state=timed-out（worktree_preserved=true，⛔ 不清理——SPEC §1 设计点3
@@ -5138,6 +5198,10 @@ export function acShortCircuitVerdict(worktree: string, taskId: string): { short
  * ⇒ transcript 落 `~/.claude/projects/<slug>/<uuid>.jsonl`）。⛔ `--worker-cmd-exact` 测试缝（`node -e …`/`sleep` 等
  * 假命令）不追加（假命令不接受该 flag，追加会误杀全部既有测试）——但 session_id 仍生成并落盘
  * （AC1 的「每行有 session_id」对测试缝同样成立，只是不进 argv）。
+ *
+ * ⚠️ `detachSignal`（gap-worker-kind-stop-waits-for-all-in-flight-workers-instead-of-detaching-for-
+ * adoption）：kind 停机把在飞 worker 交给下一个循环时由 `RunningWorker.detach` 置位。见
+ * `WorkerDetachSignal` 的 WHY——置位后本函数对该 worker 的**全部**收尾路径失效。
  */
 function runOneWorker({
   taskId,
@@ -5153,6 +5217,7 @@ function runOneWorker({
   sessionId = newSessionId(),
   injectSessionId = true,
   judgeQuickDeath,
+  detachSignal,
 }: {
   taskId: string;
   selectorReason: string;
@@ -5169,8 +5234,11 @@ function runOneWorker({
   /** 快速死亡判定回调（常驻环注入；批量路径不注入）。见 QuickDeathJudge 的头注释——判定必须在
    *  载体落盘【之前】发生，否则跨任务关联命中的那条记录会在载体里写成 ordinary。 */
   judgeQuickDeath?: QuickDeathJudge;
+  /** 停机脱钩信号（常驻环注入；批量路径不注入——那条路没有 kind 停机语义）。 */
+  detachSignal?: WorkerDetachSignal;
 }): Promise<WorkerRunResult> {
   const argv = injectSessionId ? [...workerArgv, "--session-id", sessionId] : workerArgv;
+  const isDetached = (): boolean => detachSignal?.detached === true;
   return new Promise((resolve) => {
     const [cmd, ...cmdArgs] = argv;
     const startedAtMs = Date.now();
@@ -5205,6 +5273,12 @@ function runOneWorker({
 
     const finish = (code: number | null, signal: string | null, spawnErr: string | null, mechResult: MechanicalFanInResult | null = null, shortCircuitReason: string | null = null) => {
       if (finished) return;
+      // 已脱钩（kind 停机把本 worker 交给了下一个循环）⇒ 本循环对它**一行都不做**：不写 outcome、
+      // 不跑机械 fan-in、不删派发记录、不投影 blocker。它的归宿改由 adopt 它的新循环承当
+      // （gap-worker-kind-stop-waits-for-all-in-flight-workers-instead-of-detaching-for-adoption）。
+      // ⛔ 这一句必须与 finishAsync 顶部那句【同时】存在：fan-in 在 finish 之前跑，只挡住 finish 会让
+      // 机械 fan-in 白跑一趟、产出被丢弃而派发记录仍被删 ⇒ 下一个循环无从 adopt。
+      if (isDetached()) return;
       finished = true;
       if (timer) clearTimeout(timer);
       const endedAtMs = Date.now();
@@ -5337,6 +5411,13 @@ function runOneWorker({
     // 计算 landing 前先跑机械 fan-in ⇒ 成功则 landing=completed（status=done ∧ 无残留 worktree）。
     const finishAsync = async (code: number | null, signal: string | null, spawnErr: string | null): Promise<void> => {
       if (finished) return;
+      // 已脱钩 ⇒ 退出流水线**一步都不进**（⛔ 尤其不 spawn 机械 fan-in）。
+      if (isDetached()) return;
+      // 一步跨进收尾流水线 ⇒ 此后再不可脱钩：fan-in 一旦开跑，它的产出只能由本循环收尾，
+      // 中途脱钩会让下一个循环把同一个 dispatch 当孤儿**再跑一次 fan-in**（双 fan-in）。
+      // ⛔ 本行与 `detach()` 里的 `pipelineStarted` 读是同一份同步状态，二者之间没有 await
+      // （JS 单线程）⇒ 「fan-in 已开跑却仍被脱钩」这一步在时序上不存在。
+      if (detachSignal) detachSignal.pipelineStarted = true;
       let mechResult: MechanicalFanInResult | null = null;
       let shortCircuitReason: string | null = null;
       if (code === 0 && !spawnErr) {
@@ -5419,8 +5500,24 @@ function runOneWorker({
       });
     }
 
+    // 脱钩的**清理半边**（见 `WorkerDetachSignal.onDetach`）：脱钩后这个 worker 仍然活着，但它这条
+    // stderr pipe 挂在**本进程**的事件循环上 ⇒ 不解引用的话，循环 return 之后进程仍不退出
+    // （实测：`child.stderr` 是唯一把它钉住的 handle，`child.unref()` 单独不够）。
+    // 「循环已停」的判据读的正是进程退出（legacy）或 pid 文件摘除（anchor 侧 startKindTask）⇒
+    // 不解引用就等于 `stop --kind worker` 永远等不到循环收尾，本任务白修。
+    // ⛔ 不 destroy / 不摘监听：stderr 照常转发（人的可观测性不变），只是不再把进程钉住。
+    if (detachSignal) {
+      (detachSignal.onDetach ??= []).push(() => {
+        try { child?.unref(); } catch { /* 已退出 */ }
+        try { (child?.stderr as { unref?: () => void } | null | undefined)?.unref?.(); } catch { /* 管道已关 */ }
+      });
+    }
+
     if (timeoutMs > 0) {
       timer = setTimeout(() => {
+        // 已脱钩 ⇒ ⛔ 不杀：超时监管随脱钩一并移交给 adopt 它的新循环（它沿用同一份
+        // `timeoutDeadlineMs`，到期自己 SIGTERM ⇒ 语义不变，只是执行者换成活着的那一个循环）。
+        if (isDetached()) return;
         timedOut = true;
         // 超时 ⇒ SIGTERM worker（保留 worktree）。close 事件随后触发并带走 signal=SIGTERM。
         try { child!.kill("SIGTERM"); } catch { /* 已退出 */ }
@@ -5443,6 +5540,12 @@ interface RunningWorker {
    *  elapsed-zero：Live 页 fan-in 窗口 elapsed 需真起点，driver 派发时已知）。 */
   startedAtMs: number;
   promise: Promise<WorkerRunResult>;
+  /** 停机脱钩（gap-worker-kind-stop-waits-for-all-in-flight-workers-instead-of-detaching-for-
+   *  adoption）：kind 停机时把本 worker 留给下一个循环。返回 `true` = 已脱钩；`false` = **不可脱钩**
+   *  （收尾流水线已在跑，见 `WorkerDetachSignal.pipelineStarted`）——那种条目必须等它自己收尾完，
+   *  ⛔ 不能退环（退环会让它的产出无人认领、派发记录留着 ⇒ 下一个循环再跑一次 fan-in）。
+   *  三个创建点（spawnSelected / adopt / resume-fan-in）各经 `makeDetachFn` 或恒 `false` 给出。 */
+  detach: () => boolean;
 }
 
 /** 常驻循环的选项（`main` 无 --task 分支装配后传入）。 */
@@ -5590,7 +5693,7 @@ export async function runResidentLoop(opts: ResidentOptions): Promise<number> {
   // round 心跳（AC138-3）：worker-outcome 只在任务真完成时写，池空时 outcome 停更会被 supervisor
   // status 的 last_record_ts（读全载体 max）误读为「死亡」；round 每轮循环无条件写一条作 liveness 直接量。
   const roundFile = path.join(rootDir, WORKER_ROUND_REL);
-  const writeRound = (round: number, inFlight: number, pool: number | null, reason: string | null, liveness: LivenessResult | null, reconciled: string[], supersededReclaim: ReclaimSupersededResult | null): void => {
+  const writeRound = (round: number, inFlight: number, pool: number | null, reason: string | null, liveness: LivenessResult | null, reconciled: string[], supersededReclaim: ReclaimSupersededResult | null, detached: { detached: string[]; undetachable: string[] } = { detached: [], undetachable: [] }): void => {
     computeGoalBranchReading(); // SPEC-goal-branch §4.3/§4.9：写记录前现读本轮在飞任务的落地目标与未标注重叠
     const record = computeWorkerRoundRecord({
       round,
@@ -5629,6 +5732,10 @@ export async function runResidentLoop(opts: ResidentOptions): Promise<number> {
       // SPEC-goal-branch §4.3/§4.9（闭包读，见 goalBranchTargets 的声明注释）。
       mergeTargets: goalBranchTargets ?? {},
       goalBranchUntaggedOverlaps: goalBranchOverlaps,
+      // gap-worker-kind-stop-waits-for-all-in-flight-workers-instead-of-detaching-for-adoption：
+      // kind 停机轮里【脱钩交给下一个循环】与【不可脱钩（收尾流水线在跑）】的在飞 task。
+      detachedWorkers: detached.detached,
+      undetachableWorkers: detached.undetachable,
     });
     try { appendRoundToFile(roundFile, record); } catch { /* 记录写失败不致命（运行时日志，⛔ 不因日志炸循环） */ }
     if (json) process.stdout.write(`${JSON.stringify({ event: "round", ...record })}\n`);
@@ -5911,6 +6018,10 @@ export async function runResidentLoop(opts: ResidentOptions): Promise<number> {
     // gap-live-fan-in-window-elapsed-zero：派发时刻（driver 决定 spawn 该 task 的此刻）——round 载体
     // in_flight_task_starts 的真起点，readLive 据此算 fan-in 窗口 elapsed（⛔ 恒 nowMs 的旧行为）。
     rw.startedAtMs = Date.now();
+    // 停机脱钩信号（gap-worker-kind-stop-…）：worker 侧与循环侧共享同一份对象——循环置 `detached`，
+    // worker 侧在跨进收尾流水线时置 `pipelineStarted`。
+    const detachSignal: WorkerDetachSignal = {};
+    rw.detach = makeDetachFn(detachSignal);
     rw.promise = runOneWorker({
       taskId: sel.task,
       selectorReason: sel.reason,
@@ -5925,6 +6036,7 @@ export async function runResidentLoop(opts: ResidentOptions): Promise<number> {
       injectSessionId: workerCmdOpts.exact == null,
       // 判定注入：写载体之前跑（见 QuickDeathJudge），onWorkerFinished 消费结论、⛔ 不再重算。
       judgeQuickDeath: judgeQuickDeathFor(sel.task),
+      detachSignal,
     }).then((r) => onWorkerFinished(rw, r));
     running.push(rw);
     if (json) {
@@ -5952,12 +6064,30 @@ export async function runResidentLoop(opts: ResidentOptions): Promise<number> {
   // 地板 race：等【任一 worker 退出】或【地板到期】取先到者。⛔ 地板定时器必须在 race 结束时清除
   // （gap-worker-driver-reconcile-interval AC 前置）：worker 先退出时，未触发的 setTimeout 仍挂起会让
   // 驱动进程在循环 break 后多活 reconcileMs 秒（默认 300s）——halt 后 driver 不退出 = 静默停摆的镜像。
-  const raceWithFloor = (runningWorkers: RunningWorker[], floorMs: number): Promise<unknown> => {
+  const raceWithFloor = (runningWorkers: RunningWorker[], floorMs: number, extra: Promise<unknown>[] = []): Promise<unknown> => {
     let timer: ReturnType<typeof setTimeout> | null = null;
     const floor = new Promise<void>((resolve) => { timer = setTimeout(resolve, floorMs); });
-    return Promise.race([...runningWorkers.map((r) => r.promise), floor]).finally(() => {
+    return Promise.race([...runningWorkers.map((r) => r.promise), ...extra, floor]).finally(() => {
       if (timer) clearTimeout(timer);
     });
+  };
+
+  /** 停机唤醒（gap-worker-kind-stop-…）：`workerStopRequested()` 为真即立刻 resolve。与 `sleep` 同源
+   *  （分片轮询，`WORKER_STOP_POLL_MS`），但**不阻塞**——它只与「等 worker 退出 / 地板到期」一起 race，
+   *  让停机请求能打断在飞等待。⛔ 缺它的话，停机请求要等满地板（`reconcileMs` 缺省 300s，≫ 60000ms
+   *  停机窗）才被看见——那正是本任务修的那个 `stop-failed` 的另一个成因面。
+   *  ⚠️ 调用方**必须** `dispose()`（clearInterval）：挂着的 interval 会让驱动进程在循环 break 后仍不退出，
+   *  与 `raceWithFloor` 的定时器同一条纪律。 */
+  const stopWake = (): { promise: Promise<void>; dispose: () => void } => {
+    let timer: ReturnType<typeof setInterval> | null = null;
+    let resolveOnce: (() => void) | null = null;
+    const promise = new Promise<void>((resolve) => { resolveOnce = resolve; });
+    timer = setInterval(() => {
+      if (!workerStopRequested()) return;
+      if (timer) { clearInterval(timer); timer = null; }
+      resolveOnce?.();
+    }, WORKER_STOP_POLL_MS);
+    return { promise, dispose: () => { if (timer) { clearInterval(timer); timer = null; } } };
   };
 
   // gap-worker-driver-restart-orphan-no-outcome-no-timeout：reconcile 步处理 dispatch 持久记录里、但不在
@@ -5983,6 +6113,9 @@ export async function runResidentLoop(opts: ResidentOptions): Promise<number> {
           rw.task = taskId;
           rw.done = false;
           rw.startedAtMs = record.startedAtMs; // 原始派发时刻（⛔ 不是接管时刻——fan-in 窗口 elapsed 真起点）
+          // ⛔ 不可脱钩，恒 `false`：这条分支一进来就【同步开跑】了退出后流水线（机械 fan-in），
+          // 它的产出只能由本循环收尾（中途退环 ⇒ 下一个循环把同一 dispatch 当孤儿再跑一次 fan-in）。
+          rw.detach = () => false;
           rw.promise = resumeExitedOrphanFanIn({
             rootDir, outcomeFile, record, inFlightCount: running.length + 1,
           }).then((r) => onWorkerFinished(rw, r));
@@ -6005,8 +6138,12 @@ export async function runResidentLoop(opts: ResidentOptions): Promise<number> {
         rw.task = taskId;
         rw.done = false;
         rw.startedAtMs = record.startedAtMs; // 原始派发时刻（⛔ 不是 adopt 时刻——fan-in 窗口 elapsed 真起点）
+        // 停机脱钩（同 spawnSelected）：被接管的 worker 只要还没进退出流水线，就可以再一次被下一个
+        // 循环接管（链式停机/重启不会把它的归宿弄丢）。
+        const detachSignal: WorkerDetachSignal = {};
+        rw.detach = makeDetachFn(detachSignal);
         rw.promise = adoptOrphanWorker({
-          taskId, rootDir, outcomeFile, record, inFlightCount: running.length + 1,
+          taskId, rootDir, outcomeFile, record, inFlightCount: running.length + 1, detachSignal,
         }).then((r) => onWorkerFinished(rw, r));
         running.push(rw);
         coldInflight.delete(taskId);
@@ -6203,15 +6340,49 @@ export async function runResidentLoop(opts: ResidentOptions): Promise<number> {
         await spawnSelected(sel);
       }
 
+      // 2'. kind 停机（`stop --kind worker` / `restart --kind worker`）⇒ 在飞 worker **脱钩**留在原地
+      //     （见 `WorkerDetachSignal`），本循环立刻退环、把控制权交回 anchor。
+      //     WHY：anchor 的停机等待窗只有 60000ms，而 `running.length === 0` 那一支要等**每个**在飞
+      //     worker 会话跑完（分钟~小时级）⇒ 有在飞就**必然** `stop-failed`/`restart-aborted`（实测
+      //     2026-10-14 08:06Z：2 个在飞，60289ms 后 stop-failed）。脱钩不丢工作：worker 是独立 OS 进程、
+      //     派发记录已落盘，下一个循环的 reconcile 会 adopt 它并在它退出后跑机械 fan-in。
+      //     ⛔ 例外是本轮不能退的那一支：收尾流水线（机械 fan-in）**已经在跑**的条目（`detach()`
+      //     返回 false）——它的产出只能由跑它的循环收尾，退环会让下一个循环把同一 dispatch 当孤儿
+      //     再跑一次 fan-in。那种轮次只等这些条目收尾（下面 wait-in-flight 的停机分支）。
+      step = "kind-stop";
+      const stopRequestedNow = workerStopRequested();
+      const detachedTasks: string[] = [];
+      const undetachableRws: RunningWorker[] = [];
+      if (stopRequestedNow) {
+        for (const rw of running) {
+          if (rw.detach()) detachedTasks.push(rw.task);
+          else undetachableRws.push(rw);
+        }
+      }
+
       // AC138-3 无条件心跳：每轮循环写一条（⛔ 池空/判停轮也写——outcome 在这些轮不写）。
       //   终态 stopReason 与瞬时 waitReason 都记 action=stop（观测面保留 stop_reason 读数，AC2）。
       step = "write-round";
-      writeRound(round, running.length, poolSeen, stopReason ?? waitReason, liveness, reconciled, supersededReclaimResult);
+      writeRound(round, running.length, poolSeen, stopReason ?? waitReason, liveness, reconciled, supersededReclaimResult, { detached: detachedTasks, undetachable: undetachableRws.map((rw) => rw.task) });
 
-      // 3. 无在飞 ⇒ 终态 halt（stopReason latch）才退出；瞬时 WAIT（池可能再补 / 闸可能已放行）⇒
+      // 3. kind 停机请求已到 ∧ 没有「收尾流水线已在跑」的在飞 ⇒ 立刻退环，⛔ 不等在飞跑完。
+      //    （生产 driver argv 无 --json ⇒ 退环这件事的可观测载体是 round 记录的 detached_workers
+      //     与 anchor.log 的 `loop returned`，不是下面这条 json 事件。）
+      if (stopRequestedNow && undetachableRws.length === 0) {
+        if (json) {
+          process.stdout.write(
+            `${JSON.stringify({ event: "worker-loop-detached", round, tasks: detachedTasks })}\n`,
+          );
+        }
+        break;
+      }
+
+      // 3'. 无在飞 ⇒ 终态 halt（stopReason latch）才退出；瞬时 WAIT（池可能再补 / 闸可能已放行）⇒
       //    等 intervalMs 重读，⛔ 不退出（gap-worker-driver-stopreason-latch-permanent-stop AC3）。
+      //    ⚠️ kind 停机在上一支已处理，此处**只**剩 stopReason（halt）——⛔ 不再重复判 workerStopRequested()
+      //    （重复判会让「已停机 ∧ 无在飞」这条轮次多写一条无意义的 stop round）。
       if (running.length === 0) {
-        if (stopReason || workerStopRequested()) break;
+        if (stopReason) break;
         step = "sleep";
         await sleep(intervalMs);
         continue;
@@ -6222,15 +6393,27 @@ export async function runResidentLoop(opts: ResidentOptions): Promise<number> {
       //    边沿事件（worker 退出）全丢也降级「慢但正确」而非「静默停摆」。复用 routine-scheduler.isDue
       //    的 interval 判定（⛔ 不新造定时器/判定）：isDue 的 interval 单位是分钟 ⇒ minutes = reconcileMs/60000。
       step = "wait-in-flight";
-      if (reconcileMs > 0) {
-        const nowMs = Date.now();
-        const floorElapsed = isDue({ kind: "interval", minutes: reconcileMs / 60_000 }, { now: nowMs, lastRun: passStartMs });
-        const floorMs = floorElapsed ? 0 : Math.max(0, passStartMs + reconcileMs - nowMs);
-        // ⛔ 地板定时器必须在 race 结束时 clearTimeout：worker 先退出时，未触发的 setTimeout 仍挂起会让
-        // 驱动进程在循环 break 后多活 reconcileMs 秒（默认 300s）——halt 后 driver 不退出、测试/生产停摆。
-        await raceWithFloor(running, floorMs);
-      } else {
-        await Promise.race(running.map((r) => r.promise));
+      // 停机已请求（但还有不可脱钩的条目在收尾）⇒ **只**等它们：脱钩的那些 promise 永不 resolve
+      // （本循环已放弃它们的收尾），而停机信号本身在这里 race 会让循环空转。
+      if (stopRequestedNow) {
+        if (undetachableRws.length > 0) await Promise.all(undetachableRws.map((rw) => rw.promise));
+        continue;
+      }
+      // 停机唤醒与本步的等待一起 race ⇒ 停机请求到达即结束等待（⛔ 不等满地板也不等在飞退出）。
+      const stopNow = stopWake();
+      try {
+        if (reconcileMs > 0) {
+          const nowMs = Date.now();
+          const floorElapsed = isDue({ kind: "interval", minutes: reconcileMs / 60_000 }, { now: nowMs, lastRun: passStartMs });
+          const floorMs = floorElapsed ? 0 : Math.max(0, passStartMs + reconcileMs - nowMs);
+          // ⛔ 地板定时器必须在 race 结束时 clearTimeout：worker 先退出时，未触发的 setTimeout 仍挂起会让
+          // 驱动进程在循环 break 后多活 reconcileMs 秒（默认 300s）——halt 后 driver 不退出、测试/生产停摆。
+          await raceWithFloor(running, floorMs, [stopNow.promise]);
+        } else {
+          await Promise.race([...running.map((r) => r.promise), stopNow.promise]);
+        }
+      } finally {
+        stopNow.dispose();
       }
     } catch (err) {
       // 错误边界：写 error round + resident-error 事件，sleep 后继续（⛔ 不静默死、不 hot-loop 烧 CPU）。

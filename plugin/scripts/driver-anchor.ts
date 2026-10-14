@@ -232,15 +232,24 @@ function startKindTask(
 //      接管（那时双派发在结构上不可能——旧进程已经不在）。真的等不到（观察窗内旧 pid 始终不退）才
 //      放弃，且必须留下**机器可读**的记录，⛔ 不是只打一行日志。
 
-/** 旧 anchor 的**真实最坏退出时间**（ms）。与 runAnchor 的两段**有界**等待逐字对应：
- *   ① 有界停机宽限 `shutdownGraceMs`（下面 `stopping` 支超时即 break）；
- *   ② 循环收尾等待 `Math.min(60_000, shutdownGraceMs)`（收尾循环那句）。
- *  ⚠️ 它是**代码里两段等待的上界**，⛔ 不是「这个进程一定会在此时刻前退出」的保证——调度抖动可以让
- *  reconcile 的 500ms 定时器晚到几十秒（2026-09-18 实测：宽限 120s 的那段实际走了 162s）。正因为
- *  这一点，D3 必须让「超预算」可继续，⛔ 不能靠把余量调大来掩盖。 */
+/** 旧 anchor 的**真实最坏退出时间**（ms）= 有界停机宽限 `shutdownGraceMs` 本身。
+ *
+ *  ⚠️ 这里**曾经**还有一个 `+ Math.min(60_000, grace)` 项（收尾循环那句「等循环收尾」）。它随
+ *  gap-anchor-grace-exceeded-exit-waits-another-60s-widening-every-takeover-gap 一起**下线**了，
+ *  理由不是「它不准」而是「它已经不存在」：那段收尾等待**只在宽限未被判超时的退出路径上还有意义**，
+ *  而宽限超时那条 break 的判据本身就是「这些循环不会收尾」——为它们再等 `min(60s, 宽限)` 是自相矛盾，
+ *  且实测**几乎必然跑满**（在飞 worker 的 `--timeout` 缺省 0 ⇒ `running.length === 0` 永不成立）。
+ *  ⇒ 现在宽限超时**直接退出**，⛔ 不再有第二段等待；预算里那个项随之下线（硬规则 5b：预算与等待是
+ *  同一个事实的两处写法，⛔ 不能只改一处，否则预算替一个已经不存在的等待留预算）。
+ *  ⚠️ 「宽限到点」到「下一趟 reconcile 察觉」的那个 tick 由 `takeoverBudgetMs` 的 `+ reconcileMs`
+ *  项承担，⛔ 不在本函数里重复计入（否则是同一段延迟算两遍）。
+ *  ⚠️ 它是**代码里那段有界等待的上界**，⛔ 不是「这个进程一定会在此时刻前退出」的保证——调度抖动可以
+ *  让 reconcile 的 500ms 定时器晚到几十秒（2026-09-18 实测：宽限 120s 的那段实际走了 162s）。正因为
+ *  这一点，D3 必须让「超预算」可继续，⛔ 不能靠把余量调大来掩盖。
+ *  ⚠️ **换代期间**（旧 anchor 跑的还是修复前的内核 ⇒ 它仍会白等 `min(60s, 宽限)`）超预算正是 D3 那条
+ *  「继续等、旧 pid 一死就接管」的路，⛔ 不是失败。 */
 export function oldAnchorWorstExitMs(shutdownGraceMs: number): number {
-  const grace = Math.max(0, shutdownGraceMs);
-  return grace + Math.min(60_000, grace);
+  return Math.max(0, shutdownGraceMs);
 }
 
 /** 超预算的余量（ms）：覆盖「停机请求被察觉」的最坏延迟（≤ reconcileMs）与收尾清理。
@@ -411,6 +420,13 @@ export async function runAnchor(opts: AnchorOptions): Promise<number> {
   // anchor 随后退出 = 零 anchor。现在：预算按真实最坏退出派生（D2），且超预算**不等于**放弃接管——
   // 它降级为「继续等旧 pid 退出，一死就接管」（D3）。「放弃」只在观察窗内旧 pid 始终不退时发生，
   // 且必然留一条机器可读记录。
+  //
+  // ⚠️ 2026-10-14，那个「真实最坏退出」本身被**去掉了一项**（gap-anchor-grace-exceeded-exit-waits-
+  // another-60s-widening-every-takeover-gap）：旧 anchor 在宽限超时之后**不再**白等
+  // `min(60s, 宽限)` ⇒ 最坏退出 = 宽限本身（+ 察觉它的那个 reconcile tick），预算随之从
+  // `宽限 + min(60s,宽限) + tick + 余量` 收敛到 `宽限 + tick + 余量`。⇒ 上面那句历史叙述里的
+  // 「宽限 + min(60s, 宽限)」是**修复前**的形态，本文件里它已不存在（`oldAnchorWorstExitMs` 是正本）。
+  // 换代期间旧 pid 仍跑修复前的内核 ⇒ 它会更慢，那正是 D3 那条「继续等」的路，⛔ 不是失败。
   //
   // ⚠️ **「旧 anchor 此刻实际托管什么」的直接量，必须在等待之前取**（本任务）：旧 anchor 正常收尾会
   // 删掉自己的那份发布面（本函数末尾的收尾段）——时机与落点在这里是**耦合**的，等旧进程退出之后再去拿，
@@ -614,6 +630,10 @@ export async function runAnchor(opts: AnchorOptions): Promise<number> {
 
   let stopping = false;
   let stopRequestedAt = 0;
+  // ⚠️ 宽限超时**单独留一个读数**（⛔ 不是让下面那段收尾等待自己再判一次）：这正是本任务修的缺口 ——
+  //    「宽限超时」那条 break **已经**判定这些循环不会收尾，而收尾等待仍会为它们再等
+  //    `min(60_000, shutdownGraceMs)`（见 `oldAnchorWorstExitMs` 的注释与本函数末尾收尾段）。
+  let graceExceeded = false;
   // ⚠️ **有界停机**（实测缺陷，2026-09-13）：worker 的常驻循环要到「在飞全部跑完」才 break
   // （`runResidentLoop` 的 `running.length === 0` 那一支，§6.9 不变式 3 要求它 ⛔ 不杀在飞），而在飞
   // worker 的 `--timeout` 缺省是 **0 = 无超时**（SPEC §4④：成本结构未知前不设阈值）。⇒ 「等全部循环
@@ -875,6 +895,9 @@ export async function runAnchor(opts: AnchorOptions): Promise<number> {
           `${ts()} anchor: shutdown grace ${shutdownGraceMs}ms exceeded with loop(s) still draining: [${draining.join(",")}]` +
           ` — exiting anyway (their in-flight children are independent OS processes and are NOT killed, SPEC §6.9 inv.3)`,
         );
+        // ⛔ 这条判据**同时**是「收尾等待不必再跑」的结论：下面那段等待等的就是这些循环，而它们**刚刚**
+        //    被判定为不会收尾。记下来供收尾段跳过它（见 `graceExceeded` 的声明处）。
+        graceExceeded = true;
         break;
       }
       if (passes % 60 === 0) log(`${ts()} anchor: stopping — ${active.size} loop(s) still draining: [${draining.join(",")}]`);
@@ -890,8 +913,21 @@ export async function runAnchor(opts: AnchorOptions): Promise<number> {
 
   // 等循环收尾（⛔ 有界：worker 的在飞子进程可能还在跑，但那个「还在跑」在结构上可以无界——见上面
   // shutdownGraceMs 的注释）。宽限之外不再等：在飞 worker 子进程是独立 OS 进程，⛔ 不因本进程退出而死。
-  const deadline = Date.now() + Math.min(60_000, shutdownGraceMs);
-  while (active.size > 0 && Date.now() < deadline) await new Promise<void>((r) => setTimeout(r, 200));
+  //
+  // ⛔⛔ **宽限超时那条路跳过本等待**（gap-anchor-grace-exceeded-exit-waits-another-60s-widening-every-
+  //    takeover-gap，实测 2026-10-14）：上面那条 break 的判据就是「这些循环不会收尾」，再为它们等
+  //    `min(60_000, shutdownGraceMs)` 是自相矛盾；而实测它**几乎必然跑满**——在飞 worker 的
+  //    `--timeout` 缺省 0 ⇒ worker 常驻循环的 `running.length === 0` 在结构上可以永远不成立。代价是交接期一段
+  //    **无 driver 派发/收养**的窗口（ClaudeCodeUI 7/7 接管落在 60–61s；quay 最近 12 次里 10 次
+  //    60–61s，其余 27/30/72s），而下一个收尾的 worker 就落在这个窗口里变成孤儿。
+  //    ⚠️ 另一条出路（把余量调大）被 D2 的注释否掉了：那是**看见**延迟，不是**去掉**延迟。
+  // ⛔ 正常停机路径不受影响，两条各自可核：
+  //    ① `active.size === 0` 那条 break（循环都已收尾）—— 本等待对空集合恒为空转；
+  //    ② `maxReconcilePasses` 测试缝那条 —— 它自带 10s 收尾窗口，本等待是它的兜底，缝不设 `graceExceeded`。
+  if (!graceExceeded) {
+    const deadline = Date.now() + Math.min(60_000, shutdownGraceMs);
+    while (active.size > 0 && Date.now() < deadline) await new Promise<void>((r) => setTimeout(r, 200));
+  }
   // 逐 kind 摘掉 pid 载体：留着死 pid 会让下一次 `start` 读到「有个 driver 在跑」（硬规则 3b）。
   for (const kind of KNOWN_KINDS) {
     try { fs.rmSync(statePaths(opts.root, kind).driverPidFile, { force: true }); } catch { /* ignore */ }
