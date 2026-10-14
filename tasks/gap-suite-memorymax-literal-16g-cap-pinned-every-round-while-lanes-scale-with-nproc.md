@@ -2,7 +2,7 @@
 id: gap-suite-memorymax-literal-16g-cap-pinned-every-round-while-lanes-scale-with-nproc
 title: 套件 MemoryMax 仍是写死的 16G 上限而 lane 随 nproc=128 增长：近 16 轮 15 轮顶满、9/12 红、7 轮
   OOM kill，全靠 rerun-green 洗成 flake
-status: todo
+status: ready
 labels:
   - gap
   - defect
