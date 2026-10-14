@@ -15,6 +15,13 @@
 //   (8) not due inside the interval ⇒ zero spawns
 //   (9) after a full round          ⇒ nothing under tasks/ or goals/ changed, AND the routine source
 //                                     carries none of the authoring symbols (static control).
+//   (10) the space half's candidate universe (task gap-arch-discovery-space-instrument-has-no-
+//        candidate-universe-on-non-quay-hosts): `candidates:0` is recorded as
+//        `not-evaluated:no-candidate-universe` and is NOT a clean round; an UNREADABLE count is a
+//        distinct `not-evaluated:candidate-count-unreadable`, never a fabricated 0; a declared
+//        `loop.arch_discovery.space_registry` is passed as `--registry` and a bad one fails closed;
+//        and on a REAL non-quay fixture root the registry is load-bearing in BOTH directions (a
+//        genuinely-drifting pair ⇒ a drift candidate; an intentional subset ⇒ a non-drift candidate).
 //
 // Run: scripts/test.sh plugin/test/arch-discovery-routine.test.mjs
 
@@ -33,6 +40,11 @@ import {
   parseArchDiscoverySection,
   readArchDiscoveryConfig,
   readCarrierFindings,
+  readScanCandidates,
+  checkSpaceRegistry,
+  spaceStateFor,
+  SPACE_NO_UNIVERSE,
+  SPACE_UNREADABLE,
   runArchDiscovery,
   buildArchDiscoveryRoutine,
   archDiscoveryRoutineFromConfig,
@@ -75,6 +87,42 @@ function writeConfig(ws, body) {
 
 const ENABLED_YAML = `loop:\n  arch_discovery:\n    enabled: true\n    interval: interval:360m\n    since_days: 7\n    max_ms: 60000\n    max_records: 2000\n    max_old_space_mb: 512\n`;
 
+/** A NON-quay fixture repo (task case (10)): one authority enum, a surface that GENUINELY drifts
+ *  (committed BEFORE the authority gained the missing value ⇒ E1=stale), and an intentional-subset
+ *  surface (committed AFTER, with a comment naming the missing value ⇒ E2 ⇒ judged non-drift). Three
+ *  commits with EXPLICIT committer dates, because the instrument's E1 compares commit TIMESTAMPS.
+ *  Returns the repo dir; callers write `.quay/config.yml` (and optionally the registry) themselves. */
+function makeForeignRepo() {
+  const repo = tmpDir("arch-disc-foreign-");
+  fs.mkdirSync(path.join(repo, "plugin", "scripts"), { recursive: true });
+  fs.mkdirSync(path.join(repo, ".quay"), { recursive: true });
+  fs.mkdirSync(path.join(repo, "tasks"), { recursive: true });
+  fs.mkdirSync(path.join(repo, "goals"), { recursive: true });
+  spawnSync("git", ["-C", repo, "init", "-q"], { encoding: "utf8", env: GIT_ENV });
+  const write = (rel, body) => fs.writeFileSync(path.join(repo, rel), body, "utf8");
+  const commit = (msg, date) => {
+    spawnSync("git", ["-C", repo, "add", "-A"], { encoding: "utf8", env: GIT_ENV });
+    const r = spawnSync("git", ["-C", repo, "commit", "-qm", msg], { encoding: "utf8", env: { ...GIT_ENV, GIT_AUTHOR_DATE: date, GIT_COMMITTER_DATE: date } });
+    assert.equal(r.status, 0, `fixture commit '${msg}' failed: ${r.stderr}`);
+  };
+  write("plugin/scripts/fixture-auth.ts", `export const FIXTURE_CODES = ["alpha", "beta"];\n`);
+  write("plugin/scripts/fixture-drift.ts", `export const FIXTURE_CODES = ["alpha", "beta"];\n`);
+  commit("t1: authority + drifting surface", "2026-10-01T00:00:00Z");
+  write("plugin/scripts/fixture-auth.ts", `export const FIXTURE_CODES = ["alpha", "beta", "gamma"];\n`);
+  commit("t2: authority gains gamma", "2026-10-02T00:00:00Z");
+  write("plugin/scripts/fixture-legit.ts", `// Intentional subset: gamma is resolved by the runtime fallback.\nexport const FIXTURE_CODES = ["alpha", "beta"];\n`);
+  commit("t3: intentional-subset surface", "2026-10-03T00:00:00Z");
+  return repo;
+}
+
+/** The minimal declarative registry the fixture repo declares: ONE authority, no registered surfaces
+ *  (the two surfaces are DISCOVERED as subset literals). ⛔ Data only — no host-specific analyzer. */
+const FIXTURE_REGISTRY = {
+  authorities: [{ id: "fixture-codes", file: "plugin/scripts/fixture-auth.ts", symbol: "FIXTURE_CODES", extract: "ts-array" }],
+  surfaces: [],
+  knownDrift: [],
+};
+
 /** One instrument row. `finding_fp` is carried verbatim (the routine does not recompute it). */
 const findingRow = (fp, subject, verdict, kind = "outcome") => ({
   kind,
@@ -86,17 +134,25 @@ const findingRow = (fp, subject, verdict, kind = "outcome") => ({
 });
 
 /** A fixture instrument: reads `--out` from argv and writes `rows` (or garbage), then exits `exit`.
- *  `write:false` models the instruments' fail-closed "a bound breach writes NOTHING". */
-function fixtureInstrument(dir, name, { rows = [], exit = 0, write = true, garbage = null } = {}) {
+ *  `write:false` models the instruments' fail-closed "a bound breach writes NOTHING".
+ *  `candidates` (space only) is the count surfaced in the `--json` structured report — the space
+ *  instrument's own `cost.candidates`. Its default models the real instrument's invariant: exactly one
+ *  `outcome` row per candidate. `report:false` models a space instrument whose stdout is NOT the
+ *  structured report (⇒ the routine must record an unreadable count, never a fabricated 0). */
+function fixtureInstrument(dir, name, { rows = [], exit = 0, write = true, garbage = null, candidates = null, report = true } = {}) {
   const p = path.join(dir, name);
   const emit = garbage !== null
     ? `fs.writeFileSync(out, ${JSON.stringify(garbage)});`
     : `fs.writeFileSync(out, ${JSON.stringify(rows.map((r) => JSON.stringify(r)).join("\n") + "\n")});`;
+  const cands = candidates === null
+    ? rows.filter((r) => r.kind === "outcome" || r.kind === "counterexample").length
+    : candidates;
   const body = [
     `import fs from "node:fs";`,
     `const a = process.argv.slice(2);`,
     `const i = a.indexOf("--out");`,
     `if (i >= 0 && ${write ? "true" : "false"}) { const out = a[i + 1]; ${emit} }`,
+    `if (${report ? "true" : "false"} && a.includes("--json")) console.log(JSON.stringify({ tool: ${JSON.stringify(name)}, mode: "scan", cost: { candidates: ${cands}, wall_ms: 1, git_calls: 0 }, results: [], score: {}, validator: {} }));`,
     `process.exit(${exit});`,
     ``,
   ].join("\n");
@@ -153,6 +209,11 @@ test("case (1)/(2)/(4) — parseArchDiscoverySection: disabled section, malforme
   assert.equal(ok.error, null);
   assert.equal(ok.config.trigger.minutes, MIN_INTERVAL_MINUTES, "exactly the floor is accepted");
   assert.equal(ok.config.sinceDays, 7, "absent bounds take their documented default");
+  // space_registry is OPTIONAL (absent ⇒ null, the pre-fix behaviour) and must be a non-empty string.
+  assert.equal(ok.config.spaceRegistry, null, "an absent space_registry is null — not an error");
+  assert.equal(parseArchDiscoverySection({ enabled: true, interval: "interval:60m", space_registry: ".quay/reg.json" }).config.spaceRegistry, ".quay/reg.json");
+  assert.match(parseArchDiscoverySection({ enabled: true, interval: "interval:60m", space_registry: 42 }).error, /space_registry' must be a non-empty workspace-relative path/);
+  assert.match(parseArchDiscoverySection({ enabled: true, interval: "interval:60m", space_registry: "  " }).error, /space_registry' must be a non-empty workspace-relative path/);
 });
 
 test("case (1) — section absent ⇒ not-evaluated:disabled and ZERO spawns", async () => {
@@ -418,4 +479,162 @@ test("archDiscoveryRoutineFromConfig — absent ⇒ NO routine assembled (the ho
   const c = archDiscoveryRoutineFromConfig(bad);
   assert.equal(c.routine !== null, true, "a malformed section is still assembled (it must record failed)");
   assert.match(c.error, /below the 60m floor/);
+});
+
+// ── (10) the space half's candidate universe ────────────────────────────────────────────────────────
+// The defect this covers: on any host that is not quay's own repo the `space` instrument scanned with
+// the registry shipped in ITS OWN checkout, found no candidates, exited 0 — and the round recorded that
+// as a clean `verified` reading. A reading that structurally cannot be non-zero is not a measurement.
+test("case (10) — candidates:0 is recorded as not-evaluated (surfacing the zero), never as a clean round", async () => {
+  const dir = tmpDir("arch-disc-fix-");
+
+  // (a) the space instrument reports a candidate universe of 0 ⇒ the round is NOT clean
+  {
+    const ws = makeWorkspace();
+    writeConfig(ws, ENABLED_YAML);
+    const timeRows = [findingRow("fpT", "kT", "rule:t")];   // a real TIME-side finding, which must survive
+    const prefix = {
+      space: ["node", fixtureInstrument(dir, "space-a.mjs", { rows: [], candidates: 0 })],
+      time: ["node", fixtureInstrument(dir, "time-a.mjs", { rows: timeRows })],
+    };
+    const fact = await runArchDiscovery(ws, runOpts(ws, { spawnFn: syncSpawn, argvPrefix: prefix }));
+    assert.equal(fact.state, "not-evaluated", "candidates:0 must NOT be folded into a clean round");
+    assert.match(fact.reason, /no-candidate-universe/);
+    assert.match(fact.reason, /candidates=0/, "the zero is surfaced in the reason");
+    const space = rounds(ws)[0].instruments.space;
+    assert.equal(space.exit, 0, "the instrument genuinely exited 0 …");
+    assert.equal(space.ok, true, "… and its output parsed …");
+    assert.equal(space.candidates, 0, "… and the instrument's own cost.candidates is SURFACED");
+    assert.equal(space.evaluated, false);
+    assert.equal(space.state, SPACE_NO_UNIVERSE);
+    assert.ok(space.argv.includes("--json"), "the structured report is requested (that is where cost.candidates lives)");
+    // The round still appends: the TIME half's readings are real, and a not-clean round must not discard them.
+    assert.equal(findings(ws).length, 1);
+    assert.equal(findings(ws)[0].instrument, "time");
+  }
+
+  // (b) a NON-ZERO candidate universe ⇒ the round is verified and the count is on the space record
+  {
+    const ws = makeWorkspace();
+    writeConfig(ws, ENABLED_YAML);
+    const rows = [findingRow("fp1", "k1", "rule:drift"), findingRow("fp2", "k2", "rule:legit")];
+    const prefix = {
+      space: ["node", fixtureInstrument(dir, "space-b.mjs", { rows })],
+      time: ["node", fixtureInstrument(dir, "time-b.mjs", { rows: [] })],
+    };
+    const fact = await runArchDiscovery(ws, runOpts(ws, { spawnFn: syncSpawn, argvPrefix: prefix }));
+    assert.equal(fact.state, "verified");
+    const space = rounds(ws)[0].instruments.space;
+    assert.equal(space.candidates, 2, "the fixture models the real invariant: one outcome row per candidate");
+    assert.equal(space.evaluated, true);
+    assert.equal(space.state, "evaluated");
+  }
+
+  // (c) the structured report is absent ⇒ an UNREADABLE count, which is a DISTINCT state, never a 0
+  {
+    const ws = makeWorkspace();
+    writeConfig(ws, ENABLED_YAML);
+    const prefix = {
+      space: ["node", fixtureInstrument(dir, "space-c.mjs", { rows: [], report: false })],
+      time: ["node", fixtureInstrument(dir, "time-c.mjs", { rows: [] })],
+    };
+    const fact = await runArchDiscovery(ws, runOpts(ws, { spawnFn: syncSpawn, argvPrefix: prefix }));
+    assert.equal(fact.state, "not-evaluated");
+    assert.match(fact.reason, /candidate-count-unreadable/);
+    const space = rounds(ws)[0].instruments.space;
+    assert.equal(space.candidates, null, "an unreadable count is null — NEVER a fabricated 0 (硬规则 3b)");
+    assert.equal(space.state, SPACE_UNREADABLE);
+  }
+});
+
+test("case (10) — spaceStateFor / readScanCandidates / checkSpaceRegistry: three distinct states, no silent zero", () => {
+  assert.equal(spaceStateFor(0), SPACE_NO_UNIVERSE);
+  assert.equal(spaceStateFor(1), "evaluated");
+  assert.equal(spaceStateFor(null), SPACE_UNREADABLE, "the three states are pairwise distinct");
+  assert.equal(readScanCandidates(JSON.stringify({ cost: { candidates: 0 } })), 0, "a REAL zero reads as 0 …");
+  assert.equal(readScanCandidates(JSON.stringify({ cost: { candidates: 7 } })), 7);
+  assert.equal(readScanCandidates(""), null, "… an unreadable report reads as null, never as 0");
+  assert.equal(readScanCandidates("not json"), null);
+  assert.equal(readScanCandidates(JSON.stringify({ results: [] })), null, "no cost block ⇒ unreadable");
+
+  const ws = makeWorkspace();
+  fs.writeFileSync(path.join(ws, ".quay", "ok.json"), JSON.stringify(FIXTURE_REGISTRY), "utf8");
+  fs.writeFileSync(path.join(ws, ".quay", "bad.json"), "{ nope\n", "utf8");
+  fs.writeFileSync(path.join(ws, ".quay", "empty.json"), JSON.stringify({ authorities: [], surfaces: [], knownDrift: [] }), "utf8");
+  assert.equal(checkSpaceRegistry(path.join(ws, ".quay", "ok.json"), ".quay/ok.json"), null);
+  assert.match(checkSpaceRegistry(path.join(ws, ".quay", "nope.json"), ".quay/nope.json"), /FAIL-CLOSED: loop\.arch_discovery space_registry '\.quay\/nope\.json' not found/);
+  assert.match(checkSpaceRegistry(path.join(ws, ".quay", "bad.json"), ".quay/bad.json"), /is not readable JSON/);
+  assert.match(checkSpaceRegistry(path.join(ws, ".quay", "empty.json"), ".quay/empty.json"), /has no 'authorities' array/);
+});
+
+test("case (10) — a declared space_registry is passed as --registry (resolved to an abs path), space only", async () => {
+  const ws = makeWorkspace();
+  fs.writeFileSync(path.join(ws, ".quay", "reg.json"), JSON.stringify(FIXTURE_REGISTRY), "utf8");
+  writeConfig(ws, ENABLED_YAML + "    space_registry: .quay/reg.json\n");
+
+  // A spawn that writes an empty carrier and reports one candidate for the space half's `--json`.
+  const spawn = countingSpawn((argv) => {
+    fs.writeFileSync(argv[argv.indexOf("--out") + 1], "");
+    return Promise.resolve({ status: 0, stdout: argv.includes("--json") ? JSON.stringify({ cost: { candidates: 1 } }) : "", stderr: "", error: null });
+  });
+  const fact = await runArchDiscovery(ws, runOpts(ws, { spawnFn: spawn }));
+  assert.equal(fact.state, "verified");
+  assert.equal(spawn.calls.length, 2);
+  const spaceArgv = spawn.calls[0];
+  assert.ok(spaceArgv.includes("--registry"), "the declared registry reaches the space instrument");
+  assert.equal(spaceArgv[spaceArgv.indexOf("--registry") + 1], path.join(ws, ".quay", "reg.json"), "the WORKSPACE-RELATIVE value is resolved against the root");
+  assert.ok(spaceArgv.includes("--json"));
+  assert.ok(!spawn.calls[1].includes("--registry"), "the TIME instrument is untouched — it has no candidate universe");
+  assert.ok(!spawn.calls[1].includes("--json"), "… and no structured report is requested from it");
+});
+
+test("case (10) — a missing / malformed space_registry fails closed with a legible reason, never a silent zero", async () => {
+  const arms = [
+    ["a missing path", "nope.json", null],
+    ["unparseable JSON", "bad.json", "{ this is not json\n"],
+    ["a registry with no authorities", "empty.json", JSON.stringify({ authorities: [], surfaces: [], knownDrift: [] })],
+  ];
+  for (const [label, base, body] of arms) {
+    const ws = makeWorkspace();
+    if (body !== null) fs.writeFileSync(path.join(ws, ".quay", base), body, "utf8");
+    writeConfig(ws, ENABLED_YAML + `    space_registry: .quay/${base}\n`);
+    const spawn = countingSpawn(null);
+    const fact = await runArchDiscovery(ws, runOpts(ws, { spawnFn: spawn }));
+    assert.equal(fact.state, "failed", `${label} ⇒ failed`);
+    assert.match(fact.reason, /FAIL-CLOSED: loop\.arch_discovery space_registry/, `${label}: the reason names the key`);
+    assert.ok(fact.reason.includes(base), `${label}: the reason names the declared path`);
+    assert.equal(spawn.calls.length, 0, `${label}: ZERO spawns (validated BEFORE the spawn)`);
+    assert.equal(fs.existsSync(carrierPath(ws)), false, `${label}: nothing appended — never a silent zero`);
+  }
+});
+
+test("case (10) — REAL instruments on a non-quay root: the declared registry is load-bearing in BOTH directions", async () => {
+  // (a) NO registry: the space instrument falls back to its OWN checkout's registry ⇒ candidates 0.
+  {
+    const repo = makeForeignRepo();
+    writeConfig(repo, ENABLED_YAML);
+    const read = readArchDiscoveryConfig(repo);
+    const fact = await runArchDiscovery(repo, { config: read.config, configPresent: read.present, configError: read.error, halted: false });
+    assert.equal(fact.state, "not-evaluated", "a non-quay root with no registry ⇒ not a clean round");
+    const space = rounds(repo)[0].instruments.space;
+    assert.equal(space.candidates, 0, "the instrument's own reading of a foreign tree");
+    assert.equal(space.state, SPACE_NO_UNIVERSE);
+    assert.equal(findings(repo).filter((f) => f.instrument === "space").length, 0, "no space candidate ⇒ no space finding");
+  }
+  // (b) WITH the declared registry: ONE authority + two surfaces ⇒ a real drift AND a real non-drift
+  //     candidate. The pair is load-bearing: neither candidate exists without the declared registry.
+  {
+    const repo = makeForeignRepo();
+    fs.writeFileSync(path.join(repo, ".quay", "space-registry.json"), JSON.stringify(FIXTURE_REGISTRY), "utf8");
+    writeConfig(repo, ENABLED_YAML + "    space_registry: .quay/space-registry.json\n");
+    const read = readArchDiscoveryConfig(repo);
+    const fact = await runArchDiscovery(repo, { config: read.config, configPresent: read.present, configError: read.error, halted: false });
+    assert.equal(fact.state, "verified", "a declared candidate universe makes the round clean again");
+    const space = rounds(repo)[0].instruments.space;
+    assert.equal(space.candidates, 2, "candidates come from the DECLARED authority (+ discovered subsets)");
+    assert.equal(space.evaluated, true);
+    const verdicts = findings(repo).filter((f) => f.instrument === "space").map((f) => f.verdict);
+    assert.ok(verdicts.includes("drift-hypothesis"), `a genuinely-drifting surface ⇒ a drift candidate (got ${JSON.stringify(verdicts)})`);
+    assert.ok(verdicts.includes("legit-difference"), `an intentional-subset surface ⇒ a NON-drift candidate (got ${JSON.stringify(verdicts)})`);
+  }
 });
