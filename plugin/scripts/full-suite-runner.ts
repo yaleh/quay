@@ -1769,13 +1769,29 @@ export function relTestPath(raw: string, root: string): string {
   return stripped;
 }
 
-/** 一行里的文件路径剥壳：`--list-files` / `--paths-only` 每行一个路径（剥空行 / 注释）。 */
-function parsePathList(stdout: string, root: string): string[] {
+/**
+ * 解析探针输出为计划集，并**逐条校验它真的是一份文件清单**——这是本机制唯一的防伪步骤，也是它
+ * 安全的失败方向：任何一条不像路径（含空白）或**在盘上不存在**的行 ⇒ 抛错 ⇒ 调用方落成「计划不可得」
+ * ⇒ 完整性维度取 `not-evaluated`（= 修法前的行为），⛔ 绝不落成一个假的「缺文件」而误判红。
+ *
+ * 为什么需要它：探针跑的是**命令**，不是「保证按约定输出的东西」。实测反例：一个把参数忽略掉的
+ * test.sh 会把 `--list-files` 当成普通运行、把 `__BUCKETS__ …`/`# pass 4` 原样打出来——不校验就会把
+ * 这些当「计划文件」，于是 5 个计划 / 0 个终态 ⇒ 假 incomplete（本轮修法绝不能引入这种红）。
+ */
+function parsePlanListOrThrow(stdout: string, root: string, source: string): string[] {
   const out: string[] = [];
   for (const line of String(stdout ?? "").split("\n")) {
     const t = line.trim();
-    if (!t || t.startsWith("#")) continue;
-    out.push(relTestPath(t, root));
+    if (!t) continue;
+    if (/\s/.test(t)) {
+      throw new Error(`plan probe (${source}) emitted a line that is not a path: ${JSON.stringify(t.slice(0, 120))}`);
+    }
+    const rel = relTestPath(t, root);
+    const abs = path.isAbsolute(rel) ? rel : path.join(root, rel);
+    if (!fs.existsSync(abs)) {
+      throw new Error(`plan probe (${source}) named a file that does not exist under the tested root: ${rel}`);
+    }
+    out.push(rel);
   }
   return out;
 }
@@ -1831,14 +1847,23 @@ export function probePlannedFiles(root: string, argv: string[]): { files: string
     // 而这里的真相是「这个根根本没有 test.sh，我读不到计划」（硬规则 3b：读不懂 ≠ 空）。
     throw new Error(`plan probe: no scripts/test.sh under ${root} — the scheduled set is unreadable`);
   }
-  const listAll = (): { files: string[]; source: string } => ({
-    files: parsePathList(execFileSyncBounded("bash", [testSh, "--list-files"], root), root),
-    source: "probe:test.sh --list-files",
-  });
+  const listAll = (): { files: string[]; source: string } => {
+    const files = parsePlanListOrThrow(
+      execFileSyncBounded("bash", [testSh, "--list-files"], root),
+      root,
+      "test.sh --list-files",
+    );
+    return { files, source: "probe:test.sh --list-files" };
+  };
   const bucketsTask = flagValue(argv, "--buckets");
   if (bucketsTask) {
     const selector = path.join(root, "plugin", "scripts", "suite-bucket-select.ts");
-    if (!fs.existsSync(selector)) return listAll();
+    // `--buckets` 的计划**只能**来自选桶器：没有它就说明这个根不是能跑 `--buckets` 的那棵树
+    // （test.sh 的 bucket 分支会 `exit 2`）⇒ 说不出计划，⛔ 不回落成「全量清单」（那会拿 A 的清单
+    // 校验一个根本没跑起来的 B）。
+    if (!fs.existsSync(selector)) {
+      throw new Error(`plan probe: --buckets requested but ${selector} is absent — the bucket plan is unreadable`);
+    }
     const nodeBin = process.execPath;
     const summary = execFileSyncBounded(
       nodeBin,
@@ -1847,13 +1872,14 @@ export function probePlannedFiles(root: string, argv: string[]): { files: string
     );
     const full = /full=1\b/.test(summary);
     if (full) return listAll();
-    const subset = parsePathList(
+    const subset = parsePlanListOrThrow(
       execFileSyncBounded(
         nodeBin,
         ["--no-warnings", "--experimental-strip-types", selector, "--root", root, "--task", bucketsTask, "--paths-only"],
         root,
       ),
       root,
+      `suite-bucket-select --paths-only (${bucketsTask})`,
     );
     // test.sh 自己的同一处兜底（`if [ -z "${bucket_sel_out}" ] ⇒ run_selected "$(effective_groups)"`）：
     // 选桶给出 0 个文件时**真正跑的是全量**，⛔ 计划侧不得说「计划是空的」（那样会把全量的终态全判成

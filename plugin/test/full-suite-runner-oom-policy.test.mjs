@@ -412,6 +412,41 @@ test("unit — resolvePlannedFiles is three-valued and explicit sources win; a b
   }
 });
 
+test("unit — the plan probe VALIDATES its own output: a `--list-files` that prints non-paths is an ERROR (plan unreadable), ⛔ never a garbage plan that fakes an incomplete round", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-plan-validate-"));
+  try {
+    fs.mkdirSync(path.join(root, "scripts"), { recursive: true });
+    // 反例（本仓库实测形态）：一个把参数忽略掉的 test.sh —— `--list-files` 被当成普通运行，输出的是
+    // `__BUCKETS__ …` / `# pass 4`。不校验就会把它们当「计划文件」⇒ 5 计划 / 0 终态 ⇒ **假 incomplete**。
+    fs.writeFileSync(
+      path.join(root, "scripts", "test.sh"),
+      '#!/usr/bin/env bash\necho "__BUCKETS__ buckets=P files=2 full=0"\necho "# pass 4"\nexit 0\n',
+      { mode: 0o755 },
+    );
+    const bogus = resolvePlannedFiles({ argv: [], env: {}, root });
+    assert.equal(bogus.files, null, "non-path output ⇒ the plan is UNREADABLE, ⛔ not a garbage plan");
+    assert.ok(bogus.error !== null, "the cause is named");
+    assert.equal(bogus.source, "probe-failed");
+    // 反例②：一份**像路径但盘上不存在**的清单 ⇒ 同样是「读不懂」，⛔ 不是「缺文件」。
+    fs.writeFileSync(path.join(root, "scripts", "test.sh"), '#!/usr/bin/env bash\necho plugin/test/ghost.test.mjs\nexit 0\n', { mode: 0o755 });
+    const ghost = resolvePlannedFiles({ argv: [], env: {}, root });
+    assert.equal(ghost.files, null, "a planned path that does not exist on disk ⇒ unreadable (⛔ not a missing-file verdict)");
+    // 正例（能取假）：真清单 ⇒ 计划可读（且与终态集同口径）。
+    fs.mkdirSync(path.join(root, "plugin", "test"), { recursive: true });
+    fs.writeFileSync(path.join(root, "plugin", "test", "real.test.mjs"), "// real\n", "utf8");
+    fs.writeFileSync(path.join(root, "scripts", "test.sh"), `#!/usr/bin/env bash\necho ${root}/plugin/test/real.test.mjs\nexit 0\n`, { mode: 0o755 });
+    const ok = resolvePlannedFiles({ argv: [], env: {}, root });
+    assert.deepEqual(ok.files, ["plugin/test/real.test.mjs"], "a real file list is read and normalized to the tested-root-relative 口径");
+    assert.equal(ok.error, null);
+    // `--buckets` 在没有选桶器的根里说不出计划（⛔ 不回落成全量清单——那是拿 A 的清单校验 B）。
+    const b = resolvePlannedFiles({ argv: ["--buckets", "gap-x"], env: {}, root });
+    assert.equal(b.files, null, "--buckets without suite-bucket-select.ts ⇒ plan unreadable");
+    assert.match(String(b.error), /bucket plan is unreadable/, "…with its own cause");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("unit — the SUITE-INCOMPLETE marker round-trips (runner writes it, fan-in reads it); a missing marker is null", () => {
   const marker = formatSuiteIncompleteMarker({
     reason: "incomplete", planned: 579, terminal: 65, missing: 514, oomKill: 4, files: [PLAN_A, PLAN_B],
