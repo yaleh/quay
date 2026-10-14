@@ -1718,7 +1718,7 @@ export interface LeakedProcess {
   pid: number;
   ppid: number;
   pgid: number;
-  /** Best-effort ISO start time (`ps -o lstart=`); null when unreadable — never a fabricated value. */
+  /** ISO start time from `/proc/<pid>/stat`; null when unreadable — never a fabricated value. */
   startedAt: string | null;
   cmdline: string;
   cwd: string | null;
