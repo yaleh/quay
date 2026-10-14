@@ -2,7 +2,7 @@
 id: gap-adopted-live-orphan-exits-without-fan-in-so-adopted-work-never-lands
 title: 被接管(adopt)的在飞 worker 退出后不跑机械 fan-in，只读 task 状态 ⇒ 永远 exited-not-landed（153
   次；anchor 自刷新/接管必然触发）
-status: todo
+status: ready
 labels:
   - gap
   - defect
