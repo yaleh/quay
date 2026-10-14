@@ -2,7 +2,7 @@
 id: gap-quay-architecture-analysis-shipped-capability-cleanroom-acceptance
 title: Quay架构分析作为已交付能力：OSD+architecture-review+arch-discovery+Method/Portfolio/Experience
   清洁隔离正负验收 + ClaudeCodeUI真实验证
-status: needs-human
+status: ready
 labels:
   - gap
 parent: null
@@ -33,7 +33,7 @@ depends_on:
 ## Acceptance Criteria
 - [x] AC1: positive-control clean-host run — all four routines' first real round record pasted (no spawn errors attributable to packaging/root-resolution for any of them).
 - [x] AC2: negative-control clean-host run on the pre-fix build — `architecture_review` fails as predicted; the other three routines are shown unaffected (pasted side-by-side).
-- [ ] AC3: ClaudeCodeUI real-host leg — the fixed official build is live (anchor takeover verified the same way as this session's prior two swaps: readlink/cmdline/driver status), and at least one real, naturally-occurring round from the bundle is pasted from that host's own carrier.
+- [x] AC3: ClaudeCodeUI real-host leg — the fixed official build is live (anchor takeover verified the same way as this session's prior two swaps: readlink/cmdline/driver status), and at least one real, naturally-occurring round from the bundle is pasted from that host's own carrier.
 - [x] AC4: no budget ceiling was changed on either host during this task — `.quay/config.yml` diffed before/after on both, pasted.
 - [x] AC5: the four-state classification (code exists / enabled / invoked / closed-loop-confirmed) is reported per routine per host — explicitly, not glossed over, including any routine that does NOT reach "closed-loop-confirmed" within the observation window.
 - [x] AC6: `scripts/test.sh` full-suite green (this task touches no single component's code directly — it is an integration acceptance — so the scoped `--for-task` gate does not apply; state this explicitly rather than skipping the check).
@@ -253,6 +253,44 @@ within this project, and ClaudeCodeUI is a separate project repo.
 `/data/home/yale/work/claudecodeui` kernel, taken in a quiet window on that host. Until then AC3 cannot be
 ticked and this task will keep exiting-not-landed — this is an authorisation/authoring gap, not a
 verification gap, and no further worker round can close it.
+## Round-4 — AC3 RESOLVED (2026-10-14, human-authorized live swap executed)
+
+**Authorization**: human explicitly authorized, this round, a controlled upgrade within the ClaudeCodeUI project scope — including overwriting/replacing the live shared kernel the project's anchor runs from, restarting its Quay driver, and interrupting in-flight workers if needed (recoverably). This discharges the round-3 blocker verbatim ("a human decision to authorise the fixed build as the `/data/home/yale/work/claudecodeui` kernel, taken in a quiet window on that host" — authorization given; "quiet window" was not required because interrupted work is designed to survive the swap, verified below).
+
+**Baseline recorded before any change**: old anchor pid `675243`, kinds `[promotion,outer,goal,worker,quality]` all `declared`, kernel `official-dist-020-dev/scripts/dist/driver-anchor.js` (builtAt 2026-10-13T14:12:37Z, PRE-FIX), `.quay/plugin` → `0.19.0` user-scope cache, serve unit → `0.16.0` (both untouched by this round, out of scope per "目标优先 Anchor"). In-flight at baseline: `claudecodeui-task-worker` pid 2335561 on `gap-live-voice-busy-utterance-preemption-proposal`, `slot-refill.js` pid 2346816, 23 task worktrees, `.quay/config.yml` md5 `47b29e76a3b0c9022aeb408955a90670` (unchanged from round 1/2/3's reading).
+
+**Method — side-by-side deployment, not in-place overwrite** (a safer variant of round-3's assumption): built the fix fresh via `publish-dist-branch.sh` from develop `4a322afab` (carries `37d467e7a` + both architecture-review prerequisite fixes) into a **new** directory `quay-scratch/official-dist-020-dev-r4-ccui-fix` (NOT overwriting the old `official-dist-020-dev` in place — round 3's "in-place mutation of a live shared artifact" concern does not apply to this variant; the old directory is left intact as the rollback target). Verified pre-swap: all three detector dist bundles present (`identity-replication-check.js`, `guard-lineage-check.js`, `deletion-closure-check.js`), version `0.20.0-dev`.
+
+**Takeover**: `spawnAnchor("/data/home/yale/work/claudecodeui", {takeoverPid: 675243})` against the new kernel → new anchor pid `2402070`. `kill -TERM 675243` → old anchor's own graceful-shutdown handler ran to completion (`anchor.log`: promotion/outer/quality stopped immediately; goal/worker drained; 120000ms grace exceeded → "exiting anyway", in-flight children preserved, SPEC §6.9 inv.3). Old pid confirmed exited. `anchor-takeover.json` anomaly marker: absent (clean handoff) both immediately after and on a later re-check.
+
+**Worker resilience verified, not assumed**: the in-flight worker (pid 2335561) was never killed — it continued independently and its mechanical fan-in children (old-kernel `worker-driver.js`/`full-suite-runner.js`, pids 2494374/2494717/2591500) ran to completion on their own after the old anchor exited. The task was NOT lost: it was re-picked-up once by the new anchor's worker loop within seconds (`worker-outcome.jsonl` 23:43:39Z) and — confirmed on a fresh re-check ~2h45m later — **`status: done`**. This is the "Quay worker 应可靠重启并恢复中断任务" requirement, verified against the real outcome, not inferred from the mechanism's design intent alone.
+
+**AC3's own claim — satisfied, with real evidence, sustained over time (not a single lucky round)**:
+```
+new anchor: pid 2402070, startedAt 2026-10-13T23:43:20.408Z, alive continuously ≥2h45m at last check, all 5 kinds declared
+loaded_kernel (driver status --kind worker): .../official-dist-020-dev-r4-ccui-fix/scripts/dist/driver-anchor.js, loaded_version 0.20.0-dev (loaded-newer vs installed 0.19.0 — expected, workspace-plugin link intentionally untouched)
+
+.quay/architecture-review-round.jsonl (THIS host's own carrier, post-swap):
+{"round":1106,"judgedAt":"2026-10-13T23:43:43.358Z","state":"not-triggered","reason":"no candidate clusters (three detectors produced zero suspicious groupings)"}
+{"round":1109,"judgedAt":"2026-10-14T00:43:56.035Z","state":"not-triggered", ...same...}
+{"round":1112,"judgedAt":"2026-10-14T01:44:13.296Z","state":"not-triggered", ...same...}
+```
+Three independent, naturally-scheduled rounds (not forced — these are the routine's own ~hourly cadence), all clean. Before this swap this exact host had produced **166 consecutive failures, 0 successes, ever** (`unparseable identity-replication output`). This is the first time architecture-review has ever returned a legible, non-error verdict on this host.
+
+**Other three routines — honest state, not glossed over**:
+- `arch_discovery` / `discovery_method`: this host's `.quay/config.yml` has no `loop.arch_discovery:`/`loop.discovery_method:` block at all (pre-existing deployment scope, unrelated to today's kernel swap — out of scope per the instruction not to touch unrelated config).
+- `open_semantic_discovery`: currently gated `not-evaluated: budget-usd-24h: $5.974574 >= $5 cap` — a real, correctly-enforced budget ceiling (NOT a defect, NOT forced past, consistent with "不放宽预算限制"). Its own carrier last wrote before the swap; no new round fired since, by design (budget, not breakage).
+
+**No budget or config change this round**: `.quay/config.yml` mtime (`2026-10-13 22:57:29`) predates the entire operation window; content unchanged.
+
+**Rollback status**: not needed — no failure occurred. The old kernel directory (`official-dist-020-dev`) is left intact and the exact `spawnAnchor({takeoverPid})` + `SIGTERM` procedure used here would restore it if ever required.
+
+⇒ **AC3 is satisfied**: the fixed build is live (readlink/cmdline/driver-status agree: `official-dist-020-dev-r4-ccui-fix`), and three real, naturally-occurring, non-error rounds from the bundle are pasted from this host's own carrier.
+
+## Verdict (updated, round 4)
+
+All six Acceptance Criteria are now satisfied with real, non-fixture evidence: AC1/AC2 (round 2, clean-host positive/negative control), AC3 (round 4, above — real ClaudeCodeUI production evidence, human-authorized), AC4 (budget unchanged, verified round 2 and round 4), AC5 (four-state classification, round 2), AC6 (full suite green, round 2). This task is ready to be closed out through the normal driver/fan-in path.
+
 ## Needs-Human
 
 **执行 2026-10-13T18:47:45.473Z — 连续修满重试上限仍不合格（标 needs-human）**
@@ -261,3 +299,7 @@ verification gap, and no further worker round can close it.
 - 失败步/判词：AC 未全勾（checked 5/6，剩余未勾 1）——续做只需验证并勾选 AC
 - run_id：wk-prod-anchor
 - session_id：3b387e04-d95a-40c6-a313-299f2c08e4b1
+
+### Resolved 2026-10-14 (round 4) — unparked
+
+The literal unpark trigger stated above ("续做只需验证并勾选 AC") and the real underlying condition (AC3's own criterion) are BOTH now satisfied, not just the proxy: human authorization was given this round, the swap was executed, and AC3's evidence was independently re-verified against the live carrier (three real post-swap rounds, re-checked ~2h45m apart) before this task was unparked — per the discipline that a stated unpark trigger is a proxy and must be checked against the real criterion, not trusted at face value. Status set to `ready`.
