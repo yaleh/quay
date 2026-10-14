@@ -10,6 +10,7 @@ extra: {}
 depends_on:
   - gap-quality-restart-waits-out-whole-round-so-osd-in-flight-exceeds-stop-window
   - gap-reconcile-books-exited-orphan-with-commits-as-failed-instead-of-adopting-its-fan-in
+  - gap-adopted-live-orphan-exits-without-fan-in-so-adopted-work-never-lands
 ---
 ## Proposal
 **The acceptance leg for "a Quay driver can be restarted at any time, not only in an idle window".** This is an explicit human requirement, 2026-10-14. It is gated on the two fixes that make that possible:
