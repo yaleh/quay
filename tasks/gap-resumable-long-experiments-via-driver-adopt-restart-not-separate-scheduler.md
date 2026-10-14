@@ -27,10 +27,10 @@ Precedent already exists and must be reused, not reinvented: a dead orphan with 
 6. The experiment's own worker must stay observable the normal way (worker-round/task-status, not silent) and must be cancellable via the normal per-kind/per-worker stop path — it must not hold a slot syncing/polling for no purpose while idle.
 
 ## Acceptance Criteria
-- [ ] AC1: fixture multi-stage experiment with 3 stages; a simulated driver restart between stages 1 and 2 resumes at stage 2, with stage 1's output unchanged and not recomputed (pasted; negative control without this fix recomputes stage 1).
-- [ ] AC2: an identity change (commit hash differs) between stages invalidates the prior checkpoint and reruns that stage, with the mismatch recorded (pasted).
-- [ ] AC3: the short-sample correctness stage runs and is checkpointed before the full experiment; a fixture where it fails stops the experiment before the expensive stage runs (pasted).
-- [ ] AC4: the experiment's worker is visible in normal worker-round observability and can be stopped via the existing per-kind/worker stop path mid-stage, leaving the manifest resumable (pasted).
+- [x] AC1: fixture multi-stage experiment with 3 stages; a simulated driver restart between stages 1 and 2 resumes at stage 2, with stage 1's output unchanged and not recomputed (pasted; negative control without this fix recomputes stage 1).
+- [x] AC2: an identity change (commit hash differs) between stages invalidates the prior checkpoint and reruns that stage, with the mismatch recorded (pasted).
+- [x] AC3: the short-sample correctness stage runs and is checkpointed before the full experiment; a fixture where it fails stops the experiment before the expensive stage runs (pasted).
+- [x] AC4: the experiment's worker is visible in normal worker-round observability and can be stopped via the existing per-kind/worker stop path mid-stage, leaving the manifest resumable (pasted).
 - [ ] AC5: `scripts/test.sh --for-task <this task>` green.
 
 ## Definition of Done
@@ -41,3 +41,4 @@ Precedent already exists and must be reused, not reinvented: a dead orphan with 
 - plugin/scripts/worker-driver.ts
 - plugin/scripts/experiment-manifest.ts
 - plugin/test/experiment-manifest.test.mjs
+- plugin/scripts/capability-catalog-declarations.json
