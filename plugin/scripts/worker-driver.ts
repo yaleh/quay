@@ -343,6 +343,10 @@ import {
   scopedGateKey,
   writeScopedGateCache,
   scopedGateCacheWriteSignature,
+  // 旧锁归属口径（按 (task, runId) 取最后一组）。⛔ 它**只**被 readAttemptPhaseTimestamps 当负控制
+  // 对照读（legacyJoin）；新归属键是**尝试窗口**。注意：下面的 `export { … } from "./worker-fan-in.ts"`
+  // 块里同名的那一条**只是再导出**，不产生本地绑定——本行才让本模块内能用它。
+  readFanInLockHold,
   resolveScopedGateCommand,
   // suite 日志失败行解析（gap-suite-failure-attribution-third-party-layout 的实现）随本模块对 fan-in 的
   // 反向依赖迁到 worker-fan-in.ts —— 机械 fan-in 的【本轮重跑失败文件】也要这份读数，而 worker-fan-in
@@ -354,6 +358,9 @@ import {
   baselineRedDeadlockReading,
   runGoalMergeFanIn,
   appendGoalMergeResultEvent,
+  // 过程日志文件名（`.quay/fan-in-<task>-<runIdSafe>.log` 的**唯一**命名函数——`readAttemptPhaseTimestamps`
+  // 按它定位本次尝试的过程日志，⛔ 不在这里重算 sanitize）。
+  fanInLogFileName,
   type GoalMergeFanInOptions,
   type GoalMergeFanInResult,
   type MechanicalFanInResult,
@@ -413,6 +420,9 @@ export {
   newSuiteLogAttemptSuffix,
   pruneTaskSuiteLogs,
   appendFanInTrace,
+  // ⛔ 不在此重复导入 readFanInLockHold（上面 `::398` 的 import 面已含它）——重复导入 = Duplicate
+  // export 编译错误。它在 readAttemptPhaseTimestamps 里只当**负控制对照**读（见 legacyJoin），
+  // 新归属键是尝试窗口，⛔ 不消费它做判定。
   scopedGateKey,
   type ScopedGateCacheEntry,
   readScopedGateCache,
@@ -571,6 +581,9 @@ export function computeOutcome({
   lockHoldMs = null,
   stderrTail = null,
   shortCircuit = null,
+  workerExitedAtMs = null,
+  faninEndedAtMs = null,
+  phases = null,
 }: {
   task: string;
   selectorReason: string;
@@ -604,6 +617,15 @@ export function computeOutcome({
    *  它是 judgeRetryExemption 把「AC 短路」与「fan-in 跑过但归因不出」分开的【结构化】判据——旧实现
    *  只能从 failure_reason 文本猜，两者同形（硬规则 3b）。 */
   shortCircuit?: string | null;
+  /** worker 进程退出的时刻（epoch ms，runOneWorker 在 `child.on("close")` 里直接读）。null = 未观测
+   *  （adopt 的孤儿 / 未 spawn 的路径——**未评估**，⛔ 不是「就在 ended_at」）。它是把「实现完成」与
+   *  「fan-in 落地」分开的唯一直接量：`ended_at` 含整段 fan-in。 */
+  workerExitedAtMs?: number | null;
+  /** 机械 fan-in 进程结束的时刻（epoch ms，runOneWorker 在 `spawnMechanicalFanIn` resolve 后直接读）。
+   *  null = 本次尝试没跑机械 fan-in（**不适用**，⛔ 不是「未评估」——两者由 `fanin_ran` 分开）。 */
+  faninEndedAtMs?: number | null;
+  /** 分阶段时间戳（`readAttemptPhaseTimestamps` 的输出；缺 ⇒ 全部 null）。 */
+  phases?: AttemptPhaseTimestamps | null;
 }) {
   // AC3（能取假，超时路径）：timedOut ⇒ final_state=timed-out（区别于外部 kill 的 killed）。
   //   被信号杀（非超时）⇒ final_state=killed + signal 落盘，⛔ 静默丢任务。
@@ -676,6 +698,40 @@ export function computeOutcome({
     // 缺值 ≠ 某个取值；硬规则 3b：未短路不得与「短路成因为 X」同形）。它是「没有 mechanical_fan_in」
     // 的两种成因里【哪一种是哪一种】的结构化判据。
     ...(typeof shortCircuit === "string" && shortCircuit.length > 0 ? { short_circuit: shortCircuit } : {}),
+    // ── 分阶段时间戳（gap-attempt-task-phase-timing-fields-incomplete-lock-wait-field-broken）──
+    // 下面这一组是本次任务新增的**具名阶段**。纪律（硬规则 3b/6）：
+    //   · 缺值 ⇒ 显式 `null`（**未评估 / 不适用**），⛔ 绝不落成 `started_at` 的别名让读者以为测过；
+    //   · `terminal` 是**显式取值**而不是「有没有 ended_at」的推断——in-flight 尝试的载体是
+    //     `.quay/worker-dispatch.json`（query 侧读它、写 `terminal:false`），本写入点落盘的每一条
+    //     都是终态 ⇒ 恒 `true`，两半靠**同一个字段名**区分（读者不必靠记录的【缺席】去猜在飞）。
+    terminal: true,
+    // `dispatched_at` = 本次派发开始的时刻，与既有 `started_at` **同一个读数**（startedAtMs 单一来源）。
+    // ⛔ 不另算一次 Date.now()——两个同义字段若各算一次就会漂移（同载体两个同义字段 = 漂移源）。
+    // 保留 `started_at` 是 DoD「No existing field is removed」；`dispatched_at` 是它的**正名**。
+    dispatched_at: new Date(startedAtMs).toISOString(),
+    worker_exited_at: workerExitedAtMs !== null && workerExitedAtMs !== undefined ? new Date(workerExitedAtMs).toISOString() : null,
+    fanin_ended_at: faninEndedAtMs !== null && faninEndedAtMs !== undefined ? new Date(faninEndedAtMs).toISOString() : null,
+    // 锁：**新归属键 = 尝试窗口**（见 readAttemptPhaseTimestamps 的 WHY）。缺 ⇒ null（未评估）。
+    lock_requested_at: phases?.lockRequestedAtMs != null ? new Date(phases.lockRequestedAtMs).toISOString() : null,
+    lock_acquired_at: phases?.lockAcquiredAtMs != null ? new Date(phases.lockAcquiredAtMs).toISOString() : null,
+    // suite 段：与锁同窗口（同一个 run 的过程日志），⛔ 不需要第二次 join。
+    suite_started_at: phases?.suiteStartedAtMs != null ? new Date(phases.suiteStartedAtMs).toISOString() : null,
+    suite_ended_at: phases?.suiteEndedAtMs != null ? new Date(phases.suiteEndedAtMs).toISOString() : null,
+    // 真正从尝试窗口量出来的锁等待（ms）——与既有 `lock_wait_ms`（读 verification-round.jsonl，
+    // 是 **suite 单飞锁** 的排队时长，另一把锁）**不是**同一个量，故用独立字段名，⛔ 不覆盖它。
+    fan_in_lock_wait_ms: phases?.lockWaitMs ?? null,
+    // 旧归属口径的对照读数（负控制）：当它 != 窗口口径时，读者能看出「旧算法在这条记录上错在哪」。
+    // 只在**窗口内确有 acquire** 时给出判定；否则 false/true 都无意义 ⇒ null（未评估，硬规则 3b）。
+    ...(phases && phases.legacyJoinMismatch !== null
+      ? {
+          legacy_lock_join: {
+            lock_acquire_epoch_ms: phases.legacyJoin.lockAcquireEpochMs,
+            lock_release_epoch_ms: phases.legacyJoin.lockReleaseEpochMs,
+            lock_hold_secs: phases.legacyJoin.lockHoldSecs,
+            mismatch: phases.legacyJoinMismatch,
+          },
+        }
+      : {}),
   };
 }
 
@@ -737,6 +793,121 @@ export function readLockMetricsForRun(
     if (typeof rec.lock_hold_ms === "number") lockHoldMs = rec.lock_hold_ms;
   }
   return { lockWaitMs, lockHoldMs };
+}
+
+// ── 尝试级阶段时间戳（gap-attempt-task-phase-timing-fields-incomplete-lock-wait-field-broken）─────
+// WHY THIS EXISTS。诊断（2026-10-14，只读）要按阶段拆一次尝试：dispatch / 实现完成（worker exit）/
+// 锁等待 / suite / fan-in 落地。既有载体只能给「整段（含 fan-in）」：
+//   · `worker-outcome.jsonl` 的 `started_at`/`ended_at` = 整段，**没有单独记 worker 退出的时刻**；
+//   · 锁等待只能靠 `mechanical_fan_in.lockAcquireEpoch/lockReleaseEpoch` 或 per-run 过程日志的
+//     `acquire-fan-in-lock` 步的 `wall_ms`——两者都**按 (task, runId) 归属**。
+//
+// ⛔ 断掉的正是这个归属键：常驻 `anchor` 的 `runId` 是一个**进程级常量**（实测 `.quay/worker-outcome.jsonl`
+// 里 `wk-prod-anchor` = 1148 条尝试 / 635 个任务；`.quay/fan-in-lock-events.jsonl` 里同一 runId = 986 次
+// acquire）。⇒ `fan-in-<task>-<runId>.log` 一个文件装着同一任务**多轮**的 acquire，`readFanInLockHold`
+// 取「最后一组 acquire/release」会跨轮配对；诊断据此把一次尝试的锁等待读成了 **P90 264 分钟 > 全程中位
+// 18 分钟**（值大于整段尝试 ⇒ 结构上不可能是这次尝试的锁等待）。这就是「它不测锁等待」的真因：
+// **不是算术错，是归属键不是【尝试】**。
+//
+// 修法（本模块，⛔ 不改 worker-fan-in.ts 的写入侧）：driver 手里有本次尝试自己的窗口
+// `[startedAtMs, endedAtMs]`——按 **ts 落在窗口内** 选出**本次尝试自己**的 acquire/suite 记录，
+// 于是归属键 = 尝试，不再是 (task, runId)。窗口选择是直接量（记录自带的 `ts`），⛔ 不猜。
+// 旧归属的读数**保留同名并存**在 `legacyJoin` 里（⛔ 不移除既有字段），使「旧算法错在哪」可当负控制复算。
+
+/** 一条 fan-in 过程日志记录（`appendFanInTrace` 写的形状；只取本模块用得到的字段）。 */
+export interface FanInTraceRecord {
+  tsMs: number;
+  step: string;
+  /** 步内墙钟（ms）；缺字段 ⇒ null（缺值 = 未查，⛔ 不与 0 共用取值）。 */
+  wallMs: number | null;
+}
+
+/** 读 `.quay/fan-in-<task>-<runIdSafe>.log` 的原始记录（按文件顺序）。读不到 / 坏行 ⇒ 跳过（best-effort
+ *  运行时日志；⛔ 不因日志坏而炸 driver）。 */
+export function readFanInTraceRecords(file: string): FanInTraceRecord[] {
+  let text = "";
+  try {
+    text = fs.readFileSync(file, "utf8");
+  } catch {
+    return [];
+  }
+  const out: FanInTraceRecord[] = [];
+  for (const line of text.split("\n")) {
+    const t = line.trim();
+    if (!t) continue;
+    let rec: { ts?: unknown; step?: unknown; wall_ms?: unknown };
+    try {
+      rec = JSON.parse(t);
+    } catch {
+      continue;
+    }
+    if (typeof rec.step !== "string") continue;
+    if (typeof rec.ts !== "string") continue;
+    const tsMs = Date.parse(rec.ts);
+    if (!Number.isFinite(tsMs)) continue;
+    out.push({ tsMs, step: rec.step, wallMs: typeof rec.wall_ms === "number" ? rec.wall_ms : null });
+  }
+  return out;
+}
+
+/** 一次尝试分阶段时间戳（全部 epoch ms；`null` = 本次尝试没有这个阶段/读不到，⛔ 不是 0）。 */
+export interface AttemptPhaseTimestamps {
+  /** 请求 fan-in 锁的时刻（= acquire 记录的 `ts` − 它的 `wall_ms`；两个读数都来自**同一条**记录）。 */
+  lockRequestedAtMs: number | null;
+  /** 拿到 fan-in 锁的时刻（= acquire 记录自己的 `ts`）。 */
+  lockAcquiredAtMs: number | null;
+  /** 真正的锁等待（ms）= acquired − requested；两读数缺一 ⇒ null。 */
+  lockWaitMs: number | null;
+  suiteStartedAtMs: number | null;
+  suiteEndedAtMs: number | null;
+  /** 承载本次读数的过程日志 basename（可核；读不到 ⇒ null）。 */
+  sourceLog: string | null;
+  /** **旧归属口径**（`readFanInLockHold(root, task, runId)` 按 (task, runId) 取最后一组）的同名读数，
+   *  保留供负控制复算；窗口内没有 acquire ⇒ 全部 null。 */
+  legacyJoin: { lockAcquireEpochMs: number | null; lockReleaseEpochMs: number | null; lockHoldSecs: number | null };
+  /** `true` ⟺ 窗口内**确有**本次尝试的 acquire ∧ 旧口径与它不一致（**旧算法在这条记录上是错的**）。
+   *  旧口径读不到 / 窗口内无 acquire ⇒ `null`（**未评估**，⛔ 不与 `false` 共用取值——硬规则 3b）。 */
+  legacyJoinMismatch: boolean | null;
+}
+
+/** 从过程日志里按**尝试窗口**取分阶段时间戳（归属键 = 尝试，⛔ 不是 (task, runId)）。 */
+export function readAttemptPhaseTimestamps(
+  root: string,
+  task: string,
+  runId: string,
+  startMs: number,
+  endMs: number,
+): AttemptPhaseTimestamps {
+  const file = path.join(root, ".quay", fanInLogFileName(task, runId));
+  const inWindow = readFanInTraceRecords(file).filter((r) => r.tsMs >= startMs && r.tsMs <= endMs);
+  // 同一次 fan-in 只写一条 acquire（成功或失败）。多条 ⇒ 取**最后**一条（与「本次尝试」最近的）——
+  // 但这本身是异常形态，故仍只按窗口归属，⛔ 不回退到 (task, runId) 的旧口径。
+  const acquires = inWindow.filter((r) => r.step === "acquire-fan-in-lock");
+  const acquire = acquires.length > 0 ? acquires[acquires.length - 1] : null;
+  const suiteStart = inWindow.find((r) => r.step === "suite-start") ?? null;
+  const suiteEnd = [...inWindow].reverse().find((r) => r.step === "suite-end" || r.step === "suite-skip") ?? null;
+  const lockAcquiredAtMs = acquire ? acquire.tsMs : null;
+  const lockRequestedAtMs = acquire && acquire.wallMs !== null ? acquire.tsMs - acquire.wallMs : null;
+  const lockWaitMs = lockRequestedAtMs !== null && lockAcquiredAtMs !== null ? Math.max(0, lockAcquiredAtMs - lockRequestedAtMs) : null;
+  // 旧口径对照：`readFanInLockHold` 的 epoch 单位是【秒】⇒ 换成 ms 再比。它读不到 ⇒ null（未评估）。
+  const legacy = readFanInLockHold(root, task, runId);
+  const legacyJoin = {
+    lockAcquireEpochMs: legacy.lockAcquireEpoch !== null ? Math.round(legacy.lockAcquireEpoch * 1000) : null,
+    lockReleaseEpochMs: legacy.lockReleaseEpoch !== null ? Math.round(legacy.lockReleaseEpoch * 1000) : null,
+    lockHoldSecs: legacy.lockHoldSecs,
+  };
+  let legacyJoinMismatch: boolean | null = null;
+  if (lockAcquiredAtMs !== null && legacyJoin.lockAcquireEpochMs !== null) {
+    // 容差 2s：旧口径的 epoch 是**秒**粒度（`date +%s`），换算必然截断。
+    legacyJoinMismatch = Math.abs(legacyJoin.lockAcquireEpochMs - lockAcquiredAtMs) > 2000;
+  }
+  return {
+    lockRequestedAtMs, lockAcquiredAtMs, lockWaitMs,
+    suiteStartedAtMs: suiteStart ? suiteStart.tsMs : null,
+    suiteEndedAtMs: suiteEnd ? suiteEnd.tsMs : null,
+    sourceLog: fs.existsSync(file) ? path.basename(file) : null,
+    legacyJoin, legacyJoinMismatch,
+  };
 }
 
 // ── 落地判定（gap-worker-driver-fake-completion-exit-0）──────────────────────────────────────────
@@ -5242,6 +5413,14 @@ function runOneWorker({
   return new Promise((resolve) => {
     const [cmd, ...cmdArgs] = argv;
     const startedAtMs = Date.now();
+    // worker 进程退出时刻（gap-attempt-...-lock-wait-field-broken）：`ended_at` 含整段 fan-in，故
+    // 「实现完成」这一相位必须**在 close 事件里当场读**，⛔ 不能在 finish() 里用 endedAtMs 反推。
+    // null = 未观测（adopt 的孤儿路径不走这里）——未评估，⛔ 不是「= ended_at」。
+    let workerExitedAtMs: number | null = null;
+    // fan-in 相位直接量（在 finishAsync 里赋值、被 finish() 读 ⇒ 必须声明在两者共同的 **runOneWorker**
+    // 作用域）。`null` = 本次尝试没跑机械 fan-in（AC 短路 / exit≠0 / 无 worktree）——**不适用**，由
+    // `mechanical_fan_in` 的有无分开，⛔ 不与「跑了但读不到」同形。
+    let faninEndedAtMs: number | null = null;
     let child: ReturnType<typeof spawn> | null = null;
     let spawnError: string | null = null;
     // worker stderr 尾部捕获（gap-worker-quick-death-environment-fatal-halts-driver）：旧实现
@@ -5299,9 +5478,13 @@ function runOneWorker({
       // verification-round ledger (matched by this worker's runId) so worker-outcome.jsonl can
       // distinguish「长时间持锁」from「worker 慢」. Absent (null) on doc-only / scoped / no-record runs.
       const lockMetrics = readLockMetricsForRun(rootDir, runId, taskId);
+      // 分阶段时间戳：按**本次尝试的窗口** [startedAtMs, endedAtMs] 从过程日志里取，归属键 = 尝试
+      // （⛔ 不再是 (task, runId)——常驻 anchor 的 runId 是进程级常量，旧口径会跨轮取错）。
+      const phases = readAttemptPhaseTimestamps(rootDir, taskId, runId, startedAtMs, endedAtMs);
       const outcome = computeOutcome({
         task: taskId, selectorReason, exitCode: code, signal,
         startedAtMs, endedAtMs, workerPid, runId,
+        workerExitedAtMs, faninEndedAtMs, phases,
         spawnError: spawnErr, inFlightCount, timedOut,
         // AC153：DriverResult → computeOutcome 的 landed 三态。verified ⇒ landed=true；failed ⇒
         // landed=false + 证伪 reason；not-evaluated ⇒ landed=null（读不懂，computeOutcome 的 landed
@@ -5447,6 +5630,9 @@ function runOneWorker({
               task: taskId, worktree: paths[0], root: rootDir, runId,
               mergeTarget: resolveTaskMergeTarget(taskId, rootDir),
             });
+            // fan-in 结束时刻（相位直接量）：此刻 fan-in 子进程已 exit、结果已解析回来。⛔ 与
+            // `worker_exited_at` 是两个不同的相位——这正是本任务要把它们分开的那一对。
+            faninEndedAtMs = Date.now();
             if (json) {
               process.stdout.write(
                 `${JSON.stringify({ event: "mechanical-fan-in", task: taskId, wall_clock_ms: Date.now() - startMechMs, ...mechResult })}\n`,
@@ -5474,6 +5660,10 @@ function runOneWorker({
       spawnError = String(err && err.message ? err.message : err);
     });
     child.on("close", (code, s) => {
+      // 相位直接量：这一句是「worker 什么时候退出的」在整条流水线里的**唯一**取数点
+      // （`child.on("close")` 的子进程退出时刻，由内核投递）。⛔ 不要在 finish() 里再补一次
+      // Date.now()——那时 fan-in 已经跑完，读到的会是 fan-in 结束时刻（正是本任务要分开的两个相位）。
+      if (workerExitedAtMs === null) workerExitedAtMs = Date.now();
       void finishAsync(code, s ?? null, spawnError);
     });
 
