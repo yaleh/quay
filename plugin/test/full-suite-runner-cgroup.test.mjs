@@ -1337,3 +1337,88 @@ test("AC3 — the lane-scaled ESTIMATOR is pure and follows the host/concurrency
   assert.equal(none.laneScaledBytes, null);
   assert.match(none.reason, /no per-member memory measurement/);
 });
+
+// ── gap-test-spawned-resident-drivers-outlive-their-suite-no-process-group-reaping (AC2) ────────────
+// The suite-end backstop: after the planned files finish, any process still alive in the suite's OWN
+// process group is enumerated (pid / start time / cmdline / cwd), killed by group, and recorded — and
+// the round becomes `not-evaluated: leaked-processes (n)` rather than green.
+//
+// The fixture deliberately reproduces the measured incident shape at suite scale: a background child
+// INHERITS the suite's stdio, so it holds the runner's stdout pipe open after the direct child exits.
+// Pre-fix that defers `close` FOREVER (the runner never got past the await and never wrote a verdict —
+// the 18h round); post-fix the round is gated on `exit` + a bounded sweep.
+
+test("AC2 — suite-end backstop: a leaked resident child yields not-evaluated: leaked-processes (1), reaped", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-leak-"));
+  const leakedPidFile = path.join(root, "leaked.pid");
+  const MARKER = "quay-leaked-fixture-marker-2f6d1a";
+  // A resident child that inherits the suite's stdout (⇒ it holds the runner's stdio pipe open) and
+  // outlives the shell that started it. The shell still reports a fully-green TAP tally, so the ONLY
+  // thing that can stop the round from certifying green is the backstop.
+  const { f, dir } = fakeSuite(
+    `node -e "setInterval(() => {}, 1000)" ${MARKER} &\n` +
+      `echo $! > ${leakedPidFile}\n` +
+      `echo "# tests 1"\necho "# pass 1"\necho "# fail 0"\necho "# cancelled 0"\nexit 0`,
+  );
+  try {
+    const child = runRunner({ root, command: `bash ${f}`, laneCount: 2 });
+    const { code } = await waitExit(child);
+    const leakedPid = Number(fs.readFileSync(leakedPidFile, "utf8").trim());
+    assert.ok(Number.isInteger(leakedPid), "the fixture recorded the resident child's pid");
+
+    // The verdict is NOT green: the tests all passed, but the round did not earn a certificate.
+    const state = readState(root);
+    assert.equal(state.state, "red", "a round that leaked a process must not certify green");
+    assert.equal(state.notEvaluated, "leaked-processes (1)", "the round is not-evaluated, naming the leak");
+    assert.equal(state.leakedProcesses.length, 1, "one leaked process enumerated");
+    const leaked = state.leakedProcesses[0];
+    assert.equal(leaked.pid, leakedPid, "the enumerated pid is the fixture's leaked child");
+    assert.ok(leaked.cmdline.includes(MARKER), `the cmdline is recorded: ${leaked.cmdline}`);
+    assert.ok(leaked.cwd !== null, `the cwd is recorded (null only when unreadable): ${leaked.cwd}`);
+    assert.ok(typeof leaked.pgid === "number", "the process group is recorded");
+    assert.equal(code, 1, "a non-green round exits 1 (it cannot be mistaken for a pass)");
+
+    // …and the child was actually REAPED, not merely reported.
+    assert.equal(await waitGone(leakedPid), true, "the leaked child was killed by group");
+
+    // The round ledger carries the same reading (the state file is overwritten each round).
+    const rec = lastRoundRecord(root);
+    assert.equal(rec.state, "red");
+    assert.equal(rec.notEvaluated, "leaked-processes (1)", "the round ledger row carries the not-evaluated value");
+    assert.equal(rec.reason, "aborted", "a leak is NOT a code failure verdict — no correctness conclusion");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("AC2 negative control — a clean round records leakedProcesses: [] and stays green", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-noleak-"));
+  const { f, dir } = fakeSuite(GREEN_SUITE);
+  try {
+    const child = runRunner({ root, command: `bash ${f}`, laneCount: 2 });
+    const { code } = await waitExit(child);
+    assert.equal(code, 0, "a clean round is still green — the backstop adds no false positive");
+    const state = readState(root);
+    assert.equal(state.state, "green");
+    assert.deepEqual(state.leakedProcesses, [], "the sweep RAN and found nothing ([] ≠ an absent field)");
+    assert.equal(state.notEvaluated, undefined, "no not-evaluated value on a clean round");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+/** Poll for the pid to disappear (a signal's effect is asynchronous to the signalling process). */
+async function waitGone(pid, { timeoutMs = 5000 } = {}) {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    try {
+      process.kill(pid, 0);
+    } catch {
+      return true;
+    }
+    if (Date.now() >= deadline) return false;
+    await new Promise((r) => setTimeout(r, 25));
+  }
+}
