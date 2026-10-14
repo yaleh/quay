@@ -42,7 +42,7 @@ import { isDirectEntry } from "./gate-script-base.ts";
 // Layer 0 + 1b（driver-runtime.ts）：splitArgs / ts / appendHeartbeatLine（心跳单一落点）/ Fact /
 // RoutineSpec / scheduleIsDue / collectFacts。⛔ 不 import Layer 1a 的 source/select/verify——
 // 本 kind 是例程型（1b），结构上不被迫实现任务处理三段（AC151 取假①）。
-import { splitArgs, ts, appendHeartbeatLine, scheduleIsDue, collectFacts, kernelSiblingArgv, resolveQuayCodeRoot, registerKindStop, type Fact, type RoutineSpec } from "./driver-runtime.ts";
+import { splitArgs, ts, appendHeartbeatLine, scheduleIsDue, collectFacts, kernelSiblingArgv, resolveQuayCodeRoot, registerKindStop, kindStopProbe, type Fact, type RoutineSpec } from "./driver-runtime.ts";
 // Layer 0 · controlPlane（driver-shared.ts）：运行期 halt = 读控制态单一真相源（与 promotion/worker 同族）；
 // residentLoopStop = 停机标志 + 可唤醒 sleep 的单一实现（finding `driver-sleep-requeststop-triple`）。
 import { isHalted, residentLoopStop } from "./driver-shared.ts";
@@ -408,7 +408,14 @@ export async function runResidentOuterLoop(opts: ResidentOuterLoopOptions): Prom
 
   // Layer 0（driver-shared）：停机标志 + 可唤醒 sleep 单一实现（finding `driver-sleep-requeststop-triple`，
   // semantic-dedup-scan —— 此前三常驻循环各写一份逐字相同的四行副本）。
-  const stopCtl = residentLoopStop();
+  // gap-per-kind-stop-is-in-memory-and-never-crosses-dist-bundles：再挂一条**盘上**停机通道——进程内
+  // 登记在 shipped 产物上恒失效（anchor 与每个 kind 各一份 esbuild bundle，各自内联 driver-runtime ⇒
+  // 两张 KIND_STOP 表）。见 `kindStopProbe` 的 WHY。
+  const stopProbe = kindStopProbe(root, "outer");
+  const stopCtl = residentLoopStop({
+    diskStopProbe: stopProbe.read,
+    onNotEvaluated: () => process.stderr.write(`outer-driver: ${stopProbe.note}\n`),
+  });
   // AC-255（SPEC §7 阶段 C）：停机登记 —— 进程信号仍停本 kind，同时 anchor 可经 `requestKindStop`
   // 只停【这一个】循环（收敛后六个 kind 同进程，`kill -TERM <pid>` 不再能只停一个）。
   registerKindStop("outer", stopCtl.requestStop);

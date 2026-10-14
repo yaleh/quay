@@ -75,6 +75,7 @@ import {
   CONTROL_STATE_REL,
   PROMOTION_CONTROL_STATE_REL,
   type ControlPlaneHandle,
+  type DiskStopReading,
 } from "./driver-shared.ts";
 // Layer 1b · schedule（routine-scheduler 判定函数，⛔ 不新造定时器）。
 import { isDue } from "./routine-scheduler.ts";
@@ -104,7 +105,7 @@ export {
 };
 // Layer 0 · 常驻循环停机控制器（residentLoopStop，单一实现于 driver-shared.ts）：outer / promotion /
 // quality-gate 三循环共用——finding `driver-sleep-requeststop-triple`（semantic-dedup-scan）抽出。
-export { residentLoopStop, type ResidentLoopStop } from "./driver-shared.ts";
+export { residentLoopStop, type DiskStopReading, type ResidentLoopStop, type ResidentLoopStopOptions } from "./driver-shared.ts";
 // Layer 1a · filters（re-export，两 driver 经本文件消费同一谓词列表）。
 export { TASK_FILTERS, applyTaskFilters, makeFilterContext, allDepsDone, readTaskStatus };
 
@@ -780,8 +781,16 @@ export async function serveKindControlPlane(
 // **进程内的一个信号**，而不是 OS 信号。本登记表就是那个信号：驱动在进入常驻循环时
 // `registerKindStop(kind, requestStop)`，anchor 用 `requestKindStop(kind)` 只停它请求的那一个。
 //
-// ⛔ 登记表是**进程内存态**（只有 anchor 与各 kind 同进程时才有效）。跨进程调用 `requestKindStop`
-// 返回 false —— 如实报出「办不到」，⛔ 不静默 no-op（硬规则 3b）。
+// ⛔ 登记表是**进程内存态**（只有 anchor 与各 kind 同进程**且共享同一个模块实例**时才有效）。跨进程调用
+// `requestKindStop` 返回 false —— 如实报出「办不到」，⛔ 不静默 no-op（硬规则 3b）。
+//
+// ⛔⛔ **shipped 产物上它恒失效**（gap-per-kind-stop-is-in-memory-and-never-crosses-dist-bundles，
+// 实测 2026-10-14）：`driver-anchor.js` 与每个 `<kind>-driver.js` 是**各自独立的 esbuild bundle**，
+// 各自内联一份本模块 ⇒ 各有一张 KIND_STOP 表，anchor 的 `requestKindStop` 查的是它自己那张**空表**、
+// 恒 `false`。故实际的 per-kind 停机**不**由本表承载，而由 `kindStopProbe(root, kind)` 读盘上
+// `.quay/anchor-kind-stops.json` 承载。本表保留的原因：dev 树（`.ts`，单模块实例）上它是**零延迟**
+// 的快路径（`stopKindViaAnchor` 实测 3510ms 成功）；且 `registerKindStop` 附带的进程级
+// SIGINT/SIGTERM 处理器仍是「整进程停机」的语义（那条路对所有 bundle 都成立，因为信号是进程级的）。
 
 interface KindStopController {
   requested: boolean;
@@ -1202,6 +1211,58 @@ export function clearKindStop(root: string, kind: DriverKind): void {
   const next = { ...cur };
   delete next[kind];
   writeKindStops(root, next);
+}
+
+// ── Layer 0 · **跨 bundle** per-kind 停机探针（gap-per-kind-stop-is-in-memory-and-never-crosses-…）───
+//
+// WHY（实测 2026-10-14，ClaudeCodeUI 的 shipped dist 内核 `official-dist-020-dev-r4-ccui-fix`）：
+// `quay driver stop|restart --kind quality` 5 次全等满 60s 后 `stop-failed` / `restart-aborted`，
+// 而同一命令在 quay 自己仓库（anchor 跑 `.ts` dev 树）3510ms 成功。根因**用反例核过，不是推断**：
+// `KIND_STOP = new Map()`（本文件 :790）是**进程内存态**，anchor 的 `requestKindStop` 只在
+// 「anchor 与该 kind 共享**同一个模块实例**」时找得到登记。shipped 产物里 `driver-anchor.js` 与每个
+// `<kind>-driver.js` 是**各自独立的 esbuild bundle**，各自内联一份 `driver-runtime`（实测：8 个
+// bundle 各含 1 处 `KIND_STOP = `），anchor 查的是自己那份**空表** ⇒ 恒 `false`，且返回值被丢弃
+// （`driver-anchor.ts:140`）⇒ 停机请求**根本没到过**那个 kind 的循环。
+//
+// ⇒ 停机信号必须有一个**不依赖模块同一性**的通道。盘上已经有现成的那个：`quay driver stop --kind X`
+// 的写侧 `updateDesired(present=false, …)` 在**同一次调用**里做两件事（:1123-1130）——把 X 移出
+// `.quay/anchor-desired.json`，并落一条停机记录到 `.quay/anchor-kind-stops.json`；`start` 侧
+// `updateDesired(present=true)` 清掉该记录。本函数就是那条记录的**读出半边**。
+//
+// ⛔ 探针**只读停机记录**，⛔ **不读**期望态成员资格。理由：读期望态会把 AC-255 刻意分开的两态
+// （`stopped-explicitly` = 有人显式停的 / `not-declared` = 静默脱离期望态）合并成同一种停机，
+// 而那两态正是 `kindDeclaration` 存在的理由。两个写侧都与停机记录同一次调用翻转 ⇒ 记录是**完备**的
+// 停机信号，不需要第二判据。（`not-declared` 的停机仍由 anchor reconcile 的进程内 `stop()` 负责；
+// 它在 shipped bundle 上确实也失效——那是同族但更窄的一个形态，不由本通道声称覆盖。）
+//
+// 三态（硬规则 3b：⛔ `not-evaluated` 不与 `not-stopped` 共用取值）：
+//   · `stopped`        文件在 ∧ 有本 kind 的记录
+//   · `not-stopped`    文件**不存在**（= 从未记录过任何显式停机，冷启动即此态，合法且自明）
+//                      或文件在 ∧ 无本 kind 的记录
+//   · `not-evaluated`  文件在但**读不懂**（坏 JSON / 非对象）——`readKindStops` 的 `null` 支。
+//     ⛔ 消费方（`residentLoopStop`）对它取 **fail-open**（继续跑）：读不懂停机记录时停掉一个**没人
+//     要求停**的循环，比漏掉一次停机请求贵得多；但必须**如实留痕一次**（`note`）。
+//     ⛔ 这也保证「文件不存在的夹具 / 直跑 kind 驱动」不受本通道影响（它们是 `not-stopped`）。 */
+export interface KindStopProbe {
+  /** 读一次盘上停机记录（三态）。 */
+  read: () => DiskStopReading;
+  /** `not-evaluated` 时的具名落痕（消费方只打一次）。 */
+  note: string;
+}
+
+export function kindStopProbe(root: string, kind: DriverKind): KindStopProbe {
+  return {
+    read: () => {
+      const stops = readKindStops(root);
+      if (stops === null) return "not-evaluated";
+      return stops[kind] ? "stopped" : "not-stopped";
+    },
+    note:
+      `kind-stop probe: ${ANCHOR_KIND_STOPS_REL} is present but unreadable (bad JSON / not an object) — ` +
+      `the cross-bundle per-kind stop channel cannot be evaluated for kind=${kind}. The loop keeps RUNNING ` +
+      `(⛔ it does not stop: stopping a loop nobody asked to stop is worse than missing one stop request). ` +
+      `Fix or delete the file, then retry \`quay driver stop --kind ${kind}\`.`,
+  };
 }
 
 /** 一趟判定所用的**期望态 + 停机记录**快照（gap-anchor-state-nonatomic-and-declaration-outruns-log M1）。
@@ -3947,6 +4008,10 @@ export interface StopOptions {
   stopTimeoutMs?: number;
   /** 等 anchor 自身退出的确认窗口（缺省 30000 = 既有值）。 */
   anchorExitMs?: number;
+  /** 停机**失败**时把该 kind 放回期望态（`restart --kind X` 的中止半边，见 `restartKind` 的 WHY）。
+   *  ⛔ 缺省 false：`stop --kind X`（意图就是「X 该停」）**保持**现有语义（移出期望态 + 落停机记录），
+   *  只有 `restart` 才置 true。 */
+  restoreDesiredOnFailure?: boolean;
 }
 
 const LEGACY_STOP_GRACE_MS = 10_000;
@@ -4157,9 +4222,23 @@ async function stopKindViaAnchor(
   rmCarrierUnlessForeignLive(st.supervisorPidFile, anchorPid0);
   try { fs.rmSync(st.stopSentinel, { force: true }); } catch { /* ignore */ }
   if (stillRunning) {
+    // gap-per-kind-stop-is-in-memory-and-never-crosses-dist-bundles（Plan 步 3）：**期望态污染的修法**。
+    // `restart --kind X` 意图是「X 应该在跑」；一次**中止的** restart 意味着旧循环**仍在跑** ⇒ 此刻把 X
+    // 留在期望态之外是一个被机器否证的说法（下一次 anchor 冷启动会照做，静默地少起一个 kind——实测
+    // 形态）。⇒ 中止路径把它放回期望态并清掉停机记录（`updateDesired(present=true)` 两件事一起做）。
+    // ⛔ 只对 `restart` 生效（`restoreDesiredOnFailure`）：`stop --kind X` 的意图是「X 该停」，它的
+    // 期望态移出 + 停机记录**保持**——那正是盘上停机通道的请求载体。
+    // ⛔ 不选「确认停干净后才移出期望态」：期望态的移出**同时**是 anchor reconcile 的停机信号
+    //    （`driver-anchor.ts:651`）与 `startKindTask` 的「⛔ 不重启」判据（`:176`），推迟它会让「循环已退
+    //    而期望态仍要它」那个窗口里 anchor 立刻把它重拉起来（§6.9 不变式 1 的反面）；修它需要第二张
+    //    「停机请求」载体 + 改写两处判据，而 restart 的中止半边一行就够。
+    if (opts.restoreDesiredOnFailure) {
+      updateDesired(root, kind, true, "quay-driver-restart-aborted");
+    }
     process.stderr.write(
       `stop-failed: kind=${kind} — 该 kind 的循环在 ${stopTimeoutMs}ms 内未收尾（anchor pid=${anchorPid ?? "none"}）。` +
       `⛔ 本条**不报成 not-running**：循环仍在 ⇒ 接着 start 会得到两份 loop（双派发）。` +
+      `期望态：${opts.restoreDesiredOnFailure ? `已把 ${kind} 放回（restart 中止 ⇒ 「该 kind 应该在跑」仍成立）` : `仍不含 ${kind}，且有停机记录（⛔ 下一次冷启动会照做，由 \`quay driver start --kind ${kind}\` 恢复）`}。` +
       workerStopUnreachableNote(kind) +
       `锚日志尾:\n`,
     );
@@ -4251,6 +4330,9 @@ export async function restartKind(
     legacyKillWaitMs: opts.legacyKillWaitMs,
     stopTimeoutMs: opts.stopTimeoutMs,
     anchorExitMs: opts.anchorExitMs,
+    // ⛔ restart 与 stop 的关键差异（gap-per-kind-stop-…，Plan 步 3）：restart 中止时**恢复期望态**。
+    // 见 `stopKindViaAnchor` 里 `stillRunning` 那一支的 WHY。
+    restoreDesiredOnFailure: true,
   });
   if (stopRc !== 0) {
     err(

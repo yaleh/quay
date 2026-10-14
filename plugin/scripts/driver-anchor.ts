@@ -45,6 +45,7 @@ import {
   readKindStops,
   rebuildKernelBundle,
   requestKindStop,
+  ANCHOR_KIND_STOPS_REL,
   resolveKernelSibling,
   sourceChangedSince,
   sourceWatch,
@@ -91,10 +92,17 @@ export interface AnchorOptions {
 /** 调用一个 kind 的**既有**常驻循环入口（同 argv 形态 ⇒ 同一条码路，⛔ 不复制判定逻辑）。
  *
  *  ⚠️ 动态 import 的目标是 `resolveKernelSibling` 解析出的**同一个绝对路径**——这样 `driver-runtime.ts`
- *  在本进程里只有**一个**模块实例，`registerKindStop` 的登记表才与各 kind 看到的是同一张。
+ *  在**dev 树**上只有**一个**模块实例，`registerKindStop` 的登记表才与各 kind 看到的是同一张。
  *  ⛔ 不要给 import URL 加 `?t=` 之类的时间戳缓存破坏：那会加载第二份 driver-runtime，
  *  登记表随之分裂（停机信号发到一份、循环听的是另一份 ⇒ 停机静默失效）。源码推进的自刷新走
- *  **整个 anchor 重启**（见 maybeSelfRefresh），⛔ 不是模块级热重载。 */
+ *  **整个 anchor 重启**（见 maybeSelfRefresh），⛔ 不是模块级热重载。
+ *
+ *  ⛔⛔ **上面那条「同一个模块实例」在 shipped 产物上结构性不成立**（gap-per-kind-stop-is-in-memory-
+ *  and-never-crosses-dist-bundles，实测 2026-10-14）：`driver-anchor.js` 与每个 `<kind>-driver.js`
+ *  是各自独立的 esbuild bundle，各自内联一份 `driver-runtime` ⇒ 本 import 加载的 bundle 有它**自己**
+ *  那张 KIND_STOP 表。⇒ per-kind 停机**不得**依赖本 import 的模块同一性，它走盘上通道
+ *  （`kindStopProbe` → `.quay/anchor-kind-stops.json`）。本函数仍按同一路径 import（dev 树上那是
+ *  零延迟快路径；shipped 上停机由盘上通道承接，两者**互补而非互斥**）。 */
 async function invokeKindDefault(kind: DriverKind, root: string, runId: string, entry: AnchorDesiredEntry): Promise<number> {
   const spec = DRIVER_KINDS[kind];
   const sibling = resolveKernelSibling(spec.driver);
@@ -137,7 +145,26 @@ function startKindTask(
   const invoke = opts.invokeKind ?? invokeKindDefault;
 
   let stopRequested = false;
-  const stop = (): void => { stopRequested = true; requestKindStop(kind); };
+  // gap-per-kind-stop-is-in-memory-and-never-crosses-dist-bundles（Plan 步 2）：进程内停机登记的
+  // **返回值必须承重**。`requestKindStop` 返回 false = 「本进程里没有该 kind 的登记」——它在 shipped
+  // 产物上是**常态**（anchor 与每个 kind 各是一份 esbuild bundle，各自内联 driver-runtime ⇒ 两张
+  // KIND_STOP 表），而旧代码把它丢弃 ⇒ 一次「停机请求从未到达任何循环」与「停机请求已送达」在 logs
+  // 上**同形**（硬规则 3b 的同族）。kind 的真正停机改由**盘上**通道承接（`kindStopProbe`，读
+  // `.quay/anchor-kind-stops.json`），所以这里只需**具名报一次**这个分层事实，⛔ 不每趟刷屏。
+  let noControllerLogged = false;
+  const stop = (): void => {
+    stopRequested = true;
+    if (!requestKindStop(kind) && !noControllerLogged) {
+      noControllerLogged = true;
+      log(
+        `${ts()} anchor: kind=${kind} — requestKindStop() reached no in-process controller ` +
+        `(the kind's loop runs from a separate module instance / esbuild bundle, so the KIND_STOP registry ` +
+        `is not shared with this anchor). Per-kind stop on this kernel is carried by the on-disk channel ` +
+        `${ANCHOR_KIND_STOPS_REL} (read by the kind's own resident loop); ⛔ this is not a failure of the ` +
+        `stop request itself.`,
+      );
+    }
+  };
 
   // `.quay/<prefix>.pid` = **anchor 的 pid**（六个 kind 一份一个 pid）。这正是「一个进程承载六个
   // kind」的诚实表示；AC-255 的判据读它并**按 pid 去重**，故六个 kind 只贡献 1 个存活进程。

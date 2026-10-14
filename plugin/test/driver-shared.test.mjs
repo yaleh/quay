@@ -237,6 +237,13 @@ test("回归（dedup 守卫）— 三常驻 driver ⛔ 不再各自声明 wakeRe
       0,
       `${f} 不得再声明 wakeResolve 副本（应经 driver-shared residentLoopStop）`,
     );
-    assert.match(src, /residentLoopStop\(\)/, `${f} 须调用 shared residentLoopStop()`);
+    // ⚠️ 判据按**结构**（调用了那个共享函数），⛔ 不按**拼写**：`residentLoopStop()` 收尾的 `()`
+    // 是一个与判据无关的字面量——gap-per-kind-stop-is-in-memory-and-never-crosses-dist-bundles 给
+    // 三个调用点都传了 `{diskStopProbe, …}`（跨 bundle 停机通道），旧的正则 `/residentLoopStop\(\)/`
+    // 会把这次**合法重构**判红（同族：criterion-pinning-a-per-file-import-list-breaks-on-legit-refactor）。
+    assert.match(src, /residentLoopStop\(/, `${f} 须调用 shared residentLoopStop()`);
+    // 并且**确实**接上了盘上停机通道（否则上面那条放宽会退化成「只要提到这个名字就算」——
+    // 硬规则 4c 的空转半边）。跨 bundle 的 per-kind 停机是这条通道的唯一载体，见 kindStopProbe 的 WHY。
+    assert.match(src, /diskStopProbe:\s*stopProbe\.read/, `${f} 须把 kindStopProbe 的读出半边接进常驻循环`);
   }
 });

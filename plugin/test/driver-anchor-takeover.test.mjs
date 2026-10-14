@@ -35,8 +35,12 @@ import path from "node:path";
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import {
-  DRIVER_KINDS,
   KNOWN_KINDS,
+  DRIVER_KINDS,
+  kindStopProbe,
+  readKindStops,
+  requestKindStop,
+  updateDesired,
 } from "../scripts/driver-runtime.ts";
 import {
   oldAnchorWorstExitMs,
@@ -425,4 +429,97 @@ test("AC3(3b) — 「没能交叉核对」是**独立取值**：快照缺失 / p
   assert.deepEqual(takeoverKindDivergence(["outer", "goal"], ["outer", "goal"]), { dropped: [], added: [] });
   assert.equal(takeoverKindsWarning(["outer", "goal"], ["outer", "goal"], 42), null, "一致 ⇒ null（⛔ 不加噪）");
   assert.match(takeoverKindsWarning(["outer", "goal"], ["outer"], 42) ?? "", /goal NOT started/, "差异 ⇒ 点名被丢的 kind");
+});
+
+// ── 跨 bundle 的 per-kind 停机通道（gap-per-kind-stop-is-in-memory-and-never-crosses-dist-bundles）──
+//
+// 现场（2026-10-14，ClaudeCodeUI 的 shipped dist 内核 `official-dist-020-dev-r4-ccui-fix`）：
+// `quay driver stop|restart --kind quality` 5 次全等满 60s 后 `stop-failed` / `restart-aborted`，
+// 而**同一条命令**在 quay 自己仓库（anchor 跑 `.ts` dev 树）3510ms 成功。根因用反例核过：per-kind
+// 停机走 `driver-runtime.ts` 的 `KIND_STOP` **进程内存**登记表，而 shipped 产物里 `driver-anchor.js`
+// 与每个 `<kind>-driver.js` 是**各自独立的 esbuild bundle**、各自内联一份 driver-runtime ⇒ anchor 的
+// `requestKindStop` 查的是自己那张**空表**、恒 `false`，而返回值被丢弃 ⇒ 停机请求从未到达循环。
+//
+// 本用例把那个布局**机械地**造出来（⛔ 不是读配置猜、⛔ 不是断言源码文本）：用 esbuild 把
+// `quality-gate-driver.ts` **单独**打成一个 bundle（= 一个独立的模块实例，与 shipped 形态同构），
+// 然后逐条取假：
+//   ① 负控制 **A**（布局为真）：本进程从 `.ts` 那份 driver-runtime 调 `requestKindStop("quality")`
+//      必须返回 **false** —— 证明这两份**确实是两个模块实例**。若它返回 true，本用例测的就不是
+//      那个布局，下面 ③ 的绿也是假的。
+//   ② 负控制 **B**（判据有代价）：**不写**停机记录时，那个 bundle 的常驻环在同一个窗口内**不退出**
+//      —— 否则 ③ 的「退出了」可能来自别的路径（崩溃 / 到点自停），与停机记录无关。
+//   ③ 判据：写停机记录（= `quay driver stop --kind X` 经 `updateDesired(present=false, …)` 写的那个）
+//      ⇒ 那个 bundle 的常驻环**退出**，且从写入到退出 ≤ 一个 reconcile tick 量级。
+//   ⛔ 直接量取自**子进程真的退出了**（`exit` 事件 + 墙钟毫秒），⛔ 不是日志里的一句话。
+
+/** quality 例程的 stub（同 `driver-config.test.mjs` 的手法）：让 due 例程零 LLM、快速返回，
+ *  本用例测的是**停机通道**，⛔ 不是例程。 */
+const QUALITY_STUBS = [
+  "--resource-gate-cmd", "false",
+  "--judge-cmd", "true", "--arch-judge-cmd", "true", "--judgment-cmd", "true",
+  "--identity-cmd", "true", "--lineage-cmd", "true", "--deletion-cmd", "true",
+  "--packaging-check-cmd", "true", "--packaging-gap-worker-cmd", "true", "--plan-cmd", "true",
+];
+
+test("跨 bundle per-kind 停机 — 判据不靠模块同一性：盘上停机记录让**独立 bundle** 的常驻环退出（含两条负控制）", async (t) => {
+  const distDir = fs.mkdtempSync(path.join(os.tmpdir(), "pkstop-dist-"));
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "pkstop-root-"));
+  fs.mkdirSync(path.join(root, ".quay"), { recursive: true });
+  let child = null;
+  t.after(() => {
+    if (child && child.exitCode === null) { try { child.kill("SIGKILL"); } catch { /* gone */ } }
+    fs.rmSync(distDir, { recursive: true, force: true });
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+
+  // ── 造出 shipped 的布局：quality-gate-driver **单独**打成一份 bundle（自己的 driver-runtime 副本）──
+  // esbuild 由 build-plugin-dist.mjs 同一份依赖提供（本仓库 devDependency；`build-plugin-dist.test.mjs`
+  // 与 `fan-in-execute-plugin-root-arg.test.mjs` 已经这么用）。
+  const { build } = await import("esbuild");
+  const outfile = path.join(distDir, "quality-gate-driver.js");
+  await build({
+    entryPoints: [path.join(REPO_ROOT, "plugin", "scripts", "quality-gate-driver.ts")],
+    bundle: true, format: "esm", platform: "node", target: "node20", outfile,
+    // yaml（CJS）的 interop shim：与 `build-plugin-dist.mjs` 的 banner 逐字同源（否则 bundle 起不来）。
+    banner: { js: "import { createRequire as __cr } from \"module\"; const require = __cr(import.meta.url);" },
+    logLevel: "silent",
+  });
+  assert.ok(fs.existsSync(outfile), "the standalone quality bundle was produced");
+
+  const pidFile = path.join(root, ".quay", "quality.pid");
+  child = spawn(
+    process.execPath,
+    [outfile, "--root", root, "--interval", "1000", "--pid-file", pidFile, ...QUALITY_STUBS],
+    { stdio: ["ignore", "ignore", "ignore"] },
+  );
+  let exitCode = null;
+  let exitedAt = 0;
+  child.on("exit", (c) => { exitCode = c; exitedAt = Date.now(); });
+
+  // 直接量：常驻环**真的起来了**（`--pid-file` 由 `runResidentQualityGateLoop` 进入循环前写一次）。
+  await waitFor(() => fs.existsSync(pidFile), 20_000, "the standalone quality bundle's resident loop to start");
+
+  // ① 负控制 A：两个模块实例确实是分开的（否则本用例测的不是那个布局）。
+  assert.equal(
+    requestKindStop("quality"), false,
+    "the in-process KIND_STOP registry must NOT be shared with the standalone bundle " +
+    "(if it were, this case would not be exercising the shipped layout at all)",
+  );
+
+  // ② 负控制 B：**没有**停机记录时它不退出（同一个窗口、同一个进程）。
+  await new Promise((r) => setTimeout(r, 1_500));
+  assert.equal(exitCode, null, "⛔ 没有停机记录时那个 bundle 的常驻环不得退出（否则 ③ 的退出与记录无关）");
+
+  // ③ 判据：写停机记录 —— 逐字就是 `quay driver stop --kind X` 的写侧。
+  const before = Date.now();
+  updateDesired(root, "quality", false, "test:stop-kind");
+  assert.ok(readKindStops(root)?.quality, "the stop record landed in .quay/anchor-kind-stops.json");
+  assert.equal(kindStopProbe(root, "quality").read(), "stopped", "and the probe reads it back as `stopped`");
+  await waitFor(() => exitCode !== null, 10_000, "the standalone bundle's resident loop to stop on the on-disk record");
+  const stopMs = exitedAt - before;
+  assert.equal(exitCode, 0, `the loop returns 0 (clean stop), got ${exitCode}`);
+  assert.ok(
+    stopMs < 4_000,
+    `⛔ 停机延迟必须是一个 reconcile tick 量级，⛔ 不是一个 interval（interval=1000ms；实测 ${stopMs}ms）`,
+  );
 });

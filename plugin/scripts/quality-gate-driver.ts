@@ -52,6 +52,7 @@ import {
   scheduleIsDue,
   isHalted,
   registerKindStop,
+  kindStopProbe,
   residentLoopStop,
   resourceGateCheck,
   kernelSiblingArgv,
@@ -1554,10 +1555,22 @@ export async function runResidentQualityGateLoop(opts: QualityGateLoopOptions): 
     try { fs.writeFileSync(pidFile, `${process.pid}\n`, "utf8"); } catch { /* pid-file 只供外部观测，写失败不致命 */ }
   }
   // Layer 0（driver-shared）：停机标志 + 可唤醒 sleep 单一实现（finding `driver-sleep-requeststop-triple`）。
-  const stopCtl = residentLoopStop();
+  // ⚠️ `kind` 必须在 `residentLoopStop` **之前**定下来：它同时是进程内登记（`registerKindStop`）与
+  // 盘上探针（`kindStopProbe`）的 kind 参数，两处不一致会让两条通道指向不同的循环。
+  const kindOfLoop: DriverKind = opts.kind ?? "quality";
+  // gap-per-kind-stop-is-in-memory-and-never-crosses-dist-bundles：**跨 bundle** 停机通道。
+  // 进程内的 `registerKindStop`/`requestKindStop` 只在「共享同一模块实例」时成立；shipped 产物里
+  // anchor 与每个 kind 各是一份 esbuild bundle（各自内联 driver-runtime）⇒ 那条通道恒失效。盘上探针
+  // 读 `.quay/anchor-kind-stops.json`（`updateDesired(present=false)` 与期望态同一次调用里写），
+  // 与模块布局无关。本函数是 quality / goal / meta **三个 kind 共用**的常驻循环 ⇒ 一次接线覆盖三者。
+  const stopProbe = kindStopProbe(root, kindOfLoop);
+  const stopCtl = residentLoopStop({
+    diskStopProbe: stopProbe.read,
+    onNotEvaluated: () => process.stderr.write(`quality-gate-driver: ${stopProbe.note}\n`),
+  });
   // AC-255（SPEC §7 阶段 C）：停机登记 —— 进程信号仍停本 kind，同时 anchor 可经 `requestKindStop`
   // 只停【这一个】循环（收敛后多个 kind 同进程，`kill -TERM <pid>` 不再能只停一个）。
-  registerKindStop(opts.kind ?? "quality", stopCtl.requestStop);
+  registerKindStop(kindOfLoop, stopCtl.requestStop);
 
   const lastRun: Record<string, number> = {};
   let round = 0;

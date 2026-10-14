@@ -117,6 +117,40 @@ export function resourceGateCheck(root: string, cmd: string[] | null): { go: boo
 //     悬空 interval 拖着不退。故 requestStop 在唤醒在飞 sleep 时一并 clearTimeout 并置 wakeTimer=null。
 // ⛔ 不进程退出、⛔ 不杀在飞轮（调用方负责）——本控制器只做「标志 + 唤醒这一觉」。
 
+// ── 跨 bundle 停机探针（gap-per-kind-stop-is-in-memory-and-never-crosses-dist-bundles）─────────────
+//
+// WHY（实测 2026-10-14，ClaudeCodeUI 的 shipped dist 内核）：per-kind stop 走的是 `driver-runtime.ts`
+// 的 `KIND_STOP` **进程内存**登记表 —— anchor 用 `requestKindStop(kind)` 找登记。那条路只在
+// 「anchor 与各 kind 同享**一个模块实例**」时成立。shipped 内核里 `driver-anchor.js` 与每个
+// `<kind>-driver.js` 是**各自独立的 esbuild bundle**，各自内联一份 `driver-runtime` ⇒ anchor 查的是
+// 它自己那份**空表**、恒 `false`，而返回值被丢弃 ⇒ `stop --kind X` 永远等满超时（5 次实测全
+// `stop-failed`，同一命令在 dev 树上 3510ms 成功）。⇒ 停机信号必须有一个**不依赖模块同一性**的通道。
+//
+// 本组选项就是那个通道的通用半边：调用方注入一个**读盘探针**，控制器在 sleep 分片与轮边界读它。
+// ⛔ 探针只读**停机记录**（`.quay/anchor-kind-stops.json`），**不读**期望态成员资格 —— 见
+// `driver-runtime.ts` `kindStopProbe` 的 WHY。
+//
+// 三态（硬规则 3b：⛔ `not-evaluated` 不与 `not-stopped` 共用取值）：
+//   · `stopped`        ⇒ 停机（latch，回到稳态不再重复读盘）
+//   · `not-stopped`    ⇒ 继续
+//   · `not-evaluated`  ⇒ **继续**（fail-open：读不懂停机记录时停掉一个**没人要求停**的循环，比漏掉
+//     一次停机请求贵得多），但**如实留痕一次**（⛔ 不静默、⛔ 不每周期刷屏）
+
+/** 跨 bundle 停机探针的一趟读数（三态，硬规则 3b）。 */
+export type DiskStopReading = "stopped" | "not-stopped" | "not-evaluated";
+
+/** 盘上探针的轮询周期缺省（ms）= anchor 的 reconcile 周期 ⇒ 停机延迟 ≤ 1 个 reconcile tick。 */
+export const DISK_STOP_POLL_MS_DEFAULT = 500;
+
+export interface ResidentLoopStopOptions {
+  /** 盘上停机探针（见上 WHY）。不传 ⇒ 行为与从前**逐字**相同（只有进程信号 + 进程内登记）。 */
+  diskStopProbe?: () => DiskStopReading;
+  /** 探针轮询周期（ms，缺省 `DISK_STOP_POLL_MS_DEFAULT`）。 */
+  diskPollMs?: number;
+  /** `not-evaluated` 读数的**一次性**具名落痕（⛔ 不静默）。 */
+  onNotEvaluated?: () => void;
+}
+
 /** 常驻循环的停机控制器。`while (!ctl.isStopRequested())` + `await ctl.sleep(intervalMs)`。 */
 export interface ResidentLoopStop {
   /** 停机是否已被请求（常驻 while 的条件用）。 */
@@ -128,14 +162,35 @@ export interface ResidentLoopStop {
 }
 
 /** 建一个常驻循环停机控制器（见上 WHY）。三 driver 各 import 本函数，⛔ 不各写一份四行副本。 */
-export function residentLoopStop(): ResidentLoopStop {
+export function residentLoopStop(opts: ResidentLoopStopOptions = {}): ResidentLoopStop {
   let stopRequested = false;
   let wakeResolve: (() => void) | null = null;
   // 当前在飞 sleep 排定的定时器 handle（见 WHY 第三条）：requestStop 提前唤醒时须 clearTimeout，
   // 否则悬空 handle 会把事件循环/测试进程拖到原 `ms` 到期。
   let wakeTimer: ReturnType<typeof setTimeout> | null = null;
+  let notEvaluatedLogged = false;
+
+  /** 读一次盘上探针并按三态动作；`stopped` 会 **latch** 停机标志（此后不再读盘）。 */
+  const probe = (): boolean => {
+    if (stopRequested) return true;
+    if (!opts.diskStopProbe) return false;
+    let reading: DiskStopReading;
+    try {
+      reading = opts.diskStopProbe();
+    } catch {
+      // 探针自己抛错（读盘失败、注入的假探针坏了）⇒ 与「读不懂」同形，⛔ 不冒充实测到的取值。
+      reading = "not-evaluated";
+    }
+    if (reading === "stopped") { stopRequested = true; return true; }
+    if (reading === "not-evaluated" && !notEvaluatedLogged) {
+      notEvaluatedLogged = true;
+      try { opts.onNotEvaluated?.(); } catch { /* 落痕失败不阻碍循环 */ }
+    }
+    return false;
+  };
+
   return {
-    isStopRequested: () => stopRequested,
+    isStopRequested: () => probe(),
     requestStop: () => {
       stopRequested = true;
       if (wakeResolve) {
@@ -148,12 +203,28 @@ export function residentLoopStop(): ResidentLoopStop {
       }
     },
     sleep: (ms: number) => new Promise<void>((resolve) => {
+      if (!opts.diskStopProbe) {
+        wakeResolve = resolve;
+        wakeTimer = setTimeout(() => {
+          wakeTimer = null; // 已到点 ⇒ 本觉的定时器不再在飞，提前唤醒路径无须（也不应）再 clear 它
+          if (wakeResolve === resolve) wakeResolve = null;
+          resolve();
+        }, ms);
+        return;
+      }
+      // 分片轮询（⛔ 不是「睡满一个 interval 再判一次」）：每次分片到点读一次盘，读到停机即唤醒 ⇒
+      // 停机延迟 ≤ 一个分片周期，与间隔长短无关。`requestStop` 仍能提前唤醒（它清掉当前分片的定时器）。
+      const pollMs = Math.max(1, Math.floor(opts.diskPollMs ?? DISK_STOP_POLL_MS_DEFAULT));
+      const deadline = Date.now() + ms;
+      const finish = (): void => { wakeResolve = null; wakeTimer = null; resolve(); };
+      const tick = (): void => {
+        if (probe()) { finish(); return; }
+        const remaining = deadline - Date.now();
+        if (remaining <= 0) { finish(); return; }
+        wakeTimer = setTimeout(tick, Math.min(pollMs, remaining));
+      };
       wakeResolve = resolve;
-      wakeTimer = setTimeout(() => {
-        wakeTimer = null; // 已到点 ⇒ 本觉的定时器不再在飞，提前唤醒路径无须（也不应）再 clear 它
-        if (wakeResolve === resolve) wakeResolve = null;
-        resolve();
-      }, ms);
+      wakeTimer = setTimeout(tick, Math.min(pollMs, Math.max(0, ms)));
     }),
   };
 }

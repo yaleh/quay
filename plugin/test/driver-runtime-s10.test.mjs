@@ -40,9 +40,15 @@ test("AC2(c) restart — stop 未确认旧进程树退出 ⇒ **中止**（⛔ �
   assert.ok(out.some((l) => l.startsWith("stopped-legacy:")), `遗留 pair 仍然要真的被停掉：${out.join("|")}`);
   assert.equal(pidAlive(f.supPid), false, "判别：遗留 supervisor 真的死了（stop 那一半仍然有效）");
   assert.equal(pidAlive(f.drvPid), false, "判别：遗留 driver 真的死了");
-  // ⛔ 最关键的一条：start 必须**没有**跑过。它跑过的直接量 = 该 kind 被加进 anchor 期望态
-  // （`startKindViaAnchor` 第 ① 步），那就是第二份 loop。
-  assert.equal(readDesired(f.root).kinds.includes("worker"), false, "⛔ start 不得跑过：kind 一旦进期望态，anchor 就会起第二份 loop");
+  // ⛔ 最关键的一条：start 必须**没有**跑过。直接量 = start 那条路自己打的行（`started:` /
+  // `already-running:` / `start-pending:`）在 out 里一条都没有（它们是 start 路径的**产物**，⛔ 不是
+  // 「它没跑」的另一种说法）。
+  // ⚠️ 这里原本用「kind 是否被加进 anchor 期望态」当代理量。gap-per-kind-stop-is-in-memory-and-never-
+  // crosses-dist-bundles 之后它对 `restart` **不再成立**：中止路径刻意把 kind 放回期望态（`restart`
+  // 的意图是「X 应该在跑」，中止 ⇒ 旧循环**仍在跑** ⇒ 期望态与事实一致；见 `stopKindViaAnchor` 的
+  // `stillRunning` 支）。代理量死在「期望态不再只由 start 写」这一点上，判据换回直接量（硬规则 4b）。
+  assert.equal(out.some((l) => /^(started|already-running|start-pending)\b/.test(l)), false, `⛔ start 不得跑过：${out.join("|")}`);
+  assert.equal(readDesired(f.root).kinds.includes("worker"), true, "restart 中止 ⇒ worker 放回期望态（旧循环仍在跑，期望态须与事实一致）");
   assert.equal(pidAlive(f.anchorPid), true, "对照：本次没起新 anchor、也没杀旧 anchor");
   assert.equal(pidAlive(f.inFlightPid), true, "AC5：在飞子进程活过整条 restart 路径");
 });
@@ -272,7 +278,9 @@ test("AC1 — kind=worker 的 stop-failed / restart-aborted 必须点名真实�
   const restartMsg = rErr.join("\n");
   assert.ok(restartMsg.includes("restart-aborted: kind=worker"), `restart-aborted 行本身必须还在：${restartMsg}`);
   assert.ok(restartMsg.includes("常驻循环") && restartMsg.includes("quay driver drain --kind worker"), `AC1：restart 路径也必须点名成因 + \`drain\`：${restartMsg}`);
-  assert.equal(readDesired(f2.root).kinds.includes("worker"), false, "对照：restart 中止后 kind 未进期望态（⛔ 没有起第二份 loop）");
+  // 对照：⛔ 没有起第二份 loop。直接量与上面同一条（start 路径自己的输出），v2：旧的「不在期望态」
+  // 代理量已被 restart 中止路径的期望态恢复取代，见上面 AC2(c) 的注释。
+  assert.equal(rOut.some((l) => /^(started|already-running|start-pending)\b/.test(l)), false, `对照：restart 中止 ⇒ ⛔ 没有起新循环：${rOut.join("|")}`);
 
   // 反向对照（证明上面的失败不是空转）：在飞子进程活过整条路径。
   assert.equal(pidAlive(f.inFlightPid), true, "AC5 对照：在飞子进程未被信号");

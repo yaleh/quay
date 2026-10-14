@@ -168,6 +168,9 @@ import {
   applyHalt,
   CONTROL_STATE_REL,
   type ControlState,
+  // gap-per-kind-stop-…：盘上停机探针的**分片轮询周期**与 resident-loop 那几个 kind 共用同一个常量
+  // （⛔ 不在本文件另写一个字面量——那正是「停机延迟」这件事出现第二个真相源的形态）。
+  DISK_STOP_POLL_MS_DEFAULT as WORKER_STOP_POLL_MS,
 } from "./driver-shared.ts";
 export {
   CONTROL_STATE_REL,
@@ -239,6 +242,7 @@ import {
   parseSelectorOutput,
   runSelectorWorker,
   kindStopRequested,
+  kindStopProbe,
   makeStopCondition,
   registerKindStop,
   resolveKernelSibling,
@@ -5467,6 +5471,26 @@ export async function runResidentLoop(opts: ResidentOptions): Promise<number> {
   // ⇒ ⛔ 不杀在飞子进程（§6.9 不变式 3，与旧 `quay driver stop` 的语义逐字相同）。
   registerKindStop("worker");
 
+  // gap-per-kind-stop-is-in-memory-and-never-crosses-dist-bundles：进程内登记（`registerKindStop` 的
+  // KIND_STOP 表）只在「anchor 与 worker 共享同一模块实例」时成立；shipped 产物里二者各是一份 esbuild
+  // bundle、各自内联 driver-runtime ⇒ `kindStopRequested("worker")` 读的是本 bundle 自己那份表，
+  // anchor 的请求**从未到达**（实测 2026-10-13：`stop --kind worker` 60s 超时后循环仍续跑 ~90+ 分钟）。
+  // ⇒ 停机判据补上**盘上**那一条（`.quay/anchor-kind-stops.json`；见 `kindStopProbe` 的 WHY）。
+  const workerStopProbe = kindStopProbe(rootDir, "worker");
+  let workerStopProbeNoted = false;
+  /** worker 的停机判据 = 进程内登记 ∨ 盘上停机记录。`not-evaluated` ⇒ ⛔ **不停**（fail-open：读不懂
+   *  停机记录时停掉一个没人要求停的循环比漏一次停机更贵），但如实留痕一次（硬规则 3b）。 */
+  const workerStopRequested = (): boolean => {
+    if (kindStopRequested("worker")) return true;
+    const reading = workerStopProbe.read();
+    if (reading === "stopped") return true;
+    if (reading === "not-evaluated" && !workerStopProbeNoted) {
+      workerStopProbeNoted = true;
+      process.stderr.write(`worker-driver: ${workerStopProbe.note}\n`);
+    }
+    return false;
+  };
+
   /** 快速死亡判定闭包（注入 runOneWorker）：**唯一记账点**（计数 / 退避 / 跨任务签名观测），且必须在
    *  载体落盘【之前】跑到——跨任务关联（同一签名 + 不同任务 + 窗口内 ⇒ environment-fatal）依赖状态，
    *  逐记录的无状态重算看不到它。见 QuickDeathJudge 的头注释。 */
@@ -5687,7 +5711,17 @@ export async function runResidentLoop(opts: ResidentOptions): Promise<number> {
   // 无在飞 worker 且瞬时 WAIT 时的轮询（gap-worker-driver-stopreason-latch-permanent-stop）：等
   // intervalMs 后重读闸/池，⛔ 不退出（退出 = 把恢复外包给 supervisor 重启，正是 1h48m 停摆的根）。
   // plain setTimeout——驱动不注册 SIGTERM 处理器（默认终止），supervisor 的 stop 仍能即时杀掉驱动。
-  const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+  // ⚠️ gap-per-kind-stop-…：**分片**轮询而非一觉睡满——每 WORKER_STOP_POLL_MS 读一次盘上停机记录，
+  // 读到即提前结束这一觉 ⇒ 停机被察觉的延迟 ≤ 一个 reconcile 周期，与 intervalMs 长短无关。
+  // ⛔ 它只让**睡眠**提前结束，⛔ 不杀在飞（收尾仍由上面 `running.length === 0` 那一支决定）。
+  const sleep = async (ms: number): Promise<void> => {
+    const deadline = Date.now() + Math.max(0, ms);
+    while (!workerStopRequested()) {
+      const remaining = deadline - Date.now();
+      if (remaining <= 0) return;
+      await new Promise<void>((resolve) => setTimeout(resolve, Math.min(WORKER_STOP_POLL_MS, remaining)));
+    }
+  };
 
   // 地板 race：等【任一 worker 退出】或【地板到期】取先到者。⛔ 地板定时器必须在 race 结束时清除
   // （gap-worker-driver-reconcile-interval AC 前置）：worker 先退出时，未触发的 setTimeout 仍挂起会让
@@ -5875,7 +5909,7 @@ export async function runResidentLoop(opts: ResidentOptions): Promise<number> {
       //    stopCondition（gap-worker-driver-stopreason-latch-permanent-stop：stopReason 一旦赋值永不复位 ⇒
       //    瞬时拒被永久 latch ⇒ 1h48m 零派发）。
       step = "dispatch-loop";
-      while (running.length < cap && !stopReason && !kindStopRequested("worker")) {
+      while (running.length < cap && !stopReason && !workerStopRequested()) {
         const sc = stopCondition();
         if (sc.stop) {
           if (sc.terminal) stopReason = sc.reason;
@@ -5934,7 +5968,7 @@ export async function runResidentLoop(opts: ResidentOptions): Promise<number> {
       // 3. 无在飞 ⇒ 终态 halt（stopReason latch）才退出；瞬时 WAIT（池可能再补 / 闸可能已放行）⇒
       //    等 intervalMs 重读，⛔ 不退出（gap-worker-driver-stopreason-latch-permanent-stop AC3）。
       if (running.length === 0) {
-        if (stopReason || kindStopRequested("worker")) break;
+        if (stopReason || workerStopRequested()) break;
         step = "sleep";
         await sleep(intervalMs);
         continue;
