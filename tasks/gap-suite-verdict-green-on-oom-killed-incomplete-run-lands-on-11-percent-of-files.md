@@ -1,7 +1,7 @@
 ---
 id: gap-suite-verdict-green-on-oom-killed-incomplete-run-lands-on-11-percent-of-files
 title: 全量套件被 OOM 杀掉大半主阶段后仍判 green 并落地（轮次 2660：65/579 文件、466/~7880 测试、oomKill=4）
-status: todo
+status: ready
 labels:
   - gap
   - defect
