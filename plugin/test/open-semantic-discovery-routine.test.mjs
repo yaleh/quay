@@ -4373,6 +4373,7 @@ test("AC(stable identity) — one concept in TWO rounds gets ONE key, with the o
   assert.equal(rows[0].concept_key, a.concept_key);
   assert.equal(rows[1].concept_key, a.concept_key);
   for (const e of experienceRecords(ws)) assert.equal(e.concept_key, a.concept_key, "the Experience carries it too");
+  process.stdout.write(`    AC2 reading: round1 ${a.record_id} concept_key=${a.concept_key} occurrences=${a.concept_occurrences}; round2 ${b.record_id} concept_key=${b.concept_key} occurrences=${b.concept_occurrences} linked=${JSON.stringify(b.concept_linked_record_ids)}\n`);
 });
 
 // ── REAL SOURCE EVIDENCE (Plan item 2) ───────────────────────────────────────────────────────────────
@@ -4403,9 +4404,16 @@ const citationDelegate = (_argv, opts) => ({
 test("AC(citations) — a cluster's citations are what its OWN calls READ, re-checked at the pin; a fabricated one is DROPPED and counted", async () => {
   const ws = makeWorkspace();
   writeConfig(ws, cfgYaml());
-  const pins = pinStub();
+  // ⛔ The cited file is COMMITTED on develop, and the round's pin is a REAL checkout of that commit — so
+  // `file:line@commit` is a claim `git show <commit>:<file>` can settle. A fixture pin that the commit did
+  // not contain would make the recorded commit decorative, which is the shape this AC exists to refuse.
+  fs.mkdirSync(path.join(ws, "plugin", "scripts"), { recursive: true });
+  fs.writeFileSync(path.join(ws, "plugin", "scripts", "a.ts"), "export const a = 1;\nexport const b = 2;\n", "utf8");
+  execFileSync("git", ["-C", ws, "add", "-A"]);
+  execFileSync("git", ["-C", ws, "commit", "-q", "-m", "pin content: the file the round will cite"]);
+  const pinFn = (o) => materializeStrippedPin({ ...o, forbiddenDirs: realHyp.PIN_FORBIDDEN_DIRS, stripCheck: (d) => realHyp.verifyCwdRefusal(d, d) });
   const spawn = countingSpawn(citationDelegate);
-  const fact = await runOpenSemanticDiscovery(ws, { ...runOpts(ws), spawnFn: spawn, pinFn: pins });
+  const fact = await runOpenSemanticDiscovery(ws, { ...runOpts(ws), spawnFn: spawn, pinFn });
   assert.equal(fact.state, "verified", String(fact.reason ?? ""));
   const rev = execFileSync("git", ["-C", ws, "rev-parse", "develop"], { encoding: "utf8" }).trim();
 
@@ -4418,12 +4426,15 @@ test("AC(citations) — a cluster's citations are what its OWN calls READ, re-ch
     assert.equal(cite.line, 1);
     assert.equal(cite.quote, "export const a = 1;", "the quote is the LINE's own text, taken from the tool result");
     assert.equal(cite.commit, rev, "…pinned to the commit the round read");
-    // THE MECHANICAL CHECK, run independently of the round: the file at the pin really says that.
-    const pinnedLine = fs.readFileSync(path.join(pins.pins[0], cite.file), "utf8").split("\n")[cite.line - 1];
-    assert.ok(pinnedLine.includes(cite.quote), `the cited line really carries the quote (got ${JSON.stringify(pinnedLine)})`);
+    // THE MECHANICAL CHECK, run INDEPENDENTLY of the round: `git show <commit>:<file>`, line N, really
+    // carries the quoted text. This is the check the AC names; nothing here reads the round's own state.
+    const atCommit = execFileSync("git", ["-C", ws, "show", `${cite.commit}:${cite.file}`], { encoding: "utf8" }).split("\n")[cite.line - 1];
+    assert.ok(atCommit.includes(cite.quote), `the cited line really carries the quote AT THE RECORDED COMMIT (got ${JSON.stringify(atCommit)})`);
     // …and the FABRICATED pair (line 99, which the pin does not have) is dropped and COUNTED, never repaired.
     assert.equal(c.citations.some((x) => x.line === 99), false, "the fabricated citation was NOT persisted");
     assert.ok(c.evidence_unverifiable >= 1, `…and it was counted (got ${c.evidence_unverifiable})`);
+    process.stdout.write(`    AC3 reading: ${c.record_id} citations=${JSON.stringify(c.citations)} evidence_unverifiable=${c.evidence_unverifiable} evidence_lines(model prose, NOT citations)=${JSON.stringify(c.evidence_lines)}\n`);
+    process.stdout.write(`    AC3 mechanical check: git show ${cite.commit}:${cite.file} | line ${cite.line} = ${JSON.stringify(atCommit)}\n`);
     // ⛔ The model's own prose claim is kept SEPARATELY and is NOT the citation list.
     assert.notDeepEqual(c.evidence_lines, c.citations);
   }

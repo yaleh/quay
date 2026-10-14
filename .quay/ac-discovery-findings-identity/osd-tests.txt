@@ -1,0 +1,272 @@
+bash: /tmp/osd-pin-babffe19-9hpqgp/plugin/scripts/capability-catalog.sh: No such file or directory
+bash: /tmp/osd-pin-babffe19-sb6J8X/plugin/scripts/capability-catalog.sh: No such file or directory
+bash: /tmp/osd-pin-babffe19-x7wRHH/plugin/scripts/capability-catalog.sh: No such file or directory
+bash: /tmp/osd-pin-babffe19-4RhZYj/plugin/scripts/capability-catalog.sh: No such file or directory
+bash: /tmp/osd-pin-dcc6a004-9nc4qt/plugin/scripts/capability-catalog.sh: No such file or directory
+bash: /tmp/osd-pin-dcc6a004-4zvbXl/plugin/scripts/capability-catalog.sh: No such file or directory
+bash: /tmp/osd-pin-dcc6a004-zXjdxg/plugin/scripts/capability-catalog.sh: No such file or directory
+bash: /tmp/osd-pin-dcc6a004-UM7lkq/plugin/scripts/capability-catalog.sh: No such file or directory
+bash: /tmp/osd-pin-dcc6a004-VQl8Z3/plugin/scripts/capability-catalog.sh: No such file or directory
+bash: /tmp/osd-pin-dcc6a004-ED6MOC/plugin/scripts/capability-catalog.sh: No such file or directory
+bash: /tmp/osd-pin-dcc6a004-EsqEMA/plugin/scripts/capability-catalog.sh: No such file or directory
+bash: /tmp/osd-pin-4664634e-54lBAN/plugin/scripts/capability-catalog.sh: No such file or directory
+bash: /tmp/osd-pin-4664634e-Y1Wety/plugin/scripts/capability-catalog.sh: No such file or directory
+bash: /tmp/osd-pin-4664634e-BkaRg8/plugin/scripts/capability-catalog.sh: No such file or directory
+bash: /tmp/osd-pin-4664634e-nzJN0a/plugin/scripts/capability-catalog.sh: No such file or directory
+bash: /tmp/osd-pin-4664634e-5C9Pvd/plugin/scripts/capability-catalog.sh: No such file or directory
+bash: /tmp/osd-pin-4664634e-lnw5FX/plugin/scripts/capability-catalog.sh: No such file or directory
+bash: /tmp/osd-pin-553818c8-Zme5zs/plugin/scripts/capability-catalog.sh: No such file or directory
+bash: /tmp/osd-pin-553818c8-yjGQfs/plugin/scripts/capability-catalog.sh: No such file or directory
+bash: /tmp/osd-pin-553818c8-B7XJqa/plugin/scripts/capability-catalog.sh: No such file or directory
+bash: /tmp/osd-pin-553818c8-g9FyEf/plugin/scripts/capability-catalog.sh: No such file or directory
+bash: /tmp/osd-pin-bb540583-i4XtOj/plugin/scripts/capability-catalog.sh: No such file or directory
+bash: /tmp/osd-pin-553818c8-cAuANp/plugin/scripts/capability-catalog.sh: No such file or directory
+bash: /tmp/osd-pin-e9b67e30-DQ78ey/plugin/scripts/capability-catalog.sh: No such file or directory
+bash: /tmp/osd-pin-e9b67e30-NFvS09/plugin/scripts/capability-catalog.sh: No such file or directory
+bash: /tmp/osd-pin-e9b67e30-wdq2zc/plugin/scripts/capability-catalog.sh: No such file or directory
+bash: /tmp/osd-pin-e9b67e30-ILhoLa/plugin/scripts/capability-catalog.sh: No such file or directory
+bash: /tmp/osd-pin-e9b67e30-NBU2Nl/plugin/scripts/capability-catalog.sh: No such file or directory
+bash: /tmp/osd-pin-e9b67e30-cPgpta/plugin/scripts/capability-catalog.sh: No such file or directory
+bash: /tmp/osd-pin-e9b67e30-6Qhu3c/plugin/scripts/capability-catalog.sh: No such file or directory
+bash: /tmp/osd-pin-e9b67e30-Vv8yyf/plugin/scripts/capability-catalog.sh: No such file or directory
+bash: /tmp/osd-pin-e9b67e30-GLwvZy/plugin/scripts/capability-catalog.sh: No such file or directory
+    AC (a): mode=baseline evaluated=0 reason="no-method-recorded:the-registry-holds-0-record(s)-so-the-production-arm-runs-baseline"
+bash: /tmp/osd-pin-3e121ac9-vknZMb/plugin/scripts/capability-catalog.sh: No such file or directory
+bash: /tmp/osd-pin-3e121ac9-KuDcJJ/plugin/scripts/capability-catalog.sh: No such file or directory
+    AC (b): mode=guided included=["fixture-active@v1"]
+bash: /tmp/osd-pin-3e121ac9-v3RAXd/plugin/scripts/capability-catalog.sh: No such file or directory
+    AC (c) [draft]: mode=baseline shadow.ran=true shadow clusters=2 portfolio rows=0
+bash: /tmp/osd-pin-3e121ac9-LfBkVP/plugin/scripts/capability-catalog.sh: No such file or directory
+    AC (c) [trial]: mode=baseline shadow.ran=true shadow clusters=2 portfolio rows=0
+bash: /tmp/osd-pin-3e121ac9-reIzM1/plugin/scripts/capability-catalog.sh: No such file or directory
+    AC (d): retired, quarantined-lineage and contaminated methods each excluded as the only record; the round still ran baseline
+    AC (e): excluded leaky ⇒ GUIDANCE_TEXT_NAMES_SEED:component:plugin/scripts/secret-fixture.ts
+bash: /tmp/osd-pin-3e121ac9-KnuuhV/plugin/scripts/capability-catalog.sh: No such file or directory
+    AC (f): reservations in .quay/open-semantic-discovery-model-budget.jsonl = investigator,shadow-investigator
+bash: /tmp/osd-pin-3e121ac9-Cf329n/plugin/scripts/capability-catalog.sh: No such file or directory
+    AC (g): 2 Experience(s) and 2 Portfolio row(s) name fixture-active@v1
+    AC real-registry: ok=true mode=baseline evaluated=5
+      baseline_reason: no-active-method:0-of-5-record(s)-is-active(only 1 draft/trial ⇒ shadow arm only),4 excluded-so-the-production-arm-runs-baseline
+      registry: {"file":"/data/home/yale/work/quay/.quay/discovery-method-registry.jsonl","malformed_lines":0,"active_ids":[],"active_evaluated":5,"excluded_contaminated":[],"contaminated_verdicts_evaluated":17}
+      INCLUDED carrier-persistence-check@v3 [shadow] guidance_chars=1279
+      EXCLUDED composite-subject-verdict-decomposition@v2 (retired) ⇒ RETIRED:composite-subject-verdict-decomposition@v2-is-retired-so-it-never-guides-a-round
+      EXCLUDED multi-writer-guard-equivalence@v3 (retired) ⇒ QUARANTINED_LINEAGE:multi-writer-guard-equivalence-carries-a-QUARANTINE-retirement-reason-on-v3; RETIRED:multi-writer-guard-equivalence@v3-is-retired-so-it-never-guides-a-round
+      EXCLUDED non-substantive-verdict-triage@v9 (retired) ⇒ RETIRED:non-substantive-verdict-triage@v9-is-retired-so-it-never-guides-a-round
+      EXCLUDED shared-contract-divergence@v7 (retired) ⇒ QUARANTINED_LINEAGE:shared-contract-divergence-carries-a-QUARANTINE-retirement-reason-on-v7; RETIRED:shared-contract-divergence@v7-is-retired-so-it-never-guides-a-round
+bash: /tmp/osd-pin-b9e553a7-1xnhxx/plugin/scripts/capability-catalog.sh: No such file or directory
+    NEGATIVE CONTROL (g): mutant reports confirmed=true for a supported+refuted cluster (claim was «NOT confirmed»)
+    NEGATIVE CONTROL (k): mutant spawned 0 calls when arch-discovery reported 0 new fingerprints (claim was «the round still runs»)
+bash: /tmp/osd-pin-b9e553a7-zv1MPz/plugin/scripts/capability-catalog.sh: No such file or directory
+bash: /tmp/osd-pin-2608ab1d-BCPqwq/plugin/scripts/capability-catalog.sh: No such file or directory
+bash: /tmp/osd-pin-2608ab1d-VbCoz6/plugin/scripts/capability-catalog.sh: No such file or directory
+bash: /tmp/osd-pin-704e3485-g1WPA1/plugin/scripts/capability-catalog.sh: No such file or directory
+bash: /tmp/osd-pin-2608ab1d-NihAR6/plugin/scripts/capability-catalog.sh: No such file or directory
+bash: /tmp/osd-pin-2608ab1d-s26Pef/plugin/scripts/capability-catalog.sh: No such file or directory
+    NEGATIVE CONTROL (ingestion): mutant called a Portfolio duplicate disposition=novel (role found-unresolved), left duplicate_of=null for the task-Touches duplicate, and wrote 2 Portfolio rows for one cluster seen twice (claims were «duplicate», «duplicate_of set» and «one row»)
+    NEGATIVE CONTROL (d): mutant SELECTED quarantined-ancestor@v2 for the shadow arm (claim was «never selected, even as the only record»); the real module excluded it via QUARANTINED_LINEAGE:quarantined-ancestor-carries-a-QUARANTINE-retirement-reason-on-v1
+    AC (gain-config): absent ⇒ 6; declared 3 ⇒ 3; 0 ⇒ loop.open_semantic_discovery 'gain_every_rounds' must be an integer >= 1 (got 0)
+    AC (a): ["PAIRED_ARM_BUDGETS_DIFFER:max_clusters_verified:3!=4"]
+    AC (b): late-reprereg ⇒ ["PREREG_NOT_OLDER_THAN_RUNS"]; no-call-time ⇒ PAIRED_PREREG_UNVERIFIABLE
+    AC (c): gain={"net_new":-2,"duplicates":2,"refuted":1,"undetermined":0,"usd":0.5,"model_calls":3}; rollup.series.net_new=[-2,3] totals={"net_new":1,"duplicates":2,"refuted":1,"usd":0.5}
+    AC (d): per-arm net-new=1 from 7 clusters (1 novel, 1 duplicate, 3 refuted, 1 undetermined, 1 unjudged)
+bash: /tmp/osd-pin-2608ab1d-PEg0Sp/plugin/scripts/capability-catalog.sh: No such file or directory
+    AC (f): round.paired={"due":false,"ordinal":1,"not_evaluated":"not-evaluated:no-eligible-method"} gain_records=0
+bash: /tmp/osd-pin-2608ab1d-lISgiO/plugin/scripts/capability-catalog.sh: No such file or directory
+✔ case (a) — section absent ⇒ not-evaluated:disabled and ZERO spawns (30.889411ms)
+✔ case (a) — enabled:false ⇒ not-evaluated:disabled and ZERO spawns (21.554525ms)
+✔ case (a) — halted ⇒ not-evaluated and ZERO spawns (22.175482ms)
+✔ case (b) — a MALFORMED key ⇒ failed, zero spawns (21.517136ms)
+✔ case (b) — a MISSING key ⇒ failed, zero spawns (every declared key is required) (141.015535ms)
+✔ case (c) — sub-360m interval WITHOUT interval_until ⇒ config error; sub-360m without EITHER 24h cap ⇒ config error (0.480779ms)
+✔ case (d) — a reservation precedes EACH of investigator, verifier, refuter, value-assessor and novelty check (123.853018ms)
+✔ case (d) — a call REFUSED at the cap stops the round and reports it (48.998746ms)
+✔ case (d) — a round that is refused BEFORE any call does not even reserve (18.870427ms)
+✔ case (e) — the USD cap ⇒ not-evaluated:budget-usd-24h and ZERO spawns (18.799659ms)
+✔ count-budget declines BEFORE the USD budget when BOTH are at their ceiling (the order is stated, not incidental) (16.269236ms)
+✔ usdBudgetUsage — an UNKNOWN price counts as the per-call ceiling, NEVER 0 (with its non-zero control) (0.326432ms)
+✔ case (f) — every spawned argv carries --max-turns, and a TOOL-LESS step is ONE turn (171.28677ms)
+✔ case (g) — a cluster the verifier SUPPORTS and the refuter REFUTES is NOT confirmed (73.321687ms)
+✔ case (g) — the positive control: supported + survived ⇒ confirmed, with a value assessment (187.939487ms)
+✔ case (g) — an UNDETERMINED refutation is NOT a confirmation (fail-closed) (78.46873ms)
+✔ case (h) — a MANUAL round leaves routine-last-run.json BYTE-IDENTICAL, a RESIDENT one advances it (328.497952ms)
+✔ case (h) — the carrier line names its caller, so a production round is distinguishable on the record (156.755972ms)
+✔ case (i) — after a full round nothing under tasks/ or goals/ changed, and the source carries no authoring symbol and no rating verb (184.225653ms)
+✔ case (i) — the engine is resolved at runtime: NO static out-of-artifact import (with mutation control) (2.224549ms)
+✔ case (j) — the investigator argv carries Read,Grep,Glob + --max-turns, and its cwd IS the pin (171.016166ms)
+✔ case (j) — the model states its OWN focus, and it is persisted and handed back to the next round (207.252374ms)
+✔ focusFromText / priorFocuses — the protocol marker is read by POSITION, and an unstated focus stays null (0.288724ms)
+✔ case (k) — the round runs when the PIN IS UNCHANGED since the last round (198.276741ms)
+✔ case (k) — arch-discovery's carrier is READ for novelty RETRIEVAL ONLY and gates nothing (333.488168ms)
+✔ case (k) — the round runs when the INVENTORY is missing (recorded as such, never as a gate) (162.170569ms)
+✔ case (k) — the round runs when the inventory is EMPTY (0 entries in scope) (168.445795ms)
+✔ case (l) — the module selects/rejects hypotheses by NO pattern table and NO regular expression (2.508722ms)
+✔ materializeStrippedPin — really archives the rev and really STRIPS the forbidden directories (46.611491ms)
+✔ resolveEngineModule / loadOpenDiscoveryModules — resolved from DISK, and an unresolvable one is NAMED (1.234932ms)
+✔ RoutineSpec — buildOpenSemanticDiscoveryRoutine wires config + ctx.halted, and is resident BY CONSTRUCTION (21.599344ms)
+✔ openSemanticDiscoveryRoutineFromConfig — off by default; a declared section is always OBSERVABLE (52.772899ms)
+✔ qualityGateRoutines — the open-semantic-discovery routine joins the table ONLY when it is passed in (18.212242ms)
+✔ INTEGRATION — the REAL runInvestigator + runVerifier accept this routine's arguments, pin gate and all (114.271858ms)
+✔ ingestion (a) — a confirmed cluster that duplicates an existing Portfolio finding is NOT net-new (242.435767ms)
+✔ ingestion (a2) — a duplicate ONLY the semantic check can see (a task Touches overlap) is caught, and its target RESOLVES (228.007128ms)
+✔ ingestion (b) — a novel cluster ⇒ an Experience AND a Portfolio row, production-open, origin_ref resolvable (118.011512ms)
+✔ ingestion (c) — a cluster refuted by the routine's refuter is NEVER ingested as supported (68.802291ms)
+✔ ingestion (d) — the same cluster seen in two rounds ⇒ ONE Portfolio record, not two (133.564645ms)
+✔ ingestion (f) — NO mechanical candidate still gets the semantic novelty call, and is NOT auto-labelled novel (98.215346ms)
+✔ ingestion (g) — refuted AND undetermined clusters are ingested as Experiences with their reasoning, never Portfolio-supported (74.427782ms)
+✔ EVIDENCE STORE — a round with verdict-bearing clusters APPENDS their real outcomes, validator-accepted (154.674891ms)
+✔ EVIDENCE STORE — the projection is what makes the next discovery_method round ingest (end to end) (215.661291ms)
+✔ ingestion — the record id the routine mints is UNIQUE per round+cluster and resolvable by prefix (0.209495ms)
+✔ ingestion — parseNoveltyVerdict: only the declared vocabulary is accepted, and unreadable stays null (0.162636ms)
+✔ ingestion — experienceRoleFor: the role follows the cluster's OWN verdict, and the one mechanical case writes nothing (0.061259ms)
+✔ ingestion — findMechanicalRepeat keys on BOTH the component set and the claim, and never on its own id (0.124827ms)
+✔ ingestion — taskIdFromPath / componentsFromSubjectKey are POSITION reads, and their refusals are their own value (0.157936ms)
+✔ ingestion — buildNoveltyPrompt states the bound and never presents an empty candidate list as a verdict (0.129317ms)
+✔ ingestion — the novelty check's tool envelope is the read-only one, and its step is on the reservation ledger (112.122837ms)
+✔ AC (a) — with 0 active methods the round runs BASELINE (unguided) and still spawns (148.965832ms)
+✔ AC (a) — a registry whose ONLY records are excluded also runs baseline (and says how many were excluded) (162.829413ms)
+✔ AC (b) — an ACTIVE method GUIDES the production round; ids recorded on the record and in the prompt (208.180833ms)
+✔ AC (c) — a DRAFT or TRIAL method guides the SHADOW arm only: records carry shadow:true, nothing reaches Portfolio (120.975424ms)
+✔ AC (d) — retired / quarantined / contaminated methods are NEVER selected, even as the only record (293.70404ms)
+✔ AC (e) — a guidance text naming a Registered seed component (or case id) ⇒ excluded, with the value named (52.544105ms)
+✔ AC (f) — the shadow arm's calls reserve against the SAME 24h ledger as every other step (53.868824ms)
+✔ AC (g) — a guided round's outcome is ingested as an Experience naming the method id and version (163.997017ms)
+✔ AC — REAL registry reading: selection against the PRODUCTION registry, with reasons (593.519521ms)
+✔ NEGATIVE CONTROL (g) — remove the refutation step in a scratch copy ⇒ the (g) claim goes RED (199.059603ms)
+✔ NEGATIVE CONTROL (k) — gate the round on «arch-discovery reported new fingerprints» ⇒ the (k) claim goes RED (53.982682ms)
+✔ NEGATIVE CONTROL (ingestion) — disable the novelty check in a scratch copy ⇒ the (a) and (d) claims go RED (704.292769ms)
+✔ NEGATIVE CONTROL (d) — ignore the quarantine walk in a scratch copy ⇒ the (d) claim goes RED (103.72057ms)
+✔ AC (gain-config) — `gain_every_rounds` is OPTIONAL (absent ⇒ the stated default), and an integer >= 1 when declared (23.762385ms)
+✔ AC (a) — arms with DIFFERENT budgets are refused, naming every field that differs (20.012921ms)
+✔ AC (b) — a pre-registration written AFTER the first call is refused; older-than ⇒ clean (0.391802ms)
+✔ AC (c) — a NEGATIVE gain is recorded as negative (for the round's metrics AND its USD) (4.549995ms)
+✔ AC (d) — duplicates and refuted findings never count as net-new, in EITHER arm (0.362661ms)
+✔ AC (f) — no eligible method ⇒ `not-evaluated:no-eligible-method`, NEVER a zero gain (154.056415ms)
+    wiring: PAIRED round 1: baseline 2 net-new / 0 duplicate / 0 refuted / $0.00018; guided 1 / 0 / 0 / $0.0001; gain {"net_new":-1,"duplicates":0,"refuted":0,"undetermined":0,"usd":-0.00008,"model_calls":-4}
+    AC (e): production-open ⇒ promoted_to=trial (candidate_after.status=trial); independent ⇒ active
+    NEGATIVE CONTROL (e): mutant promoted a production-open verdict to status=active (claim was «never active»)
+bash: /tmp/osd-reserve-pinroot-8aVcG5/osd-pin-f82c2d7b-8sPbcy/plugin/scripts/capability-catalog.sh: No such file or directory
+bash: /tmp/osd-reserve-pinroot-rZFePk/osd-pin-f82c2d7b-SwLI1t/plugin/scripts/capability-catalog.sh: No such file or directory
+bash: /tmp/osd-reserve-pinroot-Yb07HB/osd-pin-f82c2d7b-w4mtOb/plugin/scripts/capability-catalog.sh: No such file or directory
+bash: /tmp/osd-reserve-pinroot-iH628W/osd-pin-f82c2d7b-b4GloU/plugin/scripts/capability-catalog.sh: No such file or directory
+bash: /tmp/osd-reserve-pinroot-YRXbaP/osd-pin-f82c2d7b-muMoG2/plugin/scripts/capability-catalog.sh: No such file or directory
+bash: /tmp/osd-reserve-pinroot-vIu9Dw/osd-pin-f82c2d7b-n421lZ/plugin/scripts/capability-catalog.sh: No such file or directory
+bash: /tmp/osd-pin-f82c2d7b-rVjJJ9/plugin/scripts/capability-catalog.sh: No such file or directory
+    AC (a): 0 events ⇒ state=verified, 9 spawn(s), offered=0
+bash: /tmp/osd-pin-f82c2d7b-uA3ROC/plugin/scripts/capability-catalog.sh: No such file or directory
+bash: /tmp/osd-pin-f82c2d7b-YtXn6m/plugin/scripts/capability-catalog.sh: No such file or directory
+bash: /tmp/osd-pin-f82c2d7b-jY8z88/plugin/scripts/capability-catalog.sh: No such file or directory
+    AC (b): limit=3 over 7 events ⇒ rounds offered 3+2+2, union = all 7, 0 lost
+bash: /tmp/osd-pin-53a2dea7-t99aY2/plugin/scripts/capability-catalog.sh: No such file or directory
+bash: /tmp/osd-pin-53a2dea7-1IBs5C/plugin/scripts/capability-catalog.sh: No such file or directory
+bash: /tmp/osd-pin-53a2dea7-yJV2NE/plugin/scripts/capability-catalog.sh: No such file or directory
+    AC (c): crashed round offered 3; next round re-offered the SAME 3; round 3 deduped the boundary by eventId
+bash: /tmp/osd-pin-53a2dea7-VU6fej/plugin/scripts/capability-catalog.sh: No such file or directory
+    AC (d): 1 coverage reason(s) reached the prompt verbatim
+bash: /tmp/osd-pin-53a2dea7-CYyS66/plugin/scripts/capability-catalog.sh: No such file or directory
+    AC (d): rebase reason reached the prompt verbatim (214 chars)
+bash: /tmp/osd-pin-53a2dea7-rWrCvJ/plugin/scripts/capability-catalog.sh: No such file or directory
+bash: /tmp/osd-pin-53a2dea7-5H3eNL/plugin/scripts/capability-catalog.sh: No such file or directory
+bash: /tmp/osd-pin-7f41b0bc-Yuk8Fh/plugin/scripts/capability-catalog.sh: No such file or directory
+    NEGATIVE CONTROL (a): mutant spawned 0 calls with 0 events (claim was «the round still runs»)
+bash: /tmp/osd-reserve-pinroot-yfh2GC/osd-pin-7f41b0bc-krsqq3/plugin/scripts/capability-catalog.sh: No such file or directory
+bash: /tmp/osd-reserve-pinroot-ShE50K/osd-pin-7f41b0bc-Xik2tb/plugin/scripts/capability-catalog.sh: No such file or directory
+bash: /tmp/osd-retry-refuse-2lV9WF/osd-pin-7f41b0bc-mFtGkH/plugin/scripts/capability-catalog.sh: No such file or directory
+bash: /tmp/osd-refuter-pinroot-RGzZpA/osd-pin-7f41b0bc-A83xGj/plugin/scripts/capability-catalog.sh: No such file or directory
+bash: /tmp/osd-refuter-pinroot-IRjqQb/osd-pin-7f41b0bc-SjaGrc/plugin/scripts/capability-catalog.sh: No such file or directory
+bash: /tmp/osd-refuter-pinroot-DcVD51/osd-pin-7f41b0bc-urDZGN/plugin/scripts/capability-catalog.sh: No such file or directory
+bash: /tmp/osd-refuter-pinroot-5IIOFF/osd-pin-7f41b0bc-shILOr/plugin/scripts/capability-catalog.sh: No such file or directory
+bash: /tmp/osd-refuter-pinroot-1lnLXi/osd-pin-7f41b0bc-4cBuJk/plugin/scripts/capability-catalog.sh: No such file or directory
+bash: /tmp/osd-refuter-pinroot-8mVh6S/osd-pin-7f41b0bc-IqeTXE/plugin/scripts/capability-catalog.sh: No such file or directory
+bash: /tmp/osd-refuter-pinroot-7xSy7Y/osd-pin-7f41b0bc-mT9vB8/plugin/scripts/capability-catalog.sh: No such file or directory
+bash: /tmp/osd-refuter-pinroot-PEY9kl/osd-pin-7f41b0bc-xcowBs/plugin/scripts/capability-catalog.sh: No such file or directory
+bash: /tmp/osd-ac1d-mutant-Kuy55W/osd-pin-7f41b0bc-5U5AzV/plugin/scripts/capability-catalog.sh: No such file or directory
+    NEGATIVE CONTROL AC1(d): mutant reports confirmed=true for a BUDGET-TRUNCATED refutation (claim was «confirmed only for a determinate survived»)
+bash: /tmp/osd-refuter-pinroot-OIx7GI/osd-pin-7f41b0bc-y38sVU/plugin/scripts/capability-catalog.sh: No such file or directory
+bash: /tmp/osd-ac2-mutant-smrS9B/osd-pin-0fc7665a-tk3ROV/plugin/scripts/capability-catalog.sh: No such file or directory
+    NEGATIVE CONTROL AC2: old join reports refutation_turns=2/2 for calls of 11 and 19 CLI turns (claim was «each cluster's own call»)
+    NEGATIVE CONTROL attribution AC3: treating a budget-truncated refutation as determinate would have flipped the join
+bash: /tmp/osd-refuter-pinroot-9F0DZA/osd-pin-0fc7665a-qnx2QY/plugin/scripts/capability-catalog.sh: No such file or directory
+bash: /tmp/osd-attr-verifier-oMEm01/osd-pin-0fc7665a-NAUHoo/plugin/scripts/capability-catalog.sh: No such file or directory
+bash: /tmp/osd-refuter-pinroot-jzIZiD/osd-pin-0fc7665a-WLj2Rz/plugin/scripts/capability-catalog.sh: No such file or directory
+bash: /tmp/osd-refuter-pinroot-nEGCaE/osd-pin-0fc7665a-jt2JYu/plugin/scripts/capability-catalog.sh: No such file or directory
+bash: /tmp/osd-refuter-pinroot-W0BsNb/osd-pin-0fc7665a-kxCYXh/plugin/scripts/capability-catalog.sh: No such file or directory
+bash: /tmp/osd-reserve-pinroot-6fa7Kb/osd-pin-0fc7665a-NkFdI8/plugin/scripts/capability-catalog.sh: No such file or directory
+bash: /tmp/osd-reserve-pinroot-d1KpQa/osd-pin-0fc7665a-gPMHjE/plugin/scripts/capability-catalog.sh: No such file or directory
+bash: /tmp/osd-reserve-pinroot-slIXQV/osd-pin-0fc7665a-NU4A67/plugin/scripts/capability-catalog.sh: No such file or directory
+bash: /tmp/osd-reserve-pinroot-zdWyda/osd-pin-0fc7665a-J5Iulx/plugin/scripts/capability-catalog.sh: No such file or directory
+bash: /tmp/osd-reserve-pinroot-l4I5W7/osd-pin-0fc7665a-EuB2o9/plugin/scripts/capability-catalog.sh: No such file or directory
+bash: /tmp/osd-reserve-pinroot-o80yzH/osd-pin-0fc7665a-X2i2GC/plugin/scripts/capability-catalog.sh: No such file or directory
+bash: /tmp/osd-pin-d7db6463-UNNkZi/plugin/scripts/capability-catalog.sh: No such file or directory
+bash: /tmp/osd-pin-d7db6463-VZNwyg/plugin/scripts/capability-catalog.sh: No such file or directory
+    AC2 reading: round1 open-semantic-discovery@2026-10-14T08:29:08.102Z#1 concept_key=duplication|a.ts occurrences=1; round2 open-semantic-discovery@2026-10-14T08:39:08.158Z#1 concept_key=duplication|a.ts occurrences=2 linked=["open-semantic-discovery@2026-10-14T08:29:08.102Z#1"]
+bash: /tmp/osd-pin-961a75bc-Bc4Mip/plugin/scripts/capability-catalog.sh: No such file or directory
+    AC3 riding reading: open-semantic-discovery@2026-10-14T08:29:08.322Z#1 citations=[{"file":"plugin/scripts/a.ts","line":1,"commit":"961a75bced9244aa2c7a72a863057be407931a6a","quote":"export const a = 1;"},{"file":"plugin/scripts/a.ts","line":2,"commit":"961a75bced9244aa2c7a72a863057be407931a6a","quote":"export const b = 2;"}] evidence_unverifiable=1 evidence_lines(model prose, NOT citations)=["a.ts:1 — fixture evidence"]
+    AC3 mechanical check: git show 961a75bced9244aa2c7a72a863057be407931a6a:plugin/scripts/a.ts | line 1 = "export const a = 1;"
+    AC3 riding reading: open-semantic-discovery@2026-10-14T08:29:08.322Z#2 citations=[{"file":"plugin/scripts/a.ts","line":1,"commit":"961a75bced9244aa2c7a72a863057be407931a6a","quote":"export const a = 1;"},{"file":"plugin/scripts/a.ts","line":2,"commit":"961a75bced9244aa2c7a72a863057be407931a6a","quote":"export const b = 2;"}] evidence_unverifiable=1 evidence_lines(model prose, NOT citations)=["c.ts:1 — fixture evidence"]
+    AC3 mechanical check: git show 961a75bced9244aa2c7a72a863057be407931a6a:plugin/scripts/a.ts | line 1 = "export const a = 1;"
+✔ WIRING — a due paired round runs BOTH arms on one pin and files only the guided one (202.791887ms)
+✔ AC (e) — a paired-round record is NOT independent evidence: the promotion path caps it at trial (4.410668ms)
+✔ NEGATIVE CONTROL (e) — let the promotion path accept `production-open` in a scratch copy ⇒ (e) goes RED (8.860637ms)
+✔ config — the section is read from the workspace's own `.quay/config.yml`, and an absent file is not an error (17.819691ms)
+✔ focusDirective — carries the history and keeps the CHOICE with the model (0.190616ms)
+✔ case (m) AC1(a) — an error_max_turns stream ⇒ the call record carries the subtype and the round reports not-evaluated:error_max_turns, NOT "0 hypotheses" (45.925206ms)
+✔ case (m) AC1(a) NEGATIVE CONTROL — remove the subtype capture and the SAME predicate stops naming the cause (0.962228ms)
+✔ case (m) AC1(b) — a zero-token exit-1 with stderr ⇒ the stderr tail is recorded (45.991894ms)
+✔ case (m) AC1(c) — the answer reserve produces parsed hypotheses from a stub that answers ONLY when told to stop exploring (148.855735ms)
+✔ case (m) 硬规则 5b — the SAME reserve covers every single-answer STEP, not just the investigator (157.717561ms)
+✔ case (m) — the turn-reserve directive is in BOTH arms' prompts (the paired instrument's only difference stays the guidance block) (37.655496ms)
+✔ case (m) — the rescue's answer is parsed by the ENGINE's own parser, so there is only ONE hypothesis rule in play (1.582463ms)
+✔ case (m) AC5 — the reserve changes NEITHER the kill switch, NOR the report-only surface, NOR the per-step envelope the paired arms are compared on (147.945915ms)
+✔ AC (a) — 0 events ⇒ the round runs normally, with the feed reported as read-and-empty (147.168573ms)
+✔ AC (b) — more events than the limit ⇒ capped, and the remainder is picked up next round (234.169827ms)
+✔ AC (c) — a crash before the append ⇒ the next round re-offers the SAME events (at-least-once) (227.319104ms)
+✔ AC (d) — `complete:false` reaches the prompt VERBATIM (the surface's own reason text) (157.135084ms)
+✔ AC (d) — `rebase:true` reaches the prompt VERBATIM (a cursor the carrier cannot honour) (161.903555ms)
+✔ AC (e) — no code path skips or schedules a round on the events (static control + its live mutation) (1.720541ms)
+✔ AC (e) — the events change NEITHER whether the round runs NOR its model-call envelope (313.418348ms)
+✔ config — `task_log_context_limit` is OPTIONAL (absent ⇒ 50) and bounded by the read surface's page maximum (17.203505ms)
+✔ priorTaskLogContext / asTaskLogCursor — an UNREADABLE stored cursor is its own state, never 'no cursor' (硬规则 3b) (0.41559ms)
+✔ taskLogDedupKey / citeOfferedEvents / taskLogContextDirective — pure, and 'nothing to cite' is null, not false (0.248934ms)
+✔ NEGATIVE CONTROL (a) — make the round SKIP when there are 0 events in a scratch copy ⇒ (a) goes RED (95.781932ms)
+✔ (n) AC1 — streamDiagnostics reads the STREAM structurally: bytes, lines, events by type, has_result, truncation (0.311293ms)
+✔ (n) AC1 — one fixture per call_failure class, classified from the captured BYTES (not from the exit code) (0.344912ms)
+✔ (n) AC1 — exit 0 with NO result event ⇒ not-evaluated:no-result-event, NEVER null (the production defect) (0.119898ms)
+✔ (n) AC1 NEGATIVE CONTROL — restore the pre-fix rule (exit 0 ⇒ success) and the production shape goes RED (1.190103ms)
+✔ (n) AC1 — a result-less exit-0 call is recorded as no-result-event WITH its bounded capture on the round (46.19754ms)
+✔ (n) AC1 — the capture is BOUNDED and says so: a huge stream is truncated, and the record says which end (0.579317ms)
+✔ (n) AC2 — a retryable call is retried EXACTLY ONCE, and the retry has its OWN reservation id in the ledger (154.132723ms)
+✔ (n) AC2 — NO retry when the ledger refuses: the round's ceiling is not spent twice on one lost call (34.092698ms)
+✔ AC1(a) — a refuter stream ending `error_max_turns` ⇒ `budget-truncated`, and EXACTLY ONE retry reservation on the ledger (63.484363ms)
+✔ AC1(b) — a refuter that READ the tree and names no counterexample ⇒ `no-counter-evidence` (and NOT a confirmation) (50.361564ms)
+✔ AC1(c) — a 0-token exit with no result ⇒ `call-failed`, which is NOT the budget's fault (53.551291ms)
+✔ AC1(d) — `confirmed` is TRUE only for a DETERMINATE «survived», never for an undetermined one (317.406527ms)
+✔ AC1(d) NEGATIVE CONTROL — let `undetermined` count as survived ⇒ the (d) claims go RED (140.844448ms)
+✔ AC2 — each cluster's refutation fields come from ITS OWN call, off the CLI's own turn unit (153.996976ms)
+✔ AC2 NEGATIVE CONTROL — restore the OLD join (the engine row's units) ⇒ the AC2 claims go RED (195.925224ms)
+✔ AC3 — the retry budget is a MEASURED default, OPTIONAL, and REQUIRED to be strictly larger than the step's (1.147454ms)
+✔ attribution AC3 — the join names WHICH step blocked a cluster, and THAT step's own cause (0.276244ms)
+✔ attribution AC3 NEGATIVE CONTROL — count a BUDGET-TRUNCATED refutation as determinate ⇒ the join flips (0.143616ms)
+✔ attribution AC3 (wiring) — a REAL round's cluster AND its scan-round line carry the join (59.105804ms)
+✔ attribution AC3 (wiring) — a cluster the VERIFIER could not settle is blocked at the VERIFIER, not the refuter (57.224707ms)
+✔ attribution AC4 — the rolling DoD is a RATE, and a window holding NO attribution block rates NOTHING (53.143281ms)
+✔ attribution AC2 — the call-failure split reports the retry-then-succeeds rate SEPARATELY from first attempts (101.484202ms)
+✔ attribution — buildDiscoveryReport joins each round to ITS OWN clusters, and marks a pre-change line `derived` (60.299226ms)
+✔ readAnchorStart — a RECENT start reads evaluated, an OLD one reads evaluated, and the three unreadable shapes are NAMED (硬规则 3b) (21.261662ms)
+✔ handoffBlock — an OLD anchor start is NOT adjacent (negative control), a RECENT one is, and a FUTURE one is not adjacent either (0.201455ms)
+✔ readHostLoad — the load rides the record, and an UNREADABLE loadavg is `ok:false` with its errno, never a 0 (1.666412ms)
+✔ (o) AC2 — a round close behind an anchor start records `adjacent:true` on the ROUND and on EVERY call, with the raw age (49.182422ms)
+✔ (o) AC2 NEGATIVE CONTROL — an OLD anchor start does NOT trigger the new behaviour, and the correlation is what differs (not the round) (80.20168ms)
+✔ (o) AC2 NEGATIVE CONTROL — NO readable anchor start is `evaluated:false` with its reason, ⛔ never `adjacent:false` (79.489746ms)
+✔ (o) AC2 NEGATIVE CONTROL — a handoff-ADJACENT round with a retryable failure still makes EXACTLY ONE retry (no policy was widened) (154.963684ms)
+✔ AC(stable identity) — one concept in TWO rounds gets ONE key, with the occurrences LINKED (195.015105ms)
+✔ AC(citations) — a cluster's citations are what its OWN calls READ, re-checked at the pin; a fabricated one is DROPPED and counted (201.557975ms)
+✔ citationsFromCallStream — only a Read RESULT yields a citation; an unpaired or non-Read call yields none (0.355932ms)
+✔ verifyCitation — every failure is its OWN code, and a path escaping the pin is refused outright (0.497729ms)
+ℹ tests 127
+ℹ suites 0
+ℹ pass 127
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 12843.190004
