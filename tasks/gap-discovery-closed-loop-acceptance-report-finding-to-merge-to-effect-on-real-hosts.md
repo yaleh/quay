@@ -2,7 +2,7 @@
 id: gap-discovery-closed-loop-acceptance-report-finding-to-merge-to-effect-on-real-hosts
 title: 架构发现真实自主闭环验收：逐条
   Finding→verifier/refuter→Task→merge→效果复测（quay+ClaudeCodeUI），来源/空轮/预算/调用失败分类计数
-status: ready
+status: done
 labels:
   - gap
   - architecture-discovery
