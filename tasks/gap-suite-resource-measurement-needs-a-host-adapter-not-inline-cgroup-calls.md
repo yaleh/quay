@@ -237,14 +237,6 @@ value unchanged」 still holds — this diff still touches none of `declaredSuit
 - plugin/test/host-resource-adapter.test.mjs
 - plugin/test/full-suite-runner-oom-policy.test.mjs
 
-## Blocker
-
-**2026-10-14T18:50:17.118Z — worker 未落地（exited-not-landed）**
-
-- 未落地原因：step=suite: oom-killed (3) — recovery exhausted at floor concurrency 32 — no declared rung produced a complete verdict (64,48,32); needs a code/config fix, see plugin/scripts/full-suite-runner.ts
-- run_id：wk-prod-anchor
-- session_id：5c68a980-7f6d-407b-bfde-d69e57025aa9
-
 ## Needs-Human
 
 **执行 2026-10-14T18:50:18.127Z — 连续修满重试上限仍不合格（标 needs-human）**
