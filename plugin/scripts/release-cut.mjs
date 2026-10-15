@@ -15,7 +15,7 @@
 //      never mentioned — the cutter discovered it on the spot.
 //
 // What this command does, IN ORDER (each step's failure carries its OWN `CAUSE=` and exit code):
-//   1. preflight, all read-only —
+//   1. preflight — REFUSING checks, all read-only —
 //        tag `v<version>` must not exist            CAUSE=release-cut-tag-exists
 //        `--root` must be version-consistent        CAUSE=release-cut-version-inconsistent
 //        `--root` must have no tracked edits        CAUSE=release-cut-dirty-tree
@@ -23,6 +23,17 @@
 //                                                   CAUSE=release-cut-base-unresolvable /
 //                                                   release-cut-develop-behind-remote /
 //                                                   release-cut-develop-sync-unreadable
+//   preflight ⑥ — the ONE preflight step that is NOT read-only and CANNOT refuse: `--base`'s last
+//        DECISIVE CI run is read from `.quay/ci-runs.jsonl`, PRINTED, and (on a real cut) appended to
+//        `.quay/release-cut-preflight.jsonl`                      ⛔ NO CAUSE=, no exit code
+//        WHY A RECORD AND NOT A GATE — SPEC §4.2 (「develop 的上一次 decisive CI 必须是绿」) is
+//        deliberately NOT enforced. §4.2's own text forbade using it to block while AC-265 was unmet;
+//        AC-265 is now `achieved`, but the deadlock that exemption existed for is live (develop's CI
+//        was red five straight days from 2026-10-10 for purely environmental reasons). A hard gate
+//        would codify "the environment twitched ⇒ no release, ever" — and 硬规则 12 names the shape
+//        of that jam (each precondition reasonable alone; chained, "永远差最后一步"). So this step
+//        only makes the reading VISIBLE and carries it into the cut's own trace.
+//        ⛔ Nothing here — the reading, the print, or the append — may ever refuse a cut.
 //   2. create a LINKED WORKTREE on `develop` (⛔ never an independent clone, ⛔ never a branch
 //      switch in the main checkout) — `release-branch-finish.sh --cut` requires HEAD == base, and
 //      the main checkout is normally NOT on `develop`;
@@ -461,6 +472,173 @@ if (doDispatch) {
       `the release.yml that would govern this run (at '--dispatch-ref ${dispatchRef}') DIFFERS from the one in the tree the tag names ('${shippedRef}') — ${diffstat}\n` +
         `    ⇒ the run would be judged by a definition the released artifact does not carry. Fix '${dispatchRef}', dispatch the tag itself (--dispatch-ref ${tag}), or pass --allow-workflow-drift to proceed deliberately`,
       2,
+    );
+  }
+}
+
+// ── preflight ⑥: the CI reading this cut SAW — RECORDED, ⛔ NEVER A GATE ─────────────────────────
+//
+// SPEC §4.2 ("切点前置：develop 的上一次 decisive CI 必须是绿") had NO mechanical carrier on this path:
+// nothing here read CI at all, so the clause was kept and broken identically (硬规则 9 — an
+// unobservable rule is kept or broken the same way). §4.2's own text opened the door to that state —
+// "⛔ 在 AC-265 达成之前，本条只能记为『规程已定义、尚不可执行』，**不得**用它去阻塞任何现有流程" — and
+// `goals/AC-265-goal.md` is `status: achieved` today, so the exemption has LAPSED. What §4.2 looks
+// like once it is mechanically present is this block: a RECORD, not a refusal.
+//
+// ⛔ WHY IT RECORDS RATHER THAN BLOCKS (a design constraint, not a wording preference):
+//   • the deadlock §4.2's exemption existed for has NOT gone away. develop's CI was red for five
+//     straight days from 2026-10-10 for PURELY ENVIRONMENTAL reasons. A hard gate here would
+//     institutionalise "the environment twitched ⇒ no release, ever" in one line of code — exactly
+//     the jam §4.2 names.
+//   • 硬规则 12: every precondition is reasonable alone; chained, they are "永远差最后一步".
+// So ⛔ NOTHING below calls `fail(...)`: a `failure` reading must not stop the cut. The test pins that
+// with a REAL cut that lands its tag while the reading is red (AC5), and the recording itself must not
+// be able to stop it either — an unwritable carrier is reported and the cut continues.
+//
+// The carrier is this feature's OWN file and carries its OWN vocabulary (`ciReading` ∈
+// {success, failure, not-evaluated} + `ciNotEvaluatedReason`) — ⛔ it borrows nothing from
+// `.quay/release-branch-finish.jsonl`'s `form=` word list, which answers a different question
+// (硬规则 8: 编号/命名不得复用).
+const CI_RUNS_REL = path.join(".quay", "ci-runs.jsonl");
+const CI_PREFLIGHT_RECORD_REL = path.join(".quay", "release-cut-preflight.jsonl");
+// The record's own `ts` IS the 「tag 时刻」: the tag is created minutes later, at this same cut, off
+// this same `base` — so the reading is anchored to the moment the tag will name. UTC, second
+// precision, the format every sibling carrier in `.quay/` uses.
+const cutMoment = new Date().toISOString().replace(/\.\d{3}Z$/, "Z");
+
+/**
+ * `base`'s last DECISIVE CI run, as an ENUMERATED reading (硬规则 3/3b: "could not read" must never
+ * share an output shape with "read it, and it was green").
+ *
+ * decisive = `conclusion` ∈ {success, failure}. `cancelled` is excluded BY DESIGN, not by oversight:
+ * a cancelled run was superseded by a later push and says nothing about whether the branch was green
+ * (SPEC §4.2: 40/92 = 43% of develop's runs in its own measured window were cancelled). ⇒ It is
+ * recorded as NEITHER green NOR red.
+ *
+ * `branch` is `--base`, which IS `develop` — its default and §4.2's subject. Reading it off the flag
+ * rather than a literal keeps ONE derivation of "the branch this cut leaves from".
+ *
+ * ⛔ The carrier is NOT in time order: measured 2026-10-15, `.quay/ci-runs.jsonl`'s FIRST line is
+ * 2026-09-14 while its LAST is 2026-10-15 (the collector backfills). "The last decisive run" is
+ * therefore the MAXIMUM `ts`, never the last readable line.
+ */
+function readLastDecisiveCi(rootDir, branch) {
+  let text;
+  try {
+    text = fs.readFileSync(path.join(rootDir, CI_RUNS_REL), "utf8");
+  } catch (err) {
+    return {
+      ciReading: "not-evaluated",
+      reason: err.code === "ENOENT" ? "carrier-absent" : "carrier-unreadable",
+      detail: err.message,
+    };
+  }
+  let onBranch = 0;
+  let cancelled = 0;
+  let undated = 0;
+  let unparseable = 0;
+  let last = null;
+  for (const raw of text.split("\n")) {
+    if (raw.trim() === "") continue;
+    let r;
+    try {
+      r = JSON.parse(raw);
+    } catch {
+      unparseable++;
+      continue;
+    }
+    if (r === null || typeof r !== "object") {
+      unparseable++;
+      continue;
+    }
+    if (r.branch !== branch) continue;
+    if (r.workflow !== "ci.yml" && r.workflow !== "CI") continue;
+    onBranch++;
+    if (r.conclusion === "cancelled") {
+      cancelled++;
+      continue;
+    }
+    if (r.conclusion !== "success" && r.conclusion !== "failure") continue;
+    // A decisive row with no usable `ts` cannot be ORDERED, so it cannot be "the last one". It gets
+    // its own count rather than being folded into "no decisive run" (硬规则 3b).
+    if (typeof r.ts !== "string" || r.ts === "") {
+      undated++;
+      continue;
+    }
+    if (last === null || r.ts > last.ts) last = r;
+  }
+  if (last === null) {
+    // Three distinct not-evaluated causes, never one shared "nothing to report" shape: "there is no
+    // row for this branch", "every row was cancelled" and "rows existed but none was orderable" name
+    // three different repairs.
+    const reason =
+      onBranch === 0 ? "no-run-for-branch" : cancelled === onBranch ? "all-runs-cancelled" : "no-orderable-decisive-run";
+    return { ciReading: "not-evaluated", reason, onBranch, cancelled, undated, unparseable };
+  }
+  return {
+    ciReading: last.conclusion,
+    runId: last.runId ?? null,
+    runTs: last.ts,
+    url: last.url ?? null,
+    onBranch,
+    cancelled,
+    undated,
+    unparseable,
+  };
+}
+
+const ci = readLastDecisiveCi(root, base);
+// ONE line per cut preflight. The four run fields live under `run` because they ARE the run's own
+// fields; `ciReading` is this carrier's vocabulary and `ts` is this cut's moment.
+const ciRecord =
+  ci.ciReading === "not-evaluated"
+    ? {
+        ts: cutMoment,
+        stage: "preflight",
+        tag,
+        branch: base,
+        ciReading: "not-evaluated",
+        ciNotEvaluatedReason: ci.reason,
+        carrier: CI_RUNS_REL,
+      }
+    : {
+        ts: cutMoment,
+        stage: "preflight",
+        tag,
+        branch: base,
+        ciReading: ci.ciReading,
+        run: { runId: ci.runId, conclusion: ci.ciReading, ts: ci.runTs, url: ci.url },
+        carrier: CI_RUNS_REL,
+      };
+
+// P2 — MAKE IT VISIBLE. This is the whole payload of §4.2: the cutter sees the reading, and the cut
+// carries it afterwards. Printed even under `--dry-run` (where it is not yet recorded), so the
+// reading can be inspected BEFORE anything is created.
+const ciSummary =
+  ci.ciReading === "not-evaluated"
+    ? `not-evaluated (${ci.reason}${ci.detail ? ` — ${ci.detail}` : ""})`
+    : `${ci.ciReading} — run ${ci.runId === null ? "runId-unreadable" : ci.runId} at ${ci.runTs}${ci.url ? ` ${ci.url}` : ""}`;
+process.stdout.write(
+  `preflight: '${base}'s last decisive CI run: ${ciSummary} (source: ${CI_RUNS_REL}; decisive = conclusion ∈ {success,failure}, ⛔ 'cancelled' is not a verdict)\n`,
+);
+process.stdout.write(
+  "preflight: ⛔ RECORDED, NOT A GATE — a red reading does NOT block this cut (SPEC §4.2 made visible, not enforced; see the header).\n",
+);
+if (dryRun) {
+  process.stdout.write(
+    `preflight: CI reading NOT recorded (--dry-run writes nothing); a real cut appends it to ${CI_PREFLIGHT_RECORD_REL}\n`,
+  );
+} else {
+  const ciRecordAbs = path.join(root, CI_PREFLIGHT_RECORD_REL);
+  try {
+    fs.mkdirSync(path.dirname(ciRecordAbs), { recursive: true });
+    fs.appendFileSync(ciRecordAbs, `${JSON.stringify(ciRecord)}\n`);
+    process.stdout.write(`preflight: CI reading recorded to ${ciRecordAbs}\n`);
+  } catch (err) {
+    // ⛔ The recording is not a gate EITHER: an unwritable carrier must not refuse the cut. But it
+    // must not be SILENT — "not recorded" and "recorded" may never share an output (硬规则 3b).
+    process.stdout.write(
+      `preflight: CI reading NOT RECORDED — '${ciRecordAbs}' is not writable (${err.message}); the cut CONTINUES\n`,
     );
   }
 }

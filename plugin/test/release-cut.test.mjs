@@ -790,3 +790,185 @@ test("P1/AC2: with `gh` absent the hand-dispatch instruction names the SAME ref 
     cleanup(c.parent);
   }
 });
+
+// ══════════════════════════════════════════════════════════════════════════════════════════════
+// gap-release-cut-preflight-records-ci-reading-not-blocking — SPEC §4.2 as a RECORD, ⛔ never a gate
+//
+// THE DEFECT: `orchestration/SPEC-release-and-hotfix-branching-2026-09-15.md` §4.2 (「切点前置：develop
+// 的上一次 decisive CI 必须是绿」) had NO mechanical carrier anywhere on this path — the preflight never
+// read CI at all, so the clause was kept and broken identically (硬规则 9). §4.2's own exemption —
+// "在 AC-265 达成之前 … 不得用它去阻塞任何现有流程" — has lapsed with `goals/AC-265-goal.md`'s
+// `status: achieved`, so the clause is now live prose held up by nothing.
+//
+// WHAT IS PINNED HERE, and why each half is load-bearing:
+//   • the CUT is NOT blocked by a red reading. This is the task's core constraint, not a nicety: a
+//     gate on the reading would codify "the environment twitched ⇒ no release, ever" — the exact jam
+//     §4.2's own exemption existed for (develop's CI was red five straight days from 2026-10-10 for
+//     purely environmental reasons), and the shape 硬规则 12 names.
+//   • the READING is three-valued and ENUMERATED — a verdict, or a NAMED not-evaluated cause. The
+//     carrier is backfilled (its first line is OLDER than its last), so "the last decisive run" is
+//     the MAXIMUM ts and ⛔ not the last readable line; `cancelled` is not a verdict at all.
+// ══════════════════════════════════════════════════════════════════════════════════════════════
+
+/** The CI carrier, relative to a fixture's root — the ONE spelling the reader and these tests share. */
+const CI_CARRIER_REL = join(".quay", "ci-runs.jsonl");
+/** The record THIS task adds, relative to a fixture's root. Its OWN file and its OWN vocabulary. */
+const CI_RECORD_REL = join(".quay", "release-cut-preflight.jsonl");
+
+/** One `.quay/ci-runs.jsonl` line, carrying only the fields the reading is defined over. */
+function ciRow({ ts, branch, workflow = "CI", conclusion, runId, url }) {
+  return JSON.stringify({ ts, branch, workflow, conclusion, runId, url });
+}
+
+/**
+ * Plant (or replace) the fixture's CI carrier. It is untracked AND gitignored (`.gitignore` carries a
+ * glob entry for `.quay/ci-runs.jsonl` — ⛔ not spelled out here: a literal glob would close this
+ * block comment at its own star-slash), and the dirty-tree preflight ignores untracked files — so
+ * planting it cannot refuse the cut for the WRONG reason, whatever shape this test gives it.
+ */
+function plantCiCarrier(root, rows) {
+  mkdirSync(join(root, ".quay"), { recursive: true });
+  writeFileSync(join(root, CI_CARRIER_REL), rows.map((r) => `${r}\n`).join(""));
+}
+
+/**
+ * The preflight's CI-reading line, clipped BEFORE its `(source: …)` footnote. The footnote names the
+ * verdict vocabulary on EVERY run, so an assertion like "no `success|failure` appears" has to read
+ * the summary alone — otherwise it would be answering about the footnote and never about the reading.
+ */
+function ciReadingLine(out) {
+  const line = out.split("\n").find((l) => l.startsWith("preflight: 'develop's last decisive CI run:"));
+  assert.ok(line, `the preflight must PRINT the CI reading it recorded: ${out}`);
+  const cut = line.indexOf(" (source:");
+  assert.ok(cut > 0, `the printed reading must carry its source footnote: ${line}`);
+  return line.slice(0, cut);
+}
+
+test("AC5: a `failure` CI reading is printed and recorded, and the cut STILL LANDS ITS TAG", () => {
+  const c = makeClone("cireading");
+  try {
+    // ── the fixture is shaped so that three LATER, wrong answers are available to a sloppy reader ──
+    plantCiCarrier(c.root, [
+      // an EARLIER decisive green, and it sits FIRST in the file — the carrier is backfilled, not
+      // sorted, so "the last line" and "the newest run" are different rows.
+      ciRow({ ts: "2026-10-10T03:04:40Z", branch: "develop", conclusion: "success", runId: 38000000001, url: "https://example.invalid/green" }),
+      // THE ANSWER: develop's newest decisive run — and it is RED.
+      ciRow({ ts: "2026-10-15T08:09:29Z", branch: "develop", conclusion: "failure", runId: 38703673544, url: "https://github.com/yaleh/quay/actions/runs/38703673544" }),
+      // a LATER develop row, but `cancelled` ⇒ a verdict it is not.
+      ciRow({ ts: "2026-10-15T09:50:00Z", branch: "develop", conclusion: "cancelled", runId: 38799000000, url: "https://example.invalid/cancelled" }),
+      // a LATER failure on develop, but on the RELEASE workflow ⇒ a different question.
+      ciRow({ ts: "2026-10-15T09:30:00Z", branch: "develop", workflow: "Release", conclusion: "failure", runId: 38795000000, url: "https://example.invalid/release" }),
+      // and a LATER develop-CI failure for ANOTHER branch.
+      ciRow({ ts: "2026-10-15T09:40:00Z", branch: "master", conclusion: "failure", runId: 38796000000, url: "https://example.invalid/master" }),
+    ]);
+
+    const r = run(["9.9.5", "--root", c.root, "--no-push", "--no-dispatch"]);
+
+    // ⛔ THE CORE CONSTRAINT (AC5): a RED reading does not refuse. The tag is the proof the cut ran
+    // through the whole landing face with that reading in hand.
+    assert.equal(git(c.root, "rev-parse", "--verify", "--quiet", "refs/tags/v9.9.5").status, 0,
+      `a red CI reading must NOT block the cut (exit=${r.status}): ${r.stdout}${r.stderr}`);
+    assert.doesNotMatch(r.stderr, /CAUSE=release-cut-ci/,
+      `the CI reading must carry NO CAUSE= — it is a record, never a preflight refusal: ${r.stderr}`);
+
+    // ── the PRINT (AC3): the reading, its run identity, and the no-gate policy ──────────────────
+    assert.equal(
+      ciReadingLine(r.stdout),
+      "preflight: 'develop's last decisive CI run: failure — run 38703673544 at 2026-10-15T08:09:29Z https://github.com/yaleh/quay/actions/runs/38703673544",
+      `the preflight must print the reading it recorded: ${r.stdout}`);
+    assert.match(r.stdout, /RECORDED, NOT A GATE/,
+      `the print must SAY it is not a gate, or an operator may read it as one: ${r.stdout}`);
+
+    // ── the RECORD (AC2): its own carrier, its own vocabulary ───────────────────────────────────
+    const recPath = join(c.root, CI_RECORD_REL);
+    assert.equal(existsSync(recPath), true, `the record must land in --root's .quay/: ${r.stdout}${r.stderr}`);
+    const lines = readFileSync(recPath, "utf8").split("\n").filter((l) => l.trim() !== "");
+    assert.equal(lines.length, 1, `one cut ⇒ exactly one record line: ${JSON.stringify(lines)}`);
+    const rec = JSON.parse(lines[0]);
+    assert.equal(rec.ciReading, "failure");
+    assert.equal(rec.branch, "develop");
+    assert.equal(rec.tag, "v9.9.5");
+    assert.equal(rec.stage, "preflight");
+    // the 「tag 时刻」: the record's OWN ts, a real instant — the tag is created minutes later, at this
+    // same cut, off this same base.
+    assert.match(rec.ts, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/, `ts must be an ISO instant: ${rec.ts}`);
+    assert.equal(rec.run.runId, 38703673544);
+    assert.equal(rec.run.conclusion, "failure");
+    assert.equal(rec.run.ts, "2026-10-15T08:09:29Z");
+    assert.equal(rec.run.url, "https://github.com/yaleh/quay/actions/runs/38703673544");
+    // 硬规则 8: this carrier does NOT reuse the finish ledger's `form=` vocabulary — a different
+    // carrier answering a different question must not borrow the other's word list.
+    assert.doesNotMatch(lines[0], /"form"/,
+      `the new carrier must not borrow .quay/release-branch-finish.jsonl's vocabulary: ${lines[0]}`);
+    assert.notEqual(CI_RECORD_REL, join(".quay", "release-branch-finish.jsonl"));
+  } finally {
+    cleanup(c.parent);
+  }
+});
+
+test("AC4: the reading is THREE-VALUED — a verdict, or a NAMED not-evaluated cause (⛔ never silently green or red)", () => {
+  const c = makeClone("civalues");
+  const recordPath = join(c.root, CI_RECORD_REL);
+  try {
+    const dryRun = () => {
+      const r = run(["9.9.4", "--dry-run", "--root", c.root]);
+      assert.equal(r.status, 0, `the dry run must pass with ANY CI carrier shape: ${r.stdout}${r.stderr}`);
+      return r.stdout;
+    };
+
+    // ── POSITIVE CONTROL FIRST (硬规则 4): a reader that cannot report a VERDICT proves nothing by
+    //    reporting "not-evaluated" below — every arm under it would be satisfied by a reader that
+    //    answers "not-evaluated" to everything. So a real green row must be read as `success`. ────
+    plantCiCarrier(c.root, [
+      ciRow({ ts: "2026-10-15T08:09:29Z", branch: "develop", conclusion: "success", runId: 42, url: "https://example.invalid/42" }),
+    ]);
+    assert.equal(ciReadingLine(dryRun()),
+      "preflight: 'develop's last decisive CI run: success — run 42 at 2026-10-15T08:09:29Z https://example.invalid/42",
+      "the reader must be able to report a VERDICT at all, or the not-evaluated arms below are vacuous");
+
+    // ── arm 1: the carrier is absent ⇒ `carrier-absent`, and it names the file it could not read ──
+    rmSync(join(c.root, CI_CARRIER_REL));
+    const absent = dryRun();
+    assert.match(ciReadingLine(absent), /^preflight: 'develop's last decisive CI run: not-evaluated \(carrier-absent — /,
+      `an absent carrier must be an explicit not-evaluated that names it: ${absent}`);
+
+    // ── arm 2: the carrier exists, but EVERY develop CI row is `cancelled` ⇒ still not a verdict ──
+    //    ⛔ THIS is the arm the "write the not-evaluated branch as green" mutation must redden: a
+    //    cancelled run was superseded by a later push and says nothing about whether develop was
+    //    green (SPEC §4.2: 40/92 = 43% of develop's runs in its own window were cancelled).
+    plantCiCarrier(c.root, [
+      ciRow({ ts: "2026-10-15T08:09:29Z", branch: "develop", conclusion: "cancelled", runId: 1, url: "https://example.invalid/1" }),
+      ciRow({ ts: "2026-10-15T09:09:29Z", branch: "develop", conclusion: "cancelled", runId: 2, url: "https://example.invalid/2" }),
+    ]);
+    const cancelled = ciReadingLine(dryRun());
+    assert.match(cancelled, /not-evaluated \(all-runs-cancelled\)/,
+      `a cancelled-only carrier must read as not-evaluated: ${cancelled}`);
+    assert.doesNotMatch(cancelled, /\b(success|failure)\b/,
+      `⛔ 'cancelled' must be read as NEITHER green NOR red: ${cancelled}`);
+
+    // ── arm 3: rows exist, but none for THIS branch ⇒ its OWN cause, never "cancelled" ────────────
+    plantCiCarrier(c.root, [
+      ciRow({ ts: "2026-10-15T09:09:29Z", branch: "someone-elses-branch", conclusion: "failure", runId: 3, url: "https://example.invalid/3" }),
+    ]);
+    const other = dryRun();
+    assert.match(ciReadingLine(other), /not-evaluated \(no-run-for-branch\)/,
+      `"no row for this branch" and "every row was cancelled" name different repairs: ${other}`);
+
+    // ── arm 4: the DECISIVE row is not the last readable line (a trailing `cancelled` must not be
+    //    mistaken for the answer, and must not erase the green that precedes it) ─────────────────
+    plantCiCarrier(c.root, [
+      ciRow({ ts: "2026-10-15T08:09:29Z", branch: "develop", conclusion: "success", runId: 7, url: "https://example.invalid/7" }),
+      ciRow({ ts: "2026-10-15T09:09:29Z", branch: "develop", conclusion: "cancelled", runId: 8, url: "https://example.invalid/8" }),
+    ]);
+    assert.match(ciReadingLine(dryRun()), /last decisive CI run: success — run 7 at /,
+      "the newest DECISIVE row wins, ⛔ not the last line and ⛔ not a trailing `cancelled`");
+
+    // ── and the dry run APPENDS NOTHING: "mutate NOTHING" covers this carrier too ────────────────
+    assert.equal(existsSync(recordPath), false,
+      "--dry-run must not append the CI record (its whole contract is that it writes nothing)");
+    assert.match(dryRun(), /CI reading NOT recorded \(--dry-run writes nothing\)/,
+      "a dry run must SAY it did not record — ⛔ 'not recorded' must not read the same as 'recorded'");
+  } finally {
+    cleanup(c.parent);
+  }
+});
