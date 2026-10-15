@@ -165,3 +165,12 @@ gap-dashboard **47**、workflow-runner-self-hosted-check **34**。
 - 未落地原因：AC 未全勾（checked 2/5，剩余未勾 3）——续做只需验证并勾选 AC
 - run_id：wk-prod-anchor
 - session_id：8f6ea38f-3f92-4864-83ca-cce156885573
+
+## Needs-Human
+
+**执行 2026-10-15T21:15:46.271Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：worker-driver 连续 3 次 exited-not-landed 未落地（重试上限）
+- 失败步/判词：AC 未全勾（checked 2/5，剩余未勾 3）——续做只需验证并勾选 AC
+- run_id：wk-prod-anchor
+- session_id：e7b51858-02c8-47b5-baa1-9040d5172010
