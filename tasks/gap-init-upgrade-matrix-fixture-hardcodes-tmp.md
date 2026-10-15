@@ -43,3 +43,7 @@ develop 的 CI 自 2026-10-10 起全红，逐条查 `gh run view <runId> --log-f
 
 - plugin/test/init-upgrade-matrix.test.mjs
 - tasks/gap-init-upgrade-matrix-fixture-hardcodes-tmp.md
+
+
+ADR-007 逐里程碑暗轴记录（本任务的声明）
+该轴仍暗,理由: 本任务是测试夹具与运行器环境耦合的修复（改的是夹具如何取临时目录），不量架构面（依赖图 / 文档比 / 变异存活都没测），没有可解析的读数可贴。
