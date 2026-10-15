@@ -3,7 +3,7 @@ id: gap-routine-semantic-dedup-scan-print-json-three-behaviours
 title: "semantic-dedup-scan: One name spans three shapes: three byte-identical
   console.log(JSON.stringify(x)), two pretty-printers that are one behaviour in
   two spellings, and a third pret"
-status: needs-human
+status: todo
 labels:
   - gap
   - routine-filed
@@ -11,6 +11,9 @@ labels:
 parent: null
 children: []
 extra: {}
+depends_on:
+  - gap-suite-recovery-ladder-log-wiring-reads-wrong-file-always-log-unreadable
+  - gap-lwa-crit-fixture-sleep300-child-not-reaped-forces-aborted-on-clean-suite
 ---
 ## Finding
 One name spans three shapes: three byte-identical console.log(JSON.stringify(x)), two pretty-printers that are one behaviour in two spellings, and a third pretty variant with a different signature — extraction must respect that core cannot import plugin sources.
@@ -93,11 +96,12 @@ extract
 - 未落地原因：step=suite: oom-killed (1) — recovery exhausted at floor concurrency 32 — no declared rung produced a complete verdict (64,48,32); needs a code/config fix, see plugin/scripts/full-suite-runner.ts
 - run_id：wk-prod-anchor
 - session_id：dbf05fc5-7778-4d96-b688-ca8fb0925e9a
-## Needs-Human（人 2026-10-15 裁定：手工停派，非重试上限机械触发）
 
-**本次状态翻转是人工决定，不是 worker-driver 的 retry-cap 机械判定**——本任务连续多轮 `exited-not-landed` 的真因已被定位为两个与本任务 delta 无关的共享基建缺陷，且既有 retry-exemption 机制把这些失败归类为 `unrelated-flaky-exempt`/`insufficient-data-fallback`，不计入本任务自己的重试计数，会无限期重派、无谓消耗（人 2026-10-15 裁定：「解阻塞的任务应当优先；必要时可以先把被阻塞任务挂到 needs-human 而不是无谓重试」）。
+## Blocked（人 2026-10-15 裁定：改用 depends_on 结构化阻塞，不用 needs-human）
+
+**人指出更正**：这不该是 needs-human（人工停派）——应当用 `depends_on` 正确表达依赖关系，挂 `todo`，让既有 todo→ready 促升闸的 `depsReadinessFor` 判定自动拦住，两个真因任务落地后自动解阻塞、无需人工翻回。
 
 - 真因①（已立案，`gap-suite-recovery-ladder-log-wiring-reads-wrong-file-always-log-unreadable`，**正在隔离 worktree 实际开发**）：OOM 低并发恢复阶梯每一档都读错日志文件，`classifyRecoveryRound` 恒报 `log-unreadable`，即便某一档其实完整、零 OOM。
 - 真因②（已立案，`gap-lwa-crit-fixture-sleep300-child-not-reaped-forces-aborted-on-clean-suite`，待空闲派发槽）：`live-web-address-fixture.mjs` 的 `sleep 300` 夹具子进程未被回收，floor 档即便零 OOM 也被误判 `aborted`。
-- 本任务自身的 AC/Touches 没有变化，不是因为本任务有缺陷才挂起。
-- **恢复条件**：上述两个任务任一落地（优先两者都落地）后，应重新核实本任务是否已能干净通过，再翻回 `ready`，不要无差别照搬旧重试计数。
+- 本任务自身的 AC/Touches 没有变化，不是因为本任务有缺陷才阻塞。
+- `depends_on` 已指向上述两个任务；两者皆 `done` 后，`ready-pool-check` 的 `depsReadinessFor` 会自动判定解阻塞，促升回 `ready`，不需要人工介入。
