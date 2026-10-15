@@ -14,6 +14,17 @@ depends_on:
   - gap-quality-gate-driver-loop-watchdog-test-hangs-since-e18ec4b04
   - gap-suite-resource-measurement-needs-a-host-adapter-not-inline-cgroup-calls
 ---
+> **PARKED**（worker 第 5 轮，2026-10-16T21:3xZ）——⛔ 不是「做完了没勾」：AC1/AC3/AC4 三条都要求
+> 「16 GiB 压力基线下、由 driver 在安静时段调度的完整测量轮」，而该基线已被 **2026-10-15 的 32G 裁定**取代；
+> 且 AC1 的对照（「ac341 isolated vs included」）在本仓 `scripts/test.sh` 里**无法构造**（无排除 flag）。
+> 缺的是**人的裁定**：(a) 按当前生效基线重定范围 / (b) 撤 AC1/AC3 / (c) 授权原样跑。
+> 裁定请求已立案：`tasks/gap-meta-call-heavy-files-ac1-ac3-ac4-2026-10-15-32g-1.md`（status: needs-human）+ `meta/META-016-*.md`。
+> **本行的唯一作用是停止重派**（本轮实测每 ~7–12 分钟烧一个 worker 会话；「达重试上限即停派」在本环境已被一次
+> retreat 在 42 秒内撤销，不可依赖 —— 见 `## Evidence` 第 5 轮）。
+> **解除条件（unpark trigger）**：上述裁定之一被写下 ⇒ 删掉本行即可恢复可派
+> （读者 = `plugin/scripts/ready-pool-check.ts` 的 `PARKED_MARKER_RE` / `isParked`，逐字排除出货池）。
+> ⛔ 本轮未改 AC 文本、未勾选、未动 `status:`。
+
 ## Proposal
 **Human direction 2026-10-14: the 16 GiB suite MemoryMax is a deliberate pressure constraint meant to drive test optimization. It must not be "fixed" just by raising it to 24/26 GiB.** This task does the optimization and the controlled concurrency comparison under 16 GiB. Only if that comparison shows 16 GiB cannot hold does it compare 20/24.
 
@@ -170,6 +181,37 @@ runner 为套件建的 systemd scope **先于** anchor 封套生效，**测出�
 不是 worker 能代替决定的事。三选一 (a)/(b)/(c) 见上一节；其中 (c) 的成本比上一节写的低（~45–60 分钟），
 但**仍占用单飞槽、会拒掉生产 fan-in** ⇒ 它正确的家是 **driver / 例行轨道**（可由 driver 排安静时段），
 而不是 worker 会话。
+
+### 第 5 轮（2026-10-16T21:3xZ）—— 停止重派（机制标记）+ 前置与速率的**实测登记**
+
+本轮**不重复**第 3/4 轮的推导（结论未变）；只登记新的可核读数，并据此把「散文再抄一遍」换成**有读者的机制**。
+
+**① 前置三条全部未变（逐条读过正本，不是转述）。**
+- `.quay/config.yml`（gitignored 运维面）仍 `suite: memory_max: 32G` —— 人 2026-10-15 的提额裁定仍生效。
+- `meta/META-016-*.md` 仍 `status: answered`，但那是 **meta-driver 的回答**，内容是「只报告、不代裁」并路由为
+  needs-human-task ⇒ **没有人对 (a)/(b)/(c) 作出选择**。
+- 裁定请求任务 `tasks/gap-meta-call-heavy-files-ac1-ac3-ac4-2026-10-15-32g-1.md` 在 `author` 与 `develop` 上
+  都是 `status: needs-human`、四条 AC 全未勾。
+
+**② 新事实：重派速率 + 「兜底」实测不可靠（两条都是读数，不是推断）。**
+- `.quay/worker-outcome.jsonl` 中该任务末 5 条：`21:08:47 / 21:15:45 / 21:27:05 / 21:34:30 / 21:37:32Z`，
+  **全部** `short_circuit: "ac-not-checked"` ⇒ 每 **~7–12 分钟**烧一个完整 worker 会话（每个会话一轮独立 recon）。
+- `.quay/task-status-events.jsonl`：重试上限那次 `ready→needs-human`（21:15:46.271Z，actor
+  `driver-filters markNeedsHuman`）在 **42 秒后**被一次 `needs-human→todo` retreat（21:16:28.719Z，
+  `actor.kind: cli`）撤销，14 秒后又由 promotion-driver 晋升回 ready ⇒ **「连续 N 次未落地即停下等人」这条兜底
+  在本环境实测不可依赖**（与 `RetryState.counts` 是内存态、驱动重启即清零一致）。
+
+**③ 因此本轮的动作 = 用有读者的机制停止重派。** 任务体首行加 `**PARKED**`
+（读者 = `ready-pool-check.ts` 的 `PARKED_MARKER_RE` / `isParked` ⇒ `reasons.push("parked")`，逐字排除出货池）。
+**它是可逆的**：裁定一到删掉该行即恢复可派，解除条件就写在标记旁。⛔ 未改 AC 文本、未勾选、未动 `status:`、未改任何代码文件。
+
+**④ 分支仍 fan-in-ready（本轮唯一的仓库动作是 merge develop）。**
+`git -C <worktree> merge --no-edit develop` ⇒ 仅任务文件一处冲突（`HEAD` 侧是 `develop` 侧的**真子集**：
+`develop` 那侧含同一句 + META-016 引用 + 第 4 轮段落）⇒ 按超集解；解后 `git diff develop -- tasks/<id>.md` **空**、
+`git diff --diff-filter=U` **空**。`git diff --name-only develop...HEAD` 仍是那 6 个源/测试文件（未新增）。
+
+**⑤ 仍未勾的部分。** AC1/AC3/AC4 缺的是**人的裁定**（ruling-dependent），故不标 `（待外部）`
+——标了会把「没人裁定」改名成「正在采集」（硬规则 3b）。AC2/AC5 保持已勾，读数未变。
 
 ## Touches
 - tasks/gap-suite-heavy-files-and-phase-concurrency-under-16g-pressure-baseline-comparison.md
