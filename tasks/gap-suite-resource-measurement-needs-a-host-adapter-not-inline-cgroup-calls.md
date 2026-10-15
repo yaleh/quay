@@ -186,6 +186,46 @@ with `SUITE-INCOMPLETE reason=oom-killed`. Both causes were read out of the arte
    (status `todo`, and it `depends_on:` THIS task), not a cap raise. So the landing path for this task is an `oomKill == 0`
    round (3 of 8 rounds on 10-14 had none); nothing in this change's diff can create or prevent one.
 
+**Round 2026-10-16 — the pressure picture changed on develop; the two defects recorded above no longer gate a landing round.**
+Re-merging develop on 2026-10-16 brought in three landed changes that supersede the 2026-10-14/15 analysis above. All readings
+below were taken on THIS worktree AFTER the merge, from the production functions (⛔ not inferred, ⛔ not fixtures):
+
+- **Defect 2 (recovery ladder `log-unreadable`) is FIXED and landed** — `gap-suite-recovery-ladder-log-wiring-reads-wrong-file-always-log-unreadable`
+  (status `done`). `recoverySuiteCommand(base, n, recLogFile)` is now a 3-arg function whose `recLogFile` is REQUIRED (it throws on
+  an empty path), and `retargetLogFile` re-points the argv's `--log-file` (dropping the single-token `=` form, which `flagValue`
+  cannot see). The runner's write target and the caller's read target are now structurally the SAME path ⇒ a rung can be certified.
+- **Defect 1's binding cap moved 16 GiB → 32 GiB by ops declaration** — `gap-suite-declared-memory-max-swallowed-by-shared-host-split`
+  (status `done`) routes a DECLARED ceiling through a project-blind guard (`0.25 ×` effective total) instead of the shared-host
+  split. The main checkout now declares `suite: memory_max: 32G` (human ruling 2026-10-15) and this worktree inherits it via
+  `worktree-include`. Measured this round:
+  `readSuiteParams(<wt>) = {"max_oversubscription":1,"memory_max":"32G"}`
+  ⇒ `resolveSuiteMemoryMax(<wt>/.quay) = {"memoryMax":"34359738368","bound":"declared","reason":null,"declared":"32G","declaredSource":"env","hostGuardBytes":66295431168,"actualConcurrency":64,"perFileHighWaterBytes":159817728,"laneScaledEstimateBytes":12785418240,"laneScaledExceedsHostGuard":false}`.
+  ⇒ 32 GiB of cap against the runner's own **11.9 GiB** lane-scaled estimate at 64 lanes (a 2.7× margin), where every failing
+  round above ran **16 GiB** of cap against a **19.8 GiB** estimate. No ambient `QUAY_SUITE_MEMORY_MAX` is set in the driver
+  environment (checked `/proc/<pid>/environ`), so the declared value is what reaches the suite — the `:-32G` default in
+  `suite-params.ts` is not shadowed.
+- **Defect 4 (a raised ceiling reds the 16 GiB baseline test) is FIXED** — `d6370d4d2` (「声明 memory_max 不再连带打红『缺省
+  16 GiB 基线』那一族用例」) is on develop, so the config/ops route to moving the cap is no longer self-blocking; the prior
+  round's two-arm probe at `full-suite-runner-cgroup.test.mjs:987` no longer describes the current tree.
+
+⇒ The 2026-10-14/15 conclusion — 「the landing path is an `oomKill == 0` round; nothing in this change's diff can create or
+prevent one」 — is retained as the historical reading but is **no longer the current prediction**: the pressure that produced
+`oomKill ≥ 1` at BOTH 128 and 32 lanes was removed by the ops declaration, ⛔ not by anything in this diff (the DoD's 「declared
+value unchanged」 still holds — this diff still touches none of `declaredSuiteMemoryMax` / `suiteMemoryMax` /
+`resolveSuiteMemoryMax` / `SUITE_MEMORY_MAX_DEFAULT`).
+
+**AC1–AC4 re-verified on the MERGED tree (2026-10-16, develop `c1d178877`).**
+- AC4: `bash scripts/test.sh --for-task gap-suite-resource-measurement-needs-a-host-adapter-not-inline-cgroup-calls --allow-thin`
+  ⇒ `exit 0`, `ℹ tests 272 / pass 272 / fail 0` — and the run selected **both** of this task's own test files
+  (`plugin/test/host-resource-adapter.test.mjs`, `plugin/test/full-suite-runner-oom-policy.test.mjs`), so AC1's and AC2's
+  pinned readings were re-executed, not assumed.
+- AC3 re-run over the added lines (`git diff develop...HEAD | grep '^+'`): `grep -niE 'claudecodeui|cantus|cloudcli'` ⇒ 0 matches;
+  absolute-path literals under `/usr|/home|/opt|/var|/data|/srv` ⇒ 0 matches; the only absolute-path literals added at all are
+  `"/sys/fs/cgroup"` (a kernel interface, naming no project) and `"/tmp/whatever"` (a test fixture). Unchanged from the reading above.
+- `npx tsc --noEmit -p packages/quay` ⇒ exit 0.
+- `anti-drift-touches-check --merge-target develop` ⇒ `ANTI-DRIFT OK … 8 actual file(s), all within declared Touches (9 glob(s))`.
+- `task_check` ⇒ `gate=execute->done ok=true acTotal=4 acChecked=4`.
+
 ## Touches
 - tasks/gap-suite-resource-measurement-needs-a-host-adapter-not-inline-cgroup-calls.md
 - plugin/scripts/host-resource-adapter.ts
