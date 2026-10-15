@@ -2,7 +2,7 @@
 id: gap-quality-continuous-resource-diagnostic-routine-mechanical-filter-then-semantic
 title: Quality 持续资源诊断
   routine：机械采集筛选在前、语义只处理新异常，复用既有架构发现身份/去重/verifier-refuter/Portfolio
-status: ready
+status: done
 labels:
   - gap
   - architecture-discovery
