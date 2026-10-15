@@ -2,7 +2,7 @@
 id: gap-driver-anchor-memory-envelope-live-sibling-enumeration-load-flake
 title: driver-anchor-memory-envelope 的「真实枚举 my own scope」用例是共享 host 时序形状的红：改有界轮询
   + 具名超时读数
-status: todo
+status: ready
 labels:
   - gap
   - ci
