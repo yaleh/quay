@@ -65,3 +65,16 @@ return spawn("/bin/sh", ["-c", `echo ${phrase} >/dev/null; sleep 300`], { cwd: r
 - 未落地原因：step=suite: oom-killed (1) — recovery exhausted at floor concurrency 32 — no declared rung produced a complete verdict (64,48,32); needs a code/config fix, see plugin/scripts/full-suite-runner.ts
 - run_id：wk-prod-anchor
 - session_id：5cf2e0c4-87eb-4027-8ae1-744926319878
+
+## Disposition
+
+**第二轮派发（复核轮）2026-10-15**：第一轮的实现（提交 `a81f0b5d7`）已在本任务分支上；第一轮的 blocker 落在 **fan-in 的 suite 步骤**（`oom-killed (1)`，降档 64/48/32 均无完整判定），不在本 diff 的 8 个文件内。本轮在隔离 worktree 内逐条重跑 AC1–AC6，读数与第一轮一致，并补了第一轮没有的证据面：
+
+- **AC1 重测（本机，独立）**：`/bin/sh`(→dash) 对 `;` 列表末条命令**不 exec 而 fork** —— 直接子进程 forked_children=**1**（子进程 cmdline=`sleep 5`）；`/bin/bash` = **0**（直接子进程 cmdline 已是 `sleep 5`）。7 文件的 `spawnNotAServe` 调用点 = **14**，全部 `children.push(...)`=**14**（develop 侧 21 = 7 个定义 + 14 个调用点）⇒ 无一处漏注册，与第一轮结论同。
+- **AC2 重测（改用出货谓词，非自写 cwd 扫描）**：两臂共用 worktree 里**同一个真实 `killAndReap`**，幸存者读数改用**出货的** `listProcessGroupMembers`（`plugin/scripts/full-suite-runner.ts`）。BEFORE（develop 形状）：直接子进程 cmdline=`/bin/sh -c echo quay.ts serve >/dev/null; sleep 300`、forked=1，teardown 后谓词读 **leaked=1**（`sleep 300`，cwd=`/tmp/lwa-nc2-before-2sDnIa (deleted)`——与生产症状同形）；AFTER（修复形状）：cmdline=`…; read _`、forked=0、**leaked=0**。
+- **AC3 重测**：真实 3 进程泄漏组（pgid 50024）仍读 **leaked=3, reaped=true**；不存在的组读 **leaked=0**（「查过且干净」与「找到泄漏」不共用取值）；`worktree-process-reaper --worktree <dir>` 对真实孤儿仍 **found=2 killed=2**。
+- **AC4 重测（合并 develop 后的树）**：`plugin/test/full-suite-runner-cgroup.test.mjs` 的常驻 driver 用例 **7/7 全绿**（suite-end backstop / 干净轮负控制 / SUCCESS / FAILURE / TIMEOUT / CANCELLATION / BARE spawn 负控制），`promotion-driver-s03.test.mjs` **7/7 全绿**。第一轮记录的 3 个 60s `waitExit` 红本轮**未复现**（loadavg 22–48）——与第一轮的宿主负载归因一致。
+- **AC5 重测**：`git diff develop...HEAD --stat` = **8 文件**；diff 新增行内 `MemoryMax`/`16GiB`/`leakedProcesses`/`QUAY_MAX_CONCURRENT_SUITES`/`gate-gameability`/`LEAK_SWEEP`/`tolerance` 命中数均为 **0**；`notEvaluated` 唯一 1 处经**打印该行原文**核对为 `//` 注释（硬规则 2：按位置判定）；删除行含 `test(` = **0**；7 文件 `^test(` 声明数 develop==worktree（16/16、16/16、14/14、13/13、14/14、15/15、19/19）。
+- **AC6 重测**：`scripts/test.sh --for-task … --allow-thin` **exit 0**，`tests 133 / pass 133 / fail 0`（7 个 ac 文件各自的共享断言共 **7** 处可见 + `worktree-process-reaper.test.mjs`）；合并 develop（`e14887ccb`）后在该树上**重跑仍绿**。
+- **5b 类面扫描（本轮新增，非修复范围）**：全库扫 `sleep 300` 与 `sh -c` spawn 形状 ⇒ 本缺陷类（末条命令为外部命令而被 dash fork、而 teardown 只杀直接子进程）**只存在于这 7 个文件的那一份共享副本**。`ac288/296/297/298/299/303` 虽各带 `killAndReap`/`killQuietly` 副本，但一律用 `process.execPath`（node `-e`）**直接起进程、不经 shell**，不属该类（其副本重复属另一类整洁性问题，不在本任务范围）。其余 `sh -c` spawn 用 `bash`（末条命令会被 exec）、末条为**内建**命令、或本就 `detached:true` 自行收尾，均无此形态。
+- **本轮结局**：scoped 门绿 + `anti-drift-touches-check` 报 `8 actual file(s), all within declared Touches`；worktree 已 merge develop 并提交。剩余风险仍在 fan-in 的 **suite 步骤**（宿主/全量 suite 内存包络这一类）；本 diff 未触及任何内存或并发旋钮（见 AC5 读数）。scoped-gate 缓存为**单记录**文件（peer 可覆盖），故未命中时 fan-in 照跑 scoped 门属预期行为。
