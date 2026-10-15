@@ -57,3 +57,11 @@ return spawn("/bin/sh", ["-c", `echo ${phrase} >/dev/null; sleep 300`], { cwd: r
 - packages/quay/test/ac300-criterion-address-derivation.test.mjs
 - packages/quay/test/ac302-criterion-address-derivation.test.mjs
 - plugin/scripts/worktree-process-reaper.ts
+
+## Blocker
+
+**2026-10-15T07:11:39.047Z — worker 未落地（exited-not-landed）**
+
+- 未落地原因：step=suite: oom-killed (1) — recovery exhausted at floor concurrency 32 — no declared rung produced a complete verdict (64,48,32); needs a code/config fix, see plugin/scripts/full-suite-runner.ts
+- run_id：wk-prod-anchor
+- session_id：5cf2e0c4-87eb-4027-8ae1-744926319878
