@@ -52,6 +52,13 @@ import { helpExit, isDirectEntry, flagValue } from "./gate-script-base.ts";
 // (semantic-dedup-scan `lineof-lineat`); the family lives once in source-text-lib.ts under ONE name.
 import { lineOf } from "./source-text-lib.ts";
 import { baselinePath } from "./ratchet-baseline.ts";
+// Its own private `defaultRoot()` — "up exactly two levels from the script dir" — was one of the
+// THREE byte-identical bodies filed by the semantic-dedup-scan routine as
+// `defaultroot-byte-identical-quad` (runId `semantic-dedup-scan-1792033478766`). `repoRoot` is the
+// home that copy should have called (and it answers by root SHAPE, not by counting levels).
+// ⛔ The retired literal is not re-written here: this file sits inside the scan surface of the
+// ratchet that forbids it, and that checker's own header sets the not-in-prose convention.
+import { repoRoot } from "./repo-root.ts";
 
 // ── the three measured quantities + the conditional fourth rule ─────────────────────────────────────
 
@@ -830,10 +837,6 @@ Exit: 0 = every quantity ≤ baseline, baseline not raised past HEAD, kernel bou
       1 = a quantity exceeded the baseline / the baseline was raised / a kernel violation
       2 = usage or environment error, INCLUDING "the graph could not be read" (evaluated:false)`;
 
-function defaultRoot(): string {
-  return path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
-}
-
 function reportReading(reading: GraphReading, v: RatchetVerdict | null, baseline: Baseline | null, asJson: boolean): void {
   if (asJson) {
     console.log(
@@ -945,7 +948,8 @@ export function main(argv: string[]): number {
   }
 
   const positional = args.find((a, i) => !a.startsWith("--") && !(i > 0 && args[i - 1] === "--baseline"));
-  const root = path.resolve(flagValue(args, "--root") ?? positional ?? defaultRoot());
+  const here = path.dirname(fileURLToPath(import.meta.url));
+  const root = path.resolve(flagValue(args, "--root") ?? positional ?? repoRoot(here));
   const baselineAbs = path.resolve(flagValue(args, "--baseline") ?? baselineFile(root));
 
   const { reading, baseline, verdict, code, relForHead } = decide(root, baselineAbs);
