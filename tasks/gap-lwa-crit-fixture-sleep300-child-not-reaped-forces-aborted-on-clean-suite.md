@@ -58,14 +58,6 @@ return spawn("/bin/sh", ["-c", `echo ${phrase} >/dev/null; sleep 300`], { cwd: r
 - packages/quay/test/ac302-criterion-address-derivation.test.mjs
 - plugin/scripts/worktree-process-reaper.ts
 
-## Blocker
-
-**2026-10-15T07:11:39.047Z — worker 未落地（exited-not-landed）**
-
-- 未落地原因：step=suite: oom-killed (1) — recovery exhausted at floor concurrency 32 — no declared rung produced a complete verdict (64,48,32); needs a code/config fix, see plugin/scripts/full-suite-runner.ts
-- run_id：wk-prod-anchor
-- session_id：5cf2e0c4-87eb-4027-8ae1-744926319878
-
 ## Disposition
 
 **第二轮派发（复核轮）2026-10-15**：第一轮的实现（提交 `a81f0b5d7`）已在本任务分支上；第一轮的 blocker 落在 **fan-in 的 suite 步骤**（`oom-killed (1)`，降档 64/48/32 均无完整判定），不在本 diff 的 8 个文件内。本轮在隔离 worktree 内逐条重跑 AC1–AC6，读数与第一轮一致，并补了第一轮没有的证据面：
