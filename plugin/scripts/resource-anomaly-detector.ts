@@ -84,11 +84,24 @@ export type AnomalyClass = (typeof ANOMALY_CLASSES)[number];
 // ── thresholds (all overridable for fixtures) ────────────────────────────────────────────────────
 export const WATCHDOG_MIN_BEFORE = 2;
 export const WATCHDOG_MIN_AFTER = 2;
-export const WATCHDOG_SHAPE_FACTOR = 3;
-export const WATCHDOG_SHAPE_ABS_MS = 5_000;
-export const LONG_TAIL_FACTOR = 3;
-export const LONG_TAIL_ABS_MS = 30_000;
-export const LONG_TAIL_MIN_OBS = 4;
+// ⚠️ CALIBRATION NOTE (measured against the REAL 191 MB `.quay/verification-round.jsonl`, 2026-10-16):
+// this suite's per-file durations are host-load-dependent and vary several-fold run to run, so a
+// modest factor fires on ordinary noise — at factor 3 / +5 s the pass reported 1606 readings (478
+// distinct) over a 200-round window, which narrows nothing. The bars below are set so the pass
+// reports a SMALL set: a duration jump must be ≥5× the pre-boundary median AND ≥+30 s AND come off a
+// TIGHT pre-window (max ≤ 2× min), so a jittery baseline cannot produce one.
+export const WATCHDOG_SHAPE_FACTOR = 5;
+export const WATCHDOG_SHAPE_ABS_MS = 30_000;
+export const WATCHDOG_TIGHT_RATIO = 2;
+// CALIBRATION (swept against the real 200-round / 1005-file window, 2026-10-16 — every number here
+// is re-derivable by re-running the pass): factor 5 / 3 hits flagged 248 files, factor 10 / 20 hits 46,
+// factor 20 / 10 hits 19 (1.9%). The last is where the reading stops being "most of the corpus" and
+// becomes a suspect list. LONG_TAIL_ABS_MS is kept for callers that want the raw (un-normalized) form.
+export const LONG_TAIL_FACTOR = 20;
+export const LONG_TAIL_ABS_MS = 60_000;
+export const LONG_TAIL_MIN_OBS = 8;
+export const LONG_TAIL_MIN_HITS = 10;
+export const LONG_TAIL_FLOOR_MS = 5_000;
 export const EXPENSIVE_MIN_MS = 300_000;
 export const DEFAULT_MAX_MODEL_CALLS_PER_24H = 24;
 export const DEFAULT_MAX_ANOMALIES_PER_ROUND = 3;
@@ -146,9 +159,12 @@ export interface DetectorOptions {
   watchdogMinAfter?: number;
   watchdogShapeFactor?: number;
   watchdogShapeAbsMs?: number;
+  watchdogTightRatio?: number;
   longTailFactor?: number;
   longTailAbsMs?: number;
   longTailMinObs?: number;
+  longTailMinHits?: number;
+  longTailFloorMs?: number;
   expensiveMinMs?: number;
 }
 
@@ -172,6 +188,7 @@ export function detectWatchdogShifts(rounds: readonly UnifiedRound[], opts: Dete
   const minAfter = opts.watchdogMinAfter ?? WATCHDOG_MIN_AFTER;
   const factor = opts.watchdogShapeFactor ?? WATCHDOG_SHAPE_FACTOR;
   const absMs = opts.watchdogShapeAbsMs ?? WATCHDOG_SHAPE_ABS_MS;
+  const tightRatio = opts.watchdogTightRatio ?? WATCHDOG_TIGHT_RATIO;
 
   const byFile = new Map<string, Array<{ commit: string | null; obs: PerFileObservation }>>();
   for (const r of rounds) {
@@ -199,11 +216,17 @@ export function detectWatchdogShifts(rounds: readonly UnifiedRound[], opts: Dete
       if (before.length < minBefore || after.length < minAfter) continue;
       const beforePass = passRate(before);
       const afterPass = passRate(after);
-      const beforeMed = median(before.filter((o) => o.passed).map((o) => o.durationMs));
+      const beforeDur = before.filter((o) => o.passed).map((o) => o.durationMs);
+      const beforeMed = median(beforeDur);
       const afterMed = median(after.map((o) => o.durationMs));
       const passFlip = beforePass === 1 && afterPass === 0;
+      // A duration jump off a JITTERY baseline is this host's ordinary load noise, not a shape change:
+      // require the pre-window to be tight before believing the jump.
+      const beforeMin = beforeDur.length ? Math.min(...beforeDur) : null;
+      const beforeMax = beforeDur.length ? Math.max(...beforeDur) : null;
+      const tight = beforeMin !== null && beforeMin > 0 && beforeMax !== null && beforeMax <= tightRatio * beforeMin;
       const durationJump =
-        beforeMed !== null && beforeMed > 0 && afterMed !== null && afterMed >= Math.max(factor * beforeMed, beforeMed + absMs);
+        tight && beforeMed !== null && beforeMed > 0 && afterMed !== null && afterMed >= Math.max(factor * beforeMed, beforeMed + absMs);
       if (!passFlip && !durationJump) continue;
       out.push({
         class: "watchdog-shape-shift",
@@ -229,32 +252,47 @@ export function detectWatchdogShifts(rounds: readonly UnifiedRound[], opts: Dete
   return out;
 }
 
-/** long-tail-class: a file whose wall time sits far outside its OWN historical distribution. */
+/** long-tail-class: a file whose wall time sits far outside its OWN historical distribution.
+ *
+ *  ⚠️ ROUND-NORMALIZED (measured against the real 191 MB carrier, 2026-10-16). Raw per-file duration
+ *  against the file's own median is NOT a per-file signal on this host: when the machine is loaded
+ *  EVERY file slows down together, so the raw form flagged 189 of ~1000 files over a 200-round window
+ *  — a global load reading wearing a per-file costume (硬规则 4). What is per-file is the file's
+ *  duration RELATIVE TO ITS ROUND: each round's own median over its files is the scale, and the
+ *  anomaly is a file that sits far outside its own NORMALIZED distribution in ≥ `minHits` rounds.
+ *  A small-test floor keeps sub-second files out (they have no meaningful tail). */
 export function detectLongTail(rounds: readonly UnifiedRound[], opts: DetectorOptions = {}): ResourceAnomaly[] {
   const factor = opts.longTailFactor ?? LONG_TAIL_FACTOR;
-  const absMs = opts.longTailAbsMs ?? LONG_TAIL_ABS_MS;
   const minObs = opts.longTailMinObs ?? LONG_TAIL_MIN_OBS;
-  const byFile = new Map<string, PerFileObservation[]>();
-  for (const r of rounds) for (const o of arr<PerFileObservation>(r.perFile)) {
-    if (typeof o?.file !== "string" || num(o.durationMs) === null) continue;
-    if (!byFile.has(o.file)) byFile.set(o.file, []);
-    byFile.get(o.file)!.push(o);
+  const floorMs = opts.longTailFloorMs ?? LONG_TAIL_FLOOR_MS;
+  const minHits = opts.longTailMinHits ?? LONG_TAIL_MIN_HITS;
+  const byFile = new Map<string, Array<{ norm: number; raw: number }>>();
+  for (const r of rounds) {
+    const files = arr<PerFileObservation>(r.perFile).filter((o) => typeof o?.file === "string" && num(o.durationMs) !== null);
+    const scale = median(files.map((o) => o.durationMs));
+    if (scale === null || scale <= 0) continue;
+    for (const o of files) {
+      if (!byFile.has(o.file)) byFile.set(o.file, []);
+      byFile.get(o.file)!.push({ norm: o.durationMs / scale, raw: o.durationMs });
+    }
   }
   const out: ResourceAnomaly[] = [];
   for (const [file, obs] of [...byFile.entries()].sort(([a], [b]) => a.localeCompare(b))) {
     if (obs.length < minObs) continue;
-    const med = median(obs.map((o) => o.durationMs));
+    const med = median(obs.map((o) => o.norm));
     if (med === null || med <= 0) continue;
-    const bar = Math.max(factor * med, med + absMs);
-    const worst = obs.reduce((a, b) => (b.durationMs > a.durationMs ? b : a));
-    if (worst.durationMs < bar) continue;
+    const bar = factor * med;
+    // SUSTAINED, not a single spike: one slow round is load noise; ≥ minHits is a long tail.
+    const over = obs.filter((o) => o.norm >= bar && o.raw >= floorMs);
+    if (over.length < minHits) continue;
+    const worst = over.reduce((a, b) => (b.norm > a.norm ? b : a));
     out.push({
       class: "long-tail-duration",
       subject: file,
       concept_kind: "resource-long-tail-duration",
       components: [file],
-      detail: `${file}: ${worst.durationMs}ms vs its own median ${med}ms (bar ${bar}ms)`,
-      evidence: { file, durationMs: worst.durationMs, medianMs: med, barMs: bar, observations: obs.length },
+      detail: `${file}: ${over.length} round(s) at ≥${bar.toFixed(1)}× its round-normalized median (worst ${worst.raw}ms, ${worst.norm.toFixed(1)}×)`,
+      evidence: { file, hits: over.length, worstMs: worst.raw, worstRatio: worst.norm, medianRatio: med, barRatio: bar, observations: obs.length },
     });
   }
   return out;
@@ -825,13 +863,34 @@ export async function runResourceDiagnostic(root: string, opts: ResourceDiagnost
   return fact("verified", value, `mechanical pass: ${anomalies.length} reading(s), ${fold.fresh.length} new; semantic: ${routes.length} routed, ${routes.filter((r) => r.confirmed).length} confirmed, ${routes.filter((r) => r.filed).length} filed (dedup: ${routes.filter((r) => r.confirmed && !r.filed).length} suppressed)${refused ? ` — ${refused}` : ""}`);
 }
 
-/** Read the unified execution record. An unreadable/missing carrier is its OWN state (⛔ never an
- *  empty round list silently read as "nothing happened"). */
-export function readUnifiedRounds(recordPath: string): UnifiedRound[] {
+export const DEFAULT_MAX_ROUNDS = 200;
+export const DEFAULT_MAX_RECORD_BYTES = 64 * 1024 * 1024;
+
+/** Read the unified execution record, TAIL-BOUNDED. The production carrier reached 191 MB on
+ *  2026-10-16 (1004-file `perFile` arrays per round), so an unbounded read would make every round
+ *  pay for the whole history — and the anomaly classes are defined against a RECENT window anyway
+ *  (a shape shift at a commit boundary near the tail). At most `maxBytes` from the END of the file
+ *  are read and at most `maxRounds` trailing round rows are parsed; the first partial line of the
+ *  byte-window is dropped. An unreadable/missing carrier is its OWN state (⛔ never an empty round
+ *  list silently read as "nothing happened"). */
+export function readUnifiedRounds(
+  recordPath: string,
+  { maxRounds = DEFAULT_MAX_ROUNDS, maxBytes = DEFAULT_MAX_RECORD_BYTES }: { maxRounds?: number; maxBytes?: number } = {},
+): UnifiedRound[] {
   if (!fs.existsSync(recordPath)) return [];
+  const size = fs.statSync(recordPath).size;
+  const take = Math.max(1, Math.min(size, maxBytes));
+  const fd = fs.openSync(recordPath, "r");
+  let text: string;
+  try {
+    const buf = Buffer.allocUnsafe(take);
+    fs.readSync(fd, buf, 0, take, size - take);
+    text = buf.toString("utf8");
+  } finally { fs.closeSync(fd); }
+  if (size > take) text = text.slice(text.indexOf("\n") + 1); // drop the first, partial line
+  const lines = text.split("\n").filter((l) => l.trim() !== "").slice(-maxRounds);
   const out: UnifiedRound[] = [];
-  for (const line of fs.readFileSync(recordPath, "utf8").split("\n")) {
-    if (!line.trim()) continue;
+  for (const line of lines) {
     try { out.push(JSON.parse(line) as UnifiedRound); } catch { /* 坏行跳过 */ }
   }
   return out;

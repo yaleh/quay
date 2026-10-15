@@ -81,7 +81,7 @@ test("AC1 — a planted watchdog-class shape shift is flagged by the mechanical 
   const rounds = path.join(tmp, "rounds.jsonl");
   writeJsonl(rounds, [
     round("c1", "plugin/test/foo.test.mjs", [[1800, true], [1900, true], [1700, true]]),
-    round("c2", "plugin/test/foo.test.mjs", [[30000, false], [31000, false], [30500, false]]),
+    round("c2", "plugin/test/foo.test.mjs", [[60000, false], [61000, false], [60500, false]]),
   ]);
   const r = spawnSync(process.execPath, [
     "--experimental-strip-types", DETECTOR,
@@ -134,9 +134,9 @@ test("AC2 — the same anomaly recurring 3 times is exactly ONE identity-keyed F
   // THREE successive commit boundaries, each with the same pass→fail/duration shift for ONE file.
   writeJsonl(rounds, [
     round("c1", "plugin/test/foo.test.mjs", [[1800, true], [1850, true]]),
-    round("c2", "plugin/test/foo.test.mjs", [[30000, false], [30500, false]]),
-    round("c3", "plugin/test/foo.test.mjs", [[31000, false], [30000, false]]),
-    round("c4", "plugin/test/foo.test.mjs", [[31500, false], [31000, false]]),
+    round("c2", "plugin/test/foo.test.mjs", [[60000, false], [60500, false]]),
+    round("c3", "plugin/test/foo.test.mjs", [[61000, false], [60000, false]]),
+    round("c4", "plugin/test/foo.test.mjs", [[61500, false], [61000, false]]),
   ]);
   const carrier = path.join(tmp, "carrier.jsonl");
   const runOnce = () => spawnSync(process.execPath, [
@@ -194,7 +194,7 @@ test("AC3 — the Finding reaches the EXISTING verifier/refuter and files via th
   const [a] = detectResourceAnomalies({
     rounds: [
       round("c1", "plugin/test/foo.test.mjs", [[1800, true], [1850, true]]),
-      round("c2", "plugin/test/foo.test.mjs", [[30000, false], [30500, false]]),
+      round("c2", "plugin/test/foo.test.mjs", [[60000, false], [60500, false]]),
     ],
   });
   const ck = await resolveConceptKeyOf(REPO_ROOT);
@@ -250,7 +250,7 @@ test("AC3 — the round only spawns the semantic pass for NEW anomalies, past th
   const cfg = { enabled: true, intervalMinutes: 60, maxModelCallsPer24h: 10, maxAnomaliesPerRound: 3 };
   const rounds = [
     round("c1", "plugin/test/foo.test.mjs", [[1800, true], [1850, true]]),
-    round("c2", "plugin/test/foo.test.mjs", [[30000, false], [30500, false]]),
+    round("c2", "plugin/test/foo.test.mjs", [[60000, false], [60500, false]]),
   ];
   const opts = { config: cfg, configPresent: true, halted: false, rounds, pipeline, conceptKeyOf: ck.conceptKeyOf, carrierPath: carrier, ledgerPath: path.join(tmp, BUDGET_LEDGER_REL) };
 
@@ -270,7 +270,7 @@ test("AC3 — the round only spawns the semantic pass for NEW anomalies, past th
   // subject, so the submit-once throttle (which already holds foo.test.mjs's key) is not what blocks.
   const roundsBar = [
     round("c1", "plugin/test/bar.test.mjs", [[1800, true], [1850, true]]),
-    round("c2", "plugin/test/bar.test.mjs", [[30000, false], [30500, false]]),
+    round("c2", "plugin/test/bar.test.mjs", [[60000, false], [60500, false]]),
   ];
   const f3 = await runResourceDiagnostic(tmp, {
     ...opts, round: 3, rounds: roundsBar, carrierPath: path.join(tmp, "carrier2.jsonl"), ledgerPath: path.join(tmp, "ledger2.jsonl"),
@@ -366,7 +366,7 @@ test("identity — the key comes from the landed ledger module, never from a loc
   assert.match(ck.modulePath, /discovery-experience-ledger\.mjs$/);
   const [a] = detectResourceAnomalies({ rounds: [
     round("c1", "plugin/test/foo.test.mjs", [[1800, true], [1850, true]]),
-    round("c2", "plugin/test/foo.test.mjs", [[30000, false], [30500, false]]),
+    round("c2", "plugin/test/foo.test.mjs", [[60000, false], [60500, false]]),
   ] });
   const k = anomalyConceptKey(a, ck.conceptKeyOf);
   assert.equal(k, "resource-watchdog-shape-shift|plugin/test/foo.test.mjs", "the key shape is the landed one: <concept_kind>|<sorted components>");
@@ -390,7 +390,7 @@ test("carrier — append-only, bad lines skipped, and the task body is keyed by 
   const { findingKey, gateFinding } = await import("../scripts/routine-file-gate.ts");
   const [a] = detectResourceAnomalies({ rounds: [
     round("c1", "plugin/test/foo.test.mjs", [[1800, true], [1850, true]]),
-    round("c2", "plugin/test/foo.test.mjs", [[30000, false], [30500, false]]),
+    round("c2", "plugin/test/foo.test.mjs", [[60000, false], [60500, false]]),
   ] });
   const body = renderAnomalyTaskBody(a, 1);
   const key = findingKey(body);
