@@ -34,19 +34,35 @@ One name spans three shapes: three byte-identical console.log(JSON.stringify(x))
 ## Requested action
 extract
 
+## Disposition
+**已修（extract），除一处结构性分歧外。** 三形态各自的落点：
+
+- 紧凑（`console.log(JSON.stringify(obj))` ×3，三处字节相同）→ `plugin/scripts/gate-script-base.ts` 的 `printJsonCompact`。三处**本就** import 该模块，无新增依赖边。
+- 美化（`console.log(JSON.stringify(x, null, 2))` 与 `` `process.stdout.write(\`${JSON.stringify(x, null, 2)}\n\`)` `` —— 同一行为两种拼写）→ 同模块的 `printJson`。
+- 美化核心变体（`packages/quay/src/cli/shared.ts:41`）→ **保留**，并就地声明为**结构性分歧而非漂移**：`packages/quay` 从不 import plugin 源（依赖方向是 plugin → Core），两个面共用一份定义就得把 Core 源码放上 plugin 的 import 路径——`packages/quay/scripts/build-plugin-dist.mjs` 的 `CORE_SRC_DIR` 注释已记该写法在 staged 布局下 break esbuild。finding 自己的 rationale 点名了这条边界。
+
+**字节等价是实测的，不是推的**：Node 的 `format()` 对单个字符串参数原样返回后再补 `\n`，故 `process.stdout.write(JSON.stringify(x) + "\n")` 与 `console.log(JSON.stringify(x))` 输出同字节（cmp 嵌套/undefined/null 夹具：46 字节，一致）；三个紧凑 CLI 的冒烟输出仍是单行。
+
+**5b 扫描（同一符号，⛔ 不是「全仓 JSON 输出」）**：`grep -rn 'function printJson' plugin/scripts` 另命中 finding 未列的 **3 处**——`orphan-session-check.ts:240`、`psi-failure-correlation-check.ts:771`、`instrument-decay-check.ts:297`。三者都是**载荷构造器**（不是裸 emitter），其末行是两种共享形状之一的副本；现全部改走共享 emitter，并改名 `printOrphanReport` / `printCorrelationReport` / `printDecayReport`，使 `printJson` 在全仓只指一件事（emitter）。
+**范围上界（写明，免得被读成「这一类已清完」）**：同一扫描的**内联**形态（`console.log(JSON.stringify(` / `stdout.write(JSON.stringify`）在 `plugin/scripts` 命中约 200 处——那是另一个、大得多的类，本 finding 的 `printJson` 簇不是它；`instrument-decay-check.ts` 内剩下的内联 error-path emitter 随该类留待另案。
+
 ## AC
-- [ ] `.quay/routine-findings.jsonl` 中 finding `print-json-three-behaviours`（routine `semantic-dedup-scan`，runId `semantic-dedup-scan-1792033478766`）所描述的问题被复核并处置
-- [ ] 处置结论可核：要么修掉，要么写明「已有机制在管、失败在哪一步」，⛔ 不以「已注意到」结案
+- [x] `.quay/routine-findings.jsonl` 中 finding `print-json-three-behaviours`（routine `semantic-dedup-scan`，runId `semantic-dedup-scan-1792033478766`）所描述的问题被复核并处置
+- [x] 处置结论可核：要么修掉，要么写明「已有机制在管、失败在哪一步」，⛔ 不以「已注意到」结案
 
 ## DoD
-- [ ] 上面的判据实跑通过
-- [ ] ⛔ 探针只立案不执行：本任务若需要跑产出者/修复，由派发链执行，⛔ 不由例程代跑
+- [x] 上面的判据实跑通过
+- [x] ⛔ 探针只立案不执行：本任务若需要跑产出者/修复，由派发链执行，⛔ 不由例程代跑
 
 ## Touches
+- `plugin/scripts/gate-script-base.ts`
 - `plugin/scripts/run-identity.ts`
 - `plugin/scripts/stage-receipt.ts`
 - `plugin/scripts/workflow-journal.ts`
 - `plugin/scripts/guard-lineage-check.ts`
 - `plugin/scripts/worktree-process-reaper.ts`
+- `plugin/scripts/orphan-session-check.ts`
+- `plugin/scripts/psi-failure-correlation-check.ts`
+- `plugin/scripts/instrument-decay-check.ts`
 - `packages/quay/src/cli/shared.ts`
 - `tasks/gap-routine-semantic-dedup-scan-print-json-three-behaviours.md`
