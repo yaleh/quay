@@ -865,21 +865,66 @@ export function recoveryConcurrencySteps(original: number | null): number[] {
 }
 
 /**
- * AC10 — 恢复轮的 argv：**同一条 suite 命令** + 把本轮的并发旋钮调到更低。
+ * 把 argv 里的 `--log-file <path>` 改成**恰好一份**、指向 `logFile`。
+ *
+ * ⛔ 必须是**替换**而不是追加：runner 读旗标用 `flagValue`（gate-script-base.ts），而它的实现是
+ * `argv.indexOf(name)` ⇒ **取第一份**。追加一份新的 `--log-file` 会让 runner 继续用旧的那份，把本函数
+ * 想修的东西原样保留（静默）。
+ *
+ * ⛔ 单 token 的 `--log-file=<path>` 形态**必须整条丢掉、改以空格形态追加**，⛔ 不能就地改写成
+ * `--log-file=<logFile>`：`flagValue` 按**精确串相等**查（`indexOf("--log-file")`），它认不出 `=` 形态
+ * ⇒ runner 会退回自己的缺省路径 `<state-dir>/full-suite.log`，而调用方仍读本档那份 —— 那正是本任务要
+ * 消灭的「写一处、读另一处」，只是换了个马甲（静默）。丢掉之后 `placed` 保持 false，由末尾统一追加。
+ */
+function retargetLogFile(base: string[], logFile: string): string[] {
+  const out: string[] = [];
+  let placed = false;
+  for (let i = 0; i < base.length; i++) {
+    const a = base[i];
+    if (a === "--log-file") {
+      if (!placed) { out.push("--log-file", logFile); placed = true; }
+      i += 1; // 丢掉它原来指的那个值（本轮不再经过它）
+      continue;
+    }
+    if (a.startsWith("--log-file=")) continue; // 认不出的形态 ⇒ 丢（见上）
+    out.push(a);
+  }
+  if (!placed) out.push("--log-file", logFile);
+  return out;
+}
+
+/**
+ * AC10 — 恢复轮的 argv：**同一条 suite 命令** + 把本轮的并发旋钮调到更低，**并把本轮的结构化日志
+ * 重定向到本档自己的 `--log-file`**。
  *
  * 本仓库形态（`full-suite-runner.ts --buckets …`）用 **`--lane-count <n>`** —— runner 的既有并发旋钮；
  * runner 的 REPLACE splice（runner-concurrency.ts `spliceConcurrency`）把同一个值作为
  * **`--test-concurrency=<n>`** 交给真正的 suite 入口 `bash scripts/test.sh`。⇒ ⛔ 不新造机制、⛔ 不另加
  * 一层包装；「真正的 suite 入口收到 `--test-concurrency=<n>`」是 runner 既有行为的投影。
  *
+ * ⛔ `recLogFile` 是**必需**参数，不是可选的「顺手带上」——这正是
+ * gap-suite-recovery-ladder-log-wiring-reads-wrong-file-always-log-unreadable 的成因：恢复轮的 argv 由
+ * 本函数给出，而**读**那一档日志的是调用方（`spawnSuiteAndWait` 的 `logFile` + `classifyRecoveryRound`），
+ * 两者被当成同一件事，实际不是——runner 把 `SUITE-PLAN`/`SUITE-INCOMPLETE`/`__PERFILE__` **写进它自己
+ * argv 里的 `--log-file`**（`fs.appendFileSync(logFile, …)`），且**不写 stdout**；而 `spawnSuiteAndWait`
+ * 只把 `child.stdout` tee 进它拿到的那份 `logFile`。⇒ argv 不重定向时 runner 的字全落在**原轮**那份日志上
+ * （还被每一档依次以 `flags:"w"` 截断），调用方读到的那份恒为 0 字节 ⇒ 每一档恒
+ * `no-conclusion(log-unreadable)`，即便该档其实完整、零 OOM。**重定向使「runner 写的那份」与「调用方读
+ * 的那份」结构上成为同一个路径** —— 本参数就是这条结构不变式的载体。
+ *
  * 非本仓库形态（命令里没有 runner）⇒ **null**：那种轮次结构上不会写 SUITE-INCOMPLETE 标记（标记只有
  * full-suite-runner 写），且没有已知的并发旋钮 ⇒ 调用方记一个**独立的**下一档 token，⛔ 不伪造「已降档」
  * （硬规则 3b：降不了档必须与降了档可区分）。
  */
-export function recoverySuiteCommand(base: string[], n: number): string[] | null {
+export function recoverySuiteCommand(base: string[], n: number, recLogFile: string): string[] | null {
   const isRunner = base.some((a) => /(^|[\\/])full-suite-runner\.ts$/.test(a));
   if (!isRunner) return null;
-  return [...base, "--lane-count", String(n)];
+  // 空路径 = 接线错误（会让本轮回到「runner 写一处、调用方读另一处」的原始缺陷）。抛，⛔ 不静默产出一条
+  // 指向错文件的 argv（硬规则 3b：读不懂/不成立必须与「合格」可区分）。唯一调用点传的是 `path.join(...)`。
+  if (typeof recLogFile !== "string" || recLogFile.trim() === "") {
+    throw new Error("recoverySuiteCommand: recLogFile is required (an empty path would re-point the round at a log nobody reads)");
+  }
+  return [...retargetLogFile(base, recLogFile), "--lane-count", String(n)];
 }
 
 /** 失败信号行（node:test 的 not ok / ✖ / # fail、断言 expected/actual、anti-drift HARD FAIL、esbuild 的
@@ -2917,7 +2962,12 @@ export async function runMechanicalFanIn(opts: MechanicalFanInOptions): Promise<
           let exemptReading: BaselineEquivalenceReading | null = null;
           let blockedNextStep: string | null = null;
           for (const n of steps) {
-            const recArgv = recoverySuiteCommand(suiteCmd, n);
+            // 本档**自己的**日志路径：必须在本档 argv 之前定下来——它同时是 (a) runner argv 里
+            // `--log-file` 的目标（结构化的 SUITE-PLAN/SUITE-INCOMPLETE/__PERFILE__ 落点）与 (b) 下面
+            // `spawnSuiteAndWait` 的 stdout tee / 静默看门狗 mtime 的观察对象 / (c) `classifyRecoveryRound`
+            // 的读取对象。三者是**同一个路径**是 AC2 的结构不变式（⛔ 不是「约定两份文件内容刚好一样」）。
+            const recLogFile = path.join(root, ".quay", suiteLogFileName(task, runId, `recovery-${n}-${newSuiteLogAttemptSuffix()}`));
+            const recArgv = recoverySuiteCommand(suiteCmd, n, recLogFile);
             if (recArgv === null) {
               // 这条 suite 命令没有已知的并发旋钮（而且结构上也写不出 SUITE-INCOMPLETE 标记）⇒ 记一个
               // **独立的**下一档 token，⛔ 不伪造「已降档」（硬规则 3b：降不了档必须与降了档可区分）。
@@ -2927,9 +2977,11 @@ export async function runMechanicalFanIn(opts: MechanicalFanInOptions): Promise<
               traceSuiteEvent("suite-recovery-unsupported", { exit: 0, wall_ms: 0, ok: false, reason: blockedNextStep, originalConcurrency });
               break;
             }
-            const recLogFile = path.join(root, ".quay", suiteLogFileName(task, runId, `recovery-${n}-${newSuiteLogAttemptSuffix()}`));
             const recT0 = Date.now();
             const rec = await spawnSuiteAndWait({ slotBase, slotLib, suiteCommand: recArgv, logFile: recLogFile, silenceMs: opts.silenceMs });
+            // 读到的是**本档自己**那份（argv 的 `--log-file` 与这里的 `recLogFile` 是同一个路径）。⛔ 空/读不出
+            // 仍然判「无结论」（硬规则 3b 的另一个方向：真正读不到绝不能被判成「读到了」）——修的是
+            // 「明明写进了一份真实日志、却被读到另一份空文件」那一半，⛔ 不是把空文件当合格。
             let recLog = "";
             try { recLog = fs.readFileSync(recLogFile, "utf8"); } catch { /* 日志读不出 ⇒ 下面判「无结论」 */ }
             const recWall = Date.now() - recT0;

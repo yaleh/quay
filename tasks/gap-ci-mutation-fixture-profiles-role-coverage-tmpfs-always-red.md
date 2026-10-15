@@ -2,7 +2,7 @@
 id: gap-ci-mutation-fixture-profiles-role-coverage-tmpfs-always-red
 title: develop CI 自 2026-10-14 起 100/100 红：profiles-role-coverage-check 的
   mutation 夹具在 tmpfs /tmp 上跑 quay init 被拒 ⇒ always-red，阻塞 v0.20.0 正式发布
-status: ready
+status: done
 labels:
   - gap
   - defect
