@@ -95,3 +95,11 @@ merge
 - `plugin/scripts/registry-bare-filename-scan.ts`
 - `plugin/test/list-script-basenames-single-source.test.mjs`
 - `tasks/gap-routine-semantic-dedup-scan-list-script-basenames-diverged-under-one-name.md`
+
+## Blocker
+
+**2026-10-15T03:50:05.795Z — worker 未落地（exited-not-landed）**
+
+- 未落地原因：step=suite: oom-killed (4) — recovery exhausted at floor concurrency 32 — no declared rung produced a complete verdict (64,48,32); needs a code/config fix, see plugin/scripts/full-suite-runner.ts
+- run_id：wk-prod-anchor
+- session_id：981a7d1a-8e60-48c8-9372-ea0ff52a8460
