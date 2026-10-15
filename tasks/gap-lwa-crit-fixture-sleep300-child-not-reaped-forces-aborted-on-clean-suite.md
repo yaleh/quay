@@ -2,7 +2,7 @@
 id: gap-lwa-crit-fixture-sleep300-child-not-reaped-forces-aborted-on-clean-suite
 title: live-web-address-fixture.mjs 的 sleep 300 夹具子进程未被回收——未 detach，既有常驻 driver
   回收机制管不到，干净完整轮也被判 aborted
-status: ready
+status: done
 labels:
   - gap
   - defect
