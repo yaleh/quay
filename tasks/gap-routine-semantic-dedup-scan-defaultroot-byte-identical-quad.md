@@ -3,7 +3,7 @@ id: gap-routine-semantic-dedup-scan-defaultroot-byte-identical-quad
 title: "semantic-dedup-scan: Three defaultRoot bodies are byte-identical
   (path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..')) and a
   fourth sibling has already migrated "
-status: ready
+status: done
 labels:
   - gap
   - routine-filed
