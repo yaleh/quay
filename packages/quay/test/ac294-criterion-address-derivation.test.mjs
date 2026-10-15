@@ -62,10 +62,14 @@ import { fileURLToPath } from "node:url";
 import YAML from "yaml";
 import {
   writeCarrier,
-  mkRoot,
   runSh,
   derive,
   installLiveWebAddressHelper,
+  // The fixture's process lifecycle lives in the shared helper too — ONE definition each, so the
+  // teardown that must be complete about the spawned process cannot drift per file (硬规则 5b).
+  spawnNotAServe,
+  killAndReap,
+  withFixture,
 } from "./helpers/live-web-address-fixture.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -133,16 +137,6 @@ function spawnServeShaped(root, { host = "127.0.0.1", port }) {
 }
 
 /**
- * A real child that `pgrep -f 'quay.ts serve'` MATCHES (the phrase is in its argv) but whose argv
- * carries no `serve` element — the shape of the acceptance runner's own `sh -c "<criterion>"`. It
- * must be reported as a candidate that derived nothing, and must never blank another candidate's
- * address.
- */
-function spawnNotAServe(root, phrase = "quay.ts serve") {
-  return spawn("/bin/sh", ["-c", `echo ${phrase} >/dev/null; sleep 300`], { cwd: root, stdio: "ignore" });
-}
-
-/**
  * A real HTTP listener on 127.0.0.1:0, IN ITS OWN PROCESS, announcing the port it got.
  *
  * ⛔ It must not live in this process: the block under test is driven through `spawnSync`, which
@@ -175,26 +169,6 @@ function listen() {
   });
 }
 
-/**
- * SIGKILL and WAIT FOR THE REAP. An un-reaped child stays in the process table as a zombie, and
- * `kill(pid, 0)` — the liveness probe both this fixture and the product's `pidAlive` use — reports a
- * zombie as ALIVE. Waiting for the `exit` event lets node reap it, so "dead" means dead here.
- */
-function killAndReap(child) {
-  return new Promise((resolve) => {
-    if (child.exitCode !== null || child.signalCode !== null) {
-      resolve();
-      return;
-    }
-    child.once("exit", () => resolve());
-    try {
-      child.kill("SIGKILL");
-    } catch {
-      resolve();
-    }
-  });
-}
-
 /** Run `script` in `root` under /bin/sh (the same shell the acceptance runner uses). */
 /** Run the shipped block and report what it derived, or why it refused. */
 /** The candidate row the block emits for one pid, or undefined when that pid is absent. */
@@ -204,26 +178,6 @@ function candidateRow(text, pid) {
     .flatMap((l) => l.replace(/^.*REPORT:/, "").split("; "))
     .map((s) => s.trim())
     .find((s) => s.startsWith(`pid=${pid} `));
-}
-
-function killQuietly(child) {
-  try {
-    child.kill("SIGKILL");
-  } catch {
-    /* already gone */
-  }
-}
-
-/** Run `body` with a fresh root and guaranteed teardown of every child/server/temp dir. */
-async function withFixture(children, servers, body) {
-  const root = mkRoot();
-  try {
-    return await body(root);
-  } finally {
-    for (const c of children) await killAndReap(c);
-    for (const s of servers) await killAndReap(s);
-    fs.rmSync(root, { recursive: true, force: true });
-  }
 }
 
 // ── ① explicit `--port N` (N >= 1) on the process's own argv ────────────────────────────────────
