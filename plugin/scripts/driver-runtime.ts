@@ -1820,21 +1820,51 @@ export interface SharedHostScopeReading {
  *  用来把「自己」从计数里排除：本进程若已在某个 `quay-anchor-*` 里（自刷新 / takeover 路径），
  *  它自己**不是**兄弟；`N+1` 里的那个 `+1` 就是它。 */
 export function selfScopeUnitName(procSelfCgroup?: string | null): string | null {
-  let text: string | null;
-  if (procSelfCgroup === undefined) {
-    try {
-      text = fs.readFileSync("/proc/self/cgroup", "utf8");
-    } catch {
-      return null;
-    }
-  } else {
-    text = procSelfCgroup;
-  }
+  const text = procSelfCgroup === undefined ? readProcSelfCgroupText() : procSelfCgroup;
   if (text === null) return null;
   const m = /(?:^|\n)0::(\/\S*)/.exec(text);
   if (!m) return null;
   const last = m[1].split("/").filter(Boolean).pop() ?? null;
   return last !== null && last.endsWith(".scope") ? last : null;
+}
+
+/** `/proc/self/cgroup` 里自己**之上**的那些 `.scope` 祖先，写成相对 cgroup 根的路径（最深的在最后）。
+ *
+ *  ── 为什么必须有它（实测，2026-10-16）─────────────────────────────────────────────────────────
+ *  树遍历把任何 `.scope` 目录当叶子（它的子树是委派子树，不是单元）——**这在宿主上成立，在容器里不成立**。
+ *  本仓库的 CI runner（`gh-runner-quay`，`--cgroupns=host` + 绑挂宿主 `/sys/fs/cgroup`）里，**整个
+ *  systemd 树就嵌在一个 `.scope` 下面**：
+ *      /sys/fs/cgroup/system.slice/docker-<id>.scope/user.slice/user-0.slice/user@0.service/app.slice/<unit>.scope
+ *  于是遍历走到 depth 2 的 `docker-<id>.scope` 就 `continue`，**连本进程自己刚建的兄弟 scope 都看不见**
+ *  （CI run 38768929572：4/4 探针 exit 0、systemd 明确回报 `Running as unit`，30 s 内一条都没进枚举；
+ *  同一次枚举里别的项目（宿主层）的 18 条全在 —— 因为它们在 `user.slice/` 下、不在那个 `.scope` 里）。
+ *  ⇒ **自己的祖先不是「别人的委派子树」**：`/proc/self/cgroup` 已经点名了那条链，链上的单元就是自己的
+ *  同类（同一个内核、同一份内存）。⛔ 只下探**自己的**祖先：别的容器（`docker-<other>.scope`）仍是叶子。
+ *  ⛔ 祖先本身**不计数**（它是自己那条链，不是 `N+1` 里的一个兄弟）。
+ *
+ *  读不到 / 无 `0::` 行 / 不在 scope 内 ⇒ **空数组**（退回原来的「`.scope` 即叶子」语义，⛔ 不猜）。 */
+export function selfCgroupScopeAncestors(procSelfCgroup?: string | null): string[] {
+  const text = procSelfCgroup === undefined ? readProcSelfCgroupText() : procSelfCgroup;
+  if (text === null) return [];
+  const m = /(?:^|\n)0::(\/\S*)/.exec(text);
+  if (!m) return [];
+  const segs = m[1].split("/").filter(Boolean);
+  const out: string[] = [];
+  const acc: string[] = [];
+  for (let i = 0; i < segs.length - 1; i++) {
+    // 末段是**自己**，不算祖先。
+    acc.push(segs[i]);
+    if (segs[i].endsWith(".scope")) out.push(acc.join("/"));
+  }
+  return out;
+}
+
+function readProcSelfCgroupText(): string | null {
+  try {
+    return fs.readFileSync("/proc/self/cgroup", "utf8");
+  } catch {
+    return null;
+  }
 }
 
 /** 只读枚举宿主上活着的同类 scope（`SHARED_HOST_SCOPE_PREFIXES`），**跨用户**——共享宿主上别人的
@@ -1845,7 +1875,9 @@ export function selfScopeUnitName(procSelfCgroup?: string | null): string | null
  *  **具名原因**，调用方回退到原来的固定 0.25（⛔ 不拒绝运行、⛔ 不要求任何外部配置存在）。
  *  子树读不到 ⇒ 仍给 `count`，但 `reason` 说明它是**下界**：少数的方向是「ceiling 更松」，⛔ 永远不会
  *  因为读不到而**多收紧**。
- *  ⛔ 一个 scope 目录内的子 cgroup 是它的委派子树（不是单元），故不再向下走。 */
+ *  ⛔ 一个 scope 目录内的子 cgroup 是它的委派子树（不是单元），故不再向下走——**唯一例外是
+ *  `selfCgroupScopeAncestors` 命中的那条链**（自己在容器里时整棵 systemd 树都嵌在祖先 `.scope` 下，
+ *  见那个函数的 why；不加这一条时探针 scope 结构上永远进不了枚举）。 */
 export function listSharedHostScopes(
   opts: {
     /** 测试缝：cgroup 根。缺省 `/sys/fs/cgroup`。 */
@@ -1864,12 +1896,15 @@ export function listSharedHostScopes(
   const prefixes = opts.prefixes ?? SHARED_HOST_SCOPE_PREFIXES;
   const maxDepth = opts.maxDepth ?? SHARED_HOST_SCOPE_MAX_DEPTH;
   const ownUnit = opts.ownUnit !== undefined ? opts.ownUnit : selfScopeUnitName(opts.procSelfCgroup);
+  // 自己那条链上的 `.scope` 祖先是**唯一**要下探的 scope 目录（见上面注释 / `selfCgroupScopeAncestors`）。
+  const ownAncestors = new Set(selfCgroupScopeAncestors(opts.procSelfCgroup));
 
   const units: string[] = [];
   const unreadableDirs: string[] = [];
   let rootError: string | null = null;
 
-  const walk = (dir: string, depth: number): void => {
+  /** `rel` = 从 `root` 起算的相对路径（祖先判定用它，⛔ 不用绝对路径——`cgroupRoot` 是可注入的测试缝）。 */
+  const walk = (dir: string, depth: number, rel: string): void => {
     let entries: fs.Dirent[];
     try {
       entries = fs.readdirSync(dir, { withFileTypes: true });
@@ -1882,15 +1917,22 @@ export function listSharedHostScopes(
     for (const ent of entries) {
       if (!ent.isDirectory()) continue;
       const name = ent.name;
+      const childRel = rel === "" ? name : `${rel}/${name}`;
       if (name.endsWith(".scope")) {
+        if (ownAncestors.has(childRel)) {
+          // 自己的祖先：不是「别人的委派子树」，继续下行；⛔ 也不把它算成一个兄弟——它是自己那条链。
+          if (depth + 1 > maxDepth) continue;
+          walk(path.join(dir, name), depth + 1, childRel);
+          continue;
+        }
         if (name !== ownUnit && prefixes.some((p) => name.startsWith(p))) units.push(name);
         continue;
       }
       if (depth + 1 > maxDepth) continue;
-      walk(path.join(dir, name), depth + 1);
+      walk(path.join(dir, name), depth + 1, childRel);
     }
   };
-  walk(root, 0);
+  walk(root, 0, "");
 
   // ⛔ 根都读不到 ⇒ **未评估**（一个独立取值），⛔ 不是 `count: 0`。
   if (rootError !== null) {
