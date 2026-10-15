@@ -1,7 +1,7 @@
 ---
 id: gap-suite-heavy-files-and-phase-concurrency-under-16g-pressure-baseline-comparison
 title: 16GiB 压力基线下：重型测试文件优化 + 内存感知调度 + 32/48/64 实际并发同 commit 完整轮对比（不足才比 20/24）
-status: needs-human
+status: todo
 labels:
   - gap
 parent: null
