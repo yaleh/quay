@@ -71,3 +71,10 @@ depends_on:
 - plugin/test/ac272-rolling-channel-version-selfproof.test.mjs
 - packages/quay/test/gap-dashboard-goal-card-ac-denominator-includes-superseded-retired.test.mjs
 - plugin/test/workflow-runner-self-hosted-check.test.mjs
+
+## Blocker
+
+**2026-10-15T19:48:18.576Z — worker 未落地（exited-not-landed）**
+
+- 未落地原因：AC 未全勾（checked 0/5，剩余未勾 5）——续做只需验证并勾选 AC
+- run_id：wk-prod-anchor
