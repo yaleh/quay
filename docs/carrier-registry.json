@@ -410,6 +410,18 @@
       "readers": "unaudited"
     },
     {
+      "name": "resource-anomaly-findings.jsonl",
+      "kind": "jsonl-log",
+      "owner": "plugin/scripts/resource-anomaly-detector.ts",
+      "readers": "unaudited"
+    },
+    {
+      "name": "resource-diagnostic-model-budget.jsonl",
+      "kind": "jsonl-log",
+      "owner": "plugin/scripts/resource-anomaly-detector.ts",
+      "readers": "unaudited"
+    },
+    {
       "name": "routine-findings.jsonl",
       "kind": "jsonl-log",
       "owner": "unowned-yet",
