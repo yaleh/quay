@@ -320,8 +320,9 @@ export {
 // start` 的启动冒烟与 ② 本文件的快速死亡分类器**必须共用同一份清单**（两份 = 漂移：签名加在一处、
 // 另一处静默漏判）。方向只能这一个——worker-driver 已从 driver-runtime import，反向会造出新的
 // value SCC（import-graph-check 是 shrink-only 棘轮，基线 valueSccs=0 ⇒ 直接红）。
-import { matchEnvironmentFatalSignature } from "./driver-runtime.ts";
+import { matchEnvironmentFatalSignature, dispatchProvenance, type DispatchProvenance, type ArgvSource } from "./driver-runtime.ts";
 export { ENVIRONMENT_FATAL_SIGNATURES, type EnvFatalSignature } from "./driver-runtime.ts";
+export { dispatchProvenance, readTranscriptRealModel, type DispatchProvenance, type ArgvSource } from "./driver-runtime.ts";
 // 可恢复长实验的簿记（manifest / checkpoint / 身份指纹 / resume 计划）住在 experiment-manifest.ts；
 // 本文件只 import 它的纯函数来把「哪些 stage 已付过钱」写进派发 prompt（见 experimentResumeClause）。
 // ⛔ 反向 import 会造新的 value SCC（import-graph-check shrink-only 棘轮，基线 valueSccs=0 ⇒ 直接红）。
@@ -2374,16 +2375,32 @@ export function buildWorkerPrompt(task: string, root: string): string {
  *  否则 prefix 非空 ⇒ 前缀 + prompt（--worker-cmd，wrapper/测试前缀可用，prompt 作为末参数追加）；
  *  否则 ⇒ launchArgv("task-worker", prompt)（配置承载的缺省，经 policy 解析 kind → profile）。 */
 export function workerArgvForTask(task: string, root: string, opts: WorkerCmdOptions = { prefix: null, exact: null }): string[] {
-  const prompt = workerPromptForTask(task, root);
+  return workerArgvForTaskWithSource(task, root, opts).argv;
+}
+
+/** 同 `workerArgvForTask`，但同时给出 **argv 由哪一层产生**（AC4 的「CLI 参数层」覆盖来源）。
+ *  ⛔ 覆盖分支只有这一份实现（`workerArgvForTask` 转调本函数；异步版 `workerArgvForTaskWithSourceAsync`
+ *  与之逐字同形，只差 prompt 的取法）——两处各写一遍的话，「exact 覆盖却仍被标成 launchArgv」
+ *  这种 provenance 撒谎不会有任何测试取假。 */
+export function workerArgvForTaskWithSource(
+  task: string,
+  root: string,
+  opts: WorkerCmdOptions = { prefix: null, exact: null },
+): { argv: string[]; source: ArgvSource } {
+  return workerArgvFromPrompt(workerPromptForTask(task, root), root, opts);
+}
+
+/** 覆盖语义的唯一实现（同步/异步两条入口共用；⛔ 不各写一份 exact>prefix>launchArgv 的分支）。 */
+function workerArgvFromPrompt(prompt: string, root: string, opts: WorkerCmdOptions): { argv: string[]; source: ArgvSource } {
   if (opts.exact != null) {
     const a = splitArgs(opts.exact);
-    return a.length > 0 ? a : launchArgv("task-worker", prompt, root);
+    if (a.length > 0) return { argv: a, source: "cli-exact" };
   }
   if (opts.prefix != null) {
     const p = splitArgs(opts.prefix);
-    return p.length > 0 ? [...p, prompt] : launchArgv("task-worker", prompt, root);
+    if (p.length > 0) return { argv: [...p, prompt], source: "cli-prefix" };
   }
-  return launchArgv("task-worker", prompt, root);
+  return { argv: launchArgv("task-worker", prompt, root), source: "launchArgv" };
 }
 
 /** 缺省 worker 命令：launchArgv("task-worker", <full-chain prompt>)（argv 形，child 即 worker，超时
@@ -4140,16 +4157,18 @@ export async function workerPromptForTaskAsync(task: string, root: string): Prom
 /** workerArgvForTask 的异步版（常驻循环体用）：覆盖语义同同步版（exact > prefix > 缺省 launchArgv），
  *  prompt 经 workerPromptForTaskAsync 取（⛔ 同步版走 continueStateForTask 的 spawnSync git）。 */
 export async function workerArgvForTaskAsync(task: string, root: string, opts: WorkerCmdOptions = { prefix: null, exact: null }): Promise<string[]> {
-  const prompt = await workerPromptForTaskAsync(task, root);
-  if (opts.exact != null) {
-    const a = splitArgs(opts.exact);
-    return a.length > 0 ? a : launchArgv("task-worker", prompt, root);
-  }
-  if (opts.prefix != null) {
-    const p = splitArgs(opts.prefix);
-    return p.length > 0 ? [...p, prompt] : launchArgv("task-worker", prompt, root);
-  }
-  return launchArgv("task-worker", prompt, root);
+  return (await workerArgvForTaskWithSourceAsync(task, root, opts)).argv;
+}
+
+/** 同 `workerArgvForTaskAsync`，但同时给出 **argv 由哪一层产生**（AC4 的「CLI 参数层」覆盖来源）。
+ *  ⛔ 覆盖分支只有这一份实现（上面的 `workerArgvForTaskAsync` 转调本函数）——两处各写一遍的话，
+ *  「exact 覆盖却仍被标成 launchArgv」这种 provenance 撒谎就不会被任何测试取假。 */
+export async function workerArgvForTaskWithSourceAsync(
+  task: string,
+  root: string,
+  opts: WorkerCmdOptions = { prefix: null, exact: null },
+): Promise<{ argv: string[]; source: ArgvSource }> {
+  return workerArgvFromPrompt(await workerPromptForTaskAsync(task, root), root, opts);
 }
 
 /** 常见信号的 shell 惯例退出码（128+signum）；未知信号给 0（被杀本身已是非零）。 */
@@ -5483,6 +5502,8 @@ function runOneWorker({
   injectSessionId = true,
   judgeQuickDeath,
   detachSignal,
+  role = "task-worker",
+  argvSource = "launchArgv",
 }: {
   taskId: string;
   selectorReason: string;
@@ -5496,6 +5517,10 @@ function runOneWorker({
   pidFile?: string;
   sessionId?: string;
   injectSessionId?: boolean;
+  /** 本次 spawn 的语义 kind（AC4 provenance 的 `role`）。缺省 task-worker（既有调用点不变）。 */
+  role?: string;
+  /** workerArgv 的产生层（配置层 vs CLI 参数层；AC4 provenance 的 `argv_source`）。 */
+  argvSource?: ArgvSource;
   /** 快速死亡判定回调（常驻环注入；批量路径不注入）。见 QuickDeathJudge 的头注释——判定必须在
    *  载体落盘【之前】发生，否则跨任务关联命中的那条记录会在载体里写成 ordinary。 */
   judgeQuickDeath?: QuickDeathJudge;
@@ -5598,6 +5623,18 @@ function runOneWorker({
         // 快速死亡成因的第二个判定面 + 生产载体字段（gap-worker-quick-death-environment-fatal-halts-driver）。
         stderrTail,
       });
+      // 派发配置 provenance（AC4）：声明值 / 覆盖来源 / **实际** argv / transcript 读出的真实 model。
+      // ⚠️ 在 `finish()` 时算，⛔ 不在 spawn 前——`model_real` 只有 worker 退出、transcript 落盘后才读得到。
+      // 解析失败（profiles.yml 缺失/非法）⇒ 记 `provenance_error`，⛔ 不让一条取证字段把收尾路径炸掉
+      // （硬规则 3b：读不懂要与「读到了」可分——空着 vs 报错是两种形态）。
+      const provenance = ((): { provenance?: DispatchProvenance; provenance_error?: string } => {
+        try {
+          return { provenance: dispatchProvenance(role, rootDir, argv, { argvSource, sessionId }) };
+        } catch (e) {
+          return { provenance_error: e instanceof Error ? e.message : String(e) };
+        }
+      })();
+      Object.assign(outcome, provenance);
       // 快速死亡【判定】先于载体落盘：判定可能依赖【跨任务】状态（同一签名窗口内 ≥2 个不同任务 ⇒
       // environment-fatal），逐记录的无状态重算看不到它。就地用判定结果校准载体的 quick_death_cause，
       // ⛔ 否则会出现「driver 因这条记录而停」而「载体说它是 ordinary」的错报。
@@ -6295,7 +6332,7 @@ export async function runResidentLoop(opts: ResidentOptions): Promise<number> {
     const runIdForTask = runId ?? `${runPrefix}-${sel.task}`;
     // 异步版（gap-worker-driver-async-selector-readypool AC1）：worker argv 经 workerArgvForTaskAsync 取——
     // 同步 workerArgvForTask 走 continueStateForTask 的 spawnSync git 会冻住协调地板。
-    const workerArgv = await workerArgvForTaskAsync(sel.task, rootDir, workerCmdOpts);
+    const { argv: workerArgv, source: argvSource } = await workerArgvForTaskWithSourceAsync(sel.task, rootDir, workerCmdOpts);
     const rw = {} as RunningWorker;
     rw.task = sel.task;
     rw.done = false;
@@ -6318,6 +6355,7 @@ export async function runResidentLoop(opts: ResidentOptions): Promise<number> {
       json,
       pidFile,
       injectSessionId: workerCmdOpts.exact == null,
+      argvSource,
       // 判定注入：写载体之前跑（见 QuickDeathJudge），onWorkerFinished 消费结论、⛔ 不再重算。
       judgeQuickDeath: judgeQuickDeathFor(sel.task),
       detachSignal,
@@ -7020,11 +7058,12 @@ export async function main(argv: string[]): Promise<number> {
       return;
     }
     inFlight += 1;
-    const argv = workerArgvForTask(taskId, rootDir, workerCmdOpts);
+    const { argv, source: argvSource } = workerArgvForTaskWithSource(taskId, rootDir, workerCmdOpts);
     const r = await runOneWorker({
       taskId, selectorReason, runId: runIdForTask, workerArgv: argv, rootDir, outcomeFile,
       timeoutMs, inFlightCount: inFlight, json, pidFile,
       injectSessionId: workerCmdOpts.exact == null,
+      argvSource,
     });
     inFlight -= 1;
     results[idx] = r;

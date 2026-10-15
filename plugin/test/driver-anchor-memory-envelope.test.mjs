@@ -353,6 +353,48 @@ test("shared-host — an absurd sibling count on a tiny host cannot push the cei
   }
 });
 
+// ── the bounded wait's EXPLICIT limits (⛔ 不是散在循环里的字面量) ────────────────────────────────
+// 依据（CI run 38700638546，2026-10-15，自托管 tokyo-alpha）：旧值 **15 000 ms 不够** ——
+//   `quay-anchor-sibling-probe-1792050245495-2003237-0.scope must appear in the real enumeration`
+// 在 **15 056.6 ms** 判红，而**同一次枚举里别的项目的 scope 全都在**（cantus / claudecodeui /
+// litellm / quay-fleet / terrain-pack / muc-quay-v9 …，还含同一次套件里并发跑出来的
+// `quay-anchor-driver-cli-ac1-0VdOc4-1792050260201.scope`）。⇒ 红的不是「枚举坏了」，是「本探针单元的
+// 注册还没落到那棵树上」。本机实测：空载 0.12 s，并发争用 2.5-3 s。30 000 ms = 2 × 那个失败点，
+// **仍然有界**（⛔ 不是「等无限久」，也⛔ 不是「取消等待/削弱断言」）。
+const SIBLING_PROBE_APPEAR_TIMEOUT_MS = 30_000;
+const SIBLING_PROBE_POLL_INTERVAL_MS = 200;
+const SIBLING_PROBE_MEMBER_SECONDS = 30;
+
+/** 有界等待超时时**唯一的**报错出口。一次打全：上限值、最后一次枚举快照、期望单元名、缺失单元名，
+ *  以及**每个探针进程自己的下场**（pid / 退出码 / 捕获到的 stderr）。
+ *  ⛔ 不许只说「没出现」——那正是这次 CI 上无法定位根因的原因：原来的 `stdio:"ignore"` 把
+ *  `systemd-run` 自己的报错整个丢掉了，只剩下一个 15 s 后的断言。 */
+function siblingProbeTimeoutReport({ units, missing, reading, probes, elapsedMs }) {
+  const lines = [
+    `${missing.length}/${units.length} probe scope(s) never appeared in the live cgroup enumeration within ${SIBLING_PROBE_APPEAR_TIMEOUT_MS} ms (the bounded wait's explicit limit; elapsed ${elapsedMs} ms).`,
+    `  expected units : ${JSON.stringify(units)}`,
+    `  missing units  : ${JSON.stringify(missing)}`,
+    `  last enumeration (count=${reading.count}): ${JSON.stringify(reading.units)}`,
+    `  enumeration reason: ${JSON.stringify(reading.reason)}`,
+  ];
+  for (const p of probes) {
+    let output = "";
+    try {
+      output = fs.readFileSync(p.outputPath, "utf8").trim();
+    } catch (e) {
+      output = `<unreadable: ${e instanceof Error ? e.message : String(e)}>`;
+    }
+    const fate =
+      p.spawnError !== null
+        ? `spawn-error=${p.spawnError}`
+        : p.exit === null
+          ? "still running"
+          : `exit code=${p.exit.code} signal=${p.exit.signal}`;
+    lines.push(`  probe ${p.unit}: pid=${p.pid} ${fate} output=${JSON.stringify(output)}`);
+  }
+  return lines.join("\n");
+}
+
 test(
   "REAL cgroup — live sibling scopes are really COUNTED, and the derived ceiling really tightens",
   { skip: anchorSystemdRunAvailable() ? false : "not-evaluated: systemd-run --user --scope unavailable on this host" },
@@ -362,39 +404,107 @@ test(
     // four genuinely live same-kind scopes are started and then read back off the kernel's tree.
     const tag = `${Date.now()}-${process.pid}`;
     const units = [0, 1, 2, 3].map((i) => `quay-anchor-sibling-probe-${tag}-${i}.scope`);
+    // 探针成员走**绝对路径**：成员不该依赖用户管理器那条 PATH（容器化 runner 上「`sleep` 在不在
+    // 那条 PATH 里」是一个与被测量无关的变量）。
+    const sleepBin =
+      ["/bin/sleep", "/usr/bin/sleep"].find((p) => {
+        try {
+          fs.accessSync(p, fs.constants.X_OK);
+          return true;
+        } catch {
+          return false;
+        }
+      }) ?? "sleep";
+    // 起探针**之前**先取一次枚举：此刻带前缀的单元**一个都不是我们建的** ⇒ 它是「宿主上确实还有别的
+    // 项目的同类 scope」这一事实的**独立读数**（下面 AC4 的那条判据用它做 not-evaluated 的守卫）。
+    const preExisting = listSharedHostScopes();
+    const probes = [];
     const started = [];
+    const diagDir = makeTmpDir("anchor-sibling-probe-diag-");
+    const probeStartMs = Date.now();
     try {
-      for (const unit of units) {
-        // `sleep 30` is the scope's member: it exits on its own, so a crashed test cannot leave the
-        // scope behind (the fixture-leak mode this task's AC1 is about).
-        const child = spawn(
-          "systemd-run",
-          ["--user", "--scope", "--quiet", "--collect", `--unit=${unit}`, "-p", "MemoryMax=64M", "-p", "MemorySwapMax=0", "sleep", "30"],
-          { detached: true, stdio: "ignore" },
-        );
+      for (const [i, unit] of units.entries()) {
+        // 成员结束时自己退出，故崩掉的用例不会把 scope 留在宿主上（`--collect` 再兜一层）。
+        const outputPath = path.join(diagDir, `${i}.log`);
+        const fd = fs.openSync(outputPath, "w");
+        let child;
+        try {
+          child = spawn(
+            "systemd-run",
+            ["--user", "--scope", "--collect", `--unit=${unit}`, "-p", "MemoryMax=64M", "-p", "MemorySwapMax=0", sleepBin, String(SIBLING_PROBE_MEMBER_SECONDS)],
+            { detached: true, stdio: ["ignore", fd, fd] },
+          );
+        } finally {
+          fs.closeSync(fd); // 子进程已继承这份 fd；父进程不再需要它（⛔ 不靠它把事件循环吊住）
+        }
+        const probe = { unit, pid: child.pid ?? null, outputPath, exit: null, spawnError: null };
+        // ⛔ 不装这两个 listener 的话，一次 spawn/exec 失败会作为**未捕获异常**炸掉整个文件，
+        //    而那正是「红得看不出原因」的另一半成因。
+        child.on("error", (e) => {
+          probe.spawnError = e instanceof Error ? e.message : String(e);
+        });
+        child.on("exit", (code, signal) => {
+          probe.exit = { code, signal };
+        });
         child.unref();
+        probes.push(probe);
         started.push(unit);
       }
       // Bounded poll: the scopes appear in the cgroup tree when their units start (⛔ not "assume started").
-      const deadline = Date.now() + 15_000;
+      const deadline = Date.now() + SIBLING_PROBE_APPEAR_TIMEOUT_MS;
       let reading = listSharedHostScopes();
       for (;;) {
         const seen = new Set(reading.units);
         if (units.every((u) => seen.has(u))) break;
+        // 所有探针都已死、单元却没齐 ⇒ 再等也不会出现：**立刻**带具名原因失败，⛔ 不把上界空等满。
+        if (probes.every((p) => p.exit !== null || p.spawnError !== null)) break;
         if (Date.now() >= deadline) break;
-        await new Promise((r) => setTimeout(r, 200));
+        await new Promise((r) => setTimeout(r, SIBLING_PROBE_POLL_INTERVAL_MS));
         reading = listSharedHostScopes();
       }
       // ① the walk really sees live scopes off the real kernel tree — by NAME, not merely "a count moved".
       const seen = new Set(reading.units);
-      for (const u of units) assert.ok(seen.has(u), `${u} must appear in the real enumeration: ${JSON.stringify(reading.units)}`);
+      const missing = units.filter((u) => !seen.has(u));
+      if (missing.length > 0) {
+        assert.fail(siblingProbeTimeoutReport({ units, missing, reading, probes, elapsedMs: Date.now() - probeStartMs }));
+      }
       assert.ok(reading.count >= units.length, `count ${reading.count} must be at least the ${units.length} scopes just started`);
       assert.equal(reading.units.includes(selfScopeUnitName() ?? "\u0000"), false, "our own scope must not be counted");
 
+      // ①b the SAME reading is a SHARED-HOST read, ⛔ not "the units this test happens to remember": on a
+      //     host that already carried another project's same-kind scope, that scope must show up in it too.
+      //     ⛔ 这条**不是**「枚举非空即可」的削弱版——它要的恰恰是同居 scope 被真数到。宿主上确实没有
+      //     别的同类 scope 时（干净 runner），它是一个**独立取值** `not-evaluated`（硬规则 3b），
+      //     ⛔ 不与「查过且成立」同形。
+      const foreign = reading.units.filter((u) => !units.includes(u));
+      if (preExisting.units.length > 0) {
+        assert.ok(
+          foreign.length > 0,
+          `the enumeration must be a shared-host read: ${preExisting.units.length} same-kind scope(s) from other projects were live before this test started (${JSON.stringify(preExisting.units)}), so at least one must still appear in the post-probe reading (${JSON.stringify(reading.units)})`,
+        );
+      }
+
       // ② the PRODUCTION path uses that measured count: `resolveAnchorEnvelope` with no injected seam
       //    must resolve exactly to the formula evaluated at the count it reports back.
+      //    ⚠️ 「它报回的条数 == 我刚才那次枚举的条数」**在共享宿主上因果不成立**：两次枚举是两个**时刻**
+      //    （其间别的项目的 anchor 随时起停），把两个时刻钉死相等是在测「这短短几毫秒里宿主没变」，
+      //    不是在测被测对象。本机实测可复现这条红（人造 churn）。⇒ 改成**夹逼**：报回的条数必须是
+      //    **这次调用前后各取一次**的活读数所夹住的值——两侧都有限，仍然可证伪。
+      const beforeCount = listSharedHostScopes().count;
       const res = resolveAnchorEnvelope({ root: "/w/real-siblings", systemdRun: true, nowMs: 1 });
-      assert.equal(res.siblingScopeCount, reading.count, "the returned provenance must be the count that was actually used");
+      const afterCount = listSharedHostScopes().count;
+      assert.ok(
+        res.siblingScopeCount >= units.length,
+        `the returned provenance must be a LIVE count, ⛔ never below the ${units.length} probe scopes this test just started (got ${res.siblingScopeCount})`,
+      );
+      assert.ok(
+        beforeCount !== null && afterCount !== null,
+        `both bracketing enumerations must be evaluated, got before=${beforeCount} after=${afterCount}`,
+      );
+      assert.ok(
+        res.siblingScopeCount >= Math.min(beforeCount, afterCount) && res.siblingScopeCount <= Math.max(beforeCount, afterCount),
+        `the returned provenance (${res.siblingScopeCount}) must be a reading the host actually had around the call — bracketed by ${beforeCount} (before) and ${afterCount} (after)`,
+      );
       assert.equal(res.memoryMax, String(sharedHostCeilingBytes(os.totalmem(), res.siblingScopeCount)));
       assert.equal(res.source, "host-derived");
       assert.equal(res.siblingScopeReason, null);

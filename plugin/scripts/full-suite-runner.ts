@@ -501,6 +501,7 @@ import type { PhaseDiffRecord, ScopeConsumedLoadRead } from "./suite-accounting.
 // OOMPolicy=continue ⇒ probe unavailable ⇒ the suite runs un-enveloped AND the OOM test reports an
 // explicit not-evaluated skip, never a silent pass).
 import {
+  defaultScopeMemoryMax,
   laneScaledScopeMemoryMax,
   pageAlignScopeBytes,
   SCOPE_ENVELOPE_HOST_FRACTION,
@@ -1257,24 +1258,106 @@ export interface SuiteMemoryMaxDecision {
   hostFraction: number;
 }
 
+/** The rule a suite host guardrail came from — an INDEPENDENT value (硬规则 3b): 「运维显式声明的上界」与
+ *  「缺省值被共享宿主多 scope 分摊收紧」是两件不同的事，⛔ 不得共用一个取值（否则「声明被尊重」与
+ *  「声明被静默吞掉」在证据里同形）。 */
+export type SuiteHostGuardRule = "project-blind" | "shared-host-split";
+
+/** The suite's host-relative guardrail + WHICH rule produced it + a NAMED rationale. */
+export interface SuiteHostGuard {
+  /** The guardrail in bytes (page-aligned by the producing helper). */
+  hostGuardBytes: number;
+  rule: SuiteHostGuardRule;
+  /** A named rationale for the choice (硬规则 3b: ⛔ a bare byte count a reader must reverse-engineer
+   *  the provenance of is not evidence). */
+  reason: string;
+  /** The live same-kind scope count the split used; `null` = **not evaluated** (缺值 ≠ 0). */
+  siblingScopeCount: number | null;
+}
+
+/** Pick the suite's host-relative guardrail BY THE PROVENANCE OF THE DECLARED CEILING (人 2026-10-15 裁定).
+ *
+ *  ── 被修的缺陷 ─────────────────────────────────────────────────────────────────────────────────
+ *  `sharedHostCeilingBytes` 的**共享宿主公平分摊**（`min(0.25 × host, max(host/(N+1), 26.0 GiB))`）与
+ *  声明值是**两条独立的规则**，而原代码把分摊值无条件当作声明的上界。本机（247.0 GiB 有效总量、17 个
+ *  同类 scope）分摊值恰是 **26.00 GiB**，于是运维在 `.quay/config.yml` `suite: memory_max:` 或
+ *  `QUAY_SUITE_MEMORY_MAX` 里写下的任何大于 26 GiB 的值都被**静默压回 26 GiB**（`bound: host-guard`）
+ *  ——人写下的一行声明，被一条防「每个 scope 各自按 0.25 叠加」的规则吞掉了。
+ *
+ *  ── 分摊规则本来要防什么（⛔ 它没有被取消，只是换了适用面）───────────────────────────────────────
+ *  分摊要防的是「**项目盲的默认值**在每个项目上各自按 0.25 套用 ⇒ N 个 scope 之和 = N × 0.25 × host」。
+ *  那个病只在**没人做过决定**时发作：`SUITE_MEMORY_MAX_DEFAULT` 是随仓库走的常量，每个 checkout 都一样。
+ *  一旦有人显式声明，值就不再是「项目盲」的了 ⇒ 分摊规则的适用前提消失。
+ *  ⇒ 显式声明（`declared.source === "env"`：config `suite: memory_max:` 或 `QUAY_SUITE_MEMORY_MAX`）时，
+ *  上界退回**项目盲值** `defaultScopeMemoryMax(total, SCOPE_ENVELOPE_HOST_FRACTION)` = 0.25 × 有效总量
+ *  （本机 66 295 676 928 B ≈ 61.74 GiB）；只有**缺省值**（`source === "default"`）才继续走多 scope 分摊。
+ *
+ *  ⛔ 三样东西一个字都不改（人 2026-10-15 裁定）：`sharedHostCeilingBytes` 本身、0.25 比例、缺省
+ *  `16G`。声明值超过 0.25 × 有效总量的，**仍**被压住（`bound: "host-guard"`，带具名原因）——只是压它的
+ *  上界从「分摊值」换成了「项目盲值」，而这条上界仍然是**宿主相对**的、仍随宿主大小缩放（硬规则 4 推论二：
+ *  ⛔ 不是写死的字面值）。
+ *
+ *  ⛔ 为什么是一个函数而不是两个调用点各写一次三元表达式（硬规则 5b）：两处（module-load 模板 +
+ *  per-run 解析）必须有同一条规则，复制一次就多一处可以单独漂移；且纯函数可注入 ⇒ 本机读数（247 GiB /
+ *  N=17）能在测试里**确定性**驱动，不必依赖跑测试的宿主。 */
+export function suiteHostGuard(opts: {
+  effectiveTotalMemBytes: number;
+  declared: DeclaredSuiteMemoryMax;
+  siblingScopeCount: number | null;
+  hostFraction?: number;
+}): SuiteHostGuard {
+  const hostFraction = opts.hostFraction ?? SCOPE_ENVELOPE_HOST_FRACTION;
+  const projectBlindBytes = Number(defaultScopeMemoryMax(opts.effectiveTotalMemBytes, hostFraction));
+  if (opts.declared.source !== "default") {
+    return {
+      hostGuardBytes: projectBlindBytes,
+      rule: "project-blind",
+      reason:
+        `the ceiling was DECLARED (${JSON.stringify(opts.declared.value)} via ${opts.declared.source}) — the ` +
+        `shared-host multi-scope split may not lower an operator's explicit declaration; the guardrail is the ` +
+        `project-blind ${hostFraction} × the effective host total`,
+      siblingScopeCount: opts.siblingScopeCount,
+    };
+  }
+  return {
+    hostGuardBytes: sharedHostCeilingBytes(opts.effectiveTotalMemBytes, opts.siblingScopeCount, hostFraction),
+    rule: "shared-host-split",
+    reason:
+      `the ceiling is the DEFAULT (${JSON.stringify(opts.declared.value)}) — a project-blind default would be ` +
+      `applied by every same-kind scope at once, so the shared-host split bounds it ` +
+      `(${opts.siblingScopeCount === null ? "sibling count NOT evaluated" : `${opts.siblingScopeCount} sibling scope(s)`})`,
+    siblingScopeCount: opts.siblingScopeCount,
+  };
+}
+
 export function suiteMemoryMax(opts: {
   effectiveTotalMemBytes: number;
   declared: DeclaredSuiteMemoryMax;
   /** The caller's own host-relative guard (already page-aligned), e.g. the shared-host tightening.
    *  ⛔ Absent ⇒ `floor(effective × 0.25)` from the shared pure function. */
   hostGuardBytes?: number;
+  /** The guardrail SELECTED by provenance (`suiteHostGuard`). ⛔ `hostGuardBytes` wins when both are
+   *  supplied (an explicit byte count is the sharper statement); when only this is supplied its bytes
+   *  are the guardrail AND its rule is named in the `host-guard` reason, so the evidence says WHICH
+   *  rule bound the declared value instead of leaving it to be reverse-engineered from the number. */
+  hostGuard?: SuiteHostGuard;
   hostFraction?: number;
 }): SuiteMemoryMaxDecision {
   const hostFraction = opts.hostFraction ?? SCOPE_ENVELOPE_HOST_FRACTION;
   const hostGuardBytes =
-    opts.hostGuardBytes ?? pageAlignScopeBytes(Math.floor(Math.max(0, opts.effectiveTotalMemBytes) * hostFraction));
+    opts.hostGuardBytes ??
+    opts.hostGuard?.hostGuardBytes ??
+    pageAlignScopeBytes(Math.floor(Math.max(0, opts.effectiveTotalMemBytes) * hostFraction));
+  // ⛔ Byte-identical for every caller that passes a bare `hostGuardBytes` (all pre-existing test/call
+  // sites): the provenance clause appears ONLY when a caller selected the guardrail via `suiteHostGuard`.
+  const guardNote = opts.hostGuard === undefined ? "" : ` — guard rule: ${opts.hostGuard.rule} (${opts.hostGuard.reason})`;
   const declaredBytes = parseSystemdBytesToBytes(opts.declared.value);
   const base = { declared: opts.declared, hostGuardBytes, hostFraction };
   if (declaredBytes === null || declaredBytes <= 0) {
     return {
       memoryMax: String(hostGuardBytes),
       bound: "host-guard",
-      reason: `the declared ceiling ${JSON.stringify(opts.declared.value)} is not a parseable size — the host-relative guardrail alone applies`,
+      reason: `the declared ceiling ${JSON.stringify(opts.declared.value)} is not a parseable size — the host-relative guardrail alone applies${guardNote}`,
       ...base,
     };
   }
@@ -1284,7 +1367,7 @@ export function suiteMemoryMax(opts: {
       bound: "host-guard",
       reason:
         `the declared ceiling (${opts.declared.value} = ${declaredBytes} B) exceeds the host-relative guardrail ` +
-        `(${hostGuardBytes} B = ${hostFraction} × the effective host total) — the host guard is the binding runaway bound`,
+        `(${hostGuardBytes} B = ${hostFraction} × the effective host total) — the host guard is the binding runaway bound${guardNote}`,
       ...base,
     };
   }
@@ -1298,12 +1381,16 @@ export function suiteMemoryMax(opts: {
 export const SUITE_MEMORY_MAX_DEFAULT = "16G";
 
 /** The suite's default MemoryMax with THIS host's readings (used by the module-load template: no
- *  state dir, so no measurement). */
+ *  state dir, so no measurement). The guardrail is SELECTED by the declared ceiling's provenance
+ *  (`suiteHostGuard`) — ⛔ not unconditionally the shared-host split, which used to swallow an
+ *  operator's explicit declaration (see `suiteHostGuard`'s block comment). */
 export function defaultSuiteMemoryMax(): string {
+  const effectiveTotalMemBytes = readEffectiveTotalMemBytes();
+  const declared = declaredSuiteMemoryMax();
   return suiteMemoryMax({
-    effectiveTotalMemBytes: readEffectiveTotalMemBytes(),
-    declared: declaredSuiteMemoryMax(),
-    hostGuardBytes: sharedHostCeilingBytes(readEffectiveTotalMemBytes(), listSharedHostScopes().count),
+    effectiveTotalMemBytes,
+    declared,
+    hostGuard: suiteHostGuard({ effectiveTotalMemBytes, declared, siblingScopeCount: listSharedHostScopes().count }),
   }).memoryMax;
 }
 
@@ -1361,10 +1448,13 @@ export function parseSystemdRunLimits(raw?: string, ctx?: { memoryMaxDefault?: s
 export function resolveSuiteMemoryMax(stateDir: string): SuiteMemoryMaxPolicy {
   const effective = readEffectiveTotalMemBytes();
   const declared = declaredSuiteMemoryMax();
+  // The guardrail is SELECTED by the declared ceiling's provenance (`suiteHostGuard`): an explicitly
+  // declared ceiling (config/env) is bounded by the PROJECT-BLIND fraction, not by the shared-host
+  // multi-scope split — the split is for the project-blind DEFAULT (人 2026-10-15 裁定).
   const decision = suiteMemoryMax({
     effectiveTotalMemBytes: effective,
     declared,
-    hostGuardBytes: sharedHostCeilingBytes(effective, listSharedHostScopes().count),
+    hostGuard: suiteHostGuard({ effectiveTotalMemBytes: effective, declared, siblingScopeCount: listSharedHostScopes().count }),
   });
   const measured = readSuiteMemoryMeasurements(stateDir);
   const estimate = laneScaledScopeMemoryMax({
@@ -1446,27 +1536,44 @@ export function buildSystemdRunArgv(command: string, limits: SystemdRunLimits = 
   return hostResourceAdapter().launchArgv(command, limits);
 }
 
+/** The trailing `run-*.scope` of a pid's cgroup path, or null when it is not inside one. Exported so
+ *  the caller-scope exclusion below and any reader share ONE extraction (硬规则 5b). */
+export function scopeUnitOfPid(pid: number): string | null {
+  try {
+    const m = fs.readFileSync(`/proc/${pid}/cgroup`, "utf8").match(/\/(run-[^/\n]+\.scope)\s*$/m);
+    return m ? m[1] : null;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Find the transient scope unit a spawned `systemd-run --scope` registered. The unit name is
  * `run-p<pid>-<invocation>.scope` where <pid> is the spawned systemd-run process's pid (verified on
  * this host). Polls `systemctl --user list-units` (the scope appears a moment after spawn); returns
  * the unit name or null after `timeoutMs`.
+ *
+ * ⛔ The CALLER's own scope is not the suite's scope, even though it matches the same `run-*` shape.
+ * `systemd-run --scope` moves the spawned process into the new scope only once the transient unit is
+ * REGISTERED — until then /proc/<pid>/cgroup still names the cgroup it was forked in, which is the
+ * caller's. In the REAL suite the caller's cgroup IS the suite's own auto-named `run-uNNN.scope`, so a
+ * naive "first `run-*.scope` wins" match returns the caller's: measured 2026-10-15, the AC1 evidence
+ * file then described a scope nobody set a ceiling on (`MemoryMax=infinity`, kernel `memory.max=max`)
+ * instead of the suite's applied 27917287424. Reading `run-*.scope` from the caller and refusing it is
+ * what makes the poll WAIT for the child's own unit, which is the answer the caller asked for.
  */
 export async function findSuiteScopeUnit(pid: number, timeoutMs = 8_000): Promise<string | null> {
   const start = Date.now();
+  // The scope THIS process already lives in (null when it is not inside a `run-*.scope`): the child
+  // only counts once it has left it.
+  const callerUnit = scopeUnitOfPid(process.pid);
   // Preferred: the child's OWN cgroup names its scope directly. systemd transient-scope naming is
   // `run-<uuid>.scope` — the older `run-p<pid>-` form (the heuristic below) NEVER matches on this
   // systemd, so the AC1 evidence was silently never captured and the hermetic cgroup test polled
   // to timeout. /proc/<pid>/cgroup is authoritative regardless of systemd's naming scheme.
   const fromCgroup = (): string | null => {
-    try {
-      const cg = fs.readFileSync(`/proc/${pid}/cgroup`, "utf8");
-      const m = cg.match(/\/(run-[^/\n]+\.scope)\s*$/m);
-      if (m) return m[1];
-    } catch {
-      // transient — retry
-    }
-    return null;
+    const unit = scopeUnitOfPid(pid);
+    return unit && unit !== callerUnit ? unit : null;
   };
   const prefix = `run-p${pid}-`;
   while (Date.now() - start < timeoutMs) {
@@ -1495,6 +1602,14 @@ export async function findSuiteScopeUnit(pid: number, timeoutMs = 8_000): Promis
  * properties systemd actually applied (`systemctl --user show <unit>` → MemoryMax/CPUQuotaPerSecUSec/
  * TasksMax/Effective*), written to `<stateDir>/suite-cgroup-evidence.txt`. Best-effort — evidence
  * capture must never fail the run.
+ *
+ * ⚠️ These properties are read for the unit `findSuiteScopeUnit` resolved — so when THAT resolves the
+ * caller's own scope instead of the suite's, this file faithfully witnesses a ceiling nobody set
+ * (`MemoryMax=infinity`). Measured 2026-10-15: that is exactly what it did inside a real suite round
+ * until the caller-scope exclusion landed. The fix belongs there (one resolution), ⛔ not in a second
+ * reading of the cgroup attribute here: `systemctl --user show` DOES report the applied `MemoryMax`
+ * once the right unit is asked (same measurement: 27917287424 property == 27917287424 in
+ * `/sys/fs/cgroup<ControlGroup>/memory.max`).
  */
 export function recordSystemdRunEvidence(stateDir: string, scopeUnit: string, limits: SystemdRunLimits): void {
   try {

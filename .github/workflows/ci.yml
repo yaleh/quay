@@ -79,6 +79,13 @@ jobs:
       # 2 fail on any non-UTC host. Declared explicitly so scripts/test.sh's own pin and this one are
       # the same statement rather than one statement plus one silent reliance on the runner.
       TZ: UTC
+      # ⚠️ TMPDIR is NOT declared here, and it cannot be (gap-ci-test-job-tmpdir-on-disk-not-tmpfs):
+      # the `runner` context is unavailable in `jobs.<job_id>.env` — GitHub's context-availability
+      # table allows only `github, needs, strategy, matrix, vars, secrets, inputs` for this key, and
+      # `runner.temp` is for STEP-level keys only. Writing it here is not a no-op: the workflow file
+      # fails validation ("Unrecognized named-value: 'runner'") and the WHOLE file stops loading, so
+      # every job in it — including this one — never starts. The TMPDIR declaration therefore lives
+      # in the step right after checkout, which persists it through `$GITHUB_ENV`.
     permissions:
       contents: read
       issues: read
@@ -90,6 +97,41 @@ jobs:
           # scripts/test.sh --list-files 空输出 → test-coverage-check --selftest AC5 fail。
           # fetch-depth: 0 = 全量历史, baseline 存在, 守卫可评估。
           fetch-depth: 0
+      - name: Point TMPDIR at the runner's disk-backed temp dir (not the container's tmpfs /tmp)
+        # gap-ci-test-job-tmpdir-on-disk-not-tmpfs. `os.tmpdir()`/`mktemp` on this runner resolved to
+        # the CONTAINER's `/tmp`, which the self-hosted runner mounts as **tmpfs**
+        # (`docker inspect gh-runner-quay` ⇒ Tmpfs {"/run":"","/tmp":""}; in-container systemd needs
+        # them). Two measured consequences:
+        #   (1) any test that runs a REAL `quay init` under `os.tmpdir()` was REFUSED — init
+        #       fail-closes when the workspace's worktree root is on tmpfs (the 2026-08-04 OOM
+        #       defence). `profiles-role-coverage-check` builds its init artifact with
+        #       `fs.mkdtempSync(path.join(os.tmpdir(), …))`, so its mutation baseline came back
+        #       exit 3 (NOT-EVALUATED) and `checker-mutation-check` scored it **always-red** —
+        #       a verdict about the runner's /tmp, not about the checker.
+        #   (2) the whole suite's temp files were charged to container MEMORY instead of disk.
+        # `RUNNER_TEMP` (= the `runner.temp` context, the same value) is `$RUNNER_WORKDIR/_temp` —
+        # here `/_work/_temp`, a BIND MOUNT off the tmpfs (`/data/scratch/.../_work`, `stat -f` =
+        # xfs). So this is a statement about the runner WIRING, not a reliance on the image.
+        # ⛔ Does NOT touch the runner's `/run`/`/tmp` tmpfs (systemd needs them) and ⛔ does NOT
+        # relax init's tmpfs refusal: the fix is to stop POINTING temp at tmpfs.
+        # ── Why a step + `$GITHUB_ENV` and not the job's `env:` block ────────────────────────────
+        # `jobs.<job_id>.env` cannot read the `runner` context (only github/needs/strategy/matrix/
+        # vars/secrets/inputs are legal there), so `TMPDIR: ${{ runner.temp }}` in that block would
+        # make the whole workflow file fail validation and stop every job from starting at all.
+        # `$GITHUB_ENV` is the supported way to set a job-wide variable whose value comes from a
+        # step-time context: it lands before this job's remaining steps, which is why this step is
+        # first (after checkout) rather than folded into any consumer.
+        # ⛔ Fail closed on an EMPTY RUNNER_TEMP: writing `TMPDIR=` would UNSET the semantics Node
+        # looks for and fall back to `/tmp` — i.e. silently reproduce the very tmpfs bug this step
+        # exists to remove, while the log still reads as "TMPDIR was set" (硬规则 3b).
+        run: |
+          set -euo pipefail
+          if [ -z "${RUNNER_TEMP:-}" ]; then
+            echo "FAIL: RUNNER_TEMP is empty — refusing to export an empty TMPDIR (os.tmpdir() would fall back to /tmp, the tmpfs this step exists to avoid)" >&2
+            exit 1
+          fi
+          echo "TMPDIR=${RUNNER_TEMP}" >> "$GITHUB_ENV"
+          echo "TMPDIR -> ${RUNNER_TEMP} (filesystem: $(stat -f -c %T "${RUNNER_TEMP}" 2>/dev/null || echo unreadable))"
       - name: Materialize the `develop` ref the suite reads by name
         # Three checks resolve this repo's authoritative branch as a LOCAL ref named `develop`:
         # plugin/scripts/direct-to-develop-bypass-check.ts returns NOT-EVALUATED ("rev-list-unreadable")

@@ -323,6 +323,20 @@ packages/quay/plugin/
 # marking it would contradict quay-runtime-artifacts.txt's stated policy and break the
 # marked-set == manifest-set binding asserted by gitignore-runtime-coverage-check.ts).
 **/.quay/release-branch-janitor.jsonl
+# gap-release-cut-preflight-records-ci-reading-not-blocking (2026-10-15): the release-cut PREFLIGHT
+# record (.quay/release-cut-preflight.jsonl) — one line per release cut, carrying the CI reading the
+# cut saw (`ciReading` ∈ {success, failure, not-evaluated}) at the moment the tag was cut, appended by
+# plugin/scripts/release-cut.mjs preflight ⑥. It is what makes SPEC §4.2 mechanically visible (the
+# clause is RECORDED, never enforced — reading it must not be able to refuse a cut).
+# Same family and the same reason as the two entries directly above: runtime state, never
+# git-tracked, and it MUST be ignored rather than merely untracked — the ff clean-tree channel passes
+# only `??` paths, and a record swept into a commit is then DELETED by the next `git checkout` of a
+# ref that lacks it, silently losing the trace this file exists to keep.
+# Not `@quay-runtime-artifact`-marked on purpose, for the same reason as the sibling `**/.quay/*`
+# entries above (a consumer project's `.gitignore` gets the covering `.quay/*` rule from quay-init;
+# marking it would contradict quay-runtime-artifacts.txt's stated policy and break the
+# marked-set == manifest-set binding asserted by gitignore-runtime-coverage-check.ts).
+**/.quay/release-cut-preflight.jsonl
 # DIR-124-A1a: per-run event log — transient diagnostic data, not committed provenance
 # @quay-runtime-artifact — quay-init writes this into a consumer .gitignore (quay-runtime-artifacts.txt)
 .workflow-events/

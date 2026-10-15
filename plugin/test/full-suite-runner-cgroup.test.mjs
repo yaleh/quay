@@ -369,8 +369,8 @@ test("AC1 unit — buildSystemdRunArgv wraps a command in systemd-run --user --s
   assert.ok(!argv.includes("MemoryMax=16G"), "the ceiling is no longer spelled as a code literal — it is the declared size in BYTES");
   assert.equal(
     DEFAULT_SYSTEMD_RUN_LIMITS.memoryMax,
-    String(Math.min(16 * 1024 ** 3, sharedHostCeilingBytes(readEffectiveTotalMemBytes(), listSharedHostScopes().count))),
-    "the declared 16 GiB baseline, clamped by the host guard (⛔ not 24/26 GiB)",
+    defaultSuiteMemoryMax(),
+    "the template holds the DECLARED ceiling as resolved for this environment (the 16 GiB undeclared default is pinned by the AC2 case that clears the declaration)",
   );
   assert.ok(argv.includes("OOMPolicy=continue"), "the scope sets OOMPolicy=continue (one OOM-killed process must not TERM the whole suite)");
   assert.ok(!argv.includes("CPUQuota="), "default argv carries NO CPUQuota — the cgroup has no CPU limit");
@@ -396,10 +396,65 @@ test("AC1 unit — parseSystemdRunLimits merges a seam override over the default
   assert.deepEqual(parseSystemdRunLimits("MemoryMax=64M Bogus=1"), { ...DEFAULT_SYSTEMD_RUN_LIMITS, memoryMax: "64M" });
 });
 
+// Found while fixing the declared ceiling (gap-suite-declared-memory-max-swallowed-by-shared-host-split):
+// `findSuiteScopeUnit` used to return the FIRST `run-*.scope` component of the child's
+// /proc/<pid>/cgroup. But the spawned `systemd-run` moves into its new scope only once the transient
+// unit is registered — at the instant of the first poll it is STILL IN THE CALLER'S cgroup. And in the
+// REAL suite the caller's cgroup IS the suite's own auto-named `run-uNNN.scope`, so the AC1 evidence
+// file (and the round's consumed-load read) described the CALLER's scope: `MemoryMax=infinity`,
+// `memory_max_kernel=max` — a witness for a ceiling nobody set. Reproduced below with the exact shape:
+// a probe running inside a real auto-named `run-*.scope` spawns a real nested `systemd-run --scope`.
+test("AC1 — findSuiteScopeUnit resolves the CHILD's scope, ⛔ never the caller's own enclosing run-*.scope", async (t) => {
+  if (!systemdRunAvailable()) return t.skip("systemd-run --user --scope not available on this host");
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-scopeunit-"));
+  const probe = path.join(dir, "probe.mjs");
+  fs.writeFileSync(
+    probe,
+    [
+      `import { spawn } from "node:child_process";`,
+      `import fs from "node:fs";`,
+      `import { buildSystemdRunArgv, DEFAULT_SYSTEMD_RUN_LIMITS, findSuiteScopeUnit } from ${JSON.stringify(RUNNER)};`,
+      `const unitOf = (p) => { try { return (fs.readFileSync(\`/proc/\${p}/cgroup\`, "utf8").match(/\\/(run-[^/\\n]+\\.scope)\\s*$/m) || [])[1] ?? null; } catch { return null; } };`,
+      `const mine = unitOf(process.pid);`,
+      `const argv = buildSystemdRunArgv('bash -c "sleep 3"', DEFAULT_SYSTEMD_RUN_LIMITS);`,
+      `const child = spawn(argv[0], argv.slice(1), { stdio: "ignore", detached: true });`,
+      `const resolved = await findSuiteScopeUnit(child.pid);`,
+      `// settle: the child's own scope exists only once its transient unit is registered`,
+      `let childUnit = unitOf(child.pid);`,
+      `for (let i = 0; i < 100 && (!childUnit || childUnit === mine); i++) { await new Promise((r) => setTimeout(r, 50)); childUnit = unitOf(child.pid); }`,
+      `console.log(JSON.stringify({ mine, resolved, childUnit }));`,
+      `try { process.kill(-child.pid, "SIGKILL"); } catch { child.kill("SIGKILL"); }`,
+    ].join("\n"),
+    "utf8",
+  );
+  try {
+    // The probe runs INSIDE an auto-named transient scope — the shape the real suite provides.
+    const { code, out } = await spawnCmd(
+      ["systemd-run", "--user", "--scope", "--quiet", "--collect", "node", "--no-warnings", "--experimental-strip-types", probe],
+      { ...process.env },
+    );
+    assert.equal(code, 0, `the in-scope probe exits 0; stdout=${JSON.stringify(out)}`);
+    const line = (out ?? "").trim().split("\n").filter((l) => l.startsWith("{")).pop();
+    assert.ok(line, `no reading from the in-scope probe — stdout=${JSON.stringify(out)}`);
+    const { mine, resolved, childUnit } = JSON.parse(line);
+    assert.match(String(mine), /^run-[^/]+\.scope$/, "the probe really is inside an auto-named run-*.scope (that shape is what makes the caller's own scope matchable)");
+    assert.ok(childUnit && childUnit !== mine, `the nested systemd-run really did land in its OWN scope (${childUnit} ≠ ${mine})`);
+    assert.equal(resolved, childUnit, "the resolved unit is the CHILD's scope");
+    assert.notEqual(resolved, mine, "⛔ NOT the caller's own enclosing scope (its limits are not the suite's)");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test(
   "AC1 — the runner wraps the suite in a systemd-run cgroup scope; the applied limits are visible as durable evidence (real systemd)",
   { skip: systemdRunAvailable() ? false : "systemd-run --user --scope not available on this host" },
-  async () => {
+  // The whole case runs under the UNDECLARED baseline: this fixture root declares nothing (no
+  // `.quay/config.yml`), so the declaration the runner resolves and the one re-resolved here are both
+  // the default — which is what the assertions below pin. `runRunner` additionally stops leaking the
+  // ambient declaration into the child, so the child's evidence and the parent's expectation agree.
+  async () =>
+    withUndeclared(async () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-sd1-"));
     // The suite must outlive the evidence capture (the scope is queryable only while it runs).
     const { f, dir } = fakeSuite(
@@ -445,6 +500,11 @@ test(
       await poll(() => fs.existsSync(evidence), { timeoutMs: 10_000 });
       const txt = fs.readFileSync(evidence, "utf8");
       assert.match(txt, /scope_unit=run-[a-z0-9]+\.scope/, "the transient scope unit name is recorded (systemd names it run-<id>.scope — cgroup-derived)");
+      // ⚠️ This witness is only as good as `findSuiteScopeUnit`: measured 2026-10-15 the file said
+      // `MemoryMax=infinity` for a suite that really ran under a ceiling, because the unit resolved was
+      // the CALLER'S own scope (the suite's `run-uNNN.scope`) — a scope nobody had set a limit on. The
+      // `findSuiteScopeUnit` case above pins that resolution; this assertion pins the evidence that
+      // depends on it.
       assert.match(
         txt,
         new RegExp(`MemoryMax=${policy.memoryMax}`),
@@ -456,7 +516,7 @@ test(
       fs.rmSync(root, { recursive: true, force: true });
       fs.rmSync(dir, { recursive: true, force: true });
     }
-  },
+    }),
 );
 
 test(
@@ -984,26 +1044,47 @@ const MIB = 1024 ** 2;
 const PROD_STATE_DIR = path.join(REPO_ROOT, ".quay");
 const HAS_PROD_ROUNDS = fs.existsSync(path.join(PROD_STATE_DIR, "verification-round.jsonl"));
 
-test("AC2 — the effective MemoryMax comes from the DECLARED value, and the declaration is what moves it", () => {
+/** The runner promotes `.quay/config.yml` `suite: memory_max:` into `QUAY_SUITE_MEMORY_MAX` for EVERY
+ *  suite child, so a project that DECLARES its own ceiling (quay itself does: the human-ruled
+ *  2026-10-15 26G) makes every case about the UNDECLARED baseline read the declaration instead and red.
+ *  A case about the default (or about "this fixture root declares nothing") therefore controls that
+ *  input itself: clear the ambient declaration for the case's duration, restore it after.
+ *  Measured 2026-10-15 under an ambient `QUAY_SUITE_MEMORY_MAX=26G`: 7 of these cases red. */
+async function withUndeclared(fn) {
+  const ambient = process.env.QUAY_SUITE_MEMORY_MAX;
+  delete process.env.QUAY_SUITE_MEMORY_MAX;
+  try {
+    return await fn();
+  } finally {
+    if (ambient === undefined) delete process.env.QUAY_SUITE_MEMORY_MAX;
+    else process.env.QUAY_SUITE_MEMORY_MAX = ambient;
+  }
+}
+
+test("AC2 — the effective MemoryMax comes from the DECLARED value, and the declaration is what moves it", async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-decl-"));
   try {
-    const resolved = resolveSuiteMemoryMax(dir);
-    assert.equal(resolved.declared, "16G", "the human-ruled baseline is the declared default");
-    assert.equal(resolved.declaredSource, "default", "…and it is the DEFAULT, not an env/config value");
-    assert.equal(resolved.bound, "declared", "the declared value is what applied (⛔ not raised to the host fraction)");
-    assert.equal(resolved.memoryMax, String(16 * GIB), "16 GiB, in bytes");
-    // The declared value is clamped only by the host bound (this host's is far above 16 GiB).
-    assert.ok(Number(resolved.memoryMax) <= resolved.hostGuardBytes, "never above the host guardrail");
-    assert.equal(Number(resolved.memoryMax), Math.min(16 * GIB, resolved.hostGuardBytes));
-    // The module-load template agrees (it resolves the same declaration, no state dir).
-    assert.equal(defaultSuiteMemoryMax(), String(Math.min(16 * GIB, sharedHostCeilingBytes(readEffectiveTotalMemBytes(), listSharedHostScopes().count))));
-    assert.equal(DEFAULT_SYSTEMD_RUN_LIMITS.memoryMax, defaultSuiteMemoryMax());
+    await withUndeclared(() => {
+      const resolved = resolveSuiteMemoryMax(dir);
+      assert.equal(resolved.declared, "16G", "the human-ruled baseline is the declared default");
+      assert.equal(resolved.declaredSource, "default", "…and it is the DEFAULT, not an env/config value");
+      assert.equal(resolved.bound, "declared", "the declared value is what applied (⛔ not raised to the host fraction)");
+      assert.equal(resolved.memoryMax, String(16 * GIB), "16 GiB, in bytes");
+      // The declared value is clamped only by the host bound (this host's is far above 16 GiB).
+      assert.ok(Number(resolved.memoryMax) <= resolved.hostGuardBytes, "never above the host guardrail");
+      assert.equal(Number(resolved.memoryMax), Math.min(16 * GIB, resolved.hostGuardBytes));
+      // The module-load template agrees (it resolves the same declaration, no state dir).
+      assert.equal(defaultSuiteMemoryMax(), String(Math.min(16 * GIB, sharedHostCeilingBytes(readEffectiveTotalMemBytes(), listSharedHostScopes().count))));
+    });
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
+  // The module-load template resolved the AMBIENT declaration at import time ⇒ it agrees with the
+  // function under that same (restored) declaration.
+  assert.equal(DEFAULT_SYSTEMD_RUN_LIMITS.memoryMax, defaultSuiteMemoryMax());
 });
 
-test("AC2 — an override CHANGES the effective ceiling (config/env is the mechanism, not the code)", () => {
+test("AC2 — an override CHANGES the effective ceiling (config/env is the mechanism, not the code)", async () => {
   // A fixed host guard keeps this deterministic on any host: 64 GiB.
   const guard = 64 * GIB;
   const withDeclared = (v) => suiteMemoryMax({ effectiveTotalMemBytes: 246 * GIB, declared: { value: v, source: "env" }, hostGuardBytes: guard });
@@ -1013,11 +1094,16 @@ test("AC2 — an override CHANGES the effective ceiling (config/env is the mecha
   assert.notEqual(withDeclared("2G").memoryMax, withDeclared("20G").memoryMax, "two declarations ⇒ two ceilings");
 
   // The env knob is the declared-source path the runner reads (config promotes into the same env).
-  assert.deepEqual(declaredSuiteMemoryMax("8G"), { value: "8G", source: "env" });
-  assert.deepEqual(declaredSuiteMemoryMax(" 16G "), { value: "16G", source: "env" }, "whitespace tolerated");
-  assert.deepEqual(declaredSuiteMemoryMax(""), { value: SUITE_MEMORY_MAX_DEFAULT, source: "default" }, "empty ⇒ the default");
-  assert.deepEqual(declaredSuiteMemoryMax(undefined), { value: SUITE_MEMORY_MAX_DEFAULT, source: "default" });
-  assert.deepEqual(declaredSuiteMemoryMax("banana"), { value: SUITE_MEMORY_MAX_DEFAULT, source: "default" }, "an unparseable value must NOT reach systemd-run (it would refuse the scope)");
+  // ⛔ `declaredSuiteMemoryMax(undefined)` resolves the env PARAMETER's own default
+  // (`process.env.QUAY_SUITE_MEMORY_MAX`) — an explicitly-passed `undefined` is indistinguishable from
+  // not passing it, so the case is about the ambient env being UNSET and must clear it.
+  await withUndeclared(() => {
+    assert.deepEqual(declaredSuiteMemoryMax("8G"), { value: "8G", source: "env" });
+    assert.deepEqual(declaredSuiteMemoryMax(" 16G "), { value: "16G", source: "env" }, "whitespace tolerated");
+    assert.deepEqual(declaredSuiteMemoryMax(""), { value: SUITE_MEMORY_MAX_DEFAULT, source: "default" }, "empty ⇒ the default");
+    assert.deepEqual(declaredSuiteMemoryMax(undefined), { value: SUITE_MEMORY_MAX_DEFAULT, source: "default" });
+    assert.deepEqual(declaredSuiteMemoryMax("banana"), { value: SUITE_MEMORY_MAX_DEFAULT, source: "default" }, "an unparseable value must NOT reach systemd-run (it would refuse the scope)");
+  });
   // The runner's env is the knob the config promotes into (the SAME name, so config < env holds).
   assert.equal(process.env.QUAY_SUITE_MEMORY_MAX === undefined || typeof process.env.QUAY_SUITE_MEMORY_MAX === "string", true);
 });
@@ -1070,7 +1156,9 @@ test(
   "AC3 — a REAL round's measured concurrency equals an independent overlap computation, and the diagnostic is below 16 GiB",
   { skip: HAS_PROD_ROUNDS ? false : "no .quay/verification-round.jsonl in this checkout (fresh clone) — nothing to measure" },
   async () => {
-    const real = resolveSuiteMemoryMax(PROD_STATE_DIR);
+    // The carrier is the production main checkout, which DECLARES its own ceiling; this case is about
+    // the 16 GiB baseline the diagnostic must stay under ⇒ resolve it undeclared.
+    const real = await withUndeclared(() => resolveSuiteMemoryMax(PROD_STATE_DIR));
     assert.ok(real.actualConcurrency !== null && real.actualConcurrency > 0, `a real measured concurrency (${real.actualConcurrency})`);
     assert.ok(real.actualConcurrency < 128, "…BELOW the requested lane count 128 — the scheduler's reliability cap is why");
     assert.ok(real.perFileHighWaterBytes !== null && real.perFileHighWaterBytes > 0, "the per-file high-water is measured too");
@@ -1101,7 +1189,7 @@ test(
   },
 );
 
-test("AC3/DoD — the diagnostic can NEVER raise the effective MemoryMax above the declared value", () => {
+test("AC3/DoD — the diagnostic can NEVER raise the effective MemoryMax above the declared value", async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-noraise-"));
   try {
     // A deliberately alarming measurement: ~1 TB of "measured" per-file demand, 200-way concurrency.
@@ -1112,7 +1200,9 @@ test("AC3/DoD — the diagnostic can NEVER raise the effective MemoryMax above t
         perFile: Array.from({ length: 200 }, (_, i) => ({ startedAtMs: 0, endedAtMs: 1000, memPeakKb: 5_000_000 + i })),
       })}\n`,
     );
-    const wild = resolveSuiteMemoryMax(dir);
+    // …against the UNDECLARED baseline (this fixture root declares nothing; the ambient env must not
+    // supply a declaration either, or the assertion would just re-read the ambient value).
+    const wild = await withUndeclared(() => resolveSuiteMemoryMax(dir));
     assert.equal(wild.laneScaledEstimateBytes > 16 * GIB, true, `the diagnostic DOES react to the measurement (${(wild.laneScaledEstimateBytes / GIB).toFixed(1)} GiB)`);
     assert.equal(wild.memoryMax, String(16 * GIB), "⛔ but the effective MemoryMax is STILL the declared 16 GiB");
     assert.equal(wild.bound, "declared");
@@ -1122,7 +1212,7 @@ test("AC3/DoD — the diagnostic can NEVER raise the effective MemoryMax above t
       path.join(dir, "verification-round.jsonl"),
       `${JSON.stringify({ round: 1, perFile: Array.from({ length: 128 }, (_, i) => ({ startedAtMs: 0, endedAtMs: 1000, memPeakKb: 900_000 + i })) })}\n`,
     );
-    const wide = resolveSuiteMemoryMax(dir);
+    const wide = await withUndeclared(() => resolveSuiteMemoryMax(dir));
     assert.equal(wide.actualConcurrency, 128, "the reader reports the wide concurrency it measured");
     assert.equal(wide.memoryMax, String(16 * GIB), "…and the ceiling is untouched by it");
   } finally {
@@ -1130,18 +1220,26 @@ test("AC3/DoD — the diagnostic can NEVER raise the effective MemoryMax above t
   }
 });
 
-test("DoD — no commit may raise the effective default above 16 GiB: the resolved default is PINNED here", () => {
+test("DoD — no commit may raise the effective default above 16 GiB: the resolved default is PINNED here", async () => {
   // The human ruled 16 GiB a deliberate pressure baseline (2026-10-14). This is the mechanical half of
   // "no commit on this branch raises the effective default": change SUITE_MEMORY_MAX_DEFAULT, or make
   // the runner derive a bigger default, and THIS goes red.
   assert.equal(SUITE_MEMORY_MAX_DEFAULT, "16G", "the declared default is 16G");
   assert.equal(parseSystemdBytesToMb(SUITE_MEMORY_MAX_DEFAULT) * 1024 * 1024, 16 * GIB);
-  assert.ok(Number(defaultSuiteMemoryMax()) <= 16 * GIB, `the resolved default never exceeds 16 GiB (${defaultSuiteMemoryMax()})`);
-  assert.ok(Number(DEFAULT_SYSTEMD_RUN_LIMITS.memoryMax) <= 16 * GIB);
-  // On a host whose guardrail is at or above 16 GiB (this one), the default is EXACTLY 16 GiB.
-  if (sharedHostCeilingBytes(readEffectiveTotalMemBytes(), listSharedHostScopes().count) >= 16 * GIB) {
-    assert.equal(defaultSuiteMemoryMax(), String(16 * GIB), "16 GiB exactly — ⛔ not 24/26 GiB");
-  }
+  // The DEFAULT is what is pinned — not the ambient declaration. A project's own `suite: memory_max:`
+  // may legitimately be higher (that is the whole point of the declared knob), so the resolution is
+  // read with the declaration cleared.
+  await withUndeclared(() => {
+    assert.ok(Number(defaultSuiteMemoryMax()) <= 16 * GIB, `the resolved default never exceeds 16 GiB (${defaultSuiteMemoryMax()})`);
+    // On a host whose guardrail is at or above 16 GiB (this one), the default is EXACTLY 16 GiB.
+    if (sharedHostCeilingBytes(readEffectiveTotalMemBytes(), listSharedHostScopes().count) >= 16 * GIB) {
+      assert.equal(defaultSuiteMemoryMax(), String(16 * GIB), "16 GiB exactly — ⛔ not 24/26 GiB");
+    }
+  });
+  // The module-load template resolved whatever declaration was ambient AT IMPORT TIME (the suite runner
+  // promotes the project's `suite: memory_max:` into it) ⇒ it must agree with a live resolution under
+  // that same declaration. ⛔ Not a `<= 16 GiB` claim: a declared project is allowed above the default.
+  assert.equal(DEFAULT_SYSTEMD_RUN_LIMITS.memoryMax, defaultSuiteMemoryMax());
 });
 
 test("unit — readSuiteMemoryMeasurements reads the round record's own perFile (rows absent ⇒ both null)", () => {
@@ -1282,28 +1380,42 @@ test(
 // The SUITE is a second long-lived consumer of the same host-derived fraction: it and the anchor
 // groups are alive at the same time, so the suite's share adds to the same sum. It is wired through
 // the SAME `sharedHostCeilingBytes` (⛔ one implementation, 硬规则 5b — this file owns no second copy
-// of the formula), and it is the UPPER bound on the declared ceiling — so a declared value is never
-// above what the shared host can afford, while a declared value BELOW it (the 16 GiB baseline here)
-// is honoured unchanged.
+// of the formula), which is the UPPER bound on the declared ceiling for the PROJECT-BLIND DEFAULT —
+// so a default is never above what the shared host can afford, while the 16 GiB baseline here is
+// honoured unchanged.
+// ⚠️ WHICH rule produces the upper bound is selected by the DECLARATION'S PROVENANCE
+// (gap-suite-declared-memory-max-swallowed-by-shared-host-split, 人 2026-10-15 裁定): an explicitly
+// DECLARED ceiling (`.quay/config.yml` `suite: memory_max:` / `QUAY_SUITE_MEMORY_MAX`) is bounded by
+// the PROJECT-BLIND `0.25 × effective host total` instead, so the shared-host split can no longer
+// silently swallow an operator's declaration. The selection's ONE home is `suiteHostGuard` in
+// plugin/scripts/full-suite-runner.ts (⛔ not restated here), and its ACs live in
+// full-suite-runner-declared-memory-guard.test.mjs. The loop below injects a guard explicitly, so it
+// holds for BOTH rules — it pins `suiteMemoryMax`'s own contract, not the selection.
 
-test("unit — the shared-host step is the UPPER bound: it never RAISES the declared ceiling", () => {
+test("unit — the shared-host step is the UPPER bound: it never RAISES the declared ceiling", async () => {
   const effective = readEffectiveTotalMemBytes();
   const reading = listSharedHostScopes();
   const blind = Math.floor((effective * SCOPE_ENVELOPE_HOST_FRACTION) / 4096) * 4096;
-  for (const n of [0, 1, 2, 8, 10 ** 6]) {
-    const guard = sharedHostCeilingBytes(effective, n);
-    const applied = Number(suiteMemoryMax({ effectiveTotalMemBytes: effective, declared: declaredSuiteMemoryMax(), hostGuardBytes: guard }).memoryMax);
-    assert.ok(applied > 0, `sibling count ${n}: a real positive ceiling`);
-    assert.ok(applied <= Math.min(16 * GIB, guard), `sibling count ${n}: the shared step must never RAISE the ceiling (${applied})`);
-    assert.ok(guard <= blind, `sibling count ${n}: the shared ceiling is never above the project-blind fraction`);
-  }
+  // `declaredSuiteMemoryMax()` with no argument reads the AMBIENT declaration ⇒ resolve the case under
+  // the undeclared 16 GiB baseline it is about (a declared 26G would be RAISED past the 16 GiB bound).
+  await withUndeclared(() => {
+    for (const n of [0, 1, 2, 8, 10 ** 6]) {
+      const guard = sharedHostCeilingBytes(effective, n);
+      const applied = Number(suiteMemoryMax({ effectiveTotalMemBytes: effective, declared: declaredSuiteMemoryMax(), hostGuardBytes: guard }).memoryMax);
+      assert.ok(applied > 0, `sibling count ${n}: a real positive ceiling`);
+      assert.ok(applied <= Math.min(16 * GIB, guard), `sibling count ${n}: the shared step must never RAISE the ceiling (${applied})`);
+      assert.ok(guard <= blind, `sibling count ${n}: the shared ceiling is never above the project-blind fraction`);
+    }
+  });
   assert.equal(sharedHostCeilingBytes(1024 * GIB, 10 ** 6), SHARED_HOST_MIN_CEILING_BYTES);
   assert.equal(SHARED_HOST_MIN_CEILING_BYTES, 2 * SHARED_HOST_OBSERVED_PEAK_BYTES);
   assert.equal(reading.count === null || reading.count >= 0, true, "the count is either a real reading or the explicit not-evaluated value");
 });
 
-test("unit — suiteMemoryMax honours an explicitly supplied host guardrail and an explicit declaration (the wiring is not decorative)", () => {
-  const base = { effectiveTotalMemBytes: 1024 * GIB, declared: declaredSuiteMemoryMax() };
+test("unit — suiteMemoryMax honours an explicitly supplied host guardrail and an explicit declaration (the wiring is not decorative)", async () => {
+  // The 16 GiB expectations below are about the UNDECLARED baseline ⇒ read `declaredSuiteMemoryMax()`
+  // with the ambient declaration cleared (a declared 26G would legitimately win over the huge guard).
+  const base = await withUndeclared(() => ({ effectiveTotalMemBytes: 1024 * GIB, declared: declaredSuiteMemoryMax() }));
   assert.equal(suiteMemoryMax({ ...base, hostGuardBytes: 12345 }).memoryMax, "12345", "a supplied guardrail is returned as-is when it is the binding one");
   assert.equal(suiteMemoryMax({ ...base, hostGuardBytes: 1024 * GIB }).memoryMax, String(16 * GIB), "…and the declared 16 GiB applies under a huge guard");
   assert.equal(suiteMemoryMax({ ...base, hostGuardBytes: GIB }).bound, "host-guard");
