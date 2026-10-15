@@ -49,3 +49,7 @@ extra: {}
 - scripts/release-cut.mjs
 - plugin/test/release-cut.test.mjs
 - tasks/gap-release-cut-preflight-records-ci-reading-not-blocking.md
+
+
+ADR-007 逐里程碑暗轴记录（本任务的声明）
+该轴仍暗,理由: 本任务只给 release-cut preflight 增加一次 CI 读数的记录与打印（记录⛔不阻塞），是可见性改动，不量架构面（依赖图 / 文档比 / 变异存活都没测），没有可解析的读数可贴。
