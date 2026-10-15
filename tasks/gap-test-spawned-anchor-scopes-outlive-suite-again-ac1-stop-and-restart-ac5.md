@@ -23,11 +23,17 @@ extra: {}
 
 **方案**：两个测试文件的 teardown 在 `after`/`finally` 里按**自己起的 scope 单元名**回收（`systemctl --user stop <unit>`，失败则写 `cgroup.kill`，见既有 reaper），并在文件末尾断言「本文件前缀的 `quay-anchor-*`/`quay-serve-*` scope 数为 0」。⛔ 不按 pid 猜、不回收别的文件或别的项目的 scope。
 
+**实现时核实/修正的两点（改前 A 阶段的实测）**
+1. **`quay-serve-dbg-serve-ws-71sgS2` 不是本任务的来源**：其 cmdline 是 `<worktree gap-serve-host-…>/packages/quay/bin/quay.ts serve`（一次手工/开发态的 serve 宿主），两个测试文件都**不起 serve 宿主** ⇒ 本任务不回收它，也不为它加断言（它属于另一条线）。
+2. **泄漏的机制比 Proposal 假设的更宽——scope 的成员不只是 anchor**：anchor 把各 kind 的循环跑在**自己进程内**，而那些循环 `spawn` 子进程（worker 调度的在飞 worker、以及每个把它当夹具的用例）。**子进程继承 anchor 的 cgroup**，而 `--collect` 只收**空** scope ⇒ **只按 pid 杀 anchor 不足以收掉 scope**。实测（2026-10-15）：一次**全绿**的 `node --test plugin/test/driver-restart-busy-e2e.test.mjs`（7/7，exit 0）留下 `quay-anchor-e2e-restart-ac2a-FkROLL-1792048717728.scope`，其**唯一**成员是 AC2a 夹具自己的在飞子进程 `node -e setTimeout(()=>{},120000)`（父进程已死、被 systemd --user 收养）。⇒ 回收判据必须是**单元名**（整组停 scope），不是 anchor 的 pid。
+
 ## Plan
 
 1. 复现：单独跑两个测试文件各一次，前后各列一次本前缀 scope，确认泄漏（改前 A）。
 2. 修 teardown（含测试失败路径），加末尾零泄漏断言。
 3. 改后同法复测（B）。
+
+**实现落点**：回收/断言机制做成**单一实现** `plugin/test/helpers/anchor-scope-reaper.mjs`（两个文件共用；`plugin/test/helpers/` 是本仓库既有的共享夹具家，见 `tmp-workspace.mjs` / `driver-runtime-harness.mjs`），⛔ 不在两个文件里各抄一份（硬规则 5b）。单元名前缀取自 `SHARED_HOST_SCOPE_PREFIXES`（= 多 scope 护栏数的同一份），命名/可用性原语取自 Core 叶子 `packages/quay/src/systemd-scope.ts`，⛔ 不新写第三份前缀表或第二份 sanitize 规则。
 
 ## Acceptance Criteria
 
@@ -44,4 +50,5 @@ AC1–AC4 带真实读数勾选；不回收任何非本测试起的 scope。落�
 
 - plugin/test/driver-cli.test.mjs
 - plugin/test/driver-restart-busy-e2e.test.mjs
+- plugin/test/helpers/anchor-scope-reaper.mjs
 - tasks/gap-test-spawned-anchor-scopes-outlive-suite-again-ac1-stop-and-restart-ac5.md
