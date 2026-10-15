@@ -2,7 +2,7 @@
 id: gap-suite-memory-telemetry-anon-file-shmem-swap-psi-concurrency-process-tree-unknown-not-zero
 title: 套件内存遥测补齐：memory.stat anon/file/shmem、swap、events、PSI、实际 phase
   并发、子进程树；采不到记 unknown 不记 0
-status: ready
+status: done
 labels:
   - gap
 parent: null
