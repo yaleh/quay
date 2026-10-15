@@ -3,7 +3,7 @@ id: gap-routine-semantic-dedup-scan-list-script-basenames-diverged-under-one-nam
 title: "semantic-dedup-scan: Identical bodies under one name, but one filters on
   EXEC_EXTENSIONS (.ts .sh .mjs .js .cjs .bash) and the other on
   SCRIPT_EXTENSIONS (.ts .sh .mjs), so the two"
-status: ready
+status: todo
 labels:
   - gap
   - routine-filed
@@ -11,6 +11,9 @@ labels:
 parent: null
 children: []
 extra: {}
+depends_on:
+  - gap-suite-recovery-ladder-log-wiring-reads-wrong-file-always-log-unreadable
+  - gap-lwa-crit-fixture-sleep300-child-not-reaped-forces-aborted-on-clean-suite
 ---
 ## Finding
 Identical bodies under one name, but one filters on EXEC_EXTENSIONS (.ts .sh .mjs .js .cjs .bash) and the other on SCRIPT_EXTENSIONS (.ts .sh .mjs), so the two same-named enumerators return different sets and any consumer swapping them silently loses .js/.cjs/.bash scripts.
@@ -103,3 +106,12 @@ merge
 - 未落地原因：step=suite: oom-killed (3) — recovery exhausted at floor concurrency 32 — no declared rung produced a complete verdict (64,48,32); needs a code/config fix, see plugin/scripts/full-suite-runner.ts
 - run_id：wk-prod-anchor
 - session_id：aa13907e-17f0-4a01-9a2e-f211a71257ab
+
+## Blocked（人 2026-10-15 裁定：改用 depends_on 结构化阻塞，不用 needs-human）
+
+**人指出更正**：这不该是 needs-human（人工停派）——应当用 `depends_on` 正确表达依赖关系，挂 `todo`，让既有 todo→ready 促升闸的 `depsReadinessFor` 判定自动拦住，两个真因任务落地后自动解阻塞、无需人工翻回。
+
+- 真因①（已立案，`gap-suite-recovery-ladder-log-wiring-reads-wrong-file-always-log-unreadable`，**正在隔离 worktree 实际开发**）：OOM 低并发恢复阶梯每一档都读错日志文件，`classifyRecoveryRound` 恒报 `log-unreadable`，即便某一档其实完整、零 OOM。
+- 真因②（已立案，`gap-lwa-crit-fixture-sleep300-child-not-reaped-forces-aborted-on-clean-suite`，待空闲派发槽）：`live-web-address-fixture.mjs` 的 `sleep 300` 夹具子进程未被回收，floor 档即便零 OOM 也被误判 `aborted`。
+- 本任务自身的 AC/Touches 没有变化，不是因为本任务有缺陷才阻塞。
+- `depends_on` 已指向上述两个任务；两者皆 `done` 后，`ready-pool-check` 的 `depsReadinessFor` 会自动判定解阻塞，促升回 `ready`，不需要人工介入。
