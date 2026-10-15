@@ -79,6 +79,19 @@ jobs:
       # 2 fail on any non-UTC host. Declared explicitly so scripts/test.sh's own pin and this one are
       # the same statement rather than one statement plus one silent reliance on the runner.
       TZ: UTC
+      # TMPDIR (gap-ci-test-job-tmpdir-on-disk-not-tmpfs). `os.tmpdir()`/`mktemp` on this runner used
+      # to resolve to the container's `/tmp`, which the self-hosted runner mounts as **tmpfs**
+      # (`docker inspect gh-runner-quay` ⇒ Tmpfs {"/run":"","/tmp":""}, needed by in-container
+      # systemd). Two consequences, both measured: (1) any test that runs a REAL `quay init` under
+      # `os.tmpdir()` is refused — init fail-closes on a tmpfs worktree root (the 2026-08-04 OOM
+      # defence), so `profiles-role-coverage-check`'s mutation baseline came back exit 3 (NOT-
+      # EVALUATED) and `checker-mutation-check` read that as **always-red**; (2) the whole suite's
+      # temp files were charged to container memory instead of disk.
+      # `runner.temp` is `$RUNNER_WORKDIR/_temp` — here `/_work/_temp`, a BIND MOUNT off the tmpfs
+      # (`/data/scratch/.../_work`, `stat -f` = xfs) — i.e. it is a property of the runner wiring, not
+      # of the image. ⛔ Not the runner's `/run`/`/tmp` tmpfs (systemd needs those) and ⛔ not a
+      # relaxation of init's tmpfs refusal: the fix is to stop POINTING temp at tmpfs.
+      TMPDIR: ${{ runner.temp }}
     permissions:
       contents: read
       issues: read
