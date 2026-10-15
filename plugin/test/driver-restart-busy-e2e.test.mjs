@@ -531,7 +531,7 @@ after(async () => {
     // 逐个用例的收尾漏了：末尾闸兜住了，但「漏」这件事本身要留痕（⛔ 不静默）。
     process.stderr.write(
       `driver-restart-busy-e2e.test.mjs: per-case cleanup missed ${rec.before.length} scope(s); the end-of-file gate reclaimed them: ` +
-      `${rec.before.join(", ")} (attempts=${rec.attemptsUsed}, ${JSON.stringify(rec.attempts)})\n`,
+      `${rec.before.join(", ")} (rounds=${rec.rounds}, ${JSON.stringify(rec.attempts)})\n`,
     );
   }
 });
@@ -1221,15 +1221,15 @@ test("零泄漏断言可取假 — 夹具伪造一个本前缀的残留 scope �
   );
   child.unref();
 
-  const seen = await waitUntil(() => readOwnScopes([probe]).units.includes(unit), 20_000);
+  const seen = await waitUntil(() => readOwnScopes([probe]).liveUnits.includes(unit), 20_000);
   assert.ok(seen, "夹具的残留 scope 必须真的出现在 user manager 上（⛔ 不是注入一个假读数）");
   assert.throws(
     () => assertNoOwnScopes([probe], "control/leaked"),
-    /仍有 1 个活着/,
+    /仍有 1 个/,
     "有残留 scope 时零泄漏断言必须变红（否则末尾那道闸不是一个测量）",
   );
 
   const rec = await reclaimOwnScopes([probe]);
-  assert.deepEqual(rec.remaining, [], `回收后不该有剩余: ${JSON.stringify(rec.attempts)}`);
+  assert.deepEqual(rec.remainingLive, [], `回收后不该有在跑的成员: ${JSON.stringify(rec.attempts)}`);
   assertNoOwnScopes([probe], "control/post");
 });

@@ -74,8 +74,42 @@ function unitStemFor(prefix, root) {
   return name.endsWith(suffix) ? name.slice(0, -suffix.length) : name;
 }
 
+/** How many processes the kernel says are in a unit's cgroup.
+ *
+ *  ⛔ WHY THIS IS THE JUDGED QUANTITY AND THE UNIT LISTING IS NOT (measured 2026-10-15, this host):
+ *  `systemctl list-units --all` keeps listing a scope for a while AFTER it stopped — such a unit
+ *  reads `dead`, its cgroup directory is gone, and it holds nothing. Measured: three combined
+ *  `node --test <both files>` runs flagged 0 / 2 / 2 "new" units at +15s and **every one of them was
+ *  `dead` with no cgroup directory** — i.e. the listing alone reports a leak that is not one, and a
+ *  gate built on it is a flake generator in both directions. What this task is about is a scope that
+ *  still holds processes (that is what `listSharedHostScopes()` counts and what "活过套件" means).
+ *  ⇒ `liveUnits` (cgroup.procs non-empty) is the judged quantity; `units` is reported alongside so
+ *  the lagging records stay visible (硬规则 3b: 记在表上但已回收 ≠ 还在跑).
+ *
+ *  Returns `null` for 「读不成」 (⛔ never folded into `false` = 「没有成员」). */
+function unitMemberCount(unit) {
+  const show = spawnSync("systemctl", ["--user", "show", "-p", "ControlGroup", "--value", unit], {
+    encoding: "utf8",
+    timeout: LIST_TIMEOUT_MS,
+  });
+  if (show.error || show.status !== 0) return null;
+  const rel = String(show.stdout || "").trim();
+  if (!rel) return null; // 没有 ControlGroup 读数 ≠ 没有成员
+  try {
+    return fs.readFileSync(path.join("/sys/fs/cgroup", rel, "cgroup.procs"), "utf8").trim().split("\n").filter(Boolean).length;
+  } catch (e) {
+    // ENOENT: the cgroup directory is gone ⇒ the unit was collected and provably holds nothing.
+    // 其它 errno（权限/IO）⇒ 读不成，⛔ 不与「零成员」同形。
+    return e && e.code === "ENOENT" ? 0 : null;
+  }
+}
+
 /**
- * The live scopes THIS file started, read off the user manager.
+ * The scopes THIS file started, read off the user manager.
+ *
+ * `units` = every matching unit the manager still lists (may include already-collected records);
+ * `liveUnits` = the subset whose cgroup still holds ≥1 process — **the judged quantity** (see
+ * `unitMemberCount`).
  *
  * Three-valued (硬规则 3b): `evaluated: false` + a NAMED `reason` is its own answer — 「没查成」 must
  * not share an output with 「查过，就是没有」.
@@ -101,10 +135,20 @@ export function readOwnScopes(roots, prefixes = SHARED_HOST_SCOPE_PREFIXES) {
       for (const stem of wanted) if (unit.startsWith(stem)) units.add(unit);
     }
   }
+
+  const listed = [...units].sort();
+  const liveUnits = [];
+  for (const unit of listed) {
+    const members = unitMemberCount(unit);
+    if (members === null) unreadable.push(`${unit} → member count not evaluated`);
+    else if (members > 0) liveUnits.push(unit);
+  }
+
   return {
     evaluated: unreadable.length === 0,
-    units: [...units].sort(),
-    reason: unreadable.length === 0 ? null : `systemctl --user list-units unreadable: ${unreadable.join("; ")}`,
+    units: listed,
+    liveUnits,
+    reason: unreadable.length === 0 ? null : `scope reading not evaluated: ${unreadable.join("; ")}`,
   };
 }
 
@@ -132,33 +176,32 @@ function killScopeCgroup(unit) {
 }
 
 /** 回收的重试预算。为什么不是「停一次就够」：`systemctl stop` 返回 0 表示**作业已受理**，而单元从
- *  `active` 到消失之间有一段反激活窗口；夹具若在这段窗口里还有成员落地（anchor 正在死的同一瞬间
- *  fork 出来的子进程），单次读-停-读会读到「已空」而单元随后又带着那个成员留在表上。
- *  实测 2026-10-15：一次**全绿**的 `node --test driver-cli.test.mjs driver-restart-busy-e2e.test.mjs`
- *  之后，`quay-anchor-e2e-restart-ac2a-xfqmmW-…` 仍带着一个 fixture 子进程活着（⛔ 不是「收集延迟」：
- *  它的成员在我们采样 85 秒后仍在），而同一份代码单独跑 AC2a 三次都不漏。⇒ 单次停不足以保证，
- *  预算必须是「停 → 短路 → 重读 → 仍在就再停」，有界（⛔ 不是无界重试）。 */
+ *  `active` 到真正没有成员之间有一段窗口 —— 夹具若在这段窗口里还有成员落地（anchor 正在死的同一
+ *  瞬间 fork 出来的子进程，或仍在收尾的 kind 循环），单次「读-停-读」就会读到「已空」而单元随后
+ *  又带着那个成员回来。⛔ 判据是**成员数**（`liveUnits`）而不是「单元还在不在表上」：后者会把系统
+ *  的收集延迟读成泄漏（实测见 `unitMemberCount`）。有界重试，⛔ 不是无界。 */
 const RECLAIM_ATTEMPTS = 10;
 const RECLAIM_SETTLE_MS = 300;
 
 /**
- * Stop every scope this file started under the given roots, and keep at it until the table is empty
- * (bounded) — returns the raw readings so a caller, or a human reading a failure, sees WHAT happened
- * rather than a boolean. Idempotent and cheap when there is nothing to reclaim (one list + short-circuit).
+ * Stop every scope this file started under the given roots, and keep at it until **none of them holds
+ * a process** (bounded). Returns the raw readings so a caller, or a human reading a failure, sees WHAT
+ * happened rather than a boolean. Idempotent and cheap when there is nothing to reclaim.
  */
 export async function reclaimOwnScopes(roots, prefixes = SHARED_HOST_SCOPE_PREFIXES) {
   const before = readOwnScopes(roots, prefixes);
   const attempts = [];
-  let remaining = before.units;
-  let evaluated = before.evaluated;
-  let reason = before.reason;
+  let after = before;
+  let round = 0;
 
-  for (let attempt = 1; attempt <= RECLAIM_ATTEMPTS && remaining.length > 0; attempt++) {
-    for (const unit of remaining) {
+  while (round < RECLAIM_ATTEMPTS && after.liveUnits.length > 0) {
+    round += 1;
+    // 停**所有**列出中的单元（含已无成员的：对系统是一次幂等 no-op，却能让滞后的单元记录尽快消失）。
+    for (const unit of after.units) {
       const r = spawnSync("systemctl", ["--user", "stop", unit], { encoding: "utf8", timeout: STOP_TIMEOUT_MS });
       const failed = Boolean(r.error) || r.status !== 0;
       attempts.push({
-        attempt,
+        round,
         unit,
         rc: r.status,
         error: failed ? (r.error ? r.error.message : String(r.stderr || "").trim()) : null,
@@ -167,13 +210,20 @@ export async function reclaimOwnScopes(roots, prefixes = SHARED_HOST_SCOPE_PREFI
       });
     }
     await new Promise((r) => setTimeout(r, RECLAIM_SETTLE_MS));
-    const after = readOwnScopes(roots, prefixes);
-    remaining = after.units;
-    evaluated = after.evaluated;
-    reason = after.reason;
+    after = readOwnScopes(roots, prefixes);
   }
 
-  return { before: before.units, attempts, remaining, evaluated, reason, attemptsUsed: attempts.length ? Math.max(...attempts.map((a) => a.attempt)) : 0 };
+  return {
+    before: before.units,
+    attempts,
+    /** 仍在表上的单元（可能只是收集延迟 —— 判据不取它，但⛔不隐藏它）。 */
+    remaining: after.units,
+    /** **仍在跑**的单元：判据取它。 */
+    remainingLive: after.liveUnits,
+    evaluated: before.evaluated && after.evaluated,
+    reason: after.reason ?? before.reason,
+    rounds: round,
+  };
 }
 
 /**
@@ -197,9 +247,10 @@ export function assertNoOwnScopes(roots, label, prefixes = SHARED_HOST_SCOPE_PRE
     return { ...r, reading: "not-applicable: this host has no systemd --user scope envelope, so no scope could have been created" };
   }
   assert.deepEqual(
-    r.units,
+    r.liveUnits,
     [],
-    `${label}: 本文件起的 scope 仍有 ${r.units.length} 个活着（scope 的成员不只是 anchor——kind 循环 spawn 的子进程同样住在里面）: ${r.units.join(", ")}`,
+    `${label}: 本文件起的 scope 仍有 ${r.liveUnits.length} 个**在跑**（scope 的成员不只是 anchor——kind 循环 spawn 的子进程同样住在里面）: ` +
+      `${r.liveUnits.join(", ")}${r.units.length > r.liveUnits.length ? `（另有已无成员、仅系统单元记录滞后的: ${r.units.filter((u) => !r.liveUnits.includes(u)).join(", ")}）` : ""}`,
   );
   return r;
 }
