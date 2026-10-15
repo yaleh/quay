@@ -30,11 +30,11 @@ develop 的 CI 全红里，`plugin/test/driver-anchor-memory-envelope.test.mjs` 
 
 ## AC
 
-- [ ] AC1: 该用例改为有界轮询（粘贴改动前后的实现片段），上限是**显式常量**且失败时打印上限值 + 最后一次枚举快照 + 期望单元名。
-- [ ] AC2: A/B 读数：改动前在「多 scope 同居」形状下至少复现一次红（粘贴原文断言与枚举快照）；改动后同一形状连跑 3 次 `node --test plugin/test/driver-anchor-memory-envelope.test.mjs` 均退出码 0（粘贴三次 `ℹ tests/pass/fail`）。
-- [ ] AC3: 负控：让期望单元名错一位（或让探针不建 scope）后，该用例必须在**有界时间内**红且报出只名原因（粘贴原文）；⛔ 不得出现「永久挂起到 harness 超时」或静默绿。
-- [ ] AC4: 断言强度未被削弱：改动后仍要求枚举里含**本探针**的 scope，且至少一条**别的项目**的 `quay-anchor-*` scope（粘贴改动后的枚举读数）。
-- [ ] AC5: 改动只落在该测试文件（`git diff --name-only` 只有它）。
+- [x] AC1: 该用例改为有界轮询（粘贴改动前后的实现片段），上限是**显式常量**且失败时打印上限值 + 最后一次枚举快照 + 期望单元名。
+- [x] AC2: A/B 读数：改动前在「多 scope 同居」形状下至少复现一次红（粘贴原文断言与枚举快照）；改动后同一形状连跑 3 次 `node --test plugin/test/driver-anchor-memory-envelope.test.mjs` 均退出码 0（粘贴三次 `ℹ tests/pass/fail`）。
+- [x] AC3: 负控：让期望单元名错一位（或让探针不建 scope）后，该用例必须在**有界时间内**红且报出只名原因（粘贴原文）；⛔ 不得出现「永久挂起到 harness 超时」或静默绿。
+- [x] AC4: 断言强度未被削弱：改动后仍要求枚举里含**本探针**的 scope，且至少一条**别的项目**的 `quay-anchor-*` scope（粘贴改动后的枚举读数）。
+- [x] AC5: 改动只落在该测试文件（`git diff --name-only` 只有它）。
 
 ## DoD
 

@@ -50,10 +50,17 @@ AC1–AC3 带真实读数勾选；本任务只做测量与立案，不改任何�
 - 取数：`.quay/baseline-red-rounds.jsonl` 最近 8 轮 `blocked` **去重并集 = 60 个文件**，与 Proposal 逐字一致；ts 区间一致。
 - 测量：develop tip `dae398dd7` 的专用 worktree，逐文件 `node --test` 两遍、顺序执行（120 趟）
   ⇒ **确定性红 0 / 隔离绿 59 / 不稳定 1**（三类之和 = 60，每行恰属一类）。
+- **round B（换树复核，§3b）**：`git merge develop` 之后在同一棵 worktree 上原样重跑同一套 120 趟
+  （测得的树 `84bf0429b`，develop 内容基线 `8fea2373`）⇒ **逐文件类别与 round A 全部 60 个一致**：
+  确定性红 0 / 隔离绿 59 / 不稳定 1，且不稳定的仍是同一个文件。⇒ 「0 确定性红」不是某一棵树的偶然。
 - fidelity：worktree provisioning 只拷 `plugin/vendor/*/dist`、**不建 `packages/*/dist`** ⇒ `QUAY_CLI` 退化为 `.ts` 回退（与真套件不同形）⇒ 补跑 `scripts/test.sh` 的 `build_dist_once` 并**作废首轮重跑**（非中途改口径）。
 - 仪器正控：必然红的控制文件跑出 `exit 1` + `# fail 1` ⇒ 「0 红」是**测出来的**，不是默认值。
-- 唯一的不稳定文件 `plugin/test/driver-restart-busy-e2e.test.mjs`：4 趟 2 绿 2 红，**红点始终是同一条用例 `AC2a-real`**（其余每条用例每趟都绿），失败文案 `timed out waiting for the dispatched fixture worker to appear`（墙钟等待，非断言值算错）。文档 §5b 已点名并给出归属。
+- 唯一的不稳定文件 `plugin/test/driver-restart-busy-e2e.test.mjs`（§5b，6 趟）：**3 绿 3 红**，红点是
+  **`AC2a-real`×2 与 `AC2b`×1** ⇒ **红点会移动**（同一份夹具、不同用例在不同趟次输掉同一场竞速），
+  失败文案统一为 `timed out waiting for the dispatched fixture worker to appear`（**墙钟等待**，非断言值算错）。
+  ⛔ 已写明 `/proc` 进程数与本条红**不是单调对应**，不把相关性说成成因。
+  （本条**修正**了本文件早先的一句「红点始终是同一条用例」——round B 把它证伪了，故按实测改写。）
 
-**AC3 的答案**：本任务板上**无需新立修复任务**——120 趟里没有任何文件判为「确定性红」，文档 §5 如实写明，并给出机制解释：载体 `blocked` 的语义是「task 树红了、develop 基线树重跑没红」（`worker-fan-in.ts:1345-1359` + `:3123-3127`），而一个在 develop 上确定性红的文件在 A/B 里两趟都会红 ⇒ 走 `exempt` ⇒ **结构性不会进入该载体**。文档同时列出内存/并发方向的既有归属任务，使「0 确定性红」这个结论可执行。
+**AC3 的答案**：本任务板上**无需新立修复任务**——两轮共 240 趟里没有任何文件判为「确定性红」，文档 §5 如实写明，并给出机制解释：载体 `blocked` 的语义是「task 树红了、develop 基线树重跑没红」（`worker-fan-in.ts:1345-1359` + `:3123-3127`），而一个在 develop 上确定性红的文件在 A/B 里两趟都会红 ⇒ 走 `exempt` ⇒ **结构性不会进入该载体**。文档同时列出内存/并发方向的既有归属任务，使「0 确定性红」这个结论可执行。
 
 **验证（worktree 内）**：scoped 门 `bash scripts/test.sh --for-task gap-develop-baseline-red-classify-deterministic-vs-load --allow-thin` ⇒ **exit 0**（selector selected 0 test files, thin allowed——Touches 是证据文档 + 任务自身，无可选测试）；`anti-drift-touches-check.ts --merge-target develop` ⇒ **OK, 1 actual file(s), all within declared Touches**；pre-commit 守卫通过。

@@ -1,7 +1,7 @@
 ---
 id: gap-release-cut-gh-absent-fixture-negative-control-fails-on-runner
 title: release-cut 夹具「让 gh 不存在」靠改写 PATH，runner 上 gh 在 /bin/gh ⇒ 自己的负控失败
-status: ready
+status: done
 labels:
   - gap
   - ci
