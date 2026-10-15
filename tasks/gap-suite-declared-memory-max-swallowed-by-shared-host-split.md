@@ -1,7 +1,7 @@
 ---
 id: gap-suite-declared-memory-max-swallowed-by-shared-host-split
 title: 运维声明的套件 memory_max 被多 scope 分摊护栏静默压到 26G：声明值应只受 0.25×有效总量约束（人裁定可放大到 32G）
-status: todo
+status: ready
 labels:
   - gap
   - defect
