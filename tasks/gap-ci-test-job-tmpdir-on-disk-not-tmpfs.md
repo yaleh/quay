@@ -2,7 +2,7 @@
 id: gap-ci-test-job-tmpdir-on-disk-not-tmpfs
 title: CI test job 把 TMPDIR 指向 runner 磁盘目录：runner 容器 /tmp 是 tmpfs，quay init
   拒绝且吃内存（与夹具修复互补）
-status: ready
+status: done
 labels:
   - gap
   - defect
