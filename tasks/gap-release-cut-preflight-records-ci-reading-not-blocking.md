@@ -2,7 +2,7 @@
 id: gap-release-cut-preflight-records-ci-reading-not-blocking
 title: release-cut preflight 记录 develop 最后一次 decisive CI 读数（记录⛔不阻塞）：给 SPEC §4.2
   一个可区分产物，不新增发版禁令
-status: todo
+status: ready
 labels:
   - gap
   - release
