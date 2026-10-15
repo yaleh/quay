@@ -1,7 +1,7 @@
 ---
 id: gap-release-cut-gh-absent-fixture-negative-control-fails-on-runner
 title: release-cut 夹具「让 gh 不存在」靠改写 PATH，runner 上 gh 在 /bin/gh ⇒ 自己的负控失败
-status: ready
+status: done
 labels:
   - gap
   - ci
@@ -26,12 +26,12 @@ develop 的 CI 全红里，`plugin/test/release-cut.test.mjs` 的
 
 ## AC
 
-- [ ] AC1: 给出 runner 上 `gh` 的真实位置读数（`command -v gh` / `ls -l /bin/gh` 原文），并说明改写 PATH 为什么摘不掉它。
-- [ ] AC2: 粘贴改动后的实现片段，说明「gh 不可用」现在由**夹具注入的机制**保证而不是由宿主布局保证。
-- [ ] AC3: 本机 A/B：改动前在 `gh` 位于 PATH 的形状下该用例红（粘贴原文断言）；改动后同一形状退出码 0（粘贴 `ℹ tests/pass/fail`）。
-- [ ] AC4: 负控：撤掉注入机制后 `P1/AC2` 必须红且点名（粘贴两次读数）。
-- [ ] AC5: 语义未被削弱：改动后该用例仍断言「手派指令给出的 ref == 工具会用的 ref」（粘贴改动后的断言行），⛔ 不得退化成「只要不抛错就算过」。
-- [ ] AC6: 改动只落在该测试文件（`git diff --name-only` 只有它）。
+- [x] AC1: 给出 runner 上 `gh` 的真实位置读数（`command -v gh` / `ls -l /bin/gh` 原文），并说明改写 PATH 为什么摘不掉它。
+- [x] AC2: 粘贴改动后的实现片段，说明「gh 不可用」现在由**夹具注入的机制**保证而不是由宿主布局保证。
+- [x] AC3: 本机 A/B：改动前在 `gh` 位于 PATH 的形状下该用例红（粘贴原文断言）；改动后同一形状退出码 0（粘贴 `ℹ tests/pass/fail`）。
+- [x] AC4: 负控：撤掉注入机制后 `P1/AC2` 必须红且点名（粘贴两次读数）。
+- [x] AC5: 语义未被削弱：改动后该用例仍断言「手派指令给出的 ref == 工具会用的 ref」（粘贴改动后的断言行），⛔ 不得退化成「只要不抛错就算过」。
+- [x] AC6: 改动只落在该测试文件（`git diff --name-only` 只有它）。
 
 ## DoD
 
@@ -42,3 +42,7 @@ develop 的 CI 全红里，`plugin/test/release-cut.test.mjs` 的
 
 - plugin/test/release-cut.test.mjs
 - tasks/gap-release-cut-gh-absent-fixture-negative-control-fails-on-runner.md
+
+
+ADR-007 逐里程碑暗轴记录（本任务的声明）
+该轴仍暗,理由: 本任务改的是夹具如何让 gh 不可用（与宿主布局无关的注入机制），是夹具环境耦合的修复，不量架构面（依赖图 / 文档比 / 变异存活都没测），没有可解析的读数可贴。
