@@ -46,6 +46,14 @@ extract
 **5b 扫描（同一符号，⛔ 不是「全仓 JSON 输出」）**：`grep -rn 'function printJson' plugin/scripts` 另命中 finding 未列的 **3 处**——`orphan-session-check.ts:240`、`psi-failure-correlation-check.ts:771`、`instrument-decay-check.ts:297`。三者都是**载荷构造器**（不是裸 emitter），其末行是两种共享形状之一的副本；现全部改走共享 emitter，并改名 `printOrphanReport` / `printCorrelationReport` / `printDecayReport`，使 `printJson` 在全仓只指一件事（emitter）。
 **范围上界（写明，免得被读成「这一类已清完」）**：同一扫描的**内联**形态（`console.log(JSON.stringify(` / `stdout.write(JSON.stringify`）在 `plugin/scripts` 命中约 200 处——那是另一个、大得多的类，本 finding 的 `printJson` 簇不是它；`instrument-decay-check.ts` 内剩下的内联 error-path emitter 随该类留待另案。
 
+**派发链复核补记（2026-10-15，第二轮；上一轮 exited-not-landed 的真因）**：上一轮以 `step=suite: incomplete suite (925/925 files)` 收尾，但读 suite 日志（`.quay/fan-in-suite-gap-routine-semantic-dedup-scan-print-json-three-behaviours~wk-prod-anchor~1792034656084-e57c61.log:2176`）可见真因**不是** suite 本身，而是先行的静态闸：
+`checker-mechanical-spine-check — 138 checker(s), 2 violation(s), 0 exempted`，红的正是
+`guard-lineage-check.ts (json)` 与 `psi-failure-correlation-check.ts (json)`：「声称 `--json` 但无 JSON 原语」。
+二者恰好是本任务把**最后一个** `JSON.stringify` 搬进共享 `printJson` 的两处（`orphan-session-check.ts` / `instrument-decay-check.ts` 尚存 error-path 内联形态，故未被触发）。静态闸 fail-closed ⇒ 测试阶段从未起跑（`terminal=0 missing=925`）⇒ 下游把它报成「suite 不完整」。
+**修法**：该判据的 `emitsJsonTs` **本就**有一条「委派给 `gate-script-base.ts` 的 emitter 即算产出 JSON」的分支（`emitVerdict/emitPass/emitFail/emitNotEvaluated`，其注释点名 `gap-gate-script-base-behavior-contract-unusable` 的同一次对齐）；`printJson`/`printJsonCompact` 是同一模块新增的**同类** emitter ⇒ 补上这一支是对**误报**的修正（委派是真的：两者体内就是 `JSON.stringify`），不是放宽闸门。
+⛔ 未走「把 `JSON.stringify` 塞回源文件当摆设」那条路——那是给闸门看的死 token。
+新支比 `emit*` 那支更**紧**：要求 **import 自 `./gate-script-base.ts`**（并解析 `as` 别名）后才认调用，因为 `printJson` 是通用名，裸名匹配会让「本地 `printJson` 只打印人读文本」这一 **C2 本要抓的形态**漏网；该负控制已进 `plugin/test/checker-mechanical-spine-check.test.mjs`。
+
 ## AC
 - [x] `.quay/routine-findings.jsonl` 中 finding `print-json-three-behaviours`（routine `semantic-dedup-scan`，runId `semantic-dedup-scan-1792033478766`）所描述的问题被复核并处置
 - [x] 处置结论可核：要么修掉，要么写明「已有机制在管、失败在哪一步」，⛔ 不以「已注意到」结案
@@ -64,6 +72,8 @@ extract
 - `plugin/scripts/orphan-session-check.ts`
 - `plugin/scripts/psi-failure-correlation-check.ts`
 - `plugin/scripts/instrument-decay-check.ts`
+- `plugin/scripts/checker-mechanical-spine-check.ts`
+- `plugin/test/checker-mechanical-spine-check.test.mjs`
 - `packages/quay/src/cli/shared.ts`
 - `tasks/gap-routine-semantic-dedup-scan-print-json-three-behaviours.md`
 
