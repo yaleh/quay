@@ -32,7 +32,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { createHash } from "node:crypto";
 import { execSync } from "node:child_process";
-import { createSelftest, parseJsonArg, git, gitLastCommitForPath, serializeSortedJson } from "./gate-script-base.ts";
+import { createSelftest, parseJsonArg, git, gitLastCommitForPath, serializeSortedJson, printJsonCompact } from "./gate-script-base.ts";
 
 // ── Types ───────────────────────────────────────────────────────────────────────────────────────────
 
@@ -467,10 +467,8 @@ export function selftest(): boolean {
 }
 
 // ── CLI entry ───────────────────────────────────────────────────────────────────────────────────────
-
-function printJson(obj: unknown): void {
-  console.log(JSON.stringify(obj));
-}
+// `printJsonCompact` (this file's former local `printJson`) is the shared emitter in
+// gate-script-base.ts — semantic-dedup-scan finding `print-json-three-behaviours`.
 
 function usage(): string {
   return [
@@ -559,7 +557,7 @@ export function main(argv: string[]): number {
       }
       const identity = requireIdentity(args[idx + 1]);
       const result = checkCandidateCommit(identity, args[idx + 2]);
-      printJson(result);
+      printJsonCompact(result);
       return result.ok ? 0 : 1;
     }
 
@@ -567,7 +565,7 @@ export function main(argv: string[]): number {
     return 0;
   } catch (err) {
     const e = err as Error & { code?: string };
-    printJson({ ok: false, code: e.code || "run-identity-error", message: e.message });
+    printJsonCompact({ ok: false, code: e.code || "run-identity-error", message: e.message });
     return 1;
   }
 }

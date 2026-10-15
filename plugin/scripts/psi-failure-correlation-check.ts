@@ -98,7 +98,7 @@ import { canonicalTestFiles } from "./canonical-test-files.ts";
 import { classifyFile } from "./runner-grouping.ts";
 import { windowMeanStall } from "./psi-window-join.ts";
 import { resolveCarrierRoot } from "./perfile-failure-rate.ts";
-import { readJsonLines, parseArgs as baseParseArgs } from "./gate-script-base.ts";
+import { readJsonLines, parseArgs as baseParseArgs, printJson } from "./gate-script-base.ts";
 import { readCpuStall } from "./suite-load-sampler.ts";
 
 type Sample = { t: number; cpu_stall: number };
@@ -768,7 +768,9 @@ function printPassive(res: ReturnType<typeof passiveAnalyze>): void {
   }
 }
 
-function printJson(args: ReturnType<typeof parseArgs>, active: Awaited<ReturnType<typeof activeRun>> | null, passive: ReturnType<typeof passiveAnalyze> | null, verdict: string): void {
+// Renamed from `printJson` when its terminal write moved to the shared emitter: the local name is
+// the payload BUILDER's, and `printJson` now names the imported emitter (gate-script-base.ts).
+function printCorrelationReport(args: ReturnType<typeof parseArgs>, active: Awaited<ReturnType<typeof activeRun>> | null, passive: ReturnType<typeof passiveAnalyze> | null, verdict: string): void {
   const out: Record<string, unknown> = { verdict };
   if (active) {
     const mech = activeMechanism(active.validFailures, active.trials, active.loadLevels);
@@ -826,7 +828,9 @@ function printJson(args: ReturnType<typeof parseArgs>, active: Awaited<ReturnTyp
   } else if (passive && !passive.carrierFound) {
     out.passive = { carrierFound: false, path: passive.path };
   }
-  process.stdout.write(JSON.stringify(out, null, 2) + "\n");
+  // Pretty shape from the shared emitter (gate-script-base.ts) — this file carried a local copy of
+  // the same terminal write; semantic-dedup-scan finding `print-json-three-behaviours` (5b sweep).
+  printJson(out);
 }
 
 async function main(): Promise<void> {
@@ -862,7 +866,7 @@ async function main(): Promise<void> {
     verdict = passive.verdict;
   }
   if (args.json) {
-    printJson(args, active, passive, verdict);
+    printCorrelationReport(args, active, passive, verdict);
   } else {
     console.log("");
     console.log(`GO/NO-GO 结论(主=主动, 辅=被动): ${verdict === "signal" ? "有增量信号，进入 Phase 1" : verdict === "no-signal" ? "无增量信号，Phase 1 不做" : "样本不足，Phase 1 不做"}`);

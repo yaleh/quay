@@ -38,7 +38,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { execSync } from "node:child_process";
 import { validateEvent, emitEvent, VALID_STAGES } from "./workflow-event-schema.mjs";
-import { createSelftest, parseJsonArg } from "./gate-script-base.ts";
+import { createSelftest, parseJsonArg, printJsonCompact } from "./gate-script-base.ts";
 import {
   sha256File,
   serializeReceipt,
@@ -603,10 +603,8 @@ export function selftest(): boolean {
 }
 
 // ── CLI entry ───────────────────────────────────────────────────────────────────────────────────────
-
-function printJson(obj: unknown): void {
-  console.log(JSON.stringify(obj));
-}
+// `printJsonCompact` (this file's former local `printJson`) is the shared emitter in
+// gate-script-base.ts — semantic-dedup-scan finding `print-json-three-behaviours`.
 
 /** This module's historical CLI-JSON error text: `invalid-json: <message>` (kept verbatim). */
 const journalJsonError = (code: string, message: string) => new Error(`${code}: ${message}`);
@@ -630,7 +628,7 @@ export function main(argv: string[]): number {
       const event = parseJsonArg(raw, journalJsonError) as Record<string, unknown>;
       const store = new StageJournalStore({ milestoneId, cwd });
       const result = store.appendStage(event);
-      printJson(result);
+      printJsonCompact(result);
       return result.ok ? 0 : 1;
     }
 
@@ -641,7 +639,7 @@ export function main(argv: string[]): number {
       const updates = parseJsonArg(raw, journalJsonError) as Record<string, Record<string, unknown>>;
       const store = new StageJournalStore({ milestoneId, cwd });
       const result = store.persistVerifyCache(updates);
-      printJson(result);
+      printJsonCompact(result);
       return result.ok ? 0 : 1;
     }
 
@@ -652,7 +650,7 @@ export function main(argv: string[]): number {
       const identity = parseJsonArg(raw, journalJsonError) as Record<string, unknown>;
       const store = new StageJournalStore({ milestoneId, cwd });
       const result = store.loadValidatedVerifyCache(identity);
-      printJson(result);
+      printJsonCompact(result);
       return result.ok ? 0 : 1;
     }
 
@@ -663,13 +661,13 @@ export function main(argv: string[]): number {
       if (raw == null) {
         // absent input → recorded-provenance no-op
         const store = new StageJournalStore({ milestoneId, cwd });
-        printJson(store.recordAbsentMigration("dir124a"));
+        printJsonCompact(store.recordAbsentMigration("dir124a"));
         return 0;
       }
       const event = parseJsonArg(raw, journalJsonError) as Record<string, unknown>;
       const store = new StageJournalStore({ milestoneId, cwd });
       const result = store.migrateDir124AEvent(event);
-      printJson(result);
+      printJsonCompact(result);
       return result.ok ? 0 : 1;
     }
 
@@ -679,22 +677,22 @@ export function main(argv: string[]): number {
       const raw = args[idx + 1] ?? (fromIdx !== -1 ? args[fromIdx + 1] : undefined);
       if (raw == null) {
         const store = new StageJournalStore({ milestoneId, cwd });
-        printJson(store.recordAbsentMigration("dir126d"));
+        printJsonCompact(store.recordAbsentMigration("dir126d"));
         return 0;
       }
       const record = parseJsonArg(raw, journalJsonError) as Record<string, unknown>;
       const store = new StageJournalStore({ milestoneId, cwd });
       const result = store.migrateDir126DTelemetry(record);
-      printJson(result);
+      printJsonCompact(result);
       return result.ok ? 0 : 1;
     }
 
-    printJson({ ok: true, usage: "workflow-journal.ts — see header for CLI modes" });
+    printJsonCompact({ ok: true, usage: "workflow-journal.ts — see header for CLI modes" });
     return 0;
   } catch (err) {
     const e = err as Error;
     const code = /^[a-z-]+:/.test(e.message) ? e.message.split(":")[0] : "workflow-journal-error";
-    printJson({ ok: false, code, message: e.message });
+    printJsonCompact({ ok: false, code, message: e.message });
     return 1;
   }
 }
