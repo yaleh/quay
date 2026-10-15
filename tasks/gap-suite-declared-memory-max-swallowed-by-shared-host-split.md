@@ -50,3 +50,11 @@ AC1–AC4 带真实读数勾选。落地后（运维步骤，不在 worker 内�
 - plugin/test/full-suite-runner-declared-memory-guard.test.mjs
 - plugin/test/full-suite-runner-cgroup.test.mjs
 - tasks/gap-suite-declared-memory-max-swallowed-by-shared-host-split.md
+
+## Blocker
+
+**2026-10-15T07:52:08.638Z — worker 未落地（exited-not-landed）**
+
+- 未落地原因：step=suite: oom-killed (1) — recovery baseline-equivalence not evaluable at concurrency 64 — needs a code fix
+- run_id：wk-prod-anchor
+- session_id：28b0ba9d-f7f5-4ab6-b3be-b1f2a711348b
