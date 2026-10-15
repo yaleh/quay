@@ -3,7 +3,7 @@ id: gap-routine-semantic-dedup-scan-list-script-basenames-diverged-under-one-nam
 title: "semantic-dedup-scan: Identical bodies under one name, but one filters on
   EXEC_EXTENSIONS (.ts .sh .mjs .js .cjs .bash) and the other on
   SCRIPT_EXTENSIONS (.ts .sh .mjs), so the two"
-status: todo
+status: needs-human
 labels:
   - gap
   - routine-filed
@@ -115,3 +115,14 @@ merge
 - 未落地原因：step=suite: oom-killed (1) — recovery exhausted at floor concurrency 32 — no declared rung produced a complete verdict (64,48,32); needs a code/config fix, see plugin/scripts/full-suite-runner.ts
 - run_id：wk-prod-anchor
 - session_id：6635aec1-549b-42ff-ad59-dc26098af244
+
+## Needs-Human
+
+**执行 2026-10-15T06:07:59.057Z — 停派终止（失败无法归因，⛔ 不再重派）**
+
+- 阻碍原因：exited-not-landed 失败无法归因（基建/契约疑似，非实现缺陷）——停止重派，⛔ 不再拿新会话撞同一堵墙：suite red could not be attributed to any failing test file in 2 consecutive rounds (bounded to at most one retry) — infra/contract suspected, not an implementable defect (parser extracted 0 of 3 failing lines and attributed none to a file; pseudo-stage tokens: __PERFILE__, lint; unrecognized tokens: ...); stopping instead of spending another worker session
+- 失败步/判词：step=suite: oom-killed (1) — recovery exhausted at floor concurrency 32 — no declared rung produced a complete verdict (64,48,32); needs a code/config fix, see plugin/scripts/full-suite-runner.ts
+- run_id：wk-prod-anchor
+- session_id：6635aec1-549b-42ff-ad59-dc26098af244
+- suite 日志：/data/home/yale/work/quay/.quay/fan-in-suite-gap-routine-semantic-dedup-scan-list-script-basenames-diverged-under-one-name~wk-prod-anchor~1792040372743-b70c82.log
+- fan-in 日志：/data/home/yale/work/quay/.quay/fan-in-gap-routine-semantic-dedup-scan-list-script-basenames-diverged-under-one-name-wk-prod-anchor.log
