@@ -292,6 +292,7 @@ done）。**但逐字段核对（`plugin/scripts/profile-policy.ts:32-56`）确�
 - plugin/.quay/profiles.yml
 - .claude/launch.settings.json
 - plugin/.claude/launch.settings.json
+- plugin/test/worker-driver-fan-in-s02.test.mjs
 
 ## Blocker
 
