@@ -1,7 +1,7 @@
 ---
 id: gap-suite-resource-measurement-needs-a-host-adapter-not-inline-cgroup-calls
 title: 套件资源测量/执行改走宿主 adapter 接口：Linux cgroup/systemd 只是一个实现，不硬编码跨项目路径、不建资源中心
-status: todo
+status: ready
 labels:
   - gap
 parent: null
