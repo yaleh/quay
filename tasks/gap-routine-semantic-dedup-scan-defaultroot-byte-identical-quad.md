@@ -91,8 +91,8 @@ merge
 
 ## Blocker
 
-**2026-10-15T04:09:45.627Z — worker 未落地（exited-not-landed）**
+**2026-10-15T05:12:55.890Z — worker 未落地（exited-not-landed）**
 
-- 未落地原因：step=suite: oom-killed (2) — recovery exhausted at floor concurrency 32 — no declared rung produced a complete verdict (64,48,32); needs a code/config fix, see plugin/scripts/full-suite-runner.ts
+- 未落地原因：step=suite: oom-killed (4) — recovery exhausted at floor concurrency 32 — no declared rung produced a complete verdict (64,48,32); needs a code/config fix, see plugin/scripts/full-suite-runner.ts
 - run_id：wk-prod-anchor
-- session_id：6edb158c-5060-427c-ae59-c013067ad204
+- session_id：faccfcf6-ea68-4d46-8b04-cbcf2ff4cb66
