@@ -819,6 +819,15 @@ function positiveIntFromEnv(name: string): number | undefined {
   return Number.isInteger(n) && n >= 1 ? n : undefined;
 }
 
+/** The positive-number twin of `positiveIntFromEnv` — for a knob whose unit is not a count (the
+ *  heavy threshold is MiB and a fractional value is meaningful). Same empty-string-is-unset rule. */
+function positiveNumberFromEnv(name: string): number | undefined {
+  const raw = process.env[name];
+  if (raw === undefined || raw === "") return undefined;
+  const n = Number(raw);
+  return Number.isFinite(n) && n > 0 ? n : undefined;
+}
+
 /** Parse a positive-integer arg (e.g. --serial-concurrency 2); NaN/<1 → null (caller errors). */
 function parsePositiveIntArg(argv: string[], name: string): number | null {
   const raw = flagValue(argv, name);
@@ -1180,6 +1189,84 @@ export function readPerFileMemoryHighWaterBytes(
     opts?.maxTailBytes ?? SUITE_PERFILE_MEMORY_TAIL_BYTES,
   );
   return perFileMemoryHighWaterBytes(rows, opts?.percentile ?? SUITE_PERFILE_MEMORY_PERCENTILE);
+}
+
+/**
+ * PER-FILE measured high-water, keyed by the SAME repo-relative path the round record stores
+ * (pure) — `max(memPeakKb)` over the pooled rows, in BYTES. This is the per-FILE reading the
+ * memory-aware scheduler needs; `perFileMemoryHighWaterBytes` above answers the different question
+ * "what does ONE LANE need on average" (a p95 over the whole population) and cannot say which file
+ * is the heavy one.
+ *
+ * ⛔ The MAX, not a percentile: a bucket's bound must hold for the heaviest thing in it, and a file
+ * with one heavy round and four light ones IS heavy (the bound is about the peak, hard rule 4b — a
+ * percentile here would be a proxy that silently drops exactly the file the bucket exists for).
+ * A file with no `memPeakKb` in any row of the window contributes nothing (缺值 ≠ 0); callers see it
+ * as "not measured" and MUST NOT schedule it as light on that basis alone.
+ */
+export function perFileHighWaterByName(rows: unknown[]): Map<string, number> {
+  const out = new Map<string, number>();
+  for (const row of rows) {
+    const perFile = (row as { perFile?: unknown })?.perFile;
+    if (!Array.isArray(perFile)) continue;
+    for (const f of perFile) {
+      const file = (f as { file?: unknown })?.file;
+      const kb = (f as { memPeakKb?: unknown })?.memPeakKb;
+      if (typeof file !== "string" || file === "") continue;
+      if (typeof kb !== "number" || !Number.isFinite(kb) || kb <= 0) continue;
+      const bytes = kb * 1024;
+      const prev = out.get(file);
+      if (prev === undefined || bytes > prev) out.set(file, bytes);
+    }
+  }
+  return out;
+}
+
+/** Read the per-file high-water window from the runner's own round record (the thinnest possible
+ *  wrapper over the pure function above + the bounded tail read). */
+export function readPerFileHighWaterByName(
+  stateDir: string,
+  opts?: { rounds?: number; maxTailBytes?: number },
+): Map<string, number> {
+  const rows = readRoundRowsFromTail(
+    path.join(stateDir, "verification-round.jsonl"),
+    opts?.rounds ?? SUITE_PERFILE_MEMORY_ROUNDS,
+    opts?.maxTailBytes ?? SUITE_PERFILE_MEMORY_TAIL_BYTES,
+  );
+  return perFileHighWaterByName(rows);
+}
+
+/**
+ * The HEAVY bucket's membership, pure: the SELECTED files whose measured high-water is strictly
+ * above `thresholdBytes`. Membership only — the scheduling that bounds them lives in test.sh.
+ *
+ * ⛔ A file with NO measured high-water is NOT heavy by default and is NOT dropped either: it stays
+ * in the normal bucket, which is the status quo. "Never measured" cannot be read as "below
+ * threshold" (hard rule 6) — but it also must not be promoted into a bucket whose bound was
+ * justified by measurements it does not have, so the only honest reading of 未查 is "leave it where
+ * it already is".
+ *
+ * Path keys are normalized by trimming a leading `./` on BOTH sides, so the round record's
+ * repo-relative spelling and a `test.sh --list-files` entry cannot disagree on the same file.
+ */
+export function heavyFileSet(
+  files: readonly string[],
+  highWaterBytes: ReadonlyMap<string, number>,
+  thresholdBytes: number,
+): string[] {
+  const norm = (p: string): string => (p.startsWith("./") ? p.slice(2) : p);
+  const byNormalized = new Map<string, number>();
+  for (const [file, bytes] of highWaterBytes) {
+    const key = norm(file);
+    const prev = byNormalized.get(key);
+    if (prev === undefined || bytes > prev) byNormalized.set(key, bytes);
+  }
+  const heavy: string[] = [];
+  for (const file of files) {
+    const bytes = byNormalized.get(norm(file));
+    if (bytes !== undefined && bytes > thresholdBytes) heavy.push(file);
+  }
+  return heavy;
 }
 
 /** The concurrency that ACTUALLY held, measured from the round record (pure): the maximum number of
@@ -3593,6 +3680,29 @@ export async function run(argv: string[]): Promise<number> {
     // 把两者分开的取值：非 null ⇒ 这一维**没评成**（读者不得把它读成「没有缺失」）。
     error: plannedResolution.error ?? (plannedFiles === null ? `plan unavailable (${plannedResolution.source})` : null),
   });
+  // ── memory-aware scheduling: the DECLARED heavy bucket (gap-suite-heavy-files-and-phase-…) ─────
+  // Files whose MEASURED per-file high-water exceeds the project-declared `suite.heavy_threshold_mb`
+  // are handed to test.sh as their own bounded bucket, so they never co-run beyond the declared
+  // `suite.heavy_max_concurrent`. ⛔ BOTH knobs are DECLARED (config → env, host-overridable); with
+  // neither present the mechanism is OFF and nothing is bucketed — there is deliberately no default
+  // threshold literal here (a machine-spec-dependent literal, hard rule 4 推论二).
+  //
+  // ⛔ The measurement window is the runner's OWN round record — the same `memPeakKb` the per-file
+  // cost collection already produces, so the bucket is driven by what this suite ACTUALLY used, not
+  // by a hand-kept list that rots as files change (a list is also a value that cannot take a false
+  // value — hard rule 4). A workspace with no history yet buckets nothing and says so below.
+  const heavyThresholdMb = positiveNumberFromEnv("QUAY_SUITE_HEAVY_THRESHOLD_MB");
+  const heavyMaxConcurrent = positiveIntFromEnv("QUAY_SUITE_HEAVY_MAX_CONCURRENT");
+  let heavyFiles: string[] = [];
+  if (heavyThresholdMb !== undefined && heavyMaxConcurrent !== undefined && plannedFiles && plannedFiles.length > 0) {
+    const highWater = readPerFileHighWaterByName(stateDir);
+    heavyFiles = heavyFileSet(plannedFiles, highWater, heavyThresholdMb * 1024 * 1024);
+    process.stderr.write(
+      `full-suite-runner: heavy bucket — declared threshold ${heavyThresholdMb} MiB, bound ${heavyMaxConcurrent}; ` +
+        `${heavyFiles.length}/${plannedFiles.length} planned file(s) exceed it (measured over ${SUITE_PERFILE_MEMORY_ROUNDS} rounds)` +
+        (highWater.size === 0 ? " — ⚠️ NO per-file measurements in the window, so nothing is bucketed\n" : `: ${heavyFiles.slice(0, 5).join(", ")}${heavyFiles.length > 5 ? ", …" : ""}\n`),
+    );
+  }
   let child: import("node:child_process").ChildProcess;
   // gap-verification-round-in-one-shot-worktree config C — the one-shot worktree REUSES the main
   // repo's warm NODE_COMPILE_CACHE (test.sh honors a user-supplied NODE_COMPILE_CACHE verbatim —
@@ -3629,6 +3739,16 @@ export async function run(argv: string[]): Promise<number> {
     // (`<key>.mem`), appended as mem_peak_kb. One dir, two dimensions — no second env var to wire.
     QUAY_PERFILE_CPU_DIR: perFileCpuDir,
     NODE_OPTIONS: withPerFileCpuPreload(process.env.NODE_OPTIONS),
+    // gap-suite-heavy-files-and-phase-… — the DECLARED heavy bucket, computed above from the
+    // runner's own measurements and handed to test.sh as data (⛔ not re-derived there: test.sh has
+    // no round history, so a second derivation would be a second, silently-diverging answer). An
+    // empty list ⇒ the phase is skipped entirely.
+    ...(heavyFiles.length > 0
+      ? {
+          QUAY_SUITE_HEAVY_FILES: heavyFiles.join("\n"),
+          QUAY_SUITE_HEAVY_MAX_CONCURRENT: String(heavyMaxConcurrent),
+        }
+      : {}),
   };
   if (useSystemdRun) {
     // The bounded child is started BY THE ADAPTER (Plan §1's second method): the runner hands it the

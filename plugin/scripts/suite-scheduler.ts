@@ -239,6 +239,21 @@ export interface ClassifyOptions {
   /** Receives the LPT provenance + whether the MAIN order actually changed, so the caller can put a
    *  real reading in the log instead of inferring "reordered" from a well-formed output (硬规则 3b). */
   onReport?: (r: LptReport) => void;
+  /** The DECLARED heavy set (gap-suite-heavy-files-and-phase-concurrency-under-16g-…): files whose
+   *  MEASURED high-water exceeds the project-declared threshold. They are pulled OUT of the three
+   *  scheduled buckets (they still run, exactly once, in the heavy tail) — see `onHeavy`. */
+  heavyFiles?: ReadonlySet<string>;
+  /** Receives the heavy files actually partitioned out of the SELECTED set. ⛔ A callback rather than
+   *  a fourth field on `GroupQueues`: the three-group shape IS the reliability-cap core's type, and
+   *  widening it would put the heavy tail inside `currentCap`'s min-lock (a heavy file would then
+   *  throttle the whole body to the heavy bound — the opposite of a memory bound). */
+  onHeavy?: (files: string[]) => void;
+}
+
+/** Normalize a file key for set membership: the round record and `test.sh --list-files` can spell the
+ *  same repo-relative path with or without a leading `./`. */
+function normFileKey(p: string): string {
+  return p.startsWith("./") ? p.slice(2) : p;
 }
 
 /** classify + filter + LPT-order the raw file list into the three per-bucket queues. Scheduling-only:
@@ -255,6 +270,22 @@ export function classifyAndOrder(files: string[], opts: ClassifyOptions): GroupQ
     if (include && !include.has(sg)) continue;
     queues[sg].push(f);
   }
+  // Partition the DECLARED heavy files out of the selected set (AFTER the --groups filter, so a
+  // filtered run cannot have a heavy file escape the selection). ⛔ They are MOVED, never duplicated:
+  // every file still runs exactly once per round — only its bucket changes.
+  const heavy: string[] = [];
+  if (opts.heavyFiles && opts.heavyFiles.size > 0) {
+    const heavyKeys = new Set<string>();
+    for (const k of opts.heavyFiles) heavyKeys.add(normFileKey(k));
+    for (const g of SUITE_GROUPS) {
+      queues[g] = queues[g].filter((f) => {
+        if (!heavyKeys.has(normFileKey(f))) return true;
+        heavy.push(f);
+        return false;
+      });
+    }
+  }
+  opts.onHeavy?.(heavy);
   if (!opts.lptEnabled) {
     opts.onReport?.({ provenance: "disabled", entries: 0, files: files.length, mainReordered: false });
     return queues;
@@ -336,8 +367,12 @@ export function runScheduler(opts: {
   budgets: SchedulerBudgets;
   groups: GroupQueues;
   testNamePatterns: string[];
+  /** The DECLARED heavy tail (gap-suite-heavy-files-and-phase-concurrency-under-16g-…): files whose
+   *  measured high-water exceeds the project-declared threshold, plus the declared co-run BOUND.
+   *  Absent ⇒ no heavy tail (the mechanism is OFF — ⛔ no default bound in code). */
+  heavy?: { files: string[]; concurrency: number };
 }): Promise<RunResult> {
-  const { budgets, groups, testNamePatterns } = opts;
+  const { budgets, groups, testNamePatterns, heavy } = opts;
   const queues: GroupQueues = { serial: [...groups.serial], lowconc: [...groups.lowconc], main: [...groups.main] };
   const active: ActiveCounts = { serial: 0, lowconc: 0, main: 0 };
   const stats: Record<SuiteGroup, GroupStats> = {
@@ -346,18 +381,31 @@ export function runScheduler(opts: {
     main: { durs: [], failed: 0, startMs: null, endMs: null },
   };
   let nextId = 1;
-  const running = new Map<number, { file: string; group: SuiteGroup; startMs: number }>();
+  const running = new Map<number, { file: string; group: SuiteGroup | "heavy"; startMs: number }>();
   const failedFiles: string[] = [];
   const schedulerStartMs = Date.now();
+  // ── the HEAVY tail's own accounting (deliberately OUTSIDE `stats`/`active`) ────────────────────
+  // `active` and `stats` are keyed by `SuiteGroup`, i.e. by the reliability-cap core's buckets. The
+  // heavy tail must NOT join them: `currentCap` is a min-lock over the ACTIVE groups, so a heavy
+  // group with the (small) declared bound would throttle the whole body to that bound whenever a
+  // heavy file ran — the bound is a MEMORY ceiling, not a load-tolerance tier, and conflating the
+  // two would silently make every round as slow as the heavy bound. So the heavy queue is tracked
+  // separately and dispatched only in the tail, when nothing else is running.
+  const heavyQueue: string[] = [...(heavy?.files ?? [])];
+  const heavyConcurrency = heavy ? heavy.concurrency : 0;
+  let heavyActive = 0;
+  const heavyStats: GroupStats = { durs: [], failed: 0, startMs: null, endMs: null };
 
   return new Promise<RunResult>((resolve) => {
     const finishFile = (id: number, failedCount: number) => {
       const rec = running.get(id);
       if (!rec) return;
       running.delete(id);
-      active[rec.group]--;
+      const isHeavy = rec.group === "heavy";
+      if (isHeavy) heavyActive--;
+      else active[rec.group]--;
       const dur = Math.max(0, Date.now() - rec.startMs);
-      const st = stats[rec.group];
+      const st = isHeavy ? heavyStats : stats[rec.group];
       const passed = failedCount === 0;
       st.durs.push(dur);
       if (!passed) {
@@ -381,7 +429,9 @@ export function runScheduler(opts: {
       // A group closes when its queue is drained AND nothing of it is still running — emit its
       // __GROUP__ + __OVERHEAD__ <group>_phase_ms once, at close (the downstream accounting reads
       // one __GROUP__ per group, same shape as measure-suite-reporter's per-phase line).
-      if (queues[rec.group].length === 0 && active[rec.group] === 0) {
+      if (isHeavy) {
+        if (heavyQueue.length === 0 && heavyActive === 0) emitGroup("heavy", heavyConcurrency, heavyStats);
+      } else if (queues[rec.group].length === 0 && active[rec.group] === 0) {
         emitGroup(rec.group, budgets[rec.group], st);
       }
       tick(); // re-dispatch on the freed capacity (event-driven — "推进到最早完成")
@@ -419,6 +469,34 @@ export function runScheduler(opts: {
       });
 
     const tick = () => {
+      // ── the HEAVY tail ────────────────────────────────────────────────────────────────────────
+      // Dispatched ONLY when the three scheduled buckets are completely drained (nothing running,
+      // every queue empty), up to the DECLARED bound at a time. Two properties fall out of that
+      // placement, both load-bearing under a 16 GiB ceiling: (1) "never co-run beyond the declared
+      // count" is a property of the SCHEDULE, not of the waterline's arithmetic holding under every
+      // group mix; (2) the bucket's peak is (bound × the heaviest file) and can NEVER be additive
+      // with the body's — which is the entire reason to bound them separately.
+      // ⛔ The gate is "the BODY has fully drained" — nothing running AND all three queues empty —
+      // not merely "nothing is running right now": at the very first tick nothing is running yet, so
+      // a `running.size === 0` test alone would start the heavy tail BEFORE the body and make the two
+      // additive (measured: body1 overlapped heavy1). The three queues empty is what makes this a TAIL.
+      if (
+        heavyConcurrency > 0 &&
+        heavyQueue.length > 0 &&
+        running.size === 0 &&
+        queues.serial.length === 0 &&
+        queues.lowconc.length === 0 &&
+        queues.main.length === 0
+      ) {
+        while (heavyActive < heavyConcurrency && heavyQueue.length > 0) {
+          const file = heavyQueue.shift() as string;
+          heavyActive++;
+          heavyStats.startMs ??= Date.now();
+          const id = nextId++;
+          running.set(id, { file, group: "heavy", startMs: Date.now() });
+          driveFile(file).then((failedCount) => finishFile(id, failedCount));
+        }
+      }
       const started = nextDispatch(budgets, queues, active);
       for (const s of started) {
         const st = stats[s.group];
@@ -427,7 +505,13 @@ export function runScheduler(opts: {
         running.set(id, { file: s.file, group: s.group, startMs: Date.now() });
         driveFile(s.file).then((failedCount) => finishFile(id, failedCount));
       }
-      if (running.size === 0 && queues.serial.length === 0 && queues.lowconc.length === 0 && queues.main.length === 0) {
+      if (
+        running.size === 0 &&
+        queues.serial.length === 0 &&
+        queues.lowconc.length === 0 &&
+        queues.main.length === 0 &&
+        heavyQueue.length === 0
+      ) {
         process.stderr.write(`__OVERHEAD__ scheduler_ms=${Date.now() - schedulerStartMs}\n`);
         resolve({ failed: failedFiles.length, failedFiles });
       }
@@ -442,7 +526,7 @@ export function runScheduler(opts: {
 
 /** Emit the group's __GROUP__ + __OVERHEAD__ <group>_phase_ms lines (measure-suite-reporter's
  *  group-floor shape: floor = max(sum/concurrency, longest) — auto-evaluated, no human arithmetic). */
-function emitGroup(group: SuiteGroup, concurrency: number, st: GroupStats): void {
+function emitGroup(group: SuiteGroup | "heavy", concurrency: number, st: GroupStats): void {
   if (st.startMs === null || st.endMs === null || st.durs.length === 0) return; // group never ran
   const sumMs = st.durs.reduce((a, b) => a + b, 0);
   const longestMs = Math.max(...st.durs);
@@ -557,12 +641,47 @@ async function main(argv: string[]): Promise<number> {
     process.stderr.write("suite-scheduler: no test files on stdin\n");
     return 2;
   }
+  // ── the DECLARED heavy bucket (gap-suite-heavy-files-and-phase-concurrency-under-16g-…) ────────
+  // Both halves come from the environment, put there by the RUNNER (config → env, so a declared
+  // value survives a driver restart and an operator can override it per host). ⛔ The runner OWNS
+  // the measurement — this module never re-derives the set from a duration/memory carrier, because
+  // two derivations of "which files are heavy" would be two answers free to disagree (硬规则 1).
+  //
+  // The bucket is ON only when BOTH halves are readable. A file list with no readable bound is
+  // reported LOUDLY and those files stay in the normal schedule: running them at an undeclared bound
+  // would be a schedule nobody asked for, and dropping them would shrink the suite silently
+  // (硬规则 3b). A fresh checkout with no measurement history simply has no list at all.
+  let heavyFiles: string[] = [];
+  let heavyConcurrencyBudget = 0;
+  let partitionedHeavy: string[] = [];
+  const heavyListRaw = process.env.QUAY_SUITE_HEAVY_FILES ?? "";
+  const heavyList = heavyListRaw.split("\n").map((s) => s.trim()).filter((s) => s.length > 0);
+  if (heavyList.length > 0) {
+    const bound = Number(process.env.QUAY_SUITE_HEAVY_MAX_CONCURRENT ?? "");
+    if (Number.isInteger(bound) && bound >= 1) {
+      heavyFiles = heavyList;
+      heavyConcurrencyBudget = bound;
+    } else {
+      process.stderr.write(
+        `scheduler: ⚠️ QUAY_SUITE_HEAVY_FILES names ${heavyList.length} file(s) but QUAY_SUITE_HEAVY_MAX_CONCURRENT ` +
+          `is '${process.env.QUAY_SUITE_HEAVY_MAX_CONCURRENT ?? ""}' (must be an integer ≥ 1) ⇒ the heavy bucket is NOT applied ` +
+          `and those files keep their normal schedule (membership preserved; nothing is dropped)\n`,
+      );
+    }
+  }
   const groups = classifyAndOrder(files, {
     root: mainRoot,
     rounds,
     lptEnabled: process.env.QUAY_TEST_LPT_ORDER !== "0",
     groups: groupsArg,
     baseline: baseline || undefined,
+    heavyFiles: new Set(heavyFiles),
+    onHeavy: (partitioned) => {
+      partitionedHeavy = partitioned;
+      process.stderr.write(
+        `scheduler: heavy=${partitioned.length}≤${heavyConcurrencyBudget} (declared bucket; runs in the tail, alone)\n`,
+      );
+    },
     onReport: (r) =>
       // The REAL reorder reading — provenance says WHICH carrier supplied durations, so a log reader
       // never has to infer "LPT ran" from the absence of an error (硬规则 3b).
@@ -570,7 +689,7 @@ async function main(argv: string[]): Promise<number> {
         `scheduler: lpt provenance=${r.provenance} entries=${r.entries} files=${r.files} main_reordered=${r.mainReordered}\n`,
       ),
   });
-  const total = groups.serial.length + groups.lowconc.length + groups.main.length;
+  const total = groups.serial.length + groups.lowconc.length + groups.main.length + partitionedHeavy.length;
   if (total === 0) {
     process.stderr.write(`suite-scheduler: no test files matched --groups '${groupsArg ?? "all"}' on stdin\n`);
     return 2;
@@ -578,7 +697,12 @@ async function main(argv: string[]): Promise<number> {
   process.stderr.write(
     `scheduler: serial=${groups.serial.length}≤${budgets.serial} lowconc=${groups.lowconc.length}≤${budgets.lowconc} main=${groups.main.length}≤${budgets.main} (reliability cap: total ≤ min budget of active groups)\n`,
   );
-  const result = await runScheduler({ budgets, groups, testNamePatterns });
+  const result = await runScheduler({
+    budgets,
+    groups,
+    testNamePatterns,
+    ...(partitionedHeavy.length > 0 ? { heavy: { files: partitionedHeavy, concurrency: heavyConcurrencyBudget } } : {}),
+  });
   return result.failed > 0 ? 1 : 0;
 }
 

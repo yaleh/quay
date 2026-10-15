@@ -13,8 +13,8 @@
 //   - No `.quay/config.yml` → returns {} (empty). The `suite:` section is OPTIONAL — a workspace
 //     without one keeps its host-derived / env-only behavior (AC4 pass/fail-neutral).
 //   - `.quay/config.yml` present but no `suite:` key → returns {} (same neutrality).
-//   - `.quay/config.yml` present with a `suite:` key → CLOSED schema: the only valid keys are the 8
-//     below; an UNKNOWN key, a WRONG-TYPED value, or an OUT-OF-RANGE value throws FAIL-CLOSED
+//   - `.quay/config.yml` present with a `suite:` key → CLOSED schema: the only valid keys are
+//     SUITE_KNOBS' keys; an UNKNOWN key, a WRONG-TYPED value, or an OUT-OF-RANGE value throws FAIL-CLOSED
 //     (DIR-050 discipline — a malformed config must not silently degrade to env defaults; AC5).
 //   - `.quay/config.yml` present but malformed YAML → throws FAIL-CLOSED (same as loop-params.ts).
 //
@@ -40,7 +40,7 @@ import YAML from "yaml";
 // `arg-parsing-helper-family`, routine `semantic-dedup-scan`).
 import { isDirectEntry, flagValue } from "./gate-script-base.ts";
 
-/** The 8 suite knobs: config key → env key (config-first per the same policy). `suite_scheduler`
+/** The suite knobs: config key → env key (config-first per the same policy). `suite_scheduler`
  *  (gap-suite-dynamic-waterline-scheduler) turns the unified group-budget scheduler ON (default) /
  *  OFF (ONE-KEY ROLLBACK to the legacy phased path). `phase_overlap` / `main_tail_stall_pct` are
  *  RETIRED-BY-SCHEDULER: they stay in the CLOSED schema so an existing config that still sets them
@@ -62,6 +62,8 @@ export const SUITE_KNOBS = {
   max_oversubscription: "QUAY_MAX_OVERSUBSCRIPTION",
   main_tail_stall_pct: "QUAY_MAIN_TAIL_STALL_PCT",
   memory_max: "QUAY_SUITE_MEMORY_MAX",
+  heavy_threshold_mb: "QUAY_SUITE_HEAVY_THRESHOLD_MB",
+  heavy_max_concurrent: "QUAY_SUITE_HEAVY_MAX_CONCURRENT",
 } as const;
 
 export type SuiteKnobKey = keyof typeof SUITE_KNOBS;
@@ -78,6 +80,17 @@ export interface SuiteParams {
   main_tail_stall_pct?: number;
   /** A systemd size string (`"16G"`, `"512M"`, `"17179869184"`) — the suite cgroup's MemoryMax. */
   memory_max?: string;
+  /** gap-suite-heavy-files-and-phase-concurrency-under-16g-pressure-baseline-comparison — the
+   *  memory-aware SCHEDULING declaration. A file whose MEASURED per-file high-water (max `memPeakKb`
+   *  over `SUITE_PERFILE_MEMORY_ROUNDS` rounds) exceeds this many MiB is "heavy"; heavy files are
+   *  scheduled in their own bucket, never co-running beyond `heavy_max_concurrent`. Both live here
+   *  (project-declared, host-overridable via the env keys) rather than as literals in the runner:
+   *  the right threshold is a property of the PROJECT's test suite and the right bound of the HOST's
+   *  memory envelope, and neither is knowable from the code. ⛔ Declaring NEITHER knob leaves the
+   *  mechanism OFF — it is deliberately not defaulted, because a default would be exactly the
+   *  machine-spec-dependent literal hard rule 4 推论二 forbids. */
+  heavy_threshold_mb?: number;
+  heavy_max_concurrent?: number;
 }
 
 /** Per-knob schema: validator + a human-readable "must be …" clause for the FAIL-CLOSED message. */
@@ -95,6 +108,14 @@ const KNOB_SPEC: Record<SuiteKnobKey, { ok: (v: unknown) => boolean; must: strin
   memory_max: {
     ok: (v) => typeof v === "string" && /^\d+(\.\d+)?\s*[kKmMgGtTpP]?[bB]?$/.test(v.trim()),
     must: "a systemd size string (e.g. \"16G\", \"512M\", \"17179869184\")",
+  },
+  heavy_threshold_mb: {
+    ok: (v) => typeof v === "number" && Number.isFinite(v) && v > 0,
+    must: "a positive number of MiB (a file whose measured peak exceeds it is scheduled heavily)",
+  },
+  heavy_max_concurrent: {
+    ok: (v) => typeof v === "number" && Number.isInteger(v) && v >= 1,
+    must: "an integer >= 1 (how many heavy files may co-run at once)",
   },
 };
 
