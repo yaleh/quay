@@ -35,9 +35,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, existsSync, appendFileSync, writeFileSync, readFileSync, symlinkSync, statSync, linkSync, unlinkSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, existsSync, appendFileSync, writeFileSync, readFileSync, symlinkSync, statSync, lstatSync, readdirSync, realpathSync, linkSync, unlinkSync, accessSync, constants } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, dirname } from "node:path";
+import { join, dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -621,23 +621,161 @@ test("P1/AC2: the REAL dispatch argv carries `--ref` — recorded from the child
   }
 });
 
+/**
+ * Does a PATH entry carry an executable `gh`? The `PATH`-lookup predicate, written out — the SAME
+ * test bash's own lookup applies (a regular file with the execute bit), so "this directory carries
+ * `gh`" means the same thing to us as it does to the child that has to find it.
+ */
+function carriesGh(dir) {
+  const p = join(dir, "gh");
+  try {
+    if (!statSync(p).isFile()) return false;
+    accessSync(p, constants.X_OK);
+    return true;
+  } catch (_) {
+    return false;
+  }
+}
+
+/**
+ * Converge `basePath` onto a PATH that cannot resolve `gh` — the fixture's "`gh` is unavailable"
+ * mechanism, made independent of the HOST's directory layout.
+ *
+ * WHY THIS REPLACED `dirname(command -v gh)` (measured 2026-10-14, CI run 38700638546):
+ * the old fixture asked the host WHERE `gh` is, then removed THAT ONE directory from `PATH`. On the
+ * runner `gh` lives in `/usr/bin`, which `PATH` also carries as `/bin` (a symlink to `/usr/bin`) —
+ * the same physical directory under two names. `command -v gh` answers `/usr/bin/gh`, the filter
+ * drops `/usr/bin`, and `/bin`, still on `PATH` and resolving to that very directory, re-supplies
+ * `gh`. The premise was never established and the fixture's OWN negative control failed:
+ * `AssertionError: the fixture must really have removed `gh` from PATH`, actual `'/bin/gh'`,
+ * expected `''` — a red that names the fixture, not the product. ⛔ The defect is the fixture's
+ * coupling to a host layout, not `gh`'s presence.
+ *
+ * TWO conditions have to hold at once, and they pull against each other:
+ *   1. `gh` must not resolve — on ANY layout, including two spellings of one directory. So we
+ *      enumerate EVERY entry that resolves `gh` (the lookup predicate, not one answer).
+ *   2. the REST of the toolchain must still resolve — the carrier directory is usually the one
+ *      holding `git`, `sed`, `bash` … Dropping it outright buys (1) by breaking (2): the cut would
+ *      die in its first `git` call and the fixture would trade one red for another, with a CAUSE
+ *      naming a defect that is not the one under test.
+ * So a carrier entry is not DROPPED, it is SHADOWED: every name it carries EXCEPT `gh` is symlinked
+ * into a directory of ours, and the child PATH gets that shadow **in the carrier's own position**.
+ * Mirroring the directory is complete by construction — a hand-listed "tools the cut needs" set
+ * would rot the first time the cut reaches for one more — and both conditions then hold with no
+ * host assumption.
+ *
+ * ⛔ IN PLACE, not prepended. A single shadow hoisted to the FRONT of PATH silently re-ranks every
+ * name in the carrier directory above the same name later on PATH, and on a host whose PATH has a
+ * stale `node` before the real one that is a different defect entirely: measured 2026-10-15 on the
+ * emulated runner layout, `/usr/bin/node` (no `--experimental-strip-types`) beat the nvm node the
+ * cut needs, and the cut died in `CAUSE=release-cut-version-inconsistent` — the fixture reddening
+ * at a step that has nothing to do with `gh`. Replacing the entry at its own index leaves every
+ * precedence question exactly as the host posed it.
+ *
+ * Returns `{ path, carriers, shadows, shadowed, unreadable }` — every field an ENUMERATED reading,
+ * so the log says what the mechanism actually did rather than that it "worked".
+ */
+function pathWithoutGh(basePath, shadowRoot) {
+  const dirs = (basePath ?? "").split(":").filter(Boolean).map((d) => resolve(d));
+  const carriers = dirs.filter(carriesGh);
+  if (carriers.length === 0) {
+    return { path: dirs.join(":"), carriers, shadows: 0, shadowed: 0, unreadable: [], dirCount: dirs.length };
+  }
+  // One shadow per PHYSICAL directory: `/usr/bin` and `/bin` are one directory under two spellings,
+  // and mirroring it twice would double the syscalls to say the same thing.
+  const shadowOf = new Map();
+  const unreadable = [];
+  let shadowed = 0;
+  const entries = dirs.map((d) => {
+    if (!carriesGh(d)) return d;
+    let key = d;
+    try { key = realpathSync(d); } catch (_) { /* unresolvable: key on the spelling we have */ }
+    if (!shadowOf.has(key)) {
+      const shadow = join(shadowRoot, `d${shadowOf.size}`);
+      mkdirSync(shadow, { recursive: true });
+      let names;
+      try { names = readdirSync(d); } catch (_) { unreadable.push(d); names = []; }
+      for (const name of names) {
+        if (name === "gh") continue;
+        const dst = join(shadow, name);
+        // lstat, not exists: a symlink we just made to a DANGLING entry would read as "absent" and
+        // send us into a second symlink() that fails EEXIST, reporting a failure that is not one.
+        try { lstatSync(dst); continue; } catch (_) { /* not there yet — make it */ }
+        try { symlinkSync(join(d, name), dst); shadowed++; } catch (_) { /* unlinkable name: skip */ }
+      }
+      shadowOf.set(key, shadow);
+    }
+    return shadowOf.get(key);
+  });
+  return { path: entries.join(":"), carriers, shadows: shadowOf.size, shadowed, unreadable, dirCount: dirs.length };
+}
+
+/**
+ * What does `name` resolve to in this child environment? An ENUMERATED three-valued reading
+ * (硬规则 3b: "could not evaluate" must not share an output with "evaluated and absent"):
+ *   { verdict: "absent", path: null }         the child really cannot resolve it
+ *   { verdict: "present", path: "<dir>/<name>" } it can, and here is WHERE (the repair is named)
+ *   { verdict: "not-evaluated", path: null }  the probe itself could not run — never folded into
+ *                                             "absent", which would read as a passing control
+ */
+function commandResolution(env, name) {
+  const probe = spawnSync("bash", ["-c", 'command -v "$1" || true', "bash", name], { encoding: "utf8", env });
+  if (probe.error || typeof probe.stdout !== "string") return { verdict: "not-evaluated", path: null };
+  const found = probe.stdout.trim();
+  return found === "" ? { verdict: "absent", path: null } : { verdict: "present", path: found };
+}
+
 test("P1/AC2: with `gh` absent the hand-dispatch instruction names the SAME ref the tool would have used", () => {
   const c = makeClone("nogh");
+  const shimBin = join(c.parent, "gh-shim");
   try {
-    // A PATH with the directory that carries `gh` removed — and an independent probe that the
-    // removal really took effect, so this test cannot pass by exercising the wrong branch.
-    const ghPath = spawnSync("bash", ["-c", "command -v gh"], { encoding: "utf8" }).stdout.trim();
-    assert.ok(ghPath, "the test host must carry a `gh` for this arm to mean anything");
-    const ghDir = dirname(ghPath);
-    const strippedPath = (process.env.PATH ?? "").split(":").filter((d) => d && d !== ghDir).join(":");
-    const probe = spawnSync("bash", ["-c", "command -v gh || true"], {
-      encoding: "utf8", env: { ...process.env, PATH: strippedPath },
-    });
-    assert.equal(probe.stdout.trim(), "", "the fixture must really have removed `gh` from PATH");
+    // ── the mechanism, read out loud: which entries carried `gh`, how many names were mirrored ────
+    const converged = pathWithoutGh(process.env.PATH, join(c.parent, "gh-shadow"));
+    process.stdout.write(`SUITE-RELEASE-CUT-FIXTURE gh-absence mechanism=carrier-shadow`
+      + ` entries=${converged.dirCount} carriers=${converged.carriers.length}`
+      + ` [${converged.carriers.join(",") || "-"}] shadows=${converged.shadows}`
+      + ` shadowed=${converged.shadowed} unreadable=${converged.unreadable.length}\n`);
+    assert.deepEqual(converged.unreadable, [],
+      `a carrier directory we cannot read cannot be shadowed, and its tools would silently vanish`
+        + ` from the child PATH: ${converged.unreadable.join(",")}`);
 
-    const r = run(["9.9.6", "--root", c.root, "--no-push"], {
-      env: { ...process.env, PATH: strippedPath },
-    });
+    // ── the controls FIRST (硬规则 4): a probe that cannot report `present` proves nothing when it
+    // reports `absent`. Two controls, one per condition the mechanism has to meet:
+    //   (a) `gh` IS read as present when a PATH carries it. The shim is OURS, so the control is
+    //       non-vacuous even on a host that carries no `gh` at all — and it is never executed by
+    //       the cut below; it exists only to be FOUND. ⛔ The un-converged host PATH is NOT usable
+    //       as this control: on a developer host `gh` is the real, authenticated client, and a cut
+    //       driven with it would reach the live GitHub API — a test whose control has a production
+    //       side effect is a worse defect than the one it guards against (same reasoning as the
+    //       record-and-exit shim at P2/AC3).
+    //   (b) the toolchain SURVIVED the shadow. This is the control that fails loudly HERE, naming
+    //       "git did not resolve", instead of letting the cut die in its first `git` call where the
+    //       red would name a defect that is not the one under test.
+    mkdirSync(shimBin, { recursive: true });
+    writeFileSync(join(shimBin, "gh"), '#!/usr/bin/env bash\nexit 0\n', { mode: 0o755 });
+    const control = commandResolution({ ...process.env, PATH: `${shimBin}:${converged.path}` }, "gh");
+    assert.equal(control.verdict, "present",
+      `the probe must READ a PATH that carries \`gh\` as present, or its "absent" below is vacuous`);
+    assert.equal(control.path, join(shimBin, "gh"),
+      `the probe must NAME where \`gh\` resolved from — that name is the repair instruction`);
+
+    const env = { ...process.env, PATH: converged.path };
+    const toolchain = commandResolution(env, "git");
+    assert.equal(toolchain.verdict, "present",
+      `the shadow must preserve the rest of the toolchain: \`git\` must still resolve under the`
+        + ` converged PATH, or the cut dies before reaching the step under test`
+        + ` (carriers [${converged.carriers.join(",") || "-"}], ${converged.shadowed} name(s) mirrored)`);
+
+    // ── and now the fixture's own premise, as a reading rather than an assumption ────────────────
+    const reading = commandResolution(env, "gh");
+    assert.equal(reading.verdict, "absent",
+      `the converged PATH must not resolve \`gh\` (it did, at ${reading.path}): ${converged.shadowed}`
+        + ` name(s) from ${converged.carriers.length} carrier(s) [${converged.carriers.join(",") || "-"}]`
+        + ` were mirrored out of ${converged.dirCount} PATH entries, so the entry that re-supplied`
+        + ` \`gh\` — the /bin → /usr/bin alias that reddened CI run 38700638546 — came from somewhere`
+        + ` else entirely`);
+
+    const r = run(["9.9.6", "--root", c.root, "--no-push"], { env });
 
     assert.equal(r.status, 1, `the cut must reach and fail in the dispatch stage: ${r.stdout}${r.stderr}`);
     assert.equal(git(c.root, "rev-parse", "--verify", "--quiet", "refs/tags/v9.9.6").status, 0,
