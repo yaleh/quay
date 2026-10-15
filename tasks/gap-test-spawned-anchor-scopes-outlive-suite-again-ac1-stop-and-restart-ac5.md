@@ -2,7 +2,7 @@
 id: gap-test-spawned-anchor-scopes-outlive-suite-again-ac1-stop-and-restart-ac5
 title: 回归：测试起的 driver anchor scope 再次活过套件（driver-cli
   ac1-stop、driver-restart-busy-e2e ac5），被计入多 scope 护栏
-status: todo
+status: ready
 labels:
   - gap
   - defect
