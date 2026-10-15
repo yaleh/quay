@@ -3,7 +3,7 @@ id: gap-routine-semantic-dedup-scan-defaultroot-byte-identical-quad
 title: "semantic-dedup-scan: Three defaultRoot bodies are byte-identical
   (path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..')) and a
   fourth sibling has already migrated "
-status: ready
+status: done
 labels:
   - gap
   - routine-filed
@@ -76,6 +76,26 @@ merge
 **验证读数**：scoped gate `bash scripts/test.sh --for-task gap-routine-semantic-dedup-scan-defaultroot-byte-identical-quad --allow-thin` **exit 0**（静态层全绿：`checker-count-drift-check` / `repo-root-derivation-check` / `import-graph-check` valueSccs=typeSccs=reverseEdges=0 / `sh-census-check` 6566≤6566、0≤0 / suite-slot-ssot / concurrency-literal 均 PASS）；
 `anti-drift-touches-check --merge-target develop` **OK —— 3 个实际改动文件全在声明的 Touches 内（5 glob）**。
 实现提交：`4e3f2962c`（分支 `task/gap-routine-semantic-dedup-scan-defaultroot-byte-identical-quad`）。
+
+**本轮（2026-10-15，worker 第 4 轮）复核读数 —— 以上取证在**当前树**上逐条重跑，全部复现**：
+替换式与原式同值（`repoRoot(<worktree>/plugin/scripts) == path.resolve(…, "..", "..") == 本 worktree 根`，`EQUAL=true`）；
+三个检查器**不带 `--root`** 各跑一次全部 `exit 0`（`checker-count-drift-check` 3/3 evaluated ·
+`import-graph-check` valueSccs=0/typeSccs=0/reverseEdges=0 · `sh-census-check` embeddedInterpreterLines=6566、duplicateCopies=0）；
+`repo-root-derivation-check` 扫 381 文件 PASS；三文件测试 **47/47** 绿；scoped gate `exit 0`（静态层全 PASS）。
+
+**上一轮 `exited-not-landed`（step=suite）的成因复核 —— ⛔ 与本任务 delta 无关**：
+原轮在 `laneCount=127` 记 `oomKill=2` ⇒ 按设计路由到 OOM 恢复梯；而该梯的**每一档 `recLogFile` 结构上为空**
+（`spawnSuiteAndWait` 只写子进程 **stdout**、runner 诊断走 **stderr**；且 runner 每档**截断**原日志）⇒ 三档一律读成
+`no-conclusion(log-unreadable)` ⇒「no declared rung produced a complete verdict」是**读数不可得**（硬规则 3b），
+**不是**「三档都跑了且不完整」。原日志里留下来的正是**最后一档（32 lane）的完整 stdout**：
+`planned=583 terminal=583 missing=0 oomKill=0`，唯一一条红在**域外文件**
+`plugin/test/driver-restart-busy-e2e.test.mjs`（AC2b；delta-relatedness=UNRELATED，非 `@load-sensitive`）。
+该文件在本 worktree **单独重跑 7/7 绿、exit 0**（AC2b 本机 527ms vs 满载 918ms ⇒ 负载敏感时序断言）——
+即 **本任务的代码 delta 不是这条红的原因**。真实成因两条，均在本任务 Touches 之外、⛔ 本条不改：
+① 宿主容量 —— 本机 `MemoryMax=16G` 是人 2026-10-14 裁定的**压力基线**（⛔ 不靠调高它结案），而 lane 随 nproc=127 增长
+（已立案 `gap-suite-memorymax-literal-16g-cap-pinned-every-round-while-lanes-scale-with-nproc`）；
+② 上述**惰性恢复梯**（正本在 `worker-fan-in.ts` / `suite-driver.ts`，⛔ 不在 `full-suite-runner.ts` —— 梯尾那句
+`see plugin/scripts/full-suite-runner.ts` 指错了文件，是本轮新读数）。
 
 ## AC
 - [x] `.quay/routine-findings.jsonl` 中 finding `defaultroot-byte-identical-quad`（routine `semantic-dedup-scan`，runId `semantic-dedup-scan-1792033478766`）所描述的问题被复核并处置
