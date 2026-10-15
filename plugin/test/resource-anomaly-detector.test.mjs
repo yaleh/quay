@@ -310,6 +310,14 @@ test("AC4 — the effect re-test compares the same metric by the same method, be
 
   const ne = effectRetest({ metric: "m", method: "x", baseline: [1800], anomalous: [30000], after: [] });
   assert.equal(ne.verdict, "not-evaluated", "⛔ an empty post window is NOT 'restored'");
+  // ⛔ A ZERO-median window is not a fast run — measured defect: `--effect-after ""` parsed to [0]
+  // and read as `restored` (a 0 ratio is ≤ any tolerance).
+  assert.equal(effectRetest({ metric: "m", method: "x", baseline: [1800, 1850], anomalous: [60000, 61000], after: [0] }).verdict, "not-evaluated");
+  const cliBlank = spawnSync(process.execPath, [
+    "--experimental-strip-types", DETECTOR, "--json",
+    "--effect-baseline", "1800,1850", "--effect-before", "60000,61000", "--effect-after", "",
+  ], { encoding: "utf8", timeout: 120_000 });
+  assert.equal(JSON.parse(cliBlank.stdout.trim()).verdict, "not-evaluated", "⛔ a blank --effect-after must NOT read as restored");
   // The anomalous window must really be anomalous — otherwise the re-test proves nothing.
   const misanchored = effectRetest({ metric: "m", method: "x", baseline: [1800, 1850], anomalous: [1900, 1910], after: [1850, 1860] });
   assert.equal(misanchored.verdict, "not-evaluated");

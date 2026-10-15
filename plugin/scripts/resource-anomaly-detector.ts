@@ -657,8 +657,10 @@ export function effectRetest(input: {
     anomalous: { n: input.anomalous.length, medianMs: a1 },
     after: { n: input.after.length, medianMs: a2 },
   };
-  const ratio = b !== null && b > 0 && a2 !== null ? a2 / b : null;
-  if (b === null || b <= 0 || a1 === null || a2 === null || input.after.length === 0 || input.anomalous.length === 0) {
+  const ratio = b !== null && b > 0 && a2 !== null && a2 > 0 ? a2 / b : null;
+  // ⛔ `a2 <= 0` is its own refusal: a zero-median post window is not a fast run, it is a window with
+  // nothing measurable in it — and a 0 ratio would read as "perfectly restored" (硬规则 3b).
+  if (b === null || b <= 0 || a1 === null || a1 <= 0 || a2 === null || a2 <= 0 || input.after.length === 0 || input.anomalous.length === 0) {
     return { ...base, ratio_after_vs_baseline: ratio, verdict: "not-evaluated", reason: "insufficient samples on one of the three windows — ⛔ not read as restored" };
   }
   if (a1 < 2 * b) {
@@ -958,7 +960,10 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
   // ── effect re-test mode (AC4): a DIRECT re-measurement, ⛔ not the fix task's own AC.
   const before = flagValue(argv, "--effect-before");
   if (before !== null) {
-    const parse = (s: string | null) => String(s ?? "").split(",").map((x) => Number(x.trim())).filter((x) => Number.isFinite(x));
+    // ⛔ Drop EMPTY tokens before Number(): `Number("")` is 0, so a blank `--effect-after ""` would
+    // otherwise parse to `[0]` and read as `restored` — a zero window that looks like a good reading.
+    const parse = (s: string | null) =>
+      String(s ?? "").split(",").map((x) => x.trim()).filter((x) => x !== "").map(Number).filter((x) => Number.isFinite(x));
     const r = effectRetest({
       metric: flagValue(argv, "--metric") ?? "per-file durationMs",
       method: "median of the file's own __PERFILE__ durations over the window (.quay/verification-round.jsonl `perFile[].durationMs`)",
