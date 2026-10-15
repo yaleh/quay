@@ -24,9 +24,12 @@
 //   · a SECOND run is byte-identical (the upgrade is idempotent; a version-level no-op must not
 //     rewrite the file).
 //
-// Isolation: every workspace is a fresh mkdtemp under os.tmpdir(); no network, no real ~/.claude,
-// no real project. CLAUDE_PLUGIN_ROOT is stripped from the child env so the plugin root resolves
-// from the running Core module (selfPluginRoot) instead of whatever the ambient session exports.
+// Isolation: every workspace is a fresh mkdtemp under a DISK-BACKED temp root; no network, no real
+// ~/.claude, no real project. CLAUDE_PLUGIN_ROOT is stripped from the child env so the plugin root
+// resolves from the running Core module (selfPluginRoot) instead of whatever the ambient session
+// exports. `os.tmpdir()` is the first candidate so TMPDIR decides (the CI job exports
+// TMPDIR=${{ runner.temp }} — gap-ci-test-job-tmpdir-on-disk-not-tmpfs); see scratchBase() for why
+// a tmpfs TMPDIR is skipped rather than used.
 
 import { test, after } from "node:test";
 import assert from "node:assert/strict";
@@ -44,7 +47,7 @@ const coreBin = path.join(repoRoot, "packages", "quay", "bin", "quay.ts");
 const fixturesDir = path.join(__dirname, "fixtures", "init-matrix");
 
 // Every temp workspace is removed once at the end of this file (the carrier-array + after()
-// pattern — a mkdtemp fixture without cleanup leaks a /tmp dir per run).
+// pattern — a mkdtemp fixture without cleanup leaks a temp dir per run).
 const TMP_DIRS = [];
 after(() => {
   for (const dir of TMP_DIRS) {
@@ -109,12 +112,82 @@ async function mcpConfigValidate(workspaceRoot) {
   }
 }
 
-/** A fresh scratch workspace; `.quay/config.yml` is the (edited) fixture. */
-function makeWorkspaceWithConfig(text) {
-  const ws = fs.mkdtempSync(path.join(os.tmpdir(), "quay-init-matrix-"));
+// ── Staging: the fixtures' GENERATION layout is rebased onto a scratch this test owns ───────────
+//
+// A fixture carries, verbatim, the absolute layout its release's init wrote on the day it was
+// generated (README.md's `BASE=/tmp/quay-init-matrix-gen`): `loop.repo_root`, `loop.worktree_root`,
+// `providers.native.path` / `mcp_entry`, and the four `QUAY_NATIVE_*` carrier dirs. Replaying those
+// bytes against the CURRENT `quay init` on a host whose `/tmp` is tmpfs — the CI runner's
+// `gh-runner-quay` container mounts `--tmpfs /tmp` — hands init a `loop.worktree_root` that is
+// memory, and init FAIL-CLOSES on that BY DESIGN (init.ts validateWorktreeRoot; the 2026-08-04
+// machine-wide OOM):
+//
+//   worktree root '/tmp/quay-init-matrix-gen/scratch-rel-v0.14.0/../scratch-rel-v0.14.0-worktrees'
+//   is on tmpfs ('/tmp' is tmpfs) — this is memory, not disk.
+//
+// That is an environment verdict about the GENERATION host, not a verdict about the upgrade under
+// test — so the generation base is swapped for a scratch root this test owns, on a disk-backed base.
+
+/** Filesystem type of `p` — the probe init itself runs (init.ts validateWorktreeRoot: `stat -f -c %T`). */
+function fsTypeAt(p) {
+  const r = spawnSync("stat", ["-f", "-c", "%T", p], { encoding: "utf8" });
+  return r.status === 0 ? r.stdout.trim() : "unknown";
+}
+
+/** A disk-backed temp base to stage scratch under, or null when this host has none.
+ *  `os.tmpdir()` is FIRST so TMPDIR is the deciding input (the CI job exports TMPDIR=runner.temp —
+ *  gap-ci-test-job-tmpdir-on-disk-not-tmpfs). A tmpfs candidate is skipped rather than used: every
+ *  rebased `loop.worktree_root` would land on it, and init fail-closes on a tmpfs worktree root by
+ *  design, which would turn this upgrade matrix into a test of the host's memory. `/var/tmp` is the
+ *  POSIX persistent-temp fallback (same idiom as worktree-root-fs-check.test.mjs's `diskTemp()`),
+ *  and it is LAST, so TMPDIR still wins whenever TMPDIR is on disk. */
+function scratchBase() {
+  for (const base of [os.tmpdir(), "/var/tmp"]) {
+    try {
+      if (fs.existsSync(base) && fsTypeAt(base) !== "tmpfs") return base;
+    } catch { /* unreadable candidate — try the next one */ }
+  }
+  return null;
+}
+
+const SCRATCH_BASE = scratchBase();
+
+/** The absolute base fixture `v` was generated in: its `loop.repo_root` is `<base>/scratch-rel-<v>`,
+ *  and every other baked path is that directory's sibling or child. Read OUT of the fixture rather
+ *  than restated here, so this file never carries a second copy of the generation layout. */
+function fixtureGenerationBase(v) {
+  const repoRoot = YAML.parse(readFixture(v))?.loop?.repo_root;
+  assert.ok(
+    typeof repoRoot === "string" && path.isAbsolute(repoRoot),
+    `${v}: fixture must record an absolute loop.repo_root — that is where its generation layout is read from`,
+  );
+  const base = path.dirname(repoRoot);
+  assert.ok(
+    base.split(path.sep).filter(Boolean).length >= 2,
+    `${v}: refusing to rebase from '${base}' — a shallower base could rewrite unrelated absolute paths`,
+  );
+  return base;
+}
+
+/** Swap the fixture's generation base for `scratchRoot`, keeping the fixture's SHAPE (absolute paths,
+ *  and the `…/scratch-rel-<v>/../scratch-rel-<v>-worktrees` sibling spelling init persists verbatim).
+ *  The bytes under fixtures/init-matrix/ are untouched: this only stages the config in the workspace,
+ *  exactly as `injectUserEdits` already edits the fixture's own text for the duration of a run. */
+function rebaseOntoScratch(raw, v, scratchRoot) {
+  const base = fixtureGenerationBase(v);
+  const rebased = raw.split(base).join(scratchRoot);
+  assert.notEqual(rebased, raw, `${v}: '${base}' does not occur in the fixture config — nothing was rebased`);
+  return rebased;
+}
+
+/** A fresh scratch workspace on a disk-backed temp root; `.quay/config.yml` is the (rebased,
+ *  user-edited) fixture. The rebase target IS the workspace, so the fixture's `loop.repo_root` lands
+ *  on a real directory and its `loop.worktree_root` lands on that directory's (disk) filesystem. */
+function makeWorkspaceWithConfig(v, raw) {
+  const ws = fs.mkdtempSync(path.join(SCRATCH_BASE, "quay-init-matrix-"));
   TMP_DIRS.push(ws);
   fs.mkdirSync(path.join(ws, ".quay"), { recursive: true });
-  fs.writeFileSync(path.join(ws, ".quay", "config.yml"), text, "utf8");
+  fs.writeFileSync(path.join(ws, ".quay", "config.yml"), rebaseOntoScratch(injectUserEdits(raw), v, ws), "utf8");
   return ws;
 }
 
@@ -195,11 +268,19 @@ test("at least one fixture carries the now-retired native binding (the removal a
 // ── The upgrade behavior, one test per historical shape ────────────────────────────────────────
 
 for (const v of VERSIONS) {
-  test(`${v}: current init upgrades to a VALID, comment-preserving, idempotent config`, { timeout: 180_000 }, async () => {
+  test(`${v}: current init upgrades to a VALID, comment-preserving, idempotent config`, { timeout: 180_000 }, async (t) => {
+    // NOT-EVALUATED, not a pass (硬规则 3b): with no disk-backed temp root the fixture's
+    // `loop.worktree_root` could only be staged on tmpfs, which init fail-closes on — the upgrade
+    // would go unmeasured, so say so instead of reporting a verdict about the host's memory.
+    if (SCRATCH_BASE === null) {
+      t.skip("no disk-backed temp root (TMPDIR and /var/tmp are both tmpfs or absent) — cannot stage a non-tmpfs loop.worktree_root");
+      return;
+    }
+
     const raw = readFixture(v);
     const before = YAML.parse(raw);
 
-    const ws = makeWorkspaceWithConfig(injectUserEdits(raw));
+    const ws = makeWorkspaceWithConfig(v, raw);
     const configPath = path.join(ws, ".quay", "config.yml");
 
     // 1. the upgrade itself
