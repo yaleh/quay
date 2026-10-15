@@ -37,7 +37,7 @@ Must cooperate with, not duplicate, the architecture-discovery identity/dedup wo
 - [ ] AC5: `scripts/test.sh --for-task <this task>` green.
 
 ## Definition of Done
-- AC1-AC5 checked with pasted evidence. No new dedup mechanism, no new verifier/refuter, no new Portfolio/Experience carrier — all reused from the landed architecture-discovery machinery. No budget ceiling raised.
+- AC1-AC5 checked with pasted evidence. No new dedup mechanism, no new verifier/refuter, no new Portfolio/Experience carrier — all reused from the landed architecture-discovery machinery. No budget ceiling raised. The registration surfaces that a NEW `plugin/scripts/*` file and two new runtime carriers oblige — the six capability tables in `plugin/scripts/capability-catalog-declarations.json`, the two entries in `docs/carrier-registry.json`, and the two ignore rules in `.gitignore` — are declared in `## Touches` and edited there, not left unregistered.
 
 ## Touches
 - tasks/gap-quality-continuous-resource-diagnostic-routine-mechanical-filter-then-semantic.md
@@ -45,3 +45,6 @@ Must cooperate with, not duplicate, the architecture-discovery identity/dedup wo
 - plugin/scripts/resource-anomaly-detector.ts
 - docs/analysis/arch-hypothesis-generation.mjs
 - plugin/test/resource-anomaly-detector.test.mjs
+- plugin/scripts/capability-catalog-declarations.json
+- docs/carrier-registry.json
+- .gitignore
