@@ -79,8 +79,8 @@ extract
 
 ## Blocker
 
-**2026-10-15T03:27:22.521Z — worker 未落地（exited-not-landed）**
+**2026-10-15T04:27:04.127Z — worker 未落地（exited-not-landed）**
 
-- 未落地原因：step=suite: incomplete suite (925/925 files) — recovery exhausted at floor concurrency 32 — no declared rung produced a complete verdict (64,48,32); needs a code/config fix, see plugin/scripts/full-suite-runner.ts
+- 未落地原因：step=suite: oom-killed (1) — recovery exhausted at floor concurrency 32 — no declared rung produced a complete verdict (64,48,32); needs a code/config fix, see plugin/scripts/full-suite-runner.ts
 - run_id：wk-prod-anchor
-- session_id：48c126d6-cda2-4288-869a-166a1d2f367b
+- session_id：dbf05fc5-7778-4d96-b688-ca8fb0925e9a
