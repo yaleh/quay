@@ -3,7 +3,7 @@ id: gap-routine-semantic-dedup-scan-print-json-three-behaviours
 title: "semantic-dedup-scan: One name spans three shapes: three byte-identical
   console.log(JSON.stringify(x)), two pretty-printers that are one behaviour in
   two spellings, and a third pret"
-status: todo
+status: needs-human
 labels:
   - gap
   - routine-filed
@@ -105,3 +105,14 @@ extract
 - 未落地原因：step=suite: oom-killed (2) — recovery exhausted at floor concurrency 32 — no declared rung produced a complete verdict (64,48,32); needs a code/config fix, see plugin/scripts/full-suite-runner.ts
 - run_id：wk-prod-anchor
 - session_id：84fa96f2-95ad-4b74-8dfb-21f75937ab4d
+
+## Needs-Human
+
+**执行 2026-10-15T05:39:23.235Z — 停派终止（失败无法归因，⛔ 不再重派）**
+
+- 阻碍原因：exited-not-landed 失败无法归因（基建/契约疑似，非实现缺陷）——停止重派，⛔ 不再拿新会话撞同一堵墙：suite red could not be attributed to any failing test file in 2 consecutive rounds (bounded to at most one retry) — infra/contract suspected, not an implementable defect (parser extracted 0 of 3 failing lines and attributed none to a file; pseudo-stage tokens: __PERFILE__, lint; unrecognized tokens: ...); stopping instead of spending another worker session
+- 失败步/判词：step=suite: oom-killed (2) — recovery exhausted at floor concurrency 32 — no declared rung produced a complete verdict (64,48,32); needs a code/config fix, see plugin/scripts/full-suite-runner.ts
+- run_id：wk-prod-anchor
+- session_id：84fa96f2-95ad-4b74-8dfb-21f75937ab4d
+- suite 日志：/data/home/yale/work/quay/.quay/fan-in-suite-gap-routine-semantic-dedup-scan-print-json-three-behaviours~wk-prod-anchor~1792039225310-cabaeb.log
+- fan-in 日志：/data/home/yale/work/quay/.quay/fan-in-gap-routine-semantic-dedup-scan-print-json-three-behaviours-wk-prod-anchor.log
