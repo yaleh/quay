@@ -103,8 +103,10 @@ merge
 
 ## Blocker
 
-**2026-10-15T06:13:19.399Z — worker 未落地（exited-not-landed）**
+**2026-10-15T08:01:05.492Z — worker 未落地（exited-not-landed）**
 
-- 未落地原因：step=flip-done: expected status 'ready' or 'done', got "todo"
+- 未落地原因：step=ff: fan-in-ff-merge: suite 证书 — suite_head..tip 恰为本任务的单个 flip-done 提交（身份判定：仅 M tasks/gap-routine-semantic-dedup-scan-defaultroot-byte-identical-quad.md）⇒ 判惰性，⛔ 未调分类器
+fan-in-ff-merge: FF FAILED — To .; not a fast-forward. Retry record written (attempt 1). Return to 无锁段 step 1 (merge develop again — 必须 merge 不得 rebase, AC75), re-judge the delta (step 2) and re-run.
+fan-in-ff-merge: measure ff_only_locked=false
 - run_id：wk-prod-anchor
-- session_id：2abae21d-793e-451e-972d-142a78994fda
+- session_id：ced4c690-27ff-49fd-9197-294c1f4e7cb4
