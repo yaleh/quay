@@ -66,3 +66,11 @@ extract
 - `plugin/scripts/instrument-decay-check.ts`
 - `packages/quay/src/cli/shared.ts`
 - `tasks/gap-routine-semantic-dedup-scan-print-json-three-behaviours.md`
+
+## Blocker
+
+**2026-10-15T03:27:22.521Z — worker 未落地（exited-not-landed）**
+
+- 未落地原因：step=suite: incomplete suite (925/925 files) — recovery exhausted at floor concurrency 32 — no declared rung produced a complete verdict (64,48,32); needs a code/config fix, see plugin/scripts/full-suite-runner.ts
+- run_id：wk-prod-anchor
+- session_id：48c126d6-cda2-4288-869a-166a1d2f367b
