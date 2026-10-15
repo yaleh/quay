@@ -33,6 +33,8 @@ extra: {}
 
 AC1–AC3 带真实读数勾选；不绕过任何门禁；不改 runner 配置。
 
+落地标志：develop 上 ci.yml 的 test job 不再出现 profiles-role-coverage-check always-red；随后 quay 发布会话可按 SPEC §3「上一次 decisive CI 绿」前置执行 `bash plugin/scripts/release-cut.sh 0.20.0`。
+
 ## Touches
 
 - plugin/scripts/checker-mutation-cases/profiles-role-coverage-check.sh
