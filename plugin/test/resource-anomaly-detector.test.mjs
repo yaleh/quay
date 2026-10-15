@@ -167,6 +167,15 @@ test("AC2 — the same anomaly recurring 3 times is exactly ONE identity-keyed F
 });
 
 // ── AC3: existing verifier/refuter + existing mechanism dedup ────────────────────────────────────
+test("AC3 — clustersFromAnomalySeeds (the engine's own adapter) refuses a subject-less seed", async () => {
+  const { clustersFromAnomalySeeds, SEED_WITHOUT_SUBJECT } = await import(pathToFileURL(ENGINE).href);
+  assert.deepEqual(clustersFromAnomalySeeds([]), [], "an empty seed set is a legitimate no-op");
+  assert.equal(clustersFromAnomalySeeds([{ concept_kind: "k", components: ["a.ts"] }])[0].rep.comps[0], "a.ts");
+  // ⛔ A seed with no subject is REFUSED by name — never silently skipped (硬规则 3b).
+  assert.throws(() => clustersFromAnomalySeeds([{ concept_kind: "k", components: [] }]), new RegExp(SEED_WITHOUT_SUBJECT));
+  assert.throws(() => clustersFromAnomalySeeds([{ components: ["a.ts"] }]), new RegExp(SEED_WITHOUT_SUBJECT));
+});
+
 test("AC3 — the Finding reaches the EXISTING verifier/refuter and files via the ABI, dedup suppressed", async () => {
   const { clustersFromAnomalySeeds } = await import(pathToFileURL(ENGINE).href);
   const tmp = mkTmp("rad-ac3-");
