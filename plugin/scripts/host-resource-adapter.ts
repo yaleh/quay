@@ -93,11 +93,15 @@ export interface ResourceLimits {
 }
 
 /** The `memory.stat` breakdown (bytes), the subsets a resource diagnosis actually uses. Absent keys
- *  stay `null` (缺值 ≠ 0). */
+ *  stay `null` (缺值 ≠ 0). `anon`/`file`/`shmem` are the three that decide WHAT filled the scope
+ *  (anonymous pressure vs reclaimable page cache); `file_mapped` and `sock` are the two that decide
+ *  what the page-cache half actually IS (mapped executables / socket buffers). */
 export interface MemoryStatBreakdown {
   anonBytes: number | null;
   fileBytes: number | null;
   shmemBytes: number | null;
+  fileMappedBytes: number | null;
+  sockBytes: number | null;
   kernelBytes: number | null;
   slabBytes: number | null;
   inactiveFileBytes: number | null;
@@ -111,10 +115,18 @@ export interface MemoryReading {
    *  a READING, distinct from "could not read it" — the enclosing `AdapterReading` carries that). */
   limitBytes: number | null;
   swapCurrentBytes: number | null;
+  /** The swap high-water mark (`memory.swap.peak`); `null` on kernels/setups without the file — and
+   *  then the enclosing `unavailableFields` names it, so 「no swap peak on this host」 is never read
+   *  as 「swap peak = 0」. */
+  swapPeakBytes: number | null;
   stat: MemoryStatBreakdown | null;
   /** The raw PSI block (unparsed text) — a formatted-elsewhere reading, kept verbatim so a reader can
    *  see the kernel's own wording rather than a re-rendered paraphrase. */
   pressure: string | null;
+  /** Per-field 「this reading could not produce it」 reasons, keyed by the reading-field name (硬规则
+   *  3b) — the ONE place that knows WHICH file was missing. A key present here means that field is
+   *  `null`; the caller records it as `null` + this reason and ⛔ never as a 0. */
+  unavailableFields: Record<string, string>;
 }
 
 export interface MemoryEventReading {
@@ -125,10 +137,37 @@ export interface MemoryEventReading {
   /** How many times the scope hit its ceiling while reclaiming (`memory.events` `max`), or `null`
    *  when the mechanism does not report it. */
   max: number | null;
+  /** Times the scope crossed its `memory.high` reclaim threshold (`memory.events` `high`), or `null`
+   *  when the mechanism does not report it. Distinct from `max`: `high` is throttling (the kernel
+   *  reclaims), `max` is the hard ceiling being hit. `null` ⇒ ⛔ not a zero. */
+  high: number | null;
+  /** Per-field 「this reading could not produce it」 reasons, keyed by the reading-field name (硬规则
+   *  3b). A key present here means that field is `null` — and it must NEVER be read as a 0. */
+  unavailableFields: Record<string, string>;
+}
+
+/** One process inside the scope, as the host's own process table reports it. Every field is
+ *  independently three-valued: a process that vanished between the scope listing and this read is
+ *  reported with `null`s (a TORN read), ⛔ never with a fabricated 0 RSS. */
+export interface ProcessReading {
+  pid: number;
+  /** The parent pid as the kernel reports it (`null` = the process vanished / is unreadable). */
+  ppid: number | null;
+  /** Resident set size in bytes (`VmRSS` from `/proc/<pid>/status`), or `null` when unreadable. */
+  rssBytes: number | null;
+  /** The process's argv joined with spaces, or `null` when unreadable. Used ONLY to tell a planned
+   *  test-file process from the processes it spawned — never parsed for policy. */
+  cmdline: string | null;
 }
 
 export interface ProcessTreeReading {
   pids: number[];
+  /** The SAME pids, as far as the host could describe them. Optional so a host that can only list
+   *  pids still satisfies the interface; a process missing here is one whose `/proc` entry was gone
+   *  (short-lived) — ⛔ not a process with 0 bytes of memory. */
+  processes?: ProcessReading[];
+  /** Per-field reasons (硬规则 3b) — e.g. `rssBytes` when the host cannot read per-process RSS. */
+  unavailableFields?: Record<string, string>;
 }
 
 /** The host capability this adapter can offer. `mechanism` is a human-readable name for the EVIDENCE
@@ -195,6 +234,8 @@ const MEMORY_STAT_KEYS: Array<[keyof MemoryStatBreakdown, string]> = [
   ["anonBytes", "anon"],
   ["fileBytes", "file"],
   ["shmemBytes", "shmem"],
+  ["fileMappedBytes", "file_mapped"],
+  ["sockBytes", "sock"],
   ["kernelBytes", "kernel"],
   ["slabBytes", "slab"],
   ["inactiveFileBytes", "inactive_file"],
@@ -279,13 +320,31 @@ export function createLinuxCgroupV2Adapter(): HostResourceAdapter {
     const foreign = foreignHandle(KIND, scope);
     if (foreign) return unavailable(foreign);
     const dir = scope.id;
-    const current = parseCgroupNumber(readFileOrNull(dir, "memory.current"));
+    // 硬规则 3b — ONE reason per field, recorded for EVERY field this reading could not produce. The
+    // file name is spelled here (the only place that knows which file backs which field), so a caller
+    // never has to invent a reason or fall back to a shared one.
+    const unavailableFields: Record<string, string> = {};
+    const miss = <T>(field: string, file: string, v: T | null): T | null => {
+      if (v === null) unavailableFields[field] = `${file} is not readable under ${dir}`;
+      return v;
+    };
+    const current = miss("currentBytes", "memory.current", parseCgroupNumber(readFileOrNull(dir, "memory.current")));
     // `memory.peak` is the kernel's high-water mark; older kernels lack it, and there the honest
     // degrade is the instantaneous `memory.current` (a LOWER bound, ⛔ not a fabricated peak).
     const peakFile = parseCgroupNumber(readFileOrNull(dir, "memory.peak"));
+    if (peakFile === null) unavailableFields.peakBytes = `memory.peak is not readable under ${dir}`;
     const peak = peakFile ?? current;
-    const limit = parseCgroupNumber(readFileOrNull(dir, "memory.max"));
-    const swap = parseCgroupNumber(readFileOrNull(dir, "memory.swap.current"));
+    const limit = miss("limitBytes", "memory.max", parseCgroupNumber(readFileOrNull(dir, "memory.max")));
+    const swap = miss(
+      "swapCurrentBytes",
+      "memory.swap.current",
+      parseCgroupNumber(readFileOrNull(dir, "memory.swap.current")),
+    );
+    const swapPeak = miss(
+      "swapPeakBytes",
+      "memory.swap.peak",
+      parseCgroupNumber(readFileOrNull(dir, "memory.swap.peak")),
+    );
     const statText = readFileOrNull(dir, "memory.stat");
     const stat: MemoryStatBreakdown | null = statText
       ? (() => {
@@ -294,21 +353,43 @@ export function createLinuxCgroupV2Adapter(): HostResourceAdapter {
             anonBytes: null,
             fileBytes: null,
             shmemBytes: null,
+            fileMappedBytes: null,
+            sockBytes: null,
             kernelBytes: null,
             slabBytes: null,
             inactiveFileBytes: null,
           };
-          for (const [field, key] of MEMORY_STAT_KEYS) out[field] = kv.has(key) ? (kv.get(key) as number) : null;
+          // 硬规则 3b — a key the kernel does not report is recorded as an EXPLICIT per-key reason, not
+          // left as a bare null: 「this kernel has no `kernel` counter」 and 「the reading never happened」
+          // are different facts, and a bare null says neither.
+          for (const [field, key] of MEMORY_STAT_KEYS) {
+            if (kv.has(key)) out[field] = kv.get(key) as number;
+            else unavailableFields[`stat.${field}`] = `memory.stat under ${dir} carries no '${key}' key`;
+          }
           return out;
         })()
       : null;
     const pressure = readFileOrNull(dir, "memory.pressure");
-    if (current === null && peak === null && limit === null && swap === null && stat === null && pressure === null) {
+    if (pressure === null) unavailableFields.pressure = `memory.pressure is not readable under ${dir}`;
+    if (stat === null) unavailableFields.stat = `memory.stat is not readable under ${dir}`;
+    if (
+      current === null && peak === null && limit === null && swap === null && swapPeak === null &&
+      stat === null && pressure === null
+    ) {
       return unavailable(
-        `no readable cgroup v2 memory file under ${dir} (memory.current / memory.peak / memory.max / memory.swap.current / memory.stat / memory.pressure)`,
+        `no readable cgroup v2 memory file under ${dir} (memory.current / memory.peak / memory.max / memory.swap.current / memory.swap.peak / memory.stat / memory.pressure)`,
       );
     }
-    return ok({ currentBytes: current, peakBytes: peak, limitBytes: limit, swapCurrentBytes: swap, stat, pressure });
+    return ok({
+      currentBytes: current,
+      peakBytes: peak,
+      limitBytes: limit,
+      swapCurrentBytes: swap,
+      swapPeakBytes: swapPeak,
+      stat,
+      pressure,
+      unavailableFields,
+    });
   };
 
   const readMemoryEvents = (scope: ResourceScopeHandle): AdapterReading<MemoryEventReading> => {
@@ -324,7 +405,17 @@ export function createLinuxCgroupV2Adapter(): HostResourceAdapter {
       // readable」, ⛔ not 「0 OOMs」 — the caller keeps its reading unknown (硬规则 3b/6).
       return unavailable(`memory.events under ${scope.id} carries neither an oom nor an oom_kill counter`);
     }
-    return ok({ oom: oom ?? 0, oomKill: oomKill ?? 0, max: kv.has("max") ? (kv.get("max") as number) : null });
+    // `high` guards the ceiling (reclaim throttling); kernels without it answer `null` + a reason, so a
+    // reader can tell 「this kernel does not report high」 from 「high = 0」.
+    const high = kv.has("high") ? (kv.get("high") as number) : null;
+    return ok({
+      oom: oom ?? 0,
+      oomKill: oomKill ?? 0,
+      max: kv.has("max") ? (kv.get("max") as number) : null,
+      high,
+      unavailableFields:
+        high === null ? { high: `memory.events under ${scope.id} carries no 'high' counter` } : {},
+    });
   };
 
   const readProcessTree = (scope: ResourceScopeHandle): AdapterReading<ProcessTreeReading> => {
@@ -336,7 +427,35 @@ export function createLinuxCgroupV2Adapter(): HostResourceAdapter {
       .split("\n")
       .map((l) => Number(l.trim()))
       .filter((n) => Number.isFinite(n) && n > 0);
-    return ok({ pids });
+    const processes: ProcessReading[] = [];
+    // A pid can vanish between the cgroup listing and this read (short-lived children). It is then
+    // reported with NULLs rather than dropped or zero-filled: `cgroup.procs` said it was in the scope,
+    // and 「we could not describe it」 is a different fact from 「it used no memory」 (硬规则 3b).
+    const unavailableFields: Record<string, string> = {};
+    let unreadable = 0;
+    for (const pid of pids) {
+      const status = readFileOrNull("/proc", `${pid}/status`);
+      const cmdlineRaw = readFileOrNull("/proc", `${pid}/cmdline`);
+      if (status === null) {
+        processes.push({ pid, ppid: null, rssBytes: null, cmdline: null });
+        unreadable += 1;
+        continue;
+      }
+      const ppidM = /^PPid:\s+(\d+)\s*$/m.exec(status);
+      const rssM = /^VmRSS:\s+(\d+)\s*kB\s*$/m.exec(status);
+      processes.push({
+        pid,
+        ppid: ppidM ? Number(ppidM[1]) : null,
+        // kB (the kernel's own unit for VmRSS) → bytes. ⛔ No page-size constant is assumed.
+        rssBytes: rssM ? Number(rssM[1]) * 1024 : null,
+        cmdline: cmdlineRaw === null || cmdlineRaw === "" ? null : cmdlineRaw.replace(/\0/g, " ").trim(),
+      });
+    }
+    if (unreadable > 0) {
+      unavailableFields.processes =
+        `${unreadable}/${pids.length} pid(s) listed by cgroup.procs had no readable /proc/<pid>/status at sample time (a torn read — their rssBytes/ppid are null, not 0)`;
+    }
+    return ok({ pids, processes, unavailableFields });
   };
 
   const launchArgv = (command: string, limits: ResourceLimits): string[] =>

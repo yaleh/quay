@@ -185,10 +185,41 @@ test("AC3 unit — the per-run evidence file carries peakBytes/memoryMaxBytes/oo
     // or one the adapter DID produce on this host (adapter / memory / processTreePids are present
     // because the readings were readable — a host where they are not would omit them, ⛔ never
     // zero-fill them).
+    //
+    // gap-suite-memory-telemetry-anon-file-shmem-swap-psi-concurrency-process-tree-unknown-not-zero
+    // widened this closure by exactly two keys, and they are NOT optional-by-luck: `memoryTelemetry`
+    // (the per-sample aggregates: stat max / at-peak / at-first-oom, swap, PSI, event deltas) and
+    // `processTreeAccounting` (the scope's process count + RSS, split planned vs descendant) are
+    // produced whenever a scope was readable — which is exactly this fixture. `concurrency` is absent
+    // HERE and present on a real ROUND: it is computed from the round's own per-file intervals and
+    // phase windows, neither of which exists at the sampler's stop() (see the runner's augment path).
     assert.deepEqual(Object.keys(JSON.parse(fs.readFileSync(f1, "utf8"))).sort(), [
-      "adapter", "capturedAt", "memory", "memoryMaxBytes", "oom", "oomKill", "peakBytes", "phase",
-      "processTreePids", "runId", "samples", "scopeUnit", "telemetry",
+      "adapter", "capturedAt", "memory", "memoryMaxBytes", "memoryTelemetry", "oom", "oomKill",
+      "peakBytes", "phase", "processTreeAccounting", "processTreePids", "runId", "samples", "scopeUnit",
+      "telemetry",
     ]);
+    // …and the two widened blocks keep the same three-valued contract as every other field: this
+    // fixture's scope carries `memory.peak` / `memory.events` / `cgroup.procs` and NOTHING else, so
+    // the stat/PSI/swap aggregates must be `null` + a NAMED reason (⛔ never 0), while the counters it
+    // CAN read are filled. That is the property the closure above exists to protect.
+    const ev1OnDisk = JSON.parse(fs.readFileSync(f1, "utf8"));
+    assert.equal(ev1OnDisk.memoryTelemetry.statMax, null, "no memory.stat in this scope ⇒ null, ⛔ not a zeroed block");
+    assert.match(ev1OnDisk.memoryTelemetry.unavailable["memory.stat"] ?? "", /memory\.stat is not readable/);
+    assert.equal(ev1OnDisk.memoryTelemetry.psi, null, "no memory.pressure ⇒ null block");
+    assert.match(ev1OnDisk.memoryTelemetry.unavailable["memory.pressure"] ?? "", /memory\.pressure is not readable/);
+    assert.equal(ev1OnDisk.memoryTelemetry.swapPeakBytes, null, "no memory.swap.peak ⇒ null, ⛔ not 0");
+    assert.equal(ev1OnDisk.memoryTelemetry.eventsDelta.oomKill, 2, "the one counter this scope DOES report is a real delta (0 → 2)");
+    assert.equal(ev1OnDisk.memoryTelemetry.eventsDelta.high, 0, "memory.events carries `high 0` at first read and at last ⇒ a real 0 delta (⛔ distinct from `null`)");
+    assert.equal(ev1OnDisk.processTreeAccounting.maxProcesses, 2, "cgroup.procs listed 4242 + 4243");
+    // The two fixture pids are almost certainly not alive on this host, so /proc/<pid>/status was gone
+    // for both ⇒ NO readable RSS ⇒ `null` + the count of unreadable ones named in the reason (⛔ the
+    // summed RSS is never invented as 0). If a host DOES have a live pid there, the honest reading is a
+    // positive number and no reason — asserted as the alternative rather than assumed away.
+    if (ev1OnDisk.processTreeAccounting.maxRssBytes === null) {
+      assert.match(ev1OnDisk.processTreeAccounting.unavailable ?? "", /had no readable \/proc\/<pid>\/status/);
+    } else {
+      assert.ok(ev1OnDisk.processTreeAccounting.maxRssBytes > 0, "a live pid ⇒ a real RSS, never 0");
+    }
 
     // (c) a SECOND run with a different runId ⇒ a SECOND file; the first is untouched (⛔ not a single slot).
     startSuiteMemorySampler({

@@ -740,10 +740,13 @@ export interface SuiteMemoryEvidence {
     peakBytes: number | null;
     limitBytes: number | null;
     swapCurrentBytes: number | null;
+    swapPeakBytes?: number | null;
     stat: {
       anonBytes: number | null;
       fileBytes: number | null;
       shmemBytes: number | null;
+      fileMappedBytes?: number | null;
+      sockBytes?: number | null;
       kernelBytes: number | null;
       slabBytes: number | null;
       inactiveFileBytes: number | null;
@@ -752,4 +755,131 @@ export interface SuiteMemoryEvidence {
   };
   /** The pids in the scope's own process tree at the last readable sample. Absent when unreadable. */
   processTreePids?: number[];
+  /**
+   * gap-suite-memory-telemetry-anon-file-shmem-swap-psi-concurrency-process-tree-unknown-not-zero —
+   * the AGGREGATES over the round's samples. `memory` above is ONE sample (the last readable one), and
+   * a single sample cannot answer the question the whole block exists for: a `peakBytes` sitting at
+   * `MemoryMax` is shaped the same whether ANONYMOUS memory filled the scope (pressure) or reclaimable
+   * PAGE CACHE did (harmless). Only the per-sample `memory.stat` split tells them apart — and only a
+   * MAX over samples keeps it when the last sample is not the peak one.
+   *
+   * EVERY field is independently three-valued (硬规则 3b/6): a field the adapter could not produce is
+   * `null` AND named in `unavailable` with the reason and the file that was missing. ⛔ Never 0 — `0`
+   * is the MEASUREMENT 「read it: nothing there」, which a blind reading is not entitled to make.
+   */
+  memoryTelemetry?: SuiteMemoryTelemetry;
+  /**
+   * The concurrency that ACTUALLY held, per phase — MEASURED from this round's own per-file intervals
+   * (the direct量), ⛔ not the requested lane count and ⛔ not nproc. Absent when the round produced no
+   * usable intervals (a fixture suite that emits no `__PERFILE__` lines, an early crash).
+   */
+  concurrency?: SuiteConcurrencyReading;
+  /**
+   * What the scope's process tree was doing, per sample, split into planned test-file processes vs the
+   * processes THEY spawned. Per-file `memPeakKb` is the file's own `RUSAGE_SELF` — it cannot see a
+   * child's memory, and 543/961 test files spawn/exec/fork. This block is that missing dimension.
+   */
+  processTreeAccounting?: SuiteProcessTreeAccounting;
+}
+
+/** The `memory.stat` keys the aggregate keeps a MAX of, per round. Same five the diagnosis needs:
+ *  the anon/file/shmem split (what filled the scope) plus file_mapped/sock (what the cache half is). */
+export interface SuiteMemoryStatSample {
+  anonBytes: number | null;
+  fileBytes: number | null;
+  shmemBytes: number | null;
+  fileMappedBytes: number | null;
+  sockBytes: number | null;
+}
+
+export interface SuiteMemoryTelemetry {
+  /** MAX of each `memory.stat` key over the round's samples. `null` when `memory.stat` was never
+   *  readable (then `unavailable.stat` names why) — NOT a zeroed block. */
+  statMax: SuiteMemoryStatSample | null;
+  /** The `memory.stat` snapshot at the sample whose `memory.current` was the highest. */
+  statAtPeakCurrent: SuiteMemoryStatSample | null;
+  /** The `memory.stat` snapshot at the FIRST sample where `oom_kill` rose above the round's first
+   *  reading — i.e. WHAT was in the scope when it started killing. */
+  statAtFirstOomKill: SuiteMemoryStatSample | null;
+  /** MAX of `memory.current` over the samples (`null` = never readable). */
+  currentMaxBytes: number | null;
+  /** MAX of `memory.swap.current` over the samples. */
+  swapCurrentMaxBytes: number | null;
+  /** MAX of `memory.swap.peak` over the samples (kernels without the file ⇒ `null` + reason). */
+  swapPeakBytes: number | null;
+  /** PSI: the max `avg10` seen and the round's `total` DELTA (last reading − first reading), for both
+   *  the `some` and the `full` lines. `null` = `memory.pressure` was never readable. */
+  psi: {
+    someAvg10Max: number | null;
+    fullAvg10Max: number | null;
+    someTotalDelta: number | null;
+    fullTotalDelta: number | null;
+  } | null;
+  /** `memory.events` DELTAS over the round (last − first): what HAPPENED in this round, as opposed to
+   *  the cumulative counters' absolute values. A key is `null` when the kernel does not report that
+   *  counter (`unavailable` names it). */
+  eventsDelta: {
+    high: number | null;
+    max: number | null;
+    oom: number | null;
+    oomKill: number | null;
+  } | null;
+  /** How many samples contributed (0 ⇒ nothing was ever read — the whole block is inert). */
+  samples: number;
+  /** The wall time the sampler ITSELF spent inside its sample function over the whole round, in ms —
+   *  the instrument's OWN cost, so the task's overhead budget is a MEASUREMENT rather than a promise
+   *  (`samplerCostMs / suite wall` is the ratio that budget is about). It includes the final stop()
+   *  sample, which is taken after the suite exits. */
+  samplerCostMs?: number;
+  /** 硬规则 3b — 「which aggregate field could not be produced, and WHY」, keyed by the field name
+   *  (`stat`, `pressure`, `swapPeakBytes`, `events.high`, …). A key present here ⇒ that field is
+   *  `null`; a reader must NOT treat its absence from this map as "the field was 0". */
+  unavailable: Record<string, string>;
+}
+
+export interface SuiteConcurrencyReading {
+  /** The lane count this round was LAUNCHED with (the runner's `--lane-count` / `defaultLaneCount()`).
+   *  Recorded ONLY so a reader can see the requested number next to the measured one — it is ⛔ not
+   *  the concurrency that held. */
+  laneCount: number;
+  /** What `laneCount` does and does not mean (the unified scheduler's reliability cap holds the total
+   *  at the lowest ACTIVE group's budget, so a requested 128 has been measured at 64 every round). */
+  laneCountNote: string;
+  /** MEASURED: the max number of per-file intervals overlapping at one instant INSIDE each phase's
+   *  `[start_ms, end_ms]` window (intervals are clipped to the window). `null` when this round had no
+   *  usable phase windows or no usable intervals. */
+  maxConcurrentPerPhase: Record<string, number> | null;
+  /** MEASURED: the max overlap over the whole round (all phases pooled). */
+  maxConcurrentOverall: number | null;
+  /** How many per-file intervals the reading was computed from (0 ⇒ no usable intervals). */
+  intervals: number;
+  /** 硬规则 3b — why the per-phase reading could not be produced, when it could not. */
+  unavailable: string | null;
+}
+
+/** Counts + summed RSS of the scope's own process tree, at each sample. Every value is three-valued:
+ *  a sample where `/proc` could not describe the pids contributes NOTHING (⛔ not a 0). */
+export interface SuiteProcessTreeAccounting {
+  /** MAX over samples of the scope's process COUNT, and of the summed RSS of its processes. */
+  maxProcesses: number | null;
+  maxRssBytes: number | null;
+  /** The same two readings AT THE SAMPLE whose `memory.current` was highest — 「when the scope was
+   *  fullest, how many processes were in it and how much of it was theirs」. */
+  atPeakProcesses: number | null;
+  atPeakRssBytes: number | null;
+  /** Planned test-file processes: MAX count and the summed RSS at that max. */
+  plannedMax: number | null;
+  plannedRssAtMaxBytes: number | null;
+  /** The processes spawned BY those planned test-file processes (descendants inside the scope): MAX
+   *  count and the summed RSS at that max. This is the half per-file `RUSAGE_SELF` cannot see. */
+  descendantMax: number | null;
+  descendantRssAtMaxBytes: number | null;
+  /** Processes that are neither a planned test file nor its descendant (the suite shell, the
+   *  scheduler, a leak) — recorded so the three buckets sum to the total and nothing is unaccounted. */
+  otherMax: number | null;
+  /** How many samples contributed a process-tree reading. */
+  samples: number;
+  /** 硬规则 3b — why the accounting is inert, when it is (`cgroup.procs` unreadable, per-process RSS
+   *  unreadable, planned set unknown, …). */
+  unavailable: string | null;
 }

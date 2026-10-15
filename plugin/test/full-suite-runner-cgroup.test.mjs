@@ -74,7 +74,30 @@ import {
   yieldedSuiteSlotCount,
   spliceConcurrency,
   stripConcurrencyFlags,
+  // gap-suite-memory-telemetry-anon-file-shmem-swap-psi-concurrency-process-tree-unknown-not-zero —
+  // the pure aggregation half of the new telemetry (the AC3 cross-check re-derives with the SAME
+  // functions the round recorded with) plus the sampler itself for the hermetic AC2 fixture.
+  parsePressureBlock,
+  maxMemoryStat,
+  maxIntervalOverlap,
+  perPhaseConcurrency,
+  fileIntervalsFromPerFile,
+  plannedFileMatcher,
+  splitProcessTree,
+  deltaOrNull,
+  startSuiteMemorySampler,
+  augmentSuiteMemoryEvidence,
 } from "../scripts/full-suite-runner.ts";
+import {
+  createLinuxCgroupV2Adapter,
+  ok,
+  scopeHandleFromDir,
+} from "../scripts/host-resource-adapter.ts";
+
+/** A directory IS a scope handle for the linux-cgroup-v2 adapter (the same seam the oom-policy test
+ *  drives the sampler through). */
+const linuxDirScope = (dir) => () => ok(scopeHandleFromDir(dir));
+const LINUX_ADAPTER = createLinuxCgroupV2Adapter();
 import { runOnce, classifyFailure, routeRed, shouldStopDispatch, shouldDispatchOnRed } from "../scripts/suite-state-trigger.ts";
 
 import {
@@ -105,6 +128,145 @@ test("unit — the cgroup counter parsers handle the REAL cgroup v2 shapes", () 
     10975837195,
   );
   assert.equal(parsePressureSomeTotal("full avg10=0.00 avg60=0.00 avg300=0.00 total=0\n"), null, "no `some` line ⇒ null");
+});
+
+// ── gap-suite-memory-telemetry-anon-file-shmem-swap-psi-concurrency-process-tree-unknown-not-zero ───
+// The pure half of the new telemetry: the same functions the sampler aggregates with, driven directly.
+// They are exported for exactly this — so a reader can RE-DERIVE the round's evidence from the raw
+// carriers instead of trusting the number that was written (AC3's cross-check).
+
+test("unit — parsePressureBlock reads BOTH PSI lines (some/full × avg10/total), and refuses to invent one", () => {
+  const both = parsePressureBlock("some avg10=1.25 avg60=0.00 avg300=0.06 total=10975837195\nfull avg10=0.50 avg60=0.00 avg300=0.00 total=77\n");
+  assert.deepEqual(both, { someAvg10: 1.25, fullAvg10: 0.5, someTotal: 10975837195, fullTotal: 77 });
+  // A kernel/host that reports only the `some` line: `full` stays null (缺值 ≠ 0 — a 0 would claim
+  // 「measured: no full-stall pressure」, which this reading never measured).
+  assert.deepEqual(parsePressureBlock("some avg10=0.00 avg60=0.00 avg300=0.00 total=5\n"), {
+    someAvg10: 0,
+    fullAvg10: null,
+    someTotal: 5,
+    fullTotal: null,
+  });
+  assert.equal(parsePressureBlock(null), null, "no file ⇒ null (⛔ not a zeroed block)");
+  assert.equal(parsePressureBlock("   "), null);
+  assert.equal(parsePressureBlock("garbage without a some/full line\n"), null, "unparseable ⇒ null, ⛔ not zeros");
+});
+
+test("unit — maxMemoryStat takes the byte-wise max and keeps an unreadable key as the other side's reading", () => {
+  const a = { anonBytes: 10, fileBytes: null, shmemBytes: 5, fileMappedBytes: 1, sockBytes: null };
+  const b = { anonBytes: 4, fileBytes: 900, shmemBytes: null, fileMappedBytes: 3, sockBytes: 7 };
+  assert.deepEqual(maxMemoryStat(a, b), {
+    anonBytes: 10,
+    fileBytes: 900,
+    shmemBytes: 5,
+    fileMappedBytes: 3,
+    sockBytes: 7,
+  });
+  // null ∘ x = x — an unreadable key must NOT act as a 0 and drive the max down.
+  assert.deepEqual(maxMemoryStat(null, b), b);
+  assert.deepEqual(maxMemoryStat(a, null), a);
+  assert.equal(maxMemoryStat(null, null), null, "nothing measured ⇒ null, ⛔ not a zeroed block");
+});
+
+test("unit — maxIntervalOverlap counts the peak overlap, window-clipped, end-before-start at the same ms", () => {
+  // 0────────10  20────30   (two disjoint files, then two overlapping ones)
+  const iv = [
+    [0, 10],
+    [20, 30],
+    [25, 40],
+    [35, 45],
+  ];
+  assert.equal(maxIntervalOverlap(iv), 2, "at t∈[25,30] two files ran; at t∈[35,40] two; never three");
+  // A window clips: [0,26] touches only the first file plus 1ms of the 20-30 one.
+  assert.equal(maxIntervalOverlap(iv, [0, 26]), 2);
+  assert.equal(maxIntervalOverlap(iv, [0, 5]), 1, "outside every interval of the second pair");
+  assert.equal(maxIntervalOverlap(iv, [11, 19]), null, "a window with no interval inside it ⇒ null, ⛔ not 0");
+  // Touching at a single ms is NOT concurrent (end sorts before start at the same timestamp).
+  assert.equal(maxIntervalOverlap([[0, 10], [10, 20]]), 1);
+  assert.equal(maxIntervalOverlap([]), null);
+  assert.equal(maxIntervalOverlap([[5, 5]]), null, "a zero-length interval was never observed running");
+});
+
+test("unit — perPhaseConcurrency attributes overlap to each phase window (AC3's pure kernel)", () => {
+  const intervals = [
+    { file: "/a.test.mjs", startMs: 100, endMs: 200 },
+    { file: "/b.test.mjs", startMs: 150, endMs: 300 },
+    { file: "/c.test.mjs", startMs: 250, endMs: 400 },
+    { file: "/d.test.mjs", startMs: 260, endMs: 270 },
+  ];
+  const phases = [
+    { phase: "static", start_ms: 0, end_ms: 90 },
+    { phase: "serial", start_ms: 90, end_ms: 240 },
+    { phase: "main", start_ms: 240, end_ms: 500 },
+  ];
+  const got = perPhaseConcurrency(intervals, phases);
+  assert.deepEqual(got, { serial: 2, main: 3 }, "static has no interval ⇒ the key is ABSENT, ⛔ not 0");
+  // No intervals / no phases ⇒ null (unknown), never an empty-but-present map.
+  assert.equal(perPhaseConcurrency([], phases), null);
+  assert.equal(perPhaseConcurrency(intervals, []), null);
+});
+
+test("unit — fileIntervalsFromPerFile takes only records carrying BOTH bounds (缺值 ≠ 0-length)", () => {
+  const iv = fileIntervalsFromPerFile([
+    { file: "a", startedAtMs: 10, endedAtMs: 20 },
+    { file: "b", startedAtMs: 10 }, // torn record ⇒ contributes nothing, ⛔ not a 0-length interval
+    { file: "c", endedAtMs: 30 },
+    { file: "d", startedAtMs: "10", endedAtMs: 20 },
+  ]);
+  assert.deepEqual(iv, [{ file: "a", startMs: 10, endMs: 20 }]);
+  assert.deepEqual(fileIntervalsFromPerFile(null), []);
+});
+
+test("unit — plannedFileMatcher resolves the plan's relative paths against the round root", () => {
+  const isPlanned = plannedFileMatcher(["plugin/test/a.test.mjs"], "/wt");
+  assert.equal(isPlanned("node /wt/plugin/test/a.test.mjs"), true, "the argv's absolute path matches");
+  assert.equal(isPlanned("node plugin/test/a.test.mjs"), true, "the plan's own relative spelling matches");
+  assert.equal(isPlanned("node /wt/plugin/test/b.test.mjs"), false);
+  assert.equal(isPlanned(null), false, "an unreadable argv is not a planned file (it is simply not evidence FOR one)");
+  // An UNKNOWN plan (null) answers null — the caller records the dimension as unavailable rather than
+  // concluding 「no planned process ran」 (硬规则 3b).
+  assert.equal(plannedFileMatcher(null, "/wt")("node /wt/plugin/test/a.test.mjs"), null);
+});
+
+test("unit — splitProcessTree buckets planned vs descendant via the ppid chain, and never invents RSS", () => {
+  const processes = [
+    { pid: 1, ppid: 0, rssBytes: 1000, cmdline: "bash test.sh" }, // the suite shell ⇒ other
+    { pid: 2, ppid: 1, rssBytes: 2000, cmdline: "node /wt/plugin/test/a.test.mjs" }, // planned
+    { pid: 3, ppid: 2, rssBytes: 3000, cmdline: "bash -c 'heavy child'" }, // descendant of a planned file
+    { pid: 4, ppid: 3, rssBytes: 4000, cmdline: "python3 worker.py" }, // grandchild ⇒ still a descendant
+    { pid: 5, ppid: 1, rssBytes: null, cmdline: "node /wt/plugin/test/b.test.mjs" }, // planned, RSS torn
+  ];
+  const split = splitProcessTree(processes, plannedFileMatcher(["plugin/test/a.test.mjs", "plugin/test/b.test.mjs"], "/wt"));
+  assert.deepEqual(split.total, { count: 5, rssBytes: 10000, rssReadable: 4, rssUnreadable: 1 });
+  assert.deepEqual(split.planned, { count: 2, rssBytes: 2000, rssReadable: 1, rssUnreadable: 1 });
+  assert.equal(split.descendant.count, 2, "the spawned child AND its grandchild are descendants");
+  assert.equal(split.descendant.rssBytes, 7000);
+  assert.deepEqual(split.other, { count: 1, rssBytes: 1000, rssReadable: 1, rssUnreadable: 0 });
+  assert.equal(
+    split.planned.count + split.descendant.count + split.other.count,
+    split.total.count,
+    "the three buckets account for every process — nothing is silently dropped",
+  );
+  // NOTHING readable ⇒ null per bucket (⛔ not 0, which would read as 「measured: they use no memory」).
+  const blind = splitProcessTree([{ pid: 9, ppid: 1, rssBytes: null, cmdline: "x" }], () => false);
+  assert.equal(blind.total.rssBytes, null);
+  assert.equal(blind.total.count, 1);
+  // A ppid CYCLE (a torn/reparented read) terminates instead of hanging.
+  const cyclic = splitProcessTree(
+    [
+      { pid: 7, ppid: 8, rssBytes: 1, cmdline: "a" },
+      { pid: 8, ppid: 7, rssBytes: 1, cmdline: "b" },
+    ],
+    () => false,
+  );
+  assert.equal(cyclic.total.count, 2);
+});
+
+test("unit — deltaOrNull is a DELTA only when both ends were read (⛔ a one-sided reading is not a 0)", () => {
+  assert.equal(deltaOrNull(0, 5), 5);
+  assert.equal(deltaOrNull(5, 5), 0, "a real 0 delta (read both ends: nothing happened)");
+  assert.equal(deltaOrNull(null, 5), null);
+  assert.equal(deltaOrNull(5, null), null);
+  assert.equal(deltaOrNull(9, 4), 0, "a counter that went DOWN means the scope was recreated — never negative activity");
 });
 
 test("unit — readPhaseCounters reads the three cumulative counters from a cgroup dir (explicit seam dir)", () => {
@@ -150,6 +312,291 @@ test("unit — PhaseDifferentialAccounting computes exact differentials from the
   } finally {
     if (before === undefined) delete process.env.QUAY_TEST_CGROUP_SCRIPT;
     else process.env.QUAY_TEST_CGROUP_SCRIPT = before;
+  }
+});
+
+// ── gap-suite-memory-telemetry-anon-file-shmem-swap-psi-concurrency-process-tree-unknown-not-zero ───
+// AC2 — a scope whose `memory.stat` / `memory.swap.current` / `memory.pressure` are absent must record
+// `null` + a NAMED reason for EXACTLY those fields, while every field it CAN read stays filled. The
+// negative control is the same file read back: `statMax` is `null`, NOT `{}` — a zeroed block would be
+// the fabricated measurement 「measured it: nothing there」 (硬规则 3b/6).
+test("AC2 — a partially readable scope records null + a named reason for exactly the missing fields, and fills the rest", () => {
+  const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-tel-ev-"));
+  const cgroupDir = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-tel-cg-"));
+  try {
+    // Readable: current / peak / max / events / procs. ABSENT: memory.stat, memory.swap.current,
+    // memory.swap.peak, memory.pressure.
+    fs.writeFileSync(path.join(cgroupDir, "memory.current"), "1048576\n");
+    fs.writeFileSync(path.join(cgroupDir, "memory.peak"), "2097152\n");
+    fs.writeFileSync(path.join(cgroupDir, "memory.max"), "17179869184\n");
+    fs.writeFileSync(path.join(cgroupDir, "memory.events"), "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\n");
+    fs.writeFileSync(path.join(cgroupDir, "cgroup.procs"), `${process.pid}\n`);
+
+    let oomKillNow = 0;
+    const sampler = startSuiteMemorySampler({
+      adapter: LINUX_ADAPTER,
+      scopeProvider: linuxDirScope(cgroupDir),
+      stateDir,
+      runId: "tel-partial",
+      memoryMaxBytes: 17179869184,
+      phaseProvider: () => "main",
+      intervalMs: 20,
+    });
+    // Let a sample see a grown current (the max over samples is what the aggregate reports), then make
+    // oom_kill rise so `statAtFirstOomKill` has a sample to point at.
+    fs.writeFileSync(path.join(cgroupDir, "memory.current"), "4194304\n");
+    oomKillNow = 1;
+    fs.writeFileSync(path.join(cgroupDir, "memory.events"), `low 0\nhigh 0\nmax 0\noom 1\noom_kill ${oomKillNow}\n`);
+    const ev = sampler.stop();
+
+    const tel = ev.memoryTelemetry;
+    // (a) the MISSING fields: null + a reason naming the FILE that was not there.
+    assert.equal(tel.statMax, null, "no memory.stat ⇒ null, ⛔ not a zeroed breakdown");
+    assert.equal(tel.statAtPeakCurrent, null);
+    assert.equal(tel.statAtFirstOomKill, null, "the oom sample had no readable stat either ⇒ null, ⛔ not a zeroed block");
+    assert.equal(tel.psi, null, "no memory.pressure ⇒ null PSI block");
+    assert.equal(tel.swapCurrentMaxBytes, null, "no memory.swap.current ⇒ null, ⛔ not 0 bytes of swap");
+    assert.equal(tel.swapPeakBytes, null, "no memory.swap.peak ⇒ null, ⛔ not 0");
+    const missing = Object.keys(tel.unavailable).filter((k) => k.startsWith("memory.")).sort();
+    assert.deepEqual(
+      missing,
+      ["memory.pressure", "memory.stat", "memory.swapCurrentBytes", "memory.swapPeakBytes"],
+      "EXACTLY the four absent fields are named — a readable field must never be reported as unavailable (and an absent one never silently absent)",
+    );
+    assert.match(tel.unavailable["memory.stat"], /memory\.stat is not readable under .*fsr-tel-cg-/);
+    assert.match(tel.unavailable["memory.pressure"], /memory\.pressure is not readable under /);
+    // (b) the READABLE fields are still filled — the nulls above are field-local, not a whole-block bail.
+    assert.equal(tel.currentMaxBytes, 4194304, "the max of memory.current over the samples");
+    assert.equal(tel.eventsDelta.oomKill, 1, "a real delta: oom_kill went 0 → 1");
+    assert.equal(tel.samples >= 1, true);
+    // (c) the instrument's own cost is recorded (AC4's ratio) and is a real measurement, not a constant.
+    assert.equal(typeof tel.samplerCostMs, "number");
+    assert.ok(tel.samplerCostMs >= 0);
+    // (d) the process tree IS readable here (cgroup.procs lists THIS process) ⇒ a real, positive RSS —
+    // the counterpart to (a): what the host CAN read, it fills.
+    assert.equal(ev.processTreeAccounting.maxProcesses, 1);
+    assert.ok(ev.processTreeAccounting.maxRssBytes > 0, "this process's own RSS was readable ⇒ a positive number, never 0");
+  } finally {
+    fs.rmSync(stateDir, { recursive: true, force: true });
+    fs.rmSync(cgroupDir, { recursive: true, force: true });
+  }
+});
+
+// AC2 negative control, the OTHER half: the SAME scope with `memory.stat` / `memory.swap.*` /
+// `memory.pressure` PRESENT ⇒ the very fields that were `null` above become numbers, and their reasons
+// disappear from `unavailable`. Without this arm, 「null + reason」 could be a function that always
+// answers null (推论三: a criterion only a broken fixture can satisfy measures nothing).
+test("AC2 negative control — the same scope WITH memory.stat/swap/pressure fills exactly the fields that were null", () => {
+  const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-tel-ev2-"));
+  const cgroupDir = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-tel-cg2-"));
+  try {
+    fs.writeFileSync(path.join(cgroupDir, "memory.current"), "1048576\n");
+    fs.writeFileSync(path.join(cgroupDir, "memory.peak"), "2097152\n");
+    fs.writeFileSync(path.join(cgroupDir, "memory.max"), "17179869184\n");
+    fs.writeFileSync(path.join(cgroupDir, "memory.events"), "low 0\nhigh 3\nmax 0\noom 0\noom_kill 0\n");
+    fs.writeFileSync(path.join(cgroupDir, "cgroup.procs"), `${process.pid}\n`);
+    fs.writeFileSync(
+      path.join(cgroupDir, "memory.stat"),
+      "anon 1073741824\nfile 536870912\nshmem 1048576\nfile_mapped 268435456\nsock 4096\nkernel 8192\nslab 16384\ninactive_file 134217728\n",
+    );
+    fs.writeFileSync(path.join(cgroupDir, "memory.swap.current"), "33554432\n");
+    fs.writeFileSync(path.join(cgroupDir, "memory.swap.peak"), "67108864\n");
+    fs.writeFileSync(path.join(cgroupDir, "memory.pressure"), "some avg10=2.50 avg60=0.00 avg300=0.00 total=1234\nfull avg10=1.25 avg60=0.00 avg300=0.00 total=99\n");
+    const ev = startSuiteMemorySampler({
+      adapter: LINUX_ADAPTER,
+      scopeProvider: linuxDirScope(cgroupDir),
+      stateDir,
+      runId: "tel-full",
+      memoryMaxBytes: 17179869184,
+      phaseProvider: () => "main",
+      intervalMs: 20,
+    }).stop();
+    const tel = ev.memoryTelemetry;
+    assert.deepEqual(tel.statMax, {
+      anonBytes: 1073741824,
+      fileBytes: 536870912,
+      shmemBytes: 1048576,
+      fileMappedBytes: 268435456,
+      sockBytes: 4096,
+    }, "the five keys the diagnosis needs — including file_mapped and sock, which the pre-change reading did not carry");
+    assert.deepEqual(tel.statAtPeakCurrent, tel.statMax, "the peak sample IS this sample (one sample, one current)");
+    assert.equal(tel.swapCurrentMaxBytes, 33554432);
+    assert.equal(tel.swapPeakBytes, 67108864);
+    assert.deepEqual(tel.psi, { someAvg10Max: 2.5, fullAvg10Max: 1.25, someTotalDelta: 0, fullTotalDelta: 0 }, "one sample ⇒ the totals' delta is a real 0 (both ends read)");
+    assert.deepEqual(
+      Object.keys(tel.unavailable).filter((k) => k.startsWith("memory.")),
+      [],
+      "nothing is missing now ⇒ no memory.* reason — the map tracks the REAL reading, not a fixed list",
+    );
+  } finally {
+    fs.rmSync(stateDir, { recursive: true, force: true });
+    fs.rmSync(cgroupDir, { recursive: true, force: true });
+  }
+});
+
+// AC3 — the recorded per-phase concurrency is the MEASURED overlap of the round's own per-file
+// intervals, and the round record's `perFile` carrier re-derives the SAME number. The requested
+// `laneCount` is deliberately different (5 vs a measured 2): the whole point of the field is that it is
+// ⛔ not the number the runner asked for (that mismatch is what made the memory-policy input wrong).
+test(
+  "AC3 — the round records MEASURED max concurrency per phase, and it equals the value re-derived from the round record",
+  async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-conc-"));
+    // Three files whose intervals overlap: a=[T,T+1000], b=[T,T+1000], c=[T+1000,T+2000] ⇒ peak 2 at
+    // the instant a and b are both running. `end_ms` is the reporter's own field, so this fixture emits
+    // exactly what measure-suite-reporter emits — the round record parses it with the production parser.
+    const { f, dir } = fakeSuite(
+      [
+        "T=$(( $(date +%s%3N) ))",
+        'echo "__PERFILE__ duration_ms=1000 /wt/plugin/test/a.test.mjs passed=true end_ms=$((T+1000))"',
+        'echo "__PERFILE__ duration_ms=1000 /wt/plugin/test/b.test.mjs passed=true end_ms=$((T+1000))"',
+        'echo "__PERFILE__ duration_ms=1000 /wt/plugin/test/c.test.mjs passed=true end_ms=$((T+2000))"',
+        "sleep 3", // keep the suite alive so the phase window covers every interval
+        'echo "# tests 3"',
+        'echo "# pass 3"',
+        'echo "# fail 0"',
+        'echo "# cancelled 0"',
+        "exit 0",
+      ].join("\n"),
+    );
+    try {
+      const child = runRunner({
+        root,
+        command: `bash ${f}`,
+        laneCount: 5,
+        runId: "conc-round",
+        env: { QUAY_TEST_PLANNED_FILES: "" },
+      });
+      const { code } = await waitExit(child);
+      assert.equal(code, 0, `runner exits 0 on the green fixture, got ${code}`);
+      const s = readState(root);
+      const evidence = JSON.parse(
+        fs.readFileSync(path.join(root, ".quay", `suite-memory-evidence-${s.runId}.json`), "utf8"),
+      );
+      const conc = evidence.concurrency;
+      assert.ok(conc, "the round's evidence carries the concurrency block (written at finalize, after the intervals are complete)");
+      assert.equal(conc.laneCount, 5, "the REQUESTED lane count is recorded next to it…");
+      assert.match(conc.laneCountNote, /reliability cap/, "…together with what it does and does not mean");
+      assert.equal(conc.maxConcurrentPerPhase.static, 2, "MEASURED: two of the three intervals overlap");
+      assert.equal(conc.maxConcurrentOverall, 2);
+      assert.notEqual(conc.maxConcurrentOverall, conc.laneCount, "the measured value is ⛔ not the requested lane count");
+
+      // The RE-DERIVATION, from a DIFFERENT carrier (the round record's own perFile array, parsed by the
+      // production parser) with the SAME exported pure functions the round recorded with.
+      const round = lastRoundRecord(root);
+      const reDerived = perPhaseConcurrency(
+        fileIntervalsFromPerFile(round.perFile),
+        round.phases.map((p) => ({ phase: p.phase, start_ms: p.start_ms, end_ms: p.end_ms })),
+      );
+      assert.deepEqual(reDerived, conc.maxConcurrentPerPhase, "recorded === re-derived from the round record's perFile intervals");
+      assert.equal(
+        maxIntervalOverlap(fileIntervalsFromPerFile(round.perFile).map((i) => [i.startMs, i.endMs])),
+        conc.maxConcurrentOverall,
+        "…and the whole-round overlap agrees too",
+      );
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  },
+);
+
+// AC3 negative control — the field is not a constant: a round whose intervals never overlap records 1,
+// not the 2 above (and still not the requested lanes).
+test(
+  "AC3 negative control — non-overlapping intervals record 1 (the reading follows the intervals, not a constant)",
+  async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-conc2-"));
+    const { f, dir } = fakeSuite(
+      [
+        "T=$(( $(date +%s%3N) ))",
+        'echo "__PERFILE__ duration_ms=100 /wt/plugin/test/a.test.mjs passed=true end_ms=$((T+100))"',
+        'echo "__PERFILE__ duration_ms=100 /wt/plugin/test/b.test.mjs passed=true end_ms=$((T+300))"',
+        "sleep 2",
+        'echo "# tests 2"',
+        'echo "# pass 2"',
+        'echo "# fail 0"',
+        'echo "# cancelled 0"',
+        "exit 0",
+      ].join("\n"),
+    );
+    try {
+      const child = runRunner({ root, command: `bash ${f}`, laneCount: 7, runId: "conc-serial", env: { QUAY_TEST_PLANNED_FILES: "" } });
+      const { code } = await waitExit(child);
+      assert.equal(code, 0);
+      const s = readState(root);
+      const evidence = JSON.parse(fs.readFileSync(path.join(root, ".quay", `suite-memory-evidence-${s.runId}.json`), "utf8"));
+      assert.equal(evidence.concurrency.maxConcurrentPerPhase.static, 1, "a=[T,T+100] and b=[T+200,T+300] never overlap");
+      assert.equal(evidence.concurrency.laneCount, 7, "…while 7 lanes were requested — the two numbers are independent");
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  },
+);
+
+// AC4 — the sampler's overhead, MEASURED two ways on a fixture suite: (a) the instrument's own cost
+// recorded in the round's evidence vs the round's wall, and (b) an A/B of the same fixture suite with
+// the sampler on and off. The seam is the ONLY way to run arm (b) — a claim about one's own overhead is
+// not a measurement (硬规则 4 推论三: a criterion only a fixture can satisfy proves nothing).
+// The arms run inside a REAL cgroup scope when systemd-run is available, so the sampler really reads
+// memory.stat / the process tree; the scope arm is also what proves the reads happened at all (a cost
+// reading taken while reading NOTHING measures the fixture's own scheduling, not the sampler).
+test("AC4 — the sampler's own cost stays under 1% of the suite wall (instrument-recorded cost + an on/off A/B)", async () => {
+  const scoped = systemdRunAvailable();
+  const scopeEnv = scoped ? { QUAY_TEST_SYSTEMD_RUN_AVAILABLE: "1", QUAY_TEST_SKIP_SYSTEMD_RUN: "0" } : {};
+  const runs = [];
+  for (const arm of ["on", "off", "on", "off"]) {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), `fsr-ovh-${arm}-`));
+    const { f, dir } = fakeSuite(
+      ['echo "# tests 5"', 'echo "# pass 5"', 'echo "# fail 0"', 'echo "# cancelled 0"', "sleep 3", "exit 0"].join("\n"),
+    );
+    try {
+      const env = { ...scopeEnv };
+      if (arm === "off") env.QUAY_TEST_SUITE_MEMORY_SAMPLER = "off";
+      const t0 = Date.now();
+      const child = runRunner({ root, command: `bash ${f}`, laneCount: 2, runId: `ovh-${arm}`, env });
+      const { code } = await waitExit(child);
+      const wallMs = Date.now() - t0;
+      assert.equal(code, 0, `the fixture round is green in the ${arm} arm`);
+      const s = readState(root);
+      const evFile = path.join(root, ".quay", `suite-memory-evidence-${s.runId}.json`);
+      if (arm === "off") {
+        assert.equal(fs.existsSync(evFile), false, "the seam really disabled the sampler (⛔ no evidence file — the seam is not a no-op)");
+        runs.push({ arm, wallMs, cost: null, statMax: null });
+        continue;
+      }
+      const evidence = JSON.parse(fs.readFileSync(evFile, "utf8"));
+      runs.push({ arm, wallMs, cost: evidence.memoryTelemetry.samplerCostMs, statMax: evidence.memoryTelemetry.statMax });
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  }
+  const on = runs.filter((r) => r.arm === "on");
+  const off = runs.filter((r) => r.arm === "off");
+  // MIN of each arm (the least-noise estimator: both arms' wall is dominated by node bootstrap + the
+  // fixture's own sleep, so the sampler's contribution only shows up as a positive tail).
+  const minOn = Math.min(...on.map((r) => r.wallMs));
+  const minOff = Math.min(...off.map((r) => r.wallMs));
+  const deltaPct = ((minOn - minOff) / minOff) * 100;
+  // The instrument's OWN reading of its cost (independent of the A/B): samples × per-sample work.
+  const costOn = Math.min(...on.map((r) => r.cost));
+  const costPct = (costOn / minOn) * 100;
+  process.stderr.write(
+    `full-suite-runner AC4 overhead (${scoped ? "REAL cgroup scope" : "hermetic, no scope"}): ` +
+      `sampler ON wall=${on.map((r) => r.wallMs).join("/")}ms OFF wall=${off.map((r) => r.wallMs).join("/")}ms ` +
+      `⇒ A/B delta=${deltaPct.toFixed(2)}% (min ${minOn} vs ${minOff}); ` +
+      `instrument-recorded samplerCostMs=${costOn.toFixed(3)} ⇒ ${costPct.toFixed(3)}% of the suite wall\n`,
+  );
+  assert.ok(deltaPct <= 1, `the on/off wall-clock delta is within the 1% budget (measured ${deltaPct.toFixed(2)}%)`);
+  assert.ok(costPct <= 1, `the sampler's own recorded cost is within the 1% budget (measured ${costPct.toFixed(3)}%)`);
+  assert.ok(costOn > 0, "the cost reading is a REAL measurement (a structurally-0 counter would carry no information)");
+  if (scoped) {
+    assert.ok(
+      on.some((r) => r.statMax !== null),
+      "inside a real scope the sampler read memory.stat — so the measured cost is the cost of real reads",
+    );
   }
 });
 

@@ -115,6 +115,7 @@ function fakeCgroupDir() {
   fs.writeFileSync(path.join(dir, "memory.peak"), `${321 * 1024 * 1024}\n`);
   fs.writeFileSync(path.join(dir, "memory.max"), `${16 * 1024 * 1024 * 1024}\n`);
   fs.writeFileSync(path.join(dir, "memory.swap.current"), "4096\n");
+  fs.writeFileSync(path.join(dir, "memory.swap.peak"), "8192\n");
   fs.writeFileSync(
     path.join(dir, "memory.stat"),
     "anon 2048\nfile 8192\nkernel_stack 16\nslab 64\nsock 8\nshmem 32\nfile_mapped 128\ninactive_file 4096\n",
@@ -136,19 +137,42 @@ test("linux adapter — reads current/peak/limit/swap/stat-breakdown/PSI/events/
     assert.equal(mem.value.peakBytes, 321 * 1024 * 1024, "peak comes from memory.peak, not memory.current");
     assert.equal(mem.value.limitBytes, 16 * 1024 * 1024 * 1024);
     assert.equal(mem.value.swapCurrentBytes, 4096);
+    assert.equal(mem.value.swapPeakBytes, 8192, "memory.swap.peak — the swap high-water mark");
     assert.deepEqual(mem.value.stat, {
       anonBytes: 2048,
       fileBytes: 8192,
       shmemBytes: 32,
+      // gap-suite-memory-telemetry-anon-file-shmem-swap-psi-concurrency-process-tree-unknown-not-zero
+      // — `file_mapped` and `sock` were on the wire all along and simply never surfaced: the anon/file/
+      // shmem split says WHAT filled the scope, these two say what the file half actually IS (mapped
+      // executables vs socket buffers).
+      fileMappedBytes: 128,
+      sockBytes: 8,
       kernelBytes: null, // `kernel` is absent from this fixture ⇒ null, ⛔ not 0
       slabBytes: 64,
       inactiveFileBytes: 4096,
     });
+    assert.deepEqual(mem.value.unavailableFields, { "stat.kernelBytes": `memory.stat under ${dir} carries no 'kernel' key` }, "the one stat key the kernel did not report is named — the others are NOT (a readable field must never share the 「unavailable」 shape)");
     assert.match(mem.value.pressure, /^some avg10=1\.00/);
     const ev = adapter.readMemoryEvents(scope);
-    assert.deepEqual(ev.value, { oom: 3, oomKill: 2, max: 7 });
+    assert.deepEqual(ev.value, { oom: 3, oomKill: 2, max: 7, high: 4, unavailableFields: {} });
     const tree = adapter.readProcessTree(scope);
     assert.deepEqual(tree.value.pids, [4242, 4243]);
+    // The pids are DESCRIBED as far as /proc allows: both are (almost certainly) gone on this host, so
+    // each is reported with NULLs — a torn read, ⛔ never 「it used 0 bytes」 — and the tally names it.
+    // If a host really has those pids, the honest reading is a positive RSS instead.
+    assert.equal(tree.value.processes.length, 2);
+    for (const p of tree.value.processes) {
+      if (p.rssBytes === null) {
+        assert.equal(p.ppid, null);
+        assert.equal(p.cmdline, null);
+      } else {
+        assert.ok(p.rssBytes > 0, "a live pid with a readable status carries a positive RSS");
+      }
+    }
+    if (tree.value.processes.every((p) => p.rssBytes === null)) {
+      assert.match(tree.value.unavailableFields.processes, /2\/2 pid\(s\) listed by cgroup\.procs had no readable/);
+    }
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }

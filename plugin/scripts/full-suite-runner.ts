@@ -202,6 +202,10 @@ import type {
   NotEvaluatedChecker,
   SuiteRoundRecord,
   SuiteMemoryEvidence,
+  SuiteMemoryStatSample,
+  SuiteMemoryTelemetry,
+  SuiteConcurrencyReading,
+  SuiteProcessTreeAccounting,
 } from "./full-suite-runner-types.ts";
 export type {
   SuiteStateValue,
@@ -215,6 +219,10 @@ export type {
   NotEvaluatedChecker,
   SuiteRoundRecord,
   SuiteMemoryEvidence,
+  SuiteMemoryStatSample,
+  SuiteMemoryTelemetry,
+  SuiteConcurrencyReading,
+  SuiteProcessTreeAccounting,
 } from "./full-suite-runner-types.ts";
 
 const REPO_ROOT = repoRoot();
@@ -522,6 +530,7 @@ import type {
   HostResourceAdapter,
   MemoryEventReading,
   MemoryReading,
+  MemoryStatBreakdown,
   ResourceLimits,
   ResourceScopeHandle,
 } from "./host-resource-adapter.ts";
@@ -1732,6 +1741,283 @@ export interface SuiteMemorySampler {
 }
 
 /**
+ * Add fields to the ALREADY-WRITTEN per-run evidence file (`<stateDir>/suite-memory-evidence-<runId>.json`).
+ *
+ * WHY a second write exists at all: the sampling window CLOSES while the suite's cgroup still exists
+ * (the transient scope is destroyed at suite exit ⇒ the final reading must be taken then), but two of
+ * the dimensions are only computable AFTER that point — the per-file intervals (every `__PERFILE__`
+ * line has arrived) and the phase windows (the accumulator's last boundary). The alternative — holding
+ * the whole evidence until the round is finalized — would drop the peak/OOM readings, which is the one
+ * thing this file exists for.
+ *
+ * ⛔ It is NOT a second writer: same module, same `writeSuiteMemoryEvidence`, same runId ⇒ the same
+ * path, strictly widened. An unreadable/absent base file is a NO-OP (the concurrency reading alone is
+ * not worth inventing the numbers the sampler owned).
+ */
+export function augmentSuiteMemoryEvidence(
+  stateDir: string,
+  runId: string,
+  patch: { concurrency: SuiteConcurrencyReading },
+): void {
+  const file = path.join(stateDir, `suite-memory-evidence-${runId}.json`);
+  let base: Record<string, unknown>;
+  try {
+    base = JSON.parse(fs.readFileSync(file, "utf8")) as Record<string, unknown>;
+  } catch {
+    return; // best-effort: no base ⇒ nothing to widen (never a half-invented evidence file)
+  }
+  if (!base || typeof base !== "object") return;
+  writeSuiteMemoryEvidence(stateDir, { ...base, ...patch } as unknown as SuiteMemoryEvidenceWritten);
+}
+
+// ── gap-suite-memory-telemetry-…-unknown-not-zero: the PURE aggregation half ──────────────────────
+// Everything below is a pure function of readings the adapter already produces — no new instrument,
+// no second cgroup reader (硬规则 5b). They are exported so the round's evidence can be RE-DERIVED from
+// the raw carriers by a reader (AC3's cross-check), instead of being trusted because it was written.
+
+/** The parsed `memory.pressure` block: both the `some` and the `full` line. `null` for a line the
+ *  kernel does not report. ⚠️ This is the BOTH-lines reading the diagnosis needs; `parsePressureSomeTotal`
+ *  (suite-accounting.ts) stays the ONE parser for its narrower callers — ⛔ the two are not merged
+ *  because merging would silently change what the phase accounting's existing contract returns. */
+export interface PressureBlock {
+  someAvg10: number | null;
+  fullAvg10: number | null;
+  someTotal: number | null;
+  fullTotal: number | null;
+}
+
+export function parsePressureBlock(text: string | null): PressureBlock | null {
+  if (text === null || text.trim() === "") return null;
+  const out: PressureBlock = { someAvg10: null, fullAvg10: null, someTotal: null, fullTotal: null };
+  let saw = false;
+  for (const line of text.split("\n")) {
+    const m = /^(some|full)\s+(.*)$/.exec(line.trim());
+    if (!m) continue;
+    saw = true;
+    const avg10 = /\bavg10=([0-9.]+)/.exec(m[2]);
+    const total = /\btotal=(\d+)/.exec(m[2]);
+    const key = m[1] as "some" | "full";
+    if (avg10) out[key === "some" ? "someAvg10" : "fullAvg10"] = Number(avg10[1]);
+    if (total) out[key === "some" ? "someTotal" : "fullTotal"] = Number(total[1]);
+  }
+  return saw ? out : null;
+}
+
+/** Byte-wise MAX of two `memory.stat` snapshots, key by key: a key absent on one side is taken from
+ *  the other (缺值 ≠ 0 — the max of 「unreadable」 and 「1234」 is 1234, ⛔ never 1234 vs a fabricated 0). */
+export function maxMemoryStat(
+  a: SuiteMemoryStatSample | null,
+  b: SuiteMemoryStatSample | null,
+): SuiteMemoryStatSample | null {
+  if (a === null) return b;
+  if (b === null) return a;
+  const keys: Array<keyof SuiteMemoryStatSample> = [
+    "anonBytes",
+    "fileBytes",
+    "shmemBytes",
+    "fileMappedBytes",
+    "sockBytes",
+  ];
+  const out = { ...a };
+  for (const k of keys) {
+    const x = a[k];
+    const y = b[k];
+    out[k] = x === null ? y : y === null ? x : Math.max(x, y);
+  }
+  return out;
+}
+
+/** The max number of `[startMs, endMs]` intervals overlapping at one instant, OPTIONALLY restricted
+ *  to a window (intervals are CLIPPED to it). This is the pure kernel of 「how many files ran at
+ *  once」 — ⛔ NOT `laneCount` and ⛔ NOT nproc. Zero-length intervals are dropped (a file that
+ *  started and ended at the same ms was never observed running); `null` when nothing was measurable. */
+export function maxIntervalOverlap(
+  intervals: ReadonlyArray<readonly [number, number]>,
+  window?: readonly [number, number],
+): number | null {
+  const events: Array<[number, number]> = [];
+  for (const [rawS, rawE] of intervals) {
+    if (!Number.isFinite(rawS) || !Number.isFinite(rawE)) continue;
+    let s = rawS;
+    let e = rawE;
+    if (window) {
+      s = Math.max(s, window[0]);
+      e = Math.min(e, window[1]);
+    }
+    if (e <= s) continue;
+    events.push([s, 1], [e, -1]);
+  }
+  if (events.length === 0) return null;
+  // End before start at the SAME ms: a file ending at t and another starting at t are not concurrent.
+  events.sort((x, y) => x[0] - y[0] || x[1] - y[1]);
+  let cur = 0;
+  let max = 0;
+  for (const [, delta] of events) {
+    cur += delta;
+    if (cur > max) max = cur;
+  }
+  return max;
+}
+
+/** The per-file intervals of a round, from its `perFile` records (`end_ms` + `duration_ms` are what the
+ *  reporter emits; `startedAtMs`/`endedAtMs` are the round record's normalized form of the same two
+ *  numbers). A record missing either bound contributes NOTHING (缺值 ≠ 0). */
+export interface FileInterval {
+  file: string;
+  startMs: number;
+  endMs: number;
+}
+
+export function fileIntervalsFromPerFile(perFile: unknown): FileInterval[] {
+  const out: FileInterval[] = [];
+  if (!Array.isArray(perFile)) return out;
+  for (const rec of perFile) {
+    const o = rec as { file?: unknown; startedAtMs?: unknown; endedAtMs?: unknown };
+    const s = o?.startedAtMs;
+    const e = o?.endedAtMs;
+    if (typeof s !== "number" || typeof e !== "number" || !Number.isFinite(s) || !Number.isFinite(e)) continue;
+    out.push({ file: typeof o.file === "string" ? o.file : "", startMs: s, endMs: e });
+  }
+  return out;
+}
+
+/** MEASURED concurrency per phase: the max per-file interval overlap INSIDE each phase's own window.
+ *  This is the value the round records — and the value AC3 re-derives from the same carriers. */
+export function perPhaseConcurrency(
+  intervals: ReadonlyArray<FileInterval>,
+  phases: ReadonlyArray<{ phase: string; start_ms: number; end_ms: number }>,
+): Record<string, number> | null {
+  if (intervals.length === 0 || phases.length === 0) return null;
+  const pairs = intervals.map((i) => [i.startMs, i.endMs] as const);
+  const out: Record<string, number> = {};
+  let any = false;
+  for (const p of phases) {
+    const max = maxIntervalOverlap(pairs, [p.start_ms, p.end_ms]);
+    if (max === null) continue;
+    // A phase can appear twice in a repaired record sequence (replacePhase renames the in-flight one);
+    // the reading for a name is the largest overlap observed under it.
+    out[p.phase] = out[p.phase] === undefined ? max : Math.max(out[p.phase], max);
+    any = true;
+  }
+  return any ? out : null;
+}
+
+/** One planned-file match predicate. A process's argv names the file it runs (`node <abs-path>`), so
+ *  a cmdline matches when it CONTAINS one of the planned paths — resolved against the round's root,
+ *  because the plan probe reports root-relative paths while the argv carries absolute ones.
+ *  `null` planned set ⇒ the predicate answers `null` (「the plan is unknown」), which the caller
+ *  records as an unavailable dimension ⛔ rather than as 「no planned process ran」. */
+export function plannedFileMatcher(
+  plannedFiles: readonly string[] | null,
+  root: string,
+): (cmdline: string | null) => boolean | null {
+  if (plannedFiles === null) return () => null;
+  const needles = new Set<string>();
+  for (const f of plannedFiles) {
+    needles.add(f);
+    needles.add(path.resolve(root, f));
+  }
+  const list = [...needles].filter((n) => n.length > 0);
+  return (cmdline) => {
+    if (cmdline === null) return false;
+    for (const n of list) if (cmdline.includes(n)) return true;
+    return false;
+  };
+}
+
+/** The scope's process tree, split for the memory diagnosis. Every bucket is counted INDEPENDENTLY:
+ *  a process whose RSS could not be read contributes to the COUNT but not to the summed bytes, and
+ *  when NOTHING in a bucket had a readable RSS the sum is `null` — ⛔ never 0, which would be the
+ *  fabricated measurement 「measured it: it used nothing」 (硬规则 3b/6). */
+export interface ProcessTreeBucket {
+  count: number;
+  /** The summed RSS of the processes whose RSS WAS readable, or `null` when none was. */
+  rssBytes: number | null;
+  rssReadable: number;
+  rssUnreadable: number;
+}
+
+export interface ProcessTreeSplit {
+  total: ProcessTreeBucket;
+  planned: ProcessTreeBucket;
+  descendant: ProcessTreeBucket;
+  other: ProcessTreeBucket;
+}
+
+export function splitProcessTree(
+  processes: ReadonlyArray<{ pid: number; ppid: number | null; rssBytes: number | null; cmdline: string | null }>,
+  isPlanned: (cmdline: string | null) => boolean | null,
+): ProcessTreeSplit {
+  const byPid = new Map<number, { ppid: number | null; rssBytes: number | null; cmdline: string | null }>();
+  for (const p of processes) byPid.set(p.pid, p);
+  // A process is a DESCENDANT when walking up its ppid chain (within the scope's own pid set) reaches
+  // a planned test-file process. Walks are memoized + depth-bounded so a ppid cycle (a reparented or
+  // torn read) cannot loop forever.
+  const kindCache = new Map<number, "planned" | "descendant" | "other">();
+  const kindOf = (pid: number): "planned" | "descendant" | "other" => {
+    const cached = kindCache.get(pid);
+    if (cached) return cached;
+    const seen = new Set<number>();
+    let cur: number | undefined = pid;
+    let depth = 0;
+    let verdict: "planned" | "descendant" | "other" = "other";
+    while (cur !== undefined && depth < 64) {
+      if (seen.has(cur)) break; // a cycle ⇒ not reachable from a planned process by a clean chain
+      seen.add(cur);
+      const proc = byPid.get(cur);
+      if (!proc) break;
+      if (isPlanned(proc.cmdline) === true) {
+        verdict = cur === pid ? "planned" : "descendant";
+        break;
+      }
+      cur = proc.ppid === null ? undefined : proc.ppid;
+      depth += 1;
+    }
+    kindCache.set(pid, verdict);
+    return verdict;
+  };
+  const empty = (): ProcessTreeBucket => ({ count: 0, rssBytes: 0, rssReadable: 0, rssUnreadable: 0 });
+  const acc: Record<"total" | "planned" | "descendant" | "other", ProcessTreeBucket> = {
+    total: empty(),
+    planned: empty(),
+    descendant: empty(),
+    other: empty(),
+  };
+  for (const p of processes) {
+    const kind = kindOf(p.pid);
+    for (const bucket of [acc.total, acc[kind]] as const) {
+      bucket.count += 1;
+      if (p.rssBytes === null) bucket.rssUnreadable += 1;
+      else {
+        bucket.rssBytes = (bucket.rssBytes ?? 0) + p.rssBytes;
+        bucket.rssReadable += 1;
+      }
+    }
+  }
+  for (const bucket of Object.values(acc)) if (bucket.rssReadable === 0) bucket.rssBytes = null;
+  return { total: acc.total, planned: acc.planned, descendant: acc.descendant, other: acc.other };
+}
+
+/** Bucket-wise MAX of two process-tree splits, for the COUNT and for the summed RSS independently
+ *  (they can come from different samples — many short-lived processes and a few large ones are both
+ *  readings worth keeping). `null` means 「nothing had a readable RSS in that bucket」 and loses to any
+ *  real reading, ⛔ never treated as 0. */
+function maxBucket(a: ProcessTreeBucket, b: ProcessTreeBucket): ProcessTreeBucket {
+  const pick = (x: number | null, y: number | null): number | null =>
+    x === null ? y : y === null ? x : Math.max(x, y);
+  const rssBytes = pick(a.rssBytes, b.rssBytes);
+  const from = a.rssBytes !== null && a.rssBytes === rssBytes ? a : b;
+  return {
+    count: Math.max(a.count, b.count),
+    rssBytes,
+    // The unreadable tally is taken from the sample that produced the winning RSS, so the three
+    // numbers always describe ONE observation rather than a mix of two.
+    rssReadable: from.rssReadable,
+    rssUnreadable: from.rssUnreadable,
+  };
+}
+
+/**
  * Start sampling the suite scope through the HOST ADAPTER every `intervalMs` (default 2s) and once
  * more on `stop()`. `scopeProvider` is resolved lazily each sample: at round start the transient scope
  * unit may not exist yet, so a one-shot resolve would make the whole evidence inert.
@@ -1757,6 +2043,12 @@ export function startSuiteMemorySampler(opts: {
   scopeUnit?: string | null;
   phaseProvider: () => string;
   intervalMs?: number;
+  /** This round's PLANNED test-file set (the runner's own plan), used ONLY to tell a planned test-file
+   *  process from the processes it spawned inside the scope. `null`/absent ⇒ that split is recorded as
+   *  unavailable, ⛔ never as 「no planned process ran」. */
+  plannedFiles?: readonly string[] | null;
+  /** The round's root, for resolving the plan's relative paths against a process's absolute argv. */
+  root?: string;
 }): SuiteMemorySampler {
   const intervalMs = opts.intervalMs ?? 2000;
   const adapter = opts.adapter ?? hostResourceAdapter();
@@ -1780,7 +2072,54 @@ export function startSuiteMemorySampler(opts: {
   let lastUnavailableReason: string | null = null;
   let processTreePids: number[] | null = null;
 
-  const sample = (): void => {
+  // ── gap-suite-memory-telemetry-…-unknown-not-zero: the per-sample AGGREGATES ─────────────────────
+  // Every field below is read INDEPENDENTLY and keeps its OWN three-valued state: a field whose source
+  // was absent in every sample lands `null` AND is named in `telemetryUnavailable` with the reason and
+  // the file — ⛔ never 0 (硬规则 3b/6: `0` is the measurement 「read it: nothing there」).
+  const telemetryUnavailable: Record<string, string> = {};
+  let statMax: SuiteMemoryStatSample | null = null;
+  let statAtPeakCurrent: SuiteMemoryStatSample | null = null;
+  let statAtFirstOomKill: SuiteMemoryStatSample | null = null;
+  let currentMax: number | null = null;
+  let swapCurrentMax: number | null = null;
+  let swapPeakMax: number | null = null;
+  let pressureFirst: PressureBlock | null = null;
+  let pressureLast: PressureBlock | null = null;
+  let someAvg10Max: number | null = null;
+  let fullAvg10Max: number | null = null;
+  let eventsFirst: MemoryEventReading | null = null;
+  let eventsLast: MemoryEventReading | null = null;
+  let oomKillAtFirst: number | null = null;
+  let statAtPeakSeen = false;
+  let statAtFirstOomKillSeen = false;
+  /** The `memory.stat` snapshot of the MOST RECENT sample (the one `statAtFirstOomKill` needs: what was
+   *  in the scope at the sample where the killing started — ⛔ NOT the running max, which would smear a
+   *  later, larger sample backwards in time). */
+  let lastStatSnapshot: SuiteMemoryStatSample | null = null;
+  // Process-tree accounting (Plan §4): the scope's own processes, split into planned test-file
+  // processes vs the processes THEY spawned. `null` values stay `null` — a sample whose /proc reads
+  // were torn contributes nothing rather than a fabricated 0.
+  let treeMax: ProcessTreeSplit | null = null;
+  let treeAtPeak: ProcessTreeSplit | null = null;
+  let treeSamples = 0;
+  const isPlanned = plannedFileMatcher(opts.plannedFiles ?? null, opts.root ?? process.cwd());
+  const statSampleOf = (stat: MemoryStatBreakdown | null): SuiteMemoryStatSample | null =>
+    stat === null
+      ? null
+      : {
+          anonBytes: stat.anonBytes,
+          fileBytes: stat.fileBytes,
+          shmemBytes: stat.shmemBytes,
+          fileMappedBytes: stat.fileMappedBytes ?? null,
+          sockBytes: stat.sockBytes ?? null,
+        };
+
+  // The instrument's OWN cost (AC4's ≤1% budget is about `samplerCostMs / suite wall`, and a promise
+  // about one's own overhead is not a measurement — 硬规则 4). `hrtime` because a sample costs well
+  // under a millisecond and a ms-resolution clock would read a structurally-guaranteed 0.
+  let samplerCostNs = 0;
+
+  const sampleOnce = (): void => {
     lastPhase = opts.phaseProvider() || lastPhase;
     const scope = opts.scopeProvider();
     if (scope.value === null) {
@@ -1800,8 +2139,49 @@ export function startSuiteMemorySampler(opts: {
       memory = memory === null || memory.peakBytes === null || mem.value.peakBytes === null
         ? mem.value
         : { ...mem.value, peakBytes: Math.max(memory.peakBytes, mem.value.peakBytes) };
+      const snapshot = statSampleOf(mem.value.stat);
+      lastStatSnapshot = snapshot;
+      statMax = maxMemoryStat(statMax, snapshot);
+      if (mem.value.currentBytes !== null) {
+        const isNewPeak = currentMax === null || mem.value.currentBytes > currentMax;
+        currentMax = isNewPeak ? mem.value.currentBytes : currentMax;
+        // The snapshot AT the peak sample — the reading that says whether the peak was anonymous
+        // memory or reclaimable page cache (a single last-sample stat cannot answer it).
+        if (isNewPeak && snapshot !== null) {
+          statAtPeakCurrent = snapshot;
+          statAtPeakSeen = true;
+        }
+      }
+      if (mem.value.swapCurrentBytes !== null) {
+        swapCurrentMax =
+          swapCurrentMax === null ? mem.value.swapCurrentBytes : Math.max(swapCurrentMax, mem.value.swapCurrentBytes);
+      }
+      if (mem.value.swapPeakBytes !== null && mem.value.swapPeakBytes !== undefined) {
+        swapPeakMax = swapPeakMax === null ? mem.value.swapPeakBytes : Math.max(swapPeakMax, mem.value.swapPeakBytes);
+      }
+      const psi = parsePressureBlock(mem.value.pressure);
+      if (psi !== null) {
+        if (pressureFirst === null) pressureFirst = psi;
+        pressureLast = psi;
+        if (psi.someAvg10 !== null) {
+          someAvg10Max = someAvg10Max === null ? psi.someAvg10 : Math.max(someAvg10Max, psi.someAvg10);
+        }
+        if (psi.fullAvg10 !== null) {
+          fullAvg10Max = fullAvg10Max === null ? psi.fullAvg10 : Math.max(fullAvg10Max, psi.fullAvg10);
+        }
+      }
+      // The adapter's own per-field reasons (硬规则 3b) — recorded as-is, so the evidence names the
+      // FILE that was missing rather than a generic 「unavailable」.
+      for (const [field, reason] of Object.entries(mem.value.unavailableFields ?? {})) {
+        telemetryUnavailable[`memory.${field}`] = reason;
+      }
     } else {
       lastUnavailableReason = mem.reason ?? "memory reading unavailable (no reason recorded)";
+      for (const field of ["stat", "pressure", "currentBytes", "swapCurrentBytes", "swapPeakBytes"]) {
+        if (telemetryUnavailable[`memory.${field}`] === undefined) {
+          telemetryUnavailable[`memory.${field}`] = mem.reason ?? "memory reading unavailable (no reason recorded)";
+        }
+      }
     }
     const ev = adapter.readMemoryEvents(handle);
     if (ev.value !== null) {
@@ -1811,12 +2191,69 @@ export function startSuiteMemorySampler(opts: {
       if (ev.value.oomKill > 0 && oomKill === 0) oomPhase = lastPhase;
       oom = Math.max(oom, ev.value.oom);
       oomKill = Math.max(oomKill, ev.value.oomKill);
+      if (eventsFirst === null) {
+        eventsFirst = ev.value;
+        oomKillAtFirst = ev.value.oomKill;
+      }
+      eventsLast = ev.value;
+      if (
+        !statAtFirstOomKillSeen &&
+        oomKillAtFirst !== null &&
+        ev.value.oomKill > oomKillAtFirst
+      ) {
+        statAtFirstOomKillSeen = true;
+        statAtFirstOomKill = lastStatSnapshot;
+      }
+      for (const [field, reason] of Object.entries(ev.value.unavailableFields ?? {})) {
+        telemetryUnavailable[`events.${field}`] = reason;
+      }
     } else {
       lastUnavailableReason = ev.reason ?? "memory-event reading unavailable (no reason recorded)";
+      for (const field of ["high", "max", "oom", "oomKill"]) {
+        if (telemetryUnavailable[`events.${field}`] === undefined) {
+          telemetryUnavailable[`events.${field}`] = ev.reason ?? "memory-event reading unavailable (no reason recorded)";
+        }
+      }
     }
     const tree = adapter.readProcessTree(handle);
-    if (tree.value !== null) processTreePids = tree.value.pids;
+    if (tree.value !== null) {
+      processTreePids = tree.value.pids;
+      if (tree.value.processes !== undefined) {
+        const split = splitProcessTree(tree.value.processes, isPlanned);
+        treeMax =
+          treeMax === null
+            ? split
+            : {
+                total: maxBucket(treeMax.total, split.total),
+                planned: maxBucket(treeMax.planned, split.planned),
+                descendant: maxBucket(treeMax.descendant, split.descendant),
+                other: maxBucket(treeMax.other, split.other),
+              };
+        // AT THE PEAK sample: the process count / RSS at the moment the scope held the most memory.
+        if (statAtPeakSeen && treeAtPeak === null) treeAtPeak = split;
+        treeSamples += 1;
+      } else if (telemetryUnavailable["processTree.processes"] === undefined) {
+        telemetryUnavailable["processTree.processes"] =
+          `the ${adapter.kind} adapter lists the scope's pids but does not describe them (no per-process RSS/argv)`;
+      }
+      for (const [field, reason] of Object.entries(tree.value.unavailableFields ?? {})) {
+        telemetryUnavailable[`processTree.${field}`] = reason;
+      }
+    } else if (telemetryUnavailable["processTree"] === undefined) {
+      telemetryUnavailable.processTree = tree.reason ?? "the scope's process tree is not readable";
+    }
     samples += 1;
+  };
+
+  /** One timed sample — the ONLY entry point (the timer, the first sample and stop() all go through
+   *  it), so `samplerCostMs` accounts for every read the instrument performs. */
+  const sample = (): void => {
+    const t0 = process.hrtime.bigint();
+    try {
+      sampleOnce();
+    } finally {
+      samplerCostNs += Number(process.hrtime.bigint() - t0);
+    }
   };
 
   sample();
@@ -1854,11 +2291,98 @@ export function startSuiteMemorySampler(opts: {
         },
         ...(memory ? { memory } : {}),
         ...(processTreePids ? { processTreePids } : {}),
+        // gap-suite-memory-telemetry-…-unknown-not-zero — the AGGREGATES over the round's samples, with
+        // a per-field 「read ✓」/「could not read, and here is WHY」 split (硬规则 3b). Every field is
+        // `null` exactly when `unavailable` names it: a reader must never have to guess whether a
+        // missing number means 「nothing there」 (0) or 「never read」.
+        memoryTelemetry: {
+          statMax: statMax ?? null,
+          statAtPeakCurrent: statAtPeakCurrent ?? null,
+          statAtFirstOomKill: statAtFirstOomKill ?? null,
+          currentMaxBytes: currentMax,
+          swapCurrentMaxBytes: swapCurrentMax,
+          swapPeakBytes: swapPeakMax,
+          psi:
+            pressureFirst === null && pressureLast === null
+              ? null
+              : {
+                  someAvg10Max,
+                  fullAvg10Max,
+                  // The DELTA over the round (last − first): the counters are cumulative since the scope
+                  // was created, so their absolute values say nothing about THIS round's window. A
+                  // counter that only ever read once has no delta — `null`, ⛔ not 0.
+                  someTotalDelta:
+                    pressureFirst?.someTotal !== null &&
+                    pressureFirst?.someTotal !== undefined &&
+                    pressureLast?.someTotal !== null &&
+                    pressureLast?.someTotal !== undefined
+                      ? Math.max(0, pressureLast.someTotal - pressureFirst.someTotal)
+                      : null,
+                  fullTotalDelta:
+                    pressureFirst?.fullTotal !== null &&
+                    pressureFirst?.fullTotal !== undefined &&
+                    pressureLast?.fullTotal !== null &&
+                    pressureLast?.fullTotal !== undefined
+                      ? Math.max(0, pressureLast.fullTotal - pressureFirst.fullTotal)
+                      : null,
+                },
+          eventsDelta: eventsLast === null
+            ? null
+            : {
+                high: deltaOrNull(eventsFirst?.high ?? null, eventsLast.high),
+                max: deltaOrNull(eventsFirst?.max ?? null, eventsLast.max),
+                oom: deltaOrNull(eventsFirst?.oom ?? null, eventsLast.oom),
+                oomKill: deltaOrNull(eventsFirst?.oomKill ?? null, eventsLast.oomKill),
+              },
+          samples,
+          samplerCostMs: samplerCostNs / 1e6,
+          unavailable: telemetryUnavailable,
+        },
+        processTreeAccounting: {
+          maxProcesses: treeMax?.total.count ?? null,
+          maxRssBytes: treeMax?.total.rssBytes ?? null,
+          atPeakProcesses: treeAtPeak?.total.count ?? null,
+          atPeakRssBytes: treeAtPeak?.total.rssBytes ?? null,
+          plannedMax: treeMax?.planned.count ?? null,
+          plannedRssAtMaxBytes: treeMax?.planned.rssBytes ?? null,
+          descendantMax: treeMax?.descendant.count ?? null,
+          descendantRssAtMaxBytes: treeMax?.descendant.rssBytes ?? null,
+          otherMax: treeMax?.other.count ?? null,
+          samples: treeSamples,
+          unavailable: processTreeAccountingReason(treeMax, treeSamples, telemetryUnavailable),
+        },
       };
       writeSuiteMemoryEvidence(opts.stateDir, evidence);
       return evidence;
     },
   };
+}
+
+/** A cumulative-counter delta (last − first), or `null` when either end could not be read — ⛔ a
+ *  one-sided reading is NOT a delta of 0 (硬规则 3b). Clamped at 0: a counter that went DOWN means the
+ *  scope was recreated between samples, which is not negative activity. */
+export function deltaOrNull(first: number | null, last: number | null): number | null {
+  if (first === null || last === null) return null;
+  return Math.max(0, last - first);
+}
+
+/** The named reason the process-tree accounting is inert, or `null` when it produced something. The
+ *  three distinct causes get three distinct strings — 「no scope」 / 「the plan is unknown」 / 「the host
+ *  lists pids but cannot describe them」 are different facts and must not share one wording. */
+export function processTreeAccountingReason(
+  treeMax: ProcessTreeSplit | null,
+  treeSamples: number,
+  unavailable: Record<string, string>,
+): string | null {
+  if (treeMax !== null && treeSamples > 0) {
+    // Partially readable is still readable — but a per-sample torn read is worth naming.
+    return unavailable["processTree.processes"] ?? null;
+  }
+  return (
+    unavailable["processTree"] ??
+    unavailable["processTree.processes"] ??
+    "the scope's process tree was never readable at a sample (no scope resolved, or cgroup.procs unreadable)"
+  );
 }
 
 // ── 计划清单完整性（gap-suite-verdict-green-on-oom-killed-incomplete-run-lands-on-11-percent-of-files）
@@ -3153,6 +3677,9 @@ export async function run(argv: string[]): Promise<number> {
   // then unreadable). `scopeProvider` resolves lazily through the host adapter (the scope unit may not
   // exist yet at round start).
   let memorySampler: SuiteMemorySampler | null = null;
+  // The evidence the sampler landed at stop(), kept so the concurrency dimension can be merged into the
+  // SAME per-run file once the round's per-file intervals + phase windows are complete.
+  let memoryEvidenceForAugment: SuiteMemoryEvidenceWritten | null = null;
   // gap-suite-resource-measurement-needs-a-host-adapter-not-inline-cgroup-calls — the sampler runs on
   // EVERY round, including the ones with NO attributable scope (an un-enveloped run, or a host whose
   // adapter cannot measure). ⛔ Not gated on `useSystemdRun` any more: gating meant a blind round
@@ -3164,7 +3691,16 @@ export async function run(argv: string[]): Promise<number> {
   const noScopeReason = !skipSystemdRun
     ? (hostResourceUnavailableReason() ?? "the host adapter reported no scope mechanism, without a reason")
     : "the suite was run UN-ENVELOPED (--no-systemd-run / a hermetic seam), so its processes share this runner's own cgroup — no scope is attributable to the suite";
-  memorySampler = startSuiteMemorySampler({
+  // gap-suite-memory-telemetry-…-unknown-not-zero AC4 — the OVERHEAD measurement seam: with
+  // `QUAY_TEST_SUITE_MEMORY_SAMPLER=off` the sampler is not started at all, so the SAME fixture suite
+  // can be timed with and without it and the delta is a real A/B rather than an assertion about one's
+  // own cost. ⛔ Not a policy knob: production sets nothing and samples on every round (an unmeasured
+  // round is exactly the defect this task closes), and a round run through it lands NO evidence file —
+  // which is why no other test may set it.
+  const samplerDisabled = process.env.QUAY_TEST_SUITE_MEMORY_SAMPLER === "off";
+  memorySampler = samplerDisabled
+    ? null
+    : startSuiteMemorySampler({
     // The scope is resolved through the SAME host adapter that built the argv — ⛔ not a second,
     // independently-resolved cgroup path (硬规则 5b).
     adapter: runAdapter,
@@ -3181,6 +3717,13 @@ export async function run(argv: string[]): Promise<number> {
       useSystemdRun && systemdLimits.memoryMax === suiteMemoryPolicy.memoryMax ? suiteMemoryPolicy : undefined,
     scopeUnit: null,
     phaseProvider: () => phaseAccount?.phase ?? "",
+    // gap-suite-memory-telemetry-…-unknown-not-zero — the round's OWN plan (resolved before the spawn,
+    // above) and its root: the process-tree split needs to know WHICH argv is a planned test file, and
+    // the plan is the only thing that can say so (a heuristic like 「argv mentions .test.」 would count
+    // a helper the runner never planned). `plannedFiles === null` ⇒ the split records itself as
+    // unavailable rather than reporting 「no planned process ran」 (硬规则 3b).
+    plannedFiles,
+    root,
   });
 
   // AC5 (reason axis) — a signal-kill ⇒ red + reason=aborted (NO correctness conclusion), so the
@@ -3955,6 +4498,10 @@ export async function run(argv: string[]): Promise<number> {
     telemetryAttempted = useSystemdRun;
     const ev = memorySampler.stop();
     oomKillReading = ev.oomKill;
+    // gap-suite-memory-telemetry-…-unknown-not-zero — keep the landed evidence so the concurrency
+    // dimension (computable only once the round's per-file intervals + phase windows are complete) can
+    // be added to the SAME file at finalize. `null` ⇒ no file to widen.
+    memoryEvidenceForAugment = ev;
     memorySampler = null;
   }
 
@@ -4514,6 +5061,44 @@ export async function run(argv: string[]): Promise<number> {
   // (never a fabricated []) when the round emitted no __PERFILE__ lines — same absent-field
   // contract as floor_ms/ceiling below.
   const perFile = perFileLines.length > 0 ? parsePerFileLines(perFileLines.join("\n")) : [];
+  // ── gap-suite-memory-telemetry-…-unknown-not-zero: the MEASURED concurrency ──────────────────────
+  // Written HERE, not inside the sampler's stop(), because the two carriers it reads only become
+  // complete at this point: the per-file intervals (every `__PERFILE__` line has arrived — the scope is
+  // gone and the stream is closed) and the phase windows (`phaseAccount.finalize()` above closed the
+  // last one). The sampler's own stop() therefore lands the file WITHOUT this block and this is the
+  // ONE place that adds it — same module, same writer, same runId (⛔ not a second carrier).
+  //
+  // ⛔ `laneCount` is recorded NEXT TO the measurement, never AS it: the runner ASKS the child for
+  // `--lane-count` lanes, but the unified scheduler's reliability cap holds the total at the lowest
+  // ACTIVE group's budget (serial/lowconc = floor(nproc/(S×P))), so the requested number and the
+  // concurrency that held are two different facts (measured 2026-10-14: requested 128, held 64, every
+  // round). Recording only the request is what made the memory policy's input wrong.
+  const roundIntervals = fileIntervalsFromPerFile(perFile);
+  const roundPhaseRecords = (phaseAccount?.records ?? []).map((p) => ({
+    phase: p.phase,
+    start_ms: p.start_ms,
+    end_ms: p.end_ms,
+  }));
+  const perPhase = perPhaseConcurrency(roundIntervals, roundPhaseRecords);
+  const concurrencyReading: SuiteConcurrencyReading = {
+    laneCount,
+    laneCountNote:
+      "the concurrency this round ASKED the child for (--lane-count / defaultLaneCount); the unified " +
+      "scheduler's reliability cap holds the TOTAL at the lowest active group's budget, so the value that " +
+      "actually held is `maxConcurrentPerPhase` / `maxConcurrentOverall`, measured from this round's per-file intervals",
+    maxConcurrentPerPhase: perPhase,
+    maxConcurrentOverall: maxIntervalOverlap(roundIntervals.map((i) => [i.startMs, i.endMs] as const)),
+    intervals: roundIntervals.length,
+    unavailable:
+      roundIntervals.length === 0
+        ? "this round produced no per-file interval records (no __PERFILE__ line carried end_ms + duration_ms) — the measured concurrency is unknown, ⛔ not 0"
+        : roundPhaseRecords.length === 0
+          ? "this round produced no phase windows (the phase accumulator recorded nothing) — only the whole-round overlap is readable"
+          : null,
+  };
+  if (memoryEvidenceForAugment) {
+    augmentSuiteMemoryEvidence(stateDir, runId, { concurrency: concurrencyReading });
+  }
   // gap-suite-verdict-green-on-oom-killed-incomplete-run-lands-on-11-percent-of-files — the round's
   // completeness reading in FULL (three-valued; see the call site). ⛔ 计划不可得时 `plannedFiles` 是
   // 显式 **null**（不是缺键也不是 0）：缺键会与「计划是空的」同形（硬规则 3b）。
