@@ -2,7 +2,7 @@
 id: gap-ci-mutation-fixture-profiles-role-coverage-tmpfs-always-red
 title: develop CI 自 2026-10-14 起 100/100 红：profiles-role-coverage-check 的
   mutation 夹具在 tmpfs /tmp 上跑 quay init 被拒 ⇒ always-red，阻塞 v0.20.0 正式发布
-status: needs-human
+status: todo
 labels:
   - gap
   - defect
@@ -27,9 +27,10 @@ extra: {}
 
 - [ ] AC1: 在 `/tmp` 为 tmpfs 的环境下，改动前 `checker-mutation-check` 对 `profiles-role-coverage-check` 判 always-red、改动后判 GREEN（粘贴 A/B 原文读数与复现命令）。
 - [ ] AC2: `quay init` 对 tmpfs worktree-root 的拒绝逻辑未改动（`git diff` 不含 `packages/quay/src/init.ts`）。
-- [ ] AC3: 落地后 develop 上一次真实 `ci.yml` run 的 `test` job 不再因该检查失败（粘贴 run id 与结论；若有其它失败如实列出，不在本任务内修）。
 
 ## Definition of Done
+
+落地后观测（不是 worker 可在 worktree 内勾的 AC，故放在 DoD）：develop 上落地后的第一次真实 `ci.yml` run，`test` job 不再因 `profiles-role-coverage-check` always-red 失败——粘贴 run id 与结论；若暴露出其它失败（静态检查此前 fail-closed，测试套件自 2026-10-10 起可能未完整跑过），如实列出、另行立案，不在本任务内修。
 
 AC1–AC3 带真实读数勾选；不绕过任何门禁；不改 runner 配置。
 
