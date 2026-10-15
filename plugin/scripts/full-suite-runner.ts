@@ -2090,11 +2090,16 @@ export function startSuiteMemorySampler(opts: {
   let eventsFirst: MemoryEventReading | null = null;
   let eventsLast: MemoryEventReading | null = null;
   let oomKillAtFirst: number | null = null;
-  let statAtPeakSeen = false;
   let statAtFirstOomKillSeen = false;
-  /** The `memory.stat` snapshot of the MOST RECENT sample (the one `statAtFirstOomKill` needs: what was
-   *  in the scope at the sample where the killing started — ⛔ NOT the running max, which would smear a
-   *  later, larger sample backwards in time). */
+  /** 「THIS sample set the running peak of `memory.current`」 — the flag the at-peak process-tree read
+   *  uses, so `atPeakProcesses`/`atPeakRssBytes` describe the SAME sample as `statAtPeakCurrent` even
+   *  when a later sample raises the peak again (a one-shot latch would pin them to an earlier, lower
+   *  peak — the two readings would silently describe different instants). */
+  let peakSampleThisTick = false;
+  /** The `memory.stat` snapshot of the CURRENT sample (what `statAtFirstOomKill` needs: what was in the
+   *  scope at the sample where the killing started — ⛔ NOT the running max, which would smear a later,
+   *  larger sample backwards in time, and ⛔ NOT the previous sample's reading, which would report a
+   *  stat the OOM sample never had). */
   let lastStatSnapshot: SuiteMemoryStatSample | null = null;
   // Process-tree accounting (Plan §4): the scope's own processes, split into planned test-file
   // processes vs the processes THEY spawned. `null` values stay `null` — a sample whose /proc reads
@@ -2121,6 +2126,9 @@ export function startSuiteMemorySampler(opts: {
 
   const sampleOnce = (): void => {
     lastPhase = opts.phaseProvider() || lastPhase;
+    // Re-armed every sample: a tick whose memory reading failed must NOT leave the previous tick's
+    // 「this is the peak sample」 standing for the process-tree read below.
+    peakSampleThisTick = false;
     const scope = opts.scopeProvider();
     if (scope.value === null) {
       lastUnavailableReason = scope.reason ?? "scope unavailable (no reason recorded)";
@@ -2142,15 +2150,16 @@ export function startSuiteMemorySampler(opts: {
       const snapshot = statSampleOf(mem.value.stat);
       lastStatSnapshot = snapshot;
       statMax = maxMemoryStat(statMax, snapshot);
+      // Whether THIS sample is the peak one — recomputed on every sample (⛔ not latched once), so the
+      // at-peak readings below always describe the CURRENT high-water sample.
+      peakSampleThisTick =
+        mem.value.currentBytes !== null && (currentMax === null || mem.value.currentBytes > currentMax);
       if (mem.value.currentBytes !== null) {
         const isNewPeak = currentMax === null || mem.value.currentBytes > currentMax;
         currentMax = isNewPeak ? mem.value.currentBytes : currentMax;
         // The snapshot AT the peak sample — the reading that says whether the peak was anonymous
         // memory or reclaimable page cache (a single last-sample stat cannot answer it).
-        if (isNewPeak && snapshot !== null) {
-          statAtPeakCurrent = snapshot;
-          statAtPeakSeen = true;
-        }
+        if (isNewPeak) statAtPeakCurrent = snapshot;
       }
       if (mem.value.swapCurrentBytes !== null) {
         swapCurrentMax =
@@ -2202,7 +2211,9 @@ export function startSuiteMemorySampler(opts: {
         ev.value.oomKill > oomKillAtFirst
       ) {
         statAtFirstOomKillSeen = true;
-        statAtFirstOomKill = lastStatSnapshot;
+        // The stat of THIS sample. `null` when this sample had no readable stat — ⛔ NOT the previous
+        // sample's, which would report a snapshot the OOM sample never had.
+        statAtFirstOomKill = mem.value !== null ? lastStatSnapshot : null;
       }
       for (const [field, reason] of Object.entries(ev.value.unavailableFields ?? {})) {
         telemetryUnavailable[`events.${field}`] = reason;
@@ -2230,7 +2241,10 @@ export function startSuiteMemorySampler(opts: {
                 other: maxBucket(treeMax.other, split.other),
               };
         // AT THE PEAK sample: the process count / RSS at the moment the scope held the most memory.
-        if (statAtPeakSeen && treeAtPeak === null) treeAtPeak = split;
+        // `peakSampleThisTick` (⛔ not a one-shot latch) keeps this on the SAME sample as
+        // `statAtPeakCurrent`, so 「the peak was anon」 and 「there were N processes using M bytes at the
+        // peak」 describe one instant rather than two.
+        if (peakSampleThisTick) treeAtPeak = split;
         treeSamples += 1;
       } else if (telemetryUnavailable["processTree.processes"] === undefined) {
         telemetryUnavailable["processTree.processes"] =
