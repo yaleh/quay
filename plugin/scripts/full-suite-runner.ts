@@ -1525,27 +1525,44 @@ export function buildSystemdRunArgv(command: string, limits: SystemdRunLimits = 
   return argv;
 }
 
+/** The trailing `run-*.scope` of a pid's cgroup path, or null when it is not inside one. Exported so
+ *  the caller-scope exclusion below and any reader share ONE extraction (硬规则 5b). */
+export function scopeUnitOfPid(pid: number): string | null {
+  try {
+    const m = fs.readFileSync(`/proc/${pid}/cgroup`, "utf8").match(/\/(run-[^/\n]+\.scope)\s*$/m);
+    return m ? m[1] : null;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Find the transient scope unit a spawned `systemd-run --scope` registered. The unit name is
  * `run-p<pid>-<invocation>.scope` where <pid> is the spawned systemd-run process's pid (verified on
  * this host). Polls `systemctl --user list-units` (the scope appears a moment after spawn); returns
  * the unit name or null after `timeoutMs`.
+ *
+ * ⛔ The CALLER's own scope is not the suite's scope, even though it matches the same `run-*` shape.
+ * `systemd-run --scope` moves the spawned process into the new scope only once the transient unit is
+ * REGISTERED — until then /proc/<pid>/cgroup still names the cgroup it was forked in, which is the
+ * caller's. In the REAL suite the caller's cgroup IS the suite's own auto-named `run-uNNN.scope`, so a
+ * naive "first `run-*.scope` wins" match returns the caller's: measured 2026-10-15, the AC1 evidence
+ * file then described a scope nobody set a ceiling on (`MemoryMax=infinity`, kernel `memory.max=max`)
+ * instead of the suite's applied 27917287424. Reading `run-*.scope` from the caller and refusing it is
+ * what makes the poll WAIT for the child's own unit, which is the answer the caller asked for.
  */
 export async function findSuiteScopeUnit(pid: number, timeoutMs = 8_000): Promise<string | null> {
   const start = Date.now();
+  // The scope THIS process already lives in (null when it is not inside a `run-*.scope`): the child
+  // only counts once it has left it.
+  const callerUnit = scopeUnitOfPid(process.pid);
   // Preferred: the child's OWN cgroup names its scope directly. systemd transient-scope naming is
   // `run-<uuid>.scope` — the older `run-p<pid>-` form (the heuristic below) NEVER matches on this
   // systemd, so the AC1 evidence was silently never captured and the hermetic cgroup test polled
   // to timeout. /proc/<pid>/cgroup is authoritative regardless of systemd's naming scheme.
   const fromCgroup = (): string | null => {
-    try {
-      const cg = fs.readFileSync(`/proc/${pid}/cgroup`, "utf8");
-      const m = cg.match(/\/(run-[^/\n]+\.scope)\s*$/m);
-      if (m) return m[1];
-    } catch {
-      // transient — retry
-    }
-    return null;
+    const unit = scopeUnitOfPid(pid);
+    return unit && unit !== callerUnit ? unit : null;
   };
   const prefix = `run-p${pid}-`;
   while (Date.now() - start < timeoutMs) {
@@ -1574,6 +1591,14 @@ export async function findSuiteScopeUnit(pid: number, timeoutMs = 8_000): Promis
  * properties systemd actually applied (`systemctl --user show <unit>` → MemoryMax/CPUQuotaPerSecUSec/
  * TasksMax/Effective*), written to `<stateDir>/suite-cgroup-evidence.txt`. Best-effort — evidence
  * capture must never fail the run.
+ *
+ * ⚠️ These properties are read for the unit `findSuiteScopeUnit` resolved — so when THAT resolves the
+ * caller's own scope instead of the suite's, this file faithfully witnesses a ceiling nobody set
+ * (`MemoryMax=infinity`). Measured 2026-10-15: that is exactly what it did inside a real suite round
+ * until the caller-scope exclusion landed. The fix belongs there (one resolution), ⛔ not in a second
+ * reading of the cgroup attribute here: `systemctl --user show` DOES report the applied `MemoryMax`
+ * once the right unit is asked (same measurement: 27917287424 property == 27917287424 in
+ * `/sys/fs/cgroup<ControlGroup>/memory.max`).
  */
 export function recordSystemdRunEvidence(stateDir: string, scopeUnit: string, limits: SystemdRunLimits): void {
   try {
