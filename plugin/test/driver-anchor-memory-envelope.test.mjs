@@ -344,6 +344,63 @@ test("shared-host — the count is a REAL read-only cgroup walk: same-kind only,
   assert.deepEqual([...SHARED_HOST_SCOPE_PREFIXES], ["quay-anchor-", "quay-serve-"]);
 });
 
+test("shared-host — a `.scope` this process lives INSIDE is walked into (container CI); a foreign one is still a leaf", () => {
+  // 实测（CI run 38768929572；本机在 runner 形状的容器里逐字复现）：CI runner 是
+  // `--cgroupns=host` 的 systemd 容器，**整棵 systemd 树嵌在宿主 cgroup 树的一个 `.scope` 下** ——
+  //     /sys/fs/cgroup/system.slice/docker-<id>.scope/user.slice/user-0.slice/user@0.service/app.slice/<unit>.scope
+  // 旧遍历把**任何** `.scope` 目录当叶子（「它的子树是委派子树，不是单元」），于是在 depth 2 的
+  // `docker-<id>.scope` 处就停住，**连本进程刚建的四条探针 scope 都看不见**（4/4 exit 0、systemd 明确
+  // 回报 `Running as unit`，30 s 内零命中；同一次枚举里别的项目在 `user.slice/` 下的 18 条全在）。
+  // ⇒ 红的是结构不是时机。这条用例把那个布局钉成**纯夹具**（⛔ 不依赖真的是容器），并且同时钉死
+  // **不能反向放宽**：别人的容器仍是叶子。
+  const root = makeTmpDir("anchor-scope-inside-scope-");
+  const mine = "docker-mine.scope";
+  const theirs = "docker-theirs.scope";
+  const chainRel = "user.slice/user-0.slice/user@0.service/app.slice";
+  const chainAbs = path.join(root, "system.slice", mine, ...chainRel.split("/"));
+  // 我们自己的容器：探针 scope 落在它里面。宿主层的同类 scope（`user.slice/` 下、不在任何 `.scope` 里）照旧。
+  fs.mkdirSync(path.join(chainAbs, "quay-anchor-probe-inside-1.scope"), { recursive: true });
+  fs.mkdirSync(path.join(root, "user.slice", "user-1004.slice", "user@1004.service", "app.slice", "quay-anchor-host-level-3.scope"), { recursive: true });
+  // 别人的容器：同样形状，但**不是我们的祖先** ⇒ 它的子树仍是委派子树，仍不得下探。
+  fs.mkdirSync(path.join(root, "system.slice", theirs, ...chainRel.split("/"), "quay-anchor-foreign-2.scope"), { recursive: true });
+  // 祖先自己不算兄弟：把它数进去就等于把 `N+1` 里的 `+1` 数了两遍。
+  const own = "init.scope";
+  const r = listSharedHostScopes({
+    cgroupRoot: root,
+    procSelfCgroup: `0::/system.slice/${mine}/${chainRel}/${own}\n`,
+    ownUnit: own,
+  });
+  assert.deepEqual(
+    r.units,
+    ["quay-anchor-host-level-3.scope", "quay-anchor-probe-inside-1.scope"],
+    `our own container's tree MUST be walked (that is where this process's own probes land) and a foreign container's MUST NOT: ${JSON.stringify(r.units)}`,
+  );
+  assert.equal(r.units.includes(mine), false, "the ancestor scope is our own chain, ⛔ not one of the N siblings");
+  assert.equal(r.units.includes("quay-anchor-foreign-2.scope"), false, "another container's delegated subtree is still not a unit");
+  assert.equal(r.reason, null);
+
+  // 三分（硬规则 3b）：无 `0::` 行 ⇒ 祖先集为空 ⇒ 退回原来的叶子语义，⛔ 不猜。
+  const noUnified = listSharedHostScopes({ cgroupRoot: root, procSelfCgroup: "1::/x\n", ownUnit: own });
+  assert.equal(
+    noUnified.units.includes("quay-anchor-probe-inside-1.scope"),
+    false,
+    "with no unified cgroup line there is no ancestry to descend into — the `.scope`-is-a-leaf rule stands",
+  );
+  assert.equal(noUnified.units.includes("quay-anchor-host-level-3.scope"), true, "…and the host-level read is unaffected either way");
+
+  // 祖先判定本身是**相对 cgroup 根**的（`cgroupRoot` 是可注入的测试缝）：绝对路径会让夹具对不上。
+  const deepest = listSharedHostScopes({
+    cgroupRoot: root,
+    procSelfCgroup: `0::/system.slice/${mine}/${chainRel}/quay-anchor-is-self.scope\n`,
+  });
+  assert.equal(
+    deepest.units.some((u) => u === "quay-anchor-is-self.scope"),
+    false,
+    "the LAST segment is SELF, never an ancestor to descend into — and self is never counted",
+  );
+  assert.equal(deepest.units.includes("quay-anchor-host-level-3.scope"), true, "…while the rest of the walk is unchanged");
+});
+
 test("shared-host — an absurd sibling count on a tiny host cannot push the ceiling ABOVE the project-blind value", () => {
   for (const total of [GIB, 8 * GIB, 64 * GIB, 1024 * GIB]) {
     const projectBlind = Number(defaultAnchorMemoryMax(total));
