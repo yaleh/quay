@@ -40,4 +40,7 @@ Low-overhead, portable sampling inside the suite scope (same sampler that alread
 - tasks/gap-suite-memory-telemetry-anon-file-shmem-swap-psi-concurrency-process-tree-unknown-not-zero.md
 - plugin/scripts/full-suite-runner.ts
 - plugin/scripts/full-suite-runner-types.ts
+- plugin/scripts/host-resource-adapter.ts
 - plugin/test/full-suite-runner-cgroup.test.mjs
+- plugin/test/full-suite-runner-oom-policy.test.mjs
+- plugin/test/host-resource-adapter.test.mjs
