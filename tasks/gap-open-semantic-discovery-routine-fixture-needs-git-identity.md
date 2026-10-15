@@ -42,3 +42,7 @@ develop 的 CI 全红里，`plugin/test/open-semantic-discovery-routine.test.mjs
 
 - plugin/test/open-semantic-discovery-routine.test.mjs
 - tasks/gap-open-semantic-discovery-routine-fixture-needs-git-identity.md
+
+
+ADR-007 逐里程碑暗轴记录（本任务的声明）
+该轴仍暗,理由: 本任务改的是夹具如何给 git 身份（显式 env / -c），是夹具环境耦合的修复，不量架构面（依赖图 / 文档比 / 变异存活都没测），没有可解析的读数可贴。

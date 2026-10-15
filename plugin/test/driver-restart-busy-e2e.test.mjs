@@ -73,6 +73,13 @@ import {
   finalizeOrphanDispatch,
   probePidLiveness,
 } from "../scripts/worker-driver.ts";
+import {
+  assertNoOwnScopes,
+  createScopeRootRegistry,
+  readOwnScopes,
+  reclaimOwnScopes,
+  waitUntil,
+} from "./helpers/anchor-scope-reaper.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "..", "..");
@@ -388,6 +395,11 @@ function git(root, args) {
   return execFileSync("git", ["-C", root, ...args], { encoding: "utf8" });
 }
 
+// 本文件起的 scope（gap-test-spawned-anchor-scopes-outlive-suite-again-ac1-stop-and-restart-ac5）：
+// 每个 host 起一个 anchor ⇒ 一个 `quay-anchor-e2e-restart-<tag>-<随机>-<ts>.scope`。注册点放在 makeHost
+// 里 ⇒ 新增用例不可能忘记。回收/断言的判据与理由见 helpers/anchor-scope-reaper.mjs 的头注释。
+const ownHosts = createScopeRootRegistry();
+
 /** A fresh `git init` scratch host with `.quay/plugin` resolving to the `.git`-free kernel tree. */
 function makeHost(kernelDir, tag) {
   const host = fs.mkdtempSync(path.join(os.tmpdir(), `e2e-restart-${tag}-`));
@@ -397,7 +409,7 @@ function makeHost(kernelDir, tag) {
   fs.writeFileSync(path.join(host, ".gitignore"), ".quay/\n");
   fs.mkdirSync(path.join(host, ".quay"), { recursive: true });
   fs.symlinkSync(kernelDir, path.join(host, ".quay", "plugin"), "dir");
-  return host;
+  return ownHosts.register(host);
 }
 
 /** The premise, MECHANICALLY: `.quay/plugin` names the kernel tree and NOT the quay source checkout. */
@@ -466,11 +478,25 @@ function stopAnchor(host) {
   if (pid) { try { process.kill(pid, "SIGKILL"); } catch { /* gone */ } }
 }
 
-function cleanup(host, extraPids = []) {
-  stopAnchor(host);
-  for (const pid of extraPids) { try { process.kill(pid, "SIGKILL"); } catch { /* gone */ } }
-  stopAnchor(host); // the anchor may have respawned between the two reads
-  fs.rmSync(host, { recursive: true, force: true });
+/** Reclaim the host AND the systemd scope it started.
+ *
+ *  ⚠️ `stopAnchor` 按 pid 杀 anchor，而 **scope 的成员不只是 anchor**：anchor 进程内的 kind 循环
+ *  spawn 出来的子进程（本文件的 AC2a/AC2a-real 夹具各有一个在飞的 worker 子进程）**继承同一个
+ *  cgroup**，`--collect` 只收**空** scope ⇒ anchor 死了、子进程还在，scope 就活过套件。
+ *  实测 2026-10-15：一次**全绿**的 `node --test plugin/test/driver-restart-busy-e2e.test.mjs`（7/7，
+ *  exit 0）留下 `quay-anchor-e2e-restart-ac2a-FkROLL-1792048717728.scope`，其唯一成员是 AC2a 夹具的
+ *  `node -e setTimeout(()=>{},120000)`（父进程已死、被 systemd --user 收养）。⇒ 收尾必须以
+ *  **单元名**（= `quay-anchor-<host 基名>-…`）整组停 scope，而不是只按 pid 杀 anchor。
+ *  ⛔ `rmSync` 仍然最后：单元名由 host 基名派生，host 一没就再也圈不出它们。 */
+async function cleanup(host, extraPids = []) {
+  try {
+    stopAnchor(host);
+    for (const pid of extraPids) { try { process.kill(pid, "SIGKILL"); } catch { /* gone */ } }
+    stopAnchor(host); // the anchor may have respawned between the two reads
+  } finally {
+    await reclaimOwnScopes([host]);
+    fs.rmSync(host, { recursive: true, force: true });
+  }
 }
 
 /** Start the six kinds on ONE anchor; the FIRST `start` spawns the anchor and carries `env` with it
@@ -492,8 +518,22 @@ before(async () => {
   SHARED_KERNEL = process.env.QUAY_E2E_KERNEL_DIR ?? fs.mkdtempSync(path.join(os.tmpdir(), "e2e-restart-kernel-"));
   await buildAnchorKernel(SHARED_KERNEL);
 });
-after(() => {
+after(async () => {
   if (SHARED_KERNEL && !process.env.QUAY_E2E_KERNEL_DIR) fs.rmSync(SHARED_KERNEL, { recursive: true, force: true });
+  // 文件末尾的零泄漏闸（gap-test-spawned-anchor-scopes-outlive-suite-again-ac1-stop-and-restart-ac5）：
+  // 每个用例的 t.after 只管自己那几个 host，而泄漏形态之一是**收尾被打断**（进程被杀/超时）⇒ 需要一道
+  // 与具体用例无关的末尾闸。⛔ 它**不是**「把断言写得更醒目」：同一判据在用例里是可取假的（见下面
+  // 「零泄漏断言可取假」那条），且这里连回收一起做（先收再断言，收不掉就红）。
+  const hosts = ownHosts.list();
+  const rec = await reclaimOwnScopes(hosts);
+  assertNoOwnScopes(hosts, "driver-restart-busy-e2e.test.mjs — 末尾零泄漏闸");
+  if (rec.before.length > 0) {
+    // 逐个用例的收尾漏了：末尾闸兜住了，但「漏」这件事本身要留痕（⛔ 不静默）。
+    process.stderr.write(
+      `driver-restart-busy-e2e.test.mjs: per-case cleanup missed ${rec.before.length} scope(s); the end-of-file gate reclaimed them: ` +
+      `${rec.before.join(", ")} (rounds=${rec.rounds}, ${JSON.stringify(rec.attempts)})\n`,
+    );
+  }
 });
 
 // ══════════════════════════════════════════════════════════════════════════════════════════════════
@@ -709,7 +749,7 @@ test("AC2a — `restart --kind worker` leaves the in-flight worker child alive (
   await buildAnchorKernel(ownKernel);
   const host = makeHost(ownKernel, "ac2a");
   const childPids = [];
-  t.after(() => { cleanup(host, childPids); fs.rmSync(ownKernel, { recursive: true, force: true }); });
+  t.after(async () => { await cleanup(host, childPids); fs.rmSync(ownKernel, { recursive: true, force: true }); });
   assertCleanHostPremise(host, ownKernel);
 
   // A worker-kind fixture that spawns a REAL long-lived child before entering its loop. The anchor
@@ -797,12 +837,12 @@ test("AC2a-real — `restart --kind worker` with a genuinely in-flight worker: t
   await buildBusyKernel(preKernel, { workerSourceContents: preSrcContents });
 
   const arms = [];
-  t.after(() => {
+  t.after(async () => {
     for (const a of arms) {
       // Kill the anchor FIRST (that stops the loop; a worker spawned after this can only be a leftover),
       // then sweep the fixture workers BY MARKER — reading the process table before the anchor dies would
       // race a re-dispatch.
-      cleanup(a.host, []);
+      await cleanup(a.host, []);
       for (const p of fixtureWorkerPids(a.marker)) { try { process.kill(p, "SIGKILL"); } catch { /* gone */ } }
     }
     fs.rmSync(postKernel, { recursive: true, force: true });
@@ -952,9 +992,9 @@ test("AC2b — an orphan worker that exits is ADOPTED and fanned in exactly once
   const host = makeHost(workerKernel, "ac2b");
   let orphan = null;
   let resident = null;
-  t.after(() => {
+  t.after(async () => {
     if (resident && resident.exitCode === null) { try { resident.kill("SIGKILL"); } catch { /* gone */ } }
-    cleanup(host, orphan ? [orphan.pid] : []);
+    await cleanup(host, orphan ? [orphan.pid] : []);
     if (!process.env.QUAY_E2E_WORKER_KERNEL_DIR) fs.rmSync(workerKernel, { recursive: true, force: true });
   });
   await buildWorkerKernel(workerKernel);
@@ -1065,9 +1105,9 @@ test("AC3 — a dead orphan whose worktree carries commits resumes its fan-in (r
   const workerKernel = process.env.QUAY_E2E_WORKER_KERNEL_DIR ?? fs.mkdtempSync(path.join(os.tmpdir(), "e2e-restart-wk3-"));
   const host = makeHost(workerKernel, "ac3");
   let resident = null;
-  t.after(() => {
+  t.after(async () => {
     if (resident && resident.exitCode === null) { try { resident.kill("SIGKILL"); } catch { /* gone */ } }
-    cleanup(host);
+    await cleanup(host);
     if (!process.env.QUAY_E2E_WORKER_KERNEL_DIR) fs.rmSync(workerKernel, { recursive: true, force: true });
   });
   await buildWorkerKernel(workerKernel);
@@ -1150,4 +1190,46 @@ test("AC3 — a dead orphan whose worktree carries commits resumes its fan-in (r
   assert.equal(none.final_state, "failed", "no commits ⇒ unchanged `failed`");
   assert.match(String(none.failure_reason), /orphaned worker finalized by reconcile/, "no commits ⇒ the orphaned reason is unchanged");
   evidence("AC3", { gap_exited_outcome: gap, no_commits_outcome: none });
+});
+
+// ══════════════════════════════════════════════════════════════════════════════════════════════════
+// 零泄漏断言可取假 (gap-test-spawned-anchor-scopes-outlive-suite-again-ac1-stop-and-restart-ac5)
+// ══════════════════════════════════════════════════════════════════════════════════════════════════
+//
+// 文件末尾那道闸只有在**能取假**时才是一个测量（硬规则 4 推论三：只能被「一切正常」满足的判据证明
+// 不了任何东西）。本用例用一个**真的**残留 scope 把它逼红一次，再回收后逼绿 —— 同一个断言在同一进程
+// 里红过也绿过 ⇒ 它的取值随被测量的变化而变，不是常数。
+//
+// 为什么伪造的是 `quay-anchor-<host 基名>-…` 而不是随便一个单元名：判据按单元名前缀圈定「本文件起的
+// 那些」，能骗过它的只有**本文件前缀**的单元。用一个别的前缀的单元去试，测的就不是这条判据了。
+
+test("零泄漏断言可取假 — 夹具伪造一个本前缀的残留 scope 时，末尾闸的判据变红（falsifiable）", async (t) => {
+  // 一个自己的 host（⛔ 不 buildAnchorKernel：这条要的是「基名唯一」这一个性质，不需要内核闭包）。
+  const probe = ownHosts.register(fs.mkdtempSync(path.join(os.tmpdir(), "e2e-restart-leakprobe-")));
+  t.after(() => cleanup(probe));
+
+  // 负控制：零残留时断言通过（这条测试不是靠「断言恒抛」通过的）。
+  assertNoOwnScopes([probe], "control/pre");
+
+  // 伪造一个残留 scope：单元名按 anchor 自己的派生规则造，成员用一个会自己退出的 `sleep`
+  // （夹具崩了也不会留 scope —— 与 driver-anchor-memory-envelope.test.mjs 同一手法）。
+  const unit = `quay-anchor-${path.basename(probe)}-${Date.now()}.scope`;
+  const child = spawn(
+    "systemd-run",
+    ["--user", "--scope", "--quiet", "--collect", `--unit=${unit}`, "sleep", "60"],
+    { detached: true, stdio: "ignore" },
+  );
+  child.unref();
+
+  const seen = await waitUntil(() => readOwnScopes([probe]).liveUnits.includes(unit), 20_000);
+  assert.ok(seen, "夹具的残留 scope 必须真的出现在 user manager 上（⛔ 不是注入一个假读数）");
+  assert.throws(
+    () => assertNoOwnScopes([probe], "control/leaked"),
+    /仍有 1 个/,
+    "有残留 scope 时零泄漏断言必须变红（否则末尾那道闸不是一个测量）",
+  );
+
+  const rec = await reclaimOwnScopes([probe]);
+  assert.deepEqual(rec.remainingLive, [], `回收后不该有在跑的成员: ${JSON.stringify(rec.attempts)}`);
+  assertNoOwnScopes([probe], "control/post");
 });

@@ -42,3 +42,7 @@ develop 的 CI 全红里，`plugin/test/release-cut.test.mjs` 的
 
 - plugin/test/release-cut.test.mjs
 - tasks/gap-release-cut-gh-absent-fixture-negative-control-fails-on-runner.md
+
+
+ADR-007 逐里程碑暗轴记录（本任务的声明）
+该轴仍暗,理由: 本任务改的是夹具如何让 gh 不可用（与宿主布局无关的注入机制），是夹具环境耦合的修复，不量架构面（依赖图 / 文档比 / 变异存活都没测），没有可解析的读数可贴。
