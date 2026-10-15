@@ -46,3 +46,7 @@ develop 的 CI 全红里，`plugin/test/driver-anchor-memory-envelope.test.mjs` 
 
 - plugin/test/driver-anchor-memory-envelope.test.mjs
 - tasks/gap-driver-anchor-memory-envelope-live-sibling-enumeration-load-flake.md
+
+
+ADR-007 逐里程碑暗轴记录（本任务的声明）
+该轴仍暗,理由: 本任务改的是那条用例如何等共享 host 的 scope 枚举出现（有界轮询 + 具名超时），是时序/环境耦合的修复，不量架构面（依赖图 / 文档比 / 变异存活都没测），没有可解析的读数可贴。
