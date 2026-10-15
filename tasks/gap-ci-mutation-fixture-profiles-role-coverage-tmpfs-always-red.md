@@ -2,7 +2,7 @@
 id: gap-ci-mutation-fixture-profiles-role-coverage-tmpfs-always-red
 title: develop CI 自 2026-10-14 起 100/100 红：profiles-role-coverage-check 的
   mutation 夹具在 tmpfs /tmp 上跑 quay init 被拒 ⇒ always-red，阻塞 v0.20.0 正式发布
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -70,7 +70,7 @@ mutations_that_stayed_green: 0
 mutations_that_always_red: 0
 RESULT: PASS — every checker IN THIS DELTA went RED under its injected defect and GREEN on restore (narrowed run; the whole-store set is the full-tier registration's job).
 ```
-⚠️ 两侧都用了 `--only profiles-role-coverage-check`（文档化的窄化模式）：CI 跑的是全量 `--check`，本任务改动只在这一个 case 内，判词来自同一个 case 的同一个报告行。四条 RED 与 NOT-EVALUATED 那条在改动前**也**是红的（init 被拒 ⇒ 期望 1/3 的断言都拿不到），只是 case 在 baseline 就 `exit 4`，所以 CI 日志里只看得到 baseline 那一条。
+⚠️ 两侧都用了 `--only profiles-role-coverage-check`（文档化的窄化模式）：CI 跑的是全量 `--check`，本任务改动只在这一个 case 内，判词来自同一个 case 的同一个报告行。四条 RED 与 NOT-EVALUATED 那条在改动前**也**拿不到期望值（init 被拒 ⇒ 期望 1/3 的断言都拿不到），只是 case 在 baseline 就 `exit 4`，所以 CI 日志里只看得到 baseline 那一条。**实测其一**（同一 `--tmpfs /tmp` 容器，手工搭 RED-1 夹具 = 载体删掉驱动请求的 `task-worker`，绕过 case 直接跑 checker）：`TMPDIR=/tmp` ⇒ `rc=3`（断言期望 1 ⇒ 同样失败）；磁盘 TMPDIR ⇒ `rc=1`（期望值）。
 
 **复现命令**（本机 `/tmp` 是磁盘 ⇒ 必须在 `--tmpfs /tmp` 容器里跑；`node_modules` 挂主检出是因为 `quay init` 要 `yaml`）:
 ```sh
@@ -85,6 +85,8 @@ docker run --rm --entrypoint bash --tmpfs /tmp \
 **AC2 的另一半（活体负控制，同一 `--tmpfs /tmp` 容器）**: `stat -f -c %T /tmp` = `tmpfs`；`node … quay.ts init --root "$(mktemp -d)" --test-command "node --test"` ⇒ exit 2 + `quay init: worktree root '/tmp/tmp.JgkIS7ZyPl-worktrees' is on tmpfs ('/tmp' is tmpfs) — this is memory, not disk.` ⇒ 拒绝逻辑未动。
 
 **⚠️ 同源观察（不在本任务内修，按 DoD 另记）**: `runner-static-gate.ts` 里那条**直接**检查 `profiles-role-coverage-check`（`--root ${repo_root}`，不经 case）在 CI 上仍会走 NOT-EVALUATED（checker 自己建 workspace 时用的是 `os.tmpdir()` = tmpfs）。`run_checker` 把 exit 3 当第三态（`STATIC_CHECK_NOT_EVALUATED`，不 abort、不算 fail）⇒ 它不产生 CI 红，但意味着该检查在 CI 上**不评估**。本轮不改：AC2 明令 init 的 tmpfs 拒绝不动，而这条检查的输入（runner 的 TMPDIR）不在本任务 `## Touches` 内。
+
+**本轮本机验证（worktree 内）**: 合并 develop 后 `scripts/test.sh --for-task <id> --allow-thin` 绿 —— 其中 change-tier 的 `checker-mutation-check --check-changed` 认出本 delta 1 个 carrier（`profiles-role-coverage-check`），该 case 7 条断言全 `ok`；`anti-drift-touches-check --task <id> --worktree <wt> --merge-target develop` = `ANTI-DRIFT OK — 1 actual file(s), all within declared Touches (2 glob(s))`（exit 0）；`fan-in-ac-completion-gate.ts --task <id> --worktree <wt> --json` = `AC 全勾（2/2）——可翻 done`。
 
 **DoD 的两条**（develop 上落地后第一次真实 `ci.yml` run 的结论、随后 `release-cut.sh 0.20.0`）是落地后观测，不在 worktree 内 —— 未做。
 
