@@ -28,12 +28,43 @@ import { parse as parseYaml } from "yaml";
  *  这是 bare 一致性校验（AC2）的判别面：bare:true 要求 auth:key。 */
 export type AuthKind = "key" | "token";
 
+/** `claude --permission-mode` 的**封闭取值集**（逐字对齐 `claude --help` 的 `choices:`）。
+ *  ⛔ 本表是**防御面**，不是抄录：`launchArgv` 只发声明过的值，`validateProfiles` 拒表外的一切字符串
+ *  ⇒ CLI 未来新增第 7 个（可能比 `bypassPermissions` 更宽的）取值时，本枚举**默认拒绝**它，
+ *  ⛔ 不是「看起来像就放过」（见 validateProfiles 的 permissionMode 校验）。
+ *  核对记录（2026-10-15 实测 `claude --help`）：`(choices: "acceptEdits", "auto", "bypassPermissions",
+ *  "manual", "dontAsk", "plan")` —— 与表逐字一致。 */
+export const PERMISSION_MODES = ["acceptEdits", "auto", "bypassPermissions", "manual", "dontAsk", "plan"] as const;
+export type PermissionMode = (typeof PERMISSION_MODES)[number];
+
+/** `claude --effort` 的**封闭取值集**（逐字对齐 `claude --help`）。
+ *  核对记录（2026-10-15 实测 `claude --help`）：`--effort <level>  Effort level for the current session
+ *  (low, medium, high, xhigh, max)` —— 与表逐字一致。
+ *
+ *  🔴 本表**承重**（不是装饰）。实测负控制（2026-10-15，经 `claude-fjdac` 真 spawn）：
+ *    `claude-fjdac -p hi --effort boguslevel`
+ *      ⇒ `Warning: Unknown --effort value 'boguslevel' — ignoring it and using the default effort.
+ *         Valid values: low, medium, high, xhigh, max.` 且 **exit 0**。
+ *  即：`--effort` 拼错时 CLI **不 fail-closed**，它降级到缺省值并正常退出——「声明了 max 却跑在
+ *  缺省强度上」与「一切正常」在退出码与输出上**同形**（硬规则 3b/4b 的教科书形态）。
+ *  ⇒ `validateProfiles` 的封闭集校验是这条路上**唯一**的 fail-closed 闸：它在加载时拒，⛔ 不指望
+ *    CLI 报错。对照 `--permission-mode`（同一次实测：越界值 ⇒ `error: … is invalid` + **exit 1**），
+ *    两个标志的失败形态**不同**，故两者都必须有框架侧校验，⛔ 不能「CLI 会报错」地省掉 effort。 */
+export const EFFORT_LEVELS = ["low", "medium", "high", "xhigh", "max"] as const;
+export type EffortLevel = (typeof EFFORT_LEVELS)[number];
+
 /** 一个可复用的 profile（L1 抽层的 recipe）。extends = 单链继承；fallbackModel = 主备回退（AC1）。 */
 export interface ProfileSpec {
   launcher?: string;
   model?: string | null;
   bare?: boolean;
   auth?: AuthKind;
+  /** 会话的权限模式（`claude --permission-mode <v>`）。**可选**——缺省 ⇒ `launchArgv` 不追加该标志，
+   *  现有 `launch.settings.json` 的 `permissions.defaultMode` 继续生效（逐字不变，见 DoD）。
+   *  ⛔ 只能声明比现有已授权模式更**收紧**的值，见 validateProfiles。 */
+  permissionMode?: PermissionMode;
+  /** 会话的推理强度（`claude --effort <v>`）。**可选**，缺省 ⇒ 不追加该标志（逐字不变）。 */
+  effort?: EffortLevel;
   env?: Record<string, string>;
   unset?: string[];
   extends?: string;
@@ -53,6 +84,10 @@ export interface RoleSpec {
    *  而 outer 按 ADR-010 milestone e2e 可能真需要浏览器工具 ⇒ 挂 profile 会把它连坐。
    *  缺省/空 ⇒ 该 role 的 argv 与改动前逐字一致（不追加任何 mcp flag）。 */
   mcpBlacklist?: string[];
+  /** 角色层覆盖（同 model/bare/env 的「只声明差异」语义）：`role.x !== undefined ? role.x : profile.x`。
+   *  缺省 ⇒ 继承 profile 层；两层都不声明 ⇒ 不追加对应 CLI 标志（逐字不变）。 */
+  permissionMode?: PermissionMode;
+  effort?: EffortLevel;
 }
 
 /** .quay/profiles.yml 的顶层形状。 */
@@ -73,6 +108,10 @@ export interface ResolvedProfile {
   auth: AuthKind | null;
   env: Record<string, string>;
   fallbackModel: string | null;
+  /** 缺省 null = 未声明 ⇒ `launchArgv` 不追加 `--permission-mode`（硬规则 6：缺值 ≠ 某个取值）。 */
+  permissionMode: PermissionMode | null;
+  /** 缺省 null = 未声明 ⇒ `launchArgv` 不追加 `--effort`。 */
+  effort: EffortLevel | null;
 }
 
 /** 解析后的一份 role（kind → profile + name）。 */
@@ -87,6 +126,43 @@ export interface ResolvedRole extends ResolvedProfile {
  *  缺省恒 true（不触发回退）。L3（driver 绑定）会把真实 spawn 失败接到这里。 */
 export interface ResolveOptions {
   modelAvailable?: (model: string) => boolean;
+}
+
+// ── 值的【来源层】（AC4：记录「哪一层决定了最终值」，⛔ 不是只把最终值记一遍）────────────────────
+// 为什么不复用 ResolvedProfile 的值：值告诉你「是什么」，来源告诉你「谁说了算」。一条 provenance 记录
+// 若只带值，读者无法区分「这个 permissionMode 是角色层刻意收紧的」与「它是共享 profile 顺带继承的」——
+// 而调整配置时这两者的改法完全不同（改 role 还是改 profile）。
+// ⛔ 与硬规则 4b 同源：只记最终值的读数是一个**代理量**，它会随继承链重排而变化，却不反映意图落点。
+/** 一个解析值的来源层。封闭枚举（⛔ 不自由组合）：
+ *   - `role`      —— 角色层（RoleSpec）直接声明；
+ *   - `profile`   —— role 直接引用的那份 profile 声明；
+ *   - `extends`   —— 经 extends 单链从某个基 profile 继承（`via` 点名**实际声明**它的那份）；
+ *   - `fallback`  —— 主备回退把 model 换成了 fallbackModel（值不是任何一层「声明」的最终值）；
+ *   - `cli`       —— CLI 参数层覆盖（L3 的 override 缝；⛔ 本模块不产生，由调用方标注）；
+ *   - `default`   —— 无任何层声明（内建缺省：launcher=""、model=null、permissionMode/effort=null）。 */
+export type ValueSource = "role" | "profile" | "extends" | "fallback" | "cli" | "default";
+
+/** 一个字段的 (值, 来源层, 点名) 三元组。 */
+export interface FieldProvenance {
+  /** 解析出的最终值（`null` = 没有值/未声明）。 */
+  value: string | null;
+  source: ValueSource;
+  /** `profile`/`extends` 时点名【实际声明该值】的 profile 名；其余来源 ⇒ null。 */
+  via: string | null;
+}
+
+/** provenance 覆盖的四个字段（env/bare/auth 不在此列：它们不是「启动标志」层面的可观测取值）。 */
+export interface RoleProvenance {
+  role: string;
+  /** 该 role 引用的 profile 名。 */
+  profile: string;
+  fields: {
+    launcher: FieldProvenance;
+    model: FieldProvenance;
+    /** ⛔ 与 `ResolvedRole.permissionMode` 同源（同一个解析核心），不是各算一遍。 */
+    permissionMode: FieldProvenance;
+    effort: FieldProvenance;
+  };
 }
 
 // ── env 合并：`""` = 取消继承（删键）；`"0"` 等其余值原样保留 ───────────────────────────────────
@@ -108,9 +184,39 @@ export function applyUnset(env: Record<string, string>, unset: readonly string[]
 }
 
 // ── profile 解析（继承展开）─────────────────────────────────────────────────────────────────────
-/** 展开一份 profile 到 ResolvedProfile。extends 单链继承（递归），循环引用抛错。
- *  缺省 launcher=""（fail-closed 由 validateProfiles 补），bare=false，auth=null。 */
-export function resolveProfile(config: ProfilesConfig, profileName: string, _seen: Set<string> = new Set()): ResolvedProfile {
+/** 一次 profile 解析的内部结果：值 + env + 四个字段的来源层。
+ *  ⛔ `resolveProfile` 与 `readRoleProvenance` **共用本函数**——继承规则只有这一份实现，
+ *  来源信息是它的副产物而不是第二次走一遍链（否则两份会在下一次改继承规则时漂移）。 */
+interface TrackedProfile {
+  resolved: ResolvedProfile;
+  sources: Pick<RoleProvenance["fields"], "launcher" | "model" | "permissionMode" | "effort">;
+}
+
+/** 内建缺省（无任何层声明时）。⛔ 单点：resolveProfile 与 validateProfiles 都从这里取。 */
+const PROFILE_DEFAULTS: ResolvedProfile = {
+  launcher: "",
+  model: null,
+  bare: false,
+  auth: null,
+  env: {},
+  fallbackModel: null,
+  permissionMode: null,
+  effort: null,
+};
+
+/** 把一个 spec 字段的「是否声明」翻成 (值, 来源)。`declared === undefined` ⇒ 继承 base 的来源。 */
+function field<T extends string>(
+  declared: T | null | undefined,
+  base: FieldProvenance,
+  declaredSource: ValueSource,
+  via: string | null,
+): FieldProvenance {
+  if (declared !== undefined) return { value: declared ?? null, source: declaredSource, via };
+  return base;
+}
+
+/** 展开一份 profile，同时跟踪四个字段的来源层。extends 单链继承（递归），循环引用抛错。 */
+function resolveProfileTracked(config: ProfilesConfig, profileName: string, _seen: Set<string> = new Set()): TrackedProfile {
   if (_seen.has(profileName)) {
     throw new Error(`profile extends cycle: ${[..._seen, profileName].join(" -> ")}`);
   }
@@ -120,62 +226,155 @@ export function resolveProfile(config: ProfilesConfig, profileName: string, _see
   _seen.add(profileName);
 
   // 先展开基 profile（若 extends），再合并本层。
-  let base: ResolvedProfile = {
-    launcher: "",
-    model: null,
-    bare: false,
-    auth: null,
-    env: {},
-    fallbackModel: null,
+  let base: TrackedProfile = {
+    resolved: { ...PROFILE_DEFAULTS },
+    sources: {
+      launcher: { value: null, source: "default", via: null },
+      model: { value: null, source: "default", via: null },
+      permissionMode: { value: null, source: "default", via: null },
+      effort: { value: null, source: "default", via: null },
+    },
   };
-  if (spec.extends) base = resolveProfile(config, spec.extends, _seen);
+  if (spec.extends) base = resolveProfileTracked(config, spec.extends, _seen);
   _seen.delete(profileName);
 
-  const env = applyUnset(mergeEnv(base.env, spec.env ?? {}), spec.unset ?? []);
+  const env = applyUnset(mergeEnv(base.resolved.env, spec.env ?? {}), spec.unset ?? []);
+  // 本层声明 ⇒ source="profile"；否则继承基层的来源，但把「基层自己声明的」改写成 "extends"
+  //（对**本 profile 的读者**而言它确实是继承来的），并保留 `via` = 真正声明它的那一份。
+  const inherit = (b: FieldProvenance): FieldProvenance =>
+    b.source === "profile" ? { value: b.value, source: "extends", via: b.via } : { ...b };
   return {
-    launcher: spec.launcher ?? base.launcher,
-    model: spec.model !== undefined ? spec.model : base.model,
-    bare: spec.bare !== undefined ? spec.bare : base.bare,
-    auth: spec.auth !== undefined ? spec.auth : base.auth,
-    env,
-    fallbackModel: spec.fallbackModel !== undefined ? spec.fallbackModel : base.fallbackModel,
+    resolved: {
+      launcher: spec.launcher ?? base.resolved.launcher,
+      model: spec.model !== undefined ? spec.model : base.resolved.model,
+      bare: spec.bare !== undefined ? spec.bare : base.resolved.bare,
+      auth: spec.auth !== undefined ? spec.auth : base.resolved.auth,
+      env,
+      fallbackModel: spec.fallbackModel !== undefined ? spec.fallbackModel : base.resolved.fallbackModel,
+      permissionMode: spec.permissionMode !== undefined ? spec.permissionMode : base.resolved.permissionMode,
+      effort: spec.effort !== undefined ? spec.effort : base.resolved.effort,
+    },
+    sources: {
+      launcher: field(spec.launcher, inherit(base.sources.launcher), "profile", profileName),
+      model: field(spec.model, inherit(base.sources.model), "profile", profileName),
+      permissionMode: field(spec.permissionMode, inherit(base.sources.permissionMode), "profile", profileName),
+      effort: field(spec.effort, inherit(base.sources.effort), "profile", profileName),
+    },
   };
+}
+
+/** 展开一份 profile 到 ResolvedProfile。extends 单链继承（递归），循环引用抛错。
+ *  缺省 launcher=""（fail-closed 由 validateProfiles 补），bare=false，auth=null。 */
+export function resolveProfile(config: ProfilesConfig, profileName: string, _seen: Set<string> = new Set()): ResolvedProfile {
+  return resolveProfileTracked(config, profileName, _seen).resolved;
 }
 
 // ── role 解析（kind → profile + 差异 + 主备回退）────────────────────────────────────────────────
 /** 把语义 kind 解析成 ResolvedRole。role 引用 profile，只叠加自己声明的差异（model/env/unset/bare）。
  *  主备回退：最终 model 不可用（opts.modelAvailable 判假）且有 fallbackModel ⇒ 降级到 fallbackModel。 */
 export function resolveRole(config: ProfilesConfig, roleName: string, opts: ResolveOptions = {}): ResolvedRole {
+  return resolveRoleTracked(config, roleName, opts).resolved;
+}
+
+/** resolveRole + 来源层（同一次 walk 的两个投影，⛔ 不是两次解析）。 */
+interface TrackedRole {
+  resolved: ResolvedRole;
+  provenance: RoleProvenance;
+}
+
+function resolveRoleTracked(config: ProfilesConfig, roleName: string, opts: ResolveOptions = {}): TrackedRole {
   const roles = config.roles ?? {};
   const role = roles[roleName];
   if (!role) throw new Error(`role not found: "${roleName}"`);
-  const p = resolveProfile(config, role.profile);
+  const p = resolveProfileTracked(config, role.profile);
 
-  const env = applyUnset(mergeEnv(p.env, role.env ?? {}), role.unset ?? []);
-  let model = role.model !== undefined ? role.model : p.model;
-  const bare = role.bare !== undefined ? role.bare : p.bare;
-  const fallbackModel = p.fallbackModel;
+  const env = applyUnset(mergeEnv(p.resolved.env, role.env ?? {}), role.unset ?? []);
+  let model = role.model !== undefined ? role.model : p.resolved.model;
+  const bare = role.bare !== undefined ? role.bare : p.resolved.bare;
+  const fallbackModel = p.resolved.fallbackModel;
+
+  // 角色层声明 ⇒ source="role"；否则沿用 profile 层的来源（含 extends/default）。
+  // ⚠️ `launcher` **不是** RoleSpec 字段（只有 profile 有）⇒ 它的来源永远来自 profile 层，
+  //    ⛔ 不在这里伪造一个 role 层分支。
+  const sources = {
+    launcher: { ...p.sources.launcher },
+    model: field(role.model, p.sources.model, "role", roleName),
+    permissionMode: field(role.permissionMode, p.sources.permissionMode, "role", roleName),
+    effort: field(role.effort, p.sources.effort, "role", roleName),
+  };
 
   // AC1 主备回退：primary model 不可用 ⇒ fallbackModel。
+  // ⛔ 回退发生时 model 的【来源层】也必须改写成 "fallback" —— 该值不是任何一层「声明」的最终值，
+  //   继续报声明它的那一层就是在 provenance 里撒谎（硬规则 3b）。
   const available = opts.modelAvailable ?? (() => true);
   if (model !== null && fallbackModel !== null && !available(model)) {
     model = fallbackModel;
+    sources.model = { value: fallbackModel, source: "fallback", via: sources.model.via };
   }
 
-  return {
-    launcher: p.launcher,
+  const permissionMode = role.permissionMode !== undefined ? role.permissionMode : p.resolved.permissionMode;
+  const effort = role.effort !== undefined ? role.effort : p.resolved.effort;
+  const resolved: ResolvedRole = {
+    launcher: p.resolved.launcher,
     model,
     bare,
-    auth: p.auth,
+    auth: p.resolved.auth,
     env,
     fallbackModel,
+    permissionMode,
+    effort,
     name: role.name ?? roleName,
     // 角色层字段：⛔ 不读 profile（shared worker-default 上的黑名单会连坐 outer）。
     mcpBlacklist: role.mcpBlacklist ?? [],
   };
+  return {
+    resolved,
+    provenance: {
+      role: roleName,
+      profile: role.profile,
+      fields: {
+        launcher: sources.launcher,
+        model: sources.model,
+        permissionMode: sources.permissionMode,
+        effort: sources.effort,
+      },
+    },
+  };
+}
+
+/** 只读 provenance（AC4 的「覆盖来源」面）：role → 四个字段各自的 (值, 哪一层, 点名)。
+ *  ⛔ 与 `resolveRole` 共用同一次 walk（`resolveRoleTracked`）⇒ 记录里的值与来源不可能互相矛盾。
+ *  调用方拿它落进 worker 的落地记录；本模块**不**碰任何载体（纯函数，可单测）。 */
+export function readRoleProvenance(config: ProfilesConfig, roleName: string, opts: ResolveOptions = {}): RoleProvenance {
+  return resolveRoleTracked(config, roleName, opts).provenance;
 }
 
 // ── 加载校验（AC2：bare 与 auth 不相容在加载时被拒，⛔ 非 spawn 后才知道）───────────────────────
+
+/** 封闭枚举校验的**单一实现**（permissionMode/effort × profile 层/role 层共用，⛔ 不写四份）。
+ *  返回 [] 表示合格；否则一条人读的 error（含**被拒的原值**，让作者知道该改什么）。
+ *
+ *  🔴 `permissionMode` 的**不扩大授权**语义（AC2）。当前整树唯一被授权的 defaultMode 是
+ *  `bypassPermissions`（`.claude/launch.settings.json` 的 `permissions.defaultMode`），它是
+ *  `claude --help` 六个取值里**最宽**的一个（「跳过全部确认」）⇒ 今天不存在一个结构上「更宽」的值，
+ *  所以本函数**不需要一个宽度序**。它真正的防御是**封**：CLI 未来新增第 7 个取值（很可能就是某个
+ *  比 `bypassPermissions` 更放得开的东西）时，本枚举**不认识它** ⇒ 默认拒绝，⛔ 不是等到有人把它
+ *  写进 profiles.yml 才发现「框架替人放大了权限」。
+ *  ⇒ 判据**能取假**：拿一个真实存在但越界的合成串（如 `"yolo"` / `"turbo"`）声明进去必须被拒——
+ *    「封闭」与「枚举恰好覆盖当前 CLI 全部取值」是两件事，后者今天为真，前者才是不扩大授权的保证。 */
+function closedSetError(
+  layer: "profile" | "role",
+  name: string,
+  fieldName: string,
+  value: unknown,
+  allowed: readonly string[],
+): string[] {
+  if (typeof value === "string" && allowed.includes(value)) return [];
+  return [
+    `${layer} "${name}": ${fieldName} must be one of ${allowed.map((v) => `"${v}"`).join(" | ")}, got ${JSON.stringify(value)} — ` +
+      `closed enum (a value the CLI may add later is REJECTED by default, ⛔ not "looks fine, let it through")`,
+  ];
+}
 /** 校验一份 profiles.yml。返回 { ok, errors }——ok:false 时 errors 逐条列出（⛔ 不是布尔化存在性）。 */
 export function validateProfiles(config: ProfilesConfig): { ok: boolean; errors: string[] } {
   const errors: string[] = [];
@@ -196,6 +395,13 @@ export function validateProfiles(config: ProfilesConfig): { ok: boolean; errors:
     }
     if (p.extends !== undefined && !(p.extends in profiles)) {
       errors.push(`profile "${name}": extends references unknown profile "${p.extends}"`);
+    }
+    // permissionMode / effort：**封闭枚举**，表外的一切字符串一律拒（⛔ 不是「看起来像就放过」）。
+    if (p.permissionMode !== undefined) {
+      errors.push(...closedSetError("profile", name, "permissionMode", p.permissionMode, PERMISSION_MODES));
+    }
+    if (p.effort !== undefined) {
+      errors.push(...closedSetError("profile", name, "effort", p.effort, EFFORT_LEVELS));
     }
     // mcpBlacklist 是【角色层】字段：挂到共享 profile 上会把同 profile 的别的 role 连坐
     // （worker-default 被 outer 与三个 worker role 共享；outer 按 ADR-010 可能真需要浏览器工具）。
@@ -224,6 +430,13 @@ export function validateProfiles(config: ProfilesConfig): { ok: boolean; errors:
       if (!Array.isArray(r.mcpBlacklist) || r.mcpBlacklist.some((s) => typeof s !== "string" || s.trim() === "")) {
         errors.push(`role "${name}": mcpBlacklist must be a non-empty-string array, got ${JSON.stringify(r.mcpBlacklist)}`);
       }
+    }
+    // 角色层 permissionMode / effort：同一个封闭枚举（⛔ 两个层级共用一份校验，不各写一遍）。
+    if (r.permissionMode !== undefined) {
+      errors.push(...closedSetError("role", name, "permissionMode", r.permissionMode, PERMISSION_MODES));
+    }
+    if (r.effort !== undefined) {
+      errors.push(...closedSetError("role", name, "effort", r.effort, EFFORT_LEVELS));
     }
   }
 

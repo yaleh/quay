@@ -9,22 +9,40 @@
 //         `""` = 取消继承（mergeEnv 删键）、`"0"` 保留、`unset` 显式取消继承、`extends` 单链继承。
 //   AC0 — 真 profiles.yml 钉死：文件可读 + 校验通过 + 五个 role 全可解析。
 //
+// 后追加（gap-role-profile-permissionmode-effort-declaration-and-provenance，前缀 NEW-）：
+//   NEW-AC1 — permissionMode/effort 两字段的继承展开（role > profile > extends > default）+
+//             provenance 的「哪一层决定了最终值」（含主备回退时改报 fallback ⛔ 不谎称声明层）。
+//   NEW-AC2 — 封闭枚举 fail-closed：表外串（含合成的「第 7 个更宽值」）一律拒；真实取值全过。
+//   NEW-AC3 — launchArgv 追加 `--permission-mode <v>` / `--effort <v>`；**未声明 ⇒ argv 逐字不变**。
+//   NEW-AC4 — 派发 provenance：声明值 / 覆盖来源 / 真实 argv / transcript 真实 model；
+//             alias 与 real **两个字段**，默认不合并。
+//   NEW-AC5 — shipped 模板不声明这两个字段、不路由任何本机 dev 取值（按**解析值**判，⛔ 非 grep 全文）。
+//
 // Run: scripts/test.sh plugin/test/profile-policy.test.mjs
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+
+import { parse as parseYaml } from "yaml";
+
+// L3 消费点（launchArgv 是这两个字段唯一的落地处；provenance 是本任务新增的取证面）。
+import { launchArgv, dispatchProvenance, readTranscriptRealModel } from "../scripts/driver-runtime.ts";
 
 import {
   mergeEnv,
   applyUnset,
   resolveProfile,
   resolveRole,
+  readRoleProvenance,
   validateProfiles,
   readProfilesConfig,
   loadProfiles,
+  PERMISSION_MODES,
+  EFFORT_LEVELS,
 } from "../scripts/profile-policy.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -356,4 +374,327 @@ test("AC1 — validateProfiles rejects a malformed role-level blacklist (读不�
     assert.equal(r.ok, false, `mcpBlacklist=${JSON.stringify(bad)} must be rejected`);
   }
   assert.equal(validateProfiles(base(["playwright"])).ok, true, "a valid array still passes");
+});
+
+// ── permissionMode / effort（gap-role-profile-permissionmode-effort-declaration-and-provenance）──────
+// 这两段钉的是【新字段】的行为，同时把上面那些既有 AC（bare/auth/mcpBlacklist）的用例留在原处不动
+// —— AC7 要求的正是「加了两个字段之后旧校验逐字仍生效」，⛔ 不是「只测新字段、放过回归」。
+
+test("NEW-AC1 — resolveProfile/resolveRole carry the two new fields through inheritance", () => {
+  const cfg = {
+    version: 1,
+    profiles: {
+      base: { launcher: "claude", model: null, bare: false, auth: "key", permissionMode: "plan", effort: "low" },
+      child: { extends: "base", effort: "max" },
+    },
+    roles: {
+      // 角色层覆盖 profile 层（AC1 要的「一个角色层覆盖 profile 层默认值的解析结果」）。
+      a: { profile: "child", name: "qa", permissionMode: "manual" },
+      // 不声明的 role ⇒ 逐字继承（含 extends 链）。
+      b: { profile: "child", name: "qb" },
+    },
+  };
+  const child = resolveProfile(cfg, "child");
+  assert.equal(child.permissionMode, "plan", "extends 继承基 profile 的 permissionMode");
+  assert.equal(child.effort, "max", "child 自己覆盖 effort");
+
+  const a = resolveRole(cfg, "a");
+  assert.equal(a.permissionMode, "manual", "角色层覆盖 profile 层");
+  assert.equal(a.effort, "max", "未声明的字段继续从 profile 继承");
+
+  const b = resolveRole(cfg, "b");
+  assert.equal(b.permissionMode, "plan");
+  assert.equal(b.effort, "max");
+});
+
+test("NEW-AC1 — undeclared ⇒ null (⛔ not a fabricated default value — 硬规则 6)", () => {
+  const cfg = {
+    version: 1,
+    profiles: { w: { launcher: "claude", model: null, bare: false, auth: "key" } },
+    roles: { r: { profile: "w", name: "qr" } },
+  };
+  assert.equal(resolveRole(cfg, "r").permissionMode, null);
+  assert.equal(resolveRole(cfg, "r").effort, null);
+});
+
+test("NEW-AC1 — provenance names WHICH layer decided each value (role vs profile vs extends vs default)", () => {
+  const cfg = {
+    version: 1,
+    profiles: {
+      base: { launcher: "claude", model: "m-base", bare: false, auth: "key", effort: "low" },
+      child: { extends: "base", permissionMode: "plan" },
+    },
+    roles: { r: { profile: "child", name: "qr", model: "m-role" } },
+  };
+  const p = readRoleProvenance(cfg, "r");
+  assert.equal(p.role, "r");
+  assert.equal(p.profile, "child");
+  // role 层直接声明 ⇒ "role"。
+  assert.deepEqual(p.fields.model, { value: "m-role", source: "role", via: "r" });
+  // role 引用的 profile 自己声明 ⇒ "profile"，via 点名它。
+  assert.deepEqual(p.fields.permissionMode, { value: "plan", source: "profile", via: "child" });
+  // 经 extends 从 base 继承 ⇒ "extends"，via 点名**实际声明**它的 base（⛔ 不是 child）。
+  assert.deepEqual(p.fields.effort, { value: "low", source: "extends", via: "base" });
+  assert.deepEqual(p.fields.launcher, { value: "claude", source: "extends", via: "base" });
+});
+
+test("NEW-AC1 — provenance reports the FALLBACK layer when 主备回退 actually fired (⛔ 不谎称是声明层)", () => {
+  const cfg = {
+    version: 1,
+    profiles: { w: { launcher: "claude", model: "glm-5.3", fallbackModel: "deepseek-v4-pro", bare: false, auth: "key" } },
+    roles: { r: { profile: "w", name: "qr" } },
+  };
+  const fired = readRoleProvenance(cfg, "r", { modelAvailable: () => false });
+  assert.equal(fired.fields.model.value, "deepseek-v4-pro");
+  assert.equal(fired.fields.model.source, "fallback", "回退时值不是任何一层声明的最终值");
+  const notFired = readRoleProvenance(cfg, "r", { modelAvailable: () => true });
+  assert.equal(notFired.fields.model.source, "profile");
+});
+
+test("NEW-AC2 — validateProfiles rejects out-of-enum permissionMode/effort on BOTH layers (fail-closed)", () => {
+  const mk = (spec) => ({
+    version: 1,
+    profiles: { w: { launcher: "claude", model: null, bare: false, auth: "key" } },
+    roles: { r: { profile: "w", name: "qr", ...spec } },
+  });
+  // 合成越界串（⛔ 不是真实存在的取值）——「封闭」这条防御若只是「枚举恰好覆盖当前 CLI」，这里就漏。
+  for (const bad of ["yolo", "turbo", "BYPASSPERMISSIONS", "bypass", "", "high "]) {
+    const r = validateProfiles(mk({ permissionMode: bad }));
+    assert.equal(r.ok, false, `role permissionMode=${JSON.stringify(bad)} must be rejected`);
+    assert.ok(r.errors.some((e) => /permissionMode must be one of/.test(e)), JSON.stringify(r.errors));
+  }
+  for (const bad of ["maxx", "HIGH", "x-high"]) {
+    const r = validateProfiles(mk({ effort: bad }));
+    assert.equal(r.ok, false, `role effort=${JSON.stringify(bad)} must be rejected`);
+  }
+  // profile 层同样被拒（⛔ 不是只在 role 层校验）。
+  const profileBad = {
+    version: 1,
+    profiles: { w: { launcher: "claude", model: null, bare: false, auth: "key", permissionMode: "yolo" } },
+    roles: { r: { profile: "w", name: "qr" } },
+  };
+  assert.equal(validateProfiles(profileBad).ok, false);
+  assert.ok(validateProfiles(profileBad).errors.some((e) => /^profile "w": permissionMode/.test(e)));
+});
+
+test("NEW-AC2 — the closed enum is the 不扩大授权 defence, and it FALSIFIES (every real value still passes)", () => {
+  // 「若 CLI 未来新增第 7 个值」的负控制：拿一个【表外】的合成串 ⇒ 默认拒绝。
+  // 这一条能取假：若校验改成「看起来像模式名就放过」，下面第一条就会红。
+  const cfg = {
+    version: 1,
+    profiles: { w: { launcher: "claude", model: null, bare: false, auth: "key" } },
+    roles: { r: { profile: "w", name: "qr", permissionMode: "unrestricted" } },
+  };
+  assert.equal(validateProfiles(cfg).ok, false, "a hypothetical wider 7th value is rejected by default");
+  // 正向控制：今天 CLI 报告的**全部**取值都必须过（否则「封闭」会变成「误拒」）。
+  for (const m of PERMISSION_MODES) {
+    const ok = validateProfiles({
+      version: 1,
+      profiles: { w: { launcher: "claude", model: null, bare: false, auth: "key", permissionMode: m } },
+      roles: { r: { profile: "w", name: "qr" } },
+    });
+    assert.equal(ok.ok, true, `real CLI value ${m} must be accepted: ${JSON.stringify(ok.errors)}`);
+  }
+  for (const e of EFFORT_LEVELS) {
+    const ok = validateProfiles({
+      version: 1,
+      profiles: { w: { launcher: "claude", model: null, bare: false, auth: "key", effort: e } },
+      roles: { r: { profile: "w", name: "qr" } },
+    });
+    assert.equal(ok.ok, true, `real CLI value ${e} must be accepted: ${JSON.stringify(ok.errors)}`);
+  }
+});
+
+test("NEW-AC5 — the shipped carrier declares neither new field and routes no dev-only value", () => {
+  const shippedYml = fs.readFileSync(path.join(REPO_ROOT, "plugin", ".quay", "profiles.yml"), "utf8");
+  const shippedSettings = fs.readFileSync(path.join(REPO_ROOT, "plugin", ".claude", "launch.settings.json"), "utf8");
+  // ① 本机 dev 路由的**字面量**在任何位置都不得出现（含注释——注释里的地址照样会被照抄）。
+  for (const [name, text] of [["plugin/.quay/profiles.yml", shippedYml], ["plugin/.claude/launch.settings.json", shippedSettings]]) {
+    for (const needle of ["127.0.0.1", "26510", "v4.1flash"]) {
+      assert.ok(!text.includes(needle), `${name} must not carry the dev-only literal ${needle}`);
+    }
+  }
+  // ② 「不写死本机取值」判的是【声明值】，⛔ 不是【出现了哪些字符串】——硬规则 2：按位置判定。
+  //    shipped carrier 的注释里有一句「dev-tree 用 claude-fjdac …」的**指路**说明（那是文档，不是配置），
+  //    所以本判据读解析后的 profile/role 取值，而非 grep 全文。
+  const cfg = parseYaml(shippedYml);
+  assert.equal(validateProfiles(cfg).ok, true, "出厂 carrier 逐字可解析且合法（新字段可选 ⇒ 缺省不破坏它）");
+  for (const [pname, p] of Object.entries(cfg.profiles ?? {})) {
+    assert.equal(p.launcher, "claude", `shipped profile ${pname}: launcher must be the generic claude`);
+    assert.equal(p.model, null, `shipped profile ${pname}: model must be null (consumer supplies its own)`);
+    assert.equal(p.permissionMode, undefined, `shipped profile ${pname}: must not declare permissionMode`);
+    assert.equal(p.effort, undefined, `shipped profile ${pname}: must not declare effort`);
+  }
+  for (const [rname, r] of Object.entries(cfg.roles ?? {})) {
+    assert.equal(r.permissionMode, undefined, `shipped role ${rname}: must not declare permissionMode`);
+    assert.equal(r.effort, undefined, `shipped role ${rname}: must not declare effort`);
+  }
+  // ③ 逐角色解析确认：shipped carrier 下每个 role 都不追加这两个标志（第三方不声明 ⇒ argv 逐字不变）。
+  for (const role of ["task-worker", "selector", "fix-worker", "outer", "manager", "pool-judge", "meta-driver"]) {
+    const r = resolveRole(cfg, role);
+    assert.equal(r.permissionMode, null, `${role}: shipped carrier must not declare permissionMode`);
+    assert.equal(r.effort, null, `${role}: shipped carrier must not declare effort`);
+  }
+});
+
+// ── launchArgv（L3 消费点）与派发 provenance ─────────────────────────────────────────────────────
+// launchArgv 是这两个字段唯一的落地处：声明在 profiles.yml，实际生效在 argv。⛔ 只测 schema 不测 argv
+// 就等于什么都没测——「解析对了但标志没拼进去」正是这条链最容易断的一环。
+
+/** 合成一个 workspace root：`.quay/profiles.yml` + `.claude/launch.settings.json`。
+ *  ⛔ 不碰真实配置根——本组的判据是 launchArgv 的行为，不是本机环境。 */
+function makeRoot(profilesYaml) {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "quay-profilemode-"));
+  fs.mkdirSync(path.join(root, ".quay"), { recursive: true });
+  fs.mkdirSync(path.join(root, ".claude"), { recursive: true });
+  fs.writeFileSync(path.join(root, ".quay", "profiles.yml"), profilesYaml);
+  fs.writeFileSync(
+    path.join(root, ".claude", "launch.settings.json"),
+    JSON.stringify({ $schema: "x", permissions: { defaultMode: "bypassPermissions" }, env: { KEEP: "1" } }),
+  );
+  return root;
+}
+
+const BOTH_DECLARED = [
+  "version: 1",
+  "profiles:",
+  "  w:",
+  "    launcher: claude",
+  "    model: synth-model",
+  "    bare: false",
+  "    auth: key",
+  "    permissionMode: plan",
+  "    effort: xhigh",
+  "roles:",
+  "  task-worker:",
+  "    profile: w",
+  "    name: quay-synth",
+  "",
+].join("\n");
+
+const NEITHER_DECLARED = [
+  "version: 1",
+  "profiles:",
+  "  w:",
+  "    launcher: claude",
+  "    model: synth-model",
+  "    bare: false",
+  "    auth: key",
+  "roles:",
+  "  task-worker:",
+  "    profile: w",
+  "    name: quay-synth",
+  "",
+].join("\n");
+
+test("NEW-AC3 — launchArgv appends --permission-mode <v> / --effort <v> for a role that declares them", () => {
+  const root = makeRoot(BOTH_DECLARED);
+  try {
+    const argv = launchArgv("task-worker", "P", root);
+    assert.equal(argv[argv.indexOf("--permission-mode") + 1], "plan");
+    assert.equal(argv[argv.indexOf("--effort") + 1], "xhigh");
+    // prompt 恒是最后一个元素（worker-driver 的续做 prompt 依赖这条不变量）。
+    assert.equal(argv[argv.length - 1], "P");
+    assert.ok(argv.indexOf("--permission-mode") < argv.indexOf("-n"), "flags precede the -n/-p tail");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("NEW-AC3 — DoD negative control: a role declaring NEITHER field gets a byte-identical argv (no flag)", () => {
+  const root = makeRoot(NEITHER_DECLARED);
+  try {
+    const argv = launchArgv("task-worker", "P", root);
+    assert.ok(!argv.includes("--permission-mode"), "⛔ must not append the flag when undeclared");
+    assert.ok(!argv.includes("--effort"), "⛔ must not append the flag when undeclared");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("NEW-AC3 — role-level declaration overrides the profile-level one all the way into argv", () => {
+  const root = makeRoot(BOTH_DECLARED + "  sel:\n    profile: w\n    name: quay-sel\n    effort: low\n");
+  try {
+    const argv = launchArgv("sel", "P", root);
+    assert.equal(argv[argv.indexOf("--permission-mode") + 1], "plan", "inherited from the profile");
+    assert.equal(argv[argv.indexOf("--effort") + 1], "low", "role layer wins");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("NEW-AC4 — the recorded provenance separates alias from real model, and names the deciding layer", () => {
+  const root = makeRoot(BOTH_DECLARED);
+  try {
+    const argv = [...launchArgv("task-worker", "P", root), "--session-id", "00000000-0000-4000-8000-000000000000"];
+    const p = dispatchProvenance("task-worker", root, argv, { sessionId: "00000000-0000-4000-8000-000000000000" });
+    // 声明值 + 覆盖来源（哪一层决定了最终值）。
+    assert.deepEqual(p.declared, {
+      launcher: "claude",
+      model: "synth-model",
+      permissionMode: "plan",
+      effort: "xhigh",
+    });
+    assert.deepEqual(p.override_source, {
+      launcher: "profile", model: "profile", permissionMode: "profile", effort: "profile",
+    });
+    assert.equal(p.override_via.permissionMode, "w");
+    // 真实 argv（⛔ 不是推导值）——从它身上读标志值。
+    assert.deepEqual(p.argv, argv);
+    assert.equal(p.argv_source, "launchArgv");
+    // alias 与真实模型是**两个字段**（本 fixture 无 transcript ⇒ real 为 null 且带原因，
+    // ⛔ 不是被填成与 alias 相同 —— 硬规则 3b：读不到不得与「读到且相同」同形）。
+    assert.equal(p.model_alias, "synth-model");
+    assert.equal(p.model_real, null);
+    // 「读不到」必须带**可分辨的原因**，⛔ 不是空串、也⛔ 不是被填成 alias（硬规则 3b/6）。
+    assert.ok(/transcript not found for session/.test(p.model_real_unavailable), p.model_real_unavailable);
+    assert.equal(p.model_real_from, null);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("NEW-AC4 — a CLI-argv override is recorded as such (⛔ not mislabeled as a launchArgv product)", () => {
+  const root = makeRoot(BOTH_DECLARED);
+  try {
+    const argv = ["node", "-e", "1"];
+    const p = dispatchProvenance("task-worker", root, argv, { argvSource: "cli-exact", sessionId: null });
+    assert.equal(p.argv_source, "cli-exact");
+    assert.deepEqual(p.argv, argv);
+    // 覆盖层不带 --model ⇒ alias 为 null（⛔ 不回落到 declared.model 假装它被传了）。
+    assert.equal(p.model_alias, null);
+    // 声明值仍然如实记录（配置说什么 vs 实际跑了什么，两半都要能读出来）。
+    assert.equal(p.declared.model, "synth-model");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("NEW-AC4 — readTranscriptRealModel reads the SERVED model, not the requested alias (⛔ 自证)", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "quay-transcript-"));
+  const sid = "11111111-2222-4333-8444-555555555555";
+  try {
+    const cwd = path.join(dir, "proj");
+    const slugDir = path.join(dir, ".claude", "projects", "-" + cwd.replace(/\//g, "-"));
+    fs.mkdirSync(slugDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(slugDir, `${sid}.jsonl`),
+      [
+        // 我们**请求**的 alias —— 在 api-request 记录里。
+        JSON.stringify({ type: "api-request", params: { model: "v4.1flash-anthropic" } }),
+        // 服务端**实际**返回的模型 —— 在 assistant 记录里。这才是「真实模型」。
+        JSON.stringify({ type: "assistant", message: { model: "deepseek-flash" } }),
+        "",
+      ].join("\n"),
+    );
+    // ⛔ 不碰 ~/.claude —— 直接钉投影函数在真实文件上的行为需要它落在真实 slug 下，
+    //    故这里只断言「找不到时不伪装」这一半，另一半（真实读数）由 AC8 的真实 spawn 证据承担。
+    const missing = readTranscriptRealModel(sid, path.join(dir, "elsewhere"));
+    assert.equal(missing.model, null);
+    assert.ok(/transcript not found/.test(missing.unavailable), missing.unavailable);
+    assert.equal(missing.from, null);
+    assert.equal(readTranscriptRealModel(null, cwd).model, null, "no session id ⇒ null (⛔ not a guess)");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 });

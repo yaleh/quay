@@ -27,6 +27,17 @@ profiles:
     model: v4.1flash-anthropic
     bare: false
     auth: token            # claude-fjdac 只提供 ANTHROPIC_AUTH_TOKEN（并置空 ANTHROPIC_API_KEY）
+    # ── 显式声明 permissionMode / effort（gap-role-profile-permissionmode-effort-declaration-and-provenance）
+    # ⚠️ 这两个值都是【把现状写出来】，⛔ 不是改行为——实测依据（2026-10-15）：
+    #   · permissionMode: bypassPermissions —— `.claude/launch.settings.json` 的 `permissions.defaultMode`
+    #     本就是它（本树唯一被授权的模式），显式声明后 provenance 才看得出「谁定的」；
+    #   · effort: high —— 本机 Claude Code 在**未传该标志**时的既有实际取值。实测 4 条真实 worker
+    #     transcript（session 552e2e5b / b4f58a5e / fdfe0b87 / 57fbcbc8）的 `effort` 字段恒为
+    #     `"high"` ⇒ 声明 `high` 与「不声明」逐字等效，只是让这个量从隐式变成可核。
+    # ⛔ 声明值只能比已授权模式更收紧或相等；封闭枚举会拒任何表外取值（含 CLI 未来新增的第 7 个）。
+    # ⛔ 本机代理路由（127.0.0.1:26510 等）**不得**出现在 shipped 模板 plugin/.quay/profiles.yml 里。
+    permissionMode: bypassPermissions
+    effort: high
     # ⚠️ gap-fix-worker-spawn-timeout-persists-post-fix（2026-09-07）更正上一轮
     #   gap-fix-worker-spawn-inherits-unrecognized-model-deepseek-v4-pro-anthropic 的「后缀不一致 ⇒ 超时」
     #   解释——该解释已被生产载体证否：对齐落地后 14 次 spawn 仍 12 次超时，且 unrecognized_model 警告
