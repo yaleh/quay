@@ -74,7 +74,8 @@ depends_on:
 
 ## Blocker
 
-**2026-10-15T19:48:18.576Z — worker 未落地（exited-not-landed）**
+**2026-10-15T21:08:47.586Z — worker 未落地（exited-not-landed）**
 
-- 未落地原因：AC 未全勾（checked 0/5，剩余未勾 5）——续做只需验证并勾选 AC
+- 未落地原因：AC 未全勾（checked 2/5，剩余未勾 3）——续做只需验证并勾选 AC
 - run_id：wk-prod-anchor
+- session_id：8f6ea38f-3f92-4864-83ca-cce156885573
