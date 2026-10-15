@@ -292,3 +292,11 @@ done）。**但逐字段核对（`plugin/scripts/profile-policy.ts:32-56`）确�
 - plugin/.quay/profiles.yml
 - .claude/launch.settings.json
 - plugin/.claude/launch.settings.json
+
+## Blocker
+
+**2026-10-15T02:43:18.608Z — worker 未落地（exited-not-landed）**
+
+- 未落地原因：step=suite: oom-killed (3) — recovery exhausted at floor concurrency 32 — no declared rung produced a complete verdict (64,48,32); needs a code/config fix, see plugin/scripts/full-suite-runner.ts
+- run_id：wk-prod-anchor
+- session_id：55f4a8f5-7040-4e04-9a93-00dcfb63496e
