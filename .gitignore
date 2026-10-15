@@ -65,6 +65,14 @@ packages/quay/plugin/
 # existing quality-round fact). Declared in docs/carrier-registry.json (owner:
 # plugin/scripts/arch-discovery-routine.ts).
 **/.quay/arch-discovery-findings.jsonl
+# resource-DIAGNOSTIC ROUTINE carriers (gap-quality-continuous-resource-diagnostic-routine-mechanical-
+# filter-then-semantic): `.quay/resource-anomaly-findings.jsonl` holds one line per NEW mechanically-
+# flagged anomaly plus one scan-round line per round, and `.quay/resource-diagnostic-model-budget.jsonl`
+# holds this routine's own 24h model-call reservations (the OSD/discovery-method ledger pattern).
+# Runtime state, never git-tracked — the same family as arch-discovery-findings.jsonl above. Both are
+# declared in docs/carrier-registry.json (owner: plugin/scripts/resource-anomaly-detector.ts).
+**/.quay/resource-anomaly-findings.jsonl
+**/.quay/resource-diagnostic-model-budget.jsonl
 # blind hypothesis-GENERATION shadow stage output dir (gap-architecture-hypothesis-generation-shadow-
 # stage-not-in-repo): `docs/analysis/arch-hypothesis-generation.mjs` defaults `--out-dir` under here, so a
 # default run must not leave untracked files in the shared checkout. Runtime state, never git-tracked —
