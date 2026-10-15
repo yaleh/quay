@@ -2,7 +2,7 @@
 id: gap-init-upgrade-matrix-fixture-hardcodes-tmp
 title: init-upgrade-matrix 夹具硬编码 /tmp：在 runner 的 tmpfs /tmp 下三条 v0.14/0.15/0.16
   用例恒红（job 级 TMPDIR 覆盖不到）
-status: ready
+status: done
 labels:
   - gap
   - ci
