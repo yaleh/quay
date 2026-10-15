@@ -264,14 +264,37 @@ done）。**但逐字段核对（`plugin/scripts/profile-policy.ts:32-56`）确�
 - [x] AC9: `scripts/test.sh --for-task <this task>` 绿；预算上限（`.quay/config.yml` 等）未被本任务改动。
 
   **scoped gate 绿**：`bash scripts/test.sh --for-task gap-role-profile-permissionmode-effort-declaration-and-provenance --allow-thin`
-  ⇒ `exit 0`，`ℹ tests 188  ℹ pass 188  ℹ fail 0`，且 change-relevant 静态层全 PASS
+  ⇒ `exit 0`，`ℹ tests 198  ℹ pass 198  ℹ fail 0`，且 change-relevant 静态层全 PASS
   （含 `import-graph-check`: `valueSccs=0 ≤ 0, typeSccs=0 ≤ 0, reverseEdges=0 ≤ 0`、
-  `profiles-role-coverage-check`、`enum-surface-parity-check`、`touched one-entry-one-path` 等）。
+  `profiles-role-coverage-check`、`enum-surface-parity-check`、`touches-one-entry-one-path-check` 等，全表无一条 FAIL）。
   **防漂移**：`anti-drift-touches-check --merge-target develop` ⇒
-  `ANTI-DRIFT OK — 5 actual file(s), all within declared Touches (9 glob(s))`，exit 0。
-  **预算未动**：本任务相对 `develop` 只改 5 个文件（`.quay/profiles.yml` + `plugin/scripts/{profile-policy,driver-runtime,worker-driver}.ts`
-  + `plugin/test/profile-policy.test.mjs`），`.quay/config.yml` 及任何 budget/cap/concurrency 声明**零改动**；
-  `.quay/profiles.yml` 的改动**仅是新增两个字段 + 注释**（无既有键被改）。
+  `ANTI-DRIFT OK — 6 actual file(s), all within declared Touches (10 glob(s))`，exit 0。
+  **预算未动**：本任务相对 `develop` 只改 6 个文件（`.quay/profiles.yml` + `plugin/scripts/{profile-policy,driver-runtime,worker-driver}.ts`
+  + `plugin/test/{profile-policy,worker-driver-fan-in-s02}.test.mjs`），`.quay/config.yml` 及任何 budget/cap/concurrency
+  声明**零改动**；`.quay/profiles.yml` 的改动**仅是新增两个字段 + 注释**（无既有键被改）。
+
+  **第 6 个文件（`plugin/test/worker-driver-fan-in-s02.test.mjs`，Touches 扩宽的由来）**：
+  该文件 AC1 把「循环体构造 worker argv」的那次调用**逐字钉死在一个拼法**上
+  （`await workerArgvForTaskAsync(sel.task, rootDir, workerCmdOpts)`）。本任务把循环体的调用点换成**同一实现的**
+  `workerArgvForTaskWithSourceAsync` 变体（多带回 AC4 需要的覆盖来源）⇒ 该断言变红。
+  修法是**钉性质、不钉拼法**（循环体 await 的是异步 argv 构造；两个异步变体都必须存在），⛔ 不是放宽判据：
+  同步 `workerArgvForTask` 的 `doesNotMatch` 负控制逐字保留。
+  按位置判定（硬规则 2）：`grep -rn workerArgvForTask plugin/test/ packages/*/test/` 的命中里**只有这一个文件**
+  钉了拼法（硬规则 5b 兄弟实例数 = 1，已逐条核对）；扩宽 Touches 后 scoped gate 重新选中该文件的 10 条用例
+  **全绿**（`188 → 198` 的来源），且这正是「扩宽 Touches 会重选 checker、新红必属自己」那条纪律的对照面——
+  本次新选中的只有这一条已知红，已修。
+
+  **⛔ 全套件（fan-in 的 suite 步）另有一条与【本任务 delta 无关】的红，已定位并给出去处**：
+  `plugin/test/full-suite-runner-cgroup.test.mjs` 的 AC3 断言「真实 round 的实测并发 < 128（请求 lane 数）」。
+  **不是本任务的缺陷**（三条独立证据）：① 该测试文件与 `plugin/scripts/full-suite-runner.ts` 相对 `develop`
+  **逐字节未改**（`git diff --stat develop...HEAD --` 对两者均空）；② 本任务自己的 round
+  （`mfi-gap-role-profile-…-1792030898206-0eaf7e`，laneCount 32/48/64/127）实测重叠**一律 64**，正是该断言要求的值；
+  ③ 把**另一行**排除后该窗口读数从 128 落回 64 ⇒ 断言会通过。那另一行是
+  `runId=mfi-gap-suite-resource-measurement-needs-a-host-adapter-not-inline-cgroup-calls-1792002203760-5f2304`
+  （该任务 `status: needs-human`），`laneCount=32` 却实测重叠 128，即那次 OOM 恢复轮自己记录的读数。
+  ⇒ 判词两条：**另一个任务的 round 记录落进了本 worktree 的 `.quay/verification-round.jsonl`**，且
+  **AC3 的 last-5 窗口不按 `runId`/`scope` 过滤**。两条都在本任务 `## Touches` 之外，⛔ 本任务不改该测试或 runner
+  （改它等于拿数据凑判据，且是别人的范围）。
 
 ## Definition of Done
 
