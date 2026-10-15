@@ -2,7 +2,7 @@
 id: gap-ci-mutation-fixture-profiles-role-coverage-tmpfs-always-red
 title: develop CI 自 2026-10-14 起 100/100 红：profiles-role-coverage-check 的
   mutation 夹具在 tmpfs /tmp 上跑 quay init 被拒 ⇒ always-red，阻塞 v0.20.0 正式发布
-status: todo
+status: needs-human
 labels:
   - gap
   - defect
@@ -39,3 +39,9 @@ AC1–AC3 带真实读数勾选；不绕过任何门禁；不改 runner 配置�
 
 - plugin/scripts/checker-mutation-cases/profiles-role-coverage-check.sh
 - tasks/gap-ci-mutation-fixture-profiles-role-coverage-tmpfs-always-red.md
+
+## Needs-Human
+
+**执行 2026-10-15T06:32:55.196Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：unsatisfiableUnannotatedAc=[AC3: 落地后 develop 上一次真实 `ci.yml` run 的 `test` job 不再因该检查失败（粘贴 run id 与结论；若有其它失败如实列出，不在本任务内修）。]（连续 3 轮被结构上不可派的拦截挡住 ⇒ 作者/人改写；⛔ 不派 fix worker）
