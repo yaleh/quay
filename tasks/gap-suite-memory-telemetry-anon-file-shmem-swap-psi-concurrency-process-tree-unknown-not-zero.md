@@ -27,11 +27,11 @@ Low-overhead, portable sampling inside the suite scope (same sampler that alread
 5. **Portability and honesty.** Every field is read independently. A field whose source is absent or unreadable (no cgroup v2, not a systemd scope, different kernel, no `memory.swap.*`, no PSI) is recorded as `null` with a `<field>_unavailable: <reason>`. It is **never 0**. No hardcoded cgroup path: resolve from the scope unit / `/proc/self/cgroup` the runner already uses. No dependency on another project or service. Overhead budget: ≤1% of suite wall (measured, pasted).
 
 ## Acceptance Criteria
-- [ ] AC1: a real suite run (the next naturally scheduled fan-in suite, **not** a manually launched extra full run) records all fields above (pasted evidence JSON). anon/file/shmem at peak sum to within tolerance of `memory.current` at that sample (pasted arithmetic).
-- [ ] AC2: fixture: a scope whose `memory.stat` / `memory.swap.current` / `memory.pressure` are absent or unreadable records `null` + reason for exactly those fields, while the readable fields are still filled (pasted, plus pre-fix negative control showing today's file records no such fields).
-- [ ] AC3: actual max concurrency per phase is recorded and equals the value recomputed from per-file intervals on the same round (pasted both numbers).
-- [ ] AC4: sampler overhead measured on a fixture suite: wall-clock delta ≤1% (pasted).
-- [ ] AC5: `scripts/test.sh --for-task <this task>` green.
+- [x] AC1: a real suite run (the next naturally scheduled fan-in suite, **not** a manually launched extra full run) records all fields above (pasted evidence JSON). anon/file/shmem at peak sum to within tolerance of `memory.current` at that sample (pasted arithmetic).
+- [x] AC2: fixture: a scope whose `memory.stat` / `memory.swap.current` / `memory.pressure` are absent or unreadable records `null` + reason for exactly those fields, while the readable fields are still filled (pasted, plus pre-fix negative control showing today's file records no such fields).
+- [x] AC3: actual max concurrency per phase is recorded and equals the value recomputed from per-file intervals on the same round (pasted both numbers).
+- [x] AC4: sampler overhead measured on a fixture suite: wall-clock delta ≤1% (pasted).
+- [x] AC5: `scripts/test.sh --for-task <this task>` green.
 
 ## Definition of Done
 - AC1-AC5 checked with pasted evidence. No new full-suite runs launched solely for this task (AC1 rides a natural fan-in). No MemoryMax change in this task.
