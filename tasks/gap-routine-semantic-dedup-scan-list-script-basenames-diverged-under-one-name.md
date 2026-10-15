@@ -99,14 +99,6 @@ merge
 - `plugin/test/list-script-basenames-single-source.test.mjs`
 - `tasks/gap-routine-semantic-dedup-scan-list-script-basenames-diverged-under-one-name.md`
 
-## Blocker
-
-**2026-10-15T04:48:35.232Z — worker 未落地（exited-not-landed）**
-
-- 未落地原因：step=suite: oom-killed (3) — recovery exhausted at floor concurrency 32 — no declared rung produced a complete verdict (64,48,32); needs a code/config fix, see plugin/scripts/full-suite-runner.ts
-- run_id：wk-prod-anchor
-- session_id：aa13907e-17f0-4a01-9a2e-f211a71257ab
-
 ## Blocked（人 2026-10-15 裁定：改用 depends_on 结构化阻塞，不用 needs-human）
 
 **人指出更正**：这不该是 needs-human（人工停派）——应当用 `depends_on` 正确表达依赖关系，挂 `todo`，让既有 todo→ready 促升闸的 `depsReadinessFor` 判定自动拦住，两个真因任务落地后自动解阻塞、无需人工翻回。
@@ -115,3 +107,11 @@ merge
 - 真因②（已立案，`gap-lwa-crit-fixture-sleep300-child-not-reaped-forces-aborted-on-clean-suite`，待空闲派发槽）：`live-web-address-fixture.mjs` 的 `sleep 300` 夹具子进程未被回收，floor 档即便零 OOM 也被误判 `aborted`。
 - 本任务自身的 AC/Touches 没有变化，不是因为本任务有缺陷才阻塞。
 - `depends_on` 已指向上述两个任务；两者皆 `done` 后，`ready-pool-check` 的 `depsReadinessFor` 会自动判定解阻塞，促升回 `ready`，不需要人工介入。
+
+## Blocker
+
+**2026-10-15T06:07:57.956Z — worker 未落地（exited-not-landed）**
+
+- 未落地原因：step=suite: oom-killed (1) — recovery exhausted at floor concurrency 32 — no declared rung produced a complete verdict (64,48,32); needs a code/config fix, see plugin/scripts/full-suite-runner.ts
+- run_id：wk-prod-anchor
+- session_id：6635aec1-549b-42ff-ad59-dc26098af244
