@@ -228,7 +228,9 @@ node --test --test-concurrency=1 --test-reporter=tap positive-control/failing.te
 
 ## 4. 逐文件逐趟原始读数（AC1）
 
-原始 JSONL 在 `results.jsonl`（120 行），逐趟完整 stdout+stderr 在 `logs/`（每个文件每趟一份）。
+原始 JSONL 在 scratch 目录的 `results.jsonl`（120 行），逐趟完整 stdout+stderr 在 `logs/`
+（每个文件每趟一份）。⚠️ 这两个载体**不在本仓库内**（`git ls-files` 不会列出它们）——它们的绝对路径是
+`/data/scratch/yale/gap-dev-baseline-red-classify/`，§6 给了重跑命令。本文件里的每一个数字都由生成器从这两份原始载体直接算出。
 
 | 文件 | 趟 | 开始时刻 (UTC) | 耗时 s | 退出码 | 判定 | TAP fail | TAP pass | 有 TAP | load1 | procs |
 |---|---|---|---|---|---|---|---|---|---|---|
