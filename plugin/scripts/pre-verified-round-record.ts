@@ -113,6 +113,7 @@
 //       --lane-count <n> --load <n> --commit <sha>
 //       [--preverified <0|1|true|false>] [--cpu-time-s <n|null>] [--cpu-source <name>]
 //       [--cpu-user-s <n|null>] [--cpu-sys-s <n|null>]
+//       [--procs-running <n>] [--procs-blocked <n>]
 //       [--suite-log <path>] [--runner <name>] [--root <dir>] [--record-file <file>]
 //       [--state <green|red>] [--json] [--help]
 //
@@ -122,6 +123,10 @@
 //   --duration-ms     the suite wall-clock in ms (required, non-negative)
 //   --lane-count      suite lane count (required, non-negative)
 //   --load            /proc/loadavg 1min at the suite's end (required, non-negative)
+//   --procs-running   /proc/stat `procs_running` (R) — the instantaneous component beside the lagging
+//                     `load`. Pass with --procs-blocked, or omit both to self-read /proc/stat at build
+//                     time. `runq` = their sum; all three ABSENT (never 0) when unreadable.
+//   --procs-blocked   /proc/stat `procs_blocked` (D) — same contract as --procs-running.
 //   --commit          the pinned verified HEAD (suite_head), 40-hex (required)
 //   --preverified     the reuse marker: 1/true = this round REUSED a caller-produced capture
 //                     (the pre-verified branch); 0/false = the suite RAN inside this fan-in (the
@@ -184,6 +189,11 @@ import { hostParallelism } from "./runner-concurrency.ts";
 // semantic-dedup-scan-1791353789266): the local re-declaration here was byte-identical to
 // full-suite-runner.effectiveParallelism ⇒ two homes for one cpu/wall expression, free to drift.
 import { effectiveParallelism } from "./suite-accounting.ts";
+// gap-resource-gate-reads-lagging-loadavg-not-instantaneous-rd — the SINGLE implementation of the
+// instantaneous run-queue read (`procs_running` / `procs_blocked` from /proc/stat). Imported from the
+// kernel leaf, NOT re-declared here: full-suite-runner.ts and suite-load-sampler.ts read the very same
+// function, so the fan-in landing row and the load curve carry one 口径 (硬规则 5b).
+import { readRunQueue } from "../../packages/quay/src/kernel/load-avg.ts";
 
 const COMMIT_RE = /^[0-9a-f]{40}$/i;
 
@@ -587,6 +597,41 @@ export function buildPreVerifiedRoundRecord(o) {
   if (!COMMIT_RE.test(commit)) {
     return { error: `--commit must be a 40-hex commit sha (got ${JSON.stringify(o.commit)})` };
   }
+  // gap-resource-gate-reads-lagging-loadavg-not-instantaneous-rd — the INSTANTANEOUS run-queue
+  // components (procs_running / procs_blocked / runq = R+D), written BESIDE `load`. `load` here is a
+  // live reading at record-build time on the in-process caller (worker-fan-in.ts reads `readLoadAvg()`
+  // in the argument list), so the components are read at the SAME moment by default — the caller may
+  // override BOTH with --procs-running/--procs-blocked when it holds a captured pair.
+  //   口径 (硬规则 3b): exactly one of the pair given ⇒ fail closed (an R without its D is ambiguous —
+  //   runq could not be derived, and a half-filled pair in the ledger is indistinguishable from a
+  //   measurement). Neither given ⇒ self-read; /proc/stat unreadable ⇒ the fields are ABSENT, never 0
+  //   (a fabricated 0 reads "nothing was runnable" exactly when the instrument failed).
+  // ⛔ No verdict reads these fields — the resource gate's overload-window criterion stays loadavg-based.
+  let procsRunning;
+  let procsBlocked;
+  const rqArgs = [
+    ["--procs-running", o.procsRunning, (v) => { procsRunning = v; }],
+    ["--procs-blocked", o.procsBlocked, (v) => { procsBlocked = v; }],
+  ];
+  const rqGiven = rqArgs.filter(([, raw]) => raw != null && String(raw).trim() !== "");
+  if (rqGiven.length === 1) {
+    return { error: `${rqGiven[0][0]} requires its pair (--procs-running AND --procs-blocked together, or neither)` };
+  }
+  if (rqGiven.length === 2) {
+    for (const [name, raw, setter] of rqArgs) {
+      const v = Number(String(raw).trim());
+      if (!Number.isInteger(v) || v < 0) {
+        return { error: `${name} must be a non-negative integer (got ${JSON.stringify(raw)})` };
+      }
+      setter(v);
+    }
+  } else {
+    const rq = readRunQueue();
+    if (rq) {
+      procsRunning = rq.procs_running;
+      procsBlocked = rq.procs_blocked;
+    }
+  }
   // cpu_time_s / cpu_source — a real number or EXPLICIT null + provenance (AC6, never 0).
   let cpuTimeS;
   let cpuSource;
@@ -714,6 +759,13 @@ export function buildPreVerifiedRoundRecord(o) {
     durationMs,
     laneCount,
     load,
+    // gap-resource-gate-reads-lagging-loadavg-not-instantaneous-rd — the instantaneous run-queue
+    // components (procs_running / procs_blocked / runq = R+D) beside `load` on the fan-in landing rows
+    // too (5b: both round-record writers carry the axis, not only full-suite-runner's). ABSENT — not 0 —
+    // when /proc/stat was unreadable and no explicit pair was passed (see the read above).
+    ...(procsRunning != null && procsBlocked != null
+      ? { procs_running: procsRunning, procs_blocked: procsBlocked, runq: procsRunning + procsBlocked }
+      : {}),
     state, // green (default) or red (gap-verification-round-static-fail-no-record: a red fan-in round)
     // gap-watchdog-killed-round-writes-no-verification-round-record — ALWAYS present on this writer's
     // rows: true = a verdict was reached (green, or red with a parsed reason); false = NOT evaluated
@@ -914,6 +966,7 @@ Usage:
       --lane-count <n> --load <n> --commit <sha>
       [--preverified <0|1|true|false>] [--cpu-time-s <n|null>] [--cpu-source <name>]
       [--cpu-user-s <n|null>] [--cpu-sys-s <n|null>]
+      [--procs-running <n>] [--procs-blocked <n>]
       [--suite-log <path>] [--runner <name>] [--root <dir>] [--record-file <file>]
       [--not-evaluated <token>]
       [--json] [--help]
@@ -944,6 +997,15 @@ Usage:
                     --cpu-time-s (a split without its sum is ambiguous — fail-closed). Optional
   --cpu-sys-s       the suite's gnu-time SYSTEM cpu seconds — the "%S" column (same contract).
                     user+sys ≈ cpu_time_s by construction (same source line). Optional
+  --procs-running   /proc/stat procs_running (tasks in R state) at record-build time — the
+                    INSTANTANEOUS component that --load (a 1-minute EWMA) lags. Must be passed
+                    TOGETHER with --procs-blocked or not at all: exactly one of the pair fails closed
+                    (an R without its D cannot derive runq, and a half pair reads as a measurement).
+                    Omit BOTH to self-read /proc/stat at build time (the in-process caller path —
+                    worker-fan-in.ts reads its --load at the same moment, so the two agree). Optional
+  --procs-blocked   /proc/stat procs_blocked (tasks in D state) — same contract as --procs-running.
+                    The record's runq is their sum; all three fields are ABSENT (never 0) when
+                    /proc/stat is unreadable. Telemetry only — no verdict reads them. Optional
   --suite-log       the fan-in suite log path — parse its __OVERHEAD__ <phase>_ms=N lines into
                     static/serial/lowconc/main phase fields + lock_wait_ms (test.sh's flock marker)
                     + record nproc/concurrentSuiteSlots/concurrentSuitesRunning (same 口径 as
@@ -988,6 +1050,8 @@ export function main(argv) {
     durationMs: flagValue(args, "--duration-ms"),
     laneCount: flagValue(args, "--lane-count"),
     load: flagValue(args, "--load"),
+    procsRunning: flagValue(args, "--procs-running"),
+    procsBlocked: flagValue(args, "--procs-blocked"),
     commit: flagValue(args, "--commit"),
     preverified: flagValue(args, "--preverified"),
     cpuTimeS: flagValue(args, "--cpu-time-s"),

@@ -483,8 +483,20 @@ function toEpochSeconds(iso: string): number {
 // start at all, while every import-based assertion stayed green. The `import … as` form binds a real
 // local of the SAME function object, so the export table, the local calls, and the kernel-identity
 // assertion all resolve to one implementation.
-import { readLoadAvg1 as readLoadAvg } from "../../packages/quay/src/kernel/load-avg.ts";
+import { readLoadAvg1 as readLoadAvg, readRunQueue } from "../../packages/quay/src/kernel/load-avg.ts";
 export { readLoadAvg };
+
+// gap-resource-gate-reads-lagging-loadavg-not-instantaneous-rd — the round record's run-queue fields.
+// Read at the SAME point as `load` (round end / crash time), from the SAME single-implementation
+// reader the load sampler uses (kernel `readRunQueue`), so the ledger row and the curve point carry
+// one 口径. Returns a spread-ready object with NO keys when /proc/stat is unreadable — the
+// absent-field contract (缺键 ≠ 0, 硬规则 3b): a fabricated `procs_running: 0` would read "nothing was
+// runnable" at exactly the moment the instrument failed. ⛔ No verdict consumes these fields.
+const runQueueFields = (): Partial<Pick<SuiteRoundRecord, "procs_running" | "procs_blocked" | "runq">> => {
+  const rq = readRunQueue();
+  if (!rq) return {};
+  return { procs_running: rq.procs_running, procs_blocked: rq.procs_blocked, runq: rq.runq };
+};
 
 // ── gap-suite-hub-file-responsibility-strip — accounting family extracted to suite-accounting.ts ──
 // The cgroup/systemd accounting family (per-phase cpu/psi differential reads + the systemd `Consumed`
@@ -3600,6 +3612,10 @@ export async function run(argv: string[]): Promise<number> {
           cancelled: 0,
           tests: 0,
           load: readLoadAvg(),
+          // gap-resource-gate-reads-lagging-loadavg-not-instantaneous-rd — a crashed round carries the
+          // same run-queue components as a normal round (5b: the principle applies at BOTH round-record
+          // writers, not only the one that produced the observation). Absent when /proc/stat is unreadable.
+          ...runQueueFields(),
           state: "red",
           reason: "crashed",
           runner: base.runner,
@@ -5313,6 +5329,10 @@ export async function run(argv: string[]): Promise<number> {
     per_test_ms: tapTests > 0 ? Number((durationMs / tapTests).toFixed(3)) : 0,
     redAt: redAtIso,
     load: readLoadAvg(),
+    // gap-resource-gate-reads-lagging-loadavg-not-instantaneous-rd — the instantaneous run-queue
+    // components beside the lagging loadavg (⛔ telemetry only; no verdict reads them). Absent when
+    // /proc/stat is unreadable.
+    ...runQueueFields(),
     state: finalState.state,
     reason: roundReason,
     // gap-verifiedcommit-dirty-tree-false-certificate AC5 — the same `void: true` marker the state
