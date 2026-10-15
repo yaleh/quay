@@ -1,7 +1,7 @@
 ---
 id: gap-develop-baseline-red-classify-deterministic-vs-load
 title: develop 基线红分类：近 8 轮 60 个基线红文件逐个单独跑两遍，分确定性红 / 隔离绿 / 不稳定，确定性红立修复任务
-status: ready
+status: done
 labels:
   - gap
 parent: null
