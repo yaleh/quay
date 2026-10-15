@@ -392,7 +392,10 @@ export function runScheduler(opts: {
   // two would silently make every round as slow as the heavy bound. So the heavy queue is tracked
   // separately and dispatched only in the tail, when nothing else is running.
   const heavyQueue: string[] = [...(heavy?.files ?? [])];
-  const heavyConcurrency = heavy ? heavy.concurrency : 0;
+  // `null` = the bucket was never DECLARED (three-valued, not a 0 that a reader must know to read as
+  // "off" — hard rule 3b). It is also what keeps this file free of an undeclared concurrency literal:
+  // the bound only ever exists because a project declared it (concurrency-literal-check, gate mode).
+  const heavyBound: number | null = heavy ? heavy.concurrency : null;
   let heavyActive = 0;
   const heavyStats: GroupStats = { durs: [], failed: 0, startMs: null, endMs: null };
 
@@ -430,7 +433,7 @@ export function runScheduler(opts: {
       // __GROUP__ + __OVERHEAD__ <group>_phase_ms once, at close (the downstream accounting reads
       // one __GROUP__ per group, same shape as measure-suite-reporter's per-phase line).
       if (isHeavy) {
-        if (heavyQueue.length === 0 && heavyActive === 0) emitGroup("heavy", heavyConcurrency, heavyStats);
+        if (heavyQueue.length === 0 && heavyActive === 0) emitGroup("heavy", heavyBound, heavyStats);
       } else if (queues[rec.group].length === 0 && active[rec.group] === 0) {
         emitGroup(rec.group, budgets[rec.group], st);
       }
@@ -481,14 +484,14 @@ export function runScheduler(opts: {
       // a `running.size === 0` test alone would start the heavy tail BEFORE the body and make the two
       // additive (measured: body1 overlapped heavy1). The three queues empty is what makes this a TAIL.
       if (
-        heavyConcurrency > 0 &&
+        heavyBound !== null &&
         heavyQueue.length > 0 &&
         running.size === 0 &&
         queues.serial.length === 0 &&
         queues.lowconc.length === 0 &&
         queues.main.length === 0
       ) {
-        while (heavyActive < heavyConcurrency && heavyQueue.length > 0) {
+        while (heavyActive < heavyBound && heavyQueue.length > 0) {
           const file = heavyQueue.shift() as string;
           heavyActive++;
           heavyStats.startMs ??= Date.now();
