@@ -222,9 +222,9 @@ test("unit — plannedFileMatcher resolves the plan's relative paths against the
   assert.equal(isPlanned("node plugin/test/a.test.mjs"), true, "the plan's own relative spelling matches");
   assert.equal(isPlanned("node /wt/plugin/test/b.test.mjs"), false);
   assert.equal(isPlanned(null), false, "an unreadable argv is not a planned file (it is simply not evidence FOR one)");
-  // An UNKNOWN plan (null) answers null — the caller records the dimension as unavailable rather than
-  // concluding 「no planned process ran」 (硬规则 3b).
-  assert.equal(plannedFileMatcher(null, "/wt")("node /wt/plugin/test/a.test.mjs"), null);
+  // An UNKNOWN plan yields NO predicate at all (⛔ not one that answers false — that would turn every
+  // process into 「not planned」, i.e. the fabricated measurement 「no planned process ran」).
+  assert.equal(plannedFileMatcher(null, "/wt"), null);
 });
 
 test("unit — splitProcessTree buckets planned vs descendant via the ppid chain, and never invents RSS", () => {
@@ -250,6 +250,13 @@ test("unit — splitProcessTree buckets planned vs descendant via the ppid chain
   const blind = splitProcessTree([{ pid: 9, ppid: 1, rssBytes: null, cmdline: "x" }], () => false);
   assert.equal(blind.total.rssBytes, null);
   assert.equal(blind.total.count, 1);
+  // An UNKNOWN plan: the total is still measured (it needs no plan), the three plan-dependent buckets
+  // are `null` — ⛔ not three empty ones, which would read as 「nothing planned ran」.
+  const unknownPlan = splitProcessTree(processes, null);
+  assert.deepEqual(unknownPlan.total, split.total);
+  assert.equal(unknownPlan.planned, null);
+  assert.equal(unknownPlan.descendant, null);
+  assert.equal(unknownPlan.other, null);
   // A ppid CYCLE (a torn/reparented read) terminates instead of hanging.
   const cyclic = splitProcessTree(
     [
@@ -376,6 +383,40 @@ test("AC2 — a partially readable scope records null + a named reason for exact
     // the counterpart to (a): what the host CAN read, it fills.
     assert.equal(ev.processTreeAccounting.maxProcesses, 1);
     assert.ok(ev.processTreeAccounting.maxRssBytes > 0, "this process's own RSS was readable ⇒ a positive number, never 0");
+  } finally {
+    fs.rmSync(stateDir, { recursive: true, force: true });
+    fs.rmSync(cgroupDir, { recursive: true, force: true });
+  }
+});
+
+// AC2 (the honesty half that the AC1 real run exposed): a round whose PLANNED SET is unknown — an
+// explicit `--command`, a failed probe — has no opinion about which process was a planned test file.
+// The three plan-dependent buckets must be `null` + a named reason, ⛔ NOT 0: three zeroed buckets read
+// as the MEASUREMENT 「no planned process ran」, which nobody made.
+test("AC2 — an unknown planned set leaves the planned/descendant split null + a named reason (⛔ not zeros)", () => {
+  const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-noplan-ev-"));
+  const cgroupDir = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-noplan-cg-"));
+  try {
+    fs.writeFileSync(path.join(cgroupDir, "memory.current"), "1048576\n");
+    fs.writeFileSync(path.join(cgroupDir, "memory.peak"), "2097152\n");
+    fs.writeFileSync(path.join(cgroupDir, "cgroup.procs"), `${process.pid}\n`);
+    const ev = startSuiteMemorySampler({
+      adapter: LINUX_ADAPTER,
+      scopeProvider: linuxDirScope(cgroupDir),
+      stateDir,
+      runId: "no-plan",
+      memoryMaxBytes: null,
+      phaseProvider: () => "main",
+      intervalMs: 20,
+      // ⛔ `plannedFiles` deliberately ABSENT — the plan is unknown.
+    }).stop();
+    const acct = ev.processTreeAccounting;
+    assert.equal(acct.maxProcesses, 1, "the TOTAL is still measured — it needs no plan, only cgroup.procs + /proc");
+    assert.ok(acct.maxRssBytes > 0, "…and its RSS is a real reading");
+    assert.equal(acct.plannedMax, null, "⛔ NOT 0 — 「no planned process ran」 is a measurement nobody made");
+    assert.equal(acct.descendantMax, null);
+    assert.equal(acct.otherMax, null);
+    assert.match(acct.unavailable ?? "", /planned test-file set is unknown/, "the reason says WHY the split is absent");
   } finally {
     fs.rmSync(stateDir, { recursive: true, force: true });
     fs.rmSync(cgroupDir, { recursive: true, force: true });

@@ -1905,13 +1905,16 @@ export function perPhaseConcurrency(
 /** One planned-file match predicate. A process's argv names the file it runs (`node <abs-path>`), so
  *  a cmdline matches when it CONTAINS one of the planned paths — resolved against the round's root,
  *  because the plan probe reports root-relative paths while the argv carries absolute ones.
- *  `null` planned set ⇒ the predicate answers `null` (「the plan is unknown」), which the caller
- *  records as an unavailable dimension ⛔ rather than as 「no planned process ran」. */
+ *
+ *  `null` planned set ⇒ **`null`**, not a predicate that answers `false`: a round whose plan is unknown
+ *  (an explicit `--command`, a failed probe) has NO opinion about which process was a planned test file,
+ *  and a `false`-answering predicate would make every bucket 「0 planned / 0 descendants」 — the
+ *  fabricated measurement 「no planned process ran」, which is exactly what 硬规则 3b forbids. */
 export function plannedFileMatcher(
   plannedFiles: readonly string[] | null,
   root: string,
-): (cmdline: string | null) => boolean | null {
-  if (plannedFiles === null) return () => null;
+): ((cmdline: string | null) => boolean) | null {
+  if (plannedFiles === null) return null;
   const needles = new Set<string>();
   for (const f of plannedFiles) {
     needles.add(f);
@@ -1938,15 +1941,19 @@ export interface ProcessTreeBucket {
 }
 
 export interface ProcessTreeSplit {
+  /** ALWAYS measured (it needs no plan — just `cgroup.procs` plus each process's own `/proc` entry). */
   total: ProcessTreeBucket;
-  planned: ProcessTreeBucket;
-  descendant: ProcessTreeBucket;
-  other: ProcessTreeBucket;
+  /** The three PLAN-DEPENDENT buckets: `null` as a SET when the round's planned file set was unknown
+   *  (then the split was never made — ⛔ NOT three empty buckets, which would read as the measurement
+   *  「nothing planned ran」). */
+  planned: ProcessTreeBucket | null;
+  descendant: ProcessTreeBucket | null;
+  other: ProcessTreeBucket | null;
 }
 
 export function splitProcessTree(
   processes: ReadonlyArray<{ pid: number; ppid: number | null; rssBytes: number | null; cmdline: string | null }>,
-  isPlanned: (cmdline: string | null) => boolean | null,
+  isPlanned: ((cmdline: string | null) => boolean) | null,
 ): ProcessTreeSplit {
   const byPid = new Map<number, { ppid: number | null; rssBytes: number | null; cmdline: string | null }>();
   for (const p of processes) byPid.set(p.pid, p);
@@ -1966,7 +1973,7 @@ export function splitProcessTree(
       seen.add(cur);
       const proc = byPid.get(cur);
       if (!proc) break;
-      if (isPlanned(proc.cmdline) === true) {
+      if (isPlanned !== null && isPlanned(proc.cmdline) === true) {
         verdict = cur === pid ? "planned" : "descendant";
         break;
       }
@@ -1995,13 +2002,26 @@ export function splitProcessTree(
     }
   }
   for (const bucket of Object.values(acc)) if (bucket.rssReadable === 0) bucket.rssBytes = null;
+  // The plan was unknown ⇒ the three plan-dependent buckets are NOT a measurement: `null` as a SET.
+  if (isPlanned === null) return { total: acc.total, planned: null, descendant: null, other: null };
   return { total: acc.total, planned: acc.planned, descendant: acc.descendant, other: acc.other };
 }
 
 /** Bucket-wise MAX of two process-tree splits, for the COUNT and for the summed RSS independently
  *  (they can come from different samples — many short-lived processes and a few large ones are both
  *  readings worth keeping). `null` means 「nothing had a readable RSS in that bucket」 and loses to any
- *  real reading, ⛔ never treated as 0. */
+ *  real reading, ⛔ never treated as 0; a `null` BUCKET (plan unknown) stays `null` on both sides. */
+function maxTreeSplit(a: ProcessTreeSplit, b: ProcessTreeSplit): ProcessTreeSplit {
+  const pair = (x: ProcessTreeBucket | null, y: ProcessTreeBucket | null): ProcessTreeBucket | null =>
+    x === null || y === null ? null : maxBucket(x, y);
+  return {
+    total: maxBucket(a.total, b.total),
+    planned: pair(a.planned, b.planned),
+    descendant: pair(a.descendant, b.descendant),
+    other: pair(a.other, b.other),
+  };
+}
+
 function maxBucket(a: ProcessTreeBucket, b: ProcessTreeBucket): ProcessTreeBucket {
   const pick = (x: number | null, y: number | null): number | null =>
     x === null ? y : y === null ? x : Math.max(x, y);
@@ -2108,6 +2128,13 @@ export function startSuiteMemorySampler(opts: {
   let treeAtPeak: ProcessTreeSplit | null = null;
   let treeSamples = 0;
   const isPlanned = plannedFileMatcher(opts.plannedFiles ?? null, opts.root ?? process.cwd());
+  if (isPlanned === null) {
+    // The round never resolved a planned set (an explicit `--command`, a failed probe). NAMED here, so
+    // the evidence says WHY the split is absent instead of presenting three empty buckets as a reading.
+    telemetryUnavailable["processTree.plannedSplit"] =
+      "this round's planned test-file set is unknown (an explicit --command, or the plan probe failed) — " +
+      "the planned-vs-descendant split could not be made, ⛔ not 「no planned process ran」";
+  }
   const statSampleOf = (stat: MemoryStatBreakdown | null): SuiteMemoryStatSample | null =>
     stat === null
       ? null
@@ -2231,15 +2258,7 @@ export function startSuiteMemorySampler(opts: {
       processTreePids = tree.value.pids;
       if (tree.value.processes !== undefined) {
         const split = splitProcessTree(tree.value.processes, isPlanned);
-        treeMax =
-          treeMax === null
-            ? split
-            : {
-                total: maxBucket(treeMax.total, split.total),
-                planned: maxBucket(treeMax.planned, split.planned),
-                descendant: maxBucket(treeMax.descendant, split.descendant),
-                other: maxBucket(treeMax.other, split.other),
-              };
+        treeMax = treeMax === null ? split : maxTreeSplit(treeMax, split);
         // AT THE PEAK sample: the process count / RSS at the moment the scope held the most memory.
         // `peakSampleThisTick` (⛔ not a one-shot latch) keeps this on the SAME sample as
         // `statAtPeakCurrent`, so 「the peak was anon」 and 「there were N processes using M bytes at the
@@ -2357,11 +2376,11 @@ export function startSuiteMemorySampler(opts: {
           maxRssBytes: treeMax?.total.rssBytes ?? null,
           atPeakProcesses: treeAtPeak?.total.count ?? null,
           atPeakRssBytes: treeAtPeak?.total.rssBytes ?? null,
-          plannedMax: treeMax?.planned.count ?? null,
-          plannedRssAtMaxBytes: treeMax?.planned.rssBytes ?? null,
-          descendantMax: treeMax?.descendant.count ?? null,
-          descendantRssAtMaxBytes: treeMax?.descendant.rssBytes ?? null,
-          otherMax: treeMax?.other.count ?? null,
+          plannedMax: treeMax?.planned?.count ?? null,
+          plannedRssAtMaxBytes: treeMax?.planned?.rssBytes ?? null,
+          descendantMax: treeMax?.descendant?.count ?? null,
+          descendantRssAtMaxBytes: treeMax?.descendant?.rssBytes ?? null,
+          otherMax: treeMax?.other?.count ?? null,
           samples: treeSamples,
           unavailable: processTreeAccountingReason(treeMax, treeSamples, telemetryUnavailable),
         },
@@ -2389,8 +2408,13 @@ export function processTreeAccountingReason(
   unavailable: Record<string, string>,
 ): string | null {
   if (treeMax !== null && treeSamples > 0) {
-    // Partially readable is still readable — but a per-sample torn read is worth naming.
-    return unavailable["processTree.processes"] ?? null;
+    // Partially readable is still readable — but a per-sample torn read, and an unmeasurable
+    // planned-vs-descendant split, are each worth naming (they are what makes a field `null`).
+    const parts = [
+      unavailable["processTree.processes"],
+      treeMax.planned === null ? unavailable["processTree.plannedSplit"] : undefined,
+    ].filter((r): r is string => typeof r === "string" && r.length > 0);
+    return parts.length > 0 ? parts.join("; ") : null;
   }
   return (
     unavailable["processTree"] ??
