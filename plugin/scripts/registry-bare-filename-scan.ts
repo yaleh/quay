@@ -52,13 +52,21 @@ export { maskComments };
 // `arg-parsing-helper-family`, routine `semantic-dedup-scan`).
 import { flagValue } from "./gate-script-base.ts";
 import { repoRoot } from "./repo-root.ts";
+// SCRIPTS_DIR_REL / listScriptBasenames now live in fs-walk.ts (`.quay/routine-findings.jsonl`
+// finding `list-script-basenames-diverged-under-one-name`, routine `semantic-dedup-scan`, runId
+// `semantic-dedup-scan-1792033478766`): this scanner and outer-retirement-precondition-check.ts
+// each kept an identical `listScriptBasenames` under the same name, filtered on different extension
+// sets. Both now re-export fs-walk.ts's single definition — ⛔ do not re-add a local copy here.
+import { SCRIPTS_DIR_REL, listScriptBasenames } from "./fs-walk.ts";
+export { SCRIPTS_DIR_REL, listScriptBasenames };
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 /** 默认受检面 = quay 仓库根（本脚本位于 <repo>/plugin/scripts/）。 */
 export const DEFAULT_ROOT = repoRoot();
-export const SCRIPTS_DIR_REL = "plugin/scripts";
-/** 脚本全域 = plugin/scripts 顶层 .ts/.sh/.mjs（SPEC §12e 的 309 = 218+78+13）。 */
-export const SCRIPT_EXTENSIONS = new Set([".ts", ".sh", ".mjs"]);
+// ⛔ 脚本全域不再是本模块自己的常量：`listScriptBasenames`（fs-walk.ts）按 EXEC_EXTENSIONS
+//   （.ts .sh .mjs .js .cjs .bash）枚举。此处曾有一个本地 `SCRIPT_EXTENSIONS = {.ts,.sh,.mjs}`
+//   （SPEC §12e 普查的 309 = 218+78+13），与同名副本 predicate 不同 ⇒ 本模块的死集 universe 静默
+//   漏掉 `.cjs` 脚本类；实测三个 `.cjs` 全部有引用者（放宽后 +3 kept / +0 dead），故统一到一组。
 /** 死集重算结果文件（AC158 直接消费）。 */
 export const DEAD_SET_RESULT_REL = "docs/analysis/dead-set-recomputed.json";
 /** 已知真样本（AC2/DoD 负控制的锚）——必须命中 quay-deliver.ts 的裸文件名清单项。 */
@@ -196,16 +204,10 @@ export function extractJsonBareFilenames(
 
 // ── 枚举 ─────────────────────────────────────────────────────────────────────────────────────────────
 
-/** 枚举 plugin/scripts 顶层脚本（.ts/.sh/.mjs，非递归）。 */
-export function listScriptBasenames(root: string): string[] {
-  const dir = path.join(root, SCRIPTS_DIR_REL);
-  if (!fs.existsSync(dir)) return [];
-  return fs
-    .readdirSync(dir, { withFileTypes: true })
-    .filter((e) => e.isFile() && SCRIPT_EXTENSIONS.has(path.extname(e.name)))
-    .map((e) => e.name)
-    .sort();
-}
+/** 枚举 plugin/scripts 顶层脚本（非递归）。
+ *  ⛔ 实现已上收 fs-walk.ts（`listScriptBasenames`），本模块只 re-export（见文件头 import 注释）——
+ *  此处不再保留副本：本模块历史副本用本地 3 扩展集，与 outer-retirement-precondition-check.ts 的
+ *  同名副本（EXEC_EXTENSIONS，6 扩展）给出两个不同的集合，而调用点看起来一模一样。 */
 
 /**
  * 目录是否为跳过目录：判定只作用于 `root` **之下**的路径段，⛔ 不看绝对路径的祖先链。
