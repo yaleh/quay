@@ -4409,13 +4409,26 @@ test("AC(citations) — a cluster's citations are what its OWN calls READ, re-ch
   // not contain would make the recorded commit decorative, which is the shape this AC exists to refuse.
   fs.mkdirSync(path.join(ws, "plugin", "scripts"), { recursive: true });
   fs.writeFileSync(path.join(ws, "plugin", "scripts", "a.ts"), "export const a = 1;\nexport const b = 2;\n", "utf8");
-  execFileSync("git", ["-C", ws, "add", "-A"]);
-  execFileSync("git", ["-C", ws, "commit", "-q", "-m", "pin content: the file the round will cite"]);
+  // ⛔ `env: GIT_ENV` on the COMMIT is LOAD-BEARING, not decoration: `ws` is a freshly `git init`-ed fixture
+  // repo (no repo-level `user.name`), so on a host with no GLOBAL git config git refuses with
+  // `Author identity unknown` and this case dies before the round even runs. Measured on CI run 38700638546
+  // and reproduced here under `HOME=<empty tmp> GIT_CONFIG_GLOBAL=/dev/null`.
+  // The identity goes in the CHILD ENV — ⛔ never into the fixture repo's own config (`git config user.name`
+  // inside `ws` would make the case pass for a reason the runner does not have: a fixture agreeing with
+  // itself). GIT_ENV sets the four `GIT_{AUTHOR,COMMITTER}_{NAME,EMAIL}` vars AFTER spreading `process.env`,
+  // so it also beats the «present but EMPTY» trap (git treats an empty ident var as a value, not as unset).
+  // Same defect family as task gap-commit-routine-write-no-git-identity-fallback, which fixed the PRODUCTION
+  // commit path. The other three `execFileSync` sites below are READS (add/rev-parse/show) that never needed
+  // an identity; they carry it only so this file has no bare-git idiom left to copy — after this change all
+  // 15 git call sites here (11 `spawnSync` + 4 `execFileSync`) pass `GIT_ENV` (硬规则 5b: the cluster, not
+  // just the reported instance).
+  execFileSync("git", ["-C", ws, "add", "-A"], { encoding: "utf8", env: GIT_ENV });
+  execFileSync("git", ["-C", ws, "commit", "-q", "-m", "pin content: the file the round will cite"], { encoding: "utf8", env: GIT_ENV });
   const pinFn = (o) => materializeStrippedPin({ ...o, forbiddenDirs: realHyp.PIN_FORBIDDEN_DIRS, stripCheck: (d) => realHyp.verifyCwdRefusal(d, d) });
   const spawn = countingSpawn(citationDelegate);
   const fact = await runOpenSemanticDiscovery(ws, { ...runOpts(ws), spawnFn: spawn, pinFn });
   assert.equal(fact.state, "verified", String(fact.reason ?? ""));
-  const rev = execFileSync("git", ["-C", ws, "rev-parse", "develop"], { encoding: "utf8" }).trim();
+  const rev = execFileSync("git", ["-C", ws, "rev-parse", "develop"], { encoding: "utf8", env: GIT_ENV }).trim();
 
   const clusters = carrierLines(ws).filter((l) => l.kind === "cluster" && l.shadow !== true);
   assert.ok(clusters.length >= 1, "the round wrote cluster records");
@@ -4428,7 +4441,7 @@ test("AC(citations) — a cluster's citations are what its OWN calls READ, re-ch
     assert.equal(cite.commit, rev, "…pinned to the commit the round read");
     // THE MECHANICAL CHECK, run INDEPENDENTLY of the round: `git show <commit>:<file>`, line N, really
     // carries the quoted text. This is the check the AC names; nothing here reads the round's own state.
-    const atCommit = execFileSync("git", ["-C", ws, "show", `${cite.commit}:${cite.file}`], { encoding: "utf8" }).split("\n")[cite.line - 1];
+    const atCommit = execFileSync("git", ["-C", ws, "show", `${cite.commit}:${cite.file}`], { encoding: "utf8", env: GIT_ENV }).split("\n")[cite.line - 1];
     assert.ok(atCommit.includes(cite.quote), `the cited line really carries the quote AT THE RECORDED COMMIT (got ${JSON.stringify(atCommit)})`);
     // …and the FABRICATED pair (line 99, which the pin does not have) is dropped and COUNTED, never repaired.
     assert.equal(c.citations.some((x) => x.line === 99), false, "the fabricated citation was NOT persisted");
