@@ -20,7 +20,7 @@
 // Run: scripts/test.sh --for-task gap-ac139-unified-driver-subcommand
 //      node --test plugin/test/driver-cli.test.mjs
 
-import { test } from "node:test";
+import { test, after } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
@@ -28,6 +28,13 @@ import path from "node:path";
 import { execFileSync, spawn, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { run } from "../../packages/quay/bin/quay.ts";
+import {
+  assertNoOwnScopes,
+  createScopeRootRegistry,
+  readOwnScopes,
+  reclaimOwnScopes,
+  waitUntil,
+} from "./helpers/anchor-scope-reaper.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const SCRIPTS_DIR = path.resolve(__dirname, "..", "scripts");
@@ -126,6 +133,14 @@ async function cli(args) {
   return r;
 }
 
+// ── 本文件起的 scope（gap-test-spawned-anchor-scopes-outlive-suite-again-ac1-stop-and-restart-ac5）──
+// `quay driver start` 把 anchor 包进 `systemd-run --user --scope --unit=quay-anchor-<root 基名>-<ts>.scope`
+// ⇒ 本文件每起一个 driver 就在 user manager 上留一个真瞬态 scope。回收/断言按【单元名前缀】做（root 是
+// mkdtemp 的唯一路径，故「前缀 + 基名」恰好圈定本文件起的那些），见 helpers/anchor-scope-reaper.mjs
+// 的头注释（为什么按 pid 杀 anchor 不够、为什么⛔不能按裸前缀扫）。注册点放在两个夹具工厂里 ⇒ 新增用例
+// 不可能忘记注册。
+const ownRoots = createScopeRootRegistry();
+
 // A hermetic bare root (not a git repo): .quay/config.yml + the kernel (copyKernel) + fake drivers.
 // The CLI resolves the kernel from THIS root via --root.
 function makeRoot(tag) {
@@ -135,7 +150,7 @@ function makeRoot(tag) {
   fs.mkdirSync(path.join(root, ".quay"), { recursive: true });
   fs.writeFileSync(path.join(root, ".quay", "config.yml"), "providers: {}\n", "utf8");
   copyKernel(scripts);
-  return root;
+  return ownRoots.register(root);
 }
 
 /** 失败安全的 driver 清理（gap-ac3-live-test-fixture-leaks-supervised-driver-processes）。
@@ -151,15 +166,32 @@ function makeRoot(tag) {
  *  实测（2026-09-14，本条立案）：本文件 `ac1-stop` 的一次失败留下了一对
  *  `/tmp/driver-cli-ac1-stop-XpH3GN` 进程（supervisor + worker driver），活了 **2.7 天**
  *  （`ps -o lstart=` 2026-09-11 10:13:14）。⛔ 别把它退回成「t.after 只 rmSync、stop 写在测试体里」
- *  ——那正是这条泄漏的产生路径。 */
+ *  ——那正是这条泄漏的产生路径。
+ *
+ *  ⚠️ 但 `driver stop` **不是** scope 的回收（gap-test-spawned-anchor-scopes-outlive-suite-again-
+ *  ac1-stop-and-restart-ac5，2026-10-15 回归）：它按 pid 停 anchor，而 scope 的成员**不只是 anchor**
+ *  ——anchor 进程内的 kind 循环 spawn 的子进程同样住在那个 cgroup 里；`--collect` 只收**空** scope
+ *  ⇒ anchor 死了、子进程还在，scope 就照样活过套件。且 `driver stop` 本身也可能没到达 anchor（实测
+ *  遗留 scope `quay-anchor-driver-cli-ac1-stop-eEx6Ag-…` 的 anchor 至今活着，而它的 root 还在盘上
+ *  = 最后一次 `fs.rmSync` 从未跑）。⇒ 收尾固定为三步：① 停 kind；② **按单元名前缀整组停 scope**；
+ *  ③ 最后才 rmSync（root 一没，① 与 ② 里按 root 派生的单元名都无处可查）。 */
 async function teardownDrivers(root, kinds) {
   try {
     for (const kind of kinds) {
       try { await cli(["driver", "stop", "--kind", kind, "--root", root]); } catch { /* 继续收下一个 */ }
     }
   } finally {
-    fs.rmSync(root, { recursive: true, force: true }); // 必须最后：root 一没，stop 就读不到 pid 文件了
+    await teardownRoot(root); // ② scope 整组回收 + ③ rmSync —— 与 ① 是否抛错无关（finally）
   }
+}
+
+/** 所有夹具 root 的统一收尾。⛔ 本文件【不再有】「只 rmSync、不回收 scope」的分支：那种分支的收尾
+ *  正确性依赖「这个用例碰巧没起 anchor」，而缺陷正是「收尾漏了 scope」，靠用例内容去保证收尾是错的
+ *  形状（2026-10-15：这正是它第二次复发时没人看见的原因）。
+ *  async ⇒ `t.after(() => teardownRoot(root))` 返回 Promise，node:test 会等它（⛔ 不是 fire-and-forget）。 */
+async function teardownRoot(root) {
+  await reclaimOwnScopes([root]); // 必须在 rmSync 之前：单元名由 root 基名派生，root 一没就再也圈不出它们
+  fs.rmSync(root, { recursive: true, force: true });
 }
 
 function git(cwd, args) {
@@ -184,6 +216,9 @@ function makeGitWorktree() {
   git(main, ["add", "-A"]);
   git(main, ["commit", "-qm", "init"]);
   git(main, ["worktree", "add", "-q", wt, "HEAD"]);
+  // 注册两个 root：`--root <wt>` 被拒绝（AC4）时不会起 scope，但收尾不该依赖「这个用例碰巧没起」。
+  ownRoots.register(main);
+  ownRoots.register(wt);
   return { main, wt };
 }
 
@@ -217,7 +252,7 @@ test("AC1 — both kinds start + status + stop through `quay driver`", async (t)
 
 test("AC1 — stop/drain are separate verbs; both kinds support drain = halt (AC150-2)", async (t) => {
   const root = makeRoot("ac1-drain");
-  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  t.after(() => teardownRoot(root));
 
   // promotion DOES support drain now (AC150-2): writes promotion-control.json halted=true.
   const p = await cli(["driver", "drain", "--kind", "promotion", "--root", root]);
@@ -298,7 +333,7 @@ test("AC2 — exactly ONE respawn/supervisor loop in the repo (TS kernel; ⛔ no
 
 test("AC3 — status reports last_record_ts (the carrier's last-record timestamp), not just a count", async (t) => {
   const root = makeRoot("ac3");
-  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  t.after(() => teardownRoot(root));
 
   // Negative control: no carrier yet ⇒ last_record_ts is null (⛔ not fabricated).
   const before = JSON.parse((await statusJson(root, "promotion")).stdout.trim());
@@ -323,8 +358,8 @@ test("AC3 — status reports last_record_ts (the carrier's last-record timestamp
 test("AC4 — start from a worktree is REJECTED (no supervisor on the worktree)", async (t) => {
   const { main, wt } = makeGitWorktree();
   t.after(() => {
-    fs.rmSync(main, { recursive: true, force: true });
-    fs.rmSync(wt, { recursive: true, force: true });
+    teardownRoot(main);
+    teardownRoot(wt);
   });
 
   const r = await cli(["driver", "start", "--kind", "promotion", "--root", wt]);
@@ -344,8 +379,8 @@ test("AC4 — start from a worktree is REJECTED (no supervisor on the worktree)"
 test("AC4 — cwd inside a worktree is also rejected (spawned subprocess)", (t) => {
   const { main, wt } = makeGitWorktree();
   t.after(() => {
-    fs.rmSync(main, { recursive: true, force: true });
-    fs.rmSync(wt, { recursive: true, force: true });
+    teardownRoot(main);
+    teardownRoot(wt);
   });
 
   const r = spawnSync(
@@ -361,7 +396,7 @@ test("AC4 — cwd inside a worktree is also rejected (spawned subprocess)", (t) 
 
 test("AC1 — resume is drain's inverse: clears halted=false (surface recovery, ⛔ no driver-internal exports)", async (t) => {
   const root = makeRoot("resume");
-  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  t.after(() => teardownRoot(root));
 
   // drain writes halted=true (worker-control.json).
   const d = await cli(["driver", "drain", "--kind", "worker", "--root", root]);
@@ -406,4 +441,60 @@ test("AC2 — start when halted REFUSES with a clear message + resume hint (⛔ 
   assert.equal(s2.code, 0, `start after resume succeeds: ${s2.stdout}\n${s2.stderr}`);
   const st = JSON.parse((await statusJson(root, "worker")).stdout.trim());
   assert.equal(st.running, 1, `worker running=1 after resume+start: ${JSON.stringify(st)}`);
+});
+
+// ══════════════════════════════════════════════════════════════════════════════════════════════════
+// 零泄漏判据（gap-test-spawned-anchor-scopes-outlive-suite-again-ac1-stop-and-restart-ac5）
+// ══════════════════════════════════════════════════════════════════════════════════════════════════
+//
+// 两半，缺一不可：
+//   · AC — 本文件的零泄漏断言在【真起了一个 scope 又没回收】时变红。⛔ 不是「把断言写得更醒目」：
+//     判据必须是**能取假**的量（硬规则 4 推论三），否则它只证明「断言写得出来」。
+//   · 文件末尾的 after() —— 断言本文件起的 scope 全都没了。放在 after 里而不是每个用例里：用例的
+//     t.after 只管自己那一个 root，而泄漏形态之一是**收尾被打断**（进程被杀/超时）⇒ 需要一道与
+//     具体用例无关的末尾闸。
+
+test("零泄漏断言可取假 — 夹具伪造一个本前缀的残留 scope 时，assertNoOwnScopes 变红（falsifiable）", async (t) => {
+  // 一个自己的 root（⛔ 不用 makeRoot：不需要内核闭包，且这条要的是「基名唯一」这一个性质）。
+  const probeRoot = ownRoots.register(fs.mkdtempSync(path.join(os.tmpdir(), "driver-cli-leakprobe-")));
+  t.after(() => teardownRoot(probeRoot));
+
+  // 零残留时断言通过（先立负控制：这条测试不是因为「断言恒抛」而通过）。
+  assertNoOwnScopes([probeRoot], "control/pre");
+
+  // 伪造一个残留 scope：单元名按 anchor 自己的派生规则造（`quay-anchor-<root 基名>-<ts>.scope`），
+  // 成员用一个会自己退出的 `sleep`（夹具崩了也不会留 scope）。
+  const unit = `quay-anchor-${path.basename(probeRoot)}-${Date.now()}.scope`;
+  const child = spawn(
+    "systemd-run",
+    ["--user", "--scope", "--quiet", "--collect", `--unit=${unit}`, "sleep", "60"],
+    { detached: true, stdio: "ignore" },
+  );
+  child.unref();
+
+  const seen = await waitUntil(() => readOwnScopes([probeRoot]).units.includes(unit), 20_000);
+  assert.ok(seen, "夹具的残留 scope 必须真的出现在 user manager 上（⛔ 不是注入一个假读数）");
+  assert.throws(
+    () => assertNoOwnScopes([probeRoot], "control/leaked"),
+    /仍有 1 个活着/,
+    "有残留 scope 时零泄漏断言必须变红（否则它不是一个测量）",
+  );
+
+  // 回收之后再次通过 ⇒ 同一个断言在同一进程里既红过也绿过（取值随被测量变化，不是常数）。
+  const rec = await reclaimOwnScopes([probeRoot]);
+  assert.deepEqual(rec.remaining, [], `回收后不该有剩余: ${JSON.stringify(rec.attempts)}`);
+  assertNoOwnScopes([probeRoot], "control/post");
+});
+
+after(async () => {
+  const roots = ownRoots.list();
+  const rec = await reclaimOwnScopes(roots);
+  assertNoOwnScopes(roots, "driver-cli.test.mjs — 末尾零泄漏闸");
+  if (rec.before.length > 0) {
+    // 走到这里说明**逐个用例的收尾漏了**：末尾闸兜住了它，但漏这件事本身要留痕（⛔ 不静默）。
+    process.stderr.write(
+      `driver-cli.test.mjs: per-case teardown missed ${rec.before.length} scope(s); the end-of-file gate reclaimed them: ` +
+      `${rec.before.join(", ")} (attempts=${rec.attemptsUsed}, ${JSON.stringify(rec.attempts)})\n`,
+    );
+  }
 });
