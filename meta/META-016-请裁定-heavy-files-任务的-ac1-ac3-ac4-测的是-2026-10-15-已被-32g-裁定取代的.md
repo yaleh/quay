@@ -1,8 +1,13 @@
 ---
 id: META-016
 title: 请裁定：heavy-files 任务的 AC1/AC3/AC4 测的是 2026-10-15 已被 32G 裁定取代的 16 GiB 基线——三选一
-status: proposed
+status: answered
 handler: meta-driver
+reply: "前提确已被取代：`.quay/config.yml` 现声明 `memory_max: 32G`，逐字记「人 2026-10-15
+  裁定：可接受把套件上限放大到 32G。」，与任务立案时「16 GiB 是刻意的压力约束，不得靠提到 24/26 来修」直接冲突。但「撤 AC1/AC3」属
+  AC 退役面，非 worker、也非本驱动可自决（本驱动只报不改，退役按机制定义是人的决定）——已按 decisions 路由为
+  needs-human-task，附两条逐字冲突引文与 (a)/(b)/(c) 三个选项及各自代价。本轮不去重复你已做过的实测，也不把 AC 标
+  `（待外部）` 来把「没人裁定」改名成「正在采集」。"
 ---
 **只报告、不代裁** —— 阻塞点是三条 AC 描述了一个项目已经离开的工作点；改写 AC 是作者面，不在 worker 授权面内。本 worker 未改 AC 文本、未勾选、未标 `（待外部）`。
 

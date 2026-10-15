@@ -141,7 +141,35 @@ gap-dashboard **47**、workflow-runner-self-hosted-check **34**。
 (c) 授权 worker/ops **在安静时段**按原样跑那 13 轮（`QUAY_SUITE_MEMORY_MAX=16G` 强制该基线）。
 ⛔ 在拿到裁定之前，本条**不把 AC1/AC3/AC4 标为（待外部）、也不勾选**——因为它们缺的不是「外部稍后会产出的读数」，
 而是一个**人的裁定**（是否还要在那个基线上测量），把待裁定写成待外部会把「未测」伪装成「待收」。
-真实读数与 scoped 门都已就位；只差这一个决定。
+真实读数与 scoped 门都已就位；只差这一个决定。裁定请求已立案为 **META-016**（`meta/META-016-*.md`，status: proposed）。
+
+### 第 4 轮复核（2026-10-16）—— AC5 重跑绿；AC1/AC3 的**「成本依据」更正**（⛔ 更正的是理由，结论不变）
+
+**本轮先做的两件事（读数）。**
+① `git -C <worktree> merge --no-edit develop` ⇒ `Already up to date`；`git diff --diff-filter=U` **空**（无未合并路径）。
+② 重跑 scoped 门 `scripts/test.sh --for-task <本任务> --allow-thin` ⇒ **exit 0**，
+`ℹ tests 271 / ℹ pass 271 / ℹ fail 0 / ℹ cancelled 0 / ℹ duration_ms 22246.46` ⇒ **AC5 仍然成立**（AC2 的读数未变）。
+
+**更正 1（成本）：一轮全量套件是 ~2.6–4.3 分钟，不是 ≥19 分钟。**
+正本 = 套件自己的轮次记录 `.quay/verification-round.jsonl` 末 6 轮的 `durationMs`：
+**188565 / 174621 / 197265 / 257253 / 156931 / 160647 ms**。
+⇒ 上面「把生产 fan-in 堵住**数小时**」高估了一个量级；13 轮的实际套件时长约 **45–60 分钟**。
+
+**更正 2（封套）：本机 anchor cgroup 的 `memory.max` = 27,917,287,424 B（26.0 GiB），**大于** 16 GiB**
+（`/sys/fs/cgroup/user.slice/.../quay-anchor-quay-*.scope/memory.max`）⇒ 用 `QUAY_SUITE_MEMORY_MAX=16G` 强制时，
+runner 为套件建的 systemd scope **先于** anchor 封套生效，**测出来就是真的 16 GiB 读数**。
+⇒ 上面「hand-run 继承 anchor 封套 ⇒ 读数不是 16 GiB 下」的说法**在本机不成立**（它只在 anchor 封套 < 16 GiB 时才成立）。
+
+**更正之后仍然成立的那条理由（这条才是承重的）**：`plugin/scripts/full-suite-runner.ts:3066–3083` 的
+**SPAWN-LAYER SINGLE-FLIGHT**——`isRunnerInFlight(<main>/.quay/full-suite-state.json)` 为真时 runner
+**拒绝启动**（`state=running` + live pid ⇒ exit 1，并往套件日志写 `single-flight-refusal`）；其后还有 resource gate
+的 `WAIT` 分支。⇒ worker 连跑 13 轮期间，**生产循环的 fan-in 轮会全部被拒**——这正是本任务 Plan §3 逐字禁止的
+「not stacked on top of live fan-ins」。（上面那次 scoped 门重跑不走 `full-suite-runner`，所以没有这个问题。）
+
+**结论不变**：AC1/AC3/AC4 缺的是**人的裁定**（是否还在 16 GiB 这个已被 2026-10-15 裁定取代的基线上测量），
+不是 worker 能代替决定的事。三选一 (a)/(b)/(c) 见上一节；其中 (c) 的成本比上一节写的低（~45–60 分钟），
+但**仍占用单飞槽、会拒掉生产 fan-in** ⇒ 它正确的家是 **driver / 例行轨道**（可由 driver 排安静时段），
+而不是 worker 会话。
 
 ## Touches
 - tasks/gap-suite-heavy-files-and-phase-concurrency-under-16g-pressure-baseline-comparison.md
