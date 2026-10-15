@@ -81,7 +81,7 @@ import {
 import { isDue } from "./routine-scheduler.ts";
 // Layer 0 · profile → L2 policy（gap-driver-binding-semantic-kind-to-profile：launchArgv 经 policy 解析
 // 语义 kind → profile，⛔ 不各自解析 profiles.yml / 不硬编码 launcher/model）。
-import { loadProfiles, resolveRole, type ProfilesConfig } from "./profile-policy.ts";
+import { loadProfiles, resolveRole, readRoleProvenance, type ProfilesConfig, type ValueSource } from "./profile-policy.ts";
 import { rootsFromEnv, mcpConfigArgvSuffix, type McpConfigRoots } from "./mcp-blacklist-resolve.ts";
 
 // ── Layer 0 · ResultVocab / controlPlane（re-export，单一真相源）────────────────────────────────────
@@ -2184,6 +2184,24 @@ export function launchArgv(role: string, prompt: string, root: string, opts: Lau
   if (config.promptSuggestions === false) argv.push("--prompt-suggestions", "false");
   if (resolved.model) argv.push("--model", resolved.model);
   if (resolved.bare) argv.push("--bare");
+  // permissionMode / effort（gap-role-profile-permissionmode-effort-declaration-and-provenance）：
+  // 只在**该 role 解析出非 null 值**时追加 ⇒ 未声明的 role argv 与改动前逐字一致（DoD：缺省行为不变，
+  // `launch.settings.json` 的 `permissions.defaultMode` 继续生效）。
+  // ⚠️ 位置必须在下面 `-n <name> -p <prompt>` 之前：prompt 恒是 argv 的最后一个元素（worker-driver
+  //   的续做 prompt 与测试都依赖这条不变量）。
+  // ⚠️ 这两个标志面向 **claude 二进制本身**，不面向代理/wrapper。**实测（2026-10-15）`claude-fjdac`
+  //   确实逐字转发**（它以 `exec claude "$@"` 结尾）：`--permission-mode bogusmode` ⇒ claude 自己报
+  //   `error: option '--permission-mode <mode>' argument 'bogusmode' is invalid. Allowed choices are …`
+  //   且 exit 1；`--effort bogus` ⇒ `Warning: Unknown --effort value …` 且 **exit 0**。
+  //   故此处如实追加。对**不转发**的 launcher，本函数仍追加（声明是声明），诊断路径 =
+  //   `runEnvironmentSmoke`（它经同一个 `launchArgv` 构造 argv ⇒ 一个不认这两个标志的 launcher 会把
+  //   "unknown option"/invalid 打在输出里 ⇒ 冒烟把原文粘进 `EnvironmentSmokeResult.output`，
+  //   ⛔ 不是「静默当成生效了」）。
+  //   🔴 但冒烟**抓不到**「effort 拼错」这一类：CLI 对它是 warn + 降级 + exit 0（见上），冒烟因此报
+  //   `pass`。这类静默降级的**唯一** fail-closed 闸是 `validateProfiles` 的封闭枚举（加载时拒）
+  //   —— 两处合用才覆盖全部失败形态，⛔ 谁都不能省。
+  if (resolved.permissionMode) argv.push("--permission-mode", resolved.permissionMode);
+  if (resolved.effort) argv.push("--effort", resolved.effort);
   if (resolved.mcpBlacklist.length > 0) {
     const roots = opts.mcpRoots !== undefined ? opts.mcpRoots : rootsFromEnv([root], process.env, resolveKernelPluginRoot());
     if (roots) argv.push(...mcpConfigArgvSuffix(resolved.mcpBlacklist, roots));
@@ -2192,6 +2210,195 @@ export function launchArgv(role: string, prompt: string, root: string, opts: Lau
   if (opts.promptViaStdin === true) argv.push("-n", resolved.name, "-p");
   else argv.push("-n", resolved.name, "-p", prompt);
   return argv;
+}
+
+// ── 派发配置 provenance（gap-role-profile-permissionmode-effort-declaration-and-provenance AC4）─────
+// WHY：`.quay/worker-outcome.jsonl` 的全部字段里此前**没有** model / launcher / permissionMode / effort，
+// 也没有「实际拼出的 argv」与「会话 transcript 里的真实 model 名」——只有 `session_id`，要外部关联才查得到。
+// 于是「我声明了 X」与「实际跑的是 Y」之间没有任何载体，「声明被代理忽略」这类**静默降级**与「一切正常」
+// 同形（硬规则 3b/4b）。本段是把这两半接上的那一层：一条记录里同时给出声明值、**哪一层**决定了它、
+// 真实 argv，以及 transcript 读回的**真实** model。
+//
+// 🔴 alias ≠ 真实模型（本任务的核心区分）：`--model v4.1flash` 是我们**请求**的名字（alias），会话
+// transcript 里 assistant 记录的 `message.model` 是服务端**实际**返回的名字（本例 `deepseek-flash`）。
+// 两者⛔ 不得合并成一个字段——合并之后「alias 写错了/网关换了底层模型」这两种完全不同的故障就同形了。
+
+/** 本次 spawn 的 argv 由哪一层产生（AC4 的「CLI 参数层」覆盖来源）。
+ *   - `launchArgv`  —— 缺省：经 profile-policy 解析 role → profile 拼出（配置层）；
+ *   - `cli-exact`   —— 调用方 `--worker-cmd-exact` 逐字覆盖（CLI 参数层，⛔ 不经 profile 解析）；
+ *   - `cli-prefix`  —— 调用方 `--worker-cmd` 前缀 + prompt（CLI 参数层）。 */
+export type ArgvSource = "launchArgv" | "cli-exact" | "cli-prefix";
+
+/** 一条派发的配置 provenance（落进 worker 落地记录的 `provenance` 键）。 */
+export interface DispatchProvenance {
+  /** 语义 kind（task-worker / selector / fix-worker / …）。 */
+  role: string;
+  /** 该 role 引用的 profile 名（⛔ 不是 role 名——溯源要能顺着它找到声明点）。 */
+  profile: string;
+  /** 配置层解析出的声明值（`argv_source !== "launchArgv"` 时与实际 argv 不同源，两半都记）。 */
+  declared: {
+    launcher: string;
+    model: string | null;
+    permissionMode: string | null;
+    effort: string | null;
+  };
+  /** 每个字段**由哪一层**决定（role / profile / extends / fallback / default）。 */
+  override_source: { launcher: ValueSource; model: ValueSource; permissionMode: ValueSource; effort: ValueSource };
+  /** `override_source` 为 profile/extends 时点名实际声明它的 profile（其余 ⇒ null）。 */
+  override_via: { launcher: string | null; model: string | null; permissionMode: string | null; effort: string | null };
+  /** 本次 argv 的产生层（配置层 vs CLI 参数层）。 */
+  argv_source: ArgvSource;
+  /** **实际传给子进程**的 argv（⛔ 不是从配置推导的**应有** argv）。 */
+  argv: string[];
+  /** `argv` 中被省略的 prompt 元素的字节数（≤ 阈值时该元素原样保留 ⇒ 0）。⛔ 省略是**显式**的，
+   *  不是静默截断——见 `PROVENANCE_ARGV_PROMPT_MAX_BYTES`。 */
+  argv_prompt_elided_bytes: number;
+  /** **argv 里的 model**（= 启动标志的 model 名 = alias）。⛔ 与 `model_real` 分开两个字段。 */
+  model_alias: string | null;
+  /** 会话 transcript 里 assistant 记录读出的**真实** model 名（本项目实测 `deepseek-flash`）。
+   *  null = 未评估（无 session id / transcript 未落盘 / 读不懂）——⛔ 不是「与 alias 相同」。 */
+  model_real: string | null;
+  /** `model_real` 的读取面（transcript 绝对路径 + 命中的记录类型）。读不出 ⇒ null（硬规则 6）。 */
+  model_real_from: { transcript: string; record_type: string } | null;
+  /** `model_real` 读不出时的**人读原因**（⛔ 不是空字符串——「没读到」与「读到了空值」必须可分）。 */
+  model_real_unavailable: string | null;
+}
+
+/** provenance 里 argv 的 prompt 元素超过此字节数 ⇒ 用 `<prompt:N bytes>` 占位（**并记 N**）。
+ *  为什么省略：worker 的 prompt 是一整份任务体（实测数十 KB），而 `worker-outcome.jsonl` 被多个消费者
+ *  **整文件读**（fan-in-queueing-model / duration-report / slot-refill）——逐条塞进完整 prompt 会让该台账
+ *  膨胀数倍，换来的却是与「调用配置」无关的内容。省略只作用于**最后一个 prompt 元素**，其余逐字保留，
+ *  且 N 落在 `argv_prompt_elided_bytes` ⇒ 读者知道被省了多少，⛔ 不是静默截断（硬规则 3b）。 */
+export const PROVENANCE_ARGV_PROMPT_MAX_BYTES = 512;
+
+/** 从一份 argv 里取某个标志的值（`--flag <v>` 形制；缺 ⇒ null）。⛔ 只认紧邻的下一个元素。 */
+function argvFlagValue(argv: readonly string[], flag: string): string | null {
+  const i = argv.indexOf(flag);
+  return i >= 0 && i + 1 < argv.length ? argv[i + 1] : null;
+}
+
+/** 把 argv 里最后一个超长元素（worker prompt）换成显式占位符，返回 [argv, 被省略的字节数]。 */
+function elideArgvPrompt(argv: readonly string[]): { argv: string[]; elided: number } {
+  const last = argv[argv.length - 1];
+  if (argv.length === 0 || typeof last !== "string" || Buffer.byteLength(last, "utf8") <= PROVENANCE_ARGV_PROMPT_MAX_BYTES) {
+    return { argv: [...argv], elided: 0 };
+  }
+  const n = Buffer.byteLength(last, "utf8");
+  return { argv: [...argv.slice(0, -1), `<prompt:${n} bytes>`], elided: n };
+}
+
+/** `~/.claude/projects/<mangled-cwd>/` —— Claude Code 的会话 transcript 目录（cwd 里 `/`→`-`，前置 `-`）。 */
+function projectTranscriptDir(cwd: string): string {
+  return path.join(os.homedir(), ".claude", "projects", "-" + cwd.replace(/\//g, "-"));
+}
+
+/** 定位该 session 的 transcript 文件。先按 spawn 的 cwd 推 slug（快路径），推不出再逐个扫
+ *  `~/.claude/projects` 下的 slug 目录（worker 可能在别的 cwd 下起会话）。
+ *  ⛔ 找不到 ⇒ null（⛔ 不猜路径）。 */
+export function findTranscriptFile(sessionId: string, cwd: string): string | null {
+  if (!sessionId) return null;
+  const direct = path.join(projectTranscriptDir(cwd), `${sessionId}.jsonl`);
+  if (fs.existsSync(direct)) return direct;
+  const base = path.join(os.homedir(), ".claude", "projects");
+  let entries: string[];
+  try {
+    entries = fs.readdirSync(base);
+  } catch {
+    return null;
+  }
+  for (const e of entries) {
+    const p = path.join(base, e, `${sessionId}.jsonl`);
+    if (fs.existsSync(p)) return p;
+  }
+  return null;
+}
+
+/** 从会话 transcript 读出**真实被服务的 model 名**与读不出的原因（AC4 的右半边）。
+ *  判定面 = `type:"assistant"` 记录的 `message.model`（服务端实际返回的那个名字）——⛔ 不读
+ *  `type:"api-request"` 的 `params.model`，那正是我们**请求**的 alias，拿它当「真实模型」就是自证
+ *  （硬规则 4：恒等式不是测量）。
+ *
+ *  取**最后一条** assistant 记录：一次会话里网关可能换过底层模型（回退/路由），最后一条是本次会话
+ *  结束时的实际值；同时返回 `record_type` 让读者知道读的是哪个面（⛔ 不给一个无出处的裸字符串）。 */
+export function readTranscriptRealModel(
+  sessionId: string | null | undefined,
+  cwd: string,
+): { model: string | null; from: { transcript: string; record_type: string } | null; unavailable: string | null } {
+  if (!sessionId) return { model: null, from: null, unavailable: "no session id (worker never started a session)" };
+  const file = findTranscriptFile(sessionId, cwd);
+  if (!file) return { model: null, from: null, unavailable: `transcript not found for session ${sessionId}` };
+  let text: string;
+  try {
+    text = fs.readFileSync(file, "utf8");
+  } catch (e) {
+    return { model: null, from: null, unavailable: `transcript unreadable: ${e instanceof Error ? e.message : String(e)}` };
+  }
+  let seenAssistant = false;
+  let model: string | null = null;
+  for (const line of text.split("\n")) {
+    const t = line.trim();
+    if (!t) continue;
+    let rec: { type?: unknown; message?: { model?: unknown } };
+    try {
+      rec = JSON.parse(t);
+    } catch {
+      continue;
+    }
+    if (rec.type !== "assistant") continue;
+    seenAssistant = true;
+    const m = rec.message?.model;
+    if (typeof m === "string" && m) model = m; // 末条胜出（会话中途换模型 ⇒ 读结束时的实际值）
+  }
+  if (!seenAssistant) return { model: null, from: null, unavailable: `no assistant record in transcript ${file}` };
+  if (model === null) return { model: null, from: null, unavailable: `assistant records carry no message.model in ${file}` };
+  return { model, from: { transcript: file, record_type: "assistant.message.model" }, unavailable: null };
+}
+
+/** 构造一条派发 provenance（AC4）。`argv` 必须是**实际要 spawn 的那一份**（含调用方追加的
+ *  `--session-id`），⛔ 不是配置层的应有值——本函数从它身上**读**实际生效的 model/permissionMode/effort，
+ *  而不是把解析值抄一遍（两者在 CLI 参数层覆盖时会分叉，正是要能看出来）。
+ *  profile 解析失败（profiles.yml 缺失/非法）⇒ 抛（fail-closed，与 launchArgv 同）；调用方决定是否降级。 */
+export function dispatchProvenance(
+  role: string,
+  root: string,
+  argv: readonly string[],
+  opts: { argvSource?: ArgvSource; sessionId?: string | null; cwd?: string } = {},
+): DispatchProvenance {
+  const config = loadProfiles(root);
+  const p = readRoleProvenance(config, role);
+  const { argv: recordedArgv, elided } = elideArgvPrompt(argv);
+  const real = readTranscriptRealModel(opts.sessionId ?? null, opts.cwd ?? root);
+  return {
+    role: p.role,
+    profile: p.profile,
+    declared: {
+      launcher: p.fields.launcher.value ?? "",
+      model: p.fields.model.value,
+      permissionMode: p.fields.permissionMode.value,
+      effort: p.fields.effort.value,
+    },
+    override_source: {
+      launcher: p.fields.launcher.source,
+      model: p.fields.model.source,
+      permissionMode: p.fields.permissionMode.source,
+      effort: p.fields.effort.source,
+    },
+    override_via: {
+      launcher: p.fields.launcher.via,
+      model: p.fields.model.via,
+      permissionMode: p.fields.permissionMode.via,
+      effort: p.fields.effort.via,
+    },
+    // CLI 参数层覆盖时 argv 不是配置层产生的 ⇒ 如实标注（⛔ 不谎称它是 launchArgv 的产物）。
+    argv_source: opts.argvSource ?? "launchArgv",
+    argv: recordedArgv,
+    argv_prompt_elided_bytes: elided,
+    // 从【实际 argv】读，⛔ 不从 declared 读——`--model` 没被追加时这里就是 null（硬规则 6）。
+    model_alias: argvFlagValue(recordedArgv, "--model"),
+    model_real: real.model,
+    model_real_from: real.from,
+    model_real_unavailable: real.unavailable,
+  };
 }
 
 // ── 环境级（environment-fatal）签名：launcher/model 解析结果【必然导致所有 worker 同样失败】的字面形态 ──
