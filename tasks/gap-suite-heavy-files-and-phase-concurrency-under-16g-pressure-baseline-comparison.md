@@ -60,7 +60,12 @@ depends_on:
 ## Touches
 - tasks/gap-suite-heavy-files-and-phase-concurrency-under-16g-pressure-baseline-comparison.md
 - plugin/scripts/full-suite-runner.ts
+- plugin/scripts/suite-params.ts
+- plugin/scripts/suite-scheduler.ts
 - scripts/test.sh
+- packages/quay/src/goal-store.ts
+- plugin/test/suite-params.test.mjs
+- plugin/test/suite-scheduler.test.mjs
 - plugin/test/ac341-post-merge-promotion-events-dialect.test.mjs
 - plugin/test/ac260-ac261-delivery-face-ref-source.test.mjs
 - plugin/test/ac272-rolling-channel-version-selfproof.test.mjs
