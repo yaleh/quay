@@ -2,7 +2,7 @@
 id: gap-resource-gate-reads-lagging-loadavg-not-instantaneous-rd
 title: 资源闸用带 1 分钟记忆的 loadavg 当「当前过载」判据 —— 实测 load1=209 而瞬时 R+D 仅 39；先把 R/D
   分量记进载体再判该换哪个量
-status: todo
+status: ready
 labels:
   - gap
 parent: null
