@@ -63,8 +63,10 @@ AC1–AC4 带真实读数勾选。落地后（运维步骤，不在 worker 内�
 
 ## Blocker
 
-**2026-10-15T07:52:08.638Z — worker 未落地（exited-not-landed）**
+**2026-10-15T08:18:00.601Z — worker 未落地（exited-not-landed）**
 
-- 未落地原因：step=suite: oom-killed (1) — recovery baseline-equivalence not evaluable at concurrency 64 — needs a code fix
+- 未落地原因：step=ff: fan-in-ff-merge: suite 证书 — suite_head..tip 恰为本任务的单个 flip-done 提交（身份判定：仅 M tasks/gap-suite-declared-memory-max-swallowed-by-shared-host-split.md）⇒ 判惰性，⛔ 未调分类器
+fan-in-ff-merge: FF FAILED — To .; not a fast-forward. Retry record written (attempt 1). Return to 无锁段 step 1 (merge develop again — 必须 merge 不得 rebase, AC75), re-judge the delta (step 2) and re-run.
+fan-in-ff-merge: measure ff_only_locked=false
 - run_id：wk-prod-anchor
-- session_id：28b0ba9d-f7f5-4ab6-b3be-b1f2a711348b
+- session_id：9c2a550a-df53-45cc-94d8-7388dae2dfbe
