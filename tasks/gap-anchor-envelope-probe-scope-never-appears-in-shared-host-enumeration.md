@@ -1,7 +1,7 @@
 ---
 id: gap-anchor-envelope-probe-scope-never-appears-in-shared-host-enumeration
 title: develop CI 仅剩的红：探针 scope 在有界等待 30s 后仍 4/4 不出现——上一条「加长等待」的修复被 CI 证伪
-status: todo
+status: ready
 labels:
   - gap
 parent: null
