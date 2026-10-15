@@ -1282,9 +1282,17 @@ test(
 // The SUITE is a second long-lived consumer of the same host-derived fraction: it and the anchor
 // groups are alive at the same time, so the suite's share adds to the same sum. It is wired through
 // the SAME `sharedHostCeilingBytes` (⛔ one implementation, 硬规则 5b — this file owns no second copy
-// of the formula), and it is the UPPER bound on the declared ceiling — so a declared value is never
-// above what the shared host can afford, while a declared value BELOW it (the 16 GiB baseline here)
-// is honoured unchanged.
+// of the formula), which is the UPPER bound on the declared ceiling for the PROJECT-BLIND DEFAULT —
+// so a default is never above what the shared host can afford, while the 16 GiB baseline here is
+// honoured unchanged.
+// ⚠️ WHICH rule produces the upper bound is selected by the DECLARATION'S PROVENANCE
+// (gap-suite-declared-memory-max-swallowed-by-shared-host-split, 人 2026-10-15 裁定): an explicitly
+// DECLARED ceiling (`.quay/config.yml` `suite: memory_max:` / `QUAY_SUITE_MEMORY_MAX`) is bounded by
+// the PROJECT-BLIND `0.25 × effective host total` instead, so the shared-host split can no longer
+// silently swallow an operator's declaration. The selection's ONE home is `suiteHostGuard` in
+// plugin/scripts/full-suite-runner.ts (⛔ not restated here), and its ACs live in
+// full-suite-runner-declared-memory-guard.test.mjs. The loop below injects a guard explicitly, so it
+// holds for BOTH rules — it pins `suiteMemoryMax`'s own contract, not the selection.
 
 test("unit — the shared-host step is the UPPER bound: it never RAISES the declared ceiling", () => {
   const effective = readEffectiveTotalMemBytes();
