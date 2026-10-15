@@ -54,6 +54,15 @@ extract
 ⛔ 未走「把 `JSON.stringify` 塞回源文件当摆设」那条路——那是给闸门看的死 token。
 新支比 `emit*` 那支更**紧**：要求 **import 自 `./gate-script-base.ts`**（并解析 `as` 别名）后才认调用，因为 `printJson` 是通用名，裸名匹配会让「本地 `printJson` 只打印人读文本」这一 **C2 本要抓的形态**漏网；该负控制已进 `plugin/test/checker-mechanical-spine-check.test.mjs`。
 
+
+**Fleet 升级复核（2026-10-15，case_81318cfe801f；第三轮 exited-not-landed 的真因）**：本轮 `step=suite: oom-killed (1) — recovery exhausted at floor concurrency 32` **不是本任务 delta 的缺陷，也不是 suite 真红**，而是 OOM 恢复梯子的读取缺陷（已知形态，同批 `semantic-dedup-scan` 兄弟任务三连同因）：
+- 原轮 `fan-in-step-trace.jsonl`：`suite-incomplete planned=925 terminal=925 missing=0 oomKill=1` → 梯子 64/48/32 三档全部 `recovery round had no conclusion (log-unreadable)`。
+- 梯子各档日志 `.quay/fan-in-suite-…~recovery-{64,48,32}-*.log` 均为 **0 字节**（结构性：恢复命令仍 tee 进原日志、而 `spawnSuiteAndWait` 只把 stdout 写进档日志）⇒ 这是**读数不可得**，不是「该档不完整」（硬规则 3b）。
+- 原日志 `.quay/fan-in-suite-gap-routine-semantic-dedup-scan-print-json-three-behaviours~wk-prod-anchor~1792035507942-bdbd92.log` 现存的是**地板档（32）的完整输出**：`SUITE-PLAN planned=925 terminal=925 missing=0 oomKill=0 laneCount=32`，`# tests 10247 / # pass 10247 / # fail 0`，静态闸 `checker-mechanical-spine-check — 138 checker(s), 0 violation(s)`（上一轮的 2 处红已由本任务的 spine 修正消除）。⇒ 地板档是一轮**完整、零 OOM、零失败**的 suite，梯子却无法认证它。
+- 任务分支 `task/gap-routine-semantic-dedup-scan-print-json-three-behaviours`（tip `0f9a5ffad`，worktree 干净，仅未追踪 `.quay/` 运行时文件）代码未变；**无需改代码，重派即可**——下一轮若原轮不撞 `oomKill>0`（主机内存/swap 压力），走普通路径即可落地。
+- 缺陷落点在 `worker-fan-in.ts` `recoverySuiteCommand` / `suite-driver.ts` `spawnSuiteAndWait`（报错尾注所指 `full-suite-runner.ts` 是错的文件）；⛔ 本任务不扩 Touches 去修它。
+⛔ 本记录不判验收：不写 done/verifiedBy，完成由 fan-in 判。
+
 ## AC
 - [x] `.quay/routine-findings.jsonl` 中 finding `print-json-three-behaviours`（routine `semantic-dedup-scan`，runId `semantic-dedup-scan-1792033478766`）所描述的问题被复核并处置
 - [x] 处置结论可核：要么修掉，要么写明「已有机制在管、失败在哪一步」，⛔ 不以「已注意到」结案
@@ -79,8 +88,8 @@ extract
 
 ## Blocker
 
-**2026-10-15T03:27:22.521Z — worker 未落地（exited-not-landed）**
+**2026-10-15T04:27:04.127Z — worker 未落地（exited-not-landed）**
 
-- 未落地原因：step=suite: incomplete suite (925/925 files) — recovery exhausted at floor concurrency 32 — no declared rung produced a complete verdict (64,48,32); needs a code/config fix, see plugin/scripts/full-suite-runner.ts
+- 未落地原因：step=suite: oom-killed (1) — recovery exhausted at floor concurrency 32 — no declared rung produced a complete verdict (64,48,32); needs a code/config fix, see plugin/scripts/full-suite-runner.ts
 - run_id：wk-prod-anchor
-- session_id：48c126d6-cda2-4288-869a-166a1d2f367b
+- session_id：dbf05fc5-7778-4d96-b688-ca8fb0925e9a
