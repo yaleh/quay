@@ -2,7 +2,7 @@
 id: gap-role-profile-permissionmode-effort-declaration-and-provenance
 title: Role/profile 声明式 model/launcher/permissionMode/effort + Session
   provenance（alias vs 真实 model），Fleet 项目显式 dev policy
-status: ready
+status: done
 labels:
   - gap
 parent: null
