@@ -950,6 +950,18 @@ test("unit — the recovery ladder is DECLARED and bounded; the step-down is com
   ]);
   assert.equal(recArgv.filter((a) => a === "--log-file").length, 1, "exactly ONE --log-file (flagValue takes the FIRST match)");
   assert.ok(!recArgv.includes("/tmp/original.log"), "the ORIGINAL round's log path is gone from the recovery argv");
+  // 单 token 形态 `--log-file=<path>`：`flagValue` 按精确串相等查（`indexOf("--log-file")`）⇒ 它**认不出**
+  // 这个形态。就地改写成 `--log-file=<logFile>` 等于让 runner 退回缺省路径、而调用方读本档那份 —— 同一条
+  // 缺陷换个马甲。故整条丢掉、改以空格形态给一份（⛔ 不是就地改写）。
+  const eqArgv = recoverySuiteCommand(
+    ["node", "--no-warnings", "/x/plugin/scripts/full-suite-runner.ts", "--buckets", "gap-mfh", "--log-file=/tmp/original.log"],
+    48, "/tmp/rec-48.log",
+  );
+  assert.deepEqual(eqArgv, [
+    "node", "--no-warnings", "/x/plugin/scripts/full-suite-runner.ts", "--buckets", "gap-mfh",
+    "--log-file", "/tmp/rec-48.log", "--lane-count", "48",
+  ], "the `=` form is dropped and re-emitted in the space form flagValue actually parses");
+  assert.ok(!eqArgv.some((a) => a.startsWith("--log-file=")), "⛔ never re-emit a form the runner cannot read");
   // 接线不变式：空路径会让本轮回到「runner 写一处、调用方读另一处」⇒ 抛出，⛔ 不静默产出一条指向错文件的 argv。
   assert.throws(() => recoverySuiteCommand(runnerCmd, 48, ""), /recLogFile is required/);
   assert.equal(

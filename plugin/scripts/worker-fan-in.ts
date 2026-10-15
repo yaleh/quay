@@ -869,8 +869,12 @@ export function recoveryConcurrencySteps(original: number | null): number[] {
  *
  * ⛔ 必须是**替换**而不是追加：runner 读旗标用 `flagValue`（gate-script-base.ts），而它的实现是
  * `argv.indexOf(name)` ⇒ **取第一份**。追加一份新的 `--log-file` 会让 runner 继续用旧的那份，把本函数
- * 想修的东西原样保留（静默）。`--log-file=<path>` 单 token 形态 flagValue 不认（`indexOf` 按精确串相等），
- * 故那种形态下我们追加的这份必然生效——但 base 里出现它就说明有别的写者，故一并去掉，让 argv 只有一份。
+ * 想修的东西原样保留（静默）。
+ *
+ * ⛔ 单 token 的 `--log-file=<path>` 形态**必须整条丢掉、改以空格形态追加**，⛔ 不能就地改写成
+ * `--log-file=<logFile>`：`flagValue` 按**精确串相等**查（`indexOf("--log-file")`），它认不出 `=` 形态
+ * ⇒ runner 会退回自己的缺省路径 `<state-dir>/full-suite.log`，而调用方仍读本档那份 —— 那正是本任务要
+ * 消灭的「写一处、读另一处」，只是换了个马甲（静默）。丢掉之后 `placed` 保持 false，由末尾统一追加。
  */
 function retargetLogFile(base: string[], logFile: string): string[] {
   const out: string[] = [];
@@ -882,10 +886,7 @@ function retargetLogFile(base: string[], logFile: string): string[] {
       i += 1; // 丢掉它原来指的那个值（本轮不再经过它）
       continue;
     }
-    if (a.startsWith("--log-file=")) {
-      if (!placed) { out.push(`--log-file=${logFile}`); placed = true; }
-      continue;
-    }
+    if (a.startsWith("--log-file=")) continue; // 认不出的形态 ⇒ 丢（见上）
     out.push(a);
   }
   if (!placed) out.push("--log-file", logFile);
