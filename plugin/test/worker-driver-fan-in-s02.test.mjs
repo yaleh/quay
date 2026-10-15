@@ -108,12 +108,16 @@ test("AC2 (gap-worker-driver-reconcile-interval) — all edge events lost (worke
 
 test("AC1 (gap-worker-driver-async-selector-readypool) — loop body's worker-argv construction is async (⛔ sync workerArgvForTask → continueStateForTask spawnSync git freezes the floor)", () => {
   const src = fs.readFileSync(DRIVER, "utf8");
-  // spawnSelected 是 async 且 await 异步 argv 构造（workerArgvForTaskAsync），⛔ 不再是同步 workerArgvForTask。
+  // spawnSelected 是 async 且 await 异步 argv 构造（workerArgvForTaskAsync / 其
+  // workerArgvForTaskWithSourceAsync 变体），⛔ 不再是同步 workerArgvForTask。
+  // 断言钉的是【异步性】这一性质，⛔ 不是某一个函数名的拼法：`gap-role-profile-permissionmode-effort-
+  // declaration-and-provenance` 把循环体的调用换成 WithSource 变体（同一实现，另带回覆盖来源），
+  // 那是本次改动的实质而非回归——两个变体都满足本 AC，故正则接受两者。
   assert.match(src, /const spawnSelected = async \(sel: \{ task: string; reason: string \}\): Promise<void>/, "spawnSelected is async");
-  assert.match(src, /await workerArgvForTaskAsync\(sel\.task, rootDir, workerCmdOpts\)/, "spawnSelected awaits workerArgvForTaskAsync");
+  assert.match(src, /await workerArgvForTask(?:WithSource)?Async\(sel\.task, rootDir, workerCmdOpts\)/, "spawnSelected awaits the async argv construction");
   assert.doesNotMatch(src, /workerArgv: workerArgvForTask\(sel\.task, rootDir, workerCmdOpts\)/, "the sync workerArgvForTask (continueStateForTask spawnSync git) is gone from the loop body");
   // 异步变体齐全，且 git 读走 runAsync（spawn，⛔ 非 spawnSync）。
-  for (const name of ["worktreePresentForTaskAsync", "worktreePathsForTaskAsync", "countBranchCommitsAsync", "branchHeadSubjectAsync", "continueStateForTaskAsync", "workerPromptForTaskAsync", "workerArgvForTaskAsync"]) {
+  for (const name of ["worktreePresentForTaskAsync", "worktreePathsForTaskAsync", "countBranchCommitsAsync", "branchHeadSubjectAsync", "continueStateForTaskAsync", "workerPromptForTaskAsync", "workerArgvForTaskAsync", "workerArgvForTaskWithSourceAsync"]) {
     assert.match(src, new RegExp(`export async function ${name}`), `${name} is defined`);
   }
   assert.match(src, /const r = await runAsync\(\["git", "-C", root, "worktree", "list", "--porcelain"\]/, "worktree async variants route through runAsync (spawn), not spawnSync");
