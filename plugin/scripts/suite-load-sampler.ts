@@ -2,9 +2,10 @@
 //
 // Spawned by full-suite-runner.ts while a full-suite verification round runs. Every N seconds it
 // samples the three structural resource signals the resource-gate already defines — loadavg (1m),
-// cpu_stall (PSI `some avg10` %), mem_avail (MB) — and appends one JSON line to
-// `<state-dir>/suite-load-<runId>.jsonl`. The Test 详情 page pulls that timeseries to render a
-// server-side load curve.
+// cpu_stall (PSI `some avg10` %), mem_avail (MB) — PLUS the instantaneous run-queue components
+// (procs_running / procs_blocked / runq = R+D, from /proc/stat — see readRunQueue's import note), and
+// appends one JSON line to `<state-dir>/suite-load-<runId>.jsonl`. The Test 详情 page pulls that
+// timeseries to render a server-side load curve.
 //
 // STOP IS FINISHEDAT-DRIVEN (⛔ the "结束即停 / 不常驻空跑" invariant), NOT state-driven
 // (gap-suite-load-sampler-early-red-truncates-load-curve): full-suite-runner.ts writes an EARLY-RED
@@ -35,6 +36,11 @@ import path from "node:path";
 // the ~73 hand-written copies of the indexOf+next-arg idiom in plugin/scripts
 // (.quay/routine-findings.jsonl finding `arg-parsing-helper-family`, routine `semantic-dedup-scan`).
 import { flagValue } from "./gate-script-base.ts";
+// gap-resource-gate-reads-lagging-loadavg-not-instantaneous-rd — the INSTANTANEOUS run-queue
+// components (procs_running / procs_blocked / R+D) ride the sampler's curve beside `loadavg`, so the
+// same 口径 lands in the load curve AND in the suite round record (full-suite-runner.ts imports the
+// SAME function from this kernel leaf — one implementation, two call sites, 硬规则 5b).
+import { readRunQueue } from "../../packages/quay/src/kernel/load-avg.ts";
 
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
 
@@ -55,8 +61,9 @@ function readLoadavg(): number | null {
  * `semantic-dedup-scan`): this reader previously existed as two byte-identical private copies — here
  * and in psi-failure-correlation-check.ts — so a change to the PSI parse/口径 could land in one copy
  * only, silently desynchronising the correlation window from the recorded load curve. It lives HERE
- * because this module owns the three structural-signal readings (readLoadavg / readCpuStall /
- * readMemAvailMb); psi-failure-correlation-check.ts now imports it instead of re-declaring it.
+ * because this module owns the structural-signal readings (readLoadavg / readCpuStall /
+ * readMemAvailMb, plus the imported readRunQueue for the run-queue axis);
+ * psi-failure-correlation-check.ts now imports it instead of re-declaring it.
  * A third same-named reader (cap-from-gate.ts `readCpuStallFromGate`) is deliberately NOT unified: it
  * does not parse /proc itself but reads through resource-gate.sh, the canonical shell implementation.
  */
@@ -145,11 +152,20 @@ async function main(): Promise<void> {
   // host is still alive FIRST, so a finished/superseded suite never gets one extra post-mortem
   // sample (the 结束即停 invariant) and a killed host can never leave a resident orphan sampler.
   while (isSuiteRunning(stateFile, runId) && process.ppid === hostPid) {
+    // gap-resource-gate-reads-lagging-loadavg-not-instantaneous-rd — `loadavg` is a 1-min EWMA (it
+    // remembers the last minute); procs_running/procs_blocked/runq are the kernel's counts for THIS
+    // instant. Both axes are recorded on every sample so a component-vs-loadavg regression is
+    // computable from the curve. `null` (not 0) when /proc/stat is unreadable — the same hole
+    // convention readLoadavg/readCpuStall follow in this module (硬规则 3b).
+    const rq = readRunQueue();
     const rec = {
       t: Date.now(),
       loadavg: readLoadavg(),
       cpu_stall: readCpuStall(),
       mem_avail: readMemAvailMb(),
+      procs_running: rq ? rq.procs_running : null,
+      procs_blocked: rq ? rq.procs_blocked : null,
+      runq: rq ? rq.runq : null,
     };
     try {
       fs.appendFileSync(outFile, JSON.stringify(rec) + "\n", "utf8");

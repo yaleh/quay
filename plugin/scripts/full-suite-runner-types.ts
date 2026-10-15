@@ -397,6 +397,24 @@ export interface SuiteRoundRecord {
   fail: number;
   cancelled: number;
   load: number;
+  /**
+   * gap-resource-gate-reads-lagging-loadavg-not-instantaneous-rd — the INSTANTANEOUS run-queue
+   * components from `/proc/stat`, recorded beside `load` (which is a 1-minute EWMA and therefore
+   * remembers the last minute rather than the instant the gate decides at). `procs_running` = tasks in
+   * R state, `procs_blocked` = tasks in D state (uninterruptible sleep), `runq` = their sum.
+   *
+   * ⛔ NO verdict reads these fields — the resource gate's overload-window criterion stays loadavg-based
+   * until a component regression justifies a change. They exist so that regression is computable at all
+   * (before this field landed, `procs_running`/`procs_blocked` were read NOWHERE in the repo ⇒ the
+   * component history did not exist).
+   *
+   * ABSENT (not 0) when /proc/stat is unreadable, and absent on every row written before this reading
+   * existed — so a reader must distinguish three states: a number, and two flavours of "no number"
+   * (measured-unavailable vs never-measured). ⛔ Never infer "0 runnable processes" from absence.
+   */
+  procs_running?: number;
+  procs_blocked?: number;
+  runq?: number;
   state: string;
   runner: string;
   // gap-worktree-scoped-runs-consume-resources-but-produce-no-signal AC1: main|worktree — which
