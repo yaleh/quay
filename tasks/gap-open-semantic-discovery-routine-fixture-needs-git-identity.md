@@ -2,7 +2,7 @@
 id: gap-open-semantic-discovery-routine-fixture-needs-git-identity
 title: open-semantic-discovery-routine 夹具缺 git identity ⇒ runner 上 Author
   identity unknown（同族已 done 修法的第二个实例）
-status: todo
+status: ready
 labels:
   - gap
   - ci
