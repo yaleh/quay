@@ -64,3 +64,4 @@ gap-routine-...-defaultroot-byte-identical-quad...: round 2719(lane48,red/failed
 - plugin/scripts/suite-driver.ts
 - plugin/test/worker-fan-in.test.mjs
 - plugin/test/suite-driver.test.mjs
+- plugin/test/full-suite-runner-oom-policy.test.mjs
