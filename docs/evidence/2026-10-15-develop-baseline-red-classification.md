@@ -20,7 +20,7 @@
 0 个确定性红。⇒ 载体的「基线红」不是文件自身的确定性缺陷，而是**全量套件内部**
 这个上下文（并发 × 内存 × 交互）的产物 —— 与 Proposal 的判断一致，且现在有了逐文件、可复现的直接量。
 
-（第二轮未执行）
+**第二轮（换一棵树，commit `84bf0429b0345db29af19cb78917429ca51f99e5`）复现了同一分布**：确定性红 0 / 隔离绿 59 / 不稳定 1（§3b 有逐文件比对）。
 
 ## 1. 取数
 
@@ -123,9 +123,14 @@ env LC_ALL=C.UTF-8 LANG=C.UTF-8 TZ=UTC NODE_COMPILE_CACHE=<disk dir> \
 - 主机：`nproc=128`、`MemTotal=252902 MB`、`node v24.21.0`
 - `loadavg`(1min) 在本窗口内的范围：**16.2 – 169.4**（128 核机器）
 - `/proc` 里可见的、cmdline 含 `--test` 的 node 进程数（**含本趟自己的 2 个**）：1 – 140
-  （该计数器把被测对象自己也数进去了，方向是保守的；它的用途只是「有没有别的东西在跑套件」）
+  （⚠️ 该计数器把**被测的这一趟自己**也数进去了 2 个，所以读数偏高——它只用来回答「此刻有没有别的东西在跑套件」，
+  ⛔ 不是一个精确的并发度测量；定量结论一律用上面的 loadavg。）
 
-⇒ **本期最强的一句**：这 60 个文件在 loadavg 长期 16+ 的重载窗口里**单独**跑仍然全绿。
+- 120 趟**开始时** `loadavg`(1min) 的分位数：min 16.2 / p25 23.5 / **中位 36.5** / p75 59.9 / max 169.4
+  ⇒ ⛔ 不要引用「16+」这种下界冒充典型值：这台机器在本窗口里**典型就是 30–60**，一半的趟次开跑时 ≥ 36。
+
+⇒ **本期最强的一句**：这 60 个文件在**主机典型 loadavg 30–60、峰值 169** 的窗口里**单独**跑，
+59/60 个趟趟全绿（余下那 1 个见 §5b，是**文件内单条用例的定时假设**，不是整文件红）。
 所以「基线红」不是主机整体在忙造成的，而是**全量套件自己的并发与内存足迹**造成的
 （正是 Proposal 说的「交给内存与并发方向」）。
 
@@ -225,6 +230,79 @@ node --test --test-concurrency=1 --test-reporter=tap positive-control/failing.te
 
 **每行恰属一类**：三类计数之和 = 0 + 59 + 1 = 60 = 并集大小。无第四类（无未评估、无缺失文件）。
 
+### 3b. 第二轮：换一棵树做同一测量（robustness control）
+
+第一轮跑到一半时 develop 已被别的 worker 推进了 —— 所以第一轮的读数描述的是**当时那个 tip**，
+而本文件最终会落在**更靠后**的树上。为了让「0 确定性红」不是**某一棵树**的偶然，
+`git merge develop` 之后在**同一棵 worktree** 上把**同一套 120 趟**原样再跑一遍（重建 dist 之后）。
+
+- 第一轮（round A）被测 commit：`dae398dd7abcacb312e0379355fc1a5bb8d169df`
+- 第二轮（round B）被测 tree = `git merge develop` 之后的 worktree HEAD：`84bf0429b0345db29af19cb78917429ca51f99e5`（其中的 develop 内容基线 = `8fea2373271163e81216685d8faa8982c55a1db4`，其上是本任务的证据文档提交）
+- round B 类别计数：确定性红 **0** / 隔离绿 **59** / 不稳定 **1**；loadavg(1min) 范围 19.1 – 184.1
+- **两轮逐文件类别是否一致：**全部 60 个文件一致****
+
+| # | 文件 | round B pass 1（退出码 / 耗时 / fail / pass） | round B pass 2 | round B 类 | 与 round A |
+|---|---|---|---|---|---|
+| 1 | `plugin/test/full-suite-runner-cgroup.test.mjs` | 0 / 32.3s / 0 / 56 | 0 / 30.9s / 0 / 56 | 隔离绿 | 一致 |
+| 2 | `plugin/test/full-suite-runner-phases.test.mjs` | 0 / 47.3s / 0 / 71 | 0 / 47.8s / 0 / 71 | 隔离绿 | 一致 |
+| 3 | `plugin/test/full-suite-runner-s07.test.mjs` | 0 / 20.1s / 0 / 7 | 0 / 21.1s / 0 / 7 | 隔离绿 | 一致 |
+| 4 | `packages/quay/test/serve-ac95-views.test.mjs` | 0 / 17.3s / 0 / 22 | 0 / 15.4s / 0 / 22 | 隔离绿 | 一致 |
+| 5 | `plugin/test/full-suite-runner-s10.test.mjs` | 0 / 11.9s / 0 / 7 | 0 / 12.0s / 0 / 7 | 隔离绿 | 一致 |
+| 6 | `plugin/test/full-suite-runner-s12.test.mjs` | 0 / 17.7s / 0 / 6 | 0 / 18.1s / 0 / 6 | 隔离绿 | 一致 |
+| 7 | `plugin/test/supervisor-observe.test.mjs` | 0 / 14.1s / 0 / 8 | 0 / 12.5s / 0 / 8 | 隔离绿 | 一致 |
+| 8 | `plugin/test/worker-driver.test.mjs` | 0 / 30.6s / 0 / 147 | 0 / 30.2s / 0 / 147 | 隔离绿 | 一致 |
+| 9 | `plugin/test/live-web-address.test.mjs` | 0 / 11.6s / 0 / 17 | 0 / 11.8s / 0 / 17 | 隔离绿 | 一致 |
+| 10 | `plugin/test/shipped-shell-reachability.test.mjs` | 0 / 7.4s / 0 / 8 | 0 / 7.4s / 0 / 8 | 隔离绿 | 一致 |
+| 11 | `packages/quay/test/build-plugin-dist.test.mjs` | 0 / 6.2s / 0 / 45 | 0 / 6.3s / 0 / 45 | 隔离绿 | 一致 |
+| 12 | `plugin/test/full-suite-runner-s02.test.mjs` | 0 / 15.8s / 0 / 7 | 0 / 15.7s / 0 / 7 | 隔离绿 | 一致 |
+| 13 | `plugin/test/full-suite-runner-s05.test.mjs` | 0 / 14.3s / 0 / 7 | 0 / 14.3s / 0 / 7 | 隔离绿 | 一致 |
+| 14 | `plugin/test/full-suite-runner-s06.test.mjs` | 0 / 10.9s / 0 / 6 | 0 / 10.9s / 0 / 6 | 隔离绿 | 一致 |
+| 15 | `plugin/test/full-suite-runner-s08.test.mjs` | 0 / 17.9s / 0 / 7 | 0 / 19.9s / 0 / 7 | 隔离绿 | 一致 |
+| 16 | `plugin/test/trend-check.test.mjs` | 0 / 10.5s / 0 / 16 | 0 / 10.3s / 0 / 16 | 隔离绿 | 一致 |
+| 17 | `packages/quay/test/gap-ac179-criterion-cold-miss-dashboard-snapshot.test.mjs` | 0 / 15.1s / 0 / 8 | 0 / 15.0s / 0 / 8 | 隔离绿 | 一致 |
+| 18 | `packages/quay/test/npm-pack-e2e.test.mjs` | 0 / 11.6s / 0 / 11 | 0 / 10.7s / 0 / 11 | 隔离绿 | 一致 |
+| 19 | `packages/quay/test/serve-board.test.mjs` | 0 / 7.2s / 0 / 16 | 0 / 7.3s / 0 / 16 | 隔离绿 | 一致 |
+| 20 | `packages/quay/test/serve-handlers.test.mjs` | 0 / 7.6s / 0 / 63 | 0 / 7.4s / 0 / 63 | 隔离绿 | 一致 |
+| 21 | `packages/quay/test/serve-live-body-i18n.test.mjs` | 0 / 3.3s / 0 / 11 | 0 / 3.2s / 0 / 11 | 隔离绿 | 一致 |
+| 22 | `plugin/test/driver-anchor-takeover.test.mjs` | 0 / 13.7s / 0 / 10 | 0 / 13.9s / 0 / 10 | 隔离绿 | 一致 |
+| 23 | `plugin/test/fan-in-execute-paths-s06.test.mjs` | 0 / 17.2s / 0 / 10 | 0 / 18.7s / 0 / 10 | 隔离绿 | 一致 |
+| 24 | `plugin/test/full-suite-runner-oom-policy.test.mjs` | 0 / 37.7s / 0 / 24 | 0 / 33.3s / 0 / 24 | 隔离绿 | 一致 |
+| 25 | `plugin/test/goal-driver-s04.test.mjs` | 0 / 5.1s / 0 / 14 | 0 / 4.9s / 0 / 14 | 隔离绿 | 一致 |
+| 26 | `plugin/test/ownership-active-loop.test.mjs` | 0 / 20.5s / 0 / 60 | 0 / 19.9s / 0 / 60 | 隔离绿 | 一致 |
+| 27 | `plugin/test/worker-fan-in.test.mjs` | 0 / 10.4s / 0 / 5 | 0 / 10.3s / 0 / 5 | 隔离绿 | 一致 |
+| 28 | `packages/quay/test/ac291-criterion-address-derivation.test.mjs` | 0 / 3.5s / 0 / 13 | 0 / 3.6s / 0 / 13 | 隔离绿 | 一致 |
+| 29 | `packages/quay/test/ac302-criterion-address-derivation.test.mjs` | 0 / 3.6s / 0 / 19 | 0 / 3.7s / 0 / 19 | 隔离绿 | 一致 |
+| 30 | `packages/quay/test/branch-model.test.mjs` | 0 / 21.2s / 0 / 54 | 0 / 21.4s / 0 / 54 | 隔离绿 | 一致 |
+| 31 | `packages/quay/test/gap-dashboard-parallelize.test.mjs` | 0 / 4.4s / 0 / 13 | 0 / 4.1s / 0 / 13 | 隔离绿 | 一致 |
+| 32 | `packages/quay/test/lanes-cli.test.mjs` | 0 / 7.5s / 0 / 8 | 0 / 6.6s / 0 / 8 | 隔离绿 | 一致 |
+| 33 | `packages/quay/test/observation.test.mjs` | 0 / 14.4s / 0 / 60 | 0 / 14.6s / 0 / 60 | 隔离绿 | 一致 |
+| 34 | `packages/quay/test/serve-system-body-i18n.test.mjs` | 0 / 15.4s / 0 / 11 | 0 / 15.5s / 0 / 11 | 隔离绿 | 一致 |
+| 35 | `plugin/test/anchor-state-atomicity.test.mjs` | 0 / 8.7s / 0 / 3 | 0 / 6.8s / 0 / 3 | 隔离绿 | 一致 |
+| 36 | `plugin/test/driver-anchor-declaration.test.mjs` | 0 / 4.7s / 0 / 3 | 0 / 5.0s / 0 / 3 | 隔离绿 | 一致 |
+| 37 | `plugin/test/driver-anchor-stop.test.mjs` | 0 / 13.8s / 0 / 5 | 0 / 13.6s / 0 / 5 | 隔离绿 | 一致 |
+| 38 | `plugin/test/driver-cli.test.mjs` | 0 / 21.6s / 0 / 9 | 0 / 21.1s / 0 / 9 | 隔离绿 | 一致 |
+| 39 | `plugin/test/driver-resolves-code-root-separate-from-workspace.test.mjs` | 0 / 8.3s / 0 / 7 | 0 / 8.3s / 0 / 7 | 隔离绿 | 一致 |
+| 40 | `plugin/test/driver-restart-busy-e2e.test.mjs` | 0 / 34.1s / 0 / 7 | 1 / 42.0s / 1 / 6 | 不稳定 | 一致 |
+| 41 | `plugin/test/driver-runtime-loaded-version-drift.test.mjs` | 0 / 6.6s / 0 / 22 | 0 / 6.1s / 0 / 22 | 隔离绿 | 一致 |
+| 42 | `plugin/test/fan-in-driver-mechanical-orchestration.test.mjs` | 0 / 13.3s / 0 / 13 | 0 / 13.5s / 0 / 13 | 隔离绿 | 一致 |
+| 43 | `plugin/test/fan-in-execute-paths-s04.test.mjs` | 0 / 1.3s / 0 / 9 | 0 / 1.3s / 0 / 9 | 隔离绿 | 一致 |
+| 44 | `plugin/test/fan-in-execute-paths-s08.test.mjs` | 0 / 3.1s / 0 / 10 | 0 / 3.0s / 0 / 10 | 隔离绿 | 一致 |
+| 45 | `plugin/test/fan-in-execute-paths-s10.test.mjs` | 0 / 8.1s / 0 / 9 | 0 / 8.1s / 0 / 9 | 隔离绿 | 一致 |
+| 46 | `plugin/test/fan-in-execute-paths-s11.test.mjs` | 0 / 10.5s / 0 / 5 | 0 / 10.6s / 0 / 5 | 隔离绿 | 一致 |
+| 47 | `plugin/test/fan-in-execute-paths-s12.test.mjs` | 0 / 14.6s / 0 / 4 | 0 / 14.6s / 0 / 4 | 隔离绿 | 一致 |
+| 48 | `plugin/test/full-suite-runner-s01.test.mjs` | 0 / 7.8s / 0 / 7 | 0 / 7.8s / 0 / 7 | 隔离绿 | 一致 |
+| 49 | `plugin/test/full-suite-runner-s03.test.mjs` | 0 / 4.4s / 0 / 7 | 0 / 4.5s / 0 / 7 | 隔离绿 | 一致 |
+| 50 | `plugin/test/full-suite-runner-s04.test.mjs` | 0 / 8.2s / 0 / 7 | 0 / 10.0s / 0 / 7 | 隔离绿 | 一致 |
+| 51 | `plugin/test/full-suite-runner-s09.test.mjs` | 0 / 12.7s / 0 / 7 | 0 / 25.7s / 0 / 7 | 隔离绿 | 一致 |
+| 52 | `plugin/test/full-suite-runner-s11.test.mjs` | 0 / 13.3s / 0 / 7 | 0 / 11.6s / 0 / 7 | 隔离绿 | 一致 |
+| 53 | `plugin/test/measure-trend-check.test.mjs` | 0 / 2.4s / 0 / 19 | 0 / 2.0s / 0 / 19 | 隔离绿 | 一致 |
+| 54 | `plugin/test/ownership-active-slice-adapter.test.mjs` | 0 / 24.7s / 0 / 14 | 0 / 19.8s / 0 / 14 | 隔离绿 | 一致 |
+| 55 | `plugin/test/promotion-driver-s03.test.mjs` | 0 / 12.2s / 0 / 7 | 0 / 12.2s / 0 / 7 | 隔离绿 | 一致 |
+| 56 | `plugin/test/resource-gate-s08.test.mjs` | 0 / 12.6s / 0 / 8 | 0 / 12.7s / 0 / 8 | 隔离绿 | 一致 |
+| 57 | `plugin/test/shipped-set.test.mjs` | 0 / 17.4s / 0 / 11 | 0 / 17.4s / 0 / 11 | 隔离绿 | 一致 |
+| 58 | `plugin/test/suite-accounting.test.mjs` | 0 / 2.2s / 0 / 5 | 0 / 2.2s / 0 / 5 | 隔离绿 | 一致 |
+| 59 | `plugin/test/suite-driver.test.mjs` | 0 / 5.0s / 0 / 14 | 0 / 5.0s / 0 / 14 | 隔离绿 | 一致 |
+| 60 | `plugin/test/suite-state-trigger.test.mjs` | 0 / 5.8s / 0 / 60 | 0 / 5.7s / 0 / 60 | 隔离绿 | 一致 |
 
 ## 4. 逐文件逐趟原始读数（AC1）
 
@@ -391,7 +469,8 @@ node --test --test-concurrency=1 --test-reporter=tap positive-control/failing.te
 ### 5b. 那 1 个「不稳定」文件的补充刻画（⛔ 不改判定，只补读数）
 
 规则把它判成「不稳定」，但「不稳定」本身还不是结论 —— 它是「**红的那些趟发生在什么条件下**」
-这个问题。下面是**同一套调用形态**、对同一个文件追跑的读数（`supp/results.jsonl`，同样逐趟记负载）：
+这个问题。下面把**同一套调用形态**对该文件的**全部趟次**摆在一起：主扫两趟（round A）、
+在其之上的两趟追跑（`supp/results.jsonl`）、以及换树之后的 round B 两趟；每趟都记了当时的负载。
 
 **`plugin/test/driver-restart-busy-e2e.test.mjs`**
 
@@ -401,39 +480,55 @@ node --test --test-concurrency=1 --test-reporter=tap positive-control/failing.te
 | 2 | 主扫 | 2026-10-15T07:48:23.662Z | 58.4 | 1 | **RED** | 1 | 45.39 | 67 |
 | 1 | 追跑 | 2026-10-15T07:56:31.352Z | 34.2 | 0 | GREEN | 0 | 77.39 | 6 |
 | 2 | 追跑 | 2026-10-15T07:57:07.086Z | 30.2 | 1 | **RED** | 1 | 50.51 | 3 |
+| 1 | round B | 2026-10-15T08:21:00.595Z | 34.1 | 0 | GREEN | 0 | 46.62 | 7 |
+| 2 | round B | 2026-10-15T08:21:36.239Z | 42.0 | 1 | **RED** | 1 | 49.99 | 72 |
 
-红那趟失败的点名与断言原文（从该趟日志直读）：
+主扫红那趟的点名与断言原文（从该趟日志直读）：
 
 ```
 not ok - AC2a-real — `restart --kind worker` with a genuinely in-flight worker: the pre-detach loop aborts; the shipped loop confirms in seconds, keeps + adopts the worker, fans it in once, and never double-dispatches
 error: 'timed out waiting for the dispatched fixture worker to appear'
 ```
 
-**逐用例、逐趟**（格内 = 判定 / 该用例耗时；**R** = 红）：
+**逐用例、逐趟**（格内 = 判定 / 该用例耗时；**R** = 红）。用例全名：
 
-| 用例 | 主扫p1 | 主扫p2 | 追跑p1 | 追跑p2 |
-|---|---|---|---|---|
-| AC1 — mid-round `restart --kind quality` on the shipped-layout kernel confirms within the bound; the interrupted round is a distinct stopped-mid-round state, and no reservation is taken after the stop | G / 4.2s | G / 5.6s | G / 4.3s | G / 4.3s |
-| AC4 — three consecutive `restart --kind quality` with no pause all confirm; the other kinds and the anchor pid are unchanged | G / 6.1s | G / 6.2s | G / 6.0s | G / 6.1s |
-| AC5 — a loop that ignores every stop makes `restart` abort legibly, with desired state restored and exactly one loop | G / 4.9s | G / 4.8s | G / 4.9s | G / 4.9s |
-| AC2a — `restart --kind worker` leaves the in-flight worker child alive (§6.9 inv.3) and starts exactly one new loop | G / 4.3s | G / 4.6s | G / 4.2s | G / 4.2s |
-| **AC2a-real — `restart --kind worker` with a genuinely in-flight worker: the pre-detach loop aborts; the shipped loop confirms in seconds, keeps + adopts the worker, fans it in once, and never double-dispatches** | G / 13.6s | **R** / 35.8s | G / 13.4s | **R** / 8.7s |
-| AC2b — an orphan worker that exits is ADOPTED and fanned in exactly once (not booked `failed`), and its task is never dispatched twice | G / 0.6s | G / 0.5s | G / 0.5s | G / 0.7s |
-| AC3 — a dead orphan whose worktree carries commits resumes its fan-in (refused on its own AC grounds) and is NOT recorded `failed: orphaned`; a dead orphan with NO commits keeps the old outcome | G / 0.6s | G / 0.5s | G / 0.4s | G / 1.1s |
+- `AC1` — mid-round `restart --kind quality` on the shipped-layout kernel confirms within the bound; the interrupted round is a distinct stopped-mid-round state, and no reservation is taken after the stop
+- `AC4` — three consecutive `restart --kind quality` with no pause all confirm; the other kinds and the anchor pid are unchanged
+- `AC5` — a loop that ignores every stop makes `restart` abort legibly, with desired state restored and exactly one loop
+- `AC2a` — `restart --kind worker` leaves the in-flight worker child alive (§6.9 inv.3) and starts exactly one new loop
+- `AC2a-real` — `restart --kind worker` with a genuinely in-flight worker: the pre-detach loop aborts; the shipped loop confirms in seconds, keeps + adopts the worker, fans it in once, and never double-dispatches
+- `AC2b` — an orphan worker that exits is ADOPTED and fanned in exactly once (not booked `failed`), and its task is never dispatched twice
+- `AC3` — a dead orphan whose worktree carries commits resumes its fan-in (refused on its own AC grounds) and is NOT recorded `failed: orphaned`; a dead orphan with NO commits keeps the old outcome
 
-⇒ 红点**始终是同一个用例**（AC2a-real — `restart --kind worker` with a genuinely in-flight worker: the pre-detach loop aborts; the shipped loop confirms in seconds, keeps + adopts the worker, fans it in once, and never double-dispatches）：28 个「用例×趟」单元里共 2 个红，其余每个用例在每一趟都绿 —— 所以这不是「整个文件不稳」，而是**一条用例的定时假设**在部分趟次不成立。
+| 用例 | 主扫 p1 | 主扫 p2 | 追跑 p1 | 追跑 p2 | round B p1 | round B p2 |
+|---|---|---|---|---|---|---|
+| AC1 | G / 4.2s | G / 5.6s | G / 4.3s | G / 4.3s | G / 4.3s | G / 4.6s |
+| AC4 | G / 6.1s | G / 6.2s | G / 6.0s | G / 6.1s | G / 6.1s | G / 6.0s |
+| AC5 | G / 4.9s | G / 4.8s | G / 4.9s | G / 4.9s | G / 4.9s | G / 4.8s |
+| AC2a | G / 4.3s | G / 4.6s | G / 4.2s | G / 4.2s | G / 4.3s | G / 4.7s |
+| **AC2a-real** | G / 13.6s | **R** / 35.8s | G / 13.4s | **R** / 8.7s | G / 13.3s | G / 20.4s |
+| **AC2b** | G / 0.6s | G / 0.5s | G / 0.5s | G / 0.7s | G / 0.5s | **R** / 0.7s |
+| AC3 | G / 0.6s | G / 0.5s | G / 0.4s | G / 1.1s | G / 0.5s | G / 0.5s |
 
-⚠️ **不要用耗时判断这条红**：该用例绿的时候是 13.6s / 13.4s，红的时候是 35.8s / 8.7s —— 红的那两趟里有一次**比绿趟还短**（预算到点就报错，不等满）。
+⇒ 42 个「用例×趟」单元里共 3 个红，红点分布 = AC2a-real×2、AC2b×1（主扫 p2→AC2a-real、追跑 p2→AC2a-real、round B p2→AC2b）。
 
-**负载相关性（说出来，但不夸大）**：4 趟里 2 绿 2 红。红趟开场时 `/proc` 里的 node `--test` 进程数是 67 / 3，绿趟是 3 / 6。主扫那一对（3 vs 67 进程，34.4s vs 58.4s）**同向**；⛔ 但追跑的 p2 在只有 3 个进程时也红了，⇒ 这个相关性是**提示**，不是已证的成因。可证伪的机制解释只有一条，且它由失败文案直接给出：
+⛔⛔ **红点会移动**：AC2a-real、AC2b 各红了 2 / 1 次 —— **同一份夹具、不同的用例在不同趟次输掉同一场竞速**。这一条本身就是「成因在夹具的时序/资源一侧、而不在某条用例的断言逻辑里」的直接读数：若缺陷属于某一条用例，红点不会换人。
+
+- `AC2a-real`：绿的时候 13.6s / 13.4s / 13.3s / 20.4s，红的时候 35.8s / 8.7s ⇒ **有红趟比它自己的绿趟还短**：预算到点就报错，不等满（⛔ 别用文件总耗时判断这条红）。
+- `AC2b`：绿的时候 0.6s / 0.5s / 0.5s / 0.7s / 0.5s，红的时候 0.7s。
+
+**负载相关性（说出来，但不夸大）**：6 趟里 3 绿 3 红。红趟开场时 `/proc` 里的 node `--test` 进程数是 67 / 3 / 72（对 `loadavg`(1min)：45.39 / 50.51 / 49.99）；绿趟是 3 / 6 / 7。
+
+⛔ **不要把这条相关性说成成因**：3 个红趟里有 1 趟开场时进程数只有 3（与绿趟同量级），而 3 个绿趟里的进程数也没有系统性更小 —— `/proc` 计数与本条红**不是单调对应**。可证伪的机制解释只有一条，且它由失败文案直接给出：
 
 ```
 error: 'timed out waiting for the dispatched fixture worker to appear'
 ```
 
 即「派发的夹具 worker 在预算内没出现」—— 一条**墙钟等待**，不是断言值算错。
-本条在 4 趟里 2 次不成立，**不属于** Proposal 说的「全量套件才红」那一类（它在单独跑时也红），
-也不属于「确定性红」（另 2 趟绿）。**按 AC2 规则它恰属「不稳定」**，且现在有了被点名的用例与 4 趟读数。
+该文件在 6 趟里红了 3 次，**不属于** Proposal 说的「全量套件才红」那一类（它在单独跑时也红），
+也不属于「确定性红」（其余 3 趟绿）。**按 AC2 规则它恰属「不稳定」**，
+且现在有了被点名的用例、每趟的耗时与共 6 趟读数。
 
 **归属（查重）**：该文件已有 `gap-busy-restart-e2e-ac2a-fixture-replaces-real-worker-driver-so-in-flight-restart-gate-is-untested`（done）与
 `gap-driver-restart-anytime-busy-e2e-on-dist-kernel`（done）两条历史任务；**当前在飞**的
@@ -451,7 +546,21 @@ error: 'timed out waiting for the dispatched fixture worker to appear'
 D=/data/scratch/yale/gap-dev-baseline-red-classify
 W=/home/yale/work/quay-worktrees/gap-develop-baseline-red-classify-deterministic-vs-load
 node $D/extract.mjs /data/home/yale/work/quay/.quay/baseline-red-rounds.jsonl $D
-node $D/run.mjs "$W" $D          # 每文件两趟，顺序执行
+node $D/run.mjs "$W" $D          # round A：每文件两趟，顺序执行（先在 $W 里跑 build_dist_once）
 node $D/classify.mjs $D
+
+# §5b 的追跑（只对已判「不稳定」的文件）
+mkdir -p $D/supp && cp $D/files.json $D/supp/
+node $D/run.mjs "$W" $D/supp
+
+# §3b 的 round B：git -C "$W" merge --no-edit develop 并重建 dist 之后，原样再跑一遍
+mkdir -p $D/roundB && cp $D/files.json $D/roundB/
+git -C "$W" rev-parse HEAD > $D/roundB/develop.txt
+node $D/run.mjs "$W" $D/roundB
+node $D/classify.mjs $D/roundB
+
 node $D/emit-doc.mjs $D "$W/docs/evidence/2026-10-15-develop-baseline-red-classification.md"
 ```
+
+⚠️ 本文的每一个数字都由 `emit-doc.mjs` 从 `results.jsonl` / `roundB/results.jsonl` / `supp/results.jsonl` /
+`summary.json` 直接算出，**没有一个是手抄的**；重跑上表四条命令会重新生成同一份表格（时间戳与负载列除外）。
