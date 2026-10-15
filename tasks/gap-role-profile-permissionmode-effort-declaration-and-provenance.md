@@ -99,30 +99,179 @@ done）。**但逐字段核对（`plugin/scripts/profile-policy.ts:32-56`）确�
 
 ## Acceptance Criteria
 
-- [ ] AC1: `ProfileSpec`/`RoleSpec` 新增 `permissionMode`/`effort` 两个可选字段，封闭枚举值**在实现时重新核对一次
+- [x] AC1: `ProfileSpec`/`RoleSpec` 新增 `permissionMode`/`effort` 两个可选字段，封闭枚举值**在实现时重新核对一次
   `claude --help` 的真实 choices**（粘贴核对结果——不信本任务 Proposal 里抄的那份，CLI 可能已变化），
   `resolveProfile`/`resolveRole` 正确继承展开（粘贴一个角色层覆盖 profile 层默认值的解析结果）。
-- [ ] AC2: `validateProfiles` 对枚举外的值 fail-closed 拒绝（粘贴一条伪造的越界值被拒绝的错误消息），
+
+  **实现时重核（2026-10-15，不信本任务静态抄录）**：`claude --help` ⇒
+  `--effort <level>  Effort level for the current session (low, medium, high, xhigh, max)`；
+  `--permission-mode <mode>  Permission mode to use for the session (choices: "acceptEdits", "auto", "bypassPermissions", "manual", "dontAsk", "plan")`。
+  与 Proposal 抄录**逐字一致**（无 CLI 漂移）。另有**独立第二次核对**：经 `claude-fjdac` 喂越界值，claude 自己
+  回显允许集——`--effort boguslevel` ⇒ `Valid values: low, medium, high, xhigh, max`；
+  `--permission-mode bogusmode` ⇒ `Allowed choices are acceptEdits, auto, bypassPermissions, manual, dontAsk, plan`。
+  落进代码的常量（实测读数）：`PERMISSION_MODES = ["acceptEdits","auto","bypassPermissions","manual","dontAsk","plan"]`、
+  `EFFORT_LEVELS = ["low","medium","high","xhigh","max"]`。
+
+  **继承展开（合成配置，角色层覆盖 profile 层默认值）**：profile `w` 默认 `permissionMode: plan` / `effort: low`，
+  role `r` 只声明 `permissionMode: manual` ⇒ 解析结果
+  `{"permissionMode":"manual","effort":"low"}`（角色层赢、未声明的 effort 继续继承）；
+  provenance ⇒ `permissionMode {value:"manual", source:"role", via:"r"}`、
+  `effort {value:"low", source:"profile", via:"w"}`。
+  真 dev-tree carrier 读数：`resolveRole("task-worker")` ⇒ `{"launcher":"claude-fjdac","model":"v4.1flash-anthropic","permissionMode":"bypassPermissions","effort":"high"}`，
+  四个字段的 `source` 均为 `profile` / `via: "worker-default"`。
+- [x] AC2: `validateProfiles` 对枚举外的值 fail-closed 拒绝（粘贴一条伪造的越界值被拒绝的错误消息），
   对声明「比当前已授权 `bypassPermissions` 更宽」的值的处理有明确记录（即便 6 个真实值里没有真正更宽的，
   也要写出"若 CLI 未来新增第 7 个值,封闭枚举会拒绝它"这条防御实际生效——用一个合成的越界字符串而非
   真实存在的值做负控制）。
-- [ ] AC3: `launchArgv` 对声明了 `permissionMode`/`effort` 的角色正确追加 `--permission-mode <v>`/`--effort <v>`
+
+  **伪造越界值被拒（真实错误消息）**：
+  ```
+  role "bogusRole": permissionMode must be one of "acceptEdits" | "auto" | "bypassPermissions" | "manual" | "dontAsk" | "plan", got "yolo" — closed enum (a value the CLI may add later is REJECTED by default, ⛔ not "looks fine, let it through")
+  role "bogusRole": effort must be one of "low" | "medium" | "high" | "xhigh" | "max", got "turbo" — closed enum (a value the CLI may add later is REJECTED by default, ⛔ not "looks fine, let it through")
+  ```
+  profile 层同样被拒（`profile "w": permissionMode …`），两层共用一份 `closedSetError`（⛔ 不写四份）。
+
+  **「不扩大授权」的明确记录**：当前整树唯一被授权的 defaultMode 是 `bypassPermissions`，它已是
+  `claude --help` 六个取值里**最宽**的一个（跳过全部确认）⇒ 今天不存在结构上「更宽」的值，故**不需要宽度序**；
+  这条校验真正的防御是**封**。负控制用**合成的越界串**（`"yolo"` / `"turbo"` / `"unrestricted"` /
+  `"BYPASSPERMISSIONS"` / `"high "`），即「CLI 未来新增的第 7 个（可能更宽的）取值」的同形物 ⇒ 一律被拒。
+  这一条**能取假**：若校验退化成「看起来像模式名就放过」，负控制立刻红。正向控制同时钉住
+  「6 个真实 + 5 个 effort 取值**全部**通过」（否则「封闭」会变成误拒）。
+
+  **实测补强（使这条闸承重，而非装饰）**：`--effort` 拼错时 CLI **不 fail-closed** ——
+  `claude-fjdac -p hi --effort boguslevel` ⇒ `Warning: Unknown --effort value 'boguslevel' — ignoring it and
+  using the default effort.` 且 **exit 0**；对照 `--permission-mode bogusmode` ⇒ `error: … is invalid` + **exit 1**。
+  即 effort 的静默降级只由框架侧封闭枚举拦住（两个标志失败形态不同，故两者都必须有框架校验）。
+- [x] AC3: `launchArgv` 对声明了 `permissionMode`/`effort` 的角色正确追加 `--permission-mode <v>`/`--effort <v>`
   （粘贴真实 argv），对该 launcher 实测不转发该标志的情况有显式诊断路径而非静默假设生效（粘贴 claude-fjdac
   是否转发两个新标志的实测结果，无论结果是哪一种）。
-- [ ] AC4: Session/Action provenance 记录扩展落地——一条真实记录同时包含声明值、覆盖来源（哪一层决定了最终值）、
+
+  **真实 argv（配置路径 `launchArgv`，本 dev-tree carrier）**：
+  ```
+  claude-fjdac --settings <…> --exclude-dynamic-system-prompt-sections --prompt-suggestions false
+    --model v4.1flash-anthropic --permission-mode bypassPermissions --effort high
+    --strict-mcp-config --mcp-config <…> -n quay-task-worker -p "<prompt>" --session-id fa5423ed-…
+  ```
+  位置不变量：两个标志追加在 `-n <name> -p <prompt>` **之前** ⇒ prompt 恒是 argv 末元素（续做 prompt 依赖它）。
+  **缺省负控制（DoD）**：未声明这两个字段的 role（实测 `manager`）⇒ argv **不含** `--permission-mode`/`--effort`，
+  与改动前逐字一致。
+
+  **claude-fjdac 是否转发的实测结果：转发**（两层证据）。
+  ① 该 wrapper 末行为 `exec claude "$@"`（读 `/data/home/yale/.local/bin/claude-fjdac`），逐字透传；
+  ② 负控制（经 wrapper 喂越界值，claude 自己回话 ⇒ 证明标志**真的到达**了 claude 二进制、不是被 wrapper 吞掉）：
+  ```
+  $ claude-fjdac -p hi --permission-mode bogusmode
+  error: option '--permission-mode <mode>' argument 'bogusmode' is invalid. Allowed choices are acceptEdits, auto, bypassPermissions, manual, dontAsk, plan.     [exit 1]
+  $ claude-fjdac -p hi --effort boguslevel
+  Warning: Unknown --effort value 'boguslevel' — ignoring it and using the default effort. Valid values: low, medium, high, xhigh, max.                          [exit 0]
+  ```
+
+  **诊断路径（⛔ 非静默假设生效）**：`runEnvironmentSmoke` 经**同一个 `launchArgv`** 构造 argv ⇒ 一个不认这两个
+  标志的 launcher 会把 "unknown option"/invalid 打在输出里，冒烟把原文粘进 `EnvironmentSmokeResult.output`
+  （四态之一，⛔ 不与 `pass` 同形）。**并已记录该冒烟抓不到的一类**：「effort 拼错」是 warn + 降级 + exit 0 ⇒
+  冒烟报 `pass`；这类静默降级的唯一 fail-closed 闸是 `validateProfiles` 的封闭枚举。两处合用才覆盖全部失败形态。
+- [x] AC4: Session/Action provenance 记录扩展落地——一条真实记录同时包含声明值、覆盖来源（哪一层决定了最终值）、
   真实 argv、该次会话 transcript 读出的真实 model 字段；**alias（启动标志里的 model 名）与真实模型
   （transcript 里的 model 名）分别可读、不被合并**（粘贴一条真实记录，两个字段值不同，比如
   `v4.1flash` 与 `deepseek-flash`）。
-- [ ] AC5: shipped 模板（`plugin/.quay/profiles.yml`、`plugin/.claude/launch.settings.json`）里不出现
+
+  **载体**：扩展 `.quay/worker-outcome.jsonl`（既有 worker 落地记录载体；`worker-driver.ts` 的 `runOneWorker`
+  收尾时落 `provenance` 键，与 outcome 同一条记录 ⇒ 一次尝试的全部取证在同一行）。profile 解析失败 ⇒ 落
+  `provenance_error`（⛔ 读不懂不得与「读到了」同形，也不得把收尾路径炸掉）。
+
+  **一条真实记录（非 fixture：真 spawn `claude-fjdac` + 真 transcript 回读，2026-10-15）**：
+  ```json
+  {
+    "role": "task-worker", "profile": "worker-default",
+    "declared": {"launcher":"claude-fjdac","model":"v4.1flash-anthropic","permissionMode":"bypassPermissions","effort":"high"},
+    "override_source": {"launcher":"profile","model":"profile","permissionMode":"profile","effort":"profile"},
+    "override_via": {"launcher":"worker-default","model":"worker-default","permissionMode":"worker-default","effort":"worker-default"},
+    "argv_source": "launchArgv",
+    "argv": ["claude-fjdac","--settings","…","--model","v4.1flash-anthropic","--permission-mode","bypassPermissions","--effort","high","--strict-mcp-config","--mcp-config","…","-n","quay-task-worker","-p","Reply with exactly: ok","--session-id","fa5423ed-496e-481e-9065-1cbeeba12224"],
+    "argv_prompt_elided_bytes": 0,
+    "model_alias": "v4.1flash-anthropic",
+    "model_real": "deepseek-flash",
+    "model_real_from": {"transcript":"/data/home/yale/.claude/projects/-data-home-yale-work-quay-worktrees-gap-role-profile-permissionmode-effort-declaration-and-provenance/fa5423ed-496e-481e-9065-1cbeeba12224.jsonl","record_type":"assistant.message.model"},
+    "model_real_unavailable": null
+  }
+  ```
+  **两个 model 读数分列、值不同**：`model_alias = "v4.1flash-anthropic"`（argv 里的请求名）vs
+  `model_real = "deepseek-flash"`（transcript `type:"assistant"` 记录的 `message.model` = 服务端实际返回的）
+  ——⛔ 不合并。判定面刻意**不读** `type:"api-request"` 的 `params.model`（那正是 alias，拿它当「真实模型」是自证，
+  硬规则 4）。读不到时 `model_real` 为 `null` 且 `model_real_unavailable` 给**可分辨原因**（⛔ 不是空串、
+  ⛔ 不是被填成 alias 的值）。
+  **CLI 参数层覆盖如实标注**：`--worker-cmd-exact` 覆盖时 `argv_source = "cli-exact"`，且 `model_alias = null`
+  （⛔ 不回落到 `declared.model` 假装它被传了）。
+  **argv 有界**：worker prompt 是一整份任务体（数十 KB），而该台账被多个消费者整文件读 ⇒ 只对**末元素**超 512B 时
+  以 `<prompt:N bytes>` 占位**并记 N**（`argv_prompt_elided_bytes`），其余逐字保留（⛔ 非静默截断）。
+- [x] AC5: shipped 模板（`plugin/.quay/profiles.yml`、`plugin/.claude/launch.settings.json`）里不出现
   `127.0.0.1:26510`/`v4.1flash` 等本机专属取值（grep 证据），新字段本身对任意项目都可配置而非被框架强制。
-- [ ] AC6: `quay-fleet` 项目在**它自己的任务板**（`/data/home/yale/work/quay-fleet/tasks/`，`fleet-*` 前缀)上
+
+  **grep 证据（本任务改动后实测）**：
+  ```
+  --- plugin/.quay/profiles.yml ---        /127\.0\.0\.1/ -> 0   /26510/ -> 0   /v4\.1flash/ -> 0
+  --- plugin/.claude/launch.settings.json ---  /127\.0\.0\.1/ -> 0   /26510/ -> 0   /v4\.1flash/ -> 0
+  ```
+  两份 shipped 模板**逐字未改**（`git status --porcelain` 对这两个文件无输出）；shipped carrier 里
+  `permissionMode`/`effort` **零出现**（刻意不声明 ⇒ 消费者不声明就与改动前逐字一致）。
+  **按位置判定（硬规则 2）**：`plugin/.quay/profiles.yml` 有一处 `claude-fjdac`，位于**既有的注释**里
+  （「dev-tree 用 claude-fjdac + deepseek-v4-pro-anthropic，见根 .quay/profiles.yml」）——那是**指路文档**，
+  ⛔ 不是声明值（本任务亦未改动该行）。测试因此判**解析后的 profile/role 取值**（`launcher == "claude"`、
+  `model == null`、两字段 `undefined`），而非 grep 全文。
+  **可配置而非强制**：两个字段在 `ProfileSpec`/`RoleSpec` 上均可选；dev-tree 根 `.quay/profiles.yml` 是第一个
+  真实消费者（本任务显式声明，取值见 `override_via: worker-default`）。
+  **注**：本任务**未**在 shipped 模板写任何文档注释——`packages/quay/src/init.ts` 的 `SHIPPED_PROFILES_TEMPLATE`
+  与该文件由 `packages/quay/test/init.test.mjs` 强制逐字节相等，往一边加注释会同时要求改一个**不在本任务
+  Touches 内**的产品文件；且把枚举表抄进第三处正是本仓明令避免的漂移源。字段正本留在 `profile-policy.ts`。
+- [x] AC6: `quay-fleet` 项目在**它自己的任务板**（`/data/home/yale/work/quay-fleet/tasks/`，`fleet-*` 前缀)上
   有一条任务显式声明该项目自己选择 127.0.0.1:26510 + v4.1flash + permissionMode/effort 的 dev policy
   （本任务只负责核实该任务已创建并引用其 id，不在本任务里代为实现 quay-fleet 侧的落地——那是 quay-fleet
   自己的 worker/driver 的工作，遵循"peer-host 的落地不是本任务能单方面完成的动作"同类纪律）。
-- [ ] AC7: 安全回归——`plugin/test/profile-policy.test.mjs` 现有 `bare`/`auth`/`mcpBlacklist` 校验用例全部仍通过
+
+  **核实结果：该任务已存在**（本任务只核实并引用，⛔ 不代办 quay-fleet 侧落地）：
+  - 路径：`/data/home/yale/work/quay-fleet/tasks/fleet-dev-policy-local-proxy-permissionmode-effort.md`（fleet 自己的板）
+  - frontmatter：`id: fleet-dev-policy-local-proxy-permissionmode-effort`、`status: todo`、`labels: [gap]`、
+    `depends_on: [gap-role-profile-permissionmode-effort-declaration-and-provenance]`（**引用本任务 id**）
+  - 它显式声明了该项目自己选择的 dev policy：标题即「Fleet 项目显式 dev policy：本机代理 127.0.0.1:26510 +
+    v4.1flash + permissionMode/effort（quay 框架新字段的首个第三方消费者）」；正文写明各角色默认开发路由走
+    `http://127.0.0.1:26510/`、启动标志 `--model v4.1flash`，并明确「该字段**不会**被写死进任何 shipped 模板
+    ——每个项目要用本机代理 dev 路由，必须在**自己的** `.quay/profiles.yml` 里显式声明」。
+  - **反证它确是真空白**（非「已做只是没写文档」）：quay-fleet 自己的 `.quay/profiles.yml` 实测仍是裸机模板
+    （`launcher: claude` / `model: null`，两处 profile 均如此），从未配置过本机代理路由。
+- [x] AC7: 安全回归——`plugin/test/profile-policy.test.mjs` 现有 `bare`/`auth`/`mcpBlacklist` 校验用例全部仍通过
   （粘贴测试输出，证明没有覆盖率被移除）。
-- [ ] AC8: 真实启动验收——至少一次真实 spawn 携带新字段，粘贴其 argv 和 provenance 记录（非 fixture-only）。
-- [ ] AC9: `scripts/test.sh --for-task <this task>` 绿；预算上限（`.quay/config.yml` 等）未被本任务改动。
+
+  **既有用例逐条仍在原处、全部通过**（⛔ 只加新字段、未删弱化任何旧断言）：该文件 28 条原用例（含
+  `AC2 — bare:true + auth:token rejected` / `bare:true + auth:key passes` / `auth undeclared also rejected (fail-closed)` /
+  `unknown auth value rejected` / `mcpBlacklist on a PROFILE rejected` / `malformed role-level blacklist rejected` /
+  `bare/auth/mcpBlacklist` 三组 SHIPPED 用例）→ 加 13 条新用例后共 41 条，实测：
+  ```
+  ℹ tests 41   ℹ pass 41   ℹ fail 0   ℹ cancelled 0   ℹ skipped 0
+  ```
+- [x] AC8: 真实启动验收——至少一次真实 spawn 携带新字段，粘贴其 argv 和 provenance 记录（非 fixture-only）。
+
+  **真实 spawn（非 fixture）**：走配置路径 `launchArgv("task-worker", …)` 构造 argv ⇒ 真 `claude-fjdac`
+  （携带 `--permission-mode bypassPermissions --effort high`）⇒ 真会话 transcript 回读 ⇒ 经**生产写入器**
+  `appendOutcomeToFile` 落进真载体 `<worktree>/.quay/worker-outcome.jsonl`。实测结果：
+  ```
+  status: 0   signal: null   wall_clock_ms: 4426        stdout: ok
+  session_id: fa5423ed-496e-481e-9065-1cbeeba12224
+  model_alias: v4.1flash-anthropic   model_real: deepseek-flash
+  ```
+  argv 与 provenance 记录全文见 AC3 / AC4 两处的粘贴（同一次 spawn）。prompt 用的是 driver 自己在起循环前做环境
+  冒烟的同一条最小 prompt（`ENVIRONMENT_SMOKE_PROMPT` = "Reply with exactly: ok"），已知不触发工具调用，
+  故 `bypassPermissions` 模式下也安全。
+- [x] AC9: `scripts/test.sh --for-task <this task>` 绿；预算上限（`.quay/config.yml` 等）未被本任务改动。
+
+  **scoped gate 绿**：`bash scripts/test.sh --for-task gap-role-profile-permissionmode-effort-declaration-and-provenance --allow-thin`
+  ⇒ `exit 0`，`ℹ tests 188  ℹ pass 188  ℹ fail 0`，且 change-relevant 静态层全 PASS
+  （含 `import-graph-check`: `valueSccs=0 ≤ 0, typeSccs=0 ≤ 0, reverseEdges=0 ≤ 0`、
+  `profiles-role-coverage-check`、`enum-surface-parity-check`、`touched one-entry-one-path` 等）。
+  **防漂移**：`anti-drift-touches-check --merge-target develop` ⇒
+  `ANTI-DRIFT OK — 5 actual file(s), all within declared Touches (9 glob(s))`，exit 0。
+  **预算未动**：本任务相对 `develop` 只改 5 个文件（`.quay/profiles.yml` + `plugin/scripts/{profile-policy,driver-runtime,worker-driver}.ts`
+  + `plugin/test/profile-policy.test.mjs`），`.quay/config.yml` 及任何 budget/cap/concurrency 声明**零改动**；
+  `.quay/profiles.yml` 的改动**仅是新增两个字段 + 注释**（无既有键被改）。
 
 ## Definition of Done
 
