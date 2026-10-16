@@ -60,6 +60,10 @@ import fs from "node:fs";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
+// The median is the SHARED leaf, not a local copy (routine `semantic-dedup-scan`, finding
+// `median-empty-policy-diverged`). Its empty policy is `null` — which is already this report's type
+// for `interval.median`, so nothing here has to invent a number for an empty sample.
+import { median } from "./median.ts";
 
 // ── vocabulary ────────────────────────────────────────────────────────────────────────────────
 /** Per-ADR status. "无法判定" is an INDEPENDENT value (硬规则 3b), never a synonym of the others. */
@@ -804,10 +808,14 @@ export function percentile(sortedAsc: number[], p: number): number | null {
   return sortedAsc[idx];
 }
 
-export function median(sortedAsc: number[]): number | null {
-  if (sortedAsc.length === 0) return null;
-  const mid = Math.floor(sortedAsc.length / 2);
-  return sortedAsc.length % 2 ? sortedAsc[mid] : Math.round(((sortedAsc[mid - 1] + sortedAsc[mid]) / 2) * 10) / 10;
+/** This report's DISPLAY rounding (1 decimal) for the interval median — kept here, not in the
+ *  shared statistic, because formatting is a consumer's choice. It is also a no-op in practice:
+ *  `intervalDays` is `Math.round((b − a) / 86400000)` (an INTEGER), so an exact even-average is
+ *  either an integer or `x.5` and 1-decimal rounding cannot move it. Kept explicitly so the
+ *  rounded reading a pre-existing report published stays bit-identical if the input ever stops
+ *  being integral. */
+function round1dp(x: number): number {
+  return Math.round(x * 10) / 10;
 }
 
 // ── main ──────────────────────────────────────────────────────────────────────────────────────
@@ -928,6 +936,10 @@ async function main(): Promise<void> {
     .map((r) => ({ id: r.id, days: r.intervalDays! }))
     .sort((a, b) => a.days - b.days);
   const days = measured.map((m) => m.days);
+  // The shared median accepts any order (it sorts internally); `days` happens to already be
+  // ascending because `percentile` below needs it that way. `null` on an empty sample is this
+  // report's own `interval.median` type, so it passes through un-coerced.
+  const medianDays = median(days);
 
   const hardRules = parseHardRules(root, claudeMdRel, index);
   const selfLabelled = hardRules.filter((r) => r.noProductMarkers.length > 0).map((r) => r.key);
@@ -953,7 +965,7 @@ async function main(): Promise<void> {
       undetermined: records.filter((r) => r.status === "无法判定").map((r) => r.id),
       interval: {
         n: measured.length,
-        median: median(days),
+        median: medianDays === null ? null : round1dp(medianDays),
         p90: percentile(days, 0.9),
         max: days.length ? days[days.length - 1] : null,
         negative: days.filter((d) => d < 0).length,

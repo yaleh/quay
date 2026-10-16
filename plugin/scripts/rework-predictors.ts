@@ -70,6 +70,14 @@ import { parseTouchEntries, extractTouchesSection } from "./touches-parser.ts";
 import { detectShape } from "./ready-pool-check.ts";
 import { isDirectEntry, seededRng } from "./gate-script-base.ts";
 import { repoRoot, mainCheckoutRoot } from "./repo-root.ts";
+// The median — the ONE definition and its empty policy (routine `semantic-dedup-scan`, finding
+// `median-empty-policy-diverged`). This file's local copy answered `NaN` for an empty sample; the
+// shared leaf answers `null`. RE-EXPORTED because this module is the documented home of the
+// statistic (`task-granularity-advice.ts` imports it as `sharedMedian`) — the call sites below keep
+// `NaN` where their declared field type is a plain `number` and they do so VISIBLY (`?? Number.NaN`),
+// which is this report's established sentinel for a quantity it could not read (`mean`, `max`).
+import { median } from "./median.ts";
+export { median };
 
 // ── The four-state `final_state` judgement (the dead-value trap lives here) ──────────────────────────
 //
@@ -268,13 +276,6 @@ export interface Recommendation {
 export function mean(xs: number[]): number {
   if (xs.length === 0) return NaN;
   return xs.reduce((a, b) => a + b, 0) / xs.length;
-}
-
-export function median(xs: number[]): number {
-  if (xs.length === 0) return NaN;
-  const s = [...xs].sort((a, b) => a - b);
-  const mid = s.length >> 1;
-  return s.length % 2 ? s[mid] : (s[mid - 1] + s[mid]) / 2;
 }
 
 /** Nearest-rank quantile (q in [0,1]) on the sorted sample — deterministic, no interpolation. */
@@ -635,7 +636,7 @@ export function buildDataset(opts: BuildOptions): Dataset {
     },
     summary: {
       tasks: rows.length,
-      median: median(executions),
+      median: median(executions) ?? Number.NaN,
       p90: quantile(executions, 0.9),
       mean: mean(executions),
       max: executions.length ? Math.max(...executions) : NaN,
@@ -776,7 +777,7 @@ export function analyseDataset(ds: Dataset, opts: AnalyzeOptions = {}): Analysis
     return {
       shape,
       n: sub.length,
-      median: median(sub.map((r) => r.executions)),
+      median: median(sub.map((r) => r.executions)) ?? Number.NaN,
       mean: mean(sub.map((r) => r.executions)),
       spearman: Number.isFinite(rho) ? rho : null,
       sufficient: sub.length >= minBinN,
@@ -790,7 +791,7 @@ export function analyseDataset(ds: Dataset, opts: AnalyzeOptions = {}): Analysis
   const cutoffMs = Date.parse(`${ageCutoff}T23:59:59Z`);
   const summariseWindow = (sub: TaskRow[], ageOf: (r: TaskRow) => number) => ({
     n: sub.length,
-    median: median(sub.map((r) => r.executions)),
+    median: median(sub.map((r) => r.executions)) ?? Number.NaN,
     mean: mean(sub.map((r) => r.executions)),
     spearmanTouches: spearman(sub.map((r) => r.touchesFileCount), sub.map((r) => r.executions)),
     spearmanAge: spearman(sub.map(ageOf), sub.map((r) => r.executions)),
@@ -834,7 +835,7 @@ export function buildRecommendation(
   }
   const sufficient = touches.groups.filter((g) => g.sufficient);
   const high = sufficient.filter((g) => g.hi === null).at(-1);
-  const baseline = { median: median(all), mean: mean(all), share5: all.filter((v) => v >= 5).length / all.length };
+  const baseline = { median: median(all) ?? Number.NaN, mean: mean(all), share5: all.filter((v) => v >= 5).length / all.length };
   if (!high) {
     return {
       recommendation: null,

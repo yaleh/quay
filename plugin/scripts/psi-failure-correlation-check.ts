@@ -100,6 +100,12 @@ import { windowMeanStall } from "./psi-window-join.ts";
 import { resolveCarrierRoot } from "./perfile-failure-rate.ts";
 import { readJsonLines, parseArgs as baseParseArgs, printJson } from "./gate-script-base.ts";
 import { readCpuStall } from "./suite-load-sampler.ts";
+// The median — the ONE definition and its empty policy (routine `semantic-dedup-scan`, finding
+// `median-empty-policy-diverged`). This file's local `median` was `pct(sorted, 0.5)`; for n ≥ 2 the
+// interpolating percentile coincides with the even-average core, so the only reading that changes is
+// the empty one. The call sites below keep this report's own sentinel (`Number.NaN`, exactly what
+// `mean`/`max` in this file already answer for an unreadable sample) and say so visibly.
+import { median } from "./median.ts";
 
 type Sample = { t: number; cpu_stall: number };
 type PerFileRec = { file: string; startedAtMs: number; endedAtMs: number; passed: boolean };
@@ -317,17 +323,6 @@ function mean(vals: number[]): number {
 }
 function max(vals: number[]): number {
   return vals.length === 0 ? Number.NaN : Math.max(...vals);
-}
-function pct(sorted: number[], p: number): number {
-  if (sorted.length === 0) return Number.NaN;
-  if (sorted.length === 1) return sorted[0];
-  const idx = (sorted.length - 1) * p;
-  const lo = Math.floor(idx);
-  const hi = Math.ceil(idx);
-  return lo === hi ? sorted[lo] : sorted[lo] + (sorted[hi] - sorted[lo]) * (idx - lo);
-}
-function median(sorted: number[]): number {
-  return pct(sorted, 0.5);
 }
 function fmt(n: number): string {
   return Number.isFinite(n) ? n.toFixed(2) : "  n/a";
@@ -818,8 +813,8 @@ function printCorrelationReport(args: ReturnType<typeof parseArgs>, active: Awai
         const pv = [...b.passVals].sort((x, y) => x - y);
         const fv = [...b.failVals].sort((x, y) => x - y);
         return {
-          bin: binLabel(b), passN: b.passN, passMean: mean(pv), passMedian: median(pv),
-          failN: b.failN, failMean: mean(fv), failMedian: median(fv),
+          bin: binLabel(b), passN: b.passN, passMean: mean(pv), passMedian: median(pv) ?? Number.NaN,
+          failN: b.failN, failMean: mean(fv), failMedian: median(fv) ?? Number.NaN,
           delta: Number.isFinite(mean(pv)) && Number.isFinite(mean(fv)) ? mean(fv) - mean(pv) : null,
           verdict: b.failN < passive.minN ? "insufficient" : (mean(fv) > mean(pv) ? "signal" : "no-signal"),
         };
