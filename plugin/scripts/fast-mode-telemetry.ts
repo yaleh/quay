@@ -130,6 +130,11 @@ import { isDirectEntry, flagValue } from "./gate-script-base.ts";
 // `s.replace(` byte needle could not see it (finding `escaperegexp-sweep-missed-two`, routine
 // `semantic-dedup-scan`; see packages/quay/test/kernel-regex-escape.test.mjs ④).
 import { escapeRegExp } from "./regex-escape.ts";
+// The median — the ONE definition and its empty policy (routine `semantic-dedup-scan`, finding
+// `median-empty-policy-diverged`). This file's local copy answered `0` for an empty sample, which is
+// indistinguishable from a measured median of 0; the shared leaf answers `null`, and the one call
+// site below keeps its `0` deliberately and VISIBLY (`?? 0`).
+import { median } from "./median.ts";
 // Start/end classification — the ONE definition, in Core, shared with the web read path
 // (packages/quay/src/observation.ts). This file used to carry a byte-identical local copy and
 // observation.ts carried the other one, each documented as a deliberate mirror of the other and
@@ -1362,16 +1367,6 @@ export async function* readAllEvents(root) {
 
 // ── Aggregate ─────────────────────────────────────────────────────────────────────────────────────────
 
-/**
- * Median of a numeric array (0 for empty). @param {number[]} values @returns {number}
- */
-function median(values) {
-  if (values.length === 0) return 0;
-  const sorted = [...values].sort((a, b) => a - b);
-  const mid = Math.floor(sorted.length / 2);
-  if (sorted.length % 2 === 1) return sorted[mid];
-  return (sorted[mid - 1] + sorted[mid]) / 2;
-}
 
 /** Start/end classification is IMPORTED, not defined here — the ONE definition lives in
  *  `packages/quay/src/start-end-like.ts` and is shared with the web read path
@@ -1597,7 +1592,9 @@ export function aggregate(events, { sinceMs = null, nowMs = null, haltEvents = n
   const totalMinutes = minutes.reduce((s, m) => s + m, 0);
   const count = minutes.length;
   const meanMinutes = count ? totalMinutes / count : 0;
-  const medianMinutes = count ? median(minutes) : 0;
+  // `?? 0` is this report's OWN stated convention for "no duration reading" (identical to
+  // `meanMinutes` above) — the helper no longer makes that choice silently (median.ts).
+  const medianMinutes = count ? (median(minutes) ?? 0) : 0;
 
   // Serial-equivalent rate — the OLD tasksPerHour definition (60 / mean). How fast tasks would
   // complete if they ran back-to-back with zero concurrency. It is a deterministic transform of

@@ -17,6 +17,10 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createSelftest } from "./gate-script-base.ts";
+// The median — the ONE definition and its empty policy (routine `semantic-dedup-scan`, finding
+// `median-empty-policy-diverged`). This file's local copy answered `0` for an empty sample; the
+// shared leaf answers `null` and each call site below states its own choice visibly.
+import { median } from "./median.ts";
 
 // ── Types ──────────────────────────────────────────────────────────────────────────────
 
@@ -106,13 +110,6 @@ const MECHANICAL_SCRIPT_PATTERNS = [
 ];
 
 // ── Helpers ────────────────────────────────────────────────────────────────────────────
-
-function median(values: number[]): number {
-  if (values.length === 0) return 0;
-  const sorted = [...values].sort((a, b) => a - b);
-  const mid = Math.floor(sorted.length / 2);
-  return sorted.length % 2 !== 0 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
-}
 
 function min(values: number[]): number {
   return values.length === 0 ? 0 : Math.min(...values);
@@ -324,8 +321,12 @@ export function computeChangePropagationRadius(events: WorkflowEvent[]): Measure
     metricClass: "mechanical-runner",
     perCandidate,
     aggregate: {
-      files: { min: min(uniqueFileCounts), median: median(uniqueFileCounts), max: max(uniqueFileCounts) },
-      directories: { min: min(uniqueDirCounts), median: median(uniqueDirCounts), max: max(uniqueDirCounts) },
+      // `?? 0` at BOTH sites: this metric's min/median/max TRIPLE already reports an empty
+      // population as zeros (`min`/`max` below do the same), so the median keeps that triple's own
+      // convention rather than gaining a `null` its siblings never carry — the choice is made here,
+      // where the triple is, instead of inside the statistic.
+      files: { min: min(uniqueFileCounts), median: median(uniqueFileCounts) ?? 0, max: max(uniqueFileCounts) },
+      directories: { min: min(uniqueDirCounts), median: median(uniqueDirCounts) ?? 0, max: max(uniqueDirCounts) },
     },
   };
 }
@@ -724,9 +725,12 @@ export function computeLandFenceTime(events: WorkflowEvent[]): MeasuredMetric | 
     metricClass: "mechanical-runner",
     perCandidate,
     aggregate: {
-      queueMs: queueTimes.length > 0 ? { min: min(queueTimes), median: median(queueTimes), max: max(queueTimes) } : null,
-      durationMs: durationTimes.length > 0 ? { min: min(durationTimes), median: median(durationTimes), max: max(durationTimes) } : null,
-      totalMs: totalTimes.length > 0 ? { min: min(totalTimes), median: median(totalTimes), max: max(totalTimes) } : null,
+      // The `length > 0` guard already proves the sample is non-empty; `?? 0` only satisfies the
+      // helper's total `number | null` contract, which is the point of moving the empty policy out
+      // of the six copies (median.ts).
+      queueMs: queueTimes.length > 0 ? { min: min(queueTimes), median: median(queueTimes) ?? 0, max: max(queueTimes) } : null,
+      durationMs: durationTimes.length > 0 ? { min: min(durationTimes), median: median(durationTimes) ?? 0, max: max(durationTimes) } : null,
+      totalMs: totalTimes.length > 0 ? { min: min(totalTimes), median: median(totalTimes) ?? 0, max: max(totalTimes) } : null,
     },
   };
 }

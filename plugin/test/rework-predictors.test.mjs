@@ -555,7 +555,11 @@ test("primitives: median/quantile/mean/rank/spearman behave on known inputs", ()
   assert.equal(median([3, 1, 2]), 2);
   assert.equal(median([4, 1, 2, 3]), 2.5);
   assert.equal(mean([1, 2, 3]), 2);
-  assert.ok(Number.isNaN(median([])));
+  // The re-exported median is the SHARED leaf (plugin/scripts/median.ts, routine finding
+  // `median-empty-policy-diverged`): an empty sample is `null` — NOT MEASURED — where this file's
+  // own copy used to answer `NaN`. This assertion is the pin for the merged policy; it is
+  // deliberately the OPPOSITE of the old one, because the old one pinned the divergence.
+  assert.equal(median([]), null);
   assert.equal(quantile([1, 2, 3, 4, 5], 0.5), 3);
   assert.equal(quantile([1, 2, 3, 4, 5], 0.9), 5);
   // Ties share the mean rank — the standard correction, so a tied pair cannot inflate rho.

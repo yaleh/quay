@@ -56,6 +56,12 @@ import { isDirectEntry } from "./gate-script-base.ts";
 import type { Fact, RoutineSpec, RoutineRunContext } from "./driver-runtime.ts";
 import { gateFinding, DEFAULT_RATE, ROUTINE_TASK_PREFIX } from "./routine-file-gate.ts";
 import { readSubmittedKeys, appendSubmission } from "./architecture-review-cluster.ts";
+// The median — the ONE definition and its empty policy (routine `semantic-dedup-scan`, finding
+// `median-empty-policy-diverged`). This file's reading was already the one the merged policy
+// adopts (`null` for an empty sample, non-finite values dropped); it is RE-EXPORTED so its public
+// surface is byte-for-byte what it was.
+import { median } from "./median.ts";
+export { median };
 
 // ── identity / carrier / budget constants ────────────────────────────────────────────────────────
 export const RESOURCE_DIAGNOSTIC_NAME = "resource-diagnostic";
@@ -170,12 +176,6 @@ export interface DetectorOptions {
 
 const num = (v: unknown): number | null => (typeof v === "number" && Number.isFinite(v) ? v : null);
 const arr = <T>(v: unknown): T[] => (Array.isArray(v) ? (v as T[]) : []);
-export function median(xs: readonly number[]): number | null {
-  const s = xs.filter((x) => Number.isFinite(x)).sort((a, b) => a - b);
-  if (s.length === 0) return null;
-  const m = Math.floor(s.length / 2);
-  return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
-}
 const passRate = (xs: readonly PerFileObservation[]) => (xs.length === 0 ? null : xs.filter((o) => o.passed).length / xs.length);
 
 // ── the mechanical detectors (pure: carrier in, anomalies out; ⛔ zero model calls) ───────────────
