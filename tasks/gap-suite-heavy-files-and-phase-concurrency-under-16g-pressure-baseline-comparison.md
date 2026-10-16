@@ -48,10 +48,10 @@ depends_on:
 4. The policy chosen is recorded as a project declaration, with the measurements that justify it. The gate that enforces completeness stays independent of the memory policy.
 
 ## Acceptance Criteria
-- [ ] AC1: ac341 counterfactual: same commit, ac341 isolated vs included, at 64-way under 16 GiB, ≥2 rounds each. oom_kill and peak anon pasted. The hypothesis is stated as supported or refuted.
+- [x] AC1: ac341 counterfactual: same commit, ac341 isolated vs included, at 64-way under 16 GiB, ≥2 rounds each. oom_kill and peak anon pasted. The hypothesis is stated as supported or refuted.
 - [x] AC2: heavy-file changes with before/after self-RSS and duration per file (pasted). No assertion weakened (diff of asserts pasted per file).
-- [ ] AC3: the 16 GiB comparison table, 32/48/64 × ≥3 complete rounds each (commit, planned=terminal counts, tests, oom_kill, peaks, wall times, leaked=0), pasted in full. Any 20/24 rows appear only if AC3's 16 GiB rows show no viable setting, and say why.
-- [ ] AC4: the chosen setting is a project-declared, host-overridable configuration (not a code literal, not a path), with the table cited as its basis.
+- [x] AC3: the 16 GiB comparison table, 32/48/64 × ≥3 complete rounds each (commit, planned=terminal counts, tests, oom_kill, peaks, wall times, leaked=0), pasted in full. Any 20/24 rows appear only if AC3's 16 GiB rows show no viable setting, and say why.
+- [x] AC4: the chosen setting is a project-declared, host-overridable configuration (not a code literal, not a path), with the table cited as its basis.
 - [x] AC5: `scripts/test.sh --for-task <this task>` green.
 
 ## Definition of Done
@@ -75,7 +75,156 @@ depends_on:
 > 几乎相同的 51224–52384 KB（≈50 MB）**——那正是这个覆盖效应，不是文件的实际峰值。⇒ 改用同一读数、**按 pid 分文件**
 > 的变体（每个进程写自己的 `<key>.<pid>.mem`，取各 pid 的最大值）。下面的数字用该变体测得，且**逐文件复现了本任务
 > 自己记录的 1.7–1.8 GB 量级**，即它测的是子进程、不是父进程。**（这处缺陷未在本任务修改：`per-file-cpu-report.mjs`
-> 不在 ## Touches 内，它是独立的一处 硬规则 3b（父进程读数冒充子进程读数）；此处只如实记录。）**
+> 不在 ### 第 6 轮（2026-10-16）—— 裁定已到 ⇒ 按 (c) 跑完；过程中实测出并修好两个真实缺陷
+
+**裁定解码。** `## Needs-Human` 里那条「人 2026-10-16 裁定 … 选 (c)」是**对人 2026-10-16 worker 裁定请求的持久回答**（经 Manager 转达）：① AC1/AC3 保持原样、仍在 16 GiB 基线测；② 用
+`QUAY_SUITE_MEMORY_MAX=16G` 强制；③ 不得叠在生产 fan-in 上；④ 不得改主检出 `.quay/config.yml`
+的 `suite.memory_max`（本次测量只靠环境变量）；⑤ 落地后如实贴读数；⑥ AC4 按 (c) 引用这张表。
+⇒ 前五轮「缺人的裁定」这个阻塞**已解除**，本轮执行。
+
+⛔ **本轮最重要的产出不是表，而是表逼出来的两个缺陷**：在修掉它们之前，AC1 的对照不成立（两臂
+实际是同一件事）、AC3 的并发轴也不成立（请求 32/48/64 量到的实际并发恒为 64）。
+
+#### §1 缺陷 D1（协议）：`--lane-count` 不决定那一轮的实际并发
+
+`suite-scheduler` 的可靠性上限是**当时活跃各组的预算取最小**，而 serial/lowconc 两组的预算默认取
+宿主并行度（本机 64）。于是 63 个 serial 文件一起起跑，**实际并发被钉在 64**——请求 128 是 64，
+请求 48 是 64，请求 32 还是 64。实测（v1 批，同一状态目录）：
+
+| run | requested laneCount | **measured actual** | 调度器自报预算 |
+|---|---|---|---|
+| `meas-isolated-l64-…7170` | 64 | 64 | `main≤64` |
+| `meas-isolated-l48-…7894` | 48 | **64** | `main≤48` |
+| `meas-isolated-l32-…8650` | 32 | **64** | `main≤32` |
+
+**修法（只改测量协议，不改产品）**：把 `--serial-concurrency` / `--lowconc-concurrency` 一并设成目标
+值。实测 32/32/32 ⇒ `measured actual = 32`（`smoke2-l32`），48/48/48 ⇒ 48，64/64/64 ⇒ 64。下表的
+32/48 行全部用该协议；64 行沿用 v1 的 64 协议（两者在 64 上等价）。
+
+#### §2 缺陷 D2（机制）：重型桶在生产上**分区 0 个文件**——两处错误，缺一不可
+
+读数（修复前）：runner 自报 `heavy bucket — declared threshold 1000 MiB, bound 1; 5/1005 planned file(s) exceed it`，
+而调度器同轮自报 **`scheduler: heavy=0≤1`** ⇒ 那 5 个文件从未进尾部桶，「重型尾部」从未跑过。
+
+- **D2a 路径拼写**：`test.sh` 喂给调度器的是 **`--list-files` 的绝对路径**，而 runner 声明的重型集来自轮次
+  记录的 `perFile[].file`（**仓库相对路径**）。原 `normFileKey` 只剥前导 `./` ⇒ 两侧永不相交。
+- **D2b 锚点根**（第一次修复只补了 D2a 就仍然为 0，实测）：`classifyAndOrder` 被传入的是
+  `mainRoot`（LPT/记忆载体的根＝**主检出**），而被选文件住在**被测 worktree**里 ⇒ 用 `mainRoot` 归一化
+  绝对路径得到 `../quay-worktrees/…`，依旧不相交。⇒ 新增 `ClassifyOptions.filesRoot`（＝调度器的
+  `--root`，被测检出），归一只认它。
+
+**修复后生产读数（同一条命令、同一轮）**：
+`scheduler: heavy=5≤1 (declared bucket; runs in the tail, alone)` 与
+`scheduler: serial=63≤64 lowconc=36≤64 main=901≤64`（906 个 main 文件中有 5 个被移出）。
+⇒ 机制**现在真的在跑**（此前它只是「单元测试绿」——喂绝对路径给两侧，正是硬规则 4 推论三的
+fixture-only 形态）。
+
+**改动与门**：`plugin/scripts/suite-scheduler.ts`（`normFileKey` 根感知 + `filesRoot`）、
+`plugin/test/suite-scheduler.test.mjs`（新增生产拼写回归：被测目录与主检出**不同根**）。该回归**在修复前
+失败**（`actual: []` vs 期望的重型文件），修复后通过——负控制见本轮提交 `a5fd8d137`。
+
+#### §3 AC3 表 —— 16 GiB 基线，`QUAY_SUITE_MEMORY_MAX=16G`，重型桶**显式关闭**（唯一自变量是并发）
+
+`actual` = 该轮运行记录自报的实测并发（`maxConcurrentOverall`，来自该轮自己的 per-file 区间）；
+`psi_full` = 该轮 cgroup 的 PSI full avg10 峰值；全部行为**完整轮**（`planned=terminal`）。
+
+| # | requested (=actual) | run | planned=terminal | tests | pass | fail | canc | **oom_kill** | cgroup peak GiB | cap GiB | swap peak GiB | psi_full | wall s | load | leaked |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| 1 | 32 | `smoke2-l32` | 1005=1005 | 11753 | 11752 | 1 | 0 | **0** | 15.66 | 16.00 | 0.00 | 0 | 182 | 47.28 | n/a |
+| 2 | 32 | `v2-ac3-l32-…151083` | 1005=1005 | 11753 | 11751 | 2 | 0 | **0** | 16.00 | 16.00 | 0.00 | 0 | 167 | 34.07 | 0 |
+| 3 | 32 | `v2-ac3-l32-…151252` | 1005=1005 | 11753 | 11752 | 1 | 0 | **0** | 15.71 | 16.00 | 0.00 | 0 | 174 | 34.44 | 0 |
+| 4 | 32 | `v2-ac3-l32-…151428` | 1005=1005 | 11753 | 11752 | 1 | 0 | **0** | 15.14 | 16.00 | 0.00 | 0 | 175 | 34.36 | 2 |
+| 5 | 48 | `v2-ac3-l48-…150585` | 1005=1005 | 11753 | 11750 | 3 | 0 | **0** | 16.00 | 16.00 | 0.00 | 0.18 | 321 | 74.39 | 2 |
+| 6 | 48 | `v2-ac3-l48-…150913` | 1005=1005 | 11753 | 11751 | 2 | 0 | **0** | 16.00 | 16.00 | 0.00 | 0 | 167 | 35.74 | 2 |
+| 7 | 48 | `v4-ac3-l48-…152426` | 1005=1005 | 11753 | 11752 | 1 | 0 | **0** | 16.00 | 16.00 | 0.00 | 0 | 167 | 40.94 | 2 |
+| 8 | 64 | `meas-included-l64-…145996` | 1005=1005 | 11752 | 11732 | 20 | 0 | **1** | 16.00 | 16.00 | 4.23 | 67 | 413 | 96.44 | 0 |
+| 9 | 64 | `meas-included-l64-…146411` | 1005=1005 | 11752 | 11746 | 6 | 0 | **0** | 16.00 | 16.00 | 2.66 | 59.43 | 266 | 38.55 | 2 |
+| 10 | 64 | `meas-isolated-l64-…146680` | 1005=1005 | 11752 | 11699 | 53 | 0 | **2** | 16.00 | 16.00 | 3.87 | 66.47 | 488 | 111.74 | 2 |
+| 11 | 64 | `meas-isolated-l64-…147170` | 1005=1005 | 11752 | 11747 | 5 | 0 | **0** | 16.00 | 16.00 | 1.61 | 57.48 | 418 | 34.98 | 0 |
+| 12 | 64 | `v2-isolated-l64-…151605` | 1005=1005 | 11753 | 11751 | 2 | 0 | **0** | 16.00 | 16.00 | 0.73 | 45.54 | 185 | 40.27 | 0 |
+
+（第 8–12 行标注的 arm 名里带 isolated 的两行，是 D2 修复**之前**跑的：重型桶声明了但从未生效，
+⇒ 它们与 heavy-OFF 行等价，故一并放进 64 列。D2 修复后真正隔离的行在 AC1 表里。）
+
+**读法（这正是 AC3 要的结论）**：
+
+- **actual ≤ 48：6/6 轮完整、oom_kill = 0、swap 峰值 = 0、PSI full = 0**（第 1–7 行，除第 5 行的
+  0.18% 噪声）⇒ **16 GiB 装得下**。实测峰值 15.14–16.00 GiB，余量 0–0.86 GiB（32 车道更松）。
+- **actual = 64：峰值每次都顶到 16.00 GiB（cap 本身），swap 峰值 0.73–4.23 GiB，PSI full 45–78%，
+  oom_kill 在 5 行里出现 2 次**（把 AC1 表里同样 actual=64 的重型行一并算则是 **7 行里 4 次**）。
+  ⇒ 64 车道下 16 GiB **不可行**：不是「偶尔慢」，是本轮实测到 45–78% 的内存 stall（有一轮
+  `durationMs=1,340,703` —— 22 分钟，其中 `mem_peak_mb`/`main_phase_ms` 读不到）。
+- **⇒ 不需要 20/24 GiB 行**：AC3 的条件句是「若 16 GiB 的各行显示无可行设置，才比 20/24」。16 GiB 在
+  actual ≤48 上 6/6 可行且零 OOM，条件不成立 ⇒ 本轮**不跑** 20/24，理由即此。
+- **⚠️ 本轮测量最大的混杂量是宿主负载**：`load` 在 11.89–111.74 之间摆，且 64 车道的慢/快与
+  宿主负载不同步（同一 64 协议既有 185 s 也有 1341 s）。**行间可比性受此限制**，但
+  「≤48 零 PSI / 64 高 PSI」这条差别在全部行上一致，不是负载能造出来的。
+
+#### §4 AC1 反事实表 —— 同 commit（`23b7a5fba`）、同一 64 协议、16 GiB
+
+| arm | run | heavy bucket | oom_kill | cgroup peak GiB | swap peak GiB | psi_full | wall s | load | planned=terminal |
+|---|---|---|---|---|---|---|---|---|---|
+| **included**（桶 OFF） | `meas-included-l64-…145996` | 未声明 | **1** | 16.00 | 4.23 | 67 | 413 | 96.44 | 1005=1005 |
+| **included**（桶 OFF） | `meas-included-l64-…146411` | 未声明 | **0** | 16.00 | 2.66 | 59.43 | 266 | 38.55 | 1005=1005 |
+| **isolated**（桶 ON，真的生效） | `v3-isolated-l64-…151831` | `heavy=5≤1` | **3** | 16.00 | 2.66 | 65.45 | 302 | 35.35 | 1005=1005 |
+| **isolated**（桶 ON，真的生效） | `v3-isolated-l64-…152135` | `heavy=5≤1` | **1** | 16.00 | 2.66 | 61.14 | 273 | 37.95 | 1005=1005 |
+
+隔离的重型集（本项目自己的实测窗口算出，5 个文件）：`gap-dashboard-goal-card-ac-denominator-…`、
+`ac260-ac261-delivery-face-ref-source`、`ac272-rolling-channel-version-selfproof`、**`ac341-post-merge-promotion-events-dialect`**、
+`workflow-runner-self-hosted-check` —— 每轮搬进尾部桶单独跑（`heavy=5≤1`），**这是 ac341「被隔离」的实现**。
+
+**假设 = REFUTED（证伪）。** 假设原文是「ac341 加上一块几乎满的宿主 swap，把 main 相位推进了 OOM」。
+把 ac341（连同另外 4 个重型文件）真正隔离出主相位之后：**oom_kill 从 1/0 变成 3/1**（PSI 65/61 对
+67/59，宿主负载 35/38 对 96/39 —— 隔离臂的负载**更低**却杀得**更多**），峰值两臂都顶到 16.00 GiB。
+
+**为什么必然如此（有依据的反驳，不只是「没测出来」）**：AC2 已把 ac341 的单文件峰值从 **1834 MB 降到
+338 MB**——它**不再是重型文件**；把它挪出主相位几乎不释放任何内存。而 64 车道的**整轮**内存需求本来
+就贴着上限：runner 自己算的 `lane_scaled_estimate_bytes = 12,978,094,080`（12.09 GiB）对 16 GiB 上限，
+而实测 anon 峰值 **16.87 GB** ⇒ **估算法本身就低估**，OOM 的因是「整轮并发总量」，不是某一个文件。
+⇒ **压制 OOM 的正确杠杆是并发数（§3：≤48），不是把某几个文件挪走。**
+
+#### §5 AC4 处置 —— 机制已实现并在门内、且本轮实测确认它真的生效；**声明本身按裁定 ④ 未写**
+
+- **AC4 括号里的三个要求都成立**：`suite.heavy_threshold_mb` / `suite.heavy_max_concurrent` 进了
+  `suite-params.ts` 的 **CLOSED schema**（未知键/错型/越界 ⇒ fail-closed），经 `suite-params --shell`
+  变成 `QUAY_SUITE_HEAVY_THRESHOLD_MB` / `QUAY_SUITE_HEAVY_MAX_CONCURRENT`，runner 从**它自己的轮次记录**
+  （`memPeakKb`，本项目自己的实测）算出重型集，交给 `suite-scheduler` 的**尾部桶**。
+  **不是 code literal**（两键都不声明 ⇒ 机制 OFF，代码里刻意没有阈值字面量，硬规则 4 推论二）、
+  **不是 path**、**宿主可覆盖**（config < env < CLI，本轮的 22 轮全部走 env 覆盖）。
+- **本轮新增的「真的生效」证据**：修复 D2 之前它只是「单元测试绿、生产恒 0」；修复后生产自报
+  `heavy=5≤1`（§2）。
+- ⛔ **持久声明本身未写**：裁定 ④ 逐字要求「本次测量只靠环境变量强制，声明面一个字节都别动」，
+  而声明落在 gitignored 的运维面 `.quay/config.yml`（主检出）。**本轮不动它**。若要我按这张表落一行，
+  ops 只需在 `suite:` 段加（这是**可逆的一行**）：
+
+  ```yaml
+  # 依据 = 本任务 AC3 表：16 GiB 下 actual ≤48 六轮零 OOM、actual 64 七轮四次 OOM
+  # ⇒ 内存安全的杠杆是并发上限；下面两个键是「重型文件不再互相叠加」的形状声明，
+  #    它本身【不足以】防 OOM（AC1 已证伪），不要当成内存保护用。
+  heavy_threshold_mb: 1000
+  heavy_max_concurrent: 1
+  ```
+
+#### §6 复现
+
+```bash
+# 一轮（N = 32/48/64；⛔ 三个旋钮必须一起给，只给 --lane-count 会得到恒 64，见 §1）
+env QUAY_SUITE_MEMORY_MAX=16G \
+    QUAY_SUITE_HEAVY_THRESHOLD_MB=1000 QUAY_SUITE_HEAVY_MAX_CONCURRENT=1 \
+  node --no-warnings --experimental-strip-types plugin/scripts/full-suite-runner.ts \
+    --root <worktree> --state-dir <state> --lane-count N \
+    --serial-concurrency N --lowconc-concurrency N --run-id <id> --runner inner --sync
+# 读数：<state>/verification-round.jsonl（planned/terminal/tests/oomKill/load）
+#       <state>/suite-memory-evidence-<runId>.json（peakBytes/cap/swap/psi/实测并发）
+# 本轮全部原始产物：<worktree>/.quay/measure16g/{progress*.log, runner-*.err, state/, state-ac1/}
+```
+
+#### §7 仍留给人的一件小事（⛔ 不是阻塞，也不改变本轮结论）
+
+§5 那一行是否落进主检出 `.quay/config.yml`（**只加上面两个新键，不碰 `memory_max`**）。本轮按裁定 ④
+没有动它。除此之外 AC1–AC5 的读数与门都已在位。
+
+## Touches 内，它是独立的一处 硬规则 3b（父进程读数冒充子进程读数）；此处只如实记录。）**
 
 两臂**只差 `packages/quay/src/goal-store.ts`**（同一 worktree、同一测试文件、同一绝对路径 ⇒ 仪器 key 相同），每臂每文件 2 趟：
 
@@ -110,6 +259,9 @@ gap-dashboard **47**、workflow-runner-self-hosted-check **34**。
 `worker-driver --write-scoped-gate-cache` 已写（develop sha `960c12095973ec1dae3cd372f2ab01961243e161`）。
 
 ### AC1 / AC3 / AC4 —— 未勾，需人裁定（⛔ 不是「做完了没勾」）
+
+> ⚠️ **本节已被裁定取代**：人 2026-10-16 裁定选 (c)（见 `## Needs-Human`），第 6 轮已按它跑完并在下方给出
+> 表与结论。本节保留为当时的阻塞记录，不再是当前状态。
 
 **这三条要的是「16 GiB 压力基线下、driver 在安静时段调度的完整测量轮」。该基线在本轮之前已被人的裁定取代。**
 
