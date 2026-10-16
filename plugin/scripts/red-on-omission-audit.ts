@@ -35,15 +35,14 @@
 
 import fs from "node:fs";
 import path from "node:path";
-import { isDirectEntry } from "./gate-script-base.ts";
+import { isDirectEntry, readRootRel } from "./gate-script-base.ts";
 
 // ── Verify helpers (mechanical, tracked-file based — never self-asserted) ──────────────────────────
 
-/** Read a file under root; return "" when missing (a missing file is a FAIL, not a pass). */
-function readUnder(root: string, rel: string): string {
-  const abs = path.join(root, rel);
-  return fs.existsSync(abs) ? fs.readFileSync(abs, "utf8") : "";
-}
+// ⛔ `readUnder(root, rel)` (a private `path.join` + `existsSync ? readFileSync : ""`) was retired by
+// semantic-dedup-scan finding `read-file-join-root-pair` — it was the third instance of that concept,
+// alongside dual-source-check.ts / retired-clause-check.ts. Its documented contract is unchanged: a
+// missing file still yields "" and "" is still a FAIL, not a pass (see `verify` arms below).
 
 /** True iff `text` contains the literal `needle` (positional content check). */
 function has(text: string, needle: string): boolean {
@@ -55,8 +54,8 @@ function has(text: string, needle: string): boolean {
  *  of test.sh into that file; run_doc_checks stays in test.sh). */
 function wiredInSuite(root: string, needle: string): boolean {
   return (
-    has(readUnder(root, "scripts/test.sh"), needle) ||
-    has(readUnder(root, "plugin/scripts/runner-static-gate.ts"), needle)
+    has(readRootRel(root, "scripts/test.sh"), needle) ||
+    has(readRootRel(root, "plugin/scripts/runner-static-gate.ts"), needle)
   );
 }
 
@@ -87,7 +86,7 @@ export interface RedReadingEntry {
 
 /** 阅读 helper：读执行核文本（registry 大量 verify 以它为准）。 */
 function tickCore(root: string): string {
-  return readUnder(root, "orchestration/orchestrator-tick-core.md");
+  return readRootRel(root, "orchestration/orchestrator-tick-core.md");
 }
 
 export const REGISTRY: RedReadingEntry[] = [
@@ -123,19 +122,19 @@ export const REGISTRY: RedReadingEntry[] = [
     redReading:
       "`.quay/verification-round.jsonl` 无 `scope=worktree`+`state=green` 记录 ⇒ fan-in 拒（门拒）；`scope` 字段缺失 ⇒ 无法判 ⇒ 拒",
     verify: (root) => {
-      const runner = readUnder(root, "plugin/scripts/full-suite-runner.ts");
+      const runner = readRootRel(root, "plugin/scripts/full-suite-runner.ts");
       // (2026-10-07): the consumer used to be the standalone A15 ④ suite-fix workflow, now DELETED
       // (zero production callers). The live consumer of the worktree+green round record is the
       // batch-merge gate (`checkWorktreeGreenGate`, `has_worktree_green_round`). Repointed here —
       // same invariant, the surviving enforcement point.
-      const consumer = readUnder(root, "plugin/scripts/integration-batch-merge.ts");
+      const consumer = readRootRel(root, "plugin/scripts/integration-batch-merge.ts");
       // gap-arch-import-cycles-zero: the `SuiteState` DECLARATION was moved VERBATIM out of
       // full-suite-runner.ts into the leaf module full-suite-runner-types.ts (to break a type-level
       // import cycle), and full-suite-runner.ts re-exports it — so the runner's declaration surface
       // now spans BOTH files. Look the field up in either. ⛔ Not a loosening: a missing file reads
       // "" (readUnder) ⇒ still a FAIL, and the invariant is unchanged — the runner's type surface
       // must still declare the field somewhere.
-      const runnerTypes = readUnder(root, "plugin/scripts/full-suite-runner-types.ts");
+      const runnerTypes = readRootRel(root, "plugin/scripts/full-suite-runner-types.ts");
       const okField =
         has(runner, 'scope?: "main" | "worktree"') || has(runnerTypes, 'scope?: "main" | "worktree"');
       const okConsumer =
@@ -195,7 +194,7 @@ export const REGISTRY: RedReadingEntry[] = [
       "A17 语义观测器 judge — 读自由文本判 stopped/awaiting；`stopped:true` 而 tick-log 无对应升级 ⇒ 变红",
     redReading: "`semantic-observer-judge.ts` 输出 `redOnOmission:true` 且 **exit 1**（AC41③ 观测层实例）",
     verify: (root) => {
-      const judge = readUnder(root, "plugin/scripts/semantic-observer-judge.ts");
+      const judge = readRootRel(root, "plugin/scripts/semantic-observer-judge.ts");
       const t = tickCore(root);
       const okCode = has(judge, "redOnOmission") && hasRe(judge, /return\s+redOnOmission\s*\?\s*1\s*:\s*0/);
       const okWiring = has(t, "semantic-observer-judge");
@@ -311,7 +310,7 @@ export const REGISTRY: RedReadingEntry[] = [
     redReading: "`resource-gate.sh --for full-suite` 退出非 0 = WAIT ⇒ 全量不跑（门拒，不做就等不到 suite 结果）",
     verify: (root) => {
       const t = tickCore(root);
-      const archive = readUnder(root, "orchestration/archive/AC58-retired-clauses.md");
+      const archive = readRootRel(root, "orchestration/archive/AC58-retired-clauses.md");
       const script = fileExists(root, "plugin/scripts/resource-gate.sh");
       // AC84/AC76 C3→R32 迁移 (orchestrator-tick-core.md C3 body moved to the archive): accept the
       // direct (unmigrated) form OR the migrated form — core holds the `C3 正身已迁出` pointer AND

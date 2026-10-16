@@ -17,7 +17,7 @@
 
 import fs from "node:fs";
 import path from "node:path";
-import { emitPass, emitFail } from "./gate-script-base.ts";
+import { emitPass, emitFail, readRootRel } from "./gate-script-base.ts";
 
 interface Responsibility {
   name: string;             // the responsibility that must have a single executor
@@ -63,11 +63,6 @@ export function hasMarker(content: string, marker: string): boolean {
   return norm(content).includes(norm(marker));
 }
 
-function readFile(root: string, rel: string): string {
-  const p = path.join(root, rel);
-  return fs.existsSync(p) ? fs.readFileSync(p, "utf8") : "";
-}
-
 export function runCheck(root: string): { ok: boolean; issues: string[] } {
   const issues: string[] = [];
 
@@ -75,7 +70,7 @@ export function runCheck(root: string): { ok: boolean; issues: string[] } {
     if (!fs.existsSync(path.join(root, entry.executor))) {
       issues.push(`[${entry.name}] EXECUTOR-MISSING: driver ${entry.executor} not found — no single live executor`);
     }
-    const text = readFile(root, entry.sessionDoc);
+    const text = readRootRel(root, entry.sessionDoc);
     for (const m of entry.retiredMarkers) {
       if (!hasMarker(text, m)) {
         issues.push(`[${entry.name}] DUAL-SOURCE: marker "${m}" ABSENT from ${entry.sessionDoc} (the session/manual path is not retired — two executors for one responsibility)`);

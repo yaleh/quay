@@ -372,6 +372,28 @@ export function readFileSafe(p: string): string {
   }
 }
 
+// ── readRootRel ─────────────────────────────────────────────────────────────────────────────────────
+// Read a repo-RELATIVE file under `root` as UTF-8, returning "" when it is absent or unreadable — the
+// single shared ROOT-RELATIVE reader: `readFileSafe` (above) composed with `path.join`. That pair was
+// carried privately, byte-identically, by two sibling checkers that both ALREADY imported this module:
+//   const p = path.join(root, rel); return fs.existsSync(p) ? fs.readFileSync(p, "utf8") : "";
+// (semantic-dedup-scan, runId `semantic-dedup-scan-1792168649663`, findingId `read-file-join-root-pair`,
+// dupKind `byte-identical-body`, verdict `real-duplication`, suggestedAction "extract — one shared
+// root-relative reader"; files dual-source-check.ts:66 / retired-clause-check.ts:196.) As with
+// readFileSafe / normalizeRel / parseJsonArg / seededRng above, the shared home already existed and the
+// copies were pure maintainability debt — no call site needed a new dependency.
+//
+// SEMANTICS vs the retired copies: identical on every input they could be handed EXCEPT an
+// existing-but-UNREADABLE path (EACCES, EISDIR), where the copies let `readFileSync` throw and this
+// returns "". That is readFileSafe's documented checker convention ("treat unreadable as empty"), and it
+// is deliberately NOT load-bearing for either former carrier — both consume "" as a FAILURE signal, not
+// as a pass: dual-source-check pushes DUAL-SOURCE for an empty session doc, retired-clause-check pushes
+// NOT-ARCHIVED when neither source nor archive yields the marker. Neither can turn a real problem into a
+// green. A caller that must distinguish "absent" from "unreadable" still reads directly (硬规则 3b).
+export function readRootRel(root: string, rel: string): string {
+  return readFileSafe(path.join(root, rel));
+}
+
 // ── readJsonLines ───────────────────────────────────────────────────────────────────────────────────
 // Read a JSONL ledger (`.quay/*.jsonl`, `.quay/per-task-suite-records.jsonl`, …) into
 // `Record<string, unknown>[]`, tolerating the two things an append-only carrier genuinely produces:

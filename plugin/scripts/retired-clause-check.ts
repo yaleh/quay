@@ -24,9 +24,7 @@
 //   node --no-warnings --experimental-strip-types plugin/scripts/retired-clause-check.ts --root <repo>
 //   scripts/test.sh --for-task gap-ac58-retired-clauses-delete-and-archive  (via run_static_checks)
 
-import fs from "node:fs";
-import path from "node:path";
-import { helpExit } from "./gate-script-base.ts";
+import { helpExit, readRootRel } from "./gate-script-base.ts";
 
 const ARCHIVE_REL = "orchestration/archive/AC58-retired-clauses.md";
 
@@ -193,21 +191,16 @@ export function norm(s: string): string {
     .trim();
 }
 
-function readFile(root: string, rel: string): string {
-  const p = path.join(root, rel);
-  return fs.existsSync(p) ? fs.readFileSync(p, "utf8") : "";
-}
-
 export function hasMarker(content: string, marker: string): boolean {
   return norm(content).includes(norm(marker));
 }
 
 export function runCheck(root: string): { ok: boolean; issues: string[] } {
   const issues: string[] = [];
-  const archive = readFile(root, ARCHIVE_REL);
+  const archive = readRootRel(root, ARCHIVE_REL);
 
   for (const entry of REGISTRY) {
-    const src = readFile(root, entry.source);
+    const src = readRootRel(root, entry.source);
     for (const m of entry.markers) {
       const inSource = hasMarker(src, m);
       const inArchive = hasMarker(archive, m);
