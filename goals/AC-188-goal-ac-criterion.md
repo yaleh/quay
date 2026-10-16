@@ -15,7 +15,7 @@ criterion: |
   const inScope=recs.filter(r=>!SELF.has(r.id)&&r.kind==="criterion"&&["active","achieved"].includes(r.status)&&String(r.criterion||"").trim().length>=20);
   const hit=need.filter(t=>inScope.some(r=>String(r.origin||"").includes(t)));
   console.log("covered:",hit.length+"/"+need.length,JSON.stringify(hit));
-  process.exit(hit.length===need.length?0:(console.error("CAUSE=origin-not-migrated — every listed task must appear in some in-scope criterion origin, covered "+hit.length+"/"+need.length),1));
+  process.exit(hit.length===need.length?0:(console.error("CAUSE=origin-not-migrated — no in-scope criterion origin covers "+need.filter(t=>!hit.includes(t)).join(" | ")),1));
   '
 expect: exit 0
 origin: |-
