@@ -2,7 +2,7 @@
 id: gap-touches-relax-auto-tighten-loop-absent
 title: 放宽派发的合并成本自动收紧闭环不存在：超阈值不写 relax_halted、样本不足/阈值未配置不分态、round 记录不留痕（GOAL-037
   AC-367 收尾面）
-status: ready
+status: done
 labels:
   - gap
 parent: null
