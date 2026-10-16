@@ -67,12 +67,12 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1：`node --test plugin/test/touches-parser-parity.test.mjs` 退出 0，且新增用例覆盖 5 例控制实验（`` `x.ts`（说明） ``、`` `x.ts` (new) ``、`` `x.ts` (new)（说明） ``、`` `x.ts`（说明）(new) ``、`` `x.ts`（说明）(new) extra ``）；后两例在修复前为红（先红后绿留痕）。
-- [ ] AC2：对 quay @ `493b5c71a8f82e7b70ef340528d3172e875c45d3` 的 `tasks/`（`git archive <sha> tasks` 冻结）跑普查，`TARGET strip-failures` 为 **0**（修复前 22）。口径：一条 bullet 记为失败，当且仅当**它自己**开头的反引号路径**在盘上存在**，而解析该 bullet 的结果**不等于**该路径。
-- [ ] AC3：同上对 claudecodeui @ `31ab0091fe53cd281da1f6c68f1e574e8ac8c654` 运行，`TARGET strip-failures` 为 **0**（修复前 7）。
-- [ ] AC4（负控制）：AC2/AC3 两条普查输出中 `other unresolved` 桶**不减为 0**——即真正畸形的条目（既非路径、也不指向存在文件）**未被误当成有效路径**。附两桶计数前后对照。
-- [ ] AC5：`node plugin/scripts/task-schema-check.ts tasks/gap-touches-parser-annotation-strip-single-shot-order-dependent.md` 退出 0；`--for-task` scoped 门绿。
-- [ ] AC6：Core 镜像 `packages/quay/src/observation.ts:507` 的处置已决定并留痕——同修 ⇒ 有对应改动与读数；记录为已知分歧 ⇒ Evidence 中附理由与后续锚点。
+- [x] AC1：`node --test plugin/test/touches-parser-parity.test.mjs` 退出 0，且新增用例覆盖 5 例控制实验（`` `x.ts`（说明） ``、`` `x.ts` (new) ``、`` `x.ts` (new)（说明） ``、`` `x.ts`（说明）(new) ``、`` `x.ts`（说明）(new) extra ``）；后两例在修复前为红（先红后绿留痕）。 —— 修复后 `node --test plugin/test/touches-parser-parity.test.mjs` = **20/20 pass（exit 0）**；新增 test「AC1: the 5 annotation order/shape control experiments all reduce to the path」覆盖 5 例控制实验，且**修复前该 test 为红**：`` `x.ts`（说明）(new) `` → `` x.ts`（说明） ``（RED 运行留痕：20 tests / 1 fail，`AssertionError: not stripped to a clean path`）。
+- [x] AC2：对 quay @ `493b5c71a8f82e7b70ef340528d3172e875c45d3` 的 `tasks/`（`git archive <sha> tasks` 冻结）跑普查，`TARGET strip-failures` 为 **0**（修复前 22）。口径：一条 bullet 记为失败，当且仅当**它自己**开头的反引号路径**在盘上存在**，而解析该 bullet 的结果**不等于**该路径。 —— 冻结语料普查（`git archive 493b5c71a tasks`，2842 文件 / 14981 bullet / 2550 条反引号开头）：**TARGET strip-failures 22 → 0**；path-exists-and-parses-OK 2230 → 2252（恰 +22）。
+- [x] AC3：同上对 claudecodeui @ `31ab0091fe53cd281da1f6c68f1e574e8ac8c654` 运行，`TARGET strip-failures` 为 **0**（修复前 7）。 —— 冻结语料普查（`git archive 31ab0091f tasks`，808 文件 / 6468 bullet / 796 条反引号开头）：**TARGET strip-failures 7 → 0**；OK 777 → 784（恰 +7；修复前 7 条全部集中在当年在飞的 `gap-ac384-processing-single-writer`，1 个文件）。
+- [x] AC4（负控制）：AC2/AC3 两条普查输出中 `other unresolved` 桶**不减为 0**——即真正畸形的条目（既非路径、也不指向存在文件）**未被误当成有效路径**。附两桶计数前后对照。 —— **负控制通过**：`other unresolved` **未减为 0** —— quay 280 → 280、claudecodeui 12 → 12。两桶前后对照：quay target 22→0 / other 280→280；ccui target 7→0 / other 12→12 ⇒ 真正畸形的条目（既非路径、也不指向存在文件）未被误当成有效路径。
+- [x] AC5：`node plugin/scripts/task-schema-check.ts tasks/gap-touches-parser-annotation-strip-single-shot-order-dependent.md` 退出 0；`--for-task` scoped 门绿。 —— `node plugin/scripts/task-schema-check.ts tasks/gap-touches-parser-annotation-strip-single-shot-order-dependent.md` **exit 0**（1 total / 1 N/A-legacy / 0 fail）；`bash scripts/test.sh --for-task gap-touches-parser-annotation-strip-single-shot-order-dependent --allow-thin` **exit 0**（170 pass / 0 fail）。
+- [x] AC6：Core 镜像 `packages/quay/src/observation.ts:507` 的处置已决定并留痕——同修 ⇒ 有对应改动与读数；记录为已知分歧 ⇒ Evidence 中附理由与后续锚点。 —— 决定：**同修**（非记录分歧）。`packages/quay/src/observation.ts` 的私有 `stripTouchAnnotation`（`parseTouchPaths` 用，消费者 `computeBlockingRelations`）落**同一**修法（leading-path cut + 定点循环），并更新镜像注释。读数：镜像一致性脚本对 5 例控制实验 + 6 条真实形态逐条断言 `parseTouchEntries` == `parseTouchPaths`（**全等**）；`packages/quay/test/observation.test.mjs` + `serve-live-body-i18n.test.mjs` = 71 pass / 0 fail；`npx tsc --noEmit -p packages/quay/tsconfig.json` exit 0。
 
 ## Definition of Done
 
@@ -99,3 +99,31 @@ extra:
 - 控制实验实测输出（5/5 符合预测）：全角单独 OK、ASCII 单独 OK、全角在最后 OK、`（说明）(new)` FAIL、`（说明）(new) extra` FAIL。
 - ⚠️ 测量期间 claudecodeui 的 `gap-ac384` 任务文件正被在飞 worker 编辑，首两轮读数取到了不同值（同一文件先测 14 条中 7 条失败、再测 1 条）；**一切数字以冻结 sha 为准**，「任务文件正在被改」这一点本身也是本条要防的形态。
 - 合并候选检查（本 skill step 2b，`task-granularity-advice --touches`）：`peers(0)` / `mentions-only(0)` ⇒ **无合并候选**。同批读数：`touches-parser.ts` landed=2 medLines=161 medRounds=1.50；`observation.ts` landed=70 medLines=355（长期返工热点，改动需更谨慎）。
+
+### 落地读数（口径复制自 scratch；脚本本身不入库，读数为本条冻结）
+
+- **口径（census）**：一条 bullet 记为 **TARGET strip-failure**，当且仅当**它自己**开头的反引号路径**在盘上存在**，而解析该 bullet 的结果**不等于**该路径（「它自己」= 不做跨 bullet 回退）。**`other unresolved`** = 开头的反引号路径**不存在**、且解析结果**也不在盘上**的 bullet —— 真正畸形桶，负控制用。
+- **冻结语料**：quay `493b5c71a8f82e7b70ef340528d3172e875c45d3`；claudecodeui `31ab0091fe53cd281da1f6c68f1e574e8ac8c654`。
+- **普查脚本**：一个 `.mjs`，**解析器模块路径作为 CLI 参数动态 import** ⇒ 同一脚本跑「修复前（develop 版解析器）/ 修复后（本任务 worktree 版解析器）」。
+
+```
+=============== BEFORE (develop 解析器) ===============        =============== AFTER (本任务解析器) ===============
+### quay @ 493b5c71a                                            ### quay @ 493b5c71a
+  bullet opens with a backtick path : 2550                        bullet opens with a backtick path : 2550
+    path exists & parses OK         : 2230                          path exists & parses OK         : 2252
+    TARGET strip-failures           : 22  (6 files)                 TARGET strip-failures           : 0  (0 files)
+  other unresolved                  : 280                         other unresolved                  : 280
+### claudecodeui @ 31ab0091f                                   ### claudecodeui @ 31ab0091f
+  bullet opens with a backtick path : 796                         bullet opens with a backtick path : 796
+    path exists & parses OK         : 777                           path exists & parses OK         : 784
+    TARGET strip-failures           : 7   (1 file)                  TARGET strip-failures           : 0  (0 files)
+  other unresolved                  : 12                          other unresolved                  : 12
+```
+
+### DoD 复跑：`task-granularity-advice --task gap-ac384-processing-single-writer --root <claudecodeui>`
+
+修复前：14 条输入里 **7 条**读成 `landed=0 medLines=— medFileLines=— medRounds=—` —— 与「这个文件从没落地过」**同形**（硬规则 3b），且输出的路径本身带着残留反引号 + 注解原文。修复后：**14 条全部解析出真实路径与读数**，只剩 `tasks/gap-ac384-processing-single-writer.md` 自身 `landed=0`（任务文件自指，非本缺陷）。
+
+### 阻断语义未变（负控制）
+
+`plugin/test/touches-parser-parity.test.mjs` 的 `checkTaskAntiDrift` 两条控制仍在：真实越界文件 `plugin/scripts/unrelated/not-declared.ts` 仍 **HARD FAIL**（`out-of-declared`）；本任务 worktree 上 `anti-drift-touches-check.ts --merge-target develop` 读 `ANTI-DRIFT OK — 3 actual file(s), all within declared Touches (4 glob(s))`。
