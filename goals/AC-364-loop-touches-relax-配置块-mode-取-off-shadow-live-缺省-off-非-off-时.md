@@ -2,7 +2,7 @@
 id: AC-364
 title: loop.touches_relax 配置块：mode 取 off|shadow|live，缺省 off；非 off 时
   after_minutes 缺失即判配置不合格，不回退到任何内置数值；非法值非零退出并保留原配置
-status: draft
+status: active
 kind: criterion
 goal: GOAL-037
 criterion: >-
@@ -38,4 +38,15 @@ expect: plugin/test/touches-relax-config.test.mjs 存在、在 55
 origin: 用户 2026-10-16 认可方案 §3.4：阈值全部来自配置，代码里不写字面量，默认关闭。依据：quay
   的既有纪律「要求一个新前置/新机制之前先给出发生率读数；无读数的数值阈值不得凭空设」——after_minutes 与名额的合适取值要等第 0 步的
   filter_trace 数据（AC-362）出来才能定，所以缺失时判不合格而不是用一个猜的默认值。
+activatedAt: 2026-10-16T15:36:29.527Z
+statusLog:
+  - at: 2026-10-16T15:36:29.527Z
+    from: draft
+    to: active
+    actor: goal-driver
+    reason: "triage: activate"
+fidelity:
+  verdict: faithful
+  reason: "fidelity judge: faithful"
+  at: 2026-10-16T15:36:29.527Z
 ---
