@@ -245,6 +245,21 @@ $ node --experimental-strip-types plugin/scripts/sh-census-check.ts --json | jq 
 独立复算（不调检查器）：逐个 `[ -L ]` + `cmp` 枚举 ⇒ 非链接同字节对 = **0**，61 个镜像项全部 mode 120000。
 注入 AC1(a) 的那次镜像替换已当场撤销，收尾净检出只有本任务自己的两个文件（`git diff --stat develop...HEAD` = `plugin/scripts/sh-census-check.ts` + `plugin/test/sh-census-check.mjs`）。
 
+### Definition of Done —— 判据本体在真实根上的读数
+
+落地面是**判据本体**（不只是检查器），所以 DoD 的四条逐一对上了：
+
+```
+$ cd /data/home/yale/work/quay            # 主检出
+$ sh -c "$(cat <goals/AC-310 的 criterion 逐字提取>)"     # 改后的判据，逐字
+exit=0  (2026-10-16T22:12:40+08:00)
+```
+
+（同一条读数在 `goal_write` 落笔时由 store 自己跑过一次：该次写入返回的 `evidence.reading` =
+`acceptance passed (exit 0)`、`at: 2026-10-16T13:55:06.340Z`、`evaluationRoot=/data/home/yale/work/quay`。）
+另三条：覆盖 ff-merge 的真实窗口内 ≥200 次无一失败 = AC5；两态可分负控制各一次 + 真实 stderr 全文 = AC1；
+「改动前 false / 改动后 true」的同命令对照 = AC3。
+
 ### 硬规则 5b —— 修一处 ≠ 只此一处（把命中数与前 3 条贴出来）
 
 改 `CAUSE` 词表之后全 corpus 搜旧词条 `duplicate-copies-nonzero-or-not-evaluated`：**3 个文件命中**
