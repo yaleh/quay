@@ -195,8 +195,14 @@ export {
 // AC152：派发前过滤的【可组合谓词列表】单一实现（driver-filters.ts）。worker 的派发环消费
 // applyTaskFilters（函数级复用，⛔ 不各写一遍）。readTaskStatus 亦上收到 driver-filters.ts，
 // 本文件 re-export 保持旧 import 面（worker-driver.test.mjs / computeLandingState 等）。
-import { applyTaskFilters, makeFilterContext, computeDispatchExclusion, readTaskStatus, advanceRetryCap, applyNeedsHumanTransition, reconcileNeedsHumanWithDisk, RETRY_CAP_DEFAULT, lastExitedNotLandedReason, exitedNotLandedAttempts, formatExitedNotLandedReason, syncDocDevelopBidirectional, WORKER_OUTCOME_REL, type RetryState, type ExitedNotLandedAttempt, type NeedsHumanKind, type FilterTraceEntry } from "./driver-filters.ts";
+import { applyTaskFilters, makeFilterContext, computeDispatchExclusion, readTaskStatus, advanceRetryCap, applyNeedsHumanTransition, reconcileNeedsHumanWithDisk, RETRY_CAP_DEFAULT, lastExitedNotLandedReason, exitedNotLandedAttempts, formatExitedNotLandedReason, syncDocDevelopBidirectional, WORKER_OUTCOME_REL, relaxedDispatchEntry, type RetryState, type ExitedNotLandedAttempt, type NeedsHumanKind, type FilterTraceEntry } from "./driver-filters.ts";
 export { readTaskStatus, lastExitedNotLandedReason, exitedNotLandedAttempts, WORKER_OUTCOME_REL } from "./driver-filters.ts";
+// GOAL-037（AC-366）：放宽账本的【写入器】与【读取器】（AC-363）。⛔ 路径字面量只经它的
+// `RELAXED_DISPATCH_REL`；⛔ 本文件不复写第二份 jsonl 解析（名额 / 「不连锁」的读数源 = 它的
+// `readRelaxedDispatchLedger`，经 `FilterContext.relaxedTaskIds` 传给谓词）。
+// 依赖方向：worker-driver → relaxed-dispatch-ledger → driver-filters（无环；⛔ driver-filters 反向
+// import 它会成值环，`import-graph-check` 的 valueSccs 棘轮钉在 0）。
+import { appendRelaxedDispatch, readRelaxedDispatchLedger, type AppendResult } from "./relaxed-dispatch-ledger.ts";
 // AC155：并发 cap / 轮询间隔 / 协调地板的单一真相源（drivers.yml 经 driver-config 加载，⛔ 不各写一份字面量、
 // ⛔ 不再读 QUAY_MAX_TASK_SUBAGENTS env——env 源已并入声明式配置）。
 import { defaultDriverConfig, loadDriverConfig, driverCap } from "./driver-config.ts";
@@ -513,6 +519,39 @@ export function assertFinalState(value: unknown, ctx: string): void {
 /** 驱动对 exited-not-landed 的退出码（gap-worker-driver-fake-completion-exit-0：exit 0 ≠ 落地，
  *  区别于 spawn-failed=2 / killed=128+sig / timed-out=128+SIGTERM=143 / failed=worker 码）。 */
 export const EXITED_NOT_LANDED_EXIT = 3;
+
+// ── GOAL-037（AC-366）：把一次【真实放宽放行】落进 AC-363 的账本 ─────────────────────────────────────
+//
+// 为什么写面在**这里**而不是 `driver-filters.ts`（本条 Plan §3 的落点）或 AC-363 的模块里：
+// ① `driver-filters.ts` **不能** import 账本模块 —— `relaxed-dispatch-ledger.ts` 已从它取
+//    `WORKER_OUTCOME_REL`，反向 import 成**值环**，而 `import-graph-check` 的 shrink-only 棘轮把
+//    `valueSccs` 钉在 0（实测：本 worktree 上 `files=476 edges=1369 value 1248 type 121 valueSccs=0`）。
+// ② 谓词必须保持**纯**（不写盘）：放行决策在 `judgeLiveRelax` 里做，写入只发生在**派发那一刻**。
+// 于是映射（trace 条目 → 五键）与写入都在调用方，且**只有这一处**。
+//
+// ✅ 复用 AC-363 的写入器 `appendRelaxedDispatch`（它自己走 `RELAXED_DISPATCH_REL`）——⛔ 本文件不写
+// 第二个账本路径字面量（硬规则 1：路径的单一来源是那个导出）。
+
+/** 把一条【trace 条目】映射成 AC-363 的 `RelaxedDispatchRecord` 五键并追加写一行账本。
+ *
+ *  ⛔ 失败**不抛**：调用方是派发环，账本写不进去不得让一次已经判定放行的派发失败 —— 但**必须留痕**
+ *  （返回的 `AppendResult.reason` 指名字段，由调用方打印）。这与 `appendRelaxedDispatch` 的
+ *  fail-closed 拒写是同一件事的两端：拒写 + 留痕 ⇒ 半个字节都不落盘，且「没写」不是静默的。 */
+export function recordRelaxedDispatch(root: string, entry: FilterTraceEntry, opts: { nowMs: number }): AppendResult {
+  return appendRelaxedDispatch(root, {
+    task: entry.task,
+    // ⚠️ **单** blocker：AC-362 的 trace 形状就是单 blocker（`FilterTraceEntry.blocker` 的顺序确定 =
+    // `ctx.inFlight` 里第一个重叠者），⛔ 本条不得凭空把它扩成多对手。无 blocker ⇒ 空数组 ⇒ AC-363
+    // 的校验拒写（放宽若无对手，就不是放宽）。
+    blockers: entry.blocker === null ? [] : [entry.blocker],
+    overlapFiles: entry.overlapFiles,
+    // ⛔ 缺值**原样**传（`null`）：AC-363 的校验会 fail-closed 拒写并指名字段，⛔ 不折成 0
+    // （缺值与「等了 0 分钟」形状必须不同，硬规则 6/3b）。
+    waitedMinutes: entry.waitedMinutes,
+    // 注入的 now（⛔ 不用裸 `Date.now()` —— 那是第二份时刻读数，测试不可判）。
+    dispatchedAt: new Date(opts.nowMs).toISOString(),
+  });
+}
 
 /** 并发上限的旧 env 定义点（concurrency-literal-check 的旧旋钮①）。AC155：env 源已退役——并发缺省
  *  改读 driver-config 的 drivers.yml（loadDriverConfig / driverCap 单一真相源）。本常量保留仅为历史
@@ -6670,7 +6709,22 @@ export async function runResidentLoop(opts: ResidentOptions): Promise<number> {
         // GOAL-037（AC-362）：归因走【新增的第 4 个可选参数】，⛔ 判定输入（候选列表 / ctx / names）
         // 逐字不变——本步的返回集合与顺序因此逐个不变（AC9 特征化）。
         const filterSink: FilterTraceEntry[] = [];
-        const afterTaskFilters = applyTaskFilters(shuffled, makeFilterContext(rootDir, { inFlight: exclusion.inFlight, retryExhausted: exclusion.retryExhausted }), undefined, (e) => filterSink.push(e));
+        // GOAL-037（AC-366）：live 判据的**名额**与**不连锁**两条读数源 = AC-363 的放宽账本。
+        // 「每轮一次」读它（⛔ 不逐候选重读盘），经 ctx 带入谓词——⛔ 谓词自己不 I/O，且 driver-filters
+        // 也**不能** import 账本模块（值环，见 recordRelaxedDispatch 的注释）。
+        // `present:false`（账本不存在）⇒ `records:[]` ⇒ 空集：对计数与「没有任务是被放宽派发的」同值。
+        const relaxLedger = readRelaxedDispatchLedger(rootDir);
+        const afterTaskFilters = applyTaskFilters(
+          shuffled,
+          makeFilterContext(rootDir, {
+            inFlight: exclusion.inFlight,
+            retryExhausted: exclusion.retryExhausted,
+            relaxedTaskIds: relaxLedger.records.map((r) => r.task),
+            relaxedLedgerMalformed: relaxLedger.malformed.length,
+          }),
+          undefined,
+          (e) => filterSink.push(e),
+        );
         // 跑过该步 ⇒ 至少是 []（⛔ 不是 null——「跑过且无候选被滤」与「没跑该步」必须可分，硬规则 3b）。
         // 同一轮多次进选择环 ⇒ 追加；轮首已复位置 null ⇒ ⛔ 不跨轮累积。
         if (filterTrace === null) filterTrace = filterSink;
@@ -6697,6 +6751,19 @@ export async function runResidentLoop(opts: ResidentOptions): Promise<number> {
           break;
         }
         step = "spawn-worker";
+        // GOAL-037（AC-366）：该候选本轮**是否被放宽放行**（live 的等待路径）⇒ 按 AC-363 的五键落一行
+        // 账本。读数取自**【本轮】的 trace 条目**（判据自己产出的那一条），⛔ 不在这里重算重叠/等待。
+        // off / shadow / `shared_files` 短路下该条目不存在（`relaxed` 恒 false）⇒ **零写入**
+        // （AC-365 的「影子期不写账本」继续成立）。
+        const relaxEntry = relaxedDispatchEntry(filterSink, sel.task);
+        if (relaxEntry !== null) {
+          const appended = recordRelaxedDispatch(rootDir, relaxEntry, { nowMs: Date.now() });
+          // 拒写（AC-363 的 fail-closed）⛔ 不让一次已经判定放行的派发失败，但**绝不静默** —— 否则
+          // 「账本写不进去」与「本来就没放宽」同形（硬规则 3b）。
+          if (!appended.ok) {
+            process.stderr.write(`worker-driver: relaxed-dispatch ledger refused the write — ${appended.reason} (task=${sel.task})\n`);
+          }
+        }
         await spawnSelected(sel);
       }
 
