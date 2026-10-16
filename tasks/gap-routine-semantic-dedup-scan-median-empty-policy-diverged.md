@@ -3,7 +3,7 @@ id: gap-routine-semantic-dedup-scan-median-empty-policy-diverged
 title: "semantic-dedup-scan: Same even-average core but the empty-set reading
   diverges: 0 (fast-mode-telemetry, workflow-baseline-metrics) vs null
   (resource-anomaly-detector, which also pr"
-status: ready
+status: done
 labels:
   - gap
   - routine-filed
