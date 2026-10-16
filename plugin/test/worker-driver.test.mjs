@@ -14,6 +14,7 @@ import {
   readLockMetricsForRun,
   newSessionId,
   appendOutcomeToFile,
+  appendRoundToFile,
   computeWorkerRoundRecord,
   splitArgs,
   launchArgv,
@@ -193,6 +194,9 @@ import { ensureBranchModel } from "../../packages/quay/src/branch-model.ts";
 // 是 `stop --kind worker` 的【写侧原语】——夹具经它触发停机，⛔ 不手写一份 JSON 形状（改天写侧变了，
 // 手写的夹具会继续「通过」，测的就不是那条通道了）。
 import { kernelSiblingArgv, recordKindStop, clearKindStop } from "../scripts/driver-runtime.ts";
+// gap-routine-semantic-dedup-scan-append-heartbeat-vs-round：round 落盘 append 的【共享家】——
+// SSOT 棘轮拿它做同一性对照（worker-driver 的 appendRoundToFile 必须 === 它）。
+import { appendHeartbeatLine } from "../scripts/driver-runtime.ts";
 
 import {
   DRIVER,
@@ -5258,4 +5262,66 @@ test("computeOutcome — 分阶段字段落盘：terminal 显式取值 + 新阶�
     },
   });
   assert.equal(mismatch.legacy_lock_join.mismatch, true);
+});
+
+// ── gap-routine-semantic-dedup-scan-append-heartbeat-vs-round ────────────────────────────────────
+// routine `semantic-dedup-scan`（finding `append-heartbeat-vs-round`，runId
+// `semantic-dedup-scan-1792168649663`）发现：driver-runtime.ts 的 `appendHeartbeatLine`（自述「一条 append
+// 的单一实现，两 driver 共用」，outer/suite driver 已 import）与 worker-driver 自己那份**逐字节相同**的
+// `appendRoundToFile` 并存。处置 = 删掉私有函数体、改走 import，名字作为**导出别名**保留。
+//
+// 这条棘轮盯的是【同一性】本身，⛔ 不是「已经改过一次」的存档：谁把私有副本写回来（或把别名的来源换成
+// 第二份实现），它就红。三半缺一不可——硬规则 2：非零计数要先看「命中的是不是我要的」（命中清单进断言
+// 消息），零计数要把同一个谓词对着一个【已知为真】的样本干跑一次（负控制臂）。
+
+const APPEND_SCRIPTS_DIR = path.join(REPO_ROOT, "plugin", "scripts");
+
+/** 一份源码文本里 `export function <name>(` 的【行位置】命中（谓词本体；文件扫描与负控制共用同一份）。 */
+function declHitsInSource(text, name) {
+  const re = new RegExp(`^export function ${name}\\s*\\(`);
+  const hits = [];
+  text.split("\n").forEach((line, i) => { if (re.test(line)) hits.push({ line: i + 1, text: line.trim() }); });
+  return hits;
+}
+
+/** 按位置扫 `plugin/scripts` 的 ts/mjs/js 三种载体（routine 的扫描面），数一个导出函数的声明点。 */
+function scanExportedFunctionDecls(dir, name) {
+  const hits = [];
+  for (const entry of fs.readdirSync(dir).sort()) {
+    if (!/\.(ts|mjs|js)$/.test(entry)) continue;
+    const text = fs.readFileSync(path.join(dir, entry), "utf8");
+    for (const h of declHitsInSource(text, name)) hits.push({ file: entry, line: h.line, text: h.text });
+  }
+  return hits;
+}
+
+test("SSOT — round 落盘的 append 恰好一份实现：worker-driver 的 appendRoundToFile 就是 driver-runtime.appendHeartbeatLine，私有副本零声明", () => {
+  // ① 同一性：worker-driver 的 `appendRoundToFile` 必须【就是】共享家那个函数对象——⛔ 不是「两份体长得
+  //    一样」（那是 ② 的事）。谁把它换成第二份实现（哪怕只有一行），这条就红。
+  assert.equal(
+    appendRoundToFile, appendHeartbeatLine,
+    "appendRoundToFile 必须是 driver-runtime.appendHeartbeatLine 本身（同一函数对象），⛔ 不是第二份实现",
+  );
+
+  // ② 位置计数：`export function appendRoundToFile(` 在 plugin/scripts 下恰好 0 处（私有副本已删）。
+  const dupDecls = scanExportedFunctionDecls(APPEND_SCRIPTS_DIR, "appendRoundToFile");
+  assert.deepEqual(
+    dupDecls, [],
+    `plugin/scripts 下 appendRoundToFile 的声明应恰好 0 处（已合并进 driver-runtime.appendHeartbeatLine）；实际命中：${JSON.stringify(dupDecls)}`,
+  );
+  // ②b 共享家仍在、且恰好一处，位置就是 driver-runtime.ts——否则「0 处」可能只是「两份都没了」（实现被
+  //     删/被搬走），那与「合并成功」不是同一件事（硬规则 3b）。
+  const homeDecls = scanExportedFunctionDecls(APPEND_SCRIPTS_DIR, "appendHeartbeatLine");
+  assert.deepEqual(
+    homeDecls.map((h) => h.file), ["driver-runtime.ts"],
+    `appendHeartbeatLine 的声明应恰好是 driver-runtime.ts 一处；实际命中：${JSON.stringify(homeDecls)}`,
+  );
+
+  // ③ 负控制：同一个谓词对一个【已知含该声明】的合成样本必须命中一处——否则 ② 的「0 处」是空转
+  //    （谓词坏掉时，零计数与「干净」同形 ⇒ 与「查过了」不可区分，硬规则 2 / 3b）。
+  const synthetic = "export function appendRoundToFile(file: string, record: unknown): string {}\n";
+  assert.equal(
+    declHitsInSource(synthetic, "appendRoundToFile").length, 1,
+    "负控制失败：谓词对已知为真的样本没命中 ⇒ ② 的 0 处不是读数",
+  );
 });

@@ -392,6 +392,12 @@
       "readers": "unaudited"
     },
     {
+      "name": "relaxed-dispatch.jsonl",
+      "kind": "jsonl-log",
+      "owner": "plugin/scripts/relaxed-dispatch-ledger.ts",
+      "readers": "unaudited"
+    },
+    {
       "name": "release-branch-finish.jsonl",
       "kind": "jsonl-log",
       "owner": "unowned-yet",
