@@ -98,14 +98,6 @@ extract
 - 本任务自身的 AC/Touches 没有变化，不是因为本任务有缺陷才阻塞。
 - `depends_on` 已指向上述两个任务；两者皆 `done` 后，`ready-pool-check` 的 `depsReadinessFor` 会自动判定解阻塞，促升回 `ready`，不需要人工介入。
 
-## Blocker
-
-**2026-10-15T05:39:22.144Z — worker 未落地（exited-not-landed）**
-
-- 未落地原因：step=suite: oom-killed (2) — recovery exhausted at floor concurrency 32 — no declared rung produced a complete verdict (64,48,32); needs a code/config fix, see plugin/scripts/full-suite-runner.ts
-- run_id：wk-prod-anchor
-- session_id：84fa96f2-95ad-4b74-8dfb-21f75937ab4d
-
 ## Needs-Human
 
 **执行 2026-10-15T05:39:23.235Z — 停派终止（失败无法归因，⛔ 不再重派）**
