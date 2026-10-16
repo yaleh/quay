@@ -1,7 +1,7 @@
 ---
 id: gap-parked-marker-matches-its-own-mention-in-prose
 title: PARKED 标记的匹配器未锚行：任务只要在证据里如实记录该标记，就会把自己永久停派（解除指令「删掉首行」在本缺陷下不成立）
-status: ready
+status: done
 labels:
   - gap
 parent: null
