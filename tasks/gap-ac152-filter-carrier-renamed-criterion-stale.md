@@ -92,3 +92,23 @@ node --no-warnings --experimental-strip-types -e 'import("./plugin/scripts/drive
 - `anti-drift-touches-check --merge-target develop` ⇒ `ANTI-DRIFT OK: … 1 actual file(s), all within declared Touches (3 glob(s))`，exit **0**。
 
 **改动面（3 个文件，全部在 `## Touches` 内）**：`goals/AC-152-…md`（criterion + body，经 ABI）、`plugin/test/driver-filters.test.mjs`（互指注释，Δ=1 块注释）、`tasks/gap-ac152-…md`（本文件）。
+
+**DoD 读数（`.quay/goal-round.jsonl`，fail → pass 的翻转，2026-10-16）**：goal-driver 的 round fact 里，
+AC-152 在修复前出现在两个失败集合中、修复后**零次出现**（`'AC-152' in json.dumps(round)` ⇒ False）：
+
+| goal round（ts） | `achievedFailing.achievedButFailing` | `frozenFailing.failing` | AC-241 | AC-242 | 该轮点名 AC-152 |
+|---|---|---|---|---|---|
+| 18:20:54 / 18:28:04（修前） | `["AC-241","AC-242"]` | `["AC-152"]` | fail | fail | 是 |
+| 18:35:16（修前） | `["AC-241"]` | `[]` | fail | fail | 是 |
+| **18:44:37 / 18:50:32（修后）** | `[]` | `[]` | **pass** | **pass** | **否** |
+
+`frozenFailing.failing: ["AC-152"]` 就是 DoD 点名的「该 AC 的 verdict」载体，修后为空；AC-241/AC-242
+的唯一成因就是它（修前 reason 逐字：`unattributable failing goal AC(s): AC-152: acceptance failed
+(exit 1) — criterion wrote no output to stderr/stdout`），修后两条都 pass。
+
+达成路径 = **判据移到真承载者 + 失败带成因 + 负控制可红**：负控制下真接受侧 `goal gate` 的 reason 带
+`CAUSE=filter-count=4-want=5 …`，而旧判据的 ledger reason 是「criterion wrote no output to
+stderr/stdout」——即把「红得无法诊断」换成带成因的红（硬规则 3b）。⛔ 不是把判据改成恒真（AC2/AC3/AC4/AC5
+是这条的判据）；⛔ 也不是把 `TASK_FILTERS` 那一格的名字改回去（那会破坏 AC-365 的 off 同形前提）。新判据
+经 `evaluateCriterionAttribution` 读数为 `bare failure exits: 0` —— 它不再给 AC-241 的 ratchet 添任何
+无成因失败。
