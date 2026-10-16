@@ -14,17 +14,6 @@ depends_on:
   - gap-quality-gate-driver-loop-watchdog-test-hangs-since-e18ec4b04
   - gap-suite-resource-measurement-needs-a-host-adapter-not-inline-cgroup-calls
 ---
-> **PARKED**（worker 第 5 轮，2026-10-16T21:3xZ）——⛔ 不是「做完了没勾」：AC1/AC3/AC4 三条都要求
-> 「16 GiB 压力基线下、由 driver 在安静时段调度的完整测量轮」，而该基线已被 **2026-10-15 的 32G 裁定**取代；
-> 且 AC1 的对照（「ac341 isolated vs included」）在本仓 `scripts/test.sh` 里**无法构造**（无排除 flag）。
-> 缺的是**人的裁定**：(a) 按当前生效基线重定范围 / (b) 撤 AC1/AC3 / (c) 授权原样跑。
-> 裁定请求已立案：`tasks/gap-meta-call-heavy-files-ac1-ac3-ac4-2026-10-15-32g-1.md`（status: needs-human）+ `meta/META-016-*.md`。
-> **本行的唯一作用是停止重派**（本轮实测每 ~7–12 分钟烧一个 worker 会话；「达重试上限即停派」在本环境已被一次
-> retreat 在 42 秒内撤销，不可依赖 —— 见 `## Evidence` 第 5 轮）。
-> **解除条件（unpark trigger）**：上述裁定之一被写下 ⇒ 删掉本行即可恢复可派
-> （读者 = `plugin/scripts/ready-pool-check.ts` 的 `PARKED_MARKER_RE` / `isParked`，逐字排除出货池）。
-> ⛔ 本轮未改 AC 文本、未勾选、未动 `status:`。
-
 ## Proposal
 **Human direction 2026-10-14: the 16 GiB suite MemoryMax is a deliberate pressure constraint meant to drive test optimization. It must not be "fixed" just by raising it to 24/26 GiB.** This task does the optimization and the controlled concurrency comparison under 16 GiB. Only if that comparison shows 16 GiB cannot hold does it compare 20/24.
 
