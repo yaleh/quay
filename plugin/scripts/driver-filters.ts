@@ -31,8 +31,15 @@ import { splitTaskFile, statusFromFrontmatter, patchStatusField, commitTaskFile,
 // GOAL-037（AC-362）filtered-empty 归因：waitedMinutes 的载体读面 = kernel 单一转移视图读取器
 // （⛔ 不手搓 jsonl 解析，硬规则 1）。
 import { edgeKindFor, appendTaskStatusEvent, gitBlobSha, readTaskStatusTransitions } from "../../packages/quay/src/kernel/task-transition.ts";
-import { parseTouches, checkTouchesPair, normalizePath } from "./touches-orthogonality-check.ts";
+import { parseTouches, checkTouchesPair, normalizePath, matchGlob } from "./touches-orthogonality-check.ts";
 import { expandDeclaredTouches } from "./concurrent-batch-scheduler.ts";
+// GOAL-037（AC-365）放宽谓词的【配置面】：只读，单一实现在 AC-364 的模块里（硬规则 1 / 5b——
+// ⛔ 本文件不复写第二个 config 解析器）。
+// ⚠️ 账本面（AC-363 的 `readRelaxedDispatchLedger`）**故意不 import**：`relaxed-dispatch-ledger.ts`
+// 已从本文件取 `WORKER_OUTCOME_REL`，反向再 import 会形成【值环】，而 `import-graph-check` 的
+// shrink-only 棘轮把 valueSccs 钉在 0（新环是 RED，且基线只许降不许升）。名额读数因此由 `ctx` 带入
+// （见 `FilterContext.relaxedInFlight`）；⛔ 本文件不自己解析那份 jsonl，也不复写它的路径语义。
+import { loadTouchesRelaxConfig, type TouchesRelaxConfig } from "./touches-relax-config.ts";
 // gap-develop-sync-reset-hard-destroys-third-party-project-tree：终局解可弃性判定复用【既有的】
 // 任务板/文档面清单（⛔ 不重写第二份——driver-filters.ts 自己的头注释即「不重写、只复用」）。
 import { DOC_SURFACES } from "./select-static-checks-for-touches.ts";
@@ -48,6 +55,13 @@ export interface FilterContext {
   inFlight: string[];
   /** 已耗尽重试上限的任务 id（retryCapNotExhausted 用；worker 无重试上限 ⇒ 空集）。 */
   retryExhausted: Set<string>;
+  /** GOAL-037（AC-365）：当前**已被放宽派发**的在飞任务数（`touchesDisjointOrAged` 的
+   *  `quota-available` 条件读它）。缺省 0 —— 在 shadow 下这是一个**结构性事实**（影子期不放行 ⇒
+   *  没有任何任务是被放宽派发的），不是「猜一个默认值」。
+   *  ⛔ 由调用方带入而非本文件去读 AC-363 的账本：`relaxed-dispatch-ledger.ts` 已从本文件取
+   *  `WORKER_OUTCOME_REL`，反向 import 会形成值环（`import-graph-check` 的 shrink-only 棘轮把
+   *  valueSccs 钉在 0）。live 下由 AC-366 从账本算出后经此传入。 */
+  relaxedInFlight?: number;
 }
 
 /** 构造缺省上下文（inFlight/retryExhausted 空集），调用方按需覆盖。 */
@@ -221,8 +235,21 @@ export const touchesDisjoint: TaskFilter = {
   name: "touchesDisjoint",
   predicate: (ctx) => {
     if (ctx.inFlight.length === 0) return () => true;
-    const expand = (globs: string[]) => expandDeclaredTouches(globs, ctx.root);
-    const readTouches = (id: string) => {
+    const { expand, readTouches } = makeTouchesSideReaders(ctx);
+    const inFlight = ctx.inFlight.map(readTouches);
+    return (id) => inFlight.every((ifp) => checkTouchesPair(readTouches(id), ifp, expand).disjoint);
+  },
+};
+
+/** touches 判定的两侧读取（展开器 + 逐 id 的 `parseTouches`）。抽出来只为让【谓词】与【归因】
+ *  读同一份单一真相源函数（`expandDeclaredTouches` / `parseTouches`），⛔ 不是第二种重叠数学。 */
+function makeTouchesSideReaders(ctx: FilterContext): {
+  expand: (globs: string[]) => Set<string>;
+  readTouches: (id: string) => { hasSection: boolean; globs: string[] };
+} {
+  return {
+    expand: (globs) => expandDeclaredTouches(globs, ctx.root),
+    readTouches: (id) => {
       const file = path.join(ctx.root, "tasks", `${id}.md`);
       let raw: string;
       try {
@@ -231,10 +258,186 @@ export const touchesDisjoint: TaskFilter = {
         return { hasSection: false, globs: [] as string[] };
       }
       return parseTouches(parseTask(raw).body);
-    };
-    const inFlight = ctx.inFlight.map(readTouches);
-    return (id) => inFlight.every((ifp) => checkTouchesPair(readTouches(id), ifp, expand).disjoint);
-  },
+    },
+  };
+}
+
+// ── GOAL-037（AC-365）：`touchesDisjointOrAged` —— off 逐候选同形 / shadow 只标注不放行 ────────────
+//
+// 为什么是【同一个】谓词而不是「再加一个」：GOAL-037 的整条生效路径（P1 shadow 观察 → P2 live 小名额
+// → P4 评估）都以「touches 这一条判定在 off 下与现状逐字节相同」为前提。往 TASK_FILTERS 里【追加】第六
+// 个谓词会让 off 下的过滤面多一条判定（那不是同形）；所以是 **取代** `touchesDisjoint` 在列表中的那一
+// 格，`touchesDisjoint` 本身【保留导出】——它仍是 off 语义的单一实现（本条直接委托它），也是本条测试
+// 用来独立算出基线的那个函数（硬规则 5b：⛔ 不写第二份 off 实现）。
+//
+// 判别力从哪来（硬规则 4：结构上不可能取假的量不是测量）：若 off 分支直接委托 `touchesDisjoint`，
+// 那么「新谓词 vs 旧谓词」的断言会退化成自证。真正的判别力来自**配置块的存在不得泄漏进 off 决策**——
+// 一个 `mode: off` 但 `after_minutes` / `max_relaxed_inflight` 齐备、且候选等待时长**确实超过**
+// `after_minutes` 的 fixture，会让「只在『任务够老』上做判断、忘了先看 mode」的实现放行而变红。
+
+/** 放宽词表的条件 id（稳定，按合取顺序求值）。⛔ 这里【没有】阈值——`after_minutes` /
+ *  `max_relaxed_inflight` / `never_relax` / `shared_files` 全部来自 AC-364 读出的配置。 */
+export const RELAX_CONDITIONS = [
+  "touches-only-blocker",
+  "waited-enough",
+  "quota-available",
+  "not-never-relax",
+  "overlap-shared",
+] as const;
+
+export type RelaxCondition = (typeof RELAX_CONDITIONS)[number];
+
+/** 一个候选本轮的放宽判定读数：`wouldRelax` + 首个不满足的条件 id（全满足 ⇒ `null`）。 */
+export interface RelaxAnnotation {
+  wouldRelax: boolean;
+  relaxBlockedBy: RelaxCondition | null;
+}
+
+/** 本轮放宽判定的【轮起点状态】：配置与账本各读一次（⛔ 不逐候选重读盘——AC-364 / AC-363 的读取器
+ *  都是每轮一次的调用）。`annotate` 为假时（off / 读不懂的声明）不产生任何标签：AC-364 的 fail-closed
+ *  姿态——读不懂 ⇒ 按最保守的 off 行为，而 ⛔ 绝不放行。 */
+interface RelaxRoundState {
+  annotate: boolean;
+  config: TouchesRelaxConfig;
+  relaxedInFlight: number;
+  readyAtMs: Map<string, number>;
+  nowMs: number;
+}
+
+/** 构造本轮状态。配置每轮读一次（⛔ 不逐候选重读盘）。名额读数由 `ctx` 带入：`ctx.relaxedInFlight`
+ *  缺省 0 —— 在 shadow 下这是结构性事实（影子期不放行 ⇒ 无任务是被放宽派发的）。 */
+function makeRelaxRoundState(ctx: FilterContext): RelaxRoundState {
+  const load = loadTouchesRelaxConfig(ctx.root);
+  const config = load.config ?? { mode: "off" as const, shared_files: [], never_relax: [] };
+  const annotate = load.state === "shadow" || load.state === "live";
+  return {
+    annotate,
+    config,
+    relaxedInFlight: ctx.relaxedInFlight ?? 0,
+    // 等待时长的单一来源 = AC-362 已落地的 `buildReadyAtMsMap`（⛔ 不新写第二个 ready 时刻解析器）。
+    readyAtMs: annotate ? buildReadyAtMsMap(ctx.root) : new Map(),
+    nowMs: Date.now(),
+  };
+}
+
+/** 重叠面 ⊆ `shared_files` 白名单（AC-364 的 `shared_files` 是**逐元素 glob**——配置测试里就给过一条
+ *  星号式 glob，故逐元素 `matchGlob` 而非字符串相等）。空重叠面 ⇒ false：「无重叠」不是「重叠都在
+ *  白名单里」，那是另一件事。 */
+function overlapsAllShared(overlapFiles: string[], sharedFiles: string[]): boolean {
+  if (overlapFiles.length === 0) return false;
+  return overlapFiles.every((f) => sharedFiles.some((g) => matchGlob(g, f)));
+}
+
+/** 逐候选求值五条件的合取，返回首个不满足者。`blocked` = 本轮**所有**滤掉该候选的谓词名
+ *  （条件①「只有该轮确实被 touches 单独挡住才允许放宽」的判定输入，GOAL-037 风险节逐字）。 */
+function judgeRelaxCandidate(
+  id: string,
+  blocked: readonly string[],
+  waits: number | null,
+  overlaps: string[],
+  state: RelaxRoundState,
+): RelaxAnnotation {
+  // ① touches-only-blocker —— 除 touches 外没有別的谓词也滤掉它。
+  if (!(blocked.length === 1 && blocked[0] === TOUCHES_RELAX_FILTER_NAME)) {
+    return { wouldRelax: false, relaxBlockedBy: "touches-only-blocker" };
+  }
+  // ② waited-enough —— 缺值（null）⇒ 条件为假（硬规则 6：缺值 = 未查，⛔ 不当 0，⛔ 不当 ∞）。
+  const after = state.config.after_minutes;
+  if (waits === null || after === undefined || !(waits >= after)) {
+    return { wouldRelax: false, relaxBlockedBy: "waited-enough" };
+  }
+  // ③ quota-available —— 已放宽在飞数 < 名额（名额来自配置，⛔ 无内置回退）。
+  const quota = state.config.max_relaxed_inflight;
+  if (quota === undefined || !(state.relaxedInFlight < quota)) {
+    return { wouldRelax: false, relaxBlockedBy: "quota-available" };
+  }
+  // ④ not-never-relax —— 候选 id 不在 `never_relax` 名单内。
+  if (state.config.never_relax.includes(id)) {
+    return { wouldRelax: false, relaxBlockedBy: "not-never-relax" };
+  }
+  // ⑤ overlap-shared —— 重叠面全部落在 `shared_files` 白名单内。
+  if (!overlapsAllShared(overlaps, state.config.shared_files)) {
+    return { wouldRelax: false, relaxBlockedBy: "overlap-shared" };
+  }
+  return { wouldRelax: true, relaxBlockedBy: null };
+}
+
+/** 谓词在列表中的名字。唯一定义点——`TASK_FILTERS` 的元素、判定里的条件①、trace 侧的条目选择、
+ *  两条既有 pin 全部引用它（⛔ 不散落第二份字面量）。 */
+const TOUCHES_RELAX_FILTER_NAME = "touchesDisjointOrAged";
+
+/** 本轮对 `touchesDisjointOrAged` 的逐候选标签表。谓词一次构造、逐候选判定；标签在**判定那一刻**
+ *  写进这张表，trace 侧按【同一次】过滤的结果读它（⛔ 不重跑谓词、⛔ 不另算一份重叠）。 */
+interface RelaxAttribution {
+  /** 该候选本轮**所有**滤掉它的谓词名（准入集合由 `applyTaskFilters` 逐候选喂进来）。 */
+  setFilteredBy: (id: string, filteredBy: readonly string[]) => void;
+  /** 该候选的标签（off / 未登记 ⇒ `null`——off 不做放宽判断）。 */
+  annotationFor: (id: string) => RelaxAnnotation | null;
+}
+
+/** 谓词实例 → 它的标签表。谓词与标签表都是**同一个模块级对象**的字段 ⇒ WeakMap 关联的是
+ *  `TASK_FILTERS` 里那一个元素本身（⛔ 不给 `TaskFilter` 接口加字段——那会让「新增谓词 = 往列表
+ *  加一行」这条 AC152 纪律失真）。`predicate()` 可能被多次调用（每个消费点各自构造一次），故标签
+ *  表在实例上保存【最后一次构造】的那一份，`applyTaskFilters` 用自己刚构造的那一份读。 */
+const RELAX_ATTRIBUTION = new WeakMap<object, RelaxAttribution>();
+
+/** 构造一轮的标签表（谓词与它成对出现）。 */
+function makeRelaxAttribution(state: RelaxRoundState, ctx: FilterContext): RelaxAttribution {
+  const annotations = new Map<string, RelaxAnnotation>();
+  return {
+    setFilteredBy: (id, filteredBy) => {
+      if (!state.annotate) return; // off / 读不懂 ⇒ 不做放宽判断（⛔ 不产生任何标签）
+      annotateRelax(id, state, ctx, annotations, filteredBy);
+    },
+    annotationFor: (id) => annotations.get(id) ?? null,
+  };
+}
+
+/** 判定一个候选的放宽标签（仅在 `state.annotate` 时登记）。重叠面 = 候选与每个在飞对手的**真实**
+ *  `checkTouchesPair(...).overlaps` 并集（复用同一份重叠数学，⛔ 不重写交集计算），并排除候选自身的
+ *  任务文件（自 touch 不是与对手的冲突面——与 AC-362 的归因面同一口径）。 */
+function annotateRelax(
+  id: string,
+  state: RelaxRoundState,
+  ctx: FilterContext,
+  annotations: Map<string, RelaxAnnotation>,
+  filteredBy: readonly string[],
+): void {
+  const { expand, readTouches } = makeTouchesSideReaders(ctx);
+  const self = readTouches(id);
+  const selfTaskFile = normalizePath(path.join("tasks", `${id}.md`));
+  const overlaps: string[] = [];
+  for (const other of ctx.inFlight) {
+    const pair = checkTouchesPair(self, readTouches(other), expand);
+    if (pair.disjoint) continue;
+    for (const f of pair.overlaps) if (normalizePath(f) !== selfTaskFile) overlaps.push(f);
+  }
+  const readyAt = state.readyAtMs.get(id);
+  const waits = readyAt === undefined ? null : Math.floor((state.nowMs - readyAt) / 60000);
+  annotations.set(id, judgeRelaxCandidate(id, filteredBy, waits, overlaps, state));
+}
+
+/** 构造一轮的判定：把标签表挂到**本次构造的那个谓词**上，并返回一个**逐调用委托**基线谓词的函数。
+ *  ⛔ 委托是「直接调用 `touchesDisjoint.predicate(ctx)` 的返回值本身」：返回值、短路顺序、fail-closed
+ *  缺省全部随之逐字节相同，且不产生第二份 off 实现（硬规则 5b）。shadow / live 的返回值与 off
+ *  **完全一样**——本条只标注不放行（live 的放行语义是 AC-366 的活；⛔ 在这里放行会让取假形态变绿）。
+ *  mode 的差别**只**喂标签表，⛔ 不参与返回值。
+ *
+ *  为什么标签表挂【构造出的那个函数】而不是列表里那个对象：`predicate(ctx)` 每个消费点各调一次
+ *  （测试里同一模块会被多次构造），挂在模块级对象上会被后一次构造覆盖。 */
+function makeTouchesDisjointOrAgedPredicate(ctx: FilterContext): (id: string) => boolean {
+  const state = makeRelaxRoundState(ctx);
+  const planOff = touchesDisjoint.predicate(ctx);
+  const decision = (id: string): boolean => planOff(id);
+  RELAX_ATTRIBUTION.set(decision, makeRelaxAttribution(state, ctx));
+  return decision;
+}
+
+/** `touchesDisjoint` 在列表中的那一格被本条取代：`touch` 面的判定从「只看互斥」变成「互斥 or 够老」，
+ *  而本条实现的是**前者不变 + 后者只观察**（off 逐候选同形 / shadow 只标注不放行）。 */
+export const touchesDisjointOrAged: TaskFilter = {
+  name: TOUCHES_RELAX_FILTER_NAME,
+  predicate: (ctx) => makeTouchesDisjointOrAgedPredicate(ctx),
 };
 
 /** 候选未耗尽重试上限（AC133 失败上限）。retryExhausted 集合由 advanceRetryCap 填充（worker 从
@@ -1260,7 +1463,7 @@ export const notNeedsHuman: TaskFilter = {
 export const TASK_FILTERS: readonly TaskFilter[] = [
   notInFlight,
   depsSatisfied,
-  touchesDisjoint,
+  touchesDisjointOrAged,
   retryCapNotExhausted,
   notNeedsHuman,
 ];
@@ -1291,6 +1494,13 @@ export interface FilterTraceEntry {
   /** 「现在」与 `.quay/task-status-events.jsonl` 中该任务【第一条 `to:"ready"`】记录时刻之差（分钟）。
    *  读不到（无该记录 / 载体不可读）⇒ `null`（⛔ 不写 0）。 */
   waitedMinutes: number | null;
+  /** **仅 `touchesDisjointOrAged` 条目**有（GOAL-037 / AC-365）：该候选在本轮 mode 下**会不会**被放宽。
+   *  `mode: off`（含配置块缺失）⇒ 恒 `false` —— off 不做放宽判断，⛔ 不出现 `true`。判断只标注，
+   *  ⛔ 不影响放行（off 与 shadow 的返回集合逐元素相同）。其余四个谓词的条目上**没有**这两个键。 */
+  wouldRelax?: boolean;
+  /** **仅 `touchesDisjointOrAged` 条目**有：首个不满足的放宽条件 id（`RELAX_CONDITIONS` 之一）；
+   *  全满足 ⇒ `null`。off ⇒ 恒 `null`。 */
+  relaxBlockedBy?: RelaxCondition | null;
 }
 
 /** trace 汇：`applyTaskFilters` 每发现一个被滤掉的（候选 × 谓词）就调用一次（逐条，⛔ 不短路）。 */
@@ -1365,19 +1575,39 @@ export function applyTaskFilters(candidateIds: string[], ctx: FilterContext, nam
     const readyAtMs = buildReadyAtMsMap(ctx.root);
     const nowMs = Date.now();
     const touchesAt = makeTouchesAttributor(ctx);
+    // GOAL-037（AC-365）：touches 那一格的标签表（off ⇒ 恒无标签）。它挂在【本次过滤构造的那一个】
+    // 谓词函数上，故这里读到的就是逐候选判定的同一份结果（⛔ 不重跑谓词）。
+    const relaxIdx = filters.indexOf(touchesDisjointOrAged);
+    const relaxAt = relaxIdx >= 0 ? RELAX_ATTRIBUTION.get(preds[relaxIdx]) ?? null : null;
     for (const id of candidateIds) {
+      // 本轮**所有**滤掉该候选的谓词（准入集合的条件①「被 touches 单独挡住」的判定输入）。先收齐
+      // 再发条目 ⇒ 条目内容与「一个候选可命中多个谓词」的语义一致（⛔ 不短路）；条目仍按 filters
+      // 顺序发出，集合与顺序与逐条即时发出时逐个相同。
+      const blocked: string[] = [];
+      for (let i = 0; i < filters.length; i++) if (!preds[i](id)) blocked.push(filters[i].name);
+      if (relaxAt) relaxAt.setFilteredBy(id, blocked);
+      if (blocked.length === 0) continue;
       for (let i = 0; i < filters.length; i++) {
-        if (preds[i](id)) continue; // 该谓词保留了候选 ⇒ 无条目
         const name = filters[i].name;
-        const att = name === touchesDisjoint.name ? touchesAt(id) : { blocker: null, overlapFiles: [] as string[] };
+        if (!blocked.includes(name)) continue;
+        const att = name === TOUCHES_RELAX_FILTER_NAME ? touchesAt(id) : { blocker: null, overlapFiles: [] as string[] };
         const readyAt = readyAtMs.get(id);
-        trace({
+        const entry: FilterTraceEntry = {
           task: id,
           filter: name,
           blocker: att.blocker,
           overlapFiles: att.overlapFiles,
           waitedMinutes: readyAt === undefined ? null : Math.floor((nowMs - readyAt) / 60000),
-        });
+        };
+        // GOAL-037（AC-365）：两键**只**长在 touches 那一格上（⛔ 不改五个既有谓词的条目形状）。
+        // off ⇒ `wouldRelax:false` + `relaxBlockedBy:null`（off 不做放宽判断，⛔ 不出现 true）；
+        // shadow ⇒ 满足全部条件者 `true`、否则点名首个不满足的条件 id。
+        if (name === TOUCHES_RELAX_FILTER_NAME) {
+          const ann = relaxAt ? relaxAt.annotationFor(id) : null;
+          entry.wouldRelax = ann ? ann.wouldRelax : false;
+          entry.relaxBlockedBy = ann ? ann.relaxBlockedBy : null;
+        }
+        trace(entry);
       }
     }
   }

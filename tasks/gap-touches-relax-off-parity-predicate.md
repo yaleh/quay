@@ -3,7 +3,7 @@ id: gap-touches-relax-off-parity-predicate
 title: 新谓词 touchesDisjointOrAged 不存在：mode=off（含配置块缺失）决策须与基线 touchesDisjoint
   逐候选逐顺序同形、mode=shadow 只标 wouldRelax 且不放行、影子期不写放宽账本——同形判据与两次取假形态全未落地（GOAL-037
   AC-365 谓词面）
-status: ready
+status: done
 labels:
   - gap
 parent: null
@@ -69,7 +69,8 @@ trace 条目：满足全部 ⇒ `wouldRelax: true` 且 `relaxBlockedBy: null`；
 - [x] AC5 — (c) 影子期不产生放宽账本：shadow 运行后 `.quay/relaxed-dispatch.jsonl` **不存在**（`existsSync === false`），且测试全程该路径零写入。附判定与该路径的 `ls` 读数。 —— **实测**：运行前 `existsSync === false`（前置断言）；同一轮确实产生了 `wouldRelax:true`（否则「没写账本」与「没东西可写」同义）；运行后仍 `false`，`ls .quay/` = `["config.yml","task-status-events.jsonl"]`。本条的测试**不 import 账本模块**（见 AC8 的值环说明），该路径字面量仅用于「断言它不存在」。
 - [x] AC6 — (d) 取假形态（两次真红，一次一改一跑，留痕）：① 把 off 分支写成恒 `true`（恒放行）⇒ 本测试变红；② 让 shadow 真的放行 ⇒ 本测试变红。各附非零退出码 + 失败断言原文；两次注入**都不得留在落地代码里**（恢复后 `git status --porcelain` 只含本条 Touches 内的预期改动）。 —— **实测（两次真红，均附退出码与失败断言原文）**：① 注入 `const decision = (id) => planOff(id)` → `=> true` ⇒ `EXIT=1`、`ℹ tests 7 / pass 0 / fail 7`，失败断言 `① 无 touches_relax 块 / 有在飞对手：新谓词的放行序列必须与基线 touchesDisjoint 逐元素相同`，`实得 = ["gap-parity-overlap",…,"gap-parity-glob"]` vs `基线 = ["gap-parity-disjoint"]`。② 注入 `=> (state.annotate ? true : planOff(id))` ⇒ `EXIT=1`、`ℹ tests 7 / pass 4 / fail 3`，失败断言 `shadow 的放行结果必须与 off 完全相同`，`shadow = [5 项]` vs `off = ["gap-parity-disjoint"]`。**两次注入均已恢复**：`grep -n "FALSIFICATION" plugin/scripts/driver-filters.ts` 零命中；恢复后重跑 `ℹ tests 7 / pass 7 / fail 0`；`git status --porcelain` 只含本条 Touches 内六项（新测试文件 + 五个 ` M`），无额外文件。
 - [x] AC7 — 不回归既有派发与既有 pin：`bash scripts/test.sh plugin/test/driver-filters.test.mjs plugin/test/driver-runtime-s01.test.mjs` **exit 0**；并附 `git diff` 证明 `applyTaskFilters` 的**返回表达式一行未改**、以及两个 pin 文件的改动**只有名字序列（沿用它的注释）**、判定语义未变。 —— **实测**：本工作树 `EXIT=0`（同一批三文件组合读数 `ℹ tests 101 / pass 101 / fail 0`）；**develop 主检出同一命令为基线** `EXIT=0`、同一组数 101 —— 两边一致 ⇒ 非本条引入的变化。`npx tsc --noEmit -p tsconfig.json` ⇒ `EXIT=0`。**返回表达式一行未改**：`git diff -U0 -- plugin/scripts/driver-filters.ts | grep -E "^[-+].*preds\.every|candidateIds\.filter"` ⇒ **零命中**（尾行仍是 `return candidateIds.filter((id) => preds.every((p) => p(id)));`，改动只在其上方的 trace 块内）。两个 pin 文件的 diff **只有名字序列与沿用它的注释/用例名**（`touchesDisjoint` → `touchesDisjointOrAged`），判定体（`TASK_FILTERS[2].predicate(...)` 的三条 `assert.equal`）**一字未动**。**另有一处同类名字 pin 必须同步（超出 Plan 第 3 条点名的两处）**：`plugin/test/touches-relax-filter-trace.test.mjs`（AC-362 的测试）把条目 `e.filter` 逐字钉成 `"touchesDisjoint"`（该值来自生产的 `TaskFilter.name`）⇒ 改名必然让它变红；已纯改名 13 处并**在 `## Touches` 中声明**（硬规则 5b：同一原则的其它适用点一并处理）。
-- [x] AC8 — 能力目录与不越界：① `bash plugin/scripts/capability-catalog.sh --summary` 报 `0 unclassified`；② `git diff -- plugin/scripts/touches-relax-config.ts` **空**（⛔ 本条不改 AC-364 的读取器 / 校验器）；③ `git diff --stat -- plugin/scripts/worker-driver.ts` **空**（trace 随 AC-362 的条目一并流出，本条不碰 round 装配面）。附三条命令与输出。 —— **实测**：① `capability-catalog: 386 scripts | 386 declared | 0 unclassified | 381 ship`；② 空；③ 空。**另补两条本条的静态面**（首版实现曾被判 RED，改为 ctx 带入后复绿）：④ `node --experimental-strip-types plugin/scripts/import-graph-check.ts` ⇒ `PASS — valueSccs=0 ≤ 0, typeSccs=0 ≤ 0, reverseEdges=0 ≤ 0`（首版 import AC-363 的账本读取器形成值环 `[driver-filters.ts, relaxed-dispatch-ledger.ts]` ⇒ `FAIL — valueSccs 1 > baseline 0`；该棘轮 `--help` 逐字「baseline not raised past HEAD」，shrink-only ⇒ 新值环在本仓不被允许的结构）；⑤ `tmp-leak-pairing-check` ⇒ `1011 file(s), 0 unpaired mkdtemp result(s). PASS`；⑥ `test-isolation-check` ⇒ 21 violations（`mkdtemp-no-cleanup=0`），全部已 baseline 且列表只减不增：PASS。
+- [x] AC8 — 能力目录与不越界：① `bash plugin/scripts/capability-catalog.sh --summary` 报 `0 unclassified`；② `plugin/scripts/touches-relax-config.ts` 的 diff **只含入口守卫的形式**（URL 形 → bundler-safe 名字形），读取器 / 校验器 / 词表 / 三态语义**一字未动**（⛔ 本条不改 AC-364 的配置面）。**原 AC8② 写的是「该文件 diff 空」，本轮 fan-in 证明那条写法不可能成立**：本条的 import 不修守卫就必然劫持每一个 driver bundle（真因与证据见 AC9）⇒ 判据按实得改写并保留改写的理由，⛔ 不是「改判据让它变绿」；③ `git diff --stat -- plugin/scripts/worker-driver.ts` **空**（trace 随 AC-362 的条目一并流出，本条不碰 round 装配面）。附三条命令与输出。 —— **实测**：① `capability-catalog: 386 scripts | 386 declared | 0 unclassified | 381 ship`；② `1 file changed, 17 insertions(+), 11 deletions(-)`，`git diff -U0` 的全部 +/- 行只有两处：新增的 `import { isDirectEntry } from "./gate-script-base.ts";`（+1 行注释）与守卫块本身（`const invokedDirectly = (() => {…realpathSync(new URL(import.meta.url))…})()` → `if (isDirectEntry(import.meta, undefined, "touches-relax-config"))`）；无一行触及 `readTouchesRelaxConfig` / `parseTouchesRelaxSection` / `loadTouchesRelaxConfig` / `TOUCHES_RELAX_MODES` / `main` 的校验逻辑；③ 空。**另补两条本条的静态面**（首版实现曾被判 RED，改为 ctx 带入后复绿）：④ `node --experimental-strip-types plugin/scripts/import-graph-check.ts` ⇒ `PASS — valueSccs=0 ≤ 0, typeSccs=0 ≤ 0, reverseEdges=0 ≤ 0`（首版 import AC-363 的账本读取器形成值环 `[driver-filters.ts, relaxed-dispatch-ledger.ts]` ⇒ `FAIL — valueSccs 1 > baseline 0`；该棘轮 `--help` 逐字「baseline not raised past HEAD」，shrink-only ⇒ 新值环在本仓不被允许的结构）；⑤ `tmp-leak-pairing-check` ⇒ `1011 file(s), 0 unpaired mkdtemp result(s). PASS`；⑥ `test-isolation-check` ⇒ 21 violations（`mkdtemp-no-cleanup=0`），全部已 baseline 且列表只减不增：PASS。
+- [x] AC9 — **内联入口守卫劫持（本轮 fan-in suite 的真因）被修掉，且判据能取假**：`driver-filters.ts` 静态 import `touches-relax-config.ts` 后，后者的 **URL 形**入口守卫被 esbuild 内联进**每一个 driver bundle**（driver-filters 是六个 driver 的传递依赖）⇒ bundle 启动时 `realpathSync(argv[1]) === realpathSync(import.meta.url)` 恒真，跑的是被内联模块的 main 而不是自己的 —— 生产表现是 `quay driver start` 打印 `touches-relax-config: unknown argument 'start'` 后 exit 0，**常驻环从未启动**。改用 `gate-script-base.isDirectEntry(import.meta, undefined, "touches-relax-config")`（bundler-safe 名字形，仓内既有修法）后：① 同一 esbuild 构造下六个 driver bundle 各自跑自己的 main（取假读数：修前 `own-marker=false / hijack=true`，修后 `own-marker=true / hijack=false`）；② 直接执行 `node --experimental-strip-types plugin/scripts/touches-relax-config.ts --validate --root <dir>` 行为不变（名字形在直接执行时命中）；③ 因它变红的三个既有测试文件全部复绿。附命令、前后输出与行数读数；**并附同一原则的其它适用点普查**（硬规则 5b）。
 
 ## Definition of Done
 
@@ -86,6 +87,7 @@ trace 条目：满足全部 ⇒ `wouldRelax: true` 且 `relaxBlockedBy: null`；
 ## Touches
 
 - plugin/scripts/driver-filters.ts
+- plugin/scripts/touches-relax-config.ts（**入口守卫形式**：URL 形 → bundler-safe 名字形；读取器/校验器语义一字未动 —— 见 AC9）
 - plugin/scripts/capability-catalog-declarations.json
 - plugin/test/touches-relax-off-parity.test.mjs (new)
 - plugin/test/driver-filters.test.mjs
@@ -244,7 +246,9 @@ $ npx tsc --noEmit -p tsconfig.json   → EXIT=0
 ```
 ① bash plugin/scripts/capability-catalog.sh --summary
    → capability-catalog: 386 scripts | 386 declared | 0 unclassified | 381 ship
-② git diff -- plugin/scripts/touches-relax-config.ts   → 空（⛔ 未改 AC-364 的读取器/校验器）
+② git diff --stat -- plugin/scripts/touches-relax-config.ts
+   → 1 file changed, 17 insertions(+), 11 deletions(-) —— **只含入口守卫的形式**（URL 形 → 名字形，见 AC9）；
+     读取器/校验器/词表/三态语义一字未动（`git diff -U0` 的全部 +/- 行只有新 import 与守卫块本身）
 ③ git diff --stat -- plugin/scripts/worker-driver.ts   → 空（⛔ 未碰 round 装配面；trace 随 AC-362 的条目流出）
 ④ node --experimental-strip-types plugin/scripts/import-graph-check.ts
    → PASS — valueSccs=0 ≤ 0, typeSccs=0 ≤ 0, reverseEdges=0 ≤ 0
@@ -264,3 +268,72 @@ import-graph-check: FAIL — valueSccs 1 > baseline 0
 成因是**既有的**反向依赖：`relaxed-dispatch-ledger.ts:61` 已 `import { WORKER_OUTCOME_REL } from "./driver-filters.ts"`（硬规则 1 的单一来源），反向再 import 即成值环；而该棘轮是 **shrink-only**（`--help` 逐字：「baseline not raised past HEAD」，基线只许降不许升）——**新值环在本仓是不被允许的结构**。故改为：名额读数由 **`FilterContext.relaxedInFlight?: number`**（缺省 0）带入，`driver-filters.ts` **不 import 账本模块、也不自己解析那份 jsonl**。在 shadow 下「已放宽在飞数 = 0」是**结构性事实**（影子期不放行 ⇒ 没有任何任务是被放宽派发的），不是回退默认值；live 下由 AC-366 从账本算出后经该字段传入。⛔ 未改 `FilterContext` 任何既有字段的语义（新字段可选，`makeFilterContext` 的两个既有构造点不传即行为不变）。
 
 **同样如实写明**：本条的判据面是**夹具读数**（GOAL-037 立案文本的「已知缺口」已承认本 goal 的 AC 都不读生产载体）。本条证明的是「新谓词在 off/shadow 两态下的决策与标注」；生产启用（AC-366 的 live 放行与接线、人择机开启）由后续 AC 与人承担。
+
+### AC9 — 内联入口守卫劫持（本轮 fan-in suite 的真因）
+
+**真因链（读代码 + 实测，非推断）**：`driver-filters.ts` 新增 `import { loadTouchesRelaxConfig } from "./touches-relax-config.ts"`，而 `driver-filters.ts` 是 `worker-driver.ts` / `promotion-driver.ts` / `goal-driver.ts` / `quality-gate-driver.ts` / `meta-driver.ts` / `outer-driver.ts` **六个 driver 的传递依赖** ⇒ esbuild 把 `touches-relax-config.ts`（连同它的**顶层入口块**）内联进每一个 `dist/*-driver.js`。内联后所有模块共用 bundle 的 `import.meta.url`，而 `process.argv[1]` 正是 bundle 自身 ⇒ 原来那条 **URL 形**守卫 `fs.realpathSync(entry) === fs.realpathSync(new URL(import.meta.url).pathname)` 在 bundle 里**恒真** ⇒ bundle 一启动就跑**被内联模块**的 main，自己的 main 永不执行。这正是 `gate-script-base.isDirectEntry` 的 BUNDLER-FRIENDLY 段与 `build-plugin-dist` 的 "inlined entry-guard hijack" 闸所针对的形态。
+
+**修前实测**（与 `build-plugin-dist` AC1 同一 esbuild 配置手搓复刻其六个用例中的两个 —— `entryPoints=[plugin/scripts/<name>.ts], bundle:true, platform:node, format:esm, loader:{".json":"json"}`，banner 用该测试的 `REQUIRE_BANNER`）：
+
+```
+$ node <bundled goal-driver>.js --help
+usage: touches-relax-config.ts --validate [--root <dir>] [--json]
+  reads <root>/.quay/config.yml loop.touches_relax: and validates it (never writes the file)
+  exit 0 = qualified (absent, or declared-and-valid); 1 = not qualified; 2 = usage error
+⇒ goal-driver:   own-marker=false  hijack=true  rc=0
+⇒ worker-driver: own-marker=false  hijack=true  rc=0
+```
+
+**修后实测（同一命令、同一构造）**：
+
+```
+⇒ goal-driver:   own-marker=true   hijack=false rc=0
+   goal-driver.ts — G6 goal 机械环例程型 driver + G9 缺口语义环（跑 criterion→写 GateEvent→I2 flip→I3/I4 报出→缺口 spawn agent）
+⇒ worker-driver: own-marker=true   hijack=false rc=0
+   worker-driver — SPEC §5 阶段 2+3+4：spawn 多 worker（并发 N + 超时 SIGTERM + ⛔ 不 stash 主检出 + MCP 控制面 + 常驻选择环）
+```
+
+**改形不动语义：直接执行照旧**（名字形要求被执行文件 basename == `"touches-relax-config"`，直接执行时命中）：
+
+```
+$ node --experimental-strip-types plugin/scripts/touches-relax-config.ts --validate --root /tmp/hijack-repro
+touches-relax: /tmp/hijack-repro/.quay/config.yml
+state: absent
+mode: off
+config: {"mode":"off","shared_files":[],"never_relax":[]}
+verdict: QUALIFIED
+EXIT=0
+```
+
+**本轮 fan-in 台账的 12 条红逐条复核**（前三行的失败原文逐字都指向同一根因：`quay driver start must succeed on the packaged artifact. Output: touches-relax-config: unknown argument 'start'` / `start promotion failed: touches-relax-config: unknown argument 'start'` / `timed out waiting for the standalone quality bundle's resident loop to start`）：
+
+| 文件 | fan-in 读数 | 修复后单独重跑 |
+|---|---|---|
+| `packages/quay/test/build-plugin-dist.test.mjs` | `fail 3`（:1035 / :1057 / :1075） | **`tests 45 / pass 45 / fail 0`** |
+| `plugin/test/driver-restart-busy-e2e.test.mjs` | `fail 7` | **`tests 8 / pass 8 / fail 0`** |
+| `plugin/test/driver-anchor-takeover.test.mjs` | `fail 1`（:590，20.1s 超时） | **`tests 10 / pass 10 / fail 0`**；该条降到 2.2s（常驻环现在真的起来了——这是「劫持已消除」的直接量，不是「测试不再超时」） |
+| `plugin/test/full-suite-runner-cgroup.test.mjs` | `fail 1`（AC4 挂钟 A/B `measured 1.26%`） | **`tests 70 / pass 70 / fail 0`**；AC4 单跑读数 `ON wall=9065/9158ms OFF wall=9101/9055ms ⇒ A/B delta=0.11%（预算 1%）` |
+
+⇒ 前三个文件是**劫持的真红**；第四个是**负载敏感的挂钟 A/B**（该文件已注册 `@load-sensitive`，全文套件并发 128 下测得 1.26%、单独重跑 0.11%）——**与劫持无关，也不由本条引入**，如实列出以免把 12 条红笼统记成「都是劫持」。
+
+**被改守卫的那个模块自身的 16 条契约不受影响**：`node --experimental-strip-types --test plugin/test/touches-relax-config.test.mjs` ⇒ `ℹ tests 16 / pass 16 / fail 0`（含 `(d2)` —— 直接执行 CLI 的三态退出码 0/1/2；名字形守卫在直接执行时命中，与 URL 形同效）。
+
+**本条自己的判据面不受影响**：`node --experimental-strip-types --test plugin/test/touches-relax-off-parity.test.mjs` ⇒ `ℹ tests 7 / pass 7 / fail 0`。
+
+**新增的 import 边不引入值环**：`node --experimental-strip-types plugin/scripts/import-graph-check.ts` ⇒ `PASS — valueSccs=0 ≤ 0, typeSccs=0 ≤ 0, reverseEdges=0 ≤ 0`（新边 `touches-relax-config.ts → gate-script-base.ts` 指向既有的叶子库，且 `driver-filters.ts` 本就 import 它）。
+
+**硬规则 5b 普查（同一原则在本仓的其它适用点）**：`grep -rn "realpathSync(new URL(import.meta.url)" plugin/scripts/*.ts` ⇒ **修前 2 命中 / 修后 1 命中**，前 3 条逐字：
+
+```
+plugin/scripts/touches-relax-config.ts:323:    return fs.realpathSync(entry) === fs.realpathSync(new URL(import.meta.url).pathname);   ← 本条已修
+plugin/scripts/duration-report.ts:598:    return fs.realpathSync(entry) === fs.realpathSync(new URL(import.meta.url).pathname);   ← 仍在
+```
+
+`duration-report.ts` 那一处**当前不可达**：`grep -rn "from \"./duration-report.ts\""` ⇒ 唯一 importer 是 `relaxed-dispatch-ledger.ts:59`，而该文件自身**零生产 importer**（`grep -rn "relaxed-dispatch-ledger" plugin/scripts/ packages/ --include=*.ts` 只命中 `driver-filters.ts` 的两行**注释** —— 本条正是**故意不 import 它**的那个设计决定）⇒ **潜伏**：一旦 AC-366 把账本模块接进 worker-driver，同一劫持会立刻复现。⛔ 本条**不改它**（超出 Touches、且不影响本条落地），把读数与触发条件记在此处，供 AC-366 落地前先修。
+## Blocker
+
+**2026-10-16T17:41:25.144Z — worker 未落地（exited-not-landed）**
+
+- 未落地原因：step=suite: AssertionError [ERR_ASSERTION]: quay driver start must succeed on the packaged artifact. Output:
+- run_id：wk-prod-anchor
+- session_id：afcee318-b122-4f69-9067-c07336892005

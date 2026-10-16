@@ -46,7 +46,7 @@ test("AC1 — Layer 1a (task-processing) owns source/select/filters/verify as ON
   // filters：可组合谓词【列表】单一实现（AC152）。
   assert.deepEqual(
     TASK_FILTERS.map((f) => f.name),
-    ["notInFlight", "depsSatisfied", "touchesDisjoint", "retryCapNotExhausted", "notNeedsHuman"],
+    ["notInFlight", "depsSatisfied", "touchesDisjointOrAged", "retryCapNotExhausted", "notNeedsHuman"],
     "五个谓词是一个列表里的元素",
   );
   assert.equal(typeof applyTaskFilters, "function", "filters · applyTaskFilters");
