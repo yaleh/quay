@@ -2,7 +2,7 @@
 id: gap-ac152-filter-carrier-renamed-criterion-stale
 title: AC152 判据 stale：TASK_FILTERS 里 touchesDisjoint 已被 touchesDisjointOrAged
   取代（GOAL-037/AC-365），判据仍点名旧名 ⇒ 判据移到真承载者 + 失败带成因 + 负控制
-status: ready
+status: done
 labels:
   - gap
   - defect
