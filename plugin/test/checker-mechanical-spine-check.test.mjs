@@ -31,6 +31,7 @@ import {
   shExitCodeLiterals,
   claimsJson,
   emitsJsonTs,
+  baseJsonEmitterBindings,
   jsonViolation,
   checkSpine,
   parseExemptions,
@@ -99,6 +100,33 @@ test("emitsJsonTs / jsonViolation — a checker delegating --json to the base em
   assert.equal(emitsJsonTs('return emitNotEvaluated("no input", { specs });'), true);
   assert.equal(jsonViolation('args.includes("--json"); return emitPass("ok");', "ts"), false);
   assert.equal(jsonViolation('args.includes("--json"); return emitFail("bad");', "ts"), false);
+});
+
+test("emitsJsonTs — a checker delegating --json to the base's shared printJson/printJsonCompact emits JSON", () => {
+  // gap-routine-semantic-dedup-scan-print-json-three-behaviours: the two shapes' implementations moved
+  // into gate-script-base.ts (printJson / printJsonCompact), so a caller's LAST literal JSON.stringify
+  // can move out with them. The delegation is real — both own JSON.stringify (see their definitions).
+  const guard = 'import { parseArgs, printJson } from "./gate-script-base.ts";\nif (opts.json) printJson(report);';
+  assert.equal(emitsJsonTs(guard), true);
+  assert.equal(jsonViolation('import { printJson } from "./gate-script-base.ts";\nif (o.json) printJson(r);', "ts"), false);
+  const compact = 'import { printJsonCompact } from "./gate-script-base.ts";\nprintJsonCompact({ ok: true });';
+  assert.equal(emitsJsonTs(compact), true);
+  // `as` aliasing resolves to the bound local name.
+  const aliased = 'import { printJson as emitReport } from "./gate-script-base.ts";\nemitReport(r);';
+  assert.deepEqual(baseJsonEmitterBindings(aliased), ["emitReport"]);
+  assert.equal(emitsJsonTs(aliased), true);
+  assert.equal(emitsJsonTs('import { printJson as emitReport } from "./gate-script-base.ts";\nreport(r);'), false);
+});
+
+test("emitsJsonTs — a LOCAL printJson that prints human text is still a violation (the arm is import-gated)", () => {
+  // The whole point of C2: a checker claiming --json that only prints human text. `printJson` is a
+  // generic name — accepting a bare call would let this shape through.
+  const localHuman = 'const args = process.argv;\nfunction printJson(o) { console.log("PASS"); }\nif (args.includes("--json")) printJson({ ok: true });';
+  assert.deepEqual(baseJsonEmitterBindings(localHuman), []);
+  assert.equal(emitsJsonTs(localHuman), false);
+  assert.equal(jsonViolation(localHuman, "ts"), true);
+  // Same file, but importing from an unrelated module — still NOT the base's emitter.
+  assert.equal(emitsJsonTs('import { printJson } from "./my-own-utils.ts";\nprintJson({});'), false);
 });
 
 // ── checkSpine + ratchet (AC2 棘轮 + AC3 负控制) ────────────────────────────────────────────────────

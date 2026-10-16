@@ -149,6 +149,28 @@ export function claimsJson(source: string): boolean {
   return source.includes("--json");
 }
 
+/** Local binding names through which `source` imports gate-script-base.ts's shared JSON emitters
+ * (`printJson` / `printJsonCompact` — both own `JSON.stringify`; see their definitions). Handles
+ * `import { printJson as emitReport }` aliasing.
+ *
+ * ⛔ Requires the IMPORT, not just a call of that name — unlike the `emit*` arm below. `printJson` is
+ * a generic name that a checker may define LOCALLY, and a local `printJson` that prints human text is
+ * precisely the shape C2 exists to catch ⇒ a bare name match would open the hole this check closes.
+ * Aliasing is resolved so the accepted call is the one actually bound to the base's emitter. */
+export function baseJsonEmitterBindings(source: string): string[] {
+  const bindings: string[] = [];
+  const importRe = /import\s*\{([^}]*)\}\s*from\s*["'](?:\.\/)?gate-script-base\.ts["']/g;
+  for (const m of source.matchAll(importRe)) {
+    for (const spec of m[1].split(",")) {
+      const parts = spec.trim().split(/\s+as\s+/);
+      const imported = parts[0].trim();
+      const local = (parts[1] ?? parts[0]).trim();
+      if ((imported === "printJson" || imported === "printJsonCompact") && local) bindings.push(local);
+    }
+  }
+  return bindings;
+}
+
 /** Does a .ts checker actually emit JSON? `JSON.stringify` (the JSON-output primitive) appears
  * anywhere in the source — including a template-literal `${JSON.stringify(…)}` interpolation, which
  * IS executed code. A comment/string that merely mentions `JSON.stringify` without a real call is a
@@ -160,7 +182,12 @@ export function emitsJsonTs(source: string): boolean {
   // JSON primitive requirement without a literal JSON.stringify in its own source
   // (gap-gate-script-base-behavior-contract-unusable: the contract verifier is aligned with the
   // redesigned behavior contract). A false NEGATIVE (missing a violation) is the safe direction.
-  return /\bemit(?:Verdict|Pass|Fail|NotEvaluated)\s*\(/.test(source);
+  if (/\bemit(?:Verdict|Pass|Fail|NotEvaluated)\s*\(/.test(source)) return true;
+  // The base's shared JSON emitters (printJson / printJsonCompact, added by
+  // gap-routine-semantic-dedup-scan-print-json-three-behaviours) are the same kind of delegation:
+  // they own JSON.stringify, so a checker whose LAST literal primitive moved into them still emits
+  // JSON. Same alignment as the emitVerdict arm above; required to be imported (see helper).
+  return baseJsonEmitterBindings(source).some((n) => new RegExp(`\\b${n}\\s*\\(`).test(source));
 }
 
 /** Does a .sh checker actually emit JSON? Direct (jq / python / `printf '{…}'` JSON literal) or

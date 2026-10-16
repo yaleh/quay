@@ -744,6 +744,43 @@ export function serializeSortedJson(value: unknown): string {
   return JSON.stringify(sorted);
 }
 
+// ── JSON stdout emission ─────────────────────────────────────────────────────────────────────────────
+// The ONE plugin-side implementation of "print a JSON payload to stdout", in the two shapes the
+// plugin's CLI scripts actually use: pretty (2-space indent) and compact (one line). Extraction
+// mandate identical to `serializeSortedJson` above; every plugin caller below already imports this
+// module, so the shared accessor belongs here rather than in a new file.
+//
+// WHY (semantic-dedup-scan; .quay/routine-findings.jsonl, routine `semantic-dedup-scan`, runId
+// `semantic-dedup-scan-1792033478766`, finding `print-json-three-behaviours`, verdict
+// `divergent-implementation`, suggestedAction `extract`): ONE name `printJson` had grown THREE
+// bodies — three byte-identical compact helpers (`console.log(JSON.stringify(obj))` in
+// run-identity.ts, stage-receipt.ts, workflow-journal.ts), two pretty-printers that are one
+// behaviour in two spellings (`console.log(JSON.stringify(x, null, 2))` in guard-lineage-check.ts
+// vs ``process.stdout.write(`${JSON.stringify(x, null, 2)}\n`)`` in worktree-process-reaper.ts),
+// and a third pretty variant in `packages/quay/src/cli/shared.ts`.
+//
+// ⛔ THIS IS NOT "the bytes happened to match" — the two shapes are the contract. Each caller keeps
+// the shape it had (compact stays compact: its JSON is parsed by tests and other scripts) and only
+// the implementation moves here. Both emitters write ONE string + "\n" through `process.stdout`,
+// which is byte-for-byte what the `console.log(<string>)` form produced (Node's `format()` returns a
+// lone string argument unchanged before appending the newline).
+//
+// ⛔ THE CORE COPY IS DELIBERATELY NOT FOLDED IN. `packages/quay` never imports plugin sources (the
+// plugin consumes the published Core, never the reverse), so `packages/quay/src/cli/shared.ts`'s
+// `printJson` is a STRUCTURAL, declared divergence — see the note at that definition. The scan's own
+// rationale names this boundary as the thing extraction has to respect.
+
+/** Pretty JSON (2-space indent) + one trailing newline to stdout — the CLI's `--json` shape. */
+export function printJson(obj: unknown): void {
+  process.stdout.write(JSON.stringify(obj, null, 2) + "\n");
+}
+
+/** Compact single-line JSON + one trailing newline to stdout — byte-identical to the
+ *  `console.log(JSON.stringify(obj))` local helpers it replaces. */
+export function printJsonCompact(obj: unknown): void {
+  process.stdout.write(JSON.stringify(obj) + "\n");
+}
+
 // ── Selftest harness (ADR-018 selfcheck-fixture pattern) ─────────────────────────────────────────────
 // The ONE implementation of the per-gate `--selftest` fixture harness. Every ADR-018 selfcheck needs the
 // same four things — a `check(name, condition, detail)` assertion, a pass/fail tally, the verdict, and a
