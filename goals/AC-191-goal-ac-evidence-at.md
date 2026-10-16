@@ -23,7 +23,7 @@ criterion: |
     const at=r.evidence&&r.evidence.at?Date.parse(r.evidence.at)/1000:0;
     const pass=Boolean(born)&&at>Number(born)&&Boolean(r.evidence&&r.evidence.verdict);
     console.log(r.id,"born="+born,"evidence.at="+((r.evidence&&r.evidence.at)||"none"),pass?"OK":"NO");
-    if(pass)ok++;
+    if(pass)ok++;else noIds.push(r.id);
   }
   process.exit(ok===need.length?0:(console.error("CAUSE=migrated-ac-evidence-not-at — every migrated AC needs evidence.at later than its file birth commit, ok "+ok+"/"+need.length),1));
   '
