@@ -37,7 +37,7 @@ criterion: |-
   const bad=Object.entries(byKey).filter(([,t])=>t.size>1);
   console.log("attemptKeys spanning >1 task (cross-task accumulation):", bad.length);
   for(const [k,t] of bad) console.log("  "+k+" -> "+[...t].join(", "));
-  process.exit(bad.length===0?0:(console.error("CAUSE=retry-attemptkey-spans-tasks — an attemptKey must never span more than one task, bad="+bad.length),1));
+  process.exit(bad.length===0?0:(console.error("CAUSE=retry-attemptkey-spans-tasks — attemptKey(s) spanning more than one task — "+bad.map(([k])=>k).join(" | ")),1));
   '
 expect: exit 0
 origin: >-
