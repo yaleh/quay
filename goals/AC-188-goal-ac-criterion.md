@@ -4,7 +4,6 @@ title: 三例的长期保证已上移为 goal 层【在域】AC，且各带非�
 status: achieved
 kind: criterion
 goal: GOAL-007
-long-term: true
 criterion: |
   node -e '
   const {execFileSync}=require("node:child_process");
@@ -16,7 +15,7 @@ criterion: |
   const inScope=recs.filter(r=>!SELF.has(r.id)&&r.kind==="criterion"&&["active","achieved"].includes(r.status)&&String(r.criterion||"").trim().length>=20);
   const hit=need.filter(t=>inScope.some(r=>String(r.origin||"").includes(t)));
   console.log("covered:",hit.length+"/"+need.length,JSON.stringify(hit));
-  process.exit(hit.length===need.length?0:1);
+  process.exit(hit.length===need.length?0:(console.error("CAUSE=origin-not-migrated — no in-scope criterion origin covers "+need.filter(t=>!hit.includes(t)).join(" | ")),1));
   '
 expect: exit 0
 origin: |-
@@ -39,4 +38,5 @@ origin: |-
   且按 id 显式排除 GOAL-007 与 AC-188..191 自身，故本 AC 与兄弟 AC 的正文不能满足它。
 
   干跑（2026-09-07，落笔当轮）：in-scope AC 38 条，覆盖 0/3，exit 1 ⇒ 今天取假。
+long-term: true
 ---

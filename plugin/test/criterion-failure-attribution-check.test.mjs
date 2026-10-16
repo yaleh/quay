@@ -183,6 +183,46 @@ test("isBareFailureExitLine — position control: the computed form in value pos
   assert.equal(isBareFailureExitLine('  x="$(sys.exit(0 if a else 1))"'), true);
 });
 
+// ── the TRAILING COMPUTED form, JS SPELLING: the ternary (2026-10-16) ───────────────────────────────
+// Same intent as AC-245's python `else <nonzero>` tail, different punctuation: a ternary separates its
+// branches with `?` / `:`, so the word `else` never appears and the 2026-09-11 tail matched NOTHING.
+// Measured 2026-10-16 — 20 in-domain criteria carried this spelling and the shared predicate returned
+// `[]` for every one, so the ratchet read bareAcs=0 / status=pass / exit 0 while the production ledger
+// was writing AC-152's unattributable `fail`. Hard rule 3b, the fourth time: "I cannot read this shape"
+// and "this criterion is clean" shared one output. Repaired in the ONE implementation both consumers
+// import (goal-store.ts), so the write gate was fixed by the same change.
+
+/** AC-152's criterion VERBATIM (the production symptom, 2026-10-16). */
+const AC152_TERNARY_CRITERION = `node --no-warnings --experimental-strip-types -e 'import("./plugin/scripts/driver-filters.ts").then(m=>{const names=new Set(m.TASK_FILTERS.map(f=>f.name));const want=["notInFlight","depsSatisfied","touchesDisjoint","retryCapNotExhausted","notNeedsHuman"];process.exit(want.every(n=>names.has(n))?0:1)})'`;
+
+test("isBareFailureExitLine — positive control: the TERNARY computed exit is a failure exit (AC-152)", () => {
+  assert.equal(isBareFailureExitLine(AC152_TERNARY_CRITERION), true, "AC-152's criterion, verbatim");
+  assert.equal(hasTrailingComputedFailureExit(AC152_TERNARY_CRITERION), true, "the pure predicate agrees");
+  // The nested-paren requirement again: `want.every(n=>names.has(n))` nests two calls inside the exit,
+  // so a nesting-capped regex would reopen the hole one paren deeper (see FAILURE_EXIT_RE's note).
+  assert.equal(isBareFailureExitLine("  process.exit(f(g(x))?0:1);"), true);
+  assert.equal(isBareFailureExitLine("  process.exit(n===30?0:1);"), true);
+  assert.equal(isBareFailureExitLine("  process.exit(c?0:2);"), true, "any non-zero tail, not just 1");
+  const whole = bareFailureExitsOfCriterion(AC152_TERNARY_CRITERION);
+  assert.equal(whole.length, 1, `the whole criterion reports exactly one bare site: ${JSON.stringify(whole)}`);
+});
+
+test("isBareFailureExitLine — negative control: the ternary form's unmatched tails", () => {
+  assert.equal(isBareFailureExitLine("  process.exit(c?0:0);"), false, "always-0 never fails ⇒ must NOT be bare");
+  assert.equal(hasTrailingComputedFailureExit("process.exit(c?0:0)"), false);
+  // The MIRROR form — the non-zero in the TRUE branch. Deliberately NOT matched: AC-330 is the domain's
+  // ONLY carrier (`props.includes("reconcile")?4:0`) and its next line already rewrites rc=4 into a cause
+  // (`[ "$mrc" != 4 ] || { echo "CAUSE=…" >&2; exit 1; }`). Matching it would accuse an attributable
+  // criterion (hard rule 4). Residue stated, not hidden: 1 in-domain, and attributed.
+  assert.equal(isBareFailureExitLine(`  process.exit(props.includes("reconcile")?4:0)`), false);
+  assert.equal(hasTrailingComputedFailureExit(`process.exit(props.includes("reconcile")?4:0)`), false);
+});
+
+test("isBareFailureExitLine — negative control: an attribution on the ternary LINE clears it", () => {
+  assert.equal(isBareFailureExitLine(`  process.exit(ok?0:(console.error("CAUSE=x"),1));`), false, "归因优先于形态");
+  assert.equal(isBareFailureExitLine(`  node -e 'c?0:1' || { echo "CAUSE=y" >&2; exit 1; }`), false, "`>&2` marks attribution");
+});
+
 // ── the IMPLICIT-EXIT class (2026-09-12, gap-criterion-attribution-blind-to-silent-terminal-command) ─
 // The third form, and the one BOTH earlier revisions could not see: a criterion with NO exit statement
 // at all, whose non-zero status is inherited from a trailing command. Every rule above asks a question

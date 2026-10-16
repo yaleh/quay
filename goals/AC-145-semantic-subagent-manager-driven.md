@@ -5,7 +5,7 @@ status: achieved
 kind: criterion
 goal: GOAL-002
 criterion: |
-  node --no-warnings --experimental-strip-types -e 'import("./plugin/scripts/semantic-face-dispatch-record.ts").then(m=>{process.exit(typeof m.appendSemanticFaceRecord==="function"&&Array.isArray(m.SEMANTIC_DUTY_KINDS)?0:1)})'
+  node --no-warnings --experimental-strip-types -e 'import("./plugin/scripts/semantic-face-dispatch-record.ts").then(m=>{process.exit(typeof m.appendSemanticFaceRecord==="function"&&Array.isArray(m.SEMANTIC_DUTY_KINDS)?0:(console.error("CAUSE=semantic-face-record-surface-missing — semantic-face-dispatch-record must export appendSemanticFaceRecord and SEMANTIC_DUTY_KINDS"),1))})'
 expect: exit 0
 origin: |
   人 2026-08-23 方向「语义撰写/人机接口 → 实现相应 subagent，由 manager 直接驱动（后台执行）」。

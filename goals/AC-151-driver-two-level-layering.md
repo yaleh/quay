@@ -5,7 +5,7 @@ status: achieved
 kind: criterion
 goal: GOAL-002
 criterion: |
-  node --no-warnings --experimental-strip-types -e 'import("./plugin/scripts/driver-runtime.ts").then(m=>{const k=Object.keys(m.DRIVER_KINDS);const l0=typeof m.verifyIndependently==="function"&&typeof m.TASK_FILTERS!=="undefined";const a=["promotion","worker"].every(x=>k.includes(x));const b=["outer","quality","meta"].every(x=>k.includes(x));process.exit(l0&&a&&b?0:1)})'
+  node --no-warnings --experimental-strip-types -e 'import("./plugin/scripts/driver-runtime.ts").then(m=>{const k=Object.keys(m.DRIVER_KINDS);const l0=typeof m.verifyIndependently==="function"&&typeof m.TASK_FILTERS!=="undefined";const a=["promotion","worker"].every(x=>k.includes(x));const b=["outer","quality","meta"].every(x=>k.includes(x));process.exit(l0&&a&&b?0:(console.error("CAUSE=driver-two-level-layering-broken — verifyIndependently/TASK_FILTERS must exist and DRIVER_KINDS must hold promotion+worker+outer+quality+meta"),1))})'
 expect: exit 0
 origin: >
   人 2026-08-23 裁定「前述可重用机制应当分层抽象，以支持这两层上的重用」；

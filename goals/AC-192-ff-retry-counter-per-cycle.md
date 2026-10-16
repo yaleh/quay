@@ -4,69 +4,40 @@ title: ff retry counter per-cycle
 status: achieved
 kind: criterion
 goal: GOAL-007
-criterion: >-
+criterion: |-
   node -e '
-
   const fs=require("node:fs"), cp=require("node:child_process");
-
-  const
-  root=cp.execFileSync("git",["rev-parse","--show-toplevel"]).toString().trim();
-
-  // Falsifiability seam (negative control only): an explicit carrier path
-  overrides the production
-
-  // carrier. Unset => the production carrier at the git root is read — never a
-  fixture.
-
-  const f=process.env.QUAY_FAN_IN_RETRIES_CARRIER ||
-  (root+"/.quay/fan-in-retries.jsonl");
-
-  if(!fs.existsSync(f)){ console.log("no retry carrier yet — nothing has
-  accumulated across tasks (pass)"); process.exit(0); }
-
+  const root=cp.execFileSync("git",["rev-parse","--show-toplevel"]).toString().trim();
+  // Falsifiability seam (negative control only): an explicit carrier path overrides the production
+  // carrier. Unset => the production carrier at the git root is read — never a fixture.
+  const f=process.env.QUAY_FAN_IN_RETRIES_CARRIER || (root+"/.quay/fan-in-retries.jsonl");
+  if(!fs.existsSync(f)){ console.log("no retry carrier yet — nothing has accumulated across tasks (pass)"); process.exit(0); }
   const recs=[];
-
   for(const l of fs.readFileSync(f,"utf8").split("\n")){
     if(!l.trim()) continue;
     let o; try{ o=JSON.parse(l); }catch{ continue; }
     if(!o || typeof o.taskId!=="string" || !o.taskId) continue;
     recs.push(o);
   }
-
-  // Per-cycle key is attemptKey (mfi-<task>-<epoch>-<rand>); runId became a
-  process-lifetime id
-
-  // (wk-prod-<epoch>) and legitimately spans tasks — runId is NOT judged here.
-  Records without a
-
-  // non-null attemptKey are pre-fix (runId-only) and excluded from the
-  per-cycle check.
-
+  // Per-cycle key is attemptKey (mfi-<task>-<epoch>-<rand>); runId became a process-lifetime id
+  // (wk-prod-<epoch>) and legitimately spans tasks — runId is NOT judged here. Records without a
+  // non-null attemptKey are pre-fix (runId-only) and excluded from the per-cycle check.
   const byKey={};
-
   let withKey=0;
-
   for(const o of recs){
     if(typeof o.attemptKey==="string" && o.attemptKey.length>0){
       withKey++;
       (byKey[o.attemptKey] ??= new Set()).add(o.taskId);
     }
   }
-
   if(recs.length>0 && withKey===0){
     console.log("NOT-EVALUATED: carrier has "+recs.length+" retry records but none carries attemptKey — per-cycle key absent, guarantee untested (fail, not pass)");
     console.error("AC-192 fail - carrier "+f+" has "+recs.length+" retry records but none carries attemptKey (per-cycle key absent, guarantee untested)"); process.exit(1);
   }
-
   const bad=Object.entries(byKey).filter(([,t])=>t.size>1);
-
-  console.log("attemptKeys spanning >1 task (cross-task accumulation):",
-  bad.length);
-
+  console.log("attemptKeys spanning >1 task (cross-task accumulation):", bad.length);
   for(const [k,t] of bad) console.log("  "+k+" -> "+[...t].join(", "));
-
-  process.exit(bad.length===0?0:1);
-
+  process.exit(bad.length===0?0:(console.error("CAUSE=retry-attemptkey-spans-tasks — attemptKey(s) spanning more than one task — "+bad.map(([k])=>k).join(" | ")),1));
   '
 expect: exit 0
 origin: >-

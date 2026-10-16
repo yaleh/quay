@@ -8,7 +8,10 @@ criterion: >
   node --no-warnings --experimental-strip-types -e
   'import("./plugin/scripts/driver-config.ts").then(m=>{const
   c=m.loadDriverConfig(".");process.exit(typeof
-  m.driverCap==="function"&&c&&c.worker&&typeof c.worker.cap==="number"?0:1)})'
+  m.driverCap==="function"&&c&&c.worker&&typeof
+  c.worker.cap==="number"?0:(console.error("CAUSE=driver-cap-surface-missing —
+  driver-config must export driverCap and the worker config must carry a numeric
+  cap"),1))})'
 expect: exit 0
 origin: >
   人 2026-08-23 裁定「前述可重用机制应当分层抽象，以支持这两层上的重用」；

@@ -25,7 +25,7 @@ criterion: |-
   }
   console.log("orphan suite processes (cwd=deleted worktree):", orphans.length);
   for(const o of orphans) console.log("  "+o);
-  process.exit(orphans.length===0?0:1);
+  process.exit(orphans.length===0?0:(console.error("CAUSE=orphan-suite-process — suite processes still holding a deleted-worktree cwd — "+orphans.join(" | ")),1));
   '
 expect: exit 0
 origin: >-

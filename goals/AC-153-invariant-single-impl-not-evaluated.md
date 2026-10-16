@@ -5,7 +5,7 @@ status: achieved
 kind: criterion
 goal: GOAL-002
 criterion: |
-  node --no-warnings --experimental-strip-types -e 'import("./plugin/scripts/driver-result.ts").then(m=>{const r=m.verifyIndependently({value:1,verifiedBy:"t",failedReason:"f",notEvaluatedReason:"n"},()=>null);process.exit(typeof m.notEvaluated==="function"&&r.state==="not-evaluated"?0:1)})'
+  node --no-warnings --experimental-strip-types -e 'import("./plugin/scripts/driver-result.ts").then(m=>{const r=m.verifyIndependently({value:1,verifiedBy:"t",failedReason:"f",notEvaluatedReason:"n"},()=>null);process.exit(typeof m.notEvaluated==="function"&&r.state==="not-evaluated"?0:(console.error("CAUSE=not-evaluated-state-surface-missing — driver-result must export notEvaluated and verifyIndependently must return state not-evaluated"),1))})'
 expect: exit 0
 origin: >
   人 2026-08-23 裁定「前述可重用机制应当分层抽象，以支持这两层上的重用」；

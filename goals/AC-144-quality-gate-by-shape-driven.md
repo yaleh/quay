@@ -5,7 +5,7 @@ status: achieved
 kind: criterion
 goal: GOAL-002
 criterion: |
-  node --no-warnings --experimental-strip-types -e 'import("./plugin/scripts/driver-runtime.ts").then(m=>{const k=m.DRIVER_KINDS.quality;process.exit(k&&k.driver==="quality-gate-driver.ts"&&k.carriers.includes("quality-round.jsonl")?0:1)})'
+  node --no-warnings --experimental-strip-types -e 'import("./plugin/scripts/driver-runtime.ts").then(m=>{const k=m.DRIVER_KINDS.quality;process.exit(k&&k.driver==="quality-gate-driver.ts"&&k.carriers.includes("quality-round.jsonl")?0:(console.error("CAUSE=quality-driver-kind-missing — DRIVER_KINDS.quality must name quality-gate-driver.ts and carry the quality-round.jsonl carrier"),1))})'
 expect: exit 0
 origin: |
   manager 2026-08-23 分析（人已见）：「质量把关」不是一件事；一股脑并入 promotion-driver

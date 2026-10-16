@@ -5,7 +5,7 @@ status: achieved
 kind: criterion
 goal: GOAL-002
 criterion: |
-  node --no-warnings --experimental-strip-types -e 'import("./plugin/scripts/driver-filters.ts").then(m=>{const names=new Set(m.TASK_FILTERS.map(f=>f.name));const want=["notInFlight","depsSatisfied","touchesDisjoint","retryCapNotExhausted","notNeedsHuman"];process.exit(want.every(n=>names.has(n))?0:1)})'
+  node --no-warnings --experimental-strip-types -e 'import("./plugin/scripts/driver-filters.ts").then(m=>{const names=new Set(m.TASK_FILTERS.map(f=>f.name));const want=["notInFlight","depsSatisfied","touchesDisjoint","retryCapNotExhausted","notNeedsHuman"];process.exit(want.every(n=>names.has(n))?0:(console.error("CAUSE=task-filter-missing — TASK_FILTERS must expose "+want.filter(n=>!names.has(n)).join(",")),1))})'
 expect: exit 0
 origin: >
   人 2026-08-23 裁定「前述可重用机制应当分层抽象，以支持这两层上的重用」；

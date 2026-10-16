@@ -4,8 +4,11 @@ title: 观测/账本/收尾面驱动化 —— outer 纯机械 A/B 段收进 dri
 status: achieved
 kind: criterion
 goal: GOAL-002
-criterion: |
-  node --no-warnings --experimental-strip-types -e 'import("./plugin/scripts/driver-runtime.ts").then(m=>{const k=m.DRIVER_KINDS.outer;process.exit(k&&k.driver==="outer-driver.ts"&&k.carriers.includes("outer-round.jsonl")?0:1)})'
+criterion: node --no-warnings --experimental-strip-types -e
+  'import("./plugin/scripts/driver-runtime.ts").then(m=>{const
+  k=m.DRIVER_KINDS.outer;process.exit(k&&k.driver==="outer-driver.ts"&&k.carriers.includes("outer-round.jsonl")?0:(console.error("CAUSE=outer-driver-kind-missing
+  — DRIVER_KINDS.outer must name outer-driver.ts and carry the outer-round.jsonl
+  carrier"),1))})'
 expect: exit 0
 origin: |
   人 2026-08-23 方向「其它定期操作 → 实现相应 driver，由 quay 统一机械驱动」。
