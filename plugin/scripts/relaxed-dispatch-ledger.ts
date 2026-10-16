@@ -256,6 +256,19 @@ export interface RunStats {
   /** 失败但**产不出** step 值的运行数（无 `mechanical_fan_in`，或它没有 step）。
    *  ⛔ 不写 `"unknown"`、⛔ 不折成 0——「没有 step」本身就是读数。 */
   failuresWithoutStep: number;
+  /** **走到 fan-in 的运行数**（`mechanical_fan_in` 读得出的运行——`landed` 与 `red` 都算）。
+   *  ⛔ 它是 per-step 失败率的**分母**：没有 `mechanical_fan_in` 的失败运行（AC 未勾短路 / 无 worktree
+   *  / 读不出）既不计入本数、也不计入任何 step 的分子——这正是「无 step ⇒ 不计入任何分子或分母」
+   *  那条 fail-closed 纪律的落点。⛔ 它**不是** `attempts`：把没跑过 fan-in 的运行算进分母会把
+   *  「测试根本没跑到那一步」混进「那一步失败了」（AC-367 DoD 明文）。 */
+  fanInReached: number;
+  /** 按 `mechanical_fan_in.step` **逐键**的失败运行数（分子）。键已排序（读数确定性）。
+   *  ⛔ 与 `fanInFailureSteps` 分工：那个是**清单**（按出现序去重），这个是**计数**。 */
+  fanInStepFailures: Record<string, number>;
+  /** 按 step 的失败率 = `fanInStepFailures[step] / fanInReached`。分母为 0 ⇒ `NOT_EVALUATED`
+   *  （⛔ 不是 0——「一次都没跑到 fan-in」与「跑到了且一次没红」形状必须不同，硬规则 3b）。
+   *  ⛔ 键与 `fanInStepFailures` 同集、同序（两处不得各自排序）。 */
+  fanInStepRates: Record<string, MaybeNum>;
   finalStates: Record<string, number>;
 }
 
@@ -269,6 +282,8 @@ function collectRunStats(rawRecords: Record<string, unknown>[]): RunStats {
   let segmentMsTotal = 0;
   const fanInFailureSteps: string[] = [];
   let failuresWithoutStep = 0;
+  let fanInReached = 0;
+  const fanInStepFailures: Record<string, number> = {};
   const finalStates: Record<string, number> = {};
 
   for (const raw of rawRecords) {
@@ -284,6 +299,14 @@ function collectRunStats(rawRecords: Record<string, unknown>[]): RunStats {
     if (rec.workerExitedAtMs === null || rec.dispatchedAtMs === null) runsWithoutSegment++;
     else segmentMsTotal += rec.workerExitedAtMs - rec.dispatchedAtMs;
 
+    // `mechanical_fan_in` **读得出** ⟺ 本次尝试真的跑过 fan-in（`landed` 与 `red` 都带它；AC 未勾
+    // 短路 / 无 worktree / 读不出三类都没有它）。**分母在这里数**，⛔ 不是在失败分支里数——后者会把
+    // 分母退化成「失败数」，于是每条 step 的失败率恒为 1（一个结构上不可能取假的量，硬规则 4）。
+    const mfi = raw.mechanical_fan_in;
+    const mfiObj = mfi !== null && typeof mfi === "object" && !Array.isArray(mfi) ? (mfi as Record<string, unknown>) : null;
+    if (mfiObj !== null) fanInReached++;
+    const step = mfiObj === null ? null : asNonEmptyString(mfiObj.step);
+
     if (rec.finalState === null) {
       unknownFinalStateRuns++; // 读不出 ⇒ 既不是完成也不是失败（硬规则 3b）
       continue;
@@ -293,13 +316,22 @@ function collectRunStats(rawRecords: Record<string, unknown>[]): RunStats {
       continue;
     }
     failedRuns++;
-    const mfi = raw.mechanical_fan_in;
-    const step =
-      mfi !== null && typeof mfi === "object" && !Array.isArray(mfi)
-        ? asNonEmptyString((mfi as Record<string, unknown>).step)
-        : null;
+    // 失败侧：⛔ 无 step 的运行不落进任何 step 的分子（fail-closed）。
     if (step === null) failuresWithoutStep++;
-    else if (!fanInFailureSteps.includes(step)) fanInFailureSteps.push(step);
+    else {
+      if (!fanInFailureSteps.includes(step)) fanInFailureSteps.push(step);
+      fanInStepFailures[step] = (fanInStepFailures[step] ?? 0) + 1;
+    }
+  }
+
+  // 键排序一次、两处共用（⛔ 不各排一遍——同集会因此漂移）。
+  const stepKeys = Object.keys(fanInStepFailures).sort();
+  const sortedFailures: Record<string, number> = {};
+  const fanInStepRates: Record<string, MaybeNum> = {};
+  for (const k of stepKeys) {
+    sortedFailures[k] = fanInStepFailures[k];
+    // 分母 0 ⇒ NOT_EVALUATED（⛔ 不是 0、⛔ 不是 1）。
+    fanInStepRates[k] = fanInReached === 0 ? NOT_EVALUATED : fanInStepFailures[k] / fanInReached;
   }
 
   return {
@@ -312,6 +344,9 @@ function collectRunStats(rawRecords: Record<string, unknown>[]): RunStats {
     runsWithoutSegment,
     fanInFailureSteps,
     failuresWithoutStep,
+    fanInReached,
+    fanInStepFailures: sortedFailures,
+    fanInStepRates,
     finalStates,
   };
 }
@@ -511,6 +546,13 @@ export function renderLedgerReport(r: RelaxedDispatchReport): string {
       `  ${row.task}  waited=${row.waitedMinutes}min  blockers=[${row.blockers.join(",")}]  attempts=${row.attempts}` +
         `  workerMin=${fmtNum(row.workerMinutes)}  extra=${fmtNum(row.extraWorkerMinutes)}` +
         `  fanInFailureSteps=[${row.fanInFailureSteps.join(",")}]  withoutStep=${row.failuresWithoutStep}`,
+    );
+    // AC-367：按 step 的失败率**分步呈现**（suite 红与 merge-develop 红分开，⛔ 不折成一个「失败」数）。
+    L.push(
+      `    fanInReached=${row.fanInReached}  stepRates=` +
+        (Object.keys(row.fanInStepRates).length === 0
+          ? "{} (没有运行产出 step 值)"
+          : `{${Object.entries(row.fanInStepRates).map(([k, v]) => `${k}: ${v === NOT_EVALUATED ? NOT_EVALUATED : v.toFixed(3)} (${row.fanInStepFailures[k]}/${row.fanInReached})`).join(", ")}}`),
     );
   }
   L.push("");

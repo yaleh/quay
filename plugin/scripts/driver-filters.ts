@@ -76,6 +76,14 @@ export interface FilterContext {
    *  恰等于 `after_minutes` 放行 / 恰少一分钟阻塞）可测。⛔ 不改轮起点快照纪律：now 仍在**判定那一
    *  刻**取一次（见 computeDispatchExclusion 的注释），⛔ 不预算进轮起点。 */
   nowMs?: number;
+  /** GOAL-037（AC-367）：自动收紧闸 —— 控制态 `.quay/worker-control.json` 的 `relax_halted`，
+   *  **每轮一次**读出后经 ctx 带入（⛔ 不逐候选重读盘：那是每个候选一次文件的 I/O，也会让同一轮
+   *  内不同候选看到不同的闸）。为真 ⇒ **live 下也保持阻塞**（放宽被收回了）。
+   *  缺省 `false` 是**结构性事实**而非「猜一个默认值」：没有这个键的旧载体读出的就是 `false`
+   *  （`mergeControlState`），且 off/shadow 下本字段根本不被读取（那两态恒不放行）。
+   *  ⛔ 读控制态的方向是 fail-closed：载体读失败/解析失败 ⇒ `readControlState` 给 `relax_halted:true`
+   *  ⇒ 阻塞（宁可不放宽，硬规则 3b）。 */
+  relaxHalted?: boolean;
 }
 
 /** 构造缺省上下文（inFlight/retryExhausted 空集），调用方按需覆盖。 */
@@ -310,9 +318,15 @@ export type RelaxCondition = (typeof RELAX_CONDITIONS)[number];
  *     拦掉就会被误记成「对手不可判定」）；
  *   · `relaxed-ledger-readable` —— 账本读不出（AC-363 的 `malformed`）⇒ 名额/不连锁无输入；
  *   · `blocker-not-relaxed` —— 不连锁（AC-366(d)），shadow 期不存在。
+ *  GOAL-037（AC-367）再追加一条**最外层**的闸：
+ *   · `relax-not-halted` —— 自动收紧已把放宽收回（控制态 `relax_halted:true`）⇒ 整条放行判据短路阻塞。
+ *     它排在**最前**，因为问题不同：它不是「这个候选能不能放宽」的一条判据，而是「放宽这件事本身
+ *     还开不开放」。排在后面会让一次已被收回的放宽先跑完其余判据再被否掉，读起来像「候选不合格」——
+ *     那正是硬规则 3b 禁止的形状混淆。
  *  同名条件 `not-never-relax` 在两态的**读法不同**（live 读重叠**文件**对名单 glob；shadow 沿用
  *  AC-365 落地的「候选 id 在名单内」），差异见 `judgeLiveRelax` 的注释与本条 Evidence。 */
 export const LIVE_RELAX_CONDITIONS = [
+  "relax-not-halted",
   "candidate-declares-touches",
   "no-overbroad-glob",
   "overlap-known",
@@ -348,6 +362,8 @@ interface RelaxRoundState {
   /** live 的两条读数源（AC-363 的账本，由调用方经 ctx 传入；⛔ 本文件不读账本——值环）。 */
   relaxedTaskIds: Set<string>;
   ledgerMalformed: number;
+  /** GOAL-037（AC-367）：自动收紧闸（`relax_halted`），由调用方经 ctx **每轮一次**带入。 */
+  relaxHalted: boolean;
   readyAtMs: Map<string, number>;
   nowMs: number;
 }
@@ -365,6 +381,8 @@ function makeRelaxRoundState(ctx: FilterContext): RelaxRoundState {
     relaxedInFlight: ctx.relaxedInFlight ?? 0,
     relaxedTaskIds: new Set(ctx.relaxedTaskIds ?? []),
     ledgerMalformed: ctx.relaxedLedgerMalformed ?? 0,
+    // AC-367：闸由调用方带入（缺省 false —— 旧载体没有 `relax_halted` 键时读出的就是 false）。
+    relaxHalted: ctx.relaxHalted ?? false,
     // 等待时长的单一来源 = AC-362 已落地的 `buildReadyAtMsMap`（⛔ 不新写第二个 ready 时刻解析器）。
     readyAtMs: annotate ? buildReadyAtMsMap(ctx.root) : new Map(),
     // 判定那一刻的「现在」取一次（⛔ 不预算进轮起点）；注入只为让等待边界可测。
@@ -421,8 +439,8 @@ function judgeRelaxCandidate(
 // 正常」同形（硬规则 3b），且 AC-367 的自动收紧要读放宽账本（「放宽的任务比不放宽的多花多少」），
 // 没有真实放行 ⇒ 账本恒空 ⇒ 闭环无输入。本函数是「人择机开启」与「真的会放宽」之间那一步。
 //
-// 合取判据（AC-366 逐字），求值顺序 = 本函数的语句顺序（「首个不满足者」必须稳定）：
-//   结构前置：候选声明可判定 → 无过宽通配 → 对手可判定 → 账本可读
+// 合取判据（AC-366 逐字，求值顺序 = 本函数的语句顺序（「首个不满足者」必须稳定）：
+//   【AC-367 的自动收紧闸】→ 结构前置：候选声明可判定 → 无过宽通配 → 对手可判定 → 账本可读
 //   → not-never-relax → 【shared_files 短路】→ waited-enough → quota-available → blocker-not-relaxed
 //
 // ⛔ 全部阈值（`after_minutes` / `max_relaxed_inflight` / `never_relax` / `shared_files`）来自 AC-364
@@ -433,6 +451,13 @@ function judgeLiveRelax(id: string, state: RelaxRoundState, ctx: FilterContext):
   const blocked = (c: LiveRelaxCondition): RelaxAnnotation => ({ wouldRelax: false, relaxBlockedBy: c, relaxed: false });
   const { expand, readTouches } = makeTouchesSideReaders(ctx);
   const self = readTouches(id);
+
+  // ⓪ relax-not-halted（GOAL-037 / AC-367）—— 自动收紧已把放宽收回 ⇒ **live 下也阻塞**。
+  //    这是整条判据最外层的闸（`AC-367(c)`：`relax_halted` 为真时谓词在 live 下也保持阻塞），
+  //    排在结构前置之前：一次已被收回的放宽不该先跑完九条判据再被否掉。
+  //    ⛔ 只影响 live —— off / shadow 在 `decision()` 里就已返回，本函数根本不会被调用（AC-365 的
+  //    同形测试因此继续绿）。
+  if (state.relaxHalted) return blocked("relax-not-halted");
 
   // ① candidate-declares-touches —— 候选自身必须有可判定的 `## Touches`（无节 / 空 / 读不出 ⇒ 无法
   //    回答「与谁重叠」，⛔ 不得当作「无重叠」）。

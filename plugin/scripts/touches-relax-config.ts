@@ -76,7 +76,40 @@ export interface TouchesRelaxConfig {
   max_relaxed_inflight?: number;
   shared_files: string[];
   never_relax: string[];
+  /** GOAL-037（AC-367）：自动收紧子块。**PRESENT only when the file spelled `auto_tighten:`** ——
+   *  与 `after_minutes` 同一条纪律：⛔ 不回填任何内置阈值。 */
+  auto_tighten?: TouchesRelaxAutoTighten;
 }
+
+// ── GOAL-037（AC-367）：自动收紧子块（`loop.touches_relax.auto_tighten`）────────────────────────────
+//
+// 为什么扩在【本模块】而不是另写一个读取器（硬规则 1/5b）：AC-364 已经把 `loop.touches_relax:`
+// 的读取+校验做成了这一份；自动收紧的三个阈值是**同一个块**的子键，另起一份解析器就是同一个
+// 配置面的第二个真相源。本模块仍然只做「读 + 校验」，⛔ 不做判定、⛔ 不写控制态——那是
+// `touches-relax-tighten.ts` 的事。
+//
+// ⛔ 无内置回退：三个键都是**可选属性**，缺哪个就 `undefined`（⛔ 不是 30 / 1 / 0.3 之类字面量）。
+// 这不是「懒得填默认」，是硬规则 12 与 GOAL-037 的正面要求——现在没有放宽样本，凭空设一个阈值
+// 就是凭空设前置；取值由人在 AC-362 的数据与影子期读数出来后填进配置。
+
+/** The three `auto_tighten:` key names — THE single source (⛔ ⛔ 不在别处重拼这些字面量)。 */
+export const AUTO_TIGHTEN_KEYS = ["min_samples", "max_extra_worker_minutes", "max_fan_in_failure_rate"] as const;
+
+export type AutoTightenKey = (typeof AUTO_TIGHTEN_KEYS)[number];
+
+/** 自动收紧子块。三个键**各自可选**且**互不代替**（一个齐了不代表另一个也齐了）。 */
+export interface TouchesRelaxAutoTighten {
+  /** 放宽组可测任务数的下界；`< min_samples` ⇒ 本次**不评估**（⛔ 不是「未超阈值」）。整数 `>= 1`。 */
+  min_samples?: number;
+  /** 放宽组相对对照组的**额外 worker 分钟**上界；超过 ⇒ 收紧。有限数 `>= 0`。 */
+  max_extra_worker_minutes?: number;
+  /** 按 `mechanical_fan_in.step` 逐键的 fan-in 失败率上界；某一步超过 ⇒ 收紧。
+   *  键 = step 词表取值（`merge-develop` / `suite` / `ff` …，⛔ 不是 `final_state` 词表）。 */
+  max_fan_in_failure_rate?: Record<string, number>;
+}
+
+/** `auto_tighten:` 子块在 issue 消息里的点分路径前缀（唯一定义点）。 */
+const AUTO_TIGHTEN_FIELD = `${SECTION_FIELD}.auto_tighten`;
 
 /** The raw read: `present` = the section exists; `section` = its RAW value (unparsed); `error` = a
  *  fail-closed reason for an unreadable file. `present:false` covers BOTH "no config file at all"
@@ -151,6 +184,69 @@ function readStringList(raw: unknown, field: string, issues: TouchesRelaxIssue[]
     }
     out.push(el);
   }
+  return out;
+}
+
+/** Pure parse + validate of the `auto_tighten:` sub-block (GOAL-037 / AC-367).
+ *
+ *  Three OPTIONAL keys, each independently shape-checked, **none back-filled**:
+ *   - absent / `null` sub-block ⇒ `undefined` (the whole sub-block is unconfigured — the caller must
+ *     read that as 「阈值未配置 ⇒ 不评估」, ⛔ never as 「用内置默认值评估」);
+ *   - `min_samples` ⇒ integer `>= 1`;
+ *   - `max_extra_worker_minutes` ⇒ finite number `>= 0`;
+ *   - `max_fan_in_failure_rate` ⇒ a mapping of step name → finite number in `[0, 1]`.
+ *  Every refusal names the exact dotted path (`loop.touches_relax.auto_tighten.<key>`, and for the
+ *  rate map the step key too) so a bad declaration is locatable in the file rather than merely
+ *  "rejected". Unknown keys inside the sub-block are NOT rejected (same posture as the parent). */
+function parseAutoTightenSection(raw: unknown, issues: TouchesRelaxIssue[]): TouchesRelaxAutoTighten | undefined {
+  if (raw === undefined || raw === null) return undefined;
+  if (typeof raw !== "object" || Array.isArray(raw)) {
+    issues.push({ field: AUTO_TIGHTEN_FIELD, message: `${AUTO_TIGHTEN_FIELD} must be a mapping (got ${describe(raw)})` });
+    return undefined;
+  }
+  const rec = raw as Record<string, unknown>;
+  const out: TouchesRelaxAutoTighten = {};
+  const [MIN_KEY, EXTRA_KEY, RATE_KEY] = AUTO_TIGHTEN_KEYS;
+
+  const min = rec[MIN_KEY];
+  if (min !== undefined && min !== null) {
+    if (typeof min !== "number" || !Number.isInteger(min) || min < 1) {
+      issues.push({ field: `${AUTO_TIGHTEN_FIELD}.${MIN_KEY}`, message: `${AUTO_TIGHTEN_FIELD}.${MIN_KEY} must be an integer >= 1 (got ${JSON.stringify(min)})` });
+    } else {
+      out.min_samples = min;
+    }
+  }
+
+  const extra = rec[EXTRA_KEY];
+  if (extra !== undefined && extra !== null) {
+    if (typeof extra !== "number" || !Number.isFinite(extra) || extra < 0) {
+      issues.push({ field: `${AUTO_TIGHTEN_FIELD}.${EXTRA_KEY}`, message: `${AUTO_TIGHTEN_FIELD}.${EXTRA_KEY} must be a finite number >= 0 (got ${JSON.stringify(extra)})` });
+    } else {
+      out.max_extra_worker_minutes = extra;
+    }
+  }
+
+  const rate = rec[RATE_KEY];
+  if (rate !== undefined && rate !== null) {
+    if (typeof rate !== "object" || Array.isArray(rate)) {
+      issues.push({ field: `${AUTO_TIGHTEN_FIELD}.${RATE_KEY}`, message: `${AUTO_TIGHTEN_FIELD}.${RATE_KEY} must be a mapping of step name -> rate in 0..1 (got ${describe(rate)})` });
+    } else {
+      const rates: Record<string, number> = {};
+      for (const [step, v] of Object.entries(rate as Record<string, unknown>)) {
+        if (step.trim() === "") {
+          issues.push({ field: `${AUTO_TIGHTEN_FIELD}.${RATE_KEY}`, message: `${AUTO_TIGHTEN_FIELD}.${RATE_KEY} has an empty step name` });
+          continue;
+        }
+        if (typeof v !== "number" || !Number.isFinite(v) || v < 0 || v > 1) {
+          issues.push({ field: `${AUTO_TIGHTEN_FIELD}.${RATE_KEY}.${step}`, message: `${AUTO_TIGHTEN_FIELD}.${RATE_KEY}.${step} must be a finite number in 0..1 (got ${JSON.stringify(v)})` });
+          continue;
+        }
+        rates[step] = v;
+      }
+      out.max_fan_in_failure_rate = rates;
+    }
+  }
+
   return out;
 }
 
@@ -235,11 +331,17 @@ export function parseTouchesRelaxSection(raw: unknown): { ok: true; config: Touc
   const sharedFiles = readStringList(rec.shared_files, `${SECTION_FIELD}.shared_files`, issues);
   const neverRelax = readStringList(rec.never_relax, `${SECTION_FIELD}.never_relax`, issues);
 
+  // ── auto_tighten（GOAL-037 / AC-367）────────────────────────────────────────────────────────────
+  const autoTighten = parseAutoTightenSection(rec.auto_tighten, issues);
+
   if (issues.length > 0) return { ok: false, issues };
 
   const config: TouchesRelaxConfig = { mode, shared_files: sharedFiles, never_relax: neverRelax };
   if (afterMinutes !== undefined) config.after_minutes = afterMinutes;
   if (maxRelaxedInflight !== undefined) config.max_relaxed_inflight = maxRelaxedInflight;
+  // ⛔ 只在文件真的写了 `auto_tighten:` 时才挂上这个键（与上面两个数字同形）——「没写」与
+  // 「写了但一个阈值都没给」由子块自身的 presence 与它的三个可选属性分别表达。
+  if (autoTighten !== undefined) config.auto_tighten = autoTighten;
   return { ok: true, config };
 }
 

@@ -202,7 +202,14 @@ export { readTaskStatus, lastExitedNotLandedReason, exitedNotLandedAttempts, WOR
 // `readRelaxedDispatchLedger`，经 `FilterContext.relaxedTaskIds` 传给谓词）。
 // 依赖方向：worker-driver → relaxed-dispatch-ledger → driver-filters（无环；⛔ driver-filters 反向
 // import 它会成值环，`import-graph-check` 的 valueSccs 棘轮钉在 0）。
-import { appendRelaxedDispatch, readRelaxedDispatchLedger, type AppendResult } from "./relaxed-dispatch-ledger.ts";
+import { appendRelaxedDispatch, buildRelaxedDispatchReport, readRelaxedDispatchLedger, type AppendResult } from "./relaxed-dispatch-ledger.ts";
+// GOAL-037（AC-367）自动收紧：判定 + 写控制态的**单一实现**在 touches-relax-tighten.ts（⛔ 本文件
+// 不重写判定、⛔ 不自己写控制态 json——`applyAutoTighten` 内部走 kernel 的 read/writeControlState）。
+// 依赖方向：worker-driver → touches-relax-tighten → {relaxed-dispatch-ledger, touches-relax-config,
+// kernel/control-state}（无环：tighten 不 import driver-filters / worker-driver）。
+// `loadTouchesRelaxConfig` 也取自它复用的 AC-364 配置读取器（⛔ 本文件不解析 config.yml）。
+import { applyAutoTighten, evaluateAutoTighten, toRoundRecord, type AutoTightenRoundRecord } from "./touches-relax-tighten.ts";
+import { loadTouchesRelaxConfig } from "./touches-relax-config.ts";
 // AC155：并发 cap / 轮询间隔 / 协调地板的单一真相源（drivers.yml 经 driver-config 加载，⛔ 不各写一份字面量、
 // ⛔ 不再读 QUAY_MAX_TASK_SUBAGENTS env——env 源已并入声明式配置）。
 import { defaultDriverConfig, loadDriverConfig, driverCap } from "./driver-config.ts";
@@ -551,6 +558,31 @@ export function recordRelaxedDispatch(root: string, entry: FilterTraceEntry, opt
     // 注入的 now（⛔ 不用裸 `Date.now()` —— 那是第二份时刻读数，测试不可判）。
     dispatchedAt: new Date(opts.nowMs).toISOString(),
   });
+}
+
+// ── GOAL-037（AC-367）：轮末的自动收紧一步 ────────────────────────────────────────────────────────
+//
+// 三态（硬规则 3b），由本函数的**返回值本身**表达，⛔ 不靠调用方判：
+//   · `null`   —— 本步**没跑**：`loop.touches_relax` 未声明 / `mode: off` / 读不懂。放宽没启用时
+//                 没有「放宽预算」可收紧 ⇒ 这不是「跑过且未超阈值」，⛔ 两者不得同形（AC8）。
+//   · 对象      —— 本步**跑了**，带 verdict / reason / 分步读数 / 实际阈值 / 是否真的落盘。
+//
+// 判定与写盘都委托 `touches-relax-tighten.ts`（单一实现）；本函数只负责「跑不跑」与装配轮记录。
+// ⛔ 此处**不吞异常也不能吞**：轮末一步抛错会被驻留环的 error 边界记成 action=error 轮（error_step
+// 指到 auto-tighten），⛔ 不静默跳过——「本步炸了」与「本步没跑」必须可分。
+export function runAutoTightenPass(root: string, nowMs: number): AutoTightenRoundRecord | null {
+  const load = loadTouchesRelaxConfig(root);
+  // `shadow` / `live` 才跑：这两态是「放宽这件事开着」的两个档（影子期不放行但读数在积累）。
+  if (load.state !== "shadow" && load.state !== "live") return null;
+  const config = load.config ?? { mode: "off" as const, shared_files: [], never_relax: [] };
+  // 读数复用 AC-363 的报告（⛔ 本文件不读 relaxed-dispatch.jsonl / worker-outcome.jsonl 这两份载体
+  // 的第二个解析器；硬规则 1：口径单一来源）。
+  const report = buildRelaxedDispatchReport(root, { nowMs });
+  const decision = evaluateAutoTighten(root, { nowMs, config, report });
+  const applied = applyAutoTighten(root, decision);
+  // 拒写（verdict 非 halt / 已 halted）不是错误，但**不静默**：`applied:false` + verdict 在轮记录里
+  // 逐字可读，故「没收紧」的成因不需要从「收紧没生效」里猜。
+  return toRoundRecord(decision, applied);
 }
 
 /** 并发上限的旧 env 定义点（concurrency-literal-check 的旧旋钮①）。AC155：env 源已退役——并发缺省
@@ -1978,6 +2010,14 @@ export function computeWorkerRoundRecord(opts: {
   detachedWorkers?: string[];
   /** 同上，但【不可脱钩】（收尾流水线已在跑）：停机轮要等它们收尾才能退环。空 = 无。 */
   undetachableWorkers?: string[];
+  /** GOAL-037（AC-367）：本轮轮末自动收紧判定的读数。三态可分（硬规则 3b，同族先例见上面
+   *  supersededReclaim 的「跑过且无 / 没跑」约定）：
+   *    对象 — 跑过该步，带 verdict（`not-evaluated` | `within-budget` | `halt`）/ reason /
+   *           分步读数 / **实际用的阈值** / `applied`（是否真的把 `relax_halted` 翻过去）；
+   *    null — 本轮**没跑**该步（`loop.touches_relax` 未声明 / `mode: off` / 读不懂 ⇒ 没有放宽预算
+   *           可收紧；或本步之前就抛错的 error 轮）。⛔ null ≠ 「跑过且未超阈值」。
+   *  缺省 null = 没跑该步。 */
+  autoTighten?: AutoTightenRoundRecord | null;
 }) {
   return {
     ts: opts.at,
@@ -2016,6 +2056,9 @@ export function computeWorkerRoundRecord(opts: {
     // gap-worker-kind-stop-…：kind 停机轮的在飞归宿（脱钩 / 不可脱钩）。恒有该字段（空数组 = 本轮无）。
     detached_workers: opts.detachedWorkers ?? [],
     undetachable_workers: opts.undetachableWorkers ?? [],
+    // GOAL-037（AC-367）：本轮自动收紧读数（对象 = 跑过带读数；null = 没跑该步——⛔ 与「跑过且未
+    // 超阈值」可区分，同 superseded_reclaim 的约定）。
+    auto_tighten: opts.autoTighten ?? null,
   };
 }
 
@@ -6040,6 +6083,11 @@ export async function runResidentLoop(opts: ResidentOptions): Promise<number> {
   // （硬规则 3b）：null = 本轮【没跑】该步；[] = 跑过且无候选被滤；非空 = 逐条归因。同一轮多次进选择环
   // ⇒ 逐次追加（⛔ 不跨轮——轮首复位，上一轮的条目不漏进本轮记录）。
   let filterTrace: FilterTraceEntry[] | null = null;
+  // 本轮轮末自动收紧读数（GOAL-037 / AC-367）。声明位置与 pushLagReading 同族（while 之外 + 每轮
+  // 开头复位）⇒ writeRound / writeErrorRound 直接从闭包读它，两处调用的签名逐字不变。三态可分
+  // （硬规则 3b）：null = 本轮【没跑】该步（放宽没启用 / 在该步之前抛错）；对象 = 跑过，带 verdict
+  // 与读数。⛔ null 与「跑过且未超阈值」不得同形——那正是 AC-367 要区分的那两件事。
+  let autoTightenReading: AutoTightenRoundRecord | null = null;
   // 本轮 goal 分支读数（SPEC-goal-branch-2026-10-03 §4.3/§4.9）：① 每个在飞任务解析出的落地目标
   // （task id → "develop" / "goal/<id>"，回答裁定②的「无法区分」）；② 无 goal_ac 且 Touches 与
   // branch-mode goal 在飞任务重叠的未标注读数（裁定⑧⑰：只报告不阻塞）。声明位置与 pushLagReading 同族
@@ -6118,6 +6166,9 @@ export async function runResidentLoop(opts: ResidentOptions): Promise<number> {
       goalBranchUntaggedOverlaps: goalBranchOverlaps,
       // GOAL-037（AC-362）（闭包读，见 filterTrace 的声明注释）：本轮 filtered-empty 的归因读数。
       filterTrace,
+      // GOAL-037（AC-367）（闭包读，见 autoTightenReading 的声明注释）：本轮自动收紧读数。
+      //   本步在 writeRound **之前**跑（step="auto-tighten"）⇒ 走到这里的轮它已定值。
+      autoTighten: autoTightenReading,
       // gap-worker-kind-stop-waits-for-all-in-flight-workers-instead-of-detaching-for-adoption：
       // kind 停机轮里【脱钩交给下一个循环】与【不可脱钩（收尾流水线在跑）】的在飞 task。
       detachedWorkers: detached.detached,
@@ -6165,6 +6216,9 @@ export async function runResidentLoop(opts: ResidentOptions): Promise<number> {
       // 否则「跑过且无候选被滤」与「没跑」在错误轮上不可区分，硬规则 3b）。在 apply-filters 之前抛错
       // ⇒ 闭包仍为 null（本轮真没跑该步）。
       filterTrace,
+      // GOAL-037（AC-367）：同款——自动收紧步【之后】才抛错时本轮确实跑过它 ⇒ 带上读数。在该步之前
+      // 抛错 ⇒ 闭包仍为 null（⛔ 两者不得同形）。
+      autoTighten: autoTightenReading,
     });
     try { appendHeartbeatLine(roundFile, record); } catch { /* 记录写失败不致命（运行时日志，⛔ 不因日志炸循环） */ }
     if (json) process.stdout.write(`${JSON.stringify({ event: "round", ...record })}\n`);
@@ -6562,6 +6616,7 @@ export async function runResidentLoop(opts: ResidentOptions): Promise<number> {
     goalBranchTargets = null; // 每轮复位（同上：⛔ 上一轮的 goal 读数不漏进本轮）
     goalBranchOverlaps = null;
     filterTrace = null; // 每轮复位（同上：⛔ 上一轮的归因条目不漏进本轮——「没跑该步 ⇒ null」据此成立）
+    autoTightenReading = null; // 每轮复位（同上：⛔ 上一轮的收紧读数不漏进本轮——「没跑该步 ⇒ null」据此成立）
     let poolSeen: number | null = null;
     let waitReason: string | null = null;
     let step = "start";
@@ -6714,6 +6769,10 @@ export async function runResidentLoop(opts: ResidentOptions): Promise<number> {
         // 也**不能** import 账本模块（值环，见 recordRelaxedDispatch 的注释）。
         // `present:false`（账本不存在）⇒ `records:[]` ⇒ 空集：对计数与「没有任务是被放宽派发的」同值。
         const relaxLedger = readRelaxedDispatchLedger(rootDir);
+        // GOAL-037（AC-367）：自动收紧闸 —— 控制态 `relax_halted` **每轮一次**读出后经 ctx 带入谓词
+        // （⛔ 不逐候选重读盘）。载体读失败/解析失败时 `readControlState` 给 `relax_halted:true`
+        // ⇒ live 下阻塞（宁可不放宽）。
+        const relaxHalted = readControlState(rootDir).state.relax_halted;
         const afterTaskFilters = applyTaskFilters(
           shuffled,
           makeFilterContext(rootDir, {
@@ -6721,6 +6780,7 @@ export async function runResidentLoop(opts: ResidentOptions): Promise<number> {
             retryExhausted: exclusion.retryExhausted,
             relaxedTaskIds: relaxLedger.records.map((r) => r.task),
             relaxedLedgerMalformed: relaxLedger.malformed.length,
+            relaxHalted,
           }),
           undefined,
           (e) => filterSink.push(e),
@@ -6789,6 +6849,12 @@ export async function runResidentLoop(opts: ResidentOptions): Promise<number> {
 
       // AC138-3 无条件心跳：每轮循环写一条（⛔ 池空/判停轮也写——outcome 在这些轮不写）。
       //   终态 stopReason 与瞬时 waitReason 都记 action=stop（观测面保留 stop_reason 读数，AC2）。
+      // GOAL-037（AC-367）：轮末的**自动收紧**一步——判「放宽比不放宽多花太多」并把收紧落进既有
+      //   控制态载体。放在 writeRound **之前**：本步的读数要进本轮记录（它是本轮发生的第 N 件事，
+      //   ⛔ 不推到下一轮——下一轮可能因停机而永不发生，那会让「已收紧但无人知道」成立）。
+      //   `runAutoTightenPass` 自己判「跑不跑」（放宽未启用 ⇒ 返回 null = 本轮没跑该步）。
+      step = "auto-tighten";
+      autoTightenReading = runAutoTightenPass(rootDir, Date.now());
       step = "write-round";
       writeRound(round, running.length, poolSeen, stopReason ?? waitReason, liveness, reconciled, supersededReclaimResult, { detached: detachedTasks, undetachable: undetachableRws.map((rw) => rw.task) });
 

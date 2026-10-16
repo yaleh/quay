@@ -78,7 +78,16 @@ export interface ForcedDispatch {
   at: string;
 }
 
-/** 控制态（单一真相源）。halted = 停止【新】派发（不杀在飞）；preference = selector 倾向存储。 */
+/** 控制态（单一真相源）。halted = 停止【新】派发（不杀在飞）；preference = selector 倾向存储。
+ *
+ *  `relax_halted`（GOAL-037 / AC-367）：**自动收紧闸** —— 为真时 touches 放宽谓词在 `mode: live`
+ *  下也保持阻塞（「放宽比不放宽多花太多」被判定成立后把放宽收回来）。它**住在既有载体里**
+ *  （`.quay/worker-control.json`），⛔ 不新造哨兵文件；也**不是**第二个 `halted`：
+ *  `halted` 停【一切新派发】、由人经控制面发出；`relax_halted` 只停【放宽放行】、由轮末的自动收紧
+ *  判定写入。两者互不代替（一个为真不得让另一个读成真）。
+ *
+ *  ⛔ 缺键读作 `false`（旧载体没有这个键——「没写过」不等于「写过 true」）；但**读不懂整份载体**
+ *  （读失败/解析失败）⇒ 两个闸都取 `true`，因为自动收紧的方向是**宁可不放宽**（硬规则 3b）。 */
 export interface ControlState {
   schemaVersion: 1;
   halted: boolean;
@@ -86,10 +95,11 @@ export interface ControlState {
   halted_at: string | null;
   preference: Record<string, string>;
   forced: ForcedDispatch[];
+  relax_halted: boolean;
 }
 
 export function defaultControlState(): ControlState {
-  return { schemaVersion: 1, halted: false, halted_by: null, halted_at: null, preference: {}, forced: [] };
+  return { schemaVersion: 1, halted: false, halted_by: null, halted_at: null, preference: {}, forced: [], relax_halted: false };
 }
 
 /** 把任意解析结果合并为 ControlState（缺失字段取缺省，不信任输入形状）。 */
@@ -109,6 +119,16 @@ export function mergeControlState(parsed: unknown): ControlState {
     forced: Array.isArray(p.forced)
       ? (p.forced as unknown[]).filter((f): f is ForcedDispatch => !!f && typeof f === "object")
       : [],
+    // `relax_halted` 的缺省方向与上面几个字段**相反**，这是刻意的：本闸的作用是【停止放宽】，
+    // 所以「没写过」（undefined）/「显式清空」（null）⇒ `false`（AC7 的「旧载体缺键 ≠ true」、
+    // AC6 的人工清零），而**一个读不懂的值**（字符串 `"yes"` / 数字 / 对象）⇒ `true`
+    // （宁可不放宽；把它读成 `false` 就是把「读不懂」伪装成「未收紧」，硬规则 3b）。
+    relax_halted:
+      typeof p.relax_halted === "boolean"
+        ? p.relax_halted
+        : p.relax_halted === undefined || p.relax_halted === null
+          ? false
+          : true,
   };
 }
 
@@ -129,12 +149,12 @@ export function readControlState(
   } catch (e) {
     const code = e && typeof e === "object" && "code" in e ? (e as { code?: string }).code : undefined;
     if (code === "ENOENT") return { state: defaultControlState(), parseError: null };
-    return { state: { ...defaultControlState(), halted: true }, parseError: `could not read control state at ${file}` };
+    return { state: { ...defaultControlState(), halted: true, relax_halted: true }, parseError: `could not read control state at ${file}` };
   }
   try {
     return { state: mergeControlState(JSON.parse(text)), parseError: null };
   } catch {
-    return { state: { ...defaultControlState(), halted: true }, parseError: `unparseable control state at ${file}` };
+    return { state: { ...defaultControlState(), halted: true, relax_halted: true }, parseError: `unparseable control state at ${file}` };
   }
 }
 
@@ -163,6 +183,16 @@ export function applyHalt(
 /** setPreference 操作：写 preference[k]=v（selector 的倾向存储）。 */
 export function applyPreference(state: ControlState, key: string, value: string): ControlState {
   return { ...state, preference: { ...state.preference, [key]: value } };
+}
+
+/** 自动收紧闸操作（GOAL-037 / AC-367）：**只**翻 `relax_halted` 这一个键。
+ *
+ *  ⛔ 刻意不做 `{...state, ...}` 之外的任何事：`halted` / `halted_by` / `halted_at` / `preference` /
+ *  `forced` 逐字保留 —— 自动收紧**不得**抹掉人工 halt，也不得清掉强制派发（AC7）。
+ *  ⛔ 也刻意**没有**「未超阈值就自动放开」的分支：本闸是单向的（人经 AC6 的方式清零），
+ *  否则单个好轮就能把收紧解除，而「放宽是一个单向棘轮」正是本缺口的一半。 */
+export function applyRelaxHalt(state: ControlState, relaxHalted = true): ControlState {
+  return { ...state, relax_halted: relaxHalted };
 }
 
 /** forceDispatch 操作：append 一条强制派发记录（驻留驱动的 selector 环消费）。 */
