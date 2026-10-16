@@ -2,7 +2,7 @@
 id: AC-363
 title: 放宽派发账本与落地连接读数：每次放宽写一条 .quay/relaxed-dispatch.jsonl，报告把它与 worker-outcome
   连接给出额外 worker 分钟、尝试次数、fan-in 失败步，并给出同期未放宽对照；样本不足为 not-evaluated 而非 0
-status: draft
+status: active
 kind: criterion
 goal: GOAL-037
 criterion: >-
@@ -40,4 +40,15 @@ origin: 用户 2026-10-16 在会话「ClaudeCodeUI
   局部重构方案」中认可「等待超过阈值乐观派发」改动方案（§3.3、§4）。合并成本预算需要「放宽的任务比不放宽的多花多少」的读数；现状里 worker 追平
   develop 时的冲突没有被记录，fan-in 的 merge-develop 失败率很低（quay 83/2492≈3.3%，claudecodeui
   2/1321≈0.15%），因为重叠任务被串行化了，放宽后冲突会出现在 worker 运行里。
+activatedAt: 2026-10-16T15:34:47.840Z
+statusLog:
+  - at: 2026-10-16T15:34:47.840Z
+    from: draft
+    to: active
+    actor: goal-driver
+    reason: "triage: activate"
+fidelity:
+  verdict: faithful
+  reason: "fidelity judge: faithful"
+  at: 2026-10-16T15:34:47.840Z
 ---
