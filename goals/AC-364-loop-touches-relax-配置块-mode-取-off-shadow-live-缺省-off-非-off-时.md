@@ -2,7 +2,7 @@
 id: AC-364
 title: loop.touches_relax 配置块：mode 取 off|shadow|live，缺省 off；非 off 时
   after_minutes 缺失即判配置不合格，不回退到任何内置数值；非法值非零退出并保留原配置
-status: active
+status: achieved
 kind: criterion
 goal: GOAL-037
 criterion: >-
@@ -45,6 +45,11 @@ statusLog:
     to: active
     actor: goal-driver
     reason: "triage: activate"
+  - at: 2026-10-16T16:35:40.308Z
+    from: active
+    to: achieved
+    actor: goal-driver
+    reason: "I2: criterion pass"
 fidelity:
   verdict: faithful
   reason: "fidelity judge: faithful"
