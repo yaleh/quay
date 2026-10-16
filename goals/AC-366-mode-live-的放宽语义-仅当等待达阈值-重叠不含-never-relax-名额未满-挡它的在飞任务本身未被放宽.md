@@ -2,7 +2,7 @@
 id: AC-366
 title: mode=live 的放宽语义：仅当等待达阈值、重叠不含
   never_relax、名额未满、挡它的在飞任务本身未被放宽、无过宽通配时放行；shared_files 内的重叠直接不算冲突；任何一项读不到即保持阻塞
-status: draft
+status: active
 kind: criterion
 goal: GOAL-037
 criterion: >-
@@ -39,4 +39,15 @@ expect: plugin/test/touches-relax-live-predicate.test.mjs 存在、在 55 秒内
 origin: 用户 2026-10-16 认可方案 §3.1、§3.2、§4。依据：对 claudecodeui 的历史重放，放宽（等待 30 分钟、冲突概率
   0.5）使 AC 延迟中位数约 −17%（90% 区间 −29% 至 −4%），p90 不变；quay 上收益约 0（组合 −1%，区间 −4% 至
   +1%），所以只在 claudecodeui 启用。重放基线偏悲观，收益可能被高估。
+activatedAt: 2026-10-16T15:38:55.044Z
+statusLog:
+  - at: 2026-10-16T15:38:55.044Z
+    from: draft
+    to: active
+    actor: goal-driver
+    reason: "triage: activate"
+fidelity:
+  verdict: faithful
+  reason: "fidelity judge: faithful"
+  at: 2026-10-16T15:38:55.044Z
 ---
