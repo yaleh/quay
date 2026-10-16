@@ -2,7 +2,7 @@
 id: gap-per-file-cpu-report-mem-key-collides-parent-and-isolated-child
 title: per-file-cpu-report 的 .mem 只按文件路径作 key ⇒ 隔离子进程模式下父进程覆盖子进程读数：五个重型文件全被读成
   ~50 MB（低估约 35×）
-status: todo
+status: ready
 labels:
   - gap
 parent: null
