@@ -3,7 +3,7 @@ id: gap-routine-semantic-dedup-scan-append-heartbeat-vs-round
 title: "semantic-dedup-scan: Byte-identical mkdir+JSONL-append+return-file
   bodies, and driver-runtime.ts:2104 explicitly declares this 'one append
   implementation shared by both drivers' — "
-status: ready
+status: done
 labels:
   - gap
   - routine-filed
