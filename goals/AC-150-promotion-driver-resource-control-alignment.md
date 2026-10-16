@@ -5,7 +5,7 @@ status: achieved
 kind: criterion
 goal: GOAL-002
 criterion: |
-  node --no-warnings --experimental-strip-types -e 'import("./plugin/scripts/driver-shared.ts").then(s=>import("./plugin/scripts/driver-runtime.ts").then(m=>{process.exit(typeof s.resourceGateCheck==="function"&&typeof s.serveControlPlane==="function"&&m.DRIVER_KINDS.promotion.verbs.includes("drain")?0:1)}))'
+  node --no-warnings --experimental-strip-types -e 'import("./plugin/scripts/driver-shared.ts").then(s=>import("./plugin/scripts/driver-runtime.ts").then(m=>{process.exit(typeof s.resourceGateCheck==="function"&&typeof s.serveControlPlane==="function"&&m.DRIVER_KINDS.promotion.verbs.includes("drain")?0:(console.error("CAUSE=promotion-resource-control-surface-missing — driver-shared must export resourceGateCheck/serveControlPlane and promotion verbs must include drain"),1))}))'
 expect: exit 0
 origin: |
   manager 2026-08-23 架构审计直读发现，⛔ 编号接全局最大值 149、不复用。本阶段的主语就是
