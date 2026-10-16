@@ -2,7 +2,7 @@
 id: gap-touches-parser-annotation-strip-single-shot-order-dependent
 title: touches-parser 的注解剥离每种括号只做一次且顺序固定 ⇒ 同时带全角与 ASCII 注解、或注解后跟散文的 Touches
   条目解析成非路径，静默与「新文件」同形
-status: todo
+status: ready
 labels:
   - gap
   - mechanism
