@@ -2,7 +2,7 @@
 id: gap-ac241-ternary-computed-exit-has-no-predicate
 title: AC-241 台账回归（第 7 次）：归因谓词对 JS 三元 computed exit（process.exit(cond?0:1)）结构性盲
   ⇒ 20 条在域判据被读成干净，AC-152 正在写不可归因 fail
-status: todo
+status: ready
 labels:
   - gap
   - defect
