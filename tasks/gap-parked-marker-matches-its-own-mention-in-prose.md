@@ -48,3 +48,11 @@ extra: {}
 - tasks/gap-parked-marker-matches-its-own-mention-in-prose.md
 - plugin/scripts/ready-pool-check.ts
 - plugin/test/ready-pool-check-s09.test.mjs
+
+## Blocker
+
+**2026-10-16T13:30:24.777Z — worker 未落地（exited-not-landed）**
+
+- 未落地原因：step=suite: AssertionError [ERR_ASSERTION]: the on/off wall-clock delta is within the 1% budget (measured 1.58%)
+- run_id：wk-prod-anchor
+- session_id：147aa63c-883f-41c6-a8e2-9d5a1351d8a5
