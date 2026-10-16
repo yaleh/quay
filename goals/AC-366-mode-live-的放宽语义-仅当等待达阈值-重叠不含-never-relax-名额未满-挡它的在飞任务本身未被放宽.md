@@ -2,7 +2,7 @@
 id: AC-366
 title: mode=live 的放宽语义：仅当等待达阈值、重叠不含
   never_relax、名额未满、挡它的在飞任务本身未被放宽、无过宽通配时放行；shared_files 内的重叠直接不算冲突；任何一项读不到即保持阻塞
-status: active
+status: achieved
 kind: criterion
 goal: GOAL-037
 criterion: >-
@@ -46,6 +46,11 @@ statusLog:
     to: active
     actor: goal-driver
     reason: "triage: activate"
+  - at: 2026-10-16T18:39:45.345Z
+    from: active
+    to: achieved
+    actor: goal-driver
+    reason: "I2: criterion pass"
 fidelity:
   verdict: faithful
   reason: "fidelity judge: faithful"
