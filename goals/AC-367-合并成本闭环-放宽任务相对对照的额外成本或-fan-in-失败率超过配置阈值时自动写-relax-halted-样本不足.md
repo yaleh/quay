@@ -2,7 +2,7 @@
 id: AC-367
 title: 合并成本闭环：放宽任务相对对照的额外成本或 fan-in 失败率超过配置阈值时自动写
   relax_halted；样本不足或阈值未配置时不自动动作并报 not-evaluated
-status: active
+status: achieved
 kind: criterion
 goal: GOAL-037
 criterion: >-
@@ -45,6 +45,11 @@ statusLog:
     to: active
     actor: goal-driver
     reason: "triage: activate"
+  - at: 2026-10-16T19:07:09.578Z
+    from: active
+    to: achieved
+    actor: goal-driver
+    reason: "I2: criterion pass"
 fidelity:
   verdict: faithful
   reason: "fidelity judge: faithful"
