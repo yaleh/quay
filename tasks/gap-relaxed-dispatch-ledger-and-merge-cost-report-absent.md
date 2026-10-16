@@ -2,7 +2,7 @@
 id: gap-relaxed-dispatch-ledger-and-merge-cost-report-absent
 title: 放宽派发既无账本也无报告：每次放宽不落 .quay/relaxed-dispatch.jsonl，合并成本无法按任务 id 与
   worker-outcome 连接（额外 worker 分钟 / 尝试次数 / fan-in 失败步都取不到）（GOAL-037 AC-363 观测面）
-status: todo
+status: ready
 labels:
   - gap
 parent: null
