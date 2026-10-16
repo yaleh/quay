@@ -1,0 +1,91 @@
+---
+id: gap-touches-relax-off-parity-predicate
+title: 新谓词 touchesDisjointOrAged 不存在：mode=off（含配置块缺失）决策须与基线 touchesDisjoint
+  逐候选逐顺序同形、mode=shadow 只标 wouldRelax 且不放行、影子期不写放宽账本——同形判据与两次取假形态全未落地（GOAL-037
+  AC-365 谓词面）
+status: todo
+labels:
+  - gap
+parent: null
+children: []
+extra:
+  schema: execution
+depends_on:
+  - gap-worker-round-filter-trace-attribution
+  - gap-touches-relax-config-block-unread-unvalidated
+goal_ac: AC-365
+---
+**type:** execution
+
+## Proposal
+
+**缺口（GOAL-037 方案 P1 的谓词面）**：`touchesDisjointOrAged` 这个谓词**在代码里不存在** —— `plugin/scripts/driver-filters.ts` 的 `TASK_FILTERS`（:1258-1264）只有 `touchesDisjoint`（:218-236），`grep -rn "touchesDisjointOrAged" plugin/ packages/` 零命中。GOAL-037 的整条生效路径（P1 shadow 观察、P2 live 小名额、P4 评估）都以这个新谓词为前提，而它必须在 off 下与现状**逐候选同形**、在 shadow 下**只标注不放行**——这两个态现在都没有实现，也没有任何读数能证明同形。
+
+**为什么这是缺口而不是「实现细节」**：AC-365 的判据是**同形（parity）**：off 时新谓词的决策要与基线 `touchesDisjoint` 逐候选、逐顺序相同（含配置块缺失的缺省态）；shadow 时放行结果与 off 完全相同，只在 `filter_trace` 里标出 `wouldRelax` 与「首个不满足的条件」。同形性只有在两套谓词都被**真实运行**、对同一输入矩阵**逐元素**比对时才可证——一个只跑新谓词的测试、或只断言集合大小的测试，区分不了「同形」与「两态都放行」。
+
+**⚠️ 同形判据的非平凡性来自哪里（本条设计的关键，不是文风）**：若 off 路径直接委托给 `touchesDisjoint`，一个**只**比较「新谓词 vs 旧谓词」的断言会退化成自证（硬规则 4：结构上不可能取假的量不是测量）。判别力必须来自**配置块的存在不得泄漏进 off 决策**：造一个 `mode: off` 但 `after_minutes`/`max_relaxed_inflight` 齐备、且候选的等待时长**确实超过** `after_minutes` 的 fixture —— 一个只在「任务够老」上做判断、忘了先看 `mode` 的实现会在这里放行，从而变红。本条要求该组输入与「配置块缺失」「显式 mode: off 且块为空」**三者**都逐元素等于基线。
+
+**机制现状（读代码得出，非推断）**：
+- 谓词列表：`TASK_FILTERS`（`plugin/scripts/driver-filters.ts:1258-1264`）五个元素；`touchesDisjoint` 是第三个。唯一消费点 `applyTaskFilters`（:1266-1271），一行 `candidateIds.filter((id) => preds.every((p) => p(id)))`。该文件头（:11-13）钉死「新增谓词 = 往 TASK_FILTERS 数组加一行，⛔ 不得在别处再写一份谓词实现」。
+- **替换会打到两处既有 pin**（本条必须一并更新，否则既有测试变红）：`plugin/test/driver-filters.test.mjs:101-107`（`deepEqual(TASK_FILTERS.map(f=>f.name), [...五个名字...])`，并在 :295-298 用 `TASK_FILTERS[2]` 当作 touches 谓词）与 `plugin/test/driver-runtime-s01.test.mjs:47-52`（同一名字序列的 deepEqual）。两处都是**特征化 pin**（把这个列表钉住是有意的），替换谓词名正是本条要求的改动本身，⛔ 不是「改测试让它变绿」。
+- off 语义的基线实现：`touchesDisjoint`（:218-236）在 `ctx.inFlight.length === 0` 时恒真；否则对每个在飞任务 `readTouches` + `checkTouchesPair(...).disjoint`；**候选文件读不出 ⇒ `{hasSection:false, globs:[]}` ⇒ `checkTouchesPair` 判 serialize ⇒ 滤掉**（fail-closed）。
+- 六面输入矩阵（AC 逐字）：无在飞 / 有重叠 / 无重叠 / 空 Touches / 通配声明 / 读不出的任务文件。
+- 配置面由同批的 `gap-touches-relax-config-block-unread-unvalidated`（AC-364）落地：`plugin/scripts/touches-relax-config.ts` 导出读取/校验，三态（块缺失 vs 显式 off）可分，非 off 时 `after_minutes`/`max_relaxed_inflight` 必填且**无内置回退**。本条**只读**它。
+- 归因面由 `gap-worker-round-filter-trace-attribution`（AC-362）落地：`applyTaskFilters` 新增**可选** trace 汇，被滤掉的（候选 × 谓词）各产出一条 `{ task, filter, blocker, overlapFiles, waitedMinutes }`。本条在**同一处**为 `touchesDisjointOrAged` 的条目补两键，⛔ 不改五个既有谓词、⛔ 不改 `applyTaskFilters` 的返回表达式。
+- 账本面由 `gap-relaxed-dispatch-ledger-and-merge-cost-report-absent`（AC-363）建立 `.quay/relaxed-dispatch.jsonl`。AC-365(c) 断言 **shadow 不写它**——本条不建、不写该账本，测试只在 fixture root 上断言该路径不存在。
+
+**放宽条件的词表（本条定义，实现与测试共用）**：候选 `wouldRelax` 当且仅当**全部**下列条件成立（合取；逐条稳定 id，按此顺序取首个不满足者；⛔ 代码里不写字面量阈值，全部取自 AC-364 读出的配置）：
+
+1. `touches-only-blocker` —— 该候选本轮**确实被 touches 单独挡住**（GOAL-037 风险节逐字：只有该轮确实被 touches 单独挡住才允许放宽）⇒ 不在 kept 集合内，且除 touches 外没有別的谓词也滤掉它；
+2. `waited-enough` —— `waitedMinutes >= after_minutes`；**缺值（`null`）⇒ 条件为假**（硬规则 6：缺值 = 未查，⛔ 不得当 0）；
+3. `quota-available` —— 当前已放宽在飞数 `< max_relaxed_inflight`；
+4. `not-never-relax` —— 候选 id 不在 `never_relax` 名单内；
+5. `overlap-shared` —— 重叠面 ⊆ `shared_files` 白名单（交集已由 `checkTouchesPair().overlaps` 算好）。
+
+trace 条目：满足全部 ⇒ `wouldRelax: true` 且 `relaxBlockedBy: null`；否则 ⇒ `wouldRelax: false` 且 `relaxBlockedBy: "<首个不满足的 id>"`。off 模式下 `wouldRelax` 恒 `false`（off 不做放宽判断），且**不得**出现 `wouldRelax: true` 的条目。
+
+⚠️ **适配条款**：若上述两条同批任务落地后的键名 / 条目形状 / 条件语义与本节不同（例如 `shared_files` 不是白名单语义），**以其导出为准**并把差异写进 Evidence；⛔ 不得为了让测试变绿而发明第六个条件、或改动配置语义。（本段不含任务 id，故不构成依赖声明。）
+
+<!-- dedup-ref --> 追踪与去重结论（机制去重已做，非症状去重；本段是追溯说明，不是依赖声明）：同 goal 的三个已立案任务 `gap-worker-round-filter-trace-attribution`（AC-362，trace 汇）、`gap-touches-relax-config-block-unread-unvalidated`（AC-364，配置读/校验）、`gap-relaxed-dispatch-ledger-and-merge-cost-report-absent`（AC-363，账本与报告）——三者都不实现新谓词、不实现同形测试。合并候选检查用现成机件跑过：`node --experimental-strip-types plugin/scripts/task-granularity-advice.ts --touches plugin/scripts/driver-filters.ts --touches plugin/scripts/capability-catalog-declarations.json --touches plugin/test/touches-relax-off-parity.test.mjs --touches plugin/test/driver-filters.test.mjs --touches plugin/test/driver-runtime-s01.test.mjs --touches tasks/gap-touches-relax-off-parity-predicate.md --json` ⇒ `peers: [gap-worker-round-filter-trace-attribution（共享 plugin/scripts/driver-filters.ts）]`、`mentions: [AC-363 条、AC-364 条]`。判定 **separate（独立立案）**：不同的验收对象（谓词的同形性与 trace 标注 vs 观测面 / 配置面 / 账本面），合并会把两条 AC 的判据面耦合进一个任务；与 peer 共享 `driver-filters.ts` 不产生额外并行损失（调度器本就按 Touches 串行）。
+
+## Plan
+
+1. **谓词（`plugin/scripts/driver-filters.ts`）**：新增 `touchesDisjointOrAged: TaskFilter`（`name: "touchesDisjointOrAged"`），**取代** `TASK_FILTERS` :1261 那一行的 `touchesDisjoint`（列表长度仍为五）。
+   - **off 路径**：与 `touchesDisjoint` **逐分支相同**——首选**直接委托** `touchesDisjoint.predicate(ctx)`（保证逐字节同形，且不产生第二份实现，硬规则 5b）；`touchesDisjoint` 的**导出保留**（它是 off 语义的单一实现，也是本条测试的基线）。
+   - **mode 来源**：经 `ctx.root` 调 AC-364 的读取器（**每轮一次**，⛔ 不在逐候选里重读重复读盘）。`mode === "off"` 或块缺失 ⇒ 只走 off 分支；`mode === "shadow"` ⇒ 先算出 off 的放行结果（返回值必须与之**完全相同**），再在同一 trace 汇里补标；`mode === "live"` ⇒ 本条**不实现**放行语义（AC-366 的活），行为与 shadow 相同（⛔ 不得在 live 下真的放行——那会让取假形态变绿）。
+   - ⛔ 不改 `applyTaskFilters` 的返回表达式，⛔ 不改两个 driver 既有调用位点的判定输入。
+2. **trace 标注（同一 trace 汇）**：对 `touchesDisjointOrAged` 产生的条目追加 `wouldRelax: boolean` 与 `relaxBlockedBy: string | null`，按上面的词表逐条求值。⚠️ 具体键名 / 嵌套形状由实现定，但**必须让测试能把 off 与 shadow 分开**（off ⇒ 无 `wouldRelax: true`；shadow ⇒ 有真有假）。
+3. **两处既有 pin 同步**：`plugin/test/driver-filters.test.mjs`（:101-107 的名字序列 + :295-298 用 `TASK_FILTERS[2]` 的判定）与 `plugin/test/driver-runtime-s01.test.mjs`（:47-52 的名字序列）更新为新名字，**判定语义一字不改**（这两个文件断言的是「五个谓词是一个列表」这条单一实现，替换元素名正是本条要求的改动）。
+4. **能力目录声明文案**：`plugin/scripts/capability-catalog-declarations.json` 的 `driver-filters.ts` 条目（:169）逐字枚举了这个列表的五个名字（`... / touchesDisjoint / ...`），替换后该文案失真 ⇒ 同步改名。⛔ 只改这一个 value 字符串，⛔ 不增删键（value 内不得有反引号或 `$(`）。
+5. **测试（新文件 `plugin/test/touches-relax-off-parity.test.mjs`，首行 `// @test-group engine`）**：**真实** `applyTaskFilters` + **真实** `TASK_FILTERS` + fixture 任务目录（`tasks/*.md` 真写盘、真 `## Touches`、真 `.quay/config.yml`），⛔ 不 mock 谓词（照 `plugin/test/driver-filters.test.mjs` 的 `makeRoot`/`writeTask`/`ctx` 手法）。断言的四面见 AC2–AC6。fixture root 用 `fs.mkdtempSync` 建、顶层 `after()` 统一删（`tmp-leak-pairing-check` 要求）。
+6. **可跑性与时限**：`expandDeclaredTouches` 走纯 fs 遍历（`touches-orthogonality-check.ts` 的 `walkFiles`）不 spawn git，fixture 根上的过滤是毫秒级；本测试**不 spawn driver、不跑全量 suite**，55s 上限应有余量（实测值写进 Evidence）。
+
+## Acceptance Criteria
+
+- [ ] AC1 — 测试文件落地且通过（AC-365 判据面逐字）：`timeout 55 node --experimental-strip-types --test plugin/test/touches-relax-off-parity.test.mjs` **exit 0**，文件带 `// @test-group engine`。附实际命令、输出尾部与实测耗时（秒）。
+- [ ] AC2 — (a) off 同形，且配置块的存在**不泄漏**进决策：三组输入——① 无 `touches_relax` 块；② 显式 `mode: off`（块为空）；③ `mode: off` 且 `after_minutes`/`max_relaxed_inflight` 齐备、且构造一个 `waitedMinutes` **确实超过** `after_minutes` 的候选——在六面输入矩阵（无在飞 / 有重叠 / 无重叠 / 空 Touches / 通配声明 / 读不出的任务文件）下，`applyTaskFilters` 的返回值与**独立算出的**基线 `touchesDisjoint` 序列**逐元素 `deepEqual`**（两个数组逐字打印）。⛔ 只比长度、或先排序再比，都不算。
+- [ ] AC3 — (b) shadow 决策同形：shadow 的返回值与 off **逐元素 `deepEqual`**（附两边数组逐字打印）；并断言 shadow 下**确实发生了标注**（trace 非空），即放行结果同形而观测面不同。
+- [ ] AC4 — (b) `wouldRelax` 与首个不满足条件：trace 里存在 `wouldRelax === true` 的条目（构造满足全部五条件的候选），且**每条条件各造一个只缺它的候选**，断言 `wouldRelax === false` 且 `relaxBlockedBy` **逐字等于**该条件 id。附每条 `{条件 id, fixture 事实, 实际条目 JSON}` 与 off 模式下无 `wouldRelax: true` 的读数。
+- [ ] AC5 — (c) 影子期不产生放宽账本：shadow 运行后 `.quay/relaxed-dispatch.jsonl` **不存在**（`existsSync === false`），且测试全程该路径零写入。附判定与该路径的 `ls` 读数。
+- [ ] AC6 — (d) 取假形态（两次真红，一次一改一跑，留痕）：① 把 off 分支写成恒 `true`（恒放行）⇒ 本测试变红；② 让 shadow 真的放行 ⇒ 本测试变红。各附非零退出码 + 失败断言原文；两次注入**都不得留在落地代码里**（恢复后 `git status --porcelain` 只含本条 Touches 内的预期改动）。
+- [ ] AC7 — 不回归既有派发与既有 pin：`bash scripts/test.sh plugin/test/driver-filters.test.mjs plugin/test/driver-runtime-s01.test.mjs` **exit 0**；并附 `git diff` 证明 `applyTaskFilters` 的**返回表达式一行未改**、以及两个 pin 文件的改动**只有名字序列（与沿用它的注释）**、判定语义未变。
+- [ ] AC8 — 能力目录与不越界：① `bash plugin/scripts/capability-catalog.sh --summary` 报 `0 unclassified`；② `git diff -- plugin/scripts/touches-relax-config.ts` **空**（⛔ 本条不改 AC-364 的读取器 / 校验器）；③ `git diff --stat -- plugin/scripts/worker-driver.ts` **空**（trace 随 AC-362 的条目一并流出，本条不碰 round 装配面）。附三条命令与输出。
+
+## Definition of Done
+
+真实落地 = **同一个真实 `applyTaskFilters` 在 off 与 shadow 两态下、对同一输入矩阵产生的两组候选序列被逐元素比对**，且 **shadow 的 `filter_trace` 里真实出现 `wouldRelax` 的真假两种读数**——不是「单测绿了」，也不是「内存对象里有这个字段」。
+
+四条逐一对上：① 新测试文件落地并 `exit 0`（AC1）；② off 与基线 `touchesDisjoint` 逐元素相同，且**配置块齐备但 mode=off** 的输入也不放宽（AC2，这是同形判据的非平凡来源）；③ shadow 与 off 逐元素相同、且 trace 里 `wouldRelax` 有真有假、不满足者点名首个条件（AC3/AC4）；④ 两次取假注入各真红一次（AC6，附红输出）。前后对照（AC7/AC8）证明既有派发决策、既有 pin 与其它三面未被本条的改动波及。
+
+⛔ 只让单测变绿、或只在测试里手搓一个对象塞进断言，**不算**落地：AC-365 的判据面（`plugin/test/touches-relax-off-parity.test.mjs` 存在且 55s 内通过）**单独不具备判别力**——它区分不了「真同形」与「两态都放行」；判别力由 AC2 的第三组输入与 AC6 的两次注入提供，故两者都不得省略、不得只在文字上声称跑过。
+
+**如实写明（⛔ 不作为省略的理由）**：本 AC 的判据面是**夹具读数**——GOAL-037 立案文本的「已知缺口」已承认本 goal 的 AC 都不读生产载体（生产读数需要人在目标项目启用 shadow/live 并重启 driver）。本条证明的是「新谓词在 off/shadow 两态下的决策与标注」，生产启用（AC-366 的接线与人择机开启）由后续 AC 与人承担。
+
+## Touches
+
+- plugin/scripts/driver-filters.ts
+- plugin/scripts/capability-catalog-declarations.json
+- plugin/test/touches-relax-off-parity.test.mjs (new)
+- plugin/test/driver-filters.test.mjs
+- plugin/test/driver-runtime-s01.test.mjs
+- tasks/gap-touches-relax-off-parity-predicate.md
