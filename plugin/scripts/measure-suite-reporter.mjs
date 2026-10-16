@@ -147,9 +147,10 @@ export function readConcurrency() {
 
 // gap-perfile-cpu-cost-collection — per-file machine cost (cost_f) via route (a) 子进程自报.
 // The preload seam (plugin/scripts/per-file-cpu-report.mjs, loaded via NODE_OPTIONS=--require) writes
-// each isolated test-file child's OWN readings into `<QUAY_PERFILE_CPU_DIR>/<sha256(abs)>.<ext>` on the
-// child's exit: `.cpu` = process.cpuUsage() (+ reaped children), `.mem` =
-// process.resourceUsage().maxRSS (gap-perfile-memory-cost-collection-missing — the memory mirror).
+// each isolated test-file child's OWN readings into
+// `<QUAY_PERFILE_CPU_DIR>/<sha256(abs)>.<pid>.<ext>` on that process's exit: `.cpu` =
+// process.cpuUsage() (+ reaped children), `.mem` = process.resourceUsage().maxRSS
+// (gap-perfile-memory-cost-collection-missing — the memory mirror).
 // This reporter reads those files back at the file's `test:complete` event — the child's exit handler
 // runs BEFORE the parent emits test:complete, so the writes are on disk and there is no race. The key
 // (sha256(path.resolve(file))[:16]) MUST match the preload's key byte-for-byte.
@@ -166,33 +167,63 @@ export function readPerFileCpuMs(file) {
 }
 
 // gap-perfile-memory-cost-collection-missing — the MEMORY mirror of readPerFileCpuMs, same dir, same
-// key, `<key>.mem` extension. The writer (per-file-cpu-report.mjs) records
+// key, `.mem` extension. The writer (per-file-cpu-report.mjs) records
 // `process.resourceUsage().maxRSS` (KB) — the kernel's PEAK RSS for that test-file child, NOT an
 // exit-time `memoryUsage().rss` snapshot. COVERAGE BOUNDARY (硬规则 3b — read the writer's header
-// before consuming this): this process only; a subprocess the file spawned is NOT covered. Returns
-// the peak KB, or undefined when the dir is unset / no report was written — the caller then OMITS
-// `mem_peak_kb` from the line (absent = "not measured", never a fabricated 0).
+// before consuming this): the file's isolated child process only; a subprocess the file spawned is
+// NOT covered. Returns the peak KB, or undefined when the dir is unset / no report was written — the
+// caller then OMITS `mem_peak_kb` from the line (absent = "not measured", never a fabricated 0).
 // Exported so the unified scheduler (suite-scheduler.ts) REUSES this single reader — the same
 // two-emission-points-one-reader contract readPerFileCpuMs carries.
 export function readPerFileMemPeakKb(file) {
   return readPerFileMetric(file, "mem");
 }
 
-// The ONE reader both exported dimensions delegate to: read `<QUAY_PERFILE_CPU_DIR>/<sha256(abs)>.<ext>`
-// and coerce it to a non-negative finite number, or undefined when absent/unreadable/invalid. Shared
-// so the two dimensions cannot drift in key derivation or in the absent⇒omitted contract.
+// The ONE reader both exported dimensions delegate to: enumerate every report for this file's key in
+// `<QUAY_PERFILE_CPU_DIR>` and return the MAXIMUM of the valid values (undefined when there is none).
+//
+// WHY a glob + max rather than the single `<key>.<ext>` read it used to be
+// (gap-per-file-cpu-report-mem-key-collides-parent-and-isolated-child): in a process-isolated run TWO
+// processes have the same file as argv[1] — node:test's isolated child (the reading we want) and the
+// runner that spawned it (whose own RSS is ~50 MB and is NOT the file's cost). With one pid-less
+// filename the runner's reading silently overwrote the child's (measured: 52,356 KB reported for a
+// file whose child peaked at 1,624,188 KB). The writer now stamps the pid into the filename; THIS side
+// takes the max, so a smaller reading can never mask a larger one regardless of write order.
+//
+// The pid component is OPTIONAL in the pattern, so the pre-fix single-file dialect still reads (older
+// report dirs, fixtures) — and every existing reader test that writes `<key>.<ext>` keeps passing
+// unchanged. The pattern is fully anchored: `<key>extra.mem`, `<key>.1.mem.bak` and any other lookalike
+// can never be mistaken for a report for this file.
+//
+// MAX, not sum/last: every distinct value here is a candidate reading of the SAME quantity by a
+// different process lifetime, and the consumers (heavy-file classification via full-suite-runner's
+// memPeakKb, the trend record) must be told the worst the file ever did — a file that once peaked at
+// 1.8 GB IS heavy. A sum would double-count a re-run; last-write-wins is the very defect being fixed.
 function readPerFileMetric(file, ext) {
   const dir = process.env.QUAY_PERFILE_CPU_DIR;
   if (!dir) return undefined;
+  let names;
   try {
-    const key = crypto.createHash("sha256").update(path.resolve(file)).digest("hex").slice(0, 16);
-    const raw = readFileSync(path.join(dir, `${key}.${ext}`), "utf8").trim();
-    if (!raw) return undefined;
-    const n = Number(raw);
-    return Number.isFinite(n) && n >= 0 ? n : undefined;
+    names = readdirSync(dir);
   } catch {
-    return undefined; // no report for this file (dir missing / write failed / not wired)
+    return undefined; // no report dir for this run (not wired / already cleaned up)
   }
+  const key = crypto.createHash("sha256").update(path.resolve(file)).digest("hex").slice(0, 16);
+  const reportName = new RegExp(`^${key}(?:\\.\\d+)?\\.${ext}$`);
+  let best;
+  for (const name of names) {
+    if (!reportName.test(name)) continue;
+    let raw;
+    try {
+      raw = readFileSync(path.join(dir, name), "utf8").trim();
+    } catch {
+      continue; // a report unreadable mid-write must not discard the other readings
+    }
+    if (!raw) continue;
+    const n = Number(raw);
+    if (Number.isFinite(n) && n >= 0 && (best === undefined || n > best)) best = n;
+  }
+  return best;
 }
 
 export default async function* perFileReporter(source) {

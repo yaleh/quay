@@ -13,7 +13,7 @@
 // present, so removing it flips THIS test red.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync, writeFileSync, existsSync, mkdtempSync, rmSync } from "node:fs";
+import { readFileSync, writeFileSync, existsSync, mkdtempSync, rmSync, readdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
@@ -104,12 +104,19 @@ function runIsolatedFixtures(dir, fixtures, env = {}) {
   Object.assign(childEnv, env);
   const r = spawnSync(process.execPath, ["--test", ...fixtures], { encoding: "utf8", env: childEnv });
   assert.equal(r.status, 0, `fixture suite should pass (stderr: ${r.stderr})`);
-  /** key contract, byte-identical to the preload writer + the reporter reader */
+  // Read the fixtures' peak-memory reports through the REPORTER'S OWN reader instead of a hand-rolled
+  // `<key>.mem` lookup. The writer's filename contract changed to `<key>.<pid>.mem`
+  // (gap-per-file-cpu-report-mem-key-collides-parent-and-isolated-child), so a second, hand-kept copy
+  // of the key/filename derivation here would be exactly the "two readers, one changed" drift the
+  // shared reader exists to prevent (the old lookup silently read `undefined` once the writer moved).
+  const prevDir = process.env.QUAY_PERFILE_CPU_DIR;
+  process.env.QUAY_PERFILE_CPU_DIR = cpuDir;
   const memByFile = new Map();
-  for (const f of fixtures) {
-    const key = crypto.createHash("sha256").update(path.resolve(f)).digest("hex").slice(0, 16);
-    const p = join(cpuDir, `${key}.mem`);
-    memByFile.set(f, existsSync(p) ? Number(readFileSync(p, "utf8").trim()) : undefined);
+  try {
+    for (const f of fixtures) memByFile.set(f, readPerFileMemPeakKb(f));
+  } finally {
+    if (prevDir === undefined) delete process.env.QUAY_PERFILE_CPU_DIR;
+    else process.env.QUAY_PERFILE_CPU_DIR = prevDir;
   }
   return { memByFile, stderr: r.stderr };
 }
@@ -195,6 +202,120 @@ test("readPerFileMemPeakKb — shared named export reading <key>.mem; absent ⇒
       assert.equal(readPerFileCpuMs(file), 12.5, "cpu dimension unaffected");
     } finally {
       delete process.env.QUAY_PERFILE_CPU_DIR;
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// ══ gap-per-file-cpu-report-mem-key-collides-parent-and-isolated-child ════════════════════════════
+// The writer's report filename is `<key>.<pid>.<ext>` and the reader takes the MAX over every report
+// under a key. Both halves exist because a process-isolated run has TWO processes with the same file
+// as argv[1] (node:test's isolated child + the runner that spawned it), and with a single pid-less
+// filename the runner's own ~50 MB reading overwrote the child's real peak — measured 31x under
+// (52,356 KB reported for a file whose child peaked at 1,624,188 KB).
+
+test("AC3 — the reader takes the MAX over a key's per-pid reports (a small reading cannot mask a larger one), and is not a constant", () => {
+  const dir = mkdtempSync(join(os.tmpdir(), "mem-pidmax-"));
+  try {
+    const file = join(dir, "x.test.mjs");
+    // key contract, byte-identical to the preload writer
+    const key = crypto.createHash("sha256").update(path.resolve(file)).digest("hex").slice(0, 16);
+    const pidA = 9_000_001; // pids no live process holds on this host — the reader must not care
+    const pidB = 9_000_002;
+    process.env.QUAY_PERFILE_CPU_DIR = dir;
+    try {
+      // NEGATIVE CONTROL FIRST (硬规则 4 — a value that cannot take the other branch is not a
+      // measurement): with ONLY the small reading present, the reader returns the small value. A
+      // reader that always returned a big/constant number, or one that read some other file, fails HERE.
+      writeFileSync(join(dir, `${key}.${pidA}.mem`), "52356\n", "utf8");
+      assert.equal(readPerFileMemPeakKb(file), 52356, "only one (small) report ⇒ that value — the reader is not a constant");
+      // The isolated child's real reading lands under the SAME key, a different pid.
+      writeFileSync(join(dir, `${key}.${pidB}.mem`), "1624188\n", "utf8");
+      assert.equal(readPerFileMemPeakKb(file), 1624188, "the child's larger reading must win over the runner's smaller one");
+      // ORDER-INDEPENDENCE: in production the runner exits LAST, so the small value is the one written
+      // second — last-write-wins is the defect being fixed, so re-write the small one and re-read.
+      writeFileSync(join(dir, `${key}.${pidA}.mem`), "52356\n", "utf8");
+      assert.equal(readPerFileMemPeakKb(file), 1624188, "the max is order-independent: a small value written last still loses");
+      // The shared reader's cpu dimension rides the SAME rule (one reader, both dimensions).
+      writeFileSync(join(dir, `${key}.${pidA}.cpu`), "1164.5\n", "utf8");
+      writeFileSync(join(dir, `${key}.${pidB}.cpu`), "1222.4\n", "utf8");
+      assert.equal(readPerFileCpuMs(file), 1222.4, "cpu takes the max over the same per-pid reports");
+      // The pattern is ANCHORED: lookalike names are not this file's reports (硬规则 2 — 按位置判定).
+      writeFileSync(join(dir, `${key}extra.mem`), "999999999\n", "utf8");
+      writeFileSync(join(dir, `${key}.1.mem.bak`), "999999999\n", "utf8");
+      writeFileSync(join(dir, `prefix${key}.mem`), "999999999\n", "utf8");
+      assert.equal(readPerFileMemPeakKb(file), 1624188, "only `<key>[.<pid>].<ext>` counts — prefixed/suffixed lookalikes are ignored");
+      // …and the pre-fix pid-less dialect still reads (older report dirs / fixtures): the acceptance
+      // that keeps the sibling reader test (and suite-scheduler.test.mjs's `<key>.cpu` fixture) green.
+      writeFileSync(join(dir, `${key}.mem`), "777\n", "utf8");
+      assert.equal(readPerFileMemPeakKb(file), 1624188, "the legacy pid-less dialect is accepted AND still loses the max");
+      rmSync(join(dir, `${key}.${pidA}.mem`));
+      rmSync(join(dir, `${key}.${pidB}.mem`));
+      assert.equal(readPerFileMemPeakKb(file), 777, "with only the legacy pid-less report left, that value is returned");
+    } finally {
+      delete process.env.QUAY_PERFILE_CPU_DIR;
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("AC2 — in a REAL process-isolated run the runner writes NO report of its own, and the reading is the child's true peak (not the runner's ~50 MB)", () => {
+  const dir = mkdtempSync(join(os.tmpdir(), "mem-pid-e2e-"));
+  try {
+    // A fixture whose isolated child really peaks well above any bare node runner's RSS (~50 MB
+    // measured on this host), and which RELEASES the memory before exit — so a reading at the
+    // runner's ~50 MB band can only be the runner's own, never this file's.
+    const fx = join(dir, "balloon.test.mjs");
+    writeFileSync(
+      fx,
+      'import { test } from "node:test";\n' +
+        'test("balloon", () => { let b = Buffer.alloc(128 * 1024 * 1024, 1); b.fill(2); b = null; });\n',
+    );
+    const childEnv = { ...process.env };
+    for (const k of Object.keys(childEnv)) {
+      if (k.startsWith("NODE_TEST_")) delete childEnv[k];
+    }
+    const cpuDir = join(dir, "cpu");
+    childEnv.QUAY_PERFILE_CPU_DIR = cpuDir;
+    const preload = join(repoRoot, "plugin", "scripts", "per-file-cpu-report.mjs");
+    childEnv.NODE_OPTIONS = `${childEnv.NODE_OPTIONS ? childEnv.NODE_OPTIONS + " " : ""}--require=${preload}`;
+    // The production shape that exposed the defect (and the per-file measurement shape): the isolation
+    // flag is on the COMMAND LINE, so the runner carries it in execArgv exactly like its children do.
+    const r = spawnSync(process.execPath, ["--test", "--test-isolation=process", fx], { encoding: "utf8", env: childEnv });
+    assert.equal(r.status, 0, `fixture suite should pass (stderr: ${r.stderr})`);
+
+    const key = crypto.createHash("sha256").update(path.resolve(fx)).digest("hex").slice(0, 16);
+    const names = readdirSync(cpuDir);
+    // (1) The runner must not write: spawnSync reports ITS pid, and no report may be keyed to it.
+    //     On the pre-fix code this is exactly the file that existed and held the ~50 MB reading.
+    assert.ok(
+      !names.includes(`${key}.${r.pid}.mem`),
+      `the runner (pid ${r.pid}) must not write a peak-memory report for the file it merely drives — reports present: ${names.join(" ")}`,
+    );
+    // (2) The pid-less dialect must not be written any more either (that was the single overwritten file).
+    assert.ok(
+      !names.includes(`${key}.mem`),
+      `the writer must key reports by pid — a pid-less report means the two processes can still collide (present: ${names.join(" ")})`,
+    );
+    // (3) The isolated child must still report, and the value read back must be ITS peak.
+    assert.ok(
+      names.some((n) => n.startsWith(`${key}.`) && n.endsWith(".mem")),
+      `the isolated child must still write its report (present: ${names.join(" ")})`,
+    );
+    const prevDir = process.env.QUAY_PERFILE_CPU_DIR;
+    process.env.QUAY_PERFILE_CPU_DIR = cpuDir;
+    try {
+      const kb = readPerFileMemPeakKb(fx);
+      assert.equal(typeof kb, "number", "the fixture's peak must be readable");
+      assert.ok(
+        kb > 64 * 1024,
+        `the reading (${kb} KB) must be the CHILD's peak, not the runner's ~50 MB — the pre-fix code read the runner's 52,356 KB here (a 31x under-report)`,
+      );
+    } finally {
+      if (prevDir === undefined) delete process.env.QUAY_PERFILE_CPU_DIR;
+      else process.env.QUAY_PERFILE_CPU_DIR = prevDir;
     }
   } finally {
     rmSync(dir, { recursive: true, force: true });

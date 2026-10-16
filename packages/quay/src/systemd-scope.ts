@@ -46,6 +46,17 @@ import { execFileSync } from "node:child_process";
  *  `"0"`/`"1"` forces the answer so a hermetic test can drive either branch. */
 export const SYSTEMD_RUN_AVAILABLE_ENV = "QUAY_TEST_SYSTEMD_RUN_AVAILABLE";
 
+/** The cgroup v2 hierarchy mount — the ONE place this literal lives. The suite's host adapter
+ *  (`plugin/scripts/host-resource-adapter.ts`) asks whether it exists before claiming it can measure a
+ *  scope, and `effective-capacity-probe.ts` walks it; ⛔ neither re-spells the path (硬规则 5b). It
+ *  is a MECHANISM constant of the linux-cgroup-v2 adapter, not a policy value — a host without it is
+ *  not "misconfigured", it is a host this adapter does not fit. */
+export const LINUX_CGROUP_V2_ROOT = "/sys/fs/cgroup";
+
+/** The systemd-run binary NAME (never a path — resolution stays with PATH, so a host with the binary
+ *  elsewhere is a PATH question, not a code change). */
+export const SYSTEMD_RUN_BIN = "systemd-run";
+
 /** Default MemoryMax = host totalmem × this fraction. ⚠️ host-DERIVED on purpose: a literal ceiling
  *  is only ever "equivalent to unlimited" on the machine that wrote it and a real limit elsewhere
  *  (CLAUDE.md 硬规则 4 推论二). ⛔ Never write such a literal. */
@@ -103,13 +114,76 @@ export interface ResolvedScopeEnvelope {
  *  must be the SAME thing. ⛔ NEVER spell these properties a second time at either call site. */
 export const SCOPE_PROPERTY_ARGS: readonly string[] = ["-p", "MemoryAccounting=yes", "-p", "OOMPolicy=continue"];
 
-/** The availability probe's argv — `systemd-run --user --scope --quiet <SCOPE_PROPERTY_ARGS> true` — a
- *  REAL transient scope that carries EXACTLY the properties the real invocation carries (so a green
- *  probe implies the real call can succeed). `argv[0]` is the binary; the trailing `true` is the no-op
- *  member. Pure + exported so a test can assert the probe exercises EVERY property the envelope relies
- *  on (the AC3 mutation control: dropping `OOMPolicy` from here turns that test red). */
+/** The bounding dimensions a scope may carry, as DECLARED POLICY VALUES. Every field is optional and
+ *  `null`/absent means 「do not pass this property」 — i.e. that dimension is NOT bounded. That is the
+ *  ONLY way to express "unlimited" here: an "equivalent-unlimited" literal is only ever unlimited on
+ *  the machine that wrote it (CLAUDE.md 硬规则 4 推论二).
+ *
+ *  ⚠️ RELATION TO THE CALLER'S POLICY TYPE: this is the ARGV BUILDER's input (optional/absent =
+ *  omit). The caller-side declared-policy type is `ResourceLimits` in
+ *  `plugin/scripts/host-resource-adapter.ts` (REQUIRED strings, `""` = unbounded), which is
+ *  structurally assignable to this. The two differ only in the "unset" convention each layer already
+ *  used — not in what gets passed. */
+export interface ScopeResourceLimits {
+  memoryMax?: string | null;
+  cpuQuota?: string | null;
+  tasksMax?: string | null;
+  memorySwapMax?: string | null;
+}
+
+/** The `-p <assign>` PAIRS for a limit set, in the ONE order every caller uses. ⛔ A dimension left
+ *  empty contributes NOTHING (not `-p MemoryMax=infinity`, not a commented-out line). */
+export function scopeLimitPropertyArgs(limits: ScopeResourceLimits): string[] {
+  const out: string[] = [];
+  if (limits.memoryMax) out.push("-p", `MemoryMax=${limits.memoryMax}`);
+  if (limits.cpuQuota) out.push("-p", `CPUQuota=${limits.cpuQuota}`);
+  if (limits.tasksMax) out.push("-p", `TasksMax=${limits.tasksMax}`);
+  if (limits.memorySwapMax) out.push("-p", `MemorySwapMax=${limits.memorySwapMax}`);
+  return out;
+}
+
+/** The mechanism knobs that distinguish the call sites of the ONE argv builder. */
+export interface ScopeLaunchOptions {
+  /** `--collect`: reap the transient scope when its last member exits (the serve/anchor envelope). */
+  collect?: boolean;
+  /** `--unit=<name>`: a NAMED transient scope (the serve/anchor envelope). */
+  unit?: string | null;
+  /** `--quiet`: suppress systemd's "Running as unit: …" stdout line. REQUIRED for the suite, whose
+   *  stdout is teed into the suite log and run through the failure-pattern matcher. */
+  quiet?: boolean;
+}
+
+/**
+ * THE argv builder for a `systemd-run --user --scope` envelope. Both call sites that used to spell
+ * their own argv — the serve/anchor envelope (`scopeLaunchArgv`) and the suite's host adapter
+ * (`host-resource-adapter.launchArgv`) — go through THIS function, so the property list, the
+ * `-p` ordering and the flag set can no longer drift between the two (硬规则 5b: 改一处两处同变).
+ *
+ * Order: binary › `--user --scope` › mechanism flags (`--collect` / `--unit=` / `--quiet`) ›
+ * `SCOPE_PROPERTY_ARGS` › limit properties › inner argv. `--scope` execs in place, so the inner argv
+ * is the TAIL and no shell is inserted.
+ */
+export function boundedScopeArgv(
+  innerArgv: string[],
+  limits: ScopeResourceLimits,
+  opts: ScopeLaunchOptions = {},
+): string[] {
+  const argv = [SYSTEMD_RUN_BIN, "--user", "--scope"];
+  if (opts.collect) argv.push("--collect");
+  if (opts.unit) argv.push(`--unit=${opts.unit}`);
+  if (opts.quiet) argv.push("--quiet");
+  argv.push(...SCOPE_PROPERTY_ARGS, ...scopeLimitPropertyArgs(limits));
+  return [...argv, ...innerArgv];
+}
+
+/** The availability probe's argv — a REAL transient scope carrying EXACTLY the properties the real
+ *  invocations carry (so a green probe implies the real call can succeed). `argv[0]` is the binary;
+ *  the trailing `true` is the no-op member. ⛔ Built by `boundedScopeArgv`, NOT spelled by hand:
+ *  that is what makes 「probe green」 structurally imply 「the real argv is accepted」. Pure + exported
+ *  so a test can assert the probe exercises EVERY property the envelope relies on (the AC3 mutation
+ *  control: dropping `OOMPolicy` from `SCOPE_PROPERTY_ARGS` turns that test red). */
 export function scopeProbeArgv(): string[] {
-  return ["systemd-run", "--user", "--scope", "--quiet", ...SCOPE_PROPERTY_ARGS, "true"];
+  return boundedScopeArgv(["true"], {}, { quiet: true });
 }
 
 /** Run `argv[0] argv.slice(1)` and report whether it exited 0. ⛔ Returns `false` — NEVER `true` — when
@@ -365,15 +439,16 @@ export function resolveScopeEnvelope(opts: ScopeEnvelopeOptions): ResolvedScopeE
  *  is preserved, and ⛔ no shell is inserted. `--collect` reaps the transient scope when the member
  *  exits (including on failure); the property list is `SCOPE_PROPERTY_ARGS` — the **SAME** array the
  *  availability probe drives, so 「探测绿」 implies these exact properties are accepted. The ceiling is
- *  passed only when present (⛔ never as an "equivalent-unlimited" literal). */
+ *  passed only when present (⛔ never as an "equivalent-unlimited" literal).
+ *
+ *  Since `boundedScopeArgv` exists this is a thin, serve-shaped CALL of it — ⛔ not a second argv
+ *  builder (硬规则 5b). The suite's envelope goes through the same function. */
 export function scopeLaunchArgv(
   innerArgv: string[],
   res: { envelope: "scope" | "none"; memoryMax: string | null; unit: string | null },
 ): string[] {
   if (res.envelope === "none" || !res.unit) return innerArgv;
-  const argv = ["systemd-run", "--user", "--scope", "--collect", `--unit=${res.unit}`, ...SCOPE_PROPERTY_ARGS];
-  if (res.memoryMax) argv.push("-p", `MemoryMax=${res.memoryMax}`);
-  return [...argv, ...innerArgv];
+  return boundedScopeArgv(innerArgv, { memoryMax: res.memoryMax }, { collect: true, unit: res.unit });
 }
 
 /** The serve host's envelope. ⛔ The ONE call the serve spawn sites share — neither

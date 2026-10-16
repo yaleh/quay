@@ -64,3 +64,54 @@ export function readLoadAvg1(): number {
     return 0;
   }
 }
+
+// ── the INSTANTANEOUS run-queue components (gap-resource-gate-reads-lagging-loadavg-not-instantaneous-rd) ─
+// `readLoadAvg1` above answers a 1-MINUTE EXPONENTIAL MOVING AVERAGE — it remembers the last minute,
+// it is not "now". `/proc/stat` carries the kernel's own current counts instead:
+//     procs_running  — tasks in R state (running + runnable)
+//     procs_blocked  — tasks in D state (uninterruptible sleep, e.g. I/O wait)
+// Measured on this host (tokyo-alpha, 2026-10-16): load1 = 208.7 while procs_running + procs_blocked
+// = 39 — a 5× gap between the lagging average and the instant. The components are recorded BESIDE
+// loadavg so a later regression can decide whether the gate's overload-window criterion should read
+// them instead; ⛔ that criterion is NOT changed here (a change must be driven by the component
+// regression, not by the observation that the two differ).
+//
+// ONE home, both layers: `plugin/scripts/full-suite-runner.ts` (the suite round record) and
+// `plugin/scripts/suite-load-sampler.ts` (the load curve) both import THIS function — the kernel leaf
+// is the only placement both layers reach (`packages/**` → `plugin/**` is the forbidden reverse edge).
+// The gate's bash side (plugin/scripts/resource-gate.sh) keeps its own awk reader: a shell function
+// cannot import this one, the same deliberate split the load-avg readers already document.
+
+/** The kernel's instantaneous run-queue counts plus their sum. */
+export interface RunQueueReading {
+  /** `/proc/stat` `procs_running` — tasks in R state. */
+  procs_running: number;
+  /** `/proc/stat` `procs_blocked` — tasks in D state (uninterruptible sleep). */
+  procs_blocked: number;
+  /** `procs_running + procs_blocked` — the instantaneous R+D queue depth. */
+  runq: number;
+}
+
+/** Read `procs_running` / `procs_blocked` from `/proc/stat`, or **null** when either line is missing
+ *  or the file cannot be read.
+ *
+ *  ⛔ NULL, not 0 — the one deliberate difference from `readLoadAvg1`'s best-effort 0 above. A load of
+ *  0 is a real reading (an idle box); a *component* of 0 is far more often "the file went away" than
+ *  "no process is runnable", and a fabricated 0 in the ledger would read as "the machine went idle"
+ *  exactly when the instrument failed (硬规则 3b: 读不懂 ⇒ 独立取值，不与合格同形). Callers therefore
+ *  have three distinguishable states: a number, `null` (read attempted, unavailable), and the field's
+ *  absence on rows written before this reading existed. */
+export function readRunQueue(): RunQueueReading | null {
+  try {
+    const text = fs.readFileSync("/proc/stat", "utf8");
+    const running = text.match(/^procs_running[ \t]+(\d+)[ \t]*$/m);
+    const blocked = text.match(/^procs_blocked[ \t]+(\d+)[ \t]*$/m);
+    if (!running || !blocked) return null;
+    const procs_running = Number(running[1]);
+    const procs_blocked = Number(blocked[1]);
+    if (!Number.isFinite(procs_running) || !Number.isFinite(procs_blocked)) return null;
+    return { procs_running, procs_blocked, runq: procs_running + procs_blocked };
+  } catch {
+    return null;
+  }
+}

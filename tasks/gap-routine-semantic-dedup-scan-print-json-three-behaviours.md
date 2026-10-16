@@ -11,6 +11,9 @@ labels:
 parent: null
 children: []
 extra: {}
+depends_on:
+  - gap-suite-recovery-ladder-log-wiring-reads-wrong-file-always-log-unreadable
+  - gap-lwa-crit-fixture-sleep300-child-not-reaped-forces-aborted-on-clean-suite
 ---
 ## Finding
 One name spans three shapes: three byte-identical console.log(JSON.stringify(x)), two pretty-printers that are one behaviour in two spellings, and a third pretty variant with a different signature — extraction must respect that core cannot import plugin sources.
@@ -86,10 +89,30 @@ extract
 - `packages/quay/src/cli/shared.ts`
 - `tasks/gap-routine-semantic-dedup-scan-print-json-three-behaviours.md`
 
+## Blocked（人 2026-10-15 裁定：改用 depends_on 结构化阻塞，不用 needs-human）
+
+**人指出更正**：这不该是 needs-human（人工停派）——应当用 `depends_on` 正确表达依赖关系，挂 `todo`，让既有 todo→ready 促升闸的 `depsReadinessFor` 判定自动拦住，两个真因任务落地后自动解阻塞、无需人工翻回。
+
+- 真因①（已立案，`gap-suite-recovery-ladder-log-wiring-reads-wrong-file-always-log-unreadable`，**正在隔离 worktree 实际开发**）：OOM 低并发恢复阶梯每一档都读错日志文件，`classifyRecoveryRound` 恒报 `log-unreadable`，即便某一档其实完整、零 OOM。
+- 真因②（已立案，`gap-lwa-crit-fixture-sleep300-child-not-reaped-forces-aborted-on-clean-suite`，待空闲派发槽）：`live-web-address-fixture.mjs` 的 `sleep 300` 夹具子进程未被回收，floor 档即便零 OOM 也被误判 `aborted`。
+- 本任务自身的 AC/Touches 没有变化，不是因为本任务有缺陷才阻塞。
+- `depends_on` 已指向上述两个任务；两者皆 `done` 后，`ready-pool-check` 的 `depsReadinessFor` 会自动判定解阻塞，促升回 `ready`，不需要人工介入。
+
 ## Blocker
 
-**2026-10-15T04:27:04.127Z — worker 未落地（exited-not-landed）**
+**2026-10-15T05:39:22.144Z — worker 未落地（exited-not-landed）**
 
-- 未落地原因：step=suite: oom-killed (1) — recovery exhausted at floor concurrency 32 — no declared rung produced a complete verdict (64,48,32); needs a code/config fix, see plugin/scripts/full-suite-runner.ts
+- 未落地原因：step=suite: oom-killed (2) — recovery exhausted at floor concurrency 32 — no declared rung produced a complete verdict (64,48,32); needs a code/config fix, see plugin/scripts/full-suite-runner.ts
 - run_id：wk-prod-anchor
-- session_id：dbf05fc5-7778-4d96-b688-ca8fb0925e9a
+- session_id：84fa96f2-95ad-4b74-8dfb-21f75937ab4d
+
+## Needs-Human
+
+**执行 2026-10-15T05:39:23.235Z — 停派终止（失败无法归因，⛔ 不再重派）**
+
+- 阻碍原因：exited-not-landed 失败无法归因（基建/契约疑似，非实现缺陷）——停止重派，⛔ 不再拿新会话撞同一堵墙：suite red could not be attributed to any failing test file in 2 consecutive rounds (bounded to at most one retry) — infra/contract suspected, not an implementable defect (parser extracted 0 of 3 failing lines and attributed none to a file; pseudo-stage tokens: __PERFILE__, lint; unrecognized tokens: ...); stopping instead of spending another worker session
+- 失败步/判词：step=suite: oom-killed (2) — recovery exhausted at floor concurrency 32 — no declared rung produced a complete verdict (64,48,32); needs a code/config fix, see plugin/scripts/full-suite-runner.ts
+- run_id：wk-prod-anchor
+- session_id：84fa96f2-95ad-4b74-8dfb-21f75937ab4d
+- suite 日志：/data/home/yale/work/quay/.quay/fan-in-suite-gap-routine-semantic-dedup-scan-print-json-three-behaviours~wk-prod-anchor~1792039225310-cabaeb.log
+- fan-in 日志：/data/home/yale/work/quay/.quay/fan-in-gap-routine-semantic-dedup-scan-print-json-three-behaviours-wk-prod-anchor.log

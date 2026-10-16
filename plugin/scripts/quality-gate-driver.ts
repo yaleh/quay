@@ -113,6 +113,12 @@ import { PROBE_ROLE_DEFAULT, probeRoutinesFromConfig } from "./probe-routine.ts"
 // 该例程不 import 任何立案/撰写函数，唯一持久化是 gitignored 载体 + 既有的 quality-round Fact。
 // ⛔ 与 fan-in/scoped-gate 无关（同上：深扫更不能上每任务必经的热路径）。
 import { archDiscoveryRoutineFromConfig } from "./arch-discovery-routine.ts";
+// RESOURCE-DIAGNOSTIC 轨道（gap-quality-continuous-resource-diagnostic-routine-mechanical-filter-then-
+// semantic）：Quality 的**持续资源诊断**——机械采集+筛选在前（零模型调用），只有**机械旗标出的
+// 新 anomaly** 才走语义面，且语义面复用**既有的** verifier/refuter + 立案通道 + 机制查重 + 提交台账。
+// 与上面四条内建例程的区别同 arch-discovery：它是**声明式**的（间隔与开关来自 `.quay/config.yml`
+// `loop.resource_diagnostic:`），所以 `qualityGateRoutines()` 的内建四条不变（AC1 的「恰好四条」仍成立）。
+import { resourceDiagnosticRoutineFromConfig } from "./resource-anomaly-detector.ts";
 // DISCOVERY-METHOD 轨道（gap-discovery-method-routine-report-only）：把已落地的 Discovery Method loop
 // （docs/analysis/discovery-{experience-ledger,reflection,method-registry}.mjs）接上轮子——每轮
 // watermarked ingest → 一次有界 reflect → 对新候选的 held-out 泛化验证。**只读、只报**：该例程不 import
@@ -1302,6 +1308,11 @@ export interface QualityGateOptions {
    *  缺省 null = 未装配（老行为）。未声明 ⇒ 例程表不变；声明了但 enabled:false/写坏 ⇒ 仍装配，
    *  因为「不跑」必须可观测（disabled / failed 读数）。 */
   openSemanticDiscoveryRoutine?: RoutineSpec | null;
+  /** resource-diagnostic 例程：同前五条的注入纪律（main() 从 `.quay/config.yml`
+   *  `loop.resource_diagnostic:` 装配后注入，⛔ 本函数不自己读配置）。缺省 null = 未装配（老行为，
+   *  内建四条不变）。未声明 ⇒ 例程表不变；声明了但 enabled:false/写坏 ⇒ 仍装配，因为「不跑」必须
+   *  可观测（disabled / failed 读数，硬规则 3b）。 */
+  resourceDiagnosticRoutine?: RoutineSpec | null;
   /** cross-project-dogfood 例程：同前四条的注入纪律（main() 从 `.quay/config.yml`
    *  `loop.cross_project_dogfood:` 装配后注入，⛔ 本函数不自己读配置）。缺省 null = 未装配（老行为）。
    *  未声明 ⇒ 例程表不变；声明了但 enabled:false/写坏 ⇒ 仍装配，因为「不跑」必须可观测（disabled /
@@ -1377,6 +1388,12 @@ export function qualityGateRoutines(root: string, opts: QualityGateOptions): Rou
     // `not-evaluated:disabled` 且零 spawn（kill switch 的可观测面）。**与上面四条的区别是主语**：它的
     // 输入是别的 Quay 宿主项目的真实使用载体，⛔ 不是本仓库的源码。
     ...(opts.crossProjectDogfoodRoutine ? [opts.crossProjectDogfoodRoutine] : []),
+    // 第十类：RESOURCE-DIAGNOSTIC 例程（同一「声明式 + 可观测」族：间隔与开关来自 `.quay/config.yml`
+    // `loop.resource_diagnostic:`）。缺席 ⇒ 不加入（老行为）；加入而 section 缺席 ⇒ 记
+    // `not-evaluated:disabled` 且零 spawn（kill switch 的可观测面）。**与上面四条的区别是【机械面在
+    // 语义面之前】且机械面零模型调用**——只有机械旗标出的**新** anomaly 才走既有的 verifier/refuter
+    // 与立案通道（见 resource-anomaly-detector.ts 头部）。
+    ...(opts.resourceDiagnosticRoutine ? [opts.resourceDiagnosticRoutine] : []),
   ];
 }
 
@@ -2059,6 +2076,19 @@ export async function main(argv: string[]): Promise<number> {
     intervalSource: archReviewIntervalSource,
   })}`);
 
+  // resource-diagnostic 轨道：读 `.quay/config.yml` `loop.resource_diagnostic:`（同一注入纪律）。
+  // section 缺席/enabled:false ⇒ 例程仍装配（若声明了），每轮只记 `not-evaluated:disabled` 且零 spawn；
+  // 配置坏 ⇒ 记 failed 并在此**可见地**报告（硬规则 3b：读不懂 ≠ 合格）。未声明 ⇒ 不装配，例程表与
+  // 未接此轨时逐条一致（内建四条不变）。
+  const resourceDiagnostic = resourceDiagnosticRoutineFromConfig(rootDir);
+  if (resourceDiagnostic.error) {
+    console.error(`quality-gate-driver: resource-diagnostic 例程配置无效 — ${resourceDiagnostic.error}`);
+  } else if (!resourceDiagnostic.present) {
+    console.error("quality-gate-driver: 未声明 loop.resource_diagnostic — resource-diagnostic 例程未装配（off by default，零 spawn；例程表与未接此轨时一致）");
+  } else {
+    console.error(`quality-gate-driver: resource-diagnostic 例程已装配（${resourceDiagnostic.enabled ? `enabled，interval ${resourceDiagnostic.routine?.schedule?.minutes ?? "?"}m` : "enabled:false — 每轮记 not-evaluated:disabled，零 spawn"}）`);
+  }
+
   const routines = qualityGateRoutines(rootDir, {
     planCmd: planCmd ? splitArgs(planCmd) : null,
     judgeArgv: judgeCmd ? splitArgs(judgeCmd) : null,
@@ -2083,6 +2113,7 @@ export async function main(argv: string[]): Promise<number> {
     discoveryMethodRoutine: discoveryMethod.routine,
     openSemanticDiscoveryRoutine: openDiscovery.routine,
     crossProjectDogfoodRoutine: crossProject.routine,
+    resourceDiagnosticRoutine: resourceDiagnostic.routine,
   });
 
   return runResidentQualityGateLoop({ root: rootDir, intervalMs: interval, once, maxRounds, roundLogFile, runId: resolvedRunId, json, pidFile, routines, routineWatchdogMs, kind: "quality" });

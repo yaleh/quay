@@ -50,6 +50,10 @@
 #   measure   mem_avail   = free -m 的 available 列 (MB)
 #   measure   heavy_procs = node 进程数（cmdline 枚举，host 无关——不写字面量 comm）
 #   measure   loadavg     = /proc/loadavg 的 1-min 字段（过载窗口补充判据, gap-resource-gate-psi-does-not-capture-load-flake-driver）
+#   measure   runq        = /proc/stat 的 procs_running(R) / procs_blocked(D) 及其和 R+D —— **瞬时**计数，
+#                           与滞后的 loadavg(1-min EWMA) 并列【记录】。⛔ 不进任何判定（无 WAIT 标记）；
+#                           判据是否改用它们，由落地后的分量回归决定
+#                           (gap-resource-gate-reads-lagging-loadavg-not-instantaneous-rd)
 #   band      cpu_ok      = some avg10 < 60
 #   band      load_ok     = load < nproc × LOAD_OVER_FACTOR（默认 2）——过载窗口 WAIT
 #   invariant nproc 在判定前后一致
@@ -75,6 +79,9 @@
 #   RESOURCE_GATE_TEST_NODE_PROCS   — override the pgrep count (integer)
 #   RESOURCE_GATE_TEST_ORPHANS      — override the orphan list ("pid:cwd" semicolon-separated)
 #   RESOURCE_GATE_TEST_NPROC        — override nproc (integer; also used for the invariant check)
+#   RESOURCE_GATE_TEST_PROCS_RUNNING / RESOURCE_GATE_TEST_PROCS_BLOCKED — override the /proc/stat
+#                                     run-queue components (integers; telemetry-only readings — they
+#                                     change no verdict, so these seams only pin the printed/JSON values)
 #
 # CROSS-LAYER TOTAL BUDGET (gap-test-concurrency-cap-does-not-scope-nested-spawns AC1, the A face):
 # the gate REPORTS the same shared total-process-budget authority
@@ -199,6 +206,21 @@ read_swap_kb() {
 read_loadavg() {
   awk '{print $1}' /proc/loadavg
 }
+
+# Instantaneous run-queue components from /proc/stat — `procs_running` (R: running + runnable) and
+# `procs_blocked` (D: uninterruptible sleep), the kernel's own CURRENT counts. read_loadavg above
+# answers a 1-MINUTE EXPONENTIAL MOVING AVERAGE: it remembers the last minute, it is not "now"
+# (measured on this host 2026-10-16: load1 = 208.7 while instant R+D = 39 — a 5× gap).
+# gap-resource-gate-reads-lagging-loadavg-not-instantaneous-rd records the two components BESIDE
+# loadavg so the component regression that would justify changing the criterion can actually be
+# computed (it could not before: procs_running/procs_blocked were read nowhere in this repo).
+# ⛔ They feed NO verdict — the OVERLOAD-WINDOW criterion below stays loadavg-based.
+# "unreadable" (never 0) when /proc/stat is missing a line: a synthesized 0 would read as "nothing
+# was runnable" exactly when the instrument failed (硬规则 3b).
+# ⛔ INLINE (not a named function) ON PURPOSE: this file is charged whole by sh-census-check.ts's
+# zero-slack embeddedInterpreterLines ratchet, so the reading costs code lines — the one-line awk
+# below and the four lines that consume it are paid for by the four folded `unmeasurable` guards
+# further down (net ≠ +1). Extracting a helper here is not free.
 
 # list_node_cmdline_pids — enumerate node pids by CMDLINE, NOT a comm literal.
 # (gap-node-mainthread-comm-literal-host-dependent) The `node-MainThread` comm literal is
@@ -327,15 +349,9 @@ cpu_stall_avg300="${RESOURCE_GATE_TEST_CPU_AVG300:-$(read_cpu_avg300)}"
 mem_avail_mb="${RESOURCE_GATE_TEST_MEM_AVAIL_MB:-$(read_mem_avail_mb)}"
 # Test seam: the literal value "unmeasurable" forces the fail-closed path deterministically
 # (simulates a missing /proc/pressure/cpu — kernel without PSI).
-if [ "${RESOURCE_GATE_TEST_CPU_AVG10:-}" = "unmeasurable" ]; then
-  cpu_stall=""
-fi
-if [ "${RESOURCE_GATE_TEST_CPU_AVG300:-}" = "unmeasurable" ]; then
-  cpu_stall_avg300=""
-fi
-if [ "${RESOURCE_GATE_TEST_MEM_AVAIL_MB:-}" = "unmeasurable" ]; then
-  mem_avail_mb=""
-fi
+if [ "${RESOURCE_GATE_TEST_CPU_AVG10:-}" = "unmeasurable" ]; then cpu_stall=""; fi
+if [ "${RESOURCE_GATE_TEST_CPU_AVG300:-}" = "unmeasurable" ]; then cpu_stall_avg300=""; fi
+if [ "${RESOURCE_GATE_TEST_MEM_AVAIL_MB:-}" = "unmeasurable" ]; then mem_avail_mb=""; fi
 swap_kb="${RESOURCE_GATE_TEST_SWAP_KB:-$(read_swap_kb)}"
 load_avg="${RESOURCE_GATE_TEST_LOAD_OVERRIDE:-$(read_loadavg)}"
 # Test seam: the literal value "unmeasurable" forces the fail-closed path deterministically
@@ -345,6 +361,18 @@ load_avg="${RESOURCE_GATE_TEST_LOAD_OVERRIDE:-$(read_loadavg)}"
 if [ "${RESOURCE_GATE_TEST_LOAD_OVERRIDE:-}" = "unmeasurable" ]; then
   load_avg=""
 fi
+# gap-resource-gate-reads-lagging-loadavg-not-instantaneous-rd — the instantaneous run-queue
+# components, read at the SAME instant as load_avg (one snapshot of one host state, not two readings
+# seconds apart). Deterministic seams mirror every other reading's (RESOURCE_GATE_TEST_*), so a
+# hermetic test can pin the printed/JSON values without depending on the host. ⛔ No verdict below
+# reads procs_running / procs_blocked / runq — this step only RECORDS them (a criterion change must be
+# driven by the component regression, not by this deployment). LINE BUDGET: this file is charged whole
+# by sh-census-check.ts's zero-slack embeddedInterpreterLines ratchet ⇒ the four lines below are paid
+# for EXACTLY by folding the three `unmeasurable` guards above 3→1 lines each (+2 saved each).
+rq_read="$(awk '/^procs_running[ \t]/{r=$2} /^procs_blocked[ \t]/{b=$2} END{print (r==""?"unreadable":r) " " (b==""?"unreadable":b)}' /proc/stat 2>/dev/null || echo 'unreadable unreadable')"
+procs_running="${RESOURCE_GATE_TEST_PROCS_RUNNING:-${rq_read%% *}}"
+procs_blocked="${RESOURCE_GATE_TEST_PROCS_BLOCKED:-${rq_read##* }}"
+runq="unreadable"; [[ "${procs_running}" =~ ^[0-9]+$ ]] && [[ "${procs_blocked}" =~ ^[0-9]+$ ]] && runq=$(( procs_running + procs_blocked ))
 node_procs="${RESOURCE_GATE_TEST_NODE_PROCS:-$(read_node_procs)}"
 # gap-systemd-run-cpuquota-scope-distorts-nproc — the OVERLOAD-WINDOW criterion compares the HOST-WIDE
 # loadavg against a processor count, so it must use the HOST online CPU count, not the cgroup-scoped
@@ -513,7 +541,7 @@ budget_available="$(printf '%s\n' "${budget_report}" | sed -n 's/^available=//p'
 if [ "$JSON" = "1" ]; then
   RG_CPU_STALL="$cpu_stall" RG_CPU_STALL_AVG300="${cpu_stall_avg300:-}" RG_CPU_LIMIT="$CPU_LIMIT" \
   RG_MEM_AVAIL_MB="$mem_avail_mb" RG_MEM_LIMIT_MB="$MEM_LIMIT_MB" \
-  RG_LOAD_AVG="$load_avg" RG_LOAD_THRESHOLD="$load_threshold" RG_LOAD_OVER_FACTOR="$LOAD_OVER_FACTOR" \
+  RG_LOAD_AVG="$load_avg" RG_LOAD_THRESHOLD="$load_threshold" RG_LOAD_OVER_FACTOR="$LOAD_OVER_FACTOR" RG_PROCS_RUNNING="$procs_running" RG_PROCS_BLOCKED="$procs_blocked" RG_RUNQ="$runq" \
   RG_NPROC="$nproc_before" RG_NODE_PROCS="$node_procs" RG_SWAP_KB="${swap_kb:-0}" \
   RG_NPROC_INVARIANT="$nproc_invariant" RG_COMM_COUNT="$comm_count" RG_CMDLINE_COUNT="$cmdline_count" \
   RG_INSTRUMENT_FAILURE="${instrument_failure:-0}" RG_BUDGET_TOTAL="${budget_total:-}" \
@@ -544,6 +572,10 @@ print(json.dumps({
     "loadavg": num(os.environ.get("RG_LOAD_AVG")),
     "load_threshold": num_int(os.environ.get("RG_LOAD_THRESHOLD")),
     "load_over_factor": num(os.environ.get("RG_LOAD_OVER_FACTOR")),
+    # gap-resource-gate-reads-lagging-loadavg-not-instantaneous-rd — the instantaneous run-queue
+    # components beside the lagging loadavg (null = /proc/stat unreadable, never 0). Telemetry only:
+    # no verdict field below is derived from them.
+    "procs_running": num_int(os.environ.get("RG_PROCS_RUNNING")), "procs_blocked": num_int(os.environ.get("RG_PROCS_BLOCKED")), "runq": num_int(os.environ.get("RG_RUNQ")),
     "nproc": num_int(os.environ.get("RG_NPROC")),
     "node_procs": num_int(os.environ.get("RG_NODE_PROCS")),
     "swap_kb": num_int(os.environ.get("RG_SWAP_KB")),
@@ -595,6 +627,11 @@ else
 fi
 printf 'nproc=%s  node_procs=%s  %s  [nproc-invariant %s]\n' \
   "$nproc_before" "$node_procs" "$swap_label" "$nproc_invariant"
+# gap-resource-gate-reads-lagging-loadavg-not-instantaneous-rd — the INSTANTANEOUS run-queue
+# components, printed beside the lagging loadavg line above. INFORMATIONAL, and the line says so:
+# unlike the cpu_stall/mem_avail/loadavg lines it carries NO WAIT/ok marker, and nothing below reads
+# it — the verdict and the exit code are computed without these values (AC2's negative control).
+printf 'runq(R+D)=%s  procs_running=%s  procs_blocked=%s   [instantaneous /proc/stat; informational — no verdict]\n' "$runq" "$procs_running" "$procs_blocked"
 printf 'node_comm_mainthread=%s  node_cmdline_procs=%s  [dual-read self-check: %s]\n' \
   "$comm_count" "$cmdline_count" "$([ "${instrument_failure}" = "1" ] && echo INSTRUMENT-FAILURE || echo ok)"
 if [ "${instrument_failure}" = "1" ]; then

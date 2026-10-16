@@ -20,6 +20,11 @@
 # `plugin/.quay/profiles.yml` (the OTHER template) and a symlink to the REAL `packages/` (what makes
 # the Core CLI able to produce a genuine init artifact).
 #
+# ⛔ The checker's children do NOT inherit the ambient $TMPDIR: they get a scratch root on the same
+# REAL DISK as the checkout (see `scratch_root` below). `quay init` refuses a tmpfs worktree root, and
+# the CI runner mounts /tmp tmpfs, so an inherited $TMPDIR turns this case ALWAYS-RED for a reason that
+# is about the runner's /tmp, not about the checker.
+#
 # ⛔ The role-name needle is assembled at runtime: this case lives under plugin/scripts/, and the
 # checker scans that tree — spelling the literal here would make the checker match a fixture.
 set -u
@@ -37,8 +42,27 @@ if [ ! -f "${repo_root}/packages/quay/bin/quay.ts" ]; then
   echo "infrastructure: Core CLI source absent at ${repo_root}/packages/quay/bin/quay.ts" >&2; exit 2
 fi
 
+# ── the checker's scratch root: REAL DISK (the checkout's own filesystem), never the ambient $TMPDIR ─
+# `profiles-role-coverage-check.ts` asserts on a REAL `quay init`, and init lays its workspace down
+# under $TMPDIR — whose DEFAULT worktree root is a SIBLING of that workspace (`<repoRoot>/../<base>-worktrees`),
+# so it inherits the workspace's filesystem. `quay init` fails CLOSED when the worktree root lands on
+# tmpfs (packages/quay/src/init.ts `validateWorktreeRoot`; the 2026-08-04 machine-wide OOM defence — ⛔
+# deliberately NOT relaxed for this case). The CI runner mounts /tmp tmpfs (`--tmpfs /tmp`, gh-runner-quay
+# on tokyo-alpha), so under the inherited $TMPDIR EVERY init here is refused, the checker can only answer
+# NOT-EVALUATED (exit 3), and the baseline below reads that as ALWAYS-RED — a verdict about the runner's
+# /tmp, not about the checker. Measured 2026-10-15, ONE tree, only /tmp's filesystem type differing:
+# `--tmpfs /tmp` ⇒ this case exits 4 (`checker exited 3, expected 0`); disk /tmp ⇒ exits 0.
+# ⇒ The checker's children are handed a scratch root on the same filesystem as the checkout itself — a
+# sibling of the repo root, the convention quay's own worktrees already use (`<repo>-worktrees`). The
+# checkout-on-real-disk premise is quay's own structural one (init writes worktrees as repo-root
+# siblings; a tmpfs checkout would refuse everywhere), not an assumption about some other mount.
+scratch_root="$(mktemp -d "${repo_root}-mutation-scratch.XXXXXX")" || {
+  echo "infrastructure: cannot create a disk-backed scratch root beside ${repo_root}" >&2; exit 2
+}
+trap 'rm -rf "$scratch_root"' EXIT
+
 rc() { # <fixture-root> → the checker's exit code
-  node --no-warnings --experimental-strip-types "$CHECKER" --check --root "$1" >/dev/null 2>&1
+  TMPDIR="$scratch_root" node --no-warnings --experimental-strip-types "$CHECKER" --check --root "$1" >/dev/null 2>&1
   echo $?
 }
 

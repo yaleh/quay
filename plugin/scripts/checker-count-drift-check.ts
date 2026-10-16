@@ -39,6 +39,15 @@ import { fileURLToPath } from "node:url";
 // of the ~73 hand-written copies of the indexOf+next-arg idiom in plugin/scripts
 // (.quay/routine-findings.jsonl finding `arg-parsing-helper-family`, routine `semantic-dedup-scan`).
 import { helpExit, isDirectEntry, flagValue } from "./gate-script-base.ts";
+// The private `defaultRoot()` this file used to carry — a hand-rolled "up exactly two levels from
+// the script dir" — was one of THREE byte-identical bodies (semantic-dedup-scan routine, runId
+// `semantic-dedup-scan-1792033478766`, findingId `defaultroot-byte-identical-quad`). `repoRoot` is
+// the home those copies should have called; it answers by root SHAPE (bundle → consumer → plain-git)
+// rather than by counting levels, so a plugin-dist copy under `packages/quay/plugin/scripts` no
+// longer silently resolves to `packages/quay` (the divergence repo-root-derivation-check.ts names).
+// ⛔ The retired form is deliberately NOT spelled out here: this file is inside that ratchet's
+// scan surface, and its own header sets the convention of not re-writing the judged literal in prose.
+import { repoRoot } from "./repo-root.ts";
 
 // ── The registries this checker owns ────────────────────────────────────────────────────────────
 // Each entry: the carrier file (repo-root relative) and the registry function inside it. Adding a
@@ -146,11 +155,6 @@ export function isEvaluated(x: Evaluated | UnEvaluated): x is Evaluated {
 
 // ── Driver ──────────────────────────────────────────────────────────────────────────────────────
 
-function defaultRoot(): string {
-  // <repo>/plugin/scripts/checker-count-drift-check.ts → <repo>
-  return path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
-}
-
 export interface RunResult {
   ok: boolean;
   entries: Evaluated[];
@@ -188,7 +192,8 @@ export function main(argv: string[]): number {
   /** Arity-1 adapter over the shared `flagValue`: this closure captures the local `args` slice. */
   const flagVal = (name: string): string | undefined => flagValue(args, name);
   const asJson = args.includes("--json");
-  const root = path.resolve(flagVal("--root") || defaultRoot());
+  const here = path.dirname(fileURLToPath(import.meta.url));
+  const root = path.resolve(flagVal("--root") || repoRoot(here));
 
   const res = runCheck(root);
 

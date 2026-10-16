@@ -129,6 +129,14 @@ export function runRunner({ root, command, laneCount, stateDir, runner, buckets,
   // explicitly provides its own, drop the inherited values so the default-path test stays hermetic.
   if (!("QUAY_SERIAL_CONCURRENCY" in env)) delete mergedEnv.QUAY_SERIAL_CONCURRENCY;
   if (!("QUAY_LOWCONC_CONCURRENCY" in env)) delete mergedEnv.QUAY_LOWCONC_CONCURRENCY;
+  // gap-suite-declared-memory-max-swallowed-by-shared-host-split: same leak, one knob over. The
+  // declared suite MemoryMax is promoted from `.quay/config.yml` `suite: memory_max:` into
+  // `QUAY_SUITE_MEMORY_MAX` by the OUTER runner, so every test child inherits it — and a nested runner
+  // spawned against a hermetic temp root would then resolve the PARENT project's declaration instead of
+  // its own (no config ⇒ the undeclared default). Measured 2026-10-15 with `memory_max: 26G` declared
+  // in the main checkout: the AC1 "default limits" assertions read 26G instead of 16G. A test that
+  // wants to exercise the declared path passes it explicitly.
+  if (!("QUAY_SUITE_MEMORY_MAX" in env)) delete mergedEnv.QUAY_SUITE_MEMORY_MAX;
   // gap-verification-round-observability-holes AC3 — hermetic tests pin the independent
   // concurrentSuitesRunning read to a lone round (QUAY_TEST_RUNNER_PROCS=1) by default. Two reasons:
   // (a) the unseamed pgrep path would count the PRODUCTION full-suite-runner.ts that launches this

@@ -59,6 +59,13 @@ import { helpExit, isDirectEntry, flagValue, createSelftest } from "./gate-scrip
 // `lineof-lineat`); the family lives once in source-text-lib.ts under ONE name.
 import { lineOf } from "./source-text-lib.ts";
 import { baselinePath } from "./ratchet-baseline.ts";
+// Its private `defaultRoot()` — the third byte-identical copy of "up exactly two levels from the
+// script dir" — was the same finding the semantic-dedup-scan routine filed as
+// `defaultroot-byte-identical-quad` (runId `semantic-dedup-scan-1792033478766`, verdict
+// `real-duplication`). `repoRoot` (repo-root.ts) is the already-existing home this call site now
+// uses: it resolves by root SHAPE, not by counting levels.
+// ⛔ The retired literal is not re-written here — see the ratchet-checker's own header convention.
+import { repoRoot } from "./repo-root.ts";
 
 // ── constants ───────────────────────────────────────────────────────────────────────────────────────
 
@@ -1031,10 +1038,6 @@ Exit: 0 = 两轴都不超基线且基线未被调高
       1 = 读数回升 / 基线被调高
       2 = 用法或环境错误，**含** evaluated:false（git 不可用 / 无 .sh / 例外清单不可解析 / 基线不可读）`;
 
-function defaultRoot(): string {
-  return path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
-}
-
 function reportReading(reading: CensusReading, baseline: Baseline | null, verdict: RatchetVerdict | null, asJson: boolean): void {
   if (asJson) {
     console.log(
@@ -1105,7 +1108,8 @@ export function main(argv: string[]): number {
   }
 
   const positional = args.find((a, i) => !a.startsWith("--") && !(i > 0 && (args[i - 1] === "--baseline" || args[i - 1] === "--exceptions")));
-  const root = path.resolve(flagValue(args, "--root") ?? positional ?? defaultRoot());
+  const here = path.dirname(fileURLToPath(import.meta.url));
+  const root = path.resolve(flagValue(args, "--root") ?? positional ?? repoRoot(here));
   const exceptionsAbs = path.resolve(flagValue(args, "--exceptions") ?? exceptionsFile(root));
   const baselineAbs = path.resolve(flagValue(args, "--baseline") ?? baselineFile(root));
 

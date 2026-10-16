@@ -690,6 +690,47 @@ export function clusterHypotheses(runs, { threshold = 0.5 } = {}) {
   return clusters;
 }
 
+/** Turn MECHANICALLY-FLAGGED anomaly seeds into the cluster shape `runVerifier` consumes.
+ *
+ *  WHY IT LIVES HERE (task gap-quality-continuous-resource-diagnostic-routine-mechanical-filter-then-
+ *  semantic, AC3): `runVerifier`'s INPUT CONTRACT — `{ rep: { concept_kind, components, comps, claim,
+ *  evidence_needed, counterexample_requirement }, members }` — is owned by this module; a second party
+ *  producing clusters must be adapted HERE, or a copy of the contract grows in the producer and drifts
+ *  from the verifier that consumes it. The resource-diagnostic routine (plugin/scripts/
+ *  resource-anomaly-detector.ts) therefore never builds a cluster itself: it hands seeds to this
+ *  function and calls the SAME `runVerifier` the OSD round calls. ⛔ NOT a second confirmation
+ *  mechanism — one engine, one contract, two producers of clusters.
+ *
+ *  `clustersFromAnomalySeeds([])` is `[]` (an empty seed set is a legitimate no-op). A seed that
+ *  names no subject is REFUSED — it THROWS with a named reason rather than being given an invented
+ *  subject AND rather than being silently skipped (硬规则 3b: "cannot be keyed" must not read as
+ *  "there was nothing there"). PURE. */
+export const SEED_WITHOUT_SUBJECT = "SEED_WITHOUT_SUBJECT";
+export function clustersFromAnomalySeeds(seeds) {
+  const norm = (c) => String(c).split("/").pop().trim();
+  const out = [];
+  for (const [i, s] of (Array.isArray(seeds) ? seeds : []).entries()) {
+    const components = [...new Set((Array.isArray(s?.components) ? s.components : []).filter((c) => String(c ?? "").trim() !== ""))];
+    if (components.length === 0 || typeof s?.concept_kind !== "string" || s.concept_kind.trim() === "") {
+      throw new Error(`${SEED_WITHOUT_SUBJECT}:${i} — a seed must carry a concept_kind and ≥1 component`);
+    }
+    out.push({
+      rep: {
+        concept_kind: s.concept_kind,
+        components,
+        comps: components.map(norm),
+        claim: String(s.claim ?? ""),
+        evidence_needed: String(s.evidence_needed ?? ""),
+        counterexample_requirement: String(s.counterexample_requirement ?? ""),
+        confidence: s.confidence ?? null,
+        concept_key: s.concept_key ?? null,
+      },
+      members: [`seed:${i + 1}`],
+    });
+  }
+  return out;
+}
+
 // ── per-turn instrumentation (pure) ──────────────────────────────────────────────────────────────────
 /** The marker for a call whose turns were NOT captured. An ABSENT record is not "zero turns": it is
  *  "not evaluated" and must be shaped like one (硬规则 3b) — the acceptance run's defeat was that the turn
