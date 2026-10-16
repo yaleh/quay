@@ -7,6 +7,8 @@
 #   goals/AC-901-fixture.md                     the INJECTED twin (a bare shell `exit 1`)
 #   goals/AC-902-fixture.md                     the SECOND injected twin (the TRAILING COMPUTED form,
 #                                               `sys.exit(0 if ok else 1)`) — the 2026-09-12 blind spot
+#   goals/AC-904-fixture.md                     the THIRD injected twin (the TERNARY COMPUTED form,
+#                                               `process.exit(cond ? 0 : 1)`) — the 2026-10-16 blind spot
 #   docs/analysis/criterion-failure-attribution.baseline.json   count=1 (the shrink-only anchor)
 # The case drives the REAL checker with `--root <workdir>`, so it never touches the committed baseline.
 #
@@ -22,6 +24,13 @@
 #                checker read this as GREEN on develop on 2026-09-12 while AC-241 was red in the
 #                production ledger: both earlier revisions ask a question ABOUT an exit statement, so a
 #                criterion with none matched nothing on every line and was never enumerated.
+#   B4 inject:   same, but the injected criterion is in the TERNARY COMPUTED form —
+#                `process.exit(cond ? 0 : 1)`, the JS spelling of AC-245's python `else <nonzero>` tail.
+#                A ternary separates its branches with `?` / `:`, so the word `else` never appears and
+#                the 2026-09-12 tail matched NOTHING: measured on develop 2026-10-16, 20 in-domain
+#                criteria carried this shape and the ratchet read bareAcs=0 / status=pass / exit 0 while
+#                the production ledger was writing AC-152's unattributable fail (硬规则 3b, 7th
+#                recurrence, 4th distinct spelling).
 #   C  restore:  1 bare AC == baseline 1       → exit 0 again (ALWAYS-RED detector)
 #   D  tri-state: goals/ removed → MUST be exit 3 NOT-EVALUATED, distinct from BOTH 0 and 1
 #     (hard rule 3b: a checker that cannot read its input must not render as "no bare failure exits")
@@ -83,6 +92,14 @@ injected_implicit_exit_criterion() {
   printf '  node packages/quay/src/goal-store.ts list --status draft | grep -q '"'"'"id": "GOAL-'"'"'\n'
 }
 
+# The TERNARY COMPUTED form verbatim: AC-152's shape. Same intent as AC-245's python tail, different
+# punctuation — a JS ternary separates its branches with `?` / `:`, so the word `else` never appears and
+# the 2026-09-12 tail could not see it. The nested `every(n=>has(n))` is deliberate: it is why the fix
+# had to reuse the depth scan rather than add a second regex.
+injected_ternary_computed_criterion() {
+  printf '  node -e '"'"'process.exit(want.every(n=>names.has(n))?0:1)'"'"'\n'
+}
+
 # ── A: baseline GREEN ────────────────────────────────────────────────────────────────────────────
 write_fixture AC-900 "$(bare_criterion)"
 write_baseline 1
@@ -124,6 +141,17 @@ if checker_cmd "${workdir}"; then
   exit 3
 fi
 rm -f "${workdir}/goals/AC-903-fixture.md"
+
+# ── B4: INJECT the TERNARY COMPUTED form ⇒ the ratchet MUST bite (the 2026-10-16 blind spot) ───────
+# The 7th recurrence of the same family and the 4th distinct spelling. Same shape as B2 (a form the
+# exit-argument scan could not read, so "unreadable" and "clean" produced one output), so it gets the
+# same kind of phase: a regression to the blind spot fails HERE instead of passing silently.
+write_fixture AC-904 "$(injected_ternary_computed_criterion)"
+if checker_cmd "${workdir}"; then
+  echo "STAYED-GREEN: checker exited 0 on the TERNARY COMPUTED form (bareAcs=2 > baseline 1) — the AC-152 blind spot is back" >&2
+  exit 3
+fi
+rm -f "${workdir}/goals/AC-904-fixture.md"
 
 # ── C: RESTORE ⇒ GREEN again ─────────────────────────────────────────────────────────────────────
 if checker_cmd "${workdir}"; then :; else

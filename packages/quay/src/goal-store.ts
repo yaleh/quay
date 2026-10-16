@@ -1125,10 +1125,12 @@ export class GoalIntentConflictError extends Error {
 // WHAT IT ENUMERATES (hard rule 2 — position, not keyword). For a criterion (a SHELL string whose
 // heredocs are usually python), LINE BY LINE:
 //   · a FAILURE-EXIT line = matches the direct forms (`sys.exit(1)` / `exit 1`, incl. the computed
-//     `sys.exit(1 if bare else 0)`), OR is an exit CALL whose argument ends with `else <nonzero>`
-//     (`sys.exit(0 if ok else 1)` — see hasTrailingComputedFailureExit for why that half is a depth
-//     scan, not a regex), OR — when the criterion carries no explicit exit at all — a status-bearing
-//     segment that inherits a silent non-zero (see the IMPLICIT-EXIT note on implicitFailureExitLines)
+//     `sys.exit(1 if bare else 0)`), OR is an exit CALL whose argument ends with a computed non-zero —
+//     `else <nonzero>` (`sys.exit(0 if ok else 1)`) or `: <nonzero>` (a JS ternary,
+//     `process.exit(cond ? 0 : 1)`); both halves are a depth scan, not a regex, for the reason given on
+//     hasTrailingComputedFailureExit, OR — when the criterion carries no explicit exit at all — a
+//     status-bearing segment that inherits a silent non-zero (see the IMPLICIT-EXIT note on
+//     implicitFailureExitLines)
 //   · an ATTRIBUTED line = also matches `stderr` / `>&2` / `console.error`
 //   BARE = failure-exit ∧ ¬attributed.
 //
@@ -1154,14 +1156,36 @@ export const FAILURE_EXIT_RE = /(?:sys\.)?exit\s*\(\s*1(?![\d])|\bexit\s+1\b/;
 /** The opener of an exit CALL whose argument can be inspected — `sys.exit(` / `exit(`. */
 const EXIT_CALL_SRC = "(?:sys\\.)?exit\\s*\\(";
 
-/** The *trailing* computed non-zero: the exit call's ARGUMENT ends with `else <nonzero-int>`. `[1-9]\d*`
- *  keeps the always-zero control `sys.exit(0 if ok else 0)` out; the `$`-anchored tail keeps
- *  `sys.exit(0) if x else 1` (where `else 1` is NOT an argument of the exit) out, because in that line
- *  the `)` after `0` closes the call and the scanned argument is just `0`. */
+/** The *trailing* computed non-zero, PYTHON spelling: the exit call's ARGUMENT ends with
+ *  `else <nonzero-int>`. `[1-9]\d*` keeps the always-zero control `sys.exit(0 if ok else 0)` out; the
+ *  `$`-anchored tail keeps `sys.exit(0) if x else 1` (where `else 1` is NOT an argument of the exit)
+ *  out, because in that line the `)` after `0` closes the call and the scanned argument is just `0`. */
 const TRAILING_ELSE_NONZERO_RE = /\belse\s*[1-9]\d*\s*$/;
 
-/** True iff `code` contains an exit CALL whose argument ends with `else <nonzero>` — the trailing
- *  computed failure exit. Depth-counting (not regex) for the reason given on `FAILURE_EXIT_RE`.
+/** The *trailing* computed non-zero, JS spelling: the exit call's ARGUMENT ends with `: <nonzero-int>`
+ *  — the FALSE branch of a ternary (`process.exit(cond ? 0 : 1)`). Same intent as the python `else`
+ *  tail above, different punctuation: a ternary's two branches are separated by `?` / `:`, so the word
+ *  `else` never appears and the 2026-09-11 python-shaped tail matched NOTHING.
+ *
+ *  WHY IT IS A SEPARATE CONSTANT (gap-ac241-ternary-computed-exit-has-no-predicate). Measured
+ *  2026-10-16: 20 in-domain criteria carry exactly this shape (AC-143/144/145/146/148/150/151/152/153/
+ *  154/155/188/191/192/193/304/305/306/307/308) and the shared predicate returned `[]` for every one —
+ *  the ratchet read `bareAcs=0`, status pass, exit 0 while the production ledger was writing AC-152's
+ *  unattributable fail. Hard rule 3b again: "I cannot read this shape" and "this criterion is clean"
+ *  shared one output. Repaired HERE, in the one implementation the write gate and the ratchet both
+ *  import, so the born-side surface is fixed by the same change.
+ *
+ *  `[1-9]\d*` keeps the always-zero control `exit(c ? 0 : 0)` out — same conservative direction as the
+ *  python tail. The `$` anchor is what keeps the MIRROR form (`exit(<nonzero> : 0)`, the non-zero in
+ *  the TRUE branch) out: measured on develop 2026-10-16 the whole domain holds exactly ONE such exit
+ *  (AC-330's `props.includes("reconcile")?4:0`) and it is ALREADY attributed — the next line rewrites
+ *  rc=4 into a cause (`[ "$mrc" != 4 ] || { echo "CAUSE=…" >&2; exit 1; }`). Matching the head branch
+ *  would accuse an attributable criterion (hard rule 4), so only the tail is matched. */
+const TRAILING_TERNARY_NONZERO_RE = /:\s*[1-9]\d*\s*$/;
+
+/** True iff `code` contains an exit CALL whose argument ends with a computed non-zero — `else <nonzero>`
+ *  (python) or `: <nonzero>` (a JS ternary's false branch). Depth-counting (not regex) for the reason
+ *  given on `FAILURE_EXIT_RE`.
  *
  *  ⛔ EVERY failure exit is examined, not just the last: a line legitimately carries more than one.
  *  ⛔ An exit call whose parentheses never balance (`exit(` with no matching `)`) yields NO verdict —
@@ -1189,7 +1213,8 @@ export function hasTrailingComputedFailureExit(code: string): boolean {
       else if (c === ")") { depth--; if (depth === 0) break; }
     }
     if (depth !== 0) continue; // unreadable call — never conflated with "no trailing computed exit"
-    if (TRAILING_ELSE_NONZERO_RE.test(code.slice(m.index + m[0].length, i))) return true;
+    const arg = code.slice(m.index + m[0].length, i);
+    if (TRAILING_ELSE_NONZERO_RE.test(arg) || TRAILING_TERNARY_NONZERO_RE.test(arg)) return true;
   }
   return false;
 }

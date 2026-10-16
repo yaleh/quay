@@ -222,6 +222,34 @@ test("B6 CREATE: an errexit-abort criterion is REFUSED by name, and its GUARDED 
   assert.equal(fs.readdirSync(dir).length, 1, "the guarded twin landed on disk");
 });
 
+test("B7 CREATE: a TERNARY computed exit is REFUSED by name, and its attributed twin is ADMITTED", () => {
+  // The birth surface must close the JS spelling of the trailing-computed class too
+  // (gap-ac241-ternary-computed-exit-has-no-predicate). Only repairing the STOCK (the 20 criteria
+  // carrying `process.exit(cond ? 0 : 1)`) would leave the next one free to be born — the write gate and
+  // the ratchet share ONE predicate, so a shape the predicate cannot read is simultaneously invisible in
+  // the stock AND unblocked at birth.
+  const { dir, store } = freshStore();
+  const red = `node --no-warnings --experimental-strip-types -e 'import("./plugin/scripts/driver-filters.ts").then(m=>{const names=new Set(m.TASK_FILTERS.map(f=>f.name));const want=["notInFlight"];process.exit(want.every(n=>names.has(n))?0:1)})'`;
+  assert.throws(
+    () => store.write("AC-906", { title: "t", ...BASE, criterion: red }),
+    (err) => {
+      assert.match(err.message, /line 1/, "the rejection enumerates the offending line number");
+      assert.match(err.message, /refused at the write surface/);
+      return true;
+    },
+  );
+  assert.deepEqual(fs.readdirSync(dir), [], "a refused write leaves NOTHING on disk");
+
+  // NEGATIVE CONTROL — the same shape with a cause on its failure branch. Without this half, "the gate
+  // refuses" and "the gate refuses everything" are the same observation.
+  store.write("AC-906", {
+    title: "t",
+    ...BASE,
+    criterion: red.replace("?0:1)", `?0:(console.error("CAUSE=task-filter-missing"),1))`),
+  });
+  assert.equal(fs.readdirSync(dir).length, 1, "the attributed twin landed on disk");
+});
+
 test("B4 an UNREADABLE stored criterion is NOT-EVALUATED — distinct text, and the repair stays open", () => {
   const { dir, store } = freshStore();
   seedHandwritten(dir, "AC-903", null); // no criterion field at all
