@@ -43,6 +43,8 @@
 import fs from "node:fs";
 import path from "node:path";
 import YAML from "yaml";
+// 入口判定用 gate-script-base 的【bundler-safe】isDirectEntry（名字形，⛔ 非 URL 形）——理由见文件尾。
+import { isDirectEntry } from "./gate-script-base.ts";
 
 /** The `loop:` key this module reads. Spelled ONCE — nothing else in the tree hardcodes the section. */
 export const TOUCHES_RELAX_SECTION = "touches_relax";
@@ -315,14 +317,18 @@ function main(argv: string[]): number {
   return qualified ? 0 : 1;
 }
 
-// 直接执行才跑 CLI（被 import 时是纯库——与 duration-report.ts / gate-script-base 的 isDirectEntry 同形）。
-const invokedDirectly = (() => {
-  const entry = process.argv[1];
-  if (!entry) return false;
-  try {
-    return fs.realpathSync(entry) === fs.realpathSync(new URL(import.meta.url).pathname);
-  } catch {
-    return false;
-  }
-})();
-if (invokedDirectly) process.exit(main(process.argv.slice(2)));
+// 直接执行才跑 CLI（被 import 时是纯库）——用 gate-script-base 的【名字形】isDirectEntry。
+//
+// ⛔ 这里【不是】URL 形（`realpathSync(argv[1]) === realpathSync(import.meta.url)`）。本模块自 AC-365
+// 起被 `driver-filters.ts` 静态 import，而 driver-filters 是**每一个 driver bundle** 的传递依赖 ⇒
+// esbuild 会把本模块连同它的入口块一起内联进 `dist/{goal,quality-gate,meta,outer,promotion,worker}-driver.js`。
+// 内联后所有模块共用 bundle 的 `import.meta.url`，而 `process.argv[1]` 正是 bundle 自身 ⇒ URL 形守卫
+// 在 bundle 里【恒真】，bundle 一启动就跑本模块的 main 而不是自己的（实测 2026-10-17：
+// `node dist/goal-driver.js --help` 打印 `touches-relax-config: unknown argument '--help'` 的 usage 后
+// exit 0，driver 的常驻环从未启动）。名字形要求被执行文件的 basename 与本模块名相同——直接执行时命中，
+// 内联进 bundle 时 basename 是宿主入口名（≠ 本模块名）⇒ 惰性不触发。与 gate-script-base.ts 里
+// `isDirectEntry` 的 BUNDLER-FRIENDLY 段、以及 identity-replication-check.ts / target-identity-literal-check.ts
+// 的用法同形（`build-plugin-dist` 的 "inlined entry-guard hijack" 闸判定的就是这个）。
+if (isDirectEntry(import.meta, undefined, "touches-relax-config")) {
+  process.exit(main(process.argv.slice(2)));
+}
