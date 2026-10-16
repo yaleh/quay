@@ -3,7 +3,7 @@ id: gap-routine-semantic-dedup-scan-read-file-join-root-pair
 title: "semantic-dedup-scan: Byte-identical `path.join(root,rel)` + `existsSync
   ? readFileSync : ''` under the same (root,rel) contract in two sibling
   checkers that both already import gat"
-status: ready
+status: done
 labels:
   - gap
   - routine-filed
