@@ -349,6 +349,22 @@ Plan §3 / AC13 的「复用 AC-363 的账本模块，⛔ 不写第二份读数�
 **本条的放宽语义未改动**：修复只动 `duration-report.ts` 的入口守卫一行（外加一行 import），
 `driver-filters.ts` 的 live 判据、`## Acceptance Criteria` 的 13 条与上文各读数**逐条不变**；
 AC2–AC11 的夹具读数本轮重跑仍为 `tests 26 · pass 26 · fail 0`。
+**第二个红（同一真因，⛔ 不是第二个缺陷）**：同一轮 suite 还有第二个红文件
+`plugin/test/driver-restart-busy-e2e.test.mjs`（AC2b / AC3 各 30s 超时，判词
+`Error: timed out waiting for reconcile to adopt the live orphan`）。它的真因与本条修的那一处**完全相同**：
+该夹具的 `buildWorkerKernel()` 用 esbuild 把 `plugin/scripts/worker-driver.ts` 打成
+`<kernel>/scripts/dist/worker-driver.js` 再当作常驻 loop spawn（`:255-264` 的 bundle、`:1046` 的
+`--root <host> --json` 调用），而修前的那个产物**正是跑时长报告并 exit 0**（duration-report 的 main
+恰好也吃 `--root/--json`）⇒ 永远不会有 `orphan-adopted` 事件 ⇒ 30s 的 `waitFor` 必然超时。
+
+实测（本 worktree，修后一次整文件运行）：`✔ tests 8 · pass 8 · fail 0 · duration_ms 36869`，
+其中 AC2b `525.7ms`、AC3 `407.1ms`（⛔ 这不是「快了 60 倍」，是**从「事件永远不发生」变成「真的发生」**；
+两者的差别是枚举式的，不是时序式的）。
+**旁证（驱动自己的基线臂）**：`.baseline-red-gap-touches-relax-live-semantics-wk-prod-anchor` 上的同一选择集
+（`ℹ tests 53`）为 **53 pass / 0 fail** —— 基线树没有这条 import 边，故两个红都不存在；
+本 worktree 的 rerun 臂同一选择集则 `fail 3`（恰为上述三条：build-plugin-dist AC1 + 本文件的 AC2b/AC3）。
+**两个红同因，一处修复同时消掉**（本条修完后的读数即上表与本节）。
+
 ## Blocker
 
 **2026-10-16T18:22:32.886Z — worker 未落地（exited-not-landed）**
