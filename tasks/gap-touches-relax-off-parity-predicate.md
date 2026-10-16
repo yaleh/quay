@@ -264,3 +264,11 @@ import-graph-check: FAIL — valueSccs 1 > baseline 0
 成因是**既有的**反向依赖：`relaxed-dispatch-ledger.ts:61` 已 `import { WORKER_OUTCOME_REL } from "./driver-filters.ts"`（硬规则 1 的单一来源），反向再 import 即成值环；而该棘轮是 **shrink-only**（`--help` 逐字：「baseline not raised past HEAD」，基线只许降不许升）——**新值环在本仓是不被允许的结构**。故改为：名额读数由 **`FilterContext.relaxedInFlight?: number`**（缺省 0）带入，`driver-filters.ts` **不 import 账本模块、也不自己解析那份 jsonl**。在 shadow 下「已放宽在飞数 = 0」是**结构性事实**（影子期不放行 ⇒ 没有任何任务是被放宽派发的），不是回退默认值；live 下由 AC-366 从账本算出后经该字段传入。⛔ 未改 `FilterContext` 任何既有字段的语义（新字段可选，`makeFilterContext` 的两个既有构造点不传即行为不变）。
 
 **同样如实写明**：本条的判据面是**夹具读数**（GOAL-037 立案文本的「已知缺口」已承认本 goal 的 AC 都不读生产载体）。本条证明的是「新谓词在 off/shadow 两态下的决策与标注」；生产启用（AC-366 的 live 放行与接线、人择机开启）由后续 AC 与人承担。
+
+## Blocker
+
+**2026-10-16T17:41:25.144Z — worker 未落地（exited-not-landed）**
+
+- 未落地原因：step=suite: AssertionError [ERR_ASSERTION]: quay driver start must succeed on the packaged artifact. Output:
+- run_id：wk-prod-anchor
+- session_id：afcee318-b122-4f69-9067-c07336892005
