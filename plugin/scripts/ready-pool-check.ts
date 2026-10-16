@@ -27,8 +27,9 @@
 //            commit-trace) — does NOT depend on AC checkbox state (the fan-in merges without ticking
 //            ACs)
 //        (b) fixture         — `labels: fixture` (gate demo fixtures, never real work)
-//        (c) PARKED          — a body `**PARKED` marker (task-level suspension; plain-text mentions
-//            of the WORD "PARKED" in AC prose are NOT markers)
+//        (c) PARKED          — a LINE-START body `**PARKED` marker (task-level suspension; plain-text
+//            mentions of the WORD "PARKED" in AC prose are NOT markers, and neither is a bold mention
+//            mid-sentence or a verbatim citation inside a code span/fence — see PARKED_MARKER_RE)
 //   2. Report `dispatchable_disjoint` — the size of the largest subset of the pool whose members are
 //      pairwise touches-disjoint (checkTouchesPair disjoint, using the SAME declared-path expander
 //      the dispatch gate uses — concrete paths resolve whether or not they exist, wildcards expand
@@ -361,9 +362,53 @@ export function computePoolFloor(cap = CONCURRENCY_CAP_DEFAULT, floorMult = POOL
 // lives with the ONE judge — packages/quay/src/kernel/task-shape-artifacts.ts — and is imported +
 // re-exported at the top of this file (gap-ready-check-duplicated-algorithm-store-vs-ready-pool-check).
 
-/** Task-level PARKED marker: a bold `**PARKED` in the body. Plain-text "PARKED" in AC prose
- *  (e.g. this very task's exclusion-rule description) is NOT a marker — matched only when bolded. */
-export const PARKED_MARKER_RE = /\*\*PARKED\b/i;
+/** Task-level PARKED marker: a LINE-START bold `**PARKED`, optionally inside a blockquote — the
+ *  mechanical "suspended / do not re-dispatch" state a worker or the outer stamps on a task.
+ *  Plain-text "PARKED" in AC prose (e.g. this task's exclusion-rule description) is NOT a marker —
+ *  matched only when bolded AND at a line start.
+ *
+ *  POSITION-BASED (hard-rule ②), mirroring SUPERSEDED_MARKER_RE / RETREATED_MARKER_RE below: the
+ *  pre-2026-10-16 form `/\*\*PARKED\b/i` was a whole-body substring match, so ANY bold mention of
+ *  the marker ANYWHERE — a worker's own Evidence line recording that it stamped the marker, a task
+ *  describing the marker's regex, a sibling cross-reference — parked the task that merely MENTIONED
+ *  it. The live victim (tasks/gap-suite-heavy-files-and-phase-concurrency-under-16g-pressure-
+ *  baseline-comparison, 2026-10-16) stayed parked after its first-line marker was deleted, because
+ *  the match had moved to the Evidence sentence at body offset 12629 / line 177; its own un-park
+ *  instruction ("delete that block") was therefore unsatisfiable (gap-parked-marker-matches-its-own-
+ *  mention-in-prose). The line-start + optional-blockquote anchor is the fix.
+ *
+ *  NOTE: `isParked` additionally masks fenced code blocks and inline code spans before applying this
+ *  regex (see `stripCodeSpansAndFences`) — recording the marker VERBATIM inside a code fence is the
+ *  normal way to cite it, and such a citation must not park the citing task. This exported regex is
+ *  the anchored marker form alone; prefer `isParked` as the reader. */
+export const PARKED_MARKER_RE = /^\s*(?:>\s*)?\*\*PARKED\b/im;
+
+/** Blank out fenced code blocks (``` / ~~~) and inline code spans (`…`) in a task body, preserving
+ *  LENGTH so every offset/line number in the masked string still refers to the original body.
+ *
+ *  Why a mask rather than a strip: `isParked` is a position-based judgment, and quoting a marker
+ *  verbatim (in a fence or an inline span) is how a task CITES it — a citation is not a stamp. The
+ *  real marker is never written inside a code span, so masking leaves it intact (verified against
+ *  every real marker in the store: gap-a6-fan-in-full-gate / gap-per-test-tail-percentiles-
+ *  conditional / gap-official-dist-delivery-… / gap-retire-inner-state-one-observer-targets-by-
+ *  parameter — all four sit outside any fence). */
+export function stripCodeSpansAndFences(body) {
+  const lines = String(body ?? "").split("\n");
+  let fence = null; // the fence character currently open ("`" or "~"), or null
+  const masked = lines.map((line) => {
+    const m = /^\s{0,3}(`{3,}|~{3,})/.exec(line);
+    if (fence !== null) {
+      if (m && m[1][0] === fence) fence = null;
+      return " ".repeat(line.length);
+    }
+    if (m) {
+      fence = m[1][0];
+      return " ".repeat(line.length);
+    }
+    return line.replace(/`[^`]*`/g, (span) => " ".repeat(span.length));
+  });
+  return masked.join("\n");
+}
 
 /** Task-level SUPERSEDED marker: a LINE-START bold `**SUPERSEDED`, optionally inside a blockquote —
  *  the outer retreat's `> **SUPERSEDED / 作废（…）**` (verified against the real store: every
@@ -1158,7 +1203,9 @@ export function isFixture(task) {
 }
 
 export function isParked(task) {
-  return PARKED_MARKER_RE.test(task.body);
+  // Mask code spans/fences first: citing the marker verbatim (the normal way to record "I stamped
+  // it" in Evidence) is not the same act as stamping it. See PARKED_MARKER_RE / stripCodeSpansAndFences.
+  return PARKED_MARKER_RE.test(stripCodeSpansAndFences(task.body));
 }
 
 /** True when the task carries the RETREATED / 搁置 marker (tasks/gap-retreated-state-not-mechanized) —

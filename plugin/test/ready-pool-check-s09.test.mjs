@@ -18,7 +18,7 @@
 // SPLIT from ready-pool-check.test.mjs by gap-suite-split-15-over-30s-test-files — shard 9/22 (8 tests). Shared fixtures: ./helpers/ready-pool-check-harness.mjs (single source).
 
 import { test } from "node:test";
-import { __dirname, analyzeTasks, assert, execFileSync, fourArtifactBody, fs, gapTask, makeWorkspace, path, writeTask } from "./helpers/ready-pool-check-harness.mjs";
+import { __dirname, analyzeTasks, assert, execFileSync, fourArtifactBody, fs, gapTask, isParked, makeWorkspace, parseTask, path, SUPERSEDED_MARKER_RE, writeTask } from "./helpers/ready-pool-check-harness.mjs";
 
 test("relevance blocking works end-to-end — a parent task with a child reports blocking=true (arity regression)", (t) => {
   const root = makeWorkspace("rel-block");
@@ -195,4 +195,62 @@ test("AC1/AC2/AC4 — a candidate referencing an ADR-022-deleted script is NOT p
   const c = r.candidates.find((x) => x.id === "gap-prepare-milestone-no-size-aware-routing");
   assert.equal(c.retiredMechanism, true, "candidate carries the retiredMechanism flag");
   assert.equal(c.eligible, false, "retired-mechanism candidate is not eligible");
+});
+
+
+// ── PARKED marker is LINE-ANCHORED (gap-parked-marker-matches-its-own-mention-in-prose) ────────────
+// The pre-2026-10-16 `PARKED_MARKER_RE = /\*\*PARKED\b/i` was a WHOLE-BODY substring match: any bold
+// mention of the marker ANYWHERE parked the task that merely MENTIONED it. The live victim
+// (gap-suite-heavy-files-and-phase-concurrency-…, 2026-10-16) stayed parked after its first-line
+// marker was deleted because the match had moved to its own Evidence sentence citing the marker —
+// making its own un-park instruction ("delete that block") unsatisfiable. Same failure as the
+// 2026-08-13 self-flagging fixed for SUPERSEDED (see that regex's comment): position-based judgment.
+
+test("PARKED: mid-sentence bold literal is NOT a marker (the pre-fix whole-body substring match)", (t) => {
+  // AC1's fixture, post-fix: the bold literal appears ONLY in prose, never at a line start.
+  const proseMention = parseTask(
+    "---\nid: x\n---\n## Evidence\n\nThe worker stamped the marker, then recorded it verbatim:\n"
+    + "the task body's first line carried `**PARKED (outer ruling) — execution suspended.**` to stop\n"
+    + "re-dispatch. See the **PARKED marker** convention used by dispatch.\n",
+  );
+  assert.equal(isParked(proseMention), false, "a bold mention inside a sentence must not park the mentioning task");
+});
+
+test("PARKED: a verbatim citation inside a code span/fence is NOT a marker", (t) => {
+  const fenced = parseTask("---\nid: x\n---\n## Evidence\n\n```\n**PARKED (outer ruling) — execution suspended.**\n```\n");
+  assert.equal(isParked(fenced), false, "quoting the marker in a fenced block is a citation, not a stamp");
+  const inlineSpan = parseTask("---\nid: x\n---\n## Evidence\n\n`**PARKED (outer ruling) — execution suspended.**`\n");
+  assert.equal(isParked(inlineSpan), false, "quoting the marker in an inline code span is a citation, not a stamp");
+});
+
+test("PARKED: real line-start markers still park (positive control, plain + blockquote)", (t) => {
+  const plain = parseTask("---\nid: x\n---\n**PARKED — execution suspended.**\n\n## Proposal\n\nhi");
+  assert.equal(isParked(plain), true, "a line-start bold marker is the real stamp");
+  const quoted = parseTask("---\nid: x\n---\n> **PARKED (outer ruling, 2026-08-04) — execution suspended.**\n\n## Proposal\n\nhi");
+  assert.equal(isParked(quoted), true, "the blockquote `> **PARKED …**` form is the real stamp (mirrors SUPERSEDED)");
+  const notFirstLine = parseTask("---\nid: x\n---\n## Proposal\n\nhi\n\n**PARKED** (worker, 2026-10-16)\n");
+  assert.equal(isParked(notFirstLine), true, "line-anchored, not first-line-only (matches SUPERSEDED/RETREATED)");
+});
+
+test("PARKED: a prose-only mention is not excluded from targeted promotion (end-to-end negative control)", (t) => {
+  const root = makeWorkspace("parked-mention");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writeTask(root, "gap-mention", {
+    status: "todo",
+    labels: ["gap"],
+    body: "## Proposal\n\nThis task DISCUSSES the **PARKED marker** convention; it carries no marker.\n\n"
+      + fourArtifactBody({ touches: ["- tasks/gap-mention.md", "- plugin/scripts/ready-pool-check.ts"] }),
+  });
+
+  const r = analyzeTasks({ tasksDir: path.join(root, "tasks"), root, targetedId: "gap-mention" });
+  assert.notEqual(r.targeted_promotion.reason, "parked", "mentioning the marker must not exclude the task as parked");
+  assert.equal(r.targeted_promotion.eligible, true, "a prose-only mention stays promotable");
+});
+
+test("SUPERSEDED: its own mid-line negative control still holds (regression guard for the shared shape)", (t) => {
+  // The sibling anchored regex must not regress while fixing PARKED — same position-based rule.
+  const midLine = "a mid-sentence **SUPERSEDED** mention documenting the regex itself";
+  assert.equal(isParked(parseTask(`---\nid: x\n---\n${midLine}`)), false, "PARKED does not fire on a SUPERSEDED mention");
+  assert.equal(SUPERSEDED_MARKER_RE.test(midLine), false, "a mid-sentence SUPERSEDED mention is not a marker");
+  assert.equal(SUPERSEDED_MARKER_RE.test("> **SUPERSEDED / 作废（…）**"), true, "a line-start SUPERSEDED marker still is");
 });
