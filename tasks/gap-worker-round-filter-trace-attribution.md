@@ -2,7 +2,7 @@
 id: gap-worker-round-filter-trace-attribution
 title: worker-round 的 filtered-empty 轮不可归因：一个 stop_reason 字面量压掉「哪个谓词 / 哪个在飞对手 /
   重叠哪些文件 / 等待多久」五种成因（GOAL-037 AC-362 观测面）
-status: todo
+status: ready
 labels:
   - gap
 parent: null
