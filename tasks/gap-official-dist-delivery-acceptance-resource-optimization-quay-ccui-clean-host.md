@@ -399,3 +399,11 @@ round re-derives exactly the same blocking condition — this is an authorizatio
 Unpark condition: a recorded authorization naming (i) which host's anchor may be replaced, (ii) which
 artifact is the authorised kernel, and (iii) the acceptable window; on receipt, AC3/AC4 are mechanical
 (§3 and §4 already carry the baseline readings, the artifact identity and the rollback target).
+
+## Blocker
+
+**2026-10-16T12:54:41.916Z — worker 未落地（exited-not-landed）**
+
+- 未落地原因：AC 未全勾（checked 0/5，剩余未勾 5）——续做只需验证并勾选 AC
+- run_id：wk-prod-anchor
+- session_id：1d20abbe-d589-4e94-90d3-485a77d1c942
