@@ -2,7 +2,7 @@
 id: gap-official-dist-delivery-acceptance-resource-optimization-quay-ccui-clean-host
 title: 资源优化能力的正式 dist
   交付验收：Quay、ClaudeCodeUI、独立干净单项目宿主三方验证（完整性负例/OOM/超时/恢复/无残留、同commit同scope前后对比）
-status: todo
+status: ready
 labels:
   - gap
 parent: null
