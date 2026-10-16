@@ -14,17 +14,6 @@ depends_on:
   - gap-quality-gate-driver-loop-watchdog-test-hangs-since-e18ec4b04
   - gap-suite-resource-measurement-needs-a-host-adapter-not-inline-cgroup-calls
 ---
-> **PARKED**（worker 第 5 轮，2026-10-16T21:3xZ）——⛔ 不是「做完了没勾」：AC1/AC3/AC4 三条都要求
-> 「16 GiB 压力基线下、由 driver 在安静时段调度的完整测量轮」，而该基线已被 **2026-10-15 的 32G 裁定**取代；
-> 且 AC1 的对照（「ac341 isolated vs included」）在本仓 `scripts/test.sh` 里**无法构造**（无排除 flag）。
-> 缺的是**人的裁定**：(a) 按当前生效基线重定范围 / (b) 撤 AC1/AC3 / (c) 授权原样跑。
-> 裁定请求已立案：`tasks/gap-meta-call-heavy-files-ac1-ac3-ac4-2026-10-15-32g-1.md`（status: needs-human）+ `meta/META-016-*.md`。
-> **本行的唯一作用是停止重派**（本轮实测每 ~7–12 分钟烧一个 worker 会话；「达重试上限即停派」在本环境已被一次
-> retreat 在 42 秒内撤销，不可依赖 —— 见 `## Evidence` 第 5 轮）。
-> **解除条件（unpark trigger）**：上述裁定之一被写下 ⇒ 删掉本行即可恢复可派
-> （读者 = `plugin/scripts/ready-pool-check.ts` 的 `PARKED_MARKER_RE` / `isParked`，逐字排除出货池）。
-> ⛔ 本轮未改 AC 文本、未勾选、未动 `status:`。
-
 ## Proposal
 **Human direction 2026-10-14: the 16 GiB suite MemoryMax is a deliberate pressure constraint meant to drive test optimization. It must not be "fixed" just by raising it to 24/26 GiB.** This task does the optimization and the controlled concurrency comparison under 16 GiB. Only if that comparison shows 16 GiB cannot hold does it compare 20/24.
 
@@ -201,7 +190,7 @@ runner 为套件建的 systemd scope **先于** anchor 封套生效，**测出�
   `actor.kind: cli`）撤销，14 秒后又由 promotion-driver 晋升回 ready ⇒ **「连续 N 次未落地即停下等人」这条兜底
   在本环境实测不可依赖**（与 `RetryState.counts` 是内存态、驱动重启即清零一致）。
 
-**③ 因此本轮的动作 = 用有读者的机制停止重派。** 任务体首行加 `**PARKED**`
+**③ 因此本轮的动作 = 用有读者的机制停止重派。** 任务体首行加 粗体 `PARKED` 字面量（见 `PARKED_MARKER_RE`）
 （读者 = `ready-pool-check.ts` 的 `PARKED_MARKER_RE` / `isParked` ⇒ `reasons.push("parked")`，逐字排除出货池）。
 **它是可逆的**：裁定一到删掉该行即恢复可派，解除条件就写在标记旁。⛔ 未改 AC 文本、未勾选、未动 `status:`、未改任何代码文件。
 
@@ -244,3 +233,14 @@ runner 为套件建的 systemd scope **先于** anchor 封套生效，**测出�
 - 失败步/判词：AC 未全勾（checked 2/5，剩余未勾 3）——续做只需验证并勾选 AC
 - run_id：wk-prod-anchor
 - session_id：e7b51858-02c8-47b5-baa1-9040d5172010
+## Needs-Human
+
+**执行 2026-10-15T21:43:46.509Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：worker-driver 连续 3 次 exited-not-landed 未落地（重试上限）
+- 失败步/判词：AC 未全勾（checked 2/5，剩余未勾 3）——续做只需验证并勾选 AC
+- run_id：wk-prod-anchor
+- session_id：bf7487c0-cc37-4c95-a1ca-2745cabaf510
+
+
+人 2026-10-16 裁定（针对本任务 worker 提出的裁定请求；该 worker 会话已结束，故记在这里作为对下一个 worker 的持久裁定 —— 经 Manager 会话转达，非 Manager 自定）：选 (c)。① AC1/AC3 保持原样，仍在 16 GiB 基线上测，不重定范围、不撤销、不改判据文字。② 在安静时段跑那 13 轮（64 路反事实 4 轮 + 32/48/64 各 >=3 完整轮共 9 轮），用环境变量 QUAY_SUITE_MEMORY_MAX=16G 强制该基线。③ 不得叠在生产 fan-in 上。④ 不得修改主检出 .quay/config.yml 的 suite.memory_max（现值 32G 是人 2026-10-15 的裁定，保持不动）；本次测量只靠环境变量强制，声明面一个字节都别动。⑤ 落地后如实贴读数（含 OOM 轮，若真有）；若 16 GiB 下装得进，请把「既有优化使上限可收回 16G」这条推断连同依据（哪些轮、峰值、余量）写进证据 —— 那是这次测量真正的产出。⑥ AC4 的处置按 (c) 不变（引用这张表作为 basis）。
