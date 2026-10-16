@@ -12,7 +12,7 @@ extra: {}
 
 `plugin/scripts/ready-pool-check.ts:366` 定义 `` PARKED_MARKER_RE = /\*\*PARKED\b/i ``，而 `:1160` 的 `isParked(task)` 是 `PARKED_MARKER_RE.test(task.body)` —— **全文子串**匹配、**未锚行**。
 
-它的姊妹 `SUPERSEDED_MARKER_RE`（`:377`）是**锚行**的（`/^\s*(?:>\s*)?\*\*SUPERSEDED\b/im`），且那段注释逐字记着为什么必须锚：一个**记录该正则自身**的句子曾被误判成标记（"the 2026-08-13 self-flagging of this task's own Evidence text"）。**PARKED 没有做同样的修复**，而它自己的注释还宣称 "Plain-text 'PARKED' in AC prose … is NOT a marker — matched only when bolded" —— 那个豁免对**粗体**字面量无效。
+它的姊妹 `SUPERSEDED_MARKER_RE`（`:377`）是**锚行**的（`/^\s*(?:>\s*)?\*\*SUPERSEDED\b/im`），且那段注释逐字记着为什么必须锚：一个**记录该正则自身**的句子曾被误判成标记（"the 2026-08-13 self-flagging of this task's own Evidence text"）。**这个标记没有做同样的修复**，而它自己的注释还宣称 "Plain-text 'PARKED' in AC prose … is NOT a marker — matched only when bolded" —— 那个豁免对**粗体**字面量无效。
 
 **活的受害者（2026-10-16 实测）**：`tasks/gap-suite-heavy-files-and-phase-concurrency-under-16g-pressure-baseline-comparison.md`。该任务 worker 为停止重派（实测每 7–12 分钟烧一个 worker 会话）在正文首行加了停派标记，并**如实把这件事记进 Evidence**。人的裁定到达后：
 
@@ -22,7 +22,7 @@ extra: {}
 
 ⇒ 该任务自己写下的解除指令（「裁定一到**删掉那一段**即恢复可派」）**在本缺陷下不成立**。它因此卡住了一次**已经作出的人裁定**，直到有人逐字节定位到那句 Evidence 才解开。
 
-（本条自身的正文刻意不含未转义的该字面量 —— 否证见 AC2 的自检。）
+**第二个活实例（就在立本条任务时发生，2026-10-16）**：本条任务的正文第一版在描述该缺陷时，因为一处**粗体排版**（星号紧跟 PARKED）而**立刻把自己停派了** —— 写入后立刻用 `isParked` 自检，读到 `true`、命中子串就是那两个星号加 PARKED。⇒ 这个坑不需要任何人「记录标记」的意图，**任何一个在粗体短语开头提到该词的句子**都会触发。AC2 的自检项即由这次误伤而来。
 
 ## Plan
 
