@@ -1,0 +1,66 @@
+# provider.yml — the native Provider's static self-declaration
+# (quay-proposal.md §10, quay-native-design.md). Travels with the Provider.
+#
+# v0 walking skeleton (G5): only what the v0 loop actually needs is declared;
+# no gold-plating.
+
+id: native
+name: "quay-native"
+description: >
+  Reference Provider: markdown+frontmatter task store, two-layer Skill set,
+  data-only MCP ABI.
+
+capabilities:
+  data.read: true    # task_list, task_get — required
+  manifest: true     # this file / provider://manifest — required
+  data.write: true   # task_write is fully wired over MCP (packages/quay-native/src/mcp-server.js,
+                     # since the v0 commit) and byte-compared against `quay-native task edit`
+                     # in test/abi-symmetry.mjs (task_write, task_write_value_equivalence, extra-isolation)
+  gate: true         # task_check via `quay-native task check`
+  goal: true         # goal_list/goal_get/goal_write/goal_gate (SPEC-goal-mechanism §5.2 —
+                     # provider-backed goal storage lives in quay-native/src/goal-store.ts)
+  skill: true        # quay:* Skills declared below — real, native Skills (author/, execute/),
+                     # driving the majority of this experiment's own tasks since the seed's retirement
+
+# status model (design §3) — 4 states, no more.
+statuses:
+  - id: todo
+    terminal: false
+  - id: ready
+    terminal: false
+  - id: done
+    terminal: true
+  - id: "needs-human"
+    terminal: true   # soft stop; no machine operation applies
+
+# lane (design §5, proposal §7.1) — coarse "which Skill set applies" label.
+lanes:
+  - authoring
+  - execution
+
+# status -> Skill logical map (design §3). HISTORICAL NOTE (v0/iteration 0):
+# at v0 (σ=0), quay:author / quay:execute did not yet exist as native
+# Skills, and the action button's payload routed to the SEED (epicd
+# authoring-convergence / fixpoint-convergence) instead of this table's own
+# targets — see iteration-0.md for that honest, original accounting.
+# CURRENT STATE (corrected iteration 40, QN-051): quay:author and
+# quay:execute are real, native Skills (packages/quay-native/skills/author/,
+# .../execute/) that this table's mapping actively and currently drives; the
+# seed was retired iterations ago. See experiments/quay-native-bootstrap/provenance.md for the full
+# per-task {author_by, execute_by, gate_by} record and current σ.
+status_skill_map:
+  todo: "quay:author"
+  ready: "quay:execute"
+
+# action_buttons (proposal §6.4, §10; design §7) — preset trigger payloads.
+# Peripheral config, not core Provider semantics. The host (quay Core CLI)
+# composes and delivers these; the Provider only declares defaults.
+action_buttons:
+  - id: advance
+    label: "Advance"
+    # payload is a template; {{id}} substituted by the host at delivery time.
+    payload: "Drive task {{id}} forward one status transition using its current status's Skill (see status_skill_map)."
+    whenStatus: ["todo", "ready"]
+
+skills_path: "./skills"
+mcp_entry: ["node", "./bin/quay-native.ts", "mcp"]
