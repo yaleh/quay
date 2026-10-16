@@ -14,6 +14,7 @@ extra:
   schema: execution
 goal_ac: AC-241
 ---
+
 ## Finding
 
 **回归（生产台账，逐字读数）** —— GOAL-009 的常设不变式 **AC-241**（`long-term: true`，2026-09-11T13:55:25.575Z achieved）在 **2026-10-16T18:01:45.884Z 第 7 次转红**。前 6 次各有一次立案、全部 `done`（`gap-goal-criteria-bare-failing-exit-unattributable` / `gap-criterion-attribution-write-gate-at-birth` / `gap-criterion-attribution-ratchet-blind-to-trailing-computed-exit` / `gap-criterion-attribution-blind-to-silent-terminal-command` / `gap-ac241-frozen-bare-failure-exits-have-no-owner` / `gap-ac241-errexit-abort-silent-failures-have-no-predicate`）——**它们没有一条不成立，只是每次只补了上一个被撞到的形态**。台账里 AC-241 的 goal-gate 事件累计 12197 条（其中 fail 395 条）。
@@ -121,7 +122,7 @@ AC-188 AC-191 AC-192 AC-193 AC-304 AC-305 AC-306 AC-307 AC-308
 
 - [ ] **AC5 接线与既有测试不退化** —— `node --test plugin/test/criterion-failure-attribution-check.test.mjs` 与 `node --test plugin/test/goal-store-write-gate-criterion-attribution.test.mjs` 全绿（含本任务新增的三元正/负控制）；`bash plugin/scripts/checker-mutation-cases/criterion-failure-attribution-check.sh` RC=0（A 基线绿 / B 注入必红 / C 恢复绿 / D 不可读 `exit 3`，四态互异）；`plugin/scripts/criterion-failure-attribution-check.ts` 头注释里「three ADDITIVE classes」的形态清单同步补上三元尾（硬规则 5b：⛔ 不留「已记录的限制」式静默——那句注释本身在第 3 次立案里就被判定为「它不是已记录的，它就是静默通过」）。
 
-- [ ] **AC6 生产台账翻绿（待外部）** —— 主检出 `.quay/gate-events.jsonl` 中 AC-152 的**尾事件**其 `payload.reason` 携带判据自己写出的成因（或 `verdict=pass`），且在该台账上跑 AC-241 判据**原文** ⇒ `exit 0`；由落地后的常驻 goal-driver 轮次写出（AC-152 约每 3–4h 被 `goal-sweep` 一次）。⛔ 不得以 worktree 台账替代**生产**读数。
+- [ ] **AC6 生产台账翻绿（待外部）** —— 主检出 `.quay/gate-events.jsonl` 中 AC-152 的**尾事件**其 `payload.reason` 携带判据自己写出的成因（或 `verdict=pass`），且在该台账上跑 AC-241 判据**原文** ⇒ `exit 0`；由落地后的常驻 goal-driver 轮次写出（AC-152 约每 3–4h 被 `goal-sweep` 一次）。⛔ 不得以 worktree 台账替代**生产**读数。（待外部）
 
 ## DoD
 
