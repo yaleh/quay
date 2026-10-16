@@ -349,3 +349,13 @@ Plan §3 / AC13 的「复用 AC-363 的账本模块，⛔ 不写第二份读数�
 **本条的放宽语义未改动**：修复只动 `duration-report.ts` 的入口守卫一行（外加一行 import），
 `driver-filters.ts` 的 live 判据、`## Acceptance Criteria` 的 13 条与上文各读数**逐条不变**；
 AC2–AC11 的夹具读数本轮重跑仍为 `tests 26 · pass 26 · fail 0`。
+## Blocker
+
+**2026-10-16T18:22:32.886Z — worker 未落地（exited-not-landed）**
+
+- 未落地原因：step=suite: AssertionError [ERR_ASSERTION]: dist/worker-driver.js must run its OWN main — expected marker "SPEC §5 阶段 2+3+4" in its output
+- run_id：wk-prod-anchor
+- session_id：3847369d-93b1-4606-bdc4-c261465661dd
+- **已解**（2026-10-17）：真因是 `plugin/scripts/duration-report.ts` 的 URL 形态入口守卫被本条新引入的
+  import 边（`worker-driver → relaxed-dispatch-ledger → duration-report`）在打包后劫持了 worker-driver 的
+  main；已改为 bundle-safe 的 `isDirectEntry`，两向读数与完整证据见上一节。
