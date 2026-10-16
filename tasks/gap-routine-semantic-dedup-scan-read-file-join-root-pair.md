@@ -41,4 +41,7 @@ extract — one shared root-relative reader
 ## Touches
 - `plugin/scripts/dual-source-check.ts`
 - `plugin/scripts/retired-clause-check.ts`
+- `plugin/scripts/red-on-omission-audit.ts`
+- `plugin/scripts/gate-script-base.ts`
+- `plugin/test/gap-routine-semantic-dedup-scan-read-file-join-root-pair.test.mjs`
 - `tasks/gap-routine-semantic-dedup-scan-read-file-join-root-pair.md`
