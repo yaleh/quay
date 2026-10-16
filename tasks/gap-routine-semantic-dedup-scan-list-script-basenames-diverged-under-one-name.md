@@ -3,7 +3,7 @@ id: gap-routine-semantic-dedup-scan-list-script-basenames-diverged-under-one-nam
 title: "semantic-dedup-scan: Identical bodies under one name, but one filters on
   EXEC_EXTENSIONS (.ts .sh .mjs .js .cjs .bash) and the other on
   SCRIPT_EXTENSIONS (.ts .sh .mjs), so the two"
-status: ready
+status: done
 labels:
   - gap
   - routine-filed
@@ -107,14 +107,6 @@ merge
 - 真因②（已立案，`gap-lwa-crit-fixture-sleep300-child-not-reaped-forces-aborted-on-clean-suite`，待空闲派发槽）：`live-web-address-fixture.mjs` 的 `sleep 300` 夹具子进程未被回收，floor 档即便零 OOM 也被误判 `aborted`。
 - 本任务自身的 AC/Touches 没有变化，不是因为本任务有缺陷才阻塞。
 - `depends_on` 已指向上述两个任务；两者皆 `done` 后，`ready-pool-check` 的 `depsReadinessFor` 会自动判定解阻塞，促升回 `ready`，不需要人工介入。
-
-## Blocker
-
-**2026-10-15T06:07:57.956Z — worker 未落地（exited-not-landed）**
-
-- 未落地原因：step=suite: oom-killed (1) — recovery exhausted at floor concurrency 32 — no declared rung produced a complete verdict (64,48,32); needs a code/config fix, see plugin/scripts/full-suite-runner.ts
-- run_id：wk-prod-anchor
-- session_id：6635aec1-549b-42ff-ad59-dc26098af244
 
 ## Needs-Human
 

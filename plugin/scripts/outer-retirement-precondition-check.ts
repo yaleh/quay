@@ -41,9 +41,14 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 // listExecutableFiles now lives in fs-walk.ts (it was a whole-function byte-identical copy of
 // fan-in-workflow-retirement-check.ts's — .quay/routine-findings.jsonl finding
-// `shell-scan-surface-family`). EXEC_EXTENSIONS went with it and is still this checker's reference
-// set for listScriptBasenames (.md is deliberately absent: a doc mention is not a call surface).
-import { listExecutableFiles, EXEC_EXTENSIONS } from "./fs-walk.ts";
+// `shell-scan-surface-family`). SCRIPTS_DIR_REL and listScriptBasenames joined it there for the same
+// reason plus one more (.quay/routine-findings.jsonl finding
+// `list-script-basenames-diverged-under-one-name`, routine `semantic-dedup-scan`, runId
+// `semantic-dedup-scan-1792033478766`): this checker and registry-bare-filename-scan.ts each kept an
+// identical `listScriptBasenames` under the same name, filtered on different extension sets. Both
+// now re-export fs-walk.ts's single definition — ⛔ do not re-add a local copy here.
+import { listExecutableFiles, SCRIPTS_DIR_REL, listScriptBasenames } from "./fs-walk.ts";
+export { SCRIPTS_DIR_REL, listScriptBasenames };
 // parseArg now lives in gate-script-base.ts as `flagValue` (it was one of the byte-identical
 // copies of the indexOf+next-arg idiom in plugin/scripts; .quay/routine-findings.jsonl finding
 // `arg-parsing-helper-family`, routine `semantic-dedup-scan`).
@@ -63,8 +68,6 @@ const DEFAULT_ROOT = repoRoot();
 export const EXECUTION_CORE_REL = "orchestration/orchestrator-tick-core.md";
 /** static-gate 注册表（`run_checker` 引用 checker 的精确 basename ⇒ 留存）。 */
 export const REGISTRY_REL = "plugin/scripts/runner-static-gate.ts";
-/** 脚本目录（枚举 plugin/scripts 顶层脚本）。 */
-export const SCRIPTS_DIR_REL = "plugin/scripts";
 /** checker 的机械信号：`-check.{ts,sh}` 结尾。 */
 export const CHECKER_RE = /-check\.(ts|sh)$/;
 /** 显式退役标记：orphan checker 文件头带此 token ⇒ 已处置（非静默孤儿）。 */
@@ -108,16 +111,10 @@ export interface PreconditionResult {
  *  不屏蔽会把 `# （outer-anchor-check.ts 带标记）` 这类注释误判为代码引用。
  *  ⛔ 实现已上收 source-text-lib.ts（见文件头的 import 注释）——此处不再保留副本。 */
 
-/** 枚举 plugin/scripts 顶层脚本（.ts/.sh/.mjs，非递归——checker-mutation-cases 是子目录）。 */
-export function listScriptBasenames(root: string): string[] {
-  const dir = path.join(root, SCRIPTS_DIR_REL);
-  if (!fs.existsSync(dir)) return [];
-  return fs
-    .readdirSync(dir, { withFileTypes: true })
-    .filter((e) => e.isFile() && EXEC_EXTENSIONS.has(path.extname(e.name)))
-    .map((e) => e.name)
-    .sort();
-}
+/** 枚举 plugin/scripts 顶层脚本（非递归——checker-mutation-cases 是子目录）。
+ *  ⛔ 实现已上收 fs-walk.ts（`listScriptBasenames`），本模块只 re-export（见文件头 import 注释）——
+ *  此处不再保留副本：本模块历史副本的 JSDoc 自称 `.ts/.sh/.mjs`，代码却按 EXEC_EXTENSIONS 过滤，
+ *  与 registry-bare-filename-scan.ts 的同名副本给出两个不同的集合。 */
 
 /** 执行核直接引用的脚本（basename 出现在执行核文本里）。 */
 export function referencedScripts(root: string, tickCoreText: string, scriptBasenames: string[]): string[] {
