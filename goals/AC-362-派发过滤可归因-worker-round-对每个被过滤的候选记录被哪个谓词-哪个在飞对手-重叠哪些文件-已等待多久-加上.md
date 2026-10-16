@@ -1,7 +1,7 @@
 ---
 id: AC-362
 title: 派发过滤可归因：worker-round 对每个被过滤的候选记录被哪个谓词、哪个在飞对手、重叠哪些文件、已等待多久；加上该记录后候选集合与顺序不变
-status: draft
+status: active
 kind: criterion
 goal: GOAL-037
 criterion: >-
@@ -40,4 +40,15 @@ origin: 用户 2026-10-16 在会话「ClaudeCodeUI 局部重构方案」中认�
   goal/AC 并激活。本条是方案第 0 步（只加观测）：worker-round 的 filtered-empty 轮（quay
   7010/49201≈14.2%、claudecodeui 4844/36578≈13.2% 的 stop
   轮）目前不记录每个候选被哪个谓词、被谁挡住，无法归因（grep 'touches-overlap' 在 worker-round.jsonl 零命中）。
+activatedAt: 2026-10-16T15:33:49.394Z
+statusLog:
+  - at: 2026-10-16T15:33:49.394Z
+    from: draft
+    to: active
+    actor: goal-driver
+    reason: "triage: activate"
+fidelity:
+  verdict: faithful
+  reason: "fidelity judge: faithful"
+  at: 2026-10-16T15:33:49.394Z
 ---
