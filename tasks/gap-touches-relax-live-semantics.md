@@ -364,14 +364,3 @@ AC2–AC11 的夹具读数本轮重跑仍为 `tests 26 · pass 26 · fail 0`。
 （`ℹ tests 53`）为 **53 pass / 0 fail** —— 基线树没有这条 import 边，故两个红都不存在；
 本 worktree 的 rerun 臂同一选择集则 `fail 3`（恰为上述三条：build-plugin-dist AC1 + 本文件的 AC2b/AC3）。
 **两个红同因，一处修复同时消掉**（本条修完后的读数即上表与本节）。
-
-## Blocker
-
-**2026-10-16T18:22:32.886Z — worker 未落地（exited-not-landed）**
-
-- 未落地原因：step=suite: AssertionError [ERR_ASSERTION]: dist/worker-driver.js must run its OWN main — expected marker "SPEC §5 阶段 2+3+4" in its output
-- run_id：wk-prod-anchor
-- session_id：3847369d-93b1-4606-bdc4-c261465661dd
-- **已解**（2026-10-17）：真因是 `plugin/scripts/duration-report.ts` 的 URL 形态入口守卫被本条新引入的
-  import 边（`worker-driver → relaxed-dispatch-ledger → duration-report`）在打包后劫持了 worker-driver 的
-  main；已改为 bundle-safe 的 `isDirectEntry`，两向读数与完整证据见上一节。
