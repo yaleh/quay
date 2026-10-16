@@ -232,3 +232,11 @@ node --no-warnings --experimental-strip-types plugin/scripts/anti-drift-touches-
 · 判据面是**夹具载体回读**，不是生产载体（DoD 已如实写明；生产消费归 AC-365/366/367）。
 · **接线不在本条**：`relaxed-dispatch-ledger.ts` 目前零生产调用者，写入器要等 AC-365/366 从放宽决策点调用它，报告要等人 / AC-367 按需跑 —— 当前 `rhythm-consumer-check` 判据2 由 catalog 的 CONSUMER 行满足（cadence=按需 ⇒ 必须声明谁按，已声明）。
 · 对照组选取以放宽记录 `dispatchedAt` 的最早→最晚为窗口，且对照任务的**全部**运行计入其分钟数（两组的归一化与换算函数同一份，故口径相同是结构性质）。
+
+## Blocker
+
+**2026-10-16T16:49:00.340Z — worker 未落地（exited-not-landed）**
+
+- 未落地原因：AC 未全勾（checked 0/9，剩余未勾 9）——续做只需验证并勾选 AC
+- run_id：wk-prod-anchor
+- session_id：bd468b94-b6b3-42b5-8426-513a79ec41e2
