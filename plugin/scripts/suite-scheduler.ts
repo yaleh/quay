@@ -227,8 +227,15 @@ export function groupsArgToSuiteGroups(csv: string): Set<SuiteGroup> {
 
 export interface ClassifyOptions {
   /** The LPT carrier root (the MAIN checkout — where .quay/verification-round.jsonl lives) and the
-   *  key-normalization root for orderByLpt. */
+   *  key-normalization root for orderByLpt. ⛔ NOT the root the SELECTED file list lives under: in
+   *  production that list is the tested checkout's absolute paths (a task worktree), while `root` is
+   *  the MAIN checkout — see `filesRoot`. */
   root: string;
+  /** The checkout the SELECTED file list is spelled against (`--root`; the tested worktree). Defaults
+   *  to `root`. Declared separately because the two differ in production: the suite runs in a task
+   *  worktree while the LPT/memory carriers live in the main checkout. Used ONLY to normalize the
+   *  absolute selected paths into the repo-relative spelling the runner's heavy set uses. */
+  filesRoot?: string;
   rounds: number;
   lptEnabled: boolean;
   /** Optional `--groups` csv; undefined = all four groups (product,engine,serial,lowconc). */
@@ -250,10 +257,28 @@ export interface ClassifyOptions {
   onHeavy?: (files: string[]) => void;
 }
 
-/** Normalize a file key for set membership: the round record and `test.sh --list-files` can spell the
- *  same repo-relative path with or without a leading `./`. */
-function normFileKey(p: string): string {
-  return p.startsWith("./") ? p.slice(2) : p;
+/** Normalize a file key for set membership. The SAME file reaches this function under TWO spellings
+ *  in production, and they must meet:
+ *
+ *    - the SELECTED file list is `test.sh --list-files`'s output — ABSOLUTE paths
+ *      (`/…/<checkout>/plugin/test/x.test.mjs`);
+ *    - the DECLARED heavy set is computed by `full-suite-runner.ts` from the round record's
+ *      `perFile[].file`, which is REPO-RELATIVE (`plugin/test/x.test.mjs`).
+ *
+ *  ⛔ 2026-10-16 (measured, this task): with only the `./` strip below, those two never met, so
+ *  `classifyAndOrder` partitioned **0** heavy files in EVERY production round while its unit test
+ *  (which feeds absolute paths on BOTH sides) stayed green — the fixture-only shape of CLAUDE.md
+ *  硬规则 4 推论三. The heavy tail therefore never ran: `scheduler: heavy=0≤1` was printed in every
+ *  measured round even where the runner reported `5/1005 planned file(s) exceed it`.
+ *
+ *  ⇒ Absolute keys are resolved RELATIVE TO `root` (the checkout the suite is running in), which is
+ *  the spelling the runner's heavy set already uses. A path outside `root` (or a non-absolute key)
+ *  keeps its literal spelling — normalization must never merge two DIFFERENT files. */
+export function normFileKey(p: string, root?: string): string {
+  const stripped = p.startsWith("./") ? p.slice(2) : p;
+  if (root === undefined || root === "" || !path.isAbsolute(stripped)) return stripped;
+  const rel = path.relative(root, stripped);
+  return rel !== "" && !rel.startsWith("..") && !path.isAbsolute(rel) ? rel : stripped;
 }
 
 /** classify + filter + LPT-order the raw file list into the three per-bucket queues. Scheduling-only:
@@ -276,10 +301,14 @@ export function classifyAndOrder(files: string[], opts: ClassifyOptions): GroupQ
   const heavy: string[] = [];
   if (opts.heavyFiles && opts.heavyFiles.size > 0) {
     const heavyKeys = new Set<string>();
-    for (const k of opts.heavyFiles) heavyKeys.add(normFileKey(k));
+    // ⛔ normalize against the SELECTED list's own root (`filesRoot`), NOT the LPT carrier root:
+    // in production the list is the tested worktree's absolute paths while `root` is the main
+    // checkout, so anchoring on `root` leaves every absolute key unmatched (measured 2026-10-16).
+    const keyRoot = opts.filesRoot ?? opts.root;
+    for (const k of opts.heavyFiles) heavyKeys.add(normFileKey(k, keyRoot));
     for (const g of SUITE_GROUPS) {
       queues[g] = queues[g].filter((f) => {
-        if (!heavyKeys.has(normFileKey(f))) return true;
+        if (!heavyKeys.has(normFileKey(f, keyRoot))) return true;
         heavy.push(f);
         return false;
       });
@@ -626,7 +655,7 @@ async function readFiles(): Promise<string[]> {
 }
 
 async function main(argv: string[]): Promise<number> {
-  const { budgets, testNamePatterns, mainRoot, baseline, groups: groupsArg, rounds, help } = parseArgs(argv);
+  const { budgets, testNamePatterns, root: filesRoot, mainRoot, baseline, groups: groupsArg, rounds, help } = parseArgs(argv);
   if (help) {
     // `--help` is DETECTED by the shared parser (`help: "return"`) and PRINTED here — the text stays
     // at the command that owns the contract. Unchanged: stderr, exit 0.
@@ -674,6 +703,7 @@ async function main(argv: string[]): Promise<number> {
   }
   const groups = classifyAndOrder(files, {
     root: mainRoot,
+    filesRoot,
     rounds,
     lptEnabled: process.env.QUAY_TEST_LPT_ORDER !== "0",
     groups: groupsArg,

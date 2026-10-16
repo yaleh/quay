@@ -242,6 +242,53 @@ test("classifyAndOrder — the declared heavy set is PARTITIONED out of the sele
   }
 });
 
+// ⛔ PRODUCTION-SHAPE regression (2026-10-16, measured): the SELECTED list arrives ABSOLUTE
+// (`test.sh --list-files` emits absolute paths) while the DECLARED heavy set is REPO-RELATIVE (the
+// runner reads `perFile[].file` from the round record). The test above feeds absolute paths on BOTH
+// sides, so it stayed green while production partitioned 0 heavy files in EVERY round
+// (`scheduler: heavy=0≤1` with 5 files declared) — the fixture-only shape of 硬规则 4 推论三.
+test("classifyAndOrder — an ABSOLUTE selected list still meets a REPO-RELATIVE heavy set (production spelling)", () => {
+  // PRODUCTION SHAPE: the suite runs in a TASK WORKTREE (`filesRoot`) while the LPT/memory carriers
+  // live in the MAIN checkout (`root`) — the two roots DIFFER, and `root` is not a prefix of the
+  // selected paths at all. Anchoring normalization on `root` (the first version of this fix, measured
+  // still-0 in production) leaves every absolute key unmatched.
+  const mainCheckout = fs.mkdtempSync(path.join(os.tmpdir(), "sched-heavy-main-"));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "sched-heavy-mixed-"));
+  try {
+    fs.mkdirSync(path.join(dir, "plugin", "test"), { recursive: true });
+    const absHeavy = path.join(dir, "plugin", "test", "ac341.test.mjs");
+    const absLight = path.join(dir, "plugin", "test", "other.test.mjs");
+    for (const f of [absHeavy, absLight]) fs.writeFileSync(f, "import { test } from 'node:test';\ntest('t', () => {});\n");
+    // The selected list is what test.sh hands the scheduler: ABSOLUTE, under the TESTED checkout.
+    // The heavy set is what the runner computed from the round record: REPO-RELATIVE.
+    let heavySeen = null;
+    const q = classifyAndOrder([absHeavy, absLight], {
+      root: mainCheckout,
+      filesRoot: dir,
+      rounds: 3,
+      lptEnabled: false,
+      heavyFiles: new Set(["plugin/test/ac341.test.mjs"]),
+      onHeavy: (h) => { heavySeen = h; },
+    });
+    assert.deepEqual(heavySeen, [absHeavy], "the repo-relative declaration must match the absolute selection");
+    assert.deepEqual(q.main, [absLight], "…and the heavy file is MOVED out of its bucket, not copied");
+    // Negative control: a key that is genuinely OUTSIDE root must NOT be merged into a same-named file.
+    let outsideSeen = null;
+    classifyAndOrder([absHeavy], {
+      root: mainCheckout,
+      filesRoot: dir,
+      rounds: 3,
+      lptEnabled: false,
+      heavyFiles: new Set(["../outside/ac341.test.mjs"]),
+      onHeavy: (h) => { outsideSeen = h; },
+    });
+    assert.deepEqual(outsideSeen, [], "an out-of-root key is not normalized into the selection");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+    fs.rmSync(mainCheckout, { recursive: true, force: true });
+  }
+});
+
 test("classifyAndOrder — no declared heavy set ⇒ an empty partition (the mechanism is OFF, not a default bound)", () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "sched-heavy-off-"));
   try {
