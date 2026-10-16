@@ -97,6 +97,15 @@ function makeGitRoot(tag) {
 }
 
 // ── AC1：五个谓词是一个列表里的元素 ──────────────────────────────────────────────────────────────
+//
+// ⚠️ 这份五名清单有【第二个 pin】，本注释就是那两个 pin 互相点名的地方
+// （gap-ac152-filter-carrier-renamed-criterion-stale，2026-10-17 立）：
+// `goals/AC-152-filter-composable-predicate-list.md` 的 `criterion` 里有一份**逐字相同**的
+// `want` 数组。两处此前互不知晓 —— 2026-10-16 的合法改名（commit `efb4c8e85`，GOAL-037 / AC-365）
+// 把 `touchesDisjoint` 换成 `touchesDisjointOrAged` 时，**测试跟着改了、判据没改**，判据因此
+// 静默 stale 了一轮又一轮（`AC-152` verdict: fail ⇒ 连带 `AC-241` 报「unattributable failing
+// goal AC(s)」）。⇒ **下次再改这一格的名字，两个 pin 必须同轮一起改。**
+// 取假（一条命令可验）：`grep -c 'goals/AC-152' plugin/test/driver-filters.test.mjs` ⇒ ≥1。
 
 test("AC1 — TASK_FILTERS is the single list of the five composable predicates", () => {
   assert.deepEqual(
