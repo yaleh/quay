@@ -190,7 +190,7 @@ runner 为套件建的 systemd scope **先于** anchor 封套生效，**测出�
   `actor.kind: cli`）撤销，14 秒后又由 promotion-driver 晋升回 ready ⇒ **「连续 N 次未落地即停下等人」这条兜底
   在本环境实测不可依赖**（与 `RetryState.counts` 是内存态、驱动重启即清零一致）。
 
-**③ 因此本轮的动作 = 用有读者的机制停止重派。** 任务体首行加 `**PARKED**`
+**③ 因此本轮的动作 = 用有读者的机制停止重派。** 任务体首行加 粗体 `PARKED` 字面量（见 `PARKED_MARKER_RE`）
 （读者 = `ready-pool-check.ts` 的 `PARKED_MARKER_RE` / `isParked` ⇒ `reasons.push("parked")`，逐字排除出货池）。
 **它是可逆的**：裁定一到删掉该行即恢复可派，解除条件就写在标记旁。⛔ 未改 AC 文本、未勾选、未动 `status:`、未改任何代码文件。
 
