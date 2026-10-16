@@ -94,6 +94,12 @@ packages/quay/plugin/
 # outer reads it for cross-task checks, never git-tracked). Same gitignored runtime-state family as
 # gate-events.jsonl / dispatch-record.jsonl.
 **/.quay/worker-outcome.jsonl
+# gap-relaxed-dispatch-ledger-and-merge-cost-report-absent (2026-10-17): the relaxed-dispatch ledger
+# (.quay/relaxed-dispatch.jsonl) — one line per RELAXED dispatch (task / blockers / overlapFiles /
+# waitedMinutes / dispatchedAt), written by plugin/scripts/relaxed-dispatch-ledger.ts. Runtime state,
+# never git-tracked; same gitignored runtime-state family as worker-outcome.jsonl / gate-events.jsonl.
+# Per-carrier entry, deliberately: this repo has NO `.quay/` catch-all rule.
+**/.quay/relaxed-dispatch.jsonl
 # gap-fan-in-workflow-lock-stale-runid-detached-holder (2026-08-28): the fan-in lock's
 # acquire/release event ledger (.quay/fan-in-lock-events.jsonl) + the fan-in lock's token
 # flag (.quay/fan-in-lock-token-*.json) + manager's fan-in failure classification
