@@ -57,6 +57,8 @@ function withFixture(files, opts = {}, fn) {
 }
 
 const GLUE = '#!/usr/bin/env bash\nset -eu\ngit -C "$1" merge --ff-only develop\nkill -TERM "$pid"\n';
+/** 6 code lines, one of them an embedded `python3` (the count the AC-310 read-path fixtures baseline at). */
+const PY_HEREDOC = '#!/usr/bin/env bash\nset -u\nresult="$(python3 - "$1" <<\'PY\'\nprint("hello")\nPY\n)"\necho "$result"\n';
 
 // ── the position judgment (硬规则 2) — the core of the 口径 ──────────────────────────────────────────
 
@@ -212,6 +214,59 @@ test("an unparseable exception list is NOT-EVALUATED, not a reading that silentl
       const d = decide(root);
       assert.equal(d.reading.evaluated, false);
       assert.equal(d.code, 2);
+    },
+  );
+});
+
+// ── the TRACKED-TREE READ PATH (gap-ac310-…: the worktree is not the data source) ───────────────────
+//
+// AC-310's criterion failed 122/9311 readings (1.31 %) with a cause that reads「副本又回来了」while the
+// real quantity was `evaluated:false`. The path that produced it: this checker is the only GOAL-025
+// judge that reads the whole tracked `.sh` set, and the worktree it read is rewritten under it every
+// round (git's checkout unlinks and re-creates each entry, so a fast reader can see ENOENT for a file
+// that exists before and after). The two tests below are the two-way control for that path: the
+// worktree copy disappearing must NOT destroy the reading, and a file unreadable from BOTH sources
+// must still be NOT-EVALUATED — the fix adds a second source, it never subtracts a failure.
+
+test("AC-310: a tracked .sh deleted from the WORKTREE is still read (from the git index) — evaluated stays true", () => {
+  withFixture(
+    {
+      [EXCEPTIONS_FILE_REL]: "",
+      [BASELINE_FILE_REL]: JSON.stringify({ embeddedInterpreterLines: 6, duplicateCopies: 0 }),
+      "plugin/scripts/py.sh": PY_HEREDOC,
+    },
+    {},
+    (root) => {
+      fs.rmSync(path.join(root, "plugin/scripts/py.sh")); // the index keeps it (⛔ NOT `git rm`)
+      const d = decide(root);
+      assert.equal(d.reading.evaluated, true, d.reading.reason ?? "");
+      assert.equal(d.code, 0);
+      const f = d.reading.files.find((x) => x.path === "plugin/scripts/py.sh");
+      assert.deepEqual(f?.embedded, ["python3"], "the content must come from the index blob, not from an absent path");
+    },
+  );
+});
+
+test("AC-310 negative control: unreadable from the WORKTREE **and** the index ⇒ still NOT-EVALUATED, never a silent zero", () => {
+  withFixture(
+    {
+      [EXCEPTIONS_FILE_REL]: "",
+      [BASELINE_FILE_REL]: JSON.stringify({ embeddedInterpreterLines: 0, duplicateCopies: 0 }),
+      "plugin/scripts/glue.sh": GLUE,
+    },
+    {},
+    (root) => {
+      fs.rmSync(path.join(root, "plugin/scripts/glue.sh"));
+      // An index entry pointing at an object that does not exist: the SECOND source fails too.
+      execFileSync(
+        "git",
+        ["-c", "core.hooksPath=/dev/null", "update-index", "--add", "--cacheinfo", `100644,${"0".repeat(39)}1,plugin/scripts/glue.sh`],
+        { cwd: root, stdio: "pipe" },
+      );
+      const d = decide(root);
+      assert.equal(d.reading.evaluated, false, "a file unreadable everywhere must NOT read as an empty file");
+      assert.equal(d.code, 2);
+      assert.match(d.reading.reason ?? "", /could not read 1 tracked \*\.sh/);
     },
   );
 });
