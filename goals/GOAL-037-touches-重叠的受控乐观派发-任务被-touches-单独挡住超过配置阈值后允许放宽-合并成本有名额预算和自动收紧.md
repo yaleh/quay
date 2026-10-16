@@ -3,12 +3,18 @@ id: GOAL-037
 title: touches 重叠的受控乐观派发：任务被 touches
   单独挡住超过配置阈值后允许放宽，合并成本有名额预算和自动收紧；先观测后影子再生效，默认关闭，只在 claudecodeui 启用（目标：缩短 goal
   从激活到完成的延迟）
-status: active
+status: achieved
 kind: goal
 origin: 用户 2026-10-16 在会话「ClaudeCodeUI 局部重构方案」中认可「等待超过阈值乐观派发」改动方案，并指示按方案创建
   goal/AC 并激活。依据：对 quay 与 claudecodeui 历史任务数据的分析与回放（worker-outcome /
   worker-round 台账、git 状态变更、goals 状态日志）。
 activatedAt: 2026-10-16T15:19:53.808Z
+statusLog:
+  - at: 2026-10-16T19:11:11.805Z
+    from: active
+    to: achieved
+    actor: goal-driver
+    reason: "I2: all ACs achieved + sufficiency covered"
 ---
 ## 背景
 
