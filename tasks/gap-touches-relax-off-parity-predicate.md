@@ -330,3 +330,10 @@ plugin/scripts/duration-report.ts:598:    return fs.realpathSync(entry) === fs.r
 ```
 
 `duration-report.ts` 那一处**当前不可达**：`grep -rn "from \"./duration-report.ts\""` ⇒ 唯一 importer 是 `relaxed-dispatch-ledger.ts:59`，而该文件自身**零生产 importer**（`grep -rn "relaxed-dispatch-ledger" plugin/scripts/ packages/ --include=*.ts` 只命中 `driver-filters.ts` 的两行**注释** —— 本条正是**故意不 import 它**的那个设计决定）⇒ **潜伏**：一旦 AC-366 把账本模块接进 worker-driver，同一劫持会立刻复现。⛔ 本条**不改它**（超出 Touches、且不影响本条落地），把读数与触发条件记在此处，供 AC-366 落地前先修。
+## Blocker
+
+**2026-10-16T17:41:25.144Z — worker 未落地（exited-not-landed）**
+
+- 未落地原因：step=suite: AssertionError [ERR_ASSERTION]: quay driver start must succeed on the packaged artifact. Output:
+- run_id：wk-prod-anchor
+- session_id：afcee318-b122-4f69-9067-c07336892005
