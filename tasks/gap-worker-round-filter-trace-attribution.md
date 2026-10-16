@@ -47,15 +47,138 @@ goal_ac: AC-362
 
 ## Acceptance Criteria
 
-- [ ] AC1 — 测试文件落地且通过：`timeout 55 node --experimental-strip-types --test plugin/test/touches-relax-filter-trace.test.mjs` **exit 0**，文件带 `// @test-group engine`。附实际命令、输出尾部与实测耗时（秒）。
-- [ ] AC2 — touches 归因（AC-362(a)）：fixture 里一个候选的 `## Touches` 与一个在飞对手重叠 ⇒ 从载体回读的记录中该候选的条目满足 `filter === "touchesDisjoint"`、`blocker` 逐字等于该对手的 task id、`overlapFiles` 非空且等于实测交集、`waitedMinutes` 由载体推出。附该条目逐字 JSON + 构造它的 fixture 事实（两个任务各自的 `## Touches`）。
-- [ ] AC3 — `overlapFiles` 是**交集**而非候选自身清单：断言其中每个路径**同时**在候选与对手的 `expandDeclaredTouches` 展开集内；并造一个对手确实声明 `tasks/<候选 id>.md` 的 fixture，断言该路径**被排除**在该条目的 `overlapFiles` 之外。附两边的展开集与该条目。
-- [ ] AC4 — 其它谓词各有其名且 `blocker === null`（AC-362(b)）：为 `depsSatisfied` / `retryCapNotExhausted` / `notNeedsHuman` **各**造一个只被它挡住的候选，断言其条目集合里存在自己 filter 名的条目、其 `blocker === null`，**且该候选没有任何 `filter === "touchesDisjoint"` 的条目**（不得被误归）。附四类候选各自的条目集合。
-- [ ] AC5 — 特征化：集合**与顺序**都不得变（AC-362(c)）：同一输入下带 trace 的 `applyTaskFilters(...)` 返回值与**基线**（测试内用真实谓词独立算出的 kept 序列，或改动前保存的同输入读数）**逐元素 deepEqual**；⛔ 不得只断言长度或先排序再比。附两边数组的逐字打印。
-- [ ] AC6 — 取假形态（AC-362(d)，必须变红，真跑一次并留痕）：① 把归因写死成恒 `touchesDisjoint`；② 恒空 `filter_trace` —— **两种注入各让本测试变红**。附每次的红输出（非零退出码 + 失败断言原文）。⛔ 注入不得留在落地代码里：落地 diff 与该测试的最终内容一致，`git status` 净。
-- [ ] AC7 — pool-empty 不写条目 + 三态可分（AC-362(e)）：`shuffled.length === 0` 的轮记录 `filter_trace === []`（⛔ 不是 `null`、⛔ 不带上一轮残留条目）；**没跑该步**的轮记录 `null`（`strictEqual` 两向各断言一次）。附两类轮从载体回读的真实记录行。
-- [ ] AC8 — `waitedMinutes` 取真值：两个 fixture 的 ready 事件时刻相差已知 Δ ⇒ 两条条目的 `waitedMinutes` 相差 ≈ Δ（杀死硬编码常量）；无 `to: "ready"` 记录的候选 ⇒ `strictEqual(waitedMinutes, null)` 且显式断言 `!== 0`。附实际数值与所用事件行。
-- [ ] AC9 — ⛔ 未改变派发决策：`bash scripts/test.sh plugin/test/driver-filters.test.mjs` **exit 0**（五个既有谓词的覆盖不回归），并附 `git diff` 证明 `applyTaskFilters` 的**返回表达式一行未改**、两个 driver 既有调用位点的判定输入未变（trace 只走新增可选参数）。附命令、退出码与该段 diff。
+- [x] AC1 — 测试文件落地且通过：`timeout 55 node --experimental-strip-types --test plugin/test/touches-relax-filter-trace.test.mjs` **exit 0**，文件带 `// @test-group engine`。附实际命令、输出尾部与实测耗时（秒）。
+- [x] AC2 — touches 归因（AC-362(a)）：fixture 里一个候选的 `## Touches` 与一个在飞对手重叠 ⇒ 从载体回读的记录中该候选的条目满足 `filter === "touchesDisjoint"`、`blocker` 逐字等于该对手的 task id、`overlapFiles` 非空且等于实测交集、`waitedMinutes` 由载体推出。附该条目逐字 JSON + 构造它的 fixture 事实（两个任务各自的 `## Touches`）。
+- [x] AC3 — `overlapFiles` 是**交集**而非候选自身清单：断言其中每个路径**同时**在候选与对手的 `expandDeclaredTouches` 展开集内；并造一个对手确实声明 `tasks/<候选 id>.md` 的 fixture，断言该路径**被排除**在该条目的 `overlapFiles` 之外。附两边的展开集与该条目。
+- [x] AC4 — 其它谓词各有其名且 `blocker === null`（AC-362(b)）：为 `depsSatisfied` / `retryCapNotExhausted` / `notNeedsHuman` **各**造一个只被它挡住的候选，断言其条目集合里存在自己 filter 名的条目、其 `blocker === null`，**且该候选没有任何 `filter === "touchesDisjoint"` 的条目**（不得被误归）。附四类候选各自的条目集合。
+- [x] AC5 — 特征化：集合**与顺序**都不得变（AC-362(c)）：同一输入下带 trace 的 `applyTaskFilters(...)` 返回值与**基线**（测试内用真实谓词独立算出的 kept 序列，或改动前保存的同输入读数）**逐元素 deepEqual**；⛔ 不得只断言长度或先排序再比。附两边数组的逐字打印。
+- [x] AC6 — 取假形态（AC-362(d)，必须变红，真跑一次并留痕）：① 把归因写死成恒 `touchesDisjoint`；② 恒空 `filter_trace` —— **两种注入各让本测试变红**。附每次的红输出（非零退出码 + 失败断言原文）。⛔ 注入不得留在落地代码里：落地 diff 与该测试的最终内容一致，`git status` 净。
+- [x] AC7 — pool-empty 不写条目 + 三态可分（AC-362(e)）：`shuffled.length === 0` 的轮记录 `filter_trace === []`（⛔ 不是 `null`、⛔ 不带上一轮残留条目）；**没跑该步**的轮记录 `null`（`strictEqual` 两向各断言一次）。附两类轮从载体回读的真实记录行。
+- [x] AC8 — `waitedMinutes` 取真值：两个 fixture 的 ready 事件时刻相差已知 Δ ⇒ 两条条目的 `waitedMinutes` 相差 ≈ Δ（杀死硬编码常量）；无 `to: "ready"` 记录的候选 ⇒ `strictEqual(waitedMinutes, null)` 且显式断言 `!== 0`。附实际数值与所用事件行。
+- [x] AC9 — ⛔ 未改变派发决策：`bash scripts/test.sh plugin/test/driver-filters.test.mjs` **exit 0**（五个既有谓词的覆盖不回归），并附 `git diff` 证明 `applyTaskFilters` 的**返回表达式一行未改**、两个 driver 既有调用位点的判定输入未变（trace 只走新增可选参数）。附命令、退出码与该段 diff。
+
+## Evidence
+
+**落地面**：工作树 `/data/home/yale/work/quay-worktrees/gap-worker-round-filter-trace-attribution`，分支 `task/gap-worker-round-filter-trace-attribution`，实现提交 `b543cd5f1`。
+- `plugin/scripts/driver-filters.ts` — `applyTaskFilters` 新增第 4 个**可选**参数 `trace?: FilterTraceSink`；新增 `FilterTraceEntry` / `FilterTraceSink` / `buildReadyAtMsMap`（读 kernel `readTaskStatusTransitions`）/ `makeTouchesAttributor`（复用真实 `parseTouches` / `checkTouchesPair` / `expandDeclaredTouches` / `normalizePath`）。五个谓词实现与 `TASK_FILTERS` 未动，返回表达式一行未改。
+- `plugin/scripts/worker-driver.ts` — apply-filters 步建归因汇（轮首复位置 `null`、同轮多次进环追加）；`computeWorkerRoundRecord` 输出 `filter_trace`；`writeRound` / `writeErrorRound` 从闭包读，两处调用签名逐字不变。
+- `plugin/test/touches-relax-filter-trace.test.mjs` — 新测试（6 条，首行 `// @test-group engine`）。
+
+### AC1 — 测试落地且通过
+
+命令：`timeout 55 node --experimental-strip-types --test plugin/test/touches-relax-filter-trace.test.mjs`
+输出尾部：
+```
+✔ AC2 — touches 归因：blocker / overlapFiles / waitedMinutes 三键同现，从【载体回读】的记录里取 (49.08ms)
+✔ AC3 — overlapFiles 是【交集】… (44.06ms)
+✔ AC4 — 其它谓词各有其名且 blocker === null… (33.95ms)
+✔ AC5 — 特征化：… 逐元素 deepEqual（集合与顺序都不变） (44.06ms)
+✔ AC7 — pool-empty ⇒ filter_trace === []；没跑该步 ⇒ null（两向各断言一次） (32.43ms)
+✔ AC8 — waitedMinutes 取真值… (34.00ms)
+ℹ tests 6   ℹ pass 6   ℹ fail 0   ℹ duration_ms 671.47
+```
+实测墙钟 `real 0m0.700s`（55s 上限余量充足）。`AC1_EXIT=0`。首行 `// @test-group engine`。
+
+### AC2 — touches 归因三键同现（从载体回读）
+
+fixture 事实（两个任务各自的 `## Touches`）：
+```
+gap-trace-cand : plugin/scripts/trace-shared.ts, plugin/scripts/cand-only.ts   （候选）
+gap-trace-opp  : plugin/scripts/trace-shared.ts, plugin/scripts/opp-only.ts    （在飞对手）
+```
+从 `.quay/worker-round.jsonl` 回读的条目逐字：
+```json
+{"task":"gap-trace-cand","filter":"touchesDisjoint","blocker":"gap-trace-opp","overlapFiles":["plugin/scripts/trace-shared.ts"],"waitedMinutes":45}
+```
+
+### AC3 — overlapFiles 是交集，且候选自身任务文件被排除
+
+```
+gap-trace-cand  expand=["plugin/scripts/cand-only.ts","plugin/scripts/trace-shared.ts"]
+                opp   =["plugin/scripts/opp-only.ts","plugin/scripts/trace-shared.ts"]
+                → overlapFiles=["plugin/scripts/trace-shared.ts"]
+gap-trace-self  expand=["plugin/scripts/self-shared.ts","tasks/gap-trace-self.md"]
+                opp   =["plugin/scripts/self-shared.ts","tasks/gap-trace-self.md"]   （对手确实声明候选自身的任务文件）
+                → overlapFiles=["plugin/scripts/self-shared.ts"]                    （tasks/gap-trace-self.md 被排除）
+```
+
+### AC4 — 其它谓词各有其名且 blocker === null
+
+```
+gap-trace-dep entries = [{"task":"gap-trace-dep","filter":"depsSatisfied","blocker":null,"overlapFiles":[],"waitedMinutes":null}]
+gap-trace-exh entries = [{"task":"gap-trace-exh","filter":"retryCapNotExhausted","blocker":null,"overlapFiles":[],"waitedMinutes":null}]
+gap-trace-nh  entries = [{"task":"gap-trace-nh","filter":"notNeedsHuman","blocker":null,"overlapFiles":[],"waitedMinutes":null}]
+```
+三者均断言「没有任何 `filter === "touchesDisjoint"` 的条目」。
+
+### AC5 — 特征化（集合与顺序逐个不变）
+
+```
+[AC5] traced   = ["gap-trace-pass","gap-trace-pass2"]
+[AC5] baseline = ["gap-trace-pass","gap-trace-pass2"]
+```
+`assert.deepEqual(kept, baseline)`（逐元素、保序）；基线由测试内**真实** `TASK_FILTERS` 谓词独立算出（非先排序再比、非只比长度）。
+
+### AC6 — 两种取假注入各红一次
+
+① 归因写死成恒 `touchesDisjoint`（`filter: touchesDisjoint.name`）⇒ `INJECTION1_EXIT=1`：
+```
+✖ AC4 — 其它谓词各有其名且 blocker === null；且不得被误归成 touchesDisjoint
+  AssertionError [ERR_ASSERTION]: gap-trace-dep 只被 depsSatisfied 挡住（且自报其名）
+    actual: [ 'touchesDisjoint' ]
+    expected: [ 'depsSatisfied' ]
+```
+② 恒空 `filter_trace`（`if (false && trace)`）⇒ `INJECTION2_EXIT=1`，5 条红：
+```
+✖ AC2 … AssertionError: CAND **只**被 touchesDisjoint 挡住（一条）     actual: [], expected: [ 'touchesDisjoint' ]
+✖ AC3 … AssertionError: 两条 touchesDisjoint 条目都在载体里          actual: undefined, expected: true
+✖ AC4 … AssertionError: gap-trace-dep 只被 depsSatisfied 挡住…       actual: [], expected: [ 'depsSatisfied' ]
+✖ AC7 … AssertionError: 前置：轮 1 确实有归因条目                    actual: false, expected: true
+✖ AC8 … （同上：条目缺失）
+ℹ fail 5
+```
+两次注入均已 `git checkout -- plugin/scripts/driver-filters.ts` 复原 ⇒ `git status --short` **空**、`git diff --stat` **空**：落地 diff 与该测试的最终内容一致。
+
+### AC7 — 三态可分（从载体回读）
+
+```
+[AC7] pool-empty row filter_trace = []; no-step row filter_trace = null
+```
+- pool-empty 轮（`applyTaskFilters([])` 仍跑该步）⇒ `filter_trace === []`（`deepEqual []` + `notStrictEqual null`）。
+- 没跑该步的轮（未传 trace，等价轮首复位后从未赋值）⇒ `filter_trace === null`（`strictEqual null`）。
+- 先往载体写了一条**非空**记录，再写 pool-empty 轮 ⇒ 证明**不带上一轮残留条目**。
+
+### AC8 — waitedMinutes 取真值
+
+```
+[AC8] carrier events: CAND to=ready at 2026-10-16T15:25:55.329Z, SELF at 2026-10-16T14:55:55.329Z
+[AC8] waitedMinutes: CAND=45, SELF=75, Δ=30; DEP(no ready record)=null
+```
+两条 `to:"ready"` 事件行相差恰好 30 分钟 ⇒ 两值 Δ=30（杀死硬编码常量；且断言 `Δ !== 0`）。无 ready 记录的 `gap-trace-dep` ⇒ `strictEqual(waitedMinutes, null)` 且显式 `!== 0`。
+
+### AC9 — 未改变派发决策
+
+`bash scripts/test.sh plugin/test/driver-filters.test.mjs` ⇒ `tests 90 / pass 90 / fail 0`，**exit 0**。
+
+`applyTaskFilters` 返回表达式 diff（**空**——该行无 `-`/`+` 命中）：
+```
+$ git diff develop -- plugin/scripts/driver-filters.ts | grep -E '^[-+].*candidateIds\.filter'
+（无输出）
+```
+`plugin/scripts/promotion-driver.ts`：`git diff develop --stat` **空**（整文件未动）。
+`plugin/scripts/worker-driver.ts` 的既有调用位点：判定输入逐字未变，归因只走新增第 4 参：
+```diff
+-        const afterTaskFilters = applyTaskFilters(shuffled, makeFilterContext(rootDir, { inFlight: exclusion.inFlight, retryExhausted: exclusion.retryExhausted }));
++        const filterSink: FilterTraceEntry[] = [];
++        const afterTaskFilters = applyTaskFilters(shuffled, makeFilterContext(rootDir, { inFlight: exclusion.inFlight, retryExhausted: exclusion.retryExhausted }), undefined, (e) => filterSink.push(e));
+```
+
+### 落地门禁读数
+
+- 反漂移 Touches 硬门（fan-in 同款）：`ANTI-DRIFT OK: task gap-worker-round-filter-trace-attribution — 3 actual file(s), all within declared Touches (4 glob(s))`，exit 0。
+- scoped 门（fan-in 同款）：`bash scripts/test.sh --for-task gap-worker-round-filter-trace-attribution --allow-thin` ⇒ `tests 243 / pass 243 / fail 0`，**exit 0**，31.9s；选中列表含 `+ plugin/test/touches-relax-filter-trace.test.mjs`，本测试 6 条在其中全绿。
+- scoped-gate 缓存已写（`--develop-sha` = 当时的 develop tip，且该 sha 是 HEAD 的祖先）。
+- 工作树 `git status --short` 空。
 
 ## Definition of Done
 
