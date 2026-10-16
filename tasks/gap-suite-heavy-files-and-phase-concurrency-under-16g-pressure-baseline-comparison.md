@@ -369,14 +369,6 @@ env QUAY_SUITE_MEMORY_MAX=16G \
 - packages/quay/test/gap-dashboard-goal-card-ac-denominator-includes-superseded-retired.test.mjs
 - plugin/test/workflow-runner-self-hosted-check.test.mjs
 
-## Blocker
-
-**2026-10-15T21:08:47.586Z — worker 未落地（exited-not-landed）**
-
-- 未落地原因：AC 未全勾（checked 2/5，剩余未勾 3）——续做只需验证并勾选 AC
-- run_id：wk-prod-anchor
-- session_id：8f6ea38f-3f92-4864-83ca-cce156885573
-
 ## Needs-Human
 
 **执行 2026-10-15T21:15:46.271Z — 连续修满重试上限仍不合格（标 needs-human）**
