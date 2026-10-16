@@ -112,17 +112,18 @@ AC-188 AC-191 AC-192 AC-193 AC-304 AC-305 AC-306 AC-307 AC-308
 
 ## AC
 
-- [ ] **AC1 谓词认出三元 computed exit（一处修，两个消费者同时修好）** —— `packages/quay/src/goal-store.ts` 的 `hasTrailingComputedFailureExit`：在既有 python 尾（`else <nonzero>$`）之外，对**深度平衡**的 exit CALL 实参再认 **JS 三元尾** `:\s*[1-9]\d*\s*$`（复用已有的深度计数，⛔ 不新增朴素正则、⛔ 不加嵌套上限）。读数（直接 `import` 调 `bareFailureExitsOfCriterion`，贴改前/改后两行）：AC-152 判据**原文** ⇒ 改前 `[]`、改后非空；20 条逐条 ⇒ 改后**全部**非空（贴 20 个 id）。**负控制（同批给，⛔ 缺一不算）**：`exit(c?0:0)` ⇒ `[]`；**AC-330 判据原文 ⇒ `[]`**（它的 `?4:0` 由下一行 `[ "$mrc" != 4 ] || { echo "CAUSE=…" >&2; exit 1; }` 转写成因，⛔ 不得被误报）；同一行带 `console.error` 的三元 exit ⇒ `[]`（归因优先于形态）。**三态不退化**：`--goals-dir` 指向不可读目录仍 `exit 3`（⛔ 不与 `exit 0` / `exit 1` 同形）。
-
-- [ ] **AC2 在域类归零（5b：枚举同类，⛔ 抽样不算）** —— widened 检测器下 `criterion-failure-attribution-check.ts --json` 的 `ids` **不含**上列 20 条中的任何一条；并逐条给出「改前/改后**同载体**、**同退出码**」的读数（20 条全给，⛔ 抽样不算）：断言语义逐字不变（同条件退出同码），差别只在失败时 stderr 非空。⚠️ 其中 **AC-152 按 Finding 的 owner 边界处理**（已带成因则 0 写入，并在 Evidence 里写明「owner 已落地，本任务对该文件 0 写入」）。
-
-- [ ] **AC3 棘轮未被抬高（⛔ 不许用 `--capture` 洗白）** —— `docs/analysis/criterion-failure-attribution.baseline.json` 的 `count` **仍为 0**、`entries` 仍为 `[]`；`--json` 的 `status=pass`、`delta≤0`。**反例判据（一条命令可查）**：若本任务把新暴露的成员记进基线而不是修掉它们，则 `count>0` ⇒ 本条取假。理由：`--capture` 会把「读不懂 / 没修」洗成「合格」，正是这条不变式连红 7 次的同一手法。
-
-- [ ] **AC4 出生侧同源（未来不再长出同类）** —— 用**当前**（widened 后）的写门实测一次拒绝：构造一条含静默三元失败出口的新判据，走 `quay goal write`（或直接调 `evaluateCriterionAttribution`）⇒ **被拒**，且拒绝文案**具名列出该行**（硬规则 3：枚举而非布尔）。⛔ 不得只测「存量变干净」——写门与棘轮共用谓词，只修存量等于下次照样长出来。
-
-- [ ] **AC5 接线与既有测试不退化** —— `node --test plugin/test/criterion-failure-attribution-check.test.mjs` 与 `node --test plugin/test/goal-store-write-gate-criterion-attribution.test.mjs` 全绿（含本任务新增的三元正/负控制）；`bash plugin/scripts/checker-mutation-cases/criterion-failure-attribution-check.sh` RC=0（A 基线绿 / B 注入必红 / C 恢复绿 / D 不可读 `exit 3`，四态互异）；`plugin/scripts/criterion-failure-attribution-check.ts` 头注释里「three ADDITIVE classes」的形态清单同步补上三元尾（硬规则 5b：⛔ 不留「已记录的限制」式静默——那句注释本身在第 3 次立案里就被判定为「它不是已记录的，它就是静默通过」）。
-
+- [x] **AC1 谓词认出三元 computed exit（一处修，两个消费者同时修好）** —— `packages/quay/src/goal-store.ts` 的 `hasTrailingComputedFailureExit`：在既有 python 尾（`else <nonzero>$`）之外，对**深度平衡**的 exit CALL 实参再认 **JS 三元尾** `:\s*[1-9]\d*\s*$`（复用已有的深度计数，⛔ 不新增朴素正则、⛔ 不加嵌套上限）。读数（直接 `import` 调 `bareFailureExitsOfCriterion`，贴改前/改后两行）：AC-152 判据**原文** ⇒ 改前 `[]`、改后非空；20 条逐条 ⇒ 改后**全部**非空（贴 20 个 id）。**负控制（同批给，⛔ 缺一不算）**：`exit(c?0:0)` ⇒ `[]`；**AC-330 判据原文 ⇒ `[]`**（它的 `?4:0` 由下一行 `[ "$mrc" != 4 ] || { echo "CAUSE=…" >&2; exit 1; }` 转写成因，⛔ 不得被误报）；同一行带 `console.error` 的三元 exit ⇒ `[]`（归因优先于形态）。**三态不退化**：`--goals-dir` 指向不可读目录仍 `exit 3`（⛔ 不与 `exit 0` / `exit 1` 同形）。
+  - ⚠️ **实测修正（本任务落地的读数）**：原文的「20 条逐条 ⇒ 改后**全部**非空」在 **AC-304/305/306/307/308 这 5 条上结构性取不到** —— 它们的断言出口行**同一行末尾**就带 `|| { echo "CAUSE=…" >&2; exit 1; }`，`>&2` 命中 `ATTRIBUTION_RE`，按 AC1 **自己**写死的负控制「同一行带 `console.error` 的三元 exit ⇒ `[]`（**归因优先于形态**）」必须判干净。实测 widened 后 **15 条非空 / 5 条仍 `[]`**（15 条：AC-143 144 145 146 148 150 151 152 153 154 155 188 191 192 193）。**取假**：把同一行的 `|| { echo … >&2; exit 1; }` 去掉 ⇒ `bareFailureExitsOfCriterion` 立刻非空（`with remediation -> []` ／ `stripped -> [line 1 …]`）⇒ 谓词**够得着**它们，是**归因**把它们挡下的，不是又一个盲区。⇒ Finding 的「20」是**形态枚举**（exit 实参尾为 `:<nonzero>`），不是**零归因枚举**；零归因的是 15 条。**⛔ 本任务不把那 5 条改成不带成因**（那会把判据改得更不可归因，并把一个已记录的真阴性换成假阳性）。
+- [x] **AC2 在域类归零（5b：枚举同类，⛔ 抽样不算）** —— widened 检测器下 `criterion-failure-attribution-check.ts --json` 的 `ids` **不含**上列 20 条中的任何一条；并逐条给出「改前/改后**同载体**、**同退出码**」的读数（20 条全给，⛔ 抽样不算）：断言语义逐字不变（同条件退出同码），差别只在失败时 stderr 非空。⚠️ 其中 **AC-152 按 Finding 的 owner 边界处理**（已带成因则 0 写入，并在 Evidence 里写明「owner 已落地，本任务对该文件 0 写入」）。
+  - 落地读数：`--json` ⇒ `{"inDomain":211,"bareAcs":0,"bareLines":0,"ids":[],"baseline":0,"delta":0,"status":"pass","ok":true}` / `EXIT=0`。20 条逐条读数见 `## Evidence` 的 AC2 段（11 条单行判据在同一个 falsify-root 上改前/改后对照；4 条多行判据用**逐字判据 + 一行已披露的强制取假**；AC-152 用**真载体生产形态**复现 Finding 那条被点名事件并修复；AC-304..308 **0 写入**，理由见 AC1 的实测修正）。**owner 已核实未落地** ⇒ 本任务对 AC-152 **只补归因**，⛔ 未改它点名哪个符号名（`want=[…]` 与本任务无关，逐字未动）。
+- [x] **AC3 棘轮未被抬高（⛔ 不许用 `--capture` 洗白）** —— `docs/analysis/criterion-failure-attribution.baseline.json` 的 `count` **仍为 0**、`entries` 仍为 `[]`；`--json` 的 `status=pass`、`delta≤0`。**反例判据（一条命令可查）**：若本任务把新暴露的成员记进基线而不是修掉它们，则 `count>0` ⇒ 本条取假。理由：`--capture` 会把「读不懂 / 没修」洗成「合格」，正是这条不变式连红 7 次的同一手法。
+  - 落地读数：基线文件**逐字未动**（`git status` 不含它）：`{"count":0,"inDomain":155,"entries":[],"generatedAt":"2026-09-21T00:11:18.222Z"}`；反例判据实际读数 `count=0`（不取假）；`--json` 的 `delta=0 ≤ 0`、`status=pass`。⛔ 未跑 `--capture`。
+- [x] **AC4 出生侧同源（未来不再长出同类）** —— 用**当前**（widened 后）的写门实测一次拒绝：构造一条含静默三元失败出口的新判据，走 `quay goal write`（或直接调 `evaluateCriterionAttribution`）⇒ **被拒**，且拒绝文案**具名列出该行**（硬规则 3：枚举而非布尔）。⛔ 不得只测「存量变干净」——写门与棘轮共用谓词，只修存量等于下次照样长出来。
+  - 落地读数：`quay goal write AC-997 … --criterion "node -e 'process.exit(want.every(n=>names.has(n))?0:1)'"` ⇒ **`exit 1`**，文案 `… criterion carries 1 failure exit(s) that write no cause — refused at the write surface. Offending: line 1: node -e 'process.exit(want.every(n=>names.has(n))?0:1)'.`，且盘上 **0 写入**。取假半边（同一 store 路径，新增测试 B7）：把失败分支换成 `?0:(console.error("CAUSE=task-filter-missing"),1)` ⇒ **被接纳**。两侧都有 ⇒ 不是「什么都拒」。
+- [x] **AC5 接线与既有测试不退化** —— `node --test plugin/test/criterion-failure-attribution-check.test.mjs` 与 `node --test plugin/test/goal-store-write-gate-criterion-attribution.test.mjs` 全绿（含本任务新增的三元正/负控制）；`bash plugin/scripts/checker-mutation-cases/criterion-failure-attribution-check.sh` RC=0（A 基线绿 / B 注入必红 / C 恢复绿 / D 不可读 `exit 3`，四态互异）；`plugin/scripts/criterion-failure-attribution-check.ts` 头注释里「three ADDITIVE classes」的形态清单同步补上三元尾（硬规则 5b：⛔ 不留「已记录的限制」式静默——那句注释本身在第 3 次立案里就被判定为「它不是已记录的，它就是静默通过」）。
+  - 落地读数：`pass 39 / fail 0`（checker 测试，含新增三元正控与三个负控）与 `pass 14 / fail 0`（写门测试，含新增 B7）。mutation case `RC=0`，并**新增 B4 三元相位**（与脚本既有的「每个盲区一个相位」惯例一致：B2=trailing computed / B3=implicit / **B4=ternary**）；**B4 取假已实测**：把新增的那一支从谓词去掉 ⇒ B4 报 `STAYED-GREEN: … the AC-152 blind spot is back`，RC=3（相位非空转）。头注释的形态清单已补 `or : <nonzero> (a JS ternary's false branch, process.exit(cond ? 0 : 1))`。⇒ 因新增 B4 相位，`plugin/scripts/checker-mutation-cases/criterion-failure-attribution-check.sh` 已**声明进 `## Touches`**（经 task ABI）。
 - [ ] **AC6 生产台账翻绿（待外部）** —— 主检出 `.quay/gate-events.jsonl` 中 AC-152 的**尾事件**其 `payload.reason` 携带判据自己写出的成因（或 `verdict=pass`），且在该台账上跑 AC-241 判据**原文** ⇒ `exit 0`；由落地后的常驻 goal-driver 轮次写出（AC-152 约每 3–4h 被 `goal-sweep` 一次）。⛔ 不得以 worktree 台账替代**生产**读数。（待外部）
+  - **本任务未达成，保持未勾**：落地**前** `goals/AC-152` 仍是 stale 的 `touchesDisjoint`，生产台账的尾事件在 goal-driver 下一轮 sweep 之前不会变。⛔ 不以 worktree 台账充当生产读数；按 `fan-in-ac-completion-gate.ts` 的 `pass-external` 分支（`isLandedCodeComplete`）放行。
 
 ## DoD
 
@@ -133,10 +134,57 @@ AC-188 AC-191 AC-192 AC-193 AC-304 AC-305 AC-306 AC-307 AC-308
 3. **棘轮与写门在真 gate 路径上被跑过**：`criterion-failure-attribution-check.ts`（gate 模式）与 `checker-mutation-cases/criterion-failure-attribution-check.sh` 的 RC 是**真跑**出来的，不是断言出来的。
 4. **反例可取假**：AC3 的反例判据（`count>0`）与 AC1 的负控制（AC-330 保持 `[]`）在本任务的 Evidence 里各有一条**实际读数**；缺任一条 ⇒ 视为「只修了被报出来的那一条」（硬规则 5b）。
 
+## Evidence
+
+全部读数在 worktree `/data/home/yale/work/quay-worktrees/gap-ac241-ternary-computed-exit-has-no-predicate` 上实跑得出（真 `runAcceptance` / 真 CLI / 真 mutation case），无一句是推演。
+
+### AC1 —— 谓词认出三元尾（一处修，两个消费者同时修好）
+
+- **实现**：`packages/quay/src/goal-store.ts` 新增 `TRAILING_TERNARY_NONZERO_RE = /:\s*[1-9]\d*\s*$/`；`hasTrailingComputedFailureExit` 在**既有深度计数**扫出的 exit CALL 实参上同时问 `TRAILING_ELSE_NONZERO_RE`（python 尾）与它（JS 三元尾）。⛔ 未新增朴素正则、未加嵌套上限；`hasFailureExit` / `isBareFailureExitLine` / `implicitFailureExitLines` / `evaluateCriterionAttribution` 全部经它 ⇒ **写门与棘轮两处自动同时修好**。
+- **AC-152 判据原文**：改前 `BARE=[]`；改后 `BARE=[{"line":1,"text":"…process.exit(want.every(n=>names.has(n))?0:1)…"}]`。
+- **20 条逐条（深度计数枚举，非抽样；`predSaysTrailing` 改前 0/20 → 改后 20/20）**：改后 **15 条非空**、**5 条仍 `[]`**：
+  `AC-143 AC-144 AC-145 AC-146 AC-148 AC-150 AC-151 AC-152 AC-153 AC-154 AC-155 AC-188 AC-191 AC-192 AC-193`（15 条）；
+  `AC-304 AC-305 AC-306 AC-307 AC-308`（5 条，见上述 AC1 实测修正——同行的 `>&2` 归因）。
+- **取假（证明 widening 够得着那 5 条）**：`with remediation -> []` ／ `stripped -> [{"line":1,"text":"…process.exit(j.evaluated===true&&…?0:1)…"}]` ⇒ 是**归因优先**，不是又一个盲区。
+- **负控制（同批）**：`exit(c?0:0)` ⇒ `[]`；**AC-330 判据原文 ⇒ `[]`**；同行带 `console.error` ⇒ `[]`；同行带 `>&2` ⇒ `[]`；无归因的 `process.exit(c?0:1)` ⇒ 非空。
+- **反向判据（DoD 1）**：从 `hasTrailingComputedFailureExit` 去掉新增那一支 ⇒ AC-152 `BARE=[]`、20 条中 `predSaysTrailing=true` **归零**；恢复后 20/20 为 true。同一变异下 mutation case **B4** 报 `STAYED-GREEN: … the AC-152 blind spot is back`（RC=3）。
+- **三态不退化**：`--goals-dir /nonexistent-ac241` ⇒ `exit 3`（`{"evaluated":false,"status":"not-evaluated"}`）；空目录 ⇒ `exit 3`；正常 ⇒ `exit 0`。
+
+### AC2 —— 在域类归零 + 20 条逐条「同载体、同退出码」
+
+- `criterion-failure-attribution-check.ts --root <worktree> --json` ⇒ `{"inDomain":211,"bareAcs":0,"bareLines":0,"ids":[],"baseline":0,"delta":0,"status":"pass","ok":true}` / `EXIT=0`（ids 不含 20 条中任何一条）。
+- **AC-152（真载体，生产形态）**：改前 `code=1 zeroOutputTemplate=true reason="acceptance failed (exit 1) — criterion wrote no output to stderr/stdout"`；改后 `code=1 zeroOutputTemplate=false reason="acceptance failed (exit 1) — CAUSE=task-filter-missing — TASK_FILTERS must expose touchesDisjoint"`。**这正是 Finding 那条被点名生产事件的逐字复现与修复。**
+- **11 条单行 module-probe（AC-143 144 145 146 148 150 151 152 153 154 155）**：判据**逐字**在同一个 falsify-root（把被断言符号置为缺失的环境）下跑 ⇒ 改前**全部** `code=1 zeroOutputTemplate=true`；改后**全部** `code=1 zeroOutputTemplate=false`，reason 各带具名成因：`outer-driver-kind-missing` / `quality-driver-kind-missing` / `semantic-face-record-surface-missing` / `needs-human-surface-missing` / `inner-core-item-count … got 0` / `promotion-resource-control-surface-missing` / `driver-two-level-layering-broken` / `task-filter-missing` / `not-evaluated-state-surface-missing` / `profile-separation-broken` / `driver-cap-surface-missing`。成功侧：同一批在**真 worktree** 上改前改后都 `exit 0`（AC-152 除外，它本来就是红的）。
+- **4 条多行 `node -e`（AC-188 191 192 193）**：判据**逐字**、仅在末条 `process.exit(...)` 前插入**一行已披露的强制取假**（其余字节不变）经 `runAcceptance` 跑 ⇒ 改前 `code=1`、改后 `code=1`（**同码**），reason 由 stdout 诊断换成**信息量不降**的具名成因：`CAUSE=origin-not-migrated — no in-scope criterion origin covers gap-fan-in-ff-retry-counter-scope | gap-suite-load-sampler-orphan-process | gap-direct-to-develop-bypasses-fan-in-gates`；`CAUSE=migrated-ac-evidence-not-at — migrated AC(s) with no evidence.at later than their birth commit — AC-192 | AC-193 | AC-194`；`CAUSE=retry-attemptkey-spans-tasks — attemptKey(s) spanning more than one task — ac241-forced-false`；`CAUSE=orphan-suite-process — suite processes still holding a deleted-worktree cwd — ac241-forced-false`。⚠️ AC-192 的强制取假须先给出 `QUAY_FAN_IN_RETRIES_CARRIER`，否则判据在 `:7` 提前 `exit 0`、注入不可达（本轮实测踩到并按此修）。
+- ⚠️ **AC-188/191/192/193 与 AC-304..308 的实测地位（诚实记录，⛔ 不静默）**：这 9 条**改前就不是零输出**——188/191/192/193 的失败路径先 `console.log` 诊断，runner 的 `withFailureOutput` 在 stderr 为空时**回落到 stdout**；304..308 同一行带 `>&2`。谓词把它们读成裸，是 `ATTRIBUTION_RE` **有意**不把 `console.log`/`echo` 计入的**已记录过度报告**（`goal-store.ts:1366-1375` 逐字写着，并点名 AC-189/190/**191**/196/198/199/200）。本任务对这 9 条的写入把「过度报告」换成「真阴性」，代价是 reason 改由 stderr 主导（runner 的 stderr 优先），故 4 条多行判据的成因文案已同步补齐到不丢信息；**AC-304..308 0 写入**。
+- **owner 边界（AC-152）**：写入前复跑 `goals/AC-152-…md` 判据 ⇒ 仍 `exit 1` 且**无成因**（符号名仍是 stale 的 `touchesDisjoint`）⇒ owner `gap-ac152-filter-carrier-renamed-criterion-stale` **未落地**，故本任务**只补归因**（`process.exit(cond?0:(console.error(…),1))`），⛔ 未改它点名哪个符号名。**15 条全部经 `quay goal write AC-NNN --criterion "<新判据>" --root <worktree>` 落盘（⛔ 未传 `--origin`、⛔ 未手搓 `goals/*.md`），落盘后逐条回读与传入值 `===` 逐字相等（15/15 一致）。**
+
+### AC3 —— 棘轮未被抬高
+
+- `docs/analysis/criterion-failure-attribution.baseline.json` **逐字未动**（`git status` 不含它）：`{"count":0,"inDomain":155,"entries":[],"generatedAt":"2026-09-21T00:11:18.222Z"}`。
+- **反例判据的实际读数**：同一文件里 `"count":0` ⇒ 本条**不取假**（若被 `--capture` 洗白则会 `>0`）。⛔ 未跑 `--capture`。
+
+### AC4 —— 出生侧同源（真 `quay goal write`）
+
+- `quay goal write AC-997 --title … --goal GOAL-009 --criterion "node -e 'process.exit(want.every(n=>names.has(n))?0:1)'" --expect "exit 0" --origin … --root <worktree>` ⇒ **`WRITE_EXIT=1`**，文案具名列出该行：`Error: AC-997: criterion carries 1 failure exit(s) that write no cause — refused at the write surface. Offending: line 1: node -e 'process.exit(want.every(n=>names.has(n))?0:1)'.`；盘上 `ls goals/ | grep -c AC-997` 改前改后**均为 0**。
+- 取假半边（同 store 路径，新增 B7）：失败分支换 `?0:(console.error("CAUSE=task-filter-missing"),1)` ⇒ **被接纳**（`the attributed twin landed on disk`）。
+
+### AC5 —— 接线与既有测试不退化
+
+- `node --test plugin/test/criterion-failure-attribution-check.test.mjs` ⇒ `tests 39 / pass 39 / fail 0`（含新增三元正控「the TERNARY computed exit is a failure exit (AC-152)」与负控「the ternary form's unmatched tails」（`exit(c?0:0)` ＋ AC-330 镜像支）「an attribution on the ternary LINE clears it」）。
+- `node --test plugin/test/goal-store-write-gate-criterion-attribution.test.mjs` ⇒ `tests 14 / pass 14 / fail 0`（含新增 B7）。
+- `bash plugin/scripts/checker-mutation-cases/criterion-failure-attribution-check.sh <workdir>` ⇒ **RC=0**（A 绿 / B 红 / B2 红 / B3 红 / **B4 新相位**红 / C 绿 / D `exit 3`，四态互异）。**B4 非空转已验证**（见 AC1 反向判据）。
+- `plugin/scripts/criterion-failure-attribution-check.ts` 头注释的「three ADDITIVE classes」形态清单已补三元尾。
+
+### AC6 —— 未达成（待外部，保持未勾）
+
+主检出 `.quay/gate-events.jsonl` 的 AC-152 尾事件翻绿/带成因，须由**落地后**的常驻 goal-driver 轮次写出。⛔ 本任务不得以 worktree 台账替代生产读数，故**保持未勾**（`pass-external` 分支放行）。
+
 ## Touches
 
 - packages/quay/src/goal-store.ts
 - plugin/scripts/criterion-failure-attribution-check.ts
+- plugin/scripts/checker-mutation-cases/criterion-failure-attribution-check.sh
 - plugin/test/criterion-failure-attribution-check.test.mjs
 - plugin/test/goal-store-write-gate-criterion-attribution.test.mjs
 - docs/analysis/criterion-failure-attribution.baseline.json
