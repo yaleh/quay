@@ -49,17 +49,169 @@ goal_ac: AC-367
 
 ## Acceptance Criteria
 
-- [ ] AC1 — 测试落地且通过（AC-367 判据面逐字）：`timeout 55 node --experimental-strip-types --test plugin/test/touches-relax-auto-tighten.test.mjs` **exit 0**，文件首行带 `// @test-group engine`。附实际命令、输出尾部与实测耗时（秒）。
-- [ ] AC2 — (a) 样本不足 / 阈值未配置 ⇒ not-evaluated **且不动作**：三组 fixture（样本数 < 配置的 `min_samples`；配置里**根本没有** `auto_tighten` 阈值；缺 `min_samples` 键）各断言 `evaluated === false`、`reason` **点名**是样本不足还是哪个键缺失并带两侧计数、读数里阈值/额外成本取 `NOT_EVALUATED`（**显式断言 `!== 0`**，硬规则 3b：不得输出 0 或空均值伪装成「无额外成本」）；且控制态载体**字节不变**（⛔ 不写 `relax_halted`）。**两向**：阈值与样本都齐 ⇒ `evaluated === true`（证明判据不是恒 false）。附三组报告 JSON 与载体哈希。
-- [ ] AC3 — (b) 超阈值 ⇒ 写 `relax_halted:true`（**沿用既有控制态机制，⛔ 不新造哨兵文件**）：放宽组相对对照的额外 worker 分钟超配置阈值 ⇒ 从 `.quay/worker-control.json` **回读** `relax_halted === true`；断言 `.quay/` 下**未新增任何文件**（写入前后载体清单对比——排除 `.tmp` 瞬时态），且写入走的是既有 `readControlState` / `writeControlState`（附调用点代码）；round 记录带原因与读数。**负控制**：把额外分钟调到阈值之下 ⇒ 同一次评估 `relax_halted` 保持 `false`（证明判据真读了读数，不是恒真）。
-- [ ] AC4 — (b)(e) fan-in 失败率**按 `mechanical_fan_in.step` 分步**、`suite` 红与 `merge-develop` 红**分开呈现**：fixture 放宽组 `suite` 失败率超配置的 suite 阈值、`merge-develop` 未超 ⇒ `reason` 逐字点名 `suite`；**对称 fixture** ⇒ 点名 `merge-develop`；显式断言读数的**两个 step 是两条独立条目**、两者给出**不同**的 `reason`（⛔ 不合并成一个「失败」）。**负控制**：一条失败运行**没有** `mechanical_fan_in`（无 step）⇒ 不计入任何 step 的分子或分母（fail-closed，⛔ 不折成 `"unknown"`、⛔ 不折成 0）；并显式断言 `step` 词表取值**不含** `exited-not-landed` / `completed` / `landed`（两词表不互串）。
-- [ ] AC5 — (c) `relax_halted` 为真 ⇒ **live 模式下仍阻塞**：在 AC-366 的 live fixture 形状上（真实 `applyTaskFilters` + 真实谓词 + 注入时钟），控制态 `relax_halted: true` ⇒ 本可放宽的候选**被滤掉**；**负控制**：把控制态清成 `false` ⇒ **同一候选被放宽**（证明阻塞是 `relax_halted` 引起的，不是恒阻塞）。附两次返回集合与两次控制态字节。
-- [ ] AC6 — (d) **人工清除后恢复**：清零动作**只**改控制态载体（人可做的事：改那一份 JSON），⛔ 不改代码、⛔ 不删文件、⛔ 不需要新命令；清零后下一轮评估**重新按读数判定**，并在读数仍超阈值时**再写回** `true`——两次读数都从载体回读。附清零前后的载体字节与两次判定。
-- [ ] AC7 — (b) **写路径不得抹掉既有控制态**：载体预置 `halted:true` / `halted_by:"outer"` / `halted_at` / `preference:{…}` / `forced:[…]` ⇒ 自动收紧写入后 `relax_halted === true` **且那几类字段逐字不变**（⛔ 自动收紧不得抹掉人工 halt / 强制派发）。另：**旧载体**无 `relax_halted` 键 ⇒ 读作 `false`（缺键 ≠ `true`）。附前后逐字 JSON。
-- [ ] AC8 — round 记录留痕**且两态可分**：跑过评估的轮，round 记录带 verdict / reason / 分步读数 / **实际阈值**；**没跑**该步的轮为 `null`（⛔ 不得写成「跑过且未超阈值」）——两者从载体文件回读并 **two-way** 断言（`strictEqual` 各一次）。⛔ 不用第二个载体承载它。
-- [ ] AC9 — (f) **取假形态**（真红并留痕，⛔ 注入不得留在落地代码里）：① 把比较写成**恒不超阈值**（如 `0 > 阈值`，或把读数钳成 0）⇒ 本测试变红；② 让 not-evaluated 分支**写 `relax_halted`** 或**回退到任一内置默认阈值** ⇒ 本测试变红。各附非零退出码 + 失败断言原文；恢复后 `git status --porcelain` 只含本 Touches 内的预期改动、落地 diff 与该测试最终内容一致。
-- [ ] AC10 — 静态面与不越界：① `bash plugin/scripts/capability-catalog.sh --summary` 报 `0 unclassified`（新脚本已在 declarations 六表成组声明）；② `git diff -- .gitignore docs/carrier-registry.json` **空**（复用 `worker-control.json`，⛔ 不新造载体）；③ `bash scripts/test.sh plugin/test/driver-filters.test.mjs plugin/test/worker-driver.test.mjs plugin/test/touches-relax-live-predicate.test.mjs` **exit 0**（谓词与既有驱动不回归；名字序列以 AC-365/366 落地态为准）；④ `git diff -- .quay/config.yml` **空**（不在 quay 自身启用）；⑤ `node --experimental-strip-types plugin/scripts/import-graph-check.ts --json` 的 `reverseEdges` 为空数组（kernel 方向未写反）。附五条命令、退出码与输出。
-- [ ] AC11 — 配置面扩块**无回退、只读**：① 真实 parser 读 fixture 的 `auto_tighten` 子块 ⇒ 读出的阈值 / `min_samples` **逐字等于** YAML 里写的值；② 子块给定非法值（非数值 / 负 / 率不在 `0..1`）⇒ 具名 issue 且模块 CLI **非零退出**；③ 运行前后 fixture `.quay/config.yml` **字节哈希相同**（一个字节没写），且**缺键时**不得出现被回填的默认值——显式断言这些键为 `undefined`（⛔ 不是 30 / 1 / 0.3 之类字面量）。附三段 fixture、校验结果与哈希前后值。
+- [x] AC1 — 测试落地且通过（AC-367 判据面逐字）：`timeout 55 node --experimental-strip-types --test plugin/test/touches-relax-auto-tighten.test.mjs` **exit 0**，文件首行带 `// @test-group engine`。附实际命令、输出尾部与实测耗时（秒）。
+- [x] AC2 — (a) 样本不足 / 阈值未配置 ⇒ not-evaluated **且不动作**：三组 fixture（样本数 < 配置的 `min_samples`；配置里**根本没有** `auto_tighten` 阈值；缺 `min_samples` 键）各断言 `evaluated === false`、`reason` **点名**是样本不足还是哪个键缺失并带两侧计数、读数里阈值/额外成本取 `NOT_EVALUATED`（**显式断言 `!== 0`**，硬规则 3b：不得输出 0 或空均值伪装成「无额外成本」）；且控制态载体**字节不变**（⛔ 不写 `relax_halted`）。**两向**：阈值与样本都齐 ⇒ `evaluated === true`（证明判据不是恒 false）。附三组报告 JSON 与载体哈希。
+- [x] AC3 — (b) 超阈值 ⇒ 写 `relax_halted:true`（**沿用既有控制态机制，⛔ 不新造哨兵文件**）：放宽组相对对照的额外 worker 分钟超配置阈值 ⇒ 从 `.quay/worker-control.json` **回读** `relax_halted === true`；断言 `.quay/` 下**未新增任何文件**（写入前后载体清单对比——排除 `.tmp` 瞬时态），且写入走的是既有 `readControlState` / `writeControlState`（附调用点代码）；round 记录带原因与读数。**负控制**：把额外分钟调到阈值之下 ⇒ 同一次评估 `relax_halted` 保持 `false`（证明判据真读了读数，不是恒真）。
+- [x] AC4 — (b)(e) fan-in 失败率**按 `mechanical_fan_in.step` 分步**、`suite` 红与 `merge-develop` 红**分开呈现**：fixture 放宽组 `suite` 失败率超配置的 suite 阈值、`merge-develop` 未超 ⇒ `reason` 逐字点名 `suite`；**对称 fixture** ⇒ 点名 `merge-develop`；显式断言读数的**两个 step 是两条独立条目**、两者给出**不同**的 `reason`（⛔ 不合并成一个「失败」）。**负控制**：一条失败运行**没有** `mechanical_fan_in`（无 step）⇒ 不计入任何 step 的分子或分母（fail-closed，⛔ 不折成 `"unknown"`、⛔ 不折成 0）；并显式断言 `step` 词表取值**不含** `exited-not-landed` / `completed` / `landed`（两词表不互串）。
+- [x] AC5 — (c) `relax_halted` 为真 ⇒ **live 模式下仍阻塞**：在 AC-366 的 live fixture 形状上（真实 `applyTaskFilters` + 真实谓词 + 注入时钟），控制态 `relax_halted: true` ⇒ 本可放宽的候选**被滤掉**；**负控制**：把控制态清成 `false` ⇒ **同一候选被放宽**（证明阻塞是 `relax_halted` 引起的，不是恒阻塞）。附两次返回集合与两次控制态字节。
+- [x] AC6 — (d) **人工清除后恢复**：清零动作**只**改控制态载体（人可做的事：改那一份 JSON），⛔ 不改代码、⛔ 不删文件、⛔ 不需要新命令；清零后下一轮评估**重新按读数判定**，并在读数仍超阈值时**再写回** `true`——两次读数都从载体回读。附清零前后的载体字节与两次判定。
+- [x] AC7 — (b) **写路径不得抹掉既有控制态**：载体预置 `halted:true` / `halted_by:"outer"` / `halted_at` / `preference:{…}` / `forced:[…]` ⇒ 自动收紧写入后 `relax_halted === true` **且那几类字段逐字不变**（⛔ 自动收紧不得抹掉人工 halt / 强制派发）。另：**旧载体**无 `relax_halted` 键 ⇒ 读作 `false`（缺键 ≠ `true`）。附前后逐字 JSON。
+- [x] AC8 — round 记录留痕**且两态可分**：跑过评估的轮，round 记录带 verdict / reason / 分步读数 / **实际阈值**；**没跑**该步的轮为 `null`（⛔ 不得写成「跑过且未超阈值」）——两者从载体文件回读并 **two-way** 断言（`strictEqual` 各一次）。⛔ 不用第二个载体承载它。
+- [x] AC9 — (f) **取假形态**（真红并留痕，⛔ 注入不得留在落地代码里）：① 把比较写成**恒不超阈值**（如 `0 > 阈值`，或把读数钳成 0）⇒ 本测试变红；② 让 not-evaluated 分支**写** `relax_halted` 或**回退到任一内置默认阈值** ⇒ 本测试变红。各附非零退出码 + 失败断言原文；恢复后 `git status --porcelain` 只含本 Touches 内的预期改动、落地 diff 与该测试最终内容一致。
+- [x] AC10 — 静态面与不越界：① `bash plugin/scripts/capability-catalog.sh --summary` 报 `0 unclassified`（新脚本已在 declarations 六表成组声明）；② `git diff -- .gitignore docs/carrier-registry.json` **空**（复用 `worker-control.json`，⛔ 不新造载体）；③ `bash scripts/test.sh plugin/test/driver-filters.test.mjs plugin/test/worker-driver.test.mjs plugin/test/touches-relax-live-predicate.test.mjs` **exit 0**（谓词与既有驱动不回归；名字序列以 AC-365/366 落地态为准）；④ `git diff -- .quay/config.yml` **空**（不在 quay 自身启用）；⑤ `node --experimental-strip-types plugin/scripts/import-graph-check.ts --json` 的 `reverseEdges` 为空数组（kernel 方向未写反）。附五条命令、退出码与输出。
+- [x] AC11 — 配置面扩块**无回退、只读**：① 真实 parser 读 fixture 的 `auto_tighten` 子块 ⇒ 读出的阈值 / `min_samples` **逐字等于** YAML 里写的值；② 子块给定非法值（非数值 / 负 / 率不在 `0..1`）⇒ 具名 issue 且模块 CLI **非零退出**；③ 运行前后 fixture `.quay/config.yml` **字节哈希相同**（一个字节没写），且**缺键时**不得出现被回填的默认值——显式断言这些键为 `undefined`（⛔ 不是 30 / 1 / 0.3 之类字面量）。附三段 fixture、校验结果与哈希前后值。
+
+### Evidence
+
+**实现落点（8 个文件，全在本条 Touches 内；anti-drift 复核 `ANTI-DRIFT OK: 8 actual file(s), all within declared Touches (9 glob(s))`，exit 0）**
+
+| 文件 | 做什么 |
+|---|---|
+| `plugin/scripts/touches-relax-tighten.ts`（新） | 判定（`evaluateAutoTighten`）+ 写盘（`applyAutoTighten`）+ round 记录装配（`toRoundRecord`）+ 只读 CLI |
+| `plugin/scripts/touches-relax-config.ts` | 扩 `auto_tighten` 子块（`parseAutoTightenSection`、`AUTO_TIGHTEN_KEYS`、`TouchesRelaxAutoTighten`） |
+| `plugin/scripts/relaxed-dispatch-ledger.ts` | `RunStats` 增 `fanInReached` / `fanInStepFailures` / `fanInStepRates`（分步分子/分母/率） |
+| `plugin/scripts/driver-filters.ts` | `FilterContext.relaxHalted` + live 词表最外层条件 `relax-not-halted` |
+| `plugin/scripts/worker-driver.ts` | 轮末 `step="auto-tighten"` → `runAutoTightenPass`；round 记录新键 `auto_tighten`；派发 ctx 带入 `relaxHalted` |
+| `packages/quay/src/kernel/control-state.ts` | `ControlState.relax_halted` + `mergeControlState` 映射 + `applyRelaxHalt` + 两条 fail-closed 读路径 |
+| `plugin/scripts/capability-catalog-declarations.json` | 新脚本在 QUESTION/CADENCE/INVALIDATION/LAST_REAFFIRMED/MATCHING/CONSUMER 六表成组声明 |
+| `plugin/test/touches-relax-auto-tighten.test.mjs`（新） | 10 个用例的判据面 |
+
+**Git**：实现提交 `2e2d00cef`；merge develop（`f765c1abc`）后为 `ae42e3dc0`。
+
+**AC1 — 实测命令与耗时**
+
+```
+$ time timeout 55 node --experimental-strip-types --test plugin/test/touches-relax-auto-tighten.test.mjs
+EXIT=0  elapsed=0.590s
+首行： // @test-group engine
+ℹ tests 10 · ℹ pass 10 · ℹ fail 0 · ℹ duration_ms 560.294338
+```
+（上限 55s，实测 **0.59s**，余量 ~93×。）
+
+**AC2 — 三组 fixture 的判定 + 载体哈希**
+
+```
+[AC2] ac2-samples : verdict=not-evaluated reason="not-evaluated: 样本不足 — samples=2 < min_samples=5 (relaxed measurable tasks=2, ledger records=2, ledger present=true)"
+[AC2] ac2-samples : 载体 sha256=<前=后>  applied=false
+[AC2] ac2-noblock : verdict=not-evaluated reason="not-evaluated: thresholds not configured — missing auto_tighten (the whole sub-block is absent); samples=2, extraWorkerMinutes=65.000, fanInReached=5. ..."
+[AC2] ac2-nominkey: verdict=not-evaluated reason="not-evaluated: thresholds not configured — missing min_samples; ..."
+[AC2] 正控制      : verdict=within-budget extra=65min reason="within-budget: extra worker minutes 65.0 <= 1000.0; steps [merge-develop=0.200<=0.990, suite=0.400<=0.990]; samples=2 >= min_samples=2"
+```
+三组的 `applied` 均为 `false` 且载体字节逐字节不变（测试用 `readFile` 前后对比 + `sha256`）；读数断言 `minSamples`/`maxExtraWorkerMinutes` 为 `NOT_EVALUATED` 且显式 `!== 0`。两向由正控制给出（`evaluated === true`，且 `extraWorkerMinutes === 65` 由载体数据算得）。
+
+**AC3 — 回读 + 未新增文件 + 负控制**
+
+```
+[AC3] 正方向: verdict=halt extra=65 > 30
+[AC3] 载体回读 = {"schemaVersion":1,"halted":false,"halted_by":null,"halted_at":null,"preference":{},"forced":[],"relax_halted":true}
+[AC3] round.auto_tighten = {"verdict":"halt","reason":"halt: extra worker minutes 65.0 > max_extra_worker_minutes 30.0 (relaxed median=80.0, control median=15.0)","applied":false,"maxExtra":30}
+[AC3] .quay/ 清单 = ["config.yml","relaxed-dispatch.jsonl","worker-control.json","worker-outcome.jsonl"]   ← 写入前后逐字相同
+[AC3] 负控制: verdict=within-budget（阈值 120 vs 读数 65）relax_halted=false
+```
+写入走既有机制 —— 测试直接读 `touches-relax-tighten.ts` 源码断言：含 `writeControlState(root, next)`、含 `CONTROL_STATE_REL`、且**不含**任何 `writeFileSync(`（唯一写面 = 既有控制态写入器）。
+
+**AC4 — 分步（两条独立条目 + 不同 reason）**
+
+```
+[AC4] suite 超阈: halt: fan-in failure rate at step 'suite' 0.400 > threshold 0.300 (failures=2/5)
+[AC4] merge 超阈: halt: fan-in failure rate at step 'merge-develop' 0.200 > threshold 0.100 (failures=1/5)
+[AC4] 分步条目 = [{"step":"merge-develop","failures":1,"reached":5,"threshold":0.9,"rate":0.2,"overThreshold":false},
+                  {"step":"suite","failures":2,"reached":5,"threshold":0.3,"rate":0.4,"overThreshold":true}]
+[AC4] 负控制①（去掉无 fan-in 的失败）    : fanInReached=5 suite=2 merge=1 withoutStep=0   ← 分子分母**都不变**
+[AC4] 负控制②（换成有 fan-in 无 step 的失败）: fanInReached=6 suite=2（率 0.3333）merge=1  ← 只动**分母**，不动分子
+```
+两个 fixture 的 reason 互不相同且各不含对方步名；`failuresWithoutStep=1` 单独报出（⛔ 不折成 `"unknown"`、⛔ 不折成 0）。分母 = **放宽组**走到 fan-in 的运行数（5 = A 的 4 条 + B 的 1 条；⛔ 不是 `attempts`：没跑过 fan-in 的运行不算「那一步失败了」）。step 词表不含 `NOT_STEP_TOKENS = ["completed","exited-not-landed","landed","killed","timed-out","failed"]` 任一取值。
+
+**AC5 — live 下仍阻塞（双向）**
+
+```
+[AC5] 闸关: kept=["gap-live-cand"]  relaxed=true   载体 sha256=b28be9c0…a4fd
+[AC5] 闸开: kept=[]                 blockedBy=relax-not-halted  载体 sha256=0bda587d…b02
+```
+两次走的是**真实** `applyTaskFilters` + 真实谓词 + 注入时钟；两次控制态载体字节**不同**（不是同一份读两遍）。
+
+**AC6 — 人工清零后恢复**
+
+```
+[AC6] 第一轮后载体   = {…,"relax_halted":true}
+[AC6] 人工清零后载体 = {…,"relax_halted":false} —— .quay/ 清单不变 ["config.yml","relaxed-dispatch.jsonl","worker-control.json","worker-outcome.jsonl"]
+[AC6] 第二轮: verdict=halt applied=true relaxHaltedBefore=false 载体 = {…,"relax_halted":true}
+```
+第二轮读到的 `relaxHaltedBefore=false` 证明确实**重读了载体**（⛔ 不是「记得上一轮判过」）。
+
+**AC7 — 写路径保留既有控制态**
+
+```
+[AC7] 写入前 = {"schemaVersion":1,"halted":true,"halted_by":"outer","halted_at":"2026-10-17T03:04:05.000Z","preference":{"board":"native","strategy":"oldest-first"},"forced":[{"task":"gap-some-other-task","reason":"人指定的强制派发","caller":"outer","at":"2026-10-17T03:05:00.000Z"}]}
+[AC7] 写入后 = {…同上逐字…,"relax_halted":true}
+[AC7] 旧载体读取 relax_halted = false（缺键 ⇒ false）→ 写入后 = true
+```
+测试对六个键逐个 `deepEqual` 前后值，并断言键集合恰为「原键 ∪ {relax_halted}」。
+
+**AC8 — round 记录 two-way**
+
+```
+[AC8] 轮1（跑过）= {"evaluated":true,"verdict":"within-budget","reason":"…extra worker minutes 10.0 <= 1000.0; steps [merge-develop=0.000<=0.990, suite=0.000<=0.990]; samples=2 >= min_samples=2","thresholdsConfigured":true,"applied":false,
+                    "readings":{"extraWorkerMinutes":10,"maxExtraWorkerMinutes":1000,"samples":2,"minSamples":2,
+                                "fanIn":[{"step":"merge-develop",…,"reached":2},{"step":"suite",…,"reached":2}],"failuresWithoutStep":0,"fanInReached":2,"relaxHaltedBefore":false}}
+[AC8] 轮2（没跑）= null   载体行数=2
+```
+两条 round 记录经真实 `appendHeartbeatLine` 落进 `.quay/worker-round.jsonl` 后由 `readJsonl` 回读；`r1.auto_tighten === null` 为 `false`、`r2.auto_tighten === null` 为 `true` —— `strictEqual` 两个方向各一次。
+
+**AC9 — 两次注入真红（各附退出码与失败断言原文）**
+
+注入①（把读数钳成 0：`extraWorkerMinutes: 0`）：
+```
+$ timeout 120 node --experimental-strip-types --test plugin/test/touches-relax-auto-tighten.test.mjs
+EXIT=1   ℹ fail 5
+✖ AC2(a) … AssertionError: extra worker 分钟逐值可算（实得 0）   actual: 0, expected: 65
+✖ AC3(b) … AssertionError: 超阈值 ⇒ halt（实得 within-budget：within-budget: extra worker minutes 0.0 <= 30.0; …）actual: 'within-budget', expected: 'halt'
+✖ AC6(d) … AssertionError: actual: 'within-budget', expected: 'halt'
+✖ AC7(b) … AssertionError: actual: 'within-budget', expected: 'halt'
+✖ AC8    … AssertionError: 带额外成本读数（放宽 20 − 对照 10）
+```
+注入②（拆掉 not-evaluated 不落盘闸：`if (false) {`）：
+```
+EXIT=1   ℹ fail 3
+✖ AC2(a) … AssertionError: ac2-samples: not-evaluated ⛔ 不得落盘   actual: true, expected: false
+✖ AC3(b) … AssertionError: within-budget ⛔ 不落盘                  actual: true, expected: false
+✖ 装配自检 … AssertionError: within-budget ⇒ 不落盘（applied 与 verdict 是两件事） actual: true, expected: false
+```
+**恢复**：`diff /tmp/ac367-inj/orig.ts plugin/scripts/touches-relax-tighten.ts` ⇒ 无输出（逐字节相同）；`git show HEAD:plugin/scripts/touches-relax-tighten.ts` 与注入前原文亦逐字节相同；两文件 `grep -c INJECTION` 均为 **0**；恢复后重跑 `ℹ pass 10 · ℹ fail 0`。
+
+**AC10 — 五条静态命令**
+
+```
+① bash plugin/scripts/capability-catalog.sh --summary
+   capability-catalog: 387 scripts | 387 declared | 0 unclassified | 382 ship        exit=0
+② git diff --stat -- .gitignore docs/carrier-registry.json      （空）              exit=0
+③ bash scripts/test.sh plugin/test/driver-filters.test.mjs plugin/test/worker-driver.test.mjs plugin/test/touches-relax-live-predicate.test.mjs
+   ℹ tests 248 · ℹ pass 248 · ℹ fail 0 · duration_ms 37794.95                       exit=0
+④ git diff --stat -- .quay/config.yml                           （空）              exit=0
+⑤ node --experimental-strip-types plugin/scripts/import-graph-check.ts --json
+   reverseEdges: []   valueSccs: []   kernelViolations: []                           exit=0
+```
+另跑相邻面（本条**扩了**它们的模块，验证不回归）：`scripts/test.sh plugin/test/touches-relax-ledger.test.mjs plugin/test/touches-relax-config.test.mjs plugin/test/touches-relax-off-parity.test.mjs plugin/test/touches-relax-filter-trace.test.mjs plugin/test/driver-runtime-control-plane.test.mjs` ⇒ **exit 0，ℹ tests 43 · pass 43 · fail 0**。
+
+**AC11 — 配置面**
+
+```
+[AC11] 逐字读出 = {"min_samples":4,"max_extra_worker_minutes":12.5,"max_fan_in_failure_rate":{"suite":0.4,"merge-develop":0.15}}
+                  （config.yml sha256 前后=f67e206a22c995a7f5e258fe955f75bda89a5f8084d86d4a03e8d87c58fdb51e）
+[AC11] 缺键读出 = {"min_samples":4}     ← 另两个键是 undefined（⛔ 不是内置默认值；键集合恰为文件写了的那些）
+[AC11] 非法 issue = ["loop.touches_relax.auto_tighten.min_samples",
+                     "loop.touches_relax.auto_tighten.max_extra_worker_minutes",
+                     "loop.touches_relax.auto_tighten.max_fan_in_failure_rate.suite",
+                     "loop.touches_relax.auto_tighten.max_fan_in_failure_rate.merge-develop"]
+       子进程 CLI：exit=1；非法 fixture sha256 前后=27608e81…c7d6（跑完 CLI 仍不变）
+```
+边界自检：`{suite: 0, merge-develop: 1}` ⇒ `ok:true`（0 与 1 都在 `0..1` 闭区间内，拒的是值不是字段）。
+
+**适配条款**：AC-363 / 364 / 366 落地态的导出名与本节一致（`readRelaxedDispatchLedger` / `buildRelaxedDispatchReport` / `RelaxedRow` / `loadTouchesRelaxConfig` / `parseTouchesRelaxSection` / `FilterContext` / `applyTaskFilters` / `ControlState` / `readControlState` / `writeControlState`），**无差异需要记录**。唯一新增的 live 条件 id 是 `relax-not-halted`（AC-366 的词表只被「包含性」断言，故可追加）。
+
+**⛔ 未启用生产**：quay 自己的 `.quay/config.yml` 未写 `touches_relax`（AC10④ 的 `git diff` 为空），`mode` 缺省 off ⇒ `runAutoTightenPass` 每轮返回 `null`，行为与现状逐字节相同。
+
+**如实写明（DoD 要求）**：本条判据面止于**夹具载体回读**；生产消费（人在目标项目填阈值、driver 每轮真判）由人择机开启的 P2/P3 阶段承担——与 GOAL-037 立案文本「已知缺口」一致。判别力不由「测试存在且 55s 内绿」提供，而由 AC2 的三态、AC4 的两条差分、AC5/AC6 的双向负控制与 AC9 的两次注入真红提供（均已在上面逐条附读数）。
 
 ## Definition of Done
 
