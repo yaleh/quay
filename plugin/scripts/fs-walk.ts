@@ -36,6 +36,13 @@
 // `semantic-dedup-scan-1790995446200`) landed `listFilesInRoots` — the whole-file scan surface the
 // three literal checkers (registry-path / serve-binding / worktree-namespace) had each kept a
 // byte-identical private walker AND call site for.
+//
+// The most recent arrival (`list-script-basenames-diverged-under-one-name`, runId
+// `semantic-dedup-scan-1792033478766`) is a family member with a twist: the two copies were
+// byte-identical EXCEPT for their extension predicate, so one name carried two answers. Unlike the
+// walkers above, its callers' policies did NOT genuinely differ — so the set was unified rather than
+// parameterised. `listScriptBasenames` below records the measurements behind that call; ⛔ do not
+// re-add a per-caller extension set there.
 
 import fs from "node:fs";
 import path from "node:path";
@@ -304,6 +311,45 @@ export function listExecutableFiles(dir: string): string[] {
     prune: (name) => EXEC_SKIP_NAMES.has(name),
     include: (_name, ext, entry) => entry !== null && entry.isFile() && EXEC_EXTENSIONS.has(ext),
   });
+}
+
+/** `plugin/scripts` as a repo-relative path — the TOP-LEVEL script directory (checkers are not
+ *  nested; `checker-mutation-cases/` is a subdirectory and is never enumerated by anything here). */
+export const SCRIPTS_DIR_REL = "plugin/scripts";
+
+/**
+ * Enumerate the top-level script basenames of `<root>/plugin/scripts`, sorted. Non-recursive.
+ *
+ * Was an exactly-identical pair BOTH named `listScriptBasenames` — in
+ * outer-retirement-precondition-check.ts and registry-bare-filename-scan.ts — whose bodies differed
+ * ONLY in the extension predicate (`EXEC_EXTENSIONS`, six extensions, vs a local three-extension
+ * `SCRIPT_EXTENSIONS`). Same name, same skeleton, different SET: on this repo the two enumerated 384
+ * and 381 basenames, and a consumer moved from one to the other silently lost the `.cjs` scripts
+ * (`.quay/routine-findings.jsonl` finding `list-script-basenames-diverged-under-one-name`, routine
+ * `semantic-dedup-scan`, runId `semantic-dedup-scan-1792033478766`; an earlier round reported the
+ * same divergence under `list-script-basenames-divergence`).
+ *
+ * ⛔ UNIFIED ON `EXEC_EXTENSIONS` — and that choice was MEASURED, not picked (this module's usual
+ * rule is that a per-caller set stays a PARAMETER; see `collectShellScripts` below):
+ *   • the two sets differed by exactly three files, all `.cjs`
+ *     (`checked-in-write-guard.cjs` / `checked-in-write-run.cjs` / `suite-fs-trace-preload.cjs`);
+ *   • widening is INERT for the retirement checker: the execution core references the same 28
+ *     scripts under either set, so no verdict of that checker moves;
+ *   • widening is inert-to-CORRECT for the dead-set scanner: all three `.cjs` carry referrers
+ *     (`checked-in-write-check.ts` / `suite-fs-trace.ts`, one of them also a test-pin), so the wider
+ *     universe adds 3 KEPT scripts and 0 new dead ones (measured: dead count 21 both ways).
+ * A parameter would leave the identical hazard one level down — same call, two answers — and the
+ * narrower set alone would keep a script class this repo really has out of a completeness
+ * instrument's universe. Pinned by plugin/test/list-script-basenames-single-source.test.mjs.
+ */
+export function listScriptBasenames(root: string): string[] {
+  const dir = path.join(root, SCRIPTS_DIR_REL);
+  if (!fs.existsSync(dir)) return [];
+  return fs
+    .readdirSync(dir, { withFileTypes: true })
+    .filter((e) => e.isFile() && EXEC_EXTENSIONS.has(path.extname(e.name)))
+    .map((e) => e.name)
+    .sort();
 }
 
 /**
