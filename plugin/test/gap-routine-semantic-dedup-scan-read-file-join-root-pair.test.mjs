@@ -47,12 +47,18 @@ function sourceOf(rel) {
   return fs.readFileSync(path.join(SCRIPTS_DIR, rel), "utf8");
 }
 
-/** The three files the finding named (two) plus the 5b sweep's third member — all now migrated. */
-const FORMER_CARRIERS = [
-  "dual-source-check.ts",
-  "retired-clause-check.ts",
-  "red-on-omission-audit.ts",
-];
+/** The single home of the shared reader — the one file allowed to DEFINE it. */
+const DEF_SITE = "gate-script-base.ts";
+
+/** Files under plugin/scripts that CALL the shared reader (the definition site excluded: the regex
+ *  below would otherwise match `export function readRootRel(` itself). */
+function readRootRelCallers() {
+  return scriptTsFiles().filter((f) => f !== DEF_SITE && /\breadRootRel\s*\(/.test(sourceOf(f)));
+}
+
+/** The three migrated sites, for the failure message only. ⛔ NOT written as bare string literals
+ *  anywhere in this file — see the note on the AC2 consumer test below. */
+const FORMER_CARRIERS_NOTE = "dual-source-check / retired-clause-check / red-on-omission-audit";
 
 // ── the structural, name-agnostic predicate ─────────────────────────────────────────────────────────
 
@@ -103,7 +109,7 @@ test("AC1 — readRootRel is defined exactly once, in gate-script-base.ts", () =
   const defs = scriptTsFiles().filter((f) => /\bfunction readRootRel\b/.test(sourceOf(f)));
   assert.deepEqual(
     defs,
-    ["gate-script-base.ts"],
+    [DEF_SITE],
     `readRootRel must have a single definition; found: ${defs.length ? defs.join(", ") : "none"}`,
   );
 });
@@ -123,16 +129,30 @@ test("AC1 — no plugin/scripts source defines a private root-relative read-or-e
   );
 });
 
-test("AC2 — each former carrier imports and CALLS the shared reader", () => {
-  for (const f of FORMER_CARRIERS) {
-    const src = sourceOf(f);
-    assert.match(
-      src,
-      /import\s*\{[^}]*\breadRootRel\b[^}]*\}\s*from\s*["']\.\/gate-script-base\.ts["']/,
-      `${f} must import readRootRel from ./gate-script-base.ts`,
-    );
-    assert.match(src, /\breadRootRel\s*\(/, `${f} must CALL the shared reader (an import alone is inert)`);
-  }
+// ⛔ WHY THE CONSUMERS ARE DERIVED FROM THE TREE INSTEAD OF LISTED BY NAME. A bare `plugin/scripts`
+// basename written as a string literal under `plugin/test/` is collected by registry-bare-filename-scan
+// as a `test-pin` REFERENCE (§12e kind ②), and `dual-source-check.ts` is still a member of the committed
+// §12f dead-set snapshot (docs/analysis/dead-set-recomputed.json `after.dead` — the script has no
+// production caller) ⇒ the whole-suite static gate goes red with
+//     RED: referenced script(s) still in dead set: dual-source-check.ts
+// and the suite aborts before a single test runs. The same trap, for the same reason, is already
+// documented at plugin/test/discovery-method-registry.test.mjs:577.
+//
+// Respelling the names to dodge that predicate (`"plugin/scripts/x.ts"`, `"x" + ".ts"`) would be worse
+// than the red: it keeps a real dependency while hiding it from the gate that exists to stop a
+// still-referenced script being archived — and this test does NOT genuinely need those scripts to
+// survive. It pins that the CLASS is closed, not that any particular carrier lives on. So the
+// dependency is removed rather than disguised, and the assertion is made tree-derived — which also
+// makes it able to take BOTH values: deleting a migrated carrier drops the count and turns this RED,
+// where a hardcoded list could not tell "three" from "the list no longer matches the tree".
+test("AC2 — the shared reader is genuinely CONSUMED by plugin/scripts sites, not merely defined", () => {
+  const callers = readRootRelCallers();
+  assert.ok(
+    callers.length >= 3,
+    `readRootRel must be CALLED, not just defined (an import alone is inert): the finding named two ` +
+      `private copies and the 硬规则⑤b sweep found a third, so ≥3 migrated sites must consume it ` +
+      `(${FORMER_CARRIERS_NOTE}). Found ${callers.length}: ${callers.join(", ") || "none"}`,
+  );
 });
 
 // ── AC2 — the negative control (both directions, on fixtures) ────────────────────────────────────────
