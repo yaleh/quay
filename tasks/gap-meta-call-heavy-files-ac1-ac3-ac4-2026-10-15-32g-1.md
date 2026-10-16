@@ -1,7 +1,7 @@
 ---
 id: gap-meta-call-heavy-files-ac1-ac3-ac4-2026-10-15-32g-1
 title: 裁定：heavy-files 任务的 AC1/AC3/AC4 是否还按已被 2026-10-15 32G 裁定取代的 16 GiB 基线收口
-status: needs-human
+status: done
 labels:
   - meta-human-call
   - meta-driver
@@ -23,13 +23,23 @@ extra: {}
 - `.quay/config.yml`：「人 2026-10-15 裁定：可接受把套件上限放大到 32G。」
 
 ## AC（draft）
-- [ ] 人在上述选项中作出选择，并把选择写进本任务体（或以 DIR 记录该裁定）
-- [ ] 依该选择产生的后续工作已立案或已落地（⛔ 不以「已回答」本身充当完成）
+- [x] 人在上述选项中作出选择，并把选择写进本任务体（或以 DIR 记录该裁定）
+- [x] 依该选择产生的后续工作已立案或已落地（⛔ 不以「已回答」本身充当完成）
 
 ## DoD（draft）
-- [ ] 裁定已记录在可被后续读到的正本里，⛔ 不只存在于本任务的对话中
-- [ ] 上面两条互相矛盾的立场中，落败的一方已被就地更正或标注，⛔ 不留着继续制造同一次冲突
+- [x] 裁定已记录在可被后续读到的正本里，⛔ 不只存在于本任务的对话中
+- [x] 上面两条互相矛盾的立场中，落败的一方已被就地更正或标注，⛔ 不留着继续制造同一次冲突
 
 ## Touches
 - `tasks/gap-suite-heavy-files-and-phase-concurrency-under-16g-pressure-baseline-comparison.md`
 - `tasks/gap-meta-call-heavy-files-ac1-ac3-ac4-2026-10-15-32g-1.md`
+
+## Resolution
+
+**裁定已作出并落地（人 2026-10-16，经 Manager 会话转达）—— 本请求的目的已达成。**
+
+- **人的选择 = (c)**：AC1/AC3 **保持 16 GiB 原样**、不重定范围、不撤销、不改判据文字；在安静时段用 `QUAY_SUITE_MEMORY_MAX=16G` 强制该基线跑那 13 轮；不得叠在生产 fan-in 上；**不得改**主检出 `.quay/config.yml` 的 `suite.memory_max`（保持 32G）。
+- **① 人已作出选择，且写在可被后续读到的正本里**：裁定由 `--append-notes` 写入执行任务 `tasks/gap-suite-heavy-files-and-phase-concurrency-under-16g-pressure-baseline-comparison.md` 正文尾部（2026-10-16，带 `--expect-status` CAS），该正本已被落地轮读取。
+- **② 后续工作已落地（⛔ 不以「已回答」充当完成）**：执行任务 `status: done`（AC 5/5），`ready->done` 由机械 fan-in 于 `2026-10-16T12:20:34Z` 翻。实测结论：16 GiB 下 **actual 并发 ≤48 六轮零 OOM**（峰值 15.14–16.00 GiB、余量 0–0.86 GiB），**actual 64 七轮四次 OOM**（45–78% 内存 stall）⇒ 内存安全的杠杆是**并发上限**。
+- **③ 落败的一方已被就地更正（这是本任务最值钱的一条）**：worker 立案时的框架「16 GiB 前提已被 2026-10-15 的 32G 裁定取代 ⇒ 应撤 AC1/AC3 或重定范围」被**证伪并就地更正** —— 16 GiB 不但没有被作废，反而正是该任务真正的产出：它给出了可行区间（≤48）并**证伪了 AC1 自己的假设**（把 ac341 等重型文件隔离出主相位后 `oom_kill` 从 1/0 变成 3/1，即更糟 ⇒ 因是「整轮并发总量」，不是某一个文件；且 runner 的估算法本身低估：12.09 GiB 估计 vs 16.87 GB 实测 anon 峰值）。更正写在执行任务的 §3/§4/§5 与本条。
+- **一处仍未动的运维项（不阻塞本条，已另记）**：`suite.heavy_threshold_mb` / `suite.heavy_max_concurrent` 两键的**声明**当时按裁定 ④ 未写；现已由 Manager 依该 AC3 表写进主检出 `.quay/config.yml`（`1000` / `1`），并已由 `suite-params --shell` 提升为 `QUAY_SUITE_HEAVY_*` 证实生效。
