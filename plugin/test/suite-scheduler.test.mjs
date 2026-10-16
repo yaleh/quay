@@ -193,6 +193,116 @@ test("classifyAndOrder — raw files classify into buckets, --groups filters, LP
   }
 });
 
+// gap-suite-heavy-files-and-phase-concurrency-under-16g-pressure-baseline-comparison — the DECLARED
+// heavy bucket. The partition must be a MOVE, never a copy (a file run twice is the silent failure the
+// planned-vs-terminal completeness dimension cannot see), it must respect the --groups selection, and
+// the tail must actually bound the co-run count.
+test("classifyAndOrder — the declared heavy set is PARTITIONED out of the selected buckets (moved, never duplicated)", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "sched-heavy-"));
+  try {
+    const serial = path.join(dir, "s.test.mjs");
+    const low = path.join(dir, "l.test.mjs");
+    const main1 = path.join(dir, "m1.test.mjs");
+    const main2 = path.join(dir, "m2.test.mjs");
+    for (const f of [serial, low, main1, main2]) {
+      fs.writeFileSync(f, "import { test } from 'node:test';\ntest('t', () => {});\n");
+    }
+    fs.writeFileSync(serial, "// @test-group serial\nimport { test } from 'node:test';\ntest('t', () => {});\n");
+    fs.writeFileSync(low, "// @test-group lowconc\nimport { test } from 'node:test';\ntest('t', () => {});\n");
+    let heavySeen = null;
+    const q = classifyAndOrder([serial, low, main1, main2], {
+      root: dir,
+      rounds: 3,
+      lptEnabled: false,
+      heavyFiles: new Set([main1, main2]),
+      onHeavy: (h) => { heavySeen = h; },
+    });
+    assert.deepEqual(heavySeen?.slice().sort(), [main1, main2].sort(), "both declared files are in the heavy bucket");
+    assert.deepEqual(q.main, [], "…and NEITHER remains in its scheduled bucket (a copy would run it twice)");
+    assert.deepEqual(q.serial, [serial]);
+    assert.deepEqual(q.lowconc, [low]);
+    // Membership across the two outputs is exactly the input set — nothing dropped, nothing doubled.
+    const all = [...q.serial, ...q.lowconc, ...q.main, ...(heavySeen ?? [])].slice().sort();
+    assert.deepEqual(all, [serial, low, main1, main2].slice().sort());
+    // The --groups filter still governs: a heavy file the selection excludes never enters the bucket.
+    let filteredHeavy = null;
+    const filtered = classifyAndOrder([serial, low, main1, main2], {
+      root: dir,
+      rounds: 3,
+      lptEnabled: false,
+      groups: "product,engine",
+      heavyFiles: new Set([low, main1]),
+      onHeavy: (h) => { filteredHeavy = h; },
+    });
+    assert.deepEqual(filteredHeavy, [main1], "the excluded lowconc file is not dragged into the heavy tail");
+    assert.deepEqual(filtered.serial, []);
+    assert.deepEqual(filtered.lowconc, []);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// ⛔ PRODUCTION-SHAPE regression (2026-10-16, measured): the SELECTED list arrives ABSOLUTE
+// (`test.sh --list-files` emits absolute paths) while the DECLARED heavy set is REPO-RELATIVE (the
+// runner reads `perFile[].file` from the round record). The test above feeds absolute paths on BOTH
+// sides, so it stayed green while production partitioned 0 heavy files in EVERY round
+// (`scheduler: heavy=0≤1` with 5 files declared) — the fixture-only shape of 硬规则 4 推论三.
+test("classifyAndOrder — an ABSOLUTE selected list still meets a REPO-RELATIVE heavy set (production spelling)", () => {
+  // PRODUCTION SHAPE: the suite runs in a TASK WORKTREE (`filesRoot`) while the LPT/memory carriers
+  // live in the MAIN checkout (`root`) — the two roots DIFFER, and `root` is not a prefix of the
+  // selected paths at all. Anchoring normalization on `root` (the first version of this fix, measured
+  // still-0 in production) leaves every absolute key unmatched.
+  const mainCheckout = fs.mkdtempSync(path.join(os.tmpdir(), "sched-heavy-main-"));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "sched-heavy-mixed-"));
+  try {
+    fs.mkdirSync(path.join(dir, "plugin", "test"), { recursive: true });
+    const absHeavy = path.join(dir, "plugin", "test", "ac341.test.mjs");
+    const absLight = path.join(dir, "plugin", "test", "other.test.mjs");
+    for (const f of [absHeavy, absLight]) fs.writeFileSync(f, "import { test } from 'node:test';\ntest('t', () => {});\n");
+    // The selected list is what test.sh hands the scheduler: ABSOLUTE, under the TESTED checkout.
+    // The heavy set is what the runner computed from the round record: REPO-RELATIVE.
+    let heavySeen = null;
+    const q = classifyAndOrder([absHeavy, absLight], {
+      root: mainCheckout,
+      filesRoot: dir,
+      rounds: 3,
+      lptEnabled: false,
+      heavyFiles: new Set(["plugin/test/ac341.test.mjs"]),
+      onHeavy: (h) => { heavySeen = h; },
+    });
+    assert.deepEqual(heavySeen, [absHeavy], "the repo-relative declaration must match the absolute selection");
+    assert.deepEqual(q.main, [absLight], "…and the heavy file is MOVED out of its bucket, not copied");
+    // Negative control: a key that is genuinely OUTSIDE root must NOT be merged into a same-named file.
+    let outsideSeen = null;
+    classifyAndOrder([absHeavy], {
+      root: mainCheckout,
+      filesRoot: dir,
+      rounds: 3,
+      lptEnabled: false,
+      heavyFiles: new Set(["../outside/ac341.test.mjs"]),
+      onHeavy: (h) => { outsideSeen = h; },
+    });
+    assert.deepEqual(outsideSeen, [], "an out-of-root key is not normalized into the selection");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+    fs.rmSync(mainCheckout, { recursive: true, force: true });
+  }
+});
+
+test("classifyAndOrder — no declared heavy set ⇒ an empty partition (the mechanism is OFF, not a default bound)", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "sched-heavy-off-"));
+  try {
+    const f = path.join(dir, "m.test.mjs");
+    fs.writeFileSync(f, "import { test } from 'node:test';\ntest('t', () => {});\n");
+    let seen = "unset";
+    const q = classifyAndOrder([f], { root: dir, rounds: 3, lptEnabled: false, onHeavy: (h) => { seen = h; } });
+    assert.deepEqual(seen, [], "an undeclared heavy set partitions nothing");
+    assert.deepEqual(q.main, [f], "…and every file keeps its scheduled bucket");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 // gap-suite-main-phase-scheduling-slack-after-floor-drop — the report is what makes "no carrier ⇒ the
 // order below is the INPUT order" distinguishable from "the order really changed". Both cases emit a
 // perfectly well-formed list of the right length, so a caller that infers reordering from the output
@@ -275,6 +385,75 @@ test("runScheduler — pass/fail-neutral execution: exit aggregate = failed-file
     assert.equal(r.status, 1, `one failing file ⇒ exit 1 (stderr: ${r.stderr})`);
     assert.match(r.stderr, new RegExp(`__PERFILE__ .* ${badFile} passed=false`), "the failing file is flagged passed=false");
     assert.match(r.stderr, new RegExp(`__PERFILE__ .* ${okFile} passed=true`), "the passing file is flagged passed=true");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// gap-suite-heavy-files-and-phase-concurrency-under-16g-pressure-baseline-comparison — the heavy
+// tail's TWO load-bearing properties, measured by wall-clock overlap (not by reading the schedule):
+// (1) heavy files never co-run beyond the DECLARED bound, and (2) the tail runs AFTER the body — so
+// the bucket's peak can never be additive with the main phase's, which is the whole point under a
+// memory ceiling. Each probe appends its own START/END wall stamps to one shared trace file.
+test("runScheduler — the declared heavy tail runs AFTER the body and never co-runs beyond its bound", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "sched-heavy-run-"));
+  const trace = path.join(dir, "trace.txt");
+  try {
+    const probe = (name) =>
+      `import { test } from "node:test";\nimport fs from "node:fs";\n` +
+      `test(${JSON.stringify(name)}, async () => {\n` +
+      `  fs.appendFileSync(process.env.HEAVY_TRACE, "S ${name} " + Date.now() + "\\n");\n` +
+      `  await new Promise((r) => setTimeout(r, 400));\n` +
+      `  fs.appendFileSync(process.env.HEAVY_TRACE, "E ${name} " + Date.now() + "\\n");\n` +
+      `});\n`;
+    const body1 = path.join(dir, "body1.test.mjs");
+    const body2 = path.join(dir, "body2.test.mjs");
+    const heavy1 = path.join(dir, "heavy1.test.mjs");
+    const heavy2 = path.join(dir, "heavy2.test.mjs");
+    fs.writeFileSync(body1, probe("body1"));
+    fs.writeFileSync(body2, probe("body2"));
+    fs.writeFileSync(heavy1, probe("heavy1"));
+    fs.writeFileSync(heavy2, probe("heavy2"));
+
+    const childEnv = { ...process.env, HEAVY_TRACE: trace, QUAY_SUITE_HEAVY_FILES: `${heavy1}\n${heavy2}`, QUAY_SUITE_HEAVY_MAX_CONCURRENT: "1" };
+    for (const k of Object.keys(childEnv)) {
+      if (k.startsWith("NODE_TEST_")) delete childEnv[k];
+    }
+    const r = spawnSync(
+      process.execPath,
+      ["--no-warnings", "--experimental-strip-types", SCHEDULER_CLI,
+        "--root", dir, "--main-root", dir,
+        "--serial-concurrency", "2", "--lowconc-concurrency", "2", "--main-concurrency", "2",
+        "--groups", "product,engine"],
+      { input: `${body1}\n${body2}\n${heavy1}\n${heavy2}\n`, encoding: "utf8", env: childEnv },
+    );
+    assert.equal(r.status, 0, `all four probes pass ⇒ exit 0 (stderr: ${r.stderr})`);
+    assert.match(r.stderr, /scheduler: heavy=2≤1/, "the bucket reports its declared size and bound");
+
+    const spans = new Map();
+    for (const line of fs.readFileSync(trace, "utf8").split("\n")) {
+      const m = line.trim().match(/^([SE]) (\S+) (\d+)$/);
+      if (!m) continue;
+      const [, kind, name, ts] = m;
+      const span = spans.get(name) ?? {};
+      if (kind === "S") span.start = Number(ts);
+      else span.end = Number(ts);
+      spans.set(name, span);
+    }
+    for (const name of ["body1", "body2", "heavy1", "heavy2"]) {
+      assert.ok(spans.get(name)?.start !== undefined && spans.get(name)?.end !== undefined, `${name} ran exactly once (membership preserved)`);
+    }
+    const overlap = (a, b) => spans.get(a).start < spans.get(b).end && spans.get(b).start < spans.get(a).end;
+    assert.equal(overlap("heavy1", "heavy2"), false, "bound=1 ⇒ the two heavy files never co-run");
+    for (const body of ["body1", "body2"]) {
+      for (const hv of ["heavy1", "heavy2"]) {
+        assert.equal(overlap(body, hv), false, `the heavy tail is not additive with the body (${body} vs ${hv})`);
+      }
+    }
+    // The tail really is a TAIL: every body span ends before every heavy span starts.
+    const bodyEnd = Math.max(spans.get("body1").end, spans.get("body2").end);
+    const heavyStart = Math.min(spans.get("heavy1").start, spans.get("heavy2").start);
+    assert.ok(bodyEnd <= heavyStart, "the body drained before the heavy tail began");
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }

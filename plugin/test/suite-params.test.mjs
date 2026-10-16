@@ -149,7 +149,7 @@ test("suiteParamsToEnv maps present knobs to their env vars (absent → omitted)
   );
 });
 
-test("SUITE_KNOBS declares exactly the 8 config→env mappings", () => {
+test("SUITE_KNOBS declares exactly the closed set of config→env mappings", () => {
   assert.deepEqual(SUITE_KNOBS, {
     suite_scheduler: "QUAY_SUITE_SCHEDULER",
     phase_overlap: "QUAY_PHASE_OVERLAP",
@@ -162,7 +162,45 @@ test("SUITE_KNOBS declares exactly the 8 config→env mappings", () => {
     // cgroup's MemoryMax becomes a DECLARED knob (a size string, not a count). Its absence from the
     // shipped config is deliberate: a machine-spec-dependent literal must not live in a tracked file.
     memory_max: "QUAY_SUITE_MEMORY_MAX",
+    // gap-suite-heavy-files-and-phase-concurrency-under-16g-pressure-baseline-comparison — the
+    // memory-aware SCHEDULING declaration (MEASURED per-file high-water → bounded heavy bucket).
+    // Deliberately no default in code: an undeclared threshold would be a machine-spec-dependent
+    // literal, and with neither knob declared the mechanism is OFF.
+    heavy_threshold_mb: "QUAY_SUITE_HEAVY_THRESHOLD_MB",
+    heavy_max_concurrent: "QUAY_SUITE_HEAVY_MAX_CONCURRENT",
   });
+});
+
+test("heavy knobs — a declared threshold/bound is read + promoted; a bad one is FAIL-CLOSED", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "sp-heavy-"));
+  try {
+    const write = (body) => fs.writeFileSync(path.join(dir, ".quay", "config.yml"), body);
+    fs.mkdirSync(path.join(dir, ".quay"), { recursive: true });
+    write("provider: native\nsuite:\n  heavy_threshold_mb: 300\n  heavy_max_concurrent: 1\n");
+    assert.deepEqual(
+      readSuiteParams(dir),
+      { heavy_threshold_mb: 300, heavy_max_concurrent: 1 },
+      "both halves of the declaration are read",
+    );
+    assert.deepEqual(
+      suiteParamsToEnv({ heavy_threshold_mb: 300, heavy_max_concurrent: 1 }),
+      { QUAY_SUITE_HEAVY_THRESHOLD_MB: "300", QUAY_SUITE_HEAVY_MAX_CONCURRENT: "1" },
+      "…and promote into their env vars (the host-override surface)",
+    );
+    // A threshold is a MiB READING and may be fractional (a measured high-water is not a round number
+    // of MiB); the BOUND, by contrast, is a count and must be whole — the two validators differ on
+    // purpose, so "300.5 ok / 1.5 not ok" is the pair that pins both.
+    write("provider: native\nsuite:\n  heavy_threshold_mb: 300.5\n  heavy_max_concurrent: 2\n");
+    assert.deepEqual(readSuiteParams(dir), { heavy_threshold_mb: 300.5, heavy_max_concurrent: 2 });
+    write("provider: native\nsuite:\n  heavy_threshold_mb: 0\n");
+    assert.throws(() => readSuiteParams(dir), /FAIL-CLOSED: \.quay\/config\.yml 'suite:heavy_threshold_mb'/, "0/negative is not a threshold");
+    write("provider: native\nsuite:\n  heavy_max_concurrent: 0\n");
+    assert.throws(() => readSuiteParams(dir), /FAIL-CLOSED: \.quay\/config\.yml 'suite:heavy_max_concurrent'/, "a bound of 0 heavy files is not a schedule");
+    write("provider: native\nsuite:\n  heavy_max_concurrent: 1.5\n");
+    assert.throws(() => readSuiteParams(dir), /FAIL-CLOSED: \.quay\/config\.yml 'suite:heavy_max_concurrent'/, "a fractional co-run count is not a count");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test("memory_max — a size string is the one non-numeric knob, and a malformed one is FAIL-CLOSED", () => {

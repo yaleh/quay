@@ -202,6 +202,10 @@ import type {
   NotEvaluatedChecker,
   SuiteRoundRecord,
   SuiteMemoryEvidence,
+  SuiteMemoryStatSample,
+  SuiteMemoryTelemetry,
+  SuiteConcurrencyReading,
+  SuiteProcessTreeAccounting,
 } from "./full-suite-runner-types.ts";
 export type {
   SuiteStateValue,
@@ -215,6 +219,10 @@ export type {
   NotEvaluatedChecker,
   SuiteRoundRecord,
   SuiteMemoryEvidence,
+  SuiteMemoryStatSample,
+  SuiteMemoryTelemetry,
+  SuiteConcurrencyReading,
+  SuiteProcessTreeAccounting,
 } from "./full-suite-runner-types.ts";
 
 const REPO_ROOT = repoRoot();
@@ -475,8 +483,20 @@ function toEpochSeconds(iso: string): number {
 // start at all, while every import-based assertion stayed green. The `import … as` form binds a real
 // local of the SAME function object, so the export table, the local calls, and the kernel-identity
 // assertion all resolve to one implementation.
-import { readLoadAvg1 as readLoadAvg } from "../../packages/quay/src/kernel/load-avg.ts";
+import { readLoadAvg1 as readLoadAvg, readRunQueue } from "../../packages/quay/src/kernel/load-avg.ts";
 export { readLoadAvg };
+
+// gap-resource-gate-reads-lagging-loadavg-not-instantaneous-rd — the round record's run-queue fields.
+// Read at the SAME point as `load` (round end / crash time), from the SAME single-implementation
+// reader the load sampler uses (kernel `readRunQueue`), so the ledger row and the curve point carry
+// one 口径. Returns a spread-ready object with NO keys when /proc/stat is unreadable — the
+// absent-field contract (缺键 ≠ 0, 硬规则 3b): a fabricated `procs_running: 0` would read "nothing was
+// runnable" at exactly the moment the instrument failed. ⛔ No verdict consumes these fields.
+const runQueueFields = (): Partial<Pick<SuiteRoundRecord, "procs_running" | "procs_blocked" | "runq">> => {
+  const rq = readRunQueue();
+  if (!rq) return {};
+  return { procs_running: rq.procs_running, procs_blocked: rq.procs_blocked, runq: rq.runq };
+};
 
 // ── gap-suite-hub-file-responsibility-strip — accounting family extracted to suite-accounting.ts ──
 // The cgroup/systemd accounting family (per-phase cpu/psi differential reads + the systemd `Consumed`
@@ -492,20 +512,40 @@ import type { PhaseDiffRecord, ScopeConsumedLoadRead } from "./suite-accounting.
 // pure function (⛔ not a second copy — 硬规则 5b). `packages/quay/src/systemd-scope.ts` is a
 // node-builtin-only leaf (the same shared module `driver-runtime.ts` imports for the anchor/serve
 // envelopes), so this `plugin/` → `packages/` edge adds no cycle.
-// gap-full-suite-scope-oom-policy-stops-whole-suite-unattributable — the ALWAYS-present scope
-// properties + the availability probe are reused from the SAME shared module (⛔ not a 2nd literal,
-// 硬规则 5b): SCOPE_PROPERTY_ARGS carries `MemoryAccounting=yes` + `OOMPolicy=continue`, and
-// scopeProbeArgv() is the probe that exercises exactly those properties. `buildSystemdRunArgv` and
-// `systemdRunAvailable` both consume them ⇒ 「探测绿」structurally implies the real suite scope accepts
-// the same properties (a host whose systemd rejects OOMPolicy=continue ⇒ probe unavailable ⇒ the
-// suite runs un-enveloped AND the OOM test reports an explicit not-evaluated skip, never a silent pass).
+// gap-full-suite-scope-oom-policy-stops-whole-suite-unattributable — the scope properties and the
+// availability probe are NOT spelled here any more: since
+// `gap-suite-resource-measurement-needs-a-host-adapter-not-inline-cgroup-calls` BOTH the real argv and
+// the probe are built by ONE function (`boundedScopeArgv`, Core `systemd-scope.ts`, which this module
+// no longer calls directly — the host adapter does). 「探测绿」therefore implies 「the real call
+// accepts these properties」 STRUCTURALLY, not by two hand-kept lists (a host whose systemd rejects
+// OOMPolicy=continue ⇒ probe unavailable ⇒ the suite runs un-enveloped AND the OOM test reports an
+// explicit not-evaluated skip, never a silent pass).
 import {
+  defaultScopeMemoryMax,
   laneScaledScopeMemoryMax,
   pageAlignScopeBytes,
-  scopeProbeArgv,
   SCOPE_ENVELOPE_HOST_FRACTION,
-  SCOPE_PROPERTY_ARGS,
 } from "../../packages/quay/src/systemd-scope.ts";
+// gap-suite-resource-measurement-needs-a-host-adapter-not-inline-cgroup-calls — the HOST ADAPTER: the
+// ONE seam through which this runner measures a scope, launches a bounded child, and reads the OOM /
+// memory counters. Linux cgroup v2 + systemd-run (`createLinuxCgroupV2Adapter`) is ONE implementation
+// behind it; a host without cgroup v2 gets `createUnsupportedHostAdapter` and every reading comes back
+// `{ value: null, reason }` — an `unknown` reading, ⛔ never a fabricated 0 (硬规则 3b/6).
+import {
+  scopeHandleFromDir,
+  resolveHostResourceAdapter,
+  spawnBounded,
+  unavailable,
+} from "./host-resource-adapter.ts";
+import type {
+  AdapterReading,
+  HostResourceAdapter,
+  MemoryEventReading,
+  MemoryReading,
+  MemoryStatBreakdown,
+  ResourceLimits,
+  ResourceScopeHandle,
+} from "./host-resource-adapter.ts";
 // The cgroup-aware "effective total memory" reading is NOT re-implemented here: the ONE cgroup
 // hierarchy traversal (ancestor walk + quay-own-scope exclusion) and the ONE derivation live in
 // `effective-capacity-probe.ts` (the shared probe). ⛔ 硬规则 5b — 不重复发明第二份探测实现.
@@ -791,6 +831,15 @@ function positiveIntFromEnv(name: string): number | undefined {
   return Number.isInteger(n) && n >= 1 ? n : undefined;
 }
 
+/** The positive-number twin of `positiveIntFromEnv` — for a knob whose unit is not a count (the
+ *  heavy threshold is MiB and a fractional value is meaningful). Same empty-string-is-unset rule. */
+function positiveNumberFromEnv(name: string): number | undefined {
+  const raw = process.env[name];
+  if (raw === undefined || raw === "") return undefined;
+  const n = Number(raw);
+  return Number.isFinite(n) && n > 0 ? n : undefined;
+}
+
 /** Parse a positive-integer arg (e.g. --serial-concurrency 2); NaN/<1 → null (caller errors). */
 function parsePositiveIntArg(argv: string[], name: string): number | null {
   const raw = flagValue(argv, name);
@@ -984,17 +1033,20 @@ export function checkResourceGate(root: string): { ok: boolean; output: string }
 // spawned suite in such a scope (MemoryMax/CPUQuota/TasksMax) when systemd-run is available, and
 // records the cgroup attributes as durable evidence (suite-cgroup-evidence.txt) — the AC1 observable.
 
-export interface SystemdRunLimits {
-  memoryMax: string; // -p MemoryMax=<v> — "" = no memory limit
-  cpuQuota: string; //  -p CPUQuota=<v> — "" = NO CPU limit (人 2026-08-11 裁定「取消 CPU 配额」; 400% 只是当时 4 核机上等价无限制的 measure-first 临时形态, 搬到多核机变成真限制 ⇒ 持久修法 = 不再传 -p CPUQuota=, 见 gap-systemd-run-cancel-cpuquota-keep-memory-guardrail + CLAUDE.md 推论二)
-  tasksMax: string; //  -p TasksMax=<v> — "" = NO task limit (人 2026-08-12 裁定③取消 TasksMax=200; 写死的 200 与 CPUQuota 同族, fork: EAGAIN 实证)
-  // gap-full-suite-scope-oom-policy-stops-whole-suite-unattributable — "" = NO swap ceiling (the
-  // pre-change default, byte-for-byte). Set it (e.g. "0") only to make a MemoryMax a REAL ceiling:
-  // with unlimited swap a cgroup can swap past its memory.max instead of OOM-killing, so a test that
-  // must reproduce an OOM sets `MemorySwapMax=0`. Production keeps "" (⛔ this task does not change the
-  // host-derived MemoryMax policy — only the OOM semantics/evidence).
-  memorySwapMax?: string; // -p MemorySwapMax=<v> — ""/absent = no swap limit
-}
+export type SystemdRunLimits = ResourceLimits;
+// ── gap-suite-resource-measurement-needs-a-host-adapter-not-inline-cgroup-calls ─────────────────
+// The limit TYPE, the argv construction and every cgroup read now live behind ONE host adapter
+// (`plugin/scripts/host-resource-adapter.ts`). `SystemdRunLimits` stays as the name the runner and its
+// tests have always used, bound to the adapter's host-neutral `ResourceLimits` (one declaration —
+// 硬规则 5b). The human rulings that shape the DEFAULTS below are unchanged by that move:
+//   · MemoryMax ""  = no memory limit  (declared per project, bounded by the host guardrail below)
+//   · CPUQuota  ""  = NO CPU limit (人 2026-08-11 裁定「取消 CPU 配额」; 400% 只是当时 4 核机上等价无限制
+//    的 measure-first 临时形态, 搬到多核机变成真限制 ⇒ 持久修法 = 不再传 -p CPUQuota=)
+//   · TasksMax  ""  = NO task limit (人 2026-08-12 裁定③取消 TasksMax=200; 写死的 200 与 CPUQuota 同族)
+//   · memorySwapMax ""/absent = NO swap ceiling (the pre-change default, byte-for-byte); `"0"` makes a
+//     MemoryMax a REAL ceiling (with unlimited swap a cgroup can swap past its memory.max instead of
+//     OOM-killing) — which is what the OOM negative-control test needs and production does NOT set
+//     (gap-full-suite-scope-oom-policy-stops-whole-suite-unattributable).
 
 // ── gap-suite-memorymax-literal-16g-cap-pinned-every-round-while-lanes-scale-with-nproc ─────────
 // THE DEFECT: the suite cgroup's ceiling was a WRITTEN-DOWN `"16G"` constant in THIS FILE. A memory
@@ -1151,6 +1203,84 @@ export function readPerFileMemoryHighWaterBytes(
   return perFileMemoryHighWaterBytes(rows, opts?.percentile ?? SUITE_PERFILE_MEMORY_PERCENTILE);
 }
 
+/**
+ * PER-FILE measured high-water, keyed by the SAME repo-relative path the round record stores
+ * (pure) — `max(memPeakKb)` over the pooled rows, in BYTES. This is the per-FILE reading the
+ * memory-aware scheduler needs; `perFileMemoryHighWaterBytes` above answers the different question
+ * "what does ONE LANE need on average" (a p95 over the whole population) and cannot say which file
+ * is the heavy one.
+ *
+ * ⛔ The MAX, not a percentile: a bucket's bound must hold for the heaviest thing in it, and a file
+ * with one heavy round and four light ones IS heavy (the bound is about the peak, hard rule 4b — a
+ * percentile here would be a proxy that silently drops exactly the file the bucket exists for).
+ * A file with no `memPeakKb` in any row of the window contributes nothing (缺值 ≠ 0); callers see it
+ * as "not measured" and MUST NOT schedule it as light on that basis alone.
+ */
+export function perFileHighWaterByName(rows: unknown[]): Map<string, number> {
+  const out = new Map<string, number>();
+  for (const row of rows) {
+    const perFile = (row as { perFile?: unknown })?.perFile;
+    if (!Array.isArray(perFile)) continue;
+    for (const f of perFile) {
+      const file = (f as { file?: unknown })?.file;
+      const kb = (f as { memPeakKb?: unknown })?.memPeakKb;
+      if (typeof file !== "string" || file === "") continue;
+      if (typeof kb !== "number" || !Number.isFinite(kb) || kb <= 0) continue;
+      const bytes = kb * 1024;
+      const prev = out.get(file);
+      if (prev === undefined || bytes > prev) out.set(file, bytes);
+    }
+  }
+  return out;
+}
+
+/** Read the per-file high-water window from the runner's own round record (the thinnest possible
+ *  wrapper over the pure function above + the bounded tail read). */
+export function readPerFileHighWaterByName(
+  stateDir: string,
+  opts?: { rounds?: number; maxTailBytes?: number },
+): Map<string, number> {
+  const rows = readRoundRowsFromTail(
+    path.join(stateDir, "verification-round.jsonl"),
+    opts?.rounds ?? SUITE_PERFILE_MEMORY_ROUNDS,
+    opts?.maxTailBytes ?? SUITE_PERFILE_MEMORY_TAIL_BYTES,
+  );
+  return perFileHighWaterByName(rows);
+}
+
+/**
+ * The HEAVY bucket's membership, pure: the SELECTED files whose measured high-water is strictly
+ * above `thresholdBytes`. Membership only — the scheduling that bounds them lives in test.sh.
+ *
+ * ⛔ A file with NO measured high-water is NOT heavy by default and is NOT dropped either: it stays
+ * in the normal bucket, which is the status quo. "Never measured" cannot be read as "below
+ * threshold" (hard rule 6) — but it also must not be promoted into a bucket whose bound was
+ * justified by measurements it does not have, so the only honest reading of 未查 is "leave it where
+ * it already is".
+ *
+ * Path keys are normalized by trimming a leading `./` on BOTH sides, so the round record's
+ * repo-relative spelling and a `test.sh --list-files` entry cannot disagree on the same file.
+ */
+export function heavyFileSet(
+  files: readonly string[],
+  highWaterBytes: ReadonlyMap<string, number>,
+  thresholdBytes: number,
+): string[] {
+  const norm = (p: string): string => (p.startsWith("./") ? p.slice(2) : p);
+  const byNormalized = new Map<string, number>();
+  for (const [file, bytes] of highWaterBytes) {
+    const key = norm(file);
+    const prev = byNormalized.get(key);
+    if (prev === undefined || bytes > prev) byNormalized.set(key, bytes);
+  }
+  const heavy: string[] = [];
+  for (const file of files) {
+    const bytes = byNormalized.get(norm(file));
+    if (bytes !== undefined && bytes > thresholdBytes) heavy.push(file);
+  }
+  return heavy;
+}
+
 /** The concurrency that ACTUALLY held, measured from the round record (pure): the maximum number of
  *  per-file intervals that overlap at one instant. This is the直接量 for "how many files ran at
  *  once" — ⛔ NOT `laneCount`, and ⛔ NOT `defaultLaneCount()`: the runner REQUESTS `--test-concurrency
@@ -1236,24 +1366,106 @@ export interface SuiteMemoryMaxDecision {
   hostFraction: number;
 }
 
+/** The rule a suite host guardrail came from — an INDEPENDENT value (硬规则 3b): 「运维显式声明的上界」与
+ *  「缺省值被共享宿主多 scope 分摊收紧」是两件不同的事，⛔ 不得共用一个取值（否则「声明被尊重」与
+ *  「声明被静默吞掉」在证据里同形）。 */
+export type SuiteHostGuardRule = "project-blind" | "shared-host-split";
+
+/** The suite's host-relative guardrail + WHICH rule produced it + a NAMED rationale. */
+export interface SuiteHostGuard {
+  /** The guardrail in bytes (page-aligned by the producing helper). */
+  hostGuardBytes: number;
+  rule: SuiteHostGuardRule;
+  /** A named rationale for the choice (硬规则 3b: ⛔ a bare byte count a reader must reverse-engineer
+   *  the provenance of is not evidence). */
+  reason: string;
+  /** The live same-kind scope count the split used; `null` = **not evaluated** (缺值 ≠ 0). */
+  siblingScopeCount: number | null;
+}
+
+/** Pick the suite's host-relative guardrail BY THE PROVENANCE OF THE DECLARED CEILING (人 2026-10-15 裁定).
+ *
+ *  ── 被修的缺陷 ─────────────────────────────────────────────────────────────────────────────────
+ *  `sharedHostCeilingBytes` 的**共享宿主公平分摊**（`min(0.25 × host, max(host/(N+1), 26.0 GiB))`）与
+ *  声明值是**两条独立的规则**，而原代码把分摊值无条件当作声明的上界。本机（247.0 GiB 有效总量、17 个
+ *  同类 scope）分摊值恰是 **26.00 GiB**，于是运维在 `.quay/config.yml` `suite: memory_max:` 或
+ *  `QUAY_SUITE_MEMORY_MAX` 里写下的任何大于 26 GiB 的值都被**静默压回 26 GiB**（`bound: host-guard`）
+ *  ——人写下的一行声明，被一条防「每个 scope 各自按 0.25 叠加」的规则吞掉了。
+ *
+ *  ── 分摊规则本来要防什么（⛔ 它没有被取消，只是换了适用面）───────────────────────────────────────
+ *  分摊要防的是「**项目盲的默认值**在每个项目上各自按 0.25 套用 ⇒ N 个 scope 之和 = N × 0.25 × host」。
+ *  那个病只在**没人做过决定**时发作：`SUITE_MEMORY_MAX_DEFAULT` 是随仓库走的常量，每个 checkout 都一样。
+ *  一旦有人显式声明，值就不再是「项目盲」的了 ⇒ 分摊规则的适用前提消失。
+ *  ⇒ 显式声明（`declared.source === "env"`：config `suite: memory_max:` 或 `QUAY_SUITE_MEMORY_MAX`）时，
+ *  上界退回**项目盲值** `defaultScopeMemoryMax(total, SCOPE_ENVELOPE_HOST_FRACTION)` = 0.25 × 有效总量
+ *  （本机 66 295 676 928 B ≈ 61.74 GiB）；只有**缺省值**（`source === "default"`）才继续走多 scope 分摊。
+ *
+ *  ⛔ 三样东西一个字都不改（人 2026-10-15 裁定）：`sharedHostCeilingBytes` 本身、0.25 比例、缺省
+ *  `16G`。声明值超过 0.25 × 有效总量的，**仍**被压住（`bound: "host-guard"`，带具名原因）——只是压它的
+ *  上界从「分摊值」换成了「项目盲值」，而这条上界仍然是**宿主相对**的、仍随宿主大小缩放（硬规则 4 推论二：
+ *  ⛔ 不是写死的字面值）。
+ *
+ *  ⛔ 为什么是一个函数而不是两个调用点各写一次三元表达式（硬规则 5b）：两处（module-load 模板 +
+ *  per-run 解析）必须有同一条规则，复制一次就多一处可以单独漂移；且纯函数可注入 ⇒ 本机读数（247 GiB /
+ *  N=17）能在测试里**确定性**驱动，不必依赖跑测试的宿主。 */
+export function suiteHostGuard(opts: {
+  effectiveTotalMemBytes: number;
+  declared: DeclaredSuiteMemoryMax;
+  siblingScopeCount: number | null;
+  hostFraction?: number;
+}): SuiteHostGuard {
+  const hostFraction = opts.hostFraction ?? SCOPE_ENVELOPE_HOST_FRACTION;
+  const projectBlindBytes = Number(defaultScopeMemoryMax(opts.effectiveTotalMemBytes, hostFraction));
+  if (opts.declared.source !== "default") {
+    return {
+      hostGuardBytes: projectBlindBytes,
+      rule: "project-blind",
+      reason:
+        `the ceiling was DECLARED (${JSON.stringify(opts.declared.value)} via ${opts.declared.source}) — the ` +
+        `shared-host multi-scope split may not lower an operator's explicit declaration; the guardrail is the ` +
+        `project-blind ${hostFraction} × the effective host total`,
+      siblingScopeCount: opts.siblingScopeCount,
+    };
+  }
+  return {
+    hostGuardBytes: sharedHostCeilingBytes(opts.effectiveTotalMemBytes, opts.siblingScopeCount, hostFraction),
+    rule: "shared-host-split",
+    reason:
+      `the ceiling is the DEFAULT (${JSON.stringify(opts.declared.value)}) — a project-blind default would be ` +
+      `applied by every same-kind scope at once, so the shared-host split bounds it ` +
+      `(${opts.siblingScopeCount === null ? "sibling count NOT evaluated" : `${opts.siblingScopeCount} sibling scope(s)`})`,
+    siblingScopeCount: opts.siblingScopeCount,
+  };
+}
+
 export function suiteMemoryMax(opts: {
   effectiveTotalMemBytes: number;
   declared: DeclaredSuiteMemoryMax;
   /** The caller's own host-relative guard (already page-aligned), e.g. the shared-host tightening.
    *  ⛔ Absent ⇒ `floor(effective × 0.25)` from the shared pure function. */
   hostGuardBytes?: number;
+  /** The guardrail SELECTED by provenance (`suiteHostGuard`). ⛔ `hostGuardBytes` wins when both are
+   *  supplied (an explicit byte count is the sharper statement); when only this is supplied its bytes
+   *  are the guardrail AND its rule is named in the `host-guard` reason, so the evidence says WHICH
+   *  rule bound the declared value instead of leaving it to be reverse-engineered from the number. */
+  hostGuard?: SuiteHostGuard;
   hostFraction?: number;
 }): SuiteMemoryMaxDecision {
   const hostFraction = opts.hostFraction ?? SCOPE_ENVELOPE_HOST_FRACTION;
   const hostGuardBytes =
-    opts.hostGuardBytes ?? pageAlignScopeBytes(Math.floor(Math.max(0, opts.effectiveTotalMemBytes) * hostFraction));
+    opts.hostGuardBytes ??
+    opts.hostGuard?.hostGuardBytes ??
+    pageAlignScopeBytes(Math.floor(Math.max(0, opts.effectiveTotalMemBytes) * hostFraction));
+  // ⛔ Byte-identical for every caller that passes a bare `hostGuardBytes` (all pre-existing test/call
+  // sites): the provenance clause appears ONLY when a caller selected the guardrail via `suiteHostGuard`.
+  const guardNote = opts.hostGuard === undefined ? "" : ` — guard rule: ${opts.hostGuard.rule} (${opts.hostGuard.reason})`;
   const declaredBytes = parseSystemdBytesToBytes(opts.declared.value);
   const base = { declared: opts.declared, hostGuardBytes, hostFraction };
   if (declaredBytes === null || declaredBytes <= 0) {
     return {
       memoryMax: String(hostGuardBytes),
       bound: "host-guard",
-      reason: `the declared ceiling ${JSON.stringify(opts.declared.value)} is not a parseable size — the host-relative guardrail alone applies`,
+      reason: `the declared ceiling ${JSON.stringify(opts.declared.value)} is not a parseable size — the host-relative guardrail alone applies${guardNote}`,
       ...base,
     };
   }
@@ -1263,7 +1475,7 @@ export function suiteMemoryMax(opts: {
       bound: "host-guard",
       reason:
         `the declared ceiling (${opts.declared.value} = ${declaredBytes} B) exceeds the host-relative guardrail ` +
-        `(${hostGuardBytes} B = ${hostFraction} × the effective host total) — the host guard is the binding runaway bound`,
+        `(${hostGuardBytes} B = ${hostFraction} × the effective host total) — the host guard is the binding runaway bound${guardNote}`,
       ...base,
     };
   }
@@ -1277,12 +1489,16 @@ export function suiteMemoryMax(opts: {
 export const SUITE_MEMORY_MAX_DEFAULT = "16G";
 
 /** The suite's default MemoryMax with THIS host's readings (used by the module-load template: no
- *  state dir, so no measurement). */
+ *  state dir, so no measurement). The guardrail is SELECTED by the declared ceiling's provenance
+ *  (`suiteHostGuard`) — ⛔ not unconditionally the shared-host split, which used to swallow an
+ *  operator's explicit declaration (see `suiteHostGuard`'s block comment). */
 export function defaultSuiteMemoryMax(): string {
+  const effectiveTotalMemBytes = readEffectiveTotalMemBytes();
+  const declared = declaredSuiteMemoryMax();
   return suiteMemoryMax({
-    effectiveTotalMemBytes: readEffectiveTotalMemBytes(),
-    declared: declaredSuiteMemoryMax(),
-    hostGuardBytes: sharedHostCeilingBytes(readEffectiveTotalMemBytes(), listSharedHostScopes().count),
+    effectiveTotalMemBytes,
+    declared,
+    hostGuard: suiteHostGuard({ effectiveTotalMemBytes, declared, siblingScopeCount: listSharedHostScopes().count }),
   }).memoryMax;
 }
 
@@ -1340,10 +1556,13 @@ export function parseSystemdRunLimits(raw?: string, ctx?: { memoryMaxDefault?: s
 export function resolveSuiteMemoryMax(stateDir: string): SuiteMemoryMaxPolicy {
   const effective = readEffectiveTotalMemBytes();
   const declared = declaredSuiteMemoryMax();
+  // The guardrail is SELECTED by the declared ceiling's provenance (`suiteHostGuard`): an explicitly
+  // declared ceiling (config/env) is bounded by the PROJECT-BLIND fraction, not by the shared-host
+  // multi-scope split — the split is for the project-blind DEFAULT (人 2026-10-15 裁定).
   const decision = suiteMemoryMax({
     effectiveTotalMemBytes: effective,
     declared,
-    hostGuardBytes: sharedHostCeilingBytes(effective, listSharedHostScopes().count),
+    hostGuard: suiteHostGuard({ effectiveTotalMemBytes: effective, declared, siblingScopeCount: listSharedHostScopes().count }),
   });
   const measured = readSuiteMemoryMeasurements(stateDir);
   const estimate = laneScaledScopeMemoryMax({
@@ -1370,69 +1589,70 @@ export function resolveSuiteMemoryMax(stateDir: string): SuiteMemoryMaxPolicy {
 }
 
 let _systemdRunAvailable: boolean | null = null;
+let _hostAdapter: HostResourceAdapter | null = null;
+
+/** The host adapter for THIS process, memoized (the selection reads the filesystem once). The runner
+ *  never constructs a cgroup path or a supervisor argv itself any more — every one of those goes
+ *  through this object (硬规则 5b: one mechanism, one place). */
+export function hostResourceAdapter(): HostResourceAdapter {
+  if (_hostAdapter === null) _hostAdapter = resolveHostResourceAdapter();
+  return _hostAdapter;
+}
+
+/** Test seam only: drop the memoized adapter so a test that changes the selection env between cases
+ *  observes the change. ⛔ Not called on any production path. */
+export function resetHostResourceAdapterMemo(): void {
+  _hostAdapter = null;
+  _systemdRunAvailable = null;
+}
 
 /**
- * Whether `systemd-run --user --scope` works on this host (memoized). The probe runs a real no-op
- * scope (`true`) — a transient scope is the ONLY reliable test that the user manager accepts
- * `--scope` + properties (binaries present is not enough; there must be a user session / D-Bus).
- * Seams: QUAY_TEST_SYSTEMD_RUN_AVAILABLE=0|1 forces the answer for hermetic tests.
+ * Whether this host can BOUND the suite in a scope (memoized). Delegates to the host adapter, whose
+ * `available()` answers BOTH halves of the question: whether the mechanism exists at all (a cgroup v2
+ * hierarchy) and whether it works on this host (a REAL no-op transient scope carrying exactly the
+ * properties the real invocation passes — the binary being on PATH is not the criterion; there must be
+ * a live user manager / D-Bus accepting `--scope` + those properties; 硬规则 3b: 探测绿不得与「真调用
+ * 能成」同形). Seams: QUAY_TEST_SYSTEMD_RUN_AVAILABLE=0|1 forces the answer for hermetic tests.
  */
 export function systemdRunAvailable(): boolean {
   if (_systemdRunAvailable !== null) return _systemdRunAvailable;
   const forced = process.env.QUAY_TEST_SYSTEMD_RUN_AVAILABLE;
   if (forced === "0") return (_systemdRunAvailable = false);
   if (forced === "1") return (_systemdRunAvailable = true);
-  try {
-    // gap-full-suite-scope-oom-policy-stops-whole-suite-unattributable — the probe carries EXACTLY the
-    // always-present properties the real invocation passes (`scopeProbeArgv()` = the shared
-    // SCOPE_PROPERTY_ARGS + a no-op member). The previous probe passed `-p TasksMax=100` — a property
-    // the real call does NOT pass (default tasksMax="") — so a host whose systemd rejects one of the
-    // REAL properties could still report 「available」 and silently run the suite un-enveloped
-    // (硬规则 3b: 探测绿不得与「真调用能成」同形). Sharing the property list makes the probe and the
-    // real call change together (改一处两处同变).
-    const probe = scopeProbeArgv();
-    execFileSync(probe[0], probe.slice(1), {
-      stdio: "ignore",
-      timeout: 10_000,
-    });
-    _systemdRunAvailable = true;
-  } catch {
-    _systemdRunAvailable = false;
-  }
-  return _systemdRunAvailable;
+  return (_systemdRunAvailable = hostResourceAdapter().available().value?.canBound === true);
+}
+
+/** The available adapter's NAMED reason for not being able to bound this host, or null when it can.
+ *  Carried into the round's warning line + the memory evidence so 「not bounded」 always says WHY
+ *  (硬规则 3b) instead of being inferred from a missing field. */
+export function hostResourceUnavailableReason(): string | null {
+  const reading = hostResourceAdapter().available();
+  return reading.value === null ? (reading.reason ?? "unavailable (no reason recorded)") : null;
 }
 
 /**
- * Build the argv that wraps `command` in `systemd-run --user --scope` with the limit properties.
- * `--quiet` suppresses systemd's "Running as unit: …" stdout line (it would be teed into the suite
- * log and pollute the failure-pattern matcher). `bash -c <command>` keeps the exact same command
- * string the un-limited path spawns (the --test-concurrency splice etc. are untouched).
+ * Build the argv that wraps `command` in a bounded scope. Thin, exported delegate to the host
+ * adapter's `launchArgv` — the runner ⛔ does not spell a `systemd-run` argv of its own (硬规则 5b);
+ * the adapter builds it through Core's ONE `boundedScopeArgv`, the same builder the serve/anchor
+ * envelope uses, so the property list and the `-p` ordering cannot drift between the two.
+ *
+ * On a host with no bounding mechanism the adapter returns the PLAIN `bash -c <command>` argv — the
+ * exact same command string the pre-existing un-limited path spawned (the `--test-concurrency` splice
+ * etc. are untouched), so no caller has to branch on it.
  */
 export function buildSystemdRunArgv(command: string, limits: SystemdRunLimits = DEFAULT_SYSTEMD_RUN_LIMITS): string[] {
-  const argv = [
-    "systemd-run",
-    "--user",
-    "--scope",
-    "--quiet",
-    // gap-full-suite-scope-oom-policy-stops-whole-suite-unattributable — the ALWAYS-present properties,
-    // taken from the ONE shared definition (SCOPE_PROPERTY_ARGS): `MemoryAccounting=yes` (so
-    // memory.peak / memory.events are readable for the per-run evidence) + `OOMPolicy=continue`.
-    // OOMPolicy is the load-bearing one: systemd's DEFAULT scope policy is `stop`, so ONE OOM-killed
-    // process TERMs the WHOLE suite scope — test.sh's abort trap then prints "terminated by an external
-    // signal" and every remaining test is cancelled with NO failing file to attribute (the 2026-10-10
-    // phenomenon). `continue` lets only the OOM'd process die, so its own test file's failure is
-    // attributed; the scope keeps running. Probe parity: `scopeProbeArgv()` (the availability probe)
-    // carries exactly these pairs, so 「probe green」 implies the real call accepts them.
-    ...SCOPE_PROPERTY_ARGS,
-  ];
-  // memoryMax/cpuQuota/tasksMax/memorySwapMax 为空 ⇒ 不传对应 -p — cgroup 对该维不设限制（人裁定：不设限制
-  // 就在机制上不传该参数，字面值只在写它的机器上等价于无限制，CLAUDE.md 推论二）。
-  if (limits.memoryMax) argv.push("-p", `MemoryMax=${limits.memoryMax}`);
-  if (limits.cpuQuota) argv.push("-p", `CPUQuota=${limits.cpuQuota}`);
-  if (limits.tasksMax) argv.push("-p", `TasksMax=${limits.tasksMax}`);
-  if (limits.memorySwapMax) argv.push("-p", `MemorySwapMax=${limits.memorySwapMax}`);
-  argv.push("bash", "-c", command);
-  return argv;
+  return hostResourceAdapter().launchArgv(command, limits);
+}
+
+/** The trailing `run-*.scope` of a pid's cgroup path, or null when it is not inside one. Exported so
+ *  the caller-scope exclusion below and any reader share ONE extraction (硬规则 5b). */
+export function scopeUnitOfPid(pid: number): string | null {
+  try {
+    const m = fs.readFileSync(`/proc/${pid}/cgroup`, "utf8").match(/\/(run-[^/\n]+\.scope)\s*$/m);
+    return m ? m[1] : null;
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -1440,22 +1660,28 @@ export function buildSystemdRunArgv(command: string, limits: SystemdRunLimits = 
  * `run-p<pid>-<invocation>.scope` where <pid> is the spawned systemd-run process's pid (verified on
  * this host). Polls `systemctl --user list-units` (the scope appears a moment after spawn); returns
  * the unit name or null after `timeoutMs`.
+ *
+ * ⛔ The CALLER's own scope is not the suite's scope, even though it matches the same `run-*` shape.
+ * `systemd-run --scope` moves the spawned process into the new scope only once the transient unit is
+ * REGISTERED — until then /proc/<pid>/cgroup still names the cgroup it was forked in, which is the
+ * caller's. In the REAL suite the caller's cgroup IS the suite's own auto-named `run-uNNN.scope`, so a
+ * naive "first `run-*.scope` wins" match returns the caller's: measured 2026-10-15, the AC1 evidence
+ * file then described a scope nobody set a ceiling on (`MemoryMax=infinity`, kernel `memory.max=max`)
+ * instead of the suite's applied 27917287424. Reading `run-*.scope` from the caller and refusing it is
+ * what makes the poll WAIT for the child's own unit, which is the answer the caller asked for.
  */
 export async function findSuiteScopeUnit(pid: number, timeoutMs = 8_000): Promise<string | null> {
   const start = Date.now();
+  // The scope THIS process already lives in (null when it is not inside a `run-*.scope`): the child
+  // only counts once it has left it.
+  const callerUnit = scopeUnitOfPid(process.pid);
   // Preferred: the child's OWN cgroup names its scope directly. systemd transient-scope naming is
   // `run-<uuid>.scope` — the older `run-p<pid>-` form (the heuristic below) NEVER matches on this
   // systemd, so the AC1 evidence was silently never captured and the hermetic cgroup test polled
   // to timeout. /proc/<pid>/cgroup is authoritative regardless of systemd's naming scheme.
   const fromCgroup = (): string | null => {
-    try {
-      const cg = fs.readFileSync(`/proc/${pid}/cgroup`, "utf8");
-      const m = cg.match(/\/(run-[^/\n]+\.scope)\s*$/m);
-      if (m) return m[1];
-    } catch {
-      // transient — retry
-    }
-    return null;
+    const unit = scopeUnitOfPid(pid);
+    return unit && unit !== callerUnit ? unit : null;
   };
   const prefix = `run-p${pid}-`;
   while (Date.now() - start < timeoutMs) {
@@ -1484,6 +1710,14 @@ export async function findSuiteScopeUnit(pid: number, timeoutMs = 8_000): Promis
  * properties systemd actually applied (`systemctl --user show <unit>` → MemoryMax/CPUQuotaPerSecUSec/
  * TasksMax/Effective*), written to `<stateDir>/suite-cgroup-evidence.txt`. Best-effort — evidence
  * capture must never fail the run.
+ *
+ * ⚠️ These properties are read for the unit `findSuiteScopeUnit` resolved — so when THAT resolves the
+ * caller's own scope instead of the suite's, this file faithfully witnesses a ceiling nobody set
+ * (`MemoryMax=infinity`). Measured 2026-10-15: that is exactly what it did inside a real suite round
+ * until the caller-scope exclusion landed. The fix belongs there (one resolution), ⛔ not in a second
+ * reading of the cgroup attribute here: `systemctl --user show` DOES report the applied `MemoryMax`
+ * once the right unit is asked (same measurement: 27917287424 property == 27917287424 in
+ * `/sys/fs/cgroup<ControlGroup>/memory.max`).
  */
 export function recordSystemdRunEvidence(stateDir: string, scopeUnit: string, limits: SystemdRunLimits): void {
   try {
@@ -1535,32 +1769,32 @@ export function parseSystemdBytesToBytes(raw: string): number | null {
   return mb === null ? null : Math.round(mb * 1024 * 1024);
 }
 
-/** Read the cgroup v2 `memory.events` counters (`oom`, `oom_kill`). null when the file is unreadable /
- *  has neither key (⛔ never a fabricated 0 — 硬规则 6; the caller treats null as 「未读到」, not 「无 OOM」). */
+/** Read the scope's `oom` / `oom_kill` event counters through the HOST ADAPTER. null when the adapter
+ *  could not produce the reading (⛔ never a fabricated 0 — 硬规则 6; the caller treats null as
+ *  「未读到」, not 「无 OOM」). Narrow on purpose: this is the legacy two-key shape its callers use —
+ *  the adapter's fuller reading (incl. `max`) is available via `readMemoryEventsThroughAdapter`. */
 export function readCgroupMemoryEvents(cgroupDir: string): { oom: number; oomKill: number } | null {
-  try {
-    const text = fs.readFileSync(path.join(cgroupDir, "memory.events"), "utf8");
-    const oom = /^oom\s+(\d+)$/m.exec(text);
-    const oomKill = /^oom_kill\s+(\d+)$/m.exec(text);
-    if (!oom && !oomKill) return null;
-    return { oom: oom ? Number(oom[1]) : 0, oomKill: oomKill ? Number(oomKill[1]) : 0 };
-  } catch {
-    return null;
-  }
+  const r = readMemoryEventsThroughAdapter(cgroupDir);
+  return r.value === null ? null : { oom: r.value.oom, oomKill: r.value.oomKill };
 }
 
-/** Read the cgroup v2 `memory.peak` high-water mark (bytes), falling back to `memory.current` on older
- *  kernels. null when neither is readable (⛔ never a fabricated 0 — 硬规则 6). */
+/** The adapter's full `memory.events` reading for a scope DIRECTORY, with the three-valued shape
+ *  (value + reason) preserved for callers that must distinguish 「no OOM」 from 「not read」. */
+export function readMemoryEventsThroughAdapter(cgroupDir: string): AdapterReading<MemoryEventReading> {
+  return hostResourceAdapter().readMemoryEvents(scopeHandleFromDir(cgroupDir));
+}
+
+/** The scope's memory reading (current/peak/limit/swap/stat-breakdown/PSI) for a scope DIRECTORY,
+ *  through the adapter. */
+export function readMemoryThroughAdapter(cgroupDir: string): AdapterReading<MemoryReading> {
+  return hostResourceAdapter().readMemory(scopeHandleFromDir(cgroupDir));
+}
+
+/** Read the scope's memory high-water mark in bytes (`memory.peak`, falling back to `memory.current`
+ *  on older kernels) through the HOST ADAPTER. null when the adapter could not produce the reading
+ *  (⛔ never a fabricated 0 — 硬规则 6). */
 export function readCgroupMemoryPeak(cgroupDir: string): number | null {
-  for (const file of ["memory.peak", "memory.current"]) {
-    try {
-      const v = Number(String(fs.readFileSync(path.join(cgroupDir, file), "utf8")).trim());
-      if (Number.isFinite(v)) return v;
-    } catch {
-      /* try the next file */
-    }
-  }
-  return null;
+  return readMemoryThroughAdapter(cgroupDir).value?.peakBytes ?? null;
 }
 
 /**
@@ -1606,17 +1840,319 @@ export interface SuiteMemorySampler {
 }
 
 /**
- * Start sampling the suite scope's cgroup every `intervalMs` (default 2s) and once more on `stop()`.
- * `cgroupDirProvider` is resolved lazily each sample: at round start the transient scope unit may not
- * exist yet, so a one-shot resolve would return null and make the whole evidence inert.
+ * Add fields to the ALREADY-WRITTEN per-run evidence file (`<stateDir>/suite-memory-evidence-<runId>.json`).
+ *
+ * WHY a second write exists at all: the sampling window CLOSES while the suite's cgroup still exists
+ * (the transient scope is destroyed at suite exit ⇒ the final reading must be taken then), but two of
+ * the dimensions are only computable AFTER that point — the per-file intervals (every `__PERFILE__`
+ * line has arrived) and the phase windows (the accumulator's last boundary). The alternative — holding
+ * the whole evidence until the round is finalized — would drop the peak/OOM readings, which is the one
+ * thing this file exists for.
+ *
+ * ⛔ It is NOT a second writer: same module, same `writeSuiteMemoryEvidence`, same runId ⇒ the same
+ * path, strictly widened. An unreadable/absent base file is a NO-OP (the concurrency reading alone is
+ * not worth inventing the numbers the sampler owned).
+ */
+export function augmentSuiteMemoryEvidence(
+  stateDir: string,
+  runId: string,
+  patch: { concurrency: SuiteConcurrencyReading },
+): void {
+  const file = path.join(stateDir, `suite-memory-evidence-${runId}.json`);
+  let base: Record<string, unknown>;
+  try {
+    base = JSON.parse(fs.readFileSync(file, "utf8")) as Record<string, unknown>;
+  } catch {
+    return; // best-effort: no base ⇒ nothing to widen (never a half-invented evidence file)
+  }
+  if (!base || typeof base !== "object") return;
+  writeSuiteMemoryEvidence(stateDir, { ...base, ...patch } as unknown as SuiteMemoryEvidenceWritten);
+}
+
+// ── gap-suite-memory-telemetry-…-unknown-not-zero: the PURE aggregation half ──────────────────────
+// Everything below is a pure function of readings the adapter already produces — no new instrument,
+// no second cgroup reader (硬规则 5b). They are exported so the round's evidence can be RE-DERIVED from
+// the raw carriers by a reader (AC3's cross-check), instead of being trusted because it was written.
+
+/** The parsed `memory.pressure` block: both the `some` and the `full` line. `null` for a line the
+ *  kernel does not report. ⚠️ This is the BOTH-lines reading the diagnosis needs; `parsePressureSomeTotal`
+ *  (suite-accounting.ts) stays the ONE parser for its narrower callers — ⛔ the two are not merged
+ *  because merging would silently change what the phase accounting's existing contract returns. */
+export interface PressureBlock {
+  someAvg10: number | null;
+  fullAvg10: number | null;
+  someTotal: number | null;
+  fullTotal: number | null;
+}
+
+export function parsePressureBlock(text: string | null): PressureBlock | null {
+  if (text === null || text.trim() === "") return null;
+  const out: PressureBlock = { someAvg10: null, fullAvg10: null, someTotal: null, fullTotal: null };
+  let saw = false;
+  for (const line of text.split("\n")) {
+    const m = /^(some|full)\s+(.*)$/.exec(line.trim());
+    if (!m) continue;
+    saw = true;
+    const avg10 = /\bavg10=([0-9.]+)/.exec(m[2]);
+    const total = /\btotal=(\d+)/.exec(m[2]);
+    const key = m[1] as "some" | "full";
+    if (avg10) out[key === "some" ? "someAvg10" : "fullAvg10"] = Number(avg10[1]);
+    if (total) out[key === "some" ? "someTotal" : "fullTotal"] = Number(total[1]);
+  }
+  return saw ? out : null;
+}
+
+/** Byte-wise MAX of two `memory.stat` snapshots, key by key: a key absent on one side is taken from
+ *  the other (缺值 ≠ 0 — the max of 「unreadable」 and 「1234」 is 1234, ⛔ never 1234 vs a fabricated 0). */
+export function maxMemoryStat(
+  a: SuiteMemoryStatSample | null,
+  b: SuiteMemoryStatSample | null,
+): SuiteMemoryStatSample | null {
+  if (a === null) return b;
+  if (b === null) return a;
+  const keys: Array<keyof SuiteMemoryStatSample> = [
+    "anonBytes",
+    "fileBytes",
+    "shmemBytes",
+    "fileMappedBytes",
+    "sockBytes",
+  ];
+  const out = { ...a };
+  for (const k of keys) {
+    const x = a[k];
+    const y = b[k];
+    out[k] = x === null ? y : y === null ? x : Math.max(x, y);
+  }
+  return out;
+}
+
+/** The max number of `[startMs, endMs]` intervals overlapping at one instant, OPTIONALLY restricted
+ *  to a window (intervals are CLIPPED to it). This is the pure kernel of 「how many files ran at
+ *  once」 — ⛔ NOT `laneCount` and ⛔ NOT nproc. Zero-length intervals are dropped (a file that
+ *  started and ended at the same ms was never observed running); `null` when nothing was measurable. */
+export function maxIntervalOverlap(
+  intervals: ReadonlyArray<readonly [number, number]>,
+  window?: readonly [number, number],
+): number | null {
+  const events: Array<[number, number]> = [];
+  for (const [rawS, rawE] of intervals) {
+    if (!Number.isFinite(rawS) || !Number.isFinite(rawE)) continue;
+    let s = rawS;
+    let e = rawE;
+    if (window) {
+      s = Math.max(s, window[0]);
+      e = Math.min(e, window[1]);
+    }
+    if (e <= s) continue;
+    events.push([s, 1], [e, -1]);
+  }
+  if (events.length === 0) return null;
+  // End before start at the SAME ms: a file ending at t and another starting at t are not concurrent.
+  events.sort((x, y) => x[0] - y[0] || x[1] - y[1]);
+  let cur = 0;
+  let max = 0;
+  for (const [, delta] of events) {
+    cur += delta;
+    if (cur > max) max = cur;
+  }
+  return max;
+}
+
+/** The per-file intervals of a round, from its `perFile` records (`end_ms` + `duration_ms` are what the
+ *  reporter emits; `startedAtMs`/`endedAtMs` are the round record's normalized form of the same two
+ *  numbers). A record missing either bound contributes NOTHING (缺值 ≠ 0). */
+export interface FileInterval {
+  file: string;
+  startMs: number;
+  endMs: number;
+}
+
+export function fileIntervalsFromPerFile(perFile: unknown): FileInterval[] {
+  const out: FileInterval[] = [];
+  if (!Array.isArray(perFile)) return out;
+  for (const rec of perFile) {
+    const o = rec as { file?: unknown; startedAtMs?: unknown; endedAtMs?: unknown };
+    const s = o?.startedAtMs;
+    const e = o?.endedAtMs;
+    if (typeof s !== "number" || typeof e !== "number" || !Number.isFinite(s) || !Number.isFinite(e)) continue;
+    out.push({ file: typeof o.file === "string" ? o.file : "", startMs: s, endMs: e });
+  }
+  return out;
+}
+
+/** MEASURED concurrency per phase: the max per-file interval overlap INSIDE each phase's own window.
+ *  This is the value the round records — and the value AC3 re-derives from the same carriers. */
+export function perPhaseConcurrency(
+  intervals: ReadonlyArray<FileInterval>,
+  phases: ReadonlyArray<{ phase: string; start_ms: number; end_ms: number }>,
+): Record<string, number> | null {
+  if (intervals.length === 0 || phases.length === 0) return null;
+  const pairs = intervals.map((i) => [i.startMs, i.endMs] as const);
+  const out: Record<string, number> = {};
+  let any = false;
+  for (const p of phases) {
+    const max = maxIntervalOverlap(pairs, [p.start_ms, p.end_ms]);
+    if (max === null) continue;
+    // A phase can appear twice in a repaired record sequence (replacePhase renames the in-flight one);
+    // the reading for a name is the largest overlap observed under it.
+    out[p.phase] = out[p.phase] === undefined ? max : Math.max(out[p.phase], max);
+    any = true;
+  }
+  return any ? out : null;
+}
+
+/** One planned-file match predicate. A process's argv names the file it runs (`node <abs-path>`), so
+ *  a cmdline matches when it CONTAINS one of the planned paths — resolved against the round's root,
+ *  because the plan probe reports root-relative paths while the argv carries absolute ones.
+ *
+ *  `null` planned set ⇒ **`null`**, not a predicate that answers `false`: a round whose plan is unknown
+ *  (an explicit `--command`, a failed probe) has NO opinion about which process was a planned test file,
+ *  and a `false`-answering predicate would make every bucket 「0 planned / 0 descendants」 — the
+ *  fabricated measurement 「no planned process ran」, which is exactly what 硬规则 3b forbids. */
+export function plannedFileMatcher(
+  plannedFiles: readonly string[] | null,
+  root: string,
+): ((cmdline: string | null) => boolean) | null {
+  if (plannedFiles === null) return null;
+  const needles = new Set<string>();
+  for (const f of plannedFiles) {
+    needles.add(f);
+    needles.add(path.resolve(root, f));
+  }
+  const list = [...needles].filter((n) => n.length > 0);
+  return (cmdline) => {
+    if (cmdline === null) return false;
+    for (const n of list) if (cmdline.includes(n)) return true;
+    return false;
+  };
+}
+
+/** The scope's process tree, split for the memory diagnosis. Every bucket is counted INDEPENDENTLY:
+ *  a process whose RSS could not be read contributes to the COUNT but not to the summed bytes, and
+ *  when NOTHING in a bucket had a readable RSS the sum is `null` — ⛔ never 0, which would be the
+ *  fabricated measurement 「measured it: it used nothing」 (硬规则 3b/6). */
+export interface ProcessTreeBucket {
+  count: number;
+  /** The summed RSS of the processes whose RSS WAS readable, or `null` when none was. */
+  rssBytes: number | null;
+  rssReadable: number;
+  rssUnreadable: number;
+}
+
+export interface ProcessTreeSplit {
+  /** ALWAYS measured (it needs no plan — just `cgroup.procs` plus each process's own `/proc` entry). */
+  total: ProcessTreeBucket;
+  /** The three PLAN-DEPENDENT buckets: `null` as a SET when the round's planned file set was unknown
+   *  (then the split was never made — ⛔ NOT three empty buckets, which would read as the measurement
+   *  「nothing planned ran」). */
+  planned: ProcessTreeBucket | null;
+  descendant: ProcessTreeBucket | null;
+  other: ProcessTreeBucket | null;
+}
+
+export function splitProcessTree(
+  processes: ReadonlyArray<{ pid: number; ppid: number | null; rssBytes: number | null; cmdline: string | null }>,
+  isPlanned: ((cmdline: string | null) => boolean) | null,
+): ProcessTreeSplit {
+  const byPid = new Map<number, { ppid: number | null; rssBytes: number | null; cmdline: string | null }>();
+  for (const p of processes) byPid.set(p.pid, p);
+  // A process is a DESCENDANT when walking up its ppid chain (within the scope's own pid set) reaches
+  // a planned test-file process. Walks are memoized + depth-bounded so a ppid cycle (a reparented or
+  // torn read) cannot loop forever.
+  const kindCache = new Map<number, "planned" | "descendant" | "other">();
+  const kindOf = (pid: number): "planned" | "descendant" | "other" => {
+    const cached = kindCache.get(pid);
+    if (cached) return cached;
+    const seen = new Set<number>();
+    let cur: number | undefined = pid;
+    let depth = 0;
+    let verdict: "planned" | "descendant" | "other" = "other";
+    while (cur !== undefined && depth < 64) {
+      if (seen.has(cur)) break; // a cycle ⇒ not reachable from a planned process by a clean chain
+      seen.add(cur);
+      const proc = byPid.get(cur);
+      if (!proc) break;
+      if (isPlanned !== null && isPlanned(proc.cmdline) === true) {
+        verdict = cur === pid ? "planned" : "descendant";
+        break;
+      }
+      cur = proc.ppid === null ? undefined : proc.ppid;
+      depth += 1;
+    }
+    kindCache.set(pid, verdict);
+    return verdict;
+  };
+  const empty = (): ProcessTreeBucket => ({ count: 0, rssBytes: 0, rssReadable: 0, rssUnreadable: 0 });
+  const acc: Record<"total" | "planned" | "descendant" | "other", ProcessTreeBucket> = {
+    total: empty(),
+    planned: empty(),
+    descendant: empty(),
+    other: empty(),
+  };
+  for (const p of processes) {
+    const kind = kindOf(p.pid);
+    for (const bucket of [acc.total, acc[kind]] as const) {
+      bucket.count += 1;
+      if (p.rssBytes === null) bucket.rssUnreadable += 1;
+      else {
+        bucket.rssBytes = (bucket.rssBytes ?? 0) + p.rssBytes;
+        bucket.rssReadable += 1;
+      }
+    }
+  }
+  for (const bucket of Object.values(acc)) if (bucket.rssReadable === 0) bucket.rssBytes = null;
+  // The plan was unknown ⇒ the three plan-dependent buckets are NOT a measurement: `null` as a SET.
+  if (isPlanned === null) return { total: acc.total, planned: null, descendant: null, other: null };
+  return { total: acc.total, planned: acc.planned, descendant: acc.descendant, other: acc.other };
+}
+
+/** Bucket-wise MAX of two process-tree splits, for the COUNT and for the summed RSS independently
+ *  (they can come from different samples — many short-lived processes and a few large ones are both
+ *  readings worth keeping). `null` means 「nothing had a readable RSS in that bucket」 and loses to any
+ *  real reading, ⛔ never treated as 0; a `null` BUCKET (plan unknown) stays `null` on both sides. */
+function maxTreeSplit(a: ProcessTreeSplit, b: ProcessTreeSplit): ProcessTreeSplit {
+  const pair = (x: ProcessTreeBucket | null, y: ProcessTreeBucket | null): ProcessTreeBucket | null =>
+    x === null || y === null ? null : maxBucket(x, y);
+  return {
+    total: maxBucket(a.total, b.total),
+    planned: pair(a.planned, b.planned),
+    descendant: pair(a.descendant, b.descendant),
+    other: pair(a.other, b.other),
+  };
+}
+
+function maxBucket(a: ProcessTreeBucket, b: ProcessTreeBucket): ProcessTreeBucket {
+  const pick = (x: number | null, y: number | null): number | null =>
+    x === null ? y : y === null ? x : Math.max(x, y);
+  const rssBytes = pick(a.rssBytes, b.rssBytes);
+  const from = a.rssBytes !== null && a.rssBytes === rssBytes ? a : b;
+  return {
+    count: Math.max(a.count, b.count),
+    rssBytes,
+    // The unreadable tally is taken from the sample that produced the winning RSS, so the three
+    // numbers always describe ONE observation rather than a mix of two.
+    rssReadable: from.rssReadable,
+    rssUnreadable: from.rssUnreadable,
+  };
+}
+
+/**
+ * Start sampling the suite scope through the HOST ADAPTER every `intervalMs` (default 2s) and once
+ * more on `stop()`. `scopeProvider` is resolved lazily each sample: at round start the transient scope
+ * unit may not exist yet, so a one-shot resolve would make the whole evidence inert.
  * `phaseProvider` reads the CURRENT suite phase (the runner's PhaseDifferentialAccounting) so the OOM
  * can be reported against the phase it happened in (`oomPhase` = the phase at the first sample whose
  * `oom_kill` was positive; else the last phase seen). The timer is `unref`'d so a missed stop() can
- * never hold the event loop. Hermetic + host-independent: when `cgroupDirProvider()` is null the
- * sampler still runs (phaseProvider advances) and lands `samples: 0` — a genuinely inert reading.
+ * never hold the event loop. Hermetic + host-independent: when `scopeProvider()` returns
+ * `{value: null, reason}` the sampler still runs (phaseProvider advances) and lands `samples: 0` with
+ * every counter `"unknown"` + the adapter's named reason — a genuinely inert reading, ⛔ never a
+ * fabricated 0 (硬规则 3b/6).
  */
 export function startSuiteMemorySampler(opts: {
-  cgroupDirProvider: () => string | null;
+  /** The host adapter to read through. Default: the process's resolved adapter. */
+  adapter?: HostResourceAdapter;
+  /** Resolve the scope of the RUNNING suite child (lazily, every sample). */
+  scopeProvider: () => AdapterReading<ResourceScopeHandle>;
   stateDir: string;
   runId: string;
   memoryMaxBytes: number | null;
@@ -1626,8 +2162,16 @@ export function startSuiteMemorySampler(opts: {
   scopeUnit?: string | null;
   phaseProvider: () => string;
   intervalMs?: number;
+  /** This round's PLANNED test-file set (the runner's own plan), used ONLY to tell a planned test-file
+   *  process from the processes it spawned inside the scope. `null`/absent ⇒ that split is recorded as
+   *  unavailable, ⛔ never as 「no planned process ran」. */
+  plannedFiles?: readonly string[] | null;
+  /** The round's root, for resolving the plan's relative paths against a process's absolute argv. */
+  root?: string;
 }): SuiteMemorySampler {
   const intervalMs = opts.intervalMs ?? 2000;
+  const adapter = opts.adapter ?? hostResourceAdapter();
+  let memory: MemoryReading | null = null;
   let peakBytes: number | null = null;
   let oom = 0;
   let oomKill = 0;
@@ -1640,26 +2184,208 @@ export function startSuiteMemorySampler(opts: {
   // null 会被读成「没读到但这个桶不重要」）。
   let eventsRead = false;
   let peakRead = false;
+  // gap-suite-resource-measurement-needs-a-host-adapter-not-inline-cgroup-calls — the LAST reason the
+  // ADAPTER gave for not producing a reading. The round's evidence must say WHY the counters are
+  // `unknown`, not merely that they are (硬规则 3b): `unknown` + a named reason is actionable, a bare
+  // `unknown` is not.
+  let lastUnavailableReason: string | null = null;
+  let processTreePids: number[] | null = null;
 
-  const sample = (): void => {
+  // ── gap-suite-memory-telemetry-…-unknown-not-zero: the per-sample AGGREGATES ─────────────────────
+  // Every field below is read INDEPENDENTLY and keeps its OWN three-valued state: a field whose source
+  // was absent in every sample lands `null` AND is named in `telemetryUnavailable` with the reason and
+  // the file — ⛔ never 0 (硬规则 3b/6: `0` is the measurement 「read it: nothing there」).
+  const telemetryUnavailable: Record<string, string> = {};
+  let statMax: SuiteMemoryStatSample | null = null;
+  let statAtPeakCurrent: SuiteMemoryStatSample | null = null;
+  let statAtFirstOomKill: SuiteMemoryStatSample | null = null;
+  let currentMax: number | null = null;
+  let swapCurrentMax: number | null = null;
+  let swapPeakMax: number | null = null;
+  let pressureFirst: PressureBlock | null = null;
+  let pressureLast: PressureBlock | null = null;
+  let someAvg10Max: number | null = null;
+  let fullAvg10Max: number | null = null;
+  let eventsFirst: MemoryEventReading | null = null;
+  let eventsLast: MemoryEventReading | null = null;
+  let oomKillAtFirst: number | null = null;
+  let statAtFirstOomKillSeen = false;
+  /** 「THIS sample set the running peak of `memory.current`」 — the flag the at-peak process-tree read
+   *  uses, so `atPeakProcesses`/`atPeakRssBytes` describe the SAME sample as `statAtPeakCurrent` even
+   *  when a later sample raises the peak again (a one-shot latch would pin them to an earlier, lower
+   *  peak — the two readings would silently describe different instants). */
+  let peakSampleThisTick = false;
+  /** The `memory.stat` snapshot of the CURRENT sample (what `statAtFirstOomKill` needs: what was in the
+   *  scope at the sample where the killing started — ⛔ NOT the running max, which would smear a later,
+   *  larger sample backwards in time, and ⛔ NOT the previous sample's reading, which would report a
+   *  stat the OOM sample never had). */
+  let lastStatSnapshot: SuiteMemoryStatSample | null = null;
+  // Process-tree accounting (Plan §4): the scope's own processes, split into planned test-file
+  // processes vs the processes THEY spawned. `null` values stay `null` — a sample whose /proc reads
+  // were torn contributes nothing rather than a fabricated 0.
+  let treeMax: ProcessTreeSplit | null = null;
+  let treeAtPeak: ProcessTreeSplit | null = null;
+  let treeSamples = 0;
+  const isPlanned = plannedFileMatcher(opts.plannedFiles ?? null, opts.root ?? process.cwd());
+  if (isPlanned === null) {
+    // The round never resolved a planned set (an explicit `--command`, a failed probe). NAMED here, so
+    // the evidence says WHY the split is absent instead of presenting three empty buckets as a reading.
+    telemetryUnavailable["processTree.plannedSplit"] =
+      "this round's planned test-file set is unknown (an explicit --command, or the plan probe failed) — " +
+      "the planned-vs-descendant split could not be made, ⛔ not 「no planned process ran」";
+  }
+  const statSampleOf = (stat: MemoryStatBreakdown | null): SuiteMemoryStatSample | null =>
+    stat === null
+      ? null
+      : {
+          anonBytes: stat.anonBytes,
+          fileBytes: stat.fileBytes,
+          shmemBytes: stat.shmemBytes,
+          fileMappedBytes: stat.fileMappedBytes ?? null,
+          sockBytes: stat.sockBytes ?? null,
+        };
+
+  // The instrument's OWN cost (AC4's ≤1% budget is about `samplerCostMs / suite wall`, and a promise
+  // about one's own overhead is not a measurement — 硬规则 4). `hrtime` because a sample costs well
+  // under a millisecond and a ms-resolution clock would read a structurally-guaranteed 0.
+  let samplerCostNs = 0;
+
+  const sampleOnce = (): void => {
     lastPhase = opts.phaseProvider() || lastPhase;
-    const dir = opts.cgroupDirProvider();
-    if (!dir) return;
-    const peak = readCgroupMemoryPeak(dir);
-    if (peak !== null) {
-      peakRead = true;
-      peakBytes = peakBytes === null ? peak : Math.max(peakBytes, peak);
+    // Re-armed every sample: a tick whose memory reading failed must NOT leave the previous tick's
+    // 「this is the peak sample」 standing for the process-tree read below.
+    peakSampleThisTick = false;
+    const scope = opts.scopeProvider();
+    if (scope.value === null) {
+      lastUnavailableReason = scope.reason ?? "scope unavailable (no reason recorded)";
+      return;
     }
-    const ev = readCgroupMemoryEvents(dir);
-    if (ev) {
+    const handle = scope.value;
+    const mem = adapter.readMemory(handle);
+    if (mem.value !== null) {
+      // The high-water mark is a MAX over samples: a later, lower reading must not lower it. `peakBytes`
+      // already carries the kernel's own high-water mark, so the max is belt-and-braces across the
+      // legacy `memory.current` fallback.
+      if (mem.value.peakBytes !== null) {
+        peakRead = true;
+        peakBytes = peakBytes === null ? mem.value.peakBytes : Math.max(peakBytes, mem.value.peakBytes);
+      }
+      memory = memory === null || memory.peakBytes === null || mem.value.peakBytes === null
+        ? mem.value
+        : { ...mem.value, peakBytes: Math.max(memory.peakBytes, mem.value.peakBytes) };
+      const snapshot = statSampleOf(mem.value.stat);
+      lastStatSnapshot = snapshot;
+      statMax = maxMemoryStat(statMax, snapshot);
+      // Whether THIS sample is the peak one — recomputed on every sample (⛔ not latched once), so the
+      // at-peak readings below always describe the CURRENT high-water sample.
+      peakSampleThisTick =
+        mem.value.currentBytes !== null && (currentMax === null || mem.value.currentBytes > currentMax);
+      if (mem.value.currentBytes !== null) {
+        const isNewPeak = currentMax === null || mem.value.currentBytes > currentMax;
+        currentMax = isNewPeak ? mem.value.currentBytes : currentMax;
+        // The snapshot AT the peak sample — the reading that says whether the peak was anonymous
+        // memory or reclaimable page cache (a single last-sample stat cannot answer it).
+        if (isNewPeak) statAtPeakCurrent = snapshot;
+      }
+      if (mem.value.swapCurrentBytes !== null) {
+        swapCurrentMax =
+          swapCurrentMax === null ? mem.value.swapCurrentBytes : Math.max(swapCurrentMax, mem.value.swapCurrentBytes);
+      }
+      if (mem.value.swapPeakBytes !== null && mem.value.swapPeakBytes !== undefined) {
+        swapPeakMax = swapPeakMax === null ? mem.value.swapPeakBytes : Math.max(swapPeakMax, mem.value.swapPeakBytes);
+      }
+      const psi = parsePressureBlock(mem.value.pressure);
+      if (psi !== null) {
+        if (pressureFirst === null) pressureFirst = psi;
+        pressureLast = psi;
+        if (psi.someAvg10 !== null) {
+          someAvg10Max = someAvg10Max === null ? psi.someAvg10 : Math.max(someAvg10Max, psi.someAvg10);
+        }
+        if (psi.fullAvg10 !== null) {
+          fullAvg10Max = fullAvg10Max === null ? psi.fullAvg10 : Math.max(fullAvg10Max, psi.fullAvg10);
+        }
+      }
+      // The adapter's own per-field reasons (硬规则 3b) — recorded as-is, so the evidence names the
+      // FILE that was missing rather than a generic 「unavailable」.
+      for (const [field, reason] of Object.entries(mem.value.unavailableFields ?? {})) {
+        telemetryUnavailable[`memory.${field}`] = reason;
+      }
+    } else {
+      lastUnavailableReason = mem.reason ?? "memory reading unavailable (no reason recorded)";
+      for (const field of ["stat", "pressure", "currentBytes", "swapCurrentBytes", "swapPeakBytes"]) {
+        if (telemetryUnavailable[`memory.${field}`] === undefined) {
+          telemetryUnavailable[`memory.${field}`] = mem.reason ?? "memory reading unavailable (no reason recorded)";
+        }
+      }
+    }
+    const ev = adapter.readMemoryEvents(handle);
+    if (ev.value !== null) {
       eventsRead = true;
       // The phase at the moment oom_kill FIRST became positive is where the OOM happened. Only latch
       // it on the 0→>0 transition so a later sample in another phase cannot overwrite it.
-      if (ev.oomKill > 0 && oomKill === 0) oomPhase = lastPhase;
-      oom = Math.max(oom, ev.oom);
-      oomKill = Math.max(oomKill, ev.oomKill);
+      if (ev.value.oomKill > 0 && oomKill === 0) oomPhase = lastPhase;
+      oom = Math.max(oom, ev.value.oom);
+      oomKill = Math.max(oomKill, ev.value.oomKill);
+      if (eventsFirst === null) {
+        eventsFirst = ev.value;
+        oomKillAtFirst = ev.value.oomKill;
+      }
+      eventsLast = ev.value;
+      if (
+        !statAtFirstOomKillSeen &&
+        oomKillAtFirst !== null &&
+        ev.value.oomKill > oomKillAtFirst
+      ) {
+        statAtFirstOomKillSeen = true;
+        // The stat of THIS sample. `null` when this sample had no readable stat — ⛔ NOT the previous
+        // sample's, which would report a snapshot the OOM sample never had.
+        statAtFirstOomKill = mem.value !== null ? lastStatSnapshot : null;
+      }
+      for (const [field, reason] of Object.entries(ev.value.unavailableFields ?? {})) {
+        telemetryUnavailable[`events.${field}`] = reason;
+      }
+    } else {
+      lastUnavailableReason = ev.reason ?? "memory-event reading unavailable (no reason recorded)";
+      for (const field of ["high", "max", "oom", "oomKill"]) {
+        if (telemetryUnavailable[`events.${field}`] === undefined) {
+          telemetryUnavailable[`events.${field}`] = ev.reason ?? "memory-event reading unavailable (no reason recorded)";
+        }
+      }
+    }
+    const tree = adapter.readProcessTree(handle);
+    if (tree.value !== null) {
+      processTreePids = tree.value.pids;
+      if (tree.value.processes !== undefined) {
+        const split = splitProcessTree(tree.value.processes, isPlanned);
+        treeMax = treeMax === null ? split : maxTreeSplit(treeMax, split);
+        // AT THE PEAK sample: the process count / RSS at the moment the scope held the most memory.
+        // `peakSampleThisTick` (⛔ not a one-shot latch) keeps this on the SAME sample as
+        // `statAtPeakCurrent`, so 「the peak was anon」 and 「there were N processes using M bytes at the
+        // peak」 describe one instant rather than two.
+        if (peakSampleThisTick) treeAtPeak = split;
+        treeSamples += 1;
+      } else if (telemetryUnavailable["processTree.processes"] === undefined) {
+        telemetryUnavailable["processTree.processes"] =
+          `the ${adapter.kind} adapter lists the scope's pids but does not describe them (no per-process RSS/argv)`;
+      }
+      for (const [field, reason] of Object.entries(tree.value.unavailableFields ?? {})) {
+        telemetryUnavailable[`processTree.${field}`] = reason;
+      }
+    } else if (telemetryUnavailable["processTree"] === undefined) {
+      telemetryUnavailable.processTree = tree.reason ?? "the scope's process tree is not readable";
     }
     samples += 1;
+  };
+
+  /** One timed sample — the ONLY entry point (the timer, the first sample and stop() all go through
+   *  it), so `samplerCostMs` accounts for every read the instrument performs. */
+  const sample = (): void => {
+    const t0 = process.hrtime.bigint();
+    try {
+      sampleOnce();
+    } finally {
+      samplerCostNs += Number(process.hrtime.bigint() - t0);
+    }
   };
 
   sample();
@@ -1683,11 +2409,117 @@ export function startSuiteMemorySampler(opts: {
         scopeUnit: opts.scopeUnit ?? null,
         samples,
         capturedAt: new Date().toISOString(),
+        // gap-suite-resource-measurement-needs-a-host-adapter-not-inline-cgroup-calls — WHICH mechanism
+        // produced (or could not produce) the readings, and WHY. Without these a reader cannot tell
+        // 「the host has no accounting」 from 「accounting existed and reported zeros」.
+        adapter: {
+          kind: adapter.kind,
+          available: adapter.available().value !== null,
+          // The reason is reported only when NOTHING was produced. A round that DID read (arm: a real
+          // scope) routinely fails its FINAL sample — the transient scope is destroyed the moment the
+          // suite child exits — and reporting that expected teardown failure here would read as 「this
+          // round was blind」 while `samples > 0` says otherwise (硬规则 3b: 一个读数不得同时表示两件事).
+          reason: memory === null && !eventsRead ? lastUnavailableReason : null,
+        },
+        ...(memory ? { memory } : {}),
+        ...(processTreePids ? { processTreePids } : {}),
+        // gap-suite-memory-telemetry-…-unknown-not-zero — the AGGREGATES over the round's samples, with
+        // a per-field 「read ✓」/「could not read, and here is WHY」 split (硬规则 3b). Every field is
+        // `null` exactly when `unavailable` names it: a reader must never have to guess whether a
+        // missing number means 「nothing there」 (0) or 「never read」.
+        memoryTelemetry: {
+          statMax: statMax ?? null,
+          statAtPeakCurrent: statAtPeakCurrent ?? null,
+          statAtFirstOomKill: statAtFirstOomKill ?? null,
+          currentMaxBytes: currentMax,
+          swapCurrentMaxBytes: swapCurrentMax,
+          swapPeakBytes: swapPeakMax,
+          psi:
+            pressureFirst === null && pressureLast === null
+              ? null
+              : {
+                  someAvg10Max,
+                  fullAvg10Max,
+                  // The DELTA over the round (last − first): the counters are cumulative since the scope
+                  // was created, so their absolute values say nothing about THIS round's window. A
+                  // counter that only ever read once has no delta — `null`, ⛔ not 0.
+                  someTotalDelta:
+                    pressureFirst?.someTotal !== null &&
+                    pressureFirst?.someTotal !== undefined &&
+                    pressureLast?.someTotal !== null &&
+                    pressureLast?.someTotal !== undefined
+                      ? Math.max(0, pressureLast.someTotal - pressureFirst.someTotal)
+                      : null,
+                  fullTotalDelta:
+                    pressureFirst?.fullTotal !== null &&
+                    pressureFirst?.fullTotal !== undefined &&
+                    pressureLast?.fullTotal !== null &&
+                    pressureLast?.fullTotal !== undefined
+                      ? Math.max(0, pressureLast.fullTotal - pressureFirst.fullTotal)
+                      : null,
+                },
+          eventsDelta: eventsLast === null
+            ? null
+            : {
+                high: deltaOrNull(eventsFirst?.high ?? null, eventsLast.high),
+                max: deltaOrNull(eventsFirst?.max ?? null, eventsLast.max),
+                oom: deltaOrNull(eventsFirst?.oom ?? null, eventsLast.oom),
+                oomKill: deltaOrNull(eventsFirst?.oomKill ?? null, eventsLast.oomKill),
+              },
+          samples,
+          samplerCostMs: samplerCostNs / 1e6,
+          unavailable: telemetryUnavailable,
+        },
+        processTreeAccounting: {
+          maxProcesses: treeMax?.total.count ?? null,
+          maxRssBytes: treeMax?.total.rssBytes ?? null,
+          atPeakProcesses: treeAtPeak?.total.count ?? null,
+          atPeakRssBytes: treeAtPeak?.total.rssBytes ?? null,
+          plannedMax: treeMax?.planned?.count ?? null,
+          plannedRssAtMaxBytes: treeMax?.planned?.rssBytes ?? null,
+          descendantMax: treeMax?.descendant?.count ?? null,
+          descendantRssAtMaxBytes: treeMax?.descendant?.rssBytes ?? null,
+          otherMax: treeMax?.other?.count ?? null,
+          samples: treeSamples,
+          unavailable: processTreeAccountingReason(treeMax, treeSamples, telemetryUnavailable),
+        },
       };
       writeSuiteMemoryEvidence(opts.stateDir, evidence);
       return evidence;
     },
   };
+}
+
+/** A cumulative-counter delta (last − first), or `null` when either end could not be read — ⛔ a
+ *  one-sided reading is NOT a delta of 0 (硬规则 3b). Clamped at 0: a counter that went DOWN means the
+ *  scope was recreated between samples, which is not negative activity. */
+export function deltaOrNull(first: number | null, last: number | null): number | null {
+  if (first === null || last === null) return null;
+  return Math.max(0, last - first);
+}
+
+/** The named reason the process-tree accounting is inert, or `null` when it produced something. The
+ *  three distinct causes get three distinct strings — 「no scope」 / 「the plan is unknown」 / 「the host
+ *  lists pids but cannot describe them」 are different facts and must not share one wording. */
+export function processTreeAccountingReason(
+  treeMax: ProcessTreeSplit | null,
+  treeSamples: number,
+  unavailable: Record<string, string>,
+): string | null {
+  if (treeMax !== null && treeSamples > 0) {
+    // Partially readable is still readable — but a per-sample torn read, and an unmeasurable
+    // planned-vs-descendant split, are each worth naming (they are what makes a field `null`).
+    const parts = [
+      unavailable["processTree.processes"],
+      treeMax.planned === null ? unavailable["processTree.plannedSplit"] : undefined,
+    ].filter((r): r is string => typeof r === "string" && r.length > 0);
+    return parts.length > 0 ? parts.join("; ") : null;
+  }
+  return (
+    unavailable["processTree"] ??
+    unavailable["processTree.processes"] ??
+    "the scope's process tree was never readable at a sample (no scope resolved, or cgroup.procs unreadable)"
+  );
 }
 
 // ── 计划清单完整性（gap-suite-verdict-green-on-oom-killed-incomplete-run-lands-on-11-percent-of-files）
@@ -2780,6 +3612,10 @@ export async function run(argv: string[]): Promise<number> {
           cancelled: 0,
           tests: 0,
           load: readLoadAvg(),
+          // gap-resource-gate-reads-lagging-loadavg-not-instantaneous-rd — a crashed round carries the
+          // same run-queue components as a normal round (5b: the principle applies at BOTH round-record
+          // writers, not only the one that produced the observation). Absent when /proc/stat is unreadable.
+          ...runQueueFields(),
           state: "red",
           reason: "crashed",
           runner: base.runner,
@@ -2860,6 +3696,29 @@ export async function run(argv: string[]): Promise<number> {
     // 把两者分开的取值：非 null ⇒ 这一维**没评成**（读者不得把它读成「没有缺失」）。
     error: plannedResolution.error ?? (plannedFiles === null ? `plan unavailable (${plannedResolution.source})` : null),
   });
+  // ── memory-aware scheduling: the DECLARED heavy bucket (gap-suite-heavy-files-and-phase-…) ─────
+  // Files whose MEASURED per-file high-water exceeds the project-declared `suite.heavy_threshold_mb`
+  // are handed to test.sh as their own bounded bucket, so they never co-run beyond the declared
+  // `suite.heavy_max_concurrent`. ⛔ BOTH knobs are DECLARED (config → env, host-overridable); with
+  // neither present the mechanism is OFF and nothing is bucketed — there is deliberately no default
+  // threshold literal here (a machine-spec-dependent literal, hard rule 4 推论二).
+  //
+  // ⛔ The measurement window is the runner's OWN round record — the same `memPeakKb` the per-file
+  // cost collection already produces, so the bucket is driven by what this suite ACTUALLY used, not
+  // by a hand-kept list that rots as files change (a list is also a value that cannot take a false
+  // value — hard rule 4). A workspace with no history yet buckets nothing and says so below.
+  const heavyThresholdMb = positiveNumberFromEnv("QUAY_SUITE_HEAVY_THRESHOLD_MB");
+  const heavyMaxConcurrent = positiveIntFromEnv("QUAY_SUITE_HEAVY_MAX_CONCURRENT");
+  let heavyFiles: string[] = [];
+  if (heavyThresholdMb !== undefined && heavyMaxConcurrent !== undefined && plannedFiles && plannedFiles.length > 0) {
+    const highWater = readPerFileHighWaterByName(stateDir);
+    heavyFiles = heavyFileSet(plannedFiles, highWater, heavyThresholdMb * 1024 * 1024);
+    process.stderr.write(
+      `full-suite-runner: heavy bucket — declared threshold ${heavyThresholdMb} MiB, bound ${heavyMaxConcurrent}; ` +
+        `${heavyFiles.length}/${plannedFiles.length} planned file(s) exceed it (measured over ${SUITE_PERFILE_MEMORY_ROUNDS} rounds)` +
+        (highWater.size === 0 ? " — ⚠️ NO per-file measurements in the window, so nothing is bucketed\n" : `: ${heavyFiles.slice(0, 5).join(", ")}${heavyFiles.length > 5 ? ", …" : ""}\n`),
+    );
+  }
   let child: import("node:child_process").ChildProcess;
   // gap-verification-round-in-one-shot-worktree config C — the one-shot worktree REUSES the main
   // repo's warm NODE_COMPILE_CACHE (test.sh honors a user-supplied NODE_COMPILE_CACHE verbatim —
@@ -2896,9 +3755,34 @@ export async function run(argv: string[]): Promise<number> {
     // (`<key>.mem`), appended as mem_peak_kb. One dir, two dimensions — no second env var to wire.
     QUAY_PERFILE_CPU_DIR: perFileCpuDir,
     NODE_OPTIONS: withPerFileCpuPreload(process.env.NODE_OPTIONS),
+    // gap-suite-heavy-files-and-phase-… — the DECLARED heavy bucket, computed above from the
+    // runner's own measurements and handed to test.sh as data (⛔ not re-derived there: test.sh has
+    // no round history, so a second derivation would be a second, silently-diverging answer). An
+    // empty list ⇒ the phase is skipped entirely.
+    ...(heavyFiles.length > 0
+      ? {
+          QUAY_SUITE_HEAVY_FILES: heavyFiles.join("\n"),
+          QUAY_SUITE_HEAVY_MAX_CONCURRENT: String(heavyMaxConcurrent),
+        }
+      : {}),
   };
   if (useSystemdRun) {
-    const sdArgv = buildSystemdRunArgv(command, systemdLimits);
+    // The bounded child is started BY THE ADAPTER (Plan §1's second method): the runner hands it the
+    // command, the declared limits and the spawn context, and gets back the child + a lazy scope
+    // resolver. ⛔ This file no longer spells a `systemd-run` argv OR a spawn option set of its own.
+    const launched = spawnBounded(hostResourceAdapter(), {
+      command,
+      limits: systemdLimits,
+      cwd: root,
+      env: suiteEnv,
+      // The flags/seams that force the un-limited path ARE the caller's veto; the adapter applies its
+      // own availability veto independently (both must permit — see `spawnBounded`).
+      allowBounding: !skipSystemdRun,
+      // detached: the suite child becomes a process-group leader so killChildTree() can terminate
+      // the WHOLE tree (test.sh + its node --test children) — a hung subprocess can't leak the flock.
+      detached: true,
+    });
+    child = launched.child;
     process.stderr.write(
       `full-suite-runner: wrapping suite in systemd-run scope (MemoryMax=${systemdLimits.memoryMax} CPUQuota=${systemdLimits.cpuQuota} TasksMax=${systemdLimits.tasksMax})` +
         // The policy, on the SAME line as the value it produced: a reader sees the DECLARED value, where
@@ -2911,14 +3795,6 @@ export async function run(argv: string[]): Promise<number> {
         (suiteMemoryPolicy.reason ? ` reason=${JSON.stringify(suiteMemoryPolicy.reason)}` : "") +
         `]\n`,
     );
-    child = spawn(sdArgv[0], sdArgv.slice(1), {
-      cwd: root,
-      stdio: ["ignore", "pipe", "pipe"],
-      env: suiteEnv,
-      // detached: the suite child becomes a process-group leader so killChildTree() can terminate
-      // the WHOLE tree (test.sh + its node --test children) — a hung subprocess can't leak the flock.
-      detached: true,
-    });
     // AC1 evidence — fire-and-forget: find the scope unit, capture it into THIS round's record, and
     // dump its applied cgroup properties to <state-dir>/suite-cgroup-evidence.txt (best-effort; never
     // fails the run). `roundScopeUnit` is set as a side effect so the round-record write at the end
@@ -2969,26 +3845,60 @@ export async function run(argv: string[]): Promise<number> {
   phaseAccount = new PhaseDifferentialAccounting(child.pid, phaseLanes);
   phaseAccount.init("static");
 
-  // gap-full-suite-scope-oom-policy-stops-whole-suite-unattributable — sample the suite scope's cgroup
+  // gap-full-suite-scope-oom-policy-stops-whole-suite-unattributable — sample the suite scope
   // (memory.peak / memory.events) while it runs, so a round's peak + OOM counts survive the transient
   // scope's destruction (the unit vanishes at suite exit ⇒ `Result=oom-kill` and `memory.events` are
-  // then unreadable). Only when a REAL scope wraps the suite — an un-enveloped run has no cgroup to
-  // sample. `cgroupDirProvider` resolves lazily (the scope unit may not exist yet at round start).
+  // then unreadable). `scopeProvider` resolves lazily through the host adapter (the scope unit may not
+  // exist yet at round start).
   let memorySampler: SuiteMemorySampler | null = null;
-  if (useSystemdRun) {
-    memorySampler = startSuiteMemorySampler({
-      cgroupDirProvider: () => resolveCgroupV2Dir(child.pid),
-      stateDir,
-      runId,
-      memoryMaxBytes: parseSystemdBytesToBytes(systemdLimits.memoryMax),
-      // The policy is carried ONLY when the applied ceiling IS the policy's value — an explicit seam
-      // override would otherwise be documented with a deployment it did not use (the evidence would
-      // claim a provenance that is false).
-      memoryMaxPolicy: systemdLimits.memoryMax === suiteMemoryPolicy.memoryMax ? suiteMemoryPolicy : undefined,
-      scopeUnit: null,
-      phaseProvider: () => phaseAccount?.phase ?? "",
-    });
-  }
+  // The evidence the sampler landed at stop(), kept so the concurrency dimension can be merged into the
+  // SAME per-run file once the round's per-file intervals + phase windows are complete.
+  let memoryEvidenceForAugment: SuiteMemoryEvidenceWritten | null = null;
+  // gap-suite-resource-measurement-needs-a-host-adapter-not-inline-cgroup-calls — the sampler runs on
+  // EVERY round, including the ones with NO attributable scope (an un-enveloped run, or a host whose
+  // adapter cannot measure). ⛔ Not gated on `useSystemdRun` any more: gating meant a blind round
+  // produced NO evidence FILE at all, and 「no file」 is indistinguishable from 「the runner died before
+  // teardown」 (硬规则 3b). A blind round now lands the file with every reading `unknown` + the
+  // adapter's NAMED reason, which is exactly what the AC2 chain has to show.
+  const runAdapter = hostResourceAdapter();
+  // Why this round has no scope of its own — a NAMED reason, never an empty gap.
+  const noScopeReason = !skipSystemdRun
+    ? (hostResourceUnavailableReason() ?? "the host adapter reported no scope mechanism, without a reason")
+    : "the suite was run UN-ENVELOPED (--no-systemd-run / a hermetic seam), so its processes share this runner's own cgroup — no scope is attributable to the suite";
+  // gap-suite-memory-telemetry-…-unknown-not-zero AC4 — the OVERHEAD measurement seam: with
+  // `QUAY_TEST_SUITE_MEMORY_SAMPLER=off` the sampler is not started at all, so the SAME fixture suite
+  // can be timed with and without it and the delta is a real A/B rather than an assertion about one's
+  // own cost. ⛔ Not a policy knob: production sets nothing and samples on every round (an unmeasured
+  // round is exactly the defect this task closes), and a round run through it lands NO evidence file —
+  // which is why no other test may set it.
+  const samplerDisabled = process.env.QUAY_TEST_SUITE_MEMORY_SAMPLER === "off";
+  memorySampler = samplerDisabled
+    ? null
+    : startSuiteMemorySampler({
+    // The scope is resolved through the SAME host adapter that built the argv — ⛔ not a second,
+    // independently-resolved cgroup path (硬规则 5b).
+    adapter: runAdapter,
+    scopeProvider: useSystemdRun
+      ? () => runAdapter.scopeOf(child.pid as number)
+      : () => unavailable<ResourceScopeHandle>(noScopeReason),
+    stateDir,
+    runId,
+    memoryMaxBytes: useSystemdRun ? parseSystemdBytesToBytes(systemdLimits.memoryMax) : null,
+    // The policy is carried ONLY when the applied ceiling IS the policy's value — an explicit seam
+    // override would otherwise be documented with a deployment it did not use (the evidence would
+    // claim a provenance that is false).
+    memoryMaxPolicy:
+      useSystemdRun && systemdLimits.memoryMax === suiteMemoryPolicy.memoryMax ? suiteMemoryPolicy : undefined,
+    scopeUnit: null,
+    phaseProvider: () => phaseAccount?.phase ?? "",
+    // gap-suite-memory-telemetry-…-unknown-not-zero — the round's OWN plan (resolved before the spawn,
+    // above) and its root: the process-tree split needs to know WHICH argv is a planned test file, and
+    // the plan is the only thing that can say so (a heuristic like 「argv mentions .test.」 would count
+    // a helper the runner never planned). `plannedFiles === null` ⇒ the split records itself as
+    // unavailable rather than reporting 「no planned process ran」 (硬规则 3b).
+    plannedFiles,
+    root,
+  });
 
   // AC5 (reason axis) — a signal-kill ⇒ red + reason=aborted (NO correctness conclusion), so the
   // inner's stop-dispatch does NOT fire on an abort. A previously-detected real failure (redDetected)
@@ -3754,9 +4664,18 @@ export async function run(argv: string[]): Promise<number> {
   // `unknown`。⛔ 两者不得压平。
   let telemetryAttempted = false;
   if (memorySampler) {
-    telemetryAttempted = true;
+    // gap-suite-resource-measurement-needs-a-host-adapter-not-inline-cgroup-calls — the sampler now
+    // exists on EVERY round (so a blind round still lands an evidence FILE), but telemetry is only
+    // ATTEMPTED when this round had a scope of its own to attribute. `telemetryAttempted` keeps its
+    // AC9 meaning (「被包住却一次都没读到」 vs 「压根没有 scope 这一维」) because the key-set contract on
+    // the round/state records — a round with no scope carries NO telemetry key (缺键 ≠ unknown).
+    telemetryAttempted = useSystemdRun;
     const ev = memorySampler.stop();
     oomKillReading = ev.oomKill;
+    // gap-suite-memory-telemetry-…-unknown-not-zero — keep the landed evidence so the concurrency
+    // dimension (computable only once the round's per-file intervals + phase windows are complete) can
+    // be added to the SAME file at finalize. `null` ⇒ no file to widen.
+    memoryEvidenceForAugment = ev;
     memorySampler = null;
   }
 
@@ -4316,6 +5235,44 @@ export async function run(argv: string[]): Promise<number> {
   // (never a fabricated []) when the round emitted no __PERFILE__ lines — same absent-field
   // contract as floor_ms/ceiling below.
   const perFile = perFileLines.length > 0 ? parsePerFileLines(perFileLines.join("\n")) : [];
+  // ── gap-suite-memory-telemetry-…-unknown-not-zero: the MEASURED concurrency ──────────────────────
+  // Written HERE, not inside the sampler's stop(), because the two carriers it reads only become
+  // complete at this point: the per-file intervals (every `__PERFILE__` line has arrived — the scope is
+  // gone and the stream is closed) and the phase windows (`phaseAccount.finalize()` above closed the
+  // last one). The sampler's own stop() therefore lands the file WITHOUT this block and this is the
+  // ONE place that adds it — same module, same writer, same runId (⛔ not a second carrier).
+  //
+  // ⛔ `laneCount` is recorded NEXT TO the measurement, never AS it: the runner ASKS the child for
+  // `--lane-count` lanes, but the unified scheduler's reliability cap holds the total at the lowest
+  // ACTIVE group's budget (serial/lowconc = floor(nproc/(S×P))), so the requested number and the
+  // concurrency that held are two different facts (measured 2026-10-14: requested 128, held 64, every
+  // round). Recording only the request is what made the memory policy's input wrong.
+  const roundIntervals = fileIntervalsFromPerFile(perFile);
+  const roundPhaseRecords = (phaseAccount?.records ?? []).map((p) => ({
+    phase: p.phase,
+    start_ms: p.start_ms,
+    end_ms: p.end_ms,
+  }));
+  const perPhase = perPhaseConcurrency(roundIntervals, roundPhaseRecords);
+  const concurrencyReading: SuiteConcurrencyReading = {
+    laneCount,
+    laneCountNote:
+      "the concurrency this round ASKED the child for (--lane-count / defaultLaneCount); the unified " +
+      "scheduler's reliability cap holds the TOTAL at the lowest active group's budget, so the value that " +
+      "actually held is `maxConcurrentPerPhase` / `maxConcurrentOverall`, measured from this round's per-file intervals",
+    maxConcurrentPerPhase: perPhase,
+    maxConcurrentOverall: maxIntervalOverlap(roundIntervals.map((i) => [i.startMs, i.endMs] as const)),
+    intervals: roundIntervals.length,
+    unavailable:
+      roundIntervals.length === 0
+        ? "this round produced no per-file interval records (no __PERFILE__ line carried end_ms + duration_ms) — the measured concurrency is unknown, ⛔ not 0"
+        : roundPhaseRecords.length === 0
+          ? "this round produced no phase windows (the phase accumulator recorded nothing) — only the whole-round overlap is readable"
+          : null,
+  };
+  if (memoryEvidenceForAugment) {
+    augmentSuiteMemoryEvidence(stateDir, runId, { concurrency: concurrencyReading });
+  }
   // gap-suite-verdict-green-on-oom-killed-incomplete-run-lands-on-11-percent-of-files — the round's
   // completeness reading in FULL (three-valued; see the call site). ⛔ 计划不可得时 `plannedFiles` 是
   // 显式 **null**（不是缺键也不是 0）：缺键会与「计划是空的」同形（硬规则 3b）。
@@ -4372,6 +5329,10 @@ export async function run(argv: string[]): Promise<number> {
     per_test_ms: tapTests > 0 ? Number((durationMs / tapTests).toFixed(3)) : 0,
     redAt: redAtIso,
     load: readLoadAvg(),
+    // gap-resource-gate-reads-lagging-loadavg-not-instantaneous-rd — the instantaneous run-queue
+    // components beside the lagging loadavg (⛔ telemetry only; no verdict reads them). Absent when
+    // /proc/stat is unreadable.
+    ...runQueueFields(),
     state: finalState.state,
     reason: roundReason,
     // gap-verifiedcommit-dirty-tree-false-certificate AC5 — the same `void: true` marker the state

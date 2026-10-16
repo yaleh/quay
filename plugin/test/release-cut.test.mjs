@@ -35,9 +35,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, existsSync, appendFileSync, writeFileSync, readFileSync, symlinkSync, statSync, linkSync, unlinkSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, existsSync, appendFileSync, writeFileSync, readFileSync, symlinkSync, statSync, lstatSync, readdirSync, realpathSync, linkSync, unlinkSync, accessSync, constants } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, dirname } from "node:path";
+import { join, dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -621,23 +621,161 @@ test("P1/AC2: the REAL dispatch argv carries `--ref` — recorded from the child
   }
 });
 
+/**
+ * Does a PATH entry carry an executable `gh`? The `PATH`-lookup predicate, written out — the SAME
+ * test bash's own lookup applies (a regular file with the execute bit), so "this directory carries
+ * `gh`" means the same thing to us as it does to the child that has to find it.
+ */
+function carriesGh(dir) {
+  const p = join(dir, "gh");
+  try {
+    if (!statSync(p).isFile()) return false;
+    accessSync(p, constants.X_OK);
+    return true;
+  } catch (_) {
+    return false;
+  }
+}
+
+/**
+ * Converge `basePath` onto a PATH that cannot resolve `gh` — the fixture's "`gh` is unavailable"
+ * mechanism, made independent of the HOST's directory layout.
+ *
+ * WHY THIS REPLACED `dirname(command -v gh)` (measured 2026-10-14, CI run 38700638546):
+ * the old fixture asked the host WHERE `gh` is, then removed THAT ONE directory from `PATH`. On the
+ * runner `gh` lives in `/usr/bin`, which `PATH` also carries as `/bin` (a symlink to `/usr/bin`) —
+ * the same physical directory under two names. `command -v gh` answers `/usr/bin/gh`, the filter
+ * drops `/usr/bin`, and `/bin`, still on `PATH` and resolving to that very directory, re-supplies
+ * `gh`. The premise was never established and the fixture's OWN negative control failed:
+ * `AssertionError: the fixture must really have removed `gh` from PATH`, actual `'/bin/gh'`,
+ * expected `''` — a red that names the fixture, not the product. ⛔ The defect is the fixture's
+ * coupling to a host layout, not `gh`'s presence.
+ *
+ * TWO conditions have to hold at once, and they pull against each other:
+ *   1. `gh` must not resolve — on ANY layout, including two spellings of one directory. So we
+ *      enumerate EVERY entry that resolves `gh` (the lookup predicate, not one answer).
+ *   2. the REST of the toolchain must still resolve — the carrier directory is usually the one
+ *      holding `git`, `sed`, `bash` … Dropping it outright buys (1) by breaking (2): the cut would
+ *      die in its first `git` call and the fixture would trade one red for another, with a CAUSE
+ *      naming a defect that is not the one under test.
+ * So a carrier entry is not DROPPED, it is SHADOWED: every name it carries EXCEPT `gh` is symlinked
+ * into a directory of ours, and the child PATH gets that shadow **in the carrier's own position**.
+ * Mirroring the directory is complete by construction — a hand-listed "tools the cut needs" set
+ * would rot the first time the cut reaches for one more — and both conditions then hold with no
+ * host assumption.
+ *
+ * ⛔ IN PLACE, not prepended. A single shadow hoisted to the FRONT of PATH silently re-ranks every
+ * name in the carrier directory above the same name later on PATH, and on a host whose PATH has a
+ * stale `node` before the real one that is a different defect entirely: measured 2026-10-15 on the
+ * emulated runner layout, `/usr/bin/node` (no `--experimental-strip-types`) beat the nvm node the
+ * cut needs, and the cut died in `CAUSE=release-cut-version-inconsistent` — the fixture reddening
+ * at a step that has nothing to do with `gh`. Replacing the entry at its own index leaves every
+ * precedence question exactly as the host posed it.
+ *
+ * Returns `{ path, carriers, shadows, shadowed, unreadable }` — every field an ENUMERATED reading,
+ * so the log says what the mechanism actually did rather than that it "worked".
+ */
+function pathWithoutGh(basePath, shadowRoot) {
+  const dirs = (basePath ?? "").split(":").filter(Boolean).map((d) => resolve(d));
+  const carriers = dirs.filter(carriesGh);
+  if (carriers.length === 0) {
+    return { path: dirs.join(":"), carriers, shadows: 0, shadowed: 0, unreadable: [], dirCount: dirs.length };
+  }
+  // One shadow per PHYSICAL directory: `/usr/bin` and `/bin` are one directory under two spellings,
+  // and mirroring it twice would double the syscalls to say the same thing.
+  const shadowOf = new Map();
+  const unreadable = [];
+  let shadowed = 0;
+  const entries = dirs.map((d) => {
+    if (!carriesGh(d)) return d;
+    let key = d;
+    try { key = realpathSync(d); } catch (_) { /* unresolvable: key on the spelling we have */ }
+    if (!shadowOf.has(key)) {
+      const shadow = join(shadowRoot, `d${shadowOf.size}`);
+      mkdirSync(shadow, { recursive: true });
+      let names;
+      try { names = readdirSync(d); } catch (_) { unreadable.push(d); names = []; }
+      for (const name of names) {
+        if (name === "gh") continue;
+        const dst = join(shadow, name);
+        // lstat, not exists: a symlink we just made to a DANGLING entry would read as "absent" and
+        // send us into a second symlink() that fails EEXIST, reporting a failure that is not one.
+        try { lstatSync(dst); continue; } catch (_) { /* not there yet — make it */ }
+        try { symlinkSync(join(d, name), dst); shadowed++; } catch (_) { /* unlinkable name: skip */ }
+      }
+      shadowOf.set(key, shadow);
+    }
+    return shadowOf.get(key);
+  });
+  return { path: entries.join(":"), carriers, shadows: shadowOf.size, shadowed, unreadable, dirCount: dirs.length };
+}
+
+/**
+ * What does `name` resolve to in this child environment? An ENUMERATED three-valued reading
+ * (硬规则 3b: "could not evaluate" must not share an output with "evaluated and absent"):
+ *   { verdict: "absent", path: null }         the child really cannot resolve it
+ *   { verdict: "present", path: "<dir>/<name>" } it can, and here is WHERE (the repair is named)
+ *   { verdict: "not-evaluated", path: null }  the probe itself could not run — never folded into
+ *                                             "absent", which would read as a passing control
+ */
+function commandResolution(env, name) {
+  const probe = spawnSync("bash", ["-c", 'command -v "$1" || true', "bash", name], { encoding: "utf8", env });
+  if (probe.error || typeof probe.stdout !== "string") return { verdict: "not-evaluated", path: null };
+  const found = probe.stdout.trim();
+  return found === "" ? { verdict: "absent", path: null } : { verdict: "present", path: found };
+}
+
 test("P1/AC2: with `gh` absent the hand-dispatch instruction names the SAME ref the tool would have used", () => {
   const c = makeClone("nogh");
+  const shimBin = join(c.parent, "gh-shim");
   try {
-    // A PATH with the directory that carries `gh` removed — and an independent probe that the
-    // removal really took effect, so this test cannot pass by exercising the wrong branch.
-    const ghPath = spawnSync("bash", ["-c", "command -v gh"], { encoding: "utf8" }).stdout.trim();
-    assert.ok(ghPath, "the test host must carry a `gh` for this arm to mean anything");
-    const ghDir = dirname(ghPath);
-    const strippedPath = (process.env.PATH ?? "").split(":").filter((d) => d && d !== ghDir).join(":");
-    const probe = spawnSync("bash", ["-c", "command -v gh || true"], {
-      encoding: "utf8", env: { ...process.env, PATH: strippedPath },
-    });
-    assert.equal(probe.stdout.trim(), "", "the fixture must really have removed `gh` from PATH");
+    // ── the mechanism, read out loud: which entries carried `gh`, how many names were mirrored ────
+    const converged = pathWithoutGh(process.env.PATH, join(c.parent, "gh-shadow"));
+    process.stdout.write(`SUITE-RELEASE-CUT-FIXTURE gh-absence mechanism=carrier-shadow`
+      + ` entries=${converged.dirCount} carriers=${converged.carriers.length}`
+      + ` [${converged.carriers.join(",") || "-"}] shadows=${converged.shadows}`
+      + ` shadowed=${converged.shadowed} unreadable=${converged.unreadable.length}\n`);
+    assert.deepEqual(converged.unreadable, [],
+      `a carrier directory we cannot read cannot be shadowed, and its tools would silently vanish`
+        + ` from the child PATH: ${converged.unreadable.join(",")}`);
 
-    const r = run(["9.9.6", "--root", c.root, "--no-push"], {
-      env: { ...process.env, PATH: strippedPath },
-    });
+    // ── the controls FIRST (硬规则 4): a probe that cannot report `present` proves nothing when it
+    // reports `absent`. Two controls, one per condition the mechanism has to meet:
+    //   (a) `gh` IS read as present when a PATH carries it. The shim is OURS, so the control is
+    //       non-vacuous even on a host that carries no `gh` at all — and it is never executed by
+    //       the cut below; it exists only to be FOUND. ⛔ The un-converged host PATH is NOT usable
+    //       as this control: on a developer host `gh` is the real, authenticated client, and a cut
+    //       driven with it would reach the live GitHub API — a test whose control has a production
+    //       side effect is a worse defect than the one it guards against (same reasoning as the
+    //       record-and-exit shim at P2/AC3).
+    //   (b) the toolchain SURVIVED the shadow. This is the control that fails loudly HERE, naming
+    //       "git did not resolve", instead of letting the cut die in its first `git` call where the
+    //       red would name a defect that is not the one under test.
+    mkdirSync(shimBin, { recursive: true });
+    writeFileSync(join(shimBin, "gh"), '#!/usr/bin/env bash\nexit 0\n', { mode: 0o755 });
+    const control = commandResolution({ ...process.env, PATH: `${shimBin}:${converged.path}` }, "gh");
+    assert.equal(control.verdict, "present",
+      `the probe must READ a PATH that carries \`gh\` as present, or its "absent" below is vacuous`);
+    assert.equal(control.path, join(shimBin, "gh"),
+      `the probe must NAME where \`gh\` resolved from — that name is the repair instruction`);
+
+    const env = { ...process.env, PATH: converged.path };
+    const toolchain = commandResolution(env, "git");
+    assert.equal(toolchain.verdict, "present",
+      `the shadow must preserve the rest of the toolchain: \`git\` must still resolve under the`
+        + ` converged PATH, or the cut dies before reaching the step under test`
+        + ` (carriers [${converged.carriers.join(",") || "-"}], ${converged.shadowed} name(s) mirrored)`);
+
+    // ── and now the fixture's own premise, as a reading rather than an assumption ────────────────
+    const reading = commandResolution(env, "gh");
+    assert.equal(reading.verdict, "absent",
+      `the converged PATH must not resolve \`gh\` (it did, at ${reading.path}): ${converged.shadowed}`
+        + ` name(s) from ${converged.carriers.length} carrier(s) [${converged.carriers.join(",") || "-"}]`
+        + ` were mirrored out of ${converged.dirCount} PATH entries, so the entry that re-supplied`
+        + ` \`gh\` — the /bin → /usr/bin alias that reddened CI run 38700638546 — came from somewhere`
+        + ` else entirely`);
+
+    const r = run(["9.9.6", "--root", c.root, "--no-push"], { env });
 
     assert.equal(r.status, 1, `the cut must reach and fail in the dispatch stage: ${r.stdout}${r.stderr}`);
     assert.equal(git(c.root, "rev-parse", "--verify", "--quiet", "refs/tags/v9.9.6").status, 0,
@@ -648,6 +786,188 @@ test("P1/AC2: with `gh` absent the hand-dispatch instruction names the SAME ref 
     // operator re-introduces the very defect by following it.
     assert.match(r.stderr, /Dispatch by hand: gh workflow run release\.yml --ref v9\.9\.6 -f tag=v9\.9\.6/,
       `the hand-dispatch instruction must carry --ref: ${r.stderr}`);
+  } finally {
+    cleanup(c.parent);
+  }
+});
+
+// ══════════════════════════════════════════════════════════════════════════════════════════════
+// gap-release-cut-preflight-records-ci-reading-not-blocking — SPEC §4.2 as a RECORD, ⛔ never a gate
+//
+// THE DEFECT: `orchestration/SPEC-release-and-hotfix-branching-2026-09-15.md` §4.2 (「切点前置：develop
+// 的上一次 decisive CI 必须是绿」) had NO mechanical carrier anywhere on this path — the preflight never
+// read CI at all, so the clause was kept and broken identically (硬规则 9). §4.2's own exemption —
+// "在 AC-265 达成之前 … 不得用它去阻塞任何现有流程" — has lapsed with `goals/AC-265-goal.md`'s
+// `status: achieved`, so the clause is now live prose held up by nothing.
+//
+// WHAT IS PINNED HERE, and why each half is load-bearing:
+//   • the CUT is NOT blocked by a red reading. This is the task's core constraint, not a nicety: a
+//     gate on the reading would codify "the environment twitched ⇒ no release, ever" — the exact jam
+//     §4.2's own exemption existed for (develop's CI was red five straight days from 2026-10-10 for
+//     purely environmental reasons), and the shape 硬规则 12 names.
+//   • the READING is three-valued and ENUMERATED — a verdict, or a NAMED not-evaluated cause. The
+//     carrier is backfilled (its first line is OLDER than its last), so "the last decisive run" is
+//     the MAXIMUM ts and ⛔ not the last readable line; `cancelled` is not a verdict at all.
+// ══════════════════════════════════════════════════════════════════════════════════════════════
+
+/** The CI carrier, relative to a fixture's root — the ONE spelling the reader and these tests share. */
+const CI_CARRIER_REL = join(".quay", "ci-runs.jsonl");
+/** The record THIS task adds, relative to a fixture's root. Its OWN file and its OWN vocabulary. */
+const CI_RECORD_REL = join(".quay", "release-cut-preflight.jsonl");
+
+/** One `.quay/ci-runs.jsonl` line, carrying only the fields the reading is defined over. */
+function ciRow({ ts, branch, workflow = "CI", conclusion, runId, url }) {
+  return JSON.stringify({ ts, branch, workflow, conclusion, runId, url });
+}
+
+/**
+ * Plant (or replace) the fixture's CI carrier. It is untracked AND gitignored (`.gitignore` carries a
+ * glob entry for `.quay/ci-runs.jsonl` — ⛔ not spelled out here: a literal glob would close this
+ * block comment at its own star-slash), and the dirty-tree preflight ignores untracked files — so
+ * planting it cannot refuse the cut for the WRONG reason, whatever shape this test gives it.
+ */
+function plantCiCarrier(root, rows) {
+  mkdirSync(join(root, ".quay"), { recursive: true });
+  writeFileSync(join(root, CI_CARRIER_REL), rows.map((r) => `${r}\n`).join(""));
+}
+
+/**
+ * The preflight's CI-reading line, clipped BEFORE its `(source: …)` footnote. The footnote names the
+ * verdict vocabulary on EVERY run, so an assertion like "no `success|failure` appears" has to read
+ * the summary alone — otherwise it would be answering about the footnote and never about the reading.
+ */
+function ciReadingLine(out) {
+  const line = out.split("\n").find((l) => l.startsWith("preflight: 'develop's last decisive CI run:"));
+  assert.ok(line, `the preflight must PRINT the CI reading it recorded: ${out}`);
+  const cut = line.indexOf(" (source:");
+  assert.ok(cut > 0, `the printed reading must carry its source footnote: ${line}`);
+  return line.slice(0, cut);
+}
+
+test("AC5: a `failure` CI reading is printed and recorded, and the cut STILL LANDS ITS TAG", () => {
+  const c = makeClone("cireading");
+  try {
+    // ── the fixture is shaped so that three LATER, wrong answers are available to a sloppy reader ──
+    plantCiCarrier(c.root, [
+      // an EARLIER decisive green, and it sits FIRST in the file — the carrier is backfilled, not
+      // sorted, so "the last line" and "the newest run" are different rows.
+      ciRow({ ts: "2026-10-10T03:04:40Z", branch: "develop", conclusion: "success", runId: 38000000001, url: "https://example.invalid/green" }),
+      // THE ANSWER: develop's newest decisive run — and it is RED.
+      ciRow({ ts: "2026-10-15T08:09:29Z", branch: "develop", conclusion: "failure", runId: 38703673544, url: "https://github.com/yaleh/quay/actions/runs/38703673544" }),
+      // a LATER develop row, but `cancelled` ⇒ a verdict it is not.
+      ciRow({ ts: "2026-10-15T09:50:00Z", branch: "develop", conclusion: "cancelled", runId: 38799000000, url: "https://example.invalid/cancelled" }),
+      // a LATER failure on develop, but on the RELEASE workflow ⇒ a different question.
+      ciRow({ ts: "2026-10-15T09:30:00Z", branch: "develop", workflow: "Release", conclusion: "failure", runId: 38795000000, url: "https://example.invalid/release" }),
+      // and a LATER develop-CI failure for ANOTHER branch.
+      ciRow({ ts: "2026-10-15T09:40:00Z", branch: "master", conclusion: "failure", runId: 38796000000, url: "https://example.invalid/master" }),
+    ]);
+
+    const r = run(["9.9.5", "--root", c.root, "--no-push", "--no-dispatch"]);
+
+    // ⛔ THE CORE CONSTRAINT (AC5): a RED reading does not refuse. The tag is the proof the cut ran
+    // through the whole landing face with that reading in hand.
+    assert.equal(git(c.root, "rev-parse", "--verify", "--quiet", "refs/tags/v9.9.5").status, 0,
+      `a red CI reading must NOT block the cut (exit=${r.status}): ${r.stdout}${r.stderr}`);
+    assert.doesNotMatch(r.stderr, /CAUSE=release-cut-ci/,
+      `the CI reading must carry NO CAUSE= — it is a record, never a preflight refusal: ${r.stderr}`);
+
+    // ── the PRINT (AC3): the reading, its run identity, and the no-gate policy ──────────────────
+    assert.equal(
+      ciReadingLine(r.stdout),
+      "preflight: 'develop's last decisive CI run: failure — run 38703673544 at 2026-10-15T08:09:29Z https://github.com/yaleh/quay/actions/runs/38703673544",
+      `the preflight must print the reading it recorded: ${r.stdout}`);
+    assert.match(r.stdout, /RECORDED, NOT A GATE/,
+      `the print must SAY it is not a gate, or an operator may read it as one: ${r.stdout}`);
+
+    // ── the RECORD (AC2): its own carrier, its own vocabulary ───────────────────────────────────
+    const recPath = join(c.root, CI_RECORD_REL);
+    assert.equal(existsSync(recPath), true, `the record must land in --root's .quay/: ${r.stdout}${r.stderr}`);
+    const lines = readFileSync(recPath, "utf8").split("\n").filter((l) => l.trim() !== "");
+    assert.equal(lines.length, 1, `one cut ⇒ exactly one record line: ${JSON.stringify(lines)}`);
+    const rec = JSON.parse(lines[0]);
+    assert.equal(rec.ciReading, "failure");
+    assert.equal(rec.branch, "develop");
+    assert.equal(rec.tag, "v9.9.5");
+    assert.equal(rec.stage, "preflight");
+    // the 「tag 时刻」: the record's OWN ts, a real instant — the tag is created minutes later, at this
+    // same cut, off this same base.
+    assert.match(rec.ts, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/, `ts must be an ISO instant: ${rec.ts}`);
+    assert.equal(rec.run.runId, 38703673544);
+    assert.equal(rec.run.conclusion, "failure");
+    assert.equal(rec.run.ts, "2026-10-15T08:09:29Z");
+    assert.equal(rec.run.url, "https://github.com/yaleh/quay/actions/runs/38703673544");
+    // 硬规则 8: this carrier does NOT reuse the finish ledger's `form=` vocabulary — a different
+    // carrier answering a different question must not borrow the other's word list.
+    assert.doesNotMatch(lines[0], /"form"/,
+      `the new carrier must not borrow .quay/release-branch-finish.jsonl's vocabulary: ${lines[0]}`);
+    assert.notEqual(CI_RECORD_REL, join(".quay", "release-branch-finish.jsonl"));
+  } finally {
+    cleanup(c.parent);
+  }
+});
+
+test("AC4: the reading is THREE-VALUED — a verdict, or a NAMED not-evaluated cause (⛔ never silently green or red)", () => {
+  const c = makeClone("civalues");
+  const recordPath = join(c.root, CI_RECORD_REL);
+  try {
+    const dryRun = () => {
+      const r = run(["9.9.4", "--dry-run", "--root", c.root]);
+      assert.equal(r.status, 0, `the dry run must pass with ANY CI carrier shape: ${r.stdout}${r.stderr}`);
+      return r.stdout;
+    };
+
+    // ── POSITIVE CONTROL FIRST (硬规则 4): a reader that cannot report a VERDICT proves nothing by
+    //    reporting "not-evaluated" below — every arm under it would be satisfied by a reader that
+    //    answers "not-evaluated" to everything. So a real green row must be read as `success`. ────
+    plantCiCarrier(c.root, [
+      ciRow({ ts: "2026-10-15T08:09:29Z", branch: "develop", conclusion: "success", runId: 42, url: "https://example.invalid/42" }),
+    ]);
+    assert.equal(ciReadingLine(dryRun()),
+      "preflight: 'develop's last decisive CI run: success — run 42 at 2026-10-15T08:09:29Z https://example.invalid/42",
+      "the reader must be able to report a VERDICT at all, or the not-evaluated arms below are vacuous");
+
+    // ── arm 1: the carrier is absent ⇒ `carrier-absent`, and it names the file it could not read ──
+    rmSync(join(c.root, CI_CARRIER_REL));
+    const absent = dryRun();
+    assert.match(ciReadingLine(absent), /^preflight: 'develop's last decisive CI run: not-evaluated \(carrier-absent — /,
+      `an absent carrier must be an explicit not-evaluated that names it: ${absent}`);
+
+    // ── arm 2: the carrier exists, but EVERY develop CI row is `cancelled` ⇒ still not a verdict ──
+    //    ⛔ THIS is the arm the "write the not-evaluated branch as green" mutation must redden: a
+    //    cancelled run was superseded by a later push and says nothing about whether develop was
+    //    green (SPEC §4.2: 40/92 = 43% of develop's runs in its own window were cancelled).
+    plantCiCarrier(c.root, [
+      ciRow({ ts: "2026-10-15T08:09:29Z", branch: "develop", conclusion: "cancelled", runId: 1, url: "https://example.invalid/1" }),
+      ciRow({ ts: "2026-10-15T09:09:29Z", branch: "develop", conclusion: "cancelled", runId: 2, url: "https://example.invalid/2" }),
+    ]);
+    const cancelled = ciReadingLine(dryRun());
+    assert.match(cancelled, /not-evaluated \(all-runs-cancelled\)/,
+      `a cancelled-only carrier must read as not-evaluated: ${cancelled}`);
+    assert.doesNotMatch(cancelled, /\b(success|failure)\b/,
+      `⛔ 'cancelled' must be read as NEITHER green NOR red: ${cancelled}`);
+
+    // ── arm 3: rows exist, but none for THIS branch ⇒ its OWN cause, never "cancelled" ────────────
+    plantCiCarrier(c.root, [
+      ciRow({ ts: "2026-10-15T09:09:29Z", branch: "someone-elses-branch", conclusion: "failure", runId: 3, url: "https://example.invalid/3" }),
+    ]);
+    const other = dryRun();
+    assert.match(ciReadingLine(other), /not-evaluated \(no-run-for-branch\)/,
+      `"no row for this branch" and "every row was cancelled" name different repairs: ${other}`);
+
+    // ── arm 4: the DECISIVE row is not the last readable line (a trailing `cancelled` must not be
+    //    mistaken for the answer, and must not erase the green that precedes it) ─────────────────
+    plantCiCarrier(c.root, [
+      ciRow({ ts: "2026-10-15T08:09:29Z", branch: "develop", conclusion: "success", runId: 7, url: "https://example.invalid/7" }),
+      ciRow({ ts: "2026-10-15T09:09:29Z", branch: "develop", conclusion: "cancelled", runId: 8, url: "https://example.invalid/8" }),
+    ]);
+    assert.match(ciReadingLine(dryRun()), /last decisive CI run: success — run 7 at /,
+      "the newest DECISIVE row wins, ⛔ not the last line and ⛔ not a trailing `cancelled`");
+
+    // ── and the dry run APPENDS NOTHING: "mutate NOTHING" covers this carrier too ────────────────
+    assert.equal(existsSync(recordPath), false,
+      "--dry-run must not append the CI record (its whole contract is that it writes nothing)");
+    assert.match(dryRun(), /CI reading NOT recorded \(--dry-run writes nothing\)/,
+      "a dry run must SAY it did not record — ⛔ 'not recorded' must not read the same as 'recorded'");
   } finally {
     cleanup(c.parent);
   }

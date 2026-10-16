@@ -2,7 +2,7 @@
 id: gap-suite-recovery-ladder-log-wiring-reads-wrong-file-always-log-unreadable
 title: 恢复阶梯每档读错日志——argv 的 --log-file 未按档改写，classifyRecoveryRound 恒
   log-unreadable，即便该档其实完整零 OOM
-status: ready
+status: done
 labels:
   - gap
   - defect

@@ -74,7 +74,30 @@ import {
   yieldedSuiteSlotCount,
   spliceConcurrency,
   stripConcurrencyFlags,
+  // gap-suite-memory-telemetry-anon-file-shmem-swap-psi-concurrency-process-tree-unknown-not-zero —
+  // the pure aggregation half of the new telemetry (the AC3 cross-check re-derives with the SAME
+  // functions the round recorded with) plus the sampler itself for the hermetic AC2 fixture.
+  parsePressureBlock,
+  maxMemoryStat,
+  maxIntervalOverlap,
+  perPhaseConcurrency,
+  fileIntervalsFromPerFile,
+  plannedFileMatcher,
+  splitProcessTree,
+  deltaOrNull,
+  startSuiteMemorySampler,
+  augmentSuiteMemoryEvidence,
 } from "../scripts/full-suite-runner.ts";
+import {
+  createLinuxCgroupV2Adapter,
+  ok,
+  scopeHandleFromDir,
+} from "../scripts/host-resource-adapter.ts";
+
+/** A directory IS a scope handle for the linux-cgroup-v2 adapter (the same seam the oom-policy test
+ *  drives the sampler through). */
+const linuxDirScope = (dir) => () => ok(scopeHandleFromDir(dir));
+const LINUX_ADAPTER = createLinuxCgroupV2Adapter();
 import { runOnce, classifyFailure, routeRed, shouldStopDispatch, shouldDispatchOnRed } from "../scripts/suite-state-trigger.ts";
 
 import {
@@ -105,6 +128,152 @@ test("unit — the cgroup counter parsers handle the REAL cgroup v2 shapes", () 
     10975837195,
   );
   assert.equal(parsePressureSomeTotal("full avg10=0.00 avg60=0.00 avg300=0.00 total=0\n"), null, "no `some` line ⇒ null");
+});
+
+// ── gap-suite-memory-telemetry-anon-file-shmem-swap-psi-concurrency-process-tree-unknown-not-zero ───
+// The pure half of the new telemetry: the same functions the sampler aggregates with, driven directly.
+// They are exported for exactly this — so a reader can RE-DERIVE the round's evidence from the raw
+// carriers instead of trusting the number that was written (AC3's cross-check).
+
+test("unit — parsePressureBlock reads BOTH PSI lines (some/full × avg10/total), and refuses to invent one", () => {
+  const both = parsePressureBlock("some avg10=1.25 avg60=0.00 avg300=0.06 total=10975837195\nfull avg10=0.50 avg60=0.00 avg300=0.00 total=77\n");
+  assert.deepEqual(both, { someAvg10: 1.25, fullAvg10: 0.5, someTotal: 10975837195, fullTotal: 77 });
+  // A kernel/host that reports only the `some` line: `full` stays null (缺值 ≠ 0 — a 0 would claim
+  // 「measured: no full-stall pressure」, which this reading never measured).
+  assert.deepEqual(parsePressureBlock("some avg10=0.00 avg60=0.00 avg300=0.00 total=5\n"), {
+    someAvg10: 0,
+    fullAvg10: null,
+    someTotal: 5,
+    fullTotal: null,
+  });
+  assert.equal(parsePressureBlock(null), null, "no file ⇒ null (⛔ not a zeroed block)");
+  assert.equal(parsePressureBlock("   "), null);
+  assert.equal(parsePressureBlock("garbage without a some/full line\n"), null, "unparseable ⇒ null, ⛔ not zeros");
+});
+
+test("unit — maxMemoryStat takes the byte-wise max and keeps an unreadable key as the other side's reading", () => {
+  const a = { anonBytes: 10, fileBytes: null, shmemBytes: 5, fileMappedBytes: 1, sockBytes: null };
+  const b = { anonBytes: 4, fileBytes: 900, shmemBytes: null, fileMappedBytes: 3, sockBytes: 7 };
+  assert.deepEqual(maxMemoryStat(a, b), {
+    anonBytes: 10,
+    fileBytes: 900,
+    shmemBytes: 5,
+    fileMappedBytes: 3,
+    sockBytes: 7,
+  });
+  // null ∘ x = x — an unreadable key must NOT act as a 0 and drive the max down.
+  assert.deepEqual(maxMemoryStat(null, b), b);
+  assert.deepEqual(maxMemoryStat(a, null), a);
+  assert.equal(maxMemoryStat(null, null), null, "nothing measured ⇒ null, ⛔ not a zeroed block");
+});
+
+test("unit — maxIntervalOverlap counts the peak overlap, window-clipped, end-before-start at the same ms", () => {
+  // 0────────10  20────30   (two disjoint files, then two overlapping ones)
+  const iv = [
+    [0, 10],
+    [20, 30],
+    [25, 40],
+    [35, 45],
+  ];
+  assert.equal(maxIntervalOverlap(iv), 2, "at t∈[25,30] two files ran; at t∈[35,40] two; never three");
+  // A window clips: [0,26] touches only the first file plus 1ms of the 20-30 one.
+  assert.equal(maxIntervalOverlap(iv, [0, 26]), 2);
+  assert.equal(maxIntervalOverlap(iv, [0, 5]), 1, "outside every interval of the second pair");
+  assert.equal(maxIntervalOverlap(iv, [11, 19]), null, "a window with no interval inside it ⇒ null, ⛔ not 0");
+  // Touching at a single ms is NOT concurrent (end sorts before start at the same timestamp).
+  assert.equal(maxIntervalOverlap([[0, 10], [10, 20]]), 1);
+  assert.equal(maxIntervalOverlap([]), null);
+  assert.equal(maxIntervalOverlap([[5, 5]]), null, "a zero-length interval was never observed running");
+});
+
+test("unit — perPhaseConcurrency attributes overlap to each phase window (AC3's pure kernel)", () => {
+  const intervals = [
+    { file: "/a.test.mjs", startMs: 100, endMs: 200 },
+    { file: "/b.test.mjs", startMs: 150, endMs: 300 },
+    { file: "/c.test.mjs", startMs: 250, endMs: 400 },
+    { file: "/d.test.mjs", startMs: 260, endMs: 270 },
+  ];
+  const phases = [
+    { phase: "static", start_ms: 0, end_ms: 90 },
+    { phase: "serial", start_ms: 90, end_ms: 240 },
+    { phase: "main", start_ms: 240, end_ms: 500 },
+  ];
+  const got = perPhaseConcurrency(intervals, phases);
+  assert.deepEqual(got, { serial: 2, main: 3 }, "static has no interval ⇒ the key is ABSENT, ⛔ not 0");
+  // No intervals / no phases ⇒ null (unknown), never an empty-but-present map.
+  assert.equal(perPhaseConcurrency([], phases), null);
+  assert.equal(perPhaseConcurrency(intervals, []), null);
+});
+
+test("unit — fileIntervalsFromPerFile takes only records carrying BOTH bounds (缺值 ≠ 0-length)", () => {
+  const iv = fileIntervalsFromPerFile([
+    { file: "a", startedAtMs: 10, endedAtMs: 20 },
+    { file: "b", startedAtMs: 10 }, // torn record ⇒ contributes nothing, ⛔ not a 0-length interval
+    { file: "c", endedAtMs: 30 },
+    { file: "d", startedAtMs: "10", endedAtMs: 20 },
+  ]);
+  assert.deepEqual(iv, [{ file: "a", startMs: 10, endMs: 20 }]);
+  assert.deepEqual(fileIntervalsFromPerFile(null), []);
+});
+
+test("unit — plannedFileMatcher resolves the plan's relative paths against the round root", () => {
+  const isPlanned = plannedFileMatcher(["plugin/test/a.test.mjs"], "/wt");
+  assert.equal(isPlanned("node /wt/plugin/test/a.test.mjs"), true, "the argv's absolute path matches");
+  assert.equal(isPlanned("node plugin/test/a.test.mjs"), true, "the plan's own relative spelling matches");
+  assert.equal(isPlanned("node /wt/plugin/test/b.test.mjs"), false);
+  assert.equal(isPlanned(null), false, "an unreadable argv is not a planned file (it is simply not evidence FOR one)");
+  // An UNKNOWN plan yields NO predicate at all (⛔ not one that answers false — that would turn every
+  // process into 「not planned」, i.e. the fabricated measurement 「no planned process ran」).
+  assert.equal(plannedFileMatcher(null, "/wt"), null);
+});
+
+test("unit — splitProcessTree buckets planned vs descendant via the ppid chain, and never invents RSS", () => {
+  const processes = [
+    { pid: 1, ppid: 0, rssBytes: 1000, cmdline: "bash test.sh" }, // the suite shell ⇒ other
+    { pid: 2, ppid: 1, rssBytes: 2000, cmdline: "node /wt/plugin/test/a.test.mjs" }, // planned
+    { pid: 3, ppid: 2, rssBytes: 3000, cmdline: "bash -c 'heavy child'" }, // descendant of a planned file
+    { pid: 4, ppid: 3, rssBytes: 4000, cmdline: "python3 worker.py" }, // grandchild ⇒ still a descendant
+    { pid: 5, ppid: 1, rssBytes: null, cmdline: "node /wt/plugin/test/b.test.mjs" }, // planned, RSS torn
+  ];
+  const split = splitProcessTree(processes, plannedFileMatcher(["plugin/test/a.test.mjs", "plugin/test/b.test.mjs"], "/wt"));
+  assert.deepEqual(split.total, { count: 5, rssBytes: 10000, rssReadable: 4, rssUnreadable: 1 });
+  assert.deepEqual(split.planned, { count: 2, rssBytes: 2000, rssReadable: 1, rssUnreadable: 1 });
+  assert.equal(split.descendant.count, 2, "the spawned child AND its grandchild are descendants");
+  assert.equal(split.descendant.rssBytes, 7000);
+  assert.deepEqual(split.other, { count: 1, rssBytes: 1000, rssReadable: 1, rssUnreadable: 0 });
+  assert.equal(
+    split.planned.count + split.descendant.count + split.other.count,
+    split.total.count,
+    "the three buckets account for every process — nothing is silently dropped",
+  );
+  // NOTHING readable ⇒ null per bucket (⛔ not 0, which would read as 「measured: they use no memory」).
+  const blind = splitProcessTree([{ pid: 9, ppid: 1, rssBytes: null, cmdline: "x" }], () => false);
+  assert.equal(blind.total.rssBytes, null);
+  assert.equal(blind.total.count, 1);
+  // An UNKNOWN plan: the total is still measured (it needs no plan), the three plan-dependent buckets
+  // are `null` — ⛔ not three empty ones, which would read as 「nothing planned ran」.
+  const unknownPlan = splitProcessTree(processes, null);
+  assert.deepEqual(unknownPlan.total, split.total);
+  assert.equal(unknownPlan.planned, null);
+  assert.equal(unknownPlan.descendant, null);
+  assert.equal(unknownPlan.other, null);
+  // A ppid CYCLE (a torn/reparented read) terminates instead of hanging.
+  const cyclic = splitProcessTree(
+    [
+      { pid: 7, ppid: 8, rssBytes: 1, cmdline: "a" },
+      { pid: 8, ppid: 7, rssBytes: 1, cmdline: "b" },
+    ],
+    () => false,
+  );
+  assert.equal(cyclic.total.count, 2);
+});
+
+test("unit — deltaOrNull is a DELTA only when both ends were read (⛔ a one-sided reading is not a 0)", () => {
+  assert.equal(deltaOrNull(0, 5), 5);
+  assert.equal(deltaOrNull(5, 5), 0, "a real 0 delta (read both ends: nothing happened)");
+  assert.equal(deltaOrNull(null, 5), null);
+  assert.equal(deltaOrNull(5, null), null);
+  assert.equal(deltaOrNull(9, 4), 0, "a counter that went DOWN means the scope was recreated — never negative activity");
 });
 
 test("unit — readPhaseCounters reads the three cumulative counters from a cgroup dir (explicit seam dir)", () => {
@@ -150,6 +319,325 @@ test("unit — PhaseDifferentialAccounting computes exact differentials from the
   } finally {
     if (before === undefined) delete process.env.QUAY_TEST_CGROUP_SCRIPT;
     else process.env.QUAY_TEST_CGROUP_SCRIPT = before;
+  }
+});
+
+// ── gap-suite-memory-telemetry-anon-file-shmem-swap-psi-concurrency-process-tree-unknown-not-zero ───
+// AC2 — a scope whose `memory.stat` / `memory.swap.current` / `memory.pressure` are absent must record
+// `null` + a NAMED reason for EXACTLY those fields, while every field it CAN read stays filled. The
+// negative control is the same file read back: `statMax` is `null`, NOT `{}` — a zeroed block would be
+// the fabricated measurement 「measured it: nothing there」 (硬规则 3b/6).
+test("AC2 — a partially readable scope records null + a named reason for exactly the missing fields, and fills the rest", () => {
+  const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-tel-ev-"));
+  const cgroupDir = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-tel-cg-"));
+  try {
+    // Readable: current / peak / max / events / procs. ABSENT: memory.stat, memory.swap.current,
+    // memory.swap.peak, memory.pressure.
+    fs.writeFileSync(path.join(cgroupDir, "memory.current"), "1048576\n");
+    fs.writeFileSync(path.join(cgroupDir, "memory.peak"), "2097152\n");
+    fs.writeFileSync(path.join(cgroupDir, "memory.max"), "17179869184\n");
+    fs.writeFileSync(path.join(cgroupDir, "memory.events"), "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\n");
+    fs.writeFileSync(path.join(cgroupDir, "cgroup.procs"), `${process.pid}\n`);
+
+    let oomKillNow = 0;
+    const sampler = startSuiteMemorySampler({
+      adapter: LINUX_ADAPTER,
+      scopeProvider: linuxDirScope(cgroupDir),
+      stateDir,
+      runId: "tel-partial",
+      memoryMaxBytes: 17179869184,
+      phaseProvider: () => "main",
+      intervalMs: 20,
+    });
+    // Let a sample see a grown current (the max over samples is what the aggregate reports), then make
+    // oom_kill rise so `statAtFirstOomKill` has a sample to point at.
+    fs.writeFileSync(path.join(cgroupDir, "memory.current"), "4194304\n");
+    oomKillNow = 1;
+    fs.writeFileSync(path.join(cgroupDir, "memory.events"), `low 0\nhigh 0\nmax 0\noom 1\noom_kill ${oomKillNow}\n`);
+    const ev = sampler.stop();
+
+    const tel = ev.memoryTelemetry;
+    // (a) the MISSING fields: null + a reason naming the FILE that was not there.
+    assert.equal(tel.statMax, null, "no memory.stat ⇒ null, ⛔ not a zeroed breakdown");
+    assert.equal(tel.statAtPeakCurrent, null);
+    assert.equal(tel.statAtFirstOomKill, null, "the oom sample had no readable stat either ⇒ null, ⛔ not a zeroed block");
+    assert.equal(tel.psi, null, "no memory.pressure ⇒ null PSI block");
+    assert.equal(tel.swapCurrentMaxBytes, null, "no memory.swap.current ⇒ null, ⛔ not 0 bytes of swap");
+    assert.equal(tel.swapPeakBytes, null, "no memory.swap.peak ⇒ null, ⛔ not 0");
+    const missing = Object.keys(tel.unavailable).filter((k) => k.startsWith("memory.")).sort();
+    assert.deepEqual(
+      missing,
+      ["memory.pressure", "memory.stat", "memory.swapCurrentBytes", "memory.swapPeakBytes"],
+      "EXACTLY the four absent fields are named — a readable field must never be reported as unavailable (and an absent one never silently absent)",
+    );
+    assert.match(tel.unavailable["memory.stat"], /memory\.stat is not readable under .*fsr-tel-cg-/);
+    assert.match(tel.unavailable["memory.pressure"], /memory\.pressure is not readable under /);
+    // (b) the READABLE fields are still filled — the nulls above are field-local, not a whole-block bail.
+    assert.equal(tel.currentMaxBytes, 4194304, "the max of memory.current over the samples");
+    assert.equal(tel.eventsDelta.oomKill, 1, "a real delta: oom_kill went 0 → 1");
+    assert.equal(tel.samples >= 1, true);
+    // (c) the instrument's own cost is recorded (AC4's ratio) and is a real measurement, not a constant.
+    assert.equal(typeof tel.samplerCostMs, "number");
+    assert.ok(tel.samplerCostMs >= 0);
+    // (d) the process tree IS readable here (cgroup.procs lists THIS process) ⇒ a real, positive RSS —
+    // the counterpart to (a): what the host CAN read, it fills.
+    assert.equal(ev.processTreeAccounting.maxProcesses, 1);
+    assert.ok(ev.processTreeAccounting.maxRssBytes > 0, "this process's own RSS was readable ⇒ a positive number, never 0");
+  } finally {
+    fs.rmSync(stateDir, { recursive: true, force: true });
+    fs.rmSync(cgroupDir, { recursive: true, force: true });
+  }
+});
+
+// AC2 (the honesty half that the AC1 real run exposed): a round whose PLANNED SET is unknown — an
+// explicit `--command`, a failed probe — has no opinion about which process was a planned test file.
+// The three plan-dependent buckets must be `null` + a named reason, ⛔ NOT 0: three zeroed buckets read
+// as the MEASUREMENT 「no planned process ran」, which nobody made.
+test("AC2 — an unknown planned set leaves the planned/descendant split null + a named reason (⛔ not zeros)", () => {
+  const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-noplan-ev-"));
+  const cgroupDir = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-noplan-cg-"));
+  try {
+    fs.writeFileSync(path.join(cgroupDir, "memory.current"), "1048576\n");
+    fs.writeFileSync(path.join(cgroupDir, "memory.peak"), "2097152\n");
+    fs.writeFileSync(path.join(cgroupDir, "cgroup.procs"), `${process.pid}\n`);
+    const ev = startSuiteMemorySampler({
+      adapter: LINUX_ADAPTER,
+      scopeProvider: linuxDirScope(cgroupDir),
+      stateDir,
+      runId: "no-plan",
+      memoryMaxBytes: null,
+      phaseProvider: () => "main",
+      intervalMs: 20,
+      // ⛔ `plannedFiles` deliberately ABSENT — the plan is unknown.
+    }).stop();
+    const acct = ev.processTreeAccounting;
+    assert.equal(acct.maxProcesses, 1, "the TOTAL is still measured — it needs no plan, only cgroup.procs + /proc");
+    assert.ok(acct.maxRssBytes > 0, "…and its RSS is a real reading");
+    assert.equal(acct.plannedMax, null, "⛔ NOT 0 — 「no planned process ran」 is a measurement nobody made");
+    assert.equal(acct.descendantMax, null);
+    assert.equal(acct.otherMax, null);
+    assert.match(acct.unavailable ?? "", /planned test-file set is unknown/, "the reason says WHY the split is absent");
+  } finally {
+    fs.rmSync(stateDir, { recursive: true, force: true });
+    fs.rmSync(cgroupDir, { recursive: true, force: true });
+  }
+});
+
+// AC2 negative control, the OTHER half: the SAME scope with `memory.stat` / `memory.swap.*` /
+// `memory.pressure` PRESENT ⇒ the very fields that were `null` above become numbers, and their reasons
+// disappear from `unavailable`. Without this arm, 「null + reason」 could be a function that always
+// answers null (推论三: a criterion only a broken fixture can satisfy measures nothing).
+test("AC2 negative control — the same scope WITH memory.stat/swap/pressure fills exactly the fields that were null", () => {
+  const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-tel-ev2-"));
+  const cgroupDir = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-tel-cg2-"));
+  try {
+    fs.writeFileSync(path.join(cgroupDir, "memory.current"), "1048576\n");
+    fs.writeFileSync(path.join(cgroupDir, "memory.peak"), "2097152\n");
+    fs.writeFileSync(path.join(cgroupDir, "memory.max"), "17179869184\n");
+    fs.writeFileSync(path.join(cgroupDir, "memory.events"), "low 0\nhigh 3\nmax 0\noom 0\noom_kill 0\n");
+    fs.writeFileSync(path.join(cgroupDir, "cgroup.procs"), `${process.pid}\n`);
+    fs.writeFileSync(
+      path.join(cgroupDir, "memory.stat"),
+      "anon 1073741824\nfile 536870912\nshmem 1048576\nfile_mapped 268435456\nsock 4096\nkernel 8192\nslab 16384\ninactive_file 134217728\n",
+    );
+    fs.writeFileSync(path.join(cgroupDir, "memory.swap.current"), "33554432\n");
+    fs.writeFileSync(path.join(cgroupDir, "memory.swap.peak"), "67108864\n");
+    fs.writeFileSync(path.join(cgroupDir, "memory.pressure"), "some avg10=2.50 avg60=0.00 avg300=0.00 total=1234\nfull avg10=1.25 avg60=0.00 avg300=0.00 total=99\n");
+    const ev = startSuiteMemorySampler({
+      adapter: LINUX_ADAPTER,
+      scopeProvider: linuxDirScope(cgroupDir),
+      stateDir,
+      runId: "tel-full",
+      memoryMaxBytes: 17179869184,
+      phaseProvider: () => "main",
+      intervalMs: 20,
+    }).stop();
+    const tel = ev.memoryTelemetry;
+    assert.deepEqual(tel.statMax, {
+      anonBytes: 1073741824,
+      fileBytes: 536870912,
+      shmemBytes: 1048576,
+      fileMappedBytes: 268435456,
+      sockBytes: 4096,
+    }, "the five keys the diagnosis needs — including file_mapped and sock, which the pre-change reading did not carry");
+    assert.deepEqual(tel.statAtPeakCurrent, tel.statMax, "the peak sample IS this sample (one sample, one current)");
+    assert.equal(tel.swapCurrentMaxBytes, 33554432);
+    assert.equal(tel.swapPeakBytes, 67108864);
+    assert.deepEqual(tel.psi, { someAvg10Max: 2.5, fullAvg10Max: 1.25, someTotalDelta: 0, fullTotalDelta: 0 }, "one sample ⇒ the totals' delta is a real 0 (both ends read)");
+    assert.deepEqual(
+      Object.keys(tel.unavailable).filter((k) => k.startsWith("memory.")),
+      [],
+      "nothing is missing now ⇒ no memory.* reason — the map tracks the REAL reading, not a fixed list",
+    );
+  } finally {
+    fs.rmSync(stateDir, { recursive: true, force: true });
+    fs.rmSync(cgroupDir, { recursive: true, force: true });
+  }
+});
+
+// AC3 — the recorded per-phase concurrency is the MEASURED overlap of the round's own per-file
+// intervals, and the round record's `perFile` carrier re-derives the SAME number. The requested
+// `laneCount` is deliberately different (5 vs a measured 2): the whole point of the field is that it is
+// ⛔ not the number the runner asked for (that mismatch is what made the memory-policy input wrong).
+test(
+  "AC3 — the round records MEASURED max concurrency per phase, and it equals the value re-derived from the round record",
+  async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-conc-"));
+    // Three files whose intervals overlap: a=[T,T+1000], b=[T,T+1000], c=[T+1000,T+2000] ⇒ peak 2 at
+    // the instant a and b are both running. `end_ms` is the reporter's own field, so this fixture emits
+    // exactly what measure-suite-reporter emits — the round record parses it with the production parser.
+    const { f, dir } = fakeSuite(
+      [
+        "T=$(( $(date +%s%3N) ))",
+        'echo "__PERFILE__ duration_ms=1000 /wt/plugin/test/a.test.mjs passed=true end_ms=$((T+1000))"',
+        'echo "__PERFILE__ duration_ms=1000 /wt/plugin/test/b.test.mjs passed=true end_ms=$((T+1000))"',
+        'echo "__PERFILE__ duration_ms=1000 /wt/plugin/test/c.test.mjs passed=true end_ms=$((T+2000))"',
+        "sleep 3", // keep the suite alive so the phase window covers every interval
+        'echo "# tests 3"',
+        'echo "# pass 3"',
+        'echo "# fail 0"',
+        'echo "# cancelled 0"',
+        "exit 0",
+      ].join("\n"),
+    );
+    try {
+      const child = runRunner({
+        root,
+        command: `bash ${f}`,
+        laneCount: 5,
+        runId: "conc-round",
+        env: { QUAY_TEST_PLANNED_FILES: "" },
+      });
+      const { code } = await waitExit(child);
+      assert.equal(code, 0, `runner exits 0 on the green fixture, got ${code}`);
+      const s = readState(root);
+      const evidence = JSON.parse(
+        fs.readFileSync(path.join(root, ".quay", `suite-memory-evidence-${s.runId}.json`), "utf8"),
+      );
+      const conc = evidence.concurrency;
+      assert.ok(conc, "the round's evidence carries the concurrency block (written at finalize, after the intervals are complete)");
+      assert.equal(conc.laneCount, 5, "the REQUESTED lane count is recorded next to it…");
+      assert.match(conc.laneCountNote, /reliability cap/, "…together with what it does and does not mean");
+      assert.equal(conc.maxConcurrentPerPhase.static, 2, "MEASURED: two of the three intervals overlap");
+      assert.equal(conc.maxConcurrentOverall, 2);
+      assert.notEqual(conc.maxConcurrentOverall, conc.laneCount, "the measured value is ⛔ not the requested lane count");
+
+      // The RE-DERIVATION, from a DIFFERENT carrier (the round record's own perFile array, parsed by the
+      // production parser) with the SAME exported pure functions the round recorded with.
+      const round = lastRoundRecord(root);
+      const reDerived = perPhaseConcurrency(
+        fileIntervalsFromPerFile(round.perFile),
+        round.phases.map((p) => ({ phase: p.phase, start_ms: p.start_ms, end_ms: p.end_ms })),
+      );
+      assert.deepEqual(reDerived, conc.maxConcurrentPerPhase, "recorded === re-derived from the round record's perFile intervals");
+      assert.equal(
+        maxIntervalOverlap(fileIntervalsFromPerFile(round.perFile).map((i) => [i.startMs, i.endMs])),
+        conc.maxConcurrentOverall,
+        "…and the whole-round overlap agrees too",
+      );
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  },
+);
+
+// AC3 negative control — the field is not a constant: a round whose intervals never overlap records 1,
+// not the 2 above (and still not the requested lanes).
+test(
+  "AC3 negative control — non-overlapping intervals record 1 (the reading follows the intervals, not a constant)",
+  async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-conc2-"));
+    const { f, dir } = fakeSuite(
+      [
+        "T=$(( $(date +%s%3N) ))",
+        'echo "__PERFILE__ duration_ms=100 /wt/plugin/test/a.test.mjs passed=true end_ms=$((T+100))"',
+        'echo "__PERFILE__ duration_ms=100 /wt/plugin/test/b.test.mjs passed=true end_ms=$((T+300))"',
+        "sleep 2",
+        'echo "# tests 2"',
+        'echo "# pass 2"',
+        'echo "# fail 0"',
+        'echo "# cancelled 0"',
+        "exit 0",
+      ].join("\n"),
+    );
+    try {
+      const child = runRunner({ root, command: `bash ${f}`, laneCount: 7, runId: "conc-serial", env: { QUAY_TEST_PLANNED_FILES: "" } });
+      const { code } = await waitExit(child);
+      assert.equal(code, 0);
+      const s = readState(root);
+      const evidence = JSON.parse(fs.readFileSync(path.join(root, ".quay", `suite-memory-evidence-${s.runId}.json`), "utf8"));
+      assert.equal(evidence.concurrency.maxConcurrentPerPhase.static, 1, "a=[T,T+100] and b=[T+200,T+300] never overlap");
+      assert.equal(evidence.concurrency.laneCount, 7, "…while 7 lanes were requested — the two numbers are independent");
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  },
+);
+
+// AC4 — the sampler's overhead, MEASURED two ways on a fixture suite: (a) the instrument's own cost
+// recorded in the round's evidence vs the round's wall, and (b) an A/B of the same fixture suite with
+// the sampler on and off. The seam is the ONLY way to run arm (b) — a claim about one's own overhead is
+// not a measurement (硬规则 4 推论三: a criterion only a fixture can satisfy proves nothing).
+// The arms run inside a REAL cgroup scope when systemd-run is available, so the sampler really reads
+// memory.stat / the process tree; the scope arm is also what proves the reads happened at all (a cost
+// reading taken while reading NOTHING measures the fixture's own scheduling, not the sampler).
+test("AC4 — the sampler's own cost stays under 1% of the suite wall (instrument-recorded cost + an on/off A/B)", async () => {
+  const scoped = systemdRunAvailable();
+  const scopeEnv = scoped ? { QUAY_TEST_SYSTEMD_RUN_AVAILABLE: "1", QUAY_TEST_SKIP_SYSTEMD_RUN: "0" } : {};
+  const runs = [];
+  for (const arm of ["on", "off", "on", "off"]) {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), `fsr-ovh-${arm}-`));
+    const { f, dir } = fakeSuite(
+      ['echo "# tests 5"', 'echo "# pass 5"', 'echo "# fail 0"', 'echo "# cancelled 0"', "sleep 3", "exit 0"].join("\n"),
+    );
+    try {
+      const env = { ...scopeEnv };
+      if (arm === "off") env.QUAY_TEST_SUITE_MEMORY_SAMPLER = "off";
+      const t0 = Date.now();
+      const child = runRunner({ root, command: `bash ${f}`, laneCount: 2, runId: `ovh-${arm}`, env });
+      const { code } = await waitExit(child);
+      const wallMs = Date.now() - t0;
+      assert.equal(code, 0, `the fixture round is green in the ${arm} arm`);
+      const s = readState(root);
+      const evFile = path.join(root, ".quay", `suite-memory-evidence-${s.runId}.json`);
+      if (arm === "off") {
+        assert.equal(fs.existsSync(evFile), false, "the seam really disabled the sampler (⛔ no evidence file — the seam is not a no-op)");
+        runs.push({ arm, wallMs, cost: null, statMax: null });
+        continue;
+      }
+      const evidence = JSON.parse(fs.readFileSync(evFile, "utf8"));
+      runs.push({ arm, wallMs, cost: evidence.memoryTelemetry.samplerCostMs, statMax: evidence.memoryTelemetry.statMax });
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  }
+  const on = runs.filter((r) => r.arm === "on");
+  const off = runs.filter((r) => r.arm === "off");
+  // MIN of each arm (the least-noise estimator: both arms' wall is dominated by node bootstrap + the
+  // fixture's own sleep, so the sampler's contribution only shows up as a positive tail).
+  const minOn = Math.min(...on.map((r) => r.wallMs));
+  const minOff = Math.min(...off.map((r) => r.wallMs));
+  const deltaPct = ((minOn - minOff) / minOff) * 100;
+  // The instrument's OWN reading of its cost (independent of the A/B): samples × per-sample work.
+  const costOn = Math.min(...on.map((r) => r.cost));
+  const costPct = (costOn / minOn) * 100;
+  process.stderr.write(
+    `full-suite-runner AC4 overhead (${scoped ? "REAL cgroup scope" : "hermetic, no scope"}): ` +
+      `sampler ON wall=${on.map((r) => r.wallMs).join("/")}ms OFF wall=${off.map((r) => r.wallMs).join("/")}ms ` +
+      `⇒ A/B delta=${deltaPct.toFixed(2)}% (min ${minOn} vs ${minOff}); ` +
+      `instrument-recorded samplerCostMs=${costOn.toFixed(3)} ⇒ ${costPct.toFixed(3)}% of the suite wall\n`,
+  );
+  assert.ok(deltaPct <= 1, `the on/off wall-clock delta is within the 1% budget (measured ${deltaPct.toFixed(2)}%)`);
+  assert.ok(costPct <= 1, `the sampler's own recorded cost is within the 1% budget (measured ${costPct.toFixed(3)}%)`);
+  assert.ok(costOn > 0, "the cost reading is a REAL measurement (a structurally-0 counter would carry no information)");
+  if (scoped) {
+    assert.ok(
+      on.some((r) => r.statMax !== null),
+      "inside a real scope the sampler read memory.stat — so the measured cost is the cost of real reads",
+    );
   }
 });
 
@@ -369,8 +857,8 @@ test("AC1 unit — buildSystemdRunArgv wraps a command in systemd-run --user --s
   assert.ok(!argv.includes("MemoryMax=16G"), "the ceiling is no longer spelled as a code literal — it is the declared size in BYTES");
   assert.equal(
     DEFAULT_SYSTEMD_RUN_LIMITS.memoryMax,
-    String(Math.min(16 * 1024 ** 3, sharedHostCeilingBytes(readEffectiveTotalMemBytes(), listSharedHostScopes().count))),
-    "the declared 16 GiB baseline, clamped by the host guard (⛔ not 24/26 GiB)",
+    defaultSuiteMemoryMax(),
+    "the template holds the DECLARED ceiling as resolved for this environment (the 16 GiB undeclared default is pinned by the AC2 case that clears the declaration)",
   );
   assert.ok(argv.includes("OOMPolicy=continue"), "the scope sets OOMPolicy=continue (one OOM-killed process must not TERM the whole suite)");
   assert.ok(!argv.includes("CPUQuota="), "default argv carries NO CPUQuota — the cgroup has no CPU limit");
@@ -396,10 +884,65 @@ test("AC1 unit — parseSystemdRunLimits merges a seam override over the default
   assert.deepEqual(parseSystemdRunLimits("MemoryMax=64M Bogus=1"), { ...DEFAULT_SYSTEMD_RUN_LIMITS, memoryMax: "64M" });
 });
 
+// Found while fixing the declared ceiling (gap-suite-declared-memory-max-swallowed-by-shared-host-split):
+// `findSuiteScopeUnit` used to return the FIRST `run-*.scope` component of the child's
+// /proc/<pid>/cgroup. But the spawned `systemd-run` moves into its new scope only once the transient
+// unit is registered — at the instant of the first poll it is STILL IN THE CALLER'S cgroup. And in the
+// REAL suite the caller's cgroup IS the suite's own auto-named `run-uNNN.scope`, so the AC1 evidence
+// file (and the round's consumed-load read) described the CALLER's scope: `MemoryMax=infinity`,
+// `memory_max_kernel=max` — a witness for a ceiling nobody set. Reproduced below with the exact shape:
+// a probe running inside a real auto-named `run-*.scope` spawns a real nested `systemd-run --scope`.
+test("AC1 — findSuiteScopeUnit resolves the CHILD's scope, ⛔ never the caller's own enclosing run-*.scope", async (t) => {
+  if (!systemdRunAvailable()) return t.skip("systemd-run --user --scope not available on this host");
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-scopeunit-"));
+  const probe = path.join(dir, "probe.mjs");
+  fs.writeFileSync(
+    probe,
+    [
+      `import { spawn } from "node:child_process";`,
+      `import fs from "node:fs";`,
+      `import { buildSystemdRunArgv, DEFAULT_SYSTEMD_RUN_LIMITS, findSuiteScopeUnit } from ${JSON.stringify(RUNNER)};`,
+      `const unitOf = (p) => { try { return (fs.readFileSync(\`/proc/\${p}/cgroup\`, "utf8").match(/\\/(run-[^/\\n]+\\.scope)\\s*$/m) || [])[1] ?? null; } catch { return null; } };`,
+      `const mine = unitOf(process.pid);`,
+      `const argv = buildSystemdRunArgv('bash -c "sleep 3"', DEFAULT_SYSTEMD_RUN_LIMITS);`,
+      `const child = spawn(argv[0], argv.slice(1), { stdio: "ignore", detached: true });`,
+      `const resolved = await findSuiteScopeUnit(child.pid);`,
+      `// settle: the child's own scope exists only once its transient unit is registered`,
+      `let childUnit = unitOf(child.pid);`,
+      `for (let i = 0; i < 100 && (!childUnit || childUnit === mine); i++) { await new Promise((r) => setTimeout(r, 50)); childUnit = unitOf(child.pid); }`,
+      `console.log(JSON.stringify({ mine, resolved, childUnit }));`,
+      `try { process.kill(-child.pid, "SIGKILL"); } catch { child.kill("SIGKILL"); }`,
+    ].join("\n"),
+    "utf8",
+  );
+  try {
+    // The probe runs INSIDE an auto-named transient scope — the shape the real suite provides.
+    const { code, out } = await spawnCmd(
+      ["systemd-run", "--user", "--scope", "--quiet", "--collect", "node", "--no-warnings", "--experimental-strip-types", probe],
+      { ...process.env },
+    );
+    assert.equal(code, 0, `the in-scope probe exits 0; stdout=${JSON.stringify(out)}`);
+    const line = (out ?? "").trim().split("\n").filter((l) => l.startsWith("{")).pop();
+    assert.ok(line, `no reading from the in-scope probe — stdout=${JSON.stringify(out)}`);
+    const { mine, resolved, childUnit } = JSON.parse(line);
+    assert.match(String(mine), /^run-[^/]+\.scope$/, "the probe really is inside an auto-named run-*.scope (that shape is what makes the caller's own scope matchable)");
+    assert.ok(childUnit && childUnit !== mine, `the nested systemd-run really did land in its OWN scope (${childUnit} ≠ ${mine})`);
+    assert.equal(resolved, childUnit, "the resolved unit is the CHILD's scope");
+    assert.notEqual(resolved, mine, "⛔ NOT the caller's own enclosing scope (its limits are not the suite's)");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test(
   "AC1 — the runner wraps the suite in a systemd-run cgroup scope; the applied limits are visible as durable evidence (real systemd)",
   { skip: systemdRunAvailable() ? false : "systemd-run --user --scope not available on this host" },
-  async () => {
+  // The whole case runs under the UNDECLARED baseline: this fixture root declares nothing (no
+  // `.quay/config.yml`), so the declaration the runner resolves and the one re-resolved here are both
+  // the default — which is what the assertions below pin. `runRunner` additionally stops leaking the
+  // ambient declaration into the child, so the child's evidence and the parent's expectation agree.
+  async () =>
+    withUndeclared(async () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-sd1-"));
     // The suite must outlive the evidence capture (the scope is queryable only while it runs).
     const { f, dir } = fakeSuite(
@@ -445,6 +988,11 @@ test(
       await poll(() => fs.existsSync(evidence), { timeoutMs: 10_000 });
       const txt = fs.readFileSync(evidence, "utf8");
       assert.match(txt, /scope_unit=run-[a-z0-9]+\.scope/, "the transient scope unit name is recorded (systemd names it run-<id>.scope — cgroup-derived)");
+      // ⚠️ This witness is only as good as `findSuiteScopeUnit`: measured 2026-10-15 the file said
+      // `MemoryMax=infinity` for a suite that really ran under a ceiling, because the unit resolved was
+      // the CALLER'S own scope (the suite's `run-uNNN.scope`) — a scope nobody had set a limit on. The
+      // `findSuiteScopeUnit` case above pins that resolution; this assertion pins the evidence that
+      // depends on it.
       assert.match(
         txt,
         new RegExp(`MemoryMax=${policy.memoryMax}`),
@@ -456,7 +1004,7 @@ test(
       fs.rmSync(root, { recursive: true, force: true });
       fs.rmSync(dir, { recursive: true, force: true });
     }
-  },
+    }),
 );
 
 test(
@@ -984,26 +1532,47 @@ const MIB = 1024 ** 2;
 const PROD_STATE_DIR = path.join(REPO_ROOT, ".quay");
 const HAS_PROD_ROUNDS = fs.existsSync(path.join(PROD_STATE_DIR, "verification-round.jsonl"));
 
-test("AC2 — the effective MemoryMax comes from the DECLARED value, and the declaration is what moves it", () => {
+/** The runner promotes `.quay/config.yml` `suite: memory_max:` into `QUAY_SUITE_MEMORY_MAX` for EVERY
+ *  suite child, so a project that DECLARES its own ceiling (quay itself does: the human-ruled
+ *  2026-10-15 26G) makes every case about the UNDECLARED baseline read the declaration instead and red.
+ *  A case about the default (or about "this fixture root declares nothing") therefore controls that
+ *  input itself: clear the ambient declaration for the case's duration, restore it after.
+ *  Measured 2026-10-15 under an ambient `QUAY_SUITE_MEMORY_MAX=26G`: 7 of these cases red. */
+async function withUndeclared(fn) {
+  const ambient = process.env.QUAY_SUITE_MEMORY_MAX;
+  delete process.env.QUAY_SUITE_MEMORY_MAX;
+  try {
+    return await fn();
+  } finally {
+    if (ambient === undefined) delete process.env.QUAY_SUITE_MEMORY_MAX;
+    else process.env.QUAY_SUITE_MEMORY_MAX = ambient;
+  }
+}
+
+test("AC2 — the effective MemoryMax comes from the DECLARED value, and the declaration is what moves it", async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-decl-"));
   try {
-    const resolved = resolveSuiteMemoryMax(dir);
-    assert.equal(resolved.declared, "16G", "the human-ruled baseline is the declared default");
-    assert.equal(resolved.declaredSource, "default", "…and it is the DEFAULT, not an env/config value");
-    assert.equal(resolved.bound, "declared", "the declared value is what applied (⛔ not raised to the host fraction)");
-    assert.equal(resolved.memoryMax, String(16 * GIB), "16 GiB, in bytes");
-    // The declared value is clamped only by the host bound (this host's is far above 16 GiB).
-    assert.ok(Number(resolved.memoryMax) <= resolved.hostGuardBytes, "never above the host guardrail");
-    assert.equal(Number(resolved.memoryMax), Math.min(16 * GIB, resolved.hostGuardBytes));
-    // The module-load template agrees (it resolves the same declaration, no state dir).
-    assert.equal(defaultSuiteMemoryMax(), String(Math.min(16 * GIB, sharedHostCeilingBytes(readEffectiveTotalMemBytes(), listSharedHostScopes().count))));
-    assert.equal(DEFAULT_SYSTEMD_RUN_LIMITS.memoryMax, defaultSuiteMemoryMax());
+    await withUndeclared(() => {
+      const resolved = resolveSuiteMemoryMax(dir);
+      assert.equal(resolved.declared, "16G", "the human-ruled baseline is the declared default");
+      assert.equal(resolved.declaredSource, "default", "…and it is the DEFAULT, not an env/config value");
+      assert.equal(resolved.bound, "declared", "the declared value is what applied (⛔ not raised to the host fraction)");
+      assert.equal(resolved.memoryMax, String(16 * GIB), "16 GiB, in bytes");
+      // The declared value is clamped only by the host bound (this host's is far above 16 GiB).
+      assert.ok(Number(resolved.memoryMax) <= resolved.hostGuardBytes, "never above the host guardrail");
+      assert.equal(Number(resolved.memoryMax), Math.min(16 * GIB, resolved.hostGuardBytes));
+      // The module-load template agrees (it resolves the same declaration, no state dir).
+      assert.equal(defaultSuiteMemoryMax(), String(Math.min(16 * GIB, sharedHostCeilingBytes(readEffectiveTotalMemBytes(), listSharedHostScopes().count))));
+    });
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
+  // The module-load template resolved the AMBIENT declaration at import time ⇒ it agrees with the
+  // function under that same (restored) declaration.
+  assert.equal(DEFAULT_SYSTEMD_RUN_LIMITS.memoryMax, defaultSuiteMemoryMax());
 });
 
-test("AC2 — an override CHANGES the effective ceiling (config/env is the mechanism, not the code)", () => {
+test("AC2 — an override CHANGES the effective ceiling (config/env is the mechanism, not the code)", async () => {
   // A fixed host guard keeps this deterministic on any host: 64 GiB.
   const guard = 64 * GIB;
   const withDeclared = (v) => suiteMemoryMax({ effectiveTotalMemBytes: 246 * GIB, declared: { value: v, source: "env" }, hostGuardBytes: guard });
@@ -1013,11 +1582,16 @@ test("AC2 — an override CHANGES the effective ceiling (config/env is the mecha
   assert.notEqual(withDeclared("2G").memoryMax, withDeclared("20G").memoryMax, "two declarations ⇒ two ceilings");
 
   // The env knob is the declared-source path the runner reads (config promotes into the same env).
-  assert.deepEqual(declaredSuiteMemoryMax("8G"), { value: "8G", source: "env" });
-  assert.deepEqual(declaredSuiteMemoryMax(" 16G "), { value: "16G", source: "env" }, "whitespace tolerated");
-  assert.deepEqual(declaredSuiteMemoryMax(""), { value: SUITE_MEMORY_MAX_DEFAULT, source: "default" }, "empty ⇒ the default");
-  assert.deepEqual(declaredSuiteMemoryMax(undefined), { value: SUITE_MEMORY_MAX_DEFAULT, source: "default" });
-  assert.deepEqual(declaredSuiteMemoryMax("banana"), { value: SUITE_MEMORY_MAX_DEFAULT, source: "default" }, "an unparseable value must NOT reach systemd-run (it would refuse the scope)");
+  // ⛔ `declaredSuiteMemoryMax(undefined)` resolves the env PARAMETER's own default
+  // (`process.env.QUAY_SUITE_MEMORY_MAX`) — an explicitly-passed `undefined` is indistinguishable from
+  // not passing it, so the case is about the ambient env being UNSET and must clear it.
+  await withUndeclared(() => {
+    assert.deepEqual(declaredSuiteMemoryMax("8G"), { value: "8G", source: "env" });
+    assert.deepEqual(declaredSuiteMemoryMax(" 16G "), { value: "16G", source: "env" }, "whitespace tolerated");
+    assert.deepEqual(declaredSuiteMemoryMax(""), { value: SUITE_MEMORY_MAX_DEFAULT, source: "default" }, "empty ⇒ the default");
+    assert.deepEqual(declaredSuiteMemoryMax(undefined), { value: SUITE_MEMORY_MAX_DEFAULT, source: "default" });
+    assert.deepEqual(declaredSuiteMemoryMax("banana"), { value: SUITE_MEMORY_MAX_DEFAULT, source: "default" }, "an unparseable value must NOT reach systemd-run (it would refuse the scope)");
+  });
   // The runner's env is the knob the config promotes into (the SAME name, so config < env holds).
   assert.equal(process.env.QUAY_SUITE_MEMORY_MAX === undefined || typeof process.env.QUAY_SUITE_MEMORY_MAX === "string", true);
 });
@@ -1070,7 +1644,9 @@ test(
   "AC3 — a REAL round's measured concurrency equals an independent overlap computation, and the diagnostic is below 16 GiB",
   { skip: HAS_PROD_ROUNDS ? false : "no .quay/verification-round.jsonl in this checkout (fresh clone) — nothing to measure" },
   async () => {
-    const real = resolveSuiteMemoryMax(PROD_STATE_DIR);
+    // The carrier is the production main checkout, which DECLARES its own ceiling; this case is about
+    // the 16 GiB baseline the diagnostic must stay under ⇒ resolve it undeclared.
+    const real = await withUndeclared(() => resolveSuiteMemoryMax(PROD_STATE_DIR));
     assert.ok(real.actualConcurrency !== null && real.actualConcurrency > 0, `a real measured concurrency (${real.actualConcurrency})`);
     assert.ok(real.actualConcurrency < 128, "…BELOW the requested lane count 128 — the scheduler's reliability cap is why");
     assert.ok(real.perFileHighWaterBytes !== null && real.perFileHighWaterBytes > 0, "the per-file high-water is measured too");
@@ -1101,7 +1677,7 @@ test(
   },
 );
 
-test("AC3/DoD — the diagnostic can NEVER raise the effective MemoryMax above the declared value", () => {
+test("AC3/DoD — the diagnostic can NEVER raise the effective MemoryMax above the declared value", async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-noraise-"));
   try {
     // A deliberately alarming measurement: ~1 TB of "measured" per-file demand, 200-way concurrency.
@@ -1112,7 +1688,9 @@ test("AC3/DoD — the diagnostic can NEVER raise the effective MemoryMax above t
         perFile: Array.from({ length: 200 }, (_, i) => ({ startedAtMs: 0, endedAtMs: 1000, memPeakKb: 5_000_000 + i })),
       })}\n`,
     );
-    const wild = resolveSuiteMemoryMax(dir);
+    // …against the UNDECLARED baseline (this fixture root declares nothing; the ambient env must not
+    // supply a declaration either, or the assertion would just re-read the ambient value).
+    const wild = await withUndeclared(() => resolveSuiteMemoryMax(dir));
     assert.equal(wild.laneScaledEstimateBytes > 16 * GIB, true, `the diagnostic DOES react to the measurement (${(wild.laneScaledEstimateBytes / GIB).toFixed(1)} GiB)`);
     assert.equal(wild.memoryMax, String(16 * GIB), "⛔ but the effective MemoryMax is STILL the declared 16 GiB");
     assert.equal(wild.bound, "declared");
@@ -1122,7 +1700,7 @@ test("AC3/DoD — the diagnostic can NEVER raise the effective MemoryMax above t
       path.join(dir, "verification-round.jsonl"),
       `${JSON.stringify({ round: 1, perFile: Array.from({ length: 128 }, (_, i) => ({ startedAtMs: 0, endedAtMs: 1000, memPeakKb: 900_000 + i })) })}\n`,
     );
-    const wide = resolveSuiteMemoryMax(dir);
+    const wide = await withUndeclared(() => resolveSuiteMemoryMax(dir));
     assert.equal(wide.actualConcurrency, 128, "the reader reports the wide concurrency it measured");
     assert.equal(wide.memoryMax, String(16 * GIB), "…and the ceiling is untouched by it");
   } finally {
@@ -1130,18 +1708,26 @@ test("AC3/DoD — the diagnostic can NEVER raise the effective MemoryMax above t
   }
 });
 
-test("DoD — no commit may raise the effective default above 16 GiB: the resolved default is PINNED here", () => {
+test("DoD — no commit may raise the effective default above 16 GiB: the resolved default is PINNED here", async () => {
   // The human ruled 16 GiB a deliberate pressure baseline (2026-10-14). This is the mechanical half of
   // "no commit on this branch raises the effective default": change SUITE_MEMORY_MAX_DEFAULT, or make
   // the runner derive a bigger default, and THIS goes red.
   assert.equal(SUITE_MEMORY_MAX_DEFAULT, "16G", "the declared default is 16G");
   assert.equal(parseSystemdBytesToMb(SUITE_MEMORY_MAX_DEFAULT) * 1024 * 1024, 16 * GIB);
-  assert.ok(Number(defaultSuiteMemoryMax()) <= 16 * GIB, `the resolved default never exceeds 16 GiB (${defaultSuiteMemoryMax()})`);
-  assert.ok(Number(DEFAULT_SYSTEMD_RUN_LIMITS.memoryMax) <= 16 * GIB);
-  // On a host whose guardrail is at or above 16 GiB (this one), the default is EXACTLY 16 GiB.
-  if (sharedHostCeilingBytes(readEffectiveTotalMemBytes(), listSharedHostScopes().count) >= 16 * GIB) {
-    assert.equal(defaultSuiteMemoryMax(), String(16 * GIB), "16 GiB exactly — ⛔ not 24/26 GiB");
-  }
+  // The DEFAULT is what is pinned — not the ambient declaration. A project's own `suite: memory_max:`
+  // may legitimately be higher (that is the whole point of the declared knob), so the resolution is
+  // read with the declaration cleared.
+  await withUndeclared(() => {
+    assert.ok(Number(defaultSuiteMemoryMax()) <= 16 * GIB, `the resolved default never exceeds 16 GiB (${defaultSuiteMemoryMax()})`);
+    // On a host whose guardrail is at or above 16 GiB (this one), the default is EXACTLY 16 GiB.
+    if (sharedHostCeilingBytes(readEffectiveTotalMemBytes(), listSharedHostScopes().count) >= 16 * GIB) {
+      assert.equal(defaultSuiteMemoryMax(), String(16 * GIB), "16 GiB exactly — ⛔ not 24/26 GiB");
+    }
+  });
+  // The module-load template resolved whatever declaration was ambient AT IMPORT TIME (the suite runner
+  // promotes the project's `suite: memory_max:` into it) ⇒ it must agree with a live resolution under
+  // that same declaration. ⛔ Not a `<= 16 GiB` claim: a declared project is allowed above the default.
+  assert.equal(DEFAULT_SYSTEMD_RUN_LIMITS.memoryMax, defaultSuiteMemoryMax());
 });
 
 test("unit — readSuiteMemoryMeasurements reads the round record's own perFile (rows absent ⇒ both null)", () => {
@@ -1282,28 +1868,42 @@ test(
 // The SUITE is a second long-lived consumer of the same host-derived fraction: it and the anchor
 // groups are alive at the same time, so the suite's share adds to the same sum. It is wired through
 // the SAME `sharedHostCeilingBytes` (⛔ one implementation, 硬规则 5b — this file owns no second copy
-// of the formula), and it is the UPPER bound on the declared ceiling — so a declared value is never
-// above what the shared host can afford, while a declared value BELOW it (the 16 GiB baseline here)
-// is honoured unchanged.
+// of the formula), which is the UPPER bound on the declared ceiling for the PROJECT-BLIND DEFAULT —
+// so a default is never above what the shared host can afford, while the 16 GiB baseline here is
+// honoured unchanged.
+// ⚠️ WHICH rule produces the upper bound is selected by the DECLARATION'S PROVENANCE
+// (gap-suite-declared-memory-max-swallowed-by-shared-host-split, 人 2026-10-15 裁定): an explicitly
+// DECLARED ceiling (`.quay/config.yml` `suite: memory_max:` / `QUAY_SUITE_MEMORY_MAX`) is bounded by
+// the PROJECT-BLIND `0.25 × effective host total` instead, so the shared-host split can no longer
+// silently swallow an operator's declaration. The selection's ONE home is `suiteHostGuard` in
+// plugin/scripts/full-suite-runner.ts (⛔ not restated here), and its ACs live in
+// full-suite-runner-declared-memory-guard.test.mjs. The loop below injects a guard explicitly, so it
+// holds for BOTH rules — it pins `suiteMemoryMax`'s own contract, not the selection.
 
-test("unit — the shared-host step is the UPPER bound: it never RAISES the declared ceiling", () => {
+test("unit — the shared-host step is the UPPER bound: it never RAISES the declared ceiling", async () => {
   const effective = readEffectiveTotalMemBytes();
   const reading = listSharedHostScopes();
   const blind = Math.floor((effective * SCOPE_ENVELOPE_HOST_FRACTION) / 4096) * 4096;
-  for (const n of [0, 1, 2, 8, 10 ** 6]) {
-    const guard = sharedHostCeilingBytes(effective, n);
-    const applied = Number(suiteMemoryMax({ effectiveTotalMemBytes: effective, declared: declaredSuiteMemoryMax(), hostGuardBytes: guard }).memoryMax);
-    assert.ok(applied > 0, `sibling count ${n}: a real positive ceiling`);
-    assert.ok(applied <= Math.min(16 * GIB, guard), `sibling count ${n}: the shared step must never RAISE the ceiling (${applied})`);
-    assert.ok(guard <= blind, `sibling count ${n}: the shared ceiling is never above the project-blind fraction`);
-  }
+  // `declaredSuiteMemoryMax()` with no argument reads the AMBIENT declaration ⇒ resolve the case under
+  // the undeclared 16 GiB baseline it is about (a declared 26G would be RAISED past the 16 GiB bound).
+  await withUndeclared(() => {
+    for (const n of [0, 1, 2, 8, 10 ** 6]) {
+      const guard = sharedHostCeilingBytes(effective, n);
+      const applied = Number(suiteMemoryMax({ effectiveTotalMemBytes: effective, declared: declaredSuiteMemoryMax(), hostGuardBytes: guard }).memoryMax);
+      assert.ok(applied > 0, `sibling count ${n}: a real positive ceiling`);
+      assert.ok(applied <= Math.min(16 * GIB, guard), `sibling count ${n}: the shared step must never RAISE the ceiling (${applied})`);
+      assert.ok(guard <= blind, `sibling count ${n}: the shared ceiling is never above the project-blind fraction`);
+    }
+  });
   assert.equal(sharedHostCeilingBytes(1024 * GIB, 10 ** 6), SHARED_HOST_MIN_CEILING_BYTES);
   assert.equal(SHARED_HOST_MIN_CEILING_BYTES, 2 * SHARED_HOST_OBSERVED_PEAK_BYTES);
   assert.equal(reading.count === null || reading.count >= 0, true, "the count is either a real reading or the explicit not-evaluated value");
 });
 
-test("unit — suiteMemoryMax honours an explicitly supplied host guardrail and an explicit declaration (the wiring is not decorative)", () => {
-  const base = { effectiveTotalMemBytes: 1024 * GIB, declared: declaredSuiteMemoryMax() };
+test("unit — suiteMemoryMax honours an explicitly supplied host guardrail and an explicit declaration (the wiring is not decorative)", async () => {
+  // The 16 GiB expectations below are about the UNDECLARED baseline ⇒ read `declaredSuiteMemoryMax()`
+  // with the ambient declaration cleared (a declared 26G would legitimately win over the huge guard).
+  const base = await withUndeclared(() => ({ effectiveTotalMemBytes: 1024 * GIB, declared: declaredSuiteMemoryMax() }));
   assert.equal(suiteMemoryMax({ ...base, hostGuardBytes: 12345 }).memoryMax, "12345", "a supplied guardrail is returned as-is when it is the binding one");
   assert.equal(suiteMemoryMax({ ...base, hostGuardBytes: 1024 * GIB }).memoryMax, String(16 * GIB), "…and the declared 16 GiB applies under a huge guard");
   assert.equal(suiteMemoryMax({ ...base, hostGuardBytes: GIB }).bound, "host-guard");

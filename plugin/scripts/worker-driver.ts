@@ -3613,7 +3613,10 @@ export function readSuiteMemoryEvidence(root: string, runId: string | null): Sui
     runId: typeof o.runId === "string" ? o.runId : runId,
     peakBytes: typeof o.peakBytes === "number" && Number.isFinite(o.peakBytes) ? o.peakBytes : null,
     memoryMaxBytes: typeof o.memoryMaxBytes === "number" && Number.isFinite(o.memoryMaxBytes) ? o.memoryMaxBytes : null,
-    oom: typeof o.oom === "number" && Number.isFinite(o.oom) ? o.oom : 0,
+    // 硬规则 6 / 3b (gap-suite-resource-measurement-needs-a-host-adapter-not-inline-cgroup-calls):
+    // an `oom` the record does not carry is UNKNOWN (`null`), never 0 — `0` is a measurement
+    // (「no OOM event occurred」) and this reader did not make one.
+    oom: typeof o.oom === "number" && Number.isFinite(o.oom) ? o.oom : null,
     oomKill: o.oomKill,
     phase: typeof o.phase === "string" ? o.phase : "",
     scopeUnit: typeof o.scopeUnit === "string" ? o.scopeUnit : null,
