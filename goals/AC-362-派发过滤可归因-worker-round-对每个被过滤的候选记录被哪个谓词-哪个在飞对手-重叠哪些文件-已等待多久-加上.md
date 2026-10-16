@@ -1,7 +1,7 @@
 ---
 id: AC-362
 title: 派发过滤可归因：worker-round 对每个被过滤的候选记录被哪个谓词、哪个在飞对手、重叠哪些文件、已等待多久；加上该记录后候选集合与顺序不变
-status: active
+status: achieved
 kind: criterion
 goal: GOAL-037
 criterion: >-
@@ -47,6 +47,11 @@ statusLog:
     to: active
     actor: goal-driver
     reason: "triage: activate"
+  - at: 2026-10-16T16:35:34.516Z
+    from: active
+    to: achieved
+    actor: goal-driver
+    reason: "I2: criterion pass"
 fidelity:
   verdict: faithful
   reason: "fidelity judge: faithful"
