@@ -1,7 +1,7 @@
 // @test-group engine
 // driver-filters.test.mjs — AC152 (tasks/gap-ac152-filter-composable-predicate-list): the dispatch-pre-
 // filter is a COMPOSABLE PREDICATE LIST shared by the two task-processing drivers (worker / promotion),
-// not a per-kind private branch. The five predicates (notInFlight / depsSatisfied / touchesDisjoint /
+// not a per-kind private branch. The five predicates (notInFlight / depsSatisfied / touchesDisjointOrAged /
 // retryCapNotExhausted / notNeedsHuman) are elements of ONE list (TASK_FILTERS); both drivers consume it
 // via applyTaskFilters. AC1 falsifiable: adding a new predicate to BOTH drivers must be a ONE-place change
 // (append to TASK_FILTERS); if it required editing both driver files ⇒ false.
@@ -101,7 +101,7 @@ function makeGitRoot(tag) {
 test("AC1 — TASK_FILTERS is the single list of the five composable predicates", () => {
   assert.deepEqual(
     TASK_FILTERS.map((f) => f.name),
-    ["notInFlight", "depsSatisfied", "touchesDisjoint", "retryCapNotExhausted", "notNeedsHuman"],
+    ["notInFlight", "depsSatisfied", "touchesDisjointOrAged", "retryCapNotExhausted", "notNeedsHuman"],
     "五个谓词是一个列表里的元素（顺序固定，取假：缺任一名或散落他处 ⇒ 假）",
   );
   assert.equal(new Set(TASK_FILTERS.map((f) => f.name)).size, TASK_FILTERS.length, "names are unique");
@@ -278,9 +278,10 @@ test("depsSatisfied — a SUPERSEDED (retired) dep does not block dispatch; read
   assert.equal(pred("gap-after-missing"), false, "unreadable dep still blocks (fail-closed)");
 });
 
-// ── touchesDisjoint ─────────────────────────────────────────────────────────────────────────────
+// ── touchesDisjointOrAged（GOAL-037 / AC-365：取代 touchesDisjoint 在列表中的那一格；off 下与
+//    touchesDisjoint 逐候选同形 —— 本用例的判定语义一字未改，只是从列表元素读它）──────────────────
 
-test("touchesDisjoint — overlapping candidate filtered vs in-flight; disjoint kept; unreadable ⇒ conservative", (t) => {
+test("touchesDisjointOrAged — overlapping candidate filtered vs in-flight; disjoint kept; unreadable ⇒ conservative", (t) => {
   const root = makeRoot("touches");
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const write = (id, touchesLine) => fs.writeFileSync(

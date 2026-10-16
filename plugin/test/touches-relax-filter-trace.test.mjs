@@ -3,12 +3,12 @@
 //
 // WHY THIS EXISTS：worker-round 的 `filtered-empty` 轮此前**不可归因**——`.quay/worker-round.jsonl`
 // 只写 `stop_reason: "filtered-empty (…filtered by predicates)"`，一个 stop_reason 字面量把五种互不
-// 相同的成因（notInFlight / depsSatisfied / touchesDisjoint / retryCapNotExhausted / notNeedsHuman）
+// 相同的成因（notInFlight / depsSatisfied / touchesDisjointOrAged / retryCapNotExhausted / notNeedsHuman）
 // 压成同形。GOAL-037 要判「touches 单独把某任务挡了超过阈值 ⇒ 允许放宽」时，阈值/名额/自动收紧三者
 // 都无读数可依（硬规则 4 推论三：先要有穿过所有中间层、验收那一刻仍取得到的量）。
 //
 // 本测试的判别力【不在】「断言全绿」上——恒真断言与真归因同形。判别力由 AC6 的两种取假注入提供
-// （① 归因写死成恒 touchesDisjoint；② 恒空 filter_trace，两者各让本测试变红）。
+// （① 归因写死成恒 touchesDisjointOrAged；② 恒空 filter_trace，两者各让本测试变红）。
 //
 // 载体面（DoD 逐字要求）：断言读的是从 fixture 的 `.quay/worker-round.jsonl` **回读并 JSON.parse**
 // 出来的那一行记录（生产写入器 = worker-driver 的 appendRoundToFile），⛔ 不是内存里的对象。
@@ -91,8 +91,8 @@ function writeRound(root, opts) {
 // fixture 的 task id（全部带 `gap-trace-` 前缀 ⇒ 绝不会与真实任务相撞）。
 const OPP = "gap-trace-opp"; // 在飞对手
 const SELF_OPP = "gap-trace-self-opp"; // 在飞对手（AC3：它声明的 Touches 含【候选自身的任务文件】）
-const CAND = "gap-trace-cand"; // 只被 touchesDisjoint 挡住
-const SELF = "gap-trace-self"; // 只被 touchesDisjoint 挡住（AC3：自身任务文件落在交集里，须被排除）
+const CAND = "gap-trace-cand"; // 只被 touchesDisjointOrAged 挡住
+const SELF = "gap-trace-self"; // 只被 touchesDisjointOrAged 挡住（AC3：自身任务文件落在交集里，须被排除）
 const DEP = "gap-trace-dep"; // 只被 depsSatisfied 挡住
 const NH = "gap-trace-nh"; // 只被 notNeedsHuman 挡住
 const EXH = "gap-trace-exh"; // 只被 retryCapNotExhausted 挡住
@@ -159,10 +159,10 @@ test("AC2 — touches 归因：blocker / overlapFiles / waitedMinutes 三键同�
 
   assert.ok(Array.isArray(rec.filter_trace), "filter_trace 是数组（跑过该步）");
   const mine = rec.filter_trace.filter((e) => e.task === CAND);
-  assert.deepEqual(mine.map((e) => e.filter), ["touchesDisjoint"], "CAND **只**被 touchesDisjoint 挡住（一条）");
+  assert.deepEqual(mine.map((e) => e.filter), ["touchesDisjointOrAged"], "CAND **只**被 touchesDisjointOrAged 挡住（一条）");
 
   const entry = mine[0];
-  assert.equal(entry.filter, "touchesDisjoint");
+  assert.equal(entry.filter, "touchesDisjointOrAged");
   assert.equal(entry.blocker, OPP, "blocker 逐字等于该在飞对手的 task id");
   assert.deepEqual(entry.overlapFiles, ["plugin/scripts/trace-shared.ts"], "overlapFiles = 实测交集（排序后）");
   assert.equal(typeof entry.waitedMinutes, "number", "waitedMinutes 由载体推出（非 null）");
@@ -187,9 +187,9 @@ test("AC3 — overlapFiles 是【交集】：每个路径同在两边的展开�
   writeRound(f.root, { filterTrace: entries });
   const rec = readLastRound(f.root);
 
-  const candEntry = rec.filter_trace.find((e) => e.task === CAND && e.filter === "touchesDisjoint");
-  const selfEntry = rec.filter_trace.find((e) => e.task === SELF && e.filter === "touchesDisjoint");
-  assert.ok(candEntry && selfEntry, "两条 touchesDisjoint 条目都在载体里");
+  const candEntry = rec.filter_trace.find((e) => e.task === CAND && e.filter === "touchesDisjointOrAged");
+  const selfEntry = rec.filter_trace.find((e) => e.task === SELF && e.filter === "touchesDisjointOrAged");
+  assert.ok(candEntry && selfEntry, "两条 touchesDisjointOrAged 条目都在载体里");
 
   const candSet = expandOf(CAND);
   const oppSet = expandOf(OPP);
@@ -216,7 +216,7 @@ test("AC3 — overlapFiles 是【交集】：每个路径同在两边的展开�
 
 // ── AC4 ──────────────────────────────────────────────────────────────────────────────────────────
 
-test("AC4 — 其它谓词各有其名且 blocker === null；且不得被误归成 touchesDisjoint", (t) => {
+test("AC4 — 其它谓词各有其名且 blocker === null；且不得被误归成 touchesDisjointOrAged", (t) => {
   const f = buildFixture("ac4");
   t.after(() => fs.rmSync(f.root, { recursive: true, force: true }));
 
@@ -230,7 +230,7 @@ test("AC4 — 其它谓词各有其名且 blocker === null；且不得被误归�
     assert.deepEqual(mine.map((e) => e.filter), [filter], `${task} 只被 ${filter} 挡住（且自报其名）`);
     assert.equal(mine[0].blocker, null, `${task} 的条目 blocker === null（非 touches 条目）`);
     assert.deepEqual(mine[0].overlapFiles, [], `${task} 的条目 overlapFiles 为空`);
-    assert.equal(mine.filter((e) => e.filter === "touchesDisjoint").length, 0, `${task} 不得有 touchesDisjoint 条目`);
+    assert.equal(mine.filter((e) => e.filter === "touchesDisjointOrAged").length, 0, `${task} 不得有 touchesDisjointOrAged 条目`);
     console.log(`[AC4] ${task} entries = ${JSON.stringify(mine)}`);
   }
 });
