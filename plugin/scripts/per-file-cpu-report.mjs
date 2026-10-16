@@ -13,8 +13,12 @@
 // reads those files back at the file's `test:complete` event and appends `cpu_ms=<n> mem_peak_kb=<n>`
 // to the `__PERFILE__` line. The child's exit handler runs synchronously BEFORE the process dies, so
 // the write is on disk before the parent emits `test:complete` — no race, no sampling error.
-// TWO files, one per dimension (`<key>.cpu` / `<key>.mem`), so the CPU contract (a bare Number) is
-// untouched by the memory addition — neither reader has to parse a composite payload.
+// TWO files, one per dimension (`<key>.<pid>.cpu` / `<key>.<pid>.mem`), so the CPU contract (a bare
+// Number) is untouched by the memory addition — neither reader has to parse a composite payload.
+// The `<pid>` component is the WRITER's process id: in a process-isolated run the runner's argv[1] is
+// the same file as its isolated child's, so a pid-less name let the runner's own reading overwrite
+// the child's (gap-per-file-cpu-report-mem-key-collides-parent-and-isolated-child — 31x under-report;
+// see the WHO reports block below for the measured readings and the second half of the fix).
 //
 // WHAT cpu_ms MEANS (cost_f = "跑这个文件消耗多少机器"): the sum of
 //   (1) THIS process's OWN `process.cpuUsage()` (user+system, µs — the isolated test-file child), and
@@ -71,6 +75,11 @@
 // The key = sha256(path.resolve(argv[1]))[:16] MUST stay byte-identical to the key
 // measure-suite-reporter.mjs computes (sha256(path.resolve(d.file))[:16]) — that is the correlation
 // contract between this writer and the reporter reader. 缺一不可, neither may drift.
+// The FULL report filename is `<key>.<pid>.<ext>` (pid = this writer's process id). The reader
+// enumerates `^<key>(\.\d+)?\.<ext>$` — the pid component is optional there so the reader also still
+// accepts the pre-fix single-file dialect (fixtures / report dirs written by the older writer) — and
+// returns the MAXIMUM of the values it finds, never the last write. 缺一不可 here too: the reader
+// must not go back to "one file per key, last writer wins", which is the defect being fixed.
 //
 // ⛔ WHY child_process is NOT a top-level named ESM import (`import { execFileSync }`): this preload
 // is loaded via NODE_OPTIONS=--require into EVERY node process of a measured suite, INCLUDING the
@@ -90,16 +99,51 @@ import { createRequire } from "node:module";
 
 const require = createRequire(import.meta.url);
 
-// The per-file cost report directory. ONE dir holds both dimensions (`<key>.cpu` + `<key>.mem`) —
-// deliberately NOT a second env var, which would be a second thing to wire and the exact two-writer
-// drift this seam already paid for once (gap-suite-scheduler-perfile-cpu-emitter-missing). The name
-// keeps its historical `CPU` spelling so every existing wiring site (full-suite-runner.ts suiteEnv,
-// the scheduler test) stays byte-identical.
+// The per-file cost report directory. ONE dir holds both dimensions (`<key>.<pid>.cpu` +
+// `<key>.<pid>.mem`) — deliberately NOT a second env var, which would be a second thing to wire and
+// the exact two-writer drift this seam already paid for once
+// (gap-suite-scheduler-perfile-cpu-emitter-missing). The name keeps its historical `CPU` spelling so
+// every existing wiring site (full-suite-runner.ts suiteEnv, the scheduler test) stays byte-identical.
 const cpuDir = process.env.QUAY_PERFILE_CPU_DIR;
-// The isolated test-file child carries `--test-isolation=process` (NOT the bare `--test`, which is
-// the direct runner). Restricting to this marker keeps the seam off `node -e` probes and other
-// non-test subprocesses while still covering every isolated test child (direct + LPT paths).
-const isIsolatedTestChild = process.execArgv.some((a) => a.startsWith("--test-isolation"));
+
+// ── WHO reports (gap-per-file-cpu-report-mem-key-collides-parent-and-isolated-child) ──────────────
+// The seam must be armed in the process that RAN the file, and in exactly one process per run of it.
+// `node --test --test-isolation=process <file>` puts the SAME `--test-isolation=process` in the
+// RUNNER's execArgv AND that runner's argv[1] IS the file — so the previous guard ("execArgv mentions
+// `--test-isolation`") armed the runner too, and the runner's exit handler ran LAST, overwriting the
+// isolated child's real reading with the runner's own ~50 MB. Measured on this host (2026-10-16): a
+// controlled fixture whose isolated child peaked at 1,624,188 KB read back as 52,356 KB — a 31x
+// under-report, and the value was the RUNNER's RSS (~52 MB), not the file's.
+// Two arms, both needed:
+//   (1) the `node --test` CLI runner of a PROCESS-isolated run is not the file's process (it spawns
+//       one child per file and never executes the file) ⇒ NOT armed. `--test` in execArgv is the
+//       discriminator: node:test's isolated child carries the isolation marker but NOT the `--test`
+//       CLI flag (verified on this host's node — child execArgv = node's default flag list +
+//       `--test-isolation=process`, no `--test`; the runner's = exactly the user's flags).
+//   (2) `--test-isolation=none` spawns no child at all — there the runner IS the file's process and
+//       its reading IS the file's, so that runner stays armed.
+// Both arms leave the seam off `node -e` probes and other non-test subprocesses (no isolation marker
+// ⇒ not a test-file process), and off the suite-fs-trace subprocess (same reason).
+// The `.pid` filename component (below) is the second, INDEPENDENT half of the same fix: even if some
+// process is ever armed twice for one file, each reading lands in its own file instead of clobbering
+// the other, and the reader takes the max (see measure-suite-reporter.mjs).
+const isolationMode = (() => {
+  // Effective `--test-isolation` mode from execArgv, last flag wins (node's own CLI rule). `null` ⇒
+  // the flag is absent ⇒ node's default (`process`), which is what the isolated-child marker shows.
+  let mode = null;
+  for (const a of process.execArgv) {
+    if (a === "--test-isolation") mode = "process";
+    else if (a.startsWith("--test-isolation=")) mode = a.slice("--test-isolation=".length);
+  }
+  return mode;
+})();
+const isTestCliRunner = process.execArgv.includes("--test");
+const hasIsolationMarker = process.execArgv.some((a) => a.startsWith("--test-isolation"));
+// `--test-isolation=none` + the CLI ⇒ THIS process executed the file itself (no child was spawned).
+const runsTheFileItself = hasIsolationMarker && isTestCliRunner && isolationMode === "none";
+// The isolated test-file child: node:test stamped the isolation marker and this is NOT the CLI runner.
+const isIsolatedTestChild = hasIsolationMarker && !isTestCliRunner;
+const shouldReport = Boolean(cpuDir) && (runsTheFileItself || isIsolatedTestChild);
 
 // Host clock ticks per second for /proc/<pid>/stat cutime/cstime (in ticks). Read once, cached;
 // fall back to USER_HZ=100 (the universal Linux proc value) if getconf is unavailable. Never
@@ -122,7 +166,7 @@ function clockTicksPerSecond() {
   return CLK_TCK;
 }
 
-if (cpuDir && isIsolatedTestChild) {
+if (shouldReport) {
   process.once("exit", () => {
     try {
       const file = process.argv[1];
@@ -164,10 +208,16 @@ if (cpuDir && isIsolatedTestChild) {
         // resourceUsage unavailable on this host → field simply absent (never a fabricated 0)
       }
       const key = crypto.createHash("sha256").update(abs).digest("hex").slice(0, 16);
+      // The KEY stays keyed on the FILE only — it is the byte-identical correlation contract with the
+      // reader. The PID in the FILENAME is what keeps two processes' readings for one file apart:
+      // with a bare `<key>.mem`, `node --test --test-isolation=process <file>` had the runner write
+      // over the isolated child's reading (the runner's ~50 MB read back as the file's peak — the
+      // 31x under-report named in the WHO reports block above). The reader takes the MAX over every
+      // `<key>[.<pid>].<ext>`, so a smaller reading can never mask a larger one.
       fs.mkdirSync(cpuDir, { recursive: true });
-      fs.writeFileSync(path.join(cpuDir, `${key}.cpu`), String(cpuMs) + "\n", "utf8");
+      fs.writeFileSync(path.join(cpuDir, `${key}.${process.pid}.cpu`), String(cpuMs) + "\n", "utf8");
       if (memPeakKb !== undefined) {
-        fs.writeFileSync(path.join(cpuDir, `${key}.mem`), String(memPeakKb) + "\n", "utf8");
+        fs.writeFileSync(path.join(cpuDir, `${key}.${process.pid}.mem`), String(memPeakKb) + "\n", "utf8");
       }
     } catch {
       // best-effort — a report failure must never fail the test it is measuring
