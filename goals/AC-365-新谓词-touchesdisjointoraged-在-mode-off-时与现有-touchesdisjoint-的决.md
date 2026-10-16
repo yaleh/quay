@@ -2,7 +2,7 @@
 id: AC-365
 title: 新谓词 touchesDisjointOrAged 在 mode=off 时与现有 touchesDisjoint
   的决策逐一相同；mode=shadow 时决策仍与 off 相同，只在 filter_trace 里标出「会被放宽」的候选
-status: active
+status: achieved
 kind: criterion
 goal: GOAL-037
 criterion: >-
@@ -44,6 +44,11 @@ statusLog:
     to: active
     actor: goal-driver
     reason: "triage: activate"
+  - at: 2026-10-16T17:56:44.137Z
+    from: active
+    to: achieved
+    actor: goal-driver
+    reason: "I2: criterion pass"
 fidelity:
   verdict: faithful
   reason: "fidelity judge: faithful"
