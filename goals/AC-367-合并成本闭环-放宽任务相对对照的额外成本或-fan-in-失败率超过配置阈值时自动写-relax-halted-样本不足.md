@@ -2,7 +2,7 @@
 id: AC-367
 title: 合并成本闭环：放宽任务相对对照的额外成本或 fan-in 失败率超过配置阈值时自动写
   relax_halted；样本不足或阈值未配置时不自动动作并报 not-evaluated
-status: draft
+status: active
 kind: criterion
 goal: GOAL-037
 criterion: >-
@@ -38,4 +38,15 @@ expect: plugin/test/touches-relax-auto-tighten.test.mjs 存在、在 55 秒内�
   AC-366。阈值与最小样本数的取值本条不设定，等 AC-362 的数据与影子期读数出来后由人在配置里给。
 origin: 用户 2026-10-16 认可方案 §3.3、§4：合并成本做成受控预算而不是一次性放开。fan-in 失败里 suite 红是主因（quay
   827/2492≈33%，claudecodeui 453/1321≈34%），语义破坏会体现在这里，必须单独监控；阈值不凭空设，因为现在没有放宽样本。
+activatedAt: 2026-10-16T15:41:53.877Z
+statusLog:
+  - at: 2026-10-16T15:41:53.877Z
+    from: draft
+    to: active
+    actor: goal-driver
+    reason: "triage: activate"
+fidelity:
+  verdict: faithful
+  reason: "fidelity judge: faithful"
+  at: 2026-10-16T15:41:53.876Z
 ---
