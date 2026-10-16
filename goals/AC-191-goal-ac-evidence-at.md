@@ -15,7 +15,7 @@ criterion: |
   const need=["gap-fan-in-ff-retry-counter-scope","gap-suite-load-sampler-orphan-process","gap-direct-to-develop-bypasses-fan-in-gates"];
   const mig=recs.filter(r=>!SELF.has(r.id)&&r.kind==="criterion"&&["active","achieved"].includes(r.status)&&String(r.criterion||"").trim().length>=20&&need.some(t=>String(r.origin||"").includes(t)));
   if(mig.length<need.length){console.error("AC-191 fail - 迁移 AC 不足:",mig.length+"/"+need.length);process.exit(1);}
-  let ok=0;
+  let ok=0,noIds=[];
   for(const r of mig){
     const file=fs.readdirSync(root+"/goals").find(f=>f.startsWith(r.id+"-"));
     if(!file){console.log("无文件:",r.id);continue;}
