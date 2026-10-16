@@ -21,7 +21,7 @@ goal_ac: AC-363
 
 **本条只做两件机件、不碰策略**：① **账本写入器**（每次放宽追加一行：task / blockers / overlapFiles / waitedMinutes / dispatchedAt）；② **连接报告**（把每条放宽记录与该任务在 `worker-outcome` 里的**全部**运行按**任务 id** 连接，给出额外 worker 分钟 / 尝试次数 / fan-in 失败步，并给出同期未放宽对照）。⛔ 放宽谓词、阈值、名额、自动收紧、`worker-driver.ts` 的接线**都不在本条**（分别是 AC-364/365/366/367）。
 
-<!-- dedup-ref --> 追踪与去重结论（机制去重已做，非症状去重）：同批的 `gap-worker-round-filter-trace-attribution`（AC-362）在 `driver-filters.ts` / `worker-driver.ts` 里做 filtered-empty 轮的归因，本条**不触碰**这两个文件（见 AC9③），两条任务无 Touches 重叠。合并候选检查用现成机件跑过：`node --experimental-strip-types plugin/scripts/task-granularity-advice.ts --touches plugin/scripts/relaxed-dispatch-ledger.ts --touches plugin/scripts/capability-catalog-declarations.json --touches plugin/test/touches-relax-ledger.test.mjs --touches .gitignore --json` ⇒ `peers: []`、`mentions: []` ⇒ 判定：独立立案，不并入任何在飞任务。
+<!-- dedup-ref --> 追踪与去重结论（机制去重已做，非症状去重）：同批的 `gap-worker-round-filter-trace-attribution`（AC-362）在 `driver-filters.ts` / `worker-driver.ts` 里做 filtered-empty 轮的归因，本条**不触碰**这两个文件（见 AC9④），两条任务无 Touches 重叠。合并候选检查用现成机件跑过：`node --experimental-strip-types plugin/scripts/task-granularity-advice.ts --touches plugin/scripts/relaxed-dispatch-ledger.ts --touches plugin/scripts/capability-catalog-declarations.json --touches plugin/test/touches-relax-ledger.test.mjs --touches .gitignore --json` ⇒ `peers: []`、`mentions: []` ⇒ 判定：独立立案，不并入任何在飞任务。
 
 ## Plan
 
@@ -32,6 +32,7 @@ goal_ac: AC-363
    - **fail-closed**（同族先例 `plugin/scripts/dispatch-record.ts` 的理由不足即拒写）：五键任一不合法（缺 / 空数组 / 非数组 / 非有限数 / 负 / 不可 parse）⇒ **拒写且一个字节都不写**，`reason` 指名具体字段。⛔ 不把读不到的 `waitedMinutes` 写成 0（硬规则 6 + 3b：缺值 = 未查，不得与「等 0 分钟」同形）。
    - `readRelaxedDispatchLedger(root)` ⇒ `{present, records, malformed}`：`present:false` 与 `records:[]` **不同形**（照 `duration-report.ts:196` `readJsonl` 的约定）。
    - `buildRelaxedDispatchReport(root, {nowMs})`：见第 2 步。CLI `--report [--root <dir>] [--json]`，退出码 0 = `evaluated:true` · 2 = 用法错误 · 3 = NOT-EVALUATED（与 `plugin/scripts/rework-predictors.ts` 的退出码约定一致）。
+   - **命名避让（撞名即红，与语义无关）**：⛔ 本模块不要用 `lineOf` / `lineAt` / `colOf` / `snippetOf` / `snippetAt` / `relOf` 做函数名——`plugin/test/source-text-lib.test.mjs` 对**全仓** `plugin/scripts` 非测试文件逐文件匹配这一族名字（`codeOnlyText` / `maskComments` 同族同理），撞名即使语义不同也会红。
 2. **连接与读数（同一文件）**：
    - **口径复用，不另立一套**：worker 运行段 = `workerExitedAtMs − dispatchedAtMs`（两键都在才算；⛔ **不用 `wall_clock_ms`**——它含 fan-in，会把 merge/suite 成本混进「worker 多花了多少」）。归一化直接调 `duration-report.ts:230` 的 `toAttemptRecord`（缺字段 ⇒ 该运行 NOT-EVALUATED，⛔ 不折成 0）；分钟换算只此一处；对照组与放宽组**用同一个归一化函数** ⇒ 「口径相同」是结构性质而不是约定。中位数用 `duration-report.ts:167` 的 `percentile(sorted, 0.5)`，⛔ 不手搓第二个 median。
    - **连接键 = 任务 id**（⛔ 不是数组下标/行号）：每条账本记录 ⇒ 该 `task` 在 `worker-outcome` 里的**全部**运行 ⇒ `attempts` = 运行条数；`workerMinutes` = 各运行段求和（有运行段不可测 ⇒ 计入 `runsWithoutSegment`，⛔ 不计 0）；`fanInFailureSteps` = 该任务**失败运行**的 `mechanical_fan_in.step` 逐字取值（按出现序去重）。
@@ -41,7 +42,10 @@ goal_ac: AC-363
 3. **测试 `plugin/test/touches-relax-ledger.test.mjs`**（首行 `// @test-group engine`：纯 fs、无子进程、无 wall-clock 等待 ⇒ 55s 上限应有余量，实测值写进 Evidence）：
    - **用真实机件**：真实 `appendRelaxedDispatch` 写进 `fs.mkdtempSync` 出的 fixture root 的 `.quay/relaxed-dispatch.jsonl`；`worker-outcome.jsonl` 行按生产字段写盘；**断言读的是从载体文件回读并 `JSON.parse` 出来的内容**（⛔ 不是内存对象）。fixture root 登记进 `TMP_ROOTS` 数组、在顶层 `after()` 统一删（照 `plugin/test/duration-report.test.mjs` 的手法：每个 mkdtemp 都有配对清理，`tmp-leak-pairing-check` 要求）。
    - **判别力**：夹具刻意让账本行序 ≠ outcome 行序、且各任务的分钟数与失败步**互不相同**，并**在测试内独立算出「按位置连接」的投影、显式断言它与正确读数不同**——否则 AC8 的注入可能是空转的（负控制的空转形态与「验过了」同形）。
-4. **静态面**：新脚本必须在 `plugin/scripts/capability-catalog-declarations.json` 里成组声明（QUESTION / CADENCE / INVALIDATION / LAST_REAFFIRMED / MATCHING / CONSUMER 六表，与 `duration-report.ts` 同形）——⛔ 漏声明会让 `bash plugin/scripts/capability-catalog.sh --summary` 报 unclassified 并 exit 1（当前读数 383 scripts | 383 declared | 0 unclassified）；新载体在 `.gitignore` 加 `**/.quay/relaxed-dispatch.jsonl` 一行（同族 `.gitignore:96`）。
+4. **静态面（三条登记，缺一即红 —— 一个新增的 `plugin/scripts/*.ts` 会被一组不 import 你的仓级契约判）**：
+   - **能力目录**：新脚本必须在 `plugin/scripts/capability-catalog-declarations.json` 里成组声明（QUESTION / CADENCE / INVALIDATION / LAST_REAFFIRMED / MATCHING / CONSUMER 六表，与 `duration-report.ts` 同形；键是 **basename**，⛔ 不是带目录的路径）——⛔ 漏声明会让 `bash plugin/scripts/capability-catalog.sh --summary` 报 unclassified 并 exit 1（当前读数 383 scripts | 383 declared | 0 unclassified）。声明值内⛔ 不得有反引号或 `$(`（数据完整性闸扫每个值）。⚠️ **CONSUMER 值里若写出 `node …<name>.ts` 形状**，`build-plugin-dist.mjs` 的 `INVOCATION_RE` 会把本模块变成**发布包的一个 bundle entry**（实测 283→284 files、体积上限转红）——按需决定，别无意中加上；⚠️ cadence 若声明「按需」，`rhythm-consumer-check` 判据2 要求**必须有 CONSUMER 行**（否则该静态检查红 ⇒ `run_static_checks` fail-closed ⇒ 整套 suite 一条测试都没跑）。
+   - **载体登记**：新载体名必须在 `docs/carrier-registry.json` 登记一条 `{name: "relaxed-dispatch.jsonl", kind: "jsonl-log", owner: "plugin/scripts/relaxed-dispatch-ledger.ts", readers: "unaudited"}` —— `plugin/test/carrier-registry-completeness.test.mjs` 把「代码里的载体名字面量」与登记表做成**双向**契约（代码有而未登记 ⇒ 红；登记了而代码里已无 ⇒ **也**红），取值按字符串字面量**逐 `/` 段**判定（`".quay/relaxed-dispatch.jsonl"` ⇒ 名字 `relaxed-dispatch.jsonl`），`owner` 必须是仓里**真实存在**的模块文件（本模块就是它的写入者，⛔ 不写 `unowned-yet`），`readers` 只能是 `"unaudited"`。
+   - **忽略项**：新载体在 `.gitignore` 加 `**/.quay/relaxed-dispatch.jsonl` 一行（同族 `.gitignore:96` 的 `**/.quay/worker-outcome.jsonl`；本仓库是逐载体条目式忽略，⛔ 没有 `.quay/` 兜底规则）。
 5. **不越界**：⛔ 不改 `plugin/scripts/driver-filters.ts` / `plugin/scripts/worker-driver.ts`（放宽决策点与接线是 AC-365/366），⛔ 不新增放宽谓词、不读配置、不碰 `.quay/config.yml`（AC-364）。
 
 ## Acceptance Criteria
@@ -54,11 +58,11 @@ goal_ac: AC-363
 - [ ] AC6 — fanInFailureSteps 的来处与词表隔离（AC-363(b)）：某放宽任务有两条失败运行（`mechanical_fan_in.step` 分别为 `merge-develop` 与 `suite`）+ 一条 `completed` ⇒ 该任务 `fanInFailureSteps` 恰为这两个值（逐字取自 `step`，⛔ 不翻译）；显式断言该字段**不含** `exited-not-landed`/`completed`/`landed`，且与该任务的 `final_state` 投影是两个不同字段。另造一条**无 `mechanical_fan_in`** 的失败运行 ⇒ 不产出 step 值、计入 `failuresWithoutStep`（⛔ 不写 `"unknown"`、⛔ 不折成 0）。附该任务两个字段的逐字值。
 - [ ] AC7 — 样本不足 ⇒ evaluated:false 且不伪装成 0（AC-363(d)）：三组 fixture——账本空 / 有放宽无对照 / 有对照无放宽——每组断言 `evaluated === false`、`reason` 指名不足的一侧并带两侧计数、`extraWorkerMinutes` 与对照组中位数取 `NOT_EVALUATED`，并**显式断言 `!== 0`**（不得输出 0 或空均值伪装成「无额外成本」，硬规则 3b）。另用模块导出的样本下限常量做两向断言：`下限 − 1` ⇒ false，达到下限 ⇒ true（⛔ 测试内不写这个数字的字面量，靠 import）。附三组报告 JSON。
 - [ ] AC8 — 取假形态（AC-363(e)，必须真红并留痕）：① 把连接键改成**按位置**（数组下标）⇒ 本测试变红；② 样本不足时把数值写成 `0` ⇒ 本测试变红。两次各附非零退出码 + 失败断言原文。注入不得留在落地代码里：恢复后 `git status` 净、落地 diff 与该测试最终内容一致。
-- [ ] AC9 — 静态面与不越界：① `bash plugin/scripts/capability-catalog.sh --summary` 报 `0 unclassified`（新脚本已在 declarations 六表成组声明）；② `git check-ignore .quay/relaxed-dispatch.jsonl` 命中（`.gitignore` 新增该载体条目）；③ `git diff --stat -- plugin/scripts/driver-filters.ts plugin/scripts/worker-driver.ts` **空**（本条不接线；放宽决策点归 AC-365/366）；④ `bash scripts/test.sh plugin/test/duration-report.test.mjs plugin/test/driver-filters.test.mjs` **exit 0**（复用的口径与既有谓词不回归）。附四条命令、退出码与输出。
+- [ ] AC9 — 静态面与不越界：① `bash plugin/scripts/capability-catalog.sh --summary` 报 `0 unclassified`（新脚本已在 declarations 六表成组声明）；② `git check-ignore .quay/relaxed-dispatch.jsonl` 命中（`.gitignore` 新增该载体条目）；③ `bash scripts/test.sh plugin/test/carrier-registry-completeness.test.mjs` **exit 0**，且 `docs/carrier-registry.json` 中 `relaxed-dispatch.jsonl` 的 `owner` 指向真实存在的新模块（⛔ 不是 `unowned-yet`）；④ `git diff --stat -- plugin/scripts/driver-filters.ts plugin/scripts/worker-driver.ts` **空**（本条不接线；放宽决策点归 AC-365/366）；⑤ `bash scripts/test.sh plugin/test/duration-report.test.mjs plugin/test/driver-filters.test.mjs` **exit 0**（复用的口径与既有谓词不回归）。附五条命令、退出码与输出。
 
 ## Definition of Done
 
-真实落地 = **在 fixture root 上由生产写入器真的追加出账本行、并由生产报告函数从载体文件回读**出连接读数，不是「单测绿了」、也不是「内存对象里有这个字段」。四条逐一对上：① 新测试落地并 exit 0（AC1）；② 从 fixture 载体回读的账本行与报告 JSON 逐字贴出（AC2/AC5）；③ 取假形态两种注入各真红一次（AC8，附红输出）；④ 静态面绿（AC9 的四条命令 + 退出码）。
+真实落地 = **在 fixture root 上由生产写入器真的追加出账本行、并由生产报告函数从载体文件回读**出连接读数，不是「单测绿了」、也不是「内存对象里有这个字段」。四条逐一对上：① 新测试落地并 exit 0（AC1）；② 从 fixture 载体回读的账本行与报告 JSON 逐字贴出（AC2/AC5）；③ 取假形态两种注入各真红一次（AC8，附红输出）；④ 静态面绿（AC9 的五条命令 + 退出码，含载体登记与能力目录两条登记）。
 
 **如实写明（⛔ 不作为省略的理由）**：本 AC 的判据面是**夹具读数**——GOAL-037 立案文本的「已知缺口」已承认本 goal 的 AC 都不读生产载体（生产读数需人在目标项目启用 shadow/live 并重启 driver，是人工步骤）。因此本条的落地证明止于「夹具载体回读」；生产消费（driver 调写入器、人或 AC-367 读报告）由 AC-365/366/367 承担。⛔ 同时：AC-363 的判据面（测试存在且 55s 内绿）**单独不具备判别力**，它区分不了「真连接」与「恒真断言」——判别力由 AC4 的「按位置投影必须不同」与 AC8 的两次注入红提供，故这两条不得省略、不得只在文字上声称跑过。全部新增测试在 `bash scripts/test.sh --for-task gap-relaxed-dispatch-ledger-and-merge-cost-report-absent` 下绿。
 
@@ -66,6 +70,7 @@ goal_ac: AC-363
 
 - plugin/scripts/relaxed-dispatch-ledger.ts (new)
 - plugin/scripts/capability-catalog-declarations.json
+- docs/carrier-registry.json
 - plugin/test/touches-relax-ledger.test.mjs (new)
 - .gitignore
 - tasks/gap-relaxed-dispatch-ledger-and-merge-cost-report-absent.md
