@@ -77,11 +77,3 @@ extra: {}
 丢掉的 2 条**都不是真标记**，而是**行内代码跨度里的引用**：其命中位置之前的反引号计数为奇数 ⇒ 处于 `` `…` `` 内，被 `stripCodeSpansAndFences` 正确屏蔽；且两条状态**均为终态**（superseded / done）⇒ **对生产零影响**（本来就不在晋升池里）。
 
 保住的 4 条真标记中，**唯一一条 `status: ready` 的任务**（标记位于正文第 397 行行首）**修复后仍为 parked** —— 这是本修复最关键的负控制：**真标记不因「锚行 + 屏蔽代码跨度」而失效**。
-
-## Blocker
-
-**2026-10-16T13:30:24.777Z — worker 未落地（exited-not-landed）**
-
-- 未落地原因：step=suite: AssertionError [ERR_ASSERTION]: the on/off wall-clock delta is within the 1% budget (measured 1.58%)
-- run_id：wk-prod-anchor
-- session_id：147aa63c-883f-41c6-a8e2-9d5a1351d8a5
