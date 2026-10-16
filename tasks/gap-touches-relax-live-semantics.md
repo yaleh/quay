@@ -3,7 +3,7 @@ id: gap-touches-relax-live-semantics
 title: mode=live 的放宽放行语义不存在：谓词在 live 下与 shadow 行为相同（配置写了但不生效），阈值边界 / never_relax
   / 名额 / 不连锁 / 过宽通配 / shared_files 短路 / 等待读不到即阻塞 / 放行写账本 / 不绕过其它谓词 / 取假形态
   全未落地（GOAL-037 AC-366 生效面）
-status: ready
+status: done
 labels:
   - gap
 parent: null
@@ -91,6 +91,7 @@ goal_ac: AC-366
 
 - plugin/scripts/driver-filters.ts
 - plugin/scripts/worker-driver.ts
+- plugin/scripts/duration-report.ts
 - plugin/test/touches-relax-live-predicate.test.mjs (new)
 - tasks/gap-touches-relax-live-semantics.md
 
@@ -282,10 +283,84 @@ plugin/scripts/relaxed-dispatch-ledger.ts:64: export const RELAXED_DISPATCH_REL 
 - 反漂移：`anti-drift-touches-check.ts --task … --worktree … --merge-target develop` ⇒
   **EXIT=0**，`ANTI-DRIFT OK: 3 actual file(s), all within declared Touches (4 glob(s))`。
 
-## Blocker
+### 2026-10-17 — 上一轮的 suite 红：真因是 `duration-report.ts` 的入口守卫，本轮已修
 
-**2026-10-16T18:22:32.886Z — worker 未落地（exited-not-landed）**
+**症状（上一轮 exited-not-landed，两次同形）**：fan-in suite 红，真因日志
+`.quay/fan-in-suite-gap-touches-relax-live-semantics~wk-prod-anchor~1792174458344-2ae0e6.log`：
 
-- 未落地原因：step=suite: AssertionError [ERR_ASSERTION]: dist/worker-driver.js must run its OWN main — expected marker "SPEC §5 阶段 2+3+4" in its output
-- run_id：wk-prod-anchor
-- session_id：3847369d-93b1-4606-bdc4-c261465661dd
+```
+test at packages/quay/test/build-plugin-dist.test.mjs:1075:1
+✖ AC1 — product surface: each driver bundle runs its OWN main (routine kinds + controls)
+  AssertionError [ERR_ASSERTION]: dist/worker-driver.js must run its OWN main — expected marker "SPEC §5 阶段 2+3+4" in its output
+```
+
+该测试文件**不在**本条的 `## Touches` 里，机械 delta 相关性判定也报 UNRELATED（它用 esbuild 以
+**路径字符串**把 `plugin/scripts/worker-driver.ts` 当 entry 打包，没有任何静态 import 边指向它 ⇒
+一跳相关性检查看不见 —— 与 `casebook`「delta 相关性对 harness 中介的 import 是盲的」同形）。
+但它**确实是本条引入的**：先复现（`--test-name-pattern` ⇒ 同一断言红），再定位。
+
+**真因（读代码得出，非推断）**：本条 Plan §3 要求复用 AC-363 的账本模块，于是
+`worker-driver.ts → relaxed-dispatch-ledger.ts → duration-report.ts` 成了一条**新的值 import 边**；
+而 `duration-report.ts` 的顶层入口守卫当时是**URL 相等**判定：
+
+```js
+// 修前（duration-report.ts 末尾）
+const invokedDirectly = (() => { const entry = process.argv[1]; … return fs.realpathSync(entry) === fs.realpathSync(new URL(import.meta.url).pathname); })();
+if (invokedDirectly) process.exit(main(process.argv.slice(2)));
+```
+
+打包后**整个 inline 模块集共用 bundle 的 `import.meta.url`**，而 `process.argv[1]` 就是 bundle 自身
+⇒ 该守卫在 `dist/worker-driver.js` 里恒为 **true**，`process.exit(main(...))` 先于 worker-driver 的
+入口守卫执行 ⇒ 产物打印的是**时长报告**并 exit 0（实测逐字输出：`window: …` / `attempts (finished in window: 308)`）。
+正是 `gate-script-base.ts` 里 `isDirectEntry` 上方那段注释记载的事故形态
+（`gap-drivers-yml-interval-not-honored-for-routine-kinds`：三个 routine driver 全跑 pool-quality-judge 的 main）——
+`duration-report.ts` 是当时**未随迁移扫到**的残留实例，只因此前**无人 import 它**故从未显形。
+
+**为什么静态检查器没拦住（如实写明）**：`build-plugin-dist.test.mjs` 的
+「ZERO inlined entry-guard hijacks」**本轮前后都绿** —— `activeFileIdentityGuards` 只扫**顶层 `if` 条件**
+（`topLevelIfConditions`），而 duration-report 的 URL 判定被包在 IIFE 里赋给 `const invokedDirectly`，
+真正的 `if` 条件里没有任何 `import.meta.url`/`process.argv[1]` token ⇒ **静态检查器对这一形态是盲的**，
+抓住它的是**运行时**打包测试。机器/测试仪器故障形态已记入 memory，本条的修复不依赖那个检查器。
+
+**修复（`plugin/scripts/duration-report.ts`，加入 `## Touches`）**：换成仓库**既有的、bundle-safe 的**
+`isDirectEntry(import.meta, undefined, "duration-report")`（gate-script-base 导出；按**文件名**认身份，
+源码布局与打包布局都成立，对 inline 进别的 bundle 的本模块恒 false）。⛔ 未新写第二份判定：
+`gate-script-base.ts` 的 import 只含 node 内建 ⇒ 无新环（typecheck 与 import-graph 均绿，见下）。
+修复落在 `duration-report.ts` 而非别处，因为**唯一的替代是取消那条 import 边**，而那会违反本条
+Plan §3 / AC13 的「复用 AC-363 的账本模块，⛔ 不写第二份读数实现」——把上游模块的**陈旧守卫**修好，
+比在调用侧绕开它更符合单一来源。
+
+**读数（本轮实测）**：
+
+| 命令 | 修前 | 修后 |
+|---|---|---|
+| `node --test --test-name-pattern="each driver bundle runs its OWN main" packages/quay/test/build-plugin-dist.test.mjs` | ✖ fail 1 | ✔ pass 1 |
+| esbuild 打包 `worker-driver.ts` + `node <bundle> --help` 的 stdout | 时长报告（`attempts (finished in window: …)`） | `worker-driver — SPEC §5 阶段 2+3+4：spawn 多 worker…` |
+| `node --test --test-name-pattern="ZERO inlined entry-guard hijacks|ZERO unnamed" …` | ✔（该检查器对该形态盲，见上） | ✔ pass 2 |
+| `node --test plugin/test/duration-report.test.mjs plugin/test/touches-relax-ledger.test.mjs plugin/test/touches-relax-live-predicate.test.mjs` | — | ✔ `tests 26 · pass 26 · fail 0` |
+| `bash scripts/test.sh plugin/test/driver-filters.test.mjs plugin/test/driver-runtime-s01.test.mjs`（AC12④） | — | ✔ `tests 95 · pass 95 · fail 0` |
+| `bash plugin/scripts/capability-catalog.sh --summary`（AC12①） | — | `386 scripts | 386 declared | 0 unclassified | 381 ship` |
+| typecheck（`.quay/config.yml` 声明的 `for d in packages/*/; do npx tsc --noEmit -p "$d"` ） | — | EXIT=0（无输出） |
+
+**负控制（证明修复真的在起作用，不是「本来就好」）**：把 `duration-report.ts` 的守卫逐字改回 URL 形态
+⇒ 打包读数立刻回到时长报告、上面的打包测试立刻变红；改回 `isDirectEntry` ⇒ 变绿。**同一棵树上、同一命令、
+只差这一处**（两向各取一次读数）。
+
+**本条的放宽语义未改动**：修复只动 `duration-report.ts` 的入口守卫一行（外加一行 import），
+`driver-filters.ts` 的 live 判据、`## Acceptance Criteria` 的 13 条与上文各读数**逐条不变**；
+AC2–AC11 的夹具读数本轮重跑仍为 `tests 26 · pass 26 · fail 0`。
+**第二个红（同一真因，⛔ 不是第二个缺陷）**：同一轮 suite 还有第二个红文件
+`plugin/test/driver-restart-busy-e2e.test.mjs`（AC2b / AC3 各 30s 超时，判词
+`Error: timed out waiting for reconcile to adopt the live orphan`）。它的真因与本条修的那一处**完全相同**：
+该夹具的 `buildWorkerKernel()` 用 esbuild 把 `plugin/scripts/worker-driver.ts` 打成
+`<kernel>/scripts/dist/worker-driver.js` 再当作常驻 loop spawn（`:255-264` 的 bundle、`:1046` 的
+`--root <host> --json` 调用），而修前的那个产物**正是跑时长报告并 exit 0**（duration-report 的 main
+恰好也吃 `--root/--json`）⇒ 永远不会有 `orphan-adopted` 事件 ⇒ 30s 的 `waitFor` 必然超时。
+
+实测（本 worktree，修后一次整文件运行）：`✔ tests 8 · pass 8 · fail 0 · duration_ms 36869`，
+其中 AC2b `525.7ms`、AC3 `407.1ms`（⛔ 这不是「快了 60 倍」，是**从「事件永远不发生」变成「真的发生」**；
+两者的差别是枚举式的，不是时序式的）。
+**旁证（驱动自己的基线臂）**：`.baseline-red-gap-touches-relax-live-semantics-wk-prod-anchor` 上的同一选择集
+（`ℹ tests 53`）为 **53 pass / 0 fail** —— 基线树没有这条 import 边，故两个红都不存在；
+本 worktree 的 rerun 臂同一选择集则 `fail 3`（恰为上述三条：build-plugin-dist AC1 + 本文件的 AC2b/AC3）。
+**两个红同因，一处修复同时消掉**（本条修完后的读数即上表与本节）。

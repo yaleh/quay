@@ -31,7 +31,7 @@ import { splitTaskFile, statusFromFrontmatter, patchStatusField, commitTaskFile,
 // GOAL-037（AC-362）filtered-empty 归因：waitedMinutes 的载体读面 = kernel 单一转移视图读取器
 // （⛔ 不手搓 jsonl 解析，硬规则 1）。
 import { edgeKindFor, appendTaskStatusEvent, gitBlobSha, readTaskStatusTransitions } from "../../packages/quay/src/kernel/task-transition.ts";
-import { parseTouches, checkTouchesPair, normalizePath, matchGlob } from "./touches-orthogonality-check.ts";
+import { parseTouches, checkTouchesPair, normalizePath, matchGlob, isOverbroadDeclaration } from "./touches-orthogonality-check.ts";
 import { expandDeclaredTouches } from "./concurrent-batch-scheduler.ts";
 // GOAL-037（AC-365）放宽谓词的【配置面】：只读，单一实现在 AC-364 的模块里（硬规则 1 / 5b——
 // ⛔ 本文件不复写第二个 config 解析器）。
@@ -62,6 +62,20 @@ export interface FilterContext {
    *  `WORKER_OUTCOME_REL`，反向 import 会形成值环（`import-graph-check` 的 shrink-only 棘轮把
    *  valueSccs 钉在 0）。live 下由 AC-366 从账本算出后经此传入。 */
   relaxedInFlight?: number;
+  /** GOAL-037（AC-366）：放宽账本里出现过的 task id —— live 的 `quota-available`（已放宽的**在飞**
+   *  数）与 `blocker-not-relaxed`（不连锁）两条判据的读数源。缺省 `[]`：AC-363 的 `present:false`
+   *  （账本不存在）与 `records:[]` 对**计数**同值（都是「没有任务是被放宽派发的」）—— 这是一个
+   *  结构性事实，不是「猜一个默认值」。
+   *  ⛔ 由调用方（worker-driver）从 AC-363 的 `readRelaxedDispatchLedger` 读出后传入；本文件不读账本
+   *  （值环，见上一字段）。⛔ 本条**不**用 `relaxedInFlight`（那个数没有 id，答不出「挡我的是谁」）。 */
+  relaxedTaskIds?: readonly string[];
+  /** GOAL-037（AC-366）：AC-363 账本里**读不出**的行数。> 0 ⇒ 名额与「不连锁」的输入不可归因 ⇒
+   *  live 判据 fail-closed 阻塞（硬规则 3b：读不懂不得与合格同形）。缺省 0 = 账本全行可解析。 */
+  relaxedLedgerMalformed?: number;
+  /** GOAL-037（AC-366）：判定用的「现在」(ms)。缺省 `Date.now()`；注入只为让等待边界（AC-366(a)：
+   *  恰等于 `after_minutes` 放行 / 恰少一分钟阻塞）可测。⛔ 不改轮起点快照纪律：now 仍在**判定那一
+   *  刻**取一次（见 computeDispatchExclusion 的注释），⛔ 不预算进轮起点。 */
+  nowMs?: number;
 }
 
 /** 构造缺省上下文（inFlight/retryExhausted 空集），调用方按需覆盖。 */
@@ -287,10 +301,39 @@ export const RELAX_CONDITIONS = [
 
 export type RelaxCondition = (typeof RELAX_CONDITIONS)[number];
 
-/** 一个候选本轮的放宽判定读数：`wouldRelax` + 首个不满足的条件 id（全满足 ⇒ `null`）。 */
+/** live **放行**判据的条件 id（稳定，按求值顺序）。刻意是**第二个词表**而不是往上面那个数组里追加：
+ *  `RELAX_CONDITIONS` 是 shadow/off 的**标注**词表，已被 `gap-touches-relax-off-parity-predicate`
+ *  的 AC4 逐字 `deepEqual` 钉死（五条，⛔ 不得增删）。本词表是 AC-366 才存在的放行判据，比它多出
+ *  四个条件：
+ *   · `candidate-declares-touches` / `no-overbroad-glob` / `overlap-known` —— 结构前置（是其余条件的
+ *     **输入**，故必须先判：`checkTouchesPair` 对「无/空声明」「过宽通配」两侧都走保守分支，不先
+ *     拦掉就会被误记成「对手不可判定」）；
+ *   · `relaxed-ledger-readable` —— 账本读不出（AC-363 的 `malformed`）⇒ 名额/不连锁无输入；
+ *   · `blocker-not-relaxed` —— 不连锁（AC-366(d)），shadow 期不存在。
+ *  同名条件 `not-never-relax` 在两态的**读法不同**（live 读重叠**文件**对名单 glob；shadow 沿用
+ *  AC-365 落地的「候选 id 在名单内」），差异见 `judgeLiveRelax` 的注释与本条 Evidence。 */
+export const LIVE_RELAX_CONDITIONS = [
+  "candidate-declares-touches",
+  "no-overbroad-glob",
+  "overlap-known",
+  "relaxed-ledger-readable",
+  "not-never-relax",
+  "waited-enough",
+  "quota-available",
+  "blocker-not-relaxed",
+] as const;
+
+export type LiveRelaxCondition = (typeof LIVE_RELAX_CONDITIONS)[number];
+
+/** 一个候选本轮的放宽判定读数：`wouldRelax` + 首个不满足的条件 id（全满足 ⇒ `null`）。
+ *  ⛔ 现有两个键的类型放宽到两个词表的并集（`relaxBlockedBy` 可能取 live 的四个新条件 id）。 */
 export interface RelaxAnnotation {
   wouldRelax: boolean;
-  relaxBlockedBy: RelaxCondition | null;
+  relaxBlockedBy: RelaxCondition | LiveRelaxCondition | null;
+  /** **仅 live** 会取真：该候选本轮**真的**被放宽放行（走等待路径）。⛔ `shared_files` 短路不算
+   *  （它「视为不冲突」，不是一次放宽派发：不占名额、不写账本 —— AC-366(f)）；shadow / off 恒
+   *  `false`（这正是本缺口修前的形态：live 与 shadow 同形）。 */
+  relaxed: boolean;
 }
 
 /** 本轮放宽判定的【轮起点状态】：配置与账本各读一次（⛔ 不逐候选重读盘——AC-364 / AC-363 的读取器
@@ -298,8 +341,13 @@ export interface RelaxAnnotation {
  *  姿态——读不懂 ⇒ 按最保守的 off 行为，而 ⛔ 绝不放行。 */
 interface RelaxRoundState {
   annotate: boolean;
+  /** **仅 live**：真的判放行（shadow 只标注不放行）。判据词表与返回值都由它分派。 */
+  live: boolean;
   config: TouchesRelaxConfig;
   relaxedInFlight: number;
+  /** live 的两条读数源（AC-363 的账本，由调用方经 ctx 传入；⛔ 本文件不读账本——值环）。 */
+  relaxedTaskIds: Set<string>;
+  ledgerMalformed: number;
   readyAtMs: Map<string, number>;
   nowMs: number;
 }
@@ -312,11 +360,15 @@ function makeRelaxRoundState(ctx: FilterContext): RelaxRoundState {
   const annotate = load.state === "shadow" || load.state === "live";
   return {
     annotate,
+    live: load.state === "live",
     config,
     relaxedInFlight: ctx.relaxedInFlight ?? 0,
+    relaxedTaskIds: new Set(ctx.relaxedTaskIds ?? []),
+    ledgerMalformed: ctx.relaxedLedgerMalformed ?? 0,
     // 等待时长的单一来源 = AC-362 已落地的 `buildReadyAtMsMap`（⛔ 不新写第二个 ready 时刻解析器）。
     readyAtMs: annotate ? buildReadyAtMsMap(ctx.root) : new Map(),
-    nowMs: Date.now(),
+    // 判定那一刻的「现在」取一次（⛔ 不预算进轮起点）；注入只为让等待边界可测。
+    nowMs: ctx.nowMs ?? Date.now(),
   };
 }
 
@@ -339,27 +391,104 @@ function judgeRelaxCandidate(
 ): RelaxAnnotation {
   // ① touches-only-blocker —— 除 touches 外没有別的谓词也滤掉它。
   if (!(blocked.length === 1 && blocked[0] === TOUCHES_RELAX_FILTER_NAME)) {
-    return { wouldRelax: false, relaxBlockedBy: "touches-only-blocker" };
+    return { wouldRelax: false, relaxBlockedBy: "touches-only-blocker", relaxed: false };
   }
   // ② waited-enough —— 缺值（null）⇒ 条件为假（硬规则 6：缺值 = 未查，⛔ 不当 0，⛔ 不当 ∞）。
   const after = state.config.after_minutes;
   if (waits === null || after === undefined || !(waits >= after)) {
-    return { wouldRelax: false, relaxBlockedBy: "waited-enough" };
+    return { wouldRelax: false, relaxBlockedBy: "waited-enough", relaxed: false };
   }
   // ③ quota-available —— 已放宽在飞数 < 名额（名额来自配置，⛔ 无内置回退）。
   const quota = state.config.max_relaxed_inflight;
   if (quota === undefined || !(state.relaxedInFlight < quota)) {
-    return { wouldRelax: false, relaxBlockedBy: "quota-available" };
+    return { wouldRelax: false, relaxBlockedBy: "quota-available", relaxed: false };
   }
   // ④ not-never-relax —— 候选 id 不在 `never_relax` 名单内。
   if (state.config.never_relax.includes(id)) {
-    return { wouldRelax: false, relaxBlockedBy: "not-never-relax" };
+    return { wouldRelax: false, relaxBlockedBy: "not-never-relax", relaxed: false };
   }
   // ⑤ overlap-shared —— 重叠面全部落在 `shared_files` 白名单内。
   if (!overlapsAllShared(overlaps, state.config.shared_files)) {
-    return { wouldRelax: false, relaxBlockedBy: "overlap-shared" };
+    return { wouldRelax: false, relaxBlockedBy: "overlap-shared", relaxed: false };
   }
-  return { wouldRelax: true, relaxBlockedBy: null };
+  // ⛔ 标注路径永不放行：`shadow` 只观察（AC-365 的同形纪律），`relaxed` 恒 false。
+  return { wouldRelax: true, relaxBlockedBy: null, relaxed: false };
+}
+
+// ── GOAL-037（AC-366）：live 的**放行**判据 ────────────────────────────────────────────────────────
+//
+// 修前的形态（本缺口）：`mode: live` 与 `shadow` 行为**逐字节相同** —— 配置写了但不生效，与「系统
+// 正常」同形（硬规则 3b），且 AC-367 的自动收紧要读放宽账本（「放宽的任务比不放宽的多花多少」），
+// 没有真实放行 ⇒ 账本恒空 ⇒ 闭环无输入。本函数是「人择机开启」与「真的会放宽」之间那一步。
+//
+// 合取判据（AC-366 逐字），求值顺序 = 本函数的语句顺序（「首个不满足者」必须稳定）：
+//   结构前置：候选声明可判定 → 无过宽通配 → 对手可判定 → 账本可读
+//   → not-never-relax → 【shared_files 短路】→ waited-enough → quota-available → blocker-not-relaxed
+//
+// ⛔ 全部阈值（`after_minutes` / `max_relaxed_inflight` / `never_relax` / `shared_files`）来自 AC-364
+// 读出的配置，本函数里没有任何字面量默认值；⛔ 任一读数**读不到** ⇒ 阻塞（缺值 ≠ 0 ≠ ∞，硬规则 6+3b）。
+// ⛔ 谓词保持纯：本函数只**读**（tasks/*.md + ctx 已带入的账本读数 + 已构造的 ready 映射），不写盘；
+// 放行的事实在 `decision()` 里登记，账本由调用方写（`worker-driver.ts`）。
+function judgeLiveRelax(id: string, state: RelaxRoundState, ctx: FilterContext): RelaxAnnotation {
+  const blocked = (c: LiveRelaxCondition): RelaxAnnotation => ({ wouldRelax: false, relaxBlockedBy: c, relaxed: false });
+  const { expand, readTouches } = makeTouchesSideReaders(ctx);
+  const self = readTouches(id);
+
+  // ① candidate-declares-touches —— 候选自身必须有可判定的 `## Touches`（无节 / 空 / 读不出 ⇒ 无法
+  //    回答「与谁重叠」，⛔ 不得当作「无重叠」）。
+  if (!self.hasSection || self.globs.length === 0) return blocked("candidate-declares-touches");
+  // ② no-overbroad-glob（AC-366(e)）—— 单一实现 = touches-orthogonality-check 的 isOverbroadDeclaration
+  //    （⛔ 不写第二份判据）。必须先于重叠扫描：checkTouchesPair 对过宽一侧走保守分支（`overlaps` 为空）
+  //    ⇒ 不先拦就会被误记成 `overlap-known`。
+  if (self.globs.some((g) => isOverbroadDeclaration(g))) return blocked("no-overbroad-glob");
+  // ③ relaxed-ledger-readable —— AC-363 的 `malformed` > 0 ⇒ 名额与「不连锁」两条判据的输入不可
+  //    归因 ⇒ fail-closed 阻塞（硬规则 3b：读不懂不得与合格同形）。
+  if (state.ledgerMalformed > 0) return blocked("relaxed-ledger-readable");
+
+  // ④ 重叠面与对手：复用同一份重叠数学（⛔ 不重写交集计算），逐对手取 `checkTouchesPair(...).overlaps`。
+  const selfTaskFile = normalizePath(path.join("tasks", `${id}.md`));
+  const overlaps: string[] = [];
+  const blockers: string[] = [];
+  for (const other of ctx.inFlight) {
+    const pair = checkTouchesPair(self, readTouches(other), expand);
+    if (pair.disjoint) continue;
+    // 保守分支（对手无/空声明、过宽通配、展开为空）⇒ `disjoint:false` 且 `overlaps` 空 ⇒ 对手**不可
+    // 判定** ⇒ 阻塞。⛔ 不当作「已算出的空集」，⛔ 不当作「无重叠」（那是把读不懂伪装成合格）。
+    if (pair.overlaps.length === 0) return blocked("overlap-known");
+    blockers.push(other);
+    for (const f of pair.overlaps) if (normalizePath(f) !== selfTaskFile) overlaps.push(f);
+  }
+
+  // ⑤ not-never-relax（AC-366(b)）—— 重叠面命中 `never_relax` ⇒ 阻塞。live 的读法 = 重叠**文件**逐
+  //    元素对名单的 glob 匹配（AC-364 的 `readStringList` 把该字段声明为「路径或 glob」）。
+  //    ⚠️ shadow 的**标注**路径沿用 AC-365 落地的「候选 id 在名单内」读法（那一处被其 AC4-④ 逐字钉住）；
+  //    两处共用同一个条件 id，语义差异写在本条 Evidence 里。
+  if (overlaps.some((f) => state.config.never_relax.some((g) => matchGlob(g, f)))) return blocked("not-never-relax");
+
+  // ⑥ shared_files 短路（AC-366(f)）—— 重叠**全部**落在白名单内 ⇒ **视为不冲突，立即放行**：不等等待、
+  //    不占名额、不写账本（它不是一次放宽派发 ⇒ `relaxed:false`）。`overlapsAllShared` 对空重叠面返回
+  //    false ——「无重叠」不是「重叠都在白名单里」，那是另一件事。
+  if (overlapsAllShared(overlaps, state.config.shared_files)) {
+    return { wouldRelax: true, relaxBlockedBy: null, relaxed: false };
+  }
+
+  // ⑦ waited-enough（AC-366(a)）—— 读不到（该任务在 status-events 账本无 `to:"ready"`）⇒ 条件为假。
+  //    ⛔ 不 `?? 0`、⛔ 不 `?? Infinity`（缺值与「等了 0 分钟」「等到天荒地老」都不同形）。
+  const readyAt = state.readyAtMs.get(id);
+  const waits = readyAt === undefined ? null : Math.floor((state.nowMs - readyAt) / 60000);
+  const after = state.config.after_minutes;
+  if (waits === null || after === undefined || !(waits >= after)) return blocked("waited-enough");
+
+  // ⑧ quota-available（AC-366(c)）—— 当前被放宽派发的**在飞**任务数 < 名额（名额来自配置，⛔ 无内置回退）。
+  //    读数 = `ctx.inFlight ∩ relaxedTaskIds`（⛔ 不是 `ctx.relaxedInFlight`——那个数没有 id，答不出 (d)）。
+  const relaxedInFlight = ctx.inFlight.filter((t) => state.relaxedTaskIds.has(t)).length;
+  const quota = state.config.max_relaxed_inflight;
+  if (quota === undefined || !(relaxedInFlight < quota)) return blocked("quota-available");
+
+  // ⑨ blocker-not-relaxed（AC-366(d)，**不连锁**）—— 挡住它的**每一个**在飞任务本身都不是被放宽派发的。
+  if (blockers.some((b) => state.relaxedTaskIds.has(b))) return blocked("blocker-not-relaxed");
+
+  return { wouldRelax: true, relaxBlockedBy: null, relaxed: true };
 }
 
 /** 谓词在列表中的名字。唯一定义点——`TASK_FILTERS` 的元素、判定里的条件①、trace 侧的条目选择、
@@ -373,6 +502,9 @@ interface RelaxAttribution {
   setFilteredBy: (id: string, filteredBy: readonly string[]) => void;
   /** 该候选的标签（off / 未登记 ⇒ `null`——off 不做放宽判断）。 */
   annotationFor: (id: string) => RelaxAnnotation | null;
+  /** 本轮判定的「现在」(ms)。trace 的 `waitedMinutes` 与 live 的等待判据必须用**同一个** now ——
+   *  否则会出现「判据按 30 分钟放行、条目却报 29 分钟」这种自相矛盾的读数。 */
+  roundNowMs: () => number;
 }
 
 /** 谓词实例 → 它的标签表。谓词与标签表都是**同一个模块级对象**的字段 ⇒ WeakMap 关联的是
@@ -381,15 +513,23 @@ interface RelaxAttribution {
  *  表在实例上保存【最后一次构造】的那一份，`applyTaskFilters` 用自己刚构造的那一份读。 */
 const RELAX_ATTRIBUTION = new WeakMap<object, RelaxAttribution>();
 
-/** 构造一轮的标签表（谓词与它成对出现）。 */
-function makeRelaxAttribution(state: RelaxRoundState, ctx: FilterContext): RelaxAttribution {
-  const annotations = new Map<string, RelaxAnnotation>();
+/** 构造一轮的标签表（谓词与它成对出现）。`annotations` 由调用方持有 —— live 的标签在**判定那一刻**
+ *  就由 `decision()` 登记（它不需要 `filteredBy`），shadow 的标签在 trace 侧登记（它需要）。 */
+function makeRelaxAttribution(
+  state: RelaxRoundState,
+  ctx: FilterContext,
+  annotations: Map<string, RelaxAnnotation>,
+): RelaxAttribution {
   return {
     setFilteredBy: (id, filteredBy) => {
       if (!state.annotate) return; // off / 读不懂 ⇒ 不做放宽判断（⛔ 不产生任何标签）
+      // live：标签已由 decision() 在判定那一刻登记（那一次用的是 live 判据与本轮的 now）。
+      // ⛔ 这里**不重算**——两处各算一次会用两套读数（`filteredBy` 与 live 判据无关）。
+      if (state.live) return;
       annotateRelax(id, state, ctx, annotations, filteredBy);
     },
     annotationFor: (id) => annotations.get(id) ?? null,
+    roundNowMs: () => state.nowMs,
   };
 }
 
@@ -417,20 +557,47 @@ function annotateRelax(
   annotations.set(id, judgeRelaxCandidate(id, filteredBy, waits, overlaps, state));
 }
 
-/** 构造一轮的判定：把标签表挂到**本次构造的那个谓词**上，并返回一个**逐调用委托**基线谓词的函数。
- *  ⛔ 委托是「直接调用 `touchesDisjoint.predicate(ctx)` 的返回值本身」：返回值、短路顺序、fail-closed
- *  缺省全部随之逐字节相同，且不产生第二份 off 实现（硬规则 5b）。shadow / live 的返回值与 off
- *  **完全一样**——本条只标注不放行（live 的放行语义是 AC-366 的活；⛔ 在这里放行会让取假形态变绿）。
- *  mode 的差别**只**喂标签表，⛔ 不参与返回值。
+/** 构造一轮的判定：把标签表挂到**本次构造的那个谓词**上，并按 mode 分派三态。
+ *
+ *  off（含配置块缺失 / 读不懂）：**逐字节**委托基线谓词 ——「直接调用 `touchesDisjoint.predicate(ctx)`
+ *  的返回值本身」：返回值、短路顺序、fail-closed 缺省全部随之逐字节相同，且不产生第二份 off 实现
+ *  （硬规则 5b）。⛔ 这里**不产生任何标签**。
+ *  shadow：返回值同样委托基线（只标注不放行）——AC-365 的同形纪律，其测试逐元素 deepEqual 两态。
+ *  live（AC-366）：与基线**不同** —— 冲突面满足放宽判据时真的放行（`judgeLiveRelax(...).relaxed`）。
+ *
+ *  ⛔ `applyTaskFilters` 的返回表达式一行不改：本函数只改【touches 谓词自己】的返回值。
  *
  *  为什么标签表挂【构造出的那个函数】而不是列表里那个对象：`predicate(ctx)` 每个消费点各调一次
  *  （测试里同一模块会被多次构造），挂在模块级对象上会被后一次构造覆盖。 */
 function makeTouchesDisjointOrAgedPredicate(ctx: FilterContext): (id: string) => boolean {
   const state = makeRelaxRoundState(ctx);
   const planOff = touchesDisjoint.predicate(ctx);
-  const decision = (id: string): boolean => planOff(id);
-  RELAX_ATTRIBUTION.set(decision, makeRelaxAttribution(state, ctx));
+  const annotations = new Map<string, RelaxAnnotation>();
+  const decision = (id: string): boolean => {
+    // ① touches 面本就不冲突 ⇒ 无事可做（⛔ 不登记标签：没有「冲突」可放宽）。
+    if (planOff(id)) return true;
+    // ② off / 配置读不懂 ⇒ 与现状逐字节相同（AC-364 的 fail-closed 姿态：⛔ 绝不放行）。
+    if (!state.annotate) return false;
+    // ③ shadow ⇒ 只标注不放行（标签留给 trace 侧登记，它需要 filteredBy）。
+    if (!state.live) return false;
+    // ④ live ⇒ 真的判放行（AC-366）。标签在**这一刻**登记：trace 侧与接线侧都按【同一次】判定的结果读。
+    //    返回值 = `wouldRelax`（=「判据说这个冲突面可以放过」），**不是** `relaxed`：
+    //    `shared_files` 短路也返回 true（视为不冲突 ⇒ 放行），但它不是一次放宽派发（`relaxed:false`
+    //    ⇒ 不占名额、不写账本，AC-366(f)）。两者的分岔点正是 `relaxed` 这一个键。
+    const ann = judgeLiveRelax(id, state, ctx);
+    annotations.set(id, ann);
+    return ann.wouldRelax;
+  };
+  RELAX_ATTRIBUTION.set(decision, makeRelaxAttribution(state, ctx, annotations));
   return decision;
+}
+
+/** 从一轮的 trace 条目里取出【该 task 本轮被放宽放行】的那一条（live 的等待路径）。
+ *  ⛔ 只有 `touchesDisjointOrAged` 的条目会长 `relaxed` 键（见 `FilterTraceEntry`），故按此键取即可，
+ *  不必比对谓词名 —— 那也避免在本文件之外复写 `TOUCHES_RELAX_FILTER_NAME` 这个字面量。
+ *  调用方（`worker-driver.ts`）据此写 AC-363 的放宽账本。 */
+export function relaxedDispatchEntry(entries: readonly FilterTraceEntry[], task: string): FilterTraceEntry | null {
+  return entries.find((e) => e.task === task && e.relaxed === true) ?? null;
 }
 
 /** `touchesDisjoint` 在列表中的那一格被本条取代：`touch` 面的判定从「只看互斥」变成「互斥 or 够老」，
@@ -1498,9 +1665,17 @@ export interface FilterTraceEntry {
    *  `mode: off`（含配置块缺失）⇒ 恒 `false` —— off 不做放宽判断，⛔ 不出现 `true`。判断只标注，
    *  ⛔ 不影响放行（off 与 shadow 的返回集合逐元素相同）。其余四个谓词的条目上**没有**这两个键。 */
   wouldRelax?: boolean;
-  /** **仅 `touchesDisjointOrAged` 条目**有：首个不满足的放宽条件 id（`RELAX_CONDITIONS` 之一）；
-   *  全满足 ⇒ `null`。off ⇒ 恒 `null`。 */
-  relaxBlockedBy?: RelaxCondition | null;
+  /** **仅 `touchesDisjointOrAged` 条目**有：首个不满足的放宽条件 id（`RELAX_CONDITIONS` 之一；
+   *  live 下还可能是 `LIVE_RELAX_CONDITIONS` 里的四个 AC-366 条件）；全满足 ⇒ `null`。off ⇒ 恒 `null`。 */
+  relaxBlockedBy?: RelaxCondition | LiveRelaxCondition | null;
+  /** **仅 `touchesDisjointOrAged` 条目**有（GOAL-037 / AC-366）：该候选本轮**真的**被放宽放行
+   *  （live 的等待路径）。off / shadow / `shared_files` 短路恒 `false` —— 短路「视为不冲突」，不是
+   *  一次放宽派发（不占名额、不写账本）。调用方按此键写 AC-363 的放宽账本（`relaxedDispatchEntry`）。
+   *
+   *  ⚠️ 这一条**只在 live 下**才会出现在「候选没被本谓词滤掉」的条目上：live 放行时 touches 谓词返回
+   *  `true`，故该候选通常不进 `blocked`；本条为此**追加一条观测条目**（⛔ 不改 `applyTaskFilters` 的
+   *  返回表达式），使「判据为真、是组合把它拦住」可归因。 */
+  relaxed?: boolean;
 }
 
 /** trace 汇：`applyTaskFilters` 每发现一个被滤掉的（候选 × 谓词）就调用一次（逐条，⛔ 不短路）。 */
@@ -1570,15 +1745,20 @@ export function applyTaskFilters(candidateIds: string[], ctx: FilterContext, nam
   const filters = names ? TASK_FILTERS.filter((f) => names.includes(f.name)) : [...TASK_FILTERS];
   const preds = filters.map((f) => f.predicate(ctx));
   if (trace) {
-    // 载体每轮读一次并建映射（⛔ 不逐候选重读全量 jsonl）；now 本轮取一次，条目间的差只反映
-    // ready 时刻之差（AC8 的 Δ 断言据此成立）。
+    // 载体每轮读一次并建映射（⛔ 不逐候选重读全量 jsonl）。
     const readyAtMs = buildReadyAtMsMap(ctx.root);
-    const nowMs = Date.now();
     const touchesAt = makeTouchesAttributor(ctx);
     // GOAL-037（AC-365）：touches 那一格的标签表（off ⇒ 恒无标签）。它挂在【本次过滤构造的那一个】
     // 谓词函数上，故这里读到的就是逐候选判定的同一份结果（⛔ 不重跑谓词）。
     const relaxIdx = filters.indexOf(touchesDisjointOrAged);
     const relaxAt = relaxIdx >= 0 ? RELAX_ATTRIBUTION.get(preds[relaxIdx]) ?? null : null;
+    // now 本轮取一次，条目间的差只反映 ready 时刻之差（AC8 的 Δ 断言据此成立）。GOAL-037（AC-366）：
+    // 与 live 的等待**判据**共用同一个 now —— 否则会出现「按 30 分钟放行、条目报 29 分钟」的自相矛盾。
+    const nowMs = relaxAt ? relaxAt.roundNowMs() : ctx.nowMs ?? Date.now();
+    const waitedFor = (id: string): number | null => {
+      const readyAt = readyAtMs.get(id);
+      return readyAt === undefined ? null : Math.floor((nowMs - readyAt) / 60000);
+    };
     for (const id of candidateIds) {
       // 本轮**所有**滤掉该候选的谓词（准入集合的条件①「被 touches 单独挡住」的判定输入）。先收齐
       // 再发条目 ⇒ 条目内容与「一个候选可命中多个谓词」的语义一致（⛔ 不短路）；条目仍按 filters
@@ -1586,26 +1766,44 @@ export function applyTaskFilters(candidateIds: string[], ctx: FilterContext, nam
       const blocked: string[] = [];
       for (let i = 0; i < filters.length; i++) if (!preds[i](id)) blocked.push(filters[i].name);
       if (relaxAt) relaxAt.setFilteredBy(id, blocked);
-      if (blocked.length === 0) continue;
+      const ann = relaxAt ? relaxAt.annotationFor(id) : null;
+      // GOAL-037（AC-366）：live 下 touches 谓词**真的放行**了该候选 —— 它因此不在 `blocked` 里，
+      // 但仍是一条必须留痕的观测：AC-366(i) 要读「放宽判据为真、是组合把它拦住」，接线侧要读
+      // `relaxed === true` 才写账本。⛔ 只**追加一条观测**，下面的返回表达式逐字不变（AC-362 的特征化）。
+      const relaxedLive = ann !== null && ann.relaxed === true;
+      if (blocked.length === 0 && !relaxedLive) continue;
+      if (relaxedLive) {
+        const att = touchesAt(id);
+        trace({
+          task: id,
+          filter: TOUCHES_RELAX_FILTER_NAME,
+          blocker: att.blocker,
+          overlapFiles: att.overlapFiles,
+          waitedMinutes: waitedFor(id),
+          wouldRelax: true,
+          relaxBlockedBy: null,
+          relaxed: true,
+        });
+      }
       for (let i = 0; i < filters.length; i++) {
         const name = filters[i].name;
         if (!blocked.includes(name)) continue;
         const att = name === TOUCHES_RELAX_FILTER_NAME ? touchesAt(id) : { blocker: null, overlapFiles: [] as string[] };
-        const readyAt = readyAtMs.get(id);
         const entry: FilterTraceEntry = {
           task: id,
           filter: name,
           blocker: att.blocker,
           overlapFiles: att.overlapFiles,
-          waitedMinutes: readyAt === undefined ? null : Math.floor((nowMs - readyAt) / 60000),
+          waitedMinutes: waitedFor(id),
         };
-        // GOAL-037（AC-365）：两键**只**长在 touches 那一格上（⛔ 不改五个既有谓词的条目形状）。
+        // GOAL-037（AC-365/366）：三键**只**长在 touches 那一格上（⛔ 不改五个既有谓词的条目形状）。
         // off ⇒ `wouldRelax:false` + `relaxBlockedBy:null`（off 不做放宽判断，⛔ 不出现 true）；
-        // shadow ⇒ 满足全部条件者 `true`、否则点名首个不满足的条件 id。
+        // shadow ⇒ 满足全部条件者 `true`、否则点名首个不满足的条件 id；live ⇒ 同上，且真的放行的
+        // 那一条走上面的 `relaxedLive` 分支（它不在 `blocked` 里）。
         if (name === TOUCHES_RELAX_FILTER_NAME) {
-          const ann = relaxAt ? relaxAt.annotationFor(id) : null;
           entry.wouldRelax = ann ? ann.wouldRelax : false;
           entry.relaxBlockedBy = ann ? ann.relaxBlockedBy : null;
+          entry.relaxed = ann ? ann.relaxed : false;
         }
         trace(entry);
       }

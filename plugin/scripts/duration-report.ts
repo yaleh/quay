@@ -49,6 +49,8 @@ import fs from "node:fs";
 import path from "node:path";
 import { parseFrontmatterCompletely, frontmatterStatus } from "./task-schema.ts";
 import { listTaskIds } from "./fast-mode-telemetry.ts";
+// 入口判定按**文件名**认身份（bundle-safe，见文件末尾的注释）。
+import { isDirectEntry } from "./gate-script-base.ts";
 
 // ── 取值词表：三态，⛔「未评估」不得与数值共用形状（硬规则 3b）──────────────────────────────
 export const NOT_EVALUATED = "NOT-EVALUATED" as const;
@@ -590,14 +592,15 @@ function main(argv: string[]): number {
   return 0;
 }
 
-// 直接执行才跑 CLI（被 import 时是纯库——与 gate-script-base 的 isDirectEntry 同形）。
-const invokedDirectly = (() => {
-  const entry = process.argv[1];
-  if (!entry) return false;
-  try {
-    return fs.realpathSync(entry) === fs.realpathSync(new URL(import.meta.url).pathname);
-  } catch {
-    return false;
-  }
-})();
-if (invokedDirectly) process.exit(main(process.argv.slice(2)));
+// 直接执行才跑 CLI（被 import 时是纯库）。用 gate-script-base 的 isDirectEntry —— 它按**文件名**
+// 认身份，故在源码布局与打包布局下都成立，且对被 inline 进别的 bundle 的本模块恒为 false。
+//
+// ⛔ 这里原来是一段「本地实现」的 URL 相等判定（`realpathSync(argv[1]) === realpathSync(import.meta.url)`），
+// 注释却写着「与 isDirectEntry 同形」—— 它**不同形**：打包后整个 inline 模块集共用 bundle 的
+// `import.meta.url`，于是本模块的 `process.exit(main(...))` 会在**别的**入口里先跑（实测 2026-10-17：
+// `worker-driver.ts` 经 AC-363 的 `relaxed-dispatch-ledger.ts` → 本模块新引入了一条 import 边，
+// `dist/worker-driver.js --help` 打印的不再是 worker-driver 的 banner 而是本报告并 exit 0）。
+// 正是 gate-script-base `isDirectEntry` 上方那段注释记载的 `gap-drivers-yml-interval-not-honored-for-routine-kinds`
+// 事故形态（`dist/{goal,quality-gate,meta}-driver.js` 全跑 pool-quality-judge 的 main）——本模块是当时
+// 未随迁移扫到的**残留实例**，只因此前无人 import 它故从未显形。
+if (isDirectEntry(import.meta, undefined, "duration-report")) process.exit(main(process.argv.slice(2)));
