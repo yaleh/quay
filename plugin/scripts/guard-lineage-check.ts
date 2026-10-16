@@ -57,7 +57,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { repoRoot } from "./repo-root.ts";
 import { resolveKernelShellSibling } from "./driver-runtime.ts";
-import { parseArgs as baseParseArgs } from "./gate-script-base.ts";
+import { parseArgs as baseParseArgs, printJson } from "./gate-script-base.ts";
 
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
 
@@ -462,9 +462,8 @@ function printHuman(report: LineageReport): void {
   for (const s of report.suspicious) console.log(`    ${s.basename}  — ${s.reason}`);
 }
 
-function printJson(report: LineageReport): void {
-  console.log(JSON.stringify(report, null, 2));
-}
+// `printJson` (pretty shape) is the shared emitter in gate-script-base.ts — semantic-dedup-scan
+// finding `print-json-three-behaviours`.
 
 // Thin adapter over the ONE canonical parser (gate-script-base.ts `parseArgs`) — this file carried one
 // of the six hand-rolled token loops filed by a `semantic-dedup-scan` pass as

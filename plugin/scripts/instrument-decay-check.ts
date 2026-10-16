@@ -40,7 +40,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { repoRoot } from "./repo-root.ts";
 import { fileURLToPath } from "node:url";
-import { parseArgs as baseParseArgs } from "./gate-script-base.ts";
+import { parseArgs as baseParseArgs, printJsonCompact } from "./gate-script-base.ts";
 
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
 
@@ -294,7 +294,9 @@ function printHuman(outcome: AnalyzeOutcome): void {
   }
 }
 
-function printJson(outcome: AnalyzeOutcome): void {
+// Renamed from `printJson` when its terminal write moved to the shared emitter: the local name is
+// the payload BUILDER's, and `printJson` now names the imported emitter (gate-script-base.ts).
+function printDecayReport(outcome: AnalyzeOutcome): void {
   const carriers = outcome.carriers.map((c) => ({
     file: c.file,
     evaluated: c.evaluated,
@@ -314,12 +316,14 @@ function printJson(outcome: AnalyzeOutcome): void {
       lastWrite: fmt(cp.lastWriteMs),
     })),
   }));
-  console.log(JSON.stringify({
+  // Compact shape from the shared emitter (gate-script-base.ts) — this file carried a local copy of
+  // the same terminal write; semantic-dedup-scan finding `print-json-three-behaviours` (5b sweep).
+  printJsonCompact({
     ok: !outcome.anyDecayed,
     evaluated: outcome.anyEvaluated,
     decayedCount: outcome.decayedCount,
     carriers,
-  }));
+  });
 }
 
 // Thin adapter over the ONE canonical parser (gate-script-base.ts `parseArgs`) — this file carried one
@@ -408,7 +412,7 @@ export function main(argv: string[]): number {
   }
 
   if (opts.json) {
-    printJson(outcome);
+    printDecayReport(outcome);
   } else {
     printHuman(outcome);
   }

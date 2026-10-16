@@ -42,7 +42,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { helpExit } from "./gate-script-base.ts";
+import { helpExit, printJson } from "./gate-script-base.ts";
 import { readProcCmdline } from "../../packages/quay/src/kernel/proc-identity.ts";
 // Shared session-liveness primitive — ONE copy, byte-identical to the pinned quay-fleet blob
 // (packages/quay/src/primitives/PROVENANCE.md). The `/proc/<pid>/stat` field-22 read below used to
@@ -237,7 +237,9 @@ function printHuman(procs: ClaudeSessionProc[]): void {
   for (const p of cls.live) process.stdout.write(`  live   ${summary(p)}\n`);
 }
 
-function printJson(procs: ClaudeSessionProc[]): number {
+// Renamed from `printJson` when its terminal write moved to the shared emitter: the local name is
+// the payload BUILDER's, and `printJson` now names the imported emitter (gate-script-base.ts).
+function printOrphanReport(procs: ClaudeSessionProc[]): number {
   const cls = classifySessions(procs);
   const trim = (p: ClaudeSessionProc) => ({
     pid: p.pid,
@@ -255,7 +257,9 @@ function printJson(procs: ClaudeSessionProc[]): number {
     orphans: cls.orphans.map(trim),
     live: cls.live.map(trim),
   };
-  process.stdout.write(`${JSON.stringify(payload, null, 2)}\n`);
+  // Pretty shape from the shared emitter (gate-script-base.ts) — this file carried a local copy of
+  // the same terminal write; semantic-dedup-scan finding `print-json-three-behaviours` (5b sweep).
+  printJson(payload);
   return cls.orphanCount > 0 ? 1 : 0;
 }
 
@@ -264,7 +268,7 @@ export async function main(argv: string[]): Promise<number> {
   const procs = enumerateClaudeProcesses();
 
   if (argv.includes("--json")) {
-    return printJson(procs);
+    return printOrphanReport(procs);
   }
 
   const kwIdx = argv.indexOf("--kill-workspace");

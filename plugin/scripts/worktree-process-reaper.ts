@@ -93,7 +93,7 @@
 import fs from "node:fs";
 import path from "node:path";
 // The direct-entry guard below is bundle-safe and single-sourced (see its call site).
-import { isDirectEntry } from "./gate-script-base.ts";
+import { isDirectEntry, printJson } from "./gate-script-base.ts";
 // gap-suite-concurrency-ff-gate-and-slot-ssot — the CANONICAL suite-slot implementation (single
 // definition point). fullSuiteLockFiles() reads it so the stale-lock reclaim covers ALL S slots
 // (S=3 ⇒ `.2` stale holders are reclaimable, never invisible to the fixed `.0`/`.1` list).
@@ -514,9 +514,9 @@ function summary(p: ProcInfo): string {
   return `pid=${p.pid} cwd=${cwd} argv0=${p.argv0 ?? "?"} state=${p.state ?? "?"}`;
 }
 
-export function printJson(payload: unknown): void {
-  process.stdout.write(`${JSON.stringify(payload, null, 2)}\n`);
-}
+// `printJson` (pretty shape) is the shared emitter in gate-script-base.ts — semantic-dedup-scan
+// finding `print-json-three-behaviours`. It was exported from here; no other module imported it
+// (the file's exported surface is `enumerateProcs`/`cwdUnder`/`main` et al.).
 
 export function main(argv: string[]): number {
   const listOnly = argv.includes("--list") || argv.includes("--dry-run");

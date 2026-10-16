@@ -40,7 +40,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { createHash } from "node:crypto";
 import { execSync } from "node:child_process";
-import { createSelftest, parseJsonArg, git, gitLastCommitForPath, serializeSortedJson } from "./gate-script-base.ts";
+import { createSelftest, parseJsonArg, git, gitLastCommitForPath, serializeSortedJson, printJsonCompact } from "./gate-script-base.ts";
 import {
   SCHEMA_VERSION as A1_SCHEMA_VERSION,
   VALID_STAGES,
@@ -796,10 +796,8 @@ export function selftest(): boolean {
 }
 
 // ── CLI entry ───────────────────────────────────────────────────────────────────────────────────────
-
-function printJson(obj: unknown): void {
-  console.log(JSON.stringify(obj));
-}
+// `printJsonCompact` (this file's former local `printJson`) is the shared emitter in
+// gate-script-base.ts — semantic-dedup-scan finding `print-json-three-behaviours`.
 
 function usage(): string {
   return [
@@ -832,7 +830,7 @@ export function main(argv: string[]): number {
         expected = parseJsonArg(args[expIdx + 1], receiptError) as typeof expected;
       }
       const result = validateReceipt(receipt, expected);
-      printJson(result);
+      printJsonCompact(result);
       return result.ok ? 0 : 1;
     }
 
@@ -842,7 +840,7 @@ export function main(argv: string[]): number {
       if (raw == null) throw receiptError("ref-input-missing", "--evidence-manifest-ref requires a '<{path,sha256}>' argument");
       const ref = parseJsonArg(raw, receiptError) as { path: string; sha256?: string; hash?: string };
       const result = validateEvidenceManifestRef(ref);
-      printJson(result);
+      printJsonCompact(result);
       return result.ok ? 0 : 1;
     }
 
@@ -852,17 +850,17 @@ export function main(argv: string[]): number {
       if (raw == null) throw receiptError("migrate-input-missing", "--migrate-prepare-ledger requires a '<entry-json>' argument");
       const entry = parseJsonArg(raw, receiptError) as Record<string, unknown>;
       const result = migratePrepareLedger(entry);
-      printJson(result);
+      printJsonCompact(result);
       return result.ok ? 0 : 1;
     }
 
     // eslint-disable-next-line no-unused-expressions
     usage();
-    printJson({ ok: true, usage: "stage-receipt.ts" });
+    printJsonCompact({ ok: true, usage: "stage-receipt.ts" });
     return 0;
   } catch (err) {
     const e = err as Error & { code?: string };
-    printJson({ ok: false, code: e.code || "stage-receipt-error", message: e.message });
+    printJsonCompact({ ok: false, code: e.code || "stage-receipt-error", message: e.message });
     return 1;
   }
 }

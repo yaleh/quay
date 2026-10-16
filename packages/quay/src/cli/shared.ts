@@ -38,6 +38,27 @@ export {
 } from "./flags.ts";
 export type { CliFlags } from "./flags.ts";
 
+// ⛔ DECLARED DIVERGENCE — deliberate, and the only copy in Core.
+//
+// A `semantic-dedup-scan` pass (routine `semantic-dedup-scan`, runId
+// `semantic-dedup-scan-1792033478766`, finding `print-json-three-behaviours`, verdict
+// `divergent-implementation`, suggestedAction `extract`) read the same name `printJson` across
+// both surfaces. The PLUGIN side was extracted onto ONE implementation —
+// `plugin/scripts/gate-script-base.ts` `printJson` (this pretty shape) and `printJsonCompact`
+// (the compact shape the three byte-identical `console.log(JSON.stringify(obj))` helpers used) —
+// and this copy is NOT folded into it, on purpose:
+//
+//   `packages/quay` is the published product and knows nothing about `plugin/`, whose scripts
+//   consume Core, never the reverse. A definition shared by BOTH surfaces would therefore have to
+//   live in Core and be imported by the plugin's CLI scripts — i.e. the plugin would import Core
+//   source, which `packages/quay/scripts/build-plugin-dist.mjs` documents (at its CORE_SRC_DIR
+//   comment) as resolving only in the repo-root layout and breaking esbuild in the staged
+//   `packages/quay/plugin/` layout for the scripts it does not special-case. Blaming that on a
+//   two-line emitter is not a trade worth making, so the duplication stays STRUCTURAL rather than
+//   drift — the scan's own rationale names this boundary as the thing extraction has to respect.
+//
+// The body is nevertheless kept byte-equivalent to the plugin's `printJson` (pretty, 2-space,
+// trailing newline) so the two surfaces emit the same bytes; if either changes shape, change both.
 export function printJson(obj) {
   process.stdout.write(JSON.stringify(obj, null, 2) + "\n");
 }
