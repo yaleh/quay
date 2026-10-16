@@ -281,3 +281,11 @@ plugin/scripts/relaxed-dispatch-ledger.ts:64: export const RELAXED_DISPATCH_REL 
   `sh-census-check` 等 change-relevant 静态检查；`import-graph-check` 实测 `valueSccs=0 typeSccs=0 reverseEdges=0`）。
 - 反漂移：`anti-drift-touches-check.ts --task … --worktree … --merge-target develop` ⇒
   **EXIT=0**，`ANTI-DRIFT OK: 3 actual file(s), all within declared Touches (4 glob(s))`。
+
+## Blocker
+
+**2026-10-16T18:22:32.886Z — worker 未落地（exited-not-landed）**
+
+- 未落地原因：step=suite: AssertionError [ERR_ASSERTION]: dist/worker-driver.js must run its OWN main — expected marker "SPEC §5 阶段 2+3+4" in its output
+- run_id：wk-prod-anchor
+- session_id：3847369d-93b1-4606-bdc4-c261465661dd
