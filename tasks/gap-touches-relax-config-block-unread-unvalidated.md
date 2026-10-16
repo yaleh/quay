@@ -3,7 +3,7 @@ id: gap-touches-relax-config-block-unread-unvalidated
 title: loop.touches_relax 配置块既无读取器也无校验器：缺省语义与「显式 off vs 没写」不分、非 off 时
   after_minutes/max_relaxed_inflight 的必填与「无内置回退」、非法值的非零退出与只读，全未落地（GOAL-037
   AC-364 配置面）
-status: todo
+status: ready
 labels:
   - gap
 parent: null
