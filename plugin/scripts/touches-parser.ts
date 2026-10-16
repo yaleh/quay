@@ -43,33 +43,72 @@ import { isDirectEntry } from "./gate-script-base.ts";
 // NESTED-PAREN handling (gap-touches-parser-strip-annotation-nested-parens — 2 real occurrences:
 // a23 `（…`（新增…）`…）` + provisioning `（新：…（config/gates/运行时载体）…）`, each of which the old
 // `\s*（[^）]*）\s*$` regex could NOT strip because `[^）]*` cannot cross a `）`): the FULL-WIDTH pass is
-// now a BALANCED-PAREN scan, not a regex. We scan from the END for the LAST `）` and walk backward to
+// a BALANCED-PAREN scan, not a regex. We scan from the END for the LAST `）` and walk backward to
 // its MATCHING `（`, counting depth so a NESTED full-width pair inside the annotation does not
 // terminate the scan early. Only FULL-WIDTH parens are counted — an ASCII `(` that is literal text
 // inside the annotation (`$(` command-substitution syntax) is NOT mistaken for the annotation's
-// opener, and an unbalanced trailing `）` (no matching `（`) is left alone (old behavior). The ASCII
-// `(…)` pass then runs on the result, preserving the old sequential double-strip for entries that
-// carry BOTH an ASCII and a full-width annotation (`path/x.ts (new)（…）` → pass 1 leaves
-// `path/x.ts (new)`, pass 2 strips ` (new)`).
-export function stripTouchAnnotation(entry) {
-  let s = String(entry);
+// opener, and an unbalanced trailing `）` (no matching `（`) is left alone (old behavior).
+//
+// ORDER-INDEPENDENCE (gap-touches-parser-annotation-strip-single-shot-order-dependent): the two
+// passes used to run exactly ONCE each, in a FIXED order (full-width first, then ASCII). That left
+// two shapes as a NON-PATH — residual backtick + annotation text, which every downstream reader
+// (task-granularity-advice, checkTouchesPair, select-tests-for-touches) reads exactly like "this
+// file was never landed" (硬规则 3b: 读不懂伪装成合格):
+//   · `` `x.ts`（说明）(new) ``       — the ASCII pass removes `(new)`, but the full-width pass has
+//     already run and never re-runs ⇒ `` x.ts`（说明） `` ;
+//   · `` `x.ts`（说明）(new) extra `` — neither end-anchored pass fires at all (the bullet ends in prose).
+// Measured: quay@493b5c7 22 of 2550 backtick-path Touches bullets; claudecodeui@31ab009 7 of 796.
+// Two changes close it, applied in order:
+//   1. LEADING-PATH CUT — a repo path contains no whitespace, backtick/quote, or parenthesis (ASCII
+//      or full-width), so when a bullet STARTS with a concrete path token that an annotation begins
+//      right after, the path IS that token and the remainder is annotation/prose. This is
+//      order-independent by construction (`(new)（…）` / `（…）(new)` / `(new) extra` all reduce to
+//      the same path). It is GATED on the token being a CONCRETE path (containing a `/`, or ending
+//      in a file extension) so that a prose bullet is never truncated into a short spurious glob —
+//      in particular a bare-directory prose bullet must not collapse to the bare directory itself.
+//   2. FIXED-POINT LOOP over the two trailing strips — keeps the historical reading for every entry
+//      the cut does not cover (prose bullets, bare-directory declarations) while making the two
+//      annotation spellings commute.
+const TOUCH_PATH_TOKEN_RE = /^[^\s`'"()（）]+/;
+const TOUCH_CONCRETE_PATH_RE = /\/|\.[A-Za-z0-9]{1,10}$/;
+const TOUCH_ANNOTATION_HEAD_RE = /^[`'"（(]/;
+
+/** Strip a trailing balanced full-width `（…）` annotation (nested pairs included); unchanged input
+ *  is returned when the trimmed entry does not END in a full-width annotation. */
+function stripTrailingFullWidthAnnotation(s) {
   const t = s.trimEnd();
   const i = t.length - 1;
-  if (t[i] === "）") {
-    let depth = 0;
-    let open = -1;
-    for (let j = i; j >= 0; j--) {
-      const c = t[j];
-      if (c === "）") depth++;
-      else if (c === "（" && --depth === 0) { open = j; break; }
-    }
-    if (open !== -1) {
-      let k = open;
-      while (k > 0 && /\s/.test(t[k - 1])) k--; // also drop whitespace before the annotation (old \s*)
-      s = t.slice(0, k);
-    }
+  if (t[i] !== "）") return s;
+  let depth = 0;
+  let open = -1;
+  for (let j = i; j >= 0; j--) {
+    const c = t[j];
+    if (c === "）") depth++;
+    else if (c === "（" && --depth === 0) { open = j; break; }
   }
-  return s.replace(/\s*\([^)]*\)\s*$/, "").trim();
+  if (open === -1) return s;
+  let k = open;
+  while (k > 0 && /\s/.test(t[k - 1])) k--; // also drop whitespace before the annotation (old \s*)
+  return t.slice(0, k);
+}
+
+export function stripTouchAnnotation(entry) {
+  // 1. Leading-path cut — a concrete leading path token whose annotation starts immediately after.
+  const t = String(entry).trim();
+  const m = TOUCH_PATH_TOKEN_RE.exec(t);
+  if (m && TOUCH_CONCRETE_PATH_RE.test(m[0])) {
+    const tail = t.slice(m[0].length).replace(/^\s+/, "");
+    if (tail && TOUCH_ANNOTATION_HEAD_RE.test(tail)) return m[0];
+  }
+  // 2. The two trailing strips, repeated to a fixed point (strictly shorter on every strip ⇒ halts).
+  let s = String(entry).trimEnd();
+  for (;;) {
+    const before = s;
+    s = stripTrailingFullWidthAnnotation(s);
+    s = s.replace(/\s*\([^)]*\)\s*$/, "").trimEnd();
+    if (s === before) break;
+  }
+  return s.trim();
 }
 
 // Parse a `## Touches` bullet list into bare path/glob strings (backticks/quotes removed,

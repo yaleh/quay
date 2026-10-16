@@ -225,6 +225,50 @@ test("AC2 能取假: nested-paren annotations → matchGlob HITS the clean path;
   );
 });
 
+// ── gap-touches-parser-annotation-strip-single-shot-order-dependent ───────────────────────────────
+// stripTouchAnnotation ran EACH annotation spelling's strip exactly ONCE, in a FIXED order
+// (full-width first, then ASCII). Two shapes escaped it and produced a NON-PATH (residual backtick
+// + annotation text) that downstream readers could not tell apart from "this file never landed"
+// (硬规则 3b): (i) BOTH spellings present with the ASCII one LAST — the ASCII pass removes `(new)`,
+// but the full-width pass has already run and never re-runs; (ii) prose after the annotation —
+// neither end-anchored pass fires at all. Measured: quay@493b5c7 22 of 2550 backtick-path Touches
+// bullets, claudecodeui@31ab009 7 of 796. The five control experiments below ARE that measured set;
+// the last two were red before this fix.
+const ORDER_FIXTURES = [
+  "- `x.ts`（说明）",             // full-width only
+  "- `x.ts` (new)",              // ASCII only
+  "- `x.ts` (new)（说明）",       // ASCII then full-width (the order that already worked)
+  "- `x.ts`（说明）(new)",        // full-width THEN ASCII — was FAIL (the full-width pass never re-ran)
+  "- `x.ts`（说明）(new) extra",  // full-width THEN ASCII + trailing prose — was FAIL (no pass fired)
+];
+
+test("AC1: the 5 annotation order/shape control experiments all reduce to the path", () => {
+  for (const section of ORDER_FIXTURES) {
+    assert.deepEqual(parseTouchEntries(section), ["x.ts"], `not stripped to a clean path: ${JSON.stringify(section)}`);
+    // Single-source parity: every delegating parser must agree on the reordered shapes too.
+    assertAllAgree(PARSERS, bodyOf(section), section, ["x.ts"]);
+  }
+  // The masked-backtick + prose corpus shape (the real `gap-ac384` / quay failures): a bullet whose
+  // leading backtick path is followed by `（…）(new)` + prose must still resolve to the path.
+  const real = "- `plugin/loop/manager-tick-core.md`（AC3：随包正本——从 orchestration/ 复制）(new)";
+  assert.deepEqual(parseTouchEntries(real), ["plugin/loop/manager-tick-core.md"]);
+  assertAllAgree(PARSERS, bodyOf(real), real, ["plugin/loop/manager-tick-core.md"]);
+});
+
+test("AC1 negative control: prose Touches bullets are NOT truncated into spurious globs", () => {
+  // The fix resolves the leading PATH when an annotation begins right after it. A bullet that does
+  // NOT start with a concrete path must keep the old reading — truncating at the first whitespace
+  // would turn prose into short spurious globs, and a bare-directory prose bullet into a directory
+  // glob that expands to everything under it (exactly the over-broad declaration the bare-dir rule
+  // exists to prevent). Both of these are REAL corpus shapes.
+  // (`parseTouchEntries`'s own post-strip still removes the trailing masked backtick — that part of
+  // the historical reading is unchanged; only the leading truncation is what must NOT happen.)
+  const proseRun = "- Run `node plugin/scripts/anti-drift-touches-check.ts`";
+  assert.deepEqual(parseTouchEntries(proseRun), ["Run `node plugin/scripts/anti-drift-touches-check.ts"]);
+  const bareDirProse = "- plugin/test/ 真安装族 12 文件（a / b）——夹具复用改造";
+  assert.deepEqual(parseTouchEntries(bareDirProse), ["plugin/test/ 真安装族 12 文件（a / b）——夹具复用改造"]);
+});
+
 // ── parseTouchEntriesWithTags (gap-ready-queue-still-lists-eight-tasks-targeting-retired-pipeline-files) ──
 // The resolve check needs to KNOW a touch is `(new)` (file will be created — need not exist yet) vs
 // `(delete)` (file must exist to be deleted) vs plain. parseTouchEntriesWithTags captures the tag
