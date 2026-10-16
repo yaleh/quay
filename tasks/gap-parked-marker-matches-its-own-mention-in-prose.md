@@ -49,6 +49,35 @@ extra: {}
 - plugin/scripts/ready-pool-check.ts
 - plugin/test/ready-pool-check-s09.test.mjs
 
+## Disposition
+
+**本轮（2026-10-16 续做轮，承接上一轮 `exited-not-landed`）两件事：把上一轮的 suite 红定案；补一条「修复有没有把真标记一起改没」的全店读数。**
+
+### 1. 上一轮的 suite 红判为**环境负载抖动**，不是本任务缺陷
+
+两条互相独立的证据：
+
+- **结构不可达（硬论证）**：失败文件 `plugin/test/full-suite-runner-cgroup.test.mjs` 的**局部 import 传递闭包共 86 个模块，其中不含 `plugin/scripts/ready-pool-check.ts`**。本任务的 delta 只有 `ready-pool-check.ts` 与其测试片 ⇒ 在那条测试里**根本没有能执行到的代码路径**。
+- **隔离不复现**：`node --test --test-concurrency=1 plugin/test/full-suite-runner-cgroup.test.mjs` ⇒ **tests 70 / pass 70 / fail 0，EXIT=0**（含失败的那条 AC4）。该断言是 on/off 墙钟 A/B（两臂各取 min，夹具只有 `sleep 3`），实测 1.58% 落在噪声带；该文件自带 `@test-group lowconc` + `@load-sensitive child-spawn` 标注。
+
+⇒ 不属本任务 `## Touches`；本层不重跑全量套件（fan-in 会重跑）。
+
+### 2. 全店读数：2844 个任务逐条对照「旧匹配器命中 / 新 `isParked` 命中」
+
+修标记类缺陷必须查**反方向**——有没有把**真标记**一起改没（那会把有意停派的任务静默放回派发池）。
+
+| 读数 | 值 |
+|---|---|
+| 扫描任务数 | 2844 |
+| 旧式全文匹配命中（修复前 parked） | 6 |
+| 新 `isParked` 命中（修复后 parked） | 4 |
+| **丢标记**（旧真、新假） | **2** |
+| **多标记**（旧假、新真） | 0 |
+
+丢掉的 2 条**都不是真标记**，而是**行内代码跨度里的引用**：其命中位置之前的反引号计数为奇数 ⇒ 处于 `` `…` `` 内，被 `stripCodeSpansAndFences` 正确屏蔽；且两条状态**均为终态**（superseded / done）⇒ **对生产零影响**（本来就不在晋升池里）。
+
+保住的 4 条真标记中，**唯一一条 `status: ready` 的任务**（标记位于正文第 397 行行首）**修复后仍为 parked** —— 这是本修复最关键的负控制：**真标记不因「锚行 + 屏蔽代码跨度」而失效**。
+
 ## Blocker
 
 **2026-10-16T13:30:24.777Z — worker 未落地（exited-not-landed）**
