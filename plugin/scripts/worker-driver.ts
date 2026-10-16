@@ -240,6 +240,7 @@ import {
   readyPoolCheck,
   defaultSelectorArgv,
   parseSelectorOutput,
+  appendHeartbeatLine,
   runSelectorWorker,
   kindStopRequested,
   kindStopProbe,
@@ -1979,12 +1980,19 @@ export function computeWorkerRoundRecord(opts: {
   };
 }
 
-/** 把一条 round 记录追加写入指定文件（mkdir -p + appendFileSync，一行一 JSON，⛔ 不截断不覆盖）。 */
-export function appendRoundToFile(file: string, record: ReturnType<typeof computeWorkerRoundRecord>): string {
-  fs.mkdirSync(path.dirname(file), { recursive: true });
-  fs.appendFileSync(file, JSON.stringify(record) + "\n", "utf8");
-  return file;
-}
+// ── round 落盘：append 的【单一实现】不再是本文件的私有副本 ──────────────────────────────────────
+// gap-routine-semantic-dedup-scan-append-heartbeat-vs-round（routine `semantic-dedup-scan`，finding
+// `append-heartbeat-vs-round`，runId `semantic-dedup-scan-1792168649663`）：本文件原先自己实现了一份与
+// driver-runtime.ts 的 `appendHeartbeatLine` **逐字节相同**的函数体（mkdir -p + appendFileSync 一行一 JSON
+// + return file）。driver-runtime.ts 的那一份**就是**「一条 append 的单一实现，两 driver 共用」的落点
+// （outer-driver / suite-driver 已 import 它），而本文件也早已从同一模块 import 别的东西 ⇒ 两份体不是
+// 「量体裁衣」，是漂移面：任一侧改了 mkdir 语义或换行约定，另一侧静默不变，且没有任何检查在盯这个同一性
+// （发现它的一直是 semantic-dedup-scan 例程自己——同一簇自 2026-09-18 起已重复立案 ≥10 轮）。
+// ⇒ 函数体删除、改走 import；`appendRoundToFile` 这个名字作为**导出别名**保留，让既有消费者继续解析
+//   （`plugin/test/touches-relax-filter-trace.test.mjs` 的 import、`orchestration/worker-driver-log-carriers.md`
+//   对 `.quay/worker-round.jsonl` 写手的点名）。⚠️ 它绑的是**同一个函数对象**，⛔ 不是第二份实现——
+//   这条同一性由 `plugin/test/worker-driver.test.mjs` 的 SSOT 棘轮断言（声明点计数 + `===` + 负控制）。
+export { appendHeartbeatLine as appendRoundToFile };
 
 /** worker 命令覆盖的两个旋钮（AC140-3 覆盖语义统一）：prefix = 前缀（prompt 追加）；exact = 整体替换（测试专用）。 */
 export interface WorkerCmdOptions {
@@ -6076,7 +6084,7 @@ export async function runResidentLoop(opts: ResidentOptions): Promise<number> {
       detachedWorkers: detached.detached,
       undetachableWorkers: detached.undetachable,
     });
-    try { appendRoundToFile(roundFile, record); } catch { /* 记录写失败不致命（运行时日志，⛔ 不因日志炸循环） */ }
+    try { appendHeartbeatLine(roundFile, record); } catch { /* 记录写失败不致命（运行时日志，⛔ 不因日志炸循环） */ }
     if (json) process.stdout.write(`${JSON.stringify({ event: "round", ...record })}\n`);
   };
 
@@ -6119,7 +6127,7 @@ export async function runResidentLoop(opts: ResidentOptions): Promise<number> {
       // ⇒ 闭包仍为 null（本轮真没跑该步）。
       filterTrace,
     });
-    try { appendRoundToFile(roundFile, record); } catch { /* 记录写失败不致命（运行时日志，⛔ 不因日志炸循环） */ }
+    try { appendHeartbeatLine(roundFile, record); } catch { /* 记录写失败不致命（运行时日志，⛔ 不因日志炸循环） */ }
     if (json) process.stdout.write(`${JSON.stringify({ event: "round", ...record })}\n`);
     // stack 单独落一条 stderr——stdout 是 JSON 事件通道，⛔ 不把多行 stack 塞进单行 JSON（会破坏解析）。
     if (stack) process.stderr.write(`worker-driver resident-loop error (round=${round} step=${step}): ${message}\n${stack}\n`);
