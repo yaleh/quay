@@ -63,19 +63,19 @@ goal_ac: AC-366
 
 ## Acceptance Criteria
 
-- [ ] AC1 — 测试落地且通过（AC-366 判据面逐字）：`timeout 55 node --experimental-strip-types --test plugin/test/touches-relax-live-predicate.test.mjs` **exit 0**，文件带 `// @test-group engine`。附实际命令、输出尾部与实测耗时（秒）。
-- [ ] AC2 — (a) 阈值边界（注入时钟）：`waitedMinutes` 恰等于 `after_minutes` ⇒ 候选**被保留**；恰少一分钟 ⇒ **被滤掉**。两次读数均从真实 `applyTaskFilters` 的返回数组逐字打印；并附两个 fixture 的 ready 事件时刻与注入的 `nowMs`。
-- [ ] AC3 — (b) `never_relax`：重叠文件命中 `never_relax` ⇒ **阻塞**（条目 `wouldRelax === false`、`relaxBlockedBy === "not-never-relax"`、账本零写入）；**负控制**：把该 fixture 的 `never_relax` 换成一条无关条目 ⇒ 同一候选**被保留**（证明判据真的读了配置，不是恒阻塞）。附两份配置与两次结果。
-- [ ] AC4 — (c) 名额：当前被放宽派发的**在飞**任务数 = `max_relaxed_inflight` ⇒ **阻塞**（`relaxBlockedBy === "quota-available"`）；改为「已放宽数 + 1」⇒ **放行**。⚠️ fixture 里这些已放宽的在飞任务**不得与候选重叠**（否则 (d) 先命中，测的就成了 (d)）。附账本行、两份配置与两次结果。
-- [ ] AC5 — (d) 不连锁：挡住候选的在飞任务本身有放宽账本记录 ⇒ **阻塞**（`relaxBlockedBy === "blocker-not-relaxed"`）；**负控制**：从 fixture 账本里删掉该在飞任务的记录（其余不动）⇒ 同一候选**被保留**（证明该条件真的读了账本，不是恒真/恒假）。附两次账本字节与结果。
-- [ ] AC6 — (e) 过宽通配：候选 `## Touches` 含 `isOverbroadDeclaration` 判为过宽的声明（如 `packages/**`）⇒ **阻塞**（`relaxBlockedBy === "no-overbroad-glob"`）；**负控制**：换成 ≥2 段锚定的精确 glob（如 `packages/quay/src/gate/*.js`）⇒ 其余条件都满足时**被保留**。附两条声明、判据输出与结果。
-- [ ] AC7 — (f) `shared_files` 短路：候选与在飞对手的重叠**全部**落在 `shared_files` 内，且注入的 `waitedMinutes` **远小于** `after_minutes`（测试内显式断言 `waitedMinutes < after_minutes`）⇒ **立即放行**（不被滤掉）；且该次放行**不写账本**（行数/文件存在性与基线相同）——它「视为不冲突」，不是一次放宽派发（该解释写进 Evidence）。附 fixture、等待读数与账本读数。
-- [ ] AC8 — (g) 等待读不到 ⇒ 阻塞且**不伪装**：候选在 fixture status-events 账本里**没有** `to:"ready"` 事件 ⇒ ①该候选**被滤掉**；②其 trace 条目 `waitedMinutes === null` 且**显式断言 `!== 0`**（硬规则 6/3b：缺值不得与「等 0 分钟」同形）；③**注入**：把 `null` 当 `Infinity`（如 `?? Infinity`）⇒ 该用例变红（证明 (g) 对「当作无穷」有判别力）。附条目 JSON 与红输出。
-- [ ] AC9 — (h) 放行时账本记一行、形状与内容逐字正确：构造一次**真实放宽放行**（全部条件满足、走等待路径而非 (f) 短路）⇒ 从 `.quay/relaxed-dispatch.jsonl` **回读**恰好一行，恰含 `task` / `blockers` / `overlapFiles` / `waitedMinutes` / `dispatchedAt` 五键，取值与 fixture 事实逐字一致（`blockers` 含该对手 id；`overlapFiles` 等于实测交集；`waitedMinutes` 等于注入时钟算出的等待；`dispatchedAt` 等于注入时钟）。**负控制**：(b)–(e) 四个阻塞用例各跑一遍后该账本**零写入**。附账本逐字行与两次读数。
-- [ ] AC10 — (i) 其它谓词不被绕过：为 `depsSatisfied` / `retryCapNotExhausted` / `notNeedsHuman` **各**造一个「touches 面本可放宽」但被该谓词挡住的候选 ⇒ 三个都**不在** `applyTaskFilters` 的返回集合内；且其中至少一个的 trace 条目 `wouldRelax === true`（证明放宽判据为真、是**组合**把它拦住的，不是放宽判据本身没通过）。附三条条目与返回集合。
-- [ ] AC11 — (j) 取假形态（真红并留痕，⛔ 注入不得留在落地代码里）：① 把 live 分支写成**恒放行** ⇒ 本测试变红；② **逐条**删除每个放宽条件各注入一次（至少 `waited-enough`、`not-never-relax`、`quota-available`、`blocker-not-relaxed`、`no-overbroad-glob`），每次**对应用例**变红。各附非零退出码 + 失败断言原文；恢复后 `git status --porcelain` 只含本条 Touches 内的预期改动、落地 diff 与该测试最终内容一致。附实际注入清单（做了哪几次、每次哪条用例红）。
-- [ ] AC12 — 静态面与不越界：① `bash plugin/scripts/capability-catalog.sh --summary` 报 `0 unclassified`（本条**不新增** `plugin/scripts/*.ts`，如实说明；若实现确需新脚本，则必须成组声明六表并把 `plugin/scripts/capability-catalog-declarations.json` 列进 Touches）；② `git diff` 证明 `applyTaskFilters` 的**返回表达式一行未改**（放宽只改 touches 谓词自身的返回值）；③ promotion 面零影响：附 `plugin/scripts/promotion-driver.ts:925-929` 的 names 子集代码与「不含 touches 谓词」的结论；④ `bash scripts/test.sh plugin/test/driver-filters.test.mjs plugin/test/driver-runtime-s01.test.mjs` **exit 0**（既有谓词列表 pin 与派发决策不回归；名字序列以 AC-365 的落地态为准）；⑤ `git diff -- .quay/config.yml` **空**（不在 quay 自身启用）。附五条命令、退出码与输出。
-- [ ] AC13 — 读数不新写第二份实现：① `grep -rn '\.quay/relaxed-dispatch\.jsonl' plugin/scripts/*.ts` 的**字面量**命中唯一在 AC-363 的模块内，其余引用（含本条的写入点）一律走其导出的 `RELAXED_DISPATCH_REL`；② `.quay/task-status-events.jsonl` 的 ready 时刻读取**复用** AC-362/365 那一处，`grep -c` 证明本条未新增第二个解析器。附两处 grep 与三处调用的逐字代码。
+- [x] AC1 — 测试落地且通过（AC-366 判据面逐字）：`timeout 55 node --experimental-strip-types --test plugin/test/touches-relax-live-predicate.test.mjs` **exit 0**，文件带 `// @test-group engine`。附实际命令、输出尾部与实测耗时（秒）。
+- [x] AC2 — (a) 阈值边界（注入时钟）：`waitedMinutes` 恰等于 `after_minutes` ⇒ 候选**被保留**；恰少一分钟 ⇒ **被滤掉**。两次读数均从真实 `applyTaskFilters` 的返回数组逐字打印；并附两个 fixture 的 ready 事件时刻与注入的 `nowMs`。
+- [x] AC3 — (b) `never_relax`：重叠文件命中 `never_relax` ⇒ **阻塞**（条目 `wouldRelax === false`、`relaxBlockedBy === "not-never-relax"`、账本零写入）；**负控制**：把该 fixture 的 `never_relax` 换成一条无关条目 ⇒ 同一候选**被保留**（证明判据真的读了配置，不是恒阻塞）。附两份配置与两次结果。
+- [x] AC4 — (c) 名额：当前被放宽派发的**在飞**任务数 = `max_relaxed_inflight` ⇒ **阻塞**（`relaxBlockedBy === "quota-available"`）；改为「已放宽数 + 1」⇒ **放行**。⚠️ fixture 里这些已放宽的在飞任务**不得与候选重叠**（否则 (d) 先命中，测的就成了 (d)）。附账本行、两份配置与两次结果。
+- [x] AC5 — (d) 不连锁：挡住候选的在飞任务本身有放宽账本记录 ⇒ **阻塞**（`relaxBlockedBy === "blocker-not-relaxed"`）；**负控制**：从 fixture 账本里删掉该在飞任务的记录（其余不动）⇒ 同一候选**被保留**（证明该条件真的读了账本，不是恒真/恒假）。附两次账本字节与结果。
+- [x] AC6 — (e) 过宽通配：候选 `## Touches` 含 `isOverbroadDeclaration` 判为过宽的声明（如 `packages/**`）⇒ **阻塞**（`relaxBlockedBy === "no-overbroad-glob"`）；**负控制**：换成 ≥2 段锚定的精确 glob（如 `packages/quay/src/gate/*.js`）⇒ 其余条件都满足时**被保留**。附两条声明、判据输出与结果。
+- [x] AC7 — (f) `shared_files` 短路：候选与在飞对手的重叠**全部**落在 `shared_files` 内，且注入的 `waitedMinutes` **远小于** `after_minutes`（测试内显式断言 `waitedMinutes < after_minutes`）⇒ **立即放行**（不被滤掉）；且该次放行**不写账本**（行数/文件存在性与基线相同）——它「视为不冲突」，不是一次放宽派发（该解释写进 Evidence）。附 fixture、等待读数与账本读数。
+- [x] AC8 — (g) 等待读不到 ⇒ 阻塞且**不伪装**：候选在 fixture status-events 账本里**没有** `to:"ready"` 事件 ⇒ ①该候选**被滤掉**；②其 trace 条目 `waitedMinutes === null` 且**显式断言 `!== 0`**（硬规则 6/3b：缺值不得与「等 0 分钟」同形）；③**注入**：把 `null` 当 `Infinity`（如 `?? Infinity`）⇒ 该用例变红（证明 (g) 对「当作无穷」有判别力）。附条目 JSON 与红输出。
+- [x] AC9 — (h) 放行时账本记一行、形状与内容逐字正确：构造一次**真实放宽放行**（全部条件满足、走等待路径而非 (f) 短路）⇒ 从 `.quay/relaxed-dispatch.jsonl` **回读**恰好一行，恰含 `task` / `blockers` / `overlapFiles` / `waitedMinutes` / `dispatchedAt` 五键，取值与 fixture 事实逐字一致（`blockers` 含该对手 id；`overlapFiles` 等于实测交集；`waitedMinutes` 等于注入时钟算出的等待；`dispatchedAt` 等于注入时钟）。**负控制**：(b)–(e) 四个阻塞用例各跑一遍后该账本**零写入**。附账本逐字行与两次读数。
+- [x] AC10 — (i) 其它谓词不被绕过：为 `depsSatisfied` / `retryCapNotExhausted` / `notNeedsHuman` **各**造一个「touches 面本可放宽」但被该谓词挡住的候选 ⇒ 三个都**不在** `applyTaskFilters` 的返回集合内；且其中至少一个的 trace 条目 `wouldRelax === true`（证明放宽判据为真、是**组合**把它拦住的，不是放宽判据本身没通过）。附三条条目与返回集合。
+- [x] AC11 — (j) 取假形态（真红并留痕，⛔ 注入不得留在落地代码里）：① 把 live 分支写成**恒放行** ⇒ 本测试变红；② **逐条**删除每个放宽条件各注入一次（至少 `waited-enough`、`not-never-relax`、`quota-available`、`blocker-not-relaxed`、`no-overbroad-glob`），每次**对应用例**变红。各附非零退出码 + 失败断言原文；恢复后 `git status --porcelain` 只含本条 Touches 内的预期改动、落地 diff 与该测试最终内容一致。附实际注入清单（做了哪几次、每次哪条用例红）。
+- [x] AC12 — 静态面与不越界：① `bash plugin/scripts/capability-catalog.sh --summary` 报 `0 unclassified`（本条**不新增** `plugin/scripts/*.ts`，如实说明；若实现确需新脚本，则必须成组声明六表并把 `plugin/scripts/capability-catalog-declarations.json` 列进 Touches）；② `git diff` 证明 `applyTaskFilters` 的**返回表达式一行未改**（放宽只改 touches 谓词自身的返回值）；③ promotion 面零影响：附 `plugin/scripts/promotion-driver.ts:925-929` 的 names 子集代码与「不含 touches 谓词」的结论；④ `bash scripts/test.sh plugin/test/driver-filters.test.mjs plugin/test/driver-runtime-s01.test.mjs` **exit 0**（既有谓词列表 pin 与派发决策不回归；名字序列以 AC-365 的落地态为准）；⑤ `git diff -- .quay/config.yml` **空**（不在 quay 自身启用）。附五条命令、退出码与输出。
+- [x] AC13 — 读数不新写第二份实现：① `grep -rn '\.quay/relaxed-dispatch\.jsonl' plugin/scripts/*.ts` 的**字面量**命中唯一在 AC-363 的模块内，其余引用（含本条的写入点）一律走其导出的 `RELAXED_DISPATCH_REL`；② `.quay/task-status-events.jsonl` 的 ready 时刻读取**复用** AC-362/365 那一处，`grep -c` 证明本条未新增第二个解析器。附两处 grep 与三处调用的逐字代码。
 
 ## Definition of Done
 
@@ -93,3 +93,191 @@ goal_ac: AC-366
 - plugin/scripts/worker-driver.ts
 - plugin/test/touches-relax-live-predicate.test.mjs (new)
 - tasks/gap-touches-relax-live-semantics.md
+
+## Evidence
+
+### 落地形态（写面与 Plan 字面的差异，逐条给结构原因）
+
+1. **`recordRelaxedDispatch` 落在 `plugin/scripts/worker-driver.ts`，不在 Plan §3 点名的 `driver-filters.ts`。** 两条结构原因：
+   ① `driver-filters.ts` **不可能** import AC-363 的账本模块 —— `relaxed-dispatch-ledger.ts` 已从它取 `WORKER_OUTCOME_REL`，
+   反向 import 成**值环**，而 `import-graph-check` 的 shrink-only 棘轮把 `valueSccs` 钉在 0（本条落地后实测仍 `valueSccs=0 typeSccs=0`，见 AC12）；
+   ② 谓词必须保持**纯**（不写盘）：放行决策在 `judgeLiveRelax` 内做，写入只发生在**派发那一刻**（`spawnSelected(sel)` 之前）。
+   写入仍**复用** AC-363 的 `appendRelaxedDispatch`（⛔ 不写第二份），路径字面量仍只经其导出的 `RELAXED_DISPATCH_REL`（AC13①）。
+2. **live 的判据词表是**第二个词表 `LIVE_RELAX_CONDITIONS`（8 条），**不是**往 `RELAX_CONDITIONS` 里追加条件。
+   `RELAX_CONDITIONS` 是 shadow/off 的**标注**词表，被 AC-365 的 AC4 逐字 `deepEqual` 钉死（五条，⛔ 不得增删）——
+   本条落地后该 pin 仍绿（AC12④）。AC-366 点名的两个新条件 id（`blocker-not-relaxed` / `no-overbroad-glob`）与四个结构前置
+   （`candidate-declares-touches` / `no-overbroad-glob` / `overlap-known` / `relaxed-ledger-readable`）只存在于 live 词表。
+3. **`not-never-relax` 在两态下读法不同（共用一个条件 id）**：live = **重叠文件**逐元素对 `never_relax` 的 glob 匹配
+   （AC-364 的 `readStringList` 把该字段声明为「路径或 glob」；本条 Proposal 逐字「重叠面不含 `never_relax`」）；
+   shadow 的**标注**路径沿用 AC-365 落地的「候选 id 在名单内」读法（那一处被其 AC4-④ 钉住，⛔ 未改动）。
+4. `FilterContext` 新增三个**可选**字段：`relaxedTaskIds`（账本出现过的 task id，live 的 `quota-available` 与
+   `blocker-not-relaxed` 的读数源）、`relaxedLedgerMalformed`、`nowMs`。账本由**调用方每轮读一次**后经 ctx 带入（同 ①，值环）；
+   `nowMs` 缺省 `Date.now()`。**同一次** now 供判据与 trace 条目共用（`RelaxAttribution.roundNowMs`），
+   否则会出现「判据按 30 分钟放行、条目报 29 分钟」这种自相矛盾的读数。
+5. trace 契约**追加**了一种观测：live 下被 touches 谓词**放行**的候选会多出一条 `relaxed:true` 条目
+   （它不在 `blocked` 里，否则**完全不产生条目**，AC-366(i) 与接线侧就都读不到）。`applyTaskFilters` 的**返回表达式一行未改**（AC12②）。
+6. `shared_files` 短路记 `wouldRelax:true, relaxed:false` —— 它「视为不冲突」，**不是**一次放宽派发：
+   不占名额、不写账本（AC-366(f)）。判别点正是 `relaxed` 这一个键。
+
+**如实写明（⛔ 不作为省略的理由）**：本条的判据面是**夹具读数** —— GOAL-037 立案文本的「已知缺口」已承认本 goal 的 AC 都不读生产载体
+（生产读数需要在目标项目启用 shadow/live 并重启 driver，是人工步骤），本条亦然。⛔ 同时：AC-366 的判据面（测试存在且 55s 内绿）
+**单独不具备判别力** —— 它区分不了「真放行」与「恒真断言」；判别力由 AC2/AC3/AC5/AC6 的双向边界与负控制、AC8③/AC11 的注入真红提供。
+
+**⛔ 本条不启用生产**：`mode` 缺省 off/absent ⇒ 行为与现状逐字节相同（负控制用例逐条取到该读数）；
+生效需要人在目标项目的 `.quay/config.yml` 显式把 `loop.touches_relax.mode` 设为 `live` 并重启 worker driver。
+
+### AC1 — 测试落地且通过
+
+```
+$ timeout 55 node --experimental-strip-types --test plugin/test/touches-relax-live-predicate.test.mjs
+EXIT=0    WALL_SECONDS=0.51
+ℹ tests 10   ℹ pass 10   ℹ fail 0   ℹ duration_ms 489.2
+```
+文件首行 = `// @test-group engine`。文件落点 `plugin/test/touches-relax-live-predicate.test.mjs`（与任务 id 不同名 ⇒ 由 `## Touches` 显式选中，⛔ 未改名）。
+
+### AC2 — (a) 阈值边界（双向）
+
+注入 `nowMs = 2026-10-17T12:00:00.000Z`，`after_minutes = 30`，同一 fixture 只改 ready 事件时刻：
+
+| fixture | ready 事件 | waitedMinutes | `applyTaskFilters` 返回 |
+|---|---|---|---|
+| A | `2026-10-17T11:30:00.000Z` | 30 | `["gap-live-cand"]`（**保留**） |
+| B | `2026-10-17T11:31:00.000Z` | 29 | `[]`（**滤掉**，`relaxBlockedBy = "waited-enough"`） |
+
+A 的条目同时自报 `relaxed: true`（证明走的是放行路径，不是「本来就没冲突」）；两次读数均从真实 `applyTaskFilters` 的返回数组逐字打印。
+
+### AC3 — (b) `never_relax` + 负控制
+
+- 正向：`never_relax: [plugin/scripts/shared.ts]`（= 实测重叠面 `["plugin/scripts/shared.ts"]`）⇒ `kept=[]`、
+  `wouldRelax=false`、`relaxBlockedBy="not-never-relax"`、**账本载体不存在**（零写入）。
+- 负控制：`never_relax: [plugin/scripts/unrelated.ts]` ⇒ 同一候选 `kept=["gap-live-cand"]`（判据真的读了配置，不是恒阻塞）。
+
+### AC4 — (c) 名额 + 负控制
+
+fixture 里 `inFlight = [BLOCKER, r1, r2]`，账本两行 `r1`/`r2`（**均不与候选重叠** —— 否则 (d) 先命中）。
+账本载体回读：`{"task":"gap-live-r1",...}`、`{"task":"gap-live-r2",...}`。
+
+| `max_relaxed_inflight` | 已放宽在飞数 | 返回 |
+|---|---|---|
+| 2 | 2 | `[]`，`relaxBlockedBy = "quota-available"` |
+| 3 | 2 | `["gap-live-cand"]`（**放行**） |
+
+### AC5 — (d) 不连锁 + 负控制
+
+- 正向：账本含 `{"task":"gap-live-blocker",...}`（在飞对手本身是被放宽派发的）⇒ `kept=[]`、`relaxBlockedBy = "blocker-not-relaxed"`。
+- 负控制：账本里**删掉那一行**（其余不动）⇒ 同一候选 `kept=["gap-live-cand"]`（账本读数 `null`）。
+  两次账本字节均在测试输出里逐字打印。
+
+### AC6 — (e) 过宽通配 + 负控制
+
+判据输出（读的是 `touches-orthogonality-check` 的实现，⛔ 未写第二份）：`isOverbroadDeclaration("packages/**") === true`、
+`isOverbroadDeclaration("packages/quay/src/gate/*.js") === false`。
+
+| 候选 `## Touches` | 返回 |
+|---|---|
+| `packages/**` | `[]`，`relaxBlockedBy = "no-overbroad-glob"` |
+| `packages/quay/src/gate/*.js`（+ 重叠面，fixture 根下真建了匹配文件） | `["gap-live-cand"]`（**保留**） |
+
+### AC7 — (f) `shared_files` 短路
+
+fixture：`shared_files: [plugin/scripts/shared.ts]`，ready = `2026-10-17T11:59:00.000Z` ⇒ `waitedMinutes = 1`，
+测试内**显式断言** `1 < after_minutes(30)`。结果：`kept=["gap-live-cand"]` ⇒ **立即放行**（若没有短路，`waited-enough` 会把它滤掉）。
+该次放行**无 `relaxed:true` 条目**、跑过生产接线后账本载体仍**不存在**（零写入）。
+**解释（AC 点名要求写进 Evidence）**：`shared_files` 内的重叠**视为不冲突**，不是一次放宽派发 —— 故它不占名额
+（`relaxedInFlight` 不计它）、不写账本（AC-363 的账本记的是「放宽派发」这一件事）。
+
+### AC8 — (g) 等待读不到 ⇒ 阻塞且不伪装
+
+fixture 的 `task-status-events.jsonl` 里没有 `gap-live-cand` 的 `to:"ready"` 事件。条目逐字：
+```json
+{"task":"gap-live-cand","filter":"touchesDisjointOrAged","blocker":"gap-live-blocker","overlapFiles":["plugin/scripts/shared.ts"],"waitedMinutes":null,"wouldRelax":false,"relaxBlockedBy":"waited-enough","relaxed":false}
+```
+`kept=[]`；`waitedMinutes === null` 且测试**显式断言 `!== 0`**。③ 注入见 AC11 的 `null-as-infinity` 行（该用例变红）。
+
+### AC9 — (h) 放行写账本，形状与内容逐字
+
+从载体 `.quay/relaxed-dispatch.jsonl` **回读**恰好一行，逐字：
+```
+{"task":"gap-live-cand","blockers":["gap-live-blocker"],"overlapFiles":["plugin/scripts/shared.ts"],"waitedMinutes":45,"dispatchedAt":"2026-10-17T12:00:00.000Z"}
+```
+断言：键集恰为 `["blockers","dispatchedAt","overlapFiles","task","waitedMinutes"]`；`task` = 候选；
+`blockers` = 单元素 `[在飞对手 id]`；`overlapFiles` = 实测交集；`waitedMinutes` = 注入时钟算出的等待（45）；
+`dispatchedAt` = 注入时钟的 ISO（`2026-10-17T12:00:00.000Z`）。AC-363 的读取器回读同为 1 条、`malformed=0`。
+
+**负控制**：(b)/(c)/(d)/(e) 四个阻塞用例各跑一遍生产接线后，账本与**各自的基线**逐字相同（(b)(c)(e) 基线 = 载体不存在；
+(d) 基线 = fixture 预置的那一行对手记录，未被追加）。实测 `[["(b)",null],["(c)",null],["(d)",[<预置那一行>]],["(e)",null]]`。
+
+### AC10 — (i) 其它谓词不被绕过
+
+三个候选都与在飞对手重叠（touches 面本可放宽），分别被 `depsSatisfied` / `retryCapNotExhausted` / `notNeedsHuman` 挡住：
+`kept = []`（三个都不在返回集合内）。三个的 touches 条目**都**是 `wouldRelax:true, relaxBlockedBy:null, relaxed:true`
+（证明放宽判据本身为真，是**组合**把它拦住的），逐条条目见测试输出（每个候选两条：touches + 拦它的那个谓词）。
+
+### AC11 — (j) 取假形态（7 次注入，每次真红 + 逐字节还原）
+
+注入器 `/tmp/relax-inject/inject.mjs`：对 `plugin/scripts/driver-filters.ts` 做**精确字符串**替换 → 跑本测试 → `cp` 备份逐字节还原
+（⛔ 不用 `git checkout`）。每次注入都断言 needle 在**原始**文件里存在（不存在即 FATAL，⛔ 不静默跑一个没生效的注入）。
+
+| # | 注入 | EXIT | 变红的用例 | 失败断言原文（截断） |
+|---|---|---|---|---|
+| 1 | live 分支写成**恒放行**（`return ann.wouldRelax` → `return true`） | 1 | AC2/AC3/AC4/AC5/AC6/AC8/AC9 | `waited=29 < 30 ⇒ 滤掉（实得 kept=["gap-live-cand"]）`；`命中 never_relax ⇒ 被滤掉`；`已放宽在飞 2 = 名额 2 ⇒ 阻塞` |
+| 2 | 删 `waited-enough` | 1 | AC2、AC8 | `waited=29 < 30 ⇒ 滤掉（实得 kept=["gap-live-cand"]）`；`等待读不到 ⇒ 阻塞` |
+| 3 | 删 `not-never-relax` | 1 | AC3、AC9 | `命中 never_relax ⇒ 被滤掉`；`(b) 阻塞（前置）` |
+| 4 | 删 `quota-available` | 1 | AC4、AC9 | `已放宽在飞 2 = 名额 2 ⇒ 阻塞`；`(c) 阻塞（前置）` |
+| 5 | 删 `blocker-not-relaxed` | 1 | AC5、AC9 | `对手本身是放宽派发的 ⇒ 阻塞（不连锁）`；`(d) 阻塞（前置）` |
+| 6 | 删 `no-overbroad-glob` | 1 | AC6 | `首个不满足者 = no-overbroad-glob（实得 overlap-known）` |
+| 7 | 等待缺值当 `Infinity`（`waits ?? Infinity`） | 1 | AC8 | `等待读不到 ⇒ 阻塞` |
+
+七次全部 `RESTORED=true`（还原后与备份逐字节相同）。全部注入跑完后 `git status --porcelain` **只有**本条 Touches 的三条：
+```
+ M plugin/scripts/driver-filters.ts
+ M plugin/scripts/worker-driver.ts
+?? plugin/test/touches-relax-live-predicate.test.mjs
+```
+注入器不落进任何提交（⛔ 注入不得留在落地代码里）。
+
+### AC12 — 静态面与不越界（五条命令）
+
+① `bash plugin/scripts/capability-catalog.sh --summary` ⇒ `386 scripts | 386 declared | 0 unclassified | 381 ship`。
+   本条**不新增** `plugin/scripts/*.ts`（新增的只有 `plugin/test/touches-relax-live-predicate.test.mjs` 一个测试文件），故无需六表声明、`capability-catalog-declarations.json` 未进 Touches。
+② `git diff -U0 -- plugin/scripts/driver-filters.ts | grep -E '^[+-].*preds\.every|^[+-].*candidateIds\.filter'` ⇒ **零命中**；
+   当前返回行 `driver-filters.ts:1812: return candidateIds.filter((id) => preds.every((p) => p(id)));` 一字未改（放宽只改 touches 谓词**自身**的返回值）。
+③ promotion 面零影响 —— `plugin/scripts/promotion-driver.ts:925-929`：
+   ```ts
+   const activeIds = new Set(applyTaskFilters(
+     r.fixDecisions.map((d) => d.id),
+     makeFilterContext(root, { inFlight: [], retryExhausted: retryState.needsHuman }),
+     ["retryCapNotExhausted", "notNeedsHuman"],
+   ));
+   ```
+   `names` 子集只含 `retryCapNotExhausted` / `notNeedsHuman` ⇒ `filters.indexOf(touchesDisjointOrAged)` 为 -1 ⇒
+   该调用位点**不含 touches 谓词**，本条的 live 分支在 promotion 面不可达（且 `inFlight: []`）。结论：**零影响**。
+④ `bash scripts/test.sh plugin/test/driver-filters.test.mjs plugin/test/driver-runtime-s01.test.mjs` ⇒ **EXIT=0**，95 条通过、
+   含 `✔ AC1 — TASK_FILTERS is the single list of the five composable predicates`（谓词列表 pin 未回归）。
+   另：AC-365/362/363/364 的四个文件一起跑 ⇒ 99 条全绿（`RELAX_CONDITIONS` 的逐字 deepEqual pin 仍绿）。
+⑤ `git diff --stat -- .quay/config.yml` ⇒ **空**（⛔ 不在 quay 自身启用 `touches_relax`）。
+
+### AC13 — 不新写第二份实现
+
+① `grep -rn '\.quay/relaxed-dispatch\.jsonl' plugin/scripts/*.ts` ⇒ 命中**只在** AC-363 的模块内：
+```
+plugin/scripts/relaxed-dispatch-ledger.ts:8:  *   · **账本**（`.quay/relaxed-dispatch.jsonl`）：...
+plugin/scripts/relaxed-dispatch-ledger.ts:64: export const RELAXED_DISPATCH_REL = ".quay/relaxed-dispatch.jsonl";
+```
+   本条的写入点走 `appendRelaxedDispatch`（其内部即 `RELAXED_DISPATCH_REL`），⛔ 未写第二个字面量。
+② ready 时刻读数**复用** AC-362/365 落下来的那一处：本条新增的引用只有两行，都是**读既有映射**，⛔ 未新增解析器：
+```
++  const readyAt = state.readyAtMs.get(id);          // live 判据，映射来自 buildReadyAtMsMap(ctx.root)
++      const readyAt = readyAtMs.get(id);            // trace 路径的同一映射
+```
+   `git diff -U0 -- plugin/scripts/driver-filters.ts | grep -cE '^\+.*(readTaskStatusTransitions\(|readTaskStatuses\(|JSON\.parse.*status-events)'` ⇒ **0**。
+   `readTaskStatusTransitions`（kernel）在本文件仍**只有**第 33 行那一处 import，`buildReadyAtMsMap` 仍是唯一的 ready→ms 映射构造点。
+
+### 阶段 2b / 2c 读数
+
+- 预合并：`git merge --no-edit develop` ⇒ EXIT=0（快进可合，无冲突）。
+- 同一把 scoped 门：`bash scripts/test.sh --for-task gap-touches-relax-live-semantics --allow-thin` ⇒ **EXIT=0**，
+  `ℹ tests 248 · pass 248 · fail 0 · duration_ms 30324.7`（含本条新测试 10 条与 `import-graph-check` /
+  `sh-census-check` 等 change-relevant 静态检查；`import-graph-check` 实测 `valueSccs=0 typeSccs=0 reverseEdges=0`）。
+- 反漂移：`anti-drift-touches-check.ts --task … --worktree … --merge-target develop` ⇒
+  **EXIT=0**，`ANTI-DRIFT OK: 3 actual file(s), all within declared Touches (4 glob(s))`。
