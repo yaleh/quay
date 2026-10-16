@@ -5,7 +5,7 @@ status: achieved
 kind: criterion
 goal: GOAL-002
 criterion: |
-  node --no-warnings --experimental-strip-types -e 'import("node:fs").then(fs=>{const t=fs.readFileSync("orchestration/AC148-inner-core-itemized-attribution.md","utf8");const n=(t.match(/^- \*\*(A\d+b?|B\d)\*\*/gm)||[]).length;process.exit(n===30?0:1)})'
+  node --no-warnings --experimental-strip-types -e 'import("node:fs").then(fs=>{const t=fs.readFileSync("orchestration/AC148-inner-core-itemized-attribution.md","utf8");const n=(t.match(/^- \*\*(A\d+b?|B\d)\*\*/gm)||[]).length;process.exit(n===30?0:(console.error("CAUSE=inner-core-item-count — orchestration/AC148-inner-core-itemized-attribution.md must carry exactly 30 A*/B* items, got "+n),1))})'
 expect: exit 0
 origin: |
   硬规则⑤（来源完备性）的直接应用：逐条映射，不是抽查几条——本仓库已为"抽查即删"付过代价
