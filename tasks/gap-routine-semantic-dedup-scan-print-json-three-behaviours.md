@@ -3,7 +3,7 @@ id: gap-routine-semantic-dedup-scan-print-json-three-behaviours
 title: "semantic-dedup-scan: One name spans three shapes: three byte-identical
   console.log(JSON.stringify(x)), two pretty-printers that are one behaviour in
   two spellings, and a third pret"
-status: needs-human
+status: todo
 labels:
   - gap
   - routine-filed
