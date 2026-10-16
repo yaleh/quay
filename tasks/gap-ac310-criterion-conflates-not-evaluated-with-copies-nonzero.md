@@ -3,7 +3,7 @@ id: gap-ac310-criterion-conflates-not-evaluated-with-copies-nonzero
 title: AC-310 判据把「检查器未评估」与「副本非零」压进同一个 CAUSE：实测 evaluated:false 且
   duplicateCopies:0 时仍报「仍有非符号链接的字节相同副本」，长期判据因此以 1.60% 假红（GOAL-025 兄弟判据
   0.17–0.39%）
-status: ready
+status: done
 labels:
   - gap
 parent: null

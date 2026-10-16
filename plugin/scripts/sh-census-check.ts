@@ -384,6 +384,133 @@ export function gitLsFilesAll(root: string): string[] {
   return out.split("\0").filter((s) => s.length > 0);
 }
 
+// ── reads of the TRACKED tree (worktree, with an atomic git-index fallback) ─────────────────────────
+//
+// THE DEFECT THIS CLOSES (AC-310, measured 2026-10-16; task
+// gap-ac310-criterion-conflates-not-evaluated-with-copies-nonzero):
+//   This checker is the only long-term judge in GOAL-025 that reads the whole tracked `.sh` set — 145
+//   files, 12 of them symlinks whose targets live in `plugin/scripts/`, i.e. in the directory the loop
+//   ff-merges / fan-ins into every round. `git merge`/`checkout` does NOT swap a worktree file by
+//   rename: `checkout_entry` unlinks and re-creates it, so a reader fast enough to land inside that
+//   window sees `ENOENT`/`EACCES` for a file that exists immediately before and after. ONE such hit on
+//   ONE of the 145 reads pushed `readFailures.length > 0` ⇒ the whole census said `evaluated:false` ⇒
+//   AC-310's criterion exited 1 with a cause that reads as "copies came back". Measured cost of the
+//   conflation: 122 fails / 9311 readings = 1.31 % since 2026-09-19, while the sibling criteria of the
+//   same goal (which read no shell files) sat at 0.17–0.39 %.
+//
+// ⛔ WHAT IS **NOT** DONE HERE, and must never be: "unreadable ⇒ treat as empty / zero". That is hard
+// rule 3b run backwards — it would buy stability by DELETING the reading. The order below is:
+//   ① read the worktree (unchanged semantics — it follows symlinks, which the index does not);
+//   ② retry a bounded number of times with backoff, because the failure mode is a WINDOW, not a state;
+//   ③ fall back to the ATOMIC source (the git index blob — the index and the object store are written
+//      to a temp file and RENAMED, never rewritten in place, so they cannot be caught mid-flight);
+//   ④ only when all three fail does the caller report NOT-EVALUATED, with the original error text.
+// Step ③ is not a workaround: the declared data source of this census has always been `git ls-files`
+// (「数据源 = git ls-files，⛔ 不用 find」), so reading the tracked CONTENT from the index is the
+// coherent choice and the worktree read was the accident.
+
+/** Node error codes a concurrent `git checkout` can produce for a file that is not really gone. */
+const TRANSIENT_READ_CODES = new Set(["ENOENT", "EACCES", "EPERM", "EBUSY", "EMFILE", "ENFILE", "ESTALE", "EIO"]);
+
+/** Backoff between worktree-read attempts (ms). Worst case ≈ 305 ms for a file that is REALLY gone —
+ *  bounded on purpose: the acceptance runner kills a goal criterion at its deadline (record
+ *  `timeoutMs`, else 60 s), and 145 doomed reads × 305 ms must not become a timeout of its own. */
+const READ_BACKOFF_MS = [5, 25, 75, 200] as const;
+
+/** Synchronous sleep. `Atomics.wait` on a private SharedArrayBuffer is the one Node-native way to
+ *  block the main thread without spawning a `sleep` binary or spinning the CPU. */
+function sleepSync(ms: number): void {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
+function isTransientReadError(err: unknown): boolean {
+  const code = (err as NodeJS.ErrnoException | null)?.code;
+  return typeof code === "string" && TRANSIENT_READ_CODES.has(code);
+}
+
+/** The index view of ONE path (`git ls-files -s -z -- <path>`): mode + blob sha, or null if untracked. */
+function indexEntry(root: string, rel: string): { mode: string; sha: string } | null {
+  let out: string;
+  try {
+    out = execFileSync("git", ["-C", root, "ls-files", "-s", "-z", "--", rel], {
+      encoding: "utf8",
+      maxBuffer: 8 * 1024 * 1024,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+  } catch {
+    return null;
+  }
+  const rec = out.split("\0").find((s) => s.length > 0);
+  if (rec === undefined) return null;
+  const tab = rec.indexOf("\t");
+  if (tab === -1) return null;
+  const head = rec.slice(0, tab).split(" ");
+  return head.length >= 2 ? { mode: head[0], sha: head[1] } : null;
+}
+
+/** One blob's bytes, as text. Resolved through the INDEX (what `git ls-files` reports, and where a
+ *  just-staged fix lives), never through `HEAD`. null when the object cannot be read. */
+function gitBlobText(root: string, sha: string): string | null {
+  try {
+    return execFileSync("git", ["-C", root, "cat-file", "blob", sha], {
+      encoding: "utf8",
+      maxBuffer: 64 * 1024 * 1024,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The git-index fallback for `rel` (repo-relative), following a symlink chain of at most 5 hops.
+ * ⛔ A mode-120000 entry's blob is the LINK TARGET, not the file — reading it naively would silently
+ * swap 「目标文件的 600 行」 for 「字符串 `../../plugin/scripts/x.sh`」, i.e. change the census by
+ * stealth instead of by intent. So a link is resolved and the TARGET's blob returned.
+ */
+function readViaGitIndex(root: string, rel: string, depth = 0): string | null {
+  if (depth > 4) return null;
+  const entry = indexEntry(root, rel);
+  if (entry === null) return null;
+  const blob = gitBlobText(root, entry.sha);
+  if (blob === null) return null;
+  if (entry.mode !== "120000") return blob;
+  const target = blob.trim();
+  if (target.length === 0) return null;
+  const resolved = path.posix.normalize(path.posix.join(path.posix.dirname(rel), target));
+  if (resolved.startsWith("..")) return null; // points outside the repo — nothing tracked to read
+  return readViaGitIndex(root, resolved, depth + 1);
+}
+
+/** The three-step read (worktree → bounded retry → git index) for an ABSOLUTE path. The index
+ *  fallback is attempted only when the path is inside `root`: a fixture or an explicitly-parked file
+ *  outside it has no index entry, so its worktree error is reported as-is. */
+function readTrackedAbs(root: string, abs: string): { ok: true; text: string } | { ok: false; error: string } {
+  let lastErr: unknown = null;
+  for (let attempt = 0; attempt <= READ_BACKOFF_MS.length; attempt++) {
+    try {
+      return { ok: true, text: fs.readFileSync(abs, "utf8") };
+    } catch (err) {
+      lastErr = err;
+      if (!isTransientReadError(err)) break;
+      const backoff = READ_BACKOFF_MS[attempt];
+      if (backoff !== undefined) sleepSync(backoff);
+    }
+  }
+  const rel = path.relative(root, abs).split(path.sep).join("/");
+  if (rel.length > 0 && !rel.startsWith("../") && !path.isAbsolute(rel)) {
+    const viaIndex = readViaGitIndex(root, rel);
+    if (viaIndex !== null) return { ok: true, text: viaIndex };
+  }
+  const first = (lastErr as Error | null)?.message.split("\n")[0];
+  return { ok: false, error: first ?? "unreadable" };
+}
+
+/** Read a TRACKED file's text by repo-relative path (worktree → bounded retry → git index). */
+export function readTrackedText(root: string, rel: string): { ok: true; text: string } | { ok: false; error: string } {
+  return readTrackedAbs(root, path.join(root, rel));
+}
+
 /** 普查对象: tracked `*.sh`，排除测试夹具与顶层 archive（与 AC2 的独立命令逐字同集合）。 */
 export function isCensusScript(rel: string): boolean {
   if (!rel.endsWith(".sh")) return false;
@@ -642,15 +769,16 @@ export function readCensus(root: string, opts: CensusOptions = {}): CensusReadin
   }
 
   const exceptionsAbs = opts.exceptionsAbs ?? exceptionsFile(root);
-  let exceptions: ExceptionEntry[];
-  try {
-    const parsed = parseExceptions(fs.readFileSync(exceptionsAbs, "utf8"));
-    if (parsed === null) {
-      return notEvaluated(`exception list is unparseable (${exceptionsAbs}) — every line must be \`<path>  # <reason>\``);
-    }
-    exceptions = parsed;
-  } catch (err) {
-    return notEvaluated(`exception list unreadable (${exceptionsAbs}): ${(err as Error).message.split("\n")[0]}`);
+  // ⛔ The exception list is a TRACKED file too — read through the same resilient path (an
+  // unreadable-and-unparseable list is a genuine NOT-EVALUATED, and the reason string is unchanged
+  // so the two cases stay told apart by the CAUSE the criterion prints).
+  const exRead = readTrackedAbs(root, exceptionsAbs);
+  if (!exRead.ok) {
+    return notEvaluated(`exception list unreadable (${exceptionsAbs}): ${exRead.error}`);
+  }
+  const exceptions = parseExceptions(exRead.text);
+  if (exceptions === null) {
+    return notEvaluated(`exception list is unparseable (${exceptionsAbs}) — every line must be \`<path>  # <reason>\``);
   }
   const exceptionSet = new Set(exceptions.map((e) => e.path));
 
@@ -666,13 +794,16 @@ export function readCensus(root: string, opts: CensusOptions = {}): CensusReadin
   let embeddedLines = 0;
 
   for (const rel of scripts) {
-    let src: string;
-    try {
-      src = fs.readFileSync(path.join(root, rel), "utf8");
-    } catch (err) {
-      readFailures.push(`${rel}: ${(err as Error).message.split("\n")[0]}`);
+    // ⛔ The 145-file loop is the ONE read path this checker owns that its GOAL-025 siblings do not,
+    // and it is where the spurious NOT-EVALUATED came from (see the block above `TRANSIENT_READ_CODES`).
+    // Resilient, NOT forgiving: a file unreadable from the worktree AND from the index still lands in
+    // `readFailures` and still reports NOT-EVALUATED with its original error text.
+    const got = readTrackedText(root, rel);
+    if (!got.ok) {
+      readFailures.push(`${rel}: ${got.error}`);
       continue;
     }
+    const src = got.text;
     const lines = countCodeLines(src);
     const embedded = extractEmbeddedInterpreters(src).map((h) => h.interpreter);
     const isException = exceptionSet.has(rel);
@@ -767,9 +898,28 @@ export function baselineFile(root: string): string {
   return baselinePath(root, BASELINE_FILE_REL);
 }
 
-export function readBaselineFile(abs: string): Baseline | null {
+/**
+ * 读工作树基线。`root` 给出时走与普查同一条 resilient 读路（工作树 → 有界重试 → git 索引），
+ * 因为基线文件本身也是一个 tracked 文件、也会被 ff-merge 原地 unlink+recreate：
+ * 一次瞬时 `ENOENT` 曾足以让整条判据 exit 2（⇒ AC-310 判据报「副本回来了」）。
+ * ⛔ 语义未变：**两处都读不到**（或内容不可解析）仍返回 null ⇒ 调用方 exit 2（fail-closed 照旧）。
+ * `root` 省略时退化为裸 `readFileSync`（保留原有单参调用形态）。
+ */
+export function readBaselineFile(abs: string, root?: string): Baseline | null {
+  let text: string;
+  if (root === undefined) {
+    try {
+      text = fs.readFileSync(abs, "utf8");
+    } catch {
+      return null;
+    }
+  } else {
+    const got = readTrackedAbs(root, abs);
+    if (!got.ok) return null;
+    text = got.text;
+  }
   try {
-    const raw = JSON.parse(fs.readFileSync(abs, "utf8")) as Partial<Baseline>;
+    const raw = JSON.parse(text) as Partial<Baseline>;
     if (typeof raw.embeddedInterpreterLines !== "number" || typeof raw.duplicateCopies !== "number") return null;
     return { embeddedInterpreterLines: raw.embeddedInterpreterLines, duplicateCopies: raw.duplicateCopies };
   } catch {
@@ -809,7 +959,7 @@ export function decide(root: string, opts: CensusOptions & { baselineAbs?: strin
   const reading = readCensus(root, opts);
   if (!reading.evaluated) return { reading, baseline: null, verdict: null, code: 2, relForHead: "" };
   const baselineAbs = opts.baselineAbs ?? baselineFile(root);
-  const baseline = readBaselineFile(baselineAbs);
+  const baseline = readBaselineFile(baselineAbs, root);
   if (baseline === null) return { reading, baseline: null, verdict: null, code: 2, relForHead: "" };
   const relForHead = path.relative(root, baselineAbs).split(path.sep).join("/");
   const inRepo = relForHead.length > 0 && !relForHead.startsWith("../") && !path.isAbsolute(relForHead);
@@ -1005,6 +1155,66 @@ export function runSelftestCases(): SelftestOutcome[] {
       fs.writeFileSync(path.join(root, FIXTURE_BASELINE), JSON.stringify({ embeddedInterpreterLines: 9, duplicateCopies: 0 }) + "\n");
       const raised = decide(root).code;
       push("baseline-raised-above-head", clean === 0 && raised === 1, "clean ⇒ exit 0; working-tree baseline raised past HEAD ⇒ exit 1", `clean exit=${clean} raised exit=${raised}`);
+    } finally {
+      try {
+        fs.rmSync(root, { recursive: true, force: true });
+      } catch {
+        /* best-effort */
+      }
+    }
+  }
+  // ⑩ 工作树里的 tracked `.sh` 被【瞬时摘掉】（索引仍在）⇒ 仍然给出 evaluated:true 的真读数。
+  //    这正是生产上 ff-merge 的形态（git checkout 是 unlink + 重建，不是 rename），也是 AC-310
+  //    1.31% 假红的来源：145 次读里命中一次，整条普查就报 NOT-EVALUATED。
+  {
+    const root = buildFixture({
+      [FIXTURE_EXCEPTIONS]: "",
+      // baseline = SH_PY_HEREDOC's 6 code lines, so a PASS here is the READING (evaluated:true), not a
+      // side effect of the ratchet being unsatisfiable.
+      [FIXTURE_BASELINE]: JSON.stringify({ embeddedInterpreterLines: 6, duplicateCopies: 0 }) + "\n",
+      "plugin/scripts/py.sh": SH_PY_HEREDOC,
+    });
+    try {
+      fs.rmSync(path.join(root, "plugin/scripts/py.sh")); // index keeps it (NOT `git rm`)
+      const d = decide(root);
+      const f = d.reading.files.find((x) => x.path === "plugin/scripts/py.sh");
+      push(
+        "worktree-absent-still-evaluated-from-index",
+        d.reading.evaluated === true && d.code === 0 && f?.embedded.join(",") === "python3",
+        "evaluated=true and exit=0 (content read from the git index — the worktree is not the data source)",
+        `evaluated=${d.reading.evaluated} exit=${d.code} embedded=${JSON.stringify(f?.embedded ?? null)} reason=${d.reading.reason ?? ""}`,
+      );
+    } finally {
+      try {
+        fs.rmSync(root, { recursive: true, force: true });
+      } catch {
+        /* best-effort */
+      }
+    }
+  }
+  // ⑪ 反向：工作树没有、索引条目指向一个【不存在的对象】⇒ 两处都读不到 ⇒ 仍然 NOT-EVALUATED。
+  //    这是 ⑩ 的负控制：新增的索引回退是「另一处再读一次」，不是「读不到就当没有」。
+  {
+    const root = buildFixture({
+      [FIXTURE_EXCEPTIONS]: "",
+      [FIXTURE_BASELINE]: JSON.stringify({ embeddedInterpreterLines: 0, duplicateCopies: 0 }) + "\n",
+      "plugin/scripts/glue.sh": SH_GLUE,
+    });
+    try {
+      const abs = path.join(root, "plugin/scripts/glue.sh");
+      fs.rmSync(abs);
+      execFileSync(
+        "git",
+        ["-c", "core.hooksPath=/dev/null", "update-index", "--add", "--cacheinfo", `100644,${"0".repeat(39)}1,plugin/scripts/glue.sh`],
+        { cwd: root, env: GIT_ENV, stdio: "pipe" },
+      );
+      const d = decide(root);
+      push(
+        "unreadable-from-both-sources-still-not-evaluated",
+        d.reading.evaluated === false && d.code === 2 && /could not read 1 tracked \*\.sh/.test(d.reading.reason ?? ""),
+        "evaluated=false and exit=2 (both sources failed ⇒ NOT-EVALUATED, never a silent zero)",
+        `evaluated=${d.reading.evaluated} exit=${d.code} reason=${(d.reading.reason ?? "").slice(0, 110)}`,
+      );
     } finally {
       try {
         fs.rmSync(root, { recursive: true, force: true });
