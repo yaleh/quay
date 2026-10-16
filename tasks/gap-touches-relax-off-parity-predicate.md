@@ -62,14 +62,14 @@ trace 条目：满足全部 ⇒ `wouldRelax: true` 且 `relaxBlockedBy: null`；
 
 ## Acceptance Criteria
 
-- [ ] AC1 — 测试文件落地且通过（AC-365 判据面逐字）：`timeout 55 node --experimental-strip-types --test plugin/test/touches-relax-off-parity.test.mjs` **exit 0**，文件带 `// @test-group engine`。附实际命令、输出尾部与实测耗时（秒）。
-- [ ] AC2 — (a) off 同形，且配置块的存在**不泄漏**进决策：三组输入——① 无 `touches_relax` 块；② 显式 `mode: off`（块为空）；③ `mode: off` 且 `after_minutes`/`max_relaxed_inflight` 齐备、且构造一个 `waitedMinutes` **确实超过** `after_minutes` 的候选——在六面输入矩阵（无在飞 / 有重叠 / 无重叠 / 空 Touches / 通配声明 / 读不出的任务文件）下，`applyTaskFilters` 的返回值与**独立算出的**基线 `touchesDisjoint` 序列**逐元素 `deepEqual`**（两个数组逐字打印）。⛔ 只比长度、或先排序再比，都不算。
-- [ ] AC3 — (b) shadow 决策同形：shadow 的返回值与 off **逐元素 `deepEqual`**（附两边数组逐字打印）；并断言 shadow 下**确实发生了标注**（trace 非空），即放行结果同形而观测面不同。
-- [ ] AC4 — (b) `wouldRelax` 与首个不满足条件：trace 里存在 `wouldRelax === true` 的条目（构造满足全部五条件的候选），且**每条条件各造一个只缺它的候选**，断言 `wouldRelax === false` 且 `relaxBlockedBy` **逐字等于**该条件 id。附每条 `{条件 id, fixture 事实, 实际条目 JSON}` 与 off 模式下无 `wouldRelax: true` 的读数。
-- [ ] AC5 — (c) 影子期不产生放宽账本：shadow 运行后 `.quay/relaxed-dispatch.jsonl` **不存在**（`existsSync === false`），且测试全程该路径零写入。附判定与该路径的 `ls` 读数。
-- [ ] AC6 — (d) 取假形态（两次真红，一次一改一跑，留痕）：① 把 off 分支写成恒 `true`（恒放行）⇒ 本测试变红；② 让 shadow 真的放行 ⇒ 本测试变红。各附非零退出码 + 失败断言原文；两次注入**都不得留在落地代码里**（恢复后 `git status --porcelain` 只含本条 Touches 内的预期改动）。
-- [ ] AC7 — 不回归既有派发与既有 pin：`bash scripts/test.sh plugin/test/driver-filters.test.mjs plugin/test/driver-runtime-s01.test.mjs` **exit 0**；并附 `git diff` 证明 `applyTaskFilters` 的**返回表达式一行未改**、以及两个 pin 文件的改动**只有名字序列（与沿用它的注释）**、判定语义未变。
-- [ ] AC8 — 能力目录与不越界：① `bash plugin/scripts/capability-catalog.sh --summary` 报 `0 unclassified`；② `git diff -- plugin/scripts/touches-relax-config.ts` **空**（⛔ 本条不改 AC-364 的读取器 / 校验器）；③ `git diff --stat -- plugin/scripts/worker-driver.ts` **空**（trace 随 AC-362 的条目一并流出，本条不碰 round 装配面）。附三条命令与输出。
+- [x] AC1 — 测试文件落地且通过（AC-365 判据面逐字）：`timeout 55 node --experimental-strip-types --test plugin/test/touches-relax-off-parity.test.mjs` **exit 0**，文件带 `// @test-group engine`。附实际命令、输出尾部与实测耗时（秒）。 —— **实测**：`EXIT=0`，`elapsed_ms=832`，`ℹ tests 7 / pass 7 / fail 0 / duration_ms 803.98`；7 条用例逐条 ✔（AC2 ×3、AC3、AC4、AC5、负控制）。文件首行即 `// @test-group engine`。远低于 55s 上限（本测试不 spawn driver、不跑 suite）。输出尾部逐字见 Evidence。
+- [x] AC2 — (a) off 同形，且配置块的存在**不泄漏**进决策：三组输入——① 无 `touches_relax` 块；② 显式 `mode: off`（块为空）；③ `mode: off` 且 `after_minutes`/`max_relaxed_inflight` 齐备、且构造一个 `waitedMinutes` **确实超过** `after_minutes` 的候选——在六面输入矩阵（无在飞 / 有重叠 / 无重叠 / 空 Touches / 通配声明 / 读不出的任务文件）下，`applyTaskFilters` 的返回值与**独立算出的**基线 `touchesDisjoint` 序列**逐元素 `deepEqual`**（两个数组逐字打印）。⛔ 只比长度、或先排序再比，都不算。 —— **实测（3 配置 × 2 在飞 = 6 子用例，全部 deepEqual 通过；另有逐候选强弱两重断言）**：有在飞时**三组**的实得与基线逐字相同 `["gap-parity-disjoint"]`；无在飞时**三组**均为 `[...overlap,disjoint,empty,nosec,glob,inflight]`（实得 = 基线）。组 ③ 的非平凡性读数：`OVERLAP` 条目 `waitedMinutes: 90 > after_minutes: 30`（fixture 由真实 `to:"ready"` 事件锚定 90 分钟前）⇒ 「配置块齐备但 mode=off」下**不放宽**。off 下 `wouldRelax` 恒 `false` 的读数：三组配置各 `条数=6、全 false`。六面矩阵含 `OVERLAP`/`DISJOINT`/`EMPTY`/`NOSEC`/`GLOB`/`MISSING`（另有 `DEPBLOCKED`：被 `depsSatisfied` 滤掉 ⇒ 让「非 touches 谓词也滤」在该组输入里真实发生）。判据还含**逐候选**断言：两侧谓词对同一 id 各自取值必须相同（集合相同也可能来自两侧各错一处相互抵消）。
+- [x] AC3 — (b) shadow 决策同形：shadow 的返回值与 off **逐元素 `deepEqual`**（附两边数组逐字打印）；并断言 shadow 下**确实发生了标注**（trace 非空），即放行结果同形而观测面不同。 —— **实测**：`shadow.kept = ["gap-parity-disjoint"]`、`off.kept = ["gap-parity-disjoint"]`（逐字相同，且两者都等于基线）；`shadow` 条目 `wouldRelax` 分布 = `[["gap-parity-overlap",true,null],["gap-parity-empty",false,"waited-enough"],["gap-parity-nosec",false,"waited-enough"],["gap-parity-glob",false,"waited-enough"],["gap-parity-missing",false,"touches-only-blocker"],["gap-parity-inflight",false,"touches-only-blocker"]]` ⇒ **有真有假**。两态的 touches 条目在 `[task,blocker,overlapFiles,waitedMinutes]` 四键上逐条相同（标注是在**同一批**条目上追加的，不是另一条通道）。
+- [x] AC4 — (b) `wouldRelax` 与首个不满足条件：trace 里存在 `wouldRelax === true` 的条目（构造满足全部五条件的候选），且**每条条件各造一个只缺它的候选**，断言 `wouldRelax === false` 且 `relaxBlockedBy` **逐字等于**该条件 id。附每条 `{条件 id, fixture 事实, 实际条目 JSON}` 与 off 模式下无 `wouldRelax: true` 的读数。 —— **实测（正向 + 五条件各一 + 条件③负控制）**：正向 `{"task":"gap-relax-cand","filter":"touchesDisjointOrAged","blocker":"gap-relax-blocker","overlapFiles":["plugin/scripts/shared.ts"],"waitedMinutes":90,"wouldRelax":true,"relaxBlockedBy":null}`。① `touches-only-blocker`（fixture 事实：候选 `status: needs-human` ⇒ `notNeedsHuman` 也滤它）⇒ `false` / `"touches-only-blocker"`；② `waited-enough`（无 `to:"ready"` 事件 ⇒ `waitedMinutes: null`，⛔ 未当 0）⇒ `false` / `"waited-enough"`；③ `quota-available`（`max_relaxed_inflight: 0`）⇒ `false` / `"quota-available"`；④ `not-never-relax`（`never_relax: [gap-relax-cand]`）⇒ `false` / `"not-never-relax"`；⑤ `overlap-shared`（`shared_files: [plugin/scripts/unrelated.ts]` vs 重叠 `["plugin/scripts/shared.ts"]`）⇒ `false` / `"overlap-shared"`。**条件③负控制**（证明它真读名额读数）：同一份配置下 `relaxedInFlight=2`（名额 3）⇒ `wouldRelax:true`，`relaxedInFlight=3` ⇒ `false` / `"quota-available"`。off 下无真值：三组配置各 `条数=6、wouldRelax 全 false`。词表冻结断言：`RELAX_CONDITIONS` deepEqual 五条 id（⛔ 未发明第六个条件）。
+- [x] AC5 — (c) 影子期不产生放宽账本：shadow 运行后 `.quay/relaxed-dispatch.jsonl` **不存在**（`existsSync === false`），且测试全程该路径零写入。附判定与该路径的 `ls` 读数。 —— **实测**：运行前 `existsSync === false`（前置断言）；同一轮确实产生了 `wouldRelax:true`（否则「没写账本」与「没东西可写」同义）；运行后仍 `false`，`ls .quay/` = `["config.yml","task-status-events.jsonl"]`。本条的测试**不 import 账本模块**（见 AC8 的值环说明），该路径字面量仅用于「断言它不存在」。
+- [x] AC6 — (d) 取假形态（两次真红，一次一改一跑，留痕）：① 把 off 分支写成恒 `true`（恒放行）⇒ 本测试变红；② 让 shadow 真的放行 ⇒ 本测试变红。各附非零退出码 + 失败断言原文；两次注入**都不得留在落地代码里**（恢复后 `git status --porcelain` 只含本条 Touches 内的预期改动）。 —— **实测（两次真红，均附退出码与失败断言原文）**：① 注入 `const decision = (id) => planOff(id)` → `=> true` ⇒ `EXIT=1`、`ℹ tests 7 / pass 0 / fail 7`，失败断言 `① 无 touches_relax 块 / 有在飞对手：新谓词的放行序列必须与基线 touchesDisjoint 逐元素相同`，`实得 = ["gap-parity-overlap",…,"gap-parity-glob"]` vs `基线 = ["gap-parity-disjoint"]`。② 注入 `=> (state.annotate ? true : planOff(id))` ⇒ `EXIT=1`、`ℹ tests 7 / pass 4 / fail 3`，失败断言 `shadow 的放行结果必须与 off 完全相同`，`shadow = [5 项]` vs `off = ["gap-parity-disjoint"]`。**两次注入均已恢复**：`grep -n "FALSIFICATION" plugin/scripts/driver-filters.ts` 零命中；恢复后重跑 `ℹ tests 7 / pass 7 / fail 0`；`git status --porcelain` 只含本条 Touches 内六项（新测试文件 + 五个 ` M`），无额外文件。
+- [x] AC7 — 不回归既有派发与既有 pin：`bash scripts/test.sh plugin/test/driver-filters.test.mjs plugin/test/driver-runtime-s01.test.mjs` **exit 0**；并附 `git diff` 证明 `applyTaskFilters` 的**返回表达式一行未改**、以及两个 pin 文件的改动**只有名字序列（沿用它的注释）**、判定语义未变。 —— **实测**：本工作树 `EXIT=0`（同一批三文件组合读数 `ℹ tests 101 / pass 101 / fail 0`）；**develop 主检出同一命令为基线** `EXIT=0`、同一组数 101 —— 两边一致 ⇒ 非本条引入的变化。`npx tsc --noEmit -p tsconfig.json` ⇒ `EXIT=0`。**返回表达式一行未改**：`git diff -U0 -- plugin/scripts/driver-filters.ts | grep -E "^[-+].*preds\.every|candidateIds\.filter"` ⇒ **零命中**（尾行仍是 `return candidateIds.filter((id) => preds.every((p) => p(id)));`，改动只在其上方的 trace 块内）。两个 pin 文件的 diff **只有名字序列与沿用它的注释/用例名**（`touchesDisjoint` → `touchesDisjointOrAged`），判定体（`TASK_FILTERS[2].predicate(...)` 的三条 `assert.equal`）**一字未动**。**另有一处同类名字 pin 必须同步（超出 Plan 第 3 条点名的两处）**：`plugin/test/touches-relax-filter-trace.test.mjs`（AC-362 的测试）把条目 `e.filter` 逐字钉成 `"touchesDisjoint"`（该值来自生产的 `TaskFilter.name`）⇒ 改名必然让它变红；已纯改名 13 处并**在 `## Touches` 中声明**（硬规则 5b：同一原则的其它适用点一并处理）。
+- [x] AC8 — 能力目录与不越界：① `bash plugin/scripts/capability-catalog.sh --summary` 报 `0 unclassified`；② `git diff -- plugin/scripts/touches-relax-config.ts` **空**（⛔ 本条不改 AC-364 的读取器 / 校验器）；③ `git diff --stat -- plugin/scripts/worker-driver.ts` **空**（trace 随 AC-362 的条目一并流出，本条不碰 round 装配面）。附三条命令与输出。 —— **实测**：① `capability-catalog: 386 scripts | 386 declared | 0 unclassified | 381 ship`；② 空；③ 空。**另补两条本条的静态面**（首版实现曾被判 RED，改为 ctx 带入后复绿）：④ `node --experimental-strip-types plugin/scripts/import-graph-check.ts` ⇒ `PASS — valueSccs=0 ≤ 0, typeSccs=0 ≤ 0, reverseEdges=0 ≤ 0`（首版 import AC-363 的账本读取器形成值环 `[driver-filters.ts, relaxed-dispatch-ledger.ts]` ⇒ `FAIL — valueSccs 1 > baseline 0`；该棘轮 `--help` 逐字「baseline not raised past HEAD」，shrink-only ⇒ 新值环在本仓不被允许的结构）；⑤ `tmp-leak-pairing-check` ⇒ `1011 file(s), 0 unpaired mkdtemp result(s). PASS`；⑥ `test-isolation-check` ⇒ 21 violations（`mkdtemp-no-cleanup=0`），全部已 baseline 且列表只减不增：PASS。
 
 ## Definition of Done
 
@@ -81,6 +81,8 @@ trace 条目：满足全部 ⇒ `wouldRelax: true` 且 `relaxBlockedBy: null`；
 
 **如实写明（⛔ 不作为省略的理由）**：本 AC 的判据面是**夹具读数**——GOAL-037 立案文本的「已知缺口」已承认本 goal 的 AC 都不读生产载体（生产读数需要人在目标项目启用 shadow/live 并重启 driver）。本条证明的是「新谓词在 off/shadow 两态下的决策与标注」，生产启用（AC-366 的接线与人择机开启）由后续 AC 与人承担。
 
+**另一条如实写明（相对 Plan 第 1 条的设计变更）**：Plan 只点名了**配置面**（`loadTouchesRelaxConfig`，已照做，每轮一次），未点名额读数的来源。条件③ 需要一个「当前已放宽在飞数」，初版 import AC-363 的 `readRelaxedDispatchLedger` 触发了 import-graph 的值环 RED；**改由 `FilterContext.relaxedInFlight?: number`（缺省 0）带入**，`driver-filters.ts` 不 import 账本模块、也不自己解析那份 jsonl。在 shadow 下「已放宽在飞 = 0」是**结构性事实**（影子期不放行 ⇒ 无任务是被放宽派发的），不是回退默认值；live 下由 AC-366 从账本算出后经该字段传入。⛔ 未改 `FilterContext` 既有字段语义（新字段可选，`makeFilterContext` 两个既有构造点不传即行为不变）。
+
 ## Touches
 
 - plugin/scripts/driver-filters.ts
@@ -88,4 +90,177 @@ trace 条目：满足全部 ⇒ `wouldRelax: true` 且 `relaxBlockedBy: null`；
 - plugin/test/touches-relax-off-parity.test.mjs (new)
 - plugin/test/driver-filters.test.mjs
 - plugin/test/driver-runtime-s01.test.mjs
+- plugin/test/touches-relax-filter-trace.test.mjs
 - tasks/gap-touches-relax-off-parity-predicate.md
+
+## Evidence
+
+**落地对象**：`plugin/scripts/driver-filters.ts` 新增 `touchesDisjointOrAged: TaskFilter`（`name` 唯一取自常量 `TOUCHES_RELAX_FILTER_NAME`），**取代** `TASK_FILTERS` 第三格的 `touchesDisjoint`（列表长度仍为五）；`touchesDisjoint` 的**导出保留**（off 语义的单一实现，本条**直接委托**它，也是基线侧）。
+
+**off 路径 = 一行委托**：`const planOff = touchesDisjoint.predicate(ctx); const decision = (id: string) => planOff(id);` ⇒ 返回值、短路顺序、fail-closed 缺省全部随之逐字节相同，且不产生第二份 off 实现（硬规则 5b）。**shadow / live 的返回值与 off 完全一样**（同一行）——mode 只喂标签表，⛔ 不参与返回值。
+
+### AC1 — 测试落地且通过
+
+```
+$ time timeout 55 node --experimental-strip-types --test plugin/test/touches-relax-off-parity.test.mjs
+✔ AC2(a) — off 同形：三组配置 × 六面矩阵，逐元素 deepEqual（配置块的存在不泄漏进 off 决策） (383.34ms)
+✔ AC2(a) — 组 ③ 的等待读数【确实超过】after_minutes（否则该输入不具判别力） (6.67ms)
+✔ AC2(a) — off 下【恒不】出现 wouldRelax:true（无论配置块多齐备） (89.63ms)
+✔ AC3(b) — shadow 决策同形：返回值与 off 逐元素 deepEqual，且观测面确实不同（有标注） (68.48ms)
+✔ AC4(b) — wouldRelax 与首个不满足条件：五条件各只破坏一条，relaxBlockedBy 逐字等于该条件 id (51.98ms)
+✔ AC5(c) — 影子期不产生放宽账本：shadow 运行后 .quay/relaxed-dispatch.jsonl 不存在 (6.40ms)
+✔ 负控制 — 矩阵里确实有候选被 touches 挡下（若 off 恒放行，下面的非空断言即刻变红） (37.93ms)
+ℹ tests 7   ℹ pass 7   ℹ fail 0   ℹ duration_ms 803.98
+EXIT=0   elapsed_ms=832（实测，远低于 55s 上限）
+```
+
+文件首行 `// @test-group engine` 已带（`head -1` 可验）。
+
+### AC2 — (a) off 同形，配置块的存在不泄漏进决策
+
+三组配置 × 两组在飞 = **6 个子用例**，`applyTaskFilters` 的返回值与**独立算出的**基线（`TASK_FILTERS` 里 touches 那一格换成 `touchesDisjoint`，其余四格同一份实现）逐元素 `deepEqual`；并有**逐候选**的更强断言（两侧谓词对每个 id 各自取值必须相同）。六面矩阵 = 无在飞 / 有重叠 `gap-parity-overlap` / 无重叠 `gap-parity-disjoint` / 空 Touches `gap-parity-empty` / 通配声明 `gap-parity-glob` / 读不出 `gap-parity-missing`（另加 `gap-parity-depblocked`：touches 面过得去但被 `depsSatisfied` 挡住——它让「被非 touches 谓词滤掉」在这组输入里真实发生）。
+
+```
+① 无块 / 无在飞        实得 = [...overlap,disjoint,empty,nosec,glob,inflight]  基线 = 同
+① 无块 / 有在飞        实得 = [disjoint]                                        基线 = [disjoint]
+② mode:off 空块/无在飞 实得 = [...overlap,disjoint,empty,nosec,glob,inflight]  基线 = 同
+② mode:off 空块/有在飞 实得 = [disjoint]                                        基线 = [disjoint]
+③ mode:off 齐备/无在飞 实得 = [...overlap,disjoint,empty,nosec,glob,inflight]  基线 = 同
+③ mode:off 齐备/有在飞 实得 = [disjoint]                                        基线 = [disjoint]
+```
+
+组 ③ 的**非平凡性读数**（候选的等待确实超过阈值，否则该输入不具判别力）：
+
+```
+[AC2-前置] OVERLAP 条目 = {"task":"gap-parity-overlap","filter":"touchesDisjointOrAged",
+  "blocker":"gap-parity-inflight","overlapFiles":["plugin/scripts/shared.ts"],
+  "waitedMinutes":90,"wouldRelax":false,"relaxBlockedBy":null}（waitedMinutes=90 > after_minutes=30）
+```
+
+off 下**恒不**出现真值（三组配置各一次）：
+
+```
+off（relax=null）⇒ touches 条目 wouldRelax 全 false，条数=6
+off（relax={"mode":"off"}）⇒ 全 false，条数=6
+off（relax={"mode":"off","after_minutes":30,"max_relaxed_inflight":5,"shared_files":[…],"never_relax":[]}）⇒ 全 false，条数=6
+```
+
+### AC3 — (b) shadow 决策同形 + 观测面确实不同
+
+```
+[AC3] shadow.kept = ["gap-parity-disjoint"]
+[AC3] off.kept    = ["gap-parity-disjoint"]
+[AC3] shadow 条目 wouldRelax 分布 = [["gap-parity-overlap",true,null],
+  ["gap-parity-empty",false,"waited-enough"],["gap-parity-nosec",false,"waited-enough"],
+  ["gap-parity-glob",false,"waited-enough"],["gap-parity-missing",false,"touches-only-blocker"],
+  ["gap-parity-inflight",false,"touches-only-blocker"]]
+```
+
+两态的 touches 条目在 `[task, blocker, overlapFiles, waitedMinutes]` 四键上逐条相同（标注是在同一批条目上追加的）；shadow 有 `true` 也有 `false`。返回集合同形、观测面不同 ⇒ 该断言同时否掉「两态都放行」。
+
+### AC4 — (b) wouldRelax 与首个不满足条件
+
+正向（全满足）与**五条件各只破坏一条**（每条都附 fixture 事实）：
+
+| 条件 id | fixture 事实 | 实际条目 `relaxBlockedBy` |
+|---|---|---|
+| （全满足） | 重叠 shared.ts ∈ 白名单；waited 90 ≥ 30；名额 5 > 0；不在 never_relax | `wouldRelax: true`, `relaxBlockedBy: null` |
+| `touches-only-blocker` | 候选 status=needs-human ⇒ `notNeedsHuman` 也滤它 | `false` / `"touches-only-blocker"` |
+| `waited-enough` | 无 `to:"ready"` 事件 ⇒ `waitedMinutes: null`（⛔ 不当 0） | `false` / `"waited-enough"` |
+| `quota-available` | `max_relaxed_inflight: 0`（已放宽在飞 0） | `false` / `"quota-available"` |
+| `not-never-relax` | `never_relax: [gap-relax-cand]` | `false` / `"not-never-relax"` |
+| `overlap-shared` | `shared_files: [plugin/scripts/unrelated.ts]` vs 重叠 `["plugin/scripts/shared.ts"]` | `false` / `"overlap-shared"` |
+
+条件③ 的**负控制**（证明它真的读名额读数，不是恒真/恒假）：
+
+```
+relaxedInFlight=2（名额 3）⇒ {"wouldRelax":true,"relaxBlockedBy":null}
+relaxedInFlight=3（名额 3）⇒ {"wouldRelax":false,"relaxBlockedBy":"quota-available"}
+```
+
+条目 JSON 逐字（例）：`{"task":"gap-relax-cand","filter":"touchesDisjointOrAged","blocker":"gap-relax-blocker","overlapFiles":["plugin/scripts/shared.ts"],"waitedMinutes":90,"wouldRelax":true,"relaxBlockedBy":null}`。条件词表冻结断言：`RELAX_CONDITIONS` deepEqual 上述五条（⛔ 未发明第六个条件）。
+
+### AC5 — (c) 影子期不产生放宽账本
+
+前置：`fs.existsSync(<root>/.quay/relaxed-dispatch.jsonl) === false`；运行后仍 `false`（且该轮确实产生了 `wouldRelax:true`，否则「没写账本」与「没东西可写」同义）。
+
+```
+[AC5] ls .quay/ = ["config.yml","task-status-events.jsonl"]（无 relaxed-dispatch.jsonl）
+```
+
+### AC6 — (d) 取假形态：两次真红（一次一改一跑）
+
+**注入 ①：off 分支恒 `true`（恒放行）** —— `const decision = (id) => planOff(id);` → `=> true`
+
+```
+EXIT=1  ℹ tests 7  ℹ pass 0  ℹ fail 7
+AssertionError: ① 无 touches_relax 块 / 有在飞对手：新谓词的放行序列必须与基线 touchesDisjoint 逐元素相同
+  实得 = ["gap-parity-overlap","gap-parity-disjoint","gap-parity-empty","gap-parity-nosec","gap-parity-glob"]
+  基线 = ["gap-parity-disjoint"]
+```
+
+**注入 ②：shadow 真的放行** —— `=> (state.annotate ? true : planOff(id))`
+
+```
+EXIT=1  ℹ tests 7  ℹ pass 4  ℹ fail 3
+AssertionError: shadow 的放行结果必须与 off 完全相同
+  shadow = ["gap-parity-overlap","gap-parity-disjoint","gap-parity-empty","gap-parity-nosec","gap-parity-glob"]
+  off    = ["gap-parity-disjoint"]
+```
+
+两次注入均已恢复：`grep -n "FALSIFICATION" plugin/scripts/driver-filters.ts` 零命中；恢复后重跑 `ℹ tests 7 ℹ pass 7 ℹ fail 0`；`git status --porcelain` **只**含本条 Touches 内的七项（`?? plugin/test/touches-relax-off-parity.test.mjs` + 五个 ` M` + 任务文件自身），无额外文件。
+
+### AC7 — 不回归既有派发与既有 pin
+
+```
+$ bash scripts/test.sh plugin/test/driver-filters.test.mjs plugin/test/driver-runtime-s01.test.mjs
+  → 本工作树：EXIT=0（同一批三文件组合读数 ℹ tests 101 / pass 101 / fail 0）
+  → develop 主检出基线：同一命令 EXIT=0、ℹ tests 101 / pass 101 / fail 0（同一组数 ⇒ 非本条引入的变化）
+$ npx tsc --noEmit -p tsconfig.json   → EXIT=0
+```
+
+**返回表达式一行未改**：`git diff -U0 -- plugin/scripts/driver-filters.ts | grep -E "^[-+].*preds\.every|candidateIds\.filter"` ⇒ **零命中**（`applyTaskFilters` 尾行仍是 `return candidateIds.filter((id) => preds.every((p) => p(id)));`，唯一的改动在它上方的 trace 块内）。
+
+两个 pin 文件的 diff **只有名字序列（与沿用它的注释 / 用例名）**：
+
+```
+-// ... the five predicates (notInFlight / depsSatisfied / touchesDisjoint /
++// ... the five predicates (notInFlight / depsSatisfied / touchesDisjointOrAged /
+-    ["notInFlight","depsSatisfied","touchesDisjoint","retryCapNotExhausted","notNeedsHuman"],
++    ["notInFlight","depsSatisfied","touchesDisjointOrAged","retryCapNotExhausted","notNeedsHuman"],
+-// ── touchesDisjoint ───…
++// ── touchesDisjointOrAged（GOAL-037 / AC-365：取代 touchesDisjoint 在列表中的那一格；…）
+-test("touchesDisjoint — overlapping candidate filtered vs in-flight; …")
++test("touchesDisjointOrAged — overlapping candidate filtered vs in-flight; …")
+（driver-runtime-s01.test.mjs 同样只有那一行名字序列）
+```
+
+判定体（`TASK_FILTERS[2].predicate(...)` 的三条 `assert.equal`）**一字未动**。
+
+**第三处名字 pin（超出 Plan 第 3 条点名的两处，必须一并同步）**：`plugin/test/touches-relax-filter-trace.test.mjs`（AC-362 的测试）把 `filter_trace` 条目的 `e.filter` 逐字钉成 `"touchesDisjoint"`（该值来自生产的 `TaskFilter.name`）⇒ 改名必然让它变红。已把该文件的 13 处 `touchesDisjoint` 全部改为 `touchesDisjointOrAged`（**纯改名，判定语义未动**），并在 `## Touches` 中声明。这是同一条尾巴的第三个实例（硬规则 5b：修完一处要在同一载体里 grep 其它适用点）。
+
+### AC8 — 能力目录与不越界
+
+```
+① bash plugin/scripts/capability-catalog.sh --summary
+   → capability-catalog: 386 scripts | 386 declared | 0 unclassified | 381 ship
+② git diff -- plugin/scripts/touches-relax-config.ts   → 空（⛔ 未改 AC-364 的读取器/校验器）
+③ git diff --stat -- plugin/scripts/worker-driver.ts   → 空（⛔ 未碰 round 装配面；trace 随 AC-362 的条目流出）
+④ node --experimental-strip-types plugin/scripts/import-graph-check.ts
+   → PASS — valueSccs=0 ≤ 0, typeSccs=0 ≤ 0, reverseEdges=0 ≤ 0
+⑤ node --experimental-strip-types plugin/scripts/tmp-leak-pairing-check.ts
+   → 1011 file(s), 0 unpaired mkdtemp result(s). PASS.
+⑥ node --experimental-strip-types plugin/scripts/test-isolation-check.ts
+   → 21 violation(s) [process-exit-1=5 mkdtemp-no-cleanup=0 …]，全部已 baseline，列表只减不增：PASS
+```
+
+**⛔ 一处设计变更（相对 Plan 第 1 条的 mode 来源，如实记录）**：Plan 原写「经 `ctx.root` 调 AC-364 的**读取器**」——这条**已照做**（`loadTouchesRelaxConfig(ctx.root)`，每轮一次）。但 Plan 未点名的**账本面**：条件③ 需要一个「当前已放宽在飞数」的读数。**初版实现 import 了 AC-363 的 `readRelaxedDispatchLedger`，被 `import-graph-check` 判 RED**：
+
+```
+value SCC: plugin/scripts/driver-filters.ts, plugin/scripts/relaxed-dispatch-ledger.ts
+import-graph-check: FAIL — valueSccs 1 > baseline 0
+```
+
+成因是**既有的**反向依赖：`relaxed-dispatch-ledger.ts:61` 已 `import { WORKER_OUTCOME_REL } from "./driver-filters.ts"`（硬规则 1 的单一来源），反向再 import 即成值环；而该棘轮是 **shrink-only**（`--help` 逐字：「baseline not raised past HEAD」，基线只许降不许升）——**新值环在本仓是不被允许的结构**。故改为：名额读数由 **`FilterContext.relaxedInFlight?: number`**（缺省 0）带入，`driver-filters.ts` **不 import 账本模块、也不自己解析那份 jsonl**。在 shadow 下「已放宽在飞数 = 0」是**结构性事实**（影子期不放行 ⇒ 没有任何任务是被放宽派发的），不是回退默认值；live 下由 AC-366 从账本算出后经该字段传入。⛔ 未改 `FilterContext` 任何既有字段的语义（新字段可选，`makeFilterContext` 的两个既有构造点不传即行为不变）。
+
+**同样如实写明**：本条的判据面是**夹具读数**（GOAL-037 立案文本的「已知缺口」已承认本 goal 的 AC 都不读生产载体）。本条证明的是「新谓词在 off/shadow 两态下的决策与标注」；生产启用（AC-366 的 live 放行与接线、人择机开启）由后续 AC 与人承担。
