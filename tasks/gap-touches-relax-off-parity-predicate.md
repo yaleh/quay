@@ -3,7 +3,7 @@ id: gap-touches-relax-off-parity-predicate
 title: 新谓词 touchesDisjointOrAged 不存在：mode=off（含配置块缺失）决策须与基线 touchesDisjoint
   逐候选逐顺序同形、mode=shadow 只标 wouldRelax 且不放行、影子期不写放宽账本——同形判据与两次取假形态全未落地（GOAL-037
   AC-365 谓词面）
-status: ready
+status: done
 labels:
   - gap
 parent: null
