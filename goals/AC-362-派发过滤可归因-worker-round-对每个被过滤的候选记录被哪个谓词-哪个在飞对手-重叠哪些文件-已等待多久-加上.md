@@ -37,7 +37,7 @@ expect: plugin/test/touches-relax-filter-trace.test.mjs 存在、在 55 秒内�
   touchesDisjoint 或恒空时，本测试必须变红；(e) pool-empty 的轮不写 trace 条目。⛔
   本条只增观测，不得改变任何派发决策。先后提示：本条与 AC-363、AC-364 是第一批，AC-365 起依赖它们。
 origin: 用户 2026-10-16 在会话「ClaudeCodeUI 局部重构方案」中认可「等待超过阈值乐观派发」改动方案并指示按方案创建
-  goal/AC 并激活。本条是方案第 0 步（只加观测）：worker-round 的 filtered-empty 轮（quay 约
-  14%、claudecodeui 约 12% 的轮次）目前不记录每个候选被哪个谓词、被谁挡住，无法归因（grep 'touches-overlap' 在
-  worker-round.jsonl 零命中）。
+  goal/AC 并激活。本条是方案第 0 步（只加观测）：worker-round 的 filtered-empty 轮（quay
+  7010/49201≈14.2%、claudecodeui 4844/36578≈13.2% 的 stop
+  轮）目前不记录每个候选被哪个谓词、被谁挡住，无法归因（grep 'touches-overlap' 在 worker-round.jsonl 零命中）。
 ---
