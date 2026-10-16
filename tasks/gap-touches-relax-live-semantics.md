@@ -3,7 +3,7 @@ id: gap-touches-relax-live-semantics
 title: mode=live 的放宽放行语义不存在：谓词在 live 下与 shadow 行为相同（配置写了但不生效），阈值边界 / never_relax
   / 名额 / 不连锁 / 过宽通配 / shared_files 短路 / 等待读不到即阻塞 / 放行写账本 / 不绕过其它谓词 / 取假形态
   全未落地（GOAL-037 AC-366 生效面）
-status: ready
+status: done
 labels:
   - gap
 parent: null
