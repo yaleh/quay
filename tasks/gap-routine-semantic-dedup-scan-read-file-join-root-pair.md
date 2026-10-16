@@ -68,3 +68,10 @@ finding 处置）；`semantic-observer-judge.ts:235` 返回 `null`，是**不同
 - `plugin/scripts/gate-script-base.ts`
 - `plugin/test/gap-routine-semantic-dedup-scan-read-file-join-root-pair.test.mjs`
 - `tasks/gap-routine-semantic-dedup-scan-read-file-join-root-pair.md`
+
+## Blocker
+
+**2026-10-16T17:11:37.507Z — worker 未落地（exited-not-landed）**
+
+- 未落地原因：step=suite: incomplete suite (592/592 files) — recovery exhausted at floor concurrency 32 — no declared rung produced a complete verdict (64,48,32); needs a code/config fix, see plugin/scripts/full-suite-runner.ts
+- run_id：wk-prod-anchor
