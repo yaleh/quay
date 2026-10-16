@@ -84,9 +84,6 @@ exit 1
 - `goals/AC-310-重复副本清零-experiments-scripts-与-plugin-scripts-下同名-非符号链接且字节相同的文.md`
 - `tasks/gap-ac310-criterion-conflates-not-evaluated-with-copies-nonzero.md`
 
-## Blocker
-
-无。本任务是 AC-310 判据失败面的独立修复：产物是「判据在真实根上稳定且可区分地取到 `duplicateCopies`」，与任何在飞任务无文件交集（`task-granularity-advice.ts` 实测 `peers: []`）。
 ## Evidence
 
 ### AC1 — 两态可分（负控制两方向，词表互斥）
