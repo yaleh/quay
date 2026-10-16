@@ -8,7 +8,9 @@ goal: GOAL-025
 criterion: |
   f=plugin/scripts/sh-census-check.ts
   [ -f "$f" ] || { echo "CAUSE=checker-missing — $f 不存在，本量无法读取（不是 0）" >&2; exit 1; }
-  node --experimental-strip-types "$f" --json 2>/dev/null | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{const j=JSON.parse(s);process.exit(j.evaluated===true&&j.totals&&j.totals.duplicateCopies===0?0:1)}catch(e){process.exit(1)}})' || { echo "CAUSE=duplicate-copies-nonzero-or-not-evaluated — experiments/ 与 plugin/ 仍有非符号链接的字节相同副本，或检查器未评估" >&2; exit 1; }
+  cause=$(node -e '(()=>{const{spawnSync}=require("child_process");const one=s=>String(s).replace(/\s+/g," ").trim().slice(0,400);const r=spawnSync(process.execPath,["--experimental-strip-types",process.argv[1],"--json",...process.argv.slice(2)],{encoding:"utf8",maxBuffer:1<<28});let j=null;try{j=JSON.parse(String(r.stdout||""))}catch(e){}if(!j){process.stdout.write("CAUSE=checker-no-readable-output — 检查器 rc="+(r.status===null?"signal:"+r.signal:String(r.status))+" 未产出可解析 JSON："+(one(r.stderr||"")||"stdout 与 stderr 均为空"));return}if(j.evaluated!==true){process.stdout.write("CAUSE=not-evaluated:"+one(j.reason||"检查器未自报 reason"));return}const n=j.totals?j.totals.duplicateCopies:null;process.stdout.write(n===0?"":"CAUSE=duplicate-copies-nonzero — 实测 duplicateCopies="+JSON.stringify(n)+"，experiments/ 与 plugin/ 下仍有非符号链接的字节相同副本")})()' "$f" "$@")
+  rc=$?
+  [ "$rc" = 0 ] && [ -z "$cause" ] || { echo "${cause:-CAUSE=checker-helper-no-output — 判据助手未产出原因}" >&2; exit 1; }
 expect: exit 0（sh-census-check --json 的 evaluated===true 且
   totals.duplicateCopies===0）。失败时 exit 1 且 stderr 携带 CAUSE=…；⛔ echo … >&2 与 exit
   1 写在同一行。检查器不存在/未评估时同样 exit 1（不是 0）。
