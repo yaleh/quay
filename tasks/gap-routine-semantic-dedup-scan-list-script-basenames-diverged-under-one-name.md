@@ -3,7 +3,7 @@ id: gap-routine-semantic-dedup-scan-list-script-basenames-diverged-under-one-nam
 title: "semantic-dedup-scan: Identical bodies under one name, but one filters on
   EXEC_EXTENSIONS (.ts .sh .mjs .js .cjs .bash) and the other on
   SCRIPT_EXTENSIONS (.ts .sh .mjs), so the two"
-status: needs-human
+status: ready
 labels:
   - gap
   - routine-filed

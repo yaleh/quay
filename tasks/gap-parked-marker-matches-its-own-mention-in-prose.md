@@ -33,10 +33,10 @@ extra: {}
 
 ## Acceptance Criteria
 
-- [ ] AC1: 粘贴复现读数：一条正文散文里含该粗体字面量、首行无标记的任务 ⇒ `isParked` 报**真**，并给出命中位置（偏移 / 行号）。
-- [ ] AC2: 修复后同一夹具 ⇒ `isParked` 报**假**；而**首行**（含 `> ` 引用形式）的夹具仍报**真**（正控）。③ 附一条自检：**本任务自己的正文**（它记录了这个标记）⇒ `isParked` 必须为**假**。
-- [ ] AC3: 既有判据（`plugin/test/ready-pool-check-s09.test.mjs` 的 parked 用例等 22 片 + transition-writes + heartbeat）原样通过；⛔ 不得放宽或删除。
-- [ ] AC4: `scripts/test.sh --for-task <本任务>` 绿；anti-drift 报 OK（改动全在 Touches 内）。
+- [x] AC1: 粘贴复现读数：一条正文散文里含该粗体字面量、首行无标记的任务 ⇒ `isParked` 报**真**，并给出命中位置（偏移 / 行号）。 ——**复现读数（修复前，旧式 `/\*\*PARKED\b/i` 全文子串匹配）**：夹具正文首行无标记、该粗体字面量只出现在第 4 行散文 ⇒ `isParked` 报 **true**，命中偏移 87 / 第 4 行（**非首行**）。活受害者同形：`gap-suite-heavy-files-…` 删掉首行标记块后仍 true，命中偏移 12629 / 第 177 行（它自己那句 Evidence）。
+- [x] AC2: 修复后同一夹具 ⇒ `isParked` 报**假**；而**首行**（含 `> ` 引用形式）的夹具仍报**真**（正控）。③ 附一条自检：**本任务自己的正文**（它记录了这个标记）⇒ `isParked` 必须为**假**。 ——**修复后实测**：同一夹具 ⇒ `isParked` = **false**；正控 = 首行 `**…**` 粗体式 / `> ` 引用式 / 非首行的行首标记 ⇒ 全 **true**；③ 自检：**本任务自己的正文** ⇒ **false**（`isParked({body: 本任务 body})`）。另补两条负控：代码栅栏内逐字引用 ⇒ false、行内代码跨度引用 ⇒ false（`stripCodeSpansAndFences` 长度保持，偏移/行号仍指向原文）。
+- [x] AC3: 既有判据（`plugin/test/ready-pool-check-s09.test.mjs` 的 parked 用例等 22 片 + transition-writes + heartbeat）原样通过；⛔ 不得放宽或删除。 ——**实测 201 用例全绿**（`ready-pool-check-s01..s22` 22 片 + `ready-pool-check-transition-writes` + `ready-pool-heartbeat`）：0 fail；**未放宽、未删除任何既有断言**（既有 parked 用例 `s01:423` / `s09:96` 原样通过），只在 `s09` **新增** 5 条本缺陷的回归用例。
+- [x] AC4: `scripts/test.sh --for-task <本任务>` 绿；anti-drift 报 OK（改动全在 Touches 内）。 ——**两条门都绿**：`bash scripts/test.sh --for-task gap-parked-marker-matches-its-own-mention-in-prose --allow-thin` ⇒ **EXIT=0**；`anti-drift-touches-check.ts --task … --worktree <wt> --merge-target develop` ⇒ `ANTI-DRIFT OK — 2 actual file(s), all within declared Touches (3 glob(s))` **EXIT=0**。
 
 ## Definition of Done
 
