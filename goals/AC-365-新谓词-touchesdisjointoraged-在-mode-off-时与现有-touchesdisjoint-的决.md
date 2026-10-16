@@ -2,7 +2,7 @@
 id: AC-365
 title: 新谓词 touchesDisjointOrAged 在 mode=off 时与现有 touchesDisjoint
   的决策逐一相同；mode=shadow 时决策仍与 off 相同，只在 filter_trace 里标出「会被放宽」的候选
-status: draft
+status: active
 kind: criterion
 goal: GOAL-037
 criterion: >-
@@ -37,4 +37,15 @@ expect: plugin/test/touches-relax-off-parity.test.mjs 存在、在 55 秒内通�
   真的放行，本测试必须变红。先后提示：依赖 AC-362（filter_trace）与 AC-364（配置）；AC-366 依赖本条。
 origin: 用户 2026-10-16 认可方案 §3.1 与 §7：默认关闭时行为必须与现状逐字节相同，先影子后生效。依据：touches
   判定有预测力（落地相邻的重叠任务对重放合并，冲突率约 55–60%，对照 13–15%），不能在没有对照的情况下改变派发。
+activatedAt: 2026-10-16T15:37:49.435Z
+statusLog:
+  - at: 2026-10-16T15:37:49.435Z
+    from: draft
+    to: active
+    actor: goal-driver
+    reason: "triage: activate"
+fidelity:
+  verdict: faithful
+  reason: "fidelity judge: faithful"
+  at: 2026-10-16T15:37:49.435Z
 ---
