@@ -25,7 +25,7 @@ criterion: |
     console.log(r.id,"born="+born,"evidence.at="+((r.evidence&&r.evidence.at)||"none"),pass?"OK":"NO");
     if(pass)ok++;else noIds.push(r.id);
   }
-  process.exit(ok===need.length?0:(console.error("CAUSE=migrated-ac-evidence-not-at — every migrated AC needs evidence.at later than its file birth commit, ok "+ok+"/"+need.length),1));
+  process.exit(ok===need.length?0:(console.error("CAUSE=migrated-ac-evidence-not-at — migrated AC(s) with no evidence.at later than their birth commit — "+noIds.join(" | ")),1));
   '
 expect: exit 0
 origin: |-
