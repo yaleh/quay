@@ -5,7 +5,7 @@ status: achieved
 kind: criterion
 goal: GOAL-002
 criterion: |
-  node --no-warnings --experimental-strip-types -e 'import("yaml").then(y=>import("node:fs").then(fs=>{const p=y.parse(fs.readFileSync(".quay/profiles.yml","utf8"));const l=fs.readFileSync(".claude/launch.settings.json","utf8");process.exit(p&&p.profiles&&p.roles&&l.indexOf("_launchSpec")===-1?0:1)}))'
+  node --no-warnings --experimental-strip-types -e 'import("yaml").then(y=>import("node:fs").then(fs=>{const p=y.parse(fs.readFileSync(".quay/profiles.yml","utf8"));const l=fs.readFileSync(".claude/launch.settings.json","utf8");process.exit(p&&p.profiles&&p.roles&&l.indexOf("_launchSpec")===-1?0:(console.error("CAUSE=profile-separation-broken — .quay/profiles.yml must carry profiles+roles and .claude/launch.settings.json must not carry _launchSpec"),1))}))'
 expect: exit 0
 origin: >
   人 2026-08-23 裁定「前述可重用机制应当分层抽象，以支持这两层上的重用」；
