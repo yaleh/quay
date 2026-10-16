@@ -195,7 +195,7 @@ export {
 // AC152：派发前过滤的【可组合谓词列表】单一实现（driver-filters.ts）。worker 的派发环消费
 // applyTaskFilters（函数级复用，⛔ 不各写一遍）。readTaskStatus 亦上收到 driver-filters.ts，
 // 本文件 re-export 保持旧 import 面（worker-driver.test.mjs / computeLandingState 等）。
-import { applyTaskFilters, makeFilterContext, computeDispatchExclusion, readTaskStatus, advanceRetryCap, applyNeedsHumanTransition, reconcileNeedsHumanWithDisk, RETRY_CAP_DEFAULT, lastExitedNotLandedReason, exitedNotLandedAttempts, formatExitedNotLandedReason, syncDocDevelopBidirectional, WORKER_OUTCOME_REL, type RetryState, type ExitedNotLandedAttempt, type NeedsHumanKind } from "./driver-filters.ts";
+import { applyTaskFilters, makeFilterContext, computeDispatchExclusion, readTaskStatus, advanceRetryCap, applyNeedsHumanTransition, reconcileNeedsHumanWithDisk, RETRY_CAP_DEFAULT, lastExitedNotLandedReason, exitedNotLandedAttempts, formatExitedNotLandedReason, syncDocDevelopBidirectional, WORKER_OUTCOME_REL, type RetryState, type ExitedNotLandedAttempt, type NeedsHumanKind, type FilterTraceEntry } from "./driver-filters.ts";
 export { readTaskStatus, lastExitedNotLandedReason, exitedNotLandedAttempts, WORKER_OUTCOME_REL } from "./driver-filters.ts";
 // AC155：并发 cap / 轮询间隔 / 协调地板的单一真相源（drivers.yml 经 driver-config 加载，⛔ 不各写一份字面量、
 // ⛔ 不再读 QUAY_MAX_TASK_SUBAGENTS env——env 源已并入声明式配置）。
@@ -1923,6 +1923,14 @@ export function computeWorkerRoundRecord(opts: {
   /** SPEC-goal-branch §4.9（裁定⑧⑰）：本轮检出的「无 goal_ac 且 Touches 与 branch-mode goal 在飞任务
    *  重叠」读数（只报告不阻塞）。空数组 = 跑过且无重叠（⛔ 与「没跑」可区分——后者为 null）。 */
   goalBranchUntaggedOverlaps?: GoalBranchUntaggedOverlap[] | null;
+  /** GOAL-037（AC-362）：本轮 apply-filters 步的【逐候选 × 逐谓词】归因条目。三态可分（硬规则 3b，
+   *  同族先例见上面 supersededReclaim 的「跑过且无 / 没跑」约定）：
+   *    []    — 跑过该步、无候选被滤（含 pool-empty 轮：`shuffled.length === 0`）；
+   *    非空   — 跑过该步、逐条归因（一个候选可命中多个谓词 ⇒ 多条）；
+   *    null  — 本轮**没跑**该步（cap 已满 / stopCondition 提前 break / 在 apply-filters 之前抛错的
+   *            error 轮）。⛔ null ≠ []——一个 `filtered-empty` 字面量压掉的五种成因据此可分。
+   *  缺省 null = 没跑该步。 */
+  filterTrace?: FilterTraceEntry[] | null;
   /** 本轮因 kind 停机【脱钩】交给下一个循环的在飞 task（gap-worker-kind-stop-waits-for-all-in-flight-
    *  workers-instead-of-detaching-for-adoption）。非空 = 本循环退环时把它们的 adopt / 退出后 fan-in
    *  交给了下一个循环 ⇒ 「停机时留下在飞并退环」在盘上可读（生产 driver argv 无 --json，round 记录
@@ -1962,6 +1970,9 @@ export function computeWorkerRoundRecord(opts: {
     merge_targets: opts.mergeTargets ?? {},
     // SPEC-goal-branch §4.9：未标注重叠读数（空数组 = 跑过且无；null = 没跑该步）。
     goal_branch_untagged_overlaps: opts.goalBranchUntaggedOverlaps ?? null,
+    // GOAL-037（AC-362）：本轮 filtered-empty 的归因读数（空数组 = 跑过且无候选被滤；null = 没跑该步
+    // ——同 goal_branch_untagged_overlaps 的约定，硬规则 3b）。
+    filter_trace: opts.filterTrace ?? null,
     // gap-worker-kind-stop-…：kind 停机轮的在飞归宿（脱钩 / 不可脱钩）。恒有该字段（空数组 = 本轮无）。
     detached_workers: opts.detachedWorkers ?? [],
     undetachable_workers: opts.undetachableWorkers ?? [],
@@ -5977,6 +5988,11 @@ export async function runResidentLoop(opts: ResidentOptions): Promise<number> {
   // 且错误轮（janitor 步【之后】才抛错）也能带上「本轮真跑过」的读数（⛔ 不抹成 null = 不让「跑过」
   // 与「没跑」在错误轮上不可区分，硬规则 3b）。⛔ 缺省 null = 没跑该步 ≠ evaluated:true+branchCount:0。
   let releaseBranchJanitorResult: JanitorResult | null = null;
+  // 本轮 apply-filters 步的归因条目（GOAL-037 / AC-362）。声明位置与 pushLagReading 同族（while 之外 +
+  // 每轮开头复位）⇒ writeRound / writeErrorRound 直接从闭包读它，两处调用的签名逐字不变。三态可分
+  // （硬规则 3b）：null = 本轮【没跑】该步；[] = 跑过且无候选被滤；非空 = 逐条归因。同一轮多次进选择环
+  // ⇒ 逐次追加（⛔ 不跨轮——轮首复位，上一轮的条目不漏进本轮记录）。
+  let filterTrace: FilterTraceEntry[] | null = null;
   // 本轮 goal 分支读数（SPEC-goal-branch-2026-10-03 §4.3/§4.9）：① 每个在飞任务解析出的落地目标
   // （task id → "develop" / "goal/<id>"，回答裁定②的「无法区分」）；② 无 goal_ac 且 Touches 与
   // branch-mode goal 在飞任务重叠的未标注读数（裁定⑧⑰：只报告不阻塞）。声明位置与 pushLagReading 同族
@@ -6053,6 +6069,8 @@ export async function runResidentLoop(opts: ResidentOptions): Promise<number> {
       // SPEC-goal-branch §4.3/§4.9（闭包读，见 goalBranchTargets 的声明注释）。
       mergeTargets: goalBranchTargets ?? {},
       goalBranchUntaggedOverlaps: goalBranchOverlaps,
+      // GOAL-037（AC-362）（闭包读，见 filterTrace 的声明注释）：本轮 filtered-empty 的归因读数。
+      filterTrace,
       // gap-worker-kind-stop-waits-for-all-in-flight-workers-instead-of-detaching-for-adoption：
       // kind 停机轮里【脱钩交给下一个循环】与【不可脱钩（收尾流水线在跑）】的在飞 task。
       detachedWorkers: detached.detached,
@@ -6096,6 +6114,10 @@ export async function runResidentLoop(opts: ResidentOptions): Promise<number> {
       // SPEC-goal-branch §4.3/§4.9：同款——已跑过该步（闭包非 null）则带上，⛔ 不因 error 抹成 null。
       mergeTargets: goalBranchTargets ?? {},
       goalBranchUntaggedOverlaps: goalBranchOverlaps,
+      // GOAL-037（AC-362）：同款——归因步【之后】才抛错时本轮确实跑过它 ⇒ 带上读数（⛔ 不抹成 null，
+      // 否则「跑过且无候选被滤」与「没跑」在错误轮上不可区分，硬规则 3b）。在 apply-filters 之前抛错
+      // ⇒ 闭包仍为 null（本轮真没跑该步）。
+      filterTrace,
     });
     try { appendRoundToFile(roundFile, record); } catch { /* 记录写失败不致命（运行时日志，⛔ 不因日志炸循环） */ }
     if (json) process.stdout.write(`${JSON.stringify({ event: "round", ...record })}\n`);
@@ -6492,6 +6514,7 @@ export async function runResidentLoop(opts: ResidentOptions): Promise<number> {
     releaseBranchJanitorResult = null; // 每轮复位（同上：⛔ 上一轮的读数不漏进本轮）
     goalBranchTargets = null; // 每轮复位（同上：⛔ 上一轮的 goal 读数不漏进本轮）
     goalBranchOverlaps = null;
+    filterTrace = null; // 每轮复位（同上：⛔ 上一轮的归因条目不漏进本轮——「没跑该步 ⇒ null」据此成立）
     let poolSeen: number | null = null;
     let waitReason: string | null = null;
     let step = "start";
@@ -6636,7 +6659,14 @@ export async function runResidentLoop(opts: ResidentOptions): Promise<number> {
         // 与「真快速死亡退避」区分成两个独立 stop_reason 字面量——⛔ 共用 backoff 字面量会把「3 任务全进
         // needsHuman 集、无一次 <60s 快速死亡」误报成退避（硬规则 3b 同形：成因错归则下游改错）。
         step = "apply-filters";
-        const afterTaskFilters = applyTaskFilters(shuffled, makeFilterContext(rootDir, { inFlight: exclusion.inFlight, retryExhausted: exclusion.retryExhausted }));
+        // GOAL-037（AC-362）：归因走【新增的第 4 个可选参数】，⛔ 判定输入（候选列表 / ctx / names）
+        // 逐字不变——本步的返回集合与顺序因此逐个不变（AC9 特征化）。
+        const filterSink: FilterTraceEntry[] = [];
+        const afterTaskFilters = applyTaskFilters(shuffled, makeFilterContext(rootDir, { inFlight: exclusion.inFlight, retryExhausted: exclusion.retryExhausted }), undefined, (e) => filterSink.push(e));
+        // 跑过该步 ⇒ 至少是 []（⛔ 不是 null——「跑过且无候选被滤」与「没跑该步」必须可分，硬规则 3b）。
+        // 同一轮多次进选择环 ⇒ 追加；轮首已复位置 null ⇒ ⛔ 不跨轮累积。
+        if (filterTrace === null) filterTrace = filterSink;
+        else filterTrace.push(...filterSink);
         const candidates = afterTaskFilters
           // 快速死亡退避（gap-worker-driver-selector-api-error-no-backoff，AC2）：退避中的 task（backoffUntil
           // 未到）本轮不派——⛔ 只滤掉退避的 task，不滤掉别的候选（退避按 task 记，不全局）。now 每候选

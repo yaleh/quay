@@ -28,8 +28,10 @@ import { parseTask, readDependsOn, readTaskStatusAtRef } from "./task-schema.ts"
 import { splitTaskFile, statusFromFrontmatter, patchStatusField, commitTaskFile, hasPriorCommit } from "./task-ops.ts";
 // gap-task-status-events-contract-v1（本文件的两个 status writer 接线）：kernel 单一事件写入器 +
 // 转移表判 kind + git blob 摘要（`git hash-object` 的纯函数形）。⛔ 不在此重写「写事件」的第二份。
-import { edgeKindFor, appendTaskStatusEvent, gitBlobSha } from "../../packages/quay/src/kernel/task-transition.ts";
-import { parseTouches, checkTouchesPair } from "./touches-orthogonality-check.ts";
+// GOAL-037（AC-362）filtered-empty 归因：waitedMinutes 的载体读面 = kernel 单一转移视图读取器
+// （⛔ 不手搓 jsonl 解析，硬规则 1）。
+import { edgeKindFor, appendTaskStatusEvent, gitBlobSha, readTaskStatusTransitions } from "../../packages/quay/src/kernel/task-transition.ts";
+import { parseTouches, checkTouchesPair, normalizePath } from "./touches-orthogonality-check.ts";
 import { expandDeclaredTouches } from "./concurrent-batch-scheduler.ts";
 // gap-develop-sync-reset-hard-destroys-third-party-project-tree：终局解可弃性判定复用【既有的】
 // 任务板/文档面清单（⛔ 不重写第二份——driver-filters.ts 自己的头注释即「不重写、只复用」）。
@@ -1263,11 +1265,121 @@ export const TASK_FILTERS: readonly TaskFilter[] = [
   notNeedsHuman,
 ];
 
+// ── GOAL-037 方案第 0 步：filtered-empty 轮的【逐候选 × 逐谓词】归因（⛔ 只增观测） ────────────────
+//
+// WHY（AC-362）：`filtered-empty` 这一个 stop_reason 字面量把五种互不相同的成因压成同形——候选分别被
+// notInFlight / depsSatisfied / touchesDisjoint / retryCapNotExhausted / notNeedsHuman 滤掉。要判
+// 「touches 单独把某任务挡了超过阈值 ⇒ 允许放宽」时，现有载体答不出「哪些候选是被 touches 挡的、被谁
+// 挡的、挡了多久」⇒ 阈值/名额/自动收紧都无读数可依（硬规则 4 推论三：先要有穿过所有中间层、验收那
+// 一刻仍取得到的量，才谈得上给它设阈值）。本条【只加观测】：applyTaskFilters 的返回集合与顺序逐个
+// 不变，trace 走新增的可选参数，两个 driver 既有调用位点的判定输入不动。
+
+/** 一个被滤掉的（候选 × 谓词）判定。`blocker` / `overlapFiles` **仅** touchesDisjoint 条目非空；
+ *  `waitedMinutes` 读不到 ⇒ `null`（⛔ 不写 0——缺值 = 未查，硬规则 6）。 */
+export interface FilterTraceEntry {
+  /** 被滤掉的候选 task id。 */
+  task: string;
+  /** 滤掉它的谓词名（= 该谓词自己的 `TaskFilter.name`，⛔ 不另抄一份字面量——新增谓词仍只是一行）。 */
+  filter: string;
+  /** 仅 `touchesDisjoint` 非 null：`ctx.inFlight` 中【第一个】与其重叠的在飞 task id（顺序确定 ⇒
+   *  读数可复现）。其余谓词恒 `null`。⚠️ 多对手时只记第一个——本条只做 AC 逐字要求的单 blocker 形状。 */
+  blocker: string | null;
+  /** 仅 `touchesDisjoint` 非空：由【真实】`checkTouchesPair(...).overlaps` 得出的交集（沿用其排序）。
+   *  ⛔ 已排除候选自身的任务文件 `tasks/<候选 id>.md`（自 touch 会把该路径带进展开集，不是与对手的
+   *  冲突面；排除后 blocker 仍被点名，可归因性不受损）。 */
+  overlapFiles: string[];
+  /** 「现在」与 `.quay/task-status-events.jsonl` 中该任务【第一条 `to:"ready"`】记录时刻之差（分钟）。
+   *  读不到（无该记录 / 载体不可读）⇒ `null`（⛔ 不写 0）。 */
+  waitedMinutes: number | null;
+}
+
+/** trace 汇：`applyTaskFilters` 每发现一个被滤掉的（候选 × 谓词）就调用一次（逐条，⛔ 不短路）。 */
+export type FilterTraceSink = (entry: FilterTraceEntry) => void;
+
+/** 读一次 `.quay/task-status-events.jsonl`，建 task → 【首个】`to:"ready"` 时刻(ms) 的映射。
+ *  ⛔ 每轮读一次（trace 路径上只调一次），⛔ 不逐候选重读全量 jsonl；解析走 kernel 的
+ *  `readTaskStatusTransitions`（硬规则 1：⛔ 不手搓 jsonl 解析）。载体不可读 ⇒ 空映射 ⇒ 下游
+ *  `waitedMinutes: null`（「读不到」，⛔ 不伪装成 0）。 */
+export function buildReadyAtMsMap(root: string): Map<string, number> {
+  const map = new Map<string, number>();
+  let transitions: ReturnType<typeof readTaskStatusTransitions>["transitions"];
+  try {
+    transitions = readTaskStatusTransitions(root).transitions;
+  } catch {
+    return map; // 读不到 ⇒ 空映射（下游 null），⛔ 不抛、⛔ 不写成 0
+  }
+  for (const t of transitions) {
+    if (t.to !== TASK_STATUS.READY) continue;
+    const at = Date.parse(t.at);
+    if (!Number.isFinite(at)) continue;
+    // 载体序 ⇒ 首条即「第一次进入 ready」；⛔ 后来的 ready 记录不覆盖（硬规则 6 的另一半：不静默改判）。
+    if (!map.has(t.taskId)) map.set(t.taskId, at);
+  }
+  return map;
+}
+
+/** touchesDisjoint 条目的归因面：对每个在飞对手跑【真实】`checkTouchesPair`，取首个非互斥者作
+ *  `blocker`，其 `overlaps`（已排序）去掉候选自身任务文件后作 `overlapFiles`。
+ *  ⛔ 不重写重叠数学（单一真相源 = touches-orthogonality-check 的 `parseTouches`/`checkTouchesPair`/
+ *  `normalizePath` + concurrent-batch-scheduler 的 `expandDeclaredTouches`）；本函数只【再调一次】
+ *  它们。存在这一份重复的读取闭包，正是因为 `touchesDisjoint` 谓词本身必须逐字不变（AC9 / Plan 1
+ *  「五个谓词的实现一处不改」）——语义随谓词变化的方式，是两者读同一批单一真相源函数。 */
+function makeTouchesAttributor(ctx: FilterContext): (id: string) => { blocker: string | null; overlapFiles: string[] } {
+  const expand = (globs: string[]) => expandDeclaredTouches(globs, ctx.root);
+  const readTouches = (id: string) => {
+    const file = path.join(ctx.root, "tasks", `${id}.md`);
+    let raw: string;
+    try {
+      raw = fs.readFileSync(file, "utf8");
+    } catch {
+      return { hasSection: false, globs: [] as string[] };
+    }
+    return parseTouches(parseTask(raw).body);
+  };
+  return (id: string) => {
+    const self = readTouches(id);
+    // 候选自身的任务文件（规范化后比较；展开集里的条目由 normalizePath 产出）。
+    const selfTaskFile = normalizePath(path.join("tasks", `${id}.md`));
+    for (const other of ctx.inFlight) {
+      const pair = checkTouchesPair(self, readTouches(other), expand);
+      if (pair.disjoint) continue;
+      return { blocker: other, overlapFiles: pair.overlaps.filter((f) => normalizePath(f) !== selfTaskFile) };
+    }
+    return { blocker: null, overlapFiles: [] };
+  };
+}
+
 /** 对候选 id 列表应用谓词列表（缺省 = 全部 TASK_FILTERS；`names` 传子集——promotion 的 fix pass
  *  只消费 retryCapNotExhausted / notNeedsHuman，其余（deps/touches/in-flight）由 ready-pool-check 的
- *  eligible 已在闸内判定，再滤一遍会丢掉 AC134 的 skip 台账）。谓词逐个构造一次，再逐候选判定。 */
-export function applyTaskFilters(candidateIds: string[], ctx: FilterContext, names?: readonly string[]): string[] {
+ *  eligible 已在闸内判定，再滤一遍会丢掉 AC134 的 skip 台账）。谓词逐个构造一次，再逐候选判定。
+ *
+ *  `trace`（GOAL-037，新增【可选】参数）：给了就逐候选 × 逐谓词判定，**被滤掉的**（候选 × 谓词）
+ *  各产生一条 `FilterTraceEntry`（⛔ 不短路——一个候选可命中多个谓词，五个成因必须各自可辨）。
+ *  ⛔ 给了 trace 也不改下面的返回表达式：集合与顺序逐个不变（AC9 特征化）。 */
+export function applyTaskFilters(candidateIds: string[], ctx: FilterContext, names?: readonly string[], trace?: FilterTraceSink | null): string[] {
   const filters = names ? TASK_FILTERS.filter((f) => names.includes(f.name)) : [...TASK_FILTERS];
   const preds = filters.map((f) => f.predicate(ctx));
+  if (trace) {
+    // 载体每轮读一次并建映射（⛔ 不逐候选重读全量 jsonl）；now 本轮取一次，条目间的差只反映
+    // ready 时刻之差（AC8 的 Δ 断言据此成立）。
+    const readyAtMs = buildReadyAtMsMap(ctx.root);
+    const nowMs = Date.now();
+    const touchesAt = makeTouchesAttributor(ctx);
+    for (const id of candidateIds) {
+      for (let i = 0; i < filters.length; i++) {
+        if (preds[i](id)) continue; // 该谓词保留了候选 ⇒ 无条目
+        const name = filters[i].name;
+        const att = name === touchesDisjoint.name ? touchesAt(id) : { blocker: null, overlapFiles: [] as string[] };
+        const readyAt = readyAtMs.get(id);
+        trace({
+          task: id,
+          filter: name,
+          blocker: att.blocker,
+          overlapFiles: att.overlapFiles,
+          waitedMinutes: readyAt === undefined ? null : Math.floor((nowMs - readyAt) / 60000),
+        });
+      }
+    }
+  }
   return candidateIds.filter((id) => preds.every((p) => p(id)));
 }
