@@ -13,9 +13,15 @@
 //   3. 判词载体（.quay/architecture-review-round.jsonl）的写端单一真相源——driver 经同一函数写，
 //      ⛔ 不各写一份（双 writer 同形，参照 verification-round / quality-round 的既有教训）。
 //
-// 三态（AC3，硬规则 3b）：judged = 判过且有结果；failed = 判词解析/执行失败；not-triggered = 机械
-// 触发未命中（候选簇为空）。三者 state 取值不同，⛔ 「读不懂」不得与「合格」同形。判词为空不写空
-// judged 记录（同 gap-pool-quality-verdicts-never-persisted AC1 的纪律）。
+// 四态（AC3 + gap-architecture-review-not-triggered-lacks-per-detector-state，硬规则 3b）：
+// judged = 判过且有结果；failed = 判词解析/执行失败；not-triggered = **三个检测器都评估过**且候选簇为空；
+// not-evaluated = 至少一个检测器没有候选宇宙/只覆盖了一部分（读不懂）。四者 state 取值不同，
+// ⛔ 「没有东西可判」不得与「判过且干净」同形。判词为空不写空 judged 记录（同 gap-pool-quality-
+// verdicts-never-persisted AC1 的纪律）。
+//
+// per-detector 状态（本模块的 `ArchReviewDetectorState`）是这条纪律的载体：每条 round 记录带
+// `detectors: [{id, evaluated, reason, clusters}]`，于是下游（以及一条 jq 命令）能验证
+// `state === "not-triggered" ⇒ detectors.every(d => d.evaluated && d.clusters.length === 0)`。
 //
 // 本文件不 auto-file 任务、不改任何任务 status（AC4 硬边界）——只产出读数。
 //
@@ -68,6 +74,10 @@ export interface IdentityReportView {
   // ⛔ 不消费 `flagged`：那是 `sharedModuleControl`（单实体）独有的派生字段，`table[]` 行上没有
   // （照字面「读 row.flagged」读不到 ⇒ `undefined` ⇒ 判据恒真，硬规则 4）。
   table?: Array<{ entity?: string; code?: number; accessor?: number; hardcoded?: number; codeFiles?: string[] }>;
+  /** 本检测器在 `--root` 上【扫描面】的在否（检测器自己的三态：full / absent）。
+   *  这是 per-detector `evaluated` 的判据：`absent` 意味着那些读数**结构上取不到**，
+   *  ⛔ 不得与「扫过且零命中」同形（gap-architecture-review-not-triggered-lacks-per-detector-state）。 */
+  rootSurface?: { kind?: string; note?: string | null };
 }
 
 /** guard-lineage-check.ts --json（P4）里聚类消费的面。 */
@@ -77,6 +87,8 @@ export interface LineageReportView {
    *  `file` = 随仓入库、缺失即真删除；`invariant` = 无文件可指；`runtime` = gitignored 运行时载体
    *  （快照存在性不可判）。⛔ 只看 `present` 分不出「真缺」与「读不懂」——那正是本缺陷的成因形态。 */
   declared?: Array<{ basename?: string; dir?: string; kind?: string; present?: boolean | null }>;
+  /** 守卫枚举面的在否（检测器自己的三态：full / absent）。per-detector `evaluated` 的判据。 */
+  rootSurface?: { kind?: string; note?: string | null };
 }
 
 /** deletion-closure-check.ts --json（P1）里聚类消费的面。 */
@@ -84,6 +96,9 @@ export interface DeletionReportView {
   components?: string[];
   dc?: string[];
   counts?: { dcTotal?: number; callGraphTotal?: number; ratio?: number | null };
+  /** 代码根覆盖面的在否（检测器自己的三态：full / partial）。per-detector `evaluated` 的判据：
+   *  `partial` 表示闭包只覆盖了在场根 —— reason 里必须带上，⛔ 不静默当成完整读数。 */
+  rootSurface?: { kind?: string; note?: string | null };
 }
 
 // ── 候选簇 ──────────────────────────────────────────────────────────────────────────────────────
@@ -268,36 +283,188 @@ export function deletionClosureComponents(r: IdentityReportView, max = 3): strin
     .map((row) => row.entity as string);
 }
 
+/** 逐检测器的候选簇（per-detector 状态的输入面）。PURE。 */
+export interface DetectorClusters {
+  identity: Cluster[];
+  lineage: Cluster[];
+  deletion: Cluster[];
+}
+
+/** 逐检测器聚类——**同一份** per-source 函数被 clusterDetectorOutputs 与 per-detector 状态共用，
+ *  ⛔ 不各算一遍（两份计数必然漂移）。PURE。 */
+export function clusterByDetector(args: {
+  identity: IdentityReportView;
+  lineage: LineageReportView;
+  deletion: DeletionReportView;
+}): DetectorClusters {
+  return {
+    identity: clusterIdentityReport(args.identity),
+    lineage: clusterLineageReport(args.lineage),
+    deletion: clusterDeletionReport(args.deletion),
+  };
+}
+
+/** 把逐检测器簇合并成统一的候选簇列表（确定性排序：rawCount desc → clusterId）。PURE。 */
+export function flattenDetectorClusters(d: DetectorClusters): Cluster[] {
+  return [...d.identity, ...d.lineage, ...d.deletion]
+    .sort((a, b) => b.rawCount - a.rawCount || a.clusterId.localeCompare(b.clusterId));
+}
+
 /** 把三个检测器的 `--json` 输出聚合成统一的候选簇列表（确定性排序：rawCount desc → clusterId）。PURE。 */
 export function clusterDetectorOutputs(args: {
   identity: IdentityReportView;
   lineage: LineageReportView;
   deletion: DeletionReportView;
 }): Cluster[] {
-  const clusters = [
-    ...clusterIdentityReport(args.identity),
-    ...clusterLineageReport(args.lineage),
-    ...clusterDeletionReport(args.deletion),
-  ];
-  return clusters.sort((a, b) => b.rawCount - a.rawCount || a.clusterId.localeCompare(b.clusterId));
+  return flattenDetectorClusters(clusterByDetector(args));
 }
 
 // ── 触发（机械，能取假：候选簇为空 ⇒ 不触发）────────────────────────────────────────────────────
+// gap-architecture-review-not-triggered-lacks-per-detector-state：旧实现只问「簇是否为空」，于是
+// 「三个检测器都评估过且干净」与「检测器没有候选宇宙（非 quay 树上的常态）」共用 `not-triggered`
+// 这一个输出 —— 真实宿主 ClaudeCodeUI 的 83/83 轮全零就被读成「干净」。现在**每个检测器自报**
+// evaluated/reason/clusters，触发判定据三分支：
+//   · 有簇                         ⇒ triggered（照常判）
+//   · 无簇 ∧ 每个检测器 evaluated   ⇒ not-triggered（这是「干净」的**真条件**）
+//   · 无簇 ∧ 任一检测器未评估       ⇒ not-evaluated（⛔ 不伪装成干净）
+
+/** 三个检测器在 per-detector 状态里的稳定身份（载体成员的 `id`）。 */
+export const ARCH_REVIEW_DETECTOR_IDS = {
+  identity: "P2-identity-replication",
+  lineage: "P4-guard-lineage",
+  deletion: "P1-deletion-closure",
+} as const;
+
+/** 一个检测器本轮的自报态（**输入侧**：clusters 是完整簇对象）。 */
+export interface DetectorProbe {
+  id: string;
+  evaluated: boolean;
+  reason: string;
+  clusters: Cluster[];
+}
+
+/** 一个检测器本轮的自报态（**载体侧**：clusters 是 clusterId 数组——AC2 的
+ *  `d.clusters.length === 0` 因而是可以从 round jsonl 直接求值的谓词）。 */
+export interface ArchReviewDetectorState {
+  id: string;
+  evaluated: boolean;
+  reason: string;
+  clusters: string[];
+}
+
+export type ArchReviewTriggerState = "triggered" | "not-triggered" | "not-evaluated";
 
 export interface ArchReviewTrigger {
   fired: boolean;
   reasons: string[];
   clusterCount: number;
+  /** 三分支取值（见本节顶部注释）；`not-triggered` **仅当** `detectors.every(d => d.evaluated
+   *  && d.clusters.length === 0)` 时成立（AC2 的蕴含关系由本函数构造性保证）。 */
+  state: ArchReviewTriggerState;
+  detectors: ArchReviewDetectorState[];
 }
 
-/** 机械触发：有候选簇 ⇒ 该 judge（⛔ 不设数值阈值——成本结构未知前不设字面量，硬规则 4 推论）。PURE。 */
-export function computeArchReviewTrigger(clusters: Cluster[]): ArchReviewTrigger {
-  const fired = clusters.length > 0;
-  return { fired, reasons: fired ? [`candidate-clusters=${clusters.length}`] : [], clusterCount: clusters.length };
+/** 机械触发：有候选簇 ⇒ 该 judge（⛔ 不设数值阈值——成本结构未知前不设字面量，硬规则 4 推论）。
+ *  PURE。`detectors` 为空数组时 ⛔ 不返回 not-triggered（空 `every` 是恒真——硬规则 4：
+ *  一个结构上不可能取假的读数不是测量）。 */
+export function computeArchReviewTrigger(detectors: DetectorProbe[]): ArchReviewTrigger {
+  const states: ArchReviewDetectorState[] = detectors.map((d) => ({
+    id: d.id,
+    evaluated: d.evaluated,
+    reason: d.reason,
+    clusters: d.clusters.map((c) => c.clusterId),
+  }));
+  const clusterCount = states.reduce((n, d) => n + d.clusters.length, 0);
+  const fired = clusterCount > 0;
+  const allEvaluatedAndClean = states.length > 0
+    && states.every((d) => d.evaluated && d.clusters.length === 0);
+  const state: ArchReviewTriggerState = fired
+    ? "triggered"
+    : allEvaluatedAndClean
+      ? "not-triggered"
+      : "not-evaluated";
+  const reasons = fired
+    ? [`candidate-clusters=${clusterCount}`]
+    : state === "not-evaluated"
+      ? states.filter((d) => !d.evaluated).map((d) => `detector-not-evaluated:${d.id}: ${d.reason}`)
+      : [];
+  return { fired, reasons, clusterCount, state, detectors: states };
+}
+
+/** 检测器自报的 `rootSurface` → (evaluated, reason)。PURE。
+ *  `kind === "full"` ⇒ 本轮根上该检测器的面可读；其余（absent / 缺失 / 未知取值）⇒ 未评估，
+ *  reason 带上检测器自己的 note（硬规则 3b：面不在 ≠ 扫过且干净；缺字段 ≠ 合格）。
+ *  P2/P4 用本函数；P1 的候选宇宙由 P2 报告推导，故走 `deletionDetectorEvaluation`。 */
+export function detectorEvalFromSurface(
+  surface: { kind?: string; note?: string | null } | undefined,
+  detector: string,
+): { evaluated: boolean; reason: string } {
+  if (!surface || typeof surface !== "object") {
+    return {
+      evaluated: false,
+      reason: `${detector} output carries no rootSurface — cannot distinguish an absent scan surface from a measured-clean one`,
+    };
+  }
+  if (surface.kind === "full") {
+    return { evaluated: true, reason: `${detector} rootSurface full` };
+  }
+  const note = typeof surface.note === "string" && surface.note.trim().length > 0 ? surface.note.trim() : null;
+  return {
+    evaluated: false,
+    reason: note ?? `${detector} rootSurface kind=${surface.kind ?? "(missing)"} — the scan surface is not present under this root`,
+  };
+}
+
+/** P1 的候选宇宙**派生自 P2 报告**（`deletionClosureComponents`），因此它的 evaluated 也是派生的：
+ *  · components 为空时：上游 identity 评估过 ⇒ 空宇宙是**测量结果**（evaluated:true，理由点名上游）；
+ *    上游未评估 ⇒ 宇宙未知（evaluated:false）——⛔ 不让「上游没读成」伪装成「P1 判过且干净」。
+ *  · components 非空时：检测器跑过 ⇒ evaluated:true；rootSurface 缺失 ⇒ false（覆盖范围读不出）；
+ *    `partial` ⇒ 仍算评估过，但理由必须带上检测器自己的 note（覆盖范围是读数的一部分）。
+ *  PURE。 */
+export function deletionDetectorEvaluation(args: {
+  components: string[];
+  identityEvaluated: boolean;
+  deletionSurface?: { kind?: string; note?: string | null };
+}): { evaluated: boolean; reason: string } {
+  if (args.components.length === 0) {
+    return args.identityEvaluated
+      ? {
+          evaluated: true,
+          reason: "no candidate components — upstream identity-replication evaluated and flagged none (measured-empty candidate universe)",
+        }
+      : {
+          evaluated: false,
+          reason: "no candidate components and upstream identity-replication was not evaluated — candidate universe unknown",
+        };
+  }
+  const surface = args.deletionSurface;
+  if (!surface || typeof surface !== "object") {
+    return {
+      evaluated: false,
+      reason: "deletion-closure output carries no rootSurface — cannot distinguish a partial scan from a complete one",
+    };
+  }
+  // 只认检测器自己的两个取值（full / partial）。未知取值 ⇒ 未评估（⛔ 「读不懂」不得落进
+  // 「评估过」那一支——同硬规则 3b；这与 P2/P4 的 full-only 判据方向一致）。
+  if (surface.kind !== "full" && surface.kind !== "partial") {
+    return {
+      evaluated: false,
+      reason: `deletion-closure rootSurface kind=${surface.kind ?? "(missing)"} — unrecognized coverage reading`,
+    };
+  }
+  const note = typeof surface.note === "string" && surface.note.trim().length > 0 ? surface.note.trim() : null;
+  const caveat = surface.kind === "full"
+    ? ""
+    : ` (${note ?? `rootSurface kind=${surface.kind ?? "(missing)"}`})`;
+  return {
+    evaluated: true,
+    reason: `deletion-closure evaluated over ${args.components.length} candidate component(s)${caveat}`,
+  };
 }
 
 // ── 判词载体（.quay/architecture-review-round.jsonl — 逐簇判词的持久化载体）──────────────────────
-// 三态（AC3，硬规则 3b）：judged / failed / not-triggered。写端单一真相源——driver 经本函数写。
+// 四态（AC3 + gap-architecture-review-not-triggered-lacks-per-detector-state，硬规则 3b）：
+// judged / failed / not-triggered / not-evaluated。写端单一真相源——driver 经本函数写。
 // ⛔ 不 auto-file、不改 status（AC4 硬边界）。
 
 export const ARCH_REVIEW_ROUND_REL = path.join(".quay", "architecture-review-round.jsonl");
@@ -307,8 +474,8 @@ export function archReviewRoundPath(root: string): string {
   return path.join(root, ARCH_REVIEW_ROUND_REL);
 }
 
-/** 载体记录三态（AC3）。 */
-export type ArchReviewState = "judged" | "failed" | "not-triggered";
+/** 载体记录四态（AC3）。 */
+export type ArchReviewState = "judged" | "failed" | "not-triggered" | "not-evaluated";
 
 /** 逐簇判词（≥5 键：clusterId/primitive/files/verdict/reasoning/judgedAt/round + suggestedAction/label）。 */
 export interface ArchReviewClusterVerdict {
@@ -328,7 +495,7 @@ export interface ArchReviewClusterVerdict {
   round: number;
 }
 
-/** 载体记录（一行 = 一次架构复核完成/失败/未触发的三态）。 */
+/** 载体记录（一行 = 一次架构复核完成/失败/未触发/未评估）。 */
 export interface ArchReviewRoundRecord {
   round: number;
   judgedAt: string;
@@ -336,16 +503,21 @@ export interface ArchReviewRoundRecord {
   triggerReasons: string[];
   clusterCount: number;
   clusters: ArchReviewClusterVerdict[];
+  /** per-detector 自报态（AC3）：**每条**记录都带，故「not-triggered 蕴含每个检测器都评估过且没有簇」
+   *  可以从载体本身一条命令验证（硬规则 3b：读数必须能取假）。 */
+  detectors: ArchReviewDetectorState[];
   reason?: string;
 }
 
-/** 构造载体记录（单一真相源）。PURE。 */
+/** 构造载体记录（单一真相源）。PURE。`detectors` 必填：漏传时构造出来的记录无法回答
+ *  「本轮每个检测器到底评估过没有」，正是本缺陷要消灭的形状（⛔ 不 default 成 []）。 */
 export function buildArchReviewRoundRecord(args: {
   round: number;
   judgedAt: string;
   state: ArchReviewState;
   triggerReasons: string[];
   clusters: ArchReviewClusterVerdict[];
+  detectors: ArchReviewDetectorState[];
   reason?: string;
 }): ArchReviewRoundRecord {
   const rec: ArchReviewRoundRecord = {
@@ -355,6 +527,7 @@ export function buildArchReviewRoundRecord(args: {
     triggerReasons: args.triggerReasons,
     clusterCount: args.clusters.length,
     clusters: args.clusters,
+    detectors: args.detectors,
   };
   if (args.reason !== undefined) rec.reason = args.reason;
   return rec;
@@ -491,10 +664,15 @@ export function appendSubmission(root: string, record: SubmissionRecord): string
   return p;
 }
 
-/** 追加写一条载体记录（mkdir -p + append，一行一 JSON，⛔ 不截断）。state=judged 且判词为空时拒写。 */
+/** 追加写一条载体记录（mkdir -p + append，一行一 JSON，⛔ 不截断）。state=judged 且判词为空时拒写。
+ *  `detectors` 缺失/非数组时同样拒写（AC3 的载体不变式——「没带 per-detector 状态」的记录会让
+ *  `not-triggered` 重新变成不可验证的断言）。 */
 export function appendArchReviewRound(root: string, record: ArchReviewRoundRecord): string {
   if (record.state === "judged" && record.clusters.length === 0) {
     throw new Error("refusing to write an empty judged architecture-review-round record (判词为空不写空记录)");
+  }
+  if (!Array.isArray(record.detectors)) {
+    throw new Error("refusing to write an architecture-review-round record without a detectors array (AC3)");
   }
   const p = archReviewRoundPath(root);
   fs.mkdirSync(path.dirname(p), { recursive: true });

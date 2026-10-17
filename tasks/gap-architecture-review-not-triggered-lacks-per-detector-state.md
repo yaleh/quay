@@ -1,7 +1,7 @@
 ---
 id: gap-architecture-review-not-triggered-lacks-per-detector-state
 title: architecture-review 的 not-triggered 缺 per-detector 状态——「无候选宇宙」与「三检测器都评估且干净」同形
-status: ready
+status: done
 labels:
   - gap
 parent: null
@@ -47,3 +47,11 @@ round 状态三态化（judged / not-triggered / not-evaluated），per-detector
 - AC2 一条命令（在写出的 `.quay/architecture-review-round.jsonl` 上）：`jq -e 'select(.state=="not-triggered") | [.detectors[] | (.evaluated and ((.clusters|length)==0))] | all'` ⇒ `true`（exit 0）；同一载体里的 `not-evaluated` 记录是负控制（`evaluated:false` 与 not-triggered 可区分）。
 - AC3 载体形态：两条记录分别为 `{"state":"not-triggered","detectors":[{id,evaluated,reason,clusters},…]}` 与 `{"state":"not-evaluated","detectors":[…evaluated:false + reason…]}`；`appendArchReviewRound` 对缺 `detectors` 的记录拒写。
 - 真实检测器 · 本 quay worktree：identity/guard-lineage `rootSurface.kind="full"`，P1 无候选构件但上游已评估 ⇒ `evaluated:true`（reason 点明 measured-empty candidate universe），触发态 `triggered`（有 1 个 P2 簇）。
+
+## Blocker
+
+**2026-10-17T05:19:29.125Z — worker 未落地（exited-not-landed）**
+
+- 未落地原因：step=suite: AssertionError [ERR_ASSERTION]: the on/off wall-clock delta is within the 1% budget (measured 2.16%) [baseline A/B: HARD RED (changed-assertion) — the task's red set is NOT a subset of the develop baseline red set: added=- changed=plugin/test/full-suite-runner-cgroup.test.mjs]
+- run_id：wk-prod-anchor
+- session_id：637b8f97-73fd-48ae-9d6e-f61333c1a03d
