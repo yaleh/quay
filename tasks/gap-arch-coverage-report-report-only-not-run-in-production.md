@@ -23,7 +23,7 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假·生产产出）落地后一条 post-landing 例程轮在覆盖率载体里产生新记录（真跑，非仅实现）；无新记录即假。（待外部）
+- [x] AC1（能取假·生产产出）落地后一条 post-landing 例程轮在覆盖率载体里产生新记录（真跑，非仅实现）；无新记录即假。（待外部）
 - [x] AC2（未评估可见）载体记录含 NOT-EVALUATED 计数，且对无分析器的语言（mjs/js/sh/py）非零。
 - [x] AC3（非 ratchet）report-only：NOT-EVALUATED 非零不使例程轮 failed（区别于「红了」）。
 
@@ -51,3 +51,4 @@ arch-coverage-report 在例程/报表位真跑并留可查基线；NOT-EVALUATED
 - **AC1（待外部）** —— 生产调度轮需要两步外部动作（本 worker 不代做）：① 落地后 quality driver 重启并加载新代码；② 在主检出 `.quay/config.yml` 的 `loop:` 下声明：
   `arch_coverage_report:` / `enabled: true` / `interval: interval:360m`
   （该文件 gitignored、不进任何分支；例程是该族的 **off by default**，未声明 ⇒ 例程表不变且零写入——这正是 AC144「恰好四条」得以保持的原因）。取假判据：落地后 `.quay/arch-coverage-history.jsonl` 中出现 `ts` 晚于落地的记录；无新记录即假。本 worker ⛔ 不代判该生产时间窗。
+- **AC1（待外部 → 已满足）** —— 生产例程轮在落地后真跑：`.quay/arch-coverage-history.jsonl` 记录 `ts=2026-10-17T07:02:50.500Z` > 落地时刻 `2026-10-17T05:49:20.592Z`，`runner:"arch-coverage-report.ts"`、`evaluated:true`、`notEvaluatedLanguageCount:4`（mjs/js/sh/py, no-analyzer）、ts 覆盖 515/523=98.5%、`globalScopeKind:"whole-repo"`（不计入覆盖）。触发 = `loop.arch_coverage_report: enabled:true, interval:360m` 声明 + `quay driver restart --kind quality`。
