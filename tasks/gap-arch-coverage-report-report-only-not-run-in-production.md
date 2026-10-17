@@ -1,7 +1,7 @@
 ---
 id: gap-arch-coverage-report-report-only-not-run-in-production
 title: arch-coverage-report 是 report-only、生产从不跑——「哪些目录没有任何分析器到达」仍不可查
-status: todo
+status: needs-human
 labels:
   - gap
 parent: null
@@ -38,3 +38,8 @@ arch-coverage-report 在例程/报表位真跑并留可查基线；NOT-EVALUATED
 - plugin/test/arch-coverage-report.test.mjs（基线载体写入断言）
 - plugin/test/quality-gate-driver.test.mjs（例程轨接线断言）
 - tasks/gap-arch-coverage-report-report-only-not-run-in-production.md
+## Needs-Human
+
+**执行 2026-10-17T05:01:09.417Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：unsatisfiableUnannotatedAc=[AC1（能取假·生产产出）落地后一条 post-landing 例程轮在覆盖率载体里产生新记录（真跑，非仅实现）；无新记录即假。]（连续 3 轮被结构上不可派的拦截挡住 ⇒ 作者/人改写；⛔ 不派 fix worker）
