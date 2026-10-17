@@ -14,7 +14,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
-import { sourceRefOf, cleanTreeCheck } from "../src/fan-in/ff-merge.ts";
+import { sourceRefOf, cleanTreeCheck, extractFfErrorReason } from "../src/fan-in/ff-merge.ts";
 
 test("sourceRefOf — absent/blank --source-ref falls back to the task branch; a ref or SHA overrides", () => {
   // Default (the existing task path, byte-for-byte unchanged): the task branch.
@@ -72,4 +72,61 @@ test("cleanTreeCheck — goals/<id>.lock 是 manifest 运行产物 ⇒ clean；�
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
+});
+
+// ── extractFfErrorReason — the retry ledger's `error` field (the REASON, not git's banner) ───────────
+// gap-cross-project-dogfood-claudecodeui-c1-ccx5t6. The fixtures below are REAL git output captured on
+// this host (two-commit scratch repos), not hand-authored shapes:
+//   push mode   `git push . <stale>:refs/heads/develop`   → opens with the banner `To .`
+//   merge mode  `git merge --ff-only task/x` (diverged)   → opens with a `hint:`, states the cause last
+// The production mode is PUSH (the main checkout sits on `author`, not on `develop`), so the banner
+// case is the one that produced 145 of this repo's 345 retry records verbatim `"error":"To ."`.
+const PUSH_NON_FF = [
+  "To .",
+  " ! [rejected]        stale -> develop (non-fast-forward)",
+  "error: failed to push some refs to '.'",
+  "hint: Updates were rejected because a pushed branch tip is behind its remote",
+  "hint: counterpart. If you want to integrate the remote changes, use 'git pull'",
+  "hint: before pushing again.",
+  "hint: See the 'Note about fast-forwards' in 'git push --help' for details.",
+  "",
+].join("\n");
+const MERGE_DIVERGED = [
+  "hint: Diverging branches can't be fast-forwarded, you need to either:",
+  "hint: ",
+  "hint: \tgit merge --no-ff",
+  "hint: \tgit rebase",
+  "hint: Disable this message with \"git config advice.diverging false\"",
+  "fatal: Not possible to fast-forward, aborting.",
+  "",
+].join("\n");
+
+test("extractFfErrorReason — push mode records git's rejection, ⛔ not the `To .` transport banner", () => {
+  const reason = extractFfErrorReason("", PUSH_NON_FF);
+  assert.notEqual(reason, "To .", "⛔ the banner is not the reason — this is the exact 145-record defect");
+  assert.match(reason, /\[rejected\]/, "the reason line git uses to state the verdict");
+  assert.match(reason, /non-fast-forward/, "…and it names WHY (the whole point of the field)");
+  assert.equal(reason, "! [rejected]        stale -> develop (non-fast-forward)");
+  assert.ok(!reason.includes("\n"), "the field stays a single line (it is interpolated into the FF FAILED message)");
+});
+
+test("extractFfErrorReason — merge mode prefers git's `fatal:` verdict over the leading advice `hint:`", () => {
+  const reason = extractFfErrorReason("", MERGE_DIVERGED);
+  assert.equal(reason, "fatal: Not possible to fast-forward, aborting.",
+    "the cause, not the `hint: Diverging branches can't be fast-forwarded…` advice that preceded it");
+});
+
+test("extractFfErrorReason — stdout is searched too (git's split between the two streams is not assumed)", () => {
+  assert.match(extractFfErrorReason("! [rejected] x -> develop (fetch first)", ""), /\[rejected\]/);
+});
+
+test("extractFfErrorReason — negative control: the OLD `split`-first-line expression reproduced the defect on THIS fixture", () => {
+  // 硬规则 4 推论三 — the fixture must be one the pre-fix expression FAILS on, otherwise it is an echo.
+  const oldExpression = PUSH_NON_FF.trim().split("\n")[0] ?? "";
+  assert.equal(oldExpression, "To .", "the pre-fix shape really did record the banner (this fixture discriminates)");
+});
+
+test("extractFfErrorReason — empty output yields \"\" so the caller's `|| \"develop advanced\"` fallback still owns that case", () => {
+  assert.equal(extractFfErrorReason("", ""), "");
+  assert.equal(extractFfErrorReason("\n  \n", "\n"), "");
 });

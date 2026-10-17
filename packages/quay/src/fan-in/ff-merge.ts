@@ -127,6 +127,28 @@ function epoch(now: Date): number {
   return Math.floor(now.getTime() / 1000);
 }
 
+// ── the ff FAILURE REASON (what the retry ledger's `error` field actually records) ───────────────────
+// gap-cross-project-dogfood-claudecodeui-c1-ccx5t6: the ledger recorded `(stdout+stderr).split("\n")[0]`,
+// and git's FIRST line is not the reason — it is a banner or a hint. `git push .` (push mode, the
+// production mode: the main checkout sits on `author`, not on `develop`) opens with the transport
+// banner `To .` and only THEN states the rejection (`! [rejected] … (non-fast-forward)`), so 145 of
+// this repo's 345 retry records carried the literal error "To ." with the reason nowhere in the
+// ledger. `git merge --ff-only` (merge mode) opens with a `hint:` (advice, not a verdict) and states
+// the cause last (`fatal: Not possible to fast-forward, aborting.`). Both are reproducible from this
+// repo's own ledger and from a two-commit scratch repo.
+// ⇒ Drop the push banner, then prefer the line git uses to STATE the verdict over a hint. PURE (no
+// git call) so the two modes' real outputs can drive it as fixtures — and so the negative control can
+// feed the OLD banner-first shape and watch the reason disappear (硬规则 4 推论三).
+export function extractFfErrorReason(stdout: string, stderr: string): string {
+  const lines = `${stdout}${stderr}`.split("\n").map((l) => l.trim()).filter(Boolean);
+  // `To <dest>` is push's transport banner (`To .` for a local push); it carries no verdict. If EVERY
+  // line were a banner (structurally impossible on a failure, but fail-soft) keep the raw lines rather
+  // than return "" — an empty reason reads as "develop advanced", a different claim.
+  const substantive = lines.filter((l) => !/^To\s+\S+$/.test(l));
+  const pool = substantive.length > 0 ? substantive : lines;
+  return pool.find((l) => /^!\s*\[rejected\]/.test(l) || /^(error|fatal):/.test(l)) ?? pool[0] ?? "";
+}
+
 // ── the ff SOURCE (the ref run before this task was fixed to `refs/heads/task/<task>`) ───────────────
 // gap-goal-branch-ff-merge-source-param: the source the merge target fast-forwards to is the
 // `--source-ref` override (a ref or a raw SHA), else the task branch `refs/heads/task/<task>`. SINGLE
@@ -941,7 +963,7 @@ export async function ffMerge(args: FfMergeArgs): Promise<FfMergeResult> {
   const m = sh(ffCmd);
   if (m.status !== 0) {
     mergeRc = 1;
-    mergeErr = (m.stdout + m.stderr).trim().split("\n")[0] ?? "";
+    mergeErr = extractFfErrorReason(m.stdout, m.stderr);
     // inert-delta in-lock retry (gap-fan-in-ff-retry-reruns-suite-on-inert-increment): develop advanced;
     // if the increment since suite_head is INERT, merge develop into the task branch (worktree) and re-ff.
     const developTip = git(root, "rev-parse", mergeTarget).stdout.trim();
@@ -963,7 +985,7 @@ export async function ffMerge(args: FfMergeArgs): Promise<FfMergeResult> {
           if (git(args.worktree, "merge", "--no-edit", mergeTarget).status === 0) {
             const m2 = sh(ffCmd);
             if (m2.status === 0) { mergeRc = 0; mergeErr = ""; }
-            else { mergeRc = 1; mergeErr = (m2.stdout + m2.stderr).trim().split("\n")[0] ?? ""; }
+            else { mergeRc = 1; mergeErr = extractFfErrorReason(m2.stdout, m2.stderr); }
           }
         }
       }

@@ -1185,6 +1185,46 @@ test("push mode (develop detached) — ff success with a clean tree lands via gi
   }
 });
 
+// gap-cross-project-dogfood-claudecodeui-c1-ccx5t6 — the retry ledger's `error` field must carry the
+// REASON. PUSH mode is the production mode (the main checkout sits on `author`, not `develop`), and
+// `git push .` opens with the transport banner `To .` — so recording `(stdout+stderr).split("\n")[0]`
+// wrote `"error":"To ."` and dropped `! [rejected] … (non-fast-forward)`. 145 of this repo's 345
+// records read exactly that. This drives the REAL ff entry in push mode and reads the ledger it wrote.
+test("push mode ff failure — the retry record names the non-fast-forward rejection, ⛔ not the `To .` banner", () => {
+  const dir = makeTmp("pushnonff");
+  const st = stateDir("pushnonff");
+  try {
+    initRepo(dir);
+    const tip = makeTaskBranch(dir, "ac62-pushnonff");
+    // develop advances AFTER the task branched ⇒ the push is an ordinary non-fast-forward.
+    fs.writeFileSync(path.join(dir, "adv.txt"), "adv\n", "utf8");
+    gitCmd(dir, "add", "-A");
+    gitCmd(dir, "commit", "-q", "-m", "develop advanced");
+    detachMergeTarget(dir); // develop detached → push mode (the production shape)
+    const head = gitCmd(dir, "rev-parse", "develop").stdout.trim();
+    const events = path.join(st, "events.jsonl");
+    const retries = path.join(st, "retries.jsonl");
+    const capArgs = captureArgs(st, "ac62-pushnonff", tip);
+
+    const r = runMerge(["--task", "ac62-pushnonff", "--root", dir, ...capArgs, "--lock-events", events, "--retry-record", retries]);
+    assert.equal(r.status, 1, `push-mode ff must fail (develop advanced):\nstdout=${r.stdout}\nstderr=${r.stderr}`);
+    assert.equal(gitCmd(dir, "rev-parse", "develop").stdout.trim(), head, "ref unchanged on ff failure");
+
+    const rec = JSON.parse(fs.readFileSync(retries, "utf8").trim());
+    assert.equal(rec.taskId, "ac62-pushnonff");
+    assert.notEqual(rec.error, "To .",
+      "⛔ the pre-fix defect: the banner was recorded and the reason was unrecoverable from the ledger");
+    assert.match(rec.error, /\[rejected\]/, "the record names git's rejection");
+    assert.match(rec.error, /non-fast-forward/, "…and WHY it was rejected");
+    assert.ok(!rec.error.includes("\n"), "the field is a single line");
+    // …and the operator-facing stderr carries the same reason, not the banner.
+    assert.match(r.stderr, /non-fast-forward/, "the FF FAILED message states the cause");
+  } finally {
+    cleanup(dir);
+    cleanup(st);
+  }
+});
+
 test("--help exits 0 with usage on stdout (gap-scripts-sprawl convention)", () => {
   const r = runMerge(["--help"]);
   assert.equal(r.status, 0);
