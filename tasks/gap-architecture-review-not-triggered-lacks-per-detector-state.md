@@ -35,4 +35,6 @@ round 状态三态化（judged / not-triggered / not-evaluated），per-detector
 
 - plugin/scripts/architecture-review-cluster.ts（computeArchReviewTrigger + round 记录类型）
 - plugin/scripts/quality-gate-driver.ts（:941 处 not-triggered 判定改用 detectors）
+- plugin/test/architecture-review-cluster.test.mjs（computeArchReviewTrigger + round 记录类型）
+- plugin/test/quality-gate-driver.test.mjs（not-triggered 判定改用 detectors）
 - tasks/gap-architecture-review-not-triggered-lacks-per-detector-state.md
