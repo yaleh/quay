@@ -35,4 +35,6 @@ arch-coverage-report 在例程/报表位真跑并留可查基线；NOT-EVALUATED
 
 - plugin/scripts/quality-gate-driver.ts（例程轨接线，或 scripts/test.sh 报表位）
 - plugin/scripts/arch-coverage-report.ts（追加基线载体写入）
+- plugin/test/arch-coverage-report.test.mjs（基线载体写入断言）
+- plugin/test/quality-gate-driver.test.mjs（例程轨接线断言）
 - tasks/gap-arch-coverage-report-report-only-not-run-in-production.md
