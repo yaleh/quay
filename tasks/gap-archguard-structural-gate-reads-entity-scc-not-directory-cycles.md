@@ -1,7 +1,7 @@
 ---
 id: gap-archguard-structural-gate-reads-entity-scc-not-directory-cycles
 title: archguard-runner 结构闸只读实体粒度 sccCount——目录级环存在时仍报 0（与 detect_cycles(package) 矛盾）
-status: todo
+status: ready
 labels:
   - gap
 parent: null
