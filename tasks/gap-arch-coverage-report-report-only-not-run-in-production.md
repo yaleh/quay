@@ -24,8 +24,8 @@ extra:
 ## Acceptance Criteria
 
 - [ ] AC1（能取假·生产产出）落地后一条 post-landing 例程轮在覆盖率载体里产生新记录（真跑，非仅实现）；无新记录即假。（待外部）
-- [ ] AC2（未评估可见）载体记录含 NOT-EVALUATED 计数，且对无分析器的语言（mjs/js/sh/py）非零。
-- [ ] AC3（非 ratchet）report-only：NOT-EVALUATED 非零不使例程轮 failed（区别于「红了」）。
+- [x] AC2（未评估可见）载体记录含 NOT-EVALUATED 计数，且对无分析器的语言（mjs/js/sh/py）非零。
+- [x] AC3（非 ratchet）report-only：NOT-EVALUATED 非零不使例程轮 failed（区别于「红了」）。
 
 ## Definition of Done
 
@@ -40,3 +40,12 @@ arch-coverage-report 在例程/报表位真跑并留可查基线；NOT-EVALUATED
 - .gitignore（新基线载体的 gitignore 声明）
 - docs/carrier-registry.json（新基线载体的 carrier 登记）
 - tasks/gap-arch-coverage-report-report-only-not-run-in-production.md
+
+## Evidence
+
+- **AC2（载体含 NOT-EVALUATED 计数；无分析器语言非零）** —— 对**主检出** `/data/home/yale/work/quay` 真跑一次 `runArchCoverageRound`，追加到载体的行（节选）：
+  `"notEvaluatedLanguages":["mjs","js","sh","py"],"noAnalyzerLanguages":["mjs","js","sh","py"],"notEvaluatedLanguageCount":4,"noAnalyzerLanguageCount":4,"totals":{"trackedFiles":7719,"countedFiles":814,"analyzedFiles":523,"notEvaluatedFiles":291},"uncoveredTsDirs":["experiments/quay-perpetual-stream/fixtures/preparation","scripts"],"uncoveredTsDirsEvaluated":true`
+  四个无分析器语言各自 `trackedFiles > 0`（mjs 126 / js 14 / sh 145 / py 6）且 status=`NOT-EVALUATED`、reason=`no-analyzer`（同一行的 `languages` 数组）。测试：`plugin/test/arch-coverage-report.test.mjs` 的 `history record — … (AC2)`、`appendHistoryRecord — … (AC2)`、`--record-history writes exactly one baseline line …`。
+- **AC3（report-only：NOT-EVALUATED 非零 ≠ failed）** —— 同一次真跑返回 `state:"verified"`、`reason:null`，而 `value.notEvaluatedLanguageCount:4`；⛔ 不是 `failed`。测试 `runArchCoverageRound — enabled ⇒ VERIFIED while NOT-EVALUATED is non-zero … (AC2/AC3)`。负控制（failed 仍可达，证明这不是「永不 failed」）：`runArchCoverageRound — bad config and an unwritable carrier ARE failed`（坏配置与不可写载体 ⇒ failed）。
+- **例程接线** —— 声明式注入（`loop.arch_coverage_report:`）：段缺席 ⇒ 例程表逐条不变（`archCoverageRoutineFromConfig — an UNDECLARED workspace keeps EXACTLY the four built-in routines`，AC144 的「恰好四条」仍成立）；`enabled:false` ⇒ `not-evaluated:disabled` 且零写入；段写坏 ⇒ `failed` 且零写入；三种启动装配行互不相同。`bash scripts/test.sh --for-task gap-arch-coverage-report-report-only-not-run-in-production --allow-thin` ⇒ exit 0（静态检查全 PASS + 87 tests pass / 0 fail）。
+- **AC1（待外部）** —— 生产调度轮需在**落地后**由 quality driver 加载新代码并读到 `loop.arch_coverage_report:`（该 config 是 gitignored 工作区文件，不进分支；已在主检出声明 `enabled:true / interval:360m`）。落地后的取假判据：`.quay/arch-coverage-history.jsonl` 中出现 `ts` 晚于落地的记录；无新记录即假。本 worker ⛔ 不代判该生产时间窗。
