@@ -25,10 +25,10 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假·读不到≠干净）把 readScopeSignal 的产物路径指向不存在文件 ⇒ exit 1 且记录 `evaluated:false`；仍 exit 0 即假。
-- [ ] AC2（版本入记录）metrics 记录含非空 `archguardVersion` 且等于 `archguard --version` 输出。
-- [ ] AC3（0 实体 fail-closed）一个含 `.ts` 文件但被分析成 0 实体的 scope ⇒ exit 1。
-- [ ] AC4（对账可见）`sourceFiles` 与 `git ls-files <source> | wc -l` 不一致时，`reason` 非空且点名差异。
+- [x] AC1（能取假·读不到≠干净）把 readScopeSignal 的产物路径指向不存在文件 ⇒ exit 1 且记录 `evaluated:false`；仍 exit 0 即假。
+- [x] AC2（版本入记录）metrics 记录含非空 `archguardVersion` 且等于 `archguard --version` 输出。
+- [x] AC3（0 实体 fail-closed）一个含 `.ts` 文件但被分析成 0 实体的 scope ⇒ exit 1。
+- [x] AC4（对账可见）`sourceFiles` 与 `git ls-files <source> | wc -l` 不一致时，`reason` 非空且点名差异。
 
 ## Definition of Done
 
