@@ -122,11 +122,3 @@ This file was executed three times in this session (after-change, negative contr
 
 - tasks/gap-busy-restart-e2e-environment-smoke-live-calls.md
 - plugin/test/driver-restart-busy-e2e.test.mjs
-
-## Blocker
-
-**2026-10-17T03:44:56.844Z — worker 未落地（exited-not-landed）**
-
-- 未落地原因：step=suite: AssertionError [ERR_ASSERTION]: cadence must be one of the five enumerated values: touches-relax-tighten.ts → 每轮（worker-driver 驻留环的轮末一步；loop.touches_relax 未声明或 mode 为 off / 读不懂时不跑，该轮 round 记录的 auto_tighten 为 null） [baseline A/B: HARD RED (task-introduced-red) — the task's red set is NOT a subset of the develop baseline red set: added=packages/quay-native/test/relation-sync.test.mjs changed=-]
-- run_id：wk-prod-anchor
-- session_id：bba7c4b6-540b-4be2-880a-70e6f9f53b8d
