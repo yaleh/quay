@@ -2,7 +2,7 @@
 id: gap-cross-project-dogfood-claudecodeui-c1-ccx5t6
 title: "[cross-project dogfood] Fan-in retry records capture only the first line
   of git's combined push output, so an ordinary non-fast-forward is…"
-status: todo
+status: ready
 labels:
   - gap
   - cross-project-dogfood
