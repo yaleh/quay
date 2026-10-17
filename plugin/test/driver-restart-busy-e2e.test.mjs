@@ -859,10 +859,18 @@ test("AC2a-real — `restart --kind worker` with a genuinely in-flight worker: t
 
     // The worker-name profile (the loop resolves the worker process name from here, and reconcile's orphan
     // classification needs it) + the launch settings + one ready task + a committed baseline.
+    //
+    // ⚠️ `launcher: /bin/true`, NOT `claude`: `start --kind worker` runs the environment smoke
+    // (`runEnvironmentSmoke` → `launchArgv` → a real child process), and this arm's worker is fully
+    // overridden by `QUAY_E2E_WORKER_CMD` below — the launcher's ONLY consumer here is that smoke. A real
+    // launcher made every run of this file issue live model calls (and the old `model: test-model` made
+    // each one a 400 whose wording happened to miss `ENVIRONMENT_FATAL_SIGNATURES`, so greenness hung on
+    // an external error string). `/bin/true` exits 0 for any argv ⇒ the shipped smoke path is still
+    // exercised end-to-end, with zero live calls. (Name still declared: the smoke's argv carries it.)
     fs.mkdirSync(path.join(host, "tasks"), { recursive: true });
     fs.writeFileSync(path.join(host, "tasks", `${BUSY_TASK}.md`), `---\nid: ${BUSY_TASK}\nstatus: ready\n---\n\n## Proposal\n\nbusy-restart fixture\n`);
     fs.writeFileSync(path.join(host, ".quay", "profiles.yml"),
-      `version: 1\nprofiles:\n  w:\n    launcher: claude\n    model: test-model\n    bare: false\n    auth: key\nroles:\n  task-worker:\n    profile: w\n    name: ${WORKER_PROCESS_NAME}\n`);
+      `version: 1\nprofiles:\n  w:\n    launcher: /bin/true\n    model: test-model\n    bare: false\n    auth: key\nroles:\n  task-worker:\n    profile: w\n    name: ${WORKER_PROCESS_NAME}\n`);
     fs.mkdirSync(path.join(host, ".claude"), { recursive: true });
     fs.writeFileSync(path.join(host, ".claude", "launch.settings.json"), JSON.stringify({ $schema: "x", permissions: {}, env: {} }));
     git(host, ["add", "-A"]);
