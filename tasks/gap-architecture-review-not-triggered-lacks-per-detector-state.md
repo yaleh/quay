@@ -23,9 +23,9 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假·状态可分）任一 detector `evaluated:false` 时 round state 为 `not-evaluated` 且记录带该 detector 的 reason；仍写 `not-triggered` 即假。
-- [ ] AC2（干净的真条件）`not-triggered` 仅在 `detectors.every(d => d.evaluated && d.clusters.length===0)` 时成立——一条命令可从 round jsonl 验证该蕴含。
-- [ ] AC3（载体可读）`architecture-review-round.jsonl` 每条含 `detectors` 数组，其成员带 id/evaluated/reason/clusters。
+- [x] AC1（能取假·状态可分）任一 detector `evaluated:false` 时 round state 为 `not-evaluated` 且记录带该 detector 的 reason；仍写 `not-triggered` 即假。
+- [x] AC2（干净的真条件）`not-triggered` 仅在 `detectors.every(d => d.evaluated && d.clusters.length===0)` 时成立——一条命令可从 round jsonl 验证该蕴含。
+- [x] AC3（载体可读）`architecture-review-round.jsonl` 每条含 `detectors` 数组，其成员带 id/evaluated/reason/clusters。
 
 ## Definition of Done
 
@@ -35,6 +35,15 @@ round 状态三态化（judged / not-triggered / not-evaluated），per-detector
 
 - plugin/scripts/architecture-review-cluster.ts（computeArchReviewTrigger + round 记录类型）
 - plugin/scripts/quality-gate-driver.ts（:941 处 not-triggered 判定改用 detectors）
-- plugin/test/architecture-review-cluster.test.mjs（computeArchReviewTrigger + round 记录类型）
-- plugin/test/quality-gate-driver.test.mjs（not-triggered 判定改用 detectors）
+- plugin/test/architecture-review-cluster.test.mjs（四态纯函数 + 载体写端：AC1/AC2/AC3 的直接单测）
+- plugin/test/quality-gate-driver.test.mjs（driver 边界：fixtures 补 rootSurface；AC1 的 not-evaluated 与负控制翻转）
 - tasks/gap-architecture-review-not-triggered-lacks-per-detector-state.md
+
+## Evidence
+
+- 单元测试：`node --experimental-strip-types --test plugin/test/architecture-review-cluster.test.mjs` ⇒ 29 pass / 0 fail（新增：四态可分、AC1 任一 evaluated:false ⇒ not-evaluated、AC2 差分翻转、AC3 缺 detectors 拒写、AC2 从写出的 jsonl 回读蕴含）。
+- driver 测试：`node --experimental-strip-types --test plugin/test/quality-gate-driver.test.mjs` ⇒ 59 pass / 0 fail（新增 AC1 driver 边界：无 rootSurface ⇒ not-evaluated + 记录带 reason；补 full ⇒ 翻成 not-triggered）。
+- 真实检测器 · 非 quay 根（mktemp，仅 `src/index.ts`）：identity `rootSurface.kind="absent"`、guard-lineage `kind="absent"`；`runArchitectureReview` ⇒ `state=not-evaluated`，载体记录逐检测器带 reason（P2/P4 absent note + P1 上游未评估），不再写 `not-triggered`。
+- AC2 一条命令（在写出的 `.quay/architecture-review-round.jsonl` 上）：`jq -e 'select(.state=="not-triggered") | [.detectors[] | (.evaluated and ((.clusters|length)==0))] | all'` ⇒ `true`（exit 0）；同一载体里的 `not-evaluated` 记录是负控制（`evaluated:false` 与 not-triggered 可区分）。
+- AC3 载体形态：两条记录分别为 `{"state":"not-triggered","detectors":[{id,evaluated,reason,clusters},…]}` 与 `{"state":"not-evaluated","detectors":[…evaluated:false + reason…]}`；`appendArchReviewRound` 对缺 `detectors` 的记录拒写。
+- 真实检测器 · 本 quay worktree：identity/guard-lineage `rootSurface.kind="full"`，P1 无候选构件但上游已评估 ⇒ `evaluated:true`（reason 点明 measured-empty candidate universe），触发态 `triggered`（有 1 个 P2 簇）。
