@@ -64,22 +64,42 @@
 // and `packages/quay/test/`. Excluding them would drop 4 real `.sh` files and make this report disagree
 // with the very command that verifies it.
 //
+// ── THE PRODUCTION TRIGGER + BASELINE (gap-arch-coverage-report-report-only-not-run-in-production) ─
+// This script answered "who analyzed which language, and how much of it?" but NOTHING ran it: only
+// its own test referenced it, so the reading existed only when a human remembered to ask. Two
+// additions close that, WITHOUT turning the report into a gate (the task explicitly does not ratchet):
+//   • `appendHistoryRecord` — every run can append ONE compact line to an append-only carrier
+//     (`.quay/arch-coverage-history.jsonl`, gitignored). The line carries the per-language rows and
+//     the uncovered-directory list, so "which directories no analyzer reaches" is a QUERYABLE history
+//     rather than a value that exists only if someone re-runs the script.
+//   • the quality-gate driver's routine track runs this script on an interval
+//     (`loop.arch_coverage_report:` in `.quay/config.yml`) and appends one such line per round.
+//     Report-only by construction: the routine's Fact state is never `failed` merely because some
+//     languages are NOT-EVALUATED — that reading IS the report's content (硬规则 3b: "not evaluated"
+//     must not share an output shape with "the check failed").
+//
 // Usage:
 //   node --experimental-strip-types plugin/scripts/arch-coverage-report.ts [<root>] [--json]
-//                                        [--archguard-manifest <path>] [--selftest]
+//                                        [--archguard-manifest <path>] [--record-history]
+//                                        [--history-path <p>] [--selftest]
 //   <root>                    repo root to survey (default: repoRoot() upward walk from this file)
 //   --archguard-manifest <p>  read the archguard scope manifest from <p> instead of
 //                             <root>/.archguard/query/manifest.json. `.archguard/` is a GENERATED
 //                             artifact (gitignored) and is therefore often absent from a task
 //                             worktree while present in the main checkout — this flag is how a
 //                             worktree reports the main checkout's real scope surface (AC3).
+//   --record-history          append one baseline line to <root>/.quay/arch-coverage-history.jsonl
+//   --history-path <p>        write that line to <p> instead (test / alternate-carrier seam)
 //   --json                    emit the report as JSON (pretty-printed; still one parseable document)
 //   --selftest                run the injected fixture cases, print one line per case, exit 0/1
 //
 // Exit codes: 0 = report produced (some languages may be unevaluated — that is the report's content);
 //             1 = --selftest had a failing case;
 //             2 = NOT EVALUATED (manifest unparseable, or git unavailable) — ⛔ never conflated with 0;
-//             3 = usage error.
+//             3 = usage error;
+//             4 = the report WAS produced, but `--record-history` could not write the carrier (the
+//                 reading exists on stdout; the baseline did not persist) — a distinct value so
+//                 "recorded" and "not recorded" never share the success code (硬规则 3b).
 
 import fs from "node:fs";
 import os from "node:os";
@@ -93,11 +113,17 @@ export const EXIT_OK = 0;
 export const EXIT_SELFTEST_FAILED = 1;
 export const EXIT_NOT_EVALUATED = 2;
 export const EXIT_USAGE = 3;
+/** The report was produced, but the requested baseline write failed (see the header contract). */
+export const EXIT_HISTORY_WRITE_FAILED = 4;
 
 export const REPORT_GENERATED_AT_PLACEHOLDER = "<generated-at>";
 
 /** The archguard scope manifest, at its single canonical location under a repo root. */
 export const DEFAULT_MANIFEST_REL = path.join(".archguard", "query", "manifest.json");
+
+/** The append-only coverage-history carrier: one compact JSON line per report run. Runtime state
+ *  under `.quay/` (gitignored, declared in docs/carrier-registry.json). */
+export const DEFAULT_HISTORY_REL = path.join(".quay", "arch-coverage-history.jsonl");
 
 // ── Languages ───────────────────────────────────────────────────────────────────────────────────────
 /** The language rows this report always emits — every one of them, even at 0 files (see AC1: a fixture
@@ -716,6 +742,111 @@ export function runReport(opts: RunOptions): RunResult {
   return { report, exitCode: report.evaluated ? EXIT_OK : EXIT_NOT_EVALUATED };
 }
 
+// ── Baseline carrier (history) ──────────────────────────────────────────────────────────────────────
+/** One language's reading, flattened for the carrier. `trackedFiles: null` is PRESERVED (an
+ *  unreadable count must not become 0 in the history either — 硬规则 3b). */
+export interface CoverageHistoryLanguage {
+  language: string;
+  trackedFiles: number | null;
+  status: LanguageRow["status"];
+  analyzedBy: string | null;
+  reason: string | null;
+  coverageFraction: number | null;
+}
+
+/** The compact per-run baseline line. It answers, at a past point in time, the questions the report
+ *  answers now: per-language coverage, which languages have NO analyzer at all, and which `.ts`
+ *  directories no registered scope reaches. Every value is copied from the report — the builder adds
+ *  NO new judgment (one interpretation of the readings stays the report's own). */
+export interface CoverageHistoryRecord {
+  ts: string;
+  runner: string;
+  root: string;
+  evaluated: boolean;
+  languages: CoverageHistoryLanguage[];
+  /** Every language whose status is NOT-EVALUATED, whatever the reason. */
+  notEvaluatedLanguages: string[];
+  /** The subset with NO analyzer at all (`reason:"no-analyzer"` — mjs/js/sh/py today). AC2's
+   *  "非零" reading is taken on THIS list, not on the aggregate: the aggregate is also non-zero when
+   *  the manifest is merely missing, which would let a never-analyzed language hide behind a
+   *  configuration problem. */
+  noAnalyzerLanguages: string[];
+  /** AC2 — the count a reader can threshold/query without re-deriving the array's length. */
+  notEvaluatedLanguageCount: number;
+  noAnalyzerLanguageCount: number;
+  totals: Report["totals"];
+  /** Directory-level reading: tracked non-test `.ts` directories that NO credited scope reaches. */
+  uncoveredTsDirs: string[];
+  uncoveredTsDirsEvaluated: boolean;
+  globalScopeKey: string | null;
+  globalScopeKind: GlobalScopeKind;
+  /** Present only when `evaluated === false` (the report itself could not be trusted). */
+  error?: string;
+  reason?: string;
+}
+
+/** Pure projection of a report onto the carrier's line shape. */
+export function buildHistoryRecord(report: Report, now?: string): CoverageHistoryRecord {
+  const languages: CoverageHistoryLanguage[] = report.languages.map((l) => ({
+    language: l.language,
+    trackedFiles: l.trackedFiles,
+    status: l.status,
+    analyzedBy: l.analyzedBy,
+    reason: l.reason ?? null,
+    coverageFraction: l.coverageFraction ?? null,
+  }));
+  const notEvaluatedLanguages = languages.filter((l) => l.status === "NOT-EVALUATED").map((l) => l.language);
+  const noAnalyzerLanguages = languages.filter((l) => l.reason === "no-analyzer").map((l) => l.language);
+  const record: CoverageHistoryRecord = {
+    ts: now ?? report.generatedAt,
+    runner: report.runner,
+    root: report.root,
+    evaluated: report.evaluated,
+    languages,
+    notEvaluatedLanguages,
+    noAnalyzerLanguages,
+    notEvaluatedLanguageCount: notEvaluatedLanguages.length,
+    noAnalyzerLanguageCount: noAnalyzerLanguages.length,
+    totals: report.totals,
+    uncoveredTsDirs: [...report.uncoveredTsDirs],
+    uncoveredTsDirsEvaluated: report.uncoveredTsDirsEvaluated,
+    globalScopeKey: report.archguard.globalScopeKey,
+    globalScopeKind: report.archguard.globalScopeKind,
+  };
+  if (report.error !== undefined) record.error = report.error;
+  if (report.reason !== undefined) record.reason = report.reason;
+  return record;
+}
+
+export interface AppendHistoryResult {
+  ok: boolean;
+  path: string;
+  error: string | null;
+}
+
+/** Append ONE baseline line to the history carrier. Creates `<root>/.quay/` if needed.
+ *
+ *  ⛔ Never silently swallows a write failure: the caller (the routine / the CLI) must be able to
+ *  distinguish "a baseline was recorded" from "the report ran but nothing persisted" (硬规则 3b).
+ *  `historyPath` is the test/alternate-carrier seam; the default is `<root>/.quay/…`.
+ *  Appending is the only write this script performs — the report itself stays read-only. */
+export function appendHistoryRecord(
+  root: string,
+  report: Report,
+  opts: { historyPath?: string; now?: string } = {},
+): AppendHistoryResult {
+  const historyPath = opts.historyPath
+    ? path.resolve(opts.historyPath)
+    : path.join(path.resolve(root), DEFAULT_HISTORY_REL);
+  try {
+    fs.mkdirSync(path.dirname(historyPath), { recursive: true });
+    fs.appendFileSync(historyPath, JSON.stringify(buildHistoryRecord(report, opts.now)) + "\n", "utf8");
+    return { ok: true, path: historyPath, error: null };
+  } catch (e: any) {
+    return { ok: false, path: historyPath, error: String(e?.message ?? e) };
+  }
+}
+
 function readFileOrEmpty(p: string): string {
   try {
     return fs.readFileSync(p, "utf8");
@@ -735,6 +866,19 @@ export function renderHuman(report: Report): string {
   const lines: string[] = [];
   lines.push(`arch-coverage-report — ${report.root}`);
   lines.push(`evaluated: ${report.evaluated}${report.reason ? `  (reason: ${report.reason})` : ""}`);
+  // ── The headline coverage reading, BEFORE the detail table ────────────────────────────────────
+  // "How much is NOT evaluated" is the report's answer to the question it exists for, so it must be
+  // readable without scanning five rows. The three quantities never collapse: language rows and the
+  // uncovered-directory list carry their own "NOT EVALUATED" state when the input was unreadable.
+  const notEval = report.languages.filter((l) => l.status === "NOT-EVALUATED");
+  const noAnalyzer = report.languages.filter((l) => l.reason === "no-analyzer");
+  lines.push(
+    `NOT-EVALUATED: ${notEval.length}/${report.languages.length} language(s)` +
+      (notEval.length > 0 ? ` [${notEval.map((l) => l.language).join(", ")}]` : "") +
+      ` · no analyzer at all: ${noAnalyzer.length}` +
+      (noAnalyzer.length > 0 ? ` [${noAnalyzer.map((l) => l.language).join(", ")}]` : "") +
+      ` · uncovered .ts dirs: ${report.uncoveredTsDirsEvaluated ? report.uncoveredTsDirs.length : "NOT EVALUATED"}`,
+  );
   lines.push("");
   lines.push("language   tracked  status         analyzedBy  reason");
   for (const l of report.languages) {
@@ -1051,9 +1195,11 @@ export function selftest(): boolean {
 
 // ── CLI ─────────────────────────────────────────────────────────────────────────────────────────────
 const USAGE = `arch-coverage-report.ts — who analyzed which language, and how much of it
-usage: arch-coverage-report.ts [<root>] [--json] [--archguard-manifest <path>] [--selftest]
+usage: arch-coverage-report.ts [<root>] [--json] [--archguard-manifest <path>]
+                               [--record-history] [--history-path <p>] [--selftest]
   exit 0 = report produced (⚠️ NOT "everything is evaluated" — read the rows)
-  exit 1 = a --selftest case failed | 2 = NOT EVALUATED (manifest unparseable / git unavailable) | 3 = usage`;
+  exit 1 = a --selftest case failed | 2 = NOT EVALUATED (manifest unparseable / git unavailable)
+  exit 3 = usage | 4 = report produced but --record-history could not write the carrier`;
 
 function main(): number {
   const argv = process.argv.slice(2);
@@ -1062,16 +1208,31 @@ function main(): number {
 
   let root: string | undefined;
   let manifestPath: string | undefined;
+  let historyPath: string | undefined;
+  let recordHistory = false;
   const json = argv.includes("--json");
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i]!;
     if (a === "--json") continue;
+    if (a === "--record-history") {
+      recordHistory = true;
+      continue;
+    }
     if (a === "--archguard-manifest") {
       manifestPath = argv[++i];
       if (manifestPath === undefined) {
         process.stderr.write("arch-coverage-report: --archguard-manifest requires a path\n");
         return EXIT_USAGE;
       }
+      continue;
+    }
+    if (a === "--history-path") {
+      historyPath = argv[++i];
+      if (historyPath === undefined) {
+        process.stderr.write("arch-coverage-report: --history-path requires a path\n");
+        return EXIT_USAGE;
+      }
+      recordHistory = true;
       continue;
     }
     if (a.startsWith("--")) {
@@ -1085,8 +1246,19 @@ function main(): number {
     root = a;
   }
 
-  const { report, exitCode } = runReport({ root: root ?? findRepoRoot(), manifestPath });
+  const resolvedRoot = root ?? findRepoRoot();
+  const { report, exitCode } = runReport({ root: resolvedRoot, manifestPath });
   process.stdout.write(json ? JSON.stringify(report, null, 2) + "\n" : renderHuman(report) + "\n");
+  // The report's own exit code is decided FIRST (it describes the readings). A failed baseline write
+  // is reported through its OWN code (4), never folded into 0 or 2 — see the header contract.
+  if (recordHistory) {
+    const appended = appendHistoryRecord(resolvedRoot, report, historyPath ? { historyPath } : {});
+    if (!appended.ok) {
+      process.stderr.write(`arch-coverage-report: history carrier not writable at ${appended.path} — ${appended.error}\n`);
+      return EXIT_HISTORY_WRITE_FAILED;
+    }
+    process.stderr.write(`arch-coverage-report: baseline appended to ${appended.path}\n`);
+  }
   return exitCode;
 }
 

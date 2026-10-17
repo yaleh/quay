@@ -65,6 +65,14 @@ packages/quay/plugin/
 # existing quality-round fact). Declared in docs/carrier-registry.json (owner:
 # plugin/scripts/arch-discovery-routine.ts).
 **/.quay/arch-discovery-findings.jsonl
+# arch-COVERAGE baseline carrier (.quay/arch-coverage-history.jsonl) —
+# gap-arch-coverage-report-report-only-not-run-in-production. The quality driver's arch-coverage-report
+# routine appends ONE compact line per round (per-language coverage rows + the uncovered-.ts-dir list),
+# so "which directories no analyzer reaches" is a queryable history instead of a value that exists only
+# when someone re-runs the script. Runtime state, never git-tracked — the same family as
+# quality-round.jsonl / arch-discovery-findings.jsonl. Declared in docs/carrier-registry.json (owner:
+# plugin/scripts/arch-coverage-report.ts).
+**/.quay/arch-coverage-history.jsonl
 # resource-DIAGNOSTIC ROUTINE carriers (gap-quality-continuous-resource-diagnostic-routine-mechanical-
 # filter-then-semantic): `.quay/resource-anomaly-findings.jsonl` holds one line per NEW mechanically-
 # flagged anomaly plus one scan-round line per round, and `.quay/resource-diagnostic-model-budget.jsonl`
