@@ -1,7 +1,7 @@
 ---
 id: gap-arch-coverage-report-report-only-not-run-in-production
 title: arch-coverage-report 是 report-only、生产从不跑——「哪些目录没有任何分析器到达」仍不可查
-status: ready
+status: done
 labels:
   - gap
 parent: null

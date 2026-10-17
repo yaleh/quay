@@ -156,6 +156,18 @@ import {
 // Read/Grep/Glob），唯一新增持久化是 gitignored 载体 `.quay/cross-project-dogfood-findings.jsonl` + 它自己
 // 那份预留台账；confirmed 的发现才写 Portfolio / 经 ABI 立一条 todo。⛔ 与 fan-in/scoped-gate 无关。
 import { crossProjectDogfoodRoutineFromConfig } from "./cross-project-dogfood-routine.ts";
+// ARCH-COVERAGE 轨道（gap-arch-coverage-report-report-only-not-run-in-production）：把既有的
+// **覆盖面自报**（plugin/scripts/arch-coverage-report.ts）接上例程环——在此之前它只有自己的测试
+// 引用，「哪些语言/目录没有任何分析器到达」在生产上不可查。**只读、只报**：本轨不 import 任何
+// 立案/撰写函数，唯一新增持久化是 gitignored 载体 `.quay/arch-coverage-history.jsonl` 的一行基线
+// + 既有的 quality-round Fact。⛔ 不 ratchet：NOT-EVALUATED 非零是该例程的**内容**，不是 failed
+// （区别于「红了」——硬规则 3b）。⛔ 与 fan-in/scoped-gate 无关。
+import {
+  runReport as runCoverageReport,
+  appendHistoryRecord as appendCoverageHistory,
+  buildHistoryRecord as buildCoverageHistoryRecord,
+  type Report as ArchCoverageReport,
+} from "./arch-coverage-report.ts";
 
 // ── 常量（由 DRIVER_KINDS registry 派生，⛔ 不另写一份路径字面量）──────────────────────────
 const QUALITY_SPEC = DRIVER_KINDS.quality;
@@ -174,6 +186,19 @@ export const POOL_JUDGE_INTERVAL_MIN_DEFAULT = 10;
 export const JUDGMENT_INTERVAL_MIN_DEFAULT = 30;
 export const ARCH_REVIEW_INTERVAL_MIN_DEFAULT = 60;
 export const PACKAGING_HYGIENE_INTERVAL_MIN_DEFAULT = 60;
+
+/** arch-coverage-report 例程（声明式，`loop.arch_coverage_report:`）的缺省间隔。360m = 与
+ *  arch_discovery / cross_project_dogfood 的**永久缺省节奏**同族（同族两条都把 360m 定为 floor）。
+ *  这一轮的成本只是 `git ls-files` + 读 manifest（实测亚秒级），节奏取长的理由是**读数不需要更密**：
+ *  覆盖面随提交缓慢变化，每小时一条基线只会把载体撑长而不增加信息。 */
+export const ARCH_COVERAGE_INTERVAL_MIN_DEFAULT = 360;
+
+/** 声明的 interval 下限（分钟）——与同族 declarative 例程（`MIN_INTERVAL_MINUTES = 60`）同一个界：
+ *  低于此界不是「更快的观测」，是把一条慢变量的读数重复写进载体。 */
+export const ARCH_COVERAGE_MIN_INTERVAL_MINUTES = 60;
+
+/** 例程名（也是它写进 quality-round 的 Fact 名字与 `.quay/routine-last-run.json` 的键）。 */
+export const ARCH_COVERAGE_ROUTINE_NAME = "arch-coverage-report";
 
 /** packaging-hygiene 的机械 check spawn 上限（毫秒）——config-key 枚举是纯函数、shipped-entry 是
  *  npm pack --dry-run + dist build（实测 ~2s / ~0.2s），180s 是给足余量的机械上限（⛔ 不是成本阈值，
@@ -1373,6 +1398,239 @@ export function formatArchitectureReviewAssembly(a: {
   return `architecture-review 例程已装配（enabled, interval=${a.intervalMinutes}m [来源: ${a.intervalSource}]，检测器脚本经 kernelSiblingArgv() 解析到本 kernel 自己的安装位置（raw .ts 或 scripts/dist/<name>.js，都缺席 ⇒ not-evaluated:detector-script-unresolved:<name>，⛔ 不 spawn 不存在的路径），⛔ 不是目标 root 的；--root 仍传目标工作区${declared}）`;
 }
 
+// ── arch-coverage-report 的 config 入口（`.quay/config.yml` `loop.arch_coverage_report:`）────────
+// 同族 declarative 例程（arch_discovery / discovery_method / open_semantic_discovery /
+// resource_diagnostic / cross_project_dogfood）的第七条：**段缺席 ⇒ 不装配**（off by default，宿主
+// 例程表逐条不变），段存在但 `enabled:false` ⇒ 仍装配、每轮记 `not-evaluated:disabled` 且零写入
+// （kill switch 必须可观测），段写坏 ⇒ 仍装配、记 `failed` 且零写入（硬规则 3b：读不懂 ≠ 合格）。
+//
+// ⛔ 为什么是声明式而不是第五条内建例程：`qualityGateRoutines()` 的「恰好四条」是 AC144 的结构判据
+// （B15/B17/架构复核/packaging-hygiene），把一条覆盖面报表塞进去会让那条判据失去意义；同族前六条
+// 也都走「config 声明 → 注入 → 例程表追加」这条路，本轨不另造机制。
+export interface ArchCoverageConfig {
+  enabled: boolean;
+  /** `enabled:false` ⇒ null（不参与调度）。 */
+  intervalMinutes: number | null;
+}
+
+export interface ArchCoverageConfigRead {
+  present: boolean;
+  config: ArchCoverageConfig | null;
+  error: string | null;
+}
+
+const cfgCoverageBad = (msg: string) => `loop.arch_coverage_report ${msg}`;
+
+/** 纯解析一个 `loop.arch_coverage_report` 值（同 `parseArchitectureReviewSection` 的形状：
+ *  `enabled` 必填布尔；disabled 段立即返回——kill switch 必须在别的键缺席/写坏时也能生效；
+ *  enabled 段必须携带合法的 `interval:<N>m` 且不低于下限）。 */
+export function parseArchCoverageSection(raw: unknown): { config: ArchCoverageConfig | null; error: string | null } {
+  if (raw === null || typeof raw !== "object" || Array.isArray(raw)) {
+    return { config: null, error: cfgCoverageBad(`must be a mapping (got ${Array.isArray(raw) ? "array" : raw === null ? "null" : typeof raw})`) };
+  }
+  const rec = raw as Record<string, unknown>;
+  if (typeof rec.enabled !== "boolean") {
+    return { config: null, error: cfgCoverageBad(`needs a boolean 'enabled' (got ${rec.enabled === undefined ? "missing" : JSON.stringify(rec.enabled)})`) };
+  }
+  if (rec.enabled === false) return { config: { enabled: false, intervalMinutes: null }, error: null };
+  if (typeof rec.interval !== "string") {
+    return { config: null, error: cfgCoverageBad(`needs an 'interval' string of the form interval:<N>m (got ${rec.interval === undefined ? "missing" : JSON.stringify(rec.interval)})`) };
+  }
+  let trigger: { kind: string; minutes?: number };
+  try {
+    trigger = parseTrigger(rec.interval) as { kind: string; minutes?: number };
+  } catch (e) {
+    return { config: null, error: cfgCoverageBad(`invalid 'interval' — ${(e as Error).message}`) };
+  }
+  if (trigger.kind !== "interval" || typeof trigger.minutes !== "number") {
+    return { config: null, error: cfgCoverageBad(`'interval' must be interval:<N>m (got kind '${trigger.kind}')`) };
+  }
+  if (trigger.minutes < ARCH_COVERAGE_MIN_INTERVAL_MINUTES) {
+    return { config: null, error: cfgCoverageBad(`interval ${trigger.minutes}m is below the ${ARCH_COVERAGE_MIN_INTERVAL_MINUTES}m floor — refused, not silently rounded`) };
+  }
+  return { config: { enabled: true, intervalMinutes: trigger.minutes }, error: null };
+}
+
+/** 读 `.quay/config.yml` `loop.arch_coverage_report:`（同族读法：无 config / 无 `loop:` / 无段
+ *  ⇒ `present:false`；YAML 或段写坏 ⇒ `error` 置位，fail-closed）。 */
+export function readArchCoverageConfig(workspaceRoot: string): ArchCoverageConfigRead {
+  const file = path.join(workspaceRoot, ".quay", "config.yml");
+  let text: string;
+  try {
+    text = fs.readFileSync(file, "utf8");
+  } catch {
+    return { present: false, config: null, error: null };
+  }
+  let parsed: unknown;
+  try {
+    parsed = parseYaml(text);
+  } catch (e) {
+    return { present: true, config: null, error: `.quay/config.yml is not valid YAML — ${(e as Error).message}` };
+  }
+  const loop = parsed && typeof parsed === "object" && !Array.isArray(parsed) ? (parsed as Record<string, unknown>).loop : undefined;
+  if (loop === null || loop === undefined) return { present: false, config: null, error: null };
+  if (typeof loop !== "object" || Array.isArray(loop)) return { present: true, config: null, error: "FAIL-CLOSED: .quay/config.yml 'loop:' must be a mapping" };
+  const raw = (loop as Record<string, unknown>).arch_coverage_report;
+  if (raw === undefined || raw === null) return { present: false, config: null, error: null };
+  const { config, error } = parseArchCoverageSection(raw);
+  return { present: true, config, error };
+}
+
+/** The arch-coverage-round Fact value — the reading the routine contributes to `quality-round.jsonl`.
+ *  `reportOnly: true` is a CONSTANT, not a claim to be checked: this routine has no threshold, no
+ *  ratchet and no filing path. */
+export interface ArchCoverageFactValue {
+  mode: "arch-coverage-report-round";
+  evaluated: boolean;
+  totals: ArchCoverageReport["totals"];
+  notEvaluatedLanguages: string[];
+  notEvaluatedLanguageCount: number;
+  noAnalyzerLanguages: string[];
+  noAnalyzerLanguageCount: number;
+  uncoveredTsDirs: string[];
+  uncoveredTsDirsEvaluated: boolean;
+  historyPath: string;
+  historyAppended: boolean;
+  reportOnly: true;
+}
+
+export interface ArchCoverageRoundOptions {
+  config?: ArchCoverageConfig | null;
+  configPresent?: boolean;
+  configError?: string | null;
+  /** Test / alternate-carrier seam; default `<root>/.quay/arch-coverage-history.jsonl`. */
+  historyPath?: string;
+  /** Deterministic `ts` seam for the carrier line. */
+  now?: string;
+}
+
+/** Run ONE arch-coverage round: produce the report and append one baseline line to the carrier.
+ *
+ *  ⛔ THE FAILURE VOCABULARY IS DELIBERATELY SPLIT (task AC3 / 硬规则 3b):
+ *    • `failed`         — the routine could not do its job: bad config, or the carrier could not be
+ *                         written. NOT used because some languages are unevaluated.
+ *    • `not-evaluated`  — the report itself could not be trusted (manifest unparseable / no git), or
+ *                         the kill switch is engaged. The line is STILL appended (with
+ *                         `evaluated:false`) so the carrier records the inability, not silence.
+ *    • `verified`       — a report was produced AND persisted. `notEvaluatedLanguageCount` may be > 0;
+ *                         that is the report's content ("these languages have no analyzer"), never a
+ *                         red. A ratchet over it would be a different task (this one is report-only). */
+export function runArchCoverageRound(root: string, opts: ArchCoverageRoundOptions = {}): Fact<ArchCoverageFactValue | null> {
+  const name = ARCH_COVERAGE_ROUTINE_NAME;
+  if (opts.configError) return { name, value: null, state: "failed", reason: opts.configError };
+  if (opts.configPresent === false) {
+    return { name, value: null, state: "not-evaluated", reason: "not-evaluated:not-declared — loop.arch_coverage_report is absent (the routine is only assembled when the section is declared)" };
+  }
+  if (opts.config === null) {
+    // present-but-unparsed is unreachable through the reader (it always sets `error`), but a direct
+    // caller must still fail closed rather than silently running with invented defaults.
+    return { name, value: null, state: "failed", reason: cfgCoverageBad("present but could not be parsed") };
+  }
+  if (opts.config && !opts.config.enabled) {
+    return { name, value: null, state: "not-evaluated", reason: "not-evaluated:disabled — .quay/config.yml loop.arch_coverage_report.enabled=false（kill switch：零报告、零写入）" };
+  }
+
+  const resolvedRoot = path.resolve(root);
+  const { report } = runCoverageReport({ root: resolvedRoot, now: opts.now });
+  const record = buildCoverageHistoryRecord(report, opts.now);
+  const appended = appendCoverageHistory(resolvedRoot, report, {
+    ...(opts.historyPath ? { historyPath: opts.historyPath } : {}),
+    ...(opts.now ? { now: opts.now } : {}),
+  });
+  const value: ArchCoverageFactValue = {
+    mode: "arch-coverage-report-round",
+    evaluated: report.evaluated,
+    totals: record.totals,
+    notEvaluatedLanguages: record.notEvaluatedLanguages,
+    notEvaluatedLanguageCount: record.notEvaluatedLanguageCount,
+    noAnalyzerLanguages: record.noAnalyzerLanguages,
+    noAnalyzerLanguageCount: record.noAnalyzerLanguageCount,
+    uncoveredTsDirs: record.uncoveredTsDirs,
+    uncoveredTsDirsEvaluated: record.uncoveredTsDirsEvaluated,
+    historyPath: appended.path,
+    historyAppended: appended.ok,
+    reportOnly: true,
+  };
+  if (!appended.ok) {
+    return { name, value, state: "failed", reason: `history carrier not writable at ${appended.path} — ${appended.error}` };
+  }
+  if (!report.evaluated) {
+    return {
+      name,
+      value,
+      state: "not-evaluated",
+      reason: `${report.reason ?? "not-evaluated"}: ${report.error ?? "the report could not be evaluated"}`,
+    };
+  }
+  // ⛔ AC3: a non-zero NOT-EVALUATED language count is NOT a failure. The count is IN the value, so a
+  // reader can still see it — it just never becomes the round's verdict.
+  return { name, value, state: "verified", reason: null };
+}
+
+export interface ArchCoverageRoutineOptions {
+  historyPath?: string;
+  now?: string;
+}
+
+/** Build the RoutineSpec (scheduler / watchdog / halt are the driver's, not re-implemented here). */
+export function buildArchCoverageRoutine(
+  root: string,
+  read: ArchCoverageConfigRead,
+  opts: ArchCoverageRoutineOptions = {},
+): RoutineSpec {
+  const minutes = read.config?.intervalMinutes ?? ARCH_COVERAGE_INTERVAL_MIN_DEFAULT;
+  return {
+    name: ARCH_COVERAGE_ROUTINE_NAME,
+    schedule: { kind: "interval", minutes },
+    // Halt is a round-internal gate for GATED ACTIONS (spawn / model calls). This routine is a pure
+    // read plus one append — the same class as `judgment-consumer-check`, whose comment records that
+    // observation keeps running while halted (gap-drain-on-routine-driver-empties-round-and-respawn-loops).
+    run: () => [
+      runArchCoverageRound(root, {
+        config: read.config,
+        configPresent: read.present,
+        configError: read.error,
+        ...(opts.historyPath ? { historyPath: opts.historyPath } : {}),
+        ...(opts.now ? { now: opts.now } : {}),
+      }),
+    ],
+  };
+}
+
+/** Production entry: read `.quay/config.yml` and build the routine. NEVER throws (an optional routine
+ *  track must not take down the driver's startup).
+ *
+ *  `routine` is `null` when NO section is declared — an undeclared workspace keeps the EXACT routine
+ *  set it had before (AC144's "exactly four" test runs on an empty root and must keep seeing four).
+ *  A DECLARED section always yields a routine, even `enabled:false` or malformed, because "not
+ *  running" must be observable (硬规则 3/3b). */
+export function archCoverageRoutineFromConfig(
+  root: string,
+  opts: ArchCoverageRoutineOptions = {},
+): { routine: RoutineSpec | null; error: string | null; present: boolean; enabled: boolean } {
+  const read = readArchCoverageConfig(root);
+  return {
+    routine: read.present ? buildArchCoverageRoutine(root, read, opts) : null,
+    error: read.error,
+    present: read.present,
+    enabled: read.config?.enabled === true,
+  };
+}
+
+/** The assembly line, as ONE string — it names what was ACTUALLY carried (interval / kill switch /
+ *  fail-closed reason), so "declared but disabled", "malformed" and "running at the default cadence"
+ *  never look the same in the driver's startup log (硬规则 3b/9). */
+export function formatArchCoverageAssembly(a: {
+  present: boolean;
+  error: string | null;
+  enabled: boolean;
+  intervalMinutes: number;
+}): string {
+  if (a.error !== null) return `arch-coverage-report 例程已装配（${a.error} — 每轮记 failed、零报告零写入；⛔ 不回退到缺省节奏照跑）`;
+  if (!a.enabled) return "arch-coverage-report 例程已装配（enabled:false — 每轮记 not-evaluated:disabled，零报告零写入）";
+  return `arch-coverage-report 例程已装配（enabled, interval=${a.intervalMinutes}m，report-only：基线 append 到 .quay/arch-coverage-history.jsonl；NOT-EVALUATED 非零是该例程的读数，⛔ 不是 failed）`;
+}
+
 // ── 例程表（Layer 1b：routines = [{name, schedule, run() → Facts}]）──────────────────────────
 
 /** 例程装配缝（测试可注入覆盖命令/间隔；缺省 = 生产缺省）。 */
@@ -1432,6 +1690,11 @@ export interface QualityGateOptions {
    *  未声明 ⇒ 例程表不变；声明了但 enabled:false/写坏 ⇒ 仍装配，因为「不跑」必须可观测（disabled /
    *  failed 读数，硬规则 3b）。 */
   crossProjectDogfoodRoutine?: RoutineSpec | null;
+  /** arch-coverage-report 例程（gap-arch-coverage-report-report-only-not-run-in-production）：同族的
+   *  声明式注入纪律（main() 从 `.quay/config.yml` `loop.arch_coverage_report:` 装配后注入）。
+   *  缺省 null = 未装配 ⇒ 未声明的工作区例程表逐条不变（AC144 的「恰好四条」判据仍成立）。
+   *  **report-only**：它产出一条覆盖面读数 + 一行基线，⛔ 不作为任何闸。 */
+  archCoverageRoutine?: RoutineSpec | null;
 }
 
 /** 四条例程（B15 pool-quality-judge + B17 judgment-consumer-check + 架构复核 + packaging-hygiene）。
@@ -1508,6 +1771,12 @@ export function qualityGateRoutines(root: string, opts: QualityGateOptions): Rou
     // 语义面之前】且机械面零模型调用**——只有机械旗标出的**新** anomaly 才走既有的 verifier/refuter
     // 与立案通道（见 resource-anomaly-detector.ts 头部）。
     ...(opts.resourceDiagnosticRoutine ? [opts.resourceDiagnosticRoutine] : []),
+    // 第十一类：ARCH-COVERAGE-REPORT 例程（同一「声明式 + 可观测」族：间隔与开关来自
+    // `.quay/config.yml` `loop.arch_coverage_report:`）。缺席 ⇒ 不加入（老行为，内建四条不变）；
+    // 加入而段缺席/写坏 ⇒ 仍装配并记 not-evaluated:disabled / failed（kill switch 与坏配置的可观测面）。
+    // **与上面各条的区别是它回答的问题**：「哪些语言/目录没有任何分析器到达」——一个**覆盖面**读数，
+    // report-only，⛔ 不 ratchet（NOT-EVALUATED 非零不是 failed）。
+    ...(opts.archCoverageRoutine ? [opts.archCoverageRoutine] : []),
   ];
 }
 
@@ -2203,6 +2472,25 @@ export async function main(argv: string[]): Promise<number> {
     console.error(`quality-gate-driver: resource-diagnostic 例程已装配（${resourceDiagnostic.enabled ? `enabled，interval ${resourceDiagnostic.routine?.schedule?.minutes ?? "?"}m` : "enabled:false — 每轮记 not-evaluated:disabled，零 spawn"}）`);
   }
 
+  // arch-coverage-report 轨道：读 `.quay/config.yml` `loop.arch_coverage_report:`（同族注入纪律）。
+  // 未声明 ⇒ 不装配（例程表与未接此轨时逐条一致，AC144 的「恰好四条」不变）；声明了但
+  // enabled:false/写坏 ⇒ 仍装配（disabled / failed 必须可观测，硬规则 3b）。**report-only**：
+  // 每 due 轮跑一次覆盖面自报并把一行基线 append 到 `.quay/arch-coverage-history.jsonl`。
+  const archCoverage = archCoverageRoutineFromConfig(rootDir);
+  if (archCoverage.error) {
+    console.error(`quality-gate-driver: arch-coverage-report 例程配置无效 — ${archCoverage.error}`);
+  } else if (!archCoverage.present) {
+    console.error("quality-gate-driver: 未声明 loop.arch_coverage_report — arch-coverage-report 例程未装配（off by default，零报告零写入；例程表与未接此轨时一致）");
+  } else {
+    console.error(`quality-gate-driver: ${formatArchCoverageAssembly({
+      present: archCoverage.present,
+      error: archCoverage.error,
+      enabled: archCoverage.enabled,
+      intervalMinutes:
+        (archCoverage.routine?.schedule as { minutes?: number } | undefined)?.minutes ?? ARCH_COVERAGE_INTERVAL_MIN_DEFAULT,
+    })}`);
+  }
+
   const routines = qualityGateRoutines(rootDir, {
     planCmd: planCmd ? splitArgs(planCmd) : null,
     judgeArgv: judgeCmd ? splitArgs(judgeCmd) : null,
@@ -2228,6 +2516,7 @@ export async function main(argv: string[]): Promise<number> {
     openSemanticDiscoveryRoutine: openDiscovery.routine,
     crossProjectDogfoodRoutine: crossProject.routine,
     resourceDiagnosticRoutine: resourceDiagnostic.routine,
+    archCoverageRoutine: archCoverage.routine,
   });
 
   return runResidentQualityGateLoop({ root: rootDir, intervalMs: interval, once, maxRounds, roundLogFile, runId: resolvedRunId, json, pidFile, routines, routineWatchdogMs, kind: "quality" });

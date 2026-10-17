@@ -38,6 +38,12 @@
       "readers": "unaudited"
     },
     {
+      "name": "arch-coverage-history.jsonl",
+      "kind": "jsonl-log",
+      "owner": "plugin/scripts/arch-coverage-report.ts",
+      "readers": "unaudited"
+    },
+    {
       "name": "arch-discovery-findings.jsonl",
       "kind": "jsonl-log",
       "owner": "plugin/scripts/arch-discovery-routine.ts",

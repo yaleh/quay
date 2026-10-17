@@ -51,6 +51,15 @@ import {
   runResidentQualityGateLoop,
   diagnosticExcerpt,
   ARCH_REVIEW_CALL_CAPTURE_DIR_REL,
+  ARCH_COVERAGE_ROUTINE_NAME,
+  ARCH_COVERAGE_INTERVAL_MIN_DEFAULT,
+  ARCH_COVERAGE_MIN_INTERVAL_MINUTES,
+  parseArchCoverageSection,
+  readArchCoverageConfig,
+  buildArchCoverageRoutine,
+  archCoverageRoutineFromConfig,
+  runArchCoverageRound,
+  formatArchCoverageAssembly,
 } from "../scripts/quality-gate-driver.ts";
 // judge 调用的失败归因/重试是【从 OSD 复用】的（硬规则 5b）——测试直接断言那**同一个**清单与分类器，
 // ⛔ 不是断言本文件里另写的一份。
@@ -1811,4 +1820,191 @@ test("AC3（OSD 轮级）— 停机到达 ⇒ 不再取预留、轮记 not-evalu
   assert.equal(lines[0].stopped_mid_round.after_stop, false);
   assert.equal(lines[0].stopped_mid_round.calls_made, 1);
   assert.ok(!fs.existsSync(path.join(ws, ".quay", "routine-last-run.json")), "last-run 未被推进");
+});
+
+// ── arch-coverage-report 例程（gap-arch-coverage-report-report-only-not-run-in-production）─────────
+//
+// This routine answers "which languages/directories does NO analyzer reach?" in PRODUCTION. The
+// properties pinned here, in the order they can silently regress:
+//   ① an UNDECLARED workspace's routine set is unchanged (AC144's exactly-four test keeps its meaning);
+//   ② the routine WRITES a baseline line every due round (AC2: per-language + NOT-EVALUATED counts);
+//   ③ NOT-EVALUATED is CONTENT, never `failed` — and `failed` is still reachable for REAL failures
+//      (bad config / unwritable carrier), so ③ is a distinction, not a blanket "never fail" (AC3).
+
+/** A REAL git worktree with one file per language. `listTrackedFiles` uses `git ls-files`, so a
+ *  plain temp dir would only ever exercise the `evaluated:false` path — that is asserted separately. */
+function makeCoverageGitRepo(tmp) {
+  const repo = path.join(tmp, "coverage-repo");
+  for (const f of ["src/a.ts", "src/b.mjs", "src/c.js", "src/d.sh", "src/e.py"]) {
+    const p = path.join(repo, f);
+    fs.mkdirSync(path.dirname(p), { recursive: true });
+    fs.writeFileSync(p, "// fixture\n");
+  }
+  const env = {
+    ...process.env,
+    GIT_AUTHOR_NAME: "coverage fixture", GIT_AUTHOR_EMAIL: "coverage@example.invalid",
+    GIT_COMMITTER_NAME: "coverage fixture", GIT_COMMITTER_EMAIL: "coverage@example.invalid",
+  };
+  for (const args of [["init", "-q"], ["add", "-A"], ["commit", "-q", "-m", "fixture"]]) {
+    const r = spawnSync("git", ["-C", repo, ...args], { env, encoding: "utf8" });
+    assert.equal(r.status, 0, `git ${args.join(" ")} failed: ${r.stderr}`);
+  }
+  return repo;
+}
+
+function coverageBaseOpts() {
+  return {
+    planCmd: null, judgeArgv: null, judgmentCmd: null, resourceGateArgv: null,
+    identityCmd: null, lineageCmd: null, deletionCmd: null, archJudgeArgv: null,
+    poolJudgeIntervalMinutes: 10, judgmentIntervalMinutes: 30, archReviewIntervalMinutes: 60,
+    packagingCheckCmd: null, packagingGapWorkerCmd: null, packagingGapWorkerTimeoutMs: 900_000,
+    packagingHygieneIntervalMinutes: 60,
+    archGapWorkerCmd: null, archGapWorkerTimeoutMs: 900_000,
+  };
+}
+
+test("arch-coverage config — absent ⇒ present:false; malformed / below-floor fail closed; disabled is its own state", (t) => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "qg-coverage-cfg-"));
+  t.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
+  // Off by default: no `.quay/config.yml` at all ⇒ the host routine set is unchanged.
+  assert.deepEqual(readArchCoverageConfig(tmp), { present: false, config: null, error: null });
+
+  assert.notEqual(parseArchCoverageSection(null).error, null);
+  const missingEnabled = parseArchCoverageSection({ interval: "interval:360m" });
+  assert.equal(missingEnabled.config, null);
+  assert.match(missingEnabled.error, /boolean 'enabled'/);
+
+  const belowFloor = parseArchCoverageSection({ enabled: true, interval: `interval:${ARCH_COVERAGE_MIN_INTERVAL_MINUTES - 1}m` });
+  assert.equal(belowFloor.config, null);
+  assert.match(belowFloor.error, new RegExp(`${ARCH_COVERAGE_MIN_INTERVAL_MINUTES}m floor`));
+
+  const badGrammar = parseArchCoverageSection({ enabled: true, interval: "every(5)" });
+  assert.equal(badGrammar.config, null);
+
+  assert.deepEqual(parseArchCoverageSection({ enabled: false }), { config: { enabled: false, intervalMinutes: null }, error: null });
+  assert.deepEqual(parseArchCoverageSection({ enabled: true, interval: "interval:360m" }), {
+    config: { enabled: true, intervalMinutes: 360 }, error: null,
+  });
+});
+
+test("archCoverageRoutineFromConfig — an UNDECLARED workspace keeps EXACTLY the four built-in routines", (t) => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "qg-coverage-absent-"));
+  t.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
+  const read = archCoverageRoutineFromConfig(tmp);
+  assert.equal(read.routine, null, "no section ⇒ the routine is not even ADDED to the table");
+  assert.equal(read.present, false);
+  assert.equal(read.error, null);
+
+  const without = qualityGateRoutines(tmp, coverageBaseOpts()).map((r) => r.name);
+  assert.deepEqual(without, ["pool-quality-judge", "judgment-consumer-check", "architecture-review", "packaging-hygiene"]);
+  const injected = { name: ARCH_COVERAGE_ROUTINE_NAME, schedule: { kind: "interval", minutes: ARCH_COVERAGE_INTERVAL_MIN_DEFAULT }, run: () => [] };
+  const withIt = qualityGateRoutines(tmp, { ...coverageBaseOpts(), archCoverageRoutine: injected }).map((r) => r.name);
+  assert.deepEqual(withIt, [...without, ARCH_COVERAGE_ROUTINE_NAME], "the injection appends; it never displaces a built-in");
+});
+
+test("archCoverageRoutineFromConfig — a DECLARED section is assembled and carries its declared interval", (t) => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "qg-coverage-declared-"));
+  t.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
+  fs.mkdirSync(path.join(tmp, ".quay"), { recursive: true });
+  fs.writeFileSync(path.join(tmp, ".quay", "config.yml"), "loop:\n  arch_coverage_report:\n    enabled: true\n    interval: interval:120m\n", "utf8");
+  const read = archCoverageRoutineFromConfig(tmp);
+  assert.equal(read.present, true);
+  assert.equal(read.enabled, true);
+  assert.equal(read.error, null);
+  assert.equal(read.routine.name, ARCH_COVERAGE_ROUTINE_NAME);
+  assert.deepEqual(read.routine.schedule, { kind: "interval", minutes: 120 });
+});
+
+test("runArchCoverageRound — enabled ⇒ VERIFIED while NOT-EVALUATED is non-zero, and one baseline line is appended (AC2/AC3)", (t) => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "qg-coverage-round-"));
+  t.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
+  const repo = makeCoverageGitRepo(tmp);
+  const history = path.join(tmp, "history.jsonl");
+  const opts = { config: { enabled: true, intervalMinutes: 360 }, configPresent: true, configError: null, historyPath: history };
+
+  const fact = runArchCoverageRound(repo, { ...opts, now: "T0" });
+  assert.equal(fact.name, ARCH_COVERAGE_ROUTINE_NAME);
+  assert.ok(fact.value.notEvaluatedLanguageCount > 0, "the fixture must actually be unevaluated or AC3 is vacuous");
+  assert.deepEqual([...fact.value.noAnalyzerLanguages].sort(), ["js", "mjs", "py", "sh"]);
+  assert.equal(fact.value.noAnalyzerLanguageCount, 4);
+  // AC3, the load-bearing assertion: a non-zero NOT-EVALUATED count does NOT become `failed`.
+  assert.equal(fact.state, "verified", `NOT-EVALUATED 非零不得使例程轮 failed（AC3）; got ${fact.state}: ${fact.reason}`);
+  assert.equal(fact.value.reportOnly, true);
+  assert.equal(fact.value.historyAppended, true);
+
+  const lines = fs.readFileSync(history, "utf8").split("\n").filter((l) => l !== "");
+  assert.equal(lines.length, 1, "one due round ⇒ exactly one baseline line");
+  const rec = JSON.parse(lines[0]);
+  assert.equal(rec.ts, "T0");
+  assert.equal(rec.noAnalyzerLanguageCount, 4);
+  assert.equal(rec.languages.length, 5);
+
+  // Append-only: a second due round adds a second line, never rewrites the first.
+  runArchCoverageRound(repo, { ...opts, now: "T1" });
+  const after = fs.readFileSync(history, "utf8").split("\n").filter((l) => l !== "");
+  assert.equal(after.length, 2);
+  assert.equal(JSON.parse(after[0]).ts, "T0");
+  assert.equal(JSON.parse(after[1]).ts, "T1");
+});
+
+test("runArchCoverageRound — kill switch ⇒ not-evaluated:disabled and ZERO writes", (t) => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "qg-coverage-disabled-"));
+  t.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
+  const history = path.join(tmp, "history.jsonl");
+  const fact = runArchCoverageRound(tmp, {
+    config: { enabled: false, intervalMinutes: null }, configPresent: true, configError: null, historyPath: history,
+  });
+  assert.equal(fact.state, "not-evaluated");
+  assert.equal(fact.value, null);
+  assert.match(fact.reason, /disabled/);
+  assert.equal(fs.existsSync(history), false, "the kill switch must produce zero writes");
+});
+
+test("runArchCoverageRound — bad config and an unwritable carrier ARE failed (the negative control for AC3)", (t) => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "qg-coverage-failed-"));
+  t.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
+  const badConfig = runArchCoverageRound(tmp, {
+    config: null, configPresent: true, configError: "loop.arch_coverage_report needs a boolean 'enabled'",
+  });
+  assert.equal(badConfig.state, "failed");
+  assert.match(badConfig.reason, /boolean 'enabled'/);
+
+  const repo = makeCoverageGitRepo(tmp);
+  const blocker = path.join(tmp, "blocker");
+  fs.writeFileSync(blocker, "not a directory");
+  const unwritable = runArchCoverageRound(repo, {
+    config: { enabled: true, intervalMinutes: 360 }, configPresent: true, configError: null,
+    historyPath: path.join(blocker, "history.jsonl"),
+  });
+  assert.equal(unwritable.state, "failed", "a report that could not persist its baseline is not a verified round");
+  assert.match(unwritable.reason, /history carrier not writable/);
+
+  // The three outcomes are three DIFFERENT shapes — "not evaluated" never dresses as "failed".
+  assert.notEqual(unwritable.state, "not-evaluated");
+});
+
+test("runArchCoverageRound — an unreadable input ⇒ not-evaluated (not failed) and STILL leaves a line marked evaluated:false", (t) => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "qg-coverage-nongit-"));
+  t.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
+  const history = path.join(tmp, "history.jsonl");
+  const fact = runArchCoverageRound(tmp, {
+    config: { enabled: true, intervalMinutes: 360 }, configPresent: true, configError: null, historyPath: history, now: "T",
+  });
+  assert.equal(fact.state, "not-evaluated");
+  assert.equal(fact.value.evaluated, false);
+  const rec = JSON.parse(fs.readFileSync(history, "utf8").trim());
+  assert.equal(rec.evaluated, false);
+  assert.equal(rec.reason, "not-a-git-worktree", "the carrier records the inability, not silence");
+});
+
+test("formatArchCoverageAssembly — enabled / disabled / malformed are three DIFFERENT startup lines (硬规则 3b/9)", () => {
+  const enabled = formatArchCoverageAssembly({ present: true, error: null, enabled: true, intervalMinutes: 360 });
+  const disabled = formatArchCoverageAssembly({ present: true, error: null, enabled: false, intervalMinutes: 360 });
+  const malformed = formatArchCoverageAssembly({ present: true, error: "loop.arch_coverage_report needs a boolean 'enabled'", enabled: false, intervalMinutes: 360 });
+  assert.notEqual(enabled, disabled);
+  assert.notEqual(disabled, malformed);
+  assert.match(enabled, /interval=360m/);
+  assert.match(enabled, /report-only/);
+  assert.match(disabled, /not-evaluated:disabled/);
+  assert.match(malformed, /failed/);
 });

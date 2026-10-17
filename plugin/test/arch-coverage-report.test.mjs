@@ -36,6 +36,13 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { LANGUAGES, EXCLUSION_RULES, isExcluded, dirInsideSource, canonicalPath } from "../scripts/arch-coverage-report.ts";
+import {
+  buildHistoryRecord,
+  appendHistoryRecord,
+  buildReport,
+  DEFAULT_HISTORY_REL,
+  EXIT_HISTORY_WRITE_FAILED,
+} from "../scripts/arch-coverage-report.ts";
 import { mainCheckoutRoot } from "../scripts/repo-root.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -430,4 +437,122 @@ test("--help exits 0 and prints usage before doing any work", () => {
   const r = run(["--help"]);
   assert.equal(r.status, 0);
   assert.match(r.stdout, /usage: arch-coverage-report\.ts/);
+});
+
+// ── the production baseline carrier (gap-arch-coverage-report-report-only-not-run-in-production) ─────
+//
+// Before this task the report existed but NOTHING ran it, so its reading was only available when a
+// human asked. The two halves below make it a baseline: (1) a compact per-run line with the
+// NOT-EVALUATED counts (AC2), (2) an append-only carrier the routine can write every round.
+// AC3 is the negative half: NOT-EVALUATED is CONTENT, never a failure — these are report-only.
+
+test("history record — per-language NOT-EVALUATED rows, with a NON-ZERO no-analyzer subset (AC2)", () => {
+  const { parsed } = jsonRun([REPO_ROOT, "--archguard-manifest", REAL_MANIFEST]);
+  const record = buildHistoryRecord(parsed, "T");
+  assert.equal(record.ts, "T");
+  assert.equal(record.evaluated, parsed.evaluated);
+  // The per-language rows are the carrier's substance: the same readings, one line per run.
+  assert.equal(record.languages.length, LANGUAGES.length);
+  for (const lang of ["mjs", "js", "sh", "py"]) {
+    const row = record.languages.find((l) => l.language === lang);
+    assert.ok(row, `${lang} row missing from the history record`);
+    assert.equal(row.status, "NOT-EVALUATED");
+    assert.equal(row.reason, "no-analyzer");
+    assert.ok(row.trackedFiles > 0, `${lang}: a 0 here would make the "non-zero" AC vacuous`);
+  }
+  // AC2's exact quantity: the no-analyzer subset — non-zero and NAMED.
+  assert.deepEqual([...record.noAnalyzerLanguages].sort(), ["js", "mjs", "py", "sh"]);
+  assert.equal(record.noAnalyzerLanguageCount, 4);
+  assert.ok(record.notEvaluatedLanguageCount >= record.noAnalyzerLanguageCount);
+  // The directory-level reading travels with the line, including its own NOT-EVALUATED state (a
+  // `false` here must never be read as "nothing uncovered" — that is the report's own 硬规则 3b).
+  assert.deepEqual(record.uncoveredTsDirs, parsed.uncoveredTsDirs);
+  assert.equal(record.uncoveredTsDirsEvaluated, parsed.uncoveredTsDirsEvaluated);
+  assert.equal(record.globalScopeKind, parsed.archguard.globalScopeKind);
+  // Unreadable counts stay null in the carrier too — never coerced to 0.
+  const nongit = buildHistoryRecord(
+    buildReport({
+      root: "/nowhere",
+      tracked: [],
+      manifestFound: false,
+      manifestPath: "/nowhere/m.json",
+      manifest: null,
+      gitError: "no git",
+    }),
+  );
+  assert.equal(nongit.evaluated, false);
+  assert.equal(nongit.languages[0].trackedFiles, null);
+});
+
+test("appendHistoryRecord — one valid JSON line per run, append-only, default path under .quay/ (AC2)", (t) => {
+  const tmp = fs.mkdtempSync(path.join(process.env.TMPDIR || "/tmp", "arch-coverage-history-"));
+  t.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
+  const report = buildReport({
+    root: tmp,
+    tracked: ["a.ts", "b.mjs", "c.js", "d.sh", "e.py"],
+    manifestFound: false,
+    manifestPath: path.join(tmp, "m.json"),
+    manifest: null,
+    now: "T0",
+  });
+  const first = appendHistoryRecord(tmp, report);
+  assert.equal(first.ok, true, `append failed: ${first.error}`);
+  assert.equal(first.path, path.join(tmp, DEFAULT_HISTORY_REL), "the default carrier lives under .quay/");
+  const second = appendHistoryRecord(tmp, report, { now: "T1" });
+  assert.equal(second.ok, true, `second append failed: ${second.error}`);
+  const lines = fs.readFileSync(first.path, "utf8").split("\n").filter((l) => l !== "");
+  assert.equal(lines.length, 2, "append, never overwrite — the baseline is a history, not a snapshot");
+  const recs = lines.map((l) => JSON.parse(l));
+  assert.equal(recs[0].ts, "T0");
+  assert.equal(recs[1].ts, "T1");
+  assert.deepEqual([...recs[1].noAnalyzerLanguages].sort(), ["js", "mjs", "py", "sh"]);
+});
+
+test("appendHistoryRecord — an unwritable carrier is its OWN result, never a silent success (硬规则 3b)", (t) => {
+  const tmp = fs.mkdtempSync(path.join(process.env.TMPDIR || "/tmp", "arch-coverage-history-bad-"));
+  t.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
+  const blocker = path.join(tmp, "blocker");
+  fs.writeFileSync(blocker, "not a directory");
+  const report = buildReport({
+    root: tmp, tracked: ["a.ts"], manifestFound: false, manifestPath: path.join(tmp, "m.json"), manifest: null,
+  });
+  const r = appendHistoryRecord(tmp, report, { historyPath: path.join(blocker, "history.jsonl") });
+  assert.equal(r.ok, false, "a failed baseline write must not be shaped like a recorded one");
+  assert.ok(r.error !== null && r.error.length > 0, "the failure carries a reason");
+});
+
+test("--record-history writes exactly one baseline line and keeps the report on stdout", (t) => {
+  const tmp = fs.mkdtempSync(path.join(process.env.TMPDIR || "/tmp", "arch-coverage-cli-history-"));
+  t.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
+  const history = path.join(tmp, "history.jsonl");
+  const r = run([REPO_ROOT, "--archguard-manifest", REAL_MANIFEST, "--record-history", "--history-path", history]);
+  assert.equal(r.status, 0, `stderr=${r.stderr}`);
+  assert.match(r.stdout, /arch-coverage-report — /, "the flag must not replace the report output");
+  const lines = fs.readFileSync(history, "utf8").split("\n").filter((l) => l !== "");
+  assert.equal(lines.length, 1);
+  const rec = JSON.parse(lines[0]);
+  assert.equal(rec.runner, "arch-coverage-report.ts");
+  assert.ok(rec.noAnalyzerLanguageCount >= 4);
+});
+
+test("--record-history into an unwritable path exits 4 — distinct from 0 (recorded) and 2 (not evaluated)", (t) => {
+  const tmp = fs.mkdtempSync(path.join(process.env.TMPDIR || "/tmp", "arch-coverage-cli-badhistory-"));
+  t.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
+  const blocker = path.join(tmp, "blocker");
+  fs.writeFileSync(blocker, "not a directory");
+  const r = run([REPO_ROOT, "--archguard-manifest", REAL_MANIFEST, "--history-path", path.join(blocker, "h.jsonl")]);
+  assert.equal(r.status, EXIT_HISTORY_WRITE_FAILED, "the reading exists; the baseline did not persist — its own code");
+  assert.match(r.stderr, /history carrier not writable/);
+});
+
+test("human report — the NOT-EVALUATED language/dir counts appear ABOVE the detail table (Plan item 3)", () => {
+  const r = run([REPO_ROOT, "--archguard-manifest", REAL_MANIFEST]);
+  assert.equal(r.status, 0);
+  const lines = r.stdout.split("\n");
+  const headlineIdx = lines.findIndex((l) => /^NOT-EVALUATED: /.test(l));
+  assert.ok(headlineIdx > 0, `no headline line:\n${r.stdout}`);
+  assert.ok(headlineIdx < lines.findIndex((l) => l.startsWith("language   tracked")), "the headline must precede the table");
+  assert.match(r.stdout, new RegExp(`NOT-EVALUATED: \\d+/${LANGUAGES.length} language\\(s\\)`));
+  assert.match(r.stdout, /no analyzer at all: 4 \[mjs, js, sh, py\]/);
+  assert.match(r.stdout, /uncovered \.ts dirs: (NOT EVALUATED|\d+)/);
 });
