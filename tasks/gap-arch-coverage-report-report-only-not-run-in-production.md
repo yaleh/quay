@@ -1,7 +1,7 @@
 ---
 id: gap-arch-coverage-report-report-only-not-run-in-production
 title: arch-coverage-report 是 report-only、生产从不跑——「哪些目录没有任何分析器到达」仍不可查
-status: todo
+status: ready
 labels:
   - gap
 parent: null
@@ -23,7 +23,7 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假·生产产出）落地后一条 post-landing 例程轮在覆盖率载体里产生新记录（真跑，非仅实现）；无新记录即假。
+- [ ] AC1（能取假·生产产出）落地后一条 post-landing 例程轮在覆盖率载体里产生新记录（真跑，非仅实现）；无新记录即假。（待外部）
 - [ ] AC2（未评估可见）载体记录含 NOT-EVALUATED 计数，且对无分析器的语言（mjs/js/sh/py）非零。
 - [ ] AC3（非 ratchet）report-only：NOT-EVALUATED 非零不使例程轮 failed（区别于「红了」）。
 
