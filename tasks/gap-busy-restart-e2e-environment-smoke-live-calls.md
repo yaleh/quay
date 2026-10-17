@@ -1,7 +1,7 @@
 ---
 id: gap-busy-restart-e2e-environment-smoke-live-calls
 title: 忙时重启 E2E 的环境冒烟每轮真调网关 3 次：文件自称 no live model calls，且绿色依赖外部错误措辞
-status: ready
+status: done
 labels:
   - gap
 parent: null
