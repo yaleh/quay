@@ -129,8 +129,8 @@ function fakeIdentityScript(tmp, withEntity) {
       // 上一版是 `code:5, hardcoded:4` —— 它在旧的裸 `hardcoded > 0` 判据下成簇，
       // 而那个裸判据正是 gap-arch-review-cluster-ignores-detector-flag-predicate 修掉的缺陷。
       // 现取真实读数形态（对照生产里 `P2-identity-quay-init.sh` 实测 59 hardcoded / 3 accessor）。
-      ? `process.stdout.write(JSON.stringify({table:[{entity:"session-liveness.sh",code:62,hardcoded:59,accessor:3,codeFiles:["plugin/scripts/a.ts","packages/quay/src/observation.ts"]}],judgmentRewrites:[{file:"plugin/scripts/worker-driver.ts"}],pathConstants:[],byteIdentical:{count:0,pairs:[]}}));`
-      : `process.stdout.write(JSON.stringify({table:[],judgmentRewrites:[],pathConstants:[],byteIdentical:{count:0,pairs:[]}}));`,
+      ? `process.stdout.write(JSON.stringify({table:[{entity:"session-liveness.sh",code:62,hardcoded:59,accessor:3,codeFiles:["plugin/scripts/a.ts","packages/quay/src/observation.ts"]}],judgmentRewrites:[{file:"plugin/scripts/worker-driver.ts"}],pathConstants:[],byteIdentical:{count:0,pairs:[]},rootSurface:{kind:"full",note:null}}));`
+      : `process.stdout.write(JSON.stringify({table:[],judgmentRewrites:[],pathConstants:[],byteIdentical:{count:0,pairs:[]},rootSurface:{kind:"full",note:null}}));`,
   );
 }
 
@@ -138,7 +138,7 @@ function fakeLineageScript(tmp, withSuspicious) {
   return writeFixture(
     tmp,
     "fake-lineage.js",
-    `process.stdout.write(JSON.stringify({suspicious:${withSuspicious ? '[{basename:"guard-a.ts",dir:"plugin/scripts"}]' : "[]"},declared:[]}));`,
+    `process.stdout.write(JSON.stringify({suspicious:${withSuspicious ? '[{basename:"guard-a.ts",dir:"plugin/scripts"}]' : "[]"},declared:[],rootSurface:{kind:"full",note:null}}));`,
   );
 }
 
@@ -146,7 +146,7 @@ function fakeDeletionScript(tmp) {
   return writeFixture(
     tmp,
     "fake-deletion.js",
-    `process.stdout.write(JSON.stringify({components:["session-liveness.sh"],dc:["plugin/scripts/a.ts","tasks/x.md"],counts:{dcTotal:2,callGraphTotal:1,ratio:2}}));`,
+    `process.stdout.write(JSON.stringify({components:["session-liveness.sh"],dc:["plugin/scripts/a.ts","tasks/x.md"],counts:{dcTotal:2,callGraphTotal:1,ratio:2},rootSurface:{kind:"full",note:null}}));`,
   );
 }
 
@@ -164,7 +164,7 @@ function fakeIdentityBoundaryScript(tmp) {
       + `{entity:"real.ts",code:9,hardcoded:9,accessor:2,codeFiles:["plugin/scripts/real.ts"]},`
       + `{entity:"real2.ts",code:8,hardcoded:8,accessor:3,codeFiles:["plugin/scripts/real2.ts"]},`
       + `{entity:"real3.ts",code:7,hardcoded:7,accessor:4,codeFiles:["plugin/scripts/real3.ts"]}],`
-      + `judgmentRewrites:[],pathConstants:[],byteIdentical:{count:0,pairs:[]}}));`,
+      + `judgmentRewrites:[],pathConstants:[],byteIdentical:{count:0,pairs:[]},rootSurface:{kind:"full",note:null}}));`,
   );
 }
 
@@ -194,7 +194,7 @@ const argv=process.argv.slice(2);
 const i=argv.indexOf("--root");
 const components=i<0?argv:argv.slice(0,i);
 fs.appendFileSync(${JSON.stringify(logPath)}, JSON.stringify(components)+"\\n");
-process.stdout.write(JSON.stringify({components,dc:["plugin/scripts/a.ts"],counts:{dcTotal:1,callGraphTotal:1,ratio:1}}));`,
+process.stdout.write(JSON.stringify({components,dc:["plugin/scripts/a.ts"],counts:{dcTotal:1,callGraphTotal:1,ratio:1},rootSurface:{kind:"full",note:null}}));`,
   );
   const prev = process.env.QUAY_PLUGIN_ROOT;
   process.env.QUAY_PLUGIN_ROOT = kernelRoot;
@@ -648,9 +648,13 @@ test("AC2/AC3 — runArchitectureReview fired ⇒ LLM judge ⇒ judged record + 
     assert.ok("suggestedAction" in v, "cluster verdict carries suggestedAction");
     assert.ok("actionable" in v, "cluster verdict carries actionable (三态)");
   }
+  // AC3 — judged 记录同样带 per-detector 状态（每条记录都必须带，不是只有 not-triggered 带）。
+  assert.ok(Array.isArray(rec.detectors), "judged record carries a detectors array");
+  assert.equal(rec.detectors.length, 3);
+  assert.ok(rec.detectors.every((d) => d.evaluated === true), `all detectors evaluated on the fired path: ${JSON.stringify(rec.detectors)}`);
 });
 
-test("AC3 — runArchitectureReview not-triggered ⇒ verified fired=false + not-triggered record", async (t) => {
+test("AC3 — runArchitectureReview not-triggered ⇒ verified fired=false + not-triggered record (all detectors evaluated)", async (t) => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "qg-arch-nt-"));
   t.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
   const { identityCmd, lineageCmd } = archReviewCmd(tmp, { withEntity: false, withSuspicious: false });
@@ -660,6 +664,46 @@ test("AC3 — runArchitectureReview not-triggered ⇒ verified fired=false + not
   assert.equal(fact.value.clusterCount, 0);
   const rec = JSON.parse(fs.readFileSync(archReviewRoundPath(tmp), "utf8").split("\n").filter((l) => l.trim()).pop());
   assert.equal(rec.state, "not-triggered");
+  // AC3（gap-architecture-review-not-triggered-lacks-per-detector-state）：载体带 per-detector 状态，
+  // 且 not-triggered 的真条件（每个检测器都评估过 ∧ 无簇）在**写出来的记录**上成立。
+  assert.ok(Array.isArray(rec.detectors), "record carries a detectors array");
+  assert.equal(rec.detectors.length, 3);
+  for (const d of rec.detectors) {
+    for (const k of ["id", "evaluated", "reason", "clusters"]) assert.ok(k in d, `detector ${d.id} carries ${k}`);
+  }
+  assert.ok(rec.detectors.every((d) => d.evaluated && d.clusters.length === 0),
+    `AC2: not-triggered ⇒ every detector evaluated && clusters empty (got ${JSON.stringify(rec.detectors)})`);
+});
+
+// gap-architecture-review-not-triggered-lacks-per-detector-state AC1（driver 边界）：
+// 检测器输出里**没有 rootSurface**（或 rootSurface 报不在）⇒ 本轮必须是 not-evaluated，
+// 记录带该 detector 的 reason，⛔ 绝不写 not-triggered。负控制：同一组命令只把 rootSurface
+// 补成 full ⇒ 状态翻成 not-triggered（证明判据是 rootSurface 造成的，不是「这个 root 恒不评估」）。
+test("AC1 — 检测器没有候选宇宙 ⇒ not-evaluated（记录带 reason），补上 rootSurface 后翻成 not-triggered", async (t) => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "qg-arch-ne-"));
+  t.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
+  const bareIdentity = writeFixture(tmp, "bare-identity.js",
+    `process.stdout.write(JSON.stringify({table:[],judgmentRewrites:[],pathConstants:[],byteIdentical:{count:0,pairs:[]}}));`);
+  const bareLineage = writeFixture(tmp, "bare-lineage.js",
+    `process.stdout.write(JSON.stringify({suspicious:[],declared:[]}));`);
+
+  const fact = await runArchitectureReview(tmp, ["node", bareIdentity], ["node", bareLineage], null, null);
+  assert.equal(fact.state, "not-evaluated", "缺 rootSurface ⇒ ⛔ 不得读成「三个检测器都评估且干净」");
+  assert.match(fact.reason, /not-evaluated/, `reason=${fact.reason}`);
+  const rec = JSON.parse(fs.readFileSync(archReviewRoundPath(tmp), "utf8").split("\n").filter((l) => l.trim()).pop());
+  assert.equal(rec.state, "not-evaluated", "⛔ 不得写 not-triggered");
+  assert.ok(rec.detectors.some((d) => !d.evaluated && /no rootSurface/.test(d.reason)),
+    "记录必须带未评估 detector 的 reason");
+
+  // 负控制：同一 root 上只把 rootSurface 补成 full ⇒ 状态必须翻转（判据能取假）。
+  const fullIdentity = writeFixture(tmp, "full-identity.js",
+    `process.stdout.write(JSON.stringify({table:[],judgmentRewrites:[],pathConstants:[],byteIdentical:{count:0,pairs:[]},rootSurface:{kind:"full",note:null}}));`);
+  const fullLineage = writeFixture(tmp, "full-lineage.js",
+    `process.stdout.write(JSON.stringify({suspicious:[],declared:[],rootSurface:{kind:"full",note:null}}));`);
+  const ok = await runArchitectureReview(tmp, ["node", fullIdentity], ["node", fullLineage], null, null);
+  assert.equal(ok.state, "verified", `补上 rootSurface 后应翻成 not-triggered（reason=${ok.reason}）`);
+  const rec2 = JSON.parse(fs.readFileSync(archReviewRoundPath(tmp), "utf8").split("\n").filter((l) => l.trim()).pop());
+  assert.equal(rec2.state, "not-triggered");
 });
 
 // gap-arch-review-p1-seed-ignores-detector-flag-predicate AC4(b)：P1 候选构件选取的**真实消费面**。
@@ -698,6 +742,7 @@ test("AC3 — runArchitectureReview judge exit non-zero ⇒ failed + failed reco
   assert.equal(fact.state, "failed");
   const rec = JSON.parse(fs.readFileSync(archReviewRoundPath(tmp), "utf8").split("\n").filter((l) => l.trim()).pop());
   assert.equal(rec.state, "failed");
+  assert.ok(Array.isArray(rec.detectors), "failed record also carries per-detector states (AC3)");
 });
 
 test("AC3 — runArchitectureReview unreadable identity ⇒ not-evaluated (硬规则 3b)", async (t) => {
@@ -1080,7 +1125,7 @@ test("Gap3/AC1 — 检测器脚本体解析不出 ⇒ architecture-review 记 no
     fs.mkdirSync(path.join(emptyKernel, "scripts", "dist"), { recursive: true });
     for (const n of ["identity-replication-check", "guard-lineage-check", "deletion-closure-check"]) {
       fs.writeFileSync(path.join(emptyKernel, "scripts", "dist", `${n}.js`),
-        "process.stdout.write(JSON.stringify({}));\n");
+        "process.stdout.write(JSON.stringify({rootSurface:{kind:\"full\",note:null}}));\n");
     }
     const ok = await runArchitectureReview(target, null, null, null, null, null, false);
     assert.notEqual(ok.state, "not-evaluated", `不该再是 unresolved（reason=${ok.reason}）`);

@@ -6,8 +6,11 @@
 //   AC1 — clusterDetectorOutputs is deterministic: given fixed --json samples of the three
 //         detectors (P1/P2/P4), it yields a fixed, ordered candidate-cluster list (unit-tested,
 //         not eyeballed). Each cluster carries {clusterId, primitive, files, rawCount, label}.
-//   AC3 — the carrier's three states (judged / failed / not-triggered) are distinct values;
-//         an empty judged record is refused (判词为空不写空记录).
+//   AC3 — the carrier's states (judged / failed / not-triggered / not-evaluated) are distinct values;
+//         an empty judged record is refused, and every record carries its per-detector states.
+//   gap-architecture-review-not-triggered-lacks-per-detector-state — AC1 (any detector
+//         evaluated:false ⇒ not-evaluated, never not-triggered), AC2 (not-triggered ⇒ every detector
+//         evaluated && clusters empty, verified from the written jsonl), AC3 (detectors member shape).
 //
 // Run:
 //   scripts/test.sh plugin/test/architecture-review-cluster.test.mjs
@@ -20,6 +23,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import {
+  ARCH_REVIEW_DETECTOR_IDS,
   PRIMITIVES,
   appendArchReviewRound,
   archReviewRoundPath,
@@ -30,6 +34,8 @@ import {
   clusterDeletionReport,
   computeArchReviewTrigger,
   deletionClosureComponents,
+  deletionDetectorEvaluation,
+  detectorEvalFromSurface,
   mergeClusterVerdicts,
 } from "../scripts/architecture-review-cluster.ts";
 
@@ -285,34 +291,147 @@ test("AC3/AC5 — 另一半能取假：越过谓词的边界行修后仍被选�
   );
 });
 
-// ── 触发（能取假）─────────────────────────────────────────────────────────────────────────────
+// ── 触发（能取假 + per-detector 三态：gap-architecture-review-not-triggered-lacks-per-detector-state）──
+//
+// AC1：任一 detector `evaluated:false` ⇒ state `not-evaluated`（⛔ 仍写 not-triggered 即假）。
+// AC2：`not-triggered` 仅当 `detectors.every(d => d.evaluated && d.clusters.length === 0)`。
+// AC3：每条 round 记录带 `detectors: [{id, evaluated, reason, clusters}]`。
 
-test("trigger — candidate clusters empty ⇒ not fired (能取假)", () => {
-  assert.deepEqual(computeArchReviewTrigger([]), { fired: false, reasons: [], clusterCount: 0 });
-  const fired = computeArchReviewTrigger(clusterDetectorOutputs({ identity: IDENTITY, lineage: LINEAGE, deletion: DELETION }));
-  assert.equal(fired.fired, true);
-  assert.equal(fired.clusterCount, 7);
-  assert.ok(fired.reasons.length > 0);
+/** 一条检测器自报态（input 侧，clusters 是簇对象）。 */
+function probe(id, evaluated, clusters = [], reason = evaluated ? `${id} rootSurface full` : `${id} rootSurface absent`) {
+  return { id, evaluated, reason, clusters };
+}
+
+/** 三个检测器**都评估过且无簇**的基准（not-triggered 的真条件）。 */
+function allEvaluatedProbes() {
+  return [
+    probe(ARCH_REVIEW_DETECTOR_IDS.identity, true),
+    probe(ARCH_REVIEW_DETECTOR_IDS.lineage, true),
+    probe(ARCH_REVIEW_DETECTOR_IDS.deletion, true),
+  ];
+}
+
+test("trigger — no detector probes ⇒ not-evaluated（空 every 恒真，⛔ 不返回 not-triggered）", () => {
+  const t = computeArchReviewTrigger([]);
+  assert.equal(t.fired, false);
+  assert.equal(t.clusterCount, 0);
+  assert.equal(t.state, "not-evaluated", "没有检测器读数时不得声称「都评估过」");
 });
 
-// ── AC3 · 三态可区分 + 判词合并 + 载体写端 ────────────────────────────────────────────────────
+test("trigger — 三个检测器都评估过且无簇 ⇒ not-triggered（能取假）", () => {
+  const t = computeArchReviewTrigger(allEvaluatedProbes());
+  assert.equal(t.fired, false);
+  assert.equal(t.state, "not-triggered");
+  assert.equal(t.clusterCount, 0);
+  assert.deepEqual(t.reasons, []);
+  assert.deepEqual(t.detectors.map((d) => [d.id, d.evaluated, d.clusters.length]), [
+    [ARCH_REVIEW_DETECTOR_IDS.identity, true, 0],
+    [ARCH_REVIEW_DETECTOR_IDS.lineage, true, 0],
+    [ARCH_REVIEW_DETECTOR_IDS.deletion, true, 0],
+  ]);
+});
 
-test("AC3 — three carrier states are distinct values; empty judged record refused", () => {
+test("AC1 — 任一 detector evaluated:false ⇒ state not-evaluated，且记录带该 detector 的 reason", () => {
+  const probes = allEvaluatedProbes();
+  probes[2] = probe(ARCH_REVIEW_DETECTOR_IDS.deletion, false, [], "no candidate components — candidate universe unknown");
+  const t = computeArchReviewTrigger(probes);
+  assert.equal(t.fired, false);
+  assert.equal(t.state, "not-evaluated", "⛔ 不得写成 not-triggered（那会把「没有候选宇宙」读成「干净」）");
+  assert.equal(t.detectors[2].evaluated, false);
+  assert.match(t.detectors[2].reason, /candidate universe unknown/);
+  assert.ok(t.reasons.some((r) => r.includes(ARCH_REVIEW_DETECTOR_IDS.deletion)),
+    "not-evaluated 的 triggerReasons 必须点名未评估的 detector");
+});
+
+test("AC2 — 差分对照：只把 evaluated 从 true 翻到 false（其余不变）⇒ 状态必须翻转", () => {
+  const clean = computeArchReviewTrigger(allEvaluatedProbes());
+  assert.equal(clean.state, "not-triggered");
+  assert.ok(clean.detectors.every((d) => d.evaluated && d.clusters.length === 0),
+    "AC2 的蕴含在 clean 记录上取真");
+
+  const probes = allEvaluatedProbes();
+  probes[1] = probe(ARCH_REVIEW_DETECTOR_IDS.lineage, false);
+  const flipped = computeArchReviewTrigger(probes);
+  assert.equal(flipped.state, "not-evaluated", "同一输入只翻 evaluated ⇒ not-triggered 必须消失");
+  assert.ok(!flipped.detectors.every((d) => d.evaluated && d.clusters.length === 0));
+});
+
+test("trigger — 有候选簇 ⇒ triggered；逐检测器 clusters 是 clusterId 数组（与合并列表同源）", () => {
+  const merged = clusterDetectorOutputs({ identity: IDENTITY, lineage: LINEAGE, deletion: DELETION });
+  const t = computeArchReviewTrigger([
+    probe(ARCH_REVIEW_DETECTOR_IDS.identity, true, clusterIdentityReport(IDENTITY)),
+    probe(ARCH_REVIEW_DETECTOR_IDS.lineage, true, clusterLineageReport(LINEAGE)),
+    probe(ARCH_REVIEW_DETECTOR_IDS.deletion, true, clusterDeletionReport(DELETION)),
+  ]);
+  assert.equal(t.fired, true);
+  assert.equal(t.state, "triggered");
+  assert.equal(t.clusterCount, merged.length);
+  assert.deepEqual(t.reasons, [`candidate-clusters=${merged.length}`]);
+  for (const d of t.detectors) for (const id of d.clusters) assert.equal(typeof id, "string");
+});
+
+test("detectorEvalFromSurface — full ⇒ evaluated；absent / 缺失 ⇒ not-evaluated（两半都取假）", () => {
+  assert.deepEqual(detectorEvalFromSurface({ kind: "full", note: null }, "P2"), {
+    evaluated: true, reason: "P2 rootSurface full",
+  });
+  const absent = detectorEvalFromSurface({ kind: "absent", note: "no plugin/scripts under this root" }, "P2");
+  assert.equal(absent.evaluated, false);
+  assert.match(absent.reason, /no plugin\/scripts under this root/);
+  const missing = detectorEvalFromSurface(undefined, "P2");
+  assert.equal(missing.evaluated, false, "缺 rootSurface 字段 ⇒ ⛔ 不默认合格（硬规则 3b）");
+  assert.match(missing.reason, /no rootSurface/);
+});
+
+test("deletionDetectorEvaluation — P1 候选宇宙派生自 P2：四种输入分别取到不同态", () => {
+  // 上游评估过 + 零构件 ⇒ 空宇宙是测量结果。
+  assert.equal(deletionDetectorEvaluation({ components: [], identityEvaluated: true }).evaluated, true);
+  // 上游未评估 + 零构件 ⇒ 宇宙未知。
+  const unknown = deletionDetectorEvaluation({ components: [], identityEvaluated: false });
+  assert.equal(unknown.evaluated, false);
+  assert.match(unknown.reason, /candidate universe unknown/);
+  // 有构件但报告无 rootSurface ⇒ 覆盖范围读不出。
+  assert.equal(deletionDetectorEvaluation({ components: ["x"], identityEvaluated: true }).evaluated, false);
+  // 未知 kind ⇒ 同样不落进「评估过」（⛔ 读不懂 ≠ 合格）。
+  assert.equal(
+    deletionDetectorEvaluation({ components: ["x"], identityEvaluated: true, deletionSurface: { kind: "weird" } }).evaluated,
+    false,
+  );
+  // 有构件 + partial ⇒ 评估过，但 reason 必须带检测器自己的 note（覆盖范围是读数的一部分）。
+  const partial = deletionDetectorEvaluation({
+    components: ["x"], identityEvaluated: true,
+    deletionSurface: { kind: "partial", note: "root .claude/workflows absent" },
+  });
+  assert.equal(partial.evaluated, true);
+  assert.match(partial.reason, /\.claude\/workflows absent/);
+});
+
+// ── AC3 · 四态可区分 + 判词合并 + 载体写端 ────────────────────────────────────────────────────
+
+/** 载体侧 detectors（clusters 是 clusterId 数组）。 */
+function detectorStates(probes = allEvaluatedProbes()) {
+  return probes.map((p) => ({ id: p.id, evaluated: p.evaluated, reason: p.reason, clusters: p.clusters.map((c) => c.clusterId) }));
+}
+
+test("AC3 — four carrier states are distinct values; empty judged record refused", () => {
   const judgedAt = "2026-09-05T00:00:00.000Z";
   const round = 42;
   const clusters = clusterDetectorOutputs({ identity: IDENTITY, lineage: LINEAGE, deletion: DELETION });
   const verdicts = clusters.map((c) => ({ clusterId: c.clusterId, verdict: "abstract", reasoning: "r", suggestedAction: "a" }));
   const merged = mergeClusterVerdicts(clusters, verdicts, judgedAt, round);
+  const detectors = detectorStates();
 
-  const judged = buildArchReviewRoundRecord({ round, judgedAt, state: "judged", triggerReasons: ["candidate-clusters=7"], clusters: merged });
-  const failed = buildArchReviewRoundRecord({ round, judgedAt, state: "failed", triggerReasons: [], clusters: [], reason: "x" });
-  const notTriggered = buildArchReviewRoundRecord({ round, judgedAt, state: "not-triggered", triggerReasons: [], clusters: [], reason: "y" });
+  const judged = buildArchReviewRoundRecord({ round, judgedAt, state: "judged", triggerReasons: ["candidate-clusters=7"], clusters: merged, detectors });
+  const failed = buildArchReviewRoundRecord({ round, judgedAt, state: "failed", triggerReasons: [], clusters: [], detectors, reason: "x" });
+  const notTriggered = buildArchReviewRoundRecord({ round, judgedAt, state: "not-triggered", triggerReasons: [], clusters: [], detectors, reason: "y" });
+  const notEvaluated = buildArchReviewRoundRecord({ round, judgedAt, state: "not-evaluated", triggerReasons: ["detector-not-evaluated:P1-deletion-closure"], clusters: [], detectors, reason: "z" });
 
   assert.equal(judged.state, "judged");
   assert.equal(failed.state, "failed");
   assert.equal(notTriggered.state, "not-triggered");
+  assert.equal(notEvaluated.state, "not-evaluated");
   assert.notEqual(judged.state, failed.state, "judged ≠ failed");
   assert.notEqual(failed.state, notTriggered.state, "failed ≠ not-triggered");
+  assert.notEqual(notTriggered.state, notEvaluated.state, "not-triggered ≠ not-evaluated（本缺陷的核心可分性）");
 
   // 逐簇判词 ≥5 键（Plan 步骤 4）。
   assert.equal(judged.clusters.length, 7);
@@ -322,32 +441,82 @@ test("AC3 — three carrier states are distinct values; empty judged record refu
     }
     assert.ok("suggestedAction" in v, "cluster verdict carries suggestedAction");
   }
+
+  // AC3：**每条**记录都带 detectors，且成员带 id/evaluated/reason/clusters。
+  for (const rec of [judged, failed, notTriggered, notEvaluated]) {
+    assert.ok(Array.isArray(rec.detectors), `${rec.state} record carries a detectors array`);
+    assert.equal(rec.detectors.length, 3);
+    for (const d of rec.detectors) {
+      for (const k of ["id", "evaluated", "reason", "clusters"]) {
+        assert.ok(k in d, `${rec.state} detector ${d.id} carries ${k}`);
+      }
+      assert.equal(typeof d.evaluated, "boolean");
+      assert.ok(Array.isArray(d.clusters));
+    }
+  }
 });
 
-test("AC3 — appendArchReviewRound writes one line per record; refuses empty judged", (t) => {
+test("AC3 — appendArchReviewRound writes one line per record; refuses empty judged and missing detectors", (t) => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "arch-"));
   t.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
   const round = 1;
   const judgedAt = "2026-09-05T00:00:00.000Z";
+  const detectors = detectorStates();
 
   const judged = buildArchReviewRoundRecord({
-    round, judgedAt, state: "judged", triggerReasons: ["candidate-clusters=1"],
+    round, judgedAt, state: "judged", triggerReasons: ["candidate-clusters=1"], detectors,
     clusters: [{ clusterId: "P1-deletion-closure", primitive: "P1", files: ["a.ts"], label: "l", verdict: "abstract", reasoning: "r", suggestedAction: "a", judgedAt, round }],
   });
   appendArchReviewRound(tmp, judged);
-  appendArchReviewRound(tmp, buildArchReviewRoundRecord({ round, judgedAt, state: "not-triggered", triggerReasons: [], clusters: [] }));
-  appendArchReviewRound(tmp, buildArchReviewRoundRecord({ round, judgedAt, state: "failed", triggerReasons: [], clusters: [], reason: "x" }));
+  appendArchReviewRound(tmp, buildArchReviewRoundRecord({ round, judgedAt, state: "not-triggered", triggerReasons: [], clusters: [], detectors }));
+  appendArchReviewRound(tmp, buildArchReviewRoundRecord({ round, judgedAt, state: "not-evaluated", triggerReasons: [], clusters: [], detectors, reason: "ne" }));
+  appendArchReviewRound(tmp, buildArchReviewRoundRecord({ round, judgedAt, state: "failed", triggerReasons: [], clusters: [], detectors, reason: "x" }));
 
   const p = archReviewRoundPath(tmp);
   const lines = fs.readFileSync(p, "utf8").split("\n").filter((l) => l.trim());
-  assert.equal(lines.length, 3, "one line per record (judged + not-triggered + failed)");
-  assert.deepEqual(lines.map((l) => JSON.parse(l).state), ["judged", "not-triggered", "failed"]);
+  assert.equal(lines.length, 4, "one line per record (judged + not-triggered + not-evaluated + failed)");
+  assert.deepEqual(lines.map((l) => JSON.parse(l).state), ["judged", "not-triggered", "not-evaluated", "failed"]);
 
   assert.throws(
-    () => appendArchReviewRound(tmp, buildArchReviewRoundRecord({ round, judgedAt, state: "judged", triggerReasons: [], clusters: [] })),
+    () => appendArchReviewRound(tmp, buildArchReviewRoundRecord({ round, judgedAt, state: "judged", triggerReasons: [], clusters: [], detectors })),
     /empty judged/,
     "空 judged 记录拒写",
   );
+  assert.throws(
+    () => appendArchReviewRound(tmp, {
+      round, judgedAt, state: "failed", triggerReasons: [], clusterCount: 0, clusters: [], reason: "no detectors",
+    }),
+    /detectors/,
+    "缺 detectors 的记录拒写（AC3 的载体不变式）",
+  );
+});
+
+test("AC2 — 一条命令可从 round jsonl 验证：not-triggered 记录里每个检测器都 evaluated 且 clusters 为空", (t) => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "arch-ac2-"));
+  t.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
+  const round = 3;
+  const judgedAt = "2026-09-05T00:00:00.000Z";
+
+  const clean = allEvaluatedProbes();
+  const notEval = allEvaluatedProbes();
+  notEval[0] = probe(ARCH_REVIEW_DETECTOR_IDS.identity, false, [], "identity rootSurface absent");
+
+  appendArchReviewRound(tmp, buildArchReviewRoundRecord({
+    round, judgedAt, state: "not-triggered", triggerReasons: [], clusters: [], detectors: detectorStates(clean),
+  }));
+  appendArchReviewRound(tmp, buildArchReviewRoundRecord({
+    round, judgedAt, state: "not-evaluated", triggerReasons: ["detector-not-evaluated:P2"], clusters: [], detectors: detectorStates(notEval), reason: "x",
+  }));
+
+  // 这就是那条「一条命令」的判据（等价于 jq -e 'select(.state=="not-triggered") | all(.detectors[]; .evaluated and (.clusters|length==0))'）。
+  const recs = fs.readFileSync(archReviewRoundPath(tmp), "utf8").split("\n").filter((l) => l.trim()).map((l) => JSON.parse(l));
+  const notTriggered = recs.filter((r) => r.state === "not-triggered");
+  assert.equal(notTriggered.length, 1);
+  for (const r of notTriggered) {
+    assert.ok(r.detectors.every((d) => d.evaluated && d.clusters.length === 0), "not-triggered ⇒ 每个检测器都评估且无簇");
+  }
+  // 负控制：同一载体里存在一条 evaluated:false 的记录 ⇒ 上面那条蕴含不是靠「只有一种记录」恒真。
+  assert.ok(recs.some((r) => r.state === "not-evaluated" && r.detectors.some((d) => !d.evaluated)));
 });
 
 test("AC3 — mergeClusterVerdicts skips unknown clusterIds and fills primitive/files/label", () => {

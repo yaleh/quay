@@ -81,18 +81,23 @@ import {
 // 架构复核例程的确定性一半（机械聚类纯函数 + 判词载体单一真相源，gap-quality-driver-architecture-
 // review-routine）。⛔ 聚类不重新实现三个检测器——只读它们的 --json 输出（本文件负责 spawn）。
 import {
+  ARCH_REVIEW_DETECTOR_IDS,
   actionableConclusions,
   appendArchReviewRound,
   appendSubmission,
   buildArchReviewRoundRecord,
-  clusterDetectorOutputs,
+  clusterByDetector,
   computeArchReviewTrigger,
   conclusionKey,
   deletionClosureComponents,
+  deletionDetectorEvaluation,
+  detectorEvalFromSurface,
+  flattenDetectorClusters,
   mergeClusterVerdicts,
   readSubmittedKeys,
   unsentConclusions,
   type ArchReviewClusterVerdict,
+  type ArchReviewDetectorState,
   type ArchReviewRoundRecord,
   type Cluster,
   type DeletionReportView,
@@ -846,9 +851,14 @@ function judgeAttemptAnswered(a: ArchReviewJudgeAttempt): boolean {
 }
 
 /** 架构复核例程：机械聚类（三个检测器 --json）→ 命中则 LLM judge → JS 合并 → 判词载体
- *  （.quay/architecture-review-round.jsonl）。读不懂任一检测器输出 ⇒ not-evaluated（硬规则 3b）；
- *  judge 失败/判词为空 ⇒ failed（落 failed 载体记录）；候选簇为空 ⇒ not-triggered（fired=false 是
- *  真实测量，非「读不懂装合格」）。
+ *  （.quay/architecture-review-round.jsonl）。四态（硬规则 3b）：
+ *    · 任一检测器读不懂/没有候选宇宙 ⇒ `not-evaluated`（记录逐检测器带上 reason）；
+ *    · judge 失败/判词为空 ⇒ `failed`；
+ *    · **每个**检测器都评估过且候选簇为空 ⇒ `not-triggered`（「干净」的真条件）；
+ *    · 有候选簇 ⇒ `judged`。
+ *  ⛔ `not-triggered` 不再由「簇为空」单独决定（gap-architecture-review-not-triggered-lacks-per-
+ *  detector-state）：真实宿主 ClaudeCodeUI 的 83/83 轮全零曾被读成「干净」，实则三个检测器在那个
+ *  根上根本没有候选宇宙。判定现在消费 `trigger.state`，并逐检测器把 evaluated/reason/clusters 写进载体。
  *  ⛔ 循环体异步化（同 B15 的 runAsync 修法）；judge（真实 claude -p）不设固定字面量上限（缺省
  *  unbounded）；judgeTimeoutMs 是负控制缝（测试注入「明显不够的值」），生产缺省 Infinity。
  *
@@ -870,51 +880,146 @@ export async function runArchitectureReview(
   gapWorkerTimeoutMs: number = ARCH_GAP_WORKER_TIMEOUT_MS_DEFAULT,
   judgeRetryBackoffMs: number = RETRY_BACKOFF_MS,
 ): Promise<Fact<ArchReviewFactValue | null>> {
+  const writeRecord = (record: ArchReviewRoundRecord): void => {
+    if (recordVerdicts) appendArchReviewRoundSafe(root, record);
+  };
+  /** 一条检测器**没跑成**的自报态（前序步骤已失败 ⇒ 后续检测器未执行）。⛔ 不省略成员：
+   *  省略会让「未评估」与「评估且干净」在 `detectors` 数组上同形。 */
+  const detectorNotRun = (id: string, why: string): ArchReviewDetectorState =>
+    ({ id, evaluated: false, reason: `not-run: ${why}`, clusters: [] });
+  /** 落一条 not-evaluated 载体记录并返回对应的 Fact。检测器解析不出/spawn 失败/输出读不懂时也写
+   *  （AC1：not-evaluated 的记录必须带该 detector 的 reason，⛔ 不是无痕返回）。 */
+  const notEvaluatedFact = (
+    detectors: ArchReviewDetectorState[],
+    reason: string,
+    value: ArchReviewFactValue | null = null,
+  ): Fact<ArchReviewFactValue | null> => {
+    writeRecord(buildArchReviewRoundRecord({
+      round: readCurrentRound(root),
+      judgedAt: new Date().toISOString(),
+      state: "not-evaluated",
+      triggerReasons: detectors.filter((d) => !d.evaluated).map((d) => `detector-not-evaluated:${d.id}`),
+      clusters: [],
+      detectors,
+      reason,
+    }));
+    return { name: "architecture-review", value, state: "not-evaluated", reason };
+  };
+
   // 1. P2 身份复制（必需——既产 P2 簇又推导 P1 候选构件）。
   const identityArgv = identityCmd ?? defaultIdentityReplicationArgv(root);
   // ⛔ 解析不到脚本体 ⇒ not-evaluated（硬规则 3b：不得 spawn 一个不存在的路径再把它读成「跑过且无数据」）。
-  if (identityArgv === null) return detectorUnresolvedFact("identity-replication-check.ts");
+  if (identityArgv === null) {
+    const fact = detectorUnresolvedFact("identity-replication-check.ts");
+    return notEvaluatedFact([
+      detectorNotRun(ARCH_REVIEW_DETECTOR_IDS.identity, "script unresolved"),
+      detectorNotRun(ARCH_REVIEW_DETECTOR_IDS.lineage, "identity detector unresolved"),
+      detectorNotRun(ARCH_REVIEW_DETECTOR_IDS.deletion, "identity detector unresolved"),
+    ], String(fact.reason));
+  }
   const identityR = await runAsync(identityArgv, { timeoutMs: ROUTINE_TIMEOUT_MS });
   if (identityR.error) {
-    return { name: "architecture-review", value: null, state: "not-evaluated", reason: `identity-replication spawn error: ${identityR.error.message}` };
+    const reason = `identity-replication spawn error: ${identityR.error.message}`;
+    return notEvaluatedFact([
+      { id: ARCH_REVIEW_DETECTOR_IDS.identity, evaluated: false, reason, clusters: [] },
+      detectorNotRun(ARCH_REVIEW_DETECTOR_IDS.lineage, "identity detector failed"),
+      detectorNotRun(ARCH_REVIEW_DETECTOR_IDS.deletion, "identity detector failed"),
+    ], reason);
   }
   const identity = parseDetectorJson<IdentityReportView>(identityR.stdout ?? "");
   if (identity === null) {
-    return { name: "architecture-review", value: null, state: "not-evaluated", reason: `unparseable identity-replication output (exit ${identityR.status}): ${diagnosticExcerpt(identityR.stdout)}` };
+    const reason = `unparseable identity-replication output (exit ${identityR.status}): ${diagnosticExcerpt(identityR.stdout)}`;
+    return notEvaluatedFact([
+      { id: ARCH_REVIEW_DETECTOR_IDS.identity, evaluated: false, reason, clusters: [] },
+      detectorNotRun(ARCH_REVIEW_DETECTOR_IDS.lineage, "identity detector unreadable"),
+      detectorNotRun(ARCH_REVIEW_DETECTOR_IDS.deletion, "identity detector unreadable"),
+    ], reason);
   }
+  const identityEval = detectorEvalFromSurface(identity.rootSurface, ARCH_REVIEW_DETECTOR_IDS.identity);
+  const identityState = (): ArchReviewDetectorState =>
+    ({ id: ARCH_REVIEW_DETECTOR_IDS.identity, evaluated: identityEval.evaluated, reason: identityEval.reason, clusters: [] });
 
   // 2. P4 守卫谱系（必需）。
   const lineageArgv = lineageCmd ?? defaultGuardLineageArgv(root);
-  if (lineageArgv === null) return detectorUnresolvedFact("guard-lineage-check.ts");
+  if (lineageArgv === null) {
+    const fact = detectorUnresolvedFact("guard-lineage-check.ts");
+    return notEvaluatedFact([
+      identityState(),
+      detectorNotRun(ARCH_REVIEW_DETECTOR_IDS.lineage, "script unresolved"),
+      detectorNotRun(ARCH_REVIEW_DETECTOR_IDS.deletion, "guard-lineage detector unresolved"),
+    ], String(fact.reason));
+  }
   const lineageR = await runAsync(lineageArgv, { timeoutMs: ROUTINE_TIMEOUT_MS });
   if (lineageR.error) {
-    return { name: "architecture-review", value: null, state: "not-evaluated", reason: `guard-lineage spawn error: ${lineageR.error.message}` };
+    const reason = `guard-lineage spawn error: ${lineageR.error.message}`;
+    return notEvaluatedFact([
+      identityState(),
+      { id: ARCH_REVIEW_DETECTOR_IDS.lineage, evaluated: false, reason, clusters: [] },
+      detectorNotRun(ARCH_REVIEW_DETECTOR_IDS.deletion, "guard-lineage detector failed"),
+    ], reason);
   }
   const lineage = parseDetectorJson<LineageReportView>(lineageR.stdout ?? "");
   if (lineage === null) {
-    return { name: "architecture-review", value: null, state: "not-evaluated", reason: `unparseable guard-lineage output (exit ${lineageR.status}): ${diagnosticExcerpt(lineageR.stdout)}` };
+    const reason = `unparseable guard-lineage output (exit ${lineageR.status}): ${diagnosticExcerpt(lineageR.stdout)}`;
+    return notEvaluatedFact([
+      identityState(),
+      { id: ARCH_REVIEW_DETECTOR_IDS.lineage, evaluated: false, reason, clusters: [] },
+      detectorNotRun(ARCH_REVIEW_DETECTOR_IDS.deletion, "guard-lineage detector unreadable"),
+    ], reason);
   }
+  const lineageEval = detectorEvalFromSurface(lineage.rootSurface, ARCH_REVIEW_DETECTOR_IDS.lineage);
 
   // 3. P1 删除闭包（候选构件由 identity 报告推导；无候选 ⇒ 空报告，跳过 spawn）。
   const components = deletionClosureComponents(identity);
   let deletion: DeletionReportView = { components: [], dc: [], counts: { dcTotal: 0, callGraphTotal: 0, ratio: null } };
   if (components.length > 0) {
     const deletionArgv = deletionCmd ?? defaultDeletionClosureArgv(root, components);
-    if (deletionArgv === null) return detectorUnresolvedFact("deletion-closure-check.ts");
+    if (deletionArgv === null) {
+      const fact = detectorUnresolvedFact("deletion-closure-check.ts");
+      return notEvaluatedFact([
+        identityState(),
+        { id: ARCH_REVIEW_DETECTOR_IDS.lineage, evaluated: lineageEval.evaluated, reason: lineageEval.reason, clusters: [] },
+        detectorNotRun(ARCH_REVIEW_DETECTOR_IDS.deletion, "script unresolved"),
+      ], String(fact.reason));
+    }
     const deletionR = await runAsync(deletionArgv, { timeoutMs: ROUTINE_TIMEOUT_MS });
     if (deletionR.error) {
-      return { name: "architecture-review", value: null, state: "not-evaluated", reason: `deletion-closure spawn error: ${deletionR.error.message}` };
+      const reason = `deletion-closure spawn error: ${deletionR.error.message}`;
+      return notEvaluatedFact([
+        identityState(),
+        { id: ARCH_REVIEW_DETECTOR_IDS.lineage, evaluated: lineageEval.evaluated, reason: lineageEval.reason, clusters: [] },
+        { id: ARCH_REVIEW_DETECTOR_IDS.deletion, evaluated: false, reason, clusters: [] },
+      ], reason);
     }
     const parsed = parseDetectorJson<DeletionReportView>(deletionR.stdout ?? "");
     if (parsed === null) {
-      return { name: "architecture-review", value: null, state: "not-evaluated", reason: `unparseable deletion-closure output (exit ${deletionR.status}): ${diagnosticExcerpt(deletionR.stdout)}` };
+      const reason = `unparseable deletion-closure output (exit ${deletionR.status}): ${diagnosticExcerpt(deletionR.stdout)}`;
+      return notEvaluatedFact([
+        identityState(),
+        { id: ARCH_REVIEW_DETECTOR_IDS.lineage, evaluated: lineageEval.evaluated, reason: lineageEval.reason, clusters: [] },
+        { id: ARCH_REVIEW_DETECTOR_IDS.deletion, evaluated: false, reason, clusters: [] },
+      ], reason);
     }
     deletion = parsed;
   }
 
-  // 4. 机械聚类 → 触发评估。
-  const clusters = clusterDetectorOutputs({ identity, lineage, deletion });
-  const trigger = computeArchReviewTrigger(clusters);
+  // 4. 机械聚类 → 逐检测器自报态 → 触发评估。
+  //    ⛔ per-detector 簇与合并簇**同源**（clusterByDetector 一次算，flatten 只排序），
+  //    否则「某一检测器 clusters 为空」与「它产出的簇被合进来」会各说各话（硬规则 5b）。
+  const perDetector = clusterByDetector({ identity, lineage, deletion });
+  const clusters = flattenDetectorClusters(perDetector);
+  // P1 的候选宇宙由 P2 报告推导 ⇒ 它的 evaluated 是派生的（见 deletionDetectorEvaluation 注释）。
+  const deletionEval = deletionDetectorEvaluation({
+    components,
+    identityEvaluated: identityEval.evaluated,
+    deletionSurface: deletion.rootSurface,
+  });
+  const trigger = computeArchReviewTrigger([
+    { id: ARCH_REVIEW_DETECTOR_IDS.identity, ...identityEval, clusters: perDetector.identity },
+    { id: ARCH_REVIEW_DETECTOR_IDS.lineage, ...lineageEval, clusters: perDetector.lineage },
+    { id: ARCH_REVIEW_DETECTOR_IDS.deletion, ...deletionEval, clusters: perDetector.deletion },
+  ]);
+
   const base: ArchReviewFactValue = {
     fired: trigger.fired,
     reasons: trigger.reasons,
@@ -928,19 +1033,28 @@ export async function runArchitectureReview(
     gapExitCode: null,
     gapError: null,
   };
-  const writeRecord = (record: ArchReviewRoundRecord): void => {
-    if (recordVerdicts) appendArchReviewRoundSafe(root, record);
-  };
   if (!trigger.fired) {
+    // AC1/AC2：无候选簇时**只有**每个检测器都评估过才允许 not-triggered；否则 not-evaluated，
+    // 且 reason 逐检测器点名（硬规则 3b：没有候选宇宙 ≠ 干净）。
+    const state = trigger.state === "not-triggered" ? "not-triggered" : "not-evaluated";
+    const reason = state === "not-triggered"
+      ? "no candidate clusters (every detector evaluated and produced zero suspicious groupings)"
+      : `not-evaluated: ${trigger.detectors.filter((d) => !d.evaluated).map((d) => `${d.id}: ${d.reason}`).join("; ")}`;
     writeRecord(buildArchReviewRoundRecord({
       round: readCurrentRound(root),
       judgedAt: new Date().toISOString(),
-      state: "not-triggered",
+      state,
       triggerReasons: trigger.reasons,
       clusters: [],
-      reason: "no candidate clusters (three detectors produced zero suspicious groupings)",
+      detectors: trigger.detectors,
+      reason,
     }));
-    return { name: "architecture-review", value: base, state: "verified", reason: `not-triggered (no candidate clusters)` };
+    return {
+      name: "architecture-review",
+      value: base,
+      state: state === "not-triggered" ? "verified" : "not-evaluated",
+      reason,
+    };
   }
 
   // 5. halt 闸（gap-drain-on-routine-driver-empties-round-and-respawn-loops）：halted ⇒ 只挡受闸动作
@@ -1036,7 +1150,7 @@ export async function runArchitectureReview(
   const failedRecord = (reason: string): ArchReviewRoundRecord & ArchReviewJudgeDiagnostics => ({
     ...buildArchReviewRoundRecord({
       round: readCurrentRound(root), judgedAt: new Date().toISOString(), state: "failed",
-      triggerReasons: trigger.reasons, clusters: [], reason,
+      triggerReasons: trigger.reasons, clusters: [], detectors: trigger.detectors, reason,
     }),
     call_failure: attempt.failure,
     stdout_bytes: attempt.stdoutBytes,
@@ -1070,7 +1184,7 @@ export async function runArchitectureReview(
   }
   const distribution: Record<string, number> = {};
   for (const m of merged) distribution[m.verdict] = (distribution[m.verdict] ?? 0) + 1;
-  writeRecord(buildArchReviewRoundRecord({ round, judgedAt, state: "judged", triggerReasons: trigger.reasons, clusters: merged }));
+  writeRecord(buildArchReviewRoundRecord({ round, judgedAt, state: "judged", triggerReasons: trigger.reasons, clusters: merged, detectors: trigger.detectors }));
 
   // 9. 语义结论 → 既有立案通道（gap-arch-review-judge-verdicts-never-reach-the-existing-gap-filing-
   //    channel）。**接法选择 = 单开一条同构路径，⛔ 不并入 packaging 的 `report.drift`**，理由：
