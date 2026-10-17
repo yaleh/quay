@@ -37,4 +37,6 @@ arch-coverage-report 在例程/报表位真跑并留可查基线；NOT-EVALUATED
 - plugin/scripts/arch-coverage-report.ts（追加基线载体写入）
 - plugin/test/arch-coverage-report.test.mjs（基线载体写入断言）
 - plugin/test/quality-gate-driver.test.mjs（例程轨接线断言）
+- .gitignore（新基线载体的 gitignore 声明）
+- docs/carrier-registry.json（新基线载体的 carrier 登记）
 - tasks/gap-arch-coverage-report-report-only-not-run-in-production.md
