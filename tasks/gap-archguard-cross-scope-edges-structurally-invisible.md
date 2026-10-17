@@ -1,7 +1,7 @@
 ---
 id: gap-archguard-cross-scope-edges-structurally-invisible
 title: archguard-runner 六 scope 各自分析——跨 scope 边（plugin↔packages）结构上不存在于任何一次分析
-status: todo
+status: ready
 labels:
   - gap
 parent: null
