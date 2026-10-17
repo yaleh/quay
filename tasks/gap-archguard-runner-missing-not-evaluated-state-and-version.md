@@ -1,7 +1,7 @@
 ---
 id: gap-archguard-runner-missing-not-evaluated-state-and-version
 title: archguard-runner 读数缺「未评估」态与版本来源——路径错/空分析/版本漂移都与「0 环通过」同形
-status: ready
+status: done
 labels:
   - gap
 parent: null
