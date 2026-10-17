@@ -24,10 +24,10 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假·目录环）fixture 模块图有 1 个目录环、实体 SCC 为 0 ⇒ runner exit 1 且 stderr 点名该环成员；仍 exit 0 即假。
-- [ ] AC2（两粒度真分开）同一 fixture 的 metrics 记录 `entitySccCount=0` 且 `directoryCycleCount>=1`——两个不同值，证明不是同一数的两个名字。
-- [ ] AC3（负控制）无环 fixture ⇒ exit 0，记录 `directoryCycleCount=0, evaluated:true`。
-- [ ] AC4（未评估态）无 TS module graph 的 scope ⇒ 记录 `evaluated:false` + `reason`，不与「0 环」同值。
+- [x] AC1（能取假·目录环）fixture 模块图有 1 个目录环、实体 SCC 为 0 ⇒ runner exit 1 且 stderr 点名该环成员；仍 exit 0 即假。
+- [x] AC2（两粒度真分开）同一 fixture 的 metrics 记录 `entitySccCount=0` 且 `directoryCycleCount>=1`——两个不同值，证明不是同一数的两个名字。
+- [x] AC3（负控制）无环 fixture ⇒ exit 0，记录 `directoryCycleCount=0, evaluated:true`。
+- [x] AC4（未评估态）无 TS module graph 的 scope ⇒ 记录 `evaluated:false` + `reason`，不与「0 环」同值。
 
 ## Definition of Done
 
