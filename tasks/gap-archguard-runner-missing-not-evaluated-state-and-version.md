@@ -39,3 +39,11 @@ runner 的每条 metrics 记录带 evaluated/reason/sourceFiles/entityCount/arch
 - plugin/scripts/archguard-runner.ts（readScopeSignal + appendHistory + main + HistoryRecord）
 - plugin/test/archguard-structural-gate-fan-in.test.mjs（读不到/0 实体负控制）
 - tasks/gap-archguard-runner-missing-not-evaluated-state-and-version.md
+
+## Blocker
+
+**2026-10-17T05:11:50.894Z — worker 未落地（exited-not-landed）**
+
+- 未落地原因：step=suite: AssertionError [ERR_ASSERTION]: the on/off wall-clock delta is within the 1% budget (measured 2.25%) [baseline A/B: HARD RED (changed-assertion) — the task's red set is NOT a subset of the develop baseline red set: added=- changed=plugin/test/full-suite-runner-cgroup.test.mjs]
+- run_id：wk-prod-anchor
+- session_id：901fff68-44b9-4d15-936d-9efe72306d8c
