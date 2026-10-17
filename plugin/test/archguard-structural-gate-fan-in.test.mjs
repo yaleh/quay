@@ -75,14 +75,22 @@ test("AC3 — archguard-runner.ts 仍可直接调用：sccCount=0 判据 + metri
   assert.match(src, /node --experimental-strip-types plugin\/scripts\/archguard-runner\.ts --root/, "the runner's own header must document the on-demand usage");
 });
 
-// ── 真实行为控制：注入假 archguard CLI（ARCHGUARD_RUNNER_CLI 测试缝）─────────────────────────────
-//
-// 这个假 CLI 模仿真 archguard 的两件事：`--version` 与 `analyze`（按 `--output-dir` + source basename
-// 落 class/all-classes.json）。模式由 FAKE_ARCHGUARD_MODE 选择：
-//   noop          — analyze 成功但【不写产物】⇒ AC1（读不到 ≠ 干净）
-//   zero-entities — 产物存在但 totalEntities=0 ⇒ AC3（有 .ts 却 0 实体）
-//   mismatch      — 产物可用（sccCount=0, entities>0），但 sourceFiles 有重复 realpath 且数量与
-//                   git ls-files 不一致 ⇒ AC4；同时这条也是 AC2 的版本锚阳性样本。
+// 追加（gap-archguard-structural-gate-reads-entity-scc-not-directory-cycles）：两个粒度的真实行为
+// 负控制。假 CLI 同时写出 archguard 的两份产物，并把它们的形状对齐【实测的真 archguard 0.1.40】：
+//   • class 产物 = `<output-dir>/<basename>/class/all-classes.json`（metricVector.sccCount = 实体粒度）
+//   • query 产物 = `<work-dir>/query/manifest.json` + `<work-dir>/query/<key>/arch.json`
+//     （extensions.tsAnalysis.moduleGraph.cycles = 目录粒度；真值实测于 2 文件 fixture：
+//      a/x.ts ↔ b/y.ts 互相 side-effect import ⇒ sccCount=0 而 cycles=[{modules:["b","a"]}]）。
+// 模式由 FAKE_ARCHGUARD_MODE 选择：
+//   noop            — analyze 成功但【不写产物】⇒ 两粒度都读不到
+//   zero-entities   — class 产物 totalEntities=0（query 正常）⇒ 0 实体 fail-closed
+//   mismatch        — class 产物可用（sccCount=0, entities>0）但 sourceFiles 有重复 realpath 且与
+//                     git ls-files 不一致（对账可见性）
+//   no-cycles       — 两粒度都可用且都为 0 ⇒ PASS（AC3 负控制）
+//   directory-cycle — class 产物 sccCount=0、query moduleGraph.cycles 有 1 个目录环（仅 src scope）
+//                     ⇒ 只有目录环的树必须 RED 且点名成员（AC1/AC2）
+//   no-module-graph — class 产物可用，query arch.json 无 tsAnalysis.moduleGraph ⇒ 目录粒度
+//                     evaluated:false + reason，⛔ 不是「0 环」（AC4）
 const RUNNER = path.join(REPO_ROOT, "plugin", "scripts", "archguard-runner.ts");
 const FAKE_ARCHGUARD_SOURCE = `#!/usr/bin/env node
 const fs = require("node:fs");
@@ -94,16 +102,21 @@ if (argv[0] === "--version") {
 }
 const outIdx = argv.indexOf("--output-dir");
 const srcIdx = argv.indexOf("-s");
+const workIdx = argv.indexOf("--work-dir");
 const outDir = outIdx >= 0 ? argv[outIdx + 1] : "";
 const source = srcIdx >= 0 ? argv[srcIdx + 1] : "";
+const workDir = workIdx >= 0 ? argv[workIdx + 1] : "";
 const mode = process.env.FAKE_ARCHGUARD_MODE || "noop";
 if (mode === "noop") process.exit(0);
+
+// ── class artifact (entity granularity) ──────────────────────────────────────────────────────────
 const file = path.join(outDir, path.basename(source), "class", "all-classes.json");
 fs.mkdirSync(path.dirname(file), { recursive: true });
+const sourceFiles = mode === "mismatch" ? ["dup.ts", "dup.ts", "extra.ts"] : [];
 const artifact = {
   version: "1.1",
   language: "typescript",
-  sourceFiles: mode === "mismatch" ? ["dup.ts", "dup.ts", "extra.ts"] : [],
+  sourceFiles,
   entities: [],
   relations: [],
   metricVector: {
@@ -116,6 +129,43 @@ const artifact = {
   },
 };
 fs.writeFileSync(file, JSON.stringify(artifact));
+
+// ── query artifact (directory granularity) — mirrors real archguard's persisted query scopes ─────
+const queryDir = path.join(workDir, "query");
+const resolved = fs.realpathSync(path.resolve(source));
+const key = Buffer.from(resolved).toString("hex").slice(0, 16);
+const cycles =
+  mode === "directory-cycle" && source === "packages/quay/src"
+    ? [{ modules: ["b", "a"], severity: "warning" }]
+    : [];
+const arch = {
+  version: "1.1",
+  language: "typescript",
+  extensions:
+    mode === "no-module-graph"
+      ? {}
+      : { tsAnalysis: { version: "1.0", moduleGraph: { nodes: [], edges: [], cycles } } },
+};
+fs.mkdirSync(path.join(queryDir, key), { recursive: true });
+fs.writeFileSync(path.join(queryDir, key, "arch.json"), JSON.stringify(arch));
+let manifest = { version: "1.0", generatedAt: new Date().toISOString(), scopes: [] };
+try {
+  manifest = JSON.parse(fs.readFileSync(path.join(queryDir, "manifest.json"), "utf8"));
+} catch {}
+manifest.scopes = (manifest.scopes || []).filter((s) => s.key !== key);
+manifest.scopes.push({
+  key,
+  label: path.basename(source) + " (typescript)",
+  language: "typescript",
+  kind: "parsed",
+  sources: [resolved],
+  entityCount: mode === "zero-entities" ? 0 : 5,
+  relationCount: 2,
+  hasAtlasExtension: false,
+  generatedAt: new Date().toISOString(),
+});
+manifest.globalScopeKey = manifest.globalScopeKey || key;
+fs.writeFileSync(path.join(queryDir, "manifest.json"), JSON.stringify(manifest));
 process.exit(0);
 `;
 
@@ -159,7 +209,7 @@ function freshWorkDir(name) {
 
 // ── AC1（能取假·读不到≠干净）：产物路径指向不存在文件 ⇒ exit 1 且记录 evaluated:false ────────────
 
-test("AC1（能取假）— 产物读不到 ⇒ exit 1，metrics 记录 evaluated:false 且 sccCount 为 null（⛔ 不以 0 冒充无环）", () => {
+test("AC1（能取假）— 产物读不到 ⇒ exit 1，metrics 记录 evaluated:false 且 entitySccCount 为 null（⛔ 不以 0 冒充无环）", () => {
   const workDir = freshWorkDir("missing-product");
   const r = runRunner("noop", workDir);
   assert.equal(r.status, 1, `runner must fail-closed when no product is written; stderr=${r.stderr}`);
@@ -168,10 +218,16 @@ test("AC1（能取假）— 产物读不到 ⇒ exit 1，metrics 记录 evaluate
   assert.equal(record.evaluated, false, "the record itself must carry evaluated:false");
   assert.equal(record.verdict, "fail");
   assert.equal(record.scopes.length, 6, "every scope must be represented, not collapsed into one error");
+  assert.equal(record.entitySccCount, null, "the entity aggregate must be null when nothing was evaluated");
+  assert.equal(record.directoryCycleCount, null, "the directory aggregate must be null when nothing was evaluated");
   for (const s of record.scopes) {
     assert.equal(s.evaluated, false, `${s.scope} must be not-evaluated`);
-    assert.equal(s.sccCount, null, `${s.scope}.sccCount must be null — 0 would impersonate "no cycles"`);
+    assert.equal(s.entitySccCount, null, `${s.scope}.entitySccCount must be null — 0 would impersonate "no cycles"`);
     assert.match(s.reason, /cannot read archguard output/, `${s.scope} must name why it could not be read`);
+    // Both granularities are unreadable here — and neither may collapse to 0.
+    assert.equal(s.directoryCyclesEvaluated, false, `${s.scope} must record directory cycles as not evaluated`);
+    assert.equal(s.directoryCycleCount, null, `${s.scope}.directoryCycleCount must be null, not 0`);
+    assert.match(s.directoryCyclesReason, /query manifest|cannot read/, `${s.scope} must name why directory cycles could not be read`);
   }
   assert.match(record.reason, /NOT EVALUATED|cannot read archguard output/);
 });
@@ -234,4 +290,92 @@ test("AC4（对账可见）— sourceFiles 与 git ls-files <source> 不一致�
   assert.equal(typeof src.gitSourceFiles, "number");
   assert.ok(src.gitSourceFiles > 0);
   assert.match(src.reason, /sourceFiles=2 vs git ls-files packages\/quay\/src=/);
+});
+
+// ── 两粒度分离（gap-archguard-structural-gate-reads-entity-scc-not-directory-cycles）──────────────
+//
+// 下面 4 条 AC 验的是【本任务】的判据。关键前提（CLAUDE.md 硬规则 4 推论四：能解释 ≠ 已检验）：
+// 假 CLI 的产物形状对齐实测真 archguard 0.1.40——2 文件 fixture（a/x.ts ↔ b/y.ts 互相 side-effect
+// import）实测 class sccCount=0、query moduleGraph.cycles=[{modules:["b","a"]}]。若只读前者，该树恒绿。
+
+test("AC1（能取假·目录环）— 只有目录环、实体 SCC 为 0 ⇒ exit 1 且 stderr 点名环成员", () => {
+  const workDir = freshWorkDir("directory-cycle");
+  const r = runRunner("directory-cycle", workDir);
+
+  assert.equal(r.status, 1, `a tree with only directory-level cycles must be RED; stderr=${r.stderr}`);
+  assert.match(r.stderr, /directory-level dependency cycles/, "stderr must name the directory-granularity violation");
+  // The members themselves (not just a count) — AC1 says 点名环成员. JSON-rendered so an empty
+  // project-root module id would also be unambiguous.
+  assert.match(r.stderr, /\[\s*"b"\s*,\s*"a"\s*\]/, `stderr must name the cycle members b and a; stderr=${r.stderr}`);
+
+  const record = lastRecord(workDir);
+  assert.equal(record.verdict, "fail");
+  assert.equal(record.evaluated, true, "both calibers WERE read — the red is a violation, not an unreadable artifact");
+  const src = record.scopes.find((s) => s.scope === "src");
+  assert.ok(src, "the src scope must be present");
+  assert.equal(src.entitySccCount, 0, "the entity/class caliber is clean on this fixture");
+  assert.equal(src.directoryCycleCount, 1, "the directory caliber sees the one cycle");
+  assert.deepEqual(src.directoryCycles[0].modules, ["b", "a"], "the recorded cycle carries its members");
+});
+
+test("AC2（两粒度真分开）— 同一 fixture 的 metrics 记录 entitySccCount=0 且 directoryCycleCount>=1（不是同一数的两个名字）", () => {
+  const workDir = freshWorkDir("two-granularities");
+  const r = runRunner("directory-cycle", workDir);
+  assert.equal(r.status, 1, `stderr=${r.stderr}`);
+
+  const record = lastRecord(workDir);
+  assert.equal(record.entitySccCount, 0, "entity/class SCC aggregate is 0");
+  assert.ok(
+    typeof record.directoryCycleCount === "number" && record.directoryCycleCount >= 1,
+    `directoryCycleCount must be >= 1, got ${JSON.stringify(record.directoryCycleCount)}`
+  );
+  assert.notEqual(record.entitySccCount, record.directoryCycleCount, "the two readings must be DIFFERENT values");
+  assert.equal(record.entitySccEvaluated, true);
+  assert.equal(record.directoryCyclesEvaluated, true);
+});
+
+test("AC3（负控制）— 无环 fixture ⇒ exit 0，记录 directoryCycleCount=0 且 evaluated:true", () => {
+  const workDir = freshWorkDir("no-cycles");
+  const r = runRunner("no-cycles", workDir);
+  assert.equal(r.status, 0, `a genuinely cycle-free tree must PASS; stderr=${r.stderr}`);
+
+  const record = lastRecord(workDir);
+  assert.equal(record.evaluated, true);
+  assert.equal(record.verdict, "pass");
+  assert.equal(record.entitySccCount, 0);
+  assert.equal(record.directoryCycleCount, 0);
+  assert.equal(record.directoryCyclesEvaluated, true, "an evaluated-clean directory reading must be true, not absent");
+  assert.equal(record.directoryCyclesReason, null);
+  for (const s of record.scopes) {
+    assert.equal(s.directoryCyclesEvaluated, true, `${s.scope} must have an evaluated directory reading`);
+    assert.equal(s.directoryCycleCount, 0, `${s.scope} must read 0 cycles, not null`);
+  }
+});
+
+test("AC4（未评估态）— 无 TS module graph 的 scope ⇒ evaluated:false + reason，不与「0 环」同值", () => {
+  const workDir = freshWorkDir("no-module-graph");
+  const r = runRunner("no-module-graph", workDir);
+
+  // A scope whose directory cycle count cannot be read must NOT pass as "0 cycles" (硬规则 3b).
+  assert.equal(r.status, 1, `an unreadable directory caliber must fail-closed; stderr=${r.stderr}`);
+  assert.match(r.stderr, /NOT EVALUATED/);
+  assert.match(r.stderr, /moduleGraph/, `stderr must name the missing module graph; stderr=${r.stderr}`);
+
+  const record = lastRecord(workDir);
+  assert.equal(record.evaluated, false);
+  assert.equal(record.directoryCyclesEvaluated, false, "the record-level directory reading must be not-evaluated");
+  assert.equal(record.directoryCycleCount, null, "not-evaluated must be null, never 0");
+  assert.ok(
+    typeof record.directoryCyclesReason === "string" && record.directoryCyclesReason.length > 0,
+    "not-evaluated must carry a reason"
+  );
+  assert.match(record.directoryCyclesReason, /moduleGraph/);
+
+  for (const s of record.scopes) {
+    assert.equal(s.evaluated, true, `${s.scope}: the class artifact WAS readable (the failure is directory-only)`);
+    assert.equal(s.entitySccCount, 0, `${s.scope}: the entity caliber is readable and clean`);
+    assert.equal(s.directoryCyclesEvaluated, false, `${s.scope}: directory caliber must be not-evaluated`);
+    assert.equal(s.directoryCycleCount, null, `${s.scope}: directoryCycleCount must be null, not 0`);
+    assert.ok(s.directoryCyclesReason && s.directoryCyclesReason.length > 0, `${s.scope}: reason required`);
+  }
 });
