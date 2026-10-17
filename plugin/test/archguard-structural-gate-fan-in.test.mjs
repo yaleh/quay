@@ -186,12 +186,18 @@ after(() => {
 /** Run the runner against the real repo scopes with a fake archguard. `workDir` is where BOTH the
  *  analyze products and the metrics-history carrier land (the runner's --work-dir seam). */
 function runRunner(mode, workDir) {
+  return runRunnerWithCli(fakeCli, mode, workDir);
+}
+
+/** Same, but with an explicit CLI path — lets the CLI-missing fail-closed path (a DIFFERENT
+ *  appendHistory call site) be exercised with a path that does not exist. */
+function runRunnerWithCli(cli, mode, workDir) {
   return spawnSync(
     process.execPath,
     ["--no-warnings", "--experimental-strip-types", RUNNER, "--root", REPO_ROOT, "--work-dir", workDir],
     {
       encoding: "utf8",
-      env: { ...process.env, ARCHGUARD_RUNNER_CLI: fakeCli, FAKE_ARCHGUARD_MODE: mode },
+      env: { ...process.env, ARCHGUARD_RUNNER_CLI: cli, FAKE_ARCHGUARD_MODE: mode },
       timeout: 180000,
     }
   );
@@ -378,4 +384,47 @@ test("AC4（未评估态）— 无 TS module graph 的 scope ⇒ evaluated:false
     assert.equal(s.directoryCycleCount, null, `${s.scope}: directoryCycleCount must be null, not 0`);
     assert.ok(s.directoryCyclesReason && s.directoryCyclesReason.length > 0, `${s.scope}: reason required`);
   }
+});
+
+// ── 跨 scope 边边界可见（gap-archguard-cross-scope-edges-structurally-invisible）──────────────────
+//
+// 六个 SCOPES 各自 analyze ⇒ `plugin/scripts` ↔ `packages/*/src` 的 import 边【不存在于任何一次
+// 分析】。因此「跨 scope 无环」是无条件真、不可取假——它不是测量。判据改为【边界可见】：
+// 每条 metrics 记录显式声明 crossScope="not-evaluated" + 非空 reason。字段缺席、值为 0/false、
+// 或 reason 为空都判假（字段缺席即假是 AC1 的字面要求）。
+//
+// 覆盖【全部三处写入路径】：① 正常分析后的 PASS 记录；② 产物读不到的 fail-closed 记录；
+// ③ CLI 缺失时在 analyze 之前写下的 fail-closed 记录（另一条 appendHistory 调用点）。
+
+function assertCrossScopeDeclared(record, label) {
+  assert.equal(record.crossScope, "not-evaluated", `${label}: crossScope must be the literal "not-evaluated"`);
+  assert.equal(typeof record.crossScopeReason, "string", `${label}: crossScopeReason must be a string`);
+  assert.ok((record.crossScopeReason ?? "").trim().length > 0, `${label}: crossScopeReason must be non-empty`);
+  assert.match(record.crossScopeReason, /cross-scope/, `${label}: the reason must name the cross-scope boundary`);
+}
+
+test("AC1（能取假·边界可见）— 每条 metrics 记录含 crossScope=not-evaluated + 非空 reason（三处写入路径）", () => {
+  // ① 正常分析、两粒度 evaluate 且全 0 ⇒ PASS 记录
+  const passDir = freshWorkDir("cross-scope-pass");
+  const passRun = runRunner("no-cycles", passDir);
+  assert.equal(passRun.status, 0, `a clean fixture must PASS; stderr=${passRun.stderr}`);
+  assertCrossScopeDeclared(lastRecord(passDir), "pass record");
+
+  // ② 产物读不到 ⇒ fail-closed（主记录构造点）
+  const failDir = freshWorkDir("cross-scope-fail");
+  const failRun = runRunner("noop", failDir);
+  assert.equal(failRun.status, 1, `an unreadable product must fail-closed; stderr=${failRun.stderr}`);
+  assertCrossScopeDeclared(lastRecord(failDir), "fail-closed record");
+
+  // ③ CLI 缺失 ⇒ 分析前写下的 fail-closed 记录（独立的 appendHistory 调用点）
+  const missingDir = freshWorkDir("cross-scope-missing-cli");
+  const missingRun = runRunnerWithCli(path.join(tmpRoot, "does-not-exist-archguard"), "noop", missingDir);
+  assert.equal(missingRun.status, 1, `a missing CLI must fail-closed; stderr=${missingRun.stderr}`);
+  assertCrossScopeDeclared(lastRecord(missingDir), "CLI-missing record");
+
+  // 负控制（字段缺席即假）：去掉 crossScope 后断言本身必须失败，否则本测试只是在回显自己。
+  assert.throws(
+    () => assertCrossScopeDeclared({ crossScopeReason: "unmeasured cross-scope edges" }, "negative control"),
+    /crossScope must be the literal/
+  );
 });

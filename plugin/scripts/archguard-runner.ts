@@ -53,6 +53,12 @@
 // 本身 gitignored（archguard 自己的 cache/metrics），故 AC3 走「被某判据读」半边（本 runner 读
 // class/all-classes.json），不走「git 提交」半边。
 //
+// CROSS-SCOPE BOUNDARY（gap-archguard-cross-scope-edges-structurally-invisible）: 六个 SCOPES 各自
+// 单独分析（multi-source ⇒ 每 source 一个 scope），跨 scope 边（`plugin/scripts` ↔ `packages/*/src`）
+// 【结构上不存在于任何一次分析】。因此本 runner 对跨 scope 环的结论不是「测得 0」，而是【未测】：
+// 每条 metrics 记录带 `crossScope:"not-evaluated"` + 非空 `crossScopeReason`（⛔ 缺席或 0/false 都
+// 会让「没测」与「干净」同形）。真正测到跨 scope 边需要单根复制分析，是后续任务、不在本 runner 内。
+//
 // Usage:
 //   node --experimental-strip-types plugin/scripts/archguard-runner.ts --root <repo-root>
 //                                        [--work-dir <dir>]   # default <root>/.archguard
@@ -150,8 +156,29 @@ interface HistoryRecord {
   sourceFiles: number | null;
   entityCount: number | null;
   verdict: "pass" | "fail";
+  /** Cross-scope dependency edges (`plugin/scripts` ↔ `packages/<pkg>/src`) are STRUCTURALLY ABSENT from
+   *  every analysis: SCOPES below are analyzed one source at a time (multi-source ⇒ one scope per
+   *  source, no cross-scope edges; only a single-root copy produces them). So "no cross-scope cycles"
+   *  is NOT a measured 0 — it was never evaluated. The literal `"not-evaluated"` (never `false` /
+   *  `0` / omitted) makes the boundary visible on every record (硬规则 3b/4: an unmeasured edge set
+   *  must not share the value of a measured-clean one).
+   *  gap-archguard-cross-scope-edges-structurally-invisible. */
+  crossScope: "not-evaluated";
+  /** Why cross-scope edges are unmeasured. Non-empty by construction — `crossScope` alone would say
+   *  "not evaluated" without saying WHICH boundary, which reads the same as a generic unreadable. */
+  crossScopeReason: string;
   scopes: ScopeSignal[];
 }
+
+/** The invariant carried by EVERY metrics record (including fail-closed ones): the six SCOPES are
+ *  analyzed independently, so no analysis can contain a cross-scope edge. Spread into each record so
+ *  a record can never be written without the boundary declaration. */
+const CROSS_SCOPE_NOT_EVALUATED = {
+  crossScope: "not-evaluated",
+  crossScopeReason:
+    "six scopes are analyzed independently (one scope per source ⇒ no cross-scope edges); " +
+    "plugin/scripts ↔ packages/*/src edges are absent from EVERY analysis — unmeasured, not measured-zero",
+} as const;
 
 // ── Helpers ────────────────────────────────────────────────────────────────────────────────────────
 
@@ -534,6 +561,7 @@ function main(): void {
       sourceFiles: null,
       entityCount: null,
       verdict: "fail",
+      ...CROSS_SCOPE_NOT_EVALUATED,
       scopes: [],
     });
     fail(`${reason} (fail-closed)`);
@@ -606,6 +634,7 @@ function main(): void {
     sourceFiles: complete ? scopes.reduce((n, s) => n + (s.sourceFiles ?? 0), 0) : null,
     entityCount: complete ? scopes.reduce((n, s) => n + (s.entityCount ?? 0), 0) : null,
     verdict,
+    ...CROSS_SCOPE_NOT_EVALUATED,
     scopes,
   };
 
