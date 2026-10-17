@@ -26,13 +26,97 @@ depends_on: []
 
 ## Acceptance Criteria
 
-- [ ] AC1: 用记录 argv 的假 `claude`（PATH 最前）跑 `node --test plugin/test/driver-restart-busy-e2e.test.mjs`，改动后记录 0 条；把夹具 launcher 临时改回 `claude` 后同一手法记录 ≥1 条（负控制）。两条原始读数贴出。
-- [ ] AC2: 该文件仍全绿：贴出 `tests / pass / fail` 行；并在同一夹具宿主上手工跑一次 `start --kind worker`，stdout 出现 `environment-smoke: ok`，且 PATH 最前的假 `claude` 未被调用。
-- [ ] AC3: `bash scripts/test.sh --for-task gap-busy-restart-e2e-environment-smoke-live-calls --allow-thin` 以 exit 0 结束（贴出末行与静态检查摘要）。
+- [x] AC1: 用记录 argv 的假 `claude`（PATH 最前）跑 `node --test plugin/test/driver-restart-busy-e2e.test.mjs`，改动后记录 0 条；把夹具 launcher 临时改回 `claude` 后同一手法记录 ≥1 条（负控制）。两条原始读数贴出。
+- [x] AC2: 该文件仍全绿：贴出 `tests / pass / fail` 行；并在同一夹具宿主上手工跑一次 `start --kind worker`，stdout 出现 `environment-smoke: ok`，且 PATH 最前的假 `claude` 未被调用。
+- [x] AC3: `bash scripts/test.sh --for-task gap-busy-restart-e2e-environment-smoke-live-calls --allow-thin` 以 exit 0 结束（贴出末行与静态检查摘要）。
 
 ## Definition of Done
 
 - AC1–AC3 全部勾选并附原始读数（不是转述）；改动只落在声明的 Touches 两文件；该 e2e 仍在 lowconc 泳道运行，且不再产生任何 `test-model` 会话。
+
+## Evidence
+
+### AC1 — recorder readings (raw)
+
+Recorder = executable `claude` at the FRONT of `PATH` (`list.append`-style shell script; every invocation appends `$*` to a record file), so a real launcher can never be reached on this host. Test command in both runs was identical:
+
+```
+PATH=<recorder-dir>:$PATH node --test plugin/test/driver-restart-busy-e2e.test.mjs
+```
+
+**After the change (`launcher: /bin/true`): records = 0.**
+
+```
+exit=0
+ℹ tests 8
+ℹ pass 8
+ℹ fail 0
+--- records: 0
+```
+
+**Negative control — fixture line temporarily reverted to `launcher: claude`, same command: records = 3** (exactly the three calls the Proposal predicts: pre start, post start, post `restartKind` → `startKind`):
+
+```
+exit=0
+ℹ tests 8
+ℹ pass 8
+ℹ fail 0
+--- records: 3
+--- first 3 argv lines:
+--settings /tmp/e2e-restart-ac2ar-pre-GaDU2d/.claude/launch.settings.json --model test-model -n quay-task-worker -p Reply with exactly: ok
+--settings /tmp/e2e-restart-ac2ar-post-Q5wTDn/.claude/launch.settings.json --model test-model -n quay-task-worker -p Reply with exactly: ok
+--settings /tmp/e2e-restart-ac2ar-post-Q5wTDn/.claude/launch.settings.json --model test-model -n quay-task-worker -p Reply with exactly: ok
+```
+
+The fixture was then restored to `/bin/true` and the file re-run: `exit=0`, `tests 8 / pass 8 / fail 0`, **records: 0** again (the final committed state).
+
+### AC2 — still green + manual `start --kind worker`
+
+```
+ℹ tests 8
+ℹ pass 8
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+```
+
+Manual run on a scratch fixture host built exactly like the busy arm (plain `git init -b develop` host, `.quay/plugin` → `.quay`-free kernel tree, `profiles.yml` with `launcher: /bin/true`), with the same recorder at the front of `PATH`:
+
+```
+exit=0
+--- stdout
+environment-smoke: ok — launcher+model resolved and callable
+started: anchor pid=140999 kind=worker driver pid=140999 confirmed_ms=302
+--- fake claude records: 0
+```
+
+The shipped smoke path (`runEnvironmentSmoke` → `launchArgv` → child process) really ran (`environment-smoke: ok` is printed only on the `pass` verdict) and the PATH-front fake was never invoked ⇒ the process it spawned was `/bin/true`.
+
+### AC3 — scoped gate
+
+```
+exit=0
+```
+
+Static-check summary (scoped, change-relevant tier) and the suite tail:
+
+```
+== scoped static checks (change-relevant tier; the complete set still runs in the full-suite gate) ==
+PASS — every declared landing target == forward branch 'develop' (0 violations)
+PASS — valueSccs=0 ≤ 0, typeSccs=0 ≤ 0, reverseEdges=0 ≤ 0 (headBaseline {"valueSccs":0,"typeSccs":0,"reverseEdges":0})
+PASS: no checked-in-tree writes: 180 write-verb call(s) across 1 executed input(s), 0 inside the tree — delta against develop (1 of 1 delta path(s) judged; unchanged test files are NOT judged by --changed)
+ℹ tests 8
+ℹ pass 8
+ℹ fail 0
+ℹ duration_ms 30150.888192
+```
+
+`NOT-EVALUATED: it0-split-or-commit-check --changed — no task file in this delta` is the expected non-blocking thin-tier entry (the task file itself is not part of the code delta), not a failure.
+
+### DoD — no new `test-model` sessions
+
+This file was executed three times in this session (after-change, negative control, restored-final). All three ran with the recorder shadowing `claude` at the front of `PATH`; the only real-launcher-shaped invocations observed were the 3 recorded argv lines in the negative control, which were served by the recorder and never reached a gateway. Final state: 0 launcher invocations, and the file keeps its `// @test-group lowconc` header (line 1), so it still runs in the lowconc lane.
 
 ## Touches
 
