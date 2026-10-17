@@ -122,3 +122,11 @@ This file was executed three times in this session (after-change, negative contr
 
 - tasks/gap-busy-restart-e2e-environment-smoke-live-calls.md
 - plugin/test/driver-restart-busy-e2e.test.mjs
+
+## Blocker
+
+**2026-10-17T03:34:16.555Z — worker 未落地（exited-not-landed）**
+
+- 未落地原因：step=suite: AssertionError [ERR_ASSERTION]: the dispatch record is cleared once the outcome is written [baseline A/B: HARD RED (task-introduced-red) — the task's red set is NOT a subset of the develop baseline red set: added=plugin/test/driver-restart-busy-e2e.test.mjs changed=-]
+- run_id：wk-prod-anchor
+- session_id：8b3b66cf-dd36-4a3d-87a8-d4546753cca4
