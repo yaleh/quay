@@ -1,7 +1,7 @@
 ---
 id: gap-architecture-review-not-triggered-lacks-per-detector-state
 title: architecture-review 的 not-triggered 缺 per-detector 状态——「无候选宇宙」与「三检测器都评估且干净」同形
-status: todo
+status: ready
 labels:
   - gap
 parent: null
