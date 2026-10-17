@@ -22,7 +22,7 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假·边界可见）每条 metrics 记录含 `crossScope` 字段且值为 `not-evaluated` + 非空 `reason`；字段缺席即假。
+- [x] AC1（能取假·边界可见）每条 metrics 记录含 `crossScope` 字段且值为 `not-evaluated` + 非空 `reason`；字段缺席即假。
 
 ## Definition of Done
 
