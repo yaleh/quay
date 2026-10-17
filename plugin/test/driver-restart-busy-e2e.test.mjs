@@ -1079,6 +1079,16 @@ test("AC2b — an orphan worker that exits is ADOPTED and fanned in exactly once
     false,
     "⛔ the task must not be dispatched a second time while its orphan was being adopted",
   );
+  // ⚠️ The clear is intentionally AFTER the outcome append (worker-driver `resumeExitedOrphanFanIn`:
+  // append outcome → project the blocker onto the task → `removeDispatchRecord`; clearing earlier would
+  // open a re-dispatch window). So reading the store in the same tick as the outcome line is a race: under
+  // a loaded full suite the blocker projection (a git commit) can take hundreds of ms. Wait (bounded) for
+  // the clear, then assert — the property is unchanged, only the read stops being same-tick.
+  await waitFor(
+    () => readDispatchStore(dispatchStoreFile(host))[taskId] === undefined,
+    30_000,
+    "the dispatch record to be cleared once the outcome is written",
+  );
   const dispatch = readDispatchStore(dispatchStoreFile(host));
   assert.equal(dispatch[taskId], undefined, "the dispatch record is cleared once the outcome is written");
 
