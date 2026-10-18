@@ -25,9 +25,9 @@ extra:
 ## Acceptance Criteria
 
 - [ ] AC1（能取假·生产产出）声明后 post-landing 例程轮在 `.quay/arch-cycle-history.jsonl` 产生记录（真跑，非仅实现）；无新记录即假。（待外部）
-- [ ] AC2（report-only）环非空时例程 state 仍 `verified`（不是 failed），且记录含环成员列表。
-- [ ] AC3（未评估态）读不到 moduleGraph 时记 `evaluated:false` + reason，不与「0 环」同值。
-- [ ] AC4（零覆盖影响）段缺席 ⇒ 例程表不变（builtin 四条仍「恰好四条」，同 archCoverageRoutineFromConfig 的既有测试）；enabled:false ⇒ not-evaluated:disabled 且零写入。
+- [x] AC2（report-only）环非空时例程 state 仍 `verified`（不是 failed），且记录含环成员列表。
+- [x] AC3（未评估态）读不到 moduleGraph 时记 `evaluated:false` + reason，不与「0 环」同值。
+- [x] AC4（零覆盖影响）段缺席 ⇒ 例程表不变（builtin 四条仍「恰好四条」，同 archCoverageRoutineFromConfig 的既有测试）；enabled:false ⇒ not-evaluated:disabled 且零写入。
 
 ## Definition of Done
 
