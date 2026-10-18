@@ -226,8 +226,8 @@ packages/quay/test/kernel-load-avg.test.mjs,packages/quay/test/kernel-env-merge.
 
 ## Blocker
 
-**2026-10-18T12:45:04.172Z — worker 未落地（exited-not-landed）**
+**2026-10-18T12:57:57.459Z — worker 未落地（exited-not-landed）**
 
-- 未落地原因：step=suite: AssertionError [ERR_ASSERTION]: cadence must be one of the five enumerated values: touches-relax-tighten.ts → 每轮（worker-driver 驻留环的轮末一步；loop.touches_relax 未声明或 mode 为 off / 读不懂时不跑，该轮 round 记录的 auto_tighten 为 null） [baseline A/B: HARD RED (task-introduced-red) — the task's red set is NOT a subset of the develop baseline red set: added=plugin/test/worker-driver.test.mjs,packages/quay/test/kernel-load-avg.test.mjs,packages/quay/test/kernel-env-merge.test.mjs changed=-]
+- 未落地原因：step=suite: AssertionError [ERR_ASSERTION]: the reap-wait note must be emitted when a match clears [baseline A/B: HARD RED (task-introduced-red) — the task's red set is NOT a subset of the develop baseline red set: added=plugin/test/tmux-leak-scan.test.mjs changed=-]
 - run_id：wk-prod-anchor
-- session_id：f0293a8c-838b-4c3b-bbee-d4c327d11de2
+- session_id：a2c2d107-4127-424c-85cf-91d205d2ee09
