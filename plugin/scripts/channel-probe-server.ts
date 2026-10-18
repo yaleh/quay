@@ -20,13 +20,12 @@
 // 退出码：0 = 正常；1 = 参数错；2 = HTTP 端口绑定失败。
 
 import http from "node:http";
-import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 // one (below) is now a one-line arity adapter over the shared `flagValue`; its algorithm was one of
 // the ~73 hand-written copies of the indexOf+next-arg idiom in plugin/scripts
 // (.quay/routine-findings.jsonl finding `arg-parsing-helper-family`, routine `semantic-dedup-scan`).
-import { flagValue } from "./gate-script-base.ts";
+import { appendJsonlLine, flagValue } from "./gate-script-base.ts";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
@@ -146,13 +145,10 @@ export function buildInstructions(source: string): string {
   ].join(" ");
 }
 
+// best-effort 证据落盘。实现已归一到 gate-script-base.appendJsonlLine（semantic-dedup-scan finding
+// `append-evidence-pair`）；本处保留历史导出名，因为测试与调用点按这个名字引用。
 export function appendEvidence(evidencePath: string, entry: Record<string, unknown>): void {
-  try {
-    fs.mkdirSync(path.dirname(evidencePath), { recursive: true });
-    fs.appendFileSync(evidencePath, JSON.stringify(entry) + "\n");
-  } catch {
-    // best-effort：证据落盘失败不能杀掉 server（否则「server 在跑」这个事实也一起消失）
-  }
+  appendJsonlLine(evidencePath, entry);
 }
 
 // ── server 主体 ───────────────────────────────────────────────────────────────────────────────────

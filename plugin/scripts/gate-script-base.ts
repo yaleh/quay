@@ -519,6 +519,30 @@ export function readJsonOrNull<T = any>(file: string): T | null {
   }
 }
 
+// ── appendJsonlLine ─────────────────────────────────────────────────────────────────────────────────
+// The WRITE side of `readJsonLines`: one `JSON.stringify(entry) + "\n"` appended to a `.jsonl` carrier,
+// creating the parent directory if it does not exist yet. Extracted here — byte-identical from two
+// private copies under the same exported name, differing only in one word of a catch comment — by
+// semantic-dedup-scan finding `append-evidence-pair` (`.quay/routine-findings.jsonl`, routine
+// `semantic-dedup-scan`, runId `semantic-dedup-scan-1792287725786`, kind `byte-identical-body`,
+// verdict `real-duplication`, requested action `merge`), which named its two carriers:
+//   plugin/scripts/channel-probe-server.ts:149 / plugin/scripts/peer-identity-probe.ts:305.
+//
+// BEST-EFFORT BY CONTRACT: a write failure is swallowed, and the function never throws. Both callers
+// are long-running probes whose evidence file is diagnostic, not load-bearing — a probe that dies
+// because its evidence directory is unwritable would also destroy the very fact ("the probe was
+// running") the evidence exists to record. ⛔ Do not turn this into a throw-on-failure helper: that
+// is a behavior change for both callers, not a merge. A caller that needs to KNOW the write failed
+// must not use this one.
+export function appendJsonlLine(file: string, entry: Record<string, unknown>): void {
+  try {
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.appendFileSync(file, JSON.stringify(entry) + "\n");
+  } catch {
+    // best-effort: see the contract note above — evidence loss must not kill the writer.
+  }
+}
+
 // ── normalizeRel ────────────────────────────────────────────────────────────────────────────────────
 // Normalize a repo-relative path or glob to a canonical form: backslashes → forward slashes, drop
 // empty (`//`) and `.` segments, resolve `..` (a leading `..` is dropped), strip a leading `./`,
