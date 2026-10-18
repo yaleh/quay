@@ -1,7 +1,7 @@
 ---
 id: gap-goal-list-ledger-scan
 title: goal list --no-evidence：跳过 gate-events.jsonl 全量扫描
-status: todo
+status: ready
 labels:
   - gap
 parent: null
