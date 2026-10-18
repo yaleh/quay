@@ -198,3 +198,11 @@ criterion-fidelity-default-wiring}.test.mjs` ⇒ 80 tests / 0 fail。
 - packages/quay/test/goal-criterion-timeout-resolution.test.mjs
 - goals/AC-197-kind-tasks-goals-meta-adr-docs-managed-commitstorewrite-5.md
 - tasks/gap-src-root-gate-cycle-break.md
+
+## Blocker
+
+**2026-10-18T12:45:04.172Z — worker 未落地（exited-not-landed）**
+
+- 未落地原因：step=suite: AssertionError [ERR_ASSERTION]: cadence must be one of the five enumerated values: touches-relax-tighten.ts → 每轮（worker-driver 驻留环的轮末一步；loop.touches_relax 未声明或 mode 为 off / 读不懂时不跑，该轮 round 记录的 auto_tighten 为 null） [baseline A/B: HARD RED (task-introduced-red) — the task's red set is NOT a subset of the develop baseline red set: added=plugin/test/worker-driver.test.mjs,packages/quay/test/kernel-load-avg.test.mjs,packages/quay/test/kernel-env-merge.test.mjs changed=-]
+- run_id：wk-prod-anchor
+- session_id：f0293a8c-838b-4c3b-bbee-d4c327d11de2
