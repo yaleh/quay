@@ -44,6 +44,12 @@
       "readers": "unaudited"
     },
     {
+      "name": "arch-cycle-history.jsonl",
+      "kind": "jsonl-log",
+      "owner": "plugin/scripts/quality-gate-driver.ts",
+      "readers": "unaudited"
+    },
+    {
       "name": "arch-discovery-findings.jsonl",
       "kind": "jsonl-log",
       "owner": "plugin/scripts/arch-discovery-routine.ts",
