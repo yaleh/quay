@@ -1,12 +1,15 @@
 // QENG-2 — pure acceptance-command runner (epicd ADR-019 "runnable meter",
 // harness runShellCommands adapted to Node).
 //
-// WHY THIS FILE LIVES IN `gate/shared/`: it is a leaf that BOTH the `gate/` root (registry.ts,
-// engine.ts, lifecycle.ts) and the `gate/factories/*` subdirectory consume. While it sat at the
-// `gate/` root, each factory's `../acceptance-runner.ts` was a child→parent edge, so archguard's
-// directory-level moduleGraph reported a `gate/factories ⇄ gate` cycle
-// (tasks/gap-gate-directory-cycle-break-by-extracting-shared-leaves). In `shared/` every edge
-// into it points DOWN; this module still imports nothing from `gate/` except the type leaf.
+// WHY THIS FILE LIVES IN `core/` (tasks/gap-src-root-gate-cycle-break): it is the ONE acceptance
+// runner for BOTH the gate (registry.ts / engine.ts / lifecycle.ts / factories/*) and the goal store
+// (`core/goal-store.ts`) — and the goal store sits BELOW the gate, so the runner cannot stay in
+// `gate/`. It was `gate/shared/acceptance-runner.ts` (tasks/gap-gate-directory-cycle-break-by-
+// extracting-shared-leaves, which removed the `gate/factories ⇄ gate` parent↔child edge), but the
+// goal store importing `gate/**` was still a `"" → gate` edge, and `gate/config/loader.ts` →
+// `gate/factories` → this file closed the directory SCC. In `core/` every edge into it points DOWN,
+// and `gate/shared/acceptance-runner.ts` stays as a forwarding re-export for external consumers.
+// ⛔ This module imports nothing from `gate/` and nothing from the src root (see core/types.ts).
 //
 // A single synchronous function that runs a shell command in a pinned cwd under
 // an enforced timeout and maps the REAL Node child-process outcome to a verdict.

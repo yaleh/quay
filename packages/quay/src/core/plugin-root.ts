@@ -23,6 +23,13 @@
 //
 // ⛔ This module ships under packages/quay (Core), so it MUST stay dependency-free on the
 // plugin layer (engine.ts rule) — it only probes the filesystem and `git worktree list`.
+//
+// ⚠️ LOCATION SENSITIVITY (tasks/gap-src-root-gate-cycle-break): the implementation lives in
+// `core/`, ONE level deeper than the forwarding `src/plugin-root.ts`. That is deliberate and safe
+// because nothing here counts `..` levels: `moduleDir()` only anchors the START of an UNBOUNDED
+// walk-up (`resolvePluginRootFrom`), and `mainCheckoutRoot()` asks `git worktree list`, which is
+// indifferent to depth. ⛔ Do not introduce a fixed parent-count — that would silently re-anchor the
+// resolver relative to this file's new depth.
 
 import fs from "node:fs";
 import path from "node:path";

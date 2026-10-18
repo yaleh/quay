@@ -79,7 +79,7 @@ import {
 } from "./acceptance-runner.ts";
 // The record-aware deadline resolver family lives in the kernel leaf, beside `resolveAcceptanceTimeoutMs`
 // — the single home of the whole "acceptance timeout resolution" family (gap-ac353-goal-store-deadline-
-// resolver-not-kernel; it was briefly split into `gate/shared/acceptance-runner.ts`, which broke the structural
+// resolver-not-kernel; it was briefly split into the acceptance runner (now `core/acceptance-runner.ts`), which broke the structural
 // guard that this file consumes the kernel). ⛔ Not re-exported through the runner.
 import { resolveAcceptanceTimeout, timeoutKnobHint } from "../kernel/gate-run-options.ts";
 // gap-goal-criterion-timeout-hardcoded-60s-ignores-acceptance-timeout: EVERY criterion this file
@@ -528,7 +528,7 @@ type GateTail = { at: string; verdict: string; actor: string; reason: string; cr
 // unchanged by construction: on-disk order is preserved, so "last wins" and "first seen" still
 // resolve to the same rows the eager array gave.
 //
-// FORMAT CONSTRAINT. `gate/gate-event-store.ts` owns the JSONL contract (one GateEvent per line);
+// FORMAT CONSTRAINT. `core/gate-event-store.ts` owns the JSONL contract (one GateEvent per line);
 // this is the same read without the array, deliberately NOT a second format — the row shape below
 // mirrors the `GateEvent` fields the two readers actually consume.
 //
@@ -631,7 +631,7 @@ export interface StalePassReading {
    *  UNKNOWN. Reported so the coverage gap is visible; ⛔ not a pass (hard rule 3b). */
   staleUnverified: string[];
   /** The last relevant verdict was NOT-EVALUATED — the criterion never got to state anything.
-   *  Three causes, all recorded by the ONE mapping (`gate/shared/acceptance-runner.ts`
+   *  Three causes, all recorded by the ONE mapping (`core/acceptance-runner.ts`
    *  `verdictFromAcceptance`): the criterion itself declared it (exit 3 — this repo's convention,
    *  e.g. 「NOT-EVALUATED: carrier absent」), it was killed at its deadline, or its command could not
    *  be run at all (exit 126/127 / spawn failure). ⛔ NOT a failure: "I cannot evaluate this HERE"
