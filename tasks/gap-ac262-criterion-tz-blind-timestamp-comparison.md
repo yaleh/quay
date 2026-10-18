@@ -143,6 +143,47 @@ out-of-scope records carrying a git-derived window (skipped):
 
 3 个 candidate 中：AC-262 已改为瞬时比较、AC-317 本来就归一化、AC-326 无 `ts`↔`land|since` 字典序比较；命中 **0**。AC-266/267/268 同形但 `status: superseded` ⇒ 不是漏修，是已退役。
 
+### 续做 worker 轮独立复验（2026-10-18，re-dispatch after exited-not-landed）
+
+上一轮 worker 的 `exited-not-landed` 原因是 fan-in ac-precheck 读到 worktree 里**落后于 develop 的任务文件副本**（checked 0/7），不是实现或验证有问题。本轮把 `develop` 合进 worktree 后逐条重跑：
+
+```
+# AC2 (worktree, .quay/goal-round.jsonl symlinked read-only to the main checkout carrier)
+land = 2026-10-18T22:01:56+08:00
+CRITERION_EXIT=0   stdout: (empty)   stderr: (empty)
+seen = 12   ok = 12   states(first 5) = [['verified'],['verified'],['verified'],['verified'],['verified']]
+
+# AC1 fail-closed probes (land replaced in a temp copy of the same criterion)
+land = "not-a-timestamp" => exit 1, stderr names the raw value:
+  AC-262: cannot parse landing timestamp 'not-a-timestamp' as ISO-8601 ... => fail-closed ...
+land = "" => exit 1:
+  AC-262: no commit touches packages/quay/src/cli/goal.ts => B2 has not landed ...
+
+# AC3 (temp carrier fixtures; same criterion text, only CAR path substituted)
+1-failed           exit=1  "...holds 1 round(s)... none carries a non-failed goal-ring (observed states, first 5: [['failed']]) => the ring is broken..."
+2-prelanding       exit=1  "...holds 0 rounds... => the goal driver recorded nothing in that window; NOT-EVALUATED for the ring..."
+3a-boundary-exact  exit=1  (ts == land instant, Z dialect, correctly excluded)
+3b-boundary-after  exit=0  (ts = land + 1ms, correctly included)
+3c-z-post          exit=0  (UTC Z post-landing verified, correctly included)
+4-mixed-absent     exit=1  "...none carries a non-failed goal-ring (observed states: [['<absent>']])..."
+
+# AC5 (QUAY_GOALS_ROOT = develop 版本的 AC-262 修复前 criterion)
+current goals/           => tests 9 / pass 9 / fail 0
+pre-fix fixture          => TEST_EXIT=1, names "AC-262.md:48 → if not ts or ts <= land: continue"
+
+# AC6
+SCOPED_GATE_EXIT=0   tests 9 / pass 9 / fail 0
+git diff --stat develop...HEAD -- packages/quay/src  => empty (0 lines)
+ANTI_DRIFT OK — 2 actual file(s), all within declared Touches (3 glob(s))
+scoped-gate-cache-written developSha=9cc017f0dafebb6c044b79e508e38bccc2fd5fb0
+
+# AC7
+scanned=211  candidates=3  blind=[]  parseErrors=[]  unlocatable=[]
+skipped: AC-266-goal.md=superseded, AC-267-goal.md=superseded, AC-268-goal.md=superseded
+```
+
+⇒ 实现（commit `631ddbacf`）未改动，本轮只补 merge + 复验 + AC 记账。
+
 ## Acceptance Criteria
 
 - [x] AC1：判据第三支改为**瞬时比较**——`ts` 与 `land` 都经 `datetime.fromisoformat(...replace("Z","+00:00"))` 解析后比较 `.timestamp()`（或语义等价的实现）；`land` 解析失败必须 fail-closed（点名原值并 exit 1），⛔ 不得当作「无窗口」静默跳过。判据语义不变：仍要求「存在 ts 晚于落地时刻的轮次 ∧ 该轮 goal-ring fact 无 failed」，且 `git log` 当场派生 `land` 的写法保留（⛔ 不写死 sha）。
@@ -177,3 +218,5 @@ out-of-scope records carrying a git-derived window (skipped):
 - 未落地原因：AC 未全勾（checked 0/7，剩余未勾 7）——续做只需验证并勾选 AC
 - run_id：wk-prod-anchor
 - session_id：88a098b0-b1b4-40f6-8d38-46c3e8e75baa
+
+**2026-10-18 — re-dispatch 复核**：上述「checked 0/7」是 fan-in 读到 worktree 内落后于 develop 的任务文件副本所致；develop 上的任务体当时已是 7/7。本轮 merge develop 后 worktree 副本同为 7/7，AC 逐条独立复验通过（见 Evidence 末节）。
