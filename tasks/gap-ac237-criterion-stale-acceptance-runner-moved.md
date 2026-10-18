@@ -2,7 +2,7 @@
 id: gap-ac237-criterion-stale-acceptance-runner-moved
 title: AC-237 判据 stale：gate/shared 抽取把 acceptance-runner.ts 搬走，判据仍 import 旧路径 ⇒
   判据移到真承载者（公开 CLI 端到端）+ 兄弟 AC-243 + import-specifier 防复发检查
-status: ready
+status: done
 labels:
   - gap
   - defect
