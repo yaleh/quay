@@ -79,6 +79,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
+import { isDirectEntry } from "./gate-script-base.ts";
 
 // ── The six scopes archguard analyzes. Each scope carries an EXPLICIT label (NOT basename(sourceDir)):
 //    packages/quay-native|github|backlog all have a `src/` basename (and two dirs a `scripts/` basename),
@@ -100,7 +101,7 @@ const SCOPES: Array<{ source: string; label: string }> = [
 // ── Types ──────────────────────────────────────────────────────────────────────────────────────────
 
 /** One directory-level cycle (a strongly connected component of the TS module graph, size > 1). */
-interface DirectoryCycle {
+export interface DirectoryCycle {
   size: number;
   modules: string[];
 }
@@ -356,6 +357,68 @@ function readDirectoryCycles(root: string, workDir: string, source: string): {
     directoryCyclesReason: null,
     directoryCycleCount: cycles.length,
     directoryCycles: cycles,
+  };
+}
+
+// ── Reusable directory-cycle reading ───────────────────────────────────────────────────────────────
+// The quality-gate-driver's arch-CYCLE report-only routine (gap-arch-cycle-report-only-routine) needs
+// EXACTLY the reading above and must not grow a second copy of it (single source of truth: the query
+// artifact layout, the manifest scope matching and the three-valued failure vocabulary are one
+// implementation, not a paraphrase). The routine reads what the LAST `analyze` persisted — it does NOT
+// run analyze itself (that is the on-demand runner's job; running a 27s/task analyze on a routine tick
+// is exactly what `gap-fan-in-remove-archguard-gate` removed).
+//
+// ⛔ THREE-VALUED AT THE AGGREGATE LEVEL TOO (硬规则 3b): if ANY scope could not be read, the
+// aggregate `evaluated` is false and `totalCycleCount` is `null` — never the sum of the readable
+// scopes, because that number would read like a complete "N cycles" count.
+
+/** One scope's directory-granularity reading, as the report-only routine persists it. */
+export interface DirectoryCycleScopeReading {
+  scope: string;
+  source: string;
+  evaluated: boolean;
+  reason: string | null;
+  cycleCount: number | null;
+  /** The cycle MEMBERS (AC2: a non-empty reading must name its members, not just count them). */
+  cycles: DirectoryCycle[] | null;
+}
+
+/** The aggregate reading over SCOPES. `totalCycleCount` is non-null ONLY when every scope evaluated. */
+export interface DirectoryCycleReading {
+  workDir: string;
+  evaluated: boolean;
+  reason: string | null;
+  totalCycleCount: number | null;
+  scopes: DirectoryCycleScopeReading[];
+}
+
+/** Read the directory-level cycles from the artifacts the LAST `archguard analyze` persisted.
+ *
+ *  NEVER throws and NEVER spawns: a missing/unreadable `.archguard/query` tree is reported as
+ *  `evaluated:false` + a per-scope reason (the same shape the gate uses), which is what makes the
+ *  routine's 硬规则-3b test meaningful — "could not read" must not look like "0 cycles". */
+export function readDirectoryCycleReading(root: string, workDir?: string): DirectoryCycleReading {
+  const resolvedRoot = path.resolve(root);
+  const resolvedWorkDir = workDir ? path.resolve(workDir) : path.join(resolvedRoot, ".archguard");
+  const scopes: DirectoryCycleScopeReading[] = SCOPES.map(({ source, label }) => {
+    const r = readDirectoryCycles(resolvedRoot, resolvedWorkDir, source);
+    return {
+      scope: label,
+      source,
+      evaluated: r.directoryCyclesEvaluated,
+      reason: r.directoryCyclesReason,
+      cycleCount: r.directoryCycleCount,
+      cycles: r.directoryCycles,
+    };
+  });
+  const failed = scopes.filter((s) => !s.evaluated);
+  const evaluated = failed.length === 0;
+  return {
+    workDir: resolvedWorkDir,
+    evaluated,
+    reason: evaluated ? null : failed.map((s) => `${s.scope}: ${s.reason}`).join(" | "),
+    totalCycleCount: evaluated ? scopes.reduce((n, s) => n + (s.cycleCount ?? 0), 0) : null,
+    scopes,
   };
 }
 
@@ -673,4 +736,10 @@ function main(): void {
   process.stdout.write("archguard-runner: PASS — no dependency cycles in any scope\n");
 }
 
-main();
+// Direct entry guard (gate-script-base convention)：仅当本文件是入口时跑 main()。
+// ⛔ 本文件自 gap-arch-cycle-report-only-routine 起【也是被 import 的库】（quality-gate-driver 的
+// arch-cycle 例程复用 readDirectoryCycleReading）；无守卫的顶层 main() 会在 import 时真的去 spawn
+// `archguard analyze`（一个 27s/task 的按需动作），把「读上次产物」变成「每次 import 都重分析」。
+// expectedBase 是必填的名字（不是 URL — 打包后所有 inlined 模块共享同一个 import.meta.url，见
+// gate-script-base.ts#isDirectEntry）。
+if (isDirectEntry(import.meta, process.argv[1], "archguard-runner")) main();

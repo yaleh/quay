@@ -168,6 +168,12 @@ import {
   buildHistoryRecord as buildCoverageHistoryRecord,
   type Report as ArchCoverageReport,
 } from "./arch-coverage-report.ts";
+// ARCH-CYCLE 轨道（gap-arch-cycle-report-only-routine）：目录级环读数此前只存在于按需 runner 的
+// **闸**里（gap-fan-in-remove-archguard-gate 已把它从 fan-in 移除 ⇒ 新能力无消费者，自 10-11
+// 没跑过）。本轨把同一个读数接成周期 report-only 例程：每 due 轮读一次「上次 analyze 落盘的」
+// moduleGraph 环，append 一行到 `.quay/arch-cycle-history.jsonl`。⛔ 不 analyze、不 ratchet、
+// 不立案——环非空是该例程的**读数内容**，不会使轮 failed（那是闸的语义，不是本轨的）。
+import { readDirectoryCycleReading, type DirectoryCycle } from "./archguard-runner.ts";
 
 // ── 常量（由 DRIVER_KINDS registry 派生，⛔ 不另写一份路径字面量）──────────────────────────
 const QUALITY_SPEC = DRIVER_KINDS.quality;
@@ -199,6 +205,21 @@ export const ARCH_COVERAGE_MIN_INTERVAL_MINUTES = 60;
 
 /** 例程名（也是它写进 quality-round 的 Fact 名字与 `.quay/routine-last-run.json` 的键）。 */
 export const ARCH_COVERAGE_ROUTINE_NAME = "arch-coverage-report";
+
+/** arch-cycle-report 例程（声明式，`loop.arch_cycle_report:`）的缺省间隔。360m = 与 arch-coverage-report
+ *  同一个理由：每轮只是读 `.archguard/query/` 的既有产物（零 spawn、亚秒级），而目录环随提交缓慢
+ *  变化——每小时一条只会把载体撑长，不增加信息。 */
+export const ARCH_CYCLE_INTERVAL_MIN_DEFAULT = 360;
+
+/** 声明 interval 的下限（分钟）——同 ARCH_COVERAGE_MIN_INTERVAL_MINUTES 的同一个界（慢变量不因
+ *  「更密的观测」变准）。 */
+export const ARCH_CYCLE_MIN_INTERVAL_MINUTES = 60;
+
+/** 例程名（Fact 名 + `.quay/routine-last-run.json` 的键）。 */
+export const ARCH_CYCLE_ROUTINE_NAME = "arch-cycle-report";
+
+/** 载体（gitignored，docs/carrier-registry.json 已登记）。 */
+export const ARCH_CYCLE_HISTORY_REL = path.posix.join(".quay", "arch-cycle-history.jsonl");
 
 /** packaging-hygiene 的机械 check spawn 上限（毫秒）——config-key 枚举是纯函数、shipped-entry 是
  *  npm pack --dry-run + dist build（实测 ~2s / ~0.2s），180s 是给足余量的机械上限（⛔ 不是成本阈值，
@@ -1631,6 +1652,273 @@ export function formatArchCoverageAssembly(a: {
   return `arch-coverage-report 例程已装配（enabled, interval=${a.intervalMinutes}m，report-only：基线 append 到 .quay/arch-coverage-history.jsonl；NOT-EVALUATED 非零是该例程的读数，⛔ 不是 failed）`;
 }
 
+// ── arch-cycle-report 的 config 入口（`.quay/config.yml` `loop.arch_cycle_report:`）────────────
+// 与 arch_coverage_report 同族的第八条声明式例程，语义逐条对齐（⛔ 不另造机制）：
+//   • 段缺席        ⇒ 不装配（off by default，宿主例程表逐条不变——AC144 的「恰好四条」判据仍成立）；
+//   • 段 enabled:false ⇒ 仍装配、每轮记 `not-evaluated:disabled` 且**零写入**（kill switch 必须可观测）；
+//   • 段写坏        ⇒ 仍装配、记 `failed` 且零写入（硬规则 3b：读不懂 ≠ 合格）。
+// 与其他七条的唯一差异是**读什么**：本轨读的是目录级环（archguard-runner 的
+// `readDirectoryCycleReading`，即上次 analyze 落盘的 `moduleGraph.cycles`），且是 **report-only**：
+// 环非空是该例程的读数内容，⛔ 不是 failed（闸的语义留在 archguard-runner / 未来的结构门里）。
+export interface ArchCycleConfig {
+  enabled: boolean;
+  /** `enabled:false` ⇒ null（不参与调度）。enabled 段缺省为 ARCH_CYCLE_INTERVAL_MIN_DEFAULT。 */
+  intervalMinutes: number | null;
+}
+
+export interface ArchCycleConfigRead {
+  present: boolean;
+  config: ArchCycleConfig | null;
+  error: string | null;
+}
+
+const cfgCycleBad = (msg: string) => `loop.arch_cycle_report ${msg}`;
+
+/** 纯解析一个 `loop.arch_cycle_report` 值。`enabled` 必填布尔；disabled 段立即返回（kill switch 必须
+ *  在别的键缺席/写坏时也生效）；enabled 段的 `interval` **可省略**（缺省 360m，见 Plan），但一旦声明
+ *  就必须是合法的 `interval:<N>m` 且不低于下限——写坏的 interval ⛔ 不静默回退到缺省。 */
+export function parseArchCycleSection(raw: unknown): { config: ArchCycleConfig | null; error: string | null } {
+  if (raw === null || typeof raw !== "object" || Array.isArray(raw)) {
+    return { config: null, error: cfgCycleBad(`must be a mapping (got ${Array.isArray(raw) ? "array" : raw === null ? "null" : typeof raw})`) };
+  }
+  const rec = raw as Record<string, unknown>;
+  if (typeof rec.enabled !== "boolean") {
+    return { config: null, error: cfgCycleBad(`needs a boolean 'enabled' (got ${rec.enabled === undefined ? "missing" : JSON.stringify(rec.enabled)})`) };
+  }
+  if (rec.enabled === false) return { config: { enabled: false, intervalMinutes: null }, error: null };
+  if (rec.interval === undefined || rec.interval === null) {
+    return { config: { enabled: true, intervalMinutes: ARCH_CYCLE_INTERVAL_MIN_DEFAULT }, error: null };
+  }
+  if (typeof rec.interval !== "string") {
+    return { config: null, error: cfgCycleBad(`'interval' must be a string of the form interval:<N>m (got ${JSON.stringify(rec.interval)})`) };
+  }
+  let trigger: { kind: string; minutes?: number };
+  try {
+    trigger = parseTrigger(rec.interval) as { kind: string; minutes?: number };
+  } catch (e) {
+    return { config: null, error: cfgCycleBad(`invalid 'interval' — ${(e as Error).message}`) };
+  }
+  if (trigger.kind !== "interval" || typeof trigger.minutes !== "number") {
+    return { config: null, error: cfgCycleBad(`'interval' must be interval:<N>m (got kind '${trigger.kind}')`) };
+  }
+  if (trigger.minutes < ARCH_CYCLE_MIN_INTERVAL_MINUTES) {
+    return { config: null, error: cfgCycleBad(`interval ${trigger.minutes}m is below the ${ARCH_CYCLE_MIN_INTERVAL_MINUTES}m floor — refused, not silently rounded`) };
+  }
+  return { config: { enabled: true, intervalMinutes: trigger.minutes }, error: null };
+}
+
+/** 读 `.quay/config.yml` `loop.arch_cycle_report:`（同族读法：无 config / 无 `loop:` / 无段 ⇒
+ *  `present:false`；YAML 或段写坏 ⇒ `error` 置位，fail-closed）。 */
+export function readArchCycleConfig(workspaceRoot: string): ArchCycleConfigRead {
+  const file = path.join(workspaceRoot, ".quay", "config.yml");
+  let text: string;
+  try {
+    text = fs.readFileSync(file, "utf8");
+  } catch {
+    return { present: false, config: null, error: null };
+  }
+  let parsed: unknown;
+  try {
+    parsed = parseYaml(text);
+  } catch (e) {
+    return { present: true, config: null, error: `.quay/config.yml is not valid YAML — ${(e as Error).message}` };
+  }
+  const loop = parsed && typeof parsed === "object" && !Array.isArray(parsed) ? (parsed as Record<string, unknown>).loop : undefined;
+  if (loop === null || loop === undefined) return { present: false, config: null, error: null };
+  if (typeof loop !== "object" || Array.isArray(loop)) return { present: true, config: null, error: "FAIL-CLOSED: .quay/config.yml 'loop:' must be a mapping" };
+  const raw = (loop as Record<string, unknown>).arch_cycle_report;
+  if (raw === undefined || raw === null) return { present: false, config: null, error: null };
+  const { config, error } = parseArchCycleSection(raw);
+  return { present: true, config, error };
+}
+
+/** One carrier line: the reading itself (per-scope cycle members) plus its evaluated state.
+ *
+ *  ⛔ `evaluated:false` lines are APPENDED TOO (with `totalCycleCount: null`): a round that could not
+ *  read the module graph must leave a trace, otherwise "never read" and "read clean" look identical
+ *  in the history (硬规则 3b — the same reason archguard-runner records its not-evaluated runs). */
+export interface ArchCycleHistoryRecord {
+  ts: string;
+  mode: "arch-cycle-report-round";
+  evaluated: boolean;
+  reason: string | null;
+  /** null unless EVERY scope was readable — never a partial sum dressed as a total. */
+  totalCycleCount: number | null;
+  notEvaluatedScopes: string[];
+  scopes: Array<{
+    scope: string;
+    source: string;
+    evaluated: boolean;
+    reason: string | null;
+    cycleCount: number | null;
+    cycles: DirectoryCycle[] | null;
+  }>;
+  reportOnly: true;
+}
+
+/** The Fact value contributed to `quality-round.jsonl` (same reading as the carrier line). */
+export interface ArchCycleFactValue {
+  mode: "arch-cycle-report-round";
+  evaluated: boolean;
+  totalCycleCount: number | null;
+  notEvaluatedScopes: string[];
+  scopes: ArchCycleHistoryRecord["scopes"];
+  workDir: string;
+  historyPath: string;
+  historyAppended: boolean;
+  reportOnly: true;
+}
+
+export interface ArchCycleRoundOptions {
+  config?: ArchCycleConfig | null;
+  configPresent?: boolean;
+  configError?: string | null;
+  /** Test / alternate-carrier seam; default `<root>/.quay/arch-cycle-history.jsonl`. */
+  historyPath?: string;
+  /** Work dir holding the LAST analyze's query artifacts; default `<root>/.archguard`. */
+  workDir?: string;
+  /** Deterministic `ts` seam for the carrier line. */
+  now?: string;
+}
+
+/** Append one line to the carrier. Returns the fail-closed `{ok, error}` shape (never throws): a write
+ *  failure must surface as `failed`, not as a silently verified round. */
+export function appendArchCycleHistory(
+  root: string,
+  record: ArchCycleHistoryRecord,
+  opts: { historyPath?: string } = {},
+): { path: string; ok: boolean; error: string | null } {
+  const file = opts.historyPath ? path.resolve(opts.historyPath) : path.join(path.resolve(root), ARCH_CYCLE_HISTORY_REL);
+  try {
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.appendFileSync(file, JSON.stringify(record) + "\n");
+    return { path: file, ok: true, error: null };
+  } catch (e) {
+    return { path: file, ok: false, error: e instanceof Error ? e.message : String(e) };
+  }
+}
+
+/** Run ONE arch-cycle round: read the directory cycles the last analyze persisted and append one line.
+ *
+ *  ⛔ THE FAILURE VOCABULARY IS DELIBERATELY SPLIT (AC2/AC3 / 硬规则 3b):
+ *    • `failed`        — the routine could not do its job: bad config, or the carrier could not be
+ *                        written. ⛔ NOT used because cycles were found (report-only, AC2).
+ *    • `not-evaluated` — the module graph could not be read (no analyze product / malformed), or the
+ *                        kill switch is engaged. The line is STILL appended (evaluated:false) so the
+ *                        carrier records the inability, not silence.
+ *    • `verified`      — a reading was produced AND persisted. `totalCycleCount` may be > 0; that is
+ *                        the reading's CONTENT, never a red. A ratchet over it would be a different
+ *                        task (this one is report-only). */
+export function runArchCycleRound(root: string, opts: ArchCycleRoundOptions = {}): Fact<ArchCycleFactValue | null> {
+  const name = ARCH_CYCLE_ROUTINE_NAME;
+  if (opts.configError) return { name, value: null, state: "failed", reason: opts.configError };
+  if (opts.configPresent === false) {
+    return { name, value: null, state: "not-evaluated", reason: "not-evaluated:not-declared — loop.arch_cycle_report is absent (the routine is only assembled when the section is declared)" };
+  }
+  if (opts.config === null) {
+    return { name, value: null, state: "failed", reason: cfgCycleBad("present but could not be parsed") };
+  }
+  if (opts.config && !opts.config.enabled) {
+    return { name, value: null, state: "not-evaluated", reason: "not-evaluated:disabled — .quay/config.yml loop.arch_cycle_report.enabled=false（kill switch：零报告、零写入）" };
+  }
+
+  const resolvedRoot = path.resolve(root);
+  const reading = readDirectoryCycleReading(resolvedRoot, opts.workDir);
+  const ts = opts.now ?? new Date().toISOString();
+  const record: ArchCycleHistoryRecord = {
+    ts,
+    mode: "arch-cycle-report-round",
+    evaluated: reading.evaluated,
+    reason: reading.reason,
+    totalCycleCount: reading.totalCycleCount,
+    notEvaluatedScopes: reading.scopes.filter((s) => !s.evaluated).map((s) => s.scope),
+    scopes: reading.scopes,
+    reportOnly: true,
+  };
+  const appended = appendArchCycleHistory(resolvedRoot, record, opts.historyPath ? { historyPath: opts.historyPath } : {});
+  const value: ArchCycleFactValue = {
+    mode: "arch-cycle-report-round",
+    evaluated: record.evaluated,
+    totalCycleCount: record.totalCycleCount,
+    notEvaluatedScopes: record.notEvaluatedScopes,
+    scopes: record.scopes,
+    workDir: reading.workDir,
+    historyPath: appended.path,
+    historyAppended: appended.ok,
+    reportOnly: true,
+  };
+  if (!appended.ok) {
+    return { name, value, state: "failed", reason: `history carrier not writable at ${appended.path} — ${appended.error}` };
+  }
+  if (!reading.evaluated) {
+    return { name, value, state: "not-evaluated", reason: `not-evaluated:module-graph — ${reading.reason ?? "the module graph could not be read"}` };
+  }
+  // ⛔ AC2: a non-zero cycle count is NOT a failure. The cycles (with their members) are IN the value,
+  // so a reader can see them — they just never become the round's verdict.
+  return { name, value, state: "verified", reason: null };
+}
+
+export interface ArchCycleRoutineOptions {
+  historyPath?: string;
+  workDir?: string;
+  now?: string;
+}
+
+/** Build the RoutineSpec (scheduler / watchdog / halt are the driver's, not re-implemented here). */
+export function buildArchCycleRoutine(
+  root: string,
+  read: ArchCycleConfigRead,
+  opts: ArchCycleRoutineOptions = {},
+): RoutineSpec {
+  const minutes = read.config?.intervalMinutes ?? ARCH_CYCLE_INTERVAL_MIN_DEFAULT;
+  return {
+    name: ARCH_CYCLE_ROUTINE_NAME,
+    schedule: { kind: "interval", minutes },
+    // Same class as arch-coverage-report: a pure read plus one append. Observation keeps running while
+    // halted (a halt gates SPAWN / model calls, not readings).
+    run: () => [
+      runArchCycleRound(root, {
+        config: read.config,
+        configPresent: read.present,
+        configError: read.error,
+        ...(opts.historyPath ? { historyPath: opts.historyPath } : {}),
+        ...(opts.workDir ? { workDir: opts.workDir } : {}),
+        ...(opts.now ? { now: opts.now } : {}),
+      }),
+    ],
+  };
+}
+
+/** Production entry: read `.quay/config.yml` and build the routine. NEVER throws.
+ *  `routine` is `null` when NO section is declared — an undeclared workspace keeps the EXACT routine
+ *  set it had before (AC144's "exactly four"). A DECLARED section always yields a routine, even
+ *  `enabled:false` or malformed, because "not running" must be observable (硬规则 3/3b). */
+export function archCycleRoutineFromConfig(
+  root: string,
+  opts: ArchCycleRoutineOptions = {},
+): { routine: RoutineSpec | null; error: string | null; present: boolean; enabled: boolean } {
+  const read = readArchCycleConfig(root);
+  return {
+    routine: read.present ? buildArchCycleRoutine(root, read, opts) : null,
+    error: read.error,
+    present: read.present,
+    enabled: read.config?.enabled === true,
+  };
+}
+
+/** The assembly line, as ONE string — declared-but-disabled / malformed / running never look the same
+ *  in the driver's startup log (硬规则 3b/9). */
+export function formatArchCycleAssembly(a: {
+  present: boolean;
+  error: string | null;
+  enabled: boolean;
+  intervalMinutes: number;
+}): string {
+  if (a.error !== null) return `arch-cycle-report 例程已装配（${a.error} — 每轮记 failed、零报告零写入；⛔ 不回退到缺省节奏照跑）`;
+  if (!a.enabled) return "arch-cycle-report 例程已装配（enabled:false — 每轮记 not-evaluated:disabled，零报告零写入）";
+  return `arch-cycle-report 例程已装配（enabled, interval=${a.intervalMinutes}m，report-only：目录级环读数 append 到 .quay/arch-cycle-history.jsonl；环非零是该例程的读数，⛔ 不是 failed）`;
+}
+
 // ── 例程表（Layer 1b：routines = [{name, schedule, run() → Facts}]）──────────────────────────
 
 /** 例程装配缝（测试可注入覆盖命令/间隔；缺省 = 生产缺省）。 */
@@ -1695,6 +1983,11 @@ export interface QualityGateOptions {
    *  缺省 null = 未装配 ⇒ 未声明的工作区例程表逐条不变（AC144 的「恰好四条」判据仍成立）。
    *  **report-only**：它产出一条覆盖面读数 + 一行基线，⛔ 不作为任何闸。 */
   archCoverageRoutine?: RoutineSpec | null;
+  /** arch-cycle-report 例程（gap-arch-cycle-report-only-routine）：同族的声明式注入纪律（main() 从
+   *  `.quay/config.yml` `loop.arch_cycle_report:` 装配后注入）。缺省 null = 未装配 ⇒ 未声明的
+   *  工作区例程表逐条不变（AC144 的「恰好四条」判据仍成立）。
+   *  **report-only**：目录级环读数 + 一行历史，环非零 ⛔ 不使轮 failed。 */
+  archCycleRoutine?: RoutineSpec | null;
 }
 
 /** 四条例程（B15 pool-quality-judge + B17 judgment-consumer-check + 架构复核 + packaging-hygiene）。
@@ -1777,6 +2070,12 @@ export function qualityGateRoutines(root: string, opts: QualityGateOptions): Rou
     // **与上面各条的区别是它回答的问题**：「哪些语言/目录没有任何分析器到达」——一个**覆盖面**读数，
     // report-only，⛔ 不 ratchet（NOT-EVALUATED 非零不是 failed）。
     ...(opts.archCoverageRoutine ? [opts.archCoverageRoutine] : []),
+    // 第十二类：ARCH-CYCLE-REPORT 例程（同一「声明式 + 可观测」族：间隔与开关来自
+    // `.quay/config.yml` `loop.arch_cycle_report:`）。缺席 ⇒ 不加入（老行为，内建四条不变）；
+    // 加入而段缺席/写坏 ⇒ 仍装配并记 not-evaluated:disabled / failed（kill switch 与坏配置的可观测面）。
+    // **它回答的问题**：「目录级环现在是多少、成员是谁」——archguard-runner 的闸读数（on-demand）
+    // 的**持续消费者**，report-only，⛔ 不 ratchet（环非零不是 failed）。
+    ...(opts.archCycleRoutine ? [opts.archCycleRoutine] : []),
   ];
 }
 
@@ -2491,6 +2790,25 @@ export async function main(argv: string[]): Promise<number> {
     })}`);
   }
 
+  // arch-cycle-report 轨道：读 `.quay/config.yml` `loop.arch_cycle_report:`（同一注入纪律）。
+  // 未声明 ⇒ 不装配（例程表逐条不变，AC144 的「恰好四条」不变）；声明了但 enabled:false/写坏 ⇒
+  // 仍装配（disabled / failed 必须可观测，硬规则 3b）。**report-only**：每 due 轮读一次上次 analyze
+  // 落盘的目录级环并把一行 append 到 `.quay/arch-cycle-history.jsonl`；环非零 ⛔ 不使轮 failed。
+  const archCycle = archCycleRoutineFromConfig(rootDir);
+  if (archCycle.error) {
+    console.error(`quality-gate-driver: arch-cycle-report 例程配置无效 — ${archCycle.error}`);
+  } else if (!archCycle.present) {
+    console.error("quality-gate-driver: 未声明 loop.arch_cycle_report — arch-cycle-report 例程未装配（off by default，零读数零写入；例程表与未接此轨时一致）");
+  } else {
+    console.error(`quality-gate-driver: ${formatArchCycleAssembly({
+      present: archCycle.present,
+      error: archCycle.error,
+      enabled: archCycle.enabled,
+      intervalMinutes:
+        (archCycle.routine?.schedule as { minutes?: number } | undefined)?.minutes ?? ARCH_CYCLE_INTERVAL_MIN_DEFAULT,
+    })}`);
+  }
+
   const routines = qualityGateRoutines(rootDir, {
     planCmd: planCmd ? splitArgs(planCmd) : null,
     judgeArgv: judgeCmd ? splitArgs(judgeCmd) : null,
@@ -2517,6 +2835,7 @@ export async function main(argv: string[]): Promise<number> {
     crossProjectDogfoodRoutine: crossProject.routine,
     resourceDiagnosticRoutine: resourceDiagnostic.routine,
     archCoverageRoutine: archCoverage.routine,
+    archCycleRoutine: archCycle.routine,
   });
 
   return runResidentQualityGateLoop({ root: rootDir, intervalMs: interval, once, maxRounds, roundLogFile, runId: resolvedRunId, json, pidFile, routines, routineWatchdogMs, kind: "quality" });

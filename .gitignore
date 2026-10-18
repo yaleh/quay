@@ -73,6 +73,15 @@ packages/quay/plugin/
 # quality-round.jsonl / arch-discovery-findings.jsonl. Declared in docs/carrier-registry.json (owner:
 # plugin/scripts/arch-coverage-report.ts).
 **/.quay/arch-coverage-history.jsonl
+# arch-CYCLE report-only carrier (.quay/arch-cycle-history.jsonl) —
+# gap-arch-cycle-report-only-routine. The quality driver's arch-cycle-report routine appends ONE line
+# per due round describing the directory-level cycles the LAST analyze persisted (per-scope cycle count
+# + the cycle MEMBER lists, or `evaluated:false` + reason when no product is readable). This is the
+# standing consumer of the directory-cycle reading that archguard-runner's on-demand gate produces —
+# without it that reading only exists on the runs nobody schedules. Runtime state, never git-tracked —
+# the same family as arch-coverage-history.jsonl / quality-round.jsonl. Declared in
+# docs/carrier-registry.json (owner: plugin/scripts/quality-gate-driver.ts).
+**/.quay/arch-cycle-history.jsonl
 # resource-DIAGNOSTIC ROUTINE carriers (gap-quality-continuous-resource-diagnostic-routine-mechanical-
 # filter-then-semantic): `.quay/resource-anomaly-findings.jsonl` holds one line per NEW mechanically-
 # flagged anomaly plus one scan-round line per round, and `.quay/resource-diagnostic-model-budget.jsonl`

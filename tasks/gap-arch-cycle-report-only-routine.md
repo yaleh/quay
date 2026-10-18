@@ -1,7 +1,7 @@
 ---
 id: gap-arch-cycle-report-only-routine
 title: 目录级环读数接周期 report-only 例程——让断环后的尺子有持续消费者（不上关键路径）
-status: ready
+status: done
 labels:
   - gap
 parent: null

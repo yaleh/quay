@@ -60,6 +60,15 @@ import {
   archCoverageRoutineFromConfig,
   runArchCoverageRound,
   formatArchCoverageAssembly,
+  ARCH_CYCLE_ROUTINE_NAME,
+  ARCH_CYCLE_INTERVAL_MIN_DEFAULT,
+  ARCH_CYCLE_MIN_INTERVAL_MINUTES,
+  ARCH_CYCLE_HISTORY_REL,
+  parseArchCycleSection,
+  readArchCycleConfig,
+  archCycleRoutineFromConfig,
+  runArchCycleRound,
+  formatArchCycleAssembly,
 } from "../scripts/quality-gate-driver.ts";
 // judge 调用的失败归因/重试是【从 OSD 复用】的（硬规则 5b）——测试直接断言那**同一个**清单与分类器，
 // ⛔ 不是断言本文件里另写的一份。
@@ -2007,4 +2016,222 @@ test("formatArchCoverageAssembly — enabled / disabled / malformed are three DI
   assert.match(enabled, /report-only/);
   assert.match(disabled, /not-evaluated:disabled/);
   assert.match(malformed, /failed/);
+});
+
+// ── arch-cycle-report 例程（gap-arch-cycle-report-only-routine）────────────────────────────────
+// AC2 / AC3 / AC4。AC1（生产载体真出现记录）在落地后的真实例程轮，由任务体标为「待外部」。
+//
+// 夹具读的是 archguard-runner 的**同一套** query 产物布局（`<workDir>/query/manifest.json` +
+// `<workDir>/query/<key>/arch.json` 的 `extensions.tsAnalysis.moduleGraph.cycles`），⛔ 不是为测试
+// 另造一个形状——否则「读到了」只证明夹具自洽。
+
+/** The six sources archguard-runner analyzes (kept in sync by reading the failure mode: a missing
+ *  scope must be REPORTED, so the fixture must know the same set). */
+const ARCH_CYCLE_SOURCES = [
+  "packages/quay/src",
+  "plugin/scripts",
+  "packages/quay-native/src",
+  "packages/quay-github/src",
+  "packages/quay-backlog/src",
+  "experiments/quay-perpetual-stream/scripts",
+];
+
+/** Materialize the query artifacts the LAST analyze would have persisted under `<root>/.archguard`. */
+function makeArchQueryFixture(root, cyclesBySource) {
+  const queryDir = path.join(root, ".archguard", "query");
+  fs.mkdirSync(queryDir, { recursive: true });
+  const scopes = [];
+  ARCH_CYCLE_SOURCES.forEach((source, i) => {
+    const key = `scope-${i}`;
+    scopes.push({ key, sources: [path.resolve(root, source)], generatedAt: "2026-10-18T00:00:00Z" });
+    fs.mkdirSync(path.join(queryDir, key), { recursive: true });
+    const cycles = (cyclesBySource?.[source] ?? []).map((modules) => ({ modules }));
+    fs.writeFileSync(
+      path.join(queryDir, key, "arch.json"),
+      JSON.stringify({ language: "typescript", extensions: { tsAnalysis: { moduleGraph: { cycles } } } }),
+      "utf8",
+    );
+  });
+  fs.writeFileSync(path.join(queryDir, "manifest.json"), JSON.stringify({ scopes }), "utf8");
+}
+
+test("arch-cycle config — absent ⇒ present:false; bad/interval-below-floor fail closed; interval defaults to 360m (AC4)", (t) => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "qg-cycle-cfg-"));
+  t.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
+  assert.deepEqual(readArchCycleConfig(tmp), { present: false, config: null, error: null });
+
+  assert.notEqual(parseArchCycleSection(null).error, null);
+  const missingEnabled = parseArchCycleSection({ interval: "interval:360m" });
+  assert.equal(missingEnabled.config, null);
+  assert.match(missingEnabled.error, /boolean 'enabled'/);
+
+  // An enabled section WITHOUT `interval` uses the documented default (this is the Plan's「缺省 360m」).
+  assert.deepEqual(parseArchCycleSection({ enabled: true }), {
+    config: { enabled: true, intervalMinutes: ARCH_CYCLE_INTERVAL_MIN_DEFAULT }, error: null,
+  });
+  // A DECLARED-but-malformed interval is refused — never silently rounded back to the default.
+  const belowFloor = parseArchCycleSection({ enabled: true, interval: `interval:${ARCH_CYCLE_MIN_INTERVAL_MINUTES - 1}m` });
+  assert.equal(belowFloor.config, null);
+  assert.match(belowFloor.error, new RegExp(`${ARCH_CYCLE_MIN_INTERVAL_MINUTES}m floor`));
+  assert.equal(parseArchCycleSection({ enabled: true, interval: "every(5)" }).config, null);
+
+  assert.deepEqual(parseArchCycleSection({ enabled: false }), { config: { enabled: false, intervalMinutes: null }, error: null });
+  assert.deepEqual(parseArchCycleSection({ enabled: true, interval: "interval:120m" }), {
+    config: { enabled: true, intervalMinutes: 120 }, error: null,
+  });
+});
+
+test("archCycleRoutineFromConfig — an UNDECLARED workspace keeps EXACTLY the four built-in routines (AC4)", (t) => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "qg-cycle-absent-"));
+  t.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
+  const read = archCycleRoutineFromConfig(tmp);
+  assert.equal(read.routine, null, "no section ⇒ the routine is not even ADDED to the table");
+  assert.equal(read.present, false);
+  assert.equal(read.error, null);
+
+  const without = qualityGateRoutines(tmp, coverageBaseOpts()).map((r) => r.name);
+  assert.deepEqual(without, ["pool-quality-judge", "judgment-consumer-check", "architecture-review", "packaging-hygiene"]);
+  const injected = { name: ARCH_CYCLE_ROUTINE_NAME, schedule: { kind: "interval", minutes: ARCH_CYCLE_INTERVAL_MIN_DEFAULT }, run: () => [] };
+  const withIt = qualityGateRoutines(tmp, { ...coverageBaseOpts(), archCycleRoutine: injected }).map((r) => r.name);
+  assert.deepEqual(withIt, [...without, ARCH_CYCLE_ROUTINE_NAME], "the injection appends; it never displaces a built-in");
+});
+
+test("archCycleRoutineFromConfig — a DECLARED section is assembled with its declared interval", (t) => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "qg-cycle-declared-"));
+  t.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
+  fs.mkdirSync(path.join(tmp, ".quay"), { recursive: true });
+  fs.writeFileSync(path.join(tmp, ".quay", "config.yml"), "loop:\n  arch_cycle_report:\n    enabled: true\n    interval: interval:120m\n", "utf8");
+  const read = archCycleRoutineFromConfig(tmp);
+  assert.equal(read.present, true);
+  assert.equal(read.enabled, true);
+  assert.equal(read.error, null);
+  assert.equal(read.routine.name, ARCH_CYCLE_ROUTINE_NAME);
+  assert.deepEqual(read.routine.schedule, { kind: "interval", minutes: 120 });
+
+  // Declaration without an explicit interval ⇒ the documented 360m default, not an unset schedule.
+  fs.writeFileSync(path.join(tmp, ".quay", "config.yml"), "loop:\n  arch_cycle_report:\n    enabled: true\n", "utf8");
+  assert.deepEqual(archCycleRoutineFromConfig(tmp).routine.schedule, { kind: "interval", minutes: 360 });
+});
+
+test("runArchCycleRound — a NON-EMPTY cycle reading is VERIFIED (report-only, AC2) and the line names the members", (t) => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "qg-cycle-round-"));
+  t.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
+  makeArchQueryFixture(tmp, {
+    "packages/quay/src": [["src/a", "src/b"]],
+    "plugin/scripts": [["scripts/x", "scripts/y", "scripts/z"]],
+  });
+  const history = path.join(tmp, "history.jsonl");
+  const opts = { config: { enabled: true, intervalMinutes: 360 }, configPresent: true, configError: null, historyPath: history, now: "T0" };
+
+  const fact = runArchCycleRound(tmp, opts);
+  assert.equal(fact.name, ARCH_CYCLE_ROUTINE_NAME);
+  // AC2, the load-bearing assertion: two directory cycles do NOT become `failed` (this is a REPORT).
+  assert.equal(fact.state, "verified", `环非空不得使例程轮 failed（AC2）; got ${fact.state}: ${fact.reason}`);
+  assert.equal(fact.value.reportOnly, true);
+  assert.equal(fact.value.evaluated, true);
+  assert.equal(fact.value.totalCycleCount, 2);
+  assert.equal(fact.value.historyAppended, true);
+
+  const lines = fs.readFileSync(history, "utf8").split("\n").filter((l) => l !== "");
+  assert.equal(lines.length, 1, "one due round ⇒ exactly one history line");
+  const rec = JSON.parse(lines[0]);
+  assert.equal(rec.ts, "T0");
+  assert.equal(rec.evaluated, true);
+  assert.equal(rec.totalCycleCount, 2);
+  assert.equal(rec.reportOnly, true);
+  // AC2's second half: the record carries the cycle MEMBERS, not just a count.
+  const withCycles = rec.scopes.filter((s) => s.cycleCount > 0);
+  assert.equal(withCycles.length, 2);
+  const srcScope = rec.scopes.find((s) => s.scope === "src");
+  assert.deepEqual(srcScope.cycles, [{ size: 2, modules: ["src/a", "src/b"] }]);
+  const scriptScope = rec.scopes.find((s) => s.scope === "scripts");
+  assert.deepEqual(scriptScope.cycles, [{ size: 3, modules: ["scripts/x", "scripts/y", "scripts/z"] }]);
+
+  // Append-only: a second due round adds a second line, never rewrites the first.
+  runArchCycleRound(tmp, { ...opts, now: "T1" });
+  const after = fs.readFileSync(history, "utf8").split("\n").filter((l) => l !== "");
+  assert.deepEqual(after.map((l) => JSON.parse(l).ts), ["T0", "T1"]);
+});
+
+test("runArchCycleRound — an UNREADABLE module graph is `not-evaluated` + evaluated:false, NEVER the same value as 0 cycles (AC3)", (t) => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "qg-cycle-none-"));
+  t.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
+  const history = path.join(tmp, "history.jsonl");
+  const opts = { config: { enabled: true, intervalMinutes: 360 }, configPresent: true, configError: null, historyPath: history, now: "T" };
+
+  // No `.archguard/query` at all: nothing to read (the `gap-fan-in-remove-archguard-gate` steady state).
+  const fact = runArchCycleRound(tmp, opts);
+  assert.equal(fact.state, "not-evaluated", "读不到 moduleGraph 不是 verified，也不是 failed");
+  assert.equal(fact.value.evaluated, false);
+  assert.equal(fact.value.totalCycleCount, null, "⛔ null, never 0 — 读不到不得与「0 环」同值（AC3）");
+  assert.equal(fact.value.notEvaluatedScopes.length, ARCH_CYCLE_SOURCES.length);
+  assert.match(fact.reason, /not-evaluated:module-graph/);
+
+  // The inability is still PERSISTED (else "never read" and "read clean" look identical in history).
+  const rec = JSON.parse(fs.readFileSync(history, "utf8").trim());
+  assert.equal(rec.evaluated, false);
+  assert.equal(rec.totalCycleCount, null);
+  assert.ok(rec.reason && rec.reason.length > 0, "the record must carry WHY it could not be evaluated");
+
+  // The negative control: a CLEAN fixture is the OTHER shape (evaluated:true, total 0). If these two
+  // ever compare equal, the three-valued state has collapsed into "no cycles".
+  const clean = fs.mkdtempSync(path.join(os.tmpdir(), "qg-cycle-clean-"));
+  t.after(() => fs.rmSync(clean, { recursive: true, force: true }));
+  makeArchQueryFixture(clean, {});
+  const cleanFact = runArchCycleRound(clean, { ...opts, historyPath: path.join(clean, "history.jsonl") });
+  assert.equal(cleanFact.state, "verified");
+  assert.equal(cleanFact.value.evaluated, true);
+  assert.equal(cleanFact.value.totalCycleCount, 0);
+  assert.notEqual(fact.value.evaluated, cleanFact.value.evaluated);
+  assert.notEqual(fact.value.totalCycleCount, cleanFact.value.totalCycleCount);
+});
+
+test("runArchCycleRound — kill switch ⇒ not-evaluated:disabled and ZERO writes; bad config ⇒ failed (AC4)", (t) => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "qg-cycle-disabled-"));
+  t.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
+  const history = path.join(tmp, "history.jsonl");
+  const disabled = runArchCycleRound(tmp, {
+    config: { enabled: false, intervalMinutes: null }, configPresent: true, configError: null, historyPath: history,
+  });
+  assert.equal(disabled.state, "not-evaluated");
+  assert.equal(disabled.value, null);
+  assert.match(disabled.reason, /disabled/);
+  assert.equal(fs.existsSync(history), false, "the kill switch must produce zero writes");
+
+  const badConfig = runArchCycleRound(tmp, {
+    config: null, configPresent: true, configError: "loop.arch_cycle_report needs a boolean 'enabled'", historyPath: history,
+  });
+  assert.equal(badConfig.state, "failed");
+  assert.match(badConfig.reason, /boolean 'enabled'/);
+  assert.equal(fs.existsSync(history), false, "a malformed section also writes nothing");
+
+  // The carrier's own failure is `failed` — never a silently verified round.
+  const blocker = path.join(tmp, "blocker");
+  fs.writeFileSync(blocker, "not a directory");
+  makeArchQueryFixture(tmp, {});
+  const unwritable = runArchCycleRound(tmp, {
+    config: { enabled: true, intervalMinutes: 360 }, configPresent: true, configError: null,
+    historyPath: path.join(blocker, "history.jsonl"),
+  });
+  assert.equal(unwritable.state, "failed");
+  assert.match(unwritable.reason, /history carrier not writable/);
+});
+
+test("formatArchCycleAssembly — enabled / disabled / malformed are three DIFFERENT startup lines (硬规则 3b/9)", () => {
+  const enabled = formatArchCycleAssembly({ present: true, error: null, enabled: true, intervalMinutes: 360 });
+  const disabled = formatArchCycleAssembly({ present: true, error: null, enabled: false, intervalMinutes: 360 });
+  const malformed = formatArchCycleAssembly({ present: true, error: "loop.arch_cycle_report needs a boolean 'enabled'", enabled: false, intervalMinutes: 360 });
+  assert.notEqual(enabled, disabled);
+  assert.notEqual(disabled, malformed);
+  assert.match(enabled, /interval=360m/);
+  assert.match(enabled, /report-only/);
+  assert.match(disabled, /not-evaluated:disabled/);
+  assert.match(malformed, /failed/);
+});
+
+test("ARCH_CYCLE_HISTORY_REL — the carrier path is the single declared one (and it is gitignored)", () => {
+  assert.equal(ARCH_CYCLE_HISTORY_REL, ".quay/arch-cycle-history.jsonl");
+  const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
+  const ignored = fs.readFileSync(path.join(REPO_ROOT, ".gitignore"), "utf8");
+  assert.match(ignored, /^\*\*\/\.quay\/arch-cycle-history\.jsonl$/m, "a runtime carrier must not be git-tracked");
 });
