@@ -46,6 +46,7 @@ import { spawn } from "node:child_process";
 import { goalCriterionWorktreeDir, realpathOrSelf } from "./goal-store.ts";
 import { readServerState, pidAlive } from "./server-state.ts";
 import {
+  entryExists,
   worktreeDepsInstallCommand,
   readDeclaredWorktreeDepsInstall,
   runWorktreeDepsInstall,
@@ -114,17 +115,6 @@ export interface WorktreeNodeModulesReading {
    *  detected" must not share a shape with "linked"). */
   decision?: WorktreeDepsDecision;
   reason: string | null;
-}
-
-/** True for ANY directory entry (file, dir, symlink — including a dangling symlink): `fs.existsSync`
- *  follows symlinks and would read a broken link as "absent", re-linking over it. */
-function entryExists(p: string): boolean {
-  try {
-    fs.lstatSync(p);
-    return true;
-  } catch {
-    return false;
-  }
 }
 
 /**
