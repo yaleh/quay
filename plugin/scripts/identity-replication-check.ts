@@ -190,7 +190,9 @@ export function shCommentMask(src: string): Uint8Array {
   return mask;
 }
 
-function maskFor(f: string): (src: string) => Uint8Array {
+/** 按扩展名选注释掩码的 dispatcher。deletion-closure-check.ts 也用它 —— 该处曾有一份
+ *  字节相同的副本（semantic-dedup-scan `maskfor-dispatcher-duplicate`），以本模块为单一来源。 */
+export function maskFor(f: string): (src: string) => Uint8Array {
   return f.endsWith(".sh") ? shCommentMask : tsCommentMask;
 }
 

@@ -31,6 +31,8 @@ import { fileURLToPath } from "node:url";
 // Shared session-liveness primitive — ONE copy, byte-identical to the pinned quay-fleet blob
 // (packages/quay/src/primitives/PROVENANCE.md).
 import { readProcStat } from "../../packages/quay/src/primitives/session-liveness.mjs";
+// Shared best-effort JSONL append — ONE copy (semantic-dedup-scan finding `append-evidence-pair`).
+import { appendJsonlLine } from "./gate-script-base.ts";
 
 // ── 常量 ──────────────────────────────────────────────────────────────────────────────────────────
 
@@ -302,14 +304,10 @@ export function detectCcVersion(home: string = os.homedir()): string | null {
 
 // ── 证据落盘 ──────────────────────────────────────────────────────────────────────────────────────
 
-export function appendEvidence(evidencePath: string, entry: Record<string, unknown>): void {
-  try {
-    fs.mkdirSync(path.dirname(evidencePath), { recursive: true });
-    fs.appendFileSync(evidencePath, JSON.stringify(entry) + "\n");
-  } catch {
-    // best-effort：证据落盘失败绝不能杀掉探针（否则「探针还在跑」这个事实会随证据一起消失）
-  }
-}
+// 证据落盘直接用共享的 gate-script-base.appendJsonlLine（semantic-dedup-scan finding
+// `append-evidence-pair`，requests `merge`）。原来的本地 `appendEvidence` 副本已删除而不是留成
+// 同形适配器：两份同名的单行适配器仍会被判重扫描按「同名 + 同体」重新立案（该 finding 已连续
+// 六轮复发），而本文件没有任何外部消费者按那个名字引用。
 
 // ── serve：注册 + 监听 + 逐帧落盘 ─────────────────────────────────────────────────────────────────
 
@@ -365,7 +363,7 @@ function serve(opts: ServeOpts): void {
     try {
       if (fs.existsSync(opts.sockPath)) fs.unlinkSync(opts.sockPath);
     } catch { /* ignore */ }
-    appendEvidence(opts.evidencePath, buildEvidenceEntry(opts.label, "cleanup", {
+    appendJsonlLine(opts.evidencePath, buildEvidenceEntry(opts.label, "cleanup", {
       pid, removed: [recordPath, kPath, opts.sockPath],
     }));
   };
@@ -381,13 +379,13 @@ function serve(opts: ServeOpts): void {
       set: opts.set,
     });
     fs.writeFileSync(recordPath, JSON.stringify(record));
-    appendEvidence(opts.evidencePath, buildEvidenceEntry(opts.label, "register-record", {
+    appendJsonlLine(opts.evidencePath, buildEvidenceEntry(opts.label, "register-record", {
       path: recordPath, record,
     }));
   }
   if (opts.writeKey) {
     fs.writeFileSync(kPath, JSON.stringify(buildKeyRecord(facts, opts.token)), { mode: 0o600 });
-    appendEvidence(opts.evidencePath, buildEvidenceEntry(opts.label, "register-key", {
+    appendJsonlLine(opts.evidencePath, buildEvidenceEntry(opts.label, "register-key", {
       path: kPath, peerTokenLen: opts.token.length, procStart, pidDomain,
     }));
   }
@@ -403,7 +401,7 @@ function serve(opts: ServeOpts): void {
     connSeq += 1;
     const connId = connSeq;
     let buf = "";
-    appendEvidence(opts.evidencePath, buildEvidenceEntry(opts.label, "connect", { connId }));
+    appendJsonlLine(opts.evidencePath, buildEvidenceEntry(opts.label, "connect", { connId }));
 
     sock.setEncoding("utf8");
     sock.on("data", (chunk: string) => {
@@ -414,7 +412,7 @@ function serve(opts: ServeOpts): void {
         const parsed = parseFrame(line);
         const authVerdict = verifyAuthFrame(line, opts.token);
         const wrapper = extractWrapperAttrs(extractMessageText(line) ?? "");
-        appendEvidence(opts.evidencePath, buildEvidenceEntry(opts.label, "frame", {
+        appendJsonlLine(opts.evidencePath, buildEvidenceEntry(opts.label, "frame", {
           connId,
           rawLine: line,                       // ⛔ 原始字节（AC1 要求核对「实际到达的属性值」）
           parsed,
@@ -424,15 +422,15 @@ function serve(opts: ServeOpts): void {
       }
     });
     sock.on("end", () => {
-      appendEvidence(opts.evidencePath, buildEvidenceEntry(opts.label, "end", { connId }));
+      appendJsonlLine(opts.evidencePath, buildEvidenceEntry(opts.label, "end", { connId }));
     });
     sock.on("error", (e: Error) => {
-      appendEvidence(opts.evidencePath, buildEvidenceEntry(opts.label, "sock-error", { connId, error: e.message }));
+      appendJsonlLine(opts.evidencePath, buildEvidenceEntry(opts.label, "sock-error", { connId, error: e.message }));
     });
   });
 
   server.on("error", (e: NodeJS.ErrnoException) => {
-    appendEvidence(opts.evidencePath, buildEvidenceEntry(opts.label, "listen-error", { error: e.message, code: e.code }));
+    appendJsonlLine(opts.evidencePath, buildEvidenceEntry(opts.label, "listen-error", { error: e.message, code: e.code }));
     console.error(`⛔ 监听失败: ${e.message}`);
     cleanup();
     process.exit(2);
@@ -441,7 +439,7 @@ function serve(opts: ServeOpts): void {
   server.listen(opts.sockPath, () => {
     // 让平台能连上（真实会话的 socket 是 600）；chmod 需在 listen 之后
     try { fs.chmodSync(opts.sockPath, 0o600); } catch { /* ignore */ }
-    appendEvidence(opts.evidencePath, buildEvidenceEntry(opts.label, "listening", {
+    appendJsonlLine(opts.evidencePath, buildEvidenceEntry(opts.label, "listening", {
       sockPath: opts.sockPath, pid, recordPath, keyPath: kPath,
     }));
     // 机器可读的一行 stdout：调用方据此取 pid/name/sock（⛔ 不靠解析人类输出）
@@ -457,7 +455,7 @@ function serve(opts: ServeOpts): void {
   process.on("SIGINT", bye);
   process.on("SIGTERM", bye);
   process.on("uncaughtException", (e) => {
-    appendEvidence(opts.evidencePath, buildEvidenceEntry(opts.label, "uncaught", { error: String(e) }));
+    appendJsonlLine(opts.evidencePath, buildEvidenceEntry(opts.label, "uncaught", { error: String(e) }));
     bye();
   });
 }
