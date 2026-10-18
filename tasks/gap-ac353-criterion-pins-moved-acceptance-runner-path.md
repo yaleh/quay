@@ -2,7 +2,7 @@
 id: gap-ac353-criterion-pins-moved-acceptance-runner-path
 title: AC-353 判据钉住已搬迁的 gate/acceptance-runner.ts（路径+相对深度双 stale）：消费者改为按导出符号定位 +
   新增 fs 路径字面量防复发检查（同时修 AC-355）
-status: ready
+status: needs-human
 labels:
   - gap
   - defect
@@ -228,3 +228,14 @@ goal sweep 产生。
 - 未落地原因：step=suite: AssertionError [ERR_ASSERTION]: cadence must be one of the five enumerated values: touches-relax-tighten.ts → 每轮（worker-driver 驻留环的轮末一步；loop.touches_relax 未声明或 mode 为 off / 读不懂时不跑，该轮 round 记录的 auto_tighten 为 null） [baseline A/B: HARD RED (task-introduced-red) — the task's red set is NOT a subset of the develop baseline red set: added=plugin/test/full-suite-runner-cgroup.test.mjs changed=-]
 - run_id：wk-prod-anchor
 - session_id：f3a892f0-9b94-48a7-8780-52aa7e50f0d8
+
+## Needs-Human
+
+**执行 2026-10-18T04:23:25.237Z — 停派终止（失败无法归因，⛔ 不再重派）**
+
+- 阻碍原因：LOOP DEADLOCK: task gap-ac353-criterion-pins-moved-acceptance-runner-path has been blocked by the SAME pre-existing red set for 3 consecutive fan-in rounds (signature unchanged across rounds). Blocked red points: plugin/test/full-suite-runner-cgroup.test.mjs. Other tasks blocked by the identical red set: gap-ac237-criterion-stale-acceptance-runner-moved — each of these tasks fixes a red point OUTSIDE the blocked set, so they are mutually landing gates (none can produce a green full suite while the others' reds remain). Suggested resolution: land ANY ONE of them first (each one's own fix is outside the blocked set, so the red set does not grow); the others' blocked sets then shrink by that red point and they land in turn. If a landing still makes it worse, a human must decide the order. ⛔ The gates were NOT relaxed: every new/changed red point still hard-fails this task (baseline-equivalence exemption never covers a red the task introduced). — 停止自动重派（电路断路器：同一既存红签名连续 3 轮未变）。⛔ 判据未放宽：本次新增 / 断言文本变化的红点仍然硬红（既存红等价豁免只覆盖「不变差」的方向）。
+- 失败步/判词：step=suite: AssertionError [ERR_ASSERTION]: cadence must be one of the five enumerated values: touches-relax-tighten.ts → 每轮（worker-driver 驻留环的轮末一步；loop.touches_relax 未声明或 mode 为 off / 读不懂时不跑，该轮 round 记录的 auto_tighten 为 null） [baseline A/B: HARD RED (task-introduced-red) — the task's red set is NOT a subset of the develop baseline red set: added=plugin/test/full-suite-runner-cgroup.test.mjs changed=-]
+- run_id：wk-prod-anchor
+- session_id：38d1f47d-cdd8-40e0-932b-a413960e053b
+- suite 日志：/data/home/yale/work/quay/.quay/fan-in-suite-gap-ac353-criterion-pins-moved-acceptance-runner-path~wk-prod-anchor~1792296944133-5ca26f.log
+- fan-in 日志：/data/home/yale/work/quay/.quay/fan-in-gap-ac353-criterion-pins-moved-acceptance-runner-path-wk-prod-anchor.log
