@@ -80,26 +80,26 @@ AC-243 本轮读数：`verdict: "not-evaluated"`，reason `acceptance failed (ex
 
 ## AC
 
-- [ ] AC1 AC-237 判据取真：`node --no-warnings --experimental-strip-types packages/quay/src/goal-store.ts gate AC-237 --root . --json` ⇒ `verdict: "pass"`、exit 0；贴改后 criterion 全文（逐字取自 `quay goal show AC-237 --json`）与 gate 读数。可直接采用的判据（立案方已逐字验证；单行，unbroken）：
+- [x] AC1 AC-237 判据取真：`node --no-warnings --experimental-strip-types packages/quay/src/goal-store.ts gate AC-237 --root . --json` ⇒ `verdict: "pass"`、exit 0；贴改后 criterion 全文（逐字取自 `quay goal show AC-237 --json`）与 gate 读数。可直接采用的判据（立案方已逐字验证；单行，unbroken）：
 
 ```
 node --no-warnings --experimental-strip-types -e 'const fs=require("fs"),os=require("os"),path=require("path"),cp=require("child_process");const d=fs.mkdtempSync(path.join(os.tmpdir(),"ac237-"));const die=m=>{try{fs.rmSync(d,{recursive:true,force:true})}catch(e){}console.error(m);process.exit(1)};const g=p=>path.join(d,"goals",p);fs.mkdirSync(path.join(d,"goals"));fs.writeFileSync(g("GOAL-999.md"),"---\nid: GOAL-999\ntitle: fixture\nstatus: active\nkind: goal\norigin: probe\nbody: |\n  probe\n---\n");const mk=(id,crit)=>fs.writeFileSync(g(id+".md"),"---\nid: "+id+"\ntitle: fixture\nstatus: active\nkind: criterion\ngoal: GOAL-999\ncriterion: \""+crit+"\"\nexpect: fixture\norigin: probe\n---\n");mk("AC-901","echo CAUSE-TOKEN >&2; exit 1");mk("AC-902","exit 1");const run=id=>{const r=cp.spawnSync(process.execPath,[path.join(process.cwd(),"packages/quay/bin/quay.js"),"goal","gate",id,"--root",d,"--json"],{encoding:"utf8"});let j;try{j=JSON.parse(r.stdout)}catch(e){die("CAUSE=gate-json-unparseable exit="+r.status+" stdout="+JSON.stringify(String(r.stdout).slice(0,200)))}return j};const a=run("AC-901");if(a.verdict!=="fail"){die("CAUSE=fixture-with-stderr-not-fail verdict="+a.verdict)}if(!String(a.reason).includes("CAUSE-TOKEN")){die("CAUSE=reason-lost-criterion-stderr reason="+JSON.stringify(a.reason))}if(!String(a.event&&a.event.payload&&a.event.payload.reason).includes("CAUSE-TOKEN")){die("CAUSE=recorded-event-lost-criterion-stderr event="+JSON.stringify(a.event&&a.event.payload))}const b=run("AC-902");if(!String(b.reason).includes("criterion wrote no output")){die("CAUSE=zero-output-cause-not-distinguished reason="+JSON.stringify(b.reason))}if(String(b.reason).includes("CAUSE-TOKEN")){die("CAUSE=zero-output-echoes-token reason="+JSON.stringify(b.reason))}try{fs.rmSync(d,{recursive:true,force:true})}catch(e){}process.exit(0)'
 ```
 
-- [ ] AC2 判据不再点名搬走的内部模块：`quay goal show AC-237 --json` 的 criterion 中 `packages/quay/src/gate/acceptance-runner.ts` 命中数 ⇒ 0。非恒零配套干跑：改前同一命令 ⇒ ≥1（贴改前/改后两读数）。
-- [ ] AC3 记录载体也带成因：AC1 的 fixture 里 `event.payload.reason` 含 `CAUSE-TOKEN`；并直接读临时 root 的 `.quay/gate-events.jsonl` 最后一行证明已落盘（贴该行）。
-- [ ] AC4 两支不同形（硬规则 3b）：零输出失败的 `reason` 含 `criterion wrote no output to stderr/stdout` 且不含 `CAUSE-TOKEN`（贴读数）。
-- [ ] AC5 兄弟 AC-243 取真：`node --no-warnings --experimental-strip-types packages/quay/src/goal-store.ts gate AC-243 --root . --json` ⇒ `verdict: "pass"`；贴改后 criterion 与读数。可直接采用的判据（立案方已逐字验证；单行，unbroken）：
+- [x] AC2 判据不再点名搬走的内部模块：`quay goal show AC-237 --json` 的 criterion 中 `packages/quay/src/gate/acceptance-runner.ts` 命中数 ⇒ 0。非恒零配套干跑：改前同一命令 ⇒ ≥1（贴改前/改后两读数）。
+- [x] AC3 记录载体也带成因：AC1 的 fixture 里 `event.payload.reason` 含 `CAUSE-TOKEN`；并直接读临时 root 的 `.quay/gate-events.jsonl` 最后一行证明已落盘（贴该行）。
+- [x] AC4 两支不同形（硬规则 3b）：零输出失败的 `reason` 含 `criterion wrote no output to stderr/stdout` 且不含 `CAUSE-TOKEN`（贴读数）。
+- [x] AC5 兄弟 AC-243 取真：`node --no-warnings --experimental-strip-types packages/quay/src/goal-store.ts gate AC-243 --root . --json` ⇒ `verdict: "pass"`；贴改后 criterion 与读数。可直接采用的判据（立案方已逐字验证；单行，unbroken）：
 
 ```
 node --no-warnings --experimental-strip-types -e 'const fs=require("fs"),os=require("os"),path=require("path"),cp=require("child_process");const d=fs.mkdtempSync(path.join(os.tmpdir(),"ac243-"));const die=m=>{try{fs.rmSync(d,{recursive:true,force:true})}catch(e){}console.error(m);process.exit(1)};const g=p=>path.join(d,"goals",p);fs.mkdirSync(path.join(d,"goals"));fs.writeFileSync(g("GOAL-999.md"),"---\nid: GOAL-999\ntitle: fixture\nstatus: active\nkind: goal\norigin: probe\nbody: |\n  probe\n---\n");fs.writeFileSync(g("AC-903.md"),"---\nid: AC-903\ntitle: fixture\nstatus: active\nkind: criterion\ngoal: GOAL-999\ncriterion: \"exit 1\"\nexpect: fixture\norigin: probe\n---\n");const r=cp.spawnSync(process.execPath,[path.join(process.cwd(),"packages/quay/bin/quay.js"),"goal","gate","AC-903","--root",d,"--json"],{encoding:"utf8"});let j;try{j=JSON.parse(r.stdout)}catch(e){die("CAUSE=gate-json-unparseable exit="+r.status+" stdout="+JSON.stringify(String(r.stdout).slice(0,200)))}const reason=String(j.reason||"");const m=reason.match(/^acceptance failed \(exit [^)]*\) — (.*)$/);if(!m){die("CAUSE=reason-shape-changed reason="+JSON.stringify(reason))}const real=m[1].trim();const files=fs.readdirSync("goals").filter(f=>/^AC-241-.*\.md$/.test(f));if(files.length!==1){die("CAUSE=AC-241-record-not-uniquely-locatable files="+JSON.stringify(files))}const src=fs.readFileSync(path.join("goals",files[0]),"utf8");const t=src.match(/T\s*=\s*"([^"]+)"/);if(!t){die("CAUSE=AC-241-bare-reason-constant-gone — its detector shape changed; re-scope AC-243")}if(real!==t[1]){die("CAUSE=constant-diverged — AC-241 T="+JSON.stringify(t[1])+" runner="+JSON.stringify(real))}try{fs.rmSync(d,{recursive:true,force:true})}catch(e){}process.exit(0)'
 ```
 
-- [ ] AC6 防复发检查存在且有效：`node --test packages/quay/test/goal-criterion-import-specifiers-resolve.test.mjs` ⇒ exit 0；负控制：在 tmp goals 目录放一条 criterion 指向 `./packages/quay/src/__nope__.ts`，用 `QUAY_GOALS_ROOT=<tmp>` 跑同一测试 ⇒ exit 1 并列出 `file → specifier`（贴两侧；⛔ 不改生产 `goals/`）。
-- [ ] AC7 负控制证明判据能因**保证本身**变红：按 Plan 4 临时去掉 stderr 折叠 ⇒ AC-237 判据 exit 1 且 stderr 含 `CAUSE=reason-lost-criterion-stderr`；`cp` 恢复后 md5 一致且判据 exit 0（贴两侧）。
-- [ ] AC8 落盘文本可被真接受侧执行：对 `quay goal show AC-237/AC-243 --json` 取出的 criterion，`sh -n` 与 `sh -c` 均 exit 0（接受侧是 `/bin/sh`=dash，⛔ 只验 bash 不算）。
-- [ ] AC9 普查留痕：在本任务 Evidence 里贴「16 个相对 import specifier / 缺失 4 个 / AC-147、AC-149 为 superseded」的枚举命令与输出。
-- [ ] AC10 schema：`node plugin/scripts/task-schema-check.ts tasks/gap-ac237-criterion-stale-acceptance-runner-moved.md` ⇒ exit 0。
+- [x] AC6 防复发检查存在且有效：`node --test packages/quay/test/goal-criterion-import-specifiers-resolve.test.mjs` ⇒ exit 0；负控制：在 tmp goals 目录放一条 criterion 指向 `./packages/quay/src/__nope__.ts`，用 `QUAY_GOALS_ROOT=<tmp>` 跑同一测试 ⇒ exit 1 并列出 `file → specifier`（贴两侧；⛔ 不改生产 `goals/`）。
+- [x] AC7 负控制证明判据能因**保证本身**变红：按 Plan 4 临时去掉 stderr 折叠 ⇒ AC-237 判据 exit 1 且 stderr 含 `CAUSE=reason-lost-criterion-stderr`；`cp` 恢复后 md5 一致且判据 exit 0（贴两侧）。
+- [x] AC8 落盘文本可被真接受侧执行：对 `quay goal show AC-237/AC-243 --json` 取出的 criterion，`sh -n` 与 `sh -c` 均 exit 0（接受侧是 `/bin/sh`=dash，⛔ 只验 bash 不算）。
+- [x] AC9 普查留痕：在本任务 Evidence 里贴「16 个相对 import specifier / 缺失 4 个 / AC-147、AC-149 为 superseded」的枚举命令与输出。
+- [x] AC10 schema：`node plugin/scripts/task-schema-check.ts tasks/gap-ac237-criterion-stale-acceptance-runner-moved.md` ⇒ exit 0。
 
 ## DoD
 
@@ -111,3 +111,172 @@ AC-237 在 goal-driver 下一轮由 fail 翻 **pass**，且 AC-243 一并翻 pas
 - goals/AC-243-ac-241-的空因常量必须与-acceptance-runner-实际产出的零输出成因文本同源-ac-241-自身退化.md
 - packages/quay/test/goal-criterion-import-specifiers-resolve.test.mjs
 - tasks/gap-ac237-criterion-stale-acceptance-runner-moved.md
+
+## Evidence
+
+所有读数均在任务 worktree `/data/home/yale/work/quay-worktrees/gap-ac237-criterion-stale-acceptance-runner-moved`
+里取得（develop `74a551d08` 已 merge 进 worktree + 本任务提交）。
+
+### AC1 — AC-237 判据经生产 CLI 面取真
+
+重锚后的 criterion（逐字取自 `quay goal show AC-237 --json`）：
+
+```
+node --no-warnings --experimental-strip-types -e 'const fs=require("fs"),os=require("os"),path=require("path"),cp=require("child_process");const d=fs.mkdtempSync(path.join(os.tmpdir(),"ac237-"));const die=m=>{try{fs.rmSync(d,{recursive:true,force:true})}catch(e){}console.error(m);process.exit(1)};const g=p=>path.join(d,"goals",p);fs.mkdirSync(path.join(d,"goals"));fs.writeFileSync(g("GOAL-999.md"),"---\nid: GOAL-999\ntitle: fixture\nstatus: active\nkind: goal\norigin: probe\nbody: |\n  probe\n---\n");const mk=(id,crit)=>fs.writeFileSync(g(id+".md"),"---\nid: "+id+"\ntitle: fixture\nstatus: active\nkind: criterion\ngoal: GOAL-999\ncriterion: \""+crit+"\"\nexpect: fixture\norigin: probe\n---\n");mk("AC-901","echo CAUSE-TOKEN >&2; exit 1");mk("AC-902","exit 1");const run=id=>{const r=cp.spawnSync(process.execPath,[path.join(process.cwd(),"packages/quay/bin/quay.js"),"goal","gate",id,"--root",d,"--json"],{encoding:"utf8"});let j;try{j=JSON.parse(r.stdout)}catch(e){die("CAUSE=gate-json-unparseable exit="+r.status+" stdout="+JSON.stringify(String(r.stdout).slice(0,200)))}return j};const a=run("AC-901");if(a.verdict!=="fail"){die("CAUSE=fixture-with-stderr-not-fail verdict="+a.verdict)}if(!String(a.reason).includes("CAUSE-TOKEN")){die("CAUSE=reason-lost-criterion-stderr reason="+JSON.stringify(a.reason))}if(!String(a.event&&a.event.payload&&a.event.payload.reason).includes("CAUSE-TOKEN")){die("CAUSE=recorded-event-lost-criterion-stderr event="+JSON.stringify(a.event&&a.event.payload))}const b=run("AC-902");if(!String(b.reason).includes("criterion wrote no output")){die("CAUSE=zero-output-cause-not-distinguished reason="+JSON.stringify(b.reason))}if(String(b.reason).includes("CAUSE-TOKEN")){die("CAUSE=zero-output-echoes-token reason="+JSON.stringify(b.reason))}try{fs.rmSync(d,{recursive:true,force:true})}catch(e){}process.exit(0)'
+```
+
+gate 读数（exit 0）：
+
+```
+$ node --no-warnings --experimental-strip-types packages/quay/src/goal-store.ts gate AC-237 --root . --json
+$ echo $?
+0
+{"id":"AC-237","verdict":"pass","cause":null,"reason":"acceptance passed (exit 0)","timeoutMs":60000}
+```
+
+### AC2 — 判据不再点名被搬走的内部模块（含非恒零干跑）
+
+```
+# 改前（dd013cf7b^，即 AC-237 criterion 重锚之前）
+$ git show 'dd013cf7b^:goals/AC-237-失败判据必须可归因-…-不得只留-exit-1.md' | grep -c 'packages/quay/src/gate/acceptance-runner.ts'
+1
+# 改后（criterion 字段内的命中数）
+$ quay goal show AC-237 --json | node -e '…count in .criterion…'
+0
+# 兄弟 AC-243 同一直方图：1 → 0
+```
+
+### AC3 — 记录载体（.quay/gate-events.jsonl）也带成因
+
+```
+AC-901 verdict: fail
+AC-901 reason: acceptance failed (exit 1) — CAUSE-TOKEN
+AC-901 event.payload.reason: acceptance failed (exit 1) — CAUSE-TOKEN
+ledger tail（临时 root 的 .quay/gate-events.jsonl，AC-902 那行）:
+{"id":"580a37bb-ea6e-4965-afbc-8fd16b659510","item_id":"AC-902","pipeline_id":"AC-902","gate":"goal","actor":"goal-cli","verdict":"fail","timestamp":"2026-10-18T02:01:56.487Z","payload":{"reason":"acceptance failed (exit 1) — criterion wrote no output to stderr/stdout","evaluationRoot":"/tmp/ac237-evidence-eils2N","treeSha":null}}
+```
+
+（AC-901 写 CAUSE-TOKEN 的那条 fail 事件同样落盘；两者的 `payload.reason` 与 CLI 返回的 `reason` 逐字相同。）
+
+### AC4 — 两支不同形（硬规则 3b）
+
+```
+AC-902 verdict: fail
+AC-902 reason: acceptance failed (exit 1) — criterion wrote no output to stderr/stdout
+reason contains "criterion wrote no output": true
+reason contains "CAUSE-TOKEN": false
+```
+
+### AC5 — 兄弟 AC-243 取真
+
+重锚后的 criterion（逐字取自 `quay goal show AC-243 --json`）：
+
+```
+node --no-warnings --experimental-strip-types -e 'const fs=require("fs"),os=require("os"),path=require("path"),cp=require("child_process");const d=fs.mkdtempSync(path.join(os.tmpdir(),"ac243-"));const die=m=>{try{fs.rmSync(d,{recursive:true,force:true})}catch(e){}console.error(m);process.exit(1)};const g=p=>path.join(d,"goals",p);fs.mkdirSync(path.join(d,"goals"));fs.writeFileSync(g("GOAL-999.md"),"---\nid: GOAL-999\ntitle: fixture\nstatus: active\nkind: goal\norigin: probe\nbody: |\n  probe\n---\n");fs.writeFileSync(g("AC-903.md"),"---\nid: AC-903\ntitle: fixture\nstatus: active\nkind: criterion\ngoal: GOAL-999\ncriterion: \"exit 1\"\nexpect: fixture\norigin: probe\n---\n");const r=cp.spawnSync(process.execPath,[path.join(process.cwd(),"packages/quay/bin/quay.js"),"goal","gate","AC-903","--root",d,"--json"],{encoding:"utf8"});let j;try{j=JSON.parse(r.stdout)}catch(e){die("CAUSE=gate-json-unparseable exit="+r.status+" stdout="+JSON.stringify(String(r.stdout).slice(0,200)))}const reason=String(j.reason||"");const m=reason.match(/^acceptance failed \(exit [^)]*\) — (.*)$/);if(!m){die("CAUSE=reason-shape-changed reason="+JSON.stringify(reason))}const real=m[1].trim();const files=fs.readdirSync("goals").filter(f=>/^AC-241-.*\.md$/.test(f));if(files.length!==1){die("CAUSE=AC-241-record-not-uniquely-locatable files="+JSON.stringify(files))}const src=fs.readFileSync(path.join("goals",files[0]),"utf8");const t=src.match(/T\s*=\s*"([^"]+)"/);if(!t){die("CAUSE=AC-241-bare-reason-constant-gone — its detector shape changed; re-scope AC-243")}if(real!==t[1]){die("CAUSE=constant-diverged — AC-241 T="+JSON.stringify(t[1])+" runner="+JSON.stringify(real))}try{fs.rmSync(d,{recursive:true,force:true})}catch(e){}process.exit(0)'
+```
+
+gate 读数（exit 0）：
+
+```
+$ node --no-warnings --experimental-strip-types packages/quay/src/goal-store.ts gate AC-243 --root . --json
+$ echo $?
+0
+{"id":"AC-243","verdict":"pass","cause":null,"reason":"acceptance passed (exit 0)","timeoutMs":60000}
+```
+
+### AC6 — 防复发检查存在且有效（生产绿 / 负控制红）
+
+生产 `goals/`：
+
+```
+$ node --test packages/quay/test/goal-criterion-import-specifiers-resolve.test.mjs
+✔ every relative import/require specifier in a live goal criterion resolves on disk
+✔ negative control: a criterion naming a removed module is reported as file → specifier
+✔ superseded / retired records are skipped (their criteria are no longer re-verified)
+✔ non-relative specifiers (node:fs, package names) are not file-path claims and are ignored
+ℹ tests 4 / pass 4 / fail 0
+$ echo $?
+0
+```
+
+负控制（tmp goals，⛔ 未改生产 `goals/`）：
+
+```
+$ QUAY_GOALS_ROOT=<tmp> node --test packages/quay/test/goal-criterion-import-specifiers-resolve.test.mjs
+$ echo $?
+1
+  AC-fixture.md → ./packages/quay/src/__nope__.ts
+```
+
+### AC7 — 负控制证明判据能因「保证本身」变红（真载体，cp 备份/恢复）
+
+```
+$ md5sum packages/quay/src/gate/shared/acceptance-runner.ts   # 改前
+3c676e9264868513f7580db8ad3718b3
+# 临时把 withFailureOutput 改回只返回 prefix（正常失败分支不再折叠 stderr/stdout）
+$ /bin/sh -c "<criterion AC-237>"; echo $?
+1
+stderr: CAUSE=reason-lost-criterion-stderr reason="acceptance failed (exit 1)"
+# 同时 goal gate 面的读数：verdict=fail, reason="acceptance failed (exit 1)"
+$ cp <backup> packages/quay/src/gate/shared/acceptance-runner.ts
+$ md5sum packages/quay/src/gate/shared/acceptance-runner.ts   # 恢复后
+3c676e9264868513f7580db8ad3718b3
+$ /bin/sh -c "<criterion AC-237>"; echo $?
+0
+```
+
+（⛔ 用 `cp` 恢复，未用 `git checkout`；`git status --short` 恢复后无该文件改动。）
+
+### AC8 — 落盘文本可被真接受侧（/bin/sh = dash）执行
+
+```
+$ ls -l /bin/sh
+lrwxrwxrwx 1 root root 4 Mar 31  2024 /bin/sh -> dash
+AC-237 sh -n EXIT=0
+AC-237 sh -c EXIT=0
+AC-243 sh -n EXIT=0
+AC-243 sh -c EXIT=0
+```
+
+### AC9 — 同族普查（硬规则 5b，枚举不是抽查）
+
+枚举命令：对 `quay goal list --root <snapshot>` 的每条记录取 `criterion`，用
+`/(?:import|require)\s*\(\s*\\?(["'])((?:\.{1,2}\/)[^"'\n]*?)\\?\1\s*\)/g` 提取相对
+specifier，再 `fs.existsSync(path.resolve(repoRoot, specifier))` 逐个判定。
+
+```
+PRE-FIX（goals 快照 dd013cf7b^）: total relative import specifiers = 16 ; missing = 4
+  AC-147 -> ./plugin/scripts/manager-liveness-independent-check.ts [status=superseded]
+  AC-149 -> ./plugin/scripts/session-retirement-check.ts [status=superseded]
+  AC-237 -> ./packages/quay/src/gate/acceptance-runner.ts [status=achieved]
+  AC-243 -> ./packages/quay/src/gate/acceptance-runner.ts [status=achieved]
+
+POST-FIX（本 worktree）: total relative import specifiers = 14 ; missing = 2
+  AC-147 -> ./plugin/scripts/manager-liveness-independent-check.ts [status=superseded]
+  AC-149 -> ./plugin/scripts/session-retirement-check.ts [status=superseded]
+```
+
+AC-147、AC-149 于 2026-09-12 已显式处置为 `superseded` ⇒ 出域，不被防复发测试计入。
+
+### AC10 — schema
+
+```
+$ node plugin/scripts/task-schema-check.ts tasks/gap-ac237-criterion-stale-acceptance-runner-moved.md
+N/A legacy (no schema marker): tasks/gap-ac237-criterion-stale-acceptance-runner-moved.md
+1 total, 0 pass, 1 N/A-legacy, 0 fail
+$ echo $?
+0
+```
+
+### 防复发测试的覆盖边界（硬规则 3b，如实写明）
+
+只覆盖 `criterion` 字段里 `import(...)` / `require(...)` 的 `./`、`../` 字面量；
+不覆盖 `grep`/`-e`/shell 重定向、`open(...)` 里的路径、动态拼接的 specifier、
+包名（`node:fs`、`yaml`）以及静态 `import … from "…"`；`[ ! -e … ]` 这类
+「要求不存在」的断言不会被误报。
+
+### 生产载体读数（Plan 5 — landing 之后，本 worker 不代填）
+
+本任务的工作止于把上述改动交给 fan-in；`AC-237/AC-243` 从 fail/not-evaluated 翻 pass 的
+`.quay/goal-round.jsonl` 轮次由 goal-driver 在**落地之后**的下一轮独立记录，并要求该轮
+`evidence.at` 晚于落地时刻。本 session 结构性无法取得那一条读数，⛔ 不以本地 gate 通过冒充。
