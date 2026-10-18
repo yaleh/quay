@@ -280,11 +280,3 @@ $ echo $?
 本任务的工作止于把上述改动交给 fan-in；`AC-237/AC-243` 从 fail/not-evaluated 翻 pass 的
 `.quay/goal-round.jsonl` 轮次由 goal-driver 在**落地之后**的下一轮独立记录，并要求该轮
 `evidence.at` 晚于落地时刻。本 session 结构性无法取得那一条读数，⛔ 不以本地 gate 通过冒充。
-
-## Blocker
-
-**2026-10-18T02:33:00.885Z — worker 未落地（exited-not-landed）**
-
-- 未落地原因：step=suite: AssertionError [ERR_ASSERTION]: fresh welcome drive failed (exit 1) — the clear loop must be SKIPPED: [baseline A/B: HARD RED (task-introduced-red) — the task's red set is NOT a subset of the develop baseline red set: added=plugin/test/send-keys-reliable.test.mjs,plugin/test/full-suite-runner-cgroup.test.mjs changed=-]
-- run_id：wk-prod-anchor
-- session_id：0fdeecdd-78f0-4ea2-8989-f1be144f70fa
