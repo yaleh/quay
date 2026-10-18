@@ -52,10 +52,10 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假·SCC 断）fresh analyze 后 `moduleGraph.cycles` 中**不存在同时含 `""` 与任意 `gate*` 成员的 SCC**（根环断开；当前 5 元环含二者，故真能取假）。仍含即假。
-- [ ] AC2（负控制）恢复一条 goal-store→gate 或 gate→goal-store 的边 ⇒ 根环重现，证明判据能取假。
-- [ ] AC3（无行为回归）`bash scripts/test.sh --for-task <本任务id> --allow-thin` 绿（gate/goal-store/cli/mcp-handlers 消费端不破）。
-- [ ] AC4（范围诚实）若 `Task` type-only 边因全局 ABI 无法完全下沉（或任一残余边），在 `## Evidence` 如实点名残余边与原因，不冒充「全断干净」。
+- [x] AC1（能取假·SCC 断）fresh analyze 后 `moduleGraph.cycles` 中**不存在同时含 `""` 与任意 `gate*` 成员的 SCC**（根环断开；当前 5 元环含二者，故真能取假）。仍含即假。
+- [x] AC2（负控制）恢复一条 goal-store→gate 或 gate→goal-store 的边 ⇒ 根环重现，证明判据能取假。
+- [x] AC3（无行为回归）`bash scripts/test.sh --for-task <本任务id> --allow-thin` 绿（gate/goal-store/cli/mcp-handlers 消费端不破）。
+- [x] AC4（范围诚实）若 `Task` type-only 边因全局 ABI 无法完全下沉（或任一残余边），在 `## Evidence` 如实点名残余边与原因，不冒充「全断干净」。
 
 ## Definition of Done
 
@@ -65,28 +65,40 @@ extra:
 
 ### 实现形状（方向 A，含 Plan 未列但传递闭包必需的下沉）
 
-`core/` 是 gate **之下的层**。Plan 只列了 8 个文件，但实测传递闭包还必需 6 个叶模块——否则 `core/` 自己会 import src root，`gate→core→""→gate` 立刻成环（这正是 AC1 要求取假的那个量）：
+`core/` 是 gate **之下的层**。Plan 只列了 8 个文件，但实测传递闭包还必需 7 个叶模块——否则 `core/` 自己会 import src root，`gate→core→""→gate` 立刻成环（这正是 AC1 要求取假的那个量）：
 
 - Plan 明列的：`types.ts`(原 `abi.ts`)、`acceptance-runner.ts`(Plan 写作 `acceptance-verdict.ts`，实际整体搬 runner——goal-store 的 `runAcceptance` 也来自它)、`criterion-capability.ts`、`goal-store.ts`、`adr-store.ts`、`document-store.ts`、`contract-validator.ts`、`config.ts`。
 - 传递闭包补的：`frontmatter-store-base.ts`、`store-commit.ts`、`criterion-fidelity.ts`、`plugin-root.ts`、`branch-model.ts`、`worktree-namespace.ts`、`gate-event-store.ts`。
 
 `gate-event-store.ts` 与 `plugin-root.ts` 不在 Plan 里，但是硬约束：
 - goal-store 在两条路径上 **dynamic import** `./gate/gate-event-store.ts`（`:2484`/`:3866`）——archguard 计 dynamic import 边，不搬就是 `core→gate`。
-- goal-store 的 `fidelitySettingsArg` 用 `resolvePluginRoot()`；`plugin-root.ts` 本身是零依赖叶（只 import `node:*`，walk-up 无深度常数），下沉后 `moduleDir()` 只多上溯一层，行为不变（`plugin-root.test.mjs` 的 24 条路径用例全绿，含 worktree 重定位与 installed-layout 两形态）。
+- goal-store 的 `fidelitySettingsArg` 用 `resolvePluginRoot()`；`plugin-root.ts` 本身是零依赖叶（只 import `node:*`，walk-up 无深度常数），下沉后 `moduleDir()` 只多上溯一层，行为不变（`plugin-root.test.mjs` 全绿，含 worktree 重定位与 installed-layout 两形态）。该文件头部已加「⛔ 不要引入固定 `..` 层数」的 LOCATION SENSITIVITY 注记。
 
-旧路径全部保留 **forwarding re-export**（`src/abi.ts`、`src/goal-store.ts`、`src/config.ts`、…、`gate/shared/acceptance-runner.ts`、`gate/criterion-capability.ts`、`gate/gate-event-store.ts`）。理由：这些旧路径是测试、`plugin/scripts/*`、`quay-native`、`goals/AC-*` 判据的**现行 import 面**（`packages/quay/src/goal-store.ts` 尤其被 20+ 条 goal 判据当 CLI 直接 spawn）。`goal-store` 的 `isMain` 守卫是 `process.argv[1].endsWith("goal-store.ts")`，经 shim 运行时仍然命中，CLI 方言与退出码逐字不变。
+旧路径全部保留 **forwarding re-export**（`src/abi.ts`、`src/goal-store.ts`、`src/config.ts`、…、`gate/shared/acceptance-runner.ts`、`gate/criterion-capability.ts`、`gate/gate-event-store.ts`）。理由：这些旧路径是测试、`plugin/scripts/*`、`quay-native`、`goals/AC-*` 判据的**现行 import 面**（`packages/quay/src/goal-store.ts` 尤其被 20+ 条 goal 判据当 CLI 直接 spawn）。`goal-store` 的 `isMain` 守卫是 `process.argv[1].endsWith("goal-store.ts")`，经 shim 运行时仍然命中，CLI 方言与退出码逐字不变（实测 `node packages/quay/src/goal-store.ts list` exit 0）。
 
-### AC1 — fresh archguard analyze（scope `000c1e20`，`sources=["packages/quay/src"]`）
+### AC1 — fresh archguard analyze（baseline 与 after 各取一次真实读数）
+
+参数两次相同：`sources=["packages/quay/src"]`, `lang=typescript`, `format=json`。
+
+**baseline**：detached worktree @ develop `b3ec1f4c8`（本任务起点），scope `6c4aa65f`：
 
 ```
-before（本任务的 develop 起点，5 元环）：
-  cycles = [["gate/config","gate/factories","gate/shared","gate",""]]
+cycles = [{"modules":["gate/config","gate/factories","gate/shared","gate",""],"severity":"error"}]
+gate→""（4 条目录边）：gate(TASK_STATUS,Task,TASK_STATUSES,TaskStatus) · gate/config(findConfig) ·
+    gate/shared(Task) · gate/factories(createAdrStore,Task,createDocumentStore,validateContracts,createGoalStore)
+""→gate（2 条目录边）：→gate(listGates,appendGateEvent,queryGateEvents,judgeCriterionCapability,…,
+    runCompleteOutOfBand) · →gate/shared(runAcceptance,verdictFromAcceptance,FAILURE_REASON_MAX_CHARS)
+```
 
-after（本 worktree，fresh analyze）：
-  moduleGraph.cycles = []                      ← 0 个 SCC（不只是「不含 gate」）
-  gate → "" 的目录边数 = 0                     ← 断的就是这半边
-  ""  → gate 的目录边数 = 1（importedNames: listGates, runGate, resolveGateLogPath,
-       runGateLogQuery, runComplete, runAdjudicate, runPromote, runRetreat, runCompleteOutOfBand）
+**after**：本 worktree，scope `000c1e20`：
+
+```
+cycles = []                     ← 0 个 SCC（不只是「不含 gate」）
+gate→"" = []                    ← 断的就是这半边
+""→gate = 1 条（listGates, runGate, resolveGateLogPath, runGateLogQuery, runComplete,
+                runAdjudicate, runPromote, runRetreat, runCompleteOutOfBand）
+core 的出/入边全单向：""→core · gate→core · gate/config→core · gate/factories→core · gate/shared→core；
+    core→kernel / node:* / yaml —— core 无一条到 "" 或 gate/* 的边
 ```
 
 `""→gate` **保留且只保留单向**：root 的 `config-validate.ts` / `mcp-handlers.ts` 仍是 gate 的宿主（Plan 第 3 条），它们 import gate 不构成环——因为 gate 已无任何回边。
@@ -97,21 +109,34 @@ after（本 worktree，fresh analyze）：
 
 ```
 cycles = [{"modules":["gate/config","gate/factories","gate",""],"severity":"error"}]
-gate → "" = [["gate/factories",["createGoalStore"]]]
+gate→"" = [["gate/factories",["createGoalStore"]]]
 ```
 
-⇒ 判据能取假。复原后重跑：`cycles = []`、`gate → "" = 0`。
+⇒ 判据能取假。复原后重跑：`cycles = []`、`gate→"" = []`。
+
+### AC3 — 无行为回归
+
+```
+bash scripts/test.sh --for-task gap-src-root-gate-cycle-break --allow-thin
+  ℹ pass 383 · ℹ fail 0 · ℹ cancelled 0 · SCOPED_GATE_EXIT=0
+```
+
+另跑（不在 scoped 选中集合、但会读被搬动的底层）：`plugin/test/{plugin-packaging,
+installed-layout-sibling-resolvability,enum-surface-parity-check,goal-invariants-standing,
+criterion-fidelity-default-wiring}.test.mjs` ⇒ 80 tests / 0 fail。
+`tsc --noEmit` 对 `packages/quay` 与 `packages/quay-native` 均 0 error。
 
 ### AC4 — 残余边（如实）
 
 - **目录级残余边 0 条**（`gate→""`），故「全断干净」在本口径下成立，不是冒充。
-- **文件级新指向**：`core/` 内 14 个文件是原 root 文件的移动（`git mv`，历史连续），root 与 gate/shared/gate 保留了 13 个 forwarding shim。这些 shim 是**显式声明**的兼容面，不是隐藏的第二实现（每个 shim 只有一行 `export *`）。
-- **Plan 与实现的命名差异**：Plan 写 `core/acceptance-verdict.ts`，实现是 `core/acceptance-runner.ts`（整体搬运，因为它同时提供 `runAcceptance`；拆一个只含 verdict 映射的文件会把一次搬迁拆成两处实现面）。
+- **文件级**：`core/` 内 15 个文件是原 root/gate 文件的 `git mv`（历史连续）；root 与 gate/ 保留 7+3 个 forwarding shim。每个 shim 只有一行 `export *`，是显式声明的兼容面，不是第二实现。
+- **Plan 与实现的命名差异**：Plan 写 `core/acceptance-verdict.ts`，实现是 `core/acceptance-runner.ts`（整体搬运，因为它同时提供 `runAcceptance`）。
+- **唯一未下沉的 root 侧 gate 消费者**：`config-validate.ts` / `mcp-handlers.ts`（gate 的宿主面，按 Plan 第 3 条保留）——它们是 `""→gate` 单向后继，不构成 SCC。
 
 ### 连带改动的理由（都在 Touches 内）
 
-- `plugin/scripts/enum-surface-parity-check.ts`：从 `abi.ts`/`adr-store.ts`/`document-store.ts`/`goal-store.ts` **读数组字面量**做真源比对——读 shim 会「读不到」而非「匹配」，必须指向 `core/`（否则 checker 变 NOT-EVALUATED/红）。
-- `plugin/scripts/worktree-namespace-literal-check.ts` + 其 mutation case：`RESOLVER_REL` 是「唯一允许拼字面量的文件」，随实现移到 `core/worktree-namespace.ts`；mutation case 的 fixture 布局同步（否则 case 读不到声明 ⇒ INFRASTRUCTURE exit 2）。
+- `plugin/scripts/enum-surface-parity-check.ts`：从 `abi.ts`/`adr-store.ts`/`document-store.ts`/`goal-store.ts` **读数组字面量**做真源比对——读 shim 会「读不到」而非「匹配」，必须指向 `core/`。
+- `plugin/scripts/worktree-namespace-literal-check.ts` + 其 mutation case：`RESOLVER_REL` 是「唯一允许拼字面量的文件」，随实现移到 `core/worktree-namespace.ts`；mutation case 的 fixture 布局同步（否则 case 读不到声明 ⇒ INFRASTRUCTURE exit 2）；单独跑该 case ⇒ exit 0。
 - `plugin/scripts/runner-static-gate.ts`：`@static-object` 登记表跟随 checker 的实际读取面。
 - `packages/quay/test/{goal-store,plugin-root,ac197,goal-criterion-timeout-resolution}.test.mjs`：四个文件**按源码路径读取/拷贝**（不是 import），路径必须跟随实现；`goal-criterion-timeout-resolution` 的 walk 同时加上 `core/`，否则「60000 只在一处」的守卫在实现搬家后变成只查 shim 的空转。
 - `goals/AC-197-*.md`：其 `five-kind-wiring` 判据块逐字点名 4 个 store 文件路径，fixture 从该 goal 文件**逐字抽取**判据后执行——路径不改则判据对 shim 求值（恒假），改了才是对实现求值。
