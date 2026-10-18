@@ -31,12 +31,20 @@ Both are the identical three-line sh/ts comment-mask dispatcher, and deletion-cl
 extract
 
 ## AC
-- [ ] `.quay/routine-findings.jsonl` 中 finding `maskfor-dispatcher-duplicate`（routine `semantic-dedup-scan`，runId `semantic-dedup-scan-1792287725786`）所描述的问题被复核并处置
-- [ ] 处置结论可核：要么修掉，要么写明「已有机制在管、失败在哪一步」，⛔ 不以「已注意到」结案
+- [x] `.quay/routine-findings.jsonl` 中 finding `maskfor-dispatcher-duplicate`（routine `semantic-dedup-scan`，runId `semantic-dedup-scan-1792287725786`）所描述的问题被复核并处置
+- [x] 处置结论可核：要么修掉，要么写明「已有机制在管、失败在哪一步」，⛔ 不以「已注意到」结案
 
 ## DoD
 - [ ] 上面的判据实跑通过
 - [ ] ⛔ 探针只立案不执行：本任务若需要跑产出者/修复，由派发链执行，⛔ 不由例程代跑
+
+## Evidence
+处置 = 修掉（extract to single source）：
+
+- `plugin/scripts/identity-replication-check.ts` 导出 `maskFor`（本模块即 `tsCommentMask` / `shCommentMask` 的拥有者，deletion-closure-check 本就从此处 import 两个 mask）。
+- `plugin/scripts/deletion-closure-check.ts` 删除本地三行副本，改为 `import { maskFor } from "./identity-replication-check.ts"`。
+- 机械复核：对 `plugin/scripts/*.{ts,mjs,js}` 全部函数体做「去注释+空白归一化」后按 body digest 计数，`maskFor` 的函数体在归一化后**只出现 1 次**（identity-replication-check.ts），修复前为 2 次。
+- 回归：`node --no-warnings --experimental-strip-types --test plugin/test/identity-replication-check.test.mjs plugin/test/deletion-closure-check.test.mjs` → 40 pass / 0 fail；两个 CLI 的 `--help` 冒烟通过（import 解析正常）。
 
 ## Touches
 - `plugin/scripts/deletion-closure-check.ts`
