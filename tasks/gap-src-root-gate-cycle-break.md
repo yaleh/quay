@@ -126,6 +126,27 @@ installed-layout-sibling-resolvability,enum-surface-parity-check,goal-invariants
 criterion-fidelity-default-wiring}.test.mjs` ⇒ 80 tests / 0 fail。
 `tsc --noEmit` 对 `packages/quay` 与 `packages/quay-native` 均 0 error。
 
+### AC3 补 — 上一轮全量 suite 的 3 个 task-introduced red（2026-10-18 修复）
+
+上一轮 fan-in 的 delta A/B 判定 HARD RED：`added=plugin/test/worker-driver.test.mjs,
+packages/quay/test/kernel-load-avg.test.mjs,packages/quay/test/kernel-env-merge.test.mjs`。三个都是
+「测试按源码路径点名实现」的现行 import/读取面，实现搬家后必须跟随（与本任务已改的 4 个测试同属一类，
+此前漏列）：
+
+- `plugin/test/worker-driver.test.mjs`：AC2 shipped 负控制把 `gate/gate-event-store.ts` 拷进打平布局后
+  动态 import；该路径现在是 forwarding shim（`export * from "../core/..."`），夹具里没有 `src/core/` ⇒
+  解析失败。修法：夹具同时落 `src/gate/gate-event-store.ts`（shim）与 `src/core/gate-event-store.ts`
+  （实现），断言不变——测的仍是 `resolveKernelSrcModule` 的 `<包根>/src` 回退。
+- `packages/quay/test/kernel-load-avg.test.mjs`：② 的 product consumer 由
+  `gate/shared/acceptance-runner.ts`（`../../kernel/load-avg.ts`）改为
+  `core/acceptance-runner.ts`（`../kernel/load-avg.ts`，实测第 38 行）；`FORMER_COPIES` 同步指向新家。
+- `packages/quay/test/kernel-env-merge.test.mjs`：② 由 `src/goal-store.ts`（`./kernel/env-merge.ts`）改为
+  `core/goal-store.ts`（`../kernel/env-merge.ts`，实测第 108 行）；`FORMER_COPIES` 同步指向新家。
+
+三个文件单跑均 0 fail（11 + 1 tests）。`plugin/test/capability-catalog.test.mjs` 的 cadence 红在 develop
+基线上同样存在（`develop:plugin/scripts/capability-catalog-declarations.json:755` 逐字相同），是 develop-wide
+既有红，不是本任务引入。
+
 ### AC4 — 残余边（如实）
 
 - **目录级残余边 0 条**（`gate→""`），故「全断干净」在本口径下成立，不是冒充。
@@ -139,6 +160,7 @@ criterion-fidelity-default-wiring}.test.mjs` ⇒ 80 tests / 0 fail。
 - `plugin/scripts/worktree-namespace-literal-check.ts` + 其 mutation case：`RESOLVER_REL` 是「唯一允许拼字面量的文件」，随实现移到 `core/worktree-namespace.ts`；mutation case 的 fixture 布局同步（否则 case 读不到声明 ⇒ INFRASTRUCTURE exit 2）；单独跑该 case ⇒ exit 0。
 - `plugin/scripts/runner-static-gate.ts`：`@static-object` 登记表跟随 checker 的实际读取面。
 - `packages/quay/test/{goal-store,plugin-root,ac197,goal-criterion-timeout-resolution}.test.mjs`：四个文件**按源码路径读取/拷贝**（不是 import），路径必须跟随实现；`goal-criterion-timeout-resolution` 的 walk 同时加上 `core/`，否则「60000 只在一处」的守卫在实现搬家后变成只查 shim 的空转。
+- `packages/quay/test/{kernel-load-avg,kernel-env-merge}.test.mjs` + `plugin/test/worker-driver.test.mjs`：同上——按源码路径断言 import/拷贝，实现搬家后必须跟随（见「AC3 补」）。
 - `goals/AC-197-*.md`：其 `five-kind-wiring` 判据块逐字点名 4 个 store 文件路径，fixture 从该 goal 文件**逐字抽取**判据后执行——路径不改则判据对 shim 求值（恒假），改了才是对实现求值。
 
 ## Touches
@@ -196,6 +218,9 @@ criterion-fidelity-default-wiring}.test.mjs` ⇒ 80 tests / 0 fail。
 - packages/quay/test/plugin-root.test.mjs
 - packages/quay/test/ac197-criterion-five-kind-wiring.test.mjs
 - packages/quay/test/goal-criterion-timeout-resolution.test.mjs
+- packages/quay/test/kernel-load-avg.test.mjs
+- packages/quay/test/kernel-env-merge.test.mjs
+- plugin/test/worker-driver.test.mjs
 - goals/AC-197-kind-tasks-goals-meta-adr-docs-managed-commitstorewrite-5.md
 - tasks/gap-src-root-gate-cycle-break.md
 
