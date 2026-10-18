@@ -74,15 +74,84 @@ if not ts or ts <= land: continue
 
 **E6. 载体与 bundle 的可达性**：`plugin/vendor/quay/dist/quay.js` 是 gitignored 构建产物（`.gitignore:4 dist/`），真实 task worktree 由 `dispatch-worktree-setup.sh` 的 worktree-include 步骤provision（脚本第 28 行注明「config.yml + vendor dist」）；`.quay/goal-round.jsonl` 由 `.gitignore:229` 忽略，worktree 内需只读软链宿主载体（见 AC2）。
 
+### Worker 轮实测（2026-10-18，实现落地后）
+
+**W1. AC2 —— 修后判据在真实生产载体上 exit 0**：任务 worktree 内
+`ln -s /data/home/yale/work/quay/.quay/goal-round.jsonl .quay/goal-round.jsonl`（只读软链，未复制），
+逐字跑 `goals/AC-262-*.md` frontmatter 的 criterion：
+
+```
+land = 2026-10-18T22:01:56+08:00   (git log -1 --format=%cI -- packages/quay/src/cli/goal.ts)
+CRITERION_EXIT=0
+stdout: (empty)
+stderr: (empty)
+seen = 11
+ok   = 11
+```
+
+（`seen`/`ok` 由同一谓词的只读探针从同一载体读出：落地后 11 轮，全部 goal-ring 非 failed。）
+
+**W2. AC3 —— 三态负对照（同一 criterion 文本，只替换 `.quay/goal-round.jsonl` 的指向）**：
+
+```
+=== AC3-1 post-landing ring=FAILED [1-failed.jsonl] exit=1 ===
+AC-262: carrier .quay/goal-round.jsonl holds 1 round(s) after the B2 landing commit (2026-10-18T22:01:56+08:00 = epoch 1792332116.000) and none carries a non-failed goal-ring (observed states, first 5: [['failed']]) => the ring is broken in production, which is the whole point of B2
+
+=== AC3-2 pre-landing only [2-prelanding.jsonl] exit=1 ===
+AC-262: carrier .quay/goal-round.jsonl holds 0 rounds after the B2 landing commit (2026-10-18T22:01:56+08:00 = epoch 1792332116.000) => the goal driver recorded nothing in that window; NOT-EVALUATED for the ring (nothing observed is not 'the ring is broken')
+
+=== AC3-3a ts == land 同一瞬时，写成 Z [3a-boundary-exact.jsonl] exit=1 ===
+AC-262: carrier .quay/goal-round.jsonl holds 0 rounds after the B2 landing commit (...) => the goal driver recorded nothing in that window; NOT-EVALUATED for the ring (nothing observed is not 'the ring is broken')
+
+=== AC3-3b ts = land + 1ms [3b-boundary-after.jsonl] exit=0 ===
+(stdout/stderr empty)
+
+=== AC3-3c Z post-landing verified，修后 criterion [3c-z-post.jsonl] exit=0 ===
+(stdout/stderr empty)
+
+=== AC3-3c 同一个 fixture，旧 develop criterion（字典序）[3c-z-post.jsonl] exit=1 ===
+AC-262: carrier .quay/goal-round.jsonl holds 0 rounds after the B2 landing commit (2026-10-18T22:01:56+08:00) and none with a non-failed goal-ring => the ring still breaks in production, which is the whole point of B2
+```
+
+末两段是**同一个 fixture、同一份载体、只差判据文本**：旧判据读成「0 轮 ⇒ ring 坏了」，新判据读成「有轮次且全绿」。⇒ 修的是读取谓词，不是放宽阈值（硬规则 4 / 4c）。
+
+**W3. AC5 —— 防复发检查两次读数**：
+- 当前 `goals/`：`node --test packages/quay/test/goal-criterion-import-specifiers-resolve.test.mjs` ⇒ `tests 9 / pass 9 / fail 0`；其中
+  `no live goal criterion compares a git %cI timestamp with a carrier ts lexicographically` ✔（0 命中）。
+- `QUAY_GOALS_ROOT=/tmp/ac262-scratch/goals-prefix`（只放 develop 版本的 AC-262 修复前 criterion）⇒ **exit 1**，报：
+
+```
+  goal criterion(s) compare two ISO-8601 dialects as strings — ...
+  AC-262.md:48 → if not ts or ts <= land: continue
+```
+
+  红且点名文件与行；负对照不是空转。
+
+**W4. AC6 —— scoped 门**：`bash scripts/test.sh --for-task gap-ac262-criterion-tz-blind-timestamp-comparison --allow-thin` ⇒ `SCOPED_GATE_EXIT=0`，`ℹ tests 9 / pass 9 / fail 0`（本任务测试文件被收集并绿）。
+`git diff --stat develop...HEAD -- packages/quay/src` 输出 0 行 ⇒ `packages/quay/src/**` 零改动；改动面 = 判据文件 + 该测试文件（2 files, +302/−4）。
+anti-drift：`ANTI-DRIFT OK: task gap-ac262-criterion-tz-blind-timestamp-comparison — 2 actual file(s), all within declared Touches (3 glob(s))`。
+
+**W5. AC7 —— 同族普查（新检查对全部 live goals）**：
+
+```
+live criteria scanned: 211 | git-timestamp candidates: 3 | blind hits: 0
+out-of-scope records carrying a git-derived window (skipped):
+   AC-266-goal.md status=superseded has-lex
+   AC-267-goal.md status=superseded has-lex
+   AC-268-goal.md status=superseded has-lex
+```
+
+3 个 candidate 中：AC-262 已改为瞬时比较、AC-317 本来就归一化、AC-326 无 `ts`↔`land|since` 字典序比较；命中 **0**。AC-266/267/268 同形但 `status: superseded` ⇒ 不是漏修，是已退役。
+
 ## Acceptance Criteria
 
-- [ ] AC1：判据第三支改为**瞬时比较**——`ts` 与 `land` 都经 `datetime.fromisoformat(...replace("Z","+00:00"))` 解析后比较 `.timestamp()`（或语义等价的实现）；`land` 解析失败必须 fail-closed（点名原值并 exit 1），⛔ 不得当作「无窗口」静默跳过。判据语义不变：仍要求「存在 ts 晚于落地时刻的轮次 ∧ 该轮 goal-ring fact 无 failed」，且 `git log` 当场派生 `land` 的写法保留（⛔ 不写死 sha）。
-- [ ] AC2：判据在**真实生产载体**上 exit 0——在任务 worktree 内 `ln -s /data/home/yale/work/quay/.quay/goal-round.jsonl .quay/goal-round.jsonl`（只读、不复制），逐字复跑 `goals/AC-262-*.md` frontmatter 的 criterion ⇒ exit 0；贴 `land`、`seen`、`ok` 三个读数与完整 stdout/stderr。
-- [ ] AC3：**可证伪负对照**（不是只跑绿）——用临时 fixture 载体喂同一判据逻辑，三种输入各取一次读数：①post-landing 轮的 `goal-ring.state = "failed"` ⇒ exit 1 且诊断点名 failed；②只有 pre-landing 轮 ⇒ exit 1 且诊断说明「0 轮（driver 未跑）而不是 ring 坏了」；③UTC `Z` 的 post-landing 轮与 `+08:00` 的 land 表示同一瞬时边界 ⇒ 归一化后正确包含/排除。三份输出原文进 Evidence。
-- [ ] AC4：诊断信息区分两种成因——`seen == 0` 与 `seen > 0 但 ok == 0` 输出不同句式（当前实现无论哪种都写 "none with a non-failed goal-ring"，把「driver 没跑」误报成「ring 坏了」，硬规则 3b）。
-- [ ] AC5：**防复发检查**——在 `packages/quay/test/goal-criterion-import-specifiers-resolve.test.mjs` 增加第二类检查：扫描全部非 superseded/retired 判据，若含 `%cI`/`git log --format` 且存在 `ts`↔`land|since` 的字典序比较、却没有时区归一化（`fromisoformat`/`Date.parse`/`getTime()`/`timestamp()`），则红并点名文件与行。用 `QUAY_GOALS_ROOT` 指向含 AC-262 修复前 criterion 的 fixture ⇒ 必红且点名；当前 `goals/` ⇒ 绿（0 命中）。两次读数贴 Evidence。⚠️ 必须跳过 superseded/retired（AC-266/267/268 是同一代码形态但已退役）。
-- [ ] AC6：`bash scripts/test.sh --for-task gap-ac262-criterion-tz-blind-timestamp-comparison --allow-thin` 绿（贴 `SCOPED_GATE_EXIT` 与测试计数）；`packages/quay/src/**` 零改动（本任务只改判据文本 + 该测试文件 + 任务体）。
-- [ ] AC7：同族普查读数进 Evidence：对全部 live `goals/*.md` 跑新检查，命中 = 0；并列出 AC-266/AC-267/AC-268 的 `status: superseded` 作为「不是漏修，是已退役」的证据。
+- [x] AC1：判据第三支改为**瞬时比较**——`ts` 与 `land` 都经 `datetime.fromisoformat(...replace("Z","+00:00"))` 解析后比较 `.timestamp()`（或语义等价的实现）；`land` 解析失败必须 fail-closed（点名原值并 exit 1），⛔ 不得当作「无窗口」静默跳过。判据语义不变：仍要求「存在 ts 晚于落地时刻的轮次 ∧ 该轮 goal-ring fact 无 failed」，且 `git log` 当场派生 `land` 的写法保留（⛔ 不写死 sha）。
+- [x] AC2：判据在**真实生产载体**上 exit 0——在任务 worktree 内 `ln -s /data/home/yale/work/quay/.quay/goal-round.jsonl .quay/goal-round.jsonl`（只读、不复制），逐字复跑 `goals/AC-262-*.md` frontmatter 的 criterion ⇒ exit 0；贴 `land`、`seen`、`ok` 三个读数与完整 stdout/stderr。
+- [x] AC3：**可证伪负对照**（不是只跑绿）——用临时 fixture 载体喂同一判据逻辑，三种输入各取一次读数：①post-landing 轮的 `goal-ring.state = "failed"` ⇒ exit 1 且诊断点名 failed；②只有 pre-landing 轮 ⇒ exit 1 且诊断说明「0 轮（driver 未跑）而不是 ring 坏了」；③UTC `Z` 的 post-landing 轮与 `+08:00` 的 land 表示同一瞬时边界 ⇒ 归一化后正确包含/排除。三份输出原文进 Evidence。
+- [x] AC4：诊断信息区分两种成因——`seen == 0` 与 `seen > 0 但 ok == 0` 输出不同句式（当前实现无论哪种都写 "none with a non-failed goal-ring"，把「driver 没跑」误报成「ring 坏了」，硬规则 3b）。
+- [x] AC5：**防复发检查**——在 `packages/quay/test/goal-criterion-import-specifiers-resolve.test.mjs` 增加第二类检查：扫描全部非 superseded/retired 判据，若含 `%cI`/`git log --format` 且存在 `ts`↔`land|since` 的字典序比较、却没有时区归一化（`fromisoformat`/`Date.parse`/`getTime()`/`timestamp()`），则红并点名文件与行。用 `QUAY_GOALS_ROOT` 指向含 AC-262 修复前 criterion 的 fixture ⇒ 必红且点名；当前 `goals/` ⇒ 绿（0 命中）。两次读数贴 Evidence。⚠️ 必须跳过 superseded/retired（AC-266/267/268 是同一代码形态但已退役）。
+- [x] AC6：`bash scripts/test.sh --for-task gap-ac262-criterion-tz-blind-timestamp-comparison --allow-thin` 绿（贴 `SCOPED_GATE_EXIT` 与测试计数）；`packages/quay/src/**` 零改动（本任务只改判据文本 + 该测试文件 + 任务体）。
+- [x] AC7：同族普查读数进 Evidence：对全部 live `goals/*.md` 跑新检查，命中 = 0；并列出 AC-266/AC-267/AC-268 的 `status: superseded` 作为「不是漏修，是已退役」的证据。
 
 ## Definition of Done
 
@@ -100,3 +169,11 @@ if not ts or ts <= land: continue
 - goals/AC-262-缺口b2-quay-goal-gate-check-batch-落在-plugin-形态-cli-上-driver-不再.md
 - packages/quay/test/goal-criterion-import-specifiers-resolve.test.mjs
 - tasks/gap-ac262-criterion-tz-blind-timestamp-comparison.md
+
+## Blocker
+
+**2026-10-18T15:17:29.234Z — worker 未落地（exited-not-landed）**
+
+- 未落地原因：AC 未全勾（checked 0/7，剩余未勾 7）——续做只需验证并勾选 AC
+- run_id：wk-prod-anchor
+- session_id：88a098b0-b1b4-40f6-8d38-46c3e8e75baa
