@@ -90,12 +90,12 @@ COVERAGE BOUNDARY 里明确写了：**只覆盖 `import(...)` / `require(...)` �
 
 ## AC
 
-- [ ] AC-353 判据转绿：`node --no-warnings --experimental-strip-types packages/quay/src/goal-store.ts gate AC-353 --root . --json` 的 `verdict` 为 `pass`（exit 0；不是 exit 3 NOT-EVALUATED，也不是 exit 1 CAUSE=*）
-- [ ] 兄弟判据 AC-355 同步转绿：同形命令 `goal ... gate AC-355 --root . --json` 的 `verdict` 为 `pass`；两条判据承载同一 stale 字面量，不允许只修一处
-- [ ] 搬迁负对照实测：在 HEAD 上的临时 git worktree 中把 `packages/quay/src/gate/shared/acceptance-runner.ts` 移到 `packages/quay/src/gate/runner/acceptance-runner.ts` 并修正其 import 深度（不提交），在该 worktree 根运行 AC-353 判据仍为 `pass`；两条读数（原树 pass + 搬迁树 pass）贴进 Evidence
-- [ ] 复发检查落地：`packages/quay/test/goal-criterion-import-specifiers-resolve.test.mjs` 新增整 token `.ts` 路径字面量解析检查；对 `goals/*.md`（跳过 superseded/retired）全部判据绿，且负对照 fixture（`QUAY_GOALS_ROOT` 指向含缺失 `gate/acceptance-runner.ts` 的判据）必须红并点名该字面量
-- [ ] re-anchor 后的 AC-353 criterion 中不存在 `gate/shared/` 或 `gate/acceptance-runner.ts` 作为消费者路径断言；承载者由 `export function runAcceptance` 定位（`grep -n` 读数贴进 Evidence）
-- [ ] 生产代码未动：本任务 diff 只含 `goals/AC-353-*.md`、`goals/AC-355-*.md`、该测试文件与任务自身；`packages/quay/src/**` 零改动，AC-353 判据内 defOnly/类型/abi/out-of-scope 各检查全绿
+- [x] AC-353 判据转绿：`node --no-warnings --experimental-strip-types packages/quay/src/goal-store.ts gate AC-353 --root . --json` 的 `verdict` 为 `pass`（exit 0；不是 exit 3 NOT-EVALUATED，也不是 exit 1 CAUSE=*）
+- [x] 兄弟判据 AC-355 同步转绿：同形命令 `goal ... gate AC-355 --root . --json` 的 `verdict` 为 `pass`；两条判据承载同一 stale 字面量，不允许只修一处
+- [x] 搬迁负对照实测：在 HEAD 上的临时 git worktree 中把 `packages/quay/src/gate/shared/acceptance-runner.ts` 移到 `packages/quay/src/gate/runner/acceptance-runner.ts` 并修正其 import 深度（不提交），在该 worktree 根运行 AC-353 判据仍为 `pass`；两条读数（原树 pass + 搬迁树 pass）贴进 Evidence
+- [x] 复发检查落地：`packages/quay/test/goal-criterion-import-specifiers-resolve.test.mjs` 新增整 token `.ts` 路径字面量解析检查；对 `goals/*.md`（跳过 superseded/retired）全部判据绿，且负对照 fixture（`QUAY_GOALS_ROOT` 指向含缺失 `gate/acceptance-runner.ts` 的判据）必须红并点名该字面量
+- [x] re-anchor 后的 AC-353 criterion 中不存在 `gate/shared/` 或 `gate/acceptance-runner.ts` 作为消费者路径断言；承载者由 `export function runAcceptance` 定位（`grep -n` 读数贴进 Evidence）
+- [x] 生产代码未动：本任务 diff 只含 `goals/AC-353-*.md`、`goals/AC-355-*.md`、该测试文件与任务自身；`packages/quay/src/**` 零改动，AC-353 判据内 defOnly/类型/abi/out-of-scope 各检查全绿
 
 ## DoD
 
@@ -109,3 +109,114 @@ COVERAGE BOUNDARY 里明确写了：**只覆盖 `import(...)` / `require(...)` �
 - `goals/AC-355-post-merge-生产验证-develop-尖端持有本刀全部结构改动-七个受影响测试文件回归全绿.md`
 - `packages/quay/test/goal-criterion-import-specifiers-resolve.test.mjs`
 - `tasks/gap-ac353-criterion-pins-moved-acceptance-runner-path.md`
+
+## Evidence
+
+任务分支 `task/gap-ac353-criterion-pins-moved-acceptance-runner-path`，worktree
+`/data/home/yale/work/quay-worktrees/gap-ac353-criterion-pins-moved-acceptance-runner-path`，
+读数时 HEAD = `4a74d7625`（已 merge develop `6eddb83` 之后）。
+
+### AC-1 / AC-2 — 两条判据转绿（`goal gate … --json` 原文）
+
+修复前（2026-10-18T03:51:32Z，同一 worktree、同一命令）：
+
+```
+{"id":"AC-353","verdict":"fail","reason":"acceptance failed (exit 1) — … ENOENT: no such file or directory, open 'packages/quay/src/gate/acceptance-runner.ts' …"}
+```
+
+修复后：
+
+```
+{"id":"AC-353","verdict":"pass","reason":"acceptance passed (exit 0)"}
+{"id":"AC-355","verdict":"pass","reason":"acceptance passed (exit 0)"}
+```
+
+（AC-355 的 `additive` 只跑 seven-test-file 段时读数亦为 `pass`；中间一次 `not-evaluated` 是判据第 14 行的
+「develop 尚未并入」守卫在 develop 前进后的正确读数，merge develop 后重跑即 `pass`——⛔ 不是把 exit 3
+当作通过。）
+
+### AC-3 — 搬迁负对照（真实 git worktree，不是读判据文本推断）
+
+- 搬迁树：`git worktree add --detach /tmp/ac353-reloc HEAD`；
+  `mv packages/quay/src/gate/shared/acceptance-runner.ts packages/quay/src/gate/runner/acceptance-runner.ts`；
+  8 处 importer 的 `shared/acceptance-runner.ts` → `runner/acceptance-runner.ts`；文件自身
+  `import type … from "./types.ts"` → `"../shared/types.ts"`（同一深度的 `../../kernel/*` 无需改）。
+  **未提交**。
+- 原树 `/data/home/yale/work/quay-worktrees/gap-ac353-…` 跑 re-anchor 后判据：
+  `PASS: kernel/gate-run-options.ts holds the single definitions of the 4 functions + 2 types; gate/config/utils.ts and gate/factories/loader.ts are both gone …` exit 0。
+- 搬迁树 `/tmp/ac353-reloc` 跑**同一**判据：同一 `PASS:` 行，exit 0。
+  ⇒ 目录怎么变（`shared/` → `runner/`）判据都自动跟着承载者走；旧判据在此树上必然 ENOENT。
+
+### AC-4 — 复发检查落地 + 红→绿两读数
+
+- 新提取器：`findUnresolvedCriterionPathLiterals`（criterion 内被引号包住的整 token `.ts` 路径字面量；
+  按 repo root 与 `packages/quay/src` 两个基址解析；跳过缺席断言行 `! -e` / `! -f` / `must be deleted` /
+  `must be removed` / `reappeared` / `still exists`；跳过转义引号内的片段与裸文件名）。
+  共享遍历抽成 `collectCriterionClaims`，与原有 `import(...)` 提取器同一份 goals 读取。
+- **泳道收集实测**：`bash scripts/test.sh --for-task gap-ac353-criterion-pins-moved-acceptance-runner-path --allow-thin`
+  exit 0，日志中该文件以 `+ packages/quay/test/goal-criterion-import-specifiers-resolve.test.mjs` 进入
+  scoped 运行集，并 9/9 `✔`（`ℹ tests 9 / pass 9 / fail 0`）。
+- **红读数**（`QUAY_GOALS_ROOT=/tmp/ac353-red-goals`，该目录 = 当前 goals/ 的拷贝 + 用
+  `git show 56b596151:goals/…` 换回修复前两条判据）：
+
+```
+✖ every quoted whole-token .ts path literal in a live goal criterion resolves on disk
+  AC-353-结构护栏-…-gate-config.md → gate/acceptance-runner.ts
+  AC-355-post-merge-…-回归全绿.md → gate/acceptance-runner.ts
+ℹ pass 7 / fail 1
+```
+
+- **绿读数**（当前 `goals/`，同一个测试）：
+
+```
+✔ every quoted whole-token .ts path literal in a live goal criterion resolves on disk
+ℹ tests 9 / pass 9 / fail 0
+```
+
+- **负对照 fixture 经由 `QUAY_GOALS_ROOT` 走生产读数**（不是私有代码路径）：子进程
+  `node --test <本文件>`，env `QUAY_GOALS_ROOT=<含 'gate/acceptance-runner.ts' 的 fixture 目录>`
+  ⇒ exit ≠ 0，输出点名 `AC-fixture.md → gate/acceptance-runner.ts`（测试
+  `negative control (QUAY_GOALS_ROOT): the production reading reds on a fixture and names the literal` ✔）。
+- 同族普查复算（当前树上，原型脚本与测试同一谓词）：`scanned 211 / checked 72 / unresolved []`。
+
+### AC-5 — criterion 不再钉目录 / 深度
+
+```
+$ grep -c "gate/shared/" goals/AC-353-…-gate-config.md
+0
+$ grep -c "gate/acceptance-runner\.ts" goals/AC-353-…-gate-config.md
+0
+$ grep -c "gate/shared/\|gate/acceptance-runner\.ts" goals/AC-355-…-回归全绿.md
+0
+$ grep -n "export function runAcceptance" goals/AC-353-…-gate-config.md
+34:  const roles=[["VALID_GOAL_STATUSES",/^export const VALID_GOAL_STATUSES\b/m],["handleGate",/^export (async )?function handleGate\(/m],["runAcceptance",/^export function runAcceptance\(/m],…];
+```
+
+6 个角色按导出符号定位（其承载者再由**解析后的绝对路径**判断是否 import `kernel/gate-run-options.ts`，
+深度自动正确）；仅 `gate/config/index.ts` / `gate/factories/utils.ts` 两个有意保留在原目录的 barrel
+与两个「必须不存在」的死文件路径继续按路径断言。
+
+### AC-6 — 生产代码零改动
+
+```
+$ git diff --name-only develop...HEAD
+"goals/AC-353-结构护栏-…-gate-config.md"
+"goals/AC-355-post-merge-…-回归全绿.md"
+packages/quay/test/goal-criterion-import-specifiers-resolve.test.mjs
+
+$ git diff --name-only develop...HEAD -- packages/quay/src
+（空）
+```
+
+（`tasks/gap-ac353-…md` 由 `task_write` 在本分支提交，属 Touches 第 4 条。）
+AC-353 判据内 defOnly 4 函数 / 2 类型 / 两个死文件缺席 / 非目标 loader·abi 未动 / out-of-scope diff 为空
+各检查全绿，见 AC-1 的 `PASS:` 行。
+
+### DoD 的一条诚实边界
+
+`goal gate` 的 pass 读数取自**本任务 worktree**（即 fan-in 将要落地的同一棵树内容），不是共享检出
+`/data/home/yale/work/quay`——因为 re-anchor 要等 fan-in 落到 `develop`、再经 develop→author 同步后，
+共享检出的 `goals/` 才携带新 criterion；在此之前在共享检出跑只会读到旧判据（仍在盘上的是修复前文本）。
+另外 `.quay/gate-events.jsonl` 在任务 worktree 里不是持久载体（会被 worktree 刷新覆盖），因此本任务
+只贴 `goal gate --json` 原文，**不**声称已产生共享检出的持久 pass 记录——那条记录由 develop 落地后的
+goal sweep 产生。
