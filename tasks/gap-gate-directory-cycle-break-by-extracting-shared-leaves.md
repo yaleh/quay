@@ -1,7 +1,7 @@
 ---
 id: gap-gate-directory-cycle-break-by-extracting-shared-leaves
 title: 断 packages/quay/src/gate 目录级环——父目录与 factories/config 子目录互引，抽 shared 叶子
-status: todo
+status: ready
 labels:
   - gap
 parent: null
