@@ -10,12 +10,12 @@ import { randomUUID } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { resolveGate } from "./registry.ts";
-import { verdictFromGateCheck } from "./acceptance-runner.ts";
+import { verdictFromGateCheck } from "./shared/acceptance-runner.ts";
 // The `/proc/loadavg` field-0 reader — the ONE implementation shared by this cost row, the gate cost
 // ledger (`acceptance-runner.ts`) and the mechanism layer (`plugin/scripts/full-suite-runner.ts`).
 // Kernel-leaf direction, same as `gate/lifecycle.ts` → `../kernel/task-transition.ts`.
 import { readLoadAvg1 } from "../kernel/load-avg.ts";
-import type { GateVerdictKind } from "./types.ts";
+import type { GateVerdictKind } from "./shared/types.ts";
 import { appendGateEvent, type GateEvent } from "./gate-event-store.ts";
 import type { Task } from "../abi.ts";
 

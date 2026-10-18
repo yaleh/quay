@@ -1,7 +1,7 @@
 // `makeGoalGate` — goal-as-criterion enforcement gate factory (SPEC §3).
 //
 // The goal store's criterion execution REUSES the task acceptance-runner shape
-// (gate/acceptance-runner.ts runAcceptance) — NOT document `contracts` (in-process
+// (gate/shared/acceptance-runner.ts runAcceptance) — NOT document `contracts` (in-process
 // grep/not-grep over the doc's own body). A goal record's `criterion` is a runnable
 // shell command; the gate runs it and maps the real child-process outcome to a verdict.
 //
@@ -14,8 +14,8 @@
 // record's `criterion` takes effect without a process restart — same shape as makeAdrGate.
 
 import path from "node:path";
-import type { GateFn } from "../types.ts";
-import { runAcceptance, verdictFromAcceptance } from "../acceptance-runner.ts";
+import type { GateFn } from "../shared/types.ts";
+import { runAcceptance, verdictFromAcceptance } from "../shared/acceptance-runner.ts";
 import { resolveRunnerOptions } from "../../kernel/gate-run-options.ts";
 import { createGoalStore } from "../../goal-store.ts";
 import type { Task } from "../../abi.ts";
@@ -42,7 +42,7 @@ export function makeGoalGate(goalId: string, goalDir: string): GateFn {
     // integration..develop"), so they must run with cwd = workspaceRoot (goalDir's parent).
     const { cwd, timeoutMs } = resolveRunnerOptions({ cwd: path.dirname(goalDir) });
     const result = runAcceptance({ command: criterion, cwd, timeoutMs });
-    // ⛔ The 3-valued verdict travels with the check (gate/acceptance-runner.ts
+    // ⛔ The 3-valued verdict travels with the check (gate/shared/acceptance-runner.ts
     // `verdictFromAcceptance`): a criterion that TIMED OUT or that could not be run at all is
     // NOT the same claim as one that ran and said no — see
     // gap-goal-gate-verdict-single-mapping-not-evaluated. Dropping it here would make the

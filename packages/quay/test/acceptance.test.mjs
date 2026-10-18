@@ -23,7 +23,7 @@ import path from "node:path";
 import fs from "node:fs";
 import os from "node:os";
 
-import { runAcceptance } from "../src/gate/acceptance-runner.ts";
+import { runAcceptance } from "../src/gate/shared/acceptance-runner.ts";
 import { gateRegistry, listGates } from "../src/gate/registry.ts";
 import { makeTmpDir, makeTmpWorkspace } from "../../../plugin/test/helpers/tmp-workspace.mjs";
 import { QUAY_CLI, QUAY_NATIVE_CLI } from "./helpers/cli-entry.mjs";
@@ -301,7 +301,7 @@ test("C1 [regression]: `--gate dod` still routes to QENG-1's dod gate", () => {
 
 // D1: helper unit — runAcceptanceCapture on exit 0 with stdout
 test("D1: runAcceptanceCapture('printf dry-ok; exit 0') -> { output contains stdout, code:0, timedOut:false }", async () => {
-  const { runAcceptanceCapture } = await import("../src/gate/acceptance-runner.ts");
+  const { runAcceptanceCapture } = await import("../src/gate/shared/acceptance-runner.ts");
   const r = runAcceptanceCapture({ command: "printf 'dry-ok'; exit 0", cwd: tmpCwd("d1-pass"), timeoutMs: 5000 });
   assert.equal(r.code, 0);
   assert.equal(r.timedOut, false);
@@ -311,7 +311,7 @@ test("D1: runAcceptanceCapture('printf dry-ok; exit 0') -> { output contains std
 
 // D1: helper unit — runAcceptanceCapture on exit 3 with stderr
 test("D1: runAcceptanceCapture('printf dry-err >&2; exit 3') -> { code:3, output contains stderr }", async () => {
-  const { runAcceptanceCapture } = await import("../src/gate/acceptance-runner.ts");
+  const { runAcceptanceCapture } = await import("../src/gate/shared/acceptance-runner.ts");
   const r = runAcceptanceCapture({ command: "printf 'dry-err' >&2; exit 3", cwd: tmpCwd("d1-fail"), timeoutMs: 5000 });
   assert.equal(r.code, 3);
   assert.equal(r.timedOut, false);
@@ -321,7 +321,7 @@ test("D1: runAcceptanceCapture('printf dry-err >&2; exit 3') -> { code:3, output
 
 // D1: helper unit — runAcceptanceCapture on timeout
 test("D1: runAcceptanceCapture('sleep 30', timeoutMs:200) -> { timedOut:true, code:null }", async () => {
-  const { runAcceptanceCapture } = await import("../src/gate/acceptance-runner.ts");
+  const { runAcceptanceCapture } = await import("../src/gate/shared/acceptance-runner.ts");
   const r = runAcceptanceCapture({ command: "sleep 30", cwd: tmpCwd("d1-timeout"), timeoutMs: 200 });
   assert.equal(r.timedOut, true);
   assert.equal(r.code, null);

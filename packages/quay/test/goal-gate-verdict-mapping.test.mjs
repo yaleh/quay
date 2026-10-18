@@ -44,7 +44,7 @@ import { QUAY_CLI, QUAY_NATIVE_CLI } from "./helpers/cli-entry.mjs";
 import {
   verdictFromAcceptance,
   verdictFromGateCheck,
-} from "../src/gate/acceptance-runner.ts";
+} from "../src/gate/shared/acceptance-runner.ts";
 // The record-aware deadline resolver family lives in the kernel leaf (gap-ac353-goal-store-deadline-
 // resolver-not-kernel) — its single home, beside `DEFAULT_ACCEPTANCE_TIMEOUT_MS` imported just below.
 import { resolveAcceptanceTimeout, ACCEPTANCE_TIMEOUT_ENV } from "../src/kernel/gate-run-options.ts";

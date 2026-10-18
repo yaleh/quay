@@ -5,8 +5,8 @@
 // has no non-empty `enforcement` string.
 
 import path from "node:path";
-import type { GateFn } from "../types.ts";
-import { runAcceptance } from "../acceptance-runner.ts";
+import type { GateFn } from "../shared/types.ts";
+import { runAcceptance } from "../shared/acceptance-runner.ts";
 import { resolveRunnerOptions } from "./utils.ts";
 import { createAdrStore } from "../../adr-store.ts";
 import type { Task } from "../../abi.ts";

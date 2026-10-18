@@ -24,7 +24,7 @@ import path from "node:path";
 import fs from "node:fs";
 import os from "node:os";
 
-import { runAcceptance } from "../src/gate/acceptance-runner.ts";
+import { runAcceptance } from "../src/gate/shared/acceptance-runner.ts";
 import { loadWorkspaceGates } from "../src/gate/registry.ts";
 import { makeTmpDir, makeTmpWorkspace } from "../../../plugin/test/helpers/tmp-workspace.mjs";
 import { QUAY_CLI, QUAY_NATIVE_CLI } from "./helpers/cli-entry.mjs";

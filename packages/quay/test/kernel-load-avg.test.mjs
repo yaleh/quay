@@ -128,7 +128,7 @@ const readRepoFile = (rel) => fs.readFileSync(path.join(REPO_ROOT, rel), "utf8")
  *  `String(…)` wrapper. */
 const FORMER_COPIES = [
   "plugin/scripts/full-suite-runner.ts",
-  "packages/quay/src/gate/acceptance-runner.ts",
+  "packages/quay/src/gate/shared/acceptance-runner.ts",
   "packages/quay/src/gate/engine.ts",
 ];
 
@@ -174,11 +174,17 @@ test("① (zero-count half) the wrapped-less near-copy has ZERO hits — the nee
 });
 
 test("② all three consumers import the kernel leaf (the wiring, not just the body count)", () => {
-  // Product side: the two `gate/` consumers import it in-package.
-  for (const rel of ["packages/quay/src/gate/acceptance-runner.ts", "packages/quay/src/gate/engine.ts"]) {
+  // Product side: the two `gate/` consumers import it in-package. `acceptance-runner.ts` moved into
+  // `gate/shared/` (tasks/gap-gate-directory-cycle-break-by-extracting-shared-leaves), so its
+  // specifier gained one `../` — the DIRECTION of the dependency (gate → kernel leaf) is unchanged.
+  const productConsumers = [
+    ["packages/quay/src/gate/shared/acceptance-runner.ts", 'from "../../kernel/load-avg.ts"'],
+    ["packages/quay/src/gate/engine.ts", 'from "../kernel/load-avg.ts"'],
+  ];
+  for (const [rel, specifier] of productConsumers) {
     assert.ok(
-      readRepoFile(rel).includes('from "../kernel/load-avg.ts"'),
-      `${rel} must import the kernel leaf (\`../kernel/load-avg.ts\`)`,
+      readRepoFile(rel).includes(specifier),
+      `${rel} must import the kernel leaf (\`${specifier}\`)`,
     );
   }
   // Mechanism side: the cross-tree import. Its direction is the load-bearing part — the product side

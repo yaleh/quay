@@ -20,7 +20,7 @@
 
 import { randomUUID } from "node:crypto";
 import { runGate } from "./engine.ts";
-import { verdictFromGateCheck } from "./acceptance-runner.ts";
+import { verdictFromGateCheck } from "./shared/acceptance-runner.ts";
 import { readGatesConfig } from "./registry.ts";
 import { appendGateEvent, type GateEvent } from "./gate-event-store.ts";
 import { TASK_STATUS, TASK_STATUSES, type Task, type TaskStatus } from "../abi.ts";

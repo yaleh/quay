@@ -44,7 +44,7 @@ import os from "node:os";
 import path from "node:path";
 import { spawnSync, execFileSync } from "node:child_process";
 import { resolveAcceptanceTimeoutMs, DEFAULT_ACCEPTANCE_TIMEOUT_MS } from "../src/kernel/gate-run-options.ts";
-import { runAcceptance } from "../src/gate/acceptance-runner.ts";
+import { runAcceptance } from "../src/gate/shared/acceptance-runner.ts";
 
 const GOAL_STORE = new URL("../src/goal-store.ts", import.meta.url).pathname;
 const QUAY_BIN = new URL("../bin/quay.js", import.meta.url).pathname;
@@ -378,7 +378,7 @@ test("AC2 — 60000 默认值只在一处定义，其余引用该导出常量", 
   assert.match(utils, /export const DEFAULT_ACCEPTANCE_TIMEOUT_MS = 60000;/, "the one definition is EXPORTED (⛔ not a private literal by another name)");
   // The runner's two entry points must reference it rather than respell it — the other half of
   // "one definition": a constant nobody imports is just a comment.
-  const runner = fs.readFileSync(path.join(srcDir, "gate", "acceptance-runner.ts"), "utf8");
+  const runner = fs.readFileSync(path.join(srcDir, "gate", "shared", "acceptance-runner.ts"), "utf8");
   assert.equal((runner.match(/timeoutMs = DEFAULT_ACCEPTANCE_TIMEOUT_MS/g) ?? []).length, 2, "runAcceptance + runAcceptanceCapture both default to the shared constant");
   assert.equal((runner.match(/timeoutMs = 60000/g) ?? []).length, 0, "⛔ no respelled default remains in the runner");
 });

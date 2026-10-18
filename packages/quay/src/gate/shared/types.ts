@@ -1,5 +1,6 @@
-// gate/types.ts — the QENG gate FUNCTION-SHAPE type family (tasks/gap-arch-import-cycles-zero,
-// GOAL-025 AC-308).
+// gate/shared/types.ts — the QENG gate FUNCTION-SHAPE type family
+// (tasks/gap-arch-import-cycles-zero, GOAL-025 AC-308; moved into `shared/` by
+// tasks/gap-gate-directory-cycle-break-by-extracting-shared-leaves).
 //
 // WHY A SEPARATE FILE: these three types were defined in registry.ts while every gate factory
 // (`factories/*.ts`) and the workspace-gate loader (`config/loader.ts`) imported them back FROM
@@ -9,15 +10,23 @@
 // imports nothing from registry.ts / factories/* / config/*, so the factories' `import type` now
 // points at a leaf. registry.ts re-exports all three, so its public API is unchanged.
 //
+// WHY `shared/` AND NOT THE `gate/` ROOT: archguard's DIRECTORY-level moduleGraph saw a
+// `gate/config ⇄ gate/factories ⇄ gate` cycle even after the file-level typeScc above was gone —
+// `factories/*.ts` and `config/loader.ts` imported `../types.ts`, a file in the PARENT directory
+// that itself is imported BY that parent (registry.ts). A file in a subdirectory reaching up into
+// the parent directory is a directory-level back edge regardless of whether the import is a type
+// import. Sitting in `gate/shared/` makes every edge point DOWN (parent → shared, child → shared),
+// so no parent↔child pair remains. `acceptance-runner.ts` moved here for the same reason.
+//
 // ⚠️ ALL THREE MOVE TOGETHER — moving only `GateFn` would leave `GateFn` referencing `GateVerdict`
 // across the module boundary and simply RELOCATE the cycle (types.ts → registry.ts for GateVerdict,
 // registry.ts → types.ts for GateFn) while `valueSccs` still looked unchanged. `GateVerdict`,
 // `GateDefinition` and `GateFn` are one coherent cluster and are defined here as a unit.
 //
-// ⛔ Keep this file a LEAF: only `import type` from ../abi.ts and `node:*` are allowed here. A value
-// import (or a type import of anything under gate/) re-creates the cycle this file exists to break.
+// ⛔ Keep this file a LEAF: only `import type` from ../../abi.ts and `node:*` are allowed here. A
+// value import (or a type import of anything under gate/) re-creates the cycle this file breaks.
 
-import type { Task } from "../abi.ts";
+import type { Task } from "../../abi.ts";
 
 /**
  * A gate verdict — THREE states, ⛔ never a boolean

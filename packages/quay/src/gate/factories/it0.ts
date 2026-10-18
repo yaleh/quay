@@ -4,8 +4,8 @@
 // shells out to `scriptPath` via the shared `runAcceptance` runner, and maps
 // exit-0 -> ok:true, non-zero -> ok:false (fail-closed on missing args).
 
-import type { GateFn } from "../types.ts";
-import { runAcceptance } from "../acceptance-runner.ts";
+import type { GateFn } from "../shared/types.ts";
+import { runAcceptance } from "../shared/acceptance-runner.ts";
 import { type GateConfig, resolveRunnerOptions, shQuote } from "./utils.ts";
 import type { Task } from "../../abi.ts";
 

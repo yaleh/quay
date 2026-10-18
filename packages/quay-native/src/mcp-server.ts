@@ -23,7 +23,7 @@ import { createGoalStore, readGoalConfig } from "./goal-store.ts";
 import { createMetaStore } from "./meta-store.ts";
 // `goal_gate` runs a goal record's `criterion` through Core's acceptance runner —
 // the SAME single runner every Core gate uses (no duplicated timeout/kill logic).
-import { runAcceptance, verdictFromAcceptance } from "../../quay/src/gate/acceptance-runner.ts";
+import { runAcceptance, verdictFromAcceptance } from "../../quay/src/gate/shared/acceptance-runner.ts";
 // The record-aware deadline resolver family lives in Core's kernel leaf (gap-ac353-goal-store-deadline-
 // resolver-not-kernel) — the single home of the whole "acceptance timeout resolution" family.
 import { resolveAcceptanceTimeout, timeoutKnobHint } from "../../quay/src/kernel/gate-run-options.ts";

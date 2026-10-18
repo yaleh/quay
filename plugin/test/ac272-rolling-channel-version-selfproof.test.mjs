@@ -43,7 +43,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { createGoalStore } from "../../packages/quay/src/goal-store.ts";
-import { runAcceptance } from "../../packages/quay/src/gate/acceptance-runner.ts";
+import { runAcceptance } from "../../packages/quay/src/gate/shared/acceptance-runner.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "..", "..");

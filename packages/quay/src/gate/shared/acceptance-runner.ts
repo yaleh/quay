@@ -1,6 +1,13 @@
 // QENG-2 — pure acceptance-command runner (epicd ADR-019 "runnable meter",
 // harness runShellCommands adapted to Node).
 //
+// WHY THIS FILE LIVES IN `gate/shared/`: it is a leaf that BOTH the `gate/` root (registry.ts,
+// engine.ts, lifecycle.ts) and the `gate/factories/*` subdirectory consume. While it sat at the
+// `gate/` root, each factory's `../acceptance-runner.ts` was a child→parent edge, so archguard's
+// directory-level moduleGraph reported a `gate/factories ⇄ gate` cycle
+// (tasks/gap-gate-directory-cycle-break-by-extracting-shared-leaves). In `shared/` every edge
+// into it points DOWN; this module still imports nothing from `gate/` except the type leaf.
+//
 // A single synchronous function that runs a shell command in a pinned cwd under
 // an enforced timeout and maps the REAL Node child-process outcome to a verdict.
 // spawnSync (not async spawn) keeps this a trivially-testable pure function that
@@ -20,12 +27,12 @@ import path from "node:path";
 // so importing the constant into both `runAcceptance` and `runAcceptanceCapture` adds no cycle —
 // the reverse (defining it here and importing it into the kernel) would create one, since the
 // kernel module is upstream of this file.
-import { shQuote, DEFAULT_ACCEPTANCE_TIMEOUT_MS } from "../kernel/gate-run-options.ts";
+import { shQuote, DEFAULT_ACCEPTANCE_TIMEOUT_MS } from "../../kernel/gate-run-options.ts";
 // The `/proc/loadavg` field-0 reader — the ONE implementation shared with the mechanism layer
 // (`plugin/scripts/full-suite-runner.ts` re-exports it as `readLoadAvg`) and with the sibling
 // `gate/engine.ts` cost row. Same kernel-leaf direction as the import above (routine
 // `semantic-dedup-scan` finding `loadavg-readers`).
-import { readLoadAvg1 } from "../kernel/load-avg.ts";
+import { readLoadAvg1 } from "../../kernel/load-avg.ts";
 import type { GateVerdictKind } from "./types.ts";
 
 export interface AcceptanceResult {

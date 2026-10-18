@@ -2,14 +2,14 @@
 // (or .quay/config.yml `gates:` section) to produce the workspace-data-driven
 // gate set. Extracted from gate/factories/loader.ts to reduce fanOut.
 //
-// Imports factories from ../factories/index.ts; types from ../registry.ts
-// (type-only, no runtime circular); config types from ./types.ts; Node
+// Imports factories from ../factories/index.ts; gate types from ../shared/types.ts
+// (type-only); config types from ./types.ts; Node
 // fs/path/YAML.
 
 import fs from "node:fs";
 import path from "node:path";
 import YAML from "yaml";
-import type { GateFn } from "../types.ts";
+import type { GateFn } from "../shared/types.ts";
 import { gateFactories } from "../factories/index.ts";
 import { type GateConfig, resolveRunnerOptions } from "../../kernel/gate-run-options.ts";
 import type {

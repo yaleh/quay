@@ -76,10 +76,10 @@ import {
   runAcceptance,
   verdictFromAcceptance,
   FAILURE_REASON_MAX_CHARS,
-} from "./gate/acceptance-runner.ts";
+} from "./gate/shared/acceptance-runner.ts";
 // The record-aware deadline resolver family lives in the kernel leaf, beside `resolveAcceptanceTimeoutMs`
 // — the single home of the whole "acceptance timeout resolution" family (gap-ac353-goal-store-deadline-
-// resolver-not-kernel; it was briefly split into `gate/acceptance-runner.ts`, which broke the structural
+// resolver-not-kernel; it was briefly split into `gate/shared/acceptance-runner.ts`, which broke the structural
 // guard that this file consumes the kernel). ⛔ Not re-exported through the runner.
 import { resolveAcceptanceTimeout, timeoutKnobHint } from "./kernel/gate-run-options.ts";
 // gap-goal-criterion-timeout-hardcoded-60s-ignores-acceptance-timeout: EVERY criterion this file
@@ -631,7 +631,7 @@ export interface StalePassReading {
    *  UNKNOWN. Reported so the coverage gap is visible; ⛔ not a pass (hard rule 3b). */
   staleUnverified: string[];
   /** The last relevant verdict was NOT-EVALUATED — the criterion never got to state anything.
-   *  Three causes, all recorded by the ONE mapping (`gate/acceptance-runner.ts`
+   *  Three causes, all recorded by the ONE mapping (`gate/shared/acceptance-runner.ts`
    *  `verdictFromAcceptance`): the criterion itself declared it (exit 3 — this repo's convention,
    *  e.g. 「NOT-EVALUATED: carrier absent」), it was killed at its deadline, or its command could not
    *  be run at all (exit 126/127 / spawn failure). ⛔ NOT a failure: "I cannot evaluate this HERE"

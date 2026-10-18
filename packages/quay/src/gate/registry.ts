@@ -2,7 +2,7 @@
 
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { runAcceptance, verdictFromAcceptance } from "./acceptance-runner.ts";
+import { runAcceptance, verdictFromAcceptance } from "./shared/acceptance-runner.ts";
 import { darkAxisGateCheck } from "./dark-axis-record.ts";
 import { makeDocumentContractGate } from "./factories/document-contract.ts";
 import { makeGoalGate } from "./factories/goal.ts";
@@ -17,12 +17,12 @@ var moduleDir = typeof __dirname === "string" ? __dirname : path.dirname(fileURL
 // dist (dist/) — a fixed up-4 walk is wrong under the dist bundle location.
 var REPO_ROOT = discoverWorkspaceRoot(moduleDir) ?? path.resolve(moduleDir, "..", "..", "..", "..");
 
-// The gate function-shape types live in ./types.ts (a leaf module) so the factories and the
+// The gate function-shape types live in ./shared/types.ts (a leaf module) so the factories and the
 // workspace-gate loader can `import type` them WITHOUT an edge back into this file — that edge was a
 // type-level import cycle (gap-arch-import-cycles-zero). Imported here for this module's own use and
 // re-exported so the public API (`import type { GateFn } from ".../gate/registry.ts"`) is unchanged.
-import type { GateVerdict, GateDefinition, GateFn } from "./types.ts";
-export type { GateVerdict, GateDefinition, GateFn } from "./types.ts";
+import type { GateVerdict, GateDefinition, GateFn } from "./shared/types.ts";
+export type { GateVerdict, GateDefinition, GateFn } from "./shared/types.ts";
 
 export { loadWorkspaceGates, readGatesConfig, discoverWorkspaceRoot, loadWorkspaceGateMetadata } from "./config/loader.ts";
 export type { GatesConfig } from "./config/types.ts";
@@ -55,7 +55,7 @@ export var gateRegistry = {
     }
     var opts = resolveRunnerOptions();
     var result = runAcceptance({ command: command, cwd: opts.cwd, timeoutMs: opts.timeoutMs, envFile: opts.envFile });
-    // ⛔ Forwards the 3-valued verdict, not just `ok` — see gate/acceptance-runner.ts's
+    // ⛔ Forwards the 3-valued verdict, not just `ok` — see gate/shared/acceptance-runner.ts's
     // verdictFromAcceptance. Without this the ENGINE's GateEvent would record a timed-out or
     // unrunnable acceptance command as `fail` (gap-goal-gate-verdict-single-mapping-not-evaluated).
     return { ok: result.ok, reason: result.reason, kind: verdictFromAcceptance(result).verdict };
