@@ -3,7 +3,7 @@ id: gap-routine-semantic-dedup-scan-entry-exists-pair
 title: "semantic-dedup-scan: Two private helpers in the same package with
   identical lstatSync bodies and the same dangling-symlink comment; nothing
   prevents a shared import and no test pin"
-status: todo
+status: ready
 labels:
   - gap
   - routine-filed
