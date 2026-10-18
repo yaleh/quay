@@ -283,8 +283,8 @@ $ echo $?
 
 ## Blocker
 
-**2026-10-18T02:20:41.931Z — worker 未落地（exited-not-landed）**
+**2026-10-18T02:33:00.885Z — worker 未落地（exited-not-landed）**
 
-- 未落地原因：step=suite: AssertionError [ERR_ASSERTION]: cadence must be one of the five enumerated values: touches-relax-tighten.ts → 每轮（worker-driver 驻留环的轮末一步；loop.touches_relax 未声明或 mode 为 off / 读不懂时不跑，该轮 round 记录的 auto_tighten 为 null） [baseline A/B: HARD RED (task-introduced-red) — the task's red set is NOT a subset of the develop baseline red set: added=plugin/test/full-suite-runner-cgroup.test.mjs changed=-]
+- 未落地原因：step=suite: AssertionError [ERR_ASSERTION]: fresh welcome drive failed (exit 1) — the clear loop must be SKIPPED: [baseline A/B: HARD RED (task-introduced-red) — the task's red set is NOT a subset of the develop baseline red set: added=plugin/test/send-keys-reliable.test.mjs,plugin/test/full-suite-runner-cgroup.test.mjs changed=-]
 - run_id：wk-prod-anchor
-- session_id：15d7cc1c-5ef9-40a8-a9c0-c480b632ee04
+- session_id：0fdeecdd-78f0-4ea2-8989-f1be144f70fa
