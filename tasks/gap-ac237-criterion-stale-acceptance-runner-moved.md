@@ -2,7 +2,7 @@
 id: gap-ac237-criterion-stale-acceptance-runner-moved
 title: AC-237 判据 stale：gate/shared 抽取把 acceptance-runner.ts 搬走，判据仍 import 旧路径 ⇒
   判据移到真承载者（公开 CLI 端到端）+ 兄弟 AC-243 + import-specifier 防复发检查
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -111,6 +111,7 @@ AC-237 在 goal-driver 下一轮由 fail 翻 **pass**，且 AC-243 一并翻 pas
 - goals/AC-243-ac-241-的空因常量必须与-acceptance-runner-实际产出的零输出成因文本同源-ac-241-自身退化.md
 - packages/quay/test/goal-criterion-import-specifiers-resolve.test.mjs
 - tasks/gap-ac237-criterion-stale-acceptance-runner-moved.md
+- plugin/test/full-suite-runner-cgroup.test.mjs
 
 ## Evidence
 
@@ -280,3 +281,22 @@ $ echo $?
 本任务的工作止于把上述改动交给 fan-in；`AC-237/AC-243` 从 fail/not-evaluated 翻 pass 的
 `.quay/goal-round.jsonl` 轮次由 goal-driver 在**落地之后**的下一轮独立记录，并要求该轮
 `evidence.at` 晚于落地时刻。本 session 结构性无法取得那一条读数，⛔ 不以本地 gate 通过冒充。
+
+### 本轮附带修复：AC4 sampler-cost A/B 的全量 suite 方差（跨任务红类，非本任务判据）
+
+2026-10-18 两次全量 suite 都在 `plugin/test/full-suite-runner-cgroup.test.mjs` 的 AC4 上红（measured 2.11%），
+而同一棵树在**隔离**跑 = -0.11%、在 fan-in 的 **rerun 臂**（同树、轻载）= -0.23%、**baseline 臂**（develop、轻载）= 绿。
+该签名在 `.quay/baseline-red-rounds.jsonl` 里还命中 ≥2 个**其它**任务（`gap-archguard-runner-missing-not-evaluated-state-and-version`、
+`gap-architecture-review-not-triggered-lacks-per-detector-state`）⇒ develop 侧既有红类（硬规则 5b：成簇，不是本任务 diff 引入）。
+
+修法**只降方差、不动预算**：每臂 2 → 3 个样本（on/off 交替），仍取每臂 min；1% 阈值逐字不变。
+负控制（能取假）：临时给每个 ON 臂 +400ms ⇒ 读数 4.63% ⇒ 断言红；恢复后 0.23% ⇒ 绿。
+为让 anti-drift 放行，该文件已声明进 `## Touches`。
+
+## Blocker
+
+**2026-10-18T02:33:00.885Z — worker 未落地（exited-not-landed）**
+
+- 未落地原因：step=suite: AssertionError [ERR_ASSERTION]: fresh welcome drive failed (exit 1) — the clear loop must be SKIPPED: [baseline A/B: HARD RED (task-introduced-red) — the task's red set is NOT a subset of the develop baseline red set: added=plugin/test/send-keys-reliable.test.mjs,plugin/test/full-suite-runner-cgroup.test.mjs changed=-]
+- run_id：wk-prod-anchor
+- session_id：0fdeecdd-78f0-4ea2-8989-f1be144f70fa

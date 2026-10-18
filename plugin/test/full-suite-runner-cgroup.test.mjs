@@ -587,7 +587,14 @@ test("AC4 — the sampler's own cost stays under 1% of the suite wall (instrumen
   const scoped = systemdRunAvailable();
   const scopeEnv = scoped ? { QUAY_TEST_SYSTEMD_RUN_AVAILABLE: "1", QUAY_TEST_SKIP_SYSTEMD_RUN: "0" } : {};
   const runs = [];
-  for (const arm of ["on", "off", "on", "off"]) {
+  // THREE samples per arm, not two (2026-10-18, gap-ac237): the arms run inside the lowconc phase
+  // under real suite concurrency, and a transient scheduling spike that lands on one ON arm inflates
+  // `min(on)` above `min(off)` for the whole test — measured in-suite: A/B delta 2.11% while the same
+  // tree read -0.11% in isolation and -0.23% under the fan-in's light-load rerun arm. The estimator
+  // is unchanged (min of each arm = the least-perturbed wall, the correct reading for an OVERHEAD
+  // claim); only its variance is reduced, so a sampler that genuinely costs >1% still fails. The
+  // arms alternate on/off so a spike hits the two arms' samples independently.
+  for (const arm of ["on", "off", "on", "off", "on", "off"]) {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), `fsr-ovh-${arm}-`));
     const { f, dir } = fakeSuite(
       ['echo "# tests 5"', 'echo "# pass 5"', 'echo "# fail 0"', 'echo "# cancelled 0"', "sleep 3", "exit 0"].join("\n"),
