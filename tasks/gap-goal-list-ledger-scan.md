@@ -38,7 +38,10 @@ extra:
 
 - packages/quay/src/goal-store.ts
 - packages/quay/src/cli/goal.ts
+- packages/quay/src/cli/help.ts
 - packages/quay/src/mcp-handlers.ts
 - packages/quay/src/provider-client.ts
+- packages/quay-native/src/mcp-server.ts
 - packages/quay/test/goal-store.test.mjs
+- packages/quay/test/gap-goal-list-no-evidence.test.mjs
 - tasks/gap-goal-list-ledger-scan.md
