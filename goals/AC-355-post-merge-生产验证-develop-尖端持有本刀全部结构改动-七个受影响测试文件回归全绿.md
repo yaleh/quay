@@ -4,7 +4,7 @@ title: post-merge 生产验证：develop 尖端持有本刀全部结构改动，
 status: achieved
 kind: criterion
 goal: GOAL-034
-criterion: |
+criterion: |-
   set -u
   root=$(git rev-parse --show-toplevel 2>/dev/null) || { echo "NOT-EVALUATED: not inside a git repository" >&2; exit 3; }
   cd "$root"
@@ -19,8 +19,13 @@ criterion: |
   node -e '(()=>{const fs=require("fs"),path=require("path");const src=process.argv[1];
   const rd=(f)=>fs.readFileSync(f,"utf8");
   const live=(t)=>t.split("\n").filter(l=>{const s=l.trim();return !(s.startsWith("//")||s.startsWith("*")||s.startsWith("/*"))}).join("\n");
-  const need=[["goal-store.ts",/from\s*[\x22\x27]\.\/kernel\/gate-run-options\.ts[\x22\x27]/],["cli/gate.ts",/from\s*[\x22\x27]\.\.\/kernel\/gate-run-options\.ts[\x22\x27]/],["gate/acceptance-runner.ts",/from\s*[\x22\x27]\.\.\/kernel\/gate-run-options\.ts[\x22\x27]/],["gate/registry.ts",/from\s*[\x22\x27]\.\.\/kernel\/gate-run-options\.ts[\x22\x27]/],["gate/config/loader.ts",/from\s*[\x22\x27]\.\.\/\.\.\/kernel\/gate-run-options\.ts[\x22\x27]/],["gate/config/index.ts",/from\s*[\x22\x27]\.\.\/\.\.\/kernel\/gate-run-options\.ts[\x22\x27]/],["gate/factories/utils.ts",/from\s*[\x22\x27]\.\.\/\.\.\/kernel\/gate-run-options\.ts[\x22\x27]/],["gate/factories/goal.ts",/from\s*[\x22\x27]\.\.\/\.\.\/kernel\/gate-run-options\.ts[\x22\x27]/]];
-  for(const pair of need){const f=pair[0],re=pair[1];if(!re.test(live(rd(path.join(src,f))))){console.error("CAUSE=post-merge-regression -- "+f+" no longer imports kernel/gate-run-options.ts on develop");process.exit(1)}}
+  const walk=(d)=>fs.readdirSync(d,{withFileTypes:true}).flatMap(e=>e.isDirectory()?walk(path.join(d,e.name)):e.name.endsWith(".ts")?[path.join(d,e.name)]:[]);
+  const all=walk(src);
+  const kernel=path.normalize(path.join(src,"kernel/gate-run-options.ts"));
+  const importsKernel=(file)=>{const dir=path.dirname(file);for(const m of live(rd(file)).matchAll(/from\s*["\x27]([^"\x27]+)["\x27]/g)){if(path.normalize(path.join(dir,m[1]))===kernel)return true}return false};
+  const roles=[["VALID_GOAL_STATUSES",/^export const VALID_GOAL_STATUSES\b/m],["handleGate",/^export (async )?function handleGate\(/m],["runAcceptance",/^export function runAcceptance\(/m],["registerGoalGate",/^export function registerGoalGate\(/m],["discoverWorkspaceRoot",/^export function discoverWorkspaceRoot\(/m],["makeGoalGate",/^export function makeGoalGate\(/m]];
+  for(const role of roles){const label=role[0],re=role[1];const carriers=all.filter(f=>re.test(live(rd(f))));if(carriers.length!==1){console.error("CAUSE=post-merge-regression -- "+label+" is exported by ["+carriers.join(",")+"] on develop, expected exactly one module");process.exit(1)}if(!importsKernel(carriers[0])){console.error("CAUSE=post-merge-regression -- the module carrying "+label+" ("+carriers[0]+") no longer imports kernel/gate-run-options.ts on develop");process.exit(1)}}
+  for(const b of ["gate/config/index.ts","gate/factories/utils.ts"]){if(!importsKernel(path.join(src,b))){console.error("CAUSE=post-merge-regression -- barrel "+b+" no longer imports kernel/gate-run-options.ts on develop");process.exit(1)}}
   })()' "$src" || { echo "CAUSE=post-merge-structural-scan-red -- the scan above printed the specific CAUSE" >&2; exit 1; }
   testfiles="packages/quay/test/gate-config-loader.test.mjs packages/quay/test/gate.test.mjs packages/quay/test/goal-store.test.mjs packages/quay/test/acceptance.test.mjs packages/quay/test/acceptance-env.test.mjs packages/quay/test/gate-diagnostics.test.mjs packages/quay/test/gate-ergonomics.test.mjs"
   node --no-warnings --experimental-strip-types --test $testfiles > /tmp/goal034-ac355-test-output.txt 2>&1
