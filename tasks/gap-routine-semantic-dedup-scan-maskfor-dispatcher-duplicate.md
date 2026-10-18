@@ -35,8 +35,8 @@ extract
 - [x] 处置结论可核：要么修掉，要么写明「已有机制在管、失败在哪一步」，⛔ 不以「已注意到」结案
 
 ## DoD
-- [ ] 上面的判据实跑通过
-- [ ] ⛔ 探针只立案不执行：本任务若需要跑产出者/修复，由派发链执行，⛔ 不由例程代跑
+- [x] 上面的判据实跑通过
+- [x] ⛔ 探针只立案不执行：本任务若需要跑产出者/修复，由派发链执行，⛔ 不由例程代跑
 
 ## Evidence
 处置 = 修掉（extract to single source）：
@@ -45,6 +45,7 @@ extract
 - `plugin/scripts/deletion-closure-check.ts` 删除本地三行副本，改为 `import { maskFor } from "./identity-replication-check.ts"`。
 - 机械复核：对 `plugin/scripts/*.{ts,mjs,js}` 全部函数体做「去注释+空白归一化」后按 body digest 计数，`maskFor` 的函数体在归一化后**只出现 1 次**（identity-replication-check.ts），修复前为 2 次。
 - 回归：`node --no-warnings --experimental-strip-types --test plugin/test/identity-replication-check.test.mjs plugin/test/deletion-closure-check.test.mjs` → 40 pass / 0 fail；两个 CLI 的 `--help` 冒烟通过（import 解析正常）。
+- 续做轮复核（2026-10-18）：worktree 内 `grep -rn "function maskFor" plugin/scripts/` 仅命中 `identity-replication-check.ts:195` 一处；上述回归 40 pass / 0 fail 重跑通过。
 
 ## Touches
 - `plugin/scripts/deletion-closure-check.ts`
