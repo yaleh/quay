@@ -220,3 +220,11 @@ AC-353 判据内 defOnly 4 函数 / 2 类型 / 两个死文件缺席 / 非目标
 另外 `.quay/gate-events.jsonl` 在任务 worktree 里不是持久载体（会被 worktree 刷新覆盖），因此本任务
 只贴 `goal gate --json` 原文，**不**声称已产生共享检出的持久 pass 记录——那条记录由 develop 落地后的
 goal sweep 产生。
+
+## Blocker
+
+**2026-10-18T04:10:31.487Z — worker 未落地（exited-not-landed）**
+
+- 未落地原因：step=suite: AssertionError [ERR_ASSERTION]: cadence must be one of the five enumerated values: touches-relax-tighten.ts → 每轮（worker-driver 驻留环的轮末一步；loop.touches_relax 未声明或 mode 为 off / 读不懂时不跑，该轮 round 记录的 auto_tighten 为 null） [baseline A/B: HARD RED (task-introduced-red) — the task's red set is NOT a subset of the develop baseline red set: added=plugin/test/full-suite-runner-cgroup.test.mjs changed=-]
+- run_id：wk-prod-anchor
+- session_id：f3a892f0-9b94-48a7-8780-52aa7e50f0d8
