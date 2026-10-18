@@ -125,10 +125,11 @@ const readRepoFile = (rel) => fs.readFileSync(path.join(REPO_ROOT, rel), "utf8")
 /** The three copies the finding found — named so a regression's failure message is diagnostic rather
  *  than a bare count. Two were byte-identical under a rename (`readLoadAvg` / `gateLoadAvg`), which is
  *  precisely what hid the pair from name-based scans; the third is the same reading under a redundant
- *  `String(…)` wrapper. */
+ *  `String(…)` wrapper. `acceptance-runner.ts` now lives in `core/` (tasks/gap-src-root-gate-cycle-break),
+ *  so the current home is what a re-inline would land in; `gate/shared/` is only a forwarding shim. */
 const FORMER_COPIES = [
   "plugin/scripts/full-suite-runner.ts",
-  "packages/quay/src/gate/shared/acceptance-runner.ts",
+  "packages/quay/src/core/acceptance-runner.ts",
   "packages/quay/src/gate/engine.ts",
 ];
 
@@ -174,11 +175,12 @@ test("① (zero-count half) the wrapped-less near-copy has ZERO hits — the nee
 });
 
 test("② all three consumers import the kernel leaf (the wiring, not just the body count)", () => {
-  // Product side: the two `gate/` consumers import it in-package. `acceptance-runner.ts` moved into
-  // `gate/shared/` (tasks/gap-gate-directory-cycle-break-by-extracting-shared-leaves), so its
-  // specifier gained one `../` — the DIRECTION of the dependency (gate → kernel leaf) is unchanged.
+  // Product side: the two consumers import it in-package. `acceptance-runner.ts` was sunk into `core/`
+  // (tasks/gap-src-root-gate-cycle-break), so its specifier lost one `../` — the DIRECTION of the
+  // dependency (product → kernel leaf) is unchanged, and `gate/shared/acceptance-runner.ts` is now a
+  // forwarding shim that carries no import of its own.
   const productConsumers = [
-    ["packages/quay/src/gate/shared/acceptance-runner.ts", 'from "../../kernel/load-avg.ts"'],
+    ["packages/quay/src/core/acceptance-runner.ts", 'from "../kernel/load-avg.ts"'],
     ["packages/quay/src/gate/engine.ts", 'from "../kernel/load-avg.ts"'],
   ];
   for (const [rel, specifier] of productConsumers) {
