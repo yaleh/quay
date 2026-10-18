@@ -5,7 +5,7 @@ title: 结构护栏：kernel/gate-run-options.ts 持有 4 函数+2 类型单一�
 status: achieved
 kind: criterion
 goal: GOAL-034
-criterion: |
+criterion: |-
   set -u
   root=$(git rev-parse --show-toplevel 2>/dev/null) || { echo "NOT-EVALUATED: not inside a git repository" >&2; exit 3; }
   cd "$root"
@@ -29,12 +29,15 @@ criterion: |
   if(!/export (interface|type) RunnerOptions\b/.test(live(kt))){console.error("CAUSE=type-not-moved -- RunnerOptions must be declared in kernel/gate-run-options.ts");process.exit(1)}
   const typesText=live(rd(path.join(src,"gate/config/types.ts")));
   if(/export (interface|type) GateConfig\b/.test(typesText)||/export (interface|type) RunnerOptions\b/.test(typesText)){console.error("CAUSE=type-duplicated -- GateConfig/RunnerOptions must be removed from gate/config/types.ts, not duplicated");process.exit(1)}
-  const need=[["goal-store.ts",/from\s*[\x22\x27]\.\/kernel\/gate-run-options\.ts[\x22\x27]/],["cli/gate.ts",/from\s*[\x22\x27]\.\.\/kernel\/gate-run-options\.ts[\x22\x27]/],["gate/acceptance-runner.ts",/from\s*[\x22\x27]\.\.\/kernel\/gate-run-options\.ts[\x22\x27]/],["gate/registry.ts",/from\s*[\x22\x27]\.\.\/kernel\/gate-run-options\.ts[\x22\x27]/],["gate/config/loader.ts",/from\s*[\x22\x27]\.\.\/\.\.\/kernel\/gate-run-options\.ts[\x22\x27]/],["gate/config/index.ts",/from\s*[\x22\x27]\.\.\/\.\.\/kernel\/gate-run-options\.ts[\x22\x27]/],["gate/factories/utils.ts",/from\s*[\x22\x27]\.\.\/\.\.\/kernel\/gate-run-options\.ts[\x22\x27]/],["gate/factories/goal.ts",/from\s*[\x22\x27]\.\.\/\.\.\/kernel\/gate-run-options\.ts[\x22\x27]/]];
-  for(const pair of need){const f=pair[0],re=pair[1];if(!re.test(live(rd(path.join(src,f))))){console.error("CAUSE=consumer-not-converged -- "+f+" does not import kernel/gate-run-options.ts");process.exit(1)}}
+  const kernel=path.normalize(path.join(src,"kernel/gate-run-options.ts"));
+  const importsKernel=(file)=>{const dir=path.dirname(file);for(const m of live(rd(file)).matchAll(/from\s*["\x27]([^"\x27]+)["\x27]/g)){if(path.normalize(path.join(dir,m[1]))===kernel)return true}return false};
+  const roles=[["VALID_GOAL_STATUSES",/^export const VALID_GOAL_STATUSES\b/m],["handleGate",/^export (async )?function handleGate\(/m],["runAcceptance",/^export function runAcceptance\(/m],["registerGoalGate",/^export function registerGoalGate\(/m],["discoverWorkspaceRoot",/^export function discoverWorkspaceRoot\(/m],["makeGoalGate",/^export function makeGoalGate\(/m]];
+  for(const role of roles){const label=role[0],re=role[1];const carriers=all.filter(f=>re.test(live(rd(f))));if(carriers.length!==1){console.error("CAUSE=role-carrier-not-unique -- "+label+" is exported by ["+carriers.join(",")+"], expected exactly one module");process.exit(1)}if(!importsKernel(carriers[0])){console.error("CAUSE=consumer-not-converged -- the module carrying "+label+" ("+carriers[0]+") does not import kernel/gate-run-options.ts");process.exit(1)}}
+  for(const b of ["gate/config/index.ts","gate/factories/utils.ts"]){if(!importsKernel(path.join(src,b))){console.error("CAUSE=consumer-not-converged -- barrel "+b+" does not import kernel/gate-run-options.ts");process.exit(1)}}
   const loaderText=live(rd(path.join(src,"gate/config/loader.ts")));
   const nongoal=["discoverWorkspaceRoot","loadWorkspaceGates","loadWorkspaceGateMetadata"];
   for(const name of nongoal){const fnRe=new RegExp("export (async )?function "+name+"\\(","m");const constRe=new RegExp("export const "+name+"\\b");if(!fnRe.test(loaderText)&&!constRe.test(loaderText)){console.error("CAUSE=nongoal-moved -- "+name+" must stay defined in gate/config/loader.ts");process.exit(1)}}
-  if(!/from\s*[\x22\x27]\.\.\/factories\/index\.ts[\x22\x27]/.test(loaderText)){console.error("CAUSE=wiring-edge-removed -- gate/config/loader.ts must still import ../factories/index.ts");process.exit(1)}
+  if(!/from\s*["\x27]\.\.\/factories\/index\.ts["\x27]/.test(loaderText)){console.error("CAUSE=wiring-edge-removed -- gate/config/loader.ts must still import ../factories/index.ts");process.exit(1)}
   if(!/export interface Task\b/.test(live(rd(path.join(src,"abi.ts"))))){console.error("CAUSE=abi-touched -- abi.ts Task definition missing or moved, out of scope for this goal");process.exit(1)}
   })()' "$src" || { echo "CAUSE=structural-scan-red -- the scan above printed the specific CAUSE" >&2; exit 1; }
   oos=$(git diff --name-only develop...HEAD -- packages/quay/src/gate/engine.ts packages/quay/src/gate/lifecycle.ts packages/quay/src/gate/driver.ts packages/quay/src/gate/types.ts packages/quay/src/abi.ts packages/quay/src/fan-in 2>/dev/null)
