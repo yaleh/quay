@@ -1009,6 +1009,13 @@ interface GoalFilter {
   status?: string;
   kind?: string;
   goal?: string;
+  /** gap-goal-list-ledger-scan: `false` ⇒ SKIP the derived evidence (the `.quay/gate-events.jsonl`
+   *  scan) and the two annotations that depend on it (`progress` / `staleness`). The ledger is
+   *  append-only and grows without bound (measured 165MB / 587k rows in this repo), so its cost is
+   *  ∝ ledger size and INDEPENDENT of the goal count — a consumer that only needs the goal
+   *  frontmatter (ids / statuses / titles, e.g. a fleet overview) must be able to avoid it.
+   *  ⛔ Absent ⇒ `true` (full evidence) — the pre-existing read shape is unchanged. */
+  includeEvidence?: boolean;
 }
 
 interface GoalViewModel {
@@ -2001,11 +2008,23 @@ export function createGoalStore(
   // The malformed files are excluded BEFORE the derived annotations, which keep
   // running over the FULL parseable list (a bad sibling file must not change
   // what a healthy goal's progress/staleness reads as — hard rule 3b).
+  //
+  // `includeEvidence:false` (gap-goal-list-ledger-scan) is the LEDGER-FREE projection: the whole
+  // evidence derivation is skipped at its SOURCE (no `ledgerEvidenceMap` scan — that single call is
+  // the ~1.3s cost this option exists to remove) and so are the two annotations built on it. The
+  // output is still the complete `GoalViewModel[]`; `evidence` / `staleness` / `lastProgressAt` (and
+  // `firstEvidenceAt`) are simply ABSENT, ⛔ not present-and-empty — "not read" must not be able to
+  // look like "read, nothing there" (hard rule 3b).
   function listWithMalformed(filter: GoalFilter = {}): {
     items: GoalViewModel[];
     malformed: Array<{ file: string; error: string }>;
   } {
-    const evidenceMap = ledgerEvidenceMap(goalDir);
+    const includeEvidence = filter.includeEvidence !== false;
+    const evidenceMap = includeEvidence
+      ? ledgerEvidenceMap(goalDir)
+      // ⛔ the empty Map is the point, not a fallback: with the option off, no ledger read happens at
+      // all. A caller that opted out gets undefined evidence on every row (the `get()` of an empty map).
+      : new Map<string, LedgerEvidence>();
     const malformed: Array<{ file: string; error: string }> = [];
     const all: GoalViewModel[] = [];
     for (const f of fs.readdirSync(goalDir)) {
@@ -2023,11 +2042,13 @@ export function createGoalStore(
       try { updatedAt = fs.statSync(p).mtimeMs; } catch { /* optional mtime, same as get() */ }
       all.push(toViewModel(parsed.frontmatter, parsed.body, evidenceMap, updatedAt));
     }
-    // GOAL rows' time is derived from their ACs — computed over the FULL list before any filter.
-    annotateGoalProgress(all);
-    // …and their staleness is derived from the side carrier, over the SAME full list (a filter must
-    // never be able to change what a goal's staleness reads as — hard rule 3b).
-    annotateGoalStaleness(all, goalDir);
+    if (includeEvidence) {
+      // GOAL rows' time is derived from their ACs — computed over the FULL list before any filter.
+      annotateGoalProgress(all);
+      // …and their staleness is derived from the side carrier, over the SAME full list (a filter must
+      // never be able to change what a goal's staleness reads as — hard rule 3b).
+      annotateGoalStaleness(all, goalDir);
+    }
     return {
       items: all
         .filter((g) => (filter.status ? g.status === filter.status : true))

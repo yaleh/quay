@@ -918,12 +918,13 @@ export function registerGoalHandlers(
   server.registerTool(
     "goal_list",
     {
-      description: "List goal records (GOAL-NNN + AC-NNN) on an enabled Provider, optionally filtered by status/kind/goal. Goal records are a separate kind from tasks (goal→AC lifecycle: draft|active|achieved|superseded|retired|needs-human).",
+      description: "List goal records (GOAL-NNN + AC-NNN) on an enabled Provider, optionally filtered by status/kind/goal. Goal records are a separate kind from tasks (goal→AC lifecycle: draft|active|achieved|superseded|retired|needs-human). Pass includeEvidence:false to skip the derived evidence/staleness/progress projection (no .quay/gate-events.jsonl scan — the cost is ∝ ledger size, independent of goal count).",
       inputSchema: {
         provider: z.string().optional(),
         status: z.string().optional(),
         kind: z.string().optional(),
         goal: z.string().optional(),
+        includeEvidence: z.boolean().optional(),
       },
     },
     async ({ provider, ...filter }) => {
