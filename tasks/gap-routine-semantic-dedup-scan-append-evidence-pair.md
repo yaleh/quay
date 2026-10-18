@@ -3,7 +3,7 @@ id: gap-routine-semantic-dedup-scan-append-evidence-pair
 title: "semantic-dedup-scan: Identical best-effort mkdir-plus-appendFileSync
   JSONL body under the same exported name in two sibling probe scripts,
   differing by one word in a catch comment."
-status: todo
+status: ready
 labels:
   - gap
   - routine-filed
