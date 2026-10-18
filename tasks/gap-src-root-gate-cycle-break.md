@@ -63,7 +63,14 @@ extra:
 
 ## Touches
 
-- packages/quay/src/core/（新建下层目录：acceptance verdict 映射、criterion-capability、stores、findConfig、Task 类型）
+- packages/quay/src/core/types.ts (new)
+- packages/quay/src/core/acceptance-verdict.ts (new)
+- packages/quay/src/core/criterion-capability.ts (new)
+- packages/quay/src/core/goal-store.ts (new)
+- packages/quay/src/core/adr-store.ts (new)
+- packages/quay/src/core/document-store.ts (new)
+- packages/quay/src/core/contract-validator.ts (new)
+- packages/quay/src/core/config.ts (new)
 - packages/quay/src/goal-store.ts（双向结）
 - packages/quay/src/abi.ts（Task 下沉或 re-export）
 - packages/quay/src/config.ts（findConfig）
