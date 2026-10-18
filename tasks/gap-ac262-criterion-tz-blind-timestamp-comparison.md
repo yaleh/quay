@@ -169,3 +169,11 @@ out-of-scope records carrying a git-derived window (skipped):
 - goals/AC-262-缺口b2-quay-goal-gate-check-batch-落在-plugin-形态-cli-上-driver-不再.md
 - packages/quay/test/goal-criterion-import-specifiers-resolve.test.mjs
 - tasks/gap-ac262-criterion-tz-blind-timestamp-comparison.md
+
+## Blocker
+
+**2026-10-18T15:17:29.234Z — worker 未落地（exited-not-landed）**
+
+- 未落地原因：AC 未全勾（checked 0/7，剩余未勾 7）——续做只需验证并勾选 AC
+- run_id：wk-prod-anchor
+- session_id：88a098b0-b1b4-40f6-8d38-46c3e8e75baa
