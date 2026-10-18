@@ -40,8 +40,10 @@ export const WORKTREE_DEPS_NPM_COMMAND = "npm install";
 export type WorktreeDepsDecision = "config" | "pnpm-lockfile" | "packageManager" | null;
 
 /** True for ANY directory entry (file, dir, symlink — including a dangling symlink): `existsSync`
- *  follows symlinks and would read a broken link as "absent", re-linking over it. */
-function entryExists(p: string): boolean {
+ *  follows symlinks and would read a broken link as "absent", re-linking over it.
+ *  Exported because goal-preview.ts's preview-provisioning path shares this exact judgment — ⛔ ONE
+ *  implementation, two callers (the same rule as `worktreeDepsInstallCommand` below). */
+export function entryExists(p: string): boolean {
   try {
     fs.lstatSync(p);
     return true;

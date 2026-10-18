@@ -3,7 +3,7 @@ id: gap-routine-semantic-dedup-scan-maskfor-dispatcher-duplicate
 title: "semantic-dedup-scan: Both are the identical three-line sh/ts
   comment-mask dispatcher, and deletion-closure-check already imports both masks
   from identity-replication-check, leaving"
-status: ready
+status: done
 labels:
   - gap
   - routine-filed
@@ -51,11 +51,3 @@ extract
 - `plugin/scripts/deletion-closure-check.ts`
 - `plugin/scripts/identity-replication-check.ts`
 - `tasks/gap-routine-semantic-dedup-scan-maskfor-dispatcher-duplicate.md`
-
-## Blocker
-
-**2026-10-18T01:50:53.863Z — worker 未落地（exited-not-landed）**
-
-- 未落地原因：AC 未全勾（checked 0/4，剩余未勾 4）——续做只需验证并勾选 AC
-- run_id：wk-prod-anchor
-- session_id：67594614-53a0-48f4-a5d2-76eeca360eb7

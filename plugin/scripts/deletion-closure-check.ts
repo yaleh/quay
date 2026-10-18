@@ -46,7 +46,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { repoRoot } from "./repo-root.ts";
-import { tsCommentMask, shCommentMask } from "./identity-replication-check.ts";
+import { maskFor } from "./identity-replication-check.ts";
 import { walkFiles, gitVisiblePaths, type VisibleSet } from "./fs-walk.ts";
 // The single regex-literal escaper (kernel leaf reached via the plugin shim); `escapeRegex` is the
 // name this file's six call sites already use. Own copy was one of the twelve byte-identical bodies
@@ -79,10 +79,6 @@ export function aliasesOf(component: string): Aliases {
     spaceStem: stem.replace(/-/g, " "),
     relPath: norm.includes("/") ? norm : `plugin/scripts/${basename}`,
   };
-}
-
-function maskFor(f: string): (src: string) => Uint8Array {
-  return f.endsWith(".sh") ? shCommentMask : tsCommentMask;
 }
 
 /** stem 的整词匹配 (session-liveness 不得命中 session-liveness-mount / session-liveness2)。 */
