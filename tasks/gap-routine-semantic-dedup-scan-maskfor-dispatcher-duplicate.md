@@ -3,7 +3,7 @@ id: gap-routine-semantic-dedup-scan-maskfor-dispatcher-duplicate
 title: "semantic-dedup-scan: Both are the identical three-line sh/ts
   comment-mask dispatcher, and deletion-closure-check already imports both masks
   from identity-replication-check, leaving"
-status: todo
+status: ready
 labels:
   - gap
   - routine-filed
