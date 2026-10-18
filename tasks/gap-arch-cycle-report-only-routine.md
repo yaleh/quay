@@ -24,7 +24,7 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假·生产产出）声明后 post-landing 例程轮在 `.quay/arch-cycle-history.jsonl` 产生记录（真跑，非仅实现）；无新记录即假。（待外部）
+- [x] AC1（能取假·生产产出）声明后 post-landing 例程轮在 `.quay/arch-cycle-history.jsonl` 产生记录（真跑，非仅实现）；无新记录即假。（待外部）
 - [x] AC2（report-only）环非空时例程 state 仍 `verified`（不是 failed），且记录含环成员列表。
 - [x] AC3（未评估态）读不到 moduleGraph 时记 `evaluated:false` + reason，不与「0 环」同值。
 - [x] AC4（零覆盖影响）段缺席 ⇒ 例程表不变（builtin 四条仍「恰好四条」，同 archCoverageRoutineFromConfig 的既有测试）；enabled:false ⇒ not-evaluated:disabled 且零写入。
@@ -41,3 +41,7 @@ extra:
 - .gitignore（新载体声明）
 - docs/carrier-registry.json（新载体登记）
 - tasks/gap-arch-cycle-report-only-routine.md
+
+## Evidence
+
+- **AC1（待外部 → 已满足）** —— `loop.arch_cycle_report: {enabled:true, interval:360m}` 声明 + `quay driver restart --kind quality` 后，生产例程轮真跑并写入 `.quay/arch-cycle-history.jsonl`：`ts=2026-10-18T10:25:51.593Z`、`mode=arch-cycle-report-round`、`reportOnly:true`；src scope `evaluated:true, cycleCount:1`（点名残余环 `[gate/config,gate/factories,gate,""]`），experiments-scripts `cycleCount:0`，其余 4 个 scope `evaluated:false`（无 moduleGraph，明写 "not 0 cycles"）。⚠️ 已知限制：本轮读的是 10-11 的陈旧 query artifact，src 环列 4 元、不含 task 1 新增的 gate/shared——结论（src 有环）仍真，但读数不新鲜且记录未带 artifact 时间戳。
