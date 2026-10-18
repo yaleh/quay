@@ -2,7 +2,7 @@
 id: gap-ac262-criterion-tz-blind-timestamp-comparison
 title: AC-262 判据第三支把 UTC "Z" 载体 ts 与 git %cI 的 +08:00 落地时刻做字典序比较 ⇒ 落地后真实 10
   轮被静默排除、判据恒假：改为 fromisoformat→epoch 瞬时比较 + 时区盲比较防复发检查
-status: ready
+status: done
 labels:
   - gap
   - defect
