@@ -22,6 +22,28 @@ import { resolvePluginRoot, resolvePluginRootFrom, resolvePluginRootReading, res
 
 const KERNEL = path.join("scripts", "driver-runtime.ts");
 
+/**
+ * Copy the resolver-under-test into `modDir` (a FAKE checkout root's `packages/quay/src`).
+ *
+ * tasks/gap-src-root-gate-cycle-break moved the implementation DOWN to `core/plugin-root.ts`
+ * (`gate/**` must not import the src root, so the leaf utilities all sank one directory);
+ * `src/plugin-root.ts` is now a forwarding re-export. A copy of the forwarding file ALONE cannot
+ * resolve — it would fail with ERR_MODULE_NOT_FOUND and the relocation tests below would go red for
+ * a reason unrelated to what they measure. So the copy is of the PAIR, preserving the relative
+ * shape: `<modDir>/plugin-root.ts` + `<modDir>/core/plugin-root.ts`.
+ */
+function copyResolverInto(modDir) {
+  fs.mkdirSync(path.join(modDir, "core"), { recursive: true });
+  fs.copyFileSync(
+    fileURLToPath(new URL("../src/plugin-root.ts", import.meta.url)),
+    path.join(modDir, "plugin-root.ts"),
+  );
+  fs.copyFileSync(
+    fileURLToPath(new URL("../src/core/plugin-root.ts", import.meta.url)),
+    path.join(modDir, "core", "plugin-root.ts"),
+  );
+}
+
 test("resolvePluginRoot() returns the plugin root containing scripts/driver-runtime.ts", () => {
   const root = resolvePluginRoot();
   assert.ok(root, "must resolve a plugin root");
@@ -250,10 +272,7 @@ test("AC5① — `.quay/plugin` pointing at ANOTHER version does NOT move the re
     fs.writeFileSync(path.join(decoy, "scripts", "driver-runtime.ts"), "// decoy kernel\n");
     fs.mkdirSync(path.join(base, ".quay"), { recursive: true });
     fs.symlinkSync(decoy, path.join(base, ".quay", "plugin"));
-    fs.copyFileSync(
-      fileURLToPath(new URL("../src/plugin-root.ts", import.meta.url)),
-      path.join(modDir, "plugin-root.ts"),
-    );
+    copyResolverInto(modDir);
     const mod = await import(pathToFileURL(path.join(modDir, "plugin-root.ts")).href + `?t=${Date.now()}`);
 
     assert.equal(mod.resolvePluginRoot(), path.resolve(base, "plugin"),
@@ -414,10 +433,7 @@ test("AC4 path ② worktree → MAIN checkout: a module loaded FROM a linked wor
     // Copy the resolver under test into the worktree and import THAT copy (its dir = the worktree).
     const modDir = path.join(wt, "packages", "quay", "src");
     fs.mkdirSync(modDir, { recursive: true });
-    fs.copyFileSync(
-      fileURLToPath(new URL("../src/plugin-root.ts", import.meta.url)),
-      path.join(modDir, "plugin-root.ts")
-    );
+    copyResolverInto(modDir);
     const wtModule = await import(pathToFileURL(path.join(modDir, "plugin-root.ts")).href + `?t=${Date.now()}`);
 
     assert.equal(

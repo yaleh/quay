@@ -15,10 +15,10 @@
 
 import path from "node:path";
 import type { GateFn } from "../shared/types.ts";
-import { runAcceptance, verdictFromAcceptance } from "../shared/acceptance-runner.ts";
+import { runAcceptance, verdictFromAcceptance } from "../../core/acceptance-runner.ts";
 import { resolveRunnerOptions } from "../../kernel/gate-run-options.ts";
-import { createGoalStore } from "../../goal-store.ts";
-import type { Task } from "../../abi.ts";
+import { createGoalStore } from "../../core/goal-store.ts";
+import type { Task } from "../../core/types.ts";
 
 /**
  * @param {string} goalId the goal record id (GOAL-NNN or AC-NNN)

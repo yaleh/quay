@@ -23,24 +23,19 @@
 // registry.ts → types.ts for GateFn) while `valueSccs` still looked unchanged. `GateVerdict`,
 // `GateDefinition` and `GateFn` are one coherent cluster and are defined here as a unit.
 //
-// ⛔ Keep this file a LEAF: only `import type` from ../../abi.ts and `node:*` are allowed here. A
-// value import (or a type import of anything under gate/) re-creates the cycle this file breaks.
+// ⛔ Keep this file a LEAF: only `import type` from ../../core/types.ts and `node:*` are allowed
+// here. A value import (or a type import of anything else under gate/) re-creates the cycle this
+// file breaks.
+//
+// tasks/gap-src-root-gate-cycle-break: `Task` moved with the ABI to `core/types.ts`, and
+// `GateVerdictKind` moved there too (the acceptance runner in `core/` produces it, and `core/`
+// must not import `gate/`). Everything this file still DEFINES — `GateVerdict`, `GateDefinition`,
+// `GateFn` — is the gate function-shape family, which no `core/` module consumes.
 
-import type { Task } from "../../abi.ts";
+import type { Task, GateVerdictKind } from "../../core/types.ts";
 
-/**
- * A gate verdict — THREE states, ⛔ never a boolean
- * (gap-goal-gate-verdict-single-mapping-not-evaluated).
- *
- * "not-evaluated" is a DISTINCT value from "fail": "this was not measured" must never wear the
- * same output shape as "this is false" (hard rule 3b). Before this type existed, two of the three
- * GateEvent write points in this repo mapped the acceptance runner's result with the binary
- * `ok ? "pass" : "fail"` — so a criterion that TIMED OUT, failed to spawn, or could not be run at
- * all (exit 126/127) was recorded as a claim that the criterion was FALSE. On the live
- * claudecodeui ledger that was 61 timeouts + ~370 exit-127 events (criteria whose scripts no
- * longer exist) among 8185 `fail`s — indistinguishable from a criterion that genuinely said no.
- */
-export type GateVerdictKind = "pass" | "fail" | "not-evaluated";
+// Re-exported so `gate/shared/types.ts`'s public API is unchanged for its existing importers.
+export type { GateVerdictKind } from "../../core/types.ts";
 
 export interface GateVerdict {
   ok: boolean;

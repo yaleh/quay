@@ -4,7 +4,7 @@
 // `task.extra` args at all. Reuses the SAME `runAcceptance` runner.
 
 import type { GateFn } from "../shared/types.ts";
-import { runAcceptance } from "../shared/acceptance-runner.ts";
+import { runAcceptance } from "../../core/acceptance-runner.ts";
 import { type GateConfig, resolveRunnerOptions, shQuote } from "./utils.ts";
 
 /**

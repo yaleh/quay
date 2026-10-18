@@ -149,11 +149,11 @@ const AUTHORITIES: AuthoritySpec[] = [
   // —— help.ts 被 bin/quay.ts 静态 import，把词表留在 cli/driver.ts 会让每次 CLI 调用多付 0.4s
   // （该文件的传递闭包带 config.ts/plugin-root.ts）。权威位置随词表移动，⛔ 不是新增一个来源。
   { id: "driver-verb", file: "packages/quay/src/driver-vocab.ts", symbol: "VERBS", extract: "ts-array" },
-  { id: "goal-status", file: "packages/quay/src/abi.ts", symbol: "GOAL_STATUSES", extract: "ts-array" },
-  { id: "meta-status", file: "packages/quay/src/abi.ts", symbol: "META_STATUSES", extract: "ts-array" },
-  { id: "task-status", file: "packages/quay/src/abi.ts", symbol: "TASK_STATUSES", extract: "ts-array" },
-  { id: "adr-status", file: "packages/quay/src/adr-store.ts", symbol: "VALID_ADR_STATUSES", extract: "ts-array" },
-  { id: "doc-status", file: "packages/quay/src/document-store.ts", symbol: "VALID_DOCUMENT_STATUSES", extract: "ts-array" },
+  { id: "goal-status", file: "packages/quay/src/core/types.ts", symbol: "GOAL_STATUSES", extract: "ts-array" },
+  { id: "meta-status", file: "packages/quay/src/core/types.ts", symbol: "META_STATUSES", extract: "ts-array" },
+  { id: "task-status", file: "packages/quay/src/core/types.ts", symbol: "TASK_STATUSES", extract: "ts-array" },
+  { id: "adr-status", file: "packages/quay/src/core/adr-store.ts", symbol: "VALID_ADR_STATUSES", extract: "ts-array" },
+  { id: "doc-status", file: "packages/quay/src/core/document-store.ts", symbol: "VALID_DOCUMENT_STATUSES", extract: "ts-array" },
 ];
 
 const SURFACES: SurfaceSpec[] = [
@@ -179,7 +179,7 @@ const SURFACES: SurfaceSpec[] = [
   { id: "cli-driver-usage-verbs", authority: "driver-verb", file: "packages/quay/src/cli/driver.ts", extract: "text", anchor: "quay driver <([a-z|]+)>", policy: "exact",
     derivesFrom: { file: "packages/quay/src/driver-vocab.ts", symbol: "VERBS", extract: "ts-array", spelling: "quay driver <\\$\\{[^}]*\\bVERBS\\b[^}]*\\}>" } },
   // ── goal status ────────────────────────────────────────────────────────────────────────────────
-  { id: "goal-store-valid-statuses", authority: "goal-status", file: "packages/quay/src/goal-store.ts", extract: "ts-array", symbol: "VALID_GOAL_STATUSES", policy: "exact" },
+  { id: "goal-store-valid-statuses", authority: "goal-status", file: "packages/quay/src/core/goal-store.ts", extract: "ts-array", symbol: "VALID_GOAL_STATUSES", policy: "exact" },
   // Core 的两个 goal_* 工具描述。⚠️ 它们是【后加的】表层（goal_* 家族 2026-10-03 才在 Core 重新
   // 暴露，见 mcp-handlers.ts 该处注释），比本登记表还新 ⇒ 上一轮枚举任务没看见它们，而 --discover
   // 只找【数组/字符串联合字面量】，看不见 `a|b|c` 形态的 text 面 ⇒ 两条漂移既未登记、也未被发现

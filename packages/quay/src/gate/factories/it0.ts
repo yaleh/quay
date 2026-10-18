@@ -5,9 +5,9 @@
 // exit-0 -> ok:true, non-zero -> ok:false (fail-closed on missing args).
 
 import type { GateFn } from "../shared/types.ts";
-import { runAcceptance } from "../shared/acceptance-runner.ts";
+import { runAcceptance } from "../../core/acceptance-runner.ts";
 import { type GateConfig, resolveRunnerOptions, shQuote } from "./utils.ts";
-import type { Task } from "../../abi.ts";
+import type { Task } from "../../core/types.ts";
 
 /**
  * Build a thin it0-script-wrapping gate fn: reads `task.extra[argsKey]`
