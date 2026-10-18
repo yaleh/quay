@@ -31,8 +31,8 @@ Two private helpers in the same package with identical lstatSync bodies and the 
 extract
 
 ## AC
-- [ ] `.quay/routine-findings.jsonl` 中 finding `entry-exists-pair`（routine `semantic-dedup-scan`，runId `semantic-dedup-scan-1792287725786`）所描述的问题被复核并处置
-- [ ] 处置结论可核：要么修掉，要么写明「已有机制在管、失败在哪一步」，⛔ 不以「已注意到」结案
+- [x] `.quay/routine-findings.jsonl` 中 finding `entry-exists-pair`（routine `semantic-dedup-scan`，runId `semantic-dedup-scan-1792287725786`）所描述的问题被复核并处置
+- [x] 处置结论可核：要么修掉，要么写明「已有机制在管、失败在哪一步」，⛔ 不以「已注意到」结案
 
 ## DoD
 - [ ] 上面的判据实跑通过
