@@ -2,7 +2,7 @@
 id: gap-ac355-postmerge-reverify-stale-acceptance-runner-pin
 title: AC-355 判据因 gate/acceptance-runner.ts 被合法搬迁而 ENOENT 转假：承接 AC-353 在飞
   re-anchor，在 develop 尖端复验结构臂（按导出符号定位）+ 七测试文件双环境全绿，含可证伪负对照
-status: todo
+status: needs-human
 labels:
   - gap
   - defect
@@ -134,3 +134,9 @@ from "../../kernel/gate-run-options.ts";`）。
 - `goals/AC-355-post-merge-生产验证-develop-尖端持有本刀全部结构改动-七个受影响测试文件回归全绿.md`
 - `packages/quay/test/goal-criterion-import-specifiers-resolve.test.mjs`
 - `tasks/gap-ac355-postmerge-reverify-stale-acceptance-runner-pin.md`
+
+## Needs-Human
+
+**执行 2026-10-18T03:51:53.705Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：unsatisfiableUnannotatedAc=[re-anchor 生效且不再钉路径：`grep -nE 'gate/acceptance-runner\.ts|gate/shared/acceptance-runner\.ts' goals/AC-355-*.md` 在消费者路径断言中零命中，承载者由导出符号定位（贴 `grep -rn 'export function runAcceptance' packages/quay/src` 读数）；若 peer 落地后仍命中 ⇒ 本任务执行 fallback 改 `goals/AC-355-*.md` 并按同一判据复验。]（连续 3 轮被结构上不可派的拦截挡住 ⇒ 作者/人改写；⛔ 不派 fix worker）
