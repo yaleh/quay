@@ -46,6 +46,7 @@
 // assertions.
 import path from "node:path";
 import crypto from "node:crypto";
+import { Transform } from "node:stream";
 import { readdirSync, readFileSync } from "node:fs";
 
 // gap-reduce-sync-spawn-floor-suite-slowdown: opt-in EXECVE (process-spawn)
@@ -114,6 +115,41 @@ function collectDescendants(rootPid, seen) {
     }
   }
   return seen;
+}
+
+// ── dropRawDiagnostics ──────────────────────────────────────────────────────────────────────────────
+/** A stream.Transform that drops `test:stdout` / `test:stderr` events before the spec reporter.
+ *
+ *  In process isolation node:test forwards each test file's raw stdout/stderr as these diagnostic
+ *  events, and the spec reporter renders them verbatim into the runner's stdout — so a test file that
+ *  leaks a literal `not ok` TAP line from one of its OWN subprocesses (a "fake red TAP"
+ *  failure-detection test) would pollute the stdout the outer runner greps for 判绿/红. Red/green is
+ *  fully carried by the structured events (test:fail / test:summary) the spec reporter renders as
+ *  `✖ <name> (Nms)` / `ℹ fail N` / `ℹ cancelled N`; the raw child streams are diagnostics only and
+ *  must not reach the outer grep.
+ *
+ *  EXPORTED because the filter is wired at BOTH suite execution points — suite-lpt-runner.mjs's
+ *  `runOrderedSuite` and suite-scheduler.ts's `runScheduler` — and those two carried byte-identical
+ *  private copies (semantic-dedup-scan finding `suite-lpt-drop-diagnostics`, routine
+ *  `semantic-dedup-scan`, runId `semantic-dedup-scan-1792405443214`, kind `byte-identical-body`,
+ *  verdict `real-duplication`, requested action `extract`; carriers
+ *  plugin/scripts/suite-lpt-runner.mjs:43 / plugin/scripts/suite-scheduler.ts:365). This module was
+ *  already the shared hub BOTH files import (readConcurrency / readPerFileCpuMs /
+ *  readPerFileMemPeakKb), so the extraction adds no new dependency and no new file. ⛔ Do not
+ *  re-inline: a second copy is how the two paths drift apart on what counts as a "diagnostic". */
+export function dropRawDiagnostics() {
+  return new Transform({
+    objectMode: true,
+    transform(chunk, _encoding, callback) {
+      let obj = chunk;
+      if (Buffer.isBuffer(chunk)) obj = JSON.parse(chunk.toString());
+      if (typeof obj === "string") obj = JSON.parse(obj);
+      if (obj && typeof obj === "object" && (obj.type === "test:stdout" || obj.type === "test:stderr")) {
+        return callback(); // drop the raw child output
+      }
+      callback(null, chunk);
+    },
+  });
 }
 
 /** Read `--test-concurrency=N` from process.execArgv (both = and space spellings) — the SINGLE
