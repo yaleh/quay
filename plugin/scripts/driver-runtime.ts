@@ -44,6 +44,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { StringDecoder } from "node:string_decoder";
 import { fileURLToPath } from "node:url";
 import { spawn, spawnSync } from "node:child_process";
 import { isDirectEntry } from "./gate-script-base.ts";
@@ -617,6 +618,9 @@ export interface CarrierFileStat {
   exists: boolean;
   /** 该载体自身的行数（wc -l 语义；不存在 ⇒ 0）。 */
   records: number;
+  /** 存在但读失败时的错误信息。⛔ 缺失/可读 ⇒ 不出现（undefined），**不填 null 或空串**：
+   *  「载体为空」与「载体读不出」必须是两个可区分形态（硬规则 3b；见 gap-meta-collectdriverreadings）。 */
+  readError?: string;
 }
 
 /** 一个 kind 的载体观测结果。 */
@@ -640,9 +644,94 @@ export interface CarrierStats {
   lastTsCarrier: string | null;
   /** 逐载体分解（哪个存在、哪个没有、各自多少行）。 */
   files: CarrierFileStat[];
+  /** 存在但读不出的载体名（空数组 = 所有存在的载体都读完了）。
+   *  ⛔ 空数组 ≠「没有载体」——后者看 primaryPath/files[].exists。
+   *  这个字段存在的原因：`records` 是**已读行数之和**，一个读不出的载体对它的贡献是 0
+   *  ⇒ 只报 records 时，「载体大到/坏到读不出」与「载体为空」输出同形（硬规则 3b）。 */
+  unreadable: string[];
 }
 
-/** 读一个 kind 的全部载体：行数之和 + 末条 ts 最大。读失败/缺失 ⇒ 该载体记 0 条（⛔ 不抛）。 */
+// ── 载体流式读取（gap-meta-collectdriverreadings）────────────────────────────────────────────────
+// 旧实现用 `fs.readFileSync(file, "utf8")` 整文件读：文件超过 V8 最大字符串长度（64 位约 512MiB）
+// 时抛 RangeError，被 per-file catch 静默折算成 `records: 0` —— 于是「读不出」与「空载体」同形，
+// 活驱动的 round 载体一旦长到该阈值就报 0 条（实测 meta kind：running=true 而 carrierRecords=0）。
+// 载体是 append-only jsonl，天生可流式读：按块扫描换行，内存只占一个块、没有文件大小上限。
+const CARRIER_READ_CHUNK_BYTES = 1 << 20;
+/** 单行最多累积的字符数：超过 ⇒ 放弃该行的 JSON 解析（仍计行数）。
+ *  防一个畸形超长行把「流式」退化成「整行进内存」——这正是本条要消灭的失败模式。 */
+const CARRIER_MAX_LINE_CHARS = 16 << 20;
+
+/** 流式扫描一个载体：wc -l 语义的行数 + 所有 JSON 行里 `tsKeys` 的最大值。
+ *  ⛔ 读失败不抛：行数取已读部分，并把错误**带出去**（调用方据此报 unreadable，⛔ 不当 0 条）。 */
+function scanCarrierFile(file: string, tsKeys: string[]): { records: number; lastTs: string | null; readError: string | null } {
+  let fd: number;
+  try {
+    fd = fs.openSync(file, "r");
+  } catch (e) {
+    return { records: 0, lastTs: null, readError: e instanceof Error ? e.message : String(e) };
+  }
+  const decoder = new StringDecoder("utf8");
+  const buf = Buffer.allocUnsafe(CARRIER_READ_CHUNK_BYTES);
+  let records = 0;
+  let lastTs: string | null = null;
+  let carry = ""; // 上一块尾部没有换行的部分
+  let carryOverflow = false; // carry 已超上限 ⇒ 该行不解析，但仍计换行
+  let readError: string | null = null;
+
+  const absorbTs = (line: string): void => {
+    if (!line.trim()) return;
+    let j: any;
+    try {
+      j = JSON.parse(line);
+    } catch {
+      return; /* torn/partial tail — skip */
+    }
+    for (const k of tsKeys) {
+      if (j && typeof j[k] === "string" && j[k] && (lastTs === null || j[k] > lastTs)) lastTs = j[k];
+    }
+  };
+  // 严格 `>`（相等不更新）⇒ 并列时保留首个，与旧实现逐行扫描的取值规则逐字一致。
+  const feed = (text: string): void => {
+    let start = 0;
+    for (;;) {
+      const nl = text.indexOf("\n", start);
+      if (nl === -1) break;
+      records += 1;
+      if (!carryOverflow) absorbTs(carry + text.slice(start, nl));
+      carry = "";
+      carryOverflow = false;
+      start = nl + 1;
+    }
+    if (start < text.length && !carryOverflow) {
+      const tail = text.slice(start);
+      if (carry.length + tail.length > CARRIER_MAX_LINE_CHARS) {
+        carryOverflow = true;
+        carry = "";
+      } else {
+        carry += tail;
+      }
+    }
+  };
+
+  try {
+    for (;;) {
+      const n = fs.readSync(fd, buf, 0, buf.length, null);
+      if (n === 0) break;
+      feed(decoder.write(buf.subarray(0, n)));
+    }
+    feed(decoder.end());
+    // 末行无尾换行：仍要读它的 ts（旧实现 split("\n") 后也会解析这一行）。
+    if (!carryOverflow) absorbTs(carry);
+  } catch (e) {
+    readError = e instanceof Error ? e.message : String(e);
+  } finally {
+    try { fs.closeSync(fd); } catch { /* 读失败后 close 也可能失败——不覆盖真正的读错误 */ }
+  }
+  return { records, lastTs, readError };
+}
+
+/** 读一个 kind 的全部载体：行数之和 + 末条 ts 最大。读失败/缺失 ⇒ 该载体记 0 条且**带出错误**
+ *  （⛔ 不抛：调用方要能继续汇总其余载体）。 */
 export function carrierStats(root: string, kind: DriverKind): CarrierStats {
   const spec = DRIVER_KINDS[kind];
   const tsKey = spec.tsKey ?? "ts";
@@ -662,41 +751,26 @@ export function carrierStats(root: string, kind: DriverKind): CarrierStats {
   // 比较用严格 `>`（相等不更新）⇒ 并列时保留**首个**供数载体，与 lastTs 的取值规则逐字一致。
   let lastTsCarrier: string | null = null;
   const files: CarrierFileStat[] = [];
+  const unreadable: string[] = [];
   for (const name of spec.carriers) {
     const file = path.join(root, ".quay", name);
     const exists = fs.existsSync(file);
     if (exists && primaryPath === null) primaryPath = file;
-    let text: string;
-    try {
-      text = fs.readFileSync(file, "utf8");
-    } catch {
+    if (!exists) {
+      // 不存在 ≠ 读不出：前者是「这个工作区没有该载体」，后者是故障（硬规则 3b）。
       files.push({ name, exists, records: 0 });
       continue;
     }
-    if (text === "") {
-      files.push({ name, exists, records: 0 });
-      continue;
-    }
-    // wc -l 语义：数换行符（⛔ split("\n").length 会把无尾换行的文件多算 1）。
-    const n = (text.match(/\n/g) ?? []).length;
-    records += n;
-    files.push({ name, exists, records: n });
-    for (const line of text.split("\n")) {
-      if (!line.trim()) continue;
-      try {
-        const j = JSON.parse(line);
-        for (const k of tsKeys) {
-          if (j && typeof j[k] === "string" && j[k] && (lastTs === null || j[k] > lastTs)) {
-            lastTs = j[k];
-            lastTsCarrier = file;
-          }
-        }
-      } catch {
-        /* torn/partial tail — skip */
-      }
+    const r = scanCarrierFile(file, tsKeys);
+    records += r.records;
+    files.push(r.readError === null ? { name, exists, records: r.records } : { name, exists, records: r.records, readError: r.readError });
+    if (r.readError !== null) unreadable.push(name);
+    if (r.lastTs !== null && (lastTs === null || r.lastTs > lastTs)) {
+      lastTs = r.lastTs;
+      lastTsCarrier = file;
     }
   }
-  return { records, lastTs, primaryPath, lastTsCarrier, files };
+  return { records, lastTs, primaryPath, lastTsCarrier, files, unreadable };
 }
 
 /** 派生状态文件的绝对路径（supervisor 共享的一份路径规则，⛔ kind 差异由 registry 表承载）。 */
@@ -3764,6 +3838,10 @@ export function statusForKind(root: string, kind: DriverKind, json: boolean, out
       running: a.running ? 1 : 0,
       carrier_path: stats.primaryPath,
       carrier_records: stats.records,
+      // 存在但读不出的载体（硬规则 3b）：`carrier_records` 只是**已读**行数之和，一个读不出的载体
+      // 贡献 0 —— 没有这个字段时「载体读不出」与「载体为空」在 JSON 上同形
+      // （gap-meta-collectdriverreadings：V8 字符串上限曾把活驱动的 carrier_records 折成 0）。
+      carrier_unreadable: stats.unreadable,
       last_record_ts: stats.lastTs,
       // ts 的【来源】单列：`carrier_path` 是「首个存在」，⛔ 不是「供这个 ts 的那个」。
       last_record_carrier: stats.lastTsCarrier,
@@ -3845,6 +3923,8 @@ export function statusForKind(root: string, kind: DriverKind, json: boolean, out
       `source_watch=${a.sourceWatch} · ` +
       // ⛔ 不打印空串：显式 "null"（= 无载体存在），与 last_record_ts 的 null 表达同形（硬规则 3b）。
       `carrier_path=${stats.primaryPath ?? "null"} · carrier_records=${stats.records} · ` +
+      // 「读不出」单列（⛔ 不并进 carrier_records=0）：空载体与读失败必须在同一行上可区分（硬规则 3b）。
+      `carrier_unreadable=${stats.unreadable.length ? stats.unreadable.join(",") : "none"} · ` +
       `last_record_ts=${stats.lastTs ?? "null"}${crossCarrier} · ` +
       // ⛔ 紧邻上面那一项：这就是「这条 ts 从哪来」的答案（`carrier_path` 回答的是另一个问题）。
       `last_record_carrier=${stats.lastTsCarrier ?? "null"} · ` +

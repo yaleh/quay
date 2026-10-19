@@ -1285,7 +1285,8 @@ export function settleEvidenceWrites(root: string, goalsRel = "goals"): Evidence
 // ⛔ 不自己实现存活/载体统计：复用 driver-runtime 已有的 aliveness/carrierStats（硬规则①）。
 
 /** 一个 driver kind 的生态读数。staleSecs = 现在距其载体最后一条记录的秒数（载体停更 ≠ 一切正常）。
- *  running=null 表示 aliveness 读不出（⛔ 不填 false 冒充「停了」——读不懂不得与「停摆」同形，硬规则 3b）。 */
+ *  running=null 表示 aliveness 读不出（⛔ 不填 false 冒充「停了」——读不懂不得与「停摆」同形，硬规则 3b）。
+ *  carrierUnreadable=null 表示 carrierStats 自身没跑成（⛔ 不得拿空数组冒充「全部读完了」——同上）。 */
 export interface DriverReading {
   kind: string;
   running: boolean | null;
@@ -1294,6 +1295,10 @@ export interface DriverReading {
   carrierRecords: number;
   carrierLastTs: string | null;
   staleSecs: number | null;
+  /** 存在但读不出的载体名（空数组 = 全部读完）；null = 载体观测本身没跑成。
+   *  没有这个字段时，`carrierRecords=0` 同时覆盖「载体为空」「载体读不出」两种世界
+   *  （硬规则 3b；gap-meta-collectdriverreadings）。 */
+  carrierUnreadable: string[] | null;
 }
 
 export function collectDriverReadings(root: string, now: number = Date.now()): DriverReading[] {
@@ -1313,6 +1318,8 @@ export function collectDriverReadings(root: string, now: number = Date.now()): D
       driverAlive: !!a?.driverAlive,
       carrierRecords: c?.records ?? 0,
       carrierLastTs: lastTs,
+      // 载体观测没跑成 ⇒ null（⛔ 不填 []：空数组的含义是「存在的载体全读完了」，两者不同形）。
+      carrierUnreadable: c ? c.unreadable : null,
       // 读不出时刻 ⇒ null（⛔ 不填 0 冒充"刚刚"，硬规则 6：缺值 = 未查，不是为假）。
       staleSecs: Number.isFinite(parsed) ? Math.round((now - parsed) / 1000) : null,
     });
@@ -1438,7 +1445,14 @@ export function readingsDigest(readings: MetaRoundReadings): string {
     // driver 只取【在跑与否】这个会改变结论的位；⛔ 不取 staleSecs/记录数——它们每轮都变，
     // 取了会让摘要恒不相等、变化检测闸失效（同 reason 文本的道理）。running=null（读不出）
     // 单独一个 token "u"，⛔ 不与 false（停摆）同形（硬规则 3b）。
-    ...readings.drivers.map((d) => `drv:${d.kind}:${d.running === null ? "u" : d.running ? 1 : 0}`).sort(),
+    // `carrierUnreadable` 同理进摘要（它不每轮变）：载体从「读得出」变「读不出」时，结论必须被重判——
+    // 只报 carrierRecords 的话这个变化在摘要里不可见（gap-meta-collectdriverreadings）。
+    // 三态各自独立：null（观测没跑成）⇒ "u"；[]（全读完）⇒ "none"；否则逐名。
+    ...readings.drivers.map((d) => {
+      const run = d.running === null ? "u" : d.running ? 1 : 0;
+      const unread = !Array.isArray(d.carrierUnreadable) ? "u" : d.carrierUnreadable.join(",") || "none";
+      return `drv:${d.kind}:${run}:${unread}`;
+    }).sort(),
     // 同步只取【最近是否在失败】这个位，⛔ 不取计数。
     `sync:${readings.syncHealth.lastEvent ?? "none"}`,
     // 寄给它的消息：id + status 都进摘要。**必须进**——否则人新发一条 META 记录不会改变摘要，

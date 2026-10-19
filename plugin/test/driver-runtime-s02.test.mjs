@@ -82,3 +82,42 @@ test("gap-meta-round-log-rel — quality carrier reads BOTH ts (heartbeat) and j
   assert.equal(st.records, 2, "both heartbeat + judgment counted");
   assert.equal(st.lastTs, "2026-09-06T10:00:30.000Z", "lastTs = fresher heartbeat ts (⛔ judgedAt-only ⇒ stale)");
 });
+
+
+test("gap-meta-collectdriverreadings — carrierStats 流式读超过 V8 字符串上限的载体（⛔ 静默折成 0 条）", (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "dr-carrier-huge-"));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  fs.mkdirSync(path.join(root, ".quay"), { recursive: true });
+  const file = path.join(root, ".quay", "meta-driver-round.jsonl");
+  // 稀疏文件：首行一条真实记录，其后是空洞（NUL），总长 > V8 最大字符串长度（64 位约 512MiB）。
+  // 改前：readFileSync 整文件读 ⇒ RangeError: Invalid string length ⇒ per-file catch 折算成 0 条，
+  // 「载体大到读不出」与「载体为空」同形。改后：按块流式扫描 ⇒ 真实行数与末条 ts。
+  fs.writeFileSync(file, '{"ts":"2026-10-19T12:52:33Z","round":1}\n', "utf8");
+  fs.truncateSync(file, 536874984);
+  assert.equal(fs.statSync(file).size, 536874984, "夹具自检：稀疏文件确实超过 V8 字符串上限");
+  const st = carrierStats(root, "meta");
+  assert.equal(st.records, 1, "流式读必须报出真实行数（改前 = 0 条，与空载体同形）");
+  assert.equal(st.lastTs, "2026-10-19T12:52:33Z", "末条 ts 也必须读得到（⛔ 只修行数不修 ts 是半个修复）");
+  assert.deepEqual(st.unreadable, [], "读成功 ⇒ ⛔ 不是 unreadable");
+});
+
+
+test("gap-meta-collectdriverreadings — 载体存在但读不出 ⇒ unreadable/readError（⛔ 与空载体同形）", (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "dr-carrier-unreadable-"));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  fs.mkdirSync(path.join(root, ".quay", "meta-driver-round.jsonl"), { recursive: true }); // 目录冒充载体 ⇒ open 成功、read EISDIR
+  const st = carrierStats(root, "meta");
+  assert.equal(st.records, 0, "读不出 ⇒ 已读行数为 0");
+  assert.deepEqual(st.unreadable, ["meta-driver-round.jsonl"], "「读不出」必须单列（改前与空载体同形）");
+  assert.equal(typeof st.files[0].readError, "string", "逐载体读数带出错误信息");
+  assert.ok(st.files[0].readError.length > 0);
+
+  // 负控制：载体真的为空 ⇒ unreadable=[]（⛔ 不是恒报读失败）。
+  const root2 = fs.mkdtempSync(path.join(os.tmpdir(), "dr-carrier-empty-"));
+  t.after(() => fs.rmSync(root2, { recursive: true, force: true }));
+  fs.mkdirSync(path.join(root2, ".quay"), { recursive: true });
+  fs.writeFileSync(path.join(root2, ".quay", "meta-driver-round.jsonl"), "", "utf8");
+  const st2 = carrierStats(root2, "meta");
+  assert.equal(st2.records, 0);
+  assert.deepEqual(st2.unreadable, [], "空载体 ≠ 读不出");
+});
