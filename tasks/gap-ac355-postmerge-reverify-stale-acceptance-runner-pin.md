@@ -2,7 +2,7 @@
 id: gap-ac355-postmerge-reverify-stale-acceptance-runner-pin
 title: AC-355 判据因 gate/acceptance-runner.ts 被合法搬迁而 ENOENT 转假：承接 AC-353 在飞
   re-anchor，在 develop 尖端复验结构臂（按导出符号定位）+ 七测试文件双环境全绿，含可证伪负对照
-status: needs-human
+status: todo
 labels:
   - gap
   - defect
