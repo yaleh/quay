@@ -3,7 +3,7 @@ id: gap-routine-semantic-dedup-scan-suite-lpt-drop-diagnostics
 title: "semantic-dedup-scan: The Transform bodies differ only in renaming the
   local chunk to obj on the Buffer.isBuffer line; suite-scheduler.ts itself
   asserts it is the SAME raw-diagnosti"
-status: ready
+status: done
 labels:
   - gap
   - routine-filed
