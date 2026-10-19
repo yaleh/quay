@@ -136,7 +136,13 @@ import {
   // snapshot in-flight set misses fan-in workflows / just-dispatched worktrees; this supplements it.
   computeInFlightWorktreeTouches,
 } from "./concurrent-batch-scheduler.ts";
-import { isDirectEntry } from "./gate-script-base.ts";
+// JSONL CARRIER READER — SINGLE SOURCE (semantic-dedup-scan finding `slot-refill-ff-records`,
+// runId `semantic-dedup-scan-1792405443214`): `readFfRetryRecords` / `readFfEscalationRecords` (and
+// this file's third copy inside computeExitedNotLandedContinueIds) were byte-identical read-split-
+// trim-JSON.parse-skip-corrupt loops differing only in the ledger filename. They now delegate to
+// gate-script-base's readJsonLines — the ONE reader, extracted for the same reason by the earlier
+// finding `readjsonlines-seven-defs-three-behaviors` (⛔ no second copy here).
+import { isDirectEntry, readJsonLines } from "./gate-script-base.ts";
 // EXITED-NOT-LANDED CONTINUE EXEMPTION (tasks/gap-slot-refill-continue-touches-overlap-redundant-
 // exemption): the worktree-list direct quantity + task-id-from-branch resolver — reused to detect a
 // residual `task/<id>` worktree (single source: fast-mode-telemetry's listWorktrees/taskIdFromBranch,
@@ -255,18 +261,7 @@ export function computeFfStarvationCap(k) {
  *  per-task-suite-records.jsonl (state=red); a worker-round-end is worker-outcome.jsonl final_state
  *  ∈ {timed-out, failed}. Absent/unparseable ⇒ [] (no ff failures ⇒ no starvation). */
 export function readFfRetryRecords(root) {
-  try {
-    const text = fs.readFileSync(path.join(root, ".quay", "fan-in-retries.jsonl"), "utf8");
-    const rows = [];
-    for (const line of text.split("\n")) {
-      const t = line.trim();
-      if (!t) continue;
-      try { rows.push(JSON.parse(t)); } catch { /* skip a corrupt line */ }
-    }
-    return rows;
-  } catch {
-    return [];
-  }
+  return readJsonLines(path.join(root, ".quay", "fan-in-retries.jsonl"));
 }
 
 /** Read <root>/.quay/fan-in-ff-escalations.jsonl — the anti-livelock escalation ledger written by
@@ -274,18 +269,7 @@ export function readFfRetryRecords(root) {
  *  success (`ff-escalation-resolved`). An ff-escalation WITHOUT a newer ff-escalation-resolved for the
  *  SAME task = that task is currently starved at k≥3. Absent/unparseable ⇒ []. */
 export function readFfEscalationRecords(root) {
-  try {
-    const text = fs.readFileSync(path.join(root, ".quay", "fan-in-ff-escalations.jsonl"), "utf8");
-    const rows = [];
-    for (const line of text.split("\n")) {
-      const t = line.trim();
-      if (!t) continue;
-      try { rows.push(JSON.parse(t)); } catch { /* skip a corrupt line */ }
-    }
-    return rows;
-  } catch {
-    return [];
-  }
+  return readJsonLines(path.join(root, ".quay", "fan-in-ff-escalations.jsonl"));
 }
 
 /** EXITED-NOT-LANDED CONTINUE EXEMPTION (tasks/gap-slot-refill-continue-touches-overlap-redundant-
@@ -298,20 +282,13 @@ export function readFfEscalationRecords(root) {
  *  worktree list ⇒ empty set (⛔ not a fabricated "everyone is continue-exempt" — the exemption is an
  *  EXEMPTION, its absence only restores the pre-existing conservative defer). */
 export function computeExitedNotLandedContinueIds(root) {
-  let exitedIds = new Set();
-  try {
-    const text = fs.readFileSync(path.join(root, ".quay", "worker-outcome.jsonl"), "utf8");
-    for (const line of text.split("\n")) {
-      const t = line.trim();
-      if (!t) continue;
-      let rec;
-      try { rec = JSON.parse(t); } catch { continue; }
-      if (rec && rec.final_state === "exited-not-landed" && typeof rec.task === "string" && rec.task) {
-        exitedIds.add(rec.task);
-      }
+  const exitedIds = new Set();
+  // Same JSONL carrier read as the two ff ledgers above (single source: readJsonLines). An
+  // absent/unreadable carrier ⇒ [] ⇒ an empty set below, the same fail-soft result as before.
+  for (const rec of readJsonLines(path.join(root, ".quay", "worker-outcome.jsonl"))) {
+    if (rec.final_state === "exited-not-landed" && typeof rec.task === "string" && rec.task) {
+      exitedIds.add(rec.task);
     }
-  } catch {
-    return new Set();
   }
   if (exitedIds.size === 0) return new Set();
   // Residual-worktree half: only a task whose `task/<id>` worktree is still open is a CONTINUE
