@@ -52,8 +52,35 @@
 //     in-scope and has nothing to resolve. This test cannot tell whether such a criterion still
 //     asserts the right guarantee — that is the goal gate's job, not this test's.
 //
-// `QUAY_GOALS_ROOT` overrides the scanned directory so the negative control below can run against a
-// temp fixture (and so a future caller can scan another workspace) without touching production
+// SECOND CHECK — timezone-blind timestamp comparison (task
+// gap-ac262-criterion-tz-blind-timestamp-comparison). AC-262's criterion derived `land` from
+// `git log -1 --format=%cI` (a committer date WITH the local offset, e.g.
+// `2026-10-18T22:01:56+08:00`) and compared it to the carrier's `ts` (UTC, `2026-10-18T14:07:37Z`)
+// as STRINGS. Lexicographically `'14' < '22'`, so every genuine post-landing round was read as
+// pre-landing: the criterion said "0 rounds" — the exact shape of "the ring never ran", which is
+// the reading hard rule 3b forbids (an input the judge cannot parse must not look like a passing
+// or a cleanly-failing judgement). The fix parses both sides to an instant (`fromisoformat` →
+// `.timestamp()`); this test is the recurrence half: the next criterion that compares two ISO-8601
+// dialects lexicographically goes red in the same landing.
+//
+// WHAT IT CHECKS (enumerated):
+//   · scans `goals/*.md` frontmatter `criterion` only (origin/expect prose may legitimately show
+//     example timestamps);
+//   · skips `superseded` / `retired` records — AC-266/267/268 carry this same code shape but are
+//     explicitly out of scope, so they are NOT a miss;
+//   · a record is in scope when its criterion both DERIVES a timestamp from git (`%cI` /
+//     `git log --format`) and COMPARES `ts` with `land`/`since` using a comparison operator;
+//   · within that scope it is a violation when the criterion carries NO timezone normalization
+//     (`fromisoformat` / `Date.parse` / `getTime()` / `.timestamp()`);
+//   · violations are reported as `file:line` so the fix lands at the comparison, not at the file.
+//
+// COVERAGE BOUNDARY: the comparison regex is word-bounded, so the normalized form
+// (`ts_epoch <= land_epoch`) never matches; but a criterion that renames the operands (`a`/`b`)
+// or normalizes with some other API is outside what this test can see. That limitation is why the
+// production criterion itself is also re-anchored, not just guarded.
+//
+// `QUAY_GOALS_ROOT` overrides the scanned directory so the negative controls below can run against
+// temp fixtures (and so a future caller can scan another workspace) without touching production
 // `goals/`.
 //
 // Run (scoped): node --test packages/quay/test/goal-criterion-import-specifiers-resolve.test.mjs
@@ -407,6 +434,255 @@ test("non-relative specifiers (node:fs, package names) are not file-path claims 
     const r = findUnresolvedCriterionImports(dir);
     assert.equal(r.checked, 0);
     assert.deepEqual(r.unresolved, []);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// ── second check: timezone-blind timestamp comparison ───────────────────────────────────────────
+
+/** `ts` compared with `land`/`since` by an operator. Word-bounded on BOTH operands so the
+ *  normalized form (`ts_epoch <= land_epoch`) does not match: `_` is a word character, so
+ *  `\bts\b` cannot match inside `ts_epoch`. */
+const LEXICOGRAPHIC_TS_COMPARISON =
+  /\bts\b\s*(?:<=|>=|<|>)\s*\b(?:land|since)\b|\b(?:land|since)\b\s*(?:<=|>=|<|>)\s*\bts\b/;
+
+/** Any of the four normalization spellings AC5 names. Presence anywhere in the criterion is
+ *  enough: a criterion that normalizes at all is not the pure string-compare shape. */
+const TIMEZONE_NORMALIZATION = /fromisoformat|Date\.parse|getTime\(\)|\.timestamp\(\)/;
+
+/** A timestamp derived from git in a criterion is a COMPARISON WINDOW, not a display string — it
+ *  will be pitted against carrier timestamps, which are written in a different dialect. */
+const GIT_TIMESTAMP_DERIVATION = /%cI|git log --format/;
+
+/**
+ * 1-based line numbers of the frontmatter `criterion:` block in the raw file. Used only to name the
+ * offending line; `null` when the block cannot be located (the record is still reported with
+ * `line: null`, never dropped).
+ */
+function criterionLineRange(raw) {
+  const lines = raw.split("\n");
+  const start = lines.findIndex((l) => /^criterion:/.test(l));
+  if (start === -1) return null;
+  let end = lines.length;
+  for (let i = start + 1; i < lines.length; i += 1) {
+    if (/^[A-Za-z_][\w-]*:\s*/.test(lines[i])) {
+      end = i;
+      break;
+    }
+  }
+  return { start: start + 1, end }; // 1-based inclusive start, exclusive end (0-based)
+}
+
+function firstLineMatching(raw, re) {
+  const range = criterionLineRange(raw);
+  if (!range) return null;
+  const lines = raw.split("\n");
+  for (let i = range.start - 1; i < Math.min(range.end, lines.length); i += 1) {
+    if (re.test(lines[i])) return i + 1; // 1-based
+  }
+  return null;
+}
+
+/**
+ * Scan a goals directory for criteria that compare a git-derived timestamp with a carrier `ts` as
+ * raw strings. Returns `blind: [{file, line, excerpt}]`; `line` is `null` when the comparison was
+ * found in the parsed criterion but not locatable in the raw text.
+ */
+export function findTimezoneBlindTimestampComparisons(goalsDir) {
+  const result = {
+    scanned: 0,
+    candidates: 0,
+    skipped: [],
+    blind: [],
+    unlocatable: [],
+    parseErrors: [],
+  };
+  let entries;
+  try {
+    entries = fs.readdirSync(goalsDir, { withFileTypes: true });
+  } catch (err) {
+    result.parseErrors.push({ file: "<goals-dir>", error: String(err && err.message ? err.message : err) });
+    return result;
+  }
+  for (const ent of entries.sort((a, b) => a.name.localeCompare(b.name))) {
+    if (!ent.isFile() || !ent.name.endsWith(".md")) continue;
+    const file = ent.name;
+    const raw = fs.readFileSync(path.join(goalsDir, file), "utf8");
+    const fmMatch = raw.match(/^---\n([\s\S]*?)\n---/);
+    if (!fmMatch) continue;
+    let fm;
+    try {
+      fm = parseYaml(fmMatch[1]);
+    } catch (err) {
+      result.parseErrors.push({ file, error: String(err && err.message ? err.message : err) });
+      continue;
+    }
+    if (!fm || typeof fm !== "object") continue;
+    if (OUT_OF_SCOPE_STATUSES.has(String(fm.status ?? ""))) {
+      result.skipped.push({ file, status: fm.status });
+      continue;
+    }
+    const criterion = typeof fm.criterion === "string" ? fm.criterion : "";
+    if (!criterion) continue;
+    result.scanned += 1;
+    if (!GIT_TIMESTAMP_DERIVATION.test(criterion)) continue;
+    result.candidates += 1;
+    if (!LEXICOGRAPHIC_TS_COMPARISON.test(criterion)) continue;
+    if (TIMEZONE_NORMALIZATION.test(criterion)) continue;
+    const line = firstLineMatching(raw, LEXICOGRAPHIC_TS_COMPARISON);
+    if (line === null) {
+      result.unlocatable.push({ file });
+      result.blind.push({ file, line: null, excerpt: null });
+    } else {
+      result.blind.push({ file, line, excerpt: raw.split("\n")[line - 1].trim().slice(0, 120) });
+    }
+  }
+  return result;
+}
+
+function describeBlind(blind) {
+  return blind
+    .map((b) => `${b.file}:${b.line ?? "?"}${b.excerpt ? ` → ${b.excerpt}` : ""}`)
+    .join("\n");
+}
+
+test("no live goal criterion compares a git %cI timestamp with a carrier ts lexicographically", () => {
+  const r = findTimezoneBlindTimestampComparisons(GOALS_DIR);
+  assert.deepEqual(
+    r.parseErrors,
+    [],
+    `could not read goal record(s) under ${GOALS_DIR} (NOT-EVALUATED, not "clean"):\n${r.parseErrors
+      .map((e) => `${e.file}: ${e.error}`)
+      .join("\n")}`,
+  );
+  // A scanner that never reached a criterion cannot find a blind comparison — say so instead of
+  // letting "checked nothing" look like "checked, clean" (hard rule 3b).
+  assert.ok(
+    r.candidates > 0,
+    `no non-superseded criterion under ${GOALS_DIR} derives a timestamp from git — this check has ` +
+      `nothing to judge, so its green is NOT evidence (hard rule 3b). Re-scope the scanner if the ` +
+      `git-derived-window shape moved.`,
+  );
+  assert.deepEqual(
+    r.blind.map((b) => b.file),
+    [],
+    `goal criterion(s) compare two ISO-8601 dialects as strings — parse both sides to an instant ` +
+      `(e.g. datetime.fromisoformat(...replace("Z","+00:00")).timestamp()) before comparing, or a ` +
+      `carrier timestamp in UTC (…Z) is read as earlier than a …+08:00 landing time:\n${describeBlind(r.blind)}`,
+  );
+});
+
+// ── negative controls for the timestamp check ───────────────────────────────────────────────────
+
+const NORMALIZED_CRITERION = [
+  "python3 - <<'P'",
+  "  import json, subprocess",
+  "  from datetime import datetime",
+  '  land = subprocess.run(["git","log","-1","--format=%cI","--","x"],capture_output=True,text=True).stdout.strip()',
+  '  land_epoch = datetime.fromisoformat(land).timestamp()',
+  '  for ln in open(".quay/goal-round.jsonl"):',
+  "      r = json.loads(ln)",
+  '      ts_epoch = datetime.fromisoformat(str(r["ts"]).replace("Z", "+00:00")).timestamp()',
+  "      if ts_epoch <= land_epoch: continue",
+  "P",
+].join("\n");
+
+const BLIND_CRITERION = [
+  "python3 - <<'P'",
+  "  import json, subprocess",
+  '  land = subprocess.run(["git","log","-1","--format=%cI","--","x"],capture_output=True,text=True).stdout.strip()',
+  '  for ln in open(".quay/goal-round.jsonl"):',
+  "      r = json.loads(ln)",
+  '      ts = str(r.get("ts") or "")',
+  "      if not ts or ts <= land: continue",
+  "P",
+].join("\n");
+
+test("negative control: the pre-fix AC-262 criterion (ts <= land as strings) is reported as file:line", () => {
+  const dir = mkGoalsDir();
+  try {
+    writeRecord(
+      dir,
+      "AC-262-prefix",
+      "---\nid: AC-262-prefix\ntitle: fixture\nstatus: achieved\nkind: criterion\ngoal: GOAL-fixture\n" +
+        "criterion: |-\n" +
+        BLIND_CRITERION.split("\n")
+          .map((l) => `  ${l}`)
+          .join("\n") +
+        "\nexpect: fixture\norigin: probe\n---\n",
+    );
+    const r = findTimezoneBlindTimestampComparisons(dir);
+    assert.equal(r.blind.length, 1, "the pre-fix comparison must be reported");
+    assert.equal(r.blind[0].file, "AC-262-prefix.md");
+    assert.ok(r.blind[0].line !== null, "the failure must name a line inside the criterion block");
+    // The named line must actually be the comparison — not the `criterion:` header or `origin:`.
+    const named = fs.readFileSync(path.join(dir, "AC-262-prefix.md"), "utf8").split("\n")[
+      r.blind[0].line - 1
+    ];
+    assert.match(named, /ts\s*<=\s*land/, `named line is not the comparison: ${JSON.stringify(named)}`);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("the normalized spelling (ts_epoch <= land_epoch after fromisoformat) is NOT reported", () => {
+  const dir = mkGoalsDir();
+  try {
+    writeRecord(
+      dir,
+      "AC-normalized",
+      "---\nid: AC-normalized\ntitle: fixture\nstatus: active\nkind: criterion\ngoal: GOAL-fixture\n" +
+        "criterion: |-\n" +
+        NORMALIZED_CRITERION.split("\n")
+          .map((l) => `  ${l}`)
+          .join("\n") +
+        "\nexpect: fixture\norigin: probe\n---\n",
+    );
+    const r = findTimezoneBlindTimestampComparisons(dir);
+    assert.deepEqual(r.blind, []);
+    assert.equal(r.candidates, 1, "the fixture criterion does derive a timestamp from git, so it must be a candidate");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("superseded / retired criteria are skipped by the timestamp check too", () => {
+  const dir = mkGoalsDir();
+  try {
+    for (const [id, status] of [["AC-266-old", "superseded"], ["AC-268-old", "retired"]]) {
+      writeRecord(
+        dir,
+        id,
+        `---\nid: ${id}\ntitle: fixture\nstatus: ${status}\nkind: criterion\ngoal: GOAL-fixture\n` +
+          "criterion: |-\n" +
+          BLIND_CRITERION.split("\n")
+            .map((l) => `  ${l}`)
+            .join("\n") +
+          "\nexpect: fixture\norigin: probe\n---\n",
+      );
+    }
+    const r = findTimezoneBlindTimestampComparisons(dir);
+    assert.deepEqual(r.blind, []);
+    assert.deepEqual(r.skipped.map((s) => s.status).sort(), ["retired", "superseded"]);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a criterion that never derives a git timestamp is out of scope", () => {
+  const dir = mkGoalsDir();
+  try {
+    writeRecord(
+      dir,
+      "AC-no-git",
+      "---\nid: AC-no-git\ntitle: fixture\nstatus: active\nkind: criterion\ngoal: GOAL-fixture\n" +
+        "criterion: |-\n  const since = readSince();\n  if (ts <= since) continue\n" +
+        "expect: fixture\norigin: probe\n---\n",
+    );
+    const r = findTimezoneBlindTimestampComparisons(dir);
+    assert.deepEqual(r.blind, []);
+    assert.equal(r.candidates, 0, "no git-derived window ⇒ not a candidate");
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }

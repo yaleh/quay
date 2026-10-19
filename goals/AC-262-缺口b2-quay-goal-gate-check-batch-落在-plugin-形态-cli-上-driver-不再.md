@@ -37,21 +37,43 @@ criterion: |-
   CAR = ".quay/goal-round.jsonl"
   if not os.path.exists(CAR):
       sys.stderr.write("AC-262: carrier %s absent => no goal round has ever been recorded, so the ring has never been observed\n" % CAR); sys.exit(1)
+  from datetime import datetime
+  def epoch_of(raw, label):
+      s = str(raw or "").strip()
+      if not s:
+          sys.stderr.write("AC-262: %s timestamp is empty => the window this criterion names cannot be read, and an unreadable window must not be reported as 'no rounds'\n" % label); sys.exit(1)
+      try:
+          return datetime.fromisoformat(s.replace("Z", "+00:00")).timestamp()
+      except Exception as e:
+          sys.stderr.write("AC-262: cannot parse %s timestamp %r as ISO-8601 (%s) => fail-closed: the carrier and git spell the same axis in different dialects, so an unparsed value is NOT the reading 'the driver has not run'\n" % (label, raw, e)); sys.exit(1)
+  land_epoch = epoch_of(land, "landing")
   seen = 0
   ok = 0
+  unparsable = []
+  observed_ring_states = []
   for ln in open(CAR, encoding="utf-8"):
       ln = ln.strip()
       if not ln: continue
       try: r = json.loads(ln)
       except Exception: continue
       ts = str(r.get("ts") or r.get("at") or "")
-      if not ts or ts <= land: continue
+      if not ts: continue
+      try:
+          ts_epoch = datetime.fromisoformat(ts.replace("Z", "+00:00")).timestamp()
+      except Exception as e:
+          unparsable.append((ts, str(e))); continue
+      if ts_epoch <= land_epoch: continue
       seen += 1
       facts = r.get("facts") or []
       ring = [f for f in facts if isinstance(f, dict) and f.get("name") == "goal-ring"]
+      observed_ring_states.append([f.get("state") for f in ring] or ["<absent>"])
       if ring and all(f.get("state") != "failed" for f in ring): ok += 1
+  if seen == 0:
+      sys.stderr.write("AC-262: carrier %s holds 0 rounds after the B2 landing commit (%s = epoch %.3f) => the goal driver recorded nothing in that window; NOT-EVALUATED for the ring (nothing observed is not 'the ring is broken')\n" % (CAR, land, land_epoch)); sys.exit(1)
   if ok < 1:
-      sys.stderr.write("AC-262: carrier %s holds %d rounds after the B2 landing commit (%s) and none with a non-failed goal-ring => the ring still breaks in production, which is the whole point of B2\n" % (CAR, seen, land)); sys.exit(1)
+      sys.stderr.write("AC-262: carrier %s holds %d round(s) after the B2 landing commit (%s = epoch %.3f) and none carries a non-failed goal-ring (observed states, first 5: %r) => the ring is broken in production, which is the whole point of B2\n" % (CAR, seen, land, land_epoch, observed_ring_states[:5])); sys.exit(1)
+  if unparsable:
+      sys.stderr.write("AC-262: note: %d carrier round(s) carried an unparseable ts and were not counted (first: %r)\n" % (len(unparsable), unparsable[0]))
   sys.exit(0)
   P
 expect: exit 0 = ①经 vendored bundle（plugin/vendor/quay/dist/quay.js，两个覆盖变量

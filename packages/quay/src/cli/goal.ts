@@ -260,6 +260,13 @@ export async function handleGoal({ sub, positional, flags, wantsJson, rest }: Cl
       if (flags.status !== undefined) filter.status = flags.status;
       if (flags.kind !== undefined) filter.kind = flags.kind;
       if (flags.goal !== undefined) filter.goal = flags.goal;
+      // gap-goal-list-ledger-scan: `--no-evidence` is the LEDGER-FREE projection — the Provider
+      // returns the same records WITHOUT the derived `evidence` / `staleness` / `lastProgressAt`
+      // keys, so a summariser never pays the `.quay/gate-events.jsonl` full scan (∝ ledger size,
+      // independent of goal count). Same idiom as `task list --no-body` (task-list.ts): read the
+      // flag off the flag bag directly — `goal list` takes no positionals, so a bare
+      // `--no-evidence` parses to `true` in every real invocation order.
+      if (flags["no-evidence"] !== undefined) filter.includeEvidence = false;
       const goals = await client.goalList(filter);
       if (wantsJson) printJson(goals);
       else if (goals.length === 0) console.log("(no goals)");

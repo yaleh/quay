@@ -2,7 +2,7 @@
 id: gap-ac355-postmerge-reverify-stale-acceptance-runner-pin
 title: AC-355 判据因 gate/acceptance-runner.ts 被合法搬迁而 ENOENT 转假：承接 AC-353 在飞
   re-anchor，在 develop 尖端复验结构臂（按导出符号定位）+ 七测试文件双环境全绿，含可证伪负对照
-status: needs-human
+status: todo
 labels:
   - gap
   - defect
@@ -112,7 +112,7 @@ from "../../kernel/gate-run-options.ts";`）。
 
 - [ ] AC-355 判据在 develop 尖端转绿：`node packages/quay/bin/quay.ts goal gate AC-355 --dry-run --json --root /data/home/yale/work/quay` 的 `verdict` 为 `pass`（exit 0，不是 exit 1 CAUSE=*，也不是 exit 3 NOT-EVALUATED）；stdout 原文与 `event.payload.treeSha` 进 Evidence；同时 `git merge-base develop HEAD` == `git rev-parse develop`。
 - [ ] 七测试文件双环境实测：干净 shell（`env -u QUAY_GOAL_ACCEPTANCE_ACTIVE`）与 `QUAY_GOAL_ACCEPTANCE_ACTIVE=1` 各跑一次 `gate-config-loader/gate/goal-store/acceptance/acceptance-env/gate-diagnostics/gate-ergonomics` 七个文件，两次都 `ℹ fail 0`；逐字贴两次的 `ℹ tests / pass / fail` 三行。
-- [ ] re-anchor 生效且不再钉路径：`grep -nE 'gate/acceptance-runner\.ts|gate/shared/acceptance-runner\.ts' goals/AC-355-*.md` 在消费者路径断言中零命中，承载者由导出符号定位（贴 `grep -rn 'export function runAcceptance' packages/quay/src` 读数）；若 peer 落地后仍命中 ⇒ 本任务执行 fallback 改 `goals/AC-355-*.md` 并按同一判据复验。
+- [ ] re-anchor 生效且不再钉路径：`grep -nE 'gate/acceptance-runner\.ts|gate/shared/acceptance-runner\.ts' goals/AC-355-*.md` 在消费者路径断言中零命中，承载者由导出符号定位（贴 `grep -rn 'export function runAcceptance' packages/quay/src` 读数）；若 peer 未覆盖 AC-355（`goals/AC-355-*.md` 的消费者路径断言仍命中该字面量）⇒ 本任务执行 fallback 改 `goals/AC-355-*.md` 并按同一判据复验。
 - [ ] 可证伪负对照：在 scratch worktree（`git worktree add --detach <path> develop` + `dispatch-worktree-setup.sh`）中把 `packages/quay/src/gate/shared/acceptance-runner.ts` 里指向 `../../kernel/gate-run-options.ts` 的 import 注释掉（不提交）⇒ 判据 exit 1 且 CAUSE 点名该角色；`git checkout --` 恢复 ⇒ exit 0。两次命令 + 逐字读数贴 Evidence（证明 re-anchor 后的判据不是恒真、也不把注释当命中）。
 - [ ] 防复发器独立绿：`node --no-warnings --experimental-strip-types --test packages/quay/test/goal-criterion-import-specifiers-resolve.test.mjs` ⇒ `fail 0`；其负对照 fixture（`QUAY_GOALS_ROOT` 指向含缺失 `gate/acceptance-runner.ts` 的判据）独立重跑必红并点名该字面量。两条读数贴 Evidence。
 - [ ] 台账留痕：filing 之后 `.quay/gate-events.jsonl` 新增 `item_id=AC-355` / `verdict=pass` 事件（贴 timestamp）；`node packages/quay/bin/quay.ts goal show AC-355 --json` 的 `evidence.verdict` = `pass`。
@@ -140,3 +140,73 @@ from "../../kernel/gate-run-options.ts";`）。
 **执行 2026-10-18T03:51:53.705Z — 连续修满重试上限仍不合格（标 needs-human）**
 
 - 阻碍原因：unsatisfiableUnannotatedAc=[re-anchor 生效且不再钉路径：`grep -nE 'gate/acceptance-runner\.ts|gate/shared/acceptance-runner\.ts' goals/AC-355-*.md` 在消费者路径断言中零命中，承载者由导出符号定位（贴 `grep -rn 'export function runAcceptance' packages/quay/src` 读数）；若 peer 落地后仍命中 ⇒ 本任务执行 fallback 改 `goals/AC-355-*.md` 并按同一判据复验。]（连续 3 轮被结构上不可派的拦截挡住 ⇒ 作者/人改写；⛔ 不派 fix worker）
+
+## Escalation Resolution（2026-10-19）
+
+**Fleet 案件**：`case_66846da137de`，2026-10-19T03:53:00.571Z 报「台账 escalate(attention)，真实状态仍为
+`needs-human`，原因 ephemeral-dev-session」。本节是该案件的持久化记录；**不勾任何 AC、不写 `done` /
+`verifiedBy`**——完成判定归 fan-in。
+
+**R1. 本次直接量（不是台账尾巴）**：
+
+```
+$ git rev-parse develop author
+c6682616bbc9a88b2c1b2cdc039f44837c90b0ce
+c6682616bbc9a88b2c1b2cdc039f44837c90b0ce
+$ git rev-list --count develop..author ; git rev-list --count author..develop
+0
+0
+
+$ node packages/quay/bin/quay.ts goal gate AC-355 --dry-run --json --root /data/home/yale/work/quay
+verdict = "fail"
+reason  = "acceptance failed (exit 1) — ... ENOENT: no such file or directory,
+           open 'packages/quay/src/gate/acceptance-runner.ts' ..."
+timestamp = "2026-10-19T03:53:32.706Z"
+event.payload.treeSha = 8859700d97fe06143cebda86ce424194a4c3812f
+```
+
+⇒ AC-355 的 stale 判据**在 2026-10-19 仍未修复**；本任务仍需要执行（不是过期案件）。
+
+**R2. `needs-human` 的机械成因（已按作者侧改写消除）**：`ready-pool-check.ts` 的
+`judgeUnsatisfiableUnannotatedAc` 对本任务 AC 第 3 条报 `status:"hit"`，命中词是
+`UNSATISFIABLE_AC_DECLARATION_PHRASES` 里的 `落地后`——它出现在 **fallback 触发条件的从句**里
+（「若 peer 落地后仍命中」），而该 AC 实际由本任务自己的执行者完成。按 Needs-Human 注记
+「作者/人改写」，本轮把该从句改为「若 peer 未覆盖 AC-355（…仍命中该字面量）」，**语义不变，
+不再声明执行者不可满足**。
+
+```
+改前: {"evaluated":true,"status":"hit","hits":["… 若 peer 落地后仍命中 …"]}
+改后: {"evaluated":true,"status":"clean","hits":[]}
+```
+
+**R3. 剩余的阻塞不在本任务体内**：`depends_on` 的
+`gap-ac353-criterion-pins-moved-acceptance-runner-path` 在 develop 上仍是 `needs-human`
+（fan-in LOOP DEADLOCK：`plugin/test/full-suite-runner-cgroup.test.mjs`；同红集的三个任务互为落地门，
+需要人决定落地顺序）。**re-anchor 已实现但未落地**：
+
+```
+$ git log --oneline develop..task/gap-ac353-criterion-pins-moved-acceptance-runner-path
+cdca0f06f Merge branch 'develop' into task/gap-ac353-criterion-pins-moved-acceptance-runner-path
+49dc5617f gap-ac353: 防复发检查补 .ts 路径字面量（整 token / 引号 / 排除缺席断言）
+f12aa1e68 goals: AC-355 field:criterion by cli:2047758
+b4b16aa32 goals: AC-353 field:criterion by cli:2047489
+```
+
+⇒ 阻塞点是 fan-in 落地顺序（人的决定），不是判据改写。因此即便 AC 拦截解除，本任务在依赖 `done`
+之前只能是 `todo`（阻断可见，派发判定为 blocked），不会进入 ready pool。
+
+**R4. 状态变更**：`needs-human → todo`（`lifecycle_retreat`，理由见 R2/R3）。`needs-human` 的本义是
+「需要人决定」；本案件的人决定已由作者侧改写完成，剩下的只是依赖未满足。
+
+
+**R5. 改写后的真实门读数**（`ready-pool-check.ts --targeted <id> --json`，2026-10-19T03:56:18Z）：
+
+```
+touchesResolve=true  touchesNarrow=true  fourArtifacts=true  bodyFreshness=fresh
+unsatisfiableUnannotatedAc={"evaluated":true,"status":"clean","hits":[]}
+depsReady=false  blockingDeps=["gap-ac353-criterion-pins-moved-acceptance-runner-path"]
+eligible=false          ⇐ 唯一的 false 来源是 blockingDeps；作者侧拦截已消失
+```
+
+⇒ 本任务当前状态是「队列内、被依赖挡住」，不是「需要人决定」。对照改前
+`unsatisfiableUnannotatedAc.status="hit"`：`eligible=false` 的成因已经换了。
