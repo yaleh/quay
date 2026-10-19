@@ -197,3 +197,16 @@ b4b16aa32 goals: AC-353 field:criterion by cli:2047489
 
 **R4. 状态变更**：`needs-human → todo`（`lifecycle_retreat`，理由见 R2/R3）。`needs-human` 的本义是
 「需要人决定」；本案件的人决定已由作者侧改写完成，剩下的只是依赖未满足。
+
+
+**R5. 改写后的真实门读数**（`ready-pool-check.ts --targeted <id> --json`，2026-10-19T03:56:18Z）：
+
+```
+touchesResolve=true  touchesNarrow=true  fourArtifacts=true  bodyFreshness=fresh
+unsatisfiableUnannotatedAc={"evaluated":true,"status":"clean","hits":[]}
+depsReady=false  blockingDeps=["gap-ac353-criterion-pins-moved-acceptance-runner-path"]
+eligible=false          ⇐ 唯一的 false 来源是 blockingDeps；作者侧拦截已消失
+```
+
+⇒ 本任务当前状态是「队列内、被依赖挡住」，不是「需要人决定」。对照改前
+`unsatisfiableUnannotatedAc.status="hit"`：`eligible=false` 的成因已经换了。
