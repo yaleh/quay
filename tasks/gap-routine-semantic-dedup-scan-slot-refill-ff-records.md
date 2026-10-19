@@ -3,7 +3,7 @@ id: gap-routine-semantic-dedup-scan-slot-refill-ff-records
 title: "semantic-dedup-scan: Two exported functions in the same file have
   identical bodies (read, split, trim, JSON.parse each, skip corrupt, [] on
   failure) differing only in the ledger fi"
-status: todo
+status: ready
 labels:
   - gap
   - routine-filed
