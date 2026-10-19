@@ -3,7 +3,7 @@ id: gap-routine-semantic-dedup-scan-baseline-shrink-only-copy
 title: "semantic-dedup-scan: Both ratchet checkers define the same exported
   shrink-only judgment (head-null bootstrap, worktree-null, raised axes) with
   only the axis source differing (Obje"
-status: todo
+status: ready
 labels:
   - gap
   - routine-filed
