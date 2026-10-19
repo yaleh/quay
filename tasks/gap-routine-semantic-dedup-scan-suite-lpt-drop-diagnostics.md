@@ -41,4 +41,5 @@ extract
 ## Touches
 - `plugin/scripts/suite-lpt-runner.mjs`
 - `plugin/scripts/suite-scheduler.ts`
+- `plugin/scripts/measure-suite-reporter.mjs`
 - `tasks/gap-routine-semantic-dedup-scan-suite-lpt-drop-diagnostics.md`
