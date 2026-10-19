@@ -239,3 +239,80 @@ goal sweep 产生。
 - session_id：38d1f47d-cdd8-40e0-932b-a413960e053b
 - suite 日志：/data/home/yale/work/quay/.quay/fan-in-suite-gap-ac353-criterion-pins-moved-acceptance-runner-path~wk-prod-anchor~1792296944133-5ca26f.log
 - fan-in 日志：/data/home/yale/work/quay/.quay/fan-in-gap-ac353-criterion-pins-moved-acceptance-runner-path-wk-prod-anchor.log
+
+## Escalation Resolution（2026-10-19）
+
+**Fleet 案件**：`case_9819a30ee4ab`（2026-10-19T04:54:11.584Z）报「台账 escalate(attention)，真实状态仍为
+`needs-human`，原因 ephemeral-dev-session」。本节是该案件的持久化记录；**不勾任何 AC、不写 `done` /
+`verifiedBy`**——完成判定仍归本项目 fan-in。
+
+**R1. 直接量（不是台账尾巴）**：
+
+```
+$ git rev-parse develop author
+6ee1e070ca5a18df15c588cab6145edd552e053d
+6ee1e070ca5a18df15c588cab6145edd552e053d
+$ git rev-list --count develop..author ; git rev-list --count author..develop
+0
+0
+
+$ node --no-warnings --experimental-strip-types packages/quay/src/goal-store.ts \
+    gate AC-353 --dry-run --json --root /data/home/yale/work/quay
+verdict   = "fail"
+reason    = "... ENOENT: no such file or directory, open 'packages/quay/src/gate/acceptance-runner.ts' ..."
+timestamp = "2026-10-19T04:54:54.004Z"
+treeSha   = dd95c4664e779cfcc3a331f57720befd9e02b55b
+```
+
+⇒ develop/主检出上的 AC-353 判据**仍是修复前文本**，本任务仍需要执行（不是过期案件）。
+
+**R2. `needs-human` 的成因已消失：互锁的另一半已落地。** 停派原因是
+`LOOP DEADLOCK … Other tasks blocked by the identical red set:
+gap-ac237-criterion-stale-acceptance-runner-moved`，其唯一解是「land ANY ONE of them first」。直接量：
+
+```
+$ git show develop:tasks/gap-ac237-criterion-stale-acceptance-runner-moved.md | sed -n '1,6p'
+status: done
+$ git log --oneline -1 88939ead8
+88939ead8 tasks: 翻 gap-ac237-criterion-stale-acceptance-runner-moved done（driver 机械 fan-in）
+```
+
+⇒ 「任选一个先落地」已由 AC-237 完成，本任务不再等同一个**人的落地顺序决定**。
+本任务 frontmatter 无 `depends_on`；`ready-pool-check --targeted` 的 `eligible=false` 唯一来源是
+`reason:"status-needs-human"`（2026-10-19T04:56Z 读数）。
+
+**R3. 本任务实现仍在树上，判据可在未来落地树上复验**（worktree 内容 = fan-in 将要落地的同一棵树）：
+
+```
+$ cd /data/home/yale/work/quay-worktrees/gap-ac353-criterion-pins-moved-acceptance-runner-path
+$ git log -1 --oneline
+cdca0f06f Merge branch 'develop' into task/gap-ac353-criterion-pins-moved-acceptance-runner-path
+$ node … goal-store.ts gate AC-353 --dry-run --json --root .
+verdict = "pass"   reason = "acceptance passed (exit 0)"   treeSha = b56e5cc4e95a65474f7084a1b2e2fa44303a6bb5
+$ node … goal-store.ts gate AC-355 --dry-run --json --root .
+verdict = "not-evaluated"
+reason  = "NOT-EVALUATED: GOAL-034 has not merged into develop yet
+           (merge-base=ca1683a5f…, develop=6ee1e070…)"
+```
+
+AC-355 的 `not-evaluated` 是判据自身的守卫（任务分支落后 develop 47 个提交）——⛔ 不是 pass，也不是 fail；
+重新派发后 worker 合并 develop 即可评估。
+
+**R4. 停派红点的现状（如实记录，不当作本任务的红）**：
+
+```
+$ node --test plugin/test/full-suite-runner-cgroup.test.mjs     # 主检出 @ develop 6ee1e070c，隔离直跑
+ℹ tests 70   pass 65   fail 5
+✖ AC1 …  ✖ AC2 …  ✖ AC3 …  ✖ AC3/DoD …  ✖ REAL cgroup negative control …
+```
+
+- 停派签名里的 `AC4 — the sampler's own cost stays under 1% …` **不在**本次 fail 列表（AC-237 落地的
+  采样方差修法已生效；本次失败是 `defaultSuiteMemoryMax()` 与 scoped probe 读数不一致的宿主/cgroup 形状）。
+- 本任务分支对该文件 **零 diff**：
+  `git diff develop...task/gap-ac353-… -- plugin/test/full-suite-runner-cgroup.test.mjs` 为空
+  ⇒ 这些红独立于本任务存在。⛔ 本条不构成「suite 会绿」的结论；下一次 fan-in 的 baseline A/B
+  仍按既存红等价判定，本任务新引入的红仍硬红（判据未放宽）。
+
+**R5. 状态变更**：`needs-human → todo`（`lifecycle_retreat`，理由 = R2 互锁已解）。这是**回到队列**，
+不是验收：AC 仍全是作者侧自检勾选，本节不新增任何勾选，也无 `done`/`verifiedBy`；下一次 fan-in
+必须自己通过 suite 与收尾门。
