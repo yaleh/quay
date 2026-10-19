@@ -1,7 +1,7 @@
 ---
 id: gap-meta-collectdriverreadings
 title: meta driver 的载体读数把「读不了」静默折叠成 0 条，活驱动与从未跑过同形
-status: todo
+status: ready
 labels:
   - meta-driver
   - driver-candidate
