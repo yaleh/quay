@@ -2,7 +2,7 @@
 id: gap-suite-memorymax-default-nondeterministic-across-cgroup-scope
 title: full-suite-runner-cgroup.test.mjs:1830 红——defaultSuiteMemoryMax() 因
   listSharedHostScopes().count 跨进程不确定，DEFAULT_SYSTEMD_RUN_LIMITS.memoryMax 非纯常量
-status: ready
+status: done
 labels:
   - gap
 parent: null
