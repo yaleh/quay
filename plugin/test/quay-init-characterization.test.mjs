@@ -202,7 +202,16 @@ const PINNED = {
       // the engine the sole writer surfaced the drift and it was fixed in the same change —
       // `packages/quay/test/init.test.mjs` now binds the two byte-for-byte. If this row moves again,
       // check whether it is the launch carrier that moved; that invariant is the reason it did not.
-      ".quay/config.yml  3eaaf7aa1fc453cb7b5df0ae6f525384e225ff542d9603d567a95d2c48aa67ff",
+      // RE-ANCHORED 2026-10-20 (gap-architecture-analysis-probe-not-wired-into-driver-routine-or-init):
+      // the fresh `loop:` block now WRITES one standing routine — `architecture-analysis`
+      // (`interval:1440m`, probe `architecture-analysis`) — instead of only documenting a commented
+      // example, and the routine-grammar comments above it were corrected to the two-layer
+      // `interval:<N>m` form. That is the INTENTIONAL change this pin is re-anchored for; the other
+      // FIVE surface files hash UNCHANGED, which is the cross-check that the move is confined to the
+      // config writer (init.ts's delta is two hunks, both inside `generateConfigContent`).
+      // The scaffold is asserted structurally in `packages/quay/test/init.test.mjs` AC2 (the hash
+      // alone could pin a config whose routine was later removed by a compensating change).
+      ".quay/config.yml  bb8b52b38ce513d368ee42526e21118abfa4c9af1e01fd8f66c6dfd90c746a9c",
       ".quay/profiles.yml  0f781fbcc8140fd1b4732d877f8484f2c6f14856e2419167281976678b748bb0",
       // RE-ANCHORED 2026-10-13 (gap-goal-driver-hardcoded-120s-spawn-kill-preempts-record-timeout-and-
       // orphans-goal-locks Plan item 3c): the single-source runtime-artifact manifest gained FOUR
