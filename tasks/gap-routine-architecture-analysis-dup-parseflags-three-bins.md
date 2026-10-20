@@ -54,10 +54,20 @@ Extract one parseFlags into a shared bin util and import it from all three bins;
    `packages/quay-native/test/document-cli.test.mjs`。
 4. `packages/quay-native/scripts/build-dist.mjs` bundle 重建成功，产物 `--help` 输出同一 usage。
 
+5. 续做轮（2026-10-20，前一轮 exited-not-landed）：全量 suite 的唯一红是
+   `packages/quay-github/test/task-check-passthrough.test.mjs`，**是本 delta 的真实后果而非环境噪声**：
+   该文件的 `withAdversarialCopy()` 只把 `bin/` + `src/` 平铺复制到 `/tmp/quay-adv-XXXX/`，于是 bin 新增的
+   相对 import `../../quay/src/cli/flags.ts` 被解析到副本之外的 `/tmp/quay/src/cli/flags.ts`
+   ⇒ `ERR_MODULE_NOT_FOUND`。修法与机理同源：临时副本改为镜像 monorepo 布局 —— 包嵌套为
+   `<tmp>/quay-github`，并以只读 symlink `<tmp>/quay -> packages/quay` 提供兄弟 core 包，相对 import
+   在临时树内可解析，而变异仍只写进被复制的 `github-client.ts`。复跑该文件：1/1 pass（2144ms），
+   三个 adversarial break/restore 用例全绿。
+
 ## Touches
 - `packages/quay-backlog/bin/quay-backlog.ts`
 - `packages/quay-github/bin/quay-github.ts`
 - `packages/quay-native/bin/quay-native.ts`
+- `packages/quay-github/test/task-check-passthrough.test.mjs`
 - `tasks/gap-routine-architecture-analysis-dup-parseflags-three-bins.md`
 
 ## Blocker
