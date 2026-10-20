@@ -1,7 +1,7 @@
 ---
 id: gap-ac349-criterion-reanchor-after-core-sink
 title: AC-349 判据重锚：GOAL-032 并入形态检查保留，生产委托改为 develop 上位置无关的委托检查
-status: todo
+status: ready
 labels:
   - gap
   - defect
