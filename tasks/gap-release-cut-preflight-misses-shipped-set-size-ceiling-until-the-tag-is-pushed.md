@@ -140,3 +140,11 @@ $ node --test plugin/test/release-cut.test.mjs
 ```
 
 同一文件在改动前的 develop 版本是 `tests 14 / pass 14 / duration 199109ms`——即三个新用例之外无回归，本文件的总耗时增加约 39s（每个 cross-checkout 的构建约 6–10s）。scoped gate（`bash scripts/test.sh --for-task gap-release-cut-preflight-misses-shipped-set-size-ceiling-until-the-tag-is-pushed --allow-thin`）里同一文件同样 17/17 绿。
+
+## Blocker
+
+**2026-10-20T23:23:41.526Z — worker 未落地（exited-not-landed）**
+
+- 未落地原因：step=suite: incomplete suite (598/598 files) — recovery exhausted at floor concurrency 32 — no declared rung produced a complete verdict (64,48,32); needs a code/config fix, see plugin/scripts/full-suite-runner.ts
+- run_id：wk-prod-anchor
+- session_id：810ab1fd-9d3b-437e-b26e-ad3c18e38e46
