@@ -2,7 +2,7 @@
 id: gap-native-provider-relative-imports-through-gate-layer
 title: native provider 经 gate/ 层路径（relative import）触 Core —— 分层实测 +
   判断（ARCH-M93-004 清零的是 package-specifier 形式，本 finding 针对 relative 形式）
-status: todo
+status: ready
 labels:
   - gap
   - architecture
