@@ -88,3 +88,10 @@ AC1-AC3 勾齐并贴证据。
 - plugin/test/probe-routine.test.mjs
 - packages/quay/test/init.test.mjs
 - tasks/gap-architecture-analysis-probe-not-wired-into-driver-routine-or-init.md
+
+## Blocker
+
+**2026-10-20T07:14:59.375Z — worker 未落地（exited-not-landed）**
+
+- 未落地原因：step=suite: AssertionError [ERR_ASSERTION]: .quay/config.yml moved.
+- run_id：wk-prod-anchor
