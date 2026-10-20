@@ -32,15 +32,48 @@ Three byte-identical 20-line --flag/positional parsers (archguard dup hash 0894c
 Extract one parseFlags into a shared bin util and import it from all three bins; AC: one definition under `git grep -n 'function parseFlags'` and three bin smoke tests (`--help`) stay green.
 
 ## AC
-- [ ] `.quay/routine-findings.jsonl` 中 finding `dup-parseflags-three-bins`（routine `architecture-analysis`，runId `architecture-analysis-1792481915389`）所描述的问题被复核并处置
-- [ ] 处置结论可核：要么修掉，要么写明「已有机制在管、失败在哪一步」，⛔ 不以「已注意到」结案
+- [x] `.quay/routine-findings.jsonl` 中 finding `dup-parseflags-three-bins`（routine `architecture-analysis`，runId `architecture-analysis-1792481915389`）所描述的问题被复核并处置
+- [x] 处置结论可核：要么修掉，要么写明「已有机制在管、失败在哪一步」，⛔ 不以「已注意到」结案
 
 ## DoD
-- [ ] 上面的判据实跑通过
-- [ ] ⛔ 探针只立案不执行：本任务若需要跑产出者/修复，由派发链执行，⛔ 不由例程代跑
+- [x] 上面的判据实跑通过
+- [x] ⛔ 探针只立案不执行：本任务若需要跑产出者/修复，由派发链执行，⛔ 不由例程代跑
+
+## Evidence
+处置 = **修掉**（不是「已注意到」）：三个 bin 各自的 20 行 `parseFlags` 已删除，改为 import 仓库里**唯一**的
+定义 `packages/quay/src/cli/flags.ts` 的 `export function parseFlags`（core 已有的共享 util，不新造第四份）。
+
+实跑读数（worktree `packages/quay-backlog|quay-github|quay-native/bin/*.ts` 改动，commit `d8dde59fe`）：
+
+1. `git grep -nE '^[[:space:]]*(export[[:space:]]+)?function[[:space:]]+parseFlags' -- '*.ts' '*.mjs' '*.js'`
+   → **count=1**，唯一命中 `packages/quay/src/cli/flags.ts:84`（改前为 4：3 个 bin 副本 + core）。
+2. 三个 bin 的 `--help` smoke 与改前逐字一致：`quay-native` / `quay-github` 打印各自 usage 并 exit 1；
+   `quay-backlog` 在未设 `QUAY_BACKLOG_TASKS_DIR` 时打印同一条 resolveTasksDir 错误并 exit 1（改前改后同形）。
+3. 直接相关测试 28 项全绿：`packages/quay/test/flags.test.mjs`、`packages/quay-github/test/cli.test.mjs`、
+   `packages/quay-backlog/test/mcp-server.test.mjs`、`packages/quay-native/test/cli-adr.test.mjs`、
+   `packages/quay-native/test/document-cli.test.mjs`。
+4. `packages/quay-native/scripts/build-dist.mjs` bundle 重建成功，产物 `--help` 输出同一 usage。
+
+5. 续做轮（2026-10-20，前一轮 exited-not-landed）：全量 suite 的唯一红是
+   `packages/quay-github/test/task-check-passthrough.test.mjs`，**是本 delta 的真实后果而非环境噪声**：
+   该文件的 `withAdversarialCopy()` 只把 `bin/` + `src/` 平铺复制到 `/tmp/quay-adv-XXXX/`，于是 bin 新增的
+   相对 import `../../quay/src/cli/flags.ts` 被解析到副本之外的 `/tmp/quay/src/cli/flags.ts`
+   ⇒ `ERR_MODULE_NOT_FOUND`。修法与机理同源：临时副本改为镜像 monorepo 布局 —— 包嵌套为
+   `<tmp>/quay-github`，并以只读 symlink `<tmp>/quay -> packages/quay` 提供兄弟 core 包，相对 import
+   在临时树内可解析，而变异仍只写进被复制的 `github-client.ts`。复跑该文件：1/1 pass（2144ms），
+   三个 adversarial break/restore 用例全绿。
 
 ## Touches
 - `packages/quay-backlog/bin/quay-backlog.ts`
 - `packages/quay-github/bin/quay-github.ts`
 - `packages/quay-native/bin/quay-native.ts`
+- `packages/quay-github/test/task-check-passthrough.test.mjs`
 - `tasks/gap-routine-architecture-analysis-dup-parseflags-three-bins.md`
+
+## Blocker
+
+**2026-10-20T07:58:03.966Z — worker 未落地（exited-not-landed）**
+
+- 未落地原因：step=suite: __PERFILE__ duration_ms=1734 packages/quay-github/test/task-check-passthrough.test.mjs passed=false end_ms=1792482938734 cpu_ms=2017.821 mem_peak_kb=72796
+- run_id：wk-prod-anchor
+- session_id：9a774e46-3a67-41ac-95ad-9fe08f8ec4c1
