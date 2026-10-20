@@ -1,7 +1,7 @@
 ---
 id: gap-probe-routine-resolves-probe-spec-under-project-root-not-plugin-root
 title: probe 轨道把 probe spec 解析到项目根而非插件根，第三方宿主声明的 probe 例程被 fail-closed 跳过
-status: ready
+status: done
 labels:
   - gap
   - defect
