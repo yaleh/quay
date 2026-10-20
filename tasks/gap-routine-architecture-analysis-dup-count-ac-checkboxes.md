@@ -3,7 +3,7 @@ id: gap-routine-architecture-analysis-dup-count-ac-checkboxes
 title: "architecture-analysis: Identical AC-checkbox predicate in two layers
   (archguard dup hash 0bb360d4880cd7f4); the fail-closed sectionFound:false/NaN
   rationale comment exists only in "
-status: todo
+status: ready
 labels:
   - gap
   - routine-filed
