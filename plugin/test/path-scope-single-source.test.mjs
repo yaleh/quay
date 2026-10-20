@@ -84,9 +84,13 @@ test("behavior: line-number citations resolve to their base path; bare basenames
     ["quay-init.sh"],
     "a trailing `:NNN` is a citation, not part of the path",
   );
+  // NB: cite the tick doc at its CURRENT (post-move) location. The pre-move path is one of the 5
+  // old paths that loop-shipping's AC1b scan forbids anywhere in the repo (a live reference to a
+  // retired path is exactly the drift that scan exists to catch) — a fixture does not need to be
+  // stale to exercise the `:NNN` rule.
   assert.deepEqual(
-    pathCandidates("orchestration/orchestrator-loop-tick.md:302"),
-    ["orchestration/orchestrator-loop-tick.md"],
+    pathCandidates("plugin/loop/orchestrator-loop-tick.md:302"),
+    ["plugin/loop/orchestrator-loop-tick.md"],
   );
   assert.deepEqual(pathCandidates("lifecycle.ts"), ["lifecycle.ts"], "bare filename-shaped basename");
   assert.deepEqual(pathCandidates("plugin/scripts/path-scope.ts"), ["plugin/scripts/path-scope.ts"]);
