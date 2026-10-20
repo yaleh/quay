@@ -2,7 +2,7 @@
 id: gap-full-suite-runner-ac4-wallclock-noise-envelope
 title: full-suite-runner AC4：on/off 墙钟差在 fan-in 负载下 1.86% > 1% ⇒
   采样与噪声容限按实测收紧（instrument 腿仍守 1%）
-status: ready
+status: done
 labels:
   - gap
   - defect
