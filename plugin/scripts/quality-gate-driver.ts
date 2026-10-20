@@ -2710,8 +2710,13 @@ export async function main(argv: string[]): Promise<number> {
       return prefix.length === 0 ? launchArgv(PROBE_ROLE_DEFAULT, prompt, rootDir) : [...prefix, prompt];
     }
     : undefined;
+  // ⛔ 不在这里拼规格根：probe 规格随插件发布，住在**本 kernel 的 plugin root** 下
+  //    （`resolveProbeSpecRoot()`，与 routine-scheduler 的 `${CLAUDE_PLUGIN_ROOT}/probes/…` 同根）。
+  //    曾经这里把 `pluginRoot` 硬拼成 `<rootDir>/plugin`（项目根）—— 内核资源锚在项目根上，于是
+  //    `quay-init` 之后没有 vendored `plugin/` 的第三方宿主，`loop.routines:` 声明的每一条 `probe:`
+  //    在运行期都读不到规格（PROBE-SPEC FAIL-CLOSED）⇒ 整条轨道静默不跑
+  //    （gap-probe-routine-resolves-probe-spec-under-project-root-not-plugin-root）。
   const probeSelection = probeRoutinesFromConfig(rootDir, {
-    pluginRoot: path.join(rootDir, "plugin"),
     probeTimeoutMs,
     ...(probeStateDir ? { stateDir: probeStateDir } : {}),
     ...(probeArgv ? { probeArgv } : {}),
@@ -2725,7 +2730,7 @@ export async function main(argv: string[]): Promise<number> {
     console.error(`quality-gate-driver: routine "${s.name}" (${s.trigger}) 未被 probe 轨道驱动 — ${s.reason}`);
   }
   if (probeSelection.routines.length > 0) {
-    console.error(`quality-gate-driver: probe 轨道已装配 ${probeSelection.routines.length} 条例程（${probeSelection.routines.map((r) => r.name).join(", ")}）`);
+    console.error(`quality-gate-driver: probe 轨道已装配 ${probeSelection.routines.length} 条例程（${probeSelection.routines.map((r) => r.name).join(", ")}；规格根 ${probeSelection.pluginRoot}）`);
   }
 
   // arch-discovery 轨道：读 `.quay/config.yml` `loop.arch_discovery:`（同一注入纪律，见 QualityGateOptions）。
