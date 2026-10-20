@@ -2,7 +2,7 @@
 id: gap-ci-yml-no-concurrency-group-push-runs-pile-up-on-single-runner
 title: ci.yml 没有 concurrency：develop 每次推送都排一整套 CI，单台 runner 下到达速率 > 处理速率，过期提交的
   run 占满队列
-status: todo
+status: ready
 labels:
   - gap
   - defect
