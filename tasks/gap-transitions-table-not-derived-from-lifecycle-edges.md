@@ -24,8 +24,8 @@ gate/lifecycle.ts 的 TRANSITIONS（promote/retreat 运行时邻接表）+ legal
 
 ## Acceptance Criteria
 
-- TRANSITIONS 的定义处不再是一份手写邻接表，而是从 LIFECYCLE_EDGES 派生的逻辑（可 grep 验证：gate/lifecycle.ts 里 TRANSITIONS 只出现在派生处，无第二份手写表）。
-- packages/quay/test/lifecycle-edge-table.test.mjs 的 25 对 golden 对照仍全绿，且该 test 文件没有为适配派生而放宽断言。
+- [ ] TRANSITIONS 的定义处不再是一份手写邻接表，而是从 LIFECYCLE_EDGES 派生的逻辑（可 grep 验证：gate/lifecycle.ts 里 TRANSITIONS 只出现在派生处，无第二份手写表）。
+- [ ] packages/quay/test/lifecycle-edge-table.test.mjs 的 25 对 golden 对照仍全绿，且该 test 文件没有为适配派生而放宽断言。
 
 ## Definition of Done
 
