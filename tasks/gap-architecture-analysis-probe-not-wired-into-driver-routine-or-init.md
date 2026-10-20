@@ -2,7 +2,7 @@
 id: gap-architecture-analysis-probe-not-wired-into-driver-routine-or-init
 title: architecture-analysis probe（唯一真正调 archguard 的机件）未接进任何通用 driver
   routine，quay init 也不 scaffold
-status: todo
+status: ready
 labels:
   - gap
 parent: null
