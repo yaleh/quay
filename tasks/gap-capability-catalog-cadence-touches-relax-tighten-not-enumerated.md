@@ -2,7 +2,7 @@
 id: gap-capability-catalog-cadence-touches-relax-tighten-not-enumerated
 title: "capability-catalog CADENCE: touches-relax-tighten.ts 夹带说明文字 ⇒
   不是五枚举之一（GOAL-037 AC-367 回归）"
-status: todo
+status: ready
 labels:
   - gap
   - defect
