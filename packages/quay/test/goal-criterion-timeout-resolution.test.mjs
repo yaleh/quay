@@ -362,9 +362,13 @@ test("AC2 — 60000 默认值只在一处定义，其余引用该导出常量", 
     }
   };
   // GOAL-034: the constant's home moved out of `gate/` into `kernel/` — the walk follows it, so a
-  // NEW file spelling the literal in either tree is still caught.
+  // NEW file spelling the literal in either tree is still caught. tasks/gap-src-root-gate-cycle-break
+  // then sank the runner + the goal store into `core/`, so the walk covers that tree too (a shim at
+  // the old root path would otherwise be the only file left to inspect, and the guard would go
+  // vacuous exactly where the implementation now lives).
   walk(path.join(srcDir, "gate"));
   walk(path.join(srcDir, "kernel"));
+  walk(path.join(srcDir, "core"));
   files.push(path.join(srcDir, "goal-store.ts"));
 
   const DEFAULT_LITERAL = /=\s*60_?000\b|timeoutMs = 60000|: 60000\)/;
@@ -378,7 +382,7 @@ test("AC2 — 60000 默认值只在一处定义，其余引用该导出常量", 
   assert.match(utils, /export const DEFAULT_ACCEPTANCE_TIMEOUT_MS = 60000;/, "the one definition is EXPORTED (⛔ not a private literal by another name)");
   // The runner's two entry points must reference it rather than respell it — the other half of
   // "one definition": a constant nobody imports is just a comment.
-  const runner = fs.readFileSync(path.join(srcDir, "gate", "shared", "acceptance-runner.ts"), "utf8");
+  const runner = fs.readFileSync(path.join(srcDir, "core", "acceptance-runner.ts"), "utf8");
   assert.equal((runner.match(/timeoutMs = DEFAULT_ACCEPTANCE_TIMEOUT_MS/g) ?? []).length, 2, "runAcceptance + runAcceptanceCapture both default to the shared constant");
   assert.equal((runner.match(/timeoutMs = 60000/g) ?? []).length, 0, "⛔ no respelled default remains in the runner");
 });

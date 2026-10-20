@@ -21,7 +21,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { spawnSync } from "node:child_process";
-import { appendGateEvent, queryGateEvents } from "./gate/gate-event-store.ts";
+import { appendGateEvent, queryGateEvents } from "./core/gate-event-store.ts";
 import { parseFrontmatter } from "./frontmatter-store-base.ts";
 import { goalBranchName, goalBranchRefExists } from "./branch-model.ts";
 
