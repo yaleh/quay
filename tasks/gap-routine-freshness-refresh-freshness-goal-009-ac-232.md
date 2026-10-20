@@ -3,7 +3,7 @@ id: gap-routine-freshness-refresh-freshness-goal-009-ac-232
 title: "freshness-refresh: Same coldstart-face run as AC-203/207 (d=173, margin
   27); filing it is required because refreshing that run does not happen by
   itself."
-status: todo
+status: ready
 labels:
   - gap
   - routine-filed
