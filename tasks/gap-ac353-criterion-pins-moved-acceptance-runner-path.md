@@ -326,3 +326,87 @@ $ node --test plugin/test/full-suite-runner-cgroup.test.mjs     # 主检出 @ de
 - session_id：b73cb424-5e7a-4282-967c-46c97be1c85d
 - suite 日志：/data/home/yale/work/quay/.quay/fan-in-suite-gap-ac353-criterion-pins-moved-acceptance-runner-path~wk-prod-anchor~1792386297743-0b57e9.log
 - fan-in 日志：/data/home/yale/work/quay/.quay/fan-in-gap-ac353-criterion-pins-moved-acceptance-runner-path-wk-prod-anchor.log
+
+## Round 2026-10-20 — develop 前进 113 提交后的复验与第三处 re-anchor
+
+（本节只记录本轮**增量**读数；以上各节保留为当时的历史记录，不覆盖。）
+
+### 先验：上一轮停派的两条红点都已在 develop 修复（直接量）
+
+- `plugin/test/capability-catalog.test.mjs` 的 cadence 红：develop 的
+  `plugin/scripts/capability-catalog-declarations.json` 里 `CADENCE["touches-relax-tighten.ts"]`
+  已从夹带说明文字的长串改为五枚举之一 `"每轮"`（合并 develop 后逐字复查；任务
+  `gap-capability-catalog-cadence-touches-relax-tighten-not-enumerated` 状态 `done`）。
+- `plugin/test/full-suite-runner-cgroup.test.mjs` 的 AC4 红（wall-clock A/B 实测 1.86% > 1%）：
+  develop 已落 `a343868ff test(full-suite-runner): AC4 wall-clock leg gets a runtime-measured noise
+  envelope`（5 samples/arm + 运行时噪声包络；instrument leg 仍保留硬 1%）。本任务对该文件
+  **零 diff**（见下方 AC-6 读数）。
+
+### 合并 develop 后暴露的**同机制第三处** stale：AC-353 criterion 钉死 `abi.ts` 里的 `Task`
+
+合并 develop（`f017705f8`）后 AC-353 判据首次变红，**不是** acceptance-runner 那一处：
+
+```
+verdict=fail
+reason="acceptance failed (exit 1) — CAUSE=abi-touched -- abi.ts Task definition missing or moved,
+        out of scope for this goal … CAUSE=structural-scan-red …"
+```
+
+成因：develop 的 `35dc5da93 refactor(core): sink the gate substrate into src/core to break the
+""<->gate directory SCC`（任务 `gap-src-root-gate-cycle-break`，done）把 `Task` 的定义搬到
+`packages/quay/src/core/types.ts`，而 `packages/quay/src/abi.ts` 按该任务的设计**保留为 forwarding
+re-export**（文件头逐字写着 `export * from "./core/types.ts"`）。旧判据用
+`/export interface Task\b/.test(live(rd(abi.ts)))` 钉住「定义就在 abi.ts 里」⇒ 一次合法重构把它变假。
+这正是本任务 Proposal 所修的同一种机制（硬规则 5b：同一文件家族的兄弟实例，且这次就在同一条判据里）。
+
+**re-anchor（符号定位，不钉目录）**：`Task` 必须有**唯一**承载模块（`^export interface Task`），
+且 `abi.ts` 必须仍 **forward** 到该承载模块（把 `from "…"` 解析成绝对路径后比对）；`abi.ts` 自己
+不得是定义点。改后同一判据在合并树上 `verdict=pass`。
+
+**负对照（硬规则 4 推论四：若假设为假，结果必须不同）**——临时 detached worktree，未提交：
+
+```
+# (a) abi.ts 删除 forwarding 行（export * from "./core/types.ts"）后：
+exit=1  verdict=fail
+reason="CAUSE=abi-touched -- abi.ts no longer forwards the Task carrier
+        (packages/quay/src/core/types.ts) CAUSE=structural-scan-red …"
+# (b) 未改动的同一临时树：
+exit=0  verdict=pass
+```
+
+### AC-3 搬迁负对照在本轮树上重做（两条读数）
+
+合并 develop 后 `runAcceptance` 的真实承载者已是 `packages/quay/src/core/acceptance-runner.ts`
+（`gate/shared/acceptance-runner.ts` 变成 forwarding shim，注释指向 core）。因此本轮跑了**两个**
+负对照（均为临时 detached worktree，未提交，跑完即删）：
+
+1. **字面 AC-3**：把 `packages/quay/src/gate/shared/acceptance-runner.ts` 移到
+   `gate/runner/acceptance-runner.ts` 并 re-point 5 个消费者 ⇒
+   `verdict=pass reason="acceptance passed (exit 0)"` exit 0。
+2. **更强的一条（真实承载者搬迁）**：把 `packages/quay/src/core/acceptance-runner.ts` 移到
+   `packages/quay/src/gate/runner/acceptance-runner.ts`，修正其内部三条 import 深度
+   （`../kernel/* → ../../kernel/*`、`./types.ts → ../core/types.ts`）并 re-point 7 个 importer
+   （`core/goal-store.ts`、`gate/factories/*.ts`、`gate/shared` shim）⇒
+   **同一判据仍 `verdict=pass` exit 0**。
+
+⇒ 目录/深度怎么变，判据都跟着**导出符号**走；两条读数都在本轮合并树（含 develop 的 SCC 重构）上取得。
+
+### 本轮验收读数（合并树 = fan-in 将要落地的同一棵树）
+
+```
+$ node … goal-store.ts gate AC-353 --dry-run --json --root .
+verdict=pass  reason="acceptance passed (exit 0)"   treeSha=459989c97d62650167300e89f8a99c16e2f0b773
+$ node … goal-store.ts gate AC-355 --dry-run --json --root .
+verdict=pass  reason="acceptance passed (exit 0)"   treeSha=459989c97d62650167300e89f8a99c16e2f0b773
+$ node --no-warnings --test packages/quay/test/goal-criterion-import-specifiers-resolve.test.mjs
+ℹ tests 14 / pass 14 / fail 0
+$ grep -c "gate/shared/" goals/AC-353-*.md                                  ⇒ 0
+$ grep -c "gate/acceptance-runner\.ts" goals/AC-353-*.md                    ⇒ 0
+$ grep -c "gate/shared/\|gate/acceptance-runner\.ts" goals/AC-355-*.md      ⇒ 0
+$ grep -rln "^export function runAcceptance(" packages/quay/src
+packages/quay/src/core/acceptance-runner.ts                                  ⇒ 唯一承载者（符号定位）
+$ git diff --name-only develop...HEAD -- packages/quay/src                   ⇒ （空）
+```
+
+本任务 delta（`git diff --name-only develop...HEAD`）：两条 `goals/AC-35{3,5}-*.md` +
+`packages/quay/test/goal-criterion-import-specifiers-resolve.test.mjs`（任务自身文件由 ABI 提交）。
