@@ -276,12 +276,17 @@ function readDirectoryCycles(root: string, workDir: string, source: string): {
   directoryCyclesReason: string | null;
   directoryCycleCount: number | null;
   directoryCycles: DirectoryCycle[] | null;
+  /** WHEN the artifact this reading came from was produced (`arch.json.timestamp`, falling back to the
+   *  manifest scope's `generatedAt`). null ⇒ no artifact was read. A reading without this cannot be
+   *  told apart from a current one (硬规则 4b: stale readings look exactly like fresh ones). */
+  artifactTimestamp: string | null;
 } {
-  const notEvaluated = (reason: string) => ({
+  const notEvaluated = (reason: string, artifactTimestamp: string | null = null) => ({
     directoryCyclesEvaluated: false,
     directoryCyclesReason: reason,
     directoryCycleCount: null,
     directoryCycles: null,
+    artifactTimestamp,
   });
 
   const queryDir = path.join(workDir, "query");
@@ -318,36 +323,53 @@ function readDirectoryCycles(root: string, workDir: string, source: string): {
   if (typeof entry?.key !== "string" || entry.key.length === 0) {
     return notEvaluated(`query manifest ${manifestFile}: the matching scope has no key`);
   }
+  // The manifest scope's own write time is the fallback freshness source when the arch.json itself
+  // carries no `timestamp` (older archguard versions / hand-written fixtures).
+  const manifestTimestamp =
+    typeof entry.generatedAt === "string" && entry.generatedAt !== "" ? entry.generatedAt : null;
 
   const archFile = path.join(queryDir, entry.key, "arch.json");
   let archRaw: string;
   try {
     archRaw = fs.readFileSync(archFile, "utf8");
   } catch {
-    return notEvaluated(`cannot read query scope artifact ${archFile} — directory-level cycles are NOT evaluated`);
+    return notEvaluated(`cannot read query scope artifact ${archFile} — directory-level cycles are NOT evaluated`, manifestTimestamp);
   }
   let arch: any;
   try {
     arch = JSON.parse(archRaw);
   } catch {
-    return notEvaluated(`query scope artifact ${archFile} is not valid JSON`);
+    return notEvaluated(`query scope artifact ${archFile} is not valid JSON`, manifestTimestamp);
   }
+  // ⛔ THE FRESHNESS OF THIS READING: the artifact's own `timestamp` is authoritative; the manifest
+  // entry's `generatedAt` is the fallback. It is recorded even on the not-evaluated paths below
+  // (an artifact WAS read — it just lacked a moduleGraph), so a routine record can always say HOW OLD
+  // the data it looked at is (gap-arch-cycle-report-record-artifact-timestamp).
+  const artifactTimestamp =
+    typeof arch.timestamp === "string" && arch.timestamp !== "" ? arch.timestamp : manifestTimestamp;
 
   const moduleGraph = arch?.extensions?.tsAnalysis?.moduleGraph;
   if (moduleGraph == null || typeof moduleGraph !== "object") {
     return notEvaluated(
-      `query scope ${entry.key} for ${source} has no extensions.tsAnalysis.moduleGraph (language: ${String(arch?.language ?? "unknown")}) — directory-level cycles are NOT evaluated (not "0 cycles")`
+      `query scope ${entry.key} for ${source} has no extensions.tsAnalysis.moduleGraph (language: ${String(arch?.language ?? "unknown")}) — directory-level cycles are NOT evaluated (not "0 cycles")`,
+      artifactTimestamp
     );
   }
   const rawCycles = moduleGraph.cycles;
   if (!Array.isArray(rawCycles)) {
-    return notEvaluated(`query scope ${entry.key} for ${source}: moduleGraph.cycles is not an array — directory-level cycles are NOT evaluated`);
+    return notEvaluated(
+      `query scope ${entry.key} for ${source}: moduleGraph.cycles is not an array — directory-level cycles are NOT evaluated`,
+      artifactTimestamp
+    );
   }
 
   const cycles: DirectoryCycle[] = [];
   for (const c of rawCycles) {
     if (c == null || !Array.isArray(c.modules) || !c.modules.every((m: unknown) => typeof m === "string")) {
-      return notEvaluated(`query scope ${entry.key} for ${source}: moduleGraph.cycles contains a malformed entry (modules must be string[])`);
+      return notEvaluated(
+        `query scope ${entry.key} for ${source}: moduleGraph.cycles contains a malformed entry (modules must be string[])`,
+        artifactTimestamp
+      );
     }
     cycles.push({ size: c.modules.length, modules: [...c.modules] });
   }
@@ -357,6 +379,7 @@ function readDirectoryCycles(root: string, workDir: string, source: string): {
     directoryCyclesReason: null,
     directoryCycleCount: cycles.length,
     directoryCycles: cycles,
+    artifactTimestamp,
   };
 }
 
@@ -381,6 +404,9 @@ export interface DirectoryCycleScopeReading {
   cycleCount: number | null;
   /** The cycle MEMBERS (AC2: a non-empty reading must name its members, not just count them). */
   cycles: DirectoryCycle[] | null;
+  /** When the artifact THIS scope was read from was produced (arch.json `timestamp`, else the
+   *  manifest scope's `generatedAt`). null ⇒ no artifact was read for this scope. */
+  artifactTimestamp: string | null;
 }
 
 /** The aggregate reading over SCOPES. `totalCycleCount` is non-null ONLY when every scope evaluated. */
@@ -390,6 +416,15 @@ export interface DirectoryCycleReading {
   reason: string | null;
   totalCycleCount: number | null;
   scopes: DirectoryCycleScopeReading[];
+  /** THE OLDEST artifact timestamp among the scopes that ACTUALLY PRODUCED A READING (evaluated),
+   *  because those are the numbers this record reports — a reading is only as fresh as its stalest
+   *  contributing part, so one stale scope must not be hidden by fresher siblings.
+   *  Scopes that could only produce a `not-evaluated` row contribute nothing to the reported cycles,
+   *  so their (often much older) artifacts are NOT averaged in — that would make `stale` permanently
+   *  true and therefore information-free (硬规则 4).
+   *  null ⇒ nothing was read / nothing evaluated, and staleness is NOT EVALUABLE (硬规则 3b: ⛔ never
+   *  `false`). Per-scope timestamps remain available in `scopes` for the unevaluated ones. */
+  artifactTimestamp: string | null;
 }
 
 /** Read the directory-level cycles from the artifacts the LAST `archguard analyze` persisted.
@@ -409,8 +444,17 @@ export function readDirectoryCycleReading(root: string, workDir?: string): Direc
       reason: r.directoryCyclesReason,
       cycleCount: r.directoryCycleCount,
       cycles: r.directoryCycles,
+      artifactTimestamp: r.artifactTimestamp,
     };
   });
+  // Oldest timestamp among the scopes that produced the readings this record reports (见 the interface
+  // comment: unevaluated scopes are not averaged in). Entries whose timestamp cannot be parsed as ISO
+  // are skipped rather than silently treated as "fresh".
+  const timestamps = scopes
+    .filter((s) => s.evaluated)
+    .map((s) => s.artifactTimestamp)
+    .filter((v): v is string => typeof v === "string" && v !== "" && Number.isFinite(Date.parse(v)));
+  const artifactTimestamp = timestamps.length > 0 ? timestamps.reduce((a, b) => (a <= b ? a : b)) : null;
   const failed = scopes.filter((s) => !s.evaluated);
   const evaluated = failed.length === 0;
   return {
@@ -419,6 +463,7 @@ export function readDirectoryCycleReading(root: string, workDir?: string): Direc
     reason: evaluated ? null : failed.map((s) => `${s.scope}: ${s.reason}`).join(" | "),
     totalCycleCount: evaluated ? scopes.reduce((n, s) => n + (s.cycleCount ?? 0), 0) : null,
     scopes,
+    artifactTimestamp,
   };
 }
 
