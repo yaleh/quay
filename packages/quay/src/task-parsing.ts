@@ -105,6 +105,14 @@ export function parseFrontmatterCompletely(frontmatterRaw) {
  * readers that check it; `total: NaN` is the STRUCTURAL guarantee that OLD destructuring read-patterns
  * (`const { total, checked } = …`) cannot obtain a pass (`total === 0` and `checked === total` are both
  * FALSE for NaN), so every pre-existing consumer fails CLOSED without being edited.
+ *
+ * This function is DELIBERATELY duplicated in the mechanism layer (plugin/scripts/task-schema.ts,
+ * re-exported by task-status-drift-check.ts) — build-plugin-dist bundles plugin/ WITHOUT the
+ * packages/ tree, so that layer cannot statically import this module. The copy is NOT an
+ * undocumented parallel implementation: plugin/test/task-parsing-parity.test.mjs feeds the SAME
+ * fixture set (null / empty / mixed `[ ]` `[x]` `[X]` `[~]` / prose with no boxes) to both call sites
+ * and asserts deep-equal objects. Edit BOTH copies or that parity test goes red
+ * (gap-routine-architecture-analysis-dup-count-ac-checkboxes).
  */
 export function countAcCheckboxes(acSection) {
   if (acSection == null) {
