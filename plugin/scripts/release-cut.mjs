@@ -23,7 +23,12 @@
 //                                                   CAUSE=release-cut-base-unresolvable /
 //                                                   release-cut-develop-behind-remote /
 //                                                   release-cut-develop-sync-unreadable
-//   preflight ⑥ — the ONE preflight step that is NOT read-only and CANNOT refuse: `--base`'s last
+//        the artifact built from `--base` must be within release.yml's shipped-set SIZE CEILING
+//        (a real local build; the ONE preflight that creates throwaway refs — it removes them again
+//        on every path, and ⛔ never touches `--root`'s tree)
+//                                                   CAUSE=release-cut-shipped-set-ceiling-exceeded /
+//                                                   release-cut-shipped-set-precheck-unavailable
+//   preflight ⑦ — the ONE preflight step that is NOT read-only and CANNOT refuse: `--base`'s last
 //        DECISIVE CI run is read from `.quay/ci-runs.jsonl`, PRINTED, and (on a real cut) appended to
 //        `.quay/release-cut-preflight.jsonl`                      ⛔ NO CAUSE=, no exit code
 //        WHY A RECORD AND NOT A GATE — SPEC §4.2 (「develop 的上一次 decisive CI 必须是绿」) is
@@ -106,7 +111,8 @@
 // Usage:
 //   node plugin/scripts/release-cut.mjs <version> [--root <repo>] [--worktree <path>]
 //                  [--remote <name>] [--base <ref>] [--dispatch-ref <ref>]
-//                  [--allow-workflow-drift] [--no-push] [--no-dispatch] [--dry-run]
+//                  [--allow-workflow-drift] [--allow-shipped-set-ceiling]
+//                  [--no-push] [--no-dispatch] [--dry-run]
 //   <version>    bare X.Y.Z (⛔ no leading `v`, no suffix) — tag = v<version>, branch = release/v<version>
 //   --root       the checkout to cut from (default: the MAIN checkout of the repo this script
 //                lives in — `git rev-parse --git-common-dir`'s parent, so running this from a
@@ -124,6 +130,11 @@
 //   --allow-workflow-drift
 //                proceed even when the governing release.yml differs from the tree the tag names;
 //                without it that difference is a REFUSED preflight (see --dispatch-ref)
+//   --allow-shipped-set-ceiling
+//                proceed even when the artifact built from `--base` exceeds the shipped-set size
+//                ceiling that release.yml's shipped-set-clean will apply to the tag; without it that
+//                reading is a REFUSED preflight (release-cut-shipped-set-ceiling-exceeded). The
+//                reading is printed either way
 //   --no-push    do not push (steps 4 and 6's push) — used by tests and by offline cuts
 //   --no-dispatch do not run `gh workflow run release.yml`
 //   --dry-run    run every READ-ONLY preflight, print the whole plan (worktree path, the
@@ -234,7 +245,7 @@ function mainRootOf(dir) {
 const USAGE =
   "用法: bash plugin/scripts/release-cut.sh <X.Y.Z> [--root <repo>] [--worktree <path>] " +
   "[--remote <name>] [--base <ref>] [--dispatch-ref <ref>] [--allow-workflow-drift] " +
-  "[--no-push] [--no-dispatch] [--dry-run]\n";
+  "[--allow-shipped-set-ceiling] [--no-push] [--no-dispatch] [--dry-run]\n";
 
 const argv = process.argv.slice(2);
 
@@ -253,6 +264,7 @@ let remote = "origin";
 let base = "develop";
 let dispatchRefArg = "";
 let allowWorkflowDrift = false;
+let allowShippedSetCeiling = false;
 let doPush = true;
 let doDispatch = true;
 let dryRun = false;
@@ -267,6 +279,7 @@ for (let i = 0; i < argv.length; i++) {
     case "--base": base = next(); break;
     case "--dispatch-ref": dispatchRefArg = next(); break;
     case "--allow-workflow-drift": allowWorkflowDrift = true; break;
+    case "--allow-shipped-set-ceiling": allowShippedSetCeiling = true; break;
     case "--no-push": doPush = false; break;
     case "--no-dispatch": doDispatch = false; break;
     case "--dry-run": dryRun = true; break;
@@ -476,7 +489,207 @@ if (doDispatch) {
   }
 }
 
-// ── preflight ⑥: the CI reading this cut SAW — RECORDED, ⛔ NEVER A GATE ─────────────────────────
+// ── preflight ⑥: the shipped-set SIZE CEILING, measured on the tree `--base` names ──────────────
+//
+// THE DEFECT THIS CLOSES (measured twice, 2026-10-16 and 2026-10-20): the artifact's size ceiling
+// (`plugin/shipped-set-baseline.json` `shipped`, enforced by
+// `plugin/scripts/verify-plugin-channel-assertions.ts`'s `shipped-set-clean`) ran ONLY in
+// release.yml's `verify-plugin-channel` — step 13, i.e. AFTER the tag was pushed and the run
+// dispatched. So a cut that could never pass was discovered at the one moment it could no longer be
+// repaired: release.yml checks out `inputs.tag`, and the ceiling is read from THAT tree, so no later
+// commit on `develop` changes the verdict for an already-pushed tag. Two consecutive releases
+// (v0.20.0, v0.21.0) died on the same line — `files 287 > ceiling 286` — and v0.20.0 was followed by
+// four days of a tag with no GitHub Release. The number was knowable BEFORE the tag existed; nothing
+// asked.
+//
+// WHY IT IS BUILT HERE AND NOT READ FROM CI: the question is "what will release.yml's build produce
+// from THIS tree?", and the only complete source for that is the same mechanism release.yml uses —
+// `plugin/scripts/publish-dist-branch.sh` (⛔ not a second implementation: the probe must reproduce
+// the gate it predicts, or the reading is a proxy that drifts from the fact — 硬规则 4b). Measured
+// 2026-10-21: the whole build takes ~6 s, so paying it before an irreversible push is cheap.
+//
+// ⛔ WHY THE PROBE CHECKS OUT A `release/*` BRANCH (a subtlety that silently changes the answer):
+// `publish-dist-branch.sh`'s build chain is `build-plugin-dist --rewrite && stamp-version && … &&
+// {prune unreachable .sh}`. `resolve-version.ts --mode build` answers NOT-EVALUATED (exit 3) on a
+// DETACHED head carrying no version tag, and because the chain is an `&&` list, bash's errexit does
+// NOT fire there — the rest of the line is simply SKIPPED. Measured 2026-10-21: building the same
+// tree from a detached worktree skipped the `.sh` prune and the bundle-version gate and produced
+// 306 files / 16594 .sh lines, while the three-character-different `release/*` checkout produced
+// 287 / 7345 — the two readings that matter (files grew by exactly the 19 `.sh` the prune removes).
+// So the probe puts the base commit on a throwaway `release/` branch (the prefix `resolve-version.ts`
+// recognises, and the shape the real cut is about to create) and builds from there.
+//
+// ⛔ READ-ONLY ON `--root`: everything happens in a temp linked worktree under the SAME PARENT dir as
+// the cut's own worktree (never inside `--root` — an untracked directory there would change
+// `git status`, which the caller may be judging), and the finally-block removes the worktree AND
+// both scratch branches on the success and the failure path alike (`--dry-run` included: its whole
+// contract is that it leaves no ref, worktree or branch behind).
+function precheckShippedSetSize(rootDir, baseRef) {
+  const unavailable = (reason, detail) => ({ verdict: "unavailable", reason, detail: detail ?? "" });
+  let parent;
+  try {
+    parent = fs.mkdtempSync(path.join(path.dirname(rootDir), "release-cut-shipped-set-"));
+  } catch (err) {
+    return unavailable("could not create a temp directory beside '--root'", err.message);
+  }
+  const worktree = path.join(parent, "tree");
+  // The tree under test supplies its own carriers — the publisher and the checker are read from the
+  // checkout of `--base`, exactly as release.yml reads them from the tagged tree. `--root`'s copies
+  // are the same files today; the difference only shows in a fixture or a cross-checkout cut, and
+  // there the tree being judged must be the one that supplies the judgment.
+  const publisher = path.join(worktree, "plugin", "scripts", "publish-dist-branch.sh");
+  const checkerPath = path.join(worktree, "plugin", "scripts", "shipped-set-rules.ts");
+  const artifactTar = path.join(parent, "artifact.tar");
+  const artifactDir = path.join(parent, "artifact");
+  // `release/` — see the NOT-EVALUATED note above. Unique per process so two concurrent probes (or a
+  // peer's) never delete each other's refs; `publish-dist-branch.sh` deletes any same-named branch
+  // before it starts, which is safe only because the name cannot belong to anyone else.
+  const probeBranch = `release/preflight-v${version}-${process.pid}`;
+  const artifactBranch = `release-cut-preflight-artifact-${process.pid}`;
+  try {
+    const added = git(rootDir, "worktree", "add", "-q", "-b", probeBranch, worktree, baseRef);
+    if (added.status !== 0) {
+      return unavailable(
+        `a linked worktree at '${baseRef}' could not be created (is '${baseRef}' checked out elsewhere?)`,
+        diagnosticTail(added),
+      );
+    }
+    if (!fs.existsSync(publisher) || !fs.existsSync(checkerPath)) {
+      return unavailable(
+        `${!fs.existsSync(publisher) ? publisher : checkerPath} does not exist in the tree '${baseRef}' names, so the ceiling cannot be measured there`,
+        "",
+      );
+    }
+    // esbuild resolves npm imports by walking up from each bundled file, and a fresh worktree has no
+    // node_modules (gitignored) — the same symlink step 1b below performs, for the same reason.
+    const rootModules = path.join(rootDir, "node_modules");
+    if (fs.existsSync(rootModules)) {
+      try {
+        fs.symlinkSync(rootModules, path.join(worktree, "node_modules"));
+      } catch {
+        /* best-effort: the build's own status is the honest reporter if this was needed */
+      }
+    }
+    const built = run("bash", [publisher, "--branch", artifactBranch], { cwd: worktree });
+    if (built.status !== 0) {
+      return unavailable(
+        `the canonical publisher (plugin/scripts/publish-dist-branch.sh, run in a worktree at '${baseRef}') exited ${built.status}`,
+        diagnosticTail(built),
+      );
+    }
+    // `git archive` of the orphan commit — the ARTIFACT a consumer receives, ⛔ never a copy of the
+    // working tree (the assembled tree has its raw .ts stripped and its .sh rewritten in place; the
+    // working tree does not). Same extraction release.yml's own step performs.
+    const archived = run("git", ["-C", worktree, "archive", "-o", artifactTar, artifactBranch]);
+    if (archived.status !== 0) {
+      return unavailable(`git archive of '${artifactBranch}' exited ${archived.status}`, diagnosticTail(archived));
+    }
+    try {
+      fs.mkdirSync(artifactDir, { recursive: true });
+    } catch (err) {
+      return unavailable(`could not create '${artifactDir}'`, err.message);
+    }
+    const extracted = run("tar", ["-xf", artifactTar, "-C", artifactDir]);
+    if (extracted.status !== 0) {
+      return unavailable(`extracting the artifact tar exited ${extracted.status}`, diagnosticTail(extracted));
+    }
+    // `--json` for an ENUMERATED reading (硬规则 3): the exit code alone cannot tell "over the
+    // ceiling" from "forbidden content present" from "the baseline could not be read", and a
+    // preflight that reports the wrong one names the wrong repair.
+    const checked = run(
+      "node",
+      ["--no-warnings", "--experimental-strip-types", checkerPath, "--check", artifactDir, "--size-ceiling", "--json"],
+      { cwd: worktree },
+    );
+    let reading;
+    try {
+      reading = JSON.parse(checked.stdout);
+    } catch {
+      return unavailable(
+        `the checker produced no machine-readable reading (exit ${checked.status})`,
+        diagnosticTail(checked),
+      );
+    }
+    if (reading === null || typeof reading !== "object" || reading.evaluated !== true) {
+      return unavailable(
+        `the artifact could not be read by the checker (${(reading && reading.reason) || "no reason given"})`,
+        diagnosticTail(checked),
+      );
+    }
+    const size = reading.size;
+    if (size === null || typeof size !== "object" || !size.measured || !size.ceiling) {
+      return unavailable(
+        `the baseline records no clean reading to compare against (${BASELINE_SHIPPED_NOTE})`,
+        diagnosticTail(checked),
+      );
+    }
+    const over = Array.isArray(size.over) ? size.over : [];
+    if (over.length > 0) return { verdict: "exceeded", measured: size.measured, ceiling: size.ceiling, over };
+    return { verdict: "pass", measured: size.measured, ceiling: size.ceiling, over };
+  } finally {
+    // ⛔ BOTH branches and the worktree go, on every path. A leftover `release/...` branch is not
+    // cosmetic: step 2 below creates `release/v<version>`, and a stale probe ref is exactly the kind
+    // of residue `--dry-run` promises never to leave.
+    git(rootDir, "worktree", "remove", "--force", worktree);
+    git(rootDir, "branch", "-D", probeBranch);
+    git(rootDir, "branch", "-D", artifactBranch);
+    git(rootDir, "worktree", "prune");
+    try {
+      fs.rmSync(parent, { recursive: true, force: true });
+    } catch {
+      /* best-effort: a leftover temp dir is reported by the caller's own reading, not hidden here */
+    }
+  }
+}
+
+/** The one sentence both the refusal and the unavailability message use for the missing ceiling. */
+const BASELINE_SHIPPED_NOTE =
+  "plugin/shipped-set-baseline.json's `shipped` block is what the release gate compares against";
+
+/** `files 287 > ceiling 286 (exceeds by 1); …` — the axes that are over, never a summed verdict. */
+function overCeilingText(r) {
+  return r.over
+    .map((k) => `${k} ${r.measured[k]} > ceiling ${r.ceiling[k]} (exceeds by ${r.measured[k] - r.ceiling[k]})`)
+    .join("; ");
+}
+
+/** The reading as one line, printed on EVERY outcome (pass, allowed override) — 硬规则 9. */
+function ceilingReading(r) {
+  return `files ${r.measured.files} / ceiling ${r.ceiling.files} · .sh lines ${r.measured.shLines} / ceiling ${r.ceiling.shLines}`;
+}
+
+const shippedSet = precheckShippedSetSize(root, base);
+if (shippedSet.verdict === "unavailable") {
+  // ⛔ NEVER shares an output shape with the pass arm (硬规则 3b): "could not measure" must not read
+  // as "within the ceiling" — and it must not read as "over the ceiling" either, which would name a
+  // repair (re-anchor the baseline) that the evidence does not support.
+  process.stderr.write(
+    `CAUSE=release-cut-shipped-set-precheck-unavailable — the shipped-set size ceiling could not be measured on '${base}', so this cut cannot tell whether release.yml's shipped-set-clean would pass AFTER the tag is pushed; refusing (硬规则 3b: 读不懂 ≠ 合格). Reason: ${shippedSet.reason}${shippedSet.detail ? `\n    build/check output — ${shippedSet.detail}` : ""}\n` +
+      `    ⇒ build and check it by hand on '${base}': bash plugin/scripts/publish-dist-branch.sh --branch <scratch> (in a checkout of '${base}' ON A release/* BRANCH — a detached head makes the build skip its .sh prune), git archive <scratch>, then node --experimental-strip-types plugin/scripts/shipped-set-rules.ts --check <dir> --size-ceiling\n`,
+  );
+  process.exit(2);
+}
+if (shippedSet.verdict === "exceeded") {
+  if (!allowShippedSetCeiling) {
+    fail(
+      "release-cut-shipped-set-ceiling-exceeded",
+      `the artifact built from '${base}' exceeds the shipped-set size ceiling: ${overCeilingText(shippedSet)}. ` +
+        `release.yml's shipped-set-clean would FAIL on the tag this cut is about to push, and that verdict cannot be repaired afterwards (release.yml reads the ceiling from the tag's own tree). ` +
+        `Re-anchor it DELIBERATELY on '${base}' first (a commit — the number is not hand-fit): node --experimental-strip-types plugin/scripts/shipped-set-rules.ts --reanchor <built-artifact-dir> --why "<why>" (record the before/after run output), then re-run this cut. ` +
+        `Or pass --allow-shipped-set-ceiling to cut anyway`,
+      2,
+    );
+  }
+  process.stdout.write(
+    `preflight: shipped-set size ceiling EXCEEDED but ACCEPTED (--allow-shipped-set-ceiling): ${ceilingReading(shippedSet)} — release.yml's shipped-set-clean will FAIL on ${tag}\n`,
+  );
+} else {
+  process.stdout.write(
+    `preflight: shipped-set size ceiling: ${ceilingReading(shippedSet)} — within (built from '${base}' by plugin/scripts/publish-dist-branch.sh; source: plugin/shipped-set-baseline.json)\n`,
+  );
+}
+
+// ── preflight ⑦: the CI reading this cut SAW — RECORDED, ⛔ NEVER A GATE ─────────────────────────
 //
 // SPEC §4.2 ("切点前置：develop 的上一次 decisive CI 必须是绿") had NO mechanical carrier on this path:
 // nothing here read CI at all, so the clause was kept and broken identically (硬规则 9 — an
