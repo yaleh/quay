@@ -1752,7 +1752,27 @@ export interface ArchCycleHistoryRecord {
     reason: string | null;
     cycleCount: number | null;
     cycles: DirectoryCycle[] | null;
+    /** When THIS scope's artifact was produced (arch.json `timestamp`, else the manifest scope's
+     *  `generatedAt`); null ⇒ no artifact was read for this scope. */
+    artifactTimestamp: string | null;
   }>;
+  /** The OLDEST artifact timestamp behind this line (the routine is only as fresh as its stalest
+   *  scope). null ⇒ no artifact timestamp could be read.
+   *
+   *  WHY THIS FIELD EXISTS (gap-arch-cycle-report-record-artifact-timestamp): the routine reads what
+   *  the LAST `analyze` persisted, and `archguard-runner` is on-demand — the query artifacts go days
+   *  without being rewritten. Without this field the history line cannot be told apart from a reading
+   *  of the CURRENT tree: readers saw the same stale 4-cycle reading for three consecutive days. */
+  artifactTimestamp: string | null;
+  /** `ts - artifactTimestamp` in ms; null when it cannot be computed (no timestamp, or an
+   *  unparseable one) — ⛔ never 0, which would read as "just produced". */
+  artifactAgeMs: number | null;
+  /** The interval the staleness verdict compares against (`intervalMinutes * 60_000`); the record
+   *  carries it so a reader does not have to re-derive the threshold from config history. */
+  staleIntervalMs: number;
+  /** `artifactAgeMs > staleIntervalMs`. Three-valued: null ⇒ staleness NOT EVALUABLE, ⛔ never
+   *  `false` (硬规则 3b — "could not tell" must not share the value of "fresh"). */
+  stale: boolean | null;
   reportOnly: true;
 }
 
@@ -1763,6 +1783,10 @@ export interface ArchCycleFactValue {
   totalCycleCount: number | null;
   notEvaluatedScopes: string[];
   scopes: ArchCycleHistoryRecord["scopes"];
+  artifactTimestamp: string | null;
+  artifactAgeMs: number | null;
+  staleIntervalMs: number;
+  stale: boolean | null;
   workDir: string;
   historyPath: string;
   historyAppended: boolean;
@@ -1825,6 +1849,19 @@ export function runArchCycleRound(root: string, opts: ArchCycleRoundOptions = {}
   const resolvedRoot = path.resolve(root);
   const reading = readDirectoryCycleReading(resolvedRoot, opts.workDir);
   const ts = opts.now ?? new Date().toISOString();
+  // FRESHNESS OF THE READING (gap-arch-cycle-report-record-artifact-timestamp): the routine does not
+  // analyze; it reports whatever the LAST analyze persisted. Recording HOW OLD that artifact is makes
+  // "reading the current tree" distinguishable from "re-reading a week-old artifact" (the failure
+  // that motivated this task: the same 4 cycles reported for 3 days).
+  //   • staleIntervalMs is the routine's declared cadence — "older than one interval" is the point at
+  //     which a reader can no longer assume the artifact tracks the tree.
+  //   • `stale` is THREE-VALUED: null when the age cannot be computed (no artifact timestamp / an
+  //     unparseable one). ⛔ Never false there — "could not tell" must not look like "fresh" (3b).
+  const staleIntervalMs = (opts.config?.intervalMinutes ?? ARCH_CYCLE_INTERVAL_DEFAULT_MIN) * 60_000;
+  const nowMs = Number.isFinite(Date.parse(ts)) ? Date.parse(ts) : Date.now();
+  const artifactMs = reading.artifactTimestamp ? Date.parse(reading.artifactTimestamp) : NaN;
+  const artifactAgeMs = Number.isFinite(artifactMs) ? nowMs - artifactMs : null;
+  const stale = artifactAgeMs === null ? null : artifactAgeMs > staleIntervalMs;
   const record: ArchCycleHistoryRecord = {
     ts,
     mode: "arch-cycle-report-round",
@@ -1833,6 +1870,10 @@ export function runArchCycleRound(root: string, opts: ArchCycleRoundOptions = {}
     totalCycleCount: reading.totalCycleCount,
     notEvaluatedScopes: reading.scopes.filter((s) => !s.evaluated).map((s) => s.scope),
     scopes: reading.scopes,
+    artifactTimestamp: reading.artifactTimestamp,
+    artifactAgeMs,
+    staleIntervalMs,
+    stale,
     reportOnly: true,
   };
   const appended = appendArchCycleHistory(resolvedRoot, record, opts.historyPath ? { historyPath: opts.historyPath } : {});
@@ -1842,6 +1883,10 @@ export function runArchCycleRound(root: string, opts: ArchCycleRoundOptions = {}
     totalCycleCount: record.totalCycleCount,
     notEvaluatedScopes: record.notEvaluatedScopes,
     scopes: record.scopes,
+    artifactTimestamp: record.artifactTimestamp,
+    artifactAgeMs: record.artifactAgeMs,
+    staleIntervalMs: record.staleIntervalMs,
+    stale: record.stale,
     workDir: reading.workDir,
     historyPath: appended.path,
     historyAppended: appended.ok,
