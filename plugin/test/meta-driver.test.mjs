@@ -1407,10 +1407,46 @@ test('collectDriverReadings: 覆盖全部注册 kind；读不出时刻 ⇒ stale
     for (const r of rows) {
       assert.equal(r.staleSecs, null, '空工作区没有载体 ⇒ 时刻读不出 ⇒ null');
       assert.equal(r.running, false);
+      // 载体观测跑成了且没有读失败 ⇒ 空数组（⛔ null：null 的含义是「观测本身没跑成」）。
+      assert.deepEqual(r.carrierUnreadable, [], `${r.kind}: 空工作区没有任何载体 ⇒ 无读失败`);
     }
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }
+});
+
+// gap-meta-collectdriverreadings — 活驱动的载体「读不出」不得折成「0 条」（硬规则 3b）。
+test('collectDriverReadings: 载体存在但读不出 ⇒ carrierUnreadable 单列（⛔ 与空载体同形）', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'meta-driver-drv-unreadable-'));
+  try {
+    // 目录冒充载体：open 成功、read 报 EISDIR ⇒ 读失败可稳定复现（⛔ 不依赖 chmod/root）。
+    fs.mkdirSync(path.join(tmp, '.quay', 'meta-driver-round.jsonl'), { recursive: true });
+    const rows = collectDriverReadings(tmp);
+    const meta = rows.find((r) => r.kind === 'meta');
+    assert.ok(meta, '前提：meta kind 在读数里');
+    assert.equal(meta.carrierRecords, 0, '读不出 ⇒ 已读行数 0');
+    assert.deepEqual(meta.carrierUnreadable, ['meta-driver-round.jsonl'],
+      '「读不出」必须与「载体为空」可区分——改前两者都只是 carrierRecords=0');
+    const others = rows.filter((r) => r.kind !== 'meta');
+    for (const r of others) assert.deepEqual(r.carrierUnreadable, [], `${r.kind}: 没有该载体 ≠ 读失败`);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('readingsDigest: carrierUnreadable 进摘要（读失败出现/消失都必须改变结论）；null 与 [] 不同形', () => {
+  const mkReading = (carrierUnreadable) => ({
+    goals: [], criteria: [], divergences: [], metaRecords: [], inertCheckers: [], focus: null,
+    timeSeries: [],
+    actionRecordFailures: MK_AFR_NONE,
+    drivers: [{ kind: 'meta', running: true, supervisorAlive: true, driverAlive: true, carrierRecords: 0, carrierLastTs: null, staleSecs: null, carrierUnreadable }],
+    syncHealth: { window: 200, ffSynced: 0, notFf: 0, ffError: 0, semanticBegin: 0, semanticResolved: 0, semanticConflict: 0, semanticAlignFailed: 0, semanticFfFailed: 0, lastEvent: null, lastTs: null },
+  });
+  assert.equal(readingsDigest(mkReading([])), readingsDigest(mkReading([])), '同一读数 ⇒ 摘要不变');
+  assert.notEqual(readingsDigest(mkReading([])), readingsDigest(mkReading(['meta-driver-round.jsonl'])),
+    '载体由可读变读不出必须改变摘要（否则结论变了而闸不跑）');
+  assert.notEqual(readingsDigest(mkReading([])), readingsDigest(mkReading(null)),
+    'null（观测没跑成）⛔ 不与 []（全都读完了）同形（硬规则 3b）');
 });
 
 // gap-not-evaluated-checkers-never-persisted — 惰性守卫读数：从 full-suite-state.json 的

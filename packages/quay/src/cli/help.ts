@@ -76,7 +76,7 @@ Usage:
   quay adr new <id> --title <title> [--status <status>] [--body <text>|--body-file <path>] [--json] [--root <path>]
   quay adr accept|deprecate|reject <id> [--json] [--root <path>]
   quay adr supersede <id> --by <newId> [--json] [--root <path>]
-  quay goal list [--status <status>] [--kind <kind>] [--goal <goal-id>] [--json] [--root <path>]
+  quay goal list [--status <status>] [--kind <kind>] [--goal <goal-id>] [--no-evidence] [--json] [--root <path>]
   quay goal show <id> [--json] [--root <path>]
   quay goal write <id> --origin <text> [--title <title>] [--status <status>] [--goal <goal-id>] [--criterion <cmd>] [--json] [--root <path>]
   quay goal gate <id> [--dry-run] [--json] [--root <path>]
@@ -517,7 +517,7 @@ Environment contract — when the default 'acceptance' gate spawns a command:
     process.stdout.write(`quay goal — goal + AC records (GOAL-NNN / AC-NNN)
 
 Usage:
-  quay goal list [--status <status>] [--kind <kind>] [--goal <goal-id>] [--json] [--root <path>]
+  quay goal list [--status <status>] [--kind <kind>] [--goal <goal-id>] [--no-evidence] [--json] [--root <path>]
   quay goal show <id> [--json] [--root <path>]
   quay goal write <id> --origin <text> [--title <title>] [--status <status>] [--goal <goal-id>] [--criterion <cmd>] [--branch true|false] [--json] [--root <path>]
   quay goal gate <id> [--timeout <ms>] [--dry-run] [--json] [--root <path>]
@@ -527,6 +527,11 @@ Usage:
   quay goal preview <GOAL-NNN> start|stop|status [--port <n>] [--host <h>] [--root <path>] [--json]
 
   list / show / write   Read and write records through the Provider ABI (SPEC-goal-mechanism §5.2).
+                        list --no-evidence  Skip the derived evidence projection (evidence /
+                        staleness / lastProgressAt): the Provider does NOT scan
+                        .quay/gate-events.jsonl, whose cost is ∝ ledger size and independent of the
+                        goal count. The full record set is still returned — a summariser that only
+                        needs frontmatter (id/status/kind/title) should pass this.
                         write --branch true|false  Opt a GOAL into its own isolation branch
                         (SPEC-goal-branch §4.1). The branch NAME is DERIVED — 'goal/<GOAL-NNN>' —
                         ⛔ never a flag. It is created lazily from the develop tip when the goal

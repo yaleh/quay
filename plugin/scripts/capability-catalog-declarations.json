@@ -752,7 +752,7 @@
     "tmux-test-isolation-check.ts": "按需",
     "touches-one-entry-one-path-check.ts": "按需",
     "touches-relax-config.ts": "按需",
-    "touches-relax-tighten.ts": "每轮（worker-driver 驻留环的轮末一步；loop.touches_relax 未声明或 mode 为 off / 读不懂时不跑，该轮 round 记录的 auto_tighten 为 null）",
+    "touches-relax-tighten.ts": "每轮",
     "touches-orthogonality-check.ts": "每里程碑",
     "touches-parser.ts": "每里程碑",
     "transcript-delivery-check.ts": "每轮",

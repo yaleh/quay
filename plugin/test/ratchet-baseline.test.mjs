@@ -27,6 +27,7 @@ import { fileURLToPath } from "node:url";
 import {
   BASELINE_COUNT_RE,
   baselinePath,
+  checkBaselineShrinkOnly,
   parseBaselineCount,
   parseRatchetBaselineText,
   readRatchetBaseline,
@@ -230,6 +231,31 @@ test("writeRatchetBaseline --reset: re-anchors the ceiling to the current set, o
   assert.match(fs.readFileSync(path.join(root, REL), "utf8"), /# baseline-count: 2\n\ntasks\/a\.md: V1\ntasks\/b\.md: V2\n$/);
   // The guard is back on immediately afterwards.
   assert.equal(writeRatchetBaseline(root, REL, ["tasks/c.md: V3"], opts()).ok, false);
+});
+
+// ── the shared shrink-only judgment (tasks/gap-routine-semantic-dedup-scan-baseline-shrink-only-copy) ──
+//
+// import-graph-check / sh-census-check / shipped-set-rules each exported this same three-way body;
+// the mechanism now lives here and the AXIS LIST is the one thing a caller passes in. These
+// assertions cover both directions: the judgment still catches a raise (so extraction lost
+// nothing), and it reports only the axes the caller named (so a consumer cannot silently inherit
+// another ratchet's axes).
+
+test("checkBaselineShrinkOnly: bootstrap / worktree-null / per-axis raise, with the caller's axis list binding", () => {
+  const axes = ["userAcs", "violations"];
+  const head = { userAcs: 3, violations: 2 };
+
+  // HEAD carries no baseline file ⇒ BOOTSTRAP, explicitly labelled, never "no constraint".
+  assert.deepEqual(checkBaselineShrinkOnly({ userAcs: 9, violations: 9 }, null, axes), { raised: [], bootstrap: true });
+  // A null WORKING-TREE baseline is not a raise (the caller's fail-closed path owns that state).
+  assert.deepEqual(checkBaselineShrinkOnly(null, head, axes), { raised: [], bootstrap: false });
+  // Equal and lower both pass …
+  assert.deepEqual(checkBaselineShrinkOnly({ ...head }, head, axes), { raised: [], bootstrap: false });
+  assert.deepEqual(checkBaselineShrinkOnly({ userAcs: 0, violations: 1 }, head, axes), { raised: [], bootstrap: false });
+  // … and a raise names exactly the axes that went up.
+  assert.deepEqual(checkBaselineShrinkOnly({ userAcs: 4, violations: 5 }, head, axes), { raised: ["userAcs", "violations"], bootstrap: false });
+  // The caller's axis list is BINDING: an axis it did not pass is not reported.
+  assert.deepEqual(checkBaselineShrinkOnly({ userAcs: 4, violations: 2 }, head, ["violations"]), { raised: [], bootstrap: false });
 });
 
 // ── the per-consumer knobs really are per-consumer (the divergence this extraction PRESERVED) ────

@@ -89,6 +89,29 @@ export function baselinePath(root: string, rel: string): string {
   return path.join(root, ...rel.split("/"));
 }
 
+/** The shrink-only judgment for a baseline FILE ITSELF: no axis of the working-tree baseline may
+ *  exceed the git-HEAD baseline. A `head` of `null` is the BOOTSTRAP state (HEAD carries no
+ *  baseline file yet) — explicitly labelled, never read as "no constraint" (硬规则 3b).
+ *
+ *  Why this is here (tasks/gap-routine-semantic-dedup-scan-baseline-shrink-only-copy, the
+ *  `semantic-dedup-scan` routine's `baseline-shrink-only-copy` finding, kind
+ *  `same-symbol-multi-file`, verdict `real-duplication`): import-graph-check, sh-census-check and
+ *  shipped-set-rules each exported a `checkBaselineShrinkOnly` with the SAME three-way body (head
+ *  null ⇒ bootstrap, worktree null ⇒ no raise, otherwise compare every axis), diverging only in
+ *  where the axis list came from (`Object.keys(worktree)` vs each module's `BASELINE_AXES`). The
+ *  mechanism is the judgment; the AXIS LIST is what each ratchet genuinely owns, so it stays at
+ *  the call site and is passed in — the call sites' exported wrappers remain so each ratchet's
+ *  public surface (and its test) keeps its own axis binding (硬规则 5b). */
+export function checkBaselineShrinkOnly<A extends string>(
+  worktree: Record<A, number> | null,
+  head: Record<A, number> | null,
+  axes: readonly A[],
+): { raised: A[]; bootstrap: boolean } {
+  if (head === null) return { raised: [], bootstrap: true };
+  if (worktree === null) return { raised: [], bootstrap: false };
+  return { raised: axes.filter((k) => worktree[k] > head[k]), bootstrap: false };
+}
+
 /** Read `<root>/<baseline rel>`. Absent file ⇒ `{ baseline: empty, baselineCount: null }` — the
  * shrink-only floor, identical for every ratchet (a ratchet that was never created has nothing
  * listed). */
