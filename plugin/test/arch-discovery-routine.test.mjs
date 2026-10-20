@@ -22,6 +22,10 @@
 //        `loop.arch_discovery.space_registry` is passed as `--registry` and a bad one fails closed;
 //        and on a REAL non-quay fixture root the registry is load-bearing in BOTH directions (a
 //        genuinely-drifting pair ⇒ a drift candidate; an intentional subset ⇒ a non-drift candidate).
+//   (11) EMPTY ROUNDS (task gap-arch-discovery-space-no-candidate-universe-still-appends-scan-round):
+//        space `no-candidate-universe` + zero findings ⇒ NO scan-round appended (carrier
+//        byte-identical), with the SAME fixture under an evaluated space half appending one
+//        (negative control); and a time-half finding STILL lands when the space half is dark.
 //
 // Run: scripts/test.sh plugin/test/arch-discovery-routine.test.mjs
 
@@ -42,6 +46,7 @@ import {
   readCarrierFindings,
   readScanCandidates,
   checkSpaceRegistry,
+  shouldAppendRound,
   spaceStateFor,
   SPACE_NO_UNIVERSE,
   SPACE_UNREADABLE,
@@ -637,4 +642,89 @@ test("case (10) — REAL instruments on a non-quay root: the declared registry i
     assert.ok(verdicts.includes("drift-hypothesis"), `a genuinely-drifting surface ⇒ a drift candidate (got ${JSON.stringify(verdicts)})`);
     assert.ok(verdicts.includes("legit-difference"), `an intentional-subset surface ⇒ a NON-drift candidate (got ${JSON.stringify(verdicts)})`);
   }
+});
+
+// ── (11) empty rounds: no candidate universe + no finding ⇒ no carrier write ────────────────────────
+// The defect this covers: `appendCarrierRecords(carrier, [...findingLines, round])` ran BEFORE the
+// space-state judgement, so a host with no `space_registry` wrote one near-empty `scan-round` line
+// every interval, forever — an empty spin. The fix suppresses ONLY the known-empty round; any finding
+// from either half still lands (the time half's readings are real).
+test("case (11) — shouldAppendRound: only the KNOWN-EMPTY round (no universe + no finding) is suppressed", () => {
+  assert.equal(shouldAppendRound(SPACE_NO_UNIVERSE, 0), false, "no candidate universe + no finding ⇒ nothing to record");
+  assert.equal(shouldAppendRound(SPACE_NO_UNIVERSE, 1), true, "a time-half finding keeps the round (AC2)");
+  assert.equal(shouldAppendRound("evaluated", 0), true, "an evaluated space half with no finding still records the round");
+  assert.equal(shouldAppendRound(SPACE_UNREADABLE, 0), true, "an UNREADABLE count is not a known-empty round — its record is the diagnostic");
+});
+
+test("case (11) AC1 — space no-candidate-universe + zero findings ⇒ carrier BYTE-IDENTICAL, last-run still advances", async () => {
+  const dir = tmpDir("arch-disc-fix-");
+  const ws = makeWorkspace();
+  writeConfig(ws, ENABLED_YAML);
+  // A pre-existing carrier line: "does not append" must mean BYTE-IDENTICAL, not "rewritten empty".
+  const seed = JSON.stringify({ kind: "finding", routine: ARCH_DISCOVERY_NAME, finding_fp: "seed", subject_key: "seed", verdict: "v", instrument: "time" }) + "\n";
+  fs.writeFileSync(carrierPath(ws), seed, "utf8");
+  const before = fs.readFileSync(carrierPath(ws), "utf8");
+
+  const prefix = {
+    space: ["node", fixtureInstrument(dir, "space-empty.mjs", { rows: [], candidates: 0 })],
+    time: ["node", fixtureInstrument(dir, "time-empty.mjs", { rows: [] })],
+  };
+  const clock = { t: Date.parse("2026-10-11T00:00:00Z") };
+  const fact = await runArchDiscovery(ws, runOpts(ws, { spawnFn: syncSpawn, argvPrefix: prefix, now: () => clock.t }));
+
+  assert.equal(fact.state, "not-evaluated", "the round is honestly not clean …");
+  assert.match(fact.reason, /no-candidate-universe/);
+  assert.match(fact.reason, /appended NOTHING/, "… and it SAYS it did not append");
+  assert.equal(fs.readFileSync(carrierPath(ws), "utf8"), before, "carrier is BYTE-IDENTICAL — no scan-round appended");
+  assert.equal(rounds(ws).length, 0, "zero scan-round lines");
+  assert.equal(findings(ws).length, 1, "the seeded finding is untouched (no finding line was added either)");
+
+  // The round DID run: the last-run advances, otherwise it would be due on every tick (a hotter spin
+  // than the per-interval one this task fixes).
+  assert.equal(readLastRunMap(lastRunPath(ws))[ARCH_DISCOVERY_NAME], clock.t, "last-run advanced — a completed empty round consumes its window");
+  // Not SILENT either: the Fact still carries the round's reading (the loop writes it to quality-round).
+  assert.equal(fact.value.appended, false, "the Fact marks the round as not appended");
+  assert.equal(fact.value.kind, "scan-round");
+  assert.equal(fact.value.instruments.space.candidates, 0);
+  assert.equal(fact.value.instruments.time.records, 0);
+});
+
+test("case (11) AC1 negative control — the SAME fixture with an evaluated space half DOES append one scan-round", async () => {
+  // Before the fix the append was unconditional, so this is the shape that proves the predicate is
+  // real: everything is identical to the AC1 fixture except the space instrument's candidate count
+  // (0 ⇒ suppressed vs 1 ⇒ appended). If the fixture were inert, this arm could not produce a round.
+  const dir = tmpDir("arch-disc-fix-");
+  const ws = makeWorkspace();
+  writeConfig(ws, ENABLED_YAML);
+  const prefix = {
+    space: ["node", fixtureInstrument(dir, "space-one.mjs", { rows: [], candidates: 1 })],
+    time: ["node", fixtureInstrument(dir, "time-one.mjs", { rows: [] })],
+  };
+  const fact = await runArchDiscovery(ws, runOpts(ws, { spawnFn: syncSpawn, argvPrefix: prefix }));
+
+  assert.equal(fact.state, "verified", "an evaluated space half with no finding is a clean (empty) scan");
+  assert.equal(rounds(ws).length, 1, "the pre-fix behaviour on this fixture: exactly one scan-round line");
+  assert.equal(rounds(ws)[0].findings.new, 0);
+  assert.equal(findings(ws).length, 0, "no finding ⇒ zero finding lines");
+});
+
+test("case (11) AC2 — space no-candidate-universe does NOT swallow a time-half finding", async () => {
+  const dir = tmpDir("arch-disc-fix-");
+  const ws = makeWorkspace();
+  writeConfig(ws, ENABLED_YAML);
+  const timeRows = [findingRow("fpT1", "kT1", "rule:T1"), findingRow("fpT2", "kT2", "rule:T2")];
+  const prefix = {
+    space: ["node", fixtureInstrument(dir, "space-dark.mjs", { rows: [], candidates: 0 })],
+    time: ["node", fixtureInstrument(dir, "time-findings.mjs", { rows: timeRows })],
+  };
+  const fact = await runArchDiscovery(ws, runOpts(ws, { spawnFn: syncSpawn, argvPrefix: prefix }));
+
+  assert.equal(fact.state, "not-evaluated", "the space half is still not a measurement …");
+  assert.match(fact.reason, /no-candidate-universe/);
+  assert.doesNotMatch(fact.reason, /appended NOTHING/, "… but this round DID append (it carries real findings)");
+  assert.equal(findings(ws).length, 2, "BOTH time-half findings land on the carrier");
+  assert.deepEqual(findings(ws).map((f) => f.instrument), ["time", "time"]);
+  assert.deepEqual(findings(ws).map((f) => f.finding_fp), ["fpT1", "fpT2"]);
+  assert.equal(rounds(ws).length, 1, "the scan-round line lands WITH them (their recurrence/diff context)");
+  assert.equal(rounds(ws)[0].findings.new, 2);
 });

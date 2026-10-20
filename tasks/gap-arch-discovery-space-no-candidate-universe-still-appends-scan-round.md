@@ -1,7 +1,7 @@
 ---
 id: gap-arch-discovery-space-no-candidate-universe-still-appends-scan-round
 title: arch-discovery 在 space 半边无候选宇宙时仍每轮 append scan-round（空转）
-status: ready
+status: done
 labels:
   - gap
   - defect
