@@ -3,7 +3,7 @@ id: gap-routine-architecture-analysis-dup-path-candidates
 title: "architecture-analysis: Structurally identical 28-line path resolution
   clone (archguard dup hash 4cf914f3bbd40659, 316 tokens) inside two independent
   static checkers, so scope-resol"
-status: ready
+status: done
 labels:
   - gap
   - routine-filed
