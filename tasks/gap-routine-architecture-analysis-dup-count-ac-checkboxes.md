@@ -57,15 +57,16 @@ Make task-parsing.ts the single implementation (plugin re-exports it) or add a p
   无文档的平行实现。
 
 负控制：只把产品副本的 `[xX]` 改成 `[x]`，新测试即红（`countAcCheckboxes diverged for fixture: mixed checklist`）；
-还原后 8/8 绿。
+还原后 8/8 绿。scoped 门（`scripts/test.sh --for-task … --allow-thin`）实跑 EXIT=0，130/130 测试通过；
+anti-drift Touches 检查 `ANTI-DRIFT OK`（3 actual files，全在声明的 4 条 glob 内）。
 
 ## AC
 - [x] `.quay/routine-findings.jsonl` 中 finding `dup-count-ac-checkboxes`（routine `architecture-analysis`，runId `architecture-analysis-1792481915389`）所描述的问题被复核并处置
 - [x] 处置结论可核：要么修掉，要么写明「已有机制在管、失败在哪一步」，⛔ 不以「已注意到」结案
 
 ## DoD
-- [ ] 上面的判据实跑通过
-- [ ] ⛔ 探针只立案不执行：本任务若需要跑产出者/修复，由派发链执行，⛔ 不由例程代跑
+- [x] 上面的判据实跑通过
+- [x] ⛔ 探针只立案不执行：本任务若需要跑产出者/修复，由派发链执行，⛔ 不由例程代跑
 
 ## Touches
 - `packages/quay/src/task-parsing.ts`
