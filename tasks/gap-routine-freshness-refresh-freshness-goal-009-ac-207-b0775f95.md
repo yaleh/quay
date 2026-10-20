@@ -3,7 +3,7 @@ id: gap-routine-freshness-refresh-freshness-goal-009-ac-207-b0775f95
 title: "freshness-refresh: Same run, same window: AC-207 shares the coldstart
   face's 173-commit distance and 179.52h-old evidence; it crosses at the same
   threshold as its siblings."
-status: todo
+status: ready
 labels:
   - gap
   - routine-filed
