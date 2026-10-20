@@ -29,7 +29,9 @@
 // ── THE DECLARED LIFECYCLE EDGE TABLE
 //    (gap-transitions-table-lacks-needs-human-and-superseded-edges) ──────────────────────────────
 // WHY THE TABLE EXISTS: the two CLI verbs (promote/retreat) walk only a two-edge-per-status
-// ADJACENCY (`TRANSITIONS` in `gate/lifecycle.ts`). It is not a declaration of the whole lifecycle:
+// ADJACENCY (`TRANSITIONS` in `gate/lifecycle.ts`, now DERIVED from this table — see
+// gap-transitions-table-not-derived-from-lifecycle-edges). That adjacency alone is not a
+// declaration of the whole lifecycle:
 // production also reaches statuses through writers that never consult it (the promotion driver's
 // todo→ready, the worker fan-in's ready→done and its done→ready "done 未落地" reset,
 // `markNeedsHuman`'s todo|ready→needs-human, the out-of-band needs-human→done completion, and every
@@ -44,7 +46,7 @@
 // is neither.
 //
 // `status` — the CURRENT-MODEL judgement (documented rule, not a timestamp):
-//   "current"  the edge belongs to the lifecycle model in force today: wired into `TRANSITIONS`,
+//   "current"  the edge belongs to the lifecycle model in force today: derived into `TRANSITIONS`,
 //              OR produced by a live DEDICATED writer in-tree (driver promotion / fan-in /
 //              markNeedsHuman / retreat / out-of-band complete), OR observed in production
 //              at/after 2026-09-20 (the reading's recent window).

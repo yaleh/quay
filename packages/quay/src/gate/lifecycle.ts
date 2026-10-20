@@ -14,9 +14,10 @@
 // Every status write passes `expectedStatus` = the pre-read status, making it a
 // compare-and-swap (store.js ConflictError, QN-015) rather than last-writer-wins.
 //
-// `TRANSITIONS` below is the promote/retreat adjacency these verbs walk; `LIFECYCLE_EDGES`
-// (further down, above runComplete) is the FULL declared 5×5 edge table — declaration only, not
-// yet consulted by any writer (gap-transitions-table-lacks-needs-human-and-superseded-edges).
+// `TRANSITIONS` below is the promote/retreat adjacency these verbs walk — DERIVED from
+// `LIFECYCLE_EDGES`, the full declared 5×5 edge table in `../kernel/task-transition.ts`. One
+// source of truth: a declared `current` promote edge IS the forward step, a declared `current`
+// retreat edge IS the back step (gap-transitions-table-not-derived-from-lifecycle-edges).
 
 import { randomUUID } from "node:crypto";
 import { runGate } from "./engine.ts";
@@ -49,24 +50,66 @@ function provenanceOf(args: { actorKind?: string; correlationId?: string }): { a
   };
 }
 
-/**
- * The legal-transition adjacency map. `forward` = promote target, `back` =
- * retreat target. Each forward edge is a gate `check()` already models; back
- * edges are single-step rework rollbacks. `needs-human` has no forward edge
- * (clearing it forward requires a human `quay task edit --status`), but
- * retreat to `todo` is allowed — a human-resolved task can be rolled back
- * for a fresh attempt.
- */
-export const TRANSITIONS: Record<string, { forward: string | null; back: string | null }> = {
-  [TASK_STATUS.TODO]: { forward: TASK_STATUS.READY, back: null },
-  [TASK_STATUS.READY]: { forward: TASK_STATUS.DONE, back: TASK_STATUS.TODO },
-  [TASK_STATUS.DONE]: { forward: null, back: TASK_STATUS.READY },
-  [TASK_STATUS.NEEDS_HUMAN]: { forward: null, back: TASK_STATUS.TODO },
-  // `superseded` is a HARD terminal (outer ruling 2026-08-12): the task's
-  // premise was deleted/voided and must not be revived — no forward edge, no
-  // back edge. Resurrection requires a human re-filing a fresh task.
-  [TASK_STATUS.SUPERSEDED]: { forward: null, back: null },
+/** The direction each edge `kind` maps onto in the promote/retreat adjacency. `escalate`,
+ *  `resolve` and `supersede` are real lifecycle edges but are NOT steps these two verbs walk. */
+const ADJACENCY_DIRECTION: Partial<Record<LifecycleEdgeKind, "forward" | "back">> = {
+  promote: "forward",
+  retreat: "back",
 };
+
+/**
+ * Derive the promote/retreat adjacency from the DECLARED edge table. `forward` = the target of a
+ * declared `current` `promote` edge, `back` = the target of a declared `current` `retreat` edge.
+ * `legacy` edges are excluded: they have no live writer today, so a CLI verb must not walk them.
+ *
+ * Fail-closed on an inconsistent declaration (hard rule 3b: an input this function cannot read must
+ * never come out looking like a checked-and-empty adjacency):
+ *   · an edge whose `from` is not a known status would otherwise be silently dropped;
+ *   · a status declaring two current edges in the same direction cannot be represented by this
+ *     one-target-per-direction shape — the conflict must surface, not be resolved by first-wins.
+ * Both throw at module load, so a malformed declaration cannot ship as a silently shrunk table.
+ */
+function deriveTransitions(
+  edges: readonly LifecycleEdge[]
+): Record<string, { forward: string | null; back: string | null }> {
+  const adjacency: Record<string, { forward: string | null; back: string | null }> = {};
+  for (const status of TASK_STATUSES) adjacency[status] = { forward: null, back: null };
+
+  for (const edge of edges) {
+    if (edge.status !== "current") continue;
+    const dir = ADJACENCY_DIRECTION[edge.kind];
+    if (dir === undefined) continue;
+    const row = adjacency[edge.from];
+    if (row === undefined) {
+      throw new Error(
+        `lifecycle declaration error: edge ${edge.from}→${edge.to} starts at an unknown status "${edge.from}"`
+      );
+    }
+    if (row[dir] !== null) {
+      throw new Error(
+        `lifecycle declaration error: ${edge.from} declares more than one current ${edge.kind} edge ` +
+          `(${row[dir]} and ${edge.to}); the promote/retreat adjacency can hold only one`
+      );
+    }
+    row[dir] = edge.to;
+  }
+  return adjacency;
+}
+
+/**
+ * The legal-transition adjacency map — DERIVED, never hand-written.
+ * `forward` = promote target, `back` = retreat target. Each forward edge is a gate `check()`
+ * already models; back edges are single-step rework rollbacks. `needs-human` has no forward edge
+ * (clearing it forward requires a human `quay task edit --status`), but retreat to `todo` is
+ * allowed — a human-resolved task can be rolled back for a fresh attempt. `superseded` is a HARD
+ * terminal (outer ruling 2026-08-12): no forward edge, no back edge.
+ *
+ * Those sentences describe the CURRENT `LIFECYCLE_EDGES` declaration; this adjacency carries no
+ * independent copy of the graph. Changing a `current` promote/retreat edge in the table changes
+ * the verbs here in the same commit.
+ */
+export const TRANSITIONS: Record<string, { forward: string | null; back: string | null }> =
+  deriveTransitions(LIFECYCLE_EDGES);
 
 /** next status, or null if terminal/unknown */
 export function legalForward(status: string): string | null {
@@ -102,11 +145,11 @@ export function assertTransition(status: string, dir: "forward" | "back"): void 
 // argument that moved `regex-escape.ts` and `shape-sections.ts` there. The table's own WHY (the 5×5
 // declaration, `current` vs `legacy`, the verified actor vocabulary) moved WITH it.
 //
-// ⛔ DECLARATION ONLY — this table changes NO runtime transition behaviour. `TRANSITIONS` /
-// `legalForward` / `legalBack` / `assertTransition` are deliberately NOT derived from it; the
-// 25-pair golden comparison in `lifecycle-edge-table.test.mjs` pins their outputs to exactly what
-// they returned before this table existed. Wiring the writers (`patchStatusField` et al.) to
-// consult this table is a FOLLOW-UP task, not this one.
+// ⛔ SINGLE SOURCE OF TRUTH — `TRANSITIONS` / `legalForward` / `legalBack` / `assertTransition`
+// ARE derived from this table (above). There is no second hand-written adjacency: this table is
+// the only place a promote/retreat edge is declared. The 25-pair golden comparison in
+// `lifecycle-edge-table.test.mjs` pins the derived outputs to exactly what the pre-derivation
+// module returned, so deriving could not quietly change behaviour.
 export { LIFECYCLE_EDGES };
 export type { LifecycleEdge, LifecycleEdgeKind, LifecycleActor };
 
