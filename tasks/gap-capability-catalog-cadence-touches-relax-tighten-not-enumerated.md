@@ -31,10 +31,10 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1 — `CADENCE["touches-relax-tighten.ts"] === "每轮"`（逐字）；`git diff -U0 -- plugin/scripts/capability-catalog-declarations.json` 只有这一行变化。
-- [ ] AC2 — `node --test plugin/test/capability-catalog.test.mjs` exit 0，`ℹ tests 18 / pass 18 / fail 0`；附输出尾部。
-- [ ] AC3 — 说明文字未丢失：`失效前提`（:1144 附近）与 `谁触发`（:2125 附近）两节仍含原有文字（附 grep 行号与原文）。
-- [ ] AC4 — 其余 `CADENCE` 值零变化：`git diff` 中 `CADENCE` 段只有 1 行 `-` / `+`。
+- [x] AC1 — `CADENCE["touches-relax-tighten.ts"] === "每轮"`（逐字）；`git diff -U0 -- plugin/scripts/capability-catalog-declarations.json` 只有这一行变化。证据：`node -e` 读 declarations ⇒ `value= "每轮" exact= true`；`git diff -U0 develop` 该文件恰为 1 行 `-` / 1 行 `+`（@@ -755 +755 @@）。
+- [x] AC2 — `node --test plugin/test/capability-catalog.test.mjs` exit 0，`ℹ tests 18 / pass 18 / fail 0`；附输出尾部。证据（worktree 内实跑）：`ℹ tests 18` / `ℹ pass 18` / `ℹ fail 0` / `EXIT=0`。
+- [x] AC3 — 说明文字未丢失：`失效前提`（:1144 附近）与 `谁触发`（:2125 附近）两节仍含原有文字（附 grep 行号与原文）。证据：`grep -n` ⇒ :1144 `"touches-relax-tighten.ts": "失效前提：① 判定词表不再是 not-evaluated | within-budget | halt…"`；:2125 `"touches-relax-tighten.ts": "谁按：① plugin/scripts/worker-driver.ts 的驻留环轮末（runAutoTightenPass…"` —— 两节原文未被本条 diff 触碰。
+- [x] AC4 — 其余 `CADENCE` 值零变化：`git diff` 中 `CADENCE` 段只有 1 行 `-` / `+`。证据：全文件 diff 只有 `@@ -755 +755 @@`；枚举值集合仍为 `["按需","每轮","每里程碑","冷启动","每红窗"]`，无越界项。
 
 ## Definition of Done
 
