@@ -49,6 +49,7 @@ import {
   defaultSuiteMemoryMax,
   resolveSuiteMemoryMax,
   declaredSuiteMemoryMax,
+  declaredSuiteMemoryMaxBytes,
   readSuiteMemoryMeasurements,
   actualConcurrencyFromRows,
   SUITE_MEMORY_MAX_DEFAULT,
@@ -56,6 +57,7 @@ import {
   parseSystemdConsumedLine,
   parseSystemdTimespanToSeconds,
   parseSystemdBytesToMb,
+  parseSystemdBytesToBytes,
   readScopeConsumedLoad,
   parseCpuStatUsageUsec,
   parsePressureSomeTotal,
@@ -953,8 +955,8 @@ test("AC1 unit — buildSystemdRunArgv wraps a command in systemd-run --user --s
   assert.ok(!argv.includes("MemoryMax=16G"), "the ceiling is no longer spelled as a code literal — it is the declared size in BYTES");
   assert.equal(
     DEFAULT_SYSTEMD_RUN_LIMITS.memoryMax,
-    defaultSuiteMemoryMax(),
-    "the template holds the DECLARED ceiling as resolved for this environment (the 16 GiB undeclared default is pinned by the AC2 case that clears the declaration)",
+    declaredSuiteMemoryMaxBytes(),
+    "the module-load template holds the DECLARED ceiling in bytes — ⛔ never a host reading (the 16 GiB undeclared default is pinned by the AC2 case that clears the declaration)",
   );
   assert.ok(argv.includes("OOMPolicy=continue"), "the scope sets OOMPolicy=continue (one OOM-killed process must not TERM the whole suite)");
   assert.ok(!argv.includes("CPUQuota="), "default argv carries NO CPUQuota — the cgroup has no CPU limit");
@@ -1657,15 +1659,16 @@ test("AC2 — the effective MemoryMax comes from the DECLARED value, and the dec
       // The declared value is clamped only by the host bound (this host's is far above 16 GiB).
       assert.ok(Number(resolved.memoryMax) <= resolved.hostGuardBytes, "never above the host guardrail");
       assert.equal(Number(resolved.memoryMax), Math.min(16 * GIB, resolved.hostGuardBytes));
-      // The module-load template agrees (it resolves the same declaration, no state dir).
-      assert.equal(defaultSuiteMemoryMax(), String(Math.min(16 * GIB, sharedHostCeilingBytes(readEffectiveTotalMemBytes(), listSharedHostScopes().count))));
+      // The state-dir-free default resolution uses the host's CAPACITY only — ⛔ not the live
+      // same-kind scope count (that is per-run input, resolved by `resolveSuiteMemoryMax`).
+      assert.equal(defaultSuiteMemoryMax(), String(Math.min(16 * GIB, sharedHostCeilingBytes(readEffectiveTotalMemBytes(), null))));
     });
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
-  // The module-load template resolved the AMBIENT declaration at import time ⇒ it agrees with the
-  // function under that same (restored) declaration.
-  assert.equal(DEFAULT_SYSTEMD_RUN_LIMITS.memoryMax, defaultSuiteMemoryMax());
+  // The module-load template resolved the AMBIENT declaration at import time ⇒ it is that declaration
+  // in bytes, ⛔ not a host- or scope-count-derived reading.
+  assert.equal(DEFAULT_SYSTEMD_RUN_LIMITS.memoryMax, declaredSuiteMemoryMaxBytes());
 });
 
 test("AC2 — an override CHANGES the effective ceiling (config/env is the mechanism, not the code)", async () => {
@@ -1815,15 +1818,51 @@ test("DoD — no commit may raise the effective default above 16 GiB: the resolv
   // read with the declaration cleared.
   await withUndeclared(() => {
     assert.ok(Number(defaultSuiteMemoryMax()) <= 16 * GIB, `the resolved default never exceeds 16 GiB (${defaultSuiteMemoryMax()})`);
-    // On a host whose guardrail is at or above 16 GiB (this one), the default is EXACTLY 16 GiB.
-    if (sharedHostCeilingBytes(readEffectiveTotalMemBytes(), listSharedHostScopes().count) >= 16 * GIB) {
+    // On a host whose capacity bound is at or above 16 GiB (this one), the default is EXACTLY 16 GiB.
+    // ⛔ The bound here is the project-blind one (`null` sibling count): the state-dir-free default
+    // resolution must NOT consume the live same-kind scope count — that is per-run input.
+    if (sharedHostCeilingBytes(readEffectiveTotalMemBytes(), null) >= 16 * GIB) {
       assert.equal(defaultSuiteMemoryMax(), String(16 * GIB), "16 GiB exactly — ⛔ not 24/26 GiB");
     }
   });
-  // The module-load template resolved whatever declaration was ambient AT IMPORT TIME (the suite runner
-  // promotes the project's `suite: memory_max:` into it) ⇒ it must agree with a live resolution under
-  // that same declaration. ⛔ Not a `<= 16 GiB` claim: a declared project is allowed above the default.
-  assert.equal(DEFAULT_SYSTEMD_RUN_LIMITS.memoryMax, defaultSuiteMemoryMax());
+  // The module-load template is the AMBIENT DECLARATION in bytes AT IMPORT TIME (the suite runner
+  // promotes the project's `suite: memory_max:` into it) ⇒ ⛔ not a host- or scope-count reading.
+  // ⛔ Not a `<= 16 GiB` claim: a declared project is allowed above the default.
+  assert.equal(DEFAULT_SYSTEMD_RUN_LIMITS.memoryMax, declaredSuiteMemoryMaxBytes());
+});
+
+test("AC2 — the module-load template + the state-dir-free default consume ONLY the declaration, ⛔ never the live same-kind scope count", () => {
+  // THE ROOT CAUSE (gap-suite-memorymax-default-nondeterministic-across-cgroup-scope):
+  // `DEFAULT_SYSTEMD_RUN_LIMITS.memoryMax` used to be `defaultSuiteMemoryMax()`, which fed
+  // `listSharedHostScopes().count` into the shared-host split. That count is host state: a test
+  // process and a `systemd-run --scope` probe on the same host see different counts ⇒ the same
+  // "constant" took two values ⇒ the cross-process assertion red. The template is now the DECLARED
+  // value in bytes (pure); the split is applied per RUN by `resolveSuiteMemoryMax`.
+  //
+  // 硬规则 2: the zero-count predicate is paired with a KNOWN-POSITIVE of the SAME predicate — the
+  // live counter MUST still appear in the per-run resolver, or the negative result below would be
+  // vacuous (a renamed/removed function would also print zero).
+  const src = fs.readFileSync(new URL("../scripts/full-suite-runner.ts", import.meta.url), "utf8");
+  const bodyOf = (header, endMarker) => {
+    const start = src.indexOf(header);
+    assert.ok(start !== -1, `source contains ${JSON.stringify(header)}`);
+    const end = src.indexOf(endMarker, start);
+    assert.ok(end !== -1, `source contains ${JSON.stringify(endMarker)} after ${JSON.stringify(header)}`);
+    return src.slice(start, end);
+  };
+  const template = bodyOf("export const DEFAULT_SYSTEMD_RUN_LIMITS", "};");
+  const stateDirFreeDefault = bodyOf("export function defaultSuiteMemoryMax(", "\n}");
+  const perRunResolver = bodyOf("export function resolveSuiteMemoryMax(", "\n}");
+  for (const [label, body] of [["DEFAULT_SYSTEMD_RUN_LIMITS", template], ["defaultSuiteMemoryMax", stateDirFreeDefault]]) {
+    assert.ok(!body.includes("listSharedHostScopes"), `${label} must NOT consume the live same-kind scope count`);
+    const siblingArgs = [...body.matchAll(/siblingScopeCount:\s*([A-Za-z0-9_.()]+)/g)].map((m) => m[1]);
+    assert.ok(siblingArgs.every((v) => v === "null"), `${label} must pass siblingScopeCount: null (no live count) — got ${JSON.stringify(siblingArgs)}`);
+  }
+  // Known-positive control: the per-run resolver still carries the count (the split was NOT retired).
+  assert.ok(perRunResolver.includes("listSharedHostScopes().count"), "resolveSuiteMemoryMax still applies the shared-host split per run");
+  // Behavioral half: the template is exactly the ambient declaration in bytes.
+  assert.equal(DEFAULT_SYSTEMD_RUN_LIMITS.memoryMax, declaredSuiteMemoryMaxBytes());
+  assert.equal(DEFAULT_SYSTEMD_RUN_LIMITS.memoryMax, String(parseSystemdBytesToBytes(declaredSuiteMemoryMax().value)));
 });
 
 test("unit — readSuiteMemoryMeasurements reads the round record's own perFile (rows absent ⇒ both null)", () => {
@@ -1866,13 +1905,13 @@ test("unit — readEffectiveTotalMemBytes is fail-open (never throws, never 0, n
 });
 
 test(
-  "REAL cgroup — on a real MemoryMax=4G external scope the DEFAULT is clamped to the host bound, not 16 GiB",
+  "REAL cgroup — a 4G external scope clamps the HOST-GUARDED default, while the module-load template stays the DECLARED constant",
   { skip: systemdRunAvailable() ? false : "not-evaluated: systemd-run --user --scope unavailable on this host" },
   async () => {
     // A REAL cgroup construction (systemd-run --scope), ⛔ not a mock. The unit name deliberately does
     // NOT match quay's own envelope prefixes ⇒ it stands in for an EXTERNAL cap (container / VM / slice).
     const unit = `quay-suite-memtest-${Date.now()}-${process.pid}.scope`;
-    const probe = `import(${JSON.stringify(RUNNER)}).then(m=>console.log(JSON.stringify({effective:m.readEffectiveTotalMemBytes(),memoryMax:m.DEFAULT_SYSTEMD_RUN_LIMITS.memoryMax,totalmem:require("os").totalmem()}))).catch(e=>{console.error(e);process.exit(1)})`;
+    const probe = `import(${JSON.stringify(RUNNER)}).then(m=>console.log(JSON.stringify({effective:m.readEffectiveTotalMemBytes(),memoryMax:m.DEFAULT_SYSTEMD_RUN_LIMITS.memoryMax,hostDefault:m.defaultSuiteMemoryMax(),totalmem:require("os").totalmem()}))).catch(e=>{console.error(e);process.exit(1)})`;
     const { code, out, err } = await spawnCmd([
       "systemd-run", "--user", "--scope", "--quiet", "--unit", unit,
       "-p", "MemoryMax=4G", "-p", "MemorySwapMax=0",
@@ -1883,9 +1922,14 @@ test(
     assert.ok(line, `no reading from the scoped probe — stdout=${JSON.stringify(out)} stderr=${JSON.stringify(err)}`);
     const reading = JSON.parse(line);
     assert.equal(reading.effective, 4 * GIB, "the effective total is the cgroup cap (4G), read from the real cgroup");
-    // The declared 16 GiB must NOT leak onto a 4 GiB host: the host fraction is the upper bound.
-    assert.equal(reading.memoryMax, String(GIB), "4 GiB effective ⇒ the declared 16 GiB is clamped to floor(4G × 0.25) = 1 GiB");
-    assert.notEqual(reading.memoryMax, String(16 * GIB), "⛔ the declared default must never exceed the host bound");
+    // AC2 (gap-suite-memorymax-default-nondeterministic-across-cgroup-scope): the module-load template is
+    // the DECLARED value in bytes ⇒ byte-identical in this scoped process and the test process, despite
+    // a different cgroup/scope shape. ⛔ It is no longer a host- or scope-count-derived reading.
+    assert.equal(reading.memoryMax, DEFAULT_SYSTEMD_RUN_LIMITS.memoryMax, "the module-load template is the DECLARED constant — identical across cgroup scopes");
+    assert.equal(reading.memoryMax, declaredSuiteMemoryMaxBytes(), "…and it is the ambient declaration in bytes");
+    // The declaration must still NOT leak onto a 4 GiB host — the HOST-GUARDED (per-run) default clamps it.
+    assert.equal(reading.hostDefault, String(GIB), "4 GiB effective ⇒ the declaration is clamped to floor(4G × 0.25) = 1 GiB");
+    assert.notEqual(reading.hostDefault, String(parseSystemdBytesToBytes(declaredSuiteMemoryMax().value)), "⛔ the declared default must never exceed the host bound where it is APPLIED");
     assert.ok(reading.totalmem > reading.effective, "os.totalmem() is the big host total ⇒ the SMALL value came from the cgroup cap, not from a small host");
   },
 );
@@ -1898,7 +1942,7 @@ test(
     // `quay-anchor-*` guardrail, a declared 16 GiB would be clamped to ≈0.25 × that (≈6.5 GiB) — the
     // 2026-08-era bug in a new dress. A scope named `quay-anchor-*` with a 1G cap must be IGNORED.
     const unit = `quay-anchor-fsr-probe-${Date.now()}-${process.pid}.scope`;
-    const probe = `import(${JSON.stringify(RUNNER)}).then(m=>console.log(JSON.stringify({effective:m.readEffectiveTotalMemBytes(),memoryMax:m.DEFAULT_SYSTEMD_RUN_LIMITS.memoryMax,totalmem:require("os").totalmem()}))).catch(e=>{console.error(e);process.exit(1)})`;
+    const probe = `import(${JSON.stringify(RUNNER)}).then(m=>console.log(JSON.stringify({effective:m.readEffectiveTotalMemBytes(),memoryMax:m.DEFAULT_SYSTEMD_RUN_LIMITS.memoryMax,hostDefault:m.defaultSuiteMemoryMax(),totalmem:require("os").totalmem()}))).catch(e=>{console.error(e);process.exit(1)})`;
     const { code, out, err } = await spawnCmd([
       "systemd-run", "--user", "--scope", "--quiet", "--unit", unit,
       "-p", "MemoryMax=1G", "-p", "MemorySwapMax=0",
@@ -1916,7 +1960,11 @@ test(
       `a quay-anchor-* scope is our own guardrail ⇒ the reading falls through to the host total (MB-truncated), NOT the 1G we set; effective=${reading.effective} totalmem=${reading.totalmem}`,
     );
     assert.notEqual(reading.effective, 1024 * GIB, `effective (${reading.effective}) is the host total, ⛔ not the 1G we set on our own anchor-named scope`);
-    assert.equal(reading.memoryMax, defaultSuiteMemoryMax(), "the scoped reading and the in-process constant agree");
+    // The failing assertion this task fixes: the module-load template and the in-process convention
+    // must agree ACROSS PROCESSES. The template is the declared bytes; the guarded default is a pure
+    // function of this host's capacity (⛔ no live scope count) ⇒ both processes see the same value.
+    assert.equal(reading.memoryMax, DEFAULT_SYSTEMD_RUN_LIMITS.memoryMax, "the module-load template agrees across processes (⛔ no scope-count contamination)");
+    assert.equal(reading.hostDefault, defaultSuiteMemoryMax(), "the HOST-GUARDED default agrees across processes too");
   },
 );
 
@@ -1929,7 +1977,7 @@ test(
     // `memory.max=4G`. ⚠️ The two layers are chosen so the test DISCRIMINATES: the layer that must be
     // EXCLUDED (the anchor, 1G) is TIGHTER than the layer that must be CONSUMED (the child, 4G).
     const unit = `quay-anchor-fsr-nested-${Date.now()}-${process.pid}.scope`;
-    const probe = `import(${JSON.stringify(RUNNER)}).then(m=>console.log(JSON.stringify({effective:m.readEffectiveTotalMemBytes(),memoryMax:m.DEFAULT_SYSTEMD_RUN_LIMITS.memoryMax,totalmem:require("os").totalmem()}))).catch(e=>{console.error(e);process.exit(1)})`;
+    const probe = `import(${JSON.stringify(RUNNER)}).then(m=>console.log(JSON.stringify({effective:m.readEffectiveTotalMemBytes(),memoryMax:m.DEFAULT_SYSTEMD_RUN_LIMITS.memoryMax,hostDefault:m.defaultSuiteMemoryMax(),totalmem:require("os").totalmem()}))).catch(e=>{console.error(e);process.exit(1)})`;
     const inner = [
       "set -e",
       'P=/sys/fs/cgroup$(cut -d: -f3 /proc/self/cgroup)',
@@ -1955,7 +2003,8 @@ test(
     const reading = JSON.parse(line);
     assert.equal(reading.effective, 4 * GIB, `the NON-quay child layer (4G) is CONSUMED and the TIGHTER quay-anchor ancestor (1G) is SKIPPED — effective=${reading.effective}`);
     assert.notEqual(reading.effective, GIB, "⛔ the quay-own ancestor's 1G was NOT consumed (that would be the feedback loop the exclusion exists to prevent)");
-    assert.equal(reading.memoryMax, String(GIB), "the declared 16 GiB is clamped to the consumed 4G layer: floor(4G × 0.25) = 1G");
+    assert.equal(reading.hostDefault, String(GIB), "the declaration is clamped to the consumed 4G layer: floor(4G × 0.25) = 1G");
+    assert.equal(reading.memoryMax, DEFAULT_SYSTEMD_RUN_LIMITS.memoryMax, "the module-load template stays the DECLARED constant across cgroup shapes");
     assert.ok(reading.totalmem > reading.effective, "os.totalmem() is the big host total ⇒ the 4G came from the cgroup chain, not from a small host");
   },
 );
