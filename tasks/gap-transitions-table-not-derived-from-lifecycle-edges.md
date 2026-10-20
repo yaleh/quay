@@ -2,7 +2,7 @@
 id: gap-transitions-table-not-derived-from-lifecycle-edges
 title: TRANSITIONS 运行时邻接表从 LIFECYCLE_EDGES 派生——消灭第二份手写转移邻接表（gate/lifecycle.ts
   注释点名的 follow-up）
-status: ready
+status: done
 labels:
   - gap
   - lifecycle
