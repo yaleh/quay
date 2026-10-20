@@ -36,7 +36,7 @@ extra:
 来源：`.archguard/query/f2ded294/arch.json` 的 `entities[].sourceLocation`，取实体 id 前缀为 `plugin/scripts/` 的文件按路径排序后的前 3 个位置：
 
 1. `plugin/scripts/ac56-recommended-deordered-check.ts:71-114` — 实体 `checkRecommendedDeordered`（function，该文件共 3 个实体）
-2. `plugin/scripts/ac61-staleness-disposition-check.ts` — 实体 `Ac61Result`（interface，该文件共 14 个实体；该实体的 sourceLocation 指向文件头部的接口声明）
+2. `plugin/scripts/ac61-staleness-disposition-check.ts:254-259` — 实体 `Ac61Result`（interface，该文件共 14 个实体）
 3. `plugin/scripts/ac69-slot-queue-gap-check.ts:107-136` — 实体 `checkRecord`（function，该文件共 4 个实体）
 
 ### FACT 3 — fan-out 2971 不是 2971 条跨包依赖（仪器语义）
