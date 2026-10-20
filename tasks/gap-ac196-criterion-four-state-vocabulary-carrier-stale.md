@@ -2,7 +2,7 @@
 id: gap-ac196-criterion-four-state-vocabulary-carrier-stale
 title: AC-196 四态返回判据锚在重构前的 src-root 载体上（实现已下沉 core/store-commit.ts）—— 重锚到
   canonical 实现模块 + 保留 import 面转发断言
-status: todo
+status: ready
 labels:
   - gap
   - defect
