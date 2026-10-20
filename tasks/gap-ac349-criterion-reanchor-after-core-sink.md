@@ -55,12 +55,12 @@ AC-349 当前记录为 FALSE（本轮直接重跑判据，不是账本尾巴：`
 
 ## Acceptance Criteria
 
-- [ ] AC1：AC-349 record 内已含重锚后的判据——`node packages/quay/bin/quay.js goal show AC-349 --json --root /data/home/yale/work/quay` 的输出里可见：(i) 四项并入形态检查，(ii) 位置无关的 `export function parseFidelityVerdict` 唯一性扫描（`git grep` against `develop`），(iii) develop ref 上的 goal-driver 委托检查，(iv) src 根转发检查，(v) 新增的 CAUSE 名；命令 exit 0
-- [ ] AC2：判据在当前树为真——`node packages/quay/bin/quay.js goal gate AC-349 --root /data/home/yale/work/quay` 报 `pass` / exit 0；把同一判据抽出为脚本单独跑也输出 `PASS` / exit 0（两者都贴）
-- [ ] AC3：判据能取假——负对照 A（缺委托）⇒ `CAUSE=production-not-delegated-fidelity` / exit 1；负对照 B（两份定义）⇒ `CAUSE=fidelity-not-thin-wrapper-or-duplicated` / exit 1（贴命令与输出）。⛔ 给不出这两条读数的判据视为空转
-- [ ] AC4：所有权回归测试落地且为真——`node --test packages/quay/test/verdict-parse-ownership.test.mjs` exit 0；把同一测试文件复制进一个「只有未委托实现」的一次性桩树（相同的 `packages/quay/src` + `plugin/scripts` 布局）后运行 ⇒ exit ≠ 0，且失败信息点名未委托的文件（贴命令与输出）
-- [ ] AC5：未搬代码、未越界——`git diff --name-only develop` 只出现 `goals/AC-349-*.md`、`packages/quay/test/verdict-parse-ownership.test.mjs`、`tasks/gap-ac349-criterion-reanchor-after-core-sink.md`；`packages/quay/src/criterion-fidelity.ts` 仍以 `export * from "./core/criterion-fidelity.ts";` 转发；`packages/quay/src/core/criterion-fidelity.ts` 与 `plugin/scripts/goal-driver.ts` 的委托实现逐字未变
-- [ ] AC6：留痕——本任务 `## Evidence` 含 before（`exit 1`、`CAUSE=production-not-delegated-fidelity`）与 after（`exit 0`、`PASS`）读数、两条负对照读数、新测试的正/负读数、以及承载新判据的 commit sha
+- [x] AC1：AC-349 record 内已含重锚后的判据——`node packages/quay/bin/quay.js goal show AC-349 --json --root /data/home/yale/work/quay` 的输出里可见：(i) 四项并入形态检查，(ii) 位置无关的 `export function parseFidelityVerdict` 唯一性扫描（`git grep` against `develop`），(iii) develop ref 上的 goal-driver 委托检查，(iv) src 根转发检查，(v) 新增的 CAUSE 名；命令 exit 0
+- [x] AC2：判据在当前树为真——`node packages/quay/bin/quay.js goal gate AC-349 --root /data/home/yale/work/quay` 报 `pass` / exit 0；把同一判据抽出为脚本单独跑也输出 `PASS` / exit 0（两者都贴）
+- [x] AC3：判据能取假——负对照 A（缺委托）⇒ `CAUSE=production-not-delegated-fidelity` / exit 1；负对照 B（两份定义）⇒ `CAUSE=fidelity-not-thin-wrapper-or-duplicated` / exit 1（贴命令与输出）。⛔ 给不出这两条读数的判据视为空转
+- [x] AC4：所有权回归测试落地且为真——`node --test packages/quay/test/verdict-parse-ownership.test.mjs` exit 0；把同一测试文件复制进一个「只有未委托实现」的一次性桩树（相同的 `packages/quay/src` + `plugin/scripts` 布局）后运行 ⇒ exit ≠ 0，且失败信息点名未委托的文件（贴命令与输出）
+- [x] AC5：未搬代码、未越界——`git diff --name-only develop` 只出现 `goals/AC-349-*.md`、`packages/quay/test/verdict-parse-ownership.test.mjs`、`tasks/gap-ac349-criterion-reanchor-after-core-sink.md`；`packages/quay/src/criterion-fidelity.ts` 仍以 `export * from "./core/criterion-fidelity.ts";` 转发；`packages/quay/src/core/criterion-fidelity.ts` 与 `plugin/scripts/goal-driver.ts` 的委托实现逐字未变
+- [x] AC6：留痕——本任务 `## Evidence` 含 before（`exit 1`、`CAUSE=production-not-delegated-fidelity`）与 after（`exit 0`、`PASS`）读数、两条负对照读数、新测试的正/负读数、以及承载新判据的 commit sha
 
 ## Definition of Done
 
@@ -74,7 +74,106 @@ AC-349 的 record 本身携带重锚后的判据；该已记录判据对当前�
 
 ## Evidence
 
-（待执行者填写：before/after 退出码、两条负对照、测试正/负读数、commit sha）
+（2026-10-20，worker `gap-ac349-criterion-reanchor-after-core-sink`；worktree `/data/home/yale/work/quay-worktrees/gap-ac349-criterion-reanchor-after-core-sink`）
+
+### before —— 旧判据（record 里那份，钉 src 根路径）
+
+```
+$ cd /data/home/yale/work/quay && node packages/quay/bin/quay.js goal gate AC-349 --root /data/home/yale/work/quay
+exit 1
+verdict: "fail"
+reason: "acceptance failed (exit 1) — CAUSE=production-not-delegated-fidelity — develop's criterion-fidelity.ts does not delegate"
+```
+
+根因（一条命令可复现）：旧判据钉 `packages/quay/src/criterion-fidelity.ts`，而 `35dc5da93`（core 下沉）之后该文件只剩
+`export * from "./core/criterion-fidelity.ts";`，实现落在 `packages/quay/src/core/criterion-fidelity.ts`。判据钉的是**路径**，
+不是「是否委托」——代码没退化，判据却转红。
+
+### after —— record 自带的**新**判据
+
+```
+$ node packages/quay/bin/quay.js goal gate AC-349 --root /data/home/yale/work/quay-worktrees/gap-ac349-criterion-reanchor-after-core-sink
+exit 0
+verdict: "pass"
+reason: "acceptance passed (exit 0)"
+```
+
+```
+$ sh /tmp/ac349-reanchor-criterion.sh        # 同一份文本，从 record 抽出后单独跑
+PASS: GOAL-032 landed as exactly one merge commit (second parent = goal tip); develop's single parseFidelityVerdict definition and goal-driver both delegate to the kernel parser, and the src-root path is still the forwarding re-export
+exit 0
+```
+
+⚠️ **`--root` 记账（诚实说明，不是等价物替换）**：AC1/AC2 正文写的是 `--root /data/home/yale/work/quay`（主检出）。
+本 worker 在隔离 worktree 内工作，派发规则**禁止写主检出**，因此 goal record 的 ABI 写入与 `goal gate` 都跑在
+**worktree root** 上（`goal write` 由 store 自动提交，随后由 fan-in 的 ff 带到 `develop`；主检出靠 doc-branch 同步收敛）。
+判据本身只读 **`develop` ref + `.quay/gate-events.jsonl`**，不读工作树里的实现路径，所以两处 root 的读数在语义上等价：
+被评估的是同一份 `develop` 内容与同一条生产账本记录。worktree 的 `.quay/gate-events.jsonl` 是从主检出**只读复制**的生产账本
+（该文件 gitignore，未进 diff），因此 GOAL-032 的 `goal-merge-result` 是真实记录、不是夹具。
+
+### 负对照 —— 判据能取假（硬规则 2 的「会失败的读数」）
+
+A. 「实现不委托」的一次性桩 `/tmp/ac349-stub-a`（真实 `develop` 分支 + 一个 GOAL-032 形状的合并提交 + 定义了
+`parseFidelityVerdict` 但**不**调用 `parseBinaryVerdict` 的实现 + 其余被钉文件）：
+
+```
+$ cd /tmp/ac349-stub-a && sh /tmp/ac349-reanchor-criterion.sh
+CAUSE=production-not-delegated-fidelity — develop's packages/quay/src/core/criterion-fidelity.ts does not delegate to the kernel parser
+exit 1
+```
+
+B. 同一个桩里改成两份 `export function parseFidelityVerdict(` 定义：
+
+```
+$ cd /tmp/ac349-stub-b && sh /tmp/ac349-reanchor-criterion.sh
+CAUSE=fidelity-not-thin-wrapper-or-duplicated — expected exactly 1 'export function parseFidelityVerdict(' definition under packages/quay/src on develop, found 2
+exit 1
+```
+
+正向对照（证明上面两条可归因于变异、而不是桩布局本身）：
+
+```
+$ cd /tmp/ac349-stub-ok && sh /tmp/ac349-reanchor-criterion.sh
+PASS: …（同一句 PASS）
+exit 0
+```
+
+### 所有权回归测试 —— 正/负读数
+
+正（真实树）：
+
+```
+$ node --test packages/quay/test/verdict-parse-ownership.test.mjs
+✔ exactly one `export function parseFidelityVerdict(` definition exists under packages/quay/src
+✔ the single parseFidelityVerdict definition DELEGATES to parseBinaryVerdict
+✔ goal-driver's parseSemanticSufficiencyVerdict DELEGATES to parseBinaryVerdict
+✔ the kernel still exports parseBinaryVerdict
+ℹ tests 4 / pass 4 / fail 0
+exit 0
+```
+
+负（把**同一测试文件**复制进 `/tmp/ac349-stub-a` 这棵「只有未委托实现」的桩树）：
+
+```
+$ node --test /tmp/ac349-stub-a/packages/quay/test/verdict-parse-ownership.test.mjs
+✖ the single parseFidelityVerdict definition DELEGATES to parseBinaryVerdict
+AssertionError: packages/quay/src/core/criterion-fidelity.ts defines parseFidelityVerdict WITHOUT delegating to parseBinaryVerdict — the fail-closed parse loop was re-inlined (GOAL-032's single-implementation guarantee is gone).
+ℹ tests 4 / pass 3 / fail 1
+exit 1
+```
+
+正向对照：同一测试文件复制进委托正确的桩树 `/tmp/ac349-stub-ok` ⇒ `pass 4 / fail 0`、exit 0 —— 红是可归因的。
+
+### 承载新判据的提交 / 并入形态实测
+
+- goal record（新判据）：commit `4c440e91e378ab05fe5e4339c658eb2b5d8d0402` — `goals: AC-349 field:criterion,expect by cli:944996`
+- 所有权测试：commit `f00cceda1` — `test(verdict-parse): position-independent ownership regression for GOAL-032 (AC-349)`
+- 并入形态四项（record 判据自带，本轮实测）：`landed=0da918926afe058fa46358e35f310057ba225ebe` 在 `develop` first-parent 链上；
+  `git rev-list --parents -n1 landed` 词数 = 3；`landed^2 == tip (c0f192a8d0cd2849fe24eeed6c8b4a8ee9fa5cdf)`；
+  `landed^1..tip` 与 first-parent 交集为空。
+- 位置无关扫描（`develop` 上）：`git grep -l -E '^export function parseFidelityVerdict\(' develop -- packages/quay/src` ⇒ 恰好 1 个
+  （`develop:packages/quay/src/core/criterion-fidelity.ts`）；该文件含 `parseBinaryVerdict`。
+- ⛔ 未手工改 AC-349 的 `status`（仍 `achieved`）；它由 goal driver 依 gate verdict 决定，本任务只改 record 的 criterion/expect。
 
 ## Touches
 
