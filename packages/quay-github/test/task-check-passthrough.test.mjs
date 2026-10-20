@@ -234,8 +234,19 @@ async function withGithubMcpForMulti(issuesByNumber, run, opts = {}) {
 // even a SIGKILL leaves at worst a /tmp/quay-adv-* dir the OS reaps, never a
 // broken production source. `mutateCopySrc(srcText)` returns the mutated copy
 // text; `run({ bin, cwd })` is invoked with the copied entry point + pkg dir.
+//
+// The copy mirrors the monorepo layout because bin/quay-github.ts imports the
+// ONE shared --flag/positional parser from Core by RELATIVE path
+// (`../../quay/src/cli/flags.ts`, architecture-analysis finding
+// dup-parseflags-three-bins). A flat `bin/ + src/` copy under a bare temp root
+// would move that import to `/tmp/quay/src/cli/flags.ts` — outside the copy,
+// ERR_MODULE_NOT_FOUND. Nesting the package as `<tmp>/quay-github` and linking
+// `<tmp>/quay` at the real Core package (read-only) keeps the relative import
+// inside the temp tree while the mutation still lands only in the copied
+// github-client.ts. Pinned by this file's own break/restore cases.
 async function withAdversarialCopy(mutateCopySrc, run) {
-  const tmpPkg = fs.mkdtempSync(path.join(os.tmpdir(), "quay-adv-"));
+  const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), "quay-adv-"));
+  const tmpPkg = path.join(tmpRoot, "quay-github");
   try {
     fs.mkdirSync(path.join(tmpPkg, "bin"), { recursive: true });
     fs.mkdirSync(path.join(tmpPkg, "src"), { recursive: true });
@@ -243,6 +254,7 @@ async function withAdversarialCopy(mutateCopySrc, run) {
     for (const f of fs.readdirSync(githubSrcDir)) {
       fs.copyFileSync(path.join(githubSrcDir, f), path.join(tmpPkg, "src", f));
     }
+    fs.symlinkSync(path.join(__dirname, "..", "..", "quay"), path.join(tmpRoot, "quay"), "dir");
     fs.symlinkSync(path.join(__dirname, "..", "..", "..", "node_modules"), path.join(tmpPkg, "node_modules"), "dir");
     const copyPath = path.join(tmpPkg, "src", "github-client.ts");
     fs.writeFileSync(copyPath, mutateCopySrc(fs.readFileSync(copyPath, "utf8")));
@@ -251,7 +263,7 @@ async function withAdversarialCopy(mutateCopySrc, run) {
       cwd: tmpPkg,
     });
   } finally {
-    fs.rmSync(tmpPkg, { recursive: true, force: true });
+    fs.rmSync(tmpRoot, { recursive: true, force: true });
   }
 }
 
