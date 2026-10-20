@@ -1,7 +1,7 @@
 ---
 id: gap-probe-routine-resolves-probe-spec-under-project-root-not-plugin-root
 title: probe 轨道把 probe spec 解析到项目根而非插件根，第三方宿主声明的 probe 例程被 fail-closed 跳过
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -80,11 +80,3 @@ AC1-AC3 勾齐并贴证据。
 - plugin/scripts/read-probe-spec.ts
 - plugin/test/probe-spec-wiring.test.mjs
 - tasks/gap-probe-routine-resolves-probe-spec-under-project-root-not-plugin-root.md
-
-## Blocker
-
-**2026-10-20T06:33:12.595Z — worker 未落地（exited-not-landed）**
-
-- 未落地原因：AC 未全勾（checked 0/3，剩余未勾 3）——续做只需验证并勾选 AC
-- run_id：wk-prod-anchor
-- session_id：e3f211b8-0139-4e9a-a8ca-40ba7db1c3ad
