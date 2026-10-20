@@ -576,6 +576,62 @@ test(
   },
 );
 
+// ── AC4 overhead budget (gap-full-suite-runner-ac4-wallclock-noise-envelope, 2026-10-20) ──────────
+// The two legs of AC4 measure DIFFERENT things and must not share one tolerance:
+//   • the INSTRUMENT leg (`samplerCostMs / suite wall`) is the authoritative reading of the sampler's
+//     own cost — samples × per-sample work, taken by the instrument itself. It keeps the HARD 1% cap.
+//   • the WALL-CLOCK A/B leg (`minOn − minOff`) is dominated by scheduling noise: under a loaded
+//     service cgroup the same fixture moved by 1.56–1.86% while the instrument read 0.03–0.05%
+//     (measured; see the task's Evidence). Its tolerance is therefore derived AT RUNTIME from the
+//     same samples instead of being a raised constant — a raised constant calibrated on one host is
+//     not a measurement (硬规则 4 推论二).
+const AC4_INSTRUMENT_BUDGET_PCT = 1; // ⛔ HARD — the authoritative leg, never relaxed
+const AC4_WALL_BUDGET_PCT = 1; // the reported budget; the floor of the runtime noise envelope
+const AC4_SAMPLES_PER_ARM = 5;
+
+/** How far an arm's MINIMUM could sit below its own true floor: the distance to its runner-up sample.
+ *  Scheduling perturbations are one-sided (they can only SLOW a run), so the gap between the two
+ *  lowest samples measures how much of the observed minimum is luck rather than the floor. It is
+ *  computed from the same samples the A/B uses ⇒ no host constant, and it grows exactly when the
+ *  host gets noisier (a quiet host reads ~0.1–0.4%, the same 5 arms under CPUQuota=50% read 1.2–2.3%). */
+function minimumGapToRunnerUpPct(walls) {
+  const sorted = [...walls].sort((a, b) => a - b);
+  assert.ok(sorted.length >= 2, `the gap needs ≥2 samples per arm (got ${sorted.length})`);
+  return ((sorted[1] - sorted[0]) / sorted[0]) * 100;
+}
+
+/** The estimator + the two budgets, in ONE place so the negative control exercises the SAME code. */
+function measureSamplerOverhead({ onWalls, offWalls, onCosts }) {
+  assert.ok(onWalls.length >= 2 && offWalls.length >= 2, "both arms need ≥2 samples");
+  const minOn = Math.min(...onWalls);
+  const minOff = Math.min(...offWalls);
+  const deltaPct = ((minOn - minOff) / minOff) * 100;
+  const onGapPct = minimumGapToRunnerUpPct(onWalls);
+  const offGapPct = minimumGapToRunnerUpPct(offWalls);
+  // Two minima, each imprecise by up to its own arm's gap ⇒ the delta's null noise is bounded by
+  // their SUM. The 1% budget is the floor, so a quiet host is judged against 1% exactly as before.
+  const wallEnvelopePct = Math.max(AC4_WALL_BUDGET_PCT, onGapPct + offGapPct);
+  const costOn = Math.min(...onCosts);
+  const costPct = (costOn / minOn) * 100;
+  return { minOn, minOff, deltaPct, costOn, costPct, onGapPct, offGapPct, wallEnvelopePct };
+}
+
+function assertSamplerOverheadWithinBudget(m) {
+  assert.ok(
+    m.deltaPct <= m.wallEnvelopePct,
+    `the on/off wall-clock delta is within the runtime noise envelope ` +
+      `(measured ${m.deltaPct.toFixed(2)}%; envelope ${m.wallEnvelopePct.toFixed(2)}% = ` +
+      `max(${AC4_WALL_BUDGET_PCT}%, on-gap ${m.onGapPct.toFixed(2)}% + off-gap ${m.offGapPct.toFixed(2)}%))`,
+  );
+  // ⛔ The instrument leg is NOT allowed to use the envelope: it is the measurement of the thing
+  // being budgeted, so it stays at the hard 1%.
+  assert.ok(
+    m.costPct <= AC4_INSTRUMENT_BUDGET_PCT,
+    `the sampler's own recorded cost is within the 1% budget (measured ${m.costPct.toFixed(3)}%)`,
+  );
+  assert.ok(m.costOn > 0, "the cost reading is a REAL measurement (a structurally-0 counter would carry no information)");
+}
+
 // AC4 — the sampler's overhead, MEASURED two ways on a fixture suite: (a) the instrument's own cost
 // recorded in the round's evidence vs the round's wall, and (b) an A/B of the same fixture suite with
 // the sampler on and off. The seam is the ONLY way to run arm (b) — a claim about one's own overhead is
@@ -586,24 +642,31 @@ test(
 test("AC4 — the sampler's own cost stays under 1% of the suite wall (instrument-recorded cost + an on/off A/B)", async () => {
   const scoped = systemdRunAvailable();
   const scopeEnv = scoped ? { QUAY_TEST_SYSTEMD_RUN_AVAILABLE: "1", QUAY_TEST_SKIP_SYSTEMD_RUN: "0" } : {};
+  // gap-full-suite-runner-ac4-wallclock-noise-envelope: the runner's post-verdict journal poll
+  // (`readScopeConsumedLoad`, up to 5 s) happens AFTER the sampler stopped and has nothing to do with
+  // its cost — leaving it inside the A/B lets an unrelated fixed tail dominate the measured wall
+  // (9.4 s of which only ~3.9 s is the suite) and dilutes the percentage. Pin it to the single-shot
+  // seam so the arms time the round, not journalctl. The cgroup scope itself stays REAL.
+  const envBase = { ...scopeEnv, QUAY_TEST_JOURNALCTL_OUTPUT: "" };
+  // FIVE samples per arm (2026-10-20, gap-full-suite-runner-ac4-wallclock-noise-envelope): three was
+  // not enough — under a loaded service cgroup the min-of-3 still landed 1.56–1.86% apart while the
+  // instrument read <0.05%. The estimator is unchanged (min of each arm = the least-perturbed wall,
+  // the correct reading for an OVERHEAD claim); more samples drive each minimum toward its floor.
+  // The per-pair ORDER alternates (on,off / off,on) so a monotonic load drift inside the test window
+  // moves both arms' minima symmetrically instead of always favouring the arm that runs second.
+  const schedule = [];
+  for (let i = 0; i < AC4_SAMPLES_PER_ARM; i++) schedule.push(...(i % 2 === 0 ? ["on", "off"] : ["off", "on"]));
   const runs = [];
-  // THREE samples per arm, not two (2026-10-18, gap-ac237): the arms run inside the lowconc phase
-  // under real suite concurrency, and a transient scheduling spike that lands on one ON arm inflates
-  // `min(on)` above `min(off)` for the whole test — measured in-suite: A/B delta 2.11% while the same
-  // tree read -0.11% in isolation and -0.23% under the fan-in's light-load rerun arm. The estimator
-  // is unchanged (min of each arm = the least-perturbed wall, the correct reading for an OVERHEAD
-  // claim); only its variance is reduced, so a sampler that genuinely costs >1% still fails. The
-  // arms alternate on/off so a spike hits the two arms' samples independently.
-  for (const arm of ["on", "off", "on", "off", "on", "off"]) {
+  for (const [i, arm] of schedule.entries()) {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), `fsr-ovh-${arm}-`));
     const { f, dir } = fakeSuite(
       ['echo "# tests 5"', 'echo "# pass 5"', 'echo "# fail 0"', 'echo "# cancelled 0"', "sleep 3", "exit 0"].join("\n"),
     );
     try {
-      const env = { ...scopeEnv };
+      const env = { ...envBase };
       if (arm === "off") env.QUAY_TEST_SUITE_MEMORY_SAMPLER = "off";
       const t0 = Date.now();
-      const child = runRunner({ root, command: `bash ${f}`, laneCount: 2, runId: `ovh-${arm}`, env });
+      const child = runRunner({ root, command: `bash ${f}`, laneCount: 2, runId: `ovh-${arm}-${i}`, env });
       const { code } = await waitExit(child);
       const wallMs = Date.now() - t0;
       assert.equal(code, 0, `the fixture round is green in the ${arm} arm`);
@@ -623,29 +686,55 @@ test("AC4 — the sampler's own cost stays under 1% of the suite wall (instrumen
   }
   const on = runs.filter((r) => r.arm === "on");
   const off = runs.filter((r) => r.arm === "off");
-  // MIN of each arm (the least-noise estimator: both arms' wall is dominated by node bootstrap + the
-  // fixture's own sleep, so the sampler's contribution only shows up as a positive tail).
-  const minOn = Math.min(...on.map((r) => r.wallMs));
-  const minOff = Math.min(...off.map((r) => r.wallMs));
-  const deltaPct = ((minOn - minOff) / minOff) * 100;
-  // The instrument's OWN reading of its cost (independent of the A/B): samples × per-sample work.
-  const costOn = Math.min(...on.map((r) => r.cost));
-  const costPct = (costOn / minOn) * 100;
+  const m = measureSamplerOverhead({
+    onWalls: on.map((r) => r.wallMs),
+    offWalls: off.map((r) => r.wallMs),
+    onCosts: on.map((r) => r.cost),
+  });
   process.stderr.write(
     `full-suite-runner AC4 overhead (${scoped ? "REAL cgroup scope" : "hermetic, no scope"}): ` +
       `sampler ON wall=${on.map((r) => r.wallMs).join("/")}ms OFF wall=${off.map((r) => r.wallMs).join("/")}ms ` +
-      `⇒ A/B delta=${deltaPct.toFixed(2)}% (min ${minOn} vs ${minOff}); ` +
-      `instrument-recorded samplerCostMs=${costOn.toFixed(3)} ⇒ ${costPct.toFixed(3)}% of the suite wall\n`,
+      `⇒ A/B delta=${m.deltaPct.toFixed(2)}% (min ${m.minOn} vs ${m.minOff}); ` +
+      `runtime noise envelope=${m.wallEnvelopePct.toFixed(2)}% ` +
+      `(max of ${AC4_WALL_BUDGET_PCT}% and on-gap ${m.onGapPct.toFixed(2)}% + off-gap ${m.offGapPct.toFixed(2)}%); ` +
+      `instrument-recorded samplerCostMs=${m.costOn.toFixed(3)} ⇒ ${m.costPct.toFixed(3)}% of the suite wall\n`,
   );
-  assert.ok(deltaPct <= 1, `the on/off wall-clock delta is within the 1% budget (measured ${deltaPct.toFixed(2)}%)`);
-  assert.ok(costPct <= 1, `the sampler's own recorded cost is within the 1% budget (measured ${costPct.toFixed(3)}%)`);
-  assert.ok(costOn > 0, "the cost reading is a REAL measurement (a structurally-0 counter would carry no information)");
+  assertSamplerOverheadWithinBudget(m);
   if (scoped) {
     assert.ok(
       on.some((r) => r.statMax !== null),
       "inside a real scope the sampler read memory.stat — so the measured cost is the cost of real reads",
     );
   }
+});
+
+// AC4 negative control (AC3 of gap-full-suite-runner-ac4-wallclock-noise-envelope): the budget must
+// still be able to say NO. Both legs are driven through the SAME `measureSamplerOverhead` +
+// `assertSamplerOverheadWithinBudget` pair the real test uses, with a controlled reading injected:
+//   • a 2% instrument reading (88 ms on a 4.4 s wall) MUST fail — proving the 1% cap is not vacuous
+//     now that the wall leg has an envelope;
+//   • a wall delta above the runtime envelope MUST fail — proving that leg still bites too.
+test("AC4 negative control — a controlled >1% instrument reading still reds (the budget is not vacuous)", () => {
+  const base = {
+    onWalls: [4400, 4410, 4420, 4430, 4440],
+    offWalls: [4395, 4405, 4415, 4425, 4435],
+    onCosts: [2.2], // 0.05% of the wall — the healthy reading
+  };
+  // Green control: the healthy reading passes the SAME assertions the real test runs.
+  assertSamplerOverheadWithinBudget(measureSamplerOverhead(base));
+  // Instrument leg: a controlled 2% reading (88 ms / 4.4 s). The wall leg is untouched and green,
+  // so ONLY the hard 1% instrument cap can reject it.
+  assert.throws(
+    () => assertSamplerOverheadWithinBudget(measureSamplerOverhead({ ...base, onCosts: [88] })),
+    /the sampler's own recorded cost is within the 1% budget \(measured 2\.000%\)/,
+    "an instrument reading above 1% MUST red — the envelope must not leak into the authoritative leg",
+  );
+  // Wall leg: a 2.3% delta with quiet arms (gap sum well under it) MUST red.
+  assert.throws(
+    () => assertSamplerOverheadWithinBudget(measureSamplerOverhead({ ...base, onWalls: [4500, 4505, 4510, 4515, 4520] })),
+    /the on\/off wall-clock delta is within the runtime noise envelope/,
+    "a wall delta above the measured envelope MUST red — the envelope is derived, not a blanket pass",
+  );
 });
 
 // ── gap-phase-boundary-differential-accounting: REAL /sys/fs/cgroup path (硬规则4 推论三) ───────────
