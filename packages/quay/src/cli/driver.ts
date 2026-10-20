@@ -87,7 +87,13 @@ Usage:
              ⛔ Report only — nothing auto-restarts; behind tells you to run: quay driver restart
              config_provider_path compares .quay/config.yml's provider path version segment with
              the installed version (the second drift source).
-  restart    stop then start. ⚠️ Inherits the worker caveat above: while ready work exists it
+  restart    stop then start. Reports the TRUE outcome as one of two words — never a guess:
+             \`restarted-loop:\` = the kind's loop generation ended and a new one is running
+             (anchor-hosted ⇒ \`process unchanged\`, printed with \`loop generation <before> -> <after>\`;
+             exit 0); \`restart-aborted:\` = no new loop was confirmed (exit 1). The stop confirmation
+             reads the kind's own loop generation from \`.quay/anchor.log\`, ⛔ not the anchor process'
+             liveness — six kinds share one anchor, so the process stays alive across a per-kind restart.
+             ⚠️ Inherits the worker caveat above: while ready work exists it
              aborts WITHOUT starting (exit 1) rather than risk two loops on one kind.
   log        READ-ONLY: print the driver's recorded per-attempt log (the RAW failure text of each
              attempt — never classified, never interpreted). Reads the workspace's own runtime
