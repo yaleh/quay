@@ -37,3 +37,4 @@ gate/lifecycle.ts 的 TRANSITIONS（promote/retreat 运行时邻接表）+ legal
 - packages/quay/src/gate/lifecycle.ts
 - packages/quay/src/kernel/task-transition.ts
 - packages/quay/test/lifecycle-edge-table.test.mjs
+- tasks/gap-transitions-table-not-derived-from-lifecycle-edges.md
