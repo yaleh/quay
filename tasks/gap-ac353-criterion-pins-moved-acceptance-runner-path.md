@@ -316,3 +316,13 @@ $ node --test plugin/test/full-suite-runner-cgroup.test.mjs     # 主检出 @ de
 **R5. 状态变更**：`needs-human → todo`（`lifecycle_retreat`，理由 = R2 互锁已解）。这是**回到队列**，
 不是验收：AC 仍全是作者侧自检勾选，本节不新增任何勾选，也无 `done`/`verifiedBy`；下一次 fan-in
 必须自己通过 suite 与收尾门。
+## Needs-Human
+
+**执行 2026-10-19T05:12:55.717Z — 停派终止（失败无法归因，⛔ 不再重派）**
+
+- 阻碍原因：LOOP DEADLOCK: task gap-ac353-criterion-pins-moved-acceptance-runner-path has been blocked by the SAME pre-existing red set for 4 consecutive fan-in rounds (signature unchanged across rounds). Blocked red points: plugin/test/full-suite-runner-cgroup.test.mjs. Other tasks blocked by the identical red set: gap-ac237-criterion-stale-acceptance-runner-moved, gap-src-root-gate-cycle-break — each of these tasks fixes a red point OUTSIDE the blocked set, so they are mutually landing gates (none can produce a green full suite while the others' reds remain). Suggested resolution: land ANY ONE of them first (each one's own fix is outside the blocked set, so the red set does not grow); the others' blocked sets then shrink by that red point and they land in turn. If a landing still makes it worse, a human must decide the order. ⛔ The gates were NOT relaxed: every new/changed red point still hard-fails this task (baseline-equivalence exemption never covers a red the task introduced). — 停止自动重派（电路断路器：同一既存红签名连续 4 轮未变）。⛔ 判据未放宽：本次新增 / 断言文本变化的红点仍然硬红（既存红等价豁免只覆盖「不变差」的方向）。
+- 失败步/判词：step=suite: AssertionError [ERR_ASSERTION]: cadence must be one of the five enumerated values: touches-relax-tighten.ts → 每轮（worker-driver 驻留环的轮末一步；loop.touches_relax 未声明或 mode 为 off / 读不懂时不跑，该轮 round 记录的 auto_tighten 为 null） [baseline A/B: HARD RED (task-introduced-red) — the task's red set is NOT a subset of the develop baseline red set: added=plugin/test/full-suite-runner-cgroup.test.mjs changed=-]
+- run_id：wk-prod-anchor
+- session_id：b73cb424-5e7a-4282-967c-46c97be1c85d
+- suite 日志：/data/home/yale/work/quay/.quay/fan-in-suite-gap-ac353-criterion-pins-moved-acceptance-runner-path~wk-prod-anchor~1792386297743-0b57e9.log
+- fan-in 日志：/data/home/yale/work/quay/.quay/fan-in-gap-ac353-criterion-pins-moved-acceptance-runner-path-wk-prod-anchor.log

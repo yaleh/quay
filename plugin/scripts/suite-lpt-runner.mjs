@@ -28,32 +28,13 @@
 import { run } from "node:test";
 import { spec } from "node:test/reporters";
 import { basename } from "node:path";
-import { Transform } from "node:stream";
-import perFileReporter, { readConcurrency } from "./measure-suite-reporter.mjs";
+import perFileReporter, { dropRawDiagnostics, readConcurrency } from "./measure-suite-reporter.mjs";
 
-/** A stream.Transform that drops `test:stdout` / `test:stderr` events before the spec reporter.
- *
- *  In process isolation node:test forwards each test file's raw stdout/stderr as these diagnostic
- *  events, and the spec reporter renders them verbatim into the runner's stdout — so a test file that
- *  leaks a literal `not ok` TAP line from one of its OWN subprocesses (a "fake red TAP"
- *  failure-detection test) would pollute the stdout the outer runner greps for 判绿/红. Red/green is
- *  fully carried by the structured events (test:fail / test:summary) the spec reporter renders as
- *  `✖ <name> (Nms)` / `ℹ fail N` / `ℹ cancelled N`; the raw child streams are diagnostics only and
- *  must not reach the outer grep. */
-function dropRawDiagnostics() {
-  return new Transform({
-    objectMode: true,
-    transform(chunk, _encoding, callback) {
-      let obj = chunk;
-      if (Buffer.isBuffer(chunk)) obj = JSON.parse(chunk.toString());
-      if (typeof obj === "string") obj = JSON.parse(obj);
-      if (obj && typeof obj === "object" && (obj.type === "test:stdout" || obj.type === "test:stderr")) {
-        return callback(); // drop the raw child output
-      }
-      callback(null, chunk);
-    },
-  });
-}
+// The raw-diagnostic filter is IMPORTED, never re-implemented — suite-scheduler.ts wires the SAME
+// exported `dropRawDiagnostics` from measure-suite-reporter.mjs. The two files used to carry
+// byte-identical private copies (semantic-dedup-scan finding `suite-lpt-drop-diagnostics`, runId
+// `semantic-dedup-scan-1792405443214`); the shared body now lives in the module both already
+// import, so the two execution paths cannot drift on what counts as a diagnostic.
 
 /** `--test-concurrency=N` from process.execArgv (both spellings) — RE-EXPORTED, never re-implemented.
  *

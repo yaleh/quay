@@ -16,8 +16,8 @@ import { verdictFromGateCheck } from "./shared/acceptance-runner.ts";
 // Kernel-leaf direction, same as `gate/lifecycle.ts` → `../kernel/task-transition.ts`.
 import { readLoadAvg1 } from "../kernel/load-avg.ts";
 import type { GateVerdictKind } from "./shared/types.ts";
-import { appendGateEvent, type GateEvent } from "./gate-event-store.ts";
-import type { Task } from "../abi.ts";
+import { appendGateEvent, type GateEvent } from "../core/gate-event-store.ts";
+import type { Task } from "../core/types.ts";
 
 // ── criterion-cost recording (gap-no-criterion-records-its-own-cost-checker-cost-jsonl) ────────────
 // Every gate execution appends ONE `{name, ms, n, load, at, verdict}` line to

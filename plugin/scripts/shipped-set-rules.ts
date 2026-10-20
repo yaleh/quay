@@ -58,6 +58,7 @@ import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { helpExit, isDirectEntry, flagValue } from "./gate-script-base.ts";
 import { countCodeLines } from "./sh-census-check.ts";
+import { checkBaselineShrinkOnly as checkBaselineShrinkOnlyShared } from "./ratchet-baseline.ts";
 
 export const RULES_FILE_REL = "plugin/shipped-set-rules.txt";
 export const BASELINE_FILE_REL = "plugin/shipped-set-baseline.json";
@@ -458,9 +459,9 @@ export function checkBaselineShrinkOnly(
   worktree: ShippedSetBaseline | null,
   head: ShippedSetBaseline | null,
 ): { raised: BaselineAxis[]; bootstrap: boolean } {
-  if (head === null) return { raised: [], bootstrap: true };
-  if (worktree === null) return { raised: [], bootstrap: false };
-  return { raised: BASELINE_AXES.filter((k) => worktree[k] > head[k]), bootstrap: false };
+  // The mechanism is the shared `ratchet-baseline.ts` judgment (the `baseline-shrink-only-copy`
+  // finding); this wrapper keeps THIS ratchet's axis list (`BASELINE_AXES`) and public surface.
+  return checkBaselineShrinkOnlyShared(worktree, head, BASELINE_AXES);
 }
 
 export function judge(

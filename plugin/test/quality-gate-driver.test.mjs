@@ -2036,21 +2036,24 @@ const ARCH_CYCLE_SOURCES = [
   "experiments/quay-perpetual-stream/scripts",
 ];
 
-/** Materialize the query artifacts the LAST analyze would have persisted under `<root>/.archguard`. */
-function makeArchQueryFixture(root, cyclesBySource) {
+/** Materialize the query artifacts the LAST analyze would have persisted under `<root>/.archguard`.
+ *
+ *  `opts.timestampBySource` sets each scope's arch.json `timestamp` (the freshness source the routine
+ *  records); `opts.omitArchTimestamp` writes arch.json WITHOUT one so the manifest `generatedAt`
+ *  fallback can be exercised. */
+function makeArchQueryFixture(root, cyclesBySource, opts = {}) {
   const queryDir = path.join(root, ".archguard", "query");
   fs.mkdirSync(queryDir, { recursive: true });
+  const defaultTimestamp = opts.generatedAt ?? "2026-10-18T00:00:00Z";
   const scopes = [];
   ARCH_CYCLE_SOURCES.forEach((source, i) => {
     const key = `scope-${i}`;
-    scopes.push({ key, sources: [path.resolve(root, source)], generatedAt: "2026-10-18T00:00:00Z" });
+    scopes.push({ key, sources: [path.resolve(root, source)], generatedAt: defaultTimestamp });
     fs.mkdirSync(path.join(queryDir, key), { recursive: true });
     const cycles = (cyclesBySource?.[source] ?? []).map((modules) => ({ modules }));
-    fs.writeFileSync(
-      path.join(queryDir, key, "arch.json"),
-      JSON.stringify({ language: "typescript", extensions: { tsAnalysis: { moduleGraph: { cycles } } } }),
-      "utf8",
-    );
+    const artifact = { language: "typescript", extensions: { tsAnalysis: { moduleGraph: { cycles } } } };
+    if (!opts.omitArchTimestamp) artifact.timestamp = opts.timestampBySource?.[source] ?? defaultTimestamp;
+    fs.writeFileSync(path.join(queryDir, key, "arch.json"), JSON.stringify(artifact), "utf8");
   });
   fs.writeFileSync(path.join(queryDir, "manifest.json"), JSON.stringify({ scopes }), "utf8");
 }
@@ -2151,6 +2154,84 @@ test("runArchCycleRound — a NON-EMPTY cycle reading is VERIFIED (report-only, 
   runArchCycleRound(tmp, { ...opts, now: "T1" });
   const after = fs.readFileSync(history, "utf8").split("\n").filter((l) => l !== "");
   assert.deepEqual(after.map((l) => JSON.parse(l).ts), ["T0", "T1"]);
+});
+
+test("runArchCycleRound — the record says HOW OLD the artifact is: artifactTimestamp + three-valued stale (AC1/AC2)", (t) => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "qg-cycle-freshness-"));
+  t.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
+  const ARTIFACT_TS = "2026-10-18T00:00:00Z";
+  // One scope carries an OLDER artifact: the aggregate must report the OLDEST, not a fresher sibling.
+  const OLDER_TS = "2026-10-11T00:00:00Z";
+  makeArchQueryFixture(
+    tmp,
+    { "packages/quay/src": [["src/a", "src/b"]] },
+    { timestampBySource: { "plugin/scripts": OLDER_TS } },
+  );
+  const history = path.join(tmp, "history.jsonl");
+  const base = { config: { enabled: true, intervalMinutes: 360 }, configPresent: true, configError: null, historyPath: history };
+
+  const readArtifactTs = (source) => {
+    const manifest = JSON.parse(fs.readFileSync(path.join(tmp, ".archguard", "query", "manifest.json"), "utf8"));
+    const entry = manifest.scopes.find((s) => s.sources.includes(path.resolve(tmp, source)));
+    return JSON.parse(fs.readFileSync(path.join(tmp, ".archguard", "query", entry.key, "arch.json"), "utf8")).timestamp;
+  };
+
+  // AC1: the recorded timestamp IS the timestamp of the arch.json actually read.
+  assert.equal(readArtifactTs("packages/quay/src"), ARTIFACT_TS);
+  assert.equal(readArtifactTs("plugin/scripts"), OLDER_TS);
+
+  // AC2 (stale): 2 days old with a 360m interval ⇒ stale:true, and the age is the oldest scope's.
+  const staleFact = runArchCycleRound(tmp, { ...base, now: "2026-10-20T00:00:00Z" });
+  assert.equal(staleFact.state, "verified");
+  assert.equal(staleFact.value.artifactTimestamp, OLDER_TS, "aggregate freshness = OLDEST artifact read, not the newest");
+  assert.equal(staleFact.value.stale, true);
+  assert.equal(staleFact.value.staleIntervalMs, 360 * 60_000);
+  assert.equal(staleFact.value.artifactAgeMs, Date.parse("2026-10-20T00:00:00Z") - Date.parse(OLDER_TS));
+  const staleRec = JSON.parse(fs.readFileSync(history, "utf8").trim().split("\n").pop());
+  assert.equal(staleRec.artifactTimestamp, OLDER_TS);
+  assert.equal(staleRec.stale, true);
+  assert.equal(staleRec.staleIntervalMs, 360 * 60_000);
+  // Per-scope freshness is carried too (AC1 applies to the line, and per-scope lets a reader see WHICH
+  // scope is stale rather than only that the aggregate is).
+  assert.deepEqual(
+    [...new Set(staleRec.scopes.filter((s) => s.artifactTimestamp != null).map((s) => s.artifactTimestamp))].sort(),
+    [OLDER_TS, ARTIFACT_TS].sort(),
+  );
+
+  // Negative control: a round whose report time is INSIDE one interval of the artifact is NOT stale.
+  // Without this, `stale:true` above could be a constant.
+  const freshFact = runArchCycleRound(tmp, { ...base, now: "2026-10-11T01:00:00Z" });
+  assert.equal(freshFact.value.artifactTimestamp, OLDER_TS);
+  assert.equal(freshFact.value.stale, false);
+});
+
+test("runArchCycleRound — NO readable artifact ⇒ artifactTimestamp/stale are null, NEVER 'fresh' (AC1/AC2, 硬规则 3b)", (t) => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "qg-cycle-noartifact-"));
+  t.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
+  const history = path.join(tmp, "history.jsonl");
+  const fact = runArchCycleRound(tmp, {
+    config: { enabled: true, intervalMinutes: 360 }, configPresent: true, configError: null,
+    historyPath: history, now: "2026-10-20T00:00:00Z",
+  });
+  assert.equal(fact.value.artifactTimestamp, null);
+  assert.equal(fact.value.artifactAgeMs, null);
+  assert.equal(fact.value.stale, null, "⛔ null (not-evaluable), never false — 'could not tell' must not read as 'fresh'");
+  const rec = JSON.parse(fs.readFileSync(history, "utf8").trim());
+  assert.ok(Object.prototype.hasOwnProperty.call(rec, "artifactTimestamp"), "the field is PRESENT even when null (AC1)");
+  assert.equal(rec.stale, null);
+});
+
+test("runArchCycleRound — arch.json without `timestamp` falls back to the manifest scope's generatedAt (AC1)", (t) => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "qg-cycle-tsfallback-"));
+  t.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
+  makeArchQueryFixture(tmp, { "packages/quay/src": [["src/a", "src/b"]] }, { omitArchTimestamp: true, generatedAt: "2026-10-19T12:00:00Z" });
+  const fact = runArchCycleRound(tmp, {
+    config: { enabled: true, intervalMinutes: 360 }, configPresent: true, configError: null,
+    historyPath: path.join(tmp, "history.jsonl"), now: "2026-10-19T13:00:00Z",
+  });
+  assert.equal(fact.value.artifactTimestamp, "2026-10-19T12:00:00Z");
+  assert.equal(fact.value.artifactAgeMs, 60 * 60_000);
+  assert.equal(fact.value.stale, false);
 });
 
 test("runArchCycleRound — an UNREADABLE module graph is `not-evaluated` + evaluated:false, NEVER the same value as 0 cycles (AC3)", (t) => {

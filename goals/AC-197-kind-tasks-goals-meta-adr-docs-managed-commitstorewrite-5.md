@@ -69,7 +69,7 @@ criterion: >-
   # to be widened further (the call-site half of the conjunction is what keeps
   it non-vacuous).
 
-  prim="packages/quay/src/store-commit.ts"
+  prim="packages/quay/src/core/store-commit.ts"
 
   grep -q 'export function commitStoreWrite' "$prim" || { echo
   "CAUSE=primitive-missing — $prim 未导出四态原语 commitStoreWrite" >&2; exit 1; }
@@ -83,8 +83,8 @@ criterion: >-
 
   n=0
 
-  for f in packages/quay/src/goal-store.ts packages/quay/src/meta-store.ts
-  packages/quay/src/adr-store.ts packages/quay/src/document-store.ts
+  for f in packages/quay/src/core/goal-store.ts packages/quay/src/meta-store.ts
+  packages/quay/src/core/adr-store.ts packages/quay/src/core/document-store.ts
   packages/quay-native/src/store.ts; do
     grep -q 'store-commit\.ts' "$f" && grep -qE 'commit(StoreWrite|KindFile|StoreBatch)\(' "$f" && n=$((n+1))
   done
@@ -100,7 +100,7 @@ criterion: >-
   # <<< five-kind-wiring
 
   exit 0
-expect: 重锚后立即读：共享原语模块 packages/quay/src/store-commit.ts 同时导出四态原语
+expect: 重锚后立即读：共享原语模块 packages/quay/src/core/store-commit.ts 同时导出四态原语
   commitStoreWrite 与委托它的每 kind 包装 commitKindFile，且五个 store 文件逐一「依赖
   store-commit.ts ∧ 出现一次调用」⇒ exit 0。失败时 exit 1 且 stderr 携带具名
   `CAUSE=`（primitive-missing / wrapper-missing / second-primitive /

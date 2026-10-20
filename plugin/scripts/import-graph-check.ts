@@ -51,7 +51,7 @@ import { helpExit, isDirectEntry, flagValue } from "./gate-script-base.ts";
 // `lineAt` was this file's own copy of the 1-based newline counter — same body as eleven others
 // (semantic-dedup-scan `lineof-lineat`); the family lives once in source-text-lib.ts under ONE name.
 import { lineOf } from "./source-text-lib.ts";
-import { baselinePath } from "./ratchet-baseline.ts";
+import { baselinePath, checkBaselineShrinkOnly as checkBaselineShrinkOnlyShared } from "./ratchet-baseline.ts";
 // Its own private `defaultRoot()` — "up exactly two levels from the script dir" — was one of the
 // THREE byte-identical bodies filed by the semantic-dedup-scan routine as
 // `defaultroot-byte-identical-quad` (runId `semantic-dedup-scan-1792033478766`). `repoRoot` is the
@@ -468,20 +468,22 @@ export interface RatchetVerdict {
   kernelBlocked: boolean;
 }
 
+/** This ratchet's axes — the part of the shared shrink-only judgment each consumer OWNS. Named
+ *  explicitly (rather than derived from `Object.keys`) so the axis list is checkable on its own and
+ *  cannot silently shrink when a baseline object is built partially. */
+export const BASELINE_AXES = ["valueSccs", "typeSccs", "reverseEdges"] as const;
+
 /**
  * The shrink-only judgment for the baseline FILE ITSELF (AC5): the working-tree baseline may not exceed
- * the git-HEAD baseline on any axis. A `head` of null is the bootstrap state (HEAD has no baseline file
- * yet) — it is labelled, never treated as "no constraint". Pure, so the self-test can exercise the
- * ±1 judgment without a git repo.
+ * the git-HEAD baseline on any axis. The mechanism lives in `ratchet-baseline.ts` (the
+ * `baseline-shrink-only-copy` finding); this wrapper keeps THIS ratchet's axis binding and its public
+ * surface, so the self-test can exercise the ±1 judgment without a git repo.
  */
 export function checkBaselineShrinkOnly(
   worktree: Baseline | null,
   head: Baseline | null,
 ): { raised: (keyof Baseline)[]; bootstrap: boolean } {
-  if (head === null) return { raised: [], bootstrap: true };
-  if (worktree === null) return { raised: [], bootstrap: false };
-  const raised = (Object.keys(worktree) as (keyof Baseline)[]).filter((k) => worktree[k] > head[k]);
-  return { raised, bootstrap: false };
+  return checkBaselineShrinkOnlyShared(worktree, head, BASELINE_AXES);
 }
 
 /** The gate judgment: the reading must not exceed the baseline, the baseline must not have been raised
@@ -493,7 +495,7 @@ export function judge(
   headBaseline: Baseline | null,
 ): RatchetVerdict {
   const counts = countsOf(reading);
-  const over = (Object.keys(counts) as (keyof Baseline)[]).filter((k) => counts[k] > baseline[k]);
+  const over = BASELINE_AXES.filter((k) => counts[k] > baseline[k]);
   const shrink = checkBaselineShrinkOnly(worktreeBaseline, headBaseline);
   const kernelBlocked = reading.kernelChecked && reading.kernelViolations.length > 0;
   return {

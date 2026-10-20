@@ -1351,6 +1351,27 @@ export function declaredSuiteMemoryMax(env = process.env.QUAY_SUITE_MEMORY_MAX):
   return { value: SUITE_MEMORY_MAX_DEFAULT, source: "default" };
 }
 
+/** The DECLARED ceiling in BYTES — the module-load template's MemoryMax.
+ *
+ *  ── 为什么它必须是一个纯函数（gap-suite-memorymax-default-nondeterministic-across-cgroup-scope）──
+ *  `DEFAULT_SYSTEMD_RUN_LIMITS` 是**模块加载时**求值的模板。它原先取 `defaultSuiteMemoryMax()`，
+ *  而后者会把 `listSharedHostScopes().count`（宿主上活着的同类 scope 数）喂进 shared-host 分摊 ⇒
+ *  同一个宿主上的两个进程（测试进程 vs 跑在 `systemd-run --scope` 里的 probe 进程）看到不同的计数，
+ *  于是同一个"常量"在两个进程里取到不同的值，`full-suite-runner-cgroup.test.mjs` 的
+ *  `reading.memoryMax === defaultSuiteMemoryMax()` 断言跨进程确定性地失败。
+ *  **一个随同宿主上别的进程有无而变的量不是常量。** 声明值（env / `SUITE_MEMORY_MAX_DEFAULT`）是
+ *  唯一属于本进程输入面的量，模板只读它。
+ *
+ *  ⛔ host guard（含 shared-host 分摊）**不是被取消**，只是换了适用面：它属于**每一轮**的真实解析
+ *  ——`resolveSuiteMemoryMax(stateDir)`（runner 的生产路径，把结果经 `ctx.memoryMaxDefault`
+ *  交给 `parseSystemdRunLimits`）。模板只是 fallback，⛔ 不承担"本轮上限"的职责。 */
+export function declaredSuiteMemoryMaxBytes(env = process.env.QUAY_SUITE_MEMORY_MAX): string {
+  const bytes = parseSystemdBytesToBytes(declaredSuiteMemoryMax(env).value);
+  // `declaredSuiteMemoryMax` only returns a value it could parse (or the parseable default), so this
+  // branch is unreachable; it exists so an edited default can never yield `"null"` to systemd-run.
+  return bytes === null ? SUITE_MEMORY_MAX_DEFAULT : String(bytes);
+}
+
 /** The Applied ceiling for one run: the DECLARED value, bounded above by the host-relative fraction
  *  (硬规则 4 推论二 — a declared ceiling may never exceed the host's own capacity). Distinct from the
  *  lane-scaled ESTIMATE, which is recorded as evidence and does not move the ceiling (see the block
@@ -1488,32 +1509,49 @@ export function suiteMemoryMax(opts: {
  *  constant only this file can change, which was the defect. */
 export const SUITE_MEMORY_MAX_DEFAULT = "16G";
 
-/** The suite's default MemoryMax with THIS host's readings (used by the module-load template: no
- *  state dir, so no measurement). The guardrail is SELECTED by the declared ceiling's provenance
- *  (`suiteHostGuard`) — ⛔ not unconditionally the shared-host split, which used to swallow an
- *  operator's explicit declaration (see `suiteHostGuard`'s block comment). */
+/** The suite's default MemoryMax with THIS host's readings (no state dir, so no measurement) — the
+ *  state-dir-free variant of `resolveSuiteMemoryMax`. The guardrail is SELECTED by the declared
+ *  ceiling's provenance (`suiteHostGuard`) — ⛔ not unconditionally the shared-host split, which used
+ *  to swallow an operator's explicit declaration (see `suiteHostGuard`'s block comment).
+ *
+ *  ⚠️ `DEFAULT_SYSTEMD_RUN_LIMITS` does ⛔ NOT call this function any more: a module-load constant may
+ *  only read the declaration (see `declaredSuiteMemoryMaxBytes`). This function is the "what would the
+ *  per-run default resolution say, without a state dir" reading — used by tests/evidence.
+ *
+ *  ⛔ `siblingScopeCount: null` here is DELIBERATE, not "not evaluated by omission"
+ *  (gap-suite-memorymax-default-nondeterministic-across-cgroup-scope): this function resolves the
+ *  DEFAULT from the host's CAPACITY only (the project-blind `0.25 × effective` bound), ⛔ not from the
+ *  live same-kind scope count. The count is process-local host state — two processes on the same host
+ *  (a test process and a `systemd-run --scope` probe) see different counts, so consuming it here makes
+ *  the "default" differ between them. The shared-host split is applied per RUN by
+ *  `resolveSuiteMemoryMax(stateDir)`, which is the path the runner actually uses. */
 export function defaultSuiteMemoryMax(): string {
   const effectiveTotalMemBytes = readEffectiveTotalMemBytes();
   const declared = declaredSuiteMemoryMax();
   return suiteMemoryMax({
     effectiveTotalMemBytes,
     declared,
-    hostGuard: suiteHostGuard({ effectiveTotalMemBytes, declared, siblingScopeCount: listSharedHostScopes().count }),
+    hostGuard: suiteHostGuard({ effectiveTotalMemBytes, declared, siblingScopeCount: null }),
   }).memoryMax;
 }
 
 /** The suite's default cgroup scope limits — the PROJECT-BLIND template. cpuQuota/tasksMax 默认空 =
- *  不设 CPU/任务上限（人裁定）; MemoryMax 宿主相对推导（公式见上）。
+ *  不设 CPU/任务上限（人裁定）; MemoryMax 取**声明的默认值**（`declaredSuiteMemoryMaxBytes`）。
  *
- *  ⚠️ This constant is the module-load TEMPLATE, so it resolves the DECLARED ceiling from env/default
- *  only — no state dir, hence no measurements. The ceiling a real round runs under is resolved per run
- *  by `resolveSuiteMemoryMax(stateDir)` and handed in via the `parseSystemdRunLimits` `ctx` parameter.
+ *  ⚠️ This constant is the module-load TEMPLATE. Its MemoryMax is a PURE function of the ambient
+ *  declaration (`QUAY_SUITE_MEMORY_MAX` / the declared default) — ⛔ it reads NO cgroup state and NO
+ *  live same-kind scope count (gap-suite-memorymax-default-nondeterministic-across-cgroup-scope:
+ *  `listSharedHostScopes().count` made this "constant" differ between processes on the same host).
+ *  The host guardrail — including the shared-host split — and the per-round measurements are applied
+ *  by `resolveSuiteMemoryMax(stateDir)` and handed in via the `parseSystemdRunLimits` `ctx` parameter;
+ *  that is the path every real round uses. Callers that construct a REAL scope must pass resolved
+ *  limits (the runner does); the template alone is not a host bound.
  *
  *  人 2026-09-24 的裁定链（4G→6G→16G）现在是**声明的默认值**（`SUITE_MEMORY_MAX_DEFAULT`），不再藏在本文件
  *  的一个常量里：6G 是 4 核旧机上定的，迁到 128 核宿主后 main lane 并发 64/128，suite 无上限时实测峰值
  *  8–10.5G，6G 下每轮顶格数千次 memory.max 事件、回收抖动让时序断言轮换飘红。16G 把症状压了下去。 */
 export const DEFAULT_SYSTEMD_RUN_LIMITS: SystemdRunLimits = {
-  memoryMax: defaultSuiteMemoryMax(),
+  memoryMax: declaredSuiteMemoryMaxBytes(),
   cpuQuota: "",
   tasksMax: "",
   memorySwapMax: "",

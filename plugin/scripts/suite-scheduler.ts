@@ -65,12 +65,11 @@
 
 import { run } from "node:test";
 import { spec } from "node:test/reporters";
-import { Transform } from "node:stream";
 import path from "node:path";
 import { isDirectEntry, parseArgs as baseParseArgs } from "./gate-script-base.ts";
 import { classifyFile, type DeclaredGroup } from "./runner-grouping.ts";
 import { loadDurationAverages, orderByLpt, loadBaselineDurations, type LptReport } from "./suite-lpt-order.ts";
-import { readPerFileCpuMs, readPerFileMemPeakKb } from "./measure-suite-reporter.mjs";
+import { dropRawDiagnostics, readPerFileCpuMs, readPerFileMemPeakKb } from "./measure-suite-reporter.mjs";
 
 export type SuiteGroup = "serial" | "lowconc" | "main";
 export const SUITE_GROUPS: SuiteGroup[] = ["serial", "lowconc", "main"];
@@ -356,26 +355,11 @@ export interface RunResult {
   failedFiles: string[];
 }
 
-/** A stream.Transform that drops `test:stdout` / `test:stderr` events before the spec reporter —
- *  the SAME raw-diagnostic filter suite-lpt-runner.mjs wires (its dropRawDiagnostics): a test file
- *  that leaks a literal `not ok` / `✖` line from one of its OWN subprocesses (stdio inherited) must
- *  not pollute the stream the outer runner greps for 判绿/红. Red/green is carried entirely by the
- *  structured events (test:fail / test:summary) the spec reporter renders as `✖ <name> (Nms)` /
- *  `ℹ fail N`; the raw child streams are diagnostics only. */
-function dropRawDiagnostics() {
-  return new Transform({
-    objectMode: true,
-    transform(chunk, _encoding, callback) {
-      let obj = chunk;
-      if (Buffer.isBuffer(obj)) obj = JSON.parse(obj.toString());
-      if (typeof obj === "string") obj = JSON.parse(obj);
-      if (obj && typeof obj === "object" && (obj.type === "test:stdout" || obj.type === "test:stderr")) {
-        return callback(); // drop the raw child output
-      }
-      callback(null, chunk);
-    },
-  });
-}
+// The raw-diagnostic filter (`dropRawDiagnostics`) is IMPORTED from measure-suite-reporter.mjs —
+// the same exported function suite-lpt-runner.mjs wires, never a private copy. The two files used
+// to carry byte-identical bodies (semantic-dedup-scan finding `suite-lpt-drop-diagnostics`, runId
+// `semantic-dedup-scan-1792405443214`, kind `byte-identical-body`, verdict `real-duplication`,
+// requested action `extract`); the shared body now lives in the module both already import.
 
 /**
  * Run the suite through the event-driven scheduler. Each dispatched file runs through node:test's

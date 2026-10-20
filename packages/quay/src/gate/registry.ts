@@ -8,7 +8,7 @@ import { makeDocumentContractGate } from "./factories/document-contract.ts";
 import { makeGoalGate } from "./factories/goal.ts";
 import { resolveRunnerOptions } from "../kernel/gate-run-options.ts";
 import { discoverWorkspaceRoot, loadWorkspaceGates, loadWorkspaceGateMetadata } from "./config/loader.ts";
-import type { Task } from "../abi.ts";
+import type { Task } from "../core/types.ts";
 
 declare const __dirname;
 var moduleDir = typeof __dirname === "string" ? __dirname : path.dirname(fileURLToPath(import.meta.url));

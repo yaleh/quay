@@ -3,7 +3,7 @@
 //
 // THE INVARIANT: exactly ONE site in the product/plugin source may spell the worktree-namespace
 // directory literal — the `DEFAULT_WORKTREE_NAMESPACE_NAME` declaration in
-// `packages/quay/src/worktree-namespace.ts`, which is the fallback branch of the single resolver
+// `packages/quay/src/core/worktree-namespace.ts`, which is the fallback branch of the single resolver
 // every reader goes through. A second spelling anywhere else is the defect re-growing: a reader that
 // answers "where are this workspace's worktrees" from a hardcoded name instead of the workspace's
 // `loop.worktree_root`, which is how a third-party project came to read ANOTHER project's namespace
@@ -36,13 +36,13 @@ import { isDirectEntry } from "./gate-script-base.ts";
 // `semantic-dedup-scan-1790995446200`). Only the traversal moved; SCAN_ROOTS and SKIP_DIRS are this
 // checker's own.
 import { listFilesInRoots } from "./fs-walk.ts";
-import { DEFAULT_WORKTREE_NAMESPACE_NAME } from "../../packages/quay/src/worktree-namespace.ts";
+import { DEFAULT_WORKTREE_NAMESPACE_NAME } from "../../packages/quay/src/core/worktree-namespace.ts";
 
 /** The scan roots, relative to the repo root — the AC's own two arguments. */
 export const SCAN_ROOTS = ["packages/quay/src", "plugin/scripts"];
 
 /** The single file allowed to hold the literal. */
-export const RESOLVER_REL = "packages/quay/src/worktree-namespace.ts";
+export const RESOLVER_REL = "packages/quay/src/core/worktree-namespace.ts";
 
 /** The declared name the single hit must ride on (the fallback branch's constant). */
 export const DECLARATION_MARKER = "DEFAULT_WORKTREE_NAMESPACE_NAME";

@@ -1,7 +1,7 @@
 ---
 id: gap-src-root-gate-cycle-break
 title: 断 ""↔gate 根环——src root 同时是 gate 的宿主与依赖源，把 gate 依赖的底层下沉建立单向分层
-status: needs-human
+status: done
 labels:
   - gap
 parent: null
@@ -223,14 +223,6 @@ packages/quay/test/kernel-load-avg.test.mjs,packages/quay/test/kernel-env-merge.
 - plugin/test/worker-driver.test.mjs
 - goals/AC-197-kind-tasks-goals-meta-adr-docs-managed-commitstorewrite-5.md
 - tasks/gap-src-root-gate-cycle-break.md
-
-## Blocker
-
-**2026-10-18T13:11:56.780Z — worker 未落地（exited-not-landed）**
-
-- 未落地原因：step=suite: AssertionError [ERR_ASSERTION]: cadence must be one of the five enumerated values: touches-relax-tighten.ts → 每轮（worker-driver 驻留环的轮末一步；loop.touches_relax 未声明或 mode 为 off / 读不懂时不跑，该轮 round 记录的 auto_tighten 为 null） [baseline A/B: HARD RED (task-introduced-red) — the task's red set is NOT a subset of the develop baseline red set: added=plugin/test/full-suite-runner-cgroup.test.mjs changed=-]
-- run_id：wk-prod-anchor
-- session_id：c79d9442-ec1e-4fd9-8297-e60782e90c4f
 
 ## Needs-Human
 

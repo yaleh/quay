@@ -4,7 +4,7 @@
 // is ever mentioned here; the command is workspace data (gates.yml).
 
 import type { GateFn } from "../shared/types.ts";
-import { runAcceptance } from "../shared/acceptance-runner.ts";
+import { runAcceptance } from "../../core/acceptance-runner.ts";
 import { type GateConfig, resolveRunnerOptions } from "./utils.ts";
 
 /**
