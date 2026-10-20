@@ -31,12 +31,12 @@ Structurally identical 28-line path resolution clone (archguard dup hash 4cf914f
 Extract to a shared plugin/scripts/path-scope.ts consumed by both; AC: repo-wide grep finds one definition and both checkers' existing tests stay green.
 
 ## AC
-- [ ] `.quay/routine-findings.jsonl` 中 finding `dup-path-candidates`（routine `architecture-analysis`，runId `architecture-analysis-1792481915389`）所描述的问题被复核并处置
-- [ ] 处置结论可核：要么修掉，要么写明「已有机制在管、失败在哪一步」，⛔ 不以「已注意到」结案
+- [x] `.quay/routine-findings.jsonl` 中 finding `dup-path-candidates`（routine `architecture-analysis`，runId `architecture-analysis-1792481915389`）所描述的问题被复核并处置
+- [x] 处置结论可核：要么修掉，要么写明「已有机制在管、失败在哪一步」，⛔ 不以「已注意到」结案
 
 ## DoD
-- [ ] 上面的判据实跑通过
-- [ ] ⛔ 探针只立案不执行：本任务若需要跑产出者/修复，由派发链执行，⛔ 不由例程代跑
+- [x] 上面的判据实跑通过
+- [x] ⛔ 探针只立案不执行：本任务若需要跑产出者/修复，由派发链执行，⛔ 不由例程代跑
 
 ## Touches
 - `plugin/scripts/threshold-scope-check.ts`
