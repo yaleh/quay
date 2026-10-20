@@ -224,14 +224,6 @@ packages/quay/test/kernel-load-avg.test.mjs,packages/quay/test/kernel-env-merge.
 - goals/AC-197-kind-tasks-goals-meta-adr-docs-managed-commitstorewrite-5.md
 - tasks/gap-src-root-gate-cycle-break.md
 
-## Blocker
-
-**2026-10-18T13:11:56.780Z — worker 未落地（exited-not-landed）**
-
-- 未落地原因：step=suite: AssertionError [ERR_ASSERTION]: cadence must be one of the five enumerated values: touches-relax-tighten.ts → 每轮（worker-driver 驻留环的轮末一步；loop.touches_relax 未声明或 mode 为 off / 读不懂时不跑，该轮 round 记录的 auto_tighten 为 null） [baseline A/B: HARD RED (task-introduced-red) — the task's red set is NOT a subset of the develop baseline red set: added=plugin/test/full-suite-runner-cgroup.test.mjs changed=-]
-- run_id：wk-prod-anchor
-- session_id：c79d9442-ec1e-4fd9-8297-e60782e90c4f
-
 ## Needs-Human
 
 **执行 2026-10-18T13:30:54.204Z — 停派终止（失败无法归因，⛔ 不再重派）**
