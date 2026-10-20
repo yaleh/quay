@@ -19,7 +19,7 @@ fallback=git-lens, output_routing cycle/god-package/duplication → milestone-ca
 `plugin/scripts/external-dogfooding-check.ts` 的例程引用（`every(10)`、仅针对 /home/yale/work/archguard
 这个外来目标）；没有通用 driver routine 调度它，`packages/quay/src/init.ts` 也不把它写进默认
 `loop.routines:`。下游项目装了 quay+archguard 后没有任何 driver 会主动跑浅层架构分析（实测：driver 的
-architecture-review / arch-discovery 例程都不碰 archguard）。修法方向：让某个 standing routine 默认调度
+architecture-review / architecture-discovery 例程都不碰 archguard）。修法方向：让某个 standing routine 默认调度
 该 probe，或 `quay init` 脚手架默认写 `loop.routines:` 里带 architecture-analysis（fallback git-lens，
 保证没有 archguard 的主机也安全）。
 
@@ -71,6 +71,20 @@ architecture-review / arch-discovery 例程都不碰 archguard）。修法方向
   → exit 0（289 pass / 0 fail；scoped static checks 全 PASS）。
 - `anti-drift-touches-check --merge-target develop` → `ANTI-DRIFT OK — 8 actual file(s), all within declared Touches`。
 
+**2026-10-20 第二轮（fan-in suite red 修复）— `plugin/test/quay-init-characterization.test.mjs` 重锚：**
+
+- 上一轮 suite red 的真因：`AC2 — a FRESH install pins the closed-set surface` 报
+  `AssertionError: .quay/config.yml moved.`（actual `bb8b52b3…` vs pinned `3eaaf7aa…`，其余 5 个 surface 文件哈希不变）。
+- **这是本条自己的改动**，不是环境问题：`init.ts` 的 delta 只有两个 hunk、都在 `generateConfigContent` 内，
+  而该测试按 SHA-256 钉住 fresh install 生成的 `.quay/config.yml`。跨进程调用（test → `quay-init.sh` → `bin/quay init`）
+  使 delta-relatedness 的 one-hop import 检查看不到它（**一次假阴性**）。
+- 修法：按该文件自身约定的「INTENTIONAL change ⇒ 一行可复核的重锚」更新哈希行，并在注释里写明重锚理由与
+  「其余五个 surface 文件哈希不变」这一 targeted cross-check；结构性断言（routine 真的在 `loop.routines` 里）
+  由 `packages/quay/test/init.test.mjs` AC2 承担，哈希之外仍可证伪。
+- 复验：`node --test plugin/test/quay-init-characterization.test.mjs` → 4 pass / 0 fail（重锚前该文件 1 fail，
+  重锚后 0 fail —— 失败可复现、修复可证伪）。
+- `plugin/test/quay-init-characterization.test.mjs` 因此纳入 `## Touches`（anti-drift 硬闸要求）。
+
 ## DoD
 
 quay 自己与一个无 archguard 的第三方宿主上，均有一个 driver routine 主动调度 architecture-analysis 并
@@ -86,5 +100,6 @@ AC1-AC3 勾齐并贴证据。
 - plugin/probes/architecture-analysis.md
 - plugin/test/quality-gate-driver.test.mjs
 - plugin/test/probe-routine.test.mjs
+- plugin/test/quay-init-characterization.test.mjs
 - packages/quay/test/init.test.mjs
 - tasks/gap-architecture-analysis-probe-not-wired-into-driver-routine-or-init.md
