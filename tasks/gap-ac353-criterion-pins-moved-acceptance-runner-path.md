@@ -2,7 +2,7 @@
 id: gap-ac353-criterion-pins-moved-acceptance-runner-path
 title: AC-353 判据钉住已搬迁的 gate/acceptance-runner.ts（路径+相对深度双 stale）：消费者改为按导出符号定位 +
   新增 fs 路径字面量防复发检查（同时修 AC-355）
-status: ready
+status: done
 labels:
   - gap
   - defect
