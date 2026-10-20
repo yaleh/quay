@@ -2,7 +2,7 @@
 id: gap-ac198-criterion-rev-parse-root-carrier-stale
 title: AC-198 rev-parse root 判据锚在重构前的 src-root 载体上（实现已下沉 core/store-commit.ts）——
   重锚到按符号定位的实现模块 + 逐字夹具
-status: ready
+status: done
 labels:
   - gap
   - defect
