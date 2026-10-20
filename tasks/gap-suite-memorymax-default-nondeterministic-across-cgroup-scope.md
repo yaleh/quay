@@ -24,9 +24,9 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假·确定性）`node --experimental-strip-types --test plugin/test/full-suite-runner-cgroup.test.mjs` 在本机连续 2 次绿（不是靠 skip，是断言真过）；仍红即假。
-- [ ] AC2（根因对）`DEFAULT_SYSTEMD_RUN_LIMITS.memoryMax` 不再依赖 `listSharedHostScopes().count`——一条命令可从源码/测试验证该依赖已移除。
-- [ ] AC3（无回归）`bash scripts/test.sh --for-task <本任务id> --allow-thin` 绿；full-suite-runner 相关测试不破。
+- [x] AC1（能取假·确定性）`node --experimental-strip-types --test plugin/test/full-suite-runner-cgroup.test.mjs` 在本机连续 2 次绿（不是靠 skip，是断言真过）；仍红即假。
+- [x] AC2（根因对）`DEFAULT_SYSTEMD_RUN_LIMITS.memoryMax` 不再依赖 `listSharedHostScopes().count`——一条命令可从源码/测试验证该依赖已移除。
+- [x] AC3（无回归）`bash scripts/test.sh --for-task <本任务id> --allow-thin` 绿；full-suite-runner 相关测试不破。
 
 ## Definition of Done
 
