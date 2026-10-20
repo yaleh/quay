@@ -79,6 +79,7 @@ import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { isDirectEntry, parseArgs } from "./gate-script-base.ts";
 import { buildFileIndex, type FileIndex, readGitignoreBasenames } from "./fs-walk.ts";
+import { pathCandidates } from "./path-scope.ts";
 import { readRatchetBaseline, writeRatchetBaseline } from "./ratchet-baseline.ts";
 
 export const DATA_FILE_REL = "docs/analysis/threshold-scope-violations.md";
@@ -116,12 +117,9 @@ export const COUNT_SUBJECT_RE =
 export const MARKER_RE = /<!--\s*unmechanized:[\s\S]*?-->|<!--\s*unmechanizable:[\s\S]*?-->/;
 
 // ── 2. Stale-path detector ───────────────────────────────────────────────────────────────────────────
-/** Repo top-level dirs — a whitespace token is path-like if it starts with one of these OR has an ext. */
-const TOP_LEVELS = [
-  "packages", "plugin", "scripts", "docs", "tasks", "orchestration", "experiments",
-  "adr", "dist", ".github", ".quay", ".claude", "milestones", "src", "test",
-];
-const PATH_EXT_RE = /\.(ts|js|mjs|md|sh|json|yml|yaml|txt|env|tsx|jsx|css|html|png|py|lock|snapshot|jsonl)$/;
+// The token judgment (pathCandidates + TOP_LEVELS / PATH_EXT_RE) now lives in path-scope.ts — it was
+// a byte-identical copy of tick-core-static-check.ts's (`.quay/routine-findings.jsonl` finding
+// `dup-path-candidates`, runId architecture-analysis-1792481915389). ⛔ do not re-add a local copy.
 
 /** Placeholder patterns (AC10) — a path carrying one is a PATTERN, not a literal path: skipped. */
 export const PLACEHOLDER_RE = /NNN|<[^>]*>|\*|\{/;
@@ -149,44 +147,10 @@ export const STALE_STRONG_ANNOT_RE =
 export type { FileIndex };
 export { buildFileIndex };
 
-/** Extract path-like candidates from a backtick token.
- *  - A SLASH-BEARING token (or whitespace-token) is a candidate when it starts with a known
- *    repo top-level OR carries a file extension ("node … script.ts <cmd>" yields its path token;
- *    math expressions like "nproc / 1.0" and data shapes are not candidates).
- *  - A BARE basename (no `/`, e.g. `quay-native.js`, `lifecycle.ts`, `it0-dod-check.mjs`) is ALSO a
- *    candidate — the task's own stale examples include three bare names (`quay-native.js`,
- *    `it0-dod-check.mjs`, `lifecycle.js`) — but only when it looks like a REAL filename: chars before
- *    AND after the extension. A pure extension mention (`.mjs`), a shell word (`pgrep`, `--json`),
- *    or a numeric fragment (`0.5`) is not a path.
- *  Absolute / home paths (`/tmp/...`, `~/.claude/...`) are not repo-relative — skipped. */
-export function pathCandidates(token: string): string[] {
-  const out: string[] = [];
-  for (const w of token.split(/\s+/)) {
-    let w2 = w.replace(/^[`'"(]+/, "").replace(/[),;.]+$/, "");
-    // A trailing `:NNN` is a LINE-NUMBER CITATION (`path.md:NNN`), not part of the path — the repo
-    // cites `quay-init.sh:1011` / `inner-brief-2026-08-04-restart.md:103` / `select-preflight.ts:113`
-    // everywhere. Strip it so the citation resolves to its base path (the file itself exists) instead
-    // of being misread as a `stale-path-ext` (stem `x` ext `md` vs candExt `md:16` false positive,
-    // round-312 CLAUDE.md:19). A genuinely-missing `path.md:NNN` still flags (base path missing).
-    w2 = w2.replace(/:\d+$/, "");
-    if (w2.length < 3) continue;
-    if (w2.startsWith("/") || w2.startsWith("~")) continue;
-    if (!w2.includes("/")) {
-      const dot = w2.lastIndexOf(".");
-      if (dot <= 0 || dot === w2.length - 1) continue; // ".mjs" or "foo." — not a filename
-      const base = w2.slice(0, dot);
-      const ext = w2.slice(dot + 1);
-      if (!PATH_EXT_RE.test(`.${ext}`)) continue;
-      if (!/^[A-Za-z0-9_@-]/.test(base)) continue; // shell/flag/quote leftovers
-      out.push(w2);
-      continue;
-    }
-    if (w2.length <= 2) continue; // lone "/" from math
-    const startsTop = TOP_LEVELS.some((t) => w2 === t || w2.startsWith(t + "/"));
-    if (startsTop || PATH_EXT_RE.test(w2)) out.push(w2);
-  }
-  return out;
-}
+// pathCandidates now lives in path-scope.ts (it was byte-identical to tick-core-static-check.ts's
+// copy — `.quay/routine-findings.jsonl` finding `dup-path-candidates`, runId
+// architecture-analysis-1792481915389). Re-exported so this module's public surface is unchanged.
+export { pathCandidates };
 
 // ── Paragraph grouping (for the marked-paragraph skip, AC3) ──────────────────────────────────────────
 interface Para { start: number; end: number; }

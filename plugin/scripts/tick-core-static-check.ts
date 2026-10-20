@@ -64,6 +64,7 @@ import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { isDirectEntry } from "./gate-script-base.ts";
 import { buildFileIndex, type FileIndex, readGitignoreBasenames } from "./fs-walk.ts";
+import { pathCandidates } from "./path-scope.ts";
 
 // ── Scan surface (a ## Contract invariant — missing target = ERROR, never silent green) ──────────────
 export const CORES = [
@@ -84,12 +85,10 @@ export const PROHIBITION_PHRASES = ["不要自己用", "外层不直接改"];
 export const NARROWING_MARKERS = ["收窄", "单一写入者", "共享树"];
 export const B3_MARKERS = ["甲", "乙", "丙", "丁", "戊"];
 
-// ── AC4 path-resolution constants (mirror threshold-scope-check.ts's three-layer judgment) ───────────
-const TOP_LEVELS = [
-  "packages", "plugin", "scripts", "docs", "tasks", "orchestration", "experiments",
-  "adr", "dist", ".github", ".quay", ".claude", "milestones", "src", "test",
-];
-const PATH_EXT_RE = /\.(ts|js|mjs|md|sh|json|yml|yaml|txt|env|tsx|jsx|css|html|png|py|lock|snapshot|jsonl)$/;
+// ── AC4 path-resolution (the token judgment lives in path-scope.ts) ─────────────────────────────────
+// TOP_LEVELS / PATH_EXT_RE / pathCandidates were a byte-identical copy of threshold-scope-check.ts's
+// (`.quay/routine-findings.jsonl` finding `dup-path-candidates`, runId
+// architecture-analysis-1792481915389). ⛔ do not re-add a local copy.
 const PLACEHOLDER_RE = /NNN|<[^>]*>|\*|\{/;
 /** An annotation on the SAME line as a missing reference that explains why the path is gone — a
  *  reader following it is not misled (the text itself says it is retired/replaced/banned/runtime
@@ -245,34 +244,10 @@ export function runAnchorChecks(root: string, coresText: Map<string, string>): {
 export type { FileIndex };
 export { buildFileIndex };
 
-/** Extract path-like candidates from a backtick token (same judgment as threshold-scope-check:
- *  slash-bearing tokens that start at a repo top-level or carry a known extension; bare basenames
- *  only when they look like real filenames; absolute/home/numeric/shell-word tokens skipped).
- *  A trailing `:N` line reference (e.g. `orchestration/orchestrator-loop-tick.md:302`) is stripped —
- *  the doc uses `path:N` as a source-locator shorthand, never a filename. */
-export function pathCandidates(token: string): string[] {
-  const out: string[] = [];
-  for (const w of token.split(/\s+/)) {
-    let w2 = w.replace(/^[`'"(]+/, "").replace(/[),;.]+$/, "");
-    w2 = w2.replace(/:\d+$/, "");
-    if (w2.length < 3) continue;
-    if (w2.startsWith("/") || w2.startsWith("~")) continue;
-    if (!w2.includes("/")) {
-      const dot = w2.lastIndexOf(".");
-      if (dot <= 0 || dot === w2.length - 1) continue; // ".mjs" or "foo." — not a filename
-      const base = w2.slice(0, dot);
-      const ext = w2.slice(dot + 1);
-      if (!PATH_EXT_RE.test(`.${ext}`)) continue;
-      if (!/^[A-Za-z0-9_@-]/.test(base)) continue; // shell/flag/quote leftovers
-      out.push(w2);
-      continue;
-    }
-    if (w2.length <= 2) continue; // lone "/" from math
-    const startsTop = TOP_LEVELS.some((t) => w2 === t || w2.startsWith(t + "/"));
-    if (startsTop || PATH_EXT_RE.test(w2)) out.push(w2);
-  }
-  return out;
-}
+// pathCandidates now lives in path-scope.ts (it was byte-identical to threshold-scope-check.ts's
+// copy — `.quay/routine-findings.jsonl` finding `dup-path-candidates`, runId
+// architecture-analysis-1792481915389). Re-exported so this module's public surface is unchanged.
+export { pathCandidates };
 
 /** Which of `missingPaths` are gitignored under `root` (git check-ignore --stdin, batched). A
  *  missing gitignored path is expected runtime/build state (e.g. `dist/quay.js`), not a stale
