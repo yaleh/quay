@@ -537,8 +537,12 @@ function precheckShippedSetSize(rootDir, baseRef) {
   // checkout of `--base`, exactly as release.yml reads them from the tagged tree. `--root`'s copies
   // are the same files today; the difference only shows in a fixture or a cross-checkout cut, and
   // there the tree being judged must be the one that supplies the judgment.
-  const publisher = path.join(worktree, "plugin", "scripts", "publish-dist-branch.sh");
-  const checkerPath = path.join(worktree, "plugin", "scripts", "shipped-set-rules.ts");
+  // ⛔ NOT `resolveKernelSibling`: that resolves the CURRENT kernel's own sibling, i.e. the checkout
+  // this release-cutter happens to run from; the fact under test is what the BASE tree's mechanisms
+  // produce. release-cut is dev-tree-only (it cuts THIS repo's releases; no third-party project runs
+  // it), so anchoring on the tree it is judging is the correct behaviour, not the AC-203 defect.
+  const publisher = path.join(worktree, "plugin", "scripts", "publish-dist-branch.sh"); // kernel-sibling-dev-tree-only: dev-tree-only — anchors on the BASE tree under test (the tree release.yml will tag), not on a third-party workspace root.
+  const checkerPath = path.join(worktree, "plugin", "scripts", "shipped-set-rules.ts"); // kernel-sibling-dev-tree-only: dev-tree-only — same: the base tree supplies the checker, as release.yml reads it from the tagged tree.
   const artifactTar = path.join(parent, "artifact.tar");
   const artifactDir = path.join(parent, "artifact");
   // `release/` — see the NOT-EVALUATED note above. Unique per process so two concurrent probes (or a
