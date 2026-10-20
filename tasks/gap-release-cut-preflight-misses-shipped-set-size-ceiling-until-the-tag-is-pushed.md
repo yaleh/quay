@@ -50,6 +50,7 @@ extra:
 ## Touches
 
 - plugin/scripts/release-cut.mjs
+- plugin/scripts/release-cut.sh
 - plugin/test/release-cut.test.mjs
 - tasks/gap-release-cut-preflight-misses-shipped-set-size-ceiling-until-the-tag-is-pushed.md
 
@@ -59,7 +60,7 @@ extra:
 
 - `plugin/scripts/release-cut.mjs` — 新增 **preflight ⑥**（原有的 CI 读数记录顺延为 ⑦，编号不复用）：`precheckShippedSetSize()` 在 `--base` 上建一个 throwaway linked worktree、把 base 提交放在 **`release/*` 分支**上（下详）、用**发布自身的机制** `plugin/scripts/publish-dist-branch.sh --branch <scratch>` 构建、`git archive` 取产物、再跑 `shipped-set-rules.ts --check <产物目录> --size-ceiling --json`。判定用 JSON 的**枚举读数**（`evaluated` / `size.over` / `size.measured` / `size.ceiling`），⛔ 不靠退出码猜；三条互不共用输出的结局：within（打印读数）、`CAUSE=release-cut-shipped-set-ceiling-exceeded`（含测得数、上限、`--reanchor` 命令）、`CAUSE=release-cut-shipped-set-precheck-unavailable`（含子进程自己的话）。新开关 `--allow-shipped-set-ceiling`（对照 `--allow-workflow-drift`，放行时仍打印读数）。`finally` 里删 worktree + 两个临时分支 + `worktree prune`，成功/失败/`--dry-run` 三条路径都走。
 - **必须落在 `release/*` 分支上（实测，不是风格）**：`publish-dist-branch.sh` 的构建链是 `build-plugin-dist --rewrite && stamp-version && version-consistency --stamp-bundle-tree && --bundle-tree && { prune 不可达 .sh }`。`resolve-version.ts --mode build` 在**detached HEAD 且无版本 tag** 时返回 NOT-EVALUATED（exit 3）；因为它是 `&&` 链中间的一环，bash 的 errexit 不触发，**链的其余部分被静默跳过**。本机实测同一条树：detached 构建得到 **306 文件 / 16594 .sh 行**（跳过了 .sh 剪枝与 bundle 版本门），`release/*` 构建得到 **287 / 7345**（差正好是剪枝掉的 19 个 .sh）。所以探针把 base 提交放在 `release/preflight-v<version>-<pid>` 上——也正是这次切版马上要创建的形状。
-- `plugin/scripts/release-cut.sh` — 只改头注释（`--help` 面）：preflight 清单 + 新开关 + `--dry-run` 的「read-only」说明。代码行数未变（sh-census 的 code-line 轴只计非注释行）。
+- `plugin/scripts/release-cut.sh` — 只改头注释（`--help` 面）：preflight 清单 + 新开关 + `--dry-run` 的「read-only」说明。代码行数未变（sh-census 的 code-line 轴只计非注释行）。这条写入已在 Touches 里申报（anti-drift 首轮报出 out-of-declared，这是任务自身的 `--help` 面，属登记而非回退）。
 - `plugin/test/release-cut.test.mjs` — AC0/AC1/AC2 三个用例 + 两个夹具助手（`setShippedCeilingOnDevelop` 写**提交**在 develop 上的 `shipped` 上限、`breakPublisherOnDevelop` 让发布子进程带自己的话失败）。`makeClone` 现在给每个夹具种一个**宽裕且已提交**的上限，理由写在注释里：否则本文件其余 14 个用例都会因为仓库自己的（当时还是过期的）基线而变红，而那并不是它们的主题。
 
 ### AC0 / AC1 / AC2（真实路径，scoped gate 输出）
