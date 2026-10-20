@@ -3,7 +3,7 @@ id: gap-routine-architecture-analysis-dup-parseflags-three-bins
 title: "architecture-analysis: Three byte-identical 20-line --flag/positional
   parsers (archguard dup hash 0894cf83d4e2ca49, 174 tokens) across the three
   provider CLI bins, so --flag=value "
-status: todo
+status: ready
 labels:
   - gap
   - routine-filed
