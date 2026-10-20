@@ -2,7 +2,7 @@
 id: gap-anchor-hosted-restart-false-negative-stop-confirm-lag-restore-respawns
 title: anchor-hosted kind 的 driver restart 把「已重起」报成 restart-aborted：stop 确认判据
   aliveness 滞后 + restoreDesiredOnFailure 静默拉起新 loop
-status: todo
+status: ready
 labels:
   - gap
   - defect
