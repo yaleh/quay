@@ -2,7 +2,7 @@
 id: gap-release-cut-preflight-misses-shipped-set-size-ceiling-until-the-tag-is-pushed
 title: release-cut 的 preflight 不预检产物体积上限：注定失败的发布要等 tag 推出去之后才被 release.yml 第 13
   步发现（v0.20.0、v0.21.0 连续两次）
-status: ready
+status: done
 labels:
   - gap
   - defect
