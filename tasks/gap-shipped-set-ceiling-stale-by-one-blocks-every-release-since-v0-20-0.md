@@ -2,7 +2,7 @@
 id: gap-shipped-set-ceiling-stale-by-one-blocks-every-release-since-v0-20-0
 title: shipped-set 体积上限停在 286，真实产物已是 287：v0.20.0、v0.21.0 的 release.yml 都被
   shipped-set-clean 拦下，按产物自身读数重新锚定
-status: ready
+status: done
 labels:
   - gap
   - defect
