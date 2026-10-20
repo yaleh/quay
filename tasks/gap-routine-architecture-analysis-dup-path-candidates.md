@@ -45,3 +45,32 @@ Extract to a shared plugin/scripts/path-scope.ts consumed by both; AC: repo-wide
 - `plugin/test/path-scope-single-source.test.mjs`
 - `plugin/scripts/capability-catalog-declarations.json`
 - `tasks/gap-routine-architecture-analysis-dup-path-candidates.md`
+
+## Blocker
+
+**2026-10-20T08:04:21.772Z — worker 未落地（exited-not-landed）**
+
+- 未落地原因：step=suite: AssertionError [ERR_ASSERTION]: no live reference to the moved files' old paths may remain (update callers to plugin/loop/ + plugin/scripts/)
+- run_id：wk-prod-anchor
+- session_id：03cfad1c-c137-4159-a1c9-ec81217e4784
+
+## Evidence
+
+**处置：已修掉**（dup 消除；不是「已有机制在管」也不是「已注意到」）
+
+- **唯一正本**：`plugin/scripts/path-scope.ts` 定义 `pathCandidates` + 它需要的两个常量
+  `TOP_LEVELS` / `PATH_EXT_RE`。`plugin/test/path-scope-single-source.test.mjs` ② 按位置枚举
+  `plugin/scripts/*.ts`，断言定义点**恰为** `["path-scope.ts"]`（先把注释剥掉，硬规则 2 两半都跑过：
+  谓词对真定义命中、对注释里的同名文本不命中）；① 用 `assert.equal` 断言两个 checker re-export 的是
+  **同一个函数引用**，而不是各自一份行为相同的副本。
+- **公开表面不变**：`threshold-scope-check.ts` / `tick-core-static-check.ts` 继续 re-export
+  `pathCandidates`（沿用 `fs-walk.ts` 的抽取先例），调用点无需改动；两个 checker 的既有测试与两组
+  静态检查在同一轮 scoped gate 中全绿。
+- **上一轮 suite 红的根因与本轮修复**：`plugin/test/loop-shipping.test.mjs` 的 AC1b（"5 个退役旧路径
+  不得有活引用"）扫到了本任务新测试的 fixture —— 那条 `:NNN` 引文用例当时引用了 tick doc 的**退役旧址**。
+  fixture 只需要一个路径形状的 token 带行号引文，不需要引用退役路径 ⇒ 改用现址
+  `plugin/loop/orchestrator-loop-tick.md:302`，该 fixture 不再产生旧路径活引用。
+  `loop-shipping.test.mjs` + `path-scope-single-source.test.mjs` 合跑 **30/30 绿**。
+- **验证**：`scripts/test.sh --for-task gap-routine-architecture-analysis-dup-path-candidates --allow-thin`
+  exit 0；`anti-drift-touches-check.ts --merge-target develop` exit 0（5 个实际改动文件全部在
+  `## Touches` 内）。

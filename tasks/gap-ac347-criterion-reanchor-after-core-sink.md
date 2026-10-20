@@ -2,7 +2,7 @@
 id: gap-ac347-criterion-reanchor-after-core-sink
 title: AC-347 判据重锚：parseFidelityVerdict 的委托已随 core/ 下沉重落到
   core/criterion-fidelity.ts（src 根文件只剩转发），恢复范围护栏
-status: ready
+status: done
 labels:
   - gap
 parent: null

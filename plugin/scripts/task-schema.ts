@@ -425,7 +425,9 @@ export function countBoxes(sectionBody) {
 // 的重导出全部改为调用它；`[~]` 语义以此为准（计入 total、算未勾）。
 //
 // 与 packages/quay/src/task-parsing.ts 的 product 层副本行为一致（byte-identical 逻辑，
-// plugin/test/task-parsing-parity.test.mjs 钉住），机制层不能静态 import packages/ 树。
+// plugin/test/task-parsing-parity.test.mjs 把同一组 4 类 fixture（null / 空串 / 混合框
+// `[ ]` `[x]` `[X]` `[~]` / 无框散文）喂给两个调用点并断言返回对象 deep-equal），
+// 机制层不能静态 import packages/ 树（build-plugin-dist 不打包 packages/ 树）。
 export function countAcCheckboxes(acSection) {
   if (acSection == null) {
     // FAIL-CLOSED (gap-ac47-completion-predicate-consumer-fail-closed, AC1): an ABSENT / UNREADABLE
