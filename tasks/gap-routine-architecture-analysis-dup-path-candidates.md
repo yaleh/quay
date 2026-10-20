@@ -41,4 +41,7 @@ Extract to a shared plugin/scripts/path-scope.ts consumed by both; AC: repo-wide
 ## Touches
 - `plugin/scripts/threshold-scope-check.ts`
 - `plugin/scripts/tick-core-static-check.ts`
+- `plugin/scripts/path-scope.ts`
+- `plugin/test/path-scope-single-source.test.mjs`
+- `plugin/scripts/capability-catalog-declarations.json`
 - `tasks/gap-routine-architecture-analysis-dup-path-candidates.md`
