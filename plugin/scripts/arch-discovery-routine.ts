@@ -32,6 +32,12 @@
 // reason; the round then appends NOTHING to the carrier and does NOT advance the last-run (so a failed
 // round does not consume the window — the next round retries).
 //
+// EMPTY ROUNDS APPEND NOTHING (gap-arch-discovery-space-no-candidate-universe-still-appends-scan-
+// round): a COMPLETED round whose space half has no candidate universe AND whose instruments produced
+// no finding carries no reading, so it writes no `scan-round` line (see `shouldAppendRound`). It DOES
+// advance the last-run — the scan genuinely ran, and not advancing would make it due every tick. Any
+// finding from either half keeps the line: the time half's readings are never discarded.
+//
 // THE SPACE HALF'S CANDIDATE UNIVERSE (gap-arch-discovery-space-instrument-has-no-candidate-universe-
 // on-non-quay-hosts): the `space` instrument can only produce a finding for a (authority, surface) pair
 // the registry DECLARES. With no `--registry` it uses the registry shipped in its OWN checkout (quay's
@@ -39,10 +45,14 @@
 // STRUCTURALLY cannot be non-zero and therefore carries no information (硬规则 3b/4). The routine now
 // (a) reads the instrument's own `cost.candidates` from its `--json` report and records it on the
 // space sub-record, and (b) treats `candidates: 0` (and an unreadable count) as `not-evaluated` — the
-// round is NOT `verified` (it still APPENDS: the time half's findings are real), and
-// (c) accepts an OPTIONAL `loop.arch_discovery.space_registry: <workspace-relative path>` which is
-// passed to the instrument as `--registry`, so a foreign host can declare its own authorities/surfaces
-// AS DATA. ⛔ No host-specific analyzer ships in Quay.
+// round is NOT `verified`, and (c) accepts an OPTIONAL `loop.arch_discovery.space_registry: <workspace-
+// relative path>` which is passed to the instrument as `--registry`, so a foreign host can declare its
+// own authorities/surfaces AS DATA. ⛔ No host-specific analyzer ships in Quay.
+//
+// AND — gap-arch-discovery-space-no-candidate-universe-still-appends-scan-round — a round with NO
+// candidate universe and NO finding at all appends NOTHING (it used to write one near-empty
+// `scan-round` line every interval on every registry-less host). A time-half finding still keeps the
+// round and still lands on the carrier; see `shouldAppendRound`.
 //
 // ⛔ NOT a hot-path gate (the `gap-fan-in-remove-archguard-gate` lesson): nothing here is called by
 // fan-in / scoped-gate / any per-task path. The only caller is the quality driver's routine table.
@@ -152,6 +162,22 @@ export const SPACE_UNREADABLE = "not-evaluated:candidate-count-unreadable";
 export function spaceStateFor(candidates: number | null): string {
   if (candidates === null) return SPACE_UNREADABLE;
   return candidates === 0 ? SPACE_NO_UNIVERSE : SPACE_EVALUATED;
+}
+
+/** Whether a COMPLETED round has anything to write to the carrier.
+ *
+ *  A round whose space half had NO candidate universe (`candidates: 0`) AND whose two instruments
+ *  produced NO finding at all carries no reading: on a host with no `space_registry` the space half
+ *  structurally reads zero, so appending a near-empty `scan-round` line every interval is pure empty
+ *  spin (gap-arch-discovery-space-no-candidate-universe-still-appends-scan-round).
+ *
+ *  ⛔ Findings are NEVER suppressed: `findingCount` counts the findings of BOTH halves, so a real
+ *  time-half reading keeps the round even when the space half is dark (硬规则 3b/4 — the fix must
+ *  not turn "no space universe" into "drop the time half's evidence"). Only an UNREADABLE candidate
+ *  count still appends: that round is not a known-empty round, and its record is the only diagnostic
+ *  of the unreadable report. */
+export function shouldAppendRound(spaceState: string, findingCount: number): boolean {
+  return !(spaceState === SPACE_NO_UNIVERSE && findingCount === 0);
 }
 
 /** The interval floor. A round spawns two node processes that stream large carriers; a cadence shorter
@@ -426,7 +452,8 @@ export interface ArchDiscoveryRunOptions {
 const asRel = (root: string, p: string) => path.relative(root, p) || p;
 
 /** The whole round: config gate → halt gate → durable due gate → spawn both `--scan`s → diff against
- *  the carrier → append (finding lines for NEW fingerprints + one scan-round line) → advance last-run.
+ *  the carrier → append (finding lines for NEW fingerprints + one scan-round line, unless the round is
+ *  a KNOWN-EMPTY one — see `shouldAppendRound`) → advance last-run (both branches).
  *  Never throws (the loop records a `failed` Fact): every failure returns BEFORE the append. */
 export async function runArchDiscovery(root: string, opts: ArchDiscoveryRunOptions): Promise<Fact> {
   const now = opts.now ?? Date.now;
@@ -628,21 +655,33 @@ export async function runArchDiscovery(root: string, opts: ArchDiscoveryRunOptio
     transitions,
     instruments,
   };
-  appendCarrierRecords(carrier, [...findingLines, round]);
+  // ⑦ the space half did NOT have a candidate universe (or its count could not be read) ⇒ the round is
+  //    `not-evaluated`, NOT `verified`. The round must not be reported as clean: on a host that is not
+  //    quay's own, `space` structurally reads zero, and folding that into `verified` is exactly the
+  //    false reading this routine used to produce (硬规则 3b/4).
+  //
+  //    EMPTY ROUNDS ARE NOT RECORDED (gap-arch-discovery-space-no-candidate-universe-still-appends-scan-
+  //    round): when the space half has no candidate universe AND neither instrument produced a finding,
+  //    the round carries no reading, so the near-empty `scan-round` line is NOT appended — that was one
+  //    line every interval, forever, on every host without a declared registry. Any finding (from
+  //    EITHER half) keeps the round: the time half's readings are real and must never be discarded.
+  //    The last-run advances in BOTH branches — the round genuinely ran, and leaving it un-advanced
+  //    would make it due on every tick instead of every interval (a far hotter spin).
+  const spaceState = String(instruments.space.state ?? SPACE_UNREADABLE);
+  const append = shouldAppendRound(spaceState, current.size);
+  appendCarrierRecords(carrier, append ? [...findingLines, round] : []);
   writeLastRun(lastRunPath, ARCH_DISCOVERY_NAME, now());
 
-  // ⑦ the space half did NOT have a candidate universe (or its count could not be read) ⇒ the round is
-  //    `not-evaluated`, NOT `verified`. The scan DID run and its readings ARE appended (the time half's
-  //    findings are real and must not be discarded), but the round must not be reported as clean: on a
-  //    host that is not quay's own, `space` structurally reads zero, and folding that into `verified`
-  //    is exactly the false reading this routine used to produce (硬规则 3b/4).
-  const spaceState = String(instruments.space.state ?? SPACE_UNREADABLE);
-  const scanned = `scan ran: ${current.size} finding_fp (${newFps.length} new, ${repeated} repeated, ${gone} gone), ${transitions.length} transition(s), wall ${wallMs}ms, peak RSS ${peakRssKb === null ? "not measured" : `${peakRssKb}kB`}; appended ${findingLines.length} finding + 1 scan-round line to ${asRel(root, carrier)}`;
+  const scanSummary = `${current.size} finding_fp (${newFps.length} new, ${repeated} repeated, ${gone} gone), ${transitions.length} transition(s), wall ${wallMs}ms, peak RSS ${peakRssKb === null ? "not measured" : `${peakRssKb}kB`}`;
+  const appendNote = append
+    ? `appended ${findingLines.length} finding + 1 scan-round line to ${asRel(root, carrier)}`
+    : `appended NOTHING — empty round: the space half has no candidate universe and neither instrument produced a finding, so no scan-round line was written to ${asRel(root, carrier)}`;
+  const scanned = `scan ran: ${scanSummary}; ${appendNote}`;
   if (spaceState !== SPACE_EVALUATED) {
     const count = typeof instruments.space.candidates === "number" ? String(instruments.space.candidates) : "unreadable";
     return fact(
       "not-evaluated",
-      round,
+      append ? round : { ...round, appended: false },
       `space ${spaceState} (candidates=${count}${spaceRegistryAbs ? "" : `; no loop.arch_discovery.space_registry declared ⇒ the space instrument scanned with ITS OWN checkout's registry, which finds nothing outside quay's repo`}) — the space half is NOT a measurement of this host, so the round is not clean. ${scanned}`,
     );
   }
