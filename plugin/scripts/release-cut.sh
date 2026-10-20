@@ -28,6 +28,11 @@
 #                                                   CAUSE=release-cut-dispatch-ref-unresolvable /
 #                                                   release-cut-workflow-definition-unreadable /
 #                                                   release-cut-workflow-definition-drift
+#        the artifact BUILT FROM `--base` must be within release.yml's shipped-set size ceiling
+#        (`plugin/shipped-set-baseline.json` `shipped`, enforced at release.yml step 13 — which runs
+#        only AFTER the tag is pushed, so a failure there is irreparable for that tag)
+#                                                   CAUSE=release-cut-shipped-set-ceiling-exceeded /
+#                                                   release-cut-shipped-set-precheck-unavailable
 #   2. create a LINKED WORKTREE on `develop` (⛔ never an independent clone, ⛔ never a branch
 #      switch in the main checkout);
 #   3. cut the release branch there and land it in ONE invocation:
@@ -50,7 +55,7 @@
 # Usage:
 #   release-cut.sh <version> [--root <repo>] [--worktree <path>] [--remote <name>]
 #                  [--base <ref>] [--dispatch-ref <ref>] [--allow-workflow-drift]
-#                  [--no-push] [--no-dispatch] [--dry-run]
+#                  [--allow-shipped-set-ceiling] [--no-push] [--no-dispatch] [--dry-run]
 #   <version>    bare X.Y.Z (⛔ no leading `v`, no suffix) — tag = v<version>, branch = release/v<version>
 #   --root       the checkout to cut from (default: the MAIN checkout of the repo this script
 #                lives in — `git rev-parse --git-common-dir`'s parent, so running this from a
@@ -68,11 +73,18 @@
 #   --allow-workflow-drift
 #                proceed even when the governing release.yml differs from the tree the tag names;
 #                without it that difference is a REFUSED preflight (see --dispatch-ref)
+#   --allow-shipped-set-ceiling
+#                proceed even when the artifact built from `--base` exceeds the shipped-set size
+#                ceiling release.yml's shipped-set-clean applies to the tag; the reading is printed
+#                either way, and without this flag the over-ceiling reading is a REFUSED preflight
 #   --no-push    do not push (steps 4 and 6's push) — used by tests and by offline cuts
 #   --no-dispatch do not run `gh workflow run release.yml`
 #   --dry-run    run every READ-ONLY preflight, print the whole plan (worktree path, the
 #                `--root` the finish step gets, the ledger's absolute path, the bump and the
 #                ratchet re-anchor), mutate NOTHING, exit 0 when the preflight passes
+#                ⚠️ "read-only" means no ref/worktree/branch SURVIVES: the size preflight builds the
+#                artifact in a throwaway linked worktree and removes it (and its scratch branches)
+#                again on the pass and the refusal path alike
 #
 # Exit codes:
 #   0  the cut completed (or the dry run's preflight passed)

@@ -161,7 +161,64 @@ function makeCloneIn(parent, prefix) {
   // bump stage runnable, so the happy path below is the real one rather than a graceful failure.
   const nm = join(repoRoot, "node_modules");
   if (existsSync(nm)) symlinkSync(nm, join(root, "node_modules"));
+  // ⛔ EVERY fixture carries an AMPLE shipped-set size ceiling, committed on `develop` (see
+  // setShippedCeilingOnDevelop): the release-cut preflight now BUILDS the artifact and compares it to
+  // that ceiling, and on the repository's own (deliberately stale) baseline every cut in this file
+  // would refuse for a reason that is none of their subject. The ceiling's own tests set their own
+  // value.
+  setShippedCeilingOnDevelop(root, AMPLE_SHIPPED_CEILING);
   return { parent, root, locality };
+}
+
+/**
+ * The ceiling every fixture starts with: generous enough that no artifact this repository can build
+ * exceeds it, so "the size preflight passed" is the ORDINARY state in this file. The arms that test
+ * the ceiling set their own value through the same helper.
+ */
+const AMPLE_SHIPPED_CEILING = { files: 100000, shLines: 1000000 };
+
+/**
+ * Commit a `shipped` ceiling onto the fixture's `develop` — the branch the cut merges back into and
+ * the tree the size preflight BUILDS FROM.
+ *
+ * ⛔ COMMITTED, never a working-tree edit, for two independent reasons: (a) the preflight builds in a
+ * LINKED worktree at `develop`, so an uncommitted edit would not be in the tree that is built at all;
+ * (b) `shipped-set-rules.ts` refuses a working-tree baseline RAISED past git HEAD's (the shrink-only
+ * guard), so a raised ceiling can only take effect through a commit.
+ */
+function setShippedCeilingOnDevelop(root, ceiling) {
+  assert.equal(git(root, "checkout", "-q", "develop").status, 0, "checkout develop to commit the ceiling");
+  const p = join(root, "plugin", "shipped-set-baseline.json");
+  const doc = JSON.parse(readFileSync(p, "utf8"));
+  const previousBytes = doc.shipped && typeof doc.shipped.bytes === "number" ? doc.shipped.bytes : 0;
+  doc.shipped = { files: ceiling.files, bytes: ceiling.bytes ?? previousBytes, shLines: ceiling.shLines };
+  writeFileSync(p, `${JSON.stringify(doc, null, 2)}\n`);
+  assert.equal(git(root, "add", "plugin/shipped-set-baseline.json").status, 0, "stage the ceiling");
+  assert.equal(git(root, "commit", "-q", "-m", `fixture: shipped-set size ceiling = ${ceiling.files} files / ${ceiling.shLines} .sh lines`).status, 0,
+    "the ceiling must be COMMITTED — the preflight builds develop's tree, and a raised working-tree baseline is refused outright");
+  assert.equal(git(root, "checkout", "-q", "author").status, 0, "return HEAD to `author` (production's shape)");
+  assert.equal(git(root, "status", "--porcelain", "--untracked-files=no").stdout.trim(), "",
+    "the fixture must be clean, or the cut would refuse on CAUSE=release-cut-dirty-tree for the wrong reason");
+}
+
+/**
+ * Make the fixture's `develop` carry a `publish-dist-branch.sh` that FAILS with a distinctive,
+ * greppable reason and a non-zero exit — the CHILD the size preflight runs, broken the same way the
+ * stamp-version arm below breaks its own child (`breakStamperOnDevelop`). What is under test is the
+ * parent's real decision logic, not the child.
+ *
+ * ⛔ A NON-ZERO EXIT is the fixture: a publisher that produces nothing would otherwise be read as
+ * "the artifact has zero files", i.e. as a PASS.
+ */
+function breakPublisherOnDevelop(root) {
+  assert.equal(git(root, "checkout", "-q", "develop").status, 0, "checkout develop to commit the edit");
+  writeFileSync(join(root, "plugin", "scripts", "publish-dist-branch.sh"),
+    '#!/usr/bin/env bash\necho "PUBLISHER-BLEW-UP: the fixture wants this exact sentence carried through" >&2\nexit 7\n');
+  assert.equal(git(root, "add", "plugin/scripts/publish-dist-branch.sh").status, 0, "stage the broken publisher");
+  assert.equal(git(root, "commit", "-q", "-m", "fixture: make publish-dist-branch.sh fail with its own reason").status, 0);
+  assert.equal(git(root, "checkout", "-q", "author").status, 0, "return HEAD to `author` (production's shape)");
+  assert.equal(git(root, "status", "--porcelain", "--untracked-files=no").stdout.trim(), "",
+    "the fixture must be clean after planting the failure");
 }
 
 /**
@@ -375,6 +432,112 @@ test("the three preflight causes are DISJOINT — the same input never yields tw
     const badVersion = run(["1.2.3", "--root", c.root, "--no-push", "--no-dispatch"]);
     assert.match(badVersion.stderr, /CAUSE=release-cut-tag-exists/);
     assert.doesNotMatch(badVersion.stderr, /release-cut-dirty-tree|release-cut-version-inconsistent/);
+  } finally {
+    cleanup(c.parent);
+  }
+});
+
+// ══════════════════════════════════════════════════════════════════════════════════════════════
+// gap-release-cut-preflight-misses-shipped-set-size-ceiling-until-the-tag-is-pushed
+//
+// THE DEFECT: the artifact's size ceiling (`plugin/shipped-set-baseline.json` `shipped`, enforced by
+// release.yml's `shipped-set-clean`) was checked ONLY at step 13 of the release run — after the tag
+// was pushed. v0.20.0 (2026-10-16) and v0.21.0 (2026-10-20) both died on the same line,
+// `files 287 > ceiling 286`, at the one moment it could no longer be repaired (release.yml reads the
+// ceiling from the tag's own tree, so no later commit on develop changes that tag's verdict).
+//
+// WHAT IS PINNED HERE, and why each arm is on the REAL path:
+//   • AC0 — an over-ceiling artifact REFUSES the cut with its OWN cause, before any ref exists. The
+//     reading asserted is the REAL build's (a file count > the ceiling we planted), which is what
+//     makes this a measurement rather than a message test: ⛔ driving a text-building helper would
+//     pass with the preflight deleted.
+//   • AC1 — a build that cannot run is an INDEPENDENT value (`…-precheck-unavailable`), never the
+//     pass arm and never the ceiling arm (硬规则 3b: 读不懂 ≠ 合格).
+//   • AC2 — within the ceiling the reading is PRINTED and the cut proceeds (the tag lands).
+// ══════════════════════════════════════════════════════════════════════════════════════════════
+
+test("AC0: an artifact OVER the shipped-set size ceiling REFUSES the cut — no tag, no worktree, no branch, no ref moved", () => {
+  const c = makeClone("ceilingover");
+  try {
+    // ⛔ The ceiling is planted at 1, i.e. below ANY real artifact, and the assertion below reads the
+    // measured number back out of the refusal: a preflight that printed a fixed sentence, or one that
+    // never built anything, cannot produce a file count > 1.
+    setShippedCeilingOnDevelop(c.root, { files: 1, shLines: 1 });
+    const refsBefore = git(c.root, "for-each-ref").stdout;
+    const worktreesBefore = git(c.root, "worktree", "list", "--porcelain").stdout;
+
+    const r = run(["9.9.3", "--root", c.root, "--no-push", "--no-dispatch"]);
+
+    assert.equal(r.status, 2, `an over-ceiling artifact must REFUSE the cut: ${r.stdout}${r.stderr}`);
+    assert.match(r.stderr, /CAUSE=release-cut-shipped-set-ceiling-exceeded/,
+      `the refusal must name its OWN cause: ${r.stderr}`);
+    const m = /files (\d+) > ceiling 1\b/.exec(r.stderr);
+    assert.ok(m, `the refusal must carry the MEASURED file count and the ceiling: ${r.stderr}`);
+    assert.ok(Number(m[1]) > 1, `the reported file count must be a real artifact's (> 1), got ${m[1]}`);
+    assert.match(r.stderr, /--reanchor/, `the refusal must name the repair: ${r.stderr}`);
+    assert.doesNotMatch(r.stderr, /release-cut-shipped-set-precheck-unavailable/,
+      "an over-ceiling reading and an unmeasurable one name different repairs and must not share an output");
+
+    // ⛔ NOTHING was created — the whole point: the tag is still free, so a new version can still be cut.
+    assert.equal(git(c.root, "rev-parse", "--verify", "--quiet", "refs/tags/v9.9.3").status, 1,
+      "a refused cut must not land the tag");
+    assert.equal(git(c.root, "rev-parse", "--verify", "--quiet", "refs/heads/release/v9.9.3").status, 1,
+      "a refused cut must not create the release branch");
+    assert.equal(git(c.root, "for-each-ref").stdout, refsBefore,
+      "the probe's throwaway refs (release/preflight-*, release-cut-preflight-artifact-*) must be gone");
+    assert.equal(git(c.root, "worktree", "list", "--porcelain").stdout, worktreesBefore,
+      "the probe's throwaway worktree must be removed");
+    assert.deepEqual(worktreeDirs(c.parent), [], "a refused preflight must not create the cut's worktree");
+  } finally {
+    cleanup(c.parent);
+  }
+});
+
+test("AC1: a publisher that cannot run is its OWN cause (…-precheck-unavailable), never the pass or ceiling arm", () => {
+  const c = makeClone("ceilingunavail");
+  try {
+    breakPublisherOnDevelop(c.root);
+    const refsBefore = git(c.root, "for-each-ref").stdout;
+
+    const r = run(["9.9.2", "--root", c.root, "--no-push", "--no-dispatch"]);
+
+    assert.equal(r.status, 2, `an unmeasurable ceiling must REFUSE the cut: ${r.stdout}${r.stderr}`);
+    assert.match(r.stderr, /CAUSE=release-cut-shipped-set-precheck-unavailable/,
+      `the unavailable arm must name its OWN cause: ${r.stderr}`);
+    // The CHILD's own words, so the operator is not left with fixed prose (same invariant as the
+    // dispatch arm's GH-BLEW-UP test below).
+    assert.match(r.stderr, /PUBLISHER-BLEW-UP/, `the child's reason must be carried through: ${r.stderr}`);
+    assert.doesNotMatch(r.stderr, /release-cut-shipped-set-ceiling-exceeded/,
+      "an unmeasurable ceiling is not an over-ceiling reading — the two name different repairs");
+
+    // ⛔ 硬规则 3b, the half that matters most: "could not measure" must not share the PASS arm's
+    // output shape, or a broken build reads as a clean bill of health.
+    assert.doesNotMatch(r.stdout, /shipped-set size ceiling: files \d+ \/ ceiling/,
+      `the unavailable arm must not print the pass reading: ${r.stdout}`);
+    assert.equal(git(c.root, "rev-parse", "--verify", "--quiet", "refs/tags/v9.9.2").status, 1,
+      "nothing may be tagged when the ceiling could not be measured");
+    assert.equal(git(c.root, "for-each-ref").stdout, refsBefore, "the probe must leave no ref behind");
+  } finally {
+    cleanup(c.parent);
+  }
+});
+
+test("AC2: within the ceiling the preflight PRINTS its reading and the cut proceeds normally", () => {
+  const c = makeClone("ceilingpass");
+  try {
+    // makeClone plants an ample ceiling; this arm asserts the ordinary path is unchanged.
+    const r = run(["9.9.1", "--root", c.root, "--no-push", "--no-dispatch"]);
+
+    const line = r.stdout.split("\n").find((l) => l.startsWith("preflight: shipped-set size ceiling:"));
+    assert.ok(line, `the preflight must PRINT the reading it measured: ${r.stdout}${r.stderr}`);
+    assert.match(line, /files \d+ \/ ceiling \d+ · \.sh lines \d+ \/ ceiling \d+ — within/,
+      `the reading must carry BOTH measured values and both ceilings: ${line}`);
+    assert.doesNotMatch(r.stderr, /CAUSE=release-cut-shipped-set-/,
+      `a within-ceiling reading carries NO cause: ${r.stderr}`);
+
+    // 后续步骤照常进行 — the landing face ran, which is only reachable past the preflight.
+    assert.equal(git(c.root, "rev-parse", "--verify", "--quiet", "refs/tags/v9.9.1").status, 0,
+      `the cut must proceed past a passing preflight: ${r.stdout}${r.stderr}`);
   } finally {
     cleanup(c.parent);
   }
