@@ -41,7 +41,7 @@ import { spawnSync } from "node:child_process";
 import YAML from "yaml";
 import { parseTrigger } from "./routine-scheduler.ts";
 import { readProbeSpec } from "./read-probe-spec.ts";
-import { launchArgv, runAsync } from "./driver-runtime.ts";
+import { launchArgv, resolveKernelPluginRoot, runAsync } from "./driver-runtime.ts";
 import { probeWriteViolations, snapshotTrackedChanges } from "./probe-write-guard.ts";
 // 机械立案步（AC5/AC6）：三道闸与 finding→任务 的形状判据都复用 routine-file-gate.ts 的单一实现，
 // ⛔ 不在这里另写一份质量/去重/限流判据。该模块只 import gate-script-base，无环
@@ -698,9 +698,12 @@ export function defaultRunExecutionProbe(decl: ExecutionProbeDecl): ExecutionPro
  *  正是本条要关掉的那个形态，只是又低了一层。同一个「源与跑的不是一份」的家族（第 6 次是
  *  源 vs 编译产物）。⛔ 这里仍然**不是**「谁新用谁」的猜测：只按固定顺序取第一份存在的文件。
  *
- *  ⚠️ 生产等价性（这是它能被安全引入的原因）：quality-gate-driver 传的恒是
- *  `pluginRoot = <root>/plugin`，而此时 ① 与 ② 是**同一个路径**（`declared` 就是
+ *  ⚠️ 生产等价性（这是它能被安全引入的原因）：本仓库（源检出）里 `resolveProbeSpecRoot()` 解析为
+ *  `<root>/plugin`（内核就住在那里），此时 ① 与 ② 是**同一个路径**（`declared` 就是
  *  `plugin/freshness-producers.json`）⇒ 本仓库的生产行为逐字节不变。
+ *  ⚠️ 第三方宿主上两者**不同**：规格根是插件安装根（`<cache>/…`），workspace 可能既无
+ *  vendored `plugin/`、也无 ② 声明的文件 ⇒ ① 不存在、② 也不存在 ⇒ 返回 ② 由调用方 fail-closed
+ *  （与修复前同形，⛔ 不因根的改变而把「读不出来」变成「读到了别处的文件」）。
  *  ⚠️ 声明边界：一个同时拥有 vendored plugin 与自己的 `plugin/freshness-producers.json` 的
  *  workspace，会取到 plugin 那一份——本仓库不存在该形态（`plugin/` 就是本仓的插件目录），
  *  故作为**已声明的**边界记在此处，⛔ 不声称对所有布局都无影响。
@@ -907,11 +910,30 @@ export function buildProbePrompt(objective: string, opts: { workspace: string; n
 
 // ── 例程本体 ─────────────────────────────────────────────────────────────────────────────────
 
+/** probe 规格的**解析根**（`<root>/probes/<name>.md`）。
+ *
+ *  = **本 kernel 的 plugin root**（`resolveKernelPluginRoot()`：插件缓存/源检出自身安装位置；
+ *  `QUAY_PLUGIN_ROOT` 是 hermetic 测试缝）。WHY 不是 `<workspace>/plugin`：`quay-init` 之后的
+ *  第三方宿主**没有** vendored `plugin/`，probe 规格随插件发布、住在插件根下；把解析根钉在项目根
+ *  会让 `loop.routines:` 里声明的每一条 `probe:` 在运行期读不到规格（`PROBE-SPEC FAIL-CLOSED:
+ *  probe spec not found at <workspace>/plugin/probes/<name>.md`），整条轨道静默不跑
+ *  （gap-probe-routine-resolves-probe-spec-under-project-root-not-plugin-root）。
+ *  与 `routine-scheduler.ts` 的 canonical 解析同根（`${CLAUDE_PLUGIN_ROOT}/probes/<name>.md`）：
+ *  harness 命名的插件根正是 driver 内核的安装位置，故自解析与 env 命名在出厂布局下是同一个路径；
+ *  ⛔ 不另造第二套根，这里只是把 `resolveKernelPluginRoot` 这一个既有实现取来用。
+ *
+ *  本仓库（源检出）上它也解析为 `<repo>/plugin`（内核就住在那里）⇒ 生产行为逐字不变。
+ *  `override` 是调用方显式给出的根（测试/嵌入方），给出即胜出。 */
+export function resolveProbeSpecRoot(override?: string | null): string {
+  return typeof override === "string" && override.trim() !== "" ? override : resolveKernelPluginRoot();
+}
+
 export interface ProbeRoutineOptions {
   /** 工作区根 = 探针要分析/记录的仓库；也是 FILE-ONLY 快照与 `WORKSPACE:` 头的取值处。 */
   root: string;
-  /** 探针规格所在 plugin 根（`<pluginRoot>/probes/<name>.md`）。 */
-  pluginRoot: string;
+  /** 探针规格所在 plugin 根（`<pluginRoot>/probes/<name>.md`）。缺省 = `resolveProbeSpecRoot()`
+   *  （本 kernel 的 plugin root，⛔ 不是 `<root>/plugin`——见该函数的 WHY）。 */
+  pluginRoot?: string;
   /** 单次 spawn 的 wall-clock 上限（ms）。**由调用方从 driver 的例程看门狗派生**（default
    *  `Math.max(60_000, routineWatchdogMs - 60_000)`）——⛔ 本模块不另立字面量（硬规则 4 推论二：
    *  写死一个「合理」的秒数，换台机器/换个负载就变成真限制，且静默）。 */
@@ -953,6 +975,9 @@ export interface ProbeRoutineOptions {
 export function llmProbeRoutine(decl: RoutineDecl, opts: ProbeRoutineOptions): RoutineSpec {
   const trigger = parseTrigger(decl.trigger) as { kind: string; minutes?: number };
   const role = opts.role ?? PROBE_ROLE_DEFAULT;
+  // 解析根在这里收敛一次（⛔ 不在每个使用点各 `?? …` 一份）：readProbeSpec 与 resolveMappingPath
+  // 必须看**同一个** plugin 根，否则「规格从哪读」与「mapping 从哪读」会分叉。
+  const pluginRoot = resolveProbeSpecRoot(opts.pluginRoot);
   const stateDir = opts.stateDir ?? path.join(opts.root, ".quay");
   const findingsPath = opts.findingsPath ?? path.join(stateDir, path.basename(ROUTINE_FINDINGS_REL));
   const lastRunPath = opts.lastRunPath ?? path.join(stateDir, path.basename(ROUTINE_LAST_RUN_REL));
@@ -980,7 +1005,7 @@ export function llmProbeRoutine(decl: RoutineDecl, opts: ProbeRoutineOptions): R
       // ② 探针规格 fail-closed（读不到 ⇒ 未评估，⛔ 不伪装成「没找到重复」）。
       let spec: Awaited<ReturnType<typeof readProbeSpec>>;
       try {
-        spec = readProbeSpec(decl.probe as string, opts.pluginRoot);
+        spec = readProbeSpec(decl.probe as string, pluginRoot);
       } catch (e) {
         return fact("not-evaluated", { fired: false, carrier: path.relative(opts.root, findingsPath) },
           `probe spec unreadable: ${(e as Error).message}`);
@@ -1048,7 +1073,7 @@ export function llmProbeRoutine(decl: RoutineDecl, opts: ProbeRoutineOptions): R
       const mappingDeclared = typeof mappingRel === "string" && mappingRel.trim() !== "";
       // ⚠️ 三值，⛔ 不把「未声明」与「声明了但读不懂」合并（硬规则 3b；第一版合并过，被 (f) 的
       //    「no registry declared」用例抓住）：undefined = 未声明 ⇒ 闸不适用；null = 读不懂 ⇒ fail-closed。
-      const mappingPath = mappingDeclared ? resolveMappingPath(opts.root, opts.pluginRoot, String(mappingRel)) : null;
+      const mappingPath = mappingDeclared ? resolveMappingPath(opts.root, pluginRoot, String(mappingRel)) : null;
       const mapping = mappingPath
         ? readProducerMapping(mappingPath)
         : { producers: undefined as undefined, executionProbe: null as ExecutionProbeDecl | null, commands: new Map<string, string>() };
@@ -1272,17 +1297,22 @@ export function llmProbeRoutine(decl: RoutineDecl, opts: ProbeRoutineOptions): R
 }
 
 /** 生产入口：读配置 → 选可驱动的 → 造例程表。**永不抛**（一条可选的例程轨道不得拖垮宿主 driver
- *  的启动）；读不出配置时把理由经 `error` 交回调用方去**可见地**报告（⛔ 不静默变空转）。 */
+ *  的启动）；读不出配置时把理由经 `error` 交回调用方去**可见地**报告（⛔ 不静默变空转）。
+ *
+ *  `pluginRoot` = 本次装配实际使用的规格解析根（= 传入的 override，否则 `resolveProbeSpecRoot()`）：
+ *  调用方把它打进日志，「这条轨道从哪个插件根读规格」就成为一个**可观测**的事实，而不是要在
+ *  出事时反推的推断（硬规则 3b/9——读不出的原因与读得懂的结果必须不同形）。 */
 export function probeRoutinesFromConfig(
   root: string,
   opts: Omit<ProbeRoutineOptions, "root">,
-): { routines: RoutineSpec[]; skipped: { name: string; trigger: string; reason: string }[]; error: string | null } {
+): { routines: RoutineSpec[]; skipped: { name: string; trigger: string; reason: string }[]; error: string | null; pluginRoot: string } {
+  const pluginRoot = resolveProbeSpecRoot(opts.pluginRoot);
   let decls: RoutineDecl[];
   try {
     decls = readRoutinesConfig(root);
   } catch (e) {
-    return { routines: [], skipped: [], error: (e as Error).message };
+    return { routines: [], skipped: [], error: (e as Error).message, pluginRoot };
   }
   const { probes, skipped } = selectProbeRoutines(decls);
-  return { routines: probes.map((d) => llmProbeRoutine(d, { ...opts, root })), skipped, error: null };
+  return { routines: probes.map((d) => llmProbeRoutine(d, { ...opts, root, pluginRoot })), skipped, error: null, pluginRoot };
 }
