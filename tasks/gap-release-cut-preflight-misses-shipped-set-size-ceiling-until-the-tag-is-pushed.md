@@ -141,6 +141,20 @@ $ node --test plugin/test/release-cut.test.mjs
 
 同一文件在改动前的 develop 版本是 `tests 14 / pass 14 / duration 199109ms`——即三个新用例之外无回归，本文件的总耗时增加约 39s（每个 cross-checkout 的构建约 6–10s）。scoped gate（`bash scripts/test.sh --for-task gap-release-cut-preflight-misses-shipped-set-size-ceiling-until-the-tag-is-pushed --allow-thin`）里同一文件同样 17/17 绿。
 
+### 静态检查 `kernel-sibling-resolution-check`（2026-10-21 本轮修复 —— 上一轮 suite 红的真因）
+
+上一轮 exited-not-landed 的 suite 红**不是 flake**：`STATIC_CHECK_FAILED: kernel-sibling-resolution-check exit=1`，两处命中都是本任务 preflight 新增的两行（`plugin/scripts/release-cut.mjs:540-541`，形如 `path.join(worktree, "plugin", "scripts", <name>)` 的 P2 target-root）。这两行是**刻意**锚在「被判定那棵树（`--base`）」上的——release.yml 读的正是 tag 自己树里的 publisher / checker，所以被测树必须自己提供判定机件；⛔ 不是改用 `resolveKernelSibling`（那解析的是 release-cut 碰巧从哪个 checkout 运行，不是被测事实）。按检查器既有的 `kernel-sibling-dev-tree-only:` 标记（带理由、与命中同处可复核；release-cut 是 dev-tree-only，第三方项目不跑它）登记豁免，并在两行上方写明理由。
+
+```
+$ node --no-warnings --experimental-strip-types plugin/scripts/kernel-sibling-resolution-check.ts
+kernel-sibling-resolution-check: PASS — 452 kernel file(s) scanned, 0 naive kernel resource resolution(s)
+EXIT=0
+$ node --no-warnings --experimental-strip-types --test plugin/test/kernel-sibling-resolution-check.test.mjs
+ℹ tests 27 / pass 27 / fail 0
+```
+
+修复后 scoped gate 重跑仍绿（`plugin/test/release-cut.test.mjs` 17/17，exit 0）；anti-drift Touches 检查 `ANTI-DRIFT OK: 3 actual file(s), all within declared Touches`。
+
 ## Blocker
 
 **2026-10-20T23:23:41.526Z — worker 未落地（exited-not-landed）**
@@ -148,3 +162,4 @@ $ node --test plugin/test/release-cut.test.mjs
 - 未落地原因：step=suite: incomplete suite (598/598 files) — recovery exhausted at floor concurrency 32 — no declared rung produced a complete verdict (64,48,32); needs a code/config fix, see plugin/scripts/full-suite-runner.ts
 - run_id：wk-prod-anchor
 - session_id：810ab1fd-9d3b-437e-b26e-ad3c18e38e46
+- 后续（2026-10-21 本轮）：真因是静态检查 `kernel-sibling-resolution-check` 对预检新增两行的 P2 命中（见 Evidence 末节），已修复并在本 worktree 重跑为 PASS；AC7 仍为（待外部）。
