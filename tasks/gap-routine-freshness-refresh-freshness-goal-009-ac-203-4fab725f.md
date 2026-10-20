@@ -3,7 +3,7 @@ id: gap-routine-freshness-refresh-freshness-goal-009-ac-203-4fab725f
 title: "freshness-refresh: 27 delivery-face commits of margin (13.5% of K=200)
   is below the 30.4-commit threshold computed for coldstart-face at the worst
   observed hour (13 c/h) plus one o"
-status: todo
+status: ready
 labels:
   - gap
   - routine-filed
