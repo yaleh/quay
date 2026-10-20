@@ -24,7 +24,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { extractSection, extractSectionFenceAware, parseFrontmatterCompletely, parseTask, frontmatterGoalAc, readGoalAc } from "../scripts/task-schema.ts";
+import { extractSection, extractSectionFenceAware, parseFrontmatterCompletely, parseTask, frontmatterGoalAc, readGoalAc, countAcCheckboxes as pluginSchemaCountAcCheckboxes } from "../scripts/task-schema.ts";
 import { countAcCheckboxes } from "../scripts/task-status-drift-check.ts";
 import {
   extractSection as productExtractSection,
@@ -84,14 +84,54 @@ test("parseFrontmatterCompletely — plugin copy matches product source (full YA
   );
 });
 
-test("countAcCheckboxes — plugin copy matches product source (incl. fail-closed absent-section)", () => {
-  const ac = extractSection(TASK_BODY, "Acceptance Criteria");
-  assert.deepEqual(countAcCheckboxes(ac), productCountAcCheckboxes(ac));
-  // fail-closed absent section: both must return the NaN total shape, not a silent {unchecked:0}.
-  const absent = countAcCheckboxes(null);
-  assert.deepEqual(absent, productCountAcCheckboxes(null));
-  assert.equal(absent.sectionFound, false);
-  assert.ok(Number.isNaN(absent.total), "absent section must be NaN, not 0");
+// ── countAcCheckboxes: FOUR fixture classes fed to BOTH call sites ──────────────────────────────
+// gap-routine-architecture-analysis-dup-count-ac-checkboxes: the product copy
+// (packages/quay/src/task-parsing.ts) and the mechanism copy (plugin/scripts/task-schema.ts) are
+// byte-identical today, but the guard below used to exercise only 2 inputs (one extracted section,
+// one null). These 4 classes pin the shapes the two layers actually differ on — absent (null),
+// present-but-empty, a checklist exercising every box token (`[ ]`/`[x]`/`[X]`/`[~]`), and a
+// present section with prose but no boxes. Every fixture is asserted non-vacuous first, so a
+// "both returned undefined" pass cannot stand in for parity.
+const AC_FIXTURES = [
+  { name: "null (absent / unreadable section)", input: null },
+  { name: "empty string (present but empty)", input: "" },
+  {
+    name: "mixed checklist (unchecked / x / X / ~)",
+    input: "- [ ] first\n- [x] second\n- [X] third\n- [~] fourth\n",
+  },
+  { name: "prose with no checkbox", input: "Just prose in the AC section, no boxes here.\n" },
+];
+
+test("countAcCheckboxes — product copy and BOTH mechanism imports agree on 4 fixture classes", () => {
+  // The mechanism layer exposes it twice: the definition (task-schema.ts, the site the finding
+  // names) and the re-export (task-status-drift-check.ts). Pin BOTH to the product source.
+  assert.equal(countAcCheckboxes, pluginSchemaCountAcCheckboxes, "status-drift re-export must BE task-schema's definition, not a second copy");
+
+  for (const { name, input } of AC_FIXTURES) {
+    const product = productCountAcCheckboxes(input);
+    const mechanism = pluginSchemaCountAcCheckboxes(input);
+    assert.deepEqual(mechanism, product, `countAcCheckboxes diverged for fixture: ${name}`);
+    // Non-vacuity: both sides returned a real result object, not undefined/null.
+    assert.equal(typeof product, "object");
+    assert.notEqual(product, null);
+    assert.ok("sectionFound" in product, `fixture ${name} must exercise the returned shape`);
+  }
+
+  // The fixtures must actually distinguish the two fail-closed states — otherwise "parity" below
+  // would hold trivially even if both copies collapsed absent and empty into one shape.
+  const absent = productCountAcCheckboxes(null);
+  const empty = productCountAcCheckboxes("");
+  assert.equal(absent.sectionFound, false, "null ⇒ sectionFound:false");
+  assert.ok(Number.isNaN(absent.total), "null ⇒ total NaN, not 0");
+  assert.equal(empty.sectionFound, true, "empty-but-present section must be distinguishable from absent");
+  assert.equal(empty.total, 0, "empty-but-present section ⇒ total 0");
+
+  // `[~]` (partial) counts in total but as unchecked — the semantics both copies must share.
+  const mixed = productCountAcCheckboxes(AC_FIXTURES[2].input);
+  assert.equal(mixed.total, 4);
+  assert.equal(mixed.checked, 2, "[x] and [X] are checked; [ ] and [~] are not");
+  assert.equal(mixed.unchecked, 2);
+  assert.equal(mixed.sectionFound, true);
 });
 
 // ── goal_ac top-level read (gap-goal-ac-task-linkage-top-level-field) ──
