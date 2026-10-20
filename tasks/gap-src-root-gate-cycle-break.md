@@ -1,7 +1,7 @@
 ---
 id: gap-src-root-gate-cycle-break
 title: 断 ""↔gate 根环——src root 同时是 gate 的宿主与依赖源，把 gate 依赖的底层下沉建立单向分层
-status: todo
+status: ready
 labels:
   - gap
 parent: null
