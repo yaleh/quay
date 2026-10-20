@@ -3991,6 +3991,168 @@ function fileTailLines(file: string, n = 8): string {
   }
 }
 
+// ── Layer 0 · anchor 承载 kind 的【循环代次】读数（gap-anchor-hosted-restart-false-negative-…）──────
+//
+// 缺陷（2026-10-20 第三方项目实测）：`restart --kind X` 的 stop 确认判据曾是
+// `aliveness(root, X).running`。收敛形态下那个量读的是**承载进程（anchor）**的活性——六个 kind 共享同
+// 一个进程，于是「X 的循环已经收尾、又因期望态被恢复而重新拉起」这件事在它上面**完全不可见**：
+// CLI 在 60s 窗口末尾报 `stop-failed` / `restart-aborted`，而同一份 `.quay/anchor.log` 里
+// `kind=X loop stopped` → `kind=X loop started` 只隔十几秒，且同刻 `quay driver start --kind X`
+// 报 `already-running`。⇒ 报告的结局与真实结局相反（硬规则 3b 的镜像：读不懂「循环 vs 承载进程」的
+// 区别 ⇒ 返回了一个与「没重起」同形的值）。
+//
+// 修法：判据换成**该 kind 自己的循环代次**——anchor 每写一行 `kind=<k> loop started`，代次 +1；
+// `loop stopped` 是旧代次结束的直接量。两者都由 anchor 自己 append 到 `.quay/anchor.log`，
+// ⛔ 不是本 CLI 维护的在飞集合（硬规则 4b：不用被测对象自己产生的量之外的自造代理）。
+//
+// ⚠️ 三态（硬规则 3b）：日志缺失 / 读不懂 ⇒ `evaluated:false` + 具名 reason，调用方**回退到旧判据**
+// （夹具与旧宿主没有 anchor.log）。⛔ 不把「读不懂」折成「已停止」——那会把一次真实的「停不掉」报成
+// `restarted-loop`（AC5 的反向控制正是这一支）。
+
+/** anchor.log 里该 kind 的一条循环生命周期事件。 */
+export interface AnchorLoopLifecycleEvent {
+  kind: DriverKind;
+  event: "started" | "stopped" | "returned";
+  /** `started` 行里 anchor 自报的 pid（其余事件为 null）。 */
+  pid: number | null;
+  /** 绝对行号（1-based）。增量读（`readAnchorLoopEventsSince`）的事件记 0（未定位绝对行号）。 */
+  line: number;
+  /** 截至本行（含）该 kind 的 `loop started` 累计次数 = **代次**（单调递增）。 */
+  generation: number;
+}
+
+/** 一份代次快照。`eof` = 快照时的日志字节数：增量读从它开始，⛔ 不从 0 重扫（500ms 级轮询的代价）。 */
+export type AnchorLoopLifecycleReading =
+  | { evaluated: true; generation: number; lastEvent: AnchorLoopLifecycleEvent | null; eof: number; logFile: string }
+  | { evaluated: false; reason: "missing" | "unreadable"; logFile: string };
+
+/** anchor 写 lifecycle 行的唯一格式（`driver-anchor.ts` 的 startKindTask）：
+ *  `2026-10-20T06:27:52Z anchor: kind=quality loop stopped`
+ *  `2026-10-20T06:27:52Z anchor: kind=quality loop returned code=0 after 498224423ms`
+ *  `2026-10-20T06:28:08Z anchor: kind=quality loop started (pid=1376399)`
+ *  ⛔ `returned` **不是**「已停止」：anchor 可以紧接着 respawn 同一 kind（§6.1 事件循环重启）。 */
+const ANCHOR_LOOP_LINE_RE = /^\S+ anchor: kind=([A-Za-z0-9_-]+) loop (started \(pid=(\d+)\)|stopped|returned code=-?\d+ after \d+ms)\s*$/;
+
+function parseAnchorLoopLine(line: string, kind: DriverKind): { event: "started" | "stopped" | "returned"; pid: number | null } | null {
+  const m = ANCHOR_LOOP_LINE_RE.exec(line);
+  if (!m || m[1] !== kind) return null;
+  if (m[2].startsWith("started")) return { event: "started", pid: m[3] !== undefined ? Number(m[3]) : null };
+  if (m[2] === "stopped") return { event: "stopped", pid: null };
+  return { event: "returned", pid: null };
+}
+
+/** 读**整个** anchor.log，返回该 kind 的最后一件事与累计代次（restart 的 before/after 用它：
+ *  代次是绝对值，⛔ 不是「本进程见过的次数」）。 */
+export function readAnchorLoopLifecycle(root: string, kind: DriverKind): AnchorLoopLifecycleReading {
+  const logFile = anchorPaths(root).logFile;
+  let raw: string;
+  try {
+    raw = fs.readFileSync(logFile, "utf8");
+  } catch (e) {
+    // ⛔ 只有 ENOENT 是「不存在」；其余（EACCES / EISDIR / …）是读不成，各自具名（同 readAnchorStateDetailed）。
+    return { evaluated: false, reason: (e as NodeJS.ErrnoException)?.code === "ENOENT" ? "missing" : "unreadable", logFile };
+  }
+  let generation = 0;
+  let lastEvent: AnchorLoopLifecycleEvent | null = null;
+  const lines = raw.split("\n");
+  for (let i = 0; i < lines.length; i++) {
+    const ev = parseAnchorLoopLine(lines[i], kind);
+    if (ev === null) continue;
+    if (ev.event === "started") generation += 1;
+    lastEvent = { kind, event: ev.event, pid: ev.pid, line: i + 1, generation };
+  }
+  return { evaluated: true, generation, lastEvent, eof: Buffer.byteLength(raw, "utf8"), logFile };
+}
+
+/** 只读 `[fromOffset, EOF)` 这一段（轮询用）。日志被截断/轮换（当前大小 < fromOffset）⇒ 具名
+ *  `not-evaluated`：⛔ 不把「读不到增量」当成「没有新事件」（那会让一个重启被判成没发生）。 */
+export function readAnchorLoopEventsSince(
+  root: string,
+  kind: DriverKind,
+  fromOffset: number,
+): { evaluated: true; events: AnchorLoopLifecycleEvent[]; eof: number } | { evaluated: false; reason: "missing" | "unreadable" | "rotated"; logFile: string } {
+  const logFile = anchorPaths(root).logFile;
+  let size: number;
+  try {
+    size = fs.statSync(logFile).size;
+  } catch (e) {
+    return { evaluated: false, reason: (e as NodeJS.ErrnoException)?.code === "ENOENT" ? "missing" : "unreadable", logFile };
+  }
+  if (size < fromOffset) return { evaluated: false, reason: "rotated", logFile };
+  if (size === fromOffset) return { evaluated: true, events: [], eof: fromOffset };
+  const buf = Buffer.alloc(size - fromOffset);
+  let fd: number;
+  try {
+    fd = fs.openSync(logFile, "r");
+    try { fs.readSync(fd, buf, 0, buf.length, fromOffset); } finally { fs.closeSync(fd); }
+  } catch {
+    return { evaluated: false, reason: "unreadable", logFile };
+  }
+  const text = buf.toString("utf8");
+  // 只消费**完整行**：最后一段可能是正在写的那一行（appendFileSync 是单次 write，仍有读到的中间态）。
+  const nl = text.lastIndexOf("\n");
+  if (nl < 0) return { evaluated: true, events: [], eof: fromOffset };
+  const complete = text.slice(0, nl);
+  const eof = fromOffset + Buffer.byteLength(text.slice(0, nl + 1), "utf8");
+  const events: AnchorLoopLifecycleEvent[] = [];
+  for (const line of complete.split("\n")) {
+    const ev = parseAnchorLoopLine(line, kind);
+    if (ev !== null) events.push({ kind, event: ev.event, pid: ev.pid, line: 0, generation: 0 });
+  }
+  return { evaluated: true, events, eof };
+}
+
+/** 快照之后该 kind 的**循环状态增量**（⛔ 不是布尔，也不是「见到事件就算停」）。
+ *
+ *  · `unchanged`  —— 增量里没有 lifecycle 事件（旧代次仍在跑）；
+ *  · `stopped`    —— **最后**一件事是 `loop stopped`（且其后没有 `loop started`）；
+ *  · `restarted`  —— **最后**一件事是 `loop started`（旧代次已收尾**且**新一代已在跑）。
+ *                   `stop` 与 `restart` 对这一态的解释不同 ⇒ 由调用方决定（见 `stopKindViaAnchor`），
+ *                   ⛔ 不在这里替它们合并；
+ *  · `returned`   —— 最后是 `loop returned`（anchor 可以 respawn 同一 kind，⛔ 不等于已停）；
+ *  · `not-evaluated` —— 日志缺失/读不懂/被轮换。 */
+export type AnchorLoopDelta =
+  | { state: "unchanged" | "stopped" | "restarted" | "returned" }
+  | { state: "not-evaluated"; reason: "missing" | "unreadable" | "rotated" };
+
+/** 读 `[pre.eof, EOF)` 并回答「**最后**发生的是哪一件事」。看最后一件而不是「有没有出现过
+ *  stopped」是必须的：`loop stopped` 之后 anchor 可能立刻 respawn（`loop started`），此时协议上
+ *  该 kind **正在跑**——只匹配 `stopped` 会让 `stop --kind X` 把一个正在跑的循环报成已停。 */
+export function readAnchorLoopDelta(root: string, kind: DriverKind, pre: AnchorLoopLifecycleReading): AnchorLoopDelta {
+  if (!pre.evaluated) return { state: "not-evaluated", reason: pre.reason };
+  const tail = readAnchorLoopEventsSince(root, kind, pre.eof);
+  if (!tail.evaluated) return { state: "not-evaluated", reason: tail.reason };
+  const last = tail.events.length > 0 ? tail.events[tail.events.length - 1] : null;
+  if (last !== null) {
+    if (last.event === "stopped") return { state: "stopped" };
+    if (last.event === "started") return { state: "restarted" };
+    return { state: "returned" };
+  }
+  // 增量里没有 lifecycle 事件 ⇒ 唯一能让「承载进程不在了」成为直接量的是 /proc（硬规则 4b）。
+  const anchorPid = readAnchorPid(root);
+  if (anchorPid === null || !pidAlive(anchorPid)) return { state: "stopped" };
+  return { state: "unchanged" };
+}
+
+/** 该 kind 的**旧循环代次**是否已在快照之后结束：`loop stopped`（旧代次收尾的直接量）或
+ *  `loop started`（新代次已起 ⇒ 旧代次必已收尾）。
+ *
+ *  ⛔ 三态不是布尔：
+ *   · `stopped`       —— 有直接量（或 anchor 进程已不在 ⇒ 它承载的循环全部结束）；
+ *   · `running`       —— 增量窗口里没有 lifecycle 事件（或只见到 `returned`——anchor 还可以 respawn），
+ *                        且 anchor 仍活着；
+ *   · `not-evaluated` —— anchor.log 缺失/读不懂/被轮换 ⇒ 调用方**回退到旧判据**（夹具形态），
+ *                        ⛔ 不折成 `stopped`（那会把「停不掉」报成重启成功，AC5 的反向控制）。 */
+export function anchorLoopStoppedSince(
+  root: string,
+  kind: DriverKind,
+  pre: AnchorLoopLifecycleReading,
+): "stopped" | "running" | "not-evaluated" {
+  const d = readAnchorLoopDelta(root, kind, pre);
+  if (d.state === "not-evaluated") return "not-evaluated";
+  return d.state === "stopped" || d.state === "restarted" ? "stopped" : "running";
+}
+
 /** 存活确认的判决（⛔ 三态不是布尔——硬规则 3b：「查过且起来了」与「查不成/还没起来」必须不同形）。
  *  `confirmed` = supervisor 活 ∧ **driver 已就绪**（见下）且该读数被【连续两次】轮询都读到；
  *  `dead` = 决断信号（supervisor 已退出且无 driver）；`pending` = 窗口用尽而 supervisor 仍活
@@ -4384,6 +4546,10 @@ export interface StopOptions {
    *  ⛔ 缺省 false：`stop --kind X`（意图就是「X 该停」）**保持**现有语义（移出期望态 + 落停机记录），
    *  只有 `restart` 才置 true。 */
   restoreDesiredOnFailure?: boolean;
+  /** 停机前的**循环代次快照**（`anchorLoopStoppedSince` 的 `pre`）。`restart` 在调用 `stopKind` 之前
+   *  取一次并传进来，使「stop 的确认判据」与「restart 的 before/after 代次」用**同一份**快照
+   *  （硬规则 5b：同一个事实不在两个函数里各读一次）。缺省 ⇒ `stopKindViaAnchor` 现读一次。 */
+  lifecycleStart?: AnchorLoopLifecycleReading;
 }
 
 const LEGACY_STOP_GRACE_MS = 10_000;
@@ -4570,14 +4736,28 @@ async function stopKindViaAnchor(
     return 0;
   }
   const remaining = updateDesired(root, kind, false, "quay-driver-stop");
-  // 等该 kind 的循环收尾（anchor 摘掉 pid 文件 = 循环已退出的直接量）。
+  // 等该 kind 的循环收尾。判据 = **该 kind 自己的循环代次**（`anchorLoopStoppedSince`），⛔ 不再只是
+  // `aliveness(root,kind).running`：收敛形态下后者读的是**承载进程**（六个 kind 共享一个 anchor），
+  // 「X 的循环收尾了、anchor 还活着」在它上面恒为 running —— 那正是本任务的假阴性成因。
+  // 日志缺失/读不懂（夹具与旧宿主）⇒ `not-evaluated` ⇒ 回退旧判据（⛔ 不折成「已停止」）。
+  const lifecycleStart = opts.lifecycleStart ?? readAnchorLoopLifecycle(root, kind);
   const stopTimeoutMs = Math.max(0, opts.stopTimeoutMs ?? ANCHOR_LOOP_STOP_TIMEOUT_MS);
+  const loopStopped = (): boolean => {
+    const d = readAnchorLoopDelta(root, kind, lifecycleStart);
+    // `not-evaluated` = 仪器读不到输入 ⇒ 用旧判据（那是**回退**，不是主判据；见函数注释）。
+    if (d.state === "not-evaluated") return !aliveness(root, kind).running;
+    if (d.state === "stopped") return true;
+    // `restarted`：旧代次已收尾、**新一代已在跑**。对 `restart` 这正是目标态（接着的 start 会幂等地
+    // 确认就绪）；对 `stop` 它是**失败**——该 kind 的循环还在跑（⛔ 不得报 stopped）。
+    if (d.state === "restarted") return opts.restoreDesiredOnFailure === true;
+    return false; // unchanged / returned（anchor 还可能 respawn，⛔ 不宣布已停）
+  };
   const deadline = Date.now() + stopTimeoutMs;
   while (Date.now() < deadline) {
-    if (!aliveness(root, kind).running) break;
+    if (loopStopped()) break;
     await sleep(250);
   }
-  const stillRunning = aliveness(root, kind).running;
+  const stillRunning = !loopStopped();
   // 一个 kind 都不剩 ⇒ anchor 自身也可以停了（⛔ 不与「还有别的 kind 要跑」同形）。
   const anchorPid = readAnchorPid(root);
   if (remaining.length === 0 && anchorPid !== null && pidAlive(anchorPid)) {
@@ -4681,6 +4861,41 @@ export function resumeKind(root: string, kind: DriverKind, out: (s: string) => v
   return 0;
 }
 
+/** 等 anchor 的**新一代码次**出现（restart 的 stop 窗口用尽之后的半段，只在 anchor 路径用）。
+ *
+ *  现场（本任务的 Proposal）：stop 窗口到点时旧循环还没收尾 ⇒ `restart-aborted`；但中止路径会
+ *  `updateDesired(present=true)`（restoreDesiredOnFailure），anchor 一旦看到旧循环收尾（`loop stopped`）
+ *  就会立刻为它拉起**新一代**（`loop started`）⇒ CLI 已经说过「没重启」，而真实结局是「重启了、还在跑」。
+ *  实测两份日志相隔 16 秒（`loop stopped` 06:27:52Z → `loop started` 06:28:08Z）。
+ *  ⇒ 在决策**之前**再给这段后果一个确认窗口（`--confirm-timeout`，与 start 的确认同一个量），盯的是该
+ *  kind 自己的代次，⛔ 不是 anchor 进程活性。
+ *
+ *  返回 `null` = 窗口内没有观察到新一代（此时「没重起」是**如实**的，⛔ 不得编造成功）；同时覆盖
+ *  anchor 已退出（它承载的循环都不存在了 ⇒ 不会有新一代自己冒出来）。 */
+async function awaitAnchorLoopRestart(
+  root: string,
+  kind: DriverKind,
+  pre: AnchorLoopLifecycleReading,
+  opts: StartOptions,
+): Promise<{ generation: number; anchorPid: number | null } | null> {
+  if (!pre.evaluated) return null; // 没有代次仪器 ⇒ 无从判断（⛔ 不猜）
+  const confirmMs = Math.max(0, opts.confirmTimeoutSecs ?? DEFAULT_CONFIRM_TIMEOUT_SECS) * 1000;
+  const deadline = Date.now() + confirmMs;
+  for (;;) {
+    const tail = readAnchorLoopEventsSince(root, kind, pre.eof);
+    if (!tail.evaluated) return null; // 日志读不懂/被轮换 ⇒ 不猜（⛔ 不折成「已重起」）
+    if (tail.events.some((e) => e.event === "started")) {
+      const full = readAnchorLoopLifecycle(root, kind); // 绝对代次（before -> after）
+      if (!full.evaluated) return null;
+      return { generation: full.generation, anchorPid: readAnchorPid(root) };
+    }
+    const anchorPid = readAnchorPid(root);
+    if (anchorPid === null || !pidAlive(anchorPid)) return null; // anchor 不在 ⇒ 不会自己起新 loop
+    if (Date.now() >= deadline) return null;
+    await sleep(250);
+  }
+}
+
 /** restart = **确认停干净之后的** start。
  *
  *  ⚠️ `gap-driver-restart-unreliable-legacy-to-anchor-migration`：旧实现 `await stopKind(...)` 后
@@ -4689,7 +4904,15 @@ export function resumeKind(root: string, kind: DriverKind, out: (s: string) => v
  *  退出码与输出（`started:` / `already-running:` / `start-pending:`）读起来都像一次重启的产物，人无法
  *  从中看出旧 loop 没死（生产实证：四组旧 supervisor+driver 在 restart 返回 60s 后仍活）。
  *  ⇒ 现在 stop 未确认干净（非 0）就**中止**，⛔ 不起新循环；退出码 1 = 「重启没发生」，是可信的。
- *  这也让 `restart --kind X` 的判据与 DoD 一致：0 ⇔ 旧进程树已消失 ∧ 新循环已确认就绪。 */
+ *  这也让 `restart --kind X` 的判据与 DoD 一致：0 ⇔ 旧进程树已消失 ∧ 新循环已确认就绪。
+ *
+ *  ⚠️ anchor 承载路径（`gap-anchor-hosted-restart-false-negative-…`）：静止形态下六个 kind 共享**一个**
+ *  anchor 进程 ⇒ 「旧进程树已消失」不是正确的判据（进程本来就不该消失），正确判据是**该 kind 的循环
+ *  代次**。因此：
+ *   · 成功的前置 = stop 确认旧代次收尾（`anchorLoopStoppedSince`，见 `stopKindViaAnchor`）；
+ *   · 报告的结局 = `restarted-loop` + `代次 before -> after`（同时保留 `started:` 行，兼容既有读者）；
+ *   · stop 窗口用尽后**不再立即**下 `restart-aborted` 的结论：先 `awaitAnchorLoopRestart` 确认有没有
+ *     新一代（restore-desired 会拉起它）——有 ⇒ 报 `restarted-loop`（⛔ 不把「已重起」报成 abort）。 */
 export async function restartKind(
   root: string,
   kind: DriverKind,
@@ -4697,6 +4920,9 @@ export async function restartKind(
   out: (s: string) => void = (s) => process.stdout.write(s),
   err: (s: string) => void = (s) => process.stderr.write(s),
 ): Promise<number> {
+  // 停机前取**一份**代次快照：stop 的确认判据与下面的 before/after 都用它（⛔ 两个函数各读一次）。
+  const anchorPath = process.env.QUAY_DRIVER_LEGACY_SUPERVISOR !== "1" && anchorOwns(root, kind);
+  const pre = anchorPath ? readAnchorLoopLifecycle(root, kind) : null;
   const stopRc = await stopKind(root, kind, out, {
     legacyGraceMs: opts.legacyGraceMs,
     legacyKillWaitMs: opts.legacyKillWaitMs,
@@ -4705,8 +4931,20 @@ export async function restartKind(
     // ⛔ restart 与 stop 的关键差异（gap-per-kind-stop-…，Plan 步 3）：restart 中止时**恢复期望态**。
     // 见 `stopKindViaAnchor` 里 `stillRunning` 那一支的 WHY。
     restoreDesiredOnFailure: true,
+    lifecycleStart: pre ?? undefined,
   });
   if (stopRc !== 0) {
+    // 停止窗口用尽 ⇒ 先确认「真实结局」：restore 之后 anchor 可能已经把新一代拉起来了。
+    if (anchorPath && pre !== null) {
+      const after = await awaitAnchorLoopRestart(root, kind, pre, opts);
+      if (after !== null) {
+        out(
+          `restarted-loop: kind=${kind} — process unchanged (anchor pid=${after.anchorPid ?? "none"}); ` +
+          `loop generation ${pre.generation} -> ${after.generation}（旧循环在 stop 窗口内未收尾，窗口用尽后由期望态恢复拉起新一代）\n`,
+        );
+        return 0;
+      }
+    }
     err(
       `restart-aborted: kind=${kind} — stop 未确认旧进程树已退出（exit=${stopRc}）；⛔ 不起新循环（否则与旧 loop 双派发）。` +
       `按上面的 stop-failed 行核对 pid；确认旧进程消亡后重跑 \`quay driver restart --kind ${kind}\`。\n` +
@@ -4714,7 +4952,26 @@ export async function restartKind(
     );
     return 1;
   }
-  return startKind(root, kind, opts, out, err);
+  const startRc = await startKind(root, kind, opts, out, err);
+  if (startRc !== 0) return startRc;
+  if (anchorPath && pre !== null) {
+    // 成功路径也要报**代次**（AC4 的枚举词表）：`started:` 只说「新一代就绪」，不说「旧代→新代」。
+    const post = readAnchorLoopLifecycle(root, kind);
+    if (post.evaluated && post.generation > pre.generation) {
+      out(
+        `restarted-loop: kind=${kind} — process unchanged (anchor pid=${readAnchorPid(root) ?? "none"}); ` +
+        `loop generation ${pre.generation} -> ${post.generation}\n`,
+      );
+    } else {
+      // ⛔ 不编造 `restarted-loop`：start 已确认就绪，但代次读数没有前进/读不懂 —— 如实报出差异（硬规则 3b）。
+      err(
+        `restart-warning: kind=${kind} — start 已确认，但循环代次读数没有前进（before=${pre.generation}，` +
+        `after=${post.evaluated ? post.generation : `not-evaluated:${post.reason}`}）；⛔ 不报成 restarted-loop。` +
+        `核对：${anchorPaths(root).logFile}\n`,
+      );
+    }
+  }
+  return 0;
 }
 
 // ── CLI（本 kernel 是 supervisor + 状态操作的【真正实现入口】，cli/driver.ts 直接 import 调用）──────
@@ -4778,6 +5035,14 @@ stop/restart 的【旧进程树确认】（gap-driver-restart-unreliable-legacy-
   \`stop-failed:\` + 仍活的 pid 清单 + 退出 1，且**旧形态载体被保留**（那是一个活进程在盘上唯一的记录）。
   \`restart\` 在 stop 非 0 时**中止**（⛔ 不起新循环 ⇒ 不会与旧 loop 双派发），退出 1 = 「重启没发生」。
   worker 的在飞子进程是独立 OS 进程，任何分支都不受影响（只发信号给本 kind 的 pid 载体里的进程）。
+
+anchor 承载时的 restart 结局（gap-anchor-hosted-restart-false-negative-…）：判据是该 kind 自己的
+【循环代次】（\`.quay/anchor.log\` 的 \`kind=<k> loop started/stopped\`），⛔ 不是承载进程（anchor）的活性。
+  成功 ⇒ \`restarted-loop: kind=<k> — process unchanged (anchor pid=<p>); loop generation <before> -> <after>\`
+  （退出 0；同一 anchor 进程内换了新一代循环，\`started:\` 行仍照常输出）。
+  失败 ⇒ \`restart-aborted:\`（退出 1；窗口内没有新一代循环，旧循环仍在跑）。
+  ⛔ 已经重起的 restart 绝不报成 \`restart-aborted\`：stop 窗口用尽后仍会等一个 \`--confirm-timeout\` 窗口，
+  确认 restore-desired 是否已让 anchor 拉起新一代。
 `);
     return 0;
   }

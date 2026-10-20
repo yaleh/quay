@@ -18,7 +18,10 @@
 // SPLIT from driver-runtime.test.mjs by gap-suite-split-15-over-30s-test-files — shard 10/10 (4 tests). Shared fixtures: ./helpers/driver-runtime-harness.mjs (single source).
 
 import { test } from "node:test";
-import { DRIVER_KINDS, KERNEL, anchorHosts, assert, fakeKindDriverSource, fs, kernelRun, killProcessGroupOf, killProcs, lastSupervisorDriverPid, makeRoot, migrationFixture, os, path, pidAlive, preferredAnchorKernel, promotion, readDesired, readPid, restartKind, rmRoots, run, spawn, spawnIdleProc, spawnOrphanProc, statePaths, stopKind, stopLegacyPair, teardownLiveDriver, worker } from "./helpers/driver-runtime-harness.mjs";
+import { DRIVER_KINDS, DRIVER_RUNTIME_ABS, KERNEL, aliveness, anchorHosts, assert, fakeKindDriverSource, fs, kernelRun, killProcessGroupOf, killProcs, lastSupervisorDriverPid, makeRoot, migrationFixture, os, path, pidAlive, preferredAnchorKernel, promotion, readAnchorState, readDesired, readPid, restartKind, rmRoots, run, spawn, spawnIdleProc, spawnOrphanProc, statePaths, stopKind, stopLegacyPair, teardownLiveDriver, worker } from "./helpers/driver-runtime-harness.mjs";
+// 新判据（循环代次）直接从 runtime 取——harness 的导出面不在本任务 ## Touches 里 ⇒ ⛔ 不为取两个符号
+// 去改共享夹具（那会让「一处改动」变成两个文件的漂移面）。同一模块实例，⛔ 不是第二份实现。
+import { anchorLoopStoppedSince, readAnchorLoopDelta, readAnchorLoopLifecycle } from "../scripts/driver-runtime.ts";
 
 test("AC2(c) restart — stop 未确认旧进程树退出 ⇒ **中止**（⛔ 不起新循环、⛔ 不把 kind 加进 anchor 期望态）", async (t) => {
   const f = migrationFixture("abort", { supervisorCarrier: true, anchorNamesWorker: true });
@@ -285,4 +288,267 @@ test("AC1 — kind=worker 的 stop-failed / restart-aborted 必须点名真实�
   // 反向对照（证明上面的失败不是空转）：在飞子进程活过整条路径。
   assert.equal(pidAlive(f.inFlightPid), true, "AC5 对照：在飞子进程未被信号");
   assert.equal(pidAlive(f2.inFlightPid), true, "AC5 对照：在飞子进程未被信号");
+});
+
+// ══════════════════════════════════════════════════════════════════════════════════════════════════
+// gap-anchor-hosted-restart-false-negative-stop-confirm-lag-restore-respawns
+//
+// 现场（2026-10-20 第三方项目实测，完整材料在任务体 Proposal）：`quay driver restart --kind quality`
+// 输出 `stop-failed` + `restart-aborted`（exit 1），而**同一份** `.quay/anchor.log` 记录
+// `kind=quality loop stopped`（06:27:52Z）→ `loop started`（06:28:08Z），随后 quality-round.jsonl
+// round 1..4 持续；同刻 `quay driver start --kind quality` 报 `already-running`。
+// 机制：收敛形态下 `aliveness(root,kind).running` 读的是**承载进程（anchor）**的活性（六个 kind 共享
+// 一个进程）⇒ 该 kind 的循环收尾/重起在它上面不可见；而 restart 中止路径的 restore-desired 又把 kind
+// 放回期望态 ⇒ anchor 在旧循环收尾后立刻拉起新一代。CLI 报告与真实结局相反。
+//
+// 判据分层（逐条可取假）：
+//   AC1 同一载体上**旧判据 vs 新判据**：事故形状的盘上载体里，`aliveness().running` 仍为 true，
+//       而 `anchorLoopStoppedSince` 报 stopped、代次 1→2（旧判据看不见 = 假阴性的成因）。
+//   AC2 真 anchor + 真 kind 循环：stop 窗口用尽、旧循环随后收尾、restore 拉起新一代 ⇒ CLI 必须报
+//       `restarted-loop` + `generation 1 -> 2` + `process unchanged`，退出 0（⛔ 不得报 restart-aborted）。
+//   AC3 位置判定 + 负控制：改后源码里旧判据的 wait 调用点清零、新判据在位；同一谓词对**改前原文**
+//       命中（证明谓词可判，⛔ 不是恒零）。
+//   AC4 输出词表（枚举，非布尔）：`restarted-loop`（process unchanged，带 before/after generation）
+//       与 `restart-aborted` 两态可区分；对「已知为真」的样本干跑非零。
+//   AC5 双向负控制：循环**不响应**停机（真的没重起）⇒ 仍如实报 restart-aborted，代次不变。
+
+const RESTART_REPO_ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), "..", "..");
+
+/** 事故的盘上形状（AC1）：anchor 承载 quality，日志里出现「旧代 stopped → 新代 started」。
+ *  `pre` 是在旧代**还在跑**时取的那一份快照（只含第一行 `loop started`）。 */
+function anchorHostedQualityRoot(tag) {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), `dr-incident-${tag}-`));
+  fs.mkdirSync(path.join(root, ".quay"), { recursive: true });
+  const anchorPid = spawnIdleProc();
+  const st = statePaths(root, "quality");
+  fs.writeFileSync(st.driverPidFile, `${anchorPid}\n`, "utf8");
+  fs.writeFileSync(path.join(root, ".quay", "anchor.pid"), `${anchorPid}\n`, "utf8");
+  fs.writeFileSync(path.join(root, ".quay", "anchor.json"), JSON.stringify({ pid: anchorPid, startedAt: new Date().toISOString(), kinds: ["quality"], host: "anchor" }), "utf8");
+  fs.writeFileSync(path.join(root, ".quay", "anchor-desired.json"), JSON.stringify({ kinds: ["quality"], opts: {}, updatedBy: "quay-driver-start", updatedAt: new Date().toISOString() }), "utf8");
+  const log = path.join(root, ".quay", "anchor.log");
+  fs.writeFileSync(log, `2026-10-20T06:20:00Z anchor: kind=quality loop started (pid=${anchorPid})\n`, "utf8");
+  return { root, anchorPid, log };
+}
+
+function incidentShapeFixture(tag) {
+  const f = anchorHostedQualityRoot(tag);
+  const pre = readAnchorLoopLifecycle(f.root, "quality");
+  fs.appendFileSync(f.log, [
+    `2026-10-20T06:27:52Z anchor: kind=quality loop returned code=0 after 498224423ms`,
+    `2026-10-20T06:27:52Z anchor: kind=quality loop stopped`,
+    `2026-10-20T06:28:08Z anchor: kind=quality loop started (pid=${f.anchorPid})`,
+    ``,
+  ].join("\n"), "utf8");
+  return { ...f, pre };
+}
+
+test("AC1 — 事故形状的同一份盘上载体：旧判据 aliveness().running 仍为 true，新判据（循环代次）报 stopped（假阴性的直接成因）", (t) => {
+  const f = incidentShapeFixture("contrast");
+  t.after(() => { killProcs([f.anchorPid]); rmRoots([f.root]); });
+
+  // 旧判据：收敛形态下它读的是**anchor 进程**（还活着）⇒ 「在跑」——即便该 kind 的循环已经换了一代。
+  assert.equal(aliveness(f.root, "quality").running, true,
+    "前提：旧判据在此形状下为 true（这正是 CLI 当年报 stop-failed / restart-aborted 的原因）");
+  // 新判据：同一份日志的增量里出现 stopped / 新一代 started ⇒ 旧代次已收尾。
+  assert.equal(anchorLoopStoppedSince(f.root, "quality", f.pre), "stopped",
+    "新判据必须看得见旧代次已收尾（否则它只是旧判据的别名）");
+  const post = readAnchorLoopLifecycle(f.root, "quality");
+  assert.equal(post.evaluated, true);
+  assert.equal(f.pre.generation, 1, "停机前代次");
+  assert.equal(post.generation, 2, "新一代出现后代次 +1（AC4 的 before/after 读数）");
+  // 枚举而不是布尔：最后一件是 `started` ⇒ `restarted`（旧代次已收尾 ∧ 新一代在跑），
+  // ⛔ 不与 `stopped`（此刻没有循环）同形——`stop` 与 `restart` 对这一态的解释不同（见 driver-runtime）。
+  assert.equal(readAnchorLoopDelta(f.root, "quality", f.pre).state, "restarted",
+    "增量读数必须区分「已收尾且新一代在跑」与「此刻没有循环」");
+
+  // 双向负控制：同一谓词对「增量里只有 returned、没有 stopped/新代」必须报 running（⛔ 不是恒 stopped）。
+  const running = anchorHostedQualityRoot("returned-only");
+  t.after(() => { killProcs([running.anchorPid]); rmRoots([running.root]); });
+  const runningPre = readAnchorLoopLifecycle(running.root, "quality");
+  fs.appendFileSync(running.log, `2026-10-20T06:30:00Z anchor: kind=quality loop returned code=0 after 1000ms\n`, "utf8");
+  assert.equal(anchorLoopStoppedSince(running.root, "quality", runningPre), "running",
+    "负控制：只有 returned（anchor 可 respawn）⛔ 不等于已停止");
+});
+
+// ── AC2 / AC5：真 anchor、真 kind 循环（⛔ 不是「CLI 自己的报告」）────────────────────────────────
+
+/** fake driver = driver-anchor.test.mjs 的同源最小实现 + 一个**可控的收尾延迟**：
+ *  · `FAKE_STOP_DELAY_MS`：收到停机请求后还要多久才把控制权交回 anchor（模拟在飞长轮）；
+ *  · `FAKE_IGNORE_STOP=1`：永不收尾（AC5 的真实负控制）。
+ *  ⚠️ import 的必须是 anchor 进程实际加载的那份 runtime（`DRIVER_RUNTIME_ABS`，通常 = 主检出那份）：
+ *     停机登记表是模块级的，import 另一份 ⇒ 两张表 ⇒ `requestKindStop` 永远到不了这个循环。 */
+function restartFixtureDriverSource(kind, opts = {}) {
+  const spec = DRIVER_KINDS[kind];
+  const carrier = spec.carriers.find((c) => c.endsWith("-round.jsonl")) ?? spec.carriers[0];
+  return `import fs from "node:fs";
+import path from "node:path";
+import { registerKindStop } from ${JSON.stringify(DRIVER_RUNTIME_ABS)};
+export async function main(argv) {
+  const args = argv.slice(2);
+  const get = (n) => { const i = args.indexOf(n); return i >= 0 ? args[i + 1] : undefined; };
+  const root = get("--root");
+  const pidFile = get("--pid-file");
+  const interval = Number(get("--interval") ?? 120);
+  if (pidFile) fs.writeFileSync(pidFile, String(process.pid) + "\\n", "utf8");
+  const ctl = ${opts.neverStop ? "null" : `registerKindStop(${JSON.stringify(kind)})`};
+  const file = path.join(root, ".quay", ${JSON.stringify(carrier)});
+  const ignoreStop = process.env.FAKE_IGNORE_STOP === "1";
+  const delayMs = Number(process.env.FAKE_STOP_DELAY_MS ?? 0);
+  let round = 0;
+  while (ignoreStop || (ctl !== null && !ctl.requested())) {
+    round += 1;
+    try { fs.appendFileSync(file, JSON.stringify({ round, ts: new Date().toISOString(), pid: process.pid }) + "\\n"); } catch {}
+    await new Promise((r) => setTimeout(r, interval));
+  }
+  // 停机请求已送达，但循环还要 delayMs 才真正收尾（在飞长轮的形状）。
+  if (delayMs > 0) await new Promise((r) => setTimeout(r, delayMs));
+  return 0;
+}
+`;
+}
+
+/** 真 anchor + quality（可延迟收尾）+ promotion（常驻，用来让 anchor 在停掉 quality 之后**不退出**：
+ *  事故里 anchor 进程全程不变——只有单 kind 时 stopKindViaAnchor 会把空期望态的 anchor 也停掉，
+ *  那是另一条路径，测不到本条）。 */
+function makeAnchorRestartFixture(tag, { honorDelayMs, ignoreStop }) {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), `dr-anchor-restart-${tag}-`));
+  const scripts = path.join(root, "plugin", "scripts");
+  fs.mkdirSync(scripts, { recursive: true });
+  fs.mkdirSync(path.join(root, ".quay"), { recursive: true });
+  fs.writeFileSync(path.join(scripts, DRIVER_KINDS.quality.driver), restartFixtureDriverSource("quality"), "utf8");
+  fs.writeFileSync(path.join(scripts, DRIVER_KINDS.promotion.driver), restartFixtureDriverSource("promotion", { neverStop: true }), "utf8");
+  const env = { FAKE_STOP_DELAY_MS: String(honorDelayMs), ...(ignoreStop ? { FAKE_IGNORE_STOP: "1" } : {}) };
+  const started = [];
+  for (const kind of ["quality", "promotion"]) {
+    const r = kernelRun(["start", "--kind", kind, "--root", root, "--confirm-timeout", "20"], root, env);
+    started.push(r);
+  }
+  return { root, env, started };
+}
+
+function anchorPidOfHost(root) {
+  const raw = readPid(root, "anchor.pid");
+  return /^\d+$/.test(raw) ? Number(raw) : null;
+}
+
+test("AC2 — anchor 承载 kind 的 stop 窗口用尽后旧循环才收尾、restore 拉起新一代 ⇒ CLI 必须报 restarted-loop（generation before -> after），退出 0", async (t) => {
+  const f = makeAnchorRestartFixture("late", { honorDelayMs: 2500, ignoreStop: false });
+  const anchorPid = anchorPidOfHost(f.root);
+  t.after(() => { killProcs([anchorPid]); rmRoots([f.root]); });
+  assert.equal(f.started[0].status, 0, `quality start: ${f.started[0].stdout}\n${f.started[0].stderr}`);
+  assert.equal(f.started[1].status, 0, `promotion start: ${f.started[1].stdout}\n${f.started[1].stderr}`);
+
+  const pre = readAnchorLoopLifecycle(f.root, "quality");
+  assert.equal(pre.evaluated, true, "anchor.log 必须可读（夹具前提）");
+  assert.equal(pre.generation, 1, `前提：quality 已有一代循环：${JSON.stringify(pre)}`);
+
+  const out = [], err = [];
+  const rc = await restartKind(
+    f.root,
+    "quality",
+    // stop 窗口 800ms < 收尾延迟 2500ms ⇒ 复现事故：窗口用尽时旧循环仍在跑。
+    { restartDelaySecs: 1, confirmTimeoutSecs: 10, stopTimeoutMs: 800 },
+    (s) => out.push(s.trim()),
+    (s) => err.push(s.trim()),
+  );
+  assert.equal(rc, 0, `loop 实际已重起 ⇒ 退出码必须是 0（⛔ 不得重启没发生）：out=${out.join("|")} err=${err.join("|")}`);
+  const outcome = out.find((l) => l.startsWith("restarted-loop:"));
+  assert.ok(outcome, `必须报出 restarted-loop（真实结局）：${out.join("|")} ${err.join("|")}`);
+  assert.match(outcome, /process unchanged/, `必须说明 anchor 进程未变：${outcome}`);
+  assert.match(outcome, new RegExp(`loop generation ${pre.generation} -> ${pre.generation + 1}`), `必须带 before/after 代次：${outcome}`);
+  assert.equal(err.some((l) => l.startsWith("restart-aborted:")), false, `⛔ 已重起不得报成 restart-aborted：${err.join("|")}`);
+
+  // 直接量（⛔ 不是命令自己的报告）：同一个 anchor 进程里，日志写出了 stopped → 新一代 started。
+  const post = readAnchorLoopLifecycle(f.root, "quality");
+  assert.equal(post.evaluated, true);
+  assert.equal(post.generation, pre.generation + 1, `代次必须恰好 +1（⛔ 不得双派发）：${JSON.stringify(post)}`);
+  assert.equal(anchorPidOfHost(f.root), anchorPid, "process unchanged：anchor pid 前后一致");
+  assert.equal(pidAlive(anchorPid), true, "对照：anchor 仍活着");
+  const qualityLines = fs.readFileSync(path.join(f.root, ".quay", "anchor.log"), "utf8").split("\n").filter((l) => l.includes("kind=quality"));
+  const stoppedIdx = qualityLines.findIndex((l) => l.includes("loop stopped"));
+  const lastStartedIdx = qualityLines.map((l) => l.includes("loop started")).lastIndexOf(true);
+  assert.ok(stoppedIdx >= 0 && lastStartedIdx > stoppedIdx, `旧代 stopped 必须早于新一代 started：${qualityLines.join("\n")}`);
+
+  // 事故里的第三个读数：同刻 `quay driver start --kind quality` 报 already-running。
+  const again = kernelRun(["start", "--kind", "quality", "--root", f.root, "--confirm-timeout", "10"], f.root, f.env);
+  assert.equal(again.status, 0, `重起后 start 必须幂等成功：${again.stdout}\n${again.stderr}`);
+  assert.match(again.stdout, /already-running/, `事故读数：start 应报 already-running：${again.stdout}`);
+});
+
+test("AC5 — 双向负控制：循环**不响应**停机（真的没重起）⇒ 仍如实报 restart-aborted，代次不变、⛔ 不得误报 restarted-loop", async (t) => {
+  const f = makeAnchorRestartFixture("ignore", { honorDelayMs: 0, ignoreStop: true });
+  const anchorPid = anchorPidOfHost(f.root);
+  t.after(() => { killProcs([anchorPid]); rmRoots([f.root]); });
+  assert.equal(f.started[0].status, 0, `quality start: ${f.started[0].stdout}\n${f.started[0].stderr}`);
+  assert.equal(f.started[1].status, 0, `promotion start: ${f.started[1].stdout}\n${f.started[1].stderr}`);
+
+  const pre = readAnchorLoopLifecycle(f.root, "quality");
+  assert.equal(pre.generation, 1, `前提：quality 已有一代循环：${JSON.stringify(pre)}`);
+
+  const out = [], err = [];
+  const rc = await restartKind(
+    f.root,
+    "quality",
+    { restartDelaySecs: 1, confirmTimeoutSecs: 2, stopTimeoutMs: 600 },
+    (s) => out.push(s.trim()),
+    (s) => err.push(s.trim()),
+  );
+  assert.equal(rc, 1, `循环不收尾 ⇒ restart 必须中止：out=${out.join("|")} err=${err.join("|")}`);
+  assert.ok(err.some((l) => l.startsWith("restart-aborted:")), `必须如实报 restart-aborted：${err.join("|")}`);
+  assert.equal(out.some((l) => l.startsWith("restarted-loop:")), false, `⛔ 没重起不得报 restarted-loop：${out.join("|")}`);
+  const post = readAnchorLoopLifecycle(f.root, "quality");
+  assert.equal(post.evaluated, true);
+  assert.equal(post.generation, pre.generation, `代次必须不变（⛔ 不得把中止报成重起）：${JSON.stringify(post)}`);
+  assert.equal(pidAlive(anchorPid), true, "对照：anchor 未被信号（只停那一个 kind 的尝试）");
+});
+
+// ── AC3 / AC4：位置判定 + 输出词表（源码级，⛔ 不是「读起来像」）──────────────────────────────────
+
+/** **改前** stop 等待循环的原文（逐字抄自改动前的 develop：`stopKindViaAnchor` 内
+ *  `(driver-runtime.ts:4576-4580)`）。AC3 的负控制靠它证明「谓词可判」——⛔ 不是恒零。 */
+const PRE_FIX_STOP_WAIT = [
+  "  const deadline = Date.now() + stopTimeoutMs;",
+  "  while (Date.now() < deadline) {",
+  "    if (!aliveness(root, kind).running) break;",
+  "    await sleep(250);",
+  "  }",
+  "  const stillRunning = aliveness(root, kind).running;",
+].join("\n");
+
+test("AC3 — 位置判定：改后 anchor-hosted stop 的确认判据不再**只**依赖旧 aliveness（新判据在位 ∧ 旧调用点清零）；负控制：同一谓词对改前原文命中", () => {
+  const src = fs.readFileSync(path.join(RESTART_REPO_ROOT, "plugin", "scripts", "driver-runtime.ts"), "utf8");
+  // 谓词 = 「这个等待循环把旧 aliveness 当成**唯一**判据」。⛔ 不用关键词「aliveness」——它在文件里到处都有。
+  const waitsOnlyOnOldAliveness = (s) => s.includes("if (!aliveness(root, kind).running) break;");
+  assert.equal(waitsOnlyOnOldAliveness(PRE_FIX_STOP_WAIT), true,
+    "负控制：谓词必须命中**改前原文**（证明它可判，⛔ 不是恒零）——否则「改后清零」是空转");
+  assert.equal(waitsOnlyOnOldAliveness(src), false,
+    "改后：旧判据的 wait 调用点必须清零（新判据接管，⛔ 不是把旧判据抄一遍）");
+  assert.match(src, /readAnchorLoopDelta\(root, kind, lifecycleStart\)/,
+    "改后：stop 的确认路径必须调用新判据 readAnchorLoopDelta（明写在位置判定的对象里）");
+  assert.match(src, /export function anchorLoopStoppedSince\(/,
+    "新判据的另一半（anchorLoopStoppedSince）必须仍在导出面里，⛔ 不是只在测试里存在");
+  assert.match(src, /const loopStopped = \(\): boolean => \{[\s\S]*?readAnchorLoopDelta/,
+    "新判据必须真的接在等待循环的判停函数上（⛔ 不是定义了没用）");
+});
+
+test("AC4 — 输出词表（枚举，非布尔）：restarted-loop（process unchanged + before/after generation）与 restart-aborted 两态可区分；已知为真样本干跑非零", () => {
+  const src = fs.readFileSync(path.join(RESTART_REPO_ROOT, "plugin", "scripts", "driver-runtime.ts"), "utf8");
+  assert.ok(src.includes("restarted-loop: kind="), "新词表 `restarted-loop` 必须在 CLI 输出面里");
+  assert.ok(src.includes("restart-aborted: kind="), "旧词表 `restart-aborted` 必须保留（⛔ 不是换掉它）");
+  assert.ok(src.includes("process unchanged"), "`restarted-loop` 必须携带「进程未变」这一半语义");
+  assert.match(src, /loop generation \$\{pre\.generation\} -> \$\{/, "必须带 before/after 代次");
+
+  // 「已知为真」样本干跑（硬规则 2 的零计数配套：谓词对真样本必须命中，⛔ 不是恒零）。
+  const outcomeOf = (line) => {
+    const m = /^(restarted-loop|restart-aborted): kind=(\S+)/.exec(line);
+    return m === null ? null : { outcome: m[1], kind: m[2] };
+  };
+  assert.deepEqual(outcomeOf("restarted-loop: kind=quality — process unchanged (anchor pid=1); loop generation 1 -> 2"), { outcome: "restarted-loop", kind: "quality" });
+  assert.deepEqual(outcomeOf("restart-aborted: kind=quality — stop 未确认旧进程树已退出（exit=1）"), { outcome: "restart-aborted", kind: "quality" });
+  // 两态不同形（枚举的一半）：普通状态行不得被这个谓词读成结局。
+  assert.equal(outcomeOf("stopped"), null, "⛔ 普通状态行不得与两种结局同形");
+  assert.equal(outcomeOf("started: anchor pid=1 kind=quality"), null, "⛔ `started:` 不等于 `restarted-loop`");
+  // 代次读数的取假半边：样本里必须是两个**不同**的数（⛔ 不是 `1 -> 1` 那种同形输出）。
+  const gen = /loop generation (\d+) -> (\d+)/.exec("restarted-loop: kind=quality — process unchanged (anchor pid=1); loop generation 1 -> 2");
+  assert.ok(gen !== null && Number(gen[1]) < Number(gen[2]), "before/after 必须真的前进");
 });
