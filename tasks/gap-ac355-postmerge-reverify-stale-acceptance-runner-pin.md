@@ -110,13 +110,13 @@ from "../../kernel/gate-run-options.ts";`）。
 
 ## AC
 
-- [ ] AC-355 判据在 develop 尖端转绿：`node packages/quay/bin/quay.ts goal gate AC-355 --dry-run --json --root /data/home/yale/work/quay` 的 `verdict` 为 `pass`（exit 0，不是 exit 1 CAUSE=*，也不是 exit 3 NOT-EVALUATED）；stdout 原文与 `event.payload.treeSha` 进 Evidence；同时 `git merge-base develop HEAD` == `git rev-parse develop`。
-- [ ] 七测试文件双环境实测：干净 shell（`env -u QUAY_GOAL_ACCEPTANCE_ACTIVE`）与 `QUAY_GOAL_ACCEPTANCE_ACTIVE=1` 各跑一次 `gate-config-loader/gate/goal-store/acceptance/acceptance-env/gate-diagnostics/gate-ergonomics` 七个文件，两次都 `ℹ fail 0`；逐字贴两次的 `ℹ tests / pass / fail` 三行。
-- [ ] re-anchor 生效且不再钉路径：`grep -nE 'gate/acceptance-runner\.ts|gate/shared/acceptance-runner\.ts' goals/AC-355-*.md` 在消费者路径断言中零命中，承载者由导出符号定位（贴 `grep -rn 'export function runAcceptance' packages/quay/src` 读数）；若 peer 未覆盖 AC-355（`goals/AC-355-*.md` 的消费者路径断言仍命中该字面量）⇒ 本任务执行 fallback 改 `goals/AC-355-*.md` 并按同一判据复验。
-- [ ] 可证伪负对照：在 scratch worktree（`git worktree add --detach <path> develop` + `dispatch-worktree-setup.sh`）中把 `packages/quay/src/gate/shared/acceptance-runner.ts` 里指向 `../../kernel/gate-run-options.ts` 的 import 注释掉（不提交）⇒ 判据 exit 1 且 CAUSE 点名该角色；`git checkout --` 恢复 ⇒ exit 0。两次命令 + 逐字读数贴 Evidence（证明 re-anchor 后的判据不是恒真、也不把注释当命中）。
-- [ ] 防复发器独立绿：`node --no-warnings --experimental-strip-types --test packages/quay/test/goal-criterion-import-specifiers-resolve.test.mjs` ⇒ `fail 0`；其负对照 fixture（`QUAY_GOALS_ROOT` 指向含缺失 `gate/acceptance-runner.ts` 的判据）独立重跑必红并点名该字面量。两条读数贴 Evidence。
-- [ ] 台账留痕：filing 之后 `.quay/gate-events.jsonl` 新增 `item_id=AC-355` / `verdict=pass` 事件（贴 timestamp）；`node packages/quay/bin/quay.ts goal show AC-355 --json` 的 `evidence.verdict` = `pass`。
-- [ ] 不越界：`git diff --name-only develop...HEAD -- packages/quay/src` 输出为空；允许写入面只有 `goals/AC-355-*.md`（仅 fallback 臂）、`packages/quay/test/goal-criterion-import-specifiers-resolve.test.mjs` 与本任务体；未重启任何 driver / `serve`。
+- [x] AC-355 判据在 develop 尖端转绿：`node packages/quay/bin/quay.ts goal gate AC-355 --dry-run --json --root /data/home/yale/work/quay` 的 `verdict` 为 `pass`（exit 0，不是 exit 1 CAUSE=*，也不是 exit 3 NOT-EVALUATED）；stdout 原文与 `event.payload.treeSha` 进 Evidence；同时 `git merge-base develop HEAD` == `git rev-parse develop`。
+- [x] 七测试文件双环境实测：干净 shell（`env -u QUAY_GOAL_ACCEPTANCE_ACTIVE`）与 `QUAY_GOAL_ACCEPTANCE_ACTIVE=1` 各跑一次 `gate-config-loader/gate/goal-store/acceptance/acceptance-env/gate-diagnostics/gate-ergonomics` 七个文件，两次都 `ℹ fail 0`；逐字贴两次的 `ℹ tests / pass / fail` 三行。
+- [x] re-anchor 生效且不再钉路径：`grep -nE 'gate/acceptance-runner\.ts|gate/shared/acceptance-runner\.ts' goals/AC-355-*.md` 在消费者路径断言中零命中，承载者由导出符号定位（贴 `grep -rn 'export function runAcceptance' packages/quay/src` 读数）；若 peer 未覆盖 AC-355（`goals/AC-355-*.md` 的消费者路径断言仍命中该字面量）⇒ 本任务执行 fallback 改 `goals/AC-355-*.md` 并按同一判据复验。
+- [x] 可证伪负对照：在 scratch worktree（`git worktree add --detach <path> develop` + `dispatch-worktree-setup.sh`）中把 `packages/quay/src/gate/shared/acceptance-runner.ts` 里指向 `../../kernel/gate-run-options.ts` 的 import 注释掉（不提交）⇒ 判据 exit 1 且 CAUSE 点名该角色；`git checkout --` 恢复 ⇒ exit 0。两次命令 + 逐字读数贴 Evidence（证明 re-anchor 后的判据不是恒真、也不把注释当命中）。
+- [x] 防复发器独立绿：`node --no-warnings --experimental-strip-types --test packages/quay/test/goal-criterion-import-specifiers-resolve.test.mjs` ⇒ `fail 0`；其负对照 fixture（`QUAY_GOALS_ROOT` 指向含缺失 `gate/acceptance-runner.ts` 的判据）独立重跑必红并点名该字面量。两条读数贴 Evidence。
+- [x] 台账留痕：filing 之后 `.quay/gate-events.jsonl` 新增 `item_id=AC-355` / `verdict=pass` 事件（贴 timestamp）；`node packages/quay/bin/quay.ts goal show AC-355 --json` 的 `evidence.verdict` = `pass`。
+- [x] 不越界：`git diff --name-only develop...HEAD -- packages/quay/src` 输出为空；允许写入面只有 `goals/AC-355-*.md`（仅 fallback 臂）、`packages/quay/test/goal-criterion-import-specifiers-resolve.test.mjs` 与本任务体；未重启任何 driver / `serve`。
 
 ## DoD
 
@@ -210,3 +210,145 @@ eligible=false          ⇐ 唯一的 false 来源是 blockingDeps；作者侧�
 
 ⇒ 本任务当前状态是「队列内、被依赖挡住」，不是「需要人决定」。对照改前
 `unsatisfiableUnannotatedAc.status="hit"`：`eligible=false` 的成因已经换了。
+
+## Execution Evidence（2026-10-20，worker 复验，develop 尖端）
+
+**起点读数**：`git rev-parse HEAD` = `git rev-parse develop` = `git merge-base develop HEAD` =
+`8d6e82995dd3a43931de682604c05e8e9627345f`（共享检出 `author` 与 develop 同点，
+`git rev-list --count develop..HEAD` = 0）。`git rev-parse '8d6e8299^{tree}'` =
+`65f45b55b208db9eacb4a0dd0292f88ca3f35329`。
+
+**E6. AC-355 判据在 develop 尖端转绿（AC1 / DoD-1）**——从共享检出原文、非 `--dry-run` 实跑（台账落痕）：
+
+```
+$ node packages/quay/bin/quay.ts goal gate AC-355 --json --root /data/home/yale/work/quay
+EXIT=0
+{
+  "id": "AC-355",
+  "verdict": "pass",
+  "cause": null,
+  "reason": "acceptance passed (exit 0)",
+  "timestamp": "2026-10-20T06:08:33.006Z",
+  "dryRun": false,
+  "event": {
+    "id": "3f0987f2-d402-4fdf-9032-0fe0637c30f0",
+    "item_id": "AC-355",
+    "verdict": "pass",
+    "timestamp": "2026-10-20T06:08:33.006Z",
+    "payload": {
+      "reason": "acceptance passed (exit 0)",
+      "evaluationRoot": "/data/home/yale/work/quay",
+      "treeSha": "65f45b55b208db9eacb4a0dd0292f88ca3f35329"
+    }
+  }
+}
+```
+
+不是 exit 1 CAUSE=*，也不是 exit 3 NOT-EVALUATED。更早一次 `--dry-run`（2026-10-20T06:03:09.446Z，
+HEAD=`b5cfc241e`，treeSha=`a4749bc6d09675f17e790221ad4f0255344bdf16`）同样 `verdict="pass"`——两次读数的
+treeSha 差异只来自期间 loop 的 doc-only 提交（`8d6e82995 routine(freshness-refresh)`），
+`packages/quay/src` 未变（见 E12）。
+
+**E7. 七测试文件双环境实测（AC2 / DoD-2）**：
+
+```
+$ env -u QUAY_GOAL_ACCEPTANCE_ACTIVE node --no-warnings --experimental-strip-types --test \
+    packages/quay/test/gate-config-loader.test.mjs packages/quay/test/gate.test.mjs \
+    packages/quay/test/goal-store.test.mjs packages/quay/test/acceptance.test.mjs \
+    packages/quay/test/acceptance-env.test.mjs packages/quay/test/gate-diagnostics.test.mjs \
+    packages/quay/test/gate-ergonomics.test.mjs
+ℹ tests 219
+ℹ pass 219
+ℹ fail 0
+EXIT=0
+
+$ QUAY_GOAL_ACCEPTANCE_ACTIVE=1 node --no-warnings --experimental-strip-types --test <同上七文件>
+ℹ tests 219
+ℹ pass 219
+ℹ fail 0
+EXIT=0
+```
+
+**E8. re-anchor 生效、不再钉路径（AC3）**——peer `gap-ac353-criterion-pins-moved-acceptance-runner-path`
+已落地（`f12aa1e68 goals: AC-355 field:criterion`、`49dc5617f gap-ac353: 防复发检查补 .ts 路径字面量`，
+均在 develop 上）：
+
+```
+$ grep -nE 'gate/acceptance-runner\.ts|gate/shared/acceptance-runner\.ts' goals/AC-355-*.md
+（零命中，exit 1）
+
+$ grep -rn 'export function runAcceptance' packages/quay/src
+packages/quay/src/core/acceptance-runner.ts:271:export function runAcceptance({ command, cwd, timeoutMs = DEFAULT_ACCEPTANCE_TIMEOUT_MS, envFile, name, timeoutKnob }: RunAcceptanceArgs): AcceptanceResult {
+packages/quay/src/core/acceptance-runner.ts:371:export function runAcceptanceCapture({ command, cwd, timeoutMs = DEFAULT_ACCEPTANCE_TIMEOUT_MS }: RunAcceptanceArgs): AcceptanceCaptureResult {
+```
+
+⇒ 判据按**导出符号**定位承载者；fallback 臂未触发（`goals/AC-355-*.md` 未改动）。
+
+**E9. 可证伪负对照（AC4 / DoD-3）**——scratch worktree（`git worktree add --detach
+/data/home/yale/work/quay-scratch/ac355-negctl develop` + `dispatch-worktree-setup.sh`；三次读数均以
+`--root /data/home/yale/work/quay-scratch/ac355-negctl` 执行）：
+
+```
+① as-is（绿）              EXIT=0  verdict="pass"  reason="acceptance passed (exit 0)"
+② 注释掉承载 runAcceptance 的模块里的 kernel import（红）
+                           EXIT=1  verdict="fail"
+                           reason="acceptance failed (exit 1) — CAUSE=post-merge-regression -- the module
+                                   carrying runAcceptance (packages/quay/src/core/acceptance-runner.ts) no
+                                   longer imports kernel/gate-run-options.ts on develop
+                                   CAUSE=post-merge-structural-scan-red -- the scan above printed the specific CAUSE"
+③ git checkout -- 恢复（绿） EXIT=0  verdict="pass"  reason="acceptance passed (exit 0)"
+```
+
+**执行说明（AC4 文本点名的路径本身已再次失效——按同一判据处理）**：AC4 原文点名
+`packages/quay/src/gate/shared/acceptance-runner.ts` 里指向 `../../kernel/gate-run-options.ts` 的 import。
+develop 尖端上该路径**已不含任何 kernel import**：commit `35dc5da93`（`refactor(core): sink the gate
+substrate into src/core`）把实现下沉到 `core/acceptance-runner.ts`，而
+`gate/shared/acceptance-runner.ts` 变成 `export * from "../../core/acceptance-runner.ts"` 的转发模块。
+因此负对照按 AC 自己的机制（`export function runAcceptance` 定位承载者）在
+`packages/quay/src/core/acceptance-runner.ts:33`
+（`import { shQuote, DEFAULT_ACCEPTANCE_TIMEOUT_MS } from "../kernel/gate-run-options.ts";`）上做注释/恢复。
+结论不受影响：判据确实随承载者的 kernel import 变红并点名 `runAcceptance`，`git checkout --` 后转绿
+——不是恒真，也不把注释当命中。
+
+**E10. 防复发器独立绿 + 负对照 fixture 独立红（AC5 / DoD-4）**：
+
+```
+$ node --no-warnings --experimental-strip-types --test packages/quay/test/goal-criterion-import-specifiers-resolve.test.mjs
+ℹ tests 14  ℹ pass 14  ℹ fail 0   EXIT=0
+
+$ FIX=$(mktemp -d); <写入 AC-fixture.md，criterion 内含引号字面量 "gate/acceptance-runner.ts">
+$ QUAY_GOALS_ROOT="$FIX" node --no-warnings --experimental-strip-types --test packages/quay/test/goal-criterion-import-specifiers-resolve.test.mjs
+✖ every quoted whole-token .ts path literal in a live goal criterion resolves on disk
+  actual:   [ 'AC-fixture.md → gate/acceptance-runner.ts' ]
+  expected: []
+EXIT=1
+```
+
+⇒ 第二类（整 token `.ts` 路径字面量）覆盖生效，红时点名 `file → literal`。
+
+**E11. 台账留痕（AC6 / DoD-1 第二半）**：
+
+```
+$ node packages/quay/bin/quay.ts goal show AC-355 --json
+{ "id":"AC-355", "status":"achieved",
+  "evidence": { "at":"2026-10-20T06:08:33.006Z", "verdict":"pass",
+                "reading":"acceptance passed (exit 0)",
+                "firstAt":"2026-10-10T06:05:25.459Z" } }
+```
+
+`.quay/gate-events.jsonl` 新增（非 dry-run）一行：
+
+```
+{"id":"3f0987f2-d402-4fdf-9032-0fe0637c30f0","item_id":"AC-355","pipeline_id":"AC-355","gate":"goal","actor":"goal-cli","verdict":"pass","timestamp":"2026-10-20T06:08:33.006Z","payload":{"reason":"acceptance passed (exit 0)","evaluationRoot":"/data/home/yale/work/quay","treeSha":"65f45b55b208db9eacb4a0dd0292f88ca3f35329"}}
+```
+
+**E12. 不越界（AC7 / DoD-5）**：
+
+```
+$ git diff --name-only develop...HEAD -- packages/quay/src
+（空）
+```
+
+写入面只有本任务体（经 Provider ABI `task_write`）；`goals/AC-355-*.md` 与
+`packages/quay/test/goal-criterion-import-specifiers-resolve.test.mjs` **未改动**（post-merge 复验，
+peer 已覆盖；fallback 臂未触发）。未重启任何 driver / `serve`。
