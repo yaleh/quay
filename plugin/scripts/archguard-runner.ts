@@ -416,9 +416,14 @@ export interface DirectoryCycleReading {
   reason: string | null;
   totalCycleCount: number | null;
   scopes: DirectoryCycleScopeReading[];
-  /** THE OLDEST artifact timestamp among the scopes that produced one — the reading is only as fresh
-   *  as its stalest part, so a single stale scope must not be hidden by fresher siblings.
-   *  null ⇒ nothing was read, and staleness is NOT EVALUABLE (硬规则 3b: ⛔ never `false`). */
+  /** THE OLDEST artifact timestamp among the scopes that ACTUALLY PRODUCED A READING (evaluated),
+   *  because those are the numbers this record reports — a reading is only as fresh as its stalest
+   *  contributing part, so one stale scope must not be hidden by fresher siblings.
+   *  Scopes that could only produce a `not-evaluated` row contribute nothing to the reported cycles,
+   *  so their (often much older) artifacts are NOT averaged in — that would make `stale` permanently
+   *  true and therefore information-free (硬规则 4).
+   *  null ⇒ nothing was read / nothing evaluated, and staleness is NOT EVALUABLE (硬规则 3b: ⛔ never
+   *  `false`). Per-scope timestamps remain available in `scopes` for the unevaluated ones. */
   artifactTimestamp: string | null;
 }
 
@@ -442,9 +447,11 @@ export function readDirectoryCycleReading(root: string, workDir?: string): Direc
       artifactTimestamp: r.artifactTimestamp,
     };
   });
-  // Oldest non-null timestamp (lexicographic min is chronological for ISO-8601 Z strings). Entries
-  // whose timestamp cannot be compared as ISO are skipped rather than silently treated as "fresh".
+  // Oldest timestamp among the scopes that produced the readings this record reports (见 the interface
+  // comment: unevaluated scopes are not averaged in). Entries whose timestamp cannot be parsed as ISO
+  // are skipped rather than silently treated as "fresh".
   const timestamps = scopes
+    .filter((s) => s.evaluated)
     .map((s) => s.artifactTimestamp)
     .filter((v): v is string => typeof v === "string" && v !== "" && Number.isFinite(Date.parse(v)));
   const artifactTimestamp = timestamps.length > 0 ? timestamps.reduce((a, b) => (a <= b ? a : b)) : null;
