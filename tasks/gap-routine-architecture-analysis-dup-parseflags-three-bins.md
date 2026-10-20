@@ -59,3 +59,11 @@ Extract one parseFlags into a shared bin util and import it from all three bins;
 - `packages/quay-github/bin/quay-github.ts`
 - `packages/quay-native/bin/quay-native.ts`
 - `tasks/gap-routine-architecture-analysis-dup-parseflags-three-bins.md`
+
+## Blocker
+
+**2026-10-20T07:58:03.966Z — worker 未落地（exited-not-landed）**
+
+- 未落地原因：step=suite: __PERFILE__ duration_ms=1734 packages/quay-github/test/task-check-passthrough.test.mjs passed=false end_ms=1792482938734 cpu_ms=2017.821 mem_peak_kb=72796
+- run_id：wk-prod-anchor
+- session_id：9a774e46-3a67-41ac-95ad-9fe08f8ec4c1

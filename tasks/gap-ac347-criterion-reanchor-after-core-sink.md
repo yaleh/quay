@@ -58,12 +58,12 @@ AC-347 当前记录为 FALSE（本轮直接重跑判据，不是账本尾巴：e
 
 ## Acceptance Criteria
 
-- [ ] AC1：AC-347 record 内已含重锚后的判据——`node packages/quay/bin/quay.js goal show AC-347 --json --root /data/home/yale/work/quay` 的输出里可见：(i) kernel `parseBinaryVerdict` 检查，(ii) 位置无关的 `export function parseFidelityVerdict` 唯一性扫描，(iii) src 根转发检查，(iv) goal-driver 三项，(v) 四个 routine-quota 文件；命令 exit 0
-- [ ] AC2：判据在当前树为真——`node packages/quay/bin/quay.js goal gate AC-347 --root /data/home/yale/work/quay` 报 `pass` / exit 0；把同一判据抽出为脚本单独跑也输出 `PASS` / exit 0（两者都贴）
-- [ ] AC3：判据能取假——同一脚本对「缺委托」的一次性桩仓库运行 ⇒ 输出 `CAUSE=fidelity-not-delegated` / exit 1（贴命令与输出）。⛔ 给不出这条读数的判据视为空转
-- [ ] AC4：未搬代码、未越界——`grep -c "export function parseFidelityVerdict" packages/quay/src/criterion-fidelity.ts` 为 0，且该文件仍以 `export * from "./core/criterion-fidelity.ts";` 转发；四个 routine-quota 文件 `git diff develop --stat` 为空；本任务分支 `git diff --name-only develop` 只出现 goal record（以及任务协议自身落地的本任务文件）
-- [ ] AC5：委托行为仍被既有测试钉住——`node --experimental-strip-types --test packages/quay/test/verdict-parse.test.mjs plugin/test/criterion-fidelity-gate.test.mjs` exit 0，且未改任何测试断言
-- [ ] AC6：留痕——本任务 `## Evidence` 含 before（`exit 1`、`CAUSE=fidelity-not-delegated`）与 after（`exit 0`、`PASS`）读数、负对照读数、以及承载新判据的 commit sha
+- [x] AC1：AC-347 record 内已含重锚后的判据——`node packages/quay/bin/quay.js goal show AC-347 --json --root /data/home/yale/work/quay` 的输出里可见：(i) kernel `parseBinaryVerdict` 检查，(ii) 位置无关的 `export function parseFidelityVerdict` 唯一性扫描，(iii) src 根转发检查，(iv) goal-driver 三项，(v) 四个 routine-quota 文件；命令 exit 0
+- [x] AC2：判据在当前树为真——`node packages/quay/bin/quay.js goal gate AC-347 --root /data/home/yale/work/quay` 报 `pass` / exit 0；把同一判据抽出为脚本单独跑也输出 `PASS` / exit 0（两者都贴）
+- [x] AC3：判据能取假——同一脚本对「缺委托」的一次性桩仓库运行 ⇒ 输出 `CAUSE=fidelity-not-delegated` / exit 1（贴命令与输出）。⛔ 给不出这条读数的判据视为空转
+- [x] AC4：未搬代码、未越界——`grep -c "export function parseFidelityVerdict" packages/quay/src/criterion-fidelity.ts` 为 0，且该文件仍以 `export * from "./core/criterion-fidelity.ts";` 转发；四个 routine-quota 文件 `git diff develop --stat` 为空；本任务分支 `git diff --name-only develop` 只出现 goal record（以及任务协议自身落地的本任务文件）
+- [x] AC5：委托行为仍被既有测试钉住——`node --experimental-strip-types --test packages/quay/test/verdict-parse.test.mjs plugin/test/criterion-fidelity-gate.test.mjs` exit 0，且未改任何测试断言
+- [x] AC6：留痕——本任务 `## Evidence` 含 before（`exit 1`、`CAUSE=fidelity-not-delegated`）与 after（`exit 0`、`PASS`）读数、负对照读数、以及承载新判据的 commit sha
 
 ## Definition of Done
 
@@ -71,7 +71,81 @@ AC-347 的 record 本身携带重锚后的判据；该已记录判据对当前�
 
 ## Evidence
 
-（待执行者填写：before/after 退出码、负对照、commit sha）
+**执行位置**：任务 worktree `/data/home/yale/work/quay-worktrees/gap-ac347-criterion-reanchor-after-core-sink`（branch `task/gap-ac347-criterion-reanchor-after-core-sink`，fork point `51ee14179` = develop）。下文所有 `--root` 都指向该 worktree（判据本身是 tree-relative 的，融合后在 develop 上判同一件事）。
+
+**before（旧判据 = record 里尚未重锚的那一版，2026-10-20T07:54:55Z）**
+
+```
+$ node packages/quay/bin/quay.js goal gate AC-347 --root <worktree>
+{"id":"AC-347","verdict":"fail","reason":"acceptance failed (exit 1) — CAUSE=fidelity-not-delegated — criterion-fidelity.ts does not call parseBinaryVerdict", ...}
+EXIT=1
+```
+
+**after — record 自己的判据（2026-10-20T07:56:24Z）**
+
+```
+$ node packages/quay/bin/quay.js goal gate AC-347 --root <worktree>
+{"id":"AC-347","verdict":"pass","reason":"acceptance passed (exit 0)", ...}
+EXIT=0
+```
+
+**after — 同一判据抽成脚本单独跑（`.quay/ac347-reanchor-criterion.sh`，untracked 暂存文件）**
+
+```
+$ bash .quay/ac347-reanchor-criterion.sh
+PASS: kernel/verdict-parse.ts exports parseBinaryVerdict; exactly one parseFidelityVerdict definition (packages/quay/src/core/criterion-fidelity.ts) delegates to it with its call site unchanged; src root still forwards to core/; goal-driver delegates and keeps its signature/call site; routine-quota files untouched
+EXIT=0
+```
+
+**负对照（硬规则 2）— 同一脚本对一次性桩仓库 `/tmp/ac347-stub-78fZr8` 运行**
+
+桩含：kernel 文件、`packages/quay/src/criterion-fidelity.ts` 转发、goal-driver 三项、四个 routine-quota 文件、`develop` 分支；唯一缺陷是 `packages/quay/src/core/criterion-fidelity.ts` 里 `parseFidelityVerdict` **不调用** `parseBinaryVerdict`（仅在注释里提到该名字）。
+
+```
+$ cd /tmp/ac347-stub-78fZr8 && bash criterion.sh
+CAUSE=fidelity-not-delegated — packages/quay/src/core/criterion-fidelity.ts does not CALL parseBinaryVerdict (a mention in a comment or an import alone is not delegation)
+EXIT=1
+```
+
+⚠️ 这轮负对照抓到了真缺陷：第一版判据用裸 `grep -q "parseBinaryVerdict"`，在**同一桩**上曾误判 `PASS` / exit 0（注释里的名字被当成委托 ⇒ 判据空转）。据此把「委托」改成位置判定：先剥掉整行注释（`^[[:space:]]*(//|/\*|\*)`），再要求调用形态 `parseBinaryVerdict(`（import 行与注释提及都不算）。硬规则 2。
+
+**AC1 — record 内判据要素逐项自检**（`goal show AC-347 --json` ⇒ exit 0，`criterion` 5201 chars）
+
+```
+OK  (i) kernel parseBinaryVerdict check
+OK  (ii) position-independent parseFidelityVerdict uniqueness scan
+OK  (iii) src-root forwarding check
+OK  (iv) goal-driver three items
+OK  (v) four routine-quota files
+OK  re-anchor rationale comment present
+```
+
+**AC4 — 未搬代码、未越界**
+
+```
+$ grep -c "export function parseFidelityVerdict" packages/quay/src/criterion-fidelity.ts
+0                          # grep exit 1（零命中），即 src 根没有任何实现
+$ grep -n 'export \* from "./core/criterion-fidelity.ts"' packages/quay/src/criterion-fidelity.ts
+10:export * from "./core/criterion-fidelity.ts";
+$ git diff develop --stat -- plugin/scripts/drivers.yml plugin/scripts/driver-config.ts plugin/scripts/routine-file-gate.ts plugin/scripts/probe-routine.ts
+                           # 输出为空（0 行）
+$ git diff --name-only develop
+"goals/AC-347-...parsebinaryverdict-....md"   # 仅 goal record；本任务文件由 task_write 单独落地
+$ git diff --name-only develop -- packages plugin
+                           # 输出为空：零代码/零测试改动
+```
+
+**AC5 — 既有测试仍钉住委托行为**
+
+```
+$ node --experimental-strip-types --test packages/quay/test/verdict-parse.test.mjs plugin/test/criterion-fidelity-gate.test.mjs
+ℹ tests 41   ℹ pass 41   ℹ fail 0
+EXIT=0                     # 未改任何测试断言
+```
+
+**承载新判据的 commit**
+
+`60544585a04d4344073eee85048062710aa5210f` — `goals: AC-347 field:criterion,expect by cli:789200`（`quay goal write` 的 store 自提交，只含 `goals/AC-347-*.md`）。
 
 ## Touches
 
