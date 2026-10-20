@@ -1,7 +1,7 @@
 ---
 id: gap-arch-cycle-report-record-artifact-timestamp
 title: arch-cycle-report 读陈旧 query artifact 却不明说——记录里加 artifact 时间戳，让「读旧数」可识别
-status: todo
+status: ready
 labels:
   - gap
 parent: null
