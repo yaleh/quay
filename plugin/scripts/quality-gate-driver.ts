@@ -112,7 +112,7 @@ import { defaultDriverConfig, loadDriverConfig } from "./driver-config.ts";
 // SPEC-capability-planes-and-mechanism-lifecycle §5.2：probe 轨道（`.quay/config.yml` `loop.routines:`
 // 的 interval 例程 → 派 fresh-context 探针 → 结构化 finding 落载体）。本 driver 是承载它的活调用点
 // （§5.1：⛔ 不为 probe 新造 driver kind——Layer 1b 的 RoutineSpec 已经是 probe 抽象）。
-import { PROBE_ROLE_DEFAULT, probeRoutinesFromConfig } from "./probe-routine.ts";
+import { PROBE_ROLE_DEFAULT, llmProbeRoutine, probeRoutinesFromConfig, type RoutineDecl } from "./probe-routine.ts";
 // arch-DISCOVERY 轨道（gap-arch-discovery-not-wired-into-routine-track-report-only）：把两个已验证的
 // 静态仪器（docs/analysis/arch-discovery-{space,time}.mjs）的 `--scan` 接上轮子。**只读、只报**——
 // 该例程不 import 任何立案/撰写函数，唯一持久化是 gitignored 载体 + 既有的 quality-round Fact。
@@ -173,7 +173,7 @@ import {
 // 没跑过）。本轨把同一个读数接成周期 report-only 例程：每 due 轮读一次「上次 analyze 落盘的」
 // moduleGraph 环，append 一行到 `.quay/arch-cycle-history.jsonl`。⛔ 不 analyze、不 ratchet、
 // 不立案——环非空是该例程的**读数内容**，不会使轮 failed（那是闸的语义，不是本轨的）。
-import { readDirectoryCycleReading, type DirectoryCycle } from "./archguard-runner.ts";
+import { readDirectoryCycleReading, resolveArchguardCli, type DirectoryCycle } from "./archguard-runner.ts";
 
 // ── 常量（由 DRIVER_KINDS registry 派生，⛔ 不另写一份路径字面量）──────────────────────────
 const QUALITY_SPEC = DRIVER_KINDS.quality;
@@ -231,6 +231,99 @@ export const PACKAGING_CHECK_TIMEOUT_MS = 180_000;
  *  elapsed_s=602.9（goal-driver GAP_WORKER_TIMEOUT_MS_DEFAULT 的同一实测导出，⛔ 不另起测量），
  *  900_000（900s）> 602.9s 留 ~1.5x 余量。 */
 export const PACKAGING_GAP_WORKER_TIMEOUT_MS_DEFAULT = 900_000;
+
+// ── 默认 probe 例程 + 主仪器可用性前置 ─────────────────────────────────────────────────────────────
+// gap-architecture-analysis-probe-not-wired-into-driver-routine-or-init。实测接线缺口（2026-10-20）：
+// `plugin/probes/architecture-analysis.md`（唯一真正调 archguard 的机件）此前只被
+// `external-dogfooding-check.ts` 的例程引用（且只针对外来目标）；通用 driver 从不调度它，而 dev
+// 工作区 `loop.routines:` 里那条是 `every(10)`（随 ADR-022 退役的迭代计数 ⇒ 两层模式永不 due，
+// 启动时只打一行「未被驱动」）。⇒ 下游项目装好 quay 后没有任何 driver 主动跑浅层架构分析。
+
+/** 默认装配的 probe 例程声明（工作区内**没有**可装配的同名 interval 声明时加入）。
+ *
+ *  为什么默认装配而不是只靠配置：`loop.routines:` 是工作区配置（本仓库里 gitignored），「每个工作区
+ *  都恰好声明了它」不是一个能被本仓库保证的事实——本 gap 的形态正是「声明了但永不 due」。默认装配让
+ *  「装了 quay 就有这条 standing routine」成为机制事实，配置声明仍可按名覆盖节奏。
+ *
+ *  `interval:1440m`（每日一次）与 semantic-dedup-scan 同节奏：它要 spawn 一个 fresh-context agent
+ *  跑一遍全树，⛔ 不是每任务热路径（gap-fan-in-remove-archguard-gate 的教训）。 */
+export const DEFAULT_PROBE_ROUTINE_DECLS: readonly RoutineDecl[] = [
+  { name: "architecture-analysis", trigger: "interval:1440m", probe: "architecture-analysis", dispatch: null },
+];
+
+/** workspace 级 Claude 设置里是否登记了 archguard（MCP server 或插件）。
+ *  只认**启用面**字段：`enabledMcpjsonServers` / `mcpServers` / `enabledPlugins`（值为真）。 */
+function jsonDeclaresArchguard(doc: unknown): boolean {
+  if (!doc || typeof doc !== "object" || Array.isArray(doc)) return false;
+  const rec = doc as Record<string, unknown>;
+  const entries = (v: unknown): string[] => Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : [];
+  if (entries(rec.enabledMcpjsonServers).some((s) => s.toLowerCase().includes("archguard"))) return true;
+  for (const key of ["mcpServers", "enabledPlugins"] as const) {
+    const v = rec[key];
+    if (!v || typeof v !== "object" || Array.isArray(v)) continue;
+    for (const [name, on] of Object.entries(v as Record<string, unknown>)) {
+      if (on !== false && name.toLowerCase().includes("archguard")) return true;
+    }
+  }
+  return false;
+}
+
+/** 本主机是否装有 archguard 仪器——两个**独立**的宿主信号，任一即可：
+ *   (a) CLI：复用 `archguard-runner.ts` 的解析器（`ARCHGUARD_RUNNER_CLI` 或 PATH）——⛔ 不写第二份；
+ *   (b) 工作区 `.claude/settings*.json` 里登记了 archguard MCP/插件（quay init 只登记 quay 自己，
+ *       所以一个**全新**第三方工作区天然没有这个信号）。
+ *  读不出/都没有 ⇒ `unavailable`（fail-closed：探针**零 spawn**、记 not-evaluated 并点名查过什么）。
+ *  ⚠️ 不声称「MCP 此刻连得上」：只回答「本主机有没有这个仪器的任何安装形态」。 */
+export function resolveArchguardInstrumentAvailability(root: string): { state: "available" | "unavailable"; detail: string } {
+  const cli = resolveArchguardCli();
+  if (cli) return { state: "available", detail: `archguard CLI resolved at ${cli}` };
+  const checked: string[] = [];
+  for (const rel of [".claude/settings.json", ".claude/settings.local.json"]) {
+    const p = path.join(root, rel);
+    checked.push(rel);
+    if (!fs.existsSync(p)) continue;
+    let doc: unknown;
+    try { doc = JSON.parse(fs.readFileSync(p, "utf8")); } catch { continue; }
+    if (jsonDeclaresArchguard(doc)) return { state: "available", detail: `archguard MCP/plugin registered in ${rel}` };
+  }
+  return {
+    state: "unavailable",
+    detail: `no archguard CLI on PATH (ARCHGUARD_RUNNER_CLI unset/unresolvable) and no archguard MCP/plugin in ${checked.join(" / ")}`,
+  };
+}
+
+/** 注入给 probe 轨道的宿主前置：只对**本主机可判定**的仪器作答；其它仪器 `unknown` ⇒ 不阻断
+ *  （硬规则 3b：没有可用性探针 ≠ 不可用）。
+ *
+ *  ⚠️ **只对 `architecture-analysis` probe 生效**（按 `decl.probe` 判定，⛔ 不按例程名——工作区可以给
+ *  同一条规格起任意 name）。理由：`semantic-dedup-scan` 的规格同样声明 `instrument: archguard`，但它的
+ *  真实产物来自 git-lens 的深扫臂、在没有 archguard 的主机上**本来就能跑**（生产上一直在跑）——把
+ *  「仪器缺失」前置套到它身上会把一条活着的例程停掉。本 gap 的判据只针对 architecture-analysis。 */
+export function archguardInstrumentPreflight(root: string): (instrument: string, decl: RoutineDecl) => { state: "available" | "unavailable" | "unknown"; detail: string } {
+  return (instrument, decl) => {
+    if (decl.probe !== "architecture-analysis") return { state: "unknown", detail: `instrument preflight not applied to probe '${decl.probe}'` };
+    if (instrument !== "archguard") return { state: "unknown", detail: `no host-level availability probe for instrument '${instrument}'` };
+    return resolveArchguardInstrumentAvailability(root);
+  };
+}
+
+/** 默认 probe 例程的装配：与配置声明的例程**同一条机制**（`llmProbeRoutine`），只额外带上宿主前置。 */
+export function buildDefaultProbeRoutines(
+  root: string,
+  opts: { pluginRoot: string; probeTimeoutMs: number; stateDir?: string; probeArgv?: (prompt: string, decl: RoutineDecl) => string[] },
+  declaredNames: ReadonlySet<string>,
+): { routines: ReturnType<typeof llmProbeRoutine>[]; decls: RoutineDecl[] } {
+  const decls = DEFAULT_PROBE_ROUTINE_DECLS.filter((d) => !declaredNames.has(d.name));
+  const routines = decls.map((d) => llmProbeRoutine(d, {
+    root,
+    pluginRoot: opts.pluginRoot,
+    probeTimeoutMs: opts.probeTimeoutMs,
+    ...(opts.stateDir ? { stateDir: opts.stateDir } : {}),
+    ...(opts.probeArgv ? { probeArgv: opts.probeArgv } : {}),
+    instrumentPreflight: archguardInstrumentPreflight(root),
+  }));
+  return { routines, decls };
+}
 
 /** 机械 spawn 的 wall-clock 上限（毫秒）——--plan 枚举 / --record-last-round / B17 审计共用（全部是
  *  快速机械 node 调用，非 LLM）。⛔ LLM judge spawn 不设固定上限（runAsync timeoutMs=Infinity，
@@ -2720,17 +2813,34 @@ export async function main(argv: string[]): Promise<number> {
     probeTimeoutMs,
     ...(probeStateDir ? { stateDir: probeStateDir } : {}),
     ...(probeArgv ? { probeArgv } : {}),
+    // 宿主前置同样给**配置声明**的例程：init 脚手架写出的 architecture-analysis（AC2）走的是这条路，
+    // 无 archguard 的主机必须同样得到 legible not-evaluated，而不是只保护默认装配那一条。
+    instrumentPreflight: archguardInstrumentPreflight(rootDir),
   });
+  // 默认装配（gap-architecture-analysis-probe-not-wired-into-driver-routine-or-init）：工作区**没有**
+  // 可装配的同名 interval 声明时，把 DEFAULT_PROBE_ROUTINE_DECLS 加进例程表——「声明了但永不 due」
+  // 与「没声明」都不该等于「没有 driver 调度它」。
+  const defaultProbe = buildDefaultProbeRoutines(rootDir, {
+    pluginRoot: probeSelection.pluginRoot,
+    probeTimeoutMs,
+    ...(probeStateDir ? { stateDir: probeStateDir } : {}),
+    ...(probeArgv ? { probeArgv } : {}),
+  }, new Set(probeSelection.routines.map((r) => r.name)));
+  const probeRoutines = [...probeSelection.routines, ...defaultProbe.routines];
   // ⛔ 可见地报告跳过/读不出的例程：一条声明了却不被驱动的 routine，与「没有这条声明」在记录上
   //    本来同形（硬规则 3b/9），故此处把理由打到 stderr（配置坏了 ⇒ driver 照常起，但说出原因）。
   if (probeSelection.error) {
     console.error(`quality-gate-driver: probe 轨道未装配 — ${probeSelection.error}`);
   }
   for (const s of probeSelection.skipped) {
-    console.error(`quality-gate-driver: routine "${s.name}" (${s.trigger}) 未被 probe 轨道驱动 — ${s.reason}`);
+    // 同名默认例程接管时写明——否则「声明的这条没被驱动」会让读者以为整条 capability 没跑。
+    const d = defaultProbe.decls.find((x) => x.name === s.name);
+    const note = d ? `（默认装配接管：${d.trigger}）` : "";
+    console.error(`quality-gate-driver: routine "${s.name}" (${s.trigger}) 未被 probe 轨道驱动 — ${s.reason}${note}`);
   }
-  if (probeSelection.routines.length > 0) {
-    console.error(`quality-gate-driver: probe 轨道已装配 ${probeSelection.routines.length} 条例程（${probeSelection.routines.map((r) => r.name).join(", ")}；规格根 ${probeSelection.pluginRoot}）`);
+  if (probeRoutines.length > 0) {
+    const defaultNote = defaultProbe.decls.length > 0 ? `；默认装配: ${defaultProbe.decls.map((d) => `${d.name} (${d.trigger})`).join(", ")}` : "";
+    console.error(`quality-gate-driver: probe 轨道已装配 ${probeRoutines.length} 条例程（${probeRoutines.map((r) => r.name).join(", ")}；规格根 ${probeSelection.pluginRoot}${defaultNote}）`);
   }
 
   // arch-discovery 轨道：读 `.quay/config.yml` `loop.arch_discovery:`（同一注入纪律，见 QualityGateOptions）。
@@ -2878,7 +2988,7 @@ export async function main(argv: string[]): Promise<number> {
     packagingHygieneIntervalMinutes,
     archGapWorkerCmd: archGapWorkerCmd ?? null,
     archGapWorkerTimeoutMs,
-    probeRoutines: probeSelection.routines,
+    probeRoutines,
     archDiscoveryRoutine: archDiscovery.routine,
     discoveryMethodRoutine: discoveryMethod.routine,
     openSemanticDiscoveryRoutine: openDiscovery.routine,

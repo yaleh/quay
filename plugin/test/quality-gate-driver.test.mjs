@@ -403,10 +403,13 @@ test("ROUND_LOG_REL / QUALITY_CONTROL_STATE_REL — 载体与控制态路径（g
 test("resident loop --once writes a round record with facts (spawn real process)", (t) => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "qg-loop-"));
   t.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
-  // ⚠️ root 是**空工作区**（不是 REPO_ROOT）：driver 现在把 `.quay/config.yml` `loop.routines:` 里
+  // ⚠️ root 是**空工作区**（不是 REPO_ROOT）：driver 把 `.quay/config.yml` `loop.routines:` 里
   // 声明的 probe 例程装进例程表（gap-productize-deep-semantic-dedup-scan-routine），若 root=主检出，
   // 这条 `--once` 用例的 facts 集合就会随该工作区 gitignored 的 config 内容漂移，且会真的 spawn 一个
-  // 探针 agent。空 root（= 本用例自己的 tmp，由 t.after 清理）⇒ 无声明 ⇒ 例程表恰为四条。
+  // 探针 agent。空 root（= 本用例自己的 tmp，由 t.after 清理）⇒ 无声明。
+  // 例程表 = 四条内建 + **默认装配**的 architecture-analysis（gap-architecture-analysis-probe-not-
+  // wired-into-driver-routine-or-init）：后者在空 root 上因**本机无 archguard 仪器**记一条
+  // `not-evaluated`（仪器前置，零 spawn）——这正是 AC2 的 no-archguard 形态。
   const planCmd = path.join(tmp, "fake-plan.js");
   const judgmentCmd = path.join(tmp, "fake-judgment.js");
   const packagingCmd = path.join(tmp, "fake-packaging.js");
@@ -423,16 +426,84 @@ test("resident loop --once writes a round record with facts (spawn real process)
      "--plan-cmd", `node ${planCmd}`, "--judgment-cmd", `node ${judgmentCmd}`,
      "--packaging-check-cmd", `node ${packagingCmd}`,
      "--identity-cmd", `node ${identityCmd}`, "--lineage-cmd", `node ${lineageCmd}`],
-    { encoding: "utf8", timeout: 120_000 },
+    // 负控制缝：本机 PATH 上有没有真的 archguard 不该决定这条用例的结论。
+    // `ARCHGUARD_RUNNER_CLI` 指向不存在的路径 ⇒ resolveArchguardCli() 返回 null（它不会回落到 PATH）。
+    { encoding: "utf8", timeout: 120_000, env: { ...process.env, ARCHGUARD_RUNNER_CLI: path.join(tmp, "no-such-archguard") } },
   );
   assert.equal(r.status, 0, `driver --once should exit 0 (stderr: ${r.stderr})`);
   const lines = fs.readFileSync(roundLog, "utf8").split("\n").filter((l) => l.trim());
   assert.equal(lines.length, 1, "one round ⇒ one heartbeat line");
   const rec = JSON.parse(lines[0]);
   assert.equal(rec.halted, false);
-  assert.equal(rec.facts.length, 4, "first round ⇒ all four routines due (never-ran ⇒ interval due)");
+  assert.equal(rec.facts.length, 5, "first round ⇒ all five routines due (never-ran ⇒ interval due; four built-in + the default architecture-analysis)");
   const names = rec.facts.map((f) => f.name).sort();
-  assert.deepEqual(names, ["architecture-review", "judgment-consumer-check", "packaging-hygiene", "pool-quality-judge"]);
+  assert.deepEqual(names, ["architecture-analysis", "architecture-review", "judgment-consumer-check", "packaging-hygiene", "pool-quality-judge"]);
+  // 空 root 无 archguard ⇒ 默认例程是**可读的** not-evaluated（不是 spawn 错误、也不是「跑了没发现」）。
+  const arch = rec.facts.find((f) => f.name === "architecture-analysis");
+  assert.equal(arch.state, "not-evaluated");
+  assert.match(arch.reason, /instrument 'archguard' unavailable on this host/);
+  assert.match(arch.reason, /fallback declared: 'git-lens'/);
+  assert.equal(arch.value.fired, false, "zero spawn");
+});
+
+// ── gap-architecture-analysis-probe-not-wired-into-driver-routine-or-init ──────────────────────────
+// AC1（装配判定）：`architecture-analysis` probe 被一条 standing routine **默认装配**——dev 工作区的
+// 形态是「声明了、但 trigger 是退役的 every(10) ⇒ probe 轨道跳过它」，默认装配必须补上这个洞，
+// 且装配行（stderr）点名它。AC2 的 no-archguard 半边：本机没有 archguard 时记**可读的**
+// not-evaluated（零 spawn），⛔ 不是 spawn 错误、⛔ 不是「跑了没发现问题」。
+// 两个方向都给控制：正控制把 archguard 可用性缝打开 ⇒ 同一条例程真的跑到 spawn 并产出 Fact，
+// 否则「not-evaluated」可能只是「这条例程恒不工作」的另一种形状（硬规则 3b/4）。
+test("AC1/AC2 — architecture-analysis is default-assembled; missing archguard ⇒ legible not-evaluated (zero spawn)", (t) => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "qg-archprobe-"));
+  t.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
+  spawnSync("git", ["-C", tmp, "init", "-q"], { encoding: "utf8" });
+  // 本仓库 dev 工作区 `.quay/config.yml` 的真实形态：声明了，但 trigger 属于退役的迭代计数文法 ⇒
+  // probe 轨道把它跳过（stderr 可见），例程表里本来没有它。
+  writeConfig(tmp, "loop:\n  routines:\n    - name: architecture-analysis\n      trigger: every(10)\n      probe: architecture-analysis\n");
+  const planCmd = writeFixture(tmp, "p.js", `process.stdout.write(JSON.stringify({triggers:{fired:false,reasons:[],poolCount:0,oldestUnreviewedAgeMs:0,roundsSinceLastJudge:0},pool:[],tasks:[],lastJudgeState:{status:"ok"}}));`);
+  const judgmentCmd = writeFixture(tmp, "j.js", `process.stdout.write(JSON.stringify({mode:"judgment-consumer-audit",judgments_total:1,wired:1,unfinished:[],drift:false}));`);
+  const packagingCmd = writeFixture(tmp, "k.js", `process.stdout.write(JSON.stringify({mode:"packaging-hygiene-audit",configKeys:{keysTotal:0,noConsumerToWire:[],state:"verified"},shippedEntries:{state:"verified",violations:[],reason:null},drift:[]}));`);
+  const probeLog = path.join(tmp, "probe-spawns.log");
+  const probeRunner = writeFixture(tmp, "probe.js",
+    `require("node:fs").appendFileSync(${JSON.stringify(probeLog)},"spawned\\n");`
+    + `process.stdout.write(JSON.stringify({findings:[],shards:1,inventory:{files:0},notes:"fixture"}));`);
+
+  const runDriver = (label, archguardPath) => {
+    const roundLog = path.join(tmp, `round-${label}.jsonl`);
+    const r = spawnSync(process.execPath, ["--experimental-strip-types",
+      path.join(REPO_ROOT, "plugin", "scripts", "quality-gate-driver.ts"),
+      "--root", tmp, "--once", "--round-log", roundLog,
+      "--plan-cmd", `node ${planCmd}`, "--judgment-cmd", `node ${judgmentCmd}`,
+      "--packaging-check-cmd", `node ${packagingCmd}`,
+      "--identity-cmd", `node ${fakeIdentityScript(tmp, false)}`,
+      "--lineage-cmd", `node ${fakeLineageScript(tmp, false)}`,
+      "--probe-runner-cmd", `node ${probeRunner}`],
+      { encoding: "utf8", timeout: 120_000, env: { ...process.env, ARCHGUARD_RUNNER_CLI: archguardPath } });
+    assert.equal(r.status, 0, `driver --once exit 0 (stderr: ${r.stderr})`);
+    const rec = JSON.parse(fs.readFileSync(roundLog, "utf8").split("\n").filter((l) => l.trim())[0]);
+    return { fact: rec.facts.find((f) => f.name === "architecture-analysis"), stderr: r.stderr };
+  };
+
+  // (a) 本机没有 archguard（缝指向不存在的路径）⇒ 装配行点名 + legible not-evaluated + 零 spawn。
+  const missing = runDriver("missing", path.join(tmp, "no-such-archguard"));
+  assert.match(missing.stderr, /routine "architecture-analysis" \(every\(10\)\) 未被 probe 轨道驱动/,
+    "the legacy declaration is still reported as skipped (⛔ not silently absorbed)");
+  assert.match(missing.stderr, /probe 轨道已装配 1 条例程（architecture-analysis；.*默认装配: architecture-analysis \(interval:1440m\)/,
+    `AC1: the assembly line must name the default-assembled routine; got:\n${missing.stderr}`);
+  assert.equal(missing.fact.state, "not-evaluated");
+  assert.match(missing.fact.reason, /instrument 'archguard' unavailable on this host/);
+  assert.match(missing.fact.reason, /fallback declared: 'git-lens'/, "the reason names the declared fallback");
+  assert.equal(missing.fact.value.fired, false);
+  assert.ok(!fs.existsSync(probeLog), "instrument unavailable ⇒ ZERO spawn (not a spawn error)");
+
+  // (b) 正控制：同一条例程 + 可用性缝打开（ARCHGUARD_RUNNER_CLI 指向一个存在的文件）⇒ 真的 spawn。
+  //     清掉持久 last-run 窗口，否则第二跑会因「窗口内不重触发」而 not-evaluated（那是另一条判据）。
+  fs.rmSync(path.join(tmp, ".quay", "routine-last-run.json"), { force: true });
+  const present = runDriver("present", probeRunner);
+  assert.equal(present.fact.state, "verified", `with the instrument present the probe must actually run; got ${present.fact.state}: ${present.fact.reason}`);
+  assert.equal(present.fact.value.fired, true);
+  assert.equal(present.fact.value.probe, "architecture-analysis");
+  assert.equal(fs.readFileSync(probeLog, "utf8").trim().split("\n").length, 1, "exactly one probe spawn");
 });
 
 test("gap-meta-round-log-rel — default round log path = .quay/quality-round.jsonl (⛔ repo-root)", (t) => {

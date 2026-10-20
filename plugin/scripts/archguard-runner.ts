@@ -197,8 +197,11 @@ function usage(msg: string): never {
 }
 
 /** Resolve the archguard CLI. `ARCHGUARD_RUNNER_CLI` is the negative-control seam (the fake CLI);
- *  production resolution is PATH. null ⇒ fail-closed (the meter must be runnable). */
-function resolveArchguardCli(): string | null {
+ *  production resolution is PATH. null ⇒ fail-closed (the meter must be runnable).
+ *  **Exported** (gap-architecture-analysis-probe-not-wired-into-driver-routine-or-init): the
+ *  architecture-analysis probe's host-availability preflight asks the SAME question ("is archguard
+ *  installed here?") and must not grow a second reader of it (硬规则 5b). */
+export function resolveArchguardCli(): string | null {
   const override = (process.env.ARCHGUARD_RUNNER_CLI ?? "").trim();
   if (override) return fs.existsSync(override) ? override : null;
   const r = spawnSync("sh", ["-c", "command -v archguard"], { encoding: "utf8" });

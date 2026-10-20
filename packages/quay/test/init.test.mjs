@@ -1630,6 +1630,26 @@ test("AC4: there is ONE fresh-install config writer (the TS template), and it em
   assert.doesNotMatch(src, /cat >[^\n]*config\.yml/, "…and no other shell writer of the config");
 });
 
+// gap-architecture-analysis-probe-not-wired-into-driver-routine-or-init AC2: a fresh workspace must be
+// BORN with a standing routine that schedules the architecture-analysis probe (the only mechanism that
+// really consults archguard). The entry is written, not commented: a commented example is
+// indistinguishable from "no routine at all" in the generated config (硬规则 3b/9).
+test("AC2: the fresh-install template scaffolds the architecture-analysis standing routine (fallback git-lens)", () => {
+  const content = generateConfigContent({ providerId: "native", providerPath: "./x", isNode: true, isGo: false });
+  const loop = YAML.parse(content).loop;
+
+  assert.ok(Array.isArray(loop.routines) && loop.routines.length > 0,
+    `loop.routines must be WRITTEN (not just commented) in the fresh-install template; got ${JSON.stringify(loop.routines)}`);
+  const arch = loop.routines.find((r) => r && r.name === "architecture-analysis");
+  assert.ok(arch, `architecture-analysis must be scaffolded; got ${JSON.stringify(loop.routines)}`);
+  assert.equal(arch.probe, "architecture-analysis", "it must point at the shipped probe spec");
+  // The proposal's own condition: `every(N)` is the retired iteration-count grammar and can never fire
+  // in two-layer mode — a scaffolded routine with that trigger would reproduce the defect it fixes.
+  assert.match(String(arch.trigger), /^interval:\d+m$/, "the trigger must be a two-layer time quantity");
+  assert.match(content, /fallback: git-lens/,
+    "the template must name the fallback that makes an archguard-less host safe (legible not-evaluated, not a spawn error)");
+});
+
 test("AC3: the validator accepts the init default gate name and still rejects a blank/ill-typed loop.gates", () => {
   const ws = tmpDir("ac3-gate-ref");
   fs.mkdirSync(path.join(ws, ".quay"), { recursive: true });

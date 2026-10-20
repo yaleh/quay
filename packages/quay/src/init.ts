@@ -1117,11 +1117,11 @@ export function generateConfigContent(opts: {
     "#                               \"none\"        — gate-output only, no independent audit",
     "#   concurrency: <int>        OPTIONAL — max parallel builds (default 1, serial).",
     "#                               >1 requires touches-disjoint tasks.",
-    "#   routines:                 OPTIONAL — standing routine track (periodic tasks):",
+    "#   routines:                 OPTIONAL — standing routine track (periodic probe routines):",
     "#     - name: <string>          routine name",
-    "#       trigger: every(N)|on(<event>)  when to fire",
+    "#       trigger: interval:<N>m  when to fire (two-layer time; `every(N)`/`on(<event>)` are legacy)",
     "#       dispatch: <prompt>      (legacy) prompt to dispatch",
-    "#       probe: <name>           (DIR-056) probe-spec name",
+    "#       probe: <name>           (DIR-056) probe-spec name under the plugin's probes/ dir",
     "#",
     "loop:",
     // ── The four PROJECT-DERIVED values, emitted FIRST so `loop.repo_root` is the section's first key
@@ -1161,10 +1161,21 @@ export function generateConfigContent(opts: {
     "  # execution: \"dispatched\"      # uncomment to use inline builds",
     "  # audit: \"adversarial\"         # uncomment to skip adversarial audit",
     "  # concurrency: 1               # uncomment for parallel builds (requires touches-disjoint)",
-    "  # routines:                    # uncomment to add periodic routines",
-    "  #   - name: \"health-check\"",
-    "  #     trigger: \"every(60)\"",
-    "  #     probe: \"health\"",
+    // ── Standing routine track, WRITTEN (not commented): a fresh workspace must be born with at least
+    //    one driver routine that actually schedules a probe. gap-architecture-analysis-probe-not-wired-
+    //    into-driver-routine-or-init：the architecture-analysis probe is the only mechanism that really
+    //    consults archguard, and before this it was scheduled by nothing a general workspace runs.
+    //    The fallback is declared HERE because it is what makes an archguard-less host safe: the probe
+    //    routine reports a legible `not-evaluated` instead of a spawn error when the primary instrument
+    //    is absent (quality-gate-driver's instrument preflight).
+    "  routines:",
+    "    # Each entry needs an `interval:<N>m` trigger (two-layer time; `every(N)` is the retired",
+    "    # iteration-count grammar and can never fire in fast mode) and a probe-spec name.",
+    "    # architecture-analysis: shallow structural pass (dependency cycles / god-packages / duplication).",
+    "    #   primary instrument: archguard; fallback: git-lens (plugin/probes/architecture-analysis.md).",
+    "    - name: \"architecture-analysis\"",
+    "      trigger: \"interval:1440m\"",
+    "      probe: \"architecture-analysis\"",
     "",
     "# " + ruleLine(69),
     "# Section 4: Serve — the web server's bind binding (OPTIONAL, COMMENTED OUT)",

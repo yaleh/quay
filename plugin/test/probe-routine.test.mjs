@@ -379,9 +379,10 @@ test("quality-gate-driver --once runs the config-declared probe routine and appe
   assert.equal(records.filter((x) => x.kind === "finding").length, 1,
     "the production call path appends structured findings to the carrier (⛔ not a boolean)");
   assert.deepEqual(records.filter((x) => x.kind === "finding")[0].files, ["plugin/scripts/a.ts:1", "plugin/scripts/b.ts:2"]);
-  // 老四条照旧（本任务不改它们的形状）
+  // 老四条照旧（本任务不改它们的形状）。第五条是 gap-architecture-analysis-probe-not-wired-into-
+  // driver-routine-or-init 的**默认装配**例程（空 fixture root 无 archguard ⇒ 一条 not-evaluated 读数）。
   assert.deepEqual(rec.facts.filter((f) => !f.name.startsWith("semantic-dedup")).map((f) => f.name).sort(),
-    ["architecture-review", "judgment-consumer-check", "packaging-hygiene", "pool-quality-judge"]);
+    ["architecture-analysis", "architecture-review", "judgment-consumer-check", "packaging-hygiene", "pool-quality-judge"]);
 });
 
 // ── (f) the mechanical FILING step (tasks/gap-ac214-fifth-crossing-routine-detects-but-nothing-acts) ─

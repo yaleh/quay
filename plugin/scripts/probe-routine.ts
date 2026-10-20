@@ -968,6 +968,12 @@ export interface ProbeRoutineOptions {
   /** 执行探针的 spawn 缝（测试用；缺省 `defaultRunExecutionProbe` = 真跑 mapping 声明的 argv）。
    *  ⛔ 注入它是为了让**同一个判定**能对着受控读数跑；生产路径恒为默认值。 */
   runExecutionProbe?: (decl: ExecutionProbeDecl) => ExecutionProbeRun;
+  /** 主仪器可用性**宿主前置**（可选；缺省 undefined = 不检查 ⇒ 老行为）。
+   *  探针规格声明了 `instrument:`，但「本主机有没有这个仪器」是**宿主事实**，规格读不出 ⇒ 由调用方
+   *  （quality-gate-driver）注入。返回 `unavailable` ⇒ 本轮记 `not-evaluated` 且**零 spawn**：
+   *  ⛔ 不是 spawn 报错（那会把「本机没有仪器」伪装成「仪器运行失败」，硬规则 3b），
+   *  ⛔ 也不伪装成「跑过了、没发现问题」。`unknown` = 本主机没有该仪器的可用性探针 ⇒ 不阻断。 */
+  instrumentPreflight?: (instrument: string, decl: RoutineDecl) => { state: "available" | "unavailable" | "unknown"; detail: string };
 }
 
 /** 把一条声明变成 Layer-1b 例程。`schedule` 用 routine-scheduler 的解析结果（**interval:<N>m 是
@@ -1015,6 +1021,20 @@ export function llmProbeRoutine(decl: RoutineDecl, opts: ProbeRoutineOptions): R
       if (ctx?.halted === true) {
         return fact("not-evaluated", { fired: false, probe: decl.probe, carrier: path.relative(opts.root, findingsPath) },
           "halted: probe spawn suppressed (halt gates the spawn, not the routine track)");
+      }
+
+      // ③b 主仪器可用性前置（宿主事实，规格读不出）。不可用 ⇒ **零 spawn** 的 not-evaluated，
+      //     理由里点名仪器、查过什么、以及规格声明的 fallback——「本机没有仪器」与「仪器跑挂了」
+      //     在读数上必须不同形（硬规则 3b/9）。
+      if (opts.instrumentPreflight) {
+        const avail = opts.instrumentPreflight(spec.instrument, decl);
+        if (avail.state === "unavailable") {
+          return fact("not-evaluated", {
+            fired: false, probe: decl.probe, instrument: spec.instrument,
+            fallback: spec.fallback, instrumentAvailable: false,
+            carrier: path.relative(opts.root, findingsPath),
+          }, `instrument '${spec.instrument}' unavailable on this host (${avail.detail}) — probe not spawned; fallback declared: '${spec.fallback}'`);
+        }
       }
 
       // ④ spawn 一个全新上下文（每次都是新进程 ⇒ 抗漂移靠这个，不靠提示词）。
