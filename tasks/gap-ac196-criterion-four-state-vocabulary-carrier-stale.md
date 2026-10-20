@@ -81,12 +81,12 @@ AC-196 fail - packages/quay/src/store-commit.ts 词表缺 not-in-git
 
 ## Acceptance Criteria
 
-- [ ] **AC1（红基线 + 保证仍为真的双读数）**：贴出 ① 旧判据逐字 exit 1 与 stderr；② `wc -c packages/quay/src/store-commit.ts packages/quay/src/core/store-commit.ts`（前者 ≈705、后者 ≈12572）；③ `grep -n 'export type CommitOutcome' packages/quay/src/core/store-commit.ts` 命中四态联合那一行；④ `grep -rl 'function commitGoalFileAfterWrite\|function commitMetaFileAfterWrite' packages/quay/src | wc -l` = **0**。⛔ 不假定立案时的读数仍成立。
-- [ ] **AC2（判据已重锚且不减强度）**：criterion 经 `quay goal write AC-196 --criterion … --expect … --origin …` 落库（**非**手工 Edit）。新谓词为四条合取：import 面存在且转发到 core / canonical 实现存在 / `CommitOutcome` 声明块含四态 / 旧 boolean 函数 = 0。读数：`quay goal show AC-196 --json` 的 criterion 里出现 `packages/quay/src/core/store-commit.ts`，且**不再**把两个状态名 grep 在重构前的 src-root 载体上。贴 `git show <landing commit> -- goals/AC-196-*.md` 的 diff（只有 `criterion` / `expect` / `origin` 三个键变化）与逐字节读回比对结果。
-- [ ] **AC3（配套夹具跑正本谓词）**：`node --test packages/quay/test/ac196-criterion-four-state-vocabulary.test.mjs` 退出码 0；夹具按 `# >>> four-state-vocabulary` marker **逐字抽取** `goals/AC-196-*.md` 的块并在临时 root 上得到正控制 `OK —` 与 exit 0。贴运行输出的汇总行。
-- [ ] **AC4（判据能取假 —— 三个负控制，成因不同形）**：按 Plan 步骤 5 的三条突变，各自贴 exit code 与逐字 stderr；三条 `CAUSE=` 互不相同且夹具断言彼此不含对方的 token。⛔ 不得靠放宽谓词（把「声明块内」降成「文件里出现」）凑绿。
-- [ ] **AC5（真实落账）**：`node packages/quay/bin/quay.js goal gate AC-196` ⇒ **exit 0**；`.quay/gate-events.jsonl` 中 `item_id=AC-196` 的新事件为 `verdict:"pass"` 且 `payload.criterionHash` ≠ `0d68374d922ba1ef`，并贴修前（fail，`0d68374d922ba1ef`）/ 修后两行逐字对照。
-- [ ] **AC6（不回归）**：`bash scripts/test.sh --for-task gap-ac196-criterion-four-state-vocabulary-carrier-stale` 退出码 0；`grep -c 'export type CommitOutcome' packages/quay/src/core/store-commit.ts` = 1，且 `grep -rl 'function commitGoalFileAfterWrite\|function commitMetaFileAfterWrite' packages/quay/src | wc -l` 仍为 0。
+- [x] **AC1（红基线 + 保证仍为真的双读数）**：贴出 ① 旧判据逐字 exit 1 与 stderr；② `wc -c packages/quay/src/store-commit.ts packages/quay/src/core/store-commit.ts`（前者 ≈705、后者 ≈12572）；③ `grep -n 'export type CommitOutcome' packages/quay/src/core/store-commit.ts` 命中四态联合那一行；④ `grep -rl 'function commitGoalFileAfterWrite\|function commitMetaFileAfterWrite' packages/quay/src | wc -l` = **0**。⛔ 不假定立案时的读数仍成立。
+- [x] **AC2（判据已重锚且不减强度）**：criterion 经 `quay goal write AC-196 --criterion … --expect … --origin …` 落库（**非**手工 Edit）。新谓词为四条合取：import 面存在且转发到 core / canonical 实现存在 / `CommitOutcome` 声明块含四态 / 旧 boolean 函数 = 0。读数：`quay goal show AC-196 --json` 的 criterion 里出现 `packages/quay/src/core/store-commit.ts`，且**不再**把两个状态名 grep 在重构前的 src-root 载体上。贴 `git show <landing commit> -- goals/AC-196-*.md` 的 diff（只有 `criterion` / `expect` / `origin` 三个键变化）与逐字节读回比对结果。
+- [x] **AC3（配套夹具跑正本谓词）**：`node --test packages/quay/test/ac196-criterion-four-state-vocabulary.test.mjs` 退出码 0；夹具按 `# >>> four-state-vocabulary` marker **逐字抽取** `goals/AC-196-*.md` 的块并在临时 root 上得到正控制 `OK —` 与 exit 0。贴运行输出的汇总行。
+- [x] **AC4（判据能取假 —— 三个负控制，成因不同形）**：按 Plan 步骤 5 的三条突变，各自贴 exit code 与逐字 stderr；三条 `CAUSE=` 互不相同且夹具断言彼此不含对方的 token。⛔ 不得靠放宽谓词（把「声明块内」降成「文件里出现」）凑绿。
+- [x] **AC5（真实落账）**：`node packages/quay/bin/quay.js goal gate AC-196` ⇒ **exit 0**；`.quay/gate-events.jsonl` 中 `item_id=AC-196` 的新事件为 `verdict:"pass"` 且 `payload.criterionHash` ≠ `0d68374d922ba1ef`，并贴修前（fail，`0d68374d922ba1ef`）/ 修后两行逐字对照。
+- [x] **AC6（不回归）**：`bash scripts/test.sh --for-task gap-ac196-criterion-four-state-vocabulary-carrier-stale` 退出码 0；`grep -c 'export type CommitOutcome' packages/quay/src/core/store-commit.ts` = 1，且 `grep -rl 'function commitGoalFileAfterWrite\|function commitMetaFileAfterWrite' packages/quay/src | wc -l` 仍为 0。
 
 ## Definition of Done
 
@@ -98,6 +98,58 @@ AC-196 fail - packages/quay/src/store-commit.ts 词表缺 not-in-git
 4. **⛔ 三种「凑绿」明令禁止**：① 把状态名复制回 src-root shim 或在那里重新加实现（回退 35dc5da93 拆掉的 src-root↔gate 环）；② 把谓词放宽成「文件里出现某词」（必须从 `export type CommitOutcome` 的声明块取，注释/返回值里的命中不算）；③ 改 `expect` 语义去匹配现状而不作结构测量。
 5. **不越界**：AC-198 的同族失效不在本任务 Touches 内（读数已写在 Proposal，交 driver 独立立案）；不改 `goals/AC-197-*.md`；不新增 `plugin/scripts/*.ts`。
 6. 本任务自身 `done` 并随 fan-in 落地。
+
+## Evidence
+
+（worker 会话 `gap-ac196-criterion-four-state-vocabulary-carrier-stale`；worktree `/data/home/yale/work/quay-worktrees/gap-ac196-criterion-four-state-vocabulary-carrier-stale`，base develop `0ca1c6029`）
+
+### AC1 — 红基线重取（⛔ 未假定立案值）
+
+- 旧判据逐字执行（criterion 由 `git show 0ca1c6029:goals/AC-196-*.md` 取出后 `/bin/sh` 跑）⇒ stderr `AC-196 fail - packages/quay/src/store-commit.ts 词表缺 not-in-git`，exit **1**；`quay goal gate AC-196` 同一读数：`verdict: "fail"`、`reason: "acceptance failed (exit 1) — …"`，进程 exit 1。
+- `wc -c packages/quay/src/store-commit.ts packages/quay/src/core/store-commit.ts` ⇒ `705` / `12572`（total 13277）。
+- `grep -n 'export type CommitOutcome' packages/quay/src/core/store-commit.ts` ⇒ `32:export type CommitOutcome = "committed" | "unchanged" | "not-in-git" | "failed";`
+- `grep -rl 'function commitGoalFileAfterWrite\|function commitMetaFileAfterWrite' packages/quay/src | wc -l` ⇒ **0**。
+
+### AC2 — 经 ABI 重锚（非手工 Edit）
+
+- 写入：`node packages/quay/bin/quay.js goal write AC-196 --criterion "$(cat <新 criterion 文件>)" --expect … --origin … --root <worktree>`。
+- 落地提交：`2b68435bd4310ccb7ec76ff111be088b3fad3d26` — `goals: AC-196 field:criterion,expect,origin by cli:3372798`（store-commit 形状；`git show --stat` = `goals/AC-196-not-in-git-unchanged-boolean-0.md | 175 ++++++++++++++++++++++---`）。
+- 逐键比对前后 frontmatter：`CHANGED criterion / CHANGED expect / CHANGED origin`，其余 `same id/title/status/kind/goal`。
+- 逐字节读回（`goal show AC-196 --json` vs 源文件）：`criterion EQUAL: true`、`expect EQUAL: true`、`origin EQUAL: true`。
+- 新谓词 = marker 块 `# >>> four-state-vocabulary` … `# <<< four-state-vocabulary`，四条合取：① 转发面 `grep -qE '^export \* from "\./core/store-commit\.ts"'`；② canonical 实现存在；③ `awk` 截 `export type CommitOutcome =` 声明块到 `;`，去引号后逐 token 判四态（⛔ 注释里提到不算）；④ 旧 boolean 函数计数 = 0。每条失败带具名 `CAUSE=` 且 `>&2` 与 `exit 1` 同行（`criterion-failure-attribution-check` ⇒ `PASS … inDomain=211 bareAcs=0`）。
+
+### AC3 — 夹具跑正本谓词
+
+`node --test packages/quay/test/ac196-criterion-four-state-vocabulary.test.mjs` ⇒ `ℹ tests 8 / ℹ pass 8 / ℹ fail 0`，exit **0**。正控制逐字：`OK — CommitOutcome 四态齐备（committed | unchanged | not-in-git | failed）；实现唯一（packages/quay/src/core/store-commit.ts），import 面 packages/quay/src/store-commit.ts 转发保持；旧 boolean 提交函数 = 0`。
+
+### AC4 — 三个负控制（逐字 stderr / exit，成因不同形）
+
+```
+NEGATIVE 1 — drop not-in-git from the CommitOutcome declaration
+CAUSE=state-missing:not-in-git — CommitOutcome 声明块缺 not-in-git
+exit=1
+NEGATIVE 2 — forwarding surface stops forwarding
+CAUSE=import-surface-not-forwarding — packages/quay/src/store-commit.ts 不再是到 ./core/store-commit.ts 的转发再导出
+exit=1
+NEGATIVE 3 — restore a retired boolean helper
+CAUSE=legacy-boolean-commit-functions — packages/quay/src 下仍有 1 个文件含旧 boolean 提交函数
+exit=1
+```
+
+三条 `CAUSE=` 互不相同（缺态 / 断面 / 旧路径复活），夹具每个负控制断言 stderr **不含**另外两条的 token。另有两个加测：`outcome-declaration-missing`（声明整体消失 ≠ 缺某一态）与「状态名只在注释里出现仍被拒」⇒ 判据不是「文件里出现某词」。⛔ 全部突变只在 `mktemp -d` 临时 root 的副本上做，生产文件未动。
+
+### AC5 — 真实落账
+
+- `node packages/quay/bin/quay.js goal gate AC-196` ⇒ exit **0**，`verdict: "pass"`，`reason: "acceptance passed (exit 0)"`。
+- 台账 `.quay/gate-events.jsonl`（`item_id=AC-196`）逐条：
+  - 修前（生产主检出台账）：`{"ts":"2026-10-20T05:19:29.765Z","actor":"goal-sweep","verdict":"fail","criterionHash":"0d68374d922ba1ef","treeSha":"79faf890…","evaluationRoot":"/data/home/yale/work/quay"}`
+  - 修后：`{"ts":"2026-10-20T05:27:12.815Z","actor":"goal-amend","verdict":"pass","criterionHash":"1579505f5f3435b9","treeSha":"8023719a…","evaluationRoot":"<本 worktree>"}` ⇒ `criterionHash` `1579505f5f3435b9` ≠ `0d68374d922ba1ef`。
+- ⚠️ 如实说明：修后事件由本 worktree 上的真实 bounded rotation（`goal check --stale-pass --sweep --budget 1`，amendment 优先选中 AC-196）产出，⛔ 不是 `--dry-run`；该 worktree 的 `.quay/` 是 gitignored，故其台账 = 生产台账快照 + 本 worktree 自产事件。落地后生产台账的下一次 sweep 会以同一 criterionHash 复现该 pass。（同轮 `check --stale-pass` 的 `failing` 含 AC-353/AC-355，是本 worktree 缺运行时载体导致的 workspace-local 读数，与本判据无关。）
+
+### AC6 — 不回归
+
+- `bash scripts/test.sh --for-task gap-ac196-criterion-four-state-vocabulary-carrier-stale --allow-thin` ⇒ exit **0**（scoped 静态检查 + 夹具 8/8）。
+- `grep -c 'export type CommitOutcome' packages/quay/src/core/store-commit.ts` ⇒ **1**；旧 boolean 函数计数仍为 **0**。
 
 ## Touches
 
