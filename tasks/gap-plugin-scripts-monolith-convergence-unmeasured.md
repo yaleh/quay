@@ -1,7 +1,7 @@
 ---
 id: gap-plugin-scripts-monolith-convergence-unmeasured
 title: plugin/scripts 仍是 4449 实体 / 2971 fan-out 的未分化巨无霸 —— 实测当前规模 + 判断是否值得立项收敛
-status: todo
+status: ready
 labels:
   - gap
   - architecture
