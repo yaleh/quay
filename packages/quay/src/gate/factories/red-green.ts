@@ -4,7 +4,7 @@
 // that a real RED->GREEN transition happened, not an assertion of it.
 
 import type { GateFn } from "../shared/types.ts";
-import { runAcceptance } from "../shared/acceptance-runner.ts";
+import { runAcceptance } from "../../core/acceptance-runner.ts";
 import { type GateConfig, resolveRunnerOptions } from "./utils.ts";
 
 /**

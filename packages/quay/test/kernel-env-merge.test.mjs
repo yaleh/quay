@@ -98,20 +98,24 @@ test("① the body exists exactly ONCE in the production tree, and NOT in the tw
   // The finding's own predicate, re-run as a NAMED list: `plugin/scripts/profile-policy.ts`'s
   // `mergeEnv` and `packages/quay/src/goal-store.ts`'s `mergeProfileEnv` were the two byte-identical
   // copies (one renamed, which is what hid the pair from name-based scans). Naming them keeps the
-  // failure message diagnostic instead of a bare count.
+  // failure message diagnostic instead of a bare count. `goal-store.ts` now lives in `core/`
+  // (tasks/gap-src-root-gate-cycle-break), so the current home is what a re-inline would land in;
+  // `src/goal-store.ts` is only a forwarding shim.
   const FORMER_COPIES = [
     "plugin/scripts/profile-policy.ts",
-    "packages/quay/src/goal-store.ts",
+    "packages/quay/src/core/goal-store.ts",
   ];
   const regressed = FORMER_COPIES.filter((f) => hits.includes(f));
   assert.deepEqual(regressed, [], `these files re-introduced a local body: ${JSON.stringify(regressed)}`);
 });
 
 test("② both consumers import the kernel leaf (the wiring, not just the body count)", () => {
-  // Product side: goal-store.ts imports it in-package.
+  // Product side: goal-store.ts imports it in-package. The file was sunk into `core/`
+  // (tasks/gap-src-root-gate-cycle-break), so the specifier gained one `../`; `src/goal-store.ts`
+  // is a forwarding shim and carries no import of its own.
   assert.ok(
-    readRepoFile("packages/quay/src/goal-store.ts").includes('from "./kernel/env-merge.ts"'),
-    "packages/quay/src/goal-store.ts must import the kernel leaf (`./kernel/env-merge.ts`)",
+    readRepoFile("packages/quay/src/core/goal-store.ts").includes('from "../kernel/env-merge.ts"'),
+    "packages/quay/src/core/goal-store.ts must import the kernel leaf (`../kernel/env-merge.ts`)",
   );
   // Mechanism side: the cross-tree import. Its direction is the load-bearing part — the product side
   // may not import `plugin/**` (import-graph-check's reverseEdges ratchet, baselined at 0).

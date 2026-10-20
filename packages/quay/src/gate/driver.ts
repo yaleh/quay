@@ -16,7 +16,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { runComplete } from "./lifecycle.ts";
-import { TASK_STATUS, type Task } from "../abi.ts";
+import { TASK_STATUS, type Task } from "../core/types.ts";
 
 interface DriverClient {
   // `includeBody` is part of the ABI's task_list surface (the frontmatter-only projection every

@@ -3660,9 +3660,16 @@ test("AC2 (shipped 负控制) — 包根打平布局（无 packages/quay/src）�
   fs.mkdirSync(path.join(pkg, "src", "gate"), { recursive: true });
   fs.mkdirSync(path.join(pkg, "plugin"), { recursive: true });
   // 打平布局：包根 src/gate/gate-event-store.ts（⛔ 无 packages/quay/ 前缀）。
+  // 实现已下沉到 core/（tasks/gap-src-root-gate-cycle-break），gate/ 只剩 forwarding re-export；
+  // 打平布局必须同时落两份，否则 shim 的 `../core/...` 在夹具里解析不到 —— 那不是本 AC 要测的失败。
   fs.copyFileSync(
     path.join(REPO_ROOT, "packages", "quay", "src", "gate", "gate-event-store.ts"),
     path.join(pkg, "src", "gate", "gate-event-store.ts"),
+  );
+  fs.mkdirSync(path.join(pkg, "src", "core"), { recursive: true });
+  fs.copyFileSync(
+    path.join(REPO_ROOT, "packages", "quay", "src", "core", "gate-event-store.ts"),
+    path.join(pkg, "src", "core", "gate-event-store.ts"),
   );
   const prev = process.env.QUAY_PLUGIN_ROOT;
   process.env.QUAY_PLUGIN_ROOT = path.join(pkg, "plugin"); // resolveKernelPluginRoot()=<pkg>/plugin ⇒ dirname=<pkg>

@@ -5,7 +5,7 @@
 // log-path drift). Never appends.
 
 import path from "node:path";
-import { queryGateEvents, type GateEvent } from "./gate-event-store.ts";
+import { queryGateEvents, type GateEvent } from "../core/gate-event-store.ts";
 
 /** Default gate-event log location, relative to the workspace root. */
 export const DEFAULT_GATE_LOG_RELATIVE_PATH = path.join(".quay", "gate-events.jsonl");

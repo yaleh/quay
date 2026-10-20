@@ -3,7 +3,7 @@
 # gap-observation-hardcodes-quay-worktrees-ignoring-config-worktree-root).
 #
 # The defect: the worktree-namespace directory literal regrows OUTSIDE the ONE file allowed to spell
-# it — the single resolver's fallback declaration (packages/quay/src/worktree-namespace.ts,
+# it — the single resolver's fallback declaration (packages/quay/src/core/worktree-namespace.ts,
 # DEFAULT_WORKTREE_NAMESPACE_NAME). A second spelling is a reader answering "where are this
 # workspace's worktrees" from a hardcoded name instead of the workspace's own
 # `loop.worktree_root` — which is how a third-party project came to read ANOTHER project's namespace
@@ -33,14 +33,14 @@ workdir="${1:?usage: $name.sh <workdir>}"
 checker_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 repo_root="$(cd "${checker_dir}/../.." && pwd -P)"
 
-mkdir -p "${workdir}/packages/quay/src" "${workdir}/plugin/scripts"
+mkdir -p "${workdir}/packages/quay/src/core" "${workdir}/plugin/scripts"
 cd "${workdir}"
 
 # The name under test, read from the ONE declaration that is allowed to hold it (never spelled here).
 ns="$(sed -n 's/.*DEFAULT_WORKTREE_NAMESPACE_NAME[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' \
-  "${repo_root}/packages/quay/src/worktree-namespace.ts" | head -n 1)"
+  "${repo_root}/packages/quay/src/core/worktree-namespace.ts" | head -n 1)"
 if [ -z "${ns}" ]; then
-  echo "INFRASTRUCTURE — could not read DEFAULT_WORKTREE_NAMESPACE_NAME from ${repo_root}/packages/quay/src/worktree-namespace.ts (the case cannot build a meaningful fixture)" >&2
+  echo "INFRASTRUCTURE — could not read DEFAULT_WORKTREE_NAMESPACE_NAME from ${repo_root}/packages/quay/src/core/worktree-namespace.ts (the case cannot build a meaningful fixture)" >&2
   exit 2
 fi
 
@@ -48,16 +48,16 @@ fi
 # Removes ONLY this case's own fixture files (never a recursive wipe of ${workdir}) so a mis-invoked
 # run cannot delete anything but the files this case just wrote.
 FIXTURE_FILES=(
-  packages/quay/src/worktree-namespace.ts
+  packages/quay/src/core/worktree-namespace.ts
   packages/quay/src/some-reader.ts
   packages/quay/src/elsewhere.ts
   plugin/scripts/some-driver.ts
   plugin/scripts/unquoted-uses.ts
 )
 write_clean() {
-  mkdir -p packages/quay/src plugin/scripts
+  mkdir -p packages/quay/src/core plugin/scripts
   rm -f "${FIXTURE_FILES[@]}"
-  printf 'export const DEFAULT_WORKTREE_NAMESPACE_NAME = "%s";\n' "${ns}" > packages/quay/src/worktree-namespace.ts
+  printf 'export const DEFAULT_WORKTREE_NAMESPACE_NAME = "%s";\n' "${ns}" > packages/quay/src/core/worktree-namespace.ts
 }
 
 checker_cmd() {
@@ -105,7 +105,7 @@ fi
 # INJECT (misplaced): the ONLY literal sits OUTSIDE the resolver declaration → MUST go RED — the
 # invariant is not "≤1 hit" alone, it is "the hit IS the single resolver's declaration".
 write_clean
-rm -f packages/quay/src/worktree-namespace.ts
+rm -f packages/quay/src/core/worktree-namespace.ts
 printf 'export const X = "%s";\n' "${ns}" > packages/quay/src/elsewhere.ts
 if checker_cmd; then
   echo "STAYED-GREEN — a lone literal in a non-resolver file did not redden the checker (「≤1 hit」 was accepted without the declaration check)" >&2
