@@ -37,6 +37,31 @@ on:
         type: string
         default: ""
 
+# ── concurrency: at most ONE running + ONE pending run per (event, ref) ────────────────────────
+# (gap-ci-yml-no-concurrency-group-push-runs-pile-up-on-single-runner, measured 2026-10-20)
+# WHY: every develop push used to enqueue a WHOLE workflow. Measured that day: ~48 pushes arriving at
+# 1,1,8,2,5,9,9,8,1,4 per hour against a single EPHEMERAL runner completing ~3/hour (`test` median
+# 15 min, n=30, range 12–25), i.e. arrivals > completions ⇒ 18 runs queued and ~6 h to drain even
+# with no new pushes. Supersession was entirely MANUAL (`gh run cancel` x15 that day) — a rule whose
+# kept/broken states are indistinguishable in the record (硬规则 9), so it is made mechanical here.
+# GitHub's per-group semantics WITHOUT `cancel-in-progress` are exactly what is wanted: a new run
+# waits as pending, a PREVIOUS PENDING run in the same group is cancelled, and the RUNNING run is
+# left alone (≤ 1 running + 1 pending per group).
+# ⛔ NO `cancel-in-progress`: it would kill the RUNNING `test` (~15 min of work), and the running run
+#    is precisely the one that yields the decisive reading. ⛔ Do not add it to "make the queue look
+#    shorter" — that measures the queue, not the product.
+# ⛔ `github.event_name` is in the group ON PURPOSE: a push must not supersede the nightly `schedule`
+#    tick or a `workflow_dispatch` run. Those are separate channels with their own cadence; letting a
+#    push cancel a queued schedule run would silently delete the periodic channel reading.
+# ⛔ `github.ref` (not a constant) keeps one ref's burst from superseding another's run — the pile-up
+#    this removes is per-branch, and `pull_request` runs share `refs/pull/<n>/merge` scoped to the PR.
+# CONSEQUENCE (recorded, not a defect): intermediate commits no longer each get a CI reading — their
+# runs end `cancelled`. `plugin/scripts/ci-runs-collect.ts` deliberately does not count `cancelled`
+# as decisive, so "a decisive reading exists" predicates are unaffected; any predicate assuming
+# "every commit has one CI reading" is not. The task's `## Evidence` carries the consumer list.
+concurrency:
+  group: ci-${{ github.event_name }}-${{ github.ref }}
+
 jobs:
   test:
     # The nightly `schedule` tick exists for the channel gate ONLY (see the `on:` block). Without
