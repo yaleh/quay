@@ -76,12 +76,12 @@ AC-198 fail: packages/quay/src/store-commit.ts does not use rev-parse to resolve
 
 ## Acceptance Criteria
 
-- [ ] **AC1（红基线 + 保证仍为真的双读数）**：贴出 ① 旧判据逐字 exit 1 与 stderr；② `wc -c packages/quay/src/store-commit.ts packages/quay/src/core/store-commit.ts`（前者约 705、后者约 12572）；③ `grep -n 'export function commitStoreWrite\|export function resolveGitRoot' packages/quay/src/core/store-commit.ts`；④ `grep -c 'rev-parse' packages/quay/src/core/store-commit.ts` = 7。⛔ 不假定立案时的读数仍成立。
-- [ ] **AC2（判据已重锚且不减强度）**：criterion 经 `quay goal write AC-198 --criterion … --expect … --origin …` 落库（**非**手工 Edit）；`quay goal show AC-198 --json` 的 `criterion` 里出现 marker 块 `# >>> rev-parse-root`，且**不再**把 `rev-parse` 钉在重构前的 src-root 载体路径上（该路径只允许出现在 `origin` 的归档文本里）。贴 `git show <landing commit> -- goals/AC-198-*.md` 的 diff（只有 `criterion` / `expect` / `origin` 三个键变化）与逐字节读回 `EQUAL: true`。
-- [ ] **AC3（夹具跑正本谓词）**：`node --test packages/quay/test/ac198-criterion-rev-parse-root.test.mjs` 退出码 0；夹具按 `>>> rev-parse-root` marker **逐字抽取** `goals/AC-198-*.md` 的块并在临时 root 上得到正控制 `OK —` 与 exit 0。贴运行输出的汇总行。
-- [ ] **AC4（判据能取假 —— 五个负控制，成因不同形）**：按 Plan 步骤 5 的五条突变，各自贴 exit code 与逐字 stderr；五条 `CAUSE=` 互不相同，且夹具断言彼此不含对方的 token。⛔ 不得靠放宽谓词（把「函数体内」降成「文件里出现」）凑绿。
-- [ ] **AC5（真实落账）**：`node packages/quay/bin/quay.js goal gate AC-198` ⇒ **exit 0**；`.quay/gate-events.jsonl` 中 `item_id=AC-198` 的新事件为 `verdict:"pass"` 且 `payload.criterionHash` ≠ 修前 hash（贴修前 / 修后两行逐字对照）。
-- [ ] **AC6（不回归 + 不回填）**：`bash scripts/test.sh --for-task gap-ac198-criterion-rev-parse-root-carrier-stale` 退出码 0；`grep -rl 'export function commitStoreWrite' packages/quay/src --include='*.ts' | wc -l` = 1；`wc -c packages/quay/src/store-commit.ts` 仍 ≈705（转发 shim 未被回填实现或加 `rev-parse` 注释）。
+- [x] **AC1（红基线 + 保证仍为真的双读数）**：贴出 ① 旧判据逐字 exit 1 与 stderr；② `wc -c packages/quay/src/store-commit.ts packages/quay/src/core/store-commit.ts`（前者约 705、后者约 12572）；③ `grep -n 'export function commitStoreWrite\|export function resolveGitRoot' packages/quay/src/core/store-commit.ts`；④ `grep -c 'rev-parse' packages/quay/src/core/store-commit.ts` = 7。⛔ 不假定立案时的读数仍成立。
+- [x] **AC2（判据已重锚且不减强度）**：criterion 经 `quay goal write AC-198 --criterion … --expect … --origin …` 落库（**非**手工 Edit）；`quay goal show AC-198 --json` 的 `criterion` 里出现 marker 块 `# >>> rev-parse-root`，且**不再**把 `rev-parse` 钉在重构前的 src-root 载体路径上（该路径只允许出现在 `origin` 的归档文本里）。贴 `git show <landing commit> -- goals/AC-198-*.md` 的 diff（只有 `criterion` / `expect` / `origin` 三个键变化）与逐字节读回 `EQUAL: true`。
+- [x] **AC3（夹具跑正本谓词）**：`node --test packages/quay/test/ac198-criterion-rev-parse-root.test.mjs` 退出码 0；夹具按 `>>> rev-parse-root` marker **逐字抽取** `goals/AC-198-*.md` 的块并在临时 root 上得到正控制 `OK —` 与 exit 0。贴运行输出的汇总行。
+- [x] **AC4（判据能取假 —— 五个负控制，成因不同形）**：按 Plan 步骤 5 的五条突变，各自贴 exit code 与逐字 stderr；五条 `CAUSE=` 互不相同，且夹具断言彼此不含对方的 token。⛔ 不得靠放宽谓词（把「函数体内」降成「文件里出现」）凑绿。
+- [x] **AC5（真实落账）**：`node packages/quay/bin/quay.js goal gate AC-198` ⇒ **exit 0**；`.quay/gate-events.jsonl` 中 `item_id=AC-198` 的新事件为 `verdict:"pass"` 且 `payload.criterionHash` ≠ 修前 hash（贴修前 / 修后两行逐字对照）。
+- [x] **AC6（不回归 + 不回填）**：`bash scripts/test.sh --for-task gap-ac198-criterion-rev-parse-root-carrier-stale` 退出码 0；`grep -rl 'export function commitStoreWrite' packages/quay/src --include='*.ts' | wc -l` = 1；`wc -c packages/quay/src/store-commit.ts` 仍 ≈705（转发 shim 未被回填实现或加 `rev-parse` 注释）。
 
 ## Definition of Done
 
