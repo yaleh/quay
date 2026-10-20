@@ -45,8 +45,11 @@ AC1-AC3 勾齐并贴证据。
 ## Touches
 
 - plugin/scripts/quality-gate-driver.ts
+- plugin/scripts/probe-routine.ts
+- plugin/scripts/archguard-runner.ts
 - packages/quay/src/init.ts
 - plugin/probes/architecture-analysis.md
 - plugin/test/quality-gate-driver.test.mjs
+- plugin/test/probe-routine.test.mjs
 - packages/quay/test/init.test.mjs
 - tasks/gap-architecture-analysis-probe-not-wired-into-driver-routine-or-init.md
