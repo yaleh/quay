@@ -7,6 +7,10 @@
 // this Provider does not implement data.write).
 
 import { createBacklogClient } from "../src/backlog-client.ts";
+// One --flag/positional parser for every provider bin — this file used to hold
+// its own byte-identical 20-line copy (architecture-analysis finding
+// dup-parseflags-three-bins). Core's cli/flags.ts is the single definition.
+import { parseFlags } from "../../quay/src/cli/flags.ts";
 
 function resolveTasksDir() {
   const dir = process.env.QUAY_BACKLOG_TASKS_DIR;
@@ -18,27 +22,6 @@ function resolveTasksDir() {
 
 function printJson(obj) {
   process.stdout.write(JSON.stringify(obj, null, 2) + "\n");
-}
-
-function parseFlags(argv) {
-  const flags = {};
-  const positional = [];
-  for (let i = 0; i < argv.length; i++) {
-    const a = argv[i];
-    if (a.startsWith("--")) {
-      const key = a.slice(2);
-      const next = argv[i + 1];
-      if (next !== undefined && !next.startsWith("--")) {
-        flags[key] = next;
-        i++;
-      } else {
-        flags[key] = true;
-      }
-    } else {
-      positional.push(a);
-    }
-  }
-  return { flags, positional };
 }
 
 async function main() {
