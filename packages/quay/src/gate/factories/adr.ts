@@ -6,10 +6,10 @@
 
 import path from "node:path";
 import type { GateFn } from "../shared/types.ts";
-import { runAcceptance } from "../shared/acceptance-runner.ts";
+import { runAcceptance } from "../../core/acceptance-runner.ts";
 import { resolveRunnerOptions } from "./utils.ts";
-import { createAdrStore } from "../../adr-store.ts";
-import type { Task } from "../../abi.ts";
+import { createAdrStore } from "../../core/adr-store.ts";
+import type { Task } from "../../core/types.ts";
 
 /**
  * E3 (DIR-030 item 2/4) — adr-as-contract enforcement: wire an

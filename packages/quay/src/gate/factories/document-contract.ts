@@ -5,9 +5,9 @@
 // in-process (`contract-validator.ts#validateContracts`), no external shell-out.
 
 import type { GateFn } from "../shared/types.ts";
-import { createDocumentStore } from "../../document-store.ts";
-import { validateContracts } from "../../contract-validator.ts";
-import type { Task } from "../../abi.ts";
+import { createDocumentStore } from "../../core/document-store.ts";
+import { validateContracts } from "../../core/contract-validator.ts";
+import type { Task } from "../../core/types.ts";
 
 /**
  * D1 — document-as-contract enforcement: wire a managed document carrying

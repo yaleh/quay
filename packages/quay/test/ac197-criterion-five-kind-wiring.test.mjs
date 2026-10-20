@@ -87,12 +87,12 @@ function predicateBlock() {
 }
 
 /** The one shared primitive module, and the five store files it must be wired into. */
-const PRIM = "packages/quay/src/store-commit.ts";
+const PRIM = "packages/quay/src/core/store-commit.ts";
 const STORES = [
-  "packages/quay/src/goal-store.ts",
+  "packages/quay/src/core/goal-store.ts",
   "packages/quay/src/meta-store.ts",
-  "packages/quay/src/adr-store.ts",
-  "packages/quay/src/document-store.ts",
+  "packages/quay/src/core/adr-store.ts",
+  "packages/quay/src/core/document-store.ts",
   "packages/quay-native/src/store.ts",
 ];
 

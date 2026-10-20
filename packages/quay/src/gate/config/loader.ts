@@ -22,7 +22,7 @@ import type {
   GateSource,
   GateDiagnostic,
 } from "./types.ts";
-import { findConfig } from "../../config.ts";
+import { findConfig } from "../../core/config.ts";
 
 // Re-export types so consumers can import from a single module.
 export type {
