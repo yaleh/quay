@@ -38,11 +38,16 @@ criterion: |-
   const nongoal=["discoverWorkspaceRoot","loadWorkspaceGates","loadWorkspaceGateMetadata"];
   for(const name of nongoal){const fnRe=new RegExp("export (async )?function "+name+"\\(","m");const constRe=new RegExp("export const "+name+"\\b");if(!fnRe.test(loaderText)&&!constRe.test(loaderText)){console.error("CAUSE=nongoal-moved -- "+name+" must stay defined in gate/config/loader.ts");process.exit(1)}}
   if(!/from\s*["\x27]\.\.\/factories\/index\.ts["\x27]/.test(loaderText)){console.error("CAUSE=wiring-edge-removed -- gate/config/loader.ts must still import ../factories/index.ts");process.exit(1)}
-  if(!/export interface Task\b/.test(live(rd(path.join(src,"abi.ts"))))){console.error("CAUSE=abi-touched -- abi.ts Task definition missing or moved, out of scope for this goal");process.exit(1)}
+  const taskCarriers=all.filter(f=>/^export interface Task\b/m.test(live(rd(f))));
+  if(taskCarriers.length!==1){console.error("CAUSE=abi-touched -- Task must have exactly one carrier module, found ["+taskCarriers.join(",")+"] (the ABI task shape has one definition site)");process.exit(1)}
+  const abiFile=path.join(src,"abi.ts");
+  if(path.normalize(taskCarriers[0])===path.normalize(abiFile)){console.error("CAUSE=abi-touched -- abi.ts must stay a FORWARDING surface (export * from the carrier), not a definition site (gap-src-root-gate-cycle-break)");process.exit(1)}
+  const abiForwards=[...live(rd(abiFile)).matchAll(/from\s*["\x27]([^"\x27]+)["\x27]/g)].some(m=>path.normalize(path.join(path.dirname(abiFile),m[1]))===path.normalize(taskCarriers[0]));
+  if(!abiForwards){console.error("CAUSE=abi-touched -- abi.ts no longer forwards the Task carrier ("+taskCarriers[0]+")");process.exit(1)}
   })()' "$src" || { echo "CAUSE=structural-scan-red -- the scan above printed the specific CAUSE" >&2; exit 1; }
   oos=$(git diff --name-only develop...HEAD -- packages/quay/src/gate/engine.ts packages/quay/src/gate/lifecycle.ts packages/quay/src/gate/driver.ts packages/quay/src/gate/types.ts packages/quay/src/abi.ts packages/quay/src/fan-in 2>/dev/null)
   [ -z "$oos" ] || { echo "CAUSE=out-of-scope-edit -- this goal must not touch: $(echo $oos | tr '\n' ' ')" >&2; exit 1; }
-  echo "PASS: kernel/gate-run-options.ts holds the single definitions of the 4 functions + 2 types; gate/config/utils.ts and gate/factories/loader.ts are both gone (no shell-move shim); seven real consumers converged; non-goal files (loader.ts config-loading functions, the config-to-factories wiring import, abi.ts) are untouched"
+  echo "PASS: kernel/gate-run-options.ts holds the single definitions of the 4 functions + 2 types; gate/config/utils.ts and gate/factories/loader.ts are both gone (no shell-move shim); seven real consumers converged; non-goal files (loader.ts config-loading functions, the config-to-factories wiring import) are untouched and the abi.ts surface still forwards the single Task carrier"
 expect: exit 0 = 单一定义 + 两个死文件/shim 均删除 + 七个消费点改口 + 非目标未动；exit 1 = CAUSE=
   指明哪一项；exit 3 = kernel/gate-run-options.ts 尚未落地
 origin: 继 GOAL-030~033 后第五个 goal branch 试点
