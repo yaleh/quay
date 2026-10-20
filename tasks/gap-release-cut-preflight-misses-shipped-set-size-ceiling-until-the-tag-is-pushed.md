@@ -154,12 +154,3 @@ $ node --no-warnings --experimental-strip-types --test plugin/test/kernel-siblin
 ```
 
 修复后 scoped gate 重跑仍绿（`plugin/test/release-cut.test.mjs` 17/17，exit 0）；anti-drift Touches 检查 `ANTI-DRIFT OK: 3 actual file(s), all within declared Touches`。
-
-## Blocker
-
-**2026-10-20T23:23:41.526Z — worker 未落地（exited-not-landed）**
-
-- 未落地原因：step=suite: incomplete suite (598/598 files) — recovery exhausted at floor concurrency 32 — no declared rung produced a complete verdict (64,48,32); needs a code/config fix, see plugin/scripts/full-suite-runner.ts
-- run_id：wk-prod-anchor
-- session_id：810ab1fd-9d3b-437e-b26e-ad3c18e38e46
-- 后续（2026-10-21 本轮）：真因是静态检查 `kernel-sibling-resolution-check` 对预检新增两行的 P2 命中（见 Evidence 末节），已修复并在本 worktree 重跑为 PASS；AC7 仍为（待外部）。
