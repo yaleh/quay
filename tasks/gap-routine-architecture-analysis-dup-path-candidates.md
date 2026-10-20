@@ -46,14 +46,6 @@ Extract to a shared plugin/scripts/path-scope.ts consumed by both; AC: repo-wide
 - `plugin/scripts/capability-catalog-declarations.json`
 - `tasks/gap-routine-architecture-analysis-dup-path-candidates.md`
 
-## Blocker
-
-**2026-10-20T08:04:21.772Z — worker 未落地（exited-not-landed）**
-
-- 未落地原因：step=suite: AssertionError [ERR_ASSERTION]: no live reference to the moved files' old paths may remain (update callers to plugin/loop/ + plugin/scripts/)
-- run_id：wk-prod-anchor
-- session_id：03cfad1c-c137-4159-a1c9-ec81217e4784
-
 ## Evidence
 
 **处置：已修掉**（dup 消除；不是「已有机制在管」也不是「已注意到」）
