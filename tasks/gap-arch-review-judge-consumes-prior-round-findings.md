@@ -37,3 +37,5 @@ extra:
 - tasks/gap-arch-review-judge-consumes-prior-round-findings.md
 - plugin/scripts/quality-gate-driver.ts
 - plugin/scripts/architecture-review-cluster.ts
+- plugin/test/quality-gate-driver.test.mjs
+- plugin/test/architecture-review-cluster.test.mjs
