@@ -38,10 +38,10 @@ goal_ac: AC-913
 
 ## Acceptance Criteria
 
-- [ ] **AC1（正向 + 逐字判据）**：在仓库根逐字执行 AC-913 的 criterion，exit 0 且输出 `OK: native imports 0 gate-layer paths`；且 `packages/quay-native/src/mcp-server.ts` 的两条 import 分别指向 `../../quay/src/core/acceptance-runner.ts` 与 `../../quay/src/core/gate-event-store.ts`（`grep -c 'core/acceptance-runner.ts'`、`grep -c 'core/gate-event-store.ts'` 各为 1）。
-- [ ] **AC2（反向负控，证明判据能取假）**：临时在 `packages/quay-native/src/` 保留一条 gate/ 层 import（把 mcp-server.ts:26 改回，或临时新增一行）⇒ criterion 输出计数 1、stderr 含 `native imports 1 gate-layer path(s) (want 0)`、exit 1；移除后重跑 ⇒ exit 0。两次读数、命令与退出码写进本任务 Execution record；负控改动不得留在落地树里（`git status --short packages/quay-native/src/` 只剩预期改动）。
-- [ ] **AC3（棘轮 + 其自身可证伪）**：`node --experimental-strip-types plugin/scripts/import-graph-check.ts` 在真树 exit 0，`--json` 输出含新的 provider→gate 轴且 `evaluated:true`、违规数 0；`--selftest` 含两条新用例并全绿：注入 provider→gate 边 ⇒ 违规 1 + exit 1，无该边 ⇒ 0 + exit 0；`plugin/test/import-graph-check.test.mjs` 覆盖该区分。
-- [ ] **AC4（scoped 门）**：`bash scripts/test.sh --for-task gap-ac913-native-gate-layer-imports-zero` exit 0（覆盖本任务 Touches 的 scoped static checks 与 `plugin/test/import-graph-check.test.mjs`）。
+- [x] **AC1（正向 + 逐字判据）**：在仓库根逐字执行 AC-913 的 criterion，exit 0 且输出 `OK: native imports 0 gate-layer paths`；且 `packages/quay-native/src/mcp-server.ts` 的两条 import 分别指向 `../../quay/src/core/acceptance-runner.ts` 与 `../../quay/src/core/gate-event-store.ts`（`grep -c 'core/acceptance-runner.ts'`、`grep -c 'core/gate-event-store.ts'` 各为 1）。
+- [x] **AC2（反向负控，证明判据能取假）**：临时在 `packages/quay-native/src/` 保留一条 gate/ 层 import（把 mcp-server.ts:26 改回，或临时新增一行）⇒ criterion 输出计数 1、stderr 含 `native imports 1 gate-layer path(s) (want 0)`、exit 1；移除后重跑 ⇒ exit 0。两次读数、命令与退出码写进本任务 Execution record；负控改动不得留在落地树里（`git status --short packages/quay-native/src/` 只剩预期改动）。
+- [x] **AC3（棘轮 + 其自身可证伪）**：`node --experimental-strip-types plugin/scripts/import-graph-check.ts` 在真树 exit 0，`--json` 输出含新的 provider→gate 轴且 `evaluated:true`、违规数 0；`--selftest` 含两条新用例并全绿：注入 provider→gate 边 ⇒ 违规 1 + exit 1，无该边 ⇒ 0 + exit 0；`plugin/test/import-graph-check.test.mjs` 覆盖该区分。
+- [x] **AC4（scoped 门）**：`bash scripts/test.sh --for-task gap-ac913-native-gate-layer-imports-zero` exit 0（覆盖本任务 Touches 的 scoped static checks 与 `plugin/test/import-graph-check.test.mjs`）。
 
 ## Definition of Done
 
@@ -49,6 +49,60 @@ goal_ac: AC-913
 - **真实落地载体**：落地后的 `develop` 树上，AC-913 criterion 逐字读 0（`git show develop:packages/quay-native/src/mcp-server.ts | grep -c 'quay/src/gate/'` = 0）；`import-graph-check` 的 provider→gate 轴在**真树**读 `evaluated:true` / 0 违规（不是只在 selftest fixture 里读 0）。
 - 两个 gate 转发 shim 的头注释不再声称 quay-native 是其 consumer（纯注释改动，shim 保留）。
 - native 行为不变：`quay-native` 的 MCP 路径（`goal_gate` / `task_check` 等）在 suite 中照常通过，import 改指不改变运行时符号来源。
+
+## Execution record
+
+**Worker run — 2026-10-21**（worktree `/home/yale/work/quay-worktrees/gap-ac913-native-gate-layer-imports-zero`，branch `task/gap-ac913-native-gate-layer-imports-zero`，commit `e6a86b478`）
+
+### A. 改指两条 import（AC1）
+
+`packages/quay-native/src/mcp-server.ts`：
+- :26 `../../quay/src/gate/shared/acceptance-runner.ts` → `../../quay/src/core/acceptance-runner.ts`
+- :32 `../../quay/src/gate/gate-event-store.ts` → `../../quay/src/core/gate-event-store.ts`
+
+逐字判据（仓库根执行）：
+```sh
+n=$(grep -rnE 'quay/src/gate/' packages/quay-native/src/ 2>/dev/null | wc -l)
+if [ "$n" -ne 0 ]; then echo "native imports $n gate-layer path(s) (want 0)" >&2; exit 1; fi
+echo "OK: native imports 0 gate-layer paths"
+```
+读数：`OK: native imports 0 gate-layer paths`，**exit 0**。
+
+```
+grep -c 'core/acceptance-runner.ts' packages/quay-native/src/mcp-server.ts  → 1
+grep -c 'core/gate-event-store.ts'  packages/quay-native/src/mcp-server.ts  → 1
+```
+
+### B. AC2 负控（判据被亲眼看到取假一次）
+
+把 `mcp-server.ts:26` 临时改回 `../../quay/src/gate/shared/acceptance-runner.ts`，逐字执行同一 criterion：
+
+| 状态 | n | stderr | exit |
+|---|---|---|---|
+| 负控在树（mcp-server.ts:26 改回 gate/ 路径） | **1** | `native imports 1 gate-layer path(s) (want 0)` | **1** |
+| 移除负控后重跑 | **0** | —（`OK: native imports 0 gate-layer paths`） | **0** |
+
+负控命中行（原始读数）：`packages/quay-native/src/mcp-server.ts:26:import { runAcceptance, verdictFromAcceptance } from "../../quay/src/gate/shared/acceptance-runner.ts";`
+
+负控改动已移除，落地树里 `git status --short packages/quay-native/src/` 只剩 ` M packages/quay-native/src/mcp-server.ts`（预期改动）。
+
+### C. AC3 棘轮 + 其自身可证伪
+
+- 真树：`node --experimental-strip-types plugin/scripts/import-graph-check.ts --root .` → exit 0；`--json` 读：
+  `evaluated:true, gateLayerChecked:true, gateLayerViolations:0, gateLayerReason:null, verdict.gateLayerBlocked:false`。
+- `--selftest` → `PASS — all 14 case(s) behaved`（exit 0），含两条新用例：
+  - `provider-imports-core-gate (… /x.ts → …/gate/y.ts ⇒ FAIL)`：`gateLayerChecked=true gateLayerViolations=1 exit=1`（违规 1 ⇒ 红）；
+  - `provider-imports-core-outside-gate (…/core/y.ts ⇒ PASS)`：`gateLayerChecked=true gateLayerViolations=0 exit=0`（无该边 ⇒ 绿）。
+- `plugin/test/import-graph-check.test.mjs` 新增 6 条 AC-913 用例（相对说明符；core/ 负控；注释不算；裸包名 `quay/src/gate/…` 与 `exports` 映射两种形态；`gateLayerChecked` 三态区分；真树读数），`node --test` **31/31 pass**。
+- 硬零：**未改** `plugin/import-graph-baseline.json`（不新增计数键）；`gateLayerChecked` 与「零违规」不共用输出值（无 provider 文件 / gate 目录缺失 ⇒ `checked:false` + reason）。
+
+### D. AC4 scoped 门
+
+`bash scripts/test.sh --for-task gap-ac913-native-gate-layer-imports-zero --allow-thin` → **exit 0**（`tests 132 / pass 132 / fail 0`），覆盖 Touches 的 scoped static checks 与 `plugin/test/import-graph-check.test.mjs`。
+
+### E. 非目标核对
+
+未改 native 的 `kernel/*` / `abi.ts` import；未删除两个 gate 转发 shim（`packages/quay/src/cli/gate.ts` 与 `packages/quay/test` 仍消费）；未改 `packages/quay-native/package.json`；两个 shim 头注释仅删除 `quay-native` 一词。
 
 ## Touches
 
