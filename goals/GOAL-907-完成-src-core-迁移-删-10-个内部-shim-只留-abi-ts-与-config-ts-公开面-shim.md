@@ -23,8 +23,15 @@ packages/quay/src 根有 12 个「FORWARDING re-export」shim（gap-src-root-gat
 
 ## 范围与非目标
 
-范围：删 10 个内部 shim；消费方改指 core/；import-graph-check 加「import 已删 src 根 shim = 违规」棘轮。
+范围：删 10 个内部 shim；消费方改指 core/；import-graph-check 加「import 已删 src 根 shim = 违规」棘轮（手段 / 防回归，不是独立退出条件——退出条件只写终态）。
 非目标：abi.ts / config.ts 保留不动；不碰 core/ 内部实现；不改任何行为。
+
+## 退出条件
+
+① `packages/quay/src` 根下带 `FORWARDING re-export` 头注释的文件恰为 2 个，且逐字就是公开 ABI 面 `abi.ts` 与 `config.ts`；
+② 其余 10 个内部 shim（adr-store / branch-model / contract-validator / criterion-fidelity / document-store / frontmatter-store-base / goal-store / plugin-root / store-commit / worktree-namespace）已从树中删除，且没有任何代码路径（静态 import / `export … from` / 动态 import / 以 shim 路径 spawn）再指向这些 src 根路径——消费方全部指向 `packages/quay/src/core/<name>.ts`；
+③ 判据能取假：保留第 3 个带该头注释的 shim ⇒ AC-911 判据红并写出实际计数；删至 2 ⇒ 绿；
+④ AC-911 achieved（以上 ①–③ 全部由 AC-911 的 criterion 与 expect 覆盖）。
 
 ## AC
 
