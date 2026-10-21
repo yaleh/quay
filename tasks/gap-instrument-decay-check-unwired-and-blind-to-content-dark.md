@@ -39,18 +39,184 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1 形态 C（真实载体，与落地顺序无关）：检测器报告暗区间，而不只报告当前状态。对主检出运行，`.quay/arch-cycle-history.jsonl` 必须满足其一：当前仍全为 false ⇒ 当前读为 `content-dark`；或修复任务 `gap-arch-cycle-report-never-evaluated-aggregate-and-stale-artifacts` 已写入首条 true ⇒ 报告一个已结束的暗区间，起点为 2026-10-18T10:25Z、覆盖 ≥25 条记录，当前不再判暗。两种情况都贴出读数。`.quay/arch-coverage-history.jsonl`（31/31 为 true）不命中（负对照）。
-- [ ] AC2 形态 D：一份产物时间戳早于覆盖源路径最新提交的记录读为 `stale-evaluated`；夹具中产物时间晚于所有覆盖提交的记录不命中（负对照）。贴出两次输出。
-- [ ] AC3 未覆盖不算健康：`.quay/measure-history.jsonl` 出现在 `uncovered` 列表中，且不计入健康载体数。贴出读数。
-- [ ] AC4 扩展点：测试只通过注册一个合成描述符，就让一个新载体被检查，不修改检测器逻辑文件；不注册时同一断言失败（负对照）。贴出测试名与输出。
-- [ ] AC5 可见信号：一轮例程运行写出一个状态为 `instrument-dark` 的 Fact，并经 gap-filing 通道立案或报告已有 gap；紧接的第二轮不重复立案。贴出两轮的 Fact 与立案结果。
-- [ ] AC6 现有 3 个告警逐个裁定：每个都附 FACT（命令与原始输出）与 JUDGMENT，并写明处置方式。
+- [x] AC1 形态 C（真实载体，与落地顺序无关）：检测器报告暗区间，而不只报告当前状态。对主检出运行，`.quay/arch-cycle-history.jsonl` 必须满足其一：当前仍全为 false ⇒ 当前读为 `content-dark`；或修复任务 `gap-arch-cycle-report-never-evaluated-aggregate-and-stale-artifacts` 已写入首条 true ⇒ 报告一个已结束的暗区间，起点为 2026-10-18T10:25Z、覆盖 ≥25 条记录，当前不再判暗。两种情况都贴出读数。`.quay/arch-coverage-history.jsonl`（31/31 为 true）不命中（负对照）。
+- [x] AC2 形态 D：一份产物时间戳早于覆盖源路径最新提交的记录读为 `stale-evaluated`；夹具中产物时间晚于所有覆盖提交的记录不命中（负对照）。贴出两次输出。
+- [x] AC3 未覆盖不算健康：`.quay/measure-history.jsonl` 出现在 `uncovered` 列表中，且不计入健康载体数。贴出读数。
+- [x] AC4 扩展点：测试只通过注册一个合成描述符，就让一个新载体被检查，不修改检测器逻辑文件；不注册时同一断言失败（负对照）。贴出测试名与输出。
+- [x] AC5 可见信号：一轮例程运行写出一个状态为 `instrument-dark` 的 Fact，并经 gap-filing 通道立案或报告已有 gap；紧接的第二轮不重复立案。贴出两轮的 Fact 与立案结果。
+- [x] AC6 现有 3 个告警逐个裁定：每个都附 FACT（命令与原始输出）与 JUDGMENT，并写明处置方式。
 
 ## Definition of Done
 
 - [ ] 六条 AC 全绿；`scripts/test.sh` 相关泳道通过；合并进 develop。
 - [ ] 读数验证使用真实载体；夹具只用于 AC2、AC4 的负对照。
 - [ ] 不在 fan-in 热路径上运行。
+
+## Evidence
+
+> 2026-10-22，worktree `task/gap-instrument-decay-check-unwired-and-blind-to-content-dark`。
+> 真实载体读数一律对主检出只读运行（`--root /data/home/yale/work/quay`）；夹具只用于 AC1 第二支、AC2、AC4 的对照。
+
+### AC1 形态 C（真实载体）+ 负对照
+
+命令：
+
+```
+node --experimental-strip-types plugin/scripts/instrument-decay-check.ts --root /data/home/yale/work/quay --no-block --json
+```
+
+读数（`.quay/arch-cycle-history.jsonl`，当前仍全 false ⇒ 第一支成立）：
+
+```
+"contentDark": {
+  "state": "dark", "records": 25, "falseRecords": 25,
+  "reason": "all 25 record(s) are evaluated:false since the first record (2026-10-18T10:25:51.593Z)",
+  "darkInterval": { "startTs": "2026-10-18T10:25:51.593Z", "endTs": "2026-10-21T23:14:05.363Z", "records": 25, "ended": false }
+}
+```
+
+负对照（`.quay/arch-coverage-history.jsonl`，31/31 为 true ⇒ 不命中）：
+
+```
+"contentDark": { "state": "healthy", "records": 31, "falseRecords": 0, "reason": null, "darkInterval": null }
+```
+
+第二支（修复落地后的形态，夹具 25 条 false + 1 条 true）：
+
+```
+✔ 形态 C — 修复落地后（首条 true 出现）报告一个【已结束】的暗区间，当前不再判暗（AC1 第二支）
+  state=healthy
+  darkInterval={ startTs: "2026-10-18T00:25:51.593Z", endTs: "2026-10-20T00:25:51.593Z", records: 25, ended: true }
+  decayed(content-dark)=0   // 已结束的区间是历史，不是当前 finding
+```
+
+（夹具的首条 ts 用 00:25 只是生成方便；真实载体的起点是 10:25:51.593Z。）`darkInterval` 同时进入 quality-round Fact（例程直接携带整个 `contentDark` 读数），因此修复不会抹掉「曾经从 2026-10-18T10:25Z 起暗了 25 条」的证据。
+
+### AC2 形态 D（stale 正例 + fresh 负对照）
+
+夹具：临时 git 仓库，`packages/quay/src/a.ts` 在 `2026-10-21T16:26:00Z` 被提交；carrier 记录里的 `artifactTimestamp` 分别取 16:17:56Z（早于提交）与 22:00:00Z（晚于提交）。
+
+```
+--- stale fixture: artifact 16:17:56Z < newest commit 16:26:00Z ---
+{ "state": "stale",
+  "scopes": [{ "scope": "src", "source": "packages/quay/src",
+               "artifactTs": "2026-10-21T16:17:56.117Z",
+               "commitTs": "2026-10-21T16:26:00.000Z", "state": "stale" }],
+  "staleFindings": ["src"] }
+--- fresh fixture (negative control): artifact 22:00:00Z > newest commit 16:26:00Z ---
+{ "state": "fresh",
+  "scopes": [{ "scope": "src", "source": "packages/quay/src",
+               "artifactTs": "2026-10-21T22:00:00.000Z",
+               "commitTs": "2026-10-21T16:26:00.000Z", "state": "fresh" }],
+  "staleFindings": [] }
+```
+
+真实载体上同一读数：`staleEvaluated.state = "stale"`，`recordStale = true`（载体自己的 `stale` 信号现在随 Fact 被消费），4 个已评估作用域全部早于其覆盖路径的最新提交（src / scripts / quay-native-src / experiments-scripts，逐条时间戳见 AC6 附带的 JSON）。
+
+### AC3 未覆盖不算健康
+
+```
+"uncovered": [
+  { "file": "fan-in-failure-classification.jsonl", "reason": "evaluated-but-undescribed", "present": true },
+  { "file": "measure-history.jsonl", "reason": "declared-uncovered", "present": true }
+],
+"uncoveredCount": 2, "healthyCount": 3
+```
+
+`measure-history.jsonl` 在列表中；`healthyCount` 只数「已登记 + 可评估 + 无腐烂读数」的三个载体，未覆盖的两个不在其中。发现型 uncovered（`fan-in-failure-classification.jsonl` 首条记录带布尔 `evaluated` 却无描述符）是登记表自身漂移的可见面——检测器不假装它被检查过。
+
+### AC4 扩展点（测试名 + 输出）
+
+```
+✔ AC4 — 注册一个合成描述符 ⇒ 新载体被检查；不注册 ⇒ 同一断言失败（负对照） (1.065246ms)
+```
+
+测试对同一份 `synthetic-evaluated-carrier.jsonl`（2 条全 false）：传入合成描述符 ⇒ `carriers.length=1`、`contentDark.state="dark"`、`decayedCount=1`；传空 manifest ⇒ `carriers.length=0`、`decayedCount=0`（负对照）。全程不改 `instrument-decay-check.ts` 的判定逻辑。
+
+### AC5 一轮写出 `instrument-dark` Fact + 两轮不重复立案（真实载体）
+
+第 1 轮（对主检出真实载体，gap-filing 通道用替身记录 argv / 报告已存在的 gap）：
+
+```
+state: "instrument-dark"
+reason: "instrument-dark: 8 finding(s) — fan-in-step-trace.jsonl: rate-stopped (3); arch-cycle-history.jsonl: content-dark (1); arch-cycle-history.jsonl: stale-evaluated (4); filings: filed=3 already-filed=0 deferred=0; 2 uncovered carrier(s) NOT counted healthy (fan-in-failure-classification.jsonl, measure-history.jsonl)"
+filings:
+  fan-in-step-trace.jsonl|rate-stopped    → filed (exit 0), summary: "existing gap: gap-arch-cycle-report-never-evaluated-aggregate-and-stale-artifacts (open, needs-human) ... no new task filed"
+  arch-cycle-history.jsonl|content-dark   → filed (exit 0), summary: 同上
+  arch-cycle-history.jsonl|stale-evaluated → filed (exit 0), summary: 同上
+gap-filing spawns: 3
+```
+
+第 2 轮（紧接；去重输入 = 上一轮写进 round 载体的 Fact）：
+
+```
+state: "instrument-dark"
+reason: "... filings: filed=0 already-filed=3 deferred=0; ..."
+filings: 三个 pair 全部 already-filed
+gap-filing spawns: 3 (delta=0)
+```
+
+去重没有第二份台账：`readPriorInstrumentDecayFilings` 只读 `.quay/quality-round.jsonl` 尾部，取上一轮 `instrument-decay` Fact 里 `filing:"filed"` 的 pair 键。`deferred`（halted / 资源门）不写入去重集合，下一轮会重试。prompt 逐对点名 `carrier=<file> shape=<kind>` 并携带 open/done 两条机制查重规则。
+
+### AC6 现有 3 个告警逐个裁定
+
+#### 1. `verification-round-record`（末次 2026-10-14T11:41:51Z，7 条）
+
+FACT（命令与原始输出）：
+
+```
+$ grep -n 'traceSuiteEvent("verification-round-record"' plugin/scripts/worker-fan-in.ts
+2824:      traceSuiteEvent("verification-round-record", {
+$ grep -n "suiteRunsOutsideRunner(worktree)) return" plugin/scripts/worker-fan-in.ts
+2808:      if (!o?.force && !suiteRunsOutsideRunner(worktree)) return;
+$ grep -n "suite_runner" .quay/config.yml
+144:  suite_runner: quay-buckets
+$ python3 -c "..."（统计 fan-in-step-trace.jsonl 该 step 的条数与末 3 条）
+verification-round-record count 7 last3 [
+  ('2026-10-14T10:36:17.238Z', 'gap-discovery-closed-loop-acceptance-report-finding-to-merge-to-effect-on-real-hosts', 'wk-prod-anchor', True, None),
+  ('2026-10-14T11:21:18.387Z', 'gap-discovery-closed-loop-acceptance-report-finding-to-merge-to-effect-on-real-hosts', 'wk-prod-anchor', True, None),
+  ('2026-10-14T11:41:51.225Z', 'gap-discovery-closed-loop-acceptance-report-finding-to-merge-to-effect-on-real-hosts', 'wk-prod-anchor', True, None)]
+```
+
+JUDGMENT：**稀有但活着，不是腐烂。** 写手路径存在（`recordDelegatedRound` → `traceSuiteEvent`）。在 quay 形态（`suite_runner: quay-buckets`）下，普通红/绿轮由 full-suite-runner 入账并由 `suiteRunsOutsideRunner` 早返回挡住；本组只在**本轮 suite 没有任何结论**（看门狗 SIGKILL 整组 / 从未 spawn）时以 `force:true` 写。7 条全部集中在 2026-10-14 同一个任务上，正是一次看门狗事件的特征，不是写手坏死。
+
+处置：**保留分组**（不删、不加豁免），并把「仅例外路径可达」写进描述符 note；本轮不立案。
+
+#### 2. `catch-up-develop`（末次 2026-10-10T19:13:58Z，96 条）
+
+FACT：
+
+```
+$ grep -n '"catch-up-develop"' plugin/scripts/worker-fan-in.ts
+2633:      a = await step("catch-up-develop", ["git", "-C", worktree, "merge", "--no-edit", "develop"], 120_000);
+2634:      if (!a.ok) return fail("catch-up-develop", a);
+$ git log -1 --format="%cI %h %s" --grep="merge: goal/"
+2026-10-11T03:24:05+08:00 eb89d042e merge: goal/GOAL-036 into develop (...)
+$ git log --since=2026-10-11 --oneline --grep="merge: goal/" | wc -l
+0
+（该 step 全部 96 条记录均来自 goal-036-* 任务，末条 2026-10-10T19:13:58.281Z）
+```
+
+JUDGMENT：**事件驱动，不是腐烂。** 写手只在 `mergeTarget !== "develop"`（goal 分支落地）时执行；最后一次 goal 落地是 2026-10-11T03:24+08（= 2026-10-10T19:24Z），就在本组最后一次写入后约 10 分钟，此后零 goal 落地 ⇒ 结构上没有触发条件。
+
+处置：**保留分组**；本轮不立案。
+
+#### 3. `suite-recovery-blocked`（末次 2026-10-20T23:23:36Z，18 条）
+
+FACT：
+
+```
+$ grep -n '"suite-recovery-blocked"' plugin/scripts/worker-fan-in.ts
+3089:            traceSuiteEvent("suite-recovery-blocked", {
+（触发条件：`certifiedRun === null` — 恢复阶梯 64/48/32 全部没有产出完整判词）
+（该 step 18 条；最后一条 2026-10-20T23:23:36.537Z，距本次运行 2 天）
+```
+
+JUDGMENT：**稀有但活着，不是腐烂。** 只有恢复阶梯整体耗尽才写；最近一次发生在 2 天前，写手显然仍在工作。
+
+处置：**保留分组**；本轮不立案。
+
+**三者的共同处置**：全部保留在 Shape B 的分组集合里（⛔ 不为了让读数变绿而删分组或加豁免）；MANIFEST 描述符 note 已记录各自的例外触发条件。真正在腐烂的是 arch-cycle 的 C/D 两形态，已有在开 gap `gap-arch-cycle-report-never-evaluated-aggregate-and-stale-artifacts`（needs-human）覆盖，按机制查重不重立。
 
 ## 落地后操作（不属于本任务完成条件）
 
@@ -63,3 +229,4 @@ extra:
 - plugin/test/instrument-decay-check.test.mjs
 - plugin/scripts/quality-gate-driver.ts
 - plugin/test/quality-gate-driver.test.mjs
+- plugin/scripts/driver-runtime.ts
