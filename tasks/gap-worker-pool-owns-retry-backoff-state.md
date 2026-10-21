@@ -66,3 +66,11 @@ AC-914 在 goal-driver 下一轮读数为 `pass`（`.quay/goal-round.jsonl` 或 
 - plugin/test/worker-pool.test.mjs（新：私有所有权 + 转移行为）
 - plugin/scripts/capability-catalog-declarations.json
 - tasks/gap-worker-pool-owns-retry-backoff-state.md
+
+## Blocker
+
+**2026-10-21T19:32:23.596Z — worker 未落地（exited-not-landed）**
+
+- 未落地原因：step=suite: AssertionError [ERR_ASSERTION]: 归一化函数只许定义一次
+- run_id：wk-prod-anchor
+- session_id：4bf35f6d-a81f-4bc3-aa7d-1a91f28ba439
