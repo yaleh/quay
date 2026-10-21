@@ -5,7 +5,7 @@ title: before/after 边数读数 + 可证伪负对照：root→gate/config 边�
 status: achieved
 kind: criterion
 goal: GOAL-034
-criterion: |
+criterion: |-
   set -u
   root=$(git rev-parse --show-toplevel 2>/dev/null) || { echo "NOT-EVALUATED: not inside a git repository" >&2; exit 3; }
   cd "$root"
@@ -24,7 +24,7 @@ criterion: |
   const BEFORE_FACTORIES_TO_CONFIG_GOAL=1;
   const BEFORE_FACTORIES_TO_CONFIG_LOADER=2;
   const FORK_POINT="162f8c380ed1dd9267167cc791ef8727fd13269d";
-  const afterRoot=countRootToGateConfig(rd(path.join(src,"goal-store.ts")));
+  const afterRoot=countRootToGateConfig(rd(path.join(src,"core","goal-store.ts")));
   if(afterRoot!==0){console.error("CAUSE=root-to-gate-config-not-cleared -- goal-store.ts still has "+afterRoot+" import(s) matching ./gate/config/ (before="+BEFORE_ROOT_TO_GATE_CONFIG+", fork point "+FORK_POINT+")");process.exit(1)}
   if(fs.existsSync(path.join(src,"gate/factories/loader.ts"))){console.error("CAUSE=dead-shim-still-present -- gate/factories/loader.ts had "+BEFORE_FACTORIES_TO_CONFIG_LOADER+" ../config/ import(s) at fork point "+FORK_POINT+", must be deleted entirely");process.exit(1)}
   const afterUtils=countFactoriesToConfig(rd(path.join(src,"gate/factories/utils.ts")));
@@ -32,7 +32,7 @@ criterion: |
   const afterGoalFactory=countFactoriesToConfig(rd(path.join(src,"gate/factories/goal.ts")));
   if(afterGoalFactory!==0){console.error("CAUSE=factories-to-config-not-cleared -- gate/factories/goal.ts still has "+afterGoalFactory+" import(s) matching ../config/ (before="+BEFORE_FACTORIES_TO_CONFIG_GOAL+")");process.exit(1)}
   const NEGCTL_LINE="import { resolveAcceptanceTimeoutMs as __negctl } from \"./gate/config/utils.ts\";\n";
-  const scratchWithRegression=NEGCTL_LINE+rd(path.join(src,"goal-store.ts"));
+  const scratchWithRegression=NEGCTL_LINE+rd(path.join(src,"core","goal-store.ts"));
   const negCount=countRootToGateConfig(scratchWithRegression);
   if(negCount!==afterRoot+1){console.error("CAUSE=negative-control-not-falsifiable -- a scratch copy of goal-store.ts with the retired import prepended did not raise the ./gate/config/ count by exactly one (after="+afterRoot+", scratch="+negCount+"); the counter cannot be trusted to detect a real regression");process.exit(1)}
   console.log(JSON.stringify({fork_point:FORK_POINT,before:{root_to_gate_config:BEFORE_ROOT_TO_GATE_CONFIG,factories_to_config_lines:BEFORE_FACTORIES_TO_CONFIG_UTILS+BEFORE_FACTORIES_TO_CONFIG_GOAL+BEFORE_FACTORIES_TO_CONFIG_LOADER},after:{root_to_gate_config:afterRoot,factories_to_config_lines:afterUtils+afterGoalFactory},negative_control_count_on_scratch_regression:negCount}));
