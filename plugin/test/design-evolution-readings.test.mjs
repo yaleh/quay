@@ -750,7 +750,10 @@ test("AC1/AC3 (real carrier) — repo-relative identity, non-empty provenance, n
     assert.equal(p, "plugin/scripts/worker-driver.ts");
   }
   assert.equal(r.files.some((f) => f.file === "worker-driver.ts"), false, "the basename must not survive as its own key");
-  assert.ok(wd.form1 >= 5, `worker-driver.ts form1 ${wd.form1} < 5`);
+  // 4 (not the basename era's 5): one selector_reason wrote `fan-in-ff-merge.sh/worker-driver.ts`,
+  // which is prose joining two file names, not a path. Under basename keying it counted; under path
+  // identity it names a file that does not exist, so it is not a hit on `plugin/scripts/worker-driver.ts`.
+  assert.ok(wd.form1 >= 4, `worker-driver.ts form1 ${wd.form1} < 4`);
   assert.ok(wd.form2 >= 6, `worker-driver.ts form2 ${wd.form2} < 6`);
   assert.ok(wd.samples.form1.length === Math.min(3, wd.form1));
   assert.ok(wd.samples.form1.every((s) => s.task !== null && s.ts !== null));
