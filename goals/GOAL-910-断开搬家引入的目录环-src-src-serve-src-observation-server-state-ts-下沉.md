@@ -2,10 +2,17 @@
 id: GOAL-910
 title: 断开搬家引入的目录环 {src, src/serve, src/observation}：server-state.ts 下沉
   core/，observation 子模块改指 core/ 与 kernel/（目录级环 1→0）
-status: draft
+status: active
 kind: goal
 origin: 架构分析会话 2026-10-22：archguard 0.1.42 scope b4f87b21 @ d7e1c743a
   读出目录环回归（此前自 GOAL-033/034 起为 0）；人当轮批准立案
+activatedAt: 2026-10-21T23:39:02.083Z
+statusLog:
+  - at: 2026-10-21T23:39:02.083Z
+    from: draft
+    to: active
+    actor: goal-cli
+    reason: ""
 ---
 ## 背景
 
