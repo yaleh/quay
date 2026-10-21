@@ -113,13 +113,27 @@ test("normalizeAssertionSignature — 折易变量（数字/哈希/绝对路径�
 test("DoD (落点映射·机械) — 签名归一化只有一个正本点：提取点/归一化点各一处，⛔ 不留第二份易变量清单", () => {
   // 把「唯一正本点」做成可执行判据（⛔ 不是散文承诺）：源码里出现第二处签名提取或第二处空白归一化
   // ⇒ 立刻红。这样「后来有人又在别处拼一份签名逻辑」是机械可见的，不靠记得。
+  //
+  // gap-worker-pool-owns-retry-backoff-state（2026-10-22）：快速死亡退避整簇（`quickDeathSignature`
+  // 及其唯一归一化点 `normalizeAssertionSignature`）随 `WorkerPool` 迁到 worker-pool.ts ⇒ 归一化点
+  // 从 worker-driver.ts 移到 worker-pool.ts（worker-driver.ts 只 re-export，⛔ 不留第二份实现）；
+  // 提取点 `assertionSignaturesFromSuiteLog` 仍留在 worker-driver.ts。判据因此按【两文件合计】计数
+  // ——位置变了，但「提取点 1 处 / 归一化点 1 处 / 空白折叠 1 处」这条性质不变（⛔ 不是放宽：
+  // 把两份源码拼起来数，第二份清单照样红），并额外钉死各自【应当】落在哪个文件。
   const src = fs.readFileSync(new URL("../scripts/worker-driver.ts", import.meta.url), "utf8");
-  const count = (re) => (src.match(re) || []).length;
+  const poolSrc = fs.readFileSync(new URL("../scripts/worker-pool.ts", import.meta.url), "utf8");
+  const both = `${src}\n${poolSrc}`;
+  const count = (re, text = both) => (text.match(re) || []).length;
   assert.equal(count(/AssertionError\(\?:/g), 1, "断言签名的提取点只许有一处");
   assert.equal(count(/export function normalizeAssertionSignature\(/g), 1, "归一化函数只许定义一次");
   assert.equal(count(/\\s\+\/g/g), 1, "空白归一化只许在唯一正本点里做（第二处 = 第二份清单）");
   // 消费者：两个（跨任务复发扫描 + 判定入口），都经 assertionSignaturesFromSuiteLog 拿到已归一化签名。
   assert.equal(count(/assertionSignaturesFromSuiteLog\(/g), 3, "1 处定义 + 2 处消费者，全部经同一提取点");
+  // 落点（⛔ 只数合计会让「两份各半」或「挪错文件」看起来一样）：归一化实现只在 worker-pool.ts，
+  // 提取点只在 worker-driver.ts；worker-driver.ts 对归一化只有 re-export。
+  assert.equal(count(/export function normalizeAssertionSignature\(/g, poolSrc), 1, "归一化点落在 worker-pool.ts");
+  assert.equal(count(/export function normalizeAssertionSignature\(/g, src), 0, "worker-driver.ts ⛔ 不留第二份归一化实现");
+  assert.equal(count(/AssertionError\(\?:/g, src), 1, "提取点落在 worker-driver.ts");
 });
 
 
