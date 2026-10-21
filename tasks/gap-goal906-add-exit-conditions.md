@@ -1,7 +1,7 @@
 ---
 id: gap-goal906-add-exit-conditions
 title: "GOAL-906 缺 ## 退出条件 致充分性闸永久 insufficient：补写 4 条退出条件并对齐标题 6→3 / 范围文本"
-status: needs-human
+status: ready
 labels:
   - gap
 parent: null
