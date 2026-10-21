@@ -24,6 +24,8 @@ extra:
 
 **改法验证（立案当轮实测，按 git numstat 逐提交计算）**：规则「列出窗口内每一次 centralΔ < 0 且 nonCentralΔ > 0 的提交」不需要任何阈值，在上述三次提交上的结果是：f19a95371、024f9d7f2 命中，3ad17ac26 不命中。也就是说，它恰好抓住了两次搬家，并且没有误报那次真实增长。
 
+**立案检查（2026-10-22 补做）**：合并判断 = none——`task-granularity-advice.ts --task` 实测 3 个 Touches 文件除本任务外无在开任务共享；promotion-driver 已按资格检查将其晋升为 ready（提交 19576d42e），即误判前置检查已通过。
+
 ## Plan
 
 1. 路径身份：形态 1、形态 2 的命中都先归一为**仓库相对路径**（去掉 worktree 根前缀 `<…>/quay-worktrees/<task-id>/`、主检出根前缀与多余的前导斜杠），以仓库相对路径作键；`file` 字段改为仓库相对路径，basename 只作展示。无法归一的路径进入 `unresolvedPaths`，不并入任何键。
