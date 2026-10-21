@@ -232,10 +232,28 @@ test("AC3（同一历史、两种 verdict ⇒ 两种动作）— insufficient-da
   assert.equal(dA.kind, "stop-terminal", "判不出 ⇒ 停");
   assert.equal(dB.kind, "count-and-retry", "已归因 ⇒ 既有计数重派");
 
-  // 静态半边：调用点必须按 kind 分叉（⛔ 不是把 stop 塞进 advanceRetryCap 的同一分支）。
-  const src = fs.readFileSync(path.join(REPO_ROOT, "plugin", "scripts", "worker-driver.ts"), "utf8");
-  assert.match(src, /if \(decision\.kind === "stop-terminal"\)/, "调用点按 kind 分叉（stop-terminal 独立分支）");
-  assert.match(src, /\} else if \(exemption\.verdict !== "unrelated-flaky-exempt"\) \{/, "既有计数路径保留在 else 侧（两 verdict 不共用分支）");
+  // 静态半边：分叉必须存在，但自 AC-915 起形态是【注册表的两个独立单元】——
+  //   · 调用点只把归一化结局交给注册表，⛔ 不再持有 kind if/else（那正是扩展点退役的东西）；
+  //   · stop-terminal 与 count-and-retry 各自匹配自己的 kind、各自声明【不同】的转移
+  //     （needsHuman vs retryAdvance）⇒ 两 verdict 结构性不共用分支。
+  const driverSrc = fs.readFileSync(path.join(REPO_ROOT, "plugin", "scripts", "worker-driver.ts"), "utf8");
+  assert.match(driverSrc, /workerPool\.dispatchOutcome\(event/, "调用点把结局交给注册表（⛔ 不再持有 kind 分支）");
+  const poolSrc = fs.readFileSync(path.join(REPO_ROOT, "plugin", "scripts", "worker-pool.ts"), "utf8");
+  const stopAt = poolSrc.indexOf('id: "exited-not-landed-stop-terminal"');
+  const retryAt = poolSrc.indexOf('id: "exited-not-landed-count-and-retry"');
+  const quickAt = poolSrc.indexOf('id: "quick-death-backoff"');
+  assert.ok(
+    stopAt >= 0 && retryAt > stopAt && quickAt > retryAt,
+    "两个内置单元各自独立注册（stop-terminal 与 count-and-retry 是两条登记项）",
+  );
+  const stopUnit = poolSrc.slice(stopAt, retryAt);
+  const retryUnit = poolSrc.slice(retryAt, quickAt);
+  assert.match(stopUnit, /decisionKind === "stop-terminal"/, "stop-terminal 单元只匹配自己的 kind");
+  assert.match(stopUnit, /needsHuman: \[/, "stop-terminal 声明 needs-human 转移（独立分支）");
+  assert.doesNotMatch(stopUnit, /retryAdvance:/, "stop-terminal ⛔ 不走计数重派分支");
+  assert.match(retryUnit, /decisionKind === "count-and-retry"/, "计数重派单元只匹配自己的 kind");
+  assert.match(retryUnit, /retryAdvance: \{/, "计数重派声明 retryAdvance 转移");
+  assert.doesNotMatch(retryUnit, /needsHuman: \[/, "计数重派 ⛔ 不与 stop-terminal 共用转移");
 });
 
 // ── 载体：round 记录带判定三键（kind/verdict/reason）＋ 哈希，⛔ 不只在 json 事件里 ─────────────
