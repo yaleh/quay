@@ -678,8 +678,18 @@ export function isLandedCodeComplete(body) {
   return uncheckedItems.length > 0 && uncheckedItems.every(isOuterVerificationItem);
 }
 
-/** TASK-BODY-SIDE LANDED signal (gap-phantom-killer-false-negative-id-not-in-commits): the OR-in
- *  alternative to the git-grep hasLandedImplementation. The FALSE-NEGATIVE direction:
+/** TASK-BODY-SIDE COMPLETION CLAIM — ⛔ NO LONGER LANDING EVIDENCE (gap-meta-isbodylanded).
+ *  Kept as the pure completion-claim predicate: it answers "does the task body DECLARE itself
+ *  code-complete-except-outer-verification", which is exactly a SELF-REPORT. It is NOT a landing
+ *  signal and must never be OR-ed into a dispatch/defer decision — a task whose boxes were ticked by
+ *  hand (or by a worker that never landed) satisfies it while the tree says the opposite (measured:
+ *  gap-ac911-src-root-forwarding-shim-deletion, 10/10 ticked with the 10 declared-for-deletion shims
+ *  still present). Today its ONLY production consumer is slot-refill's incidence counter
+ *  `phantom_killer_false_negative_caught`; the authoritative "已合待翻 done" judgment lives in
+ *  ready-pool-check's notYetFlipped, which gates the same completion claim on tree-side evidence
+ *  (taskWorkLanded) and honours the leftover-worktree exemption.
+ *  ORIGINAL RATIONALE (kept for history — why the predicate exists at all): the FALSE-NEGATIVE
+ *  direction of the git-grep:
  *  hasLandedImplementation reads `git log develop --grep <taskId>` — when the implementation commits
  *  NEVER carry the task id in their message (the empirical case:
  *  gap-superseded-modeled-as-task-lifecycle-terminal — impl deba6463/8a8fc8f6/f12863a8/8bf44f9f/
@@ -690,8 +700,7 @@ export function isLandedCodeComplete(body) {
  *  item is outer-verification) is "已合待翻 done" even when no commit names its id. total > 0 is
  *  REQUIRED — a no-checkbox task (a fresh task with no completion boxes) must NOT be judged landed
  *  from body alone (that would be a phantom-killer FALSE POSITIVE: genuinely-new no-checkbox work
- *  swallowed). Reuses the single-source countCompletionCheckboxes + isOuterVerificationItem. */
-export function isBodyLanded(body) {
+ *  swallowed). Reuses the single-source countCompletionCheckboxes + isOuterVerificationItem. */export function isBodyLanded(body) {
   const { total, checked, uncheckedItems, sectionFound } = countCompletionCheckboxes(body);
   // AC47 (gap-ac47-completion-predicate-consumer-fail-closed, AC1/AC2): fail-closed on an
   // ABSENT/UNRECOGNIZED AC/DoD section — a body whose completion predicate cannot read its AC/DoD is
@@ -953,11 +962,14 @@ export function analyzeSlotRefill({ tasksDir, root, cap = FIXED_DISPATCH_CAP, fl
   // step-4 but assembleBatch serialized them all".
   let assembleBatchDeferred = [];
   // PHANTOM-KILLER FALSE-NEGATIVE OBSERVATION POINT (gap-phantom-killer-false-negative-id-not-in-
-  // commits AC1): count of ready tasks caught by the BODY-side landed signal (isBodyLanded) that the
-  // git-grep hasLandedImplementation MISSED (bodyLanded && !gitLanded). Each is a phantom-killer false
-  // negative — an already-landed task whose implementation commits never carried its id, so absent the
-  // body-side signal it WOULD have been recommended for dispatch. Declared at function scope so the
-  // result surfaces it (0 when nothing is evaluated).
+  // commits AC1; kept as an OBSERVATION by gap-meta-isbodylanded): count of ready tasks whose BODY
+  // claims completion (isBodyLanded) while the git-grep hasLandedImplementation sees no landing
+  // (bodyLanded && !gitLanded). It no longer drives any dispatch decision — the body-side claim is a
+  // self-report and must never defer (see the landed-implementation step-4 block). The reading is
+  // still useful: it is the incidence of "body says done, tree does not", i.e. exactly the class this
+  // gate used to bury (and, when the work really did land id-lessly, the class ready-pool-check's
+  // corroborated notYetFlipped now judges). Declared at function scope so the result surfaces it
+  // (0 when nothing is evaluated).
   let phantomKillerFalseNegativeCaught = 0;
   // AC2/AC3 (gap-delivery-critical-label-at-promote-not-after-dispatch): the delivery-critical tasks
   // EXCLUDED from this round's recommendation because they are IN-FLIGHT (deferred with a
@@ -1105,19 +1117,33 @@ export function analyzeSlotRefill({ tasksDir, root, cap = FIXED_DISPATCH_CAP, fl
     // MUTEX-CLIQUE LANDED-IGNORE (tasks/gap-slot-refill-clique-ignores-landed-touches): the `landed`
     // signal is computed ONCE here and reused below — an AC-incomplete landed task stays a candidate
     // (stuck-work), but its id is recorded so its touches never enter the batch clique.
-    // PHANTOM-KILLER FALSE-NEGATIVE BODY-SIDE OR-IN (gap-phantom-killer-false-negative-id-not-in-
-    // commits AC2): hasLandedImplementation (the git-grep — commit messages naming <task-id>) misses
-    // a landed task whose implementation commits NEVER carry the id (the empirical superseded-modeled
-    // shape — deba6463 etc. on develop but messages say "VALID_STATUSES 加 superseded"). OR-in the
-    // task-body-side signal (isBodyLanded — ACs 全勾 + 未勾项均为外层验证 ⇒ 视同 landed). The AC1 counter
-    // records the false-negative direction (body caught it when the git-grep missed). isLandedCodeComplete
-    // gates the union so an AC-incomplete landed task (stuck-work) stays dispatchable — isBodyLanded
-    // implies isLandedCodeComplete (both require the same code-complete-except-outer-verification
-    // disjunction; isBodyLanded additionally requires total > 0), so the body-side catch always defers.
+    // ⛔ BODY-SIDE SELF-REPORT IS NOT LANDING EVIDENCE (gap-meta-isbodylanded, 2026-10-21).
+    // The body-side signal (isBodyLanded — ACs 全勾 + 未勾项均为外层验证) USED to be OR-ed into
+    // `landed` (gap-phantom-killer-false-negative-id-not-in-commits AC2), so a task whose completion
+    // checkboxes were ALL TICKED was deferred `landed-implementation` even when the tree carried no
+    // landing at all. That is a self-report used as landing evidence — a quantity structurally unable
+    // to take false (hard rule 4). Measured on gap-ac911-src-root-forwarding-shim-deletion: ready,
+    // 10/10 boxes ticked, the 10 shims it declared for deletion still present in the tree, its only
+    // in-flight trace a worker worktree that never landed — it was the ONLY task able to advance
+    // GOAL-907, and this gate buried it permanently (reason=landed-implementation; the AC-911 verdict
+    // read fail for 20 consecutive rounds).
+    // The body-side signal is still READ for the incidence counter below, but it NEVER DEFERS: landing
+    // must be asserted from the TREE. The corroborated version of this judgment already exists one
+    // layer up — ready-pool-check's notYetFlipped, whose completion arm is gated on its tree-side
+    // workLanded signal AND which honours the leftover-worktree exemption (an OPEN task worktree is
+    // the DIRECT "fan-in not yet complete" quantity). slot-refill consumes that judgment through
+    // isNotYetFlippedSkip's `excludedNyfIds` arm above, so the false-negative class it was added for
+    // (a landed task whose implementation commits never carry the id) is still kept out of
+    // `recommended` — by evidence, not by self-report (verified: ready-pool-check.notYetFlipped
+    // returns true on the real gap-superseded-modeled-as-task-lifecycle-terminal body).
+    // ⛔ Do NOT re-add a body-side arm here: this layer has no worktree/landing-ref knowledge, which
+    // is exactly why the self-report arm was able to bypass the exemption one layer up.
     const gitLanded = hasLandedImplementation(root, id);
     const bodyLanded = isBodyLanded(text);
+    // OBSERVATION ONLY (never a dispatch decision): how often the body claims completion while the
+    // tree shows no landing — the incidence reading for this defect class.
     if (bodyLanded && !gitLanded) phantomKillerFalseNegativeCaught++;
-    const landed = gitLanded || bodyLanded;
+    const landed = gitLanded;
     if (landed && isLandedCodeComplete(text)) { defer(id, "landed-implementation"); continue; }
     // step-4 check 5: C8 SELF-TOUCH (gap-slot-refill-c8-reject-no-backfill) — the dispatch gate
     // (fast-mode-tick-core.md C8) requires the candidate's OWN `tasks/<id>.md` in ## Touches

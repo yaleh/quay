@@ -27,27 +27,64 @@
 // SPLIT from slot-refill.test.mjs by gap-suite-split-15-over-30s-test-files — shard 16/20 (6 tests). Shared fixtures: ./helpers/slot-refill-harness.mjs (single source).
 
 import { test } from "node:test";
-import { analyzeSlotRefill, assert, bodyLandedOuterUncheckedBody, dispatchableBody, fs, hasLandedImplementation, isBodyLanded, isImplementationClassFile, isLandedCodeComplete, isOuterVerificationItem, landedNoCheckboxBody, makeLandedNoIdWorkspace, makeLandedWorkspace, makeSidecarCommitWorkspace, makeTaskOnlyCommitWorkspace, path, writeTask } from "./helpers/slot-refill-harness.mjs";
+import { analyzeSlotRefill, analyzeTasks, assert, bodyLandedOuterUncheckedBody, dispatchableBody, fs, hasLandedImplementation, isBodyLanded, isImplementationClassFile, isLandedCodeComplete, isOuterVerificationItem, landedNoCheckboxBody, makeLandedNoIdWorkspace, makeLandedWorkspace, makeSidecarCommitWorkspace, makeTaskOnlyCommitWorkspace, path, writeTask } from "./helpers/slot-refill-harness.mjs";
 
-test("PHANTOM-KILLER FALSE NEGATIVE — a landed task whose implementation commits never carry the id (superseded-modeled shape) is NOT recommended (AC1/AC2/AC3)", (t) => {
-  const root = makeLandedNoIdWorkspace("body", "gap-superseded");
+test("SELF-REPORT IS NOT LANDING EVIDENCE — an all-checked body with NO tree-side landing is NOT deferred landed-implementation (gap-meta-isbodylanded)", (t) => {
+  // THE MEASURED DEFECT SHAPE (gap-ac911-src-root-forwarding-shim-deletion, 2026-10-21): a ready task
+  // whose completion boxes are ALL ticked (10/10) while the tree shows NO landing at all (the 10 shims
+  // it declared for deletion still present, no develop commit carrying an implementation-class file
+  // for it). slot-refill deferred it `landed-implementation` on the body-side self-report ALONE ⇒ the
+  // only task able to advance its goal was buried permanently. The completion claim is still READ (the
+  // incidence counter), it is simply never landing EVIDENCE.
+  const root = makeLandedNoIdWorkspace("selfreport", "gap-ac911-shape");
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
-  // Pure-git: NO develop commit names the id ⇒ hasLandedImplementation is false — the false negative.
-  assert.equal(hasLandedImplementation(root, "gap-superseded"), false, "git-grep misses the id-less implementation (the false negative)");
-  // Body-side: ACs 全勾 + the ONLY unchecked item is the outer full-suite verification ⇒ landed.
+  // Precondition: the tree carries no landing for this id (no commit names it ⇒ git-grep misses; the
+  // fixture's implementation file is unrelated to this task's Touches).
+  assert.equal(hasLandedImplementation(root, "gap-ac911-shape"), false, "precondition: no tree-side landing evidence");
   const body = bodyLandedOuterUncheckedBody();
+  // The self-report still reads as complete — which is exactly why it must not be trusted alone.
+  assert.equal(isBodyLanded(body), true, "the body self-reports complete (that is the whole problem)");
+  writeTask(root, "gap-ac911-shape", { status: "ready", labels: ["gap"], body });
+  const r = analyzeSlotRefill({ tasksDir: path.join(root, "tasks"), root, cap: 3 });
+  const reasons = (r.deferred || []).filter((d) => d.id === "gap-ac911-shape").map((d) => d.reason);
+  assert.ok(!reasons.includes("landed-implementation"), `self-report alone must NOT defer, got: ${reasons.join(",")}`);
+  assert.ok(r.recommended.includes("gap-ac911-shape"), "the task stays DISPATCHABLE (no permanent burial)");
+  // The incidence reading survives as an OBSERVATION (it no longer drives the decision).
+  assert.equal(r.phantom_killer_false_negative_caught, 1, "body-claims-complete/tree-shows-nothing is still REPORTED (observation only)");
+});
+
+test("ID-LESS LANDED — the false-negative class is still kept out of `recommended`, by the CORROBORATED pool judge (not by the body)", (t) => {
+  // The case the body-side arm was originally added for (gap-phantom-killer-false-negative-id-not-in-
+  // commits): implementation landed on the integration line but NO commit message carries the id, so
+  // hasLandedImplementation misses it. That protection is NOT lost by removing the body-side arm — it
+  // now comes from the layer that can actually see the tree: ready-pool-check.notYetFlipped gates the
+  // SAME completion claim on taskWorkLanded (`(new)`-touch existence here), so the task is pool-excluded
+  // and slot-refill's `excludedNyfIds` arm defers it as not-yet-flipped.
+  const root = makeLandedNoIdWorkspace("idless", "gap-superseded");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  assert.equal(hasLandedImplementation(root, "gap-superseded"), false, "git-grep misses the id-less implementation (the false negative)");
+  // `plugin/scripts/impl.ts` EXISTS on disk (created by the merged branch) and is declared `(new)` ⇒
+  // the tree-side landed signal (taskWorkLanded touch arm) fires — the corroboration the body arm
+  // lacked. The remaining DoD item carries the pool's `（待外部）` annotation, so ready-pool-check's
+  // `remainingAllExternal` arm applies — GATED on workLanded, i.e. on that tree-side evidence.
+  const body = bodyLandedOuterUncheckedBody("- plugin/scripts/impl.ts (new)").replace(
+    "- [ ] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）——外层 verification-round 验证",
+    "- [ ] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）（待外部）",
+  );
   assert.equal(isOuterVerificationItem("全量套件绿（`fail 0`）——外层 verification-round 验证"), true, "the outer full-suite item is recognized as outer-verification (AC2)");
-  assert.equal(isBodyLanded(body), true, "ACs 全勾 + 唯一未勾是外层验证 ⇒ body-side landed (AC2)");
   assert.equal(isLandedCodeComplete(body), true, "the completion gate also recognizes the outer family (AC2)");
-  // End-to-end: the landed-but-id-less task is deferred, NOT recommended; a genuinely-new peer still is.
+  assert.equal(isBodyLanded(body), true, "body-side claim (unchanged, observation only)");
   writeTask(root, "gap-superseded", { status: "ready", labels: ["gap"], body });
   writeTask(root, "gap-fresh", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/fresh.ts (new)"]) });
   const r = analyzeSlotRefill({ tasksDir: path.join(root, "tasks"), root, cap: 3 });
-  assert.ok(!r.recommended.includes("gap-superseded"), "id-less landed task is NOT recommended (AC2)");
-  const reasons = (r.deferred || []).filter((d) => d.id === "gap-superseded").map((d) => d.reason);
-  assert.ok(reasons.includes("landed-implementation"), `deferred landed-implementation, got: ${reasons.join(",")}`);
-  assert.ok(r.recommended.includes("gap-fresh"), "a genuinely-new ready task is still recommended (AC3 negative control)");
-  assert.equal(r.phantom_killer_false_negative_caught, 1, "the body-side catch of a git-missed task is counted (AC1)");
+  assert.ok(!r.recommended.includes("gap-superseded"), "id-less landed task is NOT recommended (the false-negative protection survives)");
+  // It is excluded by the POOL's corroborated judge (not by slot-refill's body arm) — assert that
+  // judge directly, so the reading names the mechanism that now carries the protection.
+  const pool = analyzeTasks({ tasksDir: path.join(root, "tasks"), root, cap: 3 });
+  const excluded = (pool.excluded || []).find((e) => e.id === "gap-superseded");
+  assert.ok(excluded, "the pool excludes the id-less landed task");
+  assert.ok(excluded.reasons.includes("not-yet-flipped"), `excluded by the tree-side not-yet-flipped judge, got: ${(excluded.reasons || []).join(",")}`);
+  assert.ok(r.recommended.includes("gap-fresh"), "a genuinely-new ready task is still recommended (negative control)");
 });
 
 

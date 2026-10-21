@@ -37,17 +37,45 @@ goal_ac: AC-912
 
 ## AC
 
-- [ ] AC1 新测试文件存在且 `node --experimental-strip-types --test packages/quay/test/ac912-criterion-discriminates-shim-deletion.test.mjs` exit 0；测试从 `goals/AC-912-*.md` 与 `goals/AC-911-*.md` 的 frontmatter **逐字**读回 criterion（缺失即失败，不跳过），并断言两份文本分别含 10 名列表与 `grep -rln 'FORWARDING re-export'`
-- [ ] AC2（生产载体）同一测试在真树 `REPO` 上执行 AC-912 shipped criterion，断言 exit 0、stdout 含 `OK: 10 internal shims deleted`，且 10 个 `packages/quay/src/<name>.ts` 的 `fs.existsSync` 全为 false（绿读数来自生产树，不是夹具）
-- [ ] AC3（区分性负控）同一测试构造只抹头注释的 scratch 树（10 个无头注释的转发文件 + 完整的 abi/config），断言头注释文件数=2、AC-911 shipped criterion exit 0（读数 2）、AC-912 shipped criterion exit 1 且 stderr 逐名 10 个；两条读数在同一次运行里同时成立
-- [ ] AC4（空转守卫）同一测试对 AC-912 criterion 做定向 mutation（从 `for m in …` 移除 `adr-store`），断言 sha256 改变；在只含 `adr-store.ts` 的 scratch 树上 shipped 判据 exit 1 点名 `adr-store`、mutated 判据 exit 0
-- [ ] AC5 `bash scripts/test.sh --for-task gap-ac912-criterion-discriminates-shim-deletion --allow-thin` exit 0（scoped gate，实测读数贴进任务体）
+- [x] AC1 新测试文件存在且 `node --experimental-strip-types --test packages/quay/test/ac912-criterion-discriminates-shim-deletion.test.mjs` exit 0；测试从 `goals/AC-912-*.md` 与 `goals/AC-911-*.md` 的 frontmatter **逐字**读回 criterion（缺失即失败，不跳过），并断言两份文本分别含 10 名列表与 `grep -rln 'FORWARDING re-export'`
+- [x] AC2（生产载体）同一测试在真树 `REPO` 上执行 AC-912 shipped criterion，断言 exit 0、stdout 含 `OK: 10 internal shims deleted`，且 10 个 `packages/quay/src/<name>.ts` 的 `fs.existsSync` 全为 false（绿读数来自生产树，不是夹具）
+- [x] AC3（区分性负控）同一测试构造只抹头注释的 scratch 树（10 个无头注释的转发文件 + 完整的 abi/config），断言头注释文件数=2、AC-911 shipped criterion exit 0（读数 2）、AC-912 shipped criterion exit 1 且 stderr 逐名 10 个；两条读数在同一次运行里同时成立
+- [x] AC4（空转守卫）同一测试对 AC-912 criterion 做定向 mutation（从 `for m in …` 移除 `adr-store`），断言 sha256 改变；在只含 `adr-store.ts` 的 scratch 树上 shipped 判据 exit 1 点名 `adr-store`、mutated 判据 exit 0
+- [x] AC5 `bash scripts/test.sh --for-task gap-ac912-criterion-discriminates-shim-deletion --allow-thin` exit 0（scoped gate，实测读数贴进任务体）
 
 ## DoD
 
 `packages/quay/test/ac912-criterion-discriminates-shim-deletion.test.mjs` 真的落在树里，并且**执行的是 `goals/AC-912-*.md` / `goals/AC-911-*.md` 里 shipped 的 criterion 文本**：真树读数 exit 0；只抹头注释的树读数 AC-911 exit 0（2）/ AC-912 exit 1（逐名 10 个）——两者在同一次运行里同时成立。用手工改 `goals/AC-912-*.md` 的 criterion（例如从列表删掉 `adr-store`）后测试**实际变红**、恢复后变绿，这个双向操作跑过一次并记录 sha256/exit（DIR-026 Reading A：对象是判据文本本身，真的被操作过，不是「测试存在」）。`npx tsc --noEmit` 与 scoped gate 全绿；fan-in 步骤跑全量 suite。不改 `packages/quay/src`、不改 AC-911/AC-912 的 status、不退役 AC-911。
 
 ⛔ 不算达成：在测试里把判据重新实现一遍（回声，不是测量 shipped 文本）；只在 scratch 树上断言而真树读数缺席；把两棵树的期望写成布尔常量而不实际执行 criterion；把 AC-911 的判据复制成测试内常量而不从 goal record 读回。
+
+## Evidence
+
+**实现**：`packages/quay/test/ac912-criterion-discriminates-shim-deletion.test.mjs`（commit `032980cdf`，`// @test-group product`，4 个 `node:test` test）。被测对象是从 `goals/AC-91{1,2}-*.md` frontmatter 解析回的 `criterion` 字符串，用 `/bin/sh -c <text>` 在目标 cwd 执行——**测试内没有任何判据复写**；判据文本与期望都由 goal record 决定。
+
+**AC1** 裸跑：exit 0，`ℹ tests 4 / ℹ pass 4 / ℹ fail 0`。第一个 test 断言 AC-912 文本含 `for m in adr-store branch-model … worktree-namespace; do`（**10 名齐全、顺序固定**）、`[ -e "packages/quay/src/$m.ts" ]`、`OK: 10 internal shims deleted`；AC-911 文本含 `grep -rln 'FORWARDING re-export' packages/quay/src/*.ts`、`OK: src-root shim count = 2`；两者 sha256 互异。goal 文件缺失 / `criterion` 非字符串 ⇒ `assert` 失败（不 skip —— 硬规则 3b）。
+
+**AC2（arm A，生产载体）** 在 `REPO`（本 worktree）跑 shipped AC-912 ⇒ exit **0**，stdout `OK: 10 internal shims deleted`；`fs.existsSync` 对 10 个 `packages/quay/src/<name>.ts` 全 **false**，且 `abi.ts`/`config.ts` 仍在。
+
+**AC3（arm B，区分性负控）** `mkdtemp` scratch root：10 个无头注释转发文件 + 从真树复制的 `abi.ts`/`config.ts`。同一次 test 内实测：
+
+- 头注释文件数（直接读盘，不经 AC-911）= **2**
+- shipped AC-911 ⇒ exit **0**，stdout `OK: src-root shim count = 2`
+- shipped AC-912 ⇒ exit **1**，stderr 逐字为 `internal shims still present: adr-store branch-model contract-validator criterion-fidelity document-store frontmatter-store-base goal-store plugin-root store-commit worktree-namespace`
+
+**AC4（arm C，空转守卫）** mutation = `for m in adr-store ` → `for m in `（anchor 命中数断言 =1；改后 sha256 不同）。只含 `packages/quay/src/adr-store.ts` 的 scratch root 上：shipped ⇒ exit **1** 且 stderr 恰为 `internal shims still present: adr-store`；mutated ⇒ exit **0** 且 stdout `OK: 10 internal shims deleted`。
+
+**DoD 双向操作（对象是判据文本本身，DIR-026 Reading A）**：
+
+| 步骤 | `goals/AC-912-*.md` sha256 | test exit | 读数 |
+|---|---|---|---|
+| 原始 | `484804bfbdc6a14e35f6bf61b40fda7410965909c08e610e353caf1bb511963c` | 0 | 4/4 pass |
+| 手工从 `for m in` 列表删掉 `adr-store` | `b4f100e20d8a55bdc85b4f3fdcb2c06054953ec35c7c62bb881810b1521ca60c` | 1 | 3/4 fail（arm A 仍绿是对的——真树上那些文件确实不存在；红的是提取形状断言 + arm B + arm C） |
+| 从备份恢复 | `484804bfbdc6a14e35f6bf61b40fda7410965909c08e610e353caf1bb511963c`（与原**字节相同**，已 diff 校验） | 0 | 4/4 pass |
+
+**AC5（scoped gate）** `bash scripts/test.sh --for-task gap-ac912-criterion-discriminates-shim-deletion --allow-thin` ⇒ **exit 0**。scoped 静态检查全 PASS：`tmp-leak-pairing-check`（1023 file / 0 unpaired）、`test-framework-policy-check`（1023 glob / 33 exemption，PASS）、`test-isolation-check`（21 条全 baselined）、`checked-in-write-check`（PASS）、`import-graph-check`（valueSccs=0 / typeSccs=0 / reverseEdges=0）、`task-contract-check` / `malformed-task-check` / `touches-one-entry-one-path-check` / `landing-target-check` / `test-group-downgrade-check` 均 PASS；随后本文件 4/4 pass。
+
+**其它**：`npx tsc --noEmit` ⇒ exit 0。anti-drift Touches（`--merge-target develop`）⇒ `ANTI-DRIFT OK: 1 actual file(s), all within declared Touches (3 glob(s))`。未改 `packages/quay/src`、未改 AC-911/AC-912 的 status（AC-911 仍 `achieved`、AC-912 仍 `active`）、未退役 AC-911。
 
 ## Touches
 

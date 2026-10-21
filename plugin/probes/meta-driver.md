@@ -30,11 +30,20 @@ WHAT YOU ARE GIVEN (the `readings` JSON in the prompt — treat it as arithmetic
 - `criteria`: every AC belonging to those goals, each with its declared `criterion` (a runnable shell
   command), its record `status`, and the `verdict`/`reason` from ACTUALLY RUNNING that criterion this
   round via `goal-store.ts gate <id>`. The verdict is a real execution result, not a self-report.
+  A `not-evaluated` verdict ALSO carries `cause` — WHY it could not be measured (`spawn` = the child
+  was killed at the driver's bound / could not start, `usage` = exit 2, `unreadable` = non-JSON
+  stdout, or the store's own cause such as `timeout` / `capability` / `declared`; `null` for a
+  definitive pass/fail). Cite the cause when you interpret a `not-evaluated` — ⛔ never invent one.
 - `divergences`: mechanically-computed mismatches between what a criterion says and what the record
-  says. Three kinds:
+  says. Four kinds:
     - `pass-but-unflipped`  — criterion PASSES but the record is not `achieved`.
     - `achieved-but-failing` — record says `achieved` but the criterion FAILS.
     - `no-criterion`        — the AC has no runnable criterion, so it fails closed (unenforceable).
+    - `not-evaluated`       — the AC is committed (active/achieved) but its criterion could NOT BE
+      RUN this round. This is NOT "the criterion is false" and NOT "the criterion passed" (hard rule
+      3b): it is an instrument reading, and it is escalated precisely because a criterion that can
+      never run can never unblock anything. Its `reason`/the criteria `cause` name the knob
+      (deadline, invocation, capability declaration).
   Each divergence also carries `repeatCount` — how many CONSECUTIVE rounds have already produced a
   recommendation for this same (id, kind) — and `lastRecommendation` — the text of the most recent
   one. These are mechanically computed from YOUR OWN carrier (`.quay/meta-driver-round.jsonl`), NOT
@@ -46,7 +55,10 @@ WHAT YOU ARE GIVEN (the `readings` JSON in the prompt — treat it as arithmetic
   not a verdict). It is the axis that decides what you output (see HANDLER ROUTING below):
     - `handler.kind` — the driver kind that owns this divergence: `goal` (pass-but-unflipped — the
       goal-driver flips `achieved` automatically), `worker` (no-criterion — the task→worker pipeline,
-      which needs an EXPLICIT trigger), or `none` (achieved-but-failing — no mechanism owns it).
+      which needs an EXPLICIT trigger), or `none` (achieved-but-failing, and not-evaluated — no
+      mechanism owns them). ⛔ `not-evaluated` is `none` ON PURPOSE: the goal-driver merely RE-RUNS
+      an unmeasurable criterion every round — that is the failing instrument, not a handler for it.
+      Person-territory (raise the deadline / repair the invocation / declare the capability).
     - `handler.state` — one of: `healthy` (the handler is present AND running), `stalled` (present
       but NOT running — driver process dead / carrier stale), `absent` (no such handler exists),
       `unreadable` (the drivers reading itself could not be read). ⛔ `absent` ≠ `unreadable`: "there
@@ -277,7 +289,7 @@ RESTRAINT — this is the point of the mechanism, not an afterthought:
    one for the other. Cover EVERY record you were given; a missing entry is a gap, not a "no opinion".
 
 REPLY WITH ONLY a JSON object, no prose around it:
-{"divergences":[{"id":"AC-NNN","kind":"pass-but-unflipped|achieved-but-failing|no-criterion",
+{"divergences":[{"id":"AC-NNN","kind":"pass-but-unflipped|achieved-but-failing|no-criterion|not-evaluated",
   "interpretation":"<one line: what this actually means>",
   "recommendation":"<one line: what should happen, and by whom>"}],
  "proposals":[{"goal":"GOAL-NNN","title":"<one line>","criterion":"<runnable shell>",

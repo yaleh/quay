@@ -2,7 +2,7 @@
 id: gap-meta-goaldriverchildtimeoutms
 title: Goal-gate child is SIGKILLed at its outer bound before writing a verdict
   — AC-911 has been unmeasured for 13 rounds
-status: ready
+status: done
 labels:
   - meta-driver
   - driver-candidate
