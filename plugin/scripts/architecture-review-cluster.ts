@@ -665,7 +665,10 @@ export function classifyEvidenceSource(evidence: string): EvidenceSource {
   const e = String(evidence ?? "").trim();
   if (e.length === 0) return "none";
   if (
-    /(?:^|[\s(（"'`])tasks\/[A-Za-z0-9._-]+\.md\b/.test(e) ||
+    // 前导字符用 `[^\w/]` 表达「词边界或括号/引号/反引号/空白」，⛔ 不在正则字面量里写引号与反引号：
+    // carrier-registry-completeness.test.mjs 的词法器不认正则字面量，一个字面引号会把该行之后的字符串
+    // 全部吞成「字符串」，让本文件的载体名从扫描结果里消失（伪装成 stale registry entry）。
+    /(?:^|[^\w/])tasks\/[A-Za-z0-9._-]+\.md\b/.test(e) ||
     /\b(?:done|completed)\s+task\b/i.test(e) ||
     /(?:任务库|已完成(?:的)?任务|同标题\s*done\s*任务|done\s*任务)/.test(e)
   ) {
