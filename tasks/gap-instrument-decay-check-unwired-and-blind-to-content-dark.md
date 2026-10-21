@@ -2,7 +2,7 @@
 id: gap-instrument-decay-check-unwired-and-blind-to-content-dark
 title: 仪器腐烂检测器 instrument-decay-check 自称常驻却没有任何机制调用（手动一跑即报 3
   个未裁定告警），且只认识「停止写入」，看不见「照常写入但内容是未评估或过期」的两种暗形态
-status: todo
+status: ready
 labels:
   - gap
   - defect
