@@ -27,17 +27,43 @@ extra:
 
 - packages/quay/src/init.ts
 - packages/quay/src/core/branch-model.ts
+- packages/quay/src/cli/init.ts
 - packages/quay/test/init.test.mjs
 - packages/quay/test/branch-model.test.mjs
 - tasks/gap-quay-init-declined-auto-commit-leaves-doc-branch-unenforced.md
 
 ## Acceptance Criteria
 
-- [ ] 一个 fixture（`git init -b develop` + 1 提交 + 无 `author` 分支 + `loop.fork_baseline: develop` 的 config）触发常驻检查，输出「doc-branch 不变量违反」且 exit 非 0；补救命令（`quay init --doc-branch-name author` 或 `git checkout -b author`）执行后，同一检查器报告 ok、exit 0。
-- [ ] 负对照：主检出已在 `author` 的 fixture 下，检查器报告 ok、exit 0（证明检查器能取假，不是恒真回显）。
-- [ ] 非交互 `quay init`（无 `--auto-commit-config`）在 0 提交仓库上运行后，其输出/退出码/产物里存在机器可读的「doc-branch 不变量待建立」信号（grep 可命中，不是只有 prose "DECLINED" 文案）。
-- [ ] `node --test packages/quay/test/init.test.mjs` 与 `node --test packages/quay/test/branch-model.test.mjs` exit 0。
+- [x] 一个 fixture（`git init -b develop` + 1 提交 + 无 `author` 分支 + `loop.fork_baseline: develop` 的 config）触发常驻检查，输出「doc-branch 不变量违反」且 exit 非 0；补救命令（`quay init --doc-branch-name author` 或 `git checkout -b author`）执行后，同一检查器报告 ok、exit 0。
+- [x] 负对照：主检出已在 `author` 的 fixture 下，检查器报告 ok、exit 0（证明检查器能取假，不是恒真回显）。
+- [x] 非交互 `quay init`（无 `--auto-commit-config`）在 0 提交仓库上运行后，其输出/退出码/产物里存在机器可读的「doc-branch 不变量待建立」信号（grep 可命中，不是只有 prose "DECLINED" 文案）。
+- [x] `node --test packages/quay/test/init.test.mjs` 与 `node --test packages/quay/test/branch-model.test.mjs` exit 0。
 
 ## Definition of Done
 
 一个真实 repo（plantuml-js 或等价 fixture）从「主检出 develop、无 author」经补救命令变成「主检出 author」，且常驻检查重跑报 ok；修复后的检查器/信号在测试里以负对照证明能取假（DIR-026 Reading A：真实对象经机制操作过，不是 fixture 自证）。
+
+## Evidence
+
+**机制（实现）**：`packages/quay/src/core/branch-model.ts` 新增只读四态判定 `checkDocBranchInvariant`（`satisfied` / `violated` / `pending` / `not-evaluated`）+ `formatDocBranchInvariantReport`（稳定 token `doc-branch-invariant: <STATE> (reason: <枚举>)`）；`packages/quay/src/init.ts` 新增唯一名字解析 `resolveDocBranchName`（flag > `loop.doc_branch` > 约定），`runInit` 在运行结束后把该判定附在 `InitResult` / `buildInitReport` 的 `docBranchInvariant` 上；`packages/quay/src/cli/init.ts` 新增只读动词 `quay init --check-doc-branch`（仅 `violated` exit 1；`pending` / `not-evaluated` exit 0），并让每次非 blocked 的 init 都打印该行。
+
+**AC1 读数**（等价 fixture：`git init -b develop` + 1 提交 + 无 `author` + `loop.fork_baseline: develop`）：
+```
+doc-branch-invariant: VIOLATED (reason: on-baseline-no-doc-branch) — ...; remedy: quay init --doc-branch-name author
+EXIT=1
+（补救：git checkout -b author 或 quay init --doc-branch-name author）
+doc-branch-invariant: SATISFIED (reason: not-on-baseline) — ...   EXIT=0
+```
+**AC2 负对照**：主检出在 `author` 的 fixture ⇒ `SATISFIED` / `EXIT=0`；检查器自身只读（检查后 `git branch --list author` 仍为空、HEAD 未移动、config 字节不变，见 `branch-model.test.mjs` AC1(CLI)）。
+
+**AC3 读数**（0 提交仓库、非交互 `quay init`，auto-commit DECLINED）：
+```
+stderr: auto-commit: DECLINED (non-interactive — ...)
+stdout: doc-branch-invariant: PENDING (reason: no-commits-yet) — ...; remedy: commit ... then run `quay init --doc-branch-name author`
+--json: {"docBranchInvariant":{"state":"pending","reason":"no-commits-yet","ok":true,...}}
+```
+外部进程随后提交 laydown ⇒ 同一检查器转为 `VIOLATED` / exit 1（这正是原先永久静默的窗口）。
+
+**AC4 读数**：`node --test packages/quay/test/branch-model.test.mjs` → 62 pass / 0 fail；`node --test packages/quay/test/init.test.mjs` → 90 pass / 0 fail。
+
+**DoD 读数**：真实 plantuml-js 工作区（本机 `/data/home/yale/work/plantuml-js`，已被人工补救为 `author`）上跑 `quay init --check-doc-branch` ⇒ `SATISFIED (reason: not-on-baseline)` / exit 0（只读，未改动该工作区）。等价失败态 fixture（首提交 author 为 `Observer Probe <observer@example.invalid>`、message `quay workspace laydown: init six-file config surface`、主检出 `develop`、无 `author`）经 `quay init --doc-branch-name author` 后：`[CREATED] doc-branch -> author` + 主检出 `develop → author`，重跑检查 ⇒ `SATISFIED` / exit 0。负对照（AC2）与 `PENDING`/`NOT-EVALUATED` 两态证明输出词表里存在「非违反」取值，不是恒真回显。
