@@ -1,7 +1,7 @@
 ---
 id: gap-ac912-criterion-discriminates-shim-deletion
 title: AC-912 判据的可证伪性载体：只抹头注释的树必须 AC-911 绿 / AC-912 红（逐字执行 shipped criterion + 区分性负控）
-status: ready
+status: done
 labels:
   - gap
 parent: null
