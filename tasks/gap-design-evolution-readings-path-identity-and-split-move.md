@@ -35,10 +35,10 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1 路径身份（真实载体）：对主检出真实的 `.quay/worker-outcome.jsonl` 运行一次，worker-driver.ts 那一项的键为 `plugin/scripts/worker-driver.ts`，其 `observedPaths` 中不再出现任何 `quay-worktrees/` 或以 `/` 开头的路径；贴出该项原文。
-- [ ] AC2 同名不同目录分键（夹具负对照）：夹具里两个不同目录下的同名文件各有一次形态 2 冲突，读数必须是两个键、各计 1；把归一逻辑改回只取文件名时，该测试必须失败。贴出两次输出。
-- [ ] AC3 形态 2 有出处：真实载体上 `docs/analysis/quay-init-closure-ratchet.baseline.json` 一项的 `observedPaths` 非空，且包含该仓库相对路径；贴出该项原文。
-- [ ] AC4 搬家可见（真实历史）：对 worker 子系统（baseline 2440b52d0，head HEAD，中心文件 worker-driver.ts + worker-fan-in.ts，modules 为 `plugin/scripts/` 下文件名含 worker / pool / dispatch / fan-in 的 .ts）运行，`oppositeSignCommits` 包含 f19a95371 与 024f9d7f2，且不包含 3ad17ac26；贴出该字段原文。
+- [x] AC1 路径身份（真实载体）：对主检出真实的 `.quay/worker-outcome.jsonl` 运行一次，worker-driver.ts 那一项的键为 `plugin/scripts/worker-driver.ts`，其 `observedPaths` 中不再出现任何 `quay-worktrees/` 或以 `/` 开头的路径；贴出该项原文。
+- [x] AC2 同名不同目录分键（夹具负对照）：夹具里两个不同目录下的同名文件各有一次形态 2 冲突，读数必须是两个键、各计 1；把归一逻辑改回只取文件名时，该测试必须失败。贴出两次输出。
+- [x] AC3 形态 2 有出处：真实载体上 `docs/analysis/quay-init-closure-ratchet.baseline.json` 一项的 `observedPaths` 非空，且包含该仓库相对路径；贴出该项原文。
+- [x] AC4 搬家可见（真实历史）：对 worker 子系统（baseline 2440b52d0，head HEAD，中心文件 worker-driver.ts + worker-fan-in.ts，modules 为 `plugin/scripts/` 下文件名含 worker / pool / dispatch / fan-in 的 .ts）运行，`oppositeSignCommits` 包含 f19a95371 与 024f9d7f2，且不包含 3ad17ac26；贴出该字段原文。
 
 ## Definition of Done
 
@@ -58,3 +58,4 @@ extra:
 - tasks/gap-design-evolution-readings-path-identity-and-split-move.md
 - plugin/scripts/design-evolution-readings.ts
 - plugin/test/design-evolution-readings.test.mjs
+- plugin/test/quality-gate-driver.test.mjs
