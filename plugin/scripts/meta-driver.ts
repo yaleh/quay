@@ -118,10 +118,24 @@ export interface CriterionReading {
   criterion: string | null;
   verdict: "pass" | "fail" | "not-evaluated";
   reason: string;
+  /** WHY a `not-evaluated` is not-evaluated — mirroring goal-driver.ts's gateCriterion so the two
+   *  driver readouts name the same causes: "spawn" (the child was killed / could not start — the
+   *  75 000ms outer bound lands here), "usage" (exit 2), "unreadable" (non-JSON stdout), or the
+   *  goal-store's OWN cause (e.g. "timeout", "capability", "declared"). `null` when the verdict is
+   *  definitive (pass/fail) or the store did not name a cause.
+   *  (tasks/gap-meta-goaldriverchildtimeoutms — without this, "not-evaluated" was a dead end: the
+   *  2026-10-21 autoDrive task could only say "not-evaluated" and invented the rest. A reading that
+   *  cannot say WHY it is not measurable cannot be routed OR refuted.) */
+  cause: string | null;
 }
 
-/** 机械算出的三类偏离（criterion 的真值 vs 记录的自述）。 */
-export type DivergenceKind = "pass-but-unflipped" | "achieved-but-failing" | "no-criterion";
+/** 机械算出的四类偏离（criterion 的真值 vs 记录的自述）。
+ *  ⛔ `not-evaluated` is its OWN kind, never folded into pass/fail (hard rule 3b: "could not
+ *  measure" and "is false" are different values). It exists so a standing unmeasured AC is
+ *  ESCALATED instead of being silently absent from every divergence list
+ *  (tasks/gap-meta-goaldriverchildtimeoutms: the 2026-10-21 reading was `not-evaluated` for 13
+ *  consecutive rounds and no handler was ever told). */
+export type DivergenceKind = "pass-but-unflipped" | "achieved-but-failing" | "no-criterion" | "not-evaluated";
 
 /** 处理者的三态 + 「读不出」。⛔ 读不出 ≠ 不存在：读不懂不得与「合格」或其反面同形
  *  （硬规则 3b）。「不存在」是【确实没有处理者】，「读不出」是【读了但没读到】——两者处置相反
@@ -280,7 +294,7 @@ export async function gateCriterion(
   root: string,
   id: string,
   opts: { recordTimeoutMs?: unknown } = {},
-): Promise<{ verdict: "pass" | "fail" | "not-evaluated"; reason: string }> {
+): Promise<{ verdict: "pass" | "fail" | "not-evaluated"; reason: string; cause: string | null }> {
   // The OUTER bound is DERIVED from the child's own inner deadline (its record's `timeoutMs` >
   // env > default), ⛔ never the mechanical `CRITERION_TIMEOUT_MS`: a record declaring a deadline
   // ≥ that literal would be pre-empted by the driver's SIGKILL before `goal gate` could reach its own
@@ -290,16 +304,22 @@ export async function gateCriterion(
     collectStderr: true,
     killGraceMs: GOAL_STORE_SIGTERM_GRACE_MS,
   });
-  if (r.error) return { verdict: "not-evaluated", reason: `gate spawn error: ${r.error.message}` };
+  if (r.error) return { verdict: "not-evaluated", reason: `gate spawn error: ${r.error.message}`, cause: "spawn" };
   // exit 0 = pass, 1 = fail（含空 criterion 的 fail-closed）, 2 = 用法/记录不存在 ⇒ 无法评估。
-  if (r.status === 2) return { verdict: "not-evaluated", reason: `gate usage error: ${(r.stderr || "").trim().slice(0, 200)}` };
+  if (r.status === 2) return { verdict: "not-evaluated", reason: `gate usage error: ${(r.stderr || "").trim().slice(0, 200)}`, cause: "usage" };
   try {
     const out = JSON.parse(String(r.stdout ?? "").trim());
     const v = out.verdict === "pass" ? "pass" : out.verdict === "fail" ? "fail" : "not-evaluated";
-    return { verdict: v, reason: String(out.reason ?? "").slice(0, 500) };
+    return {
+      verdict: v,
+      reason: String(out.reason ?? "").slice(0, 500),
+      // The store names its OWN cause ("timeout"/"capability"/"declared"/…); pass it through rather
+      // than collapsing every not-evaluated into one opaque value.
+      cause: typeof out.cause === "string" ? out.cause : null,
+    };
   } catch {
     // 读不懂输出 ≠ 合格（硬规则 3b）——给它一个独立取值，不与 pass/fail 共用。
-    return { verdict: "not-evaluated", reason: `unparseable gate output (exit ${r.status})` };
+    return { verdict: "not-evaluated", reason: `unparseable gate output (exit ${r.status})`, cause: "unreadable" };
   }
 }
 
@@ -323,6 +343,12 @@ export function computeDivergences(readings: CriterionReading[]): Divergence[] {
     if (!c.criterion || c.criterion.trim() === "") { out.push({ ...base, kind: "no-criterion" }); continue; }
     if (c.verdict === "pass" && c.status !== "achieved") { out.push({ ...base, kind: "pass-but-unflipped" }); continue; }
     if (c.verdict === "fail" && c.status === "achieved") { out.push({ ...base, kind: "achieved-but-failing" }); continue; }
+    // A committed AC whose criterion could NOT BE RUN this round is a divergence in its own right:
+    // "we promised to measure this and we did not". Before this branch, `not-evaluated` fell through
+    // every case and produced NOTHING — a standing unmeasured AC was indistinguishable from a healthy
+    // one on the divergence list (tasks/gap-meta-goaldriverchildtimeoutms: 13 consecutive rounds).
+    // ⛔ Not `achieved-but-failing`/`pass-but-unflipped`: the verdict is neither (hard rule 3b).
+    if (c.verdict === "not-evaluated") { out.push({ ...base, kind: "not-evaluated" }); continue; }
   }
   return out;
 }
@@ -342,6 +368,12 @@ export const DIVERGENCE_HANDLER_KIND: Record<DivergenceKind, string> = {
   "pass-but-unflipped": "goal",
   "no-criterion": "worker",
   "achieved-but-failing": "none",
+  // ⛔ "none" on purpose: re-running an unmeasurable criterion is what the goal-driver already does
+  // every round — that is the FAILING instrument, not a handler for it. No driver kind resolves
+  // "this criterion could not be run"; a person must raise the deadline or repair the criterion.
+  // Mapping it to "goal" would report handler.state=healthy and the probe spec would suppress it
+  // as a transient window — exactly the silence this task removes.
+  "not-evaluated": "none",
 };
 
 /** 由 drivers 读数派生一条偏离的处理者三态。纯函数、可枚举（⛔ 不是布尔/总数）：
@@ -474,6 +506,17 @@ export interface TimeSeriesSignal {
   crossed: boolean;
   evaluated: boolean;
   threshold: number;
+  /** The REPEATED value for `mode: "unchanged"` — i.e. WHAT has been unchanged for `count` rounds.
+   *  `null` for `mode: "expected-absent"` (that mode counts an absence, not a value) and when
+   *  `evaluated` is false (no value was read).
+   *
+   *  ⛔ WHY THIS FIELD EXISTS (tasks/gap-meta-goaldriverchildtimeoutms): `unchanged:13` alone is
+   *  ambiguous between "failing for 13 rounds" and "UNMEASURED for 13 rounds" — and the 2026-10-21
+   *  semantic probe read the AC-911 streak as the latter, filing a task against an instrument that
+   *  had in fact produced 30 definitive `fail` events. Carrying the value makes the signal
+   *  self-describing instead of leaving the reader to infer it. It stays OUT of readingsDigest for
+   *  the same reason `count` does: it changes only when the streak changes. */
+  value: string | null;
 }
 
 /** 一条 streak 计算结果（evaluated:false = 读不出/无历史，⛔ 不与 count=0 同形）。 */
@@ -566,11 +609,15 @@ export function deriveGoalCarrierSignals(
       key: `goal:${ac}:verdict`, mode: "unchanged",
       count: vr.count, crossed: vr.evaluated && vr.count >= verdictUnchangedThreshold,
       evaluated: vr.evaluated, threshold: verdictUnchangedThreshold,
+      // WHAT was unchanged — `null` exactly when there is no evaluated tail (⛔ not "").
+      value: vr.evaluated ? verdicts[verdicts.length - 1] : null,
     });
     out.push({
       key: `goal:${ac}:spawn-zero-output`, mode: "expected-absent",
       count: sr.count, crossed: sr.evaluated && sr.count >= spawnZeroThreshold,
       evaluated: sr.evaluated, threshold: spawnZeroThreshold,
+      // This mode counts an ABSENCE; it has no repeated value to report.
+      value: null,
     });
   }
   return out;
@@ -1053,7 +1100,7 @@ export async function collectReadings(root: string, cliFocus: string | null): Pr
   for (const ac of acs) {
     const id = String(ac.id);
     const criterion = ac.criterion == null ? null : String(ac.criterion);
-    const { verdict, reason } = await gateCriterion(root, id, { recordTimeoutMs: ac.timeoutMs });
+    const { verdict, reason, cause } = await gateCriterion(root, id, { recordTimeoutMs: ac.timeoutMs });
     criteria.push({
       id,
       title: ac.title == null ? null : String(ac.title),
@@ -1062,6 +1109,7 @@ export async function collectReadings(root: string, cliFocus: string | null): Pr
       criterion,
       verdict,
       reason,
+      cause,
     });
   }
   const drivers = collectDriverReadings(root);
@@ -1438,7 +1486,11 @@ export function readingsDigestPartsForActionFailures(r: ActionFailureReading): s
  *  ⛔ 不含时间戳/reason 文本（那些每轮都变，会让摘要恒不相等 ⇒ 变化检测恒为真 ⇒ 闸失效）。 */
 export function readingsDigest(readings: MetaRoundReadings): string {
   const parts = [
-    ...readings.criteria.map((c) => `${c.id}:${c.status}:${c.verdict}`).sort(),
+    // `cause` is included: WHICH not-evaluated it is (spawn/usage/timeout/capability/…) changes the
+    // disposition (raise the deadline vs repair the invocation vs declare the capability), and it is
+    // stable per round — so it belongs in the "did the conclusion change" digest. `-` for a
+    // definitive verdict / an unnamed cause.
+    ...readings.criteria.map((c) => `${c.id}:${c.status}:${c.verdict}:${c.cause ?? "-"}`).sort(),
     // 偏离带处理者三态（handler.state）进摘要——三态变了结论就变（如 goal-driver 由跑变停）。
     // ⛔ 不取 handler 的秒数（staleSecs）与 repeatCount/lastRecommendation：那些每轮都变。
     ...readings.divergences.map((d) => `${d.id}:${d.kind}:${d.handler?.state ?? "no-handler"}`).sort(),
