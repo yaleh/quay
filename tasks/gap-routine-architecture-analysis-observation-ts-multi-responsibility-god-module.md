@@ -3,7 +3,7 @@ id: gap-routine-architecture-analysis-observation-ts-multi-responsibility-god-mo
 title: "architecture-analysis: 4797 lines with 64 direct importers and at least
   four unrelated responsibilities in one file: fast-mode event pairing,
   liveness/activity signals, Touches-sec"
-status: todo
+status: ready
 labels:
   - gap
   - routine-filed
