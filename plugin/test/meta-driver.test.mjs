@@ -189,13 +189,36 @@ test('computeDivergences: pass 且已 achieved ⇒ 无偏离（一致就不报�
   assert.equal(d.length, 0);
 });
 
-// 负控制：not-evaluated 既不是 pass 也不是 fail ⇒ 不得被算成任何一类偏离（硬规则 3b：
-// "读不懂"必须有独立取值，不与合格/不合格共用）。
-test('computeDivergences: verdict=not-evaluated ⇒ 不产生 pass/fail 类偏离', () => {
+// gap-meta-goaldriverchildtimeoutms: a COMMITTED AC whose criterion could not be run must be
+// ESCALATED, not silently dropped. Before this, `not-evaluated` fell through every branch and
+// produced no divergence at all — the 2026-10-21T04:08:39Z AC-911 reading was `not-evaluated` and
+// nothing told any handler it could not be measured. ⛔ It is granted its OWN kind, never re-used
+// as pass/fail (hard rule 3b).
+test('computeDivergences: verdict=not-evaluated ⇒ 独立 kind "not-evaluated"（⛔ 不是 pass/fail 类）', () => {
   const d = computeDivergences([
-    { id: 'AC-005', title: null, goal: 'GOAL-001', status: 'active', criterion: 'x', verdict: 'not-evaluated', reason: 'spawn error' },
+    { id: 'AC-005', title: null, goal: 'GOAL-001', status: 'active', criterion: 'x', verdict: 'not-evaluated', reason: 'spawn error', cause: 'spawn' },
   ]);
-  assert.equal(d.length, 0);
+  assert.equal(d.length, 1, '承诺态 + not-evaluated ⇒ 必须产生一条偏离（否则无人知晓它没被测）');
+  assert.equal(d[0].kind, 'not-evaluated');
+  assert.notEqual(d[0].kind, 'pass-but-unflipped');
+  assert.notEqual(d[0].kind, 'achieved-but-failing');
+  assert.notEqual(d[0].kind, 'no-criterion');
+  // achieved 侧同样报——「已经宣称兑现」的判据测不了，与 active 同样需要处理者。
+  const achieved = computeDivergences([
+    { id: 'AC-006', title: null, goal: 'GOAL-001', status: 'achieved', criterion: 'x', verdict: 'not-evaluated', reason: 'timeout', cause: 'timeout' },
+  ]);
+  assert.equal(achieved[0]?.kind, 'not-evaluated');
+  // 负控制（防放宽）：非承诺态 + not-evaluated 仍不报——draft/retired 没有「该测却没测」的承诺。
+  assert.deepEqual(computeDivergences([
+    { id: 'AC-007', title: null, goal: 'GOAL-001', status: 'draft', criterion: 'x', verdict: 'not-evaluated', reason: 'spawn error', cause: 'spawn' },
+  ]), []);
+  assert.deepEqual(computeDivergences([
+    { id: 'AC-008', title: null, goal: 'GOAL-001', status: 'retired', criterion: 'x', verdict: 'not-evaluated', reason: 'spawn error', cause: 'spawn' },
+  ]), []);
+  // 无判据优先于 not-evaluated（既缺判据又没跑成 ⇒ 报更可操作的 no-criterion）。
+  assert.equal(computeDivergences([
+    { id: 'AC-009', title: null, goal: 'GOAL-001', status: 'active', criterion: '', verdict: 'not-evaluated', reason: 'x', cause: 'usage' },
+  ])[0]?.kind, 'no-criterion');
 });
 
 // draft = 提案不是承诺（实测：meta-driver 自己提的 AC-180 曾被报成 pass-but-unflipped）。
@@ -551,6 +574,22 @@ test('readingsDigest: 只随 verdict/status/偏离类别变，⛔ 不随 reason 
   assert.notEqual(a.criteria[0].reason, b.criteria[0].reason, '前提：两次的 reason 确实不同');
   assert.equal(readingsDigest(a), readingsDigest(b), '噪声不得改变摘要');
   assert.notEqual(readingsDigest(a), readingsDigest(mkReadings('fail')), 'verdict 变了摘要必须变');
+});
+
+// gap-meta-goaldriverchildtimeoutms: WHICH not-evaluated it is changes the disposition, so `cause`
+// belongs in the digest (it is stable per round — ⛔ not a churn source like reason text).
+test('readingsDigest: not-evaluated 的 cause 变 ⇒ 摘要变；同一 cause ⇒ 摘要不变', () => {
+  const withCause = (cause) => {
+    const r = mkReadings('not-evaluated', 'same');
+    r.criteria = [{ ...r.criteria[0], cause }];
+    return r;
+  };
+  assert.notEqual(readingsDigest(withCause('spawn')), readingsDigest(withCause('timeout')),
+    'spawn（被外层上限杀掉）与 timeout（criterion 自己超时）需要不同的处置 ⇒ 摘要必须不同');
+  assert.equal(readingsDigest(withCause('spawn')), readingsDigest(withCause('spawn')), '同一 cause ⇒ 摘要不变（否则变化检测恒为真）');
+  // 负控制：reason 文本带着同一 cause 变化时仍不得改变摘要（避免把「文本噪声」当变化）。
+  const a = withCause('spawn'); const b = withCause('spawn'); b.criteria[0].reason = 'different text';
+  assert.equal(readingsDigest(a), readingsDigest(b));
 });
 
 test('shouldJudge: 首次（never judged）⇒ 判读', () => {
@@ -1916,6 +1955,12 @@ test('attachDivergenceHandlers: 三态双向能取假；achieved-but-failing 恒
   assert.deepEqual(attachDivergenceHandlers([af], [])[0].handler, { kind: 'none', state: 'absent' });
   // no-criterion 处理者标识 = worker（task→worker 流水线）。
   assert.equal(attachDivergenceHandlers([hDiv('AC-143', 'no-criterion')], [drv(true)])[0].handler.kind, 'worker');
+  // not-evaluated 处理者 = none ⇒ 恒 absent ⇒ probe 必须 escalate。
+  // ⛔ 映射成 "goal" 会让 goal-driver 健康时 handler.state=healthy，probe 规格要求「transient
+  // window ⇒ 沉默」，于是「测不了」这件事又被吞掉——正是本任务要消除的沉默。
+  const ne = hDiv('AC-911', 'not-evaluated');
+  assert.deepEqual(attachDivergenceHandlers([ne], [drv(true)])[0].handler, { kind: 'none', state: 'absent' },
+    'not-evaluated 没有自动处理者：goal-driver 只是【重复】跑它，不是在修它');
 });
 
 // DoD3 回放：09-06T14:25–19:04 那段的读数形态（goal-driver 缺席/停摆）⇒ 7 条 pass-but-unflipped
@@ -1992,6 +2037,26 @@ test('AC1 派生层: 真生产记录（AC-214 连续 8 轮 spawn 零产出）⇒
   assert.equal(verdict.mode, 'unchanged');
   assert.equal(verdict.evaluated, true);
   assert.ok(verdict.count >= 8, `verdict 连续不变 streak 应 ≥ 8，实得 ${verdict.count}`);
+  // gap-meta-goaldriverchildtimeoutms: the signal must say WHAT was unchanged. `count:13` alone was
+  // read as "13 rounds unmeasured" while every one of those rounds actually held a definitive `fail`.
+  assert.equal(verdict.value, 'fail', 'unchanged 信号必须携带被重复的取值（否则 "unchanged" 在 unmeasured 与 failing 之间歧义）');
+  assert.equal(spawn.value, null, 'expected-absent 计的是「没发生」，没有可重复的取值 ⇒ value=null（⛔ 不是 ""）');
+});
+
+test('gap-meta-goaldriverchildtimeoutms AC: unchanged 信号的 value 能把「未评估」与「稳定失败」分开', () => {
+  const roundWith = (verdict) => ({
+    round: 1, ts: '2026-10-21T04:00:00.000Z',
+    facts: [{ name: 'goal-ring', value: { criteria: [{ id: 'AC-911', goal: 'GOAL-907', status: 'active', verdict }] }, state: 'verified' }],
+  });
+  const unmeasured = deriveGoalCarrierSignals([roundWith('not-evaluated')], ['AC-911']).find((s) => s.key === 'goal:AC-911:verdict');
+  const failing = deriveGoalCarrierSignals([roundWith('fail')], ['AC-911']).find((s) => s.key === 'goal:AC-911:verdict');
+  assert.equal(unmeasured.value, 'not-evaluated');
+  assert.equal(failing.value, 'fail');
+  assert.notEqual(unmeasured.value, failing.value, '两种 streak 的 count 可以相同，value 必须不同');
+  // 无任何观测 ⇒ 尾值 null ⇒ evaluated:false 且 value=null（⛔ 不冒充某个取值）。
+  const never = deriveGoalCarrierSignals([roundWith('fail')], ['AC-999']).find((s) => s.key === 'goal:AC-999:verdict');
+  assert.equal(never.evaluated, false);
+  assert.equal(never.value, null);
 });
 
 test('AC1 负控制: 打断「零产出」连续后 streak 变短（判据能取假，⛔ 非恒真）', () => {

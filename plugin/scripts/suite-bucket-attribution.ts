@@ -54,10 +54,16 @@ import { fileURLToPath } from "node:url";
 // `arg-parsing-helper-family`, routine `semantic-dedup-scan`).
 import { isDirectEntry, normalizeRel, flagValue } from "./gate-script-base.ts";
 
-export type Bucket = "P" | "S" | "M";
-
-// Canonical bucket order for the string form (P first, the deliverable).
-const BUCKET_ORDER: readonly Bucket[] = ["P", "S", "M"];
+// The canonical bucket set (`Bucket`), its order (`BUCKET_ORDER`) and the string form
+// (`canonicalBuckets`) are a kernel leaf shared with the product-side page renderer
+// (`packages/quay/src/serve-tests.ts`), which cannot import `plugin/**` (reverse-edge ratchet).
+// Re-exported below so this file stays the one import site for the existing consumers
+// (routine `semantic-dedup-scan` finding `canonical-buckets`, task
+// gap-routine-semantic-dedup-scan-canonical-buckets).
+import { canonicalBuckets, type Bucket } from "../../packages/quay/src/kernel/canonical-buckets.ts";
+export type { Bucket } from "../../packages/quay/src/kernel/canonical-buckets.ts";
+export { BUCKET_ORDER } from "../../packages/quay/src/kernel/canonical-buckets.ts";
+export { canonicalBuckets };
 
 // ── Source-tree reference patterns ────────────────────────────────────────────────────────────────────
 // A reference is classified by which source tree it lands in. Each pattern is a literal path prefix:
@@ -344,16 +350,6 @@ export function bucketSetOf(fileRef: string, root = repoRoot()): Set<Bucket> {
   }
 
   return buckets;
-}
-
-/**
- * Canonical string form of a bucket set: `P | S | M | P+S | P+M | S+M | P+S+M | UNRESOLVED`.
- * @param {Set<Bucket>} buckets
- * @returns {string}
- */
-export function canonicalBuckets(buckets: Set<Bucket>): string {
-  if (buckets.size === 0) return "UNRESOLVED";
-  return BUCKET_ORDER.filter((b) => buckets.has(b)).join("+");
 }
 
 /**

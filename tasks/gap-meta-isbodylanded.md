@@ -1,7 +1,7 @@
 ---
 id: gap-meta-isbodylanded
 title: slot-refill 的 landed-implementation 闸把「完成框全勾」自报当落地证据 ⇒ 未删除的 ready 任务永久不可派
-status: ready
+status: done
 labels:
   - meta-driver
   - driver-candidate
