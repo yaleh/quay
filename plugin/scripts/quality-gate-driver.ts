@@ -181,7 +181,17 @@ import {
 // 没跑过）。本轨把同一个读数接成周期 report-only 例程：每 due 轮读一次「上次 analyze 落盘的」
 // moduleGraph 环，append 一行到 `.quay/arch-cycle-history.jsonl`。⛔ 不 analyze、不 ratchet、
 // 不立案——环非空是该例程的**读数内容**，不会使轮 failed（那是闸的语义，不是本轨的）。
-import { readDirectoryCycleReading, resolveArchguardCli, type DirectoryCycle } from "./archguard-runner.ts";
+import {
+  readDirectoryCycleReading,
+  readGraphSummaryReading,
+  resolveArchguardCli,
+  type DirectoryCycle,
+  type TopOutDegreeEntry,
+} from "./archguard-runner.ts";
+// GRAPH-SUMMARY（gap-quality-round-facts-surface-top-out-degree-god-functions）：arch-cycle 例程
+// 同一批多读两条非环读数——topByOutDegree（god functions）与 relationCountByType（图的能力边界）。
+// 它们与目录环来自**同一份** `.archguard/query/<globalScopeKey>/arch.json`，因此仍是零 spawn 的纯
+// 文件读；⛔ 不在这里重新 analyze（`gap-fan-in-remove-archguard-gate`：不把 27s/task 拉进每轮）。
 
 // ── 常量（由 DRIVER_KINDS registry 派生，⛔ 不另写一份路径字面量）──────────────────────────
 const QUALITY_SPEC = DRIVER_KINDS.quality;
@@ -1958,7 +1968,27 @@ export interface ArchCycleHistoryRecord {
   /** `artifactAgeMs > staleIntervalMs`. Three-valued: null ⇒ staleness NOT EVALUABLE, ⛔ never
    *  `false` (硬规则 3b — "could not tell" must not share the value of "fresh"). */
   stale: boolean | null;
+  /** The SAME-BATCH graph reading (gap-quality-round-facts-surface-top-out-degree-god-functions).
+   *  Present on every line — `evaluated:false` lines carry `null` readings, never `{}`/`0`/`[]`. */
+  graphSummary: GraphSummaryRecord;
   reportOnly: true;
+}
+
+/** topByOutDegree + relationCountByType, as persisted (carrier line and quality-round Fact share ONE
+ *  shape — a reader must not have to learn two spellings of the same reading). */
+export interface GraphSummaryRecord {
+  evaluated: boolean;
+  reason: string | null;
+  scopeKey: string | null;
+  scopeLabel: string | null;
+  artifactTimestamp: string | null;
+  entityCount: number | null;
+  relationCount: number | null;
+  relationCountByType: Record<string, number> | null;
+  entitiesWithOutgoingRelations: number | null;
+  topByOutDegreeLimit: number;
+  topByOutDegree: TopOutDegreeEntry[] | null;
+  topByOutDegreeTruncated: boolean | null;
 }
 
 /** The Fact value contributed to `quality-round.jsonl` (same reading as the carrier line). */
@@ -1972,6 +2002,12 @@ export interface ArchCycleFactValue {
   artifactAgeMs: number | null;
   staleIntervalMs: number;
   stale: boolean | null;
+  /** Flattened to the TOP LEVEL of the Fact value as well: the ACs (and any reader grepping
+   *  `quality-round.jsonl` for the god-function reading) name these two fields directly. They are the
+   *  same objects as `graphSummary`'s — one reading, two spellings of the access path, not two reads. */
+  topByOutDegree: TopOutDegreeEntry[] | null;
+  relationCountByType: Record<string, number> | null;
+  graphSummary: GraphSummaryRecord;
   workDir: string;
   historyPath: string;
   historyAppended: boolean;
@@ -1986,6 +2022,9 @@ export interface ArchCycleRoundOptions {
   historyPath?: string;
   /** Work dir holding the LAST analyze's query artifacts; default `<root>/.archguard`. */
   workDir?: string;
+  /** Top-N grain for the god-function reading (default TOP_OUT_DEGREE_LIMIT_DEFAULT). A test seam —
+   *  ⛔ not a threshold (硬规则 4): it only bounds how many entries the line carries. */
+  graphSummaryLimit?: number;
   /** Deterministic `ts` seam for the carrier line. */
   now?: string;
 }
@@ -2033,6 +2072,28 @@ export function runArchCycleRound(root: string, opts: ArchCycleRoundOptions = {}
 
   const resolvedRoot = path.resolve(root);
   const reading = readDirectoryCycleReading(resolvedRoot, opts.workDir);
+  // SAME-BATCH graph reading (gap-quality-round-facts-surface-top-out-degree-god-functions): both
+  // readings come from the same persisted `.archguard/query` tree, so this adds a file read, not a
+  // second analysis (⛔ zero spawn).
+  const graph = readGraphSummaryReading(
+    resolvedRoot,
+    opts.workDir,
+    opts.graphSummaryLimit !== undefined ? { limit: opts.graphSummaryLimit } : {},
+  );
+  const graphSummary: GraphSummaryRecord = {
+    evaluated: graph.evaluated,
+    reason: graph.reason,
+    scopeKey: graph.scopeKey,
+    scopeLabel: graph.scopeLabel,
+    artifactTimestamp: graph.artifactTimestamp,
+    entityCount: graph.entityCount,
+    relationCount: graph.relationCount,
+    relationCountByType: graph.relationCountByType,
+    entitiesWithOutgoingRelations: graph.entitiesWithOutgoingRelations,
+    topByOutDegreeLimit: graph.topByOutDegreeLimit,
+    topByOutDegree: graph.topByOutDegree,
+    topByOutDegreeTruncated: graph.topByOutDegreeTruncated,
+  };
   const ts = opts.now ?? new Date().toISOString();
   // FRESHNESS OF THE READING (gap-arch-cycle-report-record-artifact-timestamp): the routine does not
   // analyze; it reports whatever the LAST analyze persisted. Recording HOW OLD that artifact is makes
@@ -2059,6 +2120,7 @@ export function runArchCycleRound(root: string, opts: ArchCycleRoundOptions = {}
     artifactAgeMs,
     staleIntervalMs,
     stale,
+    graphSummary,
     reportOnly: true,
   };
   const appended = appendArchCycleHistory(resolvedRoot, record, opts.historyPath ? { historyPath: opts.historyPath } : {});
@@ -2072,6 +2134,9 @@ export function runArchCycleRound(root: string, opts: ArchCycleRoundOptions = {}
     artifactAgeMs: record.artifactAgeMs,
     staleIntervalMs: record.staleIntervalMs,
     stale: record.stale,
+    topByOutDegree: graphSummary.topByOutDegree,
+    relationCountByType: graphSummary.relationCountByType,
+    graphSummary,
     workDir: reading.workDir,
     historyPath: appended.path,
     historyAppended: appended.ok,
@@ -2083,6 +2148,17 @@ export function runArchCycleRound(root: string, opts: ArchCycleRoundOptions = {}
   if (!reading.evaluated) {
     return { name, value, state: "not-evaluated", reason: `not-evaluated:module-graph — ${reading.reason ?? "the module graph could not be read"}` };
   }
+  // The graph summary is a SECOND reading of the same artifact tree and carries its own three-valued
+  // state. A round where the cycles were readable but topByOutDegree/relationCountByType were not is
+  // NOT the same thing as a complete report (硬规则 3b) — it is `not-evaluated:graph-summary`, named.
+  if (!graphSummary.evaluated) {
+    return {
+      name,
+      value,
+      state: "not-evaluated",
+      reason: `not-evaluated:graph-summary — ${graphSummary.reason ?? "topByOutDegree/relationCountByType could not be read"}`,
+    };
+  }
   // ⛔ AC2: a non-zero cycle count is NOT a failure. The cycles (with their members) are IN the value,
   // so a reader can see them — they just never become the round's verdict.
   return { name, value, state: "verified", reason: null };
@@ -2091,6 +2167,7 @@ export function runArchCycleRound(root: string, opts: ArchCycleRoundOptions = {}
 export interface ArchCycleRoutineOptions {
   historyPath?: string;
   workDir?: string;
+  graphSummaryLimit?: number;
   now?: string;
 }
 
@@ -2113,6 +2190,7 @@ export function buildArchCycleRoutine(
         configError: read.error,
         ...(opts.historyPath ? { historyPath: opts.historyPath } : {}),
         ...(opts.workDir ? { workDir: opts.workDir } : {}),
+        ...(opts.graphSummaryLimit !== undefined ? { graphSummaryLimit: opts.graphSummaryLimit } : {}),
         ...(opts.now ? { now: opts.now } : {}),
       }),
     ],

@@ -274,6 +274,49 @@ function normalizeFsPath(p: string): string {
  *  Three-valued (硬规则 3b): any of {no manifest, no scope for this source, arch.json unreadable,
  *  no tsAnalysis.moduleGraph, malformed cycles} ⇒ evaluated:false + reason, never `count: 0`.
  */
+/** Read `<workDir>/query/manifest.json` — the ONE place the query-artifact layout is spelled.
+ *
+ *  Both readers below (directory cycles and the graph summary) resolve their artifacts through this
+ *  helper, so the layout / parse-failure vocabulary is one implementation, not a paraphrase (the
+ *  same single-source-of-truth reason `readDirectoryCycleReading` exists at all). */
+function readQueryManifest(
+  workDir: string,
+): { ok: true; manifestFile: string; manifest: any } | { ok: false; code: "unreadable" | "malformed"; reason: string } {
+  const queryDir = path.join(workDir, "query");
+  const manifestFile = path.join(queryDir, "manifest.json");
+  let manifestRaw: string;
+  try {
+    manifestRaw = fs.readFileSync(manifestFile, "utf8");
+  } catch {
+    return { ok: false, code: "unreadable", reason: `cannot read query manifest ${manifestFile}` };
+  }
+  try {
+    return { ok: true, manifestFile, manifest: JSON.parse(manifestRaw) };
+  } catch {
+    return { ok: false, code: "malformed", reason: `query manifest ${manifestFile} is not valid JSON` };
+  }
+}
+
+/** Read one query scope's `arch.json` by manifest key. Failure is a REASON, never an empty artifact
+ *  (硬规则 3b: "could not read" must not look like "the graph is empty"). */
+function readQueryScopeArch(
+  workDir: string,
+  key: string,
+): { ok: true; archFile: string; arch: any } | { ok: false; code: "unreadable" | "malformed"; reason: string } {
+  const archFile = path.join(workDir, "query", key, "arch.json");
+  let raw: string;
+  try {
+    raw = fs.readFileSync(archFile, "utf8");
+  } catch {
+    return { ok: false, code: "unreadable", reason: `cannot read query scope artifact ${archFile}` };
+  }
+  try {
+    return { ok: true, archFile, arch: JSON.parse(raw) };
+  } catch {
+    return { ok: false, code: "malformed", reason: `query scope artifact ${archFile} is not valid JSON` };
+  }
+}
+
 function readDirectoryCycles(root: string, workDir: string, source: string): {
   directoryCyclesEvaluated: boolean;
   directoryCyclesReason: string | null;
@@ -292,20 +335,15 @@ function readDirectoryCycles(root: string, workDir: string, source: string): {
     artifactTimestamp,
   });
 
-  const queryDir = path.join(workDir, "query");
-  const manifestFile = path.join(queryDir, "manifest.json");
-  let manifestRaw: string;
-  try {
-    manifestRaw = fs.readFileSync(manifestFile, "utf8");
-  } catch {
-    return notEvaluated(`cannot read query manifest ${manifestFile} — directory-level cycles are NOT evaluated (not "0 cycles")`);
+  const manifestRead = readQueryManifest(workDir);
+  if (!manifestRead.ok) {
+    return notEvaluated(
+      manifestRead.code === "unreadable"
+        ? `${manifestRead.reason} — directory-level cycles are NOT evaluated (not "0 cycles")`
+        : manifestRead.reason
+    );
   }
-  let manifest: any;
-  try {
-    manifest = JSON.parse(manifestRaw);
-  } catch {
-    return notEvaluated(`query manifest ${manifestFile} is not valid JSON`);
-  }
+  const { manifestFile, manifest } = manifestRead;
   const entries: any[] = Array.isArray(manifest?.scopes) ? manifest.scopes : [];
   if (entries.length === 0) {
     return notEvaluated(`query manifest ${manifestFile} lists no scopes`);
@@ -331,19 +369,18 @@ function readDirectoryCycles(root: string, workDir: string, source: string): {
   const manifestTimestamp =
     typeof entry.generatedAt === "string" && entry.generatedAt !== "" ? entry.generatedAt : null;
 
-  const archFile = path.join(queryDir, entry.key, "arch.json");
-  let archRaw: string;
-  try {
-    archRaw = fs.readFileSync(archFile, "utf8");
-  } catch {
-    return notEvaluated(`cannot read query scope artifact ${archFile} — directory-level cycles are NOT evaluated`, manifestTimestamp);
+  const archRead = readQueryScopeArch(workDir, entry.key);
+  if (!archRead.ok) {
+    // Same wording as before the helper extraction: an unreadable artifact is spelled out as a
+    // not-evaluated reading (never "0 cycles"); a malformed one keeps its own reason.
+    return notEvaluated(
+      archRead.code === "unreadable"
+        ? `${archRead.reason} — directory-level cycles are NOT evaluated`
+        : archRead.reason,
+      manifestTimestamp
+    );
   }
-  let arch: any;
-  try {
-    arch = JSON.parse(archRaw);
-  } catch {
-    return notEvaluated(`query scope artifact ${archFile} is not valid JSON`, manifestTimestamp);
-  }
+  const { arch } = archRead;
   // ⛔ THE FRESHNESS OF THIS READING: the artifact's own `timestamp` is authoritative; the manifest
   // entry's `generatedAt` is the fallback. It is recorded even on the not-evaluated paths below
   // (an artifact WAS read — it just lacked a moduleGraph), so a routine record can always say HOW OLD
@@ -467,6 +504,181 @@ export function readDirectoryCycleReading(root: string, workDir?: string): Direc
     totalCycleCount: evaluated ? scopes.reduce((n, s) => n + (s.cycleCount ?? 0), 0) : null,
     scopes,
     artifactTimestamp,
+  };
+}
+
+// ── Reusable GRAPH-SUMMARY reading (topByOutDegree + relationCountByType) ─────────────────────────
+// gap-quality-round-facts-surface-top-out-degree-god-functions: the two non-cycle readings that
+// `archguard_summary` exposes were, until now, only visible to whoever remembered to call the MCP
+// tool — no standing fact carried them. They are NOT a different product: both are derived from the
+// very same `.archguard/query/<globalScopeKey>/arch.json` the report-only routines already read
+// (`entities[]` + `relations[]`), so this reader is a PURE FILE READ like the one above.
+//
+// ⛔ WHICH SCOPE: the GLOBAL scope (`manifest.globalScopeKey`), not the six per-source scopes. The
+// findings this task is about (run / handleAllRoutes / runResidentLoop god functions; inheritance /
+// call relation counts) are whole-tree readings — exactly what `archguard_summary` returns. The
+// per-source scopes are disjoint by construction (cross-scope edges are structurally invisible, see
+// the header), so summing them would NOT be the same measurement as the global scope; it would be a
+// different (and silently incomplete) one.
+//
+// ⛔ THREE-VALUED (硬规则 3b): no manifest / no globalScopeKey / unreadable or malformed artifact /
+// non-array `entities` or `relations` / a malformed relation entry ⇒ `evaluated:false` with a reason
+// and `null` readings — never `{}` / `0` / `[]`, which would read as "a graph with nothing in it".
+
+/** Default top-N for the god-function reading. N is a REPORTING GRAIN, not a threshold (硬规则 4):
+ *  it bounds how much of the carrier line each round carries; `topByOutDegreeTruncated` +
+ *  `entitiesWithOutgoingRelations` make any truncation visible instead of silently dropping ties. */
+export const TOP_OUT_DEGREE_LIMIT_DEFAULT = 10;
+
+/** One high-out-degree entity, WITH positional evidence (file/line) so a reader can reproduce it
+ *  without re-running archguard (AC1: "贴出前 3 条位置证据"). */
+export interface TopOutDegreeEntry {
+  /** The entity id as the artifact spells it (unique within the scope). */
+  entityId: string;
+  /** Short entity name (`entities[].name`), falling back to the id's last segment. */
+  name: string;
+  outDegree: number;
+  /** `entities[].type` (function/method/class/…) when the entity record is present. */
+  kind: string | null;
+  file: string | null;
+  startLine: number | null;
+}
+
+/** The reading, as the arch-cycle routine persists it into its carrier and its quality-round Fact. */
+export interface GraphSummaryReading {
+  workDir: string;
+  evaluated: boolean;
+  reason: string | null;
+  /** The manifest key this reading came from (`globalScopeKey`). */
+  scopeKey: string | null;
+  scopeLabel: string | null;
+  /** The artifact's own `timestamp`, falling back to the manifest scope's `generatedAt` — the same
+   *  freshness discipline as the directory-cycle reading (硬规则 4b). */
+  artifactTimestamp: string | null;
+  entityCount: number | null;
+  relationCount: number | null;
+  /** Relations per `relation.type` (dependency / composition / inheritance / call / …). The FULL
+   *  distribution, not a selected subset: which types are absent is itself the graph's capability
+   *  boundary (`call=2` next to `dependency=6490` was the reading that motivated this task). */
+  relationCountByType: Record<string, number> | null;
+  /** How many entities have at least one outgoing relation (the population the top-N was cut from —
+   *  lets a reader see that the list is a SAMPLE, not the whole graph). */
+  entitiesWithOutgoingRelations: number | null;
+  topByOutDegreeLimit: number;
+  /** Sorted by outDegree DESC, then entityId ASC (deterministic ties — the M118 audit's finding was a
+   *  silently dropped TIED entry, so truncation must be disclosed rather than resolved by luck). */
+  topByOutDegree: TopOutDegreeEntry[] | null;
+  /** `entitiesWithOutgoingRelations > topByOutDegree.length`; null when unevaluated. */
+  topByOutDegreeTruncated: boolean | null;
+}
+
+/** Read `topByOutDegree` + `relationCountByType` from the artifact the LAST `archguard analyze`
+ *  persisted. NEVER throws and NEVER spawns (no `analyze`, no CLI lookup — see the section comment). */
+export function readGraphSummaryReading(
+  root: string,
+  workDir?: string,
+  opts: { limit?: number } = {},
+): GraphSummaryReading {
+  const resolvedRoot = path.resolve(root);
+  const resolvedWorkDir = workDir ? path.resolve(workDir) : path.join(resolvedRoot, ".archguard");
+  const limit = opts.limit ?? TOP_OUT_DEGREE_LIMIT_DEFAULT;
+  const unevaluated = (reason: string, known: Partial<GraphSummaryReading> = {}): GraphSummaryReading => ({
+    workDir: resolvedWorkDir,
+    evaluated: false,
+    reason,
+    scopeKey: null,
+    scopeLabel: null,
+    artifactTimestamp: null,
+    ...known,
+    entityCount: null,
+    relationCount: null,
+    relationCountByType: null,
+    entitiesWithOutgoingRelations: null,
+    topByOutDegreeLimit: limit,
+    topByOutDegree: null,
+    topByOutDegreeTruncated: null,
+  });
+
+  const manifestRead = readQueryManifest(resolvedWorkDir);
+  if (!manifestRead.ok) {
+    return unevaluated(`${manifestRead.reason} — the graph summary is NOT evaluated (not an empty graph)`);
+  }
+  const { manifestFile, manifest } = manifestRead;
+  const key = manifest?.globalScopeKey;
+  if (typeof key !== "string" || key.length === 0) {
+    return unevaluated(`query manifest ${manifestFile} carries no globalScopeKey — the graph summary is NOT evaluated`);
+  }
+  const entry = Array.isArray(manifest?.scopes) ? manifest.scopes.find((e: any) => e?.key === key) : undefined;
+  const scopeLabel = typeof entry?.label === "string" ? entry.label : null;
+  const manifestTimestamp =
+    typeof entry?.generatedAt === "string" && entry.generatedAt !== "" ? entry.generatedAt : null;
+  const archRead = readQueryScopeArch(resolvedWorkDir, key);
+  if (!archRead.ok) {
+    return unevaluated(`${archRead.reason} — the graph summary is NOT evaluated (not an empty graph)`, {
+      scopeKey: key,
+      scopeLabel,
+      artifactTimestamp: manifestTimestamp,
+    });
+  }
+  const arch = archRead.arch;
+  const artifactTimestamp =
+    typeof arch?.timestamp === "string" && arch.timestamp !== "" ? arch.timestamp : manifestTimestamp;
+  const known = { scopeKey: key, scopeLabel, artifactTimestamp };
+  if (arch == null || typeof arch !== "object") {
+    return unevaluated(`query scope ${key} is not an object — the graph summary is NOT evaluated`, known);
+  }
+  if (!Array.isArray(arch.entities) || !Array.isArray(arch.relations)) {
+    return unevaluated(`query scope ${key} has no entities[]/relations[] arrays — the graph summary is NOT evaluated`, known);
+  }
+
+  const byType: Record<string, number> = {};
+  const outDegree = new Map<string, number>();
+  for (let i = 0; i < arch.relations.length; i += 1) {
+    const rel = arch.relations[i];
+    if (rel == null || typeof rel !== "object" || typeof rel.source !== "string" || typeof rel.type !== "string") {
+      return unevaluated(
+        `query scope ${key}: relations[${i}] is malformed (source/type must be strings) — the graph summary is NOT evaluated`,
+        known,
+      );
+    }
+    byType[rel.type] = (byType[rel.type] ?? 0) + 1;
+    outDegree.set(rel.source, (outDegree.get(rel.source) ?? 0) + 1);
+  }
+
+  const entityById = new Map<string, any>();
+  for (const e of arch.entities) {
+    if (e != null && typeof e === "object" && typeof e.id === "string") entityById.set(e.id, e);
+  }
+  const ranked = [...outDegree.entries()]
+    .map(([entityId, degree]): TopOutDegreeEntry => {
+      const e = entityById.get(entityId);
+      const loc = e?.sourceLocation;
+      return {
+        entityId,
+        name: typeof e?.name === "string" && e.name !== "" ? e.name : entityId.split(".").pop() ?? entityId,
+        outDegree: degree,
+        kind: typeof e?.type === "string" ? e.type : null,
+        file: typeof loc?.file === "string" ? loc.file : null,
+        startLine: typeof loc?.startLine === "number" && Number.isFinite(loc.startLine) ? loc.startLine : null,
+      };
+    })
+    .sort((a, b) => b.outDegree - a.outDegree || a.entityId.localeCompare(b.entityId));
+
+  const top = ranked.slice(0, Math.max(0, limit));
+  return {
+    workDir: resolvedWorkDir,
+    evaluated: true,
+    reason: null,
+    scopeKey: key,
+    scopeLabel,
+    artifactTimestamp,
+    entityCount: arch.entities.length,
+    relationCount: arch.relations.length,
+    relationCountByType: byType,
+    entitiesWithOutgoingRelations: ranked.length,
+    topByOutDegreeLimit: limit,
+    topByOutDegree: top,
+    topByOutDegreeTruncated: ranked.length > top.length,
   };
 }
 
