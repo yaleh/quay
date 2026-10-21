@@ -93,8 +93,8 @@ serve 的 modules 必须同时覆盖**基线端**的顶层 `serve*.ts` / `server
 
 ## Blocker
 
-**2026-10-21T22:35:47.683Z — worker 未落地（exited-not-landed）**
+**2026-10-21T22:53:38.684Z — worker 未落地（exited-not-landed）**
 
-- 未落地原因：AC 未全勾（checked 5/8，剩余未勾 3）——续做只需验证并勾选 AC
+- 未落地原因：step=suite: AssertionError [ERR_ASSERTION]: at least one bin is under-sampled (otherwise the rule is vacuous) [baseline A/B: HARD RED (task-introduced-red) — the task's red set is NOT a subset of the develop baseline red set: added=plugin/test/full-suite-runner-cgroup.test.mjs changed=-]
 - run_id：wk-prod-anchor
-- session_id：6c5381c9-db4e-42e8-a2fb-0bbab7a87a86
+- session_id：564e3046-7eaf-422b-8f7f-d28897e75899
