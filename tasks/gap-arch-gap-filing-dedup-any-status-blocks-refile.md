@@ -2,7 +2,7 @@
 id: gap-arch-gap-filing-dedup-any-status-blocks-refile
 title: arch-review gap-filing 的 dedup 写「ANY status 的同机制任务不再重立」——done 任务的 claim
   不证明缺陷已从当前源码消失（硬规则 5b），立案前需 current-source 复核
-status: todo
+status: ready
 labels:
   - gap
   - architecture
