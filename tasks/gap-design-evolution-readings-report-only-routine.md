@@ -90,3 +90,11 @@ serve 的 modules 必须同时覆盖**基线端**的顶层 `serve*.ts` / `server
 - plugin/scripts/capability-catalog-declarations.json
 - plugin/shipped-set-baseline.json
 - .gitignore
+
+## Blocker
+
+**2026-10-21T22:35:47.683Z — worker 未落地（exited-not-landed）**
+
+- 未落地原因：AC 未全勾（checked 5/8，剩余未勾 3）——续做只需验证并勾选 AC
+- run_id：wk-prod-anchor
+- session_id：6c5381c9-db4e-42e8-a2fb-0bbab7a87a86
