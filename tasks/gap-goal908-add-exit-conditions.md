@@ -2,7 +2,7 @@
 id: gap-goal908-add-exit-conditions
 title: "GOAL-908 缺 ## 退出条件 致充分性闸永久 insufficient：补写退出条件并把 provider→gate/
   棘轮降为手段（提案，选项 b）"
-status: todo
+status: needs-human
 labels:
   - gap
 parent: null
