@@ -38,7 +38,7 @@ $ grep -rln 'FORWARDING re-export' packages/quay/src/*.ts | wc -l
 <!-- dedup-ref -->
 **去重与粒度**：全库 `goal_ac: AC-911` 零命中；机制关键词（shim / `FORWARDING re-export` / src-root）检索没有 open 任务。相关但不同机制：`gap-src-root-gate-cycle-break`（done）是这 12 个 shim 的**成因**（它把实现下沉 `core/` 并留下转发面），本任务删除其中 10 个转发面。`node --experimental-strip-types plugin/scripts/task-granularity-advice.ts --touches … --json` 的 `peers: []`。决定：**separate**（独立验收 = AC-911 的计数判据）。
 
-**非目标**：`abi.ts` / `config.ts` 不动；`packages/quay/src/core/**` 的实现不改；除机械判据点名的 achieved goal criterion（本轮实测：quoted-literal 类点名 AC-196 / AC-216 / AC-347；`goal-store.test.mjs` 的能力闸点名 AC-242 / AC-245）外，其余 achieved goal criterion 的历史文本不改写（理由：不在复验域，见上）；`plugin/test/*` 里把这些路径当**合成夹具数据**的地方不动（`architecture-decision-memory.test.mjs`、`routine-file-gate.test.mjs`、`kernel-sibling-resolution-check.test.mjs` 的 fixture、`plugin/test/fixtures/criterion-fidelity/*.ts` 等——它们不读真文件）；`docs/**` 历史记录不改写；`packages/quay/dist/**`、`plugin/vendor/**` 是未跟踪的构建产物，不在此任务内重建。
+**非目标**：`abi.ts` / `config.ts` 不动；`packages/quay/src/core/**` 的实现不改；除机械判据点名的 achieved goal criterion（本轮实测：quoted-literal 类点名 AC-196 / AC-216 / AC-347；`goal-store.test.mjs` 的能力闸点名 AC-242 / AC-245）外，其余 achieved goal criterion 的历史文本不改写（理由：不在复验域，见上）；`plugin/test/*` 里把这些路径当**合成夹具数据**的地方不动（`architecture-decision-memory.test.mjs`、`routine-file-gate.test.mjs`、`kernel-sibling-resolution-check.test.mjs` 的 fixture、`plugin/test/fixtures/criterion-fidelity/*.ts` 等——它们不读真文件）；`docs/**` 历史记录不改写（唯一例外见 Touches：`docs/analysis/ownership-active-limited-proposal.mjs` 是可执行分析脚本、被 `plugin/test/ownership-active-limited-proposal.test.mjs` 真 spawn，属真实消费方）；`packages/quay/dist/**`、`plugin/vendor/**` 是未跟踪的构建产物，不在此任务内重建。
 
 ## Plan
 
@@ -62,16 +62,16 @@ $ grep -rln 'FORWARDING re-export' packages/quay/src/*.ts | wc -l
 
 ## AC
 
-- [ ] AC-911 判据逐字 exit 0（cwd=git 根）：`n=$(grep -rln 'FORWARDING re-export' packages/quay/src/*.ts | wc -l); if [ "$n" -ne 2 ]; then echo "src-root shim count is $n (want 2: abi.ts + config.ts)" >&2; exit 1; fi; echo "OK"` —— 并在任务体贴出 `grep -rln …` 的两个文件名（必须恰为 `abi.ts` 与 `config.ts`）
-- [ ] 反向（能取假）实跑并贴两次读数：临时把 `packages/quay/src/core/branch-model.ts` 按 shim 形态复制为 `packages/quay/src/branch-model.ts`（首行含 `FORWARDING re-export`）⇒ 同一判据 **exit 1** 且 stderr 为 `src-root shim count is 3 (want 2: abi.ts + config.ts)`；删除该临时文件后同一判据 **exit 0**
-- [ ] 10 个被删文件逐个不存在：`for f in adr-store branch-model contract-validator criterion-fidelity document-store frontmatter-store-base goal-store plugin-root store-commit worktree-namespace; do test ! -e "packages/quay/src/$f.ts" || { echo "still exists: $f"; exit 1; }; done` exit 0
-- [ ] `npx tsc --noEmit` exit 0（根 tsconfig 覆盖 `packages/**/src/**/*.ts`，含 quay-native 深相对消费方）
-- [ ] `node --experimental-strip-types --test packages/quay/test/goal-criterion-import-specifiers-resolve.test.mjs` exit 0（**删除之后**仍绿 ⇒ 被 quoted-path-literal 类点名的 goal criterion 已重锚）
-- [ ] `node --experimental-strip-types --test packages/quay/test/ac196-criterion-four-state-vocabulary.test.mjs` exit 0（其 verbatim 夹具不再物化已删 shim，且四态词表/退休 helper 的结构断言未被削弱）
-- [ ] 棘轮读数：`node --experimental-strip-types plugin/scripts/import-graph-check.ts --json` exit 0，且 JSON 中 `retiredShimHits` 为 `[]`、`retiredShimsChecked` 为 `true`；`node --experimental-strip-types plugin/scripts/import-graph-check.ts --selftest` exit 0
-- [ ] 棘轮能取假（双向，贴读数）：`node --experimental-strip-types --test plugin/test/import-graph-check.test.mjs` exit 0，其中新增夹具 (a) 已删 shim 文件重现 ⇒ checker exit 1 且点名该路径，(b) `import … from "./goal-store.ts"` 指向已删路径 ⇒ exit 1，干净树 ⇒ exit 0，仅注释提及 ⇒ 不报
-- [ ] exports 目标在 **worktree 内**存在：`node -e 'const fs=require("fs"),p=require("./packages/quay/package.json"); for (const k of ["./adr-store","./document-store","./contract-validator"]) { const t=p.exports[k]; if(!/^\.\/src\/.*\.ts$/.test(t)||!fs.existsSync("packages/quay/"+t.replace(/^\.\//,""))) { console.error(k,t); process.exit(1);} }'` exit 0（⛔ 不以 worktree 里的 bare-specifier import 判定——它解析到主检出）
-- [ ] `bash scripts/test.sh --for-task gap-ac911-src-root-forwarding-shim-deletion --allow-thin` exit 0
+- [x] AC-911 判据逐字 exit 0（cwd=git 根）：`n=$(grep -rln 'FORWARDING re-export' packages/quay/src/*.ts | wc -l); if [ "$n" -ne 2 ]; then echo "src-root shim count is $n (want 2: abi.ts + config.ts)" >&2; exit 1; fi; echo "OK"` —— 实测 `OK`，`grep -rln …` 恰为 `packages/quay/src/abi.ts` 与 `packages/quay/src/config.ts`
+- [x] 反向（能取假）实跑并贴两次读数：临时把 `packages/quay/src/core/branch-model.ts` 按 shim 形态复制为 `packages/quay/src/branch-model.ts`（首行含 `FORWARDING re-export`）⇒ 同一判据 **exit 1** 且 stderr 为 `src-root shim count is 3 (want 2: abi.ts + config.ts)`；删除该临时文件后同一判据 **exit 0**（实测：reading 1 = `src-root shim count is 3 (want 2: abi.ts + config.ts)` / judge exit 1；reading 2 = `OK` / judge exit 0）
+- [x] 10 个被删文件逐个不存在：`for f in adr-store branch-model contract-validator criterion-fidelity document-store frontmatter-store-base goal-store plugin-root store-commit worktree-namespace; do test ! -e "packages/quay/src/$f.ts" || { echo "still exists: $f"; exit 1; }; done` exit 0（实测 exit 0）
+- [x] `npx tsc --noEmit` exit 0（根 tsconfig 覆盖 `packages/**/src/**/*.ts`，含 quay-native 深相对消费方）——实测 exit 0
+- [x] `node --experimental-strip-types --test packages/quay/test/goal-criterion-import-specifiers-resolve.test.mjs` exit 0（**删除之后**仍绿 ⇒ 被 quoted-path-literal 类点名的 goal criterion 已重锚）——实测 exit 0，14/14 pass
+- [x] `node --experimental-strip-types --test packages/quay/test/ac196-criterion-four-state-vocabulary.test.mjs` exit 0（其 verbatim 夹具不再物化已删 shim，且四态词表/退休 helper 的结构断言未被削弱）——实测 exit 0，8/8 pass（5 条彼此可区分的 `CAUSE=` 负控制：state-missing / canonical-implementation-missing / legacy-boolean-commit-functions / outcome-declaration-missing）
+- [x] 棘轮读数：`node --experimental-strip-types plugin/scripts/import-graph-check.ts --json` exit 0，且 JSON 中 `retiredShimHits` 为 `[]`、`retiredShimsChecked` 为 `true`；`node --experimental-strip-types plugin/scripts/import-graph-check.ts --selftest` exit 0（实测 exit 0 / `retiredShimHits=[]` `retiredShimsChecked=true`；selftest exit 0，12/12 case behaved）
+- [x] 棘轮能取假（双向，贴读数）：`node --experimental-strip-types --test plugin/test/import-graph-check.test.mjs` exit 0，其中新增夹具 (a) 已删 shim 文件重现 ⇒ checker exit 1 且点名该路径，(b) `import … from "./goal-store.ts"` 指向已删路径 ⇒ exit 1，干净树 ⇒ exit 0，仅注释提及 ⇒ 不报（实测 exit 0，25/25 pass，四条 AC-911 断言逐条命中）
+- [x] exports 目标在 **worktree 内**存在：`node -e '…'` exit 0（⛔ 不以 worktree 里的 bare-specifier import 判定——它解析到主检出）——实测 exit 0：`./adr-store` → `./src/core/adr-store.ts`、`./document-store` → `./src/core/document-store.ts`、`./contract-validator` → `./src/core/contract-validator.ts`
+- [x] `bash scripts/test.sh --for-task gap-ac911-src-root-forwarding-shim-deletion --allow-thin` exit 0（实测 exit 0，1486/1486 pass）
 
 ## DoD
 
@@ -81,6 +81,7 @@ $ grep -rln 'FORWARDING re-export' packages/quay/src/*.ts | wc -l
 
 ## Touches
 
+- docs/analysis/ownership-active-limited-proposal.mjs
 - goals/AC-196-not-in-git-unchanged-boolean-0.md
 - goals/AC-216-长期保证-ac-的复验域不随-goal-关闭而消失-达成即停止复验会让-上移一层-变成换层藏同一缺陷.md
 - goals/AC-242-台账不得留下-已离开复验域却尾事件为-fail-的-ac-否则下游判据-ac-241-结构上永不通过-被误读成-还有真缺.md
