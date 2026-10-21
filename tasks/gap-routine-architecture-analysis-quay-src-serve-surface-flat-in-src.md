@@ -46,9 +46,11 @@ Mechanically move the serve* family into packages/quay/src/serve/ (matching the 
 
 ### 2. 处置（= Requested action）
 
-- 24 个模块 `git mv` 进 `packages/quay/src/serve/`（git 识别为 24 条 rename，内容改动比 R098–R100）。
+- 24 个模块 `git mv` 进 `packages/quay/src/serve/`（git 识别为 24 条 rename，内容相似度 R098–R100，
+  即「纯移动」由 git 的相似度判定直接给出，不是自述）。
 - 新增 `packages/quay/src/serve/index.ts`：25 条 `export *`，**不是手维护的符号清单**
   （手维护清单在模块新增导出时会静默漏掉，硬规则 3b；`tsc` 是「barrel 完整」的判据）。
+- 移动后 `packages/quay/src` 顶层文件数 52 → 29。
 
 ### 3. 「no behavior change」不是自证，有两个直接量
 
@@ -76,10 +78,11 @@ Mechanically move the serve* family into packages/quay/src/serve/ (matching the 
 - 两个 checker-mutation-case（`host-repo-surface-ratchet.sh`、`serve-binding-literal-check.sh`）的
   **fixture 布局**：它们把被测 checker 指向的路径在临时根下重建，路径不同步则 case 会在错误的位置
   注入（表现为 INFRASTRUCTURE 或假绿）。两者改动后实跑 EXIT=0。
-- 三个把「目录 + 文件名」拼起来的测试（`serve.test.mjs` 的 serve-* 枚举、`serve-task.test.mjs` 的
+- 四个把「目录 + 文件名」拼起来的测试（`serve.test.mjs` 的 serve-* 枚举、`serve-task.test.mjs` 的
   三文件扫描、`serve-board.test.mjs` / `webui-modernist-sync.test.mjs` 的 source-text 检查）改为
   `src/serve` 基址；`gap-webui-tests-page-unpaginated-tables` 的 `<table>` 枚举命令改为
-  `packages/quay/src/serve/serve-*.ts`。
+  `packages/quay/src/serve/serve-*.ts`；`host-repo-surface-ratchet.test.mjs` 的 fixture
+  **mkdir 目标**也随之下沉一层（否则写 fixture 时 ENOENT）。
 
 ### 6. 移动暴露出的唯一真实运行时依赖（不是注释问题）
 
@@ -94,13 +97,30 @@ Mechanically move the serve* family into packages/quay/src/serve/ (matching the 
 两处 `git show <rev>:<path>` 的注释指向**那个 rev 实际携带的旧路径**，保持旧路径并注明文件已移动 ——
 把它们改成新路径会让注释对那个 rev 说谎。
 
+### 8. 判据实跑读数（本任务分支，非自述）
+
+- **scoped 门** `bash scripts/test.sh --for-task <id> --allow-thin`：**EXIT=0**；
+  全部 scoped 静态检查 PASS（含 `checker-mutation-check --check-changed`、
+  `checked-in-write-check --changed`（148/212 delta 路径被判定，0 次写进树）、
+  `import-graph-check`、`sh-census-check`、`suite-bucket-reattr-ratchet-check`、`landing-target-check`），
+  测试阶段 `✔ 90 / ✖ 0`。
+- **anti-drift Touches**：`ANTI-DRIFT HARD FAIL … 1 violation(s) — out-of-declared:
+  packages/quay/test/helpers/live-web-address-fixture.mjs` ⇒ 该文件确实随 import 改动，
+  已补进 `## Touches`（`packages/quay/test/helpers/*.mjs`）而非回退。
+- 逐个复跑受影响的最大风险测试文件：`characterization-serve-routes`(3/3)、`serve-task`(12/12)、
+  `serve-nav-inconsistent-routes`(12/12)、`webui-modernist-sync`(6/6)、
+  `gap-webui-tests-page-unpaginated-tables`(5/5)、`host-repo-surface-ratchet`(9/9)、
+  `serve-binding-literal-check`、`config-key-consumer-check`、`import-graph-check`、
+  `delivery-status-single-source`、`suite-bucket-attribution`、`kernel-sibling-resolution-check`
+  —— 全绿。
+
 ## AC
-- [ ] `.quay/routine-findings.jsonl` 中 finding `quay-src-serve-surface-flat-in-src`（routine `architecture-analysis`，runId `architecture-analysis-1792599464308`）所描述的问题被复核并处置
-- [ ] 处置结论可核：要么修掉，要么写明「已有机制在管、失败在哪一步」，⛔ 不以「已注意到」结案
+- [x] `.quay/routine-findings.jsonl` 中 finding `quay-src-serve-surface-flat-in-src`（routine `architecture-analysis`，runId `architecture-analysis-1792599464308`）所描述的问题被复核并处置
+- [x] 处置结论可核：要么修掉，要么写明「已有机制在管、失败在哪一步」，⛔ 不以「已注意到」结案
 
 ## DoD
-- [ ] 上面的判据实跑通过
-- [ ] ⛔ 探针只立案不执行：本任务若需要跑产出者/修复，由派发链执行，⛔ 不由例程代跑
+- [x] 上面的判据实跑通过
+- [x] ⛔ 探针只立案不执行：本任务若需要跑产出者/修复，由派发链执行，⛔ 不由例程代跑
 
 ## Touches
 - `packages/quay/src/serve/**`
@@ -108,6 +128,7 @@ Mechanically move the serve* family into packages/quay/src/serve/ (matching the 
 - `packages/quay/src/cli/*.ts`
 - `packages/quay/src/kernel/*.ts`
 - `packages/quay/test/*.mjs`
+- `packages/quay/test/helpers/*.mjs`
 - `packages/quay/scripts/*.mjs`
 - `packages/quay-native/src/*.ts`
 - `plugin/scripts/*.ts`
