@@ -50,6 +50,12 @@
       "readers": "unaudited"
     },
     {
+      "name": "design-evolution-history.jsonl",
+      "kind": "jsonl-log",
+      "owner": "plugin/scripts/design-evolution-readings.ts",
+      "readers": "unaudited"
+    },
+    {
       "name": "arch-discovery-findings.jsonl",
       "kind": "jsonl-log",
       "owner": "plugin/scripts/arch-discovery-routine.ts",

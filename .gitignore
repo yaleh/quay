@@ -82,6 +82,15 @@ packages/quay/plugin/
 # the same family as arch-coverage-history.jsonl / quality-round.jsonl. Declared in
 # docs/carrier-registry.json (owner: plugin/scripts/quality-gate-driver.ts).
 **/.quay/arch-cycle-history.jsonl
+# DESIGN-EVOLUTION readings carrier (.quay/design-evolution-history.jsonl) —
+# gap-design-evolution-readings-report-only-routine (DIR-133 裁定 3). The quality driver's
+# design-evolution-readings routine appends ONE line per due round carrying the two META-MECHANISM
+# readings: RM1 (share of a subsystem's growth that lands back in its central files) and RM2 (hot-file
+# contention counts from the worker-outcome ledger), or `evaluated:false` + a reason naming the exact
+# path/condition. Runtime state, never git-tracked — the same family as arch-cycle-history.jsonl /
+# quality-round.jsonl. Declared in docs/carrier-registry.json (owner:
+# plugin/scripts/design-evolution-readings.ts).
+**/.quay/design-evolution-history.jsonl
 # resource-DIAGNOSTIC ROUTINE carriers (gap-quality-continuous-resource-diagnostic-routine-mechanical-
 # filter-then-semantic): `.quay/resource-anomaly-findings.jsonl` holds one line per NEW mechanically-
 # flagged anomaly plus one scan-round line per round, and `.quay/resource-diagnostic-model-budget.jsonl`
