@@ -2,7 +2,7 @@
 id: gap-worker-driver-resident-loop-decomposition-discovery
 title: worker-driver.ts 7266 行 / runResidentLoop@6017 出度 30 是 loop
   生产核心最大单体——把四关注点与出度图落到可查询载体（后续切片 goal 的输入）
-status: ready
+status: done
 labels:
   - gap
   - architecture
