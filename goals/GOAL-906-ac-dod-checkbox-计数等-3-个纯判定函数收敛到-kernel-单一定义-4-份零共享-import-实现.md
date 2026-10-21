@@ -1,9 +1,16 @@
 ---
 id: GOAL-906
 title: AC/DoD checkbox 计数等 3 个纯判定函数收敛到 kernel/ 单一定义（4 份零共享 import 实现 → 1 份）
-status: draft
+status: active
 kind: goal
 origin: 架构分析改进方案 G-1（2026-10-21 会话，基于 ArchGuard detect_duplicates + 源码按位置核对）
+activatedAt: 2026-10-21T02:00:27.678Z
+statusLog:
+  - at: 2026-10-21T02:00:27.678Z
+    from: draft
+    to: active
+    actor: goal-cli
+    reason: ""
 ---
 ## 背景
 
