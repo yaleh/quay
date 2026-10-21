@@ -85,11 +85,11 @@ meta-read-back outside the exit section = true
 
 ## AC
 
-- [ ] AC1 机械充分性闸在真实 goal 载体上离开 `insufficient`：`node packages/quay/bin/quay.js goal show GOAL-909 --json 2>/dev/null | node --no-warnings --experimental-strip-types --input-type=module -e 'import { goalSufficiencyVerdict } from "./plugin/scripts/goal-driver.ts"; let s=""; for await (const c of process.stdin) s+=c; const g=JSON.parse(s); const v=goalSufficiencyVerdict(g,[{id:"AC-914"},{id:"AC-915"}]); console.log("verdict="+v); if (v==="insufficient") process.exit(1);'` 退出 0，stdout 为 `verdict=not-evaluated`（⛔ 不是 `verdict=insufficient`）。
-- [ ] AC2 退出条件节逐字可被机械层读到且收敛到 AC 可判终态：同一读数上断言 body 的 `## 退出条件` 节体非空白字符 > 40、`/^[①②③]/gm` 恰 3 行、节体**不含**子串 `全量 suite` 与 `合并进 develop`，且 `## 元机制回读（不是退出条件）` 出现在 `## 退出条件` 之后；退出 0 并打印 `nonWs=<n> clauses=3`。
-- [ ] AC3 判据能取假（两次读数原样贴进 Resolution）：① 对**不含** `## 退出条件` 的合成 body（`"## 背景\n\nx"`）调用同一函数 ⇒ `insufficient`；② 对 AC1 读到的**真实** post-edit body 调用同一函数 ⇒ `not-evaluated`。
-- [ ] AC4 范围节的「行为不变」已标注由任务层承担：同一读数中 body 含子串 `由任务层 fan-in 门承担`，且该子串所在行仍以 `- 行为不变：` 开头。
-- [ ] AC5 只改 goal 文件、状态不动：`git diff --name-only $(git merge-base HEAD develop) -- goals/` 恰好只有 `goals/GOAL-909-r2-workerpool-聚合-结局处理扩展点-把-runresidentloop-的-retry-backoff-n.md` 一行；`quay goal show GOAL-909 --json` 的 `status` 仍为 `active`；AC-914/AC-915 的 `status`、`criterion`、`expect` 与 apply 前逐字节相同。
+- [x] AC1 机械充分性闸在真实 goal 载体上离开 `insufficient`：`node packages/quay/bin/quay.js goal show GOAL-909 --json 2>/dev/null | node --no-warnings --experimental-strip-types --input-type=module -e 'import { goalSufficiencyVerdict } from "./plugin/scripts/goal-driver.ts"; let s=""; for await (const c of process.stdin) s+=c; const g=JSON.parse(s); const v=goalSufficiencyVerdict(g,[{id:"AC-914"},{id:"AC-915"}]); console.log("verdict="+v); if (v==="insufficient") process.exit(1);'` 退出 0，stdout 为 `verdict=not-evaluated`（⛔ 不是 `verdict=insufficient`）。
+- [x] AC2 退出条件节逐字可被机械层读到且收敛到 AC 可判终态：同一读数上断言 body 的 `## 退出条件` 节体非空白字符 > 40、`/^[①②③]/gm` 恰 3 行、节体**不含**子串 `全量 suite` 与 `合并进 develop`，且 `## 元机制回读（不是退出条件）` 出现在 `## 退出条件` 之后；退出 0 并打印 `nonWs=<n> clauses=3`。
+- [x] AC3 判据能取假（两次读数原样贴进 Resolution）：① 对**不含** `## 退出条件` 的合成 body（`"## 背景\n\nx"`）调用同一函数 ⇒ `insufficient`；② 对 AC1 读到的**真实** post-edit body 调用同一函数 ⇒ `not-evaluated`。
+- [x] AC4 范围节的「行为不变」已标注由任务层承担：同一读数中 body 含子串 `由任务层 fan-in 门承担`，且该子串所在行仍以 `- 行为不变：` 开头。
+- [x] AC5 只改 goal 文件、状态不动：`git diff --name-only $(git merge-base HEAD develop) -- goals/` 恰好只有 `goals/GOAL-909-r2-workerpool-聚合-结局处理扩展点-把-runresidentloop-的-retry-backoff-n.md` 一行；`quay goal show GOAL-909 --json` 的 `status` 仍为 `active`；AC-914/AC-915 的 `status`、`criterion`、`expect` 与 apply 前逐字节相同。
 
 ## DoD
 
@@ -103,3 +103,15 @@ meta-read-back outside the exit section = true
 ## Dark Axis
 
 该轴仍暗，理由：本任务只改 GOAL-909 的 body 文本，不改变生产代码、延迟、并发或资源行为；无 L_D/L_G 轴读数可采。
+
+## Resolution
+
+outcome: applied（人 2026-10-22 在架构分析会话中批准方案 (b)，原话「都同意」；由该会话按本提案的逐字文本执行）。
+
+- **执行**：经 `goal_write` 整体替换 GOAL-909 正文（提交 7a6e8a84a）。(1)(2) 两处修订逐字照本提案。另有一处提案外的事实更正，执行者主动说明：「先例对照」一行的 worker 占比由 88% 改为 82%（统一公式读到 GOAL-909 动手前的 ff32d031d；原 88% 的一次性命令漏算分母，见元机制 finding 的「口径更正」节）。这一处同在 GOAL-909 文件内，不影响 AC5 的单文件约束。
+- **AC1**：真实载体读数 `verdict=not-evaluated`，exit 0。修改前同一命令读数为 `verdict=insufficient`，exit 1。
+- **AC2**：`nonWs=440 clauses=3`；退出条件节不含「全量 suite」「合并进 develop」；`## 元机制回读（不是退出条件）` 位于 `## 退出条件` 之后。exit 0。
+- **AC3**：合成 body `## 背景\n\nx` ⇒ `verdict=insufficient`（exit 1）；真实改后 body ⇒ `verdict=not-evaluated`（exit 0）。
+- **AC4**：含「由任务层 fan-in 门承担」的行恰 1 行，以 `- 行为不变：` 开头。
+- **AC5**：提交 7a6e8a84a 只改动 `goals/GOAL-909-r2-workerpool-聚合-结局处理扩展点-把-runresidentloop-的-retry-backoff-n.md` 一个文件；GOAL-909 status 仍为 active；AC-914 / AC-915 的 status、criterion、expect 改前改后逐字节相同（sha256 前缀 a7969f11a645d1ad / 4d5ef18ae8186e4f）。两条 AC 此时均为 achieved（由 GOAL-909 的实施提交 f19a95371、024f9d7f2 达成，非本任务所改）。
+- **口径说明**：本任务原 AC5 用 `git diff --name-only $(git merge-base HEAD develop) -- goals/` 取证，那是为在任务 worktree 中执行设计的；本次在主检出执行，改用「goal_write 那次提交的改动文件清单」取同一个量。
