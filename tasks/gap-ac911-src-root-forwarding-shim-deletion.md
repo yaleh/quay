@@ -187,6 +187,7 @@ $ grep -rln 'FORWARDING re-export' packages/quay/src/*.ts | wc -l
 - plugin/test/kernel-sibling-resolution-check.test.mjs
 - plugin/test/meta-driver.test.mjs
 - plugin/test/ownership-active-limited-proposal.test.mjs
+- plugin/test/ownership-active-loop.test.mjs
 - plugin/test/worker-driver.test.mjs
 - plugin/test/workflow-runner-self-hosted-check.test.mjs
 - plugin/test/worktree-namespace-literal-check.test.mjs
@@ -195,8 +196,8 @@ $ grep -rln 'FORWARDING re-export' packages/quay/src/*.ts | wc -l
 
 ## Blocker
 
-**2026-10-21T03:18:13.061Z — worker 未落地（exited-not-landed）**
+**2026-10-21T04:05:38.153Z — worker 未落地（exited-not-landed）**
 
-- 未落地原因：step=suite: AssertionError [ERR_ASSERTION]: the shipped criterion must pass on this tree: node:fs:483
+- 未落地原因：step=suite: AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
 - run_id：wk-prod-anchor
-- session_id：a983c9cf-ca59-40ef-b1ef-a15514e5bb16
+- session_id：395f77c7-f22f-4f25-9e37-5459621538f1
