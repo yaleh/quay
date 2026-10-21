@@ -47,7 +47,6 @@
 
 import fs from "node:fs";
 import path from "node:path";
-import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 // `pidAlive` rides the edge that already existed: it used to be a 5-line private copy here (one of
 // the four divergent ones — `.quay/routine-findings.jsonl` finding `pidalive-eperm-opposite`, routine
@@ -57,16 +56,33 @@ import { DRIVER_KINDS, pidAlive } from "./driver-runtime.ts";
 // valueOf (below) is now a one-line arity adapter over the shared `flagValue`; its algorithm was one
 // of the ~73 hand-written copies of the indexOf+next-arg idiom in plugin/scripts
 // (.quay/routine-findings.jsonl finding `arg-parsing-helper-family`, routine `semantic-dedup-scan`).
-import { isDirectEntry, flagValue } from "./gate-script-base.ts";
+// runCli / resolveCliPath / sleep / out / readServerCarrier / SERVER_STATE_REL now come from the
+// shared base instead of private copies — `.quay/routine-findings.jsonl` finding
+// `server-verifier-twin-scripts` (routine `semantic-dedup-scan`, runId
+// `semantic-dedup-scan-1792560001684`); this file and server-restart-inflight-verify.ts carried the
+// same helper bodies verbatim.
+import {
+  isDirectEntry,
+  flagValue,
+  isIsoInstant,
+  out,
+  readServerCarrier,
+  resolveCliPath,
+  runCli,
+  SERVER_STATE_REL,
+  sleep,
+} from "./gate-script-base.ts";
 import { repoRoot as moduleRepoRoot } from "./repo-root.ts";
+
+// `isIsoInstant` stays part of THIS module's published surface (its own test imports it from here),
+// while the definition lives once in ./gate-script-base.ts.
+export { isIsoInstant };
 
 /** AC-254's own id, verbatim — the criterion matches this string exactly. */
 export const AC_ID = "GOAL-017-AC-254";
 /** The carrier this producer owns. The criterion's exit 1 on a missing carrier means the AC's own
  *  product is absent. */
 export const CARRIER_REL = ".quay/unified-server-verification.jsonl";
-/** The unified server's state carrier (written by the host; this script only READS it). */
-const SERVER_STATE_REL = ".quay/server.json";
 /** The six kinds the criterion requires — ⛔ derived from the kernel's DRIVER_KINDS, never typed out.
  *  A hardcoded copy would drift the moment a kind is added, and the criterion would silently start
  *  demanding 6 while the producer reports 7 (or vice versa). */
@@ -204,12 +220,6 @@ export interface BuildResult {
   verdict: Verdict;
   reason: string;
   record?: Record<string, unknown>;
-}
-
-/** Does `v` look like an ISO-8601 instant the criterion's `time.strptime(s[:19], "%Y-%m-%dT%H:%M:%S")`
- *  can parse? The criterion reports exit 3 for a non-ISO `at`, so the producer must not emit one. */
-export function isIsoInstant(v: unknown): boolean {
-  return typeof v === "string" && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/.test(v);
 }
 
 /**
@@ -414,21 +424,8 @@ function probeHost(host: string): string {
 }
 
 // (the private `pidAlive` copy that used to live here is gone — imported from ./driver-runtime.ts)
-
-interface ServerCarrier {
-  pid: number;
-  services: Array<{ name: string; host: string; port: number; up?: boolean }>;
-}
-
-function readServerCarrier(root: string): ServerCarrier | null {
-  try {
-    const j = JSON.parse(fs.readFileSync(path.join(root, SERVER_STATE_REL), "utf8")) as ServerCarrier;
-    if (!j || !Array.isArray(j.services) || !Number.isInteger(j.pid)) return null;
-    return j;
-  } catch {
-    return null;
-  }
-}
+// (the private `ServerCarrier`/`readServerCarrier` copies are gone too — imported from
+//  ./gate-script-base.ts; finding `server-verifier-twin-scripts`)
 
 // ── main ────────────────────────────────────────────────────────────────────────────────────────
 
@@ -436,38 +433,6 @@ function readServerCarrier(root: string): ServerCarrier | null {
 function tsKeyFor(kind: string): string {
   const spec = DRIVER_KINDS[kind as keyof typeof DRIVER_KINDS] as { tsKey?: string } | undefined;
   return spec?.tsKey ?? "ts";
-}
-
-function resolveCliPath(explicit: string | undefined): string | null {
-  if (explicit) return fs.existsSync(explicit) ? explicit : null;
-  // Default: the Core CLI of the checkout this script lives in (`<repo>/plugin/scripts/…`).
-  const repoRoot = moduleRepoRoot();
-  const devEntry = path.join(repoRoot, "packages", "quay", "bin", "quay.ts");
-  return fs.existsSync(devEntry) ? devEntry : null;
-}
-
-function runCli(cli: string, args: string[], cwd: string): { argv: string[]; exit: number; stdout: string; stderr: string } {
-  const stripTypes = cli.endsWith(".ts") ? ["--experimental-strip-types"] : [];
-  const argv = [process.execPath, "--no-warnings", ...stripTypes, cli, ...args];
-  const r = spawnSync(argv[0], argv.slice(1), { cwd, encoding: "utf8", timeout: 180000 });
-  return { argv, exit: r.status ?? -1, stdout: r.stdout ?? "", stderr: r.stderr ?? "" };
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((r) => setTimeout(r, ms));
-}
-
-function out(json: boolean, doc: Record<string, unknown>): void {
-  if (json) process.stdout.write(JSON.stringify(doc, null, 2) + "\n");
-  else {
-    const parts = Object.entries(doc)
-      .filter(([, v]) => typeof v !== "object")
-      .map(([k, v]) => `${k}=${String(v)}`);
-    process.stdout.write(parts.join(" ") + "\n");
-    for (const [k, v] of Object.entries(doc)) {
-      if (v && typeof v === "object") process.stdout.write(`  ${k}: ${JSON.stringify(v)}\n`);
-    }
-  }
 }
 
 async function main(argv: string[]): Promise<number> {
@@ -478,7 +443,7 @@ async function main(argv: string[]): Promise<number> {
   const root = path.resolve(valueOf("root") ?? process.cwd());
   const control = valueOf("control");
   const windowMs = Number(valueOf("window-ms") ?? "900000");
-  const cli = resolveCliPath(valueOf("cli"));
+  const cli = resolveCliPath(valueOf("cli"), moduleRepoRoot());
   if (cli === null) {
     out(json, { ac: AC_ID, verdict: "USAGE", reason: "cannot locate the Core CLI entry — pass --cli <path/to/quay.ts|quay.js>" });
     return 3;

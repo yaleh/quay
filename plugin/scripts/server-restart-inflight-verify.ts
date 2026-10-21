@@ -68,13 +68,28 @@
 
 import fs from "node:fs";
 import path from "node:path";
-import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { DRIVER_KINDS } from "./driver-runtime.ts";
 // valueOf (below) is now a one-line arity adapter over the shared `flagValue`; its algorithm was one
 // of the ~73 hand-written copies of the indexOf+next-arg idiom in plugin/scripts
 // (.quay/routine-findings.jsonl finding `arg-parsing-helper-family`, routine `semantic-dedup-scan`).
-import { isDirectEntry, flagValue } from "./gate-script-base.ts";
+//
+// runCli / resolveCliPath / sleep / out / readServerCarrier / SERVER_STATE_REL come from the shared
+// base too — finding `server-verifier-twin-scripts` (routine `semantic-dedup-scan`, runId
+// `semantic-dedup-scan-1792560001684`): this file and server-partial-stop-verify.ts carried the same
+// helper bodies verbatim. `isIsoInstant` is re-exported below so this module's published surface
+// (its own test imports it from here) is unchanged.
+import {
+  isDirectEntry,
+  flagValue,
+  isIsoInstant,
+  out,
+  readServerCarrier,
+  resolveCliPath,
+  runCli,
+  SERVER_STATE_REL,
+  sleep,
+} from "./gate-script-base.ts";
 // The `round` field is a JSON STRING in these carriers; that conversion is ALREADY solved (and
 // unit-tested) in AC-254's producer, which shares this very carrier file. ⛔ A second copy would be
 // the exact 「两份实现 = 漂移」 shape — and the trap is silent: writing the raw string through is
@@ -88,6 +103,10 @@ import { lastLine, parseRoundRecord, roundCarrierName, type RoundReading } from 
 import { resolveWorkerProcessName } from "./worker-driver.ts";
 import { repoRoot as moduleRepoRoot } from "./repo-root.ts";
 
+// `isIsoInstant` stays part of THIS module's published surface (its own test imports it from here),
+// while the definition lives once in ./gate-script-base.ts.
+export { isIsoInstant };
+
 /** AC-256's own id, verbatim — the criterion matches this string exactly. */
 export const AC_ID = "GOAL-017-AC-256";
 /** The service that is restarted. Verbatim: the criterion matches this string exactly. */
@@ -96,7 +115,10 @@ export const RESTARTED_SERVICE = "driver:worker";
 export const CARRIER_REL = ".quay/unified-server-verification.jsonl";
 /** How the in-flight set was obtained — recorded so the derivation is auditable, not asserted. */
 export const INFLIGHT_SOURCE = "proc-tree";
-const SERVER_STATE_REL = ".quay/server.json";
+/** This verifier's CLI budget: a REAL `server restart` waits through a driver respawn, so it allows
+ *  300 s where the shared base's default (180 s) is the partial-stop verifier's budget. The difference
+ *  is the pre-extraction behavior of this call site — the extraction preserved it as a parameter. */
+const RESTART_CLI_TIMEOUT_MS = 300000;
 /** SPEC §7 阶段 C（AC-255）的 anchor 回读面 {pid, startedAt, kinds, host}。读它是为了**在动手之前**
  *  认出「这个 kind 的 pid 其实是 anchor 的 pid」——⛔ 不读它就会 SIGTERM 一个承载六个 kind 的进程。 */
 const ANCHOR_STATE_REL = ".quay/anchor.json";
@@ -303,10 +325,6 @@ export interface BuildResult {
   record?: Record<string, unknown>;
 }
 
-export function isIsoInstant(v: unknown): boolean {
-  return typeof v === "string" && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/.test(v);
-}
-
 function isoMs(v: string): number {
   const t = Date.parse(v);
   return Number.isFinite(t) ? t : NaN;
@@ -443,50 +461,8 @@ export function buildRecord(r: Readings): BuildResult {
 }
 
 // ── main ────────────────────────────────────────────────────────────────────────────────────────
-
-function resolveCliPath(explicit: string | undefined): string | null {
-  if (explicit) return fs.existsSync(explicit) ? explicit : null;
-  const repoRoot = moduleRepoRoot();
-  const devEntry = path.join(repoRoot, "packages", "quay", "bin", "quay.ts");
-  return fs.existsSync(devEntry) ? devEntry : null;
-}
-
-function runCli(cli: string, args: string[], cwd: string): { argv: string[]; exit: number; stdout: string; stderr: string } {
-  const stripTypes = cli.endsWith(".ts") ? ["--experimental-strip-types"] : [];
-  const argv = [process.execPath, "--no-warnings", ...stripTypes, cli, ...args];
-  const r = spawnSync(argv[0], argv.slice(1), { cwd, encoding: "utf8", timeout: 300000 });
-  return { argv, exit: r.status ?? -1, stdout: r.stdout ?? "", stderr: r.stderr ?? "" };
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((r) => setTimeout(r, ms));
-}
-
-function out(json: boolean, doc: Record<string, unknown>): void {
-  if (json) process.stdout.write(JSON.stringify(doc, null, 2) + "\n");
-  else {
-    const parts = Object.entries(doc)
-      .filter(([, v]) => typeof v !== "object")
-      .map(([k, v]) => `${k}=${String(v)}`);
-    process.stdout.write(parts.join(" ") + "\n");
-    for (const [k, v] of Object.entries(doc)) if (v && typeof v === "object") process.stdout.write(`  ${k}: ${JSON.stringify(v)}\n`);
-  }
-}
-
-interface ServerCarrier {
-  pid: number;
-  services: Array<{ name: string; host: string; port: number; up?: boolean }>;
-}
-
-function readServerCarrier(root: string): ServerCarrier | null {
-  try {
-    const j = JSON.parse(fs.readFileSync(path.join(root, SERVER_STATE_REL), "utf8")) as ServerCarrier;
-    if (!j || !Array.isArray(j.services) || !Number.isInteger(j.pid)) return null;
-    return j;
-  } catch {
-    return null;
-  }
-}
+// (the private resolveCliPath / runCli / sleep / out / ServerCarrier / readServerCarrier copies are
+//  gone — imported from ./gate-script-base.ts; finding `server-verifier-twin-scripts`)
 
 function readPidFileAbs(p: string): number | null {
   try {
@@ -536,7 +512,7 @@ async function main(argv: string[]): Promise<number> {
   const root = path.resolve(valueOf("root") ?? process.cwd());
   const control = valueOf("control") ?? "none";
   const windowMs = Number(valueOf("window-ms") ?? "1200000");
-  const cli = resolveCliPath(valueOf("cli"));
+  const cli = resolveCliPath(valueOf("cli"), moduleRepoRoot());
   if (cli === null) {
     out(json, { ac: AC_ID, verdict: "USAGE", reason: "cannot locate the Core CLI entry — pass --cli <path/to/quay.ts|quay.js>" });
     return 3;
@@ -672,10 +648,10 @@ async function main(argv: string[]): Promise<number> {
     // （driver-runtime.ts startKind 的 orphan 分支）。那会真的杀掉生产驱动 —— 一个「负控制」绝不能
     // 有副作用。§6.9 不变式 1（start 不静默重启）的活体对照因此放在 CLI 的单测里，与它的既有
     // fixture driver 一起做，而不在这里拿生产驱动冒险。
-    restart = runCli(cli, ["server", "status", "--json", "--root", root], root);
+    restart = runCli(cli, ["server", "status", "--json", "--root", root], root, RESTART_CLI_TIMEOUT_MS);
     via = `${cli} server status --json --root ${root} (STRUCTURAL CONTROL: a pure read stands in for the restart, so the driver pid cannot move)`;
   } else {
-    restart = runCli(cli, ["server", "restart", "--only", RESTARTED_SERVICE, "--json", "--root", root], root);
+    restart = runCli(cli, ["server", "restart", "--only", RESTARTED_SERVICE, "--json", "--root", root], root, RESTART_CLI_TIMEOUT_MS);
     via = `${cli} server restart --only ${RESTARTED_SERVICE} --json --root ${root}`;
   }
 

@@ -4,7 +4,7 @@
 // Usage:
 //   import { parseArgs, flagValue, readFrontmatter, emitPass, emitFail, emitNotEvaluated, emitVerdict, requireArg, isDirectEntry, git, gitLastCommitForPath } from "./gate-script-base.ts";
 
-import { execSync } from "node:child_process";
+import { execSync, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 
@@ -937,4 +937,115 @@ export function createSelftest(opts: SelftestOptions): Selftest {
     get failures() { return failures; },
     report,
   };
+}
+
+// ── Verifier-script primitives (CLI invocation / carrier read / dual-mode emit) ───────────────────────
+// Extraction (routine `semantic-dedup-scan`, finding `server-verifier-twin-scripts`, runId
+// `semantic-dedup-scan-1792560001684`, verdict `real-duplication`, suggestedAction `extract`):
+// plugin/scripts/server-partial-stop-verify.ts and plugin/scripts/server-restart-inflight-verify.ts
+// carried byte-identical private copies of these helpers. Both are TypeScript verifier scripts and
+// both already import this module, so the shared accessor belongs here rather than in a new file
+// (same mandate as `printJson` / `git` / `serializeSortedJson` above).
+//
+// ⛔ BEHAVIOR IS PRESERVED, NOT "IMPROVED". The one place the copies disagreed was `runCli`'s spawn
+// timeout (180 s in the partial-stop verifier, 300 s in the restart verifier — the latter waits through
+// a real driver respawn). That difference is REAL, so the timeout is a PARAMETER; it is not silently
+// unified into one value, and the default is the partial-stop copy's 180 s.
+//
+// ⛔ `out` KEEPS ITS NAME. It is the dual-mode emitter both verifiers call at every exit path (a JSON
+// document under `--json`, `k=v` scalars + indented sub-objects otherwise); renaming it would touch
+// ~30 call sites for no behavioral gain and would make this extraction's diff unreadable.
+
+/** One completed CLI invocation, as the verifiers need it: the argv actually used (they record it as
+ *  evidence) plus the three readings callers branch on. A spawn failure is `exit: -1`, never a throw. */
+export interface CliRun {
+  argv: string[];
+  exit: number;
+  stdout: string;
+  stderr: string;
+}
+
+/** The argv `runCli` spawns, factored out so the `.ts`/`.js` branch is OBSERVABLE without executing
+ *  (the CI Node floor cannot run a `.ts` fixture at all — hard rule 4 推论三: a contract readable
+ *  only on the dev host is not measured). A `.ts` entry gets `--experimental-strip-types`; a built
+ *  `.js` entry must NOT. `--no-warnings` is unconditional so Node's type-stripping notice never
+ *  pollutes a captured stdout. */
+export function cliArgv(cli: string, args: string[]): string[] {
+  const stripTypes = cli.endsWith(".ts") ? ["--experimental-strip-types"] : [];
+  return [process.execPath, "--no-warnings", ...stripTypes, cli, ...args];
+}
+
+/** Run the Core CLI entry `cli` with `args` in `cwd`. `timeoutMs` is a parameter because the two
+ *  original copies genuinely disagreed (see the note above) — not a tunable offered for its own sake. */
+export function runCli(cli: string, args: string[], cwd: string, timeoutMs = 180000): CliRun {
+  const argv = cliArgv(cli, args);
+  const r = spawnSync(argv[0], argv.slice(1), { cwd, encoding: "utf8", timeout: timeoutMs });
+  return { argv, exit: r.status ?? -1, stdout: r.stdout ?? "", stderr: r.stderr ?? "" };
+}
+
+/** Promise sleep, for the verifiers' polling windows. */
+export function sleep(ms: number): Promise<void> {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
+/** Does `v` look like an ISO-8601 instant that a criterion's
+ *  `time.strptime(s[:19], "%Y-%m-%dT%H:%M:%S")` can parse? The AC-254/AC-256 criteria report exit 3
+ *  for a non-ISO `at`, so the producers must not emit one. */
+export function isIsoInstant(v: unknown): boolean {
+  return typeof v === "string" && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/.test(v);
+}
+
+/** Emit a verifier's result document: pretty JSON when `json`, else the `k=v` scalars of `doc` on one
+ *  line followed by one indented `<k>: <json>` line per object-valued field. Byte-identical to the
+ *  private copies it replaces (including the field ORDER: scalars first, then objects). */
+export function out(json: boolean, doc: Record<string, unknown>): void {
+  if (json) process.stdout.write(JSON.stringify(doc, null, 2) + "\n");
+  else {
+    const parts = Object.entries(doc)
+      .filter(([, v]) => typeof v !== "object")
+      .map(([k, v]) => `${k}=${String(v)}`);
+    process.stdout.write(parts.join(" ") + "\n");
+    for (const [k, v] of Object.entries(doc)) {
+      if (v && typeof v === "object") process.stdout.write(`  ${k}: ${JSON.stringify(v)}\n`);
+    }
+  }
+}
+
+/** Resolve the Core CLI entry: an explicit `--cli` when it exists, else this checkout's
+ *  `packages/quay/bin/quay.ts` under `repoRootForDefault`. `null` is the caller's USAGE outcome.
+ *
+ *  The root is PASSED IN rather than resolved here so this module keeps no tie to the repo layout —
+ *  a caller points it at the tree it means (`repoRoot()`), and a test can point it at a fixture. */
+export function resolveCliPath(explicit: string | undefined, repoRootForDefault: string): string | null {
+  if (explicit) return fs.existsSync(explicit) ? explicit : null;
+  const devEntry = path.join(repoRootForDefault, "packages", "quay", "bin", "quay.ts");
+  return fs.existsSync(devEntry) ? devEntry : null;
+}
+
+/** The unified server's state carrier (`.quay/server.json`), workspace-relative. It is the same
+ *  literal Core's `server-state.ts` publishes; ⛔ it is not IMPORTED from there because this module is
+ *  inlined into every shipped bundle entry that imports it, and pulling Core (and its write path) in
+ *  would grow all of them for one string. */
+export const SERVER_STATE_REL = ".quay/server.json";
+
+/** The subset of the carrier the server verifiers read. ⛔ Deliberately LAX (`pid` + `services[]`
+ *  only): this reader must still read a carrier the ACTUAL host wrote, and a stricter reader would
+ *  turn a less-complete live carrier into "unreadable" (⇒ NOT-EVALUATED) — a behavior change, which a
+ *  dedup extraction must not make. `up` is optional: only some call sites consult it. */
+export interface ServerCarrier {
+  pid: number;
+  services: Array<{ name: string; host: string; port: number; up?: boolean }>;
+}
+
+/** Read the unified server carrier. Absent / unreadable / ill-shaped all yield `null` — exactly the
+ *  contract of the private copies this replaces. Callers translate `null` into their own
+ *  distinguishable NOT-EVALUATED verdict (硬规则 3b); none of them reads it as "not running". */
+export function readServerCarrier(root: string): ServerCarrier | null {
+  try {
+    const j = JSON.parse(fs.readFileSync(path.join(root, SERVER_STATE_REL), "utf8")) as ServerCarrier;
+    if (!j || !Array.isArray(j.services) || !Number.isInteger(j.pid)) return null;
+    return j;
+  } catch {
+    return null;
+  }
 }
