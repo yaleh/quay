@@ -3,7 +3,7 @@ id: gap-routine-freshness-refresh-freshness-stale-goal-009-ac-205
 title: "freshness-refresh: AC-205's newest evidence (ts 2026-10-12T21:59:06Z) is
   205.43h old and only 3 delivery-face commits from the k=200 window edge; the
   most recent producer run (2026"
-status: todo
+status: ready
 labels:
   - gap
   - routine-filed
