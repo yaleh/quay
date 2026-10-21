@@ -2,7 +2,7 @@
 id: AC-913
 title: native 经 gate/ 层的 import 归零（gate/shared/acceptance-runner +
   gate/gate-event-store 改指 core 真身或 exports）
-status: active
+status: achieved
 kind: criterion
 goal: GOAL-908
 criterion: "n=$(grep -rnE 'quay/src/gate/' packages/quay-native/src/ 2>/dev/null
@@ -22,6 +22,11 @@ statusLog:
     to: active
     actor: goal-driver
     reason: "triage: activate"
+  - at: 2026-10-21T08:55:32.032Z
+    from: active
+    to: achieved
+    actor: goal-driver
+    reason: "I2: criterion pass"
 fidelity:
   verdict: faithful
   reason: "fidelity judge: faithful"
