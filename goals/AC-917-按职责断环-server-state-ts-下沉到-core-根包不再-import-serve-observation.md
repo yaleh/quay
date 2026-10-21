@@ -1,7 +1,7 @@
 ---
 id: AC-917
 title: 按职责断环：server-state.ts 下沉到 core/，根包不再 import ./serve/，observation 子模块不再回指根包模块
-status: draft
+status: active
 kind: criterion
 goal: GOAL-910
 criterion: 'if [ ! -f packages/quay/src/core/server-state.ts ] || [ -e
@@ -29,4 +29,15 @@ expect: 本条防止用错误的方式断环（例如把 goal-preview.ts 也搬�
   处（model.ts:14、events.ts:13、blocking.ts:11、liveness.ts:20）。
 origin: 架构分析会话 2026-10-22：环的两条成因边（root→serve 经 server-state.ts；observation→root
   经 abi.ts / start-end-like.ts）按职责定位；人当轮批准立案
+activatedAt: 2026-10-21T23:50:06.082Z
+statusLog:
+  - at: 2026-10-21T23:50:06.082Z
+    from: draft
+    to: active
+    actor: goal-driver
+    reason: "triage: activate"
+fidelity:
+  verdict: faithful
+  reason: "fidelity judge: faithful"
+  at: 2026-10-21T23:50:06.082Z
 ---
