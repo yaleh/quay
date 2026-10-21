@@ -2251,3 +2251,86 @@ test("printNextSteps: 'Workspace ready at:' is the --root ITSELF, and agrees wit
   assert.notEqual(dir, targetDir, "fixture: --root must be a SUBDIR of the CWD for this check to bite");
 });
 
+
+// ---------------------------------------------------------------------------
+// The DECLINED-AUTO-COMMIT path (gap-quay-init-declined-auto-commit-leaves-doc-branch-unenforced)
+//
+// The gap: a non-interactive `quay init` on a 0-commit repository DECLINES its auto-commit (it must
+// not commit a working tree it did not create), so there is no commit to fork the doc branch from.
+// If the FIRST commit is then made by an EXTERNAL process, nothing re-judges the checkout and the
+// main branch stays on the landing baseline `develop` permanently. The fix carries the unestablished
+// invariant out of that run as a MACHINE-READABLE `pending` signal (a dedicated field + a greppable
+// line), and adds a READ-ONLY check verb (`quay init --check-doc-branch`) that fails closed once a
+// commit exists and the invariant is still broken.
+//
+// ⛔ Falsifiability: delete the `docBranchInvariant` attachment in `runInit` (or the CLI print) and
+// every assertion below reads `undefined` / matches nothing. The negative half — the checker CAN
+// return a non-violated reading — lives in branch-model.test.mjs (AC2 fixture) and in the
+// violated⇒satisfied transition there.
+// ---------------------------------------------------------------------------
+
+test("DECLINED auto-commit on a 0-commit repo: the run carries a machine-readable PENDING doc-branch-invariant", () => {
+  const { dir, g } = freshGitRepo("declined-pending", "develop");
+  assert.throws(() => g("rev-parse", "--verify", "HEAD"), /./, "fixture: HEAD must be unborn");
+
+  // ⛔ NO --auto-commit-config and NO --auto-commit-skip: the plain non-interactive run, i.e. the
+  // exact path on which the auto-commit is DECLINED. (stdin is a pipe here, so `prompt` never
+  // becomes interactive — the same condition as a loop/observer session.)
+  // spawnSync throughout this test: BOTH streams are captured on success AND on a non-zero exit
+  // (the DECLINED line goes to stderr by design, and a violated check writes its verdict to stdout
+  // while exiting 1 — `runQuayAllowFail` keeps stdout only on the success path).
+  const runCli = (args) => {
+    const r = spawnSync("node", [quayBin, ...args], { cwd: dir, encoding: "utf8" });
+    return { stdout: r.stdout ?? "", stderr: r.stderr ?? "", exitCode: r.status ?? 1 };
+  };
+
+  const out = runCli(["init", "--root", dir]);
+  assert.equal(out.exitCode, 0, `a declined commit is not a failure:\n${out.stdout}${out.stderr}`);
+  assert.match(out.stderr, /auto-commit: DECLINED/, "premise: the auto-commit really declined");
+  assert.throws(() => g("rev-parse", "--verify", "HEAD"), /./, "premise: no commit was created");
+
+  // (1) The signal: a stable token + enumerated state + reason — greppable, not the generic prose.
+  assert.match(
+    out.stdout,
+    /^doc-branch-invariant: PENDING \(reason: no-commits-yet\)/m,
+    `the unestablished invariant must be a distinct machine-readable state:\n${out.stdout}`,
+  );
+  // …and it is NOT dressed as either of the two states it must be distinguishable from.
+  assert.doesNotMatch(out.stdout, /doc-branch-invariant: SATISFIED/);
+  assert.doesNotMatch(out.stdout, /doc-branch-invariant: VIOLATED/);
+  // The remedy is named, so the operator's next action is not a guess.
+  assert.match(out.stdout, /quay init --doc-branch-name author/);
+
+  // (2) The SAME reading through the JSON document — no prose parsing required by a caller.
+  const j = runCli(["init", "--json", "--root", dir]);
+  assert.equal(j.exitCode, 0, j.stderr);
+  const doc = JSON.parse(j.stdout);
+  assert.equal(doc.docBranchInvariant.state, "pending");
+  assert.equal(doc.docBranchInvariant.reason, "no-commits-yet");
+  assert.equal(doc.docBranchInvariant.ok, true, "pending is not a failure — it is an unestablished invariant");
+  assert.match(doc.docBranchInvariant.remedy, /quay init --doc-branch-name author/);
+
+  // (3) The standalone check verb agrees on the same repository, and exits 0 (no verdict = no failure).
+  const chk = runCli(["init", "--check-doc-branch", "--root", dir]);
+  assert.equal(chk.exitCode, 0, `pending must not exit non-zero:\n${chk.stdout}${chk.stderr}`);
+  assert.match(chk.stdout, /doc-branch-invariant: PENDING/);
+
+  // (4) ⛔ THE GAP ITSELF: an EXTERNAL process creates the first commit. The invariant is now
+  // violated, and the check verb fails closed — this is the state that used to be silent forever.
+  g("add", "-A");
+  g("commit", "-q", "-m", "quay workspace laydown: init six-file config surface");
+  assert.equal(g("symbolic-ref", "--short", "HEAD"), "develop", "premise: the checkout is still on the baseline");
+  assert.equal(g("branch", "--list", "author"), "", "premise: still no doc branch");
+
+  const afterExternalCommit = runCli(["init", "--check-doc-branch", "--root", dir]);
+  assert.equal(afterExternalCommit.exitCode, 1, `the broken invariant must now fail closed:\n${afterExternalCommit.stdout}`);
+  assert.match(afterExternalCommit.stdout, /doc-branch-invariant: VIOLATED \(reason: on-baseline-no-doc-branch\)/);
+
+  // (5) …and the remedy the output names really repairs it, on a REAL repository object.
+  const remedy = runCli(["init", "--root", dir, "--doc-branch-name", "author", "--auto-commit-skip"]);
+  assert.equal(remedy.exitCode, 0, `${remedy.stdout}${remedy.stderr}`);
+  assert.equal(g("symbolic-ref", "--short", "HEAD"), "author");
+  const final = runCli(["init", "--check-doc-branch", "--root", dir]);
+  assert.equal(final.exitCode, 0, `the repaired repo must check OK:\n${final.stdout}`);
+  assert.match(final.stdout, /doc-branch-invariant: SATISFIED/);
+});

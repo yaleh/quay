@@ -1095,6 +1095,247 @@ export function formatDocBranchReport(report: DocBranchReport): string {
   return lines.join("\n");
 }
 
+// ── THE STANDING DOC-BRANCH INVARIANT CHECK ─────────────────────────────────────────────────────
+// (gap-quay-init-declined-auto-commit-leaves-doc-branch-unenforced)
+//
+// ============================ WHY THIS EXISTS ============================
+// `ensureDocBranch` above ESTABLISHES the invariant, but only on the runs that call it. `quay init`
+// calls it before any write and re-calls it after the auto-commit on an unborn repository — so the
+// two paths the previous tasks closed are: (a) a repo that already had a commit when init ran;
+// (b) a repo whose first commit init's OWN auto-commit created.
+//
+// The third path has no owner: on a non-interactive run `autoCommitClosedSet` DECLINES (it must not
+// silently commit a working tree it did not create), so init writes the config, `ensureDocBranch`
+// truthfully reports NOT-EVALUATED on the still-unborn HEAD, and the run ends. If the first commit
+// is then created by SOMEBODY ELSE — an autonomous loop's observer session, or a human — nothing
+// ever judges the checkout again. Measured 2026-10-21 on a third-party project: the first commit
+// (`quay workspace laydown: init six-file config surface`) was authored by an observer session, the
+// main checkout sat on `develop`, no doc branch existed, and the config carried no `loop.doc_branch`.
+// The invariant was broken with zero trace of it ever having been evaluated.
+//
+// ============================ WHAT THIS FUNCTION IS ============================
+// The READ-ONLY half of the same judgment `ensureDocBranch` acts on, expressed as a standing
+// INVARIANT rather than as an action: "when the main checkout is on the landing baseline and the
+// repository HAS a commit, some OTHER branch must be carrying the doc role". It is safe to run on
+// every init and from a check verb — it mutates nothing (no branch created, HEAD not moved, no file
+// written) — which is what lets it be a resident reading instead of a one-shot step.
+//
+// FOUR STATES, never a boolean (hard rule 3):
+//   satisfied     — the checkout is NOT on the landing baseline; nothing to do (the negative control:
+//                   a project already on its doc branch must read as OK, not as "no violation found").
+//   violated      — the checkout IS on the baseline, a commit exists, and no usable doc branch is
+//                   carrying the role. `ok: false`; the caller's exit code is non-zero.
+//   pending       — the checkout is on the baseline but the repository has ZERO commits (the state
+//                   init's declined auto-commit leaves behind). ⛔ NOT satisfied: a doc branch cannot
+//                   be forked from a commit that does not exist, and the next external commit would
+//                   make this a `violated` state with nobody watching. ⛔ NOT a failure either — the
+//                   caller exits 0 and carries the state separately (hard rule 3b).
+//   not-evaluated — detached/unborn HEAD we cannot name, no doc-branch name supplied, or a
+//                   non-git directory. Verdict WITHHELD; never `satisfied`.
+//
+// ⛔ The NAME is an input (`opts.name`), exactly as in `ensureDocBranch` — this module names no doc
+// branch of its own. The caller resolves it with the shipped precedence (CLI flag → the target's
+// `loop.doc_branch` → the caller's convention; see `init.ts` `resolveDocBranchName`).
+
+/** The standing invariant's classification — a CLASSIFICATION, never a boolean (hard rule 3). */
+export type DocBranchInvariantState = "satisfied" | "violated" | "pending" | "not-evaluated";
+
+/** The machine-readable cause attached to the state (enumerated, never prose-matched downstream). */
+export type DocBranchInvariantReason =
+  | "not-on-baseline"
+  | "on-baseline-no-doc-branch"
+  | "on-baseline-doc-branch-elsewhere"
+  | "on-baseline-doc-branch-collision"
+  | "no-commits-yet"
+  | "detached-head"
+  | "not-a-git-worktree"
+  | "no-doc-branch-name"
+  | "doc-branch-is-baseline"
+  | "ancestry-undecidable";
+
+export interface DocBranchInvariantReport {
+  state: DocBranchInvariantState;
+  /** False ONLY for `violated` — `pending` and `not-evaluated` are not failures (hard rule 3b). */
+  ok: boolean;
+  /** True iff the verdict was WITHHELD (`state === "not-evaluated"`) — distinct from `ok === true`. */
+  notEvaluated: boolean;
+  /** The enumerated cause (`not-on-baseline`, `on-baseline-no-doc-branch`, `no-commits-yet`, …). */
+  reason: DocBranchInvariantReason;
+  /** The branch the main checkout is on, or null when HEAD is detached/unreadable. */
+  checkedOut: string | null;
+  /** Always `LANDING_BASELINE_ROLE` — the ref the invariant is about. */
+  baseline: string;
+  /** The requested doc-branch name (echoed verbatim; never invented here). */
+  docBranch: string;
+  /** The named doc branch's sha, or null when it does not exist. */
+  docBranchSha: string | null;
+  detail: string;
+  /** The single command that repairs a `violated` state; null otherwise. */
+  remedy: string | null;
+}
+
+export interface DocBranchInvariantOptions {
+  /** The doc-branch name to judge against — REQUIRED by the caller (see the section header). */
+  name: string;
+}
+
+/**
+ * Judge the standing doc-branch invariant at `root`. READ-ONLY: it runs `git` queries and nothing
+ * else — no branch is created, HEAD is not moved, no file is written. See the section header for the
+ * four states and the three init paths this closes.
+ */
+export function checkDocBranchInvariant(root: string, opts: DocBranchInvariantOptions): DocBranchInvariantReport {
+  const name = (opts.name ?? "").trim();
+  const baseline = LANDING_BASELINE_ROLE;
+  const report = (
+    state: DocBranchInvariantState,
+    reason: DocBranchInvariantReason,
+    detail: string,
+    extra: { checkedOut?: string | null; docBranchSha?: string | null; remedy?: string | null } = {},
+  ): DocBranchInvariantReport => ({
+    state,
+    ok: state !== "violated",
+    notEvaluated: state === "not-evaluated",
+    reason,
+    checkedOut: extra.checkedOut ?? null,
+    baseline,
+    docBranch: name,
+    docBranchSha: extra.docBranchSha ?? null,
+    detail,
+    remedy: extra.remedy ?? null,
+  });
+
+  const insideRepo = git(root, ["rev-parse", "--is-inside-work-tree"]);
+  if (!insideRepo.ok || insideRepo.out.trim() !== "true") {
+    return report("not-evaluated", "not-a-git-worktree", `${root} is not inside a git work tree — the invariant is not judged there`);
+  }
+
+  const checkedOut = resolveCheckedOutBranch(root);
+  if (checkedOut === null) {
+    return report(
+      "not-evaluated",
+      "detached-head",
+      "HEAD is detached: the main checkout is on no branch, so 'is it on the landing baseline?' has no answer — ⛔ NOT treated as satisfied",
+    );
+  }
+
+  // ① The invariant already holds: the checkout is somewhere other than the landing baseline.
+  //    ⛔ Checked BEFORE the commit count and BEFORE the name: whether it holds is knowable without
+  //    either, and a project that is already off the baseline gets its true answer with no config.
+  if (checkedOut !== baseline) {
+    return report(
+      "satisfied",
+      "not-on-baseline",
+      `the main checkout is on '${checkedOut}', not the landing baseline '${baseline}' — the doc-branch invariant holds`,
+      { checkedOut },
+    );
+  }
+
+  // ② On the baseline. A repository with no commit cannot fork a doc branch from it: this is the
+  //    state a DECLINED init auto-commit leaves behind, and it is `pending`, never `satisfied`.
+  const headSha = resolveSha(root, "HEAD");
+  if (headSha === null) {
+    return report(
+      "pending",
+      "no-commits-yet",
+      `the main checkout is on '${baseline}' but the repository has NO commits yet, so no doc branch ` +
+        `can be created from it — the invariant is UNESTABLISHED (pending), not satisfied`,
+      {
+        checkedOut,
+        remedy:
+          `commit the laid-down workspace (any commit on '${baseline}'), then run ` +
+          `\`quay init --doc-branch-name ${name === "" ? "<name>" : name}\` — or \`git checkout -b ${name === "" ? "<name>" : name}\` on the unborn HEAD`,
+      },
+    );
+  }
+
+  if (name === "") {
+    return report(
+      "not-evaluated",
+      "no-doc-branch-name",
+      "no doc-branch name was supplied — refusing to invent one (a branch name invented in the " +
+        "judgment layer is the per-project identity literal target-identity-literal-check.ts fails RED on). " +
+        "Pass it in: `--doc-branch-name <name>`, or `loop.doc_branch` in .quay/config.yml",
+      { checkedOut },
+    );
+  }
+  if (name === baseline) {
+    return report(
+      "not-evaluated",
+      "doc-branch-is-baseline",
+      `the requested doc-branch name '${name}' IS the landing baseline — there is no second ref to judge, so no verdict is issued`,
+      { checkedOut },
+    );
+  }
+
+  const remedy = `quay init --doc-branch-name ${name}`;
+  const docBranchSha = resolveSha(root, name);
+
+  // ③ The checkout sits on the baseline and the doc branch does not exist: the exact plantuml-js
+  //    shape (external first commit, no doc branch, config without `loop.doc_branch`).
+  if (docBranchSha === null) {
+    return report(
+      "violated",
+      "on-baseline-no-doc-branch",
+      `the doc-branch invariant is violated: the main checkout is on the landing baseline '${baseline}' ` +
+        `(HEAD ${headSha.slice(0, 8)}) and the doc branch '${name}' does not exist — human edits and the ` +
+        `driver's own commits share one branch and one git index`,
+      { checkedOut, remedy },
+    );
+  }
+
+  // ④ The doc branch exists. It is still a violation (the checkout should be ON it), but the reason
+  //    differs by ancestry: a related branch is switched to, an unrelated one is a name collision
+  //    that `--adopt-branch-model` must decide explicitly.
+  const nameContainsBaseline = isAncestor(root, baseline, name);
+  const baselineContainsName = isAncestor(root, name, baseline);
+  if (nameContainsBaseline === null || baselineContainsName === null) {
+    return report(
+      "not-evaluated",
+      "ancestry-undecidable",
+      `doc branch '${name}' exists (${docBranchSha.slice(0, 8)}) but its ancestry with '${baseline}' could not be decided — refusing to call it related or a collision`,
+      { checkedOut, docBranchSha },
+    );
+  }
+  if (!nameContainsBaseline && !baselineContainsName) {
+    return report(
+      "violated",
+      "on-baseline-doc-branch-collision",
+      `the doc-branch invariant is violated: the main checkout is on '${baseline}' and '${name}' ` +
+        `(${docBranchSha.slice(0, 8)}) shares NO ancestry with it — a name collision, not a doc branch; ` +
+        `switching onto it would move the edit surface onto a foreign line`,
+      { checkedOut, docBranchSha, remedy: `${remedy} --adopt-branch-model` },
+    );
+  }
+  return report(
+    "violated",
+    "on-baseline-doc-branch-elsewhere",
+    `the doc-branch invariant is violated: the main checkout is on the landing baseline '${baseline}' ` +
+      `while the related doc branch '${name}' (${docBranchSha.slice(0, 8)}) exists — the working copy ` +
+      `must be ON it, or human edits and the driver's commits share one branch and one index`,
+    { checkedOut, docBranchSha, remedy },
+  );
+}
+
+/**
+ * One-line rendering for the operator AND for a script: the marker + the enumerated reason make the
+ * line machine-readable (`grep 'doc-branch-invariant: VIOLATED'`), never a prose sentence whose
+ * verdict must be parsed out. ⛔ `PENDING` and `NOT-EVALUATED` are distinct markers — collapsing
+ * either into `SATISFIED` is the hard-rule-3b failure this whole check exists to avoid.
+ */
+export function formatDocBranchInvariantReport(report: DocBranchInvariantReport): string {
+  const mark =
+    report.state === "violated"
+      ? "VIOLATED"
+      : report.state === "pending"
+        ? "PENDING"
+        : report.state === "not-evaluated"
+          ? "NOT-EVALUATED"
+          : "SATISFIED";
+  const head = `doc-branch-invariant: ${mark} (reason: ${report.reason}) — ${report.detail}`;
+  return report.remedy ? `${head}; remedy: ${report.remedy}` : head;
+}
+
 // ── GOAL BRANCH role (orchestration/SPEC-goal-branch-2026-10-03.md §4.1/§4.2) ─────────────────────
 //
 // A goal may opt in to its own isolation branch (`branch: true` on the goal record): its tasks land

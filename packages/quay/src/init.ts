@@ -19,7 +19,9 @@ import {
   moveCheckoutOntoLandingBaseline,
   landingBaselineEstablishedNow,
   formatBaselineCheckoutReport,
+  checkDocBranchInvariant,
   type BranchModelReport,
+  type DocBranchInvariantReport,
   type DocBranchReport,
 } from "./core/branch-model.ts";
 // The ONE regex-literal escaper (kernel leaf). This file used to inline the escape body at the
@@ -703,6 +705,18 @@ export interface InitResult {
   docBranch?: DocBranchReport;
   /** `formatDocBranchReport(docBranch)` — the operator-facing rendering of the verdict above. */
   docBranchReport?: string;
+  /**
+   * The STANDING doc-branch invariant, judged AFTER this run against the on-disk state
+   * (`checkDocBranchInvariant`). Four states — `satisfied` / `violated` / `pending` /
+   * `not-evaluated` — never a boolean, so "the invariant could not be judged" never reads as
+   * "the invariant holds" (hard rule 3b).
+   *
+   * ⛔ This is a READING, not a step: it creates no branch and moves no HEAD. It is what carries the
+   * `pending` state out of a run whose non-interactive auto-commit DECLINED on a 0-commit repository
+   * (gap-quay-init-declined-auto-commit-leaves-doc-branch-unenforced) — the state in which a later
+   * EXTERNAL first commit would otherwise break the invariant with nobody looking.
+   */
+  docBranchInvariant: DocBranchInvariantReport;
   /**
    * The baseline→checkout handoff's report, present only when THIS run established `develop` at the
    * very commit the checkout was on and therefore moved the checkout onto it.
@@ -1686,10 +1700,46 @@ export function runInit(opts: InitOptions): InitResult {
   // already resolves the root, and a root derived in twelve places is twelve chances to derive a
   // different one. `runInitImpl` returns the result WITHOUT it (see its signature) so the compiler
   // forces exactly this one site to supply it.
-  return { ...runInitImpl(opts), workspaceRoot: root, pluginVersionForProject };
+  //
+  // The STANDING doc-branch invariant is attached here for the same reason — ONE site, reading the
+  // state the run actually left on disk (branch-model.ts `checkDocBranchInvariant`). Read-only: it
+  // neither creates the doc branch nor moves HEAD, so an init that already did the right thing is
+  // not perturbed by being measured afterwards.
+  const result = runInitImpl(opts);
+  return {
+    ...result,
+    workspaceRoot: root,
+    pluginVersionForProject,
+    docBranchInvariant: checkDocBranchInvariant(root, { name: resolveDocBranchName(root, opts.docBranchName) }),
+  };
 }
 
-function runInitImpl(opts: InitOptions): Omit<InitResult, "workspaceRoot"> {
+/**
+ * Resolve the DOC-branch NAME with the shipped precedence: explicit parameter > the target's
+ * `loop.doc_branch` > the `author` convention.
+ *
+ * ⛔ `author` rides an `??` chain on purpose — a BARE identity literal is what
+ * `target-identity-literal-check.ts` fails RED on (`"author"` is deliberately NOT in
+ * `LEGAL_IDENTITY_VALUES`), and this is the ONE place the convention is spelled. ⛔ An explicitly
+ * supplied empty string is NOT replaced (it is the caller saying "no name" and must keep reaching
+ * `ensureDocBranch` / `checkDocBranchInvariant` as NOT-EVALUATED).
+ */
+export function resolveDocBranchName(root: string, explicit?: string): string {
+  const configured = (() => {
+    try {
+      const cfg = classifyConfig(path.join(root, ".quay", "config.yml"));
+      const loop = (cfg.config?.["loop"] ?? {}) as Record<string, unknown>;
+      return typeof loop["doc_branch"] === "string" ? (loop["doc_branch"] as string) : undefined;
+    } catch {
+      // An unreadable/missing config has no opinion — fall through to the convention rather than
+      // turning a name resolution into a failure (the state that matters is reported elsewhere).
+      return undefined;
+    }
+  })();
+  return explicit ?? configured ?? "author";
+}
+
+function runInitImpl(opts: InitOptions): Omit<InitResult, "workspaceRoot" | "docBranchInvariant"> {
   const root = path.resolve(opts.root);
   const quayDir = path.join(root, ".quay");
   const configPath = path.join(quayDir, "config.yml");
@@ -1781,14 +1831,12 @@ function runInitImpl(opts: InitOptions): Omit<InitResult, "workspaceRoot"> {
   // The same first step's second half: the branch-model entry ALSO created/switched the doc-only work
   // branch. Runs BEFORE any write, exactly as the shell's `set -e` abort did: a REFUSED doc branch (a
   // name collision) leaves the tree untouched rather than half-initialized.
-  const existingLoop = (existing.config?.["loop"] ?? {}) as Record<string, unknown>;
-  const configuredDocBranch =
-    typeof existingLoop["doc_branch"] === "string" ? (existingLoop["doc_branch"] as string) : undefined;
   // Precedence, unchanged: explicit `--doc-branch-name` > the target's `loop.doc_branch` > the
-  // `author` convention. ⛔ `author` rides an override-channel expression on purpose — a BARE
-  // identity literal is what `target-identity-literal-check.ts` fails RED on, and a default with no
-  // override would be one. `ensureDocBranch` invents no name of its own (see its header).
-  const docBranchName = opts.docBranchName ?? configuredDocBranch ?? "author";
+  // `author` convention — and it is spelled ONCE, in `resolveDocBranchName`, because the CLI's check
+  // verb and the post-run invariant reading must resolve the SAME name this step establishes
+  // (ADR-004: one judgment source, never a second predicate). ⛔ `ensureDocBranch` invents no name of
+  // its own (see its header).
+  const docBranchName = resolveDocBranchName(root, opts.docBranchName);
   // The baseline→checkout handoff the branch-model-only entry performs (and ONLY when the baseline
   // was established by THIS run and points at the very commit the checkout is on): metadata-only,
   // never under --dry-run. It must precede the doc-branch judgment — `ensureDocBranch` reads the
@@ -2378,6 +2426,12 @@ export interface InitReport {
   unknownKeys: string[];
   /** The `.quay/plugin` link step's outcome (three states, see `PluginLinkOutcome`). */
   pluginLink: PluginLinkOutcome;
+  /**
+   * The STANDING doc-branch invariant after this run (`checkDocBranchInvariant`) — the same four
+   * states the CLI renders as `doc-branch-invariant: <STATE>`, carried in the one JSON document so
+   * a caller never has to parse prose to tell `pending` from `satisfied`.
+   */
+  docBranchInvariant: DocBranchInvariantReport;
   /** The generated config text — present only in a dry run (nothing else has a use for the bytes). */
   content?: string;
 }
@@ -2415,6 +2469,7 @@ export function buildInitReport(result: InitResult, o: { dryRun: boolean }): Ini
     projectValues: result.upgrade?.projectValues ?? [],
     unknownKeys,
     pluginLink: result.pluginLink,
+    docBranchInvariant: result.docBranchInvariant,
     ...(o.dryRun ? { content: result.content } : {}),
   };
 }

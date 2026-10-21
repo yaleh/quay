@@ -20,11 +20,13 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   LANDING_BASELINE_ROLE,
+  checkDocBranchInvariant,
   classifyBranch,
   detectDefaultBranch,
   ensureBranchModel,
   ensureDocBranch,
   formatBaselineCheckoutReport,
+  formatDocBranchInvariantReport,
   formatDocBranchReport,
   landingBaselineEstablishedNow,
   moveCheckoutOntoLandingBaseline,
@@ -1122,4 +1124,170 @@ test("goal branch — a repo with no resolvable develop withholds the verdict, n
   assert.equal(r.ok, true);
   assert.equal(r.notEvaluated, true);
   assert.equal(goalBranchRefExists(dir, "GOAL-903"), false, "nothing was created");
+});
+
+// ── the STANDING doc-branch invariant check ─────────────────────────────────────────────────────
+// (gap-quay-init-declined-auto-commit-leaves-doc-branch-unenforced)
+//
+// The gap: a non-interactive init on a 0-commit repository DECLINES its auto-commit, so it cannot
+// create (or re-judge) the doc branch; if the FIRST commit is then created by an EXTERNAL process,
+// nothing ever judges the checkout again and the main branch stays on the landing baseline for good.
+// These tests pin the READ-ONLY checker that answers that question on demand — and, above all, that
+// it can return a NON-violated reading at all (a checker that always says VIOLATED proves nothing).
+// ---------------------------------------------------------------------------------------------
+
+/** A repo whose main checkout sits on `develop` with `commits` commits (0 = unborn). */
+function developCheckoutRepo(tag, { commits = 1 } = {}) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), `quay-inv-${tag}-`));
+  TMP_DIRS.push(dir);
+  git(dir, ["init", "-q", "-b", "develop"]);
+  git(dir, ["config", "user.name", "inv-test"]);
+  git(dir, ["config", "user.email", "inv@example.com"]);
+  for (let i = 1; i <= commits; i++) {
+    fs.writeFileSync(path.join(dir, `c${i}.txt`), `${i}\n`);
+    commit(dir, `c${i}`);
+  }
+  return dir;
+}
+
+/** Write a minimal but REAL config carrying the task's fixture key (`loop.fork_baseline: develop`). */
+function writeLoopConfig(dir) {
+  fs.mkdirSync(path.join(dir, ".quay"), { recursive: true });
+  fs.writeFileSync(path.join(dir, ".quay", "config.yml"), "loop:\n  fork_baseline: develop\n");
+}
+
+test("AC1 (checker): main checkout on `develop`, 1 commit, no doc branch ⇒ VIOLATED with a runnable remedy", () => {
+  const dir = developCheckoutRepo("ac1-violated");
+  writeLoopConfig(dir);
+  // Premise, measured rather than assumed: the repository DOES have a commit and no doc branch.
+  assert.equal(git(dir, ["rev-list", "--count", "HEAD"]), "1");
+  assert.equal(git(dir, ["branch", "--list", "author"]), "");
+
+  const r = checkDocBranchInvariant(dir, { name: "author" });
+  assert.equal(r.state, "violated");
+  assert.equal(r.ok, false, "a violation is NOT ok");
+  assert.equal(r.notEvaluated, false);
+  assert.equal(r.reason, "on-baseline-no-doc-branch");
+  assert.equal(r.checkedOut, "develop");
+  assert.equal(r.docBranchSha, null);
+  assert.match(r.remedy, /quay init --doc-branch-name author/, "the single-command remedy names the real flag");
+  // The rendered line is machine-readable: marker + enumerated reason, not prose to be parsed.
+  assert.match(formatDocBranchInvariantReport(r), /^doc-branch-invariant: VIOLATED \(reason: on-baseline-no-doc-branch\)/);
+  assert.match(formatDocBranchInvariantReport(r), /doc-branch invariant is violated/);
+});
+
+test("AC1 (CLI): the check verb exits 1 while violated, then 0 after the remedy — and mutates NOTHING itself", () => {
+  const dir = developCheckoutRepo("ac1-cli");
+  writeLoopConfig(dir);
+
+  const before = runQuayInit(["init", "--check-doc-branch", "--root", dir], dir);
+  assert.equal(before.exitCode, 1, `a violated invariant must be a non-zero exit:\n${before.stdout}${before.stderr}`);
+  assert.match(before.stdout, /doc-branch-invariant: VIOLATED/);
+  // ⛔ A CHECK is read-only: no branch appeared, the checkout did not move, no file was written.
+  assert.equal(git(dir, ["branch", "--list", "author"]), "", "the check must not create the doc branch");
+  assert.equal(git(dir, ["symbolic-ref", "--short", "HEAD"]), "develop", "the check must not move HEAD");
+  assert.equal(fs.readFileSync(path.join(dir, ".quay", "config.yml"), "utf8"), "loop:\n  fork_baseline: develop\n");
+
+  // The remedy the task names: `git checkout -b author` on the same checkout.
+  git(dir, ["checkout", "-q", "-b", "author"]);
+  const after = runQuayInit(["init", "--check-doc-branch", "--root", dir], dir);
+  assert.equal(after.exitCode, 0, `the same checker must now report ok:\n${after.stdout}${after.stderr}`);
+  assert.match(after.stdout, /doc-branch-invariant: SATISFIED/);
+});
+
+test("AC1 (remedy via init): `quay init --doc-branch-name author` flips VIOLATED ⇒ SATISFIED", () => {
+  const dir = developCheckoutRepo("ac1-init-remedy");
+  writeLoopConfig(dir);
+  fs.mkdirSync(path.join(dir, "scripts"), { recursive: true });
+  fs.writeFileSync(path.join(dir, "scripts", "test.sh"), "#!/bin/bash\necho test\n");
+  assert.equal(checkDocBranchInvariant(dir, { name: "author" }).state, "violated", "fixture premise");
+
+  const init = runQuayInit(["init", "--root", dir, "--doc-branch-name", "author", "--auto-commit-skip"], dir);
+  assert.equal(init.exitCode, 0, `${init.stdout}${init.stderr}`);
+  assert.equal(git(dir, ["symbolic-ref", "--short", "HEAD"]), "author", "the remedy moved the checkout");
+  assert.equal(checkDocBranchInvariant(dir, { name: "author" }).state, "satisfied");
+});
+
+test("AC2 (negative control): main checkout already on the doc branch ⇒ SATISFIED / exit 0", () => {
+  const dir = developCheckoutRepo("ac2-ok");
+  git(dir, ["checkout", "-q", "-b", "author"]);
+  const r = checkDocBranchInvariant(dir, { name: "author" });
+  assert.equal(r.state, "satisfied");
+  assert.equal(r.ok, true);
+  assert.equal(r.notEvaluated, false);
+  assert.equal(r.reason, "not-on-baseline");
+  assert.equal(r.remedy, null, "an invariant that holds needs no remedy");
+
+  const cli = runQuayInit(["init", "--check-doc-branch", "--root", dir], dir);
+  assert.equal(cli.exitCode, 0, `the negative control must be able to read OK:\n${cli.stdout}${cli.stderr}`);
+  assert.match(cli.stdout, /doc-branch-invariant: SATISFIED/);
+});
+
+test("PENDING: on `develop` with ZERO commits the verdict is pending — not satisfied, not violated", () => {
+  const dir = developCheckoutRepo("pending", { commits: 0 });
+  assert.throws(() => git(dir, ["rev-parse", "--verify", "HEAD"]), /./, "fixture: HEAD is unborn");
+
+  const r = checkDocBranchInvariant(dir, { name: "author" });
+  assert.equal(r.state, "pending");
+  assert.equal(r.ok, true, "no commits is not a FAILURE (hard rule 3b)");
+  assert.equal(r.notEvaluated, false);
+  assert.equal(r.reason, "no-commits-yet");
+  assert.match(r.remedy, /commit the laid-down workspace/);
+  assert.match(formatDocBranchInvariantReport(r), /^doc-branch-invariant: PENDING/);
+  assert.notEqual(r.state, "satisfied", "⛔ an unborn repo is NOT the invariant holding");
+});
+
+test("NOT-EVALUATED: detached HEAD, an absent name and a non-git dir each WITHHOLD the verdict", () => {
+  const detached = developCheckoutRepo("detached");
+  git(detached, ["checkout", "-q", "--detach"]);
+  const d = checkDocBranchInvariant(detached, { name: "author" });
+  assert.equal(d.state, "not-evaluated");
+  assert.equal(d.reason, "detached-head");
+  assert.equal(d.ok, true);
+  assert.equal(d.notEvaluated, true, "a withheld verdict is its own state");
+
+  const named = developCheckoutRepo("no-name");
+  const n = checkDocBranchInvariant(named, { name: "" });
+  assert.equal(n.state, "not-evaluated");
+  assert.equal(n.reason, "no-doc-branch-name");
+  assert.equal(n.ok, true);
+
+  const plain = fs.mkdtempSync(path.join(os.tmpdir(), "quay-inv-plain-"));
+  TMP_DIRS.push(plain);
+  const p = checkDocBranchInvariant(plain, { name: "author" });
+  assert.equal(p.state, "not-evaluated");
+  assert.equal(p.reason, "not-a-git-worktree");
+  assert.equal(p.ok, true, "unreadable input is never a violation and never a pass");
+});
+
+test("the doc branch EXISTS but the checkout sits on `develop` ⇒ still VIOLATED, reason names which case", () => {
+  // Related branch: switching to it repairs the invariant (the branch is never renamed or re-pointed).
+  const related = developCheckoutRepo("elsewhere");
+  git(related, ["branch", "docwork"]);
+  const r = checkDocBranchInvariant(related, { name: "docwork" });
+  assert.equal(r.state, "violated");
+  assert.equal(r.reason, "on-baseline-doc-branch-elsewhere");
+  assert.notEqual(r.docBranchSha, null);
+
+  // Unrelated branch: a NAME COLLISION, and the remedy carries the adoption decision explicitly.
+  const collision = developCheckoutRepo("collision");
+  git(collision, ["checkout", "-q", "--orphan", "docwork"]);
+  fs.writeFileSync(path.join(collision, "foreign.txt"), "x\n");
+  commit(collision, "foreign line");
+  git(collision, ["checkout", "-q", "develop"]);
+  // `--orphan` + commit left the index empty on the way back; restore the tree state is unnecessary —
+  // only the ref topology matters for this judgment.
+  const c = checkDocBranchInvariant(collision, { name: "docwork" });
+  assert.equal(c.state, "violated");
+  assert.equal(c.reason, "on-baseline-doc-branch-collision");
+  assert.match(c.remedy, /--adopt-branch-model/, "a collision must not be repaired by silently re-pointing");
+});
+
+test("the check is IDEMPOTENT and read-only — two runs on the same repo produce the same reading", () => {
+  const dir = developCheckoutRepo("idempotent");
+  const first = checkDocBranchInvariant(dir, { name: "author" });
+  const second = checkDocBranchInvariant(dir, { name: "author" });
+  assert.deepEqual({ ...second }, { ...first });
+  assert.equal(git(dir, ["branch", "--list", "author"]), "");
+  assert.equal(git(dir, ["symbolic-ref", "--short", "HEAD"]), "develop");
 });

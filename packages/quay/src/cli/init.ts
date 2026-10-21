@@ -15,13 +15,16 @@ import {
   printInstallSteps,
   providerRuntimeExistenceReport,
   deliverySurfaceL1Report,
+  resolveDocBranchName,
 } from "../init.ts";
 import {
   ensureDocBranch,
   formatBaselineCheckoutReport,
+  formatDocBranchInvariantReport,
   formatDocBranchReport,
   landingBaselineEstablishedNow,
   moveCheckoutOntoLandingBaseline,
+  checkDocBranchInvariant,
 } from "../core/branch-model.ts";
 import type { CliCtx } from "./context.ts";
 
@@ -40,6 +43,9 @@ const KNOWN_INIT_FLAGS: ReadonlySet<string> = new Set([
   "adopt-branch-model",
   "branch-model-only",
   "doc-branch-name",
+  // The READ-ONLY standing doc-branch invariant check (gap-quay-init-declined-auto-commit-leaves-
+  // doc-branch-unenforced): runs the same judgment `ensureDocBranch` acts on, mutates nothing.
+  "check-doc-branch",
   "project",
   "plugin-root",
   "json",
@@ -71,6 +77,7 @@ Usage:
   quay init [--drop-incompatible] [--dry-run] [--json] [--project <name>] [--root <path>]
   quay init --branch-model-only [--adopt-branch-model] [--dry-run] [--root <path>]
   quay init --branch-model-only --doc-branch-name <name> [--dry-run] [--root <path>]
+  quay init --check-doc-branch [--doc-branch-name <name>] [--json] [--root <path>]
 
 ⛔ There is no overwrite flag and no reconcile selector. The STATE of the target decides:
      absent config      ⇒ write a fresh one
@@ -102,6 +109,16 @@ Flags:
                Head detached => NOT-EVALUATED (no verdict, nothing moved). This CLI has NO
                ${INIT_DOC_BRANCH_NO_DEFAULT_PROSE}
   --dry-run    Report what would happen without writing to disk.
+  --check-doc-branch
+               READ-ONLY: judge the standing doc-branch invariant and exit. The invariant is
+               "when the main checkout is on the landing baseline 'develop' and the repository
+               has a commit, the doc-only branch must be carrying the edits". Prints one
+               machine-readable line:
+                   doc-branch-invariant: SATISFIED|VIOLATED|PENDING|NOT-EVALUATED (reason: ...)
+               Exit 1 only when VIOLATED. PENDING (no commits yet, so no doc branch can be
+               forked) and NOT-EVALUATED (detached HEAD, no name supplied) are their own states
+               and exit 0 — a withheld verdict is not a violation. Nothing is created or moved;
+               run this after any non-quay process has committed a laid-down workspace.
   --adopt-branch-model
                When the project already has a 'develop' (or 'author') that is NOT
                a continuation of its default branch, preserve the existing tip
@@ -265,6 +282,35 @@ Description:
   // `LEGAL_IDENTITY_VALUES`).
   const docBranchName = typeof initFlags["doc-branch-name"] === "string" ? initFlags["doc-branch-name"] : undefined;
 
+  // ── The STANDING doc-branch invariant check (`--check-doc-branch`) ──────────────────────────────
+  // (gap-quay-init-declined-auto-commit-leaves-doc-branch-unenforced)
+  //
+  // The READ-ONLY verb for the state `quay init` cannot always repair in the run that creates it: a
+  // non-interactive init on a 0-commit repository DECLINES its auto-commit, so there is no commit to
+  // fork a doc branch from; if the first commit is then made by an EXTERNAL process (an autonomous
+  // loop's observer session, or a human), nothing re-judges the checkout and the main branch stays on
+  // the landing baseline `develop` for good. This runs the SAME judgment `ensureDocBranch` acts on
+  // (`branch-model.ts` `checkDocBranchInvariant`) without mutating anything, so it is safe as a
+  // resident check on any workspace, any number of times.
+  //
+  // Exit codes: 0 = satisfied OR pending OR not-evaluated; 1 = violated. ⛔ A withheld verdict is not
+  // a violation (hard rule 3b) — `pending` (no commits yet) and `not-evaluated` (detached HEAD, no
+  // name supplied) keep their own markers and exit 0, exactly as the task's negative-control half
+  // requires the checker to be able to return a NON-violated reading at all.
+  if (initFlags["check-doc-branch"] === true) {
+    const name = resolveDocBranchName(targetRoot, docBranchName);
+    const invariant = checkDocBranchInvariant(targetRoot, { name });
+    if (json) {
+      // ONE document on stdout, as `quay init --json` promises. The report is echoed as-is so a
+      // caller reads the same enumerated `state`/`reason` the human line renders.
+      process.stdout.write(JSON.stringify({ check: "doc-branch-invariant", ...invariant }, null, 2) + "\n");
+    } else {
+      say(formatDocBranchInvariantReport(invariant));
+    }
+    process.exitCode = invariant.state === "violated" ? 1 : 0;
+    return;
+  }
+
   // ── AC-331: the project-derived `loop:` values + the optional auto-commit ────────────────────────
   // Explicit flags win; absent ⇒ the target's existing value, else detection / the documented default
   // (all four resolutions live in init.ts, one implementation).
@@ -351,6 +397,13 @@ Description:
       say(result.branchModelReport);
       if (result.baselineCheckoutReport) say(result.baselineCheckoutReport);
       if (result.docBranchReport) say(result.docBranchReport);
+      // The STANDING invariant, judged AFTER this run on the state it left on disk. Printed on every
+      // non-blocked outcome — including the `pending` one a DECLINED non-interactive auto-commit on a
+      // 0-commit repository leaves behind (gap-quay-init-declined-auto-commit-leaves-doc-branch-
+      // unenforced): a check that only speaks when it is violated is indistinguishable from one that
+      // never ran (hard rule 9), and the `pending` state is exactly the unnoticed window in which an
+      // EXTERNAL first commit would break the invariant.
+      say(formatDocBranchInvariantReport(result.docBranchInvariant));
     }
 
     // The config-free branch-model entry (gap-upgrade-entry-never-establishes-branch-model). It
@@ -415,6 +468,9 @@ Description:
       // threaded straight through rather than inventing a second adoption flag.
       const docBranch = ensureDocBranch(targetRoot, { name: docBranchName ?? "", dryRun, adopt: adoptBranchModel });
       say(formatDocBranchReport(docBranch));
+      // The STANDING invariant, re-read AFTER the step above — this entry's own doc-branch action just
+      // happened here (not inside `runInit`), so the report attached by `runInit` predates it.
+      say(formatDocBranchInvariantReport(checkDocBranchInvariant(targetRoot, { name: docBranchName ?? "" })));
       // Fail-closed on a real refusal (a name collision) or a failed mutation; a dry run only
       // reports, and an unreadable HEAD is NOT a failure (hard rule 3b).
       if (!docBranch.ok && !dryRun) process.exitCode = 1;
