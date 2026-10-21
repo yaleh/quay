@@ -9,6 +9,19 @@ parent: null
 children: []
 extra:
   schema: execution
+  acceptance: node packages/quay/bin/quay.js goal show GOAL-908 --json 2>/dev/null
+    | node --no-warnings --experimental-strip-types --input-type=module -e
+    'import { goalSufficiencyVerdict } from "./plugin/scripts/goal-driver.ts";
+    let s=""; for await (const c of process.stdin) s+=c; const g=JSON.parse(s);
+    const v=goalSufficiencyVerdict(g,[{id:"AC-913"}]); if (v==="insufficient") {
+    console.error("verdict="+v); process.exit(1);} const sec=g.body.split("##
+    退出条件")[1].split(/^## /m)[0]; const n=sec.replace(/\s/g,"").length; const
+    cl=sec.split("\n").filter(l=>/^[①②③④]/.test(l)); if (n<=40||cl.length!==4) {
+    console.error("exit-conditions n="+n+" clauses="+cl.length);
+    process.exit(1);} if
+    (!g.body.includes("不是独立退出条件")||!g.title.includes("provider→gate/ 棘轮为防回归手段"))
+    { console.error("ratchet marker missing"); process.exit(1);}
+    console.log("verdict="+v+" clauses="+cl.length);'
 goal_ac: AC-913
 ---
 ## Proposal
@@ -124,3 +137,8 @@ $ git diff --name-only $(git merge-base HEAD develop) -- goals/
 $ quay goal show AC-913 --json
 status=achieved（apply 前同为 achieved）；criterion/expect 逐字未变
 ```
+
+
+## Dark Axis
+
+该轴仍暗,理由: 本任务只改 GOAL-908 的 title/body（提案 (b)），不改变生产代码、延迟、并发或资源行为；无 L_D/L_G 轴读数可采。
