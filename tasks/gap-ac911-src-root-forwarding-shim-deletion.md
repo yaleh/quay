@@ -38,7 +38,7 @@ $ grep -rln 'FORWARDING re-export' packages/quay/src/*.ts | wc -l
 <!-- dedup-ref -->
 **去重与粒度**：全库 `goal_ac: AC-911` 零命中；机制关键词（shim / `FORWARDING re-export` / src-root）检索没有 open 任务。相关但不同机制：`gap-src-root-gate-cycle-break`（done）是这 12 个 shim 的**成因**（它把实现下沉 `core/` 并留下转发面），本任务删除其中 10 个转发面。`node --experimental-strip-types plugin/scripts/task-granularity-advice.ts --touches … --json` 的 `peers: []`。决定：**separate**（独立验收 = AC-911 的计数判据）。
 
-**非目标**：`abi.ts` / `config.ts` 不动；`packages/quay/src/core/**` 的实现不改；除机械判据点名的 achieved goal criterion（本轮实测：quoted-literal 类点名 AC-196 / AC-216 / AC-347；`goal-store.test.mjs` 的能力闸点名 AC-242 / AC-245）外，其余 achieved goal criterion 的历史文本不改写（理由：不在复验域，见上）；`plugin/test/*` 里把这些路径当**合成夹具数据**的地方不动（`architecture-decision-memory.test.mjs`、`routine-file-gate.test.mjs`、`kernel-sibling-resolution-check.test.mjs` 的 fixture、`plugin/test/fixtures/criterion-fidelity/*.ts` 等——它们不读真文件）；`docs/**` 历史记录不改写（唯一例外见 Touches：`docs/analysis/ownership-active-limited-proposal.mjs` 是可执行分析脚本、被 `plugin/test/ownership-active-limited-proposal.test.mjs` 真 spawn，属真实消费方）；`packages/quay/dist/**`、`plugin/vendor/**` 是未跟踪的构建产物，不在此任务内重建。
+**非目标**：`abi.ts` / `config.ts` 不动；`packages/quay/src/core/**` 的实现不改；除机械判据点名的 achieved goal criterion（本轮实测：quoted-literal 类点名 AC-196 / AC-216 / AC-347；`goal-store.test.mjs` 的能力闸点名 AC-242 / AC-245）外，其余 achieved goal criterion 的历史文本不改写（理由：不在复验域，见上）；`plugin/test/*` 里把这些路径当**合成夹具数据**的地方不动（`routine-file-gate.test.mjs`、`kernel-sibling-resolution-check.test.mjs` 的 fixture、`plugin/test/fixtures/criterion-fidelity/*.ts` 等——它们不读真文件）。⚠️ 更正（2026-10-21 实测）：`plugin/test/architecture-decision-memory.test.mjs` 曾被列为「不读真文件」，**是错的**——它的 seed 断言 `fs.existsSync(<repo>/packages/quay/src/goal-store.ts)`，删 shim 后即红；该文件与其 seed `docs/analysis/architecture-decision-memory.mjs` 已进 Touches 并改指 `core/goal-store.ts`；`docs/**` 历史记录不改写（唯一例外见 Touches：`docs/analysis/ownership-active-limited-proposal.mjs` 是可执行分析脚本、被 `plugin/test/ownership-active-limited-proposal.test.mjs` 真 spawn，属真实消费方）；`packages/quay/dist/**`、`plugin/vendor/**` 是未跟踪的构建产物，不在此任务内重建。
 
 ## Plan
 
@@ -82,11 +82,13 @@ $ grep -rln 'FORWARDING re-export' packages/quay/src/*.ts | wc -l
 ## Touches
 
 - docs/analysis/ownership-active-limited-proposal.mjs
+- docs/analysis/architecture-decision-memory.mjs
 - goals/AC-196-not-in-git-unchanged-boolean-0.md
 - goals/AC-216-长期保证-ac-的复验域不随-goal-关闭而消失-达成即停止复验会让-上移一层-变成换层藏同一缺陷.md
 - goals/AC-242-台账不得留下-已离开复验域却尾事件为-fail-的-ac-否则下游判据-ac-241-结构上永不通过-被误读成-还有真缺.md
 - goals/AC-245-goal-014-激活时选中的选项-①-②-③-必须留痕-今天-statuslog-的-draft-active-条目.md
 - goals/AC-347-结构与范围护栏-kernel-verdict-parse-ts-提供-parsebinaryverdict-两个旧函数薄.md
+- goals/AC-354-before-after-边数读数-可证伪负对照-root-gate-config-边数-1-0-gate-factor.md
 - packages/quay-native/bin/quay-native.ts
 - packages/quay-native/src/goal-store.ts
 - packages/quay-native/src/mcp-server.ts
@@ -122,6 +124,7 @@ $ grep -rln 'FORWARDING re-export' packages/quay/src/*.ts | wc -l
 - packages/quay/test/ac196-criterion-four-state-vocabulary.test.mjs
 - packages/quay/test/ac301-criterion-address-derivation.test.mjs
 - packages/quay/test/ac326-criterion-branch-discard.test.mjs
+- packages/quay/test/ac354-negative-control-falsifiable.test.mjs
 - packages/quay/test/adr-gate.test.mjs
 - packages/quay/test/adr-store.test.mjs
 - packages/quay/test/branch-model.test.mjs
@@ -164,6 +167,7 @@ $ grep -rln 'FORWARDING re-export' packages/quay/src/*.ts | wc -l
 - plugin/test/ac341-post-merge-promotion-events-dialect.test.mjs
 - plugin/test/active-ac-must-have-criterion.test.mjs
 - plugin/test/anti-drift-touches-check.test.mjs
+- plugin/test/architecture-decision-memory.test.mjs
 - plugin/test/conformance-target-fixture.test.mjs
 - plugin/test/criterion-fidelity-default-wiring.test.mjs
 - plugin/test/criterion-fidelity-gate.test.mjs
