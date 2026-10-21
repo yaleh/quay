@@ -46,7 +46,12 @@ import { validateConfigText, type ConfigIssue } from "./config-validate.ts";
 // what version THIS project will actually load (the session layer's projectPath tier rule) vs the
 // version running init. The reading lives in loaded-version.ts — the ONE module that reads the install
 // record — ⛔ not re-parsed here (硬规则 5b).
-import { projectScopedVersionReading, type ProjectScopedVersionReading } from "./loaded-version.ts";
+import {
+  projectScopedVersionReading,
+  userScopedInstallReading,
+  type ProjectScopedVersionReading,
+  type UserScopedInstallReading,
+} from "./loaded-version.ts";
 
 // ── Three-state classification of an existing `.quay/config.yml` ────────────────────────────────────
 // (SPEC-quay-init-reconcile-and-native-implementation-2026-09-18 §3.3; AC1.)
@@ -836,6 +841,13 @@ export interface InitOptions {
    * with quay's sessions, and cross-session delivery addresses peers BY NAME.
    */
   project?: string;
+  /**
+   * Where `~/.claude/plugins/installed_plugins.json` is read from (default: `$HOME`, else the OS
+   * home). Threaded so a test can point the install-record readers at a fixture home instead of
+   * mutating the operator's real record (the install steps and the project-scope version
+   * cross-check must both read the SAME home).
+   */
+  homeDir?: string;
   /**
    * Where human-facing progress lines go (default `console.log`). The CLI's `--json` mode passes a
    * stderr sink so stdout carries exactly ONE JSON document; everything else keeps the default.
@@ -1687,7 +1699,7 @@ export function runInit(opts: InitOptions): InitResult {
   // reading must not block a legitimate init), and the sentence goes to STDERR (a warning is not progress
   // on stdout, and `--json` promises stdout carries exactly one document).
   const root = path.resolve(opts.root);
-  const homeDir = process.env.HOME ?? os.homedir();
+  const homeDir = opts.homeDir ?? process.env.HOME ?? os.homedir();
   const pluginVersionForProject = projectScopedVersionReading(
     homeDir,
     root,
@@ -2167,7 +2179,7 @@ function runInitImpl(opts: InitOptions): Omit<InitResult, "workspaceRoot" | "doc
   const goalsDir = path.join(root, "goals");
   const settingsPath = path.join(root, ".claude", "settings.json");
   const pluginVersion = readPluginVersion(opts.pluginRoot);
-  const installStepsText = printInstallSteps();
+  const installStepsText = printInstallSteps({ homeDir: opts.homeDir ?? process.env.HOME ?? os.homedir() });
   let autoCommit: AutoCommitReading | undefined;
   let pluginLink: PluginLinkOutcome = { state: "not-run", reason: "the run aborted before the link step" };
   // The unborn-repository re-judgment's own failure channel (see the block after this try). `null`
@@ -4014,21 +4026,107 @@ export function ensureGitignore(root: string, opts: { runtimeArtifactsManifest?:
   return { wrote, warnings };
 }
 
+/** Options for `printInstallSteps`. */
+export interface InstallStepsOptions {
+  /**
+   * Where `~/.claude/plugins/installed_plugins.json` is read from (default: `$HOME`, else the OS
+   * home). Threaded so a test can point the reader at a fixture home instead of mutating the
+   * operator's real install record.
+   */
+  homeDir?: string;
+  /**
+   * The caller has EXPLICITLY asked for a project-/local-scope record for this project. Only then
+   * does the printout present that install command — and always with the "pins the version, does
+   * NOT follow user-scope upgrades" warning.
+   */
+  requestedScope?: "user" | "project" | "local";
+}
+
 /**
  * The explicit install steps. `enabledPlugins` only toggles an ALREADY-INSTALLED plugin and an
  * untrusted directory's project settings are not read at all, so "config committed ⇒ auto-installed"
- * is FALSE (SPEC §6 T3). The text must say so, must carry the FULL single-`<source>` recipe (the
- * two-arg form is rejected outright by the CLI), and must present `--scope` as the caller's choice
- * rather than pushing `project` as the only correct value.
+ * is FALSE (SPEC §6 T3).
+ *
+ * ⚠️ THE USER-SCOPE PRE-CHECK (gap-init-install-steps-must-detect-existing-user-scope-install):
+ * init does NOT install — it only PRINTS steps, and an agent follows them. So the printout must ask
+ * FIRST whether `quay@quay` already has a user-scope record. Presenting user/project/local as three
+ * equivalent choices when the user-scope install already exists is what made an agent add a second,
+ * project-scoped record that PINS its version and never follows the user-scope upgrades
+ * (plantuml-js 2026-10-21: user 0.19.0, then a project record pinned to 0.20.0).
+ *
+ * Three states, and they read differently on purpose (硬规则 3b): `present` ⇒ say "already installed
+ * at user scope (version X), do NOT install again"; `absent` ⇒ the original three-way recipe;
+ * `not-evaluated` (the record is missing/unparsable) ⇒ say the record could not be read and check it
+ * FIRST — ⛔ never the `absent` recipe, which would read as "there is no user install".
  */
-export function printInstallSteps(): string {
+export function printInstallSteps(opts: InstallStepsOptions = {}): string {
+  const homeDir = opts.homeDir ?? process.env.HOME ?? os.homedir();
+  const userScope = userScopedInstallReading(homeDir);
+  const requestedProjectScope = opts.requestedScope === "project" || opts.requestedScope === "local";
   return [
     "",
     "━━━ quay plugin install steps (explicit — config does NOT auto-install) ━━━",
     "The files just written ENABLE the quay plugin for this project, but they DO NOT install it.",
     "`enabledPlugins` only toggles an ALREADY-INSTALLED plugin, and an untrusted directory's project",
-    "settings are not read at all — so \"config committed => auto-installed\" is FALSE. Install it first:",
+    "settings are not read at all — so \"config committed => auto-installed\" is FALSE.",
     "",
+    ...(userScope.state === "present" ? alreadyUserScopedInstallSteps(userScope, opts, requestedProjectScope) : []),
+    ...(userScope.state === "not-evaluated" ? unreadableInstallRecordSteps(userScope) : []),
+    ...(userScope.state === "present" ? upgradeAndTrustSteps() : freshInstallSteps(opts.requestedScope)),
+    "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
+    "",
+  ].join("\n");
+}
+
+/** The `present` arm: the user-scope record already covers this project, so installing again is the
+ *  defect. The project/local command appears ONLY when the caller explicitly requested it, and the
+ *  pin warning rides with it (never as a bare option). */
+function alreadyUserScopedInstallSteps(
+  r: UserScopedInstallReading,
+  opts: InstallStepsOptions,
+  requestedProjectScope: boolean,
+): string[] {
+  const version = r.version === null ? "(version not recorded)" : r.version;
+  const lines = [
+    `  ✓ ALREADY INSTALLED at user scope: quay@quay ${version}`,
+    "    → do NOT install it again. One user-scope record serves every project on this machine;",
+    "      upgrade it IN PLACE with `claude plugin update quay@quay --scope user` and this project",
+    "      follows that upgrade with no record of its own.",
+    "",
+    "  # ⛔ Do NOT add a project/local scope record just to \"enable\" this project: such a record PINS",
+    "  #    a version for this project and does NOT follow the user-scope upgrades (that is exactly",
+    "  #    the version drift this step exists to prevent).",
+  ];
+  if (requestedProjectScope) {
+    // Explicitly requested ⇒ print it, WITH the pin warning attached to the same block.
+    lines.push(
+      `  # You explicitly requested --scope ${opts.requestedScope}. This PINS the version for this`,
+      "  # project and it will NOT follow user-scope upgrades:",
+      `  claude plugin install quay@quay --scope ${opts.requestedScope}`,
+    );
+  }
+  lines.push("");
+  return lines;
+}
+
+/** The `not-evaluated` arm: the record could not be read, so we cannot say whether a user-scope
+ *  install exists. Say that, give the check command, and only then fall back to the fresh recipe —
+ *  the sentence is what keeps this state from reading exactly like `absent` (硬规则 3b). */
+function unreadableInstallRecordSteps(r: UserScopedInstallReading): string[] {
+  return [
+    `  ⚠ the plugin install record could not be read — ${r.reason}`,
+    "    → CHECK IT FIRST: if it already lists a user-scope quay@quay, do NOT install a project/local",
+    "      record for this project (that PINS a version and does NOT follow user-scope upgrades):",
+    "      claude plugin list --json | jq -r '.[] | select(.id==\"quay@quay\") | .scope' | sort -u",
+    "",
+  ];
+}
+
+/** The `absent` arm — the original behaviour when no user-scope record exists (AC: unchanged).
+ *  Also used by the `not-evaluated` arm after its warning line (the recipe is the same; the state
+ *  sentence printed above it is what tells the two states apart). */
+function freshInstallSteps(requestedScope?: "user" | "project" | "local"): string[] {
+  return [
     "  # 1. register the PUBLISHED marketplace source — the github channel. The CLI takes exactly ONE",
     "  #    <source> argument: `marketplace add <name> <source>` is rejected outright.",
     "  claude plugin marketplace add yaleh/quay",
@@ -4038,11 +4136,20 @@ export function printInstallSteps(): string {
     "  #      --scope user     one version for every project on this machine; upgrade once, here",
     "  #      --scope project  a per-project switch, version pinned in <cwd>/.claude/settings.json",
     "  #      --scope local    this working copy only, not committed",
-    "  claude plugin install quay@quay --scope <user|project|local>",
+    requestedScope === "project" || requestedScope === "local"
+      ? `  claude plugin install quay@quay --scope ${requestedScope}`
+      : "  claude plugin install quay@quay --scope <user|project|local>",
     "",
     "  # (or the npm-global path: `npm install -g quay` — its register-plugin.mjs postinstall registers",
     "  #  the marketplace source only; pass QUAY_PLUGIN_SCOPE=user|project|local to enable it in the same run)",
     "  #",
+    ...upgradeAndTrustSteps(),
+  ];
+}
+
+/** Steps 3-4 shared by every arm: upgrade IN PLACE, then trust + restart. */
+function upgradeAndTrustSteps(): string[] {
+  return [
     "  # 3. UPGRADE LATER — IN PLACE, at the scope that already holds the record (⛔ never `uninstall`",
     "  #    then `install --scope ...`: that replaces the record you have):",
     "  #      claude plugin list --json | jq -r '.[] | select(.id==\"quay@quay\") | .scope' | sort -u",
@@ -4051,9 +4158,7 @@ export function printInstallSteps(): string {
     "",
     "  # 4. accept the trust dialog the FIRST time you enter this directory, then restart the session.",
     "After that, the enabledPlugins block below takes effect (a restart is required to apply).",
-    "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
-    "",
-  ].join("\n");
+  ];
 }
 
 /**

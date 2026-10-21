@@ -203,7 +203,10 @@ export interface LoadedHostProbe {
  *  的答案由会话层的**分层规则**决定，而那条规则键在 `projectPath` 上（见 `projectScopedVersionReading`）；
  *  `installedVersionFromRegistry` 从不读它。 */
 interface QuayRegistryEntry {
-  version: string;
+  /** `null` = 条目存在但**没有可用的版本字段**。它仍然是一个条目（「有没有这个 scope 的安装」与
+   *  「那条安装是哪一版」是两个问题）——`highestVersionEntry` 跳过它，`userScopedInstallReading`
+   *  把它算作 present-but-unversioned（硬规则 3b：读不出版本 ≠ 没有这条安装）。 */
+  version: string | null;
   installedAt: string | null;
   scope: string | null;
   installPath: string | null;
@@ -214,8 +217,9 @@ interface QuayRegistryEntry {
  *  `null` = 记录读不出（文件缺失/不可读/不可解析/`quay@quay` 不是数组）——**唯一**一处区分「没有记录」与
  *  「有记录」的地方，下面两个读数（`installedVersionFromRegistry` / `projectScopedVersionReading`）共用，
  *  ⛔ 不各写一份解析器（硬规则 5b：第二份解析必然漂移）。
- *  条目里没有合法 `version` 的被**跳过**（一个没有版本的条目不是一个版本读数）；条目表可以是空数组
- *  （有记录、但一个合法条目都没有），那与「记录读不出」**不同形**。 */
+ *  条目里没有合法 `version` 的**保留**、`version: null`（「有没有这条安装」与「那条安装是哪一版」是
+ *  两个问题；版本读数由 `highestVersionEntry` 跳过 null 来回答）；条目表可以是空数组
+ *  （有记录、但一个条目都没有），那与「记录读不出」**不同形**。 */
 function readQuayRegistryEntries(homeDir: string): QuayRegistryEntry[] | null {
   let raw: string;
   try {
@@ -232,7 +236,6 @@ function readQuayRegistryEntries(homeDir: string): QuayRegistryEntry[] | null {
       if (!e || typeof e !== "object") continue;
       const o = e as Record<string, unknown>;
       const version = typeof o.version === "string" && o.version.trim() !== "" ? o.version.trim() : null;
-      if (version === null) continue;
       out.push({
         version,
         installedAt:
@@ -249,16 +252,24 @@ function readQuayRegistryEntries(homeDir: string): QuayRegistryEntry[] | null {
 }
 
 /** 条目表里**最高**版本那条（同一 host 上同一插件可有多个 scope/多个项目条目）。
- *  ⛔ 不可排序 ⇒ 字典序兜底：保证「取最高」在任意版本串上都给一个**确定**答案（⛔ 不返回第一个）。 */
+ *  ⛔ 不可排序 ⇒ 字典序兜底：保证「取最高」在任意版本串上都给一个**确定**答案（⛔ 不返回第一个）。
+ *  ⛔ 没有版本的条目**不参与**排名（`null` 不是一个版本读数）；全是无版本条目 ⇒ `null`。 */
 function highestVersionEntry(entries: readonly QuayRegistryEntry[]): QuayRegistryEntry | null {
   let best: QuayRegistryEntry | null = null;
+  let bestVersion: string | null = null;
   for (const cand of entries) {
-    if (best === null) {
+    const candVersion = cand.version;
+    if (candVersion === null) continue;
+    if (bestVersion === null) {
       best = cand;
+      bestVersion = candVersion;
       continue;
     }
-    const c = compareVersions(cand.version, best.version);
-    if (c === null ? cand.version > best.version : c > 0) best = cand;
+    const c = compareVersions(candVersion, bestVersion);
+    if (c === null ? candVersion > bestVersion : c > 0) {
+      best = cand;
+      bestVersion = candVersion;
+    }
   }
   return best;
 }
@@ -281,8 +292,59 @@ export function installedVersionFromRegistry(homeDir: string): InstalledRegistry
   const entries = readQuayRegistryEntries(homeDir);
   if (entries === null) return null;
   const best = highestVersionEntry(entries);
-  if (best === null) return null;
+  if (best === null || best.version === null) return null;
   return { version: best.version, installedAt: best.installedAt, scope: best.scope, installPath: best.installPath };
+}
+
+/**
+ * 「`quay@quay` 是否**已经**有一条 user scope 安装」——init 打印安装步骤之前的**前置读数**
+ * (gap-init-install-steps-must-detect-existing-user-scope-install)。
+ *
+ * WHY THIS EXISTS: init 只**打印**安装步骤、从不自己装；而打印文本曾把 `--scope user|project|local`
+ * 三者并列成等价选择，且不先问 user scope 是否已有记录。按打印步骤行动的 agent 于是又装一份
+ * project scope —— 那条记录**钉住版本、不随 user 升级**（plantuml-js 2026-10-21：user 0.19.0 在，
+ * init 后 project 条目钉死 0.20.0）。
+ *
+ * 三态（硬规则 3b）：`present`（≥1 条 user 条目）/ `absent`（记录**可读**且确实没有 user 条目）/
+ * `not-evaluated`（记录缺失/不可解析 ⇒ 说不出来，⛔ 调用方不得把它读作「没有 user 安装」）。
+ * 条目存在但无可用版本 ⇒ 仍是 `present`，`version: null`（「有没有」与「哪一版」是两个问题）。
+ */
+export interface UserScopedInstallReading {
+  state: "present" | "absent" | "not-evaluated";
+  /** present 时 user 条目里的最高版本；无版本字段 ⇒ null（⛔ 不是 absent）。 */
+  version: string | null;
+  installedAt: string | null;
+  /** user scope 条目数（absent 恒为 0）。 */
+  entryCount: number;
+  /** not-evaluated 的原因（该态下必非空——空原因与「没问题」同形）。 */
+  reason: string | null;
+}
+
+export function userScopedInstallReading(homeDir: string): UserScopedInstallReading {
+  const entries = readQuayRegistryEntries(homeDir);
+  if (entries === null) {
+    return {
+      state: "not-evaluated",
+      version: null,
+      installedAt: null,
+      entryCount: 0,
+      reason:
+        "the plugin install record (~/.claude/plugins/installed_plugins.json) is missing, unreadable or " +
+        "unparsable — cannot tell whether a user-scope quay@quay install already exists",
+    };
+  }
+  const userEntries = entries.filter((e) => e.scope === "user");
+  if (userEntries.length === 0) {
+    return { state: "absent", version: null, installedAt: null, entryCount: 0, reason: null };
+  }
+  const best = highestVersionEntry(userEntries);
+  return {
+    state: "present",
+    version: best?.version ?? null,
+    installedAt: best?.installedAt ?? userEntries[0]?.installedAt ?? null,
+    entryCount: userEntries.length,
+    reason: null,
+  };
 }
 
 /** 会话层分层规则命中的一层：`project` = 一条 `projectPath` 匹配本项目的 project/local 条目；
@@ -380,12 +442,21 @@ export function projectScopedVersionReading(
   const winner = isProjectTier ? highestVersionEntry(projectEntries) : highestVersionEntry(entries.filter((e) => e.scope === "user"));
   if (winner === null) {
     return degraded(
-      `the install record carries no quay@quay entry for this project (no project/local entry whose projectPath ` +
-        `resolves to ${rootNorm}, and no user entry)`,
+      `the install record carries no versioned quay@quay entry for this project (no project/local entry whose ` +
+        `projectPath resolves to ${rootNorm}, and no versioned user entry)`,
     );
   }
 
   const loaded = winner.version;
+  if (loaded === null) {
+    // Unreachable after `highestVersionEntry` (it skips versionless entries), but the type has to be
+    // narrowed HERE rather than asserted: a versionless winner must never read as a version.
+    return degraded(`the winning quay@quay entry carries no usable version field`, {
+      scope: isProjectTier ? "project" : "user",
+      registryScope: winner.scope,
+      projectPath: winner.projectPath,
+    });
+  }
   const self = selfVersion !== null && selfVersion.trim() !== "" ? selfVersion.trim() : null;
   if (self === null) {
     return degraded("cannot read the version init itself is running as (no readable plugin-root version record)", {

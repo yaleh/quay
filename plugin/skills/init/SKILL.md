@@ -90,14 +90,32 @@ archived with `gap-quay-init-closure-shrink-body` (AC168).
 
 `enabledPlugins` only toggles an ALREADY-INSTALLED plugin, and an untrusted directory's project
 settings are not read at all (SPEC §6 / T3) — so "config committed ⇒ auto-installed" is FALSE. The
-script's output carries the explicit steps, which are:
+script's output carries the explicit steps. **Step 0 is a check, not an install** — the printer
+reads `~/.claude/plugins/installed_plugins.json` first, so the three scopes are never presented as
+equivalent choices when a user-scope record already exists:
 
 ```bash
-claude plugin marketplace add yaleh/quay
-claude plugin install quay@quay --scope user     # or --scope project / --scope local — see below
+# 0. FIRST: is quay@quay already installed at user scope? (the script's printout does this for you)
+claude plugin list --json | jq -r '.[] | select(.id=="quay@quay") | .scope' | sort -u
+#    → "user" listed ⇒ ALREADY INSTALLED. Do NOT install again, and do NOT add a project/local
+#      record "to enable this project": such a record PINS a version and does NOT follow the
+#      user-scope upgrades. Upgrade the user record in place instead (see below).
+claude plugin marketplace add yaleh/quay                                # only when nothing is installed
+claude plugin install quay@quay --scope user                            # ...at the scope YOU choose
 # (or the npm-global path: npm install -g quay — its register-plugin.mjs postinstall registers the
 #  marketplace source only; pass QUAY_PLUGIN_SCOPE=user|project|local to enable it in the same run)
 ```
+
+**Why the check is step 0** (gap-init-install-steps-must-detect-existing-user-scope-install): init
+does not run the install — it prints steps and an agent runs them. Presenting `user|project|local`
+as equivalents made an agent add a project-scope record on top of an existing user-scope install;
+the project record pinned its own version and stopped following user upgrades (measured 2026-10-21:
+user 0.19.0 present, project record pinned 0.20.0). ⇒ **`--scope project` / `--scope local` are
+deliberate overrides, not a default recommendation**: each one PINS a version for that project. The
+default printout (no explicit scope request) does not carry the project/local command at all; when
+a caller explicitly requests that scope, the command appears **together with** the pin warning. A
+record whose scope is `project`/`local` is never needed merely to *enable* a project that a
+user-scope install already covers.
 
 ⚠️ **`marketplace add` takes ONE `<source>`, not `<name> <source>`.** The two-argument form is
 rejected outright (Claude Code 2.1.280: `✘ Invalid marketplace source format. Try: owner/repo,
@@ -108,9 +126,12 @@ plugin **in place** with no install record — `claude mcp list` looks Connected
 ever installed. The published channel is the github source above; this repo's own dog-food channel
 is the separate name `quay-dev` (directory → `<this repo>/plugin`, declared at user scope, SPEC §4b).
 
-⚠️ **Choose `--scope` deliberately — but the value is the consumer's.** `claude plugin install`
-defaults to `scope=user`, so it is always worth passing `--scope` explicitly; which value is right
-depends on how you want to run quay (human ruling 2026-10-06, SPEC §4b revision):
+⚠️ **When nothing is installed yet, choose `--scope` deliberately — but the value is the consumer's.**
+`claude plugin install` defaults to `scope=user`, so it is always worth passing `--scope`
+explicitly; which value is right depends on how you want to run quay (human ruling 2026-10-06,
+SPEC §4b revision). **If a user-scope record already exists, the choice is already made** — see the
+step-0 check above: a second project/local record does not "enable" anything the user record does
+not already enable; it only pins a version that stops following user-scope upgrades.
 
 | `--scope` | what it means | where the enable is written |
 |---|---|---|
