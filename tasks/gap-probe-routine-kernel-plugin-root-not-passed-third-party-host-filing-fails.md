@@ -26,9 +26,9 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] probeRoutinesFromConfig / buildDefaultProbeRoutines 传 kernelPluginRoot，且 fileRoutineTask 在无 packages/quay-native 的宿主上经第二分支解析到 vendored bundle（可 grep 核对 resolveTaskCliEntry 的第二分支被走到）。
-- [ ] filed=0 且 errors 非空时，fact state 不是 "verified"（独立取值，可 grep 核对）。
-- [ ] 回归测试覆盖「无 packages/quay-native + 安装形态插件根 + accepted finding ⇒ 任务文件落到 tasks/」，可运行、可复核。
+- [x] probeRoutinesFromConfig / buildDefaultProbeRoutines 传 kernelPluginRoot，且 fileRoutineTask 在无 packages/quay-native 的宿主上经第二分支解析到 vendored bundle（可 grep 核对 resolveTaskCliEntry 的第二分支被走到）。
+- [x] filed=0 且 errors 非空时，fact state 不是 "verified"（独立取值，可 grep 核对）。
+- [x] 回归测试覆盖「无 packages/quay-native + 安装形态插件根 + accepted finding ⇒ 任务文件落到 tasks/」，可运行、可复核。
 
 ## Definition of Done
 
