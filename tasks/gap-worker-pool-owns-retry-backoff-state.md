@@ -2,7 +2,7 @@
 id: gap-worker-pool-owns-retry-backoff-state
 title: WorkerPool 聚合 retry/backoff 状态：worker-driver.ts 去掉两个闭包局部变量，状态与转移收进 export
   class WorkerPool（GOAL-909/AC-914）
-status: todo
+status: ready
 labels:
   - gap
 parent: null
