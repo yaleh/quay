@@ -250,3 +250,215 @@ test("CLI --carrier — 只检一个载体", () => {
   assert.equal(out.carriers[0].file, "fan-in-step-trace.jsonl");
   assert.equal(out.decayedCount, 4);
 });
+
+// ── 形态 C：内容全暗（gap-instrument-decay-check-unwired-and-blind-to-content-dark）───────────────────
+// 载体照常写入，但写进去的每一条都是 evaluated:false。形状 A/B 结构上看不见它。
+
+const ARCH_CYCLE_SPEC = MANIFEST.find((m) => m.file === "arch-cycle-history.jsonl");
+const ARCH_COVERAGE_SPEC = MANIFEST.find((m) => m.file === "arch-coverage-history.jsonl");
+const DESIGN_EVOLUTION_SPEC = MANIFEST.find((m) => m.file === "design-evolution-history.jsonl");
+
+function cycleRec(ts, evaluated, scopes = []) {
+  return { ts, mode: "arch-cycle-report-round", evaluated, scopes };
+}
+function coverageRec(ts, evaluated) {
+  return { ts, runner: "arch-coverage-report.ts", evaluated, languages: [] };
+}
+
+test("形态 C — 真实描述符（arch-cycle-history）：从首条起每条 false ⇒ content-dark", () => {
+  const dir = tmpDir("idc-c-dark-");
+  writeCarrier(dir, "arch-cycle-history.jsonl", [
+    cycleRec("2026-10-18T10:25:51.593Z", false),
+    cycleRec("2026-10-19T10:25:51.593Z", false),
+    cycleRec("2026-10-21T23:14:05.363Z", false),
+  ]);
+  const res = analyzeCarrier(dir, ARCH_CYCLE_SPEC, DEFAULT_STALE_SECONDS);
+  assert.equal(res.contentDark.state, "dark");
+  assert.equal(res.contentDark.records, 3);
+  assert.equal(res.contentDark.falseRecords, 3);
+  const dark = res.decayed.filter((d) => d.kind === "content-dark");
+  assert.equal(dark.length, 1, "content-dark must be a DecayFinding, not only a shape reading");
+  assert.equal(dark[0].group, "(all records)");
+  assert.equal(dark[0].count, 3);
+});
+
+test("形态 C 负对照 — arch-coverage-history 描述符：31/31 true ⇒ healthy（不命中）", () => {
+  const dir = tmpDir("idc-c-healthy-");
+  writeCarrier(dir, "arch-coverage-history.jsonl", Array.from({ length: 31 }, (_, i) =>
+    coverageRec(`2026-10-${String((i % 21) + 1).padStart(2, "0")}T07:02:50.500Z`, true)));
+  const res = analyzeCarrier(dir, ARCH_COVERAGE_SPEC, DEFAULT_STALE_SECONDS);
+  assert.equal(res.contentDark.state, "healthy");
+  assert.equal(res.contentDark.records, 31);
+  assert.equal(res.decayed.filter((d) => d.kind === "content-dark").length, 0);
+});
+
+test("形态 C 边界 — 只有 1 条记录 ⇒ not-evaluated（冷启动时序，⛔ 不是 healthy）", () => {
+  const dir = tmpDir("idc-c-cold-");
+  writeCarrier(dir, "design-evolution-history.jsonl", [{ ts: RECENT, evaluated: true }]);
+  const res = analyzeCarrier(dir, DESIGN_EVOLUTION_SPEC, DEFAULT_STALE_SECONDS);
+  assert.equal(res.contentDark.state, "not-evaluated");
+  assert.match(res.contentDark.reason, /cold-start/);
+  assert.equal(res.decayed.length, 0, "a cold start is not a finding");
+});
+
+test("形态 C 边界 — 一条记录缺 evaluated 字段 ⇒ not-evaluated（读不懂 ≠ 健康）", () => {
+  const dir = tmpDir("idc-c-missing-");
+  writeCarrier(dir, "arch-cycle-history.jsonl", [cycleRec(RECENT, false), { ts: RECENT, mode: "arch-cycle-report-round" }]);
+  const res = analyzeCarrier(dir, ARCH_CYCLE_SPEC, DEFAULT_STALE_SECONDS);
+  assert.equal(res.contentDark.state, "not-evaluated");
+  assert.match(res.contentDark.reason, /no boolean 'evaluated'/);
+});
+
+// ── 形态 D：过期的已评估 ────────────────────────────────────────────────────────────────────────────
+
+function git(dir, args, env = {}) {
+  return spawnSync("git", ["-C", dir, ...args], {
+    encoding: "utf8",
+    env: { ...process.env, GIT_CONFIG_NOSYSTEM: "1", ...env },
+  });
+}
+
+function makeRepo(dir) {
+  assert.equal(git(dir, ["init", "-q"]).status, 0, "git init");
+  assert.equal(git(dir, ["config", "user.email", "fixture@example.com"]).status, 0);
+  assert.equal(git(dir, ["config", "user.name", "fixture"]).status, 0);
+}
+
+function commitAt(dir, iso, relPath, content) {
+  const full = path.join(dir, relPath);
+  fs.mkdirSync(path.dirname(full), { recursive: true });
+  fs.writeFileSync(full, content, "utf8");
+  assert.equal(git(dir, ["add", relPath]).status, 0, "git add");
+  const r = git(dir, ["commit", "-q", "-m", `touch ${relPath}`], {
+    GIT_AUTHOR_DATE: iso,
+    GIT_COMMITTER_DATE: iso,
+    GIT_AUTHOR_NAME: "fixture",
+    GIT_AUTHOR_EMAIL: "fixture@example.com",
+    GIT_COMMITTER_NAME: "fixture",
+    GIT_COMMITTER_EMAIL: "fixture@example.com",
+  });
+  assert.equal(r.status, 0, `git commit at ${iso}: ${r.stderr}`);
+}
+
+test("形态 D — 产物时间戳早于覆盖源路径的最新提交 ⇒ stale-evaluated", () => {
+  const dir = tmpDir("idc-d-stale-");
+  makeRepo(dir);
+  // 覆盖源路径在 16:26 被提交改动；读数里的产物时间戳是 16:17 ⇒ 读数过期。
+  commitAt(dir, "2026-10-21T16:26:00Z", "packages/quay/src/a.ts", "export const a = 1;\n");
+  writeCarrier(dir, "arch-cycle-history.jsonl", [
+    {
+      ts: "2026-10-21T23:14:05.363Z", mode: "arch-cycle-report-round", evaluated: false,
+      scopes: [{ scope: "src", source: "packages/quay/src", evaluated: true, artifactTimestamp: "2026-10-21T16:17:56.117Z", cycleCount: 0 }],
+    },
+  ]);
+  const res = analyzeCarrier(dir, ARCH_CYCLE_SPEC, DEFAULT_STALE_SECONDS);
+  assert.equal(res.staleEvaluated.state, "stale");
+  assert.equal(res.staleEvaluated.scopes.length, 1);
+  assert.equal(res.staleEvaluated.scopes[0].state, "stale");
+  assert.equal(res.staleEvaluated.scopes[0].artifactMs, Date.parse("2026-10-21T16:17:56.117Z"));
+  assert.equal(res.staleEvaluated.scopes[0].commitMs, Date.parse("2026-10-21T16:26:00Z"));
+  const finding = res.decayed.filter((d) => d.kind === "stale-evaluated");
+  assert.equal(finding.length, 1);
+  assert.equal(finding[0].group, "src");
+});
+
+test("形态 D 负对照 — 产物时间晚于所有覆盖提交 ⇒ fresh（不命中）", () => {
+  const dir = tmpDir("idc-d-fresh-");
+  makeRepo(dir);
+  commitAt(dir, "2026-10-21T16:26:00Z", "packages/quay/src/a.ts", "export const a = 1;\n");
+  writeCarrier(dir, "arch-cycle-history.jsonl", [
+    {
+      ts: "2026-10-21T23:14:05.363Z", mode: "arch-cycle-report-round", evaluated: true,
+      scopes: [{ scope: "src", source: "packages/quay/src", evaluated: true, artifactTimestamp: "2026-10-21T22:00:00.000Z", cycleCount: 0 }],
+    },
+  ]);
+  const res = analyzeCarrier(dir, ARCH_CYCLE_SPEC, DEFAULT_STALE_SECONDS);
+  assert.equal(res.staleEvaluated.state, "fresh");
+  assert.equal(res.decayed.filter((d) => d.kind === "stale-evaluated").length, 0);
+});
+
+test("形态 D — 读 git 的例程按声明 not-applicable（⛔ 不是 fresh，也不是 finding）", () => {
+  const dir = tmpDir("idc-d-na-");
+  writeCarrier(dir, "design-evolution-history.jsonl", [
+    { ts: RECENT, evaluated: true, mode: "design-evolution-readings-round" },
+    { ts: RECENT, evaluated: true, mode: "design-evolution-readings-round" },
+  ]);
+  const res = analyzeCarrier(dir, DESIGN_EVOLUTION_SPEC, DEFAULT_STALE_SECONDS);
+  assert.equal(res.staleEvaluated.state, "not-applicable");
+  assert.match(res.staleEvaluated.reason, /git/);
+  assert.equal(res.decayed.filter((d) => d.kind === "stale-evaluated").length, 0);
+});
+
+// ── 未覆盖 ≠ 健康（AC3）─────────────────────────────────────────────────────────────────────────────
+
+test("uncovered — measure-history 列入且不计入健康载体数（⛔ 未检查与检查过且干净不同形）", () => {
+  const dir = tmpDir("idc-uncovered-");
+  // 一个健康的已登记载体（全 true），一个声明的未覆盖载体，一个「带 evaluated 但无描述符」的载体。
+  writeCarrier(dir, "arch-coverage-history.jsonl", [
+    coverageRec("2026-10-20T07:02:50.500Z", true),
+    coverageRec("2026-10-21T07:02:50.500Z", true),
+  ]);
+  writeCarrier(dir, "measure-history.jsonl", [{ round: 1, runAt: RECENT, file: "x.test.mjs", durationMs: 1 }]);
+  writeCarrier(dir, "some-new-eval-carrier.jsonl", [{ ts: RECENT, evaluated: true }]);
+  const out = analyzeAll(dir, { staleSeconds: DEFAULT_STALE_SECONDS });
+  const files = out.uncovered.map((u) => u.file);
+  assert.ok(files.includes("measure-history.jsonl"), `measure-history must be listed as uncovered; got ${files.join(",")}`);
+  const mh = out.uncovered.find((u) => u.file === "measure-history.jsonl");
+  assert.equal(mh.reason, "declared-uncovered");
+  assert.equal(mh.present, true);
+  const discovered = out.uncovered.find((u) => u.file === "some-new-eval-carrier.jsonl");
+  assert.ok(discovered, "a carrier carrying `evaluated` but lacking a descriptor must be discovered");
+  assert.equal(discovered.reason, "evaluated-but-undescribed");
+  assert.equal(out.uncoveredCount, 2);
+  // 只有 arch-coverage-history 是「已登记 + 可评估 + 无腐烂」；uncovered 两个都不在健康计数里。
+  assert.equal(out.healthyCount, 1);
+});
+
+test("uncovered — --carrier 聚焦查询不扫全目录（覆盖面不是它的读数）", () => {
+  const dir = tmpDir("idc-uncovered-focus-");
+  writeCarrier(dir, "fan-in-lock-events.jsonl", [lockRec("acquire", RECENT), lockRec("release", RECENT)]);
+  writeCarrier(dir, "measure-history.jsonl", [{ round: 1 }]);
+  const out = analyzeAll(dir, { staleSeconds: DEFAULT_STALE_SECONDS, carrier: "fan-in-lock-events.jsonl" });
+  assert.equal(out.uncoveredCount, 0);
+});
+
+// ── AC4：扩展点 —— 只注册一个合成描述符即可检查新载体（⛔ 不改检测器逻辑）──────────────────────────
+
+test("AC4 — 注册一个合成描述符 ⇒ 新载体被检查；不注册 ⇒ 同一断言失败（负对照）", () => {
+  const dir = tmpDir("idc-ac4-");
+  writeCarrier(dir, "synthetic-evaluated-carrier.jsonl", [
+    { ts: "2026-10-20T00:00:00Z", evaluated: false },
+    { ts: "2026-10-21T00:00:00Z", evaluated: false },
+  ]);
+  const synthetic = { file: "synthetic-evaluated-carrier.jsonl", evaluatedField: "evaluated", note: "AC4 synthetic descriptor" };
+
+  const registered = analyzeAll(dir, { staleSeconds: DEFAULT_STALE_SECONDS }, [synthetic]);
+  assert.equal(registered.carriers.length, 1);
+  assert.equal(registered.carriers[0].file, "synthetic-evaluated-carrier.jsonl");
+  assert.equal(registered.carriers[0].contentDark.state, "dark", "the descriptor alone makes the new carrier analysable");
+  assert.equal(registered.decayedCount, 1);
+
+  // 负对照：同一份数据、同一断言，不注册 ⇒ 载体根本不被检查（carriers 为空）。
+  const unregistered = analyzeAll(dir, { staleSeconds: DEFAULT_STALE_SECONDS }, []);
+  assert.equal(unregistered.carriers.length, 0);
+  assert.equal(unregistered.carriers.find((c) => c.file === "synthetic-evaluated-carrier.jsonl"), undefined);
+  assert.equal(unregistered.decayedCount, 0);
+});
+
+test("CLI --json — 形态 C/D 与 uncovered 都在机器面上（healthyCount ≠ 全目录）", () => {
+  const dir = tmpDir("idc-cli-json-new-");
+  writeCarrier(dir, "arch-cycle-history.jsonl", [
+    cycleRec("2026-10-20T00:00:00Z", false),
+    cycleRec("2026-10-21T00:00:00Z", false),
+  ]);
+  writeCarrier(dir, "measure-history.jsonl", [{ round: 1 }]);
+  const r = runChecker(dir, ["--json"]);
+  assert.equal(r.status, 1, `content-dark is decay (exit 1): ${r.stderr}`);
+  const out = JSON.parse(r.stdout);
+  const cycle = out.carriers.find((c) => c.file === "arch-cycle-history.jsonl");
+  assert.equal(cycle.contentDark.state, "dark");
+  assert.equal(cycle.staleEvaluated.state, "not-evaluated"); // no scopes in the fixture ⇒ cannot tell, not "fresh"
+  assert.equal(out.uncoveredCount, 1);
+  assert.equal(out.uncovered[0].file, "measure-history.jsonl");
+  assert.equal(out.healthyCount, 0, "the uncovered carrier must not be counted healthy");
+});

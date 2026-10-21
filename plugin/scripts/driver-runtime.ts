@@ -2966,11 +2966,16 @@ export async function runSelectorWorker(
 // 选择、没有「spawn 执行者再复核其自述」——它的单元是【例程】不是【任务】，产出是【读数】不是
 // 【任务终态】。硬塞进 1a 会迫使它实现三个空段（source/select/verify），那正是 AC151 取假① 说的架构错误。
 
-/** 一条例程的产出（读数）。state=not-evaluated 表示读不到输入（⛔ 与「合格」不同形，硬规则 3b）。 */
+/** 一条例程的产出（读数）。state=not-evaluated 表示读不到输入（⛔ 与「合格」不同形，硬规则 3b）。
+ *
+ *  `instrument-dark`（gap-instrument-decay-check-unwired-and-blind-to-content-dark）是**读数内容本身
+ *  就是一个腐烂发现**的独立取值：一个仪器腐烂检测例程跑成功了（能读、结论明确），但结论是「有仪器
+ *  在腐烂」。它 ⛔ 不是 `verified`（那会读成「检查过且干净」），也 ⛔ 不是 `not-evaluated`（那是「读不懂」），
+ *  也 ⛔ 不是 `failed`（例程本身没有失败）。三者与它必须可区分——这正是本值存在的理由（硬规则 3b/9）。 */
 export interface Fact<T = unknown> {
   name: string;
   value: T;
-  state: "verified" | "not-evaluated" | "failed";
+  state: "verified" | "not-evaluated" | "failed" | "instrument-dark";
   reason: string | null;
 }
 

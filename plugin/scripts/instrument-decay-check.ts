@@ -20,6 +20,19 @@
 // 伴生对照是结构性的防误报：一个单分组（或全分组同旧）的载体，其唯一分组就是它自己的「最新」，
 // 结构上不可能满足「比某个伴生分组更旧」⇒ 永不误报（AC2 反向判据）。
 //
+// 两种【照常写入】的暗形态（gap-instrument-decay-check-unwired-and-blind-to-content-dark）：
+//   C. content-dark   带 `evaluated` 字段的载体，从首条起每条都是 false（≥2 条记录——1 条可能是冷启动
+//                     时序，这是最小结构条件，不是调出来的阈值）。载体在写，但写的全是「没评估成」。
+//   D. stale-evaluated 最新一条有 evaluated:true 作用域的记录，其产物时间戳早于【覆盖源路径的最新提交】。
+//                     它与真正的健康状态从外部看完全相同（读数说「已评估、0 环」），比 C 更危险。
+//   两种形态都允许例外声明：描述符可注明 D 无输入（记录里没有产物时间戳/覆盖路径，或例程直接读 git）。
+//
+// 覆盖面诚实（硬规则 3b）：没有 `evaluated` 字段、也未登记描述符的载体列入 `uncovered`，
+// ⛔ 不计入健康载体数——「没被检查」不得与「检查过且干净」同形。
+//
+// 扩展点：要检查一个新载体，只需在 MANIFEST（或调用方传入的 manifest）里登记一个描述符，
+// ⛔ 不改本文件的判定逻辑（AC4 负控制测的就是这一点）。
+//
 // 用法:
 //   instrument-decay-check.ts [--root <dir>] [--stale-seconds <n>] [--carrier <file>] [--no-block] [--json] [--help]
 //     --root DIR          workspace root（默认：本脚本位置自动推导）。接 run_operational_checks 时传
@@ -38,6 +51,7 @@
 
 import fs from "node:fs";
 import path from "node:path";
+import { spawnSync } from "node:child_process";
 import { repoRoot } from "./repo-root.ts";
 import { fileURLToPath } from "node:url";
 import { parseArgs as baseParseArgs, printJsonCompact } from "./gate-script-base.ts";
@@ -53,10 +67,10 @@ export const DEFAULT_STALE_SECONDS = 86400; // 24h 伴生陈旧间隔（只影�
 export interface CarrierSpec {
   /** .quay/ 下的相对路径。 */
   file: string;
-  /** 记录里哪个字段的值构成分组身份。 */
-  groupBy: string;
-  /** 该载体应当出现的分组词表（Shape A：缺席 = 停写）。 */
-  expected: string[];
+  /** 记录里哪个字段的值构成分组身份。缺省 ⇒ 本载体不做分组分析（形状 A/B 不适用）。 */
+  groupBy?: string;
+  /** 该载体应当出现的分组词表（Shape A：缺席 = 停写）。缺省 []。 */
+  expected?: string[];
   /** 是否应用 Shape B（速率归零对照）。锁事件类（acquire 后 release 可合法滞后）关掉。 */
   shapeB?: boolean;
   /** 记录里 `kind` 取此值的行**整体不计入本载体的分析**（既不入分组、不计 totalRecords）。缺省不过滤。
@@ -70,8 +84,29 @@ export interface CarrierSpec {
    *  判据用**精确等于**（⛔ 不是「有 kind 就跳过」）：既有记录都没有 `kind` 字段，任何「有 kind 即跳过」
    *  的写法都会把全部历史记录一起过滤掉——那是把「读不懂」伪装成「零腐烂」（硬规则 3b）。 */
   skipKind?: string;
+  /** 记录级 `evaluated` 字段名（形状 C 的输入）。缺省 ⇒ 形状 C 不适用。 */
+  evaluatedField?: string;
+  /** 形状 D 的输入：这份载体读的是【持久化产物】时，记录里产物时间戳与覆盖源路径的位置。
+   *  缺省 ⇒ 形状 D 不适用；此时 `artifactNotApplicable` 必须写明为什么（⛔ 不静默跳过）。 */
+  artifact?: ArtifactSpec;
+  /** 形状 D 不适用的理由（与 `artifact` 二选一）。 */
+  artifactNotApplicable?: string;
   /** 写手溯源——为什么这些分组【应当】在这个载体里。 */
   note: string;
+}
+
+/** 形状 D 的读取位置：每个「作用域」一条（覆盖源路径 + 产物时间戳 + 该作用域是否已评估）。 */
+export interface ArtifactSpec {
+  /** 记录里承载作用域数组的字段（如 `scopes`）。 */
+  scopesField: string;
+  /** 每个作用域里覆盖的源路径字段（repo 相对路径，交给 `git log -- <path>`）。 */
+  sourceField: string;
+  /** 每个作用域里产物时间戳字段（ISO 字符串）。 */
+  artifactTsField: string;
+  /** 每个作用域里的 evaluated 字段。缺省 ⇒ 用记录级 evaluated。 */
+  scopeEvaluatedField?: string;
+  /** 作用域名字段（报告里点名用）。缺省 `scope`。 */
+  scopeNameField?: string;
 }
 
 export const MANIFEST: CarrierSpec[] = [
@@ -96,7 +131,12 @@ export const MANIFEST: CarrierSpec[] = [
     note:
       "worker-driver.ts 机械 fan-in 步骤链。前 8 个经 step()/appendFanInStepTrace 写共享载体；" +
       "后 4 个（ac-precheck/suite-*）自 a5a301e03 起被 trace() 改写到 per-run 日志，" +
-      "共享载体停写而伴生步骤（merge-develop/typecheck/scoped-gate/ff）仍在写——P5 的字面实例。",
+      "共享载体停写而伴生步骤（merge-develop/typecheck/scoped-gate/ff）仍在写——P5 的字面实例。" +
+      "【罕见但活着的例外路径，不是腐烂】verification-round-record：仅当本轮 suite 无结论" +
+      "（看门狗 SIGKILL / 从未 spawn）时 force 写一条（worker-fan-in.ts recordDelegatedRound）；" +
+      "quay 形态（suite_runner: quay-buckets）下普通红/绿轮由 full-suite-runner 入账、不走本组。" +
+      "catch-up-develop：仅当 fan-in 的 mergeTarget ≠ develop（goal 分支落地）时才有这一步。" +
+      "suite-recovery-blocked：仅当 suite 恢复阶梯耗尽（64/48/32 都无完整判词）时才写。",
   },
   {
     file: "fan-in-lock-events.jsonl",
@@ -107,35 +147,400 @@ export const MANIFEST: CarrierSpec[] = [
       "fan-in 锁事件账本：acquire 与 release 应成对出现。只按 Shape A 判「两种事件都在写」；" +
       "不在 Shape B 上判速率——持锁时长可变，release 末次时刻落后 acquire 是正常态。",
   },
+  {
+    // gap-instrument-decay-check-unwired-and-blind-to-content-dark：形态 C 的实测载体——25/25 条
+    // record-level evaluated:false（首条 2026-10-18T10:25Z），载体照常写入但写进去的全是「未评估」。
+    // 形态 D 的实测载体——src scope 读「已评估、0 环」，读的是 2026-10-21T16:17Z 的产物，而目录环在
+    // 16:26Z/16:27Z 才被提交引入 ⇒ 与真正的健康读数从外部看完全相同。
+    file: "arch-cycle-history.jsonl",
+    evaluatedField: "evaluated",
+    artifact: {
+      scopesField: "scopes",
+      sourceField: "source",
+      artifactTsField: "artifactTimestamp",
+      scopeEvaluatedField: "evaluated",
+      scopeNameField: "scope",
+    },
+    note:
+      "arch-cycle-report 例程每轮追加一行。记录级 evaluated 是「全部作用域都可读」；作用域级 evaluated " +
+      "是「这一作用域可读」。形态 D 取**最后一条含已评估作用域**的记录（记录级 false 只表示并非全部" +
+      "作用域可读，不表示什么都没评估）。作用域 source 是 repo 相对路径 ⇒ D 的对照量是 git 提交时刻。",
+  },
+  {
+    // AC1 的负对照：31/31 条 evaluated:true ⇒ 形状 C 必须不命中（而不是「样本刚好绿」）。
+    file: "arch-coverage-history.jsonl",
+    evaluatedField: "evaluated",
+    artifactNotApplicable:
+      "记录不含『产物时间戳 + 覆盖源路径』对（analyzedBy 是 archguard scope key，不是产物时间）⇒ 形状 D 无输入",
+    note:
+      "arch-coverage-report 例程每轮追加一行（语言 × 覆盖状态）。它有 record-level evaluated，因此形态 C " +
+      "适用；它读的是分析器注册表而不是逐作用域的持久化产物，故形态 D 按声明不适用。",
+  },
+  {
+    // 形态 C 的边界：只有 1 条记录 ⇒ 冷启动时序，不足以下结论。形态 D 显式不适用（读 git，不读产物）。
+    file: "design-evolution-history.jsonl",
+    evaluatedField: "evaluated",
+    artifactNotApplicable:
+      "例程直接读 git 历史（RM1/RM2），没有可取时间戳的持久化产物 ⇒ 形状 D 按定义不适用",
+    note:
+      "design-evolution-readings 例程每轮追加一行。它读 git 历史与 worker-outcome 账本，不读持久化" +
+      "分析产物 ⇒ 形状 D 按声明不适用；record-level evaluated 存在 ⇒ 形态 C 适用。",
+  },
 ];
 
-export interface GroupStat {
-  count: number;
-  lastWriteMs: number | null;
-}
-
-export interface DecayFinding {
-  group: string;
-  kind: "never-wrote" | "rate-stopped";
-  count: number;
-  lastWriteMs: number | null;
-}
-
-export interface Companion {
-  group: string;
-  count: number;
-  lastWriteMs: number | null;
-}
-
-export interface CarrierResult {
+/** 已知但**未登记描述符**的载体（覆盖面的诚实声明）。
+ *
+ *  为什么需要（Plan item 4）：`uncovered` 必须可见，否则「检测器没有检查这个载体」与「检查过且干净」
+ *  在读数上同形（硬规则 3b）。这不是一份「所有 jsonl」的清单——`.quay/` 里绝大多数文件不是读数载体；
+ *  这里只列**读数型**载体中已知的漏网者。`evaluated` 字段的存在与否由检测器自己读首条记录判定，
+ *  ⛔ 不在这份声明里复制（声明只写它为什么没有描述符）。 */
+export interface UncoveredCarrier {
   file: string;
-  evaluated: boolean;
-  reason: string | null;
-  totalRecords: number;
-  freshestMs: number | null;
-  groupCount: number;
-  decayed: DecayFinding[];
-  companions: Companion[];
+  note: string;
+}
+
+export const DECLARED_UNCOVERED: UncoveredCarrier[] = [
+  {
+    file: "measure-history.jsonl",
+    note:
+      "suite 每文件耗时账本（127 万+ 行，无 evaluated 字段）：它记录的是测量时长，不是「评估结论」，" +
+      "本检测器的四种形状都没有输入。列入 uncovered 是为了不把它算进健康载体数。",
+  },
+];
+
+/** 读一个载体的全部记录（坏行跳过；skipKind 精确等于过滤，见 CarrierSpec.skipKind）。 */
+export function readCarrierRecords(root: string, spec: CarrierSpec): Record<string, unknown>[] | null {
+  const filePath = path.join(root, ".quay", spec.file);
+  if (!fs.existsSync(filePath)) return null;
+  const out: Record<string, unknown>[] = [];
+  for (const line of fs.readFileSync(filePath, "utf8").split("\n")) {
+    const rec = parseLine(line);
+    if (!rec) continue;
+    if (spec.skipKind !== undefined && rec["kind"] === spec.skipKind) continue;
+    out.push(rec);
+  }
+  return out;
+}
+
+/** 形状 C：带 record-level `evaluated` 的载体，从首条起每条都是 false（≥2 条）。
+ *
+ *  ⛔ 四态：少于 2 条 ⇒ `not-evaluated`（冷启动时序，不是「健康」）；某条缺布尔字段 ⇒ `not-evaluated`
+ *  （读不懂 ≠ 合格，硬规则 3b）。≥2 是**最小结构条件**，不是调出来的阈值。 */
+export function analyzeContentDarkness(records: Record<string, unknown>[], spec: CarrierSpec): ShapeCReading {
+  if (spec.evaluatedField === undefined) {
+    return { state: "not-applicable", records: records.length, falseRecords: 0, reason: "descriptor does not declare an evaluated field" };
+  }
+  if (records.length < 2) {
+    return { state: "not-evaluated", records: records.length, falseRecords: 0, reason: `only ${records.length} record(s) — fewer than 2 is a cold-start timing, not a verdict` };
+  }
+  let falseRecords = 0;
+  for (let i = 0; i < records.length; i++) {
+    const v = records[i][spec.evaluatedField];
+    if (typeof v !== "boolean") {
+      return { state: "not-evaluated", records: records.length, falseRecords, reason: `record #${i} has no boolean '${spec.evaluatedField}' (got ${JSON.stringify(v)}) — cannot conclude` };
+    }
+    if (v === false) falseRecords++;
+  }
+  if (falseRecords === records.length) {
+    return { state: "dark", records: records.length, falseRecords, reason: `all ${records.length} record(s) are ${spec.evaluatedField}:false since the first record` };
+  }
+  return { state: "healthy", records: records.length, falseRecords, reason: null };
+}
+
+export interface GitCommitTime {
+  ms: number | null;
+  sha: string | null;
+  error: string | null;
+}
+
+/** 覆盖源路径的最新提交（committer date）。空输出（该路径无提交）与 git 失败都返回 error ⇒ 未评估。 */
+export function gitLatestCommitForPath(root: string, source: string): GitCommitTime {
+  const r = spawnSync("git", ["-C", root, "log", "-1", "--format=%ct%x09%H", "--", source], {
+    encoding: "utf8",
+    timeout: 30_000,
+  });
+  if (r.error) return { ms: null, sha: null, error: r.error.message };
+  if (r.status !== 0) {
+    return { ms: null, sha: null, error: (String(r.stderr ?? "").trim().slice(0, 200)) || `git exited ${r.status}` };
+  }
+  const line = String(r.stdout ?? "").trim().split("\n")[0];
+  if (!line) return { ms: null, sha: null, error: `no commit touches '${source}'` };
+  const [ct, sha] = line.split("\t");
+  const sec = Number(ct);
+  if (!Number.isFinite(sec)) return { ms: null, sha: sha ?? null, error: `unparseable commit time '${ct}'` };
+  return { ms: sec * 1000, sha: sha ?? null, error: null };
+}
+
+/** 形状 D：最新一条「含已评估作用域」的记录，其产物时间戳早于覆盖源路径的最新提交 ⇒ stale。
+ *
+ *  为什么取「含已评估作用域」而不是「record-level evaluated:true」：arch-cycle-history 的记录级
+ *  evaluated 表示「**全部**作用域都可读」——一条记录可以是记录级 false 而仍有若干作用域已评估
+ *  （实测最后一条就是：2 个作用域不可读、4 个可读）。只认记录级 true 会让 D 对这个真实载体无输入。
+ *
+ *  ⛔ 四态：无描述符 ⇒ not-applicable（并带 descriptor 给出的理由）；无可用记录 / 任一作用域读不出
+ *  ⇒ not-evaluated；有 stale ⇒ stale；否则 fresh。 */
+export function analyzeStaleEvaluated(records: Record<string, unknown>[], spec: CarrierSpec, root: string): ShapeDReading {
+  const na = (reason: string): ShapeDReading => ({ state: "not-applicable", reason, recordTs: null, scopes: [] });
+  if (spec.evaluatedField === undefined || spec.artifact === undefined) {
+    return na(spec.artifactNotApplicable ?? "descriptor declares no artifact (artifact timestamp + covered paths)");
+  }
+  const art = spec.artifact;
+  const scopeEvaluated = (s: Record<string, unknown>, rec: Record<string, unknown>): boolean =>
+    art.scopeEvaluatedField !== undefined
+      ? s[art.scopeEvaluatedField] === true
+      : rec[spec.evaluatedField as string] === true;
+
+  let chosen: Record<string, unknown> | null = null;
+  for (let i = records.length - 1; i >= 0; i--) {
+    const arr = records[i][art.scopesField];
+    if (!Array.isArray(arr)) continue;
+    if (arr.some((s) => s !== null && typeof s === "object" && scopeEvaluated(s as Record<string, unknown>, records[i]))) {
+      chosen = records[i];
+      break;
+    }
+  }
+  if (chosen === null) {
+    return {
+      state: "not-evaluated",
+      reason: `no record carries an evaluated '${art.scopesField}' scope — cannot tell whether the artifact is stale`,
+      recordTs: null,
+      scopes: [],
+    };
+  }
+
+  const recordTs = typeof chosen["ts"] === "string" ? (chosen["ts"] as string) : null;
+  const scopes: StaleScopeReading[] = [];
+  for (const raw of chosen[art.scopesField] as unknown[]) {
+    if (raw === null || typeof raw !== "object") continue;
+    const s = raw as Record<string, unknown>;
+    if (!scopeEvaluated(s, chosen)) continue;
+    const nameRaw = s[art.scopeNameField ?? "scope"];
+    const scope = typeof nameRaw === "string" && nameRaw !== "" ? nameRaw : "<unset>";
+    const sourceRaw = s[art.sourceField];
+    const source = typeof sourceRaw === "string" ? sourceRaw : "";
+    const artifactTsRaw = s[art.artifactTsField];
+    const artifactTs = typeof artifactTsRaw === "string" && artifactTsRaw !== "" ? artifactTsRaw : null;
+    const artifactMs = artifactTs === null ? null : (Number.isFinite(Date.parse(artifactTs)) ? Date.parse(artifactTs) : null);
+
+    if (source === "") {
+      scopes.push({ scope, source, artifactTs, artifactMs, commitMs: null, commitSha: null, state: "not-evaluated", reason: `scope has no '${art.sourceField}' — no covered path to compare against` });
+      continue;
+    }
+    if (artifactMs === null) {
+      scopes.push({ scope, source, artifactTs, artifactMs, commitMs: null, commitSha: null, state: "not-evaluated", reason: artifactTs === null ? `scope has no '${art.artifactTsField}'` : `unparseable artifact timestamp '${artifactTs}'` });
+      continue;
+    }
+    const commit = gitLatestCommitForPath(root, source);
+    if (commit.ms === null) {
+      scopes.push({ scope, source, artifactTs, artifactMs, commitMs: null, commitSha: commit.sha, state: "not-evaluated", reason: `git could not resolve the latest commit: ${commit.error}` });
+      continue;
+    }
+    // 严格小于：产物【早于】覆盖路径的最新提交才是过期。相等时无法区分先后 ⇒ 记 fresh（同一秒）。
+    const stale = artifactMs < commit.ms;
+    scopes.push({
+      scope, source, artifactTs, artifactMs,
+      commitMs: commit.ms, commitSha: commit.sha,
+      state: stale ? "stale" : "fresh",
+      reason: stale
+        ? `artifact ${artifactTs} predates the latest commit touching ${source} (${new Date(commit.ms).toISOString()} ${commit.sha ?? ""})`.trim()
+        : null,
+    });
+  }
+
+  if (scopes.length === 0) {
+    return { state: "not-evaluated", reason: "the chosen record carries no evaluated scope with a comparable artifact", recordTs, scopes };
+  }
+  if (scopes.some((s) => s.state === "stale")) return { state: "stale", reason: null, recordTs, scopes };
+  if (scopes.some((s) => s.state === "not-evaluated")) return { state: "not-evaluated", reason: "at least one scope could not be compared", recordTs, scopes };
+  return { state: "fresh", reason: null, recordTs, scopes };
+}
+
+/** 首条可解析记录（uncovered 发现只看这一条——measure-history 有 127 万行，⛔ 不整份读）。 */
+function firstRecordOf(root: string, file: string): Record<string, unknown> | null {
+  let fd: number | null = null;
+  try {
+    fd = fs.openSync(path.join(root, ".quay", file), "r");
+    const buf = Buffer.alloc(64 * 1024);
+    const n = fs.readSync(fd, buf, 0, buf.length, 0);
+    for (const line of buf.subarray(0, n).toString("utf8").split("\n")) {
+      const rec = parseLine(line);
+      if (rec) return rec;
+    }
+    return null;
+  } catch {
+    return null;
+  } finally {
+    if (fd !== null) { try { fs.closeSync(fd); } catch { /* best-effort */ } }
+  }
+}
+
+/** 没有登记描述符的载体清单。
+ *
+ *  两个来源，缺一即不诚实：
+ *   ① DECLARED_UNCOVERED —— 人审查过的「已知但没有描述符」；
+ *   ② **发现**：`.quay/*.jsonl` 首条记录带布尔 `evaluated` 却既无描述符也未声明 ⇒ 登记表自身漂移
+ *      （新载体已经带上了评估语义，而没人给它登记描述符）。这正是本任务的形态 C 从源头消失前的样子。
+ *  ⛔ 不带 `evaluated` 的随手数据文件（测试残留、证据包、度量账本）不在此列——检测器不假装检查一切。 */
+export function discoverUncovered(root: string, manifest: CarrierSpec[] = MANIFEST): UncoveredEntry[] {
+  const described = new Set(manifest.map((m) => m.file));
+  const entries = new Map<string, UncoveredEntry>();
+  for (const d of DECLARED_UNCOVERED) {
+    if (described.has(d.file)) continue;
+    entries.set(d.file, {
+      file: d.file,
+      reason: "declared-uncovered",
+      present: fs.existsSync(path.join(root, ".quay", d.file)),
+      note: d.note,
+    });
+  }
+  let names: string[] = [];
+  try {
+    names = fs.readdirSync(path.join(root, ".quay")).filter((n) => n.endsWith(".jsonl")).sort();
+  } catch {
+    return [...entries.values()];
+  }
+  for (const name of names) {
+    if (described.has(name) || entries.has(name)) continue;
+    const first = firstRecordOf(root, name);
+    if (first !== null && typeof first["evaluated"] === "boolean") {
+      entries.set(name, {
+        file: name,
+        reason: "evaluated-but-undescribed",
+        present: true,
+        note: "first record carries a boolean 'evaluated' but no descriptor is registered — shapes C/D cannot be applied; register a descriptor",
+      });
+    }
+  }
+  return [...entries.values()].sort((a, b) => a.file.localeCompare(b.file));
+}
+
+// ── 单载体分析 ──────────────────────────────────────────────────────────────────────────────────────
+export function analyzeCarrier(root: string, spec: CarrierSpec, staleSeconds: number): CarrierResult {
+  const empty: CarrierResult = {
+    file: spec.file, evaluated: false, reason: "carrier-missing",
+    totalRecords: 0, freshestMs: null, groupCount: 0, decayed: [], companions: [],
+    contentDark: { state: "not-evaluated", records: 0, falseRecords: 0, reason: "carrier-missing" },
+    staleEvaluated: { state: "not-evaluated", reason: "carrier-missing", recordTs: null, scopes: [] },
+  };
+  const records = readCarrierRecords(root, spec);
+  if (records === null) return empty;
+
+  const totalRecords = records.length;
+  const groups = new Map<string, GroupStat>();
+  if (spec.groupBy !== undefined) {
+    for (const rec of records) {
+      const key = String(rec[spec.groupBy] ?? "<unset>");
+      const ts = extractTsMs(rec);
+      const g = groups.get(key) ?? { count: 0, lastWriteMs: null };
+      g.count++;
+      if (ts !== null && (g.lastWriteMs === null || ts > g.lastWriteMs)) g.lastWriteMs = ts;
+      groups.set(key, g);
+    }
+  }
+
+  let freshestMs: number | null = null;
+  for (const g of groups.values()) {
+    if (g.lastWriteMs !== null && (freshestMs === null || g.lastWriteMs > freshestMs)) freshestMs = g.lastWriteMs;
+  }
+
+  const decayed: DecayFinding[] = [];
+
+  // Shape A：期望分组 0 条记录，而载体整体有记录（产生路径还在跑、只是这批事件转移去了别处）。
+  if (totalRecords > 0 && spec.groupBy !== undefined) {
+    for (const exp of spec.expected ?? []) {
+      const g = groups.get(exp);
+      if (!g || g.count === 0) {
+        decayed.push({ group: exp, kind: "never-wrote", count: 0, lastWriteMs: null, detail: null });
+      }
+    }
+  }
+
+  // Shape B：有历史记录的分组，末次写入比载体最新（伴生分组仍在写）老超过 staleSeconds。
+  if (spec.shapeB !== false && freshestMs !== null && staleSeconds > 0) {
+    const gapMs = staleSeconds * 1000;
+    for (const [k, g] of groups) {
+      if (g.count === 0 || g.lastWriteMs === null) continue;
+      if (freshestMs - g.lastWriteMs > gapMs) {
+        decayed.push({ group: k, kind: "rate-stopped", count: g.count, lastWriteMs: g.lastWriteMs, detail: null });
+      }
+    }
+  }
+
+  // Shape C：载体在写，但写进去的全是「没评估成」。
+  const contentDark = analyzeContentDarkness(records, spec);
+  if (contentDark.state === "dark") {
+    const lastWriteMs = records.reduce<number | null>((acc, r) => {
+      const ts = extractTsMs(r);
+      return ts !== null && (acc === null || ts > acc) ? ts : acc;
+    }, null);
+    decayed.push({
+      group: "(all records)",
+      kind: "content-dark",
+      count: records.length,
+      lastWriteMs,
+      detail: contentDark.reason,
+    });
+  }
+
+  // Shape D：已评估，但读到的产物早于它覆盖的源码的最新提交。
+  const staleEvaluated = analyzeStaleEvaluated(records, spec, root);
+  for (const s of staleEvaluated.scopes) {
+    if (s.state !== "stale") continue;
+    decayed.push({
+      group: s.scope,
+      kind: "stale-evaluated",
+      count: 1,
+      lastWriteMs: s.artifactMs,
+      detail: s.reason,
+    });
+  }
+
+  // 伴生分组（仍在写的对照证据）：末次写入距载体最新不超过 staleSeconds（或无 staleSeconds 时全部）。
+  const gapMs = staleSeconds > 0 ? staleSeconds * 1000 : Infinity;
+  const companions: Companion[] = [];
+  for (const [k, g] of groups) {
+    if (g.lastWriteMs === null) continue;
+    if (freshestMs === null || freshestMs - g.lastWriteMs <= gapMs) {
+      companions.push({ group: k, count: g.count, lastWriteMs: g.lastWriteMs });
+    }
+  }
+  companions.sort((a, b) => (b.lastWriteMs ?? 0) - (a.lastWriteMs ?? 0));
+
+  return {
+    file: spec.file, evaluated: true, reason: null,
+    totalRecords, freshestMs, groupCount: groups.size, decayed, companions,
+    contentDark, staleEvaluated,
+  };
+}
+
+export interface AnalyzeOutcome {
+  carriers: CarrierResult[];
+  anyEvaluated: boolean;
+  anyDecayed: boolean;
+  decayedCount: number;
+  /** 未覆盖的载体（⛔ 不计入 healthyCount）。 */
+  uncovered: UncoveredEntry[];
+  uncoveredCount: number;
+  /** 已登记、可评估、且没有任何腐烂读数的载体数。 */
+  healthyCount: number;
+}
+
+export function analyzeAll(
+  root: string,
+  opts: { staleSeconds: number; carrier?: string },
+  manifest: CarrierSpec[] = MANIFEST,
+): AnalyzeOutcome {
+  const specs = opts.carrier
+    ? manifest.filter((m) => m.file === opts.carrier || path.basename(m.file) === opts.carrier)
+    : manifest;
+  const carriers = specs.map((spec) => analyzeCarrier(root, spec, opts.staleSeconds));
+  const anyEvaluated = carriers.some((c) => c.evaluated);
+  const anyDecayed = carriers.some((c) => c.decayed.length > 0);
+  const decayedCount = carriers.reduce((n, c) => n + c.decayed.length, 0);
+  // --carrier 是聚焦查询：覆盖面对它不是读数（只报它自己），⛔ 不因此把整个 .quay 扫一遍。
+  const uncovered = opts.carrier ? [] : discoverUncovered(root, manifest);
+  const healthyCount = carriers.filter((c) => c.evaluated && c.decayed.length === 0).length;
+  return { carriers, anyEvaluated, anyDecayed, decayedCount, uncovered, uncoveredCount: uncovered.length, healthyCount };
 }
 
 // ── 时间戳抽取（通用：按字段优先级尝试，缺值 = 未查）───────────────────────────────────────────────
@@ -172,117 +577,31 @@ function parseLine(line: string): Record<string, unknown> | null {
 }
 
 // ── 单载体分析 ──────────────────────────────────────────────────────────────────────────────────────
-export function analyzeCarrier(root: string, spec: CarrierSpec, staleSeconds: number): CarrierResult {
-  const filePath = path.join(root, ".quay", spec.file);
-  const empty: CarrierResult = {
-    file: spec.file, evaluated: false, reason: "carrier-missing",
-    totalRecords: 0, freshestMs: null, groupCount: 0, decayed: [], companions: [],
-  };
-  if (!fs.existsSync(filePath)) return empty;
-
-  const text = fs.readFileSync(filePath, "utf8");
-  const groups = new Map<string, GroupStat>();
-  let totalRecords = 0;
-  for (const line of text.split("\n")) {
-    const rec = parseLine(line);
-    if (!rec) continue;
-    // 非本载体「该管的那批写手」的记录整体不计入（见 CarrierSpec.skipKind 的两条理由）。精确等于，
-    // ⛔ 不是「有 kind 就跳过」——历史记录都没有该字段，宽松谓词会把它们一起过滤掉。
-    if (spec.skipKind !== undefined && rec["kind"] === spec.skipKind) continue;
-    totalRecords++;
-    const key = String(rec[spec.groupBy] ?? "<unset>");
-    const ts = extractTsMs(rec);
-    const g = groups.get(key) ?? { count: 0, lastWriteMs: null };
-    g.count++;
-    if (ts !== null && (g.lastWriteMs === null || ts > g.lastWriteMs)) g.lastWriteMs = ts;
-    groups.set(key, g);
-  }
-
-  let freshestMs: number | null = null;
-  for (const g of groups.values()) {
-    if (g.lastWriteMs !== null && (freshestMs === null || g.lastWriteMs > freshestMs)) freshestMs = g.lastWriteMs;
-  }
-
-  const decayed: DecayFinding[] = [];
-
-  // Shape A：期望分组 0 条记录，而载体整体有记录（产生路径还在跑、只是这批事件转移去了别处）。
-  if (totalRecords > 0) {
-    for (const exp of spec.expected) {
-      const g = groups.get(exp);
-      if (!g || g.count === 0) {
-        decayed.push({ group: exp, kind: "never-wrote", count: 0, lastWriteMs: null });
-      }
-    }
-  }
-
-  // Shape B：有历史记录的分组，末次写入比载体最新（伴生分组仍在写）老超过 staleSeconds。
-  if (spec.shapeB !== false && freshestMs !== null && staleSeconds > 0) {
-    const gapMs = staleSeconds * 1000;
-    for (const [k, g] of groups) {
-      if (g.count === 0 || g.lastWriteMs === null) continue;
-      if (freshestMs - g.lastWriteMs > gapMs) {
-        decayed.push({ group: k, kind: "rate-stopped", count: g.count, lastWriteMs: g.lastWriteMs });
-      }
-    }
-  }
-
-  // 伴生分组（仍在写的对照证据）：末次写入距载体最新不超过 staleSeconds（或无 staleSeconds 时全部）。
-  const gapMs = staleSeconds > 0 ? staleSeconds * 1000 : Infinity;
-  const companions: Companion[] = [];
-  for (const [k, g] of groups) {
-    if (g.lastWriteMs === null) continue;
-    if (freshestMs === null || freshestMs - g.lastWriteMs <= gapMs) {
-      companions.push({ group: k, count: g.count, lastWriteMs: g.lastWriteMs });
-    }
-  }
-  companions.sort((a, b) => (b.lastWriteMs ?? 0) - (a.lastWriteMs ?? 0));
-
-  return {
-    file: spec.file, evaluated: true, reason: null,
-    totalRecords, freshestMs, groupCount: groups.size, decayed, companions,
-  };
-}
-
-export interface AnalyzeOutcome {
-  carriers: CarrierResult[];
-  anyEvaluated: boolean;
-  anyDecayed: boolean;
-  decayedCount: number;
-}
-
-export function analyzeAll(
-  root: string,
-  opts: { staleSeconds: number; carrier?: string },
-  manifest: CarrierSpec[] = MANIFEST,
-): AnalyzeOutcome {
-  const specs = opts.carrier
-    ? manifest.filter((m) => m.file === opts.carrier || path.basename(m.file) === opts.carrier)
-    : manifest;
-  const carriers = specs.map((spec) => analyzeCarrier(root, spec, opts.staleSeconds));
-  const anyEvaluated = carriers.some((c) => c.evaluated);
-  const anyDecayed = carriers.some((c) => c.decayed.length > 0);
-  const decayedCount = carriers.reduce((n, c) => n + c.decayed.length, 0);
-  return { carriers, anyEvaluated, anyDecayed, decayedCount };
-}
-
 function fmt(ms: number | null): string {
   if (ms === null) return "—";
   return new Date(ms).toISOString();
 }
 
-function printHuman(outcome: AnalyzeOutcome): void {
-  if (!outcome.anyDecayed) {
-    console.log("instrument-decay-check: ok — no instrument decay (companion contrast found no stopped group)");
-    return;
+function describeFinding(d: DecayFinding): string {
+  switch (d.kind) {
+    case "never-wrote":
+      return "never-wrote (0 records, expected — writer split to another file?)";
+    case "rate-stopped":
+      return `rate-stopped (last=${fmt(d.lastWriteMs)}, ${d.count} records)`;
+    case "content-dark":
+      return `content-dark (${d.count} record(s), every one evaluated:false — the carrier writes, but writes "not evaluated")`;
+    case "stale-evaluated":
+      return `stale-evaluated (artifact=${fmt(d.lastWriteMs)} predates the newest commit touching its source)`;
   }
+}
+
+function printHuman(outcome: AnalyzeOutcome): void {
   for (const c of outcome.carriers) {
     if (c.decayed.length === 0) continue;
-    console.log(`INSTRUMENT-DECAY: .quay/${c.file} — ${c.decayed.length} group(s) stopped writing`);
+    console.log(`INSTRUMENT-DECAY: .quay/${c.file} — ${c.decayed.length} finding(s)`);
     for (const d of c.decayed) {
-      const extra = d.kind === "never-wrote"
-        ? "never-wrote (0 records, expected — writer split to another file?)"
-        : `rate-stopped (last=${fmt(d.lastWriteMs)}, ${d.count} records)`;
-      console.log(`  decayed: ${d.group} — ${extra}`);
+      console.log(`  decayed: ${d.group} — ${describeFinding(d)}`);
+      if (d.detail) console.log(`    detail: ${d.detail}`);
     }
     if (c.companions.length > 0) {
       const brief = c.companions
@@ -291,6 +610,16 @@ function printHuman(outcome: AnalyzeOutcome): void {
         .join("; ");
       console.log(`  companion (still writing): ${brief}`);
     }
+  }
+  // 覆盖面（⛔ 不与健康同形）：未覆盖的载体单独列出，且明说它们不在健康计数里。
+  if (outcome.uncoveredCount > 0) {
+    console.log(`UNCOVERED: ${outcome.uncoveredCount} carrier(s) have no descriptor — NOT counted as healthy:`);
+    for (const u of outcome.uncovered) {
+      console.log(`  ${u.file} (${u.reason}${u.present ? "" : ", absent"}${u.note ? `) — ${u.note}` : ")"}`);
+    }
+  }
+  if (!outcome.anyDecayed) {
+    console.log(`instrument-decay-check: ok — no instrument decay (${outcome.healthyCount} carrier(s) healthy, ${outcome.uncoveredCount} uncovered)`);
   }
 }
 
@@ -304,11 +633,27 @@ function printDecayReport(outcome: AnalyzeOutcome): void {
     totalRecords: c.totalRecords,
     freshest: fmt(c.freshestMs),
     groupCount: c.groupCount,
+    contentDark: c.contentDark,
+    staleEvaluated: {
+      state: c.staleEvaluated.state,
+      reason: c.staleEvaluated.reason,
+      recordTs: c.staleEvaluated.recordTs,
+      scopes: c.staleEvaluated.scopes.map((s) => ({
+        scope: s.scope,
+        source: s.source,
+        artifactTs: s.artifactTs,
+        commitTs: fmt(s.commitMs),
+        commitSha: s.commitSha,
+        state: s.state,
+        reason: s.reason,
+      })),
+    },
     decayed: c.decayed.map((d) => ({
       group: d.group,
       kind: d.kind,
       count: d.count,
       lastWrite: fmt(d.lastWriteMs),
+      detail: d.detail,
     })),
     companions: c.companions.map((cp) => ({
       group: cp.group,
@@ -322,6 +667,9 @@ function printDecayReport(outcome: AnalyzeOutcome): void {
     ok: !outcome.anyDecayed,
     evaluated: outcome.anyEvaluated,
     decayedCount: outcome.decayedCount,
+    healthyCount: outcome.healthyCount,
+    uncoveredCount: outcome.uncoveredCount,
+    uncovered: outcome.uncovered,
     carriers,
   });
 }
