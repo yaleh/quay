@@ -30,6 +30,8 @@ extra:
 
 **RM2 定义（零配置）**：扫描 `.quay/worker-outcome.jsonl`，按文件路径统计两种形态：形态 1，`selector_reason` 同时含该路径和争用词表里的词；形态 2，记录中出现 `Merge conflict in <路径>`。争用词表只在一处导出，不得复制。按两者之和取前 N 个文件（缺省 10），每个文件给出累计计数、本轮窗口（上一条记录之后）内的计数，以及前 3 条命中样本（任务 id + 时间）。载体缺失记 `evaluated:false`。每轮对一个内置的已知为真的样本行干跑两个谓词（硬规则 4 推论二的检测半边）；干跑不命中就记 `evaluated:false`，让「谓词坏了」不会以「零争用」的样子出现。
 
+**立案检查（2026-10-22 补做）**：合并判断 = none——`task-granularity-advice.ts --task` 实测 8 个 Touches 文件除本任务外无任何在开任务共享；`ready-pool-check` 读数 `prosePrereqGap: []`、eligible。登记闸：同族 `arch-coverage-report.ts` 只登记于 `docs/carrier-registry.json` 与 `capability-catalog-declarations.json`（均已在 Touches）；laydown 集合由 `init.ts` 的 `deriveLoopScripts` 机械推导，无需手工登记文件。
+
 ## Plan
 
 1. 读 quality-gate-driver.ts 里 arch-cycle-report 的整套接线：`readArchCycleConfig` 解析配置段、`archCycleRoutineFromConfig` 装配（:3143 一带）、`runArchCycleRound` 读数并追加历史、`ARCH_CYCLE_HISTORY_REL`。按同一形状实现新例程，不另起一套机制。
