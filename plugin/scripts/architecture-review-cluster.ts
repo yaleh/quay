@@ -495,6 +495,64 @@ export interface ArchReviewClusterVerdict {
   round: number;
 }
 
+/** 上一轮被判过的簇（= 本轮要逐条复核的 prior finding）——**含被否认的**
+ *  （`priorVerdict: "coincidental"` 的那些正是「上一轮说不成立」的结论，必须一起复核）。 */
+export interface PriorFinding {
+  clusterId: string;
+  primitive: string;
+  label: string;
+  files: string[];
+  priorVerdict: string;
+  priorReasoning: string;
+  priorSuggestedAction: string;
+  priorRound: number;
+  priorJudgedAt: string;
+}
+
+/** 一条 prior finding 的复核结论。**三态 + 未评估独立取值**（硬规则 3b）：
+ *  survived = 缺陷在**当前源码**里仍可见；resolved = 上一轮指出的真缺陷已消失；denied = 上一轮的
+ *  结论本身错了（误读）；not-evaluated = 给不出判定（⛔ 不折叠成 denied）。 */
+export type PriorFindingState = "survived" | "resolved" | "denied" | "not-evaluated";
+
+/** judge 一条 prior finding 判词的**依据来源**（机械派生，⛔ 不让读者自觉）：
+ *  current-source = file:line 或 grep 命中（真的去看了源码）；
+ *  task-store = 引用了任务库（`tasks/<id>.md` / 「done 任务」）——**不是** current-source 核对；
+ *  none = 没给依据；unrecognized = 给了但两种形态都不像。 */
+export type EvidenceSource = "current-source" | "task-store" | "none" | "unrecognized";
+
+export interface PriorFindingRuling {
+  clusterId: string;
+  state: PriorFindingState;
+  /** judge 给出的核对依据原文（current-source 时含 file:line / grep 命中）。 */
+  evidence: string;
+  evidenceSource: EvidenceSource;
+  /** state==="not-evaluated" 时的原因（降级/缺判词/词表外取值）。 */
+  reason?: string;
+}
+
+/** 本轮 prior-finding 复核的**聚合态**（写进载体，供下一轮/外部一条命令核对）：
+ *  none = 没有上一轮 findings；checked = 每条都拿到了三态判词；partial = 一部分拿到；
+ *  not-evaluated = 上一轮有 findings 但一条判词都没拿到（含载体读不懂）。 */
+export type PriorFindingsCheckState = "none" | "checked" | "partial" | "not-evaluated";
+
+/** 「上一轮」读出的结果（硬规则 3b：none / read / unreadable 三个取值互不同形）。 */
+export interface PriorRoundRead {
+  state: "none" | "read" | "unreadable";
+  round: number | null;
+  judgedAt: string | null;
+  findings: PriorFinding[];
+  reason?: string;
+}
+
+/** 写进载体的上一轮元信息（不含 findings 本体——本体在 `priorFindings` 的逐条判词里）。 */
+export interface ArchReviewPriorRound {
+  state: PriorRoundRead["state"];
+  round: number | null;
+  judgedAt: string | null;
+  findingCount: number;
+  reason?: string;
+}
+
 /** 载体记录（一行 = 一次架构复核完成/失败/未触发/未评估）。 */
 export interface ArchReviewRoundRecord {
   round: number;
@@ -506,6 +564,11 @@ export interface ArchReviewRoundRecord {
   /** per-detector 自报态（AC3）：**每条**记录都带，故「not-triggered 蕴含每个检测器都评估过且没有簇」
    *  可以从载体本身一条命令验证（硬规则 3b：读数必须能取假）。 */
   detectors: ArchReviewDetectorState[];
+  /** 上一轮元信息 + 逐条 prior-finding 三态（gap-arch-review-judge-consumes-prior-round-findings）。
+   *  只在 **judged** 记录上出现：非 judged 记录里 judge 没跑，不存在「逐条复核过」这件事。 */
+  priorRound?: ArchReviewPriorRound;
+  priorFindings?: PriorFindingRuling[];
+  priorFindingsState?: PriorFindingsCheckState;
   reason?: string;
 }
 
@@ -518,6 +581,9 @@ export function buildArchReviewRoundRecord(args: {
   triggerReasons: string[];
   clusters: ArchReviewClusterVerdict[];
   detectors: ArchReviewDetectorState[];
+  priorRound?: ArchReviewPriorRound;
+  priorFindings?: PriorFindingRuling[];
+  priorFindingsState?: PriorFindingsCheckState;
   reason?: string;
 }): ArchReviewRoundRecord {
   const rec: ArchReviewRoundRecord = {
@@ -529,6 +595,11 @@ export function buildArchReviewRoundRecord(args: {
     clusters: args.clusters,
     detectors: args.detectors,
   };
+  // ⛔ 不 default 成 []：缺席 = 「这次没做 prior 复核」（非 judged 记录），与「复核过且没有 findings」
+  // 必须不同形（硬规则 3b）。
+  if (args.priorRound !== undefined) rec.priorRound = args.priorRound;
+  if (args.priorFindings !== undefined) rec.priorFindings = args.priorFindings;
+  if (args.priorFindingsState !== undefined) rec.priorFindingsState = args.priorFindingsState;
   if (args.reason !== undefined) rec.reason = args.reason;
   return rec;
 }
@@ -571,6 +642,186 @@ export function mergeClusterVerdicts(
     });
   }
   return out;
+}
+
+// ── 上一轮 findings 的逐条复核（gap-arch-review-judge-consumes-prior-round-findings）──────────────
+// WHY：两次全仓架构评审里，「重跑后逐条核上一轮提过的问题（**含被否认的**）现在还可见吗」这一步
+// 拦下了四次误判（「601 节点全是 DTO」/「native 6 条越界 import」/「两份转移表是 drift」/
+// 「core↔gate 是复制」）。此前 judge 只吃本轮 clusters ——「上一轮结论现在是否仍成立」在机制里是空的，
+// 靠人每次重跑手算。本段把这一步变成**judge 的输入 + 载体的逐条三态**。
+//
+// 两条纪律：
+//   ① 三态 + 未评估（硬规则 3b）：survived / resolved / denied 是判定；给不出判定时必须写
+//      `not-evaluated`，⛔ 不折叠成 denied（「读不懂」与「判过且否认」不得同形）。
+//      `mergePriorFindingRulings()` 是这条的唯一执行点。
+//   ② 依据必须是 **current-source 核对**（file:line / grep 命中），⛔ 不是「任务库里有一条同标题
+//      done 任务」（硬规则 5b：任务状态是代理量，且它与「缺陷已修」恰好同形——任务被错误关闭时也同形）。
+//      `classifyEvidenceSource()` 把依据机械分类；非 current-source 的判词**降级为 not-evaluated**
+//      ——⛔ 不让 prompt 措辞成为唯一执行点（可见性 ≠ 执行，硬规则 9）。
+
+/** 依据来源判定（PURE）。顺序有事：`tasks/<id>.md:12` 既是 file:line 又是任务库引用，任务库优先
+ *  ——它恰恰是**不得**当作修复证据的那一类。 */
+export function classifyEvidenceSource(evidence: string): EvidenceSource {
+  const e = String(evidence ?? "").trim();
+  if (e.length === 0) return "none";
+  if (
+    /(?:^|[\s(（"'`])tasks\/[A-Za-z0-9._-]+\.md\b/.test(e) ||
+    /\b(?:done|completed)\s+task\b/i.test(e) ||
+    /(?:任务库|已完成(?:的)?任务|同标题\s*done\s*任务|done\s*任务)/.test(e)
+  ) {
+    return "task-store";
+  }
+  // file:line（含可选的 ./ 或 / 前缀）——「真的去看了一眼源码」的最小可核形态。
+  const fileLine = /(?:\.{0,2}\/)?(?:[\w.@+-]+\/)*[\w.@+-]+\.(?:ts|tsx|mts|cts|js|mjs|cjs|json|jsonl|md|ya?ml|sh|css|html):\d+/;
+  // grep 命中：命令 + 一个「有结果」的记号（⛔ 光有 grep 命令不算——那可能零命中）。
+  const grepHit = /\bgrep\b[^\n]{0,300}(?:→|=>|->|\bhits?\b|\bmatch(?:es)?\b|命中)/i;
+  if (fileLine.test(e) || grepHit.test(e)) return "current-source";
+  return "unrecognized";
+}
+
+/** judge 输出的逐条 prior-finding 判词（schema：{clusterId, state, evidence}；字段一律 unknown，
+ *  因为判词来自 LLM，读不懂的取值必须走 not-evaluated 而不是被当成本类型）。 */
+export interface JudgePriorRuling {
+  clusterId?: unknown;
+  state?: unknown;
+  evidence?: unknown;
+}
+
+const PRIOR_FINDING_STATES: ReadonlySet<string> = new Set(["survived", "resolved", "denied"]);
+
+/** 把 judge 判词合回上一轮 findings（PURE）。对**每条** prior finding 都产出恰好一条 ruling：
+ *  · 没判词 / 词表外 state / 依据不是 current-source ⇒ `not-evaluated` + reason（⛔ 不 default 成 denied）；
+ *  · judge 自己写 `not-evaluated` ⇒ 保留为 not-evaluated（这是它诚实的「核不出来」）；
+ *  · 只有 survived / resolved / denied + current-source 依据才是真判词。
+ *  `rulings === null` 表示 judge 输出根本没带 priorFindings（例如旧的裸数组形态）——整批未评估。 */
+export function mergePriorFindingRulings(
+  prior: PriorFinding[],
+  rulings: JudgePriorRuling[] | null,
+): PriorFindingRuling[] {
+  const byId = new Map<string, JudgePriorRuling>();
+  for (const r of rulings ?? []) {
+    if (!r || typeof r !== "object") continue;
+    const id = typeof r.clusterId === "string" ? r.clusterId.trim() : "";
+    if (id.length === 0) continue;
+    if (!byId.has(id)) byId.set(id, r); // 重复判词取首条（确定性，⛔ 不靠后者覆盖前者）
+  }
+  return prior.map((p) => {
+    const r = byId.get(p.clusterId);
+    if (!r) {
+      return {
+        clusterId: p.clusterId,
+        state: "not-evaluated" as const,
+        evidence: "",
+        evidenceSource: "none" as const,
+        reason: "judge returned no ruling for this prior finding",
+      };
+    }
+    const evidence = typeof r.evidence === "string" ? r.evidence.trim() : "";
+    const evidenceSource = classifyEvidenceSource(evidence);
+    const rawState = typeof r.state === "string" ? r.state.trim().toLowerCase() : "";
+    if (rawState === "not-evaluated") {
+      return {
+        clusterId: p.clusterId,
+        state: "not-evaluated" as const,
+        evidence,
+        evidenceSource,
+        reason: "judge reported it could not verify this prior finding against the current source",
+      };
+    }
+    if (!PRIOR_FINDING_STATES.has(rawState)) {
+      return {
+        clusterId: p.clusterId,
+        state: "not-evaluated" as const,
+        evidence,
+        evidenceSource,
+        reason: `unrecognized prior-finding state ${JSON.stringify(r.state ?? null)} (expected survived|resolved|denied|not-evaluated)`,
+      };
+    }
+    if (evidenceSource !== "current-source") {
+      return {
+        clusterId: p.clusterId,
+        state: "not-evaluated" as const,
+        evidence,
+        evidenceSource,
+        reason: `ruling ${rawState} lacks a current-source basis (file:line or grep hit); evidence source = ${evidenceSource}`,
+      };
+    }
+    return { clusterId: p.clusterId, state: rawState as PriorFindingState, evidence, evidenceSource };
+  });
+}
+
+/** 聚合态（PURE）。`prior.state === "unreadable"` 必须落到 not-evaluated——载体读不懂时，
+ *  「没有 findings」与「不知道有没有 findings」不同形（硬规则 3b）。 */
+export function priorFindingsCheckState(
+  prior: PriorRoundRead,
+  rulings: PriorFindingRuling[],
+): PriorFindingsCheckState {
+  if (prior.state === "unreadable") return "not-evaluated";
+  if (rulings.length === 0) return "none";
+  const evaluated = rulings.filter((r) => r.state !== "not-evaluated").length;
+  if (evaluated === rulings.length) return "checked";
+  return evaluated === 0 ? "not-evaluated" : "partial";
+}
+
+/** 读「上一轮」judged 记录里的逐簇判词作为 prior findings（IO）。PURE 的部分只有字段归一化；
+ *  三态语义见本段顶部。
+ *  · 文件不存在 / 没有任何 judged 记录 ⇒ `none`（合法的首轮态，⛔ 不是 unreadable）；
+ *  · **最后一行**解析不出 ⇒ `unreadable`——无法确定「上一轮」是不是它，⛔ 不得跳过它去用更早的记录；
+ *  · 中间坏行不影响结论（它不可能是「上一轮」，只要最后一条可解析的 judged 记录还在）。
+ *  · 取**最后一条** state==="judged" 的记录（非 judged 记录没有 clusters，不是可复核的 findings）。 */
+export function readPriorRoundFindings(root: string): PriorRoundRead {
+  const p = archReviewRoundPath(root);
+  if (!fs.existsSync(p)) {
+    return { state: "none", round: null, judgedAt: null, findings: [], reason: "no architecture-review-round carrier yet (nothing judged before)" };
+  }
+  const lines = fs.readFileSync(p, "utf8").split("\n").filter((l) => l.trim().length > 0);
+  if (lines.length === 0) {
+    return { state: "none", round: null, judgedAt: null, findings: [], reason: "carrier exists but holds no records (nothing judged before)" };
+  }
+  let lastJudged: Record<string, unknown> | null = null;
+  for (let i = 0; i < lines.length; i++) {
+    let rec: unknown;
+    try {
+      rec = JSON.parse(lines[i]);
+    } catch {
+      if (i === lines.length - 1) {
+        return {
+          state: "unreadable",
+          round: null,
+          judgedAt: null,
+          findings: [],
+          reason: "last architecture-review-round record is not parseable — cannot tell which round is the prior one",
+        };
+      }
+      continue; // 中间坏行：后面还有记录，上一轮由最后一条可解析的 judged 记录确定
+    }
+    if (!rec || typeof rec !== "object" || Array.isArray(rec)) continue;
+    const r = rec as Record<string, unknown>;
+    if (r.state === "judged" && Array.isArray(r.clusters)) lastJudged = r;
+  }
+  if (lastJudged === null) {
+    return { state: "none", round: null, judgedAt: null, findings: [], reason: "no judged architecture-review-round record yet (nothing to re-check)" };
+  }
+  const recRound = typeof lastJudged.round === "number" ? lastJudged.round : null;
+  const recJudgedAt = typeof lastJudged.judgedAt === "string" ? lastJudged.judgedAt : null;
+  const findings: PriorFinding[] = [];
+  for (const c of lastJudged.clusters as unknown[]) {
+    if (!c || typeof c !== "object" || Array.isArray(c)) continue;
+    const v = c as Record<string, unknown>;
+    if (typeof v.clusterId !== "string" || v.clusterId.length === 0) continue;
+    findings.push({
+      clusterId: v.clusterId,
+      primitive: typeof v.primitive === "string" ? v.primitive : "",
+      label: typeof v.label === "string" ? v.label : "",
+      files: Array.isArray(v.files) ? v.files.filter((f): f is string => typeof f === "string") : [],
+      priorVerdict: typeof v.verdict === "string" ? v.verdict : "",
+      priorReasoning: typeof v.reasoning === "string" ? v.reasoning : "",
+      priorSuggestedAction: typeof v.suggestedAction === "string" ? v.suggestedAction : "",
+      priorRound: typeof v.round === "number" ? v.round : (recRound ?? 0),
+      priorJudgedAt: typeof v.judgedAt === "string" ? v.judgedAt : (recJudgedAt ?? ""),
+    });
+  }
+  return { state: "read", round: recRound, judgedAt: recJudgedAt, findings };
 }
 
 // ── 语义结论 → 立案（gap-arch-review-judge-verdicts-never-reach-the-existing-gap-filing-channel）──

@@ -36,6 +36,10 @@ import {
   deletionClosureComponents,
   deletionDetectorEvaluation,
   detectorEvalFromSurface,
+  classifyEvidenceSource,
+  mergePriorFindingRulings,
+  priorFindingsCheckState,
+  readPriorRoundFindings,
   mergeClusterVerdicts,
 } from "../scripts/architecture-review-cluster.ts";
 
@@ -623,4 +627,142 @@ test("filings — 提交台账：不存在 ⇒ 空集；追加后可读；坏行
   // 幂等：重复追加同一键不改变集合（读侧按集合语义）。
   appendSubmission(tmp, { key: "k1", clusterId: "c1", verdict: "abstract", submittedAt: "2026-09-12T01:00:00.000Z", round: 2 });
   assert.deepEqual([...readSubmittedKeys(tmp)].sort(), ["k1", "k2"]);
+});
+
+// ── gap-arch-review-judge-consumes-prior-round-findings ────────────────────────────────────────
+// AC1：上一轮 findings 进 judge 输入，逐条三态写进**同一载体**（round jsonl）。
+// AC2：resolved/denied 的依据必须是 current-source 核对（file:line / grep 命中），⛔ 不是
+//      「任务库里有一条 done 任务」——后者在机械侧被降级为 not-evaluated（prompt 措辞不是执行点）。
+
+function priorFinding(clusterId, priorVerdict = "abstract") {
+  return {
+    clusterId,
+    primitive: "P2",
+    label: `label for ${clusterId}`,
+    files: ["plugin/scripts/a.ts"],
+    priorVerdict,
+    priorReasoning: "prior reasoning",
+    priorSuggestedAction: "prior action",
+    priorRound: 7,
+    priorJudgedAt: "2026-10-20T00:00:00.000Z",
+  };
+}
+
+function writeJudgedRound(tmp, round, clusters) {
+  const detectors = detectorStates();
+  const judgedAt = "2026-10-20T00:00:00.000Z";
+  appendArchReviewRound(tmp, buildArchReviewRoundRecord({
+    round,
+    judgedAt,
+    state: "judged",
+    triggerReasons: ["candidate-clusters=1"],
+    detectors,
+    clusters: clusters.map((c) => ({
+      clusterId: c.clusterId, primitive: c.primitive, files: c.files, label: c.label,
+      verdict: c.verdict, reasoning: c.reasoning, suggestedAction: c.suggestedAction,
+      actionable: null, judgedAt, round,
+    })),
+  }));
+}
+
+test("prior — classifyEvidenceSource：file:line / grep 命中是 current-source；任务库引用不是", () => {
+  // 真·current-source 的两半都要认。
+  assert.equal(classifyEvidenceSource("plugin/scripts/x.ts:42 still imports y"), "current-source", "file:line");
+  assert.equal(classifyEvidenceSource("./plugin/scripts/x.ts:7 — no longer present"), "current-source", "./ 前缀");
+  assert.equal(classifyEvidenceSource('grep -rn "Foo" plugin/scripts → 3 hits'), "current-source", "grep 命中");
+  assert.equal(classifyEvidenceSource('grep -rn "Foo" plugin/scripts => 0'), "current-source", "grep 命中(=>)");
+  // 任务库引用必须与 current-source 不同形（AC2 的负控制）。
+  assert.equal(classifyEvidenceSource("tasks/gap-foo.md:1 says done"), "task-store", "tasks/<id>.md 是任务库，不是源码核对");
+  assert.equal(classifyEvidenceSource("there is a done task for this"), "task-store", "done task");
+  assert.equal(classifyEvidenceSource("任务库里有同标题 done 任务"), "task-store", "中文任务库引用");
+  assert.equal(classifyEvidenceSource(""), "none");
+  assert.equal(classifyEvidenceSource("looks fine to me"), "unrecognized", "既非 file:line 也非任务库 ⇒ 未识别（⛔ 不算核对过）");
+  // ⛔ 光有 grep 命令、没有结果记号 ⇒ 不是命中（零命中也长这样）。
+  assert.equal(classifyEvidenceSource('grep -rn "Foo" plugin/scripts'), "unrecognized");
+});
+
+test("prior — mergePriorFindingRulings：三态 + 未评估独立取值；无 current-source 依据的 resolved/denied 降级", () => {
+  const prior = [priorFinding("c-survived"), priorFinding("c-resolved"), priorFinding("c-denied", "coincidental"), priorFinding("c-missing")];
+  const rulings = mergePriorFindingRulings(prior, [
+    { clusterId: "c-survived", state: "survived", evidence: "plugin/scripts/a.ts:10 still shows the duplication" },
+    { clusterId: "c-resolved", state: "resolved", evidence: "grep -rn 'legacySymbol' plugin/scripts → 0 hits" },
+    { clusterId: "c-denied", state: "denied", evidence: "plugin/scripts/a.ts:99 shows the two tables are pinned by a golden test, not drift" },
+    // c-missing 没判词
+  ]);
+  assert.equal(rulings.length, 4, "对**每条** prior finding 都有恰好一条 ruling（⛔ 不因缺判词而少一条）");
+  assert.deepEqual(rulings.map((r) => r.state), ["survived", "resolved", "denied", "not-evaluated"]);
+  assert.deepEqual(rulings.map((r) => r.evidenceSource), ["current-source", "current-source", "current-source", "none"]);
+  assert.ok(rulings[3].reason.includes("no ruling"), "缺判词必须带 reason（⛔ 不折叠成 denied）");
+  // AC2 负控制：resolved/denied 只靠「任务库里有 done 任务」⇒ 必须降级为 not-evaluated。
+  const taskStore = mergePriorFindingRulings(prior, [
+    { clusterId: "c-resolved", state: "resolved", evidence: "tasks/gap-foo.md is done" },
+    { clusterId: "c-denied", state: "denied", evidence: "a done task already covers this" },
+  ]);
+  assert.equal(taskStore[1].state, "not-evaluated", "task-store 依据不足以判 resolved");
+  assert.equal(taskStore[1].evidenceSource, "task-store");
+  assert.match(taskStore[1].reason, /current-source/);
+  assert.equal(taskStore[2].state, "not-evaluated", "task-store 依据不足以判 denied");
+  // 词表外取值 / judge 自己说 not-evaluated ⇒ 都是 not-evaluated，且原因可区分。
+  const unknown = mergePriorFindingRulings([priorFinding("c1")], [{ clusterId: "c1", state: "fixed", evidence: "plugin/scripts/a.ts:1" }]);
+  assert.equal(unknown[0].state, "not-evaluated");
+  assert.match(unknown[0].reason, /unrecognized/);
+  const selfNE = mergePriorFindingRulings([priorFinding("c1")], [{ clusterId: "c1", state: "not-evaluated", evidence: "could not locate the file" }]);
+  assert.equal(selfNE[0].state, "not-evaluated");
+  assert.match(selfNE[0].reason, /could not verify/);
+  // rulings=null（旧裸数组形态的 judge 输出）⇒ 整批未评估，⛔ 不是「没有 prior findings」。
+  const legacy = mergePriorFindingRulings(prior, null);
+  assert.ok(legacy.every((r) => r.state === "not-evaluated"));
+});
+
+test("prior — priorFindingsCheckState：none/checked/partial/not-evaluated 四态互不同形；载体读不懂 ⇒ not-evaluated", () => {
+  const prior = [priorFinding("c1"), priorFinding("c2")];
+  const read = { state: "read", round: 7, judgedAt: "x", findings: prior };
+  assert.equal(priorFindingsCheckState(priorFindingsReadNone(), []), "none", "没有上一轮 findings");
+  const checked = mergePriorFindingRulings(prior, [
+    { clusterId: "c1", state: "resolved", evidence: "plugin/scripts/a.ts:3 no longer present" },
+    { clusterId: "c2", state: "survived", evidence: "plugin/scripts/b.ts:9 still present" },
+  ]);
+  assert.equal(priorFindingsCheckState(read, checked), "checked");
+  const partial = mergePriorFindingRulings(prior, [{ clusterId: "c1", state: "survived", evidence: "plugin/scripts/a.ts:3" }]);
+  assert.equal(priorFindingsCheckState(read, partial), "partial", "一半拿到三态 ⇒ partial");
+  const noneRuled = mergePriorFindingRulings(prior, []);
+  assert.equal(priorFindingsCheckState(read, noneRuled), "not-evaluated", "有 findings 但零判词 ⇒ not-evaluated");
+  const unreadable = { state: "unreadable", round: null, judgedAt: null, findings: [], reason: "bad line" };
+  assert.equal(priorFindingsCheckState(unreadable, []), "not-evaluated", "⛔ 载体读不懂不得与「没有 findings」同形");
+});
+
+function priorFindingsReadNone() {
+  return { state: "none", round: null, judgedAt: null, findings: [], reason: "no carrier" };
+}
+
+test("prior — readPriorRoundFindings：取最后一条 judged 记录的逐簇判词（含被否认的）；中间坏行不影响，末行坏 ⇒ unreadable", (t) => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "arch-prior-"));
+  t.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
+  // 没有载体 ⇒ none（合法的首轮态，⛔ 不是 unreadable）。
+  const first = readPriorRoundFindings(tmp);
+  assert.equal(first.state, "none");
+  assert.deepEqual(first.findings, []);
+
+  writeJudgedRound(tmp, 7, [
+    { clusterId: "P2-identity-x", primitive: "P2", files: ["a.ts"], label: "x", verdict: "abstract", reasoning: "dup", suggestedAction: "merge" },
+    { clusterId: "P4-suspicious-guards", primitive: "P4", files: ["g.ts"], label: "g", verdict: "coincidental", reasoning: "preventive", suggestedAction: "keep" },
+  ]);
+  // 中间插一行坏 JSON + 一条更新的非 judged 记录：上一轮仍 = 最后一条 judged。
+  fs.appendFileSync(archReviewRoundPath(tmp), "{broken middle line\n", "utf8");
+  appendArchReviewRound(tmp, buildArchReviewRoundRecord({
+    round: 8, judgedAt: "2026-10-20T01:00:00.000Z", state: "not-triggered", triggerReasons: [], clusters: [], detectors: detectorStates(),
+  }));
+  const read = readPriorRoundFindings(tmp);
+  assert.equal(read.state, "read");
+  assert.equal(read.round, 7);
+  assert.deepEqual(read.findings.map((f) => f.clusterId), ["P2-identity-x", "P4-suspicious-guards"]);
+  assert.deepEqual(read.findings.map((f) => f.priorVerdict), ["abstract", "coincidental"], "被否认的（coincidental）也在清单里");
+  assert.equal(read.findings[0].priorReasoning, "dup");
+
+  // 末行坏 ⇒ unreadable（⛔ 不得跳过它去用更早的记录——那会把「不知道」伪装成「上一轮是 7」）。
+  fs.appendFileSync(archReviewRoundPath(tmp), "{broken last line\n", "utf8");
+  const bad = readPriorRoundFindings(tmp);
+  assert.equal(bad.state, "unreadable");
+  assert.match(bad.reason, /not parseable/);
+  assert.deepEqual(bad.findings, []);
 });

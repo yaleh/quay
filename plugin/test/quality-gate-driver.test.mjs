@@ -44,6 +44,7 @@ import {
   runJudgmentConsumerCheck,
   runPoolQualityJudge,
   runArchitectureReview,
+  archReviewJudgePrompt,
   buildArchGapWorkerPrompt,
   buildPackagingGapWorkerPrompt,
   qualityGateRoutines,
@@ -856,6 +857,92 @@ test("AC6 — recordVerdicts=false ⇒ carrier does not grow; restore ⇒ grows 
   const on2 = await runArchitectureReview(tmp, identityCmd, lineageCmd, deletionCmd, judgeArgv, gateArgv, true, Infinity, false, gapWorkerCmd);
   assert.equal(on2.state, "verified");
   assert.equal(count(), 2, "write restored ⇒ carrier grows to 2");
+});
+
+// ── 上一轮 findings 逐条复核（gap-arch-review-judge-consumes-prior-round-findings）────────────────
+// AC1：judge 输入带上上一轮 arch-review-round 的逐簇判词，输出逐条 survived/resolved/denied 三态，
+//      与 clusters **同一载体**（round jsonl）。
+// AC2：resolved/denied 的依据必须是 current-source 核对（file:line / grep 命中）——「任务库里有 done
+//      任务」在**机械侧**被降级为 not-evaluated（prompt 措辞不是执行点）。
+
+const FOUR_CLUSTER_VERDICTS = [
+  { clusterId: "P2-identity-session-liveness.sh", verdict: "abstract", reasoning: "dup naming", suggestedAction: "consolidate", actionable: true },
+  { clusterId: "P1-deletion-closure", verdict: "coincidental", reasoning: "narrative refs", suggestedAction: "keep", actionable: false },
+  { clusterId: "P2-judgment-rewrites", verdict: "abstract", reasoning: "same fingerprint 2x", suggestedAction: "merge", actionable: true },
+  { clusterId: "P4-suspicious-guards", verdict: "uncertain", reasoning: "preventive?", suggestedAction: "human", actionable: false },
+];
+
+test("AC1/AC2 — prompt 含上一轮 findings 清单 + current-source 要求（不是任务库引用）", () => {
+  const clusters = [{ clusterId: "P2-identity-x", primitive: "P2", files: ["plugin/scripts/a.ts"], rawCount: 6, label: "dup" }];
+  const prior = [{
+    clusterId: "P4-suspicious-guards", primitive: "P4", label: "guard never fired", files: ["plugin/scripts/g.ts"],
+    priorVerdict: "coincidental", priorReasoning: "preventive?", priorSuggestedAction: "keep", priorRound: 9, priorJudgedAt: "2026-10-20T00:00:00.000Z",
+  }];
+  const withPrior = archReviewJudgePrompt(clusters, "/repo", prior);
+  assert.match(withPrior, /Prior-round findings \(round 9/, "prompt 点名上一轮");
+  assert.ok(withPrior.includes("P4-suspicious-guards"), "prompt 带每条 prior finding 的 clusterId");
+  assert.ok(withPrior.includes("priorVerdict=coincidental"), "被否认的（coincidental）也在清单里");
+  for (const token of ["survived", "resolved", "denied", "not-evaluated"]) {
+    assert.ok(withPrior.includes(token), `prompt 必须给出 ${token} 这个词（判词词表）`);
+  }
+  assert.match(withPrior, /CURRENT source/i, "判定依据必须点名 current source");
+  assert.match(withPrior, /Do NOT cite the task store/, "prompt 明确禁止任务库引用");
+  assert.ok(withPrior.includes('"priorFindings"'), "prompt 规定输出形态含 priorFindings");
+  // 首轮：没有上一轮 findings ⇒ 明说为空，⛔ 不是含糊省略。
+  assert.match(archReviewJudgePrompt(clusters, "/repo"), /No prior-round findings/);
+});
+
+test("AC1/AC2 — 第二轮载体带逐条三态；task-store 依据的 denied 被降级为 not-evaluated", async (t) => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "qg-arch-prior-"));
+  t.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
+  const { identityCmd, lineageCmd, deletionCmd, gateArgv, gapWorkerCmd } = archReviewCmd(tmp);
+  const recs = () => fs.readFileSync(archReviewRoundPath(tmp), "utf8").split("\n").filter((l) => l.trim()).map((l) => JSON.parse(l));
+
+  // 第一轮：judge 输出裸数组（旧形态也在支持范围内），没有上一轮 ⇒ 「none」而不是「checked」。
+  const r1 = await runArchitectureReview(tmp, identityCmd, lineageCmd, deletionCmd,
+    ["node", fakeArchJudgeWith(tmp, "judge-prior-r1.js", FOUR_CLUSTER_VERDICTS)], gateArgv, true, Infinity, false, gapWorkerCmd);
+  assert.equal(r1.state, "verified");
+  const rec1 = recs()[0];
+  assert.equal(rec1.priorRound.state, "none", "首轮没有上一轮 judged 记录");
+  assert.equal(rec1.priorFindingsState, "none");
+  assert.deepEqual(rec1.priorFindings, []);
+
+  // 第二轮：judge 输出 {clusters, priorFindings}。四条 prior finding：resolved(源码核对) /
+  // survived(源码核对) / denied(只引用 done 任务 ⇒ 必须降级) / 缺判词(⇒ 未评估)。
+  const judge2 = {
+    clusters: FOUR_CLUSTER_VERDICTS,
+    priorFindings: [
+      { clusterId: "P2-identity-session-liveness.sh", state: "resolved", evidence: "grep -rn 'session-liveness.sh' plugin/scripts → 0 hits" },
+      { clusterId: "P1-deletion-closure", state: "survived", evidence: "plugin/scripts/identity-replication-check.ts:120 still emits the inflated closure" },
+      { clusterId: "P2-judgment-rewrites", state: "denied", evidence: "tasks/gap-already-done.md is done" },
+      // P4-suspicious-guards 没给判词
+    ],
+  };
+  const r2 = await runArchitectureReview(tmp, identityCmd, lineageCmd, deletionCmd,
+    ["node", fakeArchJudgeWith(tmp, "judge-prior-r2.js", judge2)], gateArgv, true, Infinity, false, gapWorkerCmd);
+  assert.equal(r2.state, "verified");
+  assert.equal(r2.value.priorFindingCount, 4, "四条 prior finding 全部进读数");
+  assert.equal(r2.value.priorFindingsState, "partial", "部分拿到三态 ⇒ partial（⛔ 不写成 checked）");
+  assert.equal(r2.value.priorResolved, 1);
+  assert.equal(r2.value.priorSurvived, 1);
+  assert.equal(r2.value.priorDenied, 0, "task-store 依据不足以判 denied");
+  assert.equal(r2.value.priorNotEvaluated, 2);
+  assert.match(r2.reason, /prior-findings partial/);
+
+  const rec2 = recs()[1];
+  assert.equal(rec2.state, "judged");
+  assert.equal(rec2.priorFindingsState, "partial", "三态写进**同一载体**（跟 clusters 同一条记录）");
+  assert.equal(rec2.priorRound.state, "read");
+  assert.equal(rec2.priorRound.findingCount, 4);
+  const byId = Object.fromEntries(rec2.priorFindings.map((r) => [r.clusterId, r]));
+  assert.equal(byId["P2-identity-session-liveness.sh"].state, "resolved");
+  assert.equal(byId["P2-identity-session-liveness.sh"].evidenceSource, "current-source");
+  assert.equal(byId["P1-deletion-closure"].state, "survived");
+  assert.equal(byId["P1-deletion-closure"].evidenceSource, "current-source");
+  assert.equal(byId["P2-judgment-rewrites"].state, "not-evaluated", "只引用 done 任务的 denied ⇒ 降级");
+  assert.equal(byId["P2-judgment-rewrites"].evidenceSource, "task-store");
+  assert.match(byId["P2-judgment-rewrites"].reason, /current-source/);
+  assert.equal(byId["P4-suspicious-guards"].state, "not-evaluated", "缺判词 ⇒ 未评估（⛔ 不折叠成 denied）");
 });
 
 // ── 语义结论 → 既有立案通道（gap-arch-review-judge-verdicts-never-reach-the-existing-gap-filing-
