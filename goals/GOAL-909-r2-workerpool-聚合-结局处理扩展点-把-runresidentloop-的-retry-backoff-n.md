@@ -2,11 +2,18 @@
 id: GOAL-909
 title: R2：WorkerPool 聚合 + 结局处理扩展点——把 runResidentLoop 的 retry/backoff/needs-human
   状态机从闭包局部变量收进 class WorkerPool，并让新结局种类从外部注册（扩展点模板的首次检验）
-status: draft
+status: active
 kind: goal
 origin: DIR-133（人 2026-10-22
   裁定：并发争用读数是合法触发器；设计切片须含扩展点判据；元机制层优先）。触发读数：worker-driver.ts 派发器改选 5
   次（2026-08-23…10-16）+ 真实合并冲突 6 次
+activatedAt: 2026-10-21T18:49:39.216Z
+statusLog:
+  - at: 2026-10-21T18:49:39.216Z
+    from: draft
+    to: active
+    actor: goal-cli
+    reason: ""
 ---
 ## 背景
 
