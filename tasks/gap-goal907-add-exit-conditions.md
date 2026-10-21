@@ -71,11 +71,11 @@ extra:
 
 ## AC
 
-- [ ] AC1 机械充分性闸在真实 goal 载体上翻转：`node packages/quay/bin/quay.js goal show GOAL-907 --json 2>/dev/null | node --no-warnings --experimental-strip-types --input-type=module -e 'import { goalSufficiencyVerdict } from "./plugin/scripts/goal-driver.ts"; let s=""; for await (const c of process.stdin) s+=c; const g=JSON.parse(s); const v=goalSufficiencyVerdict(g,[{id:"AC-911"}]); console.log("verdict="+v); if (v==="insufficient") process.exit(1);'` 退出 0，stdout 为 `verdict=not-evaluated`（⛔ 不是 `verdict=insufficient`）。
-- [ ] AC2 退出条件节非空且恰有 4 条编号条款：在同一条 `goal show GOAL-907 --json` 读数上运行 `node -e`，断言 body 的 `## 退出条件` 节体非空白字符 > 40、`/^[①②③④]/gm` 命中恰 4 行、每条非空白字符 ≥ 20；退出 0 并打印 `clauses=4`。
-- [ ] AC3 棘轮条款已降为手段：同一读数中 body 含子串 `不是独立退出条件`，且该子串所在行仍以 `范围：` 开头（棘轮仍是范围内要做的实现动作，只是不再是退出条件）。
-- [ ] AC4 判据能取假（两次读数原样贴进 Resolution）：① 对**不含** `## 退出条件` 的合成 body（`"## 背景\n\nx"`）调用 `goalSufficiencyVerdict({id:"GOAL-907",body},[{id:"AC-911"}])` ⇒ `insufficient`；② 对 AC1 读到的**真实** post-edit body 调用同一函数 ⇒ `not-evaluated`。两次都贴出命令与输出。
-- [ ] AC5 只改 body：`git diff --name-only $(git merge-base HEAD develop) -- goals/` 的输出恰好只有 `goals/GOAL-907-完成-src-core-迁移-删-10-个内部-shim-只留-abi-ts-与-config-ts-公开面-shim.md` 一行（AC-911 文件未动），且 `quay goal show GOAL-907 --json` 的 `status` 仍为 `active`；`quay goal show AC-911 --json` 的 `status` 仍为 `active`、`criterion`/`expect` 与 apply 前逐字节相同。
+- [x] AC1 机械充分性闸在真实 goal 载体上翻转：`node packages/quay/bin/quay.js goal show GOAL-907 --json 2>/dev/null | node --no-warnings --experimental-strip-types --input-type=module -e 'import { goalSufficiencyVerdict } from "./plugin/scripts/goal-driver.ts"; let s=""; for await (const c of process.stdin) s+=c; const g=JSON.parse(s); const v=goalSufficiencyVerdict(g,[{id:"AC-911"}]); console.log("verdict="+v); if (v==="insufficient") process.exit(1);'` 退出 0，stdout 为 `verdict=not-evaluated`（⛔ 不是 `verdict=insufficient`）。
+- [x] AC2 退出条件节非空且恰有 4 条编号条款：在同一条 `goal show GOAL-907 --json` 读数上运行 `node -e`，断言 body 的 `## 退出条件` 节体非空白字符 > 40、`/^[①②③④]/gm` 命中恰 4 行、每条非空白字符 ≥ 20；退出 0 并打印 `clauses=4`。
+- [x] AC3 棘轮条款已降为手段：同一读数中 body 含子串 `不是独立退出条件`，且该子串所在行仍以 `范围：` 开头（棘轮仍是范围内要做的实现动作，只是不再是退出条件）。
+- [x] AC4 判据能取假（两次读数原样贴进 Resolution）：① 对**不含** `## 退出条件` 的合成 body（`"## 背景\n\nx"`）调用 `goalSufficiencyVerdict({id:"GOAL-907",body},[{id:"AC-911"}])` ⇒ `insufficient`；② 对 AC1 读到的**真实** post-edit body 调用同一函数 ⇒ `not-evaluated`。两次都贴出命令与输出。
+- [x] AC5 只改 body：`git diff --name-only $(git merge-base HEAD develop) -- goals/` 的输出恰好只有 `goals/GOAL-907-完成-src-core-迁移-删-10-个内部-shim-只留-abi-ts-与-config-ts-公开面-shim.md` 一行（AC-911 文件未动），且 `quay goal show GOAL-907 --json` 的 `status` 仍为 `active`；`quay goal show AC-911 --json` 的 `status` 仍为 `active`、`criterion`/`expect` 与 apply 前逐字节相同。
 
 ## DoD
 
@@ -85,3 +85,91 @@ extra:
 
 - goals/GOAL-907-完成-src-core-迁移-删-10-个内部-shim-只留-abi-ts-与-config-ts-公开面-shim.md
 - tasks/gap-goal907-add-exit-conditions.md
+
+## Resolution
+
+**落地**：`goals/GOAL-907-完成-src-core-迁移-删-10-个内部-shim-只留-abi-ts-与-config-ts-公开面-shim.md` 在 `## AC` 前新增 `## 退出条件` ①–④，并把 `范围：` 句里的 import-graph-check 棘轮标注为「手段 / 防回归，不是独立退出条件」。worktree 分支 `task/gap-goal907-add-exit-conditions`，提交 `faec7a562`（仅该 goal 文件，1 file changed, 8 insertions(+), 1 deletion(-)）。
+
+**与提案文本的唯一偏差**：提案逐字稿的条款 ④ 为「④ AC-911 achieved。」，其非空白字符数 = 16，低于本任务 AC2 要求的「每条非空白字符 ≥ 20」。因此 ④ 扩展为「④ AC-911 achieved（以上 ①–③ 全部由 AC-911 的 criterion 与 expect 覆盖）。」（非空白 51 字符），语义不变。
+
+### AC1 —— 真实载体读数（pre-edit 的真实载体读数 = `verdict=insufficient` exit=1，见 Proposal）
+
+命令（cwd = worktree 根）：
+
+```
+node packages/quay/bin/quay.js goal show GOAL-907 --json 2>/dev/null | node --no-warnings --experimental-strip-types --input-type=module -e 'import { goalSufficiencyVerdict } from "./plugin/scripts/goal-driver.ts"; let s=""; for await (const c of process.stdin) s+=c; const g=JSON.parse(s); const v=goalSufficiencyVerdict(g,[{id:"AC-911"}]); console.log("verdict="+v); if (v==="insufficient") process.exit(1);'
+```
+
+输出：
+
+```
+verdict=not-evaluated
+exit=0
+```
+
+### AC2 —— 退出条件节形状
+
+```
+nonWs=468 clauses=4 clauseLens=[87,284,46,51]
+clauses=4
+exit=0
+```
+
+（节体非空白 468 > 40；/^[①②③④]/gm 命中恰 4 行；每条非空白字符 87/284/46/51 均 ≥ 20。）
+
+### AC3 —— 棘轮降为手段
+
+```
+hits=1
+line=范围：删 10 个内部 shim；消费方改指 core/；import-graph-check 加「import 已删 src 根 shim = 违规」棘轮（手段 / 防回归，不是独立退出条件——退出条件只写终态）。
+range-line-carries-ratchet-disclaimer=OK
+exit=0
+```
+
+### AC4 —— 判据能取假（红/绿两次读数）
+
+红（合成 body，不含 `## 退出条件`）：
+
+```
+node --no-warnings --experimental-strip-types --input-type=module -e 'import { goalSufficiencyVerdict } from "./plugin/scripts/goal-driver.ts"; const body="## 背景\n\nx"; const v=goalSufficiencyVerdict({id:"GOAL-907",body},[{id:"AC-911"}]); console.log("verdict="+v);'
+=> verdict=insufficient
+```
+
+绿（真实 post-edit body，经载体 `goal show GOAL-907 --json` 读回）：
+
+```
+=> verdict=not-evaluated
+```
+
+### AC5 —— 只改 body（单文件 + status）
+
+```
+$ git diff --name-only $(git merge-base HEAD develop) -- goals/
+"goals/GOAL-907-完成-src-core-迁移-删-10-个内部-shim-只留-abi-ts-与-config-ts-公开面-shim.md"
+$ git diff --name-only $(git merge-base HEAD develop) -- goals/ | wc -l
+1
+$ quay goal show GOAL-907 --json | .status
+active
+$ quay goal show AC-911 --json | .status
+status=active
+```
+
+AC-911 文件逐字节未动（worktree 与 develop 的 md5 相同，`git diff --stat develop -- goals/AC-911…md` 为空）：
+
+```
+44f12b852db566995a2809cce8c026ae  goals/AC-911-src-根-shim-数-12-2-只留-abi-ts-与-config-ts-公开面.md
+44f12b852db566995a2809cce8c026ae  (git show develop:…)
+```
+
+criterion/expect 读数（与 apply 前逐字节相同）：
+
+```
+criterion="n=$(grep -rln 'FORWARDING re-export' packages/quay/src/*.ts | wc -l); if [ "$n" -ne 2 ]; then echo "src-root shim count is $n (want 2: abi.ts + config.ts)" >&2; exit 1; fi; echo "OK: src-root shim count = 2""
+expect="正向：packages/quay/src 根下带「FORWARDING re-export」头注释的 shim 恰剩 2 个（abi.ts 与 config.ts，公开 ABI 面），其余 10 个（adr-store/branch-model/contract-validator/criterion-fidelity/document-store/frontmatter-store-base/goal-store/plugin-root/store-commit/worktree-namespace）已删且消费方改指 core/。反向（能取假）：保留第 3 个 shim ⇒ 判据红（计数 3，stderr 写 cause）；删至 2 ⇒ 绿。criterion cwd = git 根，`grep -rln` 只统计含该头注释的文件，非关键词误匹配。"
+```
+
+### Touches 与实际改动一致性
+
+- 改动 1：`goals/GOAL-907-…-shim.md` —— 在 Touches 内。
+- 改动 2：`tasks/gap-goal907-add-exit-conditions.md`（本 AC 勾选 + 本 Resolution）—— 在 Touches 内。
+- 无 Touches 之外的改动：worktree 上唯一的实现提交只含 goal 文件。
