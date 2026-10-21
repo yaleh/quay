@@ -42,10 +42,11 @@ import { QUAY_VERSION } from "./version.ts";
 // store), NOT a hand-maintained mirror of it. See start-end-like.ts's header.
 import { isStartLike, isEndLike } from "./start-end-like.ts";
 import { readProcCmdlineText } from "./kernel/proc-identity.ts";
-// The ONE trailing full-width `（…）` annotation stripper — shared with plugin/scripts/touches-parser.ts
-// (task gap-three-pure-judges-kernel-single-def). It used to be a hand-maintained mirror here
-// ("Core cannot import a plugin script"); the kernel is the one location both layers reach.
-import { stripTrailingFullWidthAnnotation } from "./kernel/touches-annotation.ts";
+// Touches annotation stripping — the ONE kernel definition, shared with plugin/scripts/touches-parser.ts
+// (task gap-three-pure-judges-kernel-single-def for the full-width half, and
+// gap-routine-semantic-dedup-scan-strip-touch-annotation for the composite entry strip). The kernel
+// is the one location both layers reach without a `packages/**` → `plugin/**` reverse edge.
+import { stripTouchAnnotation } from "./kernel/touches-annotation.ts";
 import { parseFrontmatter } from "./core/frontmatter-store-base.ts";
 import { TASK_STATUS, isTaskStatus, type TaskStatus } from "./abi.ts";
 import { resolvePluginScript, resolvePluginScriptExec, resolveOrchestrationFile } from "./core/plugin-root.ts";
@@ -489,39 +490,12 @@ export function extractTouchesSection(body: string): { hasSection: boolean; sect
   return { hasSection, section: out.join("\n") };
 }
 
-/** Strip a trailing `(…)` / full-width `（…）` annotation from a Touches entry (the same algorithm as
- *  touches-parser.ts stripTouchAnnotation; the full-width half is the kernel's ONE definition,
- *  `./kernel/touches-annotation.ts` — task gap-three-pure-judges-kernel-single-def retired the
- *  "Core cannot import a plugin script, so this is a hand-maintained mirror" arrangement).
- *
- *  ORDER-INDEPENDENT since gap-touches-parser-annotation-strip-single-shot-order-dependent. The old
- *  mirror ran each spelling's strip ONCE in a FIXED order, so `` `x.ts`（说明）(new) `` (ASCII last)
- *  and `` `x.ts`（说明）(new) extra `` (prose tail) both left a residual backtick + annotation text —
- *  a NON-PATH that `computeBlockingRelations` read exactly like "this file was never landed"
- *  (硬规则 3b). Same two-part fix as the plugin original: a leading-concrete-path cut, then the two
- *  trailing strips repeated to a fixed point. */
-const TOUCH_PATH_TOKEN_RE = /^[^\s`'"()（）]+/;
-const TOUCH_CONCRETE_PATH_RE = /\/|\.[A-Za-z0-9]{1,10}$/;
-const TOUCH_ANNOTATION_HEAD_RE = /^[`'"（(]/;
-
-function stripTouchAnnotation(entry: string): string {
-  // 1. Leading-path cut — a concrete leading path token whose annotation starts immediately after.
-  const t = entry.trim();
-  const m = TOUCH_PATH_TOKEN_RE.exec(t);
-  if (m && TOUCH_CONCRETE_PATH_RE.test(m[0])) {
-    const tail = t.slice(m[0].length).replace(/^\s+/, "");
-    if (tail && TOUCH_ANNOTATION_HEAD_RE.test(tail)) return m[0];
-  }
-  // 2. The two trailing strips, repeated to a fixed point (strictly shorter on every strip ⇒ halts).
-  let s = entry.trimEnd();
-  for (;;) {
-    const before = s;
-    s = stripTrailingFullWidthAnnotation(s);
-    s = s.replace(/\s*\([^)]*\)\s*$/, "").trimEnd();
-    if (s === before) break;
-  }
-  return s.trim();
-}
+// Touches-entry annotation strip: ONE definition in the kernel leaf
+// (`./kernel/touches-annotation.ts`), shared with plugin/scripts/touches-parser.ts. This module
+// used to carry a hand-maintained mirror of the composite algorithm (leading-path cut + both
+// trailing annotation spellings to a fixed point); task
+// gap-routine-semantic-dedup-scan-strip-touch-annotation removed that copy — the two files now
+// delegate to the same function object, so they cannot drift.
 
 /** Parse a `## Touches` bullet list into bare path strings (mirrors touches-parser.ts parseTouchEntries). */
 export function parseTouchPaths(touchesSection: string): string[] {

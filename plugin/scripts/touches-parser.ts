@@ -2,7 +2,12 @@
 import fs from "node:fs";
 import path from "node:path";
 import { isDirectEntry } from "./gate-script-base.ts";
-import { stripTrailingFullWidthAnnotation } from "../../packages/quay/src/kernel/touches-annotation.ts";
+// The annotation-strip algorithm (full-width + ASCII, leading-path cut, fixed-point loop) is the
+// kernel's ONE definition; this module delegates and re-exports it for its own consumers (e.g.
+// task-status-drift-check.ts). Task gap-routine-semantic-dedup-scan-strip-touch-annotation removed
+// the second copy that used to live here.
+import { stripTouchAnnotation } from "../../packages/quay/src/kernel/touches-annotation.ts";
+export { stripTouchAnnotation };
 //
 // Root cause this module exists to close (gap-task-body-has-n-parsers-and-no-authority):
 // the repo had N independent Touches parsers, none authoritative, and they DISAGREED on the
@@ -41,58 +46,14 @@ import { stripTrailingFullWidthAnnotation } from "../../packages/quay/src/kernel
 // actually uses, so a scoped run never silently skips a change-relevant check because of a
 // full-width annotation).
 //
-// NESTED-PAREN handling (gap-touches-parser-strip-annotation-nested-parens) lives in the kernel
-// implementation: `packages/quay/src/kernel/touches-annotation.ts` (a BALANCED-PAREN scan, not a
-// regex — see that file's header). It is the ONE definition shared with Core's observation.ts
-// (task gap-three-pure-judges-kernel-single-def); this path imports it instead of carrying a copy.
-// It ships self-contained through build-plugin-dist's `coreSrcAliasPlugin` (the same inlining
-// precedent as ready-pool-check.ts importing kernel/task-shape-artifacts.ts).
-//
-// ORDER-INDEPENDENCE (gap-touches-parser-annotation-strip-single-shot-order-dependent): the two
-// passes used to run exactly ONCE each, in a FIXED order (full-width first, then ASCII). That left
-// two shapes as a NON-PATH — residual backtick + annotation text, which every downstream reader
-// (task-granularity-advice, checkTouchesPair, select-tests-for-touches) reads exactly like "this
-// file was never landed" (硬规则 3b: 读不懂伪装成合格):
-//   · `` `x.ts`（说明）(new) ``       — the ASCII pass removes `(new)`, but the full-width pass has
-//     already run and never re-runs ⇒ `` x.ts`（说明） `` ;
-//   · `` `x.ts`（说明）(new) extra `` — neither end-anchored pass fires at all (the bullet ends in prose).
-// Measured: quay@493b5c7 22 of 2550 backtick-path Touches bullets; claudecodeui@31ab009 7 of 796.
-// Two changes close it, applied in order:
-//   1. LEADING-PATH CUT — a repo path contains no whitespace, backtick/quote, or parenthesis (ASCII
-//      or full-width), so when a bullet STARTS with a concrete path token that an annotation begins
-//      right after, the path IS that token and the remainder is annotation/prose. This is
-//      order-independent by construction (`(new)（…）` / `（…）(new)` / `(new) extra` all reduce to
-//      the same path). It is GATED on the token being a CONCRETE path (containing a `/`, or ending
-//      in a file extension) so that a prose bullet is never truncated into a short spurious glob —
-//      in particular a bare-directory prose bullet must not collapse to the bare directory itself.
-//   2. FIXED-POINT LOOP over the two trailing strips — keeps the historical reading for every entry
-//      the cut does not cover (prose bullets, bare-directory declarations) while making the two
-//      annotation spellings commute.
-const TOUCH_PATH_TOKEN_RE = /^[^\s`'"()（）]+/;
-const TOUCH_CONCRETE_PATH_RE = /\/|\.[A-Za-z0-9]{1,10}$/;
-const TOUCH_ANNOTATION_HEAD_RE = /^[`'"（(]/;
-
-/** Strip a trailing annotation (`（…）` full-width or `(…)` ASCII) from a Touches entry, with the
- *  leading-path cut that makes the two spellings commute. The full-width balanced-paren half is the
- *  kernel's ONE definition (`../../packages/quay/src/kernel/touches-annotation.ts`). */
-export function stripTouchAnnotation(entry) {
-  // 1. Leading-path cut — a concrete leading path token whose annotation starts immediately after.
-  const t = String(entry).trim();
-  const m = TOUCH_PATH_TOKEN_RE.exec(t);
-  if (m && TOUCH_CONCRETE_PATH_RE.test(m[0])) {
-    const tail = t.slice(m[0].length).replace(/^\s+/, "");
-    if (tail && TOUCH_ANNOTATION_HEAD_RE.test(tail)) return m[0];
-  }
-  // 2. The two trailing strips, repeated to a fixed point (strictly shorter on every strip ⇒ halts).
-  let s = String(entry).trimEnd();
-  for (;;) {
-    const before = s;
-    s = stripTrailingFullWidthAnnotation(s);
-    s = s.replace(/\s*\([^)]*\)\s*$/, "").trimEnd();
-    if (s === before) break;
-  }
-  return s.trim();
-}
+// NESTED-PAREN handling (gap-touches-parser-strip-annotation-nested-parens) and ORDER-INDEPENDENCE
+// (gap-touches-parser-annotation-strip-single-shot-order-dependent: leading-path cut + the two
+// trailing strips repeated to a fixed point) both live in the kernel implementation —
+// `packages/quay/src/kernel/touches-annotation.ts` (see its header for the algorithm and the
+// measured corpus). This module no longer carries any part of it: `stripTouchAnnotation` is
+// imported and re-exported above. It ships self-contained through build-plugin-dist's
+// `coreSrcAliasPlugin` (the same inlining precedent as ready-pool-check.ts importing
+// kernel/task-shape-artifacts.ts).
 
 // Parse a `## Touches` bullet list into bare path/glob strings (backticks/quotes removed,
 // trailing "(…)" annotations stripped, leading `./` removed). Returns [] for a missing/empty
