@@ -1287,6 +1287,13 @@ export function llmProbeRoutine(decl: RoutineDecl, opts: ProbeRoutineOptions): R
       // last-run 只在**真的产出了记录**之后写回：违约/失败轮不占窗口，下一轮仍会重试。
       try { writeLastRun(lastRunPath, decl.name, started); } catch { /* last-run 写失败 ⇒ 下轮重跑，不致命 */ }
 
+      // 立案失败**不得与合格同形**（硬规则 3b）：本轮声明了立案面（filingEnabled !== false），却没有
+      // 一条被接受的 finding 落成任务，且每次尝试都带回了理由 ⇒ 这一轮不能读作 verified。
+      // ⚠️ 这与「探针没跑」不同：读数（findings / recordsAppended）是完整的，故 reason 逐条带出
+      //    `fileErrors`，而不是复述成一次探针失败。曾经这里无条件返回 verified ⇒ 第三方宿主上永不立案，
+      //    而每个 quality-round 都读作正常（gap-probe-routine-kernel-plugin-root-not-passed-…）。
+      const filingFailed = filed.length === 0 && fileErrors.length > 0;
+
       // AC5 的红侧：探针点名了一个**未登记**的产出者 = 探针自身的完整性缺陷（它凭空造了一个主体）
       // ⇒ 本轮判 failed 并**逐条指名**（⛔ 不静默降级成一条普通 rejected 记录）。登记齐备 ⇒ verified。
       const producerRejects = dispositions.filter((d) => d.gate === "producer");
@@ -1296,6 +1303,14 @@ export function llmProbeRoutine(decl: RoutineDecl, opts: ProbeRoutineOptions): R
           filed, filingRejected: dispositions.length - filed.length, carrierCommit: commit.ok ? "committed" : commit.reason,
           unregisteredProducers: producerRejects.map((d) => ({ findingId: d.findingId, reason: d.reason })),
         }, `probe named ${producerRejects.length} UNREGISTERED producer(s) — nothing filed for them: ${producerRejects.map((d) => `${d.findingId ?? "<no-id>"} (${d.reason})`).join("; ")}`);
+      }
+      if (filingFailed) {
+        return fact("failed", {
+          ...base, runId, recordsAppended: recorded, findings: parsed.findings.length, malformed: parsed.malformed,
+          filed, escalated, remedy_availability: remedy.status,
+          carrierCommit: commit.ok ? "committed" : commit.reason,
+          filingErrors: fileErrors,
+        }, `deep scan recorded ${recorded} record(s) but FILING FAILED — 0 of the accepted finding(s) became a task: ${fileErrors.join("; ")}`);
       }
       return fact("verified", {
         ...base,

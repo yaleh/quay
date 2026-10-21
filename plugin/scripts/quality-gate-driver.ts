@@ -58,6 +58,7 @@ import {
   STOPPED_MID_ROUND,
   resourceGateCheck,
   kernelSiblingArgv,
+  resolveKernelPluginRoot,
   splitArgs,
   isNonNegInt,
   type DriverKind,
@@ -328,13 +329,18 @@ export function archguardInstrumentPreflight(root: string): (instrument: string,
 /** 默认 probe 例程的装配：与配置声明的例程**同一条机制**（`llmProbeRoutine`），只额外带上宿主前置。 */
 export function buildDefaultProbeRoutines(
   root: string,
-  opts: { pluginRoot: string; probeTimeoutMs: number; stateDir?: string; probeArgv?: (prompt: string, decl: RoutineDecl) => string[] },
+  opts: { pluginRoot: string; probeTimeoutMs: number; stateDir?: string; probeArgv?: (prompt: string, decl: RoutineDecl) => string[]; kernelPluginRoot?: string | null },
   declaredNames: ReadonlySet<string>,
 ): { routines: ReturnType<typeof llmProbeRoutine>[]; decls: RoutineDecl[] } {
   const decls = DEFAULT_PROBE_ROUTINE_DECLS.filter((d) => !declaredNames.has(d.name));
+  // 出厂布局下 task store CLI 的锚点（`resolveTaskCliEntry` 的第二分支）。缺省从本 kernel 的安装
+  // 位置解析——⛔ 不让「调用方忘了传」重新变成「第三方宿主永不立案」（硬规则 4 推论二：依赖宿主的
+  // ambient 常量不可作为能力前提；这里是同一形态的 fail-closed 缺省）。
+  const kernelPluginRoot = opts.kernelPluginRoot !== undefined ? opts.kernelPluginRoot : resolveKernelPluginRoot();
   const routines = decls.map((d) => llmProbeRoutine(d, {
     root,
     pluginRoot: opts.pluginRoot,
+    kernelPluginRoot,
     probeTimeoutMs: opts.probeTimeoutMs,
     ...(opts.stateDir ? { stateDir: opts.stateDir } : {}),
     ...(opts.probeArgv ? { probeArgv: opts.probeArgv } : {}),
@@ -2985,6 +2991,11 @@ export async function main(argv: string[]): Promise<number> {
   //    （gap-probe-routine-resolves-probe-spec-under-project-root-not-plugin-root）。
   const probeSelection = probeRoutinesFromConfig(rootDir, {
     probeTimeoutMs,
+    // task store CLI 的**出厂锚点**：`fileRoutineTask` 在无 `packages/quay-native` 的宿主上要靠它
+    // 解析到 `<kernelPluginRoot>/vendor/quay-native/dist/quay-native.js`（resolveTaskCliEntry 第二分支）。
+    // ⛔ 曾经这里没传 ⇒ 该分支永远走不到 ⇒ 第三方宿主上立案恒失败，而 fact 仍读作 verified
+    // （gap-probe-routine-kernel-plugin-root-not-passed-third-party-host-filing-fails）。
+    kernelPluginRoot: resolveKernelPluginRoot(),
     ...(probeStateDir ? { stateDir: probeStateDir } : {}),
     ...(probeArgv ? { probeArgv } : {}),
     // 宿主前置同样给**配置声明**的例程：init 脚手架写出的 architecture-analysis（AC2）走的是这条路，
@@ -2996,6 +3007,7 @@ export async function main(argv: string[]): Promise<number> {
   // 与「没声明」都不该等于「没有 driver 调度它」。
   const defaultProbe = buildDefaultProbeRoutines(rootDir, {
     pluginRoot: probeSelection.pluginRoot,
+    kernelPluginRoot: resolveKernelPluginRoot(),
     probeTimeoutMs,
     ...(probeStateDir ? { stateDir: probeStateDir } : {}),
     ...(probeArgv ? { probeArgv } : {}),

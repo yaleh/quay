@@ -52,6 +52,7 @@ import {
   proseKey,
   readTaskStatus,
   recurrenceByKey,
+  resolveTaskCliEntry,
   recurrenceOrder,
   renderRoutineTaskBody,
   repeatRejectionDecision,
@@ -903,4 +904,36 @@ test("㉓ routineTaskId + collisionEscapeId compose into the OLD two names the l
   assert.notEqual(escaped, base);
   assert.notEqual(escaped, hashed);
   assert.equal(taken.has(escaped), false, "the third name is free ⇒ the subject is no longer sealed in name space");
+});
+
+// ── ㉔ resolveTaskCliEntry — the two store layouts
+// (gap-probe-routine-kernel-plugin-root-not-passed-third-party-host-filing-fails)
+// The defect: `probeRoutinesFromConfig` never passed `kernelPluginRoot`, so the SECOND branch below
+// could not be taken and a third-party host (no `packages/quay-native`) could never file — silently,
+// while the round still read `verified`. This pins the branch itself; the end-to-end landing is pinned
+// in probe-routine.test.mjs (driver --once on a workspace with no source store).
+test("resolveTaskCliEntry — a third-party host resolves the VENDORED bundle from kernelPluginRoot (and null when there is none)", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "gate-store-thirdparty-"));
+  const kernel = fs.mkdtempSync(path.join(os.tmpdir(), "gate-kernel-plugin-"));
+  try {
+    // premise, asserted: this workspace is the third-party shape (the first branch cannot mask anything)
+    assert.equal(fs.existsSync(path.join(root, "packages", "quay-native")), false);
+    // negative control: with NO kernel anchor neither branch exists ⇒ null (never an empty success)
+    assert.equal(resolveTaskCliEntry(root, null), null,
+      "⛔ unresolved must be null — the caller reports it as unresolvable, never as 'nothing to file'");
+    // installation-shaped plugin root: <kernel>/vendor/quay-native/dist/quay-native.js
+    const vendored = path.join(kernel, "vendor", "quay-native", "dist", "quay-native.js");
+    fs.mkdirSync(path.dirname(vendored), { recursive: true });
+    fs.writeFileSync(vendored, "// fixture stand-in for the shipped bundle\n", "utf8");
+    assert.deepEqual(resolveTaskCliEntry(root, kernel), ["--no-warnings", vendored],
+      "the SECOND branch is the one a shipped install takes (⛔ a source-only flag like --experimental-strip-types would be wrong here)");
+    // and a source checkout still takes the FIRST branch even when a kernel root is supplied
+    fs.mkdirSync(path.join(root, "packages", "quay-native", "bin"), { recursive: true });
+    fs.writeFileSync(path.join(root, "packages", "quay-native", "bin", "quay-native.ts"), "// fixture\n", "utf8");
+    assert.deepEqual(resolveTaskCliEntry(root, kernel),
+      ["--no-warnings", "--experimental-strip-types", path.join(root, "packages", "quay-native", "bin", "quay-native.ts")]);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(kernel, { recursive: true, force: true });
+  }
 });

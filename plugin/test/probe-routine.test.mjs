@@ -241,6 +241,9 @@ test("llmProbeRoutine — real run appends a round record + one record per findi
   const r2 = llmProbeRoutine({ name: "semantic-dedup-scan", trigger: "interval:1440m", probe: "semantic-dedup-scan", dispatch: null }, {
     root, pluginRoot: path.join(root, "plugin"), probeTimeoutMs: 30_000,
     probeArgv: () => fakeProbeArgv({ findings: [FINDING, { ...FINDING, id: "second" }], shards: 3, inventory: { plugin_scripts: 2, package_src: 1, candidate_clusters: 1 } }),
+    // 立案缝：本用例测的是载体/last-run，⛔ 不让一份不存在的任务库把读数拖成 filing-failed
+    // （立案失败的独立取值由专门的回归用例覆盖）。
+    fileTaskFn: async (taskId) => ({ ok: true, reason: `filed as ${taskId}` }),
   });
   const facts = await r2.run({ halted: false });
   assert.equal(facts.length, 1);
@@ -274,6 +277,8 @@ test("llmProbeRoutine NEGATIVE CONTROL — within the durable window it does NOT
     root, pluginRoot: path.join(root, "plugin"), probeTimeoutMs: 30_000,
     probeArgv: () => fakeProbeArgv({ findings: [FINDING], shards: 2 }),
     spawnFn: async (argv, opts) => { spawns += 1; const { runAsync } = await import("../scripts/driver-runtime.ts"); return runAsync(argv, opts); },
+    // 同上一用例：立案缝只为让「正常一轮」真的 verified，被测的仍是 durable last-run 窗口。
+    fileTaskFn: async (taskId) => ({ ok: true, reason: `filed as ${taskId}` }),
   });
   const first = await mk().run({ halted: false });
   assert.equal(first[0].state, "verified");
@@ -383,6 +388,23 @@ test("quality-gate-driver --once runs the config-declared probe routine and appe
   // driver-routine-or-init 的**默认装配**例程（空 fixture root 无 archguard ⇒ 一条 not-evaluated 读数）。
   assert.deepEqual(rec.facts.filter((f) => !f.name.startsWith("semantic-dedup")).map((f) => f.name).sort(),
     ["architecture-analysis", "architecture-review", "judgment-consumer-check", "packaging-hygiene", "pool-quality-judge"]);
+
+  // ── the FILING REGRESSION (gap-probe-routine-kernel-plugin-root-not-passed-third-party-host-filing-fails)
+  // 本工作区 = 第三方宿主的形状：**没有** `packages/quay-native`。修复前 quality-gate-driver 没把
+  // kernelPluginRoot 交给 probe 轨道 ⇒ resolveTaskCliEntry 的两个分支都走不到 ⇒ 一条都不立案，
+  // 而上面那条 `state === "verified"` 照旧成立（失败藏在 filing-round.errors 里）。
+  // 现在：出厂插件根（本 kernel 的安装位置，含 vendored task CLI）是解析锚点 ⇒ 任务文件真的落盘。
+  assert.equal(fs.existsSync(path.join(root, "packages", "quay-native")), false,
+    "premise: no source-layout task store — otherwise the FIRST branch masks the defect");
+  assert.ok(fs.existsSync(path.join(REPO_ROOT, "plugin", "vendor", "quay-native", "dist", "quay-native.js")),
+    "premise: the installation-shaped plugin root carries the vendored task CLI (built by scripts/test.sh)");
+  assert.equal(probeFacts[0].state, "verified", `filing succeeded ⇒ verified, got ${probeFacts[0].state}: ${probeFacts[0].reason}`);
+  const filedIds = probeFacts[0].value.filed;
+  assert.equal(filedIds.length, 1, `the accepted finding must be filed through the vendored branch (filed=${JSON.stringify(filedIds)})`);
+  assert.ok(fs.existsSync(path.join(root, "tasks", `${filedIds[0]}.md`)),
+    "the task file must really land in the workspace's tasks/ (⛔ not just a claimed filing)");
+  const filingRound = records.filter((r) => r.kind === "filing-round").at(-1);
+  assert.deepEqual(filingRound.errors, [], "no filing error may survive into the round record");
 });
 
 // ── (f) the mechanical FILING step (tasks/gap-ac214-fifth-crossing-routine-detects-but-nothing-acts) ─
@@ -512,6 +534,30 @@ test("FILING AC5 (green side) — register the producer and the SAME finding fil
   assert.match(written[0].taskId, /^gap-routine-freshness-refresh-/);
   const round = readCarrier(root).find((r) => r.kind === "filing-round");
   assert.deepEqual(round.filed, [written[0].taskId]);
+});
+
+test("FILING FAILURE — an unresolvable task store is its OWN state, not `verified` (硬规则 3b)", async () => {
+  // 缺口现场（plantuml-js，quay 0.22.0）：立案返回 `task store CLI unresolved`，filed=0，而 fact 仍是
+  // verified——失败只活在 filing-round.errors 里。本用例即红侧的反面：同一读数必须让 fact 不再是 verified。
+  const root = makeFilingWorkspace({ registeredProducers: ["coldstart-face"] });
+  const routine = llmProbeRoutine(
+    { name: "freshness-refresh", trigger: "interval:120m", probe: "freshness-refresh", dispatch: null },
+    {
+      root, pluginRoot: path.join(root, "plugin"), probeTimeoutMs: 30_000,
+      probeArgv: () => fakeProbeArgv({ findings: [FRESHNESS_FINDING], shards: 1 }),
+      // ⛔ 不给 kernelPluginRoot、也不注入 fileTaskFn：临时工作区没有 packages/quay-native ⇒
+      //    resolveTaskCliEntry 两支都走不到（这正是第三方宿主缺 kernelPluginRoot 时的形状）。
+    },
+  );
+  const facts = await routine.run({ halted: false });
+  assert.equal(facts[0].state, "failed", `filed=0 + errors ⇒ NOT verified, got ${facts[0].state}: ${facts[0].reason}`);
+  assert.match(facts[0].reason, /FILING FAILED/);
+  assert.match(facts[0].reason, /unresolved/, "the reason must name the actual cause, not just say 'failed'");
+  assert.deepEqual(facts[0].value.filed, []);
+  assert.ok(facts[0].value.filingErrors.length > 0, "the error list must be visible on the Fact, not only in the carrier");
+  const round = readCarrier(root).find((r) => r.kind === "filing-round");
+  assert.deepEqual(round.filed, []);
+  assert.match(round.errors[0], /unresolved/);
 });
 
 test("FILING AC6 reverse control — with filing switched off the SAME finding produces NO task", async () => {
