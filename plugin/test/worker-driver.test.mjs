@@ -1167,12 +1167,12 @@ test("AC1 (能取假) — classifyDeltaRelatedness 区分「失败测试在 delt
 
   const viaImport = classifyDeltaRelatedness("packages/quay/test/obs.test.mjs",
     ["packages/quay/src/observation.ts"],
-    ["packages/quay/src/observation.ts", "packages/quay/src/serve-handlers.ts"]);
+    ["packages/quay/src/observation.ts", "packages/quay/src/serve/serve-handlers.ts"]);
   assert.equal(viaImport.verdict, "related", "one-hop import intersects delta ⇒ related");
 
   const unrelated = classifyDeltaRelatedness("packages/quay/test/obs.test.mjs",
-    ["packages/quay/src/serve-dashboard.ts"],
-    ["packages/quay/src/observation.ts", "packages/quay/src/serve-handlers.ts"]);
+    ["packages/quay/src/serve/serve-dashboard.ts"],
+    ["packages/quay/src/observation.ts", "packages/quay/src/serve/serve-handlers.ts"]);
   assert.equal(unrelated.verdict, "unrelated", "not in delta + one-hop imports disjoint ⇒ unrelated");
 
   // 两个判断能互相区分（⛔ 恒定输出同一结论 ⇒ 假）。
@@ -1219,7 +1219,7 @@ test("AC4 (能取假) — 措辞含「不是结论/重跑验证」，⛔ 不含�
 test("AC5 (能取假) — buildContinueWorkerPrompt 在 suite 红时拼入 continueRelatednessNote 输出", (t) => {
   const root = makeRoot("rel-wired");
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
-  writeRelatednessTask(root, "gap-x", ["packages/quay/src/serve-dashboard.ts"]);
+  writeRelatednessTask(root, "gap-x", ["packages/quay/src/serve/serve-dashboard.ts"]);
   writeRelatednessTest(root, "packages/quay/test/obs.test.mjs", { loadSensitive: false });
   const suiteLog = path.join(root, ".quay", "fan-in-suite-gap-x.log");
   fs.mkdirSync(path.dirname(suiteLog), { recursive: true });
@@ -4045,7 +4045,7 @@ function acAppendLegacyThirdParty(root, taskId, tsMs, basename) {
 }
 function acFixture(tag) {
   const root = makeRoot(tag);
-  acWriteTouchesTask(root, "gap-a", ["packages/quay/src/serve-dashboard.ts"]); // 与失败测试无关
+  acWriteTouchesTask(root, "gap-a", ["packages/quay/src/serve/serve-dashboard.ts"]); // 与失败测试无关
   fs.mkdirSync(path.join(root, "plugin", "test"), { recursive: true });
   fs.writeFileSync(path.join(root, AC_UNRELATED_TEST), 'import { test } from "node:test";\n', "utf8");
   acWriteSuiteRedLog(root, "fan-in-suite-gap-a.log", AC_UNRELATED_SIG);
@@ -4191,7 +4191,7 @@ function sdeAppendFileRecord(root, taskId, tsMs, basename, files) {
 }
 
 /** 夹具：失败文件在盘上（一跳 import 读得出 ⇒ 相关性判为 unrelated 而非 unknown），Touches 默认不含它。 */
-function sdeFixture(tag, touches = ["packages/quay/src/serve-dashboard.ts"]) {
+function sdeFixture(tag, touches = ["packages/quay/src/serve/serve-dashboard.ts"]) {
   const root = makeRoot(tag);
   acWriteTouchesTask(root, "gap-a", touches);
   fs.mkdirSync(path.join(root, "plugin", "test"), { recursive: true });
@@ -4255,7 +4255,7 @@ test("AC2（顺序·可得假）— 无 AssertionError 的整文件红：delta �
   assert.match(jOut.reason, /outside this task's Touches\/diff/, "判词如实报出「已算出：不在本任务 delta 内」");
 
   // 对照臂：同一夹具，只把该文件放进本任务 Touches ⇒ own-defect-counted。
-  const inside = sdeFixture("sde-ac2-in", [SDE_DEAD_FILE, "packages/quay/src/serve-dashboard.ts"]);
+  const inside = sdeFixture("sde-ac2-in", [SDE_DEAD_FILE, "packages/quay/src/serve/serve-dashboard.ts"]);
   t.after(() => rmSafe(inside));
   sdeAppendFileRecord(inside, "gap-b", SDE_NOW - 3600_000, "fan-in-suite-gap-a.log", [SDE_DEAD_FILE]);
   const jIn = judgeRetryExemption(inside, "gap-a",

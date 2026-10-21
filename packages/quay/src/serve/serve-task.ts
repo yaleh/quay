@@ -1,7 +1,7 @@
 // serve-task.ts — /tasks + /task/<id> route handlers, split from serve-handlers.ts.
 
 import type { IncomingMessage, ServerResponse } from "node:http";
-import type { ProviderClient } from "./provider-client.ts";
+import type { ProviderClient } from "../provider-client.ts";
 import type { Manifest, ServePageCfg } from "./serve-render.ts";
 import {
   html, escapeHtml, stripHeadings, pageStyles, modernistStyles, renderMarkdown,
@@ -22,9 +22,9 @@ import {
   readFanInAttempts, isValidSessionId, readLiveWorkerProcesses, liveSessionIdForPid,
   workerDriverActive, readTaskStatusMapAtRef, readTaskTitleMapAtRef, readTaskCommitTimesAtRef,
   readTaskAtRefMeta, readTaskCommitTimeAtRef,
-} from "./observation.ts";
-import type { LiveWorker, WorkerOutcomeRecord } from "./observation.ts";
-import { TASK_STATUSES } from "./abi.ts";
+} from "../observation.ts";
+import type { LiveWorker, WorkerOutcomeRecord } from "../observation.ts";
+import { TASK_STATUSES } from "../abi.ts";
 
 export async function handleTaskList(
   req: IncomingMessage,

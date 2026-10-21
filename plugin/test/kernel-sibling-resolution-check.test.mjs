@@ -118,7 +118,7 @@ test("RED (P4 template): `${root}/packages/…/src/…` cross-package source anc
 
 // ── 不误伤（P4 边界）：相对 import / bin 布局 / 非 packages 前缀不命中 ───────────────────────────────────
 test("GREEN: a RELATIVE import of a packages/** source module is NOT a cross-package violation", () => {
-  const src = 'const mod = await import("../../packages/quay/src/serve-send.ts");\n';
+  const src = 'const mod = await import("../../packages/quay/src/serve/serve-send.ts");\n';
   assert.deepEqual(scanText(src), [], JSON.stringify(scanText(src)));
 });
 

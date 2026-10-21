@@ -89,7 +89,7 @@ test("no-hit: the right file with the WRONG concern_kind is not a hit", () => {
 });
 
 test("no-hit: an unrelated file that happens to be mentioned is not a hit", () => {
-  const r = isKnownExemption({ concern_kind: "canonicalization", files: ["packages/quay/src/serve.ts"] });
+  const r = isKnownExemption({ concern_kind: "canonicalization", files: ["packages/quay/src/serve/serve.ts"] });
   assert.equal(r.status, "not-known");
 });
 
@@ -99,7 +99,7 @@ test("an ENUM, not a boolean: `not-known` and `unreadable input` are distinguish
     assert.equal(r.status, "not-known");
     assert.equal(r.unreadable_input, true, "a shape the matcher cannot read must not be shaped like 'nothing matched'");
   }
-  assert.equal(isKnownExemption({ concern_kind: "canonicalization", files: ["packages/quay/src/serve.ts"] }).unreadable_input, false);
+  assert.equal(isKnownExemption({ concern_kind: "canonicalization", files: ["packages/quay/src/serve/serve.ts"] }).unreadable_input, false);
   assert.deepEqual([...DECISION_STATUS], ["exempted", "known-not-yet-filed", "not-known"]);
 });
 

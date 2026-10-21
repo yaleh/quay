@@ -1,7 +1,7 @@
 // serve-system.ts — /system + /manager route handlers, split from serve-handlers.ts.
 
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { readSystem, readManager, RESOURCE_GATE_NAME, PROCESS_BUDGET_NAME, type SystemResult, type ManagerResult, type ResourceGateReading } from "./observation.ts";
+import { readSystem, readManager, RESOURCE_GATE_NAME, PROCESS_BUDGET_NAME, type SystemResult, type ManagerResult, type ResourceGateReading } from "../observation.ts";
 import type { ServePageCfg, ServeIdentity } from "./serve-render.ts";
 import { html, escapeHtml, pageStyles, modernistStyles, renderSiteNav, renderMobileChrome, obsNote, pageTitle, pageNameFor, htmlLangTag, DEFAULT_LANG, type Lang } from "./serve-render.ts";
 import { systemLabelsFor, systemLabel, fillLabel, managerLabelsFor } from "./serve-i18n.ts";

@@ -23,7 +23,7 @@ import {
   mergeLiveAndHistoryIntervals,
   packLanes,
   FIXED_GANTT_LANES,
-} from "../src/serve-dashboard.ts";
+} from "../src/serve/serve-dashboard.ts";
 import { readLive, readWorkerOutcomeRecords, WORKER_OUTCOME_REL } from "../src/observation.ts";
 
 const FIXED_NOW_MS = 1_700_000_000_000; // deterministic wall-clock anchor

@@ -32,12 +32,12 @@
 // to know `.quay/`); the store read goes through the provider ABI (client.taskList) like /tasks.
 
 import type { IncomingMessage, ServerResponse } from "node:http";
-import type { ProviderClient } from "./provider-client.ts";
+import type { ProviderClient } from "../provider-client.ts";
 import type { Manifest, ServePageCfg, ServeIdentity } from "./serve-render.ts";
 import { html, escapeHtml, pageStyles, modernistStyles, relativeTime, renderSiteNav, renderMobileChrome, tableWrap, pageTitle, pageNameFor, htmlLangTag, DEFAULT_LANG, type Lang } from "./serve-render.ts";
 import { needsHumanLabelsFor, needsHumanLabel, type NeedsHumanKey } from "./serve-i18n.ts";
-import { readNeedsHumanLedger, readFanInAttempts, type FanInAttemptsResult } from "./observation.ts";
-import { TASK_STATUS } from "./abi.ts";
+import { readNeedsHumanLedger, readFanInAttempts, type FanInAttemptsResult } from "../observation.ts";
+import { TASK_STATUS } from "../abi.ts";
 
 // The `<code>` ELEMENTS this page embeds mid-sentence, as `{code}` payloads (serve-i18n.ts ROW 18).
 // They sit HERE rather than in the dictionary because the dictionary carries copy, not markup; the

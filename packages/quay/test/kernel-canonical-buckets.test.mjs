@@ -2,7 +2,7 @@
 // kernel-canonical-buckets.test.mjs — the kernel leaf `packages/quay/src/kernel/canonical-buckets.ts`
 // and its two layers' consumers: the dispatch-side judges (`plugin/scripts/suite-bucket-attribution.ts`
 // + `plugin/scripts/suite-bucket-select.ts`) and the product-side page renderer
-// (`packages/quay/src/serve-tests.ts`).
+// (`packages/quay/src/serve/serve-tests.ts`).
 // (routine `semantic-dedup-scan` finding `canonical-buckets`, task
 // gap-routine-semantic-dedup-scan-canonical-buckets.)
 //
@@ -49,7 +49,7 @@ const KERNEL_REL = "packages/quay/src/kernel/canonical-buckets.ts";
 const FORMER_HOMES = [
   "plugin/scripts/suite-bucket-attribution.ts",
   "plugin/scripts/suite-bucket-select.ts",
-  "packages/quay/src/serve-tests.ts",
+  "packages/quay/src/serve/serve-tests.ts",
 ];
 
 const SCAN_ROOTS = ["plugin", "packages"];

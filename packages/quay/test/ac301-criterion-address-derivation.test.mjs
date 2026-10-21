@@ -222,7 +222,7 @@ test("AC-301 block: --port 0 (kernel-assigned) falls back to the carrier's web s
 
 // KNOWN LIMITATION of the canonical addr-derivation block (shared verbatim with AC-288/AC-290/…, so
 // it is deliberately NOT re-derived here — the family convention is to adopt the newest block
-// verbatim). `packages/quay/src/server-state.ts` `probeAddress()` treats BOTH `0.0.0.0` and `::`
+// verbatim). `packages/quay/src/serve/server-state.ts` `probeAddress()` treats BOTH `0.0.0.0` and `::`
 // (and `""` / `*`) as wildcards, but the block's shell counterpart only normalises `0.0.0.0:*`:
 // for an IPv6 wildcard host the concatenation is `:::PORT`, and `${a#::}` leaves `:PORT`, yielding
 // `127.0.0.1::PORT`. What this test pins is the SAFETY property, which is what matters for a probe:

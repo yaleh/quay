@@ -21,13 +21,13 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 import fs from "node:fs";
 import http from "node:http";
-import { pageStyles, tableWrap } from "../src/serve-render.ts";
-import { renderLivePage } from "../src/serve-live.ts";
-import { renderBoardPage } from "../src/serve-board.ts";
-import { renderNeedsHumanPage } from "../src/serve-needs-human.ts";
-import { renderPerFileTable, renderFileHistoryTable } from "../src/serve-tests.ts";
-import { handleGoalList } from "../src/serve-goal.ts";
-import { startServer } from "../src/serve.ts";
+import { pageStyles, tableWrap } from "../src/serve/serve-render.ts";
+import { renderLivePage } from "../src/serve/serve-live.ts";
+import { renderBoardPage } from "../src/serve/serve-board.ts";
+import { renderNeedsHumanPage } from "../src/serve/serve-needs-human.ts";
+import { renderPerFileTable, renderFileHistoryTable } from "../src/serve/serve-tests.ts";
+import { handleGoalList } from "../src/serve/serve-goal.ts";
+import { startServer } from "../src/serve/serve.ts";
 import { clearVerificationRoundCache } from "../src/observation.ts";
 import { makeTmpWorkspace } from "../../../plugin/test/helpers/tmp-workspace.mjs";
 import { QUAY_NATIVE_CLI } from "./helpers/cli-entry.mjs";
@@ -154,7 +154,7 @@ test("AC2: /needs-human tables are wrapped and the prose column is clamped", () 
 });
 
 test("AC2: /tests perFile + file-history tables are wrapped", () => {
-  const perFile = [{ file: "packages/quay/src/serve-render.ts", durationMs: 1234, passed: true }];
+  const perFile = [{ file: "packages/quay/src/serve/serve-render.ts", durationMs: 1234, passed: true }];
   assertAllTablesWrapped(renderPerFileTable(perFile), "/tests perFile");
   const fh = renderFileHistoryTable([{ round: 1, startedAt: "2026-01-01T00:00:00Z", durationMs: 100, passed: true }]);
   assertAllTablesWrapped(fh, "/tests file history");

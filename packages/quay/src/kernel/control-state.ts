@@ -34,7 +34,7 @@
 //       `node:fs` / `node:path` / `node:http` / `node:crypto`. It does NOT reach the driver runtime:
 //       `resourceGateCheck`, `resolveResourceGateScript`, `spawnSync` and `fileURLToPath` all stay
 //       behind in driver-shared.ts, untouched. What moves is the control-STATE + identity-gate +
-//       MCP-hosting domain — which `packages/quay/src/serve.ts` has hosted in-process since stage A2
+//       MCP-hosting domain — which `packages/quay/src/serve/serve.ts` has hosted in-process since stage A2
 //       (AC-251), i.e. it is by then a shared primitive, which is exactly L0's definition.
 // The mechanism side keeps every import site: `plugin/scripts/driver-shared.ts` re-exports this
 // module, so `driver-runtime.ts`, `worker-driver.ts`, `promotion-driver.ts` and the test harnesses

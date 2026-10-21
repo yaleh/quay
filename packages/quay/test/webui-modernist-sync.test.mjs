@@ -14,7 +14,7 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 import fs from "node:fs";
 import http from "node:http";
-import { startServer } from "../src/serve.ts";
+import { startServer } from "../src/serve/serve.ts";
 import { makeTmpDir } from "../../../plugin/test/helpers/tmp-workspace.mjs";
 import { QUAY_NATIVE_CLI } from "./helpers/cli-entry.mjs";
 
@@ -132,14 +132,15 @@ test("AC100(c) — the three detail-page rendering code segments contain zero ha
   // gap-serve-handlers-split-by-concern: the detail-page handlers + their render helpers moved out
   // of serve-handlers.ts into per-concern files. The AC100(c) invariant (zero hex in the detail-page
   // render path) is unchanged; only each function's home file moved.
+  // Serve modules live under `src/serve/` (gap-routine-architecture-analysis-quay-src-serve-surface-flat-in-src).
   const fnFiles = {
-    handleAdrDetail: "serve-adr.ts",
-    handleGoalDetail: "serve-goal.ts",
-    goalEvidenceCell: "serve-goal.ts",
-    handleDocDetail: "serve-doc.ts",
-    modernistStyles: "serve-render.ts",
-    detailStyles: "serve-render.ts",
-    renderMarkdown: "serve-render.ts",
+    handleAdrDetail: "serve/serve-adr.ts",
+    handleGoalDetail: "serve/serve-goal.ts",
+    goalEvidenceCell: "serve/serve-goal.ts",
+    handleDocDetail: "serve/serve-doc.ts",
+    modernistStyles: "serve/serve-render.ts",
+    detailStyles: "serve/serve-render.ts",
+    renderMarkdown: "serve/serve-render.ts",
   };
   for (const [fn, file] of Object.entries(fnFiles)) {
     const src = fs.readFileSync(path.join(__dirname, "..", "src", file), "utf8");

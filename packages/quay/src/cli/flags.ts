@@ -62,7 +62,7 @@ export function resolveJsonFlag(flags: CliFlags): { json: boolean } | null {
 
 // UQ-047/UQ-048 (M08-merge-recover): shared --page-size parser used by every
 // `task list` output mode (CLI table, --json/--format json) AND documented
-// for the Web UI's own ?pageSize= param (src/serve.js). A missing --page-size
+// for the Web UI's own ?pageSize= param (src/serve/serve.js). A missing --page-size
 // means "no limit" (existing behavior, preserved); an explicitly-invalid
 // value (0, negative, non-numeric) is a hard usage error, not a silent
 // fall-back to "show everything" (UQ-048).

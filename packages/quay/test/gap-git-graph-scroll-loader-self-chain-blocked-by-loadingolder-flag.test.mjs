@@ -19,8 +19,8 @@ import vm from "node:vm";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { gitGraphClientScript } from "../src/serve-git.ts";
-import { gitHistoryClientLabelsFor } from "../src/serve-i18n.ts";
+import { gitGraphClientScript } from "../src/serve/serve-git.ts";
+import { gitHistoryClientLabelsFor } from "../src/serve/serve-i18n.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -156,7 +156,7 @@ test("AC2: the OLD ordering (reset in .finally, self-chain in .then) makes exact
 // ── AC3: structural — every loadingOlder reset precedes the self-chain call site ────────────────
 
 test("AC3: every loadingOlder = false reset line precedes the self-chain loadOlder() call site", () => {
-  const src = fs.readFileSync(path.join(__dirname, "../src/serve-git.ts"), "utf8");
+  const src = fs.readFileSync(path.join(__dirname, "../src/serve/serve-git.ts"), "utf8");
   const lines = src.split("\n");
   const resetLines = [];
   lines.forEach((l, i) => { if (l.includes("loadingOlder = false")) { resetLines.push(i + 1); } });

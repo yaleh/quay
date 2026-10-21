@@ -22,8 +22,8 @@ import assert from "node:assert/strict";
 import vm from "node:vm";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
-import { gitGraphClientScript, renderGitHistoryPage, GIT_GRAPH_AUTO_LOAD_ROW_LIMIT } from "../src/serve-git.ts";
-import { gitHistoryClientLabelsFor } from "../src/serve-i18n.ts";
+import { gitGraphClientScript, renderGitHistoryPage, GIT_GRAPH_AUTO_LOAD_ROW_LIMIT } from "../src/serve/serve-git.ts";
+import { gitHistoryClientLabelsFor } from "../src/serve/serve-i18n.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 

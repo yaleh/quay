@@ -6,7 +6,7 @@
 // they share a pid, nothing in `ps` tells a reader which services that single process hosts. This
 // module publishes that fact to a durable, externally-readable file and reads it back with the
 // three outcomes kept apart. It is deliberately the ONLY place the carrier's path and shape are
-// written down: `packages/quay/src/serve.ts` (the publisher) and `packages/quay/src/cli/server.ts`
+// written down: `packages/quay/src/serve/serve.ts` (the publisher) and `packages/quay/src/cli/server.ts`
 // (the reader) both import from here, so the contract cannot drift into two definitions.
 //
 // ── 三分法（硬规则 3b — 本文件必须做对的判断）──────────────────────────────────────────────────
@@ -36,7 +36,7 @@ import path from "node:path";
 // Before tasks/gap-arch-reverse-edges-zero this line pointed at plugin/scripts/write-json-atomic.ts,
 // a `packages/**` → `plugin/**` reverse edge that resolved only because esbuild inlined the plugin
 // file into the self-contained dist bundle.
-import { writeJsonAtomic } from "./kernel/write-json-atomic.ts";
+import { writeJsonAtomic } from "../kernel/write-json-atomic.ts";
 
 /** The carrier's workspace-relative path. Runtime state — never committed (untracked `.quay/`). */
 export const SERVER_STATE_REL = ".quay/server.json";

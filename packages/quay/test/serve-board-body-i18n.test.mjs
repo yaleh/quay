@@ -29,15 +29,15 @@ import path from "node:path";
 import fs from "node:fs";
 import os from "node:os";
 import http from "node:http";
-import { startServer } from "../src/serve.ts";
+import { startServer } from "../src/serve/serve.ts";
 import {
   BOARD_LABELS,
   BOARD_KEYS,
   boardLabelsFor,
   boardLabel,
   fillLabel,
-} from "../src/serve-i18n.ts";
-import { peekBoardSnapshot, BOARD_SNAPSHOT_DISABLED_ENV } from "../src/serve-board.ts";
+} from "../src/serve/serve-i18n.ts";
+import { peekBoardSnapshot, BOARD_SNAPSHOT_DISABLED_ENV } from "../src/serve/serve-board.ts";
 import { readBoardExecution, readBoardLanding, clearLandingCache } from "../src/observation.ts";
 import { QUAY_NATIVE_CLI } from "./helpers/cli-entry.mjs";
 

@@ -26,7 +26,7 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 import fs from "node:fs";
 import http from "node:http";
-import { startServer } from "../src/serve.ts";
+import { startServer } from "../src/serve/serve.ts";
 import {
   DASHBOARD_LABELS,
   DASHBOARD_KEYS,
@@ -35,11 +35,11 @@ import {
   dashboardLabel,
   fillLabel,
   chromeLabel,
-} from "../src/serve-i18n.ts";
+} from "../src/serve/serve-i18n.ts";
 import {
   peekDashboardSnapshot,
   DASHBOARD_SNAPSHOT_DISABLED_ENV,
-} from "../src/serve-dashboard.ts";
+} from "../src/serve/serve-dashboard.ts";
 import { readTests } from "../src/observation.ts";
 import { makeTmpDir } from "../../../plugin/test/helpers/tmp-workspace.mjs";
 import { QUAY_NATIVE_CLI } from "./helpers/cli-entry.mjs";

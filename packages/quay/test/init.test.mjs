@@ -27,7 +27,7 @@ import {
   migrateStaleMcpEntry,
   providerEntryFile,
 } from "../src/init.ts";
-import { SERVE_BINDING_FALLBACK } from "../src/serve-binding.ts";
+import { SERVE_BINDING_FALLBACK } from "../src/serve/serve-binding.ts";
 // The project-scope version cross-check reader (gap-init-plugin-version-crosscheck-project-scope-shadow):
 // the ONE module that reads the install record, unit-tested here for its three states.
 import { projectScopedVersionReading } from "../src/loaded-version.ts";

@@ -18,7 +18,7 @@ import path from "node:path";
 import fs from "node:fs";
 import os from "node:os";
 import http from "node:http";
-import { startServer } from "../src/serve.ts";
+import { startServer } from "../src/serve/serve.ts";
 import {
   readBoardLanding,
   readBoardExecution,
@@ -29,8 +29,8 @@ import {
   readTaskStatusAtRef,
   clearTaskStatusRefCache,
 } from "../src/observation.ts";
-import { renderBoardPage } from "../src/serve-handlers.ts";
-import { handleBoard, BOARD_SNAPSHOT_DISABLED_ENV } from "../src/serve-board.ts";
+import { renderBoardPage } from "../src/serve/serve-handlers.ts";
+import { handleBoard, BOARD_SNAPSHOT_DISABLED_ENV } from "../src/serve/serve-board.ts";
 import { QUAY_NATIVE_CLI } from "./helpers/cli-entry.mjs";
 import { createStore } from "../../quay-native/src/store.ts";
 
@@ -903,7 +903,7 @@ test("AC-292 — /board's own chrome switches under Cookie: lang=zh; en baseline
 // renaming the PAGE_LABELS key fails HERE, with the reason, instead of silently degrading the live
 // page back to an English <title> (which the criterion would then report as `title-unchanged`).
 test("AC-292 — the PAGE_LABELS tokens serve-board.ts passes to pageTitle/pageNameFor resolve in zh", async () => {
-  const { pageNameFor } = await import("../src/serve-i18n.ts");
+  const { pageNameFor } = await import("../src/serve/serve-i18n.ts");
   // The FULL token `pageTitle` receives (em dash + subtitle included) — ROW 3's key shape.
   // ⚠️ MIGRATED by gap-webui-board-body-copy-en-zh: the token itself is now ENGLISH. Only the TOKEN
   // moved; AC-292's four arms are unchanged, because `pageNameFor`'s en column is the identity for
@@ -982,7 +982,7 @@ test("AC3/AC4 — the landing <code> renders the DERIVED name in all four landin
 });
 
 test("AC2 — the three srcLanding* rows carry a {source} SLOT, not a second literal", async () => {
-  const { boardLabel } = await import("../src/serve-i18n.ts");
+  const { boardLabel } = await import("../src/serve/serve-i18n.ts");
   const { TASK_STATUS_DRIFT_CHECK_NAME } = await import("../src/observation.ts");
   for (const key of ["srcLandingTimeout", "srcLandingUnavailable", "srcLandingFailed"]) {
     for (const lang of ["en", "zh"]) {
@@ -1006,7 +1006,8 @@ test("AC1 — no product-layer source names the checker a second time (source sc
     const src = fs.readFileSync(path.join(__dirname, "..", "src", file), "utf8");
     return src.split("\n").map((line, i) => [i + 1, line]).filter(([, line]) => line.includes(TASK_STATUS_DRIFT_CHECK_NAME));
   };
-  for (const file of ["serve-board.ts", "serve-i18n.ts"]) {
+  // Serve modules live under `src/serve/` (gap-routine-architecture-analysis-quay-src-serve-surface-flat-in-src).
+  for (const file of ["serve/serve-board.ts", "serve/serve-i18n.ts"]) {
     const hits = occurrenceLines(file);
     assert.equal(hits.length, 0,
       `${file} must not name the checker (a second naming point reopens the defect): ` +

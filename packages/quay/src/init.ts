@@ -1211,7 +1211,7 @@ export function generateConfigContent(opts: {
     "# fresh install and an upgrade disagree about whether the section exists at all (AC-330).",
     "# Uncomment ONLY to pin your own values; the ones shown ARE the effective defaults.",
     "#",
-    "# Exactly ONE reader: `resolveServeBinding` (packages/quay/src/serve-binding.ts). An explicit",
+    "# Exactly ONE reader: `resolveServeBinding` (packages/quay/src/serve/serve-binding.ts). An explicit",
     "# command-line `--host` / `--port` still wins over this section; a malformed value here (a",
     "# non-integer port, a blank host) REFUSES the start rather than silently falling back — so",
     "# 「配错了」 and 「没配」 are never the same reading.",

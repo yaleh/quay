@@ -25,7 +25,7 @@ import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
-import { layoutGitGraph } from "../src/serve-git.ts";
+import { layoutGitGraph } from "../src/serve/serve-git.ts";
 import { readGitHistory } from "../src/observation.ts";
 import { windowScopeArgs, windowGitExec, withStableWindow } from "./helpers/git-ref-window.mjs";
 

@@ -17,7 +17,7 @@ import path from "node:path";
 import fs from "node:fs";
 import os from "node:os";
 import { readTranscript, SESSION_VIEW_INITIAL_TURNS, SESSION_VIEW_EARLIER_CHUNK } from "../src/observation.ts";
-import { renderSessionsPage, renderSessionPage, earlierTurnsChunk, handleSessionEarlier } from "../src/serve-handlers.ts";
+import { renderSessionsPage, renderSessionPage, earlierTurnsChunk, handleSessionEarlier } from "../src/serve/serve-handlers.ts";
 
 const LIVE_ID = "11111111-1111-4111-8111-111111111111";
 const GONE_ID = "22222222-2222-4222-8222-222222222222";

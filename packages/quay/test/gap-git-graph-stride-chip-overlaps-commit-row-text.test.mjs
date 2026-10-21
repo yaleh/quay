@@ -41,7 +41,7 @@ import {
   GIT_GRAPH_TEXT_X,
   GIT_GRAPH_ROW_H,
   GIT_GRAPH_PAD_Y,
-} from "../src/serve-git.ts";
+} from "../src/serve/serve-git.ts";
 import { resolveRefWindow, windowScopeArgs, windowGitExec, describeWindow, withStableWindow } from "./helpers/git-ref-window.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -95,7 +95,7 @@ function nonCommitIntersections(commitEls, nonCommitEls) {
 // ── AC1: the appendChip mechanism is gone from the source ──────────────────────────────────────────
 
 test("AC1: serve-git.ts carries zero appendChip sites (grep -c = 0, was 4)", () => {
-  const src = readFileSync(path.resolve(__dirname, "../src/serve-git.ts"), "utf8");
+  const src = readFileSync(path.resolve(__dirname, "../src/serve/serve-git.ts"), "utf8");
   const count = (src.match(/appendChip/g) || []).length;
   assert.equal(count, 0, `appendChip occurrence count must be 0 (got ${count})`);
 });

@@ -4,7 +4,7 @@
 // LIVE-batch B / DIR-044-LIVE).
 //
 // resolveProviderEnv(cfg, provider) is the single shared env-resolution leg
-// that bin/quay.js, src/mcp-server.js, and src/serve.js all call (QN-045).
+// that bin/quay.js, src/mcp-server.js, and src/serve/serve.js all call (QN-045).
 // Its contract (per the module's own header comment):
 //   - iterate provider.env's entries;
 //   - a STRING value that starts with "./" or "../" is a relative path and is

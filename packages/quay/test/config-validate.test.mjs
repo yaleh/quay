@@ -510,7 +510,7 @@ test("AC4: config-validate.ts no longer reads the raw YAML mcp_entry (predicate 
   // control below could never match again. That made the assertion a develop-wide, ownerless red
   // (every task's fan-in suite runs this file). A pinned revision is immutable, so the control
   // stays falsifiable. Same idiom as gap-git-graph-cross-column-edges-drawn-as-fixed-stubs-not-
-  // anchored.test.mjs's `303a94950^:packages/quay/src/serve-git.ts`.
+  // anchored.test.mjs's `303a94950^:packages/quay/src/serve/serve-git.ts`.
   const PRE_CHANGE_REV = "6f747e39e^"; // parent of the commit that removed the raw access
   const before = exec("git", ["-C", repoRoot, "show", `${PRE_CHANGE_REV}:packages/quay/src/config-validate.ts`], {
     encoding: "utf8",

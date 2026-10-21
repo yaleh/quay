@@ -18,13 +18,13 @@ import path from "node:path";
 import fs from "node:fs";
 import os from "node:os";
 import http from "node:http";
-import { startServer } from "../src/serve.ts";
-import { dashboardLabelsFor } from "../src/serve-i18n.ts";
-import { renderLiveCard, renderMgrCard, renderTestsCard, renderDashboardPage, sparklineSvg, renderDashboardCardRefreshScript } from "../src/serve-dashboard.ts";
+import { startServer } from "../src/serve/serve.ts";
+import { dashboardLabelsFor } from "../src/serve/serve-i18n.ts";
+import { renderLiveCard, renderMgrCard, renderTestsCard, renderDashboardPage, sparklineSvg, renderDashboardCardRefreshScript } from "../src/serve/serve-dashboard.ts";
 import { QUAY_NATIVE_CLI } from "./helpers/cli-entry.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const SERVE_DASHBOARD_SRC = path.join(__dirname, "..", "src", "serve-dashboard.ts");
+const SERVE_DASHBOARD_SRC = path.join(__dirname, "..", "src", "serve", "1606");
 
 /** Minimal-but-shape-valid dashboard args (the same benign shape the sibling dashboard tests use). */
 function makeDashboardArgs(tasks = []) {

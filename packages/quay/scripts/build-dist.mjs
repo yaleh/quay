@@ -45,7 +45,7 @@ export const REQUIRE_BANNER =
  * walk-up from each file's own directory.
  *
  * WHY IT WAS ADDED (GOAL-017/AC-251): the Core bundle used to INLINE sources living outside the
- * product package — `src/serve.ts` imported `serveControlPlane` from
+ * product package — `src/serve/serve.ts` imported `serveControlPlane` from
  * `plugin/scripts/driver-shared.ts`, which dynamic-imports `@modelcontextprotocol/sdk/*` and
  * `zod`. esbuild resolves a bundled file's bare specifiers relative to THAT FILE's directory, and a
  * plugin-layer source has no node_modules between it and the filesystem root: it happened to work in

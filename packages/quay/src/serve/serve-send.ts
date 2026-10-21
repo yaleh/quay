@@ -35,9 +35,9 @@ import os from "node:os";
 import path from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { isValidSessionId, sessionTranscriptPath } from "./observation.ts";
+import { isValidSessionId, sessionTranscriptPath } from "../observation.ts";
 import { html, escapeHtml, pageStyles, modernistStyles, renderSiteNav, renderMobileChrome } from "./serve-render.ts";
-import { resolvePluginScriptExec } from "./core/plugin-root.ts";
+import { resolvePluginScriptExec } from "../core/plugin-root.ts";
 // Shared session read/write primitives — the socket delivery lanes (L1 message / L2 keys) and the
 // input-face audit ledger each exist exactly ONCE in this repo, byte-identical to the pinned
 // quay-fleet blob (packages/quay/src/primitives/PROVENANCE.md; re-checked by
@@ -49,7 +49,7 @@ import { resolvePluginScriptExec } from "./core/plugin-root.ts";
 // / ledger mechanics are `deliver` (L1) and `deliverKeys` (L2); what stays here is only THIS repo's
 // orchestration — which frames to compose, where the ledger goes, and how an outcome maps onto the
 // delivery vocabulary.
-import { appendAuditRecord, deliver, deliverKeys, summarizePayload } from "./primitives/delivery-audit.mjs";
+import { appendAuditRecord, deliver, deliverKeys, summarizePayload } from "../primitives/delivery-audit.mjs";
 
 const execFileP = promisify(execFile);
 

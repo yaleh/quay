@@ -41,7 +41,7 @@ export const KINDS = ["promotion", "worker", "outer", "quality", "meta", "goal"]
 // 把清单留在 serve.ts 会让 `quay --help` 每次调用付那份加载成本（driver-vocab.ts 的头注释记着
 // 同一个实测：0.25s → 0.67s）。本模块零 import ⇒ 成为**单一实现 + 零加载成本**的那个落点。
 //
-// ⛔ 这里是**唯一**的服务清单：`packages/quay/src/serve.ts`（宿主）与 `packages/quay/src/cli/server.ts`
+// ⛔ 这里是**唯一**的服务清单：`packages/quay/src/serve/serve.ts`（宿主）与 `packages/quay/src/cli/server.ts`
 // （四个动词）都从这里 import，⛔ 不各写一份（SPEC §6.8 单一实现；两份 = 假）。
 //
 // `DRIVER_SERVICE_KINDS` 与上面的 `KINDS` 是同一集合 —— 服务名 `driver:<kind>` 的 kind 段由它构造。

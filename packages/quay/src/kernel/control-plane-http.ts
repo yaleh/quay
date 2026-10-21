@@ -3,7 +3,7 @@
 // (tasks/gap-arch-reverse-edges-zero; moved down from plugin/scripts/driver-shared.ts — see
 //  kernel/control-state.ts for the full §8-①b decision record and the three measurements behind it)
 //
-// WHY IT IS A KERNEL MODULE: `packages/quay/src/serve.ts` hosts this server IN-PROCESS (GOAL-017 /
+// WHY IT IS A KERNEL MODULE: `packages/quay/src/serve/serve.ts` hosts this server IN-PROCESS (GOAL-017 /
 // AC-251, SPEC-unified-quay-server §7 stage A2: "web (serve) + control 合入一个进程"), so the
 // product layer is a first-class consumer of it, and it must reach it without a `packages/**` →
 // `plugin/**` reverse edge. Everything the server needs is in `./control-state.ts` + node builtins;
@@ -37,7 +37,7 @@ import {
 
 /** The control plane's bind host fallback — LOOPBACK by design (its only gate is the
  *  caller-identity check, kernel/control-state.ts CONTROL_HEADER), and a DIFFERENT quantity from
- *  the web binding (packages/quay/src/serve-binding.ts): the web leg is reachable on all
+ *  the web binding (packages/quay/src/serve/serve-binding.ts): the web leg is reachable on all
  *  interfaces, the control leg is not. Exported so `serve.ts` publishes this same value into the
  *  carrier instead of re-spelling it (gap-serve-binding-defaults-three-copies-to-one-definition-point). */
 export const CONTROL_PLANE_DEFAULT_HOST = "127.0.0.1";

@@ -12,7 +12,7 @@
 //   AC2 — 0 分母（acs.length === 0）⇒ 无 NaN/Infinity 宽度、无进度条，纯文本仍可读。
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { renderGoalCard } from "../src/serve-dashboard.ts";
+import { renderGoalCard } from "../src/serve/serve-dashboard.ts";
 
 // gap-webui-dashboard-body-copy-en-zh: the dashboard's body copy is now language-dependent and
 // the module default is `en` (DEFAULT_LANG). Every render below is therefore made EXPLICITLY

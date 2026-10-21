@@ -31,7 +31,7 @@ import { FIXED_GANTT_LANES, mergeLiveAndHistoryIntervals, packLanes, type LiveGa
 // and the very same `DEFAULT_TIMELINE_HOURS` (3). A local `3` here would be a second definition
 // point for a value the Contract requires to equal the card's, i.e. exactly the drift class this
 // repo forbids. The import is paid only by THIS verb — bin/quay.ts loads handlers lazily at dispatch.
-import { DEFAULT_TIMELINE_HOURS, parseTimelineHours } from "../serve-dashboard.ts";
+import { DEFAULT_TIMELINE_HOURS, parseTimelineHours } from "../serve/serve-dashboard.ts";
 import { resolveRoot } from "../driver-control.ts";
 import type { CliCtx } from "./context.ts";
 

@@ -21,7 +21,7 @@ import {
   DOC_SURFACE_REL,
   ADVISORY_ALLOWLIST,
 } from "../scripts/serve-binding-literal-check.ts";
-import { SERVE_BINDING_FALLBACK } from "../../packages/quay/src/serve-binding.ts";
+import { SERVE_BINDING_FALLBACK } from "../../packages/quay/src/serve/serve-binding.ts";
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const HOST = SERVE_BINDING_FALLBACK.host;
@@ -63,13 +63,13 @@ test("GREEN: the real repo holds exactly ONE quoted bind default, and it is the 
 test("RED (control 1): a second quoted default in an ENTRY file FAILS", () => {
   const root = fixture({
     [HOLDER_REL]: DECLARATION,
-    "packages/quay/src/serve.ts": `const host = opts.host ?? ${QUOTED_HOST};\n`,
+    "packages/quay/src/serve/serve.ts": `const host = opts.host ?? ${QUOTED_HOST};\n`,
   });
   try {
     const report = checkServeBindingLiteral(root);
     assert.equal(report.ok, false, "a re-grown bind default must be caught");
     assert.equal(report.hits.length, 2);
-    assert.ok(report.hits.some((h) => h.file === "packages/quay/src/serve.ts"), "the offending site is named");
+    assert.ok(report.hits.some((h) => h.file === "packages/quay/src/serve/serve.ts"), "the offending site is named");
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }

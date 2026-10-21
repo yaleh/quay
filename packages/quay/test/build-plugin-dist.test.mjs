@@ -719,7 +719,7 @@ test("AC4 — negative control: removing the driver field empties the derived se
 });
 
 // ── gap-ac205-session-delivery-channel-transcript-confirmed ──────────────────────────────────────
-// send-to-session.ts:53 does `await import("../../packages/quay/src/serve-send.ts")` — a dev-tree
+// send-to-session.ts:53 does `await import("../../packages/quay/src/serve/serve-send.ts")` — a dev-tree
 // relative path. The shipped dist/send-to-session.js must be SELF-CONTAINED (serve-send inlined,
 // no runtime dev-tree dynamic import), or the installed artifact (no packages/ source tree) fails at
 // runtime with "共享投递模块不可用" (send-to-session.ts:134). esbuild inlines the dynamic import; the

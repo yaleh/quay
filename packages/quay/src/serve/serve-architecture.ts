@@ -1,7 +1,7 @@
 // serve-architecture.ts — /architecture route handler, split from serve-handlers.ts.
 
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { readArchitecture, ARCH_RECENT_WINDOW_DAYS, type ArchitectureResult } from "./observation.ts";
+import { readArchitecture, ARCH_RECENT_WINDOW_DAYS, type ArchitectureResult } from "../observation.ts";
 import { architectureLabelsFor, fillLabel } from "./serve-i18n.ts";
 import type { ServePageCfg, ServeIdentity } from "./serve-render.ts";
 import { html, escapeHtml, pageStyles, modernistStyles, renderSiteNav, renderMobileChrome, obsNote, pageTitle, pageNameFor, htmlLangTag, DEFAULT_LANG, type Lang } from "./serve-render.ts";

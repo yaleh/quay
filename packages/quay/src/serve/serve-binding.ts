@@ -6,7 +6,7 @@
 //
 //   entry                                   host default        port default
 //   ─────────────────────────────────────   ─────────────────   ─────────────────────────────
-//   packages/quay/src/serve.ts              all-interfaces        kernel-assigned (0)
+//   packages/quay/src/serve/serve.ts              all-interfaces        kernel-assigned (0)
 //   packages/quay/src/cli/server.ts         loopback              (omitted ⇒ 0)
 //   plugin/scripts/start-drivers.ts         all-interfaces        0, WRITTEN into every cmdline
 //

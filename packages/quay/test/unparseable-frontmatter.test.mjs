@@ -30,7 +30,7 @@ import fs from "node:fs";
 import os from "node:os";
 import http from "node:http";
 import YAML from "yaml";
-import { startServer } from "../src/serve.ts";
+import { startServer } from "../src/serve/serve.ts";
 import { connectProvider } from "../src/provider-client.ts";
 import { createStore } from "../../quay-native/src/store.ts";
 import { QUAY_NATIVE_CLI } from "./helpers/cli-entry.mjs";

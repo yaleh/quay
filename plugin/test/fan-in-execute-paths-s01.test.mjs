@@ -110,7 +110,7 @@ test("① AC2 取假一 — code committed EARLIER in branch history must still 
   // delta was doc-only ⇒ skipped the full suite while the branch's own code (serve.ts, committed in
   // branch history) silently landed on develop never full-suite-covered. The FIX diffs `fork HEAD` —
   // the branch's overall change ⇒ serve.ts must appear in code_delta.
-  const codeDelta = await classifyRealDelta({ "packages/quay/src/serve-handlers.ts": "export const x = 1\n" });
+  const codeDelta = await classifyRealDelta({ "packages/quay/src/serve/serve-handlers.ts": "export const x = 1\n" });
   assert.notEqual(codeDelta, "", `branch-overall delta must see the branch's own code (取假一), got empty`);
   assert.match(codeDelta, /packages\/quay\/src\/serve-handlers\.ts/);
   // The develop-side delta (what the OLD gate saw) is doc-only — prove the falsification is real:

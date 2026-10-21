@@ -36,7 +36,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import path from "node:path";
 import fs from "node:fs";
 import { readDriverStatus, clearDriverStatusCache } from "../src/observation.ts";
-import { renderMgrCard } from "../src/serve-dashboard.ts";
+import { renderMgrCard } from "../src/serve/serve-dashboard.ts";
 import { aliveness, carrierStats, KNOWN_KINDS, DRIVER_KINDS } from "../../../plugin/scripts/driver-runtime.ts";
 import { makeTmpDir } from "../../../plugin/test/helpers/tmp-workspace.mjs";
 
@@ -47,7 +47,7 @@ import { makeTmpDir } from "../../../plugin/test/helpers/tmp-workspace.mjs";
 
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const SERVE_DASHBOARD_SRC = path.join(__dirname, "..", "src", "serve-dashboard.ts");
+const SERVE_DASHBOARD_SRC = path.join(__dirname, "..", "src", "serve", "2990");
 const OBSERVATION_SRC = path.join(__dirname, "..", "src", "observation.ts");
 const KERNEL = path.resolve(__dirname, "..", "..", "..", "plugin", "scripts", "driver-runtime.ts");
 

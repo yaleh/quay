@@ -21,7 +21,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { readFileSync, existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
-import { readGitHistory, readGitRemotes, type GitHistoryCommit, type GitHistoryResult, GIT_HISTORY_LIMIT } from "./observation.ts";
+import { readGitHistory, readGitRemotes, type GitHistoryCommit, type GitHistoryResult, GIT_HISTORY_LIMIT } from "../observation.ts";
 import type { ServePageCfg, ServeIdentity } from "./serve-render.ts";
 import { html, escapeHtml, pageStyles, modernistStyles, renderSiteNav, renderMobileChrome, pad2, pageTitle, pageNameFor, htmlLangTag, DEFAULT_LANG, type Lang } from "./serve-render.ts";
 import { gitHistoryLabelsFor, gitHistoryLabel, gitHistoryClientLabelsFor, type GitHistoryKey, type GitHistoryClientLabels } from "./serve-i18n.ts";
@@ -69,7 +69,8 @@ export const GIT_GRAPH_AUTO_LOAD_ROW_LIMIT = 2500;
  * contrast against the light canvas (--color-neutral-100 / #f8f4f4). Slot-indexed by column number:
  * column `c` draws with `var(--color-lane-(c % 8))`, so two ADJACENT columns always differ in hue.
  * Restored verbatim from the retired lane model (gap-git-graph-cross-column-edges-drawn-as-fixed-stubs-
- * not-anchored AC10 pins it to `git show 303a94950^:packages/quay/src/serve-git.ts` item-by-item).
+ * not-anchored AC10 pins it to `git show 303a94950^:packages/quay/src/serve-git.ts` item-by-item; the
+ * file has since been moved to `src/serve/`, so the HISTORICAL path is the one that rev carries).
  */
 export const GIT_GRAPH_LANE_PALETTE: readonly string[] = [
   "#b71c1c", // red

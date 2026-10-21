@@ -2,7 +2,7 @@
 # Mutation case for host-repo-surface-ratchet (gap-host-repo-surface-ratchet, GOAL-015 退出条件④ / AC-236).
 # Fixture: a root whose three enumerated surfaces are CONTROLLED FAKES —
 #   packages/quay/bin/quay.ts              prints a fixed --help (2 verbs: init, task)
-#   packages/quay/src/serve-handlers.ts    + serve.ts carry fixed url.pathname === "…" routes (4 total)
+#   packages/quay/src/serve/serve-handlers.ts + serve/serve.ts carry fixed url.pathname === "…" routes (4 total)
 #   plugin/scripts/config-key-consumer-check.ts prints a fixed --json (2 has-consumer keys)
 # The checker enumerates the REAL entry/sources under --root (never a fixture of the checker itself),
 # so the fakes stand in for the real surface — the mutation tests the checker's JUDGMENT, not the real
@@ -15,7 +15,7 @@ name="host-repo-surface-ratchet"
 workdir="${1:?usage: $name.sh <workdir>}"
 checker_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
-mkdir -p "${workdir}/packages/quay/bin" "${workdir}/packages/quay/src" "${workdir}/plugin/scripts"
+mkdir -p "${workdir}/packages/quay/bin" "${workdir}/packages/quay/src/serve" "${workdir}/plugin/scripts"
 
 # Fake CLI entry: prints a fixed --help surface (2 verbs).
 cat > "${workdir}/packages/quay/bin/quay.ts" <<'EOF'
@@ -30,8 +30,8 @@ write_routes() { # $1 = "yes" (with /tasks) | "no" (without /tasks)
     echo 'if (url.pathname === "/") {}'
     if [ "$1" = "yes" ]; then echo 'if (url.pathname === "/tasks") {}'; fi
     echo 'if (url.pathname === "/dashboard") {}'
-  } > "${workdir}/packages/quay/src/serve-handlers.ts"
-  echo 'if (url.pathname === "/health") {}' > "${workdir}/packages/quay/src/serve.ts"
+  } > "${workdir}/packages/quay/src/serve/serve-handlers.ts"
+  echo 'if (url.pathname === "/health") {}' > "${workdir}/packages/quay/src/serve/serve.ts"
 }
 
 # Fake config-key consumer check: prints a fixed --json with 2 has-consumer keys.

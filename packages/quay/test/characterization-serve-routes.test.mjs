@@ -10,7 +10,7 @@
 // The two load-bearing properties, both required by the task's ACs:
 //
 //   ① The route set is DERIVED from the dispatcher's real registry — `handleAllRoutes` in
-//      packages/quay/src/serve-handlers.ts — never hand-copied here. A hand-copied list drifts the
+//      packages/quay/src/serve/serve-handlers.ts — never hand-copied here. A hand-copied list drifts the
 //      moment a route is added; the derivation makes a new route RED (missing snapshot key) instead
 //      of silently un-snapshotted. `deriveGetRoutes()` reads the source text and applies the same
 //      two matcher shapes the dispatcher uses (`url.pathname === "…"` literals + `/^\…$/` regex
@@ -37,13 +37,13 @@ import http from "node:http";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { startServer } from "../src/serve.ts";
+import { startServer } from "../src/serve/serve.ts";
 import { createStore } from "../../quay-native/src/store.ts";
 import { QUAY_NATIVE_CLI } from "./helpers/cli-entry.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const SNAPSHOT_PATH = path.join(__dirname, "fixtures", "characterization", "serve-routes.snapshot.json");
-const HANDLERS_SRC = path.join(__dirname, "..", "src", "serve-handlers.ts");
+const HANDLERS_SRC = path.join(__dirname, "..", "src", "serve", "2637");
 const nativeBin = QUAY_NATIVE_CLI;
 const nativeProviderDir = path.join(__dirname, "..", "..", "quay-native", "bin");
 
@@ -402,7 +402,7 @@ test("route-set: the dispatcher-derived GET routes and the snapshot keys are the
   assert.deepEqual(
     missingFromSnapshot,
     [],
-    `route-set: every GET route registered in packages/quay/src/serve-handlers.ts must be snapshotted; missing: ${JSON.stringify(missingFromSnapshot)}`,
+    `route-set: every GET route registered in packages/quay/src/serve/serve-handlers.ts must be snapshotted; missing: ${JSON.stringify(missingFromSnapshot)}`,
   );
   assert.deepEqual(
     staleInSnapshot,

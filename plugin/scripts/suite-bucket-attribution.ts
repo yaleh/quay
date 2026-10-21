@@ -56,7 +56,7 @@ import { isDirectEntry, normalizeRel, flagValue } from "./gate-script-base.ts";
 
 // The canonical bucket set (`Bucket`), its order (`BUCKET_ORDER`) and the string form
 // (`canonicalBuckets`) are a kernel leaf shared with the product-side page renderer
-// (`packages/quay/src/serve-tests.ts`), which cannot import `plugin/**` (reverse-edge ratchet).
+// (`packages/quay/src/serve/serve-tests.ts`), which cannot import `plugin/**` (reverse-edge ratchet).
 // Re-exported below so this file stays the one import site for the existing consumers
 // (routine `semantic-dedup-scan` finding `canonical-buckets`, task
 // gap-routine-semantic-dedup-scan-canonical-buckets).

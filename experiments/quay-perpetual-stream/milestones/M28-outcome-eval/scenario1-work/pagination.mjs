@@ -1,7 +1,7 @@
 // pagination.mjs — M28-outcome-eval scenario 1 scratch deliverable.
 // Standalone paginate() helper, motivated by the duplicated page-size /
 // page-index clamping logic in packages/quay/bin/quay.js (resolvePageSize)
-// and packages/quay/src/serve.js (separate query-param pageSize handling).
+// and packages/quay/src/serve/serve.js (separate query-param pageSize handling).
 // This module does NOT modify either product file (out of scope for this
 // milestone) — it demonstrates the shared logic as a standalone, tested
 // unit, per scenario 1's Plan.

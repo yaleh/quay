@@ -110,7 +110,7 @@ export const DEFAULT_LABELS = Object.freeze({
   "native-goal-write-desc": "drift",
   "serve-goal-status-order": "drift",
   "serve-goal-status-tabs": "drift",
-  "discovered:packages/quay/src/serve-dashboard.ts:1009": "legit",
+  "discovered:packages/quay/src/serve/serve-dashboard.ts:1009": "legit",
   "discovered:plugin/scripts/routine-file-gate.ts:375": "legit",
   "discovered:plugin/scripts/routine-file-gate.ts:378": "legit",
 });

@@ -3,13 +3,13 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { readFileSync, readdirSync, openSync, readSync, closeSync, statSync } from "node:fs";
 import path from "node:path";
-import { readTests, type TestsResult, type TestRunRecord } from "./observation.ts";
+import { readTests, type TestsResult, type TestRunRecord } from "../observation.ts";
 // The canonical bucket set + string form are a kernel leaf: single source with the dispatch-side
 // attribution judge (which reaches the same leaf through `plugin/scripts/suite-bucket-attribution.ts`'s
 // re-export). Only the ORDER/FORM is shared — the file→bucket JUDGMENT still travels through the
 // dispatch-written artifact below. (routine `semantic-dedup-scan` finding `canonical-buckets`, task
 // gap-routine-semantic-dedup-scan-canonical-buckets.)
-import { canonicalBuckets, type Bucket } from "./kernel/canonical-buckets.ts";
+import { canonicalBuckets, type Bucket } from "../kernel/canonical-buckets.ts";
 import type { ServePageCfg, ServeIdentity } from "./serve-render.ts";
 import {
   html, escapeHtml, pageStyles, modernistStyles, renderSiteNav, renderMobileChrome, pad2, obsNote, DEFAULT_PAGE_SIZE, tableWrap, pageTitle,

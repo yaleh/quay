@@ -27,7 +27,7 @@ import {
   GIT_GRAPH_TRUNK_X,
   GIT_GRAPH_LANE_GAP,
   GIT_GRAPH_PAD_Y,
-} from "../src/serve-git.ts";
+} from "../src/serve/serve-git.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "../../..");

@@ -7,7 +7,7 @@
 //   socket 返回 0 字节（fire-and-forget，无 ack/error）；消息以纯文本到达目标会话。
 //
 // gap-webui-message-delivery-entry：本脚本的 socket 协议（连接 + 写 auth/user 帧）已提炼为可 import
-// 的共享模块 `packages/quay/src/serve-send.ts` 的 `sendSessionFrames`——web 发送入口（/send）与本节
+// 的共享模块 `packages/quay/src/serve/serve-send.ts` 的 `sendSessionFrames`——web 发送入口（/send）与本节
 // 本脚本【共用同一实现】（⛔ 不复制一份进 web 层）。本脚本继续作为独立诊断工具保留，只负责参数解析
 // 与诊断输出，投递动作委托给共享模块。
 //
@@ -207,13 +207,13 @@ import path from "node:path";
 import { flagValue } from "./gate-script-base.ts";
 import { readProcCmdline } from "../../packages/quay/src/kernel/proc-identity.ts";
 
-// 共享 socket 协议（packages/quay/src/serve-send.ts 的 sendSessionFrames）。动态 import 用相对路径
+// 共享 socket 协议（packages/quay/src/serve/serve-send.ts 的 sendSessionFrames）。动态 import 用相对路径
 // ——与 build-evidence-gate.ts 的 `await import("../../packages/quay/src/…")` 同型（plugin 从 repo-root
 // 的 packages/quay 取产品模块，相对本脚本解析，非打包期依赖）。
 async function loadSendSessionFrames(): Promise<
   (opts: { sockPath: string; token: string; text: string; fromName: string }) => Promise<{ ok: boolean; reason: string | null }>
 > {
-  const mod = await import("../../packages/quay/src/serve-send.ts");
+  const mod = await import("../../packages/quay/src/serve/serve-send.ts");
   return mod.sendSessionFrames;
 }
 
@@ -249,7 +249,7 @@ if (args.includes("--keys")) {
   console.error(`  audit  = ${auditLogPath}`);
   console.error(`  bytes  = ${JSON.stringify(bytes)}（原样注入，含控制字节；⛔ 不自动补换行）`);
   try {
-    const mod = await import("../../packages/quay/src/serve-send.ts");
+    const mod = await import("../../packages/quay/src/serve/serve-send.ts");
     const out = await mod.sendKeysToSession({ sockPath, authToken, bytes, auditLogPath, who: `script-${process.pid}` });
     if (out.delivered) {
       console.error("  ✅ DATA 帧已写出（拒绝帧未先到）");

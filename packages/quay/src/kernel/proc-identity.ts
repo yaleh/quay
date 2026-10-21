@@ -2,7 +2,7 @@
 // (tasks/gap-arch-reverse-edges-zero; extracted from plugin/scripts/worktree-process-reaper.ts)
 //
 // ── WHY THIS FILE EXISTS AT ALL (why not just import the reaper) ─────────────────════════════════
-// `packages/quay/src/serve.ts` needs exactly these two predicates for its admission lock's pid-reuse
+// `packages/quay/src/serve/serve.ts` needs exactly these two predicates for its admission lock's pid-reuse
 // guard (a recycled pid that is alive but is NOT a `quay serve` must be judged STALE, not "held").
 // It used to import them from `plugin/scripts/worktree-process-reaper.ts` — a `packages/**` →
 // `plugin/**` reverse edge. The reaper CANNOT simply be moved down instead: it imports

@@ -26,7 +26,7 @@ import {
   renderWorkProgressRow,
   gridColumns,
   dashboardGridStyles,
-} from "../src/serve-dashboard.ts";
+} from "../src/serve/serve-dashboard.ts";
 
 /** Minimal-but-shape-valid dashboard args (the same benign shape the sibling dashboard tests use). */
 function makeDashboardArgs(tasks = []) {

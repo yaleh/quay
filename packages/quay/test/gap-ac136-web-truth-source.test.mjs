@@ -25,7 +25,7 @@ import path from "node:path";
 import fs from "node:fs";
 import os from "node:os";
 import { readManager, clearPoolMetricsCache, parsePromotionRoundRecords } from "../src/observation.ts";
-import { readTaskSummary, clearTaskSummaryCache } from "../src/serve-handlers.ts";
+import { readTaskSummary, clearTaskSummaryCache } from "../src/serve/serve-handlers.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "..", "..", "..");

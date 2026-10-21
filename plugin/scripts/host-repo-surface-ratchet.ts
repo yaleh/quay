@@ -54,8 +54,8 @@ export const CLI_ENTRY_REL = "packages/quay/bin/quay.ts";
 
 /** The web-route source files (position hits of `url.pathname === "…"`). */
 export const WEB_ROUTE_FILES: readonly string[] = [
-  "packages/quay/src/serve-handlers.ts",
-  "packages/quay/src/serve.ts",
+  "packages/quay/src/serve/serve-handlers.ts",
+  "packages/quay/src/serve/serve.ts",
 ];
 
 /** The config-key consumer checker whose --json output IS the config_keys_with_consumer surface. */

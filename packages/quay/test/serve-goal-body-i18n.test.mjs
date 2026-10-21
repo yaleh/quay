@@ -29,8 +29,8 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 import fs from "node:fs";
 import http from "node:http";
-import { startServer } from "../src/serve.ts";
-import { GOAL_LABELS, GOAL_KEYS, goalLabelsFor, goalLabel, fillLabel, CHROME_LABELS, chromeLabel } from "../src/serve-i18n.ts";
+import { startServer } from "../src/serve/serve.ts";
+import { GOAL_LABELS, GOAL_KEYS, goalLabelsFor, goalLabel, fillLabel, CHROME_LABELS, chromeLabel } from "../src/serve/serve-i18n.ts";
 import { makeTmpDir } from "../../../plugin/test/helpers/tmp-workspace.mjs";
 import { QUAY_NATIVE_CLI } from "./helpers/cli-entry.mjs";
 
@@ -305,7 +305,7 @@ test("AC2: the LIST read-failure banner is localized (both languages), on a clie
   // returns [] rather than throwing — verified), so a directory-based probe never renders the banner
   // and its row would go unexercised (硬规则 4: a criterion whose state cannot be built is not a
   // measurement). It is built here the only way it can be: a client that throws.
-  const { handleGoalList } = await import("../src/serve-goal.ts");
+  const { handleGoalList } = await import("../src/serve/serve-goal.ts");
   const capture = () => ({ statusCode: 0, headers: {}, body: "", writeHead(c, h) { this.statusCode = c; this.headers = h; }, end(b) { this.body = b || ""; } });
   const client = { goalList: async () => { throw new Error("boom-read"); }, taskList: async () => ({ tasks: [], malformed: [] }) };
   const en = capture();
@@ -441,7 +441,7 @@ test("AC2/residue: the NO-IDENTITY <title> is Chinese in BOTH languages — meas
   // stronger thing the earlier tasks did NOT: it CONSTRUCTS the state and pins the residue as
   // PRESENT in both languages, so a later task that localizes it must come here deliberately, and no
   // future reader can mistake the census above for a claim about every reachable state.
-  const { handleGoalList } = await import("../src/serve-goal.ts");
+  const { handleGoalList } = await import("../src/serve/serve-goal.ts");
   const capture = () => ({ statusCode: 0, headers: {}, body: "", writeHead(c, h) { this.statusCode = c; this.headers = h; }, end(b) { this.body = b || ""; } });
   const client = { goalList: async () => [{ id: "GOAL-001", title: "t", status: "active", kind: "goal", body: "" }], taskList: async () => ({ tasks: [], malformed: [] }) };
   const titleOf = (body) => /<title>([^<]*)<\/title>/.exec(body.replace(/\n/g, " "))?.[1];

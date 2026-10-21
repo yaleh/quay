@@ -2,7 +2,7 @@
 // gap-serve-binding-defaults-three-copies-to-one-definition-point.
 //
 // THE INVARIANT: the `quay serve` web binding's host literal has exactly ONE definition point —
-// `SERVE_BINDING_FALLBACK` in `packages/quay/src/serve-binding.ts` (the fallback branch of the one
+// `SERVE_BINDING_FALLBACK` in `packages/quay/src/serve/serve-binding.ts` (the fallback branch of the one
 // resolver every reader goes through). Before this, the same quantity had three definitions that
 // DISAGREED about the host (all-interfaces / all-interfaces / loopback), and `plugin/scripts/
 // start-drivers.ts` additionally wrote `--port 0` into every spawned host's cmdline — the mechanism
@@ -43,14 +43,14 @@ import { isDirectEntry } from "./gate-script-base.ts";
 // `semantic-dedup-scan-1790995446200`). Only the traversal moved; SCAN_ROOTS and SKIP_DIRS are this
 // checker's own.
 import { listFilesInRoots } from "./fs-walk.ts";
-import { SERVE_BINDING_FALLBACK } from "../../packages/quay/src/serve-binding.ts";
+import { SERVE_BINDING_FALLBACK } from "../../packages/quay/src/serve/serve-binding.ts";
 import { CONTROL_PLANE_DEFAULT_HOST } from "../../packages/quay/src/kernel/control-plane-http.ts";
 
 /** The scan roots — the AC's own two arguments. */
 export const SCAN_ROOTS = ["packages/quay/src", "plugin/scripts"];
 
 /** The single file allowed to hold the bind-default literal. */
-export const HOLDER_REL = "packages/quay/src/serve-binding.ts";
+export const HOLDER_REL = "packages/quay/src/serve/serve-binding.ts";
 
 /** The declaration the single hit must ride on. */
 export const DECLARATION_MARKER = "SERVE_BINDING_FALLBACK";
@@ -66,7 +66,7 @@ export const DOC_SURFACE_REL = "plugin/skills/drivers/SKILL.md";
  */
 export const ADVISORY_ALLOWLIST: ReadonlyArray<{ rel: string; reason: string }> = [
   {
-    rel: "packages/quay/src/server-state.ts",
+    rel: "packages/quay/src/serve/server-state.ts",
     reason: "normalises a wildcard bind host to a PROBEABLE address (the port-probe helper); it compares/derives, it does not define a bind default",
   },
   {

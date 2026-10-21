@@ -16,7 +16,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const SERVE_SEND = path.resolve(__dirname, "..", "..", "packages", "quay", "src", "serve-send.ts");
+const SERVE_SEND = path.resolve(__dirname, "..", "..", "packages", "quay", "src", "serve", "1100");
 const CHECKER = path.resolve(__dirname, "..", "scripts", "transcript-delivery-check.ts");
 
 const src = fs.readFileSync(SERVE_SEND, "utf8");

@@ -9,7 +9,7 @@
 // file beyond config — the env-building logic is provider-agnostic.
 //
 // Previously this logic was duplicated byte-identically in bin/quay.js and
-// src/mcp-server.js, while src/serve.js used a THIRD, narrower path: it read
+// src/mcp-server.js, while src/serve/serve.js used a THIRD, narrower path: it read
 // only `provider.tasks_dir` directly and built a single-key env object
 // (`QUAY_NATIVE_TASKS_DIR`), ignoring `provider.env` entirely. A workspace
 // config that set `tasks_dir` and `env` to different values would silently

@@ -20,7 +20,7 @@
 //
 // So the derivation lives here ONCE and the criteria CALL it. The carrier is read as the DIRECT
 // measurement of the live host's own state (hard rule 4b: `.quay/server.json` is written by the
-// running `packages/quay/src/serve.ts`, whose read contract is `packages/quay/src/server-state.ts`);
+// running `packages/quay/src/serve/serve.ts`, whose read contract is `packages/quay/src/serve/server-state.ts`);
 // ⛔ the workspace config is the EXPECTED state and is deliberately NOT consulted here.
 //
 // THREE-STATE OUTPUT (hard rule 3b). The caller must be able to tell "the carrier is not
@@ -53,8 +53,8 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-/** The carrier's path, relative to the workspace root. The writer is `packages/quay/src/serve.ts`;
- *  the read contract (shape + the three-way read outcome) is `packages/quay/src/server-state.ts`. */
+/** The carrier's path, relative to the workspace root. The writer is `packages/quay/src/serve/serve.ts`;
+ *  the read contract (shape + the three-way read outcome) is `packages/quay/src/serve/server-state.ts`. */
 export const CARRIER_RELATIVE_PATH = path.join(".quay", "server.json");
 
 /** Every NOT-EVALUATED sub-state this helper can report. Enumerated (⛔ not a boolean "ok/not-ok")

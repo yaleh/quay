@@ -598,7 +598,7 @@ test('E6 (negative): a non-zero schema-check result fails', () => {
 
 test('E7 (negative): a scoped commit touching an unrelated path fails', () => {
   const ev = evidenceFixture();
-  ev.mutations[0].scopedCommit.filesChanged = ['tasks/DIR-118.md', 'packages/quay/src/serve.js'];
+  ev.mutations[0].scopedCommit.filesChanged = ['tasks/DIR-118.md', 'packages/quay/src/serve/serve.js'];
   const r = runLiveProof(ev);
   assert.notEqual(r.status, 0, 'a commit touching unrelated files must be rejected');
 });

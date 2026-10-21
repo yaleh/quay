@@ -31,8 +31,8 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 import fs from "node:fs";
 import http from "node:http";
-import { startServer } from "../src/serve.ts";
-import { pageStyles, renderMobileChrome } from "../src/serve-handlers.ts";
+import { startServer } from "../src/serve/serve.ts";
+import { pageStyles, renderMobileChrome } from "../src/serve/serve-handlers.ts";
 import { makeTmpDir } from "../../../plugin/test/helpers/tmp-workspace.mjs";
 import { QUAY_NATIVE_CLI } from "./helpers/cli-entry.mjs";
 
@@ -41,7 +41,7 @@ const nativeBin = QUAY_NATIVE_CLI;
 const nativeProviderDir = path.join(__dirname, "..", "..", "quay-native", "bin");
 // gap-serve-handlers-split-by-concern: the rendering code (pageStyles + verdict classes) moved to
 // serve-render.ts; the AC102-preserved zero-hex + token-derived invariant now pins that file.
-const SERVE_RENDER = path.join(__dirname, "..", "src", "serve-render.ts");
+const SERVE_RENDER = path.join(__dirname, "..", "src", "serve", "2783");
 
 function get(port, urlPath) {
   return new Promise((resolve, reject) => {

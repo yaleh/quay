@@ -34,8 +34,8 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 import fs from "node:fs";
 import http from "node:http";
-import { startServer } from "../src/serve.ts";
-import { handleGoalList } from "../src/serve-goal.ts";
+import { startServer } from "../src/serve/serve.ts";
+import { handleGoalList } from "../src/serve/serve-goal.ts";
 import { makeTmpDir } from "../../../plugin/test/helpers/tmp-workspace.mjs";
 import { QUAY_NATIVE_CLI } from "./helpers/cli-entry.mjs";
 
@@ -119,7 +119,7 @@ const GOALS = [
   { id: "GOAL-003", title: "active goal", status: "active", kind: "goal" },
 ];
 const ACS = [
-  { id: "AC-156", title: "criterion AC-156 with a long title that must clamp to two lines", status: "achieved", kind: "criterion", goal: "GOAL-020", criterion: "grep -c 'text-overflow:ellipsis' packages/quay/src/serve-goal.ts" },
+  { id: "AC-156", title: "criterion AC-156 with a long title that must clamp to two lines", status: "achieved", kind: "criterion", goal: "GOAL-020", criterion: "grep -c 'text-overflow:ellipsis' packages/quay/src/serve/serve-goal.ts" },
   { id: "AC-161", title: "criterion AC-161", status: "superseded", kind: "criterion", goal: "GOAL-003", criterion: "exit 0" },
 ];
 

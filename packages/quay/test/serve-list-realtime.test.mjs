@@ -27,7 +27,7 @@ import os from "node:os";
 import http from "node:http";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
-import { startServer } from "../src/serve.ts";
+import { startServer } from "../src/serve/serve.ts";
 import { createStore } from "../../quay-native/src/store.ts";
 import { QUAY_NATIVE_CLI } from "./helpers/cli-entry.mjs";
 

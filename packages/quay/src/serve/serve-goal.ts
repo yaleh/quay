@@ -1,7 +1,7 @@
 // serve-goal.ts — /goal + /goal/<id> route handlers, split from serve-handlers.ts.
 
 import type { IncomingMessage, ServerResponse } from "node:http";
-import type { ProviderClient } from "./provider-client.ts";
+import type { ProviderClient } from "../provider-client.ts";
 import type { ServePageCfg } from "./serve-render.ts";
 import {
   html, escapeHtml, shellStyles, renderMarkdown, renderSiteNav, renderMobileChrome, renderBackLink, relativeTime, tableWrap, pageTitle,

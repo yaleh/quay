@@ -71,7 +71,7 @@ import { spawnSync } from "node:child_process";
 import { createStore } from "../../quay-native/src/store.ts";
 import { activeProvider } from "../src/config.ts";
 import { resolvePluginRoot } from "../src/core/plugin-root.ts";
-import { readPluginLinkVersion, pluginVersionState } from "../src/serve-render.ts";
+import { readPluginLinkVersion, pluginVersionState } from "../src/serve/serve-render.ts";
 import { laydownWorkspace } from "../../../plugin/test/helpers/quay-init-install-fixture.mjs";
 import { spawnAsync, spawnTimings, assertParallelLaunches } from "../../../plugin/test/helpers/async-spawn.mjs";
 

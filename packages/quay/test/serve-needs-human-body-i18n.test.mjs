@@ -27,15 +27,15 @@ import path from "node:path";
 import fs from "node:fs";
 import http from "node:http";
 import { execFileSync } from "node:child_process";
-import { startServer } from "../src/serve.ts";
+import { startServer } from "../src/serve/serve.ts";
 import {
   NEEDS_HUMAN_KEYS,
   NEEDS_HUMAN_LABELS,
   needsHumanLabelsFor,
   needsHumanLabel,
   fillLabel,
-} from "../src/serve-i18n.ts";
-import { renderNeedsHumanPage } from "../src/serve-needs-human.ts";
+} from "../src/serve/serve-i18n.ts";
+import { renderNeedsHumanPage } from "../src/serve/serve-needs-human.ts";
 import { QUAY_NATIVE_CLI } from "./helpers/cli-entry.mjs";
 import { makeTmpDir } from "../../../plugin/test/helpers/tmp-workspace.mjs";
 import { createStore } from "../../quay-native/src/store.ts";

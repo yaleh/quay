@@ -4,7 +4,7 @@
 // the same three-line body — `BUCKET_ORDER.filter((b) => buckets.has(b)).join("+")` with the
 // `size === 0 ⇒ "UNRESOLVED"` guard — plus the same private `BUCKET_ORDER` array existed in TWO
 // layers: the methodology-side attribution judge `plugin/scripts/suite-bucket-attribution.ts` and
-// the product-side page renderer `packages/quay/src/serve-tests.ts` (routine `semantic-dedup-scan`
+// the product-side page renderer `packages/quay/src/serve/serve-tests.ts` (routine `semantic-dedup-scan`
 // finding `canonical-buckets`, task
 // gap-routine-semantic-dedup-scan-canonical-buckets). A third spelling of the same array
 // (`BUCKET_ARTIFACT_ORDER` in `plugin/scripts/suite-bucket-select.ts`) documented itself as "same
