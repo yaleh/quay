@@ -1,7 +1,7 @@
 ---
 id: AC-916
 title: packages/quay/src 下目录级依赖环为 0（当前 1 个：{., observation, serve}）
-status: draft
+status: active
 kind: criterion
 goal: GOAL-910
 criterion: "node -e 'const fs=require(\"fs\"),path=require(\"path\");const
@@ -43,4 +43,15 @@ expect: '正向：按行首 import / export…from 语句（仓库内相对路�
   instrument-failure，⛔ 不报「0 个环」。'
 origin: 架构分析会话 2026-10-22：archguard 0.1.42 scope b4f87b21 @ d7e1c743a 发现目录环回归，由
   e7e84366a（serve* 搬入 src/serve/）与 d21a018aa（observation 拆入子目录）两次搬家提交引入；人当轮批准立案
+activatedAt: 2026-10-21T23:49:07.852Z
+statusLog:
+  - at: 2026-10-21T23:49:07.852Z
+    from: draft
+    to: active
+    actor: goal-driver
+    reason: "triage: activate"
+fidelity:
+  verdict: faithful
+  reason: "fidelity judge: faithful"
+  at: 2026-10-21T23:49:07.851Z
 ---
