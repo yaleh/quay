@@ -3,7 +3,7 @@ id: gap-probe-routine-kernel-plugin-root-not-passed-third-party-host-filing-fail
 title: probe 立案在第三方宿主上失败——probeRoutinesFromConfig 未把 kernelPluginRoot 传进
   RoutineSpec，fileRoutineTask 的 resolveTaskCliEntry 落到 null、vendored bundle
   分支永远走不到；且 filed=0 时 fact 仍标 verified
-status: todo
+status: ready
 labels:
   - gap
   - defect
