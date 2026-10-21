@@ -875,7 +875,10 @@ export function main(argv: string[]): number {
   if (opts.help) {
     console.log(
       "instrument-decay-check.ts [--root <dir>] [--stale-seconds <n>] [--carrier <file>] [--no-block] [--json] — " +
-      "P5 instrument-decay detector (companion contrast, not absolute rate). " +
+      "instrument-decay detector: A never-wrote / B rate-stopped (companion contrast, not absolute rate), " +
+      "C content-dark (every record evaluated:false, reported as a start/count/ended interval), " +
+      "D stale-evaluated (artifact predates the newest commit touching its covered source), " +
+      "plus an uncovered list that is never counted healthy. " +
       "0 = no decay, 1 = decay, 2 = usage/env error, 3 = NOT-EVALUATED (no carrier evaluable)."
     );
     return 0;
