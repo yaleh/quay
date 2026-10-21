@@ -2,7 +2,7 @@
 id: gap-init-install-steps-must-detect-existing-user-scope-install
 title: quay:init 打印的安装步骤未先查 installed_plugins.json 里 quay@quay 是否已有 user scope
   条目——agent 按打印步骤又装一份 project scope，钉死版本不随 user 升级
-status: ready
+status: done
 labels:
   - gap
   - defect
