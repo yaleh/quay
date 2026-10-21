@@ -3,7 +3,7 @@ id: gap-routine-architecture-analysis-plugin-scripts-flat-god-directory
 title: "architecture-analysis: archguard god-package: plugin/scripts = 299
   top-level .ts, 4466 entities, 189347 lines, fanOut 3163 with fanIn 0 — one
   flat namespace where any script may im"
-status: todo
+status: ready
 labels:
   - gap
   - routine-filed
