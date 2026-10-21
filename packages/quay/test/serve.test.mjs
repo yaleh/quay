@@ -45,11 +45,11 @@ import {
   serveLockPath,
   SERVE_ADMISSION_REFUSED_MARKER,
   shutdownHost,
-} from "../src/serve.ts";
+} from "../src/serve/serve.ts";
 import { composePayload } from "../src/action.ts";
 import { readLive, readJournal } from "../src/observation.ts";
-import { renderLivePage } from "../src/serve-live.ts";
-import { serveIdentity, pageTitle, pluginVersionState, renderIdentityCard } from "../src/serve-render.ts";
+import { renderLivePage } from "../src/serve/serve-live.ts";
+import { serveIdentity, pageTitle, pluginVersionState, renderIdentityCard } from "../src/serve/serve-render.ts";
 import { QUAY_CLI, QUAY_NATIVE_CLI } from "./helpers/cli-entry.mjs";
 import { createStore } from "../../quay-native/src/store.ts";
 // gap-web-cannot-show-what-the-loop-is-doing-now (AC2): /live's in-flight list must match
@@ -2144,9 +2144,9 @@ async function main() {
       execFileSync("git", ["init", "-q"], { cwd: gitRoot });
       execFileSync("git", ["-C", gitRoot, "config", "user.email", "test@example.com"]);
       execFileSync("git", ["-C", gitRoot, "config", "user.name", "stale-test"]);
-      fs.mkdirSync(path.join(gitRoot, "packages", "quay", "src"), { recursive: true });
-      fs.writeFileSync(path.join(gitRoot, "packages", "quay", "src", "serve.ts"), "export const x = 1;\n");
-      execFileSync("git", ["-C", gitRoot, "add", "packages/quay/src/serve.ts"]);
+      fs.mkdirSync(path.join(gitRoot, "packages", "quay", "src", "serve"), { recursive: true });
+      fs.writeFileSync(path.join(gitRoot, "packages", "quay", "src", "serve", "serve.ts"), "export const x = 1;\n");
+      execFileSync("git", ["-C", gitRoot, "add", "packages/quay/src/serve/serve.ts"]);
       execFileSync("git", ["-C", gitRoot, "commit", "-q", "-m", "stale-detection fixture"]);
       const staleStatus = computeStaleStatus(gitRoot);
       assert(staleStatus.evaluated === true, "AC1: computeStaleStatus(git repo) evaluated === true");
@@ -2334,7 +2334,7 @@ async function main() {
         "AC3: the equal-version state renders a DIFFERENT marker (the two states are distinguishable)");
 
       // AC4/AC5 source invariants.
-      const srcDir = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "src");
+      const srcDir = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "src", "serve");
       const srcFiles = fs.readdirSync(srcDir).filter((f) => /^serve-.*\.ts$/.test(f));
       assert(srcFiles.length >= 15, `AC4 setup: the serve-* page modules are present (${srcFiles.length} files)`);
 

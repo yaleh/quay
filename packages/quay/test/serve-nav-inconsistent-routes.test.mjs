@@ -25,15 +25,15 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 import fs from "node:fs";
 import http from "node:http";
-import { startServer } from "../src/serve.ts";
-import { pageStyles, renderMobileChrome, renderSiteNav } from "../src/serve-handlers.ts";
+import { startServer } from "../src/serve/serve.ts";
+import { pageStyles, renderMobileChrome, renderSiteNav } from "../src/serve/serve-handlers.ts";
 import { makeTmpDir } from "../../../plugin/test/helpers/tmp-workspace.mjs";
 import { QUAY_NATIVE_CLI } from "./helpers/cli-entry.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const nativeBin = QUAY_NATIVE_CLI;
 const nativeProviderDir = path.join(__dirname, "..", "..", "quay-native", "bin");
-const SERVE_HANDLERS = path.join(__dirname, "..", "src", "serve-handlers.ts");
+const SERVE_HANDLERS = path.join(__dirname, "..", "src", "serve", "serve-handlers.ts");
 
 function get(port, urlPath) {
   return new Promise((resolve, reject) => {

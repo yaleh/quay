@@ -103,7 +103,7 @@ const sliceDeps = (over = {}) => ({
 // ── 1. schema ──────────────────────────────────────────────────────────────────────────────────
 test("schema: exactly three request kinds are admitted, each validated declaratively", () => {
   assert.deepEqual([...EVIDENCE_KINDS], ["read_file", "grep", "archguard_query"]);
-  assert.ok(validateRequest({ kind: "read_file", path: "packages/quay/src/serve.ts", start_line: 40, end_line: 60 }).ok);
+  assert.ok(validateRequest({ kind: "read_file", path: "packages/quay/src/serve/serve.ts", start_line: 40, end_line: 60 }).ok);
   assert.ok(validateRequest({ kind: "grep", pattern: "from ['\"]\\./cli/", paths: ["packages/quay/src"] }).ok);
   assert.ok(validateRequest({ kind: "archguard_query", query: "used_by", args: { name: "runDriver", depth: 2 } }).ok);
   for (const bad of [null, [], { kind: "bash", command: "ls" }, { kind: "write_file", path: "a" }, { kind: "archguard_query", query: "rm" }]) {
@@ -131,7 +131,7 @@ test("scope: paths cannot escape the root or reach reference/outcome/benchmark/r
     assert.equal(normalizeRepoPath(p).ok, false, p);
     assert.equal(validateRequest({ kind: "read_file", path: p, start_line: 1 }).ok, false, p);
   }
-  assert.deepEqual(normalizeRepoPath("./packages//quay/src/./serve.ts"), { ok: true, path: "packages/quay/src/serve.ts" });
+  assert.deepEqual(normalizeRepoPath("./packages//quay/src/./serve/serve.ts"), { ok: true, path: "packages/quay/src/serve/serve.ts" });
 });
 
 // ── 2b. holdout answer surface (GOAL-034 blind benchmark, 2026-10-11) ──────────────────────────
@@ -877,9 +877,9 @@ test("AC2: the historically re-proposed exempted item now terminates as abstain(
 test("AC2 negative control: the SAME shape aimed at a file the memory does not know still proposes", async () => {
   const known = githubClientProposal();
   const unknown = githubClientProposal({
-    concern: "The task-status vocabulary has a third copy: `packages/quay/src/serve.ts` compares statuses with bare literals while the declared single owner sits elsewhere.",
-    candidate_interventions: [{ title: "Converge the status literals in `packages/quay/src/serve.ts` onto the shared table", rationale: "caller-side convergence" }],
-    scope: { in_scope: ["packages/quay/src/serve.ts (the literal compare/assign sites)"], non_goals: ["behaviour change"] },
+    concern: "The task-status vocabulary has a third copy: `packages/quay/src/serve/serve.ts` compares statuses with bare literals while the declared single owner sits elsewhere.",
+    candidate_interventions: [{ title: "Converge the status literals in `packages/quay/src/serve/serve.ts` onto the shared table", rationale: "caller-side convergence" }],
+    scope: { in_scope: ["packages/quay/src/serve/serve.ts (the literal compare/assign sites)"], non_goals: ["behaviour change"] },
   });
   assert.equal(known.concern_kind, unknown.concern_kind, "the control differs ONLY in the location");
   const res = await runActiveInvestigation({

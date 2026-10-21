@@ -160,7 +160,7 @@ const SURFACES: SurfaceSpec[] = [
   // ── driver kind（6 值）──────────────────────────────────────────────────────────────────────────
   { id: "cli-driver-kinds", authority: "driver-kind", file: "packages/quay/src/driver-vocab.ts", extract: "ts-array", symbol: "KINDS", policy: "exact" },
   { id: "driver-config-union", authority: "driver-kind", file: "plugin/scripts/driver-config.ts", extract: "ts-string-union", anchor: "kind:\\s*", policy: "exact" },
-  { id: "web-driver-kinds", authority: "driver-kind", file: "packages/quay/src/serve-sessions.ts", extract: "ts-array", symbol: "WEB_DRIVER_KINDS", policy: "subset" },
+  { id: "web-driver-kinds", authority: "driver-kind", file: "packages/quay/src/serve/serve-sessions.ts", extract: "ts-array", symbol: "WEB_DRIVER_KINDS", policy: "subset" },
   { id: "start-drivers-kinds", authority: "driver-kind", file: "plugin/scripts/start-drivers.ts", extract: "ts-array", symbol: "DRIVER_KINDS", policy: "exact" },
   // cli/driver.ts 与 cli/help.ts 的 kind 帮助文本：**运行时派生**自 driver-vocab.ts:KINDS
   // （Core ⛔ 不能静态 import plugin/ 的 kernel —— 见 SurfaceSpec.derivesFrom 的注释）。
@@ -172,7 +172,7 @@ const SURFACES: SurfaceSpec[] = [
   { id: "claude-md-driver-kind", authority: "driver-kind", file: "CLAUDE.md", extract: "text", anchor: "--kind <([a-z-]+\\|[a-z|-]+)>", policy: "exact" },
   { id: "drivers-skill-kind", authority: "driver-kind", file: "plugin/skills/drivers/SKILL.md", extract: "text", anchor: "--kind ([a-z-]+\\|[a-z|-]+)", policy: "exact" },
   // ── driver verb（6 值）──────────────────────────────────────────────────────────────────────────
-  { id: "web-driver-verbs", authority: "driver-verb", file: "packages/quay/src/serve-sessions.ts", extract: "ts-array", symbol: "WEB_DRIVER_VERBS", policy: "subset" },
+  { id: "web-driver-verbs", authority: "driver-verb", file: "packages/quay/src/serve/serve-sessions.ts", extract: "ts-array", symbol: "WEB_DRIVER_VERBS", policy: "subset" },
   // 同上：verb 帮助文本运行时派生自 driver-vocab.ts:VERBS。
   { id: "cli-help-driver-usage-verbs", authority: "driver-verb", file: "packages/quay/src/cli/help.ts", extract: "text", anchor: "quay driver <([a-z|]+)>", policy: "exact",
     derivesFrom: { file: "packages/quay/src/driver-vocab.ts", symbol: "VERBS", extract: "ts-array", spelling: "quay driver <\\$\\{[^}]*\\bVERBS\\b[^}]*\\}>" } },
@@ -187,11 +187,11 @@ const SURFACES: SurfaceSpec[] = [
   { id: "core-goal-list-desc", authority: "goal-status", file: "packages/quay/src/mcp-handlers.ts", extract: "text", anchor: "goal→AC lifecycle: ([a-z|-]+)", policy: "exact" },
   { id: "core-goal-write-desc", authority: "goal-status", file: "packages/quay/src/mcp-handlers.ts", extract: "text", anchor: "one goal record[^\\n]*?status ∈ ([a-z|-]+)", policy: "exact" },
   { id: "native-goal-write-desc", authority: "goal-status", file: "packages/quay-native/src/mcp-server.ts", extract: "text", anchor: "one goal record[^\\n]*?status ∈ ([a-z|-]+)", policy: "exact" },
-  { id: "serve-goal-status-order", authority: "goal-status", file: "packages/quay/src/serve-goal.ts", extract: "ts-array", symbol: "GOAL_STATUS_ORDER", policy: "exact" },
+  { id: "serve-goal-status-order", authority: "goal-status", file: "packages/quay/src/serve/serve-goal.ts", extract: "ts-array", symbol: "GOAL_STATUS_ORDER", policy: "exact" },
   // anchor 是本数组字面量的头两个元素（该数组就地写在 JSX 里，没有 symbol 可锚）。本任务把
   // needs-human 插在 draft 之后 ⇒ 头部两个元素随之改变，anchor 同步重锚（锚不匹配 ⇒
   // `matched 0 times` ⇒ NOT-EVALUATED，是响的失败，⛔ 不是静默放行）。
-  { id: "serve-goal-status-tabs", authority: "goal-status", file: "packages/quay/src/serve-goal.ts", extract: "ts-array", anchor: "\\[\"draft\",\\s*\"needs-human\"", policy: "exact" },
+  { id: "serve-goal-status-tabs", authority: "goal-status", file: "packages/quay/src/serve/serve-goal.ts", extract: "ts-array", anchor: "\\[\"draft\",\\s*\"needs-human\"", policy: "exact" },
   // ── meta status ────────────────────────────────────────────────────────────────────────────────
   { id: "meta-store-valid-statuses", authority: "meta-status", file: "packages/quay/src/meta-store.ts", extract: "ts-array", symbol: "VALID_META_STATUSES", policy: "exact" },
   { id: "core-meta-write-desc", authority: "meta-status", file: "packages/quay/src/mcp-handlers.ts", extract: "text", anchor: "META record[^\\n]*?status ∈ ([a-z|-]+)", policy: "exact" },

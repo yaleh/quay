@@ -3,7 +3,7 @@ id: gap-routine-architecture-analysis-quay-src-serve-surface-flat-in-src
 title: "architecture-analysis: packages/quay/src carries fanIn 259 / fanOut 662
   / 52 top-level files, of which 24 are serve*/server-state (~15795 lines:
   serve-i18n 2779, serve-dashboard 19"
-status: ready
+status: done
 labels:
   - gap
   - routine-filed

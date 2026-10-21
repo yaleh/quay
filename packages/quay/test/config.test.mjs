@@ -14,7 +14,7 @@ import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import { findConfig, loadConfig, activeProvider } from "../src/config.ts";
-import { resolveServeBinding } from "../src/serve-binding.ts";
+import { resolveServeBinding } from "../src/serve/serve-binding.ts";
 
 let failures = 0;
 function assert(cond, msg) {

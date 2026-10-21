@@ -13,11 +13,11 @@ import http, { type Server, type ServerResponse } from "node:http";
 import path from "node:path";
 import fs from "node:fs";
 import { execFileSync } from "node:child_process";
-import { loadConfig, activeProvider, providerMcpEntry } from "./config.ts";
-import { connectProvider, type ProviderClient } from "./provider-client.ts";
-import { resolveProviderEnv } from "./provider-env.ts";
+import { loadConfig, activeProvider, providerMcpEntry } from "../config.ts";
+import { connectProvider, type ProviderClient } from "../provider-client.ts";
+import { resolveProviderEnv } from "../provider-env.ts";
 import { handleAllRoutes, serveIdentity, type ServePageCfg } from "./serve-handlers.ts";
-import { readBranchModel, startDevelopRefBackgroundRefresh } from "./observation.ts";
+import { readBranchModel, startDevelopRefBackgroundRefresh } from "../observation.ts";
 // gap-ac179-criterion-cold-miss-30s-ttl-always-expired: the dashboard's build moves OFF the request
 // path onto a background snapshot tick, started here beside the develop-ref refresh tick (the same
 // "cold build at startup, unref'd interval, never in a request" shape).
@@ -31,24 +31,24 @@ import { startBoardSnapshotRefresh } from "./serve-board.ts";
 // hosted by THIS process. `serveControlPlane` is imported, never reimplemented here — the control
 // plane has exactly ONE implementation (AC150-3), and stage A2 is a MERGE of two existing
 // implementations into one process, not a second copy.
-// It now lives in the kernel (`./kernel/control-plane-http.ts`, tasks/gap-arch-reverse-edges-zero):
+// It now lives in the kernel (`../kernel/control-plane-http.ts`, tasks/gap-arch-reverse-edges-zero):
 // the product HOSTS the control plane, so its implementation must be reachable from the product
 // without the product reverse-importing `plugin/**`. This import used to point at
 // plugin/scripts/driver-shared.ts; the kernel home makes it an in-package one.
-import { serveControlPlane, CONTROL_PLANE_DEFAULT_HOST, type ControlPlaneHandle } from "./kernel/control-plane-http.ts";
+import { serveControlPlane, CONTROL_PLANE_DEFAULT_HOST, type ControlPlaneHandle } from "../kernel/control-plane-http.ts";
 import { resolveServeBinding } from "./serve-binding.ts";
 import { writeServerState, removeServerState, pidAlive, CONTROL_PLANE_NAME } from "./server-state.ts";
-import { writeJsonAtomic } from "./kernel/write-json-atomic.ts";
+import { writeJsonAtomic } from "../kernel/write-json-atomic.ts";
 // The pid-reuse guard for the admission lock (see `inspectAdmissionLock`): a recycled pid that is
 // alive but is NOT a `quay serve` must be judged STALE, not "held". Both predicates are
-// single-sourced in the kernel leaf `./kernel/proc-identity.ts` (extracted from the reaper, which
+// single-sourced in the kernel leaf `../kernel/proc-identity.ts` (extracted from the reaper, which
 // re-exports them for its own callers) — ⛔ not reimplemented here (second copy = drift).
-import { readProcCmdline, isQuayServe } from "./kernel/proc-identity.ts";
+import { readProcCmdline, isQuayServe } from "../kernel/proc-identity.ts";
 // The service inventory is a ZERO-IMPORT leaf module (driver-vocab.ts, core-root) because the same
 // names appear in `quay --help`'s statically-imported help text — this file's graph must not be
 // pulled in just to print them. One list, two consumers. ⛔ It lives in core-root, NOT `cli/`: this
 // host IS core, and importing a cli/ module from here is the core-root → cli edge GOAL-033 removes.
-import { ALL_SERVICE_NAMES } from "./driver-vocab.ts";
+import { ALL_SERVICE_NAMES } from "../driver-vocab.ts";
 
 // ══ 服务清单 + 期望态载体（GOAL-017 / AC-254, SPEC §6.9 阶段 B）══════════════════════════════════
 //

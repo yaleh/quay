@@ -10,7 +10,7 @@
 // Run (scoped): node --test packages/quay/test/gap-git-graph-lane-chip-rendered-once-regardless-of-span.test.mjs
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { layoutGitGraph } from "../src/serve-git.ts";
+import { layoutGitGraph } from "../src/serve/serve-git.ts";
 
 function c(hash, t, parentHashes, subject, decorations = []) {
   return { hash, t, ref: "", parents: parentHashes.length, parentHashes, subject, decorations };

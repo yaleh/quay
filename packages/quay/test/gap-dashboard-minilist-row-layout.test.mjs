@@ -24,10 +24,10 @@ import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import fs from "node:fs";
-import { renderDashboardPage } from "../src/serve-dashboard.ts";
+import { renderDashboardPage } from "../src/serve/serve-dashboard.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const SERVE_DASHBOARD_SRC = path.join(__dirname, "..", "src", "serve-dashboard.ts");
+const SERVE_DASHBOARD_SRC = path.join(__dirname, "..", "src", "serve", "serve-dashboard.ts");
 
 /** Minimal-but-shape-valid dashboard args — the same shape the sibling multistatus-minitable test uses.
  *  `live.inFlight` and `tests.runs` are BOTH empty so the live-card mini list and tests-card recent strip

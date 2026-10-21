@@ -29,11 +29,11 @@ import fs from "node:fs";
 import os from "node:os";
 import net from "node:net"; // used by captureSocketFrames' UDS probe — NOT by the deleted freePort()
 import http from "node:http";
-import { startServer } from "../src/serve.ts";
-import { layoutGitGraph, renderLoadCurveSvg, readSuiteLoadSamples, clipSuiteLoadSamplesToWindow, renderPerFileTable, renderPerFileTimelineSvg, bucketSetOfFile, collectFileHistory, renderFileDurationTrendSvg, renderFileHistoryTable, gitGraphClientScript, taskRunsBlock, renderFanInCell, fanInLogPath, driverActionSpec, newSessionArgs, resumeSessionArgs, WEB_DRIVER_VERBS, WEB_DRIVER_KINDS } from "../src/serve-handlers.ts";
+import { startServer } from "../src/serve/serve.ts";
+import { layoutGitGraph, renderLoadCurveSvg, readSuiteLoadSamples, clipSuiteLoadSamplesToWindow, renderPerFileTable, renderPerFileTimelineSvg, bucketSetOfFile, collectFileHistory, renderFileDurationTrendSvg, renderFileHistoryTable, gitGraphClientScript, taskRunsBlock, renderFanInCell, fanInLogPath, driverActionSpec, newSessionArgs, resumeSessionArgs, WEB_DRIVER_VERBS, WEB_DRIVER_KINDS } from "../src/serve/serve-handlers.ts";
 import { readGitHistory, readLive, liveSessionIdForPid, sessionTranscriptPath, isValidSessionId, readWorkerOutcomeRecords } from "../src/observation.ts";
-import { renderLivePage } from "../src/serve-live.ts";
-import { sendSessionFrames, verdictStateToDeliveryState, classifyReceipt, resolveSessionEndpoint, sendToSession, renderSendResult, HELD_EXPIRY_MS, WEB_SEND_FROM_NAME } from "../src/serve-send.ts";
+import { renderLivePage } from "../src/serve/serve-live.ts";
+import { sendSessionFrames, verdictStateToDeliveryState, classifyReceipt, resolveSessionEndpoint, sendToSession, renderSendResult, HELD_EXPIRY_MS, WEB_SEND_FROM_NAME } from "../src/serve/serve-send.ts";
 import { QUAY_NATIVE_CLI } from "./helpers/cli-entry.mjs";
 import { createStore } from "../../quay-native/src/store.ts";
 
@@ -2033,7 +2033,7 @@ test("AC1 (falsifiable) — POST /sessions/driver delegates to runDriver and for
 
 // ══════════════════════════════════════════════════════════════════════════════════════════════════
 // gap-webui-message-delivery-entry — /send 消息投递入口。AC1（共享实现）：web 入口与
-// plugin/scripts/send-to-session.ts 共用 packages/quay/src/serve-send.ts 的 sendSessionFrames（⛔
+// plugin/scripts/send-to-session.ts 共用 packages/quay/src/serve/serve-send.ts 的 sendSessionFrames（⛔
 // 两份实现 ⇒ 假）。AC2（真实状态）：投递四态 delivered/held/expired/error，held→expired 可观测（⛔
 // 只显示 success:true 而无 held/expired 态 ⇒ 假）。决定变量 = 接收方 settings（§10.1），非 socket
 // 的 fire-and-forget「写成功」。
@@ -2089,7 +2089,7 @@ test("AC1 (shared protocol) — sendSessionFrames writes the auth frame then the
 test("AC1 (no two copies) — send-to-session.ts imports the shared module instead of reimplementing the socket", () => {
   const src = fs.readFileSync(pluginScriptPath, "utf8");
   assert.doesNotMatch(src, /net\.createConnection/, "the plugin script no longer opens its own socket (logic extracted)");
-  assert.match(src, /import\("\.\.\/\.\.\/packages\/quay\/src\/serve-send\.ts"\)/, "the plugin script imports the shared serve-send.ts module");
+  assert.match(src, /import\("\.\.\/\.\.\/packages\/quay\/src\/serve\/serve-send\.ts"\)/, "the plugin script imports the shared serve-send.ts module");
 });
 
 test("AC1/AC2 (falsifiable) — verdictStateToDeliveryState maps the transcript verdict to the delivery state (single source, not settings)", () => {

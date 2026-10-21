@@ -32,14 +32,14 @@ import path from "node:path";
 import fs from "node:fs";
 import os from "node:os";
 import { readManager, readManagerLight, readLive, readTests, readGitHistory, clearPoolMetricsCache, clearVerificationRoundCache, clearGitHistoryCache, POOL_METRICS_CACHE_TTL_MS, VERIFICATION_ROUND_CACHE_TTL_MS, GIT_HISTORY_CACHE_TTL_MS } from "../src/observation.ts";
-import { readTaskSummary, clearTaskSummaryCache, TASK_SUMMARY_CACHE_TTL_MS } from "../src/serve-handlers.ts";
+import { readTaskSummary, clearTaskSummaryCache, TASK_SUMMARY_CACHE_TTL_MS } from "../src/serve/serve-handlers.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "..", "..", "..");
 const OBSERVATION_SRC = path.join(__dirname, "..", "src", "observation.ts");
 // gap-serve-handlers-split-by-concern: handleDashboard moved to serve-dashboard.ts; the AC2
 // structural concurrency assertion now pins that file.
-const SERVE_DASHBOARD_SRC = path.join(__dirname, "..", "src", "serve-dashboard.ts");
+const SERVE_DASHBOARD_SRC = path.join(__dirname, "..", "src", "serve", "serve-dashboard.ts");
 const SLOT_REFILL_TS = path.join(REPO_ROOT, "plugin", "scripts", "slot-refill.ts");
 
 // ── Structural helpers (AC1/AC2: the parallel structure is pinned in source) ───────────────────

@@ -5,7 +5,7 @@ status: achieved
 kind: criterion
 goal: GOAL-002
 criterion: |
-  node --no-warnings --experimental-strip-types -e 'import("./packages/quay/src/serve-needs-human.ts").then(m=>{process.exit(typeof m.handleNeedsHuman==="function"&&typeof m.extractNeedsHumanReason==="function"?0:(console.error("CAUSE=needs-human-surface-missing — serve-needs-human must export handleNeedsHuman and extractNeedsHumanReason"),1))})'
+  node --no-warnings --experimental-strip-types -e 'import("./packages/quay/src/serve/serve-needs-human.ts").then(m=>{process.exit(typeof m.handleNeedsHuman==="function"&&typeof m.extractNeedsHumanReason==="function"?0:(console.error("CAUSE=needs-human-surface-missing — serve-needs-human must export handleNeedsHuman and extractNeedsHumanReason"),1))})'
 expect: exit 0
 origin: |
   manager 09:2xZ 直读：driver 不能 AskUserQuestion；取消 outer 后到达人的通道只剩 needs-human

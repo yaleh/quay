@@ -25,10 +25,10 @@ import fs from "node:fs";
 import http from "node:http";
 import os from "node:os";
 import { fileURLToPath } from "node:url";
-import { startServer } from "../src/serve.ts";
+import { startServer } from "../src/serve/serve.ts";
 import {
   DOC_TASK_KEYS, DOC_TASK_LABELS, docTaskLabelsFor, docTaskLabel,
-} from "../src/serve-i18n.ts";
+} from "../src/serve/serve-i18n.ts";
 import { makeTmpDir } from "../../../plugin/test/helpers/tmp-workspace.mjs";
 import { QUAY_NATIVE_CLI } from "./helpers/cli-entry.mjs";
 

@@ -127,7 +127,7 @@ function state() { return (stateFile && fs.existsSync(stateFile)) ? JSON.parse(f
 function pidAlive(pid) {
   try { process.kill(pid, 0); return true; } catch (e) { return e.code === "EPERM"; }
 }
-// Mirrors packages/quay/src/serve.ts:acquireServeAdmissionLock (minus the cmdline pid-reuse check,
+// Mirrors packages/quay/src/serve/serve.ts:acquireServeAdmissionLock (minus the cmdline pid-reuse check,
 // which a node -e fake cannot satisfy). Returns true when the lock was taken.
 function tryLock(root) {
   const lock = root + "/.quay/server.lock";

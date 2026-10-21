@@ -661,7 +661,7 @@ export function main(argv: string[]): number {
 }
 
 // ⛔ NAME-based, never URL-based (gap-serve-same-root-admission-lock, 2026-09-18 — measured):
-// when `packages/quay/src/serve.ts` imported this module for `readProcCmdline` + `isQuayServe`, the
+// when `packages/quay/src/serve/serve.ts` imported this module for `readProcCmdline` + `isQuayServe`, the
 // reaper was INLINED into the shipped `quay` bundle. In that form EVERY inlined module shares the
 // bundle's `import.meta.url`, so the old `fileURLToPath(import.meta.url) === resolve(argv[1])` check
 // was TRUE inside `quay serve`: this top-level block ran the reaper's own CLI with `serve`'s argv,

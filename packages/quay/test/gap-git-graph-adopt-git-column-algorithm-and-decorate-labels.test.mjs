@@ -39,7 +39,7 @@ import {
   assignGitColumns,
   renderGitHistoryPage,
   gitGraphClientScript,
-} from "../src/serve-git.ts";
+} from "../src/serve/serve-git.ts";
 import { resolveRefWindow, windowScopeArgs, windowGitExec, describeWindow, withStableWindow } from "./helpers/git-ref-window.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -194,7 +194,7 @@ test("AC3: the rendered label set equals the %D-nonempty commit set; develop app
 // ── AC4: every interaction mechanism is gone from the source ────────────────────────────────────────
 
 test("AC4: serve-git.ts carries zero interaction mechanisms (expanded[/点击展开/折叠/git-svg-hit/appendChip)", () => {
-  const src = readFileSync(path.resolve(__dirname, "../src/serve-git.ts"), "utf8");
+  const src = readFileSync(path.resolve(__dirname, "../src/serve/serve-git.ts"), "utf8");
   const patterns = ["expanded[", "点击展开", "折叠", "git-svg-hit", "appendChip"];
   for (const p of patterns) {
     assert.ok(!src.includes(p), `serve-git.ts must not contain ${JSON.stringify(p)}`);

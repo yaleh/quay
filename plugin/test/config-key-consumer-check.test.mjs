@@ -186,7 +186,7 @@ test("serve: the reader stays wired, and the audit no longer enumerates serve.* 
   // The READER half is untouched: a user who pinned serve.host/port still gets it honored. Asserted
   // against the reader's own source, so this half cannot be dropped silently by the same edit that
   // removed the writer.
-  const readerSrc = fs.readFileSync(path.join(REPO_ROOT, "packages", "quay", "src", "serve-binding.ts"), "utf8");
+  const readerSrc = fs.readFileSync(path.join(REPO_ROOT, "packages", "quay", "src", "serve", "serve-binding.ts"), "utf8");
   assert.match(readerSrc, /const serveHost =/, "resolveServeBinding still binds serve.host");
   assert.match(readerSrc, /const servePort =/, "…and serve.port");
 });

@@ -29,7 +29,7 @@ import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { readGitHistory, GIT_HISTORY_LIMIT, GIT_HISTORY_REF_SCOPE } from "../src/observation.ts";
-import { taskIdFromSubject, layoutTaskGraph, layoutGitGraph, gitHistoryJson, renderGitHistoryPage, gitHistoryViewOf } from "../src/serve-git.ts";
+import { taskIdFromSubject, layoutTaskGraph, layoutGitGraph, gitHistoryJson, renderGitHistoryPage, gitHistoryViewOf } from "../src/serve/serve-git.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "../../..");

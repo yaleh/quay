@@ -1,6 +1,6 @@
 // @test-group product
 // QN-061 (iteration 57): live cross-Provider (GitHub) regression test for
-// the Web UI (`quay serve`, src/serve.js) — the third of the proposal's
+// the Web UI (`quay serve`, src/serve/serve.js) — the third of the proposal's
 // three sibling ABI bindings (quay-proposal.md §9: CLI, Core MCP, Web UI;
 // see also core-three-way-symmetry.test.mjs's own header). Iterations
 // 54/55 closed the CLI-layer (bin/quay.js) cross-Provider test-coverage
@@ -14,7 +14,7 @@
 // header) so this was always expected to work, but was never proven live,
 // end-to-end, against a real GitHub-backed task before this test existed.
 //
-// Read packages/quay/src/serve.js and provider-client.js in full before
+// Read packages/quay/src/serve/serve.js and provider-client.js in full before
 // writing this test: the Web UI's GET routes (`/tasks` list, `/task/:id`
 // detail) call only read-only Provider functions (client.taskList(),
 // client.taskGet(), client.manifest()) — no write path. The POST
@@ -52,7 +52,7 @@ import path from "node:path";
 import fs from "node:fs";
 import os from "node:os";
 import http from "node:http";
-import { startServer } from "../src/serve.ts";
+import { startServer } from "../src/serve/serve.ts";
 import { QUAY_NATIVE_CLI } from "./helpers/cli-entry.mjs";
 
 const LIVE_GITHUB_ENV = "QUAY_TEST_LIVE_GITHUB";

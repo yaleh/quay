@@ -51,7 +51,7 @@ const REATTRIBUTION_PATH = ".quay/suite-bucket-reattribution.jsonl";
 // The effective bucket-attribution artifact (gap-bucket-second-truth-source-page-recompute): one JSON
 // line per suite test file — {file, buckets, source} — written by the DISPATCH side (this module) as the
 // SINGLE truth source for file→bucket membership (reattribution override → static closure → mirror fold,
-// with the winning path recorded as `source`). The web page (packages/quay/src/serve-tests.ts) READS this
+// with the winning path recorded as `source`). The web page (packages/quay/src/serve/serve-tests.ts) READS this
 // artifact instead of re-deriving the judgment (Core cannot import plugin/). Recomputed on every bucket
 // dispatch; a runtime derived product (gitignored, never committed).
 const EFFECTIVE_PATH = ".quay/suite-bucket-effective.jsonl";

@@ -25,15 +25,15 @@ import {
   renderTimelineBarSvg,
   parseTimelineHours,
   DEFAULT_TIMELINE_HOURS,
-} from "../src/serve-dashboard.ts";
-import { relativeTime } from "../src/serve-render.ts";
-import { dashboardLabelsFor } from "../src/serve-i18n.ts";
+} from "../src/serve/serve-dashboard.ts";
+import { relativeTime } from "../src/serve/serve-render.ts";
+import { dashboardLabelsFor } from "../src/serve/serve-i18n.ts";
 import { readTests, readWorkerOutcomeRecords } from "../src/observation.ts";
-import { startServer } from "../src/serve.ts";
+import { startServer } from "../src/serve/serve.ts";
 import { QUAY_NATIVE_CLI } from "./helpers/cli-entry.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const SERVE_DASHBOARD_SRC = path.join(__dirname, "..", "src", "serve-dashboard.ts");
+const SERVE_DASHBOARD_SRC = path.join(__dirname, "..", "src", "serve", "serve-dashboard.ts");
 const FIXED_NOW_MS = 1_700_000_000_000; // deterministic wall-clock anchor for window math
 
 /** The git PRIMARY checkout root — where the drivers write the REAL `.quay/*.jsonl` runtime data.

@@ -16,7 +16,7 @@
 //
 // WHY RE-WALKING THE CWD IS WRONG (the defect this module exists to prevent): the provider MCP
 // process is spawned with `cwd = <workspaceRoot>/<provider.path>` (Core: src/mcp-server.ts and
-// src/serve.ts both pass `cwd: providerDir`). quay-init's upgrade channel binds provider.path to
+// src/serve/serve.ts both pass `cwd: providerDir`). quay-init's upgrade channel binds provider.path to
 // the PLUGIN's vendored runtime (`$PLUGIN_ROOT/vendor/quay-native`), so for any third-party
 // project installed that way the process cwd sits INSIDE THE QUAY REPO — and the first
 // `.quay/config.yml` found upward belongs to quay itself, not to the target project. Deriving

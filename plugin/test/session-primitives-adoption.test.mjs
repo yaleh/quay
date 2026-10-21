@@ -36,7 +36,7 @@ const MODULES = ["pty-frame.mjs", "delivery-audit.mjs", "session-liveness.mjs", 
  * real consumer (that is the "vendored dead code" state the criterion is meant to catch).
  */
 const EXPECTED_CONSUMERS = {
-  "delivery-audit.mjs": ["packages/quay/src/serve-send.ts"],
+  "delivery-audit.mjs": ["packages/quay/src/serve/serve-send.ts"],
   "session-liveness.mjs": [
     "packages/quay/src/observation.ts",
     "plugin/scripts/orphan-session-check.ts",
@@ -134,11 +134,11 @@ test("AC3 — pty-frame's production consumer after the amendment: the L2 keys l
   //   2. serve-send.ts opens no socket of its own (re-adding one ⇒ red — the duplicate AC-253 retired),
   //   3. the module that calls the codec is byte-identical to the pin (a fork ⇒ red),
   //   4. the codec really lives in that module (an encoder moved elsewhere ⇒ red).
-  const serveSend = fs.readFileSync(path.join(REPO_ROOT, "packages/quay/src/serve-send.ts"), "utf8");
+  const serveSend = fs.readFileSync(path.join(REPO_ROOT, "packages/quay/src/serve/serve-send.ts"), "utf8");
   assert.match(serveSend, /export function sendKeysToSession/, "the L2 keys lane is exported");
   assert.match(
     serveSend,
-    /import \{[^}]*\bdeliverKeys\b[^}]*\} from "\.\/primitives\/delivery-audit\.mjs"/,
+    /import \{[^}]*\bdeliverKeys\b[^}]*\} from "\.\.\/primitives\/delivery-audit\.mjs"/,
     "serve-send.ts imports the shared L2 delivery primitive",
   );
   assert.match(serveSend, /return deliverKeys\(\{/, "the lane IS deliverKeys — no second implementation");
@@ -237,7 +237,7 @@ test("AC3 — pty-frame's lane: the repo really has no pre-existing binary-frame
   // …and the lane that DOES exercise the frame codec is serve-send.ts's sendKeysToSession, which now
   // reaches it through the shared `deliverKeys` (the dedicated AC3 — pty-frame test below pins that
   // call chain and the pin). What must NOT be true any more is a second codec call site here.
-  const serveSend = fs.readFileSync(path.join(REPO_ROOT, "packages/quay/src/serve-send.ts"), "utf8");
+  const serveSend = fs.readFileSync(path.join(REPO_ROOT, "packages/quay/src/serve/serve-send.ts"), "utf8");
   assert.match(serveSend, /export function sendKeysToSession/, "the L2 keys lane is exported");
   assert.doesNotMatch(
     serveSend,
@@ -353,7 +353,7 @@ test("AC3-adjacent — an UNUSABLE ledger never crashes a lane: L1 falls back, L
 
   // ── L1: real socket + unusable caller ledger ⇒ the DELIVERY still happens (job #1 wins over
   //        bookkeeping; the record degrades to the documented default). ──────────────────────────
-  const { sendSessionFrames } = await import(path.join(REPO_ROOT, "packages/quay/src/serve-send.ts"));
+  const { sendSessionFrames } = await import(path.join(REPO_ROOT, "packages/quay/src/serve/serve-send.ts"));
   const sockPath = path.join(dir, "messaging.sock");
   const got = [];
   const srv = net.createServer((c) => c.on("data", (b) => got.push(b)));
@@ -391,13 +391,13 @@ test("AC5 — observation.ts runs the validator at its output boundary and refus
   // whether `session` is attached, and the refusal carries the validator's own reasons.
   assert.match(src, /validateSessionRecord\(/, "observation.ts calls the shared validator");
   assert.match(src, /sessionRefusal: verdict\.errors/, "a refused record carries the validator's reasons");
-  const sessions = fs.readFileSync(path.join(REPO_ROOT, "packages/quay/src/serve-sessions.ts"), "utf8");
+  const sessions = fs.readFileSync(path.join(REPO_ROOT, "packages/quay/src/serve/serve-sessions.ts"), "utf8");
   // gap-webui-sessions-body-copy-en-zh: the refusal FRAME's copy left this file for serve-i18n.ts
   // ROW 15 (`refusedStateRecord`, zh column byte-equal to the literal pinned here before). The
   // assertion FOLLOWS THE COPY — two reads, both in code position (`refusedStateRecord` occurs
   // exactly once in serve-sessions.ts, in the render expression) — instead of pinning the
   // pre-localization source form, which is precisely what this localization removed.
   assert.match(sessions, /refusedStateRecord/, "the render surface resolves the refusal frame row");
-  const i18n = fs.readFileSync(path.join(REPO_ROOT, "packages/quay/src/serve-i18n.ts"), "utf8");
+  const i18n = fs.readFileSync(path.join(REPO_ROOT, "packages/quay/src/serve/serve-i18n.ts"), "utf8");
   assert.match(i18n, /状态记录不可用/, "and that row's zh column still carries the refusal wording");
 });

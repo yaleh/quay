@@ -12,7 +12,7 @@
 //
 // The assertion is that black-box fact: a node process that hits the bind failure EXITS.
 //
-// 能取假 (pre-fix control, run 2026-09-11): with `packages/quay/src/serve.ts` reverted to its
+// 能取假 (pre-fix control, run 2026-09-11): with `packages/quay/src/serve/serve.ts` reverted to its
 // pre-fix version, the child below prints `CHILD:EADDRINUSE` and then HANGS until the test's
 // timeout kills it ⇒ this test fails on `signal === null`. Post-fix it exits on its own (code 0).
 import { test } from "node:test";
@@ -26,7 +26,7 @@ import net from "node:net";
 import { QUAY_NATIVE_CLI } from "./helpers/cli-entry.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const serveTs = path.join(__dirname, "..", "src", "serve.ts");
+const serveTs = path.join(__dirname, "..", "src", "serve", "serve.ts");
 const nativeProviderDir = path.join(__dirname, "..", "..", "quay-native", "bin");
 const nativeBin = QUAY_NATIVE_CLI;
 

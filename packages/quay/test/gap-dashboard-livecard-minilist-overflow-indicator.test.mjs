@@ -17,7 +17,7 @@
 // Run (scoped): node --test packages/quay/test/gap-dashboard-livecard-minilist-overflow-indicator.test.mjs
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { renderLiveCard } from "../src/serve-dashboard.ts";
+import { renderLiveCard } from "../src/serve/serve-dashboard.ts";
 
 const NOW_MS = 1_700_000_000_000;
 

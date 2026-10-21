@@ -40,7 +40,7 @@ function cleanup(dir) { try { fs.rmSync(dir, { recursive: true, force: true }); 
 function makeFixture(prefix) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), `hrsr-${prefix}-`));
   fs.mkdirSync(path.join(root, "packages", "quay", "bin"), { recursive: true });
-  fs.mkdirSync(path.join(root, "packages", "quay", "src"), { recursive: true });
+  fs.mkdirSync(path.join(root, "packages", "quay", "src", "serve"), { recursive: true });
   fs.mkdirSync(path.join(root, "plugin", "scripts"), { recursive: true });
   writeCli(root, ["init", "task"]);
   writeRoutes(root, ["/", "/tasks", "/dashboard"], "/health");
@@ -61,11 +61,11 @@ function writeCli(root, verbs) {
 
 function writeRoutes(root, handlerRoutes, serveRoute) {
   fs.writeFileSync(
-    path.join(root, "packages", "quay", "src", "serve-handlers.ts"),
+    path.join(root, "packages", "quay", "src", "serve", "serve-handlers.ts"),
     handlerRoutes.map((r) => `if (url.pathname === "${r}") {}`).join("\n") + "\n",
   );
   fs.writeFileSync(
-    path.join(root, "packages", "quay", "src", "serve.ts"),
+    path.join(root, "packages", "quay", "src", "serve", "serve.ts"),
     `if (url.pathname === "${serveRoute}") {}\n`,
   );
 }
@@ -110,7 +110,7 @@ test("countsOf reports the three set cardinalities", () => {
 test("AC4 — enumerateSurface with NO CLI entry ⇒ evaluated:false (NOT-EVALUATED, never a green count)", () => {
   const root = makeTmp("no-entry");
   try {
-    fs.mkdirSync(path.join(root, "packages", "quay", "src"), { recursive: true });
+    fs.mkdirSync(path.join(root, "packages", "quay", "src", "serve"), { recursive: true });
     const r = enumerateSurface(root);
     assert.equal(r.evaluated, false, "a root without packages/quay/bin/quay.ts must be NOT-EVALUATED");
   } finally { cleanup(root); }
@@ -163,7 +163,7 @@ test("AC4 — the CLI exits 3 with NOT-EVALUATED on stderr when a source cannot 
     assert.equal(res.status, 0);
 
     // Break an enumerated source: delete the web-route source file.
-    fs.rmSync(path.join(root, "packages", "quay", "src", "serve-handlers.ts"));
+    fs.rmSync(path.join(root, "packages", "quay", "src", "serve", "serve-handlers.ts"));
     res = runChecker(root, ["--json"]);
     assert.equal(res.status, 3, `NOT-EVALUATED must exit 3, got ${res.status}: ${res.stdout}${res.stderr}`);
     assert.match(res.stderr, /NOT-EVALUATED/, "the NOT-EVALUATED third state must be distinguishable on stderr");

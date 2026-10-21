@@ -32,7 +32,7 @@
 //     until a human restarted it by hand — measured twice (2026-08-23: 8.5h stale, 11 UI tasks
 //     invisible; 2026-09-14: 3h+ stale, AC-179 criterion verdict oscillating 6/20). The detector that
 //     reports `stale:true` has existed since gap-webui-server-stale-code-no-restart-detection
-//     (2026-08-23, `packages/quay/src/serve.ts:229 computeStaleStatus`); what was missing is a
+//     (2026-08-23, `packages/quay/src/serve/serve.ts:229 computeStaleStatus`); what was missing is a
 //     CONSUMER, and this script owns the only decision point that decides whether a server runs.
 //     `quay serve` has no supervisor (unlike the drivers), so backgrounding — and now reloading — is
 //     THIS script's job, not a second copy of the driver supervisor.
@@ -58,7 +58,7 @@
 //   ⛔ `--host` / `--port` are OPTIONAL and are FORWARDED only when given
 //   (gap-serve-binding-defaults-three-copies-to-one-definition-point): when omitted, the spawned
 //   `quay serve` resolves both through the ONE definition point
-//   (packages/quay/src/serve-binding.ts — `.quay/config.yml` `serve:` section, else the single
+//   (packages/quay/src/serve/serve-binding.ts — `.quay/config.yml` `serve:` section, else the single
 //   declared fallback, port 0 =「让内核分配临时端口」). Only pass `--port` to pin a host to an exact
 //   port (a deployment that must be addressable at a fixed number); the pinned value is then honored
 //   exactly and a real collision fails loudly.
@@ -76,7 +76,7 @@ import { spawn, spawnSync } from "node:child_process";
 // two copies (硬规则 5b). This is a FORWARD plugin→packages edge: esbuild (build-plugin-dist,
 // bundle:true) INLINES it into the shipped `dist/start-drivers.js`, so "the installed bundle is
 // self-contained" and "there is one implementation" are not in conflict.
-import { openServeLog, SERVE_LOG_UNAVAILABLE } from "../../packages/quay/src/serve-log.ts";
+import { openServeLog, SERVE_LOG_UNAVAILABLE } from "../../packages/quay/src/serve/serve-log.ts";
 // The host's OWN cgroup scope (gap-serve-host-spawned-in-caller-session-cgroup-dies-when-cloudcli-
 // restarts): `detached:true` leaves the session but ⛔ not the cgroup, so a host started here from a
 // CloudCLI session died when that session's scope was stopped. The argv construction + availability
@@ -93,7 +93,7 @@ import { resolveServeEnvelope, scopeLaunchArgv, serveScopeUnavailableReport } fr
 // to remove (semantic-dedup-scan `parseargs-handrolled-residuals`).
 import { parseArgs as baseParseArgs } from "./gate-script-base.ts";
 // The serve host's in-memory ceiling (`NODE_OPTIONS=--max-old-space-size=…`) is SINGLE-SOURCED in the
-// Core leaf `packages/quay/src/serve-heap-cap.ts` — the SAME implementation this host's other spawn
+// Core leaf `packages/quay/src/serve/serve-heap-cap.ts` — the SAME implementation this host's other spawn
 // site (`packages/quay/src/cli/server.ts:spawnHost`) uses
 // (`.quay/routine-findings.jsonl` finding `serveheapcapmb-cross-layer-copy`, routine
 // `semantic-dedup-scan`, runId `semantic-dedup-scan-1791821278116`). This file used to keep a
@@ -106,7 +106,7 @@ import { parseArgs as baseParseArgs } from "./gate-script-base.ts";
 // reaches the whole serve host, and esbuild (bundle:true) would INLINE it here — measured 2026-10-13,
 // `dist/start-drivers.js` 32,143 B → 784,043 B (24×). The LEAF is the established shape for a helper
 // both spawn sites need (serve-log.ts / systemd-scope.ts), and it carries node builtins only.
-import { withServeHeapCap } from "../../packages/quay/src/serve-heap-cap.ts";
+import { withServeHeapCap } from "../../packages/quay/src/serve/serve-heap-cap.ts";
 
 const DRIVER_KINDS = ["promotion", "worker", "outer", "goal"] as const;
 // ⛔ This file declares NO web bind default — not the host, not the port
@@ -115,7 +115,7 @@ const DRIVER_KINDS = ["promotion", "worker", "outer", "goal"] as const;
 // unconditional `--port 0` is the mechanism behind the seventeen
 // `…criterion-cmdline-port-literal-stale` gaps, whose criteria derived a live address from a literal
 // that was structurally always 0. The serve binding now has ONE definition point —
-// `packages/quay/src/serve-binding.ts` — reached by the spawned `quay serve` itself, so this script
+// `packages/quay/src/serve/serve-binding.ts` — reached by the spawned `quay serve` itself, so this script
 // only FORWARDS a flag the operator actually named. That is also why it still needs no `.quay/config.yml`
 // read (the binding is resolved by the CHILD, so nothing here has to close over the config reader).
 const DEFAULT_SERVE_TIMEOUT_MS = 30000;
@@ -126,7 +126,7 @@ const HEALTH_PROBE_TIMEOUT_MS = 2000;
 const SERVE_STOP_TIMEOUT_MS = 10000;
 
 /** The marker `quay serve` prints on stdout when its same-root admission lock refused the start.
- *  ⚠️ Deliberately duplicated with `packages/quay/src/serve.ts:SERVE_ADMISSION_REFUSED_MARKER` —
+ *  ⚠️ Deliberately duplicated with `packages/quay/src/serve/serve.ts:SERVE_ADMISSION_REFUSED_MARKER` —
  *  the kernel keeps its own copy rather than importing Core for a string literal. Both copies must
  *  move together; the `self=<pid>` field is what binds a marker line to the spawn that produced it. */
 export const SERVE_ADMISSION_REFUSED_MARKER = "quay-serve-admission-refused";
@@ -362,7 +362,7 @@ export function planServeAction(opts: {
 
 // ── Stale-serve consumption (gap-serve-stale-signal-has-no-consumer) ──────────────────────────
 // The signal (`GET /health` → `stale`) is read over HTTP rather than by importing
-// `packages/quay/src/serve.ts`: this script lays down as a self-contained plugin entry (rule (a),
+// `packages/quay/src/serve/serve.ts`: this script lays down as a self-contained plugin entry (rule (a),
 // zero closure deps — see the direct-entry guard at the bottom), so a cross-layer source import
 // would break the laydown. HTTP is also the same seam the AC-179 criterion itself uses.
 
@@ -424,7 +424,7 @@ export function probeServeStaleness(
 }
 
 /** The host pid named by `.quay/server.json` — the carrier `quay serve` writes about ITSELF
- *  (`packages/quay/src/server-state.ts`). Three-valued on purpose (硬規則 3b): an unreadable carrier
+ *  (`packages/quay/src/serve/server-state.ts`). Three-valued on purpose (硬規則 3b): an unreadable carrier
  *  must not read as "no server", and "absent" must not read as "unreadable" — the caller acts
  *  differently on each.
  *
@@ -597,7 +597,7 @@ export async function startServe(
   }
   const spawnedAtMs = Date.now();
   // ⛔ Forward ONLY what the operator named. The host/port defaults are resolved by the spawned
-  // `quay serve` through `resolveServeBinding` (packages/quay/src/serve-binding.ts); writing a
+  // `quay serve` through `resolveServeBinding` (packages/quay/src/serve/serve-binding.ts); writing a
   // default here would be a second definition point — and an unconditional `--port` in particular
   // makes every cmdline-derived address reading structurally false (AC4).
   const serveArgs = [...inv.args, "serve"];
@@ -678,7 +678,7 @@ Flags:
   --root <path>          Workspace root (default: discovered via .quay/config.yml from cwd).
   --host <ip>            Web server bind host. Forwarded to \`quay serve\` ONLY when given; when
                          omitted the host is resolved by the ONE definition point
-                         (packages/quay/src/serve-binding.ts): .quay/config.yml \`serve.host\`, else
+                         (packages/quay/src/serve/serve-binding.ts): .quay/config.yml \`serve.host\`, else
                          the single declared fallback.
   --port <p>             Web server port. Forwarded to \`quay serve\` ONLY when given; when omitted
                          the port is resolved by the same definition point and defaults to 0 =

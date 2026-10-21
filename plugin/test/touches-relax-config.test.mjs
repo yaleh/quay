@@ -223,12 +223,12 @@ test("(c) 缺 shared_files / never_relax ⇒ 读出的两者 deepEqual []；给�
     mode: "live",
     after_minutes: 45,
     max_relaxed_inflight: 4,
-    shared_files: ["packages/quay/src/serve.ts", "**/*.test.mjs"],
+    shared_files: ["packages/quay/src/serve/serve.ts", "**/*.test.mjs"],
     never_relax: ["tasks/**", ".quay/config.yml"],
   };
   const r = parseTouchesRelaxSection(given);
   assert.equal(r.ok, true);
-  assert.deepEqual(r.config.shared_files, ["packages/quay/src/serve.ts", "**/*.test.mjs"]);
+  assert.deepEqual(r.config.shared_files, ["packages/quay/src/serve/serve.ts", "**/*.test.mjs"]);
   assert.deepEqual(r.config.never_relax, ["tasks/**", ".quay/config.yml"]);
 });
 

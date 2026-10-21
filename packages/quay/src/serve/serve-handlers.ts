@@ -8,7 +8,7 @@
 // IMPORTANT: This file MUST NOT import from ./serve.ts (would create circular import).
 
 import type { IncomingMessage, ServerResponse } from "node:http";
-import type { ProviderClient } from "./provider-client.ts";
+import type { ProviderClient } from "../provider-client.ts";
 import type { Manifest, ServePageCfg } from "./serve-render.ts";
 // gap-ac288-webui-lang-switch-mechanism: the language resolver. Its ONLY caller is
 // `handleAllRoutes` below — one parse per request, every page consumes the result (AC4's

@@ -510,7 +510,7 @@ test("AC4: config-validate.ts no longer reads the raw YAML mcp_entry (predicate 
   // control below could never match again. That made the assertion a develop-wide, ownerless red
   // (every task's fan-in suite runs this file). A pinned revision is immutable, so the control
   // stays falsifiable. Same idiom as gap-git-graph-cross-column-edges-drawn-as-fixed-stubs-not-
-  // anchored.test.mjs's `303a94950^:packages/quay/src/serve-git.ts`.
+  // anchored.test.mjs's `303a94950^:packages/quay/src/serve-git.ts` (that rev predates the serve/ move).
   const PRE_CHANGE_REV = "6f747e39e^"; // parent of the commit that removed the raw access
   const before = exec("git", ["-C", repoRoot, "show", `${PRE_CHANGE_REV}:packages/quay/src/config-validate.ts`], {
     encoding: "utf8",
@@ -1619,7 +1619,7 @@ test("AC3 (structural): every provider-launch path routes mcp_entry through prov
   // By POSITION (硬规则 2): the three launch paths must read the argv through the shared helper —
   // a direct `… = provider.mcp_entry` destructure is the bare-TypeError path this AC closes.
   const srcDir = path.join(__dirname, "..", "src");
-  const targets = ["mcp-server.ts", "serve.ts", path.join("cli", "shared.ts")];
+  const targets = ["mcp-server.ts", path.join("serve", "serve.ts"), path.join("cli", "shared.ts")];
   for (const rel of targets) {
     const src = fs.readFileSync(path.join(srcDir, rel), "utf8");
     assert.match(src, /providerMcpEntry\(provider\)/, `${rel} must resolve argv via providerMcpEntry(provider)`);

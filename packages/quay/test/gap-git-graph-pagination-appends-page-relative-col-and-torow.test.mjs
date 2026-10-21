@@ -41,7 +41,7 @@ import {
   gitHistoryJson,
   GIT_GRAPH_TRUNK_X,
   GIT_GRAPH_LANE_GAP,
-} from "../src/serve-git.ts";
+} from "../src/serve/serve-git.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "../../..");
@@ -433,7 +433,7 @@ test("AC4: restoring the raw-push page rows (page-relative col/toRow, no recompu
 // ── AC5: single-source column allocation — one export, injected verbatim once into the client ─────
 
 test("AC5: assignGitColumns is exported once and injected verbatim once (no second column allocation)", () => {
-  const src = readFileSync(path.resolve(__dirname, "../src/serve-git.ts"), "utf8");
+  const src = readFileSync(path.resolve(__dirname, "../src/serve/serve-git.ts"), "utf8");
   const defs = (src.match(/export function assignGitColumns/g) || []).length;
   assert.equal(defs, 1, `serve-git.ts exports assignGitColumns exactly once (got ${defs})`);
   const script = gitGraphClientScript();

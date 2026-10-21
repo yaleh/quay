@@ -36,7 +36,7 @@ import {
   GIT_GRAPH_TRUNK_X,
   GIT_GRAPH_LANE_GAP,
   GIT_GRAPH_PAD_Y,
-} from "../src/serve-git.ts";
+} from "../src/serve/serve-git.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "../../..");
@@ -307,7 +307,7 @@ test("AC6: the git-history page emits a page-scoped #main width override wide en
 // ── AC7: the global 900px cap in serve-render.ts is untouched ───────────────────────────────────
 
 test("AC7: serve-render.ts keeps the bare `main { max-width: 900px }` rule (global untouched)", () => {
-  const src = readFileSync(path.resolve(__dirname, "../src/serve-render.ts"), "utf8");
+  const src = readFileSync(path.resolve(__dirname, "../src/serve/serve-render.ts"), "utf8");
   assert.ok(/^main\s*\{[^}]*max-width:\s*900px/m.test(src), "the bare main rule's 900px cap survives (global not changed)");
 });
 
@@ -427,6 +427,8 @@ test("AC9 negative control: a constant laneColor breaks the |{col % 8}| assertio
 // ── AC10: the restored palette matches 303a94950^ item-by-item ─────────────────────────────────
 
 test("AC10: restored GIT_GRAPH_LANE_PALETTE matches 303a94950^ item-by-item", () => {
+  // ⚠️ This rev PREDATES the serve/ move: at 303a94950^ the file really was at src/serve-git.ts.
+  // ⛔ Re-pinning it to src/serve/serve-git.ts would make the comment lie about that rev.
   const recovered = execFileSync("git", ["-C", REPO_ROOT, "show", "303a94950^:packages/quay/src/serve-git.ts"], {
     encoding: "utf8",
     maxBuffer: 64 * 1024 * 1024,

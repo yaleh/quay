@@ -30,12 +30,12 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 import fs from "node:fs";
 import http from "node:http";
-import { startServer } from "../src/serve.ts";
+import { startServer } from "../src/serve/serve.ts";
 import {
   renderTaskBody, splitBodySections, shouldStructureBody,
   BODY_STRUCTURE_MIN_CHARS, BODY_STRUCTURE_MIN_SECTIONS, BODY_SECTION_FOLD_CHARS,
-} from "../src/serve-task.ts";
-import { renderMarkdown } from "../src/serve-render.ts";
+} from "../src/serve/serve-task.ts";
+import { renderMarkdown } from "../src/serve/serve-render.ts";
 import { makeTmpDir } from "../../../plugin/test/helpers/tmp-workspace.mjs";
 import { QUAY_NATIVE_CLI } from "./helpers/cli-entry.mjs";
 
@@ -81,7 +81,7 @@ const LONG_BODY = [
   "",
   "## Touches",
   "",
-  "- packages/quay/src/serve-task.ts",
+  "- packages/quay/src/serve/serve-task.ts",
 ].join("\n");
 
 /** The short-body fixture (AC2): ONE `## ` heading and a few dozen chars — must stay flat. */

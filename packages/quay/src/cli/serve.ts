@@ -19,7 +19,7 @@ import { parseFlags } from "./shared.ts";
 import type { CliCtx } from "./context.ts";
 
 export async function handleServe({ argv }: CliCtx) {
-  const { startServer, isServeAdmissionRefused, formatAdmissionRefusal } = await import("../serve.ts");
+  const { startServer, isServeAdmissionRefused, formatAdmissionRefusal } = await import("../serve/serve.ts");
   // `serve` has no subcommand token — reparse from argv[2] so `--port` etc.
   // is read correctly instead of being swallowed into `sub`.
   const { flags: serveFlags } = parseFlags(argv.slice(1));

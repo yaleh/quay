@@ -18,11 +18,11 @@ import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { resolveServeBinding, SERVE_BINDING_FALLBACK } from "../src/serve-binding.ts";
+import { resolveServeBinding, SERVE_BINDING_FALLBACK } from "../src/serve/serve-binding.ts";
 import { QUAY_CLI } from "./helpers/cli-entry.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const SRC = path.resolve(__dirname, "../src/serve-binding.ts");
+const SRC = path.resolve(__dirname, "../src/serve/serve-binding.ts");
 
 function tmpWs(config) {
   const ws = fs.mkdtempSync(path.join(os.tmpdir(), "serve-binding-ws-"));

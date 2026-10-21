@@ -44,11 +44,11 @@ import {
   probeControlService,
   serverStatePath,
   type ServiceProbe,
-} from "../server-state.ts";
+} from "../serve/server-state.ts";
 // The service inventory + desired-state carrier are SINGLE-SOURCED in serve.ts (the service-lifecycle
 // host). `status` used to import only server-state.ts; it now shares the host's own vocabulary, so
 // 「CLI 认得的服务名」 and 「宿主承载的服务名」 cannot drift into two lists (SPEC §6.8 单一实现).
-import { parseServiceList, readServiceState, writeServiceState } from "../serve.ts";
+import { parseServiceList, readServiceState, writeServiceState } from "../serve/serve.ts";
 // The service NAMES come from the zero-import leaf (same reason as help.ts): one list, three
 // consumers. ⛔ Never re-declare them here.
 import { ALL_SERVICE_NAMES, DRIVER_SERVICE_KINDS, HOSTED_SERVICE_NAMES } from "../driver-vocab.ts";
@@ -58,7 +58,7 @@ import { runDriver, runDriverAsync } from "../driver-control.ts";
 // SAME host, and they used to disagree — `startServe` appended to `.quay/serve.log`, `spawnHost`
 // used `stdio: "ignore"`, so a host started via `quay server start/add/restart` left no cause
 // anywhere. ⛔ One implementation, not two copies (硬规则 5b).
-import { openServeLog, SERVE_LOG_UNAVAILABLE } from "../serve-log.ts";
+import { openServeLog, SERVE_LOG_UNAVAILABLE } from "../serve/serve-log.ts";
 // 宿主**自己的 cgroup scope**（gap-serve-host-spawned-in-caller-session-cgroup-dies-when-cloudcli-
 // restarts）：`detached:true` 只脱离会话、⛔ 不脱离 cgroup ⇒ 必须把 argv 包进 `systemd-run --user
 // --scope`。argv 构造与可用性判据的唯一实现在 Core 叶模块 `systemd-scope.ts`——本文件与
@@ -72,7 +72,7 @@ import { resolveServeEnvelope, scopeLaunchArgv, serveScopeUnavailableReport } fr
 import { serveHostLoadedVersionReading } from "../loaded-version.ts";
 import type { CliCtx } from "./context.ts";
 
-// The serve host's in-memory ceiling is SINGLE-SOURCED in the Core leaf `../serve-heap-cap.ts`
+// The serve host's in-memory ceiling is SINGLE-SOURCED in the Core leaf `../serve/serve-heap-cap.ts`
 // (`.quay/routine-findings.jsonl` finding `serveheapcapmb-cross-layer-copy`, routine
 // `semantic-dedup-scan`, runId `semantic-dedup-scan-1791821278116`): THIS file's `spawnHost` and
 // `plugin/scripts/start-drivers.ts`'s `startServe` are the two spawn sites of the SAME host, and each
@@ -81,7 +81,7 @@ import type { CliCtx } from "./context.ts";
 // two (硬规则 5b). The names stay exported HERE because that is the surface this module has always
 // had; the kernel imports the LEAF directly (⛔ never this CLI module — the leaf's header records the
 // measured cost of that edge).
-import { serveHeapCapMb, withServeHeapCap } from "../serve-heap-cap.ts";
+import { serveHeapCapMb, withServeHeapCap } from "../serve/serve-heap-cap.ts";
 export { serveHeapCapMb, withServeHeapCap };
 
 /** The two services stage A2 merges; both must be present and carry the host pid for `running`. */
@@ -585,7 +585,7 @@ export function spawnHost(
   const stripTypes = entry.endsWith(".ts") ? ["--experimental-strip-types"] : [];
   // ⛔ Neither `--host` nor `--port` is spelled here unless the caller named one
   // (gap-serve-binding-defaults-three-copies-to-one-definition-point). BOTH defaults now belong to
-  // ONE place — `resolveServeBinding` in packages/quay/src/serve-binding.ts, reached by the spawned
+  // ONE place — `resolveServeBinding` in packages/quay/src/serve/serve-binding.ts, reached by the spawned
   // `quay serve` itself (CLI flag > `.quay/config.yml` `serve:` > the single fallback). Before this,
   // this line injected a SECOND host default (a loopback fallback tacked onto `hostFlag`) that
   // contradicted the web leg's own all-interfaces default — the same command listening on two

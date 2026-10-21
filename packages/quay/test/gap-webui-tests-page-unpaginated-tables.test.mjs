@@ -20,9 +20,9 @@ import path from "node:path";
 import fs from "node:fs";
 import os from "node:os";
 import http from "node:http";
-import { startServer } from "../src/serve.ts";
+import { startServer } from "../src/serve/serve.ts";
 import { clearVerificationRoundCache } from "../src/observation.ts";
-import { buildTestsHref } from "../src/serve-tests.ts";
+import { buildTestsHref } from "../src/serve/serve-tests.ts";
 import { QUAY_NATIVE_CLI } from "./helpers/cli-entry.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -205,30 +205,31 @@ test("AC4: enumerate every <table> in serve-*.ts and annotate it — no unannota
   // The deliverable: the grep hit count + first-3 actual lines + a per-site annotation
   // (已接分页 / 无需分页[with upper-bound source] / 待接). Pinned here so the enumeration can't drift.
   const inventory = [
-    ["packages/quay/src/serve-architecture.ts", 55, "无需分页（上界=packages/* 顶层组件数，近 7 天变更组件 ≤ 该固定集合）"],
-    ["packages/quay/src/serve-board.ts", 168, "已接分页（gap-webui-board-no-pagination，?page/?pageSize）"],
-    ["packages/quay/src/serve-doc.ts", 39, "无需分页（上界=docs-managed/ 人工维护文档数）"],
-    ["packages/quay/src/serve-adr.ts", 26, "无需分页（上界=adr/ADR-*.md 文件数）"],
-    ["packages/quay/src/serve-system.ts", 118, "无需分页（上界=活跃 Claude 会话数）"],
-    ["packages/quay/src/serve-system.ts", 128, "无需分页（上界=已配置 observer 数）"],
-    ["packages/quay/src/serve-task.ts", 482, "已接分页（QW-007 buildHref，?page/?pageSize）"],
-    ["packages/quay/src/serve-task.ts", 579, "无需分页（上界=单个任务的 run 台账记录数）"],
-    ["packages/quay/src/serve-goal.ts", 255, "无需分页（上界=goals/ 人工维护 goal 数，cap=3 active；Goals tab）"],
-    ["packages/quay/src/serve-goal.ts", 287, "无需分页（上界=goals/ 下派生 criterion 总数；Criteria tab）"],
-    ["packages/quay/src/serve-goal.ts", 467, "无需分页（上界=单个 goal 名下 criterion 数，gap-webui-goal-detail-no-entity-links 的详情页 criterion 区块）"],
-    ["packages/quay/src/serve-tests.ts", 319, "已接分页（本任务，?perFilePage/?perFilePageSize）"],
-    ["packages/quay/src/serve-tests.ts", 752, "已接分页（本任务，?page/?pageSize）"],
-    ["packages/quay/src/serve-tests.ts", 917, "待接（/tests/file 单文件跨轮历史，一行/轮，无上界）"],
-    ["packages/quay/src/serve-needs-human.ts", 82, "无需分页（上界=needs-human 任务池，稀有终态）"],
-    ["packages/quay/src/serve-needs-human.ts", 88, "待接（升级台账 .quay/promotion-outcome.jsonl append-only，无上界）"],
-    ["packages/quay/src/serve-live.ts", 84, "无需分页（上界=在飞任务数，受并发上限约束）"],
+    ["packages/quay/src/serve/serve-architecture.ts", 55, "无需分页（上界=packages/* 顶层组件数，近 7 天变更组件 ≤ 该固定集合）"],
+    ["packages/quay/src/serve/serve-board.ts", 168, "已接分页（gap-webui-board-no-pagination，?page/?pageSize）"],
+    ["packages/quay/src/serve/serve-doc.ts", 39, "无需分页（上界=docs-managed/ 人工维护文档数）"],
+    ["packages/quay/src/serve/serve-adr.ts", 26, "无需分页（上界=adr/ADR-*.md 文件数）"],
+    ["packages/quay/src/serve/serve-system.ts", 118, "无需分页（上界=活跃 Claude 会话数）"],
+    ["packages/quay/src/serve/serve-system.ts", 128, "无需分页（上界=已配置 observer 数）"],
+    ["packages/quay/src/serve/serve-task.ts", 482, "已接分页（QW-007 buildHref，?page/?pageSize）"],
+    ["packages/quay/src/serve/serve-task.ts", 579, "无需分页（上界=单个任务的 run 台账记录数）"],
+    ["packages/quay/src/serve/serve-goal.ts", 255, "无需分页（上界=goals/ 人工维护 goal 数，cap=3 active；Goals tab）"],
+    ["packages/quay/src/serve/serve-goal.ts", 287, "无需分页（上界=goals/ 下派生 criterion 总数；Criteria tab）"],
+    ["packages/quay/src/serve/serve-goal.ts", 467, "无需分页（上界=单个 goal 名下 criterion 数，gap-webui-goal-detail-no-entity-links 的详情页 criterion 区块）"],
+    ["packages/quay/src/serve/serve-tests.ts", 319, "已接分页（本任务，?perFilePage/?perFilePageSize）"],
+    ["packages/quay/src/serve/serve-tests.ts", 752, "已接分页（本任务，?page/?pageSize）"],
+    ["packages/quay/src/serve/serve-tests.ts", 917, "待接（/tests/file 单文件跨轮历史，一行/轮，无上界）"],
+    ["packages/quay/src/serve/serve-needs-human.ts", 82, "无需分页（上界=needs-human 任务池，稀有终态）"],
+    ["packages/quay/src/serve/serve-needs-human.ts", 88, "待接（升级台账 .quay/promotion-outcome.jsonl append-only，无上界）"],
+    ["packages/quay/src/serve/serve-live.ts", 84, "无需分页（上界=在飞任务数，受并发上限约束）"],
   ];
 
-  // The AC's literal command — `grep -rn "<table" packages/quay/src/serve-*.ts` — needs a SHELL for the
-  // `*.ts` glob (grep itself does not expand globs on its file arguments). execSync runs via /bin/sh.
+  // The AC's literal command — `grep -rn "<table" packages/quay/src/serve/serve-*.ts` — needs a SHELL for
+  // the `*.ts` glob (grep itself does not expand globs on its file arguments). execSync runs via /bin/sh.
+  // (The serve family moved into `src/serve/` — gap-routine-architecture-analysis-quay-src-serve-surface-flat-in-src.)
   // Sort the lines: the shell's glob expansion order is filesystem-dependent (not guaranteed), so the
   // "first 3" is pinned on the SORTED order for determinism.
-  const grepOut = execSync('grep -rn "<table" packages/quay/src/serve-*.ts', {
+  const grepOut = execSync('grep -rn "<table" packages/quay/src/serve/serve-*.ts', {
     cwd: REPO_ROOT, encoding: "utf8",
   }).trim().split("\n").sort();
 
@@ -244,7 +245,7 @@ test("AC4: enumerate every <table> in serve-*.ts and annotate it — no unannota
   // that fix was applied there and missed here, its sibling. Order is still pinned (the multiset
   // walks this same sorted list), and the content assertion keeps each pinned hit a real <table>
   // site rather than just a filename that happens to sort first.
-  const firstThree = [[0, "serve-adr.ts"], [1, "serve-architecture.ts"], [2, "serve-board.ts"]];
+  const firstThree = [[0, "serve/serve-adr.ts"], [1, "serve/serve-architecture.ts"], [2, "serve/serve-board.ts"]];
   for (const [i, file] of firstThree) {
     assert.ok(new RegExp(`^packages/quay/src/${file}:\\d+:`).test(grepOut[i]),
       `AC4: hit #${i + 1} is ${file} (got ${grepOut[i]})`);

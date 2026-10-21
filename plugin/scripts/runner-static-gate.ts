@@ -327,7 +327,7 @@ run_static_checks() {
   # @static-object packages/quay/src/ plugin/scripts/ plugin/scripts/worktree-namespace-literal-check.ts plugin/test/worktree-namespace-literal-check.test.mjs
   run_checker "worktree-namespace-literal-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/worktree-namespace-literal-check.ts" --root "${repo_root}"
   echo "== serve-binding literal check (gap-serve-binding-defaults-three-copies-to-one-definition-point, AC1/AC7/AC8) =="
-  # serve 的绑定默认值（host/port）只有一个定义点：packages/quay/src/serve-binding.ts 的
+  # serve 的绑定默认值（host/port）只有一个定义点：packages/quay/src/serve/serve-binding.ts 的
   # SERVE_BINDING_FALLBACK（唯一解析器 resolveServeBinding 的回落分支）。此前同一量有三个定义点且
   # host 互相矛盾（serve.ts 全接口 / cli/server.ts 回环 / start-drivers.ts 全接口 + 无条件写
   # --port 0）—— 最后一条正是 17 条 criterion-cmdline-port-literal-stale 的机制根因。谓词即 AC 自己的
@@ -846,7 +846,7 @@ run_static_checks() {
   # 诚实记下覆盖代价：只改那两个文档面的 delta 会让本检查器在 scoped 轮缺席；覆盖来自
   # ①本检查器自身文件被触碰时的 scoped 子集，②任何一次真正跑起来的全量 suite（本行无条件执行）。
   # @static-tier change
-  # @static-object plugin/scripts/enum-surface-parity-check.ts plugin/scripts/checker-mutation-cases/enum-surface-parity-check.sh plugin/test/enum-surface-parity-check.test.mjs plugin/scripts/driver-runtime.ts plugin/scripts/driver-config.ts plugin/scripts/start-drivers.ts plugin/scripts/task-status.ts packages/quay/src/core/types.ts packages/quay/src/core/goal-store.ts packages/quay/src/serve-sessions.ts packages/quay/src/driver-vocab.ts packages/quay/src/cli/driver.ts packages/quay/src/cli/help.ts packages/quay/src/serve-goal.ts packages/quay/src/core/adr-store.ts packages/quay/src/core/document-store.ts packages/quay/src/mcp-handlers.ts packages/quay-native/src/mcp-server.ts
+  # @static-object plugin/scripts/enum-surface-parity-check.ts plugin/scripts/checker-mutation-cases/enum-surface-parity-check.sh plugin/test/enum-surface-parity-check.test.mjs plugin/scripts/driver-runtime.ts plugin/scripts/driver-config.ts plugin/scripts/start-drivers.ts plugin/scripts/task-status.ts packages/quay/src/core/types.ts packages/quay/src/core/goal-store.ts packages/quay/src/serve/serve-sessions.ts packages/quay/src/driver-vocab.ts packages/quay/src/cli/driver.ts packages/quay/src/cli/help.ts packages/quay/src/serve/serve-goal.ts packages/quay/src/core/adr-store.ts packages/quay/src/core/document-store.ts packages/quay/src/mcp-handlers.ts packages/quay-native/src/mcp-server.ts
   run_checker "enum-surface-parity-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/enum-surface-parity-check.ts" --root "${repo_root}"
   # ── PROMOTED BACK FROM THE OPERATIONAL TIER: the two CORRECTNESS checkers whose default
   # reachability was ZERO (tasks/gap-correctness-checkers-opt-in-not-default-suite-member) ─────────

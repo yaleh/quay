@@ -24,8 +24,8 @@ import path from "node:path";
 import fs from "node:fs";
 import os from "node:os";
 import http from "node:http";
-import { startServer } from "../src/serve.ts";
-import { renderWorkProgressRow } from "../src/serve-dashboard.ts";
+import { startServer } from "../src/serve/serve.ts";
+import { renderWorkProgressRow } from "../src/serve/serve-dashboard.ts";
 import { QUAY_NATIVE_CLI } from "./helpers/cli-entry.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));

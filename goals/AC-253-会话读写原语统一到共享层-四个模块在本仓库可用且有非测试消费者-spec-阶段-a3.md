@@ -20,7 +20,7 @@ criterion: |-
           if m in l: got.add(m)
   missing=[m for m in MODS if m not in got]
   if missing: sys.stderr.write("AC-253: no non-test IMPORT of shared primitive(s): %s (a bare string mention in a comment does NOT count)\n"%",".join(missing)); sys.exit(1)
-  try: r2=subprocess.run(["git","grep","-nE",r"net\.createConnection\s*\(","--","packages/quay/src/serve-send.ts","packages/quay/src/observation.ts"],capture_output=True,text=True,timeout=60)
+  try: r2=subprocess.run(["git","grep","-nE",r"net\.createConnection\s*\(","--","packages/quay/src/serve/serve-send.ts","packages/quay/src/observation.ts"],capture_output=True,text=True,timeout=60)
   except Exception as e: sys.stderr.write("AC-253 NOT-EVALUATED: git grep (second pass) failed (%s)\n"%e); sys.exit(3)
   dup=[l for l in r2.stdout.splitlines() if l.strip()]
   if dup: sys.stderr.write("AC-253: a SECOND hand-written socket implementation survives (%d line(s), first: %s) => SPEC 8-1 violated: 'only one implementation' is the actual A3 criterion\n"%(len(dup),dup[0][:100])); sys.exit(1)

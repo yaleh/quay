@@ -9,8 +9,8 @@
 // reported `CAUSE=en-fetch-failed` against a server that was up the whole time — the ledger shows
 // the SAME `criterionHash` 848bfb6418f2a892 green at 2026-09-23T05:08:40.467Z and red from
 // 08:36:03.044Z, i.e. the CARRIER moved, not the criterion's subject. The amendment moves that ONE
-// step to the live host's own carrier `.quay/server.json` (writer `packages/quay/src/serve.ts`; read
-// contract `packages/quay/src/server-state.ts`), which is the only place a kernel-assigned port is
+// step to the live host's own carrier `.quay/server.json` (writer `packages/quay/src/serve/serve.ts`; read
+// contract `packages/quay/src/serve/server-state.ts`), which is the only place a kernel-assigned port is
 // knowable.
 //
 // WHY THE CRITERION TEXT IS LOADED FROM `goals/` INSTEAD OF RESTATED HERE. 硬规则 4 推论三: a fixture

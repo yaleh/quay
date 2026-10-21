@@ -424,7 +424,7 @@ test("expandDeclaredTouches: a wildcard that matches nothing is EMPTY (the conse
 test("assembleBatch (AC1): a NEW-file candidate vs an EXISTING-file candidate, clearly unrelated → disjoint, both batch", () => {
   const cands = [
     parseCandidate("A", "**type:** execution\n## Touches\n- plugin/scripts/brand-new-alpha.ts"),
-    parseCandidate("B", "**type:** execution\n## Touches\n- packages/quay/src/serve.ts"),
+    parseCandidate("B", "**type:** execution\n## Touches\n- packages/quay/src/serve/serve.ts"),
   ];
   const r = assembleBatch(cands, { expand: (g) => expandDeclaredTouches(g, REPO_ROOT) });
   assert.deepEqual(r.batch, ["A", "B"]);
@@ -492,7 +492,7 @@ test("main --json (AC1): new-file vs existing-file pair → both batch, no defer
     const newA = path.join(ac1Dir, "new-a.md");
     const existB = path.join(ac1Dir, "existing-b.md");
     fs.writeFileSync(newA, "**type:** execution\n## Touches\n- plugin/scripts/brand-new-alpha.ts\n");
-    fs.writeFileSync(existB, "**type:** execution\n## Touches\n- packages/quay/src/serve.ts\n");
+    fs.writeFileSync(existB, "**type:** execution\n## Touches\n- packages/quay/src/serve/serve.ts\n");
     const r = await runMainJson(["--root", REPO_ROOT, newA, existB]);
     assert.equal(r.code, 0);
     const parsed = JSON.parse(r.stdout);

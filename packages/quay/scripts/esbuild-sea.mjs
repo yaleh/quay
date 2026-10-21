@@ -37,7 +37,7 @@ try {
     plugins: [redirectVersionPlugin],
     loader: { ".json": "json" },
     // Same additional resolution root as build-dist.mjs (see bundleNodePaths there). Its original
-    // reason was that this bundle inlined plugin/scripts/driver-shared.ts via src/serve.ts; since
+    // reason was that this bundle inlined plugin/scripts/driver-shared.ts via src/serve/serve.ts; since
     // tasks/gap-arch-reverse-edges-zero every inlined source is under packages/quay/src/, so no
     // out-of-package importer remains. Kept for the same reason as there: it is additive, and it
     // pins that a self-contained bundle's bare specifiers resolve against the bundle's own package.

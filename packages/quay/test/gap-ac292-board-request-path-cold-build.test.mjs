@@ -27,7 +27,7 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 import fs from "node:fs";
 import http from "node:http";
-import { startServer } from "../src/serve.ts";
+import { startServer } from "../src/serve/serve.ts";
 import {
   peekBoardSnapshot,
   startBoardSnapshotRefresh,
@@ -37,7 +37,7 @@ import {
   boardSnapshotDisabled,
   BOARD_SNAPSHOT_DISABLED_ENV,
   BOARD_SNAPSHOT_REFRESH_MS,
-} from "../src/serve-board.ts";
+} from "../src/serve/serve-board.ts";
 import {
   clearLandingCache,
   getLandingColdRunCount,
@@ -124,9 +124,9 @@ before(async () => {
   workspaceRoot = fixture.ws;
   tasksDir = fixture.tasksDir;
   const store = createStore(tasksDir);
-  store.write("BRD-1", { title: "first board task", status: "todo", labels: ["gap"], body: TASK_BODY("brdFirst", "packages/quay/src/serve-board.ts") });
-  store.write("BRD-2", { title: "second board task", status: "done", labels: ["gap", "webui"], body: TASK_BODY("brdSecond", "packages/quay/src/serve-board.ts") });
-  store.write("BRD-3", { title: "third board task", status: "ready", labels: ["webui"], body: TASK_BODY("brdThird", "packages/quay/src/serve-board.ts") });
+  store.write("BRD-1", { title: "first board task", status: "todo", labels: ["gap"], body: TASK_BODY("brdFirst", "packages/quay/src/serve/serve-board.ts") });
+  store.write("BRD-2", { title: "second board task", status: "done", labels: ["gap", "webui"], body: TASK_BODY("brdSecond", "packages/quay/src/serve/serve-board.ts") });
+  store.write("BRD-3", { title: "third board task", status: "ready", labels: ["webui"], body: TASK_BODY("brdThird", "packages/quay/src/serve/serve-board.ts") });
 
   const { execFileSync } = await import("node:child_process");
   execFileSync("git", ["init", "-q"], { cwd: workspaceRoot });
@@ -213,7 +213,7 @@ test("AC1′: with a snapshot present /board serves the snapshot — a store mut
   // Mutate the store AND drop the TTL caches. Dropping the caches is what makes this a measurement
   // of the SNAPSHOT rather than of a TTL: on the pre-fix request path (and on the legacy fallback
   // below) a cache-less request MUST read the store and therefore MUST show BRD-LATE.
-  createStore(tasksDir).write("BRD-LATE", { title: "late added", status: "todo", labels: ["gap"], body: TASK_BODY("brdLate", "packages/quay/src/serve-board.ts") });
+  createStore(tasksDir).write("BRD-LATE", { title: "late added", status: "todo", labels: ["gap"], body: TASK_BODY("brdLate", "packages/quay/src/serve/serve-board.ts") });
   coldCaches();
 
   const afterMutate = await get(port, "/board?all=1");

@@ -7,8 +7,8 @@
 import { readFileSync, existsSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { resolvePluginRoot } from "./core/plugin-root.ts";
-import type { ProviderClient } from "./provider-client.ts";
+import { resolvePluginRoot } from "../core/plugin-root.ts";
+import type { ProviderClient } from "../provider-client.ts";
 import { DEFAULT_LANG, LANGS, type Lang } from "./serve-lang.ts";
 import { SERVE_BINDING_FALLBACK } from "./serve-binding.ts";
 // AC-289: the label dictionary is imported for the render functions here and re-exported for pages,
@@ -70,7 +70,7 @@ export function tableWrap(inner: string): string {
 // product-layer leaf ./search-index.ts (Core, not this renderer): the helper is
 // not rendering logic and three other surfaces need it. Re-exported here so
 // serve-task.ts and serve-handlers.ts's `export *` keep their import path.
-export { stripHeadings } from "./search-index.ts";
+export { stripHeadings } from "../search-index.ts";
 
 // QW-001: minimal, consistent CSS system — applied via <link> in every page's
 // <head>. No external file: inlined as a <style> block so the single-file
@@ -484,7 +484,7 @@ const __webuiCssGlobal = globalThis as unknown as { __WEBUI_MODERNIST_CSS__?: st
 const WEBUI_MODERNIST_CSS = (() => {
   if (__webuiCssGlobal.__WEBUI_MODERNIST_CSS__ !== undefined) return __webuiCssGlobal.__WEBUI_MODERNIST_CSS__;
   try {
-    return readFileSync(new URL("./webui-modernist.css", import.meta.url), "utf8");
+    return readFileSync(new URL("../webui-modernist.css", import.meta.url), "utf8");
   } catch (err) {
     console.error(`[quay serve] webui-modernist.css missing:`, (err as Error).message);
     return "";
@@ -751,7 +751,7 @@ export function inlineMarkdown(text: string, opts: RenderMarkdownOpts = {}): str
 // now the shared product-layer leaf ./relative-time.ts (not rendering logic — the CLI
 // needs it too). Re-exported here so serve-task.ts, serve-dashboard.ts, serve-live.ts,
 // serve-goal.ts, serve-needs-human.ts and serve.ts keep their import path unchanged.
-export { relativeTime } from "./relative-time.ts";
+export { relativeTime } from "../relative-time.ts";
 
 // M26-adversarial-eval finding ADV-003: shared open-redirect guard for
 // ?from= redirect targets, replacing the two previously-DIVERGING inline

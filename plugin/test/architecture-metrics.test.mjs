@@ -13,10 +13,10 @@ import { computeRunMetrics, evidenceCost, touchedFilesOf, aggregateMetrics, NOT_
 const readOnly = (over = {}) => ({
   usage: { rounds: 5, evidence_requests: 4, evidence_bytes: 12345 },
   steps: [
-    { round: 1, outcome: "evidence", request: { kind: "read_file", path: "packages/quay/src/serve.ts" } },
+    { round: 1, outcome: "evidence", request: { kind: "read_file", path: "packages/quay/src/serve/serve.ts" } },
     { round: 2, outcome: "evidence", request: { kind: "grep", paths: ["packages/quay/src"] } },
   ],
-  evidence: [{ id: "ev-1", request: { kind: "read_file", path: "packages/quay/src/serve.ts" }, provenance: { path: "packages/quay/src/serve.ts" } }],
+  evidence: [{ id: "ev-1", request: { kind: "read_file", path: "packages/quay/src/serve/serve.ts" }, provenance: { path: "packages/quay/src/serve/serve.ts" } }],
   envelope: { concern: "unresolved", scope: { in_scope: [] }, candidate_interventions: [] },
   ...over,
 });
@@ -93,7 +93,7 @@ test("recoveryRounds names the round the run first touched the goal's real area,
 });
 
 test("touchedFilesOf unions READ files and proposed files — a grep's directory scope is not a file it touched", () => {
-  assert.deepEqual(touchedFilesOf(proposing(["packages/quay/src/cli/driver.ts"])), ["packages/quay/src/cli/driver.ts", "packages/quay/src/serve.ts"]);
+  assert.deepEqual(touchedFilesOf(proposing(["packages/quay/src/cli/driver.ts"])), ["packages/quay/src/cli/driver.ts", "packages/quay/src/serve/serve.ts"]);
   const grepOnly = readOnly({ evidence: [{ id: "ev-1", request: { kind: "grep", paths: ["packages/quay/src"] }, provenance: { tool: "grep" } }] });
   assert.deepEqual(touchedFilesOf(grepOnly), [], "a directory scope is not a touched file");
 });

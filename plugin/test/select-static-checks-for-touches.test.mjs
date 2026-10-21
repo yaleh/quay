@@ -565,7 +565,7 @@ const COMPANION_CARRIERS = [
 const COMPANION_NON_CARRIERS = [
   "plugin/scripts/repo-root.ts",
   "docs/proposals/x.md",
-  "packages/quay/src/serve.ts",
+  "packages/quay/src/serve/serve.ts",
 ];
 
 /**

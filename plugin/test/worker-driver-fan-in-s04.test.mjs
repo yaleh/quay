@@ -42,7 +42,7 @@ test("RETRY_EXEMPTION_WINDOW_MS_DEFAULT — 48h 窗口缺省（与提案 48h 复
 test("AC3 (反向控制) — 两个【不同】缺陷（易变量各异）跨 2 任务 ⇒ 仍 own-defect-counted（⛔ 归一化过头即红）", (t) => {
   const root = makeRoot("exempt-volatile-ac3");
   t.after(() => rmSafe(root));
-  writeExemptionTask(root, "gap-a", ["packages/quay/src/serve-dashboard.ts"]);
+  writeExemptionTask(root, "gap-a", ["packages/quay/src/serve/serve-dashboard.ts"]);
   writeFailingTest(root, EXEMPT_TEST);
   const nowMs = Date.parse("2026-09-03T00:00:00.000Z");
   // 缺陷 A 与缺陷 B：措辞不同（缺陷身份不同），但**都**带 pid/路径易变量——若归一化把量抹成恒等占位
@@ -66,7 +66,7 @@ test("AC3 (反向控制) — 两个【不同】缺陷（易变量各异）跨 2 
 test("AC2 (正控制) — 同一缺陷的易变量（pid/ms/路径）各异跨 2 任务 ⇒ unrelated-flaky-exempt（⛔ 改前 own-defect-counted）", (t) => {
   const root = makeRoot("exempt-volatile-ac2");
   t.after(() => rmSafe(root));
-  writeExemptionTask(root, "gap-a", ["packages/quay/src/serve-dashboard.ts"]);
+  writeExemptionTask(root, "gap-a", ["packages/quay/src/serve/serve-dashboard.ts"]);
   writeFailingTest(root, EXEMPT_TEST);
   const nowMs = Date.parse("2026-09-03T00:00:00.000Z");
   // 同一缺陷（driver-runtime AC4「未确认存活」）的两次运行：pid / 耗时 / 工作树路径全不同。
@@ -126,7 +126,7 @@ test("DoD (落点映射·机械) — 签名归一化只有一个正本点：提�
 test("AC4 (硬规则 3b) — 判不出（退化签名 / 无断言行 / suite log 读不到）⇒ insufficient-data-fallback，⛔ 不与豁免同形", (t) => {
   const root = makeRoot("exempt-volatile-ac4");
   t.after(() => rmSafe(root));
-  writeExemptionTask(root, "gap-a", ["packages/quay/src/serve-dashboard.ts"]);
+  writeExemptionTask(root, "gap-a", ["packages/quay/src/serve/serve-dashboard.ts"]);
   writeFailingTest(root, EXEMPT_TEST);
 
   // ① 退化签名：折叠后连一个字母都不剩（`1 !== 2`）⇒ 在不同缺陷间恒等 ⇒ 不得当作身份 ⇒ 判不出。

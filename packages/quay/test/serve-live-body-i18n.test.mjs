@@ -36,7 +36,7 @@ import fs from "node:fs";
 import os from "node:os";
 import http from "node:http";
 import { execFileSync } from "node:child_process";
-import { startServer } from "../src/serve.ts";
+import { startServer } from "../src/serve/serve.ts";
 import {
   LIVE_KEYS,
   LIVE_LABELS,
@@ -44,8 +44,8 @@ import {
   liveLabel,
   dashboardLabel,
   fillLabel,
-} from "../src/serve-i18n.ts";
-import { phaseLabel, renderLivePage } from "../src/serve-live.ts";
+} from "../src/serve/serve-i18n.ts";
+import { phaseLabel, renderLivePage } from "../src/serve/serve-live.ts";
 import { QUAY_NATIVE_CLI } from "./helpers/cli-entry.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));

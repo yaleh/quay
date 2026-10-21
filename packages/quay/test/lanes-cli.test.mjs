@@ -35,7 +35,7 @@ import {
 import { readLive, readWorkerOutcomeRecords } from "../src/observation.ts";
 // The window default/validator the card's `?hours=` param uses — imported (not re-typed) so this
 // file cannot agree with the CLI while BOTH disagree with the card.
-import { DEFAULT_TIMELINE_HOURS } from "../src/serve-dashboard.ts";
+import { DEFAULT_TIMELINE_HOURS } from "../src/serve/serve-dashboard.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const pkgDir = path.resolve(__dirname, "..");

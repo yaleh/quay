@@ -25,7 +25,7 @@ const lines = (root) => { const f = storeFile(root); return fs.existsSync(f) ? f
 
 // One COMPLETE, valid record per kind — the baseline the missing-field variants are derived from.
 const GOOD = {
-  evidence: { tool: "read_file", ref: "abc1234567890def", ts: "2026-10-11T00:00:00Z", sha256: "a".repeat(64), confidence: confidence("high", "commit-pinned reading"), path: "packages/quay/src/serve.ts", range: [1, 40] },
+  evidence: { tool: "read_file", ref: "abc1234567890def", ts: "2026-10-11T00:00:00Z", sha256: "a".repeat(64), confidence: confidence("high", "commit-pinned reading"), path: "packages/quay/src/serve/serve.ts", range: [1, 40] },
   hypothesis: { statement: "the gate core forms a package-level cycle with the root", source_evidence: ["ev-1"], ts: "2026-10-11T00:00:00Z" },
   experiment: { hypothesis_ref: "the gate core forms a cycle", method: "bounded shadow investigation", budget: { max_rounds: 8 }, ts: "2026-10-11T00:00:00Z" },
   outcome: { experiment_ref: "bounded shadow investigation", verdict: "abstained", ts: "2026-10-11T00:00:00Z" },
@@ -209,9 +209,9 @@ const RUN = {
   terminal: { kind: "abstain", forced: false, forced_cause: null },
   evidence: [
     { id: "ev-0", request: { kind: "initial_facts" }, status: "ok", text_sha256: "b".repeat(64), provenance: { tool: "git", ref_commit: "abc1234567890def", ts: "2026-10-11T01:00:00Z", command: "git log -1" } },
-    { id: "ev-1", request: { kind: "read_file", path: "packages/quay/src/serve.ts" }, status: "ok", text_sha256: "c".repeat(64), provenance: { tool: "read_file", ref_commit: "abc1234567890def", ts: "2026-10-11T01:00:01Z", content_sha256: "c".repeat(64), path: "packages/quay/src/serve.ts", range: [1, 40] } },
+    { id: "ev-1", request: { kind: "read_file", path: "packages/quay/src/serve/serve.ts" }, status: "ok", text_sha256: "c".repeat(64), provenance: { tool: "read_file", ref_commit: "abc1234567890def", ts: "2026-10-11T01:00:01Z", content_sha256: "c".repeat(64), path: "packages/quay/src/serve/serve.ts", range: [1, 40] } },
   ],
-  envelope: { concern: "some concern", concern_kind: "package-cycle", candidate_interventions: [], scope: { in_scope: ["packages/quay/src/serve.ts"], non_goals: [] } },
+  envelope: { concern: "some concern", concern_kind: "package-cycle", candidate_interventions: [], scope: { in_scope: ["packages/quay/src/serve/serve.ts"], non_goals: [] } },
   decision_memory: null,
 };
 
@@ -240,7 +240,7 @@ test("buildRunRecords: the verdict follows the decision memory and the terminal,
 });
 
 test("subjectFilesOf is structural: complete repo paths only, from the declared locations and the proposal body", () => {
-  assert.deepEqual(subjectFilesOf(RUN), ["packages/quay/src/serve.ts"]);
+  assert.deepEqual(subjectFilesOf(RUN), ["packages/quay/src/serve/serve.ts"]);
   assert.deepEqual(subjectFilesOf({ envelope: { concern: "no path here at all", scope: { in_scope: [] } } }), []);
   assert.deepEqual(extractPathTokens("docs/analysis/x.mjs"), ["docs/analysis/x.mjs"]);
   assert.equal(subjectKey("package-cycle", ["b.ts", "a.ts"]), subjectKey("package-cycle", ["a.ts", "b.ts"]), "key is order-independent");

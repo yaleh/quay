@@ -18,9 +18,9 @@ import path from "node:path";
 import fs from "node:fs";
 import os from "node:os";
 import http from "node:http";
-import { startServer } from "../src/serve.ts";
+import { startServer } from "../src/serve/serve.ts";
 import { clearVerificationRoundCache } from "../src/observation.ts";
-import { buildTestsHref } from "../src/serve-tests.ts";
+import { buildTestsHref } from "../src/serve/serve-tests.ts";
 import { QUAY_NATIVE_CLI } from "./helpers/cli-entry.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));

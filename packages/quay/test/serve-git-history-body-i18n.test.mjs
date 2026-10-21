@@ -30,8 +30,8 @@ import path from "node:path";
 import fs from "node:fs";
 import os from "node:os";
 import http from "node:http";
-import { startServer } from "../src/serve.ts";
-import { gitHistoryJson, GIT_GRAPH_AUTO_LOAD_ROW_LIMIT } from "../src/serve-git.ts";
+import { startServer } from "../src/serve/serve.ts";
+import { gitHistoryJson, GIT_GRAPH_AUTO_LOAD_ROW_LIMIT } from "../src/serve/serve-git.ts";
 import {
   GIT_HISTORY_LABELS,
   GIT_HISTORY_KEYS,
@@ -39,7 +39,7 @@ import {
   gitHistoryLabel,
   gitHistoryClientLabelsFor,
   fillLabel,
-} from "../src/serve-i18n.ts";
+} from "../src/serve/serve-i18n.ts";
 import { makeTmpDir } from "../../../plugin/test/helpers/tmp-workspace.mjs";
 import { QUAY_NATIVE_CLI } from "./helpers/cli-entry.mjs";
 
@@ -329,7 +329,7 @@ test("AC5 (client script): the inlined script's two load hints and two span unit
   // ── ROW 17b's other half: a caller that injects NOTHING gets NEUTRAL placeholders, never the
   // server's own default language (a script that quietly chose a language is invisible; a
   // placeholder is visible in both). ────────────────────────────────────────────────────────────
-  const bare = (await import("../src/serve-git.ts")).gitGraphClientScript();
+  const bare = (await import("../src/serve/serve-git.ts")).gitGraphClientScript();
   // ⚠️ Scoped to the four INJECTED CONSTANTS, not to the whole script: the script's source comments
   // legitimately carry Chinese (this repo quotes its own 硬规则 in them), and a whole-script CJK sweep
   // would fail for a reason that has nothing to do with what is rendered.
@@ -347,7 +347,7 @@ test("AC5 (client script): the inlined script's two load hints and two span unit
 // ── the auto-load fuse is still wired to the injected constants (not a stale literal) ─────────────
 
 test("AC5: the fuse threshold and the injected constants are both present in the real client script", async () => {
-  const src = (await import("../src/serve-git.ts")).gitGraphClientScript(gitHistoryClientLabelsFor("en"));
+  const src = (await import("../src/serve/serve-git.ts")).gitGraphClientScript(gitHistoryClientLabelsFor("en"));
   assert.match(src, /var autoLoadBudget = \d+;/, "the auto-load budget is still interpolated as a number");
   assert.ok(src.includes(String(GIT_GRAPH_AUTO_LOAD_ROW_LIMIT)), "…and it is the exported constant the tests mock");
   assert.match(src, /sentinel\.textContent = LBL_CLICK_LOAD_OLDER;/, "the fuse writes the INJECTED constant, not a literal");

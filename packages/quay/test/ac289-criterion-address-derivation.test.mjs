@@ -8,8 +8,8 @@
 // `host:0` and the criterion reported `CAUSE=en-fetch-failed` against a server that was up the whole
 // time — the ledger shows the SAME `criterionHash` green at 04:51Z and red from 08:21Z, i.e. the
 // CARRIER moved, not the criterion's subject. The amendment moves that ONE step to the live host's
-// own carrier `.quay/server.json` (writer `packages/quay/src/serve.ts`; read contract
-// `packages/quay/src/server-state.ts`), which is the only place a kernel-assigned port is knowable.
+// own carrier `.quay/server.json` (writer `packages/quay/src/serve/serve.ts`; read contract
+// `packages/quay/src/serve/server-state.ts`), which is the only place a kernel-assigned port is knowable.
 //
 // WHY THE CRITERION TEXT IS LOADED FROM `goals/` INSTEAD OF RESTATED HERE. 硬规则 4 推论三: a fixture
 // that re-implements the thing proves "can produce", not "did produce" — and a test asserting on a

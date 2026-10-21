@@ -65,7 +65,7 @@ export function mkRoot(prefix = "lwa-crit-") {
  *    · `writeCarrier(root, { pid, services })`               — the raw carrier (13 files);
  *    · `writeCarrier(root, pid, services)`                    — AC-179's positional form;
  *    · `writeCarrier(root, { pid, host, port, up?, dropWeb? })` — the convenience form (AC-289/291),
- *      which synthesizes the standard `web` + `control` pair `packages/quay/src/serve.ts` writes.
+ *      which synthesizes the standard `web` + `control` pair `packages/quay/src/serve/serve.ts` writes.
  *
  *  The third arm is a convenience, ⛔ not a second carrier writer: all three build the same envelope
  *  and hand it to the same `fs.writeFileSync` below. */

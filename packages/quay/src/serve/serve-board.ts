@@ -1,8 +1,8 @@
 // serve-board.ts — /board route handler, split from serve-handlers.ts.
 
 import type { IncomingMessage, ServerResponse } from "node:http";
-import type { ProviderClient } from "./provider-client.ts";
-import { readBoardLanding, readBoardExecution, readTaskStatusMapAtRef, yieldToEventLoop, TASK_STATUS_DRIFT_CHECK_NAME, type BoardLanding, type BoardExecution } from "./observation.ts";
+import type { ProviderClient } from "../provider-client.ts";
+import { readBoardLanding, readBoardExecution, readTaskStatusMapAtRef, yieldToEventLoop, TASK_STATUS_DRIFT_CHECK_NAME, type BoardLanding, type BoardExecution } from "../observation.ts";
 import type { Manifest, ServePageCfg, ServeIdentity } from "./serve-render.ts";
 import { html, escapeHtml, pageStyles, modernistStyles, DEFAULT_PAGE_SIZE, buildHref, renderSiteNav, renderMobileChrome, tableWrap, pageTitle, pageNameFor, htmlLangTag, DEFAULT_LANG, type Lang } from "./serve-render.ts";
 // gap-webui-board-body-copy-en-zh: this page's BODY copy resolves through serve-i18n.ts's ROW 11

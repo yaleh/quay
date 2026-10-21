@@ -9,7 +9,7 @@
 // ── 该「共性」现在分居两处，本文件是它的 plugin 侧入口（tasks/gap-arch-reverse-edges-zero）──────
 // 上段所述的四个共性里，三个（控制态 read/write/halt、身份闸、serveControlPlane）**已下沉到
 // `packages/quay/src/kernel/`**（control-state.ts + control-plane-http.ts），本文件只做 re-export：
-// 原因是 `packages/quay/src/serve.ts` 也是它们的消费者（AC-251 把控制面并进 `quay serve` 进程），
+// 原因是 `packages/quay/src/serve/serve.ts` 也是它们的消费者（AC-251 把控制面并进 `quay serve` 进程），
 // 而产品层不得反向 import 方法学层。方向恒为 plugin → kernel。第四个（资源门 resourceGateCheck）
 // 留在本文件：它 spawn 一个 plugin 侧 shell（resource-gate.sh），是【driver 运行时】而非共享原语。
 // ⛔ 判据（读数不为 0 就说明方向被写反了）：`node --experimental-strip-types

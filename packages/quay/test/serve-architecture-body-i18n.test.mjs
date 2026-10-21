@@ -33,7 +33,7 @@ import path from "node:path";
 import fs from "node:fs";
 import os from "node:os";
 import http from "node:http";
-import { startServer } from "../src/serve.ts";
+import { startServer } from "../src/serve/serve.ts";
 import {
   ARCHITECTURE_LABELS,
   ARCHITECTURE_KEYS,
@@ -41,7 +41,7 @@ import {
   architectureLabel,
   fillLabel,
   pageNameFor,
-} from "../src/serve-i18n.ts";
+} from "../src/serve/serve-i18n.ts";
 import { ARCH_RECENT_WINDOW_DAYS } from "../src/observation.ts";
 import { QUAY_NATIVE_CLI } from "./helpers/cli-entry.mjs";
 
@@ -441,7 +441,7 @@ test("AC5: /architecture has exactly ONE render path, and it is language-aware",
   // comment names `renderArchitecturePage` in prose, so a naive match scores 3 and the arm would be
   // measuring the documentation rather than the code — the exact false-positive shape the hard rule
   // names. Stripping first makes the count a statement about call sites.
-  const src = fs.readFileSync(path.join(__dirname, "..", "src", "serve-architecture.ts"), "utf8");
+  const src = fs.readFileSync(path.join(__dirname, "..", "src", "serve", "serve-architecture.ts"), "utf8");
   const code = src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^[ \t]*\/\/.*$/gm, "");
   const calls = [...code.matchAll(/renderArchitecturePage\(/g)].length;
   assert.equal(calls, 2, `one definition + one call site (got ${calls}) — a third would be an unwired path`);

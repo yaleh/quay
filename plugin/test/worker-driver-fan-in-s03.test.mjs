@@ -135,7 +135,7 @@ test("AC3 (gap-worker-driver-retry-cap-not-wired) — promotion 不回归：同�
 test("AC1 (能取假) — judgeRetryExemption：失败测试文件不在 Touches ∧ 断言签名跨 ≥2 不同任务复发 ⇒ unrelated-flaky-exempt（第 3 次不计入重试）", (t) => {
   const root = makeRoot("exempt-ac1");
   t.after(() => rmSafe(root));
-  writeExemptionTask(root, "gap-a", ["packages/quay/src/serve-dashboard.ts"]); // 与失败测试无关
+  writeExemptionTask(root, "gap-a", ["packages/quay/src/serve/serve-dashboard.ts"]); // 与失败测试无关
   writeFailingTest(root, EXEMPT_TEST);
   writeSuiteRedLog(root, "fan-in-suite-gap-a.log", EXEMPT_TEST, "probe must be alive");
   const nowMs = Date.parse("2026-09-03T00:00:00.000Z");
@@ -155,7 +155,7 @@ test("AC1 (能取假) — judgeRetryExemption：失败测试文件不在 Touches
 test("AC1 负控制 — 签名只在本任务出现（未达 ≥2 不同任务阈值）⇒ own-defect-counted（照常机械翻转）", (t) => {
   const root = makeRoot("exempt-ac1-neg");
   t.after(() => rmSafe(root));
-  writeExemptionTask(root, "gap-a", ["packages/quay/src/serve-dashboard.ts"]);
+  writeExemptionTask(root, "gap-a", ["packages/quay/src/serve/serve-dashboard.ts"]);
   writeFailingTest(root, EXEMPT_TEST);
   writeSuiteRedLog(root, "fan-in-suite-gap-a.log", EXEMPT_TEST, "probe must be alive");
   const nowMs = Date.parse("2026-09-03T00:00:00.000Z");

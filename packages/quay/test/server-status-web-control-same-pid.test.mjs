@@ -27,8 +27,8 @@ import path from "node:path";
 import fs from "node:fs";
 import net from "node:net";
 import os from "node:os";
-import { startServer, shutdownHost } from "../src/serve.ts";
-import { readServerState, pidAlive, SERVER_STATE_REL, CONTROL_PLANE_NAME } from "../src/server-state.ts";
+import { startServer, shutdownHost } from "../src/serve/serve.ts";
+import { readServerState, pidAlive, SERVER_STATE_REL, CONTROL_PLANE_NAME } from "../src/serve/server-state.ts";
 // The verb table is the SINGLE source of the usage line (cli/server.ts's SERVER_VERBS feeds both
 // `handleServer`'s dispatch and its USAGE string), so the assertion below derives from it rather than
 // re-typing the set — a pinned literal here is what makes a test defend last release's verb list.

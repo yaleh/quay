@@ -13,14 +13,14 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 import fs from "node:fs";
 import http from "node:http";
-import { startServer } from "../src/serve.ts";
-import { handleGoalList, renderTaskAttachText, goalAcOf } from "../src/serve-goal.ts";
-import { readTaskSummary, clearTaskSummaryCache } from "../src/serve-dashboard.ts";
+import { startServer } from "../src/serve/serve.ts";
+import { handleGoalList, renderTaskAttachText, goalAcOf } from "../src/serve/serve-goal.ts";
+import { readTaskSummary, clearTaskSummaryCache } from "../src/serve/serve-dashboard.ts";
 // gap-webui-goal-body-copy-en-zh: the three-state markers moved into serve-i18n.ts ROW 21's
 // `GOAL_LABELS`. The DIRECT-import arms below now pass `ZH` explicitly, because the dictionary's
 // default language is `en` — leaving them on the default would silently turn "the marker is
 // translated" into "the marker is absent" for every Chinese assertion (决定记录 ④).
-import { goalLabelsFor } from "../src/serve-i18n.ts";
+import { goalLabelsFor } from "../src/serve/serve-i18n.ts";
 import { makeTmpDir } from "../../../plugin/test/helpers/tmp-workspace.mjs";
 import { QUAY_NATIVE_CLI } from "./helpers/cli-entry.mjs";
 
@@ -144,7 +144,7 @@ test("AC6: goal rollup == sum of criteria; direct-on-goal task excluded", () => 
 // ── AC3 (static + unit): reuses the dashboard accessor, not a second Map ────────────────────────
 
 test("AC3a: serve-goal imports the dashboard cache accessor (never its own cache)", () => {
-  const src = fs.readFileSync(path.join(__dirname, "..", "src", "serve-goal.ts"), "utf8");
+  const src = fs.readFileSync(path.join(__dirname, "..", "src", "serve", "serve-goal.ts"), "utf8");
   assert.match(src, /import\s*\{[^}]*readTaskSummary[^}]*\}\s*from\s*"\.\/serve-dashboard\.ts"/,
     "serve-goal.ts imports readTaskSummary from ./serve-dashboard.ts");
   assert.doesNotMatch(src, /taskSummaryCache\s*=\s*new\s+Map|TASK_SUMMARY_CACHE_TTL_MS\s*=\s*\d/,

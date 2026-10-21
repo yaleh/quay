@@ -16,11 +16,11 @@ import fs from "node:fs";
 import os from "node:os";
 import http from "node:http";
 import { fileURLToPath } from "node:url";
-import { handleTaskList, handleTaskDetail } from "../src/serve-task.ts";
+import { handleTaskList, handleTaskDetail } from "../src/serve/serve-task.ts";
 import { readTaskStatusMapAtRef, readTaskStatusAtRef, readTaskTitleMapAtRef, readTaskCommitTimesAtRef, refreshDevelopRefCaches, resetSingleTaskGitSpawnCount, getSingleTaskGitSpawnCount, clearTaskStatusRefCache } from "../src/observation.ts";
 // AC-290 (gap-ac290-tasks-page-zh-shell-lang-title-nav-current): the /tasks LIST page's zh chrome.
-import { startServer } from "../src/serve.ts";
-import { renderSiteNav } from "../src/serve-render.ts";
+import { startServer } from "../src/serve/serve.ts";
+import { renderSiteNav } from "../src/serve/serve-render.ts";
 import { makeTmpDir } from "../../../plugin/test/helpers/tmp-workspace.mjs";
 import { QUAY_NATIVE_CLI } from "./helpers/cli-entry.mjs";
 
@@ -127,7 +127,9 @@ test("AC2 — a task whose status is identical in develop and disk (or absent fr
 });
 
 test("AC3 — the develop read is object-store only (no `git checkout` / `git worktree add` in the changed modules)", () => {
-  for (const f of ["serve-task.ts", "serve-board.ts", "observation.ts"]) {
+  // `src/serve/` hosts the web surface (moved there by
+  // gap-routine-architecture-analysis-quay-src-serve-surface-flat-in-src); `observation.ts` stays at src root.
+  for (const f of ["serve/serve-task.ts", "serve/serve-board.ts", "observation.ts"]) {
     const src = fs.readFileSync(path.join(SRC_DIR, f), "utf8");
     assert.doesNotMatch(src, /git\s+checkout/, `${f}: must not git checkout (the develop read is object-store only, never blocks fan-in)`);
     assert.doesNotMatch(src, /git\s+worktree\s+add/, `${f}: must not git worktree add`);

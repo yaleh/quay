@@ -11,9 +11,9 @@
 // Run (scoped): node --test packages/quay/test/gap-dashboard-status-tag-badges.test.mjs
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { renderGoalCard } from "../src/serve-dashboard.ts";
-import { renderFanInCardFromRecords } from "../src/serve-dashboard.ts";
-import { renderFanInCell } from "../src/serve-task.ts";
+import { renderGoalCard } from "../src/serve/serve-dashboard.ts";
+import { renderFanInCardFromRecords } from "../src/serve/serve-dashboard.ts";
+import { renderFanInCell } from "../src/serve/serve-task.ts";
 
 // ── renderGoalCard fixtures (renderGoalCard reads id/title/status/kind/goal/evidence) ────────────
 function goal(id, { title = `${id} title` } = {}) {

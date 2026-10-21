@@ -212,7 +212,7 @@ test("AC2: a task whose touches are disjoint from every unverified task forks fr
   const dir = makeTmp("disjoint");
   try {
     initGitRepo(dir);
-    writeTask(dir, "unverified-one", ["packages/quay/src/serve.ts"]);
+    writeTask(dir, "unverified-one", ["packages/quay/src/serve/serve.ts"]);
     writeTask(dir, "candidate-disjoint", ["plugin/scripts/fork-baseline.ts"]);
 
     const r = runNode([forkBaselineCli, "--root", dir, "--task", join(dir, "tasks", "candidate-disjoint.md"), "--unverified", "unverified-one"]);
@@ -337,7 +337,7 @@ test("RETIRED UNIFIED FORK SOURCE: default path still decides develop for a disj
   try {
     initGitRepo(dir);
     // The unverified task on integration touches a different file than the candidate.
-    writeTask(dir, "unverified-one", ["packages/quay/src/serve.ts"]);
+    writeTask(dir, "unverified-one", ["packages/quay/src/serve/serve.ts"]);
     // Candidate touches fork-baseline.ts — DISJOINT from the unverified task ⇒ develop.
     writeTask(dir, "candidate-disjoint", ["plugin/scripts/fork-baseline.ts"]);
 

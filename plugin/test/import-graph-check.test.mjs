@@ -540,7 +540,7 @@ test("AC2 — the real repo reads as evaluated, and the value cycle contains the
 test("AC3 — the real reverse edges start from the three packages/ files the ratchet pins", () => {
   if (REAL_BASELINE.reverseEdges === 0) return; // repaired ⇒ nothing to assert (the baseline is the oracle)
   const froms = new Set(REAL.reverseEdges.map((e) => e.from));
-  for (const f of ["packages/quay/src/serve.ts", "packages/quay/src/server-state.ts", "packages/quay-native/src/store.ts"]) {
+  for (const f of ["packages/quay/src/serve/serve.ts", "packages/quay/src/serve/server-state.ts", "packages/quay-native/src/store.ts"]) {
     assert.ok(froms.has(f), `reverseEdges must include an edge FROM ${f}; got ${JSON.stringify([...froms])}`);
   }
   const tos = new Set(REAL.reverseEdges.map((e) => e.to));

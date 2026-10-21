@@ -30,7 +30,7 @@
 // check` are NOT part of §9's listed capability set (they were added to the
 // Core CLI later, QN-024/QN-027, after §9's own example block was written,
 // and were never proposed for the Web UI). Their absence from the Web UI's
-// own three behaviors (list/detail/action-POST — see src/serve.js's own
+// own three behaviors (list/detail/action-POST — see src/serve/serve.js's own
 // header comment) is correctly NOT a gap this test reports.
 //
 // Method: rather than driving a real browser (out of scope per DIR-010's own
@@ -54,7 +54,7 @@ import os from "node:os";
 import http from "node:http";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
-import { startServer } from "../src/serve.ts";
+import { startServer } from "../src/serve/serve.ts";
 import { QUAY_CLI, QUAY_NATIVE_CLI } from "./helpers/cli-entry.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));

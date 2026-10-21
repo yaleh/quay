@@ -71,7 +71,7 @@ import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { layoutGitGraph } from "../src/serve-git.ts";
+import { layoutGitGraph } from "../src/serve/serve-git.ts";
 import { readGitHistory, GIT_HISTORY_REF_SCOPE } from "../src/observation.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));

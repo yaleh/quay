@@ -100,7 +100,7 @@ test("extension-swap equivalence: an import written .js resolves to the .ts lite
 
 // ── records go through the PRODUCTION validator ─────────────────────────────────────────────────────
 test("evidence records the tool emits validate against the store (source form and carrier form)", () => {
-  const src = sourceEvidence("enum-surface-parity-check", "packages/quay/src/serve-goal.ts", 225, "  const GOAL_STATUS_ORDER = [", "c010f023a78b3634ed204d9bb23a0a90417a267e", { subject_key: "enum-surface:goal-status|packages/quay/src/serve-goal.ts#225" });
+  const src = sourceEvidence("enum-surface-parity-check", "packages/quay/src/serve/serve-goal.ts", 225, "  const GOAL_STATUS_ORDER = [", "c010f023a78b3634ed204d9bb23a0a90417a267e", { subject_key: "enum-surface:goal-status|packages/quay/src/serve/serve-goal.ts#225" });
   assert.deepEqual(validateRecord("evidence", src), { ok: true, reasons: [] });
   const car = carrierEvidence("dependency-task-carrier", "tasks/x.md", 7, "## Acceptance Criteria", { provenance_task: "x" });
   assert.deepEqual(validateRecord("evidence", car), { ok: true, reasons: [] });

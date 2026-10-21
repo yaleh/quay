@@ -97,7 +97,7 @@
 // regression mechanically.
 //
 // Scoped strictly to existing behavior per G5: no appearance or interactivity
-// changes made to src/serve.js. Any gap found is filed as a separate QC-*
+// changes made to src/serve/serve.js. Any gap found is filed as a separate QC-*
 // task.
 //
 // Run: node test/web-ui-browser.test.mjs
@@ -108,7 +108,7 @@ import path from "node:path";
 import fs from "node:fs";
 import os from "node:os";
 import http from "node:http";
-import { startServer } from "../src/serve.ts";
+import { startServer } from "../src/serve/serve.ts";
 import { QUAY_NATIVE_CLI } from "./helpers/cli-entry.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));

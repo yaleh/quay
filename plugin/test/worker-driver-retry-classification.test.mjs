@@ -114,7 +114,7 @@ const T1 = "2026-09-13T10:05:41.985Z"; // 真实 quay-fleet 第二轮（日志�
 test("AC1 — 归因不出的 suite 红仍是 insufficient-data-fallback（读数如实，⛔ 不改判定名）", (t) => {
   const root = makeRoot("rcl-ac1-verdict");
   t.after(() => rmSafe(root));
-  writeTaskWithTouches(root, "gap-a", ["packages/quay/src/serve-dashboard.ts"]);
+  writeTaskWithTouches(root, "gap-a", ["packages/quay/src/serve/serve-dashboard.ts"]);
   const log = writeSuiteLog(root, "fan-in-suite-gap-a.log", UNATTRIBUTABLE_LOG);
 
   const j = judgeRetryExemption(root, "gap-a", suiteRedOutcome(T0, log), { nowMs: NOW });
@@ -126,7 +126,7 @@ test("AC1 — 归因不出的 suite 红仍是 insufficient-data-fallback（读�
 test("AC1（首次）— 归因不出且无历史 ⇒ 允许至多一次重试（⛔ 不是无条件停：瞬时时仍可重试）", (t) => {
   const root = makeRoot("rcl-ac1-first");
   t.after(() => rmSafe(root));
-  writeTaskWithTouches(root, "gap-a", ["packages/quay/src/serve-dashboard.ts"]);
+  writeTaskWithTouches(root, "gap-a", ["packages/quay/src/serve/serve-dashboard.ts"]);
   const log = writeSuiteLog(root, "fan-in-suite-gap-a.log", UNATTRIBUTABLE_LOG);
 
   const outcome = suiteRedOutcome(T0, log);
@@ -139,7 +139,7 @@ test("AC1（首次）— 归因不出且无历史 ⇒ 允许至多一次重试�
 test("AC1（负控制，本任务要害）— 上一轮同为归因不出 ⇒ stop-terminal：不重派 + 记录判定与理由", (t) => {
   const root = makeRoot("rcl-ac1-stop");
   t.after(() => rmSafe(root));
-  writeTaskWithTouches(root, "gap-a", ["packages/quay/src/serve-dashboard.ts"]);
+  writeTaskWithTouches(root, "gap-a", ["packages/quay/src/serve/serve-dashboard.ts"]);
   const logA = writeSuiteLog(root, "fan-in-suite-gap-a-1.log", UNATTRIBUTABLE_LOG);
   writeSuiteLog(root, "fan-in-suite-gap-a-2.log", UNATTRIBUTABLE_LOG_B); // 内容不同 ⇒ 停因是「有界重试用尽」而非哈希
   appendSuiteRedOutcome(root, "gap-a", T0, logA); // 上一轮（真实载体）
@@ -160,7 +160,7 @@ test("AC1（负控制，本任务要害）— 上一轮同为归因不出 ⇒ st
 test("AC2（能取假）— 连续两轮 suite 日志内容哈希相同 ⇒ 该判据发火（第 3 轮不发生）", (t) => {
   const root = makeRoot("rcl-ac2-hash");
   t.after(() => rmSafe(root));
-  writeTaskWithTouches(root, "gap-a", ["packages/quay/src/serve-dashboard.ts"]);
+  writeTaskWithTouches(root, "gap-a", ["packages/quay/src/serve/serve-dashboard.ts"]);
   // 两份【不同文件名、内容逐字节相同】的日志——正是 quay-fleet 两轮 fan-in（152 字节，diff 为空）。
   const first = writeSuiteLog(root, "fan-in-suite~1.log", UNATTRIBUTABLE_LOG);
   const second = writeSuiteLog(root, "fan-in-suite~2.log", UNATTRIBUTABLE_LOG);
@@ -182,7 +182,7 @@ test("AC2（能取假）— 连续两轮 suite 日志内容哈希相同 ⇒ 该�
 test("AC2（双向控制）— 日志内容【不同】⇒ 哈希判据不发火（⛔ 不停在这条判据上；正常重试不被掐死）", (t) => {
   const root = makeRoot("rcl-ac2-falsify");
   t.after(() => rmSafe(root));
-  writeTaskWithTouches(root, "gap-a", ["packages/quay/src/serve-dashboard.ts"]);
+  writeTaskWithTouches(root, "gap-a", ["packages/quay/src/serve/serve-dashboard.ts"]);
   const first = writeSuiteLog(root, "fan-in-suite~1.log", UNATTRIBUTABLE_LOG);
   writeSuiteLog(root, "fan-in-suite~2.log", UNATTRIBUTABLE_LOG_B); // 【不同】内容
   appendSuiteRedOutcome(root, "gap-a", T0, first);
@@ -216,7 +216,7 @@ test("AC2（负控制）— 已归因的实现缺陷即使日志逐字节相同 
 test("AC3（同一历史、两种 verdict ⇒ 两种动作）— insufficient-data-fallback ⇒ stop-terminal，own-defect ⇒ count-and-retry", (t) => {
   const root = makeRoot("rcl-ac3");
   t.after(() => rmSafe(root));
-  writeTaskWithTouches(root, "gap-a", ["packages/quay/src/serve-dashboard.ts"]);
+  writeTaskWithTouches(root, "gap-a", ["packages/quay/src/serve/serve-dashboard.ts"]);
   const first = writeSuiteLog(root, "fan-in-suite~1.log", UNATTRIBUTABLE_LOG);
   const second = writeSuiteLog(root, "fan-in-suite~2.log", UNATTRIBUTABLE_LOG);
   appendSuiteRedOutcome(root, "gap-a", T0, first);
@@ -260,7 +260,7 @@ test("载体 — round 记录带 exited_not_landed_stops（kind 可区分），�
 test("窗口 — 48h 外的归因不出不触发停止（窗口外历史不进判定）", (t) => {
   const root = makeRoot("rcl-window");
   t.after(() => rmSafe(root));
-  writeTaskWithTouches(root, "gap-a", ["packages/quay/src/serve-dashboard.ts"]);
+  writeTaskWithTouches(root, "gap-a", ["packages/quay/src/serve/serve-dashboard.ts"]);
   const old = writeSuiteLog(root, "fan-in-suite-old.log", UNATTRIBUTABLE_LOG);
   const now = writeSuiteLog(root, "fan-in-suite-now.log", UNATTRIBUTABLE_LOG);
   // 5 天前的一次归因不出（窗口 = 48h）。
@@ -485,7 +485,7 @@ test("AC(载体字段) — 第三方日志经 judgeRetryExemption ⇒ failingTes
 test("AC3(判词) — 「读不懂」判词含解析器读到的失败行数 N（`0 of N`），⛔ 断言句已消失", (t) => {
   const root = makeRoot("rcl-wording");
   t.after(() => rmSafe(root));
-  writeTaskWithTouches(root, "gap-a", ["packages/quay/src/serve-dashboard.ts"]);
+  writeTaskWithTouches(root, "gap-a", ["packages/quay/src/serve/serve-dashboard.ts"]);
   // ① 有失败行但一行也归因不出（第三方伪阶段名）⇒「0 of 1」。
   writeSuiteLog(root, "fan-in-suite~1.log", UNATTRIBUTABLE_LOG);
   const withFailingLines = writeSuiteLog(root, "fan-in-suite~2.log", "__PERFILE__ duration_ms=1 lint passed=false end_ms=2\n");
@@ -614,7 +614,7 @@ test("AC3①（负控制·方向一）— 点名的 checker 本身在本任务 d
 test("AC3②（负控制·方向二）— 点名的 checker 与本任务 delta 无关 ⇒ ⛔ 不得归因到本任务", (t) => {
   const root = makeRoot("rcl-static-ac3b");
   t.after(() => rmSafe(root));
-  writeTaskWithTouches(root, "gap-a", ["packages/quay/src/serve-dashboard.ts"]);
+  writeTaskWithTouches(root, "gap-a", ["packages/quay/src/serve/serve-dashboard.ts"]);
   const log = writeSuiteLog(root, "fan-in-suite-gap-a.log", STATIC_PHASE_RED_LOG);
   const j = judgeRetryExemption(root, "gap-a", suiteRedOutcome(T0, log), { nowMs: NOW });
   assert.notEqual(j.verdict, "static-phase-attributed", "⛔ 无关不得归因到本任务（负控制）");

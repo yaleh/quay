@@ -12,8 +12,8 @@
 // Run (scoped): node --test packages/quay/test/gap-dashboard-fanin-cell-inline-layout-and-id-truncation.test.mjs
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { renderFanInCell } from "../src/serve-task.ts";
-import { renderFanInCardFromRecords } from "../src/serve-dashboard.ts";
+import { renderFanInCell } from "../src/serve/serve-task.ts";
+import { renderFanInCardFromRecords } from "../src/serve/serve-dashboard.ts";
 
 /** The exact monospace stack shared with serve-dashboard.ts:1008 / serve-system.ts:140. */
 const MONO_STACK = "font-family:ui-monospace,monospace";

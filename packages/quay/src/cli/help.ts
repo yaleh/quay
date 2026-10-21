@@ -25,7 +25,7 @@ import { TASK_STATUS_EVENT_ACTOR_KINDS } from "../kernel/task-transition.ts";
 // The web binding's ONE fallback (a leaf module, zero closure deps). Interpolated rather than
 // re-typed: the help text is a DERIVED surface, so the default it prints is the same value the
 // resolver uses — the two cannot drift (gap-serve-binding-defaults-three-copies-to-one-definition-point AC8).
-import { SERVE_BINDING_FALLBACK } from "../serve-binding.ts";
+import { SERVE_BINDING_FALLBACK } from "../serve/serve-binding.ts";
 
 // ── the product-layer single naming point for the shipped init upgrade entry ─────────────────────
 // (gap-quay-init-sh-no-single-naming-point; same shape as `RESOURCE_GATE_REL` + `scriptBasename` in
@@ -777,7 +777,7 @@ Usage:
               it, are excluded) — ⛔ it is not a visual zoom of an already-built timeline.
               Missing / illegal / out-of-range (\`abc\`, 0, 999, 1.5) → the default, which is the
               same value and the same validator the card's \`?hours=\` param uses — 3 hours, whose ONE
-              definition point is \`DEFAULT_TIMELINE_HOURS\` in src/serve-dashboard.ts (⛔ not re-typed
+              definition point is \`DEFAULT_TIMELINE_HOURS\` in src/serve/serve-dashboard.ts (⛔ not re-typed
               at this help site: this file is loaded by EVERY invocation, so it must not import the
               web render module just to interpolate one number).
   --root <path>       Workspace root (default: discovered via .quay/config.yml from cwd).

@@ -16,8 +16,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import vm from "node:vm";
-import { gitGraphClientScript, renderGitHistoryPage, GIT_GRAPH_AUTO_LOAD_ROW_LIMIT } from "../src/serve-git.ts";
-import { gitHistoryClientLabelsFor } from "../src/serve-i18n.ts";
+import { gitGraphClientScript, renderGitHistoryPage, GIT_GRAPH_AUTO_LOAD_ROW_LIMIT } from "../src/serve/serve-git.ts";
+import { gitHistoryClientLabelsFor } from "../src/serve/serve-i18n.ts";
 
 /** A minimal row (the shape the client renderer reads: hash/t/subject/parents/col/decorations/edges). */
 function commit(hash, t, subject) {

@@ -21,10 +21,10 @@ import {
   renderLiveCard,
   renderFanInCardFromRecords,
   renderLiveSwimlaneSvg,
-} from "../src/serve-dashboard.ts";
+} from "../src/serve/serve-dashboard.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const SERVE_DASHBOARD_SRC = path.join(__dirname, "..", "src", "serve-dashboard.ts");
+const SERVE_DASHBOARD_SRC = path.join(__dirname, "..", "src", "serve", "serve-dashboard.ts");
 const FIXED_NOW_MS = 1_700_000_000_000; // deterministic wall-clock anchor
 
 /** Extract an `export function <name>(…) { … }` body from the source (balanced braces) — the same

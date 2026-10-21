@@ -22,7 +22,7 @@ import path from "node:path";
 import fs from "node:fs";
 import os from "node:os";
 import http from "node:http";
-import { startServer } from "../src/serve.ts";
+import { startServer } from "../src/serve/serve.ts";
 import {
   parseResourceGateJson,
   parseProcessBudgetJson,
@@ -39,7 +39,7 @@ import {
   RESOURCE_GATE_NAME,
   PROCESS_BUDGET_NAME,
 } from "../src/observation.ts";
-import { renderSiteNav } from "../src/serve-handlers.ts";
+import { renderSiteNav } from "../src/serve/serve-handlers.ts";
 import { QUAY_NATIVE_CLI } from "./helpers/cli-entry.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));

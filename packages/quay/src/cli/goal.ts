@@ -227,7 +227,7 @@ export async function handleGoal({ sub, positional, flags, wantsJson, rest }: Cl
     const { previewWorktreeDir, startPreviewServe, stopPreviewServe, readPreviewStatus } = await import("../goal-preview.ts");
     // ⛔ The displayed bind fallback is DERIVED from the ONE definition point — spelling a host
     // literal here is the second copy `serve-binding-literal-check` exists to catch.
-    const hostFallback = (await import("../serve-binding.ts")).SERVE_BINDING_FALLBACK.host;
+    const hostFallback = (await import("../serve/serve-binding.ts")).SERVE_BINDING_FALLBACK.host;
     const previewRoot = previewWorktreeDir(mainRoot, id);
     if (action === "start") {
       const rawPort = flags.port;
