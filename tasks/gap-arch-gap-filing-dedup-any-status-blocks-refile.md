@@ -25,8 +25,8 @@ plugin/scripts/quality-gate-driver.ts 的 buildArchGapWorkerPrompt 让短命 fil
 
 ## Acceptance Criteria
 
-- [ ] buildArchGapWorkerPrompt 的文本里，对 done 任务的 claim 不再是无条件「do NOT file a duplicate」，而是「先 current-source 复核（file:line / grep 命中），仍可见则重立并带旧任务 id」。
-- [ ] 该措辞可 grep 核对：prompt 文本里 open 与 done 两条 dedup 规则可区分（贴出 grep 命中）。
+- [x] buildArchGapWorkerPrompt 的文本里，对 done 任务的 claim 不再是无条件「do NOT file a duplicate」，而是「先 current-source 复核（file:line / grep 命中），仍可见则重立并带旧任务 id」。
+- [x] 该措辞可 grep 核对：prompt 文本里 open 与 done 两条 dedup 规则可区分（贴出 grep 命中）。
 
 ## Definition of Done
 
