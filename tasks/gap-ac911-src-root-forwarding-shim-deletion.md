@@ -188,3 +188,11 @@ $ grep -rln 'FORWARDING re-export' packages/quay/src/*.ts | wc -l
 - plugin/test/worktree-namespace-literal-check.test.mjs
 - scripts/goal-032-selfhost-probe.mjs
 - tasks/gap-ac911-src-root-forwarding-shim-deletion.md
+
+## Blocker
+
+**2026-10-21T03:18:13.061Z — worker 未落地（exited-not-landed）**
+
+- 未落地原因：step=suite: AssertionError [ERR_ASSERTION]: the shipped criterion must pass on this tree: node:fs:483
+- run_id：wk-prod-anchor
+- session_id：a983c9cf-ca59-40ef-b1ef-a15514e5bb16
