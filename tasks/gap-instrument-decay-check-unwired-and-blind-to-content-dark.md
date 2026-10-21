@@ -18,11 +18,15 @@ extra:
 
 **事实一：它没有接到线上。** 自称「常驻检测器」，但 quality-gate-driver、manager-tick-readings 和任何例程都没有调用它；它也只认识两个载体（fan-in-step-trace.jsonl、fan-in-lock-events.jsonl）。2026-10-22 对真实仓库手动运行一次（`--no-block --json`）：`ok:false, decayedCount:3`，三个都在 fan-in-step-trace.jsonl，类型都是 rate-stopped——`verification-round-record`（末次写入 2026-10-14）、`catch-up-develop`（2026-10-10）、`suite-recovery-blocked`（2026-10-20）。**这三个尚未裁定**：可能是真的腐烂，也可能是本来就很少发生的事件。此前没有任何人看到过它们。
 
+**事实一补充：已有的过期信号亮着，也没有下游。** arch-cycle 最近一条记录的记录级 `stale` 早已是 `true`（`artifactAgeMs=3948443656`，约 45.7 天，`staleIntervalMs=21600000`），没有任何东西消费它。仪器诚实地发出信号不够，信号必须被接到下游。
+
 **事实二：它看不见另外两种暗形态。** 下面两种情况下载体都照常写入，所以 A/B 都不会命中：
 - **C 内容全暗**：载体持续写入，但从上线起每一条都是 `evaluated:false`。实例：`.quay/arch-cycle-history.jsonl` 25/25 条为 false（首条 2026-10-18T10:25Z）。
 - **D 过期的已评估**：记录为 `evaluated:true`，但它读的产物早于其所覆盖源码的最新提交。实例：arch-cycle 的 src scope 读为「已评估、0 环」，读的是 2026-10-21T16:17Z 的产物，而目录环在 16:26Z / 16:27Z 引入。D 比 C 更危险，因为它和真正的健康状态从外部看完全相同。
 
 **发生率（硬规则 12）**：C 已实测 1 例（arch-cycle，持续 4 天）；D 已实测 1 例（src scope）；同族的历史先例：ADR-007 的 git-lens 探针被归档后变成悬空软链，自检脚本仍打出看似通过的一行，「the rot went unnoticed for six days」（ADR-007 frontmatter 下的 enforcement 注释，2026-09-13 记录）；以及本检测器自身未接线、手动一跑即有 3 个告警。
+
+**立案检查（2026-10-22 补做）**：合并判断 = separate——与 `gap-arch-cycle-report-never-evaluated-aggregate-and-stale-artifacts` 共享 `quality-gate-driver.ts` 与其测试文件（task-granularity-advice 实测 peers 仅此一条），但机制不同，由调度器按 Touches 串行。AC1 已写成与两者落地先后无关的形式。
 
 ## Plan
 
@@ -35,7 +39,7 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1 形态 C（真实载体）：对主检出运行，`.quay/arch-cycle-history.jsonl` 读为 `content-dark`（贴出读数）；`.quay/arch-coverage-history.jsonl`（31/31 为 true）不命中（负对照）。
+- [ ] AC1 形态 C（真实载体，与落地顺序无关）：检测器报告暗区间，而不只报告当前状态。对主检出运行，`.quay/arch-cycle-history.jsonl` 必须满足其一：当前仍全为 false ⇒ 当前读为 `content-dark`；或修复任务 `gap-arch-cycle-report-never-evaluated-aggregate-and-stale-artifacts` 已写入首条 true ⇒ 报告一个已结束的暗区间，起点为 2026-10-18T10:25Z、覆盖 ≥25 条记录，当前不再判暗。两种情况都贴出读数。`.quay/arch-coverage-history.jsonl`（31/31 为 true）不命中（负对照）。
 - [ ] AC2 形态 D：一份产物时间戳早于覆盖源路径最新提交的记录读为 `stale-evaluated`；夹具中产物时间晚于所有覆盖提交的记录不命中（负对照）。贴出两次输出。
 - [ ] AC3 未覆盖不算健康：`.quay/measure-history.jsonl` 出现在 `uncovered` 列表中，且不计入健康载体数。贴出读数。
 - [ ] AC4 扩展点：测试只通过注册一个合成描述符，就让一个新载体被检查，不修改检测器逻辑文件；不注册时同一断言失败（负对照）。贴出测试名与输出。
