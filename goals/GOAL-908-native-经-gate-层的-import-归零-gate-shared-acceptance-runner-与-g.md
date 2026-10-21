@@ -1,7 +1,7 @@
 ---
 id: GOAL-908
 title: native 经 gate/ 层的 import 归零：gate/shared/acceptance-runner 与
-  gate/gate-event-store 改指 core 真身或 exports，棘轮「provider→gate/」违规
+  gate/gate-event-store 改指 core 真身或 exports（provider→gate/ 棘轮为防回归手段）
 status: active
 kind: goal
 origin: 架构分析改进方案 G-3（2026-10-21 会话，native 经 gate 层 2 条转发 shim import）
@@ -25,8 +25,15 @@ GOAL-907（已 achieved）把 packages/quay/src 根的 12 个转发 shim 删到 
 
 ## 范围与非目标
 
-范围：native 的 gate/ 层 import 2→0（改指 core 真身或 exports）；import-graph-check 加「provider → quay/src/gate/ 边 = 违规」棘轮。
+范围：native 的 gate/ 层 import 2→0（改指 core 真身或 exports）；import-graph-check 加「provider → quay/src/gate/ 边 = 违规」棘轮（手段 / 防回归，不是独立退出条件——退出条件只写终态，棘轮由执行任务 `gap-ac913-native-gate-layer-imports-zero` 的 AC3 交付）。
 非目标：不碰 native 的 kernel/* 与 abi.ts import（合法）；不碰 core/ 内部实现；不改 native 的运行时依赖声明（quay:* 保留）。
+
+## 退出条件
+
+① `packages/quay-native/src/` 下对 `quay/src/gate/` 的 import 计数为 0（AC-913 criterion 逐字读绿，stdout 为 `OK: native imports 0 gate-layer paths`）；
+② 原本经 gate/ 层的两条 import 已改指 core 真身或经 package exports：`../../quay/src/core/acceptance-runner.ts` 与 `../../quay/src/core/gate-event-store.ts` 在 `packages/quay-native/src/mcp-server.ts` 中各出现 1 次；
+③ 判据能取假：故意保留一条 gate/ 层 import ⇒ grep 计数 1、stderr 写 cause、exit 1；移除 ⇒ 计数 0、exit 0；
+④ AC-913 achieved（①–③ 全部由 AC-913 的 criterion 与 expect 覆盖）。
 
 ## AC
 
