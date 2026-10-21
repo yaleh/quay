@@ -94,16 +94,24 @@ import {
   detectorEvalFromSurface,
   flattenDetectorClusters,
   mergeClusterVerdicts,
+  mergePriorFindingRulings,
+  priorFindingsCheckState,
+  readPriorRoundFindings,
   readSubmittedKeys,
   unsentConclusions,
   type ArchReviewClusterVerdict,
   type ArchReviewDetectorState,
+  type ArchReviewPriorRound,
   type ArchReviewRoundRecord,
   type Cluster,
   type DeletionReportView,
   type IdentityReportView,
   type JudgeClusterVerdict,
+  type JudgePriorRuling,
   type LineageReportView,
+  type PriorFinding,
+  type PriorFindingRuling,
+  type PriorFindingsCheckState,
 } from "./architecture-review-cluster.ts";
 // AC155：轮询间隔的单一真相源（drivers.yml 经 driver-config 加载，⛔ 不各写一份字面量——同
 // outer-driver / promotion-driver 的接法）。quality 段由此前的「字面量 60_000」改为从
@@ -855,14 +863,39 @@ function parseDetectorJson<T>(stdout: string): T | null {
 
 /** 架构复核 judge prompt（单个 `claude -p` 判整批候选簇；机械聚类来自三个检测器，判定交给 LLM）。
  *  ⛔ 不按簇拆 schema agent（那是 Workflow 工具的形态，driver 进程没有）——本 driver 用单一批判
- *  `claude -p`，输出 JSON 数组，聚合仍走 architecture-review-cluster.ts 的单一 JS 算术。
+ *  `claude -p`，输出 JSON 对象，聚合仍走 architecture-review-cluster.ts 的单一 JS 算术。
  *  `actionable` 是本任务（gap-arch-review-judge-verdicts-never-reach-the-existing-gap-filing-
  *  channel）加的**结构化**立案判定：⛔ 不让下游解析 suggestedAction 的自由文本（那会把判定从 LLM
- *  挪进正则）。语义定义写在 prompt 里，三态由 mergeClusterVerdicts 兜底（缺失 ⇒ 未评估，非 false）。 */
-function archReviewJudgePrompt(clusters: Cluster[], root: string): string {
+ *  挪进正则）。语义定义写在 prompt 里，三态由 mergeClusterVerdicts 兜底（缺失 ⇒ 未评估，非 false）。
+ *
+ *  `priorFindings`（gap-arch-review-judge-consumes-prior-round-findings）是**上一轮 judged 记录里
+ *  的逐簇判词**：judge 必须对每条给 survived / resolved / denied（给不出 ⇒ not-evaluated），且
+ *  resolved/denied 的依据必须是 **current-source 核对**（file:line 或 grep 命中），⛔ 不是「任务库
+ *  里有一条 done 任务」。⚠️ prompt 只是**输入侧**；执行点在 `mergePriorFindingRulings()` 的机械
+ *  降级（⛔ 不把判据寄托在措辞上，硬规则 9）。 */
+export function archReviewJudgePrompt(clusters: Cluster[], root: string, priorFindings: PriorFinding[] = []): string {
   const summary = clusters
     .map((c) => `  ${c.clusterId} [${c.primitive}] files=${c.files.length} rawCount=${c.rawCount} — ${c.label} — ${c.files.slice(0, 12).join(", ")}${c.files.length > 12 ? ", …" : ""}`)
     .join("\n");
+  const prior = priorFindings
+    .map((p) => `  ${p.clusterId} [${p.primitive}] priorVerdict=${p.priorVerdict || "(none)"} round=${p.priorRound} — ${p.label} — files: ${p.files.slice(0, 12).join(", ")}${p.files.length > 12 ? ", …" : ""}${p.priorReasoning ? ` — prior reasoning: ${p.priorReasoning}` : ""}`)
+    .join("\n");
+  const priorBlock = priorFindings.length > 0
+    ? [
+        `Prior-round findings (round ${priorFindings[0].priorRound}, judged ${priorFindings[0].priorJudgedAt || "unknown"}) — you MUST rule on EVERY one of them:`,
+        prior,
+        "For EACH prior finding, re-check it against the CURRENT source tree (`root`) and set `state` to exactly one of:",
+        "  survived      — the defect/problem is STILL visible in the current source.",
+        "  resolved      — the prior finding named a real defect that is NO LONGER visible in the current source.",
+        "  denied        — the prior finding was WRONG / not a real defect (it was a misreading of the source).",
+        "  not-evaluated — you could not verify it against the current source. ⛔ Do NOT guess, and do NOT downgrade it to denied.",
+        "Every survived/resolved/denied ruling MUST carry `evidence`: the CURRENT-SOURCE check you actually ran —",
+        '  either a `path:line` reference (e.g. "plugin/scripts/x.ts:42 still imports y") or a grep hit (e.g. `grep -rn "Foo" plugin/scripts → 3 hits`).',
+        "⛔ Do NOT cite the task store as evidence: an existing/done task (tasks/<id>.md) is NOT proof that the defect is resolved — it is a proxy and can be wrong.",
+      ]
+    : [
+        "No prior-round findings are available (this is the first judged round) — emit an empty `priorFindings` array.",
+      ];
   return [
     "You are the architecture-review judge for the quay repo (docs/proposals/archguard-generation-era-primitives.md §3).",
     "Mechanical clustering already grouped suspicious files into candidate clusters — trust it as arithmetic, NOT a verdict.",
@@ -871,14 +904,19 @@ function archReviewJudgePrompt(clusters: Cluster[], root: string): string {
     "For EACH cluster decide: does it warrant abstracting/merging (real identity replication / deletion-closure debt), or is it coincidental similarity to keep as-is?",
     "Also set `actionable`: true iff this cluster names a defect that should be FIXED BY A TASK — either (a) real replication/deletion debt to merge, or (b) a defect in the detector/pipeline that produced this cluster (e.g. generated directories or worktree snapshots polluting the measured dependency graph, so the number is an artifact rather than a real signal).",
     "Set `actionable` false when the cluster is coincidental similarity, or mere load-bearing centrality that is correct by design — no task should be filed for those.",
-    "Reply with ONLY a JSON array, one object per cluster:",
-    '[{"clusterId":"<id>","verdict":"abstract|coincidental|uncertain","reasoning":"<one line>","suggestedAction":"<one line>","actionable":true|false}]',
+    ...priorBlock,
+    "Reply with ONLY a JSON object (no prose, no code fence):",
+    '{"clusters":[{"clusterId":"<id>","verdict":"abstract|coincidental|uncertain","reasoning":"<one line>","suggestedAction":"<one line>","actionable":true|false}],"priorFindings":[{"clusterId":"<prior cluster id, verbatim>","state":"survived|resolved|denied|not-evaluated","evidence":"<path:line or grep hit>"}]}',
   ].join("\n");
 }
 
 /** 缺省架构复核 judge 命令（launchArgv role=pool-judge → 短命 claude -p，复用 B15 的 profile 机制）。 */
-export function defaultArchReviewJudgeArgv(clusters: Cluster[], root: string): string[] {
-  return launchArgv("pool-judge", archReviewJudgePrompt(clusters, root), root);
+export function defaultArchReviewJudgeArgv(
+  clusters: Cluster[],
+  root: string,
+  priorFindings: PriorFinding[] = [],
+): string[] {
+  return launchArgv("pool-judge", archReviewJudgePrompt(clusters, root, priorFindings), root);
 }
 
 /** 架构复核 gap-filing agent spawn 的 wall-clock 上限【缺省回退值】（毫秒）。同 PACKAGING_…_DEFAULT
@@ -932,6 +970,16 @@ export interface ArchReviewFactValue {
   submittedKeys: string[];
   /** actionable 字段读不出的簇数（硬规则 3b：⛔ 与 actionable===false 不同形）。 */
   actionabilityNotEvaluated: number;
+  /** 本轮复核的上一轮 finding 数（gap-arch-review-judge-consumes-prior-round-findings）。 */
+  priorFindingCount?: number;
+  /** 逐条复核的聚合态（none/checked/partial/not-evaluated）——**只在 judge 真的跑过时**出现：
+   *  早退路径（halt / 资源门 / 判词失败）根本没做这一步，⛔ 不得在那里写 "none"（那会把「没做」
+   *  伪装成「上一轮没有 findings」，硬规则 3b）。 */
+  priorFindingsState?: PriorFindingsCheckState;
+  priorSurvived?: number;
+  priorResolved?: number;
+  priorDenied?: number;
+  priorNotEvaluated?: number;
   gapFiled: boolean;
   gapExitCode: number | null;
   gapError: string | null;
@@ -972,8 +1020,11 @@ export interface ArchReviewJudgeDiagnostics {
  *  重解析一遍 stdout（第二套解析必然是第二套真相）。 */
 interface ArchReviewJudgeAttempt {
   r: { status: number | null; stdout: string; stderr: string; error: Error | null };
-  /** judge 输出的逐簇判词；`null` = stdout 不是 JSON 数组（⛔ 与「判过但为空」不同形，硬规则 3b）。 */
+  /** judge 输出的逐簇判词；`null` = stdout 不是可读形态（⛔ 与「判过但为空」不同形，硬规则 3b）。 */
   verdicts: JudgeClusterVerdict[] | null;
+  /** judge 输出的逐条 prior-finding 判词；`null` = 输出没带这个面（旧裸数组形态 ⇒ 整批未评估）。
+   *  ⛔ 不 default 成 []：「没判」与「判过且没有 prior findings」不同形（硬规则 3b）。 */
+  priorRulings: JudgePriorRuling[] | null;
   /** 复用的 `callFailureClass` 读数。 */
   failure: string | null;
   apiErrorEvent: boolean;
@@ -1209,7 +1260,10 @@ export async function runArchitectureReview(
   }
 
   // 7. LLM judge（真实 claude -p，单批）。失败归因/有界重试【复用 OSD 机件】（硬规则 5b）。
-  const argv = judgeArgv ?? defaultArchReviewJudgeArgv(clusters, root);
+  //    ⚠️ 读「上一轮」必须在**本轮记录写盘之前**（judge 输入 = 上一轮 judged 记录的逐簇判词）。
+  //    读不懂载体 ⇒ `unreadable`（⛔ 不当作「没有上一轮」：那会把「不知道」伪装成「首轮」）。
+  const prior = readPriorRoundFindings(root);
+  const argv = judgeArgv ?? defaultArchReviewJudgeArgv(clusters, root, prior.findings);
   // ⛔ 取不到流读取器 ⇒ 分类与重试边界都无从谈起 ⇒ fail-closed 成 not-evaluated（硬规则 3b）。
   //    ⛔ 也不是 failed：failed 需要一个分类读数，而正是它读不出——「读不懂」不得伪装成任一合格态。
   let streamDiagnostics: Awaited<ReturnType<typeof loadStreamDiagnostics>>;
@@ -1239,15 +1293,25 @@ export async function runArchitectureReview(
       api_error_event: apiErrorEvent, has_result: hasResult,
     });
     let verdicts: JudgeClusterVerdict[] | null = null;
+    let priorRulings: JudgePriorRuling[] | null = null;
     try {
       const parsed = JSON.parse(stdout.trim());
-      if (Array.isArray(parsed)) verdicts = parsed;
+      // 两种形态都认（向后兼容）：
+      //  · 旧形态 = 裸数组（只有逐簇判词 ⇒ priorRulings 保持 null ⇒ 全部 prior findings 未评估）；
+      //  · 新形态 = {clusters:[…], priorFindings:[…]}（本任务要求的形态，prompt 里逐字给出）。
+      if (Array.isArray(parsed)) {
+        verdicts = parsed;
+      } else if (parsed && typeof parsed === "object" && Array.isArray((parsed as { clusters?: unknown }).clusters)) {
+        verdicts = (parsed as { clusters: JudgeClusterVerdict[] }).clusters;
+        const pf = (parsed as { priorFindings?: unknown }).priorFindings;
+        if (Array.isArray(pf)) priorRulings = pf as JudgePriorRuling[];
+      }
     } catch { /* 非 JSON ⇒ verdicts 保持 null（⛔ 不伪装成「判过但为空」） */ }
     // 捕获：只在**没有产出可用判词**的调用上留痕（与 OSD 同形——成功调用的判词已逐簇落在载体上，
     // 再存一份流就是 transcript 而不是诊断）。写失败【报在记录上】，⛔ 不是静默缺失（硬规则 3b：
     // 「无字节可看」与「没有捕获文件」必须不同形）。
     let capture: Record<string, unknown> | null = null;
-    const attempt: ArchReviewJudgeAttempt = { r, verdicts, failure, apiErrorEvent, hasResult, stdoutBytes, diagnostic: diagnosticExcerpt(stdout), capture: null };
+    const attempt: ArchReviewJudgeAttempt = { r, verdicts, priorRulings, failure, apiErrorEvent, hasResult, stdoutBytes, diagnostic: diagnosticExcerpt(stdout), capture: null };
     if (!judgeAttemptAnswered(attempt)) {
       try {
         capture = writeCallCapture(root, path.join(captureDir, `arch-judge-${process.pid}-${attemptNo}-${Date.now()}.txt`), { stdout, stderr });
@@ -1323,7 +1387,22 @@ export async function runArchitectureReview(
   }
   const distribution: Record<string, number> = {};
   for (const m of merged) distribution[m.verdict] = (distribution[m.verdict] ?? 0) + 1;
-  writeRecord(buildArchReviewRoundRecord({ round, judgedAt, state: "judged", triggerReasons: trigger.reasons, clusters: merged, detectors: trigger.detectors }));
+  // 逐条复核上一轮 findings（gap-arch-review-judge-consumes-prior-round-findings）。三态由
+  // mergePriorFindingRulings 兜底：缺判词/词表外/依据非 current-source ⇒ not-evaluated（⛔ 不折叠
+  // 成 denied）。聚合态与逐条 ruling **同一载体**（跟 clusters 同一条记录），供下一轮消费。
+  const priorRulings = mergePriorFindingRulings(prior.findings, attempt.priorRulings);
+  const priorState = priorFindingsCheckState(prior, priorRulings);
+  const priorRound: ArchReviewPriorRound = {
+    state: prior.state,
+    round: prior.round,
+    judgedAt: prior.judgedAt,
+    findingCount: prior.findings.length,
+    ...(prior.reason !== undefined ? { reason: prior.reason } : {}),
+  };
+  writeRecord(buildArchReviewRoundRecord({
+    round, judgedAt, state: "judged", triggerReasons: trigger.reasons, clusters: merged, detectors: trigger.detectors,
+    priorRound, priorFindings: priorRulings, priorFindingsState: priorState,
+  }));
 
   // 9. 语义结论 → 既有立案通道（gap-arch-review-judge-verdicts-never-reach-the-existing-gap-filing-
   //    channel）。**接法选择 = 单开一条同构路径，⛔ 不并入 packaging 的 `report.drift`**，理由：
@@ -1345,6 +1424,12 @@ export async function runArchitectureReview(
     actionableCount: filable.length,
     submittedKeys: toSend.map(conclusionKey),
     actionabilityNotEvaluated: notEvaluated.length,
+    priorFindingCount: priorRulings.length,
+    priorFindingsState: priorState,
+    priorSurvived: priorRulings.filter((r) => r.state === "survived").length,
+    priorResolved: priorRulings.filter((r) => r.state === "resolved").length,
+    priorDenied: priorRulings.filter((r) => r.state === "denied").length,
+    priorNotEvaluated: priorRulings.filter((r) => r.state === "not-evaluated").length,
   };
   if (toSend.length > 0) {
     const gapArgv = buildArchGapWorkerArgv(root, toSend, gapWorkerCmd);
@@ -1375,11 +1460,18 @@ export async function runArchitectureReview(
   const unreadable = notEvaluated.length > 0
     ? `; actionability unreadable for ${notEvaluated.length} cluster(s) — ⛔ NOT "judged not-actionable"`
     : "";
+  // 上一轮 findings 的逐条复核读数也进 reason（⛔ 只写进载体会让「每轮都在核」在 driver 输出里不可见；
+  // not-evaluated 明确成词，不与 denied 同形）。
+  const priorSummary = priorRulings.length > 0
+    ? `; prior-findings ${priorState}: survived=${value.priorSurvived} resolved=${value.priorResolved} denied=${value.priorDenied} not-evaluated=${value.priorNotEvaluated}`
+    : prior.state === "unreadable"
+      ? `; prior-findings not-evaluated: ${prior.reason ?? "prior round carrier unreadable"}`
+      : `; prior-findings none`;
   return {
     name: "architecture-review",
     value,
     state: "verified",
-    reason: `judged ${merged.length} cluster(s): ${summary || "none"}${filing}${unreadable}`,
+    reason: `judged ${merged.length} cluster(s): ${summary || "none"}${filing}${unreadable}${priorSummary}`,
   };
 }
 

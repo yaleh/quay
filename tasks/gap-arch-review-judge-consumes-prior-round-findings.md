@@ -2,7 +2,7 @@
 id: gap-arch-review-judge-consumes-prior-round-findings
 title: architecture-review judge 缺「上一轮 findings 逐条 survived/resolved/denied
   核对」输入——本会话四次误判都靠这一步才拦住
-status: ready
+status: done
 labels:
   - gap
   - architecture
@@ -50,12 +50,4 @@ extra:
 - AC1：`archReviewJudgePrompt` 带上一轮逐簇判词（含 `coincidental` 这类被否认项）+ survived/resolved/denied/not-evaluated 词表 + `priorFindings` 输出形态；`readPriorRoundFindings` 取最后一条 `judged` 记录（末行坏 ⇒ unreadable，⛔ 不跳过）。用例：`plugin/test/quality-gate-driver.test.mjs`「AC1/AC2 — prompt 含上一轮 findings 清单…」「AC1/AC2 — 第二轮载体带逐条三态…」；`plugin/test/architecture-review-cluster.test.mjs`「prior — readPriorRoundFindings…」。
 - AC2：`classifyEvidenceSource` 把 `tasks/<id>.md` / done task / 任务库引用机械判为 `task-store`（与 file:line / grep 命中不同形），`mergePriorFindingRulings` 把非 current-source 依据的三态判词**降级为 not-evaluated 并带 reason**——prompt 措辞不是执行点。用例：「prior — classifyEvidenceSource…」「prior — mergePriorFindingRulings…」「AC1/AC2 — 第二轮载体带逐条三态…」（task-store 依据的 denied ⇒ not-evaluated）。
 - 2026-10-21 续做轮复验读数（当前代码）：prompt 含 `Prior-round findings` 块 / prior cluster id / 四态词表 / `"priorFindings":[` 输出形态；`classifyEvidenceSource("tasks/gap-already-done.md is done")` = `task-store` ⇒ `mergePriorFindingRulings` 降级为 `not-evaluated`；grep 命中依据 ⇒ `resolved` + `current-source`。`node --test plugin/test/{architecture-review-cluster,quality-gate-driver}.test.mjs` = 114 pass / 0 fail；`carrier-registry-completeness` 5 pass（本次修复见下条）。
-- 2026-10-21 陈旧条目修复：`classifyEvidenceSource` 里 `/(?:^|[\s(（"'`])tasks\/…/` 的字面引号/反引号被 carrier-registry 词法器（不认正则字面量）当成字符串起点，吞掉其后全文 ⇒ `architecture-review-submissions.jsonl` 从扫描结果消失、伪装成 stale 条目。改为 `[^\w/]`（同义、不含字面引号），carrier-registry 5 测试转绿。
-
-## Blocker
-
-**2026-10-21T04:59:44.704Z — worker 未落地（exited-not-landed）**
-
-- 未落地原因：step=suite: AssertionError [ERR_ASSERTION]: 陈旧条目 / stale registry entries (declared but no longer present in code — remove or repoint them):
-- run_id：wk-prod-anchor
-- session_id：cc11d14d-bc64-4403-86dc-0bc04b5f597c
+- 2026-10-21 陈旧条目修复：`classifyEvidenceSource` 里带字面引号/反引号的正则（`tasks\/<id>.md` 前导字符类）被 carrier-registry 词法器（不认正则字面量）当成字符串起点，吞掉其后全文 ⇒ `architecture-review-submissions.jsonl` 从扫描结果消失、伪装成 stale 条目。改为 `[^\w/]`（同义、不含字面引号），carrier-registry 5 测试转绿。
