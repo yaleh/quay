@@ -133,8 +133,8 @@ export interface CriterionReading {
  *  ⛔ `not-evaluated` is its OWN kind, never folded into pass/fail (hard rule 3b: "could not
  *  measure" and "is false" are different values). It exists so a standing unmeasured AC is
  *  ESCALATED instead of being silently absent from every divergence list
- *  (tasks/gap-meta-goaldriverchildtimeoutms: the 2026-10-21 reading was `not-evaluated` for 13
- *  consecutive rounds and no handler was ever told). */
+ *  (tasks/gap-meta-goaldriverchildtimeoutms: the 2026-10-21T04:08:39Z meta reading was
+ *  `not-evaluated` and produced NO divergence — no handler was ever told it could not be measured). */
 export type DivergenceKind = "pass-but-unflipped" | "achieved-but-failing" | "no-criterion" | "not-evaluated";
 
 /** 处理者的三态 + 「读不出」。⛔ 读不出 ≠ 不存在：读不懂不得与「合格」或其反面同形
@@ -346,7 +346,7 @@ export function computeDivergences(readings: CriterionReading[]): Divergence[] {
     // A committed AC whose criterion could NOT BE RUN this round is a divergence in its own right:
     // "we promised to measure this and we did not". Before this branch, `not-evaluated` fell through
     // every case and produced NOTHING — a standing unmeasured AC was indistinguishable from a healthy
-    // one on the divergence list (tasks/gap-meta-goaldriverchildtimeoutms: 13 consecutive rounds).
+    // one on the divergence list (tasks/gap-meta-goaldriverchildtimeoutms: the 04:08:39Z reading).
     // ⛔ Not `achieved-but-failing`/`pass-but-unflipped`: the verdict is neither (hard rule 3b).
     if (c.verdict === "not-evaluated") { out.push({ ...base, kind: "not-evaluated" }); continue; }
   }
@@ -512,9 +512,10 @@ export interface TimeSeriesSignal {
    *
    *  ⛔ WHY THIS FIELD EXISTS (tasks/gap-meta-goaldriverchildtimeoutms): `unchanged:13` alone is
    *  ambiguous between "failing for 13 rounds" and "UNMEASURED for 13 rounds" — and the 2026-10-21
-   *  semantic probe read the AC-911 streak as the latter, filing a task against an instrument that
-   *  had in fact produced 30 definitive `fail` events. Carrying the value makes the signal
-   *  self-describing instead of leaving the reader to infer it. It stays OUT of readingsDigest for
+   *  semantic probe read the AC-911 streak as the latter, filing a task against an instrument whose
+   *  ledger already held 21 definitive `fail` events for AC-911 by that round (30 by 05:00Z).
+   *  Carrying the value makes the signal self-describing instead of leaving the reader to infer it.
+   *  It stays OUT of readingsDigest for
    *  the same reason `count` does: it changes only when the streak changes. */
   value: string | null;
 }

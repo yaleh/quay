@@ -191,8 +191,9 @@ test('computeDivergences: pass 且已 achieved ⇒ 无偏离（一致就不报�
 
 // gap-meta-goaldriverchildtimeoutms: a COMMITTED AC whose criterion could not be run must be
 // ESCALATED, not silently dropped. Before this, `not-evaluated` fell through every branch and
-// produced no divergence at all — AC-911 sat unmeasured for 13 consecutive rounds with nothing
-// telling any handler. ⛔ It is granted its OWN kind, never re-used as pass/fail (hard rule 3b).
+// produced no divergence at all — the 2026-10-21T04:08:39Z AC-911 reading was `not-evaluated` and
+// nothing told any handler it could not be measured. ⛔ It is granted its OWN kind, never re-used
+// as pass/fail (hard rule 3b).
 test('computeDivergences: verdict=not-evaluated ⇒ 独立 kind "not-evaluated"（⛔ 不是 pass/fail 类）', () => {
   const d = computeDivergences([
     { id: 'AC-005', title: null, goal: 'GOAL-001', status: 'active', criterion: 'x', verdict: 'not-evaluated', reason: 'spawn error', cause: 'spawn' },
@@ -573,6 +574,22 @@ test('readingsDigest: 只随 verdict/status/偏离类别变，⛔ 不随 reason 
   assert.notEqual(a.criteria[0].reason, b.criteria[0].reason, '前提：两次的 reason 确实不同');
   assert.equal(readingsDigest(a), readingsDigest(b), '噪声不得改变摘要');
   assert.notEqual(readingsDigest(a), readingsDigest(mkReadings('fail')), 'verdict 变了摘要必须变');
+});
+
+// gap-meta-goaldriverchildtimeoutms: WHICH not-evaluated it is changes the disposition, so `cause`
+// belongs in the digest (it is stable per round — ⛔ not a churn source like reason text).
+test('readingsDigest: not-evaluated 的 cause 变 ⇒ 摘要变；同一 cause ⇒ 摘要不变', () => {
+  const withCause = (cause) => {
+    const r = mkReadings('not-evaluated', 'same');
+    r.criteria = [{ ...r.criteria[0], cause }];
+    return r;
+  };
+  assert.notEqual(readingsDigest(withCause('spawn')), readingsDigest(withCause('timeout')),
+    'spawn（被外层上限杀掉）与 timeout（criterion 自己超时）需要不同的处置 ⇒ 摘要必须不同');
+  assert.equal(readingsDigest(withCause('spawn')), readingsDigest(withCause('spawn')), '同一 cause ⇒ 摘要不变（否则变化检测恒为真）');
+  // 负控制：reason 文本带着同一 cause 变化时仍不得改变摘要（避免把「文本噪声」当变化）。
+  const a = withCause('spawn'); const b = withCause('spawn'); b.criteria[0].reason = 'different text';
+  assert.equal(readingsDigest(a), readingsDigest(b));
 });
 
 test('shouldJudge: 首次（never judged）⇒ 判读', () => {
