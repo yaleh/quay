@@ -4,24 +4,32 @@
 // mechanism layer (its task-schema.ts / task-status-drift-check.ts). This reverses the ONE
 // product-layer → mechanism-layer src-level hard import: the native store (packages/quay-native/src/
 // store.ts) used to import parseFrontmatterCompletely from the mechanism layer. The product layer is
-// now the SOURCE for the PRODUCT (store.ts consumes from here). The mechanism layer keeps its own
-// copies — it CANNOT statically import this module (build-plugin-dist stages plugin/ → packages/quay/
-// plugin/ and bundles each entry WITHOUT the packages/ tree, the same reason loop-complete-task.ts and
-// config-wiring-check.ts use DYNAMIC pathToFileURL imports for `../../packages/...`). The two copies
-// are pinned BEHAVIORALLY identical by plugin/test/task-parsing-parity.test.mjs — a divergence there
-// means the two frontmatter/section readers silently disagree (the drift class this promotion exists
-// to end).
+// now the SOURCE for the PRODUCT (store.ts consumes from here).
+//
+// The stale claim that the mechanism layer cannot reach this source tree (because the plugin bundle
+// is staged without it) is RETIRED: build-plugin-dist's `coreSrcAliasPlugin` re-points every
+// `packages/quay/src/**` specifier onto the real Core source tree and INLINES it into `dist/*.js` —
+// `plugin/scripts/ready-pool-check.ts` already statically imports
+// `../../packages/quay/src/kernel/task-shape-artifacts.ts` and ships. The kernel is the one
+// location BOTH layers reach, which is why the converged pure judges live there.
 //
 //   extractSection             — depth-aware `## Heading` → body slicing (moved from task-schema.ts).
 //   parseFrontmatterCompletely — the ONE complete task-frontmatter YAML parser (moved from task-schema.ts).
-//   countAcCheckboxes          — GFM checkbox counting with a fail-closed absent-section shape (moved
-//                                from task-status-drift-check.ts).
+//   countAcCheckboxes          — GFM checkbox counting with a fail-closed absent-section shape.
+//                                MOVED OUT (task gap-three-pure-judges-kernel-single-def): the one
+//                                definition now lives in `./kernel/ac-checkbox-count.ts` and is
+//                                re-exported at the bottom of this file, so both layers — and this
+//                                module's existing import surface — resolve the same function.
 //
-// All three are migrated VERBATIM — logic unchanged, behavior unchanged. The existing unit tests
+// extractSection / parseFrontmatterCompletely are still migrated VERBATIM — logic unchanged, behavior
+// unchanged. The mechanism layer still keeps its own copies of THESE TWO, pinned BEHAVIORALLY
+// identical by plugin/test/task-parsing-parity.test.mjs (converging them is out of this task's
+// scope); countAcCheckboxes is now structurally single. Existing unit tests
 // (plugin/test/mechanism-count / ready-pool-check / workflow-invariant-ownership / slot-refill /
-// task-status-drift-check) are the regression evidence that the move did not alter behavior.
+// task-status-drift-check) are the regression evidence that the moves did not alter behavior.
 //
-// Scope honesty: this module carries ONLY these three capabilities. It is NOT mechanism-layer
+// Scope honesty: this module carries ONLY these two capabilities (plus the countAcCheckboxes
+// re-export). It is NOT mechanism-layer
 // bootstrap completion — the remaining §2.6 items (③ shape-aware four-artifact judgment, ④ batch
 // status write, ⑤ workspace-root parameterization, ⑥ depends_on first-class) are still unexpressed in
 // the ABI, per docs/proposals/archguard-generation-era-primitives.md §2.6. This task must not be
@@ -95,31 +103,15 @@ export function parseFrontmatterCompletely(frontmatterRaw) {
 }
 
 /**
- * Count GFM checkbox boxes in an AC section (`- [ ]`, `- [x]`, `- [X]`, `- [~]`; moved verbatim from
- * task-status-drift-check.ts). The acceptance gate reads `- [x]` boxes, so a `done` task with boxes but
- * ZERO checked could NOT have passed the gate as written. `[~]` (partial) counts as unchecked, matching
- * the gate semantics.
+ * Count GFM checkbox boxes in an AC section (`- [ ]`, `- [x]`, `- [X]`, `- [~]`).
  *
- * FAIL-CLOSED (gap-ac47-completion-predicate-consumer-fail-closed, AC1): an ABSENT / UNREADABLE section
- * (null) must NOT read as `{ unchecked: 0 }`. `sectionFound:false` is the distinguishable state for
- * readers that check it; `total: NaN` is the STRUCTURAL guarantee that OLD destructuring read-patterns
- * (`const { total, checked } = …`) cannot obtain a pass (`total === 0` and `checked === total` are both
- * FALSE for NaN), so every pre-existing consumer fails CLOSED without being edited.
- *
- * This function is DELIBERATELY duplicated in the mechanism layer (plugin/scripts/task-schema.ts,
- * re-exported by task-status-drift-check.ts) — build-plugin-dist bundles plugin/ WITHOUT the
- * packages/ tree, so that layer cannot statically import this module. The copy is NOT an
- * undocumented parallel implementation: plugin/test/task-parsing-parity.test.mjs feeds the SAME
- * fixture set (null / empty / mixed `[ ]` `[x]` `[X]` `[~]` / prose with no boxes) to both call sites
- * and asserts deep-equal objects. Edit BOTH copies or that parity test goes red
- * (gap-routine-architecture-analysis-dup-count-ac-checkboxes).
+ * MOVED to the kernel (task gap-three-pure-judges-kernel-single-def, AC-909): the ONE definition —
+ * including the fail-closed `null → { total: NaN, checked: NaN, unchecked: NaN, sectionFound:false }`
+ * shape and the `[~]`-counts-as-unchecked semantics — now lives in
+ * `./kernel/ac-checkbox-count.ts`, re-exported below. The mechanism layer
+ * (plugin/scripts/task-schema.ts) imports that same kernel file, so the former product/mechanism copy
+ * pair is structurally ONE function (identity-equal across both import surfaces) rather than two
+ * bodies pinned only by plugin/test/task-parsing-parity.test.mjs.
  */
-export function countAcCheckboxes(acSection) {
-  if (acSection == null) {
-    return { total: NaN, checked: NaN, unchecked: NaN, sectionFound: false };
-  }
-  const boxes = acSection.match(/^\s*-\s+\[(.)\]/gm) ?? [];
-  let checked = 0;
-  for (const b of boxes) if (/\[[xX]\]/.test(b)) checked++;
-  return { total: boxes.length, checked, unchecked: boxes.length - checked, sectionFound: true };
-}
+export { countAcCheckboxes } from "./kernel/ac-checkbox-count.ts";
+

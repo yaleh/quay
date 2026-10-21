@@ -19,6 +19,14 @@
 import fs from "node:fs";
 import path from "node:path";
 import { readFileSafe } from "./gate-script-base.ts";
+// The ONE whole-segment wildcard expander — shared with scripts/test-coverage-check.ts
+// (task gap-three-pure-judges-kernel-single-def, AC-909). It ships self-contained through
+// build-plugin-dist's `coreSrcAliasPlugin` (the same inlining precedent as ready-pool-check.ts
+// statically importing kernel/task-shape-artifacts.ts).
+import { expandGlob } from "../../packages/quay/src/kernel/glob-expand.ts";
+
+// Kept as a re-export so the historical import surface of THIS module does not break.
+export { expandGlob } from "../../packages/quay/src/kernel/glob-expand.ts";
 
 /** Parse the space-separated glob patterns out of `scripts/test.sh`'s `glob=(...)` line. */
 export function parseCanonicalGlobs(repoRoot: string): string[] {
@@ -29,45 +37,6 @@ export function parseCanonicalGlobs(repoRoot: string): string[] {
     .split(/\s+/)
     .map((s) => s.trim())
     .filter(Boolean);
-}
-
-function globSegmentToRegex(seg: string): RegExp {
-  const escaped = seg.replace(/[.+^${}()|[\]\\]/g, "\\$&").replace(/\*/g, "[^/]*");
-  return new RegExp(`^${escaped}$`);
-}
-
-/** Expand one glob pattern (each `/`-segment MAY contain `*`) against `root`, returning absolute
- * paths. Supports exactly the whole-segment-wildcard shape scripts/test.sh uses. */
-export function expandGlob(pattern: string, root: string): string[] {
-  const segments = pattern.split("/");
-  let current = [root];
-  for (const seg of segments) {
-    if (!seg.includes("*")) {
-      current = current.map((dir) => path.join(dir, seg)).filter((p) => fs.existsSync(p));
-      continue;
-    }
-    const re = globSegmentToRegex(seg);
-    const next: string[] = [];
-    for (const dir of current) {
-      let entries: string[] = [];
-      try {
-        entries = fs.readdirSync(dir);
-      } catch {
-        entries = [];
-      }
-      for (const e of entries) {
-        if (re.test(e)) next.push(path.join(dir, e));
-      }
-    }
-    current = next;
-  }
-  return current.filter((p) => {
-    try {
-      return fs.statSync(p).isFile();
-    } catch {
-      return false;
-    }
-  });
 }
 
 /** The working-tree test files covered by scripts/test.sh's canonical glob, repo-relative, deduped

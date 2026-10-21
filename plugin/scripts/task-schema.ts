@@ -424,24 +424,15 @@ export function countBoxes(sectionBody) {
 // 其余 3 处（stale-ready-audit / worker-driver / task-ac-carryover-check）与 task-status-drift-check
 // 的重导出全部改为调用它；`[~]` 语义以此为准（计入 total、算未勾）。
 //
-// 与 packages/quay/src/task-parsing.ts 的 product 层副本行为一致（byte-identical 逻辑，
-// plugin/test/task-parsing-parity.test.mjs 把同一组 4 类 fixture（null / 空串 / 混合框
-// `[ ]` `[x]` `[X]` `[~]` / 无框散文）喂给两个调用点并断言返回对象 deep-equal），
-// 机制层不能静态 import packages/ 树（build-plugin-dist 不打包 packages/ 树）。
-export function countAcCheckboxes(acSection) {
-  if (acSection == null) {
-    // FAIL-CLOSED (gap-ac47-completion-predicate-consumer-fail-closed, AC1): an ABSENT / UNREADABLE
-    // section must NOT read as `{ unchecked: 0 }`. `sectionFound:false` is the distinguishable state
-    // for readers that check it; `total: NaN` is the STRUCTURAL guarantee that OLD destructuring
-    // read-patterns (`const { total, checked } = …`) cannot obtain a pass (`total === 0` and
-    // `checked === total` are both FALSE for NaN).
-    return { total: NaN, checked: NaN, unchecked: NaN, sectionFound: false };
-  }
-  const boxes = acSection.match(/^\s*-\s+\[(.)\]/gm) ?? [];
-  let checked = 0;
-  for (const b of boxes) if (/\[[xX]\]/.test(b)) checked++;
-  return { total: boxes.length, checked, unchecked: boxes.length - checked, sectionFound: true };
-}
+// 与 packages/quay/src/task-parsing.ts 的 product 层共用同一实现：唯一真身在
+// `packages/quay/src/kernel/ac-checkbox-count.ts`（task gap-three-pure-judges-kernel-single-def, AC-909），
+// 本文件在此 re-export 它，所以 `./task-schema.ts` 的既有 import 面（stale-ready-audit /
+// worker-driver / task-ac-carryover-check / task-status-drift-check / slot-refill / ready-pool-check）
+// 全部不变。机制层可以静态 import `packages/quay/src/**` —— build-plugin-dist 的
+// `coreSrcAliasPlugin` 会按后缀把 specifier 重指向真实 Core 源树并 INLINE 进 `dist/*.js`（先例：
+// ready-pool-check.ts 静态 import kernel/task-shape-artifacts.ts 并随 dist 出货）。此前「机制层到不了
+// packages/ 源树」的说法已过期，不是事实。
+export { countAcCheckboxes } from "../../packages/quay/src/kernel/ac-checkbox-count.ts";
 
 export function checkAcceptanceChecklist(task) {
   const sec = extractSection(task.body, "Acceptance Criteria");

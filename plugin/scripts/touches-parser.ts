@@ -2,6 +2,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { isDirectEntry } from "./gate-script-base.ts";
+import { stripTrailingFullWidthAnnotation } from "../../packages/quay/src/kernel/touches-annotation.ts";
 //
 // Root cause this module exists to close (gap-task-body-has-n-parsers-and-no-authority):
 // the repo had N independent Touches parsers, none authoritative, and they DISAGREED on the
@@ -40,14 +41,12 @@ import { isDirectEntry } from "./gate-script-base.ts";
 // actually uses, so a scoped run never silently skips a change-relevant check because of a
 // full-width annotation).
 //
-// NESTED-PAREN handling (gap-touches-parser-strip-annotation-nested-parens — 2 real occurrences:
-// a23 `（…`（新增…）`…）` + provisioning `（新：…（config/gates/运行时载体）…）`, each of which the old
-// `\s*（[^）]*）\s*$` regex could NOT strip because `[^）]*` cannot cross a `）`): the FULL-WIDTH pass is
-// a BALANCED-PAREN scan, not a regex. We scan from the END for the LAST `）` and walk backward to
-// its MATCHING `（`, counting depth so a NESTED full-width pair inside the annotation does not
-// terminate the scan early. Only FULL-WIDTH parens are counted — an ASCII `(` that is literal text
-// inside the annotation (`$(` command-substitution syntax) is NOT mistaken for the annotation's
-// opener, and an unbalanced trailing `）` (no matching `（`) is left alone (old behavior).
+// NESTED-PAREN handling (gap-touches-parser-strip-annotation-nested-parens) lives in the kernel
+// implementation: `packages/quay/src/kernel/touches-annotation.ts` (a BALANCED-PAREN scan, not a
+// regex — see that file's header). It is the ONE definition shared with Core's observation.ts
+// (task gap-three-pure-judges-kernel-single-def); this path imports it instead of carrying a copy.
+// It ships self-contained through build-plugin-dist's `coreSrcAliasPlugin` (the same inlining
+// precedent as ready-pool-check.ts importing kernel/task-shape-artifacts.ts).
 //
 // ORDER-INDEPENDENCE (gap-touches-parser-annotation-strip-single-shot-order-dependent): the two
 // passes used to run exactly ONCE each, in a FIXED order (full-width first, then ASCII). That left
@@ -73,25 +72,9 @@ const TOUCH_PATH_TOKEN_RE = /^[^\s`'"()（）]+/;
 const TOUCH_CONCRETE_PATH_RE = /\/|\.[A-Za-z0-9]{1,10}$/;
 const TOUCH_ANNOTATION_HEAD_RE = /^[`'"（(]/;
 
-/** Strip a trailing balanced full-width `（…）` annotation (nested pairs included); unchanged input
- *  is returned when the trimmed entry does not END in a full-width annotation. */
-function stripTrailingFullWidthAnnotation(s) {
-  const t = s.trimEnd();
-  const i = t.length - 1;
-  if (t[i] !== "）") return s;
-  let depth = 0;
-  let open = -1;
-  for (let j = i; j >= 0; j--) {
-    const c = t[j];
-    if (c === "）") depth++;
-    else if (c === "（" && --depth === 0) { open = j; break; }
-  }
-  if (open === -1) return s;
-  let k = open;
-  while (k > 0 && /\s/.test(t[k - 1])) k--; // also drop whitespace before the annotation (old \s*)
-  return t.slice(0, k);
-}
-
+/** Strip a trailing annotation (`（…）` full-width or `(…)` ASCII) from a Touches entry, with the
+ *  leading-path cut that makes the two spellings commute. The full-width balanced-paren half is the
+ *  kernel's ONE definition (`../../packages/quay/src/kernel/touches-annotation.ts`). */
 export function stripTouchAnnotation(entry) {
   // 1. Leading-path cut — a concrete leading path token whose annotation starts immediately after.
   const t = String(entry).trim();
