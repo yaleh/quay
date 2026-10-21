@@ -1,7 +1,7 @@
 ---
 id: AC-915
 title: 扩展点：新的 worker 结局处理单元可从 worker-driver.ts 之外注册到 WorkerPool 并生效（开闭原则可取假验证）
-status: draft
+status: active
 kind: criterion
 goal: GOAL-909
 criterion: "t=plugin/test/worker-pool-extension-point.test.mjs; if [ ! -f \"$t\"
@@ -23,4 +23,15 @@ expect: 扩展点判据（DIR-133 裁定 2）：新代码以后落在哪里。�
   就接入，不是代码被搬到了哪里。
 origin: DIR-133（人 2026-10-22 裁定）裁定 2：设计切片必须含扩展点判据；依据 serve（分发器）增量落回中心文件 1% vs
   worker（区域抽取）88%
+activatedAt: 2026-10-21T18:56:51.504Z
+statusLog:
+  - at: 2026-10-21T18:56:51.504Z
+    from: draft
+    to: active
+    actor: goal-driver
+    reason: "triage: activate"
+fidelity:
+  verdict: faithful
+  reason: "fidelity judge: faithful"
+  at: 2026-10-21T18:56:51.504Z
 ---
