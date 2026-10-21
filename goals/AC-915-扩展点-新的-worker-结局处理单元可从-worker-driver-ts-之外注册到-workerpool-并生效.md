@@ -1,7 +1,7 @@
 ---
 id: AC-915
 title: 扩展点：新的 worker 结局处理单元可从 worker-driver.ts 之外注册到 WorkerPool 并生效（开闭原则可取假验证）
-status: active
+status: achieved
 kind: criterion
 goal: GOAL-909
 criterion: "t=plugin/test/worker-pool-extension-point.test.mjs; if [ ! -f \"$t\"
@@ -30,6 +30,11 @@ statusLog:
     to: active
     actor: goal-driver
     reason: "triage: activate"
+  - at: 2026-10-21T20:18:00.044Z
+    from: active
+    to: achieved
+    actor: goal-driver
+    reason: "I2: criterion pass"
 fidelity:
   verdict: faithful
   reason: "fidelity judge: faithful"
