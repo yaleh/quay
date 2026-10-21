@@ -157,7 +157,8 @@ Mechanically move the serve* family into packages/quay/src/serve/ (matching the 
 - `plugin/scripts/*.ts`
 - `plugin/scripts/checker-mutation-cases/*.sh`
 - `plugin/test/*.mjs`
-- `goals/*.md`
+- `goals/AC-146-human-interface-explicit-owner.md`
+- `goals/AC-253-会话读写原语统一到共享层-四个模块在本仓库可用且有非测试消费者-spec-阶段-a3.md`
 - `docs/analysis/*.mjs`
 - `experiments/quay-perpetual-stream/test/*.mjs`
 - `experiments/quay-perpetual-stream/milestones/**`
