@@ -1,6 +1,6 @@
 ---
 id: GOAL-906
-title: AC/DoD checkbox 计数等 3 个纯判定函数收敛到 kernel/ 单一定义（4 份零共享 import 实现 → 1 份）
+title: AC/DoD checkbox 计数等 3 个纯判定函数收敛到 kernel/ 单一定义（3 个函数各 2 份零共享 import 实现 → 各 1 份，共 6 → 3）
 status: active
 kind: goal
 origin: 架构分析改进方案 G-1（2026-10-21 会话，基于 ArchGuard detect_duplicates + 源码按位置核对）
@@ -22,9 +22,16 @@ archguard detect_duplicates（scope b4f87b21 @ HEAD 6473463e3）实测：AC/DoD 
 
 判断：checkbox 计数、全角注解剥离、glob 展开都是「无副作用的纯判定」，跨层重复实现违反单一真源（硬规则 5b：修好一处 ≠ 只有一处）。
 
+## 退出条件
+
+① `countAcCheckboxes`、`stripTrailingFullWidthAnnotation`、`expandGlob` 三个纯判定函数在 `packages/quay/src`、`plugin/scripts`、`scripts` 三个被扫目录（`*.ts`）中各恰有 1 个 `function NAME` 定义处——按名字逐个计数，不是总数；
+② 上述 3 个唯一定义全部落在 `packages/quay/src/kernel/`（或经 kernel/ 转发的单一真身），产品层与工具层不再各自持有本地实现；
+③ 产品层（`packages/quay/src`）与工具层（`plugin/scripts`、`scripts`）的消费方均 import/export 该 kernel 真身；
+④ 判据能取假：向任一层加回一份同名 `function` 定义 ⇒ 判据红并写出 cause（名字 + 实际定义数）；删除后 ⇒ 判据绿。
+
 ## 范围与非目标
 
-范围：三个纯函数各收敛为 kernel/ 单一定义；产品层与工具层各消费方 import kernel/ 真身；删除其余定义；detect_duplicates 不再报这三组。
+范围：三个纯函数各收敛为 kernel/ 单一定义；产品层与工具层各消费方 import kernel/ 真身；删除其余定义；验证说明（不是独立退出条件）：上述收敛在结构上意味着 archguard `detect_duplicates` 不应再报这三组；该重跑作为 Resolution 里的一条【派生观测】记录，不被写成本 goal 的退出条件——archguard 的重复分组/阈值不受本 goal 控制，是代理量（硬规则 4b）。
 非目标：不改变 AC/DoD 计数的判定语义本身；不碰 drain-scheduler.ts 双副本（另一机制，另行处理）。
 
 ## AC

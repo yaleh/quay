@@ -1,7 +1,7 @@
 ---
 id: gap-goal907-add-exit-conditions
 title: "GOAL-907 缺 ## 退出条件 致充分性闸永久 insufficient：补写 4 条退出条件并把「棘轮」条款降为手段"
-status: ready
+status: done
 labels:
   - gap
 parent: null
