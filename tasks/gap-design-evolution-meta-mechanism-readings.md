@@ -1,6 +1,7 @@
 ---
 id: gap-design-evolution-meta-mechanism-readings
-title: 设计演进元机制的外部直接量读数：分解后增量落回中心文件占比（serve 1% / worker 88%）与热点文件并发争用——评价「扩展点模板」本身是否有效
+title: 设计演进元机制的外部直接量读数：分解后增量落回中心文件占比（统一公式 serve 1% / worker 82%，原 88%
+  口径作废）与热点文件并发争用——评价「扩展点模板」本身是否有效
 status: done
 labels:
   - gap
