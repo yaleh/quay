@@ -2,7 +2,7 @@
 id: gap-quality-round-facts-surface-top-outdegree-god-functions
 title: quality-round 事实只读环与覆盖率——把 topByOutDegree god-functions 与关系类型分布也读进
   quality-round（只读既有 archguard 产物，不 spawn）
-status: todo
+status: ready
 labels:
   - gap
   - architecture
