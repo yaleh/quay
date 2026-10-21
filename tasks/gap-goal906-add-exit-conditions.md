@@ -1,7 +1,7 @@
 ---
 id: gap-goal906-add-exit-conditions
 title: "GOAL-906 缺 ## 退出条件 致充分性闸永久 insufficient：补写 4 条退出条件并对齐标题 6→3 / 范围文本"
-status: ready
+status: done
 labels:
   - gap
 parent: null
@@ -79,12 +79,12 @@ AC-909 的 `criterion` 字段本身只是一条名字计数 grep；「落在 ker
 
 ## AC
 
-- [ ] AC1 机械充分性闸在真实 goal 载体上翻转：`node packages/quay/bin/quay.js goal show GOAL-906 --json 2>/dev/null | node --no-warnings --experimental-strip-types --input-type=module -e 'import { goalSufficiencyVerdict } from "./plugin/scripts/goal-driver.ts"; let s=""; for await (const c of process.stdin) s+=c; const g=JSON.parse(s); const v=goalSufficiencyVerdict(g,[{id:"AC-909"}]); console.log("verdict="+v); if (v==="insufficient") process.exit(1);'` 退出 0，stdout 为 `verdict=not-evaluated`（⛔ 不是 `verdict=insufficient`）。
-- [ ] AC2 退出条件节非空且恰有 4 条编号条款：在同一条 `goal show GOAL-906 --json` 读数上运行 `node -e`，断言 body 的 `## 退出条件` 节体非空白字符 > 40、`/^[①②③④]/gm` 命中恰 4 行、每条非空白字符 ≥ 20；退出 0 并打印 `clauses=4`。
-- [ ] AC3 标题不再声称 4→1：同一条读数中 `title` 不含子串 `4 份零共享`，且含子串 `6 → 3`；退出 0。
-- [ ] AC4 范围文本不再把 archguard 重跑写成独立交付项：同一条读数中 body 不含子串 `detect_duplicates 不再报这三组`，且含 `派生观测` 与 `不是独立退出条件`；退出 0。
-- [ ] AC5 判据能取假（两次读数原样贴进 Resolution）：① 对**不含** `## 退出条件` 的合成 body（`"## 背景\n\nx"`）调用 `goalSufficiencyVerdict({id:"GOAL-906",body},[{id:"AC-909"}])` ⇒ `insufficient`；② 对 AC1 读到的**真实** post-edit body 调用同一函数 ⇒ `not-evaluated`。两次都贴出命令与输出。
-- [ ] AC6 只改 body/title：`git diff --name-only $(git merge-base HEAD develop) -- goals/` 的输出恰好只有 `goals/GOAL-906-ac-dod-checkbox-计数等-3-个纯判定函数收敛到-kernel-单一定义-4-份零共享-import-实现.md` 一行（AC-909 文件未动），且 `quay goal show GOAL-906 --json` 的 `status` 仍为 `active`。
+- [x] AC1 机械充分性闸在真实 goal 载体上翻转：`node packages/quay/bin/quay.js goal show GOAL-906 --json 2>/dev/null | node --no-warnings --experimental-strip-types --input-type=module -e 'import { goalSufficiencyVerdict } from "./plugin/scripts/goal-driver.ts"; let s=""; for await (const c of process.stdin) s+=c; const g=JSON.parse(s); const v=goalSufficiencyVerdict(g,[{id:"AC-909"}]); console.log("verdict="+v); if (v==="insufficient") process.exit(1);'` 退出 0，stdout 为 `verdict=not-evaluated`（⛔ 不是 `verdict=insufficient`）。
+- [x] AC2 退出条件节非空且恰有 4 条编号条款：在同一条 `goal show GOAL-906 --json` 读数上运行 `node -e`，断言 body 的 `## 退出条件` 节体非空白字符 > 40、`/^[①②③④]/gm` 命中恰 4 行、每条非空白字符 ≥ 20；退出 0 并打印 `clauses=4`。
+- [x] AC3 标题不再声称 4→1：同一条读数中 `title` 不含子串 `4 份零共享`，且含子串 `6 → 3`；退出 0。
+- [x] AC4 范围文本不再把 archguard 重跑写成独立交付项：同一条读数中 body 不含子串 `detect_duplicates 不再报这三组`，且含 `派生观测` 与 `不是独立退出条件`；退出 0。
+- [x] AC5 判据能取假（两次读数原样贴进 Resolution）：① 对**不含** `## 退出条件` 的合成 body（`"## 背景\n\nx"`）调用 `goalSufficiencyVerdict({id:"GOAL-906",body},[{id:"AC-909"}])` ⇒ `insufficient`；② 对 AC1 读到的**真实** post-edit body 调用同一函数 ⇒ `not-evaluated`。两次都贴出命令与输出。
+- [x] AC6 只改 body/title：`git diff --name-only $(git merge-base HEAD develop) -- goals/` 的输出恰好只有 `goals/GOAL-906-ac-dod-checkbox-计数等-3-个纯判定函数收敛到-kernel-单一定义-4-份零共享-import-实现.md` 一行（AC-909 文件未动），且 `quay goal show GOAL-906 --json` 的 `status` 仍为 `active`。
 
 ## DoD
 
@@ -94,3 +94,90 @@ AC-909 的 `criterion` 字段本身只是一条名字计数 grep；「落在 ker
 
 - goals/GOAL-906-ac-dod-checkbox-计数等-3-个纯判定函数收敛到-kernel-单一定义-4-份零共享-import-实现.md
 - tasks/gap-goal906-add-exit-conditions.md
+
+## Resolution
+
+落地：worktree `gap-goal906-add-exit-conditions`，分支 `task/gap-goal906-add-exit-conditions`，commit `f6c5760aa`。改动仅 `goals/GOAL-906-…-实现.md` 一个文件（`title` + body）。代码/测试零改动；AC-909 的载体文件不在 diff 中。
+
+### AC1 —— 机械充分性闸在真实载体上翻转（worktree 根执行）
+
+```sh
+node packages/quay/bin/quay.js goal show GOAL-906 --json 2>/dev/null | node --no-warnings --experimental-strip-types --input-type=module -e 'import { goalSufficiencyVerdict } from "./plugin/scripts/goal-driver.ts"; let s=""; for await (const c of process.stdin) s+=c; const g=JSON.parse(s); const v=goalSufficiencyVerdict(g,[{id:"AC-909"}]); console.log("verdict="+v); if (v==="insufficient") process.exit(1);'
+```
+
+输出：
+
+```
+verdict=not-evaluated
+EXIT=0
+```
+
+### AC2 —— 退出条件节恰 4 条、每条够长
+
+同一 `goal show GOAL-906 --json` 读数上的断言输出：
+
+```
+sectionChars=396 clauses=4 shortLines=0
+clauses=4
+EXIT=0
+```
+
+### AC3 / AC4 —— 标题与范围文本
+
+```
+AC3 ok: AC/DoD checkbox 计数等 3 个纯判定函数收敛到 kernel/ 单一定义（3 个函数各 2 份零共享 import 实现 → 各 1 份，共 6 → 3）   （EXIT3=0）
+AC4 ok                                                                                                                    （EXIT4=0）
+```
+
+（AC3：`title` 不含 `4 份零共享`、含 `6 → 3`。AC4：`body` 不含 `detect_duplicates 不再报这三组`、含 `派生观测` 与 `不是独立退出条件`。）
+
+### AC5 —— 判据能取假：红 / 绿两次读数
+
+红（合成 body，不含 `## 退出条件`）：
+
+```sh
+node --no-warnings --experimental-strip-types --input-type=module -e 'import { goalSufficiencyVerdict } from "./plugin/scripts/goal-driver.ts"; console.log("synthetic=" + goalSufficiencyVerdict({id:"GOAL-906", body:"## 背景\n\nx"}, [{id:"AC-909"}]));'
+```
+
+```
+synthetic=insufficient
+EXIT_SYNTH=0
+```
+
+绿（AC1 读到的真实 post-edit body，同一函数、同一条命令形状）：
+
+```
+real=not-evaluated
+EXIT_REAL=0
+```
+
+两次退出码都是 0（命令本身成功），区别只在输入载体 ⇒ 判据能取假，不是恒真。
+
+### AC6 —— 只改一个 goal 文件，GOAL-906 仍 active
+
+```
+$ git -c core.quotepath=false diff --name-only $(git merge-base HEAD develop) -- goals/
+goals/GOAL-906-ac-dod-checkbox-计数等-3-个纯判定函数收敛到-kernel-单一定义-4-份零共享-import-实现.md
+$ git diff --name-only $(git merge-base HEAD develop) -- goals/ | wc -l
+1
+$ git diff --name-only $(git merge-base HEAD develop) -- goals/AC-909*
+(空 —— AC-909 文件未动)
+$ node packages/quay/bin/quay.js goal show GOAL-906 --json | jq -r .status
+active
+```
+
+（默认 `core.quotepath` 下同一条路径以 C 引号转义形式输出，仍是同一行同一路径。）
+
+### 与 DoD 原文的一处事实偏差（如实记录，未粉饰）
+
+DoD 写「AC-909 仍为 `active`」，实测 **AC-909 在 develop 上已是 `achieved`**：其收敛任务 `gap-three-pure-judges-kernel-single-def` 已落地并跑过 gate（`quay goal show AC-909 --json` ⇒ `status=achieved`）。**这不是本任务改的**——`git diff --name-only $(git merge-base HEAD develop) -- goals/AC-909*` 为空，本任务只改 GOAL-906 载体。
+
+DoD 该句的**意图**（「AC-909 的 status / criterion / expect 未被本任务改动」）成立并已取证；字面读数按实测记录。AC-909 的 `criterion` 与 `expect` 原文未变（见上「AC-909 文件未动」）。
+
+### Touches 与实际改动一致
+
+实际改动 = `goals/GOAL-906-…-实现.md`（声明内）+ `tasks/gap-goal906-add-exit-conditions.md`（本 Resolution 与 AC 勾选，经 `task_write` ABI，声明内）。无多改、无少改。
+
+### 派生观测（不是独立退出条件）
+
+archguard `detect_duplicates` 的重跑未在本任务执行：该读数不受本 goal 控制（重复分组/阈值由 archguard 侧决定，是代理量——硬规则 4b），且 AC-909 的机械判据是逐名字定义数 grep，不调用 archguard。收敛的**直接量**已由 AC-909 的 criterion 覆盖。
