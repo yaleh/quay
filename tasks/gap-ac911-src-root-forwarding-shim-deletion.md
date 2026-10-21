@@ -179,6 +179,7 @@ $ grep -rln 'FORWARDING re-export' packages/quay/src/*.ts | wc -l
 - plugin/test/goal-store-write-gate-criterion-attribution.test.mjs
 - plugin/test/helpers/goal-driver-harness.mjs
 - plugin/test/import-graph-check.test.mjs
+- plugin/test/kernel-sibling-resolution-check.test.mjs
 - plugin/test/meta-driver.test.mjs
 - plugin/test/ownership-active-limited-proposal.test.mjs
 - plugin/test/worker-driver.test.mjs
