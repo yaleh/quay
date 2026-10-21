@@ -23,5 +23,5 @@ export {
   VALID_GOAL_STATUSES,
   isGoalId,
   isCriterionId,
-} from "../../quay/src/goal-store.ts";
-export type { DisposeOld } from "../../quay/src/goal-store.ts";
+} from "../../quay/src/core/goal-store.ts";
+export type { DisposeOld } from "../../quay/src/core/goal-store.ts";

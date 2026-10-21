@@ -52,7 +52,7 @@ import { loadConfig, activeProvider, findConfig, providerMcpEntry } from "./conf
 import { connectProvider } from "./provider-client.ts";
 import { resolveProviderEnv } from "./provider-env.ts";
 import { type ConnectedProvider, registerAllHandlers, registerConfigHandlers } from "./mcp-handlers.ts";
-import { resolvePluginScriptExec } from "./plugin-root.ts";
+import { resolvePluginScriptExec } from "./core/plugin-root.ts";
 import { runInit, buildInitReport } from "./init.ts";
 import { readFanInAttempts } from "./observation.ts";
 

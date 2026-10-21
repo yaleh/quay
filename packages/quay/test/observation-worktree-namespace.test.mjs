@@ -32,7 +32,7 @@ import {
   workerTaskIdFromCmdline,
   WORKER_PROCESS_NAME,
 } from "../src/observation.ts";
-import { resolveWorktreeNamespace, DEFAULT_WORKTREE_NAMESPACE_NAME } from "../src/worktree-namespace.ts";
+import { resolveWorktreeNamespace, DEFAULT_WORKTREE_NAMESPACE_NAME } from "../src/core/worktree-namespace.ts";
 
 /** Write `<dir>/.quay/config.yml` carrying `loop.worktree_root` (omitted when `worktreeRoot` is null). */
 function writeConfig(dir, worktreeRoot) {

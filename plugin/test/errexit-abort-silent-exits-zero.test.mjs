@@ -23,7 +23,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { parse as parseYaml } from "yaml";
 
-import { errexitAbortSilentExits } from "../../packages/quay/src/goal-store.ts";
+import { errexitAbortSilentExits } from "../../packages/quay/src/core/goal-store.ts";
 import { parseGoalFile, IN_DOMAIN_STATUSES } from "../scripts/criterion-failure-attribution-check.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));

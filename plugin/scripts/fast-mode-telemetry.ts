@@ -114,8 +114,8 @@ import { acquireCoreSrc } from "./core-src-import.ts";
 // kernel import graph (driver-runtime.ts → driver-filters.ts → concurrent-batch-scheduler.ts → here),
 // and a bare `../../packages/quay/src/…` literal dies in the staged `packages/quay/plugin/` copy.
 const { resolveWorktreeNamespace } = await acquireCoreSrc(
-  () => import("../../packages/quay/src/worktree-namespace.ts"),
-  "worktree-namespace.ts",
+  () => import("../../packages/quay/src/core/worktree-namespace.ts"),
+  "core/worktree-namespace.ts",
 );
 import os from "node:os";
 import path from "node:path";

@@ -7,7 +7,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { createAdrStore, VALID_ADR_STATUSES } from "../src/adr-store.ts";
+import { createAdrStore, VALID_ADR_STATUSES } from "../src/core/adr-store.ts";
 
 // gap-tests-never-clean-up-their-tmpdirs: every tmpDir() created a per-run-unique dir that was never
 // removed — /tmp (tmpfs) accumulated 3,590 `adr-store-*` dirs. The node:test file-level after() hook

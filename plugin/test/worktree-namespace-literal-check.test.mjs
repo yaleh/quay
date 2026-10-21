@@ -18,7 +18,7 @@ import {
   SCAN_ROOTS,
   RESOLVER_REL,
 } from "../scripts/worktree-namespace-literal-check.ts";
-import { DEFAULT_WORKTREE_NAMESPACE_NAME } from "../../packages/quay/src/worktree-namespace.ts";
+import { DEFAULT_WORKTREE_NAMESPACE_NAME } from "../../packages/quay/src/core/worktree-namespace.ts";
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const NAME = DEFAULT_WORKTREE_NAMESPACE_NAME;

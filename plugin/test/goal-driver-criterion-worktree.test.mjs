@@ -311,7 +311,7 @@ test("判据 worktree 的路径由【配置解析出的】worktree 基目录派�
       process.execPath,
       [
         "--no-warnings", "--experimental-strip-types", "-e",
-        `import { goalCriterionWorktreeDir } from ${JSON.stringify(path.join(repoRoot, "packages/quay/src/goal-store.ts"))};` +
+        `import { goalCriterionWorktreeDir } from ${JSON.stringify(path.join(repoRoot, "packages/quay/src/core/goal-store.ts"))};` +
           `process.stdout.write(JSON.stringify([goalCriterionWorktreeDir(process.argv[1], "GOAL-901"), goalCriterionWorktreeDir(process.argv[2], "GOAL-901")]))`,
         rootA, rootB,
       ],

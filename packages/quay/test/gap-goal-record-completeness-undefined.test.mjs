@@ -16,7 +16,7 @@ import path from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { QUAY_NATIVE_CLI } from "./helpers/cli-entry.mjs";
-import { createGoalStore, MIN_GOAL_BODY_CHARS, evaluateCriterionAttribution } from "../src/goal-store.ts";
+import { createGoalStore, MIN_GOAL_BODY_CHARS, evaluateCriterionAttribution } from "../src/core/goal-store.ts";
 
 const nativeBin = QUAY_NATIVE_CLI;
 

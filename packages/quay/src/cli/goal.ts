@@ -16,7 +16,7 @@ import { withProvider, printJson } from "./shared.ts";
 import type { CliCtx } from "./context.ts";
 import type { CliFlags } from "./flags.ts";
 import type { GoalRecord } from "../abi.ts";
-import { runGoalStoreCli } from "../goal-store.ts";
+import { runGoalStoreCli } from "../core/goal-store.ts";
 
 /**
  * AC2 — the staleness marker for a GOAL row's TEXT rendering

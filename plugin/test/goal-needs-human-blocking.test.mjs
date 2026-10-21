@@ -16,7 +16,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
 import { goalAchievedFromRecords } from '../scripts/goal-driver.ts';
-import { VALID_GOAL_STATUSES } from '../../packages/quay/src/goal-store.ts';
+import { VALID_GOAL_STATUSES } from '../../packages/quay/src/core/goal-store.ts';
 
 test('VALID_GOAL_STATUSES 含 needs-human（词表侧）', () => {
   assert.ok(VALID_GOAL_STATUSES.includes('needs-human'), 'needs-human 必须进 goal 词表');

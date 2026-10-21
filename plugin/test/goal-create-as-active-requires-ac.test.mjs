@@ -51,7 +51,7 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
-const goalStorePath = path.join(repoRoot, 'packages', 'quay', 'src', 'goal-store.ts');
+const goalStorePath = path.join(repoRoot, 'packages', 'quay', 'src', 'core', 'goal-store.ts');
 
 /** 合法的 GOAL body（≥ MIN_GOAL_BODY_CHARS=40 非空白字符——创建路径的完整性契约）。 */
 const GOAL_BODY = 'background / scope & non-goals / exit conditions —— 本 fixture 的 body 足够长。';

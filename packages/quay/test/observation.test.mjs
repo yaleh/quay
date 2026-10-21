@@ -15,7 +15,7 @@ import path from "node:path";
 import fs from "node:fs";
 import os from "node:os";
 import { parseVerificationRound, readLive, taskWorktreeOpen, readJournal, parseWorkerOutcomeRecords, parseWorkerOutcomeRecordsDetailed, readFanInAttempts, fanInAttemptFromRecord, workerInFlightTasks, workerDriverOnlineMs, workerTaskIdFromCmdline, readLiveWorkerProcesses, WORKER_PROCESS_NAME, WORKER_OUTCOME_REL, WORKER_ROUND_REL, isValidSessionId, sessionTranscriptPath, projectSlug, transcriptContentBlocks, parseTranscript, readTranscript, readTranscriptTail, readSession, parseClaudeAgentsJson, readTaskStatusAtRef, readTaskAtRefMeta, readTaskTitleMapAtRef, readTaskCommitTimesAtRef, readTaskCommitTimeAtRef, readTaskStatusMapAtRef, refreshDevelopRefCaches, clearTaskStatusRefCache, resetDevelopRefWalkCounts, getDevelopRefFullWalkCount, getDevelopRefBoundedWalkCount, LOOP_DRIVER_CHECK_REL, OBSERVER_REGISTRY_REL, runLoopDriverProbe, readManager, scriptBasename, RESOURCE_GATE_REL, RESOURCE_GATE_NAME, PROCESS_BUDGET_NAME, TASK_STATUS_DRIFT_CHECK_REL, TASK_STATUS_DRIFT_CHECK_NAME } from "../src/observation.ts";
-import { resolvePluginScript, resolveOrchestrationFile } from "../src/plugin-root.ts";
+import { resolvePluginScript, resolveOrchestrationFile } from "../src/core/plugin-root.ts";
 import { renderSessionPage } from "../src/serve-handlers.ts";
 import { taskRunsBlock, handleTaskList } from "../src/serve-task.ts";
 

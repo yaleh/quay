@@ -32,7 +32,7 @@ import {
   scanSurfaceTopSegments,
   regexBodies,
   readMechanismFromCriterion,
-} from '../../packages/quay/src/criterion-fidelity.ts';
+} from '../../packages/quay/src/core/criterion-fidelity.ts';
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const fixtureDir = path.join(repoRoot, 'plugin', 'test', 'fixtures', 'criterion-fidelity');

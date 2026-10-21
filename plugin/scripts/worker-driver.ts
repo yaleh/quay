@@ -132,8 +132,8 @@ import { extractSection, countAcCheckboxes, fetchTaskStatusAtRef, parseFrontmatt
 // ② 读该 GOAL 的 status/branch（复用 §4.8 身份检查的 lookupGoalBranchMode——「活跃 branch-mode GOAL」
 // 这一问的单一实现，⛔ 不在本文件重写一份谓词）；③ 派生分支名与存在性（branch-model 的
 // goalBranchName/goalBranchRefExists，均为 leaf：只 import node 内建，无反向边 ⇒ 不新增值 SCC）。
-import { fileNameForId } from "../../packages/quay/src/frontmatter-store-base.ts";
-import { goalBranchName, goalBranchRefExists, goalIdFromBranchToken } from "../../packages/quay/src/branch-model.ts";
+import { fileNameForId } from "../../packages/quay/src/core/frontmatter-store-base.ts";
+import { goalBranchName, goalBranchRefExists, goalIdFromBranchToken } from "../../packages/quay/src/core/branch-model.ts";
 // goal→develop 最终 fan-in（SPEC-goal-branch-2026-10-03 §4.7）：请求/结果事件形状与「待执行」派生读数
 // 的单一实现住在 Core（`quay goal merge` 与测试共用同一份，⛔ 本文件不重写）。执行侧（runGoalMergeFanIn）
 // 住在 worker-fan-in.ts（同机械 fan-in 的锁/suite/ff 基建），本文件每轮调它。

@@ -187,7 +187,7 @@ import { bundleEntries } from "../../packages/quay/scripts/build-plugin-dist.mjs
 // gap-fan-in-merge-target-hardcoded-develop-blocks-third-party-landing: the AC4 e2e drives the REAL
 // mechanical fan-in on a third-party-shaped repo, before and after `quay init` establishes the
 // landing baseline.
-import { ensureBranchModel } from "../../packages/quay/src/branch-model.ts";
+import { ensureBranchModel } from "../../packages/quay/src/core/branch-model.ts";
 // gap-worker-prompt-omits-anti-drift-pre-exit-check…：AC1 的期望 argv 必须与实现【同源】解析
 // （kernelSiblingArgv = fan-in 的 gateArgv 用的同一个函数），⛔ 不测试里手写一份路径。
 // gap-worker-kind-stop-waits-for-all-in-flight-workers-instead-of-detaching-for-adoption：`recordKindStop`

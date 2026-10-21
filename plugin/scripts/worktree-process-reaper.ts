@@ -103,7 +103,7 @@ import { suiteLockSlotPaths, suiteLockBase } from "./suite-lock-slots.ts";
 // live (SPEC-goal-branch-2026-10-03 §4.10). Resolved through the SINGLE resolver the read side
 // (observation.ts) and fast-mode-telemetry.ts already share: spelling the segment as a literal here
 // would be exactly the drift `worktree-namespace-literal-check.ts` exists to catch.
-import { resolveWorktreeNamespace } from "../../packages/quay/src/worktree-namespace.ts";
+import { resolveWorktreeNamespace } from "../../packages/quay/src/core/worktree-namespace.ts";
 // The two process-IDENTITY predicates (`readProcCmdline` / `isQuayServe`, re-exported below for
 // every existing caller) now live in the kernel leaf `packages/quay/src/kernel/proc-identity.ts`
 // (tasks/gap-arch-reverse-edges-zero). They are the ONLY part of this file `packages/quay/src/

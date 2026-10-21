@@ -53,7 +53,7 @@ import { suiteLockBase } from "./suite-lock-slots.ts";
 // `goal/<GOAL-NNN>` → `fan-in.goal-<GOAL>.lock`。goalIdFromBranchToken 是「该 token 是不是 goal 分支、
 // 叫什么 GOAL」的单一实现（与 §4.8 身份检查同源，⛔ 不写第二份正则）。budget-model.ts 是 leaf（只
 // import node 内建），无反向边。
-import { goalIdFromBranchToken, goalBranchName, goalBranchRefExists } from "../../packages/quay/src/branch-model.ts";
+import { goalIdFromBranchToken, goalBranchName, goalBranchRefExists } from "../../packages/quay/src/core/branch-model.ts";
 // SPEC-goal-branch-2026-10-03 §4.7 (裁定⑫⑲⑳): the goal→develop merge executor is the worker-driver
 // (DIR-131). The REQUEST/RESULT event shapes + the derived-pending reader live in Core (ONE definition,
 // shared with `quay goal merge` and the tests); ⛔ this module never re-declares them.

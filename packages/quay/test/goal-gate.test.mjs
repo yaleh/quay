@@ -15,7 +15,7 @@ import path from "node:path";
 
 import { gateRegistry, registerGoalGate, listGates } from "../src/gate/registry.ts";
 import { makeGoalGate } from "../src/gate/factories/goal.ts";
-import { createGoalStore } from "../src/goal-store.ts";
+import { createGoalStore } from "../src/core/goal-store.ts";
 
 const _createdDirs = [];
 function tmpGoalDir(tag) {

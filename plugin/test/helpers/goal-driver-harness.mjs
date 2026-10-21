@@ -96,7 +96,7 @@ import {
   OBJECTIVE_EVIDENCE_CARRIERS,
   OBJECTIVE_ASSERTION_FIELDS,
 } from '../../scripts/goal-driver.ts';
-import { readsFrozenPopulation } from '../../../packages/quay/src/goal-store.ts';
+import { readsFrozenPopulation } from '../../../packages/quay/src/core/goal-store.ts';
 import { runResidentQualityGateLoop } from '../../scripts/quality-gate-driver.ts';
 import { DRIVER_KINDS, KNOWN_KINDS, GOAL_ACCEPTANCE_ACTIVE_ENV } from '../../scripts/driver-runtime.ts';
 // cli/driver.ts 的 KINDS 白名单（AC6 断言对象；已导出）。
@@ -123,7 +123,7 @@ function writeGoalFile(tmp, { id, status, kind, goal, criterion, body = '## body
   fs.writeFileSync(path.join(tmp, 'goals', `${id}-t.md`), lines.join('\n'), 'utf8');
 }
 
-const goalStoreAbs = path.join(repoRoot, 'packages', 'quay', 'src', 'goal-store.ts');
+const goalStoreAbs = path.join(repoRoot, 'packages', 'quay', 'src', 'core', 'goal-store.ts');
 
 function writeStandingGoalFile(tmp, { id, status, kind, goal, criterion, longTerm = false }) {
   const lines = ['---', `id: ${id}`, 'title: t', `status: ${status}`, `kind: ${kind}`];

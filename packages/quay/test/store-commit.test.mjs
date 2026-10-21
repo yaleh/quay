@@ -15,8 +15,8 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { execFileSync } from "node:child_process";
-import { commitStoreWrite, commitStoreBatch, commitKindFile, storeCommitMessage, resolveCommitActor, resolveGitRoot } from "../src/store-commit.ts";
-import { createGoalStore } from "../src/goal-store.ts";
+import { commitStoreWrite, commitStoreBatch, commitKindFile, storeCommitMessage, resolveCommitActor, resolveGitRoot } from "../src/core/store-commit.ts";
+import { createGoalStore } from "../src/core/goal-store.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 

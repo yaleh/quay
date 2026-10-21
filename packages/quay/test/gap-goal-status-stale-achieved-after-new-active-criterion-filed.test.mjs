@@ -26,7 +26,7 @@ import os from "node:os";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 
-import { createGoalStore, readGoalStaleness, GOAL_STALENESS_SIGNAL_REL } from "../src/goal-store.ts";
+import { createGoalStore, readGoalStaleness, GOAL_STALENESS_SIGNAL_REL } from "../src/core/goal-store.ts";
 import { goalStalenessMark } from "../src/cli/goal.ts";
 import { QUAY_CLI, QUAY_NATIVE_CLI, QUAY_PKG_DIR } from "./helpers/cli-entry.mjs";
 

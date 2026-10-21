@@ -19,7 +19,7 @@ import {
 } from "./serve-render.ts";
 import { runDriver } from "./driver-control.ts";
 import { renderSendForm } from "./serve-send.ts";
-import { resolvePluginScript } from "./plugin-root.ts";
+import { resolvePluginScript } from "./core/plugin-root.ts";
 import { writeJson } from "./serve-http-json.ts";
 // gap-webui-sessions-body-copy-en-zh: this file's BODY copy resolves through serve-i18n.ts ROW 15.
 // ⛔ `serve-i18n.ts` (not `serve-render.ts`) because the page's own labels are that table's business;

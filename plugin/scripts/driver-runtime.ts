@@ -469,7 +469,7 @@ export function resolveQuaySrcModule(rel: string, codeRoot: string | null = reso
 // goal-driver 的「立案前直接量复核」要**参与**那道闸（跑判据前置位、已在跑则拒绝），而它必须读
 // 同一个名字。⛔ 在 driver 侧重写一份 `"QUAY_GOAL_ACCEPTANCE_ACTIVE"` 字面量就是第二个定义——
 // store 侧改名后 driver 会**静默停止守闸**（硬规则 5b 的形态），故走单一导入面。
-export { inAchievedReverifyScope, readsFrozenPopulation, stripEvidenceTimestamp, GOAL_ACCEPTANCE_ACTIVE_ENV } from "../../packages/quay/src/goal-store.ts";
+export { inAchievedReverifyScope, readsFrozenPopulation, stripEvidenceTimestamp, GOAL_ACCEPTANCE_ACTIVE_ENV } from "../../packages/quay/src/core/goal-store.ts";
 export { createMetaStore } from "../../packages/quay/src/meta-store.ts";
 // goal-branch (SPEC-goal-branch-2026-10-03 §5 B1, ruling ⑩): the goal-driver OWNS the criterion
 // worktree's lifecycle (create / refresh / delete, ruling ㉒) while the criterion's cwd is chosen by
@@ -477,7 +477,7 @@ export { createMetaStore } from "../../packages/quay/src/meta-store.ts";
 // (`goalCriterionWorktreeDir`, derived from the config-resolved worktree namespace) and this module
 // is where the driver-side symbols are surfaced — ⛔ goal-driver never spells a Core source-tree
 // literal itself (AC-262; same reason the two re-exports above exist).
-export { goalCriterionWorktreeDir, realpathOrSelf } from "../../packages/quay/src/goal-store.ts";
+export { goalCriterionWorktreeDir, realpathOrSelf } from "../../packages/quay/src/core/goal-store.ts";
 // The OUTER wall-clock bound a driver must impose on a goal-store child, DERIVED from the child's own
 // inner deadline (record `timeoutMs` > env > default) + the activation fidelity-judge bound + a grace —
 // and the grace constant itself, surfaced so the driver never spells a second copy of the derivation
@@ -485,16 +485,16 @@ export { goalCriterionWorktreeDir, realpathOrSelf } from "../../packages/quay/sr
 // hard-coded 120 s literal pre-empted every declared `timeoutMs` ≥ 120000 and orphaned the store lock).
 // `readLockPid` is surfaced with it: the driver's kill-cleanup removes `goals/<id>.lock` ONLY when its
 // recorded pid equals the child it killed (⛔ never a lock a live process now holds).
-export { goalDriverChildTimeoutMs, GOAL_DRIVER_SPAWN_GRACE_MS, GOAL_STORE_SIGTERM_GRACE_MS } from "../../packages/quay/src/goal-store.ts";
-export { readLockPid } from "../../packages/quay/src/frontmatter-store-base.ts";
+export { goalDriverChildTimeoutMs, GOAL_DRIVER_SPAWN_GRACE_MS, GOAL_STORE_SIGTERM_GRACE_MS } from "../../packages/quay/src/core/goal-store.ts";
+export { readLockPid } from "../../packages/quay/src/core/frontmatter-store-base.ts";
 // `ensureGoalBranch` is the ONE creation site for `goal/<id>` (Core `branch-model.ts`) — the store
 // calls it on the transition that leaves a branch-mode goal active. goal-driver now also calls it
 // idempotently to BACK-FILL a missing branch on an already-active branch-mode goal
 // (gap-goal-branch-active-branch-mode-goal-without-branch-never-self-heals), so the symbol is
 // surfaced here for the same AC-262 reason as the two lines above: the driver expresses "I need this
 // symbol", ⛔ never the Core layout literal.
-export { goalBranchName, goalBranchRefExists, goalBranchTip, ensureGoalBranch } from "../../packages/quay/src/branch-model.ts";
-export type { GoalBranchAction, GoalBranchReport } from "../../packages/quay/src/branch-model.ts";
+export { goalBranchName, goalBranchRefExists, goalBranchTip, ensureGoalBranch } from "../../packages/quay/src/core/branch-model.ts";
+export type { GoalBranchAction, GoalBranchReport } from "../../packages/quay/src/core/branch-model.ts";
 // The ledger's `goal-merge-result` reading — the goal-side record of a LANDED `goal/<id>` merge. The
 // back-fill predicate must tell "never created" from "merged and then deleted" (the latter must NOT
 // be re-created), and this is the single definition of that fact (Core `goal-merge.ts`); ⛔ no second

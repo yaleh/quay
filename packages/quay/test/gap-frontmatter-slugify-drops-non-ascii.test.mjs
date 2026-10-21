@@ -9,11 +9,11 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { slugify } from "../src/frontmatter-store-base.ts";
-import { createAdrStore } from "../src/adr-store.ts";
+import { slugify } from "../src/core/frontmatter-store-base.ts";
+import { createAdrStore } from "../src/core/adr-store.ts";
 import { createMetaStore } from "../src/meta-store.ts";
-import { createGoalStore } from "../src/goal-store.ts";
-import { createDocumentStore } from "../src/document-store.ts";
+import { createGoalStore } from "../src/core/goal-store.ts";
+import { createDocumentStore } from "../src/core/document-store.ts";
 
 // The exact exemplar title from the task body (40 chars, 22 CJK chars). The pre-fix
 // slugify collapses it to "store-kind" (ratio 10/40 = 0.25).

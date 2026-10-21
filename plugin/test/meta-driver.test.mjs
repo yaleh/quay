@@ -95,7 +95,7 @@ import { ROUTINE_FINDINGS_REL } from '../scripts/probe-routine.ts';
 import { routineGlobalCeiling, routineWindowMs } from '../scripts/driver-config.ts';
 // 读回 supersedes 用 store 自己的投影（⛔ 不 grep 落盘文本：字段名在 YAML 里的排版是序列化细节，
 // 断言它会把「字段没写进去」与「排版变了」混为一谈）。
-import { createGoalStore } from '../../packages/quay/src/goal-store.ts';
+import { createGoalStore } from '../../packages/quay/src/core/goal-store.ts';
 
 // 脚本根（goal 动词的 quay CLI 入口从这里解析）——数据根在各测试里另给临时目录。
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');

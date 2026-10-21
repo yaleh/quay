@@ -22,7 +22,7 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
-const goalStorePath = path.join(repoRoot, 'packages', 'quay', 'src', 'goal-store.ts');
+const goalStorePath = path.join(repoRoot, 'packages', 'quay', 'src', 'core', 'goal-store.ts');
 
 // 保真性闸的注入 seam（QUAY_GOAL_FIDELITY_JUDGE）：一个 argv 前缀，prompt 作末参数追加。三个假判定器
 // —— ⛔ 全用无空格的 JS，避免 splitArgs 语义下的引号剥层问题。

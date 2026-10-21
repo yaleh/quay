@@ -47,7 +47,7 @@ import path from "node:path";
 import { execFileSync, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import YAML from "yaml";
-import { createGoalStore } from "../src/goal-store.ts";
+import { createGoalStore } from "../src/core/goal-store.ts";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 /** Repo root of THIS checkout (a task worktree during dispatch). */

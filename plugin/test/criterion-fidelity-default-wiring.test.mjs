@@ -22,10 +22,10 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
-import { resolveFidelityJudgeArgvFromConfig } from '../../packages/quay/src/goal-store.ts';
+import { resolveFidelityJudgeArgvFromConfig } from '../../packages/quay/src/core/goal-store.ts';
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
-const goalStorePath = path.join(repoRoot, 'packages', 'quay', 'src', 'goal-store.ts');
+const goalStorePath = path.join(repoRoot, 'packages', 'quay', 'src', 'core', 'goal-store.ts');
 
 /** Hermetic temp workspace：goals/ + .quay/ + .claude/（缺省配置的落点）。 */
 function makeWorkspace() {
