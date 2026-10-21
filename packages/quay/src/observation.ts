@@ -42,6 +42,10 @@ import { QUAY_VERSION } from "./version.ts";
 // store), NOT a hand-maintained mirror of it. See start-end-like.ts's header.
 import { isStartLike, isEndLike } from "./start-end-like.ts";
 import { readProcCmdlineText } from "./kernel/proc-identity.ts";
+// The ONE trailing full-width `（…）` annotation stripper — shared with plugin/scripts/touches-parser.ts
+// (task gap-three-pure-judges-kernel-single-def). It used to be a hand-maintained mirror here
+// ("Core cannot import a plugin script"); the kernel is the one location both layers reach.
+import { stripTrailingFullWidthAnnotation } from "./kernel/touches-annotation.ts";
 import { parseFrontmatter } from "./frontmatter-store-base.ts";
 import { TASK_STATUS, isTaskStatus, type TaskStatus } from "./abi.ts";
 import { resolvePluginScript, resolvePluginScriptExec, resolveOrchestrationFile } from "./plugin-root.ts";
@@ -485,9 +489,10 @@ export function extractTouchesSection(body: string): { hasSection: boolean; sect
   return { hasSection, section: out.join("\n") };
 }
 
-/** Strip a trailing `(…)` / full-width `（…）` annotation from a Touches entry (mirrors
- *  touches-parser.ts stripTouchAnnotation — Core cannot import a plugin script, so this is the
- *  mirror; keep the two in step).
+/** Strip a trailing `(…)` / full-width `（…）` annotation from a Touches entry (the same algorithm as
+ *  touches-parser.ts stripTouchAnnotation; the full-width half is the kernel's ONE definition,
+ *  `./kernel/touches-annotation.ts` — task gap-three-pure-judges-kernel-single-def retired the
+ *  "Core cannot import a plugin script, so this is a hand-maintained mirror" arrangement).
  *
  *  ORDER-INDEPENDENT since gap-touches-parser-annotation-strip-single-shot-order-dependent. The old
  *  mirror ran each spelling's strip ONCE in a FIXED order, so `` `x.ts`（说明）(new) `` (ASCII last)
@@ -498,25 +503,6 @@ export function extractTouchesSection(body: string): { hasSection: boolean; sect
 const TOUCH_PATH_TOKEN_RE = /^[^\s`'"()（）]+/;
 const TOUCH_CONCRETE_PATH_RE = /\/|\.[A-Za-z0-9]{1,10}$/;
 const TOUCH_ANNOTATION_HEAD_RE = /^[`'"（(]/;
-
-/** Trailing balanced full-width `（…）` strip (nested pairs included); unchanged when the trimmed
- *  entry does not END in a full-width annotation. */
-function stripTrailingFullWidthAnnotation(s: string): string {
-  const t = s.trimEnd();
-  const i = t.length - 1;
-  if (t[i] !== "）") return s;
-  let depth = 0;
-  let open = -1;
-  for (let j = i; j >= 0; j--) {
-    const c = t[j];
-    if (c === "）") depth++;
-    else if (c === "（" && --depth === 0) { open = j; break; }
-  }
-  if (open === -1) return s;
-  let k = open;
-  while (k > 0 && /\s/.test(t[k - 1])) k--;
-  return t.slice(0, k);
-}
 
 function stripTouchAnnotation(entry: string): string {
   // 1. Leading-path cut — a concrete leading path token whose annotation starts immediately after.

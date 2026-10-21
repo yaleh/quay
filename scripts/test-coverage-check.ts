@@ -39,6 +39,10 @@ import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
+// The ONE whole-segment wildcard expander — shared with plugin/scripts/canonical-test-files.ts
+// (task gap-three-pure-judges-kernel-single-def, AC-909). This used to be a second byte-identical
+// body here; the kernel is now the single definition.
+import { expandGlob } from "../packages/quay/src/kernel/glob-expand.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "..");
@@ -109,46 +113,6 @@ function parseCanonicalGlobs(repoRoot: string): string[] {
     );
   }
   return patterns;
-}
-
-function globSegmentToRegex(seg: string): RegExp {
-  const escaped = seg.replace(/[.+^${}()|[\]\\]/g, "\\$&").replace(/\*/g, "[^/]*");
-  return new RegExp(`^${escaped}$`);
-}
-
-/** Expand a single glob pattern (each `/`-separated segment MAY contain `*`) against `root`,
- * returning absolute file paths. Only supports whole-segment wildcards, which is exactly the
- * shape `scripts/test.sh` uses (`packages/*\/test/*.test.mjs`, `plugin/test/*.test.mjs`). */
-function expandGlob(pattern: string, root: string): string[] {
-  const segments = pattern.split("/");
-  let current = [root];
-  for (const seg of segments) {
-    if (!seg.includes("*")) {
-      current = current.map((dir) => path.join(dir, seg)).filter((p) => fs.existsSync(p));
-      continue;
-    }
-    const re = globSegmentToRegex(seg);
-    const next: string[] = [];
-    for (const dir of current) {
-      let entries: string[] = [];
-      try {
-        entries = fs.readdirSync(dir);
-      } catch {
-        entries = [];
-      }
-      for (const e of entries) {
-        if (re.test(e)) next.push(path.join(dir, e));
-      }
-    }
-    current = next;
-  }
-  return current.filter((p) => {
-    try {
-      return fs.statSync(p).isFile();
-    } catch {
-      return false;
-    }
-  });
 }
 
 /** The real set of files `scripts/test.sh`'s default (no-args) invocation actually runs. */

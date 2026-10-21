@@ -2,19 +2,30 @@
 // task-parsing-parity.test.mjs — the drift guard for the three parsing primitives PROMOTED to the
 // product layer (gap-abi-promote-section-parsing-flip-store-reverse-import).
 //
-// The product layer (packages/quay/src/task-parsing.ts, next to abi.ts) is now the AUTHORITATIVE home
-// of extractSection / parseFrontmatterCompletely / countAcCheckboxes. The native store
-// (packages/quay-native/src/store.ts) consumes them from there — the ONE reverse import is gone.
+// The product layer (packages/quay/src/task-parsing.ts, next to abi.ts) is the AUTHORITATIVE home
+// of extractSection / parseFrontmatterCompletely. countAcCheckboxes is now a kernel leaf
+// (packages/quay/src/kernel/ac-checkbox-count.ts) re-exported from here and from the mechanism
+// layer. The native store (packages/quay-native/src/store.ts) consumes them from there — the ONE
+// reverse import is gone.
 //
 // WHY this test exists: the mechanism layer (plugin/scripts/task-schema.ts + task-status-drift-check.ts)
-// still needs these three functions for ITS OWN readers (parseTask / readDependsOn / the status-drift
-// detector). It CANNOT statically import packages/quay/src/task-parsing.ts — build-plugin-dist stages
-// plugin/ → packages/quay/plugin/ and bundles each entry WITHOUT the packages/ tree (the same reason
-// loop-complete-task.ts / config-wiring-check.ts use DYNAMIC pathToFileURL imports; a static
-// `../../packages/...` import fails esbuild's resolve). So the plugin keeps its own mechanism-layer
-// copies, and THIS test pins them BEHAVIORALLY identical to the product source — a divergence here is
-// the two frontmatter/section readers silently disagreeing (the exact drift class the promotion exists
-// to end). "No private implementation" is enforced here as "no behaviorally-divergent implementation".
+// still needs these functions for ITS OWN readers (parseTask / readDependsOn / the status-drift
+// detector). Reductions so far:
+//   · countAcCheckboxes — STRUCTURALLY single since task gap-three-pure-judges-kernel-single-def
+//     (AC-909): the one definition lives at packages/quay/src/kernel/ac-checkbox-count.ts and BOTH
+//     packages/quay/src/task-parsing.ts and plugin/scripts/task-schema.ts re-export it, so the
+//     identity assertion below is the convergence evidence.
+//   · extractSection / parseFrontmatterCompletely — still duplicated in the mechanism layer (out of
+//     that task's scope), so THIS test pins them BEHAVIORALLY identical to the product source. A
+//     divergence here is the two frontmatter/section readers silently disagreeing (the exact drift
+//     class the promotion exists to end).
+//
+// ⚠ The former premise of this file — that the mechanism layer cannot reach the Core source tree
+// through a static import (because build-plugin-dist's bundle step does not carry that tree) — is
+// STALE. build-plugin-dist's `coreSrcAliasPlugin` re-points every `packages/quay/src/**` specifier
+// onto the real Core source tree and INLINES it into `dist/*.js` (precedent:
+// plugin/scripts/ready-pool-check.ts statically imports kernel/task-shape-artifacts.ts and ships).
+// The kernel is reachable from BOTH layers; that is why the converged judges live there.
 //
 // Run: scripts/test.sh plugin/test/task-parsing-parity.test.mjs
 
