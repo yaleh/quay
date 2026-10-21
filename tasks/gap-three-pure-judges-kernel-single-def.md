@@ -2,7 +2,7 @@
 id: gap-three-pure-judges-kernel-single-def
 title: 3 个纯判定函数（countAcCheckboxes / stripTrailingFullWidthAnnotation /
   expandGlob）收敛到 kernel/ 各 1 处定义（6 份 → 3 份）
-status: ready
+status: done
 labels:
   - gap
 parent: null
