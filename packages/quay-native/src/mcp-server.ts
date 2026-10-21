@@ -23,13 +23,13 @@ import { createGoalStore, readGoalConfig } from "./goal-store.ts";
 import { createMetaStore } from "./meta-store.ts";
 // `goal_gate` runs a goal record's `criterion` through Core's acceptance runner —
 // the SAME single runner every Core gate uses (no duplicated timeout/kill logic).
-import { runAcceptance, verdictFromAcceptance } from "../../quay/src/gate/shared/acceptance-runner.ts";
+import { runAcceptance, verdictFromAcceptance } from "../../quay/src/core/acceptance-runner.ts";
 // The record-aware deadline resolver family lives in Core's kernel leaf (gap-ac353-goal-store-deadline-
 // resolver-not-kernel) — the single home of the whole "acceptance timeout resolution" family.
 import { resolveAcceptanceTimeout, timeoutKnobHint } from "../../quay/src/kernel/gate-run-options.ts";
 // …and records the verdict in the SAME ledger `quay goal gate` appends to, so the two entry points
 // for one criterion leave the same durable evidence (gap-goal-gate-verdict-single-mapping-not-evaluated).
-import { appendGateEvent } from "../../quay/src/gate/gate-event-store.ts";
+import { appendGateEvent } from "../../quay/src/core/gate-event-store.ts";
 // The "which tree was this evaluated on" payload fragment (SPEC-goal-branch-2026-10-03 §7 辛), shared
 // with the `goal gate` CLI / sweep writers so all three entry points record the same shape (硬规则 5b).
 import { evaluationContext } from "../../quay/src/core/goal-store.ts";

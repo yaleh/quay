@@ -252,6 +252,116 @@ test("the kernel boundary is checked when the directory EXISTS, and honestly rep
   });
 });
 
+// ── AC-913's provider → Core gate-layer ratchet — every direction ───────────────────────────────────
+
+const GATE_DIR = "packages/quay/src/gate";
+const PROVIDER_DIR = "packages/quay-native/src";
+
+test("AC-913 — a provider package importing Core's gate layer is a NAMED violation and a RED gate", () => {
+  withFixture(
+    {
+      [`${PROVIDER_DIR}/x.ts`]: `import { y } from "../../quay/src/gate/y.ts";\nexport const x = y;\n`,
+      [`${GATE_DIR}/y.ts`]: "export const y = 1;\n",
+    },
+    {},
+    (root) => {
+      const r = readImportGraph(root);
+      assert.equal(r.gateLayerChecked, true, "both ends exist — the axis must be evaluated, not skipped");
+      assert.deepEqual(
+        r.gateLayerViolations.map((v) => `${v.from}:${v.line}->${v.to}`),
+        [`${PROVIDER_DIR}/x.ts:1->${GATE_DIR}/y.ts`],
+      );
+      assert.equal(judge(r, ZERO, ZERO, null).ok, false, "a provider→gate import must redden the ratchet");
+    },
+  );
+});
+
+test("AC-913 — the negative control: the same provider file importing Core's shared core/ layer is clean", () => {
+  withFixture(
+    {
+      [`${PROVIDER_DIR}/x.ts`]: `import { y } from "../../quay/src/core/y.ts";\nexport const x = y;\n`,
+      "packages/quay/src/core/y.ts": "export const y = 1;\n",
+      [`${GATE_DIR}/untouched.ts`]: "export const z = 1;\n",
+    },
+    {},
+    (root) => {
+      const r = readImportGraph(root);
+      assert.equal(r.gateLayerChecked, true, "the gate dir exists and a provider file was scanned");
+      assert.deepEqual(r.gateLayerViolations, []);
+      assert.equal(judge(r, ZERO, ZERO, null).ok, true, "core/ is the shared layer — importing it is legitimate");
+    },
+  );
+});
+
+test("AC-913 — a COMMENT naming a gate path is not a violation (position judgment, hard rule 2)", () => {
+  withFixture(
+    {
+      [`${PROVIDER_DIR}/x.ts`]: `// import { y } from "../../quay/src/gate/y.ts";\nexport const x = 1;\n`,
+      [`${GATE_DIR}/y.ts`]: "export const y = 1;\n",
+    },
+    {},
+    (root) => {
+      const r = readImportGraph(root);
+      assert.equal(r.gateLayerChecked, true);
+      assert.deepEqual(r.gateLayerViolations, [], "a commented-out import is not a dependency");
+      assert.equal(judge(r, ZERO, ZERO, null).ok, true);
+    },
+  );
+});
+
+test("AC-913 — the BARE package form counts too: literal package path and package `exports` both bite", () => {
+  // (a) `quay/src/gate/…` written as a bare specifier — what a "cleaned up" relative import becomes.
+  withFixture(
+    {
+      [`${PROVIDER_DIR}/x.ts`]: `import { y } from "quay/src/gate/y.ts";\nexport const x = y;\n`,
+      [`${GATE_DIR}/y.ts`]: "export const y = 1;\n",
+    },
+    {},
+    (root) => {
+      const r = readImportGraph(root);
+      assert.equal(r.gateLayerChecked, true);
+      assert.equal(r.gateLayerViolations.length, 1, JSON.stringify(r.gateLayerViolations));
+      assert.equal(r.gateLayerViolations[0].to, `${GATE_DIR}/y.ts`);
+    },
+  );
+  // (b) an `exports` subpath that maps INTO the gate dir — a wildcard or a new export cannot become a
+  // silent bypass just because the specifier no longer spells the path.
+  withFixture(
+    {
+      [`${PROVIDER_DIR}/x.ts`]: `import { y } from "quay/gate-thing";\nexport const x = y;\n`,
+      [`${GATE_DIR}/thing.ts`]: "export const y = 1;\n",
+      "packages/quay/package.json": JSON.stringify({ name: "quay", exports: { "./gate-thing": "./src/gate/thing.ts" } }),
+    },
+    {},
+    (root) => {
+      const r = readImportGraph(root);
+      assert.equal(r.gateLayerViolations.length, 1, JSON.stringify(r.gateLayerViolations));
+      assert.equal(r.gateLayerViolations[0].to, `${GATE_DIR}/thing.ts`);
+    },
+  );
+});
+
+test("AC-913 — gateLayerChecked distinguishes 'nothing to judge' from 'judged and clean' (hard rule 3b)", () => {
+  // No provider file ⇒ the axis has no input; it must NOT report the same value as a clean read.
+  withFixture({ [`${GATE_DIR}/y.ts`]: "export const y = 1;\n" }, {}, (root) => {
+    const r = readImportGraph(root);
+    assert.equal(r.gateLayerChecked, false);
+    assert.match(r.gateLayerReason, /no provider/);
+    assert.deepEqual(r.gateLayerViolations, []);
+  });
+  // A provider file but no gate directory ⇒ likewise not evaluated, and the reason names the missing end.
+  withFixture({ [`${PROVIDER_DIR}/x.ts`]: "export const x = 1;\n" }, {}, (root) => {
+    const r = readImportGraph(root);
+    assert.equal(r.gateLayerChecked, false);
+    assert.match(r.gateLayerReason, /gate.*absent/);
+  });
+});
+
+test("AC-913 — the real tree reads the provider→gate axis EVALUATED with zero violations", () => {
+  assert.equal(REAL.gateLayerChecked, true, `the axis was not evaluated: ${REAL.gateLayerReason}`);
+  assert.deepEqual(REAL.gateLayerViolations, [], `provider→gate imports present: ${JSON.stringify(REAL.gateLayerViolations)}`);
+});
+
 test("a symlink is deduplicated to its realpath (one node, no phantom)", () => {
   const root = fixture({
     "plugin/scripts/real.ts": "export const v = 1;\n",

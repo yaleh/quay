@@ -25,6 +25,15 @@
 //   或任一【真实】import/export 语句指向该路径都算。列表是静态字面量 ⇒ `retiredShimsChecked:true` 恒成立
 //   （唯一例外是枚举本身失败，此时随 `evaluated:false` 一起上报，⛔ 不伪装成「零命中」）。
 //
+// SIXTH RULE（AC-913，2026-10-21）: provider 包（`packages/quay-*`，Core `packages/quay` 本体除外）不得
+//   import Core 的 gate 层（`packages/quay/src/gate/**`）。provider 只依赖 ABI 表面 + 合法共享叶
+//   （`kernel/*`、`core/*`）；gate/ 是 Core 的内部实现层，经它 import 等于把 provider 钉在 Core 的私有
+//   结构上（AC-913 的实测缺陷：native `mcp-server.ts` 两条 gate/ 转发 shim import）。**relative 与 bare
+//   都算**：相对说明符按 importer 归一，裸说明符经 Core `package.json` 的 `exports` 映射（外加
+//   `quay/src/gate/…` 字面形态）——否则「改写成裸包名」就成了绕过口。
+//   硬零（照 kernel 第四规则）：不进 baseline 计数键；`gateLayerChecked` 与「零违规」不共用输出值
+//   （硬规则 3b：没有 provider 文件可查 / gate 目录不存在 ⇒ checked:false，⛔ 不得读作「查过且干净」）。
+//
 // 设计约束（每条都对应一次已发生的错误）:
 //   · 按位置判定（硬规则 2）: 只认真实的 import/export 语句，注释/字符串里出现 `from "…plugin/…"` 不算。
 //     复用仓库已有的 `buildNonCodeMask`（plugin/scripts 中 13 处依赖它），不新造掩码。
@@ -99,6 +108,17 @@ export interface RetiredShimHit {
   line?: number;
 }
 
+/** A provider-package file importing Core's gate layer (the SIXTH rule's hit). */
+export interface GateLayerViolation {
+  /** the importing provider file (repo-relative, canonicalised). */
+  from: string;
+  /** the gate module it names (repo-relative), whether or not the file still exists. */
+  to: string;
+  /** the raw module specifier as written — the form both relative and bare hits share. */
+  spec: string;
+  line: number;
+}
+
 export interface GraphReading {
   /** false ⇒ the graph could not be read (NOT-EVALUATED — never conflated with "0 cycles"). */
   evaluated: boolean;
@@ -120,6 +140,13 @@ export interface GraphReading {
   /** true unconditionally: the retired-path list is a static literal, so there is no "could not look"
    *  state for this check (硬规则 3b — the value is always evaluable, never silently conflated). */
   retiredShimsChecked: boolean;
+  /** SIXTH QUANTITY — AC-913's provider→Core-gate ratchet. Empty is the healthy reading. */
+  gateLayerViolations: GateLayerViolation[];
+  /** true only when BOTH ends were present (at least one provider file AND Core's gate directory).
+   *  ⛔ false means "nothing was judged", which is NOT the same value as "judged and clean" (硬规则 3b). */
+  gateLayerChecked: boolean;
+  /** why `gateLayerChecked` is false — an absent reason (null) exactly when the axis was evaluated. */
+  gateLayerReason: string | null;
 }
 
 /** The committed baseline shape — exactly the three ratchet counters. */
@@ -138,6 +165,13 @@ const REVERSE_TARGET_PREFIXES = ["plugin/", "experiments/"];
 /** The conditional kernel boundary (SPEC §2 P1: 共享原语落点 `packages/quay/src/kernel/`). */
 export const KERNEL_DIR_REL = "packages/quay/src/kernel";
 const KERNEL_PREFIX = `${KERNEL_DIR_REL}/`;
+
+/** SIXTH RULE (AC-913): Core's implementation-side gate layer, which providers must not reach into. */
+export const CORE_GATE_DIR_REL = "packages/quay/src/gate";
+const CORE_GATE_PREFIX = `${CORE_GATE_DIR_REL}/`;
+/** A provider-package file — `packages/quay-<name>/…`. Core itself (`packages/quay/…`) never matches:
+ *  the character after `quay` must be `-`, and a module inside Core's own directory has `/`. */
+const PROVIDER_FILE_RE = /^packages\/quay-[^/]+\//;
 
 /**
  * FIFTH QUANTITY — the retired src-root forwarding shims (AC-911, 2026-10-21).
@@ -178,6 +212,96 @@ const RETIRED_SHIM_KEYS = new Map(RETIRED_SRC_ROOT_SHIMS.map((p) => [shimKey(p),
 export function normalizeRelativeSpecifier(fromRel: string, spec: string): string | null {
   if (!spec.startsWith(".")) return null;
   return path.posix.normalize(path.posix.join(path.posix.dirname(fromRel), spec));
+}
+
+// ── the SIXTH rule: provider packages → Core's gate layer (AC-913) ─────────────────────────────────
+
+/** Is `rel` a module inside Core's gate layer? Extension-insensitive, so `./gate/x`,
+ *  `./gate/x.js` and `./gate/x.ts` are the same module; the bare directory name counts too. */
+function isGateModule(rel: string): boolean {
+  const base = shimKey(rel);
+  return base === CORE_GATE_DIR_REL || base.startsWith(CORE_GATE_PREFIX);
+}
+
+/** Flatten a `package.json` `exports` value (string / array / condition object) to its target list. */
+function collectExportTargets(value: unknown, out: string[]): void {
+  if (typeof value === "string") {
+    out.push(value);
+    return;
+  }
+  if (Array.isArray(value)) {
+    for (const v of value) collectExportTargets(v, out);
+    return;
+  }
+  if (value !== null && typeof value === "object") {
+    for (const v of Object.values(value as Record<string, unknown>)) collectExportTargets(v, out);
+  }
+}
+
+/** Resolve a bare subpath (`./adr-store`, `./gate/*`) against Core's exports map. Exact keys win;
+ *  a `*` pattern is expanded so a future wildcard export cannot become a silent bypass. */
+function exportTargetsFor(map: ReadonlyMap<string, string[]>, subpath: string): string[] {
+  const exact = map.get(subpath);
+  if (exact !== undefined) return exact;
+  for (const [key, targets] of map) {
+    const star = key.indexOf("*");
+    if (star < 0) continue;
+    const pre = key.slice(0, star);
+    const post = key.slice(star + 1);
+    if (!subpath.startsWith(pre) || !subpath.endsWith(post)) continue;
+    const middle = subpath.slice(pre.length, subpath.length - post.length);
+    return targets.map((t) => t.replace("*", middle));
+  }
+  return [];
+}
+
+/** Read Core's `package.json` `exports` map as repo-relative POSIX targets.
+ *  A fixture tree without Core has no bare-specifier surface — an honest empty map, never a thrown
+ *  read: the RELATIVE form is still judged, so the rule degrades to its narrower form in fixtures. */
+export function readCoreExports(root: string): Map<string, string[]> {
+  const out = new Map<string, string[]>();
+  let raw: { exports?: Record<string, unknown> };
+  try {
+    raw = JSON.parse(fs.readFileSync(path.join(root, "packages/quay/package.json"), "utf8")) as {
+      exports?: Record<string, unknown>;
+    };
+  } catch {
+    return out;
+  }
+  for (const [subpath, value] of Object.entries(raw.exports ?? {})) {
+    const targets: string[] = [];
+    collectExportTargets(value, targets);
+    out.set(
+      subpath,
+      targets.map((t) => path.posix.normalize(path.posix.join("packages/quay", t))),
+    );
+  }
+  return out;
+}
+
+/**
+ * The Core gate module a specifier names, or null. BOTH specifier forms count (AC-913):
+ *   · RELATIVE — normalised from the importer (`../../quay/src/gate/x.ts`), whether or not the target
+ *     file still exists: naming the path is the dependency, and a dangling one is worse, not cleaner;
+ *   · BARE — Core's `exports` map (`quay/<subpath>`, wildcards included) plus the literal
+ *     `quay/src/gate/…` path, so renaming a relative import to the package form is not a bypass.
+ */
+export function gateLayerTargetOf(fromRel: string, spec: string, coreExports: ReadonlyMap<string, string[]>): string | null {
+  if (spec.startsWith(".")) {
+    const norm = normalizeRelativeSpecifier(fromRel, spec);
+    return norm !== null && isGateModule(norm) ? norm : null;
+  }
+  if (spec === "quay" || spec.startsWith("quay/")) {
+    // The literal package-path form: `quay/src/gate/x.ts` (any extension variant), which is what a
+    // relative import looks like after someone "cleans it up" to the package name.
+    const literal = spec === "quay" ? "packages/quay" : `packages/quay/${spec.slice("quay/".length)}`;
+    if (isGateModule(literal)) return literal;
+    const subpath = spec === "quay" ? "." : `./${spec.slice("quay/".length)}`;
+    for (const target of exportTargetsFor(coreExports, subpath)) {
+      if (isGateModule(target)) return target;
+    }
+  }
+  return null;
 }
 
 // ── file selection (git ls-files, never find) ───────────────────────────────────────────────────────
@@ -397,6 +521,9 @@ export function readImportGraph(root: string): GraphReading {
     dangling: [],
     retiredShimHits: [],
     retiredShimsChecked: false,
+    gateLayerViolations: [],
+    gateLayerChecked: false,
+    gateLayerReason: "the import graph could not be read",
   };
 
   let tracked: string[];
@@ -459,6 +586,10 @@ export function readImportGraph(root: string): GraphReading {
   // ── edges ── (iterated over the CANONICAL node set, so a symlink's file is read once, as its target)
   const allEdges: ImportEdge[] = [];
   const parseFailures: string[] = [];
+  // SIXTH QUANTITY: collect provider→Core-gate hits from the RAW import statements (not from
+  // `allEdges`), because a bare package specifier resolves to no node and would otherwise vanish.
+  const coreExports = readCoreExports(root);
+  const gateLayerViolations: GateLayerViolation[] = [];
   for (const [canon, rel] of repOf) {
     let src: string;
     try {
@@ -468,6 +599,12 @@ export function readImportGraph(root: string): GraphReading {
       continue;
     }
     for (const imp of extractImports(src)) {
+      // SIXTH QUANTITY: a provider-package file naming Core's gate layer. Position judgment already
+      // applied by `extractImports`; both relative and bare specifier forms are covered.
+      if (PROVIDER_FILE_RE.test(canon)) {
+        const target = gateLayerTargetOf(canon, imp.spec, coreExports);
+        if (target !== null) gateLayerViolations.push({ from: canon, to: target, spec: imp.spec, line: imp.line });
+      }
       // FIFTH QUANTITY: a real import/export statement pointing at a retired src-root shim. Position
       // judgment — `extractImports` already excludes comments/strings, and an unresolvable path (the
       // shim is gone) is exactly the reading this catches.
@@ -527,6 +664,18 @@ export function readImportGraph(root: string): GraphReading {
     kernelViolations.sort((a, b) => a.from.localeCompare(b.from) || a.to.localeCompare(b.to) || a.line - b.line);
   }
 
+  // SIXTH RULE coverage: the axis is EVALUATED only when both ends exist. A missing gate directory or
+  // a tree with no provider package is "nothing judged" (checked:false), never "judged and clean".
+  gateLayerViolations.sort((a, b) => a.from.localeCompare(b.from) || a.line - b.line || a.to.localeCompare(b.to));
+  const providerFileCount = nodeList.filter((p) => PROVIDER_FILE_RE.test(p)).length;
+  const coreGateExists =
+    fs.existsSync(path.join(root, CORE_GATE_DIR_REL)) && fs.statSync(path.join(root, CORE_GATE_DIR_REL)).isDirectory();
+  const gateLayerReason = !coreGateExists
+    ? `${CORE_GATE_DIR_REL}/ absent`
+    : providerFileCount === 0
+      ? "no provider-package (packages/quay-*/) source files to judge"
+      : null;
+
   return {
     evaluated: true,
     files: nodeList.length,
@@ -542,6 +691,9 @@ export function readImportGraph(root: string): GraphReading {
     dangling,
     retiredShimHits,
     retiredShimsChecked: true,
+    gateLayerViolations,
+    gateLayerChecked: gateLayerReason === null,
+    gateLayerReason,
   };
 }
 
@@ -563,6 +715,8 @@ export interface RatchetVerdict {
   kernelBlocked: boolean;
   /** AC-911's resurrection ratchet: true ⇒ a retired src-root shim is back (file or live import). */
   retiredShimsBlocked: boolean;
+  /** AC-913's layer ratchet: true ⇒ a provider package imports Core's gate layer. */
+  gateLayerBlocked: boolean;
 }
 
 /** This ratchet's axes — the part of the shared shrink-only judgment each consumer OWNS. Named
@@ -596,14 +750,18 @@ export function judge(
   const shrink = checkBaselineShrinkOnly(worktreeBaseline, headBaseline);
   const kernelBlocked = reading.kernelChecked && reading.kernelViolations.length > 0;
   const retiredShimsBlocked = reading.retiredShimHits.length > 0;
+  // A collected hit is RED regardless of coverage: the provider file that produced it is itself
+  // evidence the axis has an input.
+  const gateLayerBlocked = reading.gateLayerViolations.length > 0;
   return {
-    ok: over.length === 0 && shrink.raised.length === 0 && !kernelBlocked && !retiredShimsBlocked,
+    ok: over.length === 0 && shrink.raised.length === 0 && !kernelBlocked && !retiredShimsBlocked && !gateLayerBlocked,
     over,
     baselineRaised: shrink.raised,
     headBaseline,
     bootstrap: shrink.bootstrap,
     kernelBlocked,
     retiredShimsBlocked,
+    gateLayerBlocked,
   };
 }
 
@@ -657,6 +815,10 @@ export interface SelftestCase {
     kernelViolations?: number;
     /** AC-911 ratchet: the expected number of retired-shim hits (file + live import). */
     retiredShimHits?: number;
+    /** AC-913 ratchet: whether the provider→Core-gate axis had both ends present. */
+    gateLayerChecked?: boolean;
+    /** AC-913 ratchet: the expected number of provider→Core-gate edges. */
+    gateLayerViolations?: number;
     /** the gate exit code this case must produce. */
     exit: number;
   };
@@ -843,6 +1005,47 @@ export const SELFTEST_CASES: SelftestCase[] = [
     expect: { evaluated: true, valueSccs: 0, typeSccs: 0, reverseEdges: 0, retiredShimHits: 0, exit: 0 },
   },
   {
+    // AC-913 (a): a provider package reaching into Core's gate layer. The axis must be EVALUATED (both
+    // ends present) and the hit must redden the gate — a ratchet that only ever reads 0 is not a check.
+    name: "provider-imports-core-gate (packages/quay-native/src/x.ts → packages/quay/src/gate/y.ts ⇒ FAIL)",
+    git: true,
+    files: {
+      "packages/quay-native/src/x.ts": F(`import { y } from "../../quay/src/gate/y.ts";\nexport const x = y;`),
+      "packages/quay/src/gate/y.ts": F(`export const y = 1;`),
+    },
+    baseline: { valueSccs: 0, typeSccs: 0, reverseEdges: 0 },
+    expect: {
+      evaluated: true,
+      valueSccs: 0,
+      typeSccs: 0,
+      reverseEdges: 0,
+      gateLayerChecked: true,
+      gateLayerViolations: 1,
+      exit: 1,
+    },
+  },
+  {
+    // AC-913 (b) — the negative control: the SAME provider file importing Core's non-gate layer is
+    // legitimate (core/ is the shared layer). The axis is still evaluated, with zero violations.
+    name: "provider-imports-core-outside-gate (…/core/y.ts ⇒ gateLayerChecked true, 0 violations, PASS)",
+    git: true,
+    files: {
+      "packages/quay-native/src/x.ts": F(`import { y } from "../../quay/src/core/y.ts";\nexport const x = y;`),
+      "packages/quay/src/core/y.ts": F(`export const y = 1;`),
+      "packages/quay/src/gate/z.ts": F(`export const z = 1;`),
+    },
+    baseline: { valueSccs: 0, typeSccs: 0, reverseEdges: 0 },
+    expect: {
+      evaluated: true,
+      valueSccs: 0,
+      typeSccs: 0,
+      reverseEdges: 0,
+      gateLayerChecked: true,
+      gateLayerViolations: 0,
+      exit: 0,
+    },
+  },
+  {
     name: "non-git-directory (cannot enumerate ⇒ evaluated false + exit 2, NEVER exit 0)",
     git: false,
     files: { "src/a.ts": F(`import { b } from "./b.ts";`) },
@@ -884,6 +1087,8 @@ export function runSelftestCase(c: SelftestCase): { name: string; ok: boolean; d
     (c.expect.kernelChecked === undefined ? "" : ` kernelChecked=${c.expect.kernelChecked}`) +
     (c.expect.kernelViolations === undefined ? "" : ` kernelViolations=${c.expect.kernelViolations}`) +
     (c.expect.retiredShimHits === undefined ? "" : ` retiredShimHits=${c.expect.retiredShimHits}`) +
+    (c.expect.gateLayerChecked === undefined ? "" : ` gateLayerChecked=${c.expect.gateLayerChecked}`) +
+    (c.expect.gateLayerViolations === undefined ? "" : ` gateLayerViolations=${c.expect.gateLayerViolations}`) +
     ` exit=${c.expect.exit}`;
   const dir = fs.mkdtempSync(path.join(process.env.TMPDIR ?? "/tmp", "import-graph-selftest-"));
   try {
@@ -904,6 +1109,12 @@ export function runSelftestCase(c: SelftestCase): { name: string; ok: boolean; d
     }
     if (c.expect.retiredShimHits !== undefined && reading.retiredShimHits.length !== c.expect.retiredShimHits) {
       problems.push(`retiredShimHits=${reading.retiredShimHits.length} want ${c.expect.retiredShimHits}`);
+    }
+    if (c.expect.gateLayerChecked !== undefined && reading.gateLayerChecked !== c.expect.gateLayerChecked) {
+      problems.push(`gateLayerChecked=${reading.gateLayerChecked} want ${c.expect.gateLayerChecked}`);
+    }
+    if (c.expect.gateLayerViolations !== undefined && reading.gateLayerViolations.length !== c.expect.gateLayerViolations) {
+      problems.push(`gateLayerViolations=${reading.gateLayerViolations.length} want ${c.expect.gateLayerViolations}`);
     }
     // Every EVALUATED reading must have run the ratchet; an unevaluated one may honestly report
     // `false` (it could not enumerate) — the caller maps that to exit 2, never to "clean".
@@ -927,7 +1138,7 @@ export function runSelftestCase(c: SelftestCase): { name: string; ok: boolean; d
       expected,
       detail:
         problems.length === 0
-          ? `got evaluated=${reading.evaluated} valueSccs=${counts.valueSccs} typeSccs=${counts.typeSccs} reverseEdges=${counts.reverseEdges} kernelChecked=${reading.kernelChecked} kernelViolations=${reading.kernelViolations.length} exit=${exit}`
+          ? `got evaluated=${reading.evaluated} valueSccs=${counts.valueSccs} typeSccs=${counts.typeSccs} reverseEdges=${counts.reverseEdges} kernelChecked=${reading.kernelChecked} kernelViolations=${reading.kernelViolations.length} gateLayerChecked=${reading.gateLayerChecked} gateLayerViolations=${reading.gateLayerViolations.length} exit=${exit}`
           : problems.join("; "),
     };
   } catch (err) {
@@ -978,9 +1189,10 @@ Usage:
   --baseline <f>    baseline file (default plugin/import-graph-baseline.json under <root>).
 
 Exit: 0 = every quantity ≤ baseline, baseline not raised past HEAD, kernel boundary holds,
-          no retired src-root shim resurrected
+          no retired src-root shim resurrected, no provider → Core gate/ import
       1 = a quantity exceeded the baseline / the baseline was raised / a kernel violation /
-          a retired src-root shim reappeared (as a file or as a live import)
+          a retired src-root shim reappeared (as a file or as a live import) /
+          a provider package imported Core's gate layer
       2 = usage or environment error, INCLUDING "the graph could not be read" (evaluated:false)`;
 
 function reportReading(reading: GraphReading, v: RatchetVerdict | null, baseline: Baseline | null, asJson: boolean): void {
@@ -1003,6 +1215,9 @@ function reportReading(reading: GraphReading, v: RatchetVerdict | null, baseline
           dangling: reading.dangling,
           retiredShimHits: reading.retiredShimHits,
           retiredShimsChecked: reading.retiredShimsChecked,
+          gateLayerViolations: reading.gateLayerViolations,
+          gateLayerChecked: reading.gateLayerChecked,
+          gateLayerReason: reading.gateLayerReason,
           baseline,
           verdict: v,
         },
@@ -1031,6 +1246,14 @@ function reportReading(reading: GraphReading, v: RatchetVerdict | null, baseline
         ? `: ${reading.retiredShimHits.map((h) => (h.kind === "file" ? `${h.path} (file)` : `${h.path} (import ${h.from}:${h.line})`)).join(", ")}`
         : ""),
   );
+  console.log(
+    `  gateLayerChecked=${reading.gateLayerChecked} gateLayerViolations=${reading.gateLayerViolations.length}` +
+      (reading.gateLayerViolations.length > 0
+        ? `: ${reading.gateLayerViolations.map((v) => `${v.from}:${v.line} → ${v.to} (via "${v.spec}")`).join(", ")}`
+        : reading.gateLayerReason !== null
+          ? ` (${reading.gateLayerReason} — not conflated with 'checked and clean')`
+          : ""),
+  );
   if (reading.dangling.length > 0) console.log(`  dangling (tracked, no readable target — not a node): ${reading.dangling.join(", ")}`);
   if (baseline) console.log(`  baseline: ${JSON.stringify(baseline)}`);
   if (v) {
@@ -1039,6 +1262,7 @@ function reportReading(reading: GraphReading, v: RatchetVerdict | null, baseline
     if (v.baselineRaised.length > 0) console.log(`  BASELINE RAISED past HEAD on: ${v.baselineRaised.join(", ")}`);
     if (v.kernelBlocked) console.log(`  KERNEL BOUNDARY VIOLATED by ${reading.kernelViolations.length} edge(s)`);
     if (v.retiredShimsBlocked) console.log(`  RETIRED SRC-ROOT SHIM RESURRECTED (${reading.retiredShimHits.length} hit(s))`);
+    if (v.gateLayerBlocked) console.log(`  PROVIDER → CORE gate/ VIOLATED by ${reading.gateLayerViolations.length} edge(s)`);
   }
 }
 
@@ -1147,6 +1371,15 @@ export function main(argv: string[]): number {
       .map((h) => (h.kind === "file" ? `${h.path} (file reappeared)` : `${h.path} (imported by ${h.from}:${h.line})`))
       .join("; ");
     process.stderr.write(`import-graph-check: FAIL — retired src-root shim resurrected: ${named}\n`);
+    return 1;
+  }
+  if (verdict.gateLayerBlocked) {
+    const named = reading.gateLayerViolations
+      .map((v) => `${v.from}:${v.line} → ${v.to} ("${v.spec}")`)
+      .join("; ");
+    process.stderr.write(
+      `import-graph-check: FAIL — provider package imports Core's gate layer (${reading.gateLayerViolations.length} edge(s)): ${named}\n`,
+    );
     return 1;
   }
   // ⛔ In --json mode stdout carries the JSON OBJECT and nothing else: an appended human line makes the
