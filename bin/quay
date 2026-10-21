@@ -1,0 +1,138 @@
+#!/usr/bin/env bash
+# plugin/bin/quay — the plugin form's CLI entry point, so `quay` works WITHOUT
+# `npm install -g quay`.
+#
+# WHY THIS FILE EXISTS (gap-ac261-plugin-bin-shim-missing-so-cli-needs-npm-global):
+# Claude Code unconditionally prepends `<plugin-root>/bin` to the Bash tool's PATH
+# for every enabled plugin — measured 2026-09-02 and recorded as T4 in
+# orchestration/SPEC-plugin-lifecycle-single-bundle-2026-09-02.md §3a/§9 ("PATH 中已
+# 存在 <plugin-root>/bin，该目录尚不存在也照样在"). The directory did not exist, so
+# a plugin-form install had NO `quay` on PATH and users were pushed to
+# `npm install -g` for the CLI alone — even though the plugin already ships a
+# self-contained, Node-≥20-runnable bundle at <plugin-root>/vendor/quay/dist/quay.js.
+#
+# The capability was there; the entry point was missing. This shim is that entry
+# point and nothing else: it resolves its OWN location (so PATH lookup, a symlink
+# from ~/.local/bin, and Claude Code's plugin-cache copy all work) and execs the
+# vendored bundle with the caller's argv. No npm, no global install, no
+# node_modules of its own — the bundle inlines its dependencies.
+#
+# It also resolves the INTERPRETER, and that half was missing too: a machine where
+# Node comes from nvm has no `node` on a minimal PATH, so the shim exited 127 with
+# the bundle sitting right there. See "Interpreter resolution" below
+# (gap-ac261-shim-node-autodetect-nvm-fallback).
+#
+# The bundle is generated (gitignored) and built by plugin/scripts/sync-vendor.sh;
+# the root `npm install` postinstall, scripts/test.sh, publish-dist-branch.sh and
+# packages/quay/scripts/package.sh all run that build, so both delivery channels
+# (the dist-plugin orphan branch and the npm tarball) carry it.
+set -euo pipefail
+
+# Resolve this script's real path, following symlinks, so <plugin-root> is correct
+# however the shim was reached. POSIX readlink only (no `readlink -f`, which is a
+# GNU/BSD extension) — the loop below is the portable equivalent.
+self="${BASH_SOURCE[0]}"
+while [ -L "$self" ]; do
+  dir="$(cd -P "$(dirname "$self")" && pwd)"
+  link="$(readlink "$self")"
+  case "$link" in
+    /*) self="$link" ;;
+    *) self="${dir}/${link}" ;;
+  esac
+done
+plugin_root="$(cd -P "$(dirname "$self")/.." && pwd)"
+
+entry="${plugin_root}/vendor/quay/dist/quay.js"
+if [ ! -f "$entry" ]; then
+  printf 'quay: the plugin'"'"'s bundled CLI is missing: %s\n' "$entry" >&2
+  printf 'quay: build it with `bash %s/scripts/sync-vendor.sh`, or install the npm package (`npm install -g quay`).\n' "$plugin_root" >&2
+  exit 127
+fi
+
+# ---------------------------------------------------------------------------
+# Interpreter resolution.
+#
+# THE BUG THIS FIXES (gap-ac261-shim-node-autodetect-nvm-fallback): `command -v node`
+# used to be the WHOLE check, so on a machine where Node comes from nvm — the normal
+# developer machine, and the one AC-261 measures — there is no /usr/bin/node at all
+# and the shim exited 127 even though a perfectly good Node >= 20 was installed. The
+# npm-free route failed hardest exactly where npm-free matters most.
+#
+# "Not on PATH" is not "not installed". After PATH, probe where a version manager
+# keeps its interpreters and exec the newest one that clears the floor.
+#
+# ⛔ The floor is load-bearing, not cosmetic: exec'ing an older Node would trade a
+# clear "needs >= 20" for a confusing crash inside the bundle, which targets >= 20.
+# And finding an older Node is NOT the same outcome as finding none — the probe
+# reports what it found rather than falling through to the generic "not found",
+# so the message never claims a node-less machine that is not node-less.
+MIN_NODE_MAJOR=20
+
+# rc 0 iff dotted-decimal version $1 is >= $2. Compared FIELD BY FIELD because a
+# plain string compare orders v9 above v24, and `sort -V` is a GNU/BSD extension
+# this file avoids (the readlink loop above skips `readlink -f` for the same
+# reason). Missing trailing fields count as 0, so "24.19" >= "24.19.0".
+version_ge() {
+  local rest_a="$1" rest_b="$2" head_a head_b i=0
+  while [ "$i" -lt 4 ]; do
+    i=$((i + 1))
+    head_a="${rest_a%%.*}"
+    head_b="${rest_b%%.*}"
+    if [ "$head_a" -gt "$head_b" ]; then return 0; fi
+    if [ "$head_a" -lt "$head_b" ]; then return 1; fi
+    case "$rest_a" in *.*) rest_a="${rest_a#*.}" ;; *) rest_a=0 ;; esac
+    case "$rest_b" in *.*) rest_b="${rest_b#*.}" ;; *) rest_b=0 ;; esac
+  done
+  return 0
+}
+
+# Sets NVM_NODE_VER and NVM_NODE_BIN (that version's `bin` dir) to the NEWEST Node
+# under <nvm>/versions/node, and returns 0; returns 1 when nvm holds no Node at all.
+#
+# The ordering is done here rather than by `ls`: directory order is arbitrary and a
+# lexicographic sort is outright wrong (v9 sorts above v24) — either would silently
+# run an older interpreter than the one the machine actually has.
+#
+# ⛔ The directory is derived from $HOME, deliberately NOT from $NVM_DIR: this lookup
+# answers for the user running quay, whereas NVM_DIR is inherited from whichever
+# shell happened to spawn us (a consumer project's CI can carry an NVM_DIR pointing
+# at an unrelated tree). $HOME is also what the diagnosis below names, so it is what
+# the probe reads.
+nvm_best_node() {
+  NVM_NODE_VER=""
+  NVM_NODE_BIN=""
+  local root="${HOME:-}/.nvm/versions/node"
+  [ -d "$root" ] || return 1
+  # "$root"/v* keeps the literal glob when nothing matches; the -d test drops it.
+  local dir name ver
+  for dir in "$root"/v*; do
+    [ -d "$dir" ] || continue
+    [ -x "$dir/bin/node" ] || continue
+    name="${dir##*/}"
+    ver="${name#v}"
+    case "$ver" in '' | *[!0-9.]*) continue ;; esac
+    if [ -n "$NVM_NODE_VER" ] && ! version_ge "$ver" "$NVM_NODE_VER"; then
+      continue
+    fi
+    NVM_NODE_VER="$ver"
+    NVM_NODE_BIN="$dir/bin"
+  done
+  [ -n "$NVM_NODE_BIN" ] || return 1
+}
+
+# A node already on PATH is the caller's own choice — use it and say nothing.
+if command -v node >/dev/null 2>&1; then
+  exec node "$entry" "$@"
+fi
+
+if nvm_best_node; then
+  if version_ge "$NVM_NODE_VER" "$MIN_NODE_MAJOR"; then
+    exec "$NVM_NODE_BIN/node" "$entry" "$@"
+  fi
+  printf 'quay: found Node.js v%s at %s/node, but the plugin CLI needs Node.js >= %s.\n' \
+    "$NVM_NODE_VER" "$NVM_NODE_BIN" "$MIN_NODE_MAJOR" >&2
+  exit 127
+fi
+
+printf 'quay: node not found on PATH — the plugin CLI needs Node.js >= %s.\n' "$MIN_NODE_MAJOR" >&2
+exit 127

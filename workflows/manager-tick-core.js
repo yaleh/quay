@@ -1,0 +1,453 @@
+export const meta = {
+  name: 'manager-tick-core',
+  description: '管理者 tick 的持久化核：独立自我审计 + 把"该跑什么/该判什么"作为指令交还主循环（quay-dev-only：须经 args.workspaceRoot 传入工作区绝对路径，缺失即拒绝）',
+  whenToUse: '每次 manager tick 的第一步，也是主循环唯一需要记住的一条：调它，然后照它返回的指令做。【⚠️ 仅限 quay 开发工作区】——本 workflow 是 quay-dev-only（依赖交付面未 ship 的 orchestration/ 正本）；调用方必须传 args.workspaceRoot=<目标工作区绝对路径>，缺失即返回 {evaluated:false} 拒绝，⛔ 绝不落回硬编码宿主路径',
+  phases: [
+    { title: 'Readings', detail: '在新鲜上下文里跑固定读数命令集，只回结构化 facts（SPEC-tick-mechanical-checks-mcp §8.3 阶段1）' },
+    { title: 'Audit', detail: '用 meta-cc 独立审计管理者本轮行为（含"判准有没有真被应用"）' },
+  ],
+}
+
+// ══ 本文件的设计（人 2026-08-07 提出，逐条都是对我前一个错误前提的纠正）══════════════
+//
+//  ① workflow 结晶的是【重复的 agent 行为序列】——"哪一步不许跳"，不是多智能体扇出。
+//  ② subagent 不缺上下文：meta-cc 索引着管理者会话历史，它可以自己查。
+//  ③ **tick workflow 本身就是快路径，职责是发现问题；深路径在 tick 里、workflow 外。**
+//  ④ args 分工：高频/结构化/我已有的 ⇒ args 传；低频/需探查/我不一定记得的 ⇒ 让它自己查。
+//  ⑤ **【本版核心】把"调用工具的要求"和"judge 的判准"放进本文件，但【不】发给 subagent，
+//     而是在 subagent 跑完后【贴在返回结果后面交还主循环】。**
+//     ⇒ 主循环的 tick 只需记住一条：**调这个 workflow，然后照它返回的指令做**。
+//     ⇒ 判准不再是"我记得应用"的散文，而是每轮作为数据出现在眼前的东西；
+//        且它活在磁盘上，**不依赖本会话上下文存活**（跨 clear/compact 稳定）。
+//
+//  这直接修掉一个实证缺陷：judge 从 workflow 移到主循环后，判准执行退化为"记得应用"，
+//  自审 agent 于 2026-08-07 12:2x 当场抓到——上一轮 tick-log 通篇没应用过任何一条判准。
+//
+// ── 成本实测（四轮，每轮把瓶颈往下推一层）─────────────────────────────────────
+//   轮1 探索式（agent 自己读文档找命令）  121 次工具调用 / 677s
+//   轮2 固定命令块下发给 agent             12 次 / 334s
+//   轮3 读数+judge 移出 workflow            1 agent 6 次 / 137s
+//   轮4（本版）指令回传，主循环只记一条    同上 + 主循环侧读数 ~1.2s
+//
+//   两个真瓶颈（都不是"调用次数"）：
+//   (a) 固定命令包进 agent 要 46s，主循环直接跑只要 102ms～1.3s——
+//       命令本身 1.7s 就返回，多出的 44s 全是"读 prompt→决定→读结果→生成结构化输出"。
+//   (b) 自审 222s 里 meta-cc 只占 27s，**167s 是模型读完 14,715 字符后的纯推理**
+//       ⇒ 驱动量是【返回体积】，故强制 content_summary + preview_length + limit。
+//
+// ── 脚本层能力边界（探针 wf_af76a6df-2c3 实测）───────────────────────────────
+//   globalThis 仅：log / phase / budget / setTimeout / clearTimeout /
+//                  agent / parallel / pipeline / workflow / args
+//   无 require / process / fetch；`import()` 在语法检查阶段即被拒；`export` 仅允许用于 meta。
+//   ⇒ 脚本层零 I/O，固定命令只能由主循环执行——这正是本版把它【回传】而非【执行】的原因。
+
+// ⚠️ 改本文件后的验证：**必须实际调用一次 Workflow**，不要拿 `node --check` 当通过。
+//    2026-08-07 21:5x 实测：我在模板串里写了未转义的反引号，`node --check` **通过**
+//    （反引号提前终止模板串，剩余字节碰巧仍是合法 JS），而 Workflow 解析器报
+//    `Unexpected token (91:41)` —— tick 的核心机制当场不可用。
+//    **模板串里的每个反引号都要写成 \`；`${` 也要转义**（早先踩过一次 String.raw 不挡 ${}）。
+//    通则同本文件判准 ②b：一个"通过"的检查，只有在它检查的正是你需要的保证时才算数。
+
+// ⚠️ 2026-08-21 09:4xZ：固定别名 'sonnet' 在人切换会话模型（kimi-k2.7-code）后的进程重启里
+//    变成后端不可解析——audit agent 连 3 次 API 400 "Model not exist"（确定性，重试无效），
+//    整份审计缺席（evaluated:false）。钉死别名 = 依赖宿主路由的常量（硬规则 4 推论二同族：
+//    合理性依赖当前环境的字面量，换个环境静默失效）。
+//    ⇒ 修法同源：不钉别名，改继承会话模型（undefined = 不传 model 字段）。
+const MODEL = undefined
+// ══ 第四次同形（硬规则 5b：兄弟实例常在同一文件；硬规则 4 推论二：钉死字面量换环境静默失效）════
+// 上面 :51-56 的 MODEL 固定别名、下面 :78 起的 session id / name 记录的是同一教训的【前三次】——
+// 钉死一个"依赖当前宿主/环境"的字面量，换环境即静默失效。这里【曾经】是第四次：
+//   const ROOT = '/home/yale/work/quay'
+// 实测存在于【全部】已发布 cache（0.9.0/0.10.0/0.11.0/0.12.0-dev）与 origin/dist-plugin 同一行——
+// 不是某版的漂移，是一开始就没搬。后果：任何装了 quay 插件【但不在 /home/yale/work/quay】的消费
+// 工作区调用本 workflow，拿到的不是崩溃，而是【关于 /home/yale/work/quay 的读数】——静默指错仓库，
+// 比崩溃更坏（硬规则 3b：读不懂/不适用必须与合格可区分）。
+// 本 workflow 零 I/O（见 :38-42），【无法】用 fs 自检工作区 ⇒ 守卫不能是"自己查一下 orchestration/
+// 在不在"，必须是【由 args 现传、缺失即拒绝】——与 managerSessionId（:78 起）已采用的修法同形。
+// ⇒ 缺失 / 非绝对路径 ⇒ 直接返回独立取值 { evaluated:false, reason }，⛔ 绝不落回硬编码默认值，
+//   且【不 spawn 任何 agent】（否则 readings/audit agent 会对着未知 cwd 跑并产出伪读数）。
+// 交付面同时显式标注本 workflow 为 quay-dev-only：plugin/loop/manager-tick-core.md。
+// ⚠️ 本 workflow 依赖 orchestration/manager-tick-{core,criteria,closing,sending}.md 与
+//    orchestration/manager-anchor-check.py —— 全部【只在 quay 开发工作区存在，交付面未 ship】。
+//    本任务判定其本意即 quay-dev-only（非"可安装"），见 task
+//    gap-manager-tick-core-hardcodes-quay-dev-root-silently-wrong-repo 的 AC4。
+// args 到达时是【字符串】不是对象（实测 wf_6f8cc053-f52）：直接 args.x 会静默 undefined。
+// 提到 MGR_SESSION_LOOKUP 之前先定义——后者要读 A.managerSessionId（2026-08-18 08:3x 修复引入）。
+const A = (() => { try { return typeof args === 'string' ? JSON.parse(args) : (args ?? {}) } catch { return {} } })()
+// 工作区根：只接受【调用方现传的绝对路径】，否则拒绝。⛔ 绝不落回任何硬编码宿主路径。
+const WORKSPACE_ROOT = typeof A.workspaceRoot === 'string' && A.workspaceRoot.startsWith('/') ? A.workspaceRoot : null
+if (!WORKSPACE_ROOT) {
+  return {
+    evaluated: false,
+    reason: 'args.workspaceRoot 缺失或不是绝对路径 —— 本 workflow 是 quay-dev-only（依赖交付面未 ship 的 orchestration/ 正本），拒绝在未知工作区产出读数。调用方须经 args.workspaceRoot 传入目标工作区【绝对路径】。⛔ 绝不落回任何硬编码宿主路径。',
+    requested: typeof A.workspaceRoot === 'string' ? A.workspaceRoot : null,
+  }
+}
+const ROOT = WORKSPACE_ROOT
+
+// ── 插件根 PLUGIN_ROOT（gap-workflow-js-carriers-emit-literal-plugin-root-env-ref-that-is-unset-in-plain-sessions）──
+// 交还给主循环的命令块里的插件脚本路径一律走 ${PLUGIN_ROOT} 这个【真 JS 绑定】（绝对路径），不再用插件根
+// 环境变量字面量：它只在 SKILL 文本替换 / hooks / MCP 配置里有值，普通会话的 Bash 里是空的（2026-10-06
+// 实测），命令里的路径会展开成空串、退化成 /scripts/dist/…（运行期才失败，与「文件不存在」同形，硬规则 3b）。
+// 调用方经 args.pluginRoot 传绝对插件根；缺失/非绝对 ⇒ 与 workspaceRoot 同形的独立取值 { evaluated:false,
+// reason } —— ⛔ 绝不落回硬编码默认值，也绝不 spawn agent（否则读数会对着未知根产出伪读数）。
+// 开发树缺省 = <ROOT>/plugin（本 workflow 是 quay-dev-only）；发布版该常量被 plugin-dist 构建清空。
+const DEV_PLUGIN_ROOT_DEFAULT = ''
+const PLUGIN_ROOT = (() => {
+  const provided = typeof A.pluginRoot === 'string' ? A.pluginRoot.trim() : ''
+  return provided || DEV_PLUGIN_ROOT_DEFAULT
+})()
+if (!PLUGIN_ROOT) {
+  return {
+    evaluated: false,
+    reason:
+      'plugin-root-not-provided: args.pluginRoot 缺失 —— 普通会话里插件根环境变量没有值，插件根必须由调用方经 args.pluginRoot 传入（= scriptPath 的上两级目录）。⛔ 绝不静默展开成空串。',
+    requested: typeof A.pluginRoot === 'string' ? A.pluginRoot : null,
+  }
+}
+if (!PLUGIN_ROOT.startsWith('/')) {
+  return {
+    evaluated: false,
+    reason: `plugin-root-invalid: args.pluginRoot 必须是绝对路径（收到 ${JSON.stringify(A.pluginRoot)}）：相对路径无法命名插件根，其 scripts/dist 引用会退化成不可解析路径。`,
+    requested: A.pluginRoot,
+  }
+}
+// ⚠️ 2026-08-14 14:3xZ：这里【曾经写死】一个 session id `b8dc91a6-…`，而它在 transcript 存储里
+//    【根本不存在】（find ~/.claude/projects -iname '*b8dc91a6*' ⇒ 0 命中）。审计 agent 每轮拿到坏 id，
+//    靠自己比对 SendMessage 前缀与 git 时间戳才找回真会话——**它足够聪明，所以我们一直没发现**。
+//    ⇒ 硬规则 4 推论二（写死的字面量会静默失效）+ C29（坏输入下仍产出「0 条新违规」= 与合格同形）的合体：
+//      一个查不到数据的审计，最可能的输出恰恰是「没发现问题」。
+//    ⇒ 修法是【不写字面量，改成读宿主】——用 2026-08-14 实测通过的官方接口现查：
+//      `claude agents --json`（外部进程可调、不需 TTY、墙钟 1.2–1.4s）取 name=="quay-manager" 的 sessionId。
+//
+// ⚠️ 2026-08-18 08:3x：上面那条 name 查找本身也漂移了——本会话在一次被杀+resume 后，
+//    `claude agents --json` 里的注册名从 `quay-manager` 变成了 `quay-a8`（sessionId 不变），
+//    连续 3 轮 NOT-EVALUATED（同一失败类，只是上移了一层：不是"写死的 id 过期"，是"写死的
+//    name 匹配式过期"）。修法同源：**不猜 name，改成由主循环每轮现传**——主循环（我）在
+//    调用本 Workflow 前就已经知道自己当轮的真实 session id（系统提示/scratchpad 路径每轮
+//    现给，不是记忆），经 `args.managerSessionId` 传入即可让 audit subagent 完全跳过查找。
+//    `A.managerSessionId` 未提供时（旧调用方式、或忘传）才回退到 name 查找——向后兼容，
+//    行为与此前完全一致，只是那条路径的脆弱性还在。
+const MGR_SESSION_LOOKUP = A.managerSessionId
+  ? String.raw`echo '${A.managerSessionId}'  # 由主循环本轮通过 args.managerSessionId 现传，非硬编码字面量——跳过易漂移的 name 查找`
+  : String.raw`claude agents --json | python3 -c "import json,sys;print(next(x['sessionId'] for x in json.load(sys.stdin) if x['name']=='quay-manager'))"`
+
+const PRIOR = A.prior ? `\n上一轮读数（只报差异）：\n${A.prior}\n` : ''
+
+// ══ 交还给主循环的指令 ①：该跑什么 ══════════════════════════════════════════
+// 判据的单一来源。改判据改这里，主循环照抄——它不需要记住任何一条命令。
+const READ_CMD = String.raw`cd ${ROOT}
+# ══ 2026-08-14 SPEC-tick-read-path-slimming §2-D：本块已瘦身 ══════════════════════════
+# 【为什么】原块 95 行，与 A0 + 核里的五项手跑大面积重叠：A0 覆盖 5 项、五项手跑覆盖 7 项、
+# 无人覆盖仅 2 项。两份各自演化的代价已实证——死命令
+# 死命令 git rev-list --left-right --count develop...integration 在此存活至 2026-08-14
+# （integration 已随 AC48 删除，实跑 fatal: ambiguous argument）。它躲过了检查，因为
+# 核的 tick-core-static-check 只扫 *.md，扫不到 *.js。⇒ 与已修的 A6 同族，区别只在扫描面之外。
+# 【原块的 9 条独有词条已全文迁入】orchestration/manager-loop-tick.md §READ_CMD-migrated
+# （落点映射逐条，非抽查——硬规则 5）。要「为什么」去那里读，不要在此复制。
+#
+# 【读数正本，不在此复制】：
+#   A0  node ${PLUGIN_ROOT}/scripts/dist/quay-session.js manager-tick-readings
+#       → 三项目 status / resource.*（cpu_some_avg10, load1, node_count, node_dual_read,
+#         mem_available_mb）/ outer.liveness / outer.ticklog / monitor.*
+#   A1  python3 orchestration/manager-anchor-check.py
+#   五项手跑：**逐条内容【不在此复制】** —— 正本是 orchestration/manager-tick-core.md 的 A0 行。
+#     ⚠️ 2026-08-14 15:4xZ 实证：此处曾复制那五项的简述，而 15:2xZ 我把核里的 ⑤ 从「数进程」
+#     改成「读 monitor-mount-check.sh --json」后，**这份副本没跟着改** ⇒ 审计的指令块每轮
+#     照旧打印「⑤ mon_procs 先取清单再从清单数」，即已被推翻的做法。
+#     ⇒ 同形第三次（前两次：manager-loop-tick 的豁免面副本、核内 A10 与 A0-⑤ 并存）。
+#     ⇒ 修法与前两次一致：**指针不是副本**。要那五项，去读 A0 行。
+lat=$(gh release view --json tagName -q .tagName 2>/dev/null); echo "release=$lat ahead=$(git rev-list --count $lat..develop 2>/dev/null)"
+# ^ AC16② 新鲜度巡检。A0 不给，五项手跑也不给。
+# ↓ 2026-08-15 09:0xZ 加：cron 调度存储的【落盘】面（本块自带说明，不借上一条尾注）。
+#   起因：manager 锚在 23:18:50 后静默停跑、8h45m 后才被发现，而我当时断言「cron 纯内存态、不留落盘痕迹」——
+#   官方文档逐字推翻它：「Claude Code stores the scheduled task list in the project's .claude directory」。
+#   实测该目录里【只有 .lock 没有 .json】，且锁由 inner 会话持有、acquiredAt 恰落在死亡窗口内。
+#   ⚠️ 因果未证实（新锚在同一把锁被持有期间正常触发两次 ⇒ 持锁本身不致命）；
+#   本条只为把这个量变成【每轮可比的读数】，让下一次死亡有 n>1 的对照。⛔ 不据单次相关下结论。
+python3 -c "
+import json,os,datetime
+p='.claude/scheduled_tasks.lock'; j='.claude/scheduled_tasks.json'
+if os.path.exists(p):
+    d=json.load(open(p))
+    print('cron_store_lock session=%s pid=%s acquiredAt=%s json_exists=%s'%(
+        d.get('sessionId','?')[:8], d.get('pid'),
+        datetime.datetime.utcfromtimestamp(d['acquiredAt']/1000).strftime('%Y-%m-%dT%H:%M:%SZ') if d.get('acquiredAt') else '?',
+        os.path.exists(j)))
+else:
+    print('cron_store_lock ABSENT json_exists=%s'%os.path.exists(j))" 2>/dev/null
+python3 -c "
+import json,os,time
+d=json.load(open('.quay/full-suite-state.json'))
+ms=d.get('durationMs')
+print('suite=%s/%s dur=%s age=%smin'%(d['state'],d.get('reason'),('%.1fs'%(ms/1000)) if ms else '跑着呢(无终态时长)',int(time.time()-os.path.getmtime('.quay/full-suite-state.json'))//60))"
+# ^ B3 的【戊】用它。durationMs 在 running 态是 null——直接 ms/1000 会 TypeError 而丢掉整条读数，
+#   而丢掉的恰恰是「正在跑」这个最该看的状态（详见 §READ_CMD-migrated 第 4 条）。`
+
+// ══ 交还给主循环的指令 ②③④：判准 / 收尾 / 发消息 —— 全部搬出 .js（2026-08-08 05:5x，人指示）══
+// 三段原是持久散文常量，性质相同：【持久】但【高频编辑】（判准 6h 内改了 15 次）——
+// 每次编辑都要求跑一遍完整 Workflow（含自审 agent，60-110k token / 3-6 分钟）验证解析，
+// 而那个验证只为防一个仅存在于【JS 模板串】里的风险（反引号提前终止导致 node --check 假绿）。
+// 抽成纯 markdown 后该风险不存在——编辑这三个文件后【不需要】跑 Workflow，Read 一下确认落地即可；
+// 只有改 .js 本身（本文件的结构/READ_CMD/AUDIT_SCHEMA/audit 的 prompt）才需要。
+// git 跟踪（不同于 manager-pending.md 的 gitignored+可丢失——这三样是判断史/操作规程，
+// 不是待办队列，理应可 blame/可 diff）。本 workflow 仍零 I/O，读不了这些文件；
+// 让主循环去读，和它已经在做的"读 manager-pending.md"是同一个模式，只是把它推广到全部三段。
+const JUDGE_CRITERIA = '**判准正本已搬出，读 `orchestration/manager-tick-criteria.md`（git 跟踪）逐条判读。**\n文件不存在或读不到 ⇒ 判准文件本身出问题了，当轮升级，不要凭记忆代打。'
+const SENDING = '**发消息的正确形态已搬出，读 `orchestration/manager-tick-sending.md`（git 跟踪）照做。**\n文件不存在或读不到 ⇒ 先按 ADR-016 三段式送，事后核实必须走 meta-cc（不要凭记忆重建规程）。'
+const CLOSING = '**收尾步骤已搬出，读 `orchestration/manager-tick-closing.md`（git 跟踪）照做。**\n文件不存在或读不到 ⇒ 至少做够两件：哨兵清扫在先，tick-log 追加一行在后（不要颠倒——颠倒过一次，见该文件史）。'
+
+const AUDIT_SCHEMA = {
+  type: 'object',
+  required: ['violations', 'undeclaredActions'],
+  properties: {
+    violations: {
+      type: 'array',
+      description: '管理者本轮违反自己规则的实例；空数组=未发现',
+      items: {
+        type: 'object', required: ['rule', 'evidence', 'status'],
+        properties: {
+          rule: { type: 'string' },
+          // ⚠️ 2026-08-15 实测根因（wf_6179b247-1ab，99 个 run 里的第 1 次 agent 失败）：
+          // 自审抓到了真违规，却因 evidence 里嵌入【原始命令行】而连续 5 次 StructuredOutput
+          // 全部 InputValidationError（1299→1190→1183→1167→1165 字节，越删越短仍失败）⇒ 整份审计丢失。
+          // ⇒ 与并发化无关（是序列化，不是竞态）；且与我自己当天两次引号/heredoc 事故同族。
+          evidence: {
+            type: 'string',
+            description: '⚠️ 单行纯文本。⛔ 不得含换行、反引号、原始命令行或原始工具输出——'
+              + '本字段曾因嵌入命令行导致 5 次 StructuredOutput 全部 JSON 解析失败、整份审计丢失'
+              + '（2026-08-15 wf_6179b247-1ab）。引证据用「<文件>:<行号>」+ ISO 时刻 + 一句话转述；'
+              + '需要指认某条命令时，写它的机件名与参数名，⛔ 不要粘贴命令本身。',
+          },
+          status: {
+            type: 'string',
+            enum: ['新发生', '已入账', '判准已退休'],
+            description: '新发生=本轮首次且 tick-log violations 列里没有；已入账=已在某一行的 violations 列（evidence 里必须引出那一行的时刻列）；判准已退休=该判准已被明文退休，本条不成立',
+          },
+        },
+      },
+    },
+    undeclaredActions: {
+      type: 'array', items: { type: 'string' },
+      description: '你在证据里看到、但主循环【没有】声明的动作（漏报检测）；看不到就返回空',
+    },
+  },
+}
+
+// ══ 阶段1（SPEC-tick-mechanical-checks-mcp-2026-08-15 §8.3，人 2026-08-15 08:2xZ 令执行）══════
+// 【为什么】READ_CMD 此前作为【命令块交还主线程执行】⇒ 命令原始输出全部沉积在主上下文里，
+// 而实测规律是「凡需跨轮存活在主上下文内的义务都衰减」（§1.1 七点：B1 100% vs A9 15.2%）。
+// 改为：本 workflow 内一个 readings agent 在【新鲜上下文】里跑同一批命令，只回结构化 facts。
+// 【schema 是必需的，不是装饰】§8.4-3：不带 schema 则散文从返回值那一侧灌回主上下文，白搬。
+// 【notEvaluated 独立取值】§7-② + 硬规则 3b：命令跑不成必须与"跑了且正常"可区分，⛔ 不得合并。
+// 【args 不喂总结】§8.4-2：本 agent 自己去盘上读正本，⛔ 不由主循环传任何总结文字进来。
+const READINGS_SCHEMA = {
+  type: 'object',
+  required: ['facts', 'notEvaluated'],
+  properties: {
+    facts: {
+      type: 'array',
+      description: '本轮读数，每条一个量。⛔ 不要把命令原始输出塞进来——那正是本次改动要挡在主上下文之外的东西。',
+      items: {
+        type: 'object',
+        required: ['name', 'value', 'source'],
+        properties: {
+          name: { type: 'string', description: '量名，如 anchor_check / load1 / suite_state / worktrees_in_flight' },
+          value: { type: 'string', description: '取值（数字也用字符串），保持原样，不要加解释' },
+          source: { type: 'string', description: '产出它的机件或命令（§2.1-4：规则可声明某量只接受来自机件 X 的值）' },
+          measuredAt: { type: 'string', description: 'UTC ISO 时刻；机械判过期用（§2.1-4）。取不到就省略。' },
+          delta: { type: 'string', description: '与上一轮相比的变化（若本轮无从得知就省略，⛔ 不要猜）' },
+        },
+      },
+    },
+    notEvaluated: {
+      type: 'array',
+      description: '【无法评估】的量——命令失败/文件缺失/输出读不懂。⛔ 绝不能把它们并进 facts，也绝不能省略。',
+      items: {
+        type: 'object',
+        required: ['name', 'reason'],
+        properties: {
+          name: { type: 'string' },
+          reason: { type: 'string', description: '为什么无法评估：命令退出码、缺哪个文件、输出哪里读不懂' },
+        },
+      },
+    },
+  },
+}
+
+// ══ 读数 与 自审 并发（2026-08-15，人提出「放进 tick workflow 与现有步骤并发跑是否更紧凑」）══
+// **前提已核，不是想当然**：自审 agent 的 prompt 里【不引用 readings】⇒ 两者无数据依赖 ⇒ 可并发。
+// 墙钟由 sum 变 max（本轮串行实测 327s）。
+// ⚠️ parallel 内【不得】用全局 phase()——它是跨 stage 的可变状态，会竞态 ⇒ 各自用 opts.phase 显式归组。
+// ⚠️ parallel 的失败语义：thunk 抛错 ⇒ 该位置为 null（调用本身不 reject）
+//    ⇒ 下方 readings===null 的「读数缺席」降级分支【仍是必需的】，且现在同样覆盖 audit===null。
+// ⊢ 代价（如实记，不是零）：自审的证据截止时刻由"读数跑完之后"提前到"与读数同时开始"，
+//   即它看不到 tick 开始后【工作流运行期间】主循环新做的动作。本轮恰好就有一例（10:44 那条越界
+//   是串行才被抓到的）。判断：自审对 git 用 --since='40 minutes ago'，3 分钟的起点前移相对 40 分钟
+//   窗口可忽略；且"工作流跑的同时主循环还在动手"本身是异常态，不是常态。⇒ 并发的收益 > 该代价。
+const [readings, audit] = await parallel([
+  () => agent(
+  `你是管理者 tick 的【读数】subagent。你在一个全新的上下文里，这是刻意的：
+主循环的上下文会随轮次累积并使义务静默脱落（实测 A9 覆盖率 15.2%），而你每轮都是新的。
+
+**你的唯一任务**：在 ${ROOT} 跑下面这批固定命令，把结果整理成结构化 facts 返回。
+**⛔ 不要把命令的原始输出返回给我** —— 挡住原始输出正是本次改动的全部目的。
+**⛔ 不要做任何判读、建议、总结** —— 判读是主循环的事，你只负责把量取准。
+
+**第一批：命令块（逐条跑，失败的记进 notEvaluated，⛔ 不要跳过也不要假装成功）**
+${READ_CMD}
+
+**第二批：A0 与 A1（正本命令，逐字照跑）**
+- A0：node ${PLUGIN_ROOT}/scripts/dist/quay-session.js manager-tick-readings
+      → 取 三项目 status / resource.（cpu_some_avg10, load1, node_count, node_dual_read, mem_available_mb）
+        / outer.liveness / outer.ticklog / monitor.
+- A1：python3 orchestration/manager-anchor-check.py
+
+**第三批：手跑项 —— 内容【不在此复制】，条数也【不在此写死】（本文件的历史教训：此处复制过一次，
+核改了而副本没跟着改，指令块照旧打印已被推翻的做法，同形第三次）。你自己去读正本：
+orchestration/manager-tick-core.md 的 A0 行，照它当前写的跑，**有几项就跑几项**。
+⇒ 你读到什么就跑什么，⛔ 不要用你记忆里的版本。
+⚠️ 2026-08-25 22:4xZ 第四次同形（读数 agent 连续多轮报「手跑④ notEvaluated」才暴露）：此处原写
+「五项手跑」，而核在 ④ 随 inbox 退役后已改为「四项」并只列 ①②③⑤ ⇒ agent 每轮去找不存在的第 5 项。
+**⊢ 教训比前三次更细一层：「指针不是副本」此前只落实到【列表内容】，没落实到【列表条数】——
+那个数字本身就是一份副本，且它过期时不报错，只让读者去找一个不存在的东西。**
+
+**取值纪律（三条，违反其一这次读数就没有价值）**
+1. **每条 fact 带 source**（哪个机件/命令产出的）；能取到时刻就带 measuredAt。
+2. **无法评估的进 notEvaluated 并写清 reason**，⛔ 绝不并进 facts、绝不省略——
+   "没跑成"与"跑了且正常"必须可区分（硬规则 3b）。
+3. **计数类的量，若你要报一个数，先确认你数的对象就是被问的那个对象**；
+   拿不准就把两个候选都报出来并在 name 里区分，⛔ 不要合并成一个数。`,
+    { schema: READINGS_SCHEMA, label: 'readings', phase: 'Readings' },
+  ),
+  () => agent(
+  `你审计【管理者自己】最近这一轮的行为。\n\n**第一步：先查出 manager 的真 session id，⛔ 不要用任何记忆里的 id**（此处曾写死一个不存在的 id，坏了很久没人发现）：\n\`\`\`bash\n${MGR_SESSION_LOOKUP}\n\`\`\`\n**⊢ 若该命令返回空或报错 ⇒ 立即报 NOT-EVALUATED 并停止**；⛔ 不得改用启发式猜测、⛔ 不得因为查不到就报「0 条违规」——一个查不到数据的审计最可能的输出恰恰是「没发现问题」，那与合格同形。\n\n拿到 id 后用 meta-cc 查该会话
+（deferred 工具，先 ToolSearch 取 schema：\`mcp__meta-cc__query_session_content\`）
+加 \`git log --oneline --since='40 minutes ago' -- ${ROOT}\`。
+
+**⚠️ 第一纪律：读证据，不许从标题猜（人 2026-08-07 裁定）。**
+
+**⚠️ 第二纪律：每条 violation 必须给 \`status\`，这是【计数正确性】的要求（2026-08-08 02:2x）。**
+上一轮你返回 4 条，其中 **3 条早已在 tick-log 的 violations 列里入账**（01:2xZ / 01:4xZ / 01:5xZ），
+**第 4 条断的是判准 ⑥ 缺席，而 ⑥ 已于 2026-08-07 20:1x 明文退休**（答案恒定 ⇒ 零信息，
+被 ⑥′ 取代）——你比对的样本是 08-07 16:5x，早于退休。
+**危害是机械的**：第六列是「连续 N 轮都在做」的唯一计数来源，
+**把旧账当新账重报，会让计数虚高、阈值失真**——与 ⑦「承认即须入账」同一个计数面，方向相反。
+⇒ 逐条标 \`新发生\` / \`已入账\`（evidence 里引出那一行的时刻列）/ \`判准已退休\`。
+**检测照旧要做，不要因为怕重复就不报**——分类是你的活，抑制不是。
+**另**：你上一轮自己写了「因 8 次工具调用预算已用尽，未能读更多行确认」——
+**预算用尽就说不知道，不要把"没读到"写成 violation**（这正是 ②b：来源不完备 ≠ 不存在）。
+
+上一版给了 3 次工具调用的硬预算，结果它只读到 commit **subject line** 就下结论，
+一轮产出 **1 条假阳性 + 1 条无法证实**：把"管理者记录【接受上一轮违规】的那条提交"
+读成了"本轮新发生违规"（重复计数），又因读不到 tick-log 正文而把"六条判准是否落地"
+判为存疑——**实测那份正文里 ①② 各出现 4 次、③④⑤⑥ 各 3 次，逐条落地了**。
+⇒ **省调用省出了错误结论。断言任何一条违规之前，必须读到承载证据的那段原文。**
+
+**但"读证据"不等于"随便拉大段文本"**——真正贵的是体积：上上版 222s 里 meta-cc 只占 27s，
+**167s 是模型读完 14,715 字符宽查询结果后的纯推理**。所以按【最便宜且能承载证据的源】选：
+
+| 要查的 | 用什么 | 为什么 |
+|---|---|---|
+| **管理者 tick-log 正文** | **\`tail -N orchestration/manager-tick-log.md\`（直接读磁盘文件）** | **人 2026-08-07 裁定：记账进 gitignore、【可丢失】，自审也应读这个可丢失的文件而不是 git。该文件已脱离跟踪，\`git show\` 读不到新内容。** |
+| 提交做了什么 | \`git show --stat\` / \`git log\` | 代码改动仍在 git 里，这条不变 |
+| 会话里实际调了什么工具/说了什么 | meta-cc | 只有它有；但**必须**带 \`content_summary: true\`、\`preview_length: 120\`、\`limit: 15\` |
+
+- **工具调用上限 8 次**（够读证据，不够漫游）
+- **meta-cc 最多 2 次**，且只用于 git 里查不到的东西${PRIOR}
+
+**判重复计数**：管理者的 tick-log 若是在**记录/接受一条已被指出的旧违规**，
+那不是新违规——看清楚是"又犯了一次"还是"在承认上一次"。
+
+只查这五条，逐条给证据（**引用你读到的原文片段**，不得是印象、不得只凭 subject line）：
+1. **§1.b2 工具使用**：跨会话发消息用的是 \`plugin/scripts/send-keys-reliable.sh\`，
+   还是手搓裸 \`tmux send-keys\`？有没有"该有现成工具却没查就自己搓"的动作？
+2. **§1.5 该做却问人**：有没有把**自己已经有答案**的事推给人决定？
+3. **§0 边界回流**：有没有写任务体/AC/DoD、跑验证、替项目调试代码、直接改项目代码？
+4. **§4 已知失效（2026-08-08 06:5x 改为指针，不再是内嵌摘要——人裁定）**：
+   读 \`orchestration/manager-loop-tick.md\` 的「## 4. 已知的自身失效形态」表格**全部行**逐条核对
+   （核查当时该表 7 行：角色回流 / 把印象当测量 / 管道后读 \$? / 截断显示当全貌 /
+   零命中当没发生 / \`--since='N min ago'\` 静默零 / 手搓代替现成工具；表可能已增行，以你实读为准）。
+   **不要用记忆里的旧清单**——旧清单曾是内嵌在这里的 6 项摘要，与源表不同步两项缺失、
+   一项（"无条件 echo"）查无来源，已在 2026-08-08 由人裁定改为指针，永远读源表，不再复制。
+5. **判准有没有被真的应用**（**读 \`tail -40 orchestration/manager-tick-log.md\`，不要用 git**——
+   该文件已 gitignore 且【允许丢失】：**文件不存在或行数不足不算违规**，如实说明读不到即可）：
+   管理者上一轮的 tick-log 行里，六条判准（PC 有效性 /
+   陈旧当现状 / 监视器 / 暂停态 / 突变 / 两种读法一致性）是否**逐条出现过结论**。
+   ⚠️ 2026-08-16 23:2xZ：本行第四项原写作 \`halt\`，而判准正本早已改为「暂停态（读 project.status）」——
+   \`halt:\` 是个不存在的字段名，判准④ 因此被读数 agent 连报 4 轮 NOT-EVALUATED。
+   **⊢ 讽刺的是上一段（第 4 条）正记着"另一份内嵌清单因与源表不同步而被改为指针"——同一文件、同一错误、第二次。**
+   **⇒ 这里也不该内嵌名字：要么读 \`orchestration/manager-tick-criteria.md\` 的小节标题，要么只说"六条判准逐条"。**
+   **这条是补偿性检查**——judge 已从 workflow 移到主循环，执行点退化为"记得应用"，
+   而 2026-08-07 12:2x 首轮即命中（上一轮 tick-log 通篇没应用过任何一条）。不许略过。
+
+**关于熔态动作（2026-08-07 修正分工，别再生成它）**：
+上一版让你列 moltenActions，实测返回空数组，而本轮明明有三件（换 suite 监视器、
+修 READ_CMD 陈旧判据、答"355 秒是否少跑"）。**根因是结构性的，不是你失职**：
+① 你与主循环**并行**跑，本轮提交常落在你之后（实测 4a25e589 在你运行中途、65d2e98f 在你结束后）；
+② **多数熔态动作根本不进 git**——换监视器是 TaskStop+Monitor 两次工具调用、答疑是几条只读 Bash，零提交；
+③ 你的 meta-cc 被限成 preview_length=120，只够看片段，不足以识别"他换了监视器"。
+⇒ **"本轮做了什么"只有主循环完整知道，该由它声明；你的活是【核验】不是【生成】。**
+
+所以：**不要列举主循环做了什么**。只在证据里发现【主循环没声明、但确实发生过】的动作时，
+把它放进 \`undeclaredActions\`（这是漏报检测）。看不到就返回空数组，**不要凑数**。`,
+    // MODEL 为 undefined 时不携带 model 字段（继承会话模型）——⛔ 不传 `model: undefined` 字面，
+    // 避免运行时有无把显式 undefined 当"已指定"的实现差异
+    (() => { const o = { label: 'self-audit', phase: 'Audit', schema: AUDIT_SCHEMA }; if (MODEL) o.model = MODEL; return o })()
+  ),
+])
+
+// ══ 把指令贴在结果后面交还主循环 ══════════════════════════════════════════════
+// 主循环的 tick 只需要记住一条：调这个 workflow，然后照下面返回的指令做。
+// A9（判 B1 本轮是否执行）此前【只】写在 orchestration/manager-tick-core.md:24，而该文件不在每轮读取
+// 路径上（2026-08-15 实测：12.3h 窗口内 Read 该文件 0 次），本 .js 里 grep 'A9' 也是 0
+// ⇒ A9 既不在我读的文件里、也不在本 workflow 的返回里 ⇒ 实测每轮覆盖率 ≤5/33 = 15.2%。
+// 它没被发现没在跑，是因为它的检查对象 B1 恒 100% ⇒ 它从来没有东西要报
+// ⇒「不运行的检查」与「运行且输出 OK 的检查」在记录上同形（硬规则 3b 的镜像）。
+// 修法按「跳数」观察项（manager-phase-goal.md 🔭 节）：把它从【独立一条】挪到【返回清单的第一条】。
+// ⚠️ 残留且【不可由本层关闭】：B1 没被调时本返回不存在 ⇒ A9 同样不在场 ⇒ 仍无人发现。
+//    该残留只能由上下文之外的东西关闭（cron 重投的 prompt 正本 / 另一层），已作为待裁项上报人。
+// ⚠️ 指针不是副本：此处只给命令形态与判据，理由/实测在 manager-tick-core.md:24 与 phase-goal 🔭 节。
+const A9_FIRST = '**先做这一条，再跑读数块**：`meta-cc query_session_content role=tool block_type=tool_use ' +
+  'tool_name=Workflow session_id=<我> since=<上一条 [manager-tick] 的实际触发时刻>`（`since` 取自同一条 ' +
+  'meta-cc `role=user pattern=\\[manager-tick\\]` 的末条 timestamp，⛔ 不用假定的周期常数）。\n' +
+  '**判据**：本轮命中 0 ⇒ 上一轮 B1 未执行，当轮记一条并在 tick-log 写出该读数；命中 ≥1 ⇒ 写出条数。\n' +
+  '**⛔ 不得只写「已核实」** —— 产物是那个条数本身。\n' +
+  '**通用形式**：任何我声称要用的机制，>3 个 tick 周期未被调用就要记（凡其调用在 transcript 里有 tool_use 记录者，一律用直接量核，不用自述）。'
+
+// 阶段1：读数已由 readings agent 在新鲜上下文里取回 ⇒ 主循环拿到的是 facts 不是原始输出。
+// ⚠️ 降级必须可区分（硬规则 3b）：agent 死了/返回空时 readings 为 null ⇒ 明确说出「读数缺席」，
+//    并把 READ_CMD 作为【回退】交还，⛔ 不得静默变回"主线程自己跑"而看起来一切正常。
+// ⚠️ 硬规则 3b（并发化后新增的暴露面）：parallel 里 agent 抛错 ⇒ 该位置 null。
+//    而 `audit: null` 与「审计跑了、零违规」在主循环眼里同形——那正是本文件反复在防的形状
+//    （自审 prompt 自己就写着「一个查不到数据的审计最可能的输出恰恰是『没发现问题』」）。
+//    ⇒ 给"没跑成"一个独立取值，⛔ 不与合格共用。
+const 自审 = audit ?? {
+  evaluated: false,
+  reason: '自审 agent 未返回（null）——本轮【审计缺席】，⛔ 不得读作「零违规」',
+}
+
+const 读数 = readings
+  ? { facts: readings.facts ?? [], notEvaluated: readings.notEvaluated ?? [], 来源: 'readings subagent（新鲜上下文）' }
+  : { facts: [], notEvaluated: [{ name: '__all__', reason: 'readings subagent 未返回（null）——本轮读数缺席' }], 来源: 'ABSENT' }
+
+// ⚠️ 硬规则 3b：正常跑完的返回带 evaluated:true，与上方【拒绝分支】的 evaluated:false 可区分——
+//    调用方一眼能判"这是本 workflow 在 workspaceRoot=X 上跑出的读数"还是"它拒绝了"。
+return {
+  evaluated: true,
+  audit: 自审,
+  读数,
+  指令: {
+    第零步_先判上一轮_B1_是否执行: A9_FIRST,
+    第一步_读数已在上面的_读数_字段: readings
+      ? '**读数由 readings subagent 在新鲜上下文取回，见本返回的 `读数` 字段。**\n' +
+        '⛔ 不要再自己跑一遍命令块——那会把原始输出重新灌进主上下文，正是本次改动要挡的东西。\n' +
+        '**必看 `读数.notEvaluated`**：那是【无法评估】的量，与"正常"不是一回事（硬规则 3b）；非空即须在 tick-log 写出。'
+      : '🔴 **readings subagent 未返回 ⇒ 本轮读数缺席。** 回退：自己跑下面这个命令块，并在 tick-log 记一条「读数降级」。\n' + READ_CMD,
+    第二步_按这些判准逐条判读: JUDGE_CRITERIA,
+    第三步_收尾: CLOSING,
+    第四步_发消息时照这个: SENDING,
+    说明: '这三段由本 workflow 从磁盘上的 .js 交还给你，不依赖你的会话上下文——' +
+          '判准是数据不是记忆，跨 clear/compact 稳定。改判据请改 orchestration/manager-tick-criteria.md。',
+  },
+}

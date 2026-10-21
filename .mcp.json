@@ -1,0 +1,7 @@
+{
+  "quay": {
+    "command": "node",
+    "args": ["${CLAUDE_PLUGIN_ROOT}/vendor/quay/dist/quay.js", "mcp"],
+    "env": {}
+  }
+}
