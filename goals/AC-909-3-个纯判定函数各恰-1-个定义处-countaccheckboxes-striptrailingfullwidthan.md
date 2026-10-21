@@ -2,7 +2,7 @@
 id: AC-909
 title: 3 个纯判定函数各恰 1 个定义处（countAcCheckboxes / stripTrailingFullWidthAnnotation /
   expandGlob）
-status: draft
+status: active
 kind: criterion
 goal: GOAL-906
 criterion: "for n in countAcCheckboxes stripTrailingFullWidthAnnotation
@@ -16,4 +16,15 @@ expect: 正向：countAcCheckboxes / stripTrailingFullWidthAnnotation / expandGl
   写出 cause）；删除 ⇒ 绿。只断言「每个名字各 1」不算总数（避免 3 份定义集中在同一个名字上）。
 origin: 架构分析 G-1（detect_duplicates 实测
   countAcCheckboxes/stripTrailingFullWidthAnnotation/expandGlob 各双份）
+activatedAt: 2026-10-21T02:12:51.122Z
+statusLog:
+  - at: 2026-10-21T02:12:51.122Z
+    from: draft
+    to: active
+    actor: goal-driver
+    reason: "triage: activate"
+fidelity:
+  verdict: faithful
+  reason: "fidelity judge: faithful"
+  at: 2026-10-21T02:12:51.122Z
 ---
