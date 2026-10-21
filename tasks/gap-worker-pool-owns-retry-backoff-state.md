@@ -44,16 +44,16 @@ CAUSE=worker-driver.ts still declares 2 retry/backoff state local(s); want 0 (ow
 
 ## AC
 
-- [ ] AC1 判据取真：在任务 worktree 内逐字执行 `quay goal show AC-914 --json` 取出的 criterion ⇒ exit 0 且 stdout 含 `OK: retry/backoff state owned by WorkerPool`（贴 criterion 全文与读数）
-- [ ] AC2 闭包局部变量清零：`grep -cE '^\s*(const|let) (retryState|backoffState)\b' plugin/scripts/worker-driver.ts || true` ⇒ `0`；同一条 grep 对 `git show develop:plugin/scripts/worker-driver.ts` 的临时副本 ⇒ `2`（零计数配套干跑，证明谓词非恒零）
-- [ ] AC3 类存在且唯一：`grep -cE '^export class WorkerPool\b' plugin/scripts/worker-pool.ts` ⇒ `1`
-- [ ] AC4 状态确由类私有拥有（不是搬家）：`grep -cE '^\s*(const|let) (retryState|backoffState)\b' plugin/scripts/worker-pool.ts || true` ⇒ `0`，且 `grep -cE '^\s*#(retryState|backoffState)\b' plugin/scripts/worker-pool.ts` ⇒ `2`，且 `plugin/test/worker-pool.test.mjs` 的 `Object.keys(new WorkerPool())` 断言 pass（贴三处读数）
-- [ ] AC5 转移经方法（行为面）：`node --experimental-strip-types --test plugin/test/worker-pool.test.mjs` ⇒ 0 fail，覆盖 Plan 第 3 步的 ①-⑤ 五个断言（贴 `# pass`/`# fail` 读数）
-- [ ] AC6 既有行为不回归：`node --experimental-strip-types --test plugin/test/worker-driver-fan-in-s05.test.mjs plugin/test/worker-driver.test.mjs` ⇒ 0 fail（re-export 面保持）
-- [ ] AC7 反向能取假（负控制，真载体）：按 Plan 第 5 步执行 ⇒ 改回后判据 exit 1 且 stderr 含 `CAUSE=worker-driver.ts still declares`；`cp` 恢复后 `md5sum` 与改前一致且判据 exit 0（贴两侧读数；⛔ 不用 `git checkout` 恢复）
-- [ ] AC8 注册完整：`bash plugin/scripts/capability-catalog.sh --json` ⇒ exit 0、`unclassified` 为 `0`、输出中含 `worker-pool.ts` 且其 `question` 非 null（贴三处读数）
-- [ ] AC9 scoped 门通过：`bash scripts/test.sh --for-task <id>` ⇒ exit 0；`node --experimental-strip-types plugin/scripts/select-static-checks-for-touches.ts --task <id> --check-registration --json` ⇒ `ok:true`（贴读数）
-- [ ] AC10 schema：`node plugin/scripts/task-schema-check.ts tasks/<id>.md` ⇒ exit 0
+- [x] AC1 判据取真：在任务 worktree 内逐字执行 `quay goal show AC-914 --json` 取出的 criterion ⇒ exit 0 且 stdout 含 `OK: retry/backoff state owned by WorkerPool`（贴 criterion 全文与读数）
+- [x] AC2 闭包局部变量清零：`grep -cE '^\s*(const|let) (retryState|backoffState)\b' plugin/scripts/worker-driver.ts || true` ⇒ `0`；同一条 grep 对 `git show develop:plugin/scripts/worker-driver.ts` 的临时副本 ⇒ `2`（零计数配套干跑，证明谓词非恒零）
+- [x] AC3 类存在且唯一：`grep -cE '^export class WorkerPool\b' plugin/scripts/worker-pool.ts` ⇒ `1`
+- [x] AC4 状态确由类私有拥有（不是搬家）：`grep -cE '^\s*(const|let) (retryState|backoffState)\b' plugin/scripts/worker-pool.ts || true` ⇒ `0`，且 `grep -cE '^\s*#(retryState|backoffState)\b' plugin/scripts/worker-pool.ts` ⇒ `2`，且 `plugin/test/worker-pool.test.mjs` 的 `Object.keys(new WorkerPool())` 断言 pass（贴三处读数）
+- [x] AC5 转移经方法（行为面）：`node --experimental-strip-types --test plugin/test/worker-pool.test.mjs` ⇒ 0 fail，覆盖 Plan 第 3 步的 ①-⑤ 五个断言（贴 `# pass`/`# fail` 读数）
+- [x] AC6 既有行为不回归：`node --experimental-strip-types --test plugin/test/worker-driver-fan-in-s05.test.mjs plugin/test/worker-driver.test.mjs` ⇒ 0 fail（re-export 面保持）
+- [x] AC7 反向能取假（负控制，真载体）：按 Plan 第 5 步执行 ⇒ 改回后判据 exit 1 且 stderr 含 `CAUSE=worker-driver.ts still declares`；`cp` 恢复后 `md5sum` 与改前一致且判据 exit 0（贴两侧读数；⛔ 不用 `git checkout` 恢复）
+- [x] AC8 注册完整：`bash plugin/scripts/capability-catalog.sh --json` ⇒ exit 0、`unclassified` 为 `0`、输出中含 `worker-pool.ts` 且其 `question` 非 null（贴三处读数）
+- [x] AC9 scoped 门通过：`bash scripts/test.sh --for-task <id>` ⇒ exit 0；`node --experimental-strip-types plugin/scripts/select-static-checks-for-touches.ts --task <id> --check-registration --json` ⇒ `ok:true`（贴读数）
+- [x] AC10 schema：`node plugin/scripts/task-schema-check.ts tasks/<id>.md` ⇒ exit 0
 
 ## DoD
 
