@@ -350,10 +350,14 @@ import {
   isQuickDeath,
   normalizeAssertionSignature,
   recordQuickDeathBackoff,
+  type ExitedNotLandedOutcome,
   type QuickDeathBackoffConfig,
   type QuickDeathCause,
+  type QuickDeathRecord,
+  type WorkerOutcomeEvent,
 } from "./worker-pool.ts";
 export {
+  BUILTIN_OUTCOME_HANDLER_IDS,
   ENV_FATAL_FANOUT_WINDOW_MS,
   QUICK_DEATH_BACKOFF_DEFAULT,
   WorkerPool,
@@ -361,6 +365,8 @@ export {
   backoffDelayMs,
   classifyQuickDeathCause,
   classifyQuickDeathEvidence,
+  environmentFatalHaltReason,
+  exitedNotLandedStopNote,
   isBackedOff,
   isQuickDeath,
   newQuickDeathBackoffState,
@@ -368,13 +374,22 @@ export {
   parseRateLimitResetAtMs,
   quickDeathSignature,
   recordQuickDeathBackoff,
+  registerBuiltinOutcomeHandlers,
 } from "./worker-pool.ts";
 export type {
+  ExitedNotLandedOutcome,
+  NeedsHumanDeclaration,
+  OutcomeDispatchReport,
+  OutcomeHandlerUnit,
+  OutcomeTransition,
+  OutcomeTransitionResult,
   QuickDeathBackoffConfig,
   QuickDeathBackoffState,
   QuickDeathCause,
   QuickDeathClassification,
   QuickDeathLiveness,
+  QuickDeathRecord,
+  WorkerOutcomeEvent,
 } from "./worker-pool.ts";
 // 可恢复长实验的簿记（manifest / checkpoint / 身份指纹 / resume 计划）住在 experiment-manifest.ts；
 // 本文件只 import 它的纯函数来把「哪些 stage 已付过钱」写进派发 prompt（见 experimentResumeClause）。
@@ -4187,28 +4202,8 @@ export function decideExitedNotLandedAction(
   };
 }
 
-/** stop-terminal 落 needs-human 的**完整判词**（`## Needs-Human` 小标题下的那条，⛔ 不是 `## Round` 里的诊断）。
- *
- *  gap-fan-in-baseline-comparison-blind-to-spec-reporter-misparks-develop-wide-red（AC4）：旧实现在这里
- *  写死「失败无法归因」，与同一句末尾 `${decision.reason}` 里 `parser attributed N failing file(s)`
- *  直接矛盾——**同一句话里**一边说归因不出、一边说读到了 N 个文件。措辞必须由 `failingTestFiles` 的
- *  条数复算（与 `suiteAttributionEvidence` 同一条纪律：判词只报判定器【读到了什么】）。
- *  ⛔ 纯函数：出参只由入参决定（Needs-Human 文案是验收面，必须可单测、可贴渲染文本）。 */
-export function exitedNotLandedStopNote(
-  decision: ExitedNotLandedDecision,
-  exemption: RetryExemptionJudgment,
-): string {
-  const attributed = exemption.failingTestFiles ?? [];
-  // 归因到 ≥1 个文件 ⇒ 真态是「读到了，但没能判为既存红 / 没能落地」。⛔ 这一段【逐字不得出现】「无法归因」
-  // ——AC4 的判据是「渲染文本不再包含该词」，连「⛔ 不是『无法归因』」这种否定式引用也算命中（判据按
-  // 字面量查，不按语义查：硬规则 2「按位置判定，不按关键词」在这里反过来用——要证明「不在场」，就不能
-  // 把那个词写进文本里当注脚）。
-  const head = attributed.length >= 1
-    ? `exited-not-landed：suite 红已归因到 ${attributed.length} 个失败文件（${attributed.slice(0, 3).join(", ")}${attributed.length > 3 ? ` 等 ${attributed.length} 个` : ""}）——` +
-      `这些红点没能被判为既存红（基线比较 / 落地未通过）⇒ 停止重派，⛔ 不再拿新会话撞同一堵墙`
-    : `exited-not-landed 失败无法归因（基建/契约疑似，非实现缺陷）——停止重派，⛔ 不再拿新会话撞同一堵墙`;
-  return `${head}：${decision.reason}`;
-}
+// `exitedNotLandedStopNote` 的形态已迁到 `worker-pool.ts`（AC-915：内置 stop-terminal 处理单元要用它，
+// 而 worker-pool.ts ⛔ 不得 import 本文件）——顶部 re-export 旧名字，消费者 import 面逐字不变。
 
 /** 续做 prompt（AC1/AC2）：复用已有 worktree（⛔ 不 create，create 撞已存在对象 fatal），并携带前一轮
  *  状态（分支提交 / AC 勾选 / 失败原因 / 前 N 次尝试清单 + suite 日志路径）供 worker 从保留 worktree
@@ -4339,22 +4334,9 @@ export function parseMaxRetries(raw: string | undefined): number {
 /** environment-fatal 的 halted_by 取值（控制态里的停机主体，人/`quay driver start` 拒绝时读它）。 */
 export const ENVIRONMENT_FATAL_HALTED_BY = "worker-driver:environment-fatal";
 
-/** 停机原因文本（含【签名原文】——AC2 要求 worker-control.json 的原因里能读到它）。
- *  `backoff` 是 recordQuickDeathBackoff 的环境级返回值：signature 给出签名名（含跨任务关联的
- *  `cross-task:<指纹>` 形态），evidence 给出原文摘录。⛔ 两者缺一 ⇒ 如实写「未捕获原文」，⛔ 不编造。 */
-export function environmentFatalHaltReason(backoff: {
-  signature: string | null;
-  evidence: string | null;
-  cause: QuickDeathCause | null;
-}): string {
-  const sig = backoff.signature ?? "unknown";
-  const ev = backoff.evidence != null && backoff.evidence.length > 0 ? backoff.evidence : "(未捕获原文)";
-  return (
-    `worker-driver halted: environment-fatal — 所有 worker 会以同一方式失败（不是任务自身缺陷）。` +
-    `签名: ${sig}；签名原文: ${ev}。` +
-    `⛔ 未翻转任何任务状态、⛔ 未计入任务的快速死亡计数。修复环境后: quay driver resume --kind worker`
-  );
-}
+// `environmentFatalHaltReason` 的形态已迁到 `worker-pool.ts`（AC-915：内置 environment-fatal 处理单元的
+// `plan()` 要用它）——顶部 re-export 旧名字，消费者 import 面逐字不变。`haltForEnvironmentFatal`（写控制态）
+// 留在本文件：那是磁盘动作，pool 只声明 `halt` 转移。
 
 /** environment-fatal ⇒ driver 自己 halt（写 `.quay/worker-control.json` halted:true + 原因与签名原文）。
  *  语义与 `quay driver drain` 同一条路（applyHalt ⇒ 派发环 spawn 前读到 halted ⇒ 停【新】派发，
@@ -5927,19 +5909,38 @@ export async function runResidentLoop(opts: ResidentOptions): Promise<number> {
    *     `failed: orphaned`，⛔ 返回值不入 results / 不进本函数 ⇒ 结构性不烧重试预算。理由：它是
    *     【基建事件】（driver 重启夹住了 worker 的退出、worker 尚无任何产出），不是任务质量信号——把它
    *     计入连续未落地会因基建原因把任务 park。 */
-  const onWorkerFinished = (rw: RunningWorker, r: WorkerRunResult): WorkerRunResult => {
-    rw.done = true;
-    results.push(r);
+  /** 一次 worker 终态的【归一化】（AC-915 / GOAL-909）：把 outcome + 判定结果翻译成
+   *  `WorkerOutcomeEvent`，并把既有观测面（`retry_exemptions` / `exited_not_landed_stops` / json 事件）
+   *  照原样落下。⛔ 这里【不】决定「应用什么转移」——那是注册在 WorkerPool 上的处理单元的事；
+   *  本函数只做读盘/判定与归一化（事件构造 ≠ 状态转移）。 */
+  const normalizeWorkerOutcome = (r: WorkerRunResult): WorkerOutcomeEvent => {
+    // 快速死亡判定已由 runOneWorker 在【写载体之前】做好（judgeQuickDeath 注入，见 QuickDeathJudge）
+    // ——这里直接消费它的结论，⛔ 不再重算（重算会二次记账，且与载体写下的那一份可能不一致）。
+    // 孤儿 adopt 路径的 outcome 不是 runOneWorker 产的（无该字段）⇒ 回落到原地的记录调用。
+    const quickDeath: QuickDeathRecord = r.quickDeath ?? workerPool.recordQuickDeath(
+      r.taskId, r.outcome.final_state, r.outcome.wall_clock_ms, Date.now(), maxRetries, backoffCfg,
+      (r.outcome as { orphan_pid_liveness?: OrphanPidLiveness | null }).orphan_pid_liveness ?? undefined,
+      (r.outcome as { selector_reason?: string | null }).selector_reason ?? null,
+      // 第二个判定面：worker stderr 的末尾捕获（runOneWorker 边转发边留的尾部窗口）。
+      (r.outcome as { worker_stderr_tail?: string | null }).worker_stderr_tail ?? null,
+    );
+
+    let exitedNotLanded: ExitedNotLandedOutcome | null = null;
     // 重试上限（gap-worker-driver-retry-cap-not-wired）：worker 结束若 exited-not-landed ⇒ 连续失败
     // 计数 + 达上限标 needs-human（ready→needs-human）。needsHuman 集合进 retryCapNotExhausted 过滤 ⇒
     // 下一轮不再重派（与 markNeedsHuman 的 status 翻转双保险——即使磁盘写失败，内存过滤也挡重派）。
     if (r.outcome.final_state === "exited-not-landed") {
-      // ff-not-fast-forward（分支滞后，非代码缺陷）不计重试上限——continue-cycle 识别为 transient
-      // 续做态，继续 CONTINUE 重派（merge develop 再 ff 自愈），⛔ 不把 3 次 branch-lag 误判成真缺陷
-      // 标 needs-human（那会静置 RECOMMENDED 不派，需人手动救回）。真缺陷（suite red / merge-develop
-      // 冲突 / anti-drift 违反 / ff 步的其它失败）仍照常计数达上限标 needs-human。
-      const needsHumanWrites: Array<{ id: string; reason: string; kind: NeedsHumanKind; countsOverride?: number }> = [];
-      if (!isFfNotFastForwardFailure(r.outcome)) {
+      if (isFfNotFastForwardFailure(r.outcome)) {
+        // ff-not-fast-forward（分支滞后，非代码缺陷）不计重试上限——continue-cycle 识别为 transient
+        // 续做态，继续 CONTINUE 重派（merge develop 再 ff 自愈），⛔ 不把 3 次 branch-lag 误判成真缺陷
+        // 标 needs-human（那会静置 RECOMMENDED 不派，需人手动救回）。真缺陷（suite red / merge-develop
+        // 冲突 / anti-drift 违反 / ff 步的其它失败）仍照常计数达上限标 needs-human。
+        // ⛔ `evaluated:false` 与「评估了、结论是某个种类」不同形（硬规则 3b）。
+        exitedNotLanded = {
+          evaluated: false, decisionKind: null, decisionReason: null, failingTestFiles: [],
+          deadlock: null, retryExempt: false, exemptionVerdict: null, exemptionReason: null,
+        };
+      } else {
         // 重试上限豁免（gap-retry-cap-flip-conflates-own-defect-with-unrelated-flaky）：suite red 的失败
         // 测试文件与任务 Touches/diff 无关 ∧ 断言签名跨任务复发（≥2 不同任务）⇒ 不计入该任务自身重试
         // 计数（继续重派，⛔ 不是无条件豁免）。三态判定结果经 writeRound 落 round 记录（AC5 生产载体），
@@ -5968,127 +5969,82 @@ export async function runResidentLoop(opts: ResidentOptions): Promise<number> {
         // （.quay/baseline-red-rounds.jsonl，fan-in 写）上判定：同一任务连续 `maxRetries` 轮撞**同一签名**
         // ⇒ 主动停派 + 落一段可读的「循环死锁」诊断（点名同签名的其它任务 + 建议落地顺序）。
         // ⛔ 它只回答「该不该再拿一个新会话去撞同一堵墙」：判定住在 worker-fan-in.ts（签名定义处），本处
-        // 只消费；`count-and-retry` 的诊断与计数仍由既有 advanceRetryCap 路径负责（下面 else 链）。
+        // 只消费；`count-and-retry` 的诊断与计数仍由既有 advanceRetryCap 路径负责。
         const deadlock = decision.kind === "count-and-retry"
           ? baselineRedDeadlockReading(rootDir, r.taskId, maxRetries)
-          : ({ kind: "continue", consecutive: 0 } as const);
-        if (deadlock.kind === "stop-terminal") {
+          : null;
+        let deadlockReading: ExitedNotLandedOutcome["deadlock"] = null;
+        if (deadlock != null && deadlock.kind === "stop-terminal") {
           exitedNotLandedStops.push({ task: r.taskId, kind: "stop-terminal", verdict: exemption.verdict, reason: deadlock.diagnostic, suiteLogHash: null });
           if (json) process.stdout.write(`${JSON.stringify({ event: "baseline-red-deadlock", task: r.taskId, ...deadlock })}\n`);
-          if (!workerPool.needsHuman(r.taskId)) {
-            needsHumanWrites.push({
-              id: r.taskId,
-              reason:
-                `${deadlock.diagnostic} — 停止自动重派（电路断路器：同一既存红签名连续 ${deadlock.consecutive} 轮未变）。` +
-                `⛔ 判据未放宽：本次新增 / 断言文本变化的红点仍然硬红（既存红等价豁免只覆盖「不变差」的方向）。`,
-              kind: "stop-terminal",
-              countsOverride: maxRetries,
-            });
-          }
-        } else if (decision.kind === "stop-terminal") {
-          // 停 = 不重派：内存集合（retryCapNotExhausted 过滤）挡下一轮 + 磁盘 status 翻转双保险。
-          // 预算照扣（counts 记满，⛔ 不因判不出而放行——与既有「照常计数」语义一致），只是不再重派。
-          // GOAL-035 AC-356：这里【不再】直接动 retryState.needsHuman/counts——latch + 预算覆写
-          // （countsOverride 把预算记满）一律交给 applyNeedsHumanTransition（批处理循环处调用）。
-          // 保留下面的 has() 守卫是为了「已 needs-human 的任务不再入队」，与旧行为一致。
-          if (!workerPool.needsHuman(r.taskId)) {
-            needsHumanWrites.push({
-              id: r.taskId,
-              // gap-park-reason-mislabels-ac-precheck-as-suite-red 点 3：停派种类由调用方传入 markNeedsHuman
-              // ⇒ 小标题/提交消息如实写「停派」而不再恒写「重试上限」。理由去掉「suite 红」绝对断言——
-              // 这条路径也可能是「没有 mechanical_fan_in（没跑过 suite）」的无法归因（point 2）。
-              // gap-fan-in-baseline-comparison-blind-to-spec-reporter-…：措辞上收到 `exitedNotLandedStopNote`
-              // （纯函数、可单测）——旧实现把「失败无法归因」写死在这里，与同一句末尾点名了 N 个失败文件的
-              // `decision.reason` 在同一行里自相矛盾。
-              reason: exitedNotLandedStopNote(decision, exemption),
-              kind: "stop-terminal",
-              countsOverride: maxRetries,
-            });
-          }
-        } else if (exemption.verdict !== "unrelated-flaky-exempt") {
-          for (const id of workerPool.advanceRetryCap([r.taskId], maxRetries)) {
-            // gap-full-suite-scope-oom-policy-stops-whole-suite-unattributable：OOM 归因的停派注记必须
-            // 写明峰值/上限/相位（而不是「基建/契约疑似」）——真因是可核的读数，读者据此知道该查内存/范围。
-            const reason = exemption.verdict === "suite-oom"
-              ? `worker-driver 连续 ${maxRetries} 次 exited-not-landed 未落地（重试上限）；本轮 suite 红已归因于 cgroup OOM：${exemption.reason}`
-              : `worker-driver 连续 ${maxRetries} 次 exited-not-landed 未落地（重试上限）`;
-            needsHumanWrites.push({ id, reason, kind: "retry-cap" });
-          }
+          deadlockReading = { kind: "stop-terminal", consecutive: deadlock.consecutive, diagnostic: deadlock.diagnostic };
         }
+        exitedNotLanded = {
+          evaluated: true,
+          decisionKind: decision.kind,
+          decisionReason: decision.reason,
+          failingTestFiles: exemption.failingTestFiles ?? [],
+          deadlock: deadlockReading,
+          retryExempt: exemption.verdict === "unrelated-flaky-exempt",
+          exemptionVerdict: exemption.verdict,
+          exemptionReason: exemption.reason ?? null,
+        };
       }
-      for (const w of needsHumanWrites) {
-        // GOAL-035：三条路径（stop-terminal / retry-cap / quick-death）的唯一 mutator + 唯一落盘入口。
-        // gap-mark-needs-human-commit-after-write：写盘即提交，返回 { id, ok, reason, committed }——
-        // ⛔ 不再丢弃 {ok,reason}；结果经 writeRound 落进 round 记录（生产载体），json 事件供测试/手动观测。
-        const nh = workerPool.applyNeedsHumanTransition(
-          rootDir,
-          w,
-          w.countsOverride !== undefined ? { countsOverride: w.countsOverride } : {},
-        );
+    }
+
+    return {
+      taskId: r.taskId,
+      finalState: r.outcome.final_state,
+      exitedNotLanded,
+      quickDeath,
+      maxRetries,
+      quickDeathMs: backoffCfg.quickDeathMs,
+    };
+  };
+
+  /** worker 终态记账（spawnSelected 与 adoptOrphanWorker 共用，⛔ 不各写一遍）：结果入 results，然后
+   *  **只做一件事**——把归一化结局交给 `WorkerPool` 的注册表（AC-915 / GOAL-909）：每个命中单元声明
+   *  自己的转移，`applyTransition` 统一落到私有状态。⛔ 本函数体内不再按结局种类分支（新增结局 / 决策
+   *  种类 = 从外部注册一个处理单元，不改本文件）。
+   *
+   *  AC4（gap-reconcile-books-exited-orphan-with-commits-as-failed-instead-of-adopting-its-fan-in）——
+   *  死孤儿的重试上限处置【已裁定】，两条路径据此分叉：
+   *   · 【有产出】死孤儿 ⇒ resumeExitedOrphanFanIn 真跑了机械 fan-in ⇒ 结果【与正常 worker 同一归宿】：
+   *     landed ⇒ completed（不计数，已落地）；fan-in 拒绝 ⇒ exited-not-landed（照常计数，含既有豁免：
+   *     ff-not-fast-forward / unrelated-flaky / AC 短路动作分叉）。理由：它现在是一条【被测量的落地尝试】，
+   *     是任务质量信号，理应按任务质量规则记账。
+   *   · 【无产出】死孤儿 ⇒ 保持今天的行为：finalizeOrphanDispatch 直接 appendOutcomeToFile 写
+   *     `failed: orphaned`，⛔ 返回值不入 results / 不进本函数 ⇒ 结构性不烧重试预算。理由：它是
+   *     【基建事件】（driver 重启夹住了 worker 的退出、worker 尚无任何产出），不是任务质量信号——把它
+   *     计入连续未落地会因基建原因把任务 park。 */
+  const onWorkerFinished = (rw: RunningWorker, r: WorkerRunResult): WorkerRunResult => {
+    rw.done = true;
+    results.push(r);
+    const event = normalizeWorkerOutcome(r);
+    const reports = workerPool.dispatchOutcome(event, { root: rootDir });
+    let halted = false;
+    for (const report of reports) {
+      // needs-human 落地的返回【永不丢弃】（旧 quick-death 调用点丢弃返回值 ⇒ 该转移在
+      // needsHumanResults / json 事件里结构上不可见，正是硬规则 9「可见性 ≠ 执行」的实例）。
+      for (const nh of report.needsHumanResults) {
         needsHumanResults.push(nh);
         if (json) process.stdout.write(`${JSON.stringify({ event: "needs-human", ...nh })}\n`);
       }
-    }
-    // 快速死亡退避（gap-worker-driver-selector-api-error-no-backoff）：worker 快速死亡（<quickDeathMs）
-    // ⇒ 对该 task 退避（backoffUntil，⛔ 不立即重派）；退避到上限（maxRetries）⇒ markNeedsHuman（复用
-    // 现有重试上限机制，⛔ 不无限退避）。needsHuman 集合与 markNeedsHuman 的 status 翻转双保险——
-    // 即使磁盘写失败，内存过滤（retryCapNotExhausted/notNeedsHuman）也挡重派。
-    // 孤儿 finalize 的 outcome 带 orphan_pid_liveness（/proc 实测取值）时一并传：⛔ 没测出来的死亡
-    // 不烧重试预算（AC4）。普通 worker 终态无该字段 ⇒ undefined ⇒ 行为不变。
-    // 成因分类（gap-worker-driver-counts-transient-rate-limit-as-fast-death-and-parks-task-needs-human）：
-    // 把 driver 【已捕获】的 selector_reason 交给纯分类器（⛔ 不新增探测面、⛔ 无语义判断）。
-    // transient-external（账号级限流/配额）⇒ 内部不计入连续上限、只退避 ⇒ 下面的 newlyNeedsHuman
-    // 分支对它永不成立（任务不再被终态停摆）；转而按错误文本自带的重置时刻退避重试。
-    // 快速死亡判定已由 runOneWorker 在【写载体之前】做好（judgeQuickDeath 注入，见 QuickDeathJudge）
-    // ——这里直接消费它的结论，⛔ 不再重算（重算会二次记账，且与载体写下的那一份可能不一致）。
-    // 孤儿 adopt 路径的 outcome 不是 runOneWorker 产的（无该字段）⇒ 回落到原地的记录调用。
-    const backoff = r.quickDeath ?? workerPool.recordQuickDeath(
-      r.taskId, r.outcome.final_state, r.outcome.wall_clock_ms, Date.now(), maxRetries, backoffCfg,
-      (r.outcome as { orphan_pid_liveness?: OrphanPidLiveness | null }).orphan_pid_liveness ?? undefined,
-      (r.outcome as { selector_reason?: string | null }).selector_reason ?? null,
-      // 第二个判定面：worker stderr 的末尾捕获（runOneWorker 边转发边留的尾部窗口）。
-      (r.outcome as { worker_stderr_tail?: string | null }).worker_stderr_tail ?? null,
-    );
-    // 环境级故障（gap-worker-quick-death-environment-fatal-halts-driver）：worker 在 60s 内以
-    // `model_not_found` / 401 / launcher ENOENT / DNS 不可解等【所有 worker 都会同样遇到】的方式死掉，
-    // 或窗口内 ≥2 个【不同任务】以同一签名死掉 ⇒ 停的是 driver，不是任务。
-    // ⛔ 不 markNeedsHuman（这正是本缺陷：逐个 park 任务直到池子清空，任务状态被动过、真因却丢了）；
-    // ⛔ 不动 counts（AC2：涉事任务的快速死亡计数不增加）。
-    if (backoff.cause === "environment-fatal") {
-      const reason = environmentFatalHaltReason(backoff);
-      const controlFile = haltForEnvironmentFatal(rootDir, reason);
-      if (json) {
-        process.stdout.write(
-          `${JSON.stringify({ event: "environment-fatal-halt", task: r.taskId, signature: backoff.signature, quick_death_ms: r.outcome.wall_clock_ms, control_file: controlFile, reason })}\n`,
-        );
+      if (report.transition.halt != null) {
+        halted = true;
+        // 环境级故障（gap-worker-quick-death-environment-fatal-halts-driver）：停机动作是调用方的
+        // 【磁盘】动作（写 `.quay/worker-control.json`），pool 只声明 halt 转移。
+        const controlFile = haltForEnvironmentFatal(rootDir, report.transition.halt.reason);
+        if (json) {
+          process.stdout.write(
+            `${JSON.stringify({ event: "environment-fatal-halt", task: r.taskId, signature: event.quickDeath?.signature ?? null, quick_death_ms: r.outcome.wall_clock_ms, control_file: controlFile, reason: report.transition.halt.reason })}\n`,
+          );
+        }
       }
-      return r;
     }
-    // 注记必须让读者一眼区分真因（plan item 4）：本路径【没有】exited-not-landed 尝试 ⇒ 注记的
-    // 「失败步/判词」行结构上缺省，若不带上快速死亡分类器的取值，这条翻转就只剩模板句、与其他路径
-    // 同形。故如实把分类器取值写进阻碍原因（ordinary / unclassifiable 两态；transient-external
-    // 结构上到不了这里）。⛔ 该分类器只管重试计数——它不再是「needs-human 成因字段」的一部分
-    // （gap-retire-needs-human-cause-enumeration 已删除该字段）。⛔ transient-external 不自动回捞
-    // （终态由人/上层裁决）。
-    // GOAL-035 修的两个真实缺陷（硬规则 9 的实例，不是比喻）：(1) 旧代码在此【丢弃】markNeedsHuman
-    // 的返回值 ⇒ 本路径的转移既不入 needsHumanResults、也不发 `needs-human` json 事件，在 production
-    // telemetry 里结构上不可见（另两条路径都留痕）；(2) 旧代码省略 kind 参数 ⇒ 落盘被静默误标成缺省
-    // `retry-cap`，即使原因文案描述的是快速死亡退避。现统一走 applyNeedsHumanTransition + 正确 kind
-    // `quick-death-backoff`，并像另两条路径一样 push 结果 + 发事件。
-    if (backoff.newlyNeedsHuman) {
-      const nh = workerPool.applyNeedsHumanTransition(rootDir, {
-        id: r.taskId,
-        reason:
-          `worker-driver 连续 ${maxRetries} 次 <${backoffCfg.quickDeathMs}ms 快速死亡（退避上限）` +
-          `；快速死亡分类：${backoff.cause ?? "unclassifiable"}`,
-        kind: "quick-death-backoff",
-      });
-      needsHumanResults.push(nh);
-      if (json) process.stdout.write(`${JSON.stringify({ event: "needs-human", ...nh })}\n`);
-    }
-    if (backoff.quickDeath && json) {
+    if (event.quickDeath?.quickDeath && json && !halted) {
       process.stdout.write(
-        `${JSON.stringify({ event: "worker-backoff", task: r.taskId, cause: backoff.cause, consecutive_quick_deaths: workerPool.consecutiveQuickDeaths(r.taskId), consecutive_transient_deaths: workerPool.consecutiveTransientDeaths(r.taskId), backed_off: backoff.backedOff, backoff_until: backoff.backoffUntil, needs_human: backoff.newlyNeedsHuman, wall_clock_ms: r.outcome.wall_clock_ms })}\n`,
+        `${JSON.stringify({ event: "worker-backoff", task: r.taskId, cause: event.quickDeath.cause, consecutive_quick_deaths: workerPool.consecutiveQuickDeaths(r.taskId), consecutive_transient_deaths: workerPool.consecutiveTransientDeaths(r.taskId), backed_off: event.quickDeath.backedOff, backoff_until: event.quickDeath.backoffUntil, needs_human: event.quickDeath.newlyNeedsHuman, wall_clock_ms: r.outcome.wall_clock_ms })}\n`,
       );
     }
     return r;
