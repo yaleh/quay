@@ -145,9 +145,18 @@ function gitRead(root: string, args: string[]): GitRead {
     });
     return { ok: true, stdout, error: null };
   } catch (e) {
-    const err = e as { stderr?: unknown; message?: string };
+    const err = e as { stderr?: unknown; status?: unknown; message?: string };
     const stderr = typeof err.stderr === "string" ? err.stderr.trim() : "";
-    return { ok: false, stdout: "", error: stderr || err.message || String(e) };
+    // A quiet git failure (e.g. `rev-parse --quiet` on an unknown ref) has EMPTY stderr; the raw
+    // exec message ("Command failed: git -C …") names the whole command line, which then lands in a
+    // carrier line as noise. Prefer stderr, then a short status, then the message.
+    const short =
+      stderr !== ""
+        ? stderr
+        : typeof err.status === "number"
+          ? `git ${args[0]} exited ${err.status}`
+          : err.message || String(e);
+    return { ok: false, stdout: "", error: short };
   }
 }
 
