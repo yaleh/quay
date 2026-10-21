@@ -2,7 +2,7 @@
 id: AC-909
 title: 3 个纯判定函数各恰 1 个定义处（countAcCheckboxes / stripTrailingFullWidthAnnotation /
   expandGlob）
-status: active
+status: achieved
 kind: criterion
 goal: GOAL-906
 criterion: "for n in countAcCheckboxes stripTrailingFullWidthAnnotation
@@ -23,6 +23,11 @@ statusLog:
     to: active
     actor: goal-driver
     reason: "triage: activate"
+  - at: 2026-10-21T03:34:06.023Z
+    from: active
+    to: achieved
+    actor: goal-driver
+    reason: "I2: criterion pass"
 fidelity:
   verdict: faithful
   reason: "fidelity judge: faithful"
