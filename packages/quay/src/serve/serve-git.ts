@@ -69,8 +69,9 @@ export const GIT_GRAPH_AUTO_LOAD_ROW_LIMIT = 2500;
  * contrast against the light canvas (--color-neutral-100 / #f8f4f4). Slot-indexed by column number:
  * column `c` draws with `var(--color-lane-(c % 8))`, so two ADJACENT columns always differ in hue.
  * Restored verbatim from the retired lane model (gap-git-graph-cross-column-edges-drawn-as-fixed-stubs-
- * not-anchored AC10 pins it to `git show 303a94950^:packages/quay/src/serve-git.ts` item-by-item; the
- * file has since been moved to `src/serve/`, so the HISTORICAL path is the one that rev carries).
+ * not-anchored AC10 pins it to the pre-move file in `git show 303a94950^` (that rev carries
+ * `packages/quay/src/` + `serve-git.ts`; the file now lives under `src/serve/`, so the HISTORICAL
+ * path is the one to ask that rev for) item-by-item).
  */
 export const GIT_GRAPH_LANE_PALETTE: readonly string[] = [
   "#b71c1c", // red

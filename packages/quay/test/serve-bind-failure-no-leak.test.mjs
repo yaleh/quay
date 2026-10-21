@@ -26,7 +26,7 @@ import net from "node:net";
 import { QUAY_NATIVE_CLI } from "./helpers/cli-entry.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const serveTs = path.join(__dirname, "..", "src", "serve", "1607");
+const serveTs = path.join(__dirname, "..", "src", "serve", "serve.ts");
 const nativeProviderDir = path.join(__dirname, "..", "..", "quay-native", "bin");
 const nativeBin = QUAY_NATIVE_CLI;
 

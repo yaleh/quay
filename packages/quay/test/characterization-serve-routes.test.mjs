@@ -43,7 +43,7 @@ import { QUAY_NATIVE_CLI } from "./helpers/cli-entry.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const SNAPSHOT_PATH = path.join(__dirname, "fixtures", "characterization", "serve-routes.snapshot.json");
-const HANDLERS_SRC = path.join(__dirname, "..", "src", "serve", "2637");
+const HANDLERS_SRC = path.join(__dirname, "..", "src", "serve", "serve-handlers.ts");
 const nativeBin = QUAY_NATIVE_CLI;
 const nativeProviderDir = path.join(__dirname, "..", "..", "quay-native", "bin");
 

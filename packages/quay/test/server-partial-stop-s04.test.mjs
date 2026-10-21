@@ -37,7 +37,7 @@ test("§6.9-1 mirror — a plain `server.close()` ends the host (the process exi
   // "the event loop drained" is observable as `exit` rather than inferred.
   const script = [
     `const { once } = await import("node:events");`,
-    `const { startServer } = await import(${JSON.stringify(path.join(__dirname, "..", "..", "quay", "src", "serve", "2934"))});`,
+    `const { startServer } = await import(${JSON.stringify(path.join(__dirname, "..", "..", "quay", "src", "serve", "serve.ts"))});`,
     `const src = await startServer({ port: 0, host: "127.0.0.1" });`,
     `const st = JSON.parse(await import("node:fs").then((fs) => fs.readFileSync(".quay/server.json", "utf8")));`,
     `console.log("READY " + JSON.stringify({ pid: st.pid, control: st.services.find((s) => s.name === "control").port }));`,

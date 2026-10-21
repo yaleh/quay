@@ -41,7 +41,7 @@ const nativeBin = QUAY_NATIVE_CLI;
 const nativeProviderDir = path.join(__dirname, "..", "..", "quay-native", "bin");
 // gap-serve-handlers-split-by-concern: the rendering code (pageStyles + verdict classes) moved to
 // serve-render.ts; the AC102-preserved zero-hex + token-derived invariant now pins that file.
-const SERVE_RENDER = path.join(__dirname, "..", "src", "serve", "2783");
+const SERVE_RENDER = path.join(__dirname, "..", "src", "serve", "serve-render.ts");
 
 function get(port, urlPath) {
   return new Promise((resolve, reject) => {

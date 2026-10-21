@@ -47,7 +47,7 @@ import { makeTmpDir } from "../../../plugin/test/helpers/tmp-workspace.mjs";
 
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const SERVE_DASHBOARD_SRC = path.join(__dirname, "..", "src", "serve", "2990");
+const SERVE_DASHBOARD_SRC = path.join(__dirname, "..", "src", "serve", "serve-dashboard.ts");
 const OBSERVATION_SRC = path.join(__dirname, "..", "src", "observation.ts");
 const KERNEL = path.resolve(__dirname, "..", "..", "..", "plugin", "scripts", "driver-runtime.ts");
 

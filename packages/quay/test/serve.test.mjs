@@ -2145,7 +2145,7 @@ async function main() {
       execFileSync("git", ["-C", gitRoot, "config", "user.email", "test@example.com"]);
       execFileSync("git", ["-C", gitRoot, "config", "user.name", "stale-test"]);
       fs.mkdirSync(path.join(gitRoot, "packages", "quay", "src"), { recursive: true });
-      fs.writeFileSync(path.join(gitRoot, "packages", "quay", "src", "serve", "129588"), "export const x = 1;\n");
+      fs.writeFileSync(path.join(gitRoot, "packages", "quay", "src", "serve", "serve.ts"), "export const x = 1;\n");
       execFileSync("git", ["-C", gitRoot, "add", "packages/quay/src/serve/serve.ts"]);
       execFileSync("git", ["-C", gitRoot, "commit", "-q", "-m", "stale-detection fixture"]);
       const staleStatus = computeStaleStatus(gitRoot);

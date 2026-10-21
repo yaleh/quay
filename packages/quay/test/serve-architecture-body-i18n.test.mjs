@@ -441,7 +441,7 @@ test("AC5: /architecture has exactly ONE render path, and it is language-aware",
   // comment names `renderArchitecturePage` in prose, so a naive match scores 3 and the arm would be
   // measuring the documentation rather than the code — the exact false-positive shape the hard rule
   // names. Stripping first makes the count a statement about call sites.
-  const src = fs.readFileSync(path.join(__dirname, "..", "src", "serve", "28367"), "utf8");
+  const src = fs.readFileSync(path.join(__dirname, "..", "src", "serve", "serve-architecture.ts"), "utf8");
   const code = src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^[ \t]*\/\/.*$/gm, "");
   const calls = [...code.matchAll(/renderArchitecturePage\(/g)].length;
   assert.equal(calls, 2, `one definition + one call site (got ${calls}) — a third would be an unwired path`);

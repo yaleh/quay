@@ -27,7 +27,7 @@ import { clearVerificationRoundCache } from "../src/observation.ts";
 import { QUAY_NATIVE_CLI } from "./helpers/cli-entry.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const SERVE_TESTS_SRC = path.join(__dirname, "..", "src", "serve", "1621");
+const SERVE_TESTS_SRC = path.join(__dirname, "..", "src", "serve", "serve-tests.ts");
 const FIXED_NOW_MS = 1_700_000_000_000; // deterministic wall-clock anchor for window math
 const nativeBin = QUAY_NATIVE_CLI;
 const nativeProviderDir = path.join(__dirname, "..", "..", "quay-native", "bin");

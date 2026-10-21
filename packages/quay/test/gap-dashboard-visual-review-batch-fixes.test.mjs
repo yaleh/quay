@@ -24,7 +24,7 @@ import { renderLiveCard, renderMgrCard, renderTestsCard, renderDashboardPage, sp
 import { QUAY_NATIVE_CLI } from "./helpers/cli-entry.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const SERVE_DASHBOARD_SRC = path.join(__dirname, "..", "src", "serve", "1606");
+const SERVE_DASHBOARD_SRC = path.join(__dirname, "..", "src", "serve", "serve-dashboard.ts");
 
 /** Minimal-but-shape-valid dashboard args (the same benign shape the sibling dashboard tests use). */
 function makeDashboardArgs(tasks = []) {

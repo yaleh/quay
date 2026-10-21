@@ -33,7 +33,7 @@ import { QUAY_NATIVE_CLI } from "./helpers/cli-entry.mjs";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const nativeBin = QUAY_NATIVE_CLI;
 const nativeProviderDir = path.join(__dirname, "..", "..", "quay-native", "bin");
-const SERVE_HANDLERS = path.join(__dirname, "..", "src", "serve", "2348");
+const SERVE_HANDLERS = path.join(__dirname, "..", "src", "serve", "serve-handlers.ts");
 
 function get(port, urlPath) {
   return new Promise((resolve, reject) => {

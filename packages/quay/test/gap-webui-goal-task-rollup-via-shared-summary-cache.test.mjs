@@ -144,7 +144,7 @@ test("AC6: goal rollup == sum of criteria; direct-on-goal task excluded", () => 
 // ── AC3 (static + unit): reuses the dashboard accessor, not a second Map ────────────────────────
 
 test("AC3a: serve-goal imports the dashboard cache accessor (never its own cache)", () => {
-  const src = fs.readFileSync(path.join(__dirname, "..", "src", "serve", "8303"), "utf8");
+  const src = fs.readFileSync(path.join(__dirname, "..", "src", "serve", "serve-goal.ts"), "utf8");
   assert.match(src, /import\s*\{[^}]*readTaskSummary[^}]*\}\s*from\s*"\.\/serve-dashboard\.ts"/,
     "serve-goal.ts imports readTaskSummary from ./serve-dashboard.ts");
   assert.doesNotMatch(src, /taskSummaryCache\s*=\s*new\s+Map|TASK_SUMMARY_CACHE_TTL_MS\s*=\s*\d/,

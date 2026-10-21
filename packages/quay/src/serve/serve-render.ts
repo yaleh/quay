@@ -484,7 +484,7 @@ const __webuiCssGlobal = globalThis as unknown as { __WEBUI_MODERNIST_CSS__?: st
 const WEBUI_MODERNIST_CSS = (() => {
   if (__webuiCssGlobal.__WEBUI_MODERNIST_CSS__ !== undefined) return __webuiCssGlobal.__WEBUI_MODERNIST_CSS__;
   try {
-    return readFileSync(new URL("./webui-modernist.css", import.meta.url), "utf8");
+    return readFileSync(new URL("../webui-modernist.css", import.meta.url), "utf8");
   } catch (err) {
     console.error(`[quay serve] webui-modernist.css missing:`, (err as Error).message);
     return "";

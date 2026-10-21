@@ -39,7 +39,7 @@ import { renderDashboardPage } from "../src/serve/serve-dashboard.ts";
 import { readTaskSummary, clearTaskSummaryCache } from "../src/serve/serve-handlers.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const SERVE_DASHBOARD_SRC = path.join(__dirname, "..", "src", "serve", "2836");
+const SERVE_DASHBOARD_SRC = path.join(__dirname, "..", "src", "serve", "serve-dashboard.ts");
 
 /** Minimal-but-shape-valid dashboard args: every nested field renderDashboardPage touches, with
  *  the sys/mgr/live probes at their benign no-op values so the render function is exercised as a

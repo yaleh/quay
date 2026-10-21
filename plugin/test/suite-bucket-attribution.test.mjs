@@ -234,7 +234,7 @@ test("AC1 negative control: a pure-M mechanism test is not attributed P", () => 
 
 test("AC1 negative control: a RELATIVE segmented run does not substring-match a bucket", () => {
   // delivery-status-single-source.test.mjs has
-  //   path.resolve(__dirname, "..", "..", "packages", "quay", "src", "serve", "12723")
+  //   path.resolve(__dirname, "..", "..", "packages", "quay", "src", "serve", "serve-send.ts")
   // — a RELATIVE run whose joined `../../packages/quay/src/serve/serve-send.ts` EMBEDS the P prefix. Signal ④
   // must NOT classify it (classifyPath would substring-match the embedded `packages/quay/src/` on a
   // `.`-prefixed run — a false P). The file stays M (its `plugin/scripts/transcript-delivery-check.ts`

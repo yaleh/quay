@@ -33,7 +33,7 @@ import { startServer } from "../src/serve/serve.ts";
 import { QUAY_NATIVE_CLI } from "./helpers/cli-entry.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const SERVE_DASHBOARD_SRC = path.join(__dirname, "..", "src", "serve", "1606");
+const SERVE_DASHBOARD_SRC = path.join(__dirname, "..", "src", "serve", "serve-dashboard.ts");
 const FIXED_NOW_MS = 1_700_000_000_000; // deterministic wall-clock anchor for window math
 
 /** The git PRIMARY checkout root — where the drivers write the REAL `.quay/*.jsonl` runtime data.

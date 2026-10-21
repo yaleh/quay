@@ -1621,7 +1621,8 @@ export const SESSIONS_LABELS: Record<SessionsKey, { en: string; zh: string }> = 
   // `profile（role 名）`; `权限模式（必填，无默认）` vs `权限模式（必填）`). ⛔ Collapsing either
   // pair into one row would have silently re-worded the resume form — ROW 5's `readFailed`
   // "one row, two call sites" licence applies ONLY when the rendered bytes are identical, and here
-  // they are not (verified against `git show HEAD:packages/quay/src/serve-sessions.ts` at that rev, not by
+  // they are not (verified against `git show HEAD` at that rev — paths then `packages/quay/src/` +
+  // `serve-sessions.ts` — not by
   // eye: the two differ by the trailing `，无默认` / `，必填` clause).
   newProfilePlaceholder: { en: "profile (role name, required)", zh: "profile（role 名，必填）" },
   resumeProfilePlaceholder: { en: "profile (role name)", zh: "profile（role 名）" },
