@@ -2,7 +2,7 @@
 id: gap-ac913-native-gate-layer-imports-zero
 title: AC-913 native 经 gate/ 层的 import 归零：mcp-server 两条改指 core/ 真身 + 「provider →
   quay/src/gate/」棘轮
-status: todo
+status: ready
 labels:
   - gap
 parent: null
