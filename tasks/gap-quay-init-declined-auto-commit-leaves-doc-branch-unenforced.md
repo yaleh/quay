@@ -2,7 +2,7 @@
 id: gap-quay-init-declined-auto-commit-leaves-doc-branch-unenforced
 title: quay:init auto-commit 被拒（非交互）后 doc-branch 不变量无人兜底——外部进程事后提交 laydown
   时主检出停在 develop、author 永不出现
-status: ready
+status: done
 labels:
   - gap
   - defect
