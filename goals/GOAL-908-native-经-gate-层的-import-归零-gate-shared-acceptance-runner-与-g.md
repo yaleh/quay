@@ -2,7 +2,7 @@
 id: GOAL-908
 title: native 经 gate/ 层的 import 归零：gate/shared/acceptance-runner 与
   gate/gate-event-store 改指 core 真身或 exports（provider→gate/ 棘轮为防回归手段）
-status: active
+status: achieved
 kind: goal
 origin: 架构分析改进方案 G-3（2026-10-21 会话，native 经 gate 层 2 条转发 shim import）
 activatedAt: 2026-10-21T08:17:51.119Z
@@ -12,6 +12,11 @@ statusLog:
     to: active
     actor: goal-cli
     reason: ""
+  - at: 2026-10-21T14:54:50.917Z
+    from: active
+    to: achieved
+    actor: goal-driver
+    reason: "I2: all ACs achieved + sufficiency covered"
 ---
 ## 背景
 

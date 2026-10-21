@@ -22,10 +22,17 @@ extra:
 3. 仅在调用方显式要求 project scope 时才提示它，且必须附「钉版本、不随 user 升级」警告。
 4. 加回归测试：mock installed_plugins.json 含 user scope 条目 → init 打印不含 `--scope project` / `--scope local` 建议；不含条目 → 仍并列建议三者（原行为）。
 
+## Implementation
+
+- `packages/quay/src/loaded-version.ts`：新增 `userScopedInstallReading(homeDir)`（三态 present / absent / not-evaluated）；共用的注册表解析器改为**保留**无版本条目（`version: null`），使「这条 scope 有没有安装」与「那条安装是哪一版」成为两个问题；`highestVersionEntry` 跳过无版本条目。
+- `packages/quay/src/init.ts`：`printInstallSteps({ homeDir, requestedScope })` 先读安装记录。present ⇒ `✓ ALREADY INSTALLED at user scope: quay@quay <version>`，不再出现 project/local 安装命令；仅在 `requestedScope` 显式指定 project/local 时才打印该命令，且同一段带 `PINS the version` / `does NOT follow user-scope upgrades` 警告。absent ⇒ 原三方并列配方（逐字保留）。not-evaluated ⇒ 自己的句子 + 检查命令，⛔ 不与 absent 同形。
+- `plugin/skills/init/SKILL.md`：安装段落改为「步骤 0 先查 user scope 记录」，project/local 定位为显式钉版本覆盖。
+- `packages/quay/test/init-install-steps-user-scope.test.mjs`：fixture home 覆盖 present / explicit-project / versionless / absent / missing-record / unreadable-record / highest-version 七例。
+
 ## Acceptance Criteria
 
-- [ ] printInstallSteps 的输出在「quay@quay 已有 user scope 条目」时，不再并列建议 project/local，而是提示「已有 user scope 安装（版本 X）」；且 project 选项仅在显式要求时出现并带钉版本警告。
-- [ ] 回归测试覆盖两种输入（user scope 已存在 / 不存在），断言打印内容按上条区分，且可 grep 核对。
+- [x] printInstallSteps 的输出在「quay@quay 已有 user scope 条目」时，不再并列建议 project/local，而是提示「已有 user scope 安装（版本 X）」；且 project 选项仅在显式要求时出现并带钉版本警告。
+- [x] 回归测试覆盖两种输入（user scope 已存在 / 不存在），断言打印内容按上条区分，且可 grep 核对。
 
 ## Definition of Done
 
@@ -36,4 +43,6 @@ extra:
 
 - tasks/gap-init-install-steps-must-detect-existing-user-scope-install.md
 - packages/quay/src/init.ts
+- packages/quay/src/loaded-version.ts
+- packages/quay/test/init-install-steps-user-scope.test.mjs
 - plugin/skills/init/SKILL.md
