@@ -50,15 +50,15 @@ test("hit: the exempted github-client.ts status-literal proposal is recognised a
 });
 
 test("hit: the GOAL-036 flipGoal statusLog defect is `known-not-yet-filed`, NOT `exempted`", () => {
-  const r = isKnownExemption({ concern_kind: "other-boundary", concern: "goal-store.ts flipGoal never appends statusLog on the disposeOld->achieved path", scope: { in_scope: ["packages/quay/src/goal-store.ts"] } });
+  const r = isKnownExemption({ concern_kind: "other-boundary", concern: "goal-store.ts flipGoal never appends statusLog on the disposeOld->achieved path", scope: { in_scope: ["packages/quay/src/core/goal-store.ts"] } });
   assert.equal(r.status, "known-not-yet-filed", "a recorded-but-unfiled defect must NOT read like a decided exemption");
   assert.equal(r.matched_entry.id, "dm-002-flipgoal-disposeold-statuslog");
 });
 
 test("dominance: when a location is both exempted and defect-flagged, `exempted` wins", () => {
-  const r = isKnownExemption({ concern_kind: "other-boundary", files: ["packages/quay/src/goal-store.ts"] }, [
-    { id: "a", type: "known-not-yet-filed", concern_kinds: ["other-boundary"], files: ["packages/quay/src/goal-store.ts"], reason: "x".repeat(50), source: "tasks/x.md" },
-    { id: "b", type: "exempted", concern_kinds: ["other-boundary"], files: ["packages/quay/src/goal-store.ts"], reason: "y".repeat(50), source: "goals/y.md" },
+  const r = isKnownExemption({ concern_kind: "other-boundary", files: ["packages/quay/src/core/goal-store.ts"] }, [
+    { id: "a", type: "known-not-yet-filed", concern_kinds: ["other-boundary"], files: ["packages/quay/src/core/goal-store.ts"], reason: "x".repeat(50), source: "tasks/x.md" },
+    { id: "b", type: "exempted", concern_kinds: ["other-boundary"], files: ["packages/quay/src/core/goal-store.ts"], reason: "y".repeat(50), source: "goals/y.md" },
   ]);
   assert.equal(r.status, "exempted");
   assert.equal(r.candidates_considered, 2, "both hits are counted, not hidden by the sort");

@@ -130,8 +130,8 @@ test("the criterion is extracted verbatim and no longer anchors on any line of g
 
   // The re-anchor itself: the planted regression is the import PREPENDED to goal-store.ts's own text.
   assert.ok(
-    /NEGCTL_LINE\+rd\(path\.join\(src,"goal-store\.ts"\)\)/.test(c),
-    "the planted regression must be the retired import prepended to goal-store.ts, not a rewrite of it",
+    /NEGCTL_LINE\+rd\(path\.join\(src,"core","goal-store\.ts"\)\)/.test(c),
+    "the planted regression must be the retired import prepended to goal-store.ts, not a rewrite of it — and it must read the CANONICAL module (src/core/goal-store.ts): AC-911 deleted the src-root forwarding shim, so a criterion still pointing at the shim anchors on a file that no longer exists (硬规则 4c)",
   );
 
   // The strengthening: exactly one, not at-least-one.
