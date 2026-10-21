@@ -2,7 +2,7 @@
 id: gap-design-evolution-readings-path-identity-and-split-move
 title: 设计演进读数例程首个生产读数暴露的三处仪器缺陷：RM2 按文件名归并且未把 worktree 绝对路径归一为仓库相对路径；形态 2
   有计数无出处；RM1 的「单次最大中心变动提交」漏掉拆成多次提交的搬家
-status: ready
+status: done
 labels:
   - gap
   - defect
