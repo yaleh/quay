@@ -87,3 +87,11 @@ AC-915 在 goal-driver 下一轮读数为 `pass`，且达成形态是**扩展点
 - plugin/scripts/worker-driver.ts
 - plugin/test/worker-pool-extension-point.test.mjs
 - tasks/gap-worker-pool-outcome-handler-extension-point.md
+
+## Blocker
+
+**2026-10-21T20:03:01.929Z — worker 未落地（exited-not-landed）**
+
+- 未落地原因：step=suite: AssertionError [ERR_ASSERTION]: 调用点按 kind 分叉（stop-terminal 独立分支）
+- run_id：wk-prod-anchor
+- session_id：f8671b9e-95be-48d3-a188-12ca1602600f
