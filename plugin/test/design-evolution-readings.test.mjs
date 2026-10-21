@@ -32,13 +32,16 @@ import {
   PREDICATE_SELFCHECK_PATH,
   PREDICATE_SELFCHECK_SAMPLE,
   buildReadings,
+  createPathIdentityResolver,
   globToRegExp,
   lineCountAt,
   measureSubsystem,
+  oppositeSignCommits,
   parseDesignEvolutionSection,
   readStandaloneSection,
   resolveCommit,
   scanContention,
+  stripWorktreePrefix,
 } from "../scripts/design-evolution-readings.ts";
 
 // ── fixture repo ────────────────────────────────────────────────────────────────────────────────────
@@ -185,6 +188,63 @@ test("measureSubsystem — the window's single largest central change is NAMED (
   assert.equal(r.denominator, 5);
 });
 
+test("measureSubsystem — a move SPLIT ACROSS commits is listed in full by oppositeSignCommits (缺陷 3)", (t) => {
+  const repo = makeRepo(t);
+  repo.write("mod/central.ts", 400);
+  repo.write("mod/pool.ts", 0);
+  const base = repo.commit("baseline");
+  // A genuine GROWTH commit: the largest |centralΔ| in the window (+300, nothing leaves).
+  repo.write("mod/central.ts", 700);
+  const growthSha = repo.commit("real growth");
+  // The move, split in two: neither half is the largest single change.
+  repo.write("mod/central.ts", 500); // -200
+  repo.write("mod/pool.ts", 200); // +200
+  const moveA = repo.commit("move part 1");
+  repo.write("mod/central.ts", 440); // -60
+  repo.write("mod/pool.ts", 260); // +60
+  const moveB = repo.commit("move part 2");
+
+  const r = measureSubsystem(repo.dir, {
+    name: "m",
+    baseline: base,
+    central: [{ atBaseline: "mod/central.ts", atHead: "mod/central.ts" }],
+    modules: ["mod/*.ts"],
+  });
+  assert.equal(r.evaluated, true, r.reason ?? "");
+  // The single-largest field still names the growth — that is exactly why it could not reveal the move.
+  assert.equal(r.maxCentralChangeCommit.sha, growthSha);
+  assert.equal(r.maxCentralChangeCommit.centralDelta, 300);
+  // The raw sign pair catches BOTH halves, with no threshold, and does not misreport the growth.
+  const shas = r.oppositeSignCommits.map((c) => c.sha);
+  assert.deepEqual(shas, [moveB, moveA], "newest first, every central-shrinking / module-growing commit");
+  assert.deepEqual(
+    r.oppositeSignCommits.map((c) => [c.centralDelta, c.nonCentralDelta]),
+    [
+      [-60, 60],
+      [-200, 200],
+    ],
+  );
+  assert.equal(shas.includes(growthSha), false, "a real growth has nonCentralΔ 0 ⇒ not a move");
+  assert.equal(r.oppositeSignCommits[0].subject, "move part 2", "the commit title comes along");
+});
+
+test("measureSubsystem — oppositeSignCommits is [] (not null) when the window has no move", (t) => {
+  const repo = makeRepo(t);
+  repo.write("mod/central.ts", 10);
+  repo.write("mod/other.ts", 10);
+  const base = repo.commit("baseline");
+  repo.write("mod/central.ts", 20);
+  repo.write("mod/other.ts", 20);
+  repo.commit("both grow");
+  const r = measureSubsystem(repo.dir, {
+    name: "m",
+    baseline: base,
+    central: [{ atBaseline: "mod/central.ts", atHead: "mod/central.ts" }],
+    modules: ["mod/*.ts"],
+  });
+  assert.deepEqual(r.oppositeSignCommits, []);
+});
+
 // ── ② three-valued rules ──────────────────────────────────────────────────────────────────────────
 
 test("measureSubsystem — an unresolvable baseline is NOT-EVALUATED, share null", (t) => {
@@ -312,6 +372,8 @@ function writeCarrier(t, records) {
 
 test("scanContention — both shapes count once per RECORD (a conflict quoted twice is one conflict)", (t) => {
   const { dir, file } = writeCarrier(t, [
+    // Form 1 names the file by BARE basename; form 2 quotes the full path. The tracked-file index is
+    // what ties them together — one file must not become two keys (and two files must not merge).
     { task: "t1", ts: "T1", selector_reason: "避开 worker-driver.ts 的争用" },
     {
       task: "t2",
@@ -322,15 +384,22 @@ test("scanContention — both shapes count once per RECORD (a conflict quoted tw
     },
     { task: "t3", ts: "T3", selector_reason: "unrelated wording about worker-driver.ts" },
   ]);
-  const r = scanContention(dir, { carrierPath: file });
+  const r = scanContention(dir, {
+    carrierPath: file,
+    repoPaths: ["plugin/scripts/worker-driver.ts", "plugin/scripts/goal-driver.ts"],
+  });
   assert.equal(r.evaluated, true, r.reason ?? "");
   assert.equal(r.carrierRecords, 3);
   assert.deepEqual(r.predicateSelfCheck, { ok: true, form1: true, form2: true });
-  const wd = r.files.find((f) => f.file === "worker-driver.ts");
+  assert.deepEqual(r.pathIndex, { available: true, files: 2 });
+  const wd = r.files.find((f) => f.file === "plugin/scripts/worker-driver.ts");
+  assert.ok(wd, "the bare basename and the full path must be ONE key");
+  assert.equal(wd.basename, "worker-driver.ts");
   assert.equal(wd.form1, 1, "t3 has no contention token ⇒ not form 1");
   assert.equal(wd.form2, 1, "the same conflict text appears twice in ONE record ⇒ still 1");
   assert.equal(wd.total, 2);
-  const gd = r.files.find((f) => f.file === "goal-driver.ts");
+  assert.deepEqual(wd.observedPaths, ["plugin/scripts/worker-driver.ts"], "provenance is repo-relative");
+  const gd = r.files.find((f) => f.file === "plugin/scripts/goal-driver.ts");
   assert.equal(gd.form1, 1);
   assert.deepEqual(gd.samples.form1.map((s) => s.task), ["t2"]);
   // Samples carry the task id AND the time (AC4's required sample shape).
@@ -394,8 +463,85 @@ test("scanContention — a BROKEN predicate turns the reading into evaluated:fal
 test("the built-in self-check sample really carries both shapes (the predicate's known-true oracle)", () => {
   assert.deepEqual(DEFAULT_CONTENTION_PREDICATES.form1Files(PREDICATE_SELFCHECK_SAMPLE), [PREDICATE_SELFCHECK_PATH]);
   assert.deepEqual(DEFAULT_CONTENTION_PREDICATES.form2Files(PREDICATE_SELFCHECK_SAMPLE), [PREDICATE_SELFCHECK_PATH]);
+  assert.equal(PREDICATE_SELFCHECK_PATH.includes("/"), true, "the sample is spelled repo-relative in BOTH shapes");
   assert.equal(CONTENTION_TOKENS.includes("contention"), true);
   assert.equal(CONTENTION_TOKENS.includes("避开"), true);
+});
+
+// ── path identity (缺陷 1 / AC1 / AC2) ───────────────────────────────────────────────────────────
+
+test("stripWorktreePrefix — a worktree root is not part of a file's identity", () => {
+  assert.equal(stripWorktreePrefix("/home/yale/work/quay-worktrees/gap-x/plugin/scripts/a.ts"), "plugin/scripts/a.ts");
+  assert.equal(stripWorktreePrefix("///home/yale/work/quay-worktrees/gap-x/plugin/scripts/a.ts"), "plugin/scripts/a.ts");
+  assert.equal(stripWorktreePrefix("quay-worktrees/gap-x/plugin/scripts/a.ts"), "plugin/scripts/a.ts");
+  assert.equal(stripWorktreePrefix("plugin/scripts/a.ts"), null);
+});
+
+test("createPathIdentityResolver — checkout root, worktree root, redundant slashes and a bare name are ONE identity", () => {
+  const resolver = createPathIdentityResolver("/repo", { repoPaths: ["plugin/scripts/worker-driver.ts"] });
+  const want = "plugin/scripts/worker-driver.ts";
+  for (const spelling of [
+    "plugin/scripts/worker-driver.ts",
+    "./plugin/scripts/worker-driver.ts",
+    "/repo/plugin/scripts/worker-driver.ts",
+    "///repo/plugin/scripts/worker-driver.ts",
+    "/home/yale/work/quay-worktrees/gap-x/plugin/scripts/worker-driver.ts",
+    "///home/yale/work/quay-worktrees/gap-x/plugin/scripts/worker-driver.ts",
+    "quay-worktrees/gap-x/plugin/scripts/worker-driver.ts",
+    "worker-driver.ts", // bare: the index says which file this is
+  ]) {
+    assert.deepEqual(resolver.resolve(spelling), { rel: want, reason: null }, spelling);
+  }
+});
+
+test("createPathIdentityResolver — unresolvable/ambiguous tokens are REFUSED by name, never mapped to some key", () => {
+  const resolver = createPathIdentityResolver("/repo", {
+    repoPaths: ["plugin/scripts/index.ts", "packages/quay/src/index.ts", "plugin/scripts/only.ts"],
+  });
+  // An absolute path outside every known root cannot be made repo-relative.
+  const outside = resolver.resolve("/tmp/somewhere/index.ts");
+  assert.equal(outside.rel, null);
+  assert.match(outside.reason, /absolute-path-outside-repo/);
+  // A bare name matching TWO repo paths has no identity it could honestly pick.
+  const ambiguous = resolver.resolve("index.ts");
+  assert.equal(ambiguous.rel, null);
+  assert.match(ambiguous.reason, /ambiguous-bare-name: index\.ts matches 2 repo paths/);
+  // A bare name matching exactly one path resolves.
+  assert.deepEqual(resolver.resolve("only.ts"), { rel: "plugin/scripts/only.ts", reason: null });
+});
+
+test("AC2 (fixture negative control) — two same-named files in DIFFERENT directories are TWO keys, one each", (t) => {
+  const { dir, file } = writeCarrier(t, [
+    { task: "a", ts: "T1", mechanical_fan_in: { reason: "Merge conflict in a/index.ts" } },
+    { task: "b", ts: "T2", mechanical_fan_in: { reason: "Merge conflict in b/index.ts" } },
+  ]);
+  const r = scanContention(dir, { carrierPath: file });
+  assert.equal(r.evaluated, true, r.reason ?? "");
+  // ⛔ A basename-keyed implementation reports ONE key with form2=2 here and fails this assertion.
+  assert.deepEqual(
+    r.files.map((f) => [f.file, f.basename, f.form2]).sort(),
+    [
+      ["a/index.ts", "index.ts", 1],
+      ["b/index.ts", "index.ts", 1],
+    ],
+  );
+  // Provenance is present for form 2 too (缺陷 2).
+  assert.deepEqual(r.files.find((f) => f.file === "a/index.ts").observedPaths, ["a/index.ts"]);
+  assert.deepEqual(r.files.find((f) => f.file === "b/index.ts").observedPaths, ["b/index.ts"]);
+});
+
+test("scanContention — a hit that cannot be mapped lands in unresolvedPaths and does NOT merge into another key", (t) => {
+  const { dir, file } = writeCarrier(t, [
+    { task: "a", ts: "T1", mechanical_fan_in: { reason: "Merge conflict in plugin/scripts/log.ts" } },
+    { task: "b", ts: "T2", mechanical_fan_in: { reason: "Merge conflict in /tmp/elsewhere/log.ts" } },
+  ]);
+  const r = scanContention(dir, { carrierPath: file });
+  assert.equal(r.files.length, 1);
+  assert.equal(r.files[0].file, "plugin/scripts/log.ts");
+  assert.equal(r.files[0].form2, 1, "the /tmp path must not be counted under this key");
+  assert.equal(r.unresolvedPaths.length, 1);
+  assert.equal(r.unresolvedPaths[0].raw, "/tmp/elsewhere/log.ts");
+  assert.match(r.unresolvedPaths[0].reason, /absolute-path-outside-repo/);
 });
 
 // ── the round record ─────────────────────────────────────────────────────────────────────────────
@@ -424,7 +570,7 @@ test("buildReadings — both RMs land in ONE record; evaluated is the AND of the
   assert.equal(rec.evaluated, true);
   assert.equal(rec.rm1.subsystems[0].centralDelta, 10);
   assert.equal(rec.rm2.evaluated, true);
-  assert.equal(rec.rm2.files[0].file, "central.ts");
+  assert.equal(rec.rm2.files[0].file, "mod/central.ts", "the key is the repo-relative path, not the basename");
   assert.notEqual(rec.rm1.subsystems[0].maxCentralChangeCommit, null, "AC5: the largest central commit must be present");
   assert.equal(rec.carrierRecords, 1, "the watermark the NEXT round starts from");
 
@@ -581,7 +727,7 @@ test("AC3 (real history) — serve's OLD central path alone reads NOT-EVALUATED 
   assert.equal(r.share, null);
 });
 
-test("AC4 (real carrier) — the finding's contention counts are reproduced (carrier growth ⇒ ≥)", (t) => {
+test("AC1/AC3 (real carrier) — repo-relative identity, non-empty provenance, no worktree/absolute spellings", (t) => {
   const carrier = path.join(REPO_ROOT, ".quay", "worker-outcome.jsonl");
   if (!fs.existsSync(carrier)) {
     t.skip(".quay/worker-outcome.jsonl is absent (gitignored runtime ledger)");
@@ -591,15 +737,67 @@ test("AC4 (real carrier) — the finding's contention counts are reproduced (car
   assert.equal(r.evaluated, true, r.reason ?? "");
   assert.equal(r.predicateSelfCheck.ok, true, "the built-in known-true sample must pass on the real run");
   const at = (f) => r.files.find((x) => x.file === f);
-  const wd = at("worker-driver.ts");
+
+  // AC1: the item's KEY is the repo-relative path, and its provenance never carries a worktree root
+  // or a leading slash (the first production record's observedPaths were ALL worktree absolute paths).
+  const wd = at("plugin/scripts/worker-driver.ts");
+  assert.ok(wd, "worker-driver.ts must be keyed by its repo-relative path");
+  assert.equal(wd.basename, "worker-driver.ts");
+  assert.ok(wd.observedPaths.length > 0, "observedPaths must not be empty");
+  for (const p of wd.observedPaths) {
+    assert.equal(p.startsWith("/"), false, `observedPaths carries an absolute path: ${p}`);
+    assert.equal(p.includes("quay-worktrees/"), false, `observedPaths carries a worktree path: ${p}`);
+    assert.equal(p, "plugin/scripts/worker-driver.ts");
+  }
+  assert.equal(r.files.some((f) => f.file === "worker-driver.ts"), false, "the basename must not survive as its own key");
   assert.ok(wd.form1 >= 5, `worker-driver.ts form1 ${wd.form1} < 5`);
   assert.ok(wd.form2 >= 6, `worker-driver.ts form2 ${wd.form2} < 6`);
   assert.ok(wd.samples.form1.length === Math.min(3, wd.form1));
   assert.ok(wd.samples.form1.every((s) => s.task !== null && s.ts !== null));
-  const wf = at("worker-fan-in.ts");
+
+  // AC3: form 2 has provenance too — the path a reader can re-check against the tree.
+  const ratchet = at("docs/analysis/quay-init-closure-ratchet.baseline.json");
+  assert.ok(ratchet, "the ratchet baseline must be keyed by its repo-relative path");
+  assert.ok(ratchet.form2 >= 4, `form2 ${ratchet.form2} < 4`);
+  assert.deepEqual(ratchet.observedPaths, ["docs/analysis/quay-init-closure-ratchet.baseline.json"]);
+
+  const wf = at("plugin/scripts/worker-fan-in.ts");
   assert.ok(wf.form1 >= 1, `worker-fan-in.ts form1 ${wf.form1} < 1`);
   assert.equal(wf.form2, 0);
-  const gd = at("goal-driver.ts");
+  const gd = at("plugin/scripts/goal-driver.ts");
   assert.ok(gd.form1 >= 2, `goal-driver.ts form1 ${gd.form1} < 2`);
   assert.equal(gd.form2, 0);
+});
+
+test("AC4 (real history) — a move split across commits is visible; the real growth is not misreported", (t) => {
+  if (!hasCommit("2440b52d0") || !hasCommit("f19a95371") || !hasCommit("024f9d7f2") || !hasCommit("3ad17ac26")) {
+    t.skip("the real worker-history refs are not in this clone");
+    return;
+  }
+  const r = measureSubsystem(REPO_ROOT, {
+    name: "worker",
+    baseline: "2440b52d0",
+    head: "HEAD",
+    central: [
+      { atBaseline: "plugin/scripts/worker-driver.ts", atHead: "plugin/scripts/worker-driver.ts" },
+      { atBaseline: "plugin/scripts/worker-fan-in.ts", atHead: "plugin/scripts/worker-fan-in.ts" },
+    ],
+    modules: ["plugin/scripts/*worker*.ts", "plugin/scripts/*pool*.ts", "plugin/scripts/*dispatch*.ts", "plugin/scripts/*fan-in*.ts"],
+  });
+  assert.equal(r.evaluated, true, r.reason ?? "");
+  const shas = r.oppositeSignCommits.map((c) => c.sha.replace(/^(.{9}).*/, "$1"));
+  assert.ok(shas.includes("f19a95371"), `f19a95371 missing from ${JSON.stringify(shas)}`);
+  assert.ok(shas.includes("024f9d7f2"), `024f9d7f2 missing from ${JSON.stringify(shas)}`);
+  assert.equal(shas.includes("3ad17ac26"), false, "a real growth (centralΔ>0, nonCentralΔ=0) must not be listed");
+  const move = r.oppositeSignCommits.find((c) => c.sha.startsWith("f19a95371"));
+  assert.equal(move.centralDelta, -356);
+  assert.equal(move.nonCentralDelta, 505);
+  assert.deepEqual([move.subject.length > 0], [true]);
+});
+
+test("oppositeSignCommits — a git read failure is null, not 「没有搬家」", () => {
+  assert.equal(
+    oppositeSignCommits(REPO_ROOT, "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef", "HEAD", new Set(), () => false),
+    null,
+  );
 });

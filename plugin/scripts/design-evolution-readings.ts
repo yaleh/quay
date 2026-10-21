@@ -13,6 +13,9 @@
 //   • RM2 — 热点文件的并发争用. Two shapes only, both read from `.quay/worker-outcome.jsonl`:
 //     (1) the dispatcher's `selector_reason` names the file AND carries a contention token;
 //     (2) the record contains `Merge conflict in <path>` (the raw git merge output).
+//     Identities are REPO-RELATIVE paths (worktree roots and checkout roots stripped); a basename is
+//     display only, and a path that cannot be mapped is reported in `unresolvedPaths` instead of
+//     being folded into some other key.
 //
 // ── WHY THIS FILE EXISTS AT ALL (the finding it replaces) ─────────────────────────────────────────
 // Both readings were ONCE-OFF commands pasted into the body of
@@ -45,8 +48,10 @@
 // Following `arch-coverage-report.ts` / `arch-cycle-report` (the same family): a non-zero share or a
 // non-zero contention count is the reading's CONTENT, ⛔ not `failed`. No ratchet here, and no numeric
 // threshold that would auto-judge "is this a move?" (硬规则 4 推论: no thresholds for an unmeasured
-// cost structure). Instead every line carries the window's single largest central-file commit so a
-// reader can SEE a move in the data rather than trust a classifier.
+// cost structure). Instead every line carries the window's single largest central-file commit AND
+// every commit whose central files shrank while a module file grew (`oppositeSignCommits`, a raw sign
+// pair, not a classifier) — a move split across several commits is invisible to the single-largest
+// field alone (measured: GOAL-909's two commits each stayed below the largest, so the move vanished).
 //
 // ── SIBLING, NOT DUPLICATE ────────────────────────────────────────────────────────────────────────
 // `arch-coverage-report.ts` answers "who analyzed which language"; `arch-cycle-report` answers
@@ -201,6 +206,130 @@ export function listTrackedPaths(root: string, rev: string): string[] | null {
   return r.stdout.split("\0").filter((p) => p !== "");
 }
 
+// ── Path identity: every observation is keyed by a REPO-RELATIVE path ─────────────────────────────
+//
+// WHY THIS EXISTS (task gap-design-evolution-readings-path-identity-and-split-move, 2026-10-22):
+// the first production RM2 record aggregated by BASENAME (`split("/").pop()`), so
+//   • two unrelated files called `index.ts` in different directories became ONE key, and
+//   • one file spelled three ways (`worker-driver.ts`, `plugin/scripts/worker-driver.ts`,
+//     `///home/yale/work/quay-worktrees/<task>/plugin/scripts/worker-driver.ts`) became THREE keys —
+//     the first record's `observedPaths` was a list of worktree absolute paths, i.e. not a
+//     repo-relative identity a reader can re-check against the tree (硬规则 4b: prefer the direct
+//     quantity, not a lossy projection of it).
+// So: strip a worktree root (`<…>/quay-worktrees/<task-id>/`), strip a known checkout root, strip
+// redundant leading slashes, and key on what remains. A bare basename carries no directory identity
+// and is resolved against the repo's tracked paths; when that is ambiguous or impossible, the token
+// goes to `unresolvedPaths` — ⛔ never merged into some other key (硬规则 3b: 「读不懂」 must not
+// share a shape with 「读到了」).
+
+/** `<anything>/quay-worktrees/<task-id>/<repo-relative>` → `<repo-relative>` (null when absent). */
+export function stripWorktreePrefix(p: string): string | null {
+  const m = /(?:^|\/)quay-worktrees\/[^/]+\/(.+)$/.exec(p);
+  return m === null ? null : m[1];
+}
+
+export interface PathIdentity {
+  /** The repo-relative path, or null when the token cannot be mapped (then `reason` names why). */
+  rel: string | null;
+  reason: string | null;
+}
+
+export interface PathIdentityResolver {
+  /** Map ONE observed path token to a repo-relative path (or a named refusal). */
+  resolve(raw: string): PathIdentity;
+  /** Tracked paths available for bare-name disambiguation; null when no index could be read. */
+  indexSize: number | null;
+}
+
+/** Absolute spellings of `root` (the path itself and its realpath). A checkout reached through a
+ *  symlinked parent has more than one spelling, and the carrier contains both. */
+function rootSpellings(root: string): string[] {
+  const abs = path.resolve(root);
+  const out = new Set<string>();
+  const push = (p: string) => {
+    const stripped = p.replace(/\/+$/, "").replace(/^\/+/, "");
+    if (stripped !== "") out.add(stripped);
+  };
+  push(abs);
+  try {
+    push(fs.realpathSync(abs));
+  } catch {
+    // A root that cannot be realpath'd still has its literal spelling.
+  }
+  return [...out];
+}
+
+/** Build the token → repo-relative-path mapper used by RM2.
+ *
+ *  `repoPaths` (test seam) OVERRIDES the index; passing `null` declares "no index available". When
+ *  absent the index is `git ls-tree -r HEAD` in `root` — the real reading always has it, and a
+ *  fixture without git simply keeps a bare token as its literal spelling (never as another file). */
+export function createPathIdentityResolver(
+  root: string,
+  opts: { repoPaths?: readonly string[] | null } = {},
+): PathIdentityResolver {
+  const roots = rootSpellings(root);
+  const index: readonly string[] | null =
+    opts.repoPaths !== undefined ? opts.repoPaths : listTrackedPaths(root, "HEAD");
+  const byBasename = new Map<string, string[]>();
+  const tracked = index === null ? null : new Set(index);
+  if (index !== null) {
+    for (const p of index) {
+      const b = path.posix.basename(p);
+      const arr = byBasename.get(b);
+      if (arr === undefined) byBasename.set(b, [p]);
+      else arr.push(p);
+    }
+  }
+
+  const resolve = (rawInput: string): PathIdentity => {
+    const raw = rawInput.trim();
+    if (raw === "") return { rel: null, reason: "empty-path-token" };
+    const p = raw.replace(/^(\.\/)+/, "");
+
+    // A worktree path is the same file as the main checkout's — strip it BEFORE anything else, so the
+    // absolute/relative distinction below never sees `quay-worktrees` as a repo directory.
+    const wt = stripWorktreePrefix(p);
+    if (wt !== null) {
+      const rel = wt.replace(/\/{2,}/g, "/").replace(/\/+$/, "");
+      return rel === "" ? { rel: null, reason: `empty-after-worktree-prefix: ${raw}` } : { rel, reason: null };
+    }
+
+    if (p.startsWith("/")) {
+      const stripped = p.replace(/^\/+/, "").replace(/\/{2,}/g, "/");
+      for (const rootRel of roots) {
+        if (stripped === rootRel) return { rel: null, reason: `points-at-repo-root: ${raw}` };
+        if (stripped.startsWith(rootRel + "/")) return { rel: stripped.slice(rootRel.length + 1), reason: null };
+      }
+      // NOT under a known root — but another checkout of THIS repo is still this repo. Take the
+      // longest suffix that is a tracked path, so an alternate/symlinked checkout spelling
+      // (`/home/…/quay/plugin/scripts/x.ts` next to `/data/…/quay/…`) identifies the same file. The
+      // tracked index is the authority here; ⛔ no guess beyond "this exact path exists in the tree".
+      if (tracked !== null) {
+        const segs = stripped.split("/");
+        for (let i = 0; i < segs.length; i++) {
+          const candidate = segs.slice(i).join("/");
+          if (tracked.has(candidate)) return { rel: candidate, reason: null };
+        }
+      }
+      return { rel: null, reason: `absolute-path-outside-repo: ${raw}` };
+    }
+
+    if (!p.includes("/")) {
+      // A bare basename carries no identity. Only the index can say WHICH file it names.
+      if (index === null) return { rel: p, reason: null };
+      const matches = byBasename.get(p) ?? [];
+      if (matches.length === 1) return { rel: matches[0], reason: null };
+      if (matches.length === 0) return { rel: p, reason: null }; // possibly a since-deleted file
+      const named = matches.slice(0, 3).join(", ") + (matches.length > 3 ? ", …" : "");
+      return { rel: null, reason: `ambiguous-bare-name: ${raw} matches ${matches.length} repo paths (${named})` };
+    }
+    return { rel: p.replace(/\/{2,}/g, "/").replace(/\/+$/, ""), reason: null };
+  };
+
+  return { resolve, indexSize: index === null ? null : index.length };
+}
+
 /** Line count of `relPath` at `rev` — `wc -l` semantics (newline count), the same caliber the
  *  finding used. Returns null ONLY when the file is absent at that rev; a git failure while the file
  *  is present throws up as `{lines:null, error}` so the caller can tell the two apart. */
@@ -234,6 +363,18 @@ export interface MaxCentralChangeCommit {
   nonCentralDelta: number;
 }
 
+/** A commit that SHRANK the central files while GROWING a module file — the signature of a move.
+ *  ⛔ No threshold and no classifier: the predicate is the raw sign pair, and every match is listed
+ *  (task gap-design-evolution-readings-path-identity-and-split-move 缺陷 3: a move split across
+ *  commits never wins 「single largest |centralΔ|」, so it was invisible). */
+export interface OppositeSignCommit {
+  sha: string;
+  centralDelta: number;
+  nonCentralDelta: number;
+  /** First line of the commit message (which commit did the moving). */
+  subject: string;
+}
+
 export interface SubsystemReading {
   name: string;
   evaluated: boolean;
@@ -263,6 +404,10 @@ export interface SubsystemReading {
    *  classifier decides "this is a move" (硬规则 4 推论) — the raw commit is put in front of the
    *  reader. */
   maxCentralChangeCommit: MaxCentralChangeCommit | null;
+  /** EVERY commit in the window with `centralΔ < 0 && nonCentralΔ > 0` — a move split across several
+   *  commits is invisible to the single-largest field above (缺陷 3). Empty list = none; null = the
+   *  git read failed (⛔ never conflated with 「没有搬家」). */
+  oppositeSignCommits: OppositeSignCommit[] | null;
 }
 
 /** `share` (0..1) → percent, rounded to 2 decimals. ⛔ Never applied twice — a double ×100 reads
@@ -306,6 +451,7 @@ export function measureSubsystem(
     moduleFileCount: null,
     newModuleFiles: null,
     maxCentralChangeCommit: null,
+    oppositeSignCommits: null,
   };
   const unevaluated = (reason: string, extra: Partial<SubsystemReading> = {}): SubsystemReading => ({
     ...base,
@@ -376,20 +522,13 @@ export function measureSubsystem(
     nonCentralDelta += (h.lines ?? 0) - (b.lines ?? 0);
   }
 
-  const denominator = centralDelta + nonCentralDelta;
-  if (denominator <= 0) {
-    return unevaluated(
-      `non-positive-denominator: centralΔ=${centralDelta} nonCentralΔ=${nonCentralDelta} (sum ${denominator}) — a share of a non-growing subsystem is not a reading`,
-      { ...shas, centralFiles, moduleFileCount: moduleFiles.length, newModuleFiles },
-    );
-  }
-  const share = centralDelta / denominator;
-
-  // The window's single largest central-file change. `--no-renames` keeps the per-commit paths
-  // literal (with rename detection a moved file appears as `old => new`, which matches neither
-  // declared path and would silently read 0). Merge commits contribute no numstat by git's default —
-  // the changes are counted on the commits that actually carry them, which is what we want.
-  const maxCentralChangeCommit = largestCentralChangeCommit(
+  // The commit-level view is RAW GIT HISTORY: it stays readable even when the share itself is
+  // not-evaluated (a non-positive denominator must not also erase the moves that produced it).
+  // `--no-renames` keeps the per-commit paths literal (with rename detection a moved file appears as
+  // `old => new`, which matches neither declared path and would silently read 0). Merge commits
+  // contribute no numstat by git's default — the changes are counted on the commits that actually
+  // carry them, which is what we want.
+  const commitStats = readCommitStats(
     root,
     baseline.sha,
     head.sha,
@@ -397,6 +536,17 @@ export function measureSubsystem(
     matchesModules,
     [...new Set([...centralPaths, ...spec.modules])],
   );
+  const maxCentralChangeCommit = pickLargestCentralChange(commitStats);
+  const opposite = pickOppositeSignCommits(commitStats);
+
+  const denominator = centralDelta + nonCentralDelta;
+  if (denominator <= 0) {
+    return unevaluated(
+      `non-positive-denominator: centralΔ=${centralDelta} nonCentralΔ=${nonCentralDelta} (sum ${denominator}) — a share of a non-growing subsystem is not a reading`,
+      { ...shas, centralFiles, moduleFileCount: moduleFiles.length, newModuleFiles, maxCentralChangeCommit, oppositeSignCommits: opposite },
+    );
+  }
+  const share = centralDelta / denominator;
 
   return {
     ...base,
@@ -413,31 +563,41 @@ export function measureSubsystem(
     moduleFileCount: moduleFiles.length,
     newModuleFiles,
     maxCentralChangeCommit,
+    oppositeSignCommits: opposite,
   };
 }
 
-/** Per-commit net line deltas via `git log --numstat --no-renames`, reduced to the largest
- *  |centralΔ|. Exported for the test seam; never throws (a git failure yields null — the reading
- *  itself is still valid, only this auxiliary field is not, and null says so). */
-export function largestCentralChangeCommit(
+interface CommitStat {
+  sha: string;
+  subject: string;
+  centralDelta: number;
+  nonCentralDelta: number;
+}
+
+/** Per-commit net line deltas via `git log --numstat --no-renames`, newest first.
+ *  Returns null when the git read fails — ⛔ never `[]` (「读不懂」 must not look like 「没有提交」). */
+function readCommitStats(
   root: string,
   baseSha: string,
   headSha: string,
   centralPaths: ReadonlySet<string>,
   matchesModules: (p: string) => boolean,
   pathFilter: string[] = [],
-): MaxCentralChangeCommit | null {
+): CommitStat[] | null {
   // The pathspec is a SUPERSET filter (git's `*` crosses `/`, ours does not), so it can only remove
   // rows we would have ignored anyway — it keeps `--numstat` from streaming every file of every
   // commit in a months-long window.
   const spec = pathFilter.length > 0 ? ["--", ...pathFilter] : [];
-  const r = gitRead(root, ["log", "--numstat", "--no-renames", "--format=%x00%H", `${baseSha}..${headSha}`, ...spec]);
+  const r = gitRead(root, ["log", "--numstat", "--no-renames", "--format=%x00%H%x1f%s", `${baseSha}..${headSha}`, ...spec]);
   if (!r.ok) return null;
-  let best: MaxCentralChangeCommit | null = null;
+  const out: CommitStat[] = [];
   for (const chunk of r.stdout.split("\0")) {
     const lines = chunk.split("\n");
-    const sha = (lines.shift() ?? "").trim();
+    const header = lines.shift() ?? "";
+    const sep = header.indexOf("\x1f");
+    const sha = (sep === -1 ? header : header.slice(0, sep)).trim();
     if (sha === "") continue;
+    const subject = sep === -1 ? "" : header.slice(sep + 1).trim();
     let centralDelta = 0;
     let nonCentralDelta = 0;
     for (const row of lines) {
@@ -449,17 +609,66 @@ export function largestCentralChangeCommit(
       if (centralPaths.has(file)) centralDelta += delta;
       else if (matchesModules(file)) nonCentralDelta += delta;
     }
-    if (best === null || Math.abs(centralDelta) > Math.abs(best.centralDelta)) {
-      best = { sha, centralDelta, nonCentralDelta };
+    out.push({ sha, subject, centralDelta, nonCentralDelta });
+  }
+  return out;
+}
+
+function pickLargestCentralChange(stats: CommitStat[] | null): MaxCentralChangeCommit | null {
+  if (stats === null) return null;
+  let best: MaxCentralChangeCommit | null = null;
+  for (const s of stats) {
+    if (best === null || Math.abs(s.centralDelta) > Math.abs(best.centralDelta)) {
+      best = { sha: s.sha, centralDelta: s.centralDelta, nonCentralDelta: s.nonCentralDelta };
     }
   }
   return best;
 }
 
+/** EVERY commit whose central files shrank while a module file grew — no threshold, so a move split
+ *  across commits is listed in full (缺陷 3). `[]` = none; `null` = the git read failed. */
+function pickOppositeSignCommits(stats: CommitStat[] | null): OppositeSignCommit[] | null {
+  if (stats === null) return null;
+  return stats
+    .filter((s) => s.centralDelta < 0 && s.nonCentralDelta > 0)
+    .map((s) => ({ sha: s.sha, centralDelta: s.centralDelta, nonCentralDelta: s.nonCentralDelta, subject: s.subject }));
+}
+
+/** The single largest-|centralΔ| commit in the window. Exported for the test seam; never throws (a
+ *  git failure yields null — the reading itself is still valid, only this auxiliary field is not). */
+export function largestCentralChangeCommit(
+  root: string,
+  baseSha: string,
+  headSha: string,
+  centralPaths: ReadonlySet<string>,
+  matchesModules: (p: string) => boolean,
+  pathFilter: string[] = [],
+): MaxCentralChangeCommit | null {
+  return pickLargestCentralChange(readCommitStats(root, baseSha, headSha, centralPaths, matchesModules, pathFilter));
+}
+
+/** Every central-shrinking / module-growing commit in the window. Exported for the test seam. */
+export function oppositeSignCommits(
+  root: string,
+  baseSha: string,
+  headSha: string,
+  centralPaths: ReadonlySet<string>,
+  matchesModules: (p: string) => boolean,
+  pathFilter: string[] = [],
+): OppositeSignCommit[] | null {
+  return pickOppositeSignCommits(readCommitStats(root, baseSha, headSha, centralPaths, matchesModules, pathFilter));
+}
+
 // ── RM2 ────────────────────────────────────────────────────────────────────────────────────────────
 
-/** A path-looking token. Deliberately extension-anchored: prose mentions of a symbol are not files. */
-const PATH_TOKEN_RE = /[A-Za-z0-9_./-]+\.(?:ts|tsx|mts|cts|js|mjs|cjs|sh|json|jsonl|md|yml|yaml|py|toml)/g;
+/** A path-looking token. Deliberately extension-anchored: prose mentions of a symbol are not files.
+ *  ⚠️ The alternatives are ordered LONGEST-FIRST and the match must end on a word boundary: JS regex
+ *  alternation is first-match, so `js|json` would turn `foo.baseline.json` into `foo.baseline.js`
+ *  and then no key could ever be found for it — that is exactly why the FIRST production record
+ *  reported a form-2 count with an EMPTY `observedPaths` (task ...-path-identity-and-split-move
+ *  缺陷 2: the count had no provenance because the extension was silently truncated). */
+const PATH_TOKEN_RE =
+  /[A-Za-z0-9_./-]+\.(?:jsonl|json|tsx|mts|cts|ts|mjs|cjs|js|yaml|yml|sh|md|py|toml)\b/g;
 const MERGE_CONFLICT_RE = /Merge conflict in ([^\s\\"']+)/g;
 
 /** The two RM2 predicates, injectable ONLY so a test can break them (AC4's negative control). The
@@ -480,15 +689,15 @@ export function collectStrings(value: unknown, out: string[] = []): string[] {
   return out;
 }
 
-/** Basenames of the path tokens in `text` (deduped, order preserved). Aggregating by BASENAME is
- *  deliberate: form 1 names `worker-driver.ts` while form 2 quotes `plugin/scripts/worker-driver.ts`;
- *  one file must not appear twice. The full spellings seen are preserved on the reading
- *  (`observedPaths`), so the merge is visible rather than hidden. */
+/** The path tokens in `text` AS SPELLED (deduped, order preserved). ⛔ The predicates must NOT fold
+ *  to basenames here: identity is decided in ONE place (`createPathIdentityResolver`), which knows
+ *  the repo roots and the tracked-file index. Folding here is what merged two `index.ts` and split
+ *  one `worker-driver.ts` into three keys (缺陷 1). */
 export function pathTokens(text: string): string[] {
   const seen = new Set<string>();
   for (const m of text.match(PATH_TOKEN_RE) ?? []) {
-    const bare = m.replace(/^\.\//, "").split("/").pop();
-    if (bare !== undefined && bare !== "") seen.add(bare);
+    const t = m.replace(/^(\.\/)+/, "");
+    if (t !== "") seen.add(t);
   }
   return [...seen];
 }
@@ -504,8 +713,8 @@ export const DEFAULT_CONTENTION_PREDICATES: ContentionPredicates = {
     const files = new Set<string>();
     for (const s of collectStrings(record)) {
       for (const m of s.matchAll(MERGE_CONFLICT_RE)) {
-        const bare = m[1].replace(/^\.\//, "").split("/").pop();
-        if (bare !== undefined && bare !== "") files.add(bare);
+        const p = m[1].replace(/^(\.\/)+/, "");
+        if (p !== "") files.add(p);
       }
     }
     return [...files];
@@ -519,13 +728,15 @@ export const PREDICATE_SELFCHECK_SAMPLE: Record<string, unknown> = Object.freeze
   task: "predicate-selfcheck-sample",
   ts: "1970-01-01T00:00:00.000Z",
   selector_reason:
-    "内置已知为真的样本行：避开 design-evolution-selfcheck.ts 的争用（predicate self-check, not a real dispatch）",
+    "内置已知为真的样本行：避开 plugin/scripts/design-evolution-selfcheck.ts 的争用（predicate self-check, not a real dispatch）",
   mechanical_fan_in: {
     reason:
       "Auto-merging plugin/scripts/design-evolution-selfcheck.ts\nCONFLICT (content): Merge conflict in plugin/scripts/design-evolution-selfcheck.ts",
   },
 });
-export const PREDICATE_SELFCHECK_PATH = "design-evolution-selfcheck.ts";
+/** Both shapes spell the sample the SAME way, because identity is now the full repo-relative path
+ *  (a bare basename would need the index — and the self-check must not depend on one). */
+export const PREDICATE_SELFCHECK_PATH = "plugin/scripts/design-evolution-selfcheck.ts";
 
 export interface ContentionSample {
   task: string | null;
@@ -534,7 +745,11 @@ export interface ContentionSample {
 }
 
 export interface ContentionFileReading {
+  /** THE KEY: a repo-relative path. ⛔ Not a basename — two different files that happen to share one
+   *  must not merge (缺陷 1). */
   file: string;
+  /** `basename(file)`, carried for display only. */
+  basename: string;
   form1: number;
   form2: number;
   total: number;
@@ -542,8 +757,17 @@ export interface ContentionFileReading {
   windowForm2: number;
   windowTotal: number;
   samples: { form1: ContentionSample[]; form2: ContentionSample[] };
-  /** The distinct path spellings folded into this basename key. */
+  /** The repo-relative spellings observed for this key (every raw spelling is normalized first, so a
+   *  worktree absolute path never appears here). ⛔ Always non-empty: a count with no provenance is
+   *  not checkable by its reader (缺陷 2 / 硬规则 3b). */
   observedPaths: string[];
+}
+
+/** A path token that could not be mapped to a repo-relative path. Reported SEPARATELY — ⛔ never
+ *  folded into some other key, and never silently dropped. */
+export interface UnresolvedPath {
+  raw: string;
+  reason: string;
 }
 
 export interface ContentionReading {
@@ -556,7 +780,12 @@ export interface ContentionReading {
   windowStartIndex: number;
   windowSource: "previous-record" | "no-previous-record" | "previous-record-unusable";
   topN: number;
+  /** Whether a tracked-file index was available to disambiguate BARE basenames. Without one a bare
+   *  name keeps its literal spelling (it is not merged into another file's key either way). */
+  pathIndex: { available: boolean; files: number | null };
   predicateSelfCheck: { ok: boolean; form1: boolean; form2: boolean };
+  /** Paths that named a contention hot file but could not be mapped to a repo-relative path. */
+  unresolvedPaths: UnresolvedPath[];
   files: ContentionFileReading[];
 }
 
@@ -568,6 +797,11 @@ export interface ContentionOptions {
   windowStartIndex?: number;
   windowSource?: ContentionReading["windowSource"];
   predicates?: ContentionPredicates;
+  /** Test seam: the tracked-path index for bare-name disambiguation. `null` = "no index". Omitted ⇒
+   *  read `git ls-tree -r HEAD` in `root`. */
+  repoPaths?: readonly string[] | null;
+  /** Test seam: supply the whole resolver (overrides `repoPaths`). */
+  resolver?: PathIdentityResolver;
 }
 
 /** Scan the worker-outcome ledger for the two contention shapes. Never throws.
@@ -583,6 +817,10 @@ export function scanContention(root: string, opts: ContentionOptions = {}): Cont
   const predicates = opts.predicates ?? DEFAULT_CONTENTION_PREDICATES;
   const windowStartIndex = opts.windowStartIndex ?? 0;
   const windowSource = opts.windowSource ?? "no-previous-record";
+  const resolver =
+    opts.resolver ??
+    createPathIdentityResolver(path.resolve(root), opts.repoPaths !== undefined ? { repoPaths: opts.repoPaths } : {});
+  const pathIndex = { available: resolver.indexSize !== null, files: resolver.indexSize };
 
   // THE SELF-CHECK RUNS FIRST — before the carrier is read, so a broken predicate can never be
   // reported as "zero contention". Both shapes must hit the built-in sample.
@@ -600,7 +838,9 @@ export function scanContention(root: string, opts: ContentionOptions = {}): Cont
       windowStartIndex,
       windowSource,
       topN,
+      pathIndex,
       predicateSelfCheck,
+      unresolvedPaths: [],
       files: [],
     };
   }
@@ -621,7 +861,9 @@ export function scanContention(root: string, opts: ContentionOptions = {}): Cont
       windowStartIndex,
       windowSource,
       topN,
+      pathIndex,
       predicateSelfCheck,
+      unresolvedPaths: [],
       files: [],
     };
   }
@@ -654,6 +896,11 @@ export function scanContention(root: string, opts: ContentionOptions = {}): Cont
       a = { form1: 0, form2: 0, windowForm1: 0, windowForm2: 0, samples: { form1: [], form2: [] }, observedPaths: new Set() };
       agg.set(file, a);
     }
+    // A count ALWAYS carries its own provenance: the repo-relative key itself is the path a reader
+    // can go and check. (The provenance pass below can only see tokens the extension regex
+    // recognises; a hit like `Merge conflict in .gitignore` has no extension, and used to leave the
+    // count with an EMPTY observedPaths — 缺陷 2's exact shape.)
+    a.observedPaths.add(file);
     a[form]++;
     if (index >= windowStartIndex) {
       if (form === "form1") a.windowForm1++;
@@ -668,23 +915,48 @@ export function scanContention(root: string, opts: ContentionOptions = {}): Cont
     }
   };
 
+  // A raw token that cannot be mapped is NOT dropped silently: it is reported by name (硬规则 3b).
+  const unresolved = new Map<string, string>();
+
+  /** Predicate output → repo-relative keys, deduped. A single record that spells one file two ways
+   *  (`worker-driver.ts` and `plugin/scripts/worker-driver.ts`) must count ONCE. */
+  const resolveHits = (raws: string[]): string[] => {
+    const keys = new Set<string>();
+    for (const raw of raws) {
+      const id = resolver.resolve(raw);
+      if (id.rel !== null) keys.add(id.rel);
+      else if (!unresolved.has(raw)) unresolved.set(raw, id.reason ?? "unresolved");
+    }
+    return [...keys];
+  };
+
   rows.forEach((record, index) => {
     // ONE record contributes at most ONE hit per file per shape.
-    for (const file of new Set(predicates.form1Files(record))) touch(file, record, index, "form1");
-    for (const file of new Set(predicates.form2Files(record))) touch(file, record, index, "form2");
-    // Remember every spelling observed for the basename key (form 1's short name vs form 2's path).
+    for (const file of resolveHits(predicates.form1Files(record))) touch(file, record, index, "form1");
+    for (const file of resolveHits(predicates.form2Files(record))) touch(file, record, index, "form2");
+  });
+
+  // PROVENANCE, pass 2: every spelling observed anywhere in the record that maps onto a counted key.
+  // Normalized first, so `observedPaths` never carries a worktree absolute path (缺陷 1/2).
+  const hotBasenames = new Set([...agg.keys()].map((f) => path.posix.basename(f)));
+  for (const record of rows) {
     for (const s of collectStrings(record)) {
-      for (const m of s.match(PATH_TOKEN_RE) ?? []) {
-        const bare = m.replace(/^\.\//, "").split("/").pop();
-        const a = bare === undefined ? undefined : agg.get(bare);
-        if (a !== undefined) a.observedPaths.add(m.replace(/^\.\//, ""));
+      for (const token of s.match(PATH_TOKEN_RE) ?? []) {
+        const raw = token.replace(/^(\.\/)+/, "");
+        const id = resolver.resolve(raw);
+        if (id.rel !== null) {
+          agg.get(id.rel)?.observedPaths.add(id.rel);
+        } else if (hotBasenames.has(path.posix.basename(raw)) && !unresolved.has(raw)) {
+          unresolved.set(raw, id.reason ?? "unresolved");
+        }
       }
     }
-  });
+  }
 
   const files: ContentionFileReading[] = [...agg.entries()]
     .map(([file, a]) => ({
       file,
+      basename: path.posix.basename(file),
       form1: a.form1,
       form2: a.form2,
       total: a.form1 + a.form2,
@@ -706,7 +978,9 @@ export function scanContention(root: string, opts: ContentionOptions = {}): Cont
     windowStartIndex,
     windowSource,
     topN,
+    pathIndex,
     predicateSelfCheck,
+    unresolvedPaths: [...unresolved.entries()].map(([raw, reason]) => ({ raw, reason })).sort((a, b) => a.raw.localeCompare(b.raw)),
     files,
   };
 }
@@ -1032,6 +1306,14 @@ function renderHuman(record: DesignEvolutionReadingsRecord): string {
     }
     const m = s.maxCentralChangeCommit;
     out.push(m === null ? "    largest central change in window: (unavailable)" : `    largest central change in window: ${m.sha.slice(0, 9)} centralΔ=${m.centralDelta >= 0 ? "+" : ""}${m.centralDelta} nonCentralΔ=${m.nonCentralDelta >= 0 ? "+" : ""}${m.nonCentralDelta}`);
+    if (s.oppositeSignCommits === null) out.push("    opposite-sign commits in window: (unavailable)");
+    else if (s.oppositeSignCommits.length === 0) out.push("    opposite-sign commits in window: (none)");
+    else {
+      out.push(`    opposite-sign commits in window (centralΔ<0 ∧ nonCentralΔ>0): ${s.oppositeSignCommits.length}`);
+      for (const c of s.oppositeSignCommits) {
+        out.push(`      ${c.sha.slice(0, 9)} centralΔ=${c.centralDelta} nonCentralΔ=+${c.nonCentralDelta}  ${c.subject}`);
+      }
+    }
   }
   out.push(`RM2 — 热点文件并发争用  carrier=${record.rm2.carrierPath}`);
   if (!record.rm2.evaluated) out.push(`  NOT-EVALUATED — ${record.rm2.reason}`);
@@ -1040,9 +1322,14 @@ function renderHuman(record: DesignEvolutionReadingsRecord): string {
     if (record.rm2.reason !== null) out.push(`  note: ${record.rm2.reason}`);
     for (const f of record.rm2.files) {
       out.push(`  ${f.file}: form1=${f.form1} form2=${f.form2} total=${f.total} (window ${f.windowTotal})`);
+      out.push(`    observed: ${f.observedPaths.length > 0 ? f.observedPaths.join(", ") : "(none)"}`);
       for (const form of ["form1", "form2"] as const) {
         for (const smp of f.samples[form]) out.push(`    [${form}] #${smp.recordIndex} ${smp.task ?? "?"} ${smp.ts ?? "?"}`);
       }
+    }
+    if (record.rm2.unresolvedPaths.length > 0) {
+      out.push(`  unresolved paths (⛔ not merged into any key): ${record.rm2.unresolvedPaths.length}`);
+      for (const u of record.rm2.unresolvedPaths) out.push(`    ${u.raw} — ${u.reason}`);
     }
   }
   return out.join("\n");

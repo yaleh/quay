@@ -2808,7 +2808,9 @@ test("runDesignEvolutionRound — AC5: ONE record carries RM1 + RM2 + the larges
   assert.equal(fact.value.rm1.subsystems[0].sharePercentRounded, 10); // 10 / (10 + 90)
   assert.equal(fact.value.rm1.subsystems[0].maxCentralChangeCommit.centralDelta, 10);
   assert.equal(fact.value.rm2.evaluated, true);
-  assert.equal(fact.value.rm2.files[0].file, "central.ts");
+  // The RM2 key is the REPO-RELATIVE path (gap-design-evolution-readings-path-identity-and-split-move):
+  // a basename is display only, so two same-named files in different directories cannot merge.
+  assert.equal(fact.value.rm2.files[0].file, "mod/central.ts");
   const lines = fs.readFileSync(history, "utf8").split("\n").filter((l) => l !== "");
   assert.equal(lines.length, 1, "one due round ⇒ exactly one history line");
   const rec = JSON.parse(lines[0]);
