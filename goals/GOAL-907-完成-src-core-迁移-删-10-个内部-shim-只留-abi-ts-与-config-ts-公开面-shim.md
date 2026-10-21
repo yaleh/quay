@@ -1,9 +1,16 @@
 ---
 id: GOAL-907
 title: 完成 src→core 迁移：删 10 个内部 shim，只留 abi.ts 与 config.ts 公开面（shim 12→2）
-status: draft
+status: active
 kind: goal
 origin: 架构分析改进方案 G-2（2026-10-21 会话，12 个 FORWARDING re-export shim 实测）
+activatedAt: 2026-10-21T02:00:30.544Z
+statusLog:
+  - at: 2026-10-21T02:00:30.544Z
+    from: draft
+    to: active
+    actor: goal-cli
+    reason: ""
 ---
 ## 背景
 
