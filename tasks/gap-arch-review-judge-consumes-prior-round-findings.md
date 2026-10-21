@@ -2,7 +2,7 @@
 id: gap-arch-review-judge-consumes-prior-round-findings
 title: architecture-review judge 缺「上一轮 findings 逐条 survived/resolved/denied
   核对」输入——本会话四次误判都靠这一步才拦住
-status: todo
+status: ready
 labels:
   - gap
   - architecture
