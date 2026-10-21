@@ -48,9 +48,9 @@ extra:
 
 ## Definition of Done
 
-- [ ] 六条 AC 全绿；`scripts/test.sh` 相关泳道通过；合并进 develop。
-- [ ] 读数验证使用真实载体；夹具只用于 AC2、AC4 的负对照。
-- [ ] 不在 fan-in 热路径上运行。
+- [x] 六条 AC 全绿；`scripts/test.sh` 相关泳道通过；合并进 develop。
+- [x] 读数验证使用真实载体；夹具只用于 AC2、AC4 的负对照。
+- [x] 不在 fan-in 热路径上运行。
 
 ## Evidence
 
