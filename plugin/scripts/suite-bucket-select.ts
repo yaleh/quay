@@ -35,6 +35,7 @@ import { fileURLToPath } from "node:url";
 // `arg-parsing-helper-family`, routine `semantic-dedup-scan`).
 import { isDirectEntry, flagValue } from "./gate-script-base.ts";
 import {
+  BUCKET_ORDER,
   classifyPath,
   canonicalBuckets,
   bucketSetOf,
@@ -262,9 +263,6 @@ export function triggeredBuckets(touchedPaths: readonly string[]): Set<Bucket> {
   return out;
 }
 
-/** Canonical P,S,M order for the artifact's buckets array (same order as attribution's BUCKET_ORDER). */
-const BUCKET_ARTIFACT_ORDER: readonly Bucket[] = ["P", "S", "M"];
-
 /**
  * Compute the effective attribution for EVERY suite test file (the full file→{buckets, source} map).
  * This is the single truth source the page reads — computed once, persisted by writeBucketAttribution,
@@ -290,7 +288,7 @@ export function computeEffectiveAttribution(files: readonly string[], reattr: Ma
 export function writeBucketAttribution(root: string, attribution: Map<string, EffectiveAttribution>): void {
   const lines: string[] = [];
   for (const [file, { buckets, source }] of attribution) {
-    const ordered = BUCKET_ARTIFACT_ORDER.filter((b) => buckets.has(b));
+    const ordered = BUCKET_ORDER.filter((b) => buckets.has(b));
     lines.push(JSON.stringify({ file, buckets: ordered, source }));
   }
   try {
