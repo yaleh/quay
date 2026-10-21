@@ -42,9 +42,9 @@ extra:
 
 ## Definition of Done
 
-- [ ] 四条 AC 全绿；`scripts/test.sh` 相关泳道通过；合并进 develop。
-- [ ] 读数验证使用真实载体与真实 git 历史；夹具只用于 AC2 的分键负对照。
-- [ ] `.quay/design-evolution-history.jsonl` 的记录形状只做向后兼容的新增（新增字段，不删、不改现有字段名），以免截断已有的读数史。
+- [x] 四条 AC 全绿；`scripts/test.sh` 相关泳道通过；合并进 develop。
+- [x] 读数验证使用真实载体与真实 git 历史；夹具只用于 AC2 的分键负对照。
+- [x] `.quay/design-evolution-history.jsonl` 的记录形状只做向后兼容的新增（新增字段，不删、不改现有字段名），以免截断已有的读数史。
 
 ## 附：已在 live 配置中更正的声明错误（不属于本任务范围，记录在此便于核对）
 
