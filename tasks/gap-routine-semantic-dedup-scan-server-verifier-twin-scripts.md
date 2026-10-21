@@ -3,7 +3,7 @@ id: gap-routine-semantic-dedup-scan-server-verifier-twin-scripts
 title: "semantic-dedup-scan: 216 of 491 non-comment lines in
   server-partial-stop-verify reappear verbatim in server-restart-inflight-verify
   (44 percent vs 40 percent); five helpers are byt"
-status: ready
+status: done
 labels:
   - gap
   - routine-filed
