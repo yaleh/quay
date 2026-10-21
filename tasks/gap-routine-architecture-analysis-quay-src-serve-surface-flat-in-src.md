@@ -138,3 +138,11 @@ Mechanically move the serve* family into packages/quay/src/serve/ (matching the 
 - `experiments/quay-perpetual-stream/test/*.mjs`
 - `experiments/quay-perpetual-stream/milestones/**`
 - `tasks/gap-routine-architecture-analysis-quay-src-serve-surface-flat-in-src.md`
+
+## Blocker
+
+**2026-10-21T17:33:35.294Z — worker 未落地（exited-not-landed）**
+
+- 未落地原因：step=suite: AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+- run_id：wk-prod-anchor
+- session_id：98ea2fe8-7cbd-43b4-a38c-9372468ffcf5
