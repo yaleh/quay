@@ -43,11 +43,11 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1 声明式装配与关闭开关：配置段缺席时不装配，内建例程仍恰好四条；`enabled:false` 时记 `not-evaluated:disabled`，不写历史。测试覆盖两种情况，贴出测试名与通过输出。
-- [ ] AC2 统一公式在真实历史上复现已知基线：用直接入口对主检出的真实 git 历史运行，声明 serve（基线 295e771b0，中心文件基线端 `packages/quay/src/serve-handlers.ts`、HEAD 端 `packages/quay/src/serve/serve-handlers.ts`，modules 为 serve 族）与 worker（基线 2440b52d0，读数提交 ff32d031d，中心文件 worker-driver.ts + worker-fan-in.ts，modules 为 `plugin/scripts/` 下文件名含 worker / pool / dispatch / fan-in 的 .ts）。输出必须是 serve 1%、worker 82%（与元机制 finding「口径更正」一节的表一致）。贴出命令与原始输出。
-- [ ] AC3 改路径时必须返回「未评估」：对 serve 只写一个中心路径 `packages/quay/src/serve-handlers.ts`（它在 HEAD 已不存在），读数为 `evaluated:false`，reason 写出该路径，share 为 null。测试与真实主检出各跑一次，贴出输出。
-- [ ] AC4 RM2 在真实载体上复现 finding 的读数：worker-driver.ts 形态 1 / 形态 2 = 5 / 6，worker-fan-in.ts = 1 / 0，goal-driver.ts = 2 / 0（载体增长了则 ≥ 这些值），每个非零计数附前 3 条样本；谓词自检通过。再用夹具把谓词改坏，读数必须变成 `evaluated:false`。贴出两次输出。
-- [ ] AC5 一条真实生产读数：直接入口对主检出真实数据运行一次（历史写到临时路径），得到一条 `evaluated:true`、同时含 RM1 与 RM2 的记录，并附「窗口内单次最大中心文件变动提交」字段。贴出该记录原文。
+- [x] AC1 声明式装配与关闭开关：配置段缺席时不装配，内建例程仍恰好四条；`enabled:false` 时记 `not-evaluated:disabled`，不写历史。测试覆盖两种情况，贴出测试名与通过输出。
+- [x] AC2 统一公式在真实历史上复现已知基线：用直接入口对主检出的真实 git 历史运行，声明 serve（基线 295e771b0，中心文件基线端 `packages/quay/src/serve-handlers.ts`、HEAD 端 `packages/quay/src/serve/serve-handlers.ts`，modules 为 serve 族）与 worker（基线 2440b52d0，读数提交 ff32d031d，中心文件 worker-driver.ts + worker-fan-in.ts，modules 为 `plugin/scripts/` 下文件名含 worker / pool / dispatch / fan-in 的 .ts）。输出必须是 serve 1%、worker 82%（与元机制 finding「口径更正」一节的表一致）。贴出命令与原始输出。
+- [x] AC3 改路径时必须返回「未评估」：对 serve 只写一个中心路径 `packages/quay/src/serve-handlers.ts`（它在 HEAD 已不存在），读数为 `evaluated:false`，reason 写出该路径，share 为 null。测试与真实主检出各跑一次，贴出输出。
+- [x] AC4 RM2 在真实载体上复现 finding 的读数：worker-driver.ts 形态 1 / 形态 2 = 5 / 6，worker-fan-in.ts = 1 / 0，goal-driver.ts = 2 / 0（载体增长了则 ≥ 这些值），每个非零计数附前 3 条样本；谓词自检通过。再用夹具把谓词改坏，读数必须变成 `evaluated:false`。贴出两次输出。
+- [x] AC5 一条真实生产读数：直接入口对主检出真实数据运行一次（历史写到临时路径），得到一条 `evaluated:true`、同时含 RM1 与 RM2 的记录，并附「窗口内单次最大中心文件变动提交」字段。贴出该记录原文。
 
 ## Definition of Done
 
@@ -68,12 +68,14 @@ loop:
         baseline: 295e771b0
         central:
           - { at_baseline: packages/quay/src/serve-handlers.ts, at_head: packages/quay/src/serve/serve-handlers.ts }
-        modules: ["packages/quay/src/serve/*.ts"]
+        modules: ["packages/quay/src/serve*.ts", "packages/quay/src/server-state*.ts", "packages/quay/src/serve/*.ts"]
       - name: worker
         baseline: 2440b52d0
         central: [plugin/scripts/worker-driver.ts, plugin/scripts/worker-fan-in.ts]
         modules: ["plugin/scripts/*worker*.ts", "plugin/scripts/*pool*.ts", "plugin/scripts/*dispatch*.ts", "plugin/scripts/*fan-in*.ts"]
 ```
+
+serve 的 modules 必须同时覆盖**基线端**的顶层 `serve*.ts` / `server-state*.ts` 与 **HEAD 端**的 `serve/*.ts`——统一公式的 nonCentralΔ 计入「在基线或 HEAD 存在且匹配 modules」的全部非中心文件；只写 HEAD 端的 `serve/*.ts` 会在基线端匹配到零个文件，算出的占比仍然约 1% 但分母不是 finding 表里的 +11644（AC2 落地时实测：三组 glob 才复现 +153 / +11644）。
 
 间隔沿用 arch_cycle_report 的写法与缺省值。
 
@@ -87,3 +89,4 @@ loop:
 - docs/carrier-registry.json
 - plugin/scripts/capability-catalog-declarations.json
 - plugin/shipped-set-baseline.json
+- .gitignore
