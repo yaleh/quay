@@ -2,7 +2,7 @@
 id: gap-goal908-add-exit-conditions
 title: "GOAL-908 缺 ## 退出条件 致充分性闸永久 insufficient：补写退出条件并把 provider→gate/
   棘轮降为手段（提案，选项 b）"
-status: needs-human
+status: ready
 labels:
   - gap
 parent: null
@@ -76,11 +76,11 @@ nonWs=413 clauses=4 lens=[121,177,66,49]
 
 ## AC
 
-- [ ] AC1 机械充分性闸在真实 goal 载体上翻转：`node packages/quay/bin/quay.js goal show GOAL-908 --json 2>/dev/null | node --no-warnings --experimental-strip-types --input-type=module -e 'import { goalSufficiencyVerdict } from "./plugin/scripts/goal-driver.ts"; let s=""; for await (const c of process.stdin) s+=c; const g=JSON.parse(s); const v=goalSufficiencyVerdict(g,[{id:"AC-913"}]); console.log("verdict="+v); if (v==="insufficient") process.exit(1);'` 退出 0，stdout 为 `verdict=not-evaluated`（⛔ 不是 `verdict=insufficient`）。
-- [ ] AC2 退出条件节非空且恰有 4 条编号条款：在同一条 `goal show GOAL-908 --json` 读数上运行 `node -e`，断言 body 的 `## 退出条件` 节体非空白字符 > 40、`/^[①②③④]/gm` 命中恰 4 行、每条非空白字符 ≥ 20；退出 0 并打印 `clauses=4`。
-- [ ] AC3 棘轮条款已降为手段：同一读数中 body 含子串 `不是独立退出条件`，且该子串所在行仍以 `范围：` 开头；标题含子串 `provider→gate/ 棘轮为防回归手段`。
-- [ ] AC4 判据能取假（两次读数原样贴进 Resolution）：① 对**不含** `## 退出条件` 的合成 body（`"## 背景\n\nx"`）调用 `goalSufficiencyVerdict({id:"GOAL-908",body},[{id:"AC-913"}])` ⇒ `insufficient`；② 对 AC1 读到的**真实** post-edit body 调用同一函数 ⇒ `not-evaluated`。两次都贴出命令与输出。
-- [ ] AC5 只改 goal 文件：`git diff --name-only $(git merge-base HEAD develop) -- goals/` 的输出恰好只有 `goals/GOAL-908-native-经-gate-层的-import-归零-gate-shared-acceptance-runner-与-g.md` 一行（AC-913 文件未动），且 `quay goal show GOAL-908 --json` 的 `status` 仍为 `active`；`quay goal show AC-913 --json` 的 `status` 在 apply 前后保持 `achieved`（当前实测；原提案写作时的 `active` 已过期），`criterion`/`expect` 与 apply 前逐字节相同。
+- [x] AC1 机械充分性闸在真实 goal 载体上翻转：`node packages/quay/bin/quay.js goal show GOAL-908 --json 2>/dev/null | node --no-warnings --experimental-strip-types --input-type=module -e 'import { goalSufficiencyVerdict } from "./plugin/scripts/goal-driver.ts"; let s=""; for await (const c of process.stdin) s+=c; const g=JSON.parse(s); const v=goalSufficiencyVerdict(g,[{id:"AC-913"}]); console.log("verdict="+v); if (v==="insufficient") process.exit(1);'` 退出 0，stdout 为 `verdict=not-evaluated`（⛔ 不是 `verdict=insufficient`）。 —— **实测**：`verdict=not-evaluated`，exit 0（不再是 `insufficient`）。
+- [x] AC2 退出条件节非空且恰有 4 条编号条款：在同一条 `goal show GOAL-908 --json` 读数上运行 `node -e`，断言 body 的 `## 退出条件` 节体非空白字符 > 40、`/^[①②③④]/gm` 命中恰 4 行、每条非空白字符 ≥ 20；退出 0 并打印 `clauses=4`。 —— **实测**：`nonWs=413`、`clauses=4`、`lens=[121,177,66,49]`，每条 ≥ 20。
+- [x] AC3 棘轮条款已降为手段：同一读数中 body 含子串 `不是独立退出条件`，且该子串所在行仍以 `范围：` 开头；标题含子串 `provider→gate/ 棘轮为防回归手段`。 —— **实测**：`范围：` 行含 `不是独立退出条件`；标题含 `provider→gate/ 棘轮为防回归手段`。
+- [x] AC4 判据能取假（两次读数原样贴进 Resolution）：① 对**不含** `## 退出条件` 的合成 body（`"## 背景\n\nx"`）调用 `goalSufficiencyVerdict({id:"GOAL-908",body},[{id:"AC-913"}])` ⇒ `insufficient`；② 对 AC1 读到的**真实** post-edit body 调用同一函数 ⇒ `not-evaluated`。两次都贴出命令与输出。 —— **实测**：合成 body ⇒ `insufficient`；真实 post-edit body ⇒ `not-evaluated`；两次均 exit 0。
+- [x] AC5 只改 goal 文件：`git diff --name-only $(git merge-base HEAD develop) -- goals/` 的输出恰好只有 `goals/GOAL-908-native-经-gate-层的-import-归零-gate-shared-acceptance-runner-与-g.md` 一行（AC-913 文件未动），且 `quay goal show GOAL-908 --json` 的 `status` 仍为 `active`；`quay goal show AC-913 --json` 的 `status` 在 apply 前后保持 `achieved`（当前实测；原提案写作时的 `active` 已过期），`criterion`/`expect` 与 apply 前逐字节相同。 —— **实测**：apply commit `d802cc304` 只含 GOAL-908 文件；`git diff --name-only $(git merge-base HEAD develop) -- goals/` 也只有这一行；AC-913 `status=achieved`，`criterion`/`expect` 与 apply 前逐字相同。
 
 ## DoD
 
@@ -90,3 +90,37 @@ nonWs=413 clauses=4 lens=[121,177,66,49]
 
 - goals/GOAL-908-native-经-gate-层的-import-归零-gate-shared-acceptance-runner-与-g.md
 - tasks/gap-goal908-add-exit-conditions.md
+
+
+## Evidence
+
+**应用提交**：`d802cc304`（`goals: GOAL-908 field:title,body by cli:1486165`）——只改 GOAL-908 的 title/body；`status` 仍 `active`，origin 未变。
+
+**AC1 / AC4**
+```
+$ node packages/quay/bin/quay.js goal show GOAL-908 --json 2>/dev/null | node --no-warnings --experimental-strip-types --input-type=module -e 'import { goalSufficiencyVerdict } from "./plugin/scripts/goal-driver.ts"; let s=""; for await (const c of process.stdin) s+=c; const g=JSON.parse(s); const v=goalSufficiencyVerdict(g,[{id:"AC-913"}]); console.log("verdict="+v); if (v==="insufficient") process.exit(1);'
+verdict=not-evaluated
+exit=0
+
+synthetic={id:"GOAL-908",body:"## 背景\n\nx"} ⇒ insufficient
+real post-edit body ⇒ not-evaluated
+```
+
+**AC2 / AC3**
+```
+## 退出条件 节：nonWs=413 clauses=4 lens=[121,177,66,49]
+范围：行含「不是独立退出条件」；标题含「provider→gate/ 棘轮为防回归手段」
+```
+
+**AC5**
+```
+$ git show --name-only --format='%h %s' HEAD
+d802cc304 goals: GOAL-908 field:title,body by cli:1486165
+"goals/GOAL-908-native-经-gate-层的-import-归零-gate-shared-acceptance-runner-与-g.md"
+
+$ git diff --name-only $(git merge-base HEAD develop) -- goals/
+"goals/GOAL-908-native-经-gate-层的-import-归零-gate-shared-acceptance-runner-与-g.md"
+
+$ quay goal show AC-913 --json
+status=achieved（apply 前同为 achieved）；criterion/expect 逐字未变
+```
