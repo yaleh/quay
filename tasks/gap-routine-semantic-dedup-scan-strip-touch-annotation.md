@@ -3,7 +3,7 @@ id: gap-routine-semantic-dedup-scan-strip-touch-annotation
 title: "semantic-dedup-scan: Identical algorithm with the same three regexes and
   the same fixed-point loop over stripTrailingFullWidthAnnotation plus paren
   stripping, differing only by a S"
-status: ready
+status: done
 labels:
   - gap
   - routine-filed

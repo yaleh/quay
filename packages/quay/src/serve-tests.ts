@@ -4,6 +4,12 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { readFileSync, readdirSync, openSync, readSync, closeSync, statSync } from "node:fs";
 import path from "node:path";
 import { readTests, type TestsResult, type TestRunRecord } from "./observation.ts";
+// The canonical bucket set + string form are a kernel leaf: single source with the dispatch-side
+// attribution judge (which reaches the same leaf through `plugin/scripts/suite-bucket-attribution.ts`'s
+// re-export). Only the ORDER/FORM is shared — the file→bucket JUDGMENT still travels through the
+// dispatch-written artifact below. (routine `semantic-dedup-scan` finding `canonical-buckets`, task
+// gap-routine-semantic-dedup-scan-canonical-buckets.)
+import { canonicalBuckets, type Bucket } from "./kernel/canonical-buckets.ts";
 import type { ServePageCfg, ServeIdentity } from "./serve-render.ts";
 import {
   html, escapeHtml, pageStyles, modernistStyles, renderSiteNav, renderMobileChrome, pad2, obsNote, DEFAULT_PAGE_SIZE, tableWrap, pageTitle,
@@ -431,10 +437,6 @@ function truncateLabel(s: string, max: number): string {
 // unreadable artifact (or a file absent from it) returns UNRESOLVED (empty set) — the page degrades
 // to a muted bar, never a 500 and never a divergent judgment.
 
-type Bucket = "P" | "S" | "M";
-
-const BUCKET_ORDER: readonly Bucket[] = ["P", "S", "M"];
-
 /** The single-truth-source artifact the dispatch side writes (mirror of suite-bucket-select.ts). */
 const EFFECTIVE_PATH = ".quay/suite-bucket-effective.jsonl";
 
@@ -475,12 +477,6 @@ function readBucketEffective(root: string): Map<string, Set<Bucket>> {
 export function bucketSetOfFile(fileRef: string, root: string | null | undefined): Set<Bucket> {
   if (!root) return new Set();
   return readBucketEffective(root).get(normalizeFileRef(fileRef)) ?? new Set();
-}
-
-/** Canonical bucket string: `P | S | M | P+S | P+M | S+M | P+S+M | UNRESOLVED` (same as attribution). */
-function canonicalBuckets(buckets: Set<Bucket>): string {
-  if (buckets.size === 0) return "UNRESOLVED";
-  return BUCKET_ORDER.filter((b) => buckets.has(b)).join("+");
 }
 
 /** The colour key: singleton → its own; any combo → "multi"; unresolved → "unresolved". */
