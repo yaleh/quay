@@ -64,6 +64,7 @@ AC-914 在 goal-driver 下一轮读数为 `pass`（`.quay/goal-round.jsonl` 或 
 - plugin/scripts/worker-pool.ts（新：`export class WorkerPool`，`#retryState`/`#backoffState` 私有持有 + 转移方法）
 - plugin/scripts/worker-driver.ts
 - plugin/test/worker-pool.test.mjs（新：私有所有权 + 转移行为）
+- plugin/test/worker-driver-fan-in-s04.test.mjs（跟随：唯一归一化点 `normalizeAssertionSignature` 随快速死亡退避整簇迁入 worker-pool.ts ⇒ s04 的「唯一正本点」源码针改为按两文件合计计数并钉死各自落点；不迁则该针计数 0，suite 恒红）
 - plugin/scripts/capability-catalog-declarations.json
 - tasks/gap-worker-pool-owns-retry-backoff-state.md
 
