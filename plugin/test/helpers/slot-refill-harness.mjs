@@ -497,7 +497,13 @@ function makeLandedNoIdWorkspace(tag, landedId) {
   return dir;
 }
 
-function bodyLandedOuterUncheckedBody() {
+/** The "superseded-modeled" completion shape: every AC ticked, the ONLY open DoD item the outer
+ *  full-suite verification. `touch` is the single `## Touches` entry — parameterized because the
+ *  LANDING judgment now depends on it (gap-meta-isbodylanded): the default `code/impl.ts (new)` does
+ *  NOT exist on disk, so the corroborated pool-level judge (ready-pool-check.notYetFlipped's
+ *  taskWorkLanded → `(new)`-touch existence) also says "not landed"; pass an existing `(new)` path to
+ *  model the real id-less-但-已落地 case. */
+function bodyLandedOuterUncheckedBody(touch = "- code/impl.ts (new)") {
   return [
     "**type:** execution",
     "## Proposal",
@@ -509,7 +515,7 @@ function bodyLandedOuterUncheckedBody() {
     "control   in-flight≥cap ⇒ should_refill false",
     "resume    分步提交",
     "## Touches",
-    "- code/impl.ts (new)", // (new) ⇒ touches-resolve-safe; NOT landed-evidence — the git-grep is the ONLY miss
+    touch,
     "## Acceptance Criteria",
     "- [x] AC1: the superseded lifecycle is modeled",
     "- [x] AC2: VALID_STATUSES accepts superseded",

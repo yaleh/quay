@@ -71,6 +71,9 @@ import {
   runArchCycleRound,
   formatArchCycleAssembly,
 } from "../scripts/quality-gate-driver.ts";
+// 同一个读数函数的两个面：例行程把它写进 Fact，AC1 的「可从 .archguard/query/ 独立复现」直接对
+// **读函数**做（⛔ 不另写一份解析，否则只是证明夹具自洽）。
+import { readGraphSummaryReading, TOP_OUT_DEGREE_LIMIT_DEFAULT } from "../scripts/archguard-runner.ts";
 // judge 调用的失败归因/重试是【从 OSD 复用】的（硬规则 5b）——测试直接断言那**同一个**清单与分类器，
 // ⛔ 不是断言本文件里另写的一份。
 import {
@@ -2198,7 +2201,13 @@ const ARCH_CYCLE_SOURCES = [
  *
  *  `opts.timestampBySource` sets each scope's arch.json `timestamp` (the freshness source the routine
  *  records); `opts.omitArchTimestamp` writes arch.json WITHOUT one so the manifest `generatedAt`
- *  fallback can be exercised. */
+ *  fallback can be exercised.
+ *
+ *  The GLOBAL scope (`manifest.globalScopeKey`) is written too: it is where archguard_summary's
+ *  `topByOutDegree` / `relationCountByType` come from, and the arch-cycle routine now reads it in the
+ *  same round (gap-quality-round-facts-surface-top-outdegree-god-functions). `opts.global` supplies its
+ *  `entities`/`relations`; the default is a genuinely EMPTY graph (evaluated:true, `{}`/`[]`) — which
+ *  keeps the cycle-only tests meaningful and is a different value from "could not read". */
 function makeArchQueryFixture(root, cyclesBySource, opts = {}) {
   const queryDir = path.join(root, ".archguard", "query");
   fs.mkdirSync(queryDir, { recursive: true });
@@ -2213,7 +2222,21 @@ function makeArchQueryFixture(root, cyclesBySource, opts = {}) {
     if (!opts.omitArchTimestamp) artifact.timestamp = opts.timestampBySource?.[source] ?? defaultTimestamp;
     fs.writeFileSync(path.join(queryDir, key, "arch.json"), JSON.stringify(artifact), "utf8");
   });
-  fs.writeFileSync(path.join(queryDir, "manifest.json"), JSON.stringify({ scopes }), "utf8");
+  if (opts.omitGlobalScope !== true) {
+    const globalKey = "global-scope";
+    scopes.push({ key: globalKey, label: "quay (typescript)", sources: [path.resolve(root)], generatedAt: defaultTimestamp });
+    fs.mkdirSync(path.join(queryDir, globalKey), { recursive: true });
+    const globalArtifact = {
+      language: "typescript",
+      timestamp: opts.global?.timestamp ?? defaultTimestamp,
+      entities: opts.global?.entities ?? [],
+      relations: opts.global?.relations ?? [],
+    };
+    fs.writeFileSync(path.join(queryDir, globalKey, "arch.json"), JSON.stringify(globalArtifact), "utf8");
+  }
+  const manifest = { scopes };
+  if (opts.omitGlobalScope !== true) manifest.globalScopeKey = "global-scope";
+  fs.writeFileSync(path.join(queryDir, "manifest.json"), JSON.stringify(manifest), "utf8");
 }
 
 test("arch-cycle config — absent ⇒ present:false; bad/interval-below-floor fail closed; interval defaults to 360m (AC4)", (t) => {
@@ -2466,6 +2489,178 @@ test("formatArchCycleAssembly — enabled / disabled / malformed are three DIFFE
   assert.match(enabled, /report-only/);
   assert.match(disabled, /not-evaluated:disabled/);
   assert.match(malformed, /failed/);
+});
+
+// ── graph summary: topByOutDegree + relationCountByType ────────────────────────────────────────
+// gap-quality-round-facts-surface-top-outdegree-god-functions. The readings come from the SAME
+// `.archguard/query/<globalScopeKey>/arch.json` the cycle reading already reads — same fixture layout,
+// no second analyzer, no spawn.
+
+/** A global-scope graph with a KNOWN out-degree ranking, INCLUDING a tie (the M118 audit's finding was
+ *  a silently dropped tied entry — the ranking must be deterministic and disclose truncation). */
+const GRAPH_ENTITIES = [
+  { id: "a.ts.run", name: "run", type: "function", sourceLocation: { file: "plugin/scripts/a.ts", startLine: 40 } },
+  { id: "b.ts.handleAllRoutes", name: "handleAllRoutes", type: "function", sourceLocation: { file: "packages/quay/src/b.ts", startLine: 55 } },
+  { id: "c.ts.runResidentLoop", name: "runResidentLoop", type: "function", sourceLocation: { file: "plugin/scripts/c.ts", startLine: 70 } },
+  { id: "d.ts.runAnchor", name: "runAnchor", type: "function", sourceLocation: { file: "plugin/scripts/d.ts", startLine: 90 } },
+];
+const GRAPH_RELATIONS = [
+  // run: 3 outgoing (2 dependency + 1 call)
+  { id: "r1", type: "dependency", source: "a.ts.run", target: "x.ts.t1" },
+  { id: "r2", type: "dependency", source: "a.ts.run", target: "x.ts.t2" },
+  { id: "r3", type: "call", source: "a.ts.run", target: "x.ts.t3" },
+  // handleAllRoutes: 2 outgoing (1 dependency + 1 inheritance)
+  { id: "r4", type: "dependency", source: "b.ts.handleAllRoutes", target: "x.ts.t4" },
+  { id: "r5", type: "inheritance", source: "b.ts.handleAllRoutes", target: "x.ts.t5" },
+  // runResidentLoop and runAnchor TIE at 1 outgoing — tie-break is entityId ASC, so c… before d…
+  { id: "r6", type: "dependency", source: "c.ts.runResidentLoop", target: "x.ts.t6" },
+  { id: "r7", type: "dependency", source: "d.ts.runAnchor", target: "x.ts.t7" },
+];
+
+test("readGraphSummaryReading — topByOutDegree (with positional evidence) + relationCountByType from the GLOBAL scope (AC1)", (t) => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "qg-graph-read-"));
+  t.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
+  makeArchQueryFixture(tmp, {}, {
+    global: { entities: GRAPH_ENTITIES, relations: GRAPH_RELATIONS, timestamp: "2026-10-20T22:29:35.342Z" },
+  });
+
+  const read = readGraphSummaryReading(tmp);
+  assert.equal(read.evaluated, true, read.reason ?? "");
+  assert.equal(read.scopeKey, "global-scope");
+  assert.equal(read.artifactTimestamp, "2026-10-20T22:29:35.342Z");
+  assert.equal(read.entityCount, 4);
+  assert.equal(read.relationCount, 7);
+  // The FULL type distribution — absent types are information (call=2 next to dependency=6490 was the
+  // reading that motivated the task), so no subset filter is applied here.
+  assert.deepEqual(read.relationCountByType, { dependency: 5, call: 1, inheritance: 1 });
+  assert.equal(read.entitiesWithOutgoingRelations, 4);
+  assert.equal(read.topByOutDegreeLimit, TOP_OUT_DEGREE_LIMIT_DEFAULT);
+  assert.equal(read.topByOutDegreeTruncated, false);
+  // Ranking: outDegree DESC, then entityId ASC for the tie (deterministic, not insertion order).
+  assert.deepEqual(read.topByOutDegree.map((e) => [e.name, e.outDegree]), [
+    ["run", 3], ["handleAllRoutes", 2], ["runResidentLoop", 1], ["runAnchor", 1],
+  ]);
+  // AC1's "位置证据": every entry carries the artifact's file/line, so a reader can reproduce it
+  // without re-running archguard.
+  assert.deepEqual(
+    { file: read.topByOutDegree[0].file, startLine: read.topByOutDegree[0].startLine, kind: read.topByOutDegree[0].kind },
+    { file: "plugin/scripts/a.ts", startLine: 40, kind: "function" },
+  );
+  assert.equal(read.topByOutDegree[1].file, "packages/quay/src/b.ts");
+
+  // Truncation is DISCLOSED, never silent: a limit of 2 keeps the top 2 and says it was cut.
+  const cut = readGraphSummaryReading(tmp, undefined, { limit: 2 });
+  assert.equal(cut.topByOutDegree.length, 2);
+  assert.equal(cut.topByOutDegreeTruncated, true);
+  assert.equal(cut.entitiesWithOutgoingRelations, 4);
+  // Determinism: the same artifact read twice yields the same ranking (no Map-order dependence).
+  assert.deepEqual(readGraphSummaryReading(tmp).topByOutDegree, read.topByOutDegree);
+});
+
+test("runArchCycleRound — the SAME round carries graphSummary, and the Fact names topByOutDegree/relationCountByType at TOP LEVEL (AC1)", (t) => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "qg-graph-round-"));
+  t.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
+  makeArchQueryFixture(tmp, { "packages/quay/src": [["src/a", "src/b"]] }, {
+    global: { entities: GRAPH_ENTITIES, relations: GRAPH_RELATIONS },
+  });
+  const history = path.join(tmp, "history.jsonl");
+  const fact = runArchCycleRound(tmp, {
+    config: { enabled: true, intervalMinutes: 360 }, configPresent: true, configError: null,
+    historyPath: history, now: "T0",
+  });
+  assert.equal(fact.state, "verified", fact.reason ?? "");
+  // ⛔ A non-zero out-degree / a large relation count is the reading's CONTENT, never a red (report-only).
+  assert.deepEqual(fact.value.relationCountByType, { dependency: 5, call: 1, inheritance: 1 });
+  assert.deepEqual(fact.value.topByOutDegree.map((e) => e.outDegree), [3, 2, 1, 1]);
+  // One reading, two access paths — the flattened fields ARE the graphSummary's values.
+  assert.deepEqual(fact.value.topByOutDegree, fact.value.graphSummary.topByOutDegree);
+  assert.deepEqual(fact.value.relationCountByType, fact.value.graphSummary.relationCountByType);
+
+  const rec = JSON.parse(fs.readFileSync(history, "utf8").trim());
+  assert.equal(rec.graphSummary.evaluated, true);
+  assert.deepEqual(rec.graphSummary.topByOutDegree, fact.value.topByOutDegree);
+  assert.deepEqual(rec.graphSummary.relationCountByType, fact.value.relationCountByType);
+});
+
+test("readGraphSummaryReading — an unreadable/fake work-dir is NOT-EVALUATED with nulls, never {} / 0 / [] (AC2 硬规则 3b)", (t) => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "qg-graph-fake-"));
+  t.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
+  const fakeWorkDir = path.join(tmp, "no-such-work-dir");
+
+  const read = readGraphSummaryReading(tmp, fakeWorkDir);
+  assert.equal(read.evaluated, false);
+  assert.match(read.reason, /cannot read query manifest/);
+  assert.equal(read.topByOutDegree, null, "⛔ null, never [] — 'could not read' must not look like 'no god functions'");
+  assert.equal(read.relationCountByType, null, "⛔ null, never {}");
+  assert.equal(read.relationCount, null, "⛔ null, never 0");
+  assert.equal(read.entityCount, null);
+  assert.equal(read.entitiesWithOutgoingRelations, null);
+  assert.equal(read.topByOutDegreeTruncated, null);
+
+  // A genuinely EMPTY but READABLE graph is the OTHER shape: evaluated:true with {}/[] — if these two
+  // ever compare equal, the three-valued reading has collapsed.
+  const clean = fs.mkdtempSync(path.join(os.tmpdir(), "qg-graph-clean-"));
+  t.after(() => fs.rmSync(clean, { recursive: true, force: true }));
+  makeArchQueryFixture(clean, {});
+  const cleanRead = readGraphSummaryReading(clean);
+  assert.equal(cleanRead.evaluated, true);
+  assert.deepEqual(cleanRead.relationCountByType, {});
+  assert.deepEqual(cleanRead.topByOutDegree, []);
+  assert.notEqual(read.evaluated, cleanRead.evaluated);
+  assert.notEqual(read.relationCount, cleanRead.relationCount);
+});
+
+test("runArchCycleRound — cycles readable but graph summary unreadable ⇒ not-evaluated:graph-summary (the two readings are independent)", (t) => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "qg-graph-noglobal-"));
+  t.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
+  // omitGlobalScope: every per-source scope HAS a moduleGraph (cycles are readable), but the manifest
+  // carries no globalScopeKey — the exact fixture that isolates the graph reading's failure.
+  makeArchQueryFixture(tmp, { "packages/quay/src": [["src/a", "src/b"]] }, { omitGlobalScope: true });
+  const history = path.join(tmp, "history.jsonl");
+  const fact = runArchCycleRound(tmp, {
+    config: { enabled: true, intervalMinutes: 360 }, configPresent: true, configError: null,
+    historyPath: history, now: "T0",
+  });
+  assert.equal(fact.state, "not-evaluated", "⛔ a half-readable round is NOT a verified report");
+  assert.match(fact.reason, /not-evaluated:graph-summary/);
+  // The cycle half WAS read (the one fixture cycle) — so the failure is clearly the OTHER half.
+  assert.equal(fact.value.evaluated, true);
+  assert.equal(fact.value.totalCycleCount, 1);
+  assert.equal(fact.value.graphSummary.evaluated, false);
+  assert.equal(fact.value.topByOutDegree, null);
+  assert.equal(fact.value.relationCountByType, null);
+  // The inability is persisted, not silent.
+  const rec = JSON.parse(fs.readFileSync(history, "utf8").trim());
+  assert.equal(rec.graphSummary.evaluated, false);
+  assert.ok(rec.graphSummary.reason && rec.graphSummary.reason.length > 0);
+});
+
+test("runArchCycleRound — the graph reading spawns NOTHING (no archguard analyze; AC2)", (t) => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "qg-graph-nospawn-"));
+  t.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
+  makeArchQueryFixture(tmp, {}, { global: { entities: GRAPH_ENTITIES, relations: GRAPH_RELATIONS } });
+
+  // A fake archguard that would leave a marker if ANY code path invoked it. Both the CLI-resolution
+  // seam and PATH point at it, so an analyze call through either route is observable.
+  const marker = path.join(tmp, "spawned.marker");
+  const fakeCli = path.join(tmp, "fake-archguard");
+  fs.writeFileSync(fakeCli, `#!/bin/sh\necho spawned > ${JSON.stringify(marker)}\nexit 0\n`, { mode: 0o755 });
+  const prevCli = process.env.ARCHGUARD_RUNNER_CLI;
+  const prevPath = process.env.PATH;
+  process.env.ARCHGUARD_RUNNER_CLI = fakeCli;
+  process.env.PATH = `${tmp}${path.delimiter}${prevPath ?? ""}`;
+  t.after(() => {
+    if (prevCli === undefined) delete process.env.ARCHGUARD_RUNNER_CLI;
+    else process.env.ARCHGUARD_RUNNER_CLI = prevCli;
+    process.env.PATH = prevPath;
+  });
+
+  const fact = runArchCycleRound(tmp, {
+    config: { enabled: true, intervalMinutes: 360 }, configPresent: true, configError: null,
+    historyPath: path.join(tmp, "history.jsonl"), now: "T0",
+  });
+  assert.equal(fact.state, "verified", fact.reason ?? "");
+  assert.equal(fs.existsSync(marker), false, "the routine must stay a pure READ — ⛔ no analyze spawn");
 });
 
 test("ARCH_CYCLE_HISTORY_REL — the carrier path is the single declared one (and it is gitignored)", () => {
