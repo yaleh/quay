@@ -2,7 +2,7 @@
 id: AC-914
 title: WorkerPool 聚合拥有 retry/backoff 状态：worker-driver.ts 不再以闭包局部变量持有
   retryState/backoffState，由 worker-pool.ts 的 class WorkerPool 封装
-status: draft
+status: active
 kind: criterion
 goal: GOAL-909
 criterion: "f=plugin/scripts/worker-driver.ts; n=\"$(grep -cE '^\\s*(const|let)
@@ -22,4 +22,15 @@ expect: 正向：runResidentLoop 不再声明 retryState / backoffState 两个�
   方法），不是把同样的闭包变量换个文件继续以模块级变量存在。
 origin: DIR-133（人 2026-10-22 裁定）裁定 1、2 下的 R2 第一刀；触发读数 = worker-driver.ts
   并发争用（派发器改选 5 次 + 真实合并冲突 6 次）
+activatedAt: 2026-10-21T18:56:15.184Z
+statusLog:
+  - at: 2026-10-21T18:56:15.184Z
+    from: draft
+    to: active
+    actor: goal-driver
+    reason: "triage: activate"
+fidelity:
+  verdict: faithful
+  reason: "fidelity judge: faithful"
+  at: 2026-10-21T18:56:15.184Z
 ---
