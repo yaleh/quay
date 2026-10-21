@@ -6,8 +6,8 @@ status: achieved
 kind: criterion
 goal: GOAL-014
 criterion: >-
-  node --no-warnings --experimental-strip-types packages/quay/src/goal-store.ts
-  get GOAL-014 | python3 -c '
+  node --no-warnings --experimental-strip-types
+  packages/quay/src/core/goal-store.ts get GOAL-014 | python3 -c '
 
   import json,sys
 
