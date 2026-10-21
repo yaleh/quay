@@ -3,7 +3,7 @@ id: gap-routine-semantic-dedup-scan-canonical-buckets
 title: "semantic-dedup-scan: Identical three-line bodies plus an identical
   private BUCKET_ORDER array in each file, and the kernel re-export pattern
   already used for regex-escape is a reac"
-status: todo
+status: ready
 labels:
   - gap
   - routine-filed
