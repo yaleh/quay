@@ -2,7 +2,7 @@
 id: gap-ac911-src-root-forwarding-shim-deletion
 title: AC-911 src 根 FORWARDING shim 12→2：删 10 个内部 shim、全部消费方改指 core/，并加「已删 shim
   复活=违规」棘轮
-status: todo
+status: ready
 labels:
   - gap
 parent: null
