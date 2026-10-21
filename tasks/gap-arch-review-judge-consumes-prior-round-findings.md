@@ -39,3 +39,11 @@ extra:
 - plugin/scripts/architecture-review-cluster.ts
 - plugin/test/quality-gate-driver.test.mjs
 - plugin/test/architecture-review-cluster.test.mjs
+
+## Blocker
+
+**2026-10-21T04:59:44.704Z — worker 未落地（exited-not-landed）**
+
+- 未落地原因：step=suite: AssertionError [ERR_ASSERTION]: 陈旧条目 / stale registry entries (declared but no longer present in code — remove or repoint them):
+- run_id：wk-prod-anchor
+- session_id：cc11d14d-bc64-4403-86dc-0bc04b5f597c
