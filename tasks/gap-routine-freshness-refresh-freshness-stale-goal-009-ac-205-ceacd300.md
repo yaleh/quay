@@ -3,7 +3,7 @@ id: gap-routine-freshness-refresh-freshness-stale-goal-009-ac-205-ceacd300
 title: "freshness-refresh: AC-205 is already past the window (d=201 > K=200,
   margin -1) with its newest evidence 209.43h old (2026-10-12T21:59:06Z), while
   producer_latest_ts=2026-10-20T10:"
-status: ready
+status: done
 labels:
   - gap
   - routine-filed
