@@ -50,7 +50,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { createGoalStore } from "../../packages/quay/src/goal-store.ts";
+import { createGoalStore } from "../../packages/quay/src/core/goal-store.ts";
 import { runAcceptance } from "../../packages/quay/src/gate/shared/acceptance-runner.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));

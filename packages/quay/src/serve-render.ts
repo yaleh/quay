@@ -7,7 +7,7 @@
 import { readFileSync, existsSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { resolvePluginRoot } from "./plugin-root.ts";
+import { resolvePluginRoot } from "./core/plugin-root.ts";
 import type { ProviderClient } from "./provider-client.ts";
 import { DEFAULT_LANG, LANGS, type Lang } from "./serve-lang.ts";
 import { SERVE_BINDING_FALLBACK } from "./serve-binding.ts";

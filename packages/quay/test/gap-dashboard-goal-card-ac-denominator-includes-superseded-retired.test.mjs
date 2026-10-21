@@ -30,7 +30,7 @@ import fs from "node:fs";
 import { renderGoalCard, AC_ROLLUP_IN_DOMAIN_STATUSES } from "../src/serve-dashboard.ts";
 import { handleGoalList } from "../src/serve-goal.ts";
 import { GOAL_STATUSES } from "../src/abi.ts";
-import { createGoalStore } from "../src/goal-store.ts";
+import { createGoalStore } from "../src/core/goal-store.ts";
 import { makeTmpDir } from "../../../plugin/test/helpers/tmp-workspace.mjs";
 
 // gap-webui-dashboard-body-copy-en-zh: the dashboard's body copy is now language-dependent and

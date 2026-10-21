@@ -23,7 +23,7 @@ import { parseFrontmatterCompletely } from "../../quay/src/task-parsing.ts";
 // delegates its add/commit to it and keeps only its own branch-aware ff-to-develop propagation —
 // the primitive's "develop" propagate is too coarse for task/ worktree branches (fan-in ff-merge is
 // the sole path into develop from a task worktree).
-import { commitStoreWrite, resolveCommitActor } from "../../quay/src/store-commit.ts";
+import { commitStoreWrite, resolveCommitActor } from "../../quay/src/core/store-commit.ts";
 // gap-task-status-events-abi-writes-and-creation: the v1 task-status EVENT WRITER. This store has
 // been the single choke point for every Provider-ABI task write since it was written, but it emitted
 // nothing — so `quay task create`, `task edit --status`, MCP `task_write` and the CLI lifecycle verbs

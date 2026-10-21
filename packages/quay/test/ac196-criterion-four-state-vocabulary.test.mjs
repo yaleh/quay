@@ -5,15 +5,14 @@
 //
 // WHAT THIS FILE IS FOR. The AC-196 criterion asserts that the store-commit primitive's return
 // vocabulary has FOUR states (committed | unchanged | not-in-git | failed) instead of one boolean, and
-// that the retired boolean helpers are gone. The ORIGINAL text phrased the vocabulary half as two
-// `grep -q` calls against `packages/quay/src/store-commit.ts` — the src-ROOT path. `35dc5da93`
-// (refactor(core): sink the gate substrate into src/core …) moved the implementation DOWN to
-// `packages/quay/src/core/store-commit.ts` and left the src-root path as a pure forwarding re-export
-// ("⛔ Do not re-add implementation here" — a body there would put the src root back into the gate
-// cycle the move removed). The guarantee never weakened — it is one implementation plus one forwarding
-// surface — but the criterion's carrier went stale and could not be true on any tree. The predicate is
-// now STRUCTURAL (forwarding surface / canonical module / declaration block / retired helpers); this
-// fixture pins that structure so the same carrier rot cannot silently return.
+// that the retired boolean helpers are gone. `35dc5da93` (refactor(core): sink the gate substrate into
+// src/core …) moved the implementation DOWN to `packages/quay/src/core/store-commit.ts`, leaving the
+// src-root path as a pure forwarding re-export.
+// `gap-ac196-criterion-four-state-vocabulary-carrier-stale` re-anchored the predicate on that
+// intermediate state; AC-911 (2026-10-21) then DELETED the src-root forwarding surface outright, so
+// the canonical module is the ONLY path. The guarantee never weakened — it is one implementation,
+// reached by exactly one path. The predicate is STRUCTURAL (canonical module / declaration block /
+// retired helpers); this fixture pins that structure so the same carrier rot cannot silently return.
 //
 // THE UNIT UNDER TEST IS THE SHIPPED BLOCK, NOT A COPY OF IT (hard rule 4). The `four-state-vocabulary`
 // block is extracted VERBATIM from the goal file's criterion — the same text `quay goal gate AC-196`
@@ -22,12 +21,12 @@
 // stay green while the criterion rotted, which is exactly the failure this task exists to repair.
 //
 // BOTH DIRECTIONS ARE COVERED (hard rule 4 corollary 3 — a predicate that cannot be false is not a
-// measurement). The unmutated positive control is paired with four structurally distinct negatives,
+// measurement). The unmutated positive control is paired with five structurally distinct negatives,
 // each asserted BY ITS OWN NAMED `CAUSE=` token so "refused for reason A" can never be read as
-// "refused for reason B": a state dropped from the declaration block, a forwarding surface that stops
-// forwarding, a restored legacy boolean helper, and — the decisive one against the obvious way to
-// weaken this predicate — a state name that survives ONLY in a comment while being absent from the
-// declaration. ⛔ Every mutation is applied to a TEMP ROOT copy; no production file is touched.
+// "refused for reason B": a state dropped from the declaration block, a MISSING canonical module, a
+// missing declaration, a restored legacy boolean helper, and — the decisive one against the obvious
+// way to weaken this predicate — a state name that survives ONLY in a comment while being absent from
+// the declaration. ⛔ Every mutation is applied to a TEMP ROOT copy; no production file is touched.
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -78,31 +77,29 @@ function predicateBlock() {
     "export type CommitOutcome",
     "not-in-git",
     "legacy-boolean-commit-functions",
-    "store-commit\\.ts",
+    "store-commit.ts",
   ]) {
     assert.ok(block.includes(needle), `extracted block does not contain ${needle}`);
   }
   return block;
 }
 
-/** The forwarding surface (src root) and the canonical implementation (core/). */
-const SHIM = "packages/quay/src/store-commit.ts";
+/** The canonical implementation — the ONLY store-commit path after AC-911 retired the src-root
+ *  forwarding surface. */
 const PRIM = "packages/quay/src/core/store-commit.ts";
 
 /**
- * A fresh temp root that IS a git root, holding real copies of the two files under their
- * repo-relative paths (the criterion addresses them relatively, so cwd == the root is what makes
- * them addressable). `git init` is not needed by the predicate itself (it is pure file inspection)
+ * A fresh temp root that IS a git root, holding a real copy of the canonical file under its
+ * repo-relative path (the criterion addresses it relatively, so cwd == the root is what makes it
+ * addressable). `git init` is not needed by the predicate itself (it is pure file inspection)
  * but keeps the root shaped like the root the gate runs in.
  */
 function mkRoot() {
   const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "ac196-fsv-")));
   execFileSync("git", ["init", "-q", dir], { stdio: "ignore" });
-  for (const rel of [SHIM, PRIM]) {
-    const dst = path.join(dir, rel);
-    fs.mkdirSync(path.dirname(dst), { recursive: true });
-    fs.copyFileSync(path.join(REPO, rel), dst);
-  }
+  const dst = path.join(dir, PRIM);
+  fs.mkdirSync(path.dirname(dst), { recursive: true });
+  fs.copyFileSync(path.join(REPO, PRIM), dst);
   return dir;
 }
 
@@ -135,9 +132,10 @@ function dropState(text, state) {
   return text.replace(` | "${state}"`, "");
 }
 
-/** NEGATIVE ②: keep the file importable but stop the forwarding re-export. */
-function stopForwarding(text) {
-  return text.replace(/^export \* from "\.\/core\/store-commit\.ts";[ \t]*$/m, 'export * from "./core/other.ts";');
+/** NEGATIVE ②: the canonical implementation is GONE. ⛔ The predicate must say so by its OWN named
+ *  cause — not by reporting a missing state on a file that does not exist (hard rule 3b). */
+function removeCanonical(root) {
+  fs.rmSync(path.join(root, PRIM), { force: true });
 }
 
 // ── positive control: the shipped block is TRUE on the real, unmutated tree ──────────────────────
@@ -181,31 +179,28 @@ test("dropping not-in-git from the CommitOutcome declaration is refused as state
     const r = runSh(predicateBlock(), root);
     assert.equal(r.code, 1, "a three-state declaration must not satisfy the predicate");
     assert.match(r.stderr, /CAUSE=state-missing:not-in-git\b/);
-    // The causes are not interchangeable: ① is about the VOCABULARY, ② about the FORWARDING SURFACE,
+    // The causes are not interchangeable: ① is about the VOCABULARY, ② about the CANONICAL MODULE,
     // ③ about the RETIRED HELPERS. A predicate that reported one for another would be unattributable
     // (hard rule 3b).
-    assert.doesNotMatch(r.stderr, /CAUSE=import-surface-not-forwarding/);
+    assert.doesNotMatch(r.stderr, /CAUSE=canonical-implementation-missing/);
     assert.doesNotMatch(r.stderr, /CAUSE=legacy-boolean-commit-functions/);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
 });
 
-// ── negative ②: a forwarding surface that stops forwarding — a DIFFERENT cause from ① ──────────
+// ── negative ②: the canonical module is GONE — a DIFFERENT cause from ① ────────────────────────
 
-test("a shim that stops forwarding to core is refused as import-surface-not-forwarding", () => {
+test("a missing canonical module is refused as canonical-implementation-missing", () => {
   const root = mkRoot();
   try {
-    const mutated = stopForwarding(getFile(root, SHIM));
-    assert.notEqual(mutated, getFile(root, SHIM), "the mutation must actually rewrite the export line");
-    putFile(root, SHIM, mutated);
-    // The comment headers still MENTION `store-commit.ts` — the mutation is precisely "the export
-    // line no longer points at the canonical module", not "the file is gone". A comment match must
-    // not be able to satisfy the forwarding half.
-    assert.ok(getFile(root, SHIM).includes("store-commit"), "the header comment must survive the mutation");
+    removeCanonical(root);
+    assert.equal(fs.existsSync(path.join(root, PRIM)), false, "the mutation must actually remove the module");
     const r = runSh(predicateBlock(), root);
-    assert.equal(r.code, 1, "a shim that does not forward must not satisfy the predicate");
-    assert.match(r.stderr, /CAUSE=import-surface-not-forwarding\b/);
+    assert.equal(r.code, 1, "a missing canonical module must not satisfy the predicate");
+    assert.match(r.stderr, /CAUSE=canonical-implementation-missing\b/);
+    // ⛔ Not laundered into "the vocabulary regressed" or "the helpers came back": those would be
+    // claims about a file that is not there (hard rule 3b).
     assert.doesNotMatch(r.stderr, /CAUSE=state-missing:/);
     assert.doesNotMatch(r.stderr, /CAUSE=legacy-boolean-commit-functions/);
   } finally {
@@ -230,7 +225,7 @@ test("a restored legacy boolean helper is refused as legacy-boolean-commit-funct
     assert.match(r.stderr, /CAUSE=legacy-boolean-commit-functions\b/);
     assert.match(r.stderr, /仍有 1 个文件/);
     assert.doesNotMatch(r.stderr, /CAUSE=state-missing:/);
-    assert.doesNotMatch(r.stderr, /CAUSE=import-surface-not-forwarding/);
+    assert.doesNotMatch(r.stderr, /CAUSE=canonical-implementation-missing/);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
@@ -291,6 +286,8 @@ test("the block is structural — it reads the declaration block, not the whole 
   assert.doesNotMatch(executable, /grep\s+-q\s+'unchanged'\s+packages\/quay\/src\/store-commit\.ts/);
   // …and the vocabulary half must be a read of the DECLARATION block, not of the file.
   assert.match(executable, /awk '[^']*export type CommitOutcome/);
-  // The forwarding half must name the canonical target, ⛔ not merely "some store-commit file".
-  assert.match(executable, /export \\\* from "\\\.\/core\/store-commit\\\.ts"/);
+  // The canonical module is addressed at its ONE normalised path (the src-root forwarding surface is
+  // retired), and the predicate tests it by structure — ⛔ not by re-asserting a shim that is gone.
+  assert.match(executable, /prim="packages\/quay\/src\/core\/store-commit\.ts"/);
+  assert.doesNotMatch(executable, /packages\/quay\/src\/store-commit\.ts(?!\.)/);
 });

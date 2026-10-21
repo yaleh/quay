@@ -9,7 +9,7 @@
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { parseFlags } from "./shared.ts";
-import { resolvePluginScript } from "../plugin-root.ts";
+import { resolvePluginScript } from "../core/plugin-root.ts";
 import type { CliCtx } from "./context.ts";
 
 // ── manager commands (C1-C5, gap-manager-productization-five-constraints) ─────────────────────────

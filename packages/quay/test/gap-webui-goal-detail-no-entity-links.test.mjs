@@ -33,7 +33,7 @@ import http from "node:http";
 import { startServer } from "../src/serve.ts";
 import { handleGoalDetail } from "../src/serve-goal.ts";
 import { renderMarkdown } from "../src/serve-render.ts";
-import { createGoalStore } from "../src/goal-store.ts";
+import { createGoalStore } from "../src/core/goal-store.ts";
 import { makeTmpDir } from "../../../plugin/test/helpers/tmp-workspace.mjs";
 import { QUAY_NATIVE_CLI } from "./helpers/cli-entry.mjs";
 

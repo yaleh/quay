@@ -2,7 +2,7 @@
 
 import type { IncomingMessage, ServerResponse } from "node:http";
 import path from "node:path";
-import { createDocumentStore } from "./document-store.ts";
+import { createDocumentStore } from "./core/document-store.ts";
 import type { ServePageCfg } from "./serve-render.ts";
 import {
   html, escapeHtml, shellStyles, renderMarkdown, renderSiteNav, renderMobileChrome, renderBackLink, pageTitle,

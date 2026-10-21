@@ -2,7 +2,7 @@
 id: gap-ac911-src-root-forwarding-shim-deletion
 title: AC-911 src 根 FORWARDING shim 12→2：删 10 个内部 shim、全部消费方改指 core/，并加「已删 shim
   复活=违规」棘轮
-status: ready
+status: done
 labels:
   - gap
 parent: null
@@ -71,7 +71,7 @@ $ grep -rln 'FORWARDING re-export' packages/quay/src/*.ts | wc -l
 - [x] 棘轮读数：`node --experimental-strip-types plugin/scripts/import-graph-check.ts --json` exit 0，且 JSON 中 `retiredShimHits` 为 `[]`、`retiredShimsChecked` 为 `true`；`node --experimental-strip-types plugin/scripts/import-graph-check.ts --selftest` exit 0（实测 exit 0 / `retiredShimHits=[]` `retiredShimsChecked=true`；selftest exit 0，12/12 case behaved）
 - [x] 棘轮能取假（双向，贴读数）：`node --experimental-strip-types --test plugin/test/import-graph-check.test.mjs` exit 0，其中新增夹具 (a) 已删 shim 文件重现 ⇒ checker exit 1 且点名该路径，(b) `import … from "./goal-store.ts"` 指向已删路径 ⇒ exit 1，干净树 ⇒ exit 0，仅注释提及 ⇒ 不报（实测 exit 0，25/25 pass，四条 AC-911 断言逐条命中）
 - [x] exports 目标在 **worktree 内**存在：`node -e '…'` exit 0（⛔ 不以 worktree 里的 bare-specifier import 判定——它解析到主检出）——实测 exit 0：`./adr-store` → `./src/core/adr-store.ts`、`./document-store` → `./src/core/document-store.ts`、`./contract-validator` → `./src/core/contract-validator.ts`
-- [x] `bash scripts/test.sh --for-task gap-ac911-src-root-forwarding-shim-deletion --allow-thin` exit 0（实测 exit 0，1486/1486 pass）
+- [x] `bash scripts/test.sh --for-task gap-ac911-src-root-forwarding-shim-deletion --allow-thin` exit 0（实测 exit 0，1563/1563 pass — 2026-10-21 本分支复跑）
 
 ## DoD
 
@@ -187,6 +187,7 @@ $ grep -rln 'FORWARDING re-export' packages/quay/src/*.ts | wc -l
 - plugin/test/kernel-sibling-resolution-check.test.mjs
 - plugin/test/meta-driver.test.mjs
 - plugin/test/ownership-active-limited-proposal.test.mjs
+- plugin/test/ownership-active-loop.test.mjs
 - plugin/test/worker-driver.test.mjs
 - plugin/test/workflow-runner-self-hosted-check.test.mjs
 - plugin/test/worktree-namespace-literal-check.test.mjs

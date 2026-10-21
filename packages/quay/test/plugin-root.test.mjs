@@ -18,7 +18,7 @@ import path from "node:path";
 import fs from "node:fs";
 import os from "node:os";
 
-import { resolvePluginRoot, resolvePluginRootFrom, resolvePluginRootReading, resolvePluginScript, resolvePluginScriptExec, isPluginSourceCheckout, mainCheckoutRoot } from "../src/plugin-root.ts";
+import { resolvePluginRoot, resolvePluginRootFrom, resolvePluginRootReading, resolvePluginScript, resolvePluginScriptExec, isPluginSourceCheckout, mainCheckoutRoot } from "../src/core/plugin-root.ts";
 
 const KERNEL = path.join("scripts", "driver-runtime.ts");
 
@@ -26,21 +26,16 @@ const KERNEL = path.join("scripts", "driver-runtime.ts");
  * Copy the resolver-under-test into `modDir` (a FAKE checkout root's `packages/quay/src`).
  *
  * tasks/gap-src-root-gate-cycle-break moved the implementation DOWN to `core/plugin-root.ts`
- * (`gate/**` must not import the src root, so the leaf utilities all sank one directory);
- * `src/plugin-root.ts` is now a forwarding re-export. A copy of the forwarding file ALONE cannot
- * resolve — it would fail with ERR_MODULE_NOT_FOUND and the relocation tests below would go red for
- * a reason unrelated to what they measure. So the copy is of the PAIR, preserving the relative
- * shape: `<modDir>/plugin-root.ts` + `<modDir>/core/plugin-root.ts`.
+ * (`gate/**` must not import the src root, so the leaf utilities all sank one directory), and
+ * AC-911 then DELETED the `src/plugin-root.ts` forwarding re-export. `core/plugin-root.ts` is now
+ * the ONE implementation and it has no relative imports, so a single copy stands alone at
+ * `<modDir>/plugin-root.ts` (the relocation tests below only need its `import.meta.url` to sit
+ * inside the fake checkout).
  */
 function copyResolverInto(modDir) {
-  fs.mkdirSync(path.join(modDir, "core"), { recursive: true });
-  fs.copyFileSync(
-    fileURLToPath(new URL("../src/plugin-root.ts", import.meta.url)),
-    path.join(modDir, "plugin-root.ts"),
-  );
   fs.copyFileSync(
     fileURLToPath(new URL("../src/core/plugin-root.ts", import.meta.url)),
-    path.join(modDir, "core", "plugin-root.ts"),
+    path.join(modDir, "plugin-root.ts"),
   );
 }
 

@@ -46,7 +46,7 @@ import { spawnSync, execFileSync } from "node:child_process";
 import { resolveAcceptanceTimeoutMs, DEFAULT_ACCEPTANCE_TIMEOUT_MS } from "../src/kernel/gate-run-options.ts";
 import { runAcceptance } from "../src/gate/shared/acceptance-runner.ts";
 
-const GOAL_STORE = new URL("../src/goal-store.ts", import.meta.url).pathname;
+const GOAL_STORE = new URL("../src/core/goal-store.ts", import.meta.url).pathname;
 const QUAY_BIN = new URL("../bin/quay.js", import.meta.url).pathname;
 
 const GOAL_BODY = "goal body: background, scope, non-goals and exit conditions — long enough to satisfy the 40-char minimum";
@@ -363,13 +363,12 @@ test("AC2 — 60000 默认值只在一处定义，其余引用该导出常量", 
   };
   // GOAL-034: the constant's home moved out of `gate/` into `kernel/` — the walk follows it, so a
   // NEW file spelling the literal in either tree is still caught. tasks/gap-src-root-gate-cycle-break
-  // then sank the runner + the goal store into `core/`, so the walk covers that tree too (a shim at
-  // the old root path would otherwise be the only file left to inspect, and the guard would go
-  // vacuous exactly where the implementation now lives).
+  // then sank the runner + the goal store into `core/`, so the walk covers that tree too — and
+  // AC-911 deleted the src-root forwarding shims, so `core/goal-store.ts` is now the ONLY goal store
+  // file and the walk reaches it (no explicit root-path push is needed or possible).
   walk(path.join(srcDir, "gate"));
   walk(path.join(srcDir, "kernel"));
   walk(path.join(srcDir, "core"));
-  files.push(path.join(srcDir, "goal-store.ts"));
 
   const DEFAULT_LITERAL = /=\s*60_?000\b|timeoutMs = 60000|: 60000\)/;
   const hits = files.filter((f) => DEFAULT_LITERAL.test(fs.readFileSync(f, "utf8")));

@@ -130,8 +130,8 @@ test("AC3a: resolveQuayCodeRoot 按【kernel 安装位置】的布局解析，�
   const real = resolveQuayCodeRoot();
   assert.ok(real !== null, "本仓 dev tree 下 resolveQuayCodeRoot() 必须可解析（否则整套 driver 都不工作）");
   assert.ok(
-    fs.existsSync(path.join(real, "packages", "quay", "src", "goal-store.ts")),
-    `code root 下必须有 packages/quay/src/goal-store.ts，实际 root=${real}`,
+    fs.existsSync(path.join(real, "packages", "quay", "src", "core", "goal-store.ts")),
+    `code root 下必须有 packages/quay/src/core/goal-store.ts，实际 root=${real}`,
   );
 
   // 分离夹具：workspace root 上【取不到】——证明旧解析（<root>/packages/…）在这里必然落空。

@@ -49,7 +49,7 @@ import { escapeRegExp } from "./regex-escape.ts";
 import {
   resolveWorktreeNamespace,
   DEFAULT_WORKTREE_NAMESPACE_NAME,
-} from "../../packages/quay/src/worktree-namespace.ts";
+} from "../../packages/quay/src/core/worktree-namespace.ts";
 import { repoRoot } from "./repo-root.ts";
 
 const REPO_ROOT = repoRoot();

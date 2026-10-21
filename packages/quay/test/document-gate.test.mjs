@@ -15,7 +15,7 @@ import os from "node:os";
 import path from "node:path";
 
 import { gateRegistry, listGates } from "../src/gate/registry.ts";
-import { createDocumentStore } from "../src/document-store.ts";
+import { createDocumentStore } from "../src/core/document-store.ts";
 
 // Every doc dir is removed once at the end of this file (the carrier-array + after() pattern) —
 // a mkdtemp fixture without cleanup leaks a /tmp dir per run.

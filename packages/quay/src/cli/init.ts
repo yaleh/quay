@@ -22,7 +22,7 @@ import {
   formatDocBranchReport,
   landingBaselineEstablishedNow,
   moveCheckoutOntoLandingBaseline,
-} from "../branch-model.ts";
+} from "../core/branch-model.ts";
 import type { CliCtx } from "./context.ts";
 
 /**

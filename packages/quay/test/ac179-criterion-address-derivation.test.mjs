@@ -32,7 +32,7 @@ import { spawn, spawnSync, execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { parse as parseYaml } from "yaml";
 import { makeTmpDir } from "../../../plugin/test/helpers/tmp-workspace.mjs";
-import { evaluateCriterionAttribution } from "../src/goal-store.ts";
+import { evaluateCriterionAttribution } from "../src/core/goal-store.ts";
 import {
   writeCarrier,
   mkRoot,

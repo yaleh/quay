@@ -80,7 +80,7 @@ import { parse as parseYaml } from "yaml";
 // `arg-parsing-helper-family`, routine `semantic-dedup-scan`).
 import { emitPass, emitFail, emitNotEvaluated, helpExit, isDirectEntry, flagValue } from "./gate-script-base.ts";
 import { repoRoot } from "./repo-root.ts";
-import { bareFailureExitsOfCriterion, type BareLine } from "../../packages/quay/src/goal-store.ts";
+import { bareFailureExitsOfCriterion, type BareLine } from "../../packages/quay/src/core/goal-store.ts";
 
 // ── the moved predicate, re-exported (see the ⛔ note above — ONE implementation lives in
 //    packages/quay/src/goal-store.ts; this module's consumers keep importing it from here) ──────────
@@ -101,7 +101,7 @@ export {
   type Segment,
   type BareLine,
   type CriterionAttributionVerdict,
-} from "../../packages/quay/src/goal-store.ts";
+} from "../../packages/quay/src/core/goal-store.ts";
 
 // ── surfaces ────────────────────────────────────────────────────────────────────────────────────────
 

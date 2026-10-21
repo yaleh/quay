@@ -43,7 +43,7 @@ import net from "node:net";
 import path from "node:path";
 import { spawn, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { parseFrontmatter } from "../src/frontmatter-store-base.ts";
+import { parseFrontmatter } from "../src/core/frontmatter-store-base.ts";
 import {
   writeCarrier,
   mkRoot,

@@ -45,7 +45,7 @@ import { fileURLToPath } from "node:url";
 // missing path).
 import { resolveKernelSibling, resolveKernelPluginRoot, resolveKernelScriptsDir } from "../scripts/driver-runtime.ts";
 // A domain — Core-side plugin resolution (walks up from this module's own location, never cwd/root).
-import { resolvePluginScript } from "../../packages/quay/src/plugin-root.ts";
+import { resolvePluginScript } from "../../packages/quay/src/core/plugin-root.ts";
 // B domain — doc-branch derivation (runtime-derived from the target's checked-out branch, ⛔ not the
 // hardcoded literal DOC_BRANCH "author").
 import { resolveDocBranch } from "../scripts/driver-filters.ts";

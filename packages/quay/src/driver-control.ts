@@ -23,7 +23,7 @@
 import path from "node:path";
 import { execFileSync, spawn, spawnSync } from "node:child_process";
 import { findConfig } from "./config.ts";
-import { resolvePluginScriptExec } from "./plugin-root.ts";
+import { resolvePluginScriptExec } from "./core/plugin-root.ts";
 import { KINDS, VERBS } from "./driver-vocab.ts";
 
 /** Resolve the workspace root from `--root` (walk-up) or the process cwd; null when no config.

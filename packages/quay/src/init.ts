@@ -21,7 +21,7 @@ import {
   formatBaselineCheckoutReport,
   type BranchModelReport,
   type DocBranchReport,
-} from "./branch-model.ts";
+} from "./core/branch-model.ts";
 // The ONE regex-literal escaper (kernel leaf). This file used to inline the escape body at the
 // `key`-literal site — one of the spelling variants invisible to the previous sweep's byte needle
 // (finding `escaperegexp-sweep-missed-two`, routine `semantic-dedup-scan`; see
@@ -30,7 +30,7 @@ import { escapeRegExp } from "./kernel/regex-escape.ts";
 // The ONE plugin-tree resolver (gap-project-quay-pointer-is-init-plugin-root-and-version-records-
 // derive-from-it): the project link's source-checkout guard reuses `isPluginSourceCheckout` so the
 // "is this an install or a working tree" judgment cannot fork into two spellings.
-import { isPluginSourceCheckout, resolvePluginRoot } from "./plugin-root.ts";
+import { isPluginSourceCheckout, resolvePluginRoot } from "./core/plugin-root.ts";
 // The ONE binding judge (gap-config-validate-requires-mcp-entry-contradicts-native-default-resolver):
 // `verify_provider_runtime_existence`'s reader resolves the native provider's runtime file through
 // the SAME function the runtime and the validator use, so an omitted binding is verified (from the

@@ -46,16 +46,16 @@ import { readProcCmdlineText } from "./kernel/proc-identity.ts";
 // (task gap-three-pure-judges-kernel-single-def). It used to be a hand-maintained mirror here
 // ("Core cannot import a plugin script"); the kernel is the one location both layers reach.
 import { stripTrailingFullWidthAnnotation } from "./kernel/touches-annotation.ts";
-import { parseFrontmatter } from "./frontmatter-store-base.ts";
+import { parseFrontmatter } from "./core/frontmatter-store-base.ts";
 import { TASK_STATUS, isTaskStatus, type TaskStatus } from "./abi.ts";
-import { resolvePluginScript, resolvePluginScriptExec, resolveOrchestrationFile } from "./plugin-root.ts";
+import { resolvePluginScript, resolvePluginScriptExec, resolveOrchestrationFile } from "./core/plugin-root.ts";
 // Shared session read/write primitives — ONE copy of each, byte-identical to the pinned quay-fleet
 // blob (packages/quay/src/primitives/PROVENANCE.md; re-checked by plugin/scripts/primitives-drift-check.ts).
 // ⛔ Do not re-implement either of these here: SPEC §3.3's only unacceptable outcome is a second
 // hand-written implementation of a session primitive.
 import { readTranscriptMtime } from "./primitives/session-liveness.mjs";
 import { validateSessionRecord } from "./primitives/session-schema.mjs";
-import { resolveWorktreeNamespace } from "./worktree-namespace.ts";
+import { resolveWorktreeNamespace } from "./core/worktree-namespace.ts";
 import YAML from "yaml";
 
 const execFileP = promisify(execFile);

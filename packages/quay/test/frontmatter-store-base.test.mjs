@@ -15,7 +15,7 @@ import {
   withFileLock,
   slugify,
   makeAssertSafeId,
-} from "../src/frontmatter-store-base.ts";
+} from "../src/core/frontmatter-store-base.ts";
 
 // Every tmp dir is removed once at the end of this file (the carrier-array + after() pattern) — a
 // mkdtemp fixture without cleanup leaks a /tmp dir per run.

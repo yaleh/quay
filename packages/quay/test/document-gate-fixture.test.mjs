@@ -16,7 +16,7 @@ import fs from "node:fs";
 import os from "node:os";
 
 import { gateRegistry, registerDocumentGate } from "../src/gate/registry.ts";
-import { createDocumentStore } from "../src/document-store.ts";
+import { createDocumentStore } from "../src/core/document-store.ts";
 import { makeTmpDir, makeTmpWorkspace } from "../../../plugin/test/helpers/tmp-workspace.mjs";
 import { QUAY_CLI, QUAY_NATIVE_CLI } from "./helpers/cli-entry.mjs";
 

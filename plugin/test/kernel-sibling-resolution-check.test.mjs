@@ -230,7 +230,7 @@ test("GREEN (P5): a dev-tree-only-marked file is exempted like the other forms (
 test("scanSurface covers the shipped kernel surface (plugin/scripts + packages/quay/src)", () => {
   const surface = scanSurface(REPO_ROOT);
   assert.ok(surface.includes("plugin/scripts/full-suite-runner.ts"), "the naive __dirname carrier must be in the surface");
-  assert.ok(surface.includes("packages/quay/src/plugin-root.ts"), "the Core resolver must be in the surface");
+  assert.ok(surface.includes("packages/quay/src/core/plugin-root.ts"), "the Core resolver must be in the surface");
   assert.ok(surface.includes("packages/quay/src/cli/driver.ts"), "the AC-203 pre-fix callsite must be in the surface");
   assert.ok(!surface.some((f) => f.includes("/dist/")), "dist bundles excluded");
   assert.ok(!surface.some((f) => f.includes("/checker-mutation-cases/")), "mutation cases excluded");

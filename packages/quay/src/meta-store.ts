@@ -35,8 +35,8 @@ import {
   slugify,
   makeAssertSafeStatus,
   makeAssertSafeId,
-} from "./frontmatter-store-base.ts";
-import { commitKindFile } from "./store-commit.ts";
+} from "./core/frontmatter-store-base.ts";
+import { commitKindFile } from "./core/store-commit.ts";
 
 export const VALID_META_STATUSES = ["proposed", "answered"];
 

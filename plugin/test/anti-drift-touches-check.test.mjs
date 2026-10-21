@@ -30,7 +30,7 @@ import { fileURLToPath } from "node:url";
 import { spawnSync, execFileSync } from "node:child_process";
 
 import { computeActualFiles, computeTaskOwnedFiles, isProjectGoalLine } from "../scripts/anti-drift-touches-check.ts";
-import { classifyBranch, detectDefaultBranch } from "../../packages/quay/src/branch-model.ts";
+import { classifyBranch, detectDefaultBranch } from "../../packages/quay/src/core/branch-model.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "..", "..");

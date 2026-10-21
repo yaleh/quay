@@ -15,8 +15,8 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { execFileSync } from "node:child_process";
-import { commitStoreWrite, commitStoreBatch, commitKindFile, storeCommitMessage, resolveCommitActor, resolveGitRoot } from "../src/store-commit.ts";
-import { createGoalStore } from "../src/goal-store.ts";
+import { commitStoreWrite, commitStoreBatch, commitKindFile, storeCommitMessage, resolveCommitActor, resolveGitRoot } from "../src/core/store-commit.ts";
+import { createGoalStore } from "../src/core/goal-store.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -271,9 +271,9 @@ test("commitStoreBatch primitive: stages multiple paths in one commit with a wri
 
 test("AC4 single constructor: the five store files contain zero fixed-prose assembly", () => {
   const files = [
-    path.join(__dirname, "..", "src", "goal-store.ts"),
-    path.join(__dirname, "..", "src", "document-store.ts"),
-    path.join(__dirname, "..", "src", "adr-store.ts"),
+    path.join(__dirname, "..", "src", "core", "goal-store.ts"),
+    path.join(__dirname, "..", "src", "core", "document-store.ts"),
+    path.join(__dirname, "..", "src", "core", "adr-store.ts"),
     path.join(__dirname, "..", "src", "meta-store.ts"),
     path.join(__dirname, "..", "..", "quay-native", "src", "store.ts"),
   ];

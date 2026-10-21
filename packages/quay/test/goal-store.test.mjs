@@ -27,7 +27,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { spawnSync, execFileSync } from "node:child_process";
-import { createGoalStore, VALID_GOAL_STATUSES, isGoalId, isCriterionId, GoalIntentConflictError, parseAdjudicationTable, GOAL_ACCEPTANCE_ACTIVE_ENV, SWEEP_ACTOR } from "../src/goal-store.ts";
+import { createGoalStore, VALID_GOAL_STATUSES, isGoalId, isCriterionId, GoalIntentConflictError, parseAdjudicationTable, GOAL_ACCEPTANCE_ACTIVE_ENV, SWEEP_ACTOR } from "../src/core/goal-store.ts";
 import { gateFactories, makeGoalGate } from "../src/gate/factories/index.ts";
 
 // gap-ac355-criterion-false-from-goal-acceptance-active-guard: this file's behaviour must NOT depend
@@ -303,7 +303,7 @@ test("draft — a draft GOAL is absent from activeGoals(); its ACs absent from l
 
 // ── AC2 + AC3: goal gate via the direct CLI (Contract invoke) ─────────────────────────────────────
 function runCli(args, opts = {}) {
-  const cli = new URL("../src/goal-store.ts", import.meta.url).pathname;
+  const cli = new URL("../src/core/goal-store.ts", import.meta.url).pathname;
   const res = spawnSync("node", ["--experimental-strip-types", cli, ...args], { encoding: "utf8", ...opts });
   return { status: res.status, stdout: res.stdout ?? "", stderr: res.stderr ?? "" };
 }
@@ -312,7 +312,7 @@ test("AC2 — an AC with an EMPTY criterion fails closed (red), and the CLI reco
   const root = tmpDir("cli-ac2");
   fs.mkdirSync(path.join(root, ".quay"), { recursive: true });
   fs.mkdirSync(path.join(root, "goals"), { recursive: true });
-  const cli = new URL("../src/goal-store.ts", import.meta.url).pathname;
+  const cli = new URL("../src/core/goal-store.ts", import.meta.url).pathname;
   const args = (a) => ["--root", root, ...a];
   spawnSync("node", ["--experimental-strip-types", cli, ...args(["write", "AC-901", "--title", "seeded exit condition", "--status", "draft", "--goal", "GOAL-001", "--criterion", "true", "--origin", "test fixture", "--expect", EXPECT])], { encoding: "utf8" });
   spawnSync("node", ["--experimental-strip-types", cli, ...args(["write", "GOAL-001", "--title", "p", "--status", "active", "--origin", "o", "--body", GOAL_BODY])], { encoding: "utf8" });
@@ -332,7 +332,7 @@ test("AC3 — a goal gate run leaves a verdict+timestamp event in .quay/gate-eve
   const root = tmpDir("cli-ac3");
   fs.mkdirSync(path.join(root, ".quay"), { recursive: true });
   fs.mkdirSync(path.join(root, "goals"), { recursive: true });
-  const cli = new URL("../src/goal-store.ts", import.meta.url).pathname;
+  const cli = new URL("../src/core/goal-store.ts", import.meta.url).pathname;
   const args = (a) => ["--root", root, ...a];
   const n = (cmd) => spawnSync("node", ["--experimental-strip-types", cli, ...args(cmd)], { encoding: "utf8" });
   seedAcCli(n, "GOAL-001");
@@ -365,7 +365,7 @@ test("AC1 — goal gate records payload.evaluationRoot (realpath) and payload.tr
   const holder = tmpDir("eval-root-alias");
   const link = path.join(holder, "alias");
   fs.symlinkSync(root, link); // the same tree, reached under a different spelling
-  const cli = new URL("../src/goal-store.ts", import.meta.url).pathname;
+  const cli = new URL("../src/core/goal-store.ts", import.meta.url).pathname;
   const n = (cmd) => spawnSync("node", ["--experimental-strip-types", cli, "--root", link, ...cmd], { encoding: "utf8" });
   seedAcCli(n, "GOAL-001");
   n(["write", "GOAL-001", "--title", "p", "--status", "active", "--origin", "o", "--body", GOAL_BODY]);
@@ -390,7 +390,7 @@ test("AC1 — goal gate records payload.evaluationRoot (realpath) and payload.tr
 test("goal-store list/get/write round-trip through the CLI (invoke surface)", () => {
   const root = tmpDir("cli-list");
   fs.mkdirSync(path.join(root, "goals"), { recursive: true });
-  const cli = new URL("../src/goal-store.ts", import.meta.url).pathname;
+  const cli = new URL("../src/core/goal-store.ts", import.meta.url).pathname;
   const args = (a) => ["--root", root, ...a];
   const n = (cmd) => spawnSync("node", ["--experimental-strip-types", cli, ...args(cmd)], { encoding: "utf8" });
   // ⚠️ AC-first (2026-09-17, gap-goal-born-draft-zero-ac-escapes-standing-invariant): the write face
@@ -481,7 +481,7 @@ test("AC-5 — cap/stale read from .quay/config.yml (change config → check fol
   const root = tmpDir("cli-config");
   fs.mkdirSync(path.join(root, ".quay"), { recursive: true });
   fs.mkdirSync(path.join(root, "goals"), { recursive: true });
-  const cli = new URL("../src/goal-store.ts", import.meta.url).pathname;
+  const cli = new URL("../src/core/goal-store.ts", import.meta.url).pathname;
   const args = (a) => ["--root", root, ...a];
   const n = (cmd) => spawnSync("node", ["--experimental-strip-types", cli, ...args(cmd)], { encoding: "utf8" });
   seedAcCli(n, "GOAL-001");
@@ -555,7 +555,7 @@ test("I5 CLI — check --achieved-failing exits 1 on an achieved-but-failing AC,
   const root = tmpDir("i5-cli");
   fs.mkdirSync(path.join(root, ".quay"), { recursive: true });
   fs.mkdirSync(path.join(root, "goals"), { recursive: true });
-  const cli = new URL("../src/goal-store.ts", import.meta.url).pathname;
+  const cli = new URL("../src/core/goal-store.ts", import.meta.url).pathname;
   const args = (a) => ["--root", root, ...a];
   const n = (cmd) => spawnSync("node", ["--experimental-strip-types", cli, ...args(cmd)], { encoding: "utf8" });
   seedAcCli(n, "GOAL-010", { status: "achieved" });
@@ -611,7 +611,7 @@ function acFileCommitCount(root, run, id) {
 
 test("AC1 — gate 不写 evidence：两次 gate 后该文件提交数不变（且不脏）", () => {
   const { root, run } = gitRepo("ac1");
-  const cli = new URL("../src/goal-store.ts", import.meta.url).pathname;
+  const cli = new URL("../src/core/goal-store.ts", import.meta.url).pathname;
   const n = (cmd) => spawnSync("node", ["--experimental-strip-types", cli, "--root", root, ...cmd], { encoding: "utf8" });
   seedAcCli(n, "GOAL-001");
   n(["write", "GOAL-001", "--title", "p", "--status", "active", "--origin", "o", "--body", GOAL_BODY]);
@@ -631,7 +631,7 @@ test("AC1 — gate 不写 evidence：两次 gate 后该文件提交数不变（�
 
 test("AC2 — verdict 真变化也不提交：fail→pass 后该文件提交数不变（gate 从不写文件）", () => {
   const { root, run } = gitRepo("ac2");
-  const cli = new URL("../src/goal-store.ts", import.meta.url).pathname;
+  const cli = new URL("../src/core/goal-store.ts", import.meta.url).pathname;
   const n = (cmd) => spawnSync("node", ["--experimental-strip-types", cli, "--root", root, ...cmd], { encoding: "utf8" });
   seedAcCli(n, "GOAL-001");
   n(["write", "GOAL-001", "--title", "p", "--status", "active", "--origin", "o", "--body", GOAL_BODY]);
@@ -650,7 +650,7 @@ test("AC2 — verdict 真变化也不提交：fail→pass 后该文件提交数�
 
 test("AC3 — 状态翻转仍然提交：active→achieved 的 flip 后必有提交", () => {
   const { root, run } = gitRepo("ac3");
-  const cli = new URL("../src/goal-store.ts", import.meta.url).pathname;
+  const cli = new URL("../src/core/goal-store.ts", import.meta.url).pathname;
   const n = (cmd) => spawnSync("node", ["--experimental-strip-types", cli, "--root", root, ...cmd], { encoding: "utf8" });
   seedAcCli(n, "GOAL-001");
   n(["write", "GOAL-001", "--title", "p", "--status", "active", "--origin", "o", "--body", GOAL_BODY]);
@@ -664,7 +664,7 @@ test("AC3 — 状态翻转仍然提交：active→achieved 的 flip 后必有提
 
 test("AC4 — N 次 gate（含 1 次 verdict flip）⇒ 恰 0 个提交：gate 彻底不写文件", () => {
   const { root, run } = gitRepo("ac4");
-  const cli = new URL("../src/goal-store.ts", import.meta.url).pathname;
+  const cli = new URL("../src/core/goal-store.ts", import.meta.url).pathname;
   const n = (cmd) => spawnSync("node", ["--experimental-strip-types", cli, "--root", root, ...cmd], { encoding: "utf8" });
   seedAcCli(n, "GOAL-001");
   n(["write", "GOAL-001", "--title", "p", "--status", "active", "--origin", "o", "--body", GOAL_BODY]);
@@ -693,7 +693,7 @@ test("AC1 (evidence-out-of-git) — gate 后文件逐字节不变", () => {
   const root = tmpDir("cli-ev-ac1");
   fs.mkdirSync(path.join(root, ".quay"), { recursive: true });
   fs.mkdirSync(path.join(root, "goals"), { recursive: true });
-  const cli = new URL("../src/goal-store.ts", import.meta.url).pathname;
+  const cli = new URL("../src/core/goal-store.ts", import.meta.url).pathname;
   const args = (a) => ["--root", root, ...a];
   const n = (cmd) => spawnSync("node", ["--experimental-strip-types", cli, ...args(cmd)], { encoding: "utf8" });
   seedAcCli(n, "GOAL-001");
@@ -711,7 +711,7 @@ test("AC2 (evidence-out-of-git) — lastProgressAt 与 get evidence 都取自账
   const root = tmpDir("cli-ev-ac2");
   fs.mkdirSync(path.join(root, ".quay"), { recursive: true });
   fs.mkdirSync(path.join(root, "goals"), { recursive: true });
-  const cli = new URL("../src/goal-store.ts", import.meta.url).pathname;
+  const cli = new URL("../src/core/goal-store.ts", import.meta.url).pathname;
   const args = (a) => ["--root", root, ...a];
   const n = (cmd) => spawnSync("node", ["--experimental-strip-types", cli, ...args(cmd)], { encoding: "utf8" });
   seedAcCli(n, "GOAL-001");
@@ -734,7 +734,7 @@ test("AC3 (evidence-out-of-git) — 无账本 ⇒ notEvaluated，文件里的 st
   const root = tmpDir("cli-ev-ac3");
   fs.mkdirSync(path.join(root, ".quay"), { recursive: true });
   fs.mkdirSync(path.join(root, "goals"), { recursive: true });
-  const cli = new URL("../src/goal-store.ts", import.meta.url).pathname;
+  const cli = new URL("../src/core/goal-store.ts", import.meta.url).pathname;
   const args = (a) => ["--root", root, ...a];
   const n = (cmd) => spawnSync("node", ["--experimental-strip-types", cli, ...args(cmd)], { encoding: "utf8" });
   // 模拟一个从 git 继承的旧文件：frontmatter 里还带着 evidence（历史提交曾写进去的）。
@@ -752,7 +752,7 @@ test("AC4 (evidence-out-of-git) — gate 后两个消费者立刻反映新 verdi
   const root = tmpDir("cli-ev-ac4");
   fs.mkdirSync(path.join(root, ".quay"), { recursive: true });
   fs.mkdirSync(path.join(root, "goals"), { recursive: true });
-  const cli = new URL("../src/goal-store.ts", import.meta.url).pathname;
+  const cli = new URL("../src/core/goal-store.ts", import.meta.url).pathname;
   const args = (a) => ["--root", root, ...a];
   const n = (cmd) => spawnSync("node", ["--experimental-strip-types", cli, ...args(cmd)], { encoding: "utf8" });
   seedAcCli(n, "GOAL-001");
@@ -793,7 +793,7 @@ test("AC1 CLI — 0 active goal: check --achieved-failing exit 1 + evaluated:fal
   const root = tmpDir("empty-af-cli");
   fs.mkdirSync(path.join(root, ".quay"), { recursive: true });
   fs.mkdirSync(path.join(root, "goals"), { recursive: true });
-  const cli = new URL("../src/goal-store.ts", import.meta.url).pathname;
+  const cli = new URL("../src/core/goal-store.ts", import.meta.url).pathname;
   const args = (a) => ["--root", root, ...a];
   const n = (cmd) => spawnSync("node", ["--experimental-strip-types", cli, ...args(cmd)], { encoding: "utf8" });
   n(["write", "GOAL-010", "--title", "p", "--status", "achieved", "--origin", "o", "--body", GOAL_BODY]);
@@ -1418,7 +1418,7 @@ function stalePassFixture(tag, acs = [["AC-900", "echo 'AC-900: no qualifying re
   const root = tmpDir(tag);
   fs.mkdirSync(path.join(root, ".quay"), { recursive: true });
   fs.mkdirSync(path.join(root, "goals"), { recursive: true });
-  const cli = new URL("../src/goal-store.ts", import.meta.url).pathname;
+  const cli = new URL("../src/core/goal-store.ts", import.meta.url).pathname;
   const n = (cmd) => spawnSync("node", ["--experimental-strip-types", cli, "--root", root, ...cmd], { encoding: "utf8" });
   const planted = n(["write", "GOAL-900", "--title", "closed goal", "--status", "achieved", "--origin", "o", "--body", GOAL_BODY]);
   assert.equal(planted.status, 0, "fixture setup: GOAL-900 must be written:\n" + planted.stderr);
@@ -1589,7 +1589,7 @@ test("AC-242 —— `---` 落在 criterion 块标量内时，其后声明的 lon
   const root = tmpDir("ac242-delim");
   fs.mkdirSync(path.join(root, "goals"), { recursive: true });
   fs.mkdirSync(path.join(root, ".quay"), { recursive: true });
-  const cli = new URL("../src/goal-store.ts", import.meta.url).pathname;
+  const cli = new URL("../src/core/goal-store.ts", import.meta.url).pathname;
   const n = (cmd) => spawnSync("node", ["--experimental-strip-types", cli, "--root", root, ...cmd], { encoding: "utf8" });
   const criterion = ["true", "# --- 这一行携带 frontmatter 分隔符（AC-214/AC-242/AC-244 的判据正文同形）", "false"].join("\n");
   n(["write", "GOAL-900", "--title", "closed goal", "--status", "achieved", "--origin", "o", "--body", GOAL_BODY]);
@@ -1833,7 +1833,7 @@ function capabilityFixture(tag) {
   const root = tmpDir(tag);
   fs.mkdirSync(path.join(root, "goals"), { recursive: true });
   fs.mkdirSync(path.join(root, ".quay"), { recursive: true });
-  const cli = new URL("../src/goal-store.ts", import.meta.url).pathname;
+  const cli = new URL("../src/core/goal-store.ts", import.meta.url).pathname;
   const n = (cmd) => spawnSync("node", ["--experimental-strip-types", cli, "--root", root, ...cmd], { encoding: "utf8" });
   return { root, n, cli };
 }

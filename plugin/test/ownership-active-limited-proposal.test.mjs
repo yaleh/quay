@@ -14,7 +14,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { createGoalStore } from "../../packages/quay/src/goal-store.ts";
+import { createGoalStore } from "../../packages/quay/src/core/goal-store.ts";
 import {
   ENTRY_BAR_STREAK, CONDITIONS, APPROVAL_REQUIRED_LINE, MEMORY_NOT_EVALUATED,
   evaluateEntryBar, deriveConcernKind, deltaEvidence, decisionMemoryStatus, decisionMemoryReading,

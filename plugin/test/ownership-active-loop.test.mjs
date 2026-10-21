@@ -894,9 +894,9 @@ test("AC2 negative control: the SAME shape aimed at a file the memory does not k
 test("a `known-not-yet-filed` hit does NOT terminate the investigation — it is flagged, not silenced", async () => {
   const proposal = githubClientProposal({
     concern_kind: "other-boundary",
-    concern: "`packages/quay/src/goal-store.ts` disposal after an achieved goal never appends a status-log entry while the sibling transition path always does.",
-    candidate_interventions: [{ title: "Make `packages/quay/src/goal-store.ts` append a status-log entry on the dispose path", rationale: "one action, two audit guarantees" }],
-    scope: { in_scope: ["packages/quay/src/goal-store.ts"], non_goals: ["the transition table work"] },
+    concern: "`packages/quay/src/core/goal-store.ts` disposal after an achieved goal never appends a status-log entry while the sibling transition path always does.",
+    candidate_interventions: [{ title: "Make `packages/quay/src/core/goal-store.ts` append a status-log entry on the dispose path", rationale: "one action, two audit guarantees" }],
+    scope: { in_scope: ["packages/quay/src/core/goal-store.ts"], non_goals: ["the transition table work"] },
   });
   const res = await runActiveInvestigation({
     root: "/r",

@@ -568,7 +568,7 @@ export async function runProposalCli({ argv, repoRoot, deps = {} }) {
   const write = args.includes("--write");
   let store = null, writeSeam = null;
   if (write) {
-    const { createGoalStore } = await import(path.join(REPO_ROOT, "packages", "quay", "src", "goal-store.ts"));
+    const { createGoalStore } = await import(path.join(REPO_ROOT, "packages", "quay", "src", "core", "goal-store.ts"));
     store = createGoalStore(path.join(root, "goals"), {});
     writeSeam = createGoalStoreWrite(store);
   }

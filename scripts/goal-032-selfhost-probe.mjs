@@ -24,7 +24,7 @@
 // different (or unresolvable) result — the negative control — which is what makes `allMatch` a
 // falsifiable reading rather than a tautology (硬规则 4). The three entries and why they are the
 // right three: `packages/quay/src/kernel/verdict-parse.ts` is the new kernel owner,
-// `packages/quay/src/criterion-fidelity.ts` is the product-side consumer,
+// `packages/quay/src/core/criterion-fidelity.ts` is the product-side consumer,
 // `plugin/scripts/goal-driver.ts` is the methodology-side consumer.
 //
 // ⛔ `import()`ing `goal-driver.ts` does NOT run a driver round: its bottom is guarded by
@@ -84,7 +84,7 @@ const EXIT_NOT_EVALUATED = 3;
 
 const DEFAULT_ENTRIES = [
   "packages/quay/src/kernel/verdict-parse.ts",
-  "packages/quay/src/criterion-fidelity.ts",
+  "packages/quay/src/core/criterion-fidelity.ts",
   "plugin/scripts/goal-driver.ts",
 ];
 const DEFAULT_SOURCES = ["packages", "plugin/scripts"];
@@ -450,7 +450,7 @@ async function main() {
         ...afterReading,
       },
       consumerConvergenceEvidence: [
-        ...grepCallSites(afterTree, ["packages/quay/src/criterion-fidelity.ts"], "parseBinaryVerdict("),
+        ...grepCallSites(afterTree, ["packages/quay/src/core/criterion-fidelity.ts"], "parseBinaryVerdict("),
         ...grepCallSites(afterTree, ["plugin/scripts/goal-driver.ts"], "parseBinaryVerdict("),
       ],
       canonicalDefinitionCountMethod:

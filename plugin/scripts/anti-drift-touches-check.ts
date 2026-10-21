@@ -62,7 +62,7 @@ import { mainCheckoutRoot } from "./repo-root.ts";
 // `arg-parsing-helper-family`, routine `semantic-dedup-scan`).
 import { isDirectEntry, helpExit, flagValue } from "./gate-script-base.ts";
 import { matchGlob, isOverbroadDeclaration, normalizePath, parseTouches } from "./touches-orthogonality-check.ts";
-import { classifyBranch, detectDefaultBranch, GOAL_BRANCH_RE, LANDING_BASELINE_ROLE } from "../../packages/quay/src/branch-model.ts";
+import { classifyBranch, detectDefaultBranch, GOAL_BRANCH_RE, LANDING_BASELINE_ROLE } from "../../packages/quay/src/core/branch-model.ts";
 
 // normalizePath (canonical: strips ./, collapses //, resolves ./.. segments, drops trailing /, case
 // preserved for the case-significant Linux repo) is single-source in touches-orthogonality-check.mjs

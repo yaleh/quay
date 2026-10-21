@@ -22,8 +22,8 @@ import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import { appendGateEvent, queryGateEvents } from "./core/gate-event-store.ts";
-import { parseFrontmatter } from "./frontmatter-store-base.ts";
-import { goalBranchName, goalBranchRefExists } from "./branch-model.ts";
+import { parseFrontmatter } from "./core/frontmatter-store-base.ts";
+import { goalBranchName, goalBranchRefExists } from "./core/branch-model.ts";
 
 /** The ledger gate names this mechanism writes. ⛔ Both are read back by the SAME module so a typo
  *  cannot half-match (硬规则 5b: one definition, not a string literal repeated per call site). */

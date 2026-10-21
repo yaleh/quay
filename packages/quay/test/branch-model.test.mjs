@@ -31,7 +31,7 @@ import {
   resolveCheckedOutBranch,
   resolveDocBranchRole,
   verifyBranchModel,
-} from "../src/branch-model.ts";
+} from "../src/core/branch-model.ts";
 import { runInit } from "../src/init.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -1068,7 +1068,7 @@ import {
   goalBranchRefExists,
   goalBranchTip,
   goalIdFromBranchToken,
-} from "../src/branch-model.ts";
+} from "../src/core/branch-model.ts";
 
 test("goal branch — name is DERIVED (goal/<id>) and the token parser accepts only GOAL-<3+digits>", () => {
   assert.equal(goalBranchName("GOAL-901"), "goal/GOAL-901");

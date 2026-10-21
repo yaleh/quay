@@ -30,7 +30,7 @@ import { fileURLToPath } from "node:url";
 import { execFileSync } from "node:child_process";
 
 import { collectSyncHealth } from "../scripts/meta-driver.ts";
-import { createGoalStore, criterionFingerprint, AMEND_ACTOR, SWEEP_ACTOR, GOAL_ACCEPTANCE_ACTIVE_ENV } from "../../packages/quay/src/goal-store.ts";
+import { createGoalStore, criterionFingerprint, AMEND_ACTOR, SWEEP_ACTOR, GOAL_ACCEPTANCE_ACTIVE_ENV } from "../../packages/quay/src/core/goal-store.ts";
 import { queryGateEvents } from "../../packages/quay/src/gate/gate-event-store.ts";
 
 // gap-ac355-criterion-false-from-goal-acceptance-active-guard: this file's behaviour must NOT depend

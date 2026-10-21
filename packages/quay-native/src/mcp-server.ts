@@ -32,7 +32,7 @@ import { resolveAcceptanceTimeout, timeoutKnobHint } from "../../quay/src/kernel
 import { appendGateEvent } from "../../quay/src/gate/gate-event-store.ts";
 // The "which tree was this evaluated on" payload fragment (SPEC-goal-branch-2026-10-03 §7 辛), shared
 // with the `goal gate` CLI / sweep writers so all three entry points record the same shape (硬规则 5b).
-import { evaluationContext } from "../../quay/src/goal-store.ts";
+import { evaluationContext } from "../../quay/src/core/goal-store.ts";
 import { randomUUID } from "node:crypto";
 
 // ── task_list's text/content budget ────────────────────────────────────────────────────────────

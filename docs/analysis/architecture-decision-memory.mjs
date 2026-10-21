@@ -43,7 +43,7 @@ export const SEED_DECISIONS = Object.freeze([
     id: "dm-002-flipgoal-disposeold-statuslog",
     type: "known-not-yet-filed",
     concern_kinds: Object.freeze(["other-boundary"]),
-    files: Object.freeze(["packages/quay/src/goal-store.ts"]),
+    files: Object.freeze(["packages/quay/src/core/goal-store.ts"]),
     symbols: Object.freeze(["flipGoal", "disposeOld"]),
     reason: "Real, recorded DEFECT with no task filed: goal-store.ts's `flipGoal` path for `disposeOld.to === \"achieved\"` never appends a statusLog entry, while the same semantic transition through `write()`'s `statusChanged` path always does — one 'dispose after achieved' action, two different audit guarantees. Filed for the human's ruling, deliberately not bundled with the (purely additive) transition-table work.",
     source: "goals/GOAL-036-workerpool-在飞排除集合-inflight-retryexhausted-收敛到单一纯函数计算点-同一轮内两次.md §相关但本轮不落地 (③Goal transition contract).",

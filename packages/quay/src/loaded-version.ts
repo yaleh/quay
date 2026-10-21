@@ -34,7 +34,7 @@ import path from "node:path";
 import { readProcCmdline } from "./kernel/proc-identity.ts";
 import { pidAlive } from "./server-state.ts";
 import { isQuayServe } from "./kernel/proc-identity.ts";
-import { resolvePluginRoot } from "./plugin-root.ts";
+import { resolvePluginRoot } from "./core/plugin-root.ts";
 
 /** 版本四态（`ahead` 是第四个取值：loaded ≠ installed 但**方向相反**——源树检出里宿主跑的是比
  *  注册表更新的一版（如本仓库 `plugin/VERSION` = `0.17.0-dev` vs 注册表 `0.16.0`）。

@@ -21,7 +21,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
-import { createGoalStore } from "../src/goal-store.ts";
+import { createGoalStore } from "../src/core/goal-store.ts";
 
 const _createdDirs = [];
 function tmpDir(tag = "born-draft") {
@@ -37,7 +37,7 @@ const GOAL_BODY = "goal body: background, scope, non-goals and exit conditions â
 const EXPECT = "the expected outcome this criterion proves";
 
 function runCli(args) {
-  const cli = new URL("../src/goal-store.ts", import.meta.url).pathname;
+  const cli = new URL("../src/core/goal-store.ts", import.meta.url).pathname;
   const res = spawnSync("node", ["--no-warnings", "--experimental-strip-types", cli, ...args], { encoding: "utf8" });
   return { status: res.status, stdout: res.stdout ?? "", stderr: res.stderr ?? "" };
 }

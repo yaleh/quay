@@ -42,7 +42,7 @@ test('real ring: GOAL 名下 achieved AC 尾事件 fail ⇒ 关闭被拒（close
       '负控制：被拒不是因充分性不足（否则测的是另一条闸）');
 
     // 逃生口（臂③）：给 AC-001 声明 long-term ⇒ 恢复可关闭。经 goal-store write（机件路径）。
-    const w = spawnSync('node', ['--experimental-strip-types', path.join(repoRoot, 'packages/quay/src/goal-store.ts'),
+    const w = spawnSync('node', ['--experimental-strip-types', path.join(repoRoot, 'packages/quay/src/core/goal-store.ts'),
       'write', 'AC-001', '--long-term', 'true', '--root', tmp], { encoding: 'utf8' });
     assert.equal(w.status, 0, 'goal-store write --long-term true 成功:\n' + w.stdout + w.stderr);
     const r2 = await runGoalRound(tmp, { scriptRoot: repoRoot, gapWorkerCmd: 'true', resourceGateArgv: ['true'], sufficiencyCmd });

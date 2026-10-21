@@ -38,14 +38,16 @@ criterion: >-
 
   #   the same guarantee instead of the same string of paths.
 
-  # ⛔ Do NOT move the implementation back to the src root: the forwarding
-  structure is
+  # ⛔ The src-root forwarding surface is GONE: GOAL-907 retired that
+  intermediate state and
 
-  #    precisely what breaks the src-root <-> gate directory SCC. This criterion
-  must not be
+  #    AC-911 (2026-10-21) deleted it, so
+  packages/quay/src/core/criterion-fidelity.ts is now the
 
-  #    made green by pasting `parseBinaryVerdict` into the forwarding file
-  either.
+  #    ONLY implementation path. Do NOT re-create a forwarding file, and do NOT
+  paste
+
+  #    `parseBinaryVerdict` into some new src-root module to make this green.
 
 
   root=$(git rev-parse --show-toplevel 2>/dev/null) || { echo "NOT-EVALUATED:
@@ -108,14 +110,22 @@ criterion: >-
   unchanged" >&2; exit 1; }
 
 
-  # d. the public import surface is unbroken: the src-root path still forwards
-  to core/
+  # d. the canonical implementation is AT the single normalised path (the
+  src-root forwarding
 
-  pub="packages/quay/src/criterion-fidelity.ts"
+  #    surface was deleted by AC-911, so core/ is the ONLY path — assert the
+  implementation there,
 
-  grep -q 'export \* from "./core/criterion-fidelity.ts"' "$pub" || { echo
-  "CAUSE=fidelity-public-import-surface-broken — $pub must keep forwarding to
-  ./core/criterion-fidelity.ts" >&2; exit 1; }
+  #    ⛔ not a forwarding file that no longer exists)
+
+  canon="packages/quay/src/core/criterion-fidelity.ts"
+
+  [ -f "$canon" ] || { echo "CAUSE=canonical-implementation-missing — $canon
+  不存在" >&2; exit 1; }
+
+  grep -q "export function parseFidelityVerdict" "$canon" || { echo
+  "CAUSE=canonical-implementation-missing — $canon 未定义 parseFidelityVerdict"
+  >&2; exit 1; }
 
 
   # e. goal-driver: canonical parse imported, thin wrapper kept, call site
@@ -158,13 +168,16 @@ criterion: >-
 
   echo "PASS: kernel/verdict-parse.ts exports parseBinaryVerdict; exactly one
   parseFidelityVerdict definition ($fid) delegates to it with its call site
-  unchanged; src root still forwards to core/; goal-driver delegates and keeps
-  its signature/call site; routine-quota files untouched"
+  unchanged; the canonical implementation lives at $canon (the src-root
+  forwarding surface is retired); goal-driver delegates and keeps its
+  signature/call site; routine-quota files untouched"
 expect: exit 0 = kernel 正本落地、packages/quay/src 下恰好一个 parseFidelityVerdict
-  定义且真正调用 parseBinaryVerdict、调用点不变、src 根仍转发 core/、goal-driver 三项成立、routine-quota
-  未触碰；exit 1 = CAUSE= 指明具体哪一条（no-canonical-function / kernel-boundary-violation
-  / fidelity-not-thin-wrapper-or-duplicated / fidelity-not-delegated /
-  fidelity-caller-changed / fidelity-public-import-surface-broken /
+  定义且真正调用 parseBinaryVerdict、调用点不变、canonical 实现位于
+  packages/quay/src/core/criterion-fidelity.ts（src 根转发面已由 GOAL-907 退役、AC-911
+  删除）、goal-driver 三项成立、routine-quota 未触碰；exit 1 = CAUSE=
+  指明具体哪一条（no-canonical-function / kernel-boundary-violation /
+  fidelity-not-thin-wrapper-or-duplicated / fidelity-not-delegated /
+  fidelity-caller-changed / canonical-implementation-missing /
   sufficiency-not-delegated / sufficiency-signature-removed /
   sufficiency-caller-changed / touched-routine-quota-file）；exit 3 =
   NOT-EVALUATED（不在 git 仓库内 / kernel 文件缺失 / goal-driver 缺失 / develop ref 缺失）

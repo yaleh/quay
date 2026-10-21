@@ -21,7 +21,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { createGoalStore, GOAL_ACCEPTANCE_ACTIVE_ENV } from "../../packages/quay/src/goal-store.ts";
+import { createGoalStore, GOAL_ACCEPTANCE_ACTIVE_ENV } from "../../packages/quay/src/core/goal-store.ts";
 
 /** 写一个 GOAL/AC 记录成 goals/ 下的真实 frontmatter 文件（hermetic，⛔ 不注入 seam——跑真 goal-store
  *  的 list/checkAchievedFailing 作用域枚举）。longTerm 缺省不写 `long-term` 键。 */

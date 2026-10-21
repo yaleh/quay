@@ -27,7 +27,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { spawn, spawnSync } from "node:child_process";
-import { resolvePluginRoot } from "../plugin-root.ts";
+import { resolvePluginRoot } from "../core/plugin-root.ts";
 import { loadConfig, activeProvider } from "../config.ts";
 import {
   classifyRuntimeArtifactDirty,

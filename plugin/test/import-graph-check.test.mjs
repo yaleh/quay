@@ -27,11 +27,13 @@ import {
   baselineFile,
   checkBaselineShrinkOnly,
   countsOf,
+  decide,
   extractImports,
   judge,
   readBaselineFile,
   readImportGraph,
   resolveSpecifier,
+  RETIRED_SRC_ROOT_SHIMS,
   tarjanSccs,
 } from "../scripts/import-graph-check.ts";
 
@@ -312,6 +314,86 @@ test("the non-JSON reading DOES print the human verdict line", () => {
     stdio: ["ignore", "pipe", "pipe"],
   });
   assert.match(out, /^(import-graph-check: files=|PASS — |FAIL — )/m);
+});
+
+// ── AC-911's resurrection ratchet — the fifth quantity, both directions ──────────────────────────────
+
+/** Materialize a fixture with a ZERO baseline committed into the tree (so `decide()` can reach its
+ *  three-valued exit code rather than "baseline missing ⇒ 2"). */
+function ratchetFixture(files) {
+  const root = fixture(files);
+  const bAbs = baselineFile(root);
+  fs.mkdirSync(path.dirname(bAbs), { recursive: true });
+  fs.writeFileSync(bAbs, JSON.stringify(ZERO, null, 2) + "\n");
+  return root;
+}
+
+const SHIM_REL = RETIRED_SRC_ROOT_SHIMS[0]; // packages/quay/src/adr-store.ts
+const SHIM_BASE = path.posix.basename(SHIM_REL);
+const SHIM_DIR = path.posix.dirname(SHIM_REL);
+
+test("AC-911 (a) — a retired src-root shim that REAPPEARS is reported and exits 1, named", () => {
+  const root = ratchetFixture({ [SHIM_REL]: `export * from "./core/${SHIM_BASE}";\n` });
+  try {
+    const d = decide(root);
+    const hits = d.reading.retiredShimHits;
+    assert.deepEqual(hits, [{ path: SHIM_REL, kind: "file" }], `exactly the reappeared file, named; got ${JSON.stringify(hits)}`);
+    assert.equal(d.code, 1, "a resurrected retired shim must fail the gate");
+    assert.equal(d.reading.retiredShimsChecked, true);
+    assert.equal(d.verdict.retiredShimsBlocked, true);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("AC-911 (b) — a live import of a DELETED shim is reported and exits 1, named with its importer", () => {
+  const importer = `${SHIM_DIR}/consumer.ts`;
+  // The specifier is assembled the same way the fixture paths above are: a spelled
+  // `./<shim>` literal here would be read by other census checks as a real import of a dead module.
+  const spec = `./${SHIM_BASE}`;
+  const root = ratchetFixture({ [importer]: `import { x } from "${spec}";\nexport const c = x;\n` });
+  try {
+    const d = decide(root);
+    assert.equal(d.reading.retiredShimHits.length, 1, JSON.stringify(d.reading.retiredShimHits));
+    const hit = d.reading.retiredShimHits[0];
+    assert.equal(hit.path, SHIM_REL);
+    assert.equal(hit.kind, "import");
+    assert.equal(hit.from, importer);
+    assert.equal(hit.line, 1);
+    assert.equal(d.code, 1, "an import of a deleted shim must fail the gate");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("AC-911 (c) — a CLEAN tree reads zero hits and exits 0 (the ratchet is not a wall)", () => {
+  const root = ratchetFixture({ [`${SHIM_DIR}/consumer.ts`]: `import { y } from "./core/${SHIM_BASE}";\nexport const c = y;\n` });
+  try {
+    const d = decide(root);
+    assert.deepEqual(d.reading.retiredShimHits, []);
+    assert.equal(d.reading.retiredShimsChecked, true);
+    assert.equal(d.code, 0);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("AC-911 (d) — a COMMENT that merely mentions a retired path is not a resurrection (position judgment)", () => {
+  const root = ratchetFixture({
+    [`${SHIM_DIR}/consumer.ts`]: `// import { x } from "./${SHIM_BASE}";\nexport const c = 1;\n`,
+  });
+  try {
+    const d = decide(root);
+    assert.deepEqual(d.reading.retiredShimHits, [], "a commented-out import is not a live edge");
+    assert.equal(d.code, 0);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("AC-911 — the real tree reads zero resurrected shims (the ratchet measured, not asserted)", () => {
+  assert.deepEqual(REAL.retiredShimHits, [], `retired shims came back: ${JSON.stringify(REAL.retiredShimHits)}`);
+  assert.equal(REAL.retiredShimsChecked, true);
 });
 
 // ── the real repo: AC2 / AC3 / AC4 as readings, not prose ────────────────────────────────────────────

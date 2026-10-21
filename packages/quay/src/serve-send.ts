@@ -37,7 +37,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { isValidSessionId, sessionTranscriptPath } from "./observation.ts";
 import { html, escapeHtml, pageStyles, modernistStyles, renderSiteNav, renderMobileChrome } from "./serve-render.ts";
-import { resolvePluginScriptExec } from "./plugin-root.ts";
+import { resolvePluginScriptExec } from "./core/plugin-root.ts";
 // Shared session read/write primitives — the socket delivery lanes (L1 message / L2 keys) and the
 // input-face audit ledger each exist exactly ONCE in this repo, byte-identical to the pinned
 // quay-fleet blob (packages/quay/src/primitives/PROVENANCE.md; re-checked by

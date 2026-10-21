@@ -25,7 +25,7 @@ import os from "node:os";
 
 import { resolveGate, listGates } from "../src/gate/registry.ts";
 import { makeTmpDir } from "../../../plugin/test/helpers/tmp-workspace.mjs";
-import { createAdrStore } from "../src/adr-store.ts";
+import { createAdrStore } from "../src/core/adr-store.ts";
 import { QUAY_CLI, QUAY_NATIVE_CLI } from "./helpers/cli-entry.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));

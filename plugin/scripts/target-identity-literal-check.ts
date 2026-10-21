@@ -51,7 +51,7 @@ import { buildNonCodeMask } from "./checker-lib.ts";
 import { scanKernelSurface as scanSurface } from "./fs-walk.ts";
 // The goal-branch token pattern is DEFINED ONCE in Core's branch model (ADR-004) — this checker asks
 // the same module that CREATES `goal/<id>` whether a literal spells one, ⛔ never a second regex.
-import { goalIdFromBranchToken } from "../../packages/quay/src/branch-model.ts";
+import { goalIdFromBranchToken } from "../../packages/quay/src/core/branch-model.ts";
 // parseArg now lives in gate-script-base.ts as `flagValue` (it was one of the byte-identical
 // copies of the indexOf+next-arg idiom in plugin/scripts; .quay/routine-findings.jsonl finding
 // `arg-parsing-helper-family`, routine `semantic-dedup-scan`).

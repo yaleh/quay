@@ -21,6 +21,10 @@
 //   不在此列 —— kernel 落点若连 node 内建都不能用就没有意义；本检查器量的是【层间越界】，不是依赖白名单。
 //   目录不存在 ⇒ `kernelChecked:false` —— ⛔【不得】返回与「已检查且合格」同形的值（硬规则 3b）。
 //
+// FIFTH RULE（AC-911，2026-10-21）: 已删除的 src 根转发 shim（10 条）不得复活 —— 文件重现（`git ls-files`）
+//   或任一【真实】import/export 语句指向该路径都算。列表是静态字面量 ⇒ `retiredShimsChecked:true` 恒成立
+//   （唯一例外是枚举本身失败，此时随 `evaluated:false` 一起上报，⛔ 不伪装成「零命中」）。
+//
 // 设计约束（每条都对应一次已发生的错误）:
 //   · 按位置判定（硬规则 2）: 只认真实的 import/export 语句，注释/字符串里出现 `from "…plugin/…"` 不算。
 //     复用仓库已有的 `buildNonCodeMask`（plugin/scripts 中 13 处依赖它），不新造掩码。
@@ -84,6 +88,17 @@ export interface NotAnalyzed {
   js: number;
 }
 
+/** A retired src-root forwarding shim that came BACK — either the file itself or a live import of it. */
+export interface RetiredShimHit {
+  /** the retired repo-relative path (as listed in RETIRED_SRC_ROOT_SHIMS). */
+  path: string;
+  kind: "file" | "import";
+  /** the importing file (kind:"import" only). */
+  from?: string;
+  /** the line of the import statement (kind:"import" only). */
+  line?: number;
+}
+
 export interface GraphReading {
   /** false ⇒ the graph could not be read (NOT-EVALUATED — never conflated with "0 cycles"). */
   evaluated: boolean;
@@ -100,6 +115,11 @@ export interface GraphReading {
   notAnalyzed: NotAnalyzed;
   /** tracked source paths that resolve to no readable target (dangling symlinks) — absent, not hidden. */
   dangling: string[];
+  /** FIFTH QUANTITY — AC-911's resurrection ratchet. Empty is the healthy reading. */
+  retiredShimHits: RetiredShimHit[];
+  /** true unconditionally: the retired-path list is a static literal, so there is no "could not look"
+   *  state for this check (硬规则 3b — the value is always evaluable, never silently conflated). */
+  retiredShimsChecked: boolean;
 }
 
 /** The committed baseline shape — exactly the three ratchet counters. */
@@ -118,6 +138,47 @@ const REVERSE_TARGET_PREFIXES = ["plugin/", "experiments/"];
 /** The conditional kernel boundary (SPEC §2 P1: 共享原语落点 `packages/quay/src/kernel/`). */
 export const KERNEL_DIR_REL = "packages/quay/src/kernel";
 const KERNEL_PREFIX = `${KERNEL_DIR_REL}/`;
+
+/**
+ * FIFTH QUANTITY — the retired src-root forwarding shims (AC-911, 2026-10-21).
+ *
+ * `tasks/gap-src-root-gate-cycle-break` sank ten modules into `core/` and left pure
+ * `export * from "./core/<name>.ts"` forwarding files at the src root. That intermediate surface
+ * made every module reachable by two graph paths; AC-911 deleted the ten files so exactly one path
+ * remains (`core/<name>.ts`). This list is the ratchet that keeps them dead:
+ *   · `kind:"file"`   — the path reappeared in `git ls-files` (someone re-created the shim);
+ *   · `kind:"import"` — a REAL import/export statement (position, not keyword — see extractImports)
+ *     normalises to one of these paths.
+ * ⛔ Not a keyword grep: comments/strings that merely mention a retired path are not hits (硬规则 2).
+ * `abi.ts` / `config.ts` are the two PERMANENT public ABI shims and are therefore NOT listed.
+ */
+export const RETIRED_SRC_ROOT_SHIMS: readonly string[] = [
+  "packages/quay/src/adr-store.ts",
+  "packages/quay/src/branch-model.ts",
+  "packages/quay/src/contract-validator.ts",
+  "packages/quay/src/criterion-fidelity.ts",
+  "packages/quay/src/document-store.ts",
+  "packages/quay/src/frontmatter-store-base.ts",
+  "packages/quay/src/goal-store.ts",
+  "packages/quay/src/plugin-root.ts",
+  "packages/quay/src/store-commit.ts",
+  "packages/quay/src/worktree-namespace.ts",
+];
+
+/** Extension-insensitive comparison key, so `./goal-store`, `./goal-store.js` and
+ *  `./goal-store.ts` all normalise to the same retired path. */
+function shimKey(rel: string): string {
+  return rel.replace(/\.(ts|mts|cts|tsx|js|mjs|cjs)$/, "");
+}
+
+const RETIRED_SHIM_KEYS = new Map(RETIRED_SRC_ROOT_SHIMS.map((p) => [shimKey(p), p]));
+
+/** Resolve a relative specifier from `fromRel` to a repo-relative POSIX path (no extension
+ *  normalisation beyond `shimKey`). Returns null for bare/external specifiers. */
+export function normalizeRelativeSpecifier(fromRel: string, spec: string): string | null {
+  if (!spec.startsWith(".")) return null;
+  return path.posix.normalize(path.posix.join(path.posix.dirname(fromRel), spec));
+}
 
 // ── file selection (git ls-files, never find) ───────────────────────────────────────────────────────
 
@@ -334,14 +395,26 @@ export function readImportGraph(root: string): GraphReading {
     kernelViolations: [],
     notAnalyzed: { mjs: 0, js: 0 },
     dangling: [],
+    retiredShimHits: [],
+    retiredShimsChecked: false,
   };
 
   let tracked: string[];
   try {
     tracked = gitLsFiles(root);
   } catch (err) {
+    // "I could not enumerate the tracked set" is NOT "no retired shim came back" (硬规则 3b) — the
+    // carried `retiredShimsChecked:false` says so, and the caller maps `evaluated:false` to exit 2.
     return { ...empty, reason: `git ls-files failed in ${root}: ${(err as Error).message.split("\n")[0]}` };
   }
+
+  // `kind:"file"` — a retired path back in the tracked set. Enumerated from `git ls-files` (the same
+  // source the node set uses), so an untracked scratch file does not red the ratchet.
+  const trackedSet = new Set(tracked);
+  const retiredShimHits: RetiredShimHit[] = RETIRED_SRC_ROOT_SHIMS.filter((p) => trackedSet.has(p)).map((p) => ({
+    path: p,
+    kind: "file" as const,
+  }));
 
   const notAnalyzed: NotAnalyzed = {
     mjs: tracked.filter((p) => p.endsWith(".mjs") && !isExcludedPath(p)).length,
@@ -372,7 +445,15 @@ export function readImportGraph(root: string): GraphReading {
     nodes.add(canon);
   }
   if (nodes.size === 0) {
-    return { ...empty, evaluated: false, notAnalyzed, dangling, reason: `no analyzable TypeScript files under ${root}` };
+    return {
+      ...empty,
+      evaluated: false,
+      notAnalyzed,
+      dangling,
+      retiredShimHits,
+      retiredShimsChecked: true,
+      reason: `no analyzable TypeScript files under ${root}`,
+    };
   }
 
   // ── edges ── (iterated over the CANONICAL node set, so a symlink's file is read once, as its target)
@@ -387,6 +468,16 @@ export function readImportGraph(root: string): GraphReading {
       continue;
     }
     for (const imp of extractImports(src)) {
+      // FIFTH QUANTITY: a real import/export statement pointing at a retired src-root shim. Position
+      // judgment — `extractImports` already excludes comments/strings, and an unresolvable path (the
+      // shim is gone) is exactly the reading this catches.
+      const norm = normalizeRelativeSpecifier(canon, imp.spec);
+      if (norm !== null) {
+        const retiredPath = RETIRED_SHIM_KEYS.get(shimKey(norm));
+        if (retiredPath !== undefined) {
+          retiredShimHits.push({ path: retiredPath, kind: "import", from: canon, line: imp.line });
+        }
+      }
       const to = resolveSpecifier(canon, imp.spec, nodes);
       if (to === null) continue; // external / bare / unresolvable — not a node edge
       allEdges.push({ from: canon, to, line: imp.line, kind: imp.kind });
@@ -398,6 +489,8 @@ export function readImportGraph(root: string): GraphReading {
       evaluated: false,
       notAnalyzed,
       dangling,
+      retiredShimHits,
+      retiredShimsChecked: true,
       reason: `could not read ${parseFailures.length} tracked source file(s): ${parseFailures.slice(0, 3).join("; ")}`,
     };
   }
@@ -447,6 +540,8 @@ export function readImportGraph(root: string): GraphReading {
     kernelViolations,
     notAnalyzed,
     dangling,
+    retiredShimHits,
+    retiredShimsChecked: true,
   };
 }
 
@@ -466,6 +561,8 @@ export interface RatchetVerdict {
   /** true when HEAD carries no baseline file — the bootstrap state, explicitly labelled, never silent. */
   bootstrap: boolean;
   kernelBlocked: boolean;
+  /** AC-911's resurrection ratchet: true ⇒ a retired src-root shim is back (file or live import). */
+  retiredShimsBlocked: boolean;
 }
 
 /** This ratchet's axes — the part of the shared shrink-only judgment each consumer OWNS. Named
@@ -498,13 +595,15 @@ export function judge(
   const over = BASELINE_AXES.filter((k) => counts[k] > baseline[k]);
   const shrink = checkBaselineShrinkOnly(worktreeBaseline, headBaseline);
   const kernelBlocked = reading.kernelChecked && reading.kernelViolations.length > 0;
+  const retiredShimsBlocked = reading.retiredShimHits.length > 0;
   return {
-    ok: over.length === 0 && shrink.raised.length === 0 && !kernelBlocked,
+    ok: over.length === 0 && shrink.raised.length === 0 && !kernelBlocked && !retiredShimsBlocked,
     over,
     baselineRaised: shrink.raised,
     headBaseline,
     bootstrap: shrink.bootstrap,
     kernelBlocked,
+    retiredShimsBlocked,
   };
 }
 
@@ -556,6 +655,8 @@ export interface SelftestCase {
     reverseEdges: number;
     kernelChecked?: boolean;
     kernelViolations?: number;
+    /** AC-911 ratchet: the expected number of retired-shim hits (file + live import). */
+    retiredShimHits?: number;
     /** the gate exit code this case must produce. */
     exit: number;
   };
@@ -710,6 +811,38 @@ export const SELFTEST_CASES: SelftestCase[] = [
     expect: { evaluated: true, valueSccs: 0, typeSccs: 0, reverseEdges: 0, kernelChecked: false, kernelViolations: 0, exit: 0 },
   },
   {
+    // AC-911 (a): the RETIRED FILE comes back. ⛔ This is the direction a "nothing imports it anymore"
+    // reading cannot see — the shim's own reappearance re-creates the second graph path.
+    name: "retired-shim-file-reappears (packages/quay/src/goal-store.ts back in git ls-files ⇒ FAIL, named)",
+    git: true,
+    files: {
+      "packages/quay/src/goal-store.ts": F(`export * from "./core/goal-store.ts";`),
+    },
+    baseline: { valueSccs: 0, typeSccs: 0, reverseEdges: 0 },
+    expect: { evaluated: true, valueSccs: 0, typeSccs: 0, reverseEdges: 0, retiredShimHits: 1, exit: 1 },
+  },
+  {
+    // AC-911 (b): a LIVE import pointing at a deleted path — the file is gone but a consumer still
+    // names it (ERR_MODULE_NOT_FOUND at run time, invisible to the three cycle quantities).
+    name: "retired-shim-import (import from ./goal-store.ts ⇒ FAIL, named)",
+    git: true,
+    files: {
+      "packages/quay/src/x.ts": F(`import { g } from "./goal-store.ts";\nexport const x = g;`),
+    },
+    baseline: { valueSccs: 0, typeSccs: 0, reverseEdges: 0 },
+    expect: { evaluated: true, valueSccs: 0, typeSccs: 0, reverseEdges: 0, retiredShimHits: 1, exit: 1 },
+  },
+  {
+    // AC-911 (c) — POSITION judgment: a comment that merely MENTIONS the retired path is not a hit.
+    name: "retired-shim-comment-mention (a commented-out import is not a resurrection ⇒ PASS)",
+    git: true,
+    files: {
+      "packages/quay/src/x.ts": F(`// import { g } from "./goal-store.ts";\nexport const x = 1;`),
+    },
+    baseline: { valueSccs: 0, typeSccs: 0, reverseEdges: 0 },
+    expect: { evaluated: true, valueSccs: 0, typeSccs: 0, reverseEdges: 0, retiredShimHits: 0, exit: 0 },
+  },
+  {
     name: "non-git-directory (cannot enumerate ⇒ evaluated false + exit 2, NEVER exit 0)",
     git: false,
     files: { "src/a.ts": F(`import { b } from "./b.ts";`) },
@@ -750,6 +883,7 @@ export function runSelftestCase(c: SelftestCase): { name: string; ok: boolean; d
     ` reverseEdges=${c.expect.reverseEdges}` +
     (c.expect.kernelChecked === undefined ? "" : ` kernelChecked=${c.expect.kernelChecked}`) +
     (c.expect.kernelViolations === undefined ? "" : ` kernelViolations=${c.expect.kernelViolations}`) +
+    (c.expect.retiredShimHits === undefined ? "" : ` retiredShimHits=${c.expect.retiredShimHits}`) +
     ` exit=${c.expect.exit}`;
   const dir = fs.mkdtempSync(path.join(process.env.TMPDIR ?? "/tmp", "import-graph-selftest-"));
   try {
@@ -767,6 +901,14 @@ export function runSelftestCase(c: SelftestCase): { name: string; ok: boolean; d
     }
     if (c.expect.kernelViolations !== undefined && reading.kernelViolations.length !== c.expect.kernelViolations) {
       problems.push(`kernelViolations=${reading.kernelViolations.length} want ${c.expect.kernelViolations}`);
+    }
+    if (c.expect.retiredShimHits !== undefined && reading.retiredShimHits.length !== c.expect.retiredShimHits) {
+      problems.push(`retiredShimHits=${reading.retiredShimHits.length} want ${c.expect.retiredShimHits}`);
+    }
+    // Every EVALUATED reading must have run the ratchet; an unevaluated one may honestly report
+    // `false` (it could not enumerate) — the caller maps that to exit 2, never to "clean".
+    if (reading.evaluated && !reading.retiredShimsChecked) {
+      problems.push("retiredShimsChecked=false on an evaluated reading (the ratchet must always evaluate)");
     }
     if (exit !== c.expect.exit) problems.push(`exit=${exit} want ${c.expect.exit}`);
     if (c.valueSccContains) {
@@ -835,8 +977,10 @@ Usage:
   --selftest        run the injected self-test cases (fixtures + the baseline-raise case) and exit.
   --baseline <f>    baseline file (default plugin/import-graph-baseline.json under <root>).
 
-Exit: 0 = every quantity ≤ baseline, baseline not raised past HEAD, kernel boundary holds
-      1 = a quantity exceeded the baseline / the baseline was raised / a kernel violation
+Exit: 0 = every quantity ≤ baseline, baseline not raised past HEAD, kernel boundary holds,
+          no retired src-root shim resurrected
+      1 = a quantity exceeded the baseline / the baseline was raised / a kernel violation /
+          a retired src-root shim reappeared (as a file or as a live import)
       2 = usage or environment error, INCLUDING "the graph could not be read" (evaluated:false)`;
 
 function reportReading(reading: GraphReading, v: RatchetVerdict | null, baseline: Baseline | null, asJson: boolean): void {
@@ -857,6 +1001,8 @@ function reportReading(reading: GraphReading, v: RatchetVerdict | null, baseline
           kernelViolations: reading.kernelViolations,
           notAnalyzed: reading.notAnalyzed,
           dangling: reading.dangling,
+          retiredShimHits: reading.retiredShimHits,
+          retiredShimsChecked: reading.retiredShimsChecked,
           baseline,
           verdict: v,
         },
@@ -879,6 +1025,12 @@ function reportReading(reading: GraphReading, v: RatchetVerdict | null, baseline
       (reading.kernelChecked ? ` (violations=${reading.kernelViolations.length})` : " (packages/quay/src/kernel/ absent — not conflated with 'checked and clean')"),
   );
   console.log(`  notAnalyzed (tracked non-test, outside this checker's TS scope): mjs=${reading.notAnalyzed.mjs} js=${reading.notAnalyzed.js}`);
+  console.log(
+    `  retiredShimsChecked=${reading.retiredShimsChecked} retiredShimHits=${reading.retiredShimHits.length}` +
+      (reading.retiredShimHits.length > 0
+        ? `: ${reading.retiredShimHits.map((h) => (h.kind === "file" ? `${h.path} (file)` : `${h.path} (import ${h.from}:${h.line})`)).join(", ")}`
+        : ""),
+  );
   if (reading.dangling.length > 0) console.log(`  dangling (tracked, no readable target — not a node): ${reading.dangling.join(", ")}`);
   if (baseline) console.log(`  baseline: ${JSON.stringify(baseline)}`);
   if (v) {
@@ -886,6 +1038,7 @@ function reportReading(reading: GraphReading, v: RatchetVerdict | null, baseline
     if (v.over.length > 0) console.log(`  OVER baseline on: ${v.over.join(", ")}`);
     if (v.baselineRaised.length > 0) console.log(`  BASELINE RAISED past HEAD on: ${v.baselineRaised.join(", ")}`);
     if (v.kernelBlocked) console.log(`  KERNEL BOUNDARY VIOLATED by ${reading.kernelViolations.length} edge(s)`);
+    if (v.retiredShimsBlocked) console.log(`  RETIRED SRC-ROOT SHIM RESURRECTED (${reading.retiredShimHits.length} hit(s))`);
   }
 }
 
@@ -987,6 +1140,13 @@ export function main(argv: string[]): number {
     process.stderr.write(
       `import-graph-check: FAIL — ${reading.kernelViolations.length} import edge(s) leave ${KERNEL_DIR_REL}/ (first: ${reading.kernelViolations[0].from}:${reading.kernelViolations[0].line} → ${reading.kernelViolations[0].to})\n`,
     );
+    return 1;
+  }
+  if (verdict.retiredShimsBlocked) {
+    const named = reading.retiredShimHits
+      .map((h) => (h.kind === "file" ? `${h.path} (file reappeared)` : `${h.path} (imported by ${h.from}:${h.line})`))
+      .join("; ");
+    process.stderr.write(`import-graph-check: FAIL — retired src-root shim resurrected: ${named}\n`);
     return 1;
   }
   // ⛔ In --json mode stdout carries the JSON OBJECT and nothing else: an appended human line makes the

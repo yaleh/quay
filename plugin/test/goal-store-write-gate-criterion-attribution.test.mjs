@@ -26,8 +26,8 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { createGoalStore } from "../../packages/quay/src/goal-store.ts";
-import * as goalStore from "../../packages/quay/src/goal-store.ts";
+import { createGoalStore } from "../../packages/quay/src/core/goal-store.ts";
+import * as goalStore from "../../packages/quay/src/core/goal-store.ts";
 import * as checker from "../scripts/criterion-failure-attribution-check.ts";
 
 const tmpDirs = [];

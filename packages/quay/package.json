@@ -13,9 +13,9 @@
     "quay": "./dist/quay.js"
   },
   "exports": {
-    "./adr-store": "./src/adr-store.ts",
-    "./document-store": "./src/document-store.ts",
-    "./contract-validator": "./src/contract-validator.ts",
+    "./adr-store": "./src/core/adr-store.ts",
+    "./document-store": "./src/core/document-store.ts",
+    "./contract-validator": "./src/core/contract-validator.ts",
     "./dashboard-kernel": {
       "types": "./src/dashboard-kernel.ts",
       "default": "./dist/dashboard-kernel.js"

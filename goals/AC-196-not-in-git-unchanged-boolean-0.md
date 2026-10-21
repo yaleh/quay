@@ -29,24 +29,18 @@ criterion: >-
   # and clean" from "never checked"). The predicate is STRUCTURAL:
 
 
-  #   ① the import surface packages/quay/src/store-commit.ts still exists and
-  still forwards to the
-
-  #      canonical module;
-
-
-  #   ② the canonical implementation packages/quay/src/core/store-commit.ts
+  #   ① the canonical implementation packages/quay/src/core/store-commit.ts
   exists;
 
 
-  #   ③ the four state names are read OUT OF the `CommitOutcome` DECLARATION
+  #   ② the four state names are read OUT OF the `CommitOutcome` DECLARATION
   BLOCK (quotes stripped,
 
   #      tokenised) — ⛔ a mention inside a comment is not a member of the
   vocabulary;
 
 
-  #   ④ the retired boolean helpers `commitGoalFileAfterWrite` /
+  #   ③ the retired boolean helpers `commitGoalFileAfterWrite` /
   `commitMetaFileAfterWrite` are gone
 
   #      from packages/quay/src (count == 0).
@@ -55,44 +49,32 @@ criterion: >-
   #
 
 
-  # ⛔ WHY THE CARRIER MOVED. The previous text grepped `not-in-git` and
-  `unchanged` in
+  # ⛔ WHY THE IMPORT-SURFACE DIMENSION IS GONE. The previous text asserted that
+  the src-ROOT
 
-  # packages/quay/src/store-commit.ts — the src-ROOT path. 35dc5da93
-  (2026-10-18, "sink the gate
+  # packages/quay/src/store-commit.ts still existed and forwarded to
+  ./core/store-commit.ts. That
 
-  # substrate into src/core …") moved the implementation DOWN to
-  packages/quay/src/core/store-commit.ts
+  # intermediate state is RETIRED: GOAL-907 declared it transitional and AC-911
+  (2026-10-21) deleted
 
-  # and left the src-root path as a pure forwarding re-export whose header says
-  "⛔ Do not re-add
+  # the src-root forwarding surface outright, so the canonical module is now the
+  ONLY path. The
 
-  # implementation here" (a body there would put the src root back into the gate
-  cycle the move
+  # guarantee never weakened — it is one implementation, reached by exactly one
+  path — and this
 
-  # removed). The guarantee never weakened — it is one implementation plus one
-  forwarding surface —
+  # predicate reads that implementation directly (declaration block +
+  retired-helper count), ⛔ not a
 
-  # only the criterion's carrier went stale. ⛔ Do NOT "fix" a future red by
+  # forwarding file that no longer exists. ⛔ Do NOT "fix" a future red by
   pasting the state names
 
-  # back into the shim, by restoring an implementation there, or by re-adding a
-  boolean helper.
-
-
-  shim="packages/quay/src/store-commit.ts"
+  # into a new shim, by restoring an implementation at the src root, or by
+  re-adding a boolean helper.
 
 
   prim="packages/quay/src/core/store-commit.ts"
-
-
-  test -f "$shim" || { echo "CAUSE=import-surface-missing — $shim
-  不存在（历史消费者依赖的受支持 import 面）" >&2; exit 1; }
-
-
-  grep -qE '^export \* from "\./core/store-commit\.ts"' "$shim" || { echo
-  "CAUSE=import-surface-not-forwarding — $shim 不再是到 ./core/store-commit.ts
-  的转发再导出" >&2; exit 1; }
 
 
   test -f "$prim" || { echo "CAUSE=canonical-implementation-missing — $prim 不存在"
@@ -125,25 +107,24 @@ criterion: >-
 
 
   echo "OK — CommitOutcome 四态齐备（committed | unchanged | not-in-git |
-  failed）；实现唯一（$prim），import 面 $shim 转发保持；旧 boolean 提交函数 = 0"
+  failed）；实现唯一（$prim）；旧 boolean 提交函数 = 0"
 
 
   # <<< four-state-vocabulary
 
 
   exit 0
-expect: 重锚后立即读：import 面 packages/quay/src/store-commit.ts 存在且逐字转发到
-  ./core/store-commit.ts；canonical 实现 packages/quay/src/core/store-commit.ts 的
-  `export type CommitOutcome` 声明块含四态 committed / unchanged / not-in-git /
-  failed（去引号后逐 token 判，⛔ 注释里提到不算）；packages/quay/src 下旧 boolean 提交函数计数 = 0 ⇒ exit
-  0。失败时 exit 1 且 stderr 携带具名 `CAUSE=`（import-surface-missing /
-  import-surface-not-forwarding / canonical-implementation-missing /
+expect: 重锚后立即读：canonical 实现 packages/quay/src/core/store-commit.ts 的 `export
+  type CommitOutcome` 声明块含四态 committed / unchanged / not-in-git / failed（去引号后逐
+  token 判，⛔ 注释里提到不算）；packages/quay/src 下旧 boolean 提交函数计数 = 0 ⇒ exit 0。失败时 exit 1
+  且 stderr 携带具名 `CAUSE=`（canonical-implementation-missing /
   outcome-declaration-missing / state-missing:<state> /
   legacy-boolean-commit-functions）——⛔ `echo … >&2` 与 `exit 1`
   必须写在【同一行】：plugin/scripts/criterion-failure-attribution-check.ts
-  逐行判定，拆两行会被判裸退出并打红棘轮（GOAL-009 AC-241 纪律）。⛔ 本条不再把两个状态名 grep 在重构前的 src-root 载体上
-  —— 那是 35dc5da93
-  之前的形态（gap-ac196-criterion-four-state-vocabulary-carrier-stale，2026-10-20 复盘）。
+  逐行判定，拆两行会被判裸退出并打红棘轮（GOAL-009 AC-241 纪律）。⛔ 本条不再断言 src 根转发面存在——该中间态已由 GOAL-907
+  退役、AC-911 删除（2026-10-21），实现唯一在 core/，由此处结构断言；也不再把两个状态名 grep 在重构前的 src-root
+  载体上（35dc5da93 之前的形态，gap-ac196-criterion-four-state-vocabulary-carrier-stale
+  复盘）。
 origin: >-
   SPEC §3 不可协商第 3 条 / 硬规则 3b。goal-store.ts:264 与 meta-store.ts:77 现在把「不在 git
   工作树」「内容没变所以跳过」「commit 真失败」三件事全部返回 false ——
