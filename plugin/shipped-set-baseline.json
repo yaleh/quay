@@ -192,6 +192,30 @@
         "shLines": 7345
       },
       "why": "release-gate size ceiling stale by one since v0.19.0: the v0.20.0 (run 38883031015) and v0.21.0 (run 39449799348) release runs both failed shipped-set-clean with files 287 > ceiling 286. Re-anchored from a real publish-dist-branch.sh artifact (the same command release.yml step 5 runs) assembled from this worktree's plugin/ tree and extracted with git archive: files 286 -> 287, bytes 61456361 -> 63139052. shLines unchanged at 7345; the three dev-only ratchet axes stay 0; bytes is reported, not gated (SIZE_GATED_AXES = files, shLines)."
+    },
+    {
+      "when": "2026-10-21T22:30:29.908Z",
+      "from": {
+        "files": 0,
+        "bytes": 0,
+        "shLines": 0,
+        "shipped": {
+          "files": 287,
+          "bytes": 63139052,
+          "shLines": 7345
+        }
+      },
+      "to": {
+        "files": 0,
+        "bytes": 0,
+        "shLines": 0
+      },
+      "shipped": {
+        "files": 288,
+        "bytes": 63698495,
+        "shLines": 7345
+      },
+      "why": "gap-design-evolution-readings-report-only-routine adds one shipped plugin script (design-evolution-readings.ts) that quality-gate-driver imports, so build-plugin-dist emits one more entry bundle (scripts/dist/design-evolution-readings.js): files 287 -> 288. Artifact built by the real publish-dist-branch.sh (sync-vendor build + build-plugin-dist + .sh reachability prune + dist closure gate) from THIS worktree's plugin/ tree; extracted with git archive. shLines unchanged (no .sh added); the three dev-only ratchet axes stay 0; bytes is reported, not gated."
     }
   ],
   "_axes": {
@@ -205,8 +229,8 @@
   "bytes": 0,
   "shLines": 0,
   "shipped": {
-    "files": 287,
-    "bytes": 63139052,
+    "files": 288,
+    "bytes": 63698495,
     "shLines": 7345
   }
 }

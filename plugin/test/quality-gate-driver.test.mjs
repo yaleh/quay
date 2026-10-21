@@ -70,6 +70,12 @@ import {
   archCycleRoutineFromConfig,
   runArchCycleRound,
   formatArchCycleAssembly,
+  DESIGN_EVOLUTION_ROUTINE_NAME,
+  DESIGN_EVOLUTION_INTERVAL_MIN_DEFAULT,
+  DESIGN_EVOLUTION_HISTORY_REL,
+  designEvolutionRoutineFromConfig,
+  runDesignEvolutionRound,
+  formatDesignEvolutionAssembly,
 } from "../scripts/quality-gate-driver.ts";
 // 同一个读数函数的两个面：例行程把它写进 Fact，AC1 的「可从 .archguard/query/ 独立复现」直接对
 // **读函数**做（⛔ 不另写一份解析，否则只是证明夹具自洽）。
@@ -2691,4 +2697,173 @@ test("ARCH_CYCLE_HISTORY_REL — the carrier path is the single declared one (an
   const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
   const ignored = fs.readFileSync(path.join(REPO_ROOT, ".gitignore"), "utf8");
   assert.match(ignored, /^\*\*\/\.quay\/arch-cycle-history\.jsonl$/m, "a runtime carrier must not be git-tracked");
+});
+
+// ── design-evolution-readings 例程（gap-design-evolution-readings-report-only-routine）─────────────
+// 这一族要钉的三件事，按「静默退化」的难易排序：
+//   ① 段缺席 ⇒ 例程表逐条不变（AC144 的「恰好四条」仍成立）；enabled:false ⇒ 记
+//      `not-evaluated:disabled` 且**零写入**（AC1 的一半）；
+//   ② 一条读数成立时，载体上真的多一行，且那一行同时含 RM1 / RM2 / 「窗口内最大中心文件变动提交」
+//      （AC5 的形状）；读数**读不出来**时，行**照写**（evaluated:false）——否则「没读过」与
+//      「读过且干净」在历史上同形（硬规则 3b）；
+//   ③ 读数本身（占比高、争用多）⛔ 不是 failed —— report-only，fail只留给真故障（坏配置 / 写不进）。
+
+test("designEvolutionRoutineFromConfig — an UNDECLARED workspace keeps EXACTLY the four built-in routines (AC1)", (t) => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "qg-de-absent-"));
+  t.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
+  const read = designEvolutionRoutineFromConfig(tmp);
+  assert.equal(read.routine, null, "no section ⇒ the routine is not even ADDED to the table");
+  assert.equal(read.present, false);
+  assert.equal(read.error, null);
+
+  const without = qualityGateRoutines(tmp, coverageBaseOpts()).map((r) => r.name);
+  assert.deepEqual(without, ["pool-quality-judge", "judgment-consumer-check", "architecture-review", "packaging-hygiene"]);
+  const injected = { name: DESIGN_EVOLUTION_ROUTINE_NAME, schedule: { kind: "interval", minutes: DESIGN_EVOLUTION_INTERVAL_MIN_DEFAULT }, run: () => [] };
+  const withIt = qualityGateRoutines(tmp, { ...coverageBaseOpts(), designEvolutionRoutine: injected }).map((r) => r.name);
+  assert.deepEqual(withIt, [...without, DESIGN_EVOLUTION_ROUTINE_NAME], "the injection appends; it never displaces a built-in");
+});
+
+test("designEvolutionRoutineFromConfig — a DECLARED section is assembled with its declared interval", (t) => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "qg-de-declared-"));
+  t.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
+  fs.mkdirSync(path.join(tmp, ".quay"), { recursive: true });
+  fs.writeFileSync(path.join(tmp, ".quay", "config.yml"), "loop:\n  design_evolution_readings:\n    enabled: true\n    interval: interval:120m\n", "utf8");
+  const read = designEvolutionRoutineFromConfig(tmp);
+  assert.equal(read.present, true);
+  assert.equal(read.enabled, true);
+  assert.equal(read.error, null);
+  assert.equal(read.routine.name, DESIGN_EVOLUTION_ROUTINE_NAME);
+  assert.deepEqual(read.routine.schedule, { kind: "interval", minutes: 120 });
+
+  // Declaration without an explicit interval ⇒ the documented 360m default, not an unset schedule.
+  fs.writeFileSync(path.join(tmp, ".quay", "config.yml"), "loop:\n  design_evolution_readings:\n    enabled: true\n", "utf8");
+  assert.deepEqual(designEvolutionRoutineFromConfig(tmp).routine.schedule, { kind: "interval", minutes: 360 });
+  assert.equal(DESIGN_EVOLUTION_INTERVAL_MIN_DEFAULT, 360);
+});
+
+test("runDesignEvolutionRound — AC1: enabled:false records not-evaluated:disabled and writes NOTHING", (t) => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "qg-de-disabled-"));
+  t.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
+  const history = path.join(tmp, "history.jsonl");
+  const fact = runDesignEvolutionRound(tmp, {
+    config: { enabled: false, intervalMinutes: null, subsystems: [], topN: 10 },
+    configPresent: true, configError: null, historyPath: history, now: "T0",
+  });
+  assert.equal(fact.name, DESIGN_EVOLUTION_ROUTINE_NAME);
+  assert.equal(fact.state, "not-evaluated");
+  assert.match(fact.reason, /not-evaluated:disabled/);
+  assert.equal(fact.value, null, "the kill switch must not even produce a reading-shaped value");
+  assert.equal(fs.existsSync(history), false, "AC1: disabled ⇒ ZERO writes (not a blank line, not a header)");
+});
+
+test("runDesignEvolutionRound — a DECLARED-but-malformed section is `failed` and writes NOTHING (硬规则 3b)", (t) => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "qg-de-badcfg-"));
+  t.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
+  const history = path.join(tmp, "history.jsonl");
+  const fact = runDesignEvolutionRound(tmp, { config: null, configPresent: true, configError: "loop.design_evolution_readings needs a boolean 'enabled'", historyPath: history });
+  assert.equal(fact.state, "failed");
+  assert.equal(fact.value, null);
+  assert.equal(fs.existsSync(history), false);
+});
+
+test("runDesignEvolutionRound — AC5: ONE record carries RM1 + RM2 + the largest central change, and appends one line", (t) => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "qg-de-round-"));
+  t.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
+  const repo = path.join(tmp, "repo");
+  fs.mkdirSync(path.join(repo, "mod"), { recursive: true });
+  fs.mkdirSync(path.join(repo, ".quay"), { recursive: true });
+  const env = { ...process.env, GIT_AUTHOR_NAME: "de fixture", GIT_AUTHOR_EMAIL: "de@example.invalid", GIT_COMMITTER_NAME: "de fixture", GIT_COMMITTER_EMAIL: "de@example.invalid" };
+  const go = (...args) => {
+    const r = spawnSync("git", ["-C", repo, ...args], { env, encoding: "utf8" });
+    assert.equal(r.status, 0, `git ${args.join(" ")} failed: ${r.stderr}`);
+  };
+  const write = (rel, n) => fs.writeFileSync(path.join(repo, rel), Array.from({ length: n }, (_, i) => `l${i}`).join("\n") + "\n");
+  write("mod/central.ts", 100);
+  write("mod/other.ts", 100);
+  go("init", "-q");
+  go("add", "-A");
+  go("commit", "-q", "-m", "baseline");
+  const baseline = spawnSync("git", ["-C", repo, "rev-parse", "HEAD"], { encoding: "utf8" }).stdout.trim();
+  write("mod/central.ts", 110);
+  write("mod/other.ts", 190);
+  go("add", "-A");
+  go("commit", "-q", "-m", "grow");
+  // RM2 is zero-config but NOT zero-input: an absent ledger is `evaluated:false` (asserted below by
+  // the sibling test). Here the ledger exists, so both readings are taken in ONE round.
+  fs.writeFileSync(
+    path.join(repo, ".quay", "worker-outcome.jsonl"),
+    JSON.stringify({ task: "x", ts: "T-x", selector_reason: "避开 mod/central.ts 的争用" }) + "\n",
+  );
+
+  const history = path.join(tmp, "history.jsonl");
+  const fact = runDesignEvolutionRound(repo, {
+    config: {
+      enabled: true, intervalMinutes: 360, topN: 10,
+      subsystems: [{ name: "m", baseline, central: [{ atBaseline: "mod/central.ts", atHead: "mod/central.ts" }], modules: ["mod/*.ts"] }],
+    },
+    configPresent: true, configError: null, historyPath: history, now: "T0",
+  });
+  assert.equal(fact.state, "verified", fact.reason ?? "");
+  assert.equal(fact.value.reportOnly, true);
+  assert.equal(fact.value.rm1.subsystems[0].sharePercentRounded, 10); // 10 / (10 + 90)
+  assert.equal(fact.value.rm1.subsystems[0].maxCentralChangeCommit.centralDelta, 10);
+  assert.equal(fact.value.rm2.evaluated, true);
+  assert.equal(fact.value.rm2.files[0].file, "central.ts");
+  const lines = fs.readFileSync(history, "utf8").split("\n").filter((l) => l !== "");
+  assert.equal(lines.length, 1, "one due round ⇒ exactly one history line");
+  const rec = JSON.parse(lines[0]);
+  assert.equal(rec.ts, "T0");
+  assert.equal(rec.mode, "design-evolution-readings-round");
+  assert.equal(rec.reportOnly, true);
+  assert.equal(rec.evaluated, true, "both readings were taken ⇒ the record is evaluated:true");
+  assert.equal(rec.rm1.subsystems[0].share, 0.1);
+  assert.ok(rec.rm1.subsystems[0].maxCentralChangeCommit, "AC5: the largest central-change commit must be on the line");
+  assert.equal(rec.rm2.carrierRecords, 1);
+});
+
+test("runDesignEvolutionRound — a reading that CANNOT be taken still appends a line (not-evaluated, not silence)", (t) => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "qg-de-noteval-"));
+  t.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
+  const repo = path.join(tmp, "repo");
+  fs.mkdirSync(path.join(repo, ".quay"), { recursive: true });
+  const env = { ...process.env, GIT_AUTHOR_NAME: "de", GIT_AUTHOR_EMAIL: "de@example.invalid", GIT_COMMITTER_NAME: "de", GIT_COMMITTER_EMAIL: "de@example.invalid" };
+  for (const args of [["init", "-q"], ["commit", "-q", "--allow-empty", "-m", "empty"]]) {
+    const r = spawnSync("git", ["-C", repo, ...args], { env, encoding: "utf8" });
+    assert.equal(r.status, 0, r.stderr);
+  }
+  fs.writeFileSync(path.join(repo, ".quay", "worker-outcome.jsonl"), "");
+  const history = path.join(tmp, "history.jsonl");
+  const fact = runDesignEvolutionRound(repo, {
+    config: {
+      enabled: true, intervalMinutes: 360, topN: 10,
+      subsystems: [{ name: "bad", baseline: "no-such-ref", central: [{ atBaseline: "a.ts", atHead: "a.ts" }], modules: ["*.ts"] }],
+    },
+    configPresent: true, configError: null, historyPath: history, now: "T0",
+  });
+  assert.equal(fact.state, "not-evaluated");
+  assert.match(fact.reason, /baseline-unresolvable/);
+  const lines = fs.readFileSync(history, "utf8").split("\n").filter((l) => l !== "");
+  assert.equal(lines.length, 1, "the inability itself is the record — ⛔ never silence");
+  assert.equal(JSON.parse(lines[0]).evaluated, false);
+});
+
+test("DESIGN_EVOLUTION_HISTORY_REL — the declared carrier is registered and gitignored (single source)", () => {
+  assert.equal(DESIGN_EVOLUTION_HISTORY_REL, ".quay/design-evolution-history.jsonl");
+  const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
+  assert.match(fs.readFileSync(path.join(root, ".gitignore"), "utf8"), /^\*\*\/\.quay\/design-evolution-history\.jsonl$/m);
+  const registry = JSON.parse(fs.readFileSync(path.join(root, "docs", "carrier-registry.json"), "utf8"));
+  const entry = registry.carriers.find((c) => c.name === "design-evolution-history.jsonl");
+  assert.ok(entry, "the carrier must be declared in docs/carrier-registry.json");
+  assert.equal(entry.owner, "plugin/scripts/design-evolution-readings.ts");
+});
+
+test("formatDesignEvolutionAssembly — malformed / disabled / running never look the same in the startup log", () => {
+  const running = formatDesignEvolutionAssembly({ present: true, error: null, enabled: true, intervalMinutes: 360 });
+  const disabled = formatDesignEvolutionAssembly({ present: true, error: null, enabled: false, intervalMinutes: 360 });
+  const broken = formatDesignEvolutionAssembly({ present: true, error: "loop.design_evolution_readings needs a boolean 'enabled'", enabled: false, intervalMinutes: 360 });
+  assert.notEqual(running, disabled);
+  assert.notEqual(disabled, broken);
+  assert.match(running, /report-only/);
+  assert.match(disabled, /not-evaluated:disabled/);
+  assert.match(broken, /每轮记 failed/);
 });

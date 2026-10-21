@@ -194,6 +194,38 @@ import {
 // 它们与目录环来自**同一份** `.archguard/query/<globalScopeKey>/arch.json`，因此仍是零 spawn 的纯
 // 文件读；⛔ 不在这里重新 analyze（`gap-fan-in-remove-archguard-gate`：不把 27s/task 拉进每轮）。
 
+// DESIGN-EVOLUTION-READINGS 轨道（gap-design-evolution-readings-report-only-routine）：RM1（分解后
+// 增量落回中心文件的占比）与 RM2（热点文件并发争用）此前只是写在元机制 finding 正文里的**一次性
+// 命令**——同一天里它们的口径不一致、改路径后读空、把搬家读成增长（三次都有实测）。本轨把两条读数
+// 接成与 arch_cycle_report 同族的声明式 report-only 例程：每 due 轮读一次 git 历史 + worker-outcome
+// 载体，append 一行到 `.quay/design-evolution-history.jsonl`。**零 LLM、零 spawn 模型**；读数本身
+// （占比、争用计数）是**内容**，⛔ 不是 failed，也不 ratchet。读数实现全在 design-evolution-readings.ts
+// （本文件只做装配），因为同一段逻辑还要给直接入口（人 / GOAL-909 评价）复用——两处实现必然漂移。
+import {
+  buildReadings as buildDesignEvolutionReadings,
+  appendHistoryRecord as appendDesignEvolutionHistory,
+  readPreviousWindow as readDesignEvolutionPreviousWindow,
+  readDesignEvolutionConfig,
+  cfgBad as deCfgBad,
+  DESIGN_EVOLUTION_ROUTINE_NAME,
+  DESIGN_EVOLUTION_INTERVAL_MIN_DEFAULT,
+  DESIGN_EVOLUTION_MIN_INTERVAL_MINUTES,
+  DESIGN_EVOLUTION_HISTORY_REL,
+  DESIGN_EVOLUTION_MODE,
+  type DesignEvolutionReadingsRecord,
+  type DesignEvolutionSectionConfig,
+  type SectionRead as DesignEvolutionSectionRead,
+  type ContentionPredicates,
+} from "./design-evolution-readings.ts";
+// 常量与例程名在本文件再导出一次：同族（arch-cycle-report）的常量就定义在本文件，读者/测试从本
+// driver 取它们是一致的取法；⛔ 值只有一份，仍定义在 design-evolution-readings.ts。
+export {
+  DESIGN_EVOLUTION_HISTORY_REL,
+  DESIGN_EVOLUTION_ROUTINE_NAME,
+  DESIGN_EVOLUTION_INTERVAL_MIN_DEFAULT,
+  DESIGN_EVOLUTION_MIN_INTERVAL_MINUTES,
+} from "./design-evolution-readings.ts";
+
 // ── 常量（由 DRIVER_KINDS registry 派生，⛔ 不另写一份路径字面量）──────────────────────────
 const QUALITY_SPEC = DRIVER_KINDS.quality;
 /** 轮记录载体（.quay/quality-round.jsonl，gitignored 运行时日志——heartbeat，与 round 记录同族）。 */
@@ -2237,6 +2269,176 @@ export function formatArchCycleAssembly(a: {
   return `arch-cycle-report 例程已装配（enabled, interval=${a.intervalMinutes}m，report-only：目录级环读数 append 到 .quay/arch-cycle-history.jsonl；环非零是该例程的读数，⛔ 不是 failed）`;
 }
 
+// ── design-evolution-readings 的 config 入口（`loop.design_evolution_readings:`）────────────────
+// 与 arch_cycle_report 同族的第九条声明式例程，语义逐条对齐（⛔ 不另造机制）：
+//   • 段缺席          ⇒ 不装配（off by default，宿主例程表逐条不变——AC144 的「恰好四条」判据仍成立）；
+//   • 段 enabled:false ⇒ 仍装配、每轮记 `not-evaluated:disabled` 且**零写入**（kill switch 必须可观测）；
+//   • 段写坏          ⇒ 仍装配、记 `failed` 且零写入（硬规则 3b：读不懂 ≠ 合格）。
+// 与其他各条的唯一差异是**读什么**：本轨读两条**元机制**读数（RM1 分解后增量落回中心文件的占比、
+// RM2 热点文件并发争用），且是 **report-only**：占比高/争用多是该例程的**内容**，⛔ 不是 failed
+// （⛔ 不 ratchet，也⛔ 不设「这是不是搬家」的数值判据——硬规则 4 推论；交给人读那一行
+// `maxCentralChangeCommit`）。解析与读数实现都在 design-evolution-readings.ts（直接入口复用同一份）。
+
+/** The Fact value contributed to `quality-round.jsonl` — the SAME record the carrier line holds
+ *  (one reading, one shape; a reader must not learn two spellings of the same number). */
+export interface DesignEvolutionFactValue {
+  mode: typeof DESIGN_EVOLUTION_MODE;
+  evaluated: boolean;
+  reason: string | null;
+  head: string | null;
+  rm1: DesignEvolutionReadingsRecord["rm1"];
+  rm2: DesignEvolutionReadingsRecord["rm2"];
+  carrierRecords: number | null;
+  historyPath: string;
+  historyAppended: boolean;
+  reportOnly: true;
+}
+
+export interface DesignEvolutionRoundOptions {
+  /** Parsed section; `null` + `configPresent:true` ⇒ present-but-unparseable (failed). */
+  config?: DesignEvolutionSectionConfig | null;
+  configPresent?: boolean;
+  configError?: string | null;
+  /** Test / alternate-carrier seam; default `<root>/.quay/design-evolution-history.jsonl`. */
+  historyPath?: string;
+  /** Test / alternate-carrier seam for the worker-outcome ledger. */
+  carrierPath?: string;
+  /** Pin the window's right end for EVERY subsystem (tests; a one-off historical reading). */
+  head?: string;
+  topN?: number;
+  predicates?: ContentionPredicates;
+  /** Deterministic `ts` seam for the carrier line. */
+  now?: string;
+}
+
+/** Run ONE design-evolution round: take both readings and append one line to the carrier.
+ *
+ *  ⛔ THE FAILURE VOCABULARY IS THE FAMILY'S (AC1 / 硬规则 3b):
+ *    • `failed`        — the routine could not do its job: bad config, or the carrier could not be
+ *                        written. ⛔ NOT used because a share is high or a file is contended.
+ *    • `not-evaluated` — a reading could not be taken (unresolvable baseline, a declared central path
+ *                        absent at one end, a non-positive denominator, a missing worker-outcome
+ *                        carrier, a self-check failure), or the kill switch is engaged. The line is
+ *                        STILL appended (evaluated:false) so the carrier records the inability.
+ *    • `verified`      — a reading was produced AND persisted. Its NUMBERS are content, never reds. */
+export function runDesignEvolutionRound(root: string, opts: DesignEvolutionRoundOptions = {}): Fact<DesignEvolutionFactValue | null> {
+  const name = DESIGN_EVOLUTION_ROUTINE_NAME;
+  if (opts.configError) return { name, value: null, state: "failed", reason: opts.configError };
+  if (opts.configPresent === false) {
+    return { name, value: null, state: "not-evaluated", reason: "not-evaluated:not-declared — loop.design_evolution_readings is absent (the routine is only assembled when the section is declared)" };
+  }
+  if (opts.config === null || opts.config === undefined) {
+    return { name, value: null, state: "failed", reason: deCfgBad("present but could not be parsed") };
+  }
+  if (!opts.config.enabled) {
+    // AC1: the kill switch is OBSERVABLE and WRITES NOTHING (not a single carrier line, not a Fact
+    // with a reading value). `not-evaluated:disabled` is a distinct value, ⛔ not "failed".
+    return { name, value: null, state: "not-evaluated", reason: "not-evaluated:disabled — .quay/config.yml loop.design_evolution_readings.enabled=false（kill switch：零读数、零写入）" };
+  }
+
+  const resolvedRoot = path.resolve(root);
+  const previous = readDesignEvolutionPreviousWindow(resolvedRoot, opts.historyPath ? { historyPath: opts.historyPath } : {});
+  const record = buildDesignEvolutionReadings(resolvedRoot, {
+    ...(opts.now ? { ts: opts.now } : {}),
+    subsystems: opts.config.subsystems,
+    topN: opts.topN ?? opts.config.topN,
+    ...(opts.head ? { head: opts.head } : {}),
+    ...(opts.carrierPath ? { carrierPath: opts.carrierPath } : {}),
+    windowStartIndex: previous.windowStartIndex,
+    windowSource: previous.windowSource,
+    ...(opts.predicates ? { predicates: opts.predicates } : {}),
+  });
+  const appended = appendDesignEvolutionHistory(resolvedRoot, record, opts.historyPath ? { historyPath: opts.historyPath } : {});
+  const value: DesignEvolutionFactValue = {
+    mode: record.mode,
+    evaluated: record.evaluated,
+    reason: record.reason,
+    head: record.head,
+    rm1: record.rm1,
+    rm2: record.rm2,
+    carrierRecords: record.carrierRecords,
+    historyPath: appended.path,
+    historyAppended: appended.ok,
+    reportOnly: true,
+  };
+  if (!appended.ok) {
+    return { name, value, state: "failed", reason: `history carrier not writable at ${appended.path} — ${appended.error}` };
+  }
+  if (!record.evaluated) {
+    return { name, value, state: "not-evaluated", reason: `not-evaluated:readings — ${record.reason ?? "the readings could not be taken"}` };
+  }
+  // ⛔ A non-zero share or a non-zero contention count is NOT a failure (report-only). The numbers are
+  // IN the value, so a reader can see them — they just never become the round's verdict.
+  return { name, value, state: "verified", reason: null };
+}
+
+export interface DesignEvolutionRoutineOptions {
+  historyPath?: string;
+  carrierPath?: string;
+  head?: string;
+  topN?: number;
+  now?: string;
+}
+
+/** Build the RoutineSpec (scheduler / watchdog / halt are the driver's, not re-implemented here). */
+export function buildDesignEvolutionRoutine(
+  root: string,
+  read: DesignEvolutionSectionRead,
+  opts: DesignEvolutionRoutineOptions = {},
+): RoutineSpec {
+  const minutes = read.config?.intervalMinutes ?? DESIGN_EVOLUTION_INTERVAL_MIN_DEFAULT;
+  return {
+    name: DESIGN_EVOLUTION_ROUTINE_NAME,
+    schedule: { kind: "interval", minutes },
+    // Same class as arch-coverage-report / arch-cycle-report: pure git + carrier reads plus one
+    // append. Observation keeps running while halted (a halt gates SPAWN / model calls, and this
+    // routine has neither).
+    run: () => [
+      runDesignEvolutionRound(root, {
+        config: read.config,
+        configPresent: read.present,
+        configError: read.error,
+        ...(opts.historyPath ? { historyPath: opts.historyPath } : {}),
+        ...(opts.carrierPath ? { carrierPath: opts.carrierPath } : {}),
+        ...(opts.head ? { head: opts.head } : {}),
+        ...(opts.topN !== undefined ? { topN: opts.topN } : {}),
+        ...(opts.now ? { now: opts.now } : {}),
+      }),
+    ],
+  };
+}
+
+/** Production entry: read `.quay/config.yml` and build the routine. NEVER throws.
+ *  `routine` is `null` when NO section is declared — an undeclared workspace keeps the EXACT routine
+ *  set it had before (AC144's "exactly four"). A DECLARED section always yields a routine, even
+ *  `enabled:false` or malformed, because "not running" must be observable (硬规则 3/3b). */
+export function designEvolutionRoutineFromConfig(
+  root: string,
+  opts: DesignEvolutionRoutineOptions = {},
+): { routine: RoutineSpec | null; error: string | null; present: boolean; enabled: boolean } {
+  const read = readDesignEvolutionConfig(root);
+  return {
+    routine: read.present ? buildDesignEvolutionRoutine(root, read, opts) : null,
+    error: read.error,
+    present: read.present,
+    enabled: read.config?.enabled === true,
+  };
+}
+
+/** The assembly line, as ONE string — declared-but-disabled / malformed / running never look the
+ *  same in the driver's startup log (硬规则 3b/9). */
+export function formatDesignEvolutionAssembly(a: {
+  present: boolean;
+  error: string | null;
+  enabled: boolean;
+  intervalMinutes: number;
+}): string {
+  if (a.error !== null) return `design-evolution-readings 例程已装配（${a.error} — 每轮记 failed、零读数零写入；⛔ 不回退到缺省节奏照跑）`;
+  if (!a.enabled) return "design-evolution-readings 例程已装配（enabled:false — 每轮记 not-evaluated:disabled，零读数零写入）";
+  return `design-evolution-readings 例程已装配（enabled, interval=${a.intervalMinutes}m，report-only：RM1/RM2 读数 append 到 ${DESIGN_EVOLUTION_HISTORY_REL}；占比高/争用多是该例程的读数，⛔ 不是 failed）`;
+}
+
+
 // ── 例程表（Layer 1b：routines = [{name, schedule, run() → Facts}]）──────────────────────────
 
 /** 例程装配缝（测试可注入覆盖命令/间隔；缺省 = 生产缺省）。 */
@@ -2306,6 +2508,11 @@ export interface QualityGateOptions {
    *  工作区例程表逐条不变（AC144 的「恰好四条」判据仍成立）。
    *  **report-only**：目录级环读数 + 一行历史，环非零 ⛔ 不使轮 failed。 */
   archCycleRoutine?: RoutineSpec | null;
+  /** design-evolution-readings 例程（gap-design-evolution-readings-report-only-routine）：同族的声明式
+   *  注入纪律（main() 从 `.quay/config.yml` `loop.design_evolution_readings:` 装配后注入）。缺省
+   *  null = 未装配 ⇒ 未声明的工作区例程表逐条不变（AC144 的「恰好四条」判据仍成立）。
+   *  **report-only**：RM1 占比 + RM2 争用计数 + 一行历史，⛔ 不作为任何闸。 */
+  designEvolutionRoutine?: RoutineSpec | null;
 }
 
 /** 四条例程（B15 pool-quality-judge + B17 judgment-consumer-check + 架构复核 + packaging-hygiene）。
@@ -2394,6 +2601,13 @@ export function qualityGateRoutines(root: string, opts: QualityGateOptions): Rou
     // **它回答的问题**：「目录级环现在是多少、成员是谁」——archguard-runner 的闸读数（on-demand）
     // 的**持续消费者**，report-only，⛔ 不 ratchet（环非零不是 failed）。
     ...(opts.archCycleRoutine ? [opts.archCycleRoutine] : []),
+    // 第十三类：DESIGN-EVOLUTION-READINGS 例程（同一「声明式 + 可观测」族：间隔与开关来自
+    // `.quay/config.yml` `loop.design_evolution_readings:`）。缺席 ⇒ 不加入（老行为，内建四条不变）；
+    // 加入而段缺席/写坏 ⇒ 仍装配并记 not-evaluated:disabled / failed（kill switch 与坏配置的可观测面）。
+    // **它回答的问题**：「扩展点模板」这个元机制到底改变了新代码的落点没有（RM1 占比）、以及哪些文件
+    // 仍在产生并发争用（RM2）——两条读数都来自被测机制之外（git 历史 / worker 结局账本），report-only，
+    // ⛔ 不 ratchet（占比高、争用多都不是 failed）。
+    ...(opts.designEvolutionRoutine ? [opts.designEvolutionRoutine] : []),
   ];
 }
 
@@ -3155,6 +3369,26 @@ export async function main(argv: string[]): Promise<number> {
     })}`);
   }
 
+  // design-evolution-readings 轨道：读 `.quay/config.yml` `loop.design_evolution_readings:`（同一注入
+  // 纪律）。未声明 ⇒ 不装配（例程表逐条不变，AC144 的「恰好四条」不变）；声明了但 enabled:false/写坏
+  // ⇒ 仍装配（disabled / failed 必须可观测，硬规则 3b）。**report-only**：每 due 轮取一次 RM1（分解后
+  // 增量落回中心文件的占比）与 RM2（热点文件并发争用），append 一行到
+  // `.quay/design-evolution-history.jsonl`；占比高/争用多 ⛔ 不使轮 failed。
+  const designEvolution = designEvolutionRoutineFromConfig(rootDir);
+  if (designEvolution.error) {
+    console.error(`quality-gate-driver: design-evolution-readings 例程配置无效 — ${designEvolution.error}`);
+  } else if (!designEvolution.present) {
+    console.error("quality-gate-driver: 未声明 loop.design_evolution_readings — design-evolution-readings 例程未装配（off by default，零读数零写入；例程表与未接此轨时一致）");
+  } else {
+    console.error(`quality-gate-driver: ${formatDesignEvolutionAssembly({
+      present: designEvolution.present,
+      error: designEvolution.error,
+      enabled: designEvolution.enabled,
+      intervalMinutes:
+        (designEvolution.routine?.schedule as { minutes?: number } | undefined)?.minutes ?? DESIGN_EVOLUTION_INTERVAL_MIN_DEFAULT,
+    })}`);
+  }
+
   const routines = qualityGateRoutines(rootDir, {
     planCmd: planCmd ? splitArgs(planCmd) : null,
     judgeArgv: judgeCmd ? splitArgs(judgeCmd) : null,
@@ -3182,6 +3416,7 @@ export async function main(argv: string[]): Promise<number> {
     resourceDiagnosticRoutine: resourceDiagnostic.routine,
     archCoverageRoutine: archCoverage.routine,
     archCycleRoutine: archCycle.routine,
+    designEvolutionRoutine: designEvolution.routine,
   });
 
   return runResidentQualityGateLoop({ root: rootDir, intervalMs: interval, once, maxRounds, roundLogFile, runId: resolvedRunId, json, pidFile, routines, routineWatchdogMs, kind: "quality" });

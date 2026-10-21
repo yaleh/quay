@@ -2,7 +2,7 @@
 id: gap-design-evolution-readings-report-only-routine
 title: 设计演进读数例程：把 RM1（分解后增量落回中心文件占比）与 RM2（热点文件并发争用）做成 quality-gate-driver
   的声明式只读例程（零 LLM），让「扩展点模板」这个元机制的效果被自动、持续地用外部直接量观测
-status: ready
+status: done
 labels:
   - gap
   - architecture
