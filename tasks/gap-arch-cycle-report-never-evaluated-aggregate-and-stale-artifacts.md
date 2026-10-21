@@ -2,7 +2,7 @@
 id: gap-arch-cycle-report-never-evaluated-aggregate-and-stale-artifacts
 title: 目录环常驻检测例程 arch-cycle-report 上线以来 25/25 轮 evaluated:false：汇总被两个无
   moduleGraph 的单目录小包作废，且产物无人刷新——一个真实的目录环因此存在约 7 小时无人察觉
-status: todo
+status: needs-human
 labels:
   - gap
   - defect
@@ -51,3 +51,9 @@ extra:
 - plugin/scripts/quality-gate-driver.ts
 - plugin/test/quality-gate-driver.test.mjs
 - plugin/test/arch-cycle-reading.test.mjs
+
+## Needs-Human
+
+**执行 2026-10-21T23:45:21.249Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：unsatisfiableUnannotatedAc=[AC4 刷新后与独立仪器一致：刷新后 src scope 为 `evaluated:true`、`behindSources:false`，且它报告的环集合与 GOAL-910 AC-916 判据在同一 HEAD 上的输出一致（GOAL-910 未落地时双方都应是 `[[".","observation","serve"]]`，落地后双方都应是 0）。贴出两份输出与 HEAD。]（连续 3 轮被结构上不可派的拦截挡住 ⇒ 作者/人改写；⛔ 不派 fix worker）
