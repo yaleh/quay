@@ -80,11 +80,11 @@ nonWs=413 clauses=4 lens=[121,177,66,49]
 - [ ] AC2 退出条件节非空且恰有 4 条编号条款：在同一条 `goal show GOAL-908 --json` 读数上运行 `node -e`，断言 body 的 `## 退出条件` 节体非空白字符 > 40、`/^[①②③④]/gm` 命中恰 4 行、每条非空白字符 ≥ 20；退出 0 并打印 `clauses=4`。
 - [ ] AC3 棘轮条款已降为手段：同一读数中 body 含子串 `不是独立退出条件`，且该子串所在行仍以 `范围：` 开头；标题含子串 `provider→gate/ 棘轮为防回归手段`。
 - [ ] AC4 判据能取假（两次读数原样贴进 Resolution）：① 对**不含** `## 退出条件` 的合成 body（`"## 背景\n\nx"`）调用 `goalSufficiencyVerdict({id:"GOAL-908",body},[{id:"AC-913"}])` ⇒ `insufficient`；② 对 AC1 读到的**真实** post-edit body 调用同一函数 ⇒ `not-evaluated`。两次都贴出命令与输出。
-- [ ] AC5 只改 goal 文件：`git diff --name-only $(git merge-base HEAD develop) -- goals/` 的输出恰好只有 `goals/GOAL-908-native-经-gate-层的-import-归零-gate-shared-acceptance-runner-与-g.md` 一行（AC-913 文件未动），且 `quay goal show GOAL-908 --json` 的 `status` 仍为 `active`；`quay goal show AC-913 --json` 的 `status` 仍为 `active`、`criterion`/`expect` 与 apply 前逐字节相同。
+- [ ] AC5 只改 goal 文件：`git diff --name-only $(git merge-base HEAD develop) -- goals/` 的输出恰好只有 `goals/GOAL-908-native-经-gate-层的-import-归零-gate-shared-acceptance-runner-与-g.md` 一行（AC-913 文件未动），且 `quay goal show GOAL-908 --json` 的 `status` 仍为 `active`；`quay goal show AC-913 --json` 的 `status` 在 apply 前后保持 `achieved`（当前实测；原提案写作时的 `active` 已过期），`criterion`/`expect` 与 apply 前逐字节相同。
 
 ## DoD
 
-在 landed 提交上，goal store 的真实载体（`quay goal show GOAL-908 --json` 读回，而不是只贴源码/文件片段）已带非空 `## 退出条件` ①–④，且 `goalSufficiencyVerdict(GOAL-908,[AC-913])` 实跑读数为 `not-evaluated`；`范围：` 句里的 import-graph-check provider→gate/ 棘轮已明确标注为「手段 / 防回归，不是独立退出条件」，标题同句已改为「provider→gate/ 棘轮为防回归手段」。Resolution 里贴出：AC1 的真实载体读数、AC4 的红/绿两次读数、AC5 的 `git diff --name-only` 单文件证据、以及 AC-913 仍为 `active` 且其 criterion/expect 未改动的证据。任务体 `## Touches` 与实际改动一致（多改/少改都在 Resolution 说明）。
+在 landed 提交上，goal store 的真实载体（`quay goal show GOAL-908 --json` 读回，而不是只贴源码/文件片段）已带非空 `## 退出条件` ①–④，且 `goalSufficiencyVerdict(GOAL-908,[AC-913])` 实跑读数为 `not-evaluated`；`范围：` 句里的 import-graph-check provider→gate/ 棘轮已明确标注为「手段 / 防回归，不是独立退出条件」，标题同句已改为「provider→gate/ 棘轮为防回归手段」。Resolution 里贴出：AC1 的真实载体读数、AC4 的红/绿两次读数、AC5 的 `git diff --name-only` 单文件证据、以及 AC-913 的 status 在 apply 前后保持 `achieved`（当前实测；原提案写作时的 `active` 已过期）且其 criterion/expect 未改动的证据。任务体 `## Touches` 与实际改动一致（多改/少改都在 Resolution 说明）。
 
 ## Touches
 
