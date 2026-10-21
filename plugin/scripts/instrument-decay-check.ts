@@ -208,6 +208,114 @@ export const DECLARED_UNCOVERED: UncoveredCarrier[] = [
   },
 ];
 
+export interface GroupStat {
+  count: number;
+  lastWriteMs: number | null;
+}
+
+/** 四种腐烂形态。前两种是「写入停止」，后两种是「照常写入但内容是暗的」。 */
+export type DecayKind = "never-wrote" | "rate-stopped" | "content-dark" | "stale-evaluated";
+
+export interface DecayFinding {
+  group: string;
+  kind: DecayKind;
+  count: number;
+  lastWriteMs: number | null;
+  /** 读数细节（D：产物时间戳 vs 覆盖路径最新提交；C：暗区间）。 */
+  detail: string | null;
+}
+
+export interface Companion {
+  group: string;
+  count: number;
+  lastWriteMs: number | null;
+}
+
+/** 形状 C 的四态（⛔ 不用布尔：读不懂/冷启动不得与「健康」同形——硬规则 3b）。 */
+export type ShapeCState = "dark" | "healthy" | "not-applicable" | "not-evaluated";
+
+/** 从首条记录起的暗区间（持续 false 的前导段）。
+ *
+ *  WHY AN INTERVAL AND NOT A BOOLEAN (AC1「检测器报告暗区间，而不只报告当前状态」): a repair task can
+ *  land while this detector is in flight, turning the carrier's newest record true. A reader must still be
+ *  able to see that the carrier was dark from 2026-10-18T10:25Z for 25 records — otherwise the repair
+ *  erases the evidence of the rot it repaired, and 「曾经暗过」 becomes indistinguishable from 「一直健康」. */
+export interface ContentDarkInterval {
+  /** 前导 false 段第一条记录的 ts（原始字符串；读不出 ⇒ null）。 */
+  startTs: string | null;
+  /** 前导 false 段最后一条记录的 ts。 */
+  endTs: string | null;
+  /** 前导 false 段的记录数。 */
+  records: number;
+  /** 段后出现了 true ⇒ 区间已结束（载体当前不再判暗）。 */
+  ended: boolean;
+}
+
+export interface ShapeCReading {
+  state: ShapeCState;
+  /** 参与判定的记录数（已按 skipKind 过滤）。 */
+  records: number;
+  /** 其中 evaluated === false 的条数。 */
+  falseRecords: number;
+  reason: string | null;
+  /** 前导暗区间；无 false 前导段 ⇒ null。⛔ 已结束的区间仍然报告（见类型注释）。 */
+  darkInterval: ContentDarkInterval | null;
+}
+
+/** 形状 D：一个作用域的产物时间戳 vs 覆盖源路径的最新提交。 */
+export interface StaleScopeReading {
+  scope: string;
+  source: string;
+  artifactTs: string | null;
+  artifactMs: number | null;
+  commitMs: number | null;
+  commitSha: string | null;
+  state: "stale" | "fresh" | "not-evaluated";
+  reason: string | null;
+}
+
+/** 形状 D 的四态（同上：`not-evaluated` 与 `fresh` 必须可区分）。 */
+export type ShapeDState = "stale" | "fresh" | "not-applicable" | "not-evaluated";
+
+export interface ShapeDReading {
+  state: ShapeDState;
+  reason: string | null;
+  /** 判定所用记录的 ts（点名证据用）。 */
+  recordTs: string | null;
+  /** 该记录自带的 record-level `stale` 信号（arch-cycle 的「产物年龄 > 调度间隔」）。
+   *  ⛔ 只携带、不参与 D 的判定：D 判的是「产物早于覆盖源码的最新提交」，与「产物年龄 > 间隔」是
+   *  两件不同的事（gap-arch-cycle-report-never-evaluated-aggregate-and-stale-artifacts 明确要求
+   *  不复用这个名字做新语义）。它此前**没有任何下游**，现在至少随 Fact 一起被消费。 */
+  recordStale: boolean | null;
+  scopes: StaleScopeReading[];
+}
+
+export interface CarrierResult {
+  file: string;
+  evaluated: boolean;
+  reason: string | null;
+  totalRecords: number;
+  freshestMs: number | null;
+  groupCount: number;
+  decayed: DecayFinding[];
+  companions: Companion[];
+  /** 形状 C（内容全暗）读数——`not-applicable` 是描述符的声明，不是「查不到」。 */
+  contentDark: ShapeCReading;
+  /** 形状 D（过期的已评估）读数。 */
+  staleEvaluated: ShapeDReading;
+}
+
+/** uncovered 的两种成因：声明已知但未登记；或**发现**带 evaluated 却无描述符（登记表自身漂移）。 */
+export type UncoveredReason = "declared-uncovered" | "evaluated-but-undescribed";
+
+export interface UncoveredEntry {
+  file: string;
+  reason: UncoveredReason;
+  /** 文件此刻是否存在——「声明了但盘上没有」与「在盘上但没描述符」不是同一件事。 */
+  present: boolean;
+  note: string | null;
+}
+
 /** 读一个载体的全部记录（坏行跳过；skipKind 精确等于过滤，见 CarrierSpec.skipKind）。 */
 export function readCarrierRecords(root: string, spec: CarrierSpec): Record<string, unknown>[] | null {
   const filePath = path.join(root, ".quay", spec.file);
@@ -225,26 +333,50 @@ export function readCarrierRecords(root: string, spec: CarrierSpec): Record<stri
 /** 形状 C：带 record-level `evaluated` 的载体，从首条起每条都是 false（≥2 条）。
  *
  *  ⛔ 四态：少于 2 条 ⇒ `not-evaluated`（冷启动时序，不是「健康」）；某条缺布尔字段 ⇒ `not-evaluated`
- *  （读不懂 ≠ 合格，硬规则 3b）。≥2 是**最小结构条件**，不是调出来的阈值。 */
+ *  （读不懂 ≠ 合格，硬规则 3b）。≥2 是**最小结构条件**，不是调出来的阈值。
+ *
+ *  ⛔ 报告的是**前导暗区间**，不只是「此刻是否暗」：修复落地后（首条 true 出现）仍要把
+ *  「从哪条起、覆盖多少条、到哪条结束」说出来（AC1）。因此 `healthy` 可以**同时**带一个
+ *  `ended:true` 的区间——那不是当前腐烂，是刚刚被修复的腐烂的证据。 */
 export function analyzeContentDarkness(records: Record<string, unknown>[], spec: CarrierSpec): ShapeCReading {
-  if (spec.evaluatedField === undefined) {
-    return { state: "not-applicable", records: records.length, falseRecords: 0, reason: "descriptor does not declare an evaluated field" };
+  const field = spec.evaluatedField;
+  if (field === undefined) {
+    return { state: "not-applicable", records: records.length, falseRecords: 0, reason: "descriptor does not declare an evaluated field", darkInterval: null };
   }
   if (records.length < 2) {
-    return { state: "not-evaluated", records: records.length, falseRecords: 0, reason: `only ${records.length} record(s) — fewer than 2 is a cold-start timing, not a verdict` };
+    return { state: "not-evaluated", records: records.length, falseRecords: 0, reason: `only ${records.length} record(s) — fewer than 2 is a cold-start timing, not a verdict`, darkInterval: null };
   }
   let falseRecords = 0;
   for (let i = 0; i < records.length; i++) {
-    const v = records[i][spec.evaluatedField];
+    const v = records[i][field];
     if (typeof v !== "boolean") {
-      return { state: "not-evaluated", records: records.length, falseRecords, reason: `record #${i} has no boolean '${spec.evaluatedField}' (got ${JSON.stringify(v)}) — cannot conclude` };
+      return { state: "not-evaluated", records: records.length, falseRecords, reason: `record #${i} has no boolean '${field}' (got ${JSON.stringify(v)}) — cannot conclude`, darkInterval: null };
     }
     if (v === false) falseRecords++;
   }
-  if (falseRecords === records.length) {
-    return { state: "dark", records: records.length, falseRecords, reason: `all ${records.length} record(s) are ${spec.evaluatedField}:false since the first record` };
+  // 前导 false 段（从首条起）。records[i] 已校验为布尔 ⇒ 段后第一条必为 true。
+  let run = 0;
+  while (run < records.length && records[run][field] === false) run++;
+  if (run === 0) {
+    return { state: "healthy", records: records.length, falseRecords, reason: null, darkInterval: null };
   }
-  return { state: "healthy", records: records.length, falseRecords, reason: null };
+  const tsOf = (rec: Record<string, unknown>): string | null => (typeof rec["ts"] === "string" ? (rec["ts"] as string) : null);
+  const darkInterval: ContentDarkInterval = {
+    startTs: tsOf(records[0]),
+    endTs: tsOf(records[run - 1]),
+    records: run,
+    ended: run < records.length,
+  };
+  if (!darkInterval.ended) {
+    return {
+      state: "dark",
+      records: records.length,
+      falseRecords,
+      reason: `all ${records.length} record(s) are ${field}:false since the first record (${darkInterval.startTs ?? "ts unreadable"})`,
+      darkInterval,
+    };
+  }
+  return { state: "healthy", records: records.length, falseRecords, reason: null, darkInterval };
 }
 
 export interface GitCommitTime {
@@ -280,7 +412,7 @@ export function gitLatestCommitForPath(root: string, source: string): GitCommitT
  *  ⛔ 四态：无描述符 ⇒ not-applicable（并带 descriptor 给出的理由）；无可用记录 / 任一作用域读不出
  *  ⇒ not-evaluated；有 stale ⇒ stale；否则 fresh。 */
 export function analyzeStaleEvaluated(records: Record<string, unknown>[], spec: CarrierSpec, root: string): ShapeDReading {
-  const na = (reason: string): ShapeDReading => ({ state: "not-applicable", reason, recordTs: null, scopes: [] });
+  const na = (reason: string): ShapeDReading => ({ state: "not-applicable", reason, recordTs: null, recordStale: null, scopes: [] });
   if (spec.evaluatedField === undefined || spec.artifact === undefined) {
     return na(spec.artifactNotApplicable ?? "descriptor declares no artifact (artifact timestamp + covered paths)");
   }
@@ -304,11 +436,13 @@ export function analyzeStaleEvaluated(records: Record<string, unknown>[], spec: 
       state: "not-evaluated",
       reason: `no record carries an evaluated '${art.scopesField}' scope — cannot tell whether the artifact is stale`,
       recordTs: null,
+      recordStale: null,
       scopes: [],
     };
   }
 
   const recordTs = typeof chosen["ts"] === "string" ? (chosen["ts"] as string) : null;
+  const recordStale = typeof chosen["stale"] === "boolean" ? (chosen["stale"] as boolean) : null;
   const scopes: StaleScopeReading[] = [];
   for (const raw of chosen[art.scopesField] as unknown[]) {
     if (raw === null || typeof raw !== "object") continue;
@@ -348,11 +482,11 @@ export function analyzeStaleEvaluated(records: Record<string, unknown>[], spec: 
   }
 
   if (scopes.length === 0) {
-    return { state: "not-evaluated", reason: "the chosen record carries no evaluated scope with a comparable artifact", recordTs, scopes };
+    return { state: "not-evaluated", reason: "the chosen record carries no evaluated scope with a comparable artifact", recordTs, recordStale, scopes };
   }
-  if (scopes.some((s) => s.state === "stale")) return { state: "stale", reason: null, recordTs, scopes };
-  if (scopes.some((s) => s.state === "not-evaluated")) return { state: "not-evaluated", reason: "at least one scope could not be compared", recordTs, scopes };
-  return { state: "fresh", reason: null, recordTs, scopes };
+  if (scopes.some((s) => s.state === "stale")) return { state: "stale", reason: null, recordTs, recordStale, scopes };
+  if (scopes.some((s) => s.state === "not-evaluated")) return { state: "not-evaluated", reason: "at least one scope could not be compared", recordTs, recordStale, scopes };
+  return { state: "fresh", reason: null, recordTs, recordStale, scopes };
 }
 
 /** 首条可解析记录（uncovered 发现只看这一条——measure-history 有 127 万行，⛔ 不整份读）。 */
@@ -419,8 +553,8 @@ export function analyzeCarrier(root: string, spec: CarrierSpec, staleSeconds: nu
   const empty: CarrierResult = {
     file: spec.file, evaluated: false, reason: "carrier-missing",
     totalRecords: 0, freshestMs: null, groupCount: 0, decayed: [], companions: [],
-    contentDark: { state: "not-evaluated", records: 0, falseRecords: 0, reason: "carrier-missing" },
-    staleEvaluated: { state: "not-evaluated", reason: "carrier-missing", recordTs: null, scopes: [] },
+    contentDark: { state: "not-evaluated", records: 0, falseRecords: 0, reason: "carrier-missing", darkInterval: null },
+    staleEvaluated: { state: "not-evaluated", reason: "carrier-missing", recordTs: null, recordStale: null, scopes: [] },
   };
   const records = readCarrierRecords(root, spec);
   if (records === null) return empty;
@@ -478,7 +612,9 @@ export function analyzeCarrier(root: string, spec: CarrierSpec, staleSeconds: nu
       kind: "content-dark",
       count: records.length,
       lastWriteMs,
-      detail: contentDark.reason,
+      detail: contentDark.darkInterval === null
+        ? contentDark.reason
+        : `${contentDark.reason}; darkInterval=[${contentDark.darkInterval.startTs ?? "?"} .. now], ${contentDark.darkInterval.records} record(s)`,
     });
   }
 
@@ -611,6 +747,13 @@ function printHuman(outcome: AnalyzeOutcome): void {
       console.log(`  companion (still writing): ${brief}`);
     }
   }
+  // 已结束的暗区间（AC1）：修复落地后当前不再判暗，但「曾经从哪条起暗了多少条」必须仍然可见。
+  for (const c of outcome.carriers) {
+    const iv = c.contentDark.darkInterval;
+    if (iv !== null && iv.ended) {
+      console.log(`INSTRUMENT-HISTORY: .quay/${c.file} — content-dark interval ended: ${iv.startTs ?? "?"} .. ${iv.endTs ?? "?"} (${iv.records} record(s)); current reading is not dark`);
+    }
+  }
   // 覆盖面（⛔ 不与健康同形）：未覆盖的载体单独列出，且明说它们不在健康计数里。
   if (outcome.uncoveredCount > 0) {
     console.log(`UNCOVERED: ${outcome.uncoveredCount} carrier(s) have no descriptor — NOT counted as healthy:`);
@@ -638,6 +781,7 @@ function printDecayReport(outcome: AnalyzeOutcome): void {
       state: c.staleEvaluated.state,
       reason: c.staleEvaluated.reason,
       recordTs: c.staleEvaluated.recordTs,
+      recordStale: c.staleEvaluated.recordStale,
       scopes: c.staleEvaluated.scopes.map((s) => ({
         scope: s.scope,
         source: s.source,

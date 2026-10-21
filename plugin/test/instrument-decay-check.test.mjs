@@ -265,7 +265,7 @@ function coverageRec(ts, evaluated) {
   return { ts, runner: "arch-coverage-report.ts", evaluated, languages: [] };
 }
 
-test("形态 C — 真实描述符（arch-cycle-history）：从首条起每条 false ⇒ content-dark", () => {
+test("形态 C — 真实描述符（arch-cycle-history）：从首条起每条 false ⇒ content-dark + 暗区间", () => {
   const dir = tmpDir("idc-c-dark-");
   writeCarrier(dir, "arch-cycle-history.jsonl", [
     cycleRec("2026-10-18T10:25:51.593Z", false),
@@ -276,10 +276,35 @@ test("形态 C — 真实描述符（arch-cycle-history）：从首条起每条 
   assert.equal(res.contentDark.state, "dark");
   assert.equal(res.contentDark.records, 3);
   assert.equal(res.contentDark.falseRecords, 3);
+  assert.deepEqual(res.contentDark.darkInterval, {
+    startTs: "2026-10-18T10:25:51.593Z",
+    endTs: "2026-10-21T23:14:05.363Z",
+    records: 3,
+    ended: false,
+  }, "the dark INTERVAL (start / count / still dark) is part of the reading, not just a boolean");
   const dark = res.decayed.filter((d) => d.kind === "content-dark");
   assert.equal(dark.length, 1, "content-dark must be a DecayFinding, not only a shape reading");
   assert.equal(dark[0].group, "(all records)");
   assert.equal(dark[0].count, 3);
+  assert.match(dark[0].detail, /darkInterval=\[2026-10-18T10:25:51\.593Z \.\. now\], 3 record/);
+});
+
+test("形态 C — 修复落地后（首条 true 出现）报告一个【已结束】的暗区间，当前不再判暗（AC1 第二支）", () => {
+  const dir = tmpDir("idc-c-ended-");
+  // 25 条 false（模拟 2026-10-18T10:25Z 起的历史）之后，修复任务写入了首条 true。
+  const rows = Array.from({ length: 25 }, (_, i) =>
+    cycleRec(`2026-10-${String(18 + Math.floor(i / 12)).padStart(2, "0")}T${String(i % 24).padStart(2, "0")}:25:51.593Z`, false));
+  rows.push(cycleRec("2026-10-22T05:00:00.000Z", true));
+  writeCarrier(dir, "arch-cycle-history.jsonl", rows);
+  const res = analyzeCarrier(dir, ARCH_CYCLE_SPEC, DEFAULT_STALE_SECONDS);
+  assert.equal(res.contentDark.state, "healthy", "current state is no longer dark");
+  assert.deepEqual(res.contentDark.darkInterval, {
+    startTs: "2026-10-18T00:25:51.593Z",
+    endTs: "2026-10-20T00:25:51.593Z",
+    records: 25,
+    ended: true,
+  }, "the ENDED interval must survive the repair: start + 25 records + ended");
+  assert.equal(res.decayed.filter((d) => d.kind === "content-dark").length, 0, "an ended interval is NOT a current finding");
 });
 
 test("形态 C 负对照 — arch-coverage-history 描述符：31/31 true ⇒ healthy（不命中）", () => {
@@ -289,6 +314,7 @@ test("形态 C 负对照 — arch-coverage-history 描述符：31/31 true ⇒ he
   const res = analyzeCarrier(dir, ARCH_COVERAGE_SPEC, DEFAULT_STALE_SECONDS);
   assert.equal(res.contentDark.state, "healthy");
   assert.equal(res.contentDark.records, 31);
+  assert.equal(res.contentDark.darkInterval, null, "no leading false run ⇒ no interval");
   assert.equal(res.decayed.filter((d) => d.kind === "content-dark").length, 0);
 });
 
@@ -298,6 +324,7 @@ test("形态 C 边界 — 只有 1 条记录 ⇒ not-evaluated（冷启动时序
   const res = analyzeCarrier(dir, DESIGN_EVOLUTION_SPEC, DEFAULT_STALE_SECONDS);
   assert.equal(res.contentDark.state, "not-evaluated");
   assert.match(res.contentDark.reason, /cold-start/);
+  assert.equal(res.contentDark.darkInterval, null);
   assert.equal(res.decayed.length, 0, "a cold start is not a finding");
 });
 
@@ -348,6 +375,7 @@ test("形态 D — 产物时间戳早于覆盖源路径的最新提交 ⇒ stale
   writeCarrier(dir, "arch-cycle-history.jsonl", [
     {
       ts: "2026-10-21T23:14:05.363Z", mode: "arch-cycle-report-round", evaluated: false,
+      stale: true, // the carrier's OWN staleness signal — carried, never used as D's verdict
       scopes: [{ scope: "src", source: "packages/quay/src", evaluated: true, artifactTimestamp: "2026-10-21T16:17:56.117Z", cycleCount: 0 }],
     },
   ]);
@@ -357,6 +385,7 @@ test("形态 D — 产物时间戳早于覆盖源路径的最新提交 ⇒ stale
   assert.equal(res.staleEvaluated.scopes[0].state, "stale");
   assert.equal(res.staleEvaluated.scopes[0].artifactMs, Date.parse("2026-10-21T16:17:56.117Z"));
   assert.equal(res.staleEvaluated.scopes[0].commitMs, Date.parse("2026-10-21T16:26:00Z"));
+  assert.equal(res.staleEvaluated.recordStale, true, "the carrier's own `stale` is carried (it had no downstream before)");
   const finding = res.decayed.filter((d) => d.kind === "stale-evaluated");
   assert.equal(finding.length, 1);
   assert.equal(finding[0].group, "src");
