@@ -21,19 +21,21 @@ extra:
 
 **后果**：这个环存在了约 7 小时，最后是一次手工运行的 archguard 分析（scope b4f87b21 @ d7e1c743a）发现的。断环本身由 GOAL-910 承担；本任务修的是本该发现它的那个仪器。
 
+**立案检查（2026-10-22 补做）**：合并判断 = separate——与 `gap-instrument-decay-check-unwired-and-blind-to-content-dark` 共享 `quality-gate-driver.ts` 与其测试文件（task-granularity-advice 实测 peers 仅此一条），但机制不同（本条修环检测读数；那条扩展通用的仪器暗态检测），由调度器按 Touches 串行。
+
 ## Plan
 
 1. **汇总按 scope 分别报告**：记录级状态分为 `complete` / `partial` / `none`；`totalCycleCount` 只对已评估的 scope 求和，`partial` 时同时列出未评估的 scope 及其原因。一个 scope 失败，不得让其它 scope 的读数一并作废。
 2. **单目录 scope 的结构性判定**：该 scope 源目录下所有受跟踪的非测试 .ts 都在同一目录时，记 `evaluated:true`、cycleCount 0、`basis: "single-directory"`，不需要 moduleGraph。多目录 scope 缺 moduleGraph 时，仍记 `evaluated:false`，reason 写明 `moduleGraph not produced (package-level diagram not requested)`。
-3. **新旧差距做成显式字段**：每个 scope 记录 `artifactTimestamp`（已有）、`commitsSinceArtifact`（产物时间之后、触及该 scope 源目录的提交数）和 `stale`（commitsSinceArtifact > 0）。stale 的 scope 照常报告环数，但必须标明 stale，不得作为当前读数呈现。
+3. **新旧差距做成显式字段**：每个 scope 记录 `artifactTimestamp`（已有）、`commitsSinceArtifact`（产物时间之后、触及该 scope 源目录的提交数）和 `behindSources`（commitsSinceArtifact > 0；算不出时为 null，三值）。⛔ 不复用 `stale` 这个名字：记录级已有的 `stale`（quality-gate-driver.ts:2152，gap-arch-cycle-report-record-artifact-timestamp 引入）表示「产物年龄 > 调度间隔」，与「产物之后覆盖源有新提交」是两件事，保留原义不动。behindSources 为 true 的 scope 照常报告环数，但必须标明，不得作为当前读数呈现。
 4. **刷新**：例程在每个调度间隔内至多一次，对 stale 的 scope 运行一次 archguard analyze，并请求 package 级图，确保产出 moduleGraph。CLI 解析顺序为 `ARCHGUARD_RUNNER_CLI` → PATH → 已安装的 archguard 插件运行时（从插件安装信息解析，不写死用户路径）；解析不到时记 `not-evaluated:instrument-absent`，并写明找过哪些位置。只在例程间隔里跑，不进 fan-in 热路径（gap-fan-in-remove-archguard-gate 的教训）。
 
 ## Acceptance Criteria
 
 - [ ] AC1 汇总为 partial 而不作废（夹具）：一个 scope 缺 moduleGraph、另一个已评估的 scope 有 1 个环 ⇒ 记录状态为 `partial`，`totalCycleCount` 计入这 1 个环，并点名缺读数的 scope。贴出测试名与输出。
 - [ ] AC2 单目录判定来自文件清单：在真实仓库上，`quay-github-src`、`quay-backlog-src` 读为 `evaluated:true`、`basis: "single-directory"`；夹具中一个缺 moduleGraph 的**多目录** scope 仍为 `evaluated:false`（负对照）。贴出两次输出。
-- [ ] AC3 过期可见（真实数据）：刷新前对主检出运行一次，src scope 的 `commitsSinceArtifact` > 0、`stale:true`。贴出该 scope 的记录。
-- [ ] AC4 刷新后与独立仪器一致：刷新后 src scope 为 `evaluated:true`、`stale:false`，且它报告的环集合与 GOAL-910 AC-916 判据在同一 HEAD 上的输出一致（GOAL-910 未落地时双方都应是 `[[".","observation","serve"]]`，落地后双方都应是 0）。贴出两份输出与 HEAD。
+- [ ] AC3 过期可见（真实数据）：刷新前对主检出运行一次，src scope 的 `commitsSinceArtifact` > 0、`behindSources:true`。贴出该 scope 的记录。
+- [ ] AC4 刷新后与独立仪器一致：刷新后 src scope 为 `evaluated:true`、`behindSources:false`，且它报告的环集合与 GOAL-910 AC-916 判据在同一 HEAD 上的输出一致（GOAL-910 未落地时双方都应是 `[[".","observation","serve"]]`，落地后双方都应是 0）。贴出两份输出与 HEAD。
 - [ ] AC5 第一条真实的已评估记录：例程向 `.quay/arch-cycle-history.jsonl` 写入一条 `evaluated:true`（状态为 complete，或为 partial 并写明原因）的生产记录，这是该载体有史以来第一条。贴出该记录。
 
 ## Definition of Done
