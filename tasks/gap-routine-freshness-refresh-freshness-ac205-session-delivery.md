@@ -3,7 +3,7 @@ id: gap-routine-freshness-refresh-freshness-ac205-session-delivery
 title: "freshness-refresh: AC-205's newest carrier record is
   2026-10-12T21:59:06Z (evidence_age_hours 207.47, d=198 of K=200); its margin
   of 2 delivery-face commits is below the 18.72-comm"
-status: ready
+status: done
 labels:
   - gap
   - routine-filed
