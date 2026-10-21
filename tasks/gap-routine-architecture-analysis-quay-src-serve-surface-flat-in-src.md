@@ -163,9 +163,3 @@ Mechanically move the serve* family into packages/quay/src/serve/ (matching the 
 - `experiments/quay-perpetual-stream/test/*.mjs`
 - `experiments/quay-perpetual-stream/milestones/**`
 - `tasks/gap-routine-architecture-analysis-quay-src-serve-surface-flat-in-src.md`
-
-## Blocker
-
-（上一轮的 exited-not-landed 已在续做轮定位并修复：suite 抓到的 9 处 flat 路径随动点位，见 §8。
-真实原因不是环境噪声 —— delta 相关性提示里标 UNRELATED 的 `goal-criterion-import-specifiers-resolve`
-同样由本次移动直接造成。）
