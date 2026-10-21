@@ -2,7 +2,7 @@
 id: gap-goal909-exit-conditions-heading-unreadable
 title: GOAL-909 退出条件节标题逐字不匹配机械判层 ⇒ 充分性恒 insufficient：拆成逐字 `## 退出条件` +
   元机制回读独立成节（提案，选项 b）
-status: todo
+status: needs-human
 labels:
   - gap
 parent: null
