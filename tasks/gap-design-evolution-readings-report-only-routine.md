@@ -51,9 +51,9 @@ extra:
 
 ## Definition of Done
 
-- [ ] 五条 AC 全绿；`scripts/test.sh` 相关泳道通过；合并进 develop。
-- [ ] 新载体已登记到 carrier-registry；若新文件成为入口，catalog 声明已补；若打包文件数变化，shipped-set 基线已用真实产物重锚并写明原因。
-- [ ] 读数全部来自真实 git 历史与真实载体，不用夹具冒充生产读数（夹具只用于 AC1、AC3、AC4 里的负对照）。
+- [x] 五条 AC 全绿；`scripts/test.sh` 相关泳道通过；合并进 develop。
+- [x] 新载体已登记到 carrier-registry；若新文件成为入口，catalog 声明已补；若打包文件数变化，shipped-set 基线已用真实产物重锚并写明原因。
+- [x] 读数全部来自真实 git 历史与真实载体，不用夹具冒充生产读数（夹具只用于 AC1、AC3、AC4 里的负对照）。
 
 ## 落地后操作（不属于本任务的完成条件）
 
