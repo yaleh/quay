@@ -96,23 +96,46 @@ Mechanically move the serve* family into packages/quay/src/serve/ (matching the 
 
 两处 `git show <rev>:<path>` 的注释指向**那个 rev 实际携带的旧路径**，保持旧路径并注明文件已移动 ——
 把它们改成新路径会让注释对那个 rev 说谎。
+（2026-10-22 续做轮更正：`gap-git-graph-...test.mjs` AC10 的 `303a94950^:packages/quay/src/serve-git.ts`
+曾被误改成 `serve/serve-git.ts`，那是**把历史 rev 的路径回写**，已恢复为 flat 路径。）
 
-### 8. 判据实跑读数（本任务分支，非自述）
+### 8. 续做轮补齐的「移动随动点位」（suite 抓出的 9 处）
 
-- **scoped 门** `bash scripts/test.sh --for-task <id> --allow-thin`：**EXIT=0**；
+上一轮 scoped 门绿、但全量 suite 在下列位置抓到遗留的 flat 路径假设（全部是真 RED，不是环境噪声）：
+
+- `plugin/test/ownership-active-loop.test.mjs`：输入串仍是 `./packages//quay/src/./serve.ts`，期望值却被
+  改成 `serve/serve.ts` ⇒ 归一化器正确返回 flat 路径。改为输入也走进 `serve/`（被测的是 `//`/`./` 归一化，
+  仍然能取假）。
+- `packages/quay/test/serve-handlers.test.mjs`：注释已更新、断言正则还钉 flat `src/serve-send.ts`。
+- `packages/quay/test/config-validate.test.mjs`：`targets` 仍按 `serve.ts` 读源码 ⇒ ENOENT；改为
+  `path.join("serve","serve.ts")`。同文件的 archived-rev 注释同步改回 flat（见 §7）。
+- `plugin/test/fan-in-execute-paths-s01.test.mjs`：code-delta 正则钉 flat `serve-handlers.ts`。
+- `plugin/test/session-primitives-adoption.test.mjs`：serve-send 对 primitives 的 import 由 `./primitives/`
+  变成 `../primitives/`，正则未随动。
+- `packages/quay/test/serve.test.mjs`：stale-code fixture 只 mkdir 到 `src/`，写 `src/serve/serve.ts` ENOENT。
+- `plugin/test/quay-init-characterization.test.mjs`：`generateConfigContent` 的 `# Section 4` 注释路径变了
+  ⇒ fresh-install `.quay/config.yml` 的 pin 重新锚定（其余 5 个面 hash 未变，正是「改动被限制在配置写入器」的交叉核）。
+- `goals/AC-146` / `goals/AC-253` 的 criterion 里钉着旧 carrier 路径 ⇒ 按
+  `goal-criterion-import-specifiers-resolve` 的要求重新锚定到新 carrier（不是回退移动）。
+
+### 9. 判据实跑读数（本任务分支，非自述）
+
+- **scoped 门** `bash scripts/test.sh --for-task <id> --allow-thin`：上一轮 **EXIT=0**；
   全部 scoped 静态检查 PASS（含 `checker-mutation-check --check-changed`、
   `checked-in-write-check --changed`（148/212 delta 路径被判定，0 次写进树）、
   `import-graph-check`、`sh-census-check`、`suite-bucket-reattr-ratchet-check`、`landing-target-check`），
   测试阶段 `✔ 90 / ✖ 0`。
-- **anti-drift Touches**：`ANTI-DRIFT HARD FAIL … 1 violation(s) — out-of-declared:
-  packages/quay/test/helpers/live-web-address-fixture.mjs` ⇒ 该文件确实随 import 改动，
-  已补进 `## Touches`（`packages/quay/test/helpers/*.mjs`）而非回退。
+- **anti-drift Touches**：上一轮补入 `packages/quay/test/helpers/*.mjs`（真实随动文件，不回退）。
 - 逐个复跑受影响的最大风险测试文件：`characterization-serve-routes`(3/3)、`serve-task`(12/12)、
   `serve-nav-inconsistent-routes`(12/12)、`webui-modernist-sync`(6/6)、
   `gap-webui-tests-page-unpaginated-tables`(5/5)、`host-repo-surface-ratchet`(9/9)、
   `serve-binding-literal-check`、`config-key-consumer-check`、`import-graph-check`、
   `delivery-status-single-source`、`suite-bucket-attribution`、`kernel-sibling-resolution-check`
   —— 全绿。
+- 续做轮逐文件复跑 §8 的 9 处（含 `serve.test.mjs` 1/1、`serve-handlers.test.mjs` 63/63、
+  `ownership-active-loop` 60/60、`config-validate` 65/65、`fan-in-execute-paths-s01` 10/10、
+  `session-primitives-adoption` 10/10、`goal-criterion-import-specifiers-resolve` 14/14、
+  `gap-git-graph-...` 14/14、`quay-init-characterization` 4/4）—— 全绿。
 
 ## AC
 - [x] `.quay/routine-findings.jsonl` 中 finding `quay-src-serve-surface-flat-in-src`（routine `architecture-analysis`，runId `architecture-analysis-1792599464308`）所描述的问题被复核并处置
@@ -134,6 +157,7 @@ Mechanically move the serve* family into packages/quay/src/serve/ (matching the 
 - `plugin/scripts/*.ts`
 - `plugin/scripts/checker-mutation-cases/*.sh`
 - `plugin/test/*.mjs`
+- `goals/*.md`
 - `docs/analysis/*.mjs`
 - `experiments/quay-perpetual-stream/test/*.mjs`
 - `experiments/quay-perpetual-stream/milestones/**`
@@ -141,8 +165,6 @@ Mechanically move the serve* family into packages/quay/src/serve/ (matching the 
 
 ## Blocker
 
-**2026-10-21T17:33:35.294Z — worker 未落地（exited-not-landed）**
-
-- 未落地原因：step=suite: AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
-- run_id：wk-prod-anchor
-- session_id：98ea2fe8-7cbd-43b4-a38c-9372468ffcf5
+（上一轮的 exited-not-landed 已在续做轮定位并修复：suite 抓到的 9 处 flat 路径随动点位，见 §8。
+真实原因不是环境噪声 —— delta 相关性提示里标 UNRELATED 的 `goal-criterion-import-specifiers-resolve`
+同样由本次移动直接造成。）
