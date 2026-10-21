@@ -2,9 +2,16 @@
 id: GOAL-908
 title: native 经 gate/ 层的 import 归零：gate/shared/acceptance-runner 与
   gate/gate-event-store 改指 core 真身或 exports，棘轮「provider→gate/」违规
-status: draft
+status: active
 kind: goal
 origin: 架构分析改进方案 G-3（2026-10-21 会话，native 经 gate 层 2 条转发 shim import）
+activatedAt: 2026-10-21T08:17:51.119Z
+statusLog:
+  - at: 2026-10-21T08:17:51.119Z
+    from: draft
+    to: active
+    actor: goal-cli
+    reason: ""
 ---
 ## 背景
 
