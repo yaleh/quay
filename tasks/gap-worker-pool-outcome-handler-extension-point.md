@@ -2,7 +2,7 @@
 id: gap-worker-pool-outcome-handler-extension-point
 title: WorkerPool 结局处理扩展点：外部注册合成处理单元并经注册表生效，测试只 import worker-pool.ts
   且自带负对照（GOAL-909/AC-915）
-status: todo
+status: ready
 labels:
   - gap
 parent: null
