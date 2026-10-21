@@ -1,7 +1,7 @@
 ---
 id: AC-911
 title: src 根 shim 数 12→2（只留 abi.ts 与 config.ts 公开面）
-status: active
+status: achieved
 kind: criterion
 goal: GOAL-907
 criterion: "n=$(grep -rln 'FORWARDING re-export' packages/quay/src/*.ts | wc
@@ -20,6 +20,11 @@ statusLog:
     to: active
     actor: goal-driver
     reason: "triage: activate"
+  - at: 2026-10-21T05:18:58.583Z
+    from: active
+    to: achieved
+    actor: goal-driver
+    reason: "I2: criterion pass"
 fidelity:
   verdict: faithful
   reason: "fidelity judge: faithful"
