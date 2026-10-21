@@ -111,7 +111,7 @@ $ node -e 'const j=require("./.archguard/query/b4f87b21/arch-index.json");const 
 - 两条 AC 全绿；出度读数可独立复核（重跑 archguard summary 或读 .archguard/output 产物），四关注点的行号区间可 grep 核对。
 - 不实现拆分、不开 goal；是否立切片 goal 另行决定。
 
-**§E3 call 出度口径更新（archguard 0.1.42 起有 call 边；scope b4f87b21 @ d4ed6e37f，2026-10-21，call 边 6100）**
+**§E5 call 出度口径更新（archguard 0.1.42 起有 call 边；scope b4f87b21 @ d4ed6e37f，2026-10-21，call 边 6100）**
 
 call 边修复后，god function 的真实**运行时**聚集暴露——dependency 口径严重低估：
 
