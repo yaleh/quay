@@ -2,7 +2,7 @@
 id: AC-913
 title: native 经 gate/ 层的 import 归零（gate/shared/acceptance-runner +
   gate/gate-event-store 改指 core 真身或 exports）
-status: draft
+status: active
 kind: criterion
 goal: GOAL-908
 criterion: "n=$(grep -rnE 'quay/src/gate/' packages/quay-native/src/ 2>/dev/null
@@ -15,4 +15,15 @@ expect: 正向：packages/quay-native/src 下不再有 `quay/src/gate/` 的 impo
   exports。反向（能取假）：故意保留一条 gate/ 层 import ⇒ 判据红（计数 1，stderr 写 cause）；移除 ⇒ 绿。只断
   gate/ 层归零，不断 kernel/*（合法共享叶）与 abi.ts（公开 ABI 面）。
 origin: 架构分析 G-3（native 经 gate 层 2 条转发 shim import，绕过 provider 只依赖 ABI 表面）
+activatedAt: 2026-10-21T08:22:50.245Z
+statusLog:
+  - at: 2026-10-21T08:22:50.245Z
+    from: draft
+    to: active
+    actor: goal-driver
+    reason: "triage: activate"
+fidelity:
+  verdict: faithful
+  reason: "fidelity judge: faithful"
+  at: 2026-10-21T08:22:50.245Z
 ---
