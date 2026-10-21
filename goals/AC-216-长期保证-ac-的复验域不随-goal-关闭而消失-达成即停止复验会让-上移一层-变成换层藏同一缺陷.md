@@ -7,7 +7,7 @@ goal: GOAL-010
 criterion: |-
   node --no-warnings --experimental-strip-types --test plugin/test/goal-standing-ac-reverify-scope.test.mjs && python3 -c '
   import json,subprocess,sys
-  r=json.loads(subprocess.run(["node","--no-warnings","--experimental-strip-types","packages/quay/src/goal-store.ts","list"],capture_output=True,text=True).stdout)
+  r=json.loads(subprocess.run(["node","--no-warnings","--experimental-strip-types","packages/quay/src/core/goal-store.ts","list"],capture_output=True,text=True).stdout)
   gs={str(x["id"]):str(x.get("status")) for x in r if str(x["id"]).startswith("GOAL-")}
   go={str(x["id"]):str(x.get("goal") or "") for x in r}
   hits=[a for l in open(".quay/goal-round.jsonl") for f in (json.loads(l).get("facts") or []) for a in (((f.get("value") or {}).get("achievedFailing") or {}).get("inScope") or []) if gs.get(go.get(str(a),""))=="achieved"]
