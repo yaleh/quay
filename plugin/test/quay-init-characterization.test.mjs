@@ -211,7 +211,12 @@ const PINNED = {
       // config writer (init.ts's delta is two hunks, both inside `generateConfigContent`).
       // The scaffold is asserted structurally in `packages/quay/test/init.test.mjs` AC2 (the hash
       // alone could pin a config whose routine was later removed by a compensating change).
-      ".quay/config.yml  bb8b52b38ce513d368ee42526e21118abfa4c9af1e01fd8f66c6dfd90c746a9c",
+      // RE-ANCHORED 2026-10-22 (gap-routine-architecture-analysis-quay-src-serve-surface-flat-in-src):
+      // the generated `# Section 4` comment now names the serve module's new carrier
+      // (`packages/quay/src/serve/serve-binding.ts`) — a pure comment-path update inside
+      // `generateConfigContent`, which is the INTENTIONAL change this pin is re-anchored for.
+      // The other FIVE surface files hash UNCHANGED (same cross-check as the re-anchors above).
+      ".quay/config.yml  2329b2ce9a02ed7429799cae3a33a6ff993689cb047e6aa8cc4c57baa16aa179",
       ".quay/profiles.yml  0f781fbcc8140fd1b4732d877f8484f2c6f14856e2419167281976678b748bb0",
       // RE-ANCHORED 2026-10-13 (gap-goal-driver-hardcoded-120s-spawn-kill-preempts-record-timeout-and-
       // orphans-goal-locks Plan item 3c): the single-source runtime-artifact manifest gained FOUR

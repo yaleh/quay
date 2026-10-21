@@ -131,7 +131,7 @@ test("scope: paths cannot escape the root or reach reference/outcome/benchmark/r
     assert.equal(normalizeRepoPath(p).ok, false, p);
     assert.equal(validateRequest({ kind: "read_file", path: p, start_line: 1 }).ok, false, p);
   }
-  assert.deepEqual(normalizeRepoPath("./packages//quay/src/./serve.ts"), { ok: true, path: "packages/quay/src/serve/serve.ts" });
+  assert.deepEqual(normalizeRepoPath("./packages//quay/src/./serve/serve.ts"), { ok: true, path: "packages/quay/src/serve/serve.ts" });
 });
 
 // ── 2b. holdout answer surface (GOAL-034 blind benchmark, 2026-10-11) ──────────────────────────

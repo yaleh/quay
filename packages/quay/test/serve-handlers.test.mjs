@@ -2089,7 +2089,7 @@ test("AC1 (shared protocol) — sendSessionFrames writes the auth frame then the
 test("AC1 (no two copies) — send-to-session.ts imports the shared module instead of reimplementing the socket", () => {
   const src = fs.readFileSync(pluginScriptPath, "utf8");
   assert.doesNotMatch(src, /net\.createConnection/, "the plugin script no longer opens its own socket (logic extracted)");
-  assert.match(src, /import\("\.\.\/\.\.\/packages\/quay\/src\/serve-send\.ts"\)/, "the plugin script imports the shared serve-send.ts module");
+  assert.match(src, /import\("\.\.\/\.\.\/packages\/quay\/src\/serve\/serve-send\.ts"\)/, "the plugin script imports the shared serve-send.ts module");
 });
 
 test("AC1/AC2 (falsifiable) — verdictStateToDeliveryState maps the transcript verdict to the delivery state (single source, not settings)", () => {

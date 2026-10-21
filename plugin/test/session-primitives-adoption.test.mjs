@@ -138,7 +138,7 @@ test("AC3 — pty-frame's production consumer after the amendment: the L2 keys l
   assert.match(serveSend, /export function sendKeysToSession/, "the L2 keys lane is exported");
   assert.match(
     serveSend,
-    /import \{[^}]*\bdeliverKeys\b[^}]*\} from "\.\/primitives\/delivery-audit\.mjs"/,
+    /import \{[^}]*\bdeliverKeys\b[^}]*\} from "\.\.\/primitives\/delivery-audit\.mjs"/,
     "serve-send.ts imports the shared L2 delivery primitive",
   );
   assert.match(serveSend, /return deliverKeys\(\{/, "the lane IS deliverKeys — no second implementation");

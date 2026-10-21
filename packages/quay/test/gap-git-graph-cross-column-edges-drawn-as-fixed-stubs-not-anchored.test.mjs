@@ -427,7 +427,9 @@ test("AC9 negative control: a constant laneColor breaks the |{col % 8}| assertio
 // ── AC10: the restored palette matches 303a94950^ item-by-item ─────────────────────────────────
 
 test("AC10: restored GIT_GRAPH_LANE_PALETTE matches 303a94950^ item-by-item", () => {
-  const recovered = execFileSync("git", ["-C", REPO_ROOT, "show", "303a94950^:packages/quay/src/serve/serve-git.ts"], {
+  // ⚠️ This rev PREDATES the serve/ move: at 303a94950^ the file really was at src/serve-git.ts.
+  // ⛔ Re-pinning it to src/serve/serve-git.ts would make the comment lie about that rev.
+  const recovered = execFileSync("git", ["-C", REPO_ROOT, "show", "303a94950^:packages/quay/src/serve-git.ts"], {
     encoding: "utf8",
     maxBuffer: 64 * 1024 * 1024,
   });
