@@ -1068,6 +1068,29 @@ test("AC3 — 立案路径经 quay-file-task 的机制查重；节流不读任�
   assert.ok(cluster.includes("SUBMISSION_LEDGER_REL"), "节流状态只在自己的提交台账里");
 });
 
+// ── gap-arch-gap-filing-dedup-any-status-blocks-refile：done 的 claim ≠ 缺陷不存在（硬规则 5b）──
+// 旧的单一「ANY status ⇒ do NOT file a duplicate」把 done 任务当成「修好了」的证据；而 done 只能
+// 说明【当时】有人认领过，缺陷仍可能留在当前源码里 ⇒ 缺口被静默吞掉、无人再认领。修法：open 与
+// done 两条规则拆开，done 分支先做 current-source 复核（file:line / grep 命中），仍可见则重立并带
+// 旧任务 id 作 traceability。
+
+test("AC — gap-filing dedup 区分 OPEN 与 DONE claim；done 分支需 current-source 复核（done ≠ absent）", () => {
+  const prompts = [
+    ["architecture-review", buildArchGapWorkerPrompt("/repo", [])],
+    ["packaging", buildPackagingGapWorkerPrompt("/repo", ["drift-x"])],
+  ];
+  for (const [name, p] of prompts) {
+    assert.ok(!p.includes("(ANY status)"), `${name}: ⛔ 不再有覆盖 done 的「ANY status ⇒ 不重立」`);
+    assert.ok(p.includes("OPEN claim"), `${name}: 明列 open 分支`);
+    assert.ok(p.includes("DONE/superseded claim"), `${name}: 明列 done 分支（可与 open 区分）`);
+    const doneRule = p.split("\n").find((l) => l.includes("DONE/superseded claim"));
+    assert.ok(doneRule && /CURRENT SOURCE/.test(doneRule), `${name}: done claim 必须先 current-source 复核`);
+    assert.ok(doneRule && /STILL visible/.test(doneRule) && /FILE the task/.test(doneRule),
+      `${name}: 缺陷仍可见 ⇒ 重立（⛔ 不无条件不立）`);
+    assert.ok(doneRule && /prior-claim: <id>/.test(doneRule), `${name}: 重立时带旧任务 id 作 traceability`);
+  }
+});
+
 // ── gap-cross-project-dogfood-quay-self-usage-c1-a7wnts：失败面必须携带原始仪器输出 ───────────────
 // 轮的 claim：judge 打印非 JSON stdout 时，round 记 state=failed / 零判词，却只写一条【固定】reason，
 // 原始 stdout 被丢弃 ⇒ 失败不可诊断。修法：失败 reason 并入【单行、有界】的原始输出
