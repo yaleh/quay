@@ -48,30 +48,32 @@ CAUSE=missing extension-point test plugin/test/worker-pool-extension-point.test.
 
 ## AC
 
-- [x] AC1 判据从红转绿：在任务 worktree 内逐字执行 `quay goal show AC-915 --json` 取出的 criterion ⇒ exit 0 且 stdout 含 `OK: a new outcome handler registers from outside worker-driver.ts`（贴 criterion 全文与读数）
+- [x] AC1 判据从红转绿：在任务 worktree 内逐字执行 `quay goal show AC-915` 取出的 criterion ⇒ exit 0 且 stdout 含 `OK: a new outcome handler registers from outside worker-driver.ts`（贴 criterion 全文与读数）
   - criterion 全文：`t=plugin/test/worker-pool-extension-point.test.mjs; if [ ! -f "$t" ]; then echo "CAUSE=missing extension-point test $t" >&2; exit 1; fi; if grep -q 'worker-driver' "$t"; then echo "CAUSE=$t references worker-driver; a new outcome handler must register through WorkerPool without touching the core file" >&2; exit 1; fi; if ! node --no-warnings --experimental-strip-types --test "$t" >/dev/null 2>&1; then echo "CAUSE=extension-point test failed: $t" >&2; exit 1; fi; echo "OK: a new outcome handler registers from outside worker-driver.ts"`
-  - 读数（red→green）：立案当轮 `CAUSE=missing extension-point test plugin/test/worker-pool-extension-point.test.mjs`（exit 1）；实现后 `OK: a new outcome handler registers from outside worker-driver.ts`（exit 0）。
+  - 读数（red→green）：立案当轮 `CAUSE=missing extension-point test plugin/test/worker-pool-extension-point.test.mjs`（exit 1）；实现后 `OK: a new outcome handler registers from outside worker-driver.ts`（exit 0，2026-10-22 本轮复跑同读数）。
+  - 注：本树 `quay goal show AC-915 --json` 返回空对象 `{}`（CLI 的 `--json` 面缺口，非判据失败）；`quay goal show AC-915` 逐字打印 criterion，以上全文取自该命令输出。
 - [x] AC2 测试文件只依赖 worker-pool.ts：`grep -cE "from ['\"]\.\./scripts/worker-pool" plugin/test/worker-pool-extension-point.test.mjs` ⇒ `1`；且 `grep -cE "from ['\"]\.\./scripts/" plugin/test/worker-pool-extension-point.test.mjs` ⇒ `1`（贴两条读数）
   - 读数：`from ../scripts/worker-pool` = **1**；`from ../scripts/` = **1**。
 - [x] AC3 不引用中心文件（criterion 谓词非恒零）：`grep -c 'worker-driver' plugin/test/worker-pool-extension-point.test.mjs || true` ⇒ `0`；同一条 grep 对该文件的一份临时副本（追加一行含中心文件名）⇒ `1`（零计数配套干跑）
-  - 读数：生产文件 = **0**；临时副本（`/tmp/ac3-probe.mjs`，追加 `// worker-driver appended line (AC3 dry-run)`）= **1** ⇒ 该谓词对真样本确实命中，零计数不是恒零。
+  - 读数：生产文件 = **0**；临时副本（`/tmp/ac3-probe.mjs`，追加 `// worker-driver appended line (AC3 dry-run)`）= **1** ⇒ 该谓词对真样本确实命中，零计数不是恒零（2026-10-22 本轮复跑同读数）。
 - [x] AC4 扩展点行为取真：`node --no-warnings --experimental-strip-types --test plugin/test/worker-pool-extension-point.test.mjs` ⇒ 0 fail，且正向断言覆盖「单元被调用 / 声明的转移被应用 / 报告含单元 id」（贴 `# pass` / `# fail` 与断言名）
-  - 读数：`ℹ tests 10 / ℹ pass 10 / ℹ fail 0`。
+  - 读数：`ℹ tests 10 / ℹ pass 10 / ℹ fail 0`（2026-10-22 本轮复跑同读数）。
   - 断言名：`正向：外部注册的合成单元被调用，它声明的转移被应用，报告含该单元 id`（内部断言：`单元被调用恰好一次` / `声明的转移（needs-human latch）被应用` / `报告含命中单元 id`）。
 - [x] AC5 负对照非空转：测试内存在「未注册 ⇒ 无转移」与「绕过注册表直调转移 ⇒ 转移可用」两条对照，`# pass` 中能读到这两条断言名；并贴它们在不注册时确实取假（贴读数）
   - `# pass` 中的断言名：`负对照A：未注册该单元 ⇒ 报告为空且没有转移（没注册就没有）`、`负对照B：绕过注册表直接调 applyTransition ⇒ 转移机制本身可用`。
   - 取假读数（AC9 的载体负控制下）：未注册路径 `reports.length === 0` 且 `pool.needsHuman("gap-synthetic") === false`（assert.equal 逐条通过）；绕过注册表路径 `res.needsHumanResults.length === 1` 且 `needsHuman === true` ⇒ 两侧不同形，负对照不是空转。
 - [x] AC6 注册面是通用分派而非硬编码单例：两个不同 `finalState` 的合成单元分别命中（贴 AC4 输出中的断言名）；`grep -cE 'registerOutcomeHandler' plugin/scripts/worker-pool.ts` ≥ `2`；`grep -cE 'dispatchOutcome' plugin/scripts/worker-driver.ts` ≥ `1`（贴三条读数）
   - 断言名：`通用分派：两个不同 finalState 的合成单元各自命中（不是硬编码单例）`（`unit-second` 命中、`unit-first` 计数器不增）。
-  - 读数：`registerOutcomeHandler` in `plugin/scripts/worker-pool.ts` = **2**（声明 + 内置注册路径调用）；`dispatchOutcome` in `plugin/scripts/worker-driver.ts` = **1**。
+  - 读数（2026-10-22 复跑）：`registerOutcomeHandler` in `plugin/scripts/worker-pool.ts` = **2**；`dispatchOutcome` in `plugin/scripts/worker-driver.ts` = **1**。
 - [x] AC7 现有分支已走同一注册面：`builtinOutcomeHandlerIds()`（或静态常量）覆盖 exited-not-landed 三分支 + 快速死亡退避 + environment-fatal + needs-human 终态（测试中断言集合 ⊇ 6 个 id 且 pass）；`onWorkerFinished` 体内不再持有这些分支的 if/else（贴 `git diff` 中该函数的读数与内置 id 清单）
   - 内置 id 清单（`new WorkerPool().builtinOutcomeHandlerIds()` 实测）：`["exited-not-landed-baseline-red-deadlock","exited-not-landed-stop-terminal","exited-not-landed-count-and-retry","quick-death-backoff","environment-fatal-halt","needs-human-terminal"]` ⇒ 6/6，且测试 `内置单元经同一注册面注册：…` pass。
-  - `onWorkerFinished` 从 ~166 行分支体收缩为 **33 行**（`plugin/scripts/worker-driver.ts:6020-6053`）：`rw.done/results.push` → `normalizeWorkerOutcome(r)` → `workerPool.dispatchOutcome(event, { root: rootDir })` → 只按报告发 `needs-human` / `environment-fatal-halt` 观测事件（停机磁盘动作由调用方执行）。体内对 `decision.kind` / `advanceRetryCap` / `applyNeedsHumanTransition` / `newlyNeedsHuman` 的分支 **0 处**（3 处关键字命中全在注释里）。
+  - `onWorkerFinished` 从 ~166 行分支体收缩为 **33 行**（`plugin/scripts/worker-driver.ts:6020-6053`）：`rw.done/results.push` → `normalizeWorkerOutcome(r)` → `workerPool.dispatchOutcome(event, { root: rootDir })` → 只按报告发 `needs-human` / `environment-fatal-halt` 观测事件（停机磁盘动作由调用方执行）。体内对 `decision.kind` / `advanceRetryCap` / `applyNeedsHumanTransition` / `newlyNeedsHuman` 的**分支 0 处**；唯一关键字命中是 `worker-backoff` 观测事件里的 `newlyNeedsHuman` 字段（观测面，⛔ 不是分支）。
 - [x] AC8 行为不回归：`node --no-warnings --experimental-strip-types --test plugin/test/worker-driver.test.mjs plugin/test/worker-driver-fan-in-s0*.test.mjs plugin/test/worker-driver-resident-s0*.test.mjs` ⇒ 0 fail；`.quay/worker-outcome.jsonl` / `worker-round.jsonl` 的记录形状由既有测试覆盖（贴 `# pass` / `# fail`）
-  - 读数：`worker-driver.test.mjs` + `worker-pool.test.mjs` = `pass 153 / fail 0`；`worker-driver-fan-in-s0*` + `worker-driver-resident-s0*` = `pass 143 / fail 0`。
+  - 读数（2026-10-22 复跑，含 `worker-pool.test.mjs`）：`ℹ tests 296 / ℹ pass 296 / ℹ fail 0`。
   - 形状不变：round 记录的 `retry_exemptions` / `exited_not_landed_stops` / `needsHuman` 字段仍在 `normalizeWorkerOutcome` / 报告循环里按原形状写入（`computeWorkerRoundRecord` 未改）。
+  - 兄弟测试重钉（2026-10-22，修复上一轮 suite 红）：`plugin/test/worker-driver-retry-classification.test.mjs` 的静态半边原先钉死中心文件里的 `if (decision.kind === "stop-terminal")` / `else if (exemption.verdict !== ...)` 字面分支——那正是本任务退役的形态。现改为钉新结构：调用点 `workerPool.dispatchOutcome(event` 交给注册表；`worker-pool.ts` 中 stop-terminal 与 count-and-retry 是两个**独立注册单元**，各自匹配自己的 kind 并声明不同转移（`needsHuman` vs `retryAdvance`），且互相不包含对方的转移。README 该文件读数：`ℹ tests 30 / ℹ pass 30 / ℹ fail 0`。
 - [x] AC9 反向能取假（真载体）：按 Plan 第 4 步执行 ⇒ 绕过注册表后 AC1 criterion exit 1 且 stderr 含 `CAUSE=extension-point test failed`，测试文件红灯；`cp` 恢复后 `md5sum` 与改前一致且转绿（贴两侧读数；⛔ 不用 `git checkout` 恢复）
-  - 变造（`dispatchOutcome` 首行插 `return []`）：criterion ⇒ `CAUSE=extension-point test failed: plugin/test/worker-pool-extension-point.test.mjs`（**exit 1**）；测试文件 ⇒ `fail 1`（`ERR_ASSERTION`，exit 1）。
+  - 变造（`dispatchOutcome` 首行插 `return []; // AC9 negative control`，2026-10-22 复跑）：criterion ⇒ `CAUSE=extension-point test failed: plugin/test/worker-pool-extension-point.test.mjs`（**exit 1**）；测试文件 ⇒ `pass 6 / fail 4`（exit 1）。
   - 恢复（`cp` 备份回填）：`md5sum` 改前/改后均为 `b4a6a463ba3bf8ff0ff299d497666d19`（`diff` 无差异）；criterion ⇒ `OK: …`（exit 0），测试 ⇒ `pass 10 / fail 0`。⛔ 全程未用 `git checkout`。
 - [x] AC10 scoped 门与 schema：`bash scripts/test.sh --for-task <id>` ⇒ exit 0；`node plugin/scripts/task-schema-check.ts tasks/<id>.md` ⇒ exit 0（贴读数）
   - scoped 门：`bash scripts/test.sh --for-task gap-worker-pool-outcome-handler-extension-point --allow-thin` ⇒ **exit 0**（`tests 163 / pass 163 / fail 0`）。
@@ -86,6 +88,7 @@ AC-915 在 goal-driver 下一轮读数为 `pass`，且达成形态是**扩展点
 - plugin/scripts/worker-pool.ts
 - plugin/scripts/worker-driver.ts
 - plugin/test/worker-pool-extension-point.test.mjs
+- plugin/test/worker-driver-retry-classification.test.mjs
 - tasks/gap-worker-pool-outcome-handler-extension-point.md
 
 ## Blocker
@@ -95,3 +98,5 @@ AC-915 在 goal-driver 下一轮读数为 `pass`，且达成形态是**扩展点
 - 未落地原因：step=suite: AssertionError [ERR_ASSERTION]: 调用点按 kind 分叉（stop-terminal 独立分支）
 - run_id：wk-prod-anchor
 - session_id：f8671b9e-95be-48d3-a188-12ca1602600f
+
+**处置（2026-10-22 续做轮）**：该断言是源文本钉（source-text pin），钉的是本任务有意退役的旧形态；测试动态半边（两 verdict ⇒ 两种动作）本就通过。已在同一测试内重钉到注册表结构（见 AC8「兄弟测试重钉」），本地复跑 `tests 30 / pass 30 / fail 0`。
