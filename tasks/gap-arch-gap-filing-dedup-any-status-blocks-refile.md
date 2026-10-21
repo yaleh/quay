@@ -36,3 +36,4 @@ plugin/scripts/quality-gate-driver.ts 的 buildArchGapWorkerPrompt 让短命 fil
 
 - tasks/gap-arch-gap-filing-dedup-any-status-blocks-refile.md
 - plugin/scripts/quality-gate-driver.ts
+- plugin/test/quality-gate-driver.test.mjs
