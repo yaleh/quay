@@ -314,9 +314,19 @@ export const CONCERN_KIND_STATES = Object.freeze({
   UNDETERMINED: "undetermined",
 });
 
+/** WHO confirms a concern of this kind — the legal values of the registry's `admission` field. The two
+ *  axes are pinned in the registry's own header comment below; ⛔ do not restate them here as well. */
+export const CONCERN_ADMISSIONS = Object.freeze({
+  MECHANICAL: "mechanical",
+  SEMANTIC_JUDGED: "semantic-judged",
+});
+
 /**
  * The registry. Each entry carries the five fields the amendment pins, plus the kind's own readers:
  *   kind                 the token `deriveConcernKind` produces;
+ *   admission            WHO confirms a concern of this kind (`CONCERN_ADMISSIONS`): `mechanical` = a
+ *                        machine can falsifiably confirm it; `semantic-judged` = the confirmation needs a
+ *                        semantic judgment, and mechanical signals may only ever produce CANDIDATES;
  *   detector             WHERE the mechanism that produces the concern lives (a path + function, never a
  *                        prose promise) — for a not-yet-mechanized kind, the task that must land it;
  *   deltaComputable      is there a COMPUTABLE delta, not a model-asserted one?
@@ -324,6 +334,14 @@ export const CONCERN_KIND_STATES = Object.freeze({
  *   occurrenceThreshold  how many times the concern must have OCCURRED before a proposal may leave the
  *                        carrier (DIR-133 ruling 1: 2). ⛔ Read by `evaluateEntryBar` — never a literal;
  *   mechanized           are the three above actually LANDED? false ⇒ NOT_YET_MECHANIZED, ⛔ not admission.
+ *
+ * ⛔ `admission` and `mechanized` are ORTHOGONAL — never merge them, never derive one from the other:
+ *   `admission` answers 「确认靠谁」 (who must confirm: a falsifiable machine reading vs a semantic
+ *   judgment), while `mechanized` answers 「仪器是否落地」 (has the detector / computable delta / negative
+ *   control actually been built?). `package-cycle` is mechanical AND mechanized; a mechanical kind whose
+ *   instrument has not landed is `mechanized:false` while staying `mechanical`; a `semantic-judged` kind
+ *   never becomes mechanized by piling on mechanical signals — only by landing the judge.
+ *
  * A new kind may only flip `mechanized` to true when it brings all three: a detector, a computable
  * falsifiable delta, and a negative control that is demonstrated to extinguish the signal. Widening the
  * string without them is "making the prose rule longer", not making the driver stronger (ADR-004).
@@ -331,6 +349,7 @@ export const CONCERN_KIND_STATES = Object.freeze({
 export const CONCERN_KIND_REGISTRY = Object.freeze([
   Object.freeze({
     kind: CONCERN_KIND_IN_SCOPE,
+    admission: CONCERN_ADMISSIONS.MECHANICAL,
     detector: "ArchGuard slice-delta (installed CLI, computed) — ownership-active-loop.mjs computeSliceDelta + .quay/ownership-shadow-proposals.jsonl",
     deltaComputable: true,
     negativeControl: true,
@@ -343,6 +362,7 @@ export const CONCERN_KIND_REGISTRY = Object.freeze([
   }),
   Object.freeze({
     kind: DESIGN_EVOLUTION_KIND,
+    admission: CONCERN_ADMISSIONS.MECHANICAL,
     detector: "plugin/scripts/design-evolution-readings.ts evolutionFindings() → .quay/routine-findings.jsonl (dupKind=evolution-regression, trigger=share-up)",
     deltaComputable: true,
     negativeControl: true,
@@ -355,6 +375,7 @@ export const CONCERN_KIND_REGISTRY = Object.freeze([
   }),
   Object.freeze({
     kind: "spine-without-extension-point",
+    admission: CONCERN_ADMISSIONS.SEMANTIC_JUDGED,
     detector: "NOT LANDED — the detector is tasks/gap-worker-fan-in-cross-cutting-hooks-not-covered-by-extension-point (ready). Until its extension point registry lands there is no machine-readable signal to admit on",
     deltaComputable: false,
     negativeControl: false,
@@ -367,6 +388,7 @@ export const CONCERN_KIND_REGISTRY = Object.freeze([
   }),
   Object.freeze({
     kind: "god-file-size",
+    admission: CONCERN_ADMISSIONS.SEMANTIC_JUDGED,
     detector: "NOT LANDED — no detector exists AND the EVENT is undefined (what counts as one occurrence of 'a god file'?). A line-count threshold is 硬规则 4 推论's forbidden zone until that definition plus a historical occurrence reading exist, so this task registers the SLOT only",
     deltaComputable: false,
     negativeControl: false,
@@ -377,7 +399,47 @@ export const CONCERN_KIND_REGISTRY = Object.freeze([
     readDelta: null,
     fingerprintOf: null,
   }),
+  Object.freeze({
+    kind: "unencapsulated-state",
+    admission: CONCERN_ADMISSIONS.SEMANTIC_JUDGED,
+    detector: "NOT LANDED — semantic-judged slot: the clue reader (plugin/scripts/unencapsulated-state-clue.ts) and the recorded-verdict judge are not landed yet; mechanical signals may only produce candidates, never a confirmation",
+    deltaComputable: false,
+    negativeControl: false,
+    negativeControlDetail: null,
+    occurrenceThreshold: null,
+    mechanized: false,
+    deltaCaliber: null,
+    readDelta: null,
+    fingerprintOf: null,
+  }),
 ]);
+
+/**
+ * Validate the `admission` field across a registry. Returns NAMED violations, never a bare boolean — a
+ * caller must be able to say WHICH kind is wrong (硬规则 3). And "I could not read the registry" gets its
+ * OWN shape (`evaluated:false` + a `cause`), ⛔ never the same shape as "read it, zero violations"
+ * (硬规则 3b): an instrument failure must not be disguised as a pass.
+ * @returns {{evaluated:boolean, missing:string[], invalid:string[], cause:string|null}}
+ *   missing — the entry carries no string `admission` at all;
+ *   invalid — the entry carries one, but it is not one of `CONCERN_ADMISSIONS`' values;
+ *   cause   — non-null iff `evaluated` is false (the registry itself could not be read).
+ */
+export function registryAdmissionViolations(registry = CONCERN_KIND_REGISTRY) {
+  if (!Array.isArray(registry)) return { evaluated: false, missing: [], invalid: [], cause: "registry-is-not-an-array" };
+  if (registry.length === 0) return { evaluated: false, missing: [], invalid: [], cause: "registry-is-empty" };
+  const legal = Object.values(CONCERN_ADMISSIONS);
+  const missing = [];
+  const invalid = [];
+  registry.forEach((entry, i) => {
+    // An entry without a readable kind still has to be NAMED — an index token is worse than a kind but far
+    // better than dropping the entry on the floor (a silent skip would read exactly like "no violation").
+    const name = isStr(entry?.kind, 1) ? entry.kind : `entry[${i}]:no-kind`;
+    const admission = isObj(entry) ? entry.admission : undefined;
+    if (typeof admission !== "string") missing.push(name);
+    else if (!legal.includes(admission)) invalid.push(name);
+  });
+  return { evaluated: true, missing, invalid, cause: null };
+}
 
 /** Look a kind up. Returns the entry, or null when the kind is not registered. */
 export function concernKindEntry(kind, registry = CONCERN_KIND_REGISTRY) {

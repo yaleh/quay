@@ -21,6 +21,7 @@ import {
   isProductionRun, deltaFingerprint, groupByCandidate, readCarrier, evaluateCarrier,
   nextGoalId, nextAcId, buildDraftGoal, proposeDraftGoal, createGoalStoreWrite,
   CONCERN_KIND_REGISTRY, CONCERN_KIND_STATES, CONCERN_KIND_IN_SCOPE, DESIGN_EVOLUTION_KIND,
+  CONCERN_ADMISSIONS, registryAdmissionViolations,
   DESIGN_EVOLUTION_DUP_KIND, DESIGN_EVOLUTION_PREDICATE_SAMPLES,
   concernKindEntry, concernKindState, designEvolutionRegression,
   designEvolutionDeltaEvidence, designEvolutionFingerprint, designEvolutionPredicateSelfCheck,
@@ -575,6 +576,89 @@ test("AC5(registry): a registered-but-unlanded detector reports NOT_YET_MECHANIZ
   const v3 = evaluateEntryBar([rec({ concern_kind: "god-file-size", slice_delta: null })], { registry: fullFlip });
   assert.ok(v3.reason.startsWith("CONDITION_2_NOT_MET"), v3.reason);
   assert.equal(v3.eligible, false);
+});
+
+// ── AC-921: every registered kind carries an `admission`, judged on the IMPORTED object ────────────
+// The expected mapping is a LITERAL table here, deliberately NOT derived from CONCERN_ADMISSIONS or from
+// the registry itself: deriving it would let one edit turn both sides green at once (硬规则 4 — a quantity
+// that structurally cannot take the false value is not a measurement).
+const EXPECTED_ADMISSION = Object.freeze({
+  "package-cycle": "mechanical",
+  "design-evolution-regression": "mechanical",
+  "god-file-size": "semantic-judged",
+  "unencapsulated-state": "semantic-judged",
+  "spine-without-extension-point": "semantic-judged",
+});
+/** Which kinds DISAGREE with the declared table. Its own check, distinct from `registryAdmissionViolations`:
+ *  a token can be perfectly LEGAL and still be the wrong one for its kind — legality only exists relative to
+ *  the closed vocabulary, correctness only relative to this expectation. A validator that "caught" arm (a)
+ *  would have to carry a second copy of this table inside the module, which is exactly the drift the task
+ *  forbids; so the two questions stay separate and both are asserted. */
+const admissionMismatches = (registry) =>
+  Object.entries(EXPECTED_ADMISSION)
+    .filter(([kind, want]) => registry.find((e) => e.kind === kind)?.admission !== want)
+    .map(([kind]) => kind);
+
+test("AC921-1(admission): all five registered kinds carry the declared admission, read off the imported object", () => {
+  const got = Object.fromEntries(CONCERN_KIND_REGISTRY.map((e) => [e.kind, e.admission]));
+  assert.deepEqual(got, EXPECTED_ADMISSION, "the imported registry's kind→admission map");
+  assert.deepEqual(admissionMismatches(CONCERN_KIND_REGISTRY), []);
+  assert.equal(CONCERN_KIND_REGISTRY.length, 5, "exactly the five declared kinds are registered");
+  // the two ADMISSION tokens are a closed vocabulary — an unknown token is not a synonym for either
+  assert.deepEqual(Object.values(CONCERN_ADMISSIONS).sort(), ["mechanical", "semantic-judged"]);
+});
+
+test("AC921-2(admission): the real registry has ZERO violations, and every violation is NAMED", () => {
+  const real = registryAdmissionViolations();
+  assert.equal(real.evaluated, true, "the real registry is readable");
+  assert.equal(real.cause, null);
+  assert.deepEqual(real.missing, []);
+  assert.deepEqual(real.invalid, []);
+
+  // NEGATIVE ARM (a): a synthetic registry whose one admission is FLIPPED to the other legal token.
+  // Synthetic registries are in-memory objects on the import path, so this proves the judge reads the
+  // OBJECT, not the source text (硬规则 2). The flipped token stays inside the legal vocabulary, so the
+  // legality check reports no violation — the WRONGNESS is named by the declared-mapping comparison above.
+  // Asserting both halves keeps the seam visible instead of pretending one check covers both questions.
+  const flipped = CONCERN_KIND_REGISTRY.map((e) =>
+    e.kind === "package-cycle" ? { ...e, admission: CONCERN_ADMISSIONS.SEMANTIC_JUDGED } : e);
+  const a = registryAdmissionViolations(flipped);
+  assert.equal(a.evaluated, true);
+  assert.deepEqual(a.invalid, [], "a flipped token is still LEGAL — legality is not the question here");
+  assert.deepEqual(a.missing, []);
+  assert.deepEqual(admissionMismatches(flipped), ["package-cycle"], "and the WRONG kind is named here");
+
+  // NEGATIVE ARM (b): an entry with the admission FIELD REMOVED — a missing field is its own list.
+  const removed = CONCERN_KIND_REGISTRY.map((e) => {
+    if (e.kind !== "god-file-size") return e;
+    const { admission: _drop, ...rest } = e;
+    return rest;
+  });
+  const b = registryAdmissionViolations(removed);
+  assert.equal(b.evaluated, true);
+  assert.deepEqual(b.missing, ["god-file-size"], "a deleted admission is reported as missing, not invalid");
+  assert.deepEqual(b.invalid, []);
+  assert.deepEqual(admissionMismatches(removed), ["god-file-size"]);
+
+  // NEGATIVE ARM (c): an ILLEGAL token — neither of the two legal values.
+  const illegal = CONCERN_KIND_REGISTRY.map((e) =>
+    e.kind === "spine-without-extension-point" ? { ...e, admission: "maybe" } : e);
+  const c = registryAdmissionViolations(illegal);
+  assert.equal(c.evaluated, true);
+  assert.deepEqual(c.invalid, ["spine-without-extension-point"]);
+  assert.deepEqual(c.missing, []);
+  assert.deepEqual(admissionMismatches(illegal), ["spine-without-extension-point"]);
+
+  // INSTRUMENT FAILURE is its OWN shape: an unreadable registry must NOT look like "zero violations"
+  // (硬规则 3b) — `evaluated:false` plus a non-null cause.
+  // ⛔ `undefined` is excluded on purpose: it triggers the default parameter (the real registry).
+  for (const unreadable of [null, "not-an-array", {}, []]) {
+    const r = registryAdmissionViolations(unreadable);
+    assert.equal(r.evaluated, false, `unreadable input ${JSON.stringify(unreadable)} must not be evaluated`);
+    assert.equal(typeof r.cause, "string");
+    assert.ok(r.cause.length > 0);
+    assert.notDeepEqual(r, { evaluated: true, missing: [], invalid: [], cause: null });
+  }
 });
 
 // ── the SECOND kind is really the one the production producer emits ───────────────────────────────
