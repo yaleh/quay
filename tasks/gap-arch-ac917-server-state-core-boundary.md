@@ -2,7 +2,7 @@
 id: gap-arch-ac917-server-state-core-boundary
 title: 按职责断环：server-state.ts 下沉 core/、根包不 import ./serve/、observation
   不回指根包（GOAL-910 AC-917）
-status: done
+status: ready
 labels:
   - gap
   - defect
