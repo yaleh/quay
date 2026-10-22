@@ -1,7 +1,7 @@
 ---
 id: AC-923
 title: C1 准入闸真正消费 registry 的 admission 字段：非法取值必须按名拒绝，而不是继续走机械判定
-status: active
+status: achieved
 kind: criterion
 goal: GOAL-911
 criterion: "node --input-type=module -e 'const m=await
@@ -36,6 +36,11 @@ statusLog:
     to: active
     actor: goal-driver
     reason: "triage: activate"
+  - at: 2026-10-22T11:32:57.949Z
+    from: active
+    to: achieved
+    actor: goal-driver
+    reason: "I2: criterion pass"
 supersedes:
   - AC-918
 fidelity:
