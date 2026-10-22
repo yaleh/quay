@@ -23,20 +23,43 @@
 //
 // The four entry conditions are taken VERBATIM from `ownership-active-replay.md` §6 (suggested entry
 // conditions a–d), not re-invented here:
-//   (1) concern_kind === "package-cycle"   — the only kind with a computable, falsifiable delta;
+//   (1) concern_kind is a REGISTERED kind whose detector is LANDED — see the dated amendment below
+//       (2026-10-22) and `ownership-active-replay.md` §8. Before the amendment this was the literal
+//       `=== "package-cycle"`; it is now a registry lookup, and "registered but not yet mechanized" is
+//       its OWN state (`NOT_YET_MECHANIZED`), never "not in scope" (硬规则 3b);
 //   (2) the delta was COMPUTED by the ArchGuard `slice-delta` primitive (not model-asserted), its negative
 //       control is falsified, and `provenanceConsistency === "match"`;
 //   (3) the decision memory was CONSULTED, its input was READABLE, and it says "not-known" (not a known
 //       exemption / not a known-not-yet-filed item). An absent `decision_memory` field or an
 //       `unreadable_input:true` reading is `MEMORY_NOT_EVALUATED` — 未查, which fails closed (硬规则 6);
-//   (4) ≥ N consecutive PRODUCTION live runs on the same candidate carry a consistent computed delta.
+//   (4) ≥ N consecutive PRODUCTION live runs on the same candidate carry a consistent computed delta,
+//       and the concern must have OCCURRED at least `occurrenceThreshold` times (the registry's own
+//       field — DIR-133 ruling 1). The streak and the occurrence count are DIFFERENT quantities: a
+//       slice of [hit, miss, hit] has occurrences=2 but streak=1.
+//
+// ── AMEND 2026-10-22: admission widened from ONE constant to a concern-kind REGISTRY (DIR-133 F1) ────
+// `CONCERN_KIND_IN_SCOPE` used to be the whole of condition (1), and its comment said package-cycle was
+// "the only kind with a computable, falsifiable delta". That was true of the INSTRUMENTS, not of the
+// concerns: `design-evolution-readings.ts` has since mechanized a second kind end to end (a detector, a
+// computable delta with a declared caliber, and a repair direction that makes the signal go dark). The
+// other two kinds DIR-133 names have NO detector yet, and pretending otherwise by simply widening the
+// string would be "making the prose rule longer", not making the driver stronger (ADR-004).
+// ⇒ three states now, never two:
+//      NOT_MET              the kind is not in the registry at all (stays in shadow);
+//      NOT_YET_MECHANIZED   the kind is registered with `mechanized:false` — its detector/delta/negative
+//                           control are not landed, so ⛔ no proposal may leave the carrier for it, and
+//                           this is reported as ITS OWN state (硬规则 3b: it must not look like NOT_MET);
+//      IN_SCOPE             registered AND mechanized — only then are conditions (2)–(4) even consulted.
+// The registry is the single judge; `CONCERN_KIND_IN_SCOPE` is kept only as the identity of the
+// package-cycle entry (and as the structural fallback `deriveConcernKind` still needs).
 
 import fs from "node:fs";
 import path from "node:path";
 
 // ── the entry bar (all four conditions are DATA so a refusal reason is enumerable and testable) ──────
 export const ENTRY_BAR_STREAK = 3;                       // N=3 (§6(c): "require ≥ N consecutive shadow runs")
-export const CONCERN_KIND_IN_SCOPE = "package-cycle";    // §6(a): only the kind with a computable delta
+export const CONCERN_KIND_IN_SCOPE = "package-cycle";    // §6(a) pre-amendment constant — now the identity of
+                                                         // the package-cycle REGISTRY entry, ⛔ not the judge.
 export const CONDITIONS = Object.freeze({
   KIND: "C1_concern_kind",
   DELTA: "C2_computed_delta_falsifiable_control_provenance",
@@ -51,12 +74,21 @@ export const APPROVAL_REQUIRED_LINE =
 const isObj = (x) => x !== null && typeof x === "object" && !Array.isArray(x);
 const isStr = (x, n = 1) => typeof x === "string" && x.trim().length >= n;
 
+/** The second mechanized kind's identity (`CONCERN_KIND_REGISTRY` below). Kept as constants because the
+ *  reader (`deriveConcernKind`) must recognise BOTH spellings: the `concern_kind` field a caller may set,
+ *  and the machine-written `dupKind` token the production findings carrier carries. */
+export const DESIGN_EVOLUTION_KIND = "design-evolution-regression";
+export const DESIGN_EVOLUTION_DUP_KIND = "evolution-regression";
+
 // ── reading a carrier record (STATUS ENUM, never a boolean — 硬规则 3) ───────────────────────────────
 /**
  * The concern kind of a run record.
  * A shadow-carrier record does not carry `concern_kind` as a field, so this derives it STRUCTURALLY:
  *   - `slice_delta` non-null  ⇒ package-cycle — by construction of the loop, a slice is computed ONLY for
  *     `concern_kind === "package-cycle"` (`ownership-active-loop.mjs`, the `computeSliceDelta` guard);
+ *   - a PRODUCTION `.quay/routine-findings.jsonl` record whose `dupKind` is the design-evolution killer's
+ *     machine-written token ⇒ design-evolution-regression (the token is emitted by
+ *     `design-evolution-readings.ts::evolutionFindingRecord`, ⛔ never typed by a model);
  *   - otherwise the loop's envelope already names the kind as a machine-written token
  *     `concern_kind=<kind>` (it is emitted by `toEnvelope`, not typed by the model).
  * @returns {string|null} the kind, or null when it cannot be read (its own state — never "not package-cycle")
@@ -65,6 +97,9 @@ export function deriveConcernKind(rec) {
   if (!isObj(rec)) return null;
   if (isStr(rec.concern_kind, 1)) return rec.concern_kind;
   if (isObj(rec.slice_delta)) return CONCERN_KIND_IN_SCOPE;
+  // The producer's wire token (design-evolution-readings.ts `dupKind`). The suite asserts this constant
+  // still equals what the producer emits — a local copy that drifts would silently stop matching.
+  if (rec.dupKind === DESIGN_EVOLUTION_DUP_KIND) return DESIGN_EVOLUTION_KIND;
   const delta = rec.envelope?.expected_mechanical_delta;
   const m = typeof delta === "string" ? delta.match(/concern_kind=([a-z0-9-]+)/) : null;
   return m ? m[1] : null;
@@ -137,7 +172,236 @@ export function deltaEvidence(rec) {
     provenance_status,
     delta: computed ? sd.delta : null,
     detail: computed ? null : `slice-delta status=${String(sd.status)}${sd.reason ? ` (${sd.reason})` : ""}`,
+    control_detail: `falsified=${JSON.stringify(sd.negative_control?.falsified ?? null)}`,
   };
+}
+
+// ── the design-evolution-regression delta — the SECOND registered kind (amend 2026-10-22) ───────────
+// Detector (already mechanized, ⛔ not built here): `plugin/scripts/design-evolution-readings.ts`
+// appends one `kind:"finding"` record per trigger to `.quay/routine-findings.jsonl` with
+// `dupKind:"evolution-regression"`, and the SAME trigger numbers ride along as `deltaCentral` /
+// `deltaNonCentral` / `deltaDenominator` / `sharePercent`. This reader consumes those NUMBERS: it never
+// parses prose, never trusts the producer's boolean, and never re-derives the delta from the finding's
+// rationale text.
+//
+// CALIBER — DECLARED ONCE, HERE, because the entry must pin one and the two are measurably different:
+//   **净口径 (net line delta)**: `share = centralΔ / (centralΔ + nonCentralΔ)`, computed over the
+//   baseline window the reading declares. ⛔ Not "只计新增". The two calibers differ on the SAME window
+//   (measured: serve 1.31% net vs 2.25% additions-only), so an entry that leaves the caliber unsaid is
+//   not replayable. (The corpus-level caliber correction lives in
+//   `gap-design-evolution-share-caliber-net-vs-additions`; this module only reads the caliber the record
+//   declares, and the record declares NET — that is what `design-evolution-readings.ts` computes.)
+//
+// THE DELTA PREDICATE = the readings' OWN declared trigger boundary, RE-COMPUTED here from the raw
+// numbers (硬规则 2: judge by structure, not by a label):
+//     regression window  ⇔  deltaCentral > 0 ∧ deltaDenominator > 0
+// The declared boundary is load-bearing: `Δdenominator <= 0` is NOT a regression even when Δcentral > 0
+// (a window that only moved lines INTO the central file is not "new code landing in central"), and a
+// repair — new code going to module files instead of the central file — drives Δcentral to ≤ 0, which is
+// exactly the direction that must extinguish the signal.
+export function designEvolutionRegression(rec) {
+  const r = isObj(rec?.design_evolution) ? rec.design_evolution : rec;
+  const missing = ["deltaCentral", "deltaNonCentral", "deltaDenominator"].filter((k) => !Number.isFinite(r?.[k]));
+  if (missing.length) {
+    const trigger = isStr(r?.trigger, 1) ? `trigger=${r.trigger}` : "no trigger";
+    return {
+      evaluated: false,
+      hit: false,
+      target: isStr(r?.target, 1) ? r.target : null,
+      reason: `${trigger}: the record carries no computable window (${missing.join(", ")} not finite) — a trigger with no numbers has no delta to propose on`,
+    };
+  }
+  return {
+    evaluated: true,
+    hit: r.deltaCentral > 0 && r.deltaDenominator > 0,
+    target: isStr(r.target, 1) ? r.target : null,
+    deltaCentral: r.deltaCentral,
+    deltaNonCentral: r.deltaNonCentral,
+    deltaDenominator: r.deltaDenominator,
+    sharePercent: Number.isFinite(r.sharePercent) ? r.sharePercent : null,
+    reason: null,
+  };
+}
+
+/** The BUILT-IN control pair for the predicate above — 硬规则 4 推论二's detection half, borrowed from
+ *  `design-evolution-readings.ts`'s RM2 `predicate-selfcheck-failed` shape. A predicate that cannot say NO
+ *  proves nothing, so before it is allowed to judge a real record it must SEPARATE two samples of known
+ *  sign: one regression window and one repair window. ⛔ Both samples are constants of the PREDICATE, not
+ *  readings: this proves the instrument can tell the two directions apart, it does NOT claim any real
+ *  subsystem regressed. */
+export const DESIGN_EVOLUTION_PREDICATE_SAMPLES = Object.freeze({
+  regression: Object.freeze({ deltaCentral: 288, deltaNonCentral: -6, deltaDenominator: 282, sharePercent: 102.13 }),
+  repaired: Object.freeze({ deltaCentral: -40, deltaNonCentral: 120, deltaDenominator: 80, sharePercent: 60 }),
+});
+
+/** ⇔ the SHARE-UP trigger's predicate is falsifiable. `ok:false` is its own value (never "clean"). */
+export function designEvolutionPredicateSelfCheck() {
+  const up = designEvolutionRegression(DESIGN_EVOLUTION_PREDICATE_SAMPLES.regression);
+  const down = designEvolutionRegression(DESIGN_EVOLUTION_PREDICATE_SAMPLES.repaired);
+  const ok = up.evaluated && up.hit && down.evaluated && down.hit === false;
+  return {
+    ok,
+    regression_hit: up.hit,
+    repaired_hit: down.hit,
+    reason: ok ? null : `predicate-selfcheck-failed: the built-in regression window hit=${up.hit}, the built-in repair window hit=${down.hit} — the predicate cannot separate a regression from a repair, so every verdict it renders is unread`,
+  };
+}
+
+/**
+ * The C2-shaped evidence for a design-evolution reading/finding record. Same four sub-readings as
+ * `deltaEvidence` so `evaluateEntryBar` stays one code path, but each is read from THIS kind's numbers:
+ *   present           the record carries the three window numbers (a `dark-streak` finding does not);
+ *   computed          the record says the window ROSE, re-computed here (a repaired/quiet window is
+ *                     `computed:false` — that is the negative control doing its job, not a producer bug);
+ *   control_falsified the predicate separated the built-in regression/repair pair;
+ *   provenance_match  the window's TWO ends are identified (`readingTs` + `priorReadingTs`) and the
+ *                     target is named — a delta whose comparison cannot be located is not replayable.
+ */
+export function designEvolutionDeltaEvidence(rec) {
+  const r = isObj(rec?.design_evolution) ? rec.design_evolution : rec;
+  const self = designEvolutionPredicateSelfCheck();
+  const empty = { present: false, computed: false, control_falsified: self.ok, provenance_match: false, provenance_status: null, delta: null, control_detail: `predicate-selfcheck=${self.ok}` };
+  if (!isObj(r)) return { ...empty, detail: "no design-evolution reading record" };
+  if (!["deltaCentral", "deltaNonCentral", "deltaDenominator"].some((k) => k in r)) {
+    return { ...empty, detail: "no deltaCentral/deltaNonCentral/deltaDenominator on the record — it carries no design-evolution window (e.g. a dark-streak finding)" };
+  }
+  const pred = designEvolutionRegression(r);
+  const target = isStr(r.target, 1) ? r.target : null;
+  const readingTs = isStr(r.readingTs, 1) ? r.readingTs : null;
+  const priorTs = isStr(r.priorReadingTs, 1) ? r.priorReadingTs : null;
+  const provenance_status = target !== null && readingTs !== null && priorTs !== null ? "match" : "incomplete-window";
+  const delta = pred.evaluated
+    ? { target, trigger: isStr(r.trigger, 1) ? r.trigger : null, deltaCentral: pred.deltaCentral, deltaNonCentral: pred.deltaNonCentral, deltaDenominator: pred.deltaDenominator, sharePercent: pred.sharePercent }
+    : null;
+  const detail = !self.ok
+    ? self.reason
+    : !pred.evaluated
+      ? pred.reason
+      : !pred.hit
+        ? `not-a-regression-window: Δcentral=${r.deltaCentral} Δdenominator=${r.deltaDenominator} — the share did NOT rise (a repaired or quiet window: new code went OUTSIDE the central file), so the signal is extinguished`
+        : null;
+  return {
+    present: true,
+    computed: pred.evaluated && pred.hit,
+    control_falsified: self.ok,
+    provenance_match: provenance_status === "match",
+    provenance_status,
+    delta,
+    detail,
+    control_detail: `predicate-selfcheck=${self.ok}`,
+  };
+}
+
+/** The identity a design-evolution candidate's delta is compared on: the SUBSYSTEM, not the window's
+ *  numbers. Two consecutive rounds of the same regression carry different Δ (each window differs), so a
+ *  numeric fingerprint would break the streak on every round; "the same delta" here means "the same
+ *  subsystem regressing on the same trigger". ⛔ Not the producer's dedup key — that key is the routine
+ *  gate's business, and copying its construction rule here would be a second place to drift. */
+export function designEvolutionFingerprint(rec) {
+  const r = isObj(rec?.design_evolution) ? rec.design_evolution : rec;
+  const target = isStr(r?.target, 1) ? r.target : null;
+  if (target === null) return null;
+  return deltaFingerprint({ target, trigger: isStr(r?.trigger, 1) ? r.trigger : null });
+}
+
+// ── the concern-kind REGISTRY (amend 2026-10-22) — the ONE judge for condition (1) ────────────────────
+/** The four condition-(1) states. ⛔ Each is distinct: "not a registered kind" and "registered but its
+ *  detector is not landed" must never share a shape (硬规则 3b). */
+export const CONCERN_KIND_STATES = Object.freeze({
+  IN_SCOPE: "in-scope",
+  NOT_MET: "not-in-scope",
+  NOT_YET_MECHANIZED: "not-yet-mechanized",
+  UNDETERMINED: "undetermined",
+});
+
+/**
+ * The registry. Each entry carries the five fields the amendment pins, plus the kind's own readers:
+ *   kind                 the token `deriveConcernKind` produces;
+ *   detector             WHERE the mechanism that produces the concern lives (a path + function, never a
+ *                        prose promise) — for a not-yet-mechanized kind, the task that must land it;
+ *   deltaComputable      is there a COMPUTABLE delta, not a model-asserted one?
+ *   negativeControl      is there a direction in which the signal must go DARK (a real falsifier)?
+ *   occurrenceThreshold  how many times the concern must have OCCURRED before a proposal may leave the
+ *                        carrier (DIR-133 ruling 1: 2). ⛔ Read by `evaluateEntryBar` — never a literal;
+ *   mechanized           are the three above actually LANDED? false ⇒ NOT_YET_MECHANIZED, ⛔ not admission.
+ * A new kind may only flip `mechanized` to true when it brings all three: a detector, a computable
+ * falsifiable delta, and a negative control that is demonstrated to extinguish the signal. Widening the
+ * string without them is "making the prose rule longer", not making the driver stronger (ADR-004).
+ */
+export const CONCERN_KIND_REGISTRY = Object.freeze([
+  Object.freeze({
+    kind: CONCERN_KIND_IN_SCOPE,
+    detector: "ArchGuard slice-delta (installed CLI, computed) — ownership-active-loop.mjs computeSliceDelta + .quay/ownership-shadow-proposals.jsonl",
+    deltaComputable: true,
+    negativeControl: true,
+    negativeControlDetail: "the slice's restore_edges make the primitive report falsified=true; an unfalsifiable cut is refused at C2",
+    occurrenceThreshold: 2,
+    mechanized: true,
+    deltaCaliber: "ArchGuard slice-delta: before/after SCC members + removed_edges",
+    readDelta: deltaEvidence,
+    fingerprintOf: (rec) => deltaFingerprint(rec?.slice_delta?.delta),
+  }),
+  Object.freeze({
+    kind: DESIGN_EVOLUTION_KIND,
+    detector: "plugin/scripts/design-evolution-readings.ts evolutionFindings() → .quay/routine-findings.jsonl (dupKind=evolution-regression, trigger=share-up)",
+    deltaComputable: true,
+    negativeControl: true,
+    negativeControlDetail: "built-in regression/repair sample pair (designEvolutionPredicateSelfCheck) + a repaired window (Δcentral<=0 ∨ Δdenominator<=0) makes the same predicate return hit=false",
+    occurrenceThreshold: 2,
+    mechanized: true,
+    deltaCaliber: "net line delta: share = centralΔ/(centralΔ+nonCentralΔ) over the record's baseline window; regression window ⇔ deltaCentral>0 ∧ deltaDenominator>0",
+    readDelta: designEvolutionDeltaEvidence,
+    fingerprintOf: designEvolutionFingerprint,
+  }),
+  Object.freeze({
+    kind: "spine-without-extension-point",
+    detector: "NOT LANDED — the detector is tasks/gap-worker-fan-in-cross-cutting-hooks-not-covered-by-extension-point (ready). Until its extension point registry lands there is no machine-readable signal to admit on",
+    deltaComputable: false,
+    negativeControl: false,
+    negativeControlDetail: null,
+    occurrenceThreshold: null,
+    mechanized: false,
+    deltaCaliber: null,
+    readDelta: null,
+    fingerprintOf: null,
+  }),
+  Object.freeze({
+    kind: "god-file-size",
+    detector: "NOT LANDED — no detector exists AND the EVENT is undefined (what counts as one occurrence of 'a god file'?). A line-count threshold is 硬规则 4 推论's forbidden zone until that definition plus a historical occurrence reading exist, so this task registers the SLOT only",
+    deltaComputable: false,
+    negativeControl: false,
+    negativeControlDetail: null,
+    occurrenceThreshold: null,
+    mechanized: false,
+    deltaCaliber: null,
+    readDelta: null,
+    fingerprintOf: null,
+  }),
+]);
+
+/** Look a kind up. Returns the entry, or null when the kind is not registered. */
+export function concernKindEntry(kind, registry = CONCERN_KIND_REGISTRY) {
+  if (!isStr(kind, 1) || !Array.isArray(registry)) return null;
+  return registry.find((e) => e.kind === kind) ?? null;
+}
+
+/**
+ * Resolve a kind to ONE of the four condition-(1) states, plus the entry (null unless registered).
+ * `token` names WHICH kind got WHICH state (`in-scope:package-cycle`), so two kinds sharing a state are
+ * still distinguishable in one reading — a bare state string would make them look identical.
+ * @returns {{state:string, token:string, kind:string|null, entry:object|null}}
+ */
+export function concernKindState(kind, registry = CONCERN_KIND_REGISTRY) {
+  const unreadable = !isStr(kind, 1);
+  const entry = unreadable ? null : concernKindEntry(kind, registry);
+  const state = unreadable
+    ? CONCERN_KIND_STATES.UNDETERMINED
+    : entry === null
+      ? CONCERN_KIND_STATES.NOT_MET
+      : entry.mechanized === true
+        ? CONCERN_KIND_STATES.IN_SCOPE
+        : CONCERN_KIND_STATES.NOT_YET_MECHANIZED;
+  return { state, token: `${state}:${unreadable ? "unreadable" : kind}`, kind: unreadable ? null : kind, entry };
 }
 
 /** A production (non-replay) live run. The BLIND/benchmark replays must never enter the streak. */
@@ -176,29 +440,50 @@ export function deltaFingerprint(delta) {
  *    through an unverified layer — 硬规则 4b). The last element IS the latest run.
  *
  * @param {Array<object>} carrierRecords  the run records for one candidate, oldest first
- * @returns {{eligible:boolean, reason:string, matchedConditions:string[], conditions:object, streak:{length:number, required:number, delta_fingerprint:string|null}}}
+ * @param {{registry?:Array<object>}} [opts]  the registry to judge against (defaults to
+ *        `CONCERN_KIND_REGISTRY`). Injectable so a caller — and the suite — can pin a DIFFERENT
+ *        `occurrenceThreshold` and see the judgment move, i.e. prove the field is read rather than declared.
+ * @returns {{eligible:boolean, reason:string, matchedConditions:string[], conditions:object, streak:{length:number, required:number, occurrences:number, occurrence_threshold:number|null, delta_fingerprint:string|null}}}
  */
-export function evaluateEntryBar(carrierRecords) {
+export function evaluateEntryBar(carrierRecords, opts = {}) {
+  const registry = Array.isArray(opts?.registry) ? opts.registry : CONCERN_KIND_REGISTRY;
   const records = Array.isArray(carrierRecords) ? carrierRecords.filter(isObj) : [];
-  const mismatch = (reason, conditions = {}) => ({ eligible: false, reason, matchedConditions: [], conditions, streak: { length: 0, required: ENTRY_BAR_STREAK, delta_fingerprint: null } });
+  const mismatch = (reason, conditions = {}) => ({ eligible: false, reason, matchedConditions: [], conditions, streak: { length: 0, required: ENTRY_BAR_STREAK, occurrences: 0, occurrence_threshold: null, delta_fingerprint: null } });
   if (records.length === 0) return mismatch("CONDITION_1_NOT_MET:no carrier records supplied for this candidate — nothing to evaluate");
 
   const ordered = [...records];   // append order == chronology (see the doc comment above)
   const head = ordered[ordered.length - 1];
   const matched = [];
 
-  // (1) concern_kind
-  const kind = deriveConcernKind(head);
-  if (kind === null) return mismatch(`CONDITION_1_UNDETERMINED:the concern_kind of the latest record could not be read (no concern_kind field, no slice_delta, no machine-written concern_kind=<kind> token)`);
-  if (kind !== CONCERN_KIND_IN_SCOPE) return mismatch(`CONDITION_1_NOT_MET:concern_kind=${kind} — only ${CONCERN_KIND_IN_SCOPE} has a computable, falsifiable delta (§6(a)); other kinds stay in shadow`);
+  // (1) concern_kind — a REGISTRY lookup, and FOUR states, not two (amend 2026-10-22).
+  const kindReading = concernKindState(deriveConcernKind(head), registry);
+  const kind = kindReading.kind;
+  if (kindReading.state === CONCERN_KIND_STATES.UNDETERMINED) return mismatch(`CONDITION_1_UNDETERMINED:the concern_kind of the latest record could not be read (no concern_kind field, no slice_delta, no dupKind, no machine-written concern_kind=<kind> token)`);
+  if (kindReading.state === CONCERN_KIND_STATES.NOT_MET) {
+    return mismatch(`CONDITION_1_NOT_MET:concern_kind=${kind} — not a registered concern kind (CONCERN_KIND_REGISTRY: ${registry.map((e) => e.kind).join(", ")}); as amended 2026-10-22 only registered+mechanized kinds are admitted, and unregistered kinds stay in shadow (§6(a))`);
+  }
+  if (kindReading.state === CONCERN_KIND_STATES.NOT_YET_MECHANIZED) {
+    // 硬规则 3b: this is ITS OWN value. A registered kind whose detector has not landed must not be
+    // reported the same way as one that is out of scope — the difference is "wait for a task", not "no".
+    return mismatch(`CONDITION_1_NOT_YET_MECHANIZED:concern_kind=${kind} — registered in CONCERN_KIND_REGISTRY but mechanized=false: ${kindReading.entry.detector}. With no landed detector/delta/negative control, nothing may leave the carrier for this kind`);
+  }
+  const entry = kindReading.entry;
   matched.push(CONDITIONS.KIND);
 
-  // (2) the delta: computed by ArchGuard, falsifiable control, provenance match
-  const d = deltaEvidence(head);
-  if (!d.present) return withMatched(mismatch(`CONDITION_2_NOT_MET:${d.detail} — the delta is not computed by the ArchGuard slice-delta primitive`), matched);
+  // A registry entry that claims `mechanized:true` but carries no readers is an INSTRUMENT failure, not a
+  // failed measurement (硬规则 3b) — its own value, ⛔ never "the delta is not computed".
+  const readDelta = typeof entry.readDelta === "function" ? entry.readDelta : null;
+  const fingerprintOf = typeof entry.fingerprintOf === "function" ? entry.fingerprintOf : null;
+  if (readDelta === null || fingerprintOf === null) {
+    return withMatched(mismatch(`CONDITION_2_UNDETERMINED:concern_kind=${kind} is registered with mechanized=true but its CONCERN_KIND_REGISTRY entry has no ${readDelta === null ? "readDelta" : "fingerprintOf"} reader — a malformed entry cannot judge anything`), matched);
+  }
+
+  // (2) the delta: computed by the KIND'S OWN detector, falsifiable control, identifiable window
+  const d = readDelta(head);
+  if (!d.present) return withMatched(mismatch(`CONDITION_2_NOT_MET:${d.detail} — the delta is not computed by the detector for concern_kind=${kind} (${entry.detector})`), matched);
   if (!d.computed) return withMatched(mismatch(`CONDITION_2_NOT_MET:the delta is not computed (${d.detail}) — a declared/estimated delta may not leave the carrier (§6(a))`), matched);
-  if (!d.control_falsified) return withMatched(mismatch(`CONDITION_2_NOT_MET:the negative control is not falsified (falsified=${JSON.stringify(head.slice_delta?.negative_control?.falsified ?? null)}) — an unfalsifiable delta proves nothing`), matched);
-  if (!d.provenance_match) return withMatched(mismatch(`CONDITION_2_NOT_MET:provenanceConsistency=${String(d.provenance_status)} — the analysed graph is not shown to come from the commit the proposal cites`), matched);
+  if (!d.control_falsified) return withMatched(mismatch(`CONDITION_2_NOT_MET:the negative control is not falsified (${d.control_detail ?? `falsified=${JSON.stringify(head.slice_delta?.negative_control?.falsified ?? null)}`}) — an unfalsifiable delta proves nothing`), matched);
+  if (!d.provenance_match) return withMatched(mismatch(`CONDITION_2_NOT_MET:provenanceConsistency=${String(d.provenance_status)} — the delta is not shown to have been computed from the windows the proposal cites`), matched);
   matched.push(CONDITIONS.DELTA);
 
   // (3) decision memory: a recorded exemption or a known-but-unfiled item must NOT be repackaged as a Goal.
@@ -218,26 +503,50 @@ export function evaluateEntryBar(carrierRecords) {
   if (memory !== "not-known") return withMatched(mismatch(`CONDITION_3_UNDETERMINED:decision_memory status ${JSON.stringify(memory)} is not a recognised verdict`), matched);
   matched.push(CONDITIONS.MEMORY);
 
-  // (4) run-streak: the MOST RECENT N production runs must all clear (1)–(3) with the SAME delta
-  const fingerprint = deltaFingerprint(head.slice_delta.delta);
+  // (4) run-streak: the MOST RECENT N production runs must all clear (1)–(3) with the SAME delta, AND
+  //     the concern must have OCCURRED at least `entry.occurrenceThreshold` times (the registry's field —
+  //     DIR-133 ruling 1). The two floors measure different things and are both required:
+  //       streak      — CONSECUTIVE qualifying production runs ending at the head (§6(c));
+  //       occurrences — qualifying production runs ANYWHERE in the slice (a [hit, miss, hit] slice has
+  //                     occurrences=2 but streak=1), i.e. "how often has this concern actually happened".
+  const fingerprint = fingerprintOf(head);
+  const qualifies = (r) => {
+    if (deriveConcernKind(r) !== kind) return false;
+    const rd = readDelta(r);
+    return rd.computed && rd.control_falsified && rd.provenance_match && fingerprintOf(r) === fingerprint;
+  };
   let streak = 0;
   for (let i = ordered.length - 1; i >= 0; i--) {
-    const r = ordered[i];
     // A replay / holdout record is NOT a production run — it neither counts toward the streak nor breaks
     // it (§6(c) counts production live runs). The first PRODUCTION run that fails to qualify ends it.
-    if (!isProductionRun(r)) continue;
-    if (deriveConcernKind(r) !== CONCERN_KIND_IN_SCOPE) break;
-    const rd = deltaEvidence(r);
-    if (!rd.computed || !rd.control_falsified || !rd.provenance_match) break;
-    if (deltaFingerprint(r.slice_delta?.delta) !== fingerprint) break;
+    if (!isProductionRun(ordered[i])) continue;
+    if (!qualifies(ordered[i])) break;
     streak++;
   }
-  const streakReading = { length: streak, required: ENTRY_BAR_STREAK, delta_fingerprint: fingerprint };
-  if (streak < ENTRY_BAR_STREAK) {
-    return { eligible: false, reason: `CONDITION_4_NOT_MET:run_streak=${streak}/${ENTRY_BAR_STREAK} — ${streak} consecutive production run(s) carry the same computed, falsifiable delta; a one-off fluctuation must not trigger a proposal (§6(c))`, matchedConditions: matched, conditions: { kind, delta: d, memory }, streak: streakReading };
+  const occurrences = ordered.filter((r) => isProductionRun(r) && qualifies(r)).length;
+  const occurrenceThreshold = Number.isFinite(entry.occurrenceThreshold) ? entry.occurrenceThreshold : null;
+  const occurrenceShort = occurrenceThreshold !== null && occurrences < occurrenceThreshold;
+  const streakReading = { length: streak, required: ENTRY_BAR_STREAK, occurrences, occurrence_threshold: occurrenceThreshold, delta_fingerprint: fingerprint };
+  if (streak < ENTRY_BAR_STREAK || occurrenceShort) {
+    const failures = [];
+    if (streak < ENTRY_BAR_STREAK) failures.push(`run_streak=${streak}/${ENTRY_BAR_STREAK}`);
+    if (occurrenceShort) failures.push(`occurrences=${occurrences}/${occurrenceThreshold} (CONCERN_KIND_REGISTRY occurrenceThreshold for concern_kind=${kind})`);
+    return {
+      eligible: false,
+      reason: `CONDITION_4_NOT_MET:${failures.join("; ")} — ${streak} consecutive production run(s) carry the same computed, falsifiable delta; a one-off fluctuation must not trigger a proposal (§6(c), DIR-133 ruling 1)`,
+      matchedConditions: matched,
+      conditions: { kind: kindReading, delta: d, memory },
+      streak: streakReading,
+    };
   }
   matched.push(CONDITIONS.STREAK);
-  return { eligible: true, reason: `ELIGIBLE:concern_kind=${CONCERN_KIND_IN_SCOPE}; computed falsifiable delta; provenanceConsistency=match; decision_memory=not-known; run_streak=${streak}/${ENTRY_BAR_STREAK}`, matchedConditions: matched, conditions: { kind, delta: d, memory }, streak: streakReading };
+  return {
+    eligible: true,
+    reason: `ELIGIBLE:concern_kind=${kind} (detector=${entry.detector}); computed falsifiable delta (${entry.deltaCaliber}); provenanceConsistency=match; decision_memory=not-known; run_streak=${streak}/${ENTRY_BAR_STREAK}; occurrences=${occurrences}/${String(occurrenceThreshold)}`,
+    matchedConditions: matched,
+    conditions: { kind: kindReading, delta: d, memory },
+    streak: streakReading,
+  };
 }
 
 const withMatched = (verdict, matched) => ({ ...verdict, matchedConditions: matched });
@@ -427,7 +736,11 @@ export function renderReviewSection(reviewResult) {
  */
 export function buildDraftGoal(eligibleRecord, { goalId, acId, review = null }) {
   const kind = deriveConcernKind(eligibleRecord) ?? "unknown";
-  const delta = eligibleRecord.slice_delta?.delta ?? null;
+  // The delta is read through the KIND'S OWN registry reader — the body may not describe a
+  // design-evolution candidate with package-cycle's vocabulary (it has no slice and no ArchGuard delta).
+  const entry = concernKindEntry(kind);
+  const evidence = typeof entry?.readDelta === "function" ? entry.readDelta(eligibleRecord) : null;
+  const delta = evidence?.delta ?? eligibleRecord.slice_delta?.delta ?? null;
   const evidenceIds = [
     ...(Array.isArray(eligibleRecord.envelope?.evidence_refs) ? eligibleRecord.envelope.evidence_refs : []),
     ...(Array.isArray(eligibleRecord.evidence) ? eligibleRecord.evidence.map((e) => e.id).filter(Boolean) : []),
@@ -437,18 +750,18 @@ export function buildDraftGoal(eligibleRecord, { goalId, acId, review = null }) 
   const renderedDelta = isStr(eligibleRecord.envelope?.expected_mechanical_delta, 1)
     ? eligibleRecord.envelope.expected_mechanical_delta
     : JSON.stringify(delta, null, 1);
-  const title = `[auto-proposal] ${kind} 收敛候选：${(files.length ? files.join(", ") : eligibleRecord.concern_key || "unlabelled candidate").slice(0, 90)}`;
+  const title = `[auto-proposal] ${kind} 收敛候选：${(files.length ? files.join(", ") : eligibleRecord.concern_key || eligibleRecord.target || "unlabelled candidate").slice(0, 90)}`;
 
   const origin = [
     `自动投研机制产出的候选（ownership-active limited-proposal mode, 端到端架构自举实验 阶段 C）。`,
     `证据载体 .quay/ownership-shadow-proposals.jsonl；run_id=${eligibleRecord.run_id ?? "n/a"}；commit=${eligibleRecord.commit ?? "n/a"}。`,
-    `准入判据 evaluateEntryBar 四条全过：concern_kind=package-cycle；delta 由 ArchGuard slice-delta 原语计算且负对照已证伪、provenanceConsistency=match；决策记忆=not-known；连续 ${ENTRY_BAR_STREAK} 次生产 live run 一致。`,
+    `准入判据 evaluateEntryBar 四条全过：concern_kind=${kind}（探测器：${entry?.detector ?? "unregistered"}）；delta 由 ${entry?.deltaCaliber ?? "该 kind 的探测器"} 计算且负对照已证伪；决策记忆=not-known；连续 ${ENTRY_BAR_STREAK} 次生产 live run 一致，出现次数 ≥ CONCERN_KIND_REGISTRY occurrenceThreshold。`,
     `人在审批前不得把本 Goal 转 active——这是本机制唯一的合法终态。`,
   ].join("\n");
 
   const body = [
     "## 背景",
-    `本候选由「ownership-active limited-proposal mode」从生产 live shadow run 的 carrier 记录中筛出，是端到端架构自举实验阶段 C 的第一个（也是唯一的）自动产出物。它只声明一个 ${kind} 的收敛 slice，不承诺任何实现方式。`,
+    `本候选由「ownership-active limited-proposal mode」从生产 live shadow run 的 carrier 记录中筛出，是端到端架构自举实验阶段 C 的自动产出物之一。它只声明一个 ${kind} 的收敛改动面，不承诺任何实现方式。`,
     "",
     "## 证据链",
     `- carrier：.quay/ownership-shadow-proposals.jsonl`,
@@ -458,18 +771,18 @@ export function buildDraftGoal(eligibleRecord, { goalId, acId, review = null }) 
     `- 引用的证据读数 id：[${uniqueEvidence.join(", ")}]`,
     `- 决策记忆：not-known（无命中条目）`,
     "",
-    "## 预测 delta（由 ArchGuard slice-delta 原语计算，非模型自述）",
+    `## 预测 delta（由 ${entry?.deltaCaliber ?? "该 kind 的探测器"} 计算，非模型自述）`,
     renderedDelta,
-    `- 负对照：falsified=true；provenanceConsistency=match`,
+    `- 负对照：${evidence?.control_detail ?? "falsified=true"}；provenanceConsistency=${evidence?.provenance_status ?? "match"}`,
     "",
     ...(review ? ["", "## 领域归属审查（advisory；不改变准入判据）", ...renderReviewSection(review)] : []),
     "",
     "## 范围与非目标",
-    `- 在范围内：${kind} 候选本身声明的 slice（见上 delta）。`,
-    "- 非目标：任何未在 slice 中命名的改动；任何产物化/长期保证；任何把本 Goal 自行转 active 的动作。",
+    `- 在范围内：${kind} 候选本身声明的改动面（见上 delta）。`,
+    "- 非目标：任何未在 delta 中命名的改动；任何产物化/长期保证；任何把本 Goal 自行转 active 的动作。",
     "",
     "## 可逆性评估",
-    `本候选的全部改动都落在一个 package-cycle 的 slice 上，且以独立的 goal 分支（goal/<本 Goal id>）承载：若人裁定否决，整条分支可直接丢弃，develop 无残留——与本仓库既有的「整分支丢弃」先例同形。因此本候选的代价是可逆的，不需要在审批前做任何预防性回退。`,
+    `本候选的改动以独立的 goal 分支（goal/<本 Goal id>）承载：若人裁定否决，整条分支可直接丢弃，develop 无残留——与本仓库既有的「整分支丢弃」先例同形。因此本候选的代价是可逆的，不需要在审批前做任何预防性回退。`,
     "",
     "## 退出条件",
     `${acId} —— 本 Goal 离开 draft（active=认可；superseded=否决）即视为已裁定。`,

@@ -159,18 +159,33 @@ Quay 现阶段的重构应该优先把"状态/决策/副作用/编排四件事�
 光抽代码、不建扩展点，新功能的落点就不会变。第 3 节「有第二个真实实例时才升格为模式」仍然成立，本节不推翻它，
 只补一条：**被拆的那个中心如果是「每加一种 X 就要改它」的形状，拆分的验收就必须写明「下一个 X 加在哪」。**
 
-### 13.1 三组读数（每个数都附载体与基线）
+### 13.1 读数（每个数都附载体与基线；**同一窗口两种口径**）
 
-| 子系统 | 重构形状 | 读数 | 载体 / 命令 |
-|---|---|---|---|
-| quay serve | 按关注点拆分 **+ 分发器（扩展点）** | 中心文件增长占比 **1%**（10-22T00:40Z 记录：中心 +153 / 非中心 +11,534，即 1.31%；基线 `295e771b0` → HEAD） | `.quay/design-evolution-history.jsonl`（gitignored，主检出）；复跑 `node --experimental-strip-types plugin/scripts/design-evolution-readings.ts --no-history --json` |
-| quay worker | 抽出一块区域（`2440b52d0`，`worker-fan-in.ts`），**没有扩展点** | **82%**（`worker-history`，基线 `2440b52d0` → `ff32d031d`，即 GOAL-909 动手前；中心 +4,820 / 非中心 +1,025 = 82.46%，同一条 10-22T00:40Z 记录） | 同上；统一公式与口径更正见 `tasks/DIR-133.md`「口径更正（2026-10-22）」。**DIR-133 早先的「88%」作废**（漏算分母，只计了新增模块） |
-| quay worker（另一窗口） | 同上，但窗口跨过 GOAL-909 的搬家提交 | **约 70%**（10-21T23:14Z 记录：基线 `2440b52d0` → HEAD `5c74f38f2`，中心 +4,420 / 非中心 +1,897 = 69.97%）；2026-10-22 对 HEAD `584e10c60` 复跑得 70.77% | 同上。这个窗口把 GOAL-909 本身的搬出量算进了分母，所以读数偏低；config 因此把 `worker-history` 钉在 `ff32d031d`。**两个数各对应自己的基线，不能互相替换** |
-| plantuml-js `ElkLayoutEngine` | `gap-elk-layout-engine-split-responsibilities`：拆成 layers / elk-graph / elk-result，**没写扩展点判据** | 数值 AC 全过：`elk.ts` 570 → **150** 行（`76d1808`，10-22 00:58 +0800），类级 `outDegree` 9（≤11）、methodCount 3（≤8）。此后 8 个改动 `elk.ts` 的布局/渲染功能提交又把 `elk.ts` 长回 **278** 行（`1eb90a0`，06:47），summary 口径的 call 出度 **26**（探针当时 23），methodCount 15 | plantuml-js `tasks/gap-elk-layout-engine-split-responsibilities.md`「执行证据」；`tasks/gap-elk-layout-strategy-extension-point.md` Proposal；`git show <rev>:src/layout/elk.ts \| wc -l`；会话 `69ce95b8` 中 Claude 的原话：「上一轮我立的拆分任务没写扩展点判据，结果就是文件短了、出度反而升了」 |
+**两种口径，正本 = `plugin/scripts/design-evolution-readings.ts` 的字段名**（⛔ 不要另起一套叫法；
+任务 `gap-design-evolution-share-caliber-net-vs-additions` 之前本文误把 quay 口径写成「只计新增」）：
 
-**读法**：serve 与 worker 的区别在于有没有扩展点，而不在拆没拆（DIR-133 F3）。plantuml-js 一例把这件事压缩到 6 小时内：
-拆分当时数值全绿，接下来的功能增长又全部落回 `ElkLayoutEngine`。随后的 `gap-elk-layout-strategy-extension-point`
-（`134934a`，done）才给出「从外部注入合成策略、不改 `src/layout/elk.ts` 即生效 + 抛错负对照」的判据。
+- **`netShare`**（记录键名 `share`，旁边带 `shareBasis: "net"`）= 中心文件**行数净差** ÷（中心净差 + 非中心净差）。
+  窗口两端 `wc -l` 相减。两个后果：纯搬出提交让中心净减少（**负**的中心增量，会**抵消**随后的长回，
+  「先搬走再长回来」和「根本没搬」在净口径下同形）；非中心文件净减少时分母可以小于分子 ⇒ **占比可以 >100%**。
+- **`additionsShare`** = `git diff --numstat` 的**新增行**（窗口两端聚合；`-M` rename 检测开启 ⇒ 纯搬家计 0 新增）÷
+  （中心新增 + 非中心新增）。两个性质：**结构上 ≤100%**（两项都是非负计数）；与 claudecodeui 会话的
+  additions-only 口径**可比**（这也是本文此前写「只计新增」的来源——那个数当时并不存在，代码一直算的是净口径）。
+- 两者是**同一个窗口的两个数**：⛔ 不可互引，也不可引用对方的数值作基线；引用任一都必须**连口径一起写**。
+
+| 子系统 | 重构形状 | `netShare`（净口径） | `additionsShare`（只计新增） | 载体 / 命令 |
+|---|---|---|---|---|
+| serve | 按关注点拆分 **+ 分发器（扩展点）** | **1.31%**（中心 +153 / 分母 11,687；基线 `295e771b0` → HEAD） | **2.32%**（349 / 15,038） | `.quay/design-evolution-history.jsonl`（gitignored，主检出）；复跑 `node --experimental-strip-types plugin/scripts/design-evolution-readings.ts --no-history --json` |
+| worker-history | 抽出一块区域（`2440b52d0`，`worker-fan-in.ts`），**没有扩展点** | **82.46%**（4,820 / 5,845；基线 `2440b52d0` → `ff32d031d`，即 GOAL-909 动手前） | **79.70%**（5,210 / 6,537） | 同上；统一公式与口径更正见 `tasks/DIR-133.md`「口径更正（2026-10-22）」。**DIR-133 早先的「88%」作废**（漏算分母，只计了新增模块） |
+| worker-post-909 | 同上，窗口从 GOAL-909 最后一次落地提交（`024f9d7f2`）起 | **102.13%**（288 / 282 —— 非中心**净 −6**，分母小于分子，见上） | **93.81%**（288 / 307） | 同上。⚠️ 这一行就是「净口径会产出不可解释读数」的实例：**同一窗口**只计新增时是 93.81%，**恒 ≤100%** |
+| quay worker（另一个窗口） | 同上，但窗口跨过 GOAL-909 的搬家提交 | **约 70%**（10-21T23:14Z 记录：基线 `2440b52d0` → HEAD `5c74f38f2`，中心 +4,420 / 非中心 +1,897 = 69.97%）；2026-10-22 对 HEAD `584e10c60` 复跑得 70.77% | 该窗口已整体退役（config 把 `worker-history` 钉在 `ff32d031d`），只保留净口径历史值 | 同上。这个窗口把 GOAL-909 本身的搬出量算进了分母，所以读数偏低。**两个数各对应自己的基线，不能互相替换** |
+| plantuml-js `ElkLayoutEngine` | `gap-elk-layout-engine-split-responsibilities`：拆成 layers / elk-graph / elk-result，**没写扩展点判据** | 该仓**未接入本载体**⇒ 缺（⛔ 不要把这行的数与 quay 的两个口径并排当同一量）：`elk.ts` 570 → **150** 行（`76d1808`，10-22 00:58 +0800），类级 `outDegree` 9（≤11）、methodCount 3（≤8）；此后 8 个改动 `elk.ts` 的布局/渲染功能提交又把 `elk.ts` 长回 **278** 行（`1eb90a0`，06:47），summary 口径的 call 出度 **26**（探针当时 23），methodCount 15 | 缺（同左，该仓无本载体） | plantuml-js `tasks/gap-elk-layout-engine-split-responsibilities.md`「执行证据」；`tasks/gap-elk-layout-strategy-extension-point.md` Proposal；`git show <rev>:src/layout/elk.ts \| wc -l`；会话 `69ce95b8` 中 Claude 的原话：「上一轮我立的拆分任务没写扩展点判据，结果就是文件短了、出度反而升了」 |
+
+**读法**：serve 与 worker 的区别在于有没有扩展点，而不在拆没拆（DIR-133 F3）。**两种口径在 serve / worker-history
+上给出同方向的结论**（1.31% vs 2.32%、82.46% vs 79.70%——方向一致、数值不同），所以「方向结论不变」；
+但 `worker-post-909` 的净口径读数 102.13% 是**口径产物**而不是「回流特别严重」，引用时必须用 `netShare`/`additionsShare`
+同时说明。plantuml-js 一例把这件事压缩到 6 小时内：拆分当时数值全绿，接下来的功能增长又全部落回 `ElkLayoutEngine`。
+随后的 `gap-elk-layout-strategy-extension-point`（`134934a`，done）才给出「从外部注入合成策略、不改 `src/layout/elk.ts`
+即生效 + 抛错负对照」的判据。
 ⚠️ 口径提示：「出度 23 → 26」比较的是 archguard summary 的 `topByOutDegree`（方法级关系计数），
 不是拆分 AC 用的 cognitive summary 类级 `outDegree`（落地时 9）。两个口径不可混比，这里只取同口径的 23 → 26。
 
@@ -179,20 +194,43 @@ Quay 现阶段的重构应该优先把"状态/决策/副作用/编排四件事�
 | 级 | 名称 | 改变了什么 | 低一级满足不了的 Π 检查 | 实例 |
 |---|---|---|---|---|
 | R0 | 搬家（relocation） | 只改分区/目录边 | **目录级环**：GOAL-910 AC-916（`packages/quay/src` 目录级 SCC = 0） | `e7e84366a`（serve* 搬进 `src/serve/`）+ `d21a018aa`（observation 拆进子目录）在 10-21 16:26–16:27Z 造出 `{., observation, serve}` 环。plantuml-js 反方向：`4327862` 沉核心后环仍在，`feba9f3` 再搬一次才断 |
-| R1 | 提取（extraction） | 改边，不改增长方向 | **call 出度**（同一口径前后比） | quay worker `2440b52d0`；plantuml-js elk 拆分 |
-| R2 | 扩展点（extension point） | 改增长方向 | **中心增长占比**——只能**事后**在后续功能上判，落地当时测不出 | quay serve 分发器；quay AC-915（WorkerPool 结局处理单元可从外部注册）；plantuml-js 策略注入 |
+| R1 | 提取（extraction） | 改边，**不改增长方向** | **窗口增长落点占比**（`netShare` / `additionsShare`）——与 R2 同一个判据；⚠️ call 出度**不是**判据，只是**签名**（见下） | quay worker `2440b52d0`；plantuml-js elk 拆分（出度 23→26，**上升**） |
+| R2 | 扩展点（extension point） | **改增长方向** | **中心增长占比**（`netShare` / `additionsShare` 两口径并记，§13.1）——只能**事后**在后续功能上判，落地当时测不出 | quay serve 分发器；quay AC-915（WorkerPool 结局处理单元可从外部注册）；plantuml-js 策略注入 |
 | R3 | 所有权收敛（ownership consolidation） | 一处定义、调用方改口 | **重复组数 / 定义点数**（本文第 10 节 duplicate disappearance、canonical definition count） | GOAL-030/031/032 |
+
+**R1 与 R2 的判据是同一个：窗口增长落点占比。出度不是判据，是签名（2026-10-22 更正）。**
+本文此前把 R1 的 Π 写成「call 出度（同口径前后比）」，暗示**纯提取会让出度下降**——跨三个代码库的实测**方向相反**：
+
+| 签名 | 出度方向 | 实例（同口径前后比） | 这一刀实际是什么 |
+|---|---|---|---|
+| 纯提取（R1） | **上升** | claudecodeui hook 38 → 56；plantuml-js elk 23 → 26 | 中心仍然调用被搬走的符号，**又多出 import 边** ⇒ 出度只增不减 |
+| 注册表式扩展点（R2） | **下降** | claudecodeui driver 203 → 187（−16） | 中心把 N 条分支换成一次注册表调用，边真的塌掉了 |
+| dispatch 缝（缝签名，**不算 R2**） | 持平 | claudecodeui ws-proxy 65 → 66 | 建了 register/dispatch，但帧处理边大多留在**同文件的兄弟函数**里 ⇒ 没有塌边。2026-10-22 复核：这一刀归「缝」 |
+| 断边 / 依赖倒置 | 不适用 | claudecodeui 刀5：**环 8 → 7** | 只断依赖，不改增长方向 ⇒ 用**环数**做签名 |
+
+⇒ **出度只能当签名读**：上升 = 提取留下了调用边（正常），下降 = 真把 N 条边收进了一条（R2 的形状），持平 = 缝。
+**R1/R2 的判读永远回到「下一個 X 加在哪」**（`netShare` / `additionsShare` 两口径并记），⛔ 不要用出度方向给一刀定级。
+claudecodeui 因此**目前干净的 R2 样本只有 driver 那一个**（203→187）；hook 是 R1（38→56）；刀5 是断边（环 8→7）。
+
+**扩展点只盖叶子、不盖主干（2026-10-22 增补）**。叶子注册表（「结局怎么处理」「这一帧走哪个 handler」）不改变
+**编排主干步骤**的落点：主干每一步仍然写着 `if/for`，新功能仍然要改中心文件。两个实例：
+① **quay worker**——GOAL-909 的 `WorkerPool` 只覆盖「结局处理」这一类，派发决策与派发执行仍在 `runResidentLoop` 里，
+它的 call 出度**仍是 84**（§13.4 的读数），所以 §13.4 的样本外预测仍按「回流中心 ≥50%」登记；
+② **claudecodeui driver**——注册表只盖 handler 叶子，主干编排步骤没动，出度才下降得动那 16 条（不是更多）。
+⇒ 拆分的验收要写明「下一个 X 加在哪**一层**」：只盖叶子的扩展点，落点判据必须看**主干步骤**有没有跟着搬。
 
 每一级都要用它自己的 Π 检查来验，低一级的检查证明不了高一级：R1 的行数/方法数全绿，证明不了 R2（plantuml-js）；
 R0 的目录环为 0，证明不了 R1。R2 的检查天生滞后，所以 R2 的**落地验收**只能用代理形态（「外部注册一个合成单元，
-不改中心文件即生效，且改动前为红」，DIR-133 裁定 2 / AC-915），真正的判读要等后续功能落地之后再读中心增长占比。
+不改中心文件即生效，且改动前为红」，DIR-133 裁定 2 / AC-915），真正的判读要等后续功能落地之后再读中心增长占比
+（同时记 `netShare` 与 `additionsShare`，见 §13.1）。
 
 **R0–R3 表的读法补充：方法体 vs 方法壳（2026-10-22 增补）**：`methodCount` 在一次职责外移后几乎不降——
 公开**方法壳**留在契约上、只有**方法体**搬走了（driver 88→86；刀1 完成后 methodCount 反而是 88，比先前
 报告的 87 +1，因为读数这一步多出一个 registry 委托壳）。因此判 R1（提取）不能只看 `methodCount`：
 要么用同口径的 call out-degree（`archguard_summary` 的 `topByOutDegree`，前后同口径比），要么把
 「方法体行数」与「方法壳数量」分开记。`methodCount` 下降只证明壳少了，不证明体搬了；两者混读会把
-「有进展」误判成「没进展」（硬规则 4b：一个代理量混了两类对象）。
+「有进展」误判成「没进展」（硬规则 4b：一个代理量混了两类对象）。⚠️ 但出度本身也**只是签名**（上表）：
+它解释「这一刀是什么形状」，**不**判定 R1/R2——判定回到增长落点占比。
 四臂判据的机械检查器：`plugin/scripts/extension-point-criteria-check.ts`（四态 `satisfied` /
 `missing-arms` / `not-applicable` / `NOT-EVALUATED`）；骨架生成器：
 `plugin/scripts/extension-point-criteria.ts --scaffold --task-id <id> --central <file> --outside <module>`。
@@ -229,7 +267,7 @@ DIR-133 裁定 2（「设计调查/切片的 AC 必须含扩展点判据」）�
 - **判读时点**：`worker-post-909` 的分母（中心 + 非中心增量）第一次 ≥ 1,000 行的那条记录。这个门槛是临时的，
   量级取自历史窗口（`worker-history` 分母约 5,800 行）；它只决定何时判读，不是质量阈值。
 - **登记时的现状（不作判读）**：2026-10-22 复跑 `design-evolution-readings.ts`（HEAD `584e10c60`）得 `worker-post-909`
-  中心 +172 / 非中心 +0，共 2 个提交（`d88ad2db8`、`80d75e886`，都是 fan-in 暗轴谓词）。分母远不到 1,000 行，**不计入判读**；
+  中心 +172 / 非中心 +0（**净口径**；`additionsShare` 的同窗口读数见 §13.1 的 `worker-post-909` 行），共 2 个提交（`d88ad2db8`、`80d75e886`，都是 fan-in 暗轴谓词）。分母远不到 1,000 行，**不计入判读**；
   10-22T00:40Z 那条载体记录里，这个子系统还是 `evaluated:false`（分母为 0）。
 
 ### 13.5 扩展点判据四件套（正本；生成器与检查器都引用本节）
@@ -280,7 +318,7 @@ GFM 列表项（`## Proposal` 散文、代码围栏、注释里的同名文字�
 脚手架：`plugin/scripts/extension-point-criteria.ts --scaffold --task-id <id> --central <file> --outside <module>`；
 skill：`plugin/skills/extension-point-refactor/SKILL.md`。
 
-### 13.6 两种「占比」口径：`centralChurnShare` ≠ 中心文件增长占比（不可互引）
+### 13.6 三种「占比」口径：`centralChurnShare` ≠ `netShare` ≠ `additionsShare`（不可互引）
 
 **结论：不是同一个量，⛔ 不得互相引用**（claudecodeui 2026-10-22 复核后已撤回原比较）。
 
@@ -288,9 +326,17 @@ skill：`plugin/skills/extension-point-refactor/SKILL.md`。
   `Δ` 易被读成「净变化」，而本量是 insertions+deletions 的 churn，故 canonical 键名取 `centralChurnShare`）** =
   (该 commit 内中心文件的 insertions + deletions) ÷ (该 commit 全部文件的 insertions + deletions)。
   实例：driver 那一刀 263 / 1275 = 0.206。它度量「**这次重构**的 churn 有多少落在中心文件」。
-- **中心文件增长占比（quay 口径；时间窗，只计新增）** = 窗口内中心文件新增行 ÷ (中心文件新增行 + 非中心文件新增行)。
-  实例：`worker-history` 基线 `2440b52d0` → `ff32d031d`，中心 +4,820 ÷ (4,820 + 1,025) = 82.46%；
-  同一公式在 serve 上得 1.31%（10-22T00:40Z 记录：中心 +153 ÷ (+153 + +11,534)，分母 = 中心 + 非中心新增行；
-  `docs` 早期「serve 1%」是该值的取整基线）。它度量「**后续增长**回流中心的比例」。
-- **差异的来源**：分子与分母都不同——前者单 commit、删除也计入；后者时间窗、只计新增。
-  0.21 回答不了「后续增长回流中心的比例」；两个数不可互相替换，也不可引用对方的数值作基线。
+- **quay 的两个时间窗口口径（`design-evolution-readings.ts` 的字段名，正本在 §13.1）**：
+  · **`netShare`**（记录键 `share` + `shareBasis:"net"`）= 窗口两端的中心文件**行数净差** ÷（中心净差 + 非中心净差）。
+    实例：`worker-history` 基线 `2440b52d0` → `ff32d031d`，4,820 / 5,845 = 82.46%；serve 153 / 11,687 = 1.31%。
+    ⚠️ **本文此前把这个数写成「只计新增」是错的**（2026-10-22 更正，任务
+    `gap-design-evolution-share-caliber-net-vs-additions`）：代码一直算的是净差；净差可为负、分母可小于分子，
+    所以同一窗口能读出 >100%（`worker-post-909` 102.13%）。
+  · **`additionsShare`** = 窗口两端 `git diff --numstat` 的**中心新增行** ÷（中心新增 + 非中心新增），纯搬家计 0。
+    实例：`worker-history` 5,210 / 6,537 = 79.70%；serve 349 / 15,038 = 2.32%；`worker-post-909` 288 / 307 = 93.81%。
+    **这个才是与 claudecodeui 的 additions-only 口径可比的那个数**。
+  两者都度量「**后续增长**回流中心的比例」，只是一个按净差、一个按新增。
+- **差异的来源**：分子与分母都不同——`centralChurnShare` 单 commit、删除也计入；quay 的两个口径是时间窗
+  （一个按行数净差、一个按新增行）。
+  0.21 回答不了「后续增长回流中心的比例」；**三个数不可互相替换，也不可引用对方的数值作基线**。
+  ⛔ 引 quay 的数时必须写成 `netShare X%` 或 `additionsShare Y%`——只写「占比 X%」读者无法判断是哪一个。
