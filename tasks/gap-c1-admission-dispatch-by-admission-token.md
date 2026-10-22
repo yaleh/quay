@@ -159,3 +159,11 @@ RESTORED_EXIT=0
 The task branch carries exactly the committed tree; fan-in fast-forwards it into develop, and the `git show develop:…` rerun is the driver's post-merge step (not reachable from the worker seat — stated so the claim is falsifiable rather than inferred).
 
 ADR-007 dark axis: 该轴仍暗,理由:本次只改 docs/analysis 的准入分派与注册表字面化，未动 packages/ 依赖结构，未运行 L_D/L_G 仪器
+
+## Blocker
+
+**2026-10-22T11:09:37.905Z — worker 未落地（exited-not-landed）**
+
+- 未落地原因：step=dark-axis: dark-axis (ADR-007 per-milestone predicate) refused the flip — MISSING: MISSING — the task body records no L_D/L_G reading (a numeric quantity at an axis-anchored line) and carries no explicit "该轴仍暗,理由:<...>" declaration. ADR-007 requires one or the other before the task may be called done.
+- run_id：wk-prod-anchor
+- session_id：12035d03-1758-43fc-9eab-0085c0a865fc
