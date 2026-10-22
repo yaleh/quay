@@ -1,7 +1,7 @@
 ---
 id: AC-916
 title: packages/quay/src 下目录级依赖环为 0（当前 1 个：{., observation, serve}）
-status: active
+status: achieved
 kind: criterion
 goal: GOAL-910
 criterion: "node -e 'const fs=require(\"fs\"),path=require(\"path\");const
@@ -50,6 +50,11 @@ statusLog:
     to: active
     actor: goal-driver
     reason: "triage: activate"
+  - at: 2026-10-22T00:39:45.328Z
+    from: active
+    to: achieved
+    actor: goal-driver
+    reason: "I2: criterion pass"
 fidelity:
   verdict: faithful
   reason: "fidelity judge: faithful"
