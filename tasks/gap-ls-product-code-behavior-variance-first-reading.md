@@ -52,6 +52,7 @@ extra:
 - plugin/scripts/ls-mutation-reading.ts (new)
 - plugin/scripts/capability-catalog-declarations.json
 - docs/carrier-registry.json
+- .gitignore
 - plugin/test/ls-mutation-reading.test.mjs (new)
 - plugin/test/fixtures/ls-mutation/target.mjs (new)
 - plugin/test/fixtures/ls-mutation/target-strong-check.mjs (new)
