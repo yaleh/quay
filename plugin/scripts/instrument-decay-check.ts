@@ -54,7 +54,7 @@ import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { repoRoot } from "./repo-root.ts";
 import { fileURLToPath } from "node:url";
-import { parseArgs as baseParseArgs, printJsonCompact } from "./gate-script-base.ts";
+import { isDirectEntry, parseArgs as baseParseArgs, printJsonCompact } from "./gate-script-base.ts";
 
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
 
@@ -916,6 +916,11 @@ export function main(argv: string[]): number {
   return outcome.anyDecayed ? 1 : 0;
 }
 
-if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+// Name-based guard, NOT a URL comparison: quality-gate-driver / meta-driver / goal-driver
+// statically import this module as a library, so esbuild inlines it into their bundles. A URL-form
+// guard would become TRUE inside the host bundle (the URL is the host's) and run this module's main()
+// instead of the driver's — build-plugin-dist refuses such a bundle (findEntryGuardHijacks). The
+// name form is inert when inlined and still runs main() when this file is executed directly.
+if (isDirectEntry(import.meta, process.argv[1], "instrument-decay-check")) {
   process.exitCode = main(process.argv);
 }
