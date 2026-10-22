@@ -62,12 +62,12 @@ merge
 - L_D: docLines=0 codeLines=209 ratio=0.000 verdict=PASS（`plugin/scripts/phase-declare.ts --ld-reading --numstat-file`，numstat = `git diff --numstat develop...HEAD`，本任务落地提交 `1d626c071`；实现 delta 无 .md 变更 ⇒ 文档增量 0，是「没有文档改动」而非未测量）
 
 ## AC
-- [ ] `.quay/routine-findings.jsonl` 中 finding `extract-section-byte-identical`（routine `semantic-dedup-scan`，runId `semantic-dedup-scan-1792647604889`）所描述的问题被复核并处置
-- [ ] 处置结论可核：要么修掉，要么写明「已有机制在管、失败在哪一步」，⛔ 不以「已注意到」结案
+- [x] `.quay/routine-findings.jsonl` 中 finding `extract-section-byte-identical`（routine `semantic-dedup-scan`，runId `semantic-dedup-scan-1792647604889`）所描述的问题被复核并处置
+- [x] 处置结论可核：要么修掉，要么写明「已有机制在管、失败在哪一步」，⛔ 不以「已注意到」结案
 
 ## DoD
-- [ ] 上面的判据实跑通过
-- [ ] ⛔ 探针只立案不执行：本任务若需要跑产出者/修复，由派发链执行，⛔ 不由例程代跑
+- [x] 上面的判据实跑通过
+- [x] ⛔ 探针只立案不执行：本任务若需要跑产出者/修复，由派发链执行，⛔ 不由例程代跑
 
 ## Touches
 - `plugin/scripts/task-schema.ts`
