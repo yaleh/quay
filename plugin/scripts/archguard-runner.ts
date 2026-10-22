@@ -79,7 +79,11 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { createRequire } from "node:module";
+// ⛔ ALIASED on purpose: the shipped plugin bundles are built with a banner that declares
+// `createRequire` at bundle scope (build-plugin-dist.mjs REQUIRE_BANNER), and esbuild keeps this
+// named import verbatim in the ESM output ⇒ importing the unaliased name is a
+// "Identifier 'createRequire' has already been declared" SyntaxError at bundle boot.
+import { createRequire as nodeCreateRequire } from "node:module";
 import { spawnSync } from "node:child_process";
 import { isDirectEntry } from "./gate-script-base.ts";
 
@@ -304,7 +308,7 @@ function resolveArchguardInPluginRoot(pluginRoot: string, searched: string[]): s
   searched.push(direct);
   if (isFile(direct)) return direct;
   try {
-    const req = createRequire(path.join(pluginRoot, "package.json"));
+    const req = nodeCreateRequire(path.join(pluginRoot, "package.json"));
     const resolved = req.resolve(`${ARCHGUARD_PKG_NAME}/${ARCHGUARD_CLI_REL}`);
     searched.push(`createRequire(${pluginRoot}) → ${resolved}`);
     if (isFile(resolved)) return resolved;
