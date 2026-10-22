@@ -1,7 +1,7 @@
 ---
 id: gap-meta-needs-human-parking-recheck
 title: needs-human 停放理由失效后无任何产物上报：判据修好、任务仍停、goal AC 每轮红
-status: ready
+status: done
 labels:
   - meta-driver
   - driver-candidate
