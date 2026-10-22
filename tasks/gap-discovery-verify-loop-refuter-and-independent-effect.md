@@ -2,7 +2,7 @@
 id: gap-discovery-verify-loop-refuter-and-independent-effect
 title: 验证环不闭合——routine-scan 与 arch-discovery 两条 origin 没有 refuter 阶段（链停在
   verifier），effect 读数是「机械 no-recurrence」而非「独立预测对结果」
-status: ready
+status: done
 labels:
   - gap
   - defect
