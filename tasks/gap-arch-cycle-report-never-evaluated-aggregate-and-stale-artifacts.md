@@ -2,7 +2,7 @@
 id: gap-arch-cycle-report-never-evaluated-aggregate-and-stale-artifacts
 title: 目录环常驻检测例程 arch-cycle-report 上线以来 25/25 轮 evaluated:false：汇总被两个无
   moduleGraph 的单目录小包作废，且产物无人刷新——一个真实的目录环因此存在约 7 小时无人察觉
-status: todo
+status: ready
 labels:
   - gap
   - defect
