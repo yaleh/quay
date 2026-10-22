@@ -1,7 +1,7 @@
 ---
 id: AC-921
 title: AC-918 的准入判据读注册表对象本身（import），不扫源码文本——文本正则看不见与注释同形的常量 kind
-status: active
+status: achieved
 kind: criterion
 goal: GOAL-911
 criterion: "node --input-type=module -e 'const m=await
@@ -48,6 +48,11 @@ statusLog:
     to: active
     actor: goal-driver
     reason: "triage: activate"
+  - at: 2026-10-22T10:59:01.115Z
+    from: active
+    to: achieved
+    actor: goal-driver
+    reason: "I2: criterion pass"
 supersedes:
   - AC-918
 fidelity:
