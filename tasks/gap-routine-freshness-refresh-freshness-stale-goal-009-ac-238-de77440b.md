@@ -3,7 +3,7 @@ id: gap-routine-freshness-refresh-freshness-stale-goal-009-ac-238-de77440b
 title: "freshness-refresh: Freshness window crossed (d=222, margin -22); newest
   AC-238 evidence is 209.4h old (2026-10-13T18:18:10Z, build d7381ed6) and the
   upgrade face has not run since,"
-status: todo
+status: ready
 labels:
   - gap
   - routine-filed
