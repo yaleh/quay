@@ -758,7 +758,13 @@ test("AC2 (real history) — the unified formula reproduces the finding's correc
       "packages/quay/src/serve/*.ts",
       "packages/quay/src/core/server-state*.ts",
     ],
-  });
+  // The window's right end is PINNED to the ref the finding's table was taken at — the SAME ref the
+  // worker arm below pins. Both rows of that table are one historical reading, so they share one head;
+  // with the default `HEAD` the serve row silently re-measured against a moving tree and any
+  // legitimate refactor of these modules broke it with a plausible-looking number (e.g. the pidAlive
+  // extraction moved 5 net lines out of core/server-state.ts ⇒ 11639). This is the reproducible
+  // historical reading `head` exists for, not a live-HEAD drift detector.
+  }, { head: "ff32d031d" });
   assert.equal(serve.evaluated, true, serve.reason ?? "");
   assert.equal(serve.centralDelta, 153);
   assert.equal(serve.nonCentralDelta, 11644);
