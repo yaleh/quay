@@ -58,6 +58,14 @@ extra:
   2. `plugin/test/probe-routine.test.mjs` —— 新的「已安装 archguard 插件运行时」解析源让默认装配的 `architecture-analysis` 例程在装了 archguard 的宿主上真的跑起来（并吃同一个假探针 ⇒ 第二条 finding）。用例改用既有负控制缝 `ARCHGUARD_RUNNER_CLI=<不存在路径>`，把宿主状态钉死。
   3. `plugin/test/archguard-structural-gate-fan-in.test.mjs` —— AC4（未评估态）原先断言**全部** scope 都 not-evaluated；Plan 步骤 2 的单目录 basis 让 5 个单目录 scope 变成真实读数。改为按 basis 分别断言，并新增「至少一个多目录 scope 仍为 not-evaluated」的空转守卫（实测剩 `src`）。
 
+## Dark-Axis Reading (ADR-007)
+
+- L_D archguard package-graph (packages/quay/src @ 6eb86b4c, measured 2026-10-22): internal-packages=12, dependency-edges=86, directory-cycles=0, unevaluated-dynamic-imports=1
+
+  Provenance: the installed archguard runtime (`@yalehwang/archguard`, the same one this task taught `resolveArchguardCli()` to find) — `analyze --sources packages/quay/src --lang typescript --diagrams package --format json --no-cache`, reading `extensions.tsAnalysis.moduleGraph`. The `packages/quay/src` tree is byte-identical to the one measured earlier at `39d192b0e` (`git diff 39d192b0e HEAD -- packages/quay/src` is empty), so this is the same structure the landing tree carries.
+
+  Why this is the relevant axis: the whole task is the DEPENDENCY-STRUCTURE reading (directory cycles) — this is a real L_D reading on the tree that would land, taken with an independent invocation of the same instrument, not a restatement of the routine's own output.
+
 ## Touches
 
 - tasks/gap-arch-cycle-report-never-evaluated-aggregate-and-stale-artifacts.md
@@ -82,3 +90,5 @@ extra:
 
 - 未落地原因：step=dark-axis: dark-axis (ADR-007 per-milestone predicate) refused the flip — MISSING: MISSING — the task body records no L_D/L_G reading (a numeric quantity at an axis-anchored line) and carries no explicit "该轴仍暗,理由:<...>" declaration. ADR-007 requires one or the other before the task may be called done.
 - run_id：wk-prod-anchor
+
+**已解除（2026-10-22，续做轮）**：上一轮缺的是 ADR-007 的逐里程碑读数，不是实现缺陷。本轮在将要落地的树上取了一次真实的 L_D 读数（见 `## Dark-Axis Reading (ADR-007)`：`directory-cycles=0`，`internal-packages=12`，`dependency-edges=86`），经 `task_write` 写入任务体。
