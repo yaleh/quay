@@ -13,7 +13,12 @@
 // `../../packages/quay/src/kernel/task-shape-artifacts.ts` and ships. The kernel is the one
 // location BOTH layers reach, which is why the converged pure judges live there.
 //
-//   extractSection             — depth-aware `## Heading` → body slicing (moved from task-schema.ts).
+//   extractSection             — depth-aware `## Heading` → body slicing.
+//                                MOVED OUT (task gap-routine-semantic-dedup-scan-extract-section-
+//                                byte-identical): the one definition now lives in
+//                                `./kernel/extract-section.ts` and is re-exported at the top of the
+//                                implementation, so both layers — and this module's existing import
+//                                surface — resolve the same function.
 //   parseFrontmatterCompletely — the ONE complete task-frontmatter YAML parser (moved from task-schema.ts).
 //   countAcCheckboxes          — GFM checkbox counting with a fail-closed absent-section shape.
 //                                MOVED OUT (task gap-three-pure-judges-kernel-single-def): the one
@@ -21,48 +26,33 @@
 //                                re-exported at the bottom of this file, so both layers — and this
 //                                module's existing import surface — resolve the same function.
 //
-// extractSection / parseFrontmatterCompletely are still migrated VERBATIM — logic unchanged, behavior
-// unchanged. The mechanism layer still keeps its own copies of THESE TWO, pinned BEHAVIORALLY
-// identical by plugin/test/task-parsing-parity.test.mjs (converging them is out of this task's
-// scope); countAcCheckboxes is now structurally single. Existing unit tests
+// parseFrontmatterCompletely is still migrated VERBATIM — logic unchanged, behavior unchanged — and
+// the mechanism layer still keeps its own copy, pinned BEHAVIORALLY identical by
+// plugin/test/task-parsing-parity.test.mjs (converging it is out of these tasks' scope).
+// extractSection and countAcCheckboxes are now structurally single. Existing unit tests
 // (plugin/test/mechanism-count / ready-pool-check / workflow-invariant-ownership / slot-refill /
 // task-status-drift-check) are the regression evidence that the moves did not alter behavior.
 //
-// Scope honesty: this module carries ONLY these two capabilities (plus the countAcCheckboxes
-// re-export). It is NOT mechanism-layer
+// Scope honesty: this module carries ONLY these two remaining capabilities (plus the
+// extractSection / countAcCheckboxes re-exports). It is NOT mechanism-layer
 // bootstrap completion — the remaining §2.6 items (③ shape-aware four-artifact judgment, ④ batch
 // status write, ⑤ workspace-root parameterization, ⑥ depends_on first-class) are still unexpressed in
 // the ABI, per docs/proposals/archguard-generation-era-primitives.md §2.6. This task must not be
 // cited as "the self-bootstrap gap is solved".
 
 import { parse as parseYaml } from "yaml";
-import { escapeRegExp } from "./kernel/regex-escape.ts";
 
 /**
- * Depth-aware section extractor. Match the heading line, capture
- * its `#` depth, stop the body at the next line whose heading is at the SAME OR SHALLOWER depth (so a
- * `## X` section extends through its nested `### ` subheadings and stops only at the next `## ` or
- * shallower — never silently truncated).
+ * Depth-aware section extractor.
  *
- * `heading` is matched LITERALLY: it is escaped through the kernel's `escapeRegExp` before it is
- * interpolated into the heading regex. Without that, a heading carrying a regex metacharacter would be
- * read as a pattern — `Plan (draft)` would become the capture group `Plan draft` and never match the
- * literal `## Plan (draft)` line, and an unbalanced `(` would throw at `new RegExp`. Escaping is a
- * no-op for the plain section names most callers pass, so their behavior is unchanged; the
- * metacharacter-heading case is pinned by plugin/test/task-parsing-parity.test.mjs. (Task
- * gap-extract-section-heading-interpolated-unescaped-into-regexp.)
+ * MOVED to the kernel (task gap-routine-semantic-dedup-scan-extract-section-byte-identical): the ONE
+ * definition — depth-aware `## Heading` slicing with the literal (escaped) heading match — now lives
+ * in `./kernel/extract-section.ts` and is re-exported below. The mechanism layer
+ * (`plugin/scripts/task-schema.ts`) imports that same kernel file, so the former product/mechanism
+ * copy pair is structurally ONE function (identity-equal across both import surfaces) rather than two
+ * byte-identical bodies pinned only by `plugin/test/task-parsing-parity.test.mjs`.
  */
-export function extractSection(fullText, heading) {
-  const headingLineRe = new RegExp(`^(##+)\\s*${escapeRegExp(heading)}\\s*$`, "im");
-  const headingMatch = fullText.match(headingLineRe);
-  if (!headingMatch) return null;
-  const depth = headingMatch[1].length;
-  const startIdx = headingMatch.index + headingMatch[0].length;
-  const rest = fullText.slice(startIdx);
-  const stopRe = new RegExp(`^#{1,${depth}}\\s`, "m");
-  const stopMatch = rest.match(stopRe);
-  return stopMatch ? rest.slice(0, stopMatch.index) : rest;
-}
+export { extractSection } from "./kernel/extract-section.ts";
 
 /**
  * The ONE complete frontmatter parser (gap-unified-frontmatter-parser, moved verbatim from

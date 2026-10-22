@@ -76,26 +76,19 @@
 
 const STATUS_WORDS = "pending|resolved|deferred|applied|rejected";
 
-// ── extractSection — reused VERBATIM from it0-dod-check.mjs (moved here, then re-imported there). ──
-// Depth-aware: match the heading line, capture its `#` depth, stop the body at the next line whose
-// heading is at the SAME OR SHALLOWER depth (so a `## X` section extends through its nested `### `
-// subheadings and stops only at the next `## ` or shallower — never silently truncated).
-// `heading` is matched LITERALLY — escaped through `escapeRegExp` (imported above) before it is
-// interpolated into the heading regex, so `Plan (draft)` matches its own line instead of being read
-// as the capture group `Plan draft`, and an unbalanced `(` cannot throw. Escaping is a no-op for plain
-// section names; plugin/test/task-parsing-parity.test.mjs pins the behavior against the product copy
-// (packages/quay/src/task-parsing.ts). Task gap-extract-section-heading-interpolated-unescaped-into-regexp.
-export function extractSection(fullText, heading) {
-  const headingLineRe = new RegExp(`^(##+)\\s*${escapeRegExp(heading)}\\s*$`, "im");
-  const headingMatch = fullText.match(headingLineRe);
-  if (!headingMatch) return null;
-  const depth = headingMatch[1].length;
-  const startIdx = headingMatch.index + headingMatch[0].length;
-  const rest = fullText.slice(startIdx);
-  const stopRe = new RegExp(`^#{1,${depth}}\\s`, "m");
-  const stopMatch = rest.match(stopRe);
-  return stopMatch ? rest.slice(0, stopMatch.index) : rest;
-}
+// ── extractSection — SINGLE-SOURCE at the kernel ─────────────────────────────────────────────────
+// Task gap-routine-semantic-dedup-scan-extract-section-byte-identical:
+// the depth-aware `## Heading` slicer used to exist as this body AND a
+// byte-identical twin in packages/quay/src/task-parsing.ts, kept in step only by
+// plugin/test/task-parsing-parity.test.mjs. The one definition now lives at
+// `packages/quay/src/kernel/extract-section.ts`; this module re-exports it, so every mechanism-layer
+// consumer (it0-dod-check / task-status-drift-check / select-tests-for-touches /
+// regenerate-backlog-view / ready-pool-check) and the product store resolve the SAME function
+// object. Same reduction the sibling `countAcCheckboxes` took in
+// task gap-three-pure-judges-kernel-single-def (see its note below). The literal-heading contract
+// (escaped `heading`, so `Plan (draft)` matches its own line and an unbalanced `(` cannot throw —
+// task gap-extract-section-heading-interpolated-unescaped-into-regexp) is documented at the kernel.
+export { extractSection } from "../../packages/quay/src/kernel/extract-section.ts";
 
 // ── parseFrontmatterCompletely — the ONE complete frontmatter parser (gap-unified-frontmatter-parser). ─
 // Single source of truth for reading a task file's YAML frontmatter. parseTask, readDependsOn, and the
