@@ -65,11 +65,11 @@ extra:
 ## Acceptance Criteria
 
 - [ ] AC1（判据 a）私有化归零：`grep -rEn '^(let|var) ' packages/quay/src/serve/serve-dashboard.ts packages/quay/src/serve/serve-board.ts` 输出 0 行，且 `grep -rEn '^(const) [A-Za-z_$]+ = new (Map|Set)'` 在这两个文件里**没有**被 `.set()/.add()/.delete()` 修改的命中；贴两个 grep 的完整输出。
-- [ ] AC2（判据 b）类存在：`grep -n 'class DashboardSnapshotStore' packages/quay/src/serve/snapshot-store.ts` 命中 1 行，且该类含 `clear` / `setStepHook` / `snapshot` / `rebuild` / `followUp` 方法（`grep -nE '  (clear|setStepHook|snapshot|rebuild|followUp)\(' packages/quay/src/serve/snapshot-store.ts` ≥5 行）；贴这两段 grep。
+- [ ] AC2（判据 b）类存在：`grep -n 'class DashboardSnapshotStore' packages/quay/src/serve/snapshot-store.ts` 命中 1 行，且该类含 `clear` / `setStepHook` / `snapshot` / `rebuild` / `followUp` 方法（`grep -nE '  (clear|setStepHook|snapshot|rebuild|followUp)\\(' packages/quay/src/serve/snapshot-store.ts` ≥5 行）；贴这两段 grep。
 - [ ] AC3（判据 c）显式单例或可注入：`grep -n 'export const .*SnapshotStore = new' packages/quay/src/serve/snapshot-store.ts` ≥1 行，且构造可注入实例用于测试；贴命中行与一条注入用法。
 - [ ] AC4（判据 d）行为不变：两个文件删除模块级状态后，`scripts/test.sh` 的 serve 相关测试（scoped）全绿；贴 `node --test` 输出尾部与通过数。**不得为通过而改任何一条既有断言**（若改了，列出改了什么并说明为何，否则视为失败）。
 - [ ] AC5（判据 e）类型检查：`tsc`（按仓库既有 typecheck 入口）对改动的三个文件通过；贴输出。
-- [ ] AC6 无残留：`grep -rn 'taskSummaryCache\|dashboardLiveCache\|dashboardSnapshots\|boardSnapshots\|clearBoardSnapshots\|clearDashboardSnapshots' packages/quay/src/serve/serve-dashboard.ts packages/quay/src/serve/serve-board.ts` 只出现在 `import`/方法调用处、不再有模块级声明或散落的自由 clear 函数；贴命中行与前 3 条内容。
+- [ ] AC6 无残留：`grep -rn 'taskSummaryCache\\|dashboardLiveCache\\|dashboardSnapshots\\|boardSnapshots\\|clearBoardSnapshots\\|clearDashboardSnapshots' packages/quay/src/serve/serve-dashboard.ts packages/quay/src/serve/serve-board.ts` 只出现在 `import`/方法调用处、不再有模块级声明或散落的自由 clear 函数；贴命中行与前 3 条内容。
 - [ ] AC7 语义等价（快照生命周期）：rebuild 去重与 follow-up 清理的语义保持（同一时刻只一个 rebuild promise、完成后从 Map 删除）；用 fixture 断言 `.delete()` 仍在正确的时机发生；贴 fixture 与断言。
 
 ## Definition of Done
@@ -85,4 +85,11 @@ extra:
 - packages/quay/src/serve/serve-dashboard.ts
 - packages/quay/src/serve/serve-board.ts
 - packages/quay/test/snapshot-store.test.mjs
+- packages/quay/test/gap-ac136-web-truth-source.test.mjs
+- packages/quay/test/gap-ac179-criterion-cold-miss-dashboard-snapshot.test.mjs
+- packages/quay/test/gap-ac292-board-request-path-cold-build.test.mjs
+- packages/quay/test/gap-dashboard-goal-card-provider-backed.test.mjs
+- packages/quay/test/gap-dashboard-parallelize.test.mjs
+- packages/quay/test/gap-dashboard-taskcard-multistatus-minitable.test.mjs
+- packages/quay/test/gap-webui-goal-task-rollup-via-shared-summary-cache.test.mjs
 - tasks/gap-dashboard-snapshot-store-encapsulate-state.md
