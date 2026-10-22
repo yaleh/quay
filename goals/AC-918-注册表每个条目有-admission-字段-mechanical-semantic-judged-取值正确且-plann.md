@@ -1,7 +1,7 @@
 ---
 id: AC-918
 title: 注册表每个条目有 admission 字段，mechanical/semantic-judged 取值正确且 Planner 按它分派
-status: active
+status: achieved
 kind: criterion
 goal: GOAL-911
 criterion: "node -e 'const fs=require(\"fs\");const
@@ -38,6 +38,11 @@ statusLog:
     to: active
     actor: goal-driver
     reason: "triage: activate"
+  - at: 2026-10-22T11:32:04.706Z
+    from: active
+    to: achieved
+    actor: goal-driver
+    reason: "I2: criterion pass"
 fidelity:
   verdict: faithful
   reason: "fidelity judge: faithful"
