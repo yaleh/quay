@@ -2,7 +2,7 @@
 id: gap-ls-product-code-behavior-variance-first-reading
 title: L_S（行为方差）对产品代码没有活仪器——ADR-007 列的 mutation/property 测试在产品代码上 0 处存在；先在一个高
   churn 的纯判定模块上取第一条读数并入载体（观察项）
-status: ready
+status: done
 labels:
   - gap
   - observation
