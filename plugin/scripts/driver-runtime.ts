@@ -471,6 +471,16 @@ export function resolveQuaySrcModule(rel: string, codeRoot: string | null = reso
 // store 侧改名后 driver 会**静默停止守闸**（硬规则 5b 的形态），故走单一导入面。
 export { inAchievedReverifyScope, readsFrozenPopulation, stripEvidenceTimestamp, GOAL_ACCEPTANCE_ACTIVE_ENV } from "../../packages/quay/src/core/goal-store.ts";
 export { createMetaStore } from "../../packages/quay/src/meta-store.ts";
+// The CRITERION CAPABILITY judge (Core `criterion-capability.ts`, the single definition of "is this
+// criterion a READING or an ACTION"). goal-driver must NAME the cause and enumerate the missing
+// carriers of an activation the store refused (gap-meta-writegoalstatus) — and the store's own
+// refusal reaches the driver as a 200-char-TRUNCATED stderr string, which is exactly why the reading
+// cannot be parsed out of it. ⛔ The judge is NOT re-implemented here nor in goal-driver: a second
+// copy would drift from the gate that actually refused (hard rule 5b). Surfaced through this module
+// for the same AC-262 reason as the re-exports above — the driver expresses "I need this symbol",
+// never a Core source-tree literal.
+export { judgeCriterionCapability, readCapabilityDeclaration } from "../../packages/quay/src/core/criterion-capability.ts";
+export type { CapabilityJudgment, CapabilityReason, CapabilityDeclaration } from "../../packages/quay/src/core/criterion-capability.ts";
 // goal-branch (SPEC-goal-branch-2026-10-03 §5 B1, ruling ⑩): the goal-driver OWNS the criterion
 // worktree's lifecycle (create / refresh / delete, ruling ㉒) while the criterion's cwd is chosen by
 // the store. Both sides must name the SAME path, so the derivation lives in Core once

@@ -49,7 +49,11 @@ import { isDirectEntry } from "./gate-script-base.ts";
 // spawn）、launchArgv（LLM 调用配置单一构造点）、splitArgs（测试缝覆盖命令切分）、Fact / RoutineSpec
 // （Layer 1b 例程契约）、parseBinaryVerdict（GOAL-032 判定器 stdout → 三态 verdict 的解析算法，
 // kernel leaf；⛔ 本文件只表达「我需要这个符号」，布局知识留 Layer 0 —— 同 regex-escape 的落点论证）。
-import { DRIVER_KINDS, runAsync, launchArgv, splitArgs, kernelSiblingArgv, kernelConfigPath, resolveQuayCodeRoot, parseBinaryVerdict, goalDriverChildTimeoutMs, GOAL_STORE_SIGTERM_GRACE_MS, readLockPid, type Fact, type RoutineSpec } from "./driver-runtime.ts";
+// 同一条导入面还提供 ⑧b 用的**能力判定器**（`judgeCriterionCapability` / `readCapabilityDeclaration`，
+// Core `criterion-capability.ts` 的单一实现，gap-meta-writegoalstatus）：⛔ 不从激活拒绝的散文里抠
+// 缺失载体——store 把它回传成**被截断到 200 字符**的 stderr，路径正好落在截断点之外（硬规则 4c：
+// 判据点名的量必须穿过所有中间层还取得到）；同一判定器在本进程重判得到的 `reasons[].detail` 才是。
+import { DRIVER_KINDS, runAsync, launchArgv, splitArgs, kernelSiblingArgv, kernelConfigPath, resolveQuayCodeRoot, parseBinaryVerdict, goalDriverChildTimeoutMs, GOAL_STORE_SIGTERM_GRACE_MS, readLockPid, judgeCriterionCapability, readCapabilityDeclaration, type Fact, type RoutineSpec } from "./driver-runtime.ts";
 // The ONE regex-literal escaper (kernel leaf via the plugin shim) — replaces an inline escape body at
 // the heading-literal site (finding `escaperegexp-sweep-missed-two`, routine `semantic-dedup-scan`).
 import { escapeRegExp } from "./regex-escape.ts";
@@ -2616,6 +2620,103 @@ export function triageDraftAc(
   return { ac, decision: "activate", reason: "结构完备（goal 锚合法 + criterion 非空 + 无 posture）——这条 AC 作为判据已就绪，建议激活进入判定（牵引由 computeGoalGaps 读，不决定是否纳入判定）" };
 }
 
+// ── ⑧b 激活被能力闸拒绝时的【具名阻塞读数】（gap-meta-writegoalstatus）──────────────────────────
+//
+// 缺陷形态（本读数存在的唯一理由）：⑧ 对分诊判 activate 的 draft AC 调 writeGoalStatus ⇒ goal-store
+// 的能力闸（Core `criterion-capability.ts`，**不可**被 `--force` 越过）拒绝 ⇒ 此前只留下
+// `flips{ok:false, reason:<散文>}`。没有任何消费者读 `ok:false`，而「缺失载体路径」埋在
+// writeGoalStatus **截断到 200 字符**的 stderr 里（前缀就占 ~150 字符）⇒ 那条 draft AC 每轮重判、
+// 永不激活，也永不进入缺口环（`computeGoalGaps` 只数 active AC）——「被能力闸挡住」与「还没轮到」
+// 在读法上同形（硬规则 3b），而它的缺失载体因此永不被委托。
+//
+// ⇒ 本读数把那次拒绝落成**具名条目**：ac + cause + **枚举出的缺失载体路径**。
+// ⛔ 纯读数：不改任何 flip / spawn / 分诊判定。
+// ⛔ 路径**不从散文里抠**：由 Core 的**同一份**能力判定器在本进程重判得到（单一实现，硬规则 5b）。
+//    只有「cause 的稳定码」在复判没复现时退回 store 回传文本里那个码（见 classifyActivationRefusal）。
+
+/** 阻塞成因词表（轮记录口径，枚举——硬规则 3）。
+ *
+ *  ⚠️ 它与 store 的机读码是**近形词**，且这是**记录在案的**、⛔ 不是笔误：
+ *   · `criterion-capability-unevaluated` = 判据的能力无法被认证（Core `uncertifiable-executed-artifact`
+ *     轴：判据**执行**的载体在它将要运行的那棵树里不存在）；
+ *   · `criterion-side-effect` = 工作区**声明**了这条判据会写（Core 轴 1/2）。
+ *  store 自己的稳定码 `criterion-capability-unevaluable`（`-able` 结尾）**逐字**存在 `storeCode`
+ *  字段里。⛔ 不要「统一」两者：一个是对外词表（本任务的 AC 契约钉死了它的拼写），一个是 store 的
+ *  诊断码；改任一都会静默打断读另一边的消费者（硬规则 5b）。 */
+export const ACTIVATION_BLOCKED_CAUSES = ["criterion-capability-unevaluated", "criterion-side-effect"] as const;
+export type ActivationBlockedCause = (typeof ACTIVATION_BLOCKED_CAUSES)[number];
+
+/** 一条被能力闸拒绝的 draft AC 激活（⑧ 的失败半边）的具名落痕。 */
+export interface ActivationBlockedReading {
+  /** 被拒的 draft AC id。 */
+  ac: string;
+  /** 它所属的 GOAL id（分诊对象集按 active GOAL 过滤得来）。 */
+  goal: string;
+  /** 阻塞成因（见 `ACTIVATION_BLOCKED_CAUSES`）。 */
+  cause: ActivationBlockedCause;
+  /** store 回传的稳定码，逐字（⛔ 不改写）。null = 复判没复现且回传文本里也无码可认。 */
+  storeCode: string | null;
+  /** 判据**执行**而运行树里不存在的载体路径（Core `uncertifiable-executed-artifact` 的 `detail`，
+   *  判据里的写法原样）。**这就是修的人要造的那个文件**。枚举（硬规则 3）。
+   *  ⚠️ `[]` 有两种成因，靠 `carrierReading` 区分，⛔ 不与「复核过且无缺失载体」同形。 */
+  missingCarriers: string[];
+  /** 命中的 Core 轴（`CapabilityRule` 词表，枚举）。 */
+  rules: string[];
+  /** 载体枚举的来源：`judged` = 本进程用 Core 同一判定器复判得到；`not-reproduced` = 复判没复现
+   *  store 的拒绝（判时那棵树与本地不同，例如 workspace 是某个 git 仓库的子目录）⇒ 载体清单不可
+   *  归因。⛔ 两者不同形（硬规则 3b）。 */
+  carrierReading: "judged" | "not-reproduced";
+  /** store 的拒绝原文（**可能已被 writeGoalStatus 截断到 200 字符**）——它是证据，不是索引。 */
+  reason: string;
+}
+
+/** 把一次「激活写失败」分类成具名阻塞条目；`null` ⇒ 这次拒绝**不是**能力闸造成的（调用方据此不落
+ *  条目，⛔ 不把其它失败——锁超时、锁被占、usage 错——伪装成「判据能力有问题」）。
+ *
+ *  `criterion` 取自**轮开始时**的 records 快照：那正是 ⑧ 拿去激活的同一条记录，两者不会互相漂移。
+ *  `root` 与 store 判据运行树同源：store 在激活路径上用 `resolveGitRoot(<root>/goals) ?? <root>`；
+ *  这里传 workspaceRoot（生产布局与裸目录夹具下二者相同）。若某个布局下二者不同，复判会落
+ *  `not-reproduced` 分支并保留 store 的码——⛔ 不会静默落成「无缺失载体」（硬规则 3b）。 */
+export function classifyActivationRefusal(
+  root: string,
+  entry: { ac: string; goal: string; criterion: string },
+  reason: string,
+): ActivationBlockedReading | null {
+  const criterion = typeof entry.criterion === "string" ? entry.criterion : "";
+  const j = criterion.trim() === ""
+    ? null
+    : judgeCriterionCapability(criterion, { root, declaration: readCapabilityDeclaration(root) });
+  if (j !== null && j.capability !== "read-only") {
+    return {
+      ac: entry.ac,
+      goal: entry.goal,
+      cause: j.capability === "not-evaluated" ? "criterion-capability-unevaluated" : "criterion-side-effect",
+      storeCode: j.code,
+      // ⛔ 只收 `uncertifiable-executed-artifact`：另外三条轴（声明的写命令 / 真实端点 / @real-infra
+      // 载体）**没有**「缺失载体」可言——它们的修法是改声明或改判据，不是造文件。混在一起会让
+      // 「该造哪个文件」读不出来。
+      missingCarriers: j.reasons.filter((r) => r.rule === "uncertifiable-executed-artifact").map((r) => r.detail),
+      rules: j.reasons.map((r) => r.rule),
+      carrierReading: "judged",
+      reason,
+    };
+  }
+  // 复判没复现 ⇒ 只有 store 回传文本里点名的稳定码能证明这次拒绝确实是能力闸。码出现在拒绝串的
+  // 最前面（截断点之前），所以这一步对截断不敏感。
+  const m = /criterion-(capability-unevaluable|side-effect):/.exec(reason);
+  if (m === null) return null;
+  return {
+    ac: entry.ac,
+    goal: entry.goal,
+    cause: m[1] === "side-effect" ? "criterion-side-effect" : "criterion-capability-unevaluated",
+    storeCode: `criterion-${m[1]}`,
+    missingCarriers: [],
+    rules: [],
+    carrierReading: "not-reproduced",
+    reason,
+  };
+}
+
 // ── G9 缺口语义环（spawn 短命 agent 经 ABI 立案，照 promotion-driver 的 fix-worker 现成形态）──────
 
 /** gap-filing agent 的 prompt：一条 gap AC 的结构化信息（goal/ac/title/expect），⛔ 非散文指令。
@@ -3503,6 +3604,13 @@ export interface GoalRoundReadings {
    *  {ac, decision, reason}（decision ∈ 四态；ac 唯一）。无 draft AC ⇒ 空数组——字段仍在，
    *  「查过且零条」与「未跑分诊」按字段存在性区分（硬规则 3b）。 */
   triage: Array<TriageEntry>;
+  /** ⑧b 激活阻塞读数（gap-meta-writegoalstatus）：本轮 ⑧ 执行 `activate` 时被 goals 能力闸拒绝的
+   *  每一条 draft AC 一条 `{ac, goal, cause, storeCode, missingCarriers, rules, carrierReading, reason}`。
+   *  ⛔ 这是「被拒的激活」的**唯一具名读数**——`flips` 的 `ok:false` 与它重复但在读法上不够：
+   *  flip 的 reason 被截断、且没有消费者能枚举「缺哪个载体」。
+   *  ⛔ 空数组 = 本轮 ⑧ 执行过且零条被拒（「查过且零条」），不是「没跑这条」——⑧ 无条件执行；
+   *  整轮失败路径（list 读不到 / CLI 解析不出）根本不构造 `value`，本字段不出现（硬规则 3b）。 */
+  activationBlocked: Array<ActivationBlockedReading>;
   /** ⑩ 不可达的 draft：draft GOAL 及其名下 draft AC。⛔ 本字段存在的理由：`goalCount` 只数 active
    *  goal，`triage` 只收 active GOAL 名下的 draft AC——于是一个 draft GOAL 连同它吞掉的 N 条 AC
    *  **在任何既有 field 里都不存在**（「被静默吞掉」与「不存在」同形，硬规则 3b）。 */
@@ -4038,6 +4146,9 @@ export async function runGoalRound(root: string, opts: GoalRoundOptions = {}): P
   // The activation spawn's OUTER bound is derived from the AC's own declared `timeoutMs` (the child
   // runs BOTH the criterion and the P6b fidelity judge under `withFileLock`) — see writeGoalStatus.
   const recordTimeoutById = new Map(records.map((r) => [String(r.id ?? ""), r.timeoutMs]));
+  // ⑧b 的读数容器（gap-meta-writegoalstatus）：**恒产出**，`[]` = 本轮执行过且零条被拒。
+  const activationBlocked: Array<ActivationBlockedReading> = [];
+  const recordById = new Map(records.map((r) => [String(r.id ?? ""), r]));
   for (const t of triage) {
     if (t.decision !== "activate") continue;
     let fidelityJudgeArgv: string | undefined;
@@ -4051,6 +4162,23 @@ export async function runGoalRound(root: string, opts: GoalRoundOptions = {}): P
       recordTimeoutMs: recordTimeoutById.get(t.ac),
     });
     flips.push({ id: t.ac, to: "active", ok: w.ok, reason: w.reason });
+    // ⑧b 失败半边（gap-meta-writegoalstatus）：写失败**若**是能力闸造成的，落一条具名阻塞读数。
+    // ⛔ 不是每次写失败都落——`classifyActivationRefusal` 返回 null 时（锁超时 / usage / 其它）
+    // 条目不存在，那类失败由 `flips.reason` 如实携带，⛔ 不被伪装成「判据能力有问题」。
+    // ⛔ 只读：本步不重试、不改写盘上任何东西、不影响本轮其余判定。
+    if (!w.ok) {
+      const rec = recordById.get(t.ac);
+      const blocked = classifyActivationRefusal(
+        root,
+        {
+          ac: t.ac,
+          goal: String(rec?.goal ?? ""),
+          criterion: typeof rec?.criterion === "string" ? rec.criterion : "",
+        },
+        w.reason,
+      );
+      if (blocked !== null) activationBlocked.push(blocked);
+    }
   }
 
   // ⑥ G9 缺口语义环：缺口（state==="gap"）非空 ⇒ 过 halt + 资源门 + 每轮上限，spawn 短命 agent 经 ABI
@@ -4141,6 +4269,7 @@ export async function runGoalRound(root: string, opts: GoalRoundOptions = {}): P
     standingRecheck,
     gaps,
     triage,
+    activationBlocked,
     unreachableDrafts,
     spawned: spawnPass.spawned,
     llm_invoked: spawnPass.llmInvoked,
@@ -4186,6 +4315,9 @@ export async function runGoalRound(root: string, opts: GoalRoundOptions = {}): P
         `closeBranchAbsent=${closeBlocks.filter((b) => b.verdict === "blocked-branch-absent").length} ` +
         // 冻结域轮转（pass 1c）：`-` = 读不到；`0/0` = 本轮无合格对象（未到 minAge，正常）。
         `frozenSweep=${frozenSweep === null ? "-" : `${frozenSweep.ran.length}/${frozenSweep.eligible}`} ` +
+        // ⑧b 激活阻塞（gap-meta-writegoalstatus）：被能力闸拒绝的 draft AC 数。⛔ 加进这一行不是陪衬——
+        // 拦截发生了却在轮记录的一行摘要里读不出来，正是 `closeUnmergedBranch` 那次 5b 遗漏的形态。
+        `activationBlocked=${activationBlocked.length} ` +
         // ⑨ CI run 采集：`ok(a+b+c)` = 追加 a / 补全 b / 归因 c；其余态逐字带出 status（⛔ 不折成一个布尔）。
         `ciRuns=${ciRuns.status}` +
         (ciRuns.status === "ok"
