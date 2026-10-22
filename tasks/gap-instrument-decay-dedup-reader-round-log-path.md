@@ -3,7 +3,7 @@ id: gap-instrument-decay-dedup-reader-round-log-path
 title: instrument-decay 的立案去重台账在生产上恒为空：readPriorInstrumentDecayFilings 读
   <root>/quality-round.jsonl，而心跳写在 .quay/ —— 同一 (载体,形态) 反复重开 gap-filing
   agent（2026-10-22 已 4 轮，全部「不立案」）
-status: todo
+status: needs-human
 labels:
   - gap
   - defect
@@ -68,3 +68,9 @@ readPriorInstrumentDecayFilings(root, ".quay/quality-round.jsonl") → prior siz
 - plugin/scripts/quality-gate-driver.ts
 - plugin/test/quality-gate-driver.test.mjs
 - tasks/gap-instrument-decay-dedup-reader-round-log-path.md
+
+## Needs-Human
+
+**执行 2026-10-22T05:24:19.665Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：unsatisfiableUnannotatedAc=[AC1-AC4 全绿；`scripts/test.sh --for-task <id>` 通过；改动合入 develop。]（连续 3 轮被结构上不可派的拦截挡住 ⇒ 作者/人改写；⛔ 不派 fix worker）
