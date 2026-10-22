@@ -21,6 +21,8 @@ extra:
 
 **它实际在用、而我们没有自动化的量**：中心文件行数、call out-degree（同口径）、以及扩展点负对照（后者由 `gap-extension-point-refactor-criteria-scaffold` 承担，本条只管**读数**）。对方报告的示例：driver `outDegree` 203→187、文件 6662→5811。
 
+**对方登记的样本外预测（2026-10-22，⛔ 是预测不是读数）**：claudecodeui 的刀4（前端 hook，纯提取）与刀5（voice 出环，端口注入/断边）都属于 **R1 侧**，不是建扩展点。对方预测这两刀的 `centralChurnShare` 会**明显高于** driver 两刀的 0.21，理由是「中心文件只有删除、没有新增落点」。判读方式：两刀实测 `centralChurnShare ≤ 0.21` ⇒ 该预测被证伪；落在 0.21–0.35 之间 ⇒ 记「同量级、不判」；`> 0.35` ⇒ 预测成立。本任务只负责产出可比的读数，判读留给模型文档的预测登记处。
+
 **已知的读数陷阱（都已在别处被实证）**：
 1. **`methodCount` 混了方法体与方法壳**——公开方法壳留在契约上，方法体搬走时它几乎不降（对方实测 88→86）。成对记录必须同时存 `methodCount` 与「方法体计数 / call out-degree」，并标明口径，⛔ 不得只存 `methodCount`。
 2. **archguard 可执行体可能解析不到**——`resolveArchguardCli()`（`plugin/scripts/archguard-runner.ts`）只查 PATH 与环境变量，本机安装位置在 plugin 运行时缓存里；解析失败时**必须记 `evaluated:false` + reason，不得写 0**（硬规则 3b）。同族的产物过期问题见 `tasks/gap-arch-cycle-report-never-evaluated-aggregate-and-stale-artifacts.md`。
