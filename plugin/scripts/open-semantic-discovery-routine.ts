@@ -619,6 +619,14 @@ export interface OpenSemanticDiscoveryConfig {
   maxWallMs: number;
   maxModelCallsPer24h: number;
   maxUsdPer24h: number;
+  /** Whether the USD ceiling above is ENFORCED. An OPTIONAL extra key (like `investigator_max_turns`)
+   *  defaulting to `true`, so every section written before this switch existed keeps its exact
+   *  behaviour. `false` means "do not refuse on the USD reading" — ⛔ it is NOT a value of
+   *  `max_usd_per_24h`: `0` there already means something else in this key family (the count ceiling's
+   *  `0` means "spawn nothing"), and a literal «effectively unlimited» number would be a host-dependent
+   *  constant rather than an absent limit (硬规则 4 推论二). The cap keeps being parsed and reported
+   *  while disabled — the switch suppresses the REFUSAL, never the READING. */
+  usdCapEnabled: boolean;
   /** How many ELIGIBLE rounds apart a PAIRED (same-budget baseline vs guided) gain round is run — the
    *  cadence of the instrument that measures whether method guidance helps at all. It is an OPTIONAL
    *  extra key (like `investigator_max_turns`), NOT one of the ten declared keys: a section written
@@ -653,6 +661,7 @@ const DISABLED_DEFAULTS: OpenSemanticDiscoveryConfig = {
   maxWallMs: 1_200_000,
   maxModelCallsPer24h: 120,
   maxUsdPer24h: 30,
+  usdCapEnabled: true,
   gainEveryRounds: DEFAULT_GAIN_EVERY_ROUNDS,
   taskLogContextLimit: DEFAULT_TASK_LOG_CONTEXT_LIMIT,
 };
@@ -782,6 +791,22 @@ export function parseOpenSemanticDiscoverySection(raw: unknown): { config: OpenS
       ),
     };
   }
+  // ── `usd_cap_enabled`: THE FIFTH OPTIONAL EXTRA KEY (the USD ceiling's on/off switch). ⛔ WHY IT EXISTS
+  // AT ALL, when every other bound is expressed by its VALUE: the USD ceiling has no lawful "off" value.
+  // `0` is refused here (a round that may spend nothing is a round that never runs) AND `0` already means
+  // "disable everything" one key over (`max_model_calls_per_24h`), so re-using it would give one key family
+  // two opposite meanings for the same literal (硬规则 8). A huge number is worse: it is a
+  // host-dependent «effectively unlimited» constant, not an absent limit (硬规则 4 推论二). So «off» gets
+  // its own BOOLEAN, and the cap itself keeps its strict >0 validation — «switched off» and «misconfigured»
+  // stay distinguishable (硬规则 3b). Absent ⇒ `true`: a section written before the switch existed keeps
+  // its exact behaviour.
+  let usdCapEnabled = true;
+  if (rec.usd_cap_enabled !== undefined && rec.usd_cap_enabled !== null) {
+    if (typeof rec.usd_cap_enabled !== "boolean") {
+      return { config: null, error: cfgBad(`'usd_cap_enabled' must be a boolean (got ${JSON.stringify(rec.usd_cap_enabled)}) — it switches the USD ceiling's REFUSAL on/off; it is not a value of 'max_usd_per_24h'`) };
+    }
+    usdCapEnabled = rec.usd_cap_enabled;
+  }
   // ⛔ `0` is a legitimate value for `max_model_calls_per_24h` (a mechanical-only declaration is coherent)
   // — the gate is integrality and non-negativity, not a made-up positive floor. The USD ceiling is the one
   // bound where 0 would be incoherent (a round that may spend nothing is a round that may never run), so it
@@ -808,6 +833,7 @@ export function parseOpenSemanticDiscoverySection(raw: unknown): { config: OpenS
       maxWallMs: parsed.max_wall_ms,
       maxModelCallsPer24h: parsed.max_model_calls_per_24h,
       maxUsdPer24h: usd,
+      usdCapEnabled,
       gainEveryRounds: gainEvery.value as number,
       taskLogContextLimit: taskLogLimit.value as number,
     },
@@ -3918,7 +3944,10 @@ export async function runOpenSemanticDiscovery(root: string, opts: OpenSemanticD
     return fact("failed", { ...base, enabled: true, interval: intervalInfo, due: dueInfo }, `unreadable 24h budget — ${(e as Error).message} (nothing appended)`);
   }
   const countBudgetBlock = { cap: config.maxModelCallsPer24h, used: callsUsage.total, reservations: callsUsage.reservations, legacy_model_calls: callsUsage.legacy_model_calls, window_ms: budget.windowMs };
-  const usdBudgetBlock = { cap: config.maxUsdPer24h, used: usdUsage.usd, priced: usdUsage.priced, estimated: usdUsage.estimated, per_call_ceiling: PER_CALL_USD_CEILING, window_ms: budget.windowMs };
+  // ⛔ The reading is taken EVEN WHEN THE CAP IS SWITCHED OFF (it costs no model call): `usd_cap_enabled`
+  //    is on the Fact precisely so a reader can tell «the USD ceiling was off» from «nobody declared one»,
+  //    and the honestly-reported real spend is what a later re-enable decision is based on.
+  const usdBudgetBlock = { usd_cap_enabled: config.usdCapEnabled, cap: config.maxUsdPer24h, used: usdUsage.usd, priced: usdUsage.priced, estimated: usdUsage.estimated, per_call_ceiling: PER_CALL_USD_CEILING, window_ms: budget.windowMs };
   if (callsUsage.total >= config.maxModelCallsPer24h) {
     return fact(
       "not-evaluated",
@@ -3926,7 +3955,11 @@ export async function runOpenSemanticDiscovery(root: string, opts: OpenSemanticD
       `budget-24h: ${callsUsage.total} model call(s) in the trailing 24h >= max_model_calls_per_24h ${config.maxModelCallsPer24h} — nothing spawned (the routine is held back by its declared ceiling, not idle)${revertedNote}${legacyNote}`,
     );
   }
-  if (usdUsage.usd >= config.maxUsdPer24h) {
+  // ── THE USD REFUSAL, GATED BY ITS OWN SWITCH. `usd_cap_enabled:false` skips ONLY this comparison: the
+  //    reading block above is still reported on every Fact (so the disabled state is VISIBLE, not merely
+  //    absent), and the COUNT ceiling above is untouched — disabling the USD ceiling never disables a
+  //    budget, it removes one bound while the other still holds.
+  if (config.usdCapEnabled && usdUsage.usd >= config.maxUsdPer24h) {
     return fact(
       "not-evaluated",
       { ...base, enabled: true, interval: intervalInfo, due: dueInfo, budget_24h: countBudgetBlock, budget_usd_24h: usdBudgetBlock },
@@ -5103,6 +5136,9 @@ export async function runOpenSemanticDiscovery(root: string, opts: OpenSemanticD
         refused: budget.refusedCount,
         mid_round_refusal: midRound,
         usd_cap: config.maxUsdPer24h,
+        // The cap is reported even when switched off; this flag is what keeps «$30, enforced» readable
+        // apart from «$30, not enforced» on the carrier line (硬规则 3b).
+        usd_cap_enabled: config.usdCapEnabled,
         usd_used_at_start: usdUsage.usd,
         ledger: asRel(root, ledgerPath),
       },
@@ -5435,6 +5471,9 @@ export function openSemanticDiscoveryRoutineFromConfig(
   intervalUntil: number | null;
   maxModelCallsPer24h: number | null;
   maxUsdPer24h: number | null;
+  /** Whether `maxUsdPer24h` is ENFORCED (`null` when no usable config was parsed). Reported alongside the
+   *  cap so a status line cannot read «HARD $30» for a section that switched it off (硬规则 3b). */
+  usdCapEnabled: boolean | null;
   investigatorRuns: number | null;
   maxClustersVerified: number | null;
   verifierMaxTurns: number | null;
@@ -5452,6 +5491,7 @@ export function openSemanticDiscoveryRoutineFromConfig(
     intervalUntil: cfg ? cfg.intervalUntil : null,
     maxModelCallsPer24h: cfg ? cfg.maxModelCallsPer24h : null,
     maxUsdPer24h: cfg ? cfg.maxUsdPer24h : null,
+    usdCapEnabled: cfg ? cfg.usdCapEnabled : null,
     investigatorRuns: cfg ? cfg.investigatorRuns : null,
     maxClustersVerified: cfg ? cfg.maxClustersVerified : null,
     verifierMaxTurns: cfg ? cfg.verifierMaxTurns : null,

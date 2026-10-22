@@ -3781,6 +3781,9 @@ export function formatOpenSemanticDiscoveryAssembly(od: {
   intervalUntil: number | null;
   maxModelCallsPer24h: number | null;
   maxUsdPer24h: number | null;
+  /** `false` ⇒ the USD ceiling is declared but NOT enforced (`usd_cap_enabled:false`). Read so this
+   *  assembly line cannot call a switched-off ceiling "HARD" — the one thing a startup line must not do. */
+  usdCapEnabled: boolean | null;
   investigatorRuns: number | null;
   maxClustersVerified: number | null;
   verifierMaxTurns: number | null;
@@ -3794,7 +3797,12 @@ export function formatOpenSemanticDiscoveryAssembly(od: {
   if (!od.enabled) return "open-semantic-discovery 例程已装配（enabled:false — 每轮记 not-evaluated:disabled，零 spawn）";
   const until = od.intervalUntil === null ? "" : `, interval_until=${new Date(od.intervalUntil).toISOString()}`;
   const calls = od.maxModelCallsPer24h === null ? "" : `, max_model_calls_per_24h=${od.maxModelCallsPer24h} (HARD: pre-spawn reservation per subprocess, trailing-24h; a reservation with no outcome still counts as spent)`;
-  const usd = od.maxUsdPer24h === null ? "" : `, max_usd_per_24h=$${od.maxUsdPer24h} (HARD: realized gateway cost from the same ledger; an unknown price counts as the per-call ceiling, never 0)`;
+  // ⛔ A ceiling with `usd_cap_enabled:false` is STILL READ AND REPORTED, but it must not be called HARD:
+  //   «declared» and «enforced» are different states and this line is where an operator reads which one
+  //   is true (硬规则 3b). The count ceiling immediately to the left stays enforced either way.
+  const usd = od.maxUsdPer24h === null ? "" : od.usdCapEnabled === false
+    ? `, max_usd_per_24h=$${od.maxUsdPer24h} (DECLARED BUT NOT ENFORCED — usd_cap_enabled:false; the realized cost is still read and reported on every Fact, and max_model_calls_per_24h still binds)`
+    : `, max_usd_per_24h=$${od.maxUsdPer24h} (HARD: realized gateway cost from the same ledger; an unknown price counts as the per-call ceiling, never 0)`;
   const shape = od.investigatorRuns === null ? "" : `, investigator_runs=${od.investigatorRuns}, max_clusters_verified=${od.maxClustersVerified}`;
   const turns = od.verifierMaxTurns === null ? "" : `, verifier_max_turns=${od.verifierMaxTurns}, refutation_max_turns=${od.refutationMaxTurns}`;
   return `open-semantic-discovery 例程已装配（enabled, interval=${od.intervalMinutes}m${until}${calls}${usd}${shape}${turns}${methods}, report-only: 不立案、不写 tasks/ 或 goals/）`;

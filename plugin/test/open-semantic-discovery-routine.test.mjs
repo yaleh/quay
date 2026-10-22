@@ -200,7 +200,7 @@ import { readAnchorStart } from "../scripts/driver-runtime.ts";
 // make this test agree with itself instead of with the contract the routine actually consumes.
 import { appendTaskStatusEvent } from "../../packages/quay/src/kernel/task-transition.ts";
 import { readTaskLog, MAX_TASK_LOG_LIMIT } from "../../packages/quay/src/cli/task-log.ts";
-import { qualityGateRoutines } from "../scripts/quality-gate-driver.ts";
+import { qualityGateRoutines, formatOpenSemanticDiscoveryAssembly } from "../scripts/quality-gate-driver.ts";
 import { INVOKED_BY_MANUAL, INVOKED_BY_RESIDENT } from "../scripts/discovery-method-routine.ts";
 import { appendLedgerRecords } from "../scripts/discovery-method-routine.ts";
 // The engine is imported for REAL here so the argv the routine builds is the argv the engine builds:
@@ -718,6 +718,123 @@ test("case (e) — the USD cap ⇒ not-evaluated:budget-usd-24h and ZERO spawns"
   assert.equal(spawn.calls.length, 0, "ZERO spawns");
   assert.equal(fact.value.budget_usd_24h.used, 40);
   assert.equal(fact.value.budget_usd_24h.priced, 1);
+});
+
+// ── (e2) the USD ceiling's own ON/OFF switch (`usd_cap_enabled`) ──────────────────────────────────────
+/** Seed the trailing 24h with ONE granted reservation that realized $40 — far above every cap used below. */
+function seedFortyDollarsSpent(ws) {
+  const nowIso = new Date().toISOString();
+  appendLedgerRecords(ledgerPath(ws), [
+    { kind: "reserve", id: "seed-1", ts: nowIso, pid: 1, step: "verifier", tools: VERIFIER_TOOLS, max_turns: 8 },
+    { kind: "cost", id: "seed-1", ts: nowIso, pid: 1, step: "verifier", cost_usd: 40, cost_source: "gateway-rates" },
+  ]);
+}
+
+test("usd_cap_enabled — parse: absent ⇒ ENFORCED (true, byte-identical to the pre-switch behaviour), explicit false ⇒ unenforced", () => {
+  const base = () => ({
+    enabled: true, interval: "interval:60m", interval_until: "2026-10-20T00:00:00Z",
+    investigator_runs: 1, max_clusters_verified: 3, verifier_max_turns: 8, refutation_max_turns: 6,
+    max_wall_ms: 1_200_000, max_model_calls_per_24h: 120, max_usd_per_24h: 30,
+  });
+  // (i) BACKWARD COMPAT: a section written before the key existed parses to ENFORCED.
+  const absent = parseOpenSemanticDiscoverySection(base());
+  assert.equal(absent.error, null, `the pre-switch declaration must keep parsing (got ${absent.error})`);
+  assert.equal(absent.config.usdCapEnabled, true, "absent ⇒ true — the existing ceiling keeps binding");
+  assert.equal(absent.config.maxUsdPer24h, 30, "the cap itself is unchanged by the switch's absence");
+  // (ii) explicit true ⇒ the same state.
+  const on = parseOpenSemanticDiscoverySection({ ...base(), usd_cap_enabled: true });
+  assert.equal(on.error, null);
+  assert.equal(on.config.usdCapEnabled, true);
+  // (iii) explicit false ⇒ off, while the CAP still parses (the switch empties the REFUSAL, not the key).
+  const off = parseOpenSemanticDiscoverySection({ ...base(), usd_cap_enabled: false });
+  assert.equal(off.error, null);
+  assert.equal(off.config.usdCapEnabled, false);
+  assert.equal(off.config.maxUsdPer24h, 30, "the cap is still parsed and reported while unenforced");
+  // (iv) `false` does NOT relax the cap's own validation: a switched-off section still needs a real >0 cap,
+  //     so «switched off» and «badly configured» remain distinguishable (硬规则 3b).
+  const offNoCap = { ...base(), usd_cap_enabled: false };
+  delete offNoCap.max_usd_per_24h;
+  assert.match(parseOpenSemanticDiscoverySection(offNoCap).error, /max_usd_per_24h/);
+  assert.match(parseOpenSemanticDiscoverySection({ ...base(), usd_cap_enabled: false, max_usd_per_24h: 0 }).error, /max_usd_per_24h.*> 0/);
+});
+
+test("usd_cap_enabled — a NON-BOOLEAN is a config error, fail-closed (section unusable, zero spawns)", async () => {
+  // The quoted `"no"` is a STRING in YAML — precisely the shape that must not be coerced to false.
+  const bad = parseOpenSemanticDiscoverySection({
+    enabled: true, interval: "interval:60m", interval_until: "2026-10-20T00:00:00Z",
+    investigator_runs: 1, max_clusters_verified: 3, verifier_max_turns: 8, refutation_max_turns: 6,
+    max_wall_ms: 1_200_000, max_model_calls_per_24h: 120, max_usd_per_24h: 30, usd_cap_enabled: "no",
+  });
+  assert.equal(bad.config, null, "a non-boolean switch leaves the section UNUSABLE");
+  assert.match(bad.error, /usd_cap_enabled.*must be a boolean/);
+  assert.match(bad.error, /"no"/, "the refusal quotes the offending value");
+  // …and the ROUND treats it as `failed`, not as «off» and not as «on».
+  const ws = makeWorkspace();
+  writeConfig(ws, cfgYaml({ usd_cap_enabled: '"no"' }));
+  const spawn = countingSpawn();
+  const fact = await runOpenSemanticDiscovery(ws, { ...runOpts(ws, { engine: makeEngine() }), spawnFn: spawn, pinFn: pinStub() });
+  assert.equal(fact.state, "failed", `got ${fact.state}: ${fact.reason}`);
+  assert.match(fact.reason, /config invalid/);
+  assert.match(fact.reason, /usd_cap_enabled/);
+  assert.equal(spawn.calls.length, 0, "ZERO spawns");
+});
+
+test("usd_cap_enabled:false — the USD refusal is SKIPPED (with the enabled CONTROL on the same fixture)", async () => {
+  // (i) OFF: $40 realized against a $1 cap. The round must NOT return `budget-usd-24h` and must spawn.
+  const wsOff = makeWorkspace();
+  writeConfig(wsOff, cfgYaml({ max_usd_per_24h: "1", usd_cap_enabled: "false" }));
+  seedFortyDollarsSpent(wsOff);
+  const spawnOff = countingSpawn();
+  const off = await runOpenSemanticDiscovery(wsOff, { ...runOpts(wsOff, { engine: makeEngine() }), spawnFn: spawnOff, pinFn: pinStub() });
+  assert.notEqual(off.state, "not-evaluated", `the disabled cap must not refuse (got ${off.state}: ${off.reason})`);
+  assert.doesNotMatch(off.reason, /budget-usd-24h/);
+  assert.ok(spawnOff.calls.length > 0, "the round actually dispatched model calls");
+  // AC3 — the DISABLED state is VISIBLE on the Fact, not encoded as an absent key.
+  assert.equal(off.value.budget_usd_24h.usd_cap_enabled, false);
+  assert.equal(off.value.budget_usd_24h.cap, 1, "the cap is still reported");
+  assert.equal(off.value.budget_usd_24h.used, 40, "the real spend is still read and reported");
+  assert.equal(off.value.reservations.usd_cap_enabled, false, "the carrier-line reservation block agrees");
+  assert.equal(off.value.reservations.usd_cap, 1);
+
+  // (ii) CONTROL: the SAME fixture with the switch ON refuses and spawns nothing. Without this arm the
+  //      test would pass for a routine that had simply lost its USD check.
+  const wsOn = makeWorkspace();
+  writeConfig(wsOn, cfgYaml({ max_usd_per_24h: "1", usd_cap_enabled: "true" }));
+  seedFortyDollarsSpent(wsOn);
+  const spawnOn = countingSpawn();
+  const on = await runOpenSemanticDiscovery(wsOn, { ...runOpts(wsOn, { engine: makeEngine() }), spawnFn: spawnOn, pinFn: pinStub() });
+  assert.equal(on.state, "not-evaluated", `got ${on.state}: ${on.reason}`);
+  assert.match(on.reason, /budget-usd-24h/);
+  assert.equal(spawnOn.calls.length, 0, "ZERO spawns with the ceiling ENFORCED");
+  assert.equal(on.value.budget_usd_24h.usd_cap_enabled, true);
+});
+
+test("usd_cap_enabled:false — the COUNT ceiling still binds (the switch removes one bound, not both)", async () => {
+  const ws = makeWorkspace();
+  writeConfig(ws, cfgYaml({ max_usd_per_24h: "1", usd_cap_enabled: "false", max_model_calls_per_24h: "0" }));
+  seedFortyDollarsSpent(ws);
+  const spawn = countingSpawn();
+  const fact = await runOpenSemanticDiscovery(ws, { ...runOpts(ws, { engine: makeEngine() }), spawnFn: spawn, pinFn: pinStub() });
+  assert.equal(fact.state, "not-evaluated", `got ${fact.state}: ${fact.reason}`);
+  assert.match(fact.reason, /budget-24h/);
+  assert.doesNotMatch(fact.reason, /budget-usd-24h/, "the switched-off USD ceiling did not speak");
+  assert.equal(spawn.calls.length, 0, "ZERO spawns — the count ceiling alone refused the round");
+});
+
+test("usd_cap_enabled:false — the DRIVER's assembly line does not call the ceiling HARD", () => {
+  // The startup line is where an operator reads whether a ceiling binds; «declared» and «enforced» must
+  // not look the same there (硬规则 3b).
+  const base = {
+    enabled: true, intervalMinutes: 60, intervalUntil: null, maxModelCallsPer24h: 120,
+    maxUsdPer24h: 30, investigatorRuns: 1, maxClustersVerified: 3, verifierMaxTurns: 8, refutationMaxTurns: 6,
+  };
+  const off = formatOpenSemanticDiscoveryAssembly({ ...base, usdCapEnabled: false });
+  assert.match(off, /max_usd_per_24h=\$30/);
+  assert.match(off, /NOT ENFORCED/);
+  assert.doesNotMatch(off, /max_usd_per_24h=\$30 \(HARD/);
+  const on = formatOpenSemanticDiscoveryAssembly({ ...base, usdCapEnabled: true });
+  assert.match(on, /max_usd_per_24h=\$30 \(HARD/);
+  assert.doesNotMatch(on, /NOT ENFORCED/);
 });
 
 test("count-budget declines BEFORE the USD budget when BOTH are at their ceiling (the order is stated, not incidental)", async () => {
