@@ -77,7 +77,13 @@
 //       2 = usage/environment error（缺 --root）。
 
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
+// ⛔ ALIASED on purpose: the shipped plugin bundles are built with a banner that declares
+// `createRequire` at bundle scope (build-plugin-dist.mjs REQUIRE_BANNER), and esbuild keeps this
+// named import verbatim in the ESM output ⇒ importing the unaliased name is a
+// "Identifier 'createRequire' has already been declared" SyntaxError at bundle boot.
+import { createRequire as nodeCreateRequire } from "node:module";
 import { spawnSync } from "node:child_process";
 import { isDirectEntry } from "./gate-script-base.ts";
 
@@ -135,6 +141,9 @@ interface ScopeSignal {
   directoryCycleCount: number | null;
   /** The cycles themselves (so the failure message can name their members). null when unevaluated. */
   directoryCycles: DirectoryCycle[] | null;
+  /** Which evidence the directory reading came from (`module-graph` / `single-directory`), null when
+   *  unevaluated — carried so a run record says WHY an absent module graph was still readable. */
+  directoryCyclesBasis: "module-graph" | "single-directory" | null;
 }
 
 interface HistoryRecord {
@@ -196,22 +205,180 @@ function usage(msg: string): never {
   process.exit(2);
 }
 
+/** Where a resolved archguard CLI came from. The provenance is recorded on every refresh so a
+ *  not-evaluated record can say WHERE the instrument was looked for instead of only "absent". */
+export type ArchguardCliSource = "env" | "path" | "plugin";
+
+export interface ArchguardCliResolution {
+  cli: string | null;
+  source: ArchguardCliSource | null;
+  /** The resolved entry is a JS file that is not directly executable ⇒ it must be spawned as
+   *  `node <cli>` (a plugin runtime installed without the exec bit is still a real instrument). */
+  viaNode: boolean;
+  /** Every location probed, in order — so `not-evaluated:instrument-absent` can name them (硬规则 3b/6). */
+  searched: string[];
+}
+
+/** `@yalehwang/archguard`'s CLI entry, relative to a resolved package root. This is the SAME entry the
+ *  archguard Claude plugin's own MCP launcher execs (`mcp-launcher.mjs`'s `ENTRY`). */
+const ARCHGUARD_PKG_NAME = "@yalehwang/archguard";
+const ARCHGUARD_CLI_REL = path.posix.join("dist", "cli", "index.js");
+
+function isExecutableFile(p: string): boolean {
+  try {
+    if (!fs.statSync(p).isFile()) return false;
+    fs.accessSync(p, fs.constants.X_OK);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function isFile(p: string): boolean {
+  try {
+    return fs.statSync(p).isFile();
+  } catch {
+    return false;
+  }
+}
+
+/** The Claude plugin roots to consult. `$CLAUDE_CONFIG_DIR` wins when set (Claude Code honours it),
+ *  otherwise `~/.claude` — ⛔ the caller's absolute home path is never written down here. */
+function claudePluginRoots(): string[] {
+  const roots: string[] = [];
+  const cfg = (process.env.CLAUDE_CONFIG_DIR ?? "").trim();
+  if (cfg) roots.push(path.join(cfg, "plugins"));
+  try {
+    roots.push(path.join(os.homedir(), ".claude", "plugins"));
+  } catch {
+    /* no home dir ⇒ this source contributes nothing */
+  }
+  return [...new Set(roots)];
+}
+
+/** Plugin install directories that could carry the archguard runtime, newest install record first.
+ *  Two sources, both read from the install metadata rather than a hardcoded path:
+ *   (b) `installed_plugins.json` — `archguard@<marketplace>` entries' `installPath`;
+ *   (c) the cache layout `<plugins>/cache/<marketplace>/archguard/<version>/` (version dirs are
+ *       DISCOVERED, never pinned — the same rule `mcp-blacklist-resolve.ts` follows). */
+function archguardPluginCandidateRoots(pluginsRoot: string): string[] {
+  const out: string[] = [];
+  const push = (p: unknown) => {
+    if (typeof p === "string" && p.length > 0 && !out.includes(p) && fs.existsSync(p)) out.push(p);
+  };
+  try {
+    const rec = JSON.parse(fs.readFileSync(path.join(pluginsRoot, "installed_plugins.json"), "utf8"));
+    const plugins = rec?.plugins;
+    if (plugins && typeof plugins === "object" && !Array.isArray(plugins)) {
+      for (const [key, entries] of Object.entries(plugins as Record<string, unknown>)) {
+        if (!key.startsWith("archguard@")) continue;
+        for (const e of Array.isArray(entries) ? entries : []) push((e as Record<string, unknown> | null)?.installPath);
+      }
+    }
+  } catch {
+    /* install record missing/unreadable ⇒ this source contributes nothing (the cache glob still applies) */
+  }
+  try {
+    const cacheParent = path.join(pluginsRoot, "cache");
+    for (const marketplace of fs.readdirSync(cacheParent)) {
+      const pkgParent = path.join(cacheParent, marketplace, "archguard");
+      let versions: string[] = [];
+      try {
+        versions = fs.readdirSync(pkgParent);
+      } catch {
+        continue;
+      }
+      for (const v of versions) push(path.join(pkgParent, v));
+    }
+  } catch {
+    /* no plugin cache ⇒ nothing */
+  }
+  return out;
+}
+
+/** Resolve the archguard CLI entry under one plugin install dir. Checks, in order:
+ *   1. `createRequire(<plugin>/package.json)` — the plugin's own dependency tree (nested or hoisted);
+ *   2. `<plugin>/node_modules/@yalehwang/archguard/dist/cli/index.js`;
+ *   3. the Claude Code npm-cache sibling: walk UP from the plugin root and take the first
+ *      `<ancestor>/npm-cache/node_modules/@yalehwang/archguard/dist/cli/index.js`.
+ *  (3) exists because Claude Code installs plugin dependencies into a sibling `npm-cache` OUTSIDE the
+ *  upward node_modules walk — the same discovery the plugin's own launcher performs. */
+function resolveArchguardInPluginRoot(pluginRoot: string, searched: string[]): string | null {
+  const direct = path.join(pluginRoot, "node_modules", ...ARCHGUARD_PKG_NAME.split("/"), ...ARCHGUARD_CLI_REL.split("/"));
+  searched.push(direct);
+  if (isFile(direct)) return direct;
+  try {
+    const req = nodeCreateRequire(path.join(pluginRoot, "package.json"));
+    const resolved = req.resolve(`${ARCHGUARD_PKG_NAME}/${ARCHGUARD_CLI_REL}`);
+    searched.push(`createRequire(${pluginRoot}) → ${resolved}`);
+    if (isFile(resolved)) return resolved;
+  } catch (err) {
+    searched.push(`createRequire(${pluginRoot}) → ${(err as Error)?.message?.split("\n")[0] ?? "unresolvable"}`);
+  }
+  let cur = path.resolve(pluginRoot);
+  for (let i = 0; i < 8; i += 1) {
+    const candidate = path.join(cur, "npm-cache", "node_modules", ...ARCHGUARD_PKG_NAME.split("/"), ...ARCHGUARD_CLI_REL.split("/"));
+    searched.push(candidate);
+    if (isFile(candidate)) return candidate;
+    const parent = path.dirname(cur);
+    if (parent === cur) break;
+    cur = parent;
+  }
+  return null;
+}
+
+/** Resolve the archguard CLI, WITH provenance and the list of probed locations.
+ *
+ *  Order (Plan 步骤 4 of gap-arch-cycle-report-never-evaluated-aggregate-and-stale-artifacts):
+ *    1. `ARCHGUARD_RUNNER_CLI` — the negative-control seam; when set it WINS and a missing path is a
+ *       hard null (no silent fallthrough to PATH, which would make the negative control vacuous);
+ *    2. PATH (`command -v archguard`);
+ *    3. an INSTALLED archguard plugin runtime, discovered from the plugin install metadata.
+ *  Step 3 is what makes the routine's refresh possible on this host at all: archguard 0.1.42 is
+ *  installed as a Claude plugin (`~/.claude/plugins/...`) and is NOT on PATH, so the old two-step
+ *  resolver answered null while the instrument was right there. */
+export function resolveArchguardCliWithSource(): ArchguardCliResolution {
+  const searched: string[] = [];
+  const override = (process.env.ARCHGUARD_RUNNER_CLI ?? "").trim();
+  if (override) {
+    searched.push(`ARCHGUARD_RUNNER_CLI=${override}`);
+    if (fs.existsSync(override)) {
+      return { cli: override, source: "env", viaNode: !isExecutableFile(override), searched };
+    }
+    return { cli: null, source: null, viaNode: false, searched };
+  }
+  searched.push("PATH (command -v archguard)");
+  const r = spawnSync("sh", ["-c", "command -v archguard"], { encoding: "utf8" });
+  if (r.status === 0 && r.stdout.trim()) {
+    const cli = r.stdout.trim();
+    return { cli, source: "path", viaNode: !isExecutableFile(cli), searched };
+  }
+  for (const pluginsRoot of claudePluginRoots()) {
+    const candidates = archguardPluginCandidateRoots(pluginsRoot);
+    if (candidates.length === 0) searched.push(`${pluginsRoot} (no archguard plugin install recorded)`);
+    for (const pluginRoot of candidates) {
+      const found = resolveArchguardInPluginRoot(pluginRoot, searched);
+      if (found) return { cli: found, source: "plugin", viaNode: !isExecutableFile(found), searched };
+    }
+  }
+  return { cli: null, source: null, viaNode: false, searched };
+}
+
 /** Resolve the archguard CLI. `ARCHGUARD_RUNNER_CLI` is the negative-control seam (the fake CLI);
- *  production resolution is PATH. null ⇒ fail-closed (the meter must be runnable).
+ *  production resolution is PATH, then an installed plugin runtime (see the resolver above).
+ *  null ⇒ fail-closed (the meter must be runnable).
  *  **Exported** (gap-architecture-analysis-probe-not-wired-into-driver-routine-or-init): the
  *  architecture-analysis probe's host-availability preflight asks the SAME question ("is archguard
  *  installed here?") and must not grow a second reader of it (硬规则 5b). */
 export function resolveArchguardCli(): string | null {
-  const override = (process.env.ARCHGUARD_RUNNER_CLI ?? "").trim();
-  if (override) return fs.existsSync(override) ? override : null;
-  const r = spawnSync("sh", ["-c", "command -v archguard"], { encoding: "utf8" });
-  if (r.status !== 0 || !r.stdout.trim()) return null;
-  return r.stdout.trim();
+  return resolveArchguardCliWithSource().cli;
 }
 
 /** `archguard --version` first line. null ⇒ version source unreadable (record becomes evaluated:false). */
-function readArchguardVersion(cli: string): string | null {
-  const r = spawnSync(cli, ["--version"], { encoding: "utf8" });
+function readArchguardVersion(cli: string, viaNode = false): string | null {
+  const r = viaNode
+    ? spawnSync(process.execPath, [cli, "--version"], { encoding: "utf8" })
+    : spawnSync(cli, ["--version"], { encoding: "utf8" });
   if (r.status !== 0) return null;
   const first = String(r.stdout ?? "").trim().split("\n")[0].trim();
   return first.length > 0 ? first : null;
@@ -225,13 +392,48 @@ function readArchguardVersion(cli: string): string | null {
  *  analyzes would silently overwrite the earlier ones' `output/src/` / `output/scripts/` (the trap
  *  reproduced in gap-archguard-scope-expand-provider-packages-experiments' probe). The explicit `label`
  *  parents each scope's output so the basename collision is contained and never eats another scope. */
-function runAnalyze(cli: string, root: string, workDir: string, source: string, label: string): number {
-  const outputDir = path.join(workDir, "output", label);
-  const r = spawnSync(
-    cli,
-    ["analyze", "--lang", "typescript", "--format", "json", "--work-dir", workDir, "--output-dir", outputDir, "-s", source],
-    { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }
-  );
+function runAnalyze(
+  cli: string,
+  root: string,
+  workDir: string,
+  source: string,
+  label: string,
+  opts: {
+    /** Restrict the generated diagram levels. `package` is what makes archguard build the module
+     *  graph (`diagram-processor.ts`'s `needsModuleGraph`), i.e. what puts `extensions.tsAnalysis
+     *  .moduleGraph` into the query artifact. Without it the artifact has no cycles to read — the
+     *  exact state that made 25/25 arch-cycle rounds unevaluable. */
+    diagrams?: string[];
+    /** Output subdir under `<workDir>/output`. Defaults to the scope label; the refresh path passes
+     *  its own so a package-only run can never overwrite the on-demand runner's class artifact. */
+    outputLabel?: string;
+    viaNode?: boolean;
+    /** Pass `--no-cache`. The refresh uses it: its whole trigger is "the sources moved after this
+     *  artifact", and a cache hit would rewrite the query artifact with the PREVIOUS run's timestamp
+     *  (measured: a 2.1s run restored the old `arch.json` verbatim), leaving `behindSources` exactly
+     *  where it was. One forced re-analysis per interval is what the refresh is FOR. */
+    noCache?: boolean;
+  } = {},
+): number {
+  const outputDir = path.join(workDir, "output", opts.outputLabel ?? label);
+  const argv = [
+    "analyze",
+    "--lang",
+    "typescript",
+    "--format",
+    "json",
+    ...(opts.diagrams && opts.diagrams.length > 0 ? ["--diagrams", ...opts.diagrams] : []),
+    ...(opts.noCache ? ["--no-cache"] : []),
+    "--work-dir",
+    workDir,
+    "--output-dir",
+    outputDir,
+    "-s",
+    source,
+  ];
+  const r = opts.viaNode
+    ? spawnSync(process.execPath, [cli, ...argv], { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] })
+    : spawnSync(cli, argv, { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
   if (r.status !== 0) {
     process.stderr.write(
       `archguard-runner: analyze failed for ${source} (exit ${r.status})\n${(r.stderr || "").split("\n").slice(-5).join("\n")}\n`
@@ -246,6 +448,83 @@ function gitTrackedFileCount(root: string, source: string): number | null {
   const r = spawnSync("git", ["ls-files", "--", source], { cwd: root, encoding: "utf8" });
   if (r.status !== 0) return null;
   return String(r.stdout ?? "").split("\n").filter((l) => l.trim().length > 0).length;
+}
+
+/** `git ls-files -z -- <source>` as a list. null ⇒ git could not answer (⛔ never `[]`, which would read
+ *  as "a scope with no files"). */
+function gitTrackedFiles(root: string, source: string): string[] | null {
+  const r = spawnSync("git", ["ls-files", "-z", "--", source], { cwd: root, encoding: "utf8" });
+  if (r.status !== 0) return null;
+  return String(r.stdout ?? "").split("\0").filter((l) => l.length > 0);
+}
+
+/** TypeScript module files vs. test files. Test files are excluded from the single-directory judgment:
+ *  they are not modules of the production graph (and are frequently in a sibling `__tests__/`). */
+const TS_SOURCE_FILE_RE = /\.(ts|tsx|mts|cts)$/;
+const TS_TEST_FILE_RE = /\.(test|spec)\.[cm]?[tj]sx?$/;
+
+/** The structural basis for a scope whose query artifact carries no `moduleGraph`.
+ *
+ *  WHY THIS EXISTS (gap-arch-cycle-report-never-evaluated-aggregate-and-stale-artifacts): archguard
+ *  only builds `extensions.tsAnalysis.moduleGraph` when the analysis REQUESTED the package-level
+ *  diagram (`diagram-processor.ts`'s `needsModuleGraph`). For `packages/quay-github/src` and
+ *  `packages/quay-backlog/src` no such request was ever made, so their artifacts carry no graph — and
+ *  the old reading collapsed that into "not evaluated", voiding the whole aggregate forever.
+ *  A scope whose tracked non-test TypeScript files ALL live in the scope directory itself cannot have
+ *  a directory-level cycle (an SCC of directory nodes needs ≥2 distinct nodes). That conclusion is
+ *  derived from the FILE LIST — ⛔ never from the absence of `moduleGraph` (硬规则 3b: "no graph" only
+ *  says "not requested", it does not say "acyclic").
+ *
+ *  Returns `single:false` with a REASON whenever the judgment is impossible (git failed / no source
+ *  files) — so the caller can spell out why it fell back to not-evaluated. */
+export function singleDirectoryBasis(
+  root: string,
+  source: string,
+): { single: boolean; files: number; dirs: string[]; reason: string | null } {
+  const all = gitTrackedFiles(root, source);
+  if (all === null) {
+    return { single: false, files: 0, dirs: [], reason: `git ls-files -- ${source} failed — the single-directory judgment is NOT evaluated` };
+  }
+  const srcDir = path.posix.normalize(source.replace(/\/+$/, ""));
+  const dirs = new Set<string>();
+  let files = 0;
+  for (const f of all) {
+    if (!TS_SOURCE_FILE_RE.test(f) || TS_TEST_FILE_RE.test(f)) continue;
+    if (/(^|\/)__tests__\//.test(f)) continue;
+    files += 1;
+    dirs.add(path.posix.dirname(f));
+  }
+  if (files === 0) {
+    return { single: false, files: 0, dirs: [], reason: `no tracked non-test TypeScript files under ${source}` };
+  }
+  const sorted = [...dirs].sort();
+  return { single: sorted.length === 1 && sorted[0] === srcDir, files, dirs: sorted, reason: null };
+}
+
+/** How many commits AFTER `since` touched `source`. null ⇒ not computable (bad timestamp / git error),
+ *  ⛔ never 0 — "could not tell" must not read as "nothing changed since".
+ *
+ *  ⚠️ TWO git-timestamp traps, both measured:
+ *   1. An out-of-range `--since` is SILENTLY IGNORED (e.g. `2999-01-01` returns the FULL history). A
+ *      future timestamp therefore never reaches git: no commit can be after it ⇒ 0.
+ *   2. `--since` is INCLUSIVE at second granularity, so a commit made in the SAME second as the
+ *      artifact counts as "after" it. Right after a refresh that is always the case ⇒ every refreshed
+ *      scope would immediately re-report itself as behind and be re-analyzed forever. The window is
+ *      therefore shifted to strictly-after the artifact's second: a same-second commit is treated as
+ *      covered by the analysis (it read the tree at some point inside that second). */
+export function commitsSince(root: string, source: string, since: string | null): number | null {
+  if (typeof since !== "string" || since === "") return null;
+  const sinceMs = Date.parse(since);
+  if (!Number.isFinite(sinceMs)) return null;
+  if (sinceMs > Date.now()) return 0;
+  const strictlyAfter = new Date(Math.floor(sinceMs / 1000) * 1000 + 1000).toISOString();
+  const r = spawnSync("git", ["rev-list", "--count", `--since=${strictlyAfter}`, "HEAD", "--", source], {
+    cwd: root,
+    encoding: "utf8",
+  });
+  if (r.status !== 0) return null;
+  const n = Number.parseInt(String(r.stdout ?? "").trim(), 10);
+  return Number.isFinite(n) ? n : null;
 }
 
 function numeric(v: unknown): number | null {
@@ -322,6 +601,11 @@ function readDirectoryCycles(root: string, workDir: string, source: string): {
   directoryCyclesReason: string | null;
   directoryCycleCount: number | null;
   directoryCycles: DirectoryCycle[] | null;
+  /** WHICH measurement produced this reading: `module-graph` (read from the artifact's
+   *  `extensions.tsAnalysis.moduleGraph`) or `single-directory` (derived from the tracked file list
+   *  because no package-level diagram was requested). null ⇒ not evaluated. A reader must be able to
+   *  tell the two apart: they are different evidence for the same "0 cycles". */
+  directoryCyclesBasis: "module-graph" | "single-directory" | null;
   /** WHEN the artifact this reading came from was produced (`arch.json.timestamp`, falling back to the
    *  manifest scope's `generatedAt`). null ⇒ no artifact was read. A reading without this cannot be
    *  told apart from a current one (硬规则 4b: stale readings look exactly like fresh ones). */
@@ -332,6 +616,7 @@ function readDirectoryCycles(root: string, workDir: string, source: string): {
     directoryCyclesReason: reason,
     directoryCycleCount: null,
     directoryCycles: null,
+    directoryCyclesBasis: null,
     artifactTimestamp,
   });
 
@@ -390,8 +675,25 @@ function readDirectoryCycles(root: string, workDir: string, source: string): {
 
   const moduleGraph = arch?.extensions?.tsAnalysis?.moduleGraph;
   if (moduleGraph == null || typeof moduleGraph !== "object") {
+    // ⛔ "NO GRAPH" IS NOT "ACYCLIC" (硬规则 3b): archguard only builds the module graph when the
+    // analysis requested the package-level diagram. The ONE thing that may turn an absent graph into a
+    // real reading is the scope's own FILE LIST — a scope whose tracked non-test .ts files all live in
+    // one directory cannot have a directory-level cycle. That is the single-directory basis.
+    const sd = singleDirectoryBasis(root, source);
+    if (sd.single) {
+      return {
+        directoryCyclesEvaluated: true,
+        directoryCyclesReason: null,
+        directoryCycleCount: 0,
+        directoryCycles: [],
+        directoryCyclesBasis: "single-directory",
+        artifactTimestamp,
+      };
+    }
+    const why = sd.reason
+      ?? `${sd.files} tracked non-test TypeScript file(s) across ${sd.dirs.length} directories (${sd.dirs.slice(0, 4).join(", ")}${sd.dirs.length > 4 ? ", …" : ""}) — NOT single-directory`;
     return notEvaluated(
-      `query scope ${entry.key} for ${source} has no extensions.tsAnalysis.moduleGraph (language: ${String(arch?.language ?? "unknown")}) — directory-level cycles are NOT evaluated (not "0 cycles")`,
+      `moduleGraph not produced (package-level diagram not requested) — query scope ${entry.key} for ${source} has no extensions.tsAnalysis.moduleGraph (language: ${String(arch?.language ?? "unknown")}); ${why}; directory-level cycles are NOT evaluated (not "0 cycles")`,
       artifactTimestamp
     );
   }
@@ -419,6 +721,7 @@ function readDirectoryCycles(root: string, workDir: string, source: string): {
     directoryCyclesReason: null,
     directoryCycleCount: cycles.length,
     directoryCycles: cycles,
+    directoryCyclesBasis: "module-graph",
     artifactTimestamp,
   };
 }
@@ -431,9 +734,17 @@ function readDirectoryCycles(root: string, workDir: string, source: string): {
 // run analyze itself (that is the on-demand runner's job; running a 27s/task analyze on a routine tick
 // is exactly what `gap-fan-in-remove-archguard-gate` removed).
 //
-// ⛔ THREE-VALUED AT THE AGGREGATE LEVEL TOO (硬规则 3b): if ANY scope could not be read, the
-// aggregate `evaluated` is false and `totalCycleCount` is `null` — never the sum of the readable
-// scopes, because that number would read like a complete "N cycles" count.
+// ⛔ THREE-VALUED AT THE AGGREGATE LEVEL TOO (硬规则 3b), BUT NO LONGER ALL-OR-NOTHING:
+// gap-arch-cycle-report-never-evaluated-aggregate-and-stale-artifacts measured 25/25 rounds with
+// `evaluated:false` because TWO of the six scopes never produced a module graph — one permanently
+// unreadable scope voided five readable ones. The aggregate now reports per scope:
+//   • `status:"complete"` — every scope produced a reading.
+//   • `status:"partial"`  — at least one did, at least one did not; `totalCycleCount` is the sum over
+//                           the scopes that DID, and `notEvaluatedScopes` names the ones that did not.
+//   • `status:"none"`     — nothing could be read; `totalCycleCount` is `null` (⛔ never 0).
+// The sum stays `null` for `none` for the original reason: an empty sum would read like a complete
+// "0 cycles" measurement. It is non-null for `partial` because the scopes it covers really were read,
+// and the record names the ones it does not cover (硬规则 3b: the unmeasured part stays visible).
 
 /** One scope's directory-granularity reading, as the report-only routine persists it. */
 export interface DirectoryCycleScopeReading {
@@ -444,39 +755,77 @@ export interface DirectoryCycleScopeReading {
   cycleCount: number | null;
   /** The cycle MEMBERS (AC2: a non-empty reading must name its members, not just count them). */
   cycles: DirectoryCycle[] | null;
+  /** Which evidence produced this reading (see `readDirectoryCycles`). null ⇒ not evaluated. */
+  basis: "module-graph" | "single-directory" | null;
   /** When the artifact THIS scope was read from was produced (arch.json `timestamp`, else the
-   *  manifest scope's `generatedAt`). null ⇒ no artifact was read for this scope. */
+   *  manifest scope's `generatedAt`). null ⇒ no artifact was read for this scope.
+   *  ⚠️ A `single-directory` reading is derived from the CURRENT file list, not from the artifact —
+   *  the timestamp is still recorded (it says which artifact we looked at) but it does not age the
+   *  reading; see `commitsSinceArtifact`/`behindSources` below. */
   artifactTimestamp: string | null;
+  /** Commits AFTER `artifactTimestamp` that touched this scope's source directory — i.e. how far the
+   *  tree has moved past the artifact the reading came from. null ⇒ NOT COMPUTABLE (no artifact
+   *  timestamp / git failed), ⛔ never 0 (硬规则 3b: "could not tell" must not read as "up to date").
+   *  For a `single-directory` reading this is 0: the reading is taken from the live file list, so it
+   *  cannot be behind its sources no matter how old the artifact is. */
+  commitsSinceArtifact: number | null;
+  /** `commitsSinceArtifact > 0`. Three-valued: null when the count is not computable.
+   *  ⛔ NOT the same thing as the record-level `stale` (artifact age > scheduling interval): this one
+   *  says "the sources changed after the artifact", which is what makes a reading WRONG rather than
+   *  merely old. Both are kept, with their own names (hard rule 8: never reuse a name for a new
+   *  meaning). A behind scope still reports its cycle count — but it must be marked, never presented
+   *  as the current reading. */
+  behindSources: boolean | null;
 }
 
-/** The aggregate reading over SCOPES. `totalCycleCount` is non-null ONLY when every scope evaluated. */
+/** The aggregate reading over SCOPES. */
 export interface DirectoryCycleReading {
   workDir: string;
+  /** `status !== "none"` — a reading was produced for at least one scope. (Before this task this
+   *  meant "every scope evaluated"; `status` now carries that distinction, so an older reader that
+   *  only looks at this boolean still sees `false` for "nothing readable" as before.) */
   evaluated: boolean;
+  status: "complete" | "partial" | "none";
+  /** Non-null when `status === "complete"` (every scope read) or `"partial"` (names the scopes that
+   *  were not, with their reasons). null for `"none"`. */
   reason: string | null;
+  /** Sum over the scopes that produced a reading. `null` ONLY when `status === "none"`. */
   totalCycleCount: number | null;
+  /** The scope labels with `behindSources === true` (empty when none / not computable for any). */
+  behindScopes: string[];
+  notEvaluatedScopes: string[];
   scopes: DirectoryCycleScopeReading[];
-  /** THE OLDEST artifact timestamp among the scopes that ACTUALLY PRODUCED A READING (evaluated),
-   *  because those are the numbers this record reports — a reading is only as fresh as its stalest
-   *  contributing part, so one stale scope must not be hidden by fresher siblings.
-   *  Scopes that could only produce a `not-evaluated` row contribute nothing to the reported cycles,
-   *  so their (often much older) artifacts are NOT averaged in — that would make `stale` permanently
-   *  true and therefore information-free (硬规则 4).
-   *  null ⇒ nothing was read / nothing evaluated, and staleness is NOT EVALUABLE (硬规则 3b: ⛔ never
-   *  `false`). Per-scope timestamps remain available in `scopes` for the unevaluated ones. */
+  /** THE OLDEST artifact timestamp among the scopes that ACTUALLY PRODUCED AN ARTIFACT-DERIVED READING
+   *  (evaluated AND `basis:"module-graph"`), because those are the numbers this record reports and a
+   *  reading is only as fresh as its stalest contributing part.
+   *  Excluded, with reasons:
+   *   • `not-evaluated` rows contribute nothing to the reported cycles;
+   *   • `single-directory` rows are derived from the file list, not the artifact — counting their
+   *     (often ancient) artifact timestamps would make `stale` permanently true and information-free
+   *     (硬规则 4).
+   *  null ⇒ no artifact-derived reading, and staleness is NOT EVALUABLE (硬规则 3b: ⛔ never `false`).
+   *  Per-scope timestamps remain available in `scopes`. */
   artifactTimestamp: string | null;
 }
 
 /** Read the directory-level cycles from the artifacts the LAST `archguard analyze` persisted.
  *
- *  NEVER throws and NEVER spawns: a missing/unreadable `.archguard/query` tree is reported as
- *  `evaluated:false` + a per-scope reason (the same shape the gate uses), which is what makes the
- *  routine's 硬规则-3b test meaningful — "could not read" must not look like "0 cycles". */
+ *  NEVER throws and NEVER spawns an analyzer: a missing/unreadable `.archguard/query` tree is reported
+ *  as `evaluated:false` + a per-scope reason (the same shape the gate uses), which is what makes the
+ *  routine's 硬规则-3b test meaningful — "could not read" must not look like "0 cycles".
+ *  It DOES read `git` (file list for the single-directory basis, commit counts for `behindSources`);
+ *  those are cheap local reads, never an analysis. */
 export function readDirectoryCycleReading(root: string, workDir?: string): DirectoryCycleReading {
   const resolvedRoot = path.resolve(root);
   const resolvedWorkDir = workDir ? path.resolve(workDir) : path.join(resolvedRoot, ".archguard");
   const scopes: DirectoryCycleScopeReading[] = SCOPES.map(({ source, label }) => {
     const r = readDirectoryCycles(resolvedRoot, resolvedWorkDir, source);
+    const basis = r.directoryCyclesBasis;
+    // A single-directory reading is taken from the live file list ⇒ it cannot be behind its sources.
+    const commitsSinceArtifact =
+      r.directoryCyclesEvaluated && basis === "single-directory"
+        ? 0
+        : commitsSince(resolvedRoot, source, r.artifactTimestamp);
     return {
       scope: label,
       source,
@@ -484,28 +833,144 @@ export function readDirectoryCycleReading(root: string, workDir?: string): Direc
       reason: r.directoryCyclesReason,
       cycleCount: r.directoryCycleCount,
       cycles: r.directoryCycles,
+      basis,
       artifactTimestamp: r.artifactTimestamp,
+      commitsSinceArtifact,
+      behindSources: commitsSinceArtifact === null ? null : commitsSinceArtifact > 0,
     };
   });
-  // Oldest timestamp among the scopes that produced the readings this record reports (见 the interface
-  // comment: unevaluated scopes are not averaged in). Entries whose timestamp cannot be parsed as ISO
-  // are skipped rather than silently treated as "fresh".
+  // Oldest timestamp among the ARTIFACT-DERIVED readings this record reports (见 the interface comment:
+  // unevaluated and single-directory scopes are not averaged in). Entries whose timestamp cannot be
+  // parsed as ISO are skipped rather than silently treated as "fresh".
   const timestamps = scopes
-    .filter((s) => s.evaluated)
+    .filter((s) => s.evaluated && s.basis === "module-graph")
     .map((s) => s.artifactTimestamp)
     .filter((v): v is string => typeof v === "string" && v !== "" && Number.isFinite(Date.parse(v)));
   const artifactTimestamp = timestamps.length > 0 ? timestamps.reduce((a, b) => (a <= b ? a : b)) : null;
   const failed = scopes.filter((s) => !s.evaluated);
-  const evaluated = failed.length === 0;
+  const status: DirectoryCycleReading["status"] =
+    failed.length === 0 ? "complete" : failed.length === scopes.length ? "none" : "partial";
+  const evaluated = status !== "none";
   return {
     workDir: resolvedWorkDir,
     evaluated,
-    reason: evaluated ? null : failed.map((s) => `${s.scope}: ${s.reason}`).join(" | "),
-    totalCycleCount: evaluated ? scopes.reduce((n, s) => n + (s.cycleCount ?? 0), 0) : null,
+    status,
+    reason:
+      status === "complete"
+        ? null
+        : `${status === "partial" ? "partial" : "not-evaluated"} (${failed.length} of ${scopes.length} scopes not evaluated): ${failed
+            .map((s) => `${s.scope}: ${s.reason}`)
+            .join(" | ")}`,
+    totalCycleCount: status === "none" ? null : scopes.reduce((n, s) => n + (s.cycleCount ?? 0), 0),
+    behindScopes: scopes.filter((s) => s.behindSources === true).map((s) => s.scope),
+    notEvaluatedScopes: failed.map((s) => s.scope),
     scopes,
     artifactTimestamp,
   };
 }
+
+// ── Refresh: re-analyze a scope whose artifact is behind its sources ──────────────────────────────
+// WHY (gap-arch-cycle-report-never-evaluated-aggregate-and-stale-artifacts): the routine is a REPORT
+// (it must not run a 27s/task analyze every tick — `gap-fan-in-remove-archguard-gate`), but NOTHING
+// ever rewrote the artifacts it reads. Measured: the src artifact was produced at 16:17Z while the
+// cycle it should have shown was introduced at 16:26Z — the routine kept reporting "evaluated, 0
+// cycles" from a 9-minute-old artifact, and the cycle lived ~7h until a human ran archguard by hand.
+// So the routine refreshes AT MOST ONE scope per scheduling interval (the driver already gates the
+// routine by that interval; this function additionally only ever spends ONE analyze, so a refresh can
+// never turn a report tick into a 6×27s sweep, and a `stop` request still lands inside its window).
+//
+// It lives HERE, next to `runAnalyze`, because the spawn command (and the `--diagrams package` flag
+// that makes archguard emit the module graph at all) has exactly one spelling.
+export type ArchCycleRefreshSkip =
+  | "no-scope-needs-refresh"
+  | "instrument-absent"
+  | "analyze-failed";
+
+export interface ArchCycleRefreshResult {
+  attempted: boolean;
+  /** The scope label re-analyzed (at most one per call). */
+  refreshedScope: string | null;
+  refreshedSource: string | null;
+  skipped: ArchCycleRefreshSkip | null;
+  /** Human-readable explanation, always set when `skipped !== null` — for `instrument-absent` it lists
+   *  EVERY location probed (硬规则 3b/6: "not found" is only meaningful with the search spelled out). */
+  detail: string | null;
+  instrument: string | null;
+  instrumentSource: ArchguardCliSource | null;
+  searched: string[];
+  /** `archguard analyze` exit code; null when no analyze ran. */
+  exitCode: number | null;
+  at: string;
+}
+
+/** Does this scope's reading need a re-analysis? Three independent triggers, each NAMED:
+ *   • `behindSources === true` — the tree moved past the artifact (the reading is WRONG, not just old);
+ *   • not-evaluated BECAUSE the artifact carries no module graph — a package-level run is the only way
+ *     to give it one (⛔ NOT every not-evaluated state: "no manifest at all" is not curable by one
+ *     scope's analyze and must not turn a report tick into a blind spawn);
+ *   • not-evaluated AND every scope is unreadable is NOT a refresh case for the same reason.
+ *  `behindSources === null` (not computable) is NOT a trigger — ⛔ never treat "could not tell" as
+ *  "behind" (that would spend an analyze on every round of a non-git workspace). */
+export function scopeNeedsRefresh(scope: DirectoryCycleScopeReading): boolean {
+  if (scope.behindSources === true) return true;
+  if (!scope.evaluated && typeof scope.reason === "string" && scope.reason.includes("moduleGraph not produced")) return true;
+  return false;
+}
+
+/** Re-analyze ONE scope that needs it, requesting the package-level diagram so the query artifact
+ *  carries `extensions.tsAnalysis.moduleGraph`. Returns a record of what was done (never throws). */
+export function refreshBehindScopes(
+  root: string,
+  workDir: string | undefined,
+  reading: DirectoryCycleReading,
+  opts: { now?: string } = {},
+): ArchCycleRefreshResult {
+  const at = opts.now ?? new Date().toISOString();
+  const target = reading.scopes.find(scopeNeedsRefresh) ?? null;
+  const base = {
+    attempted: false,
+    refreshedScope: null,
+    refreshedSource: null,
+    instrument: null as string | null,
+    instrumentSource: null as ArchguardCliSource | null,
+    searched: [] as string[],
+    exitCode: null as number | null,
+    at,
+  };
+  if (!target) {
+    return { ...base, skipped: "no-scope-needs-refresh", detail: "every scope's artifact is current (or its staleness is not computable)" };
+  }
+  const resolvedRoot = path.resolve(root);
+  const resolvedWorkDir = workDir ? path.resolve(workDir) : path.join(resolvedRoot, ".archguard");
+  const resolution = resolveArchguardCliWithSource();
+  if (!resolution.cli) {
+    return {
+      ...base,
+      skipped: "instrument-absent",
+      detail: `archguard CLI not found — probed: ${resolution.searched.join(" ; ")}`,
+      searched: resolution.searched,
+    };
+  }
+  const rc = runAnalyze(resolution.cli, resolvedRoot, resolvedWorkDir, target.source, target.scope, {
+    diagrams: ["package"],
+    outputLabel: `arch-cycle-refresh-${target.scope}`,
+    viaNode: resolution.viaNode,
+    noCache: true,
+  });
+  return {
+    ...base,
+    attempted: true,
+    refreshedScope: target.scope,
+    refreshedSource: target.source,
+    skipped: rc === 0 ? null : "analyze-failed",
+    detail: rc === 0 ? `archguard analyze --diagrams package → ${target.source}` : `archguard analyze exited ${rc} for ${target.source}`,
+    instrument: resolution.cli,
+    instrumentSource: resolution.source,
+    searched: resolution.searched,
+    exitCode: rc,
+  };
+}
+
 
 // ── Reusable GRAPH-SUMMARY reading (topByOutDegree + relationCountByType) ─────────────────────────
 // gap-quality-round-facts-surface-top-out-degree-god-functions: the two non-cycle readings that
@@ -706,6 +1171,7 @@ function readScopeSignal(root: string, workDir: string, label: string, source: s
     directoryCyclesReason: null,
     directoryCycleCount: null,
     directoryCycles: null,
+    directoryCyclesBasis: null,
   };
   // The directory-granularity reading is taken INDEPENDENTLY of the class artifact: it comes from a
   // different persisted product (query scope) and must carry its own evaluated/reason triad (AC4).
@@ -718,6 +1184,7 @@ function readScopeSignal(root: string, workDir: string, label: string, source: s
           directoryCyclesReason: `analyze exited ${analyzeRc} — no product to read`,
           directoryCycleCount: null,
           directoryCycles: null,
+          directoryCyclesBasis: null,
         };
   const withDirectory = { ...base, ...directory };
   const unevaluated = (reason: string): ScopeSignal => ({ ...withDirectory, reason });
@@ -865,9 +1332,10 @@ function main(): void {
 
   // 1. The meter must be runnable (fail-closed on a missing CLI) — and the not-evaluated state is
   //    itself written to the carrier before exiting, so "no run" never looks like "clean run".
-  const cli = resolveArchguardCli();
+  const resolution = resolveArchguardCliWithSource();
+  const cli = resolution.cli;
   if (!cli) {
-    const reason = "archguard CLI not found (PATH / ARCHGUARD_RUNNER_CLI) — the meter must be runnable";
+    const reason = `archguard CLI not found — probed: ${resolution.searched.join(" ; ")} — the meter must be runnable`;
     appendHistory(workDir, {
       timestamp: new Date().toISOString(),
       tool: "archguard-runner",
@@ -892,7 +1360,7 @@ function main(): void {
 
   // 2. Version provenance. A record without a comparable version is not comparable across runs
   //    (archguard 0.1.35→0.1.40 changed detect_cycles' shape and scope resolution).
-  const archguardVersion = readArchguardVersion(cli);
+  const archguardVersion = readArchguardVersion(cli, resolution.viaNode);
   const versionReason =
     archguardVersion === null ? "archguard --version produced no readable version — record is not version-anchored" : null;
 
@@ -901,7 +1369,7 @@ function main(): void {
   //    the carrier records WHICH scopes failed to evaluate instead of collapsing them into one error.
   const scopes = SCOPES.map(({ source, label }) => {
     process.stdout.write(`archguard-runner: analyzing ${label} (${source})\n`);
-    const rc = runAnalyze(cli, root, workDir, source, label);
+    const rc = runAnalyze(cli, root, workDir, source, label, { viaNode: resolution.viaNode });
     return readScopeSignal(root, workDir, label, source, rc);
   });
 

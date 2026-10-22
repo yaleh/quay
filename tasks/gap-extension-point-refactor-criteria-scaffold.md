@@ -238,3 +238,10 @@ EXIT=0
 - docs/references/ownership-first-refactoring-methodology.md
 - tasks/DIR-133.md
 - tasks/gap-extension-point-refactor-criteria-scaffold.md
+
+## Blocker
+
+**2026-10-22T03:48:21.895Z — worker 未落地（exited-not-landed）**
+
+- 未落地原因：step=dark-axis: dark-axis (ADR-007 per-milestone predicate) refused the flip — MISSING: MISSING — the task body records no L_D/L_G reading (a numeric quantity at an axis-anchored line) and carries no explicit "该轴仍暗,理由:<...>" declaration. ADR-007 requires one or the other before the task may be called done.
+- run_id：wk-prod-anchor
