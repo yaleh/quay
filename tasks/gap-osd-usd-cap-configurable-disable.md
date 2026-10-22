@@ -2,7 +2,7 @@
 id: gap-osd-usd-cap-configurable-disable
 title: open-semantic-discovery 的 USD 限额没有「关闭」表达——max_usd_per_24h 只接受 >0， 0 被拒绝，且
   0 在次数限额里意为「全禁」不能复用；加 usd_cap_enabled 布尔并在配置里关掉
-status: todo
+status: ready
 labels:
   - gap
   - defect
