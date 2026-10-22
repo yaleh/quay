@@ -3,7 +3,7 @@ id: gap-mechanical-fan-in-flip-bypasses-adr007-dark-axis-predicate
 title: 机械 fan-in 翻 done 绕过 ADR-007 dark-axis 判定：2026-09-14 起 816 条 complete 事件对
   36 条 dark-axis 事件， 795 条来自 driver 的落地没有一条经过判定；按当前任务体回放，793 个 driver 落地任务中 782
   个会被判 MISSING
-status: ready
+status: done
 labels:
   - gap
   - defect
