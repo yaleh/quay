@@ -58,15 +58,15 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1 判据正本四臂齐备：`grep -n '^### 臂' docs/references/ownership-first-refactoring-methodology.md` 输出 4 行，且每臂段落写明「取假方式」（哪一步为红）与它是否活性臂；贴这 4 行与前 3 条命中内容。
-- [ ] AC2 脚手架可运行：对一个示例任务 id 运行 `node --experimental-strip-types plugin/scripts/extension-point-criteria.ts --scaffold --task-id <id> --central <file> --outside <module>`，stdout 含四臂占位符、正臂 `triggered=1` 断言模板、以及「本 AC 是单次验收、非常设棘轮」的固定说明，退出码 0；贴完整输出。
-- [ ] AC3 检查器四态可分：fixture 单测覆盖 `satisfied` / `missing-arms` / `not-applicable` / `NOT-EVALUATED` 四种输入，且断言 `NOT-EVALUATED` 的输出与 `satisfied` 在**每一个判别字段上都不同**（硬规则 3b）；贴测试文件路径与断言条数。
-- [ ] AC4 位置判定负对照：把四臂文字整段放进 `## Proposal` 散文、AC 列表项只写行为判据，检查器必须报 `missing-arms`（不是 `satisfied`）；再把同样四臂写进 AC 列表项，必须报 `satisfied`。贴两次运行的完整输出。
-- [ ] AC5 生产载体读数：对主检出 `tasks/*.md` 中所有带 `refactor-slice` 标签（若无则用 `plan` 形状 + 标题含「拆分/切片/重构」）的任务实跑检查器，贴 `{evaluated:true, satisfied:N, missing:N, notApplicable:N}` 计数与前 5 条缺失任务 id。本条只要求读数可复现，**不要求本次把缺失清零**。
-- [ ] AC6 skill 可被调用：`plugin/skills/extension-point-refactor/SKILL.md` 存在且经 `plugin/scripts/capability-catalog.sh` 或清单可见；贴清单命令输出中对应行。
-- [ ] AC7 目录一致：`bash plugin/scripts/capability-catalog.sh --summary` 自报计数与声明数一致、新增脚本 `0 unclassified`；贴原文。
-- [ ] AC8 负臂真空绿被机件拦住：检查器 fixture 里放一份「只有负臂、正臂写成『handler 存在』」的任务体，必须输出 `missing-arms` 且命中项具名到正臂；同一份任务体把正臂改成 `triggered=1` 后才 `satisfied`。贴两次运行的完整输出与 fixture 路径。模板正本中对应三句（正臂断言 `triggered=1` / 只写负臂判无效 / 红线基线是单次 AC 非棘轮）各贴一行原文。
-- [ ] AC9 两种占比口径分开记录：`docs/references/ownership-first-refactoring-methodology.md` §13 写明 `centralΔ`（单 commit churn，含删除，claudecodeui 口径）与「中心文件增长占比」（时间窗，只计新增，quay 口径）**不是同一个量、不可互引**，并各给一条公式与一个实例值；贴这两行原文。
+- [x] AC1 判据正本四臂齐备：`grep -n '^### 臂' docs/references/ownership-first-refactoring-methodology.md` 输出 4 行，且每臂段落写明「取假方式」（哪一步为红）与它是否活性臂；贴这 4 行与前 3 条命中内容。 —— `grep -n '^### 臂'` 输出 4 行，且每臂写明取假方式与是否活性臂（原文：`是否活性臂`：臂1=是，臂2/3/4=否）。
+- [x] AC2 脚手架可运行：对一个示例任务 id 运行 `node --experimental-strip-types plugin/scripts/extension-point-criteria.ts --scaffold --task-id <id> --central <file> --outside <module>`，stdout 含四臂占位符、正臂 `triggered=1` 断言模板、以及「本 AC 是单次验收、非常设棘轮」的固定说明，退出码 0；贴完整输出。 —— exit 0；stdout 含四臂占位符、`triggered=1` 断言模板、「本 AC 是单次验收、非常设棘轮」固定说明（完整输出见 Evidence）。
+- [x] AC3 检查器四态可分：fixture 单测覆盖 `satisfied` / `missing-arms` / `not-applicable` / `NOT-EVALUATED` 四种输入，且断言 `NOT-EVALUATED` 的输出与 `satisfied` 在**每一个判别字段上都不同**（硬规则 3b）；贴测试文件路径与断言条数。 —— `plugin/test/extension-point-criteria-check.test.mjs`：8 个 test、54 条断言全绿；NOT-EVALUATED 判据内 7 条断言，`evaluated/verdict/applicable/satisfied/四臂` 每个判别字段都与 satisfied 不同。
+- [x] AC4 位置判定负对照：把四臂文字整段放进 `## Proposal` 散文、AC 列表项只写行为判据，检查器必须报 `missing-arms`（不是 `satisfied`）；再把同样四臂写进 AC 列表项，必须报 `satisfied`。贴两次运行的完整输出。 —— Proposal 散文版 = `missing-arms` / exit 1；同样四臂写进 AC 列表项 = `satisfied` / exit 0（两次完整输出见 Evidence）。
+- [x] AC5 生产载体读数：对主检出 `tasks/*.md` 中所有带 `refactor-slice` 标签（若无则用 `plan` 形状 + 标题含「拆分/切片/重构」）的任务实跑检查器，贴 `{evaluated:true, satisfied:N, missing:N, notApplicable:N}` 计数与前 5 条缺失任务 id。本条只要求读数可复现，**不要求本次把缺失清零**。 —— `{evaluated:true, satisfied:0, missing:34, notApplicable:1891}`（另有 notEvaluated:1019），前 5 缺失 id = `DIR-074, DIR-080, DIR-133, exp5-M-ARCH-AUDIT-M108-EXPLORE, exp5-M-TS-MIGRATION-P0`；本条不要求清零。
+- [x] AC6 skill 可被调用：`plugin/skills/extension-point-refactor/SKILL.md` 存在且经 `plugin/scripts/capability-catalog.sh` 或清单可见；贴清单命令输出中对应行。 —— `find plugin/skills -maxdepth 2 -name SKILL.md` 命中 `plugin/skills/extension-point-refactor/SKILL.md`；`plugin/test/plugin-packaging.test.mjs` 的 14 目录清单含 `extension-point-refactor`。
+- [x] AC7 目录一致：`bash plugin/scripts/capability-catalog.sh --summary` 自报计数与声明数一致、新增脚本 `0 unclassified`；贴原文。 —— `capability-catalog: 392 scripts | 392 declared | 0 unclassified | 387 ship`（原文见 Evidence）。
+- [x] AC8 负臂真空绿被机件拦住：检查器 fixture 里放一份「只有负臂、正臂写成『handler 存在』」的任务体，必须输出 `missing-arms` 且命中项具名到正臂；同一份任务体把正臂改成 `triggered=1` 后才 `satisfied`。贴两次运行的完整输出与 fixture 路径。模板正本中对应三句（正臂断言 `triggered=1` / 只写负臂判无效 / 红线基线是单次 AC 非棘轮）各贴一行原文。 —— weak fixture（正臂写「handler 存在」）= `missing-arms` 且 `missing:["positive"]`、weak.reason=`named-but-no-count-assertion`；改成 `triggered=1` 后 = `satisfied`（两次输出与三句模板原文见 Evidence）。
+- [x] AC9 两种占比口径分开记录：`docs/references/ownership-first-refactoring-methodology.md` §13 写明 `centralΔ`（单 commit churn，含删除，claudecodeui 口径）与「中心文件增长占比」（时间窗，只计新增，quay 口径）**不是同一个量、不可互引**，并各给一条公式与一个实例值；贴这两行原文。 —— §13.6 两条公式各带实例：`centralΔ` 263/1275 = 0.206（单 commit，含删除）；中心文件增长占比 +4,820/(4,820+1,025) = 82.46%（时间窗，只计新增），并显式写明不可互引（原文见 Evidence）。
 
 ## Definition of Done
 
@@ -74,11 +74,157 @@ extra:
 - `docs/references/ownership-first-refactoring-methodology.md` §13 的 R0–R3 表补上「方法体 vs 方法壳」读法，并链接本检查器；同节写清 `centralΔ`（单 commit churn，含删除）与「中心文件增长占比」（时间窗，只计新增）不可互引。
 - `tasks/DIR-133.md` 裁定 2 处有一行指针指向检查器，规则不再只有散文一份载体。
 
+## Evidence
+
+### AC1 — 判据正本四臂（4 行命中 + 前 3 段原文）
+
+```
+$ grep -n '^### 臂' docs/references/ownership-first-refactoring-methodology.md
+241:### 臂 1 — 正臂（positive arm）：从中心文件之外注册的 handler 被触发
+248:### 臂 2 — 负臂（negative arm）：未注册时不触发
+256:### 臂 3 — 注入泄漏（injection leak）：把分派器替换成泄漏实现后，同一断言必红
+263:### 臂 4 — 红线基线（red-line baseline）：改动前 `wc -l <基线>` 的断言必红
+```
+
+前 3 段（各含「取假方式」与「是否活性臂」）：
+
+```
+### 臂 1 — 正臂（positive arm）：从中心文件之外注册的 handler 被触发
+**断言形态**：从 `<outside>` 注册一个新的处理单元、**不修改** `<central>`，运行后读数必须是 **`triggered=1`（计数）**——不是「handler 存在」。
+**取假方式**：删掉/断线外部注册后同一断言读数为 `triggered=0` ⇒ 本条必红。红色落点是「注册被移除/接线断开」这一步。
+**是否活性臂**：**是**。这条正臂就是活性检查，不另配一条；负臂不能替代它。
+
+### 臂 2 — 负臂（negative arm）：未注册时不触发
+**断言形态**：同一个断言在【未注册】时读数为 `triggered=0`。
+**取假方式**：分派器泄漏/无条件调用时，`triggered=0` 必红。
+**是否活性臂**：**否**（它是真空绿的来源，必须配正臂）。⚠️ 负臂单独看，对「注册了但断线」是**假绿**——断线时 `triggered=0`，负臂照样绿，只是绿错了理由。因此：**只写负臂、不写正臂 ⇒ 判据无效**，检查器判 `missing-arms` 并具名到正臂；负臂只有在与一条 counted 正臂（`triggered=1`）成对时才被接受。
+
+### 臂 3 — 注入泄漏（injection leak）：把分派器替换成泄漏实现后，同一断言必红
+**断言形态**：把 `<central>` 的分派器替换成泄漏实现（无视注册表、无条件调用），臂 1 / 臂 2 的同一断言必须打红。
+**取假方式**：替换后仍绿 ⇒ 该臂没测到分派器，判红。
+**是否活性臂**：**否**。它的作用是证明**负臂断言本身不真空**（不是给正臂兜底）。
+```
+
+### AC2 — 脚手架完整输出（`--scaffold --task-id EX-SLICE-1 --central packages/quay/src/serve.ts --outside src/serve/handlers/registry.ts`，exit 0）
+
+```
+<!-- extension-point-criteria scaffold — generated by plugin/scripts/extension-point-criteria.ts -->
+<!-- task: EX-SLICE-1 ; central: packages/quay/src/serve.ts ; outside: src/serve/handlers/registry.ts -->
+<!-- dry-run: paste the AC block below into the task's ## Acceptance Criteria through Provider ABI task_write. -->
+
+## Acceptance Criteria
+
+<!-- 扩展点判据四件套 — paste these four items into the task's own Acceptance Criteria via task_write. -->
+
+- [ ] 正臂（活性检查）：从 src/serve/handlers/registry.ts 注册一个新的处理单元、不改 packages/quay/src/serve.ts，运行后读数必须是 triggered=1（计数断言，不是「handler 存在」）。取假方式：删掉/断线 src/serve/handlers/registry.ts 的注册后同一断言读数为 triggered=0 ⇒ 本条必红。**这条正臂就是活性检查，不另配。**
+- [ ] 负臂：同一个断言在【未注册】时读数为 triggered=0。取假方式：分派器泄漏/无条件触发时该断言必红。⚠️ 负臂必须与一条 counted 正臂（triggered=1）成对；**只写负臂、不写正臂 ⇒ 判据无效**，检查器判 missing-arms。
+- [ ] 注入泄漏：把 packages/quay/src/serve.ts 的分派器替换成泄漏实现（无视注册表、无条件调用），上一臂/正臂的同一断言必须打红。取假方式：替换后仍绿 ⇒ 该臂没测到分派器。它的作用是证明【负臂断言本身不真空】，不是给正臂兜底。
+- [ ] 红线基线：改动前记录 `wc -l packages/quay/src/serve.ts` 的基线（<填基线行数>），并断言改动后的中心文件行数 < 基线；在改动前跑该断言必须为红。取假方式：基线前跑不红 ⇒ 断言没测到那次增长。**本 AC 是单次验收、非常设棘轮**，不是常设检查。
+
+### 固定说明
+
+本 AC 是单次验收、非常设棘轮：红线基线只在本次重构任务验收时由 worker 检查一次，任务 done 后永不复评，不进入常设检查链，也不需要重锚规则。常设棘轮属于设计演进读数例程（design-evolution-readings.ts）的领域，本 AC 不假装拥有它。
+
+### 落 AC 前自检
+
+```bash
+node --experimental-strip-types plugin/scripts/extension-point-criteria-check.ts --task-id EX-SLICE-1 --json
+```
+
+四态读法：satisfied（四臂齐备）/ missing-arms（逐臂具名缺哪几臂）/ not-applicable（不是设计切片）/ NOT-EVALUATED（AC 段读不到，独立取值，不得与 satisfied 同形）。
+```
+
+### AC3 — 测试文件与断言条数
+
+- 文件：`plugin/test/extension-point-criteria-check.test.mjs`
+- `node --test plugin/test/extension-point-criteria-check.test.mjs` ⇒ `tests 8 / pass 8 / fail 0`；全文件 `assert.` 54 条。
+- AC3 判据（`NOT-EVALUATED is a distinct value...`）内 7 条断言：`verdict`/`reason` 2 条 equal + `evaluated`/`verdict`/`applicable`/`satisfied`/四臂 5 条 notEqual（四臂循环逐臂断言）——每个判别字段都与 `satisfied` 不同。
+
+### AC4 — 位置判定负对照（两次完整输出）
+
+fixture 目录：`/tmp/epc-evidence-Jb8PhM/`
+
+第一次：四臂整段放 `## Proposal` 散文，AC 列表项只写行为判据（`ac4-prose.md`）：
+
+```json
+{"evaluated":true,"verdict":"missing-arms","applicable":true,"satisfied":false,"arms":{"positive":false,"negative":false,"injectionLeak":false,"redLineBaseline":false},"missing":["positive","negative","injectionLeak","redLineBaseline"],"missingLabels":["正臂","负臂","注入泄漏","红线基线"],"missingArms":[{"arm":"positive","label":"正臂","question":"从中心文件之外注册的 handler 被触发了吗（计数断言 triggered=1，不是「handler 存在」）？"},{"arm":"negative","label":"负臂","question":"未注册时确实不触发吗（且与一条 counted 正臂成对，否则是真空绿）？"},{"arm":"injectionLeak","label":"注入泄漏","question":"把分派器换成泄漏实现后，同一断言会打红吗（证明负臂不真空）？"},{"arm":"redLineBaseline","label":"红线基线","question":"改动前 `wc -l <中心文件>` 的基线断言为红吗（单次验收，非常设棘轮）？"}],"weak":[],"acItems":1,"taskId":"ac4-prose","taskFile":"/tmp/epc-evidence-Jb8PhM/ac4-prose.md","status":"fail","ok":false,"message":"missing-arms — ac4-prose: missing 正臂 / 负臂 / 注入泄漏 / 红线基线"}
+EXIT=1
+```
+
+第二次：同样四臂写进 AC 列表项（`ac4-in-ac.md`）：
+
+```json
+{"evaluated":true,"verdict":"satisfied","applicable":true,"satisfied":true,"arms":{"positive":true,"negative":true,"injectionLeak":true,"redLineBaseline":true},"missing":[],"missingLabels":[],"missingArms":[],"weak":[],"acItems":4,"taskId":"ac4-in-ac","taskFile":"/tmp/epc-evidence-Jb8PhM/ac4-in-ac.md","status":"pass","ok":true,"message":"satisfied — ac4-in-ac: 四臂齐备 (正臂 / 负臂 / 注入泄漏 / 红线基线)"}
+EXIT=0
+```
+
+### AC5 — 生产载体读数（主检出 `tasks/*.md`）
+
+```
+$ node --experimental-strip-types plugin/scripts/extension-point-criteria-check.ts --scan --tasks-dir /data/home/yale/work/quay/tasks --json
+{"evaluated":true,"tasksDir":"/data/home/yale/work/quay/tasks","satisfied":0,"missing":34,"notApplicable":1891,"notEvaluated":1019,"missingIds":["DIR-074","DIR-080","DIR-133","exp5-M-ARCH-AUDIT-M108-EXPLORE","exp5-M-TS-MIGRATION-P0"],"status":"pass","ok":true,"message":"extension-point criteria over /data/home/yale/work/quay/tasks: satisfied=0 missing=34 notApplicable=1891 notEvaluated=1019 | first missing: DIR-074, DIR-080, DIR-133, exp5-M-ARCH-AUDIT-M108-EXPLORE, exp5-M-TS-MIGRATION-P0"}
+```
+
+`refactor-slice` 标签在主检出 0 个任务携带（唯一命中是本任务正文的自述），因此按 AC5 的 fallback（标题含「拆分/切片/重构」）判定适用性。
+
+### AC6 — skill 可见
+
+```
+$ find plugin/skills -maxdepth 2 -name SKILL.md | sort
+...
+plugin/skills/extension-point-refactor/SKILL.md
+...
+```
+
+`plugin/test/plugin-packaging.test.mjs` 的 14 目录清单已含 `'extension-point-refactor'`（第 108 行）。
+
+### AC7 — 目录一致
+
+```
+$ bash plugin/scripts/capability-catalog.sh --summary
+capability-catalog: 392 scripts | 392 declared | 0 unclassified | 387 ship
+```
+
+### AC8 — 负臂真空绿被机件拦住（两次完整输出 + 三句模板原文）
+
+fixture：`/tmp/epc-evidence-Jb8PhM/ac8-weak.md`（正臂写成「handler 存在」）⇒
+
+```json
+{"evaluated":true,"verdict":"missing-arms","applicable":true,"satisfied":false,"arms":{"positive":false,"negative":true,"injectionLeak":true,"redLineBaseline":true},"missing":["positive"],"missingLabels":["正臂"],"missingArms":[{"arm":"positive","label":"正臂","question":"从中心文件之外注册的 handler 被触发了吗（计数断言 triggered=1，不是「handler 存在」）？"}],"weak":[{"arm":"positive","label":"正臂","reason":"named-but-no-count-assertion","item":"正臂：从外部注册的 handler 存在。"}],"acItems":4,"taskId":"ac8-weak","taskFile":"/tmp/epc-evidence-Jb8PhM/ac8-weak.md","status":"fail","ok":false,"message":"missing-arms — ac8-weak: missing 正臂 (weak: 正臂=named-but-no-count-assertion)"}
+EXIT=1
+```
+
+同一份任务体把正臂改成 `triggered=1`（`/tmp/epc-evidence-Jb8PhM/ac8-strong.md`）⇒
+
+```json
+{"evaluated":true,"verdict":"satisfied","applicable":true,"satisfied":true,"arms":{"positive":true,"negative":true,"injectionLeak":true,"redLineBaseline":true},"missing":[],"missingLabels":[],"missingArms":[],"weak":[],"acItems":4,"taskId":"ac8-strong","taskFile":"/tmp/epc-evidence-Jb8PhM/ac8-strong.md","status":"pass","ok":true,"message":"satisfied — ac8-strong: 四臂齐备 (正臂 / 负臂 / 注入泄漏 / 红线基线)"}
+EXIT=0
+```
+
+模板正本三句原文（`docs/references/ownership-first-refactoring-methodology.md` §13.5）：
+
+```
+**断言形态**：从 `<outside>` 注册一个新的处理单元、**不修改** `<central>`，运行后读数必须是 **`triggered=1`（计数）**——不是「handler 存在」。
+因此：**只写负臂、不写正臂 ⇒ 判据无效**，检查器判 `missing-arms` 并具名到正臂；负臂只有在与一条 counted 正臂（`triggered=1`）成对时才被接受。
+**本臂是单次任务 AC，不是常设棘轮**：只在重构任务验收时由 worker 检查一次，任务 done 后永不复评，因此它**不会**在后续增长里恒红，**不需要重锚规则**。
+```
+
+### AC9 — 两种占比口径分开记录（原文两行）
+
+```
+- **`centralΔ`（claudecodeui 口径；单 commit churn，含删除）** = (该 commit 内中心文件的 insertions + deletions) ÷ (该 commit 全部文件的 insertions + deletions)。实例：driver 那一刀 263 / 1275 = 0.206。
+- **中心文件增长占比（quay 口径；时间窗，只计新增）** = 窗口内中心文件新增行 ÷ (中心文件新增行 + 非中心文件新增行)。实例：`worker-history` 基线 `2440b52d0` → `ff32d031d`，中心 +4,820 ÷ (4,820 + 1,025) = 82.46%；同一公式在 serve 上得 1.31%（+153 ÷ (+153 + +11,534)）。
+```
+
+同节显式结论：「不是同一个量，⛔ 不得互相引用」。
+
 ## Touches
 
 - plugin/scripts/extension-point-criteria.ts
 - plugin/scripts/extension-point-criteria-check.ts
 - plugin/test/extension-point-criteria-check.test.mjs
+- plugin/test/plugin-packaging.test.mjs
+- plugin/.claude-plugin/plugin.json
 - plugin/skills/extension-point-refactor/SKILL.md
 - plugin/scripts/capability-catalog-declarations.json
 - docs/references/ownership-first-refactoring-methodology.md
