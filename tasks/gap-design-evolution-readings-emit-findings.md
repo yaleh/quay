@@ -2,7 +2,7 @@
 id: gap-design-evolution-readings-emit-findings
 title: 设计演化读数只报不动作——不产出 finding、与既有立案通道零接线；改为在相对回归与连续 未评估时产出可去重的 finding，交现成
   routine-file-gate 立案
-status: todo
+status: ready
 labels:
   - gap
   - defect
