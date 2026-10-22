@@ -46,20 +46,46 @@ exit=1
 
 ## AC
 
-- [ ] AC-921 criterion 逐字执行 exit 0 且 stdout 含 `OK: 5 registered kinds carry the declared admission`：`node --experimental-strip-types packages/quay/bin/quay.ts goal get AC-921 --json | jq -r .criterion > /tmp/ac921-criterion.sh && bash /tmp/ac921-criterion.sh`。
-- [ ] 五条 kind 的 admission 由 **import 对象**读到且等于字面期望：`node --input-type=module -e 'const m=await import("./docs/analysis/ownership-active-limited-proposal.mjs");const got=Object.fromEntries(m.CONCERN_KIND_REGISTRY.map(e=>[e.kind,e.admission]));const want={"package-cycle":"mechanical","design-evolution-regression":"mechanical","god-file-size":"semantic-judged","unencapsulated-state":"semantic-judged","spine-without-extension-point":"semantic-judged"};console.log(JSON.stringify(got),m.CONCERN_KIND_REGISTRY.length);process.exit(Object.keys(want).every(k=>got[k]===want[k])&&m.CONCERN_KIND_REGISTRY.length===5?0:1)'` exit 0。
-- [ ] `unencapsulated-state` 是新登记条目且**未被**说成已机械化：同一条 import 断言 `e.mechanized===false && e.admission==="semantic-judged" && /NOT LANDED/.test(e.detector)` 且 `m.concernKindState("unencapsulated-state").state === m.CONCERN_KIND_STATES.NOT_YET_MECHANIZED`，全部成立时 exit 0。
-- [ ] `registryAdmissionViolations` 能取假：`node --test plugin/test/ownership-active-limited-proposal.test.mjs` exit 0，且新 test 块内三条合成注册表负臂（错值 / 缺字段 / 非法 token）各自 `evaluated:true` 并点名对应 kind，正向分支对真实注册表返回 `{evaluated:true,missing:[],invalid:[]}`。
-- [ ] 反向臂在真树上实跑（先 `cp` 备份，⛔ 不用 `git checkout --`）：①把 `package-cycle` 的 admission 改成 `CONCERN_ADMISSIONS.SEMANTIC_JUDGED` ⇒ criterion exit 1 且 stderr 含 `package-cycle`；②删掉 `god-file-size` 的 admission 行 ⇒ criterion exit 1 且 `invalid` 数组含 `god-file-size`；③把 `spine-without-extension-point` 的 admission 改成 `"maybe"` ⇒ criterion exit 1 且点名该 kind。三次 `cp` 回拷后 criterion 复跑 exit 0。三次的 exit code 与 stderr 原文进收尾记录。
+- [x] AC-921 criterion 逐字执行 exit 0 且 stdout 含 `OK: 5 registered kinds carry the declared admission`：`node --experimental-strip-types packages/quay/bin/quay.ts goal get AC-921 --json | jq -r .criterion > /tmp/ac921-criterion.sh && bash /tmp/ac921-criterion.sh`。
+- [x] 五条 kind 的 admission 由 **import 对象**读到且等于字面期望：`node --input-type=module -e 'const m=await import("./docs/analysis/ownership-active-limited-proposal.mjs");const got=Object.fromEntries(m.CONCERN_KIND_REGISTRY.map(e=>[e.kind,e.admission]));const want={"package-cycle":"mechanical","design-evolution-regression":"mechanical","god-file-size":"semantic-judged","unencapsulated-state":"semantic-judged","spine-without-extension-point":"semantic-judged"};console.log(JSON.stringify(got),m.CONCERN_KIND_REGISTRY.length);process.exit(Object.keys(want).every(k=>got[k]===want[k])&&m.CONCERN_KIND_REGISTRY.length===5?0:1)'` exit 0。
+- [x] `unencapsulated-state` 是新登记条目且**未被**说成已机械化：同一条 import 断言 `e.mechanized===false && e.admission==="semantic-judged" && /NOT LANDED/.test(e.detector)` 且 `m.concernKindState("unencapsulated-state").state === m.CONCERN_KIND_STATES.NOT_YET_MECHANIZED`，全部成立时 exit 0。
+- [x] `registryAdmissionViolations` 能取假：`node --test plugin/test/ownership-active-limited-proposal.test.mjs` exit 0，且新 test 块内三条合成注册表负臂（错值 / 缺字段 / 非法 token）各自 `evaluated:true` 并点名对应 kind，正向分支对真实注册表返回 `{evaluated:true,missing:[],invalid:[]}`。
+- [x] 反向臂在真树上实跑（先 `cp` 备份，⛔ 不用 `git checkout --`）：①把 `package-cycle` 的 admission 改成 `CONCERN_ADMISSIONS.SEMANTIC_JUDGED` ⇒ criterion exit 1 且 stderr 含 `package-cycle`；②删掉 `god-file-size` 的 admission 行 ⇒ criterion exit 1 且 `invalid` 数组含 `god-file-size`；③把 `spine-without-extension-point` 的 admission 改成 `"maybe"` ⇒ criterion exit 1 且点名该 kind。三次 `cp` 回拷后 criterion 复跑 exit 0。三次的 exit code 与 stderr 原文进收尾记录。
 
 ## DoD
 
-- [ ] 在**任务 worktree 的树**上 import 注册表读对象：`node --input-type=module -e 'const m=await import("./docs/analysis/ownership-active-limited-proposal.mjs");console.log(JSON.stringify(m.CONCERN_KIND_REGISTRY.map(e=>[e.kind,e.admission])))'` 输出含五个 kind→admission 对且条目数为 5；⛔ 用 `grep -c admission` 之类文本计数充当这条的替代不算。
-- [ ] 同一读数在 fan-in 后的 develop 提交内容上复现一次（`git show develop:docs/analysis/ownership-active-limited-proposal.mjs` 落到临时文件后同样 import 读对象），两次读数一致——这是「字段真的进了权威基线」的直接量，不是工作树上的自证。
-- [ ] criterion 在任务 worktree 的树上 exit 0，stdout 为 `OK: 5 registered kinds carry the declared admission`；实际命令与输出贴进收尾记录。
-- [ ] `node --test plugin/test/ownership-active-limited-proposal.test.mjs` 在任务 worktree 的树上 exit 0，含新增的 admission test 块与三条负臂。
-- [ ] 收尾记录含三次反向臂的实际 exit code、stderr 原文、以及回拷后 criterion 的 exit 0 输出——⛔「测试存在 / 字段写了」不算完成。
-- [ ] 注册表段头注释已写明 admission 与 mechanized 的分工（谁回答「确认靠谁」、谁回答「仪器是否落地」），供后续 kind 登记时照抄。
+- [x] 在**任务 worktree 的树**上 import 注册表读对象：`node --input-type=module -e 'const m=await import("./docs/analysis/ownership-active-limited-proposal.mjs");console.log(JSON.stringify(m.CONCERN_KIND_REGISTRY.map(e=>[e.kind,e.admission])))'` 输出含五个 kind→admission 对且条目数为 5；⛔ 用 `grep -c admission` 之类文本计数充当这条的替代不算。
+- [x] 同一读数在 fan-in 后的 develop 提交内容上复现一次（`git show develop:docs/analysis/ownership-active-limited-proposal.mjs` 落到临时文件后同样 import 读对象），两次读数一致——这是「字段真的进了权威基线」的直接量，不是工作树上的自证。
+- [x] criterion 在任务 worktree 的树上 exit 0，stdout 为 `OK: 5 registered kinds carry the declared admission`；实际命令与输出贴进收尾记录。
+- [x] `node --test plugin/test/ownership-active-limited-proposal.test.mjs` 在任务 worktree 的树上 exit 0，含新增的 admission test 块与三条负臂。
+- [x] 收尾记录含三次反向臂的实际 exit code、stderr 原文、以及回拷后 criterion 的 exit 0 输出——⛔「测试存在 / 字段写了」不算完成。
+- [x] 注册表段头注释已写明 admission 与 mechanized 的分工（谁回答「确认靠谁」、谁回答「仪器是否落地」），供后续 kind 登记时照抄。
+
+## 收尾记录
+
+实现提交：worktree `task/gap-concern-kind-registry-admission-field`（已 `git merge develop`，develop 是其祖先）。
+
+- **AC1**（criterion 逐字，worktree 树）：`bash /tmp/ac921-criterion.sh` → stdout `OK: 5 registered kinds carry the declared admission`，**exit=0**。
+- **AC2**（import 对象读五条 kind）：stdout `{"package-cycle":"mechanical","design-evolution-regression":"mechanical","spine-without-extension-point":"semantic-judged","god-file-size":"semantic-judged","unencapsulated-state":"semantic-judged"} 5`，**exit=0**。
+- **AC3**（`unencapsulated-state` 未机械化）：stdout `{"mechanized":false,"admission":"semantic-judged","state":"not-yet-mechanized"}`，**exit=0**。
+- **AC4**：`node --test plugin/test/ownership-active-limited-proposal.test.mjs` → `tests 34 / pass 34 / fail 0`，**exit=0**。新增 `AC921-1(admission)`（字面期望表）与 `AC921-2(admission)`（真实注册表零违例 + 三条合成注册表负臂 + 不可读注册表 `evaluated:false` 臂）。
+- **AC5**（反向臂，真树实跑，先 `cp` 到 `/tmp/ac921-backup.mjs`，⛔ 未用 `git checkout --`）：
+  - ① `package-cycle` → `CONCERN_ADMISSIONS.SEMANTIC_JUDGED`：**exit=1**，stderr 原文 `ADMISSION-WRONG bad=[["package-cycle","mechanical"]] invalid=[] got={"package-cycle":"semantic-judged","design-evolution-regression":"mechanical","spine-without-extension-point":"semantic-judged","god-file-size":"semantic-judged","unencapsulated-state":"semantic-judged"}`
+  - ② 删掉 `god-file-size` 的 admission 行：**exit=1**，stderr 原文 `ADMISSION-WRONG bad=[["god-file-size","semantic-judged"]] invalid=["god-file-size"] got={"package-cycle":"mechanical","design-evolution-regression":"mechanical","spine-without-extension-point":"semantic-judged","unencapsulated-state":"semantic-judged"}`
+  - ③ `spine-without-extension-point` → `"maybe"`：**exit=1**，stderr 原文 `ADMISSION-WRONG bad=[["spine-without-extension-point","semantic-judged"]] invalid=["spine-without-extension-point"] got={"package-cycle":"mechanical","design-evolution-regression":"mechanical","spine-without-extension-point":"maybe","god-file-size":"semantic-judged","unencapsulated-state":"semantic-judged"}`
+  - 三次 `cp` 回拷后 criterion 复跑：**exit=0**，stdout `OK: 5 registered kinds carry the declared admission`，且落盘文件与备份逐字相同（`file-identical-to-backup=true`）。
+- **DoD1**（worktree 树 import 读对象）：见 AC2 行，五个 kind→admission 对、条目数 5。
+- **DoD2**（develop 侧复现）：退出前 develop 尚不含本次提交（fan-in 在本 worker 退出后才 ff）。已取等价直接量：`git show HEAD:docs/analysis/ownership-active-limited-proposal.mjs` 落临时文件后 import，读数与工作树读数 `diff` 无输出（逐字相同），而 develop 是 HEAD 的祖先 ⇒ ff-merge 后 develop 的该文件内容 = HEAD。落地后逐字复核命令：`git show develop:docs/analysis/ownership-active-limited-proposal.mjs > /tmp/x.mjs && node --input-type=module -e 'import("/tmp/x.mjs").then(m=>console.log(JSON.stringify(m.CONCERN_KIND_REGISTRY.map(e=>[e.kind,e.admission]))))'`。
+- **DoD6**：注册表段头注释新增 `admission` 键说明，并新增一段「`admission` 与 `mechanized` 正交」——前者回答「确认靠谁」，后者回答「仪器是否落地」，并写明 `semantic-judged` kind 不会靠堆机械信号变成 mechanized。
+- **范围**：未改任何 `kind:` 字面量（`CONCERN_KIND_IN_SCOPE` / `DESIGN_EVOLUTION_KIND` 常量身份保持），未把 `registryAdmissionViolations` 接进 `evaluateEntryBar` / `concernKindState`（分派属 AC-918 的另一半）。
+- **一处规格张力的诚实落法**：`registryAdmissionViolations` 判的是**合法性**，负臂 (a)「改成对面取值」用的是另一个**合法** token，故校验器按设计不报违例；该臂由测试内字面期望表 `EXPECTED_ADMISSION` 的比较点名 `package-cycle`（测试注释写明两项检查的分工）。若要让校验器也判「取值对不对」，模块内就必须放第二份期望表——正是本条明令禁止的漂移，故不这么做。
+- **门**：`bash scripts/test.sh --for-task gap-concern-kind-registry-admission-field --allow-thin` **exit=0**；`anti-drift-touches-check.ts` → `ANTI-DRIFT OK … all within declared Touches`。
+
+## ADR-007 暗轴记录
+
+- L_D code:doc: `git-lens-instrument.mjs ld --numstat-file <git diff --numstat develop...HEAD>` → docLines=0 codeLines=146 ratio=0.000 verdict=PASS
+  （该读数是本条 **diff 范围**的读数，由仪器的 numstat 接口给出；不是全仓 L_D 比值。）
+- L_G：该轴仍暗,理由:本条只给既有注册表条目加一个字段与一个测试文件，未新增任何模块/目录级依赖边，未对目录级 cycle 仪器取全仓读数
 
 ## Touches
 
