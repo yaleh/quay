@@ -32,7 +32,7 @@ exit=1
    - **新增** `unencapsulated-state` 条目（同样 `Object.freeze`）：`admission: CONCERN_ADMISSIONS.SEMANTIC_JUDGED`、`mechanized: false`（线索器与判断器都未落地 ⇒ `concernKindState` 必须继续给 `NOT_YET_MECHANIZED`，⛔ **不要**给它 `mechanized:true`）、`deltaComputable: false`、`negativeControl: false`、`occurrenceThreshold: null`、`deltaCaliber: null`、`readDelta: null`、`fingerprintOf: null`；`detector` 写真实落点而非承诺：`"NOT LANDED — semantic-judged slot: the clue reader (plugin/scripts/unencapsulated-state-clue.ts) and the recorded-verdict judge are not landed yet; mechanical signals may only produce candidates, never a confirmation"`。
 3. 新增导出校验器 `registryAdmissionViolations(registry = CONCERN_KIND_REGISTRY)`，返回 `{ evaluated: boolean, missing: string[], invalid: string[], cause: string|null }`：
    - 输入不是数组或为空 ⇒ `evaluated:false` + 非空 `cause`，⛔ 不与「零违例」同形（硬规则 3 / 3b）；
-   - `admission` 缺失或不是字符串 ⇒ 该条 `kind` 进 `missing`；值不在 `Object.values(CONCERN_ADMISSIONS)` ⇒ 进 `invalid`；两者都**点名 kind**，⛔ 不返回裸 boolean，⛔ 不用 `"有问题"` 这种不带名字的结论。
+   - `admission` 缺失或不是字符串 ⇒ 该条 `kind` 进 `missing`；值不在 `Object.values(CONCERN_ADMISSIONS)` ⇒ 进 `invalid`；两者都**点名 kind**，⛔ 不返回裸 boolean，⛔ 不用「有问题」这种不带名字的结论。
    - 本条**不**把它接进 `evaluateEntryBar` / `concernKindState` 的判定路径——那是分派，属于 AC-918 expect 的另一半。
 4. 在 `plugin/test/ownership-active-limited-proposal.test.mjs` 加 test 块，**import 注册表对象**断言：
    - 期望映射以**测试文件里的字面表**写死（`{ "package-cycle": "mechanical", ..., "spine-without-extension-point": "semantic-judged" }`），⛔ 不用模块内常量推导期望值——否则同一处改动能同时改绿两边（硬规则 4：结构上不可能取假的量不是测量）；
@@ -54,10 +54,11 @@ exit=1
 
 ## DoD
 
-- [ ] 在**落地后**的 develop 内容上读对象：`git show develop:docs/analysis/ownership-active-limited-proposal.mjs > /tmp/ac921-develop-registry.mjs`，再 `node --input-type=module -e 'const m=await import("/tmp/ac921-develop-registry.mjs");console.log(JSON.stringify(Object.fromEntries(m.CONCERN_KIND_REGISTRY.map(e=>[e.kind,e.admission]))))'` 输出含五个 kind→admission 对，且 `length===5`。⛔ 用 `grep -c admission` 之类文本计数充当这条的替代不算。
-- [ ] 落地后的树上实跑 AC-921 criterion：exit 0 且 stdout 为 `OK: 5 registered kinds carry the declared admission`（读的是真实注册表对象，不是本文转述）。
-- [ ] 落地后的树上 `node --test plugin/test/ownership-active-limited-proposal.test.mjs` exit 0，含新增的 admission test 块与三条负臂。
-- [ ] 收尾记录含三次反向臂的实际 exit code、stderr 原文、以及回拷后 criterion 的 exit 0 输出——⛔「测试存在 / 字段写了」不算落地。
+- [ ] 在**任务 worktree 的树**上 import 注册表读对象：`node --input-type=module -e 'const m=await import("./docs/analysis/ownership-active-limited-proposal.mjs");console.log(JSON.stringify(m.CONCERN_KIND_REGISTRY.map(e=>[e.kind,e.admission])))'` 输出含五个 kind→admission 对且条目数为 5；⛔ 用 `grep -c admission` 之类文本计数充当这条的替代不算。
+- [ ] 同一读数在 fan-in 后的 develop 提交内容上复现一次（`git show develop:docs/analysis/ownership-active-limited-proposal.mjs` 落到临时文件后同样 import 读对象），两次读数一致——这是「字段真的进了权威基线」的直接量，不是工作树上的自证。
+- [ ] criterion 在任务 worktree 的树上 exit 0，stdout 为 `OK: 5 registered kinds carry the declared admission`；实际命令与输出贴进收尾记录。
+- [ ] `node --test plugin/test/ownership-active-limited-proposal.test.mjs` 在任务 worktree 的树上 exit 0，含新增的 admission test 块与三条负臂。
+- [ ] 收尾记录含三次反向臂的实际 exit code、stderr 原文、以及回拷后 criterion 的 exit 0 输出——⛔「测试存在 / 字段写了」不算完成。
 - [ ] 注册表段头注释已写明 admission 与 mechanized 的分工（谁回答「确认靠谁」、谁回答「仪器是否落地」），供后续 kind 登记时照抄。
 
 ## Touches
