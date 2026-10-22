@@ -24,6 +24,9 @@
 //            字段 task_id · gate（含 missing）· action（promote/fix/skip/needs-human）· result · ts，outer 可消费）
 //         ✅ AC150-1：起 fix worker 前经与 worker-driver 同一 resourceGateCheck 判定（WAIT ⇒ 退避，本轮不 spawn）
 //         ✅ AC150-2：运行期 halt = 读 .quay/promotion-control.json（单一真相源）；halted ⇒ 停止晋升与 fix spawn
+//         ✅ gap-meta-needs-human-parking-recheck：每轮复跑每个 needs-human 任务记录里点名的机械停放判据，
+//            报出「判据今日已 clean 而任务仍停放」的那些（写 .quay/needs-human-parking-recheck.json + 轮事件
+//            needs_human_parking + 非空时 stderr）。只读读数，⛔ 不改 status、⛔ 不做机械再入队。
 //   驱动  ⛔ 不做任何 commit（标 needs-human 是写 status 到 tasks/<id>.md，同 --apply 晋升的写类，非 commit）
 //         ⛔ 不读/不写 .halt（停机态 = promotion-control.json 单一真相源，与 worker-driver 同族；AC135 才涉及 outer 退役）
 //
@@ -79,6 +82,12 @@ import { defaultDriverConfig, loadDriverConfig, driverCap } from "./driver-confi
 // AC153：核心不变式单一实现（「⛔ 不信执行者自述，用独立量复核」）。AC133 重闸验证（computeReverifyOutcome）
 // 消费它——worker 的 computeLandingState 与本文件的重闸判定共用同一份三态映射（⛔ 不各写一遍）。
 import { verifyIndependently } from "./driver-result.ts";
+// 「停放理由已失效」的每轮读数（tasks/gap-meta-needs-human-parking-recheck）：markNeedsHuman 把机械停放
+// 判据写进任务的 ## Needs-Human 记录，但此前没有任何机件在之后复跑它 —— 判据修好、任务仍停、goal AC
+// 每轮红，人无从察觉（AC-919 连续 42 轮）。本文件是那条读数的【每轮活消费者】：复跑记录里点名的判据，
+// 只把「今日已 clean 而任务仍停放」的那些报出来。⛔ 只读——不改 status（人 2026-09-20 裁定：needs-human
+// 没有可机械再入队的路径），故这里没有任何写回调用。
+import { scanNeedsHumanParking, writeParkingReading, type ParkingReading } from "./needs-human-parking-recheck.ts";
 // AC153：re-export verifyIndependently 值——测试用「同一函数身份」证两 driver 共用单一实现（⛔ 非平行副本）。
 export { verifyIndependently } from "./driver-result.ts";
 
@@ -1000,7 +1009,20 @@ export async function runResidentPromotionLoop(opts: ResidentLoopOptions): Promi
     for (const o of outcomes) {
       try { appendOutcomeRecord(outcomeLogFile, o); } catch { /* 记录写失败不致命（运行时日志，⛔ 不因日志炸循环） */ }
     }
-    if (json) process.stdout.write(`${JSON.stringify({ event: "round", ...record })}\n`);
+    // 「停放理由已失效」读数（tasks/gap-meta-needs-human-parking-recheck）：每轮一次，复跑每个
+    // needs-human 任务记录里点名的机械停放判据，只报「今日已 clean 而任务仍停」的那些。放在 needs-human
+    // 翻转【之后】，本轮新停的任务也在读数内。⛔ 只读：不改任何 status（needs-human 无机械再入队路径）。
+    // 读数写盘（durable、可被外部读），并随 json 轮事件发出；非空 stale 同时打 stderr——驱动日志的
+    // 读者不必再去查任何东西就能看到「判据已修好但任务还停着」。
+    const parking: ParkingReading = scanNeedsHumanParking(root);
+    try { writeParkingReading(root, parking); } catch { /* 读数写失败不致命（运行时日志），但 ⛔ 不吞掉下面的 stderr 报告 */ }
+    if (parking.reported_stale > 0) {
+      process.stderr.write(
+        `promotion-driver: ${parking.reported_stale} needs-human task(s) parked on a mechanical criterion that is CLEAN today ` +
+          `(parking reason expired, task still parked): ${parking.stale.map((t) => `${t.id}(${t.judge})`).join(", ")}\n`,
+      );
+    }
+    if (json) process.stdout.write(`${JSON.stringify({ event: "round", ...record, needs_human_parking: parking })}\n`);
     if (once) break;
     if (maxRounds !== null && round >= maxRounds) break;
     await stopCtl.sleep(intervalMs);
