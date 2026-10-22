@@ -72,3 +72,6 @@ merge
   （phase 声明的 `--reason`），且没有 `reasonIsSubstantive` 函数体，不属本 finding 的
   `byte-identical-body` 类；强行耦合会让 phase-declare 的拒绝文案依赖 dispatch-record 的概念，
   故保留并在 `gate-script-base.ts:584` 就地写明理由。
+
+**ADR-007 暗轴记录**：
+- 该轴仍暗,理由:本任务是重复定义的合并，未改变模块依赖拓扑，也未运行 archguard 取得 L_D/L_G 读数
