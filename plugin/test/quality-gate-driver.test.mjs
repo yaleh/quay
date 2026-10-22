@@ -76,6 +76,17 @@ import {
   designEvolutionRoutineFromConfig,
   runDesignEvolutionRound,
   formatDesignEvolutionAssembly,
+  INSTRUMENT_DECAY_ROUTINE_NAME,
+  INSTRUMENT_DECAY_INTERVAL_MIN_DEFAULT,
+  INSTRUMENT_DECAY_MIN_INTERVAL_MINUTES,
+  parseInstrumentDecaySection,
+  readInstrumentDecayConfig,
+  instrumentDecayRoutineFromConfig,
+  buildInstrumentDecayRoutine,
+  runInstrumentDecayRound,
+  buildInstrumentDecayGapWorkerPrompt,
+  readPriorInstrumentDecayFilings,
+  formatInstrumentDecayAssembly,
 } from "../scripts/quality-gate-driver.ts";
 // 同一个读数函数的两个面：例行程把它写进 Fact，AC1 的「可从 .archguard/query/ 独立复现」直接对
 // **读函数**做（⛔ 不另写一份解析，否则只是证明夹具自洽）。
@@ -2823,6 +2834,66 @@ test("runDesignEvolutionRound — AC5: ONE record carries RM1 + RM2 + the larges
   assert.equal(rec.rm2.carrierRecords, 1);
 });
 
+test("runDesignEvolutionRound — the Fact carries the ADR-008 phase staleness WITHOUT changing its state", (t) => {
+  // gap-adr008-phase-declaration-staleness-reading: the reading rides along in the EXISTING Fact.
+  // The load-bearing assertion is the negative one — an unreadable/late declaration must not turn the
+  // routine red, because the reading is content, not a verdict (Plan §3/§4).
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "qg-de-phase-"));
+  t.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
+  const repo = path.join(tmp, "repo");
+  fs.mkdirSync(path.join(repo, "mod"), { recursive: true });
+  fs.mkdirSync(path.join(repo, ".quay"), { recursive: true });
+  const env = { ...process.env, GIT_AUTHOR_NAME: "de fixture", GIT_AUTHOR_EMAIL: "de@example.invalid", GIT_COMMITTER_NAME: "de fixture", GIT_COMMITTER_EMAIL: "de@example.invalid" };
+  const go = (...args) => {
+    const r = spawnSync("git", ["-C", repo, ...args], { env, encoding: "utf8" });
+    assert.equal(r.status, 0, `git ${args.join(" ")} failed: ${r.stderr}`);
+  };
+  const write = (rel, n) => fs.writeFileSync(path.join(repo, rel), Array.from({ length: n }, (_, i) => `l${i}`).join("\n") + "\n");
+  write("mod/central.ts", 100);
+  go("init", "-q");
+  go("add", "-A");
+  go("commit", "-q", "-m", "baseline");
+  const baseline = spawnSync("git", ["-C", repo, "rev-parse", "HEAD"], { encoding: "utf8" }).stdout.trim();
+  write("mod/central.ts", 110);
+  go("add", "-A");
+  go("commit", "-q", "-m", "grow");
+  fs.writeFileSync(path.join(repo, ".quay", "worker-outcome.jsonl"), "");
+  fs.writeFileSync(
+    path.join(repo, ".quay", "two-phase-state.json"),
+    JSON.stringify({
+      phase: "convergence",
+      declaredAt: "2026-01-01T00:00:00.000Z",
+      reason: "fixture",
+      history: [{ phase: "convergence", declaredAt: "2026-01-01T00:00:00.000Z", reason: "fixture" }],
+    }),
+  );
+  const opts = {
+    config: {
+      enabled: true, intervalMinutes: 360, topN: 10,
+      subsystems: [{ name: "m", baseline, central: [{ atBaseline: "mod/central.ts", atHead: "mod/central.ts" }], modules: ["mod/*.ts"] }],
+    },
+    configPresent: true, configError: null, historyPath: path.join(tmp, "history.jsonl"), now: "T0",
+  };
+
+  const fact = runDesignEvolutionRound(repo, opts);
+  assert.equal(fact.state, "verified", fact.reason ?? "");
+  assert.equal(fact.value.phaseStaleness.evaluated, true);
+  assert.equal(fact.value.phaseStaleness.phase, "convergence");
+  assert.equal(fact.value.phaseStaleness.declarations, 1);
+  // ONE reading, ONE shape: the carrier line and the Fact carry the identical embedded object.
+  const line = JSON.parse(fs.readFileSync(opts.historyPath, "utf8").split("\n").filter((l) => l !== "")[0]);
+  assert.deepEqual(line.phaseStaleness, fact.value.phaseStaleness);
+
+  // Negative control: with NO phase carrier the attached reading is NOT-EVALUATED, and the round is
+  // STILL `verified` — the field can never become a hidden gate.
+  fs.rmSync(path.join(repo, ".quay", "two-phase-state.json"));
+  const fact2 = runDesignEvolutionRound(repo, opts);
+  assert.equal(fact2.state, "verified", "a missing phase carrier must not red the design-evolution round");
+  assert.equal(fact2.value.phaseStaleness.evaluated, false);
+  assert.equal(fact2.value.phaseStaleness.commitsSince, null);
+  assert.match(fact2.value.phaseStaleness.reason, /carrier-missing/);
+});
+
 test("runDesignEvolutionRound — a reading that CANNOT be taken still appends a line (not-evaluated, not silence)", (t) => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "qg-de-noteval-"));
   t.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
@@ -2866,6 +2937,246 @@ test("formatDesignEvolutionAssembly — malformed / disabled / running never loo
   assert.notEqual(running, disabled);
   assert.notEqual(disabled, broken);
   assert.match(running, /report-only/);
+  assert.match(disabled, /not-evaluated:disabled/);
+  assert.match(broken, /每轮记 failed/);
+});
+
+// ════════════════════════════════════════════════════════════════════════════════════════════════════
+// gap-instrument-decay-check-unwired-and-blind-to-content-dark
+// 例程接线：config 段（loop.instrument_decay:）、读数 Fact 的独立状态 `instrument-dark`、
+// 以及「下一轮不重复立案」（上一轮 Fact 里的已立案 pair 是本轮的唯一去重输入）。
+// ════════════════════════════════════════════════════════════════════════════════════════════════════
+
+function writeJsonl(dir, rel, rows) {
+  const p = path.join(dir, ".quay", rel);
+  fs.mkdirSync(path.dirname(p), { recursive: true });
+  fs.writeFileSync(p, rows.map((r) => JSON.stringify(r)).join("\n") + "\n", "utf8");
+  return p;
+}
+
+function instDecayOpts(extra = {}) {
+  return {
+    config: { enabled: true, intervalMinutes: INSTRUMENT_DECAY_INTERVAL_MIN_DEFAULT },
+    configPresent: true,
+    configError: null,
+    ...extra,
+  };
+}
+
+/** A stand-in gap-filing agent: appends every invocation's argv to a marker file and prints a summary. */
+function makeGapWorker(dir) {
+  const marker = path.join(dir, "gap-worker-calls.jsonl");
+  const script = path.join(dir, "gap-worker.mjs");
+  fs.writeFileSync(script,
+    `import fs from "node:fs";\n` +
+    `fs.appendFileSync(${JSON.stringify(marker)}, JSON.stringify(process.argv.slice(2)) + "\\n");\n` +
+    `console.log("filed gap: fixture (one task per carrier+shape)");\n`,
+    "utf8");
+  return { cmd: `node ${script}`, marker, calls: () => (fs.existsSync(marker) ? fs.readFileSync(marker, "utf8").split("\n").filter(Boolean) : []) };
+}
+
+test("instrument_decay config — absent / malformed / below-floor / disabled are four distinct readings", (t) => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "qg-decay-cfg-"));
+  t.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
+  assert.deepEqual(readInstrumentDecayConfig(tmp), { present: false, config: null, error: null });
+
+  assert.notEqual(parseInstrumentDecaySection(null).error, null);
+  assert.match(parseInstrumentDecaySection({ interval: "interval:360m" }).error, /boolean 'enabled'/);
+  assert.equal(parseInstrumentDecaySection({ enabled: true }).config.intervalMinutes, INSTRUMENT_DECAY_INTERVAL_MIN_DEFAULT);
+  const below = parseInstrumentDecaySection({ enabled: true, interval: `interval:${INSTRUMENT_DECAY_MIN_INTERVAL_MINUTES - 1}m` });
+  assert.equal(below.config, null);
+  assert.match(below.error, new RegExp(`${INSTRUMENT_DECAY_MIN_INTERVAL_MINUTES}m floor`));
+  assert.deepEqual(parseInstrumentDecaySection({ enabled: false }), { config: { enabled: false, intervalMinutes: null }, error: null });
+
+  fs.mkdirSync(path.join(tmp, ".quay"), { recursive: true });
+  fs.writeFileSync(path.join(tmp, ".quay", "config.yml"), "loop:\n  instrument_decay:\n    enabled: true\n    interval: interval:120m\n", "utf8");
+  const read = readInstrumentDecayConfig(tmp);
+  assert.equal(read.present, true);
+  assert.equal(read.config.enabled, true);
+  assert.equal(read.error, null);
+  assert.equal(read.config.intervalMinutes, 120);
+});
+
+test("instrumentDecayRoutineFromConfig — UNDECLARED keeps EXACTLY the four built-ins; DECLARED appends (AC144)", (t) => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "qg-decay-assemble-"));
+  t.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
+  const absent = instrumentDecayRoutineFromConfig(tmp);
+  assert.equal(absent.routine, null, "no section ⇒ the routine is not even ADDED to the table");
+  assert.equal(absent.present, false);
+
+  const without = qualityGateRoutines(tmp, coverageBaseOpts()).map((r) => r.name);
+  assert.deepEqual(without, ["pool-quality-judge", "judgment-consumer-check", "architecture-review", "packaging-hygiene"]);
+  const injected = { name: INSTRUMENT_DECAY_ROUTINE_NAME, schedule: { kind: "interval", minutes: 360 }, run: () => [] };
+  const withIt = qualityGateRoutines(tmp, { ...coverageBaseOpts(), instrumentDecayRoutine: injected }).map((r) => r.name);
+  assert.deepEqual(withIt, [...without, INSTRUMENT_DECAY_ROUTINE_NAME], "the injection appends; it never displaces a built-in");
+
+  fs.mkdirSync(path.join(tmp, ".quay"), { recursive: true });
+  fs.writeFileSync(path.join(tmp, ".quay", "config.yml"), "loop:\n  instrument_decay:\n    enabled: true\n    interval: interval:120m\n", "utf8");
+  const declared = instrumentDecayRoutineFromConfig(tmp);
+  assert.equal(declared.present, true);
+  assert.equal(declared.routine.name, INSTRUMENT_DECAY_ROUTINE_NAME);
+  assert.deepEqual(declared.routine.schedule, { kind: "interval", minutes: 120 });
+  assert.equal(typeof declared.routine.run, "function");
+});
+
+test("runInstrumentDecayRound — content-dark ⇒ state `instrument-dark` (⛔ not verified / not-evaluated) + one filing per (carrier,shape)", async (t) => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "qg-decay-dark-"));
+  t.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
+  writeJsonl(tmp, "arch-cycle-history.jsonl", [
+    { ts: "2026-10-18T10:25:51.593Z", mode: "arch-cycle-report-round", evaluated: false, scopes: [] },
+    { ts: "2026-10-21T23:14:05.363Z", mode: "arch-cycle-report-round", evaluated: false, scopes: [] },
+  ]);
+  const worker = makeGapWorker(tmp);
+  const fact = await runInstrumentDecayRound(tmp, instDecayOpts({
+    gapWorkerCmd: worker.cmd,
+    priorFilings: [],
+    roundLogPath: path.join(tmp, "quality-round.jsonl"),
+  }));
+
+  assert.equal(fact.name, INSTRUMENT_DECAY_ROUTINE_NAME);
+  assert.equal(fact.state, "instrument-dark", `a dark reading must be its OWN state: ${fact.reason}`);
+  assert.notEqual(fact.state, "verified");
+  assert.notEqual(fact.state, "not-evaluated");
+  assert.match(fact.reason, /instrument-dark/);
+  assert.match(fact.reason, /arch-cycle-history\.jsonl: content-dark/, "the reason names carrier + shape");
+  assert.equal(fact.value.decayedCount, 1);
+  assert.equal(fact.value.carriers.find((c) => c.file === "arch-cycle-history.jsonl").contentDark.state, "dark");
+  assert.equal(fact.value.filings.length, 1);
+  assert.equal(fact.value.filings[0].key, "arch-cycle-history.jsonl|content-dark");
+  assert.equal(fact.value.filings[0].filing, "filed");
+  assert.equal(fact.value.filings[0].exitCode, 0);
+  assert.equal(worker.calls().length, 1, "exactly one gap-filing spawn");
+  // The prompt carries the mechanism-based dedup rules (open claim vs done claim).
+  const prompt = JSON.parse(worker.calls()[0]).at(-1);
+  assert.match(prompt, /carrier=arch-cycle-history\.jsonl shape=content-dark/);
+  assert.match(prompt, /OPEN claim/);
+  assert.match(prompt, /DONE\/superseded claim/);
+});
+
+test("runInstrumentDecayRound — 紧接的第二轮不重复立案（上一轮 Fact 是唯一去重输入）", async (t) => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "qg-decay-second-"));
+  t.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
+  writeJsonl(tmp, "arch-cycle-history.jsonl", [
+    { ts: "2026-10-18T10:25:51.593Z", mode: "arch-cycle-report-round", evaluated: false, scopes: [] },
+    { ts: "2026-10-21T23:14:05.363Z", mode: "arch-cycle-report-round", evaluated: false, scopes: [] },
+  ]);
+  const worker = makeGapWorker(tmp);
+  const roundLog = path.join(tmp, "quality-round.jsonl");
+
+  // Round 1: files.
+  const first = await runInstrumentDecayRound(tmp, instDecayOpts({ gapWorkerCmd: worker.cmd, priorFilings: [], roundLogPath: roundLog }));
+  assert.equal(first.value.filings[0].filing, "filed");
+  assert.equal(worker.calls().length, 1);
+
+  // The driver writes EVERY round's facts to the round carrier — reproduce that write here so round 2
+  // reads the PREVIOUS round's Fact from the real carrier path (⛔ no second ledger).
+  fs.writeFileSync(roundLog, JSON.stringify({ round: 1, run_id: "qg-fixture", ts: new Date().toISOString(), facts: [first] }) + "\n", "utf8");
+
+  // Round 2: same findings ⇒ already-filed, ZERO new spawns.
+  const second = await runInstrumentDecayRound(tmp, instDecayOpts({ gapWorkerCmd: worker.cmd, roundLogPath: roundLog }));
+  assert.equal(second.state, "instrument-dark", "the reading is still dark — only the filing is deduped");
+  assert.equal(second.value.filings[0].filing, "already-filed");
+  assert.equal(second.value.filings[0].exitCode, null);
+  assert.equal(worker.calls().length, 1, "the immediately following round must NOT refile");
+  assert.match(second.reason, /already-filed=1/);
+});
+
+test("readPriorInstrumentDecayFilings — reads the round carrier tail; absent carrier ⇒ no prior filings", (t) => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "qg-decay-prior-"));
+  t.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
+  assert.deepEqual([...readPriorInstrumentDecayFilings(tmp)], [], "no round log ⇒ nothing was filed yet");
+  const log = path.join(tmp, "round.jsonl");
+  fs.writeFileSync(log, [
+    JSON.stringify({ round: 1, facts: [{ name: "pool-quality-judge", value: {} }] }),
+    JSON.stringify({ round: 2, facts: [{ name: INSTRUMENT_DECAY_ROUTINE_NAME, value: { filings: [
+      { key: "a.jsonl|content-dark", filing: "filed" },
+      { key: "b.jsonl|stale-evaluated", filing: "deferred" },
+    ] } }] }),
+  ].join("\n") + "\n", "utf8");
+  const keys = readPriorInstrumentDecayFilings(tmp, log);
+  assert.ok(keys.has("a.jsonl|content-dark"));
+  assert.equal(keys.has("b.jsonl|stale-evaluated"), false, "a deferred pair is NOT filed — it retries");
+});
+
+test("runInstrumentDecayRound — enabled:false ⇒ not-evaluated:disabled, zero reads zero spawns", async (t) => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "qg-decay-off-"));
+  t.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
+  writeJsonl(tmp, "arch-cycle-history.jsonl", [
+    { ts: "2026-10-20T00:00:00Z", evaluated: false }, { ts: "2026-10-21T00:00:00Z", evaluated: false },
+  ]);
+  const worker = makeGapWorker(tmp);
+  const fact = await runInstrumentDecayRound(tmp, {
+    config: { enabled: false, intervalMinutes: null }, configPresent: true, configError: null,
+    gapWorkerCmd: worker.cmd, priorFilings: [],
+  });
+  assert.equal(fact.state, "not-evaluated");
+  assert.match(fact.reason, /disabled/);
+  assert.equal(fact.value, null, "the kill switch writes NOTHING (not even a reading)");
+  assert.equal(worker.calls().length, 0);
+});
+
+test("runInstrumentDecayRound — no registered carrier present ⇒ not-evaluated (⛔ not `verified`)", async (t) => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "qg-decay-nocarrier-"));
+  t.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
+  const fact = await runInstrumentDecayRound(tmp, instDecayOpts({ priorFilings: [] }));
+  assert.equal(fact.state, "not-evaluated");
+  assert.match(fact.reason, /no-carrier/);
+});
+
+test("runInstrumentDecayRound — clean carrier ⇒ verified, but uncovered carriers are NOT silently healthy", async (t) => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "qg-decay-clean-"));
+  t.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
+  writeJsonl(tmp, "arch-coverage-history.jsonl", [
+    { ts: "2026-10-20T07:02:50.500Z", runner: "arch-coverage-report.ts", evaluated: true, languages: [] },
+    { ts: "2026-10-21T07:02:50.500Z", runner: "arch-coverage-report.ts", evaluated: true, languages: [] },
+  ]);
+  const fact = await runInstrumentDecayRound(tmp, instDecayOpts({ priorFilings: [] }));
+  assert.equal(fact.state, "verified");
+  assert.equal(fact.value.decayedCount, 0);
+  assert.equal(fact.value.healthyCount, 1);
+  // measure-history is declared-uncovered: it must appear, and the reason must say it is not healthy.
+  assert.ok(fact.value.uncovered.some((u) => u.file === "measure-history.jsonl"));
+  assert.match(fact.reason ?? "", /uncovered carrier\(s\) NOT counted healthy/);
+});
+
+test("runInstrumentDecayRound — halted ⇒ reading still runs, gap-filing is deferred (observation is not gated)", async (t) => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "qg-decay-halted-"));
+  t.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
+  writeJsonl(tmp, "arch-cycle-history.jsonl", [
+    { ts: "2026-10-20T00:00:00Z", evaluated: false }, { ts: "2026-10-21T00:00:00Z", evaluated: false },
+  ]);
+  const worker = makeGapWorker(tmp);
+  const fact = await runInstrumentDecayRound(tmp, instDecayOpts({ gapWorkerCmd: worker.cmd, priorFilings: [], halted: true }));
+  assert.equal(fact.state, "instrument-dark", "halt gates spawn, not readings");
+  assert.equal(fact.value.filings[0].filing, "deferred");
+  assert.equal(fact.value.filings[0].error, "halted");
+  assert.equal(worker.calls().length, 0);
+});
+
+test("buildInstrumentDecayGapWorkerPrompt — names EVERY carrier+shape and carries the open/done dedup rules", () => {
+  const prompt = buildInstrumentDecayGapWorkerPrompt("/repo", [
+    { file: "fan-in-step-trace.jsonl", kind: "rate-stopped", findings: [
+      { group: "catch-up-develop", kind: "rate-stopped", count: 96, lastWriteMs: 1, detail: null },
+    ] },
+    { file: "arch-cycle-history.jsonl", kind: "stale-evaluated", findings: [
+      { group: "src", kind: "stale-evaluated", count: 1, lastWriteMs: 2, detail: "artifact < commit" },
+    ] },
+  ]);
+  assert.match(prompt, /carrier=fan-in-step-trace\.jsonl shape=rate-stopped/);
+  assert.match(prompt, /carrier=arch-cycle-history\.jsonl shape=stale-evaluated/);
+  assert.match(prompt, /catch-up-develop/);
+  assert.match(prompt, /artifact < commit/);
+  assert.match(prompt, /OPEN claim/);
+  assert.match(prompt, /done ≠ absent/);
+});
+
+test("formatInstrumentDecayAssembly — malformed / disabled / running never look the same", () => {
+  const running = formatInstrumentDecayAssembly({ present: true, error: null, enabled: true, intervalMinutes: 360 });
+  const disabled = formatInstrumentDecayAssembly({ present: true, error: null, enabled: false, intervalMinutes: 360 });
+  const broken = formatInstrumentDecayAssembly({ present: true, error: "loop.instrument_decay needs a boolean 'enabled'", enabled: false, intervalMinutes: 360 });
+  assert.notEqual(running, disabled);
+  assert.notEqual(disabled, broken);
+  assert.match(running, /instrument-dark/);
   assert.match(disabled, /not-evaluated:disabled/);
   assert.match(broken, /每轮记 failed/);
 });

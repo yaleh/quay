@@ -75,6 +75,8 @@
 //   node --experimental-strip-types plugin/scripts/phase-declare.ts \
 //        --to <expansion|convergence> --reason "<one sentence: what triggered this switch>" \
 //        [--root <repo>] [--window <n>] [--json]
+//   node --experimental-strip-types plugin/scripts/phase-declare.ts \
+//        --staleness [--root <repo>] [--json]
 //
 //   --root    repo root holding the carrier (default: derived from this file's location — the
 //             checkout you actually invoked, so a declaration made inside a task worktree lands in
@@ -82,6 +84,9 @@
 //   --window  how many trailing commits the L_D snapshot spans (default 50). Clamped to the
 //             available history: a repo with fewer commits is read from its first commit (diffed
 //             against the empty tree), never an error.
+//   --staleness  READ-ONLY: report how far the CURRENT declaration is from HEAD — commits since,
+//             newly added goals since, and days since — instead of declaring a phase. Writes no
+//             file. See the section above `readPhaseStaleness` for what it is (and is not) for.
 
 import fs from "node:fs";
 import path from "node:path";
@@ -256,6 +261,158 @@ export function buildState(prev: Declaration[], d: Declaration): CarrierState {
   return { phase: d.phase, declaredAt: d.declaredAt, reason: d.reason, reading: d.reading, history };
 }
 
+// ── staleness reading (READ-ONLY) ────────────────────────────────────────────────────────────────
+// tasks/gap-adr008-phase-declaration-staleness-reading (2026-10-22). The carrier in this file has a
+// reader count of ZERO: `grep -n "two-phase-state|phase-declare" plugin/scripts/*.ts` outside this
+// file returns nothing, so "the declaration may be stale" was only ever observable to a human who
+// remembered to open the JSON. `readPhaseStaleness` turns that into a reading — commits since the
+// declaration, goals newly added since it, and the number of days — and NOTHING else:
+//   • it writes no file (AC5: no writeFileSync/appendFileSync/renameSync anywhere below);
+//   • it sets no threshold and is not consulted by any control-flow decision, so it cannot switch
+//     the phase (Plan §4: no auto-switch is added — the whole point of this task is a VISIBLE
+//     number, not a decision);
+//   • when it cannot read, it says so: `evaluated:false` with `commitsSince: null` — ⛔ never 0,
+//     which would be indistinguishable from "the declaration was made at HEAD" (硬规则 3b).
+//
+// The goal predicate is by filename: `goals/` also holds `kind: criterion` files named AC-<n>, which
+// are NOT goals (127 of them were added in the same window), and filtering them out is what
+// reproduces the finding's count (30 GOAL-ids added since 2026-09-13). The authority on "is this a
+// goal file" is each file's own frontmatter `kind:`; the name prefix is the cheap equivalent used
+// here, and it is the SAME predicate the finding's command used (`git log --diff-filter=A -- goals/`
+// piped through `GOAL-[0-9]+`), so the reading and the finding count the same objects.
+const GOAL_ID_RE = /^(GOAL-\d+)/;
+
+/** Milliseconds per day — a unit conversion, not a threshold. */
+const DAY_MS = 86_400_000;
+
+export interface PhaseStalenessReading {
+  /** False whenever the carrier, its shape, or a git read could not be evaluated. */
+  evaluated: boolean;
+  /** Names the exact unreadable condition; `null` only when evaluated. */
+  reason: string | null;
+  phase: Phase | null;
+  declaredAt: string | null;
+  /** How many declarations the carrier's `history` holds (1 = it has never been re-declared). */
+  declarations: number | null;
+  /** `git rev-list --count --since=<declaredAt> HEAD`; null when not evaluated (⛔ not 0). */
+  commitsSince: number | null;
+  /** GOAL-<n> ids of files added under `goals/` since <declaredAt>, sorted; null when not evaluated. */
+  newGoalsSince: string[] | null;
+  /** Whole days (2 decimal places) between <declaredAt> and `now`; null when not evaluated, or
+   *  when the caller's `now` seam is not a valid instant (unknown clock ≠ zero days). */
+  daysSince: number | null;
+}
+
+/** The "could not evaluate" value — every quantity is null, never a plausible-looking zero. */
+function stalenessNotEvaluated(reason: string): PhaseStalenessReading {
+  return {
+    evaluated: false,
+    reason,
+    phase: null,
+    declaredAt: null,
+    declarations: null,
+    commitsSince: null,
+    newGoalsSince: null,
+    daysSince: null,
+  };
+}
+
+/**
+ * Read how far HEAD is from the carrier's CURRENT declaration. Pure with respect to the filesystem
+ * (read-only) and never throws: every failure becomes `evaluated:false` + a distinguishable reason.
+ *
+ * `root` is the repo holding the carrier; `opts.now` is a deterministic-clock seam for tests.
+ */
+export function readPhaseStaleness(root: string, opts: { now?: Date } = {}): PhaseStalenessReading {
+  const repo = path.resolve(root);
+  const p = carrierPath(repo);
+
+  let raw: string;
+  try {
+    raw = fs.readFileSync(p, "utf8");
+  } catch (e) {
+    const code = (e as NodeJS.ErrnoException).code;
+    return code === "ENOENT"
+      ? stalenessNotEvaluated(
+          `carrier-missing: ${STATE_FILE_REL} does not exist under ${repo} — there is no declaration to measure the distance from`,
+        )
+      : stalenessNotEvaluated(`carrier-unreadable: ${STATE_FILE_REL} could not be read (${(e as Error).message})`);
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (e) {
+    // Distinct from carrier-missing: the file IS there and its age is unknown, not zero.
+    return stalenessNotEvaluated(
+      `carrier-unparseable: ${STATE_FILE_REL} is not valid JSON (${(e as Error).message}) — the declaration exists but could not be read`,
+    );
+  }
+  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+    return stalenessNotEvaluated(`carrier-shape-unrecognized: ${STATE_FILE_REL} is not a JSON object`);
+  }
+  const state = parsed as Partial<CarrierState>;
+  if (typeof state.phase !== "string" || !PHASES.includes(state.phase as Phase)) {
+    return stalenessNotEvaluated(
+      `carrier-shape-unrecognized: ${STATE_FILE_REL} has no legal phase value (${JSON.stringify(state.phase ?? null)})`,
+    );
+  }
+  if (typeof state.declaredAt !== "string" || !Number.isFinite(Date.parse(state.declaredAt))) {
+    return stalenessNotEvaluated(
+      `carrier-shape-unrecognized: ${STATE_FILE_REL} has no parseable declaredAt (${JSON.stringify(state.declaredAt ?? null)})`,
+    );
+  }
+  if (!Array.isArray(state.history)) {
+    return stalenessNotEvaluated(`carrier-shape-unrecognized: ${STATE_FILE_REL} has no history array`);
+  }
+  const declaredAt = state.declaredAt;
+
+  let commitsSince: number;
+  try {
+    const out = git(["rev-list", "--count", `--since=${declaredAt}`, "HEAD"], repo).trim();
+    const n = Number(out);
+    if (!Number.isInteger(n) || n < 0) throw new Error(`unexpected output ${JSON.stringify(out)}`);
+    commitsSince = n;
+  } catch (e) {
+    return stalenessNotEvaluated(
+      `git-unavailable: git rev-list --count --since=${declaredAt} HEAD failed in ${repo} (${(e as Error).message})`,
+    );
+  }
+
+  let newGoalsSince: string[];
+  try {
+    const out = git(["log", `--since=${declaredAt}`, "--diff-filter=A", "--name-only", "--format=", "--", "goals/"], repo);
+    const ids = new Set<string>();
+    for (const line of out.split("\n")) {
+      const rel = line.trim();
+      if (!rel) continue;
+      const m = path.posix.basename(rel).match(GOAL_ID_RE);
+      if (m) ids.add(m[1]);
+    }
+    newGoalsSince = [...ids].sort();
+  } catch (e) {
+    return stalenessNotEvaluated(
+      `git-unavailable: git log --diff-filter=A --name-only -- goals/ failed in ${repo} (${(e as Error).message})`,
+    );
+  }
+
+  const nowMs = (opts.now ?? new Date()).getTime();
+  const daysSince = Number.isFinite(nowMs)
+    ? Math.round(((nowMs - Date.parse(declaredAt)) / DAY_MS) * 100) / 100
+    : null;
+
+  return {
+    evaluated: true,
+    reason: null,
+    phase: state.phase as Phase,
+    declaredAt,
+    declarations: state.history.length,
+    commitsSince,
+    newGoalsSince,
+    daysSince,
+  };
+}
+
 // ── arg parsing ──────────────────────────────────────────────────────────────────────────────────
 
 interface ParsedArgs {
@@ -263,6 +420,8 @@ interface ParsedArgs {
   reason?: string;
   root?: string;
   window?: number;
+  /** READ-ONLY staleness reading instead of a declaration (never combined with --to/--reason). */
+  staleness: boolean;
   json: boolean;
   error?: string;
 }
@@ -278,7 +437,9 @@ interface ParsedArgs {
 export function parseArgs(argv: string[]): ParsedArgs {
   const parsed = baseParseArgs(["node", "phase-declare", ...argv], {
     minArgs: 0,
-    usage: '--to <expansion|convergence> --reason "<one sentence>" [--root <repo>] [--window <n>] [--json]',
+    usage:
+      '--to <expansion|convergence> --reason "<one sentence>" [--root <repo>] [--window <n>] [--json]\n' +
+      "       --staleness [--root <repo>] [--json]",
     help: "return",
     errors: "return",
     unknown: "reject",
@@ -287,6 +448,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
       reason: { type: "string" },
       root: { type: "string" },
       window: { type: "string" },
+      staleness: { type: "boolean" },
       json: { type: "boolean" },
     },
   });
@@ -295,6 +457,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
     to: str(parsed.flags.to),
     reason: str(parsed.flags.reason),
     root: str(parsed.flags.root),
+    staleness: parsed.flags.staleness === true,
     json: parsed.flags.json === true,
   };
   if (parsed.help) return { ...out, error: "help" };
@@ -319,8 +482,11 @@ const USAGE = `phase-declare.ts — declare the ADR-008 two-phase breathing stat
 Usage:
   node --experimental-strip-types plugin/scripts/phase-declare.ts \\
        --to <expansion|convergence> --reason "<one sentence>" [--root <repo>] [--window <n>] [--json]
+  node --experimental-strip-types plugin/scripts/phase-declare.ts \\
+       --staleness [--root <repo>] [--json]      (READ-ONLY: no file is written)
 
-Exit: 0 written | 1 refused (no/thin --reason, or unreadable carrier) | 2 usage | 3 no reading`;
+Exit: 0 written | 1 refused (no/thin --reason, or unreadable carrier) | 2 usage | 3 no reading
+      (with --staleness: 0 = read and evaluated, 3 = NOT-EVALUATED — a distinct value, see its reason)`;
 
 function main(): void {
   const opts = parseArgs(process.argv.slice(2));
@@ -332,6 +498,34 @@ function main(): void {
     console.error(`phase-declare: ${opts.error}\n\n${USAGE}`);
     process.exit(2);
   }
+  const repoRoot = opts.root ? path.resolve(opts.root) : path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
+
+  // READ-ONLY face (tasks/gap-adr008-phase-declaration-staleness-reading): report the distance from
+  // the current declaration. Deliberately disjoint from the declaration path below — mixing them
+  // would let a read be mistaken for a write (and vice versa).
+  if (opts.staleness) {
+    if (opts.to !== undefined || opts.reason !== undefined) {
+      console.error(`phase-declare: --staleness is a read-only reading and cannot be combined with --to/--reason\n\n${USAGE}`);
+      process.exit(2);
+    }
+    const staleness = readPhaseStaleness(repoRoot);
+    if (opts.json) {
+      console.log(JSON.stringify(staleness, null, 2));
+    } else if (!staleness.evaluated) {
+      console.log(`phase-declare: NOT-EVALUATED — ${staleness.reason}`);
+    } else {
+      console.log(
+        `phase-declare: phase=${staleness.phase} declaredAt=${staleness.declaredAt} ` +
+          `(${staleness.daysSince} days ago, ${staleness.declarations} declaration(s) recorded)`,
+      );
+      console.log(
+        `  since then: commits=${staleness.commitsSince} newGoals=${staleness.newGoalsSince?.length ?? 0}` +
+          (staleness.newGoalsSince && staleness.newGoalsSince.length > 0 ? ` [${staleness.newGoalsSince.join(", ")}]` : ""),
+      );
+    }
+    process.exit(staleness.evaluated ? 0 : 3);
+  }
+
   if (!opts.to || !PHASES.includes(opts.to as Phase)) {
     console.error(`phase-declare: --to must be one of ${PHASES.join("|")} (got ${JSON.stringify(opts.to ?? null)})\n\n${USAGE}`);
     process.exit(2);
@@ -346,7 +540,7 @@ function main(): void {
     process.exit(1);
   }
 
-  const root = opts.root ? path.resolve(opts.root) : path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
+  const root = repoRoot;
 
   let prev: Declaration[];
   try {

@@ -229,6 +229,22 @@ export {
   DESIGN_EVOLUTION_MIN_INTERVAL_MINUTES,
 } from "./design-evolution-readings.ts";
 
+// INSTRUMENT-DECAY 轨道（gap-instrument-decay-check-unwired-and-blind-to-content-dark）：
+// `plugin/scripts/instrument-decay-check.ts` 自称「常驻检测器」，但此前没有任何例程调用它——它只在
+// 人手动跑的时候存在。本轨把它接成与 arch_cycle_report 同族的声明式只读例程（`loop.instrument_decay:`）：
+// 每 due 轮跑一次四项读数（写手停写 A/B、内容全暗 C、过期的已评估 D、未覆盖清单），产出一条
+// `state: "instrument-dark"` 的 Fact（⛔ 与 verified / not-evaluated 都不同形），并对每个
+// （载体，形态）经**既有** gap-filing 通道立案（按机制去重：上一轮的 Fact 里已立案的 pair 不再 spawn）。
+// **零模型调用**：读数本身是纯文件 + git 读；只有「有新腐烂」才 spawn 一个短命 gap-filing agent。
+// ⛔ 与 fan-in/scoped-gate 无关（不在每任务必经的热路径上）。
+import {
+  analyzeAll as analyzeInstrumentDecay,
+  DEFAULT_STALE_SECONDS as INSTRUMENT_DECAY_DEFAULT_STALE_SECONDS,
+  type AnalyzeOutcome as InstrumentDecayOutcome,
+  type DecayFinding as InstrumentDecayFinding,
+  type CarrierSpec as InstrumentDecayCarrierSpec,
+} from "./instrument-decay-check.ts";
+
 // ── 常量（由 DRIVER_KINDS registry 派生，⛔ 不另写一份路径字面量）──────────────────────────
 const QUALITY_SPEC = DRIVER_KINDS.quality;
 /** 轮记录载体（.quay/quality-round.jsonl，gitignored 运行时日志——heartbeat，与 round 记录同族）。 */
@@ -274,6 +290,21 @@ export const ARCH_CYCLE_ROUTINE_NAME = "arch-cycle-report";
 
 /** 载体（gitignored，docs/carrier-registry.json 已登记）。 */
 export const ARCH_CYCLE_HISTORY_REL = path.posix.join(".quay", "arch-cycle-history.jsonl");
+
+/** instrument-decay 例程（声明式，`loop.instrument_decay:`）的缺省间隔。360m 与同族一致：每轮只是
+ *  读既有的 jsonl 载体 + 每个作用域一次 `git log -1`（零 spawn 模型、亚秒级），而「仪器是否在腐烂」
+ *  是慢变量——更密的观测不会让结论更准，只会把读数写得更频繁。 */
+export const INSTRUMENT_DECAY_INTERVAL_MIN_DEFAULT = 360;
+
+/** 声明 interval 的下限（分钟）——同族同一个界。 */
+export const INSTRUMENT_DECAY_MIN_INTERVAL_MINUTES = 60;
+
+/** 例程名（Fact 名 + `.quay/routine-last-run.json` 的键）。 */
+export const INSTRUMENT_DECAY_ROUTINE_NAME = "instrument-decay";
+
+/** gap-filing agent 的 wall-clock 上限【缺省回退值】（毫秒）。与 packaging-hygiene / architecture-review
+ *  的 gap-filing 角色同源（同一次实测 elapsed_s=602.9），⛔ 不另起测量。 */
+export const INSTRUMENT_DECAY_GAP_WORKER_TIMEOUT_MS_DEFAULT = 900_000;
 
 /** packaging-hygiene 的机械 check spawn 上限（毫秒）——config-key 枚举是纯函数、shipped-entry 是
  *  npm pack --dry-run + dist build（实测 ~2s / ~0.2s），180s 是给足余量的机械上限（⛔ 不是成本阈值，
@@ -2435,6 +2466,9 @@ export interface DesignEvolutionFactValue {
   rm1: DesignEvolutionReadingsRecord["rm1"];
   rm2: DesignEvolutionReadingsRecord["rm2"];
   carrierRecords: number | null;
+  /** ADR-008 phase-declaration staleness (gap-adr008-phase-declaration-staleness-reading) — attached
+   *  information, embedded verbatim from the carrier's owner. ⛔ Never folded into the Fact's state. */
+  phaseStaleness: DesignEvolutionReadingsRecord["phaseStaleness"];
   historyPath: string;
   historyAppended: boolean;
   reportOnly: true;
@@ -2503,6 +2537,7 @@ export function runDesignEvolutionRound(root: string, opts: DesignEvolutionRound
     rm1: record.rm1,
     rm2: record.rm2,
     carrierRecords: record.carrierRecords,
+    phaseStaleness: record.phaseStaleness,
     historyPath: appended.path,
     historyAppended: appended.ok,
     reportOnly: true,
@@ -2585,6 +2620,388 @@ export function formatDesignEvolutionAssembly(a: {
 }
 
 
+// ── instrument-decay 的 config 入口（`.quay/config.yml` `loop.instrument_decay:`）──────────────
+// 与 arch_cycle_report 同族的第十条声明式例程，语义逐条对齐（⛔ 不另造机制）：
+//   • 段缺席          ⇒ 不装配（off by default，宿主例程表逐条不变——AC144 的「恰好四条」判据仍成立）；
+//   • 段 enabled:false ⇒ 仍装配、每轮记 `not-evaluated:disabled` 且**零读数零写入**（kill switch 必须可观测）；
+//   • 段写坏          ⇒ 仍装配、记 `failed` 且零读数零写入（硬规则 3b：读不懂 ≠ 合格）。
+// 与其他各条的唯一差异是**它回答什么**：「我们用来观测系统的仪器本身还在不在读数」——A/B（写手停写）、
+// C（载体在写但全是 evaluated:false）、D（已评估但产物早于覆盖源码）、uncovered（没被检查的载体）。
+// **report-only**：腐烂是读数内容，⛔ 不 ratchet；但它是 `state: "instrument-dark"`，⛔ 不与 verified 同形。
+export interface InstrumentDecayConfig {
+  enabled: boolean;
+  /** `enabled:false` ⇒ null（不参与调度）。enabled 段缺省为 INSTRUMENT_DECAY_INTERVAL_MIN_DEFAULT。 */
+  intervalMinutes: number | null;
+}
+
+export interface InstrumentDecayConfigRead {
+  present: boolean;
+  config: InstrumentDecayConfig | null;
+  error: string | null;
+}
+
+const cfgInstrumentDecayBad = (msg: string) => `loop.instrument_decay ${msg}`;
+
+/** 纯解析一个 `loop.instrument_decay` 值（与 parseArchCycleSection 逐条同形）。 */
+export function parseInstrumentDecaySection(raw: unknown): { config: InstrumentDecayConfig | null; error: string | null } {
+  if (raw === null || typeof raw !== "object" || Array.isArray(raw)) {
+    return { config: null, error: cfgInstrumentDecayBad(`must be a mapping (got ${Array.isArray(raw) ? "array" : raw === null ? "null" : typeof raw})`) };
+  }
+  const rec = raw as Record<string, unknown>;
+  if (typeof rec.enabled !== "boolean") {
+    return { config: null, error: cfgInstrumentDecayBad(`needs a boolean 'enabled' (got ${rec.enabled === undefined ? "missing" : JSON.stringify(rec.enabled)})`) };
+  }
+  if (rec.enabled === false) return { config: { enabled: false, intervalMinutes: null }, error: null };
+  if (rec.interval === undefined || rec.interval === null) {
+    return { config: { enabled: true, intervalMinutes: INSTRUMENT_DECAY_INTERVAL_MIN_DEFAULT }, error: null };
+  }
+  if (typeof rec.interval !== "string") {
+    return { config: null, error: cfgInstrumentDecayBad(`'interval' must be a string of the form interval:<N>m (got ${JSON.stringify(rec.interval)})`) };
+  }
+  let trigger: { kind: string; minutes?: number };
+  try {
+    trigger = parseTrigger(rec.interval) as { kind: string; minutes?: number };
+  } catch (e) {
+    return { config: null, error: cfgInstrumentDecayBad(`invalid 'interval' — ${(e as Error).message}`) };
+  }
+  if (trigger.kind !== "interval" || typeof trigger.minutes !== "number") {
+    return { config: null, error: cfgInstrumentDecayBad(`'interval' must be interval:<N>m (got kind '${trigger.kind}')`) };
+  }
+  if (trigger.minutes < INSTRUMENT_DECAY_MIN_INTERVAL_MINUTES) {
+    return { config: null, error: cfgInstrumentDecayBad(`interval ${trigger.minutes}m is below the ${INSTRUMENT_DECAY_MIN_INTERVAL_MINUTES}m floor — refused, not silently rounded`) };
+  }
+  return { config: { enabled: true, intervalMinutes: trigger.minutes }, error: null };
+}
+
+/** 读 `.quay/config.yml` `loop.instrument_decay:`（同族读法：无 config / 无 `loop:` / 无段 ⇒
+ *  `present:false`；YAML 或段写坏 ⇒ `error` 置位，fail-closed）。 */
+export function readInstrumentDecayConfig(workspaceRoot: string): InstrumentDecayConfigRead {
+  const file = path.join(workspaceRoot, ".quay", "config.yml");
+  let text: string;
+  try {
+    text = fs.readFileSync(file, "utf8");
+  } catch {
+    return { present: false, config: null, error: null };
+  }
+  let parsed: unknown;
+  try {
+    parsed = parseYaml(text);
+  } catch (e) {
+    return { present: true, config: null, error: `.quay/config.yml is not valid YAML — ${(e as Error).message}` };
+  }
+  const loop = parsed && typeof parsed === "object" && !Array.isArray(parsed) ? (parsed as Record<string, unknown>).loop : undefined;
+  if (loop === null || loop === undefined) return { present: false, config: null, error: null };
+  if (typeof loop !== "object" || Array.isArray(loop)) return { present: true, config: null, error: "FAIL-CLOSED: .quay/config.yml 'loop:' must be a mapping" };
+  const raw = (loop as Record<string, unknown>).instrument_decay;
+  if (raw === undefined || raw === null) return { present: false, config: null, error: null };
+  const { config, error } = parseInstrumentDecaySection(raw);
+  return { present: true, config, error };
+}
+
+/** 一个（载体，形态）的立案结局。`already-filed` 的证据来自**上一轮的 Fact**（下面是 readPrior…）——
+ *  ⛔ 不另造一份去重账本：Fact 已经是每轮落盘的载体，第二份台账只会与它漂移。 */
+export interface InstrumentDecayFiling {
+  /** `${file}|${kind}` —— 去重键（Plan：「对每个（载体，形态）」）。 */
+  key: string;
+  file: string;
+  kind: InstrumentDecayFinding["kind"];
+  /** 该 pair 下受影响的分组/作用域名（prompt 里逐条列出——立案是 per pair，证据是 per group）。 */
+  groups: string[];
+  filing: "filed" | "already-filed" | "deferred";
+  exitCode: number | null;
+  error: string | null;
+  /** agent 输出的去噪摘要（报告已有 gap 时 agent 会在这里点名 task id）。 */
+  summary: string | null;
+}
+
+export interface InstrumentDecayFactValue {
+  mode: "instrument-decay-round";
+  evaluated: boolean;
+  decayedCount: number;
+  healthyCount: number;
+  uncoveredCount: number;
+  uncovered: InstrumentDecayOutcome["uncovered"];
+  carriers: Array<{
+    file: string;
+    evaluated: boolean;
+    contentDark: InstrumentDecayOutcome["carriers"][number]["contentDark"];
+    staleEvaluated: InstrumentDecayOutcome["carriers"][number]["staleEvaluated"];
+    decayed: InstrumentDecayFinding[];
+  }>;
+  filings: InstrumentDecayFiling[];
+  reportOnly: true;
+}
+
+/** gap-filing prompt：逐 (载体, 形态) 交给短命 agent，经 quay-file-task 立案（同 packaging 的措辞，
+ *  mechanism-based dedup）。 */
+export function buildInstrumentDecayGapWorkerPrompt(
+  root: string,
+  pairs: Array<{ file: string; kind: InstrumentDecayFinding["kind"]; findings: InstrumentDecayFinding[] }>,
+): string {
+  const lines: string[] = [
+    "You are a gap-filing agent in the quay repo. A standing instrument-decay check found carriers whose READINGS are dark — the carriers are still being written, so the older checks (write rate stopped) cannot see them.",
+    `Repo root: ${root}.`,
+    "The detector is plugin/scripts/instrument-decay-check.ts. Its four shapes:",
+    "  • never-wrote / rate-stopped — a writer group stopped writing (the original P5 shapes).",
+    "  • content-dark — the carrier keeps writing, but every record it holds is evaluated:false.",
+    "  • stale-evaluated — the carrier says evaluated:true, but the artifact it read predates the newest commit touching the source paths it covers.",
+    "Findings (one gap task PER (carrier, shape) below):",
+  ];
+  pairs.forEach((p, i) => {
+    lines.push(`  ${i + 1}. carrier=${p.file} shape=${p.kind}`);
+    for (const f of p.findings) {
+      lines.push(`       - ${f.group}: ${f.kind} (count=${f.count})${f.detail ? ` — ${f.detail}` : ""}`);
+    }
+  });
+  lines.push(
+    "The quay-file-task skill performs MECHANISM-BASED dedup. Apply the TWO rules below — an OPEN claim and a DONE claim are NOT the same case — and report every existing task id you matched:",
+    "  • OPEN claim (existing task in todo/ready/needs-human) — it claims the same rot ⇒ a real duplicate: do NOT file; report that task id instead.",
+    "  • DONE/superseded claim — a done task claiming the same rot is NOT proof the rot is gone (a task can be closed while the carrier still reads dark; done ≠ absent, hard rule 5b). Verify against the CURRENT CARRIER before deciding: re-read the carrier named above (and the writer path) at the current HEAD. STILL dark ⇒ FILE the task and carry the old task id in the body as traceability (`prior-claim: <id>`) — that is not a duplicate. NO LONGER dark ⇒ do NOT file; report 'the old task already fixed it' together with the evidence you checked.",
+    "A finding that is rare-BY-DESIGN (a step only reachable on an exceptional path) is still worth a task ONLY if the writer path is gone or the trigger has not occurred in far longer than its own cadence; otherwise report the adjudication instead of filing. Name which of the two you concluded.",
+  );
+  return lines.join("\n");
+}
+
+/** gap-filing agent argv = launchArgv("fix-worker", <prompt>)（测试缝：前缀覆盖时把 prompt 追加）。 */
+export function buildInstrumentDecayGapWorkerArgv(
+  root: string,
+  pairs: Array<{ file: string; kind: InstrumentDecayFinding["kind"]; findings: InstrumentDecayFinding[] }>,
+  cmd?: string | null,
+): string[] {
+  const prompt = buildInstrumentDecayGapWorkerPrompt(root, pairs);
+  if (cmd != null) {
+    const prefix = splitArgs(cmd);
+    if (prefix.length === 0) return launchArgv("fix-worker", prompt, root);
+    return [...prefix, prompt];
+  }
+  return launchArgv("fix-worker", prompt, root);
+}
+
+/** 上一轮已立案的 pair 键——从 round 载体（`.quay/quality-round.jsonl`）的尾部读，⛔ 不新造台账。
+ *
+ *  WHY the tail only: the round log is an append-only heartbeat carrier (63k+ lines in production).
+ *  The previous round's Fact is what we need; scanning the whole file every 360m would grow without
+ *  bound. 500 lines is far more than one round's worth (a round is ONE line). */
+export function readPriorInstrumentDecayFilings(root: string, roundLogPath?: string): Set<string> {
+  const file = roundLogPath ?? path.join(root, ROUND_LOG_REL);
+  const out = new Set<string>();
+  let text: string;
+  try {
+    text = fs.readFileSync(file, "utf8");
+  } catch {
+    return out;
+  }
+  const lines = text.split("\n").filter((l) => l.trim() !== "").slice(-500);
+  for (let i = lines.length - 1; i >= 0; i--) {
+    let rec: any;
+    try { rec = JSON.parse(lines[i]); } catch { continue; }
+    const facts = Array.isArray(rec?.facts) ? rec.facts : [];
+    for (const f of facts) {
+      if (!f || f.name !== INSTRUMENT_DECAY_ROUTINE_NAME) continue;
+      const filings = Array.isArray(f?.value?.filings) ? f.value.filings : [];
+      for (const fl of filings) {
+        if (fl && fl.filing === "filed" && typeof fl.key === "string") out.add(fl.key);
+      }
+    }
+  }
+  return out;
+}
+
+export interface InstrumentDecayRoundOptions {
+  config?: InstrumentDecayConfig | null;
+  configPresent?: boolean;
+  configError?: string | null;
+  /** 形状 B 的伴生陈旧间隔（秒）；缺省 DEFAULT_STALE_SECONDS。 */
+  staleSeconds?: number;
+  /** Test seam: manifest override（⚠️ 生产永不传——描述符的登记表就是 MANIFEST）。 */
+  manifest?: InstrumentDecayCarrierSpec[];
+  /** Test seam: gap-filing agent 命令前缀。缺省 null ⇒ 生产 launchArgv。 */
+  gapWorkerCmd?: string | null;
+  gapWorkerTimeoutMs?: number;
+  resourceGateArgv?: string[] | null;
+  halted?: boolean;
+  /** Test seam: 已立案 pair 键（缺省从 round 载体尾部读）。 */
+  priorFilings?: Iterable<string>;
+  roundLogPath?: string;
+  /** 确定性 ts seam（当前只用于 reason 里的时间证据，不写载体）。 */
+  now?: string;
+}
+
+/** 跑一轮 instrument-decay 读数 + 立案。NEVER throws。
+ *
+ *  ⛔ 失败词表是这一族的（硬规则 3b）：
+ *    • `failed`          — 例程做不成它的事（坏配置）；
+ *    • `not-evaluated`   — 没有任何已登记载体可读（verify worktree 无主检出运行时态），或 kill switch；
+ *    • `verified`        — 读数取到了且**没有任何腐烂**（uncovered 仍写进 value/reason，⛔ 不吞掉）；
+ *    • `instrument-dark` — 读数取到了，结论是「有仪器在腐烂」。⛔ 不与 verified / not-evaluated 同形。 */
+export async function runInstrumentDecayRound(
+  root: string,
+  opts: InstrumentDecayRoundOptions = {},
+): Promise<Fact<InstrumentDecayFactValue | null>> {
+  const name = INSTRUMENT_DECAY_ROUTINE_NAME;
+  if (opts.configError) return { name, value: null, state: "failed", reason: opts.configError };
+  if (opts.configPresent === false) {
+    return { name, value: null, state: "not-evaluated", reason: "not-evaluated:not-declared — loop.instrument_decay is absent (the routine is only assembled when the section is declared)" };
+  }
+  if (opts.config === null) {
+    return { name, value: null, state: "failed", reason: cfgInstrumentDecayBad("present but could not be parsed") };
+  }
+  if (opts.config && !opts.config.enabled) {
+    return { name, value: null, state: "not-evaluated", reason: "not-evaluated:disabled — .quay/config.yml loop.instrument_decay.enabled=false（kill switch：零读数、零写入）" };
+  }
+
+  const resolvedRoot = path.resolve(root);
+  const outcome = analyzeInstrumentDecay(resolvedRoot, {
+    staleSeconds: opts.staleSeconds ?? INSTRUMENT_DECAY_DEFAULT_STALE_SECONDS,
+  }, opts.manifest);
+
+  // 把 findings 归并成 (载体, 形态) 的 pair —— 立案的粒度是 Plan 写明的 pair，证据仍是逐 group。
+  const pairMap = new Map<string, { file: string; kind: InstrumentDecayFinding["kind"]; findings: InstrumentDecayFinding[] }>();
+  for (const c of outcome.carriers) {
+    for (const f of c.decayed) {
+      const key = `${c.file}|${f.kind}`;
+      const entry = pairMap.get(key) ?? { file: c.file, kind: f.kind, findings: [] };
+      entry.findings.push(f);
+      pairMap.set(key, entry);
+    }
+  }
+  const pairs = [...pairMap.entries()].map(([key, v]) => ({ key, ...v }));
+  const prior = opts.priorFilings !== undefined
+    ? new Set(opts.priorFilings)
+    : readPriorInstrumentDecayFilings(resolvedRoot, opts.roundLogPath);
+
+  const filings: InstrumentDecayFiling[] = [];
+  for (const p of pairs) {
+    const groups = p.findings.map((f) => f.group);
+    if (prior.has(p.key)) {
+      filings.push({ key: p.key, file: p.file, kind: p.kind, groups, filing: "already-filed", exitCode: null, error: null, summary: null });
+      continue;
+    }
+    if (opts.halted === true) {
+      filings.push({ key: p.key, file: p.file, kind: p.kind, groups, filing: "deferred", exitCode: null, error: "halted", summary: null });
+      continue;
+    }
+    const gate = resourceGateCheck(resolvedRoot, opts.resourceGateArgv ?? null);
+    if (!gate.go) {
+      filings.push({ key: p.key, file: p.file, kind: p.kind, groups, filing: "deferred", exitCode: null, error: `resource-gate ${gate.state}`, summary: null });
+      continue;
+    }
+    const argv = buildInstrumentDecayGapWorkerArgv(resolvedRoot, [p], opts.gapWorkerCmd ?? null);
+    const g = await runAsync(argv, { timeoutMs: opts.gapWorkerTimeoutMs ?? INSTRUMENT_DECAY_GAP_WORKER_TIMEOUT_MS_DEFAULT, collectStderr: true });
+    filings.push({
+      key: p.key, file: p.file, kind: p.kind, groups,
+      filing: "filed",
+      exitCode: g.status,
+      error: g.error ? g.error.message : (g.status === 0 ? null : (String(g.stderr ?? "").slice(0, 200) || null)),
+      summary: String(g.stdout ?? "").trim().slice(-400) || null,
+    });
+  }
+
+  const value: InstrumentDecayFactValue = {
+    mode: "instrument-decay-round",
+    evaluated: outcome.anyEvaluated,
+    decayedCount: outcome.decayedCount,
+    healthyCount: outcome.healthyCount,
+    uncoveredCount: outcome.uncoveredCount,
+    uncovered: outcome.uncovered,
+    carriers: outcome.carriers.map((c) => ({
+      file: c.file,
+      evaluated: c.evaluated,
+      contentDark: c.contentDark,
+      staleEvaluated: c.staleEvaluated,
+      decayed: c.decayed,
+    })),
+    filings,
+    reportOnly: true,
+  };
+
+  if (!outcome.anyEvaluated) {
+    return { name, value, state: "not-evaluated", reason: "not-evaluated:no-carrier — no registered carrier is present under .quay/ (verify worktree has no main-checkout runtime state)" };
+  }
+  const coverage = value.uncoveredCount > 0
+    ? `${value.uncoveredCount} uncovered carrier(s) NOT counted healthy (${value.uncovered.map((u) => u.file).join(", ")})`
+    : "no uncovered carriers";
+  if (outcome.decayedCount === 0) {
+    return { name, value, state: "verified", reason: value.uncoveredCount > 0 ? `no instrument decay; ${coverage}` : null };
+  }
+  const filed = filings.filter((f) => f.filing === "filed").length;
+  const already = filings.filter((f) => f.filing === "already-filed").length;
+  const deferred = filings.filter((f) => f.filing === "deferred").length;
+  const named = [...pairMap.values()].map((p) => `${p.file}: ${p.kind} (${p.findings.length})`).join("; ");
+  return {
+    name,
+    value,
+    state: "instrument-dark",
+    reason: `instrument-dark: ${outcome.decayedCount} finding(s) — ${named}; filings: filed=${filed} already-filed=${already} deferred=${deferred}; ${coverage}`,
+  };
+}
+
+export interface InstrumentDecayRoutineOptions {
+  staleSeconds?: number;
+  gapWorkerCmd?: string | null;
+  gapWorkerTimeoutMs?: number;
+  resourceGateArgv?: string[] | null;
+  roundLogPath?: string;
+}
+
+/** Build the RoutineSpec（scheduler / watchdog / halt 是 driver 的，不在这里重实现）。 */
+export function buildInstrumentDecayRoutine(
+  root: string,
+  read: InstrumentDecayConfigRead,
+  opts: InstrumentDecayRoutineOptions = {},
+): RoutineSpec {
+  const minutes = read.config?.intervalMinutes ?? INSTRUMENT_DECAY_INTERVAL_MIN_DEFAULT;
+  return {
+    name: INSTRUMENT_DECAY_ROUTINE_NAME,
+    schedule: { kind: "interval", minutes },
+    // 纯文件 + git 读；halt 只挡 gap-filing spawn（读数照跑——观测不是受闸动作）。
+    run: async (ctx) => [
+      await runInstrumentDecayRound(root, {
+        config: read.config,
+        configPresent: read.present,
+        configError: read.error,
+        ...(opts.staleSeconds !== undefined ? { staleSeconds: opts.staleSeconds } : {}),
+        ...(opts.gapWorkerCmd !== undefined ? { gapWorkerCmd: opts.gapWorkerCmd } : {}),
+        ...(opts.gapWorkerTimeoutMs !== undefined ? { gapWorkerTimeoutMs: opts.gapWorkerTimeoutMs } : {}),
+        ...(opts.resourceGateArgv !== undefined ? { resourceGateArgv: opts.resourceGateArgv } : {}),
+        ...(opts.roundLogPath !== undefined ? { roundLogPath: opts.roundLogPath } : {}),
+        halted: ctx?.halted === true,
+      }),
+    ],
+  };
+}
+
+/** Production entry: read `.quay/config.yml` and build the routine. NEVER throws.
+ *  `routine` is `null` when NO section is declared — an undeclared workspace keeps the EXACT routine
+ *  set it had before (AC144's "exactly four"). A DECLARED section always yields a routine, even
+ *  `enabled:false` or malformed, because "not running" must be observable (硬规则 3/3b). */
+export function instrumentDecayRoutineFromConfig(
+  root: string,
+  opts: InstrumentDecayRoutineOptions = {},
+): { routine: RoutineSpec | null; error: string | null; present: boolean; enabled: boolean } {
+  const read = readInstrumentDecayConfig(root);
+  return {
+    routine: read.present ? buildInstrumentDecayRoutine(root, read, opts) : null,
+    error: read.error,
+    present: read.present,
+    enabled: read.config?.enabled === true,
+  };
+}
+
+/** The assembly line, as ONE string — declared-but-disabled / malformed / running never look the
+ *  same in the driver's startup log (硬规则 3b/9). */
+export function formatInstrumentDecayAssembly(a: {
+  present: boolean;
+  error: string | null;
+  enabled: boolean;
+  intervalMinutes: number;
+}): string {
+  if (a.error !== null) return `instrument-decay 例程已装配（${a.error} — 每轮记 failed、零读数零写入；⛔ 不回退到缺省节奏照跑）`;
+  if (!a.enabled) return "instrument-decay 例程已装配（enabled:false — 每轮记 not-evaluated:disabled，零读数零写入）";
+  return `instrument-decay 例程已装配（enabled, interval=${a.intervalMinutes}m，report-only：A/B 写手停写 + C 内容全暗 + D 过期的已评估 + uncovered，读数写成 state=instrument-dark 的 Fact；腐烂是读数内容，⛔ 不是 failed；有新腐烂才 spawn gap-filing，已立案的 (载体,形态) 不重复立案）`;
+}
+
+
 // ── 例程表（Layer 1b：routines = [{name, schedule, run() → Facts}]）──────────────────────────
 
 /** 例程装配缝（测试可注入覆盖命令/间隔；缺省 = 生产缺省）。 */
@@ -2659,6 +3076,12 @@ export interface QualityGateOptions {
    *  null = 未装配 ⇒ 未声明的工作区例程表逐条不变（AC144 的「恰好四条」判据仍成立）。
    *  **report-only**：RM1 占比 + RM2 争用计数 + 一行历史，⛔ 不作为任何闸。 */
   designEvolutionRoutine?: RoutineSpec | null;
+  /** instrument-decay 例程（gap-instrument-decay-check-unwired-and-blind-to-content-dark）：同族的
+   *  声明式注入纪律（main() 从 `.quay/config.yml` `loop.instrument_decay:` 装配后注入）。缺省
+   *  null = 未装配 ⇒ 未声明的工作区例程表逐条不变（AC144 的「恰好四条」判据仍成立）。
+   *  **report-only**：读数写成 `state: "instrument-dark"` 的 Fact（⛔ 不 ratchet），有新腐烂才 spawn
+   *  gap-filing；已立案的 (载体, 形态) 不重复立案。 */
+  instrumentDecayRoutine?: RoutineSpec | null;
 }
 
 /** 四条例程（B15 pool-quality-judge + B17 judgment-consumer-check + 架构复核 + packaging-hygiene）。
@@ -2754,6 +3177,12 @@ export function qualityGateRoutines(root: string, opts: QualityGateOptions): Rou
     // 仍在产生并发争用（RM2）——两条读数都来自被测机制之外（git 历史 / worker 结局账本），report-only，
     // ⛔ 不 ratchet（占比高、争用多都不是 failed）。
     ...(opts.designEvolutionRoutine ? [opts.designEvolutionRoutine] : []),
+    // 第十四类：INSTRUMENT-DECAY 例程（同一「声明式 + 可观测」族：间隔与开关来自 `.quay/config.yml`
+    // `loop.instrument_decay:`）。缺席 ⇒ 不加入（老行为，内建四条不变）；加入而段缺席/写坏 ⇒ 仍装配并记
+    // not-evaluated:disabled / failed（kill switch 与坏配置的可观测面）。
+    // **它回答的问题**：「我们用来观测系统的仪器本身还在读数吗」——A/B 写手停写、C 内容全暗、
+    // D 过期的已评估、uncovered 未覆盖。⛔ 不是 fan-in 热路径上的检查。
+    ...(opts.instrumentDecayRoutine ? [opts.instrumentDecayRoutine] : []),
   ];
 }
 
@@ -3535,6 +3964,26 @@ export async function main(argv: string[]): Promise<number> {
     })}`);
   }
 
+  // instrument-decay 轨道：读 `.quay/config.yml` `loop.instrument_decay:`（同一注入纪律）。
+  // 未声明 ⇒ 不装配（例程表逐条不变，AC144 的「恰好四条」不变）；声明了但 enabled:false/写坏 ⇒
+  // 仍装配（disabled / failed 必须可观测，硬规则 3b）。**report-only**：每 due 轮跑一次四项读数
+  // （A/B 写手停写、C 内容全暗、D 过期的已评估、uncovered），写成 `state: "instrument-dark"` 的
+  // Fact；腐烂 ⛔ 不使轮 failed，有新腐烂才 spawn gap-filing。
+  const instrumentDecay = instrumentDecayRoutineFromConfig(rootDir);
+  if (instrumentDecay.error) {
+    console.error(`quality-gate-driver: instrument-decay 例程配置无效 — ${instrumentDecay.error}`);
+  } else if (!instrumentDecay.present) {
+    console.error("quality-gate-driver: 未声明 loop.instrument_decay — instrument-decay 例程未装配（off by default，零读数零写入；例程表与未接此轨时一致）");
+  } else {
+    console.error(`quality-gate-driver: ${formatInstrumentDecayAssembly({
+      present: instrumentDecay.present,
+      error: instrumentDecay.error,
+      enabled: instrumentDecay.enabled,
+      intervalMinutes:
+        (instrumentDecay.routine?.schedule as { minutes?: number } | undefined)?.minutes ?? INSTRUMENT_DECAY_INTERVAL_MIN_DEFAULT,
+    })}`);
+  }
+
   const routines = qualityGateRoutines(rootDir, {
     planCmd: planCmd ? splitArgs(planCmd) : null,
     judgeArgv: judgeCmd ? splitArgs(judgeCmd) : null,
@@ -3563,6 +4012,7 @@ export async function main(argv: string[]): Promise<number> {
     archCoverageRoutine: archCoverage.routine,
     archCycleRoutine: archCycle.routine,
     designEvolutionRoutine: designEvolution.routine,
+    instrumentDecayRoutine: instrumentDecay.routine,
   });
 
   return runResidentQualityGateLoop({ root: rootDir, intervalMs: interval, once, maxRounds, roundLogFile, runId: resolvedRunId, json, pidFile, routines, routineWatchdogMs, kind: "quality" });
