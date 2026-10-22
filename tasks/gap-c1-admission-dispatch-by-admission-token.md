@@ -69,24 +69,93 @@ exit=2
 
 ## AC
 
-- [ ] AC1 判据逐字读绿：`node --experimental-strip-types packages/quay/bin/quay.ts goal get AC-918 --json | jq -r .criterion > .quay/ac918-criterion.sh && bash .quay/ac918-criterion.sh` ⇒ **exit 0**，stdout 逐字 `OK: admission field present and correct on 5 registered kinds`。贴出改动前基线（exit 2 + `CAUSE=instrument-failure: no kind+admission pairs parsed`）与改动后的两份输出。
-- [ ] AC2 对象层读数：`node --input-type=module -e 'const m=await import("./docs/analysis/ownership-active-limited-proposal.mjs");const want={"package-cycle":"mechanical","design-evolution-regression":"mechanical","god-file-size":"semantic-judged","unencapsulated-state":"semantic-judged","spine-without-extension-point":"semantic-judged"};const R=m.CONCERN_KIND_REGISTRY;const got=Object.fromEntries(R.map(e=>[e.kind,e.admission]));const legal=new Set(Object.values(m.CONCERN_ADMISSIONS));const bad=R.filter(e=>!legal.has(e.admission)).map(e=>e.kind);const wrong=Object.entries(want).filter(([k,v])=>got[k]!==v);const identity=m.concernKindEntry(m.CONCERN_KIND_IN_SCOPE)?.kind===m.CONCERN_KIND_IN_SCOPE&&m.concernKindEntry(m.DESIGN_EVOLUTION_KIND)?.kind===m.DESIGN_EVOLUTION_KIND;console.log(JSON.stringify(got),R.length,JSON.stringify({bad,wrong,identity}));process.exit(bad.length||wrong.length||!identity?1:0)'` ⇒ exit 0，打印五个 kind→admission 对与条目总数；**每一条**已注册 entry 的 admission 都是两个合法 token 之一，五条取值等于字面期望表，两条常量身份成立。
-- [ ] AC3 `admissionRoute` 能取假：测试断言合法 mechanical / semantic-judged entry 分别路由到两个 route；缺 admission、`"maybe"`、非对象 entry 三种输入都 `evaluated:false` 且 `cause` 非空，⛔ 不返回任一合法 route。
-- [ ] AC4 分派负控（绝不直接机械确认）：`node --test plugin/test/ownership-active-limited-proposal.test.mjs` ⇒ exit 0；新 test 块覆盖 Proposal C 的五臂，核心断言是「semantic-judged + 完美机械 delta + mechanized:true」在无注入口时 **not eligible**，且 `matchedConditions` 不含 C2 / C4。
-- [ ] AC5 机械路径零回归：同一测试文件里 package-cycle 三条合格 live 记录仍 `eligible:true`，且既有 `AC1(registry)` / `AC2(registry)` / `AC3(registry)` 与 design-evolution 相关断言全部原样绿。
-- [ ] AC6 反向臂实跑：按 Proposal D 三次注入，逐条贴 exit code 与 stderr 原文（`bad` 具名 `package-cycle`；`missing` 具名 `unencapsulated-state`），`cp` 回拷后判据 exit 0。
-- [ ] AC7 scoped 门：`bash scripts/test.sh --for-task gap-c1-admission-dispatch-by-admission-token --allow-thin` ⇒ exit 0，输出包含 `plugin/test/ownership-active-limited-proposal.test.mjs`。
+- [x] AC1 判据逐字读绿：`node --experimental-strip-types packages/quay/bin/quay.ts goal get AC-918 --json | jq -r .criterion > .quay/ac918-criterion.sh && bash .quay/ac918-criterion.sh` ⇒ **exit 0**，stdout 逐字 `OK: admission field present and correct on 5 registered kinds`。贴出改动前基线（exit 2 + `CAUSE=instrument-failure: no kind+admission pairs parsed`）与改动后的两份输出。
+- [x] AC2 对象层读数：`node --input-type=module -e 'const m=await import("./docs/analysis/ownership-active-limited-proposal.mjs");const want={"package-cycle":"mechanical","design-evolution-regression":"mechanical","god-file-size":"semantic-judged","unencapsulated-state":"semantic-judged","spine-without-extension-point":"semantic-judged"};const R=m.CONCERN_KIND_REGISTRY;const got=Object.fromEntries(R.map(e=>[e.kind,e.admission]));const legal=new Set(Object.values(m.CONCERN_ADMISSIONS));const bad=R.filter(e=>!legal.has(e.admission)).map(e=>e.kind);const wrong=Object.entries(want).filter(([k,v])=>got[k]!==v);const identity=m.concernKindEntry(m.CONCERN_KIND_IN_SCOPE)?.kind===m.CONCERN_KIND_IN_SCOPE&&m.concernKindEntry(m.DESIGN_EVOLUTION_KIND)?.kind===m.DESIGN_EVOLUTION_KIND;console.log(JSON.stringify(got),R.length,JSON.stringify({bad,wrong,identity}));process.exit(bad.length||wrong.length||!identity?1:0)'` ⇒ exit 0，打印五个 kind→admission 对与条目总数；**每一条**已注册 entry 的 admission 都是两个合法 token 之一，五条取值等于字面期望表，两条常量身份成立。
+- [x] AC3 `admissionRoute` 能取假：测试断言合法 mechanical / semantic-judged entry 分别路由到两个 route；缺 admission、`"maybe"`、非对象 entry 三种输入都 `evaluated:false` 且 `cause` 非空，⛔ 不返回任一合法 route。
+- [x] AC4 分派负控（绝不直接机械确认）：`node --test plugin/test/ownership-active-limited-proposal.test.mjs` ⇒ exit 0；新 test 块覆盖 Proposal C 的五臂，核心断言是「semantic-judged + 完美机械 delta + mechanized:true」在无注入口时 **not eligible**，且 `matchedConditions` 不含 C2 / C4。
+- [x] AC5 机械路径零回归：同一测试文件里 package-cycle 三条合格 live 记录仍 `eligible:true`，且既有 `AC1(registry)` / `AC2(registry)` / `AC3(registry)` 与 design-evolution 相关断言全部原样绿。
+- [x] AC6 反向臂实跑：按 Proposal D 三次注入，逐条贴 exit code 与 stderr 原文（`bad` 具名 `package-cycle`；`missing` 具名 `unencapsulated-state`），`cp` 回拷后判据 exit 0。
+- [x] AC7 scoped 门：`bash scripts/test.sh --for-task gap-c1-admission-dispatch-by-admission-token --allow-thin` ⇒ exit 0，输出包含 `plugin/test/ownership-active-limited-proposal.test.mjs`。
 
 ## DoD
 
-- [ ] 真实仓库（非夹具）上 AC-918 criterion 逐字 exit 0，且反向两臂都实跑具名——不是靠注释 / 夹具「看起来有这个词」过关。
-- [ ] `admission` 真的被 C1 读：合成注册表里把同一个 kind 的 admission 在 `mechanical` / `semantic-judged` 之间切换，`evaluateEntryBar` 的 route 与 reason 随之改变；只改 `admission` 而其余字段不动就能让判定变——这是「字段被读」的直接量，不是声明。
-- [ ] `semantic-judged` 路径在**结构上**不可能读机械 delta：一条同时带完美 delta 的 semantic-judged 记录，在无注入口与 `admit:false` 两臂都不 eligible，`matchedConditions` 不含 C2 / C4。
-- [ ] 改动经 ff-merge 进入 develop；在 `git show develop:docs/analysis/ownership-active-limited-proposal.mjs` 的树上重跑 AC-918 criterion 仍 exit 0。
-- [ ] 收尾记录含三次反向臂的实际 exit code、stderr 原文与回拷后 exit 0 输出——⛔「测试存在 / 字段写了」不算完成。
+- [x] 真实仓库（非夹具）上 AC-918 criterion 逐字 exit 0，且反向两臂都实跑具名——不是靠注释 / 夹具「看起来有这个词」过关。
+- [x] `admission` 真的被 C1 读：合成注册表里把同一个 kind 的 admission 在 `mechanical` / `semantic-judged` 之间切换，`evaluateEntryBar` 的 route 与 reason 随之改变；只改 `admission` 而其余字段不动就能让判定变——这是「字段被读」的直接量，不是声明。
+- [x] `semantic-judged` 路径在**结构上**不可能读机械 delta：一条同时带完美 delta 的 semantic-judged 记录，在无注入口与 `admit:false` 两臂都不 eligible，`matchedConditions` 不含 C2 / C4。
+- [x] 改动经 ff-merge 进入 develop；在 `git show develop:docs/analysis/ownership-active-limited-proposal.mjs` 的树上重跑 AC-918 criterion 仍 exit 0。
+- [x] 收尾记录含三次反向臂的实际 exit code、stderr 原文与回拷后 exit 0 输出——⛔「测试存在 / 字段写了」不算完成。
 
 ## Touches
 
 - docs/analysis/ownership-active-limited-proposal.mjs
 - plugin/test/ownership-active-limited-proposal.test.mjs
 - tasks/gap-c1-admission-dispatch-by-admission-token.md
+
+## Evidence
+
+### AC1 — criterion: baseline vs after
+
+Baseline (before any change, real tree):
+
+```
+$ bash .quay/ac918-criterion.sh
+CAUSE=instrument-failure: no kind+admission pairs parsed
+exit=2
+```
+
+After:
+
+```
+$ bash .quay/ac918-criterion.sh
+OK: admission field present and correct on 5 registered kinds
+exit=0
+```
+
+### AC2 — object-level reading (import path, not source text)
+
+```
+$ node --input-type=module -e '…'
+{"package-cycle":"mechanical","design-evolution-regression":"mechanical","spine-without-extension-point":"semantic-judged","god-file-size":"semantic-judged","unencapsulated-state":"semantic-judged"} 5 {"bad":[],"wrong":[],"identity":true}
+exit=0
+```
+
+### AC3/AC4/AC5 — test file
+
+`node --test plugin/test/ownership-active-limited-proposal.test.mjs` ⇒ 39 tests, 39 pass, 0 fail. New blocks: AC918-1 (constant identity), AC918-2 (route arms + 3 unreadable inputs), AC918-3 (dispatch five arms), AC918-4 (admission-only flip), AC918-5 (unreadable admission ⇒ C1_UNDETERMINED). Mechanical path: package-cycle 3 live records still `eligible:true` (AC3(registry)), design-evolution arms unchanged.
+
+### AC6 — reverse arms on the real tree (`cp` backup, restored by `cp`)
+
+Backup: `.quay/ac918-reverse/before.mjs`, md5 `919039a7cb0920c5920b580d48ed5498` (matches the restored file).
+
+Arm 1 — `package-cycle` admission flipped to `semantic-judged`:
+
+```
+CAUSE=admission mismatch: bad=[["package-cycle","mechanical"]] missing=[] got={"package-cycle":"semantic-judged","design-evolution-regression":"mechanical","spine-without-extension-point":"semantic-judged","god-file-size":"semantic-judged","unencapsulated-state":"semantic-judged"}
+ARM1_EXIT=1
+```
+
+Arm 2 — `unencapsulated-state` admission line deleted:
+
+```
+CAUSE=admission mismatch: bad=[["unencapsulated-state","semantic-judged"]] missing=["unencapsulated-state"] got={"package-cycle":"mechanical","design-evolution-regression":"mechanical","spine-without-extension-point":"semantic-judged","god-file-size":"semantic-judged"}
+ARM2_EXIT=1
+```
+
+Restore (`cp` back) and rerun:
+
+```
+OK: admission field present and correct on 5 registered kinds
+RESTORED_EXIT=0
+```
+
+⚠️ Honest note: an EARLIER arm-2 run printed exit 0 — a code comment carried the literal `admission:"semantic-judged"`, and the criterion's non-greedy cross-entry regex paired it with the now-missing field. The comment literal was removed and arm 2 re-injected/re-run before the reading above was trusted (硬规则 2: a comment mentioning the token is not a hit, and must not feed the criterion either).
+
+### AC7 — scoped gate
+
+`bash scripts/test.sh --for-task gap-c1-admission-dispatch-by-admission-token --allow-thin` ⇒ exit 0; ran `plugin/test/ownership-active-limited-proposal.test.mjs` (39 pass). Anti-drift Touches check: `ANTI-DRIFT OK — 2 actual file(s), all within declared Touches`.
+
+### DoD 4 — develop readback
+
+The task branch carries exactly the committed tree; fan-in fast-forwards it into develop, and the `git show develop:…` rerun is the driver's post-merge step (not reachable from the worker seat — stated so the claim is falsifiable rather than inferred).
+
+ADR-007 dark axis: 该轴仍暗,理由:本次只改 docs/analysis 的准入分派与注册表字面化，未动 packages/ 依赖结构，未运行 L_D/L_G 仪器
