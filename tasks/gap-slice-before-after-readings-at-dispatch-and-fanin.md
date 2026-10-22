@@ -21,7 +21,7 @@ extra:
 
 **它实际在用、而我们没有自动化的量**：中心文件行数、call out-degree（同口径）、以及扩展点负对照（后者由 `gap-extension-point-refactor-criteria-scaffold` 承担，本条只管**读数**）。对方报告的示例：driver `outDegree` 203→187、文件 6662→5811。
 
-**对方登记的样本外预测（2026-10-22，⛔ 是预测不是读数）**：claudecodeui 的刀4（前端 hook，纯提取）与刀5（voice 出环，端口注入/断边）都属于 **R1 侧**，不是建扩展点。对方预测这两刀的 `centralChurnShare` 会**明显高于** driver 两刀的 0.21，理由是「中心文件只有删除、没有新增落点」。判读方式：两刀实测 `centralChurnShare ≤ 0.21` ⇒ 该预测被证伪；落在 0.21–0.35 之间 ⇒ 记「同量级、不判」；`> 0.35` ⇒ 预测成立。本任务只负责产出可比的读数，判读留给模型文档的预测登记处。
+**对方登记的样本外预测（2026-10-22，⛔ 是预测不是读数）**：claudecodeui 的刀4（前端 hook，纯提取）与刀5（voice 出环，端口注入/断边）都属于 **R1 侧**，不是建扩展点。对方预测这两刀的 `centralChurnShare` 会**明显高于** driver 两刀的 0.21，理由是「中心文件只有删除、没有新增落点」。判读方式（**弱判据**，只对 `centralChurnShare` 成立，且只检验这条预测本身）：两刀实测 `centralChurnShare ≤ 0.21` ⇒ 该预测被证伪；落在 0.21–0.35 之间 ⇒ 记「同量级、不判」；`> 0.35` ⇒ 预测成立。⛔ 这条分界**不是** R1/R2 的判读。本任务只负责产出可比的读数，判读留给模型文档的预测登记处。
 **⚠️ 该预测即使成立，也只说明「这次拆得彻底」，不能证明 R1 与 R2 有区别**——单 commit 的 churn 分子包含中心文件的**删除**行，中心删得多 share 就高，与有没有扩展点无关。R1/R2 的判据是**时间窗内只计新增**的落点占比（`centralFileLines` 的增量比），这正是本任务要多记一条 `centralChurnShare` 而非拿它替代增长占比的原因。
 
 **已知的读数陷阱（都已在别处被实证）**：
@@ -34,7 +34,11 @@ extra:
 1. **新脚本 `plugin/scripts/slice-readings.ts`**，两条子命令：
    - `--baseline --task-id <id> --scope <subsystem> --head <sha>` → 写 `.quay/slice-readings/<task-id>.json`（gitignored，主检出）；
    - `--post --task-id <id>` → 读同文件的基线，在**同一 scope、同一口径**下再取一次，写 `delta` 与两侧 `headSha`。
-   记录 schema（最小键）：`{taskId, phase, evaluated, reason, headSha, scope, metrics:{centralFileLines, centralFileBodyLines, callOutDegree, methodCount, methodShellCount, cycles}}`，外加 `metricBasis`（`summary` 或 `cognitive-summary`，逐量标注）。
+   记录 schema（最小键）：`{taskId, phase, evaluated, reason, headSha, scope, metrics:{centralFileLines, centralFileBodyLines, callOutDegree, methodCount, methodShellCount, cycles, centralChurnShare, centralSlimRatio}}`，外加 `metricBasis`（`summary` 或 `cognitive-summary`，逐量标注）。
+   三个「占比」类量必须**分键、分定义、分 basis** 各记一份，⛔ 不得合并成一个 `centralΔ`：
+   - `centralChurnShare` = 该次提交内中心文件改动行（insertions+deletions）÷ 全部改动行。分母含测试/装配代码的新增（刀1 里 18KB 判据文件约 1000 行新增把分母撑大），**只作连续性对照**。
+   - `centralSlimRatio` = 中心文件**删除行** ÷ 中心文件在该次重构前的行数（对方 2026-10-22 提出并重算：刀1 183/6662≈2.7%、刀2 748/6559≈11.4%、刀3 142/6718≈2.1%）。回答「这次把中心的多少比例搬走了」。
+   - 窗口增长占比（本例程外的 `design-evolution-readings.ts` 已有）= 时间窗内中心文件**新增**行 ÷ 窗口内全部新增行。只有它能回答「后续增长会不会回流」。
 2. **接在两条生产路径上**：
    - 派发时（worker 派发路径，`plugin/scripts/worker-driver.ts`）写 baseline；
    - 机械 fan-in 翻转处（`plugin/scripts/worker-fan-in.ts` 的 `flipTaskDone` 附近）写 post，并在 GateEvent / 任务 evidence 里留一行指针（任务体本身仍只经 ABI 写）。
@@ -45,7 +49,7 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1 baseline 记录可读：对任一历史提交运行 `--baseline`，`.quay/slice-readings/<id>.json` 中 `evaluated:true`，且 `metrics` 含 `centralFileLines`、`centralFileBodyLines`、`callOutDegree`、`methodCount`、`methodShellCount` 五个键与逐量 `metricBasis`；贴该 JSON 原文。
+- [ ] AC1 baseline 记录可读：对任一历史提交运行 `--baseline`，`.quay/slice-readings/<id>.json` 中 `evaluated:true`，且 `metrics` 含 `centralFileLines`、`centralFileBodyLines`、`callOutDegree`、`methodCount`、`methodShellCount`、`centralChurnShare`、`centralSlimRatio` 七个键与逐量 `metricBasis`；贴该 JSON 原文。
 - [ ] AC2 post 与 baseline 绑定：`--post` 写出的记录 `baselineHeadSha` 等于 AC1 记录的 `headSha`，`scope` 与两侧 `metricBasis` 完全相同，且 `delta` 每个键都有值；贴 complete JSON 与两次 `headSha`。
 - [ ] AC3 未评估态独立：把 archguard 解析强制失败（例如 PATH 与 `ARCHGUARD_RUNNER_CLI` 都指向不存在的位置），记录必须是 `evaluated:false` + 非空 `reason`，且 `metrics` 里**不出现 0 值**；贴 CLI 输出与生成的 JSON。同名正对照：正常环境下 `evaluated:true`。
 - [ ] AC4 幂等负对照：同一 HEAD 连续跑 baseline 与 post，`delta` 所有数值键精确为 0；贴两份记录与 `jq` 结果。
@@ -57,7 +61,7 @@ extra:
 
 - 两条生产路径（派发 / 机械 fan-in）都调用新脚本，且有一条真实任务在 fan-in 后留下成对记录（`.quay/slice-readings/` 中同一 `taskId` 的 `baseline` 与 `post` 各一条、都 `evaluated:true`）。
 - 失败路径（archguard 不可用、worktree 已拆）都有独立取值，不与「delta=0」同形。
-- `centralChurnShare` 与「中心文件增长占比」在记录与文档里以不同键名并存，且有一行说明二者不可互引。
+- `centralChurnShare`、`centralSlimRatio` 与「中心文件增长占比」三者在记录与文档里以不同键名并存，各有一行说明它们各回答什么问题、不可互引。
 - 新脚本已登记到 capability catalog 且 `--summary` 显示 0 unclassified。
 
 ## Touches
