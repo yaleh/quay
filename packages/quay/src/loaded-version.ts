@@ -32,7 +32,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { readProcCmdline } from "./kernel/proc-identity.ts";
-import { pidAlive } from "./serve/server-state.ts";
+import { pidAlive } from "./core/server-state.ts";
 import { isQuayServe } from "./kernel/proc-identity.ts";
 import { resolvePluginRoot } from "./core/plugin-root.ts";
 

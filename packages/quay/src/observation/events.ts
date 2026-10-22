@@ -5,12 +5,12 @@
 // Nothing here touches the task store, /proc, or a `.quay/` carrier — the pairing is PURE over the
 // events it is handed (the process/worktree annotation belongs to liveness.ts and readLive).
 //
-// ⛔ Both predicates come from ../start-end-like.ts — the ONE definition shared with the plugin's
+// ⛔ Both predicates come from ../kernel/start-end-like.ts — the ONE definition shared with the plugin's
 // fast-mode-telemetry.ts. observation.ts keeps its own `export { isStartLike, isEndLike }` line so the
 // SSOT ratchet (`plugin/test/start-end-like-ssot.test.mjs`) still finds the Core consumer there.
 import fs from "node:fs";
 import path from "node:path";
-import { isStartLike, isEndLike } from "../start-end-like.ts";
+import { isStartLike, isEndLike } from "../kernel/start-end-like.ts";
 import type { InFlightTask } from "./model.ts";
 
 interface RawEvent {

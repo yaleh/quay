@@ -144,8 +144,8 @@ import { median } from "./median.ts";
 // driver-filters.ts → concurrent-batch-scheduler.ts → here), and the literal dies in the staged
 // `packages/quay/plugin/` copy that `build-plugin-dist.mjs` compiles from.
 const { isStartLike, isEndLike } = await acquireCoreSrc(
-  () => import("../../packages/quay/src/start-end-like.ts"),
-  "start-end-like.ts",
+  () => import("../../packages/quay/src/kernel/start-end-like.ts"),
+  "kernel/start-end-like.ts",
 );
 import {
   SCHEMA_VERSION,
@@ -1369,7 +1369,7 @@ export async function* readAllEvents(root) {
 
 
 /** Start/end classification is IMPORTED, not defined here — the ONE definition lives in
- *  `packages/quay/src/start-end-like.ts` and is shared with the web read path
+ *  `packages/quay/src/kernel/start-end-like.ts` and is shared with the web read path
  *  (packages/quay/src/observation.ts). These two names used to be a local byte-identical copy of
  *  that file's predicates, each documented as a mirror of the other and neither pinned by a test
  *  (gap-routine-semantic-dedup-scan-is-start-end-like-cross-surface). Re-exported so the SSOT

@@ -17,7 +17,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { readProcCmdlineText } from "../kernel/proc-identity.ts";
-import { TASK_STATUS } from "../abi.ts";
+import { TASK_STATUS } from "../core/types.ts";
 import {
   FAST_MODE_EVENTS_DIR,
   ORCHESTRATION_DIR,

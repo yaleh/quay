@@ -689,7 +689,15 @@ test("AC2 (real history) — the unified formula reproduces the finding's correc
     name: "serve",
     baseline: "295e771b0",
     central: [{ atBaseline: "packages/quay/src/serve-handlers.ts", atHead: "packages/quay/src/serve/serve-handlers.ts" }],
-    modules: ["packages/quay/src/serve*.ts", "packages/quay/src/server-state*.ts", "packages/quay/src/serve/*.ts"],
+    // server-state.ts moved serve/ -> core/ (gap-arch-directory-cycle-src-observation-serve): it is
+    // still this subsystem's runtime state carrier, so the glob follows the file. Without the core/
+    // arm the module set would silently shrink by the file and the reading would drift (11644 -> 11306).
+    modules: [
+      "packages/quay/src/serve*.ts",
+      "packages/quay/src/server-state*.ts",
+      "packages/quay/src/serve/*.ts",
+      "packages/quay/src/core/server-state*.ts",
+    ],
   });
   assert.equal(serve.evaluated, true, serve.reason ?? "");
   assert.equal(serve.centralDelta, 153);

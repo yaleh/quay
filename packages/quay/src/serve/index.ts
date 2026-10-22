@@ -16,7 +16,7 @@
 // hand-maintained re-export list would drift the moment a module gains an export, and drift
 // here is silent (the symbol is simply absent). The typecheck is what proves the barrel whole.
 
-export * from "./server-state.js";
+export * from "../core/server-state.js";
 export * from "./serve.js";
 export * from "./serve-adr.js";
 export * from "./serve-architecture.js";

@@ -527,7 +527,7 @@ export { parseBinaryVerdict } from "../../packages/quay/src/kernel/verdict-parse
 // 现改为**从单一真相源取符号**：Core `server-state.ts` 定义一次，本文件导入并再导出（下游
 // `server-partial-stop-verify.ts` 等经本文件取，布局知识仍只在本节出现一次）。
 // (import + export, ⛔ 不是 `export … from` —— 本文件内部多处直接调用 `pidAlive`，需要一个本地绑定。)
-import { pidAlive } from "../../packages/quay/src/serve/server-state.ts";
+import { pidAlive } from "../../packages/quay/src/core/server-state.ts";
 export { pidAlive };
 
 // 「宿主**实际加载**的版本 vs **已安装**版本」的读数：**从 Core 取符号**，本文件不再自带一份实现。
