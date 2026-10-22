@@ -88,7 +88,12 @@ const STATUS_WORDS = "pending|resolved|deferred|applied|rejected";
 // task gap-three-pure-judges-kernel-single-def (see its note below). The literal-heading contract
 // (escaped `heading`, so `Plan (draft)` matches its own line and an unbalanced `(` cannot throw —
 // task gap-extract-section-heading-interpolated-unescaped-into-regexp) is documented at the kernel.
-export { extractSection } from "../../packages/quay/src/kernel/extract-section.ts";
+// ⚠ `export { x } from "…"` binds only the EXPORT TABLE, not a local name — and this module CALLS
+// extractSection internally (parseTask / checkTouchesPostContent / …). So import for the local
+// binding, then re-export the same object (memory: export-alias-binds-the-export-table-not-module-
+// scope).
+import { extractSection } from "../../packages/quay/src/kernel/extract-section.ts";
+export { extractSection };
 
 // ── parseFrontmatterCompletely — the ONE complete frontmatter parser (gap-unified-frontmatter-parser). ─
 // Single source of truth for reading a task file's YAML frontmatter. parseTask, readDependsOn, and the
