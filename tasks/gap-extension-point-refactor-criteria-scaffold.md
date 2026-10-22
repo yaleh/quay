@@ -246,10 +246,3 @@ EXIT=0
 
 - L_D 本任务 diff（`git diff --numstat develop...HEAD`，2026-10-22 合并 develop 后在 worktree 实测） codeLines=820 docLines=180 ratio=4.6:1（code-heavy 是本任务形态：检查器 + 脚手架 + 夹具 + 模板正本）
 - L_G import-graph-check（结构性代理；`node --experimental-strip-types plugin/scripts/import-graph-check.ts . --json`，worktree @ 246ee92d5） files=498 edges=1475 valueEdges=1343 typeEdges=132 valueSccs=0 typeSccs=0 reverseEdges=0 kernelViolations=0 gateLayerViolations=0 evaluated=true
-
-## Blocker
-
-**2026-10-22T03:48:21.895Z — worker 未落地（exited-not-landed）**
-
-- 未落地原因：step=dark-axis: dark-axis (ADR-007 per-milestone predicate) refused the flip — MISSING: MISSING — the task body records no L_D/L_G reading (a numeric quantity at an axis-anchored line) and carries no explicit "该轴仍暗,理由:<...>" declaration. ADR-007 requires one or the other before the task may be called done.
-- run_id：wk-prod-anchor
