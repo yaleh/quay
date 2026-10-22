@@ -1,7 +1,7 @@
 ---
 id: gap-extension-point-refactor-criteria-scaffold
 title: 扩展点重构缺判据脚手架——四件套（正臂/负臂/注入泄漏/红线基线）每次靠手抄，且 methodCount 读数混了方法体与方法壳
-status: todo
+status: ready
 labels:
   - gap
   - defect
