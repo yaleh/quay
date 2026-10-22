@@ -3,7 +3,7 @@ id: gap-routine-freshness-refresh-freshness-stale-goal-009-ac-205-13de4f75
 title: "freshness-refresh: Delivery-face distance d=264 has passed K=200
   (margin=-64) and the newest AC-205 record is 232.71h old
   (2026-10-12T21:59:06Z, carrier line 360); only session-del"
-status: ready
+status: done
 labels:
   - gap
   - routine-filed
