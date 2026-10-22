@@ -3,7 +3,7 @@ id: gap-arch-cycle-refresh-first-stale-wins-starves-later-scopes
 title: arch-cycle-report 的刷新按固定顺序只取第一个 stale scope：plugin/scripts 每间隔都 stale ⇒
   quay-native-src / experiments-scripts 永久饿死（experiments-scripts 产物已落后 18 天，检测器
   stale-evaluated 三组常亮）
-status: ready
+status: done
 labels:
   - gap
   - defect
