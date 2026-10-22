@@ -163,11 +163,3 @@ The task branch carries exactly the committed tree; fan-in fast-forwards it into
 - L_G：该轴仍暗,理由:本次只改 docs/analysis 的准入分派、注册表字面化与 plugin/test，未动 packages/ 依赖结构，未运行 L_G 仪器
 
 ⚠️ 上一轮写的是 `ADR-007 dark axis: 该轴仍暗,…`，而谓词要求 `该轴仍暗` 位于**行首**（至多允许列表符/引用符/轴标签前缀）⇒ 判 MISSING。本轮改为行首声明；这是同一条判断，只修正载体形态，理由本身不变。
-
-## Blocker
-
-**2026-10-22T11:09:37.905Z — worker 未落地（exited-not-landed）**
-
-- 未落地原因：step=dark-axis: dark-axis (ADR-007 per-milestone predicate) refused the flip — MISSING: MISSING — the task body records no L_D/L_G reading (a numeric quantity at an axis-anchored line) and carries no explicit "该轴仍暗,理由:<...>" declaration. ADR-007 requires one or the other before the task may be called done.
-- run_id：wk-prod-anchor
-- session_id：12035d03-1758-43fc-9eab-0085c0a865fc
