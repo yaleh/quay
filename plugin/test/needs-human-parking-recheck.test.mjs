@@ -234,19 +234,23 @@ test("AC1(e) — promotion-driver is the LIVE consumer: every round carries the 
       process.execPath,
       [
         "--no-warnings", "--experimental-strip-types", DRIVER,
-        "--root", root, "--once", "--json",
+        "--root", root, "--max-rounds", "2", "--interval", "0", "--json",
         "--ready-pool-cmd", `${process.execPath} ${fake}`,
         "--resource-gate-cmd", "node -e process.exit(0)",
       ],
       { encoding: "utf8", timeout: 120_000 },
     );
-    assert.equal(res.status, 0, `driver --once must exit 0:\nstdout=${res.stdout}\nstderr=${res.stderr}`);
+    assert.equal(res.status, 0, `driver --max-rounds 2 must exit 0:\nstdout=${res.stdout}\nstderr=${res.stderr}`);
 
-    const round = res.stdout.trim().split("\n").map((l) => JSON.parse(l)).find((e) => e.event === "round");
-    assert.ok(round, `the driver must emit a round event:\n${res.stdout}`);
-    assert.ok(round.needs_human_parking, `the round event carries needs_human_parking: ${JSON.stringify(round).slice(0, 400)}`);
-    assert.deepEqual(round.needs_human_parking.stale.map((t) => t.id), ["gap-fixture-parked"]);
-    assert.equal(round.needs_human_parking.tasks[0].judge, "unsatisfiableUnannotatedAc");
+    // EVERY round carries it — not just the first (this is the 「每轮真跑」 half of the AC). Two rounds
+    // are driven and each round event must carry its own reading.
+    const rounds = res.stdout.trim().split("\n").map((l) => JSON.parse(l)).filter((e) => e.event === "round");
+    assert.equal(rounds.length, 2, `two rounds must be driven:\n${res.stdout}`);
+    for (const r of rounds) {
+      assert.ok(r.needs_human_parking, `round ${r.round} carries needs_human_parking: ${JSON.stringify(r).slice(0, 400)}`);
+      assert.deepEqual(r.needs_human_parking.stale.map((t) => t.id), ["gap-fixture-parked"], `round ${r.round} reports the stale park`);
+      assert.equal(r.needs_human_parking.tasks[0].judge, "unsatisfiableUnannotatedAc");
+    }
 
     // Durable carrier: the reading is on disk after the round (an external reader needs no stdout).
     const file = path.join(root, READING_REL);
