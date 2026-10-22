@@ -32,7 +32,7 @@ import path from "node:path";
 import fs from "node:fs";
 import os from "node:os";
 import { readManager, readManagerLight, readLive, readTests, readGitHistory, clearPoolMetricsCache, clearVerificationRoundCache, clearGitHistoryCache, POOL_METRICS_CACHE_TTL_MS, VERIFICATION_ROUND_CACHE_TTL_MS, GIT_HISTORY_CACHE_TTL_MS } from "../src/observation.ts";
-import { readTaskSummary, clearTaskSummaryCache, TASK_SUMMARY_CACHE_TTL_MS } from "../src/serve/serve-handlers.ts";
+import { readTaskSummary, dashboardSnapshotStore, TASK_SUMMARY_CACHE_TTL_MS } from "../src/serve/serve-handlers.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "..", "..", "..");
@@ -231,7 +231,7 @@ test("AC3: readTaskSummary caches the task array for 30s and never re-calls the 
     { id: "A-2", title: "two", status: "todo", labels: [], updatedAt: 2 },
   ];
   try {
-    clearTaskSummaryCache();
+    dashboardSnapshotStore.clearTaskSummary();
     const { client, calls } = mockTaskListClient(fixture);
 
     const t1 = await readTaskSummary(root, client);
@@ -249,14 +249,14 @@ test("AC3: readTaskSummary caches the task array for 30s and never re-calls the 
     await readTaskSummary(other, client);
     assert.equal(calls.n, 2, "a different workspace root is a cache miss (re-reads the provider)");
 
-    // clearTaskSummaryCache() forces a fresh read.
-    clearTaskSummaryCache();
+    // dashboardSnapshotStore.clearTaskSummary() forces a fresh read.
+    dashboardSnapshotStore.clearTaskSummary();
     await readTaskSummary(root, client);
     assert.equal(calls.n, 3, "clearing the cache forces a fresh provider read");
 
     assert.ok(TASK_SUMMARY_CACHE_TTL_MS > 0 && TASK_SUMMARY_CACHE_TTL_MS <= 60_000, `TTL ${TASK_SUMMARY_CACHE_TTL_MS}ms is a short bounded window`);
   } finally {
-    clearTaskSummaryCache();
+    dashboardSnapshotStore.clearTaskSummary();
   }
 });
 

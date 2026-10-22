@@ -31,9 +31,8 @@ import { startServer } from "../src/serve/serve.ts";
 import {
   peekBoardSnapshot,
   startBoardSnapshotRefresh,
-  setBoardSnapshotStepHook,
+  boardSnapshotStore,
   isBoardSnapshotRebuilding,
-  clearBoardSnapshots,
   boardSnapshotDisabled,
   BOARD_SNAPSHOT_DISABLED_ENV,
   BOARD_SNAPSHOT_REFRESH_MS,
@@ -148,7 +147,7 @@ after(async () => {
   if (server.client) await server.client.close();
   process.chdir(originalCwd);
   server.client = null;
-  clearBoardSnapshots();
+  boardSnapshotStore.clearSnapshot();
 });
 
 // ── AC3′: the direct measurement — zero subprocesses, zero full scans on the request path ────────
@@ -257,7 +256,7 @@ test("AC2′: while a rebuild is in flight, concurrent /board requests stay far 
   let release;
   const held = new Promise((r) => { release = r; });
   let entered = false;
-  setBoardSnapshotStepHook(async () => { entered = true; await held; });
+  boardSnapshotStore.setStepHook(async () => { entered = true; await held; });
   const rebuilding = server.boardSnapshot.rebuildNow();
   assert.ok(
     await until(() => entered && isBoardSnapshotRebuilding(workspaceRoot), 10_000),
@@ -269,7 +268,7 @@ test("AC2′: while a rebuild is in flight, concurrent /board requests stay far 
   const worstMs = performance.now() - t0;
   release();
   await rebuilding;
-  setBoardSnapshotStepHook(null);
+  boardSnapshotStore.setStepHook(null);
 
   for (const r of concurrent) {
     assert.equal(r.status, 200, "every concurrent /board answers 200");

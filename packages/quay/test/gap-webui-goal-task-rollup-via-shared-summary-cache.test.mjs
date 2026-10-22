@@ -15,7 +15,7 @@ import fs from "node:fs";
 import http from "node:http";
 import { startServer } from "../src/serve/serve.ts";
 import { handleGoalList, renderTaskAttachText, goalAcOf } from "../src/serve/serve-goal.ts";
-import { readTaskSummary, clearTaskSummaryCache } from "../src/serve/serve-dashboard.ts";
+import { readTaskSummary, dashboardSnapshotStore } from "../src/serve/serve-dashboard.ts";
 // gap-webui-goal-body-copy-en-zh: the three-state markers moved into serve-i18n.ts ROW 21's
 // `GOAL_LABELS`. The DIRECT-import arms below now pass `ZH` explicitly, because the dictionary's
 // default language is `en` — leaving them on the default would silently turn "the marker is
@@ -152,7 +152,7 @@ test("AC3a: serve-goal imports the dashboard cache accessor (never its own cache
 });
 
 test("AC3b: one taskList call across /dashboard + /goal in the same 30s window", async () => {
-  clearTaskSummaryCache();
+  dashboardSnapshotStore.clearTaskSummary();
   const calls = { taskList: 0 };
   const client = {
     goalList: async () => [{ id: "GOAL-001", title: "g", status: "active", kind: "goal", body: "" }],
@@ -174,7 +174,7 @@ test("AC3b: one taskList call across /dashboard + /goal in the same 30s window",
 // ── AC5 (unit): taskList throw => 200, columns intact, 未读到 carries the reason ────────────────
 
 test("AC5: taskList failure renders 未读到 with the reason, never a bare —", async () => {
-  clearTaskSummaryCache();
+  dashboardSnapshotStore.clearTaskSummary();
   const client = {
     goalList: async () => [
       { id: "GOAL-001", title: "g", status: "active", kind: "goal", body: "" },
@@ -369,7 +369,7 @@ test("AC4: cache-hit stays fast; cache-miss renders fully and stays bounded", as
   // the production store). Take the max of 3 cold requests for a stable miss cost.
   const missTimes = [];
   for (let i = 0; i < 3; i++) {
-    clearTaskSummaryCache();
+    dashboardSnapshotStore.clearTaskSummary();
     const t0 = process.hrtime.bigint();
     const r = await get(port, "/goal", "lang=en");
     const t1 = process.hrtime.bigint();

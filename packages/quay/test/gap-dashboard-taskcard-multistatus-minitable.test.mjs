@@ -36,7 +36,7 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 import fs from "node:fs";
 import { renderDashboardPage } from "../src/serve/serve-dashboard.ts";
-import { readTaskSummary, clearTaskSummaryCache } from "../src/serve/serve-handlers.ts";
+import { readTaskSummary, dashboardSnapshotStore } from "../src/serve/serve-handlers.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const SERVE_DASHBOARD_SRC = path.join(__dirname, "..", "src", "serve", "serve-dashboard.ts");
@@ -170,7 +170,7 @@ test("AC2: a status with 0 tasks renders no mini-list block (no empty-placeholde
 });
 
 test("AC3: one task-summary read → exactly one client.taskList call (zero additional provider calls)", async () => {
-  clearTaskSummaryCache();
+  dashboardSnapshotStore.clearTaskSummary();
   const root = `gap-tsum-minitable-${Date.now()}-${Math.random().toString(36).slice(2)}`;
   const fixture = [
     { id: "A-1", title: "one", status: "ready", labels: [], updatedAt: 1 },
@@ -188,7 +188,7 @@ test("AC3: one task-summary read → exactly one client.taskList call (zero addi
     assert.equal(t2, fixture, "cache hit returns the same array object (no re-read)");
     assert.equal(calls.n, 1, "cache hit adds zero provider calls");
   } finally {
-    clearTaskSummaryCache();
+    dashboardSnapshotStore.clearTaskSummary();
   }
 });
 
