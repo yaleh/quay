@@ -158,11 +158,11 @@ workspaceEnforcesDarkAxis(/data/home/yale/work/quay) = true
 2. `plugin/test/sh-census-check.test.mjs` AC6 — 判据是「**已提交基线 == 活体读数**」，不是「≤」。本任务把 L_D/L_G 的读数搬进 `git-lens-instrument.mjs` 之后，`git-lens-selfcheck.sh` 不再在**命令位置**调用解释器 ⇒ 它**离开**了 embedded-interpreter 轴（65 → 0 计行数；同时该文件本身 65 → 87 物理代码行，所以不是压行作弊）。基线按只降不升的棘轮规矩**下调** 6566 → 6501，逐项归因写进 `_reanchorLog`。非手拟合证据：用 checker 自己的 `countCodeLines`/`extractEmbeddedInterpreters` 跑 `git show develop:experiments/quay-perpetual-stream/scripts/git-lens-selfcheck.sh` 得 65 计行数 + `embedded:[node]`，**正好等于 6566 − 6501**。⇒ 该文件 22/22 绿。
 - 这两条新写入（`plugin/test/probe-routine.test.mjs`、`plugin/sh-census-baseline.json`）已按纪律声明进 `## Touches`，不是「跑红了再补声明」以外的手工绕过。
 - 合并 develop 时 `adr-enforcement-report` 与 develop 新增的 `instrument-decay` 例程在同一个 options 接口 / 例程表 / 测试文件上冲突 ⇒ 按**语义并集**解决：两条例程同时保留（`adrEnforcementRoutine` = 第十四类，`instrumentDecayRoutine` = 第十五类），测试文件保留两侧用例块。合并后 `plugin/test/quality-gate-driver.test.mjs` 114/114 绿。
-- 合并后 scoped gate：`bash scripts/test.sh --for-task gap-adr007-half1-selfcheck-probes-archived-and-gate-never-invoked --allow-thin` ⇒ `GATE_EXIT=0`（**148 tests / 148 pass / 0 fail**）。
+- 合并后 scoped gate：`bash scripts/test.sh --for-task gap-adr007-half1-selfcheck-probes-archived-and-gate-never-invoked --allow-thin` ⇒ `GATE_EXIT=0`（**180 tests / 180 pass / 0 fail**）。
 
 **DoD 读数**
-- `bash scripts/test.sh --for-task gap-adr007-half1-selfcheck-probes-archived-and-gate-never-invoked --allow-thin` ⇒ `GATE_EXIT=0`（**148 tests / 148 pass / 0 fail**；scoped 静态检查全 PASS，含 `sh-census-check`：embeddedInterpreterLines=**6501 == 6501**——基线已按 AC6 的「相等」语义同轮下调，不再是「≤ 6566」）。
-- `anti-drift-touches-check.ts --task <id> --worktree <wt> --merge-target develop` ⇒ `ANTI-DRIFT OK — 16 actual file(s), all within declared Touches`（修 red 前实测报的正是那 2 个未声明文件，逐条枚举而非一句 HARD FAIL）。
+- `bash scripts/test.sh --for-task gap-adr007-half1-selfcheck-probes-archived-and-gate-never-invoked --allow-thin` ⇒ `GATE_EXIT=0`（**180 tests / 180 pass / 0 fail**；scoped 静态检查全 PASS，含 `sh-census-check`：embeddedInterpreterLines=**6501 == 6501**——基线已按 AC6 的「相等」语义同轮下调，不再是「≤ 6566」）。
+- `anti-drift-touches-check.ts --task <id> --worktree <wt> --merge-target develop` ⇒ `ANTI-DRIFT OK — 17 actual file(s), all within declared Touches`（修 red 前实测报的正是那 2 个未声明文件，逐条枚举而非一句 HARD FAIL）。
 - `git diff develop -- archive/` 为空；`archive/2026-09-07-zero-call-scripts/` 未被改动或复活。
 - L_S 两个用例仍在（各自 NOT-EVALUATED），未被删除。
 - `grep -rn 'adr-enforcement' plugin/scripts/worker-fan-in.ts` ⇒ 0 命中（新例程不在 fan-in 路径上）。
