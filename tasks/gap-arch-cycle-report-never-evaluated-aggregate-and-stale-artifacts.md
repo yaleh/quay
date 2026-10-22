@@ -86,9 +86,8 @@ extra:
 
 ## Blocker
 
-**2026-10-22T01:32:53.705Z — worker 未落地（exited-not-landed）**
+**2026-10-22T02:19:16.499Z — worker 未落地（exited-not-landed）**
 
-- 未落地原因：step=dark-axis: dark-axis (ADR-007 per-milestone predicate) refused the flip — MISSING: MISSING — the task body records no L_D/L_G reading (a numeric quantity at an axis-anchored line) and carries no explicit "该轴仍暗,理由:<...>" declaration. ADR-007 requires one or the other before the task may be called done.
+- 未落地原因：step=suite: AssertionError [ERR_ASSERTION]: the suite's final line must appear — NOT killed at red-grace [baseline A/B: HARD RED (task-introduced-red) — the task's red set is NOT a subset of the develop baseline red set: added=plugin/test/full-suite-runner-s07.test.mjs,packages/quay/test/serve-ac95-views.test.mjs,plugin/test/live-web-address.test.mjs,plugin/test/promotion-driver-s02.test.mjs,plugin/test/supervisor-observe.test.mjs,plugin/test/ownership-active-loop.test.mjs changed=-]
 - run_id：wk-prod-anchor
-
-**已解除（2026-10-22，续做轮）**：上一轮缺的是 ADR-007 的逐里程碑读数，不是实现缺陷。本轮在将要落地的树上取了一次真实的 L_D 读数（见 `## Dark-Axis Reading (ADR-007)`：`directory-cycles=0`，`internal-packages=12`，`dependency-edges=86`），经 `task_write` 写入任务体。
+- session_id：7b2b945d-54f7-4705-8ce1-fea31cbb6db5
