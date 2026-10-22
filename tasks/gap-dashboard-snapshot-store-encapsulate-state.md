@@ -81,8 +81,9 @@ extra:
 
 ## Evidence
 
-所有读数在 worktree `/home/yale/work/quay-worktrees/gap-dashboard-snapshot-store-encapsulate-state`
-（HEAD 含 develop `5b9d3cfd4`）上取得。
+读数在 worktree `/home/yale/work/quay-worktrees/gap-dashboard-snapshot-store-encapsulate-state`
+上取得（HEAD 含 develop `5b9d3cfd4`）。**重构前的对照样本** = 该分支的分叉点 `eed2c9fe6`
+（下文所有「同谓词对该样本干跑」都指它，不用会随提交移动的 `HEAD~N` 指代）。
 
 ### AC1 —— 模块级可变状态归零（两条 grep，均为空输出）
 
@@ -94,12 +95,12 @@ $ grep -rEn '^(const) [A-Za-z_$]+ = new (Map|Set)' packages/quay/src/serve/serve
 ```
 
 **零计数的配套动作（硬规则 2 的另一半：把谓词对着一个已知为真的样本干跑一次）**——同一谓词对
-重构前的 `HEAD~2` 版本必须命中：
+分叉点 `eed2c9fe6` 必须命中：
 
 ```
-$ git show HEAD~2:packages/quay/src/serve/serve-dashboard.ts | grep -cE '^(let|var) '
+$ git show eed2c9fe6:packages/quay/src/serve/serve-dashboard.ts | grep -cE '^(let|var) '
 1
-$ git show HEAD~2:packages/quay/src/serve/serve-board.ts | grep -n 'boardSnapshots\|clearBoardSnapshots' | head -3
+$ git show eed2c9fe6:packages/quay/src/serve/serve-board.ts | grep -n 'boardSnapshots\|clearBoardSnapshots' | head -3
 336:const boardSnapshots = new Map<string, BoardSnapshot>();
 358:  return boardSnapshots.get(root) ?? null;
 362:export function clearBoardSnapshots(): void {
@@ -136,7 +137,7 @@ $ grep -n 'export const .*SnapshotStore = new' packages/quay/src/serve/snapshot-
 const s = new DashboardSnapshotStore();
 assert.equal(s.taskSummary("r", 60_000), null, "an unwritten cache is a miss, never a fabricated empty value");
 ```
-另有隔离性用例：`an injectable constructible instance is isolated from the module singletons` ——
+另有隔离性用例 `an injectable constructible instance is isolated from the module singletons`：
 `local.publish("iso-root", …)` 之后 `dashboardSnapshotStore.snapshot("iso-root")` 仍为 `null`。
 
 ### AC4 —— 行为不变（scoped 全绿）+ 断言零改动
@@ -153,12 +154,20 @@ $ bash scripts/test.sh --for-task gap-dashboard-snapshot-store-encapsulate-state
 ℹ todo 0
 ```
 
-其中包含本任务的 10 条新用例与 7 个既有测试文件的全部用例（`gap-ac136-web-truth-source` 29 条、
-`gap-ac179-criterion-cold-miss-dashboard-snapshot` 8 条、`gap-ac292-board-request-path-cold-build` 6 条、
-`gap-dashboard-goal-card-provider-backed` 10 条等）。
+其中包含本任务的 10 条新用例与 7 个既有测试文件的全部用例（`gap-ac136-web-truth-source`、
+`gap-ac179-criterion-cold-miss-dashboard-snapshot`、`gap-ac292-board-request-path-cold-build`、
+`gap-dashboard-goal-card-provider-backed`、`gap-dashboard-parallelize`、
+`gap-dashboard-taskcard-multistatus-minitable`、`gap-webui-goal-task-rollup-via-shared-summary-cache`）。
 
-**断言零改动（逐行核对，非口头声明）**——7 个既有测试文件的 diff 共 36 增 / 39 删，**每一行都是同一个
-句柄改名**，没有任何一条 `assert*` 语句被增删改：
+**断言零改动（机械判据，不是口头声明）**——7 个既有测试文件的 diff 共 36 增 / 39 删，**每一行都是同一个
+句柄改名**；直接数含 `assert` 的增删行：
+
+```
+$ git diff develop -U0 -- <the 7 test files> | grep -E '^[-+].*assert' | wc -l
+0
+```
+
+改名样例：
 
 ```
 -import { readTaskSummary, clearTaskSummaryCache } from "../src/serve/serve-handlers.ts";
@@ -174,10 +183,10 @@ $ bash scripts/test.sh --for-task gap-dashboard-snapshot-store-encapsulate-state
 **如实列出非断言的两处文字改动**（AC4 要求列出）：
 1. 两条 **test 标题**改名（`clearDashboardSnapshots drops every snapshot …` →
    `dashboardSnapshotStore.clearSnapshot drops every snapshot …`；`… after clearDashboardSnapshots …` →
-   `… after clearSnapshot …`）。理由：原标题点名了一个已不存在的自由函数，标题会指向不存在的导出。
-2. 一行**注释**由 `// clearTaskSummaryCache() forces a fresh read.` 改为
+   `… after clearSnapshot …`）。理由：原标题点名了一个已不存在的自由函数。
+2. 一行**注释** `// clearTaskSummaryCache() forces a fresh read.` →
    `// dashboardSnapshotStore.clearTaskSummary() forces a fresh read.`，同上。
-   ⛔ 两者的断言体逐字未动。
+   ⛔ 两者的断言体逐字未动（上面那条 `grep … assert | wc -l = 0` 就是它的机械证明）。
 
 ### AC5 —— 类型检查（仓库既有入口：`.quay/config.yml` 的 `ts-typecheck` = per-package 循环）
 
@@ -197,12 +206,12 @@ $ grep -rn 'taskSummaryCache\|dashboardLiveCache\|dashboardSnapshots\|boardSnaps
 (无输出; exit=1)
 ```
 
-**「只出现在 import/方法调用处」的证明不是「0 命中看着像通过」**——它是 0 命中，比 AC 要求的更严
-（连 import/方法调用处都没有，因为标识符本身已不存在；两个文件只出现 `dashboardSnapshotStore` /
-`boardSnapshotStore` 这两个**新**句柄）。同一谓词对重构前样本的干跑（硬规则 2 另一半）：
+**这不是「0 命中看着像通过」**——它比 AC 的要求更严：连 `import`/方法调用处都没有，因为那些标识符本身
+已不存在，两个文件只出现 `dashboardSnapshotStore` / `boardSnapshotStore` 这两个**新**句柄。同一谓词对
+重构前样本的干跑（硬规则 2 另一半）：
 
 ```
-$ git show HEAD~2:packages/quay/src/serve/serve-board.ts | grep -n 'boardSnapshots\|clearBoardSnapshots' | head -3
+$ git show eed2c9fe6:packages/quay/src/serve/serve-board.ts | grep -n 'boardSnapshots\|clearBoardSnapshots' | head -3
 336:const boardSnapshots = new Map<string, BoardSnapshot>();
 358:  return boardSnapshots.get(root) ?? null;
 362:export function clearBoardSnapshots(): void {
