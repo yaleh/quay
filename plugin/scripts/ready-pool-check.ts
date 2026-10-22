@@ -938,7 +938,29 @@ export function isPendingImplementationItem(text) {
 // 判据 (position-based, 硬规则② — the ONLY surface read is the TEXT of unchecked AC/DoD list items,
 // never `## Proposal` prose, never a fenced code block, never a quote):
 //   hit ⟺ the item is UNCHECKED ∧ it is NOT annotated `（待外部）` ∧ its text carries one of the
-//   declaration phrases below. The phrase list is a CLOSED ENUM in ONE place (this array).
+//   declaration phrases below IN A DECLARATIVE POSITION (see next paragraph). The phrase list is a
+//   CLOSED ENUM in ONE place, split into the two families it actually describes.
+//
+// ⚠️ WHY THE FAMILIES ARE SPLIT (gap-meta-declaresunsatisfiablebyexecutor): a bare substring match on
+// the AFTER-LANDING family is a false-positive generator. `落地后` also appears inside an EVIDENCE
+// INSTRUCTION — the clause that asks the executor to paste/explain evidence, e.g.
+//   `贴出立案基线（exit 2）与落地后绿灯两份输出` (tasks/gap-semantic-admission-contract-module.md AC1)
+// — and inside a HYPOTHETICAL/fallback clause, e.g.
+//   `若 peer 落地后仍命中 ⇒ 本任务执行 fallback` (tasks/gap-ac355-… AC; the first instance, worked
+//   around then by rewriting the AC, which is why the judge misfired a second time on another task).
+// Both are satisfiable by their own executor, yet both were judged `hit` ⇒ never dispatchable ⇒
+// promotion-driver flipped the task to needs-human (AC-919's verdict stayed `fail` for 18 rounds).
+//
+//   · HUMAN-GATE family (`只能由人` / `不得由执行者代写`): unconditional substring match — these mean
+//     "a human, not the executor, writes this" whichever clause they sit in.
+//   · AFTER-LANDING family (`合入 develop` / `落地后`): counts as a DECLARATION only when its owning
+//     clause is declarative — i.e. the phrase is NOT preceded, within the same strong clause, by
+//     (a) an evidence-demand verb (`贴出` / `提供` / `输出` / `记录` / …) or (b) a conditional marker
+//     (`若` / `如果` / `一旦` / …). Clause = text between `。` / `；` / `;` / newline — NOT `，`, because
+//     in the evidence sample the phrase is separated from `贴出` only by a comma/parenthesis. This
+//     keeps the real declarations HIT (`落地后实测复查：…`, `真实落地（合入 develop …）：…`, the
+//     `实现落地后，…读数` corpus form, and `落地后时间窗内…（贴路径…）` where the phrase PRECEDES the
+//     evidence verb) while the evidence-instruction and hypothetical-fallback families go CLEAN.
 //
 // Why the annotation is not "guessed": the existing ruling (gap-ready-pool-remaining-external-vs-
 // implementation, 人 2026-08-12) is 判据只读注解、不猜. This check does not ADD a new judgment about
@@ -947,22 +969,74 @@ export function isPendingImplementationItem(text) {
 // finishes this". The annotation stays the author's to write; ⛔ a worker must never add it itself
 // (that would be a self-exemption, and the fix for a hit is to rewrite the AC or annotate it — a
 // HUMAN/authoring decision, not a worker's).
-export const UNSATISFIABLE_AC_DECLARATION_PHRASES = Object.freeze([
-  // ① the executor may not write the line on the human's behalf (verbatim sample:
-  //    `AC9 人评审门：…这条 AC 不得由执行者代写` / `…该行只能由人 yale 写入，执行者不得代写`)
+export const UNSATISFIABLE_AC_HUMAN_GATE_PHRASES = Object.freeze([
+  // the executor may not write the line on the human's behalf (verbatim sample:
+  // `AC9 人评审门：…这条 AC 不得由执行者代写` / `…该行只能由人 yale 写入，执行者不得代写`)
   "不得由执行者代写",
   "执行者不得代写",
   "只能由人",
-  // ② satisfiable only AFTER this task lands (verbatim samples: `AC6 真实落地（合入 develop 并推送
-  //    yaleh 之后）：触发 Desktop Release…` / `落地后实测复查：sqlite3 … 里 agent 档不再增长`)
+]);
+
+export const UNSATISFIABLE_AC_AFTER_LANDING_PHRASES = Object.freeze([
+  // satisfiable only AFTER this task lands (verbatim samples: `AC6 真实落地（合入 develop 并推送
+  // yaleh 之后）：触发 Desktop Release…` / `落地后实测复查：sqlite3 … 里 agent 档不再增长`)
   "合入 develop",
   "落地后",
 ]);
 
+/** The union — the public "declaration vocabulary" list. ONE source: the two family arrays above. */
+export const UNSATISFIABLE_AC_DECLARATION_PHRASES = Object.freeze([
+  ...UNSATISFIABLE_AC_HUMAN_GATE_PHRASES,
+  ...UNSATISFIABLE_AC_AFTER_LANDING_PHRASES,
+]);
+
+/** Evidence-demand verbs: a clause that asks the executor to PASTE/PROVIDE/EXPLAIN evidence is an
+ *  instruction, not a declaration that the executor cannot satisfy the item. Closed enum, one place. */
+export const EVIDENCE_DEMAND_VERBS = Object.freeze([
+  "贴出", "贴上", "贴进", "贴", "附上", "提供", "给出", "打印", "输出",
+  "说明", "记录", "列出", "摘录", "回填",
+]);
+
+/** Conditional markers: `若 … 落地后 …` is a hypothetical/fallback condition — the item is judged
+ *  after an EXTERNAL event, which does not mean THIS task's executor cannot satisfy it. Closed enum,
+ *  one place. (Two-char markers only — a bare `如` would also match `如下`/`例如`.) */
+export const CONDITIONAL_CLAUSE_MARKERS = Object.freeze([
+  "若", "如果", "假若", "倘若", "如若", "一旦", "除非", "要是",
+]);
+
+/** Index just past the last STRONG clause boundary before `at` (0 when there is none). Commas are
+ *  deliberately NOT boundaries: in the evidence sample (`贴出…（exit 2，CAUSE=…）与落地后红灯…`) the
+ *  evidence verb and the phrase are separated only by a comma/parenthesis, so splitting on `，` would
+ *  hide the instruction and resurrect the false positive. */
+function clauseStartBefore(text, at) {
+  let start = 0;
+  for (const m of text.matchAll(/[。；;\n]/g)) {
+    if (m.index >= at) break;
+    start = m.index + m[0].length;
+  }
+  return start;
+}
+
+/** Is the occurrence at `at` in a DECLARATIVE position? (inside an evidence instruction or a
+ *  hypothetical clause ⇒ no). Position-based judgment: only the clause prefix before the phrase is
+ *  read, never the phrase's own wording. */
+function inDeclarativePosition(text, at) {
+  const prefix = text.slice(clauseStartBefore(text, at), at);
+  if (EVIDENCE_DEMAND_VERBS.some((v) => prefix.includes(v))) return false;
+  if (CONDITIONAL_CLAUSE_MARKERS.some((m) => prefix.includes(m))) return false;
+  return true;
+}
+
 /** Does the ITEM TEXT itself declare that the executor structurally cannot satisfy it? Position-based
  *  (硬规则②): the caller must have already restricted the argument to a single list-item's text. */
 export function declaresUnsatisfiableByExecutor(text) {
-  return UNSATISFIABLE_AC_DECLARATION_PHRASES.some((p) => text.includes(p));
+  if (UNSATISFIABLE_AC_HUMAN_GATE_PHRASES.some((p) => text.includes(p))) return true;
+  return UNSATISFIABLE_AC_AFTER_LANDING_PHRASES.some((p) => {
+    for (let at = text.indexOf(p); at !== -1; at = text.indexOf(p, at + p.length)) {
+      if (inDeclarativePosition(text, at)) return true;
+    }
+    return false;
+  });
 }
 
 /** Strip fenced code blocks from a section before its list items are read (位置判定, 硬规则②): a

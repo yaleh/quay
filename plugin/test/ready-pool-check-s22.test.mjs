@@ -21,7 +21,12 @@ import { test } from "node:test";
 import { analyzeTasks, assert, buildGitHistoryIndex, cacheFixtureBody, execFileSync, fs, loadLandingIndex, loadParsedTaskStoreAtRef, makeGitWorkspace, makeWorkspace, normIndex, normStore, os, path, readTaskStatusAtRef, refTaskIds, rpCachePath, withCacheOff, writeTask } from "./helpers/ready-pool-check-harness.mjs";
 // The new judgment is imported DIRECTLY from the script under test (the shared harness above is out
 // of this task's ## Touches, so it must not be edited to re-export it).
-import { judgeUnsatisfiableUnannotatedAc, UNSATISFIABLE_AC_DECLARATION_PHRASES } from "../scripts/ready-pool-check.ts";
+import {
+  judgeUnsatisfiableUnannotatedAc,
+  UNSATISFIABLE_AC_DECLARATION_PHRASES,
+  UNSATISFIABLE_AC_AFTER_LANDING_PHRASES,
+  UNSATISFIABLE_AC_HUMAN_GATE_PHRASES,
+} from "../scripts/ready-pool-check.ts";
 
 test("store cache is CONTENT-KEYED: a task whose blob changed is re-read on the very next call", (t) => {
   const { root, git } = makeGitWorkspace("store-ck", { n: 3 });
@@ -409,6 +414,65 @@ test("unsatisfiable-AC position judgment: a declaration in ## Proposal prose or 
   // not a broken matcher.
   const real = judgeUnsatisfiableUnannotatedAc(unsatAcBody("gap-real", ["AC7 人工关卡——该行只能由人 yale 写入，执行者不得代写"]));
   assert.equal(real.hits.length, 1, "the same phrase as a real AC item is a hit (the position tests above are not vacuous)");
+});
+
+// ── gap-meta-declaresunsatisfiablebyexecutor ────────────────────────────────────────────────────────
+// The AFTER-LANDING phrases (`落地后` / `合入 develop`) are DECLARATIONS only in a declarative clause.
+// Two false-positive families had blocked legitimately satisfiable tasks:
+//   ① an EVIDENCE INSTRUCTION — "paste the baseline and the post-landing green output":
+//      `贴出立案基线（exit 2）与落地后绿灯两份输出` (tasks/gap-semantic-admission-contract-module.md AC1).
+//      This task (carrying GOAL-911 AC-919) was judged `hit` ⇒ never dispatchable ⇒ promotion-driver
+//      flipped it to needs-human; AC-919's verdict read `fail` for 18 rounds.
+//   ② a HYPOTHETICAL/fallback clause — `若 peer 落地后仍命中 ⇒ 本任务执行 fallback` (the earlier
+//      tasks/gap-ac355-… instance). It was worked around by an author-side rewrite, so the JUDGE stayed
+//      wrong and misfired again ⇒ fix the judge, do not re-write around it.
+// The positive direction is pinned too: real declarations (and the corpus form where an evidence verb
+// comes AFTER the phrase) must stay HIT — a judge that only ever returns "clean" is not a fix.
+const META_UNSAT_EVIDENCE_CLAUSE =
+  "AC1 正向：跑判据 ⇒ exit 0。贴出立案基线（exit 2）与落地后绿灯两份输出，以及 git rev-parse HEAD。";
+const META_UNSAT_HYPOTHETICAL =
+  "re-anchor 生效且不再钉路径：`grep -nE 'acceptance-runner\\.ts' goals/AC-355-*.md` 零命中；若 peer 落地后仍命中 ⇒ 本任务执行 fallback 并按同一判据复验。";
+const META_UNSAT_REAL_DECLARATIONS = [
+  "AC6 落地后实测复查：sqlite3 里 agent 档不再增长",
+  "AC9 人评审门：该行只能由人 yale 写入",
+  // evidence verb AFTER the phrase ⇒ still a declaration (the phrase qualifies the item itself)
+  "AC5（生产读数）落地后时间窗内一次真实 fan-in 的 suite 日志中该文件不出现在 `passed=false` 行（贴路径 + 时间戳 + 计数 0）",
+  // corpus form: the phrase follows a `：` but no evidence verb/conditional precedes it in its clause
+  "AC1（能取假，生产载体）：实现落地后，`.quay/verification-round.jsonl` 中该记录的条数 ≥ 3",
+];
+
+test("unsatisfiable-AC judge: 落地后 inside an EVIDENCE INSTRUCTION or a HYPOTHETICAL clause is NOT a declaration (gap-meta-declaresunsatisfiablebyexecutor)", () => {
+  // The closed enums are still a single source, split by the two families they actually describe.
+  assert.ok(UNSATISFIABLE_AC_HUMAN_GATE_PHRASES.length > 0 && UNSATISFIABLE_AC_AFTER_LANDING_PHRASES.length > 0, "both declaration families are non-empty");
+  for (const p of [...UNSATISFIABLE_AC_HUMAN_GATE_PHRASES, ...UNSATISFIABLE_AC_AFTER_LANDING_PHRASES]) {
+    assert.ok(UNSATISFIABLE_AC_DECLARATION_PHRASES.includes(p), `the public union carries ${p}`);
+  }
+
+  // ① evidence instruction ⇒ CLEAN (this was the production misfire: status "hit" before the fix)
+  const ev = judgeUnsatisfiableUnannotatedAc(unsatAcBody("gap-meta-unsat-ev", [META_UNSAT_EVIDENCE_CLAUSE]));
+  assert.equal(ev.evaluated, true);
+  assert.equal(ev.status, "clean", `an evidence-instruction clause must NOT block promotion, got ${JSON.stringify(ev)}`);
+  assert.deepEqual(ev.hits, []);
+
+  // ② hypothetical/fallback clause ⇒ CLEAN (the AC-355 family)
+  const hy = judgeUnsatisfiableUnannotatedAc(unsatAcBody("gap-meta-unsat-hy", [META_UNSAT_HYPOTHETICAL]));
+  assert.equal(hy.status, "clean", `a hypothetical clause must NOT block promotion, got ${JSON.stringify(hy)}`);
+  assert.deepEqual(hy.hits, []);
+
+  // ③ real declarations ⇒ still HIT, verbatim — the fix must not become a blanket "clean".
+  const real = judgeUnsatisfiableUnannotatedAc(unsatAcBody("gap-meta-unsat-real", META_UNSAT_REAL_DECLARATIONS));
+  assert.equal(real.status, "hit", `real declarations must stay hit, got ${JSON.stringify(real)}`);
+  for (const item of META_UNSAT_REAL_DECLARATIONS) {
+    assert.ok(real.hits.includes(item), `hits must still name ${item} verbatim`);
+  }
+
+  // ④ mixed body: the clean item does not mask the real declarations (enumerate, never boolean).
+  const mixed = judgeUnsatisfiableUnannotatedAc(
+    unsatAcBody("gap-meta-unsat-mixed", [META_UNSAT_EVIDENCE_CLAUSE, ...META_UNSAT_REAL_DECLARATIONS]),
+  );
+  assert.equal(mixed.status, "hit");
+  assert.equal(mixed.hits.length, META_UNSAT_REAL_DECLARATIONS.length, `only the ${META_UNSAT_REAL_DECLARATIONS.length} real declarations are named, got ${JSON.stringify(mixed.hits)}`);
+  assert.equal(mixed.hits.includes(META_UNSAT_EVIDENCE_CLAUSE), false, "the evidence-instruction item is not named");
 });
 
 test("unsatisfiable-AC third state: a body with no recognizable AC/DoD section is NOT-EVALUATED, never 'clean' (AC4)", () => {
