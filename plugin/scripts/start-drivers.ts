@@ -107,6 +107,15 @@ import { parseArgs as baseParseArgs } from "./gate-script-base.ts";
 // `dist/start-drivers.js` 32,143 B → 784,043 B (24×). The LEAF is the established shape for a helper
 // both spawn sites need (serve-log.ts / systemd-scope.ts), and it carries node builtins only.
 import { withServeHeapCap } from "../../packages/quay/src/serve/serve-heap-cap.ts";
+// The pid-liveness probe is SINGLE-SOURCED in the kernel leaf `packages/quay/src/kernel/pid-alive.ts`
+// (`.quay/routine-findings.jsonl` finding `pid-alive-three-copies`, routine `semantic-dedup-scan`,
+// runId `semantic-dedup-scan-1792647604889`). This file used to keep its own copy, justified as
+// "a zero-closure-deps direct entry may not import the single source" — that justification was false
+// (the imports above are exactly such imports). It was NOT fixable by importing
+// `core/server-state.ts`: esbuild would inline that module's whole closure into
+// `dist/start-drivers.js`. The LEAF is the established shape for a helper both sides need
+// (serve-log.ts / systemd-scope.ts / serve-heap-cap.ts), and it imports nothing.
+import { pidAlive } from "../../packages/quay/src/kernel/pid-alive.ts";
 
 const DRIVER_KINDS = ["promotion", "worker", "outer", "goal"] as const;
 // ⛔ This file declares NO web bind default — not the host, not the port
@@ -130,29 +139,6 @@ const SERVE_STOP_TIMEOUT_MS = 10000;
  *  the kernel keeps its own copy rather than importing Core for a string literal. Both copies must
  *  move together; the `self=<pid>` field is what binds a marker line to the spawn that produced it. */
 export const SERVE_ADMISSION_REFUSED_MARKER = "quay-serve-admission-refused";
-
-/** Direct quantity: is this pid a live process? Same semantics as Core `packages/quay/src/
- *  server-state.ts:pidAlive` (`kill(pid, 0)`; **EPERM = exists but not ours = still alive** —
- *  someone else's process is not a dead one). Duplicated for the same laydown reason as the marker
- *  above: this is a zero-closure-deps direct entry (see the guard at the bottom), so it may not
- *  import the single source.
- *
- *  ⚠️ THIS IS THE ONE REMAINING COPY, on purpose — the other three are gone
- *  (`.quay/routine-findings.jsonl` finding `pidalive-eperm-opposite`, routine `semantic-dedup-scan`,
- *  runId `semantic-dedup-scan-1789889905875`: three copies read EPERM as ALIVE and driver-runtime.ts
- *  kept a fourth that read it as DEAD). `driver-runtime.ts` now re-exports Core's, and
- *  `server-partial-stop-verify.ts` imports it from there. The signature here stays `number` (⛔ not
- *  the shared string-coercing one) because its single caller `stopServeHost(pid: number, …)` already
- *  holds a number — the divergence that mattered was the EPERM branch, not the input type. */
-function pidAlive(pid: number): boolean {
-  if (!Number.isInteger(pid) || pid <= 0) return false;
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (err) {
-    return (err as NodeJS.ErrnoException)?.code === "EPERM";
-  }
-}
 
 /** The exact JSON the `quay driver status --json` emits; we read only `alive` (AC139-3). */
 export interface DriverStatus {

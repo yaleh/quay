@@ -160,7 +160,14 @@ import { execFileSync } from "node:child_process";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import YAML from "yaml";
 import { isDue, parseTrigger } from "./routine-scheduler.ts";
-import { isStoppedMidRound, STOPPED_MID_ROUND, StoppedMidRoundError, type Fact, type RoutineRunContext, type RoutineSpec } from "./driver-runtime.ts";
+import { isStoppedMidRound, pidAlive, STOPPED_MID_ROUND, StoppedMidRoundError, type Fact, type RoutineRunContext, type RoutineSpec } from "./driver-runtime.ts";
+// `pidAlive` is NOT defined here — it is the kernel leaf `packages/quay/src/kernel/pid-alive.ts`,
+// reached through this module's existing driver-runtime import (which re-exports it). This file used
+// to carry its own copy (`.quay/routine-findings.jsonl` finding `pid-alive-three-copies`, routine
+// `semantic-dedup-scan`, runId `semantic-dedup-scan-1792647604889`); its input contract differed
+// (number-only) and nothing forced the copy — this module already imports driver-runtime.
+// Re-exported because plugin/test/discovery-method-routine.test.mjs imports the symbol from here.
+export { pidAlive };
 // ⛔ `writeLastRun` is deliberately NOT imported: the resident advance must land the stamp in the SAME
 // write as the timestamp, so this routine uses its own `writeLastRunStamped` (see that function).
 import { ROUTINE_LAST_RUN_REL, readLastRunMap } from "./probe-routine.ts";
@@ -596,7 +603,7 @@ export function modelCallsInWindow(records: readonly Record<string, unknown>[], 
 // ── the 24h reservation ledger: durable, atomic, pre-spawn ──────────────────────────────────────────
 // The nine functions below are the whole mechanism the header describes. Read them in this order:
 //   readLedgerRecords / appendLedgerRecords   — the durable carrier (append-only, torn line THROWS)
-//   pidAlive / acquireBudgetLock              — the cross-process critical section, with bounded,
+//   pidAlive (imported) / acquireBudgetLock   — the cross-process critical section, with bounded,
 //                                               logged stale-holder recovery
 //   ledgerReservationsInWindow                — the ledger half of the trailing-24h reading
 //   budgetUsage                               — the whole reading (ledger + legacy carrier term)
@@ -650,18 +657,6 @@ function ledgerTs(rec: Record<string, unknown>, index: number): number {
     throw new Error(`ledger line ${index + 1} (kind:${String(rec.kind ?? "<none>")}) has no parseable 'ts' (got ${JSON.stringify(rec.ts)}) — its instant cannot be read, so the 24h budget cannot be established`);
   }
   return ms;
-}
-
-/** Is a pid still alive? `EPERM` means "alive, but not ours" — a holder we must NOT reclaim. Every other
- *  failure (ESRCH in particular) means the holder is gone. */
-export function pidAlive(pid: unknown): boolean {
-  if (typeof pid !== "number" || !Number.isInteger(pid) || pid <= 0) return false;
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (e) {
-    return (e as NodeJS.ErrnoException).code === "EPERM";
-  }
 }
 
 /** A held lock. `release()` removes the file ONLY if it still holds OUR token — a holder that was

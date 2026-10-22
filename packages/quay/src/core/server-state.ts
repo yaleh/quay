@@ -173,28 +173,23 @@ export function readServerState(workspaceRoot: string): ServerStateRead {
  *  protect a live process that is not ours, and a probe that read EPERM as DEAD would delete that
  *  process's only record on disk / report "not running" for a running loop (硬规则 3b).
  *
- *  ⚠️ SINGLE SOURCE. `plugin/scripts/driver-runtime.ts` re-exports this symbol instead of keeping its
- *  own copy — it used to keep one whose bare `catch` returned false unconditionally, so the same
- *  probe read a live-but-foreign pid as DEAD on the driver path and ALIVE here
- *  (`.quay/routine-findings.jsonl` finding `pidalive-eperm-opposite`, routine `semantic-dedup-scan`,
- *  runId `semantic-dedup-scan-1789889905875`, 2026-09-20; re-filed on 09-13 / 09-17 as well).
- *  The ONE remaining copy is `plugin/scripts/start-drivers.ts` — a zero-closure-deps laydown entry
- *  that cannot import anything (see its direct-entry guard); it carries the same EPERM semantics.
+ *  ⚠️ SINGLE SOURCE — the implementation now lives in the kernel leaf `kernel/pid-alive.ts`, and this
+ *  module re-exports it because `pidAlive` is part of server-state's public surface (`serve.ts`,
+ *  `cli/server.ts`, `loaded-version.ts` import it from here). Every copy is gone:
+ *  `plugin/scripts/driver-runtime.ts` re-exports this symbol (it used to keep one whose bare `catch`
+ *  returned false unconditionally, so the same probe read a live-but-foreign pid as DEAD on the
+ *  driver path and ALIVE here — finding `pidalive-eperm-opposite`, routine `semantic-dedup-scan`,
+ *  runId `semantic-dedup-scan-1789889905875`), and `plugin/scripts/start-drivers.ts` +
+ *  `plugin/scripts/discovery-method-routine.ts` now import the leaf instead of carrying their own
+ *  (`.quay/routine-findings.jsonl` finding `pid-alive-three-copies`, same routine, runId
+ *  `semantic-dedup-scan-1792647604889`). A leaf with no imports was required: start-drivers is a
+ *  bundled direct entry, and importing THIS module would inline its whole closure into
+ *  `dist/start-drivers.js`.
  *
  *  The input is COERCED rather than required to be a number: pid carriers are read as TEXT
  *  (`readPidFile` returns a string), so the driver-side readers hand this function strings. Anything
  *  that is not a positive integer after coercion ⇒ not alive (读不懂 ⇒ 不报存活). */
-export function pidAlive(pid: string | number | null | undefined): boolean {
-  if (pid === null || pid === undefined || pid === "") return false;
-  const n = Number(pid);
-  if (!Number.isInteger(n) || n <= 0) return false;
-  try {
-    process.kill(n, 0);
-    return true;
-  } catch (err) {
-    return (err as NodeJS.ErrnoException)?.code === "EPERM";
-  }
-}
+export { pidAlive } from "../kernel/pid-alive.ts";
 
 // ── Per-service live faces (SPEC §6.10: 活性取直接量) ────────────────────────────────────────────
 //
