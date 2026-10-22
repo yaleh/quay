@@ -239,6 +239,11 @@ EXIT=0
 - tasks/DIR-133.md
 - tasks/gap-extension-point-refactor-criteria-scaffold.md
 
+## Dark-axis record (ADR-007)
+
+- L_D 本任务 diff（`git diff --numstat develop...HEAD`，2026-10-22 合并 develop 后在 worktree 实测） codeLines=820 docLines=180 ratio=4.6:1（code-heavy 是本任务形态：检查器 + 脚手架 + 夹具 + 模板正本）
+- L_G import-graph-check（结构性代理；`node --experimental-strip-types plugin/scripts/import-graph-check.ts . --json`，worktree @ 246ee92d5） files=498 edges=1475 valueEdges=1343 typeEdges=132 valueSccs=0 typeSccs=0 reverseEdges=0 kernelViolations=0 gateLayerViolations=0 evaluated=true
+
 ## Blocker
 
 **2026-10-22T03:48:21.895Z — worker 未落地（exited-not-landed）**
