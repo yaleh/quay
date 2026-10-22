@@ -2,7 +2,7 @@
 id: gap-arch-cycle-within-interval-branch-skips-downgrade
 title: arch-cycle-report 的 within-interval 分支不执行 stale 降级：唯一 due scope 被间隔预算推迟时
   plugin/scripts 仍以 evaluated:true + cycleCount:0 上报（检测器 stale-evaluated 常亮）
-status: todo
+status: ready
 labels:
   - gap
   - defect
@@ -44,7 +44,7 @@ prior-claim: gap-arch-cycle-refresh-first-stale-wins-starves-later-scopes
 **与在开任务的关系（merge-candidate 读数：`task-granularity-advice.ts` peers=2）**：
 
 - `gap-adr007-half1-selfcheck-probes-archived-and-gate-never-invoked`（ready）共享 `plugin/scripts/quality-gate-driver.ts`，但机制不同（ADR 门/selfcheck 的调用面 vs arch-cycle 的降级分支）⇒ separate，由调度器按 Touches 串行。
-- `gap-instrument-decay-dedup-reader-round-log-path`（todo）也共享该文件，修的是 instrument-decay 立案去重台账的读路径，与本条的降级分支不同 ⇒ separate。
+- `gap-instrument-decay-dedup-reader-round-log-path`（needs-human）也共享该文件，修的是 instrument-decay 立案去重台账的读路径，与本条的降级分支不同 ⇒ separate。
 
 ## Plan
 
@@ -63,7 +63,7 @@ prior-claim: gap-arch-cycle-refresh-first-stale-wins-starves-later-scopes
 
 ## Definition of Done
 
-- [ ] 五条 AC 全绿（AC4 待外部），改动合入 develop，并在主检出同步后复验 AC4。
+- [ ] 五条 AC 全绿（AC4 待外部）、改动合并进 develop（待外部）。
 - [ ] 载体不变式成立且由机制（不是 prose）保证：任何 `evaluated:true` 的 scope，其 `artifactTimestamp` 不早于覆盖源路径的最新提交；做不到时该 scope 必须是 `evaluated:false` + reason 含 `artifact-behind-sources`，⛔ 不得是 `cycleCount:0`。该不变式在 `pending.length === 0` 的纯间隔内轮次同样成立。
 - [ ] `within-interval` 轮次仍不跑 analyze（零新增 spawn），刷新仍只在例程 tick 内发生，不进 fan-in / per-task 热路径。
 - [ ] 记录级 `status` 与 scope 级 `evaluated` 不再互相矛盾：有降级 scope ⇒ `status:"partial"` 且 `notEvaluatedScopes` 点名，绝不出现 `status:"complete"` + 某 scope `evaluated:false`。
