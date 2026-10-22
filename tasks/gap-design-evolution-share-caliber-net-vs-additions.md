@@ -2,7 +2,7 @@
 id: gap-design-evolution-share-caliber-net-vs-additions
 title: 设计演化读数用「净行数增量」却对外宣称「只计新增」——同一窗口两种口径差出 serve 1.31%/2.25%、worker-post-909
   102.13%/93.81%，且 R1 的出度判据方向写反
-status: ready
+status: done
 labels:
   - gap
   - defect
