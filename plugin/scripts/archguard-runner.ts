@@ -808,6 +808,44 @@ export interface DirectoryCycleReading {
   artifactTimestamp: string | null;
 }
 
+/** Roll a set of per-scope readings up into the aggregate the routine persists. THE ONE implementation
+ *  of `status` / `reason` / `totalCycleCount` / `behindScopes` / `artifactTimestamp`: the report round
+ *  re-aggregates after DOWNGRADING scopes whose refresh failed (`downgradeStaleScopes`), and a second
+ *  copy of this arithmetic is exactly how "partial" and "complete" would start disagreeing. */
+function aggregateDirectoryCycleReading(
+  workDir: string,
+  scopes: DirectoryCycleScopeReading[],
+): DirectoryCycleReading {
+  // Oldest timestamp among the ARTIFACT-DERIVED readings this record reports (见 the interface comment:
+  // unevaluated and single-directory scopes are not averaged in). Entries whose timestamp cannot be
+  // parsed as ISO are skipped rather than silently treated as "fresh".
+  const timestamps = scopes
+    .filter((s) => s.evaluated && s.basis === "module-graph")
+    .map((s) => s.artifactTimestamp)
+    .filter((v): v is string => typeof v === "string" && v !== "" && Number.isFinite(Date.parse(v)));
+  const artifactTimestamp = timestamps.length > 0 ? timestamps.reduce((a, b) => (a <= b ? a : b)) : null;
+  const failed = scopes.filter((s) => !s.evaluated);
+  const status: DirectoryCycleReading["status"] =
+    failed.length === 0 ? "complete" : failed.length === scopes.length ? "none" : "partial";
+  const evaluated = status !== "none";
+  return {
+    workDir,
+    evaluated,
+    status,
+    reason:
+      status === "complete"
+        ? null
+        : `${status === "partial" ? "partial" : "not-evaluated"} (${failed.length} of ${scopes.length} scopes not evaluated): ${failed
+            .map((s) => `${s.scope}: ${s.reason}`)
+            .join(" | ")}`,
+    totalCycleCount: status === "none" ? null : scopes.reduce((n, s) => n + (s.cycleCount ?? 0), 0),
+    behindScopes: scopes.filter((s) => s.behindSources === true).map((s) => s.scope),
+    notEvaluatedScopes: failed.map((s) => s.scope),
+    scopes,
+    artifactTimestamp,
+  };
+}
+
 /** Read the directory-level cycles from the artifacts the LAST `archguard analyze` persisted.
  *
  *  NEVER throws and NEVER spawns an analyzer: a missing/unreadable `.archguard/query` tree is reported
@@ -839,58 +877,65 @@ export function readDirectoryCycleReading(root: string, workDir?: string): Direc
       behindSources: commitsSinceArtifact === null ? null : commitsSinceArtifact > 0,
     };
   });
-  // Oldest timestamp among the ARTIFACT-DERIVED readings this record reports (见 the interface comment:
-  // unevaluated and single-directory scopes are not averaged in). Entries whose timestamp cannot be
-  // parsed as ISO are skipped rather than silently treated as "fresh".
-  const timestamps = scopes
-    .filter((s) => s.evaluated && s.basis === "module-graph")
-    .map((s) => s.artifactTimestamp)
-    .filter((v): v is string => typeof v === "string" && v !== "" && Number.isFinite(Date.parse(v)));
-  const artifactTimestamp = timestamps.length > 0 ? timestamps.reduce((a, b) => (a <= b ? a : b)) : null;
-  const failed = scopes.filter((s) => !s.evaluated);
-  const status: DirectoryCycleReading["status"] =
-    failed.length === 0 ? "complete" : failed.length === scopes.length ? "none" : "partial";
-  const evaluated = status !== "none";
-  return {
-    workDir: resolvedWorkDir,
-    evaluated,
-    status,
-    reason:
-      status === "complete"
-        ? null
-        : `${status === "partial" ? "partial" : "not-evaluated"} (${failed.length} of ${scopes.length} scopes not evaluated): ${failed
-            .map((s) => `${s.scope}: ${s.reason}`)
-            .join(" | ")}`,
-    totalCycleCount: status === "none" ? null : scopes.reduce((n, s) => n + (s.cycleCount ?? 0), 0),
-    behindScopes: scopes.filter((s) => s.behindSources === true).map((s) => s.scope),
-    notEvaluatedScopes: failed.map((s) => s.scope),
-    scopes,
-    artifactTimestamp,
-  };
+  return aggregateDirectoryCycleReading(resolvedWorkDir, scopes);
 }
 
-// ── Refresh: re-analyze a scope whose artifact is behind its sources ──────────────────────────────
+// ── Refresh: re-analyze the scopes whose artifacts are behind their sources ────────────────────────
 // WHY (gap-arch-cycle-report-never-evaluated-aggregate-and-stale-artifacts): the routine is a REPORT
 // (it must not run a 27s/task analyze every tick — `gap-fan-in-remove-archguard-gate`), but NOTHING
 // ever rewrote the artifacts it reads. Measured: the src artifact was produced at 16:17Z while the
 // cycle it should have shown was introduced at 16:26Z — the routine kept reporting "evaluated, 0
 // cycles" from a 9-minute-old artifact, and the cycle lived ~7h until a human ran archguard by hand.
-// So the routine refreshes AT MOST ONE scope per scheduling interval (the driver already gates the
-// routine by that interval; this function additionally only ever spends ONE analyze, so a refresh can
-// never turn a report tick into a 6×27s sweep, and a `stop` request still lands inside its window).
+//
+// ⛔ THE BUDGET IS PER SCOPE, NOT PER ROUND (gap-arch-cycle-refresh-first-stale-wins-starves-later-scopes).
+// The previous rule — "at most ONE analyze per scheduling interval" — combined with "pick the FIRST
+// needs-refresh scope in SCOPES declaration order" starved every later scope FOREVER: `plugin/scripts`
+// is touched by almost every merge, so it was stale (and first) at every interval, while
+// `quay-native-src` / `experiments-scripts` were never reached. Measured 2026-10-22: the
+// experiments-scripts artifact was 18 days older than the newest commit touching its sources — ~112
+// intervals' worth of starvation — and the record still presented those scopes as `evaluated:true`.
+// So: EVERY scope that needs it is refreshed in the round (bounded by the scope count — 6 × ~27s ≈
+// 2.7 min, against a 360m cadence), and the per-scope interval budget lives in the driver's carrier
+// clock (`readLastRefreshAtByScope`). Selection is STALEST FIRST so that even a future tightening of
+// the budget cannot make a fixed declaration order starve a scope again.
 //
 // It lives HERE, next to `runAnalyze`, because the spawn command (and the `--diagrams package` flag
 // that makes archguard emit the module graph at all) has exactly one spelling.
 export type ArchCycleRefreshSkip =
   | "no-scope-needs-refresh"
   | "instrument-absent"
-  | "analyze-failed";
+  | "analyze-failed"
+  /** Some attempted scope failed while others succeeded — ⛔ NOT `null` (that would read as a clean
+   *  sweep) and NOT `analyze-failed` (that would read as "nothing was refreshed"). 硬规则 3b. */
+  | "partial";
+
+/** One scope this call re-analyzed. `artifactTimestamp`/`commitsSinceArtifact` are the PRE-analyze
+ *  values that made it due (a reader can see WHAT was stale, not just that a spawn happened). */
+export interface ArchCycleRefreshedScope {
+  scope: string;
+  source: string;
+  artifactTimestamp: string | null;
+  commitsSinceArtifact: number | null;
+  /** `archguard analyze` exit code for THIS scope. */
+  exitCode: number;
+  ok: boolean;
+}
+
+/** A due scope that was deliberately NOT attempted this round, with the reason spelled out. */
+export interface ArchCycleDeferredScope {
+  scope: string;
+  reason: string;
+}
 
 export interface ArchCycleRefreshResult {
   attempted: boolean;
-  /** The scope label re-analyzed (at most one per call). */
-  refreshedScope: string | null;
-  refreshedSource: string | null;
+  /** Every scope re-analyzed this call, in the order attempted (stalest first). ⛔ A list, not a
+   *  single label: the record must be able to say that several scopes were refreshed, and which
+   *  ones failed (`ok:false` + its own `exitCode`). */
+  refreshedScopes: ArchCycleRefreshedScope[];
+  /** Due scopes that were NOT attempted (per-scope interval budget / caller filter), each NAMED —
+   *  "deferred" must never be indistinguishable from "not needed". */
+  deferredScopes: ArchCycleDeferredScope[];
   skipped: ArchCycleRefreshSkip | null;
   /** Human-readable explanation, always set when `skipped !== null` — for `instrument-absent` it lists
    *  EVERY location probed (硬规则 3b/6: "not found" is only meaningful with the search spelled out). */
@@ -898,7 +943,9 @@ export interface ArchCycleRefreshResult {
   instrument: string | null;
   instrumentSource: ArchguardCliSource | null;
   searched: string[];
-  /** `archguard analyze` exit code; null when no analyze ran. */
+  /** 0 when every attempted analyze succeeded; the FIRST non-zero exit otherwise; null when no analyze
+   *  ran. Per-scope exit codes live in `refreshedScopes` (one aggregate value cannot say WHICH scope
+   *  failed). */
   exitCode: number | null;
   at: string;
 }
@@ -917,28 +964,63 @@ export function scopeNeedsRefresh(scope: DirectoryCycleScopeReading): boolean {
   return false;
 }
 
-/** Re-analyze ONE scope that needs it, requesting the package-level diagram so the query artifact
- *  carries `extensions.tsAnalysis.moduleGraph`. Returns a record of what was done (never throws). */
+/** The due scopes, STALEST FIRST: `commitsSinceArtifact` DESC, then oldest `artifactTimestamp`
+ *  FIRST. Why not declaration order (the old behaviour): a fixed order + a finite per-round budget
+ *  is exactly the starvation mechanism this task fixes — the first stale scope wins every round.
+ *  `commitsSinceArtifact === null` ("not computable") sorts LAST and is never read as "most stale"
+ *  (硬规则 3b: a nil measurement must not outrank a real one); the final tie-break is the label, so
+ *  the order is deterministic (a test must not depend on sort stability). */
+export function selectRefreshTargets(reading: DirectoryCycleReading): DirectoryCycleScopeReading[] {
+  const artifactMs = (s: DirectoryCycleScopeReading): number | null => {
+    const ms = s.artifactTimestamp ? Date.parse(s.artifactTimestamp) : NaN;
+    return Number.isFinite(ms) ? ms : null;
+  };
+  return reading.scopes.filter(scopeNeedsRefresh).sort((a, b) => {
+    const ca = a.commitsSinceArtifact;
+    const cb = b.commitsSinceArtifact;
+    if (ca !== cb) {
+      if (ca === null) return 1;
+      if (cb === null) return -1;
+      return cb - ca;
+    }
+    const ta = artifactMs(a);
+    const tb = artifactMs(b);
+    if (ta !== tb) {
+      if (ta === null) return 1;
+      if (tb === null) return -1;
+      return ta - tb;
+    }
+    return a.scope.localeCompare(b.scope);
+  });
+}
+
+/** Re-analyze EVERY scope that needs it (or just `opts.scopes`, when the caller has already applied
+ *  its per-scope interval budget), requesting the package-level diagram so the query artifact carries
+ *  `extensions.tsAnalysis.moduleGraph`. Returns a record of what was done (never throws).
+ *
+ *  A failing scope does NOT stop the sweep: one broken scope must not starve the others, which is the
+ *  whole point of the change. */
 export function refreshBehindScopes(
   root: string,
   workDir: string | undefined,
   reading: DirectoryCycleReading,
-  opts: { now?: string } = {},
+  opts: { now?: string; scopes?: string[] } = {},
 ): ArchCycleRefreshResult {
   const at = opts.now ?? new Date().toISOString();
-  const target = reading.scopes.find(scopeNeedsRefresh) ?? null;
+  const wanted = opts.scopes ? new Set(opts.scopes) : null;
+  const targets = selectRefreshTargets(reading).filter((s) => wanted === null || wanted.has(s.scope));
   const base = {
     attempted: false,
-    refreshedScope: null,
-    refreshedSource: null,
+    refreshedScopes: [] as ArchCycleRefreshedScope[],
+    deferredScopes: [] as ArchCycleDeferredScope[],
     instrument: null as string | null,
     instrumentSource: null as ArchguardCliSource | null,
     searched: [] as string[],
     exitCode: null as number | null,
     at,
   };
-  if (!target) {
-    return { ...base, skipped: "no-scope-needs-refresh", detail: "every scope's artifact is current (or its staleness is not computable)" };
+  if (targets.length === 0) {
+    return { ...base, skipped: "no-scope-needs-refresh", detail: "no scope's artifact is behind its sources (or its staleness is not computable)" };
   }
   const resolvedRoot = path.resolve(root);
   const resolvedWorkDir = workDir ? path.resolve(workDir) : path.join(resolvedRoot, ".archguard");
@@ -951,25 +1033,73 @@ export function refreshBehindScopes(
       searched: resolution.searched,
     };
   }
-  const rc = runAnalyze(resolution.cli, resolvedRoot, resolvedWorkDir, target.source, target.scope, {
-    diagrams: ["package"],
-    outputLabel: `arch-cycle-refresh-${target.scope}`,
-    viaNode: resolution.viaNode,
-    noCache: true,
-  });
+  const refreshedScopes: ArchCycleRefreshedScope[] = [];
+  for (const target of targets) {
+    const rc = runAnalyze(resolution.cli, resolvedRoot, resolvedWorkDir, target.source, target.scope, {
+      diagrams: ["package"],
+      outputLabel: `arch-cycle-refresh-${target.scope}`,
+      viaNode: resolution.viaNode,
+      noCache: true,
+    });
+    refreshedScopes.push({
+      scope: target.scope,
+      source: target.source,
+      artifactTimestamp: target.artifactTimestamp,
+      commitsSinceArtifact: target.commitsSinceArtifact,
+      exitCode: rc,
+      ok: rc === 0,
+    });
+  }
+  const failed = refreshedScopes.filter((s) => !s.ok);
   return {
     ...base,
     attempted: true,
-    refreshedScope: target.scope,
-    refreshedSource: target.source,
-    skipped: rc === 0 ? null : "analyze-failed",
-    detail: rc === 0 ? `archguard analyze --diagrams package → ${target.source}` : `archguard analyze exited ${rc} for ${target.source}`,
+    refreshedScopes,
+    skipped: failed.length === 0 ? null : failed.length === refreshedScopes.length ? "analyze-failed" : "partial",
+    detail: refreshedScopes
+      .map((s) => `archguard analyze --diagrams package → ${s.source} (exit ${s.exitCode})`)
+      .join(" ; "),
     instrument: resolution.cli,
     instrumentSource: resolution.source,
     searched: resolution.searched,
-    exitCode: rc,
+    exitCode: failed.length === 0 ? 0 : (failed[0]?.exitCode ?? 1),
   };
 }
+
+/** Downgrade the scopes that are STILL behind their sources after the refresh attempt.
+ *
+ *  WHY (硬规则 3b/8, this task's Plan item 3): a stale scope's cycle count is NOT a reading of the
+ *  current tree, so presenting it with `evaluated:true` + `cycleCount:0` is indistinguishable from a
+ *  healthy clean scope. The caller passes the scopes it knows remained unrefreshed (analyze failed /
+ *  instrument absent / deferred by the per-scope budget) plus the cause; each becomes
+ *  `evaluated:false`, `cycleCount:null`, `cycles:null`, `basis:null`, and its reason carries the
+ *  LITERAL token `artifact-behind-sources` (a reader greps for it; the artifact timestamp and the
+ *  commit count it is behind are in the same sentence). Scopes NOT in `causes` are untouched — a
+ *  FRESH scope is never downgraded because it was never due. */
+export function downgradeStaleScopes(
+  reading: DirectoryCycleReading,
+  causes: ReadonlyMap<string, string>,
+): DirectoryCycleReading {
+  if (causes.size === 0) return reading;
+  const scopes = reading.scopes.map((s) => {
+    const cause = causes.get(s.scope);
+    if (cause === undefined) return s;
+    const behind = s.commitsSinceArtifact === null ? "an unknown number of" : `${s.commitsSinceArtifact}`;
+    const artifact = s.artifactTimestamp ?? "an unknown artifact timestamp";
+    return {
+      ...s,
+      evaluated: false,
+      reason:
+        `artifact-behind-sources: artifact ${artifact} is behind ${behind} commit(s) touching ${s.source} — ${cause}; ` +
+        `this scope's cycle count is NOT the current tree (⛔ not "0 cycles")`,
+      cycleCount: null,
+      cycles: null,
+      basis: null,
+    };
+  });
+  return aggregateDirectoryCycleReading(reading.workDir, scopes);
+}
+
 
 
 // ── Reusable GRAPH-SUMMARY reading (topByOutDegree + relationCountByType) ─────────────────────────

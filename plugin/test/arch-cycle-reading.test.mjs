@@ -36,9 +36,11 @@ import {
   commitsSince,
   resolveArchguardCliWithSource,
   scopeNeedsRefresh,
+  selectRefreshTargets,
   refreshBehindScopes,
+  downgradeStaleScopes,
 } from "../scripts/archguard-runner.ts";
-import { runArchCycleRound, readLastRefreshAt } from "../scripts/quality-gate-driver.ts";
+import { runArchCycleRound, readLastRefreshAt, readLastRefreshAtByScope } from "../scripts/quality-gate-driver.ts";
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
 
@@ -56,21 +58,25 @@ const SOURCES = [
 const LABELS = ["src", "scripts", "quay-native-src", "quay-github-src", "quay-backlog-src", "experiments-scripts"];
 
 /** A real git repo (the single-directory judgment and the commit count both read `git`, so a fake
- *  directory tree would only prove the fixture to itself). */
-function gitInit(dir, files) {
+ *  directory tree would only prove the fixture to itself).
+ *  `date` pins the initial commit's committer date — `commitsSince` runs `git rev-list --since`, which
+ *  reads the COMMITTER date, so a fixture that needs commits BEFORE and AFTER an artifact timestamp
+ *  must control it explicitly. */
+const GIT_IDENTITY = {
+  GIT_AUTHOR_NAME: "fixture",
+  GIT_AUTHOR_EMAIL: "fixture@example.invalid",
+  GIT_COMMITTER_NAME: "fixture",
+  GIT_COMMITTER_EMAIL: "fixture@example.invalid",
+};
+
+function gitInit(dir, files, date) {
   fs.mkdirSync(dir, { recursive: true });
   for (const [rel, content] of Object.entries(files)) {
     const p = path.join(dir, rel);
     fs.mkdirSync(path.dirname(p), { recursive: true });
     fs.writeFileSync(p, content, "utf8");
   }
-  const env = {
-    ...process.env,
-    GIT_AUTHOR_NAME: "fixture",
-    GIT_AUTHOR_EMAIL: "fixture@example.invalid",
-    GIT_COMMITTER_NAME: "fixture",
-    GIT_COMMITTER_EMAIL: "fixture@example.invalid",
-  };
+  const env = { ...process.env, ...GIT_IDENTITY, ...(date ? { GIT_AUTHOR_DATE: date, GIT_COMMITTER_DATE: date } : {}) };
   const run = (args) => {
     const r = spawnSync("git", args, { cwd: dir, encoding: "utf8", env });
     assert.equal(r.status, 0, `git ${args.join(" ")} failed: ${r.stderr}`);
@@ -80,6 +86,21 @@ function gitInit(dir, files) {
   run(["add", "-A"]);
   run(["commit", "-q", "-m", "fixture"]);
   return { run, env };
+}
+
+/** Add a commit dated `date` (committer date), touching `files`. Used to place a commit AFTER an
+ *  artifact timestamp — the only way `commitsSince` can report "the tree moved past the artifact". */
+function commitAt(dir, date, files) {
+  for (const [rel, content] of Object.entries(files)) {
+    const p = path.join(dir, rel);
+    fs.mkdirSync(path.dirname(p), { recursive: true });
+    fs.writeFileSync(p, content, "utf8");
+  }
+  const env = { ...process.env, ...GIT_IDENTITY, GIT_AUTHOR_DATE: date, GIT_COMMITTER_DATE: date };
+  for (const args of [["add", "-A"], ["commit", "-q", "--allow-empty", "-m", `fixture ${date}`]]) {
+    const r = spawnSync("git", args, { cwd: dir, encoding: "utf8", env });
+    assert.equal(r.status, 0, `git ${args.join(" ")} failed: ${r.stderr}`);
+  }
 }
 
 /** The query-artifact layout `archguard analyze` persists: `<workDir>/query/manifest.json` plus one
@@ -112,8 +133,9 @@ function writeQueryFixture(workDir, root, { timestampBySource = {}, moduleGraphB
 }
 
 /** A scope tree where every source dir exists; `multiDir` lists the sources that get a second
- *  directory (so their single-directory judgment is FALSE — the negative control). */
-function makeRepoFixture(root, { multiDir = [], testsInSubdir = false } = {}) {
+ *  directory (so their single-directory judgment is FALSE — the negative control). `date` pins the
+ *  fixture commit's committer date (see `gitInit`). */
+function makeRepoFixture(root, { multiDir = [], testsInSubdir = false, date } = {}) {
   const files = {};
   SOURCES.forEach((source, i) => {
     files[`${source}/mod-${i}.ts`] = `export const v${i} = ${i};\n`;
@@ -122,7 +144,7 @@ function makeRepoFixture(root, { multiDir = [], testsInSubdir = false } = {}) {
     if (testsInSubdir) files[`${source}/__tests__/x-${i}.test.ts`] = `export const t${i} = ${i};\n`;
     files[`${source}/y-${i}.test.ts`] = `export const u${i} = ${i};\n`;
   });
-  return gitInit(root, files);
+  return gitInit(root, files, date);
 }
 
 // ── AC2 (unit): the single-directory judgment comes from the FILE LIST ───────────────────────────
@@ -317,11 +339,20 @@ test("readDirectoryCycleReading — behindSources is TRUE when the source moved 
   assert.equal(backlog.behindSources, false);
 });
 
-// ── refresh: at most one analyze per interval, package-level diagram, honest skips ───────────────
+// ── refresh: EVERY due scope per round (per-scope budget), stalest first, honest skips ────────────
+// ⛔ THE OLD RULE THIS SECTION USED TO PIN — "at most ONE scope per call", "exactly one analyze per
+// refresh", "the other scopes were NOT swept" — is the starvation mechanism
+// gap-arch-cycle-refresh-first-stale-wins-starves-later-scopes removes: `plugin/scripts` is touched by
+// nearly every merge, so with a global single-analyze budget + declaration-order selection it was the
+// first stale scope at every interval and the tail scopes were never refreshed at all (measured
+// 2026-10-22: the experiments-scripts artifact was 18 days older than its newest source commit).
+// The assertions below are the INVERSE on purpose (AC5: a rule reversal must be written, not bypassed).
 
 /** A fake archguard CLI: records its argv, then rewrites the target scope's artifact WITH a module
- *  graph and a NOW timestamp — i.e. exactly what `analyze --diagrams package` would persist. */
-function fakeArchguard(tmp) {
+ *  graph and a NOW timestamp — i.e. exactly what `analyze --diagrams package` would persist.
+ *  `failFor` lists sources for which the run exits 3 WITHOUT touching the artifact — the AC3
+ *  negative control ("the analyze failed, so the artifact is still behind the tree"). */
+function fakeArchguard(tmp, { failFor = [] } = {}) {
   const record = path.join(tmp, "argv.log");
   const script = path.join(tmp, "fake-archguard.mjs");
   fs.writeFileSync(
@@ -330,9 +361,10 @@ function fakeArchguard(tmp) {
       `import path from "node:path";\n` +
       `const argv = process.argv.slice(2);\n` +
       `fs.appendFileSync(${JSON.stringify(record)}, JSON.stringify(argv) + "\\n");\n` +
+      `const s = argv[argv.indexOf("-s") + 1];\n` +
+      `if (${JSON.stringify(failFor)}.includes(s)) { process.stderr.write("fixture: forced failure for " + s + "\\n"); process.exit(3); }\n` +
       `const i = argv.indexOf("--work-dir");\n` +
       `const wd = argv[i + 1];\n` +
-      `const s = argv[argv.indexOf("-s") + 1];\n` +
       `const manifestFile = path.join(wd, "query", "manifest.json");\n` +
       `const manifest = JSON.parse(fs.readFileSync(manifestFile, "utf8"));\n` +
       `const wanted = fs.realpathSync(path.resolve(process.cwd(), s));\n` +
@@ -351,6 +383,19 @@ function fakeArchguard(tmp) {
   return { wrapper, record, script };
 }
 
+/** Every `-s <source>` the fake CLI was invoked with, in order (⛔ a proxy the test can COUNT — the
+ *  budget ACs are about how many analyzes each scope costs, not about the code path that chose it). */
+function analyzedSources(record) {
+  if (!fs.existsSync(record)) return [];
+  return fs
+    .readFileSync(record, "utf8")
+    .trim()
+    .split("\n")
+    .filter((l) => l.trim())
+    .map((l) => JSON.parse(l))
+    .map((argv) => argv[argv.indexOf("-s") + 1]);
+}
+
 function withEnv(t, patch) {
   const prev = {};
   for (const [k, v] of Object.entries(patch)) {
@@ -366,7 +411,45 @@ function withEnv(t, patch) {
   });
 }
 
-test("refreshBehindScopes — ONE analyze, requesting the package-level diagram, then a re-read that clears behindSources (AC4 mechanism)", (t) => {
+// ── AC1/Plan 1-2: stalest-first selection + EVERY due scope refreshed in one round ───────────────
+
+test("selectRefreshTargets — STALEST FIRST (commits desc, then oldest artifact), NOT declaration order (Plan 1-2 / AC1)", (t) => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "acr-order-"));
+  t.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
+  // Base commit EARLY, artifact AFTER it, then commits dated after the artifact — so `commitsSince`
+  // (which reads committer dates via `git rev-list --since`) can differentiate the scopes.
+  makeRepoFixture(tmp, { date: "2025-12-01T00:00:00Z" });
+  const workDir = path.join(tmp, ".archguard");
+  writeQueryFixture(workDir, tmp, {
+    timestampBySource: Object.fromEntries(SOURCES.map((s) => [s, "2026-01-01T00:00:00Z"])),
+    moduleGraphBySource: Object.fromEntries(SOURCES.map((s) => [s, []])),
+  });
+  const scripts = "plugin/scripts";
+  const native = "packages/quay-native/src";
+  const experiments = "experiments/quay-perpetual-stream/scripts";
+  commitAt(tmp, "2026-01-02T00:00:00Z", { [`${scripts}/a.ts`]: "export const a = 1;\n" });
+  commitAt(tmp, "2026-01-03T00:00:00Z", { [`${native}/a.ts`]: "export const a = 1;\n" });
+  commitAt(tmp, "2026-01-04T00:00:00Z", { [`${native}/b.ts`]: "export const b = 1;\n" });
+  commitAt(tmp, "2026-01-05T00:00:00Z", { [`${experiments}/a.ts`]: "export const a = 1;\n" });
+  commitAt(tmp, "2026-01-06T00:00:00Z", { [`${experiments}/b.ts`]: "export const b = 1;\n" });
+  commitAt(tmp, "2026-01-07T00:00:00Z", { [`${experiments}/c.ts`]: "export const c = 1;\n" });
+
+  const reading = readDirectoryCycleReading(tmp, workDir);
+  const byScope = Object.fromEntries(reading.scopes.map((s) => [s.scope, s]));
+  assert.equal(byScope["experiments-scripts"].commitsSinceArtifact, 3);
+  assert.equal(byScope["quay-native-src"].commitsSinceArtifact, 2);
+  assert.equal(byScope.scripts.commitsSinceArtifact, 1);
+  assert.equal(byScope.src.commitsSinceArtifact, 0, "untouched since the artifact ⇒ not due");
+
+  const order = selectRefreshTargets(reading).map((s) => s.scope);
+  assert.deepEqual(order, ["experiments-scripts", "quay-native-src", "scripts"], "stalest first");
+  // ⛔ THE NEGATIVE CONTROL (AC5 — same assertion, old implementation would be red): the previous
+  // selection was `reading.scopes.find(scopeNeedsRefresh)`, i.e. SCOPES declaration order:
+  assert.notDeepEqual(order, ["scripts", "quay-native-src", "experiments-scripts"], "declaration order is what starved the tail");
+  assert.equal(selectRefreshTargets(reading)[0].scope, "experiments-scripts", "the scope starved for 18 days must go first");
+});
+
+test("refreshBehindScopes — refreshes EVERY due scope once (package-level diagram, --no-cache), then reports nothing-to-do (AC1/AC2)", (t) => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "acr-refresh-"));
   t.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
   makeRepoFixture(tmp);
@@ -386,68 +469,267 @@ test("refreshBehindScopes — ONE analyze, requesting the package-level diagram,
 
   const res = refreshBehindScopes(tmp, workDir, before, { now: "2026-10-22T00:00:00Z" });
   assert.equal(res.attempted, true);
-  assert.equal(res.skipped, null);
-  assert.equal(res.refreshedScope, "src", "at most ONE scope per call — the first that needs it");
+  assert.equal(res.skipped, null, "every attempt succeeded ⇒ no skip value (⛔ not \"partial\")");
+  assert.equal(res.exitCode, 0);
+  assert.deepEqual(res.refreshedScopes.map((s) => s.scope).sort(), [...LABELS].sort(), "⛔ ALL due scopes, not just the first");
+  assert.equal(res.refreshedScopes.every((s) => s.ok === true), true);
+  assert.deepEqual(res.deferredScopes, []);
   assert.equal(res.instrumentSource, "env");
   assert.match(res.instrument, /fake-archguard$/);
 
+  // AC2 BUDGET, measured on the spawns themselves: each due scope exactly ONCE.
+  const sources = analyzedSources(record);
+  assert.equal(sources.length, SOURCES.length, "six due scopes ⇒ six analyzes (one each), never a re-run of one");
+  assert.deepEqual([...sources].sort(), [...SOURCES].sort());
+  for (const source of SOURCES) {
+    assert.equal(sources.filter((s) => s === source).length, 1, `${source} analyzed exactly once`);
+  }
   const calls = fs.readFileSync(record, "utf8").trim().split("\n").map((l) => JSON.parse(l));
-  assert.equal(calls.length, 1, "⛔ exactly one analyze per refresh — never a 6×27s sweep inside a report tick");
-  assert.deepEqual(calls[0].slice(0, 1), ["analyze"]);
-  const dIdx = calls[0].indexOf("--diagrams");
-  assert.ok(dIdx >= 0, "the request must ask for a package-level diagram");
-  assert.equal(calls[0][dIdx + 1], "package", "`--diagrams package` is what makes archguard emit moduleGraph");
-  // ⛔ and it must BYPASS the cache: a cache hit rewrites the query artifact with the PREVIOUS run's
-  // timestamp (measured: 2.1s, `arch.json` restored verbatim), leaving the scope exactly as behind as
-  // it was — a refresh that cannot change the reading is not a refresh.
-  assert.ok(calls[0].includes("--no-cache"), "the refresh must force a real re-analysis");
-  assert.equal(calls[0][calls[0].indexOf("-s") + 1], "packages/quay/src");
+  for (const argv of calls) {
+    assert.equal(argv[0], "analyze");
+    const dIdx = argv.indexOf("--diagrams");
+    assert.ok(dIdx >= 0, "the request must ask for a package-level diagram");
+    assert.equal(argv[dIdx + 1], "package", "`--diagrams package` is what makes archguard emit moduleGraph");
+    // ⛔ BYPASS the cache: a cache hit rewrites the query artifact with the PREVIOUS run's timestamp
+    // (measured: 2.1s, `arch.json` restored verbatim), leaving the scope exactly as behind as it was.
+    assert.ok(argv.includes("--no-cache"), "the refresh must force a real re-analysis");
+  }
 
   const after = readDirectoryCycleReading(tmp, workDir);
-  const src = after.scopes.find((s) => s.scope === "src");
-  assert.equal(src.evaluated, true);
-  assert.equal(src.behindSources, false, "the refreshed artifact now covers the tree");
-  assert.equal(after.scopes.filter((s) => s.behindSources === true).length, 5, "the other scopes were NOT swept");
+  assert.equal(after.scopes.every((s) => s.behindSources === false), true, "every refreshed artifact now covers its tree");
+  assert.deepEqual(selectRefreshTargets(after), [], "nothing is due after the sweep");
+
+  const again = refreshBehindScopes(tmp, workDir, after);
+  assert.equal(again.attempted, false);
+  assert.equal(again.skipped, "no-scope-needs-refresh");
+  assert.deepEqual(again.refreshedScopes, []);
+  assert.equal(analyzedSources(record).length, SOURCES.length, "no new analyze once everything is current");
 });
 
-test("runArchCycleRound — refresh is applied BEFORE the reported reading, and AT MOST ONCE per interval (AC4/DoD)", (t) => {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "acr-interval-"));
+test("runArchCycleRound — scripts / quay-native-src / experiments-scripts ALL refreshed in ONE round, record.behindScopes empty (AC1)", (t) => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "acr-ac1-"));
   t.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
   makeRepoFixture(tmp);
   const { wrapper, record } = fakeArchguard(tmp);
   withEnv(t, { ARCHGUARD_RUNNER_CLI: wrapper });
 
+  const stale = ["plugin/scripts", "packages/quay-native/src", "experiments/quay-perpetual-stream/scripts"];
+  const freshTs = "2999-01-01T00:00:00Z"; // future ⇒ commitsSince() is 0 by construction
   const workDir = path.join(tmp, ".archguard");
-  const oldTs = "2020-01-01T00:00:00Z";
   writeQueryFixture(workDir, tmp, {
-    timestampBySource: Object.fromEntries(SOURCES.map((s) => [s, oldTs])),
+    timestampBySource: Object.fromEntries(SOURCES.map((s) => [s, stale.includes(s) ? "2020-01-01T00:00:00Z" : freshTs])),
     moduleGraphBySource: Object.fromEntries(SOURCES.map((s) => [s, []])),
   });
   const history = path.join(tmp, "history.jsonl");
+  const fact = runArchCycleRound(tmp, {
+    config: { enabled: true, intervalMinutes: 360 }, configPresent: true, configError: null,
+    historyPath: history, workDir, now: new Date().toISOString(),
+  });
+  assert.equal(fact.state, "verified", fact.reason ?? "");
+
+  const refreshed = fact.value.refresh.refreshedScopes.map((s) => s.scope).sort();
+  assert.deepEqual(refreshed, ["experiments-scripts", "quay-native-src", "scripts"], "all three stale scopes in one round");
+  assert.deepEqual(fact.value.behindScopes, [], "⛔ the old reading would still list the two starved scopes here");
+  assert.equal(fact.value.scopes.every((s) => s.evaluated === true), true);
+  assert.equal(fact.value.status, "complete");
+
+  // AC2: the already-fresh scopes cost ZERO analyzes.
+  const sources = analyzedSources(record);
+  for (const source of ["packages/quay/src", "packages/quay-github/src", "packages/quay-backlog/src"]) {
+    assert.equal(sources.filter((s) => s === source).length, 0, `${source} was fresh ⇒ not analyzed`);
+  }
+  for (const source of stale) assert.equal(sources.filter((s) => s === source).length, 1, `${source} analyzed once`);
+
+  const rec = JSON.parse(fs.readFileSync(history, "utf8").trim());
+  assert.deepEqual(rec.behindScopes, []);
+  assert.equal(rec.scopes.every((s) => s.evaluated && s.behindSources === false), true);
+});
+
+test("runArchCycleRound — PER-SCOPE interval budget: a refreshed scope is not re-run, another stale scope still refreshes (AC2/DoD)", (t) => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "acr-interval-"));
+  t.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
+  makeRepoFixture(tmp, { date: "2025-12-01T00:00:00Z" });
+  const { wrapper, record } = fakeArchguard(tmp);
+  withEnv(t, { ARCHGUARD_RUNNER_CLI: wrapper });
+
+  const src = "packages/quay/src";
+  const scripts = "plugin/scripts";
+  const workDir = path.join(tmp, ".archguard");
+  writeQueryFixture(workDir, tmp, {
+    // ONLY src is behind at round 1 (its artifact predates the base commit); everything else is fresh.
+    timestampBySource: Object.fromEntries(SOURCES.map((s) => [s, s === src ? "2025-06-01T00:00:00Z" : "2026-01-01T00:00:00Z"])),
+    moduleGraphBySource: Object.fromEntries(SOURCES.map((s) => [s, []])),
+  });
+  const history = path.join(tmp, "history.jsonl");
+  const t0 = Date.now();
   const base = {
     config: { enabled: true, intervalMinutes: 60 }, configPresent: true, configError: null,
     historyPath: history, workDir,
   };
 
-  const first = runArchCycleRound(tmp, { ...base, now: new Date().toISOString() });
+  const first = runArchCycleRound(tmp, { ...base, now: new Date(t0).toISOString() });
   assert.equal(first.state, "verified", first.reason ?? "");
-  assert.equal(first.value.refresh.attempted, true);
-  assert.equal(first.value.refresh.refreshedScope, "src");
+  assert.deepEqual(first.value.refresh.refreshedScopes.map((s) => s.scope), ["src"]);
   assert.equal(first.value.refresh.appliedBeforeReading, true);
-  assert.equal(first.value.scopes.find((s) => s.scope === "src").behindSources, false, "the record reports the POST-refresh reading");
+  assert.deepEqual(analyzedSources(record), [src]);
+  assert.equal(readLastRefreshAtByScope(history).src, new Date(t0).toISOString());
 
-  // A restart minutes later must NOT refresh again (the interval guard reads the carrier itself).
-  const second = runArchCycleRound(tmp, { ...base, now: new Date(Date.now() + 60_000).toISOString() });
-  assert.equal(second.value.refresh.attempted, false);
-  assert.equal(second.value.refresh.skipped, "within-interval");
-  assert.match(second.value.refresh.detail, /at most one analyze per interval/);
+  // A NEW commit makes `plugin/scripts` stale AFTER src's refresh. 60s later is INSIDE the 60m
+  // interval — the OLD global clock answered `within-interval` here and starved scripts for a whole
+  // interval (the defect). The per-scope clock has no entry for scripts, so it MUST refresh.
+  commitAt(tmp, "2026-02-01T00:00:00Z", { [`${scripts}/new-after-refresh.ts`]: "export const n = 1;\n" });
+  const second = runArchCycleRound(tmp, { ...base, now: new Date(t0 + 60_000).toISOString() });
+  assert.notEqual(second.value.refresh.skipped, "within-interval", "one scope's refresh must not block another scope");
+  assert.deepEqual(second.value.refresh.refreshedScopes.map((s) => s.scope), ["scripts"]);
+  assert.equal(second.value.refresh.attempted, true);
+  // ⛔ src was NOT re-analyzed: its own budget is spent for this interval.
+  assert.deepEqual(analyzedSources(record), [src, scripts], "same scope ≤1 analyze per interval; other scopes still refresh");
 
-  const calls = fs.readFileSync(record, "utf8").trim().split("\n").filter((l) => l.trim());
-  assert.equal(calls.length, 1, "two rounds inside one interval ⇒ exactly one analyze");
+  // Round 3, still inside the interval, nothing due ⇒ explicit no-op (and still zero spawns).
+  const third = runArchCycleRound(tmp, { ...base, now: new Date(t0 + 120_000).toISOString() });
+  assert.equal(third.value.refresh.attempted, false);
+  assert.equal(third.value.refresh.skipped, "no-scope-needs-refresh");
+  assert.equal(analyzedSources(record).length, 2);
 
-  // `readLastRefreshAt` only counts rounds that RAN an analyze — a reporting-only round does not
-  // reset the clock (otherwise a permanently absent instrument would never retry).
+  // `readLastRefreshAt` (round-level) and `readLastRefreshAtByScope` (the budget clock) agree on
+  // rounds that ran, and a reporting-only round resets neither.
   assert.equal(readLastRefreshAt(history) !== null, true);
+  const byScope = readLastRefreshAtByScope(history);
+  assert.deepEqual(Object.keys(byScope).sort(), ["scripts", "src"]);
+});
+
+test("runArchCycleRound — a stale scope whose analyze FAILS is downgraded to not-evaluated + artifact-behind-sources (AC3)", (t) => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "acr-ac3-"));
+  t.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
+  makeRepoFixture(tmp);
+  const experiments = "experiments/quay-perpetual-stream/scripts";
+  const { wrapper, record } = fakeArchguard(tmp, { failFor: [experiments] });
+  withEnv(t, { ARCHGUARD_RUNNER_CLI: wrapper });
+
+  const stale = ["plugin/scripts", "packages/quay-native/src", experiments];
+  const workDir = path.join(tmp, ".archguard");
+  writeQueryFixture(workDir, tmp, {
+    timestampBySource: Object.fromEntries(SOURCES.map((s) => [s, stale.includes(s) ? "2020-01-01T00:00:00Z" : "2999-01-01T00:00:00Z"])),
+    moduleGraphBySource: Object.fromEntries(SOURCES.map((s) => [s, []])),
+  });
+  const history = path.join(tmp, "history.jsonl");
+  const fact = runArchCycleRound(tmp, {
+    config: { enabled: true, intervalMinutes: 360 }, configPresent: true, configError: null,
+    historyPath: history, workDir, now: new Date().toISOString(),
+  });
+  assert.equal(fact.state, "verified", "a partial round is still a reading");
+  assert.match(fact.reason ?? "", /partial — .*experiments-scripts/);
+
+  const rec = JSON.parse(fs.readFileSync(history, "utf8").trim());
+  assert.equal(rec.refresh.skipped, "partial", "⛔ NOT null (would read as a clean sweep) and NOT analyze-failed (others ran)");
+  const failed = rec.refresh.refreshedScopes.find((s) => s.scope === "experiments-scripts");
+  assert.equal(failed.ok, false);
+  assert.equal(failed.exitCode, 3);
+  assert.equal(rec.refresh.refreshedScopes.filter((s) => s.ok).length, 2, "the other two were refreshed");
+
+  const bad = rec.scopes.find((s) => s.scope === "experiments-scripts");
+  assert.equal(bad.evaluated, false, "⛔ never presented as a current reading");
+  assert.equal(bad.cycleCount, null, "⛔ never cycleCount:0 — that is the healthy-clean value");
+  assert.equal(bad.cycles, null);
+  assert.equal(bad.basis, null);
+  assert.match(bad.reason, /artifact-behind-sources/);
+  assert.match(bad.reason, /analyze exited 3/);
+  assert.match(bad.reason, /2020-01-01T00:00:00Z/);
+  assert.equal(bad.behindSources, true, "the staleness itself is still recorded");
+
+  const good = rec.scopes.find((s) => s.scope === "scripts");
+  assert.equal(good.evaluated, true, "a scope refreshed in the SAME round keeps its reading");
+  assert.equal(good.cycleCount, 0);
+  assert.equal(good.behindSources, false);
+
+  assert.equal(rec.status, "partial", "the record-level status names the unrefreshable scope");
+  assert.deepEqual(rec.notEvaluatedScopes, ["experiments-scripts"]);
+  assert.match(rec.reason, /experiments-scripts: artifact-behind-sources/);
+});
+
+test("runArchCycleRound — the SAME failure injected on a FRESH scope does not downgrade it (AC3 negative control)", (t) => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "acr-ac3-neg-"));
+  t.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
+  makeRepoFixture(tmp);
+  const src = "packages/quay/src";
+  // The instrument would fail for src IF it were analyzed — it must never be analyzed, because a
+  // fresh scope is not due. This is the control that stops "downgrade" from being "downgrade everything".
+  const { wrapper, record } = fakeArchguard(tmp, { failFor: [src] });
+  withEnv(t, { ARCHGUARD_RUNNER_CLI: wrapper });
+  const workDir = path.join(tmp, ".archguard");
+  writeQueryFixture(workDir, tmp, {
+    timestampBySource: Object.fromEntries(SOURCES.map((s) => [s, s === src ? "2999-01-01T00:00:00Z" : "2020-01-01T00:00:00Z"])),
+    moduleGraphBySource: Object.fromEntries(SOURCES.map((s) => [s, []])),
+  });
+  const history = path.join(tmp, "history.jsonl");
+  const fact = runArchCycleRound(tmp, {
+    config: { enabled: true, intervalMinutes: 360 }, configPresent: true, configError: null,
+    historyPath: history, workDir, now: new Date().toISOString(),
+  });
+  assert.equal(analyzedSources(record).includes(src), false, "a fresh scope is never analyzed");
+  const srcRow = fact.value.scopes.find((s) => s.scope === "src");
+  assert.equal(srcRow.evaluated, true);
+  assert.equal(srcRow.cycleCount, 0);
+  assert.equal(srcRow.behindSources, false);
+  assert.equal(fact.value.refresh.refreshedScopes.some((s) => s.scope === "src"), false);
+  assert.equal(fact.value.status, "complete", "no scope was downgraded");
+});
+
+test("downgradeStaleScopes — only the scopes named in `causes` are touched (unit, 硬规则 3b)", (t) => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "acr-downgrade-"));
+  t.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
+  makeRepoFixture(tmp);
+  const workDir = path.join(tmp, ".archguard");
+  writeQueryFixture(workDir, tmp, {
+    timestampBySource: Object.fromEntries(SOURCES.map((s) => [s, "2020-01-01T00:00:00Z"])),
+    moduleGraphBySource: Object.fromEntries(SOURCES.map((s) => [s, []])),
+  });
+  const reading = readDirectoryCycleReading(tmp, workDir);
+  const out = downgradeStaleScopes(reading, new Map([["scripts", "analyze exited 7"]]));
+  const scripts = out.scopes.find((s) => s.scope === "scripts");
+  const other = out.scopes.find((s) => s.scope === "quay-native-src");
+  assert.equal(scripts.evaluated, false);
+  assert.equal(scripts.cycleCount, null);
+  assert.match(scripts.reason, /artifact-behind-sources: artifact 2020-01-01T00:00:00Z is behind .* commit\(s\) touching plugin\/scripts — analyze exited 7/);
+  assert.equal(other.evaluated, true, "a scope with no cause keeps its reading");
+  assert.equal(other.cycleCount, 0);
+  assert.equal(out.status, "partial");
+  assert.deepEqual(out.notEvaluatedScopes, ["scripts"]);
+  assert.deepEqual(out.behindScopes, reading.behindScopes, "behindScopes still records the staleness");
+  assert.equal(downgradeStaleScopes(reading, new Map()), reading, "empty causes ⇒ the same reading (no copy)");
+});
+
+
+test("readLastRefreshAt / readLastRefreshAtByScope — only rounds that RAN an analyze set a clock; the legacy singular shape is honoured (Plan 4)", (t) => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "acr-clock-"));
+  t.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
+  const history = path.join(tmp, "history.jsonl");
+  const lines = [
+    // legacy record (before this task): ONE scope, singular field
+    { ts: "2026-10-20T00:00:00Z", refresh: { attempted: true, refreshedScope: "scripts", at: "2026-10-20T00:00:00Z" } },
+    // a reporting-only round must reset NOTHING
+    { ts: "2026-10-21T00:00:00Z", refresh: { attempted: false, skipped: "instrument-absent", at: "2026-10-21T00:00:00Z" } },
+    // current shape: a list
+    {
+      ts: "2026-10-22T00:00:00Z",
+      refresh: {
+        attempted: true,
+        refreshedScopes: [
+          { scope: "scripts", exitCode: 0, ok: true },
+          { scope: "quay-native-src", exitCode: 0, ok: true },
+        ],
+        at: "2026-10-22T00:00:00Z",
+      },
+    },
+    "{ not json",
+  ];
+  fs.writeFileSync(history, lines.map((l) => (typeof l === "string" ? l : JSON.stringify(l))).join("\n") + "\n", "utf8");
+
+  assert.equal(readLastRefreshAt(history), "2026-10-22T00:00:00Z", "round-level: the newest round that ran");
+  assert.deepEqual(readLastRefreshAtByScope(history), {
+    scripts: "2026-10-22T00:00:00Z", // newest wins
+    "quay-native-src": "2026-10-22T00:00:00Z",
+  });
   const onlySkipped = path.join(tmp, "skipped-only.jsonl");
   fs.writeFileSync(
     onlySkipped,
@@ -455,6 +737,8 @@ test("runArchCycleRound — refresh is applied BEFORE the reported reading, and 
     "utf8",
   );
   assert.equal(readLastRefreshAt(onlySkipped), null);
+  assert.deepEqual(readLastRefreshAtByScope(onlySkipped), {}, "a round that analyzed nothing clocks nothing");
+  assert.deepEqual(readLastRefreshAtByScope(path.join(tmp, "does-not-exist.jsonl")), {});
 });
 
 test("refreshBehindScopes — an absent instrument is `instrument-absent` and NAMES every probed location (Plan 步骤 4)", (t) => {
@@ -479,8 +763,23 @@ test("refreshBehindScopes — an absent instrument is `instrument-absent` and NA
   const res = refreshBehindScopes(tmp, workDir, readDirectoryCycleReading(tmp, workDir));
   assert.equal(res.attempted, false);
   assert.equal(res.skipped, "instrument-absent");
+  assert.deepEqual(res.refreshedScopes, []);
   assert.match(res.detail, /probed: .*ARCHGUARD_RUNNER_CLI/);
   assert.ok(res.searched.length > 0, "the searched list is the evidence that a search happened");
+
+  // ROUND LEVEL: a stale scope that could NOT be refreshed must not keep presenting its old cycle
+  // count as the current tree (Plan item 3). All six are behind here ⇒ status "none".
+  const history = path.join(tmp, "history-absent.jsonl");
+  const fact = runArchCycleRound(tmp, {
+    config: { enabled: true, intervalMinutes: 60 }, configPresent: true, configError: null,
+    historyPath: history, workDir, now: new Date().toISOString(),
+  });
+  const rec = JSON.parse(fs.readFileSync(history, "utf8").trim());
+  assert.equal(rec.refresh.skipped, "instrument-absent");
+  assert.equal(rec.scopes.every((s) => s.evaluated === false && s.cycleCount === null), true);
+  assert.ok(rec.scopes.every((s) => /artifact-behind-sources/.test(s.reason)));
+  assert.equal(rec.status, "none");
+  assert.equal(fact.state, "not-evaluated", "the honest verdict when nothing could be made current");
 });
 
 test("resolveArchguardCliWithSource — the installed plugin runtime is a real resolution source, discovered from install metadata (Plan 步骤 4)", (t) => {
