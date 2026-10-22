@@ -180,13 +180,16 @@ import {
 // ARCH-CYCLE 轨道（gap-arch-cycle-report-only-routine）：目录级环读数此前只存在于按需 runner 的
 // **闸**里（gap-fan-in-remove-archguard-gate 已把它从 fan-in 移除 ⇒ 新能力无消费者，自 10-11
 // 没跑过）。本轨把同一个读数接成周期 report-only 例程：每 due 轮读一次「上次 analyze 落盘的」
-// moduleGraph 环，append 一行到 `.quay/arch-cycle-history.jsonl`。⛔ 不 analyze、不 ratchet、
+// moduleGraph 环，append 一行到 `.quay/arch-cycle-history.jsonl`。analyze 只在这一轮里为**到期**
+// 的 scope 补跑（每 scope 每间隔至多一次；⛔ 不进 fan-in / per-task 热路径）。⛔ 不 ratchet、
 // 不立案——环非空是该例程的**读数内容**，不会使轮 failed（那是闸的语义，不是本轨的）。
 import {
+  downgradeStaleScopes,
   readDirectoryCycleReading,
   readGraphSummaryReading,
   refreshBehindScopes,
   resolveArchguardCli,
+  selectRefreshTargets,
   type ArchCycleRefreshResult,
   type DirectoryCycle,
   type DirectoryCycleReading,
@@ -2069,24 +2072,55 @@ export interface ArchCycleHistoryRecord {
   graphSummary: GraphSummaryRecord;
   /** WHAT THIS ROUND DID ABOUT STALE ARTIFACTS. The routine is a reader, but it is the only thing that
    *  ever looks at these artifacts on a schedule — the mechanism that refills them lives here, bounded
-   *  to at most ONE analyze per scheduling interval (see `refreshBehindScopes`). Always present, so
-   *  "no refresh" is a stated decision (`skipped`) rather than silence. */
+   *  PER SCOPE to at most one analyze per scheduling interval (see `refreshBehindScopes` /
+   *  `readLastRefreshAtByScope`): every due scope is attempted in the round, and only a scope that was
+   *  itself refreshed recently is deferred. Always present, so "no refresh" is a stated decision
+   *  (`skipped`) rather than silence. */
   refresh: ArchCycleRefreshRecord;
   reportOnly: true;
 }
 
+/** One scope the round re-analyzed, as persisted. */
+export interface ArchCycleRefreshedScopeRecord {
+  scope: string;
+  source: string;
+  /** The artifact timestamp that made the scope due (BEFORE the analyze) — so the record says WHAT
+   *  was stale, not just that a spawn happened. */
+  artifactTimestamp: string | null;
+  commitsSinceArtifact: number | null;
+  /** `archguard analyze` exit code for THIS scope; a non-zero code is why `ok:false`. */
+  exitCode: number;
+  ok: boolean;
+}
+
+/** A due scope the round did NOT attempt, with the reason (per-scope interval budget / filter). */
+export interface ArchCycleDeferredScopeRecord {
+  scope: string;
+  reason: string;
+}
+
 /** The refresh half of a round, as persisted. `attempted:false` + `skipped` is a complete answer:
  *  every no-analyze path names itself (⛔ never an absent field, which would read as "did not think
- *  about it"). */
+ *  about it").
+ *
+ *  ⛔ `refreshedScopes` is a LIST (gap-arch-cycle-refresh-first-stale-wins-starves-later-scopes): the
+ *  old singular `refreshedScope` could only say "one scope was refreshed", which — together with the
+ *  fixed-order selection — made the starvation of every later scope invisible on the carrier. */
 export interface ArchCycleRefreshRecord {
   attempted: boolean;
-  refreshedScope: string | null;
-  skipped: "no-scope-needs-refresh" | "instrument-absent" | "analyze-failed" | "within-interval" | "disabled" | null;
+  /** Every scope re-analyzed this round, stalest first. Empty ⇒ nothing was spawned. */
+  refreshedScopes: ArchCycleRefreshedScopeRecord[];
+  /** Due scopes deliberately not attempted this round, each NAMED. "Deferred" and "not needed" must
+   *  never share a representation (硬规则 3b). */
+  deferredScopes: ArchCycleDeferredScopeRecord[];
+  skipped: "no-scope-needs-refresh" | "instrument-absent" | "analyze-failed" | "within-interval" | "disabled" | "partial" | null;
   detail: string | null;
   instrument: string | null;
   instrumentSource: "env" | "path" | "plugin" | null;
   /** Every location probed for the CLI (`instrument-absent` must say what was looked for). */
   searched: string[];
+  /** 0 when every attempted analyze succeeded; the first non-zero exit otherwise; null when no
+   *  analyze ran. Per-scope codes live in `refreshedScopes`. */
   exitCode: number | null;
   at: string;
   /** `true` when the reading in THIS record was taken AFTER the refresh (so a reader knows whether
@@ -2208,38 +2242,78 @@ export function runArchCycleRound(root: string, opts: ArchCycleRoundOptions = {}
   const nowMs = Number.isFinite(Date.parse(ts)) ? Date.parse(ts) : Date.now();
   const historyPathForRead = opts.historyPath ? path.resolve(opts.historyPath) : path.join(resolvedRoot, ARCH_CYCLE_HISTORY_REL);
 
-  // ── REFRESH (Plan 步骤 4) ────────────────────────────────────────────────────────────────────────
-  // The routine reads what the LAST analyze persisted, and until this task NOTHING ever rewrote it: a
-  // cycle introduced 9 minutes after the last artifact was invisible for ~7h (measured 2026-10-22).
-  // So the routine now refills the artifact it is about to report — but ONLY:
-  //   • for a scope that needs it (`scopeNeedsRefresh`: sources moved past the artifact, or the
-  //     artifact has no module graph because no package-level run was ever requested), and
-  //   • at most once per scheduling interval, enforced against the carrier's own last `refresh.at`
-  //     (a driver restart between rounds must not turn the report into a sweep), and
+  // ── REFRESH (Plan 步骤 1-4) ─────────────────────────────────────────────────────────────────────
+  // The routine reads what the LAST analyze persisted, and until
+  // gap-arch-cycle-report-never-evaluated-aggregate-and-stale-artifacts NOTHING ever rewrote it. That
+  // task added a refresh — but with a GLOBAL "at most one analyze per interval" budget and a
+  // fixed-declaration-order selection, which starved every scope after the first: `plugin/scripts` is
+  // touched by nearly every merge, so it was stale (and first) at every interval while
+  // `quay-native-src` / `experiments-scripts` were never reached (measured 2026-10-22: the
+  // experiments-scripts artifact was 18 days older than its newest source commit, ≈112 intervals).
+  //
+  // ⇒ THE BUDGET IS PER SCOPE (gap-arch-cycle-refresh-first-stale-wins-starves-later-scopes):
+  //   • every due scope (`scopeNeedsRefresh`) is refreshed in the round, stalest first
+  //     (`selectRefreshTargets`), so a fixed order can never starve the tail again;
+  //   • "at most once per interval" is enforced PER SCOPE against the carrier's own recorded
+  //     refresh times (`readLastRefreshAtByScope`) — a driver restart between rounds must not turn
+  //     the report into a sweep, but one scope's recent refresh must not block the others either;
+  //   • a due scope that could NOT be refreshed (analyze failed / instrument absent / deferred) is
+  //     DOWNGRADED to `evaluated:false` + `artifact-behind-sources` — ⛔ never left presenting a stale
+  //     `cycleCount` as the current tree (硬规则 3b);
   //   • never on the fan-in / per-task hot path — this is the routine's tick only
   //     (`gap-fan-in-remove-archguard-gate`).
-  let reading: DirectoryCycleReading = readDirectoryCycleReading(resolvedRoot, opts.workDir);
+  const readingBeforeRefresh: DirectoryCycleReading = readDirectoryCycleReading(resolvedRoot, opts.workDir);
+  let reading: DirectoryCycleReading = readingBeforeRefresh;
   let refresh: ArchCycleRefreshRecord;
+  /** Due scopes whose cause of non-refresh is known, for the downgrade below. */
+  const downgradeCauses = new Map<string, string>();
   if (opts.refresh === false) {
     refresh = {
-      attempted: false, refreshedScope: null, skipped: "disabled",
+      attempted: false, refreshedScopes: [], deferredScopes: [], skipped: "disabled",
       detail: "refresh disabled by the caller (read-only round: reports the artifacts as they are)",
       instrument: null, instrumentSource: null, searched: [], exitCode: null, at: ts, appliedBeforeReading: false,
     };
   } else {
-    const lastRefreshAt = readLastRefreshAt(historyPathForRead);
-    const lastMs = lastRefreshAt ? Date.parse(lastRefreshAt) : NaN;
-    if (Number.isFinite(lastMs) && nowMs - lastMs < staleIntervalMs) {
+    const due = selectRefreshTargets(readingBeforeRefresh);
+    const lastByScope = readLastRefreshAtByScope(historyPathForRead);
+    const intervalLabel = `${Math.round(staleIntervalMs / 60_000)}m`;
+    const pending: string[] = [];
+    const deferred: ArchCycleDeferredScopeRecord[] = [];
+    for (const scope of due) {
+      const lastRefreshAt = lastByScope[scope.scope];
+      const lastMs = lastRefreshAt ? Date.parse(lastRefreshAt) : NaN;
+      if (Number.isFinite(lastMs) && nowMs - lastMs < staleIntervalMs) {
+        deferred.push({
+          scope: scope.scope,
+          reason: `within-interval: last refresh at ${lastRefreshAt} is within this routine's ${intervalLabel} interval`,
+        });
+      } else {
+        pending.push(scope.scope);
+      }
+    }
+    if (due.length === 0) {
       refresh = {
-        attempted: false, refreshedScope: null, skipped: "within-interval",
-        detail: `last refresh at ${lastRefreshAt} is within this routine's ${Math.round(staleIntervalMs / 60_000)}m interval — at most one analyze per interval`,
+        attempted: false, refreshedScopes: [], deferredScopes: [], skipped: "no-scope-needs-refresh",
+        detail: "no scope's artifact is behind its sources (or its staleness is not computable)",
+        instrument: null, instrumentSource: null, searched: [], exitCode: null, at: ts, appliedBeforeReading: false,
+      };
+    } else if (pending.length === 0) {
+      refresh = {
+        attempted: false, refreshedScopes: [], deferredScopes: deferred, skipped: "within-interval",
+        detail: `every due scope was refreshed within this routine's ${intervalLabel} interval — per-scope budget: ${deferred
+          .map((d) => `${d.scope} (${d.reason})`)
+          .join(" ; ")}`,
         instrument: null, instrumentSource: null, searched: [], exitCode: null, at: ts, appliedBeforeReading: false,
       };
     } else {
-      const r: ArchCycleRefreshResult = refreshBehindScopes(resolvedRoot, opts.workDir, reading, { now: ts });
+      const r: ArchCycleRefreshResult = refreshBehindScopes(resolvedRoot, opts.workDir, readingBeforeRefresh, {
+        now: ts,
+        scopes: pending,
+      });
       refresh = {
         attempted: r.attempted,
-        refreshedScope: r.refreshedScope,
+        refreshedScopes: r.refreshedScopes,
+        deferredScopes: deferred,
         skipped: r.skipped,
         detail: r.detail,
         instrument: r.instrument,
@@ -2247,14 +2321,37 @@ export function runArchCycleRound(root: string, opts: ArchCycleRoundOptions = {}
         searched: r.searched,
         exitCode: r.exitCode,
         at: r.at,
-        appliedBeforeReading: r.attempted && r.exitCode === 0,
+        appliedBeforeReading: r.refreshedScopes.some((s) => s.ok),
       };
       if (refresh.appliedBeforeReading) {
         // Re-read AFTER the analyze: the numbers in this record are the post-refresh ones, and the
         // graph summary must come from the same (now refreshed) artifact tree.
         reading = readDirectoryCycleReading(resolvedRoot, opts.workDir);
       }
+      // Why each still-due scope was not made current (the downgrade reason). A scope that a successful
+      // analyze brought up to date is NOT in `stillDue`, so it keeps its `evaluated:true` reading.
+      const exitByScope = new Map(r.refreshedScopes.map((s) => [s.scope, s] as const));
+      const deferredByScope = new Map(deferred.map((d) => [d.scope, d.reason] as const));
+      const stillDue = new Set(selectRefreshTargets(reading).map((s) => s.scope));
+      for (const scope of due) {
+        if (!stillDue.has(scope.scope)) continue;
+        const attempted = exitByScope.get(scope.scope);
+        const cause = deferredByScope.get(scope.scope)
+          ?? (r.skipped === "instrument-absent"
+            ? `instrument-absent — archguard CLI not found (probed: ${r.searched.join(" ; ")})`
+            : attempted === undefined
+              ? "not attempted this round"
+              : attempted.ok
+                ? "analyze exited 0 but the artifact is still behind the sources"
+                : `analyze exited ${attempted.exitCode}`);
+        downgradeCauses.set(scope.scope, cause);
+      }
     }
+  }
+  // THE HONESTY GATE: a stale scope that could not be refreshed must not be presented as a current
+  // reading. Applied AFTER the re-read so it sees the artifact tree this record will actually report.
+  if (downgradeCauses.size > 0) {
+    reading = downgradeStaleScopes(reading, downgradeCauses);
   }
   // SAME-BATCH graph reading (gap-quality-round-facts-surface-top-out-degree-god-functions): both
   // readings come from the same persisted `.archguard/query` tree, so this adds a file read, not a
@@ -2358,29 +2455,68 @@ export function runArchCycleRound(root: string, opts: ArchCycleRoundOptions = {}
   return { name, value, state: "verified", reason: null };
 }
 
-/** The `refresh.at` of the last carrier line that ACTUALLY RAN an analyze, or null. This is the
- *  "at most one analyze per interval" clock: the carrier already records every round, so the guard
- *  needs no second state file (a second carrier would be a second truth that can disagree with the
- *  history). Rounds that only REPORTED (`attempted:false` — disabled / no scope behind / instrument
- *  absent) do not reset the clock, so the first eligible round after those still refreshes. */
+/** The `refresh.at` of the last carrier line that ACTUALLY RAN an analyze, or null.
+ *
+ *  ⚠️ ROUND-LEVEL ONLY. The round's budget is PER SCOPE now — `readLastRefreshAtByScope` is the clock
+ *  the round consults. This function is kept because it answers a different, still-useful question
+ *  ("when did anything last run?"), and because it tolerates the SAME record shapes (new
+ *  `refreshedScopes[]` and the legacy singular `refreshedScope`).
+ *  The carrier already records every round, so the guard needs no second state file (a second carrier
+ *  would be a second truth that can disagree with the history). Rounds that only REPORTED
+ *  (`attempted:false` — disabled / no scope behind / instrument absent) do not reset the clock, so the
+ *  first eligible round after those still refreshes. */
 export function readLastRefreshAt(historyPath: string): string | null {
+  const ats = readRefreshTimesByScope(historyPath);
+  return ats.roundAt;
+}
+
+/** WHEN EACH SCOPE was last re-analyzed, read from the carrier itself.
+ *
+ *  THE per-scope budget clock (gap-arch-cycle-refresh-first-stale-wins-starves-later-scopes): the old
+ *  global `readLastRefreshAt` let ONE scope's refresh block every other scope for a whole interval —
+ *  the starvation mechanism, expressed as a clock. Records are walked newest-first and the FIRST hit
+ *  for a scope wins; a malformed line is skipped, never erasing the earlier ones.
+ *
+ *  Both record shapes are honoured: `refresh.refreshedScopes[]` (current) and `refresh.refreshedScope`
+ *  (legacy), so a carrier written before this change still suppresses an immediate re-analysis.
+ *  Only rounds with `attempted:true` count — `attempted:false` (disabled / no scope behind / instrument
+ *  absent) did not run anything and must not reset any clock. */
+export function readLastRefreshAtByScope(historyPath: string): Record<string, string> {
+  return readRefreshTimesByScope(historyPath).byScope;
+}
+
+/** One backward walk of the carrier, shared by both readers (one parse, one legacy-shape tolerance). */
+function readRefreshTimesByScope(historyPath: string): { roundAt: string | null; byScope: Record<string, string> } {
   let text: string;
   try {
     text = fs.readFileSync(historyPath, "utf8");
   } catch {
-    return null;
+    return { roundAt: null, byScope: {} };
   }
   const lines = text.split("\n").filter((l) => l.trim().length > 0);
+  let roundAt: string | null = null;
+  const byScope: Record<string, string> = {};
   for (let i = lines.length - 1; i >= 0; i -= 1) {
+    let rec: any;
     try {
-      const rec = JSON.parse(lines[i]);
-      const at = rec?.refresh?.at;
-      if (rec?.refresh?.attempted === true && typeof at === "string" && at !== "") return at;
+      rec = JSON.parse(lines[i]);
     } catch {
-      /* a malformed line does not erase the earlier ones — keep walking back */
+      continue; // a malformed line does not erase the earlier ones — keep walking back
+    }
+    const at = rec?.refresh?.at;
+    if (rec?.refresh?.attempted !== true || typeof at !== "string" || at === "") continue;
+    if (roundAt === null) roundAt = at;
+    const list = Array.isArray(rec.refresh.refreshedScopes) ? rec.refresh.refreshedScopes : [];
+    const labels: unknown[] = list.map((s: any) => (s !== null && typeof s === "object" ? s.scope : undefined));
+    // Legacy singular shape: the carrier written before this task could only name ONE scope.
+    if (typeof rec.refresh.refreshedScope === "string" && rec.refresh.refreshedScope !== "") {
+      labels.push(rec.refresh.refreshedScope);
+    }
+    for (const label of labels) {
+      if (typeof label === "string" && label !== "" && byScope[label] === undefined) byScope[label] = at;
     }
   }
-  return null;
+  return { roundAt, byScope };
 }
 
 export interface ArchCycleRoutineOptions {
@@ -2443,7 +2579,7 @@ export function formatArchCycleAssembly(a: {
 }): string {
   if (a.error !== null) return `arch-cycle-report 例程已装配（${a.error} — 每轮记 failed、零报告零写入；⛔ 不回退到缺省节奏照跑）`;
   if (!a.enabled) return "arch-cycle-report 例程已装配（enabled:false — 每轮记 not-evaluated:disabled，零报告零写入）";
-  return `arch-cycle-report 例程已装配（enabled, interval=${a.intervalMinutes}m，report-only：目录级环读数 append 到 .quay/arch-cycle-history.jsonl；每间隔至多一次 archguard analyze 刷新一个待刷 scope；环非零是该例程的读数，⛔ 不是 failed）`;
+  return `arch-cycle-report 例程已装配（enabled, interval=${a.intervalMinutes}m，report-only：目录级环读数 append 到 .quay/arch-cycle-history.jsonl；每个 stale scope 每个间隔至多一次 archguard analyze，一轮刷新全部到期的 scope（最陈旧优先）；刷新不成的 stale scope 降级为 evaluated:false + artifact-behind-sources；环非零是该例程的读数，⛔ 不是 failed）`;
 }
 
 // ── design-evolution-readings 的 config 入口（`loop.design_evolution_readings:`）────────────────
