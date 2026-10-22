@@ -386,8 +386,11 @@ test("quality-gate-driver --once runs the config-declared probe routine and appe
   assert.deepEqual(records.filter((x) => x.kind === "finding")[0].files, ["plugin/scripts/a.ts:1", "plugin/scripts/b.ts:2"]);
   // 老四条照旧（本任务不改它们的形状）。第五条是 gap-architecture-analysis-probe-not-wired-into-
   // driver-routine-or-init 的**默认装配**例程（空 fixture root 无 archguard ⇒ 一条 not-evaluated 读数）。
+  // 第六条是 gap-adr007-half1-selfcheck-probes-archived-and-gate-never-invoked 的**默认装配**例程：
+  // `gates.adr` 里带 `enforcement:` 的 ADR 有一个常设调用者（此前 adr-007 门 0 条 GateEvent）。
+  // 它同样是 DEFAULT-ON，所以空 fixture root（无 gates.adr）也会出现一行 not-evaluated 读数。
   assert.deepEqual(rec.facts.filter((f) => !f.name.startsWith("semantic-dedup")).map((f) => f.name).sort(),
-    ["architecture-analysis", "architecture-review", "judgment-consumer-check", "packaging-hygiene", "pool-quality-judge"]);
+    ["adr-enforcement-report", "architecture-analysis", "architecture-review", "judgment-consumer-check", "packaging-hygiene", "pool-quality-judge"]);
 
   // ── the FILING REGRESSION (gap-probe-routine-kernel-plugin-root-not-passed-third-party-host-filing-fails)
   // 本工作区 = 第三方宿主的形状：**没有** `packages/quay-native`。修复前 quality-gate-driver 没把

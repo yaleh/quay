@@ -418,8 +418,24 @@
         "embeddedInterpreterLines": "+7 = plugin/scripts/sync-vendor.sh 325 -> 332 counted code lines. Itemised: +4 = the two 2-line `cmp_or_report` calls added to --check (the kernel bundle and its vector; without them --check reports CLEAN on a mirror with no kernel); +2 = the two `cp`s added to --sync-dist (mirror the built kernel bundle and the vector); +2 = the same two `cp`s in the full-build mode; -1 = the single-bundle presence guard (`if [ ! -f .../quay.js ]`, 4 lines) became a 3-line loop over `quay.js dashboard-kernel.js`, so --sync-dist still exits 2 when EITHER built bundle is missing. Residual = 0: the branch's entire tracked *.sh delta vs develop is that one path (`git diff --name-status develop HEAD -- '*.sh'` → M plugin/scripts/sync-vendor.sh).",
         "duplicateCopies": "0 — untouched (0 is the assertion, not an omission). This task added no experiments/** mirror and converted no byte-identical pair."
       }
+    },
+    {
+      "when": "2026-10-22 (gap-adr007-half1-selfcheck-probes-archived-and-gate-never-invoked)",
+      "from": {
+        "embeddedInterpreterLines": 6566,
+        "duplicateCopies": 0
+      },
+      "to": {
+        "embeddedInterpreterLines": 6501,
+        "duplicateCopies": 0
+      },
+      "why": "DOWNWARD re-anchor (-65, the intended direction). The task's HALF 1 fix turns git-lens-selfcheck.sh from a probe-driver (each fixture ran `node scripts/git-lens-l-*.ts` at a command position — the archived probes that no longer load) into a launcher that hands the readings to the live instruments in one place, with the L_D/L_G readings themselves moved into experiments/quay-perpetual-stream/scripts/git-lens-instrument.mjs (a .mjs, NOT on this axis). The .sh therefore LEAVES the axis entirely: its 65 counted code lines drop to 0 while the file stays tracked and absent from the exception list (membership moved, not the file — and it grew 65 -> 87 physical code lines, so this is not line-compression gaming). ⛔ AC6 of plugin/test/sh-census-check.test.mjs requires the committed baseline to EQUAL the live reading, not merely bound it (a stale-higher baseline would let a future +65 regression stay green). Measured with the checker's OWN reading on this tree: `node --experimental-strip-types plugin/scripts/sh-census-check.ts --json` → totals.embeddedInterpreterLines 6501 (53 embedded .sh), duplicateCopies 0 — never hand-fitted. Non-fitted proof: the same checker's exported countCodeLines/extractEmbeddedInterpreters on `git show develop:experiments/quay-perpetual-stream/scripts/git-lens-selfcheck.sh` reads 65 lines with embedded:[node @ line 27] (= 6566 - 6501 exactly), while this branch's version reads 87 lines with embedded:[].",
+      "attribution": {
+        "embeddedInterpreterLines": "-65 = experiments/quay-perpetual-stream/scripts/git-lens-selfcheck.sh 65 -> 0 counted lines (it leaves the axis: the sole charge was the fixture runner invoking `node` at a command position; the readings now live in git-lens-instrument.mjs, an .mjs outside the *.sh census). Residual = 0: the branch's entire tracked *.sh delta vs develop is that one path (`git diff --name-status develop...HEAD -- '*.sh'` → M experiments/quay-perpetual-stream/scripts/git-lens-selfcheck.sh), so no other member contributes.",
+        "duplicateCopies": "0 — untouched (0 is the assertion, not an omission). This task added no experiments/** mirror and converted no byte-identical pair."
+      }
     }
   ],
-  "embeddedInterpreterLines": 6566,
+  "embeddedInterpreterLines": 6501,
   "duplicateCopies": 0
 }
