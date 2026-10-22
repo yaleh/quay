@@ -2,7 +2,7 @@
 id: gap-c1-admission-dispatch-by-admission-token
 title: C1 准入按 admission 分派（mechanical→delta / semantic-judged→判断器，绝不直接机械确认），并让
   AC-918 判据的字面读法在真实源码上可取到（GOAL-911）
-status: ready
+status: done
 labels:
   - gap
 parent: null

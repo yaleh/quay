@@ -21,7 +21,7 @@ import {
   isProductionRun, deltaFingerprint, groupByCandidate, readCarrier, evaluateCarrier,
   nextGoalId, nextAcId, buildDraftGoal, proposeDraftGoal, createGoalStoreWrite,
   CONCERN_KIND_REGISTRY, CONCERN_KIND_STATES, CONCERN_KIND_IN_SCOPE, DESIGN_EVOLUTION_KIND,
-  CONCERN_ADMISSIONS, registryAdmissionViolations,
+  CONCERN_ADMISSIONS, registryAdmissionViolations, admissionRoute,
   DESIGN_EVOLUTION_DUP_KIND, DESIGN_EVOLUTION_PREDICATE_SAMPLES,
   concernKindEntry, concernKindState, designEvolutionRegression,
   designEvolutionDeltaEvidence, designEvolutionFingerprint, designEvolutionPredicateSelfCheck,
@@ -563,17 +563,27 @@ test("AC5(registry): a registered-but-unlanded detector reports NOT_YET_MECHANIZ
     // ⛔ no delta/streak judgment is reachable for it — C1 short-circuits before C2
     assert.equal(v.streak.length, 0);
   }
-  // Flipping the entry is the ONLY thing that moves the refusal past C1 — the gate is the registry, not
-  // prose. Half a flip (mechanized:true but no readers) is an INSTRUMENT failure, its own value:
+  // Flipping `mechanized` moves the refusal past the NOT_YET_MECHANIZED gate — but for a SEMANTIC-JUDGED
+  // kind it must land on the semantic route, never on (2)–(4): C1 dispatches on `admission` first
+  // (gap-c1-admission-dispatch-by-admission-token, AC-918). Half a flip is therefore NOT_EVALUATED, not C2.
   const halfFlip = CONCERN_KIND_REGISTRY.map((e) => (e.kind === "god-file-size" ? { ...e, mechanized: true } : e));
   const v2 = evaluateEntryBar([rec({ concern_kind: "god-file-size", slice_delta: null })], { registry: halfFlip });
-  assert.ok(v2.reason.startsWith("CONDITION_2_UNDETERMINED"), v2.reason);
+  assert.ok(v2.reason.startsWith("CONDITION_1_SEMANTIC_NOT_EVALUATED"), v2.reason);
   assert.equal(v2.eligible, false);
-  // A complete flip moves the refusal to C2 — never straight to ELIGIBLE.
-  const fullFlip = CONCERN_KIND_REGISTRY.map((e) => (e.kind === "god-file-size"
-    ? { ...e, mechanized: true, readDelta: () => ({ present: false, computed: false, control_falsified: false, provenance_match: false, provenance_status: null, detail: "stub" }), fingerprintOf: () => null }
-    : e));
-  const v3 = evaluateEntryBar([rec({ concern_kind: "god-file-size", slice_delta: null })], { registry: fullFlip });
+  // The MECHANICAL half/full-flip arms stay on the delta path: a malformed entry is a C2 instrument failure,
+  // and a complete flip moves the refusal to C2 — never straight to ELIGIBLE.
+  const MECH_FIXTURE_KIND = "mechanical-admission-fixture";
+  const mechFixtureRegistry = (over) => CONCERN_KIND_REGISTRY.map((e) =>
+    e.kind === CONCERN_KIND_IN_SCOPE ? { ...e, kind: MECH_FIXTURE_KIND, ...over } : e);
+  const vHalf = evaluateEntryBar([rec({ concern_kind: MECH_FIXTURE_KIND, slice_delta: null })], { registry: mechFixtureRegistry({ readDelta: null }) });
+  assert.ok(vHalf.reason.startsWith("CONDITION_2_UNDETERMINED"), vHalf.reason);
+  assert.equal(vHalf.eligible, false);
+  const v3 = evaluateEntryBar([rec({ concern_kind: MECH_FIXTURE_KIND, slice_delta: null })], {
+    registry: mechFixtureRegistry({
+      readDelta: () => ({ present: false, computed: false, control_falsified: false, provenance_match: false, provenance_status: null, detail: "stub" }),
+      fingerprintOf: () => null,
+    }),
+  });
   assert.ok(v3.reason.startsWith("CONDITION_2_NOT_MET"), v3.reason);
   assert.equal(v3.eligible, false);
 });
@@ -697,4 +707,153 @@ test("AC7(doc): ownership-active-replay.md carries a dated amendment naming both
   const code = fs.readFileSync(path.join(REPO, MODULE_REL), "utf8");
   assert.match(code, /AMEND 2026-10-22/);
   assert.match(code, /ownership-active-replay\.md` §8/);
+});
+
+// ════════════════════════════════════════════════════════════════════════════════════════════════
+// gap-c1-admission-dispatch-by-admission-token (2026-10-22, AC-918 / GOAL-911)
+//   Part A: the registry's `kind` / `admission` values are QUOTED LITERALS (the criterion's carrier)
+//           while the exported constants stay pinned to them by identity assertions here.
+//   Part B: C1 dispatches on `admission` — a `semantic-judged` kind is NEVER confirmed by its mechanical
+//           delta, no matter how perfect that delta is. These tests are the negative control for the
+//           exact failure GOAL-911 forbids: "a mechanized kind gets mechanically confirmed" silently
+//           bypassing the semantic layer (硬规则 4b).
+// ════════════════════════════════════════════════════════════════════════════════════════════════
+
+// ── AC918-A: the literal spellings and the constants are ONE value, not two copies ─────────────────
+test("AC918-1(registry): literal kind/admission spellings still carry the exported constant identities", () => {
+  // The criterion reads the SOURCE TEXT (`kind: "<token>"` + `admission: "<token>"`), so the registry
+  // must spell the tokens literally. Those literals must not become an unconstrained second copy: each
+  // entry's kind is the exported constant, and every admission is a member of the closed vocabulary.
+  const legal = Object.values(CONCERN_ADMISSIONS);
+  assert.equal(concernKindEntry(CONCERN_KIND_IN_SCOPE)?.kind, CONCERN_KIND_IN_SCOPE);
+  assert.equal(concernKindEntry(DESIGN_EVOLUTION_KIND)?.kind, DESIGN_EVOLUTION_KIND);
+  for (const e of CONCERN_KIND_REGISTRY) {
+    assert.equal(typeof e.kind, "string", `${e.kind} names a kind, not an expression`);
+    assert.ok(legal.includes(e.admission), `${e.kind}.admission ${JSON.stringify(e.admission)} is a legal token`);
+  }
+  assert.equal(concernKindEntry(CONCERN_KIND_IN_SCOPE).admission, CONCERN_ADMISSIONS.MECHANICAL);
+  assert.equal(concernKindEntry(DESIGN_EVOLUTION_KIND).admission, CONCERN_ADMISSIONS.MECHANICAL);
+  for (const kind of ["god-file-size", "unencapsulated-state", "spine-without-extension-point"]) {
+    assert.equal(concernKindEntry(kind).admission, CONCERN_ADMISSIONS.SEMANTIC_JUDGED, kind);
+  }
+});
+
+// ── AC3: `admissionRoute` can take the FALSE value — unreadable is its own route ───────────────────
+test("AC918-2(admissionRoute): both legal tokens route, and three unreadable inputs return 'unreadable'", () => {
+  const mech = admissionRoute(concernKindEntry(CONCERN_KIND_IN_SCOPE));
+  assert.deepEqual([mech.evaluated, mech.route, mech.cause], [true, "mechanical", null]);
+  const sem = admissionRoute(concernKindEntry("unencapsulated-state"));
+  assert.deepEqual([sem.evaluated, sem.route, sem.cause], [true, "semantic-judged", null]);
+  // switching ONLY the admission field switches the route — the field is READ, not declared
+  const flipped = admissionRoute({ ...concernKindEntry(CONCERN_KIND_IN_SCOPE), admission: "semantic-judged" });
+  assert.deepEqual([flipped.evaluated, flipped.route], [true, "semantic-judged"]);
+
+  const legalRoutes = new Set(Object.values(CONCERN_ADMISSIONS));
+  const unreadable = [
+    { kind: "x", detector: "d" },                       // no admission field at all
+    { kind: "x", admission: "maybe" },                  // illegal token
+    null,                                               // not an object
+  ];
+  for (const entry of unreadable) {
+    const r = admissionRoute(entry);
+    assert.equal(r.evaluated, false, `unreadable input ${JSON.stringify(entry)} must not be evaluated`);
+    assert.equal(r.route, "unreadable");
+    assert.equal(typeof r.cause, "string");
+    assert.ok(r.cause.length > 0, "an unreadable route names its cause");
+    assert.equal(legalRoutes.has(r.route), false, "⛔ an unreadable admission must not share a legal route's shape");
+  }
+});
+
+// ── AC4: the dispatch negative control — semantic-judged + perfect delta is NEVER confirmed mechanically
+// A SYNTHETIC kind based on the package-cycle entry: it keeps that entry's real readers/threshold (so the
+// mechanical path COULD clear C2–C4) and differs only in `kind` + `admission`. If the dispatch ignored
+// `admission`, this record set would be eligible — which is exactly the failure being ruled out.
+const SEMANTIC_SYNTHETIC_KIND = "admission-route-fixture";
+const semanticStreak = () => [
+  rec({ run_id: "live:s1", concern_kind: SEMANTIC_SYNTHETIC_KIND }),
+  rec({ run_id: "live:s2", concern_kind: SEMANTIC_SYNTHETIC_KIND }),
+  rec({ run_id: "live:s3", concern_kind: SEMANTIC_SYNTHETIC_KIND }),
+];
+/** The synthetic registry differs from the real one ONLY in that this semantic kind claims to be
+ *  mechanized (so C1 reaches the dispatch instead of short-circuiting at NOT_YET_MECHANIZED). Its record
+ *  carries a PERFECT mechanical delta — the exact bait that used to be accepted. */
+const semanticRegistry = (admission = CONCERN_ADMISSIONS.SEMANTIC_JUDGED) =>
+  CONCERN_KIND_REGISTRY.map((e) =>
+    e.kind === CONCERN_KIND_IN_SCOPE ? { ...e, kind: SEMANTIC_SYNTHETIC_KIND, mechanized: true, admission } : e);
+
+test("AC918-3(dispatch): a semantic-judged kind with a perfect mechanical delta is not mechanically confirmed", () => {
+  const registry = semanticRegistry();
+  const records = semanticStreak();
+
+  // (a) NO judge injected ⇒ its own NOT_EVALUATED value; the mechanical delta was never consulted.
+  const absent = evaluateEntryBar(records, { registry });
+  assert.equal(absent.eligible, false);
+  assert.ok(absent.reason.startsWith("CONDITION_1_SEMANTIC_NOT_EVALUATED:"), absent.reason);
+  assert.match(absent.reason, /admission-route-fixture/);
+  assert.equal(absent.matchedConditions.includes(CONDITIONS.DELTA), false, "⛔ no mechanical delta may be matched");
+  assert.equal(absent.matchedConditions.includes(CONDITIONS.STREAK), false, "⛔ no run streak may be matched");
+  assert.equal(absent.matchedConditions.includes(CONDITIONS.MEMORY), false);
+  assert.equal(absent.streak.length, 0);
+
+  // (b) the judge throws ⇒ NOT_EVALUATED (an instrument failure is not a refusal)
+  const threw = evaluateEntryBar(records, { registry, semanticAdmission: () => { throw new Error("judge exploded"); } });
+  assert.ok(threw.reason.startsWith("CONDITION_1_SEMANTIC_NOT_EVALUATED:"), threw.reason);
+  assert.match(threw.reason, /judge exploded/);
+  assert.equal(threw.eligible, false);
+
+  // (c) the judge returns something unreadable ⇒ NOT_EVALUATED, not "refused"
+  const garbage = evaluateEntryBar(records, { registry, semanticAdmission: () => ({ admit: "yes" }) });
+  assert.ok(garbage.reason.startsWith("CONDITION_1_SEMANTIC_NOT_EVALUATED:"), garbage.reason);
+  assert.equal(garbage.eligible, false);
+
+  // (d) admit:false ⇒ a NAMED refusal carrying the judge's verdict
+  const refused = evaluateEntryBar(records, { registry, semanticAdmission: () => ({ admit: false, verdict: "refuted" }) });
+  assert.equal(refused.eligible, false);
+  assert.ok(refused.reason.startsWith("CONDITION_1_SEMANTIC_REFUSED:concern_kind=admission-route-fixture verdict=refuted"), refused.reason);
+  assert.equal(refused.matchedConditions.includes(CONDITIONS.DELTA), false);
+
+  // (e) admit:true WITHOUT a counterfactual ⇒ its own named refusal (硬规则 4 推论四)
+  const noCounterfactual = evaluateEntryBar(records, { registry, semanticAdmission: () => ({ admit: true, verdict: "confirmed" }) });
+  assert.equal(noCounterfactual.eligible, false);
+  assert.ok(noCounterfactual.reason.startsWith("CONDITION_1_SEMANTIC_COUNTERFACTUAL_MISSING:"), noCounterfactual.reason);
+  assert.match(noCounterfactual.reason, /admission-route-fixture/);
+
+  // (f) admit:true WITH a counterfactual ⇒ eligible, and C1 is the ONLY condition matched
+  const confirmed = evaluateEntryBar(records, {
+    registry,
+    semanticAdmission: () => ({ admit: true, verdict: "confirmed", counterfactual: "if the state were encapsulated by the owning module, the judge would return admit:false" }),
+  });
+  assert.equal(confirmed.eligible, true, confirmed.reason);
+  assert.deepEqual(confirmed.matchedConditions, [CONDITIONS.KIND]);
+  assert.equal(confirmed.matchedConditions.includes(CONDITIONS.DELTA), false);
+  assert.equal(confirmed.matchedConditions.includes(CONDITIONS.MEMORY), false);
+  assert.equal(confirmed.matchedConditions.includes(CONDITIONS.STREAK), false);
+  assert.match(confirmed.reason, /admission=semantic-judged/);
+});
+
+// ── DoD: ONLY the admission field moves the judgment (mechanical ↔ semantic-judged) ────────────────
+test("AC918-4(dispatch): flipping admission alone switches the route and the verdict", () => {
+  const records = semanticStreak();
+  // identical records, identical everything else — only the synthetic entry's admission differs
+  const asMechanical = evaluateEntryBar(records, { registry: semanticRegistry(CONCERN_ADMISSIONS.MECHANICAL) });
+  const asSemantic = evaluateEntryBar(records, { registry: semanticRegistry(CONCERN_ADMISSIONS.SEMANTIC_JUDGED) });
+  assert.equal(asMechanical.eligible, true, asMechanical.reason);
+  assert.match(asMechanical.reason, /ELIGIBLE:concern_kind=admission-route-fixture/);
+  assert.equal(asSemantic.eligible, false);
+  assert.match(asSemantic.reason, /^CONDITION_1_SEMANTIC_NOT_EVALUATED:/);
+});
+
+// ── an entry that does not say WHO confirms is undetermined — never either route ───────────────────
+test("AC918-5(dispatch): an unreadable admission fails closed with CONDITION_1_UNDETERMINED", () => {
+  for (const admission of [undefined, "maybe"]) {
+    const registry = CONCERN_KIND_REGISTRY.map((e) => {
+      if (e.kind !== "package-cycle") return e;
+      const { admission: _drop, ...rest } = e;
+      return admission === undefined ? rest : { ...rest, admission };
+    });
+    const v = evaluateEntryBar([rec({ run_id: "live:1" })], { registry });
+    assert.equal(v.eligible, false, `admission=${JSON.stringify(admission)} must not be admitted`);
+    assert.ok(v.reason.startsWith("CONDITION_1_UNDETERMINED:concern_kind=package-cycle"), v.reason);
+    assert.deepEqual(v.matchedConditions, [], "an unreadable admission matches no condition");
+  }
 });

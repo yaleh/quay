@@ -52,6 +52,20 @@
 //      IN_SCOPE             registered AND mechanized — only then are conditions (2)–(4) even consulted.
 // The registry is the single judge; `CONCERN_KIND_IN_SCOPE` is kept only as the identity of the
 // package-cycle entry (and as the structural fallback `deriveConcernKind` still needs).
+//
+// ── AMEND 2026-10-22 (b): C1 DISPATCHES on `admission` (GOAL-911 / AC-918) ──────────────────────────
+// "Registered + mechanized" answers whether the INSTRUMENT is landed; it does not answer WHO must CONFIRM.
+// `admissionRoute(entry)` resolves the registry's `admission` into `mechanical` / `semantic-judged` /
+// `unreadable`, and condition (1) branches on it:
+//   mechanical       → the existing (2)–(4) mechanical delta path, unchanged;
+//   semantic-judged  → the mechanical delta is NEVER read (a clue is not a verdict, 硬规则 4b). An injected
+//                      `opts.semanticAdmission(record, entry)` judge must return `{admit, verdict?,
+//                      counterfactual?}`; a confirmation without a counterfactual is refused by name, and a
+//                      missing/throwing/unreadable judge is NOT_EVALUATED (its own value);
+//   unreadable       → CONDITION_1_UNDETERMINED, fail closed.
+// `mechanized` and `admission` stay orthogonal: a semantic-judged kind does not become confirmable by
+// accumulating mechanical signals, and this module defines NO verdict vocabulary of its own (that contract
+// lives in its own module) — it consumes only the judge's `admit` boolean and `verdict` string.
 
 import fs from "node:fs";
 import path from "node:path";
@@ -178,7 +192,7 @@ export function deltaEvidence(rec) {
 
 // ── the design-evolution-regression delta — the SECOND registered kind (amend 2026-10-22) ───────────
 // Detector (already mechanized, ⛔ not built here): `plugin/scripts/design-evolution-readings.ts`
-// appends one `kind:"finding"` record per trigger to `.quay/routine-findings.jsonl` with
+// appends one finding record (its `kind` field) per trigger to `.quay/routine-findings.jsonl` with
 // `dupKind:"evolution-regression"`, and the SAME trigger numbers ride along as `deltaCentral` /
 // `deltaNonCentral` / `deltaDenominator` / `sharePercent`. This reader consumes those NUMBERS: it never
 // parses prose, never trusts the producer's boolean, and never re-derives the delta from the finding's
@@ -346,10 +360,16 @@ export const CONCERN_ADMISSIONS = Object.freeze({
  * falsifiable delta, and a negative control that is demonstrated to extinguish the signal. Widening the
  * string without them is "making the prose rule longer", not making the driver stronger (ADR-004).
  */
+// ⚠️ `kind` and `admission` are written as QUOTED LITERALS here (not the constants' names) because the
+// GOAL-911 / AC-918 criterion reads this SOURCE TEXT and pairs `kind: "<token>"` with the following
+// `admission: "<token>"`. The constants have not lost their identity: the suite asserts every entry's
+// `kind` === the matching constant and every `admission` === a `CONCERN_ADMISSIONS` member, so the literal
+// spelling and the constant are pinned to each other by a test (⛔ a comment mentioning the literal is NOT
+// a hit — 硬规则 2 — and must never be used to feed that criterion).
 export const CONCERN_KIND_REGISTRY = Object.freeze([
   Object.freeze({
-    kind: CONCERN_KIND_IN_SCOPE,
-    admission: CONCERN_ADMISSIONS.MECHANICAL,
+    kind: "package-cycle",
+    admission: "mechanical",
     detector: "ArchGuard slice-delta (installed CLI, computed) — ownership-active-loop.mjs computeSliceDelta + .quay/ownership-shadow-proposals.jsonl",
     deltaComputable: true,
     negativeControl: true,
@@ -361,8 +381,8 @@ export const CONCERN_KIND_REGISTRY = Object.freeze([
     fingerprintOf: (rec) => deltaFingerprint(rec?.slice_delta?.delta),
   }),
   Object.freeze({
-    kind: DESIGN_EVOLUTION_KIND,
-    admission: CONCERN_ADMISSIONS.MECHANICAL,
+    kind: "design-evolution-regression",
+    admission: "mechanical",
     detector: "plugin/scripts/design-evolution-readings.ts evolutionFindings() → .quay/routine-findings.jsonl (dupKind=evolution-regression, trigger=share-up)",
     deltaComputable: true,
     negativeControl: true,
@@ -375,7 +395,7 @@ export const CONCERN_KIND_REGISTRY = Object.freeze([
   }),
   Object.freeze({
     kind: "spine-without-extension-point",
-    admission: CONCERN_ADMISSIONS.SEMANTIC_JUDGED,
+    admission: "semantic-judged",
     detector: "NOT LANDED — the detector is tasks/gap-worker-fan-in-cross-cutting-hooks-not-covered-by-extension-point (ready). Until its extension point registry lands there is no machine-readable signal to admit on",
     deltaComputable: false,
     negativeControl: false,
@@ -388,7 +408,7 @@ export const CONCERN_KIND_REGISTRY = Object.freeze([
   }),
   Object.freeze({
     kind: "god-file-size",
-    admission: CONCERN_ADMISSIONS.SEMANTIC_JUDGED,
+    admission: "semantic-judged",
     detector: "NOT LANDED — no detector exists AND the EVENT is undefined (what counts as one occurrence of 'a god file'?). A line-count threshold is 硬规则 4 推论's forbidden zone until that definition plus a historical occurrence reading exist, so this task registers the SLOT only",
     deltaComputable: false,
     negativeControl: false,
@@ -401,7 +421,7 @@ export const CONCERN_KIND_REGISTRY = Object.freeze([
   }),
   Object.freeze({
     kind: "unencapsulated-state",
-    admission: CONCERN_ADMISSIONS.SEMANTIC_JUDGED,
+    admission: "semantic-judged",
     detector: "NOT LANDED — semantic-judged slot: the clue reader (plugin/scripts/unencapsulated-state-clue.ts) and the recorded-verdict judge are not landed yet; mechanical signals may only produce candidates, never a confirmation",
     deltaComputable: false,
     negativeControl: false,
@@ -448,6 +468,28 @@ export function concernKindEntry(kind, registry = CONCERN_KIND_REGISTRY) {
 }
 
 /**
+ * WHO confirms a registered kind — the C1 ADMISSION ROUTE. Three-valued, and the third value is its own
+ * shape (硬规则 3b): "I could not read the admission field" must never be reported as either legal route,
+ * because both routes are promises the module then has to keep (mechanical = the delta path is authoritative;
+ * semantic-judged = mechanical signals are candidates ONLY and a semantic judge must confirm).
+ *
+ * @returns {{evaluated:boolean, route:"mechanical"|"semantic-judged"|"unreadable", cause:string|null}}
+ *   `evaluated:false` ⇒ `route:"unreadable"` and a non-empty `cause` naming why (⛔ never a legal route).
+ */
+export function admissionRoute(entry) {
+  if (!isObj(entry)) return { evaluated: false, route: "unreadable", cause: "entry-is-not-an-object" };
+  const admission = entry.admission;
+  if (typeof admission !== "string" || admission.trim() === "") {
+    return { evaluated: false, route: "unreadable", cause: `entry ${isStr(entry.kind, 1) ? entry.kind : "<no-kind>"} carries no string admission field` };
+  }
+  const legal = Object.values(CONCERN_ADMISSIONS);
+  if (!legal.includes(admission)) {
+    return { evaluated: false, route: "unreadable", cause: `entry ${isStr(entry.kind, 1) ? entry.kind : "<no-kind>"} carries admission ${JSON.stringify(admission)}, which is not one of ${legal.join(" / ")}` };
+  }
+  return { evaluated: true, route: admission, cause: null };
+}
+
+/**
  * Resolve a kind to ONE of the four condition-(1) states, plus the entry (null unless registered).
  * `token` names WHICH kind got WHICH state (`in-scope:package-cycle`), so two kinds sharing a state are
  * still distinguishable in one reading — a bare state string would make them look identical.
@@ -490,6 +532,53 @@ export function deltaFingerprint(delta) {
   return JSON.stringify(canonicalize(delta));
 }
 
+/**
+ * C1's SEMANTIC-JUDGED route: the confirmation comes from an injected judge (`opts.semanticAdmission`), never
+ * from the record's mechanical delta. The module deliberately does NOT define the judge's verdict vocabulary
+ * (`confirmed` / `refuted` / `needs-more-evidence` — that single contract belongs to its own task); it only
+ * consumes the `admit` boolean and the `verdict` string, so the clue pipeline and the judge pipeline can be
+ * wired together by a later caller without a second vocabulary living here.
+ *
+ * Every refusal is NAMED and has its own value (硬规则 3b/4 推论四):
+ *   missing judge / judge throws / unreadable return   CONDITION_1_SEMANTIC_NOT_EVALUATED
+ *   admit:true without a counterfactual                CONDITION_1_SEMANTIC_COUNTERFACTUAL_MISSING
+ *   admit:false (+ a verdict)                          CONDITION_1_SEMANTIC_REFUSED verdict=<verdict>
+ *   admit:true with a counterfactual                   ELIGIBLE, matchedConditions = [C1] only
+ */
+function evaluateSemanticAdmission(head, entry, kind, opts, mismatch) {
+  const judge = opts?.semanticAdmission;
+  if (typeof judge !== "function") {
+    return mismatch(`CONDITION_1_SEMANTIC_NOT_EVALUATED:concern_kind=${kind} — admission=semantic-judged but no semanticAdmission judge was injected; its mechanical signals are candidates only and can never confirm it`);
+  }
+  let judgment;
+  try {
+    judgment = judge(head, entry);
+  } catch (err) {
+    return mismatch(`CONDITION_1_SEMANTIC_NOT_EVALUATED:concern_kind=${kind} — the injected semanticAdmission judge threw: ${err instanceof Error ? err.message : String(err)}`);
+  }
+  if (!isObj(judgment) || typeof judgment.admit !== "boolean") {
+    return mismatch(`CONDITION_1_SEMANTIC_NOT_EVALUATED:concern_kind=${kind} — the injected semanticAdmission judge returned an unreadable verdict (expected an object with a boolean \`admit\`; got ${JSON.stringify(judgment)})`);
+  }
+  if (judgment.admit === false) {
+    if (!isStr(judgment.verdict, 1)) {
+      return mismatch(`CONDITION_1_SEMANTIC_NOT_EVALUATED:concern_kind=${kind} — the semanticAdmission judge refused (admit:false) without naming a verdict; a refusal must be attributable`);
+    }
+    return mismatch(`CONDITION_1_SEMANTIC_REFUSED:concern_kind=${kind} verdict=${judgment.verdict} — the semantic judge did not confirm this concern; its mechanical delta is a clue only`);
+  }
+  const counterfactual = isStr(judgment.counterfactual, 1) ? judgment.counterfactual.trim() : null;
+  if (counterfactual === null) {
+    return mismatch(`CONDITION_1_SEMANTIC_COUNTERFACTUAL_MISSING:concern_kind=${kind} — a semantic confirmation must carry the counterfactual that would have made the verdict different (硬规则 4 推论四: a claim that explains every outcome is not a tested conclusion)`);
+  }
+  return {
+    eligible: true,
+    reason: `ELIGIBLE:concern_kind=${kind} admission=semantic-judged; semantic confirmation verdict=${judgment.verdict ?? "confirmed"}; counterfactual=${counterfactual}`,
+    matchedConditions: [CONDITIONS.KIND],
+    conditions: { kind: { kind, admission: CONCERN_ADMISSIONS.SEMANTIC_JUDGED }, semantic: { admit: true, verdict: judgment.verdict ?? null, counterfactual }, delta: null, memory: null },
+    // No streak was consulted on this route, and reporting one would imply a mechanical count was run.
+    streak: { length: 0, required: ENTRY_BAR_STREAK, occurrences: 0, occurrence_threshold: null, delta_fingerprint: null },
+  };
+}
+
 // ── the entry bar ────────────────────────────────────────────────────────────────────────────────
 /**
  * Judge whether ONE candidate's carrier records clear the four-entry bar.
@@ -502,9 +591,13 @@ export function deltaFingerprint(delta) {
  *    through an unverified layer — 硬规则 4b). The last element IS the latest run.
  *
  * @param {Array<object>} carrierRecords  the run records for one candidate, oldest first
- * @param {{registry?:Array<object>}} [opts]  the registry to judge against (defaults to
- *        `CONCERN_KIND_REGISTRY`). Injectable so a caller — and the suite — can pin a DIFFERENT
- *        `occurrenceThreshold` and see the judgment move, i.e. prove the field is read rather than declared.
+ * @param {{registry?:Array<object>, semanticAdmission?:(record:object, entry:object)=>{admit:boolean, verdict?:string, counterfactual?:string}}} [opts]
+ *        `registry`  — the registry to judge against (defaults to `CONCERN_KIND_REGISTRY`). Injectable so a
+ *        caller — and the suite — can pin a DIFFERENT `occurrenceThreshold` and see the judgment move, i.e.
+ *        prove the field is read rather than declared.
+ *        `semanticAdmission` — the C1 judge injected for semantic-judged kinds. Their mechanical
+ *        delta is NEVER read here; without this function a semantic-judged kind is
+ *        `CONDITION_1_SEMANTIC_NOT_EVALUATED` (its own value, ⛔ not eligible and ⛔ not a delta refusal).
  * @returns {{eligible:boolean, reason:string, matchedConditions:string[], conditions:object, streak:{length:number, required:number, occurrences:number, occurrence_threshold:number|null, delta_fingerprint:string|null}}}
  */
 export function evaluateEntryBar(carrierRecords, opts = {}) {
@@ -530,6 +623,20 @@ export function evaluateEntryBar(carrierRecords, opts = {}) {
     return mismatch(`CONDITION_1_NOT_YET_MECHANIZED:concern_kind=${kind} — registered in CONCERN_KIND_REGISTRY but mechanized=false: ${kindReading.entry.detector}. With no landed detector/delta/negative control, nothing may leave the carrier for this kind`);
   }
   const entry = kindReading.entry;
+
+  // (1b) WHO confirms this kind — the ADMISSION ROUTE (GOAL-911 / AC-918). `mechanized` answered "is the
+  // instrumentation landed"; `admission` answers "who must confirm". A semantic-judged kind is confirmed
+  // ONLY by the semantic judge — reading its mechanical delta would silently promote a clue to a
+  // confirmation (硬规则 4b, "a mechanical signal is a lead, never the verdict"), so this branch is taken
+  // BEFORE any delta is read. `unreadable` is its own value: an entry that does not say who confirms it
+  // must not be treated as either route (硬规则 3/3b).
+  const route = admissionRoute(entry);
+  if (!route.evaluated) {
+    return mismatch(`CONDITION_1_UNDETERMINED:concern_kind=${kind} — its CONCERN_KIND_REGISTRY entry does not say WHO confirms it (${route.cause}); an unreadable admission may not be treated as either route`);
+  }
+  if (route.route === CONCERN_ADMISSIONS.SEMANTIC_JUDGED) {
+    return evaluateSemanticAdmission(head, entry, kind, opts, mismatch);
+  }
   matched.push(CONDITIONS.KIND);
 
   // A registry entry that claims `mechanized:true` but carries no readers is an INSTRUMENT failure, not a
