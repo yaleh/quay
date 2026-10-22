@@ -185,8 +185,11 @@ import {
 import {
   readDirectoryCycleReading,
   readGraphSummaryReading,
+  refreshBehindScopes,
   resolveArchguardCli,
+  type ArchCycleRefreshResult,
   type DirectoryCycle,
+  type DirectoryCycleReading,
   type TopOutDegreeEntry,
 } from "./archguard-runner.ts";
 // GRAPH-SUMMARY（gap-quality-round-facts-surface-top-out-degree-god-functions）：arch-cycle 例程
@@ -1979,9 +1982,21 @@ export interface ArchCycleHistoryRecord {
   mode: "arch-cycle-report-round";
   evaluated: boolean;
   reason: string | null;
-  /** null unless EVERY scope was readable — never a partial sum dressed as a total. */
+  /** Record-level completeness (gap-arch-cycle-report-never-evaluated-aggregate-and-stale-artifacts):
+   *  `complete` = every scope produced a reading; `partial` = at least one did (and `reason` names the
+   *  ones that did not, with their reasons); `none` = nothing could be read (`totalCycleCount` null —
+   *  ⛔ never 0). ADDITIVE: `evaluated` keeps its old "a reading exists" meaning, so a partial record
+   *  is `evaluated:true` and the distinction is carried by THIS field instead of being collapsed. */
+  status: "complete" | "partial" | "none";
+  /** Sum over the scopes that produced a reading. null ONLY when `status === "none"`.
+   *  (Before this task: null unless EVERY scope was readable — two permanently graph-less provider
+   *  packages therefore voided a 4-cycle reading for 25 consecutive rounds.) */
   totalCycleCount: number | null;
   notEvaluatedScopes: string[];
+  /** Scope labels whose sources moved AFTER the artifact the reading came from (`behindSources`).
+   *  A behind scope still reports its cycle count, but its number is NOT the current tree — this list
+   *  is what says so at the record level. */
+  behindScopes: string[];
   scopes: Array<{
     scope: string;
     source: string;
@@ -1989,9 +2004,17 @@ export interface ArchCycleHistoryRecord {
     reason: string | null;
     cycleCount: number | null;
     cycles: DirectoryCycle[] | null;
+    /** `module-graph` (read from the artifact) or `single-directory` (derived from the tracked file
+     *  list because no package-level diagram was ever requested); null ⇒ not evaluated. */
+    basis: "module-graph" | "single-directory" | null;
     /** When THIS scope's artifact was produced (arch.json `timestamp`, else the manifest scope's
      *  `generatedAt`); null ⇒ no artifact was read for this scope. */
     artifactTimestamp: string | null;
+    /** Commits after `artifactTimestamp` touching this scope's source dir; null ⇒ not computable. */
+    commitsSinceArtifact: number | null;
+    /** `commitsSinceArtifact > 0`; null ⇒ not computable. ⛔ A DIFFERENT question from the record-level
+     *  `stale` (artifact age > interval): this one says the artifact no longer covers the sources. */
+    behindSources: boolean | null;
   }>;
   /** The OLDEST artifact timestamp behind this line (the routine is only as fresh as its stalest
    *  scope). null ⇒ no artifact timestamp could be read.
@@ -2013,7 +2036,31 @@ export interface ArchCycleHistoryRecord {
   /** The SAME-BATCH graph reading (gap-quality-round-facts-surface-top-out-degree-god-functions).
    *  Present on every line — `evaluated:false` lines carry `null` readings, never `{}`/`0`/`[]`. */
   graphSummary: GraphSummaryRecord;
+  /** WHAT THIS ROUND DID ABOUT STALE ARTIFACTS. The routine is a reader, but it is the only thing that
+   *  ever looks at these artifacts on a schedule — the mechanism that refills them lives here, bounded
+   *  to at most ONE analyze per scheduling interval (see `refreshBehindScopes`). Always present, so
+   *  "no refresh" is a stated decision (`skipped`) rather than silence. */
+  refresh: ArchCycleRefreshRecord;
   reportOnly: true;
+}
+
+/** The refresh half of a round, as persisted. `attempted:false` + `skipped` is a complete answer:
+ *  every no-analyze path names itself (⛔ never an absent field, which would read as "did not think
+ *  about it"). */
+export interface ArchCycleRefreshRecord {
+  attempted: boolean;
+  refreshedScope: string | null;
+  skipped: "no-scope-needs-refresh" | "instrument-absent" | "analyze-failed" | "within-interval" | "disabled" | null;
+  detail: string | null;
+  instrument: string | null;
+  instrumentSource: "env" | "path" | "plugin" | null;
+  /** Every location probed for the CLI (`instrument-absent` must say what was looked for). */
+  searched: string[];
+  exitCode: number | null;
+  at: string;
+  /** `true` when the reading in THIS record was taken AFTER the refresh (so a reader knows whether
+   *  the numbers below include the re-analysis or precede it). */
+  appliedBeforeReading: boolean;
 }
 
 /** topByOutDegree + relationCountByType, as persisted (carrier line and quality-round Fact share ONE
@@ -2037,8 +2084,10 @@ export interface GraphSummaryRecord {
 export interface ArchCycleFactValue {
   mode: "arch-cycle-report-round";
   evaluated: boolean;
+  status: "complete" | "partial" | "none";
   totalCycleCount: number | null;
   notEvaluatedScopes: string[];
+  behindScopes: string[];
   scopes: ArchCycleHistoryRecord["scopes"];
   artifactTimestamp: string | null;
   artifactAgeMs: number | null;
@@ -2050,6 +2099,7 @@ export interface ArchCycleFactValue {
   topByOutDegree: TopOutDegreeEntry[] | null;
   relationCountByType: Record<string, number> | null;
   graphSummary: GraphSummaryRecord;
+  refresh: ArchCycleRefreshRecord;
   workDir: string;
   historyPath: string;
   historyAppended: boolean;
@@ -2069,6 +2119,10 @@ export interface ArchCycleRoundOptions {
   graphSummaryLimit?: number;
   /** Deterministic `ts` seam for the carrier line. */
   now?: string;
+  /** Refresh stale artifacts before reporting (default TRUE — the production path).
+   *  `false` is the read-only seam used to observe what the routine would have reported BEFORE a
+   *  refresh (AC3) without spending an analyze; it is stated on the record as `skipped:"disabled"`. */
+  refresh?: boolean;
 }
 
 /** Append one line to the carrier. Returns the fail-closed `{ok, error}` shape (never throws): a write
@@ -2088,17 +2142,22 @@ export function appendArchCycleHistory(
   }
 }
 
-/** Run ONE arch-cycle round: read the directory cycles the last analyze persisted and append one line.
+/** Run ONE arch-cycle round: refresh at most one behind scope, read the directory cycles the last
+ *  analyze persisted, and append one line.
  *
  *  ⛔ THE FAILURE VOCABULARY IS DELIBERATELY SPLIT (AC2/AC3 / 硬规则 3b):
  *    • `failed`        — the routine could not do its job: bad config, or the carrier could not be
  *                        written. ⛔ NOT used because cycles were found (report-only, AC2).
- *    • `not-evaluated` — the module graph could not be read (no analyze product / malformed), or the
- *                        kill switch is engaged. The line is STILL appended (evaluated:false) so the
- *                        carrier records the inability, not silence.
- *    • `verified`      — a reading was produced AND persisted. `totalCycleCount` may be > 0; that is
- *                        the reading's CONTENT, never a red. A ratchet over it would be a different
- *                        task (this one is report-only). */
+ *    • `not-evaluated` — the aggregate could not be read AT ALL (`status:"none"` — no analyze product
+ *                        / malformed), or the kill switch is engaged. The line is STILL appended
+ *                        (evaluated:false) so the carrier records the inability, not silence.
+ *    • `verified`      — a reading was produced AND persisted, `complete` OR `partial`. A PARTIAL
+ *                        reading (some scopes unreadable) is still a reading — the scopes that WERE
+ *                        read keep their numbers, and the Fact's reason names the ones that were not
+ *                        (gap-arch-cycle-report-never-evaluated-aggregate-and-stale-artifacts: two
+ *                        permanently graph-less provider packages voided everything for 25 rounds).
+ *                        `totalCycleCount` may be > 0; that is the reading's CONTENT, never a red. A
+ *                        ratchet over it would be a different task (this one is report-only). */
 export function runArchCycleRound(root: string, opts: ArchCycleRoundOptions = {}): Fact<ArchCycleFactValue | null> {
   const name = ARCH_CYCLE_ROUTINE_NAME;
   if (opts.configError) return { name, value: null, state: "failed", reason: opts.configError };
@@ -2113,7 +2172,59 @@ export function runArchCycleRound(root: string, opts: ArchCycleRoundOptions = {}
   }
 
   const resolvedRoot = path.resolve(root);
-  const reading = readDirectoryCycleReading(resolvedRoot, opts.workDir);
+  const staleIntervalMs = (opts.config?.intervalMinutes ?? ARCH_CYCLE_INTERVAL_DEFAULT_MIN) * 60_000;
+  const ts = opts.now ?? new Date().toISOString();
+  const nowMs = Number.isFinite(Date.parse(ts)) ? Date.parse(ts) : Date.now();
+  const historyPathForRead = opts.historyPath ? path.resolve(opts.historyPath) : path.join(resolvedRoot, ARCH_CYCLE_HISTORY_REL);
+
+  // ── REFRESH (Plan 步骤 4) ────────────────────────────────────────────────────────────────────────
+  // The routine reads what the LAST analyze persisted, and until this task NOTHING ever rewrote it: a
+  // cycle introduced 9 minutes after the last artifact was invisible for ~7h (measured 2026-10-22).
+  // So the routine now refills the artifact it is about to report — but ONLY:
+  //   • for a scope that needs it (`scopeNeedsRefresh`: sources moved past the artifact, or the
+  //     artifact has no module graph because no package-level run was ever requested), and
+  //   • at most once per scheduling interval, enforced against the carrier's own last `refresh.at`
+  //     (a driver restart between rounds must not turn the report into a sweep), and
+  //   • never on the fan-in / per-task hot path — this is the routine's tick only
+  //     (`gap-fan-in-remove-archguard-gate`).
+  let reading: DirectoryCycleReading = readDirectoryCycleReading(resolvedRoot, opts.workDir);
+  let refresh: ArchCycleRefreshRecord;
+  if (opts.refresh === false) {
+    refresh = {
+      attempted: false, refreshedScope: null, skipped: "disabled",
+      detail: "refresh disabled by the caller (read-only round: reports the artifacts as they are)",
+      instrument: null, instrumentSource: null, searched: [], exitCode: null, at: ts, appliedBeforeReading: false,
+    };
+  } else {
+    const lastRefreshAt = readLastRefreshAt(historyPathForRead);
+    const lastMs = lastRefreshAt ? Date.parse(lastRefreshAt) : NaN;
+    if (Number.isFinite(lastMs) && nowMs - lastMs < staleIntervalMs) {
+      refresh = {
+        attempted: false, refreshedScope: null, skipped: "within-interval",
+        detail: `last refresh at ${lastRefreshAt} is within this routine's ${Math.round(staleIntervalMs / 60_000)}m interval — at most one analyze per interval`,
+        instrument: null, instrumentSource: null, searched: [], exitCode: null, at: ts, appliedBeforeReading: false,
+      };
+    } else {
+      const r: ArchCycleRefreshResult = refreshBehindScopes(resolvedRoot, opts.workDir, reading, { now: ts });
+      refresh = {
+        attempted: r.attempted,
+        refreshedScope: r.refreshedScope,
+        skipped: r.skipped,
+        detail: r.detail,
+        instrument: r.instrument,
+        instrumentSource: r.instrumentSource,
+        searched: r.searched,
+        exitCode: r.exitCode,
+        at: r.at,
+        appliedBeforeReading: r.attempted && r.exitCode === 0,
+      };
+      if (refresh.appliedBeforeReading) {
+        // Re-read AFTER the analyze: the numbers in this record are the post-refresh ones, and the
+        // graph summary must come from the same (now refreshed) artifact tree.
+        reading = readDirectoryCycleReading(resolvedRoot, opts.workDir);
+      }
+    }
+  }
   // SAME-BATCH graph reading (gap-quality-round-facts-surface-top-out-degree-god-functions): both
   // readings come from the same persisted `.archguard/query` tree, so this adds a file read, not a
   // second analysis (⛔ zero spawn).
@@ -2136,17 +2247,15 @@ export function runArchCycleRound(root: string, opts: ArchCycleRoundOptions = {}
     topByOutDegree: graph.topByOutDegree,
     topByOutDegreeTruncated: graph.topByOutDegreeTruncated,
   };
-  const ts = opts.now ?? new Date().toISOString();
   // FRESHNESS OF THE READING (gap-arch-cycle-report-record-artifact-timestamp): the routine does not
-  // analyze; it reports whatever the LAST analyze persisted. Recording HOW OLD that artifact is makes
-  // "reading the current tree" distinguishable from "re-reading a week-old artifact" (the failure
-  // that motivated this task: the same 4 cycles reported for 3 days).
+  // analyze on demand; it reports what the LAST analyze persisted (the refresh above may have just
+  // rewritten part of it). Recording HOW OLD that artifact is makes "reading the current tree"
+  // distinguishable from "re-reading a week-old artifact" (the failure that motivated that task: the
+  // same 4 cycles reported for 3 days).
   //   • staleIntervalMs is the routine's declared cadence — "older than one interval" is the point at
   //     which a reader can no longer assume the artifact tracks the tree.
   //   • `stale` is THREE-VALUED: null when the age cannot be computed (no artifact timestamp / an
   //     unparseable one). ⛔ Never false there — "could not tell" must not look like "fresh" (3b).
-  const staleIntervalMs = (opts.config?.intervalMinutes ?? ARCH_CYCLE_INTERVAL_DEFAULT_MIN) * 60_000;
-  const nowMs = Number.isFinite(Date.parse(ts)) ? Date.parse(ts) : Date.now();
   const artifactMs = reading.artifactTimestamp ? Date.parse(reading.artifactTimestamp) : NaN;
   const artifactAgeMs = Number.isFinite(artifactMs) ? nowMs - artifactMs : null;
   const stale = artifactAgeMs === null ? null : artifactAgeMs > staleIntervalMs;
@@ -2154,23 +2263,28 @@ export function runArchCycleRound(root: string, opts: ArchCycleRoundOptions = {}
     ts,
     mode: "arch-cycle-report-round",
     evaluated: reading.evaluated,
+    status: reading.status,
     reason: reading.reason,
     totalCycleCount: reading.totalCycleCount,
-    notEvaluatedScopes: reading.scopes.filter((s) => !s.evaluated).map((s) => s.scope),
+    notEvaluatedScopes: reading.notEvaluatedScopes,
+    behindScopes: reading.behindScopes,
     scopes: reading.scopes,
     artifactTimestamp: reading.artifactTimestamp,
     artifactAgeMs,
     staleIntervalMs,
     stale,
     graphSummary,
+    refresh,
     reportOnly: true,
   };
   const appended = appendArchCycleHistory(resolvedRoot, record, opts.historyPath ? { historyPath: opts.historyPath } : {});
   const value: ArchCycleFactValue = {
     mode: "arch-cycle-report-round",
     evaluated: record.evaluated,
+    status: record.status,
     totalCycleCount: record.totalCycleCount,
     notEvaluatedScopes: record.notEvaluatedScopes,
+    behindScopes: record.behindScopes,
     scopes: record.scopes,
     artifactTimestamp: record.artifactTimestamp,
     artifactAgeMs: record.artifactAgeMs,
@@ -2179,6 +2293,7 @@ export function runArchCycleRound(root: string, opts: ArchCycleRoundOptions = {}
     topByOutDegree: graphSummary.topByOutDegree,
     relationCountByType: graphSummary.relationCountByType,
     graphSummary,
+    refresh,
     workDir: reading.workDir,
     historyPath: appended.path,
     historyAppended: appended.ok,
@@ -2203,7 +2318,38 @@ export function runArchCycleRound(root: string, opts: ArchCycleRoundOptions = {}
   }
   // ⛔ AC2: a non-zero cycle count is NOT a failure. The cycles (with their members) are IN the value,
   // so a reader can see them — they just never become the round's verdict.
+  // A PARTIAL reading is VERIFIED too (that is this task's whole point: two permanently graph-less
+  // scopes must not void the other four) — but its reason NAMES what was not read, so "partial" and
+  // "complete" never share a line in `quality-round.jsonl` (硬规则 3b).
+  if (reading.status === "partial") {
+    return { name, value, state: "verified", reason: `partial — ${reading.reason ?? "some scopes were not evaluated"}` };
+  }
   return { name, value, state: "verified", reason: null };
+}
+
+/** The `refresh.at` of the last carrier line that ACTUALLY RAN an analyze, or null. This is the
+ *  "at most one analyze per interval" clock: the carrier already records every round, so the guard
+ *  needs no second state file (a second carrier would be a second truth that can disagree with the
+ *  history). Rounds that only REPORTED (`attempted:false` — disabled / no scope behind / instrument
+ *  absent) do not reset the clock, so the first eligible round after those still refreshes. */
+export function readLastRefreshAt(historyPath: string): string | null {
+  let text: string;
+  try {
+    text = fs.readFileSync(historyPath, "utf8");
+  } catch {
+    return null;
+  }
+  const lines = text.split("\n").filter((l) => l.trim().length > 0);
+  for (let i = lines.length - 1; i >= 0; i -= 1) {
+    try {
+      const rec = JSON.parse(lines[i]);
+      const at = rec?.refresh?.at;
+      if (rec?.refresh?.attempted === true && typeof at === "string" && at !== "") return at;
+    } catch {
+      /* a malformed line does not erase the earlier ones — keep walking back */
+    }
+  }
+  return null;
 }
 
 export interface ArchCycleRoutineOptions {
@@ -2266,7 +2412,7 @@ export function formatArchCycleAssembly(a: {
 }): string {
   if (a.error !== null) return `arch-cycle-report 例程已装配（${a.error} — 每轮记 failed、零报告零写入；⛔ 不回退到缺省节奏照跑）`;
   if (!a.enabled) return "arch-cycle-report 例程已装配（enabled:false — 每轮记 not-evaluated:disabled，零报告零写入）";
-  return `arch-cycle-report 例程已装配（enabled, interval=${a.intervalMinutes}m，report-only：目录级环读数 append 到 .quay/arch-cycle-history.jsonl；环非零是该例程的读数，⛔ 不是 failed）`;
+  return `arch-cycle-report 例程已装配（enabled, interval=${a.intervalMinutes}m，report-only：目录级环读数 append 到 .quay/arch-cycle-history.jsonl；每间隔至多一次 archguard analyze 刷新一个待刷 scope；环非零是该例程的读数，⛔ 不是 failed）`;
 }
 
 // ── design-evolution-readings 的 config 入口（`loop.design_evolution_readings:`）────────────────
