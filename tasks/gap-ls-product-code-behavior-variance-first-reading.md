@@ -2,7 +2,7 @@
 id: gap-ls-product-code-behavior-variance-first-reading
 title: L_S（行为方差）对产品代码没有活仪器——ADR-007 列的 mutation/property 测试在产品代码上 0 处存在；先在一个高
   churn 的纯判定模块上取第一条读数并入载体（观察项）
-status: ready
+status: done
 labels:
   - gap
   - observation
@@ -145,10 +145,3 @@ node --no-warnings --experimental-strip-types <worktree>/plugin/scripts/ls-mutat
 - plugin/test/fixtures/ls-mutation/target-strong-check.mjs (new)
 - plugin/test/fixtures/ls-mutation/target-weak-check.mjs (new)
 - plugin/test/carrier-registry-completeness.test.mjs
-
-## Blocker
-
-**2026-10-22T01:43:03.085Z — worker 未落地（exited-not-landed）**
-
-- 未落地原因：step=suite: AssertionError [ERR_ASSERTION]: at least one bin is under-sampled (otherwise the rule is vacuous) [baseline A/B: HARD RED (task-introduced-red) — the task's red set is NOT a subset of the develop baseline red set: added=plugin/test/source-text-lib.test.mjs changed=-]
-- run_id：wk-prod-anchor
