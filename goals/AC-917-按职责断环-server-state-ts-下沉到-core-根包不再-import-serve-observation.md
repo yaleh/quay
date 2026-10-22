@@ -1,7 +1,7 @@
 ---
 id: AC-917
 title: 按职责断环：server-state.ts 下沉到 core/，根包不再 import ./serve/，observation 子模块不再回指根包模块
-status: active
+status: achieved
 kind: criterion
 goal: GOAL-910
 criterion: 'if [ ! -f packages/quay/src/core/server-state.ts ] || [ -e
@@ -36,6 +36,11 @@ statusLog:
     to: active
     actor: goal-driver
     reason: "triage: activate"
+  - at: 2026-10-22T00:39:54.294Z
+    from: active
+    to: achieved
+    actor: goal-driver
+    reason: "I2: criterion pass"
 fidelity:
   verdict: faithful
   reason: "fidelity judge: faithful"
