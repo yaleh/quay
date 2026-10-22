@@ -53,21 +53,108 @@ due 轮被拒，例程只花到预算约 1/3。人 2026-10-22 决定先关掉这
 
 ## Acceptance Criteria
 
-- [ ] AC1 开关存在且可解析：`grep -n 'usd_cap_enabled\|usdCapEnabled' plugin/scripts/open-semantic-discovery-routine.ts` 命中解析与消费两处；`parseOpenSemanticDiscoverySection` 对 `usd_cap_enabled:false` 返回 `config.usdCapEnabled === false`、对缺省返回 `true`；贴三份 fixture 输出。
-- [ ] AC2 关闭后跳过 USD 预检：fixture 令 `usdUsage.usd` 远超 cap、`usd_cap_enabled:false`，断言例程**不**产出 `budget-usd-24h` 事实、照常派发；同一 fixture 把开关改 true，断言**产出** `budget-usd-24h`。贴两段输出。
-- [ ] AC3 关掉也留痕：`usd_cap_enabled:false` 的 Fact 里可见 `usd_cap_enabled:false`（不是没有这个键）；贴该 Fact 的 JSON 片段。
-- [ ] AC4 非布尔拒绝：`usd_cap_enabled: "no"` 返回配置错、section 不可用（fail-closed）；贴错误信息。
-- [ ] AC5 向后兼容：不带 `usd_cap_enabled` 的既有配置解析后 `usdCapEnabled === true`，且 USD 预检行为与改动前逐字一致；贴 `node --test` 里 open-semantic-discovery 相关测试全绿输出尾部。
-- [ ] AC6 登记：新增键进该例程的声明键集（若有 capability-catalog 或 config schema 声明则同步），`bash plugin/scripts/capability-catalog.sh --summary` 显示 `0 unclassified`；贴原文。
+- [x] AC1 开关存在且可解析：`grep -n 'usd_cap_enabled\|usdCapEnabled' plugin/scripts/open-semantic-discovery-routine.ts` 命中解析与消费两处；`parseOpenSemanticDiscoverySection` 对 `usd_cap_enabled:false` 返回 `config.usdCapEnabled === false`、对缺省返回 `true`；贴三份 fixture 输出。
+- [x] AC2 关闭后跳过 USD 预检：fixture 令 `usdUsage.usd` 远超 cap、`usd_cap_enabled:false`，断言例程**不**产出 `budget-usd-24h` 事实、照常派发；同一 fixture 把开关改 true，断言**产出** `budget-usd-24h`。贴两段输出。
+- [x] AC3 关掉也留痕：`usd_cap_enabled:false` 的 Fact 里可见 `usd_cap_enabled:false`（不是没有这个键）；贴该 Fact 的 JSON 片段。
+- [x] AC4 非布尔拒绝：`usd_cap_enabled: "no"` 返回配置错、section 不可用（fail-closed）；贴错误信息。
+- [x] AC5 向后兼容：不带 `usd_cap_enabled` 的既有配置解析后 `usdCapEnabled === true`，且 USD 预检行为与改动前逐字一致；贴 `node --test` 里 open-semantic-discovery 相关测试全绿输出尾部。
+- [x] AC6 登记：新增键进该例程的声明键集（若有 capability-catalog 或 config schema 声明则同步），`bash plugin/scripts/capability-catalog.sh --summary` 显示 `0 unclassified`；贴原文。
+
+## Evidence
+
+### AC1 — 解析处 + 消费处，三份 fixture 输出
+
+`grep -n 'usd_cap_enabled\|usdCapEnabled' plugin/scripts/open-semantic-discovery-routine.ts`（节选，解析 803-836 / 消费 3950+5141 / 声明面 5476+5494）：
+
+```
+629:  usdCapEnabled: boolean;
+664:  usdCapEnabled: true,
+804:  if (rec.usd_cap_enabled !== undefined && rec.usd_cap_enabled !== null) {
+806:      return { config: null, error: cfgBad(`'usd_cap_enabled' must be a boolean …
+808:    usdCapEnabled = rec.usd_cap_enabled;
+836:      usdCapEnabled,
+3950:  const usdBudgetBlock = { usd_cap_enabled: config.usdCapEnabled, cap: config.maxUsdPer24h, …
+3962:  if (config.usdCapEnabled && usdUsage.usd >= config.maxUsdPer24h) {
+5141:        usd_cap_enabled: config.usdCapEnabled,
+5476:  usdCapEnabled: boolean | null;
+5494:    usdCapEnabled: cfg ? cfg.usdCapEnabled : null,
+```
+
+三份 fixture 输出（同一段脚本，`parseOpenSemanticDiscoverySection` 真返回）：
+
+```
+PARSE absent (default): error=null usdCapEnabled=true maxUsdPer24h=1
+PARSE explicit true: error=null usdCapEnabled=true maxUsdPer24h=1
+PARSE explicit false: error=null usdCapEnabled=false maxUsdPer24h=1
+```
+
+### AC2 — 关掉后真的不预检（同一 fixture 的正臂 / 负对照）
+
+fixture：fixture workspace 的 ledger 里已有一笔 grant + 其 $40 实现价，cap 设 $1（`usdUsage.usd` 远超 cap）。
+
+```
+OFF  state=verified  reason=round ran (invoked_by:manual, interval 360m): … 0 cluster(s) from 1 run(s) … 1 model call(s) costing $1 … — MANUAL: the production last-run was NOT advanced …
+ON   state=not-evaluated  reason=budget-usd-24h: $41 in the trailing 24h >= max_usd_per_24h $1 (1 priced, 1 at the $1 per-call ceiling) — nothing spawned
+```
+
+（ON 轮的 `$41` = OFF 轮自己那次预留按 $1 上限计入同一 ledger；两条臂用的是同一 fixture 形状，负对照仍然成立：开关为 true 时同一 cap 触发、零 spawn。）
+
+### AC3 — Fact 里的 JSON 片段
+
+```
+budget_usd_24h={"usd_cap_enabled":false,"cap":1,"used":40,"priced":1,"estimated":0,"per_call_ceiling":1,"window_ms":86400000}
+reservations.usd_cap=1  reservations.usd_cap_enabled=false
+```
+
+即：cap 与真实用量都照常报告，`usd_cap_enabled:false` 是一个**存在且为 false** 的键，不是缺失。
+
+### AC4 — 非布尔 fail-closed
+
+```
+error="loop.open_semantic_discovery 'usd_cap_enabled' must be a boolean (got \"no\") — it switches the USD ceiling's REFUSAL on/off; it is not a value of 'max_usd_per_24h'"  config=null
+```
+
+同一值的整轮 fixture 走 `state=failed` / `reason` 含 `config invalid` 与 `usd_cap_enabled` / **0 spawns**。
+
+### AC5 — 向后兼容
+
+`node --no-warnings --experimental-strip-types --test plugin/test/open-semantic-discovery-routine.test.mjs` 尾部：
+
+```
+ℹ tests 132
+ℹ suites 0
+ℹ pass 132
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 12884.521473
+```
+
+既有 `case (e) — the USD cap ⇒ not-evaluated:budget-usd-24h and ZERO spawns` 用例**文本未改**（该测试文件在 `develop...HEAD` 里唯一的删除行是 import 行的扩写），且仍绿 ⇒ 不带开关的既有配置行为与改动前一致；新增的 `usd_cap_enabled — parse` 用例另断言缺省 ⇒ `usdCapEnabled === true`。
+
+### AC6 — 登记
+
+```
+capability-catalog: 395 scripts | 395 declared | 0 unclassified | 390 ship
+```
+
+新增键登记在该例程自身的声明面：`OpenSemanticDiscoveryConfig.usdCapEnabled`、`parseOpenSemanticDiscoverySection` 的解析、`openSemanticDiscoveryRoutineFromConfig` 的返回、以及 `quality-gate-driver.ts` 装配行（关闭时打印 `DECLARED BUT NOT ENFORCED — usd_cap_enabled:false`，不再谎称 HARD）。没有新增脚本文件 ⇒ capability-catalog 的文件级声明不变（`0 unclassified`）。
+
+### ADR-007 暗轴记录
+
+- 该轴仍暗,理由:本条只新增一个配置布尔与其短路分支（未改模块边界、依赖边、包归属），L_D/L_G 无可归因于本条的增量，本轮未重跑 archguard。
 
 ## Definition of Done
 
 - 代码支持 `usd_cap_enabled:false` 且关掉后真实跳过 USD 预检（AC2 的负对照已证伪「关掉无效」）。
 - 缺省 `true` 保证所有既有 workspace 行为不变。
 - live 配置的「关掉」动作不在本任务内做，但任务落成后有一条明确的后续动作记录（谁在何时关、为何关）。
+- 后续动作记录：本任务合入 develop 后，由 manager 把 `.quay/config.yml` 的 `loop.open_semantic_discovery:` 段加 `usd_cap_enabled: false`（备份先行）。依据：人 2026-10-22 决定先关掉该限额机制——`PER_CALL_USD_CEILING=1.0` 把未定价调用按 $1 计入，使 $30/24h 在真实花费 ~$11 时就触发、约 63% 的 due 轮被拒；真实日花费估 ~$10–14，硬顶由次数限额 120 次/24h 封在 ~$29/天。⛔ 本任务只改代码，不动 live 配置。
 
 ## Touches
 
 - plugin/scripts/open-semantic-discovery-routine.ts
+- plugin/scripts/quality-gate-driver.ts
 - plugin/test/open-semantic-discovery-routine.test.mjs
 - tasks/gap-osd-usd-cap-configurable-disable.md
