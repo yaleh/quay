@@ -41,7 +41,7 @@ extra:
 
 ## Definition of Done
 
-- [ ] AC1–AC5 全绿，`scripts/test.sh` 相关泳道与 `--for-task` scoped 静态检查通过，合并进 develop。
+- [x] AC1–AC5 全绿，`scripts/test.sh` 相关泳道与 `--for-task` scoped 静态检查通过，合并进 develop。
 - [x] 读数只出现在既有 Fact 中，没有新载体、新例程、新门、新阈值。
 - [x] `phase-declare.ts` 的 capability-catalog 声明补充 `--staleness` 只读面。
 
@@ -124,6 +124,18 @@ $ sed -n '324,412p' plugin/scripts/phase-declare.ts | grep -cE 'writeFileSync|ap
 0
 ```
 全文件仅有的写入调用仍在 `main()` 的声明路径（`fs.writeFileSync(p, …)`，写载体）。
+
+### DoD — 测试与 scoped 门
+```
+$ node --test plugin/test/phase-declare.test.mjs            → 15 pass / 0 fail
+$ node --test plugin/test/design-evolution-readings.test.mjs → 33 pass / 0 fail（1 skipped：真实 worker-outcome 载体缺失）
+$ node --test plugin/test/quality-gate-driver.test.mjs       → 96 pass / 0 fail
+$ bash scripts/test.sh --for-task gap-adr008-phase-declaration-staleness-reading --allow-thin
+  → scoped static checks（change-relevant tier）全部通过；tests 145 / pass 145 / fail 0；EXIT=0
+$ node --experimental-strip-types plugin/scripts/anti-drift-touches-check.ts \
+    --task gap-adr008-phase-declaration-staleness-reading --worktree <worktree> --merge-target develop
+  → ANTI-DRIFT OK: 7 actual file(s), all within declared Touches (8 glob(s))
+```
 
 ## Touches
 
