@@ -56,6 +56,18 @@ $ node --test plugin/test/goal-driver-activation-blocked.test.mjs
 - **取假验证（DoD 1，实测，⛔ 非自述）**：临时把 `if (blocked !== null) activationBlocked.push(blocked);` 改成 `&& false` ⇒ 同一命令 **3 条全红**（`ℹ pass 0 / fail 3`），改回后全绿。
 - **回归面**：`goal-triage-activate-executed` / `goal-triage` / `goal-driver-s06`（AC3 Core 字面量硬检查）/ `goal-posture-blocks-activate` / `goal-driver-s09` 共 27 条全绿。
 
+### 上一轮 exited-not-landed 的唯一红点已复验：是 @load-sensitive 的墙钟噪声，不是本任务的代码效应（2026-10-22）
+上一轮 fan-in 全量 suite 相对 develop 基线**只多一条**红：`plugin/test/full-suite-runner-cgroup.test.mjs` 的 `AC4 — the sampler's own cost stays under 1% of the suite wall`（`measured 2.71%; envelope 2.13%`）。
+- **该文件自注册 `// @load-sensitive child-spawn`**，且这条判据的**分子分母都是耗时样本的估计量**（每臂 5 次墙钟取 min，噪声包络 = 两臂各自 min 与次小值之差的**和**）⇒ 它测的是 A/B，不是恒等式。
+- **本任务对 `driver-runtime.ts` 的改动是纯 re-export**（只 `export { … } from` / `export type`，无模块加载期行为改动），且 on/off 两臂跑的是**同一个构建**，两臂同构地承担它 ⇒ 结构上不可能只抬高 on 臂。
+- **对照（同一份代码，去掉并发负载）**：worktree 内隔离复跑 `node --test plugin/test/full-suite-runner-cgroup.test.mjs` ⇒ `ℹ tests 72 / pass 72 / fail 0`，AC4 自身读数 `A/B delta=2.07%`、`envelope=9.21%`、`samplerCostMs=2.758 (0.066% of wall)`。⇒ 全量 suite 里 `2.71% > 2.13%` 是 **113 车道并发下包络被低估**，隔离后同一判据绿。
+- ⛔ 本任务**不改**该文件的阈值/样本数/分组（不在 `## Touches`，且改它会静默掩盖另一条 gap 的载体——硬规则 5b）。
+
+### 本轮 pre-merge / 门（worktree 内，prerequisite for fan-in）
+- `git merge develop` 干净并入（无 unmerged path）。
+- scoped 门 `bash scripts/test.sh --for-task gap-meta-writegoalstatus --allow-thin` ⇒ **exit 0**（选中 `plugin/test/goal-driver-activation-blocked.test.mjs` + lint 等静态检查；3/3 绿）。选择器只解析 1/4 Touches（`driver-runtime.ts`/`goal-driver.ts` 无同名测试文件），故 `--allow-thin`。
+- `anti-drift-touches-check.ts --merge-target develop` ⇒ `ANTI-DRIFT OK: 3 actual file(s), all within declared Touches`。
+
 ### 本任务**没有**做的事（如实记录，⛔ 不要读成已完成）
 本任务只落 AC 契约要求的**具名读数**；把 `activationBlocked` 接进 `runGapSpawnPass` / `computeGoalGaps`（即真正把「缺载体」那条 draft AC 委托出去）**未做**——那需要新增一个缺口态并改 `GoalGapState` 词表与既有消费方，超出本任务 `## Touches`。⇒ AC-920 类缺口现在**读得出来**，但**仍不会被自动立案**；消费半边是后续独立任务的对象。
 
@@ -68,3 +80,11 @@ $ node --test plugin/test/goal-driver-activation-blocked.test.mjs
 - `plugin/scripts/driver-runtime.ts`
 - `plugin/test/goal-driver-activation-blocked.test.mjs`
 - `tasks/gap-meta-writegoalstatus.md`
+
+## Blocker
+
+**2026-10-22T12:16:55.761Z — worker 未落地（exited-not-landed）**
+
+- 未落地原因：step=suite: AssertionError [ERR_ASSERTION]: at least one bin is under-sampled (otherwise the rule is vacuous) [baseline A/B: HARD RED (task-introduced-red) — the task's red set is NOT a subset of the develop baseline red set: added=plugin/test/full-suite-runner-cgroup.test.mjs changed=-]
+- run_id：wk-prod-anchor
+- session_id：eb498ffa-e65f-41b5-81f9-66ae3a959c61
