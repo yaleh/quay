@@ -17,7 +17,18 @@
 // `ingested N`, `not-triggered`, `verified` round state, `scan ran`, a Portfolio row without a merged
 // fix, and a merged fix without a post-merge effect reading are ALL **intermediate states**. This
 // report therefore never emits a single "success" boolean: it emits the CHAIN, one link at a time.
-// `closed` is true only when every link is a value AND the effect reading came back negative.
+//
+// ── THE EFFECT LINK IS A PREDICTION CHECKED AGAINST A MEASUREMENT (task
+//    gap-discovery-verify-loop-refuter-and-independent-effect) ─────────────────────────────────────
+// The post-merge effect used to be ONE mechanical reading — «the concept did not recur» — and `closed`
+// was true when it came back negative. That is 硬规则 4 推论四's shape («没复现» and «修好了» were the
+// same word). The effect link is now the fix task's OWN falsifiable prediction (`## Effect Prediction`,
+// written at filing time) checked against that measurement, with three INDEPENDENT values:
+// `prediction-confirmed` / `prediction-refuted` / `no-prediction` — and `not-evaluated:<reason>` when
+// the prediction or the measurement could not be read (硬规则 3b). The old recurrence reading is kept
+// beside it as `effect.recurrence`, so «nobody predicted» and «it did not recur» are different words at
+// different levels. `closed` therefore requires EVERY link to be a value (which includes a REFUTER
+// reading) AND the prediction to be matched by the measurement.
 //
 // ── EVERY LINK IS A VALUE OR AN EXPLICIT `not-evaluated:<reason>` (硬规则 3b) ─────────────────────
 // `null` is never used for "could not read". A link that could not be read carries the string
@@ -66,7 +77,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { isDirectEntry, parseArgs as baseParseArgs } from "./gate-script-base.ts";
-import { SCRIPT_REPO_ROOT, resolveEngineModule } from "./open-semantic-discovery-routine.ts";
+import { SCRIPT_REPO_ROOT, resolveEngineModule, readRefuterStage } from "./open-semantic-discovery-routine.ts";
 import { STOPPED_MID_ROUND } from "./driver-runtime.ts";
 
 // ── the carriers this report reads (relative to a host's SHARED checkout) ─────────────────────────
@@ -457,6 +468,11 @@ export interface HostFinding {
   origin_carrier: string | null;
   verifier: unknown;
   refuter: unknown;
+  /** WHY an `undetermined` refutation did not settle — the OSD refuter's own four-value vocabulary,
+   *  read through the SAME `readRefuterStage` the refuter writes behind. `null` for a determinate
+   *  verdict AND for a record that carries no refutation at all; the `refuter` link's own value is what
+   *  tells those two apart. */
+  refuter_cause: string | null;
   /** WHERE each verdict was read from — the "real ids at every link" half of AC3. `null` when the link
    *  could not be resolved to a record at all. */
   verifier_source: { rel: string; line: number } | null;
@@ -506,21 +522,51 @@ function resolveOriginRecord(
   return { ok: true, rec: hit.rec, line: hit.line, rel: reader.rel, kind: reader.kind };
 }
 
-/** Read the verifier/refuter verdicts out of the carrier the finding's `origin_carrier` names. */
+/** WHAT AN ABSENT `refutation_verdict` MEANS, per origin carrier.
+ *
+ *  ⛔ THE TWO ARE DIFFERENT FACTS and must not share a word (硬规则 3b):
+ *    • OSD / dogfood — the refuter STAGE exists and ran; this particular record carries no answer. The
+ *      absence is about the RECORD.
+ *    • arch-discovery / routine-scan — the writer has no refuter stage at all (measured 2026-10-22:
+ *      0 of the arch `finding` records and 0 of the routine `finding` records carry the field). The
+ *      absence is about the MECHANISM. This task wires the READ side for all three origins; it does not
+ *      pretend the two writers grew a stage they do not have.
+ *  Both values are `not-evaluated:` — never a verdict — so neither can be read as «refuted» or «survived». */
+const REFUTER_ABSENCE_REASON: Record<string, string> = {
+  [OSD_FINDINGS_REL]: "no-refutation_verdict-on-the-cluster-record",
+  [DOGFOOD_FINDINGS_REL]: "no-refutation_verdict-on-the-dogfood-cluster-record",
+  [ARCH_FINDINGS_REL]: "arch-discovery-has-no-refuter-stage",
+  [ROUTINE_FINDINGS_REL]: "routine-scan-has-no-refuter-stage",
+};
+
+/** Read the verifier/refuter verdicts out of the carrier the finding's `origin_carrier` names.
+ *
+ *  ⛔ ONE REFUTER READER FOR ALL THREE ORIGINS (硬规则 5b): the refuter's field names and vocabulary are
+ *  the OSD round's own, so they are read through `readRefuterStage` — the SAME function the OSD round
+ *  writes behind. Before this task the arch/routine branches did not read the field at all: they returned
+ *  a hard-coded `not-evaluated:<origin>-has-no-refuter-stage`, which meant a record that DID carry a
+ *  refutation could never have been seen. The hard-coded reason now survives ONLY as the fallback for a
+ *  record that carries no `refutation_verdict`, where it states a true fact about the mechanism. */
 function verdictsFor(
   host: { carriers: Map<string, CarrierRead> },
   row: Record<string, unknown>,
-): { verifier: unknown; refuter: unknown; confirmed: boolean | null; source: { rel: string; line: number } | null } {
+): { verifier: unknown; refuter: unknown; refuter_cause: string | null; confirmed: boolean | null; source: { rel: string; line: number } | null } {
   const resolved = resolveOriginRecord(host, row);
   if (!resolved.ok) {
-    return { verifier: notEvaluated(resolved.reason), refuter: notEvaluated(resolved.reason), confirmed: null, source: null };
+    return { verifier: notEvaluated(resolved.reason), refuter: notEvaluated(resolved.reason), refuter_cause: null, confirmed: null, source: null };
   }
   const rec = resolved.rec;
   const source = { rel: resolved.rel, line: resolved.line };
+  // THE SHARED READING: a record that carries the refuter's own fields is consumed on every origin.
+  const refuter = readRefuterStage(rec);
+  const refuterValue: unknown = refuter.verdict !== null
+    ? refuter.verdict
+    : notEvaluated(REFUTER_ABSENCE_REASON[resolved.rel] ?? `no-refuter-record-reader-for:${resolved.rel}`);
   if (CLUSTER_SHAPED_CARRIERS.includes(resolved.rel)) {
     return {
       verifier: isStr(rec.verifier_verdict, 1) ? String(rec.verifier_verdict) : notEvaluated("no-verifier_verdict-on-the-cluster-record"),
-      refuter: isStr(rec.refutation_verdict, 1) ? String(rec.refutation_verdict) : notEvaluated("no-refutation_verdict-on-the-cluster-record"),
+      refuter: refuterValue,
+      refuter_cause: refuter.undetermined_cause,
       confirmed: typeof rec.confirmed === "boolean" ? rec.confirmed : null,
       source,
     };
@@ -528,15 +574,17 @@ function verdictsFor(
   if (resolved.rel === ARCH_FINDINGS_REL) {
     return {
       verifier: isStr(rec.verdict, 1) ? String(rec.verdict) : notEvaluated("no-verdict-on-the-arch-finding-record"),
-      refuter: notEvaluated("arch-discovery-has-no-refuter-stage"),
+      refuter: refuterValue,
+      refuter_cause: refuter.undetermined_cause,
       confirmed: null,
       source,
     };
   }
-  // routine-findings: the scan's own mechanical verdict; there is no independent refutation stage here.
+  // routine-findings: the scan's own mechanical verdict, plus the SAME shared refuter reading.
   return {
     verifier: isStr(rec.verdict, 1) ? String(rec.verdict) : notEvaluated("no-verdict-on-the-routine-finding-record"),
-    refuter: notEvaluated("routine-scan-has-no-refuter-stage"),
+    refuter: refuterValue,
+    refuter_cause: refuter.undetermined_cause,
     confirmed: null,
     source,
   };
@@ -566,17 +614,106 @@ function findOriginRecord(
   return carrier.records.find(({ rec }) => rec.kind === kind && rec.runId === runId && rec.findingId === findingId) ?? null;
 }
 
-/**
- * THE POST-MERGE EFFECT READING (Plan item 3). It is taken AFTER the merge commit's own time — never
- * before it, and never from the fix task's own AC.
+// ── THE EFFECT PREDICTION (Plan item 2) — an INDEPENDENT prediction, not just «did it recur?» ────────
+//
+// THE DEFECT THIS CLOSES (task gap-discovery-verify-loop-refuter-and-independent-effect, fact 3): the
+// effect link used to be ONE mechanical reading — «the same concept key did not recur after the fix» —
+// and `closed` was true when that reading came back negative. That is 硬规则 4 推论四's shape: «没复现»
+// and «修好了» were the same word, and nothing said what the fix PREDICTED. An independent Evaluator is
+// exactly a prediction made BEFORE the fix lands, checked against the measurement AFTER it does.
+//
+// WHERE THE PREDICTION LIVES: the FIX TASK's own body, in a `## Effect Prediction` section written at
+// filing time (the routine filing template now emits one; see `renderRoutineTaskBody`). ⛔ Not the
+// portfolio row and not the carrier record: those are written by the ingester AFTER the fix landed, so a
+// prediction stored there could be — and historically would be — written with hindsight. The fix task is
+// the artifact that exists BEFORE the merge, which is what makes «prediction» the right word.
+//
+// THREE INDEPENDENT VALUES (AC3), never a boolean:
+//   `prediction-confirmed` — a prediction was written AND the post-merge measurement matched it;
+//   `prediction-refuted`   — a prediction was written AND the measurement contradicted it;
+//   `no-prediction`        — the fix task was READ and carries no `## Effect Prediction` section.
+// An effect that could not be judged at all stays `not-evaluated:<reason>` (never one of the three), and
+// an UNREADABLE/unparseable prediction is also `not-evaluated:` — «I could not read the prediction» must
+// not be filed under «no prediction was written» (硬规则 3b).
+//
+// ⛔ THE OLD RECURRENCE READING IS KEPT, as a SUB-READING (`effect.recurrence`), never deleted: it is the
+// measurement the prediction is checked against, and `no-prediction` therefore still shows what the
+// mechanical reading said. That is what keeps `no-prediction` from being isomorphic to the old
+// `no-recurrence-after-fix` (AC3): they are different words at different levels.
+export const EFFECT_KINDS = Object.freeze(["prediction-confirmed", "prediction-refuted", "no-prediction"] as const);
+export type EffectKind = (typeof EFFECT_KINDS)[number];
+
+/** The closed vocabulary of FALSIFIABLE metrics a prediction may name. ⛔ A metric outside this list is
+ *  `not-evaluated:unknown-effect-prediction-metric:<name>` — a report that answered a metric it does not
+ *  know how to measure would be inventing its own verdict (硬规则 3b). */
+export const EFFECT_PREDICTION_METRICS = Object.freeze(["concept_recurs_after_merge"] as const);
+
+export interface EffectPrediction {
+  metric: string;
+  expected: boolean;
+  statement: string | null;
+  /** When the prediction was written, as the task states it. ⛔ Reported, never guessed: `null` when the
+   *  body carries no `recorded_at:` line (absence is absence). */
+  recorded_at: string | null;
+}
+
+export type EffectPredictionRead =
+  | { state: "present"; prediction: EffectPrediction }
+  | { state: "absent" }
+  | { state: "unreadable"; reason: string }
+  | { state: "unparseable"; reason: string }
+  | { state: "unknown-metric"; metric: string };
+
+const unbacktick = (s: string): string => s.replace(/^`+|`+$/g, "").trim();
+
+/** Read a fix task's `## Effect Prediction` section. PURE over the file's bytes.
  *
- * Two independent readings, both from real carriers:
+ *  The five outcomes are deliberately separate: an ABSENT section means «nobody predicted», an
+ *  UNREADABLE task file means «I could not look», an UNPARSEABLE section means «something is there but I
+ *  cannot read it», and an UNKNOWN METRIC means «a prediction exists that this report cannot measure».
+ *  Folding any two of them together would recreate 硬规则 3b. */
+export function readEffectPrediction(root: string | null, taskId: string | null): EffectPredictionRead {
+  if (root === null) return { state: "unreadable", reason: "no-shared-checkout-could-be-named" };
+  if (taskId === null) return { state: "unreadable", reason: "the-finding-carries-no-fix-task-to-predict-from" };
+  const file = path.join(root, "tasks", `${taskId}.md`);
+  let text: string;
+  try {
+    text = fs.readFileSync(file, "utf8");
+  } catch (e) {
+    const code = (e as NodeJS.ErrnoException).code;
+    return { state: "unreadable", reason: code === "ENOENT" ? `no-task-file:tasks/${taskId}.md` : `task-file-unreadable:${code ?? String(e)}` };
+  }
+  const heading = /^##\s+Effect Prediction\s*$/im.exec(text);
+  if (heading === null) return { state: "absent" };
+  const rest = text.slice(heading.index + heading[0].length);
+  const nextHeading = /^##\s+\S/m.exec(rest);
+  const section = nextHeading === null ? rest : rest.slice(0, nextHeading.index);
+  const field = (name: string): string | null => {
+    const m = new RegExp(`^\\s*[-*]\\s*${name}\\s*:\\s*(.+)$`, "im").exec(section);
+    return m === null ? null : unbacktick(m[1]!);
+  };
+  const metric = field("metric");
+  if (metric === null || metric === "") return { state: "unparseable", reason: "the-section-carries-no-metric-line" };
+  const expectedRaw = field("expected");
+  if (expectedRaw === null) return { state: "unparseable", reason: "the-section-carries-no-expected-line" };
+  const expected = /^true$/i.test(expectedRaw) ? true : /^false$/i.test(expectedRaw) ? false : null;
+  if (expected === null) return { state: "unparseable", reason: `expected-is-not-true/false:${JSON.stringify(expectedRaw)}` };
+  if (!(EFFECT_PREDICTION_METRICS as readonly string[]).includes(metric)) return { state: "unknown-metric", metric };
+  return { state: "present", prediction: { metric, expected, statement: field("statement"), recorded_at: field("recorded_at") } };
+}
+
+/**
+ * THE POST-MERGE EFFECT READING (Plan items 2-3). The MEASUREMENT is taken AFTER the merge commit's own
+ * time — never before it, and never from the fix task's own AC — and is then checked against the fix
+ * task's own prediction.
+ *
+ * Two independent measurements, both from real carriers:
  *   (a) the OSD carrier: does the SAME concept key occur again, strictly after the landing?
  *   (b) the evidence store, through the portfolio module's own `deriveRecurred` (the SAME derivation
  *       the Portfolio row's `recurred` field is built from, reused rather than re-implemented).
  *
- * A reading that could not be taken is `not-evaluated:<reason>` — and if NO reading could be taken the
- * whole link is `not-evaluated`, because "we could not look" must not read as "it did not recur"
+ * A reading that could not be taken is `not-evaluated:<reason>` — and if no measurement could be taken
+ * the whole link is `not-evaluated`, because "we could not look" must not read as "it did not recur"
  * (硬规则 3b; this is precisely the value AC5's negative control turns on).
  */
 function effectReading(
@@ -584,6 +721,7 @@ function effectReading(
   row: Record<string, unknown>,
   merge: { sha: string; committed_at_iso: string } | null,
   conceptKey: string | null,
+  taskId: string | null,
 ): unknown {
   if (merge === null) return notEvaluated("no-merge-commit-to-read-the-effect-after");
   const since = merge.committed_at_iso;
@@ -640,13 +778,63 @@ function effectReading(
   const readings = [conceptReading, storeReading];
   const recurredHits = readings.filter((r) => r !== null && r.evaluated === true && r.recurred === true);
   const evaluated = readings.filter((r) => r !== null && r.evaluated === true);
-  if (recurredHits.length > 0) {
-    return { kind: "recurred-after-fix", since, readings, reason: "AT_LEAST_ONE_READING_FOUND_THE_CONCEPT_AGAIN_AFTER_THE_MERGE" };
+  // THE MECHANICAL SUB-READING, unchanged in substance: it used to BE the effect link; it is now the
+  // measurement the prediction is checked against. Its three states keep their old words.
+  const recurrence: { kind: string | null; reason: string; since: string; readings: unknown[] } =
+    recurredHits.length > 0
+      ? { kind: "recurred-after-fix", since, readings, reason: "AT_LEAST_ONE_READING_FOUND_THE_CONCEPT_AGAIN_AFTER_THE_MERGE" }
+      : evaluated.length === readings.length
+        ? { kind: "no-recurrence-after-fix", since, readings, reason: "EVERY_READING_WAS_TAKEN_AND_NONE_FOUND_A_RECURRENCE" }
+        : { kind: null, reason: notEvaluated(`effect-not-evaluated:${readings.filter((r) => r !== null && r.evaluated !== true).map((r) => String(r!.reason)).join("+")}`), since, readings };
+
+  // ── THE PREDICTION vs THE MEASUREMENT ──────────────────────────────────────────────────────────────
+  const read = readEffectPrediction(host.root, taskId);
+  const predictionSource = taskId === null ? null : `tasks/${taskId}.md#Effect Prediction`;
+  if (read.state === "unreadable") return notEvaluated(`effect-prediction-unreadable:${read.reason}`);
+  if (read.state === "unparseable") return notEvaluated(`effect-prediction-unparseable:${read.reason}`);
+  if (read.state === "unknown-metric") return notEvaluated(`unknown-effect-prediction-metric:${read.metric}`);
+
+  if (read.state === "absent") {
+    // A DEFINITE state about the fix task — and it carries the measurement beside it so the two are
+    // visibly different readings rather than one word doing double duty (AC3).
+    return {
+      kind: "no-prediction",
+      since,
+      recurrence,
+      readings,
+      prediction_source: predictionSource,
+      reason: "THE_FIX_TASK_CARRIES_NO_EFFECT_PREDICTION_SECTION",
+    };
   }
-  if (evaluated.length === readings.length) {
-    return { kind: "no-recurrence-after-fix", since, readings, reason: "EVERY_READING_WAS_TAKEN_AND_NONE_FOUND_A_RECURRENCE" };
+
+  const prediction = read.prediction;
+  // ⛔ WHEN was the prediction written, relative to the landing? Reported, not enforced: a prediction
+  //    recorded AFTER the merge it claims to anticipate is a POST-HOC claim, and the reader must be able
+  //    to see that (硬规则 3b: an unreadable/absent value must not be shaped like a real one). `null`
+  //    when the body states no `recorded_at` — absence is absence.
+  const recorded_after_merge =
+    prediction.recorded_at !== null && Number.isFinite(Date.parse(prediction.recorded_at))
+      ? Date.parse(prediction.recorded_at) > Date.parse(since)
+      : null;
+
+  if (recurrence.kind === null) {
+    // The prediction EXISTS but the metric cannot be measured ⇒ the link is not evaluated. Answering
+    // «confirmed» or «refuted» here would be inventing the measurement (硬规则 3b).
+    return notEvaluated(`effect-prediction-cannot-be-checked:${String(recurrence.reason).replace(/^not-evaluated:/, "")}`);
   }
-  return { kind: null, reason: notEvaluated(`effect-not-evaluated:${readings.filter((r) => r !== null && r.evaluated !== true).map((r) => String(r!.reason)).join("+")}`), since, readings };
+  // `concept_recurs_after_merge` is the only metric the vocabulary admits (readEffectPrediction rejects
+  // anything else), so the dispatch is total over the vocabulary rather than a default arm.
+  const measuredValue = recurrence.kind === "recurred-after-fix";
+  const matched = measuredValue === prediction.expected;
+  return {
+    kind: matched ? "prediction-confirmed" : "prediction-refuted",
+    since,
+    recurrence,
+    readings,
+    prediction: { ...prediction, source: predictionSource, recorded_after_merge },
+    measured: { metric: prediction.metric, evaluated: true, value: measuredValue, from: recurrence.kind },
+    reason: matched ? "THE_MEASURED_VALUE_MATCHES_THE_PREDICTION" : "THE_MEASURED_VALUE_CONTRADICTS_THE_PREDICTION",
+  };
 }
 
 /** The task file's own frontmatter status, read from the shared checkout. */
@@ -756,7 +944,10 @@ function buildFinding(
     merge = notEvaluated(isStr(row.fix_landed_reason, 1) ? String(row.fix_landed_reason) : `no-fix_landed_commit-and-${host.modules.ok ? "no-fix_task" : String(host.modules.reason)}`);
   }
 
-  const effect = effectReading(host, row, mergeFor, conceptKey);
+  // ⛔ The PREDICTION is read from the fix task's own body — the artifact that exists BEFORE the merge.
+  //    `null` (not `notEvaluated`) is passed when the row names no fix task: `readEffectPrediction` turns
+  //    that into its own `unreadable:` reason, so «no task» cannot be laundered into «no prediction».
+  const effect = effectReading(host, row, mergeFor, conceptKey, isStr(row.fix_task, 1) ? String(row.fix_task) : null);
 
   const links: Record<LinkName, unknown> = {
     carrier: { rel: PORTFOLIO_REL, line, kind: isStr(row.kind, 1) ? String(row.kind) : null, id: isStr(row.id, 1) ? String(row.id) : null },
@@ -788,6 +979,7 @@ function buildFinding(
     origin_carrier: isStr(row.origin_carrier, 1) ? String(row.origin_carrier) : null,
     verifier: v.verifier,
     refuter: v.refuter,
+    refuter_cause: v.refuter_cause,
     verifier_source: v.source,
     refuter_source: v.source,
     confirmed: v.confirmed,
@@ -798,7 +990,16 @@ function buildFinding(
     effect,
     chain: {
       complete: missing.length === 0,
-      closed: missing.length === 0 && effectKind === "no-recurrence-after-fix",
+      // ⛔ CLOSED IS NOW TWO INDEPENDENT CONDITIONS (DoD item 1): every link is a value — which already
+      //    requires the refuter link — AND the fix's own PREDICTION was matched by the measurement. The
+      //    old rule (`effect === "no-recurrence-after-fix"`) accepted a mechanical non-recurrence as a
+      //    closure; that is the value this task replaces.
+      closed: missing.length === 0 && effectKind === "prediction-confirmed",
+      closed_reason: missing.length > 0
+        ? `LINKS_NOT_VALUED:${missing.join("+")}`
+        : effectKind === "prediction-confirmed"
+          ? "EVERY_LINK_IS_A_VALUE_AND_THE_PREDICTION_MATCHED_THE_MEASUREMENT"
+          : `EVERY_LINK_IS_A_VALUE_BUT_THE_EFFECT_IS:${String(effectKind ?? (isObj(effect) ? effect.reason : effect))}`,
       furthest_link: LINK_ORDER[furthest]!,
       missing,
     },
@@ -1052,7 +1253,12 @@ export function renderText(report: Record<string, unknown>): string {
       out.push(
         `       merge=${m ? `${String(m.sha).slice(0, 12)} on-${String(m.branch)}=${String(m.on_branch)} @${String(m.committed_at)}` : fmt(f.merge_commit)}`,
       );
-      out.push(`       effect=${eff ? `${String(eff.kind)} since=${String(eff.since)}` : fmt(f.effect)}`);
+      const rec = eff !== null && isObj(eff.recurrence) ? (eff.recurrence as Record<string, unknown>) : null;
+      out.push(
+        `       effect=${eff ? `${String(eff.kind)} since=${String(eff.since)}` : fmt(f.effect)}` +
+          `${eff !== null && isObj(eff.prediction) ? ` prediction=${String((eff.prediction as Record<string, unknown>).metric)}=${String((eff.prediction as Record<string, unknown>).expected)}${(eff.prediction as Record<string, unknown>).recorded_after_merge === true ? " (RECORDED-AFTER-THE-MERGE)" : ""}` : ""}` +
+          `${rec ? ` recurrence=${String(rec.kind)}` : ""}`,
+      );
       out.push(`       chain: complete=${f.chain.complete} closed=${f.chain.closed} furthest=${f.chain.furthest_link}${f.chain.missing.length ? ` missing=[${f.chain.missing.join(",")}]` : ""}`);
     }
     const r = h.rounds;
@@ -1127,11 +1333,17 @@ export async function main(argv: string[] = process.argv): Promise<number> {
     kind: "discovery-closed-loop-report",
     window: { since, applies_to: "rounds only — the finding carriers are reported whole" },
     routines,
+    effect_vocabulary: {
+      kinds: EFFECT_KINDS,
+      prediction_metrics: EFFECT_PREDICTION_METRICS,
+      note: "`effect.kind` is the PREDICTION verdict (three independent values); `effect.recurrence.kind` is the mechanical recurrence sub-reading it is checked against. An effect that could not be judged is `not-evaluated:<reason>` — never one of the three.",
+    },
     hosts,
     notes: [
       "READ-ONLY: this report opens carriers O_RDONLY and writes nothing. No model call, no budget change.",
       "DETERMINISTIC: no wall-clock 'now' enters the output; every cutoff comes from a value in a carrier.",
-      "Every link is a value or `not-evaluated:<reason>`. `closed` requires EVERY link to be a value AND the post-merge effect reading to be negative.",
+      "Every link is a value or `not-evaluated:<reason>`. `closed` requires EVERY link to be a value — which includes a REFUTER reading — AND the fix task's own `## Effect Prediction` to be matched by the post-merge measurement.",
+      "The refuter link is read through the OSD refuter's own record reader for ALL THREE origins; an origin whose writer emits no `refutation_verdict` still reads `not-evaluated:<origin>-has-no-refuter-stage`, which is a statement about the MECHANISM, not about a refuter that ran and found nothing.",
     ],
   };
   process.stdout.write(args.flags.json === true ? `${JSON.stringify(report, null, 2)}\n` : `${renderText(report as unknown as Record<string, unknown>)}\n`);

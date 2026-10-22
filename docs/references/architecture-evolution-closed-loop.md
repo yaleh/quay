@@ -4,7 +4,13 @@
 显式切成可分别设计、可分别落地的具名角色与载体。不是科学定理，不创建 Goal，不改运行代码。
 （2026-10-22 更正：「全文零实现」已不成立。**Evidence Store 已有生产载体** `.quay/architecture-evidence-store.jsonl`
 （2026-10-11 起，截至 2026-10-22 `wc -l` = 378），发现层载体 `.quay/arch-discovery-findings.jsonl`（同日 `wc -l` = 166）；
-**独立 Evaluator 实际上仍缺、Learning Store / Evolution Planner 仍零实现**——现状读法见 §2.2、§2.6 与第 9 节表内的更正注，
+**refuter 读侧已接三条 origin；Evaluator 的「预测对结果」已落**（`plugin/scripts/discovery-closed-loop-report.ts` 的
+`effect` 三态：`prediction-confirmed` / `prediction-refuted` / `no-prediction`；`closed` 现在要求 refuter 有值 ∧ 预测被实测对上）。
+**仍缺**：① arch-discovery / routine-scan 的**产出侧**还没有写 `refutation_verdict` 的阶段（读侧已接线，生产记录里仍是 0 条，
+故 3 条 routine-origin 链仍 `missing:[refuter]`）；② arch-discovery 的 finding **没有进 portfolio**（`.quay/discovery-portfolio.jsonl`
+里 `origin_carrier = .quay/arch-discovery-findings.jsonl` 的行数为 0），所以它的链在本报告里根本不可见；③ 预测的**合并前写入纪律**
+只能靠 `recorded_at` 事后核对（本仓库唯一一条真 done 链的预测是回填的，报告以 `prediction.recorded_after_merge:true` 标出）；
+④ Learning Store / Evolution Planner 仍零实现。现状读法见 §2.2、§2.6 与第 9 节表内的更正注，
 总读数以 `node --experimental-strip-types plugin/scripts/discovery-closed-loop-report.ts --host=local=<repo>` 为准。）
 
 **本文不重复、只指路的既有正本：**
@@ -41,7 +47,7 @@ GOAL-030~036 之外的任何任务应该做什么；不对"端到端架构自举
 | 本文层级 | 对应 harness 正本 §0.4 行 | 当前状态 |
 |---|---|---|
 | **L1 Execution** | Task execution（单个任务 ready→done） | **真实运作** |
-| **L2 Architecture Evolution**（本文主体，第 1-8 节） | Goal/investigation decomposition + 本文新增的 Evidence Store/Investigator/Planner/Evaluator 具名阶段 | Goal 层**真实运作**（GOAL-030~036）；本文新增的具名角色**设计假设，零实现**（2026-10-22 更正：Evidence Store 已有载体，Investigator 有部分机件；Planner/Evaluator/Learning Store 仍缺，见文首更正注） |
+| **L2 Architecture Evolution**（本文主体，第 1-8 节） | Goal/investigation decomposition + 本文新增的 Evidence Store/Investigator/Planner/Evaluator 具名阶段 | Goal 层**真实运作**（GOAL-030~036）；本文新增的具名角色**设计假设，零实现**（2026-10-22 更正：Evidence Store 已有载体，Investigator 有部分机件；**refuter 读侧已接三条 origin，Evaluator=预测对结果已落（报告 `effect` 三态）**；仍缺：arch/routine 的 refuter **产出侧**、arch→portfolio 的接入、Planner/Learning Store。见文首更正注） |
 | **L3 Methodology Evolution** | Meta-driver proposal + Meta-driver builder | Meta-driver **真实但窄域**，~~且当前故障~~（2026-10-22 更正：已于 2026-10-09 修复，见 harness 正本 §6 更正注）；Meta-driver builder **零实现**（2026-10-22 复核仍成立） |
 
 **本文的定位**：L2 层目前只有"Goal 怎么切、怎么落地"这一半是真实机制（`branch:true` Goal 标准流程），
@@ -173,12 +179,29 @@ self-host → before/after → 人工触发 merge → 机械 fan-in → post-mer
 
 ### 2.6 独立 Evaluator — 设计假设，已有两次真实的人工 ad hoc 实例
 
-（2026-10-22 更正/现状指针：独立 Evaluator **实际上仍缺**。读法：
-`node --experimental-strip-types plugin/scripts/discovery-closed-loop-report.ts --host=local=<repo>`。截至 2026-10-22 该报告：
-portfolio 链 26 条 finding，`closed=true` 仅 1/26；refuter 列 10 条 `supported`、13 条
+（2026-10-22 二次更正/现状指针：**refuter 已接三条 origin（读侧）；Evaluator = 预测对结果，已落**
+——`plugin/scripts/discovery-closed-loop-report.ts` 的 `effect` 链接现在读 fix task 自己的
+`## Effect Prediction`（`recorded_at` 为立案轮 ts），把预测与 merge 后的实测对账，输出三个独立取值
+`prediction-confirmed` / `prediction-refuted` / `no-prediction`（或 `not-evaluated:<原因>`）；机械复发读数
+降为 `effect.recurrence` 子读数，`closed` 现在要求「每条链接都有值（含 refuter）」∧「预测被实测对上」。
+读法：`node --experimental-strip-types plugin/scripts/discovery-closed-loop-report.ts --host=local=<repo>`。
+截至 2026-10-22 该报告：portfolio 链 26 条 finding，`closed=true` 1/26 —— **那一条是真实 done 链**
+（`open-semantic-discovery@2026-10-13T01:10:43.215Z#2`：refuter `supported` → task `done` → merge 在 develop
+→ `effect: prediction-confirmed`）；refuter 列 10 条 `supported`、13 条
 `not-evaluated:no-verdict-reader-for-origin_carrier`、3 条 `not-evaluated:routine-scan-has-no-refuter-stage`；
-修复后效果列 13 条 `no-recurrence-after-fix`、13 条 `not-evaluated`。"no-recurrence-after-fix" 是机械复发读数，
-不是本节要求的、身份独立于 Planner/Investigator 的预测-实测对账。）
+effect 列 1 条 `prediction-confirmed`、12 条 `no-prediction`、13 条 `not-evaluated:no-merge-commit…`。
+
+**还缺什么（逐条，别把上面的「已落」读大）**：
+1. **产出侧 refuter 仍缺两条 origin**：arch-discovery 与 routine-scan 的 writer 不写 `refutation_verdict`，
+   所以生产里那 3 条 routine-origin 链仍 `missing:[refuter]`；读侧接线只保证「一旦写了就被读到」，
+   它不制造一条读数（硬规则 3b：读不到 ⇒ `not-evaluated`，不伪装成 `not-run`/`supported`）。
+2. **arch-discovery 的 finding 没有进 portfolio**：`.quay/discovery-portfolio.jsonl` 中
+   `origin_carrier = .quay/arch-discovery-findings.jsonl` 的行数为 0 ⇒ arch origin 的链在本报告里不可见，
+   它的 refuter 分支目前只有 fixture 覆盖。
+3. **预测的「合并前」纪律只有事后核对**：本仓库唯一一条真 done 链的 `## Effect Prediction` 是
+   **2026-10-22 回填**到一条 2026-10-13 已合并的 fix 上，报告如实标出 `prediction.recorded_after_merge: true`。
+   真正的合并前预测要等本机制落地后新立的 fix 才自然产生（routine 立案模板已从源头写入）。
+4. Learning Store / Evolution Planner 仍零实现（与本节无关，见 §2.7/§9）。
 
 **人工先例**：
 - **GOAL-033**：立项时预测 package SCC `6→5`，分支落地后实测是 `6→4`（`fan-in` 随 `cli` 一并脱环）。

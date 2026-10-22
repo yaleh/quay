@@ -1246,6 +1246,52 @@ export function refutationUndeterminedCause(input: {
   return "unparseable";
 }
 
+// ── THE REFUTER STAGE'S RECORD READER — ONE definition for EVERY origin ───────────────────────────────
+// WHY THIS IS HERE AND NOT IN THE REPORT (task gap-discovery-verify-loop-refuter-and-independent-effect):
+// the closed-loop report has to answer «did an INDEPENDENT refuter read this finding?» for three origins
+// (OSD's `cluster`, the routine probe's `finding`, arch-discovery's `finding`). Until this task it
+// hard-coded `not-evaluated:<origin>-has-no-refuter-stage` for the last two, so a record that DID carry a
+// refutation could never have been read — the absence was baked into the reader, which is the same
+// failure mode as a judge that cannot read its input returning the passing value (硬规则 3b).
+//
+// ⛔ THE VOCABULARY AND THE FIELD NAMES ARE THE REFUTER'S OWN, spelled here ONCE:
+// `refutation_verdict` / `refutation_undetermined_cause` / `refutation_counterexample` are what the OSD
+// round writes (see `refutationReading` above) and what the dogfood round reuses. A second reader that
+// re-spelled them would be a second definition to keep in step (硬规则 5b).
+//
+// ⛔ ABSENCE IS NOT A VERDICT. A record with no `refutation_verdict` returns `verdict: null` — the caller
+// decides whether that means «the stage exists but produced no reading» (OSD/dogfood) or «this origin's
+// writer has no refuter stage yet» (arch/routine). Folding those two into one `not-run` here would make
+// an unwired stage indistinguishable from a refuter that ran and answered `not-run`.
+export const REFUTATION_VERDICTS = Object.freeze(["supported", "refuted", "undetermined", "not-run"] as const);
+export type RefutationVerdict = (typeof REFUTATION_VERDICTS)[number];
+
+export interface RefuterRecordReading {
+  /** The refuter's verdict, verbatim, or `null` when the record carries none. */
+  verdict: string | null;
+  /** `true` only for a verdict the vocabulary names AND that is not `undetermined`/`not-run` — the G3
+   *  «an independent refuter actually settled this» reading. Absence and undetermined both give false,
+   *  but they are different `verdict` values, so the caller can still tell them apart. */
+  determinate: boolean;
+  undetermined_cause: string | null;
+  counterexample: unknown;
+}
+
+/** Read the refuter's answer off ANY finding/cluster record — whatever origin wrote it. */
+export function readRefuterStage(rec: Record<string, unknown>): RefuterRecordReading {
+  const verdict = typeof rec.refutation_verdict === "string" && rec.refutation_verdict.trim() !== ""
+    ? rec.refutation_verdict.trim()
+    : null;
+  return {
+    verdict,
+    determinate: verdict === "supported" || verdict === "refuted",
+    undetermined_cause: typeof rec.refutation_undetermined_cause === "string" && rec.refutation_undetermined_cause !== ""
+      ? rec.refutation_undetermined_cause
+      : null,
+    counterexample: rec.refutation_counterexample ?? null,
+  };
+}
+
 // ── THE PER-CLUSTER ATTRIBUTION JOIN + THE RESIDENT-ROUND DoD ─────────────────────────────────────────
 // THE DEFECT THIS CLOSES (task gap-osd-resident-round-never-autonomously-confirms-fix-attribution-and-
 // call-failed-retry, Plan items 3-4). A round's `confirmed:0` was a ROUND-level fact with no per-cluster

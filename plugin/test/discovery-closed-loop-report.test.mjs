@@ -32,15 +32,19 @@ import {
   ROUND_CLASSES,
   UNCLASSIFIED_PREFIX,
   LINK_ORDER,
+  EFFECT_KINDS,
+  EFFECT_PREDICTION_METRICS,
   classifyRoundFact,
   classifyRounds,
   readCarrier,
+  readEffectPrediction,
   originClassOf,
   parseHostSpec,
   sharedCheckoutOf,
   isOnBranch,
   notEvaluated,
 } from "../scripts/discovery-closed-loop-report.ts";
+import { renderRoutineTaskBody } from "../scripts/routine-file-gate.ts";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SCRIPT = path.join(HERE, "..", "scripts", "discovery-closed-loop-report.ts");
@@ -64,18 +68,26 @@ function git(root, args, { date = "2026-10-01T00:00:00Z" } = {}) {
 }
 
 /** A git repo whose `develop` branch already carries one `done` commit on `tasks/<taskId>.md`.
- *  Returns `{root, sha}` — a REAL landing the report has to find by reading git, not by being told. */
-function repoWithLandedFix(taskId, { date = "2026-10-01T00:00:00Z" } = {}) {
+ *  Returns `{root, sha}` — a REAL landing the report has to find by reading git, not by being told.
+ *
+ *  `prediction` is the VERBATIM body of the fix task's `## Effect Prediction` section (or `null` for a
+ *  fix that carries none). It lives on the TASK — the artifact that exists before the merge — which is
+ *  where `readEffectPrediction` reads it from. */
+function repoWithLandedFix(taskId, { date = "2026-10-01T00:00:00Z", prediction = null } = {}) {
   const root = tmpdir("repo");
   git(root, ["init", "-q", "-b", "develop"]);
   fs.mkdirSync(path.join(root, "tasks"), { recursive: true });
   fs.mkdirSync(path.join(root, ".quay"), { recursive: true });
-  fs.writeFileSync(path.join(root, "tasks", `${taskId}.md`), `---\nid: ${taskId}\nstatus: done\n---\n# ${taskId}\n`);
+  const predictionSection = prediction === null ? "" : `\n## Effect Prediction\n${prediction}\n`;
+  fs.writeFileSync(path.join(root, "tasks", `${taskId}.md`), `---\nid: ${taskId}\nstatus: done\n---\n# ${taskId}\n${predictionSection}`);
   git(root, ["add", "-A"]);
   git(root, ["commit", "-q", "-m", `tasks: 翻 ${taskId} done（driver 机械 fan-in）`], { date });
   const sha = git(root, ["rev-parse", "HEAD"]).trim();
   return { root, sha };
 }
+
+/** The prediction a fix task carriers by default in these fixtures: «the concept does not recur». */
+const PREDICT_NO_RECURRENCE = "- metric: concept_recurs_after_merge\n- expected: false\n- statement: fixture prediction — the same concept must not recur after the fix\n- recorded_at: 2026-09-30T00:20:00.000Z";
 
 const writeJsonl = (root, rel, records) => {
   fs.mkdirSync(path.dirname(path.join(root, rel)), { recursive: true });
@@ -107,9 +119,9 @@ const CONCEPT_KEY = "duplication|a.ts,b.ts";
  *  store would make that reading `not-evaluated` — which would leave `recurred-after-fix` reachable but
  *  `no-recurrence-after-fix` NOT, i.e. the control's negative arm could not be taken. An empty store
  *  makes "was looked at, nothing found" a real reading, which is exactly the value under test. */
-function fixtureFinding({ laterTs }) {
+function fixtureFinding({ laterTs, prediction = PREDICT_NO_RECURRENCE }) {
   const taskId = "gap-fixture-fix-landed";
-  const { root, sha } = repoWithLandedFix(taskId);
+  const { root, sha } = repoWithLandedFix(taskId, { prediction });
   writeJsonl(root, ".quay/architecture-evidence-store.jsonl", []);
   writeJsonl(root, ".quay/discovery-portfolio.jsonl", [
     {
@@ -181,17 +193,22 @@ test("AC5 negative control: a merged fix whose concept recurs AFTERWARDS is `rec
   assert.equal(f.merge_commit.on_branch, true, "the fixture commit was made ON develop");
   assert.match(String(f.merge_commit.committed_at), /^2026-10-01T00:00:00/, "cutoff comes from the commit, not the clock");
 
-  // THE ASSERTION THIS TEST EXISTS FOR.
-  assert.equal(f.effect.kind, "recurred-after-fix", "a later occurrence of the same concept key must read as recurrence");
-  assert.equal(f.effect.readings[0].recurred, true);
-  assert.equal(f.effect.readings[0].concept_key, CONCEPT_KEY, "the recurrence is judged by the finding's OWN resolved key");
-  assert.equal(f.effect.readings[0].later_occurrences.length, 1, "the later cluster is cited by record_id");
-  assert.match(String(f.effect.readings[0].later_occurrences[0].record_id), /^open-semantic-discovery@2026-10-02/);
+  // THE ASSERTION THIS TEST EXISTS FOR. The fix task predicted «the concept does not recur»; the
+  // measurement found a later occurrence ⇒ the PREDICTION is refuted — a different value from
+  // «the measurement was not taken».
+  assert.equal(f.effect.kind, "prediction-refuted", "a prediction the measurement contradicts must read as refuted");
+  assert.equal(f.effect.prediction.expected, false, "the prediction's own expected value is carried, not inferred");
+  assert.equal(f.effect.measured.value, true, "the measurement says the concept DID recur");
+  assert.equal(f.effect.recurrence.kind, "recurred-after-fix", "the mechanical sub-reading keeps its own word");
+  assert.equal(f.effect.recurrence.readings[0].recurred, true);
+  assert.equal(f.effect.recurrence.readings[0].concept_key, CONCEPT_KEY, "the recurrence is judged by the finding's OWN resolved key");
+  assert.equal(f.effect.recurrence.readings[0].later_occurrences.length, 1, "the later cluster is cited by record_id");
+  assert.match(String(f.effect.recurrence.readings[0].later_occurrences[0].record_id), /^open-semantic-discovery@2026-10-02/);
 
   // …and it is NOT reported as closed. A chain whose links are all present but whose effect came back
   // positive is a DIFFERENT state from a closed loop, and the two must not share a word.
   assert.equal(f.chain.complete, true, "every link resolved to a value — the chain itself ran to the end");
-  assert.equal(f.chain.closed, false, "recurred-after-fix must NOT be reported as closed");
+  assert.equal(f.chain.closed, false, "prediction-refuted must NOT be reported as closed");
 
   fs.rmSync(root, { recursive: true, force: true });
 });
@@ -203,11 +220,190 @@ test("AC5 control's other arm: the SAME fixture with the later occurrence before
   const { root } = fixtureFinding({ laterTs: "2026-09-30T12:00:00.000Z" });
   const report = runReport(root);
   const f = findingBy(report.hosts[0], "open-semantic-discovery@2026-09-30T00:00:00.000Z#1");
-  assert.equal(f.effect.kind, "no-recurrence-after-fix", "an occurrence BEFORE the landing is not a recurrence");
-  assert.equal(f.effect.readings[0].evaluated, true, "the reading WAS taken — it just came back negative");
-  assert.equal(f.effect.readings[0].later_occurrences.length, 0);
-  assert.equal(f.effect.readings[1].evaluated, true, "the evidence-store reading was taken too");
-  assert.equal(f.chain.closed, true, "all links present + no recurrence ⇒ closed");
+  assert.equal(f.effect.recurrence.kind, "no-recurrence-after-fix", "an occurrence BEFORE the landing is not a recurrence");
+  assert.equal(f.effect.recurrence.readings[0].evaluated, true, "the reading WAS taken — it just came back negative");
+  assert.equal(f.effect.recurrence.readings[0].later_occurrences.length, 0);
+  assert.equal(f.effect.recurrence.readings[1].evaluated, true, "the evidence-store reading was taken too");
+  assert.equal(f.effect.kind, "prediction-confirmed", "the prediction («no recurrence») matched the measurement");
+  assert.equal(f.chain.closed, true, "all links present + the prediction matched ⇒ closed");
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+// ── ①b AC3/AC5: THE THREE INDEPENDENT EFFECT VALUES, and the deliberate-error control ─────────────
+
+test("AC3: prediction-confirmed / prediction-refuted / no-prediction are three DIFFERENT kinds", () => {
+  // Three fixtures that differ ONLY in the fix task's `## Effect Prediction` section (and, for the
+  // refuted arm, in whether the concept recurred). If the effect were still the old mechanical reading,
+  // all three would report the same word.
+  const seen = [];
+
+  const confirmed = fixtureFinding({ laterTs: "2026-09-30T12:00:00.000Z" }); // no recurrence + predicted false
+  const cf = findingBy(runReport(confirmed.root).hosts[0], "open-semantic-discovery@2026-09-30T00:00:00.000Z#1");
+  seen.push(cf.effect.kind);
+  assert.equal(cf.effect.kind, "prediction-confirmed");
+  assert.equal(cf.effect.recurrence.kind, "no-recurrence-after-fix");
+  assert.equal(cf.effect.prediction.recorded_after_merge, false, "recorded_at 2026-09-30T00:20Z precedes the 2026-10-01 landing");
+  fs.rmSync(confirmed.root, { recursive: true, force: true });
+
+  // THE DELIBERATELY WRONG PREDICTION (AC5's control, its own arm): the same non-recurring measurement,
+  // but the task predicted a RECURRENCE. If the report echoed the prediction instead of measuring, this
+  // arm could not differ from the one above.
+  const refuted = fixtureFinding({
+    laterTs: "2026-09-30T12:00:00.000Z",
+    prediction: "- metric: concept_recurs_after_merge\n- expected: true\n- statement: deliberate false prediction",
+  });
+  const rf = findingBy(runReport(refuted.root).hosts[0], "open-semantic-discovery@2026-09-30T00:00:00.000Z#1");
+  seen.push(rf.effect.kind);
+  assert.equal(rf.effect.kind, "prediction-refuted", "a deliberately wrong prediction must be REFUTED by the measurement");
+  assert.equal(rf.effect.prediction.expected, true);
+  assert.equal(rf.effect.measured.value, false);
+  assert.equal(rf.chain.closed, false, "a refuted prediction is not a closed loop");
+  fs.rmSync(refuted.root, { recursive: true, force: true });
+
+  // …and a fix task with NO prediction section. The measurement still ran and still came back negative,
+  // which is EXACTLY why the two must be different words: `no-prediction` sits above, the old
+  // `no-recurrence-after-fix` sits in `effect.recurrence`, and neither is the other.
+  const absent = fixtureFinding({ laterTs: "2026-09-30T12:00:00.000Z", prediction: null });
+  const af = findingBy(runReport(absent.root).hosts[0], "open-semantic-discovery@2026-09-30T00:00:00.000Z#1");
+  seen.push(af.effect.kind);
+  assert.equal(af.effect.kind, "no-prediction");
+  assert.equal(af.effect.recurrence.kind, "no-recurrence-after-fix", "the mechanical reading is still there — as a sub-reading");
+  assert.notEqual(af.effect.kind, af.effect.recurrence.kind, "`no-prediction` must not be isomorphic to `no-recurrence-after-fix`");
+  assert.equal(af.chain.closed, false, "no prediction ⇒ nothing to confirm ⇒ not closed");
+  fs.rmSync(absent.root, { recursive: true, force: true });
+
+  assert.deepEqual([...new Set(seen)].sort(), [...EFFECT_KINDS].sort(), "all three declared kinds are producible, each by its own fixture");
+  assert.equal(new Set(seen).size, 3, "three distinct fixtures must yield three distinct kinds");
+  assert.deepEqual([...EFFECT_PREDICTION_METRICS], ["concept_recurs_after_merge"], "the metric vocabulary is closed and enumerable");
+});
+
+test("an unmeasurable or unreadable prediction is `not-evaluated`, never one of the three kinds", () => {
+  // (a) a metric outside the closed vocabulary ⇒ the report does not invent a verdict.
+  const unknown = fixtureFinding({
+    laterTs: "2026-09-30T12:00:00.000Z",
+    prediction: "- metric: vibes_are_good\n- expected: true",
+  });
+  const uf = findingBy(runReport(unknown.root).hosts[0], "open-semantic-discovery@2026-09-30T00:00:00.000Z#1");
+  assert.equal(uf.effect, notEvaluated("unknown-effect-prediction-metric:vibes_are_good"));
+  assert.equal(uf.chain.closed, false);
+  fs.rmSync(unknown.root, { recursive: true, force: true });
+
+  // (b) a section that exists but cannot be parsed ⇒ its OWN value, not `no-prediction`.
+  const unparseable = fixtureFinding({
+    laterTs: "2026-09-30T12:00:00.000Z",
+    prediction: "- metric: concept_recurs_after_merge\n- statement: no expected line at all",
+  });
+  const pf = findingBy(runReport(unparseable.root).hosts[0], "open-semantic-discovery@2026-09-30T00:00:00.000Z#1");
+  assert.match(String(pf.effect), /^not-evaluated:effect-prediction-unparseable:/);
+  assert.notEqual(pf.effect, "no-prediction", "«I could not read it» must not be filed under «nobody wrote one»");
+  fs.rmSync(unparseable.root, { recursive: true, force: true });
+});
+
+// ── ①c AC1/AC2: the refuter link is read for ALL THREE origins through ONE reader ─────────────────
+
+test("AC1: arch-discovery and routine-scan records that CARRY a refutation_verdict are consumed", () => {
+  const root = tmpdir("refuters");
+  git(root, ["init", "-q", "-b", "develop"]);
+  fs.mkdirSync(path.join(root, ".quay"), { recursive: true });
+  fs.mkdirSync(path.join(root, "tasks"), { recursive: true });
+  // arch-discovery: the same finding_fp twice — one with a refuter answer, one without.
+  writeJsonl(root, ".quay/arch-discovery-findings.jsonl", [
+    { kind: "finding", routine: "arch-discovery", ts: "2026-09-29T00:00:00.000Z", finding_fp: "fp-with-refuter", subject_key: "cycle:a|b", verdict: "drift-hypothesis", refutation_verdict: "refuted", refutation_undetermined_cause: null, instrument: "space" },
+    { kind: "finding", routine: "arch-discovery", ts: "2026-09-29T00:00:00.000Z", finding_fp: "fp-without-refuter", subject_key: "cycle:c|d", verdict: "drift-hypothesis", instrument: "space" },
+  ]);
+  // routine-scan: the `runId#findingId` convention, one with a refuter answer.
+  writeJsonl(root, ".quay/routine-findings.jsonl", [
+    { kind: "finding", routine: "semantic-dedup-scan", runId: "semantic-dedup-scan-1", findingId: "twin", files: ["a.ts", "b.ts"], verdict: "real-duplication", refutation_verdict: "supported", ts: "2026-09-29T00:00:00.000Z" },
+  ]);
+  const row = (id, carrier, ref, extra = {}) => ({
+    kind: "portfolio_finding",
+    id: `portfolio_finding-${id}`,
+    finding_id: id,
+    origin: "autonomous-routine",
+    origin_carrier: carrier,
+    origin_ref: ref,
+    components: ["a.ts", "b.ts"],
+    outcome: "supported",
+    fix_task: null,
+    fix_landed_commit: null,
+    fix_landed_reason: "NO_FIX_TASK",
+    recurred: null,
+    recurred_reason: "NO_LATER_OUTCOME_ON_SAME_COMPONENTS",
+    duplicate_of: null,
+    ts: "2026-09-30T00:00:00.000Z",
+    ...extra,
+  });
+  writeJsonl(root, ".quay/discovery-portfolio.jsonl", [
+    row("A-with", ".quay/arch-discovery-findings.jsonl", "fp-with-refuter"),
+    row("A-without", ".quay/arch-discovery-findings.jsonl", "fp-without-refuter"),
+    row("R-with", ".quay/routine-findings.jsonl", "semantic-dedup-scan-1#twin"),
+  ]);
+
+  const host = runReport(root).hosts[0];
+  // arch-discovery: the field IS consumed on the normal path…
+  const withRef = findingBy(host, "A-with");
+  assert.equal(withRef.refuter, "refuted", "arch-discovery's refuter reading must come from the record, not a hard-coded absence");
+  assert.equal(withRef.refuter_cause, null);
+  assert.ok(!withRef.chain.missing.includes("refuter"), "a record with a refuter answer must not be missing the refuter link");
+  // …and the hard-coded token survives ONLY for a record that carries no field.
+  const without = findingBy(host, "A-without");
+  assert.equal(without.refuter, notEvaluated("arch-discovery-has-no-refuter-stage"));
+  assert.ok(without.chain.missing.includes("refuter"));
+
+  // routine-scan: same reader, same vocabulary.
+  const routine = findingBy(host, "R-with");
+  assert.equal(routine.refuter, "supported", "routine-scan's refuter reading must come from the record too");
+  assert.ok(!routine.chain.missing.includes("refuter"));
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test("`readEffectPrediction` distinguishes absent / unreadable / unparseable / unknown-metric", () => {
+  const root = tmpdir("prediction");
+  fs.mkdirSync(path.join(root, "tasks"), { recursive: true });
+  assert.deepEqual(readEffectPrediction(root, "no-such-task"), { state: "unreadable", reason: "no-task-file:tasks/no-such-task.md" });
+  assert.deepEqual(readEffectPrediction(root, null), { state: "unreadable", reason: "the-finding-carries-no-fix-task-to-predict-from" });
+  assert.deepEqual(readEffectPrediction(null, "x"), { state: "unreadable", reason: "no-shared-checkout-could-be-named" });
+
+  const write = (id, body) => fs.writeFileSync(path.join(root, "tasks", `${id}.md`), body);
+  write("t-bare", "---\nid: t-bare\n---\n## Plan\nnothing predicted\n");
+  assert.deepEqual(readEffectPrediction(root, "t-bare"), { state: "absent" });
+
+  write("t-ok", "## Effect Prediction\n\n- metric: concept_recurs_after_merge\n- expected: `false`\n- statement: backticked values are still values\n- recorded_at: 2026-09-30T00:00:00Z\n\n## AC\n- [ ] x\n");
+  assert.deepEqual(readEffectPrediction(root, "t-ok"), {
+    state: "present",
+    prediction: { metric: "concept_recurs_after_merge", expected: false, statement: "backticked values are still values", recorded_at: "2026-09-30T00:00:00Z" },
+  });
+
+  write("t-unknown", "## Effect Prediction\n- metric: made_up\n- expected: true\n");
+  assert.deepEqual(readEffectPrediction(root, "t-unknown"), { state: "unknown-metric", metric: "made_up" });
+
+  write("t-bad-expected", "## Effect Prediction\n- metric: concept_recurs_after_merge\n- expected: maybe\n");
+  assert.equal(readEffectPrediction(root, "t-bad-expected").state, "unparseable");
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test("AC4: the ROUTINE FILING TEMPLATE writes the prediction, and the report's own reader parses it", () => {
+  // ⛔ The write site and the read site are pinned TOGETHER here: `renderRoutineTaskBody` is the template
+  // every routine-filed fix task is built from, and `readEffectPrediction` is the only reader. A change
+  // to one that the other does not follow shows up as this test going red rather than as a silently
+  // unread prediction in production (硬规则 5b: one definition, two consumers).
+  const body = renderRoutineTaskBody(
+    {
+      id: "twin-symbols", kind: "same-symbol-multi-file", symbols: ["walk"], files: ["plugin/scripts/a.ts"],
+      verdict: "real-duplication", rationale: "两个文件各自定义了同一个 walk", suggestedAction: "抽出 fs-walk", subject: "walk-family",
+    },
+    { routine: "semantic-dedup-scan", probe: "semantic-dedup-scan", runId: "semantic-dedup-scan-1", carrier: ".quay/routine-findings.jsonl", ts: "2026-10-22T00:00:00.000Z", taskId: "gap-routine-semantic-dedup-scan-twin-symbols" },
+  );
+  assert.match(body, /^## Effect Prediction$/m, "the filing template must emit the section the report reads");
+  const root = tmpdir("template");
+  fs.mkdirSync(path.join(root, "tasks"), { recursive: true });
+  fs.writeFileSync(path.join(root, "tasks", "gap-routine-semantic-dedup-scan-twin-symbols.md"), body);
+  const read = readEffectPrediction(root, "gap-routine-semantic-dedup-scan-twin-symbols");
+  assert.equal(read.state, "present", "the template's own output must be readable by the report's reader");
+  assert.equal(read.prediction.metric, "concept_recurs_after_merge");
+  assert.equal(read.prediction.expected, false);
+  assert.equal(read.prediction.recorded_at, "2026-10-22T00:00:00.000Z", "recorded_at is the FILING round's ts — before any merge");
+  assert.match(String(read.prediction.statement), /walk-family/);
   fs.rmSync(root, { recursive: true, force: true });
 });
 

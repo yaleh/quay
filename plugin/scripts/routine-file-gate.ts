@@ -1343,6 +1343,21 @@ export function renderRoutineTaskBody(
     ...(human ? ["", "（finding 自己的 suggestedAction，逐字：）"] : []),
     String(f.suggestedAction ?? "").trim() || "（finding 未给出 suggestedAction —— 立案时按 rationale 判定处置）",
     "",
+    // ── THE FALSIFIABLE EFFECT PREDICTION (task gap-discovery-verify-loop-refuter-and-independent-effect)
+    // WHY IT IS IN THE FILING TEMPLATE: the closed-loop report's `effect` link used to be a purely
+    // MECHANICAL reading («the concept did not recur after the merge»), which cannot tell «fixed» from
+    // «nobody looked again» (硬规则 4 推论四). An independent Evaluator needs a prediction written BEFORE
+    // the fix lands, and the only artifact that exists at that moment is THIS task body. The filing
+    // template is therefore the single write site: `recorded_at` is the filing round's own `ts`, i.e.
+    // strictly before any merge, so the report can tell a real prediction from a post-hoc claim.
+    // ⛔ The metric vocabulary is closed (`EFFECT_PREDICTION_METRICS` in discovery-closed-loop-report.ts);
+    //    `concept_recurs_after_merge` is what a routine-filed dedup/defect fix predicts.
+    "## Effect Prediction",
+    "- metric: concept_recurs_after_merge",
+    "- expected: false",
+    `- statement: 修复后 \`${String(f.subject ?? "").trim() || "<none>"}\` 不再以同一 subject 复发（同 concept_key 的后续记录数应为 0）`,
+    `- recorded_at: ${ctx.ts}`,
+    "",
     // ⛔ 平标题，**不加 `（draft）` 后缀**：`SHAPE_SECTIONS` 两种都认，但 **checkbox 闸只认平标题** ——
     // 带后缀时 `quay task check` 报 "AC section has no checkboxes"（实测：第一版用 `## AC（draft）`
     // 立出来的 6 条任务全部 FAIL）⇒ 机械立出来的任务会**结构上无法通过 ready/done 闸**，即又一个
