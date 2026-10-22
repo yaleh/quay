@@ -3,8 +3,6 @@ id: ADR-007
 title: Instrument the dark axes L_G/L_D/L_S — a milestone is not judged on L_T alone
 status: accepted
 date: 2026-07-19
-accepted-date: 2026-07-20
-enforcement: "bash experiments/quay-perpetual-stream/scripts/git-lens-selfcheck.sh"
 supersedes: []
 superseded-by: []
 tags:
@@ -12,6 +10,8 @@ tags:
   - git-lens
   - verification
   - crystallization
+accepted-date: 2026-07-20
+enforcement: bash experiments/quay-perpetual-stream/scripts/git-lens-selfcheck.sh
 ---
 ## Context
 Applying the GIT lens (ADR-006) to this project's own review: normal review instruments `L_T` (tests pass) and half of `L_C` (types/constraints); `L_G` (reinvented/duplicated abstractions), `L_D` (description length / dependency structure), and `L_S` (behavior variance) are DARK (`docs/references/geometry-as-llm-architecture-interface.md` §5, layer-一). A green `L_T` on a cheap proxy can be a pseudo-convergence on the wrong axis (the curl-vs-real-subagent lesson; see ADR-010). Judging a milestone on `L_T` alone is systematic blindness.
@@ -42,6 +42,8 @@ This is an instance of ADR-006 and a specific application of ADR-005 (cheap veri
         `adr-007` gate is registered but is not run by the suite and has 0 events in
         .quay/gate-events.jsonl, so nothing surfaced it. Fixing the probes is a separate task —
         this ADR does not silently absorb it.
+        ⚠️ The KNOWN ROT note above is STALE as of 2026-10-22 (kept as history, not deleted) — see
+        the "Status note 2026-10-22" block at the end of this ADR for the current state.
      ── HALF 2, the PER-MILESTONE predicate (LANDED 2026-09-13,
         tasks/gap-adr007-per-milestone-dark-axis-enforcement-gate): a task must RECORD a dark-axis
         reading or explicitly DECLARE the axis still dark, before it can be called done. The
@@ -78,3 +80,37 @@ This is an instance of ADR-006 and a specific application of ADR-005 (cheap veri
   axis still dark — so "silently unexamined" is a state the gate can see, not a reviewer's opinion.
 - **Enables:** archguard and mutation/property tests become standing milestone instruments (→ CLAUDE.md Tools pointer); the L_T..L_S review question (ADR-006) has runnable answers.
 - **Scope / relations:** instance-of ADR-006; uses ADR-005's rationale; the proxies themselves are 硬形变 per ADR-004. Complements ADR-010 (which keeps `L_T` on the REAL axis).
+
+**Amended 2026-10-22 (re-evaluation against 3 months of production data) — Status note 2026-10-22**
+— human-approved 2026-10-22. Supersedes the 2026-09-13 KNOWN ROT note as the description of current
+state; that note stays in the enforcement comment as history.
+
+- **HALF 1 is still dead, in a different way.** The dangling `git-lens-*.ts` symlinks were removed
+  by `tasks/gap-arch-retire-orphan-sh-and-dangling-symlinks.md` (status `done`); the three probes
+  exist only under `archive/2026-09-07-zero-call-scripts/plugin/scripts/`. But
+  `experiments/quay-perpetual-stream/scripts/git-lens-selfcheck.sh` remains, and the frontmatter
+  `enforcement:` still points at it, so it fails deterministically (re-run 2026-10-22: exit 1,
+  `MODULE_NOT_FOUND` on 4 fixtures, while still printing `PASS:` for the three fixtures whose
+  expected exit is 1 — `l-d/prose-heavy`, `l-g/cycle-repo`, `l-s/weak-module`). The `adr-007`
+  gate has **0** events in `.quay/gate-events.jsonl` in the ~94 days since it was wired on
+  2026-07-20.
+- **The frontmatter `enforcement:` is deliberately NOT changed by this note.** Replacing it is a
+  separate task, being filed now; this ADR does not silently absorb that fix (same discipline as
+  the 2026-09-13 note).
+- **HALF 2 is live but covers little of the landing flow.** Since 2026-09-14,
+  `.quay/gate-events.jsonl` holds **36** `dark-axis` gate events (**23** pass / **13** fail)
+  against **816** `complete` events (815 when this amendment was drafted; one more landed at
+  2026-10-22T00:36Z), i.e. about **4%**.
+- **The mechanical fan-in still bypasses the predicate.**
+  `grep -n -i 'darkaxis\|dark-axis' plugin/scripts/worker-driver.ts` returns **zero** hits (the
+  same pattern hits 19 lines of `packages/quay/src/gate/lifecycle.ts`, so the zero is not a dead
+  pattern). The 2026-09-13 "NOT ENFORCED on the mechanical fan-in flip" warning is still current.
+- **L_S: DARK for product behavior.** The L_S behavior-variance probe
+  (`git-lens-l-s-behavior-variance.ts`) is archived, and no mutation/property test of product
+  behavior is wired. One instrument does run and calls itself "the L_S instrument":
+  `plugin/scripts/checker-mutation-check.sh`, in the static phase of `scripts/test.sh`. Its
+  subject is the **checkers** (would each checker fail when its subject is mutated?), not the
+  product's behavior variance. So the checker slice of L_S is lit, and L_S as this ADR's Decision
+  defines it (product stability / behavior variance) is DARK.
+- Per ADR-004's 2026-10-22 amendment, a check with no liveness reading counts as a dark axis. By
+  that rule HALF 1 is dark: it is declared and has never produced an event.
