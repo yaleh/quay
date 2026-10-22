@@ -52,7 +52,7 @@ EXPLICITLY REJECT citing the continuous math (Fisher / natural gradient / intrin
   evidence for a decision only after ALL of:
   1. a **fixed computation mode** (one of `direct` / `jl`, with fixed parameters) for every
      snapshot used;
-  2. **≥ N same-mode snapshots**, with N fixed in the pre-registration below, not chosen afterwards
+  2. **≥ N same-mode snapshots**, with N fixed in the item-3 pre-registration, not chosen afterwards
      (硬规则 4 推论: no threshold before the cost structure is known; N is part of the registration,
      not of this ADR);
   3. **one pre-registered out-of-sample prediction that hits.** Example: a predicted `d_int` change
