@@ -95,5 +95,3 @@ prior-claim: gap-arch-cycle-refresh-first-stale-wins-starves-later-scopes
 ## ADR-007 dark-axis record
 
 该轴仍暗,理由:本任务只改 `runArchCycleRound` 的分支控制流（把 deferred scope 写进既有的 downgradeCauses 台账），未改变包依赖结构或上帝包分布，L_D/L_G 读数对本改动无判别力且本任务未测量。
-
-## Evidence (立案读数)
