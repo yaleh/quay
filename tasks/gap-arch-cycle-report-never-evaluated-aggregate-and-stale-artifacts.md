@@ -2,7 +2,7 @@
 id: gap-arch-cycle-report-never-evaluated-aggregate-and-stale-artifacts
 title: 目录环常驻检测例程 arch-cycle-report 上线以来 25/25 轮 evaluated:false：汇总被两个无
   moduleGraph 的单目录小包作废，且产物无人刷新——一个真实的目录环因此存在约 7 小时无人察觉
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -58,6 +58,14 @@ extra:
   2. `plugin/test/probe-routine.test.mjs` —— 新的「已安装 archguard 插件运行时」解析源让默认装配的 `architecture-analysis` 例程在装了 archguard 的宿主上真的跑起来（并吃同一个假探针 ⇒ 第二条 finding）。用例改用既有负控制缝 `ARCHGUARD_RUNNER_CLI=<不存在路径>`，把宿主状态钉死。
   3. `plugin/test/archguard-structural-gate-fan-in.test.mjs` —— AC4（未评估态）原先断言**全部** scope 都 not-evaluated；Plan 步骤 2 的单目录 basis 让 5 个单目录 scope 变成真实读数。改为按 basis 分别断言，并新增「至少一个多目录 scope 仍为 not-evaluated」的空转守卫（实测剩 `src`）。
 
+## Dark-Axis Reading (ADR-007)
+
+- L_D archguard package-graph (packages/quay/src @ 6eb86b4c, measured 2026-10-22): internal-packages=12, dependency-edges=86, directory-cycles=0, unevaluated-dynamic-imports=1
+
+  Provenance: the installed archguard runtime (`@yalehwang/archguard`, the same one this task taught `resolveArchguardCli()` to find) — `analyze --sources packages/quay/src --lang typescript --diagrams package --format json --no-cache`, reading `extensions.tsAnalysis.moduleGraph`. The `packages/quay/src` tree is byte-identical to the one measured earlier at `39d192b0e` (`git diff 39d192b0e HEAD -- packages/quay/src` is empty), so this is the same structure the landing tree carries.
+
+  Why this is the relevant axis: the whole task is the DEPENDENCY-STRUCTURE reading (directory cycles) — this is a real L_D reading on the tree that would land, taken with an independent invocation of the same instrument, not a restatement of the routine's own output.
+
 ## Touches
 
 - tasks/gap-arch-cycle-report-never-evaluated-aggregate-and-stale-artifacts.md
@@ -75,11 +83,3 @@ extra:
 - 阻碍原因：unsatisfiableUnannotatedAc=[AC4 刷新后与独立仪器一致：刷新后 src scope 为 `evaluated:true`、`behindSources:false`，且它报告的环集合与 GOAL-910 AC-916 判据在同一 HEAD 上的输出一致（GOAL-910 未落地时双方都应是 `[[".","observation","serve"]]`，落地后双方都应是 0）。贴出两份输出与 HEAD。]（连续 3 轮被结构上不可派的拦截挡住 ⇒ 作者/人改写；⛔ 不派 fix worker）
 
 **已解除（2026-10-22）**：AC4 已在两次真实读数上复验（同一 HEAD 双侧一致，且负对照在 `d7e1c743a` 上双方同时报出 `{., observation, serve}`），该 AC 现为绿。
-
-## Blocker
-
-**2026-10-22T01:14:36.898Z — worker 未落地（exited-not-landed）**
-
-- 未落地原因：step=suite: AssertionError [ERR_ASSERTION]: at least one bin is under-sampled (otherwise the rule is vacuous) [baseline A/B: HARD RED (task-introduced-red) — the task's red set is NOT a subset of the develop baseline red set: added=packages/quay/test/build-plugin-dist.test.mjs,plugin/test/probe-routine.test.mjs,plugin/test/archguard-structural-gate-fan-in.test.mjs changed=-]
-- run_id：wk-prod-anchor
-- session_id：40a16a09-4df2-4229-ac52-183a6d683a2b

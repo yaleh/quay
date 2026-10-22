@@ -2,7 +2,7 @@
 id: gap-instrument-decay-check-unwired-and-blind-to-content-dark
 title: 仪器腐烂检测器 instrument-decay-check 自称常驻却没有任何机制调用（手动一跑即报 3
   个未裁定告警），且只认识「停止写入」，看不见「照常写入但内容是未评估或过期」的两种暗形态
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -231,10 +231,26 @@ JUDGMENT：**稀有但活着，不是腐烂。** 只有恢复阶梯整体耗尽�
 - plugin/test/quality-gate-driver.test.mjs
 - plugin/scripts/driver-runtime.ts
 
-## Blocker
+## Round-2 补记（2026-10-22）：bundle 入口守卫改为 name-form
 
-**2026-10-22T00:13:22.769Z — worker 未落地（exited-not-landed）**
+### 上一轮 suite 红的根因
 
-- 未落地原因：step=suite: AssertionError [ERR_ASSERTION]: the real publish script FAILED (exit 1): [baseline A/B: HARD RED (changed-assertion) — the task's red set is NOT a subset of the develop baseline red set: added=plugin/test/shipped-shell-reachability.test.mjs,plugin/test/shipped-shell-reachability.test.mjs,plugin/test/shipped-shell-reachability.test.mjs,plugin/test/shipped-shell-reachability.test.mjs changed=packages/quay/test/build-plugin-dist.test.mjs]
-- run_id：wk-prod-anchor
-- session_id：f425f148-7942-451e-ba75-1c1361578d9a
+上一轮（run `wk-prod-anchor`，suite 日志 `fan-in-suite-gap-instrument-decay-check-unwired-and-blind-to-content-dark~wk-prod-anchor~1792627415235-0ffef8.log`）红的 4 个文件里，3 个同因：`quality-gate-driver.ts` / `meta-driver.ts` / `goal-driver.ts` 静态 import `instrument-decay-check.ts` 后，esbuild 把它内联进 driver bundle；而它的入口守卫是 URL 形式（`path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)`），在宿主 bundle 里恒真 ⇒ 会跑检测器的 `main()` 而不是 driver 的。`build-plugin-dist` 拒绝构建（`findEntryGuardHijacks` 报 3 条 `inlined entry-guard hijack`），连带 `npm-pack-e2e`（11）、`shipped-shell-reachability`（4）、`build-plugin-dist`（1）全红。第四个红文件 `task-granularity-advice.test.mjs`（1 条 production 分布断言）在 develop 基线红集里同样红，与本任务无关。
+
+### 修法与读数
+
+修法：守卫迁移到 `gate-script-base.ts` 的 name-form —— `isDirectEntry(import.meta, process.argv[1], "instrument-decay-check")`（内联后 inert，直接执行时仍跑 `main()`）。行为不变，只是不再依赖 URL。
+
+```
+$ node --input-type=module -e "import {findEntryGuardHijacks} from './packages/quay/scripts/build-plugin-dist.mjs'; console.log(findEntryGuardHijacks('plugin'))"
+[]
+$ node --test packages/quay/test/build-plugin-dist.test.mjs        # tests 45, pass 45, fail 0
+$ node --test plugin/test/shipped-shell-reachability.test.mjs      # tests 8,  pass 8,  fail 0
+$ node --test packages/quay/test/npm-pack-e2e.test.mjs             # tests 11, pass 11, fail 0
+$ node --test plugin/test/instrument-decay-check.test.mjs          # tests 27, pass 27, fail 0
+$ bash scripts/test.sh --for-task gap-instrument-decay-check-unwired-and-blind-to-content-dark --allow-thin  # exit 0
+```
+
+## Dark-axis record
+
+该轴仍暗,理由:本任务只做仪器腐烂检测器的接线与扩展（外加一处 bundle 入口守卫的 name-form 迁移），没有对依赖结构 / 重复抽象做新的测量，没有可解析的 L_D/L_G 读数可贴。

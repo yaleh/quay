@@ -5225,6 +5225,54 @@ export function makeDetachFn(sig: WorkerDetachSignal): () => boolean {
 }
 
 /**
+ * 派发时抓一次 slice baseline（gap-slice-before-after-readings-at-dispatch-and-fanin）。
+ *
+ * WHY fire-and-forget：baseline 要跑一次 `archguard analyze`（实测 ~6-10s）。若同步等它，驱动器的
+ * 派发节拍（并发 N + 协调地板）会为一条**观测**停住——观测不该付阻塞前置（硬规则 12）。head 显式
+ * 传给子进程（fork point = 任务 mergeTarget 的当前 tip），所以子进程晚几秒跑也不影响读数是「派发那
+ * 一刻」的；`--tree` 缺省 root，若 root HEAD 已不在该 tip，脚本自己造临时 worktree 回放。
+ *
+ * FAIL-OPEN（⛔ 不阻塞派发）：脚本不存在 / git 读不到 / spawn 失败都只返回。readings 的失败由脚本
+ * 自己写成 `evaluated:false` 记录（若连脚本都没起来，则本轮没有记录——这与「有基线」不同形，
+ * fan-in 的 post 会以 `baseline-missing` 明说，见 worker-fan-in.runSlicePostReading）。
+ *
+ * 只有声明了 `loop.design_evolution_readings` 的工作区才 spawn：没有 subsystem 声明时脚本只能报
+ * 「no scope」，而每次派发都起一个 node 进程去报这句话纯属噪声（也避免 fan-in/suite 的夹具被拖慢）。
+ */
+function queueSliceBaseline(taskId: string, rootDir: string): void {
+  if (process.env.QUAY_SLICE_READINGS === "0") return;
+  try {
+    const configFile = path.join(rootDir, ".quay", "config.yml");
+    let configText: string;
+    try {
+      configText = fs.readFileSync(configFile, "utf8");
+    } catch {
+      return;
+    }
+    if (!configText.includes("design_evolution_readings")) return;
+    // The fork point the worker's worktree will start at (goal branch or develop).
+    const mergeTarget = resolveTaskMergeTarget(taskId, rootDir);
+    const tip = spawnSync("git", ["-C", rootDir, "rev-parse", "--verify", "--quiet", `${mergeTarget}^{commit}`], {
+      encoding: "utf8",
+    });
+    const headSha = (tip.stdout ?? "").trim();
+    if (tip.status !== 0 || headSha === "") return;
+    const argv = kernelSiblingArgv("slice-readings.ts", ["--baseline", "--task-id", taskId, "--root", rootDir, "--head", headSha]);
+    if (argv === null) return;
+    const [cmd, ...cmdArgs] = argv;
+    const child = spawn(cmd, cmdArgs, { cwd: rootDir, stdio: "ignore", detached: true });
+    // ⛔ detached + unref: the driver may exit (one-shot --task mode) before the analyze finishes;
+    // the reading must survive it (it carries its own explicit head).
+    child.on("error", () => {
+      /* fail-open: an unobservable baseline is a missing baseline, not a failed dispatch */
+    });
+    child.unref();
+  } catch {
+    /* fail-open — see the doc comment */
+  }
+}
+
+/**
  * spawn 一个 worker 并等待其终态（含超时 SIGTERM）。超时 ⇒ kill("SIGTERM")，close 事件带 signal=SIGTERM，
  * timedOut 标记落 outcome final_state=timed-out（worktree_preserved=true，⛔ 不清理——SPEC §1 设计点3
  * 超时保留 worktree）。其它异常死亡终态（failed/killed——worker 没跑完、无完成实现）清理 orphan
@@ -5281,6 +5329,8 @@ function runOneWorker({
   /** 停机脱钩信号（常驻环注入；批量路径不注入——那条路没有 kind 停机语义）。 */
   detachSignal?: WorkerDetachSignal;
 }): Promise<WorkerRunResult> {
+  // Dispatch-time slice baseline (fire-and-forget; fail-open — see queueSliceBaseline).
+  if (role === "task-worker") queueSliceBaseline(taskId, rootDir);
   const argv = injectSessionId ? [...workerArgv, "--session-id", sessionId] : workerArgv;
   const isDetached = (): boolean => detachSignal?.detached === true;
   return new Promise((resolve) => {

@@ -583,6 +583,45 @@ test("buildReadings — both RMs land in ONE record; evaluated is the AND of the
   assert.match(rec2.reason, /rm1: bad: baseline-unresolvable/);
 });
 
+test("buildReadings — the ADR-008 phase staleness rides along as ATTACHED info and never changes evaluated", (t) => {
+  const repo = makeRepo(t);
+  repo.write("mod/central.ts", 100);
+  const base = repo.commit("baseline");
+  repo.write("mod/central.ts", 110);
+  repo.commit("grow");
+  fs.mkdirSync(path.join(repo.dir, ".quay"), { recursive: true });
+  fs.writeFileSync(path.join(repo.dir, ".quay", "worker-outcome.jsonl"), "");
+  const subsystems = [{ name: "m", baseline: base, central: [{ atBaseline: "mod/central.ts", atHead: "mod/central.ts" }], modules: ["mod/*.ts"] }];
+
+  // (a) No phase carrier: the ATTACHED reading is NOT-EVALUATED (null, ⛔ not 0) while the ROUND is
+  // still evaluated — a missing declaration must never look like a failed design-evolution round.
+  const noCarrier = buildReadings(repo.dir, { ts: "2026-01-10T00:00:00.000Z", subsystems });
+  assert.equal(noCarrier.evaluated, true);
+  assert.equal(noCarrier.phaseStaleness.evaluated, false);
+  assert.match(noCarrier.phaseStaleness.reason, /carrier-missing/);
+  assert.equal(noCarrier.phaseStaleness.commitsSince, null);
+
+  // (b) With a carrier: the reading is EMBEDDED verbatim, and a stale declaration is still content —
+  // the round's own verdict is byte-for-byte the one it had before the field existed.
+  fs.writeFileSync(
+    path.join(repo.dir, ".quay", "two-phase-state.json"),
+    JSON.stringify({
+      phase: "convergence",
+      declaredAt: "2026-01-01T00:00:00.000Z",
+      reason: "fixture",
+      history: [{ phase: "convergence", declaredAt: "2026-01-01T00:00:00.000Z", reason: "fixture" }],
+    }),
+  );
+  const withCarrier = buildReadings(repo.dir, { ts: "2026-01-10T00:00:00.000Z", subsystems });
+  assert.equal(withCarrier.evaluated, true, "a stale declaration is content, ⛔ not a failed round");
+  assert.equal(withCarrier.reason, null);
+  assert.equal(withCarrier.phaseStaleness.evaluated, true);
+  assert.equal(withCarrier.phaseStaleness.phase, "convergence");
+  assert.equal(withCarrier.phaseStaleness.declarations, 1);
+  assert.equal(withCarrier.phaseStaleness.daysSince, 9, "`ts` is the deterministic clock for the distance");
+  assert.equal(typeof withCarrier.phaseStaleness.commitsSince, "number");
+});
+
 test("buildReadings — declaring NO subsystem is a named not-evaluated RM1, never a silent pass", (t) => {
   const repo = makeRepo(t);
   repo.write("x.ts", 1);

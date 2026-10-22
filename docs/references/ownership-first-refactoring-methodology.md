@@ -152,3 +152,145 @@ Quay 现阶段的重构应该优先把"状态/决策/副作用/编排四件事�
 ## 12. 一句话压缩版
 
 **先把状态、决策、副作用、编排四件事分别钉给唯一拥有者，用 ArchGuard before/after + 负对照 + 分支自举证明调用方真的收敛到了那个唯一实现（不是搬了个壳），每次只切一个能独立验收的小问题，在 `branch:true` Goal 的 fork → 串行 task → 自举 → before/after → merge → post-merge 闭环里把这套验证跑穿到底，模式名字只用来标注已经收敛出来的形状，不用来提前设计。**
+
+## 13. 提取 ≠ 扩展点：R1 与 R2（2026-10-22 增补）
+
+第 2 节防的是「搬壳」：新模块存在，责任却没搬过去。本节补另一种陷阱：**责任确实搬出去了，但下一次增长仍然流回中心。**
+光抽代码、不建扩展点，新功能的落点就不会变。第 3 节「有第二个真实实例时才升格为模式」仍然成立，本节不推翻它，
+只补一条：**被拆的那个中心如果是「每加一种 X 就要改它」的形状，拆分的验收就必须写明「下一个 X 加在哪」。**
+
+### 13.1 三组读数（每个数都附载体与基线）
+
+| 子系统 | 重构形状 | 读数 | 载体 / 命令 |
+|---|---|---|---|
+| quay serve | 按关注点拆分 **+ 分发器（扩展点）** | 中心文件增长占比 **1%**（10-22T00:40Z 记录：中心 +153 / 非中心 +11,534，即 1.31%；基线 `295e771b0` → HEAD） | `.quay/design-evolution-history.jsonl`（gitignored，主检出）；复跑 `node --experimental-strip-types plugin/scripts/design-evolution-readings.ts --no-history --json` |
+| quay worker | 抽出一块区域（`2440b52d0`，`worker-fan-in.ts`），**没有扩展点** | **82%**（`worker-history`，基线 `2440b52d0` → `ff32d031d`，即 GOAL-909 动手前；中心 +4,820 / 非中心 +1,025 = 82.46%，同一条 10-22T00:40Z 记录） | 同上；统一公式与口径更正见 `tasks/DIR-133.md`「口径更正（2026-10-22）」。**DIR-133 早先的「88%」作废**（漏算分母，只计了新增模块） |
+| quay worker（另一窗口） | 同上，但窗口跨过 GOAL-909 的搬家提交 | **约 70%**（10-21T23:14Z 记录：基线 `2440b52d0` → HEAD `5c74f38f2`，中心 +4,420 / 非中心 +1,897 = 69.97%）；2026-10-22 对 HEAD `584e10c60` 复跑得 70.77% | 同上。这个窗口把 GOAL-909 本身的搬出量算进了分母，所以读数偏低；config 因此把 `worker-history` 钉在 `ff32d031d`。**两个数各对应自己的基线，不能互相替换** |
+| plantuml-js `ElkLayoutEngine` | `gap-elk-layout-engine-split-responsibilities`：拆成 layers / elk-graph / elk-result，**没写扩展点判据** | 数值 AC 全过：`elk.ts` 570 → **150** 行（`76d1808`，10-22 00:58 +0800），类级 `outDegree` 9（≤11）、methodCount 3（≤8）。此后 8 个改动 `elk.ts` 的布局/渲染功能提交又把 `elk.ts` 长回 **278** 行（`1eb90a0`，06:47），summary 口径的 call 出度 **26**（探针当时 23），methodCount 15 | plantuml-js `tasks/gap-elk-layout-engine-split-responsibilities.md`「执行证据」；`tasks/gap-elk-layout-strategy-extension-point.md` Proposal；`git show <rev>:src/layout/elk.ts \| wc -l`；会话 `69ce95b8` 中 Claude 的原话：「上一轮我立的拆分任务没写扩展点判据，结果就是文件短了、出度反而升了」 |
+
+**读法**：serve 与 worker 的区别在于有没有扩展点，而不在拆没拆（DIR-133 F3）。plantuml-js 一例把这件事压缩到 6 小时内：
+拆分当时数值全绿，接下来的功能增长又全部落回 `ElkLayoutEngine`。随后的 `gap-elk-layout-strategy-extension-point`
+（`134934a`，done）才给出「从外部注入合成策略、不改 `src/layout/elk.ts` 即生效 + 抛错负对照」的判据。
+⚠️ 口径提示：「出度 23 → 26」比较的是 archguard summary 的 `topByOutDegree`（方法级关系计数），
+不是拆分 AC 用的 cognitive summary 类级 `outDegree`（落地时 9）。两个口径不可混比，这里只取同口径的 23 → 26。
+
+### 13.2 重构分类（工作模型，**机制成立待验**）
+
+| 级 | 名称 | 改变了什么 | 低一级满足不了的 Π 检查 | 实例 |
+|---|---|---|---|---|
+| R0 | 搬家（relocation） | 只改分区/目录边 | **目录级环**：GOAL-910 AC-916（`packages/quay/src` 目录级 SCC = 0） | `e7e84366a`（serve* 搬进 `src/serve/`）+ `d21a018aa`（observation 拆进子目录）在 10-21 16:26–16:27Z 造出 `{., observation, serve}` 环。plantuml-js 反方向：`4327862` 沉核心后环仍在，`feba9f3` 再搬一次才断 |
+| R1 | 提取（extraction） | 改边，不改增长方向 | **call 出度**（同一口径前后比） | quay worker `2440b52d0`；plantuml-js elk 拆分 |
+| R2 | 扩展点（extension point） | 改增长方向 | **中心增长占比**——只能**事后**在后续功能上判，落地当时测不出 | quay serve 分发器；quay AC-915（WorkerPool 结局处理单元可从外部注册）；plantuml-js 策略注入 |
+| R3 | 所有权收敛（ownership consolidation） | 一处定义、调用方改口 | **重复组数 / 定义点数**（本文第 10 节 duplicate disappearance、canonical definition count） | GOAL-030/031/032 |
+
+每一级都要用它自己的 Π 检查来验，低一级的检查证明不了高一级：R1 的行数/方法数全绿，证明不了 R2（plantuml-js）；
+R0 的目录环为 0，证明不了 R1。R2 的检查天生滞后，所以 R2 的**落地验收**只能用代理形态（「外部注册一个合成单元，
+不改中心文件即生效，且改动前为红」，DIR-133 裁定 2 / AC-915），真正的判读要等后续功能落地之后再读中心增长占比。
+
+**R0–R3 表的读法补充：方法体 vs 方法壳（2026-10-22 增补）**：`methodCount` 在一次职责外移后几乎不降——
+公开**方法壳**留在契约上、只有**方法体**搬走了（driver 88→86；刀1 完成后 methodCount 反而是 88，比先前
+报告的 87 +1，因为读数这一步多出一个 registry 委托壳）。因此判 R1（提取）不能只看 `methodCount`：
+要么用同口径的 call out-degree（`archguard_summary` 的 `topByOutDegree`，前后同口径比），要么把
+「方法体行数」与「方法壳数量」分开记。`methodCount` 下降只证明壳少了，不证明体搬了；两者混读会把
+「有进展」误判成「没进展」（硬规则 4b：一个代理量混了两类对象）。
+四臂判据的机械检查器：`plugin/scripts/extension-point-criteria-check.ts`（四态 `satisfied` /
+`missing-arms` / `not-applicable` / `NOT-EVALUATED`）；骨架生成器：
+`plugin/scripts/extension-point-criteria.ts --scaffold --task-id <id> --central <file> --outside <module>`。
+
+**分级**：三组读数**证据充分**（载体可复跑）；「R0–R3 是四个可分离的级、每级需要独立的 Π」是**机制成立待验**，
+依据只有本节的 quay 两个子系统 + plantuml-js 一例。
+
+### 13.3 DIR-133 规则 ② 已升格为 Π 检查（2026-10-22 落地）
+
+DIR-133 裁定 2（「设计调查/切片的 AC 必须含扩展点判据」）原先**只是散文**。它防的那种失败（拆分 AC 没写扩展点，
+增长回流）已在 **2 个代码库发生过 2 次**：quay worker `2440b52d0`，plantuml-js `gap-elk-layout-engine-split-responsibilities`
+（这个计数不含 claudecodeui 的 ws-proxy——它 2026-10-22 又提供了一例，使发生率升到 3 个代码库）。
+按硬规则 12，发生率 ≥2 足以把它做成可执行检查；本任务（`tasks/gap-extension-point-refactor-criteria-scaffold`）
+已落地机械形态：
+
+- **判据正本** = 本节 13.5 的四臂（正臂 / 负臂 / 注入泄漏 / 红线基线）；
+- **检查器** `plugin/scripts/extension-point-criteria-check.ts`——按位置只读任务的 `## Acceptance Criteria` 列表项，
+  四态输出 `satisfied` / `missing-arms`（逐臂具名）/ `not-applicable` / `NOT-EVALUATED`；
+- **骨架生成器** `plugin/scripts/extension-point-criteria.ts --scaffold --task-id <id> --central <file> --outside <module>`
+  （stdout dry-run；任务体仍只经 Provider ABI `task_write` 写入）；
+- **skill** `plugin/skills/extension-point-refactor/SKILL.md` 把「生成骨架 → 填四臂 → 跑检查器 → 落 AC」串成一次调用。
+
+
+### 13.4 登记一条样本外预测（2026-10-22 登记）
+
+- **对象**：quay worker 在 GOAL-909 之后的增长，载体子系统 `worker-post-909`（`.quay/config.yml`
+  `design_evolution_readings`，基线 `024f9d7f2`，即 AC-915 扩展点落地提交）。
+- **模型依据**：GOAL-909 的 `WorkerPool` 是 R1，不是完整的 R2。状态归属收进了类（`WorkerPool` methodCount 16），
+  扩展点也只覆盖「结局处理」这一类；派发决策与派发执行仍在 `runResidentLoop` 里，后者的 call 出度**仍是 84**
+  （archguard scope `b4f87b21`，快照生成于 2026-10-22T00:58Z，晚于 `024f9d7f2`；`archguard_summary` `topByOutDegree`，
+  与 GOAL-909 前的 discovery 任务读数相同）。
+- **预测**：后续 worker 增长中，落在中心文件（`worker-driver.ts` + `worker-fan-in.ts`）的占比**保持 ≥50%**。
+- **证伪条件**：读数 **≤20%** ⇒ 对这个案例而言，R1/R2 的区分被证伪（R1 也改变了增长方向）。落在 20%–50% 之间：不判，记为不确定。
+- **判读时点**：`worker-post-909` 的分母（中心 + 非中心增量）第一次 ≥ 1,000 行的那条记录。这个门槛是临时的，
+  量级取自历史窗口（`worker-history` 分母约 5,800 行）；它只决定何时判读，不是质量阈值。
+- **登记时的现状（不作判读）**：2026-10-22 复跑 `design-evolution-readings.ts`（HEAD `584e10c60`）得 `worker-post-909`
+  中心 +172 / 非中心 +0，共 2 个提交（`d88ad2db8`、`80d75e886`，都是 fan-in 暗轴谓词）。分母远不到 1,000 行，**不计入判读**；
+  10-22T00:40Z 那条载体记录里，这个子系统还是 `evaluated:false`（分母为 0）。
+
+### 13.5 扩展点判据四件套（正本；生成器与检查器都引用本节）
+
+来源：claudecodeui 会话「Quay 的 OO 设计重构」2026-10-22 在 5 刀 OO 重构里**每刀手写**的同一套判据。
+本节是它的唯一正本：`plugin/scripts/extension-point-criteria.ts` 输出它，
+`plugin/scripts/extension-point-criteria-check.ts` 按下面四条臂判它。
+
+### 臂 1 — 正臂（positive arm）：从中心文件之外注册的 handler 被触发
+
+**断言形态**：从 `<outside>` 注册一个新的处理单元、**不修改** `<central>`，运行后读数必须是 **`triggered=1`（计数）**——
+不是「handler 存在」。存在性检查在断线时仍然绿，测不到接线。
+**取假方式**：删掉/断线外部注册后同一断言读数为 `triggered=0` ⇒ 本条必红。红色落点是「注册被移除/接线断开」这一步。
+**是否活性臂**：**是**。这条正臂就是活性检查，不另配一条；负臂不能替代它。
+
+### 臂 2 — 负臂（negative arm）：未注册时不触发
+
+**断言形态**：同一个断言在【未注册】时读数为 `triggered=0`。
+**建议伴生读数**：负臂同时断言 `handlerRegistered=false`（注册表确认无此 handler）。负臂绿有两条路径——
+unregister 真的被 gate 掉了 / unregister 没生效但恰好被正臂拦住；多这一个读数才把两条路拆开，
+让「unregister 真生效」由负臂自己直接证出（claudecodeui 2026-10-22 审阅建议，采纳）。
+**取假方式**：分派器泄漏/无条件调用时，`triggered=0` 必红。
+**是否活性臂**：**否**（它是真空绿的来源，必须配正臂）。⚠️ 负臂单独看，对「注册了但断线」是**假绿**——
+断线时 `triggered=0`，负臂照样绿，只是绿错了理由。因此：**只写负臂、不写正臂 ⇒ 判据无效**，
+检查器判 `missing-arms` 并具名到正臂；负臂只有在与一条 counted 正臂（`triggered=1`）成对时才被接受。
+
+### 臂 3 — 注入泄漏（injection leak）：把分派器替换成泄漏实现后，同一断言必红
+
+**断言形态**：把 `<central>` 的分派器替换成泄漏实现（无视注册表、无条件调用），臂 1 / 臂 2 的同一断言必须打红。
+**取假方式**：替换后仍绿 ⇒ 该臂没测到分派器，判红。
+**是否活性臂**：**否**。它的作用是证明**负臂断言本身不真空**（不是给正臂兜底）：如果泄漏实现下负臂仍然绿，
+说明负臂测的不是分派器。
+
+### 臂 4 — 红线基线（red-line baseline）：改动前 `wc -l <基线>` 的断言必红
+
+**断言形态**：改动前记录 `wc -l <central>` 的基线 B，并断言改动后中心文件行数 < B（或等价的结构读数）；
+在改动前跑这条断言必须为红。
+**取假方式**：基线之前跑不红 ⇒ 断言没测到那次增长。
+**是否活性臂**：**否**。**本臂是单次任务 AC，不是常设棘轮**：只在重构任务验收时由 worker 检查一次，
+任务 done 后永不复评，因此它**不会**在后续增长里恒红，**不需要重锚规则**。常设棘轮属于设计演进读数例程
+（`design-evolution-readings.ts`）的领域，不要在这条 AC 里假装拥有它。（本仓库「把行号钉进判据」的历史教训
+只在**常设**检查上成立，单次 AC 不适用。）
+
+**机械形态**：`plugin/scripts/extension-point-criteria-check.ts` 按位置只读 `## Acceptance Criteria` 的
+GFM 列表项（`## Proposal` 散文、代码围栏、注释里的同名文字都不算——硬规则 2），四态输出
+`satisfied` / `missing-arms`（逐臂具名，正臂写成「handler 存在」也算 weak 缺失）/ `not-applicable`
+（不是设计切片）/ `NOT-EVALUATED`（AC 段读不到，独立取值，不得与 `satisfied` 同形——硬规则 3b）。
+脚手架：`plugin/scripts/extension-point-criteria.ts --scaffold --task-id <id> --central <file> --outside <module>`；
+skill：`plugin/skills/extension-point-refactor/SKILL.md`。
+
+### 13.6 两种「占比」口径：`centralChurnShare` ≠ 中心文件增长占比（不可互引）
+
+**结论：不是同一个量，⛔ 不得互相引用**（claudecodeui 2026-10-22 复核后已撤回原比较）。
+
+- **`centralChurnShare`（canonical 键名；claudecodeui 口径；单 commit churn，含删除。早期写作 `centralΔ`——
+  `Δ` 易被读成「净变化」，而本量是 insertions+deletions 的 churn，故 canonical 键名取 `centralChurnShare`）** =
+  (该 commit 内中心文件的 insertions + deletions) ÷ (该 commit 全部文件的 insertions + deletions)。
+  实例：driver 那一刀 263 / 1275 = 0.206。它度量「**这次重构**的 churn 有多少落在中心文件」。
+- **中心文件增长占比（quay 口径；时间窗，只计新增）** = 窗口内中心文件新增行 ÷ (中心文件新增行 + 非中心文件新增行)。
+  实例：`worker-history` 基线 `2440b52d0` → `ff32d031d`，中心 +4,820 ÷ (4,820 + 1,025) = 82.46%；
+  同一公式在 serve 上得 1.31%（10-22T00:40Z 记录：中心 +153 ÷ (+153 + +11,534)，分母 = 中心 + 非中心新增行；
+  `docs` 早期「serve 1%」是该值的取整基线）。它度量「**后续增长**回流中心的比例」。
+- **差异的来源**：分子与分母都不同——前者单 commit、删除也计入；后者时间窗、只计新增。
+  0.21 回答不了「后续增长回流中心的比例」；两个数不可互相替换，也不可引用对方的数值作基线。
