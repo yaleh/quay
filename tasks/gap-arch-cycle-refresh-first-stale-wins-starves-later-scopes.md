@@ -84,5 +84,9 @@ extra:
 - **AC2 argv 计数**：同一夹具下 fresh 的 src / quay-github-src / quay-backlog-src 的 `-s` 出现 0 次。`runArchCycleRound` 连续三轮（t0 / t0+60s / t0+120s，interval=60m）的 analyze 序列为 `[packages/quay/src, plugin/scripts]`：src 在间隔内不被重跑，而刷新后新变 stale 的 scripts 仍能被刷新（旧全局时钟在这一步答 `within-interval`，正是饿死机制）。
 - **AC3**：fake archguard 对 experiments-scripts 退出 3 ⇒ 该 scope `evaluated:false` / `cycleCount:null` / `cycles:null` / `basis:null`，reason = `artifact-behind-sources: artifact 2020-01-01T00:00:00Z is behind … commit(s) touching … — analyze exited 3; …`；同一轮 scripts 仍 `evaluated:true`、`behindSources:false`；记录级 `status:"partial"`、`notEvaluatedScopes:["experiments-scripts"]`、`refresh.skipped:"partial"`。负控制：同一失败注入 fresh 的 src ⇒ src 的 `-s` 出现 0 次、仍 `evaluated:true`、记录级仍 `complete`。仪器缺失时同样降级（全无当前读数时记录级 `status:"none"`，Fact `not-evaluated`）。
 - **AC5 旧实现上为红**：`refreshedScopes` 字段在 `git show develop:plugin/scripts/quality-gate-driver.ts` 中出现 0 次（旧记录只有单个 `refreshedScope`）；旧 runner 在同一夹具上只刷 1 个 scope、`behindAfter` 仍有两项（见 AC1 对照）。三条旧断言（`at most ONE scope per call` / `exactly one analyze per refresh` / `the other scopes were NOT swept`）已按新规则改写为逆向断言，并保留各自的负控制。
-- **scoped gate**：`bash scripts/test.sh --for-task gap-arch-cycle-refresh-first-stale-wins-starves-later-scopes --allow-thin` ⇒ EXIT=0，123 tests / 123 pass / 0 fail（含 `arch-cycle-reading.test.mjs` 16 项与 `quality-gate-driver.test.mjs` 全量）。
+- **scoped gate**：`bash scripts/test.sh --for-task gap-arch-cycle-refresh-first-stale-wins-starves-later-scopes --allow-thin` ⇒ EXIT=0，123 tests / 123 pass / 0 fail（含 `arch-cycle-reading.test.mjs` 16 项与 `quality-gate-driver.test.mjs` 全量），25 条 scoped 静态检查全绿。
 - **AC4 承接者（待外部的合法性条件）**：`loop.arch_cycle_report`（`.quay/config.yml`，interval 360m）在主检出上每间隔跑一次 `runArchCycleRound`；落地并由 driver 把 develop 同步到主检出后，其下一轮 append 的记录即 AC4 要求的载体行（无需人工派发；最后一步是常驻例程自动产生）。复验即 AC4 正文两条命令（先读最后一行 `behindScopes` / 各 scope `evaluated` + reason，再跑 `instrument-decay-check.ts --root /data/home/yale/work/quay --carrier arch-cycle-history.jsonl --json`）。
+
+## ADR-007 暗轴记录
+
+- 该轴仍暗,理由:本任务只改 plugin/scripts 内 arch-cycle 的刷新选择/预算与降级逻辑，不改变模块依赖结构，故未取 L_D/L_G 读数（archguard 的六个 scope 载体正是本任务所修的 stale 对象，用它取读数自指）。
