@@ -32,12 +32,14 @@ Track the phase explicitly and switch by rule:
 - **The phase field was declared once and never moved.** `.quay/two-phase-state.json` holds exactly
   one declaration (`history` length 1): `phase: convergence`, `declaredAt: 2026-09-13T20:35:47Z`,
   based on an L_D code:doc reading from the now-archived git-lens rule.
-- **Since then:** `git rev-list --count --since=2026-09-13T20:35 HEAD` = **10,572** commits
-  (≈10,566 when this amendment was drafted; the loop kept committing), and new goals
-  GOAL-906..GOAL-910 were opened. That is visible new work being absorbed, i.e. expansion, yet the
-  phase field never moved. (Caveat: GOAL-906..910 are themselves consolidation-shaped by title,
-  e.g. shim deletion and cycle breaking. Whether this period was expansion or continued convergence
-  is exactly what a stale phase field cannot tell us; the field carries no information either way.)
+- **Since then:** `git rev-list --count --since=2026-09-13T20:35:47Z HEAD` = **10,347** commits
+  (10,361 counting from the declared reading's head `9d2662b19`; an earlier draft of this note said
+  10,572 because the `--since` value lacked `Z` and git read it as local time, +0800 — corrected
+  2026-10-22). **30** goals were opened after the declaration (GOAL-018..037 and GOAL-901..910;
+  901..905 are drills). The phase field never moved. (Caveat: much of this work — e.g.
+  GOAL-906..910, shim deletion and cycle breaking — is consolidation-shaped by title. Whether this
+  period was expansion or continued convergence is exactly what a stale phase field cannot tell
+  us; the field carries no information either way.)
 - **Observed asymmetry: expansion needs no mechanism, contraction needs a human.** Expansion
   happened by default (the loop absorbs whatever is filed); the only recorded phase declaration, a
   convergence, was a human judgment ("人判定当前处于收缩相"). Nothing switches the phase back, and
