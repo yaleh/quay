@@ -1961,9 +1961,10 @@ export async function appendCompleteGateEvent(
 // THE DEFECT: the predicate's only enforcement points were the lifecycle verbs
 // (`runComplete`/`runCompleteLoop`/`runCompleteOutOfBand` → `enforceDarkAxis`). The PRODUCTION
 // landing path is the mechanical fan-in, which writes `status: done` from its own frontmatter patch
-// (`flipTaskDone`) and never traverses them — measured 2026-10-22: 816 `complete` events vs 36
-// `dark-axis` events since 2026-09-14, and replaying the predicate over the 793 distinct tasks the
-// driver landed gives MISSING 782 / DISCLAIMED 11 / RECORDED 0. The step below closes that hole:
+// (`flipTaskDone`) and never traverses them — measured 2026-10-22 at implementation time: 817
+// `complete` events vs 36 `dark-axis` events since 2026-09-14 (816 when the task was drafted; the
+// population moves as production lands), and replaying the predicate over the 794 distinct tasks the
+// driver landed gives MISSING 783 / DISCLAIMED 11 / RECORDED 0. The step below closes that hole:
 // it sits AFTER `ac-gate` and BEFORE `flipTaskDone`, and it is the same judgment, not a plugin-side
 // re-derivation (⛔ no second L_D/L_G regex — CLAUDE.md 硬规则 5b).
 
