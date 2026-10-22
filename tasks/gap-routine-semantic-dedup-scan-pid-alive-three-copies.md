@@ -3,7 +3,7 @@ id: gap-routine-semantic-dedup-scan-pid-alive-three-copies
 title: "semantic-dedup-scan: All three implement kill(pid,0) with EPERM read as
   ALIVE; server-state.ts:187 is the exported canonical copy (driver-runtime
   already re-exports it) and discove"
-status: todo
+status: ready
 labels:
   - gap
   - routine-filed

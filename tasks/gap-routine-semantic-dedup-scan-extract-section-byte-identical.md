@@ -3,7 +3,7 @@ id: gap-routine-semantic-dedup-scan-extract-section-byte-identical
 title: "semantic-dedup-scan: Depth-aware heading extractor is byte-identical
   (same escapeRegExp call, same stopRe logic); task-schema.ts neither imports
   nor re-exports the product copy, so"
-status: todo
+status: ready
 labels:
   - gap
   - routine-filed

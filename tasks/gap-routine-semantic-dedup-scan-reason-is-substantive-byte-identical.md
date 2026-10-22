@@ -3,7 +3,7 @@ id: gap-routine-semantic-dedup-scan-reason-is-substantive-byte-identical
 title: "semantic-dedup-scan: Bodies are character-identical and both compare
   against a locally re-declared MIN_REASON_CHARS = 8;
   semantic-face-dispatch-record imports only isDirectEntry, s"
-status: todo
+status: ready
 labels:
   - gap
   - routine-filed
