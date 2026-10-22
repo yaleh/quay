@@ -25,3 +25,24 @@ Track the phase explicitly and switch by rule:
 - **Forbids:** treating the crystallization/convergence program as permanent; expanding indefinitely while stability/description-length degrade unchecked.
 - **Enables:** a legible phase field on the dashboard; a principled "when do we stop crystallizing" answer.
 - **Scope / relations:** instance-of ADR-006; consumes ADR-007's dark-axis proxies as the switch signals. Complements ADR-009 (background workflow cadence runs whichever phase is active).
+
+**Amended 2026-10-22 (re-evaluation against 3 months of production data) — Status note**
+— human-approved 2026-10-22. Status stays `proposed`.
+
+- **The phase field was declared once and never moved.** `.quay/two-phase-state.json` holds exactly
+  one declaration (`history` length 1): `phase: convergence`, `declaredAt: 2026-09-13T20:35:47Z`,
+  based on an L_D code:doc reading from the now-archived git-lens rule.
+- **Since then:** `git rev-list --count --since=2026-09-13T20:35 HEAD` = **10,572** commits
+  (≈10,566 when this amendment was drafted; the loop kept committing), and new goals
+  GOAL-906..GOAL-910 were opened. That is visible new work being absorbed, i.e. expansion, yet the
+  phase field never moved. (Caveat: GOAL-906..910 are themselves consolidation-shaped by title,
+  e.g. shim deletion and cycle breaking. Whether this period was expansion or continued convergence
+  is exactly what a stale phase field cannot tell us; the field carries no information either way.)
+- **Observed asymmetry: expansion needs no mechanism, contraction needs a human.** Expansion
+  happened by default (the loop absorbs whatever is filed); the only recorded phase declaration, a
+  convergence, was a human judgment ("人判定当前处于收缩相"). Nothing switches the phase back, and
+  nothing notices that it has not been switched.
+- **Follow-up, as an observation item and not a blocker:** a phase-record-staleness reading (how long
+  since the last declaration, against how much commit / goal activity) is being filed as an
+  observation item. Per 硬规则 12 its occurrence count is **1** (this one stale record), which is
+  below the bar for a blocking prerequisite.
