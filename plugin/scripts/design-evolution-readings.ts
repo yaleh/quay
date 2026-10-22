@@ -1659,9 +1659,11 @@ export function evolutionFindings(record: DesignEvolutionReadingsRecord, verdict
           `子系统 \`${t.target}\` 本轮相对上一条读数分母增加 \`${t.deltaDenominator}\`、中心增量 \`${t.deltaCentral}\`、` +
           `非中心增量 \`${t.deltaNonCentral}\` ⇒ 新增的行落进了中心文件（分解没有把新代码挡在外面）。` +
           `累计占比 \`${t.sharePercent}%\`（centralΔ=\`${reading?.centralDelta ?? "?"}\` / denominator=\`${reading?.denominator ?? "?"}\`）。${where}。`,
+        // ⚠️ NO backticks inside `suggestedAction`: the renderer wraps the WHOLE action in one pair
+        // (routine-file-gate's candidate text), so an inner pair would break the reader's structure.
         suggestedAction:
-          `复核 \`${t.target}\` 本轮新增的中心文件行是否本应落在扩展点之外的模块里；若是，把新增逻辑移到模块文件并在 ` +
-          `\`${hist}\` 的后续读数上看到中心增量回落；若否，在任务体写明「这轮增长确实属于中心文件的职责」。`,
+          `复核 ${t.target} 本轮新增的中心文件行是否本应落在扩展点之外的模块里；若是，把新增逻辑移到模块文件并在 ` +
+          `${hist} 的后续读数上看到中心增量回落；若否，在任务体写明「这轮增长确实属于中心文件的职责」。`,
         files,
       };
     }
@@ -1681,7 +1683,7 @@ export function evolutionFindings(record: DesignEvolutionReadingsRecord, verdict
           `\`${t.target}\` 连续 \`${t.darkRounds}\` 轮读数 \`evaluated:false\`（阈值 \`${verdict.darkStreakRounds}\` 轮，策略选择）。` +
           `最近一条原因：\`${reading?.reason ?? (t.target === EVOLUTION_RM2_TARGET ? record.rm2.reason : null) ?? "no reason recorded"}\`。${where}。`,
         suggestedAction:
-          `读 \`${hist}\` 的最近记录，定位 \`${t.target}\` 读不出的确切条件` +
+          `读 ${hist} 的最近记录，定位 ${t.target} 读不出的确切条件` +
           `（baseline 不可解析 / 中心文件在某端缺失 / 分母非正 / 载体缺失），修好仪器或改正声明；⛔ 不要靠调高 dark_streak_rounds 让这条消掉。`,
         files,
       };
@@ -1702,8 +1704,8 @@ export function evolutionFindings(record: DesignEvolutionReadingsRecord, verdict
         `（identity=\`${reading === null ? "unavailable" : subsystemIdentity(reading)}\`）⇒ 这条读数来源消失了。` +
         `⛔ 改名不算消失（identity 由 baseline + 中心文件集构成）；这是「声明里不再有它」。${where}。`,
       suggestedAction:
-        `确认 \`${t.target}\` 是有意从 \`.quay/config.yml\` \`loop.design_evolution_readings.subsystems:\` 移除的：` +
-        `是 ⇒ 在任务体写明移除理由并结案；否 ⇒ 恢复该子系统声明，并让 \`${hist}\` 的下一条记录重新列出它。`,
+        `确认 ${t.target} 是有意从 .quay/config.yml 的 loop.design_evolution_readings.subsystems 移除的：` +
+        `是 ⇒ 在任务体写明移除理由并结案；否 ⇒ 恢复该子系统声明，并让 ${hist} 的下一条记录重新列出它。`,
       files,
     };
   });
