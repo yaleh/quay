@@ -350,6 +350,12 @@
       "readers": "unaudited"
     },
     {
+      "name": "ls-readings.jsonl",
+      "kind": "jsonl-log",
+      "owner": "plugin/scripts/ls-mutation-reading.ts",
+      "readers": "unaudited"
+    },
+    {
       "name": "pool-quality-judge-state.json",
       "kind": "state-json",
       "owner": "unowned-yet",
