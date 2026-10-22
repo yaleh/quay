@@ -152,9 +152,17 @@ workspaceEnforcesDarkAxis(/data/home/yale/work/quay) = true
 - testPass（4）：it0-dod-check-tests 0 · ts-typecheck 0 · split-or-commit 0 · enforcement-with-design 0
 另有 `adr-001` 0 / `adr-007` 0（本任务的新例程覆盖 adr 一族）。注意 `ts-typecheck` 由 `fan-in-ts-typecheck-gate.ts` 直接运行、不经门引擎 ⇒ 对它「0 事件」≠「从未运行」；其余各门是否也有别处的直接调用者，仍是待判的观察项。
 
+**本轮（第 2 轮）suite-red 修复 — 两条 task-introduced red（2026-10-22）**
+上一轮机械 fan-in 的 suite 在 baseline A/B 里读出 `added=plugin/test/probe-routine.test.mjs,plugin/test/sh-census-check.test.mjs`。两条都不是环境抖动：重跑复现，且各自都能追到本分支的一次真实变更。
+1. `plugin/test/probe-routine.test.mjs` — 该用例把 driver 的默认例程表**钉成一个字面清单**（当时五条）。本任务新增的 `adr-enforcement-report` 是 **DEFAULT-ON 的第六条**（这正是它的设计：段缺席也装配），所以清单必须跟着它走。断言改为六条（`adr-enforcement-report` 排在 `sort()` 后的首位），注释写明第六条及其在空 fixture root（无 `gates.adr`）上的形态 = 一条 `not-evaluated` 读数。⇒ 该文件 32/32 绿。
+2. `plugin/test/sh-census-check.test.mjs` AC6 — 判据是「**已提交基线 == 活体读数**」，不是「≤」。本任务把 L_D/L_G 的读数搬进 `git-lens-instrument.mjs` 之后，`git-lens-selfcheck.sh` 不再在**命令位置**调用解释器 ⇒ 它**离开**了 embedded-interpreter 轴（65 → 0 计行数；同时该文件本身 65 → 87 物理代码行，所以不是压行作弊）。基线按只降不升的棘轮规矩**下调** 6566 → 6501，逐项归因写进 `_reanchorLog`。非手拟合证据：用 checker 自己的 `countCodeLines`/`extractEmbeddedInterpreters` 跑 `git show develop:experiments/quay-perpetual-stream/scripts/git-lens-selfcheck.sh` 得 65 计行数 + `embedded:[node]`，**正好等于 6566 − 6501**。⇒ 该文件 22/22 绿。
+- 这两条新写入（`plugin/test/probe-routine.test.mjs`、`plugin/sh-census-baseline.json`）已按纪律声明进 `## Touches`，不是「跑红了再补声明」以外的手工绕过。
+- 合并 develop 时 `adr-enforcement-report` 与 develop 新增的 `instrument-decay` 例程在同一个 options 接口 / 例程表 / 测试文件上冲突 ⇒ 按**语义并集**解决：两条例程同时保留（`adrEnforcementRoutine` = 第十四类，`instrumentDecayRoutine` = 第十五类），测试文件保留两侧用例块。合并后 `plugin/test/quality-gate-driver.test.mjs` 114/114 绿。
+- 合并后 scoped gate：`bash scripts/test.sh --for-task gap-adr007-half1-selfcheck-probes-archived-and-gate-never-invoked --allow-thin` ⇒ `GATE_EXIT=0`（**148 tests / 148 pass / 0 fail**）。
+
 **DoD 读数**
-- `bash scripts/test.sh --for-task gap-adr007-half1-selfcheck-probes-archived-and-gate-never-invoked --allow-thin` ⇒ `GATE_EXIT=0`（137 tests / 137 pass / 0 fail；scoped 静态检查全 PASS，含 `sh-census-check`：embeddedInterpreterLines=6501 ≤ 6566）。
-- `anti-drift-touches-check.ts --task <id> --worktree <wt> --merge-target develop` ⇒ `ANTI-DRIFT OK — 14 actual file(s), all within declared Touches`。
+- `bash scripts/test.sh --for-task gap-adr007-half1-selfcheck-probes-archived-and-gate-never-invoked --allow-thin` ⇒ `GATE_EXIT=0`（**148 tests / 148 pass / 0 fail**；scoped 静态检查全 PASS，含 `sh-census-check`：embeddedInterpreterLines=**6501 == 6501**——基线已按 AC6 的「相等」语义同轮下调，不再是「≤ 6566」）。
+- `anti-drift-touches-check.ts --task <id> --worktree <wt> --merge-target develop` ⇒ `ANTI-DRIFT OK — 16 actual file(s), all within declared Touches`（修 red 前实测报的正是那 2 个未声明文件，逐条枚举而非一句 HARD FAIL）。
 - `git diff develop -- archive/` 为空；`archive/2026-09-07-zero-call-scripts/` 未被改动或复活。
 - L_S 两个用例仍在（各自 NOT-EVALUATED），未被删除。
 - `grep -rn 'adr-enforcement' plugin/scripts/worker-fan-in.ts` ⇒ 0 命中（新例程不在 fan-in 路径上）。
@@ -177,6 +185,8 @@ workspaceEnforcesDarkAxis(/data/home/yale/work/quay) = true
 - plugin/test/quality-gate-driver.test.mjs
 - plugin/test/git-lens-selfcheck.test.mjs
 - packages/quay/test/adr-gate.test.mjs
+- plugin/test/probe-routine.test.mjs
+- plugin/sh-census-baseline.json
 
 ## Blocker
 
