@@ -826,7 +826,7 @@
     "extension-point-criteria.ts": "按需",
     "extension-point-criteria-check.ts": "按需",
     "slice-readings.ts": "按需",
-    "worker-fan-in-hooks.ts": "每次机械 fan-in（内置两条：dark-axis pre-flip / slice-readings-post post-flip）"
+    "worker-fan-in-hooks.ts": "每轮"
   },
   "INVALIDATION": {
     "verify-plugin-channel-assertions.ts": "失效前提：Claude Code plugin 仍是唯一的发布/安装渠道，且 release.yml 的 verify-plugin-channel 仍是发布门禁（门禁若移到别处，断言实现不变但调用点须同步）；断言依赖的直接量仍存在——VERSION、.claude-plugin/plugin.json、bin/quay --version、项目 .quay/plugin 链接、.quay/config.yml 的 providers.native、/proc/<pid>/cgroup、.quay/server.json、.quay/serve.log、installed_plugins.json。任一量改由另一个载体承载（例如版本改从被测对象自报接口取）⇒ 本条口径需同步，否则会把读不懂误判为合格。",
