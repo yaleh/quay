@@ -2,7 +2,7 @@
 id: gap-planner-admission-widen-beyond-package-cycle
 title: Planner 立案准入只认 package-cycle——把准入从单常量扩成 concern-kind 注册表，先承认
   「设计演进读数回归」（已机械化），主干无扩展点 / god-file 体量留作注册位（其探测器未落地）
-status: ready
+status: done
 labels:
   - gap
   - defect
