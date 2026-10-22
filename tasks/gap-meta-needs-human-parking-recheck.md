@@ -27,5 +27,6 @@ tasks/gap-semantic-admission-contract-module.md å›  unsatisfiableUnannotatedAc è
 - `plugin/test/needs-human-parking-recheck.test.mjs`
 - `plugin/scripts/promotion-driver.ts`
 - `plugin/scripts/capability-catalog.sh`
+- `plugin/scripts/capability-catalog-declarations.json`
 - `docs/proposals/quay-product-outline.md`
 - `tasks/gap-meta-needs-human-parking-recheck.md`
