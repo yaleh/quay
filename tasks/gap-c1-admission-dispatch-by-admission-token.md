@@ -158,7 +158,11 @@ RESTORED_EXIT=0
 
 The task branch carries exactly the committed tree; fan-in fast-forwards it into develop, and the `git show develop:…` rerun is the driver's post-merge step (not reachable from the worker seat — stated so the claim is falsifiable rather than inferred).
 
-ADR-007 dark axis: 该轴仍暗,理由:本次只改 docs/analysis 的准入分派与注册表字面化，未动 packages/ 依赖结构，未运行 L_D/L_G 仪器
+### ADR-007 dark axis record
+
+- L_G：该轴仍暗,理由:本次只改 docs/analysis 的准入分派、注册表字面化与 plugin/test，未动 packages/ 依赖结构，未运行 L_G 仪器
+
+⚠️ 上一轮写的是 `ADR-007 dark axis: 该轴仍暗,…`，而谓词要求 `该轴仍暗` 位于**行首**（至多允许列表符/引用符/轴标签前缀）⇒ 判 MISSING。本轮改为行首声明；这是同一条判断，只修正载体形态，理由本身不变。
 
 ## Blocker
 
