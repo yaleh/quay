@@ -2,7 +2,7 @@
 id: gap-arch-cycle-report-never-evaluated-aggregate-and-stale-artifacts
 title: 目录环常驻检测例程 arch-cycle-report 上线以来 25/25 轮 evaluated:false：汇总被两个无
   moduleGraph 的单目录小包作废，且产物无人刷新——一个真实的目录环因此存在约 7 小时无人察觉
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -83,11 +83,3 @@ extra:
 - 阻碍原因：unsatisfiableUnannotatedAc=[AC4 刷新后与独立仪器一致：刷新后 src scope 为 `evaluated:true`、`behindSources:false`，且它报告的环集合与 GOAL-910 AC-916 判据在同一 HEAD 上的输出一致（GOAL-910 未落地时双方都应是 `[[".","observation","serve"]]`，落地后双方都应是 0）。贴出两份输出与 HEAD。]（连续 3 轮被结构上不可派的拦截挡住 ⇒ 作者/人改写；⛔ 不派 fix worker）
 
 **已解除（2026-10-22）**：AC4 已在两次真实读数上复验（同一 HEAD 双侧一致，且负对照在 `d7e1c743a` 上双方同时报出 `{., observation, serve}`），该 AC 现为绿。
-
-## Blocker
-
-**2026-10-22T02:19:16.499Z — worker 未落地（exited-not-landed）**
-
-- 未落地原因：step=suite: AssertionError [ERR_ASSERTION]: the suite's final line must appear — NOT killed at red-grace [baseline A/B: HARD RED (task-introduced-red) — the task's red set is NOT a subset of the develop baseline red set: added=plugin/test/full-suite-runner-s07.test.mjs,packages/quay/test/serve-ac95-views.test.mjs,plugin/test/live-web-address.test.mjs,plugin/test/promotion-driver-s02.test.mjs,plugin/test/supervisor-observe.test.mjs,plugin/test/ownership-active-loop.test.mjs changed=-]
-- run_id：wk-prod-anchor
-- session_id：7b2b945d-54f7-4705-8ce1-fea31cbb6db5
