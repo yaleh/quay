@@ -5,7 +5,7 @@
 // `product,engine` suite, so this only changes `--group engine`-only runs (none exist in CI/workflows).
 // plugin/test/plugin-packaging.test.mjs — pins the DIR-040 (+ DIR-042-B) plugin-packaging invariants:
 //   1. the marketplace + plugin manifests are valid JSON with the shape Claude Code expects
-//   2. plugin.json carries NO commands[] (skills/ auto-discovers) and the 13 bundled skill
+//   2. plugin.json carries NO commands[] (skills/ auto-discovers) and the 14 bundled skill
 //      directories exist on disk
 //   3. the bundled execute skill is byte-identical to its ONE canonical source
 //      (packages/quay-native/skills/execute/SKILL.md) — single-source, ADR-004
@@ -76,7 +76,7 @@ test('neither marketplace entry carries a `version` — the field is read by not
   }
 });
 
-test('plugin.json is valid JSON; skills auto-discover (no commands[]); the 13 bundled skill directories exist on disk', () => {
+test('plugin.json is valid JSON; skills auto-discover (no commands[]); the 14 bundled skill directories exist on disk', () => {
   const manifest = readJson(path.join(pluginDir, '.claude-plugin', 'plugin.json'));
   assert.equal(manifest.name, 'quay');
   // Cross-check against packages/quay's version rather than a hardcoded literal (which is
@@ -95,7 +95,7 @@ test('plugin.json is valid JSON; skills auto-discover (no commands[]); the 13 bu
   // default command scan loses nothing. This assertion keeps the field from silently returning.
   assert.equal('commands' in manifest, false,
     'plugin.json must NOT declare commands[] — skills/ is auto-scanned, and commands[] re-registers each SKILL.md as a duplicate flat command (quay:SKILL)');
-  // The 13 bundled skills still ship as auto-discovered directories. (The old invariant was
+  // The 14 bundled skills still ship as auto-discovered directories. (The old invariant was
   // `commands[]` equals the on-disk skill dirs; the source of truth moved from the manifest field
   // to the filesystem, since the manifest no longer declares them.)
   const diskSkills = fs.readdirSync(path.join(pluginDir, 'skills'))
@@ -105,6 +105,7 @@ test('plugin.json is valid JSON; skills auto-discover (no commands[]); the 13 bu
     'cold-start',
     'drivers',
     'execute',
+    'extension-point-refactor',
     'init',
     'loop-driver',
     'manager',
@@ -116,7 +117,7 @@ test('plugin.json is valid JSON; skills auto-discover (no commands[]); the 13 bu
     'quay-webui-bootstrap-methodology',
     'routines',
   ];
-  assert.deepEqual(diskSkills, wanted, `plugin/skills/ must contain exactly the 13 bundled skill directories. Missing: ${wanted.filter((d) => !diskSkills.includes(d))}. Extra: ${diskSkills.filter((d) => !wanted.includes(d))}`);
+  assert.deepEqual(diskSkills, wanted, `plugin/skills/ must contain exactly the 14 bundled skill directories. Missing: ${wanted.filter((d) => !diskSkills.includes(d))}. Extra: ${diskSkills.filter((d) => !wanted.includes(d))}`);
 });
 
 test('M143: plugin.json declares agents[] with quay-task', () => {

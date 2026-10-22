@@ -91,6 +91,20 @@ packages/quay/plugin/
 # quality-round.jsonl. Declared in docs/carrier-registry.json (owner:
 # plugin/scripts/design-evolution-readings.ts).
 **/.quay/design-evolution-history.jsonl
+# L_S (behaviour-variance) READING carrier (.quay/ls-readings.jsonl) —
+# gap-ls-product-code-behavior-variance-first-reading. plugin/scripts/ls-mutation-reading.ts appends
+# ONE line per reading (target, mutants, killed/survived/notEvaluated, score, survivors). Runtime
+# state, never git-tracked — the same family as arch-cycle-history.jsonl / quality-round.jsonl (this
+# IS the reading; a readable-but-committable carrier would be a different thing). Declared in
+# docs/carrier-registry.json (owner: plugin/scripts/ls-mutation-reading.ts). Deliberately NOT marked
+# `@quay-runtime-artifact`: its pattern lives under `.quay/`, which quay-init's static `.quay/*`
+# rule already covers in consumer projects (quay-runtime-artifacts.txt's inclusion criterion).
+**/.quay/ls-readings.jsonl
+# PER-TASK slice readings carrier (.quay/slice-readings/<task-id>.json) —
+# gap-slice-before-after-readings-at-dispatch-and-fanin (人 2026-10-22): one file per task holding the
+# dispatch-time `baseline` reading and the fan-in `post` reading + per-metric delta. Runtime evidence,
+# never git-tracked (the file names are task ids, so a directory rule — ⛔ not a *.jsonl carrier).
+**/.quay/slice-readings/
 # resource-DIAGNOSTIC ROUTINE carriers (gap-quality-continuous-resource-diagnostic-routine-mechanical-
 # filter-then-semantic): `.quay/resource-anomaly-findings.jsonl` holds one line per NEW mechanically-
 # flagged anomaly plus one scan-round line per round, and `.quay/resource-diagnostic-model-budget.jsonl`

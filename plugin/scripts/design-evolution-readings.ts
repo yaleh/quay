@@ -1023,6 +1023,11 @@ export interface DesignEvolutionReadingsRecord {
    *  trigger (tasks/gap-adr008-phase-declaration-staleness-reading Plan §3-4). Its own unreadable
    *  state is `evaluated:false` inside the field, which must not change the ROUND's verdict. */
   phaseStaleness: PhaseStalenessReading;
+  /** The round's own JUDGMENT (gap-design-evolution-readings-emit-findings): `stable` /
+   *  `regression` / `no-prior` / `not-evaluated`, plus the per-subsystem table. Present on every
+   *  record this module writes (a `stable` round is still an assessment); ABSENT on records written
+   *  before the judgment existed — an absent field is 「这一轮没有判定」, ⛔ never `stable` (硬规则 6). */
+  evolution?: EvolutionVerdict;
   reportOnly: true;
 }
 
@@ -1124,23 +1129,765 @@ export function readPreviousWindow(
   }
 }
 
+// ═════════════════════════════════════════════════════════════════════════════════════════════════
+// FROM A READING TO A FINDING (tasks/gap-design-evolution-readings-emit-findings, 2026-10-22)
+// ═════════════════════════════════════════════════════════════════════════════════════════════════
+//
+// WHAT WAS MISSING. Everything above produces a reading and stops. `quality-gate-driver`'s
+// design-evolution routine appended one line per due round and reported it, and NOTHING downstream
+// read that line: the second half of the meta-mechanism (「检出回归就立案」) did not exist. The filing
+// track DID exist an arm's length away — `.quay/routine-findings.jsonl` → `routine-file-gate.ts`
+// (quality / dedup / rate) → `quay:run-routines` — with 2924 records and `architecture-analysis`
+// already among its producers. The readings were simply never connected to it. The two historical
+// events a regression detector would have caught (the ~7h directory cycle, the worker god-file
+// growth) were found by a human reading, not by this routine.
+//
+// WHAT THIS ADDS, and what it deliberately does NOT:
+//   ⛔ no new driver, ⛔ no model call, ⛔ no task creation from here. A `regression` verdict becomes a
+//   FINDING in the EXISTING carrier; whether it becomes a task stays the existing gate's call.
+//
+// THE TRIGGERS ARE STRUCTURAL, NEVER THRESHOLDS (硬规则 4 推论 — no numeric threshold for a cost
+// structure nobody has measured). At the task's reading the carrier held 9 records with almost no
+// variance (serve 1.31% ×8, worker-history 82.46% ×7), so a `>50%` / `>1%` bar would be invented:
+//   • `share-up`      — same subsystem, same baseline, and THIS round's denominator AND its central
+//                       delta both grew ⇒ new lines were produced AND new lines landed in the central
+//                       file. The finding carries Δcentral / Δdenominator / Δnon-central and the
+//                       cumulative share. Noise is absorbed by the gate's DEDUP branch (one filing per
+//                       subsystem+trigger), ⛔ never by an invented cut-off.
+//                       DECLARED BOUNDARY: `Δdenominator <= 0` is NOT a share-up even when Δcentral > 0
+//                       — a window that only moved lines INTO the central file is not "new code
+//                       landing in central", and the task names this trigger by that shape.
+//   • `dark-streak`   — a subsystem read `evaluated:false` for ≥ `dark_streak_rounds` consecutive
+//                       rounds. ← the ONLY round count here, and it is a POLICY choice (one failure
+//                       can be transient, two is worth a task), ⛔ not a measurement; the default is
+//                       stated once, below, and the config key only overrides it.
+//   • `source-missing`— a subsystem the previous round measured is GONE. Identity is `baseline` +
+//                       the central file set, ⛔ not the label: a rename does not remove a reading.
+//                       (Measured on the real carrier — record #1 renames `worker` → `worker-history`
+//                       with the same baseline 2440b52d0 and the same central files. A label-keyed
+//                       rule would have filed a "subsystem vanished" task for a config rename.)
+//
+// THE INSTRUMENT GOING DARK IS ITSELF A FINDING (`dark-streak`), or this mechanism is blind exactly
+// when its instruments are — the lesson of `gap-instrument-decay-check-unwired-and-blind-to-content-
+// dark`. ⛔ This does not re-detect decay; it consumes its OWN dark rounds.
+//
+// EVERY ROUND LEAVES A TRACE, `stable` INCLUDED: the verdict is embedded in the round's own carrier
+// record (`evolution`), so 「这条例程评估过几轮、触发过几次」 is a query over the carrier, not a
+// memory. (`arch-cycle-report`'s 25/25 `evaluated:false` is the measured cost of skipping this.)
+//
+// THE DEDUP IDENTITY IS MECHANICAL: `evolution:<target>:<trigger>`, emitted as the finding's SYMBOL,
+// so `routine-file-gate`'s existing subject key (`symbols:<sorted set>`) keys on it with NO new
+// parser. ⛔ The rationale (which a fresh context would paraphrase every round) never reaches the
+// key — the same measured lesson as `semantic-dedup-scan`'s 76 recurring clusters / 0 cross-round
+// prose keys.
+
+/** The one POLICY number in this mechanism. WHY 2: one dark round can be a transient (a resolve
+ *  failure, a carrier being rewritten); two consecutive is worth a task. ⛔ This is a choice about
+ *  when to spend a human's attention — it is NOT a measured threshold (硬规则 4 推论), and it must
+ *  not be quoted as if a reading had produced it. The single definition point; the config key
+ *  `design_evolution_readings.dark_streak_rounds` only OVERRIDES it (⛔ no second default). */
+export const DESIGN_EVOLUTION_DARK_STREAK_ROUNDS_DEFAULT = 2;
+
+/** The existing routine-findings carrier this mechanism appends FINDINGS to (⛔ not a new carrier:
+ *  `quay:run-routines` / `routine-file-gate` already read this one, and a private file would need a
+ *  new consumer — the exact "detects but nothing acts" shape this task closes). */
+export const EVOLUTION_FINDINGS_REL = path.posix.join(".quay", "routine-findings.jsonl");
+
+/** Round-level judgment states. `not-evaluated` is spelled the way the Fact vocabulary spells it. */
+export const EVOLUTION_STATE_STABLE = "stable";
+export const EVOLUTION_STATE_REGRESSION = "regression";
+export const EVOLUTION_STATE_NO_PRIOR = "no-prior";
+export const EVOLUTION_STATE_NOT_EVALUATED = "not-evaluated";
+export type EvolutionState =
+  | typeof EVOLUTION_STATE_STABLE
+  | typeof EVOLUTION_STATE_REGRESSION
+  | typeof EVOLUTION_STATE_NO_PRIOR
+  | typeof EVOLUTION_STATE_NOT_EVALUATED;
+
+/** The three triggers — the ONE vocabulary. ⛔ Never copy this list: a drifted copy silently changes
+ *  what counts as a regression (and what the finding key means). */
+export const EVOLUTION_TRIGGER_VALUES = ["share-up", "dark-streak", "source-missing"] as const;
+export type EvolutionTrigger = (typeof EVOLUTION_TRIGGER_VALUES)[number];
+export const EVOLUTION_TRIGGER_SHARE_UP = "share-up";
+export const EVOLUTION_TRIGGER_DARK_STREAK = "dark-streak";
+export const EVOLUTION_TRIGGER_SOURCE_MISSING = "source-missing";
+
+/** RM2's row in the per-subsystem table. RM2 is a whole-repo reading, not a declared subsystem, and
+ *  it must still be able to go dark — naming it here keeps the table exhaustive without pretending
+ *  it is a `subsystems:` entry. */
+export const EVOLUTION_RM2_TARGET = "rm2";
+
+/** Per-subsystem row states: the three triggers plus four non-triggering values. ⛔ Each is distinct
+ *  (硬规则 3): 「没变化」(`stable`), 「这轮才出现」(`new`), 「上一轮没有可比值」(`no-prior`) and
+ *  「这一轮读不出来」(`not-evaluated`) must never share one spelling. */
+export type SubsystemRowState = EvolutionTrigger | "stable" | "new" | "no-prior" | "not-evaluated";
+
+export interface SubsystemVerdict {
+  name: string;
+  state: SubsystemRowState;
+  /** THIS round's increment over the previous one (⛔ not the cumulative reading — both are carried:
+   *  `deltaCentral` here, the cumulative `sharePercent` alongside). null when incomparable. */
+  deltaCentral: number | null;
+  deltaNonCentral: number | null;
+  deltaDenominator: number | null;
+  /** The CUMULATIVE share the subsystem reports this round (2 decimals). */
+  sharePercent: number | null;
+  /** Consecutive `evaluated:false` rounds ENDING at this round (`dark-streak` rows only). */
+  darkRounds: number | null;
+  /** Names the exact cause whenever a number is null (硬规则 3b). */
+  reason: string | null;
+}
+
+/** One trigger hit — the shape both the finding and the summary line read. */
+export interface EvolutionTriggerHit {
+  trigger: EvolutionTrigger;
+  target: string;
+  deltaCentral: number | null;
+  deltaNonCentral: number | null;
+  deltaDenominator: number | null;
+  sharePercent: number | null;
+  darkRounds: number | null;
+}
+
+export interface EvolutionVerdict {
+  state: EvolutionState;
+  /** NON-NULL ONLY for `regression`, and never empty there. Otherwise `null` — ⛔ not `[]`: an empty
+   *  array makes 「无触发」 and 「判不了」 share one shape (硬规则 3b). */
+  triggers: EvolutionTriggerHit[] | null;
+  /** The full per-subsystem table (triggering rows AND non-triggering ones) — the AC3 surface. */
+  subsystems: SubsystemVerdict[];
+  /** ONE deterministic line. Never null, so a `stable` round is still a visible assessment. */
+  summary: string;
+  /** Why the judgment could not be taken (`not-evaluated` only), else null. */
+  reason: string | null;
+  currTs: string;
+  currEvaluated: boolean;
+  priorTs: string | null;
+  /** THREE-VALUED, kept apart from `priorTs === null`: a first round and a corrupt carrier are not
+   *  the same fact (硬规则 3b). */
+  priorState: "ok" | "no-prior-record" | "previous-record-unusable";
+  darkStreakRounds: number;
+}
+
+/** A finding this mechanism would file. Every field is derived from the readings — ⛔ no prose enters
+ *  the KEY, and the key is the only thing dedup sees. */
+export interface EvolutionFinding {
+  /** `evolution:<target>:<trigger>` — the mechanical identity (see the header block). */
+  key: string;
+  target: string;
+  trigger: EvolutionTrigger;
+  readingTs: string;
+  priorReadingTs: string | null;
+  deltaCentral: number | null;
+  deltaNonCentral: number | null;
+  deltaDenominator: number | null;
+  sharePercent: number | null;
+  darkRounds: number | null;
+  rationale: string;
+  suggestedAction: string;
+  files: string[];
+}
+
+/** `evolution:<target>:<trigger>`. ⛔ ONE construction point — the carrier record and the rendered
+ *  candidate must key identically, or dedup silently stops working. */
+export function evolutionFindingKey(target: string, trigger: EvolutionTrigger): string {
+  return `evolution:${target}:${trigger}`;
+}
+
+// ── reading the carrier's HISTORY (not just its watermark) ───────────────────────────────────────
+
+export type HistoryReadState = "ok" | "carrier-missing" | "unreadable";
+
+export interface HistoryRead {
+  state: HistoryReadState;
+  /** [] unless `state === "ok"` (⛔ a half-parsed list must not be presented as the history). */
+  records: DesignEvolutionReadingsRecord[];
+  /** Non-blank lines that did not parse into a round record — reported, never silently dropped. */
+  malformed: number;
+  reason: string | null;
+}
+
+function isRoundRecord(x: unknown): x is DesignEvolutionReadingsRecord {
+  if (x === null || typeof x !== "object" || Array.isArray(x)) return false;
+  const r = x as Record<string, unknown>;
+  if (r.mode !== DESIGN_EVOLUTION_MODE) return false;
+  if (typeof r.ts !== "string" || typeof r.evaluated !== "boolean") return false;
+  const rm1 = r.rm1 as { subsystems?: unknown } | undefined;
+  if (rm1 === null || typeof rm1 !== "object" || !Array.isArray(rm1?.subsystems)) return false;
+  const rm2 = r.rm2 as { evaluated?: unknown } | undefined;
+  return rm2 !== null && typeof rm2 === "object" && typeof rm2?.evaluated === "boolean";
+}
+
+/** Read EVERY round record the carrier holds, oldest first.
+ *
+ *  THREE-VALUED (硬规则 3b): a missing carrier and an unparseable one are different facts, and a
+ *  carrier with some good and some corrupt lines is `ok` carrying `malformed > 0` — the caller can
+ *  see what it is standing on. A carrier whose non-blank lines ALL fail to parse is `unreadable`
+ *  (reading it produced nothing, so presenting it as "no history" would be a lie). */
+export function readDesignEvolutionHistory(root: string, opts: { historyPath?: string } = {}): HistoryRead {
+  const file = opts.historyPath ? path.resolve(opts.historyPath) : path.join(path.resolve(root), DESIGN_EVOLUTION_HISTORY_REL);
+  let text: string;
+  try {
+    text = fs.readFileSync(file, "utf8");
+  } catch (e) {
+    const code = (e as { code?: string }).code;
+    if (code === "ENOENT") return { state: "carrier-missing", records: [], malformed: 0, reason: `${file} does not exist` };
+    return { state: "unreadable", records: [], malformed: 0, reason: `${file} is unreadable — ${(e as Error).message}` };
+  }
+  const lines = text.split("\n").filter((l) => l.trim() !== "");
+  const records: DesignEvolutionReadingsRecord[] = [];
+  let malformed = 0;
+  for (const line of lines) {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(line);
+    } catch {
+      malformed += 1;
+      continue;
+    }
+    if (!isRoundRecord(parsed)) {
+      malformed += 1;
+      continue;
+    }
+    records.push(parsed);
+  }
+  if (lines.length > 0 && records.length === 0) {
+    return { state: "unreadable", records: [], malformed, reason: `${file} carries ${lines.length} line(s) but none is a round record` };
+  }
+  return { state: "ok", records, malformed, reason: null };
+}
+
+/** Consecutive `evaluated:false` rounds for `name`, counting BACKWARDS from the last record. A record
+ *  that does not carry the subsystem BREAKS the streak (absent ≠ dark — 硬规则 6: 缺值 ≠ 为假). */
+export function trailingDarkRounds(records: readonly DesignEvolutionReadingsRecord[], name: string): number {
+  let n = 0;
+  for (let i = records.length - 1; i >= 0; i--) {
+    const s = records[i].rm1.subsystems.find((x) => x.name === name);
+    if (!s || s.evaluated !== false) break;
+    n += 1;
+  }
+  return n;
+}
+
+/** Same for RM2's whole-repo reading. */
+export function trailingRm2DarkRounds(records: readonly DesignEvolutionReadingsRecord[]): number {
+  let n = 0;
+  for (let i = records.length - 1; i >= 0; i--) {
+    if (records[i].rm2.evaluated !== false) break;
+    n += 1;
+  }
+  return n;
+}
+
+/** The prior-dark map the pure judge consumes: one entry per target the CURRENT round can report. */
+export function priorDarkRoundsFor(
+  records: readonly DesignEvolutionReadingsRecord[],
+  names: readonly string[],
+): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const name of names) out[name] = trailingDarkRounds(records, name);
+  out[EVOLUTION_RM2_TARGET] = trailingRm2DarkRounds(records);
+  return out;
+}
+
+// ── THE JUDGMENT (pure; ⛔ no I/O, ⛔ no model) ──────────────────────────────────────────────────
+
+/** A subsystem's IDENTITY across rounds: what it MEASURES, not what it is called. A renamed
+ *  subsystem (same baseline, same central files) is the SAME reading — measured on the real carrier:
+ *  `worker` → `worker-history` at record #1, both at baseline 2440b52d0. */
+export function subsystemIdentity(s: { baseline: string; baselineSha?: string | null; central: readonly CentralFileSpec[] }): string {
+  const baseline = s.baselineSha ?? s.baseline;
+  return `${baseline}|${s.central.map((c) => c.atHead).slice().sort().join(",")}`;
+}
+
+export interface JudgeOptions {
+  /** Rounds a subsystem must read `evaluated:false` consecutively before it counts as a regression. */
+  darkStreakRounds?: number;
+  /** Consecutive dark rounds immediately BEFORE `curr`, per target (see `priorDarkRoundsFor`).
+   *  Absent ⇒ derived from `prev` alone (1 when `prev` carries the subsystem unevaluated, else 0),
+   *  which is exactly the pair-wise reading for the default threshold of 2. */
+  priorDarkRounds?: Readonly<Record<string, number>>;
+  /** Why `prev` is what it is. Defaults to `no-prior-record` when `prev` is null, else `ok`. */
+  prevState?: EvolutionVerdict["priorState"];
+  prevStateReason?: string | null;
+}
+
+const num = (v: number | null | undefined): number | null => (typeof v === "number" && Number.isFinite(v) ? v : null);
+const sub = (a: number | null, b: number | null): number | null => (a === null || b === null ? null : a - b);
+
+/** Judge ONE round against its predecessor. Four states, pairwise distinguishable:
+ *    `stable`         — a usable prior exists and nothing triggered;
+ *    `regression`     — ≥1 trigger (triggers non-empty);
+ *    `no-prior`       — this is the first reading (priorTs null, priorState `no-prior-record`);
+ *    `not-evaluated`  — THIS round cannot be judged (its own readings are dark short of a streak, or
+ *                       the previous record is unreadable). `reason` is non-null and `triggers` null.
+ *  ⛔ `stable` and `no-prior` differ in `state` AND `priorTs`; ⛔ `not-evaluated` never borrows
+ *  `triggers: []`. */
+export function judgeEvolutionRegression(
+  prev: DesignEvolutionReadingsRecord | null,
+  curr: DesignEvolutionReadingsRecord,
+  opts: JudgeOptions = {},
+): EvolutionVerdict {
+  const threshold = opts.darkStreakRounds ?? DESIGN_EVOLUTION_DARK_STREAK_ROUNDS_DEFAULT;
+  const priorState: EvolutionVerdict["priorState"] = opts.prevState ?? (prev === null ? "no-prior-record" : "ok");
+  const derivedDark: Readonly<Record<string, number>> =
+    opts.priorDarkRounds ??
+    (prev === null
+      ? {}
+      : Object.fromEntries(
+          prev.rm1.subsystems.map((s) => [s.name, s.evaluated === false ? 1 : 0] as const),
+        ));
+  const base = {
+    currTs: curr.ts,
+    currEvaluated: curr.evaluated === true,
+    priorTs: prev?.ts ?? null,
+    priorState,
+    darkStreakRounds: threshold,
+  };
+
+  if (!isRoundRecord(curr)) {
+    return {
+      ...base,
+      state: EVOLUTION_STATE_NOT_EVALUATED,
+      triggers: null,
+      subsystems: [],
+      summary: `${EVOLUTION_STATE_NOT_EVALUATED} @${String((curr as { ts?: unknown })?.ts ?? "?")} — the round record could not be read`,
+      reason: "current-record-unreadable: the argument is not a design-evolution round record (mode/ts/evaluated/rm1.subsystems/rm2.evaluated missing)",
+    };
+  }
+  if (priorState === "previous-record-unusable") {
+    return {
+      ...base,
+      state: EVOLUTION_STATE_NOT_EVALUATED,
+      triggers: null,
+      subsystems: [],
+      summary: `${EVOLUTION_STATE_NOT_EVALUATED} @${curr.ts} — the previous round could not be read, so no comparison exists`,
+      reason: opts.prevStateReason ?? "previous-record-unusable: the last carrier line is not a round record, so there is no baseline to compare against (⛔ not the same as a first round)",
+    };
+  }
+
+  const rows: SubsystemVerdict[] = [];
+  const prevSubs = prev?.rm1.subsystems ?? null;
+  const usedPrev = new Set<number>();
+
+  const judgeOne = (cs: (typeof curr.rm1.subsystems)[number], ps: (typeof curr.rm1.subsystems)[number] | null): SubsystemVerdict => {
+    const dark = derivedDark[cs.name] ?? 0;
+    if (cs.evaluated !== true) {
+      const darkRounds = dark + 1;
+      if (darkRounds >= threshold) {
+        return {
+          name: cs.name, state: EVOLUTION_TRIGGER_DARK_STREAK,
+          deltaCentral: null, deltaNonCentral: null, deltaDenominator: null, sharePercent: null,
+          darkRounds, reason: cs.reason ?? "the reading reports evaluated:false without a reason",
+        };
+      }
+      return {
+        name: cs.name, state: EVOLUTION_STATE_NOT_EVALUATED,
+        deltaCentral: null, deltaNonCentral: null, deltaDenominator: null, sharePercent: null,
+        darkRounds, reason: cs.reason ?? "the reading reports evaluated:false without a reason",
+      };
+    }
+    const sharePercent = num(cs.sharePercent);
+    if (ps === null) {
+      return {
+        name: cs.name, state: prev === null ? EVOLUTION_STATE_NO_PRIOR : "new",
+        deltaCentral: null, deltaNonCentral: null, deltaDenominator: null, sharePercent,
+        darkRounds: null,
+        reason: prev === null ? "first round — there is no previous reading to compare against" : "this subsystem is absent from the previous round",
+      };
+    }
+    if (ps.evaluated !== true) {
+      return {
+        name: cs.name, state: EVOLUTION_STATE_NO_PRIOR,
+        deltaCentral: null, deltaNonCentral: null, deltaDenominator: null, sharePercent,
+        darkRounds: null,
+        reason: `the previous round could not evaluate this subsystem (${ps.reason ?? "no reason recorded"}) ⇒ the increment is not computable`,
+      };
+    }
+    const deltaCentral = sub(num(cs.centralDelta), num(ps.centralDelta));
+    const deltaNonCentral = sub(num(cs.nonCentralDelta), num(ps.nonCentralDelta));
+    const deltaDenominator = sub(num(cs.denominator), num(ps.denominator));
+    const sameBaseline = subsystemIdentity(cs) === subsystemIdentity(ps);
+    const shareUp =
+      sameBaseline && deltaDenominator !== null && deltaCentral !== null &&
+      deltaDenominator > 0 && deltaCentral > 0;
+    return {
+      name: cs.name,
+      state: shareUp ? EVOLUTION_TRIGGER_SHARE_UP : EVOLUTION_STATE_STABLE,
+      deltaCentral, deltaNonCentral, deltaDenominator, sharePercent, darkRounds: null,
+      reason: shareUp
+        ? null
+        : sameBaseline
+          ? "no new lines landed in the central file this round (Δcentral <= 0 or Δdenominator <= 0)"
+          : "the subsystem's baseline identity changed between the two rounds ⇒ the increment is not comparable",
+    };
+  };
+
+  for (const cs of curr.rm1.subsystems) {
+    let pi = -1;
+    if (prevSubs !== null) {
+      pi = prevSubs.findIndex((p, i) => !usedPrev.has(i) && p.name === cs.name);
+      if (pi < 0) pi = prevSubs.findIndex((p, i) => !usedPrev.has(i) && subsystemIdentity(p) === subsystemIdentity(cs));
+      if (pi >= 0) usedPrev.add(pi);
+    }
+    rows.push(judgeOne(cs, pi >= 0 ? prevSubs![pi] : null));
+  }
+  // `source-missing` rows: what the previous round measured and this one does not.
+  if (prevSubs !== null) {
+    for (const [i, ps] of prevSubs.entries()) {
+      if (usedPrev.has(i)) continue;
+      rows.push({
+        name: ps.name, state: EVOLUTION_TRIGGER_SOURCE_MISSING,
+        deltaCentral: null, deltaNonCentral: null, deltaDenominator: null, sharePercent: null,
+        darkRounds: null,
+        reason: `the previous round measured this subsystem (${subsystemIdentity(ps)}) and this round does not declare it`,
+      });
+    }
+  }
+  // RM2's own row — the contention reading can go dark too, and an instrument that goes dark silently
+  // is the failure class this whole section exists for.
+  const rm2Dark = (derivedDark[EVOLUTION_RM2_TARGET] ?? 0) + (curr.rm2.evaluated === true ? 0 : 1);
+  if (curr.rm2.evaluated !== true) {
+    rows.push({
+      name: EVOLUTION_RM2_TARGET,
+      state: rm2Dark >= threshold ? EVOLUTION_TRIGGER_DARK_STREAK : EVOLUTION_STATE_NOT_EVALUATED,
+      deltaCentral: null, deltaNonCentral: null, deltaDenominator: null, sharePercent: null,
+      darkRounds: rm2Dark, reason: curr.rm2.reason ?? "rm2 reports evaluated:false without a reason",
+    });
+  } else if (prev !== null && prev.rm2.evaluated !== true) {
+    rows.push({
+      name: EVOLUTION_RM2_TARGET, state: EVOLUTION_STATE_NO_PRIOR,
+      deltaCentral: null, deltaNonCentral: null, deltaDenominator: null, sharePercent: null,
+      darkRounds: null, reason: "the previous round could not take the contention reading",
+    });
+  } else {
+    rows.push({
+      name: EVOLUTION_RM2_TARGET, state: EVOLUTION_STATE_STABLE,
+      deltaCentral: null, deltaNonCentral: null, deltaDenominator: null, sharePercent: null,
+      darkRounds: null, reason: null,
+    });
+  }
+
+  const triggers: EvolutionTriggerHit[] = rows
+    .filter((r) => r.state === EVOLUTION_TRIGGER_SHARE_UP || r.state === EVOLUTION_TRIGGER_DARK_STREAK || r.state === EVOLUTION_TRIGGER_SOURCE_MISSING)
+    .map((r) => ({
+      trigger: r.state as EvolutionTrigger,
+      target: r.name,
+      deltaCentral: r.deltaCentral,
+      deltaNonCentral: r.deltaNonCentral,
+      deltaDenominator: r.deltaDenominator,
+      sharePercent: r.sharePercent,
+      darkRounds: r.darkRounds,
+    }));
+
+  const notEvaluatedRows = rows.filter((r) => r.state === EVOLUTION_STATE_NOT_EVALUATED);
+  const state: EvolutionState =
+    triggers.length > 0
+      ? EVOLUTION_STATE_REGRESSION
+      // ⚠️ Derived from the ROWS, not only from `curr.evaluated`: a row that could not be taken means
+      // this round cannot be judged, even if a caller handed us a record whose summary boolean says
+      // otherwise. `curr.evaluated === false` is checked too, because a record can be unevaluated for
+      // a reason no row captures (rm1 with no subsystem declared at all).
+      : notEvaluatedRows.length > 0 || curr.evaluated !== true
+        ? EVOLUTION_STATE_NOT_EVALUATED
+        : prev === null
+          ? EVOLUTION_STATE_NO_PRIOR
+          : EVOLUTION_STATE_STABLE;
+
+  const reason =
+    state === EVOLUTION_STATE_NOT_EVALUATED
+      ? curr.evaluated !== true
+        ? `current-round-not-evaluated: ${curr.reason ?? "the round reports evaluated:false without a reason"}`
+        : `sub-readings-not-evaluated: ${notEvaluatedRows.map((r) => `${r.name} (${r.reason ?? "no reason recorded"})`).join("; ")} — one dark round is not yet a streak (threshold ${threshold})`
+      : null;
+
+  const summary =
+    `${state} @${curr.ts} vs ${prev === null ? "(no prior reading)" : prev.ts}` +
+    (triggers.length > 0
+      ? ` — ${triggers
+          .map((t) =>
+            t.trigger === EVOLUTION_TRIGGER_SHARE_UP
+              ? `${t.trigger}:${t.target} (Δcentral=${t.deltaCentral} Δdenominator=${t.deltaDenominator} Δnon-central=${t.deltaNonCentral} share=${t.sharePercent}%)`
+              : t.trigger === EVOLUTION_TRIGGER_DARK_STREAK
+                ? `${t.trigger}:${t.target} (${t.darkRounds} consecutive rounds evaluated:false)`
+                : `${t.trigger}:${t.target} (measured by the previous round, not declared now)`,
+          )
+          .join(", ")}`
+      : reason !== null
+        ? ` — ${reason}`
+        : "");
+
+  return {
+    ...base,
+    state,
+    triggers: triggers.length > 0 ? triggers : null,
+    subsystems: rows,
+    summary,
+    reason,
+  };
+}
+
+// ── the FINDING (mechanical text; ⛔ nothing here calls a model, ⛔ nothing here files a task) ────
+
+/** Render the findings a verdict justifies. `stable` / `no-prior` / `not-evaluated` yield NONE — a
+ *  non-triggering round's assessment already lives in the carrier record, and filing it would turn
+ *  the routine into a heartbeat spammer. */
+export function evolutionFindings(record: DesignEvolutionReadingsRecord, verdict: EvolutionVerdict): EvolutionFinding[] {
+  if (verdict.state !== EVOLUTION_STATE_REGRESSION || verdict.triggers === null) return [];
+  const hist = DESIGN_EVOLUTION_HISTORY_REL;
+  return verdict.triggers.map((t) => {
+    const reading = record.rm1.subsystems.find((s) => s.name === t.target) ?? null;
+    const files = reading
+      ? [...new Set([...reading.centralFiles.map((c) => c.atHead), ...reading.central.map((c) => c.atHead)])]
+      : t.target === EVOLUTION_RM2_TARGET
+        ? [OUTCOME_CARRIER_REL]
+        : [];
+    const where = `读数载体 \`${hist}\` 的 ts=\`${record.ts}\`（上一条 \`${verdict.priorTs ?? "<none>"}\`）`;
+    if (t.trigger === EVOLUTION_TRIGGER_SHARE_UP) {
+      return {
+        key: evolutionFindingKey(t.target, t.trigger),
+        target: t.target,
+        trigger: t.trigger,
+        readingTs: record.ts,
+        priorReadingTs: verdict.priorTs,
+        deltaCentral: t.deltaCentral,
+        deltaNonCentral: t.deltaNonCentral,
+        deltaDenominator: t.deltaDenominator,
+        sharePercent: t.sharePercent,
+        darkRounds: null,
+        rationale:
+          `子系统 \`${t.target}\` 本轮相对上一条读数分母增加 \`${t.deltaDenominator}\`、中心增量 \`${t.deltaCentral}\`、` +
+          `非中心增量 \`${t.deltaNonCentral}\` ⇒ 新增的行落进了中心文件（分解没有把新代码挡在外面）。` +
+          `累计占比 \`${t.sharePercent}%\`（centralΔ=\`${reading?.centralDelta ?? "?"}\` / denominator=\`${reading?.denominator ?? "?"}\`）。${where}。`,
+        // ⚠️ NO backticks inside `suggestedAction`: the renderer wraps the WHOLE action in one pair
+        // (routine-file-gate's candidate text), so an inner pair would break the reader's structure.
+        suggestedAction:
+          `复核 ${t.target} 本轮新增的中心文件行是否本应落在扩展点之外的模块里；若是，把新增逻辑移到模块文件并在 ` +
+          `${hist} 的后续读数上看到中心增量回落；若否，在任务体写明「这轮增长确实属于中心文件的职责」。`,
+        files,
+      };
+    }
+    if (t.trigger === EVOLUTION_TRIGGER_DARK_STREAK) {
+      return {
+        key: evolutionFindingKey(t.target, t.trigger),
+        target: t.target,
+        trigger: t.trigger,
+        readingTs: record.ts,
+        priorReadingTs: verdict.priorTs,
+        deltaCentral: null,
+        deltaNonCentral: null,
+        deltaDenominator: null,
+        sharePercent: null,
+        darkRounds: t.darkRounds,
+        rationale:
+          `\`${t.target}\` 连续 \`${t.darkRounds}\` 轮读数 \`evaluated:false\`（阈值 \`${verdict.darkStreakRounds}\` 轮，策略选择）。` +
+          `最近一条原因：\`${reading?.reason ?? (t.target === EVOLUTION_RM2_TARGET ? record.rm2.reason : null) ?? "no reason recorded"}\`。${where}。`,
+        suggestedAction:
+          `读 ${hist} 的最近记录，定位 ${t.target} 读不出的确切条件` +
+          `（baseline 不可解析 / 中心文件在某端缺失 / 分母非正 / 载体缺失），修好仪器或改正声明；⛔ 不要靠调高 dark_streak_rounds 让这条消掉。`,
+        files,
+      };
+    }
+    return {
+      key: evolutionFindingKey(t.target, t.trigger),
+      target: t.target,
+      trigger: t.trigger,
+      readingTs: record.ts,
+      priorReadingTs: verdict.priorTs,
+      deltaCentral: null,
+      deltaNonCentral: null,
+      deltaDenominator: null,
+      sharePercent: null,
+      darkRounds: null,
+      rationale:
+        `上一轮（\`${verdict.priorTs ?? "<none>"}\`）测量的子系统 \`${t.target}\` 在本轮读数中不存在` +
+        `（identity=\`${reading === null ? "unavailable" : subsystemIdentity(reading)}\`）⇒ 这条读数来源消失了。` +
+        `⛔ 改名不算消失（identity 由 baseline + 中心文件集构成）；这是「声明里不再有它」。${where}。`,
+      suggestedAction:
+        `确认 ${t.target} 是有意从 .quay/config.yml 的 loop.design_evolution_readings.subsystems 移除的：` +
+        `是 ⇒ 在任务体写明移除理由并结案；否 ⇒ 恢复该子系统声明，并让 ${hist} 的下一条记录重新列出它。`,
+      files,
+    };
+  });
+}
+
+/** The carrier RECORD a finding lands as. Shape = the EXISTING `.quay/routine-findings.jsonl`
+ *  `kind:"finding"` record (⛔ a second record shape would need a second reader): `symbols` carries
+ *  the mechanical key, so `routine-file-gate`'s subject dedup reads it with no new parser, and
+ *  `recurrenceByKey` counts rounds for the same key. */
+export function evolutionFindingRecord(f: EvolutionFinding, ts: string): Record<string, unknown> {
+  const ms = Date.parse(ts);
+  return {
+    ts,
+    kind: "finding",
+    routine: DESIGN_EVOLUTION_ROUTINE_NAME,
+    probe: DESIGN_EVOLUTION_ROUTINE_NAME,
+    runId: `${DESIGN_EVOLUTION_ROUTINE_NAME}-${Number.isFinite(ms) ? ms : ts}`,
+    findingId: `${f.target}-${f.trigger}`,
+    dupKind: "evolution-regression",
+    subject: f.target,
+    symbols: [f.key],
+    files: f.files,
+    verdict: "confirmed",
+    rationale: f.rationale,
+    suggestedAction: f.suggestedAction,
+    // The trigger's own numbers, carried verbatim so a reader never has to re-derive them from prose.
+    target: f.target,
+    trigger: f.trigger,
+    readingTs: f.readingTs,
+    priorReadingTs: f.priorReadingTs,
+    deltaCentral: f.deltaCentral,
+    deltaNonCentral: f.deltaNonCentral,
+    deltaDenominator: f.deltaDenominator,
+    sharePercent: f.sharePercent,
+    darkRounds: f.darkRounds,
+    margin: null,
+  };
+}
+
+export interface FindingsAppend {
+  path: string;
+  appended: number;
+  ok: boolean;
+  error: string | null;
+}
+
+/** Append the findings to the EXISTING routine-findings carrier. Fail-closed `{ok,error}` (never
+ *  throws) — a write failure must surface as `failed`, never as a silently verified round.
+ *  ⚠️ The carrier is TRACKED (unlike the history carrier): the append is left in the working tree,
+ *  and the existing per-round commit in `probe-routine.ts` (`commitRoutineWrite` on the same path)
+ *  is what lands it. ⛔ This module does not commit — a report-only routine must not create commits. */
+export function appendEvolutionFindings(
+  root: string,
+  record: DesignEvolutionReadingsRecord,
+  findings: readonly EvolutionFinding[],
+  opts: { carrierPath?: string } = {},
+): FindingsAppend {
+  const file = opts.carrierPath ? path.resolve(opts.carrierPath) : path.join(path.resolve(root), EVOLUTION_FINDINGS_REL);
+  if (findings.length === 0) return { path: file, appended: 0, ok: true, error: null };
+  try {
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.appendFileSync(file, findings.map((f) => JSON.stringify(evolutionFindingRecord(f, record.ts)) + "\n").join(""));
+    return { path: file, appended: findings.length, ok: true, error: null };
+  } catch (e) {
+    return { path: file, appended: 0, ok: false, error: e instanceof Error ? e.message : String(e) };
+  }
+}
+
+// ── ONE round, end to end (both entry points call THIS — ⛔ no second orchestration) ──────────────
+
+export interface TakeRoundOptions extends ReadingsOptions {
+  /** The carrier the verdict is embedded in; also the source of the previous round. */
+  historyPath?: string;
+  /** Where findings land (default `<root>/.quay/routine-findings.jsonl`). */
+  findingsPath?: string;
+  /** `false` ⇒ take the reading and judge it, but persist NOTHING (and therefore file nothing: a
+   *  finding cites a record that must exist). The direct entry's `--no-history`. */
+  persist?: boolean;
+  darkStreakRounds?: number;
+}
+
+export interface TakenRound {
+  record: DesignEvolutionReadingsRecord;
+  verdict: EvolutionVerdict;
+  findings: EvolutionFinding[];
+  history: { path: string; appended: boolean; error: string | null };
+  findingsCarrier: FindingsAppend;
+  /** True when the previous record could not be read (a `not-evaluated` verdict for that reason). */
+  priorUnreadable: boolean;
+  /** Non-blank carrier lines that were not round records (⛔ never silently dropped). */
+  historyMalformed: number;
+}
+
+/** Read the history → take the reading → judge it → persist the record → file what the judgment
+ *  justifies. The ONE orchestration both the routine and the direct entry use. */
+export function takeEvolutionRound(root: string, opts: TakeRoundOptions): TakenRound {
+  const resolvedRoot = path.resolve(root);
+  const historyPath = opts.historyPath ? path.resolve(opts.historyPath) : path.join(resolvedRoot, DESIGN_EVOLUTION_HISTORY_REL);
+  const prior = readDesignEvolutionHistory(resolvedRoot, { historyPath });
+  const previous = readPreviousWindow(resolvedRoot, { historyPath });
+  const record = buildReadings(resolvedRoot, {
+    ...(opts.ts ? { ts: opts.ts } : {}),
+    subsystems: opts.subsystems,
+    ...(opts.carrierPath ? { carrierPath: opts.carrierPath } : {}),
+    ...(opts.topN !== undefined ? { topN: opts.topN } : {}),
+    windowStartIndex: previous.windowStartIndex,
+    windowSource: previous.windowSource,
+    ...(opts.predicates ? { predicates: opts.predicates } : {}),
+    ...(opts.head ? { head: opts.head } : {}),
+  });
+  const names = record.rm1.subsystems.map((s) => s.name);
+  const verdict = judgeEvolutionRegression(prior.state === "ok" ? prior.records[prior.records.length - 1] ?? null : null, record, {
+    ...(opts.darkStreakRounds !== undefined ? { darkStreakRounds: opts.darkStreakRounds } : {}),
+    priorDarkRounds: prior.state === "ok" ? priorDarkRoundsFor(prior.records, names) : {},
+    prevState:
+      prior.state === "ok"
+        ? prior.records.length === 0
+          ? "no-prior-record"
+          : "ok"
+        : prior.state === "carrier-missing"
+          ? "no-prior-record"
+          : "previous-record-unusable",
+    ...(prior.state === "unreadable" ? { prevStateReason: `previous-record-unusable: ${prior.reason}` } : {}),
+  });
+  // The trace is part of the RECORD (AC6): a `stable` round is still an assessment, and a reader
+  // must be able to ask 「评估过几轮」 of the carrier alone.
+  record.evolution = verdict;
+  if (opts.persist === false) {
+    return {
+      record,
+      verdict,
+      findings: [],
+      history: { path: historyPath, appended: false, error: null },
+      findingsCarrier: { path: opts.findingsPath ?? path.join(resolvedRoot, EVOLUTION_FINDINGS_REL), appended: 0, ok: true, error: null },
+      priorUnreadable: prior.state === "unreadable",
+      historyMalformed: prior.malformed,
+    };
+  }
+  const appended = appendHistoryRecord(resolvedRoot, record, { historyPath });
+  const findings = appended.ok ? evolutionFindings(record, verdict) : [];
+  const findingsCarrier = appendEvolutionFindings(resolvedRoot, record, findings, opts.findingsPath ? { carrierPath: opts.findingsPath } : {});
+  return {
+    record,
+    verdict,
+    findings,
+    history: { path: appended.path, appended: appended.ok, error: appended.error },
+    findingsCarrier,
+    priorUnreadable: prior.state === "unreadable",
+    historyMalformed: prior.malformed,
+  };
+}
+
 // ── Direct entry ──────────────────────────────────────────────────────────────────────────────────
 
 export const EXIT_OK = 0;
 export const EXIT_USAGE = 2;
 export const EXIT_NOT_EVALUATED = 3;
 export const EXIT_HISTORY_WRITE_FAILED = 4;
+/** The history record landed but the FINDINGS carrier could not be written. A distinct exit code
+ *  because it is a distinct failure (硬规则 3): the reading exists, the filing did not. */
+export const EXIT_FINDINGS_WRITE_FAILED = 5;
 
 const USAGE = `usage: design-evolution-readings [--root <repo>] [--config <section.yml>] [--head <rev>]
-                                   [--top-n <n>] [--history <path>] [--no-history] [--json]
+                                   [--top-n <n>] [--history <path>] [--findings <path>]
+                                   [--carrier <worker-outcome.jsonl>] [--no-history] [--json]
 
   RM1 (decomposition share) is taken for every subsystem declared in the \`design_evolution_readings\`
   section (--config points at a file holding the SECTION BODY; default: the \`loop.\` section of
   <root>/.quay/config.yml). RM2 (hot-file contention) is zero-config and always taken from
   <root>/.quay/worker-outcome.jsonl.
 
+  The round is then JUDGED against the previous record in the history carrier (stable / regression /
+  no-prior / not-evaluated). A \`regression\` appends one finding per trigger to the routine-findings
+  carrier (default <root>/.quay/routine-findings.jsonl, --findings overrides); the existing
+  routine-file-gate decides whether it becomes a task — this command never files one.
+
+  --no-history  take the reading and the judgment but write NOTHING (no record ⇒ no finding: a finding
+                cites a record that must exist).
+
   exit 0 = record produced, evaluated:true   exit 3 = record produced, NOT-EVALUATED (a distinct value)
-  exit 4 = history carrier not writable      exit 2 = usage / input error`;
+  exit 4 = history carrier not writable      exit 5 = findings carrier not writable
+  exit 2 = usage / input error`;
 
 export interface DesignEvolutionSectionConfig {
   enabled: boolean;
@@ -1148,6 +1895,10 @@ export interface DesignEvolutionSectionConfig {
   intervalMinutes: number | null;
   subsystems: SubsystemSpec[];
   topN: number;
+  /** `dark_streak_rounds` — how many CONSECUTIVE `evaluated:false` rounds make a subsystem's darkness
+   *  a finding. The default is defined ONCE (`DESIGN_EVOLUTION_DARK_STREAK_ROUNDS_DEFAULT`); this key
+   *  only overrides it. ⛔ It is a policy about when to spend attention, not a measured threshold. */
+  darkStreakRounds: number;
 }
 
 export interface SectionRead {
@@ -1222,13 +1973,18 @@ export function parseDesignEvolutionSection(raw: unknown): { config: SectionRead
     return { config: null, error: cfgBad(`must be a mapping (got ${Array.isArray(raw) ? "array" : raw === null ? "null" : typeof raw})`) };
   }
   const rec = raw as Record<string, unknown>;
-  const known = new Set(["enabled", "interval", "subsystems", "top_n"]);
+  const known = new Set(["enabled", "interval", "subsystems", "top_n", "dark_streak_rounds"]);
   const unknown = Object.keys(rec).filter((k) => !known.has(k));
   if (unknown.length > 0) return { config: null, error: cfgBad(`has unknown key(s): ${unknown.join(", ")} — a silently ignored key would make the reading lie`) };
   if (typeof rec.enabled !== "boolean") {
     return { config: null, error: cfgBad(`needs a boolean 'enabled' (got ${rec.enabled === undefined ? "missing" : JSON.stringify(rec.enabled)})`) };
   }
-  if (rec.enabled === false) return { config: { enabled: false, intervalMinutes: null, subsystems: [], topN: CONTENTION_TOP_N_DEFAULT }, error: null };
+  if (rec.enabled === false) {
+    return {
+      config: { enabled: false, intervalMinutes: null, subsystems: [], topN: CONTENTION_TOP_N_DEFAULT, darkStreakRounds: DESIGN_EVOLUTION_DARK_STREAK_ROUNDS_DEFAULT },
+      error: null,
+    };
+  }
 
   let intervalMinutes = DESIGN_EVOLUTION_INTERVAL_MIN_DEFAULT;
   if (rec.interval !== undefined && rec.interval !== null) {
@@ -1251,6 +2007,17 @@ export function parseDesignEvolutionSection(raw: unknown): { config: SectionRead
     topN = rec.top_n;
   }
 
+  // ⚠️ A malformed value is REFUSED, never silently rounded back to the default (the same rule this
+  // section applies to `interval`): a `dark_streak_rounds: 0` would make every dark round a finding,
+  // and a typo that silently became 2 would hide the operator's intent.
+  let darkStreakRounds = DESIGN_EVOLUTION_DARK_STREAK_ROUNDS_DEFAULT;
+  if (rec.dark_streak_rounds !== undefined && rec.dark_streak_rounds !== null) {
+    if (typeof rec.dark_streak_rounds !== "number" || !Number.isInteger(rec.dark_streak_rounds) || rec.dark_streak_rounds < 1) {
+      return { config: null, error: cfgBad(`'dark_streak_rounds' must be a positive integer (got ${JSON.stringify(rec.dark_streak_rounds)})`) };
+    }
+    darkStreakRounds = rec.dark_streak_rounds;
+  }
+
   const subsystems: SubsystemSpec[] = [];
   if (rec.subsystems !== undefined && rec.subsystems !== null) {
     if (!Array.isArray(rec.subsystems)) return { config: null, error: cfgBad(`'subsystems' must be a list`) };
@@ -1263,7 +2030,7 @@ export function parseDesignEvolutionSection(raw: unknown): { config: SectionRead
       subsystems.push(parsed.spec);
     }
   }
-  return { config: { enabled: true, intervalMinutes, subsystems, topN }, error: null };
+  return { config: { enabled: true, intervalMinutes, subsystems, topN, darkStreakRounds }, error: null };
 }
 
 /** Read the section from `<root>/.quay/config.yml` (absent file / absent `loop:` / absent section ⇒
@@ -1309,10 +2076,31 @@ export function readStandaloneSection(file: string): SectionRead {
   return { present: true, config, error };
 }
 
-function renderHuman(record: DesignEvolutionReadingsRecord): string {
+function renderHuman(record: DesignEvolutionReadingsRecord, findings: readonly EvolutionFinding[] = []): string {
   const out: string[] = [];
   out.push(`design-evolution-readings  evaluated=${record.evaluated}  ts=${record.ts}`);
   if (record.reason !== null) out.push(`  reason: ${record.reason}`);
+  // The judgment comes RIGHT AFTER the round header: the reading is the input, the verdict is what
+  // the mechanism now does with it, and a reader must not have to scroll past 40 lines of RM1 detail
+  // to find out whether anything was filed.
+  const v = record.evolution;
+  out.push("JUDGMENT — 本轮相对上一条读数");
+  if (v === undefined) {
+    out.push("  (not taken — this record predates the judgment)");
+  } else {
+    out.push(`  state=${v.state}  prior=${v.priorTs ?? "(none)"}  priorState=${v.priorState}  darkStreakRounds=${v.darkStreakRounds}`);
+    out.push(`  ${v.summary}`);
+    if (v.reason !== null) out.push(`  reason: ${v.reason}`);
+    for (const r of v.subsystems) {
+      const d =
+        r.deltaCentral === null
+          ? ""
+          : `  Δcentral=${r.deltaCentral >= 0 ? "+" : ""}${r.deltaCentral} ΔnonCentral=${r.deltaNonCentral === null ? "?" : (r.deltaNonCentral >= 0 ? "+" : "") + r.deltaNonCentral} Δdenominator=${r.deltaDenominator === null ? "?" : (r.deltaDenominator >= 0 ? "+" : "") + r.deltaDenominator}`;
+      out.push(`    ${r.name}: ${r.state}${d}${r.sharePercent === null ? "" : `  share=${r.sharePercent}%`}${r.reason === null ? "" : `  — ${r.reason}`}`);
+    }
+    out.push(`  findings: ${findings.length}`);
+    for (const f of findings) out.push(`    ${f.key}  files=${f.files.length > 0 ? f.files.join(", ") : "(none)"}`);
+  }
   out.push("RM1 — 分解后增量落回中心文件的占比  share = centralΔ / (centralΔ + nonCentralΔ)");
   if (record.rm1.subsystems.length === 0) out.push(`  (none declared) ${record.rm1.reason ?? ""}`);
   for (const s of record.rm1.subsystems) {
@@ -1368,6 +2156,8 @@ export function main(argv: string[]): number {
   let rootArg: string | undefined;
   let configPath: string | undefined;
   let historyPath: string | undefined;
+  let findingsPath: string | undefined;
+  let carrierPath: string | undefined;
   let head: string | undefined;
   let topN: number | undefined;
   let json = false;
@@ -1395,6 +2185,22 @@ export function main(argv: string[]): number {
       historyPath = argv[++i];
       if (historyPath === undefined) {
         process.stderr.write(`design-evolution-readings: --history requires a path\n${USAGE}\n`);
+        return EXIT_USAGE;
+      }
+      continue;
+    }
+    if (a === "--findings") {
+      findingsPath = argv[++i];
+      if (findingsPath === undefined) {
+        process.stderr.write(`design-evolution-readings: --findings requires a path\n${USAGE}\n`);
+        return EXIT_USAGE;
+      }
+      continue;
+    }
+    if (a === "--carrier") {
+      carrierPath = argv[++i];
+      if (carrierPath === undefined) {
+        process.stderr.write(`design-evolution-readings: --carrier requires a path\n${USAGE}\n`);
         return EXIT_USAGE;
       }
       continue;
@@ -1453,23 +2259,36 @@ export function main(argv: string[]): number {
     return EXIT_OK;
   }
 
-  const previous = readPreviousWindow(root, historyPath ? { historyPath } : {});
-  const record = buildReadings(root, {
+  // ONE orchestration with the routine (`takeEvolutionRound`): the direct entry must produce the
+  // SAME judgment and the SAME findings, or 「人手工跑的读数」 and 「例程跑的读数」 become two mechanisms.
+  const taken = takeEvolutionRound(root, {
     subsystems: section.config.subsystems,
     topN: topN ?? section.config.topN,
+    darkStreakRounds: section.config.darkStreakRounds,
     ...(head ? { head } : {}),
-    windowStartIndex: previous.windowStartIndex,
-    windowSource: previous.windowSource,
+    ...(historyPath ? { historyPath } : {}),
+    ...(findingsPath ? { findingsPath } : {}),
+    ...(carrierPath ? { carrierPath } : {}),
+    ...(noHistory ? { persist: false } : {}),
   });
+  const { record } = taken;
 
-  process.stdout.write((json ? JSON.stringify(record, null, 2) : renderHuman(record)) + "\n");
+  process.stdout.write((json ? JSON.stringify(record, null, 2) : renderHuman(record, taken.findings)) + "\n");
   if (!noHistory) {
-    const appended = appendHistoryRecord(root, record, historyPath ? { historyPath } : {});
-    if (!appended.ok) {
-      process.stderr.write(`design-evolution-readings: history carrier not writable at ${appended.path} — ${appended.error}\n`);
+    if (!taken.history.appended) {
+      process.stderr.write(`design-evolution-readings: history carrier not writable at ${taken.history.path} — ${taken.history.error}\n`);
       return EXIT_HISTORY_WRITE_FAILED;
     }
-    process.stderr.write(`design-evolution-readings: record appended to ${appended.path}\n`);
+    process.stderr.write(`design-evolution-readings: record appended to ${taken.history.path}\n`);
+    if (!taken.findingsCarrier.ok) {
+      process.stderr.write(
+        `design-evolution-readings: findings carrier not writable at ${taken.findingsCarrier.path} — ${taken.findingsCarrier.error} (the reading landed; ${taken.findings.length} finding(s) did NOT)\n`,
+      );
+      return EXIT_FINDINGS_WRITE_FAILED;
+    }
+    if (taken.findingsCarrier.appended > 0) {
+      process.stderr.write(`design-evolution-readings: ${taken.findingsCarrier.appended} finding(s) appended to ${taken.findingsCarrier.path}\n`);
+    }
   }
   return record.evaluated ? EXIT_OK : EXIT_NOT_EVALUATED;
 }

@@ -248,3 +248,14 @@ export function routineGlobalCeiling(root: string): number {
 export function routineWindowMs(root: string): number {
   return loadRoutineQuotaConfig(root).windowMs;
 }
+
+// ── design-evolution-readings 的 dark-streak 策略轮数 ─────────────────────────────────────────────
+// (tasks/gap-design-evolution-readings-emit-findings)
+//
+// ⛔ 定义点只有一处：`design-evolution-readings.ts` 的 `DESIGN_EVOLUTION_DARK_STREAK_ROUNDS_DEFAULT`
+// （该值是该机制唯一的策略数，注释里写明它是**策略选择**而非测量结果）。本文件只做**派生出口**——
+// 驱动侧（quality-gate-driver）与配置解析侧从同一条 `driver-config` 面取到它，而不是各自再写一个字面量。
+// ⚠️ 这是 re-export，不是第二份定义：改值只改 design-evolution-readings.ts 那一处。
+// ⛔ 本文件不 import 任何其他模块去「猜」这个值（例如从 `.quay/config.yml` 读段）：段是**覆盖**面，
+// 缺省值必须由代码定义，否则「配置没写」与「配置写坏了」会落到同一个数上。
+export { DESIGN_EVOLUTION_DARK_STREAK_ROUNDS_DEFAULT } from "./design-evolution-readings.ts";

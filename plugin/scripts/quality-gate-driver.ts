@@ -180,13 +180,19 @@ import {
 // ARCH-CYCLE 轨道（gap-arch-cycle-report-only-routine）：目录级环读数此前只存在于按需 runner 的
 // **闸**里（gap-fan-in-remove-archguard-gate 已把它从 fan-in 移除 ⇒ 新能力无消费者，自 10-11
 // 没跑过）。本轨把同一个读数接成周期 report-only 例程：每 due 轮读一次「上次 analyze 落盘的」
-// moduleGraph 环，append 一行到 `.quay/arch-cycle-history.jsonl`。⛔ 不 analyze、不 ratchet、
+// moduleGraph 环，append 一行到 `.quay/arch-cycle-history.jsonl`。analyze 只在这一轮里为**到期**
+// 的 scope 补跑（每 scope 每间隔至多一次；⛔ 不进 fan-in / per-task 热路径）。⛔ 不 ratchet、
 // 不立案——环非空是该例程的**读数内容**，不会使轮 failed（那是闸的语义，不是本轨的）。
 import {
+  downgradeStaleScopes,
   readDirectoryCycleReading,
   readGraphSummaryReading,
+  refreshBehindScopes,
   resolveArchguardCli,
+  selectRefreshTargets,
+  type ArchCycleRefreshResult,
   type DirectoryCycle,
+  type DirectoryCycleReading,
   type TopOutDegreeEntry,
 } from "./archguard-runner.ts";
 // GRAPH-SUMMARY（gap-quality-round-facts-surface-top-out-degree-god-functions）：arch-cycle 例程
@@ -201,10 +207,10 @@ import {
 // 载体，append 一行到 `.quay/design-evolution-history.jsonl`。**零 LLM、零 spawn 模型**；读数本身
 // （占比、争用计数）是**内容**，⛔ 不是 failed，也不 ratchet。读数实现全在 design-evolution-readings.ts
 // （本文件只做装配），因为同一段逻辑还要给直接入口（人 / GOAL-909 评价）复用——两处实现必然漂移。
+// ⚠️ `takeEvolutionRound` is the ONE orchestration: read previous → read → judge → persist → append
+// findings. This file only assembles and reports — ⛔ it must not grow a second copy of that order.
 import {
-  buildReadings as buildDesignEvolutionReadings,
-  appendHistoryRecord as appendDesignEvolutionHistory,
-  readPreviousWindow as readDesignEvolutionPreviousWindow,
+  takeEvolutionRound,
   readDesignEvolutionConfig,
   cfgBad as deCfgBad,
   DESIGN_EVOLUTION_ROUTINE_NAME,
@@ -212,8 +218,10 @@ import {
   DESIGN_EVOLUTION_MIN_INTERVAL_MINUTES,
   DESIGN_EVOLUTION_HISTORY_REL,
   DESIGN_EVOLUTION_MODE,
+  EVOLUTION_FINDINGS_REL,
   type DesignEvolutionReadingsRecord,
   type DesignEvolutionSectionConfig,
+  type DesignEvolutionVerdict,
   type SectionRead as DesignEvolutionSectionRead,
   type ContentionPredicates,
 } from "./design-evolution-readings.ts";
@@ -224,7 +232,24 @@ export {
   DESIGN_EVOLUTION_ROUTINE_NAME,
   DESIGN_EVOLUTION_INTERVAL_MIN_DEFAULT,
   DESIGN_EVOLUTION_MIN_INTERVAL_MINUTES,
+  EVOLUTION_FINDINGS_REL,
 } from "./design-evolution-readings.ts";
+
+// INSTRUMENT-DECAY 轨道（gap-instrument-decay-check-unwired-and-blind-to-content-dark）：
+// `plugin/scripts/instrument-decay-check.ts` 自称「常驻检测器」，但此前没有任何例程调用它——它只在
+// 人手动跑的时候存在。本轨把它接成与 arch_cycle_report 同族的声明式只读例程（`loop.instrument_decay:`）：
+// 每 due 轮跑一次四项读数（写手停写 A/B、内容全暗 C、过期的已评估 D、未覆盖清单），产出一条
+// `state: "instrument-dark"` 的 Fact（⛔ 与 verified / not-evaluated 都不同形），并对每个
+// （载体，形态）经**既有** gap-filing 通道立案（按机制去重：上一轮的 Fact 里已立案的 pair 不再 spawn）。
+// **零模型调用**：读数本身是纯文件 + git 读；只有「有新腐烂」才 spawn 一个短命 gap-filing agent。
+// ⛔ 与 fan-in/scoped-gate 无关（不在每任务必经的热路径上）。
+import {
+  analyzeAll as analyzeInstrumentDecay,
+  DEFAULT_STALE_SECONDS as INSTRUMENT_DECAY_DEFAULT_STALE_SECONDS,
+  type AnalyzeOutcome as InstrumentDecayOutcome,
+  type DecayFinding as InstrumentDecayFinding,
+  type CarrierSpec as InstrumentDecayCarrierSpec,
+} from "./instrument-decay-check.ts";
 
 // ── 常量（由 DRIVER_KINDS registry 派生，⛔ 不另写一份路径字面量）──────────────────────────
 const QUALITY_SPEC = DRIVER_KINDS.quality;
@@ -271,6 +296,21 @@ export const ARCH_CYCLE_ROUTINE_NAME = "arch-cycle-report";
 
 /** 载体（gitignored，docs/carrier-registry.json 已登记）。 */
 export const ARCH_CYCLE_HISTORY_REL = path.posix.join(".quay", "arch-cycle-history.jsonl");
+
+/** instrument-decay 例程（声明式，`loop.instrument_decay:`）的缺省间隔。360m 与同族一致：每轮只是
+ *  读既有的 jsonl 载体 + 每个作用域一次 `git log -1`（零 spawn 模型、亚秒级），而「仪器是否在腐烂」
+ *  是慢变量——更密的观测不会让结论更准，只会把读数写得更频繁。 */
+export const INSTRUMENT_DECAY_INTERVAL_MIN_DEFAULT = 360;
+
+/** 声明 interval 的下限（分钟）——同族同一个界。 */
+export const INSTRUMENT_DECAY_MIN_INTERVAL_MINUTES = 60;
+
+/** 例程名（Fact 名 + `.quay/routine-last-run.json` 的键）。 */
+export const INSTRUMENT_DECAY_ROUTINE_NAME = "instrument-decay";
+
+/** gap-filing agent 的 wall-clock 上限【缺省回退值】（毫秒）。与 packaging-hygiene / architecture-review
+ *  的 gap-filing 角色同源（同一次实测 elapsed_s=602.9），⛔ 不另起测量。 */
+export const INSTRUMENT_DECAY_GAP_WORKER_TIMEOUT_MS_DEFAULT = 900_000;
 
 /** packaging-hygiene 的机械 check spawn 上限（毫秒）——config-key 枚举是纯函数、shipped-entry 是
  *  npm pack --dry-run + dist build（实测 ~2s / ~0.2s），180s 是给足余量的机械上限（⛔ 不是成本阈值，
@@ -1979,9 +2019,21 @@ export interface ArchCycleHistoryRecord {
   mode: "arch-cycle-report-round";
   evaluated: boolean;
   reason: string | null;
-  /** null unless EVERY scope was readable — never a partial sum dressed as a total. */
+  /** Record-level completeness (gap-arch-cycle-report-never-evaluated-aggregate-and-stale-artifacts):
+   *  `complete` = every scope produced a reading; `partial` = at least one did (and `reason` names the
+   *  ones that did not, with their reasons); `none` = nothing could be read (`totalCycleCount` null —
+   *  ⛔ never 0). ADDITIVE: `evaluated` keeps its old "a reading exists" meaning, so a partial record
+   *  is `evaluated:true` and the distinction is carried by THIS field instead of being collapsed. */
+  status: "complete" | "partial" | "none";
+  /** Sum over the scopes that produced a reading. null ONLY when `status === "none"`.
+   *  (Before this task: null unless EVERY scope was readable — two permanently graph-less provider
+   *  packages therefore voided a 4-cycle reading for 25 consecutive rounds.) */
   totalCycleCount: number | null;
   notEvaluatedScopes: string[];
+  /** Scope labels whose sources moved AFTER the artifact the reading came from (`behindSources`).
+   *  A behind scope still reports its cycle count, but its number is NOT the current tree — this list
+   *  is what says so at the record level. */
+  behindScopes: string[];
   scopes: Array<{
     scope: string;
     source: string;
@@ -1989,9 +2041,17 @@ export interface ArchCycleHistoryRecord {
     reason: string | null;
     cycleCount: number | null;
     cycles: DirectoryCycle[] | null;
+    /** `module-graph` (read from the artifact) or `single-directory` (derived from the tracked file
+     *  list because no package-level diagram was ever requested); null ⇒ not evaluated. */
+    basis: "module-graph" | "single-directory" | null;
     /** When THIS scope's artifact was produced (arch.json `timestamp`, else the manifest scope's
      *  `generatedAt`); null ⇒ no artifact was read for this scope. */
     artifactTimestamp: string | null;
+    /** Commits after `artifactTimestamp` touching this scope's source dir; null ⇒ not computable. */
+    commitsSinceArtifact: number | null;
+    /** `commitsSinceArtifact > 0`; null ⇒ not computable. ⛔ A DIFFERENT question from the record-level
+     *  `stale` (artifact age > interval): this one says the artifact no longer covers the sources. */
+    behindSources: boolean | null;
   }>;
   /** The OLDEST artifact timestamp behind this line (the routine is only as fresh as its stalest
    *  scope). null ⇒ no artifact timestamp could be read.
@@ -2013,7 +2073,62 @@ export interface ArchCycleHistoryRecord {
   /** The SAME-BATCH graph reading (gap-quality-round-facts-surface-top-out-degree-god-functions).
    *  Present on every line — `evaluated:false` lines carry `null` readings, never `{}`/`0`/`[]`. */
   graphSummary: GraphSummaryRecord;
+  /** WHAT THIS ROUND DID ABOUT STALE ARTIFACTS. The routine is a reader, but it is the only thing that
+   *  ever looks at these artifacts on a schedule — the mechanism that refills them lives here, bounded
+   *  PER SCOPE to at most one analyze per scheduling interval (see `refreshBehindScopes` /
+   *  `readLastRefreshAtByScope`): every due scope is attempted in the round, and only a scope that was
+   *  itself refreshed recently is deferred. Always present, so "no refresh" is a stated decision
+   *  (`skipped`) rather than silence. */
+  refresh: ArchCycleRefreshRecord;
   reportOnly: true;
+}
+
+/** One scope the round re-analyzed, as persisted. */
+export interface ArchCycleRefreshedScopeRecord {
+  scope: string;
+  source: string;
+  /** The artifact timestamp that made the scope due (BEFORE the analyze) — so the record says WHAT
+   *  was stale, not just that a spawn happened. */
+  artifactTimestamp: string | null;
+  commitsSinceArtifact: number | null;
+  /** `archguard analyze` exit code for THIS scope; a non-zero code is why `ok:false`. */
+  exitCode: number;
+  ok: boolean;
+}
+
+/** A due scope the round did NOT attempt, with the reason (per-scope interval budget / filter). */
+export interface ArchCycleDeferredScopeRecord {
+  scope: string;
+  reason: string;
+}
+
+/** The refresh half of a round, as persisted. `attempted:false` + `skipped` is a complete answer:
+ *  every no-analyze path names itself (⛔ never an absent field, which would read as "did not think
+ *  about it").
+ *
+ *  ⛔ `refreshedScopes` is a LIST (gap-arch-cycle-refresh-first-stale-wins-starves-later-scopes): the
+ *  old singular `refreshedScope` could only say "one scope was refreshed", which — together with the
+ *  fixed-order selection — made the starvation of every later scope invisible on the carrier. */
+export interface ArchCycleRefreshRecord {
+  attempted: boolean;
+  /** Every scope re-analyzed this round, stalest first. Empty ⇒ nothing was spawned. */
+  refreshedScopes: ArchCycleRefreshedScopeRecord[];
+  /** Due scopes deliberately not attempted this round, each NAMED. "Deferred" and "not needed" must
+   *  never share a representation (硬规则 3b). */
+  deferredScopes: ArchCycleDeferredScopeRecord[];
+  skipped: "no-scope-needs-refresh" | "instrument-absent" | "analyze-failed" | "within-interval" | "disabled" | "partial" | null;
+  detail: string | null;
+  instrument: string | null;
+  instrumentSource: "env" | "path" | "plugin" | null;
+  /** Every location probed for the CLI (`instrument-absent` must say what was looked for). */
+  searched: string[];
+  /** 0 when every attempted analyze succeeded; the first non-zero exit otherwise; null when no
+   *  analyze ran. Per-scope codes live in `refreshedScopes`. */
+  exitCode: number | null;
+  at: string;
+  /** `true` when the reading in THIS record was taken AFTER the refresh (so a reader knows whether
+   *  the numbers below include the re-analysis or precede it). */
+  appliedBeforeReading: boolean;
 }
 
 /** topByOutDegree + relationCountByType, as persisted (carrier line and quality-round Fact share ONE
@@ -2037,8 +2152,10 @@ export interface GraphSummaryRecord {
 export interface ArchCycleFactValue {
   mode: "arch-cycle-report-round";
   evaluated: boolean;
+  status: "complete" | "partial" | "none";
   totalCycleCount: number | null;
   notEvaluatedScopes: string[];
+  behindScopes: string[];
   scopes: ArchCycleHistoryRecord["scopes"];
   artifactTimestamp: string | null;
   artifactAgeMs: number | null;
@@ -2050,6 +2167,7 @@ export interface ArchCycleFactValue {
   topByOutDegree: TopOutDegreeEntry[] | null;
   relationCountByType: Record<string, number> | null;
   graphSummary: GraphSummaryRecord;
+  refresh: ArchCycleRefreshRecord;
   workDir: string;
   historyPath: string;
   historyAppended: boolean;
@@ -2069,6 +2187,10 @@ export interface ArchCycleRoundOptions {
   graphSummaryLimit?: number;
   /** Deterministic `ts` seam for the carrier line. */
   now?: string;
+  /** Refresh stale artifacts before reporting (default TRUE — the production path).
+   *  `false` is the read-only seam used to observe what the routine would have reported BEFORE a
+   *  refresh (AC3) without spending an analyze; it is stated on the record as `skipped:"disabled"`. */
+  refresh?: boolean;
 }
 
 /** Append one line to the carrier. Returns the fail-closed `{ok, error}` shape (never throws): a write
@@ -2088,17 +2210,22 @@ export function appendArchCycleHistory(
   }
 }
 
-/** Run ONE arch-cycle round: read the directory cycles the last analyze persisted and append one line.
+/** Run ONE arch-cycle round: refresh at most one behind scope, read the directory cycles the last
+ *  analyze persisted, and append one line.
  *
  *  ⛔ THE FAILURE VOCABULARY IS DELIBERATELY SPLIT (AC2/AC3 / 硬规则 3b):
  *    • `failed`        — the routine could not do its job: bad config, or the carrier could not be
  *                        written. ⛔ NOT used because cycles were found (report-only, AC2).
- *    • `not-evaluated` — the module graph could not be read (no analyze product / malformed), or the
- *                        kill switch is engaged. The line is STILL appended (evaluated:false) so the
- *                        carrier records the inability, not silence.
- *    • `verified`      — a reading was produced AND persisted. `totalCycleCount` may be > 0; that is
- *                        the reading's CONTENT, never a red. A ratchet over it would be a different
- *                        task (this one is report-only). */
+ *    • `not-evaluated` — the aggregate could not be read AT ALL (`status:"none"` — no analyze product
+ *                        / malformed), or the kill switch is engaged. The line is STILL appended
+ *                        (evaluated:false) so the carrier records the inability, not silence.
+ *    • `verified`      — a reading was produced AND persisted, `complete` OR `partial`. A PARTIAL
+ *                        reading (some scopes unreadable) is still a reading — the scopes that WERE
+ *                        read keep their numbers, and the Fact's reason names the ones that were not
+ *                        (gap-arch-cycle-report-never-evaluated-aggregate-and-stale-artifacts: two
+ *                        permanently graph-less provider packages voided everything for 25 rounds).
+ *                        `totalCycleCount` may be > 0; that is the reading's CONTENT, never a red. A
+ *                        ratchet over it would be a different task (this one is report-only). */
 export function runArchCycleRound(root: string, opts: ArchCycleRoundOptions = {}): Fact<ArchCycleFactValue | null> {
   const name = ARCH_CYCLE_ROUTINE_NAME;
   if (opts.configError) return { name, value: null, state: "failed", reason: opts.configError };
@@ -2113,7 +2240,122 @@ export function runArchCycleRound(root: string, opts: ArchCycleRoundOptions = {}
   }
 
   const resolvedRoot = path.resolve(root);
-  const reading = readDirectoryCycleReading(resolvedRoot, opts.workDir);
+  const staleIntervalMs = (opts.config?.intervalMinutes ?? ARCH_CYCLE_INTERVAL_DEFAULT_MIN) * 60_000;
+  const ts = opts.now ?? new Date().toISOString();
+  const nowMs = Number.isFinite(Date.parse(ts)) ? Date.parse(ts) : Date.now();
+  const historyPathForRead = opts.historyPath ? path.resolve(opts.historyPath) : path.join(resolvedRoot, ARCH_CYCLE_HISTORY_REL);
+
+  // ── REFRESH (Plan 步骤 1-4) ─────────────────────────────────────────────────────────────────────
+  // The routine reads what the LAST analyze persisted, and until
+  // gap-arch-cycle-report-never-evaluated-aggregate-and-stale-artifacts NOTHING ever rewrote it. That
+  // task added a refresh — but with a GLOBAL "at most one analyze per interval" budget and a
+  // fixed-declaration-order selection, which starved every scope after the first: `plugin/scripts` is
+  // touched by nearly every merge, so it was stale (and first) at every interval while
+  // `quay-native-src` / `experiments-scripts` were never reached (measured 2026-10-22: the
+  // experiments-scripts artifact was 18 days older than its newest source commit, ≈112 intervals).
+  //
+  // ⇒ THE BUDGET IS PER SCOPE (gap-arch-cycle-refresh-first-stale-wins-starves-later-scopes):
+  //   • every due scope (`scopeNeedsRefresh`) is refreshed in the round, stalest first
+  //     (`selectRefreshTargets`), so a fixed order can never starve the tail again;
+  //   • "at most once per interval" is enforced PER SCOPE against the carrier's own recorded
+  //     refresh times (`readLastRefreshAtByScope`) — a driver restart between rounds must not turn
+  //     the report into a sweep, but one scope's recent refresh must not block the others either;
+  //   • a due scope that could NOT be refreshed (analyze failed / instrument absent / deferred) is
+  //     DOWNGRADED to `evaluated:false` + `artifact-behind-sources` — ⛔ never left presenting a stale
+  //     `cycleCount` as the current tree (硬规则 3b);
+  //   • never on the fan-in / per-task hot path — this is the routine's tick only
+  //     (`gap-fan-in-remove-archguard-gate`).
+  const readingBeforeRefresh: DirectoryCycleReading = readDirectoryCycleReading(resolvedRoot, opts.workDir);
+  let reading: DirectoryCycleReading = readingBeforeRefresh;
+  let refresh: ArchCycleRefreshRecord;
+  /** Due scopes whose cause of non-refresh is known, for the downgrade below. */
+  const downgradeCauses = new Map<string, string>();
+  if (opts.refresh === false) {
+    refresh = {
+      attempted: false, refreshedScopes: [], deferredScopes: [], skipped: "disabled",
+      detail: "refresh disabled by the caller (read-only round: reports the artifacts as they are)",
+      instrument: null, instrumentSource: null, searched: [], exitCode: null, at: ts, appliedBeforeReading: false,
+    };
+  } else {
+    const due = selectRefreshTargets(readingBeforeRefresh);
+    const lastByScope = readLastRefreshAtByScope(historyPathForRead);
+    const intervalLabel = `${Math.round(staleIntervalMs / 60_000)}m`;
+    const pending: string[] = [];
+    const deferred: ArchCycleDeferredScopeRecord[] = [];
+    for (const scope of due) {
+      const lastRefreshAt = lastByScope[scope.scope];
+      const lastMs = lastRefreshAt ? Date.parse(lastRefreshAt) : NaN;
+      if (Number.isFinite(lastMs) && nowMs - lastMs < staleIntervalMs) {
+        deferred.push({
+          scope: scope.scope,
+          reason: `within-interval: last refresh at ${lastRefreshAt} is within this routine's ${intervalLabel} interval`,
+        });
+      } else {
+        pending.push(scope.scope);
+      }
+    }
+    if (due.length === 0) {
+      refresh = {
+        attempted: false, refreshedScopes: [], deferredScopes: [], skipped: "no-scope-needs-refresh",
+        detail: "no scope's artifact is behind its sources (or its staleness is not computable)",
+        instrument: null, instrumentSource: null, searched: [], exitCode: null, at: ts, appliedBeforeReading: false,
+      };
+    } else if (pending.length === 0) {
+      refresh = {
+        attempted: false, refreshedScopes: [], deferredScopes: deferred, skipped: "within-interval",
+        detail: `every due scope was refreshed within this routine's ${intervalLabel} interval — per-scope budget: ${deferred
+          .map((d) => `${d.scope} (${d.reason})`)
+          .join(" ; ")}`,
+        instrument: null, instrumentSource: null, searched: [], exitCode: null, at: ts, appliedBeforeReading: false,
+      };
+    } else {
+      const r: ArchCycleRefreshResult = refreshBehindScopes(resolvedRoot, opts.workDir, readingBeforeRefresh, {
+        now: ts,
+        scopes: pending,
+      });
+      refresh = {
+        attempted: r.attempted,
+        refreshedScopes: r.refreshedScopes,
+        deferredScopes: deferred,
+        skipped: r.skipped,
+        detail: r.detail,
+        instrument: r.instrument,
+        instrumentSource: r.instrumentSource,
+        searched: r.searched,
+        exitCode: r.exitCode,
+        at: r.at,
+        appliedBeforeReading: r.refreshedScopes.some((s) => s.ok),
+      };
+      if (refresh.appliedBeforeReading) {
+        // Re-read AFTER the analyze: the numbers in this record are the post-refresh ones, and the
+        // graph summary must come from the same (now refreshed) artifact tree.
+        reading = readDirectoryCycleReading(resolvedRoot, opts.workDir);
+      }
+      // Why each still-due scope was not made current (the downgrade reason). A scope that a successful
+      // analyze brought up to date is NOT in `stillDue`, so it keeps its `evaluated:true` reading.
+      const exitByScope = new Map(r.refreshedScopes.map((s) => [s.scope, s] as const));
+      const deferredByScope = new Map(deferred.map((d) => [d.scope, d.reason] as const));
+      const stillDue = new Set(selectRefreshTargets(reading).map((s) => s.scope));
+      for (const scope of due) {
+        if (!stillDue.has(scope.scope)) continue;
+        const attempted = exitByScope.get(scope.scope);
+        const cause = deferredByScope.get(scope.scope)
+          ?? (r.skipped === "instrument-absent"
+            ? `instrument-absent — archguard CLI not found (probed: ${r.searched.join(" ; ")})`
+            : attempted === undefined
+              ? "not attempted this round"
+              : attempted.ok
+                ? "analyze exited 0 but the artifact is still behind the sources"
+                : `analyze exited ${attempted.exitCode}`);
+        downgradeCauses.set(scope.scope, cause);
+      }
+    }
+  }
+  // THE HONESTY GATE: a stale scope that could not be refreshed must not be presented as a current
+  // reading. Applied AFTER the re-read so it sees the artifact tree this record will actually report.
+  if (downgradeCauses.size > 0) {
+    reading = downgradeStaleScopes(reading, downgradeCauses);
+  }
   // SAME-BATCH graph reading (gap-quality-round-facts-surface-top-out-degree-god-functions): both
   // readings come from the same persisted `.archguard/query` tree, so this adds a file read, not a
   // second analysis (⛔ zero spawn).
@@ -2136,17 +2378,15 @@ export function runArchCycleRound(root: string, opts: ArchCycleRoundOptions = {}
     topByOutDegree: graph.topByOutDegree,
     topByOutDegreeTruncated: graph.topByOutDegreeTruncated,
   };
-  const ts = opts.now ?? new Date().toISOString();
   // FRESHNESS OF THE READING (gap-arch-cycle-report-record-artifact-timestamp): the routine does not
-  // analyze; it reports whatever the LAST analyze persisted. Recording HOW OLD that artifact is makes
-  // "reading the current tree" distinguishable from "re-reading a week-old artifact" (the failure
-  // that motivated this task: the same 4 cycles reported for 3 days).
+  // analyze on demand; it reports what the LAST analyze persisted (the refresh above may have just
+  // rewritten part of it). Recording HOW OLD that artifact is makes "reading the current tree"
+  // distinguishable from "re-reading a week-old artifact" (the failure that motivated that task: the
+  // same 4 cycles reported for 3 days).
   //   • staleIntervalMs is the routine's declared cadence — "older than one interval" is the point at
   //     which a reader can no longer assume the artifact tracks the tree.
   //   • `stale` is THREE-VALUED: null when the age cannot be computed (no artifact timestamp / an
   //     unparseable one). ⛔ Never false there — "could not tell" must not look like "fresh" (3b).
-  const staleIntervalMs = (opts.config?.intervalMinutes ?? ARCH_CYCLE_INTERVAL_DEFAULT_MIN) * 60_000;
-  const nowMs = Number.isFinite(Date.parse(ts)) ? Date.parse(ts) : Date.now();
   const artifactMs = reading.artifactTimestamp ? Date.parse(reading.artifactTimestamp) : NaN;
   const artifactAgeMs = Number.isFinite(artifactMs) ? nowMs - artifactMs : null;
   const stale = artifactAgeMs === null ? null : artifactAgeMs > staleIntervalMs;
@@ -2154,23 +2394,28 @@ export function runArchCycleRound(root: string, opts: ArchCycleRoundOptions = {}
     ts,
     mode: "arch-cycle-report-round",
     evaluated: reading.evaluated,
+    status: reading.status,
     reason: reading.reason,
     totalCycleCount: reading.totalCycleCount,
-    notEvaluatedScopes: reading.scopes.filter((s) => !s.evaluated).map((s) => s.scope),
+    notEvaluatedScopes: reading.notEvaluatedScopes,
+    behindScopes: reading.behindScopes,
     scopes: reading.scopes,
     artifactTimestamp: reading.artifactTimestamp,
     artifactAgeMs,
     staleIntervalMs,
     stale,
     graphSummary,
+    refresh,
     reportOnly: true,
   };
   const appended = appendArchCycleHistory(resolvedRoot, record, opts.historyPath ? { historyPath: opts.historyPath } : {});
   const value: ArchCycleFactValue = {
     mode: "arch-cycle-report-round",
     evaluated: record.evaluated,
+    status: record.status,
     totalCycleCount: record.totalCycleCount,
     notEvaluatedScopes: record.notEvaluatedScopes,
+    behindScopes: record.behindScopes,
     scopes: record.scopes,
     artifactTimestamp: record.artifactTimestamp,
     artifactAgeMs: record.artifactAgeMs,
@@ -2179,6 +2424,7 @@ export function runArchCycleRound(root: string, opts: ArchCycleRoundOptions = {}
     topByOutDegree: graphSummary.topByOutDegree,
     relationCountByType: graphSummary.relationCountByType,
     graphSummary,
+    refresh,
     workDir: reading.workDir,
     historyPath: appended.path,
     historyAppended: appended.ok,
@@ -2203,7 +2449,77 @@ export function runArchCycleRound(root: string, opts: ArchCycleRoundOptions = {}
   }
   // ⛔ AC2: a non-zero cycle count is NOT a failure. The cycles (with their members) are IN the value,
   // so a reader can see them — they just never become the round's verdict.
+  // A PARTIAL reading is VERIFIED too (that is this task's whole point: two permanently graph-less
+  // scopes must not void the other four) — but its reason NAMES what was not read, so "partial" and
+  // "complete" never share a line in `quality-round.jsonl` (硬规则 3b).
+  if (reading.status === "partial") {
+    return { name, value, state: "verified", reason: `partial — ${reading.reason ?? "some scopes were not evaluated"}` };
+  }
   return { name, value, state: "verified", reason: null };
+}
+
+/** The `refresh.at` of the last carrier line that ACTUALLY RAN an analyze, or null.
+ *
+ *  ⚠️ ROUND-LEVEL ONLY. The round's budget is PER SCOPE now — `readLastRefreshAtByScope` is the clock
+ *  the round consults. This function is kept because it answers a different, still-useful question
+ *  ("when did anything last run?"), and because it tolerates the SAME record shapes (new
+ *  `refreshedScopes[]` and the legacy singular `refreshedScope`).
+ *  The carrier already records every round, so the guard needs no second state file (a second carrier
+ *  would be a second truth that can disagree with the history). Rounds that only REPORTED
+ *  (`attempted:false` — disabled / no scope behind / instrument absent) do not reset the clock, so the
+ *  first eligible round after those still refreshes. */
+export function readLastRefreshAt(historyPath: string): string | null {
+  const ats = readRefreshTimesByScope(historyPath);
+  return ats.roundAt;
+}
+
+/** WHEN EACH SCOPE was last re-analyzed, read from the carrier itself.
+ *
+ *  THE per-scope budget clock (gap-arch-cycle-refresh-first-stale-wins-starves-later-scopes): the old
+ *  global `readLastRefreshAt` let ONE scope's refresh block every other scope for a whole interval —
+ *  the starvation mechanism, expressed as a clock. Records are walked newest-first and the FIRST hit
+ *  for a scope wins; a malformed line is skipped, never erasing the earlier ones.
+ *
+ *  Both record shapes are honoured: `refresh.refreshedScopes[]` (current) and `refresh.refreshedScope`
+ *  (legacy), so a carrier written before this change still suppresses an immediate re-analysis.
+ *  Only rounds with `attempted:true` count — `attempted:false` (disabled / no scope behind / instrument
+ *  absent) did not run anything and must not reset any clock. */
+export function readLastRefreshAtByScope(historyPath: string): Record<string, string> {
+  return readRefreshTimesByScope(historyPath).byScope;
+}
+
+/** One backward walk of the carrier, shared by both readers (one parse, one legacy-shape tolerance). */
+function readRefreshTimesByScope(historyPath: string): { roundAt: string | null; byScope: Record<string, string> } {
+  let text: string;
+  try {
+    text = fs.readFileSync(historyPath, "utf8");
+  } catch {
+    return { roundAt: null, byScope: {} };
+  }
+  const lines = text.split("\n").filter((l) => l.trim().length > 0);
+  let roundAt: string | null = null;
+  const byScope: Record<string, string> = {};
+  for (let i = lines.length - 1; i >= 0; i -= 1) {
+    let rec: any;
+    try {
+      rec = JSON.parse(lines[i]);
+    } catch {
+      continue; // a malformed line does not erase the earlier ones — keep walking back
+    }
+    const at = rec?.refresh?.at;
+    if (rec?.refresh?.attempted !== true || typeof at !== "string" || at === "") continue;
+    if (roundAt === null) roundAt = at;
+    const list = Array.isArray(rec.refresh.refreshedScopes) ? rec.refresh.refreshedScopes : [];
+    const labels: unknown[] = list.map((s: any) => (s !== null && typeof s === "object" ? s.scope : undefined));
+    // Legacy singular shape: the carrier written before this task could only name ONE scope.
+    if (typeof rec.refresh.refreshedScope === "string" && rec.refresh.refreshedScope !== "") {
+      labels.push(rec.refresh.refreshedScope);
+    }
+    for (const label of labels) {
+      if (typeof label === "string" && label !== "" && byScope[label] === undefined) byScope[label] = at;
+    }
+  }
+  return { roundAt, byScope };
 }
 
 export interface ArchCycleRoutineOptions {
@@ -2266,7 +2582,7 @@ export function formatArchCycleAssembly(a: {
 }): string {
   if (a.error !== null) return `arch-cycle-report 例程已装配（${a.error} — 每轮记 failed、零报告零写入；⛔ 不回退到缺省节奏照跑）`;
   if (!a.enabled) return "arch-cycle-report 例程已装配（enabled:false — 每轮记 not-evaluated:disabled，零报告零写入）";
-  return `arch-cycle-report 例程已装配（enabled, interval=${a.intervalMinutes}m，report-only：目录级环读数 append 到 .quay/arch-cycle-history.jsonl；环非零是该例程的读数，⛔ 不是 failed）`;
+  return `arch-cycle-report 例程已装配（enabled, interval=${a.intervalMinutes}m，report-only：目录级环读数 append 到 .quay/arch-cycle-history.jsonl；每个 stale scope 每个间隔至多一次 archguard analyze，一轮刷新全部到期的 scope（最陈旧优先）；刷新不成的 stale scope 降级为 evaluated:false + artifact-behind-sources；环非零是该例程的读数，⛔ 不是 failed）`;
 }
 
 // ── ADR-ENFORCEMENT 轨道（tasks/gap-adr007-half1-selfcheck-probes-archived-and-gate-never-invoked）─
@@ -2612,6 +2928,18 @@ export interface DesignEvolutionFactValue {
   /** ADR-008 phase-declaration staleness (gap-adr008-phase-declaration-staleness-reading) — attached
    *  information, embedded verbatim from the carrier's owner. ⛔ Never folded into the Fact's state. */
   phaseStaleness: DesignEvolutionReadingsRecord["phaseStaleness"];
+  /** THIS round's judgment against the previous record (gap-design-evolution-readings-emit-findings).
+   *  ⛔ It is NOT the round's state: a `regression` verdict is the reading's CONTENT (report-only
+   *  stands), and a `not-evaluated` verdict is carried in the value rather than turning the Fact red —
+   *  the Fact's own `not-evaluated` still means 「读数没取到」, which is a different fact. */
+  evolution: DesignEvolutionVerdict;
+  /** Where findings land (the existing routine-findings carrier) and how many this round appended.
+   *  `findingsAppended: 0` with `findingsCount: 0` is 「没有回归」, ⛔ never 「写了但没成」 — the latter
+   *  is `findingsOk:false` (硬规则 3). */
+  findingsPath: string;
+  findingsCount: number;
+  findingsAppended: number;
+  findingsOk: boolean;
   historyPath: string;
   historyAppended: boolean;
   reportOnly: true;
@@ -2624,8 +2952,13 @@ export interface DesignEvolutionRoundOptions {
   configError?: string | null;
   /** Test / alternate-carrier seam; default `<root>/.quay/design-evolution-history.jsonl`. */
   historyPath?: string;
+  /** Test / alternate-carrier seam for the FINDINGS carrier; default
+   *  `<root>/.quay/routine-findings.jsonl` (the existing routine filing track). */
+  findingsPath?: string;
   /** Test / alternate-carrier seam for the worker-outcome ledger. */
   carrierPath?: string;
+  /** Override `design_evolution_readings.dark_streak_rounds` (the config is the production source). */
+  darkStreakRounds?: number;
   /** Pin the window's right end for EVERY subsystem (tests; a one-off historical reading). */
   head?: string;
   topN?: number;
@@ -2660,18 +2993,22 @@ export function runDesignEvolutionRound(root: string, opts: DesignEvolutionRound
   }
 
   const resolvedRoot = path.resolve(root);
-  const previous = readDesignEvolutionPreviousWindow(resolvedRoot, opts.historyPath ? { historyPath: opts.historyPath } : {});
-  const record = buildDesignEvolutionReadings(resolvedRoot, {
+  // ONE orchestration, shared with the DIRECT entry (`takeEvolutionRound`): read the previous record
+  // → take the readings → judge → persist the record (verdict embedded) → append the findings the
+  // judgment justifies. ⛔ This file does not re-implement any of it, and ⛔ it never files a task —
+  // the finding lands in the EXISTING carrier and `routine-file-gate` / `quay:run-routines` decide.
+  const taken = takeEvolutionRound(resolvedRoot, {
     ...(opts.now ? { ts: opts.now } : {}),
     subsystems: opts.config.subsystems,
     topN: opts.topN ?? opts.config.topN,
+    darkStreakRounds: opts.darkStreakRounds ?? opts.config.darkStreakRounds,
     ...(opts.head ? { head: opts.head } : {}),
+    ...(opts.historyPath ? { historyPath: opts.historyPath } : {}),
+    ...(opts.findingsPath ? { findingsPath: opts.findingsPath } : {}),
     ...(opts.carrierPath ? { carrierPath: opts.carrierPath } : {}),
-    windowStartIndex: previous.windowStartIndex,
-    windowSource: previous.windowSource,
     ...(opts.predicates ? { predicates: opts.predicates } : {}),
   });
-  const appended = appendDesignEvolutionHistory(resolvedRoot, record, opts.historyPath ? { historyPath: opts.historyPath } : {});
+  const record = taken.record;
   const value: DesignEvolutionFactValue = {
     mode: record.mode,
     evaluated: record.evaluated,
@@ -2681,23 +3018,39 @@ export function runDesignEvolutionRound(root: string, opts: DesignEvolutionRound
     rm2: record.rm2,
     carrierRecords: record.carrierRecords,
     phaseStaleness: record.phaseStaleness,
-    historyPath: appended.path,
-    historyAppended: appended.ok,
+    evolution: taken.verdict,
+    findingsPath: taken.findingsCarrier.path,
+    findingsCount: taken.findings.length,
+    findingsAppended: taken.findingsCarrier.appended,
+    findingsOk: taken.findingsCarrier.ok,
+    historyPath: taken.history.path,
+    historyAppended: taken.history.appended,
     reportOnly: true,
   };
-  if (!appended.ok) {
-    return { name, value, state: "failed", reason: `history carrier not writable at ${appended.path} — ${appended.error}` };
+  if (!taken.history.appended) {
+    return { name, value, state: "failed", reason: `history carrier not writable at ${taken.history.path} — ${taken.history.error}` };
+  }
+  // 硬规则 3b: 「读数落了、finding 没落」 must NOT look like 「没有回归」. The round FAILED to do its
+  // job even though the reading itself was taken.
+  if (!taken.findingsCarrier.ok) {
+    return {
+      name, value, state: "failed",
+      reason: `findings carrier not writable at ${taken.findingsCarrier.path} — ${taken.findingsCarrier.error} (the reading landed; ${taken.findings.length} finding(s) did not)`,
+    };
   }
   if (!record.evaluated) {
     return { name, value, state: "not-evaluated", reason: `not-evaluated:readings — ${record.reason ?? "the readings could not be taken"}` };
   }
-  // ⛔ A non-zero share or a non-zero contention count is NOT a failure (report-only). The numbers are
-  // IN the value, so a reader can see them — they just never become the round's verdict.
+  // ⛔ A non-zero share, a non-zero contention count, or a `regression` VERDICT is NOT a failure
+  // (report-only). The numbers and the verdict are IN the value, so a reader can see them — they
+  // just never become the round's verdict.
   return { name, value, state: "verified", reason: null };
 }
 
 export interface DesignEvolutionRoutineOptions {
   historyPath?: string;
+  /** Alternate findings carrier (tests); default `<root>/.quay/routine-findings.jsonl`. */
+  findingsPath?: string;
   carrierPath?: string;
   head?: string;
   topN?: number;
@@ -2723,6 +3076,7 @@ export function buildDesignEvolutionRoutine(
         configPresent: read.present,
         configError: read.error,
         ...(opts.historyPath ? { historyPath: opts.historyPath } : {}),
+        ...(opts.findingsPath ? { findingsPath: opts.findingsPath } : {}),
         ...(opts.carrierPath ? { carrierPath: opts.carrierPath } : {}),
         ...(opts.head ? { head: opts.head } : {}),
         ...(opts.topN !== undefined ? { topN: opts.topN } : {}),
@@ -2759,7 +3113,391 @@ export function formatDesignEvolutionAssembly(a: {
 }): string {
   if (a.error !== null) return `design-evolution-readings 例程已装配（${a.error} — 每轮记 failed、零读数零写入；⛔ 不回退到缺省节奏照跑）`;
   if (!a.enabled) return "design-evolution-readings 例程已装配（enabled:false — 每轮记 not-evaluated:disabled，零读数零写入）";
-  return `design-evolution-readings 例程已装配（enabled, interval=${a.intervalMinutes}m，report-only：RM1/RM2 读数 append 到 ${DESIGN_EVOLUTION_HISTORY_REL}；占比高/争用多是该例程的读数，⛔ 不是 failed）`;
+  // 装配行点名`两`个载体：读数去哪、finding 去哪。只写前者会让「这条例程现在会立案」在生产日志里
+  // 不可见（硬规则 9：守与不守在记录上必须可分）。
+  return `design-evolution-readings 例程已装配（enabled, interval=${a.intervalMinutes}m，report-only 读数：RM1/RM2 append 到 ${DESIGN_EVOLUTION_HISTORY_REL}，本轮判定（stable/regression/no-prior/not-evaluated）随记录落盘；regression 时把 finding append 到 ${EVOLUTION_FINDINGS_REL}，由既有 routine-file-gate 决定是否立案；占比高/争用多是读数，⛔ 不是 failed）`;
+}
+
+
+// ── instrument-decay 的 config 入口（`.quay/config.yml` `loop.instrument_decay:`）──────────────
+// 与 arch_cycle_report 同族的第十条声明式例程，语义逐条对齐（⛔ 不另造机制）：
+//   • 段缺席          ⇒ 不装配（off by default，宿主例程表逐条不变——AC144 的「恰好四条」判据仍成立）；
+//   • 段 enabled:false ⇒ 仍装配、每轮记 `not-evaluated:disabled` 且**零读数零写入**（kill switch 必须可观测）；
+//   • 段写坏          ⇒ 仍装配、记 `failed` 且零读数零写入（硬规则 3b：读不懂 ≠ 合格）。
+// 与其他各条的唯一差异是**它回答什么**：「我们用来观测系统的仪器本身还在不在读数」——A/B（写手停写）、
+// C（载体在写但全是 evaluated:false）、D（已评估但产物早于覆盖源码）、uncovered（没被检查的载体）。
+// **report-only**：腐烂是读数内容，⛔ 不 ratchet；但它是 `state: "instrument-dark"`，⛔ 不与 verified 同形。
+export interface InstrumentDecayConfig {
+  enabled: boolean;
+  /** `enabled:false` ⇒ null（不参与调度）。enabled 段缺省为 INSTRUMENT_DECAY_INTERVAL_MIN_DEFAULT。 */
+  intervalMinutes: number | null;
+}
+
+export interface InstrumentDecayConfigRead {
+  present: boolean;
+  config: InstrumentDecayConfig | null;
+  error: string | null;
+}
+
+const cfgInstrumentDecayBad = (msg: string) => `loop.instrument_decay ${msg}`;
+
+/** 纯解析一个 `loop.instrument_decay` 值（与 parseArchCycleSection 逐条同形）。 */
+export function parseInstrumentDecaySection(raw: unknown): { config: InstrumentDecayConfig | null; error: string | null } {
+  if (raw === null || typeof raw !== "object" || Array.isArray(raw)) {
+    return { config: null, error: cfgInstrumentDecayBad(`must be a mapping (got ${Array.isArray(raw) ? "array" : raw === null ? "null" : typeof raw})`) };
+  }
+  const rec = raw as Record<string, unknown>;
+  if (typeof rec.enabled !== "boolean") {
+    return { config: null, error: cfgInstrumentDecayBad(`needs a boolean 'enabled' (got ${rec.enabled === undefined ? "missing" : JSON.stringify(rec.enabled)})`) };
+  }
+  if (rec.enabled === false) return { config: { enabled: false, intervalMinutes: null }, error: null };
+  if (rec.interval === undefined || rec.interval === null) {
+    return { config: { enabled: true, intervalMinutes: INSTRUMENT_DECAY_INTERVAL_MIN_DEFAULT }, error: null };
+  }
+  if (typeof rec.interval !== "string") {
+    return { config: null, error: cfgInstrumentDecayBad(`'interval' must be a string of the form interval:<N>m (got ${JSON.stringify(rec.interval)})`) };
+  }
+  let trigger: { kind: string; minutes?: number };
+  try {
+    trigger = parseTrigger(rec.interval) as { kind: string; minutes?: number };
+  } catch (e) {
+    return { config: null, error: cfgInstrumentDecayBad(`invalid 'interval' — ${(e as Error).message}`) };
+  }
+  if (trigger.kind !== "interval" || typeof trigger.minutes !== "number") {
+    return { config: null, error: cfgInstrumentDecayBad(`'interval' must be interval:<N>m (got kind '${trigger.kind}')`) };
+  }
+  if (trigger.minutes < INSTRUMENT_DECAY_MIN_INTERVAL_MINUTES) {
+    return { config: null, error: cfgInstrumentDecayBad(`interval ${trigger.minutes}m is below the ${INSTRUMENT_DECAY_MIN_INTERVAL_MINUTES}m floor — refused, not silently rounded`) };
+  }
+  return { config: { enabled: true, intervalMinutes: trigger.minutes }, error: null };
+}
+
+/** 读 `.quay/config.yml` `loop.instrument_decay:`（同族读法：无 config / 无 `loop:` / 无段 ⇒
+ *  `present:false`；YAML 或段写坏 ⇒ `error` 置位，fail-closed）。 */
+export function readInstrumentDecayConfig(workspaceRoot: string): InstrumentDecayConfigRead {
+  const file = path.join(workspaceRoot, ".quay", "config.yml");
+  let text: string;
+  try {
+    text = fs.readFileSync(file, "utf8");
+  } catch {
+    return { present: false, config: null, error: null };
+  }
+  let parsed: unknown;
+  try {
+    parsed = parseYaml(text);
+  } catch (e) {
+    return { present: true, config: null, error: `.quay/config.yml is not valid YAML — ${(e as Error).message}` };
+  }
+  const loop = parsed && typeof parsed === "object" && !Array.isArray(parsed) ? (parsed as Record<string, unknown>).loop : undefined;
+  if (loop === null || loop === undefined) return { present: false, config: null, error: null };
+  if (typeof loop !== "object" || Array.isArray(loop)) return { present: true, config: null, error: "FAIL-CLOSED: .quay/config.yml 'loop:' must be a mapping" };
+  const raw = (loop as Record<string, unknown>).instrument_decay;
+  if (raw === undefined || raw === null) return { present: false, config: null, error: null };
+  const { config, error } = parseInstrumentDecaySection(raw);
+  return { present: true, config, error };
+}
+
+/** 一个（载体，形态）的立案结局。`already-filed` 的证据来自**上一轮的 Fact**（下面是 readPrior…）——
+ *  ⛔ 不另造一份去重账本：Fact 已经是每轮落盘的载体，第二份台账只会与它漂移。 */
+export interface InstrumentDecayFiling {
+  /** `${file}|${kind}` —— 去重键（Plan：「对每个（载体，形态）」）。 */
+  key: string;
+  file: string;
+  kind: InstrumentDecayFinding["kind"];
+  /** 该 pair 下受影响的分组/作用域名（prompt 里逐条列出——立案是 per pair，证据是 per group）。 */
+  groups: string[];
+  filing: "filed" | "already-filed" | "deferred";
+  exitCode: number | null;
+  error: string | null;
+  /** agent 输出的去噪摘要（报告已有 gap 时 agent 会在这里点名 task id）。 */
+  summary: string | null;
+}
+
+export interface InstrumentDecayFactValue {
+  mode: "instrument-decay-round";
+  evaluated: boolean;
+  decayedCount: number;
+  healthyCount: number;
+  uncoveredCount: number;
+  uncovered: InstrumentDecayOutcome["uncovered"];
+  carriers: Array<{
+    file: string;
+    evaluated: boolean;
+    contentDark: InstrumentDecayOutcome["carriers"][number]["contentDark"];
+    staleEvaluated: InstrumentDecayOutcome["carriers"][number]["staleEvaluated"];
+    decayed: InstrumentDecayFinding[];
+  }>;
+  filings: InstrumentDecayFiling[];
+  reportOnly: true;
+}
+
+/** gap-filing prompt：逐 (载体, 形态) 交给短命 agent，经 quay-file-task 立案（同 packaging 的措辞，
+ *  mechanism-based dedup）。 */
+export function buildInstrumentDecayGapWorkerPrompt(
+  root: string,
+  pairs: Array<{ file: string; kind: InstrumentDecayFinding["kind"]; findings: InstrumentDecayFinding[] }>,
+): string {
+  const lines: string[] = [
+    "You are a gap-filing agent in the quay repo. A standing instrument-decay check found carriers whose READINGS are dark — the carriers are still being written, so the older checks (write rate stopped) cannot see them.",
+    `Repo root: ${root}.`,
+    "The detector is plugin/scripts/instrument-decay-check.ts. Its four shapes:",
+    "  • never-wrote / rate-stopped — a writer group stopped writing (the original P5 shapes).",
+    "  • content-dark — the carrier keeps writing, but every record it holds is evaluated:false.",
+    "  • stale-evaluated — the carrier says evaluated:true, but the artifact it read predates the newest commit touching the source paths it covers.",
+    "Findings (one gap task PER (carrier, shape) below):",
+  ];
+  pairs.forEach((p, i) => {
+    lines.push(`  ${i + 1}. carrier=${p.file} shape=${p.kind}`);
+    for (const f of p.findings) {
+      lines.push(`       - ${f.group}: ${f.kind} (count=${f.count})${f.detail ? ` — ${f.detail}` : ""}`);
+    }
+  });
+  lines.push(
+    "The quay-file-task skill performs MECHANISM-BASED dedup. Apply the TWO rules below — an OPEN claim and a DONE claim are NOT the same case — and report every existing task id you matched:",
+    "  • OPEN claim (existing task in todo/ready/needs-human) — it claims the same rot ⇒ a real duplicate: do NOT file; report that task id instead.",
+    "  • DONE/superseded claim — a done task claiming the same rot is NOT proof the rot is gone (a task can be closed while the carrier still reads dark; done ≠ absent, hard rule 5b). Verify against the CURRENT CARRIER before deciding: re-read the carrier named above (and the writer path) at the current HEAD. STILL dark ⇒ FILE the task and carry the old task id in the body as traceability (`prior-claim: <id>`) — that is not a duplicate. NO LONGER dark ⇒ do NOT file; report 'the old task already fixed it' together with the evidence you checked.",
+    "A finding that is rare-BY-DESIGN (a step only reachable on an exceptional path) is still worth a task ONLY if the writer path is gone or the trigger has not occurred in far longer than its own cadence; otherwise report the adjudication instead of filing. Name which of the two you concluded.",
+  );
+  return lines.join("\n");
+}
+
+/** gap-filing agent argv = launchArgv("fix-worker", <prompt>)（测试缝：前缀覆盖时把 prompt 追加）。 */
+export function buildInstrumentDecayGapWorkerArgv(
+  root: string,
+  pairs: Array<{ file: string; kind: InstrumentDecayFinding["kind"]; findings: InstrumentDecayFinding[] }>,
+  cmd?: string | null,
+): string[] {
+  const prompt = buildInstrumentDecayGapWorkerPrompt(root, pairs);
+  if (cmd != null) {
+    const prefix = splitArgs(cmd);
+    if (prefix.length === 0) return launchArgv("fix-worker", prompt, root);
+    return [...prefix, prompt];
+  }
+  return launchArgv("fix-worker", prompt, root);
+}
+
+/** 上一轮已立案的 pair 键——从 round 载体（`.quay/quality-round.jsonl`）的尾部读，⛔ 不新造台账。
+ *
+ *  WHY the tail only: the round log is an append-only heartbeat carrier (63k+ lines in production).
+ *  The previous round's Fact is what we need; scanning the whole file every 360m would grow without
+ *  bound. 500 lines is far more than one round's worth (a round is ONE line). */
+export function readPriorInstrumentDecayFilings(root: string, roundLogPath?: string): Set<string> {
+  const file = roundLogPath ?? path.join(root, ROUND_LOG_REL);
+  const out = new Set<string>();
+  let text: string;
+  try {
+    text = fs.readFileSync(file, "utf8");
+  } catch {
+    return out;
+  }
+  const lines = text.split("\n").filter((l) => l.trim() !== "").slice(-500);
+  for (let i = lines.length - 1; i >= 0; i--) {
+    let rec: any;
+    try { rec = JSON.parse(lines[i]); } catch { continue; }
+    const facts = Array.isArray(rec?.facts) ? rec.facts : [];
+    for (const f of facts) {
+      if (!f || f.name !== INSTRUMENT_DECAY_ROUTINE_NAME) continue;
+      const filings = Array.isArray(f?.value?.filings) ? f.value.filings : [];
+      for (const fl of filings) {
+        if (fl && fl.filing === "filed" && typeof fl.key === "string") out.add(fl.key);
+      }
+    }
+  }
+  return out;
+}
+
+export interface InstrumentDecayRoundOptions {
+  config?: InstrumentDecayConfig | null;
+  configPresent?: boolean;
+  configError?: string | null;
+  /** 形状 B 的伴生陈旧间隔（秒）；缺省 DEFAULT_STALE_SECONDS。 */
+  staleSeconds?: number;
+  /** Test seam: manifest override（⚠️ 生产永不传——描述符的登记表就是 MANIFEST）。 */
+  manifest?: InstrumentDecayCarrierSpec[];
+  /** Test seam: gap-filing agent 命令前缀。缺省 null ⇒ 生产 launchArgv。 */
+  gapWorkerCmd?: string | null;
+  gapWorkerTimeoutMs?: number;
+  resourceGateArgv?: string[] | null;
+  halted?: boolean;
+  /** Test seam: 已立案 pair 键（缺省从 round 载体尾部读）。 */
+  priorFilings?: Iterable<string>;
+  roundLogPath?: string;
+  /** 确定性 ts seam（当前只用于 reason 里的时间证据，不写载体）。 */
+  now?: string;
+}
+
+/** 跑一轮 instrument-decay 读数 + 立案。NEVER throws。
+ *
+ *  ⛔ 失败词表是这一族的（硬规则 3b）：
+ *    • `failed`          — 例程做不成它的事（坏配置）；
+ *    • `not-evaluated`   — 没有任何已登记载体可读（verify worktree 无主检出运行时态），或 kill switch；
+ *    • `verified`        — 读数取到了且**没有任何腐烂**（uncovered 仍写进 value/reason，⛔ 不吞掉）；
+ *    • `instrument-dark` — 读数取到了，结论是「有仪器在腐烂」。⛔ 不与 verified / not-evaluated 同形。 */
+export async function runInstrumentDecayRound(
+  root: string,
+  opts: InstrumentDecayRoundOptions = {},
+): Promise<Fact<InstrumentDecayFactValue | null>> {
+  const name = INSTRUMENT_DECAY_ROUTINE_NAME;
+  if (opts.configError) return { name, value: null, state: "failed", reason: opts.configError };
+  if (opts.configPresent === false) {
+    return { name, value: null, state: "not-evaluated", reason: "not-evaluated:not-declared — loop.instrument_decay is absent (the routine is only assembled when the section is declared)" };
+  }
+  if (opts.config === null) {
+    return { name, value: null, state: "failed", reason: cfgInstrumentDecayBad("present but could not be parsed") };
+  }
+  if (opts.config && !opts.config.enabled) {
+    return { name, value: null, state: "not-evaluated", reason: "not-evaluated:disabled — .quay/config.yml loop.instrument_decay.enabled=false（kill switch：零读数、零写入）" };
+  }
+
+  const resolvedRoot = path.resolve(root);
+  const outcome = analyzeInstrumentDecay(resolvedRoot, {
+    staleSeconds: opts.staleSeconds ?? INSTRUMENT_DECAY_DEFAULT_STALE_SECONDS,
+  }, opts.manifest);
+
+  // 把 findings 归并成 (载体, 形态) 的 pair —— 立案的粒度是 Plan 写明的 pair，证据仍是逐 group。
+  const pairMap = new Map<string, { file: string; kind: InstrumentDecayFinding["kind"]; findings: InstrumentDecayFinding[] }>();
+  for (const c of outcome.carriers) {
+    for (const f of c.decayed) {
+      const key = `${c.file}|${f.kind}`;
+      const entry = pairMap.get(key) ?? { file: c.file, kind: f.kind, findings: [] };
+      entry.findings.push(f);
+      pairMap.set(key, entry);
+    }
+  }
+  const pairs = [...pairMap.entries()].map(([key, v]) => ({ key, ...v }));
+  const prior = opts.priorFilings !== undefined
+    ? new Set(opts.priorFilings)
+    : readPriorInstrumentDecayFilings(resolvedRoot, opts.roundLogPath);
+
+  const filings: InstrumentDecayFiling[] = [];
+  for (const p of pairs) {
+    const groups = p.findings.map((f) => f.group);
+    if (prior.has(p.key)) {
+      filings.push({ key: p.key, file: p.file, kind: p.kind, groups, filing: "already-filed", exitCode: null, error: null, summary: null });
+      continue;
+    }
+    if (opts.halted === true) {
+      filings.push({ key: p.key, file: p.file, kind: p.kind, groups, filing: "deferred", exitCode: null, error: "halted", summary: null });
+      continue;
+    }
+    const gate = resourceGateCheck(resolvedRoot, opts.resourceGateArgv ?? null);
+    if (!gate.go) {
+      filings.push({ key: p.key, file: p.file, kind: p.kind, groups, filing: "deferred", exitCode: null, error: `resource-gate ${gate.state}`, summary: null });
+      continue;
+    }
+    const argv = buildInstrumentDecayGapWorkerArgv(resolvedRoot, [p], opts.gapWorkerCmd ?? null);
+    const g = await runAsync(argv, { timeoutMs: opts.gapWorkerTimeoutMs ?? INSTRUMENT_DECAY_GAP_WORKER_TIMEOUT_MS_DEFAULT, collectStderr: true });
+    filings.push({
+      key: p.key, file: p.file, kind: p.kind, groups,
+      filing: "filed",
+      exitCode: g.status,
+      error: g.error ? g.error.message : (g.status === 0 ? null : (String(g.stderr ?? "").slice(0, 200) || null)),
+      summary: String(g.stdout ?? "").trim().slice(-400) || null,
+    });
+  }
+
+  const value: InstrumentDecayFactValue = {
+    mode: "instrument-decay-round",
+    evaluated: outcome.anyEvaluated,
+    decayedCount: outcome.decayedCount,
+    healthyCount: outcome.healthyCount,
+    uncoveredCount: outcome.uncoveredCount,
+    uncovered: outcome.uncovered,
+    carriers: outcome.carriers.map((c) => ({
+      file: c.file,
+      evaluated: c.evaluated,
+      contentDark: c.contentDark,
+      staleEvaluated: c.staleEvaluated,
+      decayed: c.decayed,
+    })),
+    filings,
+    reportOnly: true,
+  };
+
+  if (!outcome.anyEvaluated) {
+    return { name, value, state: "not-evaluated", reason: "not-evaluated:no-carrier — no registered carrier is present under .quay/ (verify worktree has no main-checkout runtime state)" };
+  }
+  const coverage = value.uncoveredCount > 0
+    ? `${value.uncoveredCount} uncovered carrier(s) NOT counted healthy (${value.uncovered.map((u) => u.file).join(", ")})`
+    : "no uncovered carriers";
+  if (outcome.decayedCount === 0) {
+    return { name, value, state: "verified", reason: value.uncoveredCount > 0 ? `no instrument decay; ${coverage}` : null };
+  }
+  const filed = filings.filter((f) => f.filing === "filed").length;
+  const already = filings.filter((f) => f.filing === "already-filed").length;
+  const deferred = filings.filter((f) => f.filing === "deferred").length;
+  const named = [...pairMap.values()].map((p) => `${p.file}: ${p.kind} (${p.findings.length})`).join("; ");
+  return {
+    name,
+    value,
+    state: "instrument-dark",
+    reason: `instrument-dark: ${outcome.decayedCount} finding(s) — ${named}; filings: filed=${filed} already-filed=${already} deferred=${deferred}; ${coverage}`,
+  };
+}
+
+export interface InstrumentDecayRoutineOptions {
+  staleSeconds?: number;
+  gapWorkerCmd?: string | null;
+  gapWorkerTimeoutMs?: number;
+  resourceGateArgv?: string[] | null;
+  roundLogPath?: string;
+}
+
+/** Build the RoutineSpec（scheduler / watchdog / halt 是 driver 的，不在这里重实现）。 */
+export function buildInstrumentDecayRoutine(
+  root: string,
+  read: InstrumentDecayConfigRead,
+  opts: InstrumentDecayRoutineOptions = {},
+): RoutineSpec {
+  const minutes = read.config?.intervalMinutes ?? INSTRUMENT_DECAY_INTERVAL_MIN_DEFAULT;
+  return {
+    name: INSTRUMENT_DECAY_ROUTINE_NAME,
+    schedule: { kind: "interval", minutes },
+    // 纯文件 + git 读；halt 只挡 gap-filing spawn（读数照跑——观测不是受闸动作）。
+    run: async (ctx) => [
+      await runInstrumentDecayRound(root, {
+        config: read.config,
+        configPresent: read.present,
+        configError: read.error,
+        ...(opts.staleSeconds !== undefined ? { staleSeconds: opts.staleSeconds } : {}),
+        ...(opts.gapWorkerCmd !== undefined ? { gapWorkerCmd: opts.gapWorkerCmd } : {}),
+        ...(opts.gapWorkerTimeoutMs !== undefined ? { gapWorkerTimeoutMs: opts.gapWorkerTimeoutMs } : {}),
+        ...(opts.resourceGateArgv !== undefined ? { resourceGateArgv: opts.resourceGateArgv } : {}),
+        ...(opts.roundLogPath !== undefined ? { roundLogPath: opts.roundLogPath } : {}),
+        halted: ctx?.halted === true,
+      }),
+    ],
+  };
+}
+
+/** Production entry: read `.quay/config.yml` and build the routine. NEVER throws.
+ *  `routine` is `null` when NO section is declared — an undeclared workspace keeps the EXACT routine
+ *  set it had before (AC144's "exactly four"). A DECLARED section always yields a routine, even
+ *  `enabled:false` or malformed, because "not running" must be observable (硬规则 3/3b). */
+export function instrumentDecayRoutineFromConfig(
+  root: string,
+  opts: InstrumentDecayRoutineOptions = {},
+): { routine: RoutineSpec | null; error: string | null; present: boolean; enabled: boolean } {
+  const read = readInstrumentDecayConfig(root);
+  return {
+    routine: read.present ? buildInstrumentDecayRoutine(root, read, opts) : null,
+    error: read.error,
+    present: read.present,
+    enabled: read.config?.enabled === true,
+  };
+}
+
+/** The assembly line, as ONE string — declared-but-disabled / malformed / running never look the
+ *  same in the driver's startup log (硬规则 3b/9). */
+export function formatInstrumentDecayAssembly(a: {
+  present: boolean;
+  error: string | null;
+  enabled: boolean;
+  intervalMinutes: number;
+}): string {
+  if (a.error !== null) return `instrument-decay 例程已装配（${a.error} — 每轮记 failed、零读数零写入；⛔ 不回退到缺省节奏照跑）`;
+  if (!a.enabled) return "instrument-decay 例程已装配（enabled:false — 每轮记 not-evaluated:disabled，零读数零写入）";
+  return `instrument-decay 例程已装配（enabled, interval=${a.intervalMinutes}m，report-only：A/B 写手停写 + C 内容全暗 + D 过期的已评估 + uncovered，读数写成 state=instrument-dark 的 Fact；腐烂是读数内容，⛔ 不是 failed；有新腐烂才 spawn gap-filing，已立案的 (载体,形态) 不重复立案）`;
 }
 
 
@@ -2843,6 +3581,12 @@ export interface QualityGateOptions {
    *  缺陷）；段只能调间隔或关掉（可观测的 not-evaluated:disabled）。**report-only**：失败是该例程的
    *  读数；selfcheck exit 2（NOT-EVALUATED）记 not-evaluated，⛔ 不记 failed。 */
   adrEnforcementRoutine?: RoutineSpec | null;
+  /** instrument-decay 例程（gap-instrument-decay-check-unwired-and-blind-to-content-dark）：同族的
+   *  声明式注入纪律（main() 从 `.quay/config.yml` `loop.instrument_decay:` 装配后注入）。缺省
+   *  null = 未装配 ⇒ 未声明的工作区例程表逐条不变（AC144 的「恰好四条」判据仍成立）。
+   *  **report-only**：读数写成 `state: "instrument-dark"` 的 Fact（⛔ 不 ratchet），有新腐烂才 spawn
+   *  gap-filing；已立案的 (载体, 形态) 不重复立案。 */
+  instrumentDecayRoutine?: RoutineSpec | null;
 }
 
 /** 四条例程（B15 pool-quality-judge + B17 judgment-consumer-check + 架构复核 + packaging-hygiene）。
@@ -2944,6 +3688,12 @@ export function qualityGateRoutines(root: string, opts: QualityGateOptions): Rou
     // 真的跑得起来吗」——经门引擎 runGate 写 GateEvent（actor=例程名），report-only，⛔ 不 ratchet、
     // ⛔ 不在 fan-in 热路径上。
     ...(opts.adrEnforcementRoutine ? [opts.adrEnforcementRoutine] : []),
+    // 第十五类：INSTRUMENT-DECAY 例程（同一「声明式 + 可观测」族：间隔与开关来自 `.quay/config.yml`
+    // `loop.instrument_decay:`）。缺席 ⇒ 不加入（老行为，内建四条不变）；加入而段缺席/写坏 ⇒ 仍装配并记
+    // not-evaluated:disabled / failed（kill switch 与坏配置的可观测面）。
+    // **它回答的问题**：「我们用来观测系统的仪器本身还在读数吗」——A/B 写手停写、C 内容全暗、
+    // D 过期的已评估、uncovered 未覆盖。⛔ 不是 fan-in 热路径上的检查。
+    ...(opts.instrumentDecayRoutine ? [opts.instrumentDecayRoutine] : []),
   ];
 }
 
@@ -3737,6 +4487,26 @@ export async function main(argv: string[]): Promise<number> {
       (adrEnforcement.routine.schedule as { minutes?: number } | undefined)?.minutes ?? ADR_ENFORCEMENT_INTERVAL_MIN_DEFAULT,
   })}`);
 
+  // instrument-decay 轨道：读 `.quay/config.yml` `loop.instrument_decay:`（同一注入纪律）。
+  // 未声明 ⇒ 不装配（例程表逐条不变，AC144 的「恰好四条」不变）；声明了但 enabled:false/写坏 ⇒
+  // 仍装配（disabled / failed 必须可观测，硬规则 3b）。**report-only**：每 due 轮跑一次四项读数
+  // （A/B 写手停写、C 内容全暗、D 过期的已评估、uncovered），写成 `state: "instrument-dark"` 的
+  // Fact；腐烂 ⛔ 不使轮 failed，有新腐烂才 spawn gap-filing。
+  const instrumentDecay = instrumentDecayRoutineFromConfig(rootDir);
+  if (instrumentDecay.error) {
+    console.error(`quality-gate-driver: instrument-decay 例程配置无效 — ${instrumentDecay.error}`);
+  } else if (!instrumentDecay.present) {
+    console.error("quality-gate-driver: 未声明 loop.instrument_decay — instrument-decay 例程未装配（off by default，零读数零写入；例程表与未接此轨时一致）");
+  } else {
+    console.error(`quality-gate-driver: ${formatInstrumentDecayAssembly({
+      present: instrumentDecay.present,
+      error: instrumentDecay.error,
+      enabled: instrumentDecay.enabled,
+      intervalMinutes:
+        (instrumentDecay.routine?.schedule as { minutes?: number } | undefined)?.minutes ?? INSTRUMENT_DECAY_INTERVAL_MIN_DEFAULT,
+    })}`);
+  }
+
   const routines = qualityGateRoutines(rootDir, {
     planCmd: planCmd ? splitArgs(planCmd) : null,
     judgeArgv: judgeCmd ? splitArgs(judgeCmd) : null,
@@ -3766,6 +4536,7 @@ export async function main(argv: string[]): Promise<number> {
     archCycleRoutine: archCycle.routine,
     designEvolutionRoutine: designEvolution.routine,
     adrEnforcementRoutine: adrEnforcement.routine,
+    instrumentDecayRoutine: instrumentDecay.routine,
   });
 
   return runResidentQualityGateLoop({ root: rootDir, intervalMs: interval, once, maxRounds, roundLogFile, runId: resolvedRunId, json, pidFile, routines, routineWatchdogMs, kind: "quality" });

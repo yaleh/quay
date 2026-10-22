@@ -1,7 +1,7 @@
 ---
 id: gap-slice-before-after-readings-at-dispatch-and-fanin
 title: 重构切片缺自动 before/after 读数——派发时与 fan-in 后各手工跑一次 archguard， 没有「同任务同基线」的成对记录
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -49,13 +49,13 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1 baseline 记录可读：对任一历史提交运行 `--baseline`，`.quay/slice-readings/<id>.json` 中 `evaluated:true`，且 `metrics` 含 `centralFileLines`、`centralFileBodyLines`、`callOutDegree`、`methodCount`、`methodShellCount`、`centralChurnShare`、`centralSlimRatio` 七个键与逐量 `metricBasis`；贴该 JSON 原文。
-- [ ] AC2 post 与 baseline 绑定：`--post` 写出的记录 `baselineHeadSha` 等于 AC1 记录的 `headSha`，`scope` 与两侧 `metricBasis` 完全相同，且 `delta` 每个键都有值；贴 complete JSON 与两次 `headSha`。
-- [ ] AC3 未评估态独立：把 archguard 解析强制失败（例如 PATH 与 `ARCHGUARD_RUNNER_CLI` 都指向不存在的位置），记录必须是 `evaluated:false` + 非空 `reason`，且 `metrics` 里**不出现 0 值**；贴 CLI 输出与生成的 JSON。同名正对照：正常环境下 `evaluated:true`。
-- [ ] AC4 幂等负对照：同一 HEAD 连续跑 baseline 与 post，`delta` 所有数值键精确为 0；贴两份记录与 `jq` 结果。
-- [ ] AC5 读生产提交（非 fixture）：用新脚本回放一组成对的**已存在**提交区间（例如 plantuml-js `gap-elk-layout-engine-split-responsibilities` 的拆分提交与其后 8 个功能提交，或 quay `2440b52d0` 窗口），产出两端 `evaluated:true` 的记录并贴出 `centralFileLines` / `callOutDegree` 的两个端点值。**必须使用仓库里真实存在的提交，不得用注入数据。**
-- [ ] AC6 接线可见：`grep -n 'slice-readings' plugin/scripts/worker-driver.ts plugin/scripts/worker-fan-in.ts` 各至少 1 行，且贴这两行。
-- [ ] AC7 成本读数：跑一次 baseline + post，报告两者各自墙钟秒数与所用 scope；只报数，不设阈值。
+- [x] AC1 baseline 记录可读：对任一历史提交运行 `--baseline`，`.quay/slice-readings/<id>.json` 中 `evaluated:true`，且 `metrics` 含 `centralFileLines`、`centralFileBodyLines`、`callOutDegree`、`methodCount`、`methodShellCount`、`centralChurnShare`、`centralSlimRatio` 七个键与逐量 `metricBasis`；贴该 JSON 原文。
+- [x] AC2 post 与 baseline 绑定：`--post` 写出的记录 `baselineHeadSha` 等于 AC1 记录的 `headSha`，`scope` 与两侧 `metricBasis` 完全相同，且 `delta` 每个键都有值；贴 complete JSON 与两次 `headSha`。
+- [x] AC3 未评估态独立：把 archguard 解析强制失败（例如 PATH 与 `ARCHGUARD_RUNNER_CLI` 都指向不存在的位置），记录必须是 `evaluated:false` + 非空 `reason`，且 `metrics` 里**不出现 0 值**；贴 CLI 输出与生成的 JSON。同名正对照：正常环境下 `evaluated:true`。
+- [x] AC4 幂等负对照：同一 HEAD 连续跑 baseline 与 post，`delta` 所有数值键精确为 0；贴两份记录与 `jq` 结果。
+- [x] AC5 读生产提交（非 fixture）：用新脚本回放一组成对的**已存在**提交区间（例如 plantuml-js `gap-elk-layout-engine-split-responsibilities` 的拆分提交与其后 8 个功能提交，或 quay `2440b52d0` 窗口），产出两端 `evaluated:true` 的记录并贴出 `centralFileLines` / `callOutDegree` 的两个端点值。**必须使用仓库里真实存在的提交，不得用注入数据。**
+- [x] AC6 接线可见：`grep -n 'slice-readings' plugin/scripts/worker-driver.ts plugin/scripts/worker-fan-in.ts` 各至少 1 行，且贴这两行。
+- [x] AC7 成本读数：跑一次 baseline + post，报告两者各自墙钟秒数与所用 scope；只报数，不设阈值。
 
 ## Definition of Done
 
@@ -64,6 +64,118 @@ extra:
 - `centralChurnShare`、`centralSlimRatio` 与「中心文件增长占比」三者在记录与文档里以不同键名并存，各有一行说明它们各回答什么问题、不可互引。
 - 新脚本已登记到 capability catalog 且 `--summary` 显示 0 unclassified。
 
+## Slice Readings Evidence（2026-10-22）
+
+- L_G archguard: cycles=0 (worker-history scope at both endpoints 2440b52d0 and ff32d031d; measured by plugin/scripts/slice-readings.ts)
+- 三个占比量的口径（各一行，⛔ 不可互引）：
+  - `centralChurnShare` = 本 HEAD 提交内中心文件改动行 ÷ 全部改动行（含删除、含测试/装配新增；只作连续性对照）。
+  - `centralSlimRatio` = 本 HEAD 提交内中心文件删除行 ÷ 中心文件在该提交前的行数（这一刀把中心的多少比例搬走了）。
+  - 「中心文件增长占比」= `design-evolution-readings.ts` RM1：时间窗内中心新增行 ÷ 窗口内全部新增行（后续增长会不会回流）；**不在本任务记录里**，也⛔ 不能由上面两个换算得到。
+
+**AC1 + AC2 + AC5（真实提交回放：2440b52d0 → ff32d031d，scope=worker-history，两端 evaluated:true）**
+
+baseline.headSha = `2440b52d04cf01a6798ad77cb2ace95148c0a6d9`；post.headSha = `ff32d031d8f0f0ba62b366a217f7f74d09d5b170`；post.baselineHeadSha = `2440b52d04cf01a6798ad77cb2ace95148c0a6d9`（= baseline.headSha）；scope 与 metricBasis 两侧逐字相同；delta 八个键均有数值。
+
+```json
+{
+  "schema": "slice-readings-v1",
+  "taskId": "ac1-ac2-probe",
+  "phase": "baseline",
+  "evaluated": true,
+  "reason": null,
+  "headSha": "2440b52d04cf01a6798ad77cb2ace95148c0a6d9",
+  "baselineHeadSha": null,
+  "scope": "worker-history",
+  "metricBasis": {
+    "centralFileLines": "git",
+    "centralFileBodyLines": "summary",
+    "callOutDegree": "summary",
+    "methodCount": "summary",
+    "methodShellCount": "summary",
+    "cycles": "summary",
+    "centralChurnShare": "git",
+    "centralSlimRatio": "git"
+  },
+  "metrics": {
+    "centralFileLines": 6225,
+    "centralFileBodyLines": 3567,
+    "callOutDegree": 244,
+    "methodCount": 129,
+    "methodShellCount": 0,
+    "cycles": 0,
+    "centralChurnShare": 0.9781647318960752,
+    "centralSlimRatio": 0.28026832460732987
+  },
+  "churnWindow": { "from": "db5e0943bb6903ebd399ec4a4daf4fe5cdce8721", "to": "2440b52d04cf01a6798ad77cb2ace95148c0a6d9" },
+  "metricNullReasons": {},
+  "archguardCli": "/data/home/yale/.claude/plugins/npm-cache/node_modules/@yalehwang/archguard/dist/cli/index.js",
+  "archguardVersion": "0.1.42",
+  "analyzedTree": { "kind": "temp-worktree", "path": "/tmp/slice-readings-tree-E0mF5y" }
+}
+```
+
+```json
+{
+  "schema": "slice-readings-v1",
+  "taskId": "ac1-ac2-probe",
+  "phase": "post",
+  "evaluated": true,
+  "reason": null,
+  "headSha": "ff32d031d8f0f0ba62b366a217f7f74d09d5b170",
+  "baselineHeadSha": "2440b52d04cf01a6798ad77cb2ace95148c0a6d9",
+  "scope": "worker-history",
+  "metricBasis": {
+    "centralFileLines": "git",
+    "centralFileBodyLines": "summary",
+    "callOutDegree": "summary",
+    "methodCount": "summary",
+    "methodShellCount": "summary",
+    "cycles": "summary",
+    "centralChurnShare": "git",
+    "centralSlimRatio": "git"
+  },
+  "metrics": {
+    "centralFileLines": 11045,
+    "centralFileBodyLines": 6326,
+    "callOutDegree": 373,
+    "methodCount": 189,
+    "methodShellCount": 0,
+    "cycles": 0,
+    "centralChurnShare": 0,
+    "centralSlimRatio": 0
+  },
+  "churnWindow": { "from": "b206784ac7d7e9dca6d7767606c32b247ecfa1e4", "to": "ff32d031d8f0f0ba62b366a217f7f74d09d5b170" },
+  "metricNullReasons": {},
+  "archguardCli": "/data/home/yale/.claude/plugins/npm-cache/node_modules/@yalehwang/archguard/dist/cli/index.js",
+  "archguardVersion": "0.1.42",
+  "analyzedTree": { "kind": "temp-worktree", "path": "/tmp/slice-readings-tree-I81oGH" },
+  "delta": {
+    "centralFileLines": 4820,
+    "centralFileBodyLines": 2759,
+    "callOutDegree": 129,
+    "methodCount": 60,
+    "methodShellCount": 0,
+    "cycles": 0,
+    "centralChurnShare": -0.9781647318960752,
+    "centralSlimRatio": -0.28026832460732987
+  }
+}
+```
+
+AC5 两端：`centralFileLines` 6225 → 11045；`callOutDegree` 244 → 373。
+
+**AC3（强制 archguard 不可用 ⇒ 独立未评估态）**：`ARCHGUARD_RUNNER_CLI=/nonexistent/archguard` 时 exit 3，记录 `evaluated:false`、`reason="archguard-cli-unresolvable: ARCHGUARD_RUNNER_CLI=/nonexistent/archguard does not exist (explicit override is authoritative; not falling back)"`，`metrics` 八个键全为 `null`（零个 0 值）。同名正对照（同一命令、`ARCHGUARD_RUNNER_CLI` 指向可执行 fake CLI）⇒ `evaluated:true`、exit 0。
+
+**AC4（同一 HEAD 幂等负对照）**：task `ac4-idem-final`，baseline 与 post 的 `headSha` 均为 `e53aa1d3d0f090e07cabc6e1782e9b8af97c0e76`；`jq -e '[.delta[] | select(. != 0)] | length == 0'` ⇒ `true`；delta = `{"centralFileLines":0,"centralFileBodyLines":0,"callOutDegree":0,"methodCount":0,"methodShellCount":0,"cycles":0,"centralChurnShare":0,"centralSlimRatio":0}`。
+
+**AC6（接线）**：
+- `plugin/scripts/worker-driver.ts:5260: const argv = kernelSiblingArgv("slice-readings.ts", ["--baseline", "--task-id", taskId, "--root", rootDir, "--head", headSha]);`
+- `plugin/scripts/worker-fan-in.ts:1801: const argv = ["node", ...kernelSiblingArgv("slice-readings.ts"), "--post", "--task-id", task, "--root", root, "--tree", worktree, "--json"];`（调用点 `worker-fan-in.ts:3431 traceSuiteEvent("slice-readings-post", …)`）
+
+**AC7（成本，只报数）**：scope=worker-history。历史回放（`--head` 与树 HEAD 不同 ⇒ 临时 worktree）：baseline 10.62s、post 10.79s；同 HEAD 就地分析：baseline 9.57s、post 9.73s。不设阈值。
+
+**DoD 失败路径**：archguard 不可用 ⇒ `archguard-cli-unresolvable`；`--tree` 指向已拆 worktree ⇒ exit 3、`worktree-missing: …`、`delta:null`（⛔ 不改读主检出）。真实任务的成对记录由本任务的派发 baseline + 本轮机械 fan-in 的 post 落在 `.quay/slice-readings/gap-slice-before-after-readings-at-dispatch-and-fanin.json`。
+
 ## Touches
 
 - plugin/scripts/slice-readings.ts
@@ -71,4 +183,5 @@ extra:
 - plugin/scripts/worker-fan-in.ts
 - plugin/test/slice-readings.test.mjs
 - plugin/scripts/capability-catalog-declarations.json
+- .gitignore
 - tasks/gap-slice-before-after-readings-at-dispatch-and-fanin.md

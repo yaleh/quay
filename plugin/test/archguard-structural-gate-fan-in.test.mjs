@@ -358,7 +358,7 @@ test("AC3（负控制）— 无环 fixture ⇒ exit 0，记录 directoryCycleCou
   }
 });
 
-test("AC4（未评估态）— 无 TS module graph 的 scope ⇒ evaluated:false + reason，不与「0 环」同值", () => {
+test("AC4（未评估态）— 无 TS module graph 的【多目录】scope ⇒ evaluated:false + reason，不与「0 环」同值（单目录 scope 以文件清单为 basis 读为真）", () => {
   const workDir = freshWorkDir("no-module-graph");
   const r = runRunner("no-module-graph", workDir);
 
@@ -377,13 +377,32 @@ test("AC4（未评估态）— 无 TS module graph 的 scope ⇒ evaluated:false
   );
   assert.match(record.directoryCyclesReason, /moduleGraph/);
 
+  // 精化（gap-arch-cycle-report-never-evaluated-aggregate-and-stale-artifacts Plan 步骤 2）：
+  // 「没有 moduleGraph」只说明【没请求 package 级图】，不说明「无环」（硬规则 3b）。能把它变成真实
+  // 读数的唯一证据是 **文件清单**：该 scope 受跟踪的非测试 .ts 全在 scope 目录本身 ⇒ 目录级环在
+  // 结构上不可能。所以本条负控制按 basis 分开断言，并额外要求**至少一个多目录 scope 仍是
+  // not-evaluated**——否则「未评估态」这一条会变成空转（全被 single-directory 覆盖）。
+  const multiDirectory = [];
   for (const s of record.scopes) {
     assert.equal(s.evaluated, true, `${s.scope}: the class artifact WAS readable (the failure is directory-only)`);
     assert.equal(s.entitySccCount, 0, `${s.scope}: the entity caliber is readable and clean`);
-    assert.equal(s.directoryCyclesEvaluated, false, `${s.scope}: directory caliber must be not-evaluated`);
-    assert.equal(s.directoryCycleCount, null, `${s.scope}: directoryCycleCount must be null, not 0`);
-    assert.ok(s.directoryCyclesReason && s.directoryCyclesReason.length > 0, `${s.scope}: reason required`);
+    if (s.directoryCyclesBasis === "single-directory") {
+      // 从文件清单推出的读数，不是「0 环」的伪装：它带着自己的 basis。
+      assert.equal(s.directoryCyclesEvaluated, true, `${s.scope}: a single-directory scope IS readable (file-list basis)`);
+      assert.equal(s.directoryCycleCount, 0, `${s.scope}: one directory cannot hold a directory-level cycle`);
+      assert.equal(s.directoryCyclesReason, null, `${s.scope}: no reason field when the basis is positive`);
+    } else {
+      multiDirectory.push(s.scope);
+      assert.equal(s.directoryCyclesEvaluated, false, `${s.scope}: a MULTI-directory scope without a graph must be not-evaluated`);
+      assert.equal(s.directoryCycleCount, null, `${s.scope}: directoryCycleCount must be null, not 0`);
+      assert.ok(s.directoryCyclesReason && s.directoryCyclesReason.length > 0, `${s.scope}: reason required`);
+      assert.match(s.directoryCyclesReason, /NOT single-directory/, `${s.scope}: the reason must say why the file-list basis did not apply`);
+    }
   }
+  assert.ok(
+    multiDirectory.length >= 1,
+    "at least one MULTI-directory scope must stay not-evaluated (otherwise this control is vacuous)"
+  );
 });
 
 // ── 跨 scope 边边界可见（gap-archguard-cross-scope-edges-structurally-invisible）──────────────────

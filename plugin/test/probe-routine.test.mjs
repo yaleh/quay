@@ -372,7 +372,16 @@ test("quality-gate-driver --once runs the config-declared probe routine and appe
     "--plan-cmd", `node ${planCmd}`, "--judgment-cmd", `node ${judgmentCmd}`,
     "--packaging-check-cmd", `node ${packagingCmd}`,
     "--identity-cmd", `node ${identityCmd}`, "--lineage-cmd", `node ${lineageCmd}`,
-  ], { encoding: "utf8", timeout: 120_000 });
+  ], {
+    encoding: "utf8",
+    timeout: 120_000,
+    // 宿主无关的负控制（gap-arch-cycle-report-never-evaluated-aggregate-and-stale-artifacts）：
+    // archguard 的 CLI 解析现在还会查【已安装的 archguard 插件运行时】，所以在装了它的宿主上
+    // 默认装配的 architecture-analysis 例程会真的跑起来（并吃同一个 --probe-runner-cmd 假探针 ⇒
+    // 第二条 finding）。本用例测的是 probe 轨道的接线，不是宿主装了什么 ⇒ 把 CLI 解析缝钉成
+    // 「不存在」，让该例程保持 not-evaluated（与下面「空 fixture root 无 archguard」的注释一致）。
+    env: { ...process.env, ARCHGUARD_RUNNER_CLI: path.join(stateDir, "no-such-archguard-cli.js") },
+  });
   assert.equal(r.status, 0, `driver --once should exit 0 (stderr: ${r.stderr})`);
   const rec = JSON.parse(fs.readFileSync(roundLog, "utf8").split("\n").filter((l) => l.trim())[0]);
   const probeFacts = rec.facts.filter((f) => f.name === "semantic-dedup-scan");
