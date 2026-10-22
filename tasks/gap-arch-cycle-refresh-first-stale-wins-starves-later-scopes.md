@@ -48,18 +48,19 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1 无饿死（夹具，负对照）：夹具中 scripts / quay-native-src / experiments-scripts 三个 scope 同时 stale（artifact 早于各自源目录最新提交），跑一轮 arch-cycle ⇒ 三个 scope 各被 analyze 一次（`refresh.refreshedScopes` 含三者），刷新后三者 `behindSources:false`。贴出改动前后两次输出——旧实现下同一夹具只刷 scripts、另两个保持 stale。
-- [ ] AC2 预算仍有界（夹具，负对照）：同一轮里已 fresh 的 src / quay-github-src / quay-backlog-src 被 analyze 0 次；同一间隔内对同一 scope 的 analyze 次数 ≤1。贴出 fake-archguard 的 argv 计数。
-- [ ] AC3 刷新失败/截断不得伪装当前（夹具）：让 fake archguard 对 experiments-scripts 退出非 0（或删除该 scope 的产物），该 scope 的记录必须是 `evaluated:false`、`cycleCount:null`、reason 含 `artifact-behind-sources`，记录级 `status:"partial"` 且点名该 scope；同一轮刷新成功的 scripts 仍为 `evaluated:true`。负控制：把同样的失败注入施加在 fresh scope 上，不得把它降级（它本来就不该被 analyze）。
-- [ ] AC4 生产载体在报告时是当前的（待外部）：落地并同步到 develop 后，`.quay/arch-cycle-history.jsonl` 最后一轮记录 `behindScopes` 为空（或非空 scope 全部 `evaluated:false` 且 reason 含 `artifact-behind-sources`），且同一 HEAD 上 `node --experimental-strip-types plugin/scripts/instrument-decay-check.ts --root /data/home/yale/work/quay --carrier arch-cycle-history.jsonl --json` 的 `decayed` 不含该载体。贴出记录与检测器输出。
-- [ ] AC5 语义反转被显式处理：上述三条旧断言已按新规则改写，`scripts/test.sh --for-task gap-arch-cycle-refresh-first-stale-wins-starves-later-scopes` 相关泳道通过；并贴出「同一新断言在旧实现上为红」的输出，证明判据能取假。
+- [x] AC1 无饿死（夹具，负对照）：夹具中 scripts / quay-native-src / experiments-scripts 三个 scope 同时 stale（artifact 早于各自源目录最新提交），跑一轮 arch-cycle ⇒ 三个 scope 各被 analyze 一次（`refresh.refreshedScopes` 含三者），刷新后三者 `behindSources:false`。贴出改动前后两次输出——旧实现下同一夹具只刷 scripts、另两个保持 stale。
+- [x] AC2 预算仍有界（夹具，负对照）：同一轮里已 fresh 的 src / quay-github-src / quay-backlog-src 被 analyze 0 次；同一间隔内对同一 scope 的 analyze 次数 ≤1。贴出 fake-archguard 的 argv 计数。
+- [x] AC3 刷新失败/截断不得伪装当前（夹具）：让 fake archguard 对 experiments-scripts 退出非 0（或删除该 scope 的产物），该 scope 的记录必须是 `evaluated:false`、`cycleCount:null`、reason 含 `artifact-behind-sources`，记录级 `status:"partial"` 且点名该 scope；同一轮刷新成功的 scripts 仍为 `evaluated:true`。负控制：把同样的失败注入施加在 fresh scope 上，不得把它降级（它本来就不该被 analyze）。
+- [ ] AC4 生产载体在报告时是当前的（待外部）
+  落地并同步到 develop 后，`.quay/arch-cycle-history.jsonl` 最后一轮记录 `behindScopes` 为空（或非空 scope 全部 `evaluated:false` 且 reason 含 `artifact-behind-sources`），且同一 HEAD 上 `node --experimental-strip-types plugin/scripts/instrument-decay-check.ts --root /data/home/yale/work/quay --carrier arch-cycle-history.jsonl --json` 的 `decayed` 不含该载体。贴出记录与检测器输出。
+- [x] AC5 语义反转被显式处理：上述三条旧断言已按新规则改写，`scripts/test.sh --for-task gap-arch-cycle-refresh-first-stale-wins-starves-later-scopes` 相关泳道通过；并贴出「同一新断言在旧实现上为红」的输出，证明判据能取假。
 
 ## Definition of Done
 
-- [ ] 五条 AC 全绿（AC4 待外部），`--for-task` scoped 静态检查与相关泳道通过，合并进 develop。
-- [ ] 不再存在「固定顺序 + 单次预算」造成的永久饿死：在任意 ≥2 个 stale scope 的夹具上，连续 ≥2 个间隔后所有 stale scope 都至少被刷新过一次。
-- [ ] 载体中任何 `evaluated:true` 的 scope，在报告时刻其 artifactTimestamp 不早于覆盖源目录的最新提交；做不到时该 scope 必须是 `evaluated:false` + `artifact-behind-sources`，⛔ 不得是 `cycleCount:0`。
-- [ ] 刷新仍只在例程 tick 内发生，不进 fan-in / per-task 热路径。
+- [ ] 五条 AC 全绿、`--for-task` scoped 静态检查与相关泳道通过、合并进 develop（AC4 待外部）
+- [x] 不再存在「固定顺序 + 单次预算」造成的永久饿死：在任意 ≥2 个 stale scope 的夹具上，连续 ≥2 个间隔后所有 stale scope 都至少被刷新过一次。
+- [x] 载体中任何 `evaluated:true` 的 scope，在报告时刻其 artifactTimestamp 不早于覆盖源目录的最新提交；做不到时该 scope 必须是 `evaluated:false` + `artifact-behind-sources`，⛔ 不得是 `cycleCount:0`。
+- [x] 刷新仍只在例程 tick 内发生，不进 fan-in / per-task 热路径。
 
 ## Touches
 
@@ -74,3 +75,14 @@ extra:
 - 载体共 32 行；最后一轮 `ts=2026-10-22T04:06:29.026Z`，`refresh:{attempted:false, skipped:"within-interval", detail:"last refresh at 2026-10-22T00:58:21Z is within this routine's 360m interval — at most one analyze per interval"}`。
 - 00:58:21Z 那轮：`refresh:{attempted:true, refreshedScope:"scripts", detail:"archguard analyze --diagrams package → plugin/scripts"}`，`behindScopes:["quay-native-src","experiments-scripts"]`（刷新已经选完目标，另两个仍在队尾）。
 - 配置：`.quay/config.yml` `loop.arch_cycle_report:{enabled:true, interval:interval:360m}`。
+
+## Evidence (本轮：实现与逐条验证，2026-10-22)
+
+- **AC1 负对照（同一夹具，旧实现 vs 新实现）**：夹具 = scripts / quay-native-src / experiments-scripts 的 artifact 时间戳 `2026-01-01T00:00:00Z` 且其后各有 1 个提交；src / quay-github-src / quay-backlog-src 的 artifact 在 2999 年（fresh）。
+  - 旧实现（`git show develop:plugin/scripts/archguard-runner.ts`）：`refreshedScope:"scripts"`、`analyzeCounts:{plugin/scripts:1}`、`totalAnalyzes:1`、`behindAfter:["quay-native-src","experiments-scripts"]`。
+  - 新实现：`refreshedScopes:[experiments-scripts, quay-native-src, scripts]`（最陈旧优先），`analyzeCounts` 三者各 1、`totalAnalyzes:3`、`behindAfter:[]`。
+- **AC2 argv 计数**：同一夹具下 fresh 的 src / quay-github-src / quay-backlog-src 的 `-s` 出现 0 次。`runArchCycleRound` 连续三轮（t0 / t0+60s / t0+120s，interval=60m）的 analyze 序列为 `[packages/quay/src, plugin/scripts]`：src 在间隔内不被重跑，而刷新后新变 stale 的 scripts 仍能被刷新（旧全局时钟在这一步答 `within-interval`，正是饿死机制）。
+- **AC3**：fake archguard 对 experiments-scripts 退出 3 ⇒ 该 scope `evaluated:false` / `cycleCount:null` / `cycles:null` / `basis:null`，reason = `artifact-behind-sources: artifact 2020-01-01T00:00:00Z is behind … commit(s) touching … — analyze exited 3; …`；同一轮 scripts 仍 `evaluated:true`、`behindSources:false`；记录级 `status:"partial"`、`notEvaluatedScopes:["experiments-scripts"]`、`refresh.skipped:"partial"`。负控制：同一失败注入 fresh 的 src ⇒ src 的 `-s` 出现 0 次、仍 `evaluated:true`、记录级仍 `complete`。仪器缺失时同样降级（全无当前读数时记录级 `status:"none"`，Fact `not-evaluated`）。
+- **AC5 旧实现上为红**：`refreshedScopes` 字段在 `git show develop:plugin/scripts/quality-gate-driver.ts` 中出现 0 次（旧记录只有单个 `refreshedScope`）；旧 runner 在同一夹具上只刷 1 个 scope、`behindAfter` 仍有两项（见 AC1 对照）。三条旧断言（`at most ONE scope per call` / `exactly one analyze per refresh` / `the other scopes were NOT swept`）已按新规则改写为逆向断言，并保留各自的负控制。
+- **scoped gate**：`bash scripts/test.sh --for-task gap-arch-cycle-refresh-first-stale-wins-starves-later-scopes --allow-thin` ⇒ EXIT=0，123 tests / 123 pass / 0 fail（含 `arch-cycle-reading.test.mjs` 16 项与 `quality-gate-driver.test.mjs` 全量）。
+- **AC4 承接者（待外部的合法性条件）**：`loop.arch_cycle_report`（`.quay/config.yml`，interval 360m）在主检出上每间隔跑一次 `runArchCycleRound`；落地并由 driver 把 develop 同步到主检出后，其下一轮 append 的记录即 AC4 要求的载体行（无需人工派发；最后一步是常驻例程自动产生）。复验即 AC4 正文两条命令（先读最后一行 `behindScopes` / 各 scope `evaluated` + reason，再跑 `instrument-decay-check.ts --root /data/home/yale/work/quay --carrier arch-cycle-history.jsonl --json`）。
