@@ -177,3 +177,10 @@ workspaceEnforcesDarkAxis(/data/home/yale/work/quay) = true
 - plugin/test/quality-gate-driver.test.mjs
 - plugin/test/git-lens-selfcheck.test.mjs
 - packages/quay/test/adr-gate.test.mjs
+
+## Blocker
+
+**2026-10-22T03:14:32.832Z — worker 未落地（exited-not-landed）**
+
+- 未落地原因：step=suite: AssertionError [ERR_ASSERTION]: at least one bin is under-sampled (otherwise the rule is vacuous) [baseline A/B: HARD RED (task-introduced-red) — the task's red set is NOT a subset of the develop baseline red set: added=plugin/test/probe-routine.test.mjs,plugin/test/sh-census-check.test.mjs changed=-]
+- run_id：wk-prod-anchor
