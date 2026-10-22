@@ -69,7 +69,7 @@ exit=2
 
 ## AC
 
-- [ ] AC1 判据逐字读绿：`node --experimental-strip-types packages/quay/bin/quay.ts goal get AC-918 --json | jq -r .criterion > .quay/ac918-criterion.sh && bash .quay/ac918-criterion.sh` ⇒ **exit 0**，stdout 逐字 `OK: admission field present and correct on 5 registered kinds`。贴出立案基线（exit 2 + `CAUSE=instrument-failure: no kind+admission pairs parsed`）与落地后的两份输出。
+- [ ] AC1 判据逐字读绿：`node --experimental-strip-types packages/quay/bin/quay.ts goal get AC-918 --json | jq -r .criterion > .quay/ac918-criterion.sh && bash .quay/ac918-criterion.sh` ⇒ **exit 0**，stdout 逐字 `OK: admission field present and correct on 5 registered kinds`。贴出改动前基线（exit 2 + `CAUSE=instrument-failure: no kind+admission pairs parsed`）与改动后的两份输出。
 - [ ] AC2 对象层读数：`node --input-type=module -e 'const m=await import("./docs/analysis/ownership-active-limited-proposal.mjs");const want={"package-cycle":"mechanical","design-evolution-regression":"mechanical","god-file-size":"semantic-judged","unencapsulated-state":"semantic-judged","spine-without-extension-point":"semantic-judged"};const R=m.CONCERN_KIND_REGISTRY;const got=Object.fromEntries(R.map(e=>[e.kind,e.admission]));const legal=new Set(Object.values(m.CONCERN_ADMISSIONS));const bad=R.filter(e=>!legal.has(e.admission)).map(e=>e.kind);const wrong=Object.entries(want).filter(([k,v])=>got[k]!==v);const identity=m.concernKindEntry(m.CONCERN_KIND_IN_SCOPE)?.kind===m.CONCERN_KIND_IN_SCOPE&&m.concernKindEntry(m.DESIGN_EVOLUTION_KIND)?.kind===m.DESIGN_EVOLUTION_KIND;console.log(JSON.stringify(got),R.length,JSON.stringify({bad,wrong,identity}));process.exit(bad.length||wrong.length||!identity?1:0)'` ⇒ exit 0，打印五个 kind→admission 对与条目总数；**每一条**已注册 entry 的 admission 都是两个合法 token 之一，五条取值等于字面期望表，两条常量身份成立。
 - [ ] AC3 `admissionRoute` 能取假：测试断言合法 mechanical / semantic-judged entry 分别路由到两个 route；缺 admission、`"maybe"`、非对象 entry 三种输入都 `evaluated:false` 且 `cause` 非空，⛔ 不返回任一合法 route。
 - [ ] AC4 分派负控（绝不直接机械确认）：`node --test plugin/test/ownership-active-limited-proposal.test.mjs` ⇒ exit 0；新 test 块覆盖 Proposal C 的五臂，核心断言是「semantic-judged + 完美机械 delta + mechanized:true」在无注入口时 **not eligible**，且 `matchedConditions` 不含 C2 / C4。
@@ -82,7 +82,7 @@ exit=2
 - [ ] 真实仓库（非夹具）上 AC-918 criterion 逐字 exit 0，且反向两臂都实跑具名——不是靠注释 / 夹具「看起来有这个词」过关。
 - [ ] `admission` 真的被 C1 读：合成注册表里把同一个 kind 的 admission 在 `mechanical` / `semantic-judged` 之间切换，`evaluateEntryBar` 的 route 与 reason 随之改变；只改 `admission` 而其余字段不动就能让判定变——这是「字段被读」的直接量，不是声明。
 - [ ] `semantic-judged` 路径在**结构上**不可能读机械 delta：一条同时带完美 delta 的 semantic-judged 记录，在无注入口与 `admit:false` 两臂都不 eligible，`matchedConditions` 不含 C2 / C4。
-- [ ] 改动经 ff-merge 进入 develop；`git show develop:docs/analysis/ownership-active-limited-proposal.mjs` 上重跑 AC-918 criterion 仍 exit 0。
+- [ ] 改动经 ff-merge 进入 develop；在 `git show develop:docs/analysis/ownership-active-limited-proposal.mjs` 的树上重跑 AC-918 criterion 仍 exit 0。
 - [ ] 收尾记录含三次反向臂的实际 exit code、stderr 原文与回拷后 exit 0 输出——⛔「测试存在 / 字段写了」不算完成。
 
 ## Touches
