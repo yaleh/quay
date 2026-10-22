@@ -33,23 +33,105 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1 读真实载体：在主检出运行 `node --experimental-strip-types plugin/scripts/phase-declare.ts --staleness --json`，输出 `evaluated:true`、`phase:"convergence"`、`declaredAt:"2026-09-13T20:35:47.187Z"`、`declarations:1`，`commitsSince` 等于同一时刻 `git rev-list --count --since=2026-09-13T20:35:47Z HEAD` 的值，`newGoalsSince` 含 GOAL-018 与 GOAL-910（贴出两条命令的输出）。
-- [ ] AC2 只读：AC1 运行前后 `md5sum .quay/two-phase-state.json` 一致，`git status --porcelain .quay/two-phase-state.json` 为空（贴出前后读数）。
-- [ ] AC3 未评估不伪装成「新鲜」（负对照）：在临时工作区中，载体缺失 ⇒ `evaluated:false` 且 `commitsSince` 为 `null`（不是 0）；载体为非法 JSON ⇒ 同样 `evaluated:false`，reason 与「缺失」可区分（贴出两次输出）。
-- [ ] AC4 进入既有 Fact（生产载体）：在主检出由 `plugin/scripts/quality-gate-driver.ts --root /data/home/yale/work/quay --once` 跑一轮且该例程 due（未 due 时贴出 `.quay/routine-last-run.json` 中该键的读数，等下一个常驻轮次产出后再取），`.quay/quality-round.jsonl` 新增一条 round 记录，其中 `design-evolution-readings` Fact 的 `value.phaseStaleness.evaluated` 为 `true` 且 `commitsSince` 与 AC1 同量级（差值等于两次运行之间的新提交数）。贴出该 Fact 的 `phaseStaleness` 片段。
-- [ ] AC5 没有自动切换：`grep -nE "phase:\s*(opts\.to|\"expansion\"|\"convergence\")" plugin/scripts/phase-declare.ts` 的命中仍只在人显式声明的写入路径上，`readPhaseStaleness` 函数体内 0 处写文件调用（`writeFileSync`/`appendFileSync`/`renameSync`）——贴出 grep 输出与函数体行范围。
+- [x] AC1 读真实载体：在主检出运行 `node --experimental-strip-types plugin/scripts/phase-declare.ts --staleness --json`，输出 `evaluated:true`、`phase:"convergence"`、`declaredAt:"2026-09-13T20:35:47.187Z"`、`declarations:1`，`commitsSince` 等于同一时刻 `git rev-list --count --since=2026-09-13T20:35:47Z HEAD` 的值，`newGoalsSince` 含 GOAL-018 与 GOAL-910（贴出两条命令的输出）。
+- [x] AC2 只读：AC1 运行前后 `md5sum .quay/two-phase-state.json` 一致，`git status --porcelain .quay/two-phase-state.json` 为空（贴出前后读数）。
+- [x] AC3 未评估不伪装成「新鲜」（负对照）：在临时工作区中，载体缺失 ⇒ `evaluated:false` 且 `commitsSince` 为 `null`（不是 0）；载体为非法 JSON ⇒ 同样 `evaluated:false`，reason 与「缺失」可区分（贴出两次输出）。
+- [x] AC4 进入既有 Fact（生产载体）：在主检出由 `plugin/scripts/quality-gate-driver.ts --root /data/home/yale/work/quay --once` 跑一轮且该例程 due（未 due 时贴出 `.quay/routine-last-run.json` 中该键的读数，等下一个常驻轮次产出后再取），`.quay/quality-round.jsonl` 新增一条 round 记录，其中 `design-evolution-readings` Fact 的 `value.phaseStaleness.evaluated` 为 `true` 且 `commitsSince` 与 AC1 同量级（差值等于两次运行之间的新提交数）。贴出该 Fact 的 `phaseStaleness` 片段。
+- [x] AC5 没有自动切换：`grep -nE "phase:\s*(opts\.to|\"expansion\"|\"convergence\")" plugin/scripts/phase-declare.ts` 的命中仍只在人显式声明的写入路径上，`readPhaseStaleness` 函数体内 0 处写文件调用（`writeFileSync`/`appendFileSync`/`renameSync`）——贴出 grep 输出与函数体行范围。
 
 ## Definition of Done
 
 - [ ] AC1–AC5 全绿，`scripts/test.sh` 相关泳道与 `--for-task` scoped 静态检查通过，合并进 develop。
-- [ ] 读数只出现在既有 Fact 中，没有新载体、新例程、新门、新阈值。
-- [ ] `phase-declare.ts` 的 capability-catalog 声明补充 `--staleness` 只读面。
+- [x] 读数只出现在既有 Fact 中，没有新载体、新例程、新门、新阈值。
+- [x] `phase-declare.ts` 的 capability-catalog 声明补充 `--staleness` 只读面。
+
+## Signal readings
+
+- L_D: docLines=0 codeLines=469 ratio=0.000（`git diff --numstat develop...HEAD`，本任务落地提交的全部改动；无 .md 变更 ⇒ 文档增量 0，是「没有文档改动」而非未测量）
+- L_G archguard: cycles=0（该轴本任务未触发 archguard 复算；改动只在 plugin/scripts 与 plugin/test，未新增跨层 import——唯一的对既存 import 是 design-evolution-readings.ts → phase-declare.ts，方向与既有 kernel 依赖一致）
+
+## Evidence
+
+### AC1 — 真实载体读数（worktree 代码 + 主检出载体，只读）
+```
+$ node --experimental-strip-types plugin/scripts/phase-declare.ts --root /data/home/yale/work/quay --staleness --json
+{ "evaluated": true, "reason": null, "phase": "convergence",
+  "declaredAt": "2026-09-13T20:35:47.187Z", "declarations": 1,
+  "commitsSince": 10385,
+  "newGoalsSince": ["GOAL-018","GOAL-019",…,"GOAL-037","GOAL-901",…,"GOAL-910"],   // 30 个
+  "daysSince": 38.23 }
+
+$ git -C /data/home/yale/work/quay rev-list --count --since=2026-09-13T20:35:47Z HEAD
+10385
+
+$ git -C /data/home/yale/work/quay log --since=2026-09-13T20:35:47Z --diff-filter=A --name-only --format= -- goals/ | grep -oE 'goals/GOAL-[0-9]+' | sort -u | wc -l
+30
+```
+`commitsSince` 与 git 自身读数相同；`newGoalsSince` 含 GOAL-018 与 GOAL-910，且计数与 finding 的 30 一致（goals/ 下同期新增的 127 个 `kind: criterion` AC-* 文件按文件名前缀排除——finding 的计数命令用的是同一谓词）。
+
+### AC2 — 只读（前后 md5 与 git status 均一致）
+```
+before: d51582c67021664e8fdd286bf30d19a0  .quay/two-phase-state.json
+        git status --porcelain .quay/two-phase-state.json → （空）
+after : d51582c67021664e8fdd286bf30d19a0  .quay/two-phase-state.json
+        git status --porcelain .quay/two-phase-state.json → （空）
+```
+单测里另有一层：fixture 中载体已提交，`git status --porcelain`（全树）跑 `--staleness --json` 前后均为空 ⇒ 不止载体一个文件没被碰，而是整个工作树零写入。
+
+### AC3 — 负对照：缺失 / 非法 JSON 都是 evaluated:false + null（可区分）
+```
+$ node ... --root /tmp/ac3-phase-aYvz --staleness --json        # 载体缺失
+{ "evaluated": false,
+  "reason": "carrier-missing: .quay/two-phase-state.json does not exist under /tmp/ac3-phase-aYvz — there is no declaration to measure the distance from",
+  "phase": null, "declaredAt": null, "declarations": null,
+  "commitsSince": null, "newGoalsSince": null, "daysSince": null }          EXIT=3
+
+$ node ... --root /tmp/ac3-phase-aYvz --staleness --json        # 载体为非法 JSON
+{ "evaluated": false,
+  "reason": "carrier-unparseable: .quay/two-phase-state.json is not valid JSON (Expected property name or '}' in JSON at position 2 (line 1 column 3)) — the declaration exists but could not be read",
+  "phase": null, "declaredAt": null, "declarations": null,
+  "commitsSince": null, "newGoalsSince": null, "daysSince": null }          EXIT=3
+```
+两种 reason 前缀不同（`carrier-missing:` / `carrier-unparseable:`），且还有第三个独立取值 `git-unavailable:`（载体可读但目录不是 git 仓库，单测覆盖）。`commitsSince` 全部为 `null`，⛔ 不是 0。
+
+### AC4 — 进入既有 Fact（生产载体）
+生产常驻轮的 design-evolution 例程下一次 due 在数小时后，故按 AC 允许的方式手动跑一轮：
+```
+$ node --experimental-strip-types plugin/scripts/quality-gate-driver.ts --root /data/home/yale/work/quay --once --json
+→ round ts=2026-10-22T02:16:32.726Z run_id=qg-1792635138358 pid=1652000
+  facts: [pool-quality-judge, judgment-consumer-check, architecture-review, packaging-hygiene,
+          semantic-dedup-scan, freshness-refresh, architecture-analysis, arch-discovery,
+          discovery-method, open-semantic-discovery, cross-project-dogfood,
+          arch-coverage-report, arch-cycle-report, design-evolution-readings]   （全部 state=verified）
+
+.quay/quality-round.jsonl 中该轮 design-evolution-readings Fact：
+  "value": { "evaluated": true, "historyAppended": true,
+    "phaseStaleness": { "evaluated": true, "reason": null, "phase": "convergence",
+      "declaredAt": "2026-09-13T20:35:47.187Z", "declarations": 1,
+      "commitsSince": 10386,
+      "newGoalsSince": ["GOAL-018", …, "GOAL-910"],      // 30 个，与 AC1 相同
+      "daysSince": 38.24 } }
+```
+`commitsSince` 10385 → 10386：两次运行之间主检出新增 1 个提交（`556483e49 routine(freshness-refresh): findings round freshness-refresh-1792635187620`，该轮 freshness 例程自己的落痕），差值恰等于新增提交数。Fact 的 `state` 仍是 `verified`——phaseStaleness 是附加信息，不参与 state 判定。
+
+### AC5 — 没有自动切换
+```
+$ grep -nE 'phase:\s*(opts\.to|"expansion"|"convergence")' plugin/scripts/phase-declare.ts
+562:    phase: opts.to as Phase,          ← 唯一命中：人显式 --to 的写入路径
+
+readPhaseStaleness 函数体 = 文件行 324..412
+$ sed -n '324,412p' plugin/scripts/phase-declare.ts | grep -cE 'writeFileSync|appendFileSync|renameSync|mkdirSync'
+0
+```
+全文件仅有的写入调用仍在 `main()` 的声明路径（`fs.writeFileSync(p, …)`，写载体）。
 
 ## Touches
 
 - tasks/gap-adr008-phase-declaration-staleness-reading.md
 - plugin/scripts/phase-declare.ts
 - plugin/scripts/design-evolution-readings.ts
+- plugin/scripts/quality-gate-driver.ts
 - plugin/scripts/capability-catalog-declarations.json
 - plugin/test/phase-declare.test.mjs
 - plugin/test/design-evolution-readings.test.mjs
+- plugin/test/quality-gate-driver.test.mjs
