@@ -1,6 +1,6 @@
 ---
 id: gap-slice-before-after-readings-at-dispatch-and-fanin
-title: 重构切片缺自动 before/after 读数——派发时与 fan-in 后各手工跑一次 archguard，没有「同任务同基线」的成对记录
+title: 重构切片缺自动 before/after 读数——派发时与 fan-in 后各手工跑一次 archguard， 没有「同任务同基线」的成对记录
 status: ready
 labels:
   - gap
@@ -38,7 +38,7 @@ extra:
 3. **成本**：只分析任务声明的 scope，不跑全仓 analyze；单次新增墙钟时间要实测并记录（不设阈值——成本结构未测之前不设数值门槛，硬规则 4 推论）。
 4. **负对照（结构式，不用阈值）**：同一 HEAD 上连跑 baseline 与 post，所有 delta 必须**精确为 0**。这是幂等性，不依赖任何经验阈值。
 5. **登记**：新脚本进 `plugin/scripts/capability-catalog-declarations.json`。
-6. **口径对照（等对方回答后再做，⛔ 本任务不承诺）**：claudecodeui 的 `centralΔ` 与 quay 的「中心文件增长占比」是否同定义——已发澄清；回答到达前，本条不引用 0.21 与 1% 的可比性。
+6. **两种占比口径并存**（2026-10-22 对方复核后确认）：claudecodeui 的 `centralΔ`（单 commit、churn、含删除）与 quay 的「中心文件增长占比」（时间窗、只计新增）**不是同一个量**，对方已撤回「0.21 ≈ serve 1%」的比较。本脚本两种都记、键名分开，⛔ 不得互相换算或合并展示。
 
 ## Acceptance Criteria
 
@@ -54,6 +54,7 @@ extra:
 
 - 两条生产路径（派发 / 机械 fan-in）都调用新脚本，且有一条真实任务在 fan-in 后留下成对记录（`.quay/slice-readings/` 中同一 `taskId` 的 `baseline` 与 `post` 各一条、都 `evaluated:true`）。
 - 失败路径（archguard 不可用、worktree 已拆）都有独立取值，不与「delta=0」同形。
+- `centralChurnShare` 与「中心文件增长占比」在记录与文档里以不同键名并存，且有一行说明二者不可互引。
 - 新脚本已登记到 capability catalog 且 `--summary` 显示 0 unclassified。
 
 ## Touches
