@@ -26,7 +26,8 @@
 //     (`import-graph-check.ts` ratchets type-level cycles too, so the direction stays one-way:
 //     serve-dashboard.ts / serve-board.ts → snapshot-store.ts.)
 
-import type { LiveResult, SystemResult, ManagerResult } from "../observation.ts";
+import type { BoardExecution, BoardLanding, CurrentSuiteRun, GitHistoryResult, LiveResult, ManagerResult, SystemResult, TestsResult, WorkerOutcomeRecord } from "../observation.ts";
+import type { GoalRecord } from "../abi.ts";
 
 /** A frontmatter-only task summary (the `includeBody:false` shape `readTaskSummary` returns). The
  *  `goal_ac` field (task→AC linkage, G7) joined the shape via gap-webui-goal-task-rollup-via-shared-
@@ -43,6 +44,47 @@ export interface TaskSummary {
   labels?: unknown;
   updatedAt?: unknown;
   goal_ac?: unknown;
+}
+
+/** Everything `/dashboard` renders from root-only + client reads, captured at one instant. Holding
+ *  the VALUES (not a rendered page) keeps the page render pure and lets the request path choose
+ *  `?hours=` per request without rebuilding.
+ *
+ *  Declared HERE because it is this store's value type — `dashboardSnapshotStore` is
+ *  `DashboardSnapshotStore<DashboardSnapshot>`. serve-dashboard.ts re-exports it so every existing
+ *  importer keeps resolving it unchanged, and the dependency stays ONE-WAY
+ *  (serve-dashboard.ts → snapshot-store.ts). */
+export interface DashboardSnapshot {
+  builtAt: number;
+  live: LiveResult;
+  sys: SystemResult;
+  mgr: ManagerResult;
+  tests: TestsResult;
+  suiteRun: CurrentSuiteRun | null;
+  history: GitHistoryResult;
+  tasks: TaskSummary[];
+  goals: GoalRecord[];
+  workerOutcomes: WorkerOutcomeRecord[];
+}
+
+/** The provider's task row as the /board consumes it. Kept structurally identical to what
+ *  `client.taskList()` returns so the board's join is unchanged. */
+export type BoardTaskRow = { id?: unknown; title?: unknown; status?: unknown; labels?: unknown };
+
+/** Everything `/board` joins at one instant: the three sources (意图 / 执行 / 落地) plus the
+ *  intent read's own degraded-state. Holding the VALUES (not a rendered page) keeps the render
+ *  pure and lets `?status=/?label=/?page=` stay per-request without rebuilding.
+ *
+ *  Declared HERE for the same one-way-dependency reason as `DashboardSnapshot` above;
+ *  serve-board.ts re-exports it. */
+export interface BoardSnapshot {
+  builtAt: number;
+  landing: BoardLanding;
+  execution: BoardExecution;
+  /** Provider tasks, each status already overridden from the develop ref (see readBoardIntent). */
+  tasks: BoardTaskRow[];
+  intentStatus: "ok" | "error";
+  intentReason: string | null;
 }
 
 /** What to do when a rebuild is requested while one is already in flight for the same root.
@@ -267,3 +309,15 @@ export class DashboardSnapshotStore<S> {
     return hit.value;
   }
 }
+
+// ── the two explicit per-page singletons ─────────────────────────────────────────────────────────
+//
+// ONE instance per page module — they never share a map, so one page's `clear()` cannot blank the
+// other's cards. Injection is by constructor: a test that needs isolation builds its own
+// `new DashboardSnapshotStore()` rather than re-binding a module-level `let`.
+
+/** The `/dashboard` route's store (four TTL caches + snapshot/rebuild/follow-up lifecycle). */
+export const dashboardSnapshotStore = new DashboardSnapshotStore<DashboardSnapshot>();
+
+/** The `/board` route's store (it uses the snapshot lifecycle; its four TTL caches stay unused). */
+export const boardSnapshotStore = new DashboardSnapshotStore<BoardSnapshot>();

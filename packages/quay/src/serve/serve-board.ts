@@ -14,7 +14,9 @@ import { boardLabelsFor, boardLabel, fillLabel } from "./serve-i18n.ts";
 // clear/setter functions now lives in ONE class instance
 // (gap-dashboard-snapshot-store-encapsulate-state). This module is a CONSUMER — it declares no
 // module-level mutable state of its own.
-import { DashboardSnapshotStore } from "./snapshot-store.ts";
+import { boardSnapshotStore, type BoardSnapshot, type BoardTaskRow } from "./snapshot-store.ts";
+export { boardSnapshotStore };
+export type { BoardSnapshot } from "./snapshot-store.ts";
 
 // ── /board — 三源 join 看板 (gap-web-board-needs-an-inconsistency-verdict-it-does-not-have) ──
 // The board joins 意图 (task store) + 执行 (telemetry) + 落地 (git code existence). The LANDING
@@ -321,28 +323,9 @@ export const BOARD_SNAPSHOT_REFRESH_MS = 30_000;
  *  dead code: it is also the unwired-state path during the first build after startup. */
 export const BOARD_SNAPSHOT_DISABLED_ENV = "QUAY_BOARD_SNAPSHOT_DISABLED";
 
-/** The provider's task row as the board consumes it. Kept structurally identical to what
- *  `client.taskList()` returns so the join below is unchanged. */
-type BoardTaskRow = { id?: unknown; title?: unknown; status?: unknown; labels?: unknown };
-
-/** Everything `/board` joins at one instant: the three sources (意图 / 执行 / 落地) plus the
- *  intent read's own degraded-state. Holding the VALUES (not a rendered page) keeps the render
- *  pure and lets `?status=/?label=/?page=` stay per-request without rebuilding. */
-export interface BoardSnapshot {
-  builtAt: number;
-  landing: BoardLanding;
-  execution: BoardExecution;
-  /** Provider tasks, each status already overridden from the develop ref (see readBoardIntent). */
-  tasks: BoardTaskRow[];
-  intentStatus: "ok" | "error";
-  intentReason: string | null;
-}
-
-/** The board's explicit store instance — its OWN maps + step hook, never shared with the
- *  dashboard's (one page's `clear()` must not blank the other's cards). Exported so tests can drive
- *  the lifecycle directly (`boardSnapshotStore.clearSnapshot()` etc.) instead of reaching for a
- *  module-level free function, which no longer exists. */
-export const boardSnapshotStore = new DashboardSnapshotStore<BoardSnapshot>();
+// `BoardSnapshot` / `BoardTaskRow` (the shapes everything below produces/consumes, and the value
+// type of `boardSnapshotStore`) are declared in snapshot-store.ts and re-exported above — their
+// declarations moved with the store that owns them, so the dependency stays one-way.
 
 /** True when the snapshot mechanism is switched off. Read at CALL time, not at module load, so a
  *  test can flip it per test (mirrors `dashboardSnapshotDisabled`). */

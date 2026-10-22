@@ -26,8 +26,9 @@ import { FIXED_GANTT_LANES, mergeLiveAndHistoryIntervals, packLanes, type LiveGa
 // `clearXxx()` / `setXxxStepHook()` functions now lives in ONE class instance
 // (gap-dashboard-snapshot-store-encapsulate-state). This module is a CONSUMER — it declares no
 // module-level mutable state of its own.
-import { DashboardSnapshotStore, type RebuildPolicy, type TaskSummary } from "./snapshot-store.ts";
-export type { TaskSummary } from "./snapshot-store.ts";
+import { dashboardSnapshotStore, type DashboardSnapshot, type RebuildPolicy, type TaskSummary } from "./snapshot-store.ts";
+export { dashboardSnapshotStore };
+export type { DashboardSnapshot, TaskSummary } from "./snapshot-store.ts";
 
 // ── /dashboard ─────────────────────────────────────────────────────────────────────────────────────
 
@@ -1463,12 +1464,6 @@ export function checkCardRegistrationCompleteness(
 // (which the promotion-driver writes on todo→ready) is always read fresh, never through this cache.
 export const TASK_SUMMARY_CACHE_TTL_MS = 30_000;
 
-/** The dashboard's explicit store instance — its OWN maps + step hook, never shared with the
- *  board's (one page's `clear()` must not blank the other's cards). Exported so tests can drive the
- *  lifecycle directly (`dashboardSnapshotStore.clearTaskSummary()` etc.) instead of reaching for a
- *  module-level free function, which no longer exists. */
-export const dashboardSnapshotStore = new DashboardSnapshotStore<DashboardSnapshot>();
-
 /** Dashboard task-summary source: client.taskList({includeBody:false}), short-TTL-cached per
  *  workspace root. On a hit the provider is not contacted, so its walkTasks() does not run (the AC3
  *  mechanical check). A failed read is NOT cached — the next load retries instead of pinning the
@@ -1572,21 +1567,10 @@ export const DASHBOARD_SNAPSHOT_REFRESH_MS = 30_000;
  *  control that proves the fix (and not the host) is what makes the criterion's first request fast. */
 export const DASHBOARD_SNAPSHOT_DISABLED_ENV = "QUAY_DASHBOARD_SNAPSHOT_DISABLED";
 
-/** Everything `/dashboard` renders from root-only + client reads, captured at one instant. Holding
- *  the VALUES (not a rendered page) keeps the page render pure and lets the request path choose
- *  `?hours=` per request without rebuilding. */
-export interface DashboardSnapshot {
-  builtAt: number;
-  live: LiveResult;
-  sys: SystemResult;
-  mgr: ManagerResult;
-  tests: TestsResult;
-  suiteRun: CurrentSuiteRun | null;
-  history: GitHistoryResult;
-  tasks: TaskSummary[];
-  goals: GoalRecord[];
-  workerOutcomes: WorkerOutcomeRecord[];
-}
+// `DashboardSnapshot` (the shape EVERYTHING below produces/consumes, and the value type of
+// `dashboardSnapshotStore`) is declared in snapshot-store.ts and re-exported above — its declaration
+// moved with the store that owns it, so the dependency stays one-way.
+//
 // ⊢ `goals` IS snapshotted, and the reason is a MEASUREMENT that contradicts the plan's estimate. The
 // plan budgeted `client.goalList()` at ~6 ms (a direct-import reading) and therefore allowed it to
 // stay on the request path. Through the real Provider ABI it is an MCP round-trip over the live goal
