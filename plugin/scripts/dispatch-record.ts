@@ -34,7 +34,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { isDirectEntry } from "./gate-script-base.ts";
+import { isDirectEntry, MIN_REASON_CHARS, reasonIsSubstantive } from "./gate-script-base.ts";
 // Single source for the preference file path — reuse, never a parallel copy (hard rule 1).
 import { PREFERENCE_FILE_REL } from "./dispatch-preference-check.ts";
 
@@ -42,10 +42,13 @@ import { PREFERENCE_FILE_REL } from "./dispatch-preference-check.ts";
  *  preference file). */
 export const RECORD_FILE_REL = "orchestration/dispatch-record.jsonl";
 
-/** A reason below this many non-whitespace chars is treated as ABSENT (empty/placeholder — the
- *  empty-vs-absent conflation would let a "随便" placeholder slip through). A one-sentence
- *  "为什么选它" is a real clause; a placeholder like "随便"/"无"/"x" is not. */
-export const MIN_REASON_CHARS = 8;
+/** The dispatch-reason threshold + predicate live in gate-script-base.ts as the ONE definition,
+ *  shared with semantic-face-dispatch-record.ts (routine `semantic-dedup-scan` finding
+ *  `reason-is-substantive-byte-identical` — the two bodies were character-identical and each
+ *  re-declared MIN_REASON_CHARS locally, so the thresholds could drift independently).
+ *  Re-exported here because dispatch-record-fingerprint-reason-check.ts and the tests import them
+ *  from this module: the historical import path is preserved, the duplicate BODY is not. */
+export { MIN_REASON_CHARS, reasonIsSubstantive };
 
 /** 40-hex git blob hash (sha1) — the fingerprint FORMAT the checker accepts. `git hash-object`
  *  output is always this shape. */
@@ -95,12 +98,6 @@ export function makeRecord({
   preferenceFile?: string;
 }): DispatchRecord {
   return { ts, taskId, preferenceFile, preferenceFingerprint: fingerprint, reason };
-}
-
-/** A reason is present only when it has ≥ MIN_REASON_CHARS non-whitespace chars (the empty-vs-absent
- *  conflation guard — same as dispatch-preference-check's SECTION_MIN_CONTENT_CHARS). */
-export function reasonIsSubstantive(reason: unknown): boolean {
-  return typeof reason === "string" && reason.replace(/\s+/g, "").length >= MIN_REASON_CHARS;
 }
 
 /** Append ONE record to <root>/orchestration/dispatch-record.jsonl (creating the dir/file as

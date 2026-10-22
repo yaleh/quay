@@ -2308,6 +2308,14 @@ export function runArchCycleRound(root: string, opts: ArchCycleRoundOptions = {}
           .join(" ; ")}`,
         instrument: null, instrumentSource: null, searched: [], exitCode: null, at: ts, appliedBeforeReading: false,
       };
+      // gap-arch-cycle-within-interval-branch-skips-downgrade: EVERY due scope was deferred by the
+      // per-scope interval budget, so NONE of them was refreshed ⇒ the reading this record carries is
+      // still the stale one. `skipped:"within-interval"` explains why no analyze ran; it does NOT make
+      // the stale `cycleCount` current (硬规则 3b). Record the same cause the `pending.length > 0`
+      // branch records, so the honesty gate below applies on THIS path too — otherwise a stale scope
+      // is presented as `evaluated:true` + `cycleCount:0`, byte-identical to a healthy reading.
+      // No re-read/stillDue filter is needed here: nothing ran, so every deferred scope is still due.
+      for (const d of deferred) downgradeCauses.set(d.scope, d.reason);
     } else {
       const r: ArchCycleRefreshResult = refreshBehindScopes(resolvedRoot, opts.workDir, readingBeforeRefresh, {
         now: ts,

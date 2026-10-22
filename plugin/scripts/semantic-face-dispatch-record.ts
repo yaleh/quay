@@ -41,7 +41,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { isDirectEntry } from "./gate-script-base.ts";
+import { isDirectEntry, MIN_REASON_CHARS, reasonIsSubstantive } from "./gate-script-base.ts";
 
 /** The semantic-face dispatch-record file's repo-relative path (gitignored runtime log, sibling of
  *  orchestration/dispatch-record.jsonl — same family: runtime telemetry, not code). */
@@ -74,25 +74,22 @@ export const SEMANTIC_DUTY_LABELS: Readonly<Record<SemanticDutyKind, string>> = 
   "cross-layer-correction": "跨层纠错",
 };
 
-/** A reason below this many non-whitespace chars is treated as ABSENT (empty/placeholder — the
- *  empty-vs-absent conflation would let a "随便" placeholder slip through). Mirrors dispatch-record.ts's
- *  MIN_REASON_CHARS; kept local so this mechanism does not silently couple to A16b's. */
-export const MIN_REASON_CHARS = 8;
+/** The dispatch-reason threshold + predicate live in gate-script-base.ts as the ONE definition,
+ *  shared with dispatch-record.ts (A16b). The former local copy here carried a comment claiming
+ *  localness was deliberate ("kept local so this mechanism does not silently couple to A16b's"),
+ *  but the body was character-identical and the two constants could drift independently — the
+ *  exact defect .quay/routine-findings.jsonl finding `reason-is-substantive-byte-identical`
+ *  (routine `semantic-dedup-scan`, runId `semantic-dedup-scan-1792647604889`) reported. Two
+ *  copies of the threshold are two authorities for one judgment, so they are now one.
+ *  Re-exported here because semantic-face-dispatch-record.test.mjs imports them from this module. */
+export { MIN_REASON_CHARS, reasonIsSubstantive };
 
 /** True when `kind` is one of the eight semantic duties (the write-point gate). */
 export function isSemanticDutyKind(kind: unknown): kind is SemanticDutyKind {
   return typeof kind === "string" && (SEMANTIC_DUTY_KINDS as readonly string[]).includes(kind);
 }
 
-/** A reason is present only when it has ≥ MIN_REASON_CHARS non-whitespace chars (same empty-vs-absent
- *  guard as A16b dispatch-record.ts). */
-export function reasonIsSubstantive(reason: unknown): boolean {
-  return typeof reason === "string" && reason.replace(/\s+/g, "").length >= MIN_REASON_CHARS;
-}
-
-/** Shape of one semantic-face dispatch-record line. All fields informational except the judged pair
- *  (dutyKind / reason). taskId is optional context — most semantic duties produce no task; task
- *  authoring/立案 produces one. */
+/** Shape of one semantic-face dispatch-record line.
 export interface SemanticFaceDispatchRecord {
   ts: string;
   dutyKind: SemanticDutyKind;
