@@ -117,7 +117,7 @@ $ grep -n '^### 臂' docs/references/ownership-first-refactoring-methodology.md
 <!-- 扩展点判据四件套 — paste these four items into the task's own Acceptance Criteria via task_write. -->
 
 - [ ] 正臂（活性检查）：从 src/serve/handlers/registry.ts 注册一个新的处理单元、不改 packages/quay/src/serve.ts，运行后读数必须是 triggered=1（计数断言，不是「handler 存在」）。取假方式：删掉/断线 src/serve/handlers/registry.ts 的注册后同一断言读数为 triggered=0 ⇒ 本条必红。**这条正臂就是活性检查，不另配。**
-- [ ] 负臂：同一个断言在【未注册】时读数为 triggered=0。取假方式：分派器泄漏/无条件触发时该断言必红。⚠️ 负臂必须与一条 counted 正臂（triggered=1）成对；**只写负臂、不写正臂 ⇒ 判据无效**，检查器判 missing-arms。
+- [ ] 负臂：同一个断言在【未注册】时读数为 triggered=0，并同时断言 handlerRegistered=false（注册表确认无此 handler——把「unregister 真被 gate 掉」与「unregister 没生效但恰好被正臂拦住」两条绿路拆开）。取假方式：分派器泄漏/无条件触发时该断言必红。⚠️ 负臂必须与一条 counted 正臂（triggered=1）成对；**只写负臂、不写正臂 ⇒ 判据无效**，检查器判 missing-arms。
 - [ ] 注入泄漏：把 packages/quay/src/serve.ts 的分派器替换成泄漏实现（无视注册表、无条件调用），上一臂/正臂的同一断言必须打红。取假方式：替换后仍绿 ⇒ 该臂没测到分派器。它的作用是证明【负臂断言本身不真空】，不是给正臂兜底。
 - [ ] 红线基线：改动前记录 `wc -l packages/quay/src/serve.ts` 的基线（<填基线行数>），并断言改动后的中心文件行数 < 基线；在改动前跑该断言必须为红。取假方式：基线前跑不红 ⇒ 断言没测到那次增长。**本 AC 是单次验收、非常设棘轮**，不是常设检查。
 
@@ -212,11 +212,19 @@ EXIT=0
 ### AC9 — 两种占比口径分开记录（原文两行）
 
 ```
-- **`centralΔ`（claudecodeui 口径；单 commit churn，含删除）** = (该 commit 内中心文件的 insertions + deletions) ÷ (该 commit 全部文件的 insertions + deletions)。实例：driver 那一刀 263 / 1275 = 0.206。
-- **中心文件增长占比（quay 口径；时间窗，只计新增）** = 窗口内中心文件新增行 ÷ (中心文件新增行 + 非中心文件新增行)。实例：`worker-history` 基线 `2440b52d0` → `ff32d031d`，中心 +4,820 ÷ (4,820 + 1,025) = 82.46%；同一公式在 serve 上得 1.31%（+153 ÷ (+153 + +11,534)）。
+- **`centralChurnShare`（canonical 键名；claudecodeui 口径；单 commit churn，含删除。早期写作 `centralΔ`——`Δ` 易被读成「净变化」，故 canonical 键名取 `centralChurnShare`）** = (该 commit 内中心文件的 insertions + deletions) ÷ (该 commit 全部文件的 insertions + deletions)。实例：driver 那一刀 263 / 1275 = 0.206。
+- **中心文件增长占比（quay 口径；时间窗，只计新增）** = 窗口内中心文件新增行 ÷ (中心文件新增行 + 非中心文件新增行)。实例：`worker-history` 基线 `2440b52d0` → `ff32d031d`，中心 +4,820 ÷ (4,820 + 1,025) = 82.46%；同一公式在 serve 上得 1.31%（10-22T00:40Z 记录：中心 +153 ÷ (+153 + +11,534)，分母 = 中心 + 非中心新增行；早期「serve 1%」是该值的取整基线）。
 ```
 
 同节显式结论：「不是同一个量，⛔ 不得互相引用」。
+
+### 审阅意见与采纳（claudecodeui 会话「Quay 的 OO 设计重构」，2026-10-22）
+
+- (a) 正臂 = 计数 `triggered=1` 的活性检查、不另配 —— ✓ 无异议，未改。
+- (b) 负臂建议同时断言伴生读数 `handlerRegistered=false` —— **已采纳**：模板 §13.5 臂 2、脚手架负臂行、skill 都加入该伴生读数（把「unregister 真被 gate 掉」与「unregister 没生效但恰好被正臂拦住」两条绿路拆开）；检查器的臂身份判定仍以臂名 + counted 正臂为准，AC8 的真空绿契约不变。
+- (c1) 键名 `centralΔ` → `centralChurnShare` —— **已采纳**：canonical 键名改为 `centralChurnShare`，`centralΔ` 记为早期拼写（`Δ` 易被读成净变化，而本量含删除）。
+- (c2) serve 实例数值自查 —— 正本载体 10-22T00:40Z 记录为 +153 ÷ (+153 + +11,534) = 1.31%（分母 = 中心 + 非中心新增行）；文档已显式写出该 basis，并注明早期「serve 1%」是其取整基线。0.98% 来自另一个 15,644 行分母，不是本公式的 basis。
+- 采纳情况同步写进提交 `b7ecf5dba`。
 
 ## Touches
 
