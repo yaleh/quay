@@ -66,6 +66,16 @@
 // `mechanized` and `admission` stay orthogonal: a semantic-judged kind does not become confirmable by
 // accumulating mechanical signals, and this module defines NO verdict vocabulary of its own (that contract
 // lives in its own module) — it consumes only the judge's `admit` boolean and `verdict` string.
+//
+// ── AMEND 2026-10-22 (c): the gate CONSUMES the registry's `admission` field (GOAL-911 / AC-923) ─────
+// `registryAdmissionViolations` existed but had ZERO production consumers: a registry whose `admission` was
+// misspelt (`"bogus"`), non-string, or absent was carried through untouched and the gate continued into the
+// mechanical delta path as if the field named a route. `evaluateEntryBar` now validates the WHOLE registry
+// through that same validator before condition (1) branches, and refuses with
+// CONDITION_1_UNDETERMINED naming every violating kind. `invalid` (a wrong value) and `missing` (no string
+// field at all) are reported separately — 硬规则 3b: deleting a field ≠ writing a wrong value. This is a
+// LEGALITY check only: it changes no routing, so a lawful `admission` reaches exactly the same branch as
+// before (AC-918's dispatch face stays untouched).
 
 import fs from "node:fs";
 import path from "node:path";
@@ -613,6 +623,25 @@ export function evaluateEntryBar(carrierRecords, opts = {}) {
   // (1) concern_kind — a REGISTRY lookup, and FOUR states, not two (amend 2026-10-22).
   const kindReading = concernKindState(deriveConcernKind(head), registry);
   const kind = kindReading.kind;
+
+  // (1a) THE REGISTRY'S `admission` FIELD IS A CONTRACT THE GATE MUST CONSUME (GOAL-911 / AC-923). An
+  // unlawful registry is an INSTRUMENT failure, so it gets its own refusal value (硬规则 3b) and is
+  // detected HERE — before any route is chosen or any delta is read — so a misspelt/absent admission can
+  // never fall through to the mechanical path. `registryAdmissionViolations` is reused verbatim (single
+  // source of truth: a second validator here would drift from the one the AC-921 suite pins). Every
+  // violating kind is NAMED, and `invalid` (wrong value) is kept in its own list, separate from `missing`
+  // (no string field at all) — 硬规则 3 (a count + a list, never a boolean) / 3b (deleted ≠ wrong).
+  const admissionLawfulness = registryAdmissionViolations(registry);
+  if (!admissionLawfulness.evaluated) {
+    return mismatch(`CONDITION_1_UNDETERMINED:concern_kind=${kind ?? "<unreadable>"} — the CONCERN_KIND_REGISTRY could not be read for admission (${admissionLawfulness.cause}); an unreadable registry may not be treated as a lawful one`);
+  }
+  const unlawful = [];
+  if (admissionLawfulness.invalid.length > 0) unlawful.push(`invalid admission value for kind(s): ${admissionLawfulness.invalid.join(", ")}`);
+  if (admissionLawfulness.missing.length > 0) unlawful.push(`missing admission field for kind(s): ${admissionLawfulness.missing.join(", ")}`);
+  if (unlawful.length > 0) {
+    return mismatch(`CONDITION_1_UNDETERMINED:concern_kind=${kind ?? "<unreadable>"} — the CONCERN_KIND_REGISTRY's admission field is not lawful: ${unlawful.join("; ")}. A legal admission is one of ${Object.values(CONCERN_ADMISSIONS).join(" / ")}; an illegal or absent admission names NO route, so the gate refuses instead of falling through to the mechanical delta path`);
+  }
+
   if (kindReading.state === CONCERN_KIND_STATES.UNDETERMINED) return mismatch(`CONDITION_1_UNDETERMINED:the concern_kind of the latest record could not be read (no concern_kind field, no slice_delta, no dupKind, no machine-written concern_kind=<kind> token)`);
   if (kindReading.state === CONCERN_KIND_STATES.NOT_MET) {
     return mismatch(`CONDITION_1_NOT_MET:concern_kind=${kind} — not a registered concern kind (CONCERN_KIND_REGISTRY: ${registry.map((e) => e.kind).join(", ")}); as amended 2026-10-22 only registered+mechanized kinds are admitted, and unregistered kinds stay in shadow (§6(a))`);

@@ -2,7 +2,7 @@
 id: gap-meta-writegoalstatus
 title: goal-driver 的 activate 判决被能力闸拒绝时必须落一个具名阻塞读数——否则同一条 draft AC
   每轮重判、永不进入缺口环，其缺失载体也永不被委托
-status: ready
+status: done
 labels:
   - meta-driver
   - driver-candidate

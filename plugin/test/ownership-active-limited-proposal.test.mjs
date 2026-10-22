@@ -857,3 +857,67 @@ test("AC918-5(dispatch): an unreadable admission fails closed with CONDITION_1_U
     assert.deepEqual(v.matchedConditions, [], "an unreadable admission matches no condition");
   }
 });
+
+// ── AC-923: the gate CONSUMES the registry's `admission` field (GOAL-911 / AC-923) ─────────────────
+// `registryAdmissionViolations` had ZERO production consumers before this: a registry whose `admission`
+// was misspelt, non-string, or absent was carried through untouched and the gate continued into the
+// mechanical delta path. Every arm below reads ONLY `evaluateEntryBar`'s return value — AC-923's criterion
+// is a runtime reading, so ⛔ no source regex. The positive control proves the new check is not "always
+// refuse": a lawful registry still reaches the SAME C2 refusal it reached before.
+const withAdmission = (kind, admission) => CONCERN_KIND_REGISTRY.map((e) => {
+  if (e.kind !== kind) return e;
+  if (admission === undefined) { const { admission: _drop, ...rest } = e; return rest; }
+  return { ...e, admission };
+});
+
+test("AC923-1(consumption): the AC-923 criterion — an illegal admission is refused by an admission-shaped reason", () => {
+  const bad = withAdmission("package-cycle", "bogus");
+  const r = evaluateEntryBar([{ concern_kind: "package-cycle" }], { registry: bad });
+  assert.equal(r.eligible, false);
+  assert.match(r.reason || "", /admission/i, "ADMISSION-NOT-CONSUMED: C1 gate produced no admission-shaped refusal for an illegal admission value");
+  // a registry-level refusal matches NO condition and starts no streak — it is not a C2 partial pass
+  assert.deepEqual(r.matchedConditions, []);
+  assert.equal(r.streak.length, 0);
+});
+
+test("AC923-2(consumption): `invalid` and `missing` are NAMED separately and never share a shape", () => {
+  const invalid = evaluateEntryBar([{ concern_kind: "package-cycle" }], { registry: withAdmission("package-cycle", "bogus") });
+  // the violating kind is NOT the head record's kind: the WHOLE registry is validated, not just the entry
+  // the head resolves to — a deleted field elsewhere in the table must not be silently ignored.
+  const missing = evaluateEntryBar([{ concern_kind: "package-cycle" }], { registry: withAdmission("unencapsulated-state", undefined) });
+  for (const [arm, v] of [["invalid", invalid], ["missing", missing]]) {
+    assert.equal(v.eligible, false, `${arm} arm must refuse`);
+    assert.match(v.reason, /admission/i, `${arm} arm must carry an admission-shaped reason`);
+  }
+  assert.match(invalid.reason, /invalid/i, "a wrong value is named `invalid`");
+  assert.match(invalid.reason, /package-cycle/);
+  assert.doesNotMatch(invalid.reason, /missing/i, "硬规则 3b: a wrong value must not read as a deleted field");
+  assert.match(missing.reason, /missing/i, "a deleted field is named `missing`");
+  assert.match(missing.reason, /unencapsulated-state/);
+  assert.doesNotMatch(missing.reason, /invalid/i, "硬规则 3b: a deleted field must not read as a wrong value");
+  assert.notEqual(invalid.reason, missing.reason, "the two violation classes get different reasons");
+});
+
+test("AC923-3(consumption): TWO illegal entries are BOTH named — a list, never a boolean", () => {
+  const registry = CONCERN_KIND_REGISTRY.map((e) =>
+    e.kind === "package-cycle" ? { ...e, admission: "bogus" }
+      : e.kind === "god-file-size" ? { ...e, admission: 123 }
+        : e);
+  const v = evaluateEntryBar([{ concern_kind: "package-cycle" }], { registry });
+  assert.equal(v.eligible, false);
+  assert.match(v.reason, /package-cycle/, "the first violating kind is named");
+  assert.match(v.reason, /god-file-size/, "the second violating kind is named");
+  // and the two kinds keep their own violation class (a non-string field is `missing`, not `invalid`)
+  assert.match(v.reason, /invalid admission value for kind\(s\): package-cycle/);
+  assert.match(v.reason, /missing admission field for kind\(s\): god-file-size/);
+});
+
+test("AC923-4(consumption): POSITIVE CONTROL — a lawful registry still refuses at C2, with no admission word", () => {
+  const r = evaluateEntryBar([{ concern_kind: "package-cycle" }]);
+  assert.equal(r.eligible, false);
+  assert.ok(r.reason.startsWith("CONDITION_2_NOT_MET"), r.reason);
+  assert.doesNotMatch(r.reason, /admission/i, "the legality check must not fire on the real registry");
+  // and the real registry really is lawful (the check's input is not being bypassed)
+  const lw = registryAdmissionViolations(CONCERN_KIND_REGISTRY);
+  assert.deepEqual([lw.evaluated, lw.invalid, lw.missing], [true, [], []]);
+});

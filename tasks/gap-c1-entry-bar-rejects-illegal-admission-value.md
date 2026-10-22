@@ -2,7 +2,7 @@
 id: gap-c1-entry-bar-rejects-illegal-admission-value
 title: C1 准入闸真正消费 registry 的 admission 字段：非法/缺失取值按名拒绝（reason 含 admission 与
   kind），合法取值零回归（GOAL-911 AC-923）
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -87,11 +87,3 @@ AC-921（achieved）只覆盖「真实注册表上取值正确」，结构上看
 - docs/analysis/ownership-active-limited-proposal.mjs
 - plugin/test/ownership-active-limited-proposal.test.mjs
 - tasks/gap-c1-entry-bar-rejects-illegal-admission-value.md
-
-## Blocker
-
-**2026-10-22T12:05:35.523Z — worker 未落地（exited-not-landed）**
-
-- 未落地原因：step=suite: oom-killed (1) — recovery exhausted at floor concurrency 32 — no declared rung produced a complete verdict (64,48,32); needs a code/config fix, see plugin/scripts/full-suite-runner.ts
-- run_id：wk-prod-anchor
-- session_id：299d671b-36ef-42fa-9a94-bcdf7df17e78
