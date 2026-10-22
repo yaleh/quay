@@ -2,7 +2,7 @@
 id: gap-c1-entry-bar-rejects-illegal-admission-value
 title: C1 准入闸真正消费 registry 的 admission 字段：非法/缺失取值按名拒绝（reason 含 admission 与
   kind），合法取值零回归（GOAL-911 AC-923）
-status: todo
+status: ready
 labels:
   - gap
   - defect
