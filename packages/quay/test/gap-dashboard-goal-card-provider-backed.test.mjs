@@ -29,8 +29,7 @@ import {
   renderDashboardPage,
   peekDashboardSnapshot,
   startDashboardSnapshotRefresh,
-  setDashboardSnapshotStepHook,
-  clearDashboardSnapshots,
+  dashboardSnapshotStore,
   isDashboardSnapshotRebuilding,
   isDashboardSnapshotFollowUpQueued,
 } from "../src/serve/serve-dashboard.ts";
@@ -279,7 +278,7 @@ test("AC1: rebuildNow() during an in-flight cold build reflects the caller's cha
   // Start from a clean snapshot state and let anything already running settle, so the only build this
   // test reasons about is the one it starts itself.
   await until(() => !isDashboardSnapshotRebuilding(workspaceRoot), 30_000);
-  clearDashboardSnapshots();
+  dashboardSnapshotStore.clearSnapshot();
   writeGoalFixture();
 
   let goalCalls = 0;
@@ -289,7 +288,7 @@ test("AC1: rebuildNow() during an in-flight cold build reflects the caller's cha
   let release;
   const held = new Promise((r) => { release = r; });
   let entered = false;
-  setDashboardSnapshotStepHook(async () => { entered = true; await held; });
+  dashboardSnapshotStore.setStepHook(async () => { entered = true; await held; });
   const handle = startDashboardSnapshotRefresh(workspaceRoot, client, { intervalMs: 60_000 });
   try {
     assert.ok(
@@ -328,14 +327,14 @@ test("AC1: rebuildNow() during an in-flight cold build reflects the caller's cha
     assert.match(r.body, /暂无 active GOAL/, "empty state shown — the dashboard reads the caller's store, not the stale incumbent");
   } finally {
     release();
-    setDashboardSnapshotStepHook(null);
+    dashboardSnapshotStore.setStepHook(null);
     handle.stop();
   }
 });
 
 test("AC3 property: the periodic tick still never stacks — ticks during an in-flight build start no build", async () => {
   await until(() => !isDashboardSnapshotRebuilding(workspaceRoot), 30_000);
-  clearDashboardSnapshots();
+  dashboardSnapshotStore.clearSnapshot();
   writeGoalFixture();
 
   let goalCalls = 0;
@@ -344,7 +343,7 @@ test("AC3 property: the periodic tick still never stacks — ticks during an in-
   let release;
   const held = new Promise((r) => { release = r; });
   let entered = 0;
-  setDashboardSnapshotStepHook(async () => { entered += 1; await held; });
+  dashboardSnapshotStore.setStepHook(async () => { entered += 1; await held; });
   // A 5 ms tick: many tick opportunities per build, i.e. the "连发" the contract is about.
   const handle = startDashboardSnapshotRefresh(workspaceRoot, client, { intervalMs: 5 });
   try {
@@ -365,7 +364,7 @@ test("AC3 property: the periodic tick still never stacks — ticks during an in-
   } finally {
     handle.stop(); // retire the interval BEFORE releasing, so no tick starts a build after the hold
     release();
-    setDashboardSnapshotStepHook(null);
+    dashboardSnapshotStore.setStepHook(null);
   }
   await until(() => !isDashboardSnapshotRebuilding(workspaceRoot), 30_000);
 });

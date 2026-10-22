@@ -10,6 +10,11 @@ import { html, escapeHtml, pageStyles, modernistStyles, DEFAULT_PAGE_SIZE, build
 // the same pattern gap-webui-dashboard-body-copy-en-zh established (ROW 5) and the rest of the series
 // copies. (ROW 10 is /journal's, which landed into develop first.)
 import { boardLabelsFor, boardLabel, fillLabel } from "./serve-i18n.ts";
+// The state cluster that used to be two module-level Maps + a `let` step hook + two free
+// clear/setter functions now lives in ONE class instance
+// (gap-dashboard-snapshot-store-encapsulate-state). This module is a CONSUMER — it declares no
+// module-level mutable state of its own.
+import { DashboardSnapshotStore } from "./snapshot-store.ts";
 
 // ── /board — 三源 join 看板 (gap-web-board-needs-an-inconsistency-verdict-it-does-not-have) ──
 // The board joins 意图 (task store) + 执行 (telemetry) + 落地 (git code existence). The LANDING
@@ -333,16 +338,11 @@ export interface BoardSnapshot {
   intentReason: string | null;
 }
 
-const boardSnapshots = new Map<string, BoardSnapshot>();
-const boardSnapshotRebuilds = new Map<string, Promise<void>>();
-
-/** Test seam: an optional hook awaited BETWEEN the build's cooperative steps. Production never sets
- *  it. It lets a test hold a build open and observe what concurrent requests see WHILE it runs,
- *  rather than racing a fixture build that finishes in microseconds. */
-let boardSnapshotStepHook: (() => Promise<void>) | null = null;
-export function setBoardSnapshotStepHook(hook: (() => Promise<void>) | null): void {
-  boardSnapshotStepHook = hook;
-}
+/** The board's explicit store instance — its OWN maps + step hook, never shared with the
+ *  dashboard's (one page's `clear()` must not blank the other's cards). Exported so tests can drive
+ *  the lifecycle directly (`boardSnapshotStore.clearSnapshot()` etc.) instead of reaching for a
+ *  module-level free function, which no longer exists. */
+export const boardSnapshotStore = new DashboardSnapshotStore<BoardSnapshot>();
 
 /** True when the snapshot mechanism is switched off. Read at CALL time, not at module load, so a
  *  test can flip it per test (mirrors `dashboardSnapshotDisabled`). */
@@ -355,25 +355,20 @@ export function boardSnapshotDisabled(): boolean {
  *  for a rebuild. */
 export function peekBoardSnapshot(root: string): BoardSnapshot | null {
   if (boardSnapshotDisabled()) return null;
-  return boardSnapshots.get(root) ?? null;
-}
-
-/** Test-hygiene handle: drop every snapshot, in-flight build marker and step hook. */
-export function clearBoardSnapshots(): void {
-  boardSnapshots.clear();
-  boardSnapshotRebuilds.clear();
-  boardSnapshotStepHook = null;
+  return boardSnapshotStore.snapshot(root);
 }
 
 /** True while a build for `root` is in flight — a direct reading of the mechanism's own state, not
  *  an inference from a timestamp. */
 export function isBoardSnapshotRebuilding(root: string): boolean {
-  return boardSnapshotRebuilds.has(root);
+  return boardSnapshotStore.isRebuilding(root);
 }
 
-/** Await the build for `root`, if any (test seam — the request path never does this). */
+/** Await the build for `root`, if any (test seam — the request path never does this). The board
+ *  never queues a follow-up build, so this reads the store's follow-up map as empty and degrades to
+ *  the in-flight marker — the pre-refactor behaviour, unchanged. */
 export function awaitBoardSnapshotRebuild(root: string): Promise<void> {
-  return boardSnapshotRebuilds.get(root) ?? Promise.resolve();
+  return boardSnapshotStore.awaitRebuild(root);
 }
 
 const EMPTY_LANDING: BoardLanding = { status: "error", timedOut: false, reason: "internal: board snapshot build failed before the landing read", flags: new Map(), scanned: 0 };
@@ -417,7 +412,7 @@ export async function buildBoardSnapshot(root: string, client: ProviderClient): 
 
   // Blocking step #1 — `readLive` over .workflow-events/.
   await yieldToEventLoop();
-  if (boardSnapshotStepHook) await boardSnapshotStepHook();
+  await boardSnapshotStore.step();
   let execution: BoardExecution;
   try { execution = await readBoardExecution(root); } catch { execution = EMPTY_EXECUTION; }
 
@@ -439,32 +434,22 @@ export function startBoardSnapshotRefresh(
   { intervalMs = BOARD_SNAPSHOT_REFRESH_MS }: { intervalMs?: number } = {},
 ): { stop: () => void; rebuildNow: () => Promise<void> } {
   if (boardSnapshotDisabled()) return { stop: () => {}, rebuildNow: () => Promise.resolve() };
-  // Only ever called when nothing is in flight for `root` (its own `finally` keeps a stale build
-  // from deleting a newer build's marker).
-  const start = (): Promise<void> => {
-    const p = buildBoardSnapshot(root, client)
-      .then((snap) => { boardSnapshots.set(root, snap); })
-      .catch(() => { /* keep the previous snapshot — see the contract above */ })
-      .finally(() => { if (boardSnapshotRebuilds.get(root) === p) boardSnapshotRebuilds.delete(root); });
-    boardSnapshotRebuilds.set(root, p);
-    return p;
-  };
-  const tick = (): Promise<void> => {
-    const inFlight = boardSnapshotRebuilds.get(root);
-    return inFlight ?? start();
-  };
+  const build = (): Promise<BoardSnapshot> => buildBoardSnapshot(root, client);
+  // The in-flight marker, its own `.delete()` and the "skip while one is running" tick policy are the
+  // store's (`boardSnapshotStore.followUp`), so the rebuild lifecycle has ONE owner instead of living
+  // half in a module-level Map and half in this closure.
+  const tick = (): Promise<void> => boardSnapshotStore.followUp(root, "skip", build);
   /** Explicit caller: wait out any incumbent FIRST, so the build this returns post-dates the call.
    *  (The tick's "skip" policy would return a build that started before the caller's change and is
    *  therefore structurally incapable of reflecting it.) */
   const rebuildNow = async (): Promise<void> => {
-    const inFlight = boardSnapshotRebuilds.get(root);
-    if (inFlight) await inFlight;
-    return start();
+    await boardSnapshotStore.awaitRebuild(root);
+    return boardSnapshotStore.rebuild(root, build);
   };
   const handle = setInterval(() => { void tick(); }, intervalMs);
   // unref'd — the tick must never be the reason the process stays alive.
   if (typeof handle.unref === "function") handle.unref();
-  void start();
+  void tick();
   return { stop: () => clearInterval(handle), rebuildNow };
 }
 

@@ -32,10 +32,9 @@ import {
   peekDashboardSnapshot,
   startDashboardSnapshotRefresh,
   buildDashboardSnapshot,
-  setDashboardSnapshotStepHook,
   awaitDashboardSnapshotRebuild,
   isDashboardSnapshotRebuilding,
-  clearDashboardSnapshots,
+  dashboardSnapshotStore,
   dashboardSnapshotDisabled,
   DASHBOARD_SNAPSHOT_DISABLED_ENV,
 } from "../src/serve/serve-dashboard.ts";
@@ -85,9 +84,9 @@ function startLagProbe() {
 
 /** Every display cache the dashboard reads through — dropped so a "cold rebuild" really is cold. */
 async function coldCaches(dash) {
-  dash.clearTaskSummaryCache();
-  dash.clearDashboardLiveCache();
-  dash.clearDashboardProbeCache();
+  dash.dashboardSnapshotStore.clearTaskSummary();
+  dash.dashboardSnapshotStore.clearLive();
+  dash.dashboardSnapshotStore.clearProbes();
   clearVerificationRoundCache();
 }
 
@@ -265,13 +264,13 @@ test("AC3′+AC4′: while a rebuild runs, concurrent /dashboard stay <10s and t
   let release;
   const held = new Promise((r) => { release = r; });
   let entered = false;
-  setDashboardSnapshotStepHook(async () => { entered = true; await held; });
+  dashboardSnapshotStore.setStepHook(async () => { entered = true; await held; });
   const rebuilding = server.dashboardSnapshot.rebuildNow();
   assert.ok(await until(() => entered && isDashboardSnapshotRebuilding(workspaceRoot), 10_000), "a rebuild must actually be in flight for this reading to mean anything");
   const concurrent = await Promise.all(Array.from({ length: 5 }, () => get(port, "/dashboard?lang=zh")));
   release();
   await rebuilding;
-  setDashboardSnapshotStepHook(null);
+  dashboardSnapshotStore.setStepHook(null);
 
   for (const r of concurrent) {
     assert.equal(r.status, 200, "every concurrent /dashboard answers 200");
@@ -372,15 +371,15 @@ test("buildDashboardSnapshot degrades per reader and awaitDashboardSnapshotRebui
   assert.equal(isDashboardSnapshotRebuilding("no-such-root-for-this-test"), false);
 });
 
-test("clearDashboardSnapshots drops every snapshot and in-flight marker (test hygiene handle)", () => {
+test("dashboardSnapshotStore.clearSnapshot drops every snapshot and in-flight marker (test hygiene handle)", () => {
   assert.ok(peekDashboardSnapshot(workspaceRoot) != null, "precondition: a snapshot is present");
-  clearDashboardSnapshots();
+  dashboardSnapshotStore.clearSnapshot();
   assert.equal(peekDashboardSnapshot(workspaceRoot), null, "the handle drops every snapshot");
   assert.equal(isDashboardSnapshotRebuilding(workspaceRoot), false, "and every in-flight marker");
 });
 
-test("a rebuild repopulates the snapshot after clearDashboardSnapshots (the handle is not a kill switch)", async () => {
-  clearDashboardSnapshots();
+test("a rebuild repopulates the snapshot after clearSnapshot (the handle is not a kill switch)", async () => {
+  dashboardSnapshotStore.clearSnapshot();
   server.dashboardSnapshot.stop();
   const { client } = server;
   const handle = startDashboardSnapshotRefresh(workspaceRoot, client, { intervalMs: 60_000 });

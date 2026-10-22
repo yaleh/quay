@@ -25,7 +25,7 @@ import path from "node:path";
 import fs from "node:fs";
 import os from "node:os";
 import { readManager, clearPoolMetricsCache, parsePromotionRoundRecords } from "../src/observation.ts";
-import { readTaskSummary, clearTaskSummaryCache } from "../src/serve/serve-handlers.ts";
+import { readTaskSummary, dashboardSnapshotStore } from "../src/serve/serve-handlers.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "..", "..", "..");
@@ -150,7 +150,7 @@ test("AC2: a driver-completed promotion (todo→ready) is reflected in the pool 
   const ws = makeRoot("ac2");
   try {
     clearPoolMetricsCache();
-    clearTaskSummaryCache();
+    dashboardSnapshotStore.clearTaskSummary();
     writeTask(ws, "gap-ac136-eligible", "todo");
     assert.equal(readStatus(ws, "gap-ac136-eligible"), "todo", "precondition: the task is todo");
 
@@ -175,7 +175,7 @@ test("AC2: a driver-completed promotion (todo→ready) is reflected in the pool 
     assert.equal(promoted.status, "ready", "task ledger shows the promoted task as ready");
   } finally {
     clearPoolMetricsCache();
-    clearTaskSummaryCache();
+    dashboardSnapshotStore.clearTaskSummary();
     fs.rmSync(ws, { recursive: true, force: true });
   }
 });
