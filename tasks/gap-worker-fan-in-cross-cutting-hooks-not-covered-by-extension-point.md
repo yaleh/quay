@@ -7,6 +7,7 @@ labels:
   - gap
   - defect
   - meta
+  - refactor-slice
 parent: null
 children: []
 extra:
