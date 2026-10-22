@@ -2320,6 +2320,9 @@ export interface DesignEvolutionFactValue {
   rm1: DesignEvolutionReadingsRecord["rm1"];
   rm2: DesignEvolutionReadingsRecord["rm2"];
   carrierRecords: number | null;
+  /** ADR-008 phase-declaration staleness (gap-adr008-phase-declaration-staleness-reading) — attached
+   *  information, embedded verbatim from the carrier's owner. ⛔ Never folded into the Fact's state. */
+  phaseStaleness: DesignEvolutionReadingsRecord["phaseStaleness"];
   historyPath: string;
   historyAppended: boolean;
   reportOnly: true;
@@ -2388,6 +2391,7 @@ export function runDesignEvolutionRound(root: string, opts: DesignEvolutionRound
     rm1: record.rm1,
     rm2: record.rm2,
     carrierRecords: record.carrierRecords,
+    phaseStaleness: record.phaseStaleness,
     historyPath: appended.path,
     historyAppended: appended.ok,
     reportOnly: true,

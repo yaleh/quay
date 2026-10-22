@@ -37,7 +37,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 
 // The module UNDER TEST — imported directly (the fan-in orchestration module, not a re-export hub).
 import { runMechanicalFanIn } from "../scripts/worker-fan-in.ts";
@@ -332,4 +332,172 @@ test("③ goal target — the doc-face done write emits its own event whose comm
   assert.match(docFace.evidence.commit, /^[0-9a-f]{40}$/);
   assert.match(git(fx.repo, ["show", `${docFace.evidence.commit}:tasks/${TASK}.md`]), /^status:\s*done$/m);
   assert.equal(gitStatus(fx.repo, ["merge-base", "--is-ancestor", docFace.evidence.commit, "develop"]), 0);
+});
+
+// ── ADR-007 per-milestone predicate at the MECHANICAL flip ────────────────────────────────────────
+//    (tasks/gap-mechanical-fan-in-flip-bypasses-adr007-dark-axis-predicate, AC1/AC2/AC3)
+//
+// Before this task `runMechanicalFanIn` flipped `status: done` with the ac-gate as its only
+// completeness check: `grep -n -i 'darkaxis\|dark-axis' plugin/scripts/worker-fan-in.ts` returned
+// zero hits while 795 of 816 `complete` events since 2026-09-14 came from this path. These tests pin
+// the new step at the three states the predicate can reach, plus its negative/positive controls.
+
+/** A fixture whose workspace DECLARES ADR-007 (`gates.adr`) — the same switch the lifecycle verbs
+ *  read — and whose task body is `body`. The body lives in the WORKTREE (the tree the flip merges),
+ *  so it is committed on the task branch; the config lives in the main checkout (the workspace root
+ *  `workspaceEnforcesDarkAxis(root)` reads). */
+function makeDarkAxisFixture(tag, { body }) {
+  const fx = makeFixture(tag, { forkFrom: "develop" });
+  write(fx.repo, ".quay/config.yml", 'providers:\n  native:\n    enabled: true\n    path: ./tasks\ngates:\n  adr:\n    - "ADR-007"\n');
+  git(fx.repo, ["add", "-A"]);
+  git(fx.repo, ["commit", "-q", "-m", "declare ADR-007 in gates.adr"]);
+  write(fx.worktree, `tasks/${TASK}.md`, body);
+  git(fx.worktree, ["add", "-A"]);
+  // The base body (no dark-axis material) is byte-identical to the fixture's own — commit only a
+  // real change rather than an empty commit.
+  if (git(fx.worktree, ["status", "--porcelain"]).trim() !== "") {
+    git(fx.worktree, ["commit", "-q", "-m", "task body under test"]);
+  }
+  return fx;
+}
+
+/** The base body (all AC/DoD boxes checked) with dark-axis material spliced in ahead of `## Touches`. */
+function taskBodyWithDarkAxis({ record = null, disclaimer = null } = {}) {
+  const lines = taskBody().split("\n");
+  const extra = [];
+  if (record) extra.push("## Dark-axis reading", record, "");
+  if (disclaimer) extra.push(disclaimer, "");
+  lines.splice(lines.indexOf("## Touches"), 0, ...extra);
+  return lines.join("\n");
+}
+
+function readGateEvents(fx) {
+  const file = path.join(fx.repo, ".quay", "gate-events.jsonl");
+  if (!fs.existsSync(file)) return [];
+  return fs.readFileSync(file, "utf8").split("\n").filter((l) => l.trim() !== "").map((l) => JSON.parse(l));
+}
+
+test("AC1 (能取假) — every AC/DoD box checked but NO L_D/L_G record: the flip is REFUSED at the dark-axis step, status stays ready, a fail event lands", async (t) => {
+  const fx = makeDarkAxisFixture("darkaxis-missing", { body: taskBodyWithDarkAxis() });
+  t.after(() => cleanup(fx));
+
+  const r = await runMechanicalFanIn(fanInOpts(fx, "darkaxis-missing", "develop"));
+
+  // The failure is the NEW step, and it names the missing artifact.
+  assert.equal(r.outcome, "red", `a record-less task must NOT land; got outcome=${r.outcome} step=${r.step}`);
+  assert.equal(r.step, "dark-axis");
+  assert.match(r.reason, /MISSING/);
+  assert.match(r.reason, /L_D\/L_G/);
+
+  // mergeTarget is untouched (the flip never ran), and so is the worktree's own task file.
+  assert.match(git(fx.repo, ["show", `develop:tasks/${TASK}.md`]), /^status:\s*ready$/m, "develop must still say ready");
+  assert.equal(statusOf(fs.readFileSync(path.join(fx.worktree, `tasks/${TASK}.md`), "utf8")), "ready");
+
+  // The judgment left a ledger entry — the readout AC6 joins on.
+  const darkEvents = readGateEvents(fx).filter((e) => e.gate === "dark-axis");
+  assert.equal(darkEvents.length, 1, `exactly one dark-axis event; got ${JSON.stringify(readGateEvents(fx))}`);
+  assert.equal(darkEvents[0].item_id, TASK);
+  assert.equal(darkEvents[0].verdict, "fail");
+  assert.equal(darkEvents[0].actor, "quay-driver");
+  assert.equal(darkEvents[0].payload.state, "MISSING");
+  // ⛔ No `complete` event: a refused flip is not a landing.
+  assert.equal(readGateEvents(fx).filter((e) => e.gate === "complete").length, 0);
+
+  // The step is visible in the per-run trace.
+  assert.ok(traceSteps(fx.repo, "darkaxis-missing").includes("dark-axis"));
+});
+
+test("AC2 (能取假) — a RECORDED reading lets the flip through and writes a pass event", async (t) => {
+  const fx = makeDarkAxisFixture("darkaxis-recorded", {
+    body: taskBodyWithDarkAxis({ record: "- L_G archguard: cycles=0, god-modules=0" }),
+  });
+  t.after(() => cleanup(fx));
+
+  const r = await runMechanicalFanIn(fanInOpts(fx, "darkaxis-recorded", "develop"));
+  assert.equal(r.outcome, "landed", `a recorded reading must land (step=${r.step} reason=${r.reason})`);
+  assert.match(git(fx.repo, ["show", `develop:tasks/${TASK}.md`]), /^status:\s*done$/m);
+
+  const darkEvents = readGateEvents(fx).filter((e) => e.gate === "dark-axis");
+  assert.equal(darkEvents.length, 1);
+  assert.equal(darkEvents[0].verdict, "pass");
+  assert.equal(darkEvents[0].payload.state, "RECORDED");
+});
+
+test("AC2 (能取假) — an explicit 该轴仍暗,理由: declaration also lands, with a pass event whose state is DISCLAIMED", async (t) => {
+  const fx = makeDarkAxisFixture("darkaxis-disclaimed", {
+    body: taskBodyWithDarkAxis({ disclaimer: "- L_G：该轴仍暗,理由:the git-lens probes are archived; this fixture consults no structural instrument" }),
+  });
+  t.after(() => cleanup(fx));
+
+  const r = await runMechanicalFanIn(fanInOpts(fx, "darkaxis-disclaimed", "develop"));
+  assert.equal(r.outcome, "landed", `a reasoned declaration must land (step=${r.step} reason=${r.reason})`);
+
+  const darkEvents = readGateEvents(fx).filter((e) => e.gate === "dark-axis");
+  assert.equal(darkEvents.length, 1);
+  assert.equal(darkEvents[0].verdict, "pass");
+  assert.equal(darkEvents[0].payload.state, "DISCLAIMED");
+});
+
+test("AC2 (硬规则 3b) — an UNREADABLE body is NOT-EVALUATED, with its own reason and its own ledger verdict (never folded into MISSING)", async (t) => {
+  // Two fixtures differing ONLY in readability: (a) a readable body with no record, (b) an
+  // unreadable one. The refusal must be distinguishable — same step, DIFFERENT state/verdict/reason.
+  const missingFx = makeDarkAxisFixture("darkaxis-ne-missing", { body: taskBodyWithDarkAxis() });
+  t.after(() => cleanup(missingFx));
+  const missingRun = await runMechanicalFanIn(fanInOpts(missingFx, "darkaxis-ne-missing", "develop"));
+
+  const unreadableFx = makeDarkAxisFixture("darkaxis-ne", { body: taskBodyWithDarkAxis() });
+  t.after(() => cleanup(unreadableFx));
+  // The production reader is `<worktree>/tasks/<id>.md`; the seam points at a file that cannot be
+  // read, which is the ONLY way to reach this state while ac-gate (same file) still passes.
+  const unreadableRun = await runMechanicalFanIn(
+    fanInOpts(unreadableFx, "darkaxis-ne", "develop", { darkAxisTaskFile: path.join(unreadableFx.base, "absent-task.md") }),
+  );
+
+  assert.equal(unreadableRun.outcome, "red");
+  assert.equal(unreadableRun.step, "dark-axis");
+  assert.match(unreadableRun.reason, /NOT-EVALUATED/);
+  assert.doesNotMatch(unreadableRun.reason, /MISSING —/);
+  assert.notEqual(unreadableRun.reason, missingRun.reason, "the two states must not share a reason (硬规则 3b)");
+
+  const neEvent = readGateEvents(unreadableFx).filter((e) => e.gate === "dark-axis");
+  assert.equal(neEvent.length, 1);
+  assert.equal(neEvent[0].payload.state, "NOT-EVALUATED");
+  assert.equal(neEvent[0].verdict, "not-evaluated", "the ledger keeps 'could not read' distinct from 'recorded nothing'");
+
+  const missingEvent = readGateEvents(missingFx).filter((e) => e.gate === "dark-axis");
+  assert.equal(missingEvent.length, 1);
+  assert.equal(missingEvent[0].verdict, "fail");
+});
+
+test("AC3 (能取假) — the flip's judgment and the standalone CLI agree state-for-state / exit-code-for-exit-code", async () => {
+  // The mechanical step must NOT carry a second rule. Drive the exported judgment and the CLI over
+  // the same four fixtures: RECORDED / DISCLAIMED / MISSING / absent file.
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "darkaxis-parity-"));
+  try {
+    fs.mkdirSync(path.join(dir, "tasks"), { recursive: true });
+    const files = {
+      "fixture-recorded": `---\nid: fixture-recorded\nstatus: ready\n---\n- L_G archguard: cycles=0\n`,
+      "fixture-disclaimed": `---\nid: fixture-disclaimed\nstatus: ready\n---\n- L_G：该轴仍暗,理由:probes archived\n`,
+      "fixture-missing": `---\nid: fixture-missing\nstatus: ready\n---\n## Plan\nnothing recorded here\n`,
+    };
+    for (const [id, text] of Object.entries(files)) fs.writeFileSync(path.join(dir, "tasks", `${id}.md`), text, "utf8");
+    const cases = [
+      ["fixture-recorded", "RECORDED", 0],
+      ["fixture-disclaimed", "DISCLAIMED", 0],
+      ["fixture-missing", "MISSING", 1],
+      ["fixture-absent", "NOT-EVALUATED", 2],
+    ];
+    const { darkAxisVerdictForTaskFile } = await import("../scripts/worker-fan-in.ts");
+    for (const [id, state, exit] of cases) {
+      const mine = darkAxisVerdictForTaskFile(path.join(dir, "tasks", `${id}.md`));
+      assert.equal(mine.state, state, `${id}: the flip's judgment must be ${state}`);
+      const cli = spawnSync(process.execPath, [
+        "--no-warnings", "--experimental-strip-types",
+        path.join(REPO, "plugin", "scripts", "dark-axis-record-check.ts"), id, "--root", dir,
+      ], { encoding: "utf8" });
+      assert.equal(cli.status, exit, `${id}: CLI exit ${cli.status} must be ${exit} (stderr=${cli.stderr})`);
+    }
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 });

@@ -1,8 +1,12 @@
 // observation/model.ts — the shared VOCABULARY of the observation layer: the in-flight view-model
 // (InFlightTask + its two axes) and the workspace-relative runtime CARRIER PATHS every seam resolves.
 //
-// It is a LEAF: its only import is the ABI's `TaskStatus` TYPE (erased at runtime), so it has no
-// runtime edge to any seam. events/liveness/blocking/records all depend on it, and observation.ts
+// It is a LEAF: its only import is the `TaskStatus` TYPE from the ABI's IMPLEMENTATION
+// (`../core/types.ts`, erased at runtime), so it has no runtime edge to any seam. It imports the
+// implementation directly rather than the `../abi.ts` forwarding facade: `abi.ts` is the EXTERNAL
+// provider-facing surface, and an internal submodule reaching up through the src root for a symbol
+// that lives one layer down closed a directory cycle (AC-917 / gap-arch-directory-cycle-src-observation-serve).
+// events/liveness/blocking/records all depend on it, and observation.ts
 // re-exports it as the barrel — a leaf cannot take part in a cycle, so the seam modules stay a DAG
 // no matter how they are wired together.
 //
@@ -11,7 +15,7 @@
 // seam that spelled `.quay/worker-outcome.jsonl` itself would be a second carrier path (the exact
 // "the writer and the reader name the same file differently" drift the carrier constants prevent).
 
-import type { TaskStatus } from "../abi.ts";
+import type { TaskStatus } from "../core/types.ts";
 
 export const FAST_MODE_EVENTS_DIR = ".workflow-events";
 export const ORCHESTRATION_DIR = "orchestration";

@@ -28,6 +28,10 @@
 //      possible at all.
 //   ⑥ an unparseable carrier is REFUSED rather than silently replaced (hard rule 3b: "could not read
 //      the previous state" must never be indistinguishable from "there was no previous state").
+//   ⑦ the READ-ONLY staleness face (gap-adr008-phase-declaration-staleness-reading): `readPhaseStaleness`
+//      reports commits / new GOAL ids / days since the declaration, writes nothing, and reports an
+//      unreadable carrier as evaluated:false with null (⛔ never 0) — with "missing" and "unparseable"
+//      DISTINGUISHABLE, since both mean "unknown age", not "age 0".
 //
 // Every fixture is a throwaway `git init` repo under os.tmpdir() — the real repo's own history is
 // never read or written by this test, so it can never be satisfied by the state of the checkout it
@@ -42,6 +46,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync, execFileSync } from "node:child_process";
+import { readPhaseStaleness } from "../scripts/phase-declare.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "..", "..");
@@ -96,6 +101,24 @@ function commitMore(dir, files, message) {
   run("git", ["add", "-A"], dir);
   run("git", ["commit", "-q", "-m", message], dir);
 }
+
+/** Commit with an EXPLICIT author+committer date — the only way `--since=<declaredAt>` can be a real
+ *  oracle in a fixture whose commits would otherwise all carry "now". */
+function commitAt(dir, files, message, dateIso) {
+  writeFiles(dir, files);
+  const env = { ...process.env, GIT_AUTHOR_DATE: dateIso, GIT_COMMITTER_DATE: dateIso };
+  execFileSync("git", ["add", "-A"], { cwd: dir, encoding: "utf8", env });
+  execFileSync("git", ["commit", "-q", "-m", message], { cwd: dir, encoding: "utf8", env });
+}
+
+/** A minimal carrier that `readPhaseStaleness` can read (it needs phase + declaredAt + history, NOT
+ *  the `reading` snapshot — that belongs to the declaration path). */
+const CARRIER_STATE = {
+  phase: "convergence",
+  declaredAt: "2026-01-01T00:00:00.000Z",
+  reason: "fixture: baseline declaration",
+  history: [{ phase: "convergence", declaredAt: "2026-01-01T00:00:00.000Z", reason: "fixture: baseline declaration" }],
+};
 
 /** Invoke the CLI. `--root` is always explicit: the test must never depend on cwd. */
 function declare(dir, args) {
@@ -322,4 +345,112 @@ test("--json prints the declaration that was written", () => {
   const state = readState(dir);
   assert.equal(printed.phase, "convergence");
   assert.deepEqual(printed, state.history[state.history.length - 1]);
+});
+
+// ── ⑦ the READ-ONLY staleness face (gap-adr008-phase-declaration-staleness-reading) ──────────────
+
+test("readPhaseStaleness — commits / new GOAL ids / days since the declaration, against a real clock", () => {
+  const dir = makeRepo({
+    "impl.ts": lines(3),
+    "README.md": "fixture\n",
+    [path.join(".quay", "two-phase-state.json")]: JSON.stringify(CARRIER_STATE, null, 2) + "\n",
+  });
+  // Declared 2026-01-05; one goal landed BEFORE it, two ids (three files) AFTER it, plus a criterion
+  // file that lives under goals/ but is NOT a goal.
+  commitAt(dir, { "goals/GOAL-001-before.md": "# before\n" }, "fixture: early goal", "2026-01-01T12:00:00Z");
+  commitAt(
+    dir,
+    {
+      "goals/GOAL-018-alpha.md": "# 18\n",
+      "goals/GOAL-018-duplicate.md": "# 18 again (same id, one goal)\n",
+      "goals/AC-999-criterion.md": "# kind: criterion — NOT a goal\n",
+      "goals/GOAL-910-omega.md": "# 910\n",
+    },
+    "fixture: later goals",
+    "2026-01-10T12:00:00Z",
+  );
+  fs.writeFileSync(
+    path.join(dir, ".quay", "two-phase-state.json"),
+    JSON.stringify({ ...CARRIER_STATE, declaredAt: "2026-01-05T00:00:00.000Z", history: [{ ...CARRIER_STATE.history[0], declaredAt: "2026-01-05T00:00:00.000Z" }] }, null, 2) + "\n",
+  );
+
+  const s = readPhaseStaleness(dir, { now: new Date("2026-01-15T00:00:00.000Z") });
+  assert.equal(s.evaluated, true, s.reason ?? "");
+  assert.equal(s.reason, null);
+  assert.equal(s.phase, "convergence");
+  assert.equal(s.declaredAt, "2026-01-05T00:00:00.000Z");
+  assert.equal(s.declarations, 1);
+  // The oracle is git ITSELF, not a number copied from the implementation.
+  assert.equal(
+    s.commitsSince,
+    Number(run("git", ["rev-list", "--count", "--since=2026-01-05T00:00:00.000Z", "HEAD"], dir).trim()),
+  );
+  assert.deepEqual(s.newGoalsSince, ["GOAL-018", "GOAL-910"], "deduped by id; GOAL-001 predates the declaration; AC-999 is a criterion, not a goal");
+  assert.equal(s.daysSince, 10);
+});
+
+test("readPhaseStaleness — a missing / unparseable / non-repo carrier is NOT-EVALUATED with null, never 0 (AC3)", () => {
+  const missing = makeRepo({ "impl.ts": lines(2) });
+  const a = readPhaseStaleness(missing);
+  assert.equal(a.evaluated, false, "no carrier ⇒ not evaluated, not 'fresh'");
+  assert.equal(a.commitsSince, null, "⛔ 0 would mean 'declared at HEAD'");
+  assert.equal(a.newGoalsSince, null);
+  assert.equal(a.daysSince, null);
+  assert.match(a.reason, /^carrier-missing:/);
+
+  const corrupt = makeRepo({ "impl.ts": lines(2) });
+  fs.mkdirSync(path.join(corrupt, ".quay"), { recursive: true });
+  fs.writeFileSync(carrier(corrupt), "{ this is not json");
+  const b = readPhaseStaleness(corrupt);
+  assert.equal(b.evaluated, false);
+  assert.equal(b.commitsSince, null);
+  assert.match(b.reason, /^carrier-unparseable:/);
+  assert.notEqual(a.reason.split(":")[0], b.reason.split(":")[0], "'no carrier' and 'unreadable carrier' must stay distinguishable");
+
+  // A readable carrier in a directory git cannot answer for: the git read is the failure, named.
+  const notGit = fs.mkdtempSync(path.join(os.tmpdir(), "phase-declare-nogit-"));
+  TMP_DIRS.push(notGit);
+  fs.mkdirSync(path.join(notGit, ".quay"), { recursive: true });
+  fs.writeFileSync(path.join(notGit, STATE_REL), JSON.stringify(CARRIER_STATE));
+  const c = readPhaseStaleness(notGit);
+  assert.equal(c.evaluated, false);
+  assert.equal(c.commitsSince, null);
+  assert.match(c.reason, /^git-unavailable:/);
+
+  // The CLI's read-only face carries the SAME three-valued answer (exit 3 = NOT-EVALUATED).
+  const cli = declare(missing, ["--staleness", "--json"]);
+  assert.equal(cli.status, 3, `NOT-EVALUATED must not exit 0; stderr=${cli.stderr}`);
+  const printed = JSON.parse(cli.stdout);
+  assert.equal(printed.evaluated, false);
+  assert.equal(printed.commitsSince, null);
+});
+
+test("--staleness is READ-ONLY: the carrier's bytes and the whole worktree are unchanged (AC2)", () => {
+  const dir = makeRepo({
+    "impl.ts": lines(3),
+    [path.join(".quay", "two-phase-state.json")]: JSON.stringify(CARRIER_STATE, null, 2) + "\n",
+  });
+  const p = carrier(dir);
+  const before = fs.readFileSync(p);
+  // The fixture's carrier is COMMITTED, so "git status empty" is a real no-write assertion and not
+  // merely "the file was untracked all along".
+  assert.equal(run("git", ["status", "--porcelain"], dir).trim(), "");
+
+  const r = declare(dir, ["--staleness", "--json"]);
+  assert.equal(r.status, 0, r.stderr);
+  const printed = JSON.parse(r.stdout);
+  assert.equal(printed.evaluated, true);
+  assert.equal(printed.phase, "convergence");
+  assert.equal(printed.commitsSince, 1);
+
+  assert.deepEqual(fs.readFileSync(p), before, "the reading must not touch the carrier");
+  assert.equal(run("git", ["status", "--porcelain"], dir).trim(), "", "the reading must not create or modify ANY file");
+  assert.equal(run("git", ["status", "--porcelain", "--", STATE_REL], dir).trim(), "");
+});
+
+test("--staleness cannot be combined with a declaration (it is a reading, not a write)", () => {
+  const dir = makeRepo({ "impl.ts": lines(3) });
+  const r = declare(dir, ["--staleness", "--to", "expansion", "--reason", "fixture: must be refused"]);
+  assert.equal(r.status, 2);
+  assert.ok(!fs.existsSync(carrier(dir)), "a refused combination writes nothing");
 });

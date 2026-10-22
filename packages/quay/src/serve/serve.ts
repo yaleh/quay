@@ -37,7 +37,7 @@ import { startBoardSnapshotRefresh } from "./serve-board.ts";
 // plugin/scripts/driver-shared.ts; the kernel home makes it an in-package one.
 import { serveControlPlane, CONTROL_PLANE_DEFAULT_HOST, type ControlPlaneHandle } from "../kernel/control-plane-http.ts";
 import { resolveServeBinding } from "./serve-binding.ts";
-import { writeServerState, removeServerState, pidAlive, CONTROL_PLANE_NAME } from "./server-state.ts";
+import { writeServerState, removeServerState, pidAlive, CONTROL_PLANE_NAME } from "../core/server-state.ts";
 import { writeJsonAtomic } from "../kernel/write-json-atomic.ts";
 // The pid-reuse guard for the admission lock (see `inspectAdmissionLock`): a recycled pid that is
 // alive but is NOT a `quay serve` must be judged STALE, not "held". Both predicates are

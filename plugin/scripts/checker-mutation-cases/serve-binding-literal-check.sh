@@ -34,7 +34,7 @@ workdir="${1:?usage: $name.sh <workdir>}"
 checker_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 repo_root="$(cd "${checker_dir}/../.." && pwd -P)"
 
-mkdir -p "${workdir}/packages/quay/src/serve" "${workdir}/plugin/scripts" "${workdir}/plugin/skills/drivers"
+mkdir -p "${workdir}/packages/quay/src/serve" "${workdir}/packages/quay/src/core" "${workdir}/plugin/scripts" "${workdir}/plugin/skills/drivers"
 cd "${workdir}"
 
 # The host under test, read from the ONE declaration allowed to hold it (never spelled here).
@@ -48,13 +48,13 @@ fi
 FIXTURE_FILES=(
   packages/quay/src/serve/serve-binding.ts
   packages/quay/src/serve/serve.ts
-  packages/quay/src/serve/server-state.ts
+  packages/quay/src/core/server-state.ts
   packages/quay/src/elsewhere.ts
   plugin/scripts/some-spawner.ts
   plugin/skills/drivers/SKILL.md
 )
 write_clean() {
-  mkdir -p packages/quay/src/serve plugin/scripts plugin/skills/drivers
+  mkdir -p packages/quay/src/serve packages/quay/src/core plugin/scripts plugin/skills/drivers
   rm -f "${FIXTURE_FILES[@]}"
   # The declaration (marker on its own line) + the doc surface that restates the value.
   printf 'export const SERVE_BINDING_FALLBACK = { host: "%s", port: 0 };\n' "${host}" \
@@ -125,7 +125,7 @@ fi
 # NEGATIVE CONTROL: an ALLOWLISTED file's quoted address (a wildcard→probeable normaliser) is
 # ADVISORY — it must never be a false red.
 write_clean
-printf 'if (h === "%s") return "probe-addr";\n' "${host}" > packages/quay/src/serve/server-state.ts
+printf 'if (h === "%s") return "probe-addr";\n' "${host}" > packages/quay/src/core/server-state.ts
 if checker_cmd; then :; else
   echo "FALSE-RED — an allowlisted file's quoted address reddened the checker (负控制未生效: it is a different 口径, advisory only)" >&2
   exit 4

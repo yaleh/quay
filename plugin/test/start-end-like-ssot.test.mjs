@@ -43,7 +43,7 @@ function _findRepoRoot(startDir) {
 }
 const REPO_ROOT = _findRepoRoot(__dirname);
 
-const LEAF_REL = "packages/quay/src/start-end-like.ts";
+const LEAF_REL = "packages/quay/src/kernel/start-end-like.ts";
 const CORE_CONSUMER_REL = "packages/quay/src/observation.ts";
 const PLUGIN_CONSUMER_REL = "plugin/scripts/fast-mode-telemetry.ts";
 

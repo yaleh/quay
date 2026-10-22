@@ -230,3 +230,11 @@ JUDGMENT：**稀有但活着，不是腐烂。** 只有恢复阶梯整体耗尽�
 - plugin/scripts/quality-gate-driver.ts
 - plugin/test/quality-gate-driver.test.mjs
 - plugin/scripts/driver-runtime.ts
+
+## Blocker
+
+**2026-10-22T00:13:22.769Z — worker 未落地（exited-not-landed）**
+
+- 未落地原因：step=suite: AssertionError [ERR_ASSERTION]: the real publish script FAILED (exit 1): [baseline A/B: HARD RED (changed-assertion) — the task's red set is NOT a subset of the develop baseline red set: added=plugin/test/shipped-shell-reachability.test.mjs,plugin/test/shipped-shell-reachability.test.mjs,plugin/test/shipped-shell-reachability.test.mjs,plugin/test/shipped-shell-reachability.test.mjs changed=packages/quay/test/build-plugin-dist.test.mjs]
+- run_id：wk-prod-anchor
+- session_id：f425f148-7942-451e-ba75-1c1361578d9a

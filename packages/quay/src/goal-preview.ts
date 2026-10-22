@@ -44,7 +44,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { spawn } from "node:child_process";
 import { goalCriterionWorktreeDir, realpathOrSelf } from "./core/goal-store.ts";
-import { readServerState, pidAlive } from "./serve/server-state.ts";
+import { readServerState, pidAlive } from "./core/server-state.ts";
 import {
   entryExists,
   worktreeDepsInstallCommand,

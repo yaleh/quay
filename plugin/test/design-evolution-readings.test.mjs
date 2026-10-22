@@ -583,6 +583,45 @@ test("buildReadings — both RMs land in ONE record; evaluated is the AND of the
   assert.match(rec2.reason, /rm1: bad: baseline-unresolvable/);
 });
 
+test("buildReadings — the ADR-008 phase staleness rides along as ATTACHED info and never changes evaluated", (t) => {
+  const repo = makeRepo(t);
+  repo.write("mod/central.ts", 100);
+  const base = repo.commit("baseline");
+  repo.write("mod/central.ts", 110);
+  repo.commit("grow");
+  fs.mkdirSync(path.join(repo.dir, ".quay"), { recursive: true });
+  fs.writeFileSync(path.join(repo.dir, ".quay", "worker-outcome.jsonl"), "");
+  const subsystems = [{ name: "m", baseline: base, central: [{ atBaseline: "mod/central.ts", atHead: "mod/central.ts" }], modules: ["mod/*.ts"] }];
+
+  // (a) No phase carrier: the ATTACHED reading is NOT-EVALUATED (null, ⛔ not 0) while the ROUND is
+  // still evaluated — a missing declaration must never look like a failed design-evolution round.
+  const noCarrier = buildReadings(repo.dir, { ts: "2026-01-10T00:00:00.000Z", subsystems });
+  assert.equal(noCarrier.evaluated, true);
+  assert.equal(noCarrier.phaseStaleness.evaluated, false);
+  assert.match(noCarrier.phaseStaleness.reason, /carrier-missing/);
+  assert.equal(noCarrier.phaseStaleness.commitsSince, null);
+
+  // (b) With a carrier: the reading is EMBEDDED verbatim, and a stale declaration is still content —
+  // the round's own verdict is byte-for-byte the one it had before the field existed.
+  fs.writeFileSync(
+    path.join(repo.dir, ".quay", "two-phase-state.json"),
+    JSON.stringify({
+      phase: "convergence",
+      declaredAt: "2026-01-01T00:00:00.000Z",
+      reason: "fixture",
+      history: [{ phase: "convergence", declaredAt: "2026-01-01T00:00:00.000Z", reason: "fixture" }],
+    }),
+  );
+  const withCarrier = buildReadings(repo.dir, { ts: "2026-01-10T00:00:00.000Z", subsystems });
+  assert.equal(withCarrier.evaluated, true, "a stale declaration is content, ⛔ not a failed round");
+  assert.equal(withCarrier.reason, null);
+  assert.equal(withCarrier.phaseStaleness.evaluated, true);
+  assert.equal(withCarrier.phaseStaleness.phase, "convergence");
+  assert.equal(withCarrier.phaseStaleness.declarations, 1);
+  assert.equal(withCarrier.phaseStaleness.daysSince, 9, "`ts` is the deterministic clock for the distance");
+  assert.equal(typeof withCarrier.phaseStaleness.commitsSince, "number");
+});
+
 test("buildReadings — declaring NO subsystem is a named not-evaluated RM1, never a silent pass", (t) => {
   const repo = makeRepo(t);
   repo.write("x.ts", 1);
@@ -689,7 +728,15 @@ test("AC2 (real history) — the unified formula reproduces the finding's correc
     name: "serve",
     baseline: "295e771b0",
     central: [{ atBaseline: "packages/quay/src/serve-handlers.ts", atHead: "packages/quay/src/serve/serve-handlers.ts" }],
-    modules: ["packages/quay/src/serve*.ts", "packages/quay/src/server-state*.ts", "packages/quay/src/serve/*.ts"],
+    // server-state.ts moved serve/ -> core/ (gap-arch-directory-cycle-src-observation-serve): it is
+    // still this subsystem's runtime state carrier, so the glob follows the file. Without the core/
+    // arm the module set would silently shrink by the file and the reading would drift (11644 -> 11306).
+    modules: [
+      "packages/quay/src/serve*.ts",
+      "packages/quay/src/server-state*.ts",
+      "packages/quay/src/serve/*.ts",
+      "packages/quay/src/core/server-state*.ts",
+    ],
   });
   assert.equal(serve.evaluated, true, serve.reason ?? "");
   assert.equal(serve.centralDelta, 153);

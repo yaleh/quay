@@ -28,6 +28,15 @@ export function parseFrontmatterCompletely(frontmatterRaw) {
 Because they share the same parse, a field added to the schema is visible to all three
 automatically — there is no second parser to keep in sync.
 
+> (2026-10-22 correction: `store.parse()` does **not** call the `task-schema.ts` function. It imports
+> `parseFrontmatterCompletely` from the product-layer copy `packages/quay/src/task-parsing.ts`
+> (`grep -n parseFrontmatterCompletely packages/quay-native/src/store.ts`; already true at this doc's
+> last commit `fc9b00cec`). So there are **two** copies, `plugin/scripts/task-schema.ts` (used by `parseTask()` /
+> `readDependsOn()`) and `packages/quay/src/task-parsing.ts` (used by `store.parse()`). They are pinned
+> behaviorally identical by `plugin/test/task-parsing-parity.test.mjs`, not shared by import. The
+> commits to `task-schema.ts` since `fc9b00cec` (`git log fc9b00cec..HEAD -- plugin/scripts/task-schema.ts`)
+> only touch heading escaping and `countAcCheckboxes`. They change no claim in this document.)
+
 ## Canonical schema (TypeScript interface)
 
 The complete field set a task frontmatter may carry (unknown keys are preserved, never dropped):

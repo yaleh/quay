@@ -8,7 +8,7 @@
 // expand-then-check — see the PARSE-SOURCE NOTE below, kept verbatim with the parser.
 import fs from "node:fs";
 import path from "node:path";
-import { TASK_STATUS } from "../abi.ts";
+import { TASK_STATUS } from "../core/types.ts";
 import { parseFrontmatter } from "../core/frontmatter-store-base.ts";
 // Touches annotation stripping — the ONE kernel definition, shared with plugin/scripts/touches-parser.ts
 // (task gap-three-pure-judges-kernel-single-def for the full-width half, and

@@ -66,7 +66,7 @@ export const DOC_SURFACE_REL = "plugin/skills/drivers/SKILL.md";
  */
 export const ADVISORY_ALLOWLIST: ReadonlyArray<{ rel: string; reason: string }> = [
   {
-    rel: "packages/quay/src/serve/server-state.ts",
+    rel: "packages/quay/src/core/server-state.ts",
     reason: "normalises a wildcard bind host to a PROBEABLE address (the port-probe helper); it compares/derives, it does not define a bind default",
   },
   {

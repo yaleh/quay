@@ -44,7 +44,7 @@ import {
   probeControlService,
   serverStatePath,
   type ServiceProbe,
-} from "../serve/server-state.ts";
+} from "../core/server-state.ts";
 // The service inventory + desired-state carrier are SINGLE-SOURCED in serve.ts (the service-lifecycle
 // host). `status` used to import only server-state.ts; it now shares the host's own vocabulary, so
 // 「CLI 认得的服务名」 and 「宿主承载的服务名」 cannot drift into two lists (SPEC §6.8 单一实现).

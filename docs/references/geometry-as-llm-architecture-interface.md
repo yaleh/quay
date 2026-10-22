@@ -293,3 +293,44 @@ attractor/barrier 的对偶只在**保守势景的理想化**里成立。LLM 的
 - 集成验收：`scripts/e2e-executor.sh`、`scripts/fixpoint-task12.sh`（实跑三场景全绿）。
 - 设计背景：`docs/proposal-v3.md`（hub 网络 + session/subagent 非对称表）、
   `docs/spike-subagent-monitor.md`（TASK-7.1 subagent 能力实测）。
+
+## 附录（2026-10-22 增补）：连续量的三项目读数，与层次一的两根新暗轴
+
+> 只增补，不改正文。正文 §4「本征维度——假的严谨」与 §7「连续动力学：假统一」的判定**不变**；变的是理由。
+> 本附录与 `adr/ADR-006` 的「Amended 2026-10-22」块（人 2026-10-22 批准）对齐。
+
+### A. 连续量：三个项目，0 次预测
+
+正文 §4 的理由是「没算、也基本算不了」。这个前提已经过时：archguard 现在会计算架构本征维度
+（`archguard_get_intrinsic_dimension`，历史存于 `.archguard/arch-health-history.json`）。它在三个项目里的全部读数如下
+（2026-10-22 用该 MCP 工具复取）：
+
+| 项目 | 载体读数 | 工具给出的 trend | 是否可比 |
+|---|---|---|---|
+| quay | 2 个快照：2026-10-01T08:30Z `dInt 126`、normalized 0.1465、860 实体、mode `direct`；2026-10-08T07:29Z `dInt 99`、normalized 0.0972、1018 实体、mode `jl` | `"decreasing"` | **不可比**：mode 与实体数都变了，差值里混着系统的变化和仪器的变化（硬规则 4b） |
+| plantuml-js | 1 个快照：2026-10-21T10:52Z `dInt 12`、normalized 0.2182、55 实体、mode `direct` | `"stable"` | 单点，没有趋势可言 |
+| quay（早期） | 会话 `0c7f9f5e`（2026-09-25T04:19Z）：`{current:null, history:[], trend:"stable"}` | `"stable"` | 未评估，却与「稳定」同形。当场被列为 archguard 缺陷（「『无法评估』和『合格』同形」）；archguard 随后修成 `evaluated:false, reason:no_arch_health_history`（同一会话 09-30 复测已修） |
+
+**三个项目里，这个连续量做出的、先于结果的预测：0 次。** 两个非空 trend 标签一个建立在不可比的两点上，一个建立在单点上；
+第三个是未评估态冒充稳定。这与正文 §4「零样本外验证」的结论一致，只是证据从「没有读数」换成了「有读数但没校准」。
+
+**现状定级：「可计算，未校准」**（ADR-006 2026-10-22 修正的原词）。拒绝仍然有效，但拒绝的理由从「算不了」改成了「没校准」。
+**晋升路径**（照抄 ADR-006，本文不另设）：`d_int` 要作为决策证据被引用，必须同时满足：① 每个用到的快照都用**固定的
+计算 mode**（`direct` / `jl` 之一，参数固定）；② **≥ N 个同 mode 快照**，N 写在第 ③ 条的预注册里，不事后挑；
+③ **一次预注册的样本外预测命中**（例如：在窗口关闭前登记 `d_int` 的变化，用它预测 `design-evolution-readings`
+在该窗口的中心增长占比）。不中就记为不中，路径从头再来。满足之前，正文的「假统一」判定照旧。
+
+### B. 对正文 §7 分级的注记：层次一多了两根经确认的暗轴
+
+正文 §7 把**层次一（目标闭包：能指出哪根轴还暗）**定为「证据充分」。2026-10-20 → 10-22 在 quay 上又确认了两次，都是
+既有仪器没有命名的暗轴（详见 `adr/ADR-006`、`adr/ADR-004`、`adr/ADR-007` 的 2026-10-22 修正，以及
+`docs/references/维度边界与结晶——从熔融实现中发现原则.md` §11、`docs/references/ownership-first-refactoring-methodology.md` §13）：
+
+- **增长方向轴**：增长落在子系统中心，还是落在中心之外。载体 `.quay/design-evolution-history.jsonl` 的
+  2026-10-22T00:40Z 记录：serve 中心增长占比 1%（基线 `295e771b0`），`worker-history` 82%（基线 `2440b52d0` → `ff32d031d`）。
+  这里给的是逐子系统读数；同一轮的聚合结果是 `evaluated:false`，因为 `worker-post-909` 的分母为 0。
+- **仪器活性轴**：声明了的检查是否真的在真实输入上跑。例：`.quay/config.yml` 声明的 18 个闸（含 `adr-007`）在
+  `.quay/gate-events.jsonl` 中事件数全部为 0；`arch-cycle-report` 在 2026-10-18T10:25Z → 10-22T00:40Z 的 26/26 轮
+  都是 `evaluated:false`（2026-10-22 复读）。
+
+这两例让层次一的「证据充分」多了两次新的命中（两者出自同一轮 ADR 重评，不算彼此独立）。层次二、层次三与连续动力学层的分级**均不变**。

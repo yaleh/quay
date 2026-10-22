@@ -12,6 +12,12 @@
 // (Core leaf + plugin import): the pair moved into Core as the single definition, and both
 // consumers import it.
 //
+// ⛔ IT LIVES IN `kernel/` (task gap-arch-directory-cycle-src-observation-serve / AC-917): it has
+// ZERO imports, so it is a pure shared leaf both `packages/**` and `plugin/scripts/**` may reach —
+// exactly what the kernel boundary is for (import-graph-check.ts FOURTH RULE). While it sat at the
+// src root, `observation/events.ts` had to climb out of its own directory to reach it, closing a
+// directory cycle {".", "observation", "serve"}. Keep this file import-free.
+//
 // CLASSIFICATION IS BY TIMING MARKER PRESENCE, not the `eventKind` extra field alone (DEFECT-4
 // fix): `eventKind` is not in A1a REQUIRED_FIELDS and `validateEvent` allows unknown extra fields,
 // so a hand-edited Fast event may lack it. An event with no `eventKind` at all is still start-like

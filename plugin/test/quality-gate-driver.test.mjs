@@ -2834,6 +2834,66 @@ test("runDesignEvolutionRound — AC5: ONE record carries RM1 + RM2 + the larges
   assert.equal(rec.rm2.carrierRecords, 1);
 });
 
+test("runDesignEvolutionRound — the Fact carries the ADR-008 phase staleness WITHOUT changing its state", (t) => {
+  // gap-adr008-phase-declaration-staleness-reading: the reading rides along in the EXISTING Fact.
+  // The load-bearing assertion is the negative one — an unreadable/late declaration must not turn the
+  // routine red, because the reading is content, not a verdict (Plan §3/§4).
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "qg-de-phase-"));
+  t.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
+  const repo = path.join(tmp, "repo");
+  fs.mkdirSync(path.join(repo, "mod"), { recursive: true });
+  fs.mkdirSync(path.join(repo, ".quay"), { recursive: true });
+  const env = { ...process.env, GIT_AUTHOR_NAME: "de fixture", GIT_AUTHOR_EMAIL: "de@example.invalid", GIT_COMMITTER_NAME: "de fixture", GIT_COMMITTER_EMAIL: "de@example.invalid" };
+  const go = (...args) => {
+    const r = spawnSync("git", ["-C", repo, ...args], { env, encoding: "utf8" });
+    assert.equal(r.status, 0, `git ${args.join(" ")} failed: ${r.stderr}`);
+  };
+  const write = (rel, n) => fs.writeFileSync(path.join(repo, rel), Array.from({ length: n }, (_, i) => `l${i}`).join("\n") + "\n");
+  write("mod/central.ts", 100);
+  go("init", "-q");
+  go("add", "-A");
+  go("commit", "-q", "-m", "baseline");
+  const baseline = spawnSync("git", ["-C", repo, "rev-parse", "HEAD"], { encoding: "utf8" }).stdout.trim();
+  write("mod/central.ts", 110);
+  go("add", "-A");
+  go("commit", "-q", "-m", "grow");
+  fs.writeFileSync(path.join(repo, ".quay", "worker-outcome.jsonl"), "");
+  fs.writeFileSync(
+    path.join(repo, ".quay", "two-phase-state.json"),
+    JSON.stringify({
+      phase: "convergence",
+      declaredAt: "2026-01-01T00:00:00.000Z",
+      reason: "fixture",
+      history: [{ phase: "convergence", declaredAt: "2026-01-01T00:00:00.000Z", reason: "fixture" }],
+    }),
+  );
+  const opts = {
+    config: {
+      enabled: true, intervalMinutes: 360, topN: 10,
+      subsystems: [{ name: "m", baseline, central: [{ atBaseline: "mod/central.ts", atHead: "mod/central.ts" }], modules: ["mod/*.ts"] }],
+    },
+    configPresent: true, configError: null, historyPath: path.join(tmp, "history.jsonl"), now: "T0",
+  };
+
+  const fact = runDesignEvolutionRound(repo, opts);
+  assert.equal(fact.state, "verified", fact.reason ?? "");
+  assert.equal(fact.value.phaseStaleness.evaluated, true);
+  assert.equal(fact.value.phaseStaleness.phase, "convergence");
+  assert.equal(fact.value.phaseStaleness.declarations, 1);
+  // ONE reading, ONE shape: the carrier line and the Fact carry the identical embedded object.
+  const line = JSON.parse(fs.readFileSync(opts.historyPath, "utf8").split("\n").filter((l) => l !== "")[0]);
+  assert.deepEqual(line.phaseStaleness, fact.value.phaseStaleness);
+
+  // Negative control: with NO phase carrier the attached reading is NOT-EVALUATED, and the round is
+  // STILL `verified` — the field can never become a hidden gate.
+  fs.rmSync(path.join(repo, ".quay", "two-phase-state.json"));
+  const fact2 = runDesignEvolutionRound(repo, opts);
+  assert.equal(fact2.state, "verified", "a missing phase carrier must not red the design-evolution round");
+  assert.equal(fact2.value.phaseStaleness.evaluated, false);
+  assert.equal(fact2.value.phaseStaleness.commitsSince, null);
+  assert.match(fact2.value.phaseStaleness.reason, /carrier-missing/);
+});
+
 test("runDesignEvolutionRound — a reading that CANNOT be taken still appends a line (not-evaluated, not silence)", (t) => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "qg-de-noteval-"));
   t.after(() => fs.rmSync(tmp, { recursive: true, force: true }));

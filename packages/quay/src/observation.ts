@@ -50,8 +50,8 @@ import { promisify } from "node:util";
 import { QUAY_VERSION } from "./version.ts";
 // The ONE definition of fast-mode start/end classification — shared with the plugin's
 // fast-mode-telemetry.ts (the writer/`--report` reader of the same `.workflow-events/*.jsonl`
-// store), NOT a hand-maintained mirror of it. See start-end-like.ts's header.
-import { isStartLike, isEndLike } from "./start-end-like.ts";
+// store), NOT a hand-maintained mirror of it. See kernel/start-end-like.ts's header.
+import { isStartLike, isEndLike } from "./kernel/start-end-like.ts";
 import { parseFrontmatter } from "./core/frontmatter-store-base.ts";
 import { TASK_STATUS, isTaskStatus, type TaskStatus } from "./abi.ts";
 import { resolvePluginScript, resolvePluginScriptExec, resolveOrchestrationFile } from "./core/plugin-root.ts";
@@ -191,7 +191,7 @@ export interface JournalResult {
  * Start/end classification — was an "EXACT mirror" of fast-mode-telemetry.ts aggregate()'s
  * semantics, pinned by a source-level doc comment and nothing else. It is now the SAME definition,
  * not a mirror: both readers of `.workflow-events/*.jsonl` import these two predicates from
- * `./start-end-like.ts` (gap-routine-semantic-dedup-scan-is-start-end-like-cross-surface). The
+ * `./kernel/start-end-like.ts` (gap-routine-semantic-dedup-scan-is-start-end-like-cross-surface). The
  * declared-mirror form could drift silently — the plugin's copy and this one were byte-identical
  * in body, so any future edit to one alone would make the web view and `--report` disagree about
  * which runs are in-flight, with no test naming either predicate. Re-exported so the SSOT ratchet

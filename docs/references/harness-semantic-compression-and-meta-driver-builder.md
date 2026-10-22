@@ -57,8 +57,16 @@
 |---|---|---|
 | Task execution（单个任务 ready→done） | **真实运作** | GOAL-030~033 的每一个 slice task |
 | Goal/investigation decomposition（一个 Goal 拆成少量串行 task） | **真实运作** | GOAL-030~033 本身（branch:true Goal 的标准流程） |
-| Meta-driver proposal（对某个长期语义维度持续判断、产出结构化 proposal） | **真实但单一窄域，且当前故障**（见第 6 节） | 现有 `meta-driver.ts` |
-| Meta-driver builder（对"如何正确切分一个新问题"这个模式本身建模/回放/固化） | **纯设计假设，零实现** | 第 7、8 节 |
+| Meta-driver proposal（对某个长期语义维度持续判断、产出结构化 proposal） | **真实但单一窄域**；~~当前故障~~（2026-10-22 更正：该故障已由 `2f847618d`/`b6918b3bf`（2026-10-09）修复，见第 6 节更正） | 现有 `meta-driver.ts` |
+| Meta-driver builder（对"如何正确切分一个新问题"这个模式本身建模/回放/固化） | **纯设计假设，零实现**（2026-10-22 复核仍成立：builder 本体、Learning Store、Evolution Planner 在 `plugin/scripts` + `packages/*/src` 中 `grep -rli` 零命中）；**但其上游"discover"一步自 2026-10-11 起已有真实运作的机件**（发现层，见下方更正注） | 第 7、8 节 |
+
+> （2026-10-22 更正：发现层已存在，属第 8 节六步管线的 discover 一步，**不是** builder 本身。）
+> 截至 2026-10-22，`git log --diff-filter=A` 可查的首提交与 `wc -l` 行数：
+> `plugin/scripts/arch-discovery-routine.ts`（`cc29454f8`，10-11，734 行）、`discovery-method-routine.ts`
+> （`37f51b5e7`，10-12，2246 行）、`open-semantic-discovery-routine.ts`（`b910035d6`，10-13，5596 行）、
+> `cross-project-dogfood-routine.ts`（`1b970a78e`，10-13，1533 行，载体 `.quay/cross-project-dogfood-findings.jsonl`）、
+> `discovery-closed-loop-report.ts`（`8b1e73193`，10-14，1148 行）。各载体当前读数以
+> `node --experimental-strip-types plugin/scripts/discovery-closed-loop-report.ts --host=local=<repo>` 为准，不在此抄快照。
 
 **越往下越接近"分解本身被 harness 化"（0.1 的第二条必要条件），当前进度也越稀薄**——这张表本身就是对"这条母命题离兑现还有多远"的一次诚实度量，不是进度宣传。
 
@@ -130,6 +138,10 @@
 
 - **真实存在、生产运行**：`plugin/scripts/meta-driver.ts` + `plugin/probes/meta-driver.md`。按 `adr/ADR-033`（schema-agent）的机械/语义分工：脚本做算术/gating，一个独立的 `claude -p` 探针做语义判断（divergence 解读、新 AC 提案、autoDrive 机制识别、决策路由、META 消息分流）。它是**单一领域**（goal-criterion divergence）的驱动，不是驱动组合，不是 builder。
 - **⚠️ 现场核实到的真实缺陷（作为本文§1「静默失败/压扁原理」的活体例证，不是假设）**：`.quay/meta-driver-round.jsonl` 显示语义半边自 **2026-09-14** 起持续失败（`"routine threw: snapshotTrackedChanges is not defined"`），截至 2026-10-09 已 **1,738 条失败记录、0 条验证通过**，而机械心跳整段时间照常跳动，看起来"一切正常"。这正是 `维度边界与结晶` §2.2 描述的"静默失败与一切正常同形"——不是比喻，是同一个机制自己踩中了自己描述的陷阱。**该文件不入版本库，此读数是现场检查的快照，会随时间推进；本文不据此创建修复任务（用户本轮指令范围排除）。**
+  （2026-10-22 更正：该缺陷已由 `2f847618d` / `b6918b3bf`（2026-10-09，"import (not just re-export) snapshotTrackedChanges/probeWriteViolations"）修复。
+  当前 `.quay/meta-driver-round.jsonl` 首条记录始于 2026-10-11，截至 2026-10-22 `grep -c snapshotTrackedChanges .quay/meta-driver-round.jsonl` = 0，
+  `grep -o 'routine threw[^"]*'` 仅 1 条且为另一原因（`goal-store list failed`）。该文件近 1GB，复核用 `grep -c`，不要 `cat`。
+  上面的 1,738 条读数保留为 2026-10-09 的历史快照，它作为"静默失败与一切正常同形"例证的论证不变。）
 - `orchestration/meta-driver-focus.md`（人工方向的转向通道）机械上每轮都读，但内容"暂无具体人工方向"从未被真正使用过——`维度边界与结晶` §4.4 "结晶到脚本 ≠ 结晶到习惯"的又一独立实例。
 - `orchestration/SPEC-capability-planes-and-mechanism-lifecycle-2026-09-05.md` §12.2/§12.3 已经写过一版"driver-candidate 提名管线"（discover → 提议 `label:driver-candidate` 任务 → 人裁定 → 实现），该 SPEC 自己承认"是 prose 指令，没有机械闸验证它真的被执行过"——**设计已存在，零实现**，与本文第 7、8 节重叠，第 7、8 节应视为对它的具体化，不是平行发明。
 - `docs/proposals/local-multi-project-coevolution-pilot.md` + `docs/proposals/quay-control-plane-host-adapters-human-control-surface.md`：跨项目（quay/meta-cc/archguard）协同的联邦式设计，Stage 0/4，**文档顶部明确声明"仅为架构讨论，不授权任何全局 loop/daemon/Host Adapter/任务联邦"**，且这条边界有一个活的机械守卫（`plugin/scripts/codex-stage1-selfcheck.sh:59-63`）防止它被提前接线。
@@ -225,13 +237,13 @@ discover recurring concern
 - **退役/归并侧几乎零工具化**（第 7.4 节）——两份独立分析（`crystallization-the-contraction-phase-has-no-mechanism.md`、`archguard-generation-era-primitives.md` §2.7）都确认收缩相从未被机制触发。任何 meta-driver builder 设计如果只写孵化、不写退役，就是在复制这个已知未解的缺口。
 - **"有产物"不自动等于"有效"**（`crystallization-half-life.md`）——有执行强制物的规则，复发率没有可测量地低于没有的。本文第 10 节的全部候选指标都应该在这条阴影下被看待：先验地相信"接上 builder 就会变好"是没有证据支持的。
 - **元机制规模倒挂**（`exp6-queue-driven-concurrent-executor.md` 引用的实测：方法学层体量是产品层的 3.7 倍，与 `adr/ADR-021` 的"元机制应比被治理对象小一个量级"要求方向相反）——任何新的 builder/incubator 代码，必须先问自己是不是又在加重这个倒挂，而不是默认"再加一层协调就会更好"。
-- **当前唯一真实存在的 meta-driver 本身正处于第 6 节描述的静默失败状态**（1,738 条失败、0 条验证通过，持续近一个月）——在讨论"如何孵化更多 meta-driver"之前，这个事实本身就是对"现有一个 driver 都没能做到可观测自愈"的提醒。
+- **当前唯一真实存在的 meta-driver 本身正处于第 6 节描述的静默失败状态**（1,738 条失败、0 条验证通过，持续近一个月）——在讨论"如何孵化更多 meta-driver"之前，这个事实本身就是对"现有一个 driver 都没能做到可观测自愈"的提醒。（2026-10-22 更正：该故障已于 2026-10-09 由 `2f847618d`/`b6918b3bf` 修复，现状读法见第 6 节更正注；修复是人发起的、不是 driver 自愈，故这条提醒的论点不变。）
 
 ## 13. 分级结论
 
 按本仓库既有的证据分级惯例（`维度边界与结晶` §8、`geometry-as-llm...md` §5/§7）：
 
-- **证据充分（已验证事实）**：GIT 框架的目标闭包层与迁移层（第 1、2 节）；ownership-first 重构的三次真实实例是硬形变/`Π_{S→E}` 的具体落地（第 4 节）；现有单一 meta-driver 的真实窄域范围与其当前的静默失败状态（第 6 节，现场核实）；退役/归役侧零工具化（第 12 节，两份独立分析交叉确认）；**GOAL-030~033 是四次真实、可核验、均已 achieved 并并入 `develop` 的任务分解实例，GOAL-033 最终实测 SCC 6→4（非立项时预期的 6→5，`fan-in` 随 `cli` 一并脱环）是"最小充分颗粒度"判据的真实样本，不是假设的例子**（第 0.2 节）。
+- **证据充分（已验证事实）**：GIT 框架的目标闭包层与迁移层（第 1、2 节）；ownership-first 重构的三次真实实例是硬形变/`Π_{S→E}` 的具体落地（第 4 节）；现有单一 meta-driver 的真实窄域范围与其 2026-09-14~10-09 的静默失败状态（第 6 节，现场核实；2026-10-22 更正：已修复，见第 6 节更正注）；退役/归役侧零工具化（第 12 节，两份独立分析交叉确认）；**GOAL-030~033 是四次真实、可核验、均已 achieved 并并入 `develop` 的任务分解实例，GOAL-033 最终实测 SCC 6→4（非立项时预期的 6→5，`fan-in` 随 `cli` 一并脱环）是"最小充分颗粒度"判据的真实样本，不是假设的例子**（第 0.2 节）。
 - **机制成立，待验（设计工作假设）**：第 7、8、9 节的 meta-driver builder 设计——结构上可以从既有的 §9 形变提出器 + `SPEC-capability-planes` §12.2 + `experiments/offline-replay` 三个既有构件拼出来，但**没有任何一步被实际跑过**；跨项目 bootstrap 能否真的发现（而非搬运）driver 组合，同属此档；**母命题本身"decomposition = 找 local chart，harness = chart 内压缩，稳定能力 = 喂给上一层的新 primitive"这套映射（第 0.3 节）是一个解释性框架，不是被测量验证过的机制**。
 - **工作假设，非定理**：「智能=信息压缩/流形搜索」整体表述（第 0、1、2、11 节）——继承自已被本项目自己审计过"假统一"的连续几何层，本文只在审计许可的三处含义下使用它。
 - **观察项（研究方向）**：第 10 节全部评价指标，含 semantic compression ratio / decision entropy——概念可定义，无实现、无验证，`crystallization-half-life.md` 是现成的反例警示，不作阻塞判据，也不作验收 KPI；**第 0.4 节"演化层级"表中的第四层（meta-driver builder 对分解本身建模/回放/固化）是全文最具推测性的一层，零实现，是后续实验的方向，不是现状描述**。

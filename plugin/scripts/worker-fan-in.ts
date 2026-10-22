@@ -71,6 +71,18 @@ import { defaultLaneCount, readLoadAvg, passedFileSet } from "./full-suite-runne
 import { SUITE_LOG_NOT_RUN_PREFIX, SUITE_LOG_RUN_START_PREFIX, SUITE_LOG_INCOMPLETE_PREFIX, SUITE_LOG_PLAN_PREFIX } from "./full-suite-runner.ts";
 import { buildPreVerifiedRoundRecord, appendPreVerifiedRound } from "./pre-verified-round-record.ts";
 import { splitTaskFile, statusFromFrontmatter, patchStatusField, commitTaskFile } from "./task-ops.ts";
+// ADR-007's PER-MILESTONE predicate at the mechanical flip (gap-mechanical-fan-in-flip-bypasses-
+// adr007-dark-axis-predicate). ⛔ NOT a second implementation: `classifyDarkAxisRecord` is Core's
+// single judgment and `taskBodyOf` is the CLI's single frontmatter stripper — the module below is
+// the very file the standalone CLI lives in, so the two faces cannot drift. The workspace switch is
+// `workspaceEnforcesDarkAxis` (lifecycle.ts), the SAME `gates.adr` declaration the ready→done verbs
+// use — no new config surface.
+import {
+  classifyDarkAxisRecord,
+  taskBodyOf,
+  type DarkAxisVerdict,
+} from "./dark-axis-record-check.ts";
+import { workspaceEnforcesDarkAxis } from "../../packages/quay/src/gate/lifecycle.ts";
 // gap-task-status-events-contract-v1: the fan-in's FOUR status writes (ready→done, the done→ready
 // "未落地" reset, the re-flip after it, and the goal-branch doc-face done) now emit the kernel's v1
 // transition event. Before this task the fan-in wrote ZERO events — the largest measured coverage
@@ -472,6 +484,10 @@ export interface MechanicalFanInOptions {
    *  `null` ⇒ **跳过**（hermetic 夹具的基线树自带 `scripts/test.sh`，不需 node_modules symlink/config 拷贝）；
    *  显式数组 ⇒ 用它。⛔ best-effort：provisioning 失败不致命（随后的重跑跑不起来 ⇒ 未评估 ⇒ 维持硬红）。 */
   baselineProvisionCommand?: string[] | null;
+  /** dark-axis 步读的任务文件（测试缝）；缺省 = `<worktree>/tasks/<task>.md`。
+   *  只为让 hermetic 夹具能到达 NOT-EVALUATED 分支（AC2）：该分支要求「文件读不出来」而 ac-gate
+   *  仍能过——同一文件同时满足两者在生产上不成立，故须显式指向。⛔ 生产不传。 */
+  darkAxisTaskFile?: string;
 }
 
 /** 机械 fan-in 单步失败的【结构化 verdict】（D6）：⛔ 不再是 `(stderr||stdout).trim()` 裸流。
@@ -1939,6 +1955,96 @@ export async function appendCompleteGateEvent(
   }
 }
 
+// ── ADR-007 per-milestone predicate on the MECHANICAL flip
+//    (gap-mechanical-fan-in-flip-bypasses-adr007-dark-axis-predicate) ────────────────────────────
+//
+// THE DEFECT: the predicate's only enforcement points were the lifecycle verbs
+// (`runComplete`/`runCompleteLoop`/`runCompleteOutOfBand` → `enforceDarkAxis`). The PRODUCTION
+// landing path is the mechanical fan-in, which writes `status: done` from its own frontmatter patch
+// (`flipTaskDone`) and never traverses them — measured 2026-10-22 at implementation time: 817
+// `complete` events vs 36 `dark-axis` events since 2026-09-14 (816 when the task was drafted; the
+// population moves as production lands), and replaying the predicate over the 794 distinct tasks the
+// driver landed gives MISSING 783 / DISCLAIMED 11 / RECORDED 0. The step below closes that hole:
+// it sits AFTER `ac-gate` and BEFORE `flipTaskDone`, and it is the same judgment, not a plugin-side
+// re-derivation (⛔ no second L_D/L_G regex — CLAUDE.md 硬规则 5b).
+
+/** The task-body classifier the mechanical flip uses, as a PATH-taking function so the AC3 evidence
+ *  can drive it over a whole task population exactly as the CLI does.
+ *
+ *  A file that cannot be READ is `NOT-EVALUATED`, its own value (硬规则 3b): "could not look" must
+ *  never wear the shape of a verdict about the body's content. This mirrors the CLI
+ *  (`dark-axis-record-check.ts`: a missing task file ⇒ exit 2), which is why the two faces agree
+ *  state-for-state over a read-only population (AC3). */
+export function darkAxisVerdictForTaskFile(taskFile: string): DarkAxisVerdict {
+  let text: string;
+  try {
+    text = fs.readFileSync(taskFile, "utf8");
+  } catch (e) {
+    return {
+      state: "NOT-EVALUATED",
+      readings: [],
+      disclaimer: null,
+      reason:
+        `NOT-EVALUATED — the task body could not be read at ${taskFile}: ${(e as Error)?.message ?? String(e)}. ` +
+        `An unreadable input is neither evidence of a record nor evidence of its absence (硬规则 3b).`,
+    };
+  }
+  return classifyDarkAxisRecord(taskBodyOf(text));
+}
+
+/** The file the mechanical flip classifies: the WORKTREE's task file (the tree that is about to be
+ *  merged), not the main checkout's copy — the body must be the one this landing carries. */
+export function darkAxisTaskFileFor(worktree: string, task: string): string {
+  return path.join(worktree, "tasks", `${task}.md`);
+}
+
+/** Map the four-state classification onto the gate ledger's three-value vocabulary
+ *  (`GateVerdictKind`). ⛔ MISSING and NOT-EVALUATED stay DISTINGUISHABLE in the ledger: collapsing
+ *  "nothing recorded" and "could not read" into one `fail` would recreate, one layer down, exactly
+ *  the conflation `classifyDarkAxisRecord` was built to avoid (硬规则 3b). */
+function darkAxisLedgerVerdict(state: DarkAxisVerdict["state"]): "pass" | "fail" | "not-evaluated" {
+  if (state === "RECORDED" || state === "DISCLAIMED") return "pass";
+  return state === "NOT-EVALUATED" ? "not-evaluated" : "fail";
+}
+
+/** Append the `dark-axis` GateEvent for ONE mechanical-flip judgment — via the SAME gate-event store
+ *  the CLI/loop/complete writer uses (⛔ never a hand-rolled JSONL append). The event is what turns
+ *  "complete / dark-axis ratio" into a directly readable quantity (the task's AC6), so unlike the
+ *  `complete` event (written after landing, where a failure must not block) this one is a
+ *  PRECONDITION: its caller treats a write failure as a refusal to flip — a judgment that leaves no
+ *  trace is indistinguishable from no judgment. actor is `quay-driver` (the fan-in's own identity,
+ *  matching `appendCompleteGateEvent`'s default). */
+export async function appendDarkAxisGateEvent(
+  root: string,
+  task: string,
+  verdict: DarkAxisVerdict,
+  ctx: { runId?: string } = {},
+): Promise<{ ok: boolean; reason: string | null }> {
+  try {
+    const { appendGateEvent } = await import(
+      "../../packages/quay/src/gate/gate-event-store.ts"
+    ) as { appendGateEvent: (logPath: string, event: unknown) => void };
+    appendGateEvent(path.join(root, ".quay", "gate-events.jsonl"), {
+      id: randomUUID(),
+      item_id: task,
+      pipeline_id: task,
+      gate: "dark-axis",
+      actor: "quay-driver",
+      verdict: darkAxisLedgerVerdict(verdict.state),
+      timestamp: new Date().toISOString(),
+      payload: {
+        state: verdict.state,
+        reason: `dark-axis (ADR-007 per-milestone predicate): ${verdict.reason}`,
+        step: "mechanical-fan-in",
+        ...(ctx.runId ? { runId: ctx.runId } : {}),
+      },
+    });
+    return { ok: true, reason: null };
+  } catch (e) {
+    return { ok: false, reason: (e as Error)?.message ?? String(e) };
+  }
+}
+
 /** gap-mechanical-fan-in-per-suite-runid-unified — 生成一次机械 fan-in 的 per-suite runId
  *  （`mfi-<task>-<epoch-ms>-<rand>`）。⛔ 不用共享的 wk-prod（那是 driver 轮次号，一 driver 轮次内多个
  *  suite 共用，不能当 suite 身份）；也⛔ 不把 runId（fan-in 过程身份，锁/日志/ff 用它）当 suite 身份——
@@ -3224,6 +3330,43 @@ export async function runMechanicalFanIn(opts: MechanicalFanInOptions): Promise<
     if (!a.ok) return fail("anti-drift-land", a);
     a = await step("ac-gate", [...acGate, "--task", task, "--worktree", worktree], 60_000);
     if (!a.ok) return fail("ac-gate", a);
+    // 8.5 ADR-007 per-milestone predicate (gap-mechanical-fan-in-flip-bypasses-adr007-dark-axis-
+    //     predicate): the mechanical flip is the PRODUCTION landing path and it bypassed the
+    //     predicate entirely. Judged on the SAME classifier the ready→done verbs use, reading the
+    //     WORKTREE body this landing is about to carry, and gated by the SAME workspace switch
+    //     (`gates.adr` contains ADR-007 — no new config surface).
+    //     Every judgment leaves a `dark-axis` GateEvent, so the complete:dark-axis ratio becomes a
+    //     directly readable quantity instead of a gap someone has to rediscover (AC6).
+    //     RECORDED / DISCLAIMED ⇒ continue. MISSING ⇒ refuse, task stays `ready`. NOT-EVALUATED ⇒
+    //     refuse too, with its OWN reason (硬规则 3b) — never folded into MISSING, which would make
+    //     "recorded nothing" and "could not read the record" the same failure.
+    if (workspaceEnforcesDarkAxis(root)) {
+      const darkT0 = Date.now();
+      appendFanInStepTrace(root, task, runId, "dark-axis", "begin");
+      const taskFile = opts.darkAxisTaskFile ?? darkAxisTaskFileFor(worktree, task);
+      const darkVerdict = darkAxisVerdictForTaskFile(taskFile);
+      const darkEvent = await appendDarkAxisGateEvent(root, task, darkVerdict, { runId });
+      const darkPass = darkVerdict.state === "RECORDED" || darkVerdict.state === "DISCLAIMED";
+      const darkDurMs = Date.now() - darkT0;
+      appendFanInStepTrace(root, task, runId, "dark-axis", "end", {
+        ok: darkPass && darkEvent.ok, durationMs: darkDurMs, state: darkVerdict.state, gateEvent: darkEvent.ok,
+      });
+      trace({
+        step: "dark-axis", exit: darkPass && darkEvent.ok ? 0 : 1, wall_ms: darkDurMs, ok: darkPass && darkEvent.ok,
+        state: darkVerdict.state,
+        ...(darkPass && darkEvent.ok ? {} : { reason: darkEvent.ok ? `${darkVerdict.state}: ${darkVerdict.reason}` : `gate-event write failed: ${darkEvent.reason}` }),
+      });
+      // The ledger write is a PRECONDITION, not an observation: a judgment with no event cannot be
+      // told apart from no judgment, which is the defect this step exists to close (⛔ fail-open).
+      if (!darkEvent.ok) {
+        return failClean("dark-axis", `dark-axis GateEvent write failed: ${darkEvent.reason ?? "unknown"} — refusing the flip (an unrecorded judgment is not a judgment)`);
+      }
+      if (!darkPass) {
+        return failClean("dark-axis", `dark-axis (ADR-007 per-milestone predicate) refused the flip — ${darkVerdict.state}: ${darkVerdict.reason}`);
+      }
+    } else {
+      trace({ step: "dark-axis-skip", exit: 0, wall_ms: 0, ok: true, reason: "workspace does not declare ADR-007 in gates.adr (workspaceEnforcesDarkAxis=false)" });
+    }
     const flipT0 = Date.now();
     const flip = await flipTaskDone(worktree, task, mergeTarget, { root, cause: { runId } });
     trace({ step: "flip-done", exit: flip.ok ? 0 : 1, wall_ms: Date.now() - flipT0, ok: flip.ok, ...(flip.ok ? {} : { reason: flip.reason ?? "flip failed" }) });
