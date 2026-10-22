@@ -561,6 +561,35 @@ export function normalizeRel(p: string): string {
   return out.join("/");
 }
 
+// ── reasonIsSubstantive (the ONE dispatch-reason threshold) ──────────────────────────────────────────
+// A dispatch reason is PRESENT only when it has ≥ MIN_REASON_CHARS non-whitespace chars. The
+// empty-vs-absent conflation guard: without it a placeholder ("随便"/"无"/"x") slips through a
+// fail-closed writer, and "reason recorded" becomes indistinguishable from "a reason exists".
+//
+// This was TWO byte-identical definitions — `reasonIsSubstantive` + `MIN_REASON_CHARS = 8` in
+// dispatch-record.ts (A16b task dispatch) and semantic-face-dispatch-record.ts (AC145 semantic
+// duty dispatch) — each re-declaring the constant locally, so the two thresholds could drift
+// independently. .quay/routine-findings.jsonl finding
+// `reason-is-substantive-byte-identical` (routine `semantic-dedup-scan`, runId
+// `semantic-dedup-scan-1792647604889`, verdict real-duplication, suggestedAction merge): the
+// bodies were character-identical, so this is that shared body. Both callers already import this
+// module (isDirectEntry), so the shared accessor belongs here rather than in a new file — same
+// disposition as `printJson`/`printJsonCompact` above.
+//
+// ⛔ ONE definition, drift is the defect: two copies of the threshold are two independent
+// authorities for the same judgment, and nothing consumes them together, so a change to either
+// silently splits the fail-closed writers' behavior. The callers re-export these symbols under
+// their historical import paths (checker + tests import them from the dispatch-record modules).
+//
+// SCOPE: phase-declare.ts:106 declares its own `MIN_REASON_CHARS = 8` for a DIFFERENT object —
+// the `--reason` of a phase declaration, with no `reasonIsSubstantive` body — so it is left as a
+// declared divergence rather than folded in here (see this task's evidence: grep count reported).
+export const MIN_REASON_CHARS = 8;
+
+export function reasonIsSubstantive(reason: unknown): boolean {
+  return typeof reason === "string" && reason.replace(/\s+/g, "").length >= MIN_REASON_CHARS;
+}
+
 // ── seededRng (the ONE deterministic PRNG) ──────────────────────────────────────────────────────────
 // mulberry32. ONE implementation for the whole plugin/scripts tree — it was three byte-identical copies
 // under two names (`mulberry32` in defect-latency-pair.ts / rework-predictors.ts, `makeRng` in
