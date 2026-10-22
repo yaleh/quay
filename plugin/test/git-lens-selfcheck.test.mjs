@@ -53,7 +53,11 @@ function makeShadow({ withProbes = true } = {}) {
   TMP_DIRS.push(root);
   const scriptsDir = path.join(root, EXPERIMENT_REL, "scripts");
   fs.mkdirSync(scriptsDir, { recursive: true });
-  fs.copyFileSync(SELFCHECK, path.join(scriptsDir, "git-lens-selfcheck.sh"));
+  // The selfcheck + the program file it drives (the readings live in the .mjs, not inline in the
+  // shell — see the sh-census ratchet).
+  for (const f of ["git-lens-selfcheck.sh", "git-lens-instrument.mjs"]) {
+    fs.copyFileSync(path.join(REPO_ROOT, EXPERIMENT_REL, "scripts", f), path.join(scriptsDir, f));
+  }
   fs.cpSync(FIXTURES, path.join(root, EXPERIMENT_REL, "fixtures", "git-lens"), { recursive: true });
   if (withProbes) {
     const pluginScripts = path.join(root, "plugin", "scripts");
