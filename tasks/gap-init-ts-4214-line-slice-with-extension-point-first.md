@@ -2,7 +2,7 @@
 id: gap-init-ts-4214-line-slice-with-extension-point-first
 title: init.ts 4214 行 / 79 exports 是根包最大的单文件——先按 DIR-133 裁定 2 定「新 provider
   注册在哪」， 再做一刀带扩展点判据的切片
-status: ready
+status: done
 labels:
   - gap
   - defect
