@@ -49,11 +49,11 @@ extra:
 ## Touches
 
 - tasks/gap-ls-product-code-behavior-variance-first-reading.md
-- plugin/scripts/ls-mutation-reading.ts
+- plugin/scripts/ls-mutation-reading.ts (new)
 - plugin/scripts/capability-catalog-declarations.json
 - docs/carrier-registry.json
-- plugin/test/ls-mutation-reading.test.mjs
-- plugin/test/fixtures/ls-mutation/target.mjs
-- plugin/test/fixtures/ls-mutation/target-strong-check.mjs
-- plugin/test/fixtures/ls-mutation/target-weak-check.mjs
+- plugin/test/ls-mutation-reading.test.mjs (new)
+- plugin/test/fixtures/ls-mutation/target.mjs (new)
+- plugin/test/fixtures/ls-mutation/target-strong-check.mjs (new)
+- plugin/test/fixtures/ls-mutation/target-weak-check.mjs (new)
 - plugin/test/carrier-registry-completeness.test.mjs
