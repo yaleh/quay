@@ -55,18 +55,18 @@ prior-claim: gap-arch-cycle-refresh-first-stale-wins-starves-later-scopes
 
 ## Acceptance Criteria
 
-- [ ] AC1（夹具 + 负对照）：夹具中只有 `plugin/scripts` 一个 scope `behindSources:true`，`refresh.at` 落在 `intervalMinutes` 内；跑一轮 `runArchCycleRound` 后，该 scope 为 `evaluated:false`、`cycleCount:null`、`cycles:null`、reason 含 `artifact-behind-sources`；记录级 `status:"partial"`、`notEvaluatedScopes:["scripts"]`、`refresh.attempted:false`、`refresh.skipped:"within-interval"`。贴出同一夹具在改动前（`git show develop:plugin/scripts/quality-gate-driver.ts`）的输出：`evaluated:true` + `cycleCount:0` + `status:"complete"`。
-- [ ] AC2（负控制）：同一夹具里 fresh 的其它 5 个 scope 一个都不被降级；当无任何 scope due 时，轮次仍是 `skipped:"no-scope-needs-refresh"`、`status:"complete"`、零降级。贴出两者的 `scopes[].evaluated` 与记录级 `status`。
-- [ ] AC3（零新增 spawn）：上述降级轮次里 fake archguard 的 argv 计数为 0（`within-interval` 仍不跑 analyze）。贴出计数输出。
+- [x] AC1（夹具 + 负对照）：夹具中只有 `plugin/scripts` 一个 scope `behindSources:true`，`refresh.at` 落在 `intervalMinutes` 内；跑一轮 `runArchCycleRound` 后，该 scope 为 `evaluated:false`、`cycleCount:null`、`cycles:null`、reason 含 `artifact-behind-sources`；记录级 `status:"partial"`、`notEvaluatedScopes:["scripts"]`、`refresh.attempted:false`、`refresh.skipped:"within-interval"`。贴出同一夹具在改动前（`git show develop:plugin/scripts/quality-gate-driver.ts`）的输出：`evaluated:true` + `cycleCount:0` + `status:"complete"`。
+- [x] AC2（负控制）：同一夹具里 fresh 的其它 5 个 scope 一个都不被降级；当无任何 scope due 时，轮次仍是 `skipped:"no-scope-needs-refresh"`、`status:"complete"`、零降级。贴出两者的 `scopes[].evaluated` 与记录级 `status`。
+- [x] AC3（零新增 spawn）：上述降级轮次里 fake archguard 的 argv 计数为 0（`within-interval` 仍不跑 analyze）。贴出计数输出。
 - [ ] AC4（生产载体）：落地并同步到 develop/主检出后的下一轮 within-interval 记录里，`scripts` 为 `evaluated:false` + `artifact-behind-sources`（或已被刷新为当前），且同一 HEAD 上 `node --experimental-strip-types plugin/scripts/instrument-decay-check.ts --root /data/home/yale/work/quay --carrier arch-cycle-history.jsonl --json` 的 `decayed` 不含 `arch-cycle-history.jsonl`。贴出记录行与检测器输出。（待外部）
-- [ ] AC5：`bash scripts/test.sh --for-task gap-arch-cycle-within-interval-branch-skips-downgrade --allow-thin` ⇒ EXIT=0，含 `arch-cycle-reading.test.mjs` 全量；贴出测试计数与退出码。
+- [x] AC5：`bash scripts/test.sh --for-task gap-arch-cycle-within-interval-branch-skips-downgrade --allow-thin` ⇒ EXIT=0，含 `arch-cycle-reading.test.mjs` 全量；贴出测试计数与退出码。
 
 ## Definition of Done
 
-- [ ] 五条 AC 全绿（AC4 待外部）、改动合并进 develop（待外部）。
-- [ ] 载体不变式成立且由机制（不是 prose）保证：任何 `evaluated:true` 的 scope，其 `artifactTimestamp` 不早于覆盖源路径的最新提交；做不到时该 scope 必须是 `evaluated:false` + reason 含 `artifact-behind-sources`，⛔ 不得是 `cycleCount:0`。该不变式在 `pending.length === 0` 的纯间隔内轮次同样成立。
-- [ ] `within-interval` 轮次仍不跑 analyze（零新增 spawn），刷新仍只在例程 tick 内发生，不进 fan-in / per-task 热路径。
-- [ ] 记录级 `status` 与 scope 级 `evaluated` 不再互相矛盾：有降级 scope ⇒ `status:"partial"` 且 `notEvaluatedScopes` 点名，绝不出现 `status:"complete"` + 某 scope `evaluated:false`。
+- [ ] 五条 AC 全绿（AC4 待外部）、改动合并进 develop（待外部）
+- [x] 载体不变式成立且由机制（不是 prose）保证：任何 `evaluated:true` 的 scope，其 `artifactTimestamp` 不早于覆盖源路径的最新提交；做不到时该 scope 必须是 `evaluated:false` + reason 含 `artifact-behind-sources`，⛔ 不得是 `cycleCount:0`。该不变式在 `pending.length === 0` 的纯间隔内轮次同样成立。
+- [x] `within-interval` 轮次仍不跑 analyze（零新增 spawn），刷新仍只在例程 tick 内发生，不进 fan-in / per-task 热路径。
+- [x] 记录级 `status` 与 scope 级 `evaluated` 不再互相矛盾：有降级 scope ⇒ `status:"partial"` 且 `notEvaluatedScopes` 点名，绝不出现 `status:"complete"` + 某 scope `evaluated:false`。
 
 ## Touches
 
@@ -81,3 +81,17 @@ prior-claim: gap-arch-cycle-refresh-first-stale-wins-starves-later-scopes
 - 载体前条：`ts=2026-10-22T04:49:37.513Z`，`status:"partial"`，`notEvaluatedScopes:["scripts"]`，scripts `evaluated:false` + `artifact-behind-sources`（reason 写明 behind 19 commits / within-interval）。
 - 代码：`plugin/scripts/quality-gate-driver.ts:2303-2310`（`pending.length === 0` 分支不填 `downgradeCauses`）与 `:2334-2351`（只在 `else` 分支填）、`:2356-2358`（`downgradeStaleScopes` 调用）。
 - 轮次分布：00:58:21Z 刷新 scripts 后至 05:01:39Z 之间 plugin/scripts 已有 19 个提交（`git log --format=%cI -- plugin/scripts`），例程间隔 360m。
+
+## Implementation Evidence (2026-10-22, worktree `task/gap-arch-cycle-within-interval-branch-skips-downgrade`)
+
+统一夹具（AC1/AC2/AC3 共用）：base commit @2025-12-01；六 scope artifact @2026-01-01（均带 moduleGraph ⇒ 全部 evaluated）；唯一后续提交 @2026-02-01 只触及 `plugin/scripts`；carrier 记 `scripts` 上次 refresh @2026-10-22T05:15:43.221Z，本轮 `now=2026-10-22T05:16:43.221Z`，`intervalMinutes=360` ⇒ 唯一 due scope 落在间隔内。
+
+- AC1 后置（修复后同一夹具）：`status:"partial"`、`notEvaluatedScopes:["scripts"]`、`refresh:{attempted:false,skipped:"within-interval",deferredScopes:[{scope:"scripts",...}]}`；`scripts` scope：`evaluated:false`、`cycleCount:null`、`cycles:null`、`basis:null`、`behindSources:true`、`reason:"artifact-behind-sources: artifact 2026-01-01T00:00:00Z is behind 1 commit(s) touching plugin/scripts — within-interval: …"`。
+- AC1 前置对照（同一夹具、`git show develop:plugin/scripts/quality-gate-driver.ts` 的旧实现，`/tmp/negctl-within-interval.mjs` 实测）：`status:"complete"`、`notEvaluatedScopes:[]`、`scripts:{evaluated:true, cycleCount:0, cycles:[], basis:"module-graph", reason:null}` ⇒ 判据能取假（旧实现上红）。
+- AC2 负控制：同一轮另 5 scope 全部 `evaluated:true` + `cycleCount:0`（`[["src",true],["quay-native-src",true],["quay-github-src",true],["quay-backlog-src",true],["experiments-scripts",true]]`）；无任何 due scope 的独立夹具 ⇒ `refresh.skipped:"no-scope-needs-refresh"`、`refresh.attempted:false`、`status:"complete"`、`notEvaluatedScopes:[]`、六 scope 全 `evaluated:true`。
+- AC3 零 spawn：上述降级轮次 `analyzedSources(record)`（fake archguard 每次调用追加一行 argv）⇒ `[]`，即 argv 计数 0。
+- AC5：`bash scripts/test.sh --for-task gap-arch-cycle-within-interval-branch-skips-downgrade --allow-thin` ⇒ `EXIT=0`，`tests 131 / pass 131 / fail 0`；其中 `plugin/test/arch-cycle-reading.test.mjs` 17/17 通过，含新增用例 `runArchCycleRound — a DUE scope deferred by the interval budget is DOWNGRADED, not reported as a current reading (AC1/AC3)`。
+
+## ADR-007 dark-axis record
+
+该轴仍暗,理由:本任务只改 `runArchCycleRound` 的分支控制流（把 deferred scope 写进既有的 downgradeCauses 台账），未改变包依赖结构或上帝包分布，L_D/L_G 读数对本改动无判别力且本任务未测量。
