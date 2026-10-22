@@ -1776,6 +1776,57 @@ function emitFanInTransitionEvent(
   });
 }
 
+/** fan-in 后的 slice post 读数（gap-slice-before-after-readings-at-dispatch-and-fanin）。
+ *
+ * WHY 在 flipTaskDone 之后、ff/cleanup 之前：post 必须读**合并树仍在世**的那棵树（develop 已并入
+ * worktree，但 ff 还没把 worktree 拆掉）。这里是最后一个同时满足「树是合并后」「worktree 还在」的
+ * 窗口；cleanup 之后只剩 `worktree-missing`（脚本会明说，⛔ 不回填主检出）。
+ *
+ * 前提：派发时的 baseline 已落盘（`.quay/slice-readings/<task>.json`）。没有 baseline 时**不 spawn**
+ * ——一次没有基线的 post 无法绑定，只会写一条 `baseline-missing` 噪声记录。
+ *
+ * FAIL-OPEN（硬规则 12：观测不得成为落地的前置）：脚本缺失 / spawn 失败 / exit 3（NOT-EVALUATED）
+ * 都不改本轮 fan-in 判定；读数与失败原因以一行 trace 落进 `.quay/fan-in-<task>-<runId>.log` 和
+ * 共享 `.quay/fan-in-step-trace.jsonl`（指向 carrier 的一行指针）。脚本自身把 `evaluated:false` +
+ * reason 写进 carrier（硬规则 3b），所以「没读到」不会与「delta=0」同形。 */
+function runSlicePostReading(
+  root: string,
+  task: string,
+  worktree: string,
+): { ran: boolean; ok: boolean; evaluated: boolean | null; carrier: string | null; delta: Record<string, number | null> | null; reason: string | null } {
+  if (process.env.QUAY_SLICE_READINGS === "0") return { ran: false, ok: true, evaluated: null, carrier: null, delta: null, reason: "disabled-by-env" };
+  const carrier = path.join(root, ".quay", "slice-readings", `${task}.json`);
+  if (!fs.existsSync(carrier)) return { ran: false, ok: true, evaluated: null, carrier: null, delta: null, reason: "no-baseline" };
+  try {
+    const argv = ["node", ...kernelSiblingArgv("slice-readings.ts"), "--post", "--task-id", task, "--root", root, "--tree", worktree, "--json"];
+    const [cmd, ...cmdArgs] = argv;
+    const r = spawnSync(cmd, cmdArgs, { encoding: "utf8", timeout: 20 * 60_000, maxBuffer: 16 * 1024 * 1024 });
+    const stdout = String(r.stdout ?? "").trim();
+    let parsed: { evaluated?: unknown; reason?: unknown; delta?: unknown } | null = null;
+    try {
+      parsed = stdout === "" ? null : JSON.parse(stdout);
+    } catch {
+      parsed = null;
+    }
+    const evaluated = parsed !== null && typeof parsed.evaluated === "boolean" ? parsed.evaluated : null;
+    const delta = parsed !== null && parsed.delta !== null && typeof parsed.delta === "object"
+      ? (parsed.delta as Record<string, number | null>)
+      : null;
+    // exit 0 = evaluated; 3 = NOT-EVALUATED (a reading was written — still a useful trace); anything
+    // else = the script itself did not produce a reading.
+    const ok = r.status === 0 || r.status === 3;
+    const reason =
+      parsed !== null && typeof parsed.reason === "string" && parsed.reason !== ""
+        ? parsed.reason
+        : ok
+          ? null
+          : `slice-readings exited ${r.status ?? "?"}${r.stderr ? ` — ${String(r.stderr).split("\n").slice(-3).join(" ").trim()}` : ""}`;
+    return { ran: true, ok, evaluated, carrier, delta, reason };
+  } catch (e) {
+    return { ran: false, ok: false, evaluated: null, carrier, delta: null, reason: `slice-post-spawn-failed: ${e instanceof Error ? e.message : String(e)}` };
+  }
+}
+
 /** 读 worktree 的任务文件并翻 status ready→done（fail-closed：status 经 task-ops.ts 单一 parser 读出，
  *  非 ready/done 即拒；gap-task-ops-consolidate-driver-frontmatter-writers）。
  *  gap-fan-in-flip-done-already-done-not-landed：「先 flip 后 ff」（人 2026-08-14 裁定）留下的
@@ -3371,6 +3422,21 @@ export async function runMechanicalFanIn(opts: MechanicalFanInOptions): Promise<
     const flip = await flipTaskDone(worktree, task, mergeTarget, { root, cause: { runId } });
     trace({ step: "flip-done", exit: flip.ok ? 0 : 1, wall_ms: Date.now() - flipT0, ok: flip.ok, ...(flip.ok ? {} : { reason: flip.reason ?? "flip failed" }) });
     if (!flip.ok) return failClean("flip-done", flip.reason ?? "flip failed");
+
+    // 8.5 slice post 读数（gap-slice-before-after-readings-at-dispatch-and-fanin）：合并树仍在世、
+    //     fan-in 提交已存在——post 的唯一正确时机。FAIL-OPEN：读数缺失/未评估只落一行 trace，
+    //     ⛔ 不改本轮 landed/red 判定（观测不是落地前置，硬规则 12）。
+    const sliceT0 = Date.now();
+    const slicePost = runSlicePostReading(root, task, worktree);
+    traceSuiteEvent("slice-readings-post", {
+      wall_ms: Date.now() - sliceT0,
+      ok: slicePost.ok && slicePost.evaluated !== false,
+      ran: slicePost.ran,
+      evaluated: slicePost.evaluated,
+      carrier: slicePost.carrier,
+      ...(slicePost.reason !== null ? { reason: slicePost.reason } : {}),
+      ...(slicePost.delta !== null ? { delta: slicePost.delta } : {}),
+    });
 
     // 9. ff（fan-in/ff-merge.ts 读 suite capture 证书 + L1 token 闸；成功 fall through，失败 red）。
     //    P2：⛔ 不再 shell-out 到 bash fan-in-ff-merge.sh —— 持锁段业务已 TS 模块化被 import。

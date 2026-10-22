@@ -64,7 +64,8 @@ extra:
 - [x] AC4 位置判定负对照：把四臂文字整段放进 `## Proposal` 散文、AC 列表项只写行为判据，检查器必须报 `missing-arms`（不是 `satisfied`）；再把同样四臂写进 AC 列表项，必须报 `satisfied`。贴两次运行的完整输出。 —— Proposal 散文版 = `missing-arms` / exit 1；同样四臂写进 AC 列表项 = `satisfied` / exit 0（两次完整输出见 Evidence）。
 - [x] AC5 生产载体读数：对主检出 `tasks/*.md` 中所有带 `refactor-slice` 标签（若无则用 `plan` 形状 + 标题含「拆分/切片/重构」）的任务实跑检查器，贴 `{evaluated:true, satisfied:N, missing:N, notApplicable:N}` 计数与前 5 条缺失任务 id。本条只要求读数可复现，**不要求本次把缺失清零**。 —— `{evaluated:true, satisfied:0, missing:34, notApplicable:1891}`（另有 notEvaluated:1019），前 5 缺失 id = `DIR-074, DIR-080, DIR-133, exp5-M-ARCH-AUDIT-M108-EXPLORE, exp5-M-TS-MIGRATION-P0`；本条不要求清零。
 - [x] AC6 skill 可被调用：`plugin/skills/extension-point-refactor/SKILL.md` 存在且经 `plugin/scripts/capability-catalog.sh` 或清单可见；贴清单命令输出中对应行。 —— `find plugin/skills -maxdepth 2 -name SKILL.md` 命中 `plugin/skills/extension-point-refactor/SKILL.md`；`plugin/test/plugin-packaging.test.mjs` 的 14 目录清单含 `extension-point-refactor`。
-- [x] AC7 目录一致：`bash plugin/scripts/capability-catalog.sh --summary` 自报计数与声明数一致、新增脚本 `0 unclassified`；贴原文。 —— `capability-catalog: 392 scripts | 392 declared | 0 unclassified | 387 ship`（原文见 Evidence）。
+- [x] AC7 目录一致：`bash plugin/scripts/capability-catalog.sh --summary` 自报计数与声明数一致、新增脚本 `0 unclassified`；贴原文。 —— `capability-catalog: 392 scripts | 392 declared | 0 unclassified | 387 ship
+capability-catalog: 393 scripts | 393 declared | 0 unclassified | 388 ship   # 合并 develop 后复跑（develop 新增 slice-readings.ts），一致性判据不变`（原文见 Evidence）。
 - [x] AC8 负臂真空绿被机件拦住：检查器 fixture 里放一份「只有负臂、正臂写成『handler 存在』」的任务体，必须输出 `missing-arms` 且命中项具名到正臂；同一份任务体把正臂改成 `triggered=1` 后才 `satisfied`。贴两次运行的完整输出与 fixture 路径。模板正本中对应三句（正臂断言 `triggered=1` / 只写负臂判无效 / 红线基线是单次 AC 非棘轮）各贴一行原文。 —— weak fixture（正臂写「handler 存在」）= `missing-arms` 且 `missing:["positive"]`、weak.reason=`named-but-no-count-assertion`；改成 `triggered=1` 后 = `satisfied`（两次输出与三句模板原文见 Evidence）。
 - [x] AC9 两种占比口径分开记录：`docs/references/ownership-first-refactoring-methodology.md` §13 写明 `centralΔ`（单 commit churn，含删除，claudecodeui 口径）与「中心文件增长占比」（时间窗，只计新增，quay 口径）**不是同一个量、不可互引**，并各给一条公式与一个实例值；贴这两行原文。 —— §13.6 两条公式各带实例：`centralΔ` 263/1275 = 0.206（单 commit，含删除）；中心文件增长占比 +4,820/(4,820+1,025) = 82.46%（时间窗，只计新增），并显式写明不可互引（原文见 Evidence）。
 
@@ -167,6 +168,8 @@ $ node --experimental-strip-types plugin/scripts/extension-point-criteria-check.
 
 `refactor-slice` 标签在主检出 0 个任务携带（唯一命中是本任务正文的自述），因此按 AC5 的 fallback（标题含「拆分/切片/重构」）判定适用性。
 
+合并 develop 后在 worktree（@ 246ee92d5）复跑同一条命令（tasksDir 不变）：`{"evaluated":true,"satisfied":0,"missing":34,"notApplicable":1892,"notEvaluated":1019}`——期间新增一个任务体使 notApplicable +1；`missing=34` 与缺失 id 前 5 条均不变。
+
 ### AC6 — skill 可见
 
 ```
@@ -238,6 +241,11 @@ EXIT=0
 - docs/references/ownership-first-refactoring-methodology.md
 - tasks/DIR-133.md
 - tasks/gap-extension-point-refactor-criteria-scaffold.md
+
+## Dark-axis record (ADR-007)
+
+- L_D 本任务 diff（`git diff --numstat develop...HEAD`，2026-10-22 合并 develop 后在 worktree 实测） codeLines=820 docLines=180 ratio=4.6:1（code-heavy 是本任务形态：检查器 + 脚手架 + 夹具 + 模板正本）
+- L_G import-graph-check（结构性代理；`node --experimental-strip-types plugin/scripts/import-graph-check.ts . --json`，worktree @ 246ee92d5） files=498 edges=1475 valueEdges=1343 typeEdges=132 valueSccs=0 typeSccs=0 reverseEdges=0 kernelViolations=0 gateLayerViolations=0 evaluated=true
 
 ## Blocker
 

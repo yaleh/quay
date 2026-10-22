@@ -1,7 +1,7 @@
 ---
 id: gap-slice-before-after-readings-at-dispatch-and-fanin
 title: 重构切片缺自动 before/after 读数——派发时与 fan-in 后各手工跑一次 archguard， 没有「同任务同基线」的成对记录
-status: ready
+status: done
 labels:
   - gap
   - defect

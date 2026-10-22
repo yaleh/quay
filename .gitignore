@@ -91,6 +91,11 @@ packages/quay/plugin/
 # quality-round.jsonl. Declared in docs/carrier-registry.json (owner:
 # plugin/scripts/design-evolution-readings.ts).
 **/.quay/design-evolution-history.jsonl
+# PER-TASK slice readings carrier (.quay/slice-readings/<task-id>.json) —
+# gap-slice-before-after-readings-at-dispatch-and-fanin (人 2026-10-22): one file per task holding the
+# dispatch-time `baseline` reading and the fan-in `post` reading + per-metric delta. Runtime evidence,
+# never git-tracked (the file names are task ids, so a directory rule — ⛔ not a *.jsonl carrier).
+**/.quay/slice-readings/
 # resource-DIAGNOSTIC ROUTINE carriers (gap-quality-continuous-resource-diagnostic-routine-mechanical-
 # filter-then-semantic): `.quay/resource-anomaly-findings.jsonl` holds one line per NEW mechanically-
 # flagged anomaly plus one scan-round line per round, and `.quay/resource-diagnostic-model-budget.jsonl`
