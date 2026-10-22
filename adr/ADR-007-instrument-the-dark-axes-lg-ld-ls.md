@@ -44,6 +44,35 @@ This is an instance of ADR-006 and a specific application of ADR-005 (cheap veri
         this ADR does not silently absorb it.
         ⚠️ The KNOWN ROT note above is STALE as of 2026-10-22 (kept as history, not deleted) — see
         the "Status note 2026-10-22" block at the end of this ADR for the current state.
+        ✅ HALF 1 REPAIRED 2026-10-22 (tasks/gap-adr007-half1-selfcheck-probes-archived-and-gate-
+        never-invoked). Two changes, both in the SAME enforcement command (the frontmatter string is
+        unchanged):
+          • `git-lens-selfcheck.sh` is now THREE-VALUED: each fixture prints PASS / FAIL /
+            `NOT-EVALUATED(<cause>)`, and the exit code is 0 (all PASS) / 1 (≥1 FAIL) / 2 (no FAIL
+            but ≥1 NOT-EVALUATED). Before invoking an axis it verifies the probe ENTRY loads; a probe
+            that cannot be loaded can therefore no longer produce an exit code that happens to equal
+            the expected one. The KNOWN ROT note's count is corrected: **3** fake PASSes, not 1
+            (`l-d/prose-heavy`, `l-g/cycle-repo`, `l-s/weak-module` — all expected exit 1, which is
+            what MODULE_NOT_FOUND also returns).
+          • The L_D and L_G cases point at LIVE instruments instead of the archived probes (⛔ the
+            archive was not restored): L_D = `plugin/scripts/phase-declare.ts --ld-reading
+            --numstat-file <f>` (the ADR-008 declaration's own `parseNumstat`/`computeRatio`, in a
+            read-only mode that writes no carrier); L_G = `archguard-runner.ts`'s
+            `readDirectoryCycleReading(root, workDir)` (the SAME reader the arch-cycle-report routine
+            consumes) over `fixtures/git-lens/l-g-archguard/{cycle,clean}/query/`.
+          • **L_S is retired as an instrument for PRODUCT code, and this is now RECORDED, not
+            silent.** No mutation/property test of product behaviour is wired; the one instrument
+            that calls itself "the L_S instrument" (`checker-mutation-check.sh`) mutates the
+            checkers. Both L_S fixture cases are KEPT and print
+            `NOT-EVALUATED(axis-retired: no living product-code L_S instrument)`. The selfcheck
+            therefore exits 2 on a healthy repo — "one axis cannot be judged" is a real reading, and
+            is never folded into 0.
+          • The gate now has a CALLER: the declarative report-only routine
+            `adr-enforcement-report` (plugin/scripts/quality-gate-driver.ts, default interval
+            1440m) runs every `gates.adr` ADR that is accepted and carries `enforcement:` through the
+            gate engine's `runGate`, so GateEvents accumulate (actor `quality-gate-driver`) and each
+            round contributes one Fact to `.quay/quality-round.jsonl`. ⛔ It is NOT on the fan-in hot
+            path.
      ── HALF 2, the PER-MILESTONE predicate (LANDED 2026-09-13,
         tasks/gap-adr007-per-milestone-dark-axis-enforcement-gate): a task must RECORD a dark-axis
         reading or explicitly DECLARE the axis still dark, before it can be called done. The
@@ -93,18 +122,20 @@ This is an instance of ADR-006 and a specific application of ADR-005 (cheap veri
 — human-approved 2026-10-22. Supersedes the 2026-09-13 KNOWN ROT note as the description of current
 state; that note stays in the enforcement comment as history.
 
-- **HALF 1 is still dead, in a different way.** The dangling `git-lens-*.ts` symlinks were removed
-  by `tasks/gap-arch-retire-orphan-sh-and-dangling-symlinks.md` (status `done`); the three probes
-  exist only under `archive/2026-09-07-zero-call-scripts/plugin/scripts/`. But
-  `experiments/quay-perpetual-stream/scripts/git-lens-selfcheck.sh` remains, and the frontmatter
-  `enforcement:` still points at it, so it fails deterministically (re-run 2026-10-22: exit 1,
+- **HALF 1 was dead — REPAIRED later on 2026-10-22** (see the "HALF 1 REPAIRED" block in the
+  enforcement comment). As recorded at drafting time: the dangling `git-lens-*.ts` symlinks had been
+  removed by `tasks/gap-arch-retire-orphan-sh-and-dangling-symlinks.md` (status `done`); the three
+  probes exist only under `archive/2026-09-07-zero-call-scripts/plugin/scripts/`. But
+  `experiments/quay-perpetual-stream/scripts/git-lens-selfcheck.sh` remained, and the frontmatter
+  `enforcement:` still points at it, so it failed deterministically (re-run 2026-10-22: exit 1,
   `MODULE_NOT_FOUND` on 4 fixtures, while still printing `PASS:` for the three fixtures whose
   expected exit is 1 — `l-d/prose-heavy`, `l-g/cycle-repo`, `l-s/weak-module`). The `adr-007`
-  gate has **0** events in `.quay/gate-events.jsonl` in the ~94 days since it was wired on
-  2026-07-20.
-- **The frontmatter `enforcement:` is deliberately NOT changed by this note.** Replacing it is a
-  separate task, being filed now; this ADR does not silently absorb that fix (same discipline as
-  the 2026-09-13 note).
+  gate had **0** events in `.quay/gate-events.jsonl` in the ~94 days since it was wired on
+  2026-07-20. The repair is: three-valued selfcheck + live L_D/L_G instruments + explicit L_S
+  retirement + a declarative routine (`adr-enforcement-report`, 1440m) that is the gate's caller.
+- **The frontmatter `enforcement:` string itself is unchanged** — the repair is inside the script it
+  names and in the routine that invokes the gate. The 2026-07-19 Decision text also stands
+  unchanged; what changed is whether the enforcement is RUNNABLE and whether anything RUNS it.
 - **HALF 2 is live but covers little of the landing flow.** Since 2026-09-14,
   `.quay/gate-events.jsonl` holds **36** `dark-axis` gate events (**23** pass / **13** fail)
   against **816** `complete` events (815 when this amendment was drafted; one more landed at
@@ -119,12 +150,14 @@ state; that note stays in the enforcement comment as history.
   over the 793 distinct tasks the driver landed since 2026-09-14 gives MISSING 782 / DISCLAIMED 11 /
   RECORDED 0 — so the ratio is expected to move only as workers start recording; that transfer is
   the point, not a regression.
-- **L_S: DARK for product behavior.** The L_S behavior-variance probe
-  (`git-lens-l-s-behavior-variance.ts`) is archived, and no mutation/property test of product
-  behavior is wired. One instrument does run and calls itself "the L_S instrument":
-  `plugin/scripts/checker-mutation-check.sh`, in the static phase of `scripts/test.sh`. Its
-  subject is the **checkers** (would each checker fail when its subject is mutated?), not the
-  product's behavior variance. So the checker slice of L_S is lit, and L_S as this ADR's Decision
-  defines it (product stability / behavior variance) is DARK.
+- **L_S: DARK for product behavior — now recorded by the enforcement instrument itself.** The L_S
+  behavior-variance probe (`git-lens-l-s-behavior-variance.ts`) is archived, and no
+  mutation/property test of product behavior is wired. One instrument does run and calls itself
+  "the L_S instrument": `plugin/scripts/checker-mutation-check.sh`, in the static phase of
+  `scripts/test.sh`. Its subject is the **checkers** (would each checker fail when its subject is
+  mutated?), not the product's behavior variance. So the checker slice of L_S is lit, and L_S as
+  this ADR's Decision defines it (product stability / behavior variance) is DARK — which
+  `git-lens-selfcheck.sh` now states explicitly (`NOT-EVALUATED(axis-retired…)`, exit 2) instead of
+  printing a PASS it never measured.
 - Per ADR-004's 2026-10-22 amendment, a check with no liveness reading counts as a dark axis. By
   that rule HALF 1 is dark: it is declared and has never produced an event.

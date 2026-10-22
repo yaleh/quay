@@ -2269,6 +2269,326 @@ export function formatArchCycleAssembly(a: {
   return `arch-cycle-report 例程已装配（enabled, interval=${a.intervalMinutes}m，report-only：目录级环读数 append 到 .quay/arch-cycle-history.jsonl；环非零是该例程的读数，⛔ 不是 failed）`;
 }
 
+// ── ADR-ENFORCEMENT 轨道（tasks/gap-adr007-half1-selfcheck-probes-archived-and-gate-never-invoked）─
+//
+// THE DEFECT this routine closes: a `gates.adr` declaration registers an `adr-<id>` gate
+// (packages/quay/src/gate/config/loader.ts → makeAdrGate), but such a gate can only be fetched BY
+// NAME — `quay gate <task> --gate adr-007` or MCP `gate_run`. The lifecycle verbs run
+// acceptance/dark-axis/dod only, and the mechanical fan-in runs neither ⇒ measured 2026-10-22:
+// `"gate":"adr-007"` had **0** lines in `.quay/gate-events.jsonl` in the ~94 days since it was
+// wired. A declared gate with no standing caller is a declaration, not an enforcement (ADR-004:
+// a check with no liveness reading counts as dark).
+//
+// ⛔ WHAT THIS ROUTINE IS **NOT**:
+//   • not a second gate implementation — it calls the ENGINE (`runGate`), so the GateEvent is the
+//     engine's (same append path, same verdict mapping), never a hand-written append;
+//   • not a ratchet — a failing ADR is the READING of a report-only routine;
+//   • not on the fan-in / scoped-gate hot path. It is a routine of THIS (quality) driver, default
+//     interval 1440m.
+//
+// ⛔ DEFAULT-ON, unlike its arch_cycle_report siblings: their section is opt-in because they report
+// a quantity; this one exists to make an ALREADY-DECLARED gate produce events. Requiring a second
+// declaration would reproduce the very defect (an enforcement nobody switched on). The section
+// `loop.adr_enforcement_report:` can only tune the interval or DISABLE it (observably:
+// `not-evaluated:disabled`, zero writes).
+export const ADR_ENFORCEMENT_ROUTINE_NAME = "adr-enforcement-report";
+export const ADR_ENFORCEMENT_INTERVAL_MIN_DEFAULT = 1440;
+export const ADR_ENFORCEMENT_MIN_INTERVAL_MINUTES = 60;
+
+export interface AdrEnforcementConfig {
+  enabled: boolean;
+  intervalMinutes: number | null;
+}
+export interface AdrEnforcementConfigRead {
+  present: boolean;
+  config: AdrEnforcementConfig | null;
+  error: string | null;
+}
+
+function cfgAdrEnforcementBad(msg: string): string {
+  return `loop.adr_enforcement_report ${msg}`;
+}
+
+/** Parse the optional section. Absent ⇒ the routine runs with its default cadence. Present ⇒ must
+ *  carry a boolean `enabled`; `interval` is `interval:<N>m` with a floor (a below-floor value is
+ *  REFUSED, never silently rounded — same discipline as the sibling routines). */
+export function parseAdrEnforcementSection(raw: unknown): { config: AdrEnforcementConfig | null; error: string | null } {
+  if (raw === null || typeof raw !== "object" || Array.isArray(raw)) {
+    return { config: null, error: cfgAdrEnforcementBad(`must be a mapping (got ${Array.isArray(raw) ? "array" : raw === null ? "null" : typeof raw})`) };
+  }
+  const rec = raw as Record<string, unknown>;
+  if (typeof rec.enabled !== "boolean") {
+    return { config: null, error: cfgAdrEnforcementBad(`needs a boolean 'enabled' (got ${rec.enabled === undefined ? "missing" : JSON.stringify(rec.enabled)})`) };
+  }
+  if (rec.enabled === false) return { config: { enabled: false, intervalMinutes: null }, error: null };
+  if (rec.interval === undefined || rec.interval === null) {
+    return { config: { enabled: true, intervalMinutes: ADR_ENFORCEMENT_INTERVAL_MIN_DEFAULT }, error: null };
+  }
+  if (typeof rec.interval !== "string") {
+    return { config: null, error: cfgAdrEnforcementBad(`'interval' must be a string of the form interval:<N>m (got ${JSON.stringify(rec.interval)})`) };
+  }
+  let trigger: { kind: string; minutes?: number };
+  try {
+    trigger = parseTrigger(rec.interval) as { kind: string; minutes?: number };
+  } catch (e) {
+    return { config: null, error: cfgAdrEnforcementBad(`invalid 'interval' — ${(e as Error).message}`) };
+  }
+  if (trigger.kind !== "interval" || typeof trigger.minutes !== "number") {
+    return { config: null, error: cfgAdrEnforcementBad(`'interval' must be interval:<N>m (got kind '${trigger.kind}')`) };
+  }
+  if (trigger.minutes < ADR_ENFORCEMENT_MIN_INTERVAL_MINUTES) {
+    return { config: null, error: cfgAdrEnforcementBad(`interval ${trigger.minutes}m is below the ${ADR_ENFORCEMENT_MIN_INTERVAL_MINUTES}m floor — refused, not silently rounded`) };
+  }
+  return { config: { enabled: true, intervalMinutes: trigger.minutes }, error: null };
+}
+
+/** Read `.quay/config.yml` `loop.adr_enforcement_report:`. Absent (incl. no config / no `loop:`)
+ *  is NOT an error here — unlike the sibling routines it means "default cadence", see the header. */
+export function readAdrEnforcementConfig(workspaceRoot: string): AdrEnforcementConfigRead {
+  const file = path.join(workspaceRoot, ".quay", "config.yml");
+  let text: string;
+  try {
+    text = fs.readFileSync(file, "utf8");
+  } catch {
+    return { present: false, config: null, error: null };
+  }
+  let parsed: unknown;
+  try {
+    parsed = parseYaml(text);
+  } catch (e) {
+    return { present: true, config: null, error: `.quay/config.yml is not valid YAML — ${(e as Error).message}` };
+  }
+  const loop = parsed && typeof parsed === "object" && !Array.isArray(parsed) ? (parsed as Record<string, unknown>).loop : undefined;
+  if (loop === null || loop === undefined) return { present: false, config: null, error: null };
+  if (typeof loop !== "object" || Array.isArray(loop)) return { present: true, config: null, error: "FAIL-CLOSED: .quay/config.yml 'loop:' must be a mapping" };
+  const raw = (loop as Record<string, unknown>).adr_enforcement_report;
+  if (raw === undefined || raw === null) return { present: false, config: null, error: null };
+  const { config, error } = parseAdrEnforcementSection(raw);
+  return { present: true, config, error };
+}
+
+/** One ADR's gate execution, as it is recorded in the round Fact (the GateEvent itself is the
+ *  engine's; this is the reader-facing summary of it). */
+export interface AdrEnforcementGateRecord {
+  adr: string;
+  gate: string;
+  ok: boolean;
+  verdict: string;
+  /** The selfcheck's OWN exit code when the engine's reason carries it (`acceptance failed (exit N)`);
+   *  null when the gate did not reach an acceptance command (unknown gate / not accepted / spawn). */
+  exitCode: number | null;
+  reason: string;
+}
+
+export interface AdrEnforcementFactValue {
+  mode: "adr-enforcement-report-round";
+  declared: string[];
+  skipped: Array<{ adr: string; why: string }>;
+  gates: AdrEnforcementGateRecord[];
+  reportOnly: true;
+}
+
+/** The selfcheck's documented three-state contract (its header + ADR-007's enforcement comment):
+ *  0 = every fixture PASS · 1 = ≥1 FAIL · 2 = no FAIL but ≥1 NOT-EVALUATED.
+ *  ⛔ exit 2 is NOT a red: it says "an axis could not be judged". The engine's binary ok/fail cannot
+ *  express that, so the ROUTINE records it — and the GateEvent's reason still carries the NOT-
+ *  EVALUATED text through `runAcceptance`'s failure excerpt. */
+export const ADR_SELFCHECK_NOT_EVALUATED_EXIT = 2;
+
+/** `acceptance failed (exit N…)` → N. The prefix is produced by the ONE acceptance runner; a gate
+ *  that never reached it yields null (⛔ never 0 — "no reading" is not "passed"). */
+export function adrEnforcementExitCode(reason: string): number | null {
+  const m = /acceptance failed \(exit (\d+)/.exec(String(reason ?? ""));
+  return m ? Number(m[1]) : null;
+}
+
+export interface AdrEnforcementRoundOptions {
+  config?: AdrEnforcementConfig | null;
+  configPresent?: boolean;
+  configError?: string | null;
+  /** Test seam: the engine + stores are injected so the round can be exercised against a temp
+   *  workspace without importing packages/quay from the plugin test (production leaves this unset
+   *  and the kernel modules are imported dynamically, the same way worker-fan-in.ts does). */
+  kernel?: {
+    readGatesConfig: (root: string) => { adr: string[] };
+    createAdrStore: (dir: string) => { get: (id: string) => { id: string; status?: string; enforcement?: unknown } | null };
+    runGate: (args: Record<string, unknown>) => Promise<{ ok: boolean; reason: string; event: { verdict: string } }>;
+  };
+  logPath?: string;
+}
+
+/** Load the kernel modules the round needs. Kept in ONE place so the shipped-bundle aliasing rule
+ *  (build-plugin-dist.mjs `coreSrcAliasPlugin` rewrites+inlines these literal specifiers — ⛔ never a
+ *  computed/pathToFileURL specifier, see worker-fan-in.ts's note) is applied once. */
+async function loadAdrEnforcementKernel(): Promise<NonNullable<AdrEnforcementRoundOptions["kernel"]>> {
+  const registry = await import("../../packages/quay/src/gate/registry.ts") as {
+    readGatesConfig: (root: string) => { adr: string[] };
+  };
+  const engine = await import("../../packages/quay/src/gate/engine.ts") as {
+    runGate: (args: Record<string, unknown>) => Promise<{ ok: boolean; reason: string; event: { verdict: string } }>;
+  };
+  const adrStore = await import("../../packages/quay/src/core/adr-store.ts") as {
+    createAdrStore: (dir: string) => { get: (id: string) => { id: string; status?: string; enforcement?: unknown } | null };
+  };
+  return {
+    readGatesConfig: registry.readGatesConfig,
+    createAdrStore: adrStore.createAdrStore,
+    runGate: engine.runGate,
+  };
+}
+
+/** Run ONE adr-enforcement round: every declared, accepted ADR that carries an `enforcement:`
+ *  command is executed through the gate ENGINE once. */
+export async function runAdrEnforcementRound(
+  root: string,
+  opts: AdrEnforcementRoundOptions = {},
+): Promise<Fact<AdrEnforcementFactValue | null>> {
+  const name = ADR_ENFORCEMENT_ROUTINE_NAME;
+  if (opts.configError) return { name, value: null, state: "failed", reason: opts.configError };
+  const config = opts.config && opts.config.enabled === false
+    ? opts.config
+    : opts.config ?? { enabled: true, intervalMinutes: ADR_ENFORCEMENT_INTERVAL_MIN_DEFAULT };
+  if (config.enabled === false) {
+    return {
+      name,
+      value: null,
+      state: "not-evaluated",
+      reason: "not-evaluated:disabled — .quay/config.yml loop.adr_enforcement_report.enabled=false（kill switch：零 gate 调用、零写入）",
+    };
+  }
+
+  const resolvedRoot = path.resolve(root);
+  let kernel: NonNullable<AdrEnforcementRoundOptions["kernel"]>;
+  try {
+    kernel = opts.kernel ?? await loadAdrEnforcementKernel();
+  } catch (e) {
+    // A workspace without the kernel layout cannot run the gate engine at all: that is a FAILED
+    // routine (it could not do its job), never a silent "nothing to report".
+    return { name, value: null, state: "failed", reason: `gate engine could not be loaded — ${(e as Error).message}` };
+  }
+
+  const declared = [...new Set((kernel.readGatesConfig(resolvedRoot)?.adr ?? []).map((a) => String(a).trim()).filter(Boolean))];
+  const store = kernel.createAdrStore(path.join(resolvedRoot, "adr"));
+  const logPath = opts.logPath ?? path.join(resolvedRoot, ".quay", "gate-events.jsonl");
+  const skipped: Array<{ adr: string; why: string }> = [];
+  const gates: AdrEnforcementGateRecord[] = [];
+
+  for (const adrId of declared) {
+    const adr = store.get(adrId);
+    if (!adr) {
+      skipped.push({ adr: adrId, why: "no such ADR file under adr/" });
+      continue;
+    }
+    if (adr.status !== "accepted") {
+      skipped.push({ adr: adrId, why: `status is ${JSON.stringify(adr.status ?? null)} — not accepted` });
+      continue;
+    }
+    if (typeof adr.enforcement !== "string" || adr.enforcement.trim() === "") {
+      skipped.push({ adr: adrId, why: "accepted but carries no `enforcement:` command" });
+      continue;
+    }
+    const gateName = adrId.toLowerCase();
+    const client = {
+      // The adr gate ignores the task (it is a contract check, not a per-task check). The synthetic
+      // id keeps the GateEvent attributable to the ROUTINE rather than to a task that was not judged.
+      taskGet: async () => ({ id: `adr:${adrId}`, title: adrId, status: "ready", labels: [], parent: null, children: [], body: "" }),
+      taskCheck: async () => ({ ok: true, reason: "adr gate does not use taskCheck" }),
+    };
+    try {
+      const r = await kernel.runGate({
+        client,
+        id: `adr:${adrId}`,
+        gate: gateName,
+        logPath,
+        actor: ADR_ENFORCEMENT_ROUTINE_NAME,
+        workspaceRoot: resolvedRoot,
+      });
+      gates.push({ adr: adrId, gate: gateName, ok: r.ok, verdict: r.event?.verdict ?? (r.ok ? "pass" : "fail"), exitCode: adrEnforcementExitCode(r.reason), reason: r.reason });
+    } catch (e) {
+      gates.push({ adr: adrId, gate: gateName, ok: false, verdict: "fail", exitCode: null, reason: `gate engine threw — ${(e as Error).message}` });
+    }
+  }
+
+  const value: AdrEnforcementFactValue = { mode: "adr-enforcement-report-round", declared, skipped, gates, reportOnly: true };
+  if (gates.length === 0) {
+    return {
+      name,
+      value,
+      state: "not-evaluated",
+      reason: `not-evaluated:no-enforcing-adr — ${declared.length} ADR(s) declared in gates.adr, 0 accepted with an enforcement command` +
+        (skipped.length > 0 ? ` (${skipped.map((s) => `${s.adr}: ${s.why}`).join("; ")})` : ""),
+    };
+  }
+  const notEvaluated = gates.filter((g) => !g.ok && g.exitCode === ADR_SELFCHECK_NOT_EVALUATED_EXIT);
+  if (notEvaluated.length > 0) {
+    return {
+      name,
+      value,
+      state: "not-evaluated",
+      reason: `not-evaluated:selfcheck-exit-${ADR_SELFCHECK_NOT_EVALUATED_EXIT} — ${notEvaluated.map((g) => `${g.adr} (an axis could not be judged; see the GateEvent's NOT-EVALUATED output)`).join(", ")}`,
+    };
+  }
+  const failed = gates.filter((g) => !g.ok);
+  if (failed.length > 0) {
+    return { name, value, state: "failed", reason: `enforcement failed — ${failed.map((g) => `${g.adr}: ${g.reason}`).join(" | ")}` };
+  }
+  return { name, value, state: "verified", reason: null };
+}
+
+/** Build the RoutineSpec (scheduler / watchdog / halt are the driver's, not re-implemented here). */
+export function buildAdrEnforcementRoutine(
+  root: string,
+  read: AdrEnforcementConfigRead,
+  opts: AdrEnforcementRoundOptions = {},
+): RoutineSpec {
+  const minutes = read.config?.intervalMinutes ?? ADR_ENFORCEMENT_INTERVAL_MIN_DEFAULT;
+  return {
+    name: ADR_ENFORCEMENT_ROUTINE_NAME,
+    schedule: { kind: "interval", minutes },
+    // A pure read + N gate executions that append GateEvents. Observation keeps running while
+    // halted (a halt gates SPAWN / model calls, not readings).
+    run: async () => [
+      await runAdrEnforcementRound(root, {
+        config: read.config,
+        configPresent: read.present,
+        configError: read.error,
+        ...(opts.logPath ? { logPath: opts.logPath } : {}),
+        ...(opts.kernel ? { kernel: opts.kernel } : {}),
+      }),
+    ],
+  };
+}
+
+/** Production entry: read `.quay/config.yml` and build the routine. NEVER throws. Unlike its
+ *  siblings this routine is assembled even when the section is ABSENT (default cadence) — see the
+ *  header for why "an enforcement nobody switched on" is exactly the defect it closes. */
+export function adrEnforcementRoutineFromConfig(
+  root: string,
+  opts: AdrEnforcementRoundOptions = {},
+): { routine: RoutineSpec; error: string | null; present: boolean; enabled: boolean } {
+  const read = readAdrEnforcementConfig(root);
+  return {
+    routine: buildAdrEnforcementRoutine(root, read, opts),
+    error: read.error,
+    present: read.present,
+    enabled: read.config?.enabled !== false,
+  };
+}
+
+/** The assembly line, as ONE string (硬规则 3b/9: absent / disabled / malformed / running must not
+ *  look the same in the startup log). */
+export function formatAdrEnforcementAssembly(a: {
+  present: boolean;
+  error: string | null;
+  enabled: boolean;
+  intervalMinutes: number;
+}): string {
+  if (a.error !== null) return `adr-enforcement-report 例程已装配（${a.error} — 每轮记 failed、零 gate 调用）`;
+  if (!a.enabled) return "adr-enforcement-report 例程已装配（enabled:false — 每轮记 not-evaluated:disabled，零 gate 调用）";
+  const declared = a.present ? "声明的节奏" : "未声明 loop.adr_enforcement_report ⇒ 缺省节奏（default-on：本轨存在的理由就是让已声明的门产生事件）";
+  return `adr-enforcement-report 例程已装配（enabled, interval=${a.intervalMinutes}m，${declared}；report-only：每个 accepted + 带 enforcement 的 gates.adr ADR 经门引擎 runGate 跑一次，事件 actor=${ADR_ENFORCEMENT_ROUTINE_NAME}）`;
+}
+
 // ── design-evolution-readings 的 config 入口（`loop.design_evolution_readings:`）────────────────
 // 与 arch_cycle_report 同族的第九条声明式例程，语义逐条对齐（⛔ 不另造机制）：
 //   • 段缺席          ⇒ 不装配（off by default，宿主例程表逐条不变——AC144 的「恰好四条」判据仍成立）；
@@ -2517,6 +2837,12 @@ export interface QualityGateOptions {
    *  null = 未装配 ⇒ 未声明的工作区例程表逐条不变（AC144 的「恰好四条」判据仍成立）。
    *  **report-only**：RM1 占比 + RM2 争用计数 + 一行历史，⛔ 不作为任何闸。 */
   designEvolutionRoutine?: RoutineSpec | null;
+  /** adr-enforcement-report 例程（tasks/gap-adr007-half1-selfcheck-probes-archived-and-gate-never-
+   *  invoked）：让 `gates.adr` 声明且 accepted 的 ADR 的 `adr-<id>` 门有常设调用者。**与上面各条的
+   *  区别**：它 DEFAULT-ON（段缺席也装配，见其节头注释——「没人打开的 enforcement」正是本轨要消灭的
+   *  缺陷）；段只能调间隔或关掉（可观测的 not-evaluated:disabled）。**report-only**：失败是该例程的
+   *  读数；selfcheck exit 2（NOT-EVALUATED）记 not-evaluated，⛔ 不记 failed。 */
+  adrEnforcementRoutine?: RoutineSpec | null;
 }
 
 /** 四条例程（B15 pool-quality-judge + B17 judgment-consumer-check + 架构复核 + packaging-hygiene）。
@@ -2612,6 +2938,12 @@ export function qualityGateRoutines(root: string, opts: QualityGateOptions): Rou
     // 仍在产生并发争用（RM2）——两条读数都来自被测机制之外（git 历史 / worker 结局账本），report-only，
     // ⛔ 不 ratchet（占比高、争用多都不是 failed）。
     ...(opts.designEvolutionRoutine ? [opts.designEvolutionRoutine] : []),
+    // 第十四类：ADR-ENFORCEMENT 例程（tasks/gap-adr007-half1-selfcheck-probes-archived-and-gate-never-
+    // invoked）。与上面各条的唯一差别是**它 DEFAULT-ON**：缺省不装配正是本轨要修的缺陷（`adr-007`
+    // 门声明了 94 天、0 事件）。**它回答的问题**：「已声明并被接受的 ADR，它的 enforcement 命令现在
+    // 真的跑得起来吗」——经门引擎 runGate 写 GateEvent（actor=例程名），report-only，⛔ 不 ratchet、
+    // ⛔ 不在 fan-in 热路径上。
+    ...(opts.adrEnforcementRoutine ? [opts.adrEnforcementRoutine] : []),
   ];
 }
 
@@ -3393,6 +3725,18 @@ export async function main(argv: string[]): Promise<number> {
     })}`);
   }
 
+  // adr-enforcement-report 轨道：让 `gates.adr` 声明且 accepted 的 ADR 的 `adr-<id>` 门有常设调用者
+  // （tasks/gap-adr007-half1-selfcheck-probes-archived-and-gate-never-invoked）。**DEFAULT-ON**：段缺席
+  // 也装配（缺省 1440m）——「已声明的门没人跑」正是本轨要消灭的形态；段只能调间隔或关掉。
+  const adrEnforcement = adrEnforcementRoutineFromConfig(rootDir);
+  console.error(`quality-gate-driver: ${formatAdrEnforcementAssembly({
+    present: adrEnforcement.present,
+    error: adrEnforcement.error,
+    enabled: adrEnforcement.enabled,
+    intervalMinutes:
+      (adrEnforcement.routine.schedule as { minutes?: number } | undefined)?.minutes ?? ADR_ENFORCEMENT_INTERVAL_MIN_DEFAULT,
+  })}`);
+
   const routines = qualityGateRoutines(rootDir, {
     planCmd: planCmd ? splitArgs(planCmd) : null,
     judgeArgv: judgeCmd ? splitArgs(judgeCmd) : null,
@@ -3421,6 +3765,7 @@ export async function main(argv: string[]): Promise<number> {
     archCoverageRoutine: archCoverage.routine,
     archCycleRoutine: archCycle.routine,
     designEvolutionRoutine: designEvolution.routine,
+    adrEnforcementRoutine: adrEnforcement.routine,
   });
 
   return runResidentQualityGateLoop({ root: rootDir, intervalMs: interval, once, maxRounds, roundLogFile, runId: resolvedRunId, json, pidFile, routines, routineWatchdogMs, kind: "quality" });

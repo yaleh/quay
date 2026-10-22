@@ -76,6 +76,16 @@ import {
   designEvolutionRoutineFromConfig,
   runDesignEvolutionRound,
   formatDesignEvolutionAssembly,
+  ADR_ENFORCEMENT_ROUTINE_NAME,
+  ADR_ENFORCEMENT_INTERVAL_MIN_DEFAULT,
+  ADR_ENFORCEMENT_MIN_INTERVAL_MINUTES,
+  ADR_SELFCHECK_NOT_EVALUATED_EXIT,
+  parseAdrEnforcementSection,
+  readAdrEnforcementConfig,
+  adrEnforcementRoutineFromConfig,
+  runAdrEnforcementRound,
+  adrEnforcementExitCode,
+  formatAdrEnforcementAssembly,
 } from "../scripts/quality-gate-driver.ts";
 // 同一个读数函数的两个面：例行程把它写进 Fact，AC1 的「可从 .archguard/query/ 独立复现」直接对
 // **读函数**做（⛔ 不另写一份解析，否则只是证明夹具自洽）。
@@ -445,9 +455,13 @@ test("resident loop --once writes a round record with facts (spawn real process)
   assert.equal(lines.length, 1, "one round ⇒ one heartbeat line");
   const rec = JSON.parse(lines[0]);
   assert.equal(rec.halted, false);
-  assert.equal(rec.facts.length, 5, "first round ⇒ all five routines due (never-ran ⇒ interval due; four built-in + the default architecture-analysis)");
+  assert.equal(rec.facts.length, 6, "first round ⇒ all six routines due (never-ran ⇒ interval due; four built-in + the default architecture-analysis + the DEFAULT-ON adr-enforcement-report)");
   const names = rec.facts.map((f) => f.name).sort();
-  assert.deepEqual(names, ["architecture-analysis", "architecture-review", "judgment-consumer-check", "packaging-hygiene", "pool-quality-judge"]);
+  assert.deepEqual(names, ["adr-enforcement-report", "architecture-analysis", "architecture-review", "judgment-consumer-check", "packaging-hygiene", "pool-quality-judge"]);
+  // 空 root 没有任何 `gates.adr` 声明 ⇒ 新例程记「无可执行的 ADR」（NOT-EVALUATED），⛔ 不是静默绿。
+  const adrFact = rec.facts.find((f) => f.name === ADR_ENFORCEMENT_ROUTINE_NAME);
+  assert.equal(adrFact.state, "not-evaluated");
+  assert.match(adrFact.reason, /no-enforcing-adr/);
   // 空 root 无 archguard ⇒ 默认例程是**可读的** not-evaluated（不是 spawn 错误、也不是「跑了没发现」）。
   const arch = rec.facts.find((f) => f.name === "architecture-analysis");
   assert.equal(arch.state, "not-evaluated");
@@ -2928,4 +2942,165 @@ test("formatDesignEvolutionAssembly — malformed / disabled / running never loo
   assert.match(running, /report-only/);
   assert.match(disabled, /not-evaluated:disabled/);
   assert.match(broken, /每轮记 failed/);
+});
+
+// ── adr-enforcement-report ───────────────────────────────────────────────────────────────────────
+// (tasks/gap-adr007-half1-selfcheck-probes-archived-and-gate-never-invoked)
+//
+// THE DEFECT: a `gates.adr`-declared gate could only be fetched BY NAME; nothing standing invoked it
+// ⇒ `.quay/gate-events.jsonl` held 0 `adr-007` events for ~94 days. These tests pin the three things
+// that make the new routine a real caller rather than a second implementation:
+//   ① it runs the gate through the ENGINE (the event is written by runGate, actor = the routine),
+//   ② it keeps only ACCEPTED ADRs carrying an `enforcement:` (otherwise "accepted ADR without a
+//      command" would manufacture a permanent red), recording the rest as `skipped`,
+//   ③ the selfcheck's exit 2 is recorded as NOT-EVALUATED, never as a pass and never as a plain red.
+
+/** A temp workspace with a `gates.adr` declaration + real ADR files (enough for the REAL kernel:
+ *  loader → makeAdrGate → runAcceptance). ⛔ No stub engine here — a stub would only prove the stub. */
+function makeAdrEnforcementWorkspace(t) {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "qg-adr-enforce-"));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  fs.mkdirSync(path.join(root, ".quay"), { recursive: true });
+  fs.mkdirSync(path.join(root, "adr"), { recursive: true });
+  fs.writeFileSync(
+    path.join(root, ".quay", "config.yml"),
+    ["gates:", "  adr:", '    - "ADR-900"', '    - "ADR-901"', '    - "ADR-902"', '    - "ADR-903"', ""].join("\n"),
+    "utf8",
+  );
+  // 900: accepted + enforcement (the one that must run) — exit 2 = the selfcheck's NOT-EVALUATED.
+  writeAdr(root, "ADR-900", { status: "accepted", enforcement: "node -e \"process.exit(2)\"" });
+  // 901: accepted, no enforcement → skipped, never run.
+  writeAdr(root, "ADR-901", { status: "accepted", enforcement: "" });
+  // 902: proposed → skipped (the gate itself would fail closed, but a never-accepted ADR must not
+  // produce a red stream; it is not an enforcement).
+  writeAdr(root, "ADR-902", { status: "proposed", enforcement: "node -e \"process.exit(0)\"" });
+  // 903 is DECLARED in gates.adr but has no file at all → skipped with a reason.
+  return root;
+}
+
+function writeAdr(root, id, { status, enforcement }) {
+  fs.writeFileSync(
+    path.join(root, "adr", `${id}.md`),
+    [
+      "---",
+      `id: ${id}`,
+      `title: fixture ${id}`,
+      `status: ${status}`,
+      `enforcement: ${JSON.stringify(enforcement)}`,
+      "---",
+      `fixture body for ${id}`,
+      "",
+    ].join("\n"),
+    "utf8",
+  );
+}
+
+test("runAdrEnforcementRound — runs accepted+enforcing ADRs through the ENGINE, skips the rest (AC5 unit)", async (t) => {
+  const root = makeAdrEnforcementWorkspace(t);
+  const fact = await runAdrEnforcementRound(root);
+
+  assert.equal(fact.name, ADR_ENFORCEMENT_ROUTINE_NAME);
+  assert.equal(fact.value.reportOnly, true);
+  assert.deepEqual(fact.value.gates.map((g) => g.adr), ["ADR-900"], "only the accepted, enforcing ADR is run");
+  assert.deepEqual(fact.value.skipped.map((s) => s.adr).sort(), ["ADR-901", "ADR-902", "ADR-903"]);
+  assert.match(fact.value.skipped.find((s) => s.adr === "ADR-902").why, /not accepted/);
+  assert.match(fact.value.skipped.find((s) => s.adr === "ADR-901").why, /no `enforcement:`/);
+  assert.match(fact.value.skipped.find((s) => s.adr === "ADR-903").why, /no such ADR/);
+
+  const g = fact.value.gates[0];
+  assert.equal(g.ok, false);
+  assert.equal(g.exitCode, ADR_SELFCHECK_NOT_EVALUATED_EXIT);
+  // ③ exit 2 is NOT-EVALUATED for the ROUTINE (the engine's own verdict stays binary: non-pass).
+  assert.equal(fact.state, "not-evaluated", fact.reason);
+  assert.match(fact.reason, /selfcheck-exit-2/);
+
+  // ① the event is the ENGINE's: one line, gate adr-900, actor = the routine name.
+  const events = fs.readFileSync(path.join(root, ".quay", "gate-events.jsonl"), "utf8").trim().split("\n").map((l) => JSON.parse(l));
+  assert.equal(events.length, 1);
+  assert.equal(events[0].gate, "adr-900");
+  assert.equal(events[0].actor, ADR_ENFORCEMENT_ROUTINE_NAME);
+  assert.equal(events[0].verdict, "fail", "engine records non-pass; the three-valued reading lives on the Fact");
+  assert.match(String(events[0].payload.reason), /exit 2/);
+});
+
+test("runAdrEnforcementRound — a passing gate is `verified`; a plain red is `failed` (three values, not two)", async (t) => {
+  const passRoot = fs.mkdtempSync(path.join(os.tmpdir(), "qg-adr-pass-"));
+  t.after(() => fs.rmSync(passRoot, { recursive: true, force: true }));
+  fs.mkdirSync(path.join(passRoot, ".quay"), { recursive: true });
+  fs.mkdirSync(path.join(passRoot, "adr"), { recursive: true });
+  fs.writeFileSync(path.join(passRoot, ".quay", "config.yml"), 'gates:\n  adr:\n    - "ADR-800"\n', "utf8");
+  writeAdr(passRoot, "ADR-800", { status: "accepted", enforcement: "node -e \"process.exit(0)\"" });
+  const pass = await runAdrEnforcementRound(passRoot);
+  assert.equal(pass.state, "verified", pass.reason);
+  assert.equal(pass.value.gates[0].ok, true);
+
+  fs.writeFileSync(path.join(passRoot, ".quay", "config.yml"), 'gates:\n  adr:\n    - "ADR-801"\n', "utf8");
+  writeAdr(passRoot, "ADR-801", { status: "accepted", enforcement: "node -e \"process.exit(1)\"" });
+  const red = await runAdrEnforcementRound(passRoot);
+  assert.equal(red.state, "failed", red.reason);
+  assert.equal(red.value.gates[0].exitCode, 1);
+});
+
+test("runAdrEnforcementRound — enabled:false is an observable kill switch: zero gate calls, zero writes", async (t) => {
+  const root = makeAdrEnforcementWorkspace(t);
+  const fact = await runAdrEnforcementRound(root, { config: { enabled: false, intervalMinutes: null }, configPresent: true });
+  assert.equal(fact.state, "not-evaluated");
+  assert.match(fact.reason, /not-evaluated:disabled/);
+  assert.equal(fact.value, null);
+  assert.equal(fs.existsSync(path.join(root, ".quay", "gate-events.jsonl")), false, "a kill switch must write NOTHING");
+});
+
+test("runAdrEnforcementRound — no accepted+enforcing ADR is NOT-EVALUATED, never a silent green", async (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "qg-adr-none-"));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  fs.mkdirSync(path.join(root, ".quay"), { recursive: true });
+  fs.mkdirSync(path.join(root, "adr"), { recursive: true });
+  const fact = await runAdrEnforcementRound(root);
+  assert.equal(fact.state, "not-evaluated");
+  assert.match(fact.reason, /no-enforcing-adr/);
+  assert.deepEqual(fact.value.gates, []);
+});
+
+test("adrEnforcementExitCode reads the acceptance runner's own prefix; no reading is null, never 0", () => {
+  assert.equal(adrEnforcementExitCode("acceptance failed (exit 2) — boom"), 2);
+  assert.equal(adrEnforcementExitCode("acceptance failed (exit 1, signal SIGKILL) — x"), 1);
+  assert.equal(adrEnforcementExitCode("acceptance passed (exit 0)"), null);
+  assert.equal(adrEnforcementExitCode("no such gate"), null);
+});
+
+test("adr-enforcement config — DEFAULT-ON when absent, tunable when declared, below-floor refused", (t) => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "qg-adr-cfg-"));
+  t.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
+  // Absent ⇒ assembled with the default cadence (unlike its arch_cycle_report siblings).
+  assert.deepEqual(readAdrEnforcementConfig(tmp), { present: false, config: null, error: null });
+  const absent = adrEnforcementRoutineFromConfig(tmp);
+  assert.equal(absent.routine.name, ADR_ENFORCEMENT_ROUTINE_NAME);
+  assert.deepEqual(absent.routine.schedule, { kind: "interval", minutes: ADR_ENFORCEMENT_INTERVAL_MIN_DEFAULT });
+  assert.equal(absent.enabled, true);
+
+  fs.mkdirSync(path.join(tmp, ".quay"), { recursive: true });
+  fs.writeFileSync(path.join(tmp, ".quay", "config.yml"), "loop:\n  adr_enforcement_report:\n    enabled: true\n    interval: interval:120m\n", "utf8");
+  assert.deepEqual(adrEnforcementRoutineFromConfig(tmp).routine.schedule, { kind: "interval", minutes: 120 });
+
+  fs.writeFileSync(path.join(tmp, ".quay", "config.yml"), "loop:\n  adr_enforcement_report:\n    enabled: false\n", "utf8");
+  const off = adrEnforcementRoutineFromConfig(tmp);
+  assert.equal(off.enabled, false);
+  assert.equal(off.routine.name, ADR_ENFORCEMENT_ROUTINE_NAME, "a kill switch is still ASSEMBLED — 'not running' must be observable");
+
+  assert.notEqual(parseAdrEnforcementSection({ interval: "interval:120m" }).error, null, "enabled is required");
+  assert.match(
+    parseAdrEnforcementSection({ enabled: true, interval: `interval:${ADR_ENFORCEMENT_MIN_INTERVAL_MINUTES - 1}m` }).error,
+    new RegExp(`${ADR_ENFORCEMENT_MIN_INTERVAL_MINUTES}m floor`),
+  );
+  assert.equal(formatAdrEnforcementAssembly({ present: false, error: null, enabled: true, intervalMinutes: 1440 }).includes("未声明"), true);
+  assert.equal(formatAdrEnforcementAssembly({ present: true, error: null, enabled: false, intervalMinutes: 1440 }).includes("enabled:false"), true);
+});
+
+test("qualityGateRoutines injects adr-enforcement-report WITHOUT displacing a built-in", () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "qg-adr-routines-"));
+  fs.rmSync(tmp, { recursive: true, force: true });
+  const base = qualityGateRoutines(tmp, coverageBaseOpts()).map((r) => r.name);
+  const injected = { name: ADR_ENFORCEMENT_ROUTINE_NAME, schedule: { kind: "interval", minutes: 1440 }, run: () => [] };
+  const withIt = qualityGateRoutines(tmp, { ...coverageBaseOpts(), adrEnforcementRoutine: injected }).map((r) => r.name);
+  assert.deepEqual(withIt, [...base, ADR_ENFORCEMENT_ROUTINE_NAME]);
 });

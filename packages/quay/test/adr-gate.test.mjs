@@ -320,3 +320,25 @@ test("E3 A4: 'quay-native adr list --applies-to <path>' excludes ADR-001 for an 
   const adrs = JSON.parse(out);
   assert.ok(!adrs.some((a) => a.id === "ADR-001"), `expected ADR-001 excluded, got ${JSON.stringify(adrs.map((a) => a.id))}`);
 });
+
+// ── ADR-007 HALF 1: the enforcement command must point at a LIVING instrument ─────────────────────
+// (tasks/gap-adr007-half1-selfcheck-probes-archived-and-gate-never-invoked). The 2026-09-13 rot was
+// not "the script is missing" — it was that `MODULE_NOT_FOUND` exits 1, which EQUALS the expected
+// code of the three "must be detected" fixtures, so the selfcheck printed PASS while measuring
+// nothing. This asserts the gate boundary now sees the three-valued reading: the selfcheck exits 2
+// (L_S has no living product-code instrument), the gate does NOT pass, and the reason carries the
+// NOT-EVALUATED text instead of a module-load failure.
+test("ADR-007: enforcement runs a live instrument — exit 2 ⇒ gate does not pass, reason names NOT-EVALUATED", async () => {
+  const store = createAdrStore(REAL_ADR_DIR);
+  const adr = store.get("ADR-007");
+  assert.ok(adr, "ADR-007 must exist in adr/");
+  assert.equal(adr.status, "accepted");
+  assert.match(String(adr.enforcement), /experiments\/quay-perpetual-stream\/scripts\/git-lens-selfcheck\.sh/);
+
+  const { makeAdrGate } = await import("../src/gate/factories/adr.ts");
+  const gateFn = makeAdrGate("ADR-007", REAL_ADR_DIR);
+  const r = await gateFn({ id: "fixture-task", title: "fixture", status: "ready", labels: [], parent: null, children: [], body: "" });
+  assert.equal(r.ok, false, "the selfcheck's NOT-EVALUATED exit (2) must never read as a pass");
+  assert.match(String(r.reason), /NOT-EVALUATED/, `reason: ${r.reason}`);
+  assert.equal(String(r.reason).includes("MODULE_NOT_FOUND"), false, "MODULE_NOT_FOUND would mean the instrument did not load");
+});

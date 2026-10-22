@@ -454,3 +454,61 @@ test("--staleness cannot be combined with a declaration (it is a reading, not a 
   assert.equal(r.status, 2);
   assert.ok(!fs.existsSync(carrier(dir)), "a refused combination writes nothing");
 });
+
+// ── --ld-reading: the LIVING L_D instrument the ADR-007 HALF 1 selfcheck drives ──────────────────
+// (tasks/gap-adr007-half1-selfcheck-probes-archived-and-gate-never-invoked). The archived
+// `git-lens-l-d-code-doc-ratio.ts` is NOT revived; the selfcheck runs THESE three fixtures through
+// this read-only face, so the same rule is pinned here at its unit.
+
+const LD_FIXTURES = path.join(
+  REPO_ROOT, "experiments", "quay-perpetual-stream", "fixtures", "git-lens", "l-d",
+);
+
+/** Exit codes are the CONTRACT the selfcheck reads: 0 not-flagged · 1 flagged · 3 NO-READING.
+ *  ⛔ "could not read" must never land on 0 or 1, or the selfcheck's expected code would be
+ *  satisfiable without an instrument (the exact shape that hid the archived probes). */
+test("--ld-reading: the three git-lens fixtures read flag / not-flag, with distinct exit codes (AC2)", () => {
+  const cases = [
+    ["prose-heavy", 1, true],
+    ["code-heavy", 0, false],
+    ["empty", 0, false],
+  ];
+  for (const [id, wantExit, wantFlagged] of cases) {
+    const r = spawnSync(
+      process.execPath,
+      ["--no-warnings", "--experimental-strip-types", SCRIPT, "--ld-reading",
+        "--numstat-file", path.join(LD_FIXTURES, `${id}.numstat`), "--json"],
+      { encoding: "utf8" },
+    );
+    assert.equal(r.status, wantExit, `${id}: stderr=${r.stderr}`);
+    const printed = JSON.parse(r.stdout);
+    assert.equal(printed.flagged, wantFlagged, `${id}: ${r.stdout}`);
+    assert.equal(typeof printed.docLines, "number");
+    assert.equal(typeof printed.codeLines, "number");
+  }
+});
+
+test("--ld-reading is READ-ONLY: no carrier and no file at all is written", () => {
+  const dir = makeRepo({ "impl.ts": lines(3), "docs/note.md": lines(40) });
+  assert.equal(run("git", ["status", "--porcelain"], dir).trim(), "");
+  const r = declare(dir, ["--ld-reading", "--numstat-file", path.join(LD_FIXTURES, "prose-heavy.numstat"), "--json"]);
+  assert.equal(r.status, 1, r.stderr);
+  assert.ok(!fs.existsSync(path.join(dir, ".quay")), "the reading must not create .quay/");
+  assert.equal(run("git", ["status", "--porcelain"], dir).trim(), "", "the reading must not touch the worktree");
+});
+
+test("--ld-reading: an unreadable numstat file exits 3 (NOT-EVALUATED), never 0/1", () => {
+  const dir = makeRepo({ "impl.ts": lines(3) });
+  const r = declare(dir, ["--ld-reading", "--numstat-file", path.join(dir, "nope.numstat"), "--json"]);
+  assert.equal(r.status, 3, r.stderr);
+  assert.match(r.stderr, /NO-READING/);
+  assert.equal(r.stdout.trim(), "");
+});
+
+test("--ld-reading: missing --numstat-file / combining with a declaration / stray --numstat-file are usage errors", () => {
+  const dir = makeRepo({ "impl.ts": lines(3) });
+  assert.equal(declare(dir, ["--ld-reading"]).status, 2);
+  assert.equal(declare(dir, ["--ld-reading", "--to", "expansion", "--reason", "fixture: must be refused"]).status, 2);
+  assert.equal(declare(dir, ["--numstat-file", path.join(LD_FIXTURES, "empty.numstat")]).status, 2);
+  assert.ok(!fs.existsSync(carrier(dir)), "usage errors write nothing");
+});

@@ -413,6 +413,51 @@ export function readPhaseStaleness(root: string, opts: { now?: Date } = {}): Pha
   };
 }
 
+// ── L_D reading over a numstat FILE (the read-only face the git-lens selfcheck drives) ───────────
+//
+// tasks/gap-adr007-half1-selfcheck-probes-archived-and-gate-never-invoked: the ADR-007 HALF 1
+// selfcheck used to invoke `experiments/.../scripts/git-lens-l-d-code-doc-ratio.ts`, archived on
+// 2026-09-07. Its MODULE_NOT_FOUND is also exit 1 — the expected code of the "must be flagged"
+// fixture — so the selfcheck printed PASS without an instrument. This face is the LIVING instrument
+// it drives instead: the SAME `parseNumstat`/`computeRatio` the ADR-008 declaration takes, applied
+// to a fixture numstat file, with NO carrier write (⛔ not a declaration).
+//
+// Exit codes (three-valued, 硬规则 3b — ⛔ "could not read" never shares a value with "not flagged"):
+//   0 = reading produced, NOT flagged
+//   1 = reading produced, flagged
+//   2 = usage error
+//   3 = NO-READING (the numstat file could not be read)
+
+/** The read-only reading's JSON shape — the `Reading` fields a numstat file can determine (no git
+ *  range / commit count: there is no repo involved). */
+export interface LdFileReading {
+  rule: string;
+  numstatFile: string;
+  docLines: number;
+  codeLines: number;
+  ratio: number | null;
+  verdict: string;
+  flagged: boolean;
+}
+
+export function takeLdFileReading(numstatFile: string): LdFileReading {
+  const text = fs.readFileSync(numstatFile, "utf8");
+  const r = computeRatio(parseNumstat(text));
+  // Mirror `takeLdReading`'s code-less arm: JSON has no Infinity literal, and a range that touched
+  // only docs IS prose-heavy (the archived rule's own behaviour).
+  return {
+    rule:
+      "L_D code:doc line-delta ratio (archived git-lens-l-d-code-doc-ratio rule: doc=/.(md|txt)$/i, " +
+      "ratio=docLines/codeLines, flagged = ratio > 3.0 AND docLines > 20)",
+    numstatFile,
+    docLines: r.docLines,
+    codeLines: r.codeLines,
+    ratio: r.ratio === Infinity ? null : r.ratio,
+    verdict: r.ratio === Infinity ? "FLAGGED (prose-heavy: codeLines=0)" : r.verdict,
+    flagged: r.flagged || r.ratio === Infinity,
+  };
+}
+
 // ── arg parsing ──────────────────────────────────────────────────────────────────────────────────
 
 interface ParsedArgs {
@@ -422,6 +467,9 @@ interface ParsedArgs {
   window?: number;
   /** READ-ONLY staleness reading instead of a declaration (never combined with --to/--reason). */
   staleness: boolean;
+  /** READ-ONLY L_D reading over `--numstat-file` instead of a declaration. */
+  ldReading: boolean;
+  numstatFile?: string;
   json: boolean;
   error?: string;
 }
@@ -439,7 +487,8 @@ export function parseArgs(argv: string[]): ParsedArgs {
     minArgs: 0,
     usage:
       '--to <expansion|convergence> --reason "<one sentence>" [--root <repo>] [--window <n>] [--json]\n' +
-      "       --staleness [--root <repo>] [--json]",
+      "       --staleness [--root <repo>] [--json]\n" +
+      "       --ld-reading --numstat-file <f> [--json]",
     help: "return",
     errors: "return",
     unknown: "reject",
@@ -449,6 +498,8 @@ export function parseArgs(argv: string[]): ParsedArgs {
       root: { type: "string" },
       window: { type: "string" },
       staleness: { type: "boolean" },
+      "ld-reading": { type: "boolean" },
+      "numstat-file": { type: "string" },
       json: { type: "boolean" },
     },
   });
@@ -458,8 +509,11 @@ export function parseArgs(argv: string[]): ParsedArgs {
     reason: str(parsed.flags.reason),
     root: str(parsed.flags.root),
     staleness: parsed.flags.staleness === true,
+    ldReading: parsed.flags["ld-reading"] === true,
     json: parsed.flags.json === true,
   };
+  const numstatFile = str(parsed.flags["numstat-file"]);
+  if (numstatFile !== undefined && numstatFile !== "") out.numstatFile = numstatFile;
   if (parsed.help) return { ...out, error: "help" };
   if (parsed.error) return { ...out, error: parsed.error };
   if (parsed.args.length > 0) return { ...out, error: `unknown argument: ${parsed.args[0]}` };
@@ -484,9 +538,12 @@ Usage:
        --to <expansion|convergence> --reason "<one sentence>" [--root <repo>] [--window <n>] [--json]
   node --experimental-strip-types plugin/scripts/phase-declare.ts \\
        --staleness [--root <repo>] [--json]      (READ-ONLY: no file is written)
+  node --experimental-strip-types plugin/scripts/phase-declare.ts \\
+       --ld-reading --numstat-file <f> [--json] (READ-ONLY: the L_D reading over a numstat file)
 
 Exit: 0 written | 1 refused (no/thin --reason, or unreadable carrier) | 2 usage | 3 no reading
-      (with --staleness: 0 = read and evaluated, 3 = NOT-EVALUATED — a distinct value, see its reason)`;
+      (with --staleness / --ld-reading: 0 = read and evaluated (--ld-reading: NOT flagged),
+       1 = --ld-reading: FLAGGED, 3 = NOT-EVALUATED — a distinct value, see its reason)`;
 
 function main(): void {
   const opts = parseArgs(process.argv.slice(2));
@@ -499,6 +556,42 @@ function main(): void {
     process.exit(2);
   }
   const repoRoot = opts.root ? path.resolve(opts.root) : path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
+
+  // READ-ONLY face (tasks/gap-adr007-half1-selfcheck-probes-archived-and-gate-never-invoked): the
+  // LIVING L_D instrument the ADR-007 HALF 1 selfcheck drives. Deliberately disjoint from every
+  // write path below — a reading must never be mistakable for a declaration.
+  if (opts.ldReading) {
+    if (opts.to !== undefined || opts.reason !== undefined || opts.staleness) {
+      console.error(`phase-declare: --ld-reading is a read-only reading and cannot be combined with --to/--reason/--staleness\n\n${USAGE}`);
+      process.exit(2);
+    }
+    if (!opts.numstatFile) {
+      console.error(`phase-declare: --ld-reading requires --numstat-file <f>\n\n${USAGE}`);
+      process.exit(2);
+    }
+    let ld: LdFileReading;
+    try {
+      ld = takeLdFileReading(opts.numstatFile);
+    } catch (e) {
+      console.error(`phase-declare: NO-READING — cannot read --numstat-file ${opts.numstatFile}: ${(e as Error).message}`);
+      process.exit(3);
+    }
+    if (opts.json) {
+      console.log(JSON.stringify(ld, null, 2));
+    } else {
+      console.log(
+        `phase-declare: L_D docLines=${ld.docLines} codeLines=${ld.codeLines} ` +
+          `ratio=${ld.ratio === null ? "n/a" : ld.ratio.toFixed(3)} verdict=${ld.verdict} (${ld.numstatFile})`,
+      );
+    }
+    // `process.exitCode` (not process.exit) so a piped stdout is flushed before exit.
+    process.exitCode = ld.flagged ? 1 : 0;
+    return;
+  }
+  if (opts.numstatFile !== undefined) {
+    console.error(`phase-declare: --numstat-file is only meaningful with --ld-reading\n\n${USAGE}`);
+    process.exit(2);
+  }
 
   // READ-ONLY face (tasks/gap-adr008-phase-declaration-staleness-reading): report the distance from
   // the current declaration. Deliberately disjoint from the declaration path below — mixing them
