@@ -78,8 +78,7 @@ extra:
 
 ## Blocker
 
-**2026-10-22T01:14:36.898Z — worker 未落地（exited-not-landed）**
+**2026-10-22T01:32:53.705Z — worker 未落地（exited-not-landed）**
 
-- 未落地原因：step=suite: AssertionError [ERR_ASSERTION]: at least one bin is under-sampled (otherwise the rule is vacuous) [baseline A/B: HARD RED (task-introduced-red) — the task's red set is NOT a subset of the develop baseline red set: added=packages/quay/test/build-plugin-dist.test.mjs,plugin/test/probe-routine.test.mjs,plugin/test/archguard-structural-gate-fan-in.test.mjs changed=-]
+- 未落地原因：step=dark-axis: dark-axis (ADR-007 per-milestone predicate) refused the flip — MISSING: MISSING — the task body records no L_D/L_G reading (a numeric quantity at an axis-anchored line) and carries no explicit "该轴仍暗,理由:<...>" declaration. ADR-007 requires one or the other before the task may be called done.
 - run_id：wk-prod-anchor
-- session_id：40a16a09-4df2-4229-ac52-183a6d683a2b
