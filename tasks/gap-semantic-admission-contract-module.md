@@ -1,7 +1,7 @@
 ---
 id: gap-semantic-admission-contract-module
 title: 两段准入契约落成一份可复用模块 semantic-admission-contract.mjs（GOAL-911 AC-919）
-status: todo
+status: needs-human
 labels:
   - gap
 parent: null
@@ -62,3 +62,8 @@ exit=2
 - tasks/gap-semantic-admission-contract-module.md
 - docs/analysis/semantic-admission-contract.mjs
 - plugin/test/semantic-admission-contract.test.mjs
+## Needs-Human
+
+**执行 2026-10-22T10:21:50.889Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：unsatisfiableUnannotatedAc=[AC1 正向（判据原文实跑）：`node --experimental-strip-types packages/quay/bin/quay.ts goal get AC-919 --json | jq -r .criterion > .quay/ac919-criterion.sh && bash .quay/ac919-criterion.sh` ⇒ exit 0，stdout 为 `OK: contract present; clue excludes confirmed; judge verdicts present`。贴出立案基线（exit 2，`CAUSE=instrument-failure: docs/analysis/semantic-admission-contract.mjs missing`）与落地后绿灯两份输出，以及 `git rev-parse HEAD`。]（连续 3 轮被结构上不可派的拦截挡住 ⇒ 作者/人改写；⛔ 不派 fix worker）
