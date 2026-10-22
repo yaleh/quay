@@ -153,3 +153,12 @@ Their preemptible fixtures now use the surviving fire arm (a MISSING task file �
 fail-closed-toward-fire fallback already pinned by inner-blocked-signal.test.mjs) and their
 non-preemptible fixtures use legal statuses. Without this, correcting the literal reds 8 tests that
 encode the defect.
+
+
+## Effect Prediction
+
+- metric: concept_recurs_after_merge
+- expected: false
+- statement: 修复后 `invariant|over90-task-gate.ts,supervisor-preempt-candidates.ts,task-status.ts` 这一 concept_key 不应在 merge 之后再次出现（同 key 的后续 cluster 数应为 0）。
+- recorded_at: 2026-10-22T16:30:00.000Z
+- note: ⚠️ 本预测在 2026-10-22 **回填**到一条 2026-10-13 已合并的 fix 上 —— 它不是合并前写下的预测，而是一条事后声明。`discovery-closed-loop-report.ts` 会以 `prediction.recorded_after_merge: true` 标出这一点，读者可据此区分「真预测」与「事后声明」。
