@@ -6,10 +6,22 @@
 // 「扩展点模板」这个元机制到底管不管用？ — measured by two readings that come from OUTSIDE the
 // mechanism itself (硬规则 4b: a reading produced by the thing it measures stops updating exactly when
 // that thing fails, and looks identical to "all fine"):
-//   • RM1 — 分解后子系统增量落回中心文件的占比. `share = centralΔ / (centralΔ + nonCentralΔ)`.
+//   • RM1 — 分解后子系统增量落回中心文件的占比. TWO CALIBERS over the SAME window, both read from git
+//     (task gap-design-evolution-share-caliber-net-vs-additions; the field names are the vocabulary —
+//     ⛔ never re-spell them in prose):
+//       netShare          = `share` = centralΔ / (centralΔ + nonCentralΔ) — the diff of LINE COUNTS
+//                           between the window's two ends. This is what the triggers judge, and what
+//                           the earlier readings quoted (serve 1.31%, worker 82.46%). A move OUT of the
+//                           central file is a negative centralΔ, so it offsets the growth that follows;
+//                           and when the non-central files NET-shrink the denominator can be smaller
+//                           than the numerator ⇒ a share ABOVE 1 (worker-post-909 read 102.13%).
+//       additionsShare    = centralAdditions / (centralAdditions + nonCentralAdditions) — the
+//                           `git diff --numstat` ADDITIONS of the same two ends (rename detection on,
+//                           so a pure move adds 0). Structurally ≤ 1, and comparable to the
+//                           claudecodeui session's additions-only caliber.
 //     A subsystem decomposed behind an extension point should keep NEW code OUT of its central
 //     files (measured 1% for serve); one that was only carved out keeps landing there (measured 82%
-//     for worker). One formula, both ends read from git.
+//     for worker). ⛔ The two calibers are recorded side by side and never substituted for each other.
 //   • RM2 — 热点文件的并发争用. Two shapes only, both read from `.quay/worker-outcome.jsonl`:
 //     (1) the dispatcher's `selector_reason` names the file AND carries a contention token;
 //     (2) the record contains `Merge conflict in <path>` (the raw git merge output).
@@ -404,7 +416,26 @@ export interface SubsystemReading {
   centralDelta: number | null;
   nonCentralDelta: number | null;
   denominator: number | null;
+  /** NET caliber: `centralΔ / (centralΔ + nonCentralΔ)`. ⛔ >1 is a legal value (see `shareReason`). */
   share: number | null;
+  /** Which caliber `share` carries. `"net"` whenever `share` is non-null; null when there is no net
+   *  number at all (⛔ never a constant: a label on a number that does not exist is noise). */
+  shareBasis: "net" | null;
+  /** Why `share` is null although the subsystem IS evaluated (net denominator non-positive). The net
+   *  caliber can be absent while the additions caliber is present — the subsystem is then evaluated. */
+  shareReason: string | null;
+  /** ADDITIONS-ONLY caliber, the same window: Σ `git diff --numstat` additions, classified by the same
+   *  central declaration and module globs (task gap-design-evolution-share-caliber-net-vs-additions).
+   *  ⛔ null = not readable, never 0. */
+  additionsNumerator: number | null;
+  additionsDenominator: number | null;
+  /** `additionsNumerator / additionsDenominator` — **structurally ≤ 1** (both terms are non-negative
+   *  counts, unlike the net caliber whose denominator can shrink below the numerator). */
+  additionsShare: number | null;
+  /** `additionsShare * 100` at 2 decimals; null when the additions caliber could not be taken. */
+  additionsSharePercent: number | null;
+  /** Names why the additions caliber is null (⛔ never shares a shape with "0 additions"). */
+  additionsReason: string | null;
   /** `share * 100` at 2 decimals; null when not evaluated. ⛔ Never 0 for an unevaluable window. */
   sharePercent: number | null;
   /** `Math.round(share * 100)` — the integer the finding's tables quote (1 / 82). */
@@ -459,6 +490,13 @@ export function measureSubsystem(
     nonCentralDelta: null,
     denominator: null,
     share: null,
+    shareBasis: null,
+    shareReason: null,
+    additionsNumerator: null,
+    additionsDenominator: null,
+    additionsShare: null,
+    additionsSharePercent: null,
+    additionsReason: null,
     sharePercent: null,
     sharePercentRounded: null,
     centralFiles: [],
@@ -467,8 +505,13 @@ export function measureSubsystem(
     maxCentralChangeCommit: null,
     oppositeSignCommits: null,
   };
+  // Every null numeric field carries a REASON naming why it is null (硬规则 3b). The early refusals
+  // below never reach either caliber, so both reasons default to the refusal — a bare `null` with no
+  // explanation is indistinguishable from "the field does not exist".
   const unevaluated = (reason: string, extra: Partial<SubsystemReading> = {}): SubsystemReading => ({
     ...base,
+    shareReason: `not-taken: ${reason}`,
+    additionsReason: `not-taken: ${reason}`,
     ...extra,
     evaluated: false,
     reason,
@@ -554,31 +597,129 @@ export function measureSubsystem(
   const opposite = pickOppositeSignCommits(commitStats);
 
   const denominator = centralDelta + nonCentralDelta;
-  if (denominator <= 0) {
+  // ── TWO CALIBERS, ONE WINDOW (task gap-design-evolution-share-caliber-net-vs-additions) ─────────
+  // NET (`share`): unchanged formula, and the caliber the trigger logic judges. A non-positive
+  // denominator is still NOT a share (a share of a non-growing subsystem is not a reading) — but it no
+  // longer takes the WHOLE subsystem dark, because the additions caliber can still be taken over the
+  // same window. Only BOTH missing is `evaluated:false`.
+  const netReason =
+    denominator <= 0
+      ? `non-positive-denominator: centralΔ=${centralDelta} nonCentralΔ=${nonCentralDelta} (sum ${denominator}) — a share of a non-growing subsystem is not a reading`
+      : null;
+  const share = netReason === null ? centralDelta / denominator : null;
+
+  // ADDITIONS-ONLY (`additionsShare`): the caliber the claudecodeui session uses, computed over the
+  // SAME window from `git diff --numstat` additions with rename detection ON (a pure move adds 0 — the
+  // same reason `oppositeSignCommits` exists: a move must not be read as growth).
+  const add = readWindowAdditions(root, baseline.sha, head.sha, centralPaths, matchesModules, [
+    ...new Set([...centralPaths, ...spec.modules]),
+  ]);
+  const additionsNumerator = add.ok ? add.central : null;
+  const additionsDenominator = add.ok ? add.central + add.nonCentral : null;
+  const additionsReason = !add.ok
+    ? `additions-unreadable: ${add.error}`
+    : additionsDenominator === 0
+      ? "additions-no-new-lines: the window added no line to the central files or to the modules (a share of zero additions is not a reading)"
+      : null;
+  // `additionsDenominator = additionsNumerator + nonCentralAdditions` and BOTH terms are non-negative
+  // counts ⇒ this ratio is structurally ≤ 1. That is the whole difference from the net caliber (whose
+  // non-central term can be negative). ⛔ No `Math.min(1, …)` clamp: a clamp would hide an accounting
+  // bug behind a plausible number. The invariant is CHECKED instead, and a violation is reported in
+  // its own state rather than silently squeezed.
+  const additionsShareRaw =
+    additionsReason === null && additionsDenominator !== null && additionsNumerator !== null
+      ? additionsNumerator / additionsDenominator
+      : null;
+  const additionsShareAboveOne =
+    additionsShareRaw !== null && additionsShareRaw > 1
+      ? `additions-share-above-one: additionsNumerator=${additionsNumerator} > additionsDenominator=${additionsDenominator} — the additions caliber cannot exceed 1 by construction, so this is an accounting bug, not a reading`
+      : null;
+  const additionsShare = additionsShareAboveOne === null ? additionsShareRaw : null;
+
+  const carried = {
+    ...shas,
+    centralFiles,
+    moduleFileCount: moduleFiles.length,
+    newModuleFiles,
+    maxCentralChangeCommit,
+    oppositeSignCommits: opposite,
+    shareReason: netReason,
+    additionsNumerator,
+    additionsDenominator,
+    additionsReason: additionsShareAboveOne ?? additionsReason,
+  };
+
+  if (share === null && additionsShare === null) {
     return unevaluated(
-      `non-positive-denominator: centralΔ=${centralDelta} nonCentralΔ=${nonCentralDelta} (sum ${denominator}) — a share of a non-growing subsystem is not a reading`,
-      { ...shas, centralFiles, moduleFileCount: moduleFiles.length, newModuleFiles, maxCentralChangeCommit, oppositeSignCommits: opposite },
+      `both-calibers-unavailable: net(${netReason}) | additions(${additionsShareAboveOne ?? additionsReason}) — neither caliber could be taken over ${spec.baseline}..${headRef}`,
+      carried,
     );
   }
-  const share = centralDelta / denominator;
 
   return {
     ...base,
-    ...shas,
+    ...carried,
     evaluated: true,
     reason: null,
     centralDelta,
     nonCentralDelta,
     denominator,
     share,
-    sharePercent: pct(share),
-    sharePercentRounded: Math.round(share * 100),
-    centralFiles,
-    moduleFileCount: moduleFiles.length,
-    newModuleFiles,
-    maxCentralChangeCommit,
-    oppositeSignCommits: opposite,
+    shareBasis: share === null ? null : "net",
+    sharePercent: share === null ? null : pct(share),
+    sharePercentRounded: share === null ? null : Math.round(share * 100),
+    additionsShare,
+    additionsSharePercent: additionsShare === null ? null : pct(additionsShare),
   };
+}
+
+/** The two sides of a `--numstat` path cell. With rename detection ON git renders a move as
+ *  `old => new` or `pre{a => b}post`; the ADDED lines land on the `to` side. */
+export function parseNumstatPath(raw: string): { from: string; to: string } {
+  const arrow = raw.indexOf(" => ");
+  if (arrow === -1) return { from: raw, to: raw };
+  const braceOpen = raw.indexOf("{");
+  const braceClose = braceOpen === -1 ? -1 : raw.indexOf("}", arrow);
+  if (braceOpen !== -1 && braceOpen < arrow && braceClose !== -1) {
+    const prefix = raw.slice(0, braceOpen);
+    const suffix = raw.slice(braceClose + 1);
+    const inner = raw.slice(braceOpen + 1, braceClose);
+    const half = inner.split(" => ");
+    const join = (mid: string) => `${prefix}${mid}${suffix}`.replace(/\/{2,}/g, "/");
+    return { from: join(half[0] ?? ""), to: join(half[1] ?? "") };
+  }
+  return { from: raw.slice(0, arrow), to: raw.slice(arrow + 4) };
+}
+
+/** Σ `git diff --numstat` ADDITIONS over the window's two ends, split by the same central declaration
+ *  and module globs the net caliber uses. `ok:false` (⛔ never zeros) when git cannot answer — a
+ *  failed read must not be indistinguishable from "this window added nothing to the central files". */
+export function readWindowAdditions(
+  root: string,
+  baseSha: string,
+  headSha: string,
+  centralPaths: ReadonlySet<string>,
+  matchesModules: (p: string) => boolean,
+  pathFilter: string[] = [],
+): { ok: true; central: number; nonCentral: number } | { ok: false; error: string } {
+  const spec = pathFilter.length > 0 ? ["--", ...pathFilter] : [];
+  // `-M` is passed EXPLICITLY: rename detection is what keeps a pure move out of the additions count,
+  // and a repo (or a caller's config) with `diff.renames=false` must not silently change the reading.
+  const r = gitRead(root, ["diff", "--numstat", "--no-ext-diff", "-M", baseSha, headSha, ...spec]);
+  if (!r.ok) return { ok: false, error: r.error ?? "git diff --numstat failed" };
+  let central = 0;
+  let nonCentral = 0;
+  for (const row of r.stdout.split("\n")) {
+    if (row === "") continue;
+    const [ins, del, file] = row.split("\t");
+    if (!file || ins === "-" || del === "-") continue; // binary: no line caliber
+    const n = Number(ins);
+    if (!Number.isFinite(n)) continue;
+    const { to } = parseNumstatPath(file);
+    if (centralPaths.has(to)) central += n;
+    else if (matchesModules(to)) nonCentral += n;
+  }
+  return { ok: true, central, nonCentral };
 }
 
 interface CommitStat {
@@ -1230,8 +1371,13 @@ export interface SubsystemVerdict {
   deltaCentral: number | null;
   deltaNonCentral: number | null;
   deltaDenominator: number | null;
-  /** The CUMULATIVE share the subsystem reports this round (2 decimals). */
+  /** The CUMULATIVE NET share the subsystem reports this round (2 decimals) — the caliber
+   *  `EVOLUTION_TRIGGER_SHARE_UP` judges. Spelled `netShare` in every rendered/filed text. */
   sharePercent: number | null;
+  /** The CUMULATIVE additions-only share over the same window (2 decimals), carried alongside so a
+   *  reader never compares a net reading against an additions-only one from another project. null when
+   *  the additions caliber could not be taken (⛔ not 0). */
+  additionsSharePercent: number | null;
   /** Consecutive `evaluated:false` rounds ENDING at this round (`dark-streak` rows only). */
   darkRounds: number | null;
   /** Names the exact cause whenever a number is null (硬规则 3b). */
@@ -1246,6 +1392,7 @@ export interface EvolutionTriggerHit {
   deltaNonCentral: number | null;
   deltaDenominator: number | null;
   sharePercent: number | null;
+  additionsSharePercent: number | null;
   darkRounds: number | null;
 }
 
@@ -1281,7 +1428,11 @@ export interface EvolutionFinding {
   deltaCentral: number | null;
   deltaNonCentral: number | null;
   deltaDenominator: number | null;
+  /** NET caliber (the one the trigger judges) and the additions-only caliber over the SAME window.
+   *  ⛔ Both are carried so a finding can never be read against the WRONG baseline: the quay readings
+   *  and the claudecodeui session do not use the same caliber. */
   sharePercent: number | null;
+  additionsSharePercent: number | null;
   darkRounds: number | null;
   rationale: string;
   suggestedAction: string;
@@ -1477,21 +1628,25 @@ export function judgeEvolutionRegression(
       if (darkRounds >= threshold) {
         return {
           name: cs.name, state: EVOLUTION_TRIGGER_DARK_STREAK,
-          deltaCentral: null, deltaNonCentral: null, deltaDenominator: null, sharePercent: null,
+          deltaCentral: null, deltaNonCentral: null, deltaDenominator: null, sharePercent: null, additionsSharePercent: null,
           darkRounds, reason: cs.reason ?? "the reading reports evaluated:false without a reason",
         };
       }
       return {
         name: cs.name, state: EVOLUTION_STATE_NOT_EVALUATED,
-        deltaCentral: null, deltaNonCentral: null, deltaDenominator: null, sharePercent: null,
+        deltaCentral: null, deltaNonCentral: null, deltaDenominator: null, sharePercent: null, additionsSharePercent: null,
         darkRounds, reason: cs.reason ?? "the reading reports evaluated:false without a reason",
       };
     }
     const sharePercent = num(cs.sharePercent);
+    // Both calibers ride along on every row a reader can see; the TRIGGER stays keyed on the net
+    // deltas (⛔ the additions caliber never moves a trigger — that would silently change what
+    // `share-up` means while keeping its name).
+    const additionsSharePercent = num(cs.additionsSharePercent);
     if (ps === null) {
       return {
         name: cs.name, state: prev === null ? EVOLUTION_STATE_NO_PRIOR : "new",
-        deltaCentral: null, deltaNonCentral: null, deltaDenominator: null, sharePercent,
+        deltaCentral: null, deltaNonCentral: null, deltaDenominator: null, sharePercent, additionsSharePercent,
         darkRounds: null,
         reason: prev === null ? "first round — there is no previous reading to compare against" : "this subsystem is absent from the previous round",
       };
@@ -1499,7 +1654,7 @@ export function judgeEvolutionRegression(
     if (ps.evaluated !== true) {
       return {
         name: cs.name, state: EVOLUTION_STATE_NO_PRIOR,
-        deltaCentral: null, deltaNonCentral: null, deltaDenominator: null, sharePercent,
+        deltaCentral: null, deltaNonCentral: null, deltaDenominator: null, sharePercent, additionsSharePercent,
         darkRounds: null,
         reason: `the previous round could not evaluate this subsystem (${ps.reason ?? "no reason recorded"}) ⇒ the increment is not computable`,
       };
@@ -1514,7 +1669,7 @@ export function judgeEvolutionRegression(
     return {
       name: cs.name,
       state: shareUp ? EVOLUTION_TRIGGER_SHARE_UP : EVOLUTION_STATE_STABLE,
-      deltaCentral, deltaNonCentral, deltaDenominator, sharePercent, darkRounds: null,
+      deltaCentral, deltaNonCentral, deltaDenominator, sharePercent, additionsSharePercent, darkRounds: null,
       reason: shareUp
         ? null
         : sameBaseline
@@ -1538,7 +1693,7 @@ export function judgeEvolutionRegression(
       if (usedPrev.has(i)) continue;
       rows.push({
         name: ps.name, state: EVOLUTION_TRIGGER_SOURCE_MISSING,
-        deltaCentral: null, deltaNonCentral: null, deltaDenominator: null, sharePercent: null,
+        deltaCentral: null, deltaNonCentral: null, deltaDenominator: null, sharePercent: null, additionsSharePercent: null,
         darkRounds: null,
         reason: `the previous round measured this subsystem (${subsystemIdentity(ps)}) and this round does not declare it`,
       });
@@ -1551,19 +1706,19 @@ export function judgeEvolutionRegression(
     rows.push({
       name: EVOLUTION_RM2_TARGET,
       state: rm2Dark >= threshold ? EVOLUTION_TRIGGER_DARK_STREAK : EVOLUTION_STATE_NOT_EVALUATED,
-      deltaCentral: null, deltaNonCentral: null, deltaDenominator: null, sharePercent: null,
+      deltaCentral: null, deltaNonCentral: null, deltaDenominator: null, sharePercent: null, additionsSharePercent: null,
       darkRounds: rm2Dark, reason: curr.rm2.reason ?? "rm2 reports evaluated:false without a reason",
     });
   } else if (prev !== null && prev.rm2.evaluated !== true) {
     rows.push({
       name: EVOLUTION_RM2_TARGET, state: EVOLUTION_STATE_NO_PRIOR,
-      deltaCentral: null, deltaNonCentral: null, deltaDenominator: null, sharePercent: null,
+      deltaCentral: null, deltaNonCentral: null, deltaDenominator: null, sharePercent: null, additionsSharePercent: null,
       darkRounds: null, reason: "the previous round could not take the contention reading",
     });
   } else {
     rows.push({
       name: EVOLUTION_RM2_TARGET, state: EVOLUTION_STATE_STABLE,
-      deltaCentral: null, deltaNonCentral: null, deltaDenominator: null, sharePercent: null,
+      deltaCentral: null, deltaNonCentral: null, deltaDenominator: null, sharePercent: null, additionsSharePercent: null,
       darkRounds: null, reason: null,
     });
   }
@@ -1577,6 +1732,7 @@ export function judgeEvolutionRegression(
       deltaNonCentral: r.deltaNonCentral,
       deltaDenominator: r.deltaDenominator,
       sharePercent: r.sharePercent,
+      additionsSharePercent: r.additionsSharePercent,
       darkRounds: r.darkRounds,
     }));
 
@@ -1607,7 +1763,7 @@ export function judgeEvolutionRegression(
       ? ` — ${triggers
           .map((t) =>
             t.trigger === EVOLUTION_TRIGGER_SHARE_UP
-              ? `${t.trigger}:${t.target} (Δcentral=${t.deltaCentral} Δdenominator=${t.deltaDenominator} Δnon-central=${t.deltaNonCentral} share=${t.sharePercent}%)`
+              ? `${t.trigger}:${t.target} (Δcentral=${t.deltaCentral} Δdenominator=${t.deltaDenominator} Δnon-central=${t.deltaNonCentral} netShare=${t.sharePercent}% additionsShare=${t.additionsSharePercent}%)`
               : t.trigger === EVOLUTION_TRIGGER_DARK_STREAK
                 ? `${t.trigger}:${t.target} (${t.darkRounds} consecutive rounds evaluated:false)`
                 : `${t.trigger}:${t.target} (measured by the previous round, not declared now)`,
@@ -1654,11 +1810,18 @@ export function evolutionFindings(record: DesignEvolutionReadingsRecord, verdict
         deltaNonCentral: t.deltaNonCentral,
         deltaDenominator: t.deltaDenominator,
         sharePercent: t.sharePercent,
+        additionsSharePercent: t.additionsSharePercent,
         darkRounds: null,
         rationale:
           `子系统 \`${t.target}\` 本轮相对上一条读数分母增加 \`${t.deltaDenominator}\`、中心增量 \`${t.deltaCentral}\`、` +
-          `非中心增量 \`${t.deltaNonCentral}\` ⇒ 新增的行落进了中心文件（分解没有把新代码挡在外面）。` +
-          `累计占比 \`${t.sharePercent}%\`（centralΔ=\`${reading?.centralDelta ?? "?"}\` / denominator=\`${reading?.denominator ?? "?"}\`）。${where}。`,
+          `非中心增量 \`${t.deltaNonCentral}\` ⇒ 新增的净行数落进了中心文件（分解没有把新代码挡在外面）。` +
+          // WHICH CALIBER, IN THE TEXT (task gap-design-evolution-share-caliber-net-vs-additions Plan 2):
+          // a bare "占比 X%" is unreadable, because the same window has TWO legitimate shares.
+          `累计净口径 \`netShare\` \`${t.sharePercent}%\`（centralΔ=\`${reading?.centralDelta ?? "?"}\` / denominator=\`${reading?.denominator ?? "?"}\`）；` +
+          `同一窗口只计新增口径 \`additionsShare\` \`${t.additionsSharePercent}%\`` +
+          `（additionsNumerator=\`${reading?.additionsNumerator ?? "?"}\` / additionsDenominator=\`${reading?.additionsDenominator ?? "?"}\`）。` +
+          `⛔ 两种口径不可互引：\`netShare\` 是窗口两端的行数净差（可为负、可 >100%），` +
+          `\`additionsShare\` 是 \`git diff --numstat\` 的新增行（结构上 ≤100%，与 claudecodeui 口径可比）。${where}。`,
         // ⚠️ NO backticks inside `suggestedAction`: the renderer wraps the WHOLE action in one pair
         // (routine-file-gate's candidate text), so an inner pair would break the reader's structure.
         suggestedAction:
@@ -1678,6 +1841,7 @@ export function evolutionFindings(record: DesignEvolutionReadingsRecord, verdict
         deltaNonCentral: null,
         deltaDenominator: null,
         sharePercent: null,
+        additionsSharePercent: null,
         darkRounds: t.darkRounds,
         rationale:
           `\`${t.target}\` 连续 \`${t.darkRounds}\` 轮读数 \`evaluated:false\`（阈值 \`${verdict.darkStreakRounds}\` 轮，策略选择）。` +
@@ -1698,6 +1862,7 @@ export function evolutionFindings(record: DesignEvolutionReadingsRecord, verdict
       deltaNonCentral: null,
       deltaDenominator: null,
       sharePercent: null,
+      additionsSharePercent: null,
       darkRounds: null,
       rationale:
         `上一轮（\`${verdict.priorTs ?? "<none>"}\`）测量的子系统 \`${t.target}\` 在本轮读数中不存在` +
@@ -1740,6 +1905,10 @@ export function evolutionFindingRecord(f: EvolutionFinding, ts: string): Record<
     deltaNonCentral: f.deltaNonCentral,
     deltaDenominator: f.deltaDenominator,
     sharePercent: f.sharePercent,
+    // The caliber is part of the number: `sharePercent` is the NET reading; `additionsSharePercent`
+    // is the additions-only reading over the same window (⛔ never substitute one for the other).
+    shareBasis: f.sharePercent === null ? null : "net",
+    additionsSharePercent: f.additionsSharePercent,
     darkRounds: f.darkRounds,
     margin: null,
   };
@@ -2096,12 +2265,12 @@ function renderHuman(record: DesignEvolutionReadingsRecord, findings: readonly E
         r.deltaCentral === null
           ? ""
           : `  Δcentral=${r.deltaCentral >= 0 ? "+" : ""}${r.deltaCentral} ΔnonCentral=${r.deltaNonCentral === null ? "?" : (r.deltaNonCentral >= 0 ? "+" : "") + r.deltaNonCentral} Δdenominator=${r.deltaDenominator === null ? "?" : (r.deltaDenominator >= 0 ? "+" : "") + r.deltaDenominator}`;
-      out.push(`    ${r.name}: ${r.state}${d}${r.sharePercent === null ? "" : `  share=${r.sharePercent}%`}${r.reason === null ? "" : `  — ${r.reason}`}`);
+      out.push(`    ${r.name}: ${r.state}${d}${r.sharePercent === null ? "" : `  netShare=${r.sharePercent}%`}${r.additionsSharePercent === null ? "" : ` additionsShare=${r.additionsSharePercent}%`}${r.reason === null ? "" : `  — ${r.reason}`}`);
     }
     out.push(`  findings: ${findings.length}`);
     for (const f of findings) out.push(`    ${f.key}  files=${f.files.length > 0 ? f.files.join(", ") : "(none)"}`);
   }
-  out.push("RM1 — 分解后增量落回中心文件的占比  share = centralΔ / (centralΔ + nonCentralΔ)");
+  out.push("RM1 — 分解后增量落回中心文件的占比    netShare = centralΔ / (centralΔ + nonCentralΔ)    additionsShare = additions/(central+nonCentral additions)");
   if (record.rm1.subsystems.length === 0) out.push(`  (none declared) ${record.rm1.reason ?? ""}`);
   for (const s of record.rm1.subsystems) {
     if (!s.evaluated) {
@@ -2110,8 +2279,18 @@ function renderHuman(record: DesignEvolutionReadingsRecord, findings: readonly E
     }
     const cp = s.centralDelta ?? 0;
     const np = s.nonCentralDelta ?? 0;
+    // Both calibers on the SAME line, each with a null-shaped fallback that NAMES itself rather than
+    // printing `0.00%` (硬规则 3b: 「读不出」 must not look like 「零」).
+    const netPart =
+      s.share === null
+        ? `netShare=n/a (${s.shareReason ?? "no net reading"})`
+        : `netShare=${s.sharePercentRounded}% (${s.sharePercent?.toFixed(2)}%)`;
+    const addPart =
+      s.additionsShare === null
+        ? `additionsShare=n/a (${s.additionsReason ?? "no additions reading"})`
+        : `additionsShare=${s.additionsSharePercent?.toFixed(2)}% (${s.additionsNumerator} / ${s.additionsDenominator})`;
     out.push(
-      `  ${s.name}: centralΔ=${cp >= 0 ? "+" : ""}${cp} nonCentralΔ=${np >= 0 ? "+" : ""}${np} share=${s.sharePercentRounded}% (${(s.sharePercent ?? 0).toFixed(2)}%)  [${s.baseline} → ${s.head} (${s.headSha?.slice(0, 9)}), ${s.moduleFileCount} module files]`,
+      `  ${s.name}: centralΔ=${cp >= 0 ? "+" : ""}${cp} nonCentralΔ=${np >= 0 ? "+" : ""}${np} ${netPart}  ${addPart}  [${s.baseline} → ${s.head} (${s.headSha?.slice(0, 9)}), ${s.moduleFileCount} module files]`,
     );
     for (const c of s.centralFiles) {
       out.push(`    central ${c.atBaseline}${c.atHead !== c.atBaseline ? ` → ${c.atHead}` : ""}: ${c.baselineLines} → ${c.headLines} (${c.delta >= 0 ? "+" : ""}${c.delta})`);

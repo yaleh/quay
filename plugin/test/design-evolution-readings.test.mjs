@@ -7,6 +7,10 @@
 //      the growth of files that ALREADY EXISTED at baseline (the口径 bug the finding corrected
 //      88% → 82%: the old command's denominator dropped them, so re-running it reproduced the wrong
 //      number). Asserted on a synthetic history whose numbers are known by construction.
+//   ①b THE SECOND CALIBER (task gap-design-evolution-share-caliber-net-vs-additions): `additionsShare`
+//      = Σ `git diff --numstat` additions over the SAME window. The net caliber can exceed 1 (a
+//      shrinking non-central file shrinks the denominator), the additions caliber cannot — both are
+//      recorded on the same subsystem, and `shareBasis` names which one `share` is.
 //   ② THE THREE-VALUED RULES (硬规则 3b) — an unresolvable baseline, a central path absent at either
 //      end, and a non-positive denominator must ALL yield `evaluated:false` with `share: null` and a
 //      reason naming the exact path/condition. ⛔ Never 0, never a share. This is the failure class
@@ -43,9 +47,11 @@ import {
   measureSubsystem,
   oppositeSignCommits,
   parseDesignEvolutionSection,
+  parseNumstatPath,
   priorDarkRoundsFor,
   readDesignEvolutionHistory,
   readStandaloneSection,
+  readWindowAdditions,
   resolveCommit,
   scanContention,
   stripWorktreePrefix,
@@ -80,10 +86,12 @@ function makeRepo(t) {
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   git(dir, "init", "-q", "-b", "main");
   const commits = [];
-  const write = (rel, lines) => {
+  // `tag` lets a test REWRITE a file in place (same line count, different content) — the only way to
+  // give the additions caliber a non-zero numerator while the NET delta is zero or negative.
+  const write = (rel, lines, tag = "line") => {
     const abs = path.join(dir, rel);
     fs.mkdirSync(path.dirname(abs), { recursive: true });
-    fs.writeFileSync(abs, lines === 0 ? "" : Array.from({ length: lines }, (_, i) => `line ${i}`).join("\n") + "\n");
+    fs.writeFileSync(abs, lines === 0 ? "" : Array.from({ length: lines }, (_, i) => `${tag} ${i}`).join("\n") + "\n");
   };
   const remove = (rel) => fs.rmSync(path.join(dir, rel), { force: true });
   const commit = (msg) => {
@@ -126,6 +134,164 @@ test("measureSubsystem — the ONE formula: nonCentralΔ includes the growth of 
   assert.equal(r.sharePercentRounded, 25);
   assert.equal(r.moduleFileCount, 3);
   assert.deepEqual(r.newModuleFiles, ["mod/new.ts"]);
+});
+
+// ── ①b the SECOND caliber (additions-only, claudecodeui-comparable) ────────────────────────────────
+// task gap-design-evolution-share-caliber-net-vs-additions: the net caliber and the additions caliber
+// are DIFFERENT numbers over the SAME window, so the record carries both and never substitutes one.
+
+test("measureSubsystem — BOTH calibers on one reading: net and additions-only diverge on a REWRITE", (t) => {
+  const repo = makeRepo(t);
+  repo.write("mod/central.ts", 100);
+  repo.write("mod/other.ts", 100);
+  const base = repo.commit("baseline");
+  repo.write("mod/central.ts", 110); // +10 net, +10 additions
+  repo.write("mod/other.ts", 100, "rewritten"); // +0 net, +100 additions (every line replaced)
+  repo.commit("grow");
+  const r = measureSubsystem(repo.dir, {
+    name: "m",
+    baseline: base,
+    central: [{ atBaseline: "mod/central.ts", atHead: "mod/central.ts" }],
+    modules: ["mod/*.ts"],
+  });
+
+  assert.equal(r.evaluated, true, r.reason ?? "");
+  // NET: 10 / (10 + 0) = 100% — the rewrite is invisible to a line-count diff.
+  assert.deepEqual([r.centralDelta, r.nonCentralDelta, r.denominator, r.share, r.sharePercent], [10, 0, 10, 1, 100]);
+  assert.equal(r.shareBasis, "net", "`share` is the NET caliber and says so on the record");
+  // ADDITIONS: 10 / (10 + 100) = 9.09% — the rewrite IS the new code landing outside the centre.
+  assert.deepEqual([r.additionsNumerator, r.additionsDenominator], [10, 110]);
+  assert.ok(Math.abs(r.additionsShare - 10 / 110) < 1e-12);
+  assert.equal(r.additionsSharePercent, 9.09);
+  assert.equal(r.additionsReason, null);
+  // The two calibers disagree by an order of magnitude — which is exactly why a finding must name one.
+  assert.notEqual(r.sharePercent, r.additionsSharePercent);
+
+  // And the additions are an ENDPOINT aggregation, not a per-commit sum: a line added and then
+  // removed inside the window is NOT counted (it is not growth).
+  repo.write("mod/other.ts", 100, "rewritten-again");
+  repo.commit("churn");
+  const later = measureSubsystem(repo.dir, {
+    name: "m",
+    baseline: base,
+    central: [{ atBaseline: "mod/central.ts", atHead: "mod/central.ts" }],
+    modules: ["mod/*.ts"],
+  });
+  assert.equal(later.additionsDenominator, 110, "a re-write inside the window is not a second addition");
+});
+
+test("measureSubsystem — AC2: a NEGATIVE non-central NET delta pushes `share` above 1 while `additionsShare` stays <= 1", (t) => {
+  // This is the worker-post-909 shape (net 102.13%, additions 93.81%) reduced to its mechanism: the
+  // non-central files SHRANK, so the net denominator is smaller than the numerator.
+  const repo = makeRepo(t);
+  repo.write("mod/central.ts", 100);
+  repo.write("mod/other.ts", 100);
+  const base = repo.commit("baseline");
+  repo.write("mod/central.ts", 110); // +10 central
+  repo.write("mod/other.ts", 94); // −6 non-central (pure deletion ⇒ ZERO additions)
+  repo.commit("grow + shrink");
+  const r = measureSubsystem(repo.dir, {
+    name: "m",
+    baseline: base,
+    central: [{ atBaseline: "mod/central.ts", atHead: "mod/central.ts" }],
+    modules: ["mod/*.ts"],
+  });
+
+  assert.equal(r.evaluated, true, r.reason ?? "");
+  assert.equal(r.nonCentralDelta, -6, "the net non-central term really is negative");
+  assert.equal(r.share, 10 / 4, "the net share is 250% — a legal value, and the reason it must be labelled");
+  assert.ok(r.share > 1, "the net caliber is ALLOWED to exceed 1 (⛔ not clamped)");
+  assert.equal(r.shareBasis, "net", "a >1 share is only readable because the record names its caliber");
+  // The additions caliber over the same window: 10 central / 10 total.
+  assert.deepEqual([r.additionsNumerator, r.additionsDenominator, r.additionsShare], [10, 10, 1]);
+  assert.ok(r.additionsShare <= 1, "additionsShare can never exceed 1 — both terms are non-negative counts");
+});
+
+test("measureSubsystem — only BOTH calibers missing is `evaluated:false`; a null net share keeps the reading", (t) => {
+  const repo = makeRepo(t);
+  repo.write("mod/central.ts", 100);
+  repo.write("mod/other.ts", 100);
+  const base = repo.commit("baseline");
+  repo.write("mod/central.ts", 90); // −10 net, 0 additions
+  repo.write("mod/other.ts", 100, "rewritten"); // 0 net, +100 additions
+  repo.commit("shrink + rewrite");
+  const r = measureSubsystem(repo.dir, {
+    name: "m",
+    baseline: base,
+    central: [{ atBaseline: "mod/central.ts", atHead: "mod/central.ts" }],
+    modules: ["mod/*.ts"],
+  });
+
+  // NET is not a reading (denominator −10), but the additions caliber IS ⇒ the subsystem is EVALUATED
+  // and the missing net number NAMES ITSELF instead of pretending to be 0.
+  assert.equal(r.evaluated, true, r.reason ?? "");
+  assert.equal(r.share, null);
+  assert.equal(r.shareBasis, null, "⛔ no caliber label on a number that does not exist");
+  assert.match(r.shareReason, /non-positive-denominator/);
+  assert.equal(r.additionsShare, 0);
+  assert.equal(r.additionsSharePercent, 0);
+});
+
+test("parseNumstatPath — the plain, braced and `=>`-only rename spellings round-trip", () => {
+  assert.deepEqual(parseNumstatPath("packages/quay/src/serve.ts"), { from: "packages/quay/src/serve.ts", to: "packages/quay/src/serve.ts" });
+  assert.deepEqual(parseNumstatPath("packages/quay/src/{ => serve}/serve-task.ts"), {
+    from: "packages/quay/src/serve-task.ts",
+    to: "packages/quay/src/serve/serve-task.ts",
+  });
+  assert.deepEqual(parseNumstatPath("packages/quay/src/{serve-a.ts => serve/serve-b.ts}"), {
+    from: "packages/quay/src/serve-a.ts",
+    to: "packages/quay/src/serve/serve-b.ts",
+  });
+  assert.deepEqual(parseNumstatPath("old/dir/a.ts => new/dir/a.ts"), { from: "old/dir/a.ts", to: "new/dir/a.ts" });
+});
+
+test("readWindowAdditions — a pure MOVE adds 0 (rename detection is what keeps a move out of the count)", (t) => {
+  const repo = makeRepo(t);
+  repo.write("mod/central.ts", 50);
+  repo.write("mod/moved.ts", 40);
+  const base = repo.commit("baseline");
+  repo.remove("mod/moved.ts");
+  repo.write("mod/newhome/moved.ts", 40);
+  repo.commit("pure move");
+  const r = readWindowAdditions(
+    repo.dir,
+    base,
+    repo.commits.at(-1),
+    new Set(["mod/central.ts"]),
+    (p) => globToRegExp("mod/**/*.ts").test(p) || globToRegExp("mod/*.ts").test(p),
+  );
+  assert.equal(r.ok, true, r.error ?? "");
+  assert.deepEqual([r.central, r.nonCentral], [0, 0], "a move is reorganisation, not growth");
+});
+
+test("readWindowAdditions — a FAILED git read is `ok:false`, never zeros (「读不懂」 ≠ 「没有新增」)", () => {
+  const r = readWindowAdditions("/definitely/not/a/repo/der-missing", "deadbeef", "deadbeef", new Set(), () => true);
+  assert.equal(r.ok, false);
+  assert.equal(typeof r.error, "string");
+  assert.ok(r.error.length > 0);
+});
+
+test("buildReadings — AC1: EVERY subsystem in the round record carries both calibers", (t) => {
+  const repo = makeRepo(t);
+  repo.write("mod/central.ts", 100);
+  repo.write("mod/other.ts", 100);
+  const base = repo.commit("baseline");
+  repo.write("mod/central.ts", 110);
+  repo.write("mod/other.ts", 190);
+  repo.commit("grow");
+  const rec = buildReadings(repo.dir, {
+    ts: "T0",
+    subsystems: [{ name: "m", baseline: base, central: [{ atBaseline: "mod/central.ts", atHead: "mod/central.ts" }], modules: ["mod/*.ts"] }],
+  });
+  const sub = rec.rm1.subsystems[0];
+  for (const k of ["share", "shareBasis", "additionsShare", "additionsNumerator", "additionsDenominator"]) {
+    assert.ok(k in sub, `AC1: the record must carry \`${k}\` (missing keys are indistinguishable from a zero)`);
+  }
+  assert.equal(sub.shareBasis, "net");
+  assert.deepEqual([sub.centralDelta, sub.nonCentralDelta, sub.sharePercent], [10, 90, 10]);
+  assert.deepEqual([sub.additionsNumerator, sub.additionsDenominator, sub.additionsSharePercent], [10, 100, 10]);
+  // Every subsystem row of the JUDGMENT carries both numbers too (the AC3 table surface).
+  assert.equal(rec.evolution, undefined, "the judgment is added by the round entry point, not by buildReadings");
 });
 
 test("measureSubsystem — a MOVED central file is declared at both ends and still measures", (t) => {
@@ -902,6 +1068,8 @@ function subReading(over = {}) {
     baseline: "base", head: "HEAD", baselineSha: "b0", headSha: "h0",
     central: [{ atBaseline: "c.ts", atHead: "c.ts" }], modules: ["*.ts"],
     centralDelta: 10, nonCentralDelta: 90, denominator: 100, share: 0.1, sharePercent: 10, sharePercentRounded: 10,
+    shareBasis: "net", shareReason: null,
+    additionsNumerator: 10, additionsDenominator: 100, additionsShare: 0.1, additionsSharePercent: 10, additionsReason: null,
     centralFiles: [{ atBaseline: "c.ts", atHead: "c.ts", baselineLines: 0, headLines: 10, delta: 10 }],
     moduleFileCount: 2, newModuleFiles: [], maxCentralChangeCommit: null, oppositeSignCommits: [],
     ...over,
@@ -1029,6 +1197,39 @@ test("AC2 — the dedup key is MECHANICAL: same subsystem+trigger ⇒ same key, 
   // …and the FIRST one passes the same gate (so the rejection is dedup, not a quality bar we invented).
   const firstPass = gateFinding(routineFindingCandidateText(asFileable(a)), { existingKeys: [], recentCount: 0, K: 3 });
   assert.equal(firstPass.accept, true, firstPass.reason);
+});
+
+test("AC6 — the share-up finding's TEXT names its caliber (⛔ never a bare 「占比 X%」)", () => {
+  // The trigger is keyed on the NET increments (unchanged), but the filed text must say WHICH share it
+  // quotes — the same window has two legitimate ones (task gap-design-evolution-share-caliber-… Plan 2).
+  const prev = round({ ts: "T0" }, [subReading({ centralDelta: 172, nonCentralDelta: 0, denominator: 172 })]);
+  const curr = round(
+    { ts: "T1" },
+    [
+      subReading({
+        centralDelta: 288, nonCentralDelta: 0, denominator: 288, share: 1, sharePercent: 100,
+        additionsNumerator: 288, additionsDenominator: 307, additionsShare: 288 / 307, additionsSharePercent: 93.81,
+      }),
+    ],
+  );
+  const v = judgeEvolutionRegression(prev, curr, { priorDarkRounds: {} });
+  assert.equal(v.state, "regression");
+  assert.equal(v.triggers[0].trigger, "share-up");
+  // The verdict row carries both numbers (the renderHuman/AC3 table surface).
+  assert.deepEqual([v.subsystems[0].sharePercent, v.subsystems[0].additionsSharePercent], [100, 93.81]);
+  const [f] = evolutionFindings(curr, v);
+  assert.match(f.rationale, /netShare/, "the finding must NAME the net caliber");
+  assert.match(f.rationale, /additionsShare/, "…and the additions-only caliber over the same window");
+  assert.match(f.rationale, /netShare` `100%/, "the net value is quoted next to its name");
+  assert.match(f.rationale, /additionsShare` `93\.81%/);
+  // The carrier record carries the caliber beside the number, so a reader needs no prose.
+  const rec = evolutionFindingRecord(f, "T1");
+  assert.equal(rec.shareBasis, "net");
+  assert.equal(rec.sharePercent, 100);
+  assert.equal(rec.additionsSharePercent, 93.81);
+  // The summary line is the same vocabulary (⛔ a second spelling would drift from the field names).
+  assert.match(v.summary, /netShare=100%/);
+  assert.match(v.summary, /additionsShare=93\.81%/);
 });
 
 test("AC2b — the same key is ONE recurrence subject across rounds (the gate's own reading)", async () => {
