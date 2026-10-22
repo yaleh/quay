@@ -53,6 +53,10 @@ extra:
 - **AC3** — 刷新前一轮（主检出，work-dir 中 src 产物时间戳还原为生产载体记录的原值 `2026-10-21T16:17:56.117Z`）：`{"scope":"src","commitsSinceArtifact":5,"behindSources":true}`。
 - **AC4** — 刷新后同一轮：`{"scope":"src","evaluated":true,"basis":"module-graph","cycleCount":0,"cycles":[],"artifactTimestamp":"2026-10-22T00:57:33.047Z","commitsSinceArtifact":0,"behindSources":false}`，`refresh:{attempted:true, refreshedScope:"src", instrumentSource:"plugin", exitCode:0}`。同一 HEAD `39d192b0e` 上：archguard（`--diagrams package --no-cache`）`moduleGraph.cycles = []`，AC-916 判据 `OK: 0 directory cycles under packages/quay/src (cross-directory edges=204, dirs=10)` → SCC 列表 `[]`，逐元素一致。**负对照**（同一比较在 `d7e1c743a` 上）：archguard 报 1 个环 `{"modules":["observation","serve",""]}`，AC-916 判据 `CAUSE=directory cycle(s) under packages/quay/src: [[".","observation","serve"]]` — 同一 SCC，说明该一致性判据能取假。
 - **AC5** — `.quay/arch-cycle-history.jsonl` 第 27 行（该载体第 1 条 `evaluated:true`，前 26 条全为 `false`）：`{"ts":"2026-10-22T00:58:21Z","status":"complete","evaluated":true,"totalCycleCount":0,"notEvaluatedScopes":[],"behindScopes":["quay-native-src","experiments-scripts"],"refresh":{"attempted":true,"refreshedScope":"scripts","instrumentSource":"plugin","exitCode":0,...}}`。
+- **套件红收尾（2026-10-22，上一轮 exited-not-landed 的三条 task-introduced red）**：
+  1. `packages/quay/test/build-plugin-dist.test.mjs` —— **真实产品缺陷**：`archguard-runner.ts` 里未别名的 `import { createRequire } from "node:module"` 与 shipped bundle 的 `REQUIRE_BANNER`（同样声明 `createRequire`）相撞，任何 driver bundle 在 boot 时 `SyntaxError: Identifier 'createRequire' has already been declared`。修为别名 `createRequire as nodeCreateRequire`；`AC1 — product surface: each driver bundle runs its OWN main` 复绿。
+  2. `plugin/test/probe-routine.test.mjs` —— 新的「已安装 archguard 插件运行时」解析源让默认装配的 `architecture-analysis` 例程在装了 archguard 的宿主上真的跑起来（并吃同一个假探针 ⇒ 第二条 finding）。用例改用既有负控制缝 `ARCHGUARD_RUNNER_CLI=<不存在路径>`，把宿主状态钉死。
+  3. `plugin/test/archguard-structural-gate-fan-in.test.mjs` —— AC4（未评估态）原先断言**全部** scope 都 not-evaluated；Plan 步骤 2 的单目录 basis 让 5 个单目录 scope 变成真实读数。改为按 basis 分别断言，并新增「至少一个多目录 scope 仍为 not-evaluated」的空转守卫（实测剩 `src`）。
 
 ## Touches
 
@@ -61,6 +65,8 @@ extra:
 - plugin/scripts/quality-gate-driver.ts
 - plugin/test/quality-gate-driver.test.mjs
 - plugin/test/arch-cycle-reading.test.mjs
+- plugin/test/probe-routine.test.mjs
+- plugin/test/archguard-structural-gate-fan-in.test.mjs
 
 ## Needs-Human
 
@@ -69,3 +75,11 @@ extra:
 - 阻碍原因：unsatisfiableUnannotatedAc=[AC4 刷新后与独立仪器一致：刷新后 src scope 为 `evaluated:true`、`behindSources:false`，且它报告的环集合与 GOAL-910 AC-916 判据在同一 HEAD 上的输出一致（GOAL-910 未落地时双方都应是 `[[".","observation","serve"]]`，落地后双方都应是 0）。贴出两份输出与 HEAD。]（连续 3 轮被结构上不可派的拦截挡住 ⇒ 作者/人改写；⛔ 不派 fix worker）
 
 **已解除（2026-10-22）**：AC4 已在两次真实读数上复验（同一 HEAD 双侧一致，且负对照在 `d7e1c743a` 上双方同时报出 `{., observation, serve}`），该 AC 现为绿。
+
+## Blocker
+
+**2026-10-22T01:14:36.898Z — worker 未落地（exited-not-landed）**
+
+- 未落地原因：step=suite: AssertionError [ERR_ASSERTION]: at least one bin is under-sampled (otherwise the rule is vacuous) [baseline A/B: HARD RED (task-introduced-red) — the task's red set is NOT a subset of the develop baseline red set: added=packages/quay/test/build-plugin-dist.test.mjs,plugin/test/probe-routine.test.mjs,plugin/test/archguard-structural-gate-fan-in.test.mjs changed=-]
+- run_id：wk-prod-anchor
+- session_id：40a16a09-4df2-4229-ac52-183a6d683a2b
