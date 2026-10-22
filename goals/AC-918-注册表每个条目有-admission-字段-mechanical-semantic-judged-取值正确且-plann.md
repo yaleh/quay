@@ -1,7 +1,7 @@
 ---
 id: AC-918
 title: 注册表每个条目有 admission 字段，mechanical/semantic-judged 取值正确且 Planner 按它分派
-status: draft
+status: active
 kind: criterion
 goal: GOAL-911
 criterion: "node -e 'const fs=require(\"fs\");const
@@ -31,4 +31,15 @@ expect: 正向：`CONCERN_KIND_REGISTRY` 每个已注册条目都带 `admission`
   字段，exit 1 并具名 missing。
 origin: GOAL-911 设计（人 2026-10-22 裁定「线索 vs 语义判断」做成通用结构）：注册表需显式区分
   mechanical（机械可确认）与 semantic-judged（机械只产线索、语义做判断）
+activatedAt: 2026-10-22T10:27:54.627Z
+statusLog:
+  - at: 2026-10-22T10:27:54.627Z
+    from: draft
+    to: active
+    actor: goal-driver
+    reason: "triage: activate"
+fidelity:
+  verdict: faithful
+  reason: "fidelity judge: faithful"
+  at: 2026-10-22T10:27:54.627Z
 ---
