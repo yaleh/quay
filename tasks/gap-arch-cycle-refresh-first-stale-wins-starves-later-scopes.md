@@ -57,7 +57,7 @@ extra:
 
 ## Definition of Done
 
-- [ ] 五条 AC 全绿、`--for-task` scoped 静态检查与相关泳道通过、合并进 develop（AC4 待外部）
+- [ ] 五条 AC 全绿（AC4 待外部）、`--for-task` scoped 静态检查与相关泳道通过、合并进 develop（待外部）
 - [x] 不再存在「固定顺序 + 单次预算」造成的永久饿死：在任意 ≥2 个 stale scope 的夹具上，连续 ≥2 个间隔后所有 stale scope 都至少被刷新过一次。
 - [x] 载体中任何 `evaluated:true` 的 scope，在报告时刻其 artifactTimestamp 不早于覆盖源目录的最新提交；做不到时该 scope 必须是 `evaluated:false` + `artifact-behind-sources`，⛔ 不得是 `cycleCount:0`。
 - [x] 刷新仍只在例程 tick 内发生，不进 fan-in / per-task 热路径。
