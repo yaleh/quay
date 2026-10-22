@@ -598,6 +598,99 @@ test("runArchCycleRound — PER-SCOPE interval budget: a refreshed scope is not 
   assert.deepEqual(Object.keys(byScope).sort(), ["scripts", "src"]);
 });
 
+// ── DUE-BUT-DEFERRED === NOT CURRENT (gap-arch-cycle-within-interval-branch-skips-downgrade) ──────
+// The `pending.length === 0` path — EVERY due scope deferred by the per-scope interval budget and
+// therefore NO analyze run — used to return WITHOUT filling `downgradeCauses`, so
+// `downgradeStaleScopes` was a no-op on exactly the rounds that carry a stale reading. Measured in
+// production 2026-10-22: `plugin/scripts` 19 commits behind was reported as `evaluated:true`,
+// `cycleCount:0`, record `status:"complete"` — byte-identical to a healthy reading (硬规则 3b).
+// The regression below is the same fixture that produced that shape; on the pre-fix implementation
+// (`git show develop:plugin/scripts/quality-gate-driver.ts` at 6a4ffe950) it reports
+// `evaluated:true` + `cycleCount:0` + `status:"complete"` (AC1 "判据能取假").
+test("runArchCycleRound — a DUE scope deferred by the interval budget is DOWNGRADED, not reported as a current reading (AC1/AC3)", (t) => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "acr-within-interval-"));
+  t.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
+  // Base commit BEFORE the artifact timestamps ⇒ only the explicit commit below can make a scope owed.
+  makeRepoFixture(tmp, { date: "2025-12-01T00:00:00Z" });
+  const { wrapper, record } = fakeArchguard(tmp);
+  withEnv(t, { ARCHGUARD_RUNNER_CLI: wrapper });
+
+  const scripts = "plugin/scripts";
+  const workDir = path.join(tmp, ".archguard");
+  writeQueryFixture(workDir, tmp, {
+    timestampBySource: Object.fromEntries(SOURCES.map((s) => [s, "2026-01-01T00:00:00Z"])),
+    moduleGraphBySource: Object.fromEntries(SOURCES.map((s) => [s, []])),
+  });
+  commitAt(tmp, "2026-02-01T00:00:00Z", { [`${scripts}/after-artifact.ts`]: "export const after = 1;\n" });
+
+  // The carrier's own per-scope clock: scripts was refreshed 60s ago, i.e. INSIDE the 360m interval.
+  const now = "2026-10-22T05:16:43.221Z";
+  const lastRefresh = "2026-10-22T05:15:43.221Z";
+  const history = path.join(tmp, "history.jsonl");
+  fs.writeFileSync(
+    history,
+    JSON.stringify({ ts: lastRefresh, refresh: { attempted: true, at: lastRefresh, refreshedScopes: [{ scope: "scripts", ok: true }] } }) + "\n",
+    "utf8",
+  );
+
+  const fact = runArchCycleRound(tmp, {
+    config: { enabled: true, intervalMinutes: 360 }, configPresent: true, configError: null,
+    historyPath: history, workDir, now,
+  });
+  assert.equal(fact.state, "verified", "a partial round is still a reading");
+
+  const rec = JSON.parse(fs.readFileSync(history, "utf8").trim().split("\n").pop());
+  // "No analyze ran" and "the reading is stale" must BOTH be readable — they are not alternatives.
+  assert.equal(rec.refresh.attempted, false, "within-interval still spawns nothing");
+  assert.equal(rec.refresh.skipped, "within-interval");
+  assert.deepEqual(rec.refresh.deferredScopes.map((d) => d.scope), ["scripts"]);
+  assert.equal(rec.refresh.refreshedScopes.length, 0);
+
+  const scriptsRow = rec.scopes.find((s) => s.scope === "scripts");
+  assert.equal(scriptsRow.evaluated, false, "⛔ never presented as a current reading");
+  assert.equal(scriptsRow.cycleCount, null, "⛔ never cycleCount:0 — that is the healthy-clean value");
+  assert.equal(scriptsRow.cycles, null);
+  assert.equal(scriptsRow.basis, null);
+  assert.match(scriptsRow.reason, /artifact-behind-sources/);
+  assert.match(scriptsRow.reason, /within-interval/);
+  assert.equal(scriptsRow.commitsSinceArtifact, 1);
+  assert.equal(scriptsRow.behindSources, true, "the staleness itself is still recorded");
+
+  assert.equal(rec.status, "partial", "⛔ not \"complete\" while a scope is unevaluated");
+  assert.deepEqual(rec.notEvaluatedScopes, ["scripts"]);
+
+  // AC2 negative control, part 1: the five fresh scopes keep their numbers (downgrade is not blanket).
+  const fresh = rec.scopes.filter((s) => s.scope !== "scripts");
+  assert.equal(fresh.length, 5);
+  assert.equal(fresh.every((s) => s.evaluated === true && s.cycleCount === 0), true);
+
+  // AC3: the within-interval round spawned ZERO analyzers.
+  assert.deepEqual(analyzedSources(record), [], "⛔ within-interval must not analyze");
+
+  // AC2 negative control, part 2: NO due scope ⇒ explicit no-op, complete, zero downgrade.
+  const tmp2 = fs.mkdtempSync(path.join(os.tmpdir(), "acr-within-interval-none-"));
+  t.after(() => fs.rmSync(tmp2, { recursive: true, force: true }));
+  makeRepoFixture(tmp2, { date: "2025-12-01T00:00:00Z" });
+  const { wrapper: wrapper2, record: record2 } = fakeArchguard(tmp2);
+  withEnv(t, { ARCHGUARD_RUNNER_CLI: wrapper2 });
+  const workDir2 = path.join(tmp2, ".archguard");
+  writeQueryFixture(workDir2, tmp2, {
+    timestampBySource: Object.fromEntries(SOURCES.map((s) => [s, "2026-01-01T00:00:00Z"])),
+    moduleGraphBySource: Object.fromEntries(SOURCES.map((s) => [s, []])),
+  });
+  const history2 = path.join(tmp2, "history.jsonl");
+  const none = runArchCycleRound(tmp2, {
+    config: { enabled: true, intervalMinutes: 360 }, configPresent: true, configError: null,
+    historyPath: history2, workDir: workDir2, now,
+  });
+  assert.equal(none.value.refresh.skipped, "no-scope-needs-refresh");
+  assert.equal(none.value.refresh.attempted, false);
+  assert.equal(none.value.status, "complete");
+  assert.deepEqual(none.value.notEvaluatedScopes, []);
+  assert.equal(none.value.scopes.every((s) => s.evaluated === true), true, "no scope due ⇒ nothing downgraded");
+  assert.deepEqual(analyzedSources(record2), []);
+});
+
 test("runArchCycleRound — a stale scope whose analyze FAILS is downgraded to not-evaluated + artifact-behind-sources (AC3)", (t) => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "acr-ac3-"));
   t.after(() => fs.rmSync(tmp, { recursive: true, force: true }));

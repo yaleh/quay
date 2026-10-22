@@ -2,7 +2,7 @@
 id: gap-arch-cycle-within-interval-branch-skips-downgrade
 title: arch-cycle-report 的 within-interval 分支不执行 stale 降级：唯一 due scope 被间隔预算推迟时
   plugin/scripts 仍以 evaluated:true + cycleCount:0 上报（检测器 stale-evaluated 常亮）
-status: ready
+status: done
 labels:
   - gap
   - defect
