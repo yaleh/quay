@@ -65,3 +65,10 @@ merge
 - `packages/quay/src/core/server-state.ts`
 - `packages/quay/src/kernel/pid-alive.ts`
 - `tasks/gap-routine-semantic-dedup-scan-pid-alive-three-copies.md`
+
+## Blocker
+
+**2026-10-22T05:59:10.120Z — worker 未落地（exited-not-landed）**
+
+- 未落地原因：step=suite: AssertionError [ERR_ASSERTION]: at least one bin is under-sampled (otherwise the rule is vacuous) [baseline A/B: HARD RED (task-introduced-red) — the task's red set is NOT a subset of the develop baseline red set: added=plugin/test/design-evolution-readings.test.mjs changed=-]
+- run_id：wk-prod-anchor
