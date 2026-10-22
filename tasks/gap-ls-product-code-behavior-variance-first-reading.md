@@ -122,11 +122,16 @@ node --no-warnings --experimental-strip-types <worktree>/plugin/scripts/ls-mutat
 
 ### DoD evidence
 
-- **scoped 门**：`bash scripts/test.sh --for-task gap-ls-product-code-behavior-variance-first-reading --allow-thin` ⇒ `EXIT=0`；9 tests / 9 pass / 0 fail；scoped 静态检查无 `STATIC_CHECK_FAILED`（含 `tmp-leak-pairing-check`、`test-isolation-check`、`test-framework-policy-check`、`checked-in-write-check` 全 PASS）。最终的 `merge develop → worktree` 由 driver 的机械 fan-in 完成（本 worker 不直接 merge develop）。
+- **scoped 门**：`bash scripts/test.sh --for-task gap-ls-product-code-behavior-variance-first-reading --allow-thin` ⇒ `EXIT=0`；9 tests / 9 pass / 0 fail；scoped 静态检查无 `STATIC_CHECK_FAILED`（含 `tmp-leak-pairing-check`、`test-isolation-check`、`test-framework-policy-check`、`checked-in-write-check` 全 PASS）。本轮在 worktree 内 `git merge develop` 之后重跑了同一个门：`EXIT=0`，9 tests / 9 pass / 0 fail。
 - **登记完整性**：`plugin/test/carrier-registry-completeness.test.mjs` 5/5 绿（`ls-readings.jsonl` 已登记，owner = `plugin/scripts/ls-mutation-reading.ts`）；`bash plugin/scripts/capability-catalog.sh --summary` ⇒ `391 scripts | 391 declared | 0 unclassified`；`plugin/test/capability-catalog.test.mjs` 18/18 绿；`plugin/scripts/gitignore-runtime-coverage-check.ts` PASS（13 marked = 13 manifest；新增的 `**/.quay/ls-readings.jsonl` 刻意不带 `@quay-runtime-artifact` 标记 —— 它在 `.quay/` 下，quay-init 的静态 `.quay/*` 规则已覆盖消费方）。
 - **未引入新依赖**：`git diff --name-only develop...HEAD -- package.json package-lock.json 'packages/*/package.json'` ⇒ 空。
 - **未设阈值/门**：本脚本只被人/自检调用，不在任何 driver 或 loop 里；`scripts/test.sh` 未改动；读数只落在 `## Evidence` 与 `.quay/ls-readings.jsonl`。
 - **ADR-007 未修改**：`git diff --name-only develop...HEAD -- 'adr/ADR-007*'` ⇒ 空。
+- **第一轮 fan-in 红的修复（2026-10-22）**：第一轮把 1-based 换行计数器 `lineOf` 私有复制进 `plugin/scripts/ls-mutation-reading.ts`，重新打开了已退役的 `lineof-lineat` 家族，`plugin/test/source-text-lib.test.mjs` 的 family 回归判据报 `ls-mutation-reading.ts:243 lineOf`（一条 task-introduced-red）。本轮改为 `import { lineOf } from "./source-text-lib.ts"`，该测试 28/28 绿。
+
+## Dark axis (ADR-007)
+
+- L_G/L_D：该轴仍暗,理由:本任务是 L_S（行为方差）轴上的第一条产品代码读数——它只跑文本变异读数器，不产生任何依赖结构/上帝模块（L_G）或文档-代码耦合（L_D）读数，两条轴在本任务中均未被观测；把 L_S 的读数伪装成 L_D/L_G 的读数正是 ADR-007 反对的「用一个轴冒充另一个轴」。
 
 ## Touches
 
