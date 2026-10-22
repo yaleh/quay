@@ -1,7 +1,7 @@
 ---
 id: AC-923
 title: C1 准入闸真正消费 registry 的 admission 字段：非法取值必须按名拒绝，而不是继续走机械判定
-status: draft
+status: active
 kind: criterion
 goal: GOAL-911
 criterion: "node --input-type=module -e 'const m=await
@@ -29,6 +29,17 @@ origin: "readings.criteria[AC-918]: verdict=fail, reason='acceptance failed
   的独立取值）只有 plugin/test/ownership-active-limited-proposal.test.mjs 一个消费者，零生产消费者 ⇒
   字段被携带、从不被消费。本条接管 AC-918 那半边错误持有的判据面；⛔ 退役 AC-918 本身仍是人的决定，本提议只声明取代关系，不改其
   status。"
+activatedAt: 2026-10-22T11:19:08.895Z
+statusLog:
+  - at: 2026-10-22T11:19:08.895Z
+    from: draft
+    to: active
+    actor: goal-driver
+    reason: "triage: activate"
 supersedes:
   - AC-918
+fidelity:
+  verdict: faithful
+  reason: "fidelity judge: faithful"
+  at: 2026-10-22T11:19:08.895Z
 ---
