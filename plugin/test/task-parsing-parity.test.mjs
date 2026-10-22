@@ -15,10 +15,15 @@
 //     (AC-909): the one definition lives at packages/quay/src/kernel/ac-checkbox-count.ts and BOTH
 //     packages/quay/src/task-parsing.ts and plugin/scripts/task-schema.ts re-export it, so the
 //     identity assertion below is the convergence evidence.
-//   · extractSection / parseFrontmatterCompletely — still duplicated in the mechanism layer (out of
-//     that task's scope), so THIS test pins them BEHAVIORALLY identical to the product source. A
-//     divergence here is the two frontmatter/section readers silently disagreeing (the exact drift
-//     class the promotion exists to end).
+//   · extractSection — STRUCTURALLY single since task
+//     gap-routine-semantic-dedup-scan-extract-section-byte-identical: the one definition lives at
+//     packages/quay/src/kernel/extract-section.ts; both entry points re-export it, so the identity
+//     assertion below is the convergence evidence (the twin had been byte-identical — routine
+//     `semantic-dedup-scan` finding `extract-section-byte-identical`).
+//   · parseFrontmatterCompletely — still duplicated in the mechanism layer (out of both tasks'
+//     scope), so THIS test pins it BEHAVIORALLY identical to the product source. A divergence here
+//     is the two frontmatter readers silently disagreeing (the exact drift class the promotion
+//     exists to end).
 //
 // ⚠ The former premise of this file — that the mechanism layer cannot reach the Core source tree
 // through a static import (because build-plugin-dist's bundle step does not carry that tree) — is
@@ -78,7 +83,14 @@ extra:
     - gap-b
 `;
 
-test("extractSection — plugin copy matches product source (depth-aware slicing)", () => {
+test("extractSection — ONE kernel definition (identity), still depth-aware", () => {
+  // STRUCTURAL, not merely behavioral (硬规则 4 推论三): the two entry points must expose the SAME
+  // function object, so a re-introduced local copy breaks this even if its body is byte-identical.
+  assert.equal(
+    extractSection,
+    productExtractSection,
+    "task-schema.ts and task-parsing.ts must re-export the SAME kernel extractSection, not two copies",
+  );
   for (const heading of ["Proposal", "Plan", "Acceptance Criteria", "Absent"]) {
     assert.deepEqual(
       extractSection(TASK_BODY, heading),
@@ -86,6 +98,10 @@ test("extractSection — plugin copy matches product source (depth-aware slicing
       `extractSection("${heading}") diverged`,
     );
   }
+  // Non-vacuity: the shared function actually slices (a stub returning null would pass the
+  // identity assertion above but fail here).
+  assert.ok(extractSection(TASK_BODY, "Plan").includes("### Step 1"), "depth-aware slice must include nested ### content");
+  assert.equal(extractSection(TASK_BODY, "Absent"), null, "absent heading ⇒ null");
 });
 
 test("parseFrontmatterCompletely — plugin copy matches product source (full YAML round-trip)", () => {

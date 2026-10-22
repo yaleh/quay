@@ -2,11 +2,15 @@
 // kernel-pure-judges.test.mjs — the pure judges converged by
 // gap-three-pure-judges-kernel-single-def (AC-909 / GOAL-906), plus `stripTouchAnnotation` added by
 // gap-routine-semantic-dedup-scan-strip-touch-annotation (a fourth two-copy algorithm the semantic
-// dedup scan found: plugin/scripts/touches-parser.ts + packages/quay/src/observation.ts).
+// dedup scan found: plugin/scripts/touches-parser.ts + packages/quay/src/observation.ts), plus
+// `extractSection` converged by gap-routine-semantic-dedup-scan-extract-section-byte-identical
+// (finding `extract-section-byte-identical`: packages/quay/src/task-parsing.ts +
+// plugin/scripts/task-schema.ts).
 //
 // WHAT THIS FILE IS FOR. The task's motivating fact is structural: `countAcCheckboxes`,
-// `stripTrailingFullWidthAnnotation` and `expandGlob` each existed as TWO byte-identical definitions
-// with no import edge between them. A purely behavioral suite would have passed BEFORE the fix too
+// `stripTrailingFullWidthAnnotation`, `expandGlob` and `extractSection` each existed as TWO
+// byte-identical definitions with no import edge between them. A purely behavioral suite would have
+// passed BEFORE the fix too
 // (both copies behaved the same) — 硬规则 4 推论三's shape. So the assertions here are:
 //
 //   ① SINGLE DEFINITION — each name has exactly ONE `function`/`const … = function` declaration on
@@ -34,8 +38,9 @@ import { fileURLToPath } from "node:url";
 import { countAcCheckboxes } from "../src/kernel/ac-checkbox-count.ts";
 import { stripTrailingFullWidthAnnotation, stripTouchAnnotation as kernelStripTouchAnnotation } from "../src/kernel/touches-annotation.ts";
 import { expandGlob } from "../src/kernel/glob-expand.ts";
-import { countAcCheckboxes as fromProductEntry } from "../src/task-parsing.ts";
-import { countAcCheckboxes as fromMechanismEntry } from "../../../plugin/scripts/task-schema.ts";
+import { extractSection } from "../src/kernel/extract-section.ts";
+import { countAcCheckboxes as fromProductEntry, extractSection as extractSectionFromProductEntry } from "../src/task-parsing.ts";
+import { countAcCheckboxes as fromMechanismEntry, extractSection as extractSectionFromMechanismEntry } from "../../../plugin/scripts/task-schema.ts";
 import { stripTouchAnnotation } from "../../../plugin/scripts/touches-parser.ts";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -44,7 +49,7 @@ const REPO_ROOT = path.resolve(HERE, "..", "..", "..");
 // ── ① ONE definition, and it lives in kernel/ ────────────────────────────────────────────────────
 // Same surfaces the task's AC1/AC2 scan (by position — declaration lines, never prose mentions).
 const SCAN_TREES = ["packages/quay/src", "plugin/scripts", "scripts"];
-const JUDGES = ["countAcCheckboxes", "stripTrailingFullWidthAnnotation", "stripTouchAnnotation", "expandGlob"];
+const JUDGES = ["countAcCheckboxes", "stripTrailingFullWidthAnnotation", "stripTouchAnnotation", "expandGlob", "extractSection"];
 
 function walkTs(dir, out = []) {
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
@@ -83,6 +88,34 @@ test("① each pure judge is DECLARED exactly once, under packages/quay/src/kern
 test("② product entry, mechanism entry and kernel leaf expose the SAME countAcCheckboxes object", () => {
   assert.equal(fromProductEntry, countAcCheckboxes, "task-parsing.ts must re-export the kernel definition");
   assert.equal(fromMechanismEntry, countAcCheckboxes, "task-schema.ts must re-export the kernel definition");
+});
+
+// extractSection was the LAST byte-identical product/mechanism twin the semantic dedup scan reported
+// (finding `extract-section-byte-identical`, routine runId `semantic-dedup-scan-1792647604889`):
+// same `escapeRegExp` call, same `stopRe` body, no import edge. Both entries must now resolve the
+// kernel object — identity, not just equal output (硬规则 4 推论三: a byte-identical re-implementation
+// would pass a behavioral golden but fail this).
+test("② product entry and mechanism entry expose the SAME kernel extractSection object", () => {
+  assert.equal(extractSectionFromProductEntry, extractSection, "task-parsing.ts must re-export the kernel definition");
+  assert.equal(extractSectionFromMechanismEntry, extractSection, "task-schema.ts must re-export the kernel definition");
+});
+
+test("③ extractSection — depth-aware slice, literal (escaped) heading, absent ⇒ null", () => {
+  const body = "## Plan\n\nintro\n\n### Step 1\ndetail\n\n### Step 2\nmore\n\n## Next\nafter\n";
+  const plan = extractSection(body, "Plan");
+  assert.ok(plan.includes("### Step 1"), "a `## X` section extends through its nested `### ` subheadings");
+  assert.ok(plan.includes("### Step 2"));
+  assert.ok(!plan.includes("after"), "the slice stops at the next SAME-or-shallower heading");
+
+  // Literal metacharacter heading (gap-extract-section-heading-interpolated-unescaped-into-regexp):
+  // escaped before interpolation, so it matches its own line and an unbalanced `(` cannot throw.
+  const meta = "## Plan (draft\n\nbody\n\n## Next\nafter\n";
+  assert.doesNotThrow(() => extractSection(meta, "Plan (draft"));
+  assert.ok(extractSection(meta, "Plan (draft").includes("body"));
+
+  // Negative control: an absent heading returns null, so the assertions above cannot pass on a
+  // function that returns the whole text regardless of the heading.
+  assert.equal(extractSection(body, "Absent"), null);
 });
 
 // The plugin Touches parser re-exports the kernel's stripTouchAnnotation (not a copy). Identity —
