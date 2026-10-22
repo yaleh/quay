@@ -69,3 +69,11 @@ extra:
 - 阻碍原因：unsatisfiableUnannotatedAc=[AC4 刷新后与独立仪器一致：刷新后 src scope 为 `evaluated:true`、`behindSources:false`，且它报告的环集合与 GOAL-910 AC-916 判据在同一 HEAD 上的输出一致（GOAL-910 未落地时双方都应是 `[[".","observation","serve"]]`，落地后双方都应是 0）。贴出两份输出与 HEAD。]（连续 3 轮被结构上不可派的拦截挡住 ⇒ 作者/人改写；⛔ 不派 fix worker）
 
 **已解除（2026-10-22）**：AC4 已在两次真实读数上复验（同一 HEAD 双侧一致，且负对照在 `d7e1c743a` 上双方同时报出 `{., observation, serve}`），该 AC 现为绿。
+
+## Blocker
+
+**2026-10-22T01:14:36.898Z — worker 未落地（exited-not-landed）**
+
+- 未落地原因：step=suite: AssertionError [ERR_ASSERTION]: at least one bin is under-sampled (otherwise the rule is vacuous) [baseline A/B: HARD RED (task-introduced-red) — the task's red set is NOT a subset of the develop baseline red set: added=packages/quay/test/build-plugin-dist.test.mjs,plugin/test/probe-routine.test.mjs,plugin/test/archguard-structural-gate-fan-in.test.mjs changed=-]
+- run_id：wk-prod-anchor
+- session_id：40a16a09-4df2-4229-ac52-183a6d683a2b
