@@ -180,7 +180,8 @@ import {
 // ARCH-CYCLE 轨道（gap-arch-cycle-report-only-routine）：目录级环读数此前只存在于按需 runner 的
 // **闸**里（gap-fan-in-remove-archguard-gate 已把它从 fan-in 移除 ⇒ 新能力无消费者，自 10-11
 // 没跑过）。本轨把同一个读数接成周期 report-only 例程：每 due 轮读一次「上次 analyze 落盘的」
-// moduleGraph 环，append 一行到 `.quay/arch-cycle-history.jsonl`。⛔ 不 analyze、不 ratchet、
+// moduleGraph 环，append 一行到 `.quay/arch-cycle-history.jsonl`。analyze 只在这一轮里为**到期**
+// 的 scope 补跑（每 scope 每间隔至多一次；⛔ 不进 fan-in / per-task 热路径）。⛔ 不 ratchet、
 // 不立案——环非空是该例程的**读数内容**，不会使轮 failed（那是闸的语义，不是本轨的）。
 import {
   downgradeStaleScopes,
@@ -2071,8 +2072,10 @@ export interface ArchCycleHistoryRecord {
   graphSummary: GraphSummaryRecord;
   /** WHAT THIS ROUND DID ABOUT STALE ARTIFACTS. The routine is a reader, but it is the only thing that
    *  ever looks at these artifacts on a schedule — the mechanism that refills them lives here, bounded
-   *  to at most ONE analyze per scheduling interval (see `refreshBehindScopes`). Always present, so
-   *  "no refresh" is a stated decision (`skipped`) rather than silence. */
+   *  PER SCOPE to at most one analyze per scheduling interval (see `refreshBehindScopes` /
+   *  `readLastRefreshAtByScope`): every due scope is attempted in the round, and only a scope that was
+   *  itself refreshed recently is deferred. Always present, so "no refresh" is a stated decision
+   *  (`skipped`) rather than silence. */
   refresh: ArchCycleRefreshRecord;
   reportOnly: true;
 }

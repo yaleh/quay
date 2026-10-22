@@ -1,0 +1,68 @@
+{
+  "schema": "slice-readings-v1",
+  "taskId": "gap-slice-before-after-readings-at-dispatch-and-fanin",
+  "scope": "worker-history",
+  "baseline": {
+    "schema": "slice-readings-v1",
+    "taskId": "gap-slice-before-after-readings-at-dispatch-and-fanin",
+    "phase": "baseline",
+    "evaluated": true,
+    "reason": null,
+    "ts": "2026-10-22T04:09:39.607Z",
+    "headSha": "823f471dd76b29f1e1cd04a9a91e7788e9ed00e0",
+    "baselineHeadSha": null,
+    "scope": "worker-history",
+    "scopeSpec": {
+      "source": "plugin/scripts",
+      "central": [
+        {
+          "atBaseline": "plugin/scripts/worker-driver.ts",
+          "atHead": "plugin/scripts/worker-driver.ts"
+        },
+        {
+          "atBaseline": "plugin/scripts/worker-fan-in.ts",
+          "atHead": "plugin/scripts/worker-fan-in.ts"
+        }
+      ],
+      "modules": [
+        "plugin/scripts/*worker*.ts",
+        "plugin/scripts/*pool*.ts",
+        "plugin/scripts/*dispatch*.ts",
+        "plugin/scripts/*fan-in*.ts"
+      ]
+    },
+    "metricBasis": {
+      "centralFileLines": "git",
+      "centralFileBodyLines": "summary",
+      "callOutDegree": "summary",
+      "methodCount": "summary",
+      "methodShellCount": "summary",
+      "cycles": "summary",
+      "centralChurnShare": "git",
+      "centralSlimRatio": "git"
+    },
+    "metrics": {
+      "centralFileLines": 10817,
+      "centralFileBodyLines": 6176,
+      "callOutDegree": 367,
+      "methodCount": 180,
+      "methodShellCount": 0,
+      "cycles": 0,
+      "centralChurnShare": 0,
+      "centralSlimRatio": 0
+    },
+    "churnWindow": {
+      "from": "30904b804b31e913820f4aa449a9d0d659c67690",
+      "to": "823f471dd76b29f1e1cd04a9a91e7788e9ed00e0"
+    },
+    "metricNullReasons": {},
+    "archguardCli": "/data/home/yale/.claude/plugins/npm-cache/node_modules/@yalehwang/archguard/dist/cli/index.js",
+    "archguardVersion": "0.1.42",
+    "analyzedTree": {
+      "kind": "temp-worktree",
+      "path": "/tmp/slice-readings-tree-vbZozl"
+    }
+  },
+  "post": null,
+  "delta": null
+}
