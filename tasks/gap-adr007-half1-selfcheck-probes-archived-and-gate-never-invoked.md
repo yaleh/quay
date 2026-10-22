@@ -65,6 +65,7 @@ extra:
 
 - tasks/gap-adr007-half1-selfcheck-probes-archived-and-gate-never-invoked.md
 - experiments/quay-perpetual-stream/scripts/git-lens-selfcheck.sh
+- experiments/quay-perpetual-stream/scripts/git-lens-instrument.mjs
 - experiments/quay-perpetual-stream/fixtures/git-lens/l-g-archguard/cycle/query/manifest.json
 - experiments/quay-perpetual-stream/fixtures/git-lens/l-g-archguard/cycle/query/fixture01/arch.json
 - experiments/quay-perpetual-stream/fixtures/git-lens/l-g-archguard/clean/query/manifest.json
