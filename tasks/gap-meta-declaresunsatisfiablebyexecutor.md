@@ -2,7 +2,7 @@
 id: gap-meta-declaresunsatisfiablebyexecutor
 title: 修 UNSATISFIABLE_AC 判据的误报：证据指令从句里的『落地后』被当成『执行者不可满足』的声明，把合法 ready 任务拦成
   needs-human
-status: ready
+status: done
 labels:
   - meta-driver
   - driver-candidate
