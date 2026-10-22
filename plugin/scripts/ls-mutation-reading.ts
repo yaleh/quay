@@ -70,6 +70,9 @@ import path from "node:path";
 import { execFileSync, spawnSync } from "node:child_process";
 import { isDirectEntry, flagValue } from "./gate-script-base.ts";
 import { escapeRegExp } from "./regex-escape.ts";
+// The 1-based newline counter lives ONCE in source-text-lib.ts (finding `lineof-lineat`):
+// a private copy here would re-open that family and red plugin/test/source-text-lib.test.mjs.
+import { lineOf } from "./source-text-lib.ts";
 
 /** The append-only carrier, relative to the workspace root (`<root>/.quay/ls-readings.jsonl`). */
 export const CARRIER_REL = ".quay/ls-readings.jsonl";
@@ -237,13 +240,6 @@ function findBodyBrace(src: string, from: number): number {
     i++;
   }
   return -1;
-}
-
-/** 1-based line number of `index` in `src`. */
-function lineOf(src: string, index: number): number {
-  let n = 1;
-  for (let i = 0; i < index && i < src.length; i++) if (src[i] === "\n") n++;
-  return n;
 }
 
 /** The body span of `name`, or null when the function is not declared in `src`. */
