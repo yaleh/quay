@@ -187,15 +187,34 @@ Quay 现阶段的重构应该优先把"状态/决策/副作用/编排四件事�
 R0 的目录环为 0，证明不了 R1。R2 的检查天生滞后，所以 R2 的**落地验收**只能用代理形态（「外部注册一个合成单元，
 不改中心文件即生效，且改动前为红」，DIR-133 裁定 2 / AC-915），真正的判读要等后续功能落地之后再读中心增长占比。
 
+**R0–R3 表的读法补充：方法体 vs 方法壳（2026-10-22 增补）**：`methodCount` 在一次职责外移后几乎不降——
+公开**方法壳**留在契约上、只有**方法体**搬走了（driver 88→86；刀1 完成后 methodCount 反而是 88，比先前
+报告的 87 +1，因为读数这一步多出一个 registry 委托壳）。因此判 R1（提取）不能只看 `methodCount`：
+要么用同口径的 call out-degree（`archguard_summary` 的 `topByOutDegree`，前后同口径比），要么把
+「方法体行数」与「方法壳数量」分开记。`methodCount` 下降只证明壳少了，不证明体搬了；两者混读会把
+「有进展」误判成「没进展」（硬规则 4b：一个代理量混了两类对象）。
+四臂判据的机械检查器：`plugin/scripts/extension-point-criteria-check.ts`（四态 `satisfied` /
+`missing-arms` / `not-applicable` / `NOT-EVALUATED`）；骨架生成器：
+`plugin/scripts/extension-point-criteria.ts --scaffold --task-id <id> --central <file> --outside <module>`。
+
 **分级**：三组读数**证据充分**（载体可复跑）；「R0–R3 是四个可分离的级、每级需要独立的 Π」是**机制成立待验**，
 依据只有本节的 quay 两个子系统 + plantuml-js 一例。
 
-### 13.3 建议：把 DIR-133 规则 ② 升格为 Π 检查（只建议，不立案）
+### 13.3 DIR-133 规则 ② 已升格为 Π 检查（2026-10-22 落地）
 
-DIR-133 裁定 2（「设计调查/切片的 AC 必须含扩展点判据」）目前**只是散文**。它防的那种失败（拆分 AC 没写扩展点，
-增长回流）已在 **2 个代码库发生过 2 次**：quay worker `2440b52d0`，plantuml-js `gap-elk-layout-engine-split-responsibilities`。
-按硬规则 12，发生率 ≥2 已经足以支持把它做成可执行检查（例如：设计切片类任务/Goal 的 AC 里至少有一条是扩展点判据，
-且在改动前实跑为红）。**本文只记录这条建议，不立案。**
+DIR-133 裁定 2（「设计调查/切片的 AC 必须含扩展点判据」）原先**只是散文**。它防的那种失败（拆分 AC 没写扩展点，
+增长回流）已在 **2 个代码库发生过 2 次**：quay worker `2440b52d0`，plantuml-js `gap-elk-layout-engine-split-responsibilities`
+（这个计数不含 claudecodeui 的 ws-proxy——它 2026-10-22 又提供了一例，使发生率升到 3 个代码库）。
+按硬规则 12，发生率 ≥2 足以把它做成可执行检查；本任务（`tasks/gap-extension-point-refactor-criteria-scaffold`）
+已落地机械形态：
+
+- **判据正本** = 本节 13.5 的四臂（正臂 / 负臂 / 注入泄漏 / 红线基线）；
+- **检查器** `plugin/scripts/extension-point-criteria-check.ts`——按位置只读任务的 `## Acceptance Criteria` 列表项，
+  四态输出 `satisfied` / `missing-arms`（逐臂具名）/ `not-applicable` / `NOT-EVALUATED`；
+- **骨架生成器** `plugin/scripts/extension-point-criteria.ts --scaffold --task-id <id> --central <file> --outside <module>`
+  （stdout dry-run；任务体仍只经 Provider ABI `task_write` 写入）；
+- **skill** `plugin/skills/extension-point-refactor/SKILL.md` 把「生成骨架 → 填四臂 → 跑检查器 → 落 AC」串成一次调用。
+
 
 ### 13.4 登记一条样本外预测（2026-10-22 登记）
 
@@ -212,3 +231,66 @@ DIR-133 裁定 2（「设计调查/切片的 AC 必须含扩展点判据」）�
 - **登记时的现状（不作判读）**：2026-10-22 复跑 `design-evolution-readings.ts`（HEAD `584e10c60`）得 `worker-post-909`
   中心 +172 / 非中心 +0，共 2 个提交（`d88ad2db8`、`80d75e886`，都是 fan-in 暗轴谓词）。分母远不到 1,000 行，**不计入判读**；
   10-22T00:40Z 那条载体记录里，这个子系统还是 `evaluated:false`（分母为 0）。
+
+### 13.5 扩展点判据四件套（正本；生成器与检查器都引用本节）
+
+来源：claudecodeui 会话「Quay 的 OO 设计重构」2026-10-22 在 5 刀 OO 重构里**每刀手写**的同一套判据。
+本节是它的唯一正本：`plugin/scripts/extension-point-criteria.ts` 输出它，
+`plugin/scripts/extension-point-criteria-check.ts` 按下面四条臂判它。
+
+### 臂 1 — 正臂（positive arm）：从中心文件之外注册的 handler 被触发
+
+**断言形态**：从 `<outside>` 注册一个新的处理单元、**不修改** `<central>`，运行后读数必须是 **`triggered=1`（计数）**——
+不是「handler 存在」。存在性检查在断线时仍然绿，测不到接线。
+**取假方式**：删掉/断线外部注册后同一断言读数为 `triggered=0` ⇒ 本条必红。红色落点是「注册被移除/接线断开」这一步。
+**是否活性臂**：**是**。这条正臂就是活性检查，不另配一条；负臂不能替代它。
+
+### 臂 2 — 负臂（negative arm）：未注册时不触发
+
+**断言形态**：同一个断言在【未注册】时读数为 `triggered=0`。
+**建议伴生读数**：负臂同时断言 `handlerRegistered=false`（注册表确认无此 handler）。负臂绿有两条路径——
+unregister 真的被 gate 掉了 / unregister 没生效但恰好被正臂拦住；多这一个读数才把两条路拆开，
+让「unregister 真生效」由负臂自己直接证出（claudecodeui 2026-10-22 审阅建议，采纳）。
+**取假方式**：分派器泄漏/无条件调用时，`triggered=0` 必红。
+**是否活性臂**：**否**（它是真空绿的来源，必须配正臂）。⚠️ 负臂单独看，对「注册了但断线」是**假绿**——
+断线时 `triggered=0`，负臂照样绿，只是绿错了理由。因此：**只写负臂、不写正臂 ⇒ 判据无效**，
+检查器判 `missing-arms` 并具名到正臂；负臂只有在与一条 counted 正臂（`triggered=1`）成对时才被接受。
+
+### 臂 3 — 注入泄漏（injection leak）：把分派器替换成泄漏实现后，同一断言必红
+
+**断言形态**：把 `<central>` 的分派器替换成泄漏实现（无视注册表、无条件调用），臂 1 / 臂 2 的同一断言必须打红。
+**取假方式**：替换后仍绿 ⇒ 该臂没测到分派器，判红。
+**是否活性臂**：**否**。它的作用是证明**负臂断言本身不真空**（不是给正臂兜底）：如果泄漏实现下负臂仍然绿，
+说明负臂测的不是分派器。
+
+### 臂 4 — 红线基线（red-line baseline）：改动前 `wc -l <基线>` 的断言必红
+
+**断言形态**：改动前记录 `wc -l <central>` 的基线 B，并断言改动后中心文件行数 < B（或等价的结构读数）；
+在改动前跑这条断言必须为红。
+**取假方式**：基线之前跑不红 ⇒ 断言没测到那次增长。
+**是否活性臂**：**否**。**本臂是单次任务 AC，不是常设棘轮**：只在重构任务验收时由 worker 检查一次，
+任务 done 后永不复评，因此它**不会**在后续增长里恒红，**不需要重锚规则**。常设棘轮属于设计演进读数例程
+（`design-evolution-readings.ts`）的领域，不要在这条 AC 里假装拥有它。（本仓库「把行号钉进判据」的历史教训
+只在**常设**检查上成立，单次 AC 不适用。）
+
+**机械形态**：`plugin/scripts/extension-point-criteria-check.ts` 按位置只读 `## Acceptance Criteria` 的
+GFM 列表项（`## Proposal` 散文、代码围栏、注释里的同名文字都不算——硬规则 2），四态输出
+`satisfied` / `missing-arms`（逐臂具名，正臂写成「handler 存在」也算 weak 缺失）/ `not-applicable`
+（不是设计切片）/ `NOT-EVALUATED`（AC 段读不到，独立取值，不得与 `satisfied` 同形——硬规则 3b）。
+脚手架：`plugin/scripts/extension-point-criteria.ts --scaffold --task-id <id> --central <file> --outside <module>`；
+skill：`plugin/skills/extension-point-refactor/SKILL.md`。
+
+### 13.6 两种「占比」口径：`centralChurnShare` ≠ 中心文件增长占比（不可互引）
+
+**结论：不是同一个量，⛔ 不得互相引用**（claudecodeui 2026-10-22 复核后已撤回原比较）。
+
+- **`centralChurnShare`（canonical 键名；claudecodeui 口径；单 commit churn，含删除。早期写作 `centralΔ`——
+  `Δ` 易被读成「净变化」，而本量是 insertions+deletions 的 churn，故 canonical 键名取 `centralChurnShare`）** =
+  (该 commit 内中心文件的 insertions + deletions) ÷ (该 commit 全部文件的 insertions + deletions)。
+  实例：driver 那一刀 263 / 1275 = 0.206。它度量「**这次重构**的 churn 有多少落在中心文件」。
+- **中心文件增长占比（quay 口径；时间窗，只计新增）** = 窗口内中心文件新增行 ÷ (中心文件新增行 + 非中心文件新增行)。
+  实例：`worker-history` 基线 `2440b52d0` → `ff32d031d`，中心 +4,820 ÷ (4,820 + 1,025) = 82.46%；
+  同一公式在 serve 上得 1.31%（10-22T00:40Z 记录：中心 +153 ÷ (+153 + +11,534)，分母 = 中心 + 非中心新增行；
+  `docs` 早期「serve 1%」是该值的取整基线）。它度量「**后续增长**回流中心的比例」。
+- **差异的来源**：分子与分母都不同——前者单 commit、删除也计入；后者时间窗、只计新增。
+  0.21 回答不了「后续增长回流中心的比例」；两个数不可互相替换，也不可引用对方的数值作基线。
