@@ -44,6 +44,14 @@
 // `evaluated:false` lines are APPENDED TOO — a round that could not read must leave a trace, or
 // 「没读过」 and 「读过且干净」 are the same history (硬规则 3b).
 //
+// ── AN ATTACHED READING: ADR-008 phase-declaration staleness ──────────────────────────────────────
+// `phaseStaleness` (tasks/gap-adr008-phase-declaration-staleness-reading) rides along in this round's
+// record and Fact: commits / new goals / days since `.quay/two-phase-state.json`'s latest declaration.
+// It is ATTACHED INFORMATION — the carrier had zero readers, and this is the first. ⛔ It never
+// changes `evaluated` (a stale declaration is content, not a failure), ⛔ it is not a gate, ⛔ it is
+// not a threshold, and ⛔ nothing switches the phase automatically. The reading is taken by its
+// carrier's owner (`phase-declare.ts` `readPhaseStaleness`), not re-implemented here.
+//
 // ── REPORT ONLY, NEVER A GATE ─────────────────────────────────────────────────────────────────────
 // Following `arch-coverage-report.ts` / `arch-cycle-report` (the same family): a non-zero share or a
 // non-zero contention count is the reading's CONTENT, ⛔ not `failed`. No ratchet here, and no numeric
@@ -75,6 +83,12 @@ import { execFileSync } from "node:child_process";
 import { parse as parseYaml } from "yaml";
 import { isDirectEntry } from "./gate-script-base.ts";
 import { repoRoot as findRepoRoot } from "./repo-root.ts";
+// The ADR-008 phase declaration's OWN staleness (tasks/gap-adr008-phase-declaration-staleness-reading).
+// Attached to this round because this routine is already a read-only git reading that lands a
+// quality-round Fact — adding a SECOND routine/carrier for one number is the drift the task forbids.
+// phase-declare.ts is direct-entry guarded, so importing it never runs its CLI.
+import { readPhaseStaleness } from "./phase-declare.ts";
+import type { PhaseStalenessReading } from "./phase-declare.ts";
 
 /** The append-only carrier (gitignored; registered in `docs/carrier-registry.json`). */
 export const DESIGN_EVOLUTION_HISTORY_REL = path.posix.join(".quay", "design-evolution-history.jsonl");
@@ -1004,6 +1018,11 @@ export interface DesignEvolutionReadingsRecord {
   /** How many worker-outcome records this round scanned — the WATERMARK the NEXT round's window
    *  starts from (an offset, not a timestamp: two records can share a ts). */
   carrierRecords: number | null;
+  /** ADR-008 phase-declaration staleness — commits / new goals / days since the last declaration.
+   *  ATTACHED INFORMATION ONLY: it is never folded into `evaluated`, never a gate, and never a
+   *  trigger (tasks/gap-adr008-phase-declaration-staleness-reading Plan §3-4). Its own unreadable
+   *  state is `evaluated:false` inside the field, which must not change the ROUND's verdict. */
+  phaseStaleness: PhaseStalenessReading;
   reportOnly: true;
 }
 
@@ -1041,8 +1060,12 @@ export function buildReadings(root: string, opts: ReadingsOptions): DesignEvolut
     : [rm1Evaluated ? null : `rm1: ${rm1Reason}`, rm2.evaluated ? null : `rm2: ${rm2.reason ?? "not evaluated"}`]
         .filter(Boolean)
         .join(" | ");
+  const ts = opts.ts ?? new Date().toISOString();
+  // `ts` doubles as the deterministic clock for the staleness distance, so a replayed round reports
+  // the same number of days it did when it was taken.
+  const now = new Date(ts);
   return {
-    ts: opts.ts ?? new Date().toISOString(),
+    ts,
     mode: DESIGN_EVOLUTION_MODE,
     evaluated,
     reason,
@@ -1050,6 +1073,7 @@ export function buildReadings(root: string, opts: ReadingsOptions): DesignEvolut
     rm1: { evaluated: rm1Evaluated, reason: rm1Reason, subsystems },
     rm2,
     carrierRecords: rm2.carrierRecords,
+    phaseStaleness: readPhaseStaleness(root, Number.isFinite(now.getTime()) ? { now } : {}),
     reportOnly: true,
   };
 }
@@ -1332,6 +1356,11 @@ function renderHuman(record: DesignEvolutionReadingsRecord): string {
       for (const u of record.rm2.unresolvedPaths) out.push(`    ${u.raw} — ${u.reason}`);
     }
   }
+  // ATTACHED reading (gap-adr008-phase-declaration-staleness-reading): content, never a verdict.
+  const ps = record.phaseStaleness;
+  out.push(`PHASE-STALENESS (ADR-008 declaration, read-only; ⛔ never a gate)`);
+  if (!ps.evaluated) out.push(`  NOT-EVALUATED — ${ps.reason}`);
+  else out.push(`  phase=${ps.phase} declaredAt=${ps.declaredAt} commits=${ps.commitsSince} newGoals=${ps.newGoalsSince?.length ?? 0} days=${ps.daysSince}`);
   return out.join("\n");
 }
 
