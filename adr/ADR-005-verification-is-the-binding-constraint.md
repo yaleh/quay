@@ -28,8 +28,8 @@ When choosing where to spend effort, prefer building **cheap, executable verific
 
 - **Reinforced: verification is the binding constraint; generation was never the bottleneck.**
   Three months of the autonomous loop produced generation in volume (e.g. 10,572 commits on this
-  branch since 2026-09-13T20:35Z alone, `git rev-list --count --since=2026-09-13T20:35 HEAD`); every
-  slowdown worth recording was on the verification side.
+  branch since 2026-09-13T20:35Z alone, `git rev-list --count --since=2026-09-13T20:35 HEAD`); the
+  binding constraints recorded in this re-evaluation (below) are all on the verification side.
 - **"Verification" splits into three binding resources**, each of which can bind independently:
   1. **Verification cost** — the full suite takes 19+ min per round (`tasks/gap-subagent-turn-budget-13min-falsified.md`:
      "suite 实测 19+ min"), and there are many distinct load-flake classes (host-load / timing reds
