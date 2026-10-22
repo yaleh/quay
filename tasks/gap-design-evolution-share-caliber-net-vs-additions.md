@@ -41,7 +41,7 @@ extra:
    - `additionsShare` + `additionsNumerator` / `additionsDenominator`（来自 `git numstat` 的 additions，窗口两端聚合，按同一 module glob 与 central 声明取文件）；
    - 两者都缺时才是 `evaluated:false`（硬规则 3b：不可评估是独立取值，不写 0）。
 2. **finding 文本必须声明口径**：`design-evolution-readings` 产出的 finding（`evolution:<target>:<trigger>` 去重键）在正文里写明用的是 `netShare` 还是 `additionsShare`，不得只写「占比 X%」。
-3. **更正文档**：`ownership-first-refactoring-methodology.md` §13.1 的三行读数改成双口径表；§13.2 的 R1/R2 判据改写为「窗口增长落点占比是唯一判据，出度只是签名」，并补两类签名（dispatch 缝 = 平、断边/依赖倒置 = 环数），刀5 的环 8→7 作为断边的实例。
+3. **更正文档**：`ownership-first-refactoring-methodology.md` §13.1 的三行读数改成双口径表；§13.2 的 R1/R2 判据改写为「窗口增长落点占比是唯一判据，出度只是签名」，并补两类签名（dispatch 缝 = 平、断边/依赖倒置 = 环数），刀5 的环 8→7 作为断边的实例；同时写明「**扩展点只盖叶子、不盖主干**」——叶子注册表不改变编排主干步骤的落点，跨 quay worker 与 claudecodeui driver 两例。
 4. **不改 claudecodeui 侧口径**：对方的 additions-only 与 churn 定义正确，本任务只让 quay 侧与之一致。
 5. **不设阈值**：两种口径都只记录与展示，不引入「超过 X 就报警」（成本结构未测，硬规则 4 推论）。
 
