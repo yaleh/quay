@@ -272,3 +272,11 @@ $ git diff -U0 develop...HEAD -- packages/quay/src/init.ts | grep '^@@'
 - packages/quay/src/init-provider-registry.ts
 - packages/quay/test/init-provider-registry.test.mjs
 - tasks/gap-init-ts-4214-line-slice-with-extension-point-first.md
+
+## Blocker
+
+**2026-10-22T07:46:05.723Z — worker 未落地（exited-not-landed）**
+
+- 未落地原因：step=suite: AssertionError [ERR_ASSERTION]: at least one bin is under-sampled (otherwise the rule is vacuous) [baseline A/B: HARD RED (task-introduced-red) — the task's red set is NOT a subset of the develop baseline red set: added=packages/quay/test/serve-sessions-zh-chrome.test.mjs changed=-]
+- run_id：wk-prod-anchor
+- session_id：8e1a889e-9ef7-47eb-86f0-e6a95c0862d5
