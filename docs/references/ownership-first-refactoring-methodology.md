@@ -248,6 +248,9 @@ DIR-133 裁定 2（「设计调查/切片的 AC 必须含扩展点判据」）�
 ### 臂 2 — 负臂（negative arm）：未注册时不触发
 
 **断言形态**：同一个断言在【未注册】时读数为 `triggered=0`。
+**建议伴生读数**：负臂同时断言 `handlerRegistered=false`（注册表确认无此 handler）。负臂绿有两条路径——
+unregister 真的被 gate 掉了 / unregister 没生效但恰好被正臂拦住；多这一个读数才把两条路拆开，
+让「unregister 真生效」由负臂自己直接证出（claudecodeui 2026-10-22 审阅建议，采纳）。
 **取假方式**：分派器泄漏/无条件调用时，`triggered=0` 必红。
 **是否活性臂**：**否**（它是真空绿的来源，必须配正臂）。⚠️ 负臂单独看，对「注册了但断线」是**假绿**——
 断线时 `triggered=0`，负臂照样绿，只是绿错了理由。因此：**只写负臂、不写正臂 ⇒ 判据无效**，
@@ -277,15 +280,17 @@ GFM 列表项（`## Proposal` 散文、代码围栏、注释里的同名文字�
 脚手架：`plugin/scripts/extension-point-criteria.ts --scaffold --task-id <id> --central <file> --outside <module>`；
 skill：`plugin/skills/extension-point-refactor/SKILL.md`。
 
-### 13.6 两种「占比」口径：`centralΔ` ≠ 中心文件增长占比（不可互引）
+### 13.6 两种「占比」口径：`centralChurnShare` ≠ 中心文件增长占比（不可互引）
 
 **结论：不是同一个量，⛔ 不得互相引用**（claudecodeui 2026-10-22 复核后已撤回原比较）。
 
-- **`centralΔ`（claudecodeui 口径；单 commit churn，含删除）** = (该 commit 内中心文件的 insertions + deletions) ÷
-  (该 commit 全部文件的 insertions + deletions)。实例：driver 那一刀 263 / 1275 = 0.206。
-  它度量「**这次重构**的 churn 有多少落在中心文件」。
+- **`centralChurnShare`（canonical 键名；claudecodeui 口径；单 commit churn，含删除。早期写作 `centralΔ`——
+  `Δ` 易被读成「净变化」，而本量是 insertions+deletions 的 churn，故 canonical 键名取 `centralChurnShare`）** =
+  (该 commit 内中心文件的 insertions + deletions) ÷ (该 commit 全部文件的 insertions + deletions)。
+  实例：driver 那一刀 263 / 1275 = 0.206。它度量「**这次重构**的 churn 有多少落在中心文件」。
 - **中心文件增长占比（quay 口径；时间窗，只计新增）** = 窗口内中心文件新增行 ÷ (中心文件新增行 + 非中心文件新增行)。
   实例：`worker-history` 基线 `2440b52d0` → `ff32d031d`，中心 +4,820 ÷ (4,820 + 1,025) = 82.46%；
-  同一公式在 serve 上得 1.31%（+153 ÷ (+153 + +11,534)）。它度量「**后续增长**回流中心的比例」。
+  同一公式在 serve 上得 1.31%（10-22T00:40Z 记录：中心 +153 ÷ (+153 + +11,534)，分母 = 中心 + 非中心新增行；
+  `docs` 早期「serve 1%」是该值的取整基线）。它度量「**后续增长**回流中心的比例」。
 - **差异的来源**：分子与分母都不同——前者单 commit、删除也计入；后者时间窗、只计新增。
   0.21 回答不了「后续增长回流中心的比例」；两个数不可互相替换，也不可引用对方的数值作基线。

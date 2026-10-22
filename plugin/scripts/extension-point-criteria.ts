@@ -14,7 +14,8 @@
 //
 // The emitted text is the SINGLE template the checker (`extension-point-criteria-check.ts`) judges:
 //   正臂      → `triggered=1` count assertion (the liveness check; no separate one)
-//   负臂      → `triggered=0` when unregistered, and it is INVALID without the counted positive arm
+//   负臂      → `triggered=0` when unregistered (plus the recommended companion reading
+//               `handlerRegistered=false`), and it is INVALID without the counted positive arm
 //   注入泄漏  → a leaking dispatcher makes the SAME assertions red (proves the negative arm is not vacuous)
 //   红线基线  → `wc -l <centre>` red BEFORE the change — a single-shot AC, NOT a standing ratchet
 //
@@ -55,7 +56,7 @@ export function buildScaffold(opts: { taskId: string; central: string; outside: 
 <!-- 扩展点判据四件套 — paste these four items into the task's own Acceptance Criteria via task_write. -->
 
 - [ ] 正臂（活性检查）：从 ${outside} 注册一个新的处理单元、不改 ${central}，运行后读数必须是 ${POSITIVE_COUNT_FORM}（计数断言，不是「handler 存在」）。取假方式：删掉/断线 ${outside} 的注册后同一断言读数为 triggered=0 ⇒ 本条必红。**这条正臂就是活性检查，不另配。**
-- [ ] 负臂：同一个断言在【未注册】时读数为 triggered=0。取假方式：分派器泄漏/无条件触发时该断言必红。⚠️ 负臂必须与一条 counted 正臂（${POSITIVE_COUNT_FORM}）成对；**只写负臂、不写正臂 ⇒ 判据无效**，检查器判 missing-arms。
+- [ ] 负臂：同一个断言在【未注册】时读数为 triggered=0，并同时断言 handlerRegistered=false（注册表确认无此 handler——把「unregister 真被 gate 掉」与「unregister 没生效但恰好被正臂拦住」两条绿路拆开）。取假方式：分派器泄漏/无条件触发时该断言必红。⚠️ 负臂必须与一条 counted 正臂（${POSITIVE_COUNT_FORM}）成对；**只写负臂、不写正臂 ⇒ 判据无效**，检查器判 missing-arms。
 - [ ] 注入泄漏：把 ${central} 的分派器替换成泄漏实现（无视注册表、无条件调用），上一臂/正臂的同一断言必须打红。取假方式：替换后仍绿 ⇒ 该臂没测到分派器。它的作用是证明【负臂断言本身不真空】，不是给正臂兜底。
 - [ ] 红线基线：改动前记录 \`wc -l ${central}\` 的基线（<填基线行数>），并断言改动后的中心文件行数 < 基线；在改动前跑该断言必须为红。取假方式：基线前跑不红 ⇒ 断言没测到那次增长。**本 AC 是单次验收、非常设棘轮**，不是常设检查。
 

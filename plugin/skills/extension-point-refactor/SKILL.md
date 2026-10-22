@@ -24,7 +24,7 @@ positive arm's assertion was RED before the change (that is the falsifiability, 
 | Arm | Assertion | Red when | Liveness? |
 |---|---|---|---|
 | 正臂 positive | a handler registered OUTSIDE the centre is triggered — the count `triggered=1`, never "the handler exists" | the registration/wiring is removed ⇒ `triggered=0` | **yes** (this IS the liveness check) |
-| 负臂 negative | unregistered ⇒ `triggered=0` | the dispatcher leaks / always fires | no — it is vacuous green on its own |
+| 负臂 negative | unregistered ⇒ `triggered=0` (recommended companion: `handlerRegistered=false`) | the dispatcher leaks / always fires | no — it is vacuous green on its own |
 | 注入泄漏 injection leak | replace the dispatcher with a leaking implementation; the SAME assertions must go red | still green ⇒ the arm never tested the dispatcher | no — it proves the NEGATIVE arm is not vacuous |
 | 红线基线 red-line baseline | `wc -l <centre>` is RED before the change | running it before the baseline is green | no — and it is a **single-shot AC, NOT a standing ratchet** (never re-evaluated after the task is done) |
 
@@ -48,7 +48,9 @@ It never touches the task store — the task body is written only through the AB
 Replace each placeholder with a real, runnable assertion. Non-negotiables:
 
 1. **正臂 is a COUNT** (`triggered=1`, or `triggeredN == 1`, …), not an existence check.
-2. **负臂 is paired with the counted 正臂** — never ship the negative arm alone.
+2. **负臂 is paired with the counted 正臂** — never ship the negative arm alone. Assert the companion
+   reading `handlerRegistered=false` as well: it separates "unregister really gated it" from "unregister
+   did nothing but the positive arm happened to catch it".
 3. **注入泄漏** names the leaky dispatcher implementation and the assertion that must redden.
 4. **红线基线** records the pre-change `wc -l <centre>` value and asserts the post-change value is below it.
    Say explicitly that it is a single acceptance check, not a standing ratchet.
