@@ -49,11 +49,13 @@ This is an instance of ADR-006 and a specific application of ADR-005 (cheap veri
         unchanged):
           • `git-lens-selfcheck.sh` is now THREE-VALUED: each fixture prints PASS / FAIL /
             `NOT-EVALUATED(<cause>)`, and the exit code is 0 (all PASS) / 1 (≥1 FAIL) / 2 (no FAIL
-            but ≥1 NOT-EVALUATED). Before invoking an axis it verifies the probe ENTRY loads; a probe
-            that cannot be loaded can therefore no longer produce an exit code that happens to equal
-            the expected one. The KNOWN ROT note's count is corrected: **3** fake PASSes, not 1
-            (`l-d/prose-heavy`, `l-g/cycle-repo`, `l-s/weak-module` — all expected exit 1, which is
-            what MODULE_NOT_FOUND also returns).
+            but ≥1 NOT-EVALUATED). Before invoking an axis it checks that the probe ENTRY exists,
+            and a probe that exists but cannot be LOADED is reported as NOT-EVALUATED too (the
+            readings themselves live in `scripts/git-lens-instrument.mjs`, so the shell stays glue);
+            a probe that cannot be loaded can therefore no longer produce an exit code that happens
+            to equal the expected one. The KNOWN ROT note's count is corrected: **3** fake PASSes,
+            not 1 (`l-d/prose-heavy`, `l-g/cycle-repo`, `l-s/weak-module` — all expected exit 1,
+            which is what MODULE_NOT_FOUND also returns).
           • The L_D and L_G cases point at LIVE instruments instead of the archived probes (⛔ the
             archive was not restored): L_D = `plugin/scripts/phase-declare.ts --ld-reading
             --numstat-file <f>` (the ADR-008 declaration's own `parseNumstat`/`computeRatio`, in a
