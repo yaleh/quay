@@ -207,10 +207,10 @@ import {
 // 载体，append 一行到 `.quay/design-evolution-history.jsonl`。**零 LLM、零 spawn 模型**；读数本身
 // （占比、争用计数）是**内容**，⛔ 不是 failed，也不 ratchet。读数实现全在 design-evolution-readings.ts
 // （本文件只做装配），因为同一段逻辑还要给直接入口（人 / GOAL-909 评价）复用——两处实现必然漂移。
+// ⚠️ `takeEvolutionRound` is the ONE orchestration: read previous → read → judge → persist → append
+// findings. This file only assembles and reports — ⛔ it must not grow a second copy of that order.
 import {
-  buildReadings as buildDesignEvolutionReadings,
-  appendHistoryRecord as appendDesignEvolutionHistory,
-  readPreviousWindow as readDesignEvolutionPreviousWindow,
+  takeEvolutionRound,
   readDesignEvolutionConfig,
   cfgBad as deCfgBad,
   DESIGN_EVOLUTION_ROUTINE_NAME,
@@ -218,8 +218,10 @@ import {
   DESIGN_EVOLUTION_MIN_INTERVAL_MINUTES,
   DESIGN_EVOLUTION_HISTORY_REL,
   DESIGN_EVOLUTION_MODE,
+  EVOLUTION_FINDINGS_REL,
   type DesignEvolutionReadingsRecord,
   type DesignEvolutionSectionConfig,
+  type DesignEvolutionVerdict,
   type SectionRead as DesignEvolutionSectionRead,
   type ContentionPredicates,
 } from "./design-evolution-readings.ts";
@@ -230,6 +232,7 @@ export {
   DESIGN_EVOLUTION_ROUTINE_NAME,
   DESIGN_EVOLUTION_INTERVAL_MIN_DEFAULT,
   DESIGN_EVOLUTION_MIN_INTERVAL_MINUTES,
+  EVOLUTION_FINDINGS_REL,
 } from "./design-evolution-readings.ts";
 
 // INSTRUMENT-DECAY 轨道（gap-instrument-decay-check-unwired-and-blind-to-content-dark）：
@@ -2605,6 +2608,18 @@ export interface DesignEvolutionFactValue {
   /** ADR-008 phase-declaration staleness (gap-adr008-phase-declaration-staleness-reading) — attached
    *  information, embedded verbatim from the carrier's owner. ⛔ Never folded into the Fact's state. */
   phaseStaleness: DesignEvolutionReadingsRecord["phaseStaleness"];
+  /** THIS round's judgment against the previous record (gap-design-evolution-readings-emit-findings).
+   *  ⛔ It is NOT the round's state: a `regression` verdict is the reading's CONTENT (report-only
+   *  stands), and a `not-evaluated` verdict is carried in the value rather than turning the Fact red —
+   *  the Fact's own `not-evaluated` still means 「读数没取到」, which is a different fact. */
+  evolution: DesignEvolutionVerdict;
+  /** Where findings land (the existing routine-findings carrier) and how many this round appended.
+   *  `findingsAppended: 0` with `findingsCount: 0` is 「没有回归」, ⛔ never 「写了但没成」 — the latter
+   *  is `findingsOk:false` (硬规则 3). */
+  findingsPath: string;
+  findingsCount: number;
+  findingsAppended: number;
+  findingsOk: boolean;
   historyPath: string;
   historyAppended: boolean;
   reportOnly: true;
@@ -2617,8 +2632,13 @@ export interface DesignEvolutionRoundOptions {
   configError?: string | null;
   /** Test / alternate-carrier seam; default `<root>/.quay/design-evolution-history.jsonl`. */
   historyPath?: string;
+  /** Test / alternate-carrier seam for the FINDINGS carrier; default
+   *  `<root>/.quay/routine-findings.jsonl` (the existing routine filing track). */
+  findingsPath?: string;
   /** Test / alternate-carrier seam for the worker-outcome ledger. */
   carrierPath?: string;
+  /** Override `design_evolution_readings.dark_streak_rounds` (the config is the production source). */
+  darkStreakRounds?: number;
   /** Pin the window's right end for EVERY subsystem (tests; a one-off historical reading). */
   head?: string;
   topN?: number;
@@ -2653,18 +2673,22 @@ export function runDesignEvolutionRound(root: string, opts: DesignEvolutionRound
   }
 
   const resolvedRoot = path.resolve(root);
-  const previous = readDesignEvolutionPreviousWindow(resolvedRoot, opts.historyPath ? { historyPath: opts.historyPath } : {});
-  const record = buildDesignEvolutionReadings(resolvedRoot, {
+  // ONE orchestration, shared with the DIRECT entry (`takeEvolutionRound`): read the previous record
+  // → take the readings → judge → persist the record (verdict embedded) → append the findings the
+  // judgment justifies. ⛔ This file does not re-implement any of it, and ⛔ it never files a task —
+  // the finding lands in the EXISTING carrier and `routine-file-gate` / `quay:run-routines` decide.
+  const taken = takeEvolutionRound(resolvedRoot, {
     ...(opts.now ? { ts: opts.now } : {}),
     subsystems: opts.config.subsystems,
     topN: opts.topN ?? opts.config.topN,
+    darkStreakRounds: opts.darkStreakRounds ?? opts.config.darkStreakRounds,
     ...(opts.head ? { head: opts.head } : {}),
+    ...(opts.historyPath ? { historyPath: opts.historyPath } : {}),
+    ...(opts.findingsPath ? { findingsPath: opts.findingsPath } : {}),
     ...(opts.carrierPath ? { carrierPath: opts.carrierPath } : {}),
-    windowStartIndex: previous.windowStartIndex,
-    windowSource: previous.windowSource,
     ...(opts.predicates ? { predicates: opts.predicates } : {}),
   });
-  const appended = appendDesignEvolutionHistory(resolvedRoot, record, opts.historyPath ? { historyPath: opts.historyPath } : {});
+  const record = taken.record;
   const value: DesignEvolutionFactValue = {
     mode: record.mode,
     evaluated: record.evaluated,
@@ -2674,23 +2698,39 @@ export function runDesignEvolutionRound(root: string, opts: DesignEvolutionRound
     rm2: record.rm2,
     carrierRecords: record.carrierRecords,
     phaseStaleness: record.phaseStaleness,
-    historyPath: appended.path,
-    historyAppended: appended.ok,
+    evolution: taken.verdict,
+    findingsPath: taken.findingsCarrier.path,
+    findingsCount: taken.findings.length,
+    findingsAppended: taken.findingsCarrier.appended,
+    findingsOk: taken.findingsCarrier.ok,
+    historyPath: taken.history.path,
+    historyAppended: taken.history.appended,
     reportOnly: true,
   };
-  if (!appended.ok) {
-    return { name, value, state: "failed", reason: `history carrier not writable at ${appended.path} — ${appended.error}` };
+  if (!taken.history.appended) {
+    return { name, value, state: "failed", reason: `history carrier not writable at ${taken.history.path} — ${taken.history.error}` };
+  }
+  // 硬规则 3b: 「读数落了、finding 没落」 must NOT look like 「没有回归」. The round FAILED to do its
+  // job even though the reading itself was taken.
+  if (!taken.findingsCarrier.ok) {
+    return {
+      name, value, state: "failed",
+      reason: `findings carrier not writable at ${taken.findingsCarrier.path} — ${taken.findingsCarrier.error} (the reading landed; ${taken.findings.length} finding(s) did not)`,
+    };
   }
   if (!record.evaluated) {
     return { name, value, state: "not-evaluated", reason: `not-evaluated:readings — ${record.reason ?? "the readings could not be taken"}` };
   }
-  // ⛔ A non-zero share or a non-zero contention count is NOT a failure (report-only). The numbers are
-  // IN the value, so a reader can see them — they just never become the round's verdict.
+  // ⛔ A non-zero share, a non-zero contention count, or a `regression` VERDICT is NOT a failure
+  // (report-only). The numbers and the verdict are IN the value, so a reader can see them — they
+  // just never become the round's verdict.
   return { name, value, state: "verified", reason: null };
 }
 
 export interface DesignEvolutionRoutineOptions {
   historyPath?: string;
+  /** Alternate findings carrier (tests); default `<root>/.quay/routine-findings.jsonl`. */
+  findingsPath?: string;
   carrierPath?: string;
   head?: string;
   topN?: number;
@@ -2716,6 +2756,7 @@ export function buildDesignEvolutionRoutine(
         configPresent: read.present,
         configError: read.error,
         ...(opts.historyPath ? { historyPath: opts.historyPath } : {}),
+        ...(opts.findingsPath ? { findingsPath: opts.findingsPath } : {}),
         ...(opts.carrierPath ? { carrierPath: opts.carrierPath } : {}),
         ...(opts.head ? { head: opts.head } : {}),
         ...(opts.topN !== undefined ? { topN: opts.topN } : {}),
@@ -2752,7 +2793,9 @@ export function formatDesignEvolutionAssembly(a: {
 }): string {
   if (a.error !== null) return `design-evolution-readings 例程已装配（${a.error} — 每轮记 failed、零读数零写入；⛔ 不回退到缺省节奏照跑）`;
   if (!a.enabled) return "design-evolution-readings 例程已装配（enabled:false — 每轮记 not-evaluated:disabled，零读数零写入）";
-  return `design-evolution-readings 例程已装配（enabled, interval=${a.intervalMinutes}m，report-only：RM1/RM2 读数 append 到 ${DESIGN_EVOLUTION_HISTORY_REL}；占比高/争用多是该例程的读数，⛔ 不是 failed）`;
+  // 装配行点名`两`个载体：读数去哪、finding 去哪。只写前者会让「这条例程现在会立案」在生产日志里
+  // 不可见（硬规则 9：守与不守在记录上必须可分）。
+  return `design-evolution-readings 例程已装配（enabled, interval=${a.intervalMinutes}m，report-only 读数：RM1/RM2 append 到 ${DESIGN_EVOLUTION_HISTORY_REL}，本轮判定（stable/regression/no-prior/not-evaluated）随记录落盘；regression 时把 finding append 到 ${EVOLUTION_FINDINGS_REL}，由既有 routine-file-gate 决定是否立案；占比高/争用多是读数，⛔ 不是 failed）`;
 }
 
 

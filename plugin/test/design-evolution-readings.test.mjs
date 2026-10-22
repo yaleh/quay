@@ -29,20 +29,33 @@ import path from "node:path";
 import {
   CONTENTION_TOKENS,
   DEFAULT_CONTENTION_PREDICATES,
+  DESIGN_EVOLUTION_DARK_STREAK_ROUNDS_DEFAULT,
   PREDICATE_SELFCHECK_PATH,
   PREDICATE_SELFCHECK_SAMPLE,
   buildReadings,
   createPathIdentityResolver,
+  evolutionFindingKey,
+  evolutionFindingRecord,
+  evolutionFindings,
   globToRegExp,
+  judgeEvolutionRegression,
   lineCountAt,
   measureSubsystem,
   oppositeSignCommits,
   parseDesignEvolutionSection,
+  priorDarkRoundsFor,
+  readDesignEvolutionHistory,
   readStandaloneSection,
   resolveCommit,
   scanContention,
   stripWorktreePrefix,
+  trailingDarkRounds,
+  trailingRm2DarkRounds,
 } from "../scripts/design-evolution-readings.ts";
+import { mainCheckoutRoot } from "../scripts/repo-root.ts";
+// The dedup identity is the EXISTING gate's, not a second parser: AC2 runs the real `findingKey` /
+// `gateFinding` over the rendered candidate text (⛔ no re-implementation in the test either).
+import { findingKey, gateFinding, routineFindingCandidateText } from "../scripts/routine-file-gate.ts";
 
 // ── fixture repo ────────────────────────────────────────────────────────────────────────────────────
 
@@ -644,6 +657,8 @@ test("parseDesignEvolutionSection — kill switch, defaults, floors, and malform
     intervalMinutes: null,
     subsystems: [],
     topN: 10,
+    // The dark-streak POLICY default (⛔ not a measurement) comes from its single definition point.
+    darkStreakRounds: DESIGN_EVOLUTION_DARK_STREAK_ROUNDS_DEFAULT,
   });
   // enabled without interval/subsystems ⇒ documented defaults, not an unset schedule.
   assert.deepEqual(parseDesignEvolutionSection({ enabled: true }).config, {
@@ -651,7 +666,13 @@ test("parseDesignEvolutionSection — kill switch, defaults, floors, and malform
     intervalMinutes: 360,
     subsystems: [],
     topN: 10,
+    darkStreakRounds: DESIGN_EVOLUTION_DARK_STREAK_ROUNDS_DEFAULT,
   });
+  // The one policy knob: an explicit value overrides the default, a malformed one is REFUSED (⛔ a
+  // silent round-trip to 2 would hide the operator's intent — the same rule `interval` follows).
+  assert.equal(parseDesignEvolutionSection({ enabled: true, dark_streak_rounds: 3 }).config.darkStreakRounds, 3);
+  assert.match(parseDesignEvolutionSection({ enabled: true, dark_streak_rounds: 0 }).error, /dark_streak_rounds/);
+  assert.match(parseDesignEvolutionSection({ enabled: true, dark_streak_rounds: "2" }).error, /dark_streak_rounds/);
   assert.match(parseDesignEvolutionSection({ enabled: true, interval: `interval:59m` }).error, /60m floor/);
   assert.match(parseDesignEvolutionSection({ enabled: true, interval: "every(5)" }).error, /interval:<N>m/);
   assert.match(parseDesignEvolutionSection({ enabled: true, top_n: 0 }).error, /top_n/);
@@ -850,4 +871,289 @@ test("oppositeSignCommits — a git read failure is null, not 「没有搬家」
     oppositeSignCommits(REPO_ROOT, "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef", "HEAD", new Set(), () => false),
     null,
   );
+});
+
+// ════════════════════════════════════════════════════════════════════════════════════════════════
+// ⑤ THE JUDGMENT + THE FINDING (tasks/gap-design-evolution-readings-emit-findings)
+//
+// WHAT THIS PINS, in decreasing order of how easy to lose:
+//   ⓐ THE FOUR STATES ARE PAIRWISE DISTINGUISHABLE (硬规则 3b) — `no-prior` and `stable` must not
+//     look alike, and `not-evaluated` must not borrow `triggers: []` from 「没有触发」.
+//   ⓑ THE DEDUP KEY IS MECHANICAL — the same subsystem+trigger keys identically across rounds even
+//     when the rationale is re-worded; nothing else may collapse. This is the measured lesson from
+//     `semantic-dedup-scan` (76 recurring clusters, 0 cross-round prose keys).
+//   ⓒ THE INCREMENT IS THE TRIGGER — a share-up is 「denominator grew AND central grew」, NOT 「the
+//     cumulative share is high」: the real carrier's serve row (1.31% ×8) never triggers.
+//   ⓓ THE DARK INSTRUMENT FILES ITSELF — one dark round is `not-evaluated`, two is a finding.
+//   ⓔ REAL CARRIER (guarded) — the replay lands the share-up on the record the task names, with the
+//     numbers the task names, and does NOT file anything for the `worker` → `worker-history` rename.
+// ════════════════════════════════════════════════════════════════════════════════════════════════
+
+/** A subsystem reading with every numeric field valid; override what a case is about. */
+function subReading(over = {}) {
+  return {
+    name: "s", evaluated: true, reason: null,
+    baseline: "base", head: "HEAD", baselineSha: "b0", headSha: "h0",
+    central: [{ atBaseline: "c.ts", atHead: "c.ts" }], modules: ["*.ts"],
+    centralDelta: 10, nonCentralDelta: 90, denominator: 100, share: 0.1, sharePercent: 10, sharePercentRounded: 10,
+    centralFiles: [{ atBaseline: "c.ts", atHead: "c.ts", baselineLines: 0, headLines: 10, delta: 10 }],
+    moduleFileCount: 2, newModuleFiles: [], maxCentralChangeCommit: null, oppositeSignCommits: [],
+    ...over,
+  };
+}
+
+/** A round record with a taken RM1 and a taken RM2. */
+function round(over = {}, subs = [subReading()]) {
+  return {
+    ts: "T0", mode: "design-evolution-readings-round", evaluated: true, reason: null, head: "h0",
+    rm1: { evaluated: subs.every((s) => s.evaluated), reason: null, subsystems: subs },
+    rm2: {
+      evaluated: true, reason: null, carrierPath: "ledger.jsonl", carrierRecords: 0, windowStartIndex: 0,
+      windowSource: "no-previous-record", topN: 10, pathIndex: [], predicateSelfCheck: { ok: true },
+      unresolvedPaths: [], files: [],
+    },
+    carrierRecords: 0, phaseStaleness: {}, reportOnly: true,
+    ...over,
+  };
+}
+
+const dark = (name, reason = "baseline-unresolvable: nope") =>
+  subReading({ name, evaluated: false, reason, centralDelta: null, nonCentralDelta: null, denominator: null, share: null, sharePercent: null, sharePercentRounded: null, centralFiles: [] });
+
+test("AC1 — the four judgment states are PAIRWISE DISTINGUISHABLE (硬规则 3b)", () => {
+  const first = round({ ts: "T0" });
+  const settled = round({ ts: "T1" });
+  const noPrior = judgeEvolutionRegression(null, first, { prevState: "no-prior-record" });
+  const stable = judgeEvolutionRegression(first, settled, { priorDarkRounds: {} });
+  const regression = judgeEvolutionRegression(
+    round({ ts: "T0" }, [subReading({ centralDelta: 10, nonCentralDelta: 90, denominator: 100 })]),
+    round({ ts: "T1" }, [subReading({ centralDelta: 40, nonCentralDelta: 90, denominator: 130 })]),
+    { priorDarkRounds: {} },
+  );
+  const notEvaluated = judgeEvolutionRegression(round({ ts: "T0" }), round({ ts: "T1" }, [dark("s")]), { priorDarkRounds: {} });
+
+  // ⓐ state is the discriminant, and no two states share it.
+  assert.deepEqual(
+    [noPrior.state, stable.state, regression.state, notEvaluated.state].sort(),
+    ["no-prior", "not-evaluated", "regression", "stable"],
+    "the four states must be four distinct values",
+  );
+
+  // ⓑ `no-prior` ≠ `stable`: BOTH `state` and `priorTs` differ (a reader keyed on either can tell).
+  assert.equal(noPrior.priorTs, null);
+  assert.equal(stable.priorTs, "T0");
+  assert.notEqual(noPrior.state, stable.state);
+
+  // ⓒ `not-evaluated` carries a NON-EMPTY reason and NO `triggers` field spelled `[]`.
+  assert.equal(typeof notEvaluated.reason, "string");
+  assert.ok(notEvaluated.reason.length > 0, "NOT-EVALUATED must name why");
+  assert.equal(notEvaluated.triggers, null, "⛔ `triggers: []` would make 「判不了」 and 「无触发」 the same shape");
+  assert.equal(stable.triggers, null);
+  assert.equal(noPrior.triggers, null);
+
+  // ⓓ `regression` carries a NON-EMPTY trigger list — and only regression does.
+  assert.ok(Array.isArray(regression.triggers) && regression.triggers.length >= 1);
+  assert.equal(regression.triggers[0].trigger, "share-up");
+  assert.equal(regression.triggers[0].target, "s");
+  assert.equal(regression.triggers[0].deltaCentral, 30); // 40 − 10
+  assert.equal(regression.triggers[0].deltaDenominator, 30); // 130 − 100
+  assert.equal(regression.reason, null);
+
+  // ⓔ every state carries a non-null summary, so `stable` is still an assessment on the carrier.
+  for (const v of [noPrior, stable, regression, notEvaluated]) assert.ok(v.summary.length > 0);
+
+  // 8 assertions above are the AC1 surface (state set, priorTs ×2, state ×2, reason, triggers ×3,
+  // trigger fields ×3, summary ×4).
+});
+
+test("AC1b — a share-up needs BOTH the denominator and the central delta to grow (⛔ not a high share)", () => {
+  const prev = (c, n) => round({ ts: "T0" }, [subReading({ centralDelta: c, nonCentralDelta: n, denominator: c + n })]);
+  const curr = (c, n) => round({ ts: "T1" }, [subReading({ centralDelta: c, nonCentralDelta: n, denominator: c + n })]);
+  const judge = (p, c) => judgeEvolutionRegression(p, c, { priorDarkRounds: {} });
+
+  // The real carrier's serve row: 1.31% and NO growth ⇒ stable, even though the share is tiny and
+  // `worker-history` sits at 82.46% forever. A threshold-shaped rule would have filed both.
+  assert.equal(judge(prev(153, 11687), curr(153, 11687)).state, "stable");
+  assert.equal(judge(prev(4820, 1025), curr(4820, 1025)).state, "stable");
+  // Non-central growth only (the decomposition is HOLDING) ⇒ stable.
+  assert.equal(judge(prev(10, 90), curr(10, 290)).state, "stable");
+  // Central growth with a SHRINKING denominator ⇒ NOT a share-up (the declared boundary).
+  assert.equal(judge(prev(10, 290), curr(50, 50)).state, "stable");
+  // Both grew ⇒ share-up.
+  const up = judge(prev(172, 0), curr(288, 0));
+  assert.equal(up.state, "regression");
+  assert.deepEqual([up.triggers[0].deltaCentral, up.triggers[0].deltaDenominator, up.triggers[0].deltaNonCentral], [116, 116, 0]);
+  // A different baseline ⇒ incomparable, ⛔ not a share-up.
+  const rebased = judge(round({ ts: "T0" }, [subReading({ baselineSha: "aaa", centralDelta: 10, nonCentralDelta: 90 })]), curr(288, 0));
+  assert.equal(rebased.state, "stable");
+});
+
+test("AC2 — the dedup key is MECHANICAL: same subsystem+trigger ⇒ same key, whatever the prose", () => {
+  const a = {
+    key: evolutionFindingKey("worker-post-909", "share-up"), target: "worker-post-909", trigger: "share-up",
+    readingTs: "T1", priorReadingTs: "T0", deltaCentral: 116, deltaNonCentral: 0, deltaDenominator: 116,
+    sharePercent: 100, darkRounds: null,
+    rationale: "子系统 `worker-post-909` 本轮相对上一条读数分母增加 `116`、中心增量 `116`。", files: ["plugin/scripts/worker-driver.ts"],
+    suggestedAction: "复核新行是否应落在模块文件", 
+  };
+  // The SAME finding, re-worded ("even the rationale is completely different") — as a fresh-context
+  // round would emit it.
+  const b = { ...a, rationale: "Worker post 909 keeps landing in the central files again this round; 116/116.", suggestedAction: "see the reading" };
+  const c = { ...a, trigger: "dark-streak", key: evolutionFindingKey("worker-post-909", "dark-streak") };
+  const d = { ...a, target: "serve", key: evolutionFindingKey("serve", "share-up") };
+
+  const asFileable = (f) => {
+    const r = evolutionFindingRecord(f, "T1");
+    return { id: r.findingId, kind: r.dupKind, symbols: r.symbols, files: r.files, verdict: r.verdict, rationale: r.rationale, suggestedAction: r.suggestedAction };
+  };
+  const ka = findingKey(routineFindingCandidateText(asFileable(a)));
+  const kb = findingKey(routineFindingCandidateText(asFileable(b)));
+  const kc = findingKey(routineFindingCandidateText(asFileable(c)));
+  const kd = findingKey(routineFindingCandidateText(asFileable(d)));
+
+  assert.equal(ka, kb, "a re-worded rationale must NOT change the key");
+  assert.equal(ka, "symbols:evolution:worker-post-909:share-up", "the key is the existing gate's subject form");
+  assert.notEqual(ka, kc, "a different trigger is a different finding");
+  assert.notEqual(ka, kd, "a different subsystem is a different finding");
+
+  // The gate's DEDUP branch really fires on the second (re-worded) finding.
+  const second = gateFinding(routineFindingCandidateText(asFileable(b)), { existingKeys: [ka], recentCount: 0, K: 3 });
+  assert.equal(second.accept, false);
+  assert.match(second.reason, /^dedup:/, "the rejection must name the dedup arm, not quality or rate");
+  // …and the FIRST one passes the same gate (so the rejection is dedup, not a quality bar we invented).
+  const firstPass = gateFinding(routineFindingCandidateText(asFileable(a)), { existingKeys: [], recentCount: 0, K: 3 });
+  assert.equal(firstPass.accept, true, firstPass.reason);
+});
+
+test("AC2b — the same key is ONE recurrence subject across rounds (the gate's own reading)", async () => {
+  const { recurrenceByKey } = await import("../scripts/routine-file-gate.ts");
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "der-key-"));
+  const file = path.join(dir, "routine-findings.jsonl");
+  const f = {
+    key: evolutionFindingKey("rm2", "dark-streak"), target: "rm2", trigger: "dark-streak",
+    readingTs: "T1", priorReadingTs: "T0", deltaCentral: null, deltaNonCentral: null, deltaDenominator: null,
+    sharePercent: null, darkRounds: 2, rationale: "连续 `2` 轮 `evaluated:false`", suggestedAction: "修仪器", files: [".quay/worker-outcome.jsonl"],
+  };
+  fs.writeFileSync(file, JSON.stringify(evolutionFindingRecord(f, "2026-10-22T00:00:00.000Z")) + "\n", "utf8");
+  fs.appendFileSync(file, JSON.stringify(evolutionFindingRecord({ ...f, rationale: "totally different words" }, "2026-10-22T06:00:00.000Z")) + "\n", "utf8");
+  // ⚠️ `recurrenceByKey` counts DISTINCT runIds, and two different ts produce two runs ⇒ 2 rounds.
+  const rec = recurrenceByKey(file);
+  assert.ok(rec instanceof Map, "a readable carrier is a Map, ⛔ not null");
+  assert.equal(rec.get("symbols:evolution:rm2:dark-streak"), 2, "both rounds are ONE subject");
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test("AC4 — one dark round is NOT-EVALUATED, two consecutive are a `dark-streak` FINDING", () => {
+  const first = round({ ts: "T0" }, [subReading({ name: "w" })]);
+  const oneDark = round({ ts: "T1", evaluated: false, reason: "rm1: w: non-positive-denominator" }, [dark("w", "non-positive-denominator: centralΔ=0 nonCentralΔ=0")]);
+
+  // —— the sequence shortened to ONE round: the verdict cannot be taken, and NOTHING is filed.
+  const single = judgeEvolutionRegression(first, oneDark, { priorDarkRounds: priorDarkRoundsFor([first], ["w", "rm2"]) });
+  assert.equal(single.state, "not-evaluated");
+  assert.equal(single.triggers, null);
+  assert.ok(single.reason.length > 0);
+  assert.deepEqual(evolutionFindings(oneDark, single), [], "one dark round must NOT file anything");
+
+  // —— two consecutive dark rounds: `dark-streak`, and it DOES produce a finding.
+  const twoDark = judgeEvolutionRegression(oneDark, oneDark, { priorDarkRounds: priorDarkRoundsFor([first, oneDark], ["w", "rm2"]) });
+  assert.equal(twoDark.state, "regression");
+  assert.deepEqual(twoDark.triggers.map((t) => `${t.trigger}:${t.target}:${t.darkRounds}`), ["dark-streak:w:2"]);
+  const filed = evolutionFindings(oneDark, twoDark);
+  assert.equal(filed.length, 1);
+  assert.equal(filed[0].key, "evolution:w:dark-streak");
+  assert.match(filed[0].rationale, /连续 `2` 轮/);
+
+  // The threshold is a POLICY knob, and it really moves the answer (⛔ not a constant in disguise).
+  const atThree = judgeEvolutionRegression(oneDark, oneDark, { darkStreakRounds: 3, priorDarkRounds: priorDarkRoundsFor([first, oneDark], ["w", "rm2"]) });
+  assert.equal(atThree.state, "not-evaluated", "with the policy at 3 rounds, two is not yet a regression");
+  assert.equal(DESIGN_EVOLUTION_DARK_STREAK_ROUNDS_DEFAULT, 2);
+
+  // A missing subsystem is reported as `source-missing`, and a RENAME is not a disappearance.
+  const gone = judgeEvolutionRegression(round({ ts: "T0" }, [subReading({ name: "w" })]), round({ ts: "T1" }, [subReading({ name: "other", baselineSha: "zzz" })]), { priorDarkRounds: {} });
+  assert.equal(gone.state, "regression");
+  assert.deepEqual(gone.triggers.map((t) => `${t.trigger}:${t.target}`), ["source-missing:w"]);
+  const renamed = judgeEvolutionRegression(round({ ts: "T0" }, [subReading({ name: "w" })]), round({ ts: "T1" }, [subReading({ name: "w-history" })]), { priorDarkRounds: {} });
+  assert.equal(renamed.state, "stable", "same baseline + same central files ⇒ the SAME reading under a new label");
+});
+
+test("AC4b — the carrier read is THREE-VALUED (missing ≠ empty ≠ unreadable)", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "der-hist-"));
+  const file = path.join(dir, "h.jsonl");
+  assert.equal(readDesignEvolutionHistory(dir, { historyPath: file }).state, "carrier-missing");
+  fs.writeFileSync(file, "", "utf8");
+  const empty = readDesignEvolutionHistory(dir, { historyPath: file });
+  assert.equal(empty.state, "ok", "an empty carrier is a readable carrier with no records");
+  assert.deepEqual(empty.records, []);
+  fs.writeFileSync(file, "not json\n{\"mode\":\"other\"}\n", "utf8");
+  const bad = readDesignEvolutionHistory(dir, { historyPath: file });
+  assert.equal(bad.state, "unreadable", "⛔ must not read as 「没有历史」");
+  assert.match(bad.reason, /none is a round record/);
+  fs.writeFileSync(file, JSON.stringify(round({ ts: "T0" })) + "\nbroken\n", "utf8");
+  const mixed = readDesignEvolutionHistory(dir, { historyPath: file });
+  assert.equal(mixed.state, "ok");
+  assert.equal(mixed.records.length, 1);
+  assert.equal(mixed.malformed, 1, "the unparseable line is REPORTED, ⛔ not silently dropped");
+  // An unreadable previous record is `not-evaluated`, ⛔ never `no-prior` (they are different facts).
+  const v = judgeEvolutionRegression(null, round({ ts: "T1" }), { prevState: "previous-record-unusable" });
+  assert.equal(v.state, "not-evaluated");
+  assert.equal(v.priorState, "previous-record-unusable");
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test("AC3 (real carrier) — the replay lands ONE share-up on the record the task names, with its numbers", (t) => {
+  // The carrier is RUNTIME state (gitignored, so a fresh worktree does not have it). A task worktree
+  // must still exercise this pin, so fall back to the MAIN checkout's copy — read-only, ⛔ no write.
+  const candidates = [path.join(REPO_ROOT, ".quay", "design-evolution-history.jsonl")];
+  try {
+    candidates.push(path.join(mainCheckoutRoot(), ".quay", "design-evolution-history.jsonl"));
+  } catch {
+    /* no main checkout reachable ⇒ the local candidate decides below */
+  }
+  const carrier = candidates.find((p) => fs.existsSync(p));
+  if (!carrier) {
+    t.skip(".quay/design-evolution-history.jsonl is absent from both this worktree and the main checkout");
+    return;
+  }
+  const read = readDesignEvolutionHistory(path.dirname(path.dirname(carrier)), { historyPath: carrier });
+  assert.equal(read.state, "ok", read.reason ?? "");
+  assert.ok(read.records.length >= 7, `expected ≥7 real records, found ${read.records.length}`);
+
+  const verdicts = [];
+  for (let i = 0; i < read.records.length; i++) {
+    const before = read.records.slice(0, i);
+    const names = read.records[i].rm1.subsystems.map((s) => s.name);
+    verdicts.push(
+      judgeEvolutionRegression(i === 0 ? null : read.records[i - 1], read.records[i], {
+        priorDarkRounds: priorDarkRoundsFor(before, names),
+        prevState: i === 0 ? "no-prior-record" : "ok",
+      }),
+    );
+  }
+  const regressions = verdicts.filter((v) => v.state === "regression");
+  assert.ok(regressions.length >= 1, "AC3: the real carrier must contain ≥1 share-up — 0 means the increment metric is wrong");
+
+  const hit = verdicts
+    .map((v, i) => ({ v, rec: read.records[i] }))
+    .find(({ v }) => (v.triggers ?? []).some((x) => x.trigger === "share-up" && x.target === "worker-post-909"));
+  assert.ok(hit, "the share-up must name worker-post-909");
+  assert.equal(hit.rec.ts, "2026-10-22T04:24:51.164Z");
+  const trig = hit.v.triggers.find((x) => x.trigger === "share-up" && x.target === "worker-post-909");
+  assert.deepEqual([trig.deltaCentral, trig.deltaDenominator, trig.deltaNonCentral], [116, 116, 0]);
+  // The findable identity is the mechanical key (no prose involved).
+  assert.deepEqual(evolutionFindings(hit.rec, hit.v).map((f) => f.key), ["evolution:worker-post-909:share-up"]);
+
+  // The `worker` → `worker-history` RENAME at record #1 must NOT read as a vanished subsystem
+  // (identity = baseline + central files). A label-keyed rule would file a task for a config edit.
+  for (const v of verdicts) {
+    for (const tg of v.triggers ?? []) {
+      assert.notEqual(tg.target, "worker", `a rename must not read as source-missing (${tg.trigger})`);
+    }
+  }
+  // And a `stable` round files NOTHING (⛔ no heartbeat spam) while still carrying its assessment.
+  // Pinned to the HISTORICAL record (the carrier is append-only, so this fact cannot drift), ⛔ not
+  // to "the last record", which would make the test fail the first time a real round regresses.
+  const stableIdx = read.records.findIndex((r) => r.ts === "2026-10-22T04:06:32.742Z");
+  assert.ok(stableIdx > 0, "the 04:06:32.742Z record must be in the carrier");
+  assert.equal(verdicts[stableIdx].state, "stable");
+  assert.deepEqual(evolutionFindings(read.records[stableIdx], verdicts[stableIdx]), []);
 });
