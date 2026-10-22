@@ -16,10 +16,10 @@ judgeUnsatisfiableUnannotatedAc（plugin/scripts/ready-pool-check.ts）对整条
 本轮读数（criteria.AC-919.verdict）= `"fail"`，采于 2026-10-22T12:41:06Z，由 meta-driver 机械采集。
 ⚠️ 机制词 `declaresUnsatisfiableByExecutor` 命中【已完成】任务：gap-executor-unsatisfiable-ac-unannotated-burns-rounds.md[done]——问题仍在而任务已 done ⇒ 先查那些任务为何没解决它，⛔ 不要在它们旁边新造一个并行机制。
 
-## AC（draft）
+## Acceptance Criteria
 - [x] `node --no-warnings --experimental-strip-types --input-type=module -e 'import { judgeUnsatisfiableUnannotatedAc as j } from "./plugin/scripts/ready-pool-check.ts"; const L=String.fromCharCode(0x843d,0x5730,0x540e), O=String.fromCharCode(0x53ea,0x80fd,0x7531,0x4eba); const b=t=>"## Acceptance Criteria\n\n- [ ] "+t+"\n\n## Definition of Done\n\n- [ ] done\n"; const ev=j(b("AC1 正向：跑判据 ⇒ exit 0。贴出立案基线（exit 2）与"+L+"绿灯两份输出，以及 git rev-parse HEAD。")); const dc=j(b("AC6 "+L+"实测复查：sqlite3 里 agent 档不再增长")); const hg=j(b("AC9 人评审门：该行"+O+" yale 写入")); const bad=[]; if(!(ev.evaluated&&ev.status==="clean")) bad.push("evidence-clause="+JSON.stringify(ev)); if(!(dc.evaluated&&dc.status==="hit")) bad.push("declaration="+JSON.stringify(dc)); if(!(hg.evaluated&&hg.status==="hit")) bad.push("human-gate="+JSON.stringify(hg)); if(bad.length){console.error("CAUSE=unsatisfiable-AC judge wrong: "+bad.join(" | "));process.exit(1)}; console.log("OK: evidence-clause clean; declaration+human-gate still hit")'` ⇒ 证据指令从句（要求执行者贴出或说明证据的从句）不再判 hit，而两类真声明（实测复查类、人工关卡类）仍判 hit ⇒ 误报消除且不回归真阳性；今天在真实树上实跑时该证据从句同样被判 hit（criterion exit 1），因此这条判据能取假。
 
-## DoD（draft）
+## Definition of Done
 - [x] 上面的判据实跑通过，且判据本身能取假（改坏实现时会红）
 - [x] 若结论是「已有机制在管、只是失败」，则修那个机制，⛔ 不新建并行机制
 
