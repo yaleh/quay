@@ -1,6 +1,7 @@
 ---
 id: gap-worker-fan-in-cross-cutting-hooks-not-covered-by-extension-point
-title: WorkerPool 扩展点只覆盖「结局处理」——GOAL-909 之后新增仍 93.8% 落在中心文件， 因为翻转前后的横切钩子（读数/暗轴）没有注册位
+title: WorkerPool 扩展点只覆盖「结局处理」——GOAL-909 之后新增仍 93.8%
+  落在中心文件，因为翻转前后的横切钩子（读数/暗轴）没有注册位；跨项目同形状：扩展点只盖叶子、不盖主干
 status: todo
 labels:
   - gap
@@ -21,10 +22,17 @@ extra:
 
 **事实四（后果）**：每新增一个横切关注点（读数、暗轴、将来的审计、指标）都要再改一次中心文件，增长回流的结构性成因没有消除。
 
+**事实五（跨项目同形状，claudecodeui 会话 2026-10-22 提供并复核）**：它的 driver 重构给读数开了 registry（叶子），但 `startHost` / `bind` / `submit` / `interrupt` 这些**编排主干步骤**没有注册位，所以 `methodCount` 停在 **86**、`outDegree` 停在 **187**。它自己的表述是「**扩展点只盖叶子、不盖主干**」，与本节事实三互证。两个代码库、两个不同系统、同一形状 ⇒ 按硬规则 12 发生率 ≥2，够格做成机制。
+
+**事实六（判据要分层）**：叶子与主干需要不同的 Π——
+- **叶子注册表**：新变体从外部注册即可生效（现有 AC-915 那类）；
+- **主干步骤注册**：新增一个横切步骤**不修改中心文件**，且正臂断言钩子被调用**恰好 1 次**、负臂断言 **0 次**（计数断言，不是「函数存在」）。
+只把主干步骤抽成几个可替换函数、顺序仍硬编码在中心，那只是 R1（提取），出度大概率还会升；要让「阶段顺序」本身成为可注册的数据（例如一个有序步骤表，中心只负责遍历），才算 R2。
+
 ## Plan
 
 1. **盘点现有硬接线钩子**：列出 `worker-fan-in.ts` 与 `worker-driver.ts` 里位于翻转前后、目前以直接调用形式存在的横切步骤（至少包含 slice-readings 的 baseline/post 与 dark-axis 谓词），逐条给 `file:line` 与调用点。
-2. **引入注册式钩子**：新增一个叶子模块（例如 `plugin/scripts/worker-fan-in-hooks.ts`），导出 `registerFanInHook({ name, phase: "pre-flip" | "post-flip", run })` 与一个唯一的 runner；中心文件只调用 runner 一次，不再逐个点名钩子。
+2. **引入主干步骤注册**（不是叶子注册表）：新增一个叶子模块（例如 `plugin/scripts/worker-fan-in-hooks.ts`），导出 `registerFanInHook({ name, phase: "pre-flip" | "post-flip", run })` 与一个唯一的 runner；**阶段顺序本身作为注册数据**（有序步骤表），中心文件只遍历、不点名任何钩子。只做「抽成几个函数」不满足本条。
 3. **迁移一个真实消费者**：把 slice-readings 的 post 读数改成注册式，证明迁移可行（不是只造一条没人用的 seam）。
 4. **负对照**：未注册的探针钩子必须**不被调用**（计数 0）；已注册的必须被调用一次（计数 1）。两臂都要断言，且正臂断言的是**计数**而不是「函数存在」（`triggered=1`）。
 5. **诚实记账**：本任务自身也会给中心文件加行（runner 调用与类型），在任务里用 `git diff --numstat` 如实贴出，不掩饰。
