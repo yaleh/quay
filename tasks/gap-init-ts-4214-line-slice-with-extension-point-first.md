@@ -253,6 +253,12 @@ $ git diff -U0 develop...HEAD -- packages/quay/src/init.ts | grep '^@@'
 非目标占用的旧行区间：`upgradeConfigContent`（`export function` @旧 `:445`，区间 445–596）、`corruptBackupPathFor`（旧 `:597–606`）。
 **交集：空。** 两段非目标代码一个字节都没动。
 
+### ADR-007 暗轴读数
+
+- L_D archguard: cycles=0 maxScc=1 src_entities_before=1077 src_entities_after=1083 root_pkg_entities_before=320 root_pkg_entities_after=326 root_pkg_files_before=27 root_pkg_files_after=28
+
+口径同 AC6/AC7：`archguard_analyze` + `archguard_summary(outputScope=package, scope=src)` + `archguard_detect_cycles(outputScope=package, scope=src)`，切前/切后各一次，同一 scope key。读数如实记录；root 包实体从 320 增至 326（新增的 registry 模块带进 1 文件 / 6 实体），src 全量实体 1077→1083，环数两侧均 0。
+
 ### 验证
 
 - `bash scripts/test.sh --for-task gap-init-ts-4214-line-slice-with-extension-point-first --allow-thin` → exit 0（scoped 静态检查层 + 相关测试通过）。
