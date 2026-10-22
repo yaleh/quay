@@ -419,7 +419,8 @@
     "relaxed-dispatch-ledger.ts": "放宽派发（任务被 touches 单独挡住超过阈值后放行）到底放行了谁、等了多久、放过的对手是哪些任务与哪些文件—— 每次放宽往 .quay/relaxed-dispatch.jsonl 追加一行（task / blockers / overlapFiles / waitedMinutes / dispatchedAt），使放宽本身从「一个没有读数的策略开关」变成事后可复算的事实（GOAL-037 / AC-363）?",
     "extension-point-criteria.ts": "扩展点重构的判据骨架长什么样 —— 给定中心文件 central 与扩展点 outside，一次 dry-run 打印出 AC/DoD 四臂骨架（正臂=从中心文件之外注册的 handler 被触发，断言必须是计数 triggered=1 而不是「handler 存在」；负臂=未注册时不触发，且必须与 counted 正臂成对，只写负臂判无效；注入泄漏=把分派器替换成泄漏实现后同一断言必红，用来证明负臂不真空；红线基线=改动前 wc -l 中心文件 的断言必红，且它是单次验收、非常设棘轮），stdout 只打印不写任务体（任务体仍只经 Provider ABI task_write 写入），退出码 0 —— 从而让每次设计切片不再手抄同一套判据（tasks/gap-extension-point-refactor-criteria-scaffold；DIR-133 裁定 2；模板正本 docs/references/ownership-first-refactoring-methodology.md §13.5）?",
     "extension-point-criteria-check.ts": "一个设计切片任务的 AC 列表项里，扩展点判据四件套（正臂/负臂/注入泄漏/红线基线）齐备吗 —— 按位置只读任务的 ## Acceptance Criteria GFM 列表项（不读 Proposal 散文、不读代码围栏、不读注释里的同名文字），四态输出 satisfied / missing-arms（逐臂具名；正臂写成「handler 存在」而没有 triggered=1 计数断言也算缺失，weak 记录错误形态） / not-applicable（无 refactor-slice 标签且标题/标签不含拆分/切片/重构语义）/ NOT-EVALUATED（AC 段读不到，独立取值不得与 satisfied 同形），并支持 --scan 对 tasks 目录产出 {evaluated, satisfied, missing, notApplicable} 计数 —— 从而让 DIR-133 裁定 2 第一次有机械检查器而不是只有散文（tasks/gap-extension-point-refactor-criteria-scaffold）?",
-    "slice-readings.ts": "单任务重构切片在【派发那一刻】与【fan-in 之后】的成对结构读数 —— 具体说：同一任务、同一 scope（.quay/config.yml loop.design_evolution_readings.subsystems 的声明）、同一口径下，中心文件行数 / 方法体行数 / 方法壳数 / call out-degree / 目录环 / centralChurnShare / centralSlimRatio 两端各是多少、逐量 delta 是多少，从而让「这一刀把中心文件削掉了多少、方法体搬走了多少」成为可机械回放、可绑定到 a specific task 的证据，而不再靠人记得在两个时点各跑一次 archguard 且两次 scope 可能不一致（tasks/gap-slice-before-after-readings-at-dispatch-and-fanin；人 2026-10-22 立项；读数来源=archguard 查询产物 + git numstat，⛔ 不读被测机制的自报）？"
+    "slice-readings.ts": "单任务重构切片在【派发那一刻】与【fan-in 之后】的成对结构读数 —— 具体说：同一任务、同一 scope（.quay/config.yml loop.design_evolution_readings.subsystems 的声明）、同一口径下，中心文件行数 / 方法体行数 / 方法壳数 / call out-degree / 目录环 / centralChurnShare / centralSlimRatio 两端各是多少、逐量 delta 是多少，从而让「这一刀把中心文件削掉了多少、方法体搬走了多少」成为可机械回放、可绑定到 a specific task 的证据，而不再靠人记得在两个时点各跑一次 archguard 且两次 scope 可能不一致（tasks/gap-slice-before-after-readings-at-dispatch-and-fanin；人 2026-10-22 立项；读数来源=archguard 查询产物 + git numstat，⛔ 不读被测机制的自报）？",
+    "worker-fan-in-hooks.ts": "机械 fan-in 的【横切步骤扩展点】在哪 —— 翻转前后要跑、但【不属于「worker 结局处理」】的那些步骤（读数、暗轴谓词、将来的审计/指标），现在是不是由 worker-fan-in.ts 之外的注册表按【阶段有序步骤表】驱动：registerFanInHook({name, phase, run}) 注册、PHASE_ORDER（pre-flip → flip → post-flip）决定顺序、runFanInHooks 是中心文件唯一的调用点（中心不点名任何钩子），新增一个横切步骤是否【零改动中心文件】；正臂 = 从中心文件之外注册的钩子被触发【恰好 1 次】（计数断言 triggered=1，⛔ 不是「handler 存在」），负臂 = 未注册时 triggered=0 且 handlerRegistered=false，注入泄漏 = 把分派器换成无视注册表的实现后负臂必红；从而让「扩展点只盖叶子、不盖主干」这条在两个代码库（quay worker 与 claudecodeui 驱动）同形的缺陷，第一次有一个可计数、可注入反证的主干扩展点（tasks/gap-worker-fan-in-cross-cutting-hooks-not-covered-by-extension-point；DIR-133 裁定 2 四件套）？"
   },
   "GUARD_OBJECT": {
     "manager-tick-log-check.sh": "runtime:orchestration/manager-tick-log.md",
@@ -824,7 +825,8 @@
     "relaxed-dispatch-ledger.ts": "按需",
     "extension-point-criteria.ts": "按需",
     "extension-point-criteria-check.ts": "按需",
-    "slice-readings.ts": "按需"
+    "slice-readings.ts": "按需",
+    "worker-fan-in-hooks.ts": "每次机械 fan-in（内置两条：dark-axis pre-flip / slice-readings-post post-flip）"
   },
   "INVALIDATION": {
     "verify-plugin-channel-assertions.ts": "失效前提：Claude Code plugin 仍是唯一的发布/安装渠道，且 release.yml 的 verify-plugin-channel 仍是发布门禁（门禁若移到别处，断言实现不变但调用点须同步）；断言依赖的直接量仍存在——VERSION、.claude-plugin/plugin.json、bin/quay --version、项目 .quay/plugin 链接、.quay/config.yml 的 providers.native、/proc/<pid>/cgroup、.quay/server.json、.quay/serve.log、installed_plugins.json。任一量改由另一个载体承载（例如版本改从被测对象自报接口取）⇒ 本条口径需同步，否则会把读不懂误判为合格。",
@@ -1220,7 +1222,8 @@
     "relaxed-dispatch-ledger.ts": "失效前提：两条载体口径不变 —— ①.quay/relaxed-dispatch.jsonl 的五个键 task / blockers / overlapFiles / waitedMinutes / dispatchedAt（放宽记录的唯一形状）；②.quay/worker-outcome.jsonl 的运行段字段 worker_exited_at 与 dispatched_at（本报告的 worker 分钟口径）与 mechanical_fan_in.step 的取值面（失败步口径）。任一字段改名、改单位，或放宽不再经本写入器落盘，本条报出的额外 worker 分钟 / 尝试次数 / fan-in 失败步需同步重算",
     "extension-point-criteria.ts": "失效前提：① DIR-133 裁定 2 仍授权「设计切片的 AC 必须含扩展点判据」，且 docs/references/ownership-first-refactoring-methodology.md §13.5 仍是四臂正本（四臂改名/增删时检查器与骨架需同步）；② 判据载体仍是任务体 ## Acceptance Criteria 的 GFM 列表项（若迁到结构化字段，位置判定需改读新载体）；③ 设计切片的识别仍是 refactor-slice 标签或标题/标签的拆分/切片/重构语义（识别口径改变时 not-applicable 判定需同步）",
     "extension-point-criteria-check.ts": "失效前提：① DIR-133 裁定 2 仍授权「设计切片的 AC 必须含扩展点判据」，且 docs/references/ownership-first-refactoring-methodology.md §13.5 仍是四臂正本（四臂改名/增删时检查器与骨架需同步）；② 判据载体仍是任务体 ## Acceptance Criteria 的 GFM 列表项（若迁到结构化字段，位置判定需改读新载体）；③ 设计切片的识别仍是 refactor-slice 标签或标题/标签的拆分/切片/重构语义（识别口径改变时 not-applicable 判定需同步）",
-    "slice-readings.ts": "失效前提：① scope 仍由 .quay/config.yml 的 loop.design_evolution_readings.subsystems[].name 声明（central/modules 定义、baseline 提交可解析）；② archguard 仍能跑 analyze 并持久化 query/manifest.json + query/<key>/arch.json（实体 sourceLocation 带 startLine/endLine、relations 带 type=call、extensions.tsAnalysis.moduleGraph.cycles 存在），解析不到/产物缺失/实体缺位置一律 evaluated:false ⛔ 不是 0；③ 三个占比类量仍分键分定义（centralChurnShare = 本 HEAD 提交内中心改动行÷全部改动行；centralSlimRatio = 中心删除行÷窗口起点中心行数；时间窗增长占比在 design-evolution-readings.ts RM1，⛔ 三者不可互引）；④ post 仍必须在 worktree 存活期间抓（cleanup 后记 worktree-missing，不回填）。"
+    "slice-readings.ts": "失效前提：① scope 仍由 .quay/config.yml 的 loop.design_evolution_readings.subsystems[].name 声明（central/modules 定义、baseline 提交可解析）；② archguard 仍能跑 analyze 并持久化 query/manifest.json + query/<key>/arch.json（实体 sourceLocation 带 startLine/endLine、relations 带 type=call、extensions.tsAnalysis.moduleGraph.cycles 存在），解析不到/产物缺失/实体缺位置一律 evaluated:false ⛔ 不是 0；③ 三个占比类量仍分键分定义（centralChurnShare = 本 HEAD 提交内中心改动行÷全部改动行；centralSlimRatio = 中心删除行÷窗口起点中心行数；时间窗增长占比在 design-evolution-readings.ts RM1，⛔ 三者不可互引）；④ post 仍必须在 worktree 存活期间抓（cleanup 后记 worktree-missing，不回填）。",
+    "worker-fan-in-hooks.ts": "失效前提：① 阶段顺序仍由 PHASE_ORDER（pre-flip → flip → post-flip）决定、且中心文件只调 runFanInHooks 一次；若顺序被移回中心硬编码（或 runFanInHooks 不再是唯一入口）⇒「顺序是注册数据」这条判据失去对象；② 内置消费者仍经 registerFanInHook 注册在 worker-fan-in-hooks.ts（若某个步骤又被写回 worker-fan-in.ts 直调）⇒ 主干扩展点退化为叶子、中心文件增长回流的结构性成因复现；③ 钩子结果仍是 {ok} 拒绝语义（若改成静默跳过 / 异常吞掉）⇒ 负臂与注入泄漏两臂失去可区分性（硬规则 3b）；④ worker-fan-in-hooks.ts 仍是叶子（⛔ 不 import worker-fan-in.ts）——若反向边出现即成值环，import-graph-check 的 valueSccs 会是第一个读数。"
   },
   "LAST_REAFFIRMED": {
     "verify-plugin-channel-assertions.ts": "2026-10-06",
@@ -1616,7 +1619,8 @@
     "relaxed-dispatch-ledger.ts": "2026-10-17",
     "extension-point-criteria.ts": "2026-10-22",
     "extension-point-criteria-check.ts": "2026-10-22",
-    "slice-readings.ts": "2026-10-22"
+    "slice-readings.ts": "2026-10-22",
+    "worker-fan-in-hooks.ts": "2026-10-22"
   },
   "MATCHING": {
     "verify-plugin-channel-assertions.ts": "position",
@@ -2012,7 +2016,8 @@
     "relaxed-dispatch-ledger.ts": "n/a",
     "extension-point-criteria.ts": "n/a",
     "extension-point-criteria-check.ts": "position",
-    "slice-readings.ts": "enumerative"
+    "slice-readings.ts": "enumerative",
+    "worker-fan-in-hooks.ts": "enumerative"
   },
   "CONSUMER": {
     "verify-plugin-channel-assertions.ts": ".github/workflows/release.yml 的 verify-plugin-channel 步骤（CI 门禁调用点）与发布前本地演练（README「发布前本地演练」）。",
@@ -2050,7 +2055,7 @@
     "ac61-staleness-disposition-check.ts": "谁按：manager 在 AC61 清单处置表态时按；条件=清单项要做 A-1..B-4 的处置判定",
     "anti-drift-touches-check.ts": "谁按：任务 subagent 在落地后核验 Touches 一致性时按；条件=任务落地要验证 touches 精确命中",
     "axis-generator.ts": "谁按：判据作者在定义新判据的测量轴时按；条件=要量化判据的时间/范围轴",
-    "dark-axis-record-check.ts": "谁按：两条 ready→done 落地路径都在 workspace 声明 ADR-007 时自动按——①【机械 fan-in（生产主路径）】plugin/scripts/worker-fan-in.ts 的 runMechanicalFanIn 在 ac-gate 之后、flipTaskDone 之前跑 dark-axis 步，读 worktree 里的任务体并调用本模块同一判定（classifyDarkAxisRecord / taskBodyOf），MISSING 与 NOT-EVALUATED 均 fail-closed 拒翻，每次判定经 gate-event-store 写一条 actor=quay-driver 的 dark-axis GateEvent；②【CLI/MCP lifecycle 动词】packages/quay/src/gate/lifecycle.ts 的 runComplete/runCompleteLoop/runCompleteOutOfBand 经 enforceDarkAxis + 内置 dark-axis 门跑同一判定（actor=quay-cli）——⛔ 不是唯一落地路径（2026-09-14..2026-10-22 实测 816 条 complete 中 795 条来自 driver，lifecycle 动词只覆盖少数）。packages/quay/src/gate/dark-axis-record.ts 是唯一实现 + plugin/scripts/ready-pool-check.ts 在池报告里对每个 ready 任务 import 同一判定（dark_axis 三态清单，派发前可见）+ 人工/agent 按任务 id 直查（node --experimental-strip-types plugin/scripts/dark-axis-record-check.ts <task-id>）；条件=要判定某任务体是否记录了 L_D/L_G 读数或显式『该轴仍暗,理由:…』声明（ADR-007 per-milestone 条款）",
+    "dark-axis-record-check.ts": "谁按：两条 ready→done 落地路径都在 workspace 声明 ADR-007 时自动按——①【机械 fan-in（生产主路径）】plugin/scripts/worker-fan-in-hooks.ts 的 dark-axis 钩子（phase=pre-flip，由 worker-fan-in.ts 的 runMechanicalFanIn 在 ac-gate 之后、flipTaskDone 之前经 runFanInHooks 触发），读 worktree 里的任务体并调用本模块同一判定（classifyDarkAxisRecord / taskBodyOf），MISSING 与 NOT-EVALUATED 均 fail-closed 拒翻，每次判定经 gate-event-store 写一条 actor=quay-driver 的 dark-axis GateEvent；②【CLI/MCP lifecycle 动词】packages/quay/src/gate/lifecycle.ts 的 runComplete/runCompleteLoop/runCompleteOutOfBand 经 enforceDarkAxis + 内置 dark-axis 门跑同一判定（actor=quay-cli）——⛔ 不是唯一落地路径（2026-09-14..2026-10-22 实测 816 条 complete 中 795 条来自 driver，lifecycle 动词只覆盖少数）。packages/quay/src/gate/dark-axis-record.ts 是唯一实现 + plugin/scripts/ready-pool-check.ts 在池报告里对每个 ready 任务 import 同一判定（dark_axis 三态清单，派发前可见）+ 人工/agent 按任务 id 直查（node --experimental-strip-types plugin/scripts/dark-axis-record-check.ts <task-id>）；条件=要判定某任务体是否记录了 L_D/L_G 读数或显式『该轴仍暗,理由:…』声明（ADR-007 per-milestone 条款）",
     "checked-in-write-check.ts": "谁按：run_static_checks（plugin/scripts/runner-static-gate.ts，@static-tier change，对象 plugin/test/ 等）每次全量套件调用按 --changed 判定本次 delta 的测试文件；scoped 门在 delta 命中 plugin/test/** 时同样选中它（gap-suite-glob-universe-fixture-write-toctou 接线，接线前它零调用点=不变式无执行者）。维护者也可手动全表面扫：node --experimental-strip-types plugin/scripts/checked-in-write-check.ts --dir plugin/test；条件=要判定某个【已执行】的测试文件是否在已签入路径下建/删条目（--changed 只看 delta，未改动的测试文件不在其判定面内，这是已知的覆盖边界，空 delta 报 NOT-EVALUATED 而非 PASS）",
     "checker-lib.ts": "谁按：新检查器作者在实现按位置/枚举判定时 import；条件=要复用 matchAtCommandPosition / enumerativeExistence",
     "checker-io.ts": "谁按：已迁移到 DriverResult 的 checker（outer-anchor-check / load-sensitive-release-check / dead-code-after-return-check / adr016-screen-use-check）在判定函数返回 DriverResult 后经 driverResultToExit 映射退出码；条件=一个 checker 的判定结果要收敛到 DriverResult 词表（gap-b4-checker-reuse-driver-result）",
@@ -2169,7 +2174,7 @@
     "tick-core-static-check.ts": "消费方：pre-commit gate（run_doc_checks → precommit-guard.ts）——--check-drift 是 HARD 闸（gap-ac90-delivery-copy-drift-gate 收口），任一副本-正本对漂移（改正本而副本不落地 / 副本单边编辑）即 block 提交；reconcile 前的 --no-block 窗口已关闭",
     "worker-driver.ts": "谁按：inner 派发器在要驱动单个 claude -p worker 跑完整任务时按（AC115 阶段 1 显式 --task）；条件=任务要被机械驱动跑完 select→worktree→develop→suite→ff 并落盘结构化 outcome 到 .quay/worker-outcome.jsonl",
     "worker-pool.ts": "谁按：worker-driver.ts 的 runResidentLoop（const workerPool = new WorkerPool()——重试计数 / needs-human 翻转 / 快速死亡退避 / 派发排除集全部经其方法，⛔ 不直接读写 Map/Set）/ plugin/test/worker-pool.test.mjs（结构面 Object.keys(new WorkerPool()) + 四条转移行为）/ driver-filters.ts（advanceRetryCap / applyNeedsHumanTransition / reconcileNeedsHumanWithDisk / computeDispatchExclusion 的真实实现，本模块委托而非复制）；条件=状态只在类体内以 # 字段声明（AC4），且 worker-driver.ts 零 const|let (retryState|backoffState)（AC2）",
-    "worker-fan-in.ts": "谁按：worker-driver.ts 在需要机械跑一次 fan-in 时按（import runMechanicalFanIn / spawnMechanicalFanIn / acquireFanInLock / scoped 门与 doc-check 命令解析 / scoped-gate 缓存读写等）；条件=driver 接手 worker 的 worktree 跑 锁 → merge develop → delta 判定 → typecheck → scoped门 → suite → ff。",
+    "worker-fan-in.ts": "谁按：worker-driver.ts 在需要机械跑一次 fan-in 时按（import runMechanicalFanIn / spawnMechanicalFanIn / acquireFanInLock / scoped 门与 doc-check 命令解析 / scoped-gate 缓存读写等）；翻转前后的【横切步骤】已迁到 worker-fan-in-hooks.ts（注册式，本文件只在 flip 两侧各一次 runFanInHooks 遍历，不点名任何钩子）；条件=driver 接手 worker 的 worktree 跑 锁 → merge develop → delta 判定 → typecheck → scoped门 → suite → ff。",
     "promotion-driver.ts": "谁按：outer 生产部署启动命令按（常驻进程，promotion-driver.ts 头注释「生产部署时由 outer 的启动命令传 --interval 覆盖」——接线为 AC130 后续/独立任务，本任务只做常驻循环这一半）；条件=生产部署启动常驻进程",
     "outer-driver.ts": "谁按：outer 退役过渡期由 outer/manager 的启动命令起常驻进程（quay driver start --kind outer）承接 outer 纯机械 A/B 段，或 fan-in 验证轮跑 --once 冒烟；条件=outer 的机械 A/B 段需要机械承接（读→报→写载体）",
     "dual-source-check.ts": "谁按：manager 在 AC149-3 无双真相源判定时按；条件=要判定任一职责是否同时有 driver 路径与人工/会话路径且都在用",
@@ -2212,7 +2217,8 @@
     "relaxed-dispatch-ledger.ts": "谁按：要回答「放宽比不放宽多花多少」的人/层 —— 设放宽名额（AC-365/366）与自动收紧（AC-367）之前先读它；条件=需要某条放宽记录的额外 worker 分钟 / 尝试次数 / fan-in 失败步，或需要把放宽组与同期未放宽的对照组在同一口径上比。CLI 动词 --report（--root 指数据根、--json 给机器读）",
     "extension-point-criteria.ts": "谁按：plugin/skills/extension-point-refactor/SKILL.md 的 Phase 1（设计切片任务落 AC 前生成骨架）；条件=要把四臂判据模板生成为该切片的具体断言骨架（stdout dry-run，绝不写任务体；任务体只经 Provider ABI task_write 写入）",
     "extension-point-criteria-check.ts": "谁按：① plugin/skills/extension-point-refactor/SKILL.md 的 Phase 3（设计切片任务落 AC 前由执行者跑）；② 实现设计切片任务的 worker 在逐条验证 AC 时按需跑；③ --scan 模式对 tasks 目录产出生产读数。条件=要判某任务是否满足 DIR-133 裁定 2 的扩展点判据四件套（missing-arms ⇒ exit 1 逐臂具名；NOT-EVALUATED ⇒ exit 3 独立取值，不得与 satisfied 同形）",
-    "slice-readings.ts": "谁按：① worker-driver.ts 的 runOneWorker 在每次 task-worker spawn 前 queueSliceBaseline（fire-and-forget，fail-open；仅当 .quay/config.yml 声明 design_evolution_readings 时）写 baseline；② worker-fan-in.ts 的 runMechanicalFanIn 在 flipTaskDone 成功之后、ff/cleanup 之前跑 --post（worktree 仍存活；无 baseline 则不 spawn），trace 行 slice-readings-post 指向 carrier；③ 人/调查可直跑 node --experimental-strip-types plugin/scripts/slice-readings.ts --baseline|--post --task-id <id> [--scope <name>] [--head <rev>] --root <repo> --json 回放历史提交（非 HEAD 时自建临时 worktree）。条件=要回答「某个任务这一刀的中心文件/方法体/出度变化」或要一份与任务绑定的 before/after 证据。⛔ 只报告不做门：delta 大小不给阈值，也不参与 fan-in 判定。"
+    "slice-readings.ts": "谁按：① worker-driver.ts 的 runOneWorker 在每次 task-worker spawn 前 queueSliceBaseline（fire-and-forget，fail-open；仅当 .quay/config.yml 声明 design_evolution_readings 时）写 baseline；② worker-fan-in-hooks.ts 的 slice-readings-post 钩子（phase=post-flip，由 worker-fan-in.ts 经【唯一一次】runFanInHooks 触发）在 flipTaskDone 成功之后、ff/cleanup 之前跑 --post（worktree 仍存活；无 baseline 则不 spawn），trace 行 slice-readings-post 指向 carrier；③ 人/调查可直跑 node --experimental-strip-types plugin/scripts/slice-readings.ts --baseline|--post --task-id <id> [--scope <name>] [--head <rev>] --root <repo> --json 回放历史提交（非 HEAD 时自建临时 worktree）。条件=要回答「某个任务这一刀的中心文件/方法体/出度变化」或要一份与任务绑定的 before/after 证据。⛔ 只报告不做门：delta 大小不给阈值，也不参与 fan-in 判定。",
+    "worker-fan-in-hooks.ts": "谁按：plugin/scripts/worker-fan-in.ts 的 runMechanicalFanIn 在 ac-gate 之后、ff 之前调用一次 runFanInHooks(ctx, flip)——pre-flip 钩子在 flipTaskDone 之前跑、post-flip 在之后跑；内置两条：dark-axis（ADR-007 per-milestone 谓词，拒翻）与 slice-readings-post（fail-open 观测）。条件=每一次机械 fan-in 落地（生产主落地路径）都经过它。新增横切步骤 = 在 leaf 模块里 registerFanInHook 一次，⛔ 不改 worker-fan-in.ts。plugin/test/worker-fan-in-hooks.test.mjs 从中心文件之外注册探针：正臂 triggered=1 / 负臂 triggered=0 / 注入泄漏使负臂变红。"
   },
   "SUPERSEDED": {
     "send-keys-verified.sh": "REMOVED 2026-08-10 (gap-retired-script-still-callable, human ruling) — superseded by send-keys-reliable.sh under outer ruling F (2026-08-04); its md5 pane-hash criterion is ADR-016-forbidden. Deleted with its test (send-keys-verified.test.mjs) and leak doc (send-keys-verified-test-leaks-tmux-servers.md). Crystallization residue poisons context — the implementation must NOT exist.",
