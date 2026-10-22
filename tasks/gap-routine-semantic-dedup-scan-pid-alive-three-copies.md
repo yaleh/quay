@@ -59,9 +59,34 @@ merge
 - [x] 上面的判据实跑通过
 - [x] ⛔ 探针只立案不执行：本任务若需要跑产出者/修复，由派发链执行，⛔ 不由例程代跑
 
+## Evidence
+**2026-10-22 第三轮（worker，续做 exited-not-landed 的 worktree）复核读数**——分支已在 `d9048855a` 完成实现，本轮只重跑判据 + 处置上轮 suite 红。
+
+- 同一性：`pidAlive(process.pid)=true`、`pidAlive("`+process.pid+`")=true`、`pidAlive(999999999)=false`、`pidAlive(null)=false`、`pidAlive("abc")=false`；`server-state.ts` 与 `discovery-method-routine.ts` 导出的 `pidAlive` 与 leaf **同一个函数对象**（`===` 均为 true）。
+- 探针计数（按位置，不是按关键词）：`grep -rn "function pidAlive" plugin/scripts packages/quay/src` ⇒ 1 处（`kernel/pid-alive.ts:33`）；四文件 `process.kill` 计数 = leaf 1 / server-state 0 / discovery-method-routine 0 / start-drivers 1 —— start-drivers 那一处是 `process.kill(pid, "SIGTERM")`（发信号，不是存活探针），存活判断走 leaf 的 `pidAlive`。
+- `node --experimental-strip-types --test plugin/test/start-drivers.test.mjs` ⇒ 21 pass / 0 fail；`plugin/test/discovery-method-routine.test.mjs` ⇒ 59 pass / 0 fail。
+- `plugin/scripts/import-graph-check.ts` ⇒ PASS（`kernelChecked=true`，`valueSccs=0`）；`npx tsc --noEmit -p packages/quay` ⇒ exit 0。
+
+**上轮 suite 红的真因与处置（`plugin/test/design-evolution-readings.test.mjs` AC2 real-history）**：
+- 症状：`AssertionError: 11639 !== 11644`（`nonCentralDelta`），被 fan-in 的 baseline A/B 判为 task-introduced。
+- 真因：该 AC2 的 **serve 臂没有钉 head**（默认 `HEAD`），而同一测试的 worker 臂钉了 `{head:"ff32d031d"}`。finding 表格的两行本来是**同一次历史读数**；本任务把 `core/server-state.ts` 的实现移进 leaf（净减 5 行）⇒ serve 臂对着移动的树重算，读出 11639。测试自己的头注释写的是「real readings … LOWER BOUNDS」，代码却是等值钉死 —— 头注释与代码不一致是真缺陷。
+- 处置：**给 serve 臂钉上 worker 臂用的同一个 ref** `{head:"ff32d031d"}`（在该 ref 实测 `centralDelta=153 / nonCentralDelta=11644 / share=1%`，与 finding 表格逐字一致；`measureSubsystem` 本就以 `head` 表达「可复现的历史窗口」，且有专门测试覆盖该性质）。这不是放宽：把**移动的 HEAD** 换成**钉死的窗口**，判据从「随任何合法重构漂移」变成「可复现且仍断言表格」。⛔ 没有放宽任何数值。
+- 复核：`node --experimental-strip-types --test plugin/test/design-evolution-readings.test.mjs` ⇒ 41 pass / 0 fail。
+- 附：同轮 suite 里 `plugin/test/task-granularity-advice.test.mjs` AC6 也是红，但它在**develop 基线上就是红**（读的是主检出 `.quay/worker-outcome.jsonl`，与分支无关；fan-in baseline A/B 未把它列为 added），不是本任务引入，未在此处置。
+
 ## Touches
 - `plugin/scripts/discovery-method-routine.ts`
 - `plugin/scripts/start-drivers.ts`
 - `packages/quay/src/core/server-state.ts`
 - `packages/quay/src/kernel/pid-alive.ts`
+- `plugin/test/design-evolution-readings.test.mjs`
 - `tasks/gap-routine-semantic-dedup-scan-pid-alive-three-copies.md`
+
+## Blocker
+
+**2026-10-22T05:59:10.120Z — worker 未落地（exited-not-landed）**
+
+- 未落地原因：step=suite: AssertionError [ERR_ASSERTION]: at least one bin is under-sampled (otherwise the rule is vacuous) [baseline A/B: HARD RED (task-introduced-red) — the task's red set is NOT a subset of the develop baseline red set: added=plugin/test/design-evolution-readings.test.mjs changed=-]
+- run_id：wk-prod-anchor
+
+（处置见 `## Evidence` 末段：真因是该测试 serve 臂未钉 head，已钉 `ff32d031d` 并复跑 41/41 绿。）
