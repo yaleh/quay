@@ -5332,3 +5332,47 @@ test("SSOT — round 落盘的 append 恰好一份实现：worker-driver 的 app
     "负控制失败：谓词对已知为真的样本没命中 ⇒ ② 的 0 处不是读数",
   );
 });
+
+// ── ADR-007 per-milestone hand-off in the dispatch prompts ───────────────────────────────────────
+//    (tasks/gap-mechanical-fan-in-flip-bypasses-adr007-dark-axis-predicate, AC4)
+//
+// The mechanical fan-in now refuses the done flip unless the task body records an L_D/L_G reading or
+// declares the axis still dark WITH A REASON. A worker that has never been told this costs a whole
+// fan-in run, so BOTH prompts (fresh dispatch and continue-after-exited-not-landed) must state the
+// obligation AND both accepted forms. This test pins the two formats, not the paragraph's wording:
+// the reading form (`- L_G archguard: cycles=0`) is what the gate's parser accepts, and the
+// declaration form (`该轴仍暗,理由:...`) is the other accepted discharge.
+test("AC4 (能取假) — buildWorkerPrompt and buildContinueWorkerPrompt both state the dark-axis obligation, the L_D/L_G reading format and the 该轴仍暗,理由: declaration format", () => {
+  const create = buildWorkerPrompt("gap-x", "/r");
+  const cont = buildContinueWorkerPrompt("gap-x", "/r", {
+    worktreePath: "/r-worktrees/gap-x",
+    branchCommits: 1,
+    branchHeadSubject: "wip",
+    acChecked: 0,
+    acTotal: 1,
+    // The prior round was refused by the dark-axis step — the continue prompt must cite it.
+    failureReason: "dark-axis (ADR-007 per-milestone predicate) refused the flip — MISSING: the task body records no L_D/L_G reading",
+    attempts: [],
+  });
+
+  for (const [name, prompt] of [["create", create], ["continue", cont]]) {
+    assert.match(prompt, /该轴仍暗,理由:</, `${name}: the declaration format must be stated`);
+    assert.match(prompt, /L_D/, `${name}: the L_D axis must be named`);
+    assert.match(prompt, /L_G/, `${name}: the L_G axis must be named`);
+    assert.match(prompt, /- L_G archguard: cycles=0/, `${name}: a concrete accepted reading form must be shown`);
+    assert.match(prompt, /LINE START/, `${name}: the position rule (axis at a line start) must be stated`);
+    assert.match(prompt, /dark-axis/, `${name}: the step that enforces it must be named`);
+  }
+
+  // The continue prompt carries the ACTUAL prior refusal, so the worker knows which hole to close.
+  assert.match(cont, /refused BY THE dark-axis STEP/);
+  assert.match(cont, /MISSING: the task body records no L_D\/L_G reading/);
+
+  // Negative control: the clause is conditional — an unrelated prior failure must NOT be dressed up
+  // as a dark-axis refusal (otherwise the note becomes noise on every retry).
+  const unrelated = buildContinueWorkerPrompt("gap-x", "/r", {
+    worktreePath: "/r-worktrees/gap-x", branchCommits: 1, branchHeadSubject: "wip",
+    acChecked: 1, acTotal: 1, failureReason: "suite red — 3 files failed", attempts: [],
+  });
+  assert.doesNotMatch(unrelated, /refused BY THE dark-axis STEP/);
+});

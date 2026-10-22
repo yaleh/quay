@@ -2495,6 +2495,32 @@ function dispatchSetupSignature(root: string, worktree: string, base?: string): 
   return `bash ${setupScript} ${worktree}${baseArg}`;
 }
 
+/** ADR-007 per-milestone hand-off (gap-mechanical-fan-in-flip-bypasses-adr007-dark-axis-predicate).
+ *  The mechanical fan-in now runs the dark-axis predicate immediately before the done flip, so a
+ *  worker that says nothing about L_D/L_G costs a whole fan-in run. The predicate is NOT a keyword
+ *  scan of prose mentions (see `packages/quay/src/gate/dark-axis-record.ts`): the axis token must sit
+ *  at a LINE START and be followed by a concrete numeric quantity, or the body must carry the
+ *  explicit, reasoned declaration. Both accepted forms are spelled out here because the worker is
+ *  the only actor who can discharge the obligation, and it cannot read the gate's code from the task
+ *  body. 创建 prompt 与续做 prompt 共用（单一真相源，硬规则 5b）。 */
+function darkAxisRecordNote(): string {
+  return [
+    `ADR-007 dark-axis record — the mechanical fan-in REFUSES the done flip unless the task body carries ONE of:`,
+    `(a) a numeric L_D/L_G reading: the axis token (\`L_D\` / \`L_G\`) at a LINE START (after at most a bullet/quote/checkbox prefix) plus at least one concrete \`key=value\`/\`key: value\` quantity on that line or its indented continuation lines — e.g. \`- L_G archguard: cycles=0\` or \`- L_D: code:doc=1:8\`; a prose mention of "L_G"/"L_D" is NOT a reading;`,
+    `(b) the explicit declaration \`该轴仍暗,理由:<one-line reason>\` (or \`axis still dark, reason: <one-line reason>\`) — a bare "still dark" with no reason does NOT discharge it.`,
+    `Record whichever is true for this task in the task body through \`task_write\` (never by hand-editing the file).`,
+  ].join(" ");
+}
+
+/** 续做 prompt 里对「上一轮就是被 dark-axis 步拒的」的指名：只在上轮失败原因含 dark-axis 时出现
+ *  （不向所有续做轮次重复一遍通用说明——那会稀释真正需要它的那一轮）。reason 逐字引用，让 worker
+ *  看到 gate 自己的判词（缺读数 / 缺声明 / NOT-EVALUATED）。 */
+function continueDarkAxisNote(state: ContinueWorkerState): string {
+  const reason = state.failureReason ?? "";
+  if (!/dark-axis/i.test(reason)) return "";
+  return `The previous round was refused BY THE dark-axis STEP (verbatim: ${reason}) — add the missing L_D/L_G reading or 该轴仍暗,理由:... declaration to the task body via \`task_write\` before exiting.`;
+}
+
 /** 创建 prompt（无保留 worktree 时的 implement-only prompt，单一真相源）。续做 prompt 见
  *  buildContinueWorkerPrompt；两者由 workerPromptForTask 按「保留 worktree 在不在」择一。
  *  gap-fan-in-driver-mechanical-orchestration：worker 只实现、实现后退出（⛔ 不自己跑 suite / 不调
@@ -2516,6 +2542,7 @@ export function buildWorkerPrompt(task: string, root: string): string {
     `provision it by running \`${dispatchSetupSignature(root, "<the worktree path you created in step 1>", mergeTarget)}\``,
     `(node_modules symlink-to-main + config.yml via worktree-include — the mechanism, not agent-remembering);`,
     `(2) implement the task per its Proposal/Plan/AC/DoD, committing your implementation on the task branch; ${acCheckNote()}`,
+    `${darkAxisRecordNote()}`,
     `(2b) ${preMergeNote(task, root, "<the worktree path you created in step 1>")}`,
     `(2c) ${antiDriftPreExitNote(task, root, "<the worktree path you created in step 1>")}`,
     `${experimentResumeClause(root, task, null) ?? ""}`,
@@ -4230,6 +4257,8 @@ export function buildContinueWorkerPrompt(task: string, root: string, state: Con
     `${continueSuiteLogNote(attempts)}`,
     `${continueRelatednessNote(root, task, attempts)}`,
     `${continueConflictResolutionNote()}`,
+    `${continueDarkAxisNote(state)}`,
+    `${darkAxisRecordNote()}`,
     `Re-provision the existing worktree first (idempotent, no-op if already set up): \`${dispatchSetupSignature(root, wt, resolveTaskMergeTarget(task, root))}\`.`,
     `Run the remaining chain in the existing worktree: (1) continue implementing per the task's`,
     `Proposal/Plan/AC/DoD (⛔ do not redo the ${commits} commits already on the branch); ${acCheckNote()}`,
