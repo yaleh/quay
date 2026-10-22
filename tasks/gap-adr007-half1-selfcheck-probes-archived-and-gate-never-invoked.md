@@ -3,7 +3,7 @@ id: gap-adr007-half1-selfcheck-probes-archived-and-gate-never-invoked
 title: ADR-007 HALF 1 的 enforcement 指向一个确定性失败的仪器：git-lens-selfcheck.sh
   调用的三个探针已归档，7 例里 3 例因 MODULE_NOT_FOUND 的 exit 1 恰好等于期望值而打印 PASS；且 adr-007
   门只能按名手动调用，载体中 0 条事件
-status: todo
+status: ready
 labels:
   - gap
   - defect
