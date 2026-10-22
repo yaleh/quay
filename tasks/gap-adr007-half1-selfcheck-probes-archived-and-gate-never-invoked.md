@@ -162,7 +162,7 @@ workspaceEnforcesDarkAxis(/data/home/yale/work/quay) = true
 
 **DoD 读数**
 - `bash scripts/test.sh --for-task gap-adr007-half1-selfcheck-probes-archived-and-gate-never-invoked --allow-thin` ⇒ `GATE_EXIT=0`（**180 tests / 180 pass / 0 fail**；scoped 静态检查全 PASS，含 `sh-census-check`：embeddedInterpreterLines=**6501 == 6501**——基线已按 AC6 的「相等」语义同轮下调，不再是「≤ 6566」）。
-- `anti-drift-touches-check.ts --task <id> --worktree <wt> --merge-target develop` ⇒ `ANTI-DRIFT OK — 17 actual file(s), all within declared Touches`（修 red 前实测报的正是那 2 个未声明文件，逐条枚举而非一句 HARD FAIL）。
+- `anti-drift-touches-check.ts --task <id> --worktree <wt> --merge-target develop` ⇒ `ANTI-DRIFT OK — … actual file(s), all within declared Touches`（修 red 前它报的正是那 2 个未声明文件，逐条枚举，⛔ 不是一句光秃秃的 HARD FAIL）。⚠️ actual 计数跟着 develop 走（本次两次实测 17 → 再合并最新 develop 后 16），**不变量是「全部落在声明的 Touches 内」**，⛔ 不要把 16/17 当常量。
 - `git diff develop -- archive/` 为空；`archive/2026-09-07-zero-call-scripts/` 未被改动或复活。
 - L_S 两个用例仍在（各自 NOT-EVALUATED），未被删除。
 - `grep -rn 'adr-enforcement' plugin/scripts/worker-fan-in.ts` ⇒ 0 命中（新例程不在 fan-in 路径上）。
