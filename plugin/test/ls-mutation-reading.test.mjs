@@ -46,34 +46,39 @@ const FIXTURE_ROOT = path.join(__dirname, "fixtures", "ls-mutation");
 
 /** Run the CLI against the fixture root and parse its --json record. */
 function runFixture(testFile) {
-  const carrier = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "ls-carrier-")), "readings.jsonl");
-  const res = spawnSync(
-    process.execPath,
-    [
-      "--no-warnings",
-      "--experimental-strip-types",
-      RUNNER,
-      "--root",
-      FIXTURE_ROOT,
-      "--target",
-      "target.mjs",
-      "--functions",
-      "classify,combine,pick",
-      "--test",
-      testFile,
-      "--carrier",
-      carrier,
-      "--json",
-    ],
-    { encoding: "utf8", timeout: 120_000 },
-  );
-  assert.equal(res.status, 0, `runner must exit 0 on a taken reading:\n${res.stderr}`);
-  const record = JSON.parse(res.stdout.trim());
-  assert.ok(fs.existsSync(carrier), "the carrier line is written");
-  const lines = fs.readFileSync(carrier, "utf8").trim().split("\n");
-  assert.equal(lines.length, 1, "exactly one carrier line per run");
-  assert.deepEqual(JSON.parse(lines[0]), record, "the carrier line and the --json record are the same object");
-  return record;
+  const carrierDir = fs.mkdtempSync(path.join(os.tmpdir(), "ls-carrier-"));
+  try {
+    const carrier = path.join(carrierDir, "readings.jsonl");
+    const res = spawnSync(
+      process.execPath,
+      [
+        "--no-warnings",
+        "--experimental-strip-types",
+        RUNNER,
+        "--root",
+        FIXTURE_ROOT,
+        "--target",
+        "target.mjs",
+        "--functions",
+        "classify,combine,pick",
+        "--test",
+        testFile,
+        "--carrier",
+        carrier,
+        "--json",
+      ],
+      { encoding: "utf8", timeout: 120_000 },
+    );
+    assert.equal(res.status, 0, `runner must exit 0 on a taken reading:\n${res.stderr}`);
+    const record = JSON.parse(res.stdout.trim());
+    assert.ok(fs.existsSync(carrier), "the carrier line is written");
+    const lines = fs.readFileSync(carrier, "utf8").trim().split("\n");
+    assert.equal(lines.length, 1, "exactly one carrier line per run");
+    assert.deepEqual(JSON.parse(lines[0]), record, "the carrier line and the --json record are the same object");
+    return record;
+  } finally {
+    fs.rmSync(carrierDir, { recursive: true, force: true });
+  }
 }
 
 // ── AC1: a weak test and a strong test must NOT look alike ────────────────────────────────────────
