@@ -91,6 +91,15 @@ packages/quay/plugin/
 # quality-round.jsonl. Declared in docs/carrier-registry.json (owner:
 # plugin/scripts/design-evolution-readings.ts).
 **/.quay/design-evolution-history.jsonl
+# L_S (behaviour-variance) READING carrier (.quay/ls-readings.jsonl) —
+# gap-ls-product-code-behavior-variance-first-reading. plugin/scripts/ls-mutation-reading.ts appends
+# ONE line per reading (target, mutants, killed/survived/notEvaluated, score, survivors). Runtime
+# state, never git-tracked — the same family as arch-cycle-history.jsonl / quality-round.jsonl (this
+# IS the reading; a readable-but-committable carrier would be a different thing). Declared in
+# docs/carrier-registry.json (owner: plugin/scripts/ls-mutation-reading.ts). Deliberately NOT marked
+# `@quay-runtime-artifact`: its pattern lives under `.quay/`, which quay-init's static `.quay/*`
+# rule already covers in consumer projects (quay-runtime-artifacts.txt's inclusion criterion).
+**/.quay/ls-readings.jsonl
 # resource-DIAGNOSTIC ROUTINE carriers (gap-quality-continuous-resource-diagnostic-routine-mechanical-
 # filter-then-semantic): `.quay/resource-anomaly-findings.jsonl` holds one line per NEW mechanically-
 # flagged anomaly plus one scan-round line per round, and `.quay/resource-diagnostic-model-budget.jsonl`
