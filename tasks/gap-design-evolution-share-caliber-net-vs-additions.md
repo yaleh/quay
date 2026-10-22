@@ -234,3 +234,13 @@ $ bash scripts/test.sh --for-task gap-design-evolution-share-caliber-net-vs-addi
 $ node --experimental-strip-types plugin/scripts/anti-drift-touches-check.ts --task … --worktree … --merge-target develop
 ANTI-DRIFT OK: 3 actual file(s), all within declared Touches (4 glob(s))
 ```
+
+## Blocker
+
+**2026-10-22T08:08:34.943Z — worker 未落地（exited-not-landed）**
+
+- 未落地原因：step=ff: fan-in-ff-merge: suite 证书 — suite_head..tip 恰为本任务的单个 flip-done 提交（身份判定：仅 M tasks/gap-design-evolution-share-caliber-net-vs-additions.md）⇒ 判惰性，⛔ 未调分类器
+fan-in-ff-merge: FF FAILED — ! [rejected]            task/gap-design-evolution-share-caliber-net-vs-additions -> develop (non-fast-forward); not a fast-forward. Retry record written (attempt 1). Return to 无锁段 step 1 (merge develop again — 必须 merge 不得 rebase, AC75), re-judge the delta (step 2) and re-run.
+fan-in-ff-merge: measure ff_only_locked=false
+- run_id：wk-prod-anchor
+- session_id：f1183193-9d62-4d62-8366-9e3b22e89040
