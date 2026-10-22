@@ -3,7 +3,7 @@ id: gap-concern-kind-registry-admission-field
 title: CONCERN_KIND_REGISTRY 每个 kind 带 admission（mechanical /
   semantic-judged）并登记 unencapsulated-state 槽位——AC-921 判据 import
   注册表对象，不扫源码文本（GOAL-911）
-status: ready
+status: done
 labels:
   - gap
 parent: null
