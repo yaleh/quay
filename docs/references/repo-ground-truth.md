@@ -13,6 +13,13 @@ reference data.
   mcp-server.test.mjs:95 `coreBin`). `dist/quay.js` is a gitignored build artifact
   (`packages/quay/scripts/build-dist.mjs`, package-relative). A plan command using
   `quay.js` fails ENOENT.
+  (2026-10-22 correction: "there is NO `packages/quay/bin/quay.js`" and "fails ENOENT" no longer
+  hold. The file was deleted in `3667b02c4` (2026-07-23, TS migration) and re-added in `6349d2f4a`
+  (2026-08-08) as a pure-JS Node-version probe shim for the source-execution path: it runs on any
+  Node, forwards to `bin/quay.ts` under `--experimental-strip-types` on Node >= 22.6, and prints an
+  actionable upgrade error below that. Re-check with `ls packages/quay/bin/` and the file's header
+  comment. `bin/quay.ts` is still the real CLI; CLAUDE.md now gives `node packages/quay/bin/quay.js
+  <cmd>` as the CLI entry point.)
 - `packages/quay-native/bin/quay-native.ts` is the native provider CLI.
 
 ## 2. Node `--test --experimental-test-coverage` output format

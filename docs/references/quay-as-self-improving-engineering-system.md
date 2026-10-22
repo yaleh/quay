@@ -31,7 +31,7 @@
 
 | 角色 | 含义 | 本仓库的具体样本 |
 |---|---|---|
-| **Builder** | 把一个 Goal 拆成 task，派 worker 并行实现，落地到 develop。 | 本仓库自己的 `tasks/*.md`（`quay` 的产品代码）；`CloudCLI`（`README.md`"Quay in practice"：18 天 5,548 commits，一个独立、可公开核验的 fork）。 |
+| **Builder** | 把一个 Goal 拆成 task，派 worker 并行实现，落地到 develop。 | 本仓库自己的 `tasks/*.md`（`quay` 的产品代码）；`CloudCLI`（`README.md`"Quay in practice"：18 天 5,548 commits，一个独立、可公开核验的 fork；该数为 README 落笔时快照，现值读法见第 5 节"跨项目迁移"行的 2026-10-22 更正）。 |
 | **Subject** | 被 Builder 改造的对象——代码本身，连同它的架构。 | 本仓库 `packages/quay/src`、`plugin/scripts` 自身；CloudCLI 自己的代码库。 |
 | **Validator** | 判断 Subject 的改动是否可接受——gate/fan-in 的机械判据 + ArchGuard/语义审查的架构判据。 | `gate/engine.ts::runGate`（机械层）；本文第 3 节引用的两份今日审查文档（语义层）。 |
 
@@ -44,7 +44,7 @@ GOAL-035 的落地说明文字本身就记录了这一点："本 goal 修改的�
 
 **当 Builder 的对象是另一个仓库（CloudCLI）时，角色分离**：Quay 是 Builder+Validator，CloudCLI 的代码是
 Subject。**两种模式目前都是真实运作的（证据充分），不是其中一种已验证、另一种是设想**——`README.md` 的
-dogfooding 数字（84 天、27,008 commits、5,110 个任务分支落地）与 CloudCLI 数字（18 天、5,548 commits）
+dogfooding 数字（84 天、27,008 commits、5,110 个任务分支落地）与 CloudCLI 数字（18 天、5,548 commits；均为 README 落笔时快照，现值读法见第 5 节 2026-10-22 更正）
 是同一条机制在两个不同 Subject 上的独立观测。
 
 **长期能力目标的表述（本文新增，之前没有被这样写过一次）：Quay 的标准不是"能不能建完一个功能"，而是能不能
@@ -127,6 +127,11 @@ dogfooding 数字（84 天、27,008 commits、5,110 个任务分支落地）与 
 | **GOAL-034** | `gate/config/utils.ts` 的纯原语+两个类型下沉 `kernel/gate-run-options.ts`，删除死 re-export shim | 本会话落地，`1cab409f0` | root→`gate/config` 边 1→0；两个死文件/shim 消失；**SCC 维持 4（本刀明确不承诺收缩，经两位独立 peer 会话手工推导确认：收缩需要连带移动真实 config 加载逻辑，ownership 判断上是错的，所以没做）** | ownership 正确的窄切片与能让 SCC 收缩的宽移动可能存在真实张力——本 goal 选择前者，**诚实记录"这次不会让数字变好看"**，不为了指标好看反过来扩大范围。 |
 | **GOAL-035** | WorkerPool "needs-human 终态转移"的决策/副作用从 3 条独立写法收敛到 `applyNeedsHumanTransition` | 本会话落地 | quick-death 路径的转移此前结构上不可观测（不进 `needsHumanResults`、不发 json 事件），现在三条路径行为一致；`kind` 误标（quick-death 被默认标成 `retry-cap`）已修正 | 两个真实实例（stop-terminal 路径 + retry-cap 路径）已经共享同一段批处理代码，第三个（quick-death）不跟进才是异常——"第二个真实实例才升格为模式"原则的反向确认：抽函数不是提前设计,是补齐已经存在的收敛。落地后还牵出一个真实的尾部缺陷（`gap-ac356`：判据自己的子检查结构上恒假，被两轮独立复核修好）。 |
 
+（2026-10-22 更正：上表**只收录到 GOAL-035（2026-10-10）为止**，不是完整清单。当前全集以 quay MCP
+`goal_list`（`kind: goal`）或 `quay goal list` 为准，不在此维护第二份。截至 2026-10-22 该读数中此后已 `achieved` 的非演练 Goal：
+GOAL-036、GOAL-037、GOAL-906、GOAL-907、GOAL-908、GOAL-909、GOAL-910（各自范围/合并提交/实测读数见该 Goal 记录本身，
+未按上表格式逐条复核，故不补表行）；GOAL-901~905 是 goal 分支流程演练（drill，标题自述"不是真实开发方向"），不属本索引。）
+
 **没有收录的**：本会话今天产出的两份审查文档（第 2 节已如实声明）提出的候选切片——它们**还不是** Goal，
 不满足本节"已 achieved 且已并入 develop"的收录门槛。
 
@@ -145,7 +150,7 @@ acceptance rate、后续任务成功率、重复率等），**本文不重复，
 | **复杂度增长** | ArchGuard 体量/SCC/耦合矩阵随时间的轨迹（而不是单点快照） | 本文第 3 节引用的两次独立审计给出了一个时间点的快照；没有跨时间的轨迹数据 |
 | **演化成本** | 落地一个等价大小的切片，所需的 task 数/worker 轮次/人工裁定次数，是否随 harness 成熟而下降 | GOAL-030~035 六次样本理论上可以互相对照，但本文不虚构这个对照——没有人做过这项统计 |
 | **故障恢复** | 一次改动引入的回归，被发现到被修复的时间/轮次（GOAL-035 自己的 `gap-ac356` 尾部缺陷是一个真实样本：从"achieved"到"发现判据恒假"到"两轮复核修好"全程有时间戳可查） | 有单个真实样本，没有汇总统计 |
-| **跨项目迁移** | 同一条机制/原则搬到第二个项目，是否只需要重新校准参数，而不需要重新发明 | **这是本仓库目前唯一有真实、独立可核验数据的一项**——CloudCLI（`README.md`"Quay in practice"）是同一条 Builder 机制作用在一个完全独立仓库上的真实样本（18 天、5,548 commits，公开 fork）；本会话内 archguard 插件会话以只读方式独立复核了本仓库的 ArchGuard 读数，是"评价机制本身也能跨会话复用"的一个小样本。**仍然不是**"给定一个新项目，发现它需要哪些 driver"（既有正本 §7.5 已经点名这是零实现的部分，本文不重复声明已解决）。 |
+| **跨项目迁移** | 同一条机制/原则搬到第二个项目，是否只需要重新校准参数，而不需要重新发明 | **这是本仓库目前唯一有真实、独立可核验数据的一项**——CloudCLI（`README.md`"Quay in practice"）是同一条 Builder 机制作用在一个完全独立仓库上的真实样本（18 天、5,548 commits，公开 fork——**这是 `README.md` 落笔时的快照**；2026-10-22 更正：现值用 `git -C /data/home/yale/work/claudecodeui log --author='Observer Probe' --oneline \| wc -l` 现取，截至 2026-10-22 = 9595，首末提交 2026-09-22 → 2026-10-22）；（2026-10-22 补充：跨项目迁移现在还有**结构性读数**，不只是提交数——plantuml-js `4327862`（"sink shared core … into src/foundation leaf"）与 `feba9f3`（"… break layout<->render cycle"），2026-10-22，均在其 `develop` 上；claudecodeui 2026-10-20 一批破环提交，如 `ac882d75d`（"break the shared→feature layering inversion"）、`8c5bbc402`（"break the chat↔settings and composer↔transcript cycles"），均在其 `develop` 上。复核：`git -C <repo> log -1 <sha>`；环结构前后读数需在该仓库跑 ArchGuard `detect_cycles` 现取。）本会话内 archguard 插件会话以只读方式独立复核了本仓库的 ArchGuard 读数，是"评价机制本身也能跨会话复用"的一个小样本。**仍然不是**"给定一个新项目，发现它需要哪些 driver"（既有正本 §7.5 已经点名这是零实现的部分，本文不重复声明已解决）。 |
 
 **正负样本存档**：今天的 `ownership-first-architecture-review-2026-10-10.md` 的"Explicitly rejected or
 downgraded"表 和 `quay-domain-model-2026-10-11.md` §7 末尾的同类表，是本仓库**第一次**把"被否定的重构提案"
