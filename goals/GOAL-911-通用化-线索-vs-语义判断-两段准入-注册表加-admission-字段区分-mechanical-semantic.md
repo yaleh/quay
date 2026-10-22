@@ -2,9 +2,16 @@
 id: GOAL-911
 title: 通用化「线索 vs 语义判断」两段准入：注册表加 admission 字段区分 mechanical /
   semantic-judged，unencapsulated-state 作为第一个语义准入 kind 端到端跑通
-status: draft
+status: active
 kind: goal
 origin: 架构分析会话 2026-10-22：人裁定「未封装」的判断必须是语义的、机械信号只做线索，并把这个「线索 vs 语义判断」的分离做成通用结构而非一次性特判
+activatedAt: 2026-10-22T09:57:00.396Z
+statusLog:
+  - at: 2026-10-22T09:57:00.396Z
+    from: draft
+    to: active
+    actor: goal-cli
+    reason: ""
 ---
 ## 背景
 
