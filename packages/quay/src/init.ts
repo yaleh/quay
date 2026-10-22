@@ -52,6 +52,19 @@ import {
   type ProjectScopedVersionReading,
   type UserScopedInstallReading,
 } from "./loaded-version.ts";
+// The fresh-install provider EXTENSION POINT (gap-init-ts-4214-line-slice-with-extension-point-
+// first): every provider-specific line of the `providers:` section is rendered by a descriptor
+// registered in init-provider-registry.ts. ⛔ This file must never name a concrete provider here —
+// adding one means registering a descriptor over there, with no edit to the centre.
+import {
+  PROVIDER_ENTRIES_HELP,
+  renderProviderSection,
+  type ProviderInitRegistry,
+} from "./init-provider-registry.ts";
+
+// Kept as a RE-EXPORT because it was this module's public surface before the slice (its unit tests
+// and any external caller import it from here) — the implementation lives in the registry module.
+export { mcpEntryForProvider } from "./init-provider-registry.ts";
 
 // ── Three-state classification of an existing `.quay/config.yml` ────────────────────────────────────
 // (SPEC-quay-init-reconcile-and-native-implementation-2026-09-18 §3.3; AC1.)
@@ -932,11 +945,6 @@ export interface InitOptions {
   allowSourceCheckoutLink?: boolean;
 }
 
-// These strings contain characters that confuse Node 26's TypeScript parser
-// when embedded in template literals, so they are stored as raw strings.
-const GH_TOKEN_REF = "$GITHUB_TOKEN";
-const GH_TOKEN_SHELL_REF = "${GITHUB_TOKEN}";
-
 /**
  * `LOOP_VERSION_DEFAULTS` as the fresh-install template must emit it — the table verbatim, except
  * that `board` is bound to THIS config's provider.
@@ -951,32 +959,6 @@ const GH_TOKEN_SHELL_REF = "${GITHUB_TOKEN}";
  */
 function loopDefaultsFor(providerId: string): Array<[string, unknown]> {
   return Object.entries(LOOP_VERSION_DEFAULTS).map(([k, v]) => [k, k === "board" ? providerId : v]);
-}
-
-/**
- * Pick the provider MCP server launch entry based on the RESOLVED provider
- * path form (gap-init-scaffolds-mcp-entry-to-raw-ts-fails-on-installed-copy).
- *
- * - INSTALLED form (the provider path contains a `node_modules` segment —
- *   e.g. `./node_modules/quay-native`, an npm-installed copy): launch the
- *   bundled dist ESM `./dist/quay-native.js` — the SAME target package.json's
- *   `bin` field points at. Raw `.ts` under node_modules is refused by Node
- *   ≥23.7 (`ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING`), so the bundled JS
- *   is the only runnable form there.
- * - DEV form (the provider path is inside the repo tree — e.g.
- *   `./packages/quay-native` or a `../../...` repo-relative path): keep the
- *   raw TypeScript entry `./bin/quay-native.ts`, which runs fine outside
- *   node_modules.
- *
- * The Core's provider launcher resolves mcp_entry relative to provider.path,
- * so both forms are `./`-relative within the provider package root.
- */
-export function mcpEntryForProvider(providerPath: string): string {
-  const segments = providerPath.split(/[\\/]+/);
-  const installed = segments.includes("node_modules");
-  return installed
-    ? '["node", "./dist/quay-native.js", "mcp"]'
-    : '["node", "./bin/quay-native.ts", "mcp"]';
 }
 
 /**
@@ -1003,6 +985,13 @@ export function generateConfigContent(opts: {
    * pure-unit callers use.
    */
   root?: string;
+  /**
+   * The provider-descriptor table the `providers:` section is rendered from. Defaults to the
+   * process-wide registry (`PROVIDER_INIT_REGISTRY`) — the production path. A caller may inject a
+   * different table; that is also the seam the injection-leak arm of the extension-point criterion
+   * uses (replace the lookup table, the positive arm must go red).
+   */
+  registry?: ProviderInitRegistry;
 }): string {
   const { providerId, providerPath, isNode, isGo } = opts;
   const values = opts.values;
@@ -1018,49 +1007,13 @@ export function generateConfigContent(opts: {
     "# " + ruleLine(69),
     "# Section 1: Providers — where tasks live",
     "# " + ruleLine(69),
-    "# quay is provider-agnostic: tasks can live on a local filesystem",
-    "# (native provider), in GitHub Issues (github provider), or in any",
-    "# backend that implements the Provider ABI.",
-    "#",
-    "# Each provider entry declares:",
-    "#   enabled: true/false     — exactly ONE provider must be enabled",
-    "#   path: <dir>             — provider package root (relative to workspaceRoot). OPTIONAL for the",
-    "#                             native provider: Core resolves it from the plugin root when omitted.",
-    "#   tasks_dir: <dir>        — where task files live (relative to workspaceRoot)",
-    "#   mcp_entry: [cmd, args]  — how to launch the provider's MCP server (relative to provider.path).",
-    "#                             OPTIONAL for the native provider (Core derives it from the plugin root);",
-    "#                             REQUIRED for every other provider.",
-    "#   env: <map>              — environment variables passed to the MCP server process",
-    "#   default_task_status: todo|ready  — status for new tasks when none is specified (default: todo)",
-    "#",
+    ...PROVIDER_ENTRIES_HELP,
     "providers:",
-    "  " + providerId + ":",
-    "    enabled: true",
-    // ⛔ NO `path:` / NO `mcp_entry:` for the NATIVE provider (gap-project-quay-pointer-is-init-plugin-
-    // root-and-version-records-derive-from-it (D), human ruling 2026-10-06): a declared path freezes
-    // the runtime to the install-cache version that wrote it, so a plugin upgrade never takes effect.
-    // Core resolves the native binding from its OWN plugin root (`plugin-root.ts`) — the single
-    // resolver — and the shipped shell writer emits the same shape. The two fresh-install writers
-    // disagreeing about these two keys is exactly the drift AC-331 removes.
-    // (`mcpEntryForProvider` below remains the ONE chooser for a provider that DOES need a declared
-    // entry — e.g. a custom or github provider — and is unit-tested directly.)
-    "    tasks_dir: " + JSON.stringify(abs("tasks")),
-    "    env:",
-    "      QUAY_NATIVE_TASKS_DIR: " + JSON.stringify(abs("tasks")),
-    "      QUAY_NATIVE_GOAL_DIR: " + JSON.stringify(abs("goals")),
-    "      QUAY_NATIVE_ADR_DIR: " + JSON.stringify(abs("adr")),
-    "      QUAY_NATIVE_META_DIR: " + JSON.stringify(abs("meta")),
-    "    # default_task_status: todo   # uncomment to change default status for new tasks",
-    "",
-    "  # GitHub provider (uncomment to use GitHub Issues as your task store):",
-    "  # github:",
-    "  #   enabled: false",
-    "  #   path: \"./node_modules/quay-github\"",
-    "  #   tasks_dir: \"./tasks\"",
-    "  #   mcp_entry: [\"node\", \"./bin/quay-github.mjs\", \"mcp\"]",
-    "  #   env:",
-    "  #     GITHUB_TOKEN: \"" + GH_TOKEN_SHELL_REF + "\"",
-    "  #     GITHUB_REPO: \"owner/repo\"",
+    // ⛔ The provider entries are NOT spelled out here any more (gap-init-ts-4214-line-slice-with-
+    // extension-point-first): each one is a `ProviderInitDescriptor` registered in
+    // init-provider-registry.ts, rendered from the table below. Adding a provider = registering a
+    // descriptor there; this call site does not change.
+    ...renderProviderSection({ providerId, providerPath, abs, registry: opts.registry }),
     "",
     "# " + ruleLine(69),
     "# Section 2: Gates — automated quality checks",

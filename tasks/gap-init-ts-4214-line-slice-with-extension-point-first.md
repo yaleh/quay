@@ -2,7 +2,7 @@
 id: gap-init-ts-4214-line-slice-with-extension-point-first
 title: init.ts 4214 行 / 79 exports 是根包最大的单文件——先按 DIR-133 裁定 2 定「新 provider
   注册在哪」， 再做一刀带扩展点判据的切片
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -265,6 +265,23 @@ $ git diff -U0 develop...HEAD -- packages/quay/src/init.ts | grep '^@@'
 - `npx tsc --noEmit -p tsconfig.json` → exit 0。
 - `node --test packages/quay/test/init.test.mjs` → 90/90 pass。
 - `node --test packages/quay/test/init-provider-registry.test.mjs` → 8/8 pass。
+
+### 环境红诊断（2026-10-22 本轮复跑，非本任务引入）
+
+本轮 suite 的两个红都落在本任务 delta **之外**（两个文件与 develop 逐字节相同：`git diff develop HEAD -- <file>` 为空）。逐个隔离复跑后的定位：
+
+1. **`packages/quay/test/serve-sessions-zh-chrome.test.mjs` AC1⑥（整页 byte-identity）——套件并发下的抖动，隔离复跑 4/4 绿**（与 `plugin/test/task-granularity-advice.test.mjs` 同跑也绿）。
+   机制（由代码路径 + 字节数双向确定）：`/sessions` 页内嵌 `obsNote(readSessions(...).status, reason)`，`readSessions` 调 `claude agents --json`（`packages/quay/src/observation.ts:3135`，`timeoutMs: 20_000`）。成功 ⇒ `status:"ok"` ⇒ `obsNote` 返回空串（长度 0）；128 lane 负载下该命令超时被杀 ⇒ `status:"empty"` + reason ⇒ 页面多出**恰好 87 字符**的 `<p class="meta"><strong>未接入/无数据</strong> — claude agents --json 未能运行（spawn 失败或超时被杀）</p>`。失败输出里两侧长度差正是 87（27920 − 27833）。两次 HTTP 往返各自独立读一次 live 外部命令，故该断言依赖「这次超时没有」，与 `?lang=en` 无关。
+2. **`plugin/test/task-granularity-advice.test.mjs` AC6 (production)——develop 侧数据边界红，隔离复跑必红**。该臂读**主检出**的 `.quay/worker-outcome.jsonl`（`repo-root.ts` 的 `mainCheckoutRoot()` = `/data/home/yale/work/quay`），与分支内容无关。实测 10 个尺寸 bin 的样本数（`since=2026-09-16`，measured=678）：
+
+   ```
+   <100=119  100–150=58  150–250=94  250–400=104  400–600=107
+   600–1000=102  1000–1500=50  1500–2000=23  2000–3000=10  3000+=11
+   ```
+
+   最小 bin（2000–3000）已达 10 ⇒ `bins.some(b => b.insufficient)` 恒假 ⇒「至少一个 bin 欠采样」这条断言永久红。这是 **data-quota 边界翻转**（数据攒够后判据自己变红），修法在判据/数据窗口侧，不在本切片。
+
+两条都不在 `## Touches` 内，也都不由本切片引起；本切片的验证（scoped 门 exit 0、registry 8/8、`init.ts` 4167 行）与上一轮一致。
 
 ## Touches
 
