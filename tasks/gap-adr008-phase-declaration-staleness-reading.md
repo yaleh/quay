@@ -2,7 +2,7 @@
 id: gap-adr008-phase-declaration-staleness-reading
 title: ADR-008 phase 声明自 2026-09-13 以来未变而无人可见——加一个只读的「距上次声明」读数（提交数 / 新 goal 数 /
   天数）进既有 quality-round Fact；不做自动切换（观察项）
-status: todo
+status: ready
 labels:
   - gap
   - observation
