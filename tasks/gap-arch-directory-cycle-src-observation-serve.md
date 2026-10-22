@@ -2,7 +2,7 @@
 id: gap-arch-directory-cycle-src-observation-serve
 title: 断开 e7e84366a/d21a018aa 引入的目录环 {., observation, serve}：server-state 下沉
   core/、observation 直取 core/types、start-end-like 下沉 kernel/（GOAL-910 AC-916）
-status: ready
+status: done
 labels:
   - gap
   - defect
