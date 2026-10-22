@@ -2,6 +2,10 @@
 
 **Status:** live reference / design hypothesis — **全文零实现**，是把既有已验证框架的若干环节，第一次
 显式切成可分别设计、可分别落地的具名角色与载体。不是科学定理，不创建 Goal，不改运行代码。
+（2026-10-22 更正：「全文零实现」已不成立。**Evidence Store 已有生产载体** `.quay/architecture-evidence-store.jsonl`
+（2026-10-11 起，截至 2026-10-22 `wc -l` = 378），发现层载体 `.quay/arch-discovery-findings.jsonl`（同日 `wc -l` = 166）；
+**独立 Evaluator 实际上仍缺、Learning Store / Evolution Planner 仍零实现**——现状读法见 §2.2、§2.6 与第 9 节表内的更正注，
+总读数以 `node --experimental-strip-types plugin/scripts/discovery-closed-loop-report.ts --host=local=<repo>` 为准。）
 
 **本文不重复、只指路的既有正本：**
 - 六步 bootstrap 管线（discover→propose→offline replay→shadow→limited-proposal→gated-activation）、
@@ -37,8 +41,8 @@ GOAL-030~036 之外的任何任务应该做什么；不对"端到端架构自举
 | 本文层级 | 对应 harness 正本 §0.4 行 | 当前状态 |
 |---|---|---|
 | **L1 Execution** | Task execution（单个任务 ready→done） | **真实运作** |
-| **L2 Architecture Evolution**（本文主体，第 1-8 节） | Goal/investigation decomposition + 本文新增的 Evidence Store/Investigator/Planner/Evaluator 具名阶段 | Goal 层**真实运作**（GOAL-030~036）；本文新增的具名角色**设计假设，零实现** |
-| **L3 Methodology Evolution** | Meta-driver proposal + Meta-driver builder | Meta-driver **真实但窄域且当前故障**（见 harness 正本 §6）；Meta-driver builder **零实现** |
+| **L2 Architecture Evolution**（本文主体，第 1-8 节） | Goal/investigation decomposition + 本文新增的 Evidence Store/Investigator/Planner/Evaluator 具名阶段 | Goal 层**真实运作**（GOAL-030~036）；本文新增的具名角色**设计假设，零实现**（2026-10-22 更正：Evidence Store 已有载体，Investigator 有部分机件；Planner/Evaluator/Learning Store 仍缺，见文首更正注） |
+| **L3 Methodology Evolution** | Meta-driver proposal + Meta-driver builder | Meta-driver **真实但窄域**，~~且当前故障~~（2026-10-22 更正：已于 2026-10-09 修复，见 harness 正本 §6 更正注）；Meta-driver builder **零实现**（2026-10-22 复核仍成立） |
 
 **本文的定位**：L2 层目前只有"Goal 怎么切、怎么落地"这一半是真实机制（`branch:true` Goal 标准流程），
 "观察怎么变成结构化、可复核、可对账的证据"这一半——目前只以**人工撰写的 prose 审查文档**（本文开头列出的
@@ -89,6 +93,11 @@ ArchGuard MCP 全部分析/依赖/重复/环检测工具、`git log`/`git archiv
 
 ### 2.2 Architecture Evidence Store — 设计假设，零实现
 
+（2026-10-22 更正：已有生产载体 `.quay/architecture-evidence-store.jsonl`，首末记录 `ts` 为 2026-10-11 → 2026-10-21，
+截至 2026-10-22 `wc -l` = 378。按 `jq -r .kind` 分：evidence / hypothesis / counterexample / experiment / outcome / repair_attempt
+六类（分布用该命令现取，不在此抄）。读者/写者：`grep -rl architecture-evidence-store plugin/scripts`。下文"现状缺口"一段记录的是
+2026-10-11 之前的状态，保留为历史；字段设计是否被逐条兑现（如 `provenance` 在 hypothesis 记录上为 null）本更正不作裁定。）
+
 **现状缺口**：今天的"证据"以两种形式存在——ArchGuard 工具调用的原始返回（短命，不落盘）与人工撰写的
 prose 审查文档（`ownership-first-architecture-review-2026-10-10.md`、`quay-domain-model-2026-10-11.md`
 本身）。后者已经按文档自己的惯例标注了 FACT/JUDGMENT/ASSUMPTION，但**这个标注活在散文里，不可查询、
@@ -113,6 +122,10 @@ prose 审查文档（`ownership-first-architecture-review-2026-10-10.md`、`quay
 问题。
 
 ### 2.3 Semantic Investigator — 设计假设，零实现，但有真实的人工先例
+
+（2026-10-22 更正：「零实现」已不完全成立——`plugin/scripts/open-semantic-discovery-routine.ts`（2026-10-13 起）
+产出带 verifier/refuter 阶段的语义聚类并写入 Evidence Store（`kind: hypothesis` 记录），`arch-discovery-routine.ts` 产出
+`.quay/arch-discovery-findings.jsonl`。它们是否满足下列四条契约，本更正不作裁定。）
 
 **人工先例（本文不是凭空设计）**：今天两份审查文档的产出方式——"四组并行、各自标注 FACT/JUDGMENT/
 ASSUMPTION 的 bounded 审查 + 一轮独立的、以证伪为目的的 Opus 反证"——已经是 Semantic Investigator
@@ -160,6 +173,13 @@ self-host → before/after → 人工触发 merge → 机械 fan-in → post-mer
 
 ### 2.6 独立 Evaluator — 设计假设，已有两次真实的人工 ad hoc 实例
 
+（2026-10-22 更正/现状指针：独立 Evaluator **实际上仍缺**。读法：
+`node --experimental-strip-types plugin/scripts/discovery-closed-loop-report.ts --host=local=<repo>`。截至 2026-10-22 该报告：
+portfolio 链 26 条 finding，`closed=true` 仅 1/26；refuter 列 10 条 `supported`、13 条
+`not-evaluated:no-verdict-reader-for-origin_carrier`、3 条 `not-evaluated:routine-scan-has-no-refuter-stage`；
+修复后效果列 13 条 `no-recurrence-after-fix`、13 条 `not-evaluated`。"no-recurrence-after-fix" 是机械复发读数，
+不是本节要求的、身份独立于 Planner/Investigator 的预测-实测对账。）
+
 **人工先例**：
 - **GOAL-033**：立项时预测 package SCC `6→5`，分支落地后实测是 `6→4`（`fan-in` 随 `cli` 一并脱环）。
   Goal 自己的 `origin` 字段原样记录了这次"预测 vs 实测"的修正过程——**这就是 Evaluator 要做的事**，只是
@@ -178,6 +198,8 @@ negative control 技术（见第 6 节），不新造度量方法——Evaluator
 专门做这一步，并把结果写回 Learning Store"，不是新的测量技术。
 
 ### 2.7 Learning Store / 策略更新 — 设计假设，零实现，填一个已点名的洞
+
+（2026-10-22 复核：仍零实现——`grep -rli 'learning.store' plugin packages --include=*.ts` 零命中（排除 node_modules）。）
 
 **已点名但未填的洞**：`harness-semantic-compression-and-meta-driver-builder.md` §7.4 已经说过，每个
 driver"孵化时必须附带……明确的 retire/merge 判据——这是本仓库目前最弱的一环"；§12 进一步引用两份独立
@@ -316,10 +338,10 @@ Investigator/Evaluator 这组具名角色特有的两项（同样标注候选、
 
 | Phase | 目标 | 产物 | Exit 读数（不设无历史支撑的阈值，呼应硬规则 12） | 当前状态 |
 |---|---|---|---|---|
-| **A — Evidence Store** | 把 Observe 层的输出结构化（§2.2 字段设计）落到一个可查询载体，首批写入对象就是本文引用的两份既有审查文档里已经做过的判断 | 一个载体（格式未定——JSONL/sqlite 均可，本文不替实现选型）+ 一个把既有两份审查文档的判断回填进去的一次性迁移 | 至少把本文引用的两份既有审查文档的全部 FACT/JUDGMENT/ASSUMPTION 标注，结构化迁移进载体并可按 `confidence`/`commit` 查询——这是一个已知、有限的回填任务，不是凭空设的数字 | **设计零实现，但已立案**：`tasks/gap-architecture-evidence-store-and-decision-memory.md`（commit `72430eea5`，由并行的"端到端架构自举实验"会话落地，覆盖 phase A+B；本文不裁定其实现细节，只记录指针，截至本文落笔仍是 `status: todo`） |
-| **B — Shadow Investigator** | Investigator 按 §2.3 四条契约运行，只读、只写 Evidence Store，无 Goal 提案权限（直接复用 harness 正本 §8 既有 shadow mode 定义） | N 条结构化 hypothesis 记录（N 由实际运行决定，不预设） | 若干条 hypothesis 经独立复核后，§8 的"hypothesis 级证伪率"有一个基于**本阶段真实产出**（不是沿用第 8 节两轮人工审查的旧数据）的读数 | 同上（同一任务 `gap-architecture-evidence-store-and-decision-memory` 覆盖 phase A+B），`status: todo` |
-| **C — Supervised Goal experiments** | Planner 候选经人工批准后开 `branch:true` Goal，走现有标准流程（第 2.5/6 节），Evaluator 独立对账 | 若干条"预测 vs 实测"对账记录 | 至少一次由本阶段真实产出的对账记录（不是第 8 节引用的 GOAL-033/034 旧样本）落进 Learning Store | **设计零实现，但已立案**：`tasks/gap-ownership-active-limited-proposal-mode.md`（commit `7fc0468a5`/`eb6639f53`，`depends_on` 字段结构化声明依赖上一行的任务，非 prose 前置）；沿用的底层机制（branch:true Goal 流程）**真实运作**；若真的触发，产出 Goal 编号由该任务 AC 动态计算，本文不预先断言是哪个编号 |
-| **D — Meta-driver builder** | Learning Store 聚合 phase C 的对账记录，触发 Investigator 置信度校准或 driver-candidate 的 retire/merge 判据（填 harness 正本 §7.4/§12 已点名的洞） | 策略更新记录 + 至少一次机制触发的 retire/merge 判定 | 至少一次真实的 retire/merge 判定由 Learning Store 数据触发，不是人凭印象裁定——这正是 `docs/analysis/crystallization-the-contraction-phase-has-no-mechanism.md` 指出的"收缩相从未被机制触发"第一次被证伪的机会，而不是又一次宣称"接上就会好" | **零实现** |
+| **A — Evidence Store** | 把 Observe 层的输出结构化（§2.2 字段设计）落到一个可查询载体，首批写入对象就是本文引用的两份既有审查文档里已经做过的判断 | 一个载体（格式未定——JSONL/sqlite 均可，本文不替实现选型）+ 一个把既有两份审查文档的判断回填进去的一次性迁移 | 至少把本文引用的两份既有审查文档的全部 FACT/JUDGMENT/ASSUMPTION 标注，结构化迁移进载体并可按 `confidence`/`commit` 查询——这是一个已知、有限的回填任务，不是凭空设的数字 | **设计零实现，但已立案**：`tasks/gap-architecture-evidence-store-and-decision-memory.md`（commit `72430eea5`，由并行的"端到端架构自举实验"会话落地，覆盖 phase A+B；本文不裁定其实现细节，只记录指针，截至本文落笔仍是 `status: todo`）。（2026-10-22 更正：该任务已 `done`（`git show develop:tasks/gap-architecture-evidence-store-and-decision-memory.md`），载体 `.quay/architecture-evidence-store.jsonl` 截至 2026-10-22 `wc -l` = 378；回填 exit 读数是否达成本更正不作裁定） |
+| **B — Shadow Investigator** | Investigator 按 §2.3 四条契约运行，只读、只写 Evidence Store，无 Goal 提案权限（直接复用 harness 正本 §8 既有 shadow mode 定义） | N 条结构化 hypothesis 记录（N 由实际运行决定，不预设） | 若干条 hypothesis 经独立复核后，§8 的"hypothesis 级证伪率"有一个基于**本阶段真实产出**（不是沿用第 8 节两轮人工审查的旧数据）的读数 | 同上（同一任务 `gap-architecture-evidence-store-and-decision-memory` 覆盖 phase A+B），`status: todo`（2026-10-22 更正：已 `done`；Evidence Store 中 `kind: hypothesis` 记录数用 `jq -r .kind .quay/architecture-evidence-store.jsonl \| sort \| uniq -c` 现取；独立复核读数见 §2.6 更正注） |
+| **C — Supervised Goal experiments** | Planner 候选经人工批准后开 `branch:true` Goal，走现有标准流程（第 2.5/6 节），Evaluator 独立对账 | 若干条"预测 vs 实测"对账记录 | 至少一次由本阶段真实产出的对账记录（不是第 8 节引用的 GOAL-033/034 旧样本）落进 Learning Store | **设计零实现，但已立案**：`tasks/gap-ownership-active-limited-proposal-mode.md`（commit `7fc0468a5`/`eb6639f53`，`depends_on` 字段结构化声明依赖上一行的任务，非 prose 前置）；沿用的底层机制（branch:true Goal 流程）**真实运作**；若真的触发，产出 Goal 编号由该任务 AC 动态计算，本文不预先断言是哪个编号（2026-10-22 更正：该任务已 `done`（`git show develop:tasks/gap-ownership-active-limited-proposal-mode.md`）；但 Learning Store 仍不存在，故本行 exit 读数"对账记录落进 Learning Store"结构上仍不可达） |
+| **D — Meta-driver builder** | Learning Store 聚合 phase C 的对账记录，触发 Investigator 置信度校准或 driver-candidate 的 retire/merge 判据（填 harness 正本 §7.4/§12 已点名的洞） | 策略更新记录 + 至少一次机制触发的 retire/merge 判定 | 至少一次真实的 retire/merge 判定由 Learning Store 数据触发，不是人凭印象裁定——这正是 `docs/analysis/crystallization-the-contraction-phase-has-no-mechanism.md` 指出的"收缩相从未被机制触发"第一次被证伪的机会，而不是又一次宣称"接上就会好" | **零实现**（2026-10-22 复核仍成立） |
 
 **四阶段的依赖关系是严格串行的**：B 需要 A 的载体才能把 hypothesis 写到有结构的地方；C 的 Evaluator
 对账需要 B 产出的 hypothesis 作为"预测"的来源（而不是像 GOAL-033/034 那样由人工在 Goal 文件里手写
