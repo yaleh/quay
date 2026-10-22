@@ -2,7 +2,7 @@
 id: gap-arch-cycle-report-never-evaluated-aggregate-and-stale-artifacts
 title: 目录环常驻检测例程 arch-cycle-report 上线以来 25/25 轮 evaluated:false：汇总被两个无
   moduleGraph 的单目录小包作废，且产物无人刷新——一个真实的目录环因此存在约 7 小时无人察觉
-status: needs-human
+status: todo
 labels:
   - gap
   - defect
@@ -35,7 +35,7 @@ extra:
 - [ ] AC1 汇总为 partial 而不作废（夹具）：一个 scope 缺 moduleGraph、另一个已评估的 scope 有 1 个环 ⇒ 记录状态为 `partial`，`totalCycleCount` 计入这 1 个环，并点名缺读数的 scope。贴出测试名与输出。
 - [ ] AC2 单目录判定来自文件清单：在真实仓库上，`quay-github-src`、`quay-backlog-src` 读为 `evaluated:true`、`basis: "single-directory"`；夹具中一个缺 moduleGraph 的**多目录** scope 仍为 `evaluated:false`（负对照）。贴出两次输出。
 - [ ] AC3 过期可见（真实数据）：刷新前对主检出运行一次，src scope 的 `commitsSinceArtifact` > 0、`behindSources:true`。贴出该 scope 的记录。
-- [ ] AC4 刷新后与独立仪器一致：刷新后 src scope 为 `evaluated:true`、`behindSources:false`，且它报告的环集合与 GOAL-910 AC-916 判据在同一 HEAD 上的输出一致（GOAL-910 未落地时双方都应是 `[[".","observation","serve"]]`，落地后双方都应是 0）。贴出两份输出与 HEAD。
+- [ ] AC4 刷新后与独立仪器一致：刷新后 src scope 为 `evaluated:true`、`behindSources:false`，且它报告的目录环集合与 GOAL-910 AC-916 判据在【同一 HEAD】上的输出逐元素一致（无论该 HEAD 上环集合是 `[[".","observation","serve"]]` 还是空）。贴出两份输出与 HEAD SHA。
 - [ ] AC5 第一条真实的已评估记录：例程向 `.quay/arch-cycle-history.jsonl` 写入一条 `evaluated:true`（状态为 complete，或为 partial 并写明原因）的生产记录，这是该载体有史以来第一条。贴出该记录。
 
 ## Definition of Done
