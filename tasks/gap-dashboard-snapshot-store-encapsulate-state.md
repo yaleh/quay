@@ -2,7 +2,7 @@
 id: gap-dashboard-snapshot-store-encapsulate-state
 title: serve-dashboard + serve-board 的 snapshot/cache 状态散成 9 个模块级 Map + 2 钩子 + 6
   个 clear 自由函数——收进一个 class DashboardSnapshotStore（私有字段 + 生命周期 + 显式单例）
-status: todo
+status: ready
 labels:
   - gap
   - defect
