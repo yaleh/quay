@@ -152,3 +152,63 @@ Quay 现阶段的重构应该优先把"状态/决策/副作用/编排四件事�
 ## 12. 一句话压缩版
 
 **先把状态、决策、副作用、编排四件事分别钉给唯一拥有者，用 ArchGuard before/after + 负对照 + 分支自举证明调用方真的收敛到了那个唯一实现（不是搬了个壳），每次只切一个能独立验收的小问题，在 `branch:true` Goal 的 fork → 串行 task → 自举 → before/after → merge → post-merge 闭环里把这套验证跑穿到底，模式名字只用来标注已经收敛出来的形状，不用来提前设计。**
+
+## 13. 提取 ≠ 扩展点：R1 与 R2（2026-10-22 增补）
+
+第 2 节防的是「搬壳」：新模块存在，责任却没搬过去。本节补另一种陷阱：**责任确实搬出去了，但下一次增长仍然流回中心。**
+光抽代码、不建扩展点，新功能的落点就不会变。第 3 节「有第二个真实实例时才升格为模式」仍然成立，本节不推翻它，
+只补一条：**被拆的那个中心如果是「每加一种 X 就要改它」的形状，拆分的验收就必须写明「下一个 X 加在哪」。**
+
+### 13.1 三组读数（每个数都附载体与基线）
+
+| 子系统 | 重构形状 | 读数 | 载体 / 命令 |
+|---|---|---|---|
+| quay serve | 按关注点拆分 **+ 分发器（扩展点）** | 中心文件增长占比 **1%**（10-22T00:40Z 记录：中心 +153 / 非中心 +11,534，即 1.31%；基线 `295e771b0` → HEAD） | `.quay/design-evolution-history.jsonl`（gitignored，主检出）；复跑 `node --experimental-strip-types plugin/scripts/design-evolution-readings.ts --no-history --json` |
+| quay worker | 抽出一块区域（`2440b52d0`，`worker-fan-in.ts`），**没有扩展点** | **82%**（`worker-history`，基线 `2440b52d0` → `ff32d031d`，即 GOAL-909 动手前；中心 +4,820 / 非中心 +1,025 = 82.46%，同一条 10-22T00:40Z 记录） | 同上；统一公式与口径更正见 `tasks/DIR-133.md`「口径更正（2026-10-22）」。**DIR-133 早先的「88%」作废**（漏算分母，只计了新增模块） |
+| quay worker（另一窗口） | 同上，但窗口跨过 GOAL-909 的搬家提交 | **约 70%**（10-21T23:14Z 记录：基线 `2440b52d0` → HEAD `5c74f38f2`，中心 +4,420 / 非中心 +1,897 = 69.97%）；2026-10-22 对 HEAD `584e10c60` 复跑得 70.77% | 同上。这个窗口把 GOAL-909 本身的搬出量算进了分母，所以读数偏低；config 因此把 `worker-history` 钉在 `ff32d031d`。**两个数各对应自己的基线，不能互相替换** |
+| plantuml-js `ElkLayoutEngine` | `gap-elk-layout-engine-split-responsibilities`：拆成 layers / elk-graph / elk-result，**没写扩展点判据** | 数值 AC 全过：`elk.ts` 570 → **150** 行（`76d1808`，10-22 00:58 +0800），类级 `outDegree` 9（≤11）、methodCount 3（≤8）。此后 8 个改动 `elk.ts` 的布局/渲染功能提交又把 `elk.ts` 长回 **278** 行（`1eb90a0`，06:47），summary 口径的 call 出度 **26**（探针当时 23），methodCount 15 | plantuml-js `tasks/gap-elk-layout-engine-split-responsibilities.md`「执行证据」；`tasks/gap-elk-layout-strategy-extension-point.md` Proposal；`git show <rev>:src/layout/elk.ts \| wc -l`；会话 `69ce95b8` 中 Claude 的原话：「上一轮我立的拆分任务没写扩展点判据，结果就是文件短了、出度反而升了」 |
+
+**读法**：serve 与 worker 的区别在于有没有扩展点，而不在拆没拆（DIR-133 F3）。plantuml-js 一例把这件事压缩到 6 小时内：
+拆分当时数值全绿，接下来的功能增长又全部落回 `ElkLayoutEngine`。随后的 `gap-elk-layout-strategy-extension-point`
+（`134934a`，done）才给出「从外部注入合成策略、不改 `src/layout/elk.ts` 即生效 + 抛错负对照」的判据。
+⚠️ 口径提示：「出度 23 → 26」比较的是 archguard summary 的 `topByOutDegree`（方法级关系计数），
+不是拆分 AC 用的 cognitive summary 类级 `outDegree`（落地时 9）。两个口径不可混比，这里只取同口径的 23 → 26。
+
+### 13.2 重构分类（工作模型，**机制成立待验**）
+
+| 级 | 名称 | 改变了什么 | 低一级满足不了的 Π 检查 | 实例 |
+|---|---|---|---|---|
+| R0 | 搬家（relocation） | 只改分区/目录边 | **目录级环**：GOAL-910 AC-916（`packages/quay/src` 目录级 SCC = 0） | `e7e84366a`（serve* 搬进 `src/serve/`）+ `d21a018aa`（observation 拆进子目录）在 10-21 16:26–16:27Z 造出 `{., observation, serve}` 环。plantuml-js 反方向：`4327862` 沉核心后环仍在，`feba9f3` 再搬一次才断 |
+| R1 | 提取（extraction） | 改边，不改增长方向 | **call 出度**（同一口径前后比） | quay worker `2440b52d0`；plantuml-js elk 拆分 |
+| R2 | 扩展点（extension point） | 改增长方向 | **中心增长占比**——只能**事后**在后续功能上判，落地当时测不出 | quay serve 分发器；quay AC-915（WorkerPool 结局处理单元可从外部注册）；plantuml-js 策略注入 |
+| R3 | 所有权收敛（ownership consolidation） | 一处定义、调用方改口 | **重复组数 / 定义点数**（本文第 10 节 duplicate disappearance、canonical definition count） | GOAL-030/031/032 |
+
+每一级都要用它自己的 Π 检查来验，低一级的检查证明不了高一级：R1 的行数/方法数全绿，证明不了 R2（plantuml-js）；
+R0 的目录环为 0，证明不了 R1。R2 的检查天生滞后，所以 R2 的**落地验收**只能用代理形态（「外部注册一个合成单元，
+不改中心文件即生效，且改动前为红」，DIR-133 裁定 2 / AC-915），真正的判读要等后续功能落地之后再读中心增长占比。
+
+**分级**：三组读数**证据充分**（载体可复跑）；「R0–R3 是四个可分离的级、每级需要独立的 Π」是**机制成立待验**，
+依据只有本节的 quay 两个子系统 + plantuml-js 一例。
+
+### 13.3 建议：把 DIR-133 规则 ② 升格为 Π 检查（只建议，不立案）
+
+DIR-133 裁定 2（「设计调查/切片的 AC 必须含扩展点判据」）目前**只是散文**。它防的那种失败（拆分 AC 没写扩展点，
+增长回流）已在 **2 个代码库发生过 2 次**：quay worker `2440b52d0`，plantuml-js `gap-elk-layout-engine-split-responsibilities`。
+按硬规则 12，发生率 ≥2 已经足以支持把它做成可执行检查（例如：设计切片类任务/Goal 的 AC 里至少有一条是扩展点判据，
+且在改动前实跑为红）。**本文只记录这条建议，不立案。**
+
+### 13.4 登记一条样本外预测（2026-10-22 登记）
+
+- **对象**：quay worker 在 GOAL-909 之后的增长，载体子系统 `worker-post-909`（`.quay/config.yml`
+  `design_evolution_readings`，基线 `024f9d7f2`，即 AC-915 扩展点落地提交）。
+- **模型依据**：GOAL-909 的 `WorkerPool` 是 R1，不是完整的 R2。状态归属收进了类（`WorkerPool` methodCount 16），
+  扩展点也只覆盖「结局处理」这一类；派发决策与派发执行仍在 `runResidentLoop` 里，后者的 call 出度**仍是 84**
+  （archguard scope `b4f87b21`，快照生成于 2026-10-22T00:58Z，晚于 `024f9d7f2`；`archguard_summary` `topByOutDegree`，
+  与 GOAL-909 前的 discovery 任务读数相同）。
+- **预测**：后续 worker 增长中，落在中心文件（`worker-driver.ts` + `worker-fan-in.ts`）的占比**保持 ≥50%**。
+- **证伪条件**：读数 **≤20%** ⇒ 对这个案例而言，R1/R2 的区分被证伪（R1 也改变了增长方向）。落在 20%–50% 之间：不判，记为不确定。
+- **判读时点**：`worker-post-909` 的分母（中心 + 非中心增量）第一次 ≥ 1,000 行的那条记录。这个门槛是临时的，
+  量级取自历史窗口（`worker-history` 分母约 5,800 行）；它只决定何时判读，不是质量阈值。
+- **登记时的现状（不作判读）**：2026-10-22 复跑 `design-evolution-readings.ts`（HEAD `584e10c60`）得 `worker-post-909`
+  中心 +172 / 非中心 +0，共 2 个提交（`d88ad2db8`、`80d75e886`，都是 fan-in 暗轴谓词）。分母远不到 1,000 行，**不计入判读**；
+  10-22T00:40Z 那条载体记录里，这个子系统还是 `evaluated:false`（分母为 0）。
