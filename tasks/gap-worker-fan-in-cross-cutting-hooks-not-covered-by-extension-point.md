@@ -2,7 +2,7 @@
 id: gap-worker-fan-in-cross-cutting-hooks-not-covered-by-extension-point
 title: WorkerPool 扩展点只覆盖「结局处理」——GOAL-909 之后新增仍 93.8%
   落在中心文件，因为翻转前后的横切钩子（读数/暗轴）没有注册位；跨项目同形状：扩展点只盖叶子、不盖主干
-status: ready
+status: done
 labels:
   - gap
   - defect

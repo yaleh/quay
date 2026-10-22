@@ -40,6 +40,10 @@ const REPO_ROOT = path.resolve(__dirname, "..", "..");
 const SCRIPT = path.join(REPO_ROOT, "plugin", "scripts", "slice-readings.ts");
 const DRIVER = path.join(REPO_ROOT, "plugin", "scripts", "worker-driver.ts");
 const FAN_IN = path.join(REPO_ROOT, "plugin", "scripts", "worker-fan-in.ts");
+// The post reading migrated OUT of the centre file (gap-worker-fan-in-cross-cutting-hooks-not-covered-
+// by-extension-point): it is now a REGISTERED post-flip hook. The pin below follows the call, it does
+// not relax it — the mechanical fan-in path still takes a POST reading, just from its new home.
+const FAN_IN_HOOKS = path.join(REPO_ROOT, "plugin", "scripts", "worker-fan-in-hooks.ts");
 
 const GIT_ENV = {
   ...process.env,
@@ -384,12 +388,17 @@ test("scope auto-resolution — no --scope, the task's ## Touches picks the decl
 
 // ── AC6: both production paths name the script (grep evidence, pinned as a test) ────────────────
 
-test("AC6 — worker-driver.ts (dispatch) and worker-fan-in.ts (mechanical fan-in) both name slice-readings", () => {
+test("AC6 — worker-driver.ts (dispatch) and the fan-in hook module (mechanical fan-in) both name slice-readings", () => {
   const driver = fs.readFileSync(DRIVER, "utf8");
   const fanIn = fs.readFileSync(FAN_IN, "utf8");
+  const fanInHooks = fs.readFileSync(FAN_IN_HOOKS, "utf8");
   assert.match(driver, /slice-readings/, "the dispatch path must invoke the reading");
-  assert.match(fanIn, /slice-readings/, "the mechanical fan-in path must invoke the reading");
+  assert.match(fanInHooks, /slice-readings/, "the mechanical fan-in path must invoke the reading");
   // Position, not keyword: the dispatch path queues a BASELINE and fan-in takes a POST.
   assert.match(driver, /queueSliceBaseline\(/, "worker-driver must actually call the baseline helper");
-  assert.match(fanIn, /runSlicePostReading\(/, "worker-fan-in must actually call the post helper");
+  assert.match(fanInHooks, /runSlicePostReading\(/, "the fan-in hooks module must actually call the post helper");
+  assert.match(fanInHooks, /phase:\s*"post-flip"/, "the post reading must be registered as a post-flip hook");
+  // ⛔ And the CENTRE must no longer call it directly — otherwise the migration is cosmetic and the
+  // next cross-cutting step still edits the centre (the defect this task exists to close).
+  assert.doesNotMatch(fanIn, /runSlicePostReading\(/, "worker-fan-in.ts must not call the post helper directly");
 });
