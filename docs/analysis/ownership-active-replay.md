@@ -170,3 +170,64 @@ benchmark); those runs are `not-evaluated`, excluded from every count above, and
 current Flash configuration; the resolved launcher/model is recorded per record (`runtime`) and escalation is a
 declared seam, off. No task/goal was created and no code edited by the loop; the only persisted output is the
 carrier.
+
+## 8. amend 2026-10-22 — 准入从单常量扩成 concern-kind 注册表
+
+> 本段是 **dated amendment**，⛔ 不改写 §1–§7 的任何原文（§6 是本实现引用的历史契约）。它记录的是
+> `evaluateEntryBar` 的条件 (1) 从**一个字面常量**变成**一张注册表**这件事，以及它为什么没有放宽准入。
+
+### 8.1 改了什么
+
+条件 (1) 原本是 `concern_kind === "package-cycle"`，注释写的是「the only kind with a computable,
+falsifiable delta」。那句话对**仪器**成立，对**concern**不成立：`plugin/scripts/design-evolution-readings.ts`
+已经把第二类信号端到端地机械化了（探测器、可计算的 delta、能把信号熄掉的修复方向）。
+现在条件 (1) 读 `CONCERN_KIND_REGISTRY`（`docs/analysis/ownership-active-limited-proposal.mjs`），每条登记项带五键：
+
+| 键 | 含义 |
+|---|---|
+| `detector` | 产出该 concern 的**机制**在哪（路径 + 函数 / 尚缺时指向任务 id）——不是散文承诺 |
+| `deltaComputable` | 是否存在**可计算**的 delta（而非模型自述） |
+| `negativeControl` | 是否存在一个「信号必须熄掉」的方向（真可证伪） |
+| `occurrenceThreshold` | 该 concern 必须**发生过几次**才可离开 carrier（DIR-133 裁定 1：2）。由判定读取，⛔ 不是字面量 |
+| `mechanized` | 上面三条是否**已落地**。`false` ⇒ 该 kind 报 `NOT_YET_MECHANIZED`，⛔ 不准入 |
+
+四态互斥（硬规则 3b——「读不懂」与「判过且合格」不能同形）：
+
+- `UNDETERMINED` — 记录的 concern_kind 读不出（无字段、无 slice_delta、无 dupKind、无机器写的 `concern_kind=` token）；
+- `NOT_MET` — 该 kind **不在**注册表里，继续留在 shadow；
+- `NOT_YET_MECHANIZED` — 在表里、但 `mechanized:false`：探测器/delta/负对照未落地，**这是它自己的态**，⛔ 不是 `NOT_MET`；
+- `IN_SCOPE` — 在表里且已机械化，此时才轮到条件 (2)–(4)。
+
+### 8.2 两条 `NOT_YET_MECHANIZED` 登记位（各自指向的探测器任务）
+
+- **`spine-without-extension-point`** → `tasks/gap-worker-fan-in-cross-cutting-hooks-not-covered-by-extension-point.md`。
+  它落地之前，没有一个可判定的「主干步骤未注册到扩展点」信号，因此本类只登记、不准入。
+- **`god-file-size`** → **尚无探测器任务**，且**事件定义未定**（「发生什么算一次 god file」没有答案）。
+  行数阈值是硬规则 4 推论（成本结构未测前不设数值阈值）的禁区，故本任务只立注册位；
+  事件定义与历史发生率读数必须先于任何阈值，属于未来探测器任务的范围。
+
+### 8.3 新准入的 `design-evolution-regression`：三件套齐备才登记
+
+1. **探测器**：`design-evolution-readings.ts` 的 `evolutionFindings()` → `.quay/routine-findings.jsonl`
+   （`dupKind:"evolution-regression"`, `trigger:"share-up"`）。本模块只**读**它写下的数字，⛔ 不重造探测器。
+2. **可计算、可取假的 delta，口径写死为净口径**：`share = centralΔ / (centralΔ + nonCentralΔ)`，
+   回归窗口 ⇔ `deltaCentral > 0 ∧ deltaDenominator > 0`（即读数机制自己声明的 `share-up` 边界）。
+   ⛔ 不是「只计新增」口径——同一窗口两种口径实测差出 serve 1.31% / 2.25%，不写死口径的登记项不可复跑。
+3. **负对照**：修复方向（新代码落到中心文件**之外**）把 `Δcentral` 压到 ≤ 0 ⇒ 同一判据返回 `hit=false`，
+   信号熄掉。另有内建 regression/repair 双样本自检（`predicate-selfcheck-failed`），
+   一条「不会说不」的判据不许判真记录（硬规则 4 推论二）。
+
+### 8.4 与 §6(d) 的关系（为什么不算违反）
+
+§6(d) 原文是「do not enable non-cycle kinds **until (1)/(2) exist**」，其中 (1)/(2) 指的是
+`duplicate` / `literal_dispersion` 两条**缺失的 CLI 查询**。本次准入的 `design-evolution-regression`
+不是那两类里的任何一个，它的仪器已经存在；§6(d) 背后的**原则**——「没有可计算、可取假 delta 的种类不准入」
+——被完整保留，并第一次变成**机器可读的一列**（`mechanized`），而不再是一句散文。
+`duplicate` / `canonicalization` 依旧 `NOT_MET`。
+
+### 8.5 落点
+
+- 实现：`docs/analysis/ownership-active-limited-proposal.mjs`（`CONCERN_KIND_REGISTRY` / `concernKindState` /
+  `designEvolutionRegression` / `designEvolutionDeltaEvidence` / `designEvolutionPredicateSelfCheck`）
+- 判据：`plugin/test/ownership-active-limited-proposal.test.mjs`（AC1–AC5、AC7 与生产记录 parity 各一条）
+- 任务：`tasks/gap-planner-admission-widen-beyond-package-cycle.md`

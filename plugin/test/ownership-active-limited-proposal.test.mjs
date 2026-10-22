@@ -20,6 +20,10 @@ import {
   evaluateEntryBar, deriveConcernKind, deltaEvidence, decisionMemoryStatus, decisionMemoryReading,
   isProductionRun, deltaFingerprint, groupByCandidate, readCarrier, evaluateCarrier,
   nextGoalId, nextAcId, buildDraftGoal, proposeDraftGoal, createGoalStoreWrite,
+  CONCERN_KIND_REGISTRY, CONCERN_KIND_STATES, CONCERN_KIND_IN_SCOPE, DESIGN_EVOLUTION_KIND,
+  DESIGN_EVOLUTION_DUP_KIND, DESIGN_EVOLUTION_PREDICATE_SAMPLES,
+  concernKindEntry, concernKindState, designEvolutionRegression,
+  designEvolutionDeltaEvidence, designEvolutionFingerprint, designEvolutionPredicateSelfCheck,
 } from "../../docs/analysis/ownership-active-limited-proposal.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -389,4 +393,224 @@ test("AC3(c3): the CLI reports malformed_lines and writes NO Goal when the carri
   assert.equal(out.results.every((x) => x.reason.startsWith("MALFORMED_CARRIER_LINES")), true);
   assert.equal(out.results.every((x) => x.proposed === undefined), true, "no Goal is proposed");
   assert.equal(fs.readdirSync(goalDir).length, 0, "the store dir is empty — no Goal was written");
+});
+
+// ════════════════════════════════════════════════════════════════════════════════════════════════
+// gap-planner-admission-widen-beyond-package-cycle (2026-10-22, DIR-133 F1)
+//   Condition 1 used to be the literal `concern_kind === "package-cycle"`, so the automated Planner
+//   could only ever admit ONE concern. The instruments — not the concerns — were the limit: a SECOND
+//   kind is now mechanized end to end (design-evolution-readings.ts produces the finding, the delta is
+//   the share's net rise, and a repair drives it dark), while the two kinds DIR-133 names are
+//   registered with `mechanized:false` and must be REPORTED AS SUCH rather than quietly admitted or
+//   quietly refused as "not in scope" (硬规则 3b).
+// ════════════════════════════════════════════════════════════════════════════════════════════════
+
+// A production-shaped design-evolution finding (fields = `.quay/routine-findings.jsonl` records written
+// by design-evolution-readings.ts::evolutionFindingRecord) plus the two fields the entry bar also reads.
+const deRec = (over = {}) => ({
+  run_id: "live:de:1", label: "live",
+  dupKind: DESIGN_EVOLUTION_DUP_KIND,
+  target: "worker-history",
+  trigger: "share-up",
+  readingTs: "2026-10-22T02:00:00Z",
+  priorReadingTs: "2026-10-22T01:00:00Z",
+  deltaCentral: 288, deltaNonCentral: -6, deltaDenominator: 282, sharePercent: 102.13,
+  decision_memory: { status: "not-known" },
+  subject_files: ["plugin/scripts/worker-driver.ts"],
+  ...over,
+});
+const deStreak = (over = {}) => [deRec({ run_id: "live:1", priorReadingTs: "2026-10-22T00:00:00Z", ...over }), deRec({ run_id: "live:2", priorReadingTs: "2026-10-22T01:00:00Z", ...over }), deRec({ run_id: "live:3", priorReadingTs: "2026-10-22T02:00:00Z", ...over })];
+
+// ── AC1: the registry exists, carries the five pinned keys on every entry, and is the C1 judge ───────
+test("AC1(registry): CONCERN_KIND_REGISTRY is exported, and every entry carries the five pinned keys", () => {
+  const code = stripComments(fs.readFileSync(path.join(REPO, MODULE_REL), "utf8"));
+  assert.match(code, /export const CONCERN_KIND_REGISTRY/, "the registry is a top-level export");
+  assert.ok(CONCERN_KIND_REGISTRY.length >= 4, `expected ≥4 entries, got ${CONCERN_KIND_REGISTRY.length}`);
+  const five = ["detector", "deltaComputable", "negativeControl", "occurrenceThreshold", "mechanized"];
+  for (const e of CONCERN_KIND_REGISTRY) {
+    for (const k of five) assert.ok(k in e, `entry ${e.kind} is missing the pinned key ${k}`);
+    assert.equal(typeof e.detector, "string", `${e.kind}.detector names a mechanism, not a boolean`);
+    assert.ok(e.detector.trim().length > 10, `${e.kind}.detector must say WHERE the detector lives`);
+    assert.equal(typeof e.mechanized, "boolean", `${e.kind}.mechanized must be a real boolean`);
+    assert.equal(typeof e.deltaComputable, "boolean");
+    assert.equal(typeof e.negativeControl, "boolean");
+  }
+  // the two mechanized kinds are exactly the two whose instruments are landed
+  const mechanized = CONCERN_KIND_REGISTRY.filter((e) => e.mechanized).map((e) => e.kind).sort();
+  assert.deepEqual(mechanized, ["design-evolution-regression", "package-cycle"]);
+  // and both carry the DIR-133-ruling-1 occurrence threshold of 2
+  for (const k of ["package-cycle", "design-evolution-regression"]) {
+    assert.equal(concernKindEntry(k).occurrenceThreshold, 2, `${k}.occurrenceThreshold`);
+  }
+  // the two registered slates are NOT mechanized and say which detector they wait for
+  assert.match(concernKindEntry("spine-without-extension-point").detector, /gap-worker-fan-in-cross-cutting-hooks-not-covered-by-extension-point/);
+  assert.match(concernKindEntry("god-file-size").detector, /NOT LANDED/);
+});
+
+// ── AC2: each concern_kind reports ITS OWN state — the tokens are pairwise distinct ────────────────
+test("AC2(registry): the five fixture kinds report five PAIRWISE DISTINCT state tokens (plus the unreadable one)", () => {
+  const tokens = {
+    "package-cycle": concernKindState("package-cycle"),
+    "design-evolution-regression": concernKindState("design-evolution-regression"),
+    "spine-without-extension-point": concernKindState("spine-without-extension-point"),
+    "god-file-size": concernKindState("god-file-size"),
+    "other-boundary": concernKindState("other-boundary"),
+    "no concern_kind field": concernKindState(null),
+  };
+  const values = Object.values(tokens).map((t) => t.token);
+  assert.equal(new Set(values).size, values.length, `tokens must not collapse: ${JSON.stringify(values)}`);
+
+  // the states are what the task pins, and each kind keeps its OWN name inside the token
+  assert.equal(tokens["package-cycle"].state, CONCERN_KIND_STATES.IN_SCOPE);
+  assert.equal(tokens["design-evolution-regression"].state, CONCERN_KIND_STATES.IN_SCOPE);
+  assert.equal(tokens["spine-without-extension-point"].state, CONCERN_KIND_STATES.NOT_YET_MECHANIZED);
+  assert.equal(tokens["god-file-size"].state, CONCERN_KIND_STATES.NOT_YET_MECHANIZED);
+  assert.equal(tokens["other-boundary"].state, CONCERN_KIND_STATES.NOT_MET);
+  assert.equal(tokens["no concern_kind field"].state, CONCERN_KIND_STATES.UNDETERMINED);
+  // the two IN_SCOPE kinds are still distinguishable by WHICH detector admits them
+  assert.notEqual(tokens["package-cycle"].entry.detector, tokens["design-evolution-regression"].entry.detector);
+  // and the four states themselves are distinct values
+  assert.equal(new Set(Object.values(CONCERN_KIND_STATES)).size, 4);
+
+  // the SAME reading through the real judgment: condition-1 reasons are pairwise distinct per kind
+  const reasons = [
+    evaluateEntryBar([rec({ run_id: "live:1" })]).reason,
+    evaluateEntryBar([deRec()]).reason,
+    evaluateEntryBar([rec({ concern_kind: "spine-without-extension-point", slice_delta: null })]).reason,
+    evaluateEntryBar([rec({ concern_kind: "god-file-size", slice_delta: null })]).reason,
+    evaluateEntryBar([rec({ concern_kind: "other-boundary", slice_delta: null })]).reason,
+  ];
+  assert.equal(new Set(reasons).size, reasons.length, `reasons must not collapse: ${JSON.stringify(reasons)}`);
+  assert.match(reasons[2], /^CONDITION_1_NOT_YET_MECHANIZED:.*spine-without-extension-point/);
+  assert.match(reasons[3], /^CONDITION_1_NOT_YET_MECHANIZED:.*god-file-size/);
+  assert.match(reasons[4], /^CONDITION_1_NOT_MET:concern_kind=other-boundary/);
+});
+
+// ── AC3: `occurrenceThreshold` is READ by the judgment, not merely declared ────────────────────────
+test("AC3(registry): the occurrence floor comes from the entry — raising it in the registry changes the verdict", () => {
+  // CONTROL: three qualifying package-cycle runs clear the default floor (2) — the streak floor (3) is met.
+  const three = [rec({ run_id: "live:1" }), rec({ run_id: "live:2" }), rec({ run_id: "live:3" })];
+  assert.equal(evaluateEntryBar(three).eligible, true);
+  assert.equal(evaluateEntryBar(three).streak.occurrence_threshold, 2);
+
+  // NEGATIVE CONTROL: the SAME records, judged against a registry whose package-cycle floor is 4.
+  // Only `occurrenceThreshold` differs ⇒ if the field were not read, this would still be eligible.
+  const raised = CONCERN_KIND_REGISTRY.map((e) => (e.kind === CONCERN_KIND_IN_SCOPE ? { ...e, occurrenceThreshold: 4 } : e));
+  const v = evaluateEntryBar(three, { registry: raised });
+  assert.equal(v.eligible, false, "the raised floor must bite");
+  assert.match(v.reason, /^CONDITION_4_NOT_MET:occurrences=3\/4/);
+  assert.match(v.reason, /CONCERN_KIND_REGISTRY occurrenceThreshold/);
+  assert.equal(v.streak.occurrences, 3);
+  assert.equal(v.streak.occurrence_threshold, 4);
+
+  // the floor is a DIFFERENT quantity from the streak: [hit, quiet, hit] has occurrences=2 but streak=1
+  // (the middle run's window does not rise — e.g. the repair that landed between the two regressions)
+  const quiet = () => { const sd = goodDelta(); sd.status = "evaluated"; return { slice_delta: { ...sd, delta: { ...sd.delta, after: { scc_size: 6, members: [""] } } } }; };
+  const gappy = [rec({ run_id: "live:1" }), rec({ run_id: "live:2", ...quiet() }), rec({ run_id: "live:3" })];
+  const g = evaluateEntryBar(gappy);
+  assert.equal(g.streak.occurrences, 2, "the non-consecutive hits are counted");
+  assert.equal(g.streak.length, 1, "the streak stops at the first non-qualifying production run");
+  assert.match(g.reason, /run_streak=1\//);
+
+  // and no literal 2 survives in the judgment: the number comes out of the entry
+  const code = stripComments(fs.readFileSync(path.join(REPO, MODULE_REL), "utf8"));
+  assert.match(code, /entry\.occurrenceThreshold/, "the judgment must read the registry field");
+});
+
+// ── AC4: the design-regression signal is FALSIFIABLE — a repair extinguishes it ─────────────────────
+test("AC4(registry): the same predicate hits on a rising window and goes dark on a repaired one", () => {
+  // the predicate itself, on the two windows AC4 asks for
+  const rising = designEvolutionRegression({ deltaCentral: 288, deltaNonCentral: -6, deltaDenominator: 282, sharePercent: 102.13 });
+  const repaired = designEvolutionRegression({ deltaCentral: -40, deltaNonCentral: 120, deltaDenominator: 80, sharePercent: 60 });
+  assert.deepEqual([rising.evaluated, rising.hit], [true, true], "a rising share window is a regression");
+  assert.deepEqual([repaired.evaluated, repaired.hit], [true, false], "the repaired window evaluates AND does not hit");
+  // the declared boundary: growth that only MOVED lines into the central file is not a regression
+  const movedOnly = designEvolutionRegression({ deltaCentral: 50, deltaNonCentral: -50, deltaDenominator: 0 });
+  assert.deepEqual([movedOnly.evaluated, movedOnly.hit], [true, false], "Δdenominator<=0 must not hit");
+
+  // the SAME two windows through the entry bar: the rising one clears C2, the repaired one is refused there
+  const risingBar = evaluateEntryBar(deStreak());
+  assert.equal(risingBar.eligible, true, risingBar.reason);
+  assert.equal(risingBar.conditions.delta.computed, true);
+  const repairedBar = evaluateEntryBar(deStreak({ deltaCentral: -40, deltaNonCentral: 120, deltaDenominator: 80, sharePercent: 60 }));
+  assert.equal(repairedBar.eligible, false);
+  assert.ok(repairedBar.reason.startsWith("CONDITION_2_NOT_MET"), repairedBar.reason);
+  assert.match(repairedBar.reason, /not-a-regression-window/);
+  assert.match(repairedBar.reason, /extinguished/);
+
+  // the built-in control pair separates, and it is reported as its own value
+  const self = designEvolutionPredicateSelfCheck();
+  assert.equal(self.ok, true, self.reason);
+  assert.deepEqual([self.regression_hit, self.repaired_hit], [true, false]);
+  assert.equal(self.reason, null);
+  assert.equal(DESIGN_EVOLUTION_PREDICATE_SAMPLES.regression.deltaCentral > 0, true);
+  // Δcentral / Δdenominator are read RAW — a producer boolean would not be enough
+  assert.equal(designEvolutionDeltaEvidence(deRec()).computed, true);
+  assert.equal(designEvolutionDeltaEvidence(deRec({ deltaCentral: 0 })).computed, false);
+});
+
+// ── AC5: `mechanized:false` is its OWN state — never NOT_MET, never ELIGIBLE ───────────────────────
+test("AC5(registry): a registered-but-unlanded detector reports NOT_YET_MECHANIZED and admits nothing", () => {
+  for (const kind of ["spine-without-extension-point", "god-file-size"]) {
+    const v = evaluateEntryBar([rec({ concern_kind: kind, slice_delta: null })]);
+    assert.equal(v.eligible, false, `${kind} must not be admitted`);
+    assert.ok(v.reason.startsWith("CONDITION_1_NOT_YET_MECHANIZED:"), v.reason);
+    assert.doesNotMatch(v.reason, /^CONDITION_1_NOT_MET/, "not-yet-mechanized must not read as out-of-scope");
+    assert.notEqual(v.reason.slice(0, 40), evaluateEntryBar([rec({ concern_kind: "other-boundary", slice_delta: null })]).reason.slice(0, 40));
+    assert.match(v.reason, /mechanized=false/);
+    assert.deepEqual(v.matchedConditions, [], "condition 1 never matched");
+    // ⛔ no delta/streak judgment is reachable for it — C1 short-circuits before C2
+    assert.equal(v.streak.length, 0);
+  }
+  // Flipping the entry is the ONLY thing that moves the refusal past C1 — the gate is the registry, not
+  // prose. Half a flip (mechanized:true but no readers) is an INSTRUMENT failure, its own value:
+  const halfFlip = CONCERN_KIND_REGISTRY.map((e) => (e.kind === "god-file-size" ? { ...e, mechanized: true } : e));
+  const v2 = evaluateEntryBar([rec({ concern_kind: "god-file-size", slice_delta: null })], { registry: halfFlip });
+  assert.ok(v2.reason.startsWith("CONDITION_2_UNDETERMINED"), v2.reason);
+  assert.equal(v2.eligible, false);
+  // A complete flip moves the refusal to C2 — never straight to ELIGIBLE.
+  const fullFlip = CONCERN_KIND_REGISTRY.map((e) => (e.kind === "god-file-size"
+    ? { ...e, mechanized: true, readDelta: () => ({ present: false, computed: false, control_falsified: false, provenance_match: false, provenance_status: null, detail: "stub" }), fingerprintOf: () => null }
+    : e));
+  const v3 = evaluateEntryBar([rec({ concern_kind: "god-file-size", slice_delta: null })], { registry: fullFlip });
+  assert.ok(v3.reason.startsWith("CONDITION_2_NOT_MET"), v3.reason);
+  assert.equal(v3.eligible, false);
+});
+
+// ── the SECOND kind is really the one the production producer emits ───────────────────────────────
+test("parity: the production findings record derives design-evolution-regression (the dupKind token matches the producer)", async () => {
+  const { evolutionFindingRecord } = await import("../../plugin/scripts/design-evolution-readings.ts");
+  const produced = evolutionFindingRecord({
+    key: "evolution:worker-history:share-up", target: "worker-history", trigger: "share-up",
+    readingTs: "2026-10-22T02:00:00Z", priorReadingTs: "2026-10-22T01:00:00Z",
+    deltaCentral: 288, deltaNonCentral: -6, deltaDenominator: 282, sharePercent: 102.13,
+    darkRounds: null, rationale: "r", suggestedAction: "a", files: ["plugin/scripts/worker-driver.ts"],
+  }, "2026-10-22T02:00:00Z");
+  // the local constant is the producer's wire token, not an invented one
+  assert.equal(produced.dupKind, DESIGN_EVOLUTION_DUP_KIND);
+  assert.equal(deriveConcernKind(produced), DESIGN_EVOLUTION_KIND);
+  // a production record with no decision_memory is UNDETERMINED at C3 (never "not-known")
+  const v = evaluateEntryBar([{ ...produced, run_id: "prod:1" }]);
+  assert.ok(v.reason.startsWith("CONDITION_3_UNDETERMINED"), v.reason);
+  // with the memory consulted, the same record clears C1+C2 and fails only the occurrence floor
+  const v2 = evaluateEntryBar([{ ...produced, run_id: "prod:1", decision_memory: { status: "not-known" } }]);
+  assert.ok(v2.reason.startsWith("CONDITION_4_NOT_MET"), v2.reason);
+  assert.match(v2.reason, /occurrences=1\/2/);
+});
+
+// ── AC7: the amendment is WRITTEN DOWN, and it names both unlanded detectors' tasks ────────────────
+test("AC7(doc): ownership-active-replay.md carries a dated amendment naming both NOT_YET_MECHANIZED tasks, and §6 is untouched", () => {
+  const doc = fs.readFileSync(path.join(REPO, "docs/analysis/ownership-active-replay.md"), "utf8");
+  assert.match(doc, /amend 2026-10-22/);
+  assert.match(doc, /CONCERN_KIND_REGISTRY/);
+  assert.match(doc, /NOT_YET_MECHANIZED/);
+  assert.match(doc, /gap-worker-fan-in-cross-cutting-hooks-not-covered-by-extension-point/);
+  assert.match(doc, /god-file-size/);
+  // §6's original text is a historical contract: the amendment is a NEW section, not a rewrite
+  assert.match(doc, /^## 6\. Still missing \/ readiness for a limited proposal mode$/m);
+  assert.match(doc, /\(a\) restrict limited proposals to `concern_kind=package-cycle` with a/, "§6(a) original wording still present");
+  // and the module header points at it
+  const code = fs.readFileSync(path.join(REPO, MODULE_REL), "utf8");
+  assert.match(code, /AMEND 2026-10-22/);
+  assert.match(code, /ownership-active-replay\.md` §8/);
 });
