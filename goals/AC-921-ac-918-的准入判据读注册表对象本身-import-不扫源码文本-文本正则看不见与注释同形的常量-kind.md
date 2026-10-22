@@ -1,7 +1,7 @@
 ---
 id: AC-921
 title: AC-918 的准入判据读注册表对象本身（import），不扫源码文本——文本正则看不见与注释同形的常量 kind
-status: draft
+status: active
 kind: criterion
 goal: GOAL-911
 criterion: "node --input-type=module -e 'const m=await
@@ -41,6 +41,17 @@ origin: "readings.criteria[AC-918]: verdict=fail, reason='acceptance failed
   the registry can cover — that half needs a behavioural criterion once the C1
   path exists. Retirement/rewording of AC-918 remains a human decision; this
   item only declares the replacement relation."
+activatedAt: 2026-10-22T10:17:09.697Z
+statusLog:
+  - at: 2026-10-22T10:17:09.697Z
+    from: draft
+    to: active
+    actor: goal-driver
+    reason: "triage: activate"
 supersedes:
   - AC-918
+fidelity:
+  verdict: faithful
+  reason: "fidelity judge: faithful"
+  at: 2026-10-22T10:17:09.697Z
 ---
