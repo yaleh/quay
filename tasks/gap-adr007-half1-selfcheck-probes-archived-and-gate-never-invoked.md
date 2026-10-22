@@ -47,19 +47,118 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1 假 PASS 消失（负对照）：在一个临时副本里把 selfcheck 用到的任一探针入口改名（模拟探针未加载），`bash experiments/quay-perpetual-stream/scripts/git-lens-selfcheck.sh` 对该轴打印 `NOT-EVALUATED(probe-not-loaded…)`，输出中**没有**任何一行 `PASS:` 属于该轴，退出码为 2。改动前的同一操作得到 `PASS: l-d/prose-heavy`（贴出改动前后两次输出与退出码）。
-- [ ] AC2 L_D 指向活仪器且能判对两个方向：在真实仓库运行 selfcheck，`l-d/prose-heavy` 为 PASS（期望 flagged），`l-d/code-heavy` 与 `l-d/empty` 为 PASS（期望 not flagged）；把 `phase-declare.ts` 的 `computeRatio` 阈值临时改成恒不 flagged（临时副本中），`l-d/prose-heavy` 变 FAIL（贴出三次输出）。
-- [ ] AC3 L_G 指向活仪器且能判对两个方向：有环夹具 PASS（检出 ≥1 个目录环并列出成员），无环夹具 PASS（0 环）；把有环夹具的 moduleGraph 删掉后，该用例报 `NOT-EVALUATED` 而不是 PASS 或「0 环」（贴出三次输出）。
-- [ ] AC4 selfcheck 在真实仓库上的整体读数：L_D 3 例与 L_G 2 例全 PASS，L_S 2 例为 `NOT-EVALUATED(axis-retired…)`，退出码为 2；同一次运行的 stdout 中 `MODULE_NOT_FOUND` 出现 0 次（贴出完整输出）。
-- [ ] AC5 门引擎产出真实事件（生产载体）：在主检出上由 `plugin/scripts/quality-gate-driver.ts --root /data/home/yale/work/quay --once` 跑一轮且新例程 due（未 due 时贴出 `.quay/routine-last-run.json` 中该键的读数，等下一个常驻轮次产出后再取），`.quay/gate-events.jsonl` 中 `"gate":"adr-007"` 的条数由 0 变为 ≥1，该事件的 verdict 与 AC4 的退出码一致（2 ⇒ 非 pass 且 reason 含 NOT-EVALUATED），同轮 `.quay/quality-round.jsonl` 有一条对应 Fact。贴出跑之前的 grep 计数、事件行与 Fact 行。
-- [ ] AC6 HALF 2 未被连带关掉：`node --experimental-strip-types -e` 调 `workspaceEnforcesDarkAxis("/data/home/yale/work/quay")` 仍返回 `true`；`grep -n '"ADR-007"' .quay/config.yml` 仍命中（贴出两条输出）。
+- [x] AC1 假 PASS 消失（负对照）：在一个临时副本里把 selfcheck 用到的任一探针入口改名（模拟探针未加载），`bash experiments/quay-perpetual-stream/scripts/git-lens-selfcheck.sh` 对该轴打印 `NOT-EVALUATED(probe-not-loaded…)`，输出中**没有**任何一行 `PASS:` 属于该轴，退出码为 2。改动前的同一操作得到 `PASS: l-d/prose-heavy`（贴出改动前后两次输出与退出码）。
+- [x] AC2 L_D 指向活仪器且能判对两个方向：在真实仓库运行 selfcheck，`l-d/prose-heavy` 为 PASS（期望 flagged），`l-d/code-heavy` 与 `l-d/empty` 为 PASS（期望 not flagged）；把 `phase-declare.ts` 的 `computeRatio` 阈值临时改成恒不 flagged（临时副本中），`l-d/prose-heavy` 变 FAIL（贴出三次输出）。
+- [x] AC3 L_G 指向活仪器且能判对两个方向：有环夹具 PASS（检出 ≥1 个目录环并列出成员），无环夹具 PASS（0 环）；把有环夹具的 moduleGraph 删掉后，该用例报 `NOT-EVALUATED` 而不是 PASS 或「0 环」（贴出三次输出）。
+- [x] AC4 selfcheck 在真实仓库上的整体读数：L_D 3 例与 L_G 2 例全 PASS，L_S 2 例为 `NOT-EVALUATED(axis-retired…)`，退出码为 2；同一次运行的 stdout 中 `MODULE_NOT_FOUND` 出现 0 次（贴出完整输出）。
+- [ ] AC5 门引擎产出真实事件（生产载体）：在主检出上由 `plugin/scripts/quality-gate-driver.ts --root /data/home/yale/work/quay --once` 跑一轮且新例程 due（未 due 时贴出 `.quay/routine-last-run.json` 中该键的读数，等下一个常驻轮次产出后再取），`.quay/gate-events.jsonl` 中 `"gate":"adr-007"` 的条数由 0 变为 ≥1，该事件的 verdict 与 AC4 的退出码一致（2 ⇒ 非 pass 且 reason 含 NOT-EVALUATED），同轮 `.quay/quality-round.jsonl` 有一条对应 Fact。贴出跑之前的 grep 计数、事件行与 Fact 行。（待外部）
+- [x] AC6 HALF 2 未被连带关掉：`node --experimental-strip-types -e` 调 `workspaceEnforcesDarkAxis("/data/home/yale/work/quay")` 仍返回 `true`；`grep -n '"ADR-007"' .quay/config.yml` 仍命中（贴出两条输出）。
 
 ## Definition of Done
 
-- [ ] 六条 AC 全绿，`scripts/test.sh` 相关泳道（含 `--for-task` scoped 静态检查）通过，合并进 develop。
-- [ ] 归档目录 `archive/2026-09-07-zero-call-scripts/` 未被改动或复活；L_S 的退役是显式记录，不是删用例。
-- [ ] ADR-007 的 KNOWN ROT 段落已更正（3 例假 PASS，不是 1 例），并写明 HALF 1 的新仪器指向；新例程不在 fan-in 路径上运行。
-- [ ] 16 个 0 事件的 it0/fixed 配置门清单与读数写入 `## Evidence`，作为观察项，未在本任务中接线。
+- [ ] 六条 AC 全绿，`scripts/test.sh` 相关泳道（含 `--for-task` scoped 静态检查）通过，合并进 develop。（待外部）
+- [x] 归档目录 `archive/2026-09-07-zero-call-scripts/` 未被改动或复活；L_S 的退役是显式记录，不是删用例。
+- [x] ADR-007 的 KNOWN ROT 段落已更正（3 例假 PASS，不是 1 例），并写明 HALF 1 的新仪器指向；新例程不在 fan-in 路径上运行。
+- [x] 16 个 0 事件的 it0/fixed 配置门清单与读数写入 `## Evidence`，作为观察项，未在本任务中接线。
+
+## Evidence
+
+**Dark-axis record（本任务自己的 ADR-007 HALF 2 判据，2026-10-22 实测）**
+- L_D phase-declare takeLdReading（worktree，range=HEAD~50..HEAD）：docLines=1248 codeLines=1414 ratio=0.883 flagged=false
+- L_G archguard-runner readDirectoryCycleReading（主检出 .archguard/query）：evaluated scopes=4/6；src cycles=0；scripts cycles=0；quay-native-src cycles=0；experiments-scripts cycles=0；quay-github-src / quay-backlog-src 的 arch.json 无 extensions.tsAnalysis.moduleGraph ⇒ 汇总 totalCycleCount=null（硬规则 3b：⛔ 不把「读不出」记成 0 环）
+
+**AC1（假 PASS 消失，负对照）**
+改动前（develop 的旧 selfcheck；探针文件不存在——与真实仓库同形；用 develop 的脚本 + 本仓库夹具在临时副本中跑）：
+```
+PASS: l-d/prose-heavy — exit 1 (expected 1)          ← 假 PASS
+FAIL: l-d/code-heavy — exit 1 but EXPECTED 0 … Cannot find module '…/git-lens-l-d-code-doc-ratio.ts'
+PASS: l-g/cycle-repo — exit 1 (expected 1)           ← 假 PASS
+FAIL: l-g/clean-repo — exit 1 but EXPECTED 0 … Cannot find module '…/git-lens-l-g-structural-drift.ts'
+FAIL: l-s/strong-module — exit 1 but EXPECTED 0 … Cannot find module '…/git-lens-l-s-behavior-variance.ts'
+PASS: l-s/weak-module — exit 1 (expected 1)          ← 假 PASS
+EXIT=1
+```
+⇒ 实测正是 **3 例假 PASS**（Proposal 的读数；ADR-007 旧注释只记了 1 例）。
+
+改动后（新 selfcheck，把 `plugin/scripts/phase-declare.ts` 在临时副本中改名以模拟探针未加载）：
+```
+NOT-EVALUATED(probe-not-loaded: …/plugin/scripts/phase-declare.ts) l-d/prose-heavy
+NOT-EVALUATED(probe-not-loaded: …/plugin/scripts/phase-declare.ts) l-d/code-heavy
+NOT-EVALUATED(probe-not-loaded: …/plugin/scripts/phase-declare.ts) l-d/empty
+…
+EXIT=2
+```
+⇒ 该轴 0 行 `PASS:`，退出码 2；「探针没加载」再也不可能落进「期望 exit 1」的 PASS 分支。
+（另有一条自动化负对照：`plugin/test/git-lens-selfcheck.test.mjs` — 探针缺失 + moduleGraph 缺失两个 shadow，断言无 PASS、exit 2。）
+
+**AC2（L_D 活仪器，两个方向）**
+- 真实仓库：`PASS: l-d/prose-heavy — exit 1 (expected 1)`、`PASS: l-d/code-heavy — exit 0 (expected 0)`、`PASS: l-d/empty — exit 0 (expected 0)`（见 AC4 全文）。
+- 临时副本把 `computeRatio` 的阈值改成恒不 flagged（`FLAG_THRESHOLD = 1e9`）：
+```
+FAIL: l-d/prose-heavy — exit 0 but EXPECTED 1. Output: { … "docLines": 240, "codeLines": 7,
+  "ratio": 34.285714285714285, "verdict": "PASS", "flagged": false }
+PASS: l-d/code-heavy — exit 0 (expected 0)
+PASS: l-d/empty — exit 0 (expected 0)
+```
+⇒ 读数真的跟着阈值走（不是恒真/恒假的自证）。
+
+**AC3（L_G 活仪器，两个方向 + 读不懂）**
+- 真实仓库：`PASS: l-g/cycle-repo — exit 1 (expected 1) — count=1 members=["packages/quay/src/cycle-a.ts -> packages/quay/src/cycle-b.ts"]`
+- 真实仓库：`PASS: l-g/clean-repo — exit 0 (expected 0) — count=0 members=[]`
+- 临时副本删掉有环夹具的 `extensions.tsAnalysis.moduleGraph`：`NOT-EVALUATED(reading-unavailable: … has no extensions.tsAnalysis.moduleGraph … — directory-level cycles are NOT evaluated (not "0 cycles")) l-g/cycle-repo`（⛔ 既不是 PASS 也不是「0 环」）
+
+**AC4（真实仓库整体读数，完整 stdout）**
+```
+== L_D code:doc ratio ==
+PASS: l-d/prose-heavy — exit 1 (expected 1)
+PASS: l-d/code-heavy — exit 0 (expected 0)
+PASS: l-d/empty — exit 0 (expected 0)
+
+== L_G structural-drift (directory-level moduleGraph cycles) ==
+PASS: l-g/cycle-repo — exit 1 (expected 1) — count=1 members=["packages/quay/src/cycle-a.ts -> packages/quay/src/cycle-b.ts"]
+PASS: l-g/clean-repo — exit 0 (expected 0) — count=0 members=[]
+
+== L_S behavior-variance ==
+NOT-EVALUATED(axis-retired: no living product-code L_S instrument (the archived behavior-variance probe is not revived)) l-s/strong-module
+NOT-EVALUATED(axis-retired: no living product-code L_S instrument (the archived behavior-variance probe is not revived)) l-s/weak-module
+
+NOT-EVALUATED: at least one axis could not be judged (see the NOT-EVALUATED lines above).
+      This is NOT 'all fixtures passed' — exit 2 is the ADR-007 enforcement contract for it.
+EXIT=2
+```
+`grep -c MODULE_NOT_FOUND` 同一输出 ⇒ **0**。
+
+**AC5（门引擎真实事件）— 待外部**
+- 跑前读数：主检出 `/data/home/yale/work/quay/.quay/gate-events.jsonl` 619,734 行，`grep -c '"gate":"adr-007"'` ⇒ **0**。
+- 生产代码路径（真 kernel：loader → makeAdrGate → runAcceptance → appendGateEvent，无替身）已在 worktree 端到端跑通（`quality-gate-driver.ts --root <worktree> --once`）：
+  - 装配行：`adr-enforcement-report 例程已装配（enabled, interval=1440m，未声明 loop.adr_enforcement_report ⇒ 缺省节奏（default-on…）；report-only…）`
+  - 引擎写的 GateEvent：`{"gate":"adr-007","actor":"adr-enforcement-report","verdict":"fail","payload":{"reason":"acceptance failed (exit 2) — … NOT-EVALUATED: at least one axis could not be judged …"}}`（verdict=非 pass；reason 含 NOT-EVALUATED，与 AC4 的 exit 2 一一对应）
+  - 同轮 quality-round Fact：`{"name":"adr-enforcement-report","state":"not-evaluated","reason":"not-evaluated:selfcheck-exit-2 — ADR-007 …"}`，value.gates=[ADR-001 pass, ADR-007 exitCode=2]
+- ⛔ **为什么不在主检出上取这条读数**：主检出（author）跑的是 develop 的代码；本任务的 selfcheck 只存在于本分支/worktree。gate 的 `enforcement:` 命令是在**被测工作区自己的 cwd** 里执行的，所以在主检出上跑一轮只会得到旧 selfcheck 的 exit 1（reason 里没有 NOT-EVALUATED）——把那一行贴成 AC5 的事件就是伪造生产证据（硬规则 4 推论三：不能把「实现了、测试绿了」当「生产跑了」）。真实读数只能在本任务落地（fan-in ff develop）且 promotion-driver 的 `syncDevelopToDoc` 把主检出快进到 develop 之后出现。
+- 承接者（自动，无需人打开开关）：`adr-enforcement-report` 例程 **DEFAULT-ON**、间隔 1440m。调度状态是**进程内内存**（不落 `.quay/routine-last-run.json`——那是 probe 轨道的载体），所以主检出上任意一次 `quality-gate-driver --once` 或常驻轮次都 **due**。落地后的核对命令：
+  `node --experimental-strip-types plugin/scripts/quality-gate-driver.ts --root /data/home/yale/work/quay --once`
+  然后 `grep -c '"gate":"adr-007"' /data/home/yale/work/quay/.quay/gate-events.jsonl`（应 ≥1）与 `tail -1 /data/home/yale/work/quay/.quay/quality-round.jsonl`（facts 里应有 `adr-enforcement-report`）。
+
+**AC6（HALF 2 未被连带关掉）**
+```
+workspaceEnforcesDarkAxis(/data/home/yale/work/quay) = true
+64:    - "ADR-007"   # dark-axis instrument regression gate (git-lens-selfcheck); wired 2026-07-20
+```
+
+**观察项：其它 0 事件的配置门（未在本任务接线，交人裁定）**
+2026-10-22 主检出 `.quay/gate-events.jsonl`（619,7xx 行）按 `"gate"` 计数，`gates:` 里声明的 **16 个非 ADR 门**全部 0 条：
+- it0（6）：impl-row 0 · line-budget 0 · vmeta-lag 0 · audit-independence 0 · dogfood-evidence 0 · drivable-workspace 0
+- fixed（6）：delivery-standalone-smoke 0 · anti-gaming 0 · loadbearing-test 0 · tree-hygiene 0 · worktree-branch-hygiene 0 · build-evidence 0
+- testPass（4）：it0-dod-check-tests 0 · ts-typecheck 0 · split-or-commit 0 · enforcement-with-design 0
+另有 `adr-001` 0 / `adr-007` 0（本任务的新例程覆盖 adr 一族）。注意 `ts-typecheck` 由 `fan-in-ts-typecheck-gate.ts` 直接运行、不经门引擎 ⇒ 对它「0 事件」≠「从未运行」；其余各门是否也有别处的直接调用者，仍是待判的观察项。
+
+**DoD 读数**
+- `bash scripts/test.sh --for-task gap-adr007-half1-selfcheck-probes-archived-and-gate-never-invoked --allow-thin` ⇒ `GATE_EXIT=0`（137 tests / 137 pass / 0 fail；scoped 静态检查全 PASS，含 `sh-census-check`：embeddedInterpreterLines=6501 ≤ 6566）。
+- `anti-drift-touches-check.ts --task <id> --worktree <wt> --merge-target develop` ⇒ `ANTI-DRIFT OK — 14 actual file(s), all within declared Touches`。
+- `git diff develop -- archive/` 为空；`archive/2026-09-07-zero-call-scripts/` 未被改动或复活。
+- L_S 两个用例仍在（各自 NOT-EVALUATED），未被删除。
+- `grep -rn 'adr-enforcement' plugin/scripts/worker-fan-in.ts` ⇒ 0 命中（新例程不在 fan-in 路径上）。
+- 仪器实现说明：读数逻辑在 `experiments/quay-perpetual-stream/scripts/git-lens-instrument.mjs`（程序文件），`.sh` 只保留夹具表——因为 `plugin/sh-census-baseline.json` 是只降不升的棘轮，把 ~25 行 `node -e` 内嵌进 tracked `.sh` 会让它回升。
 
 ## Touches
 
