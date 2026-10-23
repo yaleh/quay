@@ -3,7 +3,7 @@ id: gap-release-model-check-mutation-case-and-manifest-enrollment
 title: release-model-check.ts 是唯一 P4-suspicious 守卫（never-fired 且无 mutation
   case、未进任何被解析的注册面）⇒ 补 per-invariant 变异验证并接入 run_static_checks，使其从 suspicious 翻到
   preventive
-status: todo
+status: ready
 labels:
   - gap
   - defect
