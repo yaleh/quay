@@ -222,8 +222,8 @@ R3 `spawns-test-sh` 的 **shrink-only** ratchet 约束 —— 新建一个 spawn
 
 ## Blocker
 
-**2026-10-23T20:20:51.433Z — worker 未落地（exited-not-landed）**
+**2026-10-23T21:22:37.396Z — worker 未落地（exited-not-landed）**
 
-- 未落地原因：step=suite: oom-killed (3) — recovery exhausted at floor concurrency 32 — no declared rung produced a complete verdict (64,48,32); needs a code/config fix, see plugin/scripts/full-suite-runner.ts
+- 未落地原因：step=suite: oom-killed (1) — new regression at lower concurrency: plugin/test/ownership-active-slice-adapter.test.mjs (passed at the original concurrency 128, fails at 48) — needs a code fix
 - run_id：wk-prod-anchor
-- session_id：432e6257-472e-46e9-906b-e600f4c73db1
+- session_id：d6dad293-4112-427f-af6e-6caa52195d69
