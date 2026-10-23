@@ -98,7 +98,7 @@ AC924-4 覆盖「confirmed 候选走 Planner 的 semantic-judged 路由且 mecha
 - `goals/AC-920-unencapsulated-state-端到端跑通-线索器只产-candidate-判断器拒绝-memoized-误报.md`
 - `plugin/test/unencapsulated-state-admission.test.mjs`
 - `tasks/gap-ac920-criterion-pipe-swallows-exit-code.md`
-- `meta/META-017-*.md`
+- `meta/META-017-请裁定-ac-920-判据-2-1-tail-6-恒-pass-的处置-改判据-退役-保持现状-ac-922-已-sup.md`
 
 <!-- 说明：前两个文件本任务只读/只跑，不修改；Touches 用来说明裁定对象与 criterion 的承载者。 -->
 
