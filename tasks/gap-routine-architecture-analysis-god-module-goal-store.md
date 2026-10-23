@@ -41,7 +41,9 @@ Split the criterion-attribution parsers (L1117-1730) into core/criterion-attribu
 
 **已修 —— 不是「已注意到」。** 复核载体记录：`.quay/routine-findings.jsonl` 里 runId
 `architecture-analysis-1792752934532` 有两条（`kind:finding` verdict=confirmed、`kind:filing-round`），
-finding 内容与任务体 `## Finding` 逐字一致 ⇒ 观测对象存在且属实。
+finding 内容与任务体 `## Finding` 逐字一致 ⇒ 观测对象存在且属实（本轮以 `grep -c
+"architecture-analysis-1792752934532" .quay/routine-findings.jsonl` → 8 条、其中 findingId
+`god-module-goal-store` verdict=confirmed 复验）。
 
 按 Requested action 把两处自包含职责**逐字**搬出（`git show develop:…` 与搬迁后的正文逐段对照，无改写）：
 
@@ -55,19 +57,24 @@ finding 内容与任务体 `## Finding` 逐字一致 ⇒ 观测对象存在且�
 `plugin/scripts/criterion-failure-attribution-check.ts` 的名与身份都不变；`goalStatusOf`（读本 store 的记录文件）
 刻意**留在 store**，使 staleness 模块保持零记录存储依赖的叶子。
 
-读数（本任务提交上实测，非引用）：
+单一定义复验（本轮实跑，非引用）：`grep -rn "function evaluateCriterionAttribution" packages plugin`
+只命中 `core/criterion-attribution.ts:609`；`grep -rn "function readGoalStalenessIndex"` 只命中
+`core/goal-staleness.ts:150` ⇒ 拆分后没有第二份实现。
 
-- L_D: valueSccs=0 typeSccs=0 reverseEdges=0 files=511 edges=1526（`plugin/scripts/import-graph-check.ts`，exit 0，PASS）
+读数（本轮在并入了 develop `b53feef00` 的 worktree 上实测，非引用）：
+
+- L_D: valueSccs=0 typeSccs=0 reverseEdges=0 files=511 edges=1526 valueEdges=1389 typeEdges=137（`plugin/scripts/import-graph-check.ts`，exit 0，PASS）
 - L_G: goalStoreLines=3427 before=4167 extractedLeafModules=2 runtimeExportsBefore=53 runtimeExportsAfter=53
   （旧/新 namespace 逐键 diff：`LOST=[]`、`ADDED=[]` ⇒ 对外值导出集未变；finding 里的「64 exports」含 11 个类型导出）
 
 验证实跑：
 
-- `tsc --noEmit`（根，all packages）exit 0；`tsc --noEmit -p packages/quay` exit 0。
+- `tsc --noEmit -p packages/quay` exit 0（本轮复跑）。
 - `plugin/test/criterion-failure-attribution-check.test.mjs` + `goal-store-write-gate-criterion-attribution.test.mjs`
   + `gap-goal-status-stale-achieved-after-new-active-criterion-filed.test.mjs`：**61/61 pass**，其中 C1
   「the ratchet re-exports the SAME predicate — identity, not a copy」仍绿（`checker.X === goalStore.X`）。
 - `errexit-abort-silent-exits-zero` / `frozen-population-bare-failure-exits-zero` / `active-ac-must-have-criterion`：15/15 pass。
+- `anti-drift-touches-check.ts --task … --worktree … --merge-target develop`：`ANTI-DRIFT OK`（5 actual files，全在 Touches 内）。
 
 ## 落地阻塞（已解除）
 
@@ -77,9 +84,12 @@ finding 内容与任务体 `## Finding` 逐字一致 ⇒ 观测对象存在且�
 owner = `gap-unencapsulated-state-clue-judge-e2e`，该任务已落地，develop 现含该测试文件。
 
 2026-10-24 在并入 develop `ea6c3e45f` 的 worktree 上重跑同一 scoped 门：**228 tests / 0 fail**，其中
-`能力闸 AC8(生产面) — 本仓库真 goals 树零误报` 转绿。此后 develop 只前进两个 task-doc 提交
-（`38656a74e` / `e9ab23f1c`，零代码变更），worktree 已并入 `e9ab23f1c`，代码 delta 与门跑时逐字节相同；
-据此写入 `.quay/scoped-gate-cache.json`（`developSha=e9ab23f1c35e7a34e49e56e5477c0dc97ba8cc32`）。
+`能力闸 AC8(生产面) — 本仓库真 goals 树零误报` 转绿。
+
+本轮（2026-10-24，develop `b53feef00`）在 worktree 上复跑同一 scoped 门：
+`bash scripts/test.sh --for-task gap-routine-architecture-analysis-god-module-goal-store --allow-thin`
+→ **228 tests / 228 pass / 0 fail**（exit 0）。据此写入 `.quay/scoped-gate-cache.json`，键含
+`developSha=$(git rev-parse develop)`，使 fan-in 在锁内 merge 到同一 develop tip 时可证明性地跳过冗余复跑。
 
 - 负控制（硬规则 4 推论四，保留为历史记录）：在 pristine `develop`（0f9616be0）的 detached worktree 上
   同一文件同一断言同样红、同样 3 条 ⇒ 当时与本任务 delta 无关。
@@ -101,8 +111,14 @@ owner = `gap-unencapsulated-state-clue-judge-e2e`，该任务已落地，develop
 
 ## Blocker
 
+历史阻断记录（均已解除）：
+
 **2026-10-23T19:38:13.761Z — worker 未落地（exited-not-landed）**
 
 - 未落地原因：step=suite: AssertionError [ERR_ASSERTION]: at least one bin is under-sampled (otherwise the rule is vacuous) [baseline A/B: HARD RED (task-introduced-red) — the task's red set is NOT a subset of the develop baseline red set: added=plugin/test/full-suite-runner-oom-policy.test.mjs changed=-]
 - run_id：wk-prod-anchor
 - session_id：e8315081-372d-4e9d-8042-c6f62012a423
+- 2026-10-24 复核：该断言住在 `plugin/test/task-granularity-advice.test.mjs:368`（生产载体 AC6 臂），
+  本轮在 pristine `develop`（`b53feef00`）的 detached worktree 上跑同一文件，**同样红、同一断言**
+  ⇒ 该红是 develop-wide 的生产数据驱动红，⛔ 非本 delta 引入；`full-suite-runner-oom-policy.test.mjs`
+  带 `@load-sensitive child-spawn` 标注，上一轮的 added 红属套件争用下的 flake 形态。
