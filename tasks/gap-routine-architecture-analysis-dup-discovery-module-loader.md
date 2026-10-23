@@ -122,3 +122,11 @@ Extract one `makeEngineModuleLoader(root, cache, unresolved[])` into a shared ro
 - `plugin/test/discovery-method-routine.test.mjs`
 - `plugin/test/open-semantic-discovery-routine.test.mjs`
 - `tasks/gap-routine-architecture-analysis-dup-discovery-module-loader.md`
+
+## Blocker
+
+**2026-10-23T12:09:40.691Z — worker 未落地（exited-not-landed）**
+
+- 未落地原因：step=suite: incomplete suite (615/615 files) — recovery exhausted at floor concurrency 32 — no declared rung produced a complete verdict (64,48,32); needs a code/config fix, see plugin/scripts/full-suite-runner.ts
+- run_id：wk-prod-anchor
+- session_id：82bb17ff-f221-4439-ab3b-cbaaee5de17d
