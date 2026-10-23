@@ -3,7 +3,7 @@ id: gap-routine-architecture-analysis-god-module-goal-store
 title: "architecture-analysis: 4,167 lines / 64 exports / 34 importers in one
   module (archguard: quay/src/core fanIn 221) carrying at least five separable
   jobs — criterion-root/tree resolu"
-status: todo
+status: ready
 labels:
   - gap
   - routine-filed
