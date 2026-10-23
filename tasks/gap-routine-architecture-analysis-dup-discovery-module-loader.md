@@ -3,7 +3,7 @@ id: gap-routine-architecture-analysis-dup-discovery-module-loader
 title: "architecture-analysis: archguard dup hash d5a5945972ad7036 (177 tokens /
   17 lines): the `load` arrow that resolves an engine module, memoizes into
   _engineModuleCache, imports via p"
-status: ready
+status: done
 labels:
   - gap
   - routine-filed
