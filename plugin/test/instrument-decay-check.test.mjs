@@ -418,6 +418,185 @@ test("形态 D — 读 git 的例程按声明 not-applicable（⛔ 不是 fresh�
   assert.equal(res.decayed.filter((d) => d.kind === "stale-evaluated").length, 0);
 });
 
+// ── 形状 B 的裁定（adjudication）──────────────────────────────────────────────────────────────────
+// gap-fan-in-step-trace-rate-stopped-adjudication：Shape B 无法区分「按设计罕见 / 条件性不可达」与
+// 「写手腐烂」。描述符可以携带机器可读裁定；裁定**必须可过期**，且被裁定的分组不得从读数里消失。
+
+const NOW_MS = Date.parse("2026-10-23T00:00:00.000Z");
+const FUTURE = "2026-11-22T00:00:00.000Z";
+const PAST = "2026-10-01T00:00:00.000Z";
+
+/** 一个 Shape B 命中的最小载体：merge-develop 在写，old-group 停了 5 天。 */
+function rateStoppedFixture() {
+  const dir = tmpDir("idc-adj-");
+  writeCarrier(dir, "fan-in-step-trace.jsonl", [
+    stepRec("merge-develop", RECENT),
+    stepRec("old-group", OLD),
+    stepRec("old-group", OLD),
+  ]);
+  return dir;
+}
+
+function rateSpec(adjudicated) {
+  return {
+    file: "fan-in-step-trace.jsonl", groupBy: "step", expected: ["merge-develop"],
+    shapeB: true, note: "", ...(adjudicated !== undefined ? { adjudicated } : {}),
+  };
+}
+
+test("裁定 — 声明存在且未过期：rare-by-design 进 adjudicated[] 而非 decayed[]，decayedCount 不计它", () => {
+  const dir = rateStoppedFixture();
+  const spec = rateSpec([
+    { group: "old-group", kind: "rare-by-design", reason: "only written on a rare exceptional path", reviewAfter: FUTURE },
+  ]);
+  const res = analyzeCarrier(dir, spec, DEFAULT_STALE_SECONDS, NOW_MS);
+  assert.equal(res.decayed.filter((d) => d.kind === "rate-stopped").length, 0, "an adjudicated group is NOT decay");
+  assert.equal(res.adjudicated.length, 1);
+  const a = res.adjudicated[0];
+  assert.equal(a.group, "old-group");
+  assert.equal(a.kind, "rare-by-design");
+  assert.equal(a.state, "rare-by-design");
+  assert.equal(a.reviewAfter, FUTURE);
+  assert.equal(a.condition, null);
+  // ⛔ 裁定不隐藏读数：count / lastWriteMs 照样在 adjudicated 里。
+  assert.equal(a.count, 2);
+  assert.equal(a.lastWriteMs, Date.parse(OLD));
+
+  const out = analyzeAll(dir, { staleSeconds: DEFAULT_STALE_SECONDS, nowMs: NOW_MS }, [spec]);
+  assert.equal(out.decayedCount, 0);
+  assert.equal(out.adjudicatedCount, 1, "the adjudicated count is a SEPARATE reading, never folded into decayedCount");
+  assert.equal(out.healthyCount, 1);
+});
+
+test("裁定负控制 — reviewAfter 已过（或删掉声明）⇒ 同一批组回到 decayed[]，且 detail 点名过期", () => {
+  const dir = rateStoppedFixture();
+  const expired = analyzeCarrier(dir, rateSpec([
+    { group: "old-group", kind: "rare-by-design", reason: "only written on a rare exceptional path", reviewAfter: PAST },
+  ]), DEFAULT_STALE_SECONDS, NOW_MS);
+  const stopped = expired.decayed.filter((d) => d.kind === "rate-stopped");
+  assert.deepEqual(stopped.map((d) => d.group), ["old-group"], "an expired adjudication exempts nothing");
+  assert.equal(expired.adjudicated.length, 0);
+  assert.match(stopped[0].detail, /adjudication expired at 2026-10-01/);
+  assert.match(stopped[0].detail, /not a permanent exemption/);
+
+  // 删掉声明：同一份数据回到腐烂（对照证明豁免来自声明，不是来自数据形状）。
+  const undeclared = analyzeCarrier(dir, rateSpec(), DEFAULT_STALE_SECONDS, NOW_MS);
+  assert.deepEqual(undeclared.decayed.filter((d) => d.kind === "rate-stopped").map((d) => d.group), ["old-group"]);
+  assert.equal(undeclared.adjudicated.length, 0);
+});
+
+test("裁定 — 读不懂的声明不产生豁免（无 reason / reviewAfter 读不出 / 未知 kind）", () => {
+  const dir = rateStoppedFixture();
+  const cases = [
+    [{ group: "old-group", kind: "rare-by-design", reason: "   ", reviewAfter: FUTURE }, /no reason/],
+    [{ group: "old-group", kind: "rare-by-design", reason: "real reason here", reviewAfter: "not-a-date" }, /unreadable/],
+    [{ group: "old-group", kind: "wishful-thinking", reason: "real reason here", reviewAfter: FUTURE }, /unknown adjudication kind/],
+  ];
+  for (const [decl, re] of cases) {
+    const res = analyzeCarrier(dir, rateSpec([decl]), DEFAULT_STALE_SECONDS, NOW_MS);
+    assert.equal(res.adjudicated.length, 0, `must NOT exempt: ${JSON.stringify(decl)}`);
+    const stopped = res.decayed.filter((d) => d.kind === "rate-stopped");
+    assert.deepEqual(stopped.map((d) => d.group), ["old-group"]);
+    assert.match(stopped[0].detail, re);
+  }
+});
+
+test("裁定 — conditional-on-input：条件命令 exit 0 ⇒ explained-absent 并附条件读数；exit 1 ⇒ 仍报 rate-stopped", () => {
+  const dir = rateStoppedFixture();
+  const hold = analyzeCarrier(dir, rateSpec([
+    { group: "old-group", kind: "conditional-on-input", reason: "unreachable while the input condition holds", conditionCmd: "exit 0", reviewAfter: FUTURE },
+  ]), DEFAULT_STALE_SECONDS, NOW_MS);
+  assert.equal(hold.decayed.filter((d) => d.kind === "rate-stopped").length, 0);
+  assert.equal(hold.adjudicated.length, 1);
+  assert.equal(hold.adjudicated[0].state, "explained-absent");
+  assert.equal(hold.adjudicated[0].condition.cmd, "exit 0");
+  assert.equal(hold.adjudicated[0].condition.exitCode, 0);
+
+  // 负控制：条件不成立 ⇒ 缺席不再有解释 ⇒ 照常报腐烂（fail-closed 到「报腐烂」）。
+  const broken = analyzeCarrier(dir, rateSpec([
+    { group: "old-group", kind: "conditional-on-input", reason: "unreachable while the input condition holds", conditionCmd: "exit 1", reviewAfter: FUTURE },
+  ]), DEFAULT_STALE_SECONDS, NOW_MS);
+  const stopped = broken.decayed.filter((d) => d.kind === "rate-stopped");
+  assert.deepEqual(stopped.map((d) => d.group), ["old-group"], "a false condition must NOT exempt the group");
+  assert.match(stopped[0].detail, /condition command did not hold \(exit 1\)/);
+  assert.equal(broken.adjudicated.length, 0);
+
+  // 缺条件命令同样不豁免（否则 conditional-on-input 会退化成无条件的永久豁免）。
+  const noCmd = analyzeCarrier(dir, rateSpec([
+    { group: "old-group", kind: "conditional-on-input", reason: "unreachable while the input condition holds", reviewAfter: FUTURE },
+  ]), DEFAULT_STALE_SECONDS, NOW_MS);
+  assert.equal(noCmd.adjudicated.length, 0);
+  assert.match(noCmd.decayed.find((d) => d.kind === "rate-stopped").detail, /no conditionCmd/);
+});
+
+// ── 生产 MANIFEST 的 5 条裁定（本任务的交付物本身）────────────────────────────────────────────────
+// 用真实描述符 + 合成载体：5 个分组都命中 Shape B，但描述符声明了裁定 ⇒ 全部进 adjudicated[]。
+// ⚠️ suite-rerun-green 的 conditional-on-input 跑的是**生产条件命令**（读载体尾部最后一条 rerun），
+// 因此这个用例同时证明「声明的可执行条件读数」真的能跑、且方向正确。
+
+const ADJUDICATED_GROUPS = [
+  "verification-round-record", "catch-up-develop", "suite-rerun-green",
+  "suite-recovery-certified", "suite-recovery-new-regression",
+];
+const BASELINE_RED_FILE = "plugin/test/task-granularity-advice.test.mjs";
+
+function manifestFixtureRows({ lastRerunState = "rerun-red", lastRerunFiles = [BASELINE_RED_FILE] } = {}) {
+  const rows = [];
+  for (const s of COMPANION_STEPS) rows.push(stepRec(s, RECENT));
+  for (const s of SUITE_STEPS) rows.push(stepRec(s, RECENT));
+  for (const g of ADJUDICATED_GROUPS) rows.push(stepRec(g, OLD));
+  rows.push({ event: "step-end", step: "rerun", task: "gap-x", runId: "wk-prod-1", ts: RECENT, epoch: epochOf(RECENT), exit: 1, ok: false, state: lastRerunState, files: lastRerunFiles });
+  return rows;
+}
+
+test("生产 MANIFEST — 5 个 rate-stopped 分组全部被裁定（4 rare-by-design + 1 explained-absent），0 腐烂", () => {
+  const dir = tmpDir("idc-manifest-adj-");
+  writeCarrier(dir, "fan-in-step-trace.jsonl", manifestFixtureRows());
+  const res = analyzeCarrier(dir, MANIFEST[0], DEFAULT_STALE_SECONDS, NOW_MS);
+  assert.deepEqual(res.decayed.filter((d) => d.kind === "rate-stopped"), [], "no rate-stopped group may survive the adjudications");
+  assert.deepEqual(res.adjudicated.map((a) => a.group).sort(), [...ADJUDICATED_GROUPS].sort());
+  const green = res.adjudicated.find((a) => a.group === "suite-rerun-green");
+  assert.equal(green.state, "explained-absent", "the baseline-red condition is a real executable reading, not prose");
+  assert.equal(green.condition.exitCode, 0);
+  assert.match(green.condition.cmd, /task-granularity-advice\.test\.mjs/);
+  for (const g of ADJUDICATED_GROUPS.filter((x) => x !== "suite-rerun-green")) {
+    assert.equal(res.adjudicated.find((a) => a.group === g).state, "rare-by-design");
+  }
+});
+
+test("生产 MANIFEST 负控制 — 最新的 rerun 变绿 ⇒ suite-rerun-green 的条件不成立 ⇒ 回到 decayed[]", () => {
+  const dir = tmpDir("idc-manifest-adj-neg-");
+  writeCarrier(dir, "fan-in-step-trace.jsonl", manifestFixtureRows({ lastRerunState: "rerun-green", lastRerunFiles: ["plugin/test/other.test.mjs"] }));
+  const res = analyzeCarrier(dir, MANIFEST[0], DEFAULT_STALE_SECONDS, NOW_MS);
+  const stopped = res.decayed.filter((d) => d.kind === "rate-stopped").map((d) => d.group);
+  assert.deepEqual(stopped, ["suite-rerun-green"], "a green rerun removes the conditional-on-input explanation");
+  assert.match(res.decayed.find((d) => d.group === "suite-rerun-green").detail, /condition command did not hold/);
+  assert.equal(res.adjudicated.length, 4, "the other four rare-by-design adjudications still hold");
+});
+
+test("CLI --json — 裁定在机器面上：decayedCount 不含它们，adjudicated[] 独立可见", () => {
+  const dir = tmpDir("idc-adj-json-");
+  writeCarrier(dir, "fan-in-step-trace.jsonl", manifestFixtureRows());
+  const r = runChecker(dir, ["--json"]);
+  assert.equal(r.status, 0, `adjudicated-only ⇒ no decay ⇒ exit 0: ${r.stderr}`);
+  const out = JSON.parse(r.stdout);
+  assert.equal(out.ok, true);
+  assert.equal(out.decayedCount, 0);
+  assert.equal(out.adjudicatedCount, 5);
+  const ft = out.carriers.find((c) => c.file === "fan-in-step-trace.jsonl");
+  assert.deepEqual(ft.decayed, []);
+  assert.equal(ft.adjudicated.length, 5);
+  assert.ok(ft.adjudicated.every((a) => a.reviewAfter === FUTURE || typeof a.reviewAfter === "string"));
+  assert.ok(ft.adjudicated.every((a) => a.count > 0 && typeof a.lastWrite === "string"));
+
+  const human = runChecker(dir);
+  assert.equal(human.status, 0);
+  assert.match(human.stdout, /INSTRUMENT-ADJUDICATED: \.quay\/fan-in-step-trace\.jsonl — 5 group\(s\) adjudicated \(NOT counted as decay\)/);
+  assert.match(human.stdout, /adjudicated: suite-rerun-green — explained-absent/);
+  assert.match(human.stdout, /5 adjudicated \(not decay\)/);
+});
+
+
 // ── 未覆盖 ≠ 健康（AC3）─────────────────────────────────────────────────────────────────────────────
 
 test("uncovered — measure-history 列入且不计入健康载体数（⛔ 未检查与检查过且干净不同形）", () => {
