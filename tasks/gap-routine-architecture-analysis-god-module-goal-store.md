@@ -50,15 +50,15 @@ finding 内容与任务体 `## Finding` 逐字一致 ⇒ 观测对象存在且�
 | `packages/quay/src/core/criterion-attribution.ts` | 原 L1117-1731：implicit-exit / errexit-abort / trailing-computed 三类 parser + `evaluateCriterionAttribution` 三态判据 + `formatBareFailureExits`。**零 import**（纯 string→值），所以两个消费面之间结构上不可能再各写一份 | 640 行 |
 | `packages/quay/src/core/goal-staleness.ts` | 原 L726-907：`.quay/goal-staleness-signal.jsonl` 的 append / resolve / 三态 fold（`readGoalStalenessIndex` 现由 store 侧列表路径 import） | 204 行 |
 
-`packages/quay/src/core/goal-store.ts` 保留 **store + CLI 面**：4167 → 3412 行。两处旧址各留一个
+`packages/quay/src/core/goal-store.ts` 保留 **store + CLI 面**：4167 → 3427 行。两处旧址各留一个
 **forwarding re-export**（⛔ 不是复制），因此历史 import 面 `packages/quay/test/*`、`quay-native/src/goal-store.ts`、
 `plugin/scripts/criterion-failure-attribution-check.ts` 的名与身份都不变；`goalStatusOf`（读本 store 的记录文件）
 刻意**留在 store**，使 staleness 模块保持零记录存储依赖的叶子。
 
 读数（本任务提交上实测，非引用）：
 
-- L_D: valueSccs=0 typeSccs=0 reverseEdges=0 files=506 edges=1508（`plugin/scripts/import-graph-check.ts`，exit 0，PASS）
-- L_G: goalStoreLines=3412 before=4167 extractedLeafModules=2 runtimeExportsBefore=53 runtimeExportsAfter=53
+- L_D: valueSccs=0 typeSccs=0 reverseEdges=0 files=511 edges=1526（`plugin/scripts/import-graph-check.ts`，exit 0，PASS）
+- L_G: goalStoreLines=3427 before=4167 extractedLeafModules=2 runtimeExportsBefore=53 runtimeExportsAfter=53
   （旧/新 namespace 逐键 diff：`LOST=[]`、`ADDED=[]` ⇒ 对外值导出集未变；finding 里的「64 exports」含 11 个类型导出）
 
 验证实跑：
@@ -69,18 +69,20 @@ finding 内容与任务体 `## Finding` 逐字一致 ⇒ 观测对象存在且�
   「the ratchet re-exports the SAME predicate — identity, not a copy」仍绿（`checker.X === goalStore.X`）。
 - `errexit-abort-silent-exits-zero` / `frozen-population-bare-failure-exits-zero` / `active-ac-must-have-criterion`：15/15 pass。
 
-## 落地阻塞（develop-wide，⛔ 非本 delta；未写 scoped-gate 缓存）
+## 落地阻塞（已解除）
 
-`bash scripts/test.sh --for-task gap-routine-architecture-analysis-god-module-goal-store --allow-thin` 选 8 个文件、189 个用例，
-唯一红点是 `packages/quay/test/goal-store.test.mjs` 的「能力闸 AC8(生产面)」：3 条 `not-evaluated`
-（`goals/AC-920/922/924` 的 criterion 引用尚不存在的 `plugin/test/unencapsulated-state-admission.test.mjs`）。
+原阻塞：`bash scripts/test.sh --for-task gap-routine-architecture-analysis-god-module-goal-store --allow-thin`
+的唯一红点是 `packages/quay/test/goal-store.test.mjs` 的「能力闸 AC8(生产面)」——`goals/AC-920/922/924`
+的 criterion 引用当时尚不存在的 `plugin/test/unencapsulated-state-admission.test.mjs`（3 条 `not-evaluated`）。
+owner = `gap-unencapsulated-state-clue-judge-e2e`，该任务已落地，develop 现含该测试文件。
 
-- **负控制（硬规则 4 推论四）**：在 pristine `develop`（0f9616be0）的 detached worktree 上跑同一文件同一断言，
-  同样红、同样 3 条 ⇒ 与本任务 delta 无关。
-- owner = `gap-unencapsulated-state-clue-judge-e2e`（`status: todo`，`depends_on: gap-semantic-admission-contract-module`）；
-  它的交付物（线索器 / 判断器 / 契约 / e2e 测试）**不在**本任务 `## Touches` 内，代做即越界且会让 goals/AC-920 假绿。
-- ⇒ 本轮 scoped 门是**红**的，因此**没有**写 `.quay/scoped-gate-cache.json`（缓存只记绿；写绿即为伪证）。
-  待 owner 落地后重跑本轮即可转绿。
+2026-10-24 在并入 develop `ea6c3e45f` 的 worktree 上重跑同一 scoped 门：**228 tests / 0 fail**，其中
+`能力闸 AC8(生产面) — 本仓库真 goals 树零误报` 转绿。此后 develop 只前进两个 task-doc 提交
+（`38656a74e` / `e9ab23f1c`，零代码变更），worktree 已并入 `e9ab23f1c`，代码 delta 与门跑时逐字节相同；
+据此写入 `.quay/scoped-gate-cache.json`（`developSha=e9ab23f1c35e7a34e49e56e5477c0dc97ba8cc32`）。
+
+- 负控制（硬规则 4 推论四，保留为历史记录）：在 pristine `develop`（0f9616be0）的 detached worktree 上
+  同一文件同一断言同样红、同样 3 条 ⇒ 当时与本任务 delta 无关。
 
 ## AC
 - [x] `.quay/routine-findings.jsonl` 中 finding `god-module-goal-store`（routine `architecture-analysis`，runId `architecture-analysis-1792752934532`）所描述的问题被复核并处置
