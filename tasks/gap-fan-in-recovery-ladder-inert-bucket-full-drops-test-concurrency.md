@@ -219,3 +219,11 @@ R3 `spawns-test-sh` 的 **shrink-only** ratchet 约束 —— 新建一个 spawn
 ## Dark Axis
 
 该轴仍暗,理由: 本任务只改 `scripts/test.sh` 一个 bash 分支的 argv 转发、一个 plan-only 探针 seam 与一条下游断言，不新增/删除模块、不改变依赖方向（L_D/L_G 无读数可采）；内存与并发行为的变化由 AC1/DoD 的真实 `.quay/fan-in-suite-*.log` 与 `concurrency.maxConcurrentOverall` 读数直接度量。
+
+## Blocker
+
+**2026-10-23T20:20:51.433Z — worker 未落地（exited-not-landed）**
+
+- 未落地原因：step=suite: oom-killed (3) — recovery exhausted at floor concurrency 32 — no declared rung produced a complete verdict (64,48,32); needs a code/config fix, see plugin/scripts/full-suite-runner.ts
+- run_id：wk-prod-anchor
+- session_id：432e6257-472e-46e9-906b-e600f4c73db1
