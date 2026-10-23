@@ -8,3 +8,16 @@
 // ⛔ Do not re-add implementation here: a `core/` module may not import this file, and a body kept
 // here would put the src root back in the gate cycle the move removed.
 export * from "./core/config.ts";
+
+// The DECLARED release-branch model (`release:` section) — named explicitly so its supported
+// import surface is visible here rather than buried in the `export *` above. The bodies live in
+// `core/config.ts` (see the ⛔ above); this line only forwards them.
+export {
+  readReleaseConfig,
+  parseReleaseConfig,
+  RELEASE_CONFIG_DEFAULTS,
+  RELEASE_ADVANCE_VALUES,
+  type ReleaseConfig,
+  type ReleaseAdvance,
+  type ReleaseConfigResolution,
+} from "./core/config.ts";

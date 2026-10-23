@@ -21,8 +21,8 @@
 // REQUIRED ANYONE TO GO THROUGH IT. Being skippable is the defect; another command would not fix it.
 //
 // ── WHAT THIS SCRIPT IS ─────────────────────────────────────────────────────────────────────────
-// A JANITOR, not a judge. It runs the SAME enumeration AC-271 runs
-// (`refs/heads/release-*` + `refs/heads/release/*`), and for each branch it dispatches to exactly one
+// A JANITOR, not a judge. It runs the SAME enumeration AC-271 runs — the branches named by the
+// DECLARED `release.globs` patterns — and for each branch it dispatches to exactly one
 // of THREE mutually-distinguishable outcomes:
 //
 //   parked-compliant     `tag --points-at <b>` non-empty ⇒ already compliant. ⛔ TOUCHED NOTHING.
@@ -109,6 +109,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { isDirectEntry } from './gate-script-base.ts';
 import { enumerateReleaseRefs, git, nonEmptyLines, revParseSha } from './git-runner.ts';
+import { readReleaseModel } from './release-model-check.ts';
 
 // ── the declared vocabulary (single source; `--vocabulary-json` and the test read THIS) ──────────
 export const JANITOR_RECORD_KEYS = [
@@ -175,9 +176,10 @@ function countAhead(root: string, base: string, branch: string): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
-/** The ref a branch must be merged into for the "merged" licence. `null` = unresolvable. */
-function resolveBase(root: string, explicit: string): string | null {
-  const candidates = explicit !== '' ? [explicit] : ['develop', 'origin/develop'];
+/** The ref a branch must be merged into for the "merged" licence. `null` = unresolvable.
+ *  `baseline` is the DECLARED merge baseline (`release.baseline`), never a hardcoded branch. */
+function resolveBase(root: string, explicit: string, baseline: string): string | null {
+  const candidates = explicit !== '' ? [explicit] : [baseline, `origin/${baseline}`];
   for (const c of candidates) {
     if (revParseSha(root, `${c}^{commit}`) !== null) return c;
   }
@@ -250,21 +252,35 @@ export function runReleaseBranchJanitor(root: string, opts: JanitorOptions = {})
     carrierCalls: [],
   });
 
-  const branches = enumerateReleaseRefs(root);
+  // The release-model declaration decides what THIS pass enumerates and what "merged back" means.
+  // An unreadable declaration is an INSTRUMENT failure — ⛔ never silently replaced by the defaults
+  // (硬规则 3b: "could not read what you declared" is not "you declared the default").
+  const model = readReleaseModel(root);
+  if (model.state === 'unreadable') {
+    return empty(
+      'instrument-failure',
+      2,
+      `CAUSE=release-branch-janitor-release-model-unreadable — the .quay/config.yml release: section is present but unreadable (${model.reason}); the branch namespace this pass judges is UNKNOWN, refusing to fall back to a guess`,
+    );
+  }
+  const globs = model.config.globs;
+  const namespace = globs.map((g) => `refs/heads/${g}`).join(' + ');
+
+  const branches = enumerateReleaseRefs(root, globs);
   if (branches === null) {
     return empty(
       'instrument-failure',
       2,
-      `CAUSE=release-branch-janitor-enumeration-failed — could not enumerate refs/heads/release-* in '${root}' (not a git repo, or git unavailable) => the branch set this pass judges could not be enumerated; "could not look" is ⛔ not "none there" (hard rule 3b)`,
+      `CAUSE=release-branch-janitor-enumeration-failed — could not enumerate ${namespace} in '${root}' (not a git repo, or git unavailable) => the branch set this pass judges could not be enumerated; "could not look" is ⛔ not "none there" (hard rule 3b)`,
     );
   }
 
-  const base = resolveBase(root, opts.base ?? '');
+  const base = resolveBase(root, opts.base ?? '', model.config.baseline);
   if (base === null) {
     return empty(
       'instrument-failure',
       2,
-      `CAUSE=release-branch-janitor-base-unresolvable — neither 'develop' nor 'origin/develop' resolves in '${root}', so the "merged back?" licence cannot be answered; refusing to classify anything (an unanswerable check must not read as "merged")`,
+      `CAUSE=release-branch-janitor-base-unresolvable — neither '${model.config.baseline}' nor 'origin/${model.config.baseline}' resolves in '${root}', so the "merged back?" licence cannot be answered; refusing to classify anything (an unanswerable check must not read as "merged")`,
     );
   }
 
@@ -350,6 +366,14 @@ export function runReleaseBranchJanitor(root: string, opts: JanitorOptions = {})
     // refs/heads namespace, and a per-round housekeeping step must not depend on network reachability.
     const r = spawnSync('bash', [carrierPath, branch, '--root', root, '--no-remote'], {
       encoding: 'utf8',
+      // The carrier is often a COPY (a fixture, a vendored install) that cannot find this plugin's
+      // config reader next to itself. Hand it the DECLARED globs the janitor already resolved, so
+      // the two judges cannot disagree about which names are release-shaped.
+      env: {
+        ...process.env,
+        RELEASE_BRANCH_GLOBS: globs.join('\n'),
+        RELEASE_BRANCH_BASELINE: model.config.baseline,
+      },
     });
     const carrierExit = r.status ?? -1;
     carrierCalls.push({
@@ -611,7 +635,7 @@ function main(argv: string[]): number {
     // "none there"). On a failure the only output is the `CAUSE=` on stderr, below.
     process.stdout.write(
       `release-branch-janitor: enumerated ${result.branchCount} release branch(es) via the SAME ` +
-        'enumeration AC-271 makes (refs/heads/release-* + refs/heads/release/*)\n',
+        'default-model enumeration the invariant checker uses (the declared release.globs namespace)\n',
     );
     for (const d of result.decisions) {
       process.stdout.write(

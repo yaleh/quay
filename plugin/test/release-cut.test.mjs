@@ -356,6 +356,45 @@ test("--dry-run exits 0, lists every step in order (worktree path, --root, ledge
 });
 
 // ══════════════════════════════════════════════════════════════════════════════════════════════
+// The DECLARED release model — baseline / tag_prefix / globs are read, never hardcoded
+// (tasks/gap-release-branch-model-hardcoded-not-configurable)
+// ══════════════════════════════════════════════════════════════════════════════════════════════
+
+test("the cut takes baseline / tag_prefix / branch globs from .quay/config.yml's release: section", () => {
+  const c = makeClone("release-model");
+  try {
+    // A baseline that is NOT the historical default, and is free to check out. Branch it off the
+    // fixture's LOCAL develop (which already carries the ample shipped-set ceiling committed by
+    // makeClone), not off origin/develop (which still carries the repository's stale one).
+    assert.equal(git(c.root, "branch", "trunk", "develop").status, 0);
+    mkdirSync(join(c.root, ".quay"), { recursive: true });
+    writeFileSync(
+      join(c.root, ".quay", "config.yml"),
+      [
+        "release:",
+        '  line: "main"',
+        '  baseline: "trunk"',
+        '  globs: ["rel/*"]',
+        '  tag_prefix: ""',
+        '  advance: "manual"',
+        "",
+      ].join("\n"),
+    );
+
+    const r = run(["9.9.9", "--dry-run", "--no-push", "--no-dispatch", "--root", c.root]);
+    assert.equal(r.status, 0, `a declared model must drive the plan: ${r.stdout}${r.stderr}`);
+    // Every derived name follows the DECLARED model: bare 9.9.9 tag (tag_prefix ""), rel/ branch
+    // (globs ["rel/*"]), trunk base (baseline). None of these is producible by the old literals.
+    assert.match(r.stdout, /create 'rel\/9\.9\.9' at 'trunk'/, r.stdout);
+    assert.match(r.stdout, /release-branch-finish\.sh rel\/9\.9\.9 --cut --tag 9\.9\.9 --root /, r.stdout);
+    assert.doesNotMatch(r.stdout, /release\/v9\.9\.9/, "the historical branch name must not reappear");
+    assert.doesNotMatch(r.stdout, /--tag v9\.9\.9/, "the historical tag prefix must not reappear");
+  } finally {
+    cleanup(c.parent);
+  }
+});
+
+// ══════════════════════════════════════════════════════════════════════════════════════════════
 // AC4 — the preflight fails closed, each with its OWN CAUSE=, and creates NO worktree
 // ══════════════════════════════════════════════════════════════════════════════════════════════
 

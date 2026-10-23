@@ -80,17 +80,23 @@ export function ancestry(root: string, ancestor: string, descendant: string): bo
 }
 
 /**
- * The release-shaped branch namespace — the SAME enumeration AC-271's criterion makes
- * (`for-each-ref refs/heads/release-* refs/heads/release/*`), read by BOTH release-* scripts.
+ * The release-shaped branch namespace read by BOTH release-* scripts.
+ *
+ * `globs` is the DECLARED model's branch-name patterns (`.quay/config.yml` `release.globs`,
+ * resolved by the caller through `release-model-check.ts`). It is REQUIRED: a default here would be
+ * a second definition of the release model, and the whole point of this change is that the model
+ * has ONE declaration point.
  * `null` = the enumeration could not be PERFORMED (hard rule 3b: "could not look" must not be
  * printed as "none"). Sorted so the two callers agree on order.
  */
-export function enumerateReleaseRefs(root: string): string[] | null {
+export function enumerateReleaseRefs(
+  root: string,
+  globs: readonly string[]
+): string[] | null {
   const r = git(root, [
     'for-each-ref',
     '--format=%(refname:short)',
-    'refs/heads/release-*',
-    'refs/heads/release/*',
+    ...globs.map((g) => `refs/heads/${g}`),
   ]);
   if (r.status !== 0) return null;
   return nonEmptyLines(r.stdout).sort();

@@ -66,6 +66,144 @@ export function readLoopConfig(startDir = process.cwd()) {
   return null;
 }
 
+// ── The `release:` section — the DECLARED release-branch model ───────────────────────────────────
+//
+// THE DEFECT THIS CLOSES (gap-release-branch-model-hardcoded-not-configurable): quay's release
+// branch model (which branch releases advance, which branch they are cut from, which branch names
+// are release-shaped, what a version tag looks like, who advances the line) lived only as literals
+// in quay's own private scripts. A second quay-driven project could not DECLARE its own model, so
+// it could not check the invariant "the release line is never committed to directly and stops at
+// the most recent fully-green release". The invariant converges; the mechanism does not — a project
+// may use a single `main`, a `release/*` train, or hotfix branches.
+//
+// THREE-STATE RESOLUTION, never two (hard rule 3b):
+//   configured  — the section is present and readable; `config` is what it declares.
+//   default     — no `.quay/config.yml`, or no `release:` key at all. `config` is the historical
+//                 model the shipped carriers have always used, and `source` says so. ⛔ This is NOT
+//                 "configured": the release MODEL meter reports it as `not-configured`, not a pass.
+//   unreadable  — the section is present but does not have the declared shape. ⛔ Never silently
+//                 replaced by the defaults: "I could not read what you declared" must not look like
+//                 "you declared the default" (hard rule 3b).
+export type ReleaseAdvance = "ci" | "manual" | "none";
+
+export interface ReleaseConfig {
+  /** The branch releases ADVANCE (the line that must stand at the most recent green release). */
+  line: string;
+  /** The branch releases are cut FROM and merged back into. */
+  baseline: string;
+  /** Glob patterns that name a release-shaped branch (e.g. `release/*`, `release-*`). */
+  globs: string[];
+  /** The prefix of a version tag (`v` for `v1.2.3`; `""` for `1.2.3`). */
+  tag_prefix: string;
+  /** Who is allowed to advance `line`. `ci` = only a fully-green release run (the release.yml
+   *  `advance-master` needs: invariant); `manual`/`none` = the meter does not judge an advancer. */
+  advance: ReleaseAdvance;
+}
+
+export const RELEASE_ADVANCE_VALUES: readonly ReleaseAdvance[] = ["ci", "manual", "none"];
+
+/** The historical model the shipped carriers used before this section existed. Kept in ONE place so
+ *  the carriers' backward-compatible fallback and the meter's `not-configured` reading cannot drift
+ *  apart. */
+export const RELEASE_CONFIG_DEFAULTS: Readonly<ReleaseConfig> = Object.freeze({
+  line: "master",
+  baseline: "develop",
+  globs: Object.freeze(["release/*", "release-*"]),
+  tag_prefix: "v",
+  advance: "ci",
+}) as Readonly<ReleaseConfig>;
+
+export type ReleaseConfigResolution =
+  | { state: "configured"; config: ReleaseConfig; configPath: string; source: "config" }
+  | { state: "default"; config: ReleaseConfig; configPath: string | null; source: "default" }
+  | { state: "unreadable"; reason: string; configPath: string | null };
+
+/**
+ * Judge ONE raw `release:` value (already YAML-parsed). THE single shape judge — the runtime reader,
+ * `config-validate`, and the shipped `release-model-check.ts` meter all ask THIS question, so a
+ * config that one accepts and another rejects is impossible by construction.
+ *
+ * This judges a PRESENT value only: absence (`undefined`) is the caller's decision (carriers treat
+ * it as the historical default, the meter as `not-configured`), while a present-but-empty key
+ * (`release:` with no body ⇒ `null`) is a shape error — "declared nothing" must not silently read
+ * as "declared the default".
+ */
+export function parseReleaseConfig(
+  raw: unknown
+): { ok: true; config: ReleaseConfig } | { ok: false; reason: string } {
+  if (raw === undefined) return { ok: false, reason: "`release:` is absent (the caller decides what absence means)" };
+  if (raw === null) return { ok: false, reason: "`release:` is empty — declare line/baseline/globs/tag_prefix/advance, or remove the key" };
+  if (typeof raw !== "object" || Array.isArray(raw)) {
+    return { ok: false, reason: "`release:` must be a mapping" };
+  }
+  const r = raw as Record<string, unknown>;
+  const str = (key: string): string | null => {
+    const v = r[key];
+    return typeof v === "string" && v.trim() !== "" ? v : null;
+  };
+  const line = str("line");
+  const baseline = str("baseline");
+  const tagPrefix = r["tag_prefix"] === undefined
+    ? RELEASE_CONFIG_DEFAULTS.tag_prefix
+    : typeof r["tag_prefix"] === "string"
+      ? (r["tag_prefix"] as string)
+      : null;
+  const advance = r["advance"] === undefined ? RELEASE_CONFIG_DEFAULTS.advance : r["advance"];
+  if (!line) return { ok: false, reason: "`release.line` must be a non-empty string" };
+  if (!baseline) return { ok: false, reason: "`release.baseline` must be a non-empty string" };
+  if (tagPrefix === null) return { ok: false, reason: "`release.tag_prefix` must be a string (may be empty)" };
+  if (!RELEASE_ADVANCE_VALUES.includes(advance as ReleaseAdvance)) {
+    return { ok: false, reason: `\`release.advance\` must be one of ${RELEASE_ADVANCE_VALUES.join("|")}` };
+  }
+  let globs: string[];
+  if (r.globs === undefined) {
+    globs = [...RELEASE_CONFIG_DEFAULTS.globs];
+  } else if (!Array.isArray(r.globs) || r.globs.length === 0) {
+    return { ok: false, reason: "`release.globs` must be a non-empty list of branch-name glob patterns" };
+  } else {
+    globs = r.globs as string[];
+    for (const g of globs) {
+      if (typeof g !== "string" || g.trim() === "") {
+        return { ok: false, reason: "`release.globs` entries must be non-empty strings" };
+      }
+    }
+  }
+  const unknown = Object.keys(r).filter((k) => !["line", "baseline", "globs", "tag_prefix", "advance"].includes(k));
+  if (unknown.length > 0) {
+    return { ok: false, reason: `unknown \`release:\` key(s): ${unknown.join(", ")}` };
+  }
+  return { ok: true, config: { line, baseline, globs, tag_prefix: tagPrefix, advance: advance as ReleaseAdvance } };
+}
+
+/**
+ * Resolve the workspace's DECLARED release model. Never throws, never conflates the three states.
+ * `startDir` is searched upward for `.quay/config.yml` exactly like `loadConfig`.
+ */
+export function readReleaseConfig(startDir = process.cwd()): ReleaseConfigResolution {
+  let configPath: string | null = null;
+  try {
+    configPath = findConfig(startDir);
+  } catch {
+    configPath = null;
+  }
+  if (!configPath) {
+    return { state: "default", config: { ...RELEASE_CONFIG_DEFAULTS, globs: [...RELEASE_CONFIG_DEFAULTS.globs] }, configPath: null, source: "default" };
+  }
+  let parsed: unknown;
+  try {
+    parsed = YAML.parse(fs.readFileSync(configPath, "utf8"));
+  } catch (err) {
+    return { state: "unreadable", reason: `config.yml did not parse: ${(err as Error)?.message ?? String(err)}`, configPath };
+  }
+  const section = parsed && typeof parsed === "object" ? (parsed as Record<string, unknown>).release : undefined;
+  if (section === undefined) {
+    return { state: "default", config: { ...RELEASE_CONFIG_DEFAULTS, globs: [...RELEASE_CONFIG_DEFAULTS.globs] }, configPath, source: "default" };
+  }
+  const judged = parseReleaseConfig(section);
+  if ("reason" in judged) return { state: "unreadable", reason: judged.reason, configPath };
+  return { state: "configured", config: judged.config, configPath, source: "config" };
+}
+
 export function activeProvider(cfg, id, pluginRoot = resolvePluginRoot()) {
   const providers = cfg.config.providers ?? {};
   if (id) {

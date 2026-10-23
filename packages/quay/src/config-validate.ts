@@ -12,7 +12,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import YAML from "yaml";
-import { loadConfig, resolveProviderEntry, NATIVE_PROVIDER_UNRESOLVABLE } from "./config.ts";
+import { loadConfig, resolveProviderEntry, NATIVE_PROVIDER_UNRESOLVABLE, parseReleaseConfig } from "./config.ts";
 import { listGates } from "./gate/registry.ts";
 import { VALID_EXECUTION, VALID_AUDIT, VALID_STOP_RE } from "./loop-params.ts";
 
@@ -705,6 +705,31 @@ function validateProviderEnv(unifiedParsed: unknown | null): ConfigIssue[] {
 }
 
 // ---------------------------------------------------------------------------
+// The `release:` section — the DECLARED release-branch model
+// ---------------------------------------------------------------------------
+
+/**
+ * 9b. `release:` shape validation (gap-release-branch-model-hardcoded-not-configurable).
+ *
+ * The section is OPTIONAL — a project need not have a release line at all, and the non-goal is
+ * explicitly NOT to force `master` / `release/*` / hotfix branches on every project. But when it
+ * IS present it must be readable: `release-model-check.ts` and every release carrier read this
+ * shape, and a section one of them silently ignored would be a model that reads declared while
+ * nothing consumes it (hard rules 3b / 5b).
+ *
+ * The judge is `parseReleaseConfig` — the SAME function the runtime reader and the shipped meter
+ * use, so validator and readers cannot disagree about what a valid section is.
+ */
+function checkReleaseSection(unifiedParsed: unknown | null): ConfigIssue[] {
+  if (!unifiedParsed || typeof unifiedParsed !== "object") return [];
+  const section = (unifiedParsed as Record<string, unknown>).release;
+  if (section === undefined) return [];
+  const judged = parseReleaseConfig(section);
+  if (!("reason" in judged)) return [];
+  return [{ severity: "error", field: "release", message: judged.reason }];
+}
+
+// ---------------------------------------------------------------------------
 // File-existence check helpers (only when checkFiles is true)
 // ---------------------------------------------------------------------------
 
@@ -895,6 +920,8 @@ function runChecks({ unifiedParsed, gatesParsed, loopParsed, workspaceRoot, plug
   if (loopParsed) allIssues.push(...checkLoopFieldValues(loopParsed));
   // 9. Routine shape
   if (loopParsed) allIssues.push(...checkRoutines(loopParsed));
+  // 9b. Release-branch model shape (optional section; judged by the SAME reader the carriers use)
+  if (unifiedParsed) allIssues.push(...checkReleaseSection(unifiedParsed));
   // 10. Provider env check
   if (unifiedParsed) allIssues.push(...validateProviderEnv(unifiedParsed));
   // 11. File-existence check

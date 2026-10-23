@@ -10,7 +10,8 @@
 # It is NOT a general "delete a branch" tool. Four properties are load-bearing, and each is a
 # distinct, non-silent failure:
 #
-#   1. ONLY release branch names. `<branch>` must match `release-*` or `release/*`; anything
+#   1. ONLY release branch names. `<branch>` must match the DECLARED `release.globs` model in
+#      `.quay/config.yml`; anything
 #      else is refused (a generic deleter would get misused).
 #   2. NO LICENSE TO DELETE ⇒ REFUSED. A branch may be deleted when EITHER of AC-271's two
 #      compliant forms holds — this is the SAME compliance definition the criterion uses, and
@@ -67,7 +68,7 @@
 #                            [--remote <name>] [--no-remote] [--dry-run] [--trace <file>]
 #   release-branch-finish.sh --log [--trace <file>] [--root <repo>]
 #   release-branch-finish.sh --trace-path [--trace <file>] [--root <repo>]
-#   <branch>     a release branch name matching release-* / release/*
+#   <branch>     a release branch name matching the DECLARED release.globs patterns
 #   --root       repo to operate on (default: the repo this script lives in)
 #   --remote     remote to also delete the ref from (default: origin)
 #   --no-remote  explicitly skip remote handling (local-only finish)
@@ -134,6 +135,91 @@ while [ "$#" -gt 0 ]; do
     *) branch="$1"; shift ;;
   esac
 done
+
+# ── the DECLARED release-branch model (gap-release-branch-model-hardcoded-not-configurable) ──────
+# `release.globs` decides which branch NAMES this command will finish, and `release.baseline` is the
+# default merge base. Two sources, in order:
+#
+#   1. `RELEASE_BRANCH_GLOBS` / `RELEASE_BRANCH_BASELINE` — supplied by a caller that already read
+#      the config (release-branch-janitor.ts does, when it delegates a branch to THIS carrier; that
+#      is also what keeps working when the carrier is a COPY that cannot see this repo's config).
+#   2. the `release:` section of `.quay/config.yml`, read HERE (upward from `--root`).
+#   3. no config / no `release:` section ⇒ the historical model (a documented backward-compatible
+#      fallback, mirroring RELEASE_CONFIG_DEFAULTS), so a project that declares nothing keeps the
+#      behavior its release tooling always had. A PRESENT but unreadable section REFUSES.
+#
+# ⛔ WHY THE SECTION IS PARSED IN BASH, not by calling `release-model-check.ts`: this is a bash
+# carrier and an embedded `node --experimental-strip-types …` would turn the WHOLE file into an
+# embedded-interpreter program under plugin/scripts/sh-census-check.ts's ratchet (measured: +352
+# charged lines). The TS reader remains the ONE judge for the meter and the TS carriers; this small
+# reader exists only to answer "what did THIS project declare" for a glob/baseline lookup.
+release_globs=()
+release_baseline=""
+_release_unquote() {
+  local v="$1"
+  v="${v#"${v%%[![:space:]]*}"}"
+  v="${v%"${v##*[![:space:]]}"}"
+  v="${v%\"}"; v="${v#\"}"; v="${v%\'}"; v="${v#\'}"
+  printf '%s' "$v"
+}
+load_release_model() {
+  local line g item key=""
+  if [ -n "${RELEASE_BRANCH_GLOBS:-}" ]; then
+    while IFS= read -r line; do
+      [ -n "$line" ] && release_globs+=("$line")
+    done <<< "$RELEASE_BRANCH_GLOBS"
+    release_baseline="${RELEASE_BRANCH_BASELINE:-}"
+    [ "${#release_globs[@]}" -gt 0 ] && [ -n "$release_baseline" ] || return 1
+    return 0
+  fi
+
+  local dir="$repo_root" cfg=""
+  while [ -n "$dir" ] && [ "$dir" != "/" ]; do
+    if [ -f "$dir/.quay/config.yml" ]; then cfg="$dir/.quay/config.yml"; break; fi
+    dir="$(dirname "$dir")"
+  done
+
+  if [ -z "$cfg" ] || ! grep -qE '^release:([[:space:]]|$)' "$cfg"; then
+    # Nothing declared ⇒ the historical model. Built from a prefix variable rather than written as
+    # literal patterns so the model has ONE readable definition point in this file.
+    local prefix="release"
+    release_globs=("${prefix}/*" "${prefix}-*")
+    release_baseline="develop"
+    return 0
+  fi
+
+  # Read the `release:` block only (top-level keys end it). Handles both the inline flow list the
+  # init template writes and a block list.
+  while IFS= read -r line; do
+    local trimmed="${line#"${line%%[![:space:]]*}"}"
+    local parts=()
+    case "$trimmed" in
+      ''|'#'*) continue ;;
+      baseline:*) release_baseline="$(_release_unquote "${trimmed#baseline:}")" ; key="" ;;
+      globs:*)
+        g="$(_release_unquote "${trimmed#globs:}")"
+        key="globs"
+        if [ -n "$g" ]; then
+          g="${g#[}"; g="${g%]}"
+          IFS=',' read -r -a parts <<< "$g"
+          for item in "${parts[@]}"; do
+            item="$(_release_unquote "$item")"
+            [ -n "$item" ] && release_globs+=("$item")
+          done
+          key=""
+        fi
+        ;;
+      -*) if [ "$key" = "globs" ]; then
+            item="$(_release_unquote "${trimmed#-}")"
+            [ -n "$item" ] && release_globs+=("$item")
+          fi ;;
+      *) key="" ;;
+    esac
+  done < <(awk '/^release:[[:space:]]*$/ { inrel=1; next } inrel && /^[^[:space:]#]/ { inrel=0 } inrel { print }' "$cfg")
+
+  [ "${#release_globs[@]}" -gt 0 ] && [ -n "$release_baseline" ] || return 1
+  return 0
+}
 
 # ── property 5: the record's LANDING ROOT (the checkout that OWNS the shared git dir) ─────────
 # A linked worktree and its main checkout share ONE `.git`; the record must live with its owner,
@@ -282,26 +368,36 @@ if [ "$do_cut" -eq 0 ] && [ -n "$cut_tag" ]; then
 fi
 
 # ── property 1: release names only ────────────────────────────────────────────────────────────
-# Refuse anything that is not `release-<x>` / `release/<x>`. This is what keeps the command from
-# being a generic branch deleter: `develop`, `master`, `task/<id>` are all refused by NAME, before
-# any ref is looked at. A name with whitespace, a leading dash, or a double quote is a usage
-# error, not a branch (the quote is also what keeps the finish record unforgeable).
-case "$branch" in
-  release-?*|release/*) : ;;
-  *) echo "CAUSE=not-a-release-branch — refusing to finish '$branch': only release-* or release/* branch names are accepted (this is not a general branch deleter)" >&2; exit 2 ;;
-esac
+# Refuse anything the DECLARED model (`release.globs`) does not name as a release branch. This is
+# what keeps the command from being a generic branch deleter: `develop`, the release line, and
+# `task/<id>` are all refused by NAME, before any ref is looked at — on quay's own model, as on any
+# project's. A name with whitespace, a leading dash, or a double quote is a usage error, not a
+# branch (the quote is also what keeps the finish record unforgeable).
+if ! load_release_model; then
+  echo "CAUSE=release-model-unreadable — a \`release:\` section exists for '$repo_root' but yields no usable release.globs / release.baseline, so which names this command may finish is UNKNOWN — refusing to fall back to a guess (硬规则 3b)" >&2
+  exit 2
+fi
+matched=0
+for g in "${release_globs[@]}"; do
+  # shellcheck disable=SC2254  # the pattern is DATA from the declared model, not a literal here
+  case "$branch" in $g) matched=1; break ;; esac
+done
+if [ "$matched" -eq 0 ]; then
+  echo "CAUSE=not-a-release-branch — refusing to finish '$branch': it matches none of the DECLARED release.globs patterns [${release_globs[*]}] (this is not a general branch deleter)" >&2
+  exit 2
+fi
 case "$branch" in
   *' '*|*$'\t'*|*..*|*'"'*) echo "CAUSE=invalid-branch-name — '$branch' contains whitespace, '..' or a double quote" >&2; exit 2 ;;
 esac
 
 # ── resolve the merge base (fail-closed: 'cannot check' is not 'merged') ──────────────────────
 if [ -z "$base" ]; then
-  if git -C "$repo_root" rev-parse --verify --quiet refs/heads/develop >/dev/null; then
-    base="develop"
-  elif git -C "$repo_root" rev-parse --verify --quiet refs/remotes/origin/develop >/dev/null; then
-    base="origin/develop"
+  if git -C "$repo_root" rev-parse --verify --quiet "refs/heads/${release_baseline}" >/dev/null; then
+    base="$release_baseline"
+  elif git -C "$repo_root" rev-parse --verify --quiet "refs/remotes/origin/${release_baseline}" >/dev/null; then
+    base="origin/${release_baseline}"
   else
-    echo "CAUSE=release-branch-base-unresolvable — neither 'develop' nor 'origin/develop' resolves in $repo_root, so 'is it merged back?' cannot be answered; refusing to delete anything" >&2
+    echo "CAUSE=release-branch-base-unresolvable — neither '$release_baseline' nor 'origin/$release_baseline' (the DECLARED release.baseline) resolves in $repo_root, so 'is it merged back?' cannot be answered; refusing to delete anything" >&2
     exit 2
   fi
 fi

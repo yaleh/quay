@@ -1,19 +1,23 @@
 #!/usr/bin/env node
-// release-master-advance-needs-check.ts — assert that release.yml's `advance-master` job declares
-// EVERY other job in the file in its `needs:`, so a partially-green release can never advance master.
-// (tasks/gap-first-green-release-and-master-ff, GOAL-020 AC-274; SPEC §6.1 invariant 3)
+// release-master-advance-needs-check.ts — assert that release.yml's advancing job declares EVERY
+// other job in the file in its `needs:`, so a partially-green release can never advance the release
+// line. (tasks/gap-first-green-release-and-master-ff, GOAL-020 AC-274; SPEC §6.1 invariant 3)
 //
-// THE DEFECT THIS EXISTS FOR (structural, not hypothetical): SPEC §6 / §1 ⑤ 问 3 redefined `master`
-// as "the tag of the most recent FULLY GREEN release run" and ruled that the only thing that may move
-// it is a new `advance-master` job inside release.yml. That job's whole safety story rests on one
-// line — its `needs:` list. `needs:` is what makes "any job failed or was skipped ⇒ master does not
+// THE DEFECT THIS EXISTS FOR (structural, not hypothetical): SPEC §6 / §1 ⑤ 问 3 redefined the
+// release line as "the tag of the most recent FULLY GREEN release run" and ruled that the only thing
+// that may move it is the advancing job inside release.yml. That job's whole safety story rests on one
+// line — its `needs:` list. `needs:` is what makes "any job failed or was skipped ⇒ the line does not
 // move" TRUE: GitHub Actions skips a job whose dependency did not succeed, so fail-closed is the
 // default and needs no code. But the list is written BY HAND, and §6.1 invariant 3 names the exact
-// way it rots: add a 7th job to this workflow, forget to add it to `needs:`, and master advances on a
-// half-green release — the very failure mode the SPEC was written to end, reproduced by a one-line
+// way it rots: add a 7th job to this workflow, forget to add it to `needs:`, and the line advances on
+// a half-green release — the very failure mode the SPEC was written to end, reproduced by a one-line
 // omission that no reviewer is obliged to notice. §6.1 therefore requires this assertion to land in
 // the SAME batch as the job ("与 A 同批落地，不得延后"), the same remedy as GOAL-012's "replace
 // thrice-missed human enumeration with mechanical enumeration".
+//
+// WHICH line: `release.line` from `.quay/config.yml`, read through `release-model-check.ts`. The job
+// KEY is still `advance-master` (a name, not a branch), but nothing here assumes the branch it pushes
+// is called anything in particular — a project declares its own line.
 //
 // WHY A STRUCTURAL CHECK RATHER THAN A RUN: the defect is a property of the checked-in workflow text,
 // observable in milliseconds and without a release. Discovering it by running release.yml would need
@@ -37,7 +41,7 @@
 //   2 = usage/environment error.
 //
 // ⛔ ABSENT `needs:` IS A FAIL, NOT A NOT-EVALUATED (the one asymmetry worth stating): a job that
-// declares no dependencies runs as soon as its own turn comes, i.e. it would move master on ANY
+// declares no dependencies runs as soon as its own turn comes, i.e. it would move the line on ANY
 // release run at all. That is not "unreadable input", it is the worst possible reading of a readable
 // one, so it must be RED. Only a `needs:` key whose VALUE cannot be read as a job-name list is
 // NOT-EVALUATED.
@@ -45,10 +49,11 @@
 // ⛔ WHAT THIS DOES **NOT** COVER — declared, not silently skipped:
 //   (a) Entries in `needs:` that name no existing job (`unknownNeeds`) are PRINTED as a count on
 //       every run but are NOT a violation. GitHub rejects a workflow whose `needs:` names a missing
-//       job, so that shape cannot advance master on a partial green — it cannot run at all. It is
+//       job, so that shape cannot advance the line on a partial green — it cannot run at all. It is
 //       reported so the blind spot has a number rather than reading as "clean".
 //   (b) Only release.yml is judged. `advance-master` exists in exactly one workflow; if a second
-//       workflow ever gains the right to push master, this checker's object must widen with it.
+//       workflow ever gains the right to push the release line, this checker's object must widen
+//       with it.
 //   (c) The invariant is about JOB KEYS, not about what those jobs do. A job that is listed but is
 //       itself unable to fail (or is `if: false`) is outside this predicate.
 //
@@ -63,8 +68,9 @@ import fs from "node:fs";
 import path from "node:path";
 import { parse as parseYaml } from "yaml";
 import { emitPass, emitFail, emitNotEvaluated, isDirectEntry } from "./gate-script-base.ts";
+import { readReleaseModel } from "./release-model-check.ts";
 
-/** The workflow that carries the master-advancing job. */
+/** The workflow that carries the release-line-advancing job. */
 export const WORKFLOW_REL = ".github/workflows/release.yml";
 
 /** The job whose `needs:` must cover every other job in that workflow. */
@@ -132,7 +138,7 @@ export function judgeWorkflowText(text: string): Outcome {
     return {
       state: "not-evaluated",
       reason: "target-job-absent",
-      detail: `the \`${TARGET_JOB}\` job is not among this workflow's ${jobKeys.length} job(s) [${jobKeys.join(", ")}] — there is no \`needs:\` to judge, and master cannot be advanced by this workflow at all`,
+      detail: `the \`${TARGET_JOB}\` job is not among this workflow's ${jobKeys.length} job(s) [${jobKeys.join(", ")}] — there is no \`needs:\` to judge, and the release line cannot be advanced by this workflow at all`,
     };
   }
 
@@ -160,7 +166,7 @@ function usage(): string {
     "Usage: release-master-advance-needs-check.ts [--root <dir>] [--json]",
     "",
     `Asserts \`${WORKFLOW_REL}\`'s \`${TARGET_JOB}\` job lists EVERY other job of that workflow in its`,
-    "`needs:`, so any non-successful dependency skips it and master cannot advance on a half-green",
+    "`needs:`, so any non-successful dependency skips it and the release line cannot advance on a half-green",
     "release (SPEC §6.1 invariant 3).",
     "",
     "exit 0 = needs covers every other job / 1 = a job is missing from needs /",
@@ -200,6 +206,19 @@ function main(argv: string[]): number {
     return 0;
   }
 
+  // The branch this job is allowed to move is DECLARED (`release.line`), not assumed. An unreadable
+  // declaration is NOT-EVALUATED — ⛔ never silently replaced by the historical default, because the
+  // whole question is "which line does this job advance?".
+  const model = readReleaseModel(root);
+  if (model.state === "unreadable") {
+    return emitNotEvaluated(
+      `[release-model-unreadable] — the .quay/config.yml release: section is present but unreadable (${model.reason}); the line \`${TARGET_JOB}\` advances is UNKNOWN (⛔ not "needs: is complete")`,
+      { reason: "release-model-unreadable", detail: model.reason },
+      { json },
+    );
+  }
+  const releaseLine = model.config.line;
+
   const wfPath = path.join(root, WORKFLOW_REL);
   if (!fs.existsSync(wfPath)) {
     return emitNotEvaluated(
@@ -214,12 +233,13 @@ function main(argv: string[]): number {
   if (outcome.state === "not-evaluated") {
     return emitNotEvaluated(
       `[${outcome.reason}] — ${outcome.detail} (⛔ not "needs: is complete")`,
-      { reason: outcome.reason, detail: outcome.detail },
+      { reason: outcome.reason, detail: outcome.detail, releaseLine },
       { json },
     );
   }
 
   const coverage =
+    `release line (declared): ${releaseLine}; ` +
     `jobs in ${WORKFLOW_REL}: ${outcome.jobs.length} [${outcome.jobs.join(", ")}]; ` +
     `${TARGET_JOB}.needs declares ${outcome.needs.length} [${outcome.needs.join(", ")}]; ` +
     `other jobs that must be covered: ${outcome.others.length}; ` +
@@ -227,17 +247,17 @@ function main(argv: string[]): number {
 
   if (outcome.state === "pass") {
     return emitPass(
-      `${TARGET_JOB}.needs covers every other job in ${WORKFLOW_REL} — a non-successful dependency skips the job, so master cannot advance on a partially green release — ${coverage}`,
-      { ...outcome },
+      `${TARGET_JOB}.needs covers every other job in ${WORKFLOW_REL} — a non-successful dependency skips the job, so '${releaseLine}' cannot advance on a partially green release — ${coverage}`,
+      { ...outcome, releaseLine },
       { json },
     );
   }
 
   return emitFail(
     `${TARGET_JOB}.needs does NOT cover every other job in ${WORKFLOW_REL} — ${outcome.missing.length} job(s) missing: ${outcome.missing.join(", ")}. ` +
-      `If any of those fails or is skipped while this job still runs, master is advanced onto a release that was never fully green (SPEC §6.1 invariant 3). ` +
+      `If any of those fails or is skipped while this job still runs, '${releaseLine}' is advanced onto a release that was never fully green (SPEC §6.1 invariant 3). ` +
       `Add the missing name(s) to the \`needs:\` list. (${coverage})`,
-    { ...outcome },
+    { ...outcome, releaseLine },
     { json },
   );
 }

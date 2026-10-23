@@ -5,14 +5,15 @@
 // THE DEFECT THIS CLOSES (tasks/gap-ac271-build-reading-creates-shared-release-ref, 2026-09-20):
 // `resolve-version.ts` decides `build` mode BY BRANCH NAME (`RELEASE_BRANCH_RE = /^release\//`,
 // scripts/resolve-version.ts:98): the un-suffixed `X.Y.Z` is produced iff HEAD carries tag `vX.Y.Z`
-// OR the current branch is `release/*`. So every REAL verification of build mode must put HEAD on a
-// REAL `release/*` branch in a REAL git repo. AC-271 forbids exactly that state:
+// OR the current branch is release-shaped by the project's declared pattern. So every REAL
+// verification of build mode must put HEAD on a REAL release-shaped branch in a REAL git repo.
+// AC-271 forbids exactly that state:
 //
 //     CAUSE=release-branch-not-parked-on-a-tag — 1 of 1 release branches have a tip that is not
 //     any tag: release/ac4-reading
 //
 // Both mechanisms are individually correct and they CONFLICT: a task whose AC legitimately reads
-// "take a real build-mode reading on a temporary release/* branch" turns a `long-term: true`
+// "take a real build-mode reading on a temporary release-shaped branch" turns a `long-term: true`
 // guarantee red for as long as the reading is being taken — and, measured 2026-09-20T04:51:07Z →
 // 04:53:26Z, BOTH the creation and the cleanup left ZERO repository trace (`git branch -D` also
 // drops the reflog; `.quay/release-branch-finish.jsonl` has no line for it). The guarantee was
@@ -21,8 +22,8 @@
 // THE FIX IS SEPARATION OF NAMESPACES, NOT A LOOSER CRITERION. The criterion stays exactly as
 // strict as it is (negative control ① in the task re-runs it against a real offending branch and
 // requires `verdict=fail`). What moves is the READING: it happens in a scratch git directory of its
-// own (`git init` + `git fetch <rev>` + a branch created THERE), so the source repo's
-// `refs/heads/release-*` / `refs/heads/release/*` namespace is never touched. The judgment is still
+// own (`git init` + `git fetch <rev>` + a branch created THERE), so the source repo's declared
+// release-branch namespace is never touched. The judgment is still
 // the real one — this script shells out to the SAME `scripts/resolve-version.ts --mode build`; ⛔ it
 // does NOT re-implement the branch/tag rule and ⛔ it adds no "inject a branch name" knob (hard rule
 // 4 推论三: a reading only an injected seam can produce is an echo, not a measurement).
@@ -45,7 +46,7 @@
 // licence"), and a shared word would make two unrelated decisions read as one vocabulary.
 //
 // ── THE PAIRED NEGATIVE CONTROL IS THE POINT (hard rule 4 推论三) ─────────────────────────────────
-// The same command must give `X.Y.Z` on a `release/*` branch and `X.Y.Z-dev` on any other branch.
+// The same command must give `X.Y.Z` on a release-shaped branch and `X.Y.Z-dev` on any other branch.
 // A caller that only ever reads the release shape cannot tell a real judgment from an implementation
 // that always returns `X.Y.Z` — which is precisely the "echo" this repo has been burned by.
 // `--branch <name>` is how the caller takes both readings; the task's AC5 evidence is that pair.
@@ -58,9 +59,10 @@
 //     --root    the SOURCE repository the reading is about (default: the process's CWD). Only read.
 //     --rev     the commit to read (default: HEAD of --root). Resolved there, then fetched
 //               by sha into the sandbox, so an unreachable commit works as well as a branch tip.
-//     --branch  the branch name the reading is taken ON, inside the sandbox (default:
-//               release/reading-<UTC stamp>). `release-*` / `release/*` ⇒ release shape; anything
-//               else ⇒ the paired non-release reading.
+//     --branch  the branch name the reading is taken ON, inside the sandbox (default: a name built
+//               from the declared release-branch prefix + `reading-<UTC stamp>`). A name matching
+//               the declared `release.globs` ⇒ release shape; anything else ⇒ the paired
+//               non-release reading.
 //     --trace   the record file (default: <root>/.quay/release-reading-sandbox.jsonl)
 //     --json    emit the whole reading as one JSON object on stdout
 //     --keep    leave the sandbox on disk and print its path (⛔ for debugging only; a kept sandbox
@@ -90,15 +92,17 @@ import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { enumerateReleaseRefs, git, revParseSha } from './git-runner.ts';
+import { makeBranchMatcher, readReleaseModel, releaseBranchPrefix } from './release-model-check.ts';
 
 // ── git helpers (the runner + sha resolver + release-ref enumeration arrive from git-runner.ts —
 //    the SINGLE implementation this script and release-branch-janitor.ts share; ⛔ do not re-copy) ──
 
-/** A release-shaped branch NAME — the same prefix rule resolve-version judges by. */
-const RELEASE_BRANCH_RE = /^release[\/-]/;
-
-function shapeOf(branch: string): 'release-branch' | 'non-release-branch' {
-  return RELEASE_BRANCH_RE.test(branch) ? 'release-branch' : 'non-release-branch';
+/** A release-shaped branch NAME — judged by the DECLARED `release.globs`, the same patterns the
+ *  enumeration uses. `resolve-version.ts` decides build mode by branch name; this carrier's
+ *  judgment must follow the project's own model rather than quay's historical one. */
+function shapeJudge(globs: readonly string[]): (branch: string) => 'release-branch' | 'non-release-branch' {
+  const matches = makeBranchMatcher(globs);
+  return (branch: string) => (matches(branch) ? 'release-branch' : 'non-release-branch');
 }
 
 function jsonEscape(s: string): string {
@@ -325,18 +329,34 @@ function main(argv: string[]): number {
 
   if (log) return logMode(traceFile);
 
+  // The release-branch namespace and the branch-name shape are BOTH read from the DECLARED model
+  // (`release.globs`). An unreadable declaration is an instrument failure — ⛔ never silently
+  // replaced by the defaults (硬规则 3b).
+  const model = readReleaseModel(root);
+  if (model.state === 'unreadable') {
+    process.stderr.write(
+      `CAUSE=release-reading-release-model-unreadable — the .quay/config.yml release: section is ` +
+        `present but unreadable (${model.reason}); the branch namespace and shape this reading is ` +
+        'taken under are UNKNOWN, refusing to fall back to a guess\n',
+    );
+    return 2;
+  }
+  const globs = model.config.globs;
+  const shapeOf = shapeJudge(globs);
+  const namespace = globs.map((g) => `refs/heads/${g}`).join(' + ');
+
   if (rev === '') {
     process.stderr.write(`release-reading-sandbox: --rev requires a revision\n${usage}\n`);
     return 2;
   }
-  if (branch === '') branch = `release/reading-${utcStamp()}`;
+  if (branch === '') branch = `${releaseBranchPrefix(globs)}reading-${utcStamp()}`;
 
   // The source namespace is read BEFORE anything is built, and again AFTER — the same run certifies
   // both halves (the DoD asks for them to be certified together, not in two separate runs).
-  const before = enumerateReleaseRefs(root);
+  const before = enumerateReleaseRefs(root, globs);
   if (before === null) {
     process.stderr.write(
-      `CAUSE=release-reading-source-unreadable — could not enumerate refs/heads/release-* in ` +
+      `CAUSE=release-reading-source-unreadable — could not enumerate ${namespace} in ` +
         `'${root}' (not a git repo, or git unavailable); "could not look" is ⛔ not "none there"\n`,
     );
     return 2;
@@ -373,7 +393,7 @@ function main(argv: string[]): number {
     }
   }
 
-  const after = enumerateReleaseRefs(root);
+  const after = enumerateReleaseRefs(root, globs);
   const shape = shapeOf(branch);
   const result: TraceLine['result'] =
     reading.exit === 3 ? 'not-evaluated' : reading.exit === 0 ? 'taken' : 'reading-error';

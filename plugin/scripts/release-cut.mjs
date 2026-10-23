@@ -61,8 +61,8 @@
 // ── `--ref`: WHICH release.yml GOVERNED THE RUN (the implicit-default defect this fixes) ────────
 // Measured 2026-10-10 by the v0.18.0 release incident. `gh workflow run release.yml -f tag=<tag>`
 // WITHOUT `--ref` runs the workflow file on the repository's DEFAULT BRANCH, and here the default
-// branch is `master` — which only advances when a release finishes FULLY GREEN. So release N was
-// always judged by release N−1's DEFINITION:
+// branch is the release line — which only advances when a release finishes FULLY GREEN. So release N
+// was always judged by release N−1's DEFINITION:
 //   • v0.17.0's run 37620677788 executed `verify-plugin-channel` with 13 steps and NO assertions
 //     step, although v0.17.0's own tree already carried that step — it ran v0.16.0's file;
 //   • `git diff v0.17.0 v0.18.0 -- .github/workflows/release.yml` is 14 insertions / 13 deletions,
@@ -71,7 +71,7 @@
 //   (a) a step can first execute during a REAL release (`.github/workflows/ci.yml` never runs
 //       `verify-plugin-channel-assertions` — grep is empty — so the release is its debut), and
 //   (b) SELF-LOCK: if the broken file is release.yml itself, fixing it does not help, because the
-//       fix is not on `master` and `master` cannot be advanced while the release keeps failing.
+//       fix is not on the release line and that line cannot be advanced while the release keeps failing.
 // The fix is to STOP DERIVING the ref silently: `--dispatch-ref <ref>` names it, and the preflight
 // states in plain words which definition will govern the run and how it differs from the tree the
 // tag names (P2 — visibility, hard rule 9: make the effective definition OBSERVABLE instead of
@@ -261,7 +261,7 @@ let version = "";
 let root = "";
 let worktree = "";
 let remote = "origin";
-let base = "develop";
+let base = "";
 let dispatchRefArg = "";
 let allowWorkflowDrift = false;
 let allowShippedSetCeiling = false;
@@ -304,6 +304,63 @@ if (!root) {
   }
 }
 
+// ── the DECLARED release-branch model (gap-release-branch-model-hardcoded-not-configurable) ────
+// `release.baseline` / `release.tag_prefix` / `release.globs` come from `.quay/config.yml` (read by
+// the ONE reader, `release-model-check.ts`), never from a hardcoded literal in this renderer. If the
+// reader is absent or the `release:` section is unreadable, the cut REFUSES: a cutter that cannot
+// say what the model is must not silently use quay's own (硬规则 3b).
+function readReleaseModel(startDir) {
+  const helper = path.join(SCRIPT_DIR, "release-model-check.ts");
+  if (!fs.existsSync(helper)) {
+    fail(
+      "release-cut-release-model-unreadable",
+      `the release-model reader is absent at '${helper}'; the baseline / tag prefix / branch globs this cut would use are UNKNOWN (the reader ships beside this renderer)`,
+      2,
+    );
+  }
+  const r = spawnSync(
+    process.execPath,
+    ["--no-warnings", "--experimental-strip-types", helper, "--print-model", "--root", startDir],
+    { encoding: "utf8" },
+  );
+  if (r.status !== 0) {
+    fail(
+      "release-cut-release-model-unreadable",
+      `could not read the DECLARED release model for '${startDir}' via ${path.basename(helper)} (exit ${r.status}): ${(r.stderr ?? "").trim()}`,
+      2,
+    );
+  }
+  const model = { baseline: "", tag_prefix: null, globs: [] };
+  for (const raw of (r.stdout ?? "").split("\n")) {
+    const line = raw.trim();
+    if (line === "" || line.startsWith("#")) continue;
+    if (line.startsWith("baseline=")) model.baseline = line.slice("baseline=".length);
+    else if (line.startsWith("tag_prefix=")) model.tag_prefix = line.slice("tag_prefix=".length);
+    else if (line.startsWith("glob=")) model.globs.push(line.slice("glob=".length));
+  }
+  if (model.baseline === "" || model.tag_prefix === null || model.globs.length === 0) {
+    fail(
+      "release-cut-release-model-unreadable",
+      `the model reader returned an incomplete model (baseline='${model.baseline}', tag_prefix=${model.tag_prefix === null ? "null" : `'${model.tag_prefix}'`}, globs=${model.globs.length}); refusing to cut with a partially-read model`,
+      2,
+    );
+  }
+  return model;
+}
+const releaseModel = readReleaseModel(root);
+if (!base) base = releaseModel.baseline;
+
+/** The literal prefix a new release branch must start with, derived from `release.globs`
+ *  (e.g. the slash-terminated prefix of a slash-glob). */
+function releaseBranchPrefix(globs) {
+  for (const g of globs) {
+    const i = g.indexOf("*");
+    if (i > 0) return g.slice(0, i);
+    if (i === -1) return g.endsWith("/") ? g : g + "/";
+  }
+  return "";
+}
+
 // ── the version and the two names derived from it (⛔ the version is never guessed) ────────────
 function badVersion(why) {
   process.stderr.write(`CAUSE=release-cut-bad-version — ${why}\n`);
@@ -324,8 +381,8 @@ if (!parts.every((p) => /^[0-9]+$/.test(p))) {
   badVersion(`'${version}' parts must all be numeric: '${version}'`);
 }
 const [vMajor, vMinor] = parts;
-const tag = `v${version}`;
-const branch = `release/v${version}`;
+const tag = `${releaseModel.tag_prefix}${version}`;
+const branch = `${releaseBranchPrefix(releaseModel.globs)}${tag}`;
 const nextVersion = `${vMajor}.${Number(vMinor) + 1}.0`;
 
 // ── is `--root` a checkout at all? ─────────────────────────────────────────────────────────────
@@ -403,21 +460,21 @@ if (git(root, "rev-parse", "--verify", "--quiet", `refs/heads/${base}`).status =
     );
   }
 }
-// ... and it must not be BEHIND the remote: a tag cut from a develop the remote has already moved
+// ... and it must not be BEHIND the remote: a tag cut from a baseline the remote has already moved
 // past would ship a release missing commits that are already published. ⚠️ This reads the
-// LAST-FETCHED `origin/develop` and never fetches (a cut must not need the network).
-if (base === "develop" && remote !== "" && doPush) {
-  const remoteBaseRef = `refs/remotes/${remote}/develop`;
+// LAST-FETCHED remote baseline and never fetches (a cut must not need the network).
+if (base === releaseModel.baseline && remote !== "" && doPush) {
+  const remoteBaseRef = `refs/remotes/${remote}/${releaseModel.baseline}`;
   if (git(root, "rev-parse", "--verify", "--quiet", remoteBaseRef).status !== 0) {
     fail(
       "release-cut-develop-sync-unreadable",
-      `'${remoteBaseRef}' does not resolve in ${root}, so 'is develop behind the remote?' cannot be answered; refusing to cut (an unanswerable check must not read as 'in sync'). Fetch first, or pass --no-push for a deliberately local cut`,
+      `'${remoteBaseRef}' does not resolve in ${root}, so 'is the baseline behind the remote?' cannot be answered; refusing to cut (an unanswerable check must not read as 'in sync'). Fetch first, or pass --no-push for a deliberately local cut`,
       2,
     );
   }
-  const behindRaw = git(root, "rev-list", "--count", `develop..${remoteBaseRef}`).stdout.trim();
+  const behindRaw = git(root, "rev-list", "--count", `${releaseModel.baseline}..${remoteBaseRef}`).stdout.trim();
   if (!/^[0-9]+$/.test(behindRaw)) {
-    fail("release-cut-develop-sync-unreadable", `could not count develop..${remoteBaseRef} in ${root}`, 2);
+    fail("release-cut-develop-sync-unreadable", `could not count ${releaseModel.baseline}..${remoteBaseRef} in ${root}`, 2);
   }
   if (Number(behindRaw) !== 0) {
     fail(
@@ -508,16 +565,16 @@ if (doDispatch) {
 // the gate it predicts, or the reading is a proxy that drifts from the fact — 硬规则 4b). Measured
 // 2026-10-21: the whole build takes ~6 s, so paying it before an irreversible push is cheap.
 //
-// ⛔ WHY THE PROBE CHECKS OUT A `release/*` BRANCH (a subtlety that silently changes the answer):
+// ⛔ WHY THE PROBE CHECKS OUT A RELEASE-SHAPED BRANCH (a subtlety that silently changes the answer):
 // `publish-dist-branch.sh`'s build chain is `build-plugin-dist --rewrite && stamp-version && … &&
 // {prune unreachable .sh}`. `resolve-version.ts --mode build` answers NOT-EVALUATED (exit 3) on a
 // DETACHED head carrying no version tag, and because the chain is an `&&` list, bash's errexit does
 // NOT fire there — the rest of the line is simply SKIPPED. Measured 2026-10-21: building the same
 // tree from a detached worktree skipped the `.sh` prune and the bundle-version gate and produced
-// 306 files / 16594 .sh lines, while the three-character-different `release/*` checkout produced
+// 306 files / 16594 .sh lines, while the three-character-different release-shaped checkout produced
 // 287 / 7345 — the two readings that matter (files grew by exactly the 19 `.sh` the prune removes).
-// So the probe puts the base commit on a throwaway `release/` branch (the prefix `resolve-version.ts`
-// recognises, and the shape the real cut is about to create) and builds from there.
+// So the probe puts the base commit on a throwaway release-shaped branch (the prefix
+// `resolve-version.ts` recognises, and the shape the real cut is about to create) and builds there.
 //
 // ⛔ READ-ONLY ON `--root`: everything happens in a temp linked worktree under the SAME PARENT dir as
 // the cut's own worktree (never inside `--root` — an untracked directory there would change
@@ -545,11 +602,13 @@ function precheckShippedSetSize(rootDir, baseRef) {
   const checkerPath = path.join(worktree, "plugin", "scripts", "shipped-set-rules.ts"); // kernel-sibling-dev-tree-only: dev-tree-only — same: the base tree supplies the checker, as release.yml reads it from the tagged tree.
   const artifactTar = path.join(parent, "artifact.tar");
   const artifactDir = path.join(parent, "artifact");
-  // `release/` — see the NOT-EVALUATED note above. Unique per process so two concurrent probes (or a
-  // peer's) never delete each other's refs; `publish-dist-branch.sh` deletes any same-named branch
-  // before it starts, which is safe only because the name cannot belong to anyone else.
-  const probeBranch = `release/preflight-v${version}-${process.pid}`;
-  const artifactBranch = `release-cut-preflight-artifact-${process.pid}`;
+  // A release-shaped prefix — see the NOT-EVALUATED note above. Unique per process so two concurrent
+  // probes (or a peer's) never delete each other's refs; `publish-dist-branch.sh` deletes any
+  // same-named branch before it starts, which is safe only because the name cannot belong to anyone
+  // else. The prefix comes from the DECLARED model (`releaseBranchPrefix`), not a literal here.
+  const releasePrefix = releaseBranchPrefix(releaseModel.globs);
+  const probeBranch = `${releasePrefix}preflight-v${version}-${process.pid}`;
+  const artifactBranch = `${releasePrefix}cut-preflight-artifact-${process.pid}`;
   try {
     const added = git(rootDir, "worktree", "add", "-q", "-b", probeBranch, worktree, baseRef);
     if (added.status !== 0) {
@@ -669,7 +728,7 @@ if (shippedSet.verdict === "unavailable") {
   // repair (re-anchor the baseline) that the evidence does not support.
   process.stderr.write(
     `CAUSE=release-cut-shipped-set-precheck-unavailable — the shipped-set size ceiling could not be measured on '${base}', so this cut cannot tell whether release.yml's shipped-set-clean would pass AFTER the tag is pushed; refusing (硬规则 3b: 读不懂 ≠ 合格). Reason: ${shippedSet.reason}${shippedSet.detail ? `\n    build/check output — ${shippedSet.detail}` : ""}\n` +
-      `    ⇒ build and check it by hand on '${base}': bash plugin/scripts/publish-dist-branch.sh --branch <scratch> (in a checkout of '${base}' ON A release/* BRANCH — a detached head makes the build skip its .sh prune), git archive <scratch>, then node --experimental-strip-types plugin/scripts/shipped-set-rules.ts --check <dir> --size-ceiling\n`,
+      `    ⇒ build and check it by hand on '${base}': bash plugin/scripts/publish-dist-branch.sh --branch <scratch> (in a checkout of '${base}' ON A RELEASE-SHAPED BRANCH — a detached head makes the build skip its .sh prune), git archive <scratch>, then node --experimental-strip-types plugin/scripts/shipped-set-rules.ts --check <dir> --size-ceiling\n`,
   );
   process.exit(2);
 }
