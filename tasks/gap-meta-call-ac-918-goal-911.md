@@ -7,7 +7,10 @@ labels:
   - meta-driver
 parent: null
 children: []
-extra: {}
+extra:
+  acceptance: 'node packages/quay/bin/quay.js goal show AC-918 --json 2>/dev/null
+    | grep -q "\"status\": \"superseded\"" && node packages/quay/bin/quay.js
+    goal show AC-925 --json 2>/dev/null | grep -q "\"status\": \"active\""'
 ---
 ## Finding
 AC-918（status=active，按 goal-driver.ts:880 `inScopeAcsOf` 计入在域）的判据是扫源码文本的正则 `kind:\s*"([a-z-]+)"…admission:`，而注册表里两个 mechanical kind 是以模块常量登记的（`kind: CONCERN_KIND_IN_SCOPE` / `kind: DESIGN_EVOLUTION_KIND`），所以它每轮恒解析出 0 对、恒 exit 2，读数上永远是一条 fail。它声称覆盖的『取值正确』已由 AC-921（achieved，import 读注册表）覆盖，『按 admission 分派』由 AC-923 承接。这条 AC 应当重写判据、标 superseded、还是保持现状？
