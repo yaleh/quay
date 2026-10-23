@@ -3,7 +3,7 @@ id: gap-routine-semantic-dedup-scan-rev-parse-head-identical
 title: "semantic-dedup-scan: Bodies identical including the SHA regex and
   try/catch-null, and both take the same single root parameter, so the two names
   are purely historical."
-status: ready
+status: done
 labels:
   - gap
   - routine-filed
@@ -73,11 +73,3 @@ merge
 - `plugin/scripts/ready-pool-check.ts`
 - `plugin/scripts/driver-filters.ts`
 - `tasks/gap-routine-semantic-dedup-scan-rev-parse-head-identical.md`
-
-## Blocker
-
-**2026-10-23T12:05:13.872Z — worker 未落地（exited-not-landed）**
-
-- 未落地原因：step=suite: oom-killed (3) — recovery red set is NOT a subset of the develop baseline red set: added=plugin/test/full-suite-runner-cgroup.test.mjs,plugin/test/full-suite-runner-cgroup.test.mjs changed=- — needs a code fix
-- run_id：wk-prod-anchor
-- session_id：3ddae9b6-333d-4fcb-b349-d2955a5ea5cc

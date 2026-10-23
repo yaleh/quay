@@ -1,7 +1,7 @@
 ---
 id: AC-926
 title: AC-919 的契约判据改为真实 import 契约模块（不扫源码文本），且「模块缺席」记为 not-evaluated 而非 fail
-status: active
+status: achieved
 kind: criterion
 goal: GOAL-911
 criterion: "node --input-type=module -e 'const
@@ -58,6 +58,11 @@ statusLog:
     to: active
     actor: goal-driver
     reason: "triage: activate"
+  - at: 2026-10-23T13:00:48.151Z
+    from: active
+    to: achieved
+    actor: goal-driver
+    reason: "I2: criterion pass"
 supersedes:
   - AC-919
 fidelity:
