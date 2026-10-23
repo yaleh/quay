@@ -149,7 +149,9 @@ exit=1
 
 ## Touches
 
-- goals/AC-924-unencapsulated-state-端到端跑通-线索器只产-candidate-判断器拒绝-memoized-计数器-注册表误报.md (new)
+- goals/AC-924-unencapsulated-state-端到端跑通-线索器对真实仓库只产-candidate-从不写-confirme.md (new)
+- goals/AC-925-planner-的-c1-准入按-admission-分派-mechanical-走既有-delta-判定-semant.md (new)
+- goals/AC-918-注册表每个条目有-admission-字段-mechanical-semantic-judged-取值正确且-plann.md (status superseded, 人的裁定)
 - goals/GOAL-911-通用化-线索-vs-语义判断-两段准入-注册表加-admission-字段区分-mechanical-semantic.md
 - tasks/gap-goal911-exit-condition3-unencapsulated-e2e-uncovered.md
 
