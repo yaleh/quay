@@ -121,3 +121,11 @@ bash scripts/test.sh --for-task gap-semantic-admission-contract-module   → exi
 - tasks/gap-semantic-admission-contract-module.md
 - docs/analysis/semantic-admission-contract.mjs (new)
 - plugin/test/semantic-admission-contract.test.mjs (new)
+
+## Blocker
+
+**2026-10-23T08:10:40.976Z — worker 未落地（exited-not-landed）**
+
+- 未落地原因：step=suite: oom-killed (2) — recovery exhausted at floor concurrency 32 — no declared rung produced a complete verdict (64,48,32); needs a code/config fix, see plugin/scripts/full-suite-runner.ts
+- run_id：wk-prod-anchor
+- session_id：80b5849d-fb48-4341-b855-a76b4aabc022
