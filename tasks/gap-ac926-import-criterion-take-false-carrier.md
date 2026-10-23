@@ -1,7 +1,7 @@
 ---
 id: gap-ac926-import-criterion-take-false-carrier
 title: AC-926 的 import 判据缺可取假的验收载体：注释-only 模块在旧判据下 exit 0、缺席路径 exit 3 无人钉住（GOAL-911）
-status: todo
+status: ready
 labels:
   - gap
 parent: null
@@ -52,13 +52,13 @@ AC-926 的存在理由正是「只在注释里提到词表也能变绿」。但�
 **交付物：把 AC-926 的判据本身做成可取假的验收载体** —— 新建 `plugin/test/ac926-semantic-admission-criterion.test.mjs`（顶部 `// @test-group engine`）：
 
 - **判据单一正源，不复制**：`goalCriterion()` 从 `goals/AC-926-*.md` 的 YAML frontmatter 取 `criterion`（与 `quay goal get AC-926 --json` 同一载体；仓库根由 `import.meta.url` 解析，⛔ 不依赖 `process.cwd()`），测试内**不出现第二份判据文本**。
-- `runCriterion(root)`：`spawnSync(process.execPath, ["--input-type=module", "-e", criterion], { cwd: root, encoding: "utf8" })` —— 判据里的相对路径 `./docs/analysis/semantic-admission-contract.mjs` 因此解析到沙箱根。
+- `runCriterion(root)`：`spawnSync("bash", ["-c", criterion], { cwd: root, encoding: "utf8" })` —— 判据文本是一整条 shell 命令（`node --input-type=module -e '…'`），交给 shell 才能「逐字跑」；cwd = 沙箱根，判据里的相对路径 `./docs/analysis/semantic-admission-contract.mjs` 因此解析到沙箱根。
 - 四个臂，各用 `mkdtempSync` 沙箱、`finally` 清理：
   - **A 缺席臂**：空沙箱 ⇒ `exit 3`、stderr 含 `NOT-EVALUATED`；并显式断言 `code !== 1`（not-evaluated 不是 fail）。
   - **B 注释-only decoy 臂**：上述 521 字节 decoy ⇒ `exit 1`、stderr 含 `CLUE_STATES/JUDGE_VERDICTS are not arrays`。**这一臂就是「判据不许扫源码文本」的可取假载体**：判据若退回 `readFileSync`+`includes` 形态，它会变绿。
   - **C 真模块臂**：把仓库里**真实的** `docs/analysis/semantic-admission-contract.mjs` `copyFileSync` 进沙箱 ⇒ `exit 0`（⛔ 不造 fixture 冒充真实模块，硬规则 4 推论三）。
   - **D 变异臂**（只在**副本**上改）：① `Object.freeze([...])` → `([...])` ⇒ `vocabularies are not frozen`；② clue 词表 `["candidate","clear","not-evaluated"]` → `["candidate","candidate","not-evaluated"]` ⇒ `CAUSE=CLUE_STATES=`；③ `export function checkVocabulariesDisjoint` → `function checkVocabulariesDisjoint` ⇒ `checkVocabulariesDisjoint is not exported`。每份副本先断言替换**实际发生**（文本有变化），再做判据跑——⛔ 真模块零改动。
-- 判据文本取证：断言 criterion 不含 `readFileSync(` / `.includes(` / `createRequire` ⇒ 「判据是 import 形态」本身也是被断言的对象，不只是靠读数。
+- 判据文本取证：断言 criterion 不含 `readFileSync(` / `createRequire`，且含 `await import(` ⇒ 「判据是 import 形态」本身也是被断言的对象，不只是靠读数。（立案文本原写「不含 `.includes(`」；落地时改为断言文本扫描形态缺席——真判据里 `judge.includes(v)` 是导入词表上的数组成员测试，即正确行为，照字面断言会得到恒假判据，硬规则 4c。理由见 Evidence 末条。）
 
 <!-- dedup-ref -->**与同 goal 其它验收面的关系（去重声明）**：`gap-semantic-admission-contract-module`（`goal_ac: AC-919`，ready）交付契约模块本体与真实 import 测试；`gap-unencapsulated-state-clue-judge-e2e`（`goal_ac: AC-924`，todo）依赖该模块交付端到端管线。全库 `grep -l "^goal_ac: AC-926$" tasks/*.md` 零命中；本任务与模块任务的 Touches 不重叠（模块任务只碰模块与其自身测试，本任务只新增另一个测试文件），`task-granularity-advice.ts` 对本案 Touches 返回 `peers: []` ⇒ 保持独立。**本任务依赖模块任务先落地**（顶层 `depends_on`），不重复造模块。
 
@@ -73,19 +73,44 @@ AC-926 的存在理由正是「只在注释里提到词表也能变绿」。但�
 
 ## AC
 
-- [ ] AC1 载体逐字读绿：`node --test plugin/test/ac926-semantic-admission-criterion.test.mjs` ⇒ exit 0，`ℹ fail 0`；贴四个臂各自的 `(code, stderr 前缀)` 表。
-- [ ] AC2 AC-926 criterion 原文读绿：从 `goals/AC-926-*.md` 取 `criterion` 写临时脚本，在**本任务 worktree 根**逐字跑 ⇒ exit 0，stdout 含 `OK: real import —`；贴命令、exit code 与 stdout 原文（立案基线 exit 3 见 Proposal 事实一）。
-- [ ] AC3 B 臂能取假（旧判据对照）：同一 decoy 沙箱里跑 `goals/AC-919-*.md` 的 criterion（运行时读取，⛔ 不复制文本）⇒ exit 0；跑 AC-926 的 criterion ⇒ exit 1 且 stderr 含 `CAUSE=CLUE_STATES/JUDGE_VERDICTS are not arrays`。贴两条命令、exit code 与 stderr 原文。
-- [ ] AC4 A 臂区分「缺席」与「不合格」：空沙箱 ⇒ exit **3** 且 stderr 含 `NOT-EVALUATED`；测试源码里同时含 `code !== 1` 与 `NOT-EVALUATED` 两个字面量。贴断言源码与运行输出。
-- [ ] AC5 C/D 臂与真树零改动：C 臂复制真实模块 ⇒ exit 0；D 三个副本分别 ⇒ exit 1 且 stderr 依次含 `vocabularies are not frozen` / `CAUSE=CLUE_STATES=` / `checkVocabulariesDisjoint is not exported`；`git status --porcelain docs/analysis/semantic-admission-contract.mjs` 为空输出。贴读数与空 porcelain。
-- [ ] AC6 判据单一正源：`node -e` 读 `goals/AC-926-*.md` 的 criterion 与测试文件全文，断言测试文件**不包含**该 criterion 原文（`verbatim_criterion_copies=0`）；`grep -n "AC-926-" plugin/test/ac926-semantic-admission-criterion.test.mjs` 命中 ≥1。贴命令与两条实际输出。
-- [ ] AC7 scoped 门：`bash scripts/test.sh --for-task gap-ac926-import-criterion-take-false-carrier --allow-thin` exit 0，输出里包含新测试文件。贴尾部。
+- [x] AC1 载体逐字读绿：`node --test plugin/test/ac926-semantic-admission-criterion.test.mjs` ⇒ exit 0，`ℹ fail 0`；贴四个臂各自的 `(code, stderr 前缀)` 表。
+- [x] AC2 AC-926 criterion 原文读绿：从 `goals/AC-926-*.md` 取 `criterion` 写临时脚本，在**本任务 worktree 根**逐字跑 ⇒ exit 0，stdout 含 `OK: real import —`；贴命令、exit code 与 stdout 原文（立案基线 exit 3 见 Proposal 事实一）。
+- [x] AC3 B 臂能取假（旧判据对照）：同一 decoy 沙箱里跑 `goals/AC-919-*.md` 的 criterion（运行时读取，⛔ 不复制文本）⇒ exit 0；跑 AC-926 的 criterion ⇒ exit 1 且 stderr 含 `CAUSE=CLUE_STATES/JUDGE_VERDICTS are not arrays`。贴两条命令、exit code 与 stderr 原文。
+- [x] AC4 A 臂区分「缺席」与「不合格」：空沙箱 ⇒ exit **3** 且 stderr 含 `NOT-EVALUATED`；测试源码里同时含 `code !== 1` 与 `NOT-EVALUATED` 两个字面量。贴断言源码与运行输出。
+- [x] AC5 C/D 臂与真树零改动：C 臂复制真实模块 ⇒ exit 0；D 三个副本分别 ⇒ exit 1 且 stderr 依次含 `vocabularies are not frozen` / `CAUSE=CLUE_STATES=` / `checkVocabulariesDisjoint is not exported`；`git status --porcelain docs/analysis/semantic-admission-contract.mjs` 为空输出。贴读数与空 porcelain。
+- [x] AC6 判据单一正源：`node -e` 读 `goals/AC-926-*.md` 的 criterion 与测试文件全文，断言测试文件**不包含**该 criterion 原文（`verbatim_criterion_copies=0`）；`grep -n "AC-926-" plugin/test/ac926-semantic-admission-criterion.test.mjs` 命中 ≥1。贴命令与两条实际输出。
+- [x] AC7 scoped 门：`bash scripts/test.sh --for-task gap-ac926-import-criterion-take-false-carrier --allow-thin` exit 0，输出里包含新测试文件。贴尾部。
 
 ## DoD
 
 - 判据载体在真实仓库上 exit 0，且每个臂**在被破坏时取假**：判据退回源码文本扫描 ⇒ B 臂红（注释-only 模块变绿）；模块缺席 ⇒ A 臂读到 3 而不是 1；真模块去 freeze / 改词表 / 取消导出 ⇒ D 臂红。贴三次实际读数，⛔「测试文件存在」不算完成。
 - 本任务零重复交付：`git diff --stat` 不含 `docs/analysis/semantic-admission-contract.mjs`（模块落地归 `gap-semantic-admission-contract-module`）；C 臂读的是仓库真实模块，不是自造 fixture。
 - 新测试进入全量 suite（`// @test-group engine`），scoped 门与 fan-in 全量跑中为绿；改动经 ff-merge 进入 develop。
+
+## Evidence
+
+载体 `plugin/test/ac926-semantic-admission-criterion.test.mjs`（`// @test-group engine`，commit eb96ad97b，worktree `/home/yale/work/quay-worktrees/gap-ac926-import-criterion-take-false-carrier`）。下表由证据脚本逐臂实测；判据正文由脚本从 `goals/AC-926-*.md` / `goals/AC-919-*.md` 运行时读取，decoy 由测试文件自身的 `DECOY` 常量取出（`decoy bytes = 521`），证据脚本不另存副本。
+
+| 臂 | 输入 | exit | 首行读数 |
+|---|---|---|---|
+| A 缺席 | 空沙箱 | 3 | `NOT-EVALUATED: contract module absent: ./docs/analysis/semantic-admission-contract.mjs` |
+| B decoy（AC-926 判据） | 521 字节纯注释模块 | 1 | `CAUSE=CLUE_STATES/JUDGE_VERDICTS are not arrays` |
+| B 对照（AC-919 旧判据） | 同一沙箱 | 0 | stdout `OK: contract present; clue excludes confirmed; judge verdicts present` |
+| C 真模块 | 仓库真模块复制品 | 0 | `OK: real import — clue/judge vocabularies frozen, complete, disjoint; the disjointness check names an isomorphic vocabulary` |
+| D1 去 freeze | 副本变异 | 1 | `CAUSE=vocabularies are not frozen` |
+| D2 改词表 | 副本变异 | 1 | `CAUSE=CLUE_STATES=["candidate","candidate","not-evaluated"]` |
+| D3 取消导出 | 副本变异 | 1 | `CAUSE=checkVocabulariesDisjoint is not exported` |
+| E 真树 | 仓库根 | 0 | `OK: real import — …` |
+
+- AC1：`node --test plugin/test/ac926-semantic-admission-criterion.test.mjs` ⇒ exit 0，`ℹ tests 6 / suites 0 / pass 6 / fail 0`。
+- AC2：criterion 从 `goals/AC-926-ac-919-…md` 的 frontmatter 取出写 `/tmp/ac926-verbatim.sh`，在 worktree 根执行 ⇒ `EXIT=0`，stdout `OK: real import — clue/judge vocabularies frozen, complete, disjoint; the disjointness check names an isomorphic vocabulary`。
+- AC3：即上表 B 的两行（同一沙箱、同一 decoy，两条判据相反读数）。
+- AC4：A 臂源码 `const code = r.status; assert.equal(code, 3, …); assert.ok(code !== 1, "not-evaluated 不是 fail（硬规则 3b）…");`；`grep -c 'code !== 1'` = 2、`grep -c 'NOT-EVALUATED'` = 4；运行读数见上表 A 行。
+- AC5：D 三处变异 `replacement_happened=true`，跑完后 `real module unchanged = true`；`git status --porcelain docs/analysis/semantic-admission-contract.mjs` ⇒ 空输出。
+- AC6：`verbatim_criterion_copies = 0`；`grep -n "AC-926-" plugin/test/ac926-semantic-admission-criterion.test.mjs` 命中 4 行（:3 :255 :258 :259）。
+- AC7：`bash scripts/test.sh --for-task gap-ac926-import-criterion-take-false-carrier --allow-thin` ⇒ `EXIT=0`，选中集合含 `+ plugin/test/ac926-semantic-admission-criterion.test.mjs`（日志第 236 行），尾部为该文件 6 个臂全绿。
+- 反向自检（Plan 6）：把 `runCriterion` 的 cwd 由沙箱改成仓库根 ⇒ A/B/D 三臂变红、C/E/F 保持绿（`ℹ pass 3 / fail 3`）；复原后 md5 一致、全绿。
+- Proposal 偏离说明：`.includes(` 未作为「非源码扫描」的断言字面量 —— 真判据里 `judge.includes(v)` 是导入词表上的数组成员测试（正确行为），照字面断言会恒假（硬规则 4c「恒假」形态）。F 臂改断言 `readFileSync(` / `createRequire` 缺席且 `await import(` 在场。
 
 ## Dark Axis（ADR-007）
 

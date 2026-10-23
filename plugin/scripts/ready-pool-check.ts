@@ -218,7 +218,9 @@ import { decideTransition, patchStatusField as applyKernelStatusPatch, appendTas
 // 「逐个查 status !== done」的循环）。gap-superseded-dependency-blocks-dispatch-forever：复用点从
 // 布尔投影 allDepsDone 上移到【三值】judgeDeps —— 本文件必须能区分「依赖全 done」与「依赖已退役」，
 // 布尔投影只够准入判定，不够读数（硬规则 3b）。
-import { judgeDeps, syncDocDevelopBidirectional } from "./driver-filters.ts";
+// gap-routine-semantic-dedup-scan-rev-parse-head-identical：`revParseHeadOf` 也复用 driver-filters.ts
+// 的那一份（本文件此前的 `revParseHead` 是逐字副本 —— 单一实现，⛔ 不各写一遍）。
+import { judgeDeps, syncDocDevelopBidirectional, revParseHeadOf } from "./driver-filters.ts";
 // criterion-cost self-record (gap-no-criterion-records-its-own-cost-checker-cost-jsonl): this
 // criterion KNOWS its input size n (the ready pool count) — the ONLY field that splits "the
 // criterion got slower" into "n got bigger" vs "the machine got busier" (the 35.8→91.2→157.0
@@ -3787,17 +3789,9 @@ const REVALUATION_EVENT_ACTOR = { kind: "promotion-driver", id: "ready-pool-chec
  *  distinguishable from a driver-driven one (硬规则 6 — 缺值 = 未查, never a guess). */
 const DIRECT_EVENT_ACTOR = { kind: "unknown", id: "ready-pool-check" } as const;
 
-/** `git rev-parse HEAD` at `root`, or null (repo-less fixture / git failure). Used for
- *  `evidence.commit` — the sha that carries the status-line change. Best-effort: a null is recorded
- *  as "no commit", never as a fabricated sha. */
-function revParseHead(root: string): string | null {
-  try {
-    const sha = execFileSync("git", ["-C", root, "rev-parse", "HEAD"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
-    return /^[0-9a-f]{40,64}$/i.test(sha) ? sha : null;
-  } catch {
-    return null;
-  }
-}
+// `revParseHeadOf` (evidence.commit — the sha carrying the status-line change) is imported from
+// driver-filters.ts: it was a byte-identical local copy here until
+// gap-routine-semantic-dedup-scan-rev-parse-head-identical. ⛔ do not re-declare it.
 
 /**
  * Decide `from → to` with the KERNEL (`decideTransition`) and patch the frontmatter only when the
@@ -3896,7 +3890,7 @@ export function setTaskStatus(root, id, newStatus, opts = {}) {
   // `evidence.commit` must name the commit that carries this status line, not "whatever HEAD was
   // before it". Contract v1's ordering (task body Plan §2).
   const committed = typeof opts.commit === "function" ? opts.commit() === true : false;
-  const commit = committed ? revParseHead(root) : null;
+  const commit = committed ? revParseHeadOf(root) : null;
   // Event AFTER the write (硬规则 7): the file is the product, the event its trace.
   const eventError = recordStatusEvent(root, id, decided.from, decided.to, decided.kind, opts.actor || DIRECT_EVENT_ACTOR, {
     commit,
@@ -4053,7 +4047,7 @@ export function retreatReadyToTodo(root, id, reasons = [], opts = {}) {
   // behaviour is preserved and the event records `commit:null` WITH its reason rather than inventing
   // a sha (the retreat's divergence is the caller's to resolve, not this writer's to hide).
   const committed = typeof opts.commit === "function" ? opts.commit() === true : false;
-  const commit = committed ? revParseHead(root) : null;
+  const commit = committed ? revParseHeadOf(root) : null;
   const eventError = recordStatusEvent(root, id, decided.from, decided.to, decided.kind, opts.actor || DIRECT_EVENT_ACTOR, {
     commit,
     statusBlobSha: gitBlobSha(written),
