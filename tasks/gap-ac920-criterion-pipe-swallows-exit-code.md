@@ -204,8 +204,8 @@ fan-in 若仍被 OOM 挡下，那是套件基础设施的独立问题，应另�
 
 ## Blocker
 
-**2026-10-23T18:22:49.738Z — worker 未落地（exited-not-landed）**
+**2026-10-23T19:06:56.963Z — worker 未落地（exited-not-landed）**
 
-- 未落地原因：step=suite: oom-killed (1) — recovery exhausted at floor concurrency 32 — no declared rung produced a complete verdict (64,48,32); needs a code/config fix, see plugin/scripts/full-suite-runner.ts
+- 未落地原因：step=suite: oom-killed (3) — new regression at lower concurrency: plugin/test/driver-anchor-takeover.test.mjs,packages/quay/test/serve-system-body-i18n.test.mjs (passed at the original concurrency 128, fails at 64) — needs a code fix
 - run_id：wk-prod-anchor
-- session_id：a496b116-919f-4338-b690-4e4aabc8fe7c
+- session_id：04bc2893-ef9e-4f35-a158-937b81f4834f
