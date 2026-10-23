@@ -2,7 +2,7 @@
 id: gap-ac925-admission-dispatch-criterion-test
 title: AC-925 的判据文件 plugin/test/admission-dispatch.test.mjs 缺失 ⇒「Planner 的 C1
   准入按 admission 分派」没有独立、可取假的验收载体（GOAL-911）
-status: todo
+status: ready
 labels:
   - gap
 parent: null
