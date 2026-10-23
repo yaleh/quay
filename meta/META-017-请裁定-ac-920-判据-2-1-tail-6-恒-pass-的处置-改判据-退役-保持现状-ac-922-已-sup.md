@@ -2,8 +2,13 @@
 id: META-017
 title: 请裁定 AC-920 判据 2>&1|tail -6 恒 pass 的处置：改判据 / 退役 / 保持现状（AC-922 已 supersedes
   但 AC-920 仍 active）
-status: proposed
+status: answered
 handler: meta-driver
+reply: 建议 (b) 退役 AC-920，并更正 (b) 的「不可逆点」判断：§② 已证 AC-924-1/2/3 恰是 AC-920 expect
+  的三条断言，AC-924 已 achieved 且在 GOAL-911 退出条件④ 内 ⇒ 承接面并未随 AC-920 退出而消失；相形之下 (a)
+  只会留下一条与 AC-922 重复、零新信息的判据，(b) 还额外止住每轮 gap sweep 把 AC-920 当无人承接 AC 重复立案。(c)
+  的持续成本最高（每轮记一次假达成 + 重复立案）。改判据/退役仍是人的动作——我无权改 AC-920 的 status 或
+  criterion，本回复只给取舍依据。
 ---
 # 请裁定：AC-920 判据恒 pass 的处置（改判据 / 退役 / 保持现状）
 
