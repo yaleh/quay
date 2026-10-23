@@ -1,7 +1,7 @@
 ---
 id: AC-918
 title: 注册表每个条目有 admission 字段，mechanical/semantic-judged 取值正确且 Planner 按它分派
-status: achieved
+status: superseded
 kind: criterion
 goal: GOAL-911
 criterion: "node -e 'const fs=require(\"fs\");const
@@ -43,6 +43,14 @@ statusLog:
     to: achieved
     actor: goal-driver
     reason: "I2: criterion pass"
+  - at: 2026-10-23T07:24:44.207Z
+    from: achieved
+    to: superseded
+    actor: goal-cli
+    reason: ""
+superseded-by:
+  - AC-921
+  - AC-923
 fidelity:
   verdict: faithful
   reason: "fidelity judge: faithful"

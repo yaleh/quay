@@ -57,7 +57,7 @@ statusLog:
 
 ## 退出条件
 
-① 注册表每个条目都有 `admission` 字段且取值正确（`package-cycle` / `design-evolution-regression` = mechanical；`god-file-size` / `unencapsulated-state` / `spine-without-extension-point` = semantic-judged）；Planner 准入按 `admission` 分派（AC-918 criterion 逐字读绿）。
+① 注册表每个条目都有 `admission` 字段且取值正确（`package-cycle` / `design-evolution-regression` = mechanical；`god-file-size` / `unencapsulated-state` / `spine-without-extension-point` = semantic-judged）；Planner 准入按 `admission` 分派（AC-925 criterion 逐字读绿）。
 ② 两段契约作为一份可复用模块存在，三态词表（candidate / confirmed / refuted / needs-more-evidence）各是独立取值、互不同形（AC-919 criterion 逐字读绿）。
 ③ `unencapsulated-state` 端到端跑通：线索器对真实仓库产候选（state=candidate，从不写 confirmed）、判断器确认真靶子并拒绝 memoized/计数器/注册表误报（AC-920 criterion 逐字读绿）。
-④ AC-918、AC-919、AC-920 均 achieved（①②③ 全部由这三条 AC 的 criterion 与 expect 覆盖）。
+④ AC-919、AC-924、AC-925 均 achieved（①②③ 全部由这三条 AC 的 criterion 与 expect 覆盖）。

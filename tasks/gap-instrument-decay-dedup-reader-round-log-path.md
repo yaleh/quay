@@ -3,7 +3,7 @@ id: gap-instrument-decay-dedup-reader-round-log-path
 title: instrument-decay 的立案去重台账在生产上恒为空：readPriorInstrumentDecayFilings 读
   <root>/quality-round.jsonl，而心跳写在 .quay/ —— 同一 (载体,形态) 反复重开 gap-filing
   agent（2026-10-22 已 4 轮，全部「不立案」）
-status: needs-human
+status: ready
 labels:
   - gap
   - defect
@@ -59,9 +59,10 @@ readPriorInstrumentDecayFilings(root, ".quay/quality-round.jsonl") → prior siz
 
 ## DoD
 
-- [ ] AC1-AC4 全绿；`scripts/test.sh --for-task <id>` 通过；改动合入 develop。
-- [ ] 真实落地（不是 fixture）：合入后至少两个生产 instrument-decay 轮次中，同一 pair 的第二轮记为 `already-filed`、gap-filing spawn 数不增；贴出两轮的 `ts` / `filings`（读 `.quay/quality-round.jsonl`），窗口起点必须晚于本任务落地提交。
+- [ ] AC1-AC4 全绿；`scripts/test.sh --for-task <id>` 通过；贴出输出。
 - [ ] 不新增第二份去重台账，也不改 `filing:"filed"` 的语义（该语义仍表示「已交给 agent」）。
+
+> post-landing 的两轮生产复查已拆到 `gap-instrument-decay-postlanding-two-rounds`，不在本任务 DoD 内。
 
 ## Evidence
 
