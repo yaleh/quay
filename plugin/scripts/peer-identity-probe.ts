@@ -32,7 +32,7 @@ import { fileURLToPath } from "node:url";
 // (packages/quay/src/primitives/PROVENANCE.md).
 import { readProcStat } from "../../packages/quay/src/primitives/session-liveness.mjs";
 // Shared best-effort JSONL append — ONE copy (semantic-dedup-scan finding `append-evidence-pair`).
-import { appendJsonlLine } from "./gate-script-base.ts";
+import { appendJsonlLine, parseArgs as baseParseArgs } from "./gate-script-base.ts";
 
 // ── 常量 ──────────────────────────────────────────────────────────────────────────────────────────
 
@@ -529,15 +529,49 @@ function shutdown(pid: number): void {
 
 // ── CLI ───────────────────────────────────────────────────────────────────────────────────────────
 
-function parseArgs(argv: string[]): { cmd: string; flags: Map<string, string[]> } {
-  const cmd = argv[0] ?? "";
+// Thin adapter over the ONE canonical parser (gate-script-base.ts `parseArgs`) — this file carried one
+// of the seven hand-rolled token loops named by `semantic-dedup-scan` finding
+// `parseargs-seven-forked-loops` (runId `semantic-dedup-scan-1792752400273`, verdict
+// `divergent-implementation`). The sub-command is a positional (`minArgs: 0`; `main` still rejects an
+// empty/absent one) and the map shape below is kept so every `one(...)`/`flags.has(...)` read site is
+// untouched.
+//   • `--set` is GREEDY (`type: "string[]", greedy: true`): the retired loop appended EVERY following
+//     non-`--` token to the current flag, so `--set a=1 b=2` must keep both values.
+//   • Unknown flags are still accepted as keys (`unknown:"accept"`) — `parseArgs` used to accept any
+//     `--x`; consumers only read the names they know.
+//   • `--help`/`-h` is detected by the shared parser (`help:"return"`), replacing the old
+//     `argv.includes("--help")` scan; `main` prints USAGE and exits 0 exactly as before.
+function parseArgs(argv: string[]): { cmd: string; flags: Map<string, string[]>; help: boolean } {
+  const parsed = baseParseArgs(["node", "peer-identity-probe.ts", ...argv], {
+    minArgs: 0,
+    usage: "serve|patch|shutdown|cleanup [flags]",
+    help: "return",
+    unknown: "accept",
+    flags: {
+      agent: { type: "string" },
+      name: { type: "string" },
+      kind: { type: "string" },
+      omit: { type: "string" },
+      set: { type: "string[]", greedy: true },
+      "no-register": { type: "boolean" },
+      "no-key": { type: "boolean" },
+      token: { type: "string" },
+      sock: { type: "string" },
+      sockdir: { type: "string" },
+      evidence: { type: "string" },
+      label: { type: "string" },
+      registry: { type: "string" },
+      pid: { type: "string" },
+      keyid: { type: "string" },
+    },
+  });
   const flags = new Map<string, string[]>();
-  let cur: string | null = null;
-  for (const a of argv.slice(1)) {
-    if (a.startsWith("--")) { cur = a.slice(2); if (!flags.has(cur)) flags.set(cur, []); }
-    else if (cur) flags.get(cur)!.push(a);
+  for (const [k, v] of Object.entries(parsed.flags)) {
+    if (typeof v === "string") flags.set(k, [v]);
+    else if (v === true) flags.set(k, []);
   }
-  return { cmd, flags };
+  for (const [k, v] of Object.entries(parsed.lists ?? {})) flags.set(k, v);
+  return { cmd: parsed.args[0] ?? "", flags, help: parsed.help === true };
 }
 
 const USAGE = `usage:
@@ -550,11 +584,11 @@ const USAGE = `usage:
 
 function main(): void {
   const argv = process.argv.slice(2);
-  if (argv.includes("--help") || argv.includes("-h") || argv.length === 0) {
+  const { cmd, flags, help } = parseArgs(argv);
+  if (help || argv.length === 0) {
     console.log(USAGE);
     process.exit(argv.length === 0 ? 1 : 0);
   }
-  const { cmd, flags } = parseArgs(argv);
   const one = (k: string): string | undefined => flags.get(k)?.[0];
   const parseSet = (): Record<string, unknown> => {
     const out: Record<string, unknown> = {};

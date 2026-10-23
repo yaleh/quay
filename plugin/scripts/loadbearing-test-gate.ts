@@ -30,6 +30,7 @@
 
 import fs from "node:fs";
 import path from "node:path";
+import { parseArgs as baseParseArgs } from "./gate-script-base.ts";
 
 export interface ScriptCfg {
   scriptsDir: string;
@@ -211,35 +212,59 @@ export function checkTree(cfg: ScriptCfg): TreeResult {
 }
 
 // ── CLI arg parse. --scripts (required), --tests, --import-root (repeatable), --registry, --outer-loop. ─
-// ⛔ NOT foldable onto gate-script-base's parseArgs — the blocker is this function's CONTROL-FLOW
-// contract, not its syntax (semantic-dedup-scan finding `parseargs-local-copies`, runId
-// `semantic-dedup-scan-1790503843524`, which named this file's copy as one of its exemplars).
-// This is a LIBRARY-shaped parser: a bad argument is RETURNED as `{error}`, and the CALLER decides
-// what to do with it (main turns it into exit 2; an importer could ignore it). The shared parser
-// OWNS `process.exit` on both its `--help` path (helpExit) and its minArgs path, so adopting it here
-// would let an argument typo terminate the process from inside what is currently a pure function —
-// and `--import-root` is likewise repeatable (`<dir> ...`), which the shared one-value-per-flag
-// parser cannot express either. Absorbing this caller needs a non-exiting error mode in the base.
-function parseArgs(argv: string[]): { cfg?: ScriptCfg; allowEmpty?: boolean; error?: string } {
-  const cfg: ScriptCfg = { scriptsDir: null as any, testDir: null, importSearchRoots: [], registryFile: null, outerLoopFile: null };
-  let allowEmpty = false;
-  const args = argv.slice(2);
-  for (let i = 0; i < args.length; i++) {
-    const a = args[i];
-    if (a === "--scripts") cfg.scriptsDir = args[++i];
-    else if (a === "--tests") cfg.testDir = args[++i];
-    else if (a === "--import-root") cfg.importSearchRoots.push(args[++i]);
-    else if (a === "--registry") cfg.registryFile = args[++i];
-    else if (a === "--outer-loop") cfg.outerLoopFile = args[++i];
-    else if (a === "--allow-empty") allowEmpty = true;
-    else return { error: `unknown argument: ${a}` };
-  }
-  return { cfg, allowEmpty };
+// Thin adapter over the ONE canonical parser (gate-script-base.ts `parseArgs`) — this file carried one
+// of the seven hand-rolled token loops named by `semantic-dedup-scan` finding
+// `parseargs-seven-forked-loops` (runId `semantic-dedup-scan-1792752400273`, verdict
+// `divergent-implementation`); it was ALSO cited as an exemplar by the earlier finding
+// `parseargs-local-copies`, which recorded the two blockers that have since been added to the base:
+//   • LIBRARY shape — a bad argument is RETURNED as `{error}` and the CALLER decides (`main` turns it
+//     into exit 2; an importer could ignore it). `errors:"return"` is exactly that mode: the shared
+//     parser no longer owns `process.exit` on the usage-error path.
+//   • `--import-root` is repeatable (`<dir> ...`) ⇒ `{type:"string[]"}` accumulates, in order.
+// `--help` therefore no longer reads as `unknown argument: --help` (exit 2): it takes the shared
+// usage-then-return path (`help:"return"`) and `main` prints the usage and returns 0 — the ONE help
+// contract. `argv` is the WHOLE `process.argv` (the retired loop sliced it itself).
+function parseArgs(argv: string[]): { cfg?: ScriptCfg; allowEmpty?: boolean; error?: string; help?: boolean } {
+  const parsed = baseParseArgs(argv, {
+    minArgs: 0,
+    usage: "--scripts <dir> [--tests <dir>] [--import-root <dir> ...] [--registry <file>] [--outer-loop <file>] [--allow-empty]",
+    help: "return",
+    errors: "return",
+    unknown: "reject",
+    flags: {
+      scripts: { type: "string" },
+      tests: { type: "string" },
+      "import-root": { type: "string[]" },
+      registry: { type: "string" },
+      "outer-loop": { type: "string" },
+      "allow-empty": { type: "boolean" },
+    },
+  });
+  if (parsed.help) return { help: true };
+  if (parsed.error) return { error: parsed.error };
+  // A bare positional is not a flag this command understands — the retired loop reported it through
+  // the same `unknown argument` channel (`${a}` kept its leading `--` for a flag typo; a positional
+  // had none, so the message shape is preserved).
+  if (parsed.args.length > 0) return { error: `unknown argument: ${parsed.args[0]}` };
+  const str = (v: string | boolean | undefined): string | undefined => (typeof v === "string" ? v : undefined);
+  const cfg: ScriptCfg = {
+    scriptsDir: str(parsed.flags.scripts) as any,
+    testDir: str(parsed.flags.tests) ?? null,
+    importSearchRoots: parsed.lists?.["import-root"] ?? [],
+    registryFile: str(parsed.flags.registry) ?? null,
+    outerLoopFile: str(parsed.flags["outer-loop"]) ?? null,
+  };
+  return { cfg, allowEmpty: parsed.flags["allow-empty"] === true };
 }
 
 // ── CLI main (only when run directly). Prints a per-script report + summary; exits 0/1/2. ─────────
 function main(argv: string[]): number {
-  const { cfg, allowEmpty, error } = parseArgs(argv);
+  const { cfg, allowEmpty, error, help } = parseArgs(argv);
+  if (help) {
+    console.log("usage: node loadbearing-test-gate.ts --scripts <dir> [--tests <dir>] " +
+      "[--import-root <dir> ...] [--registry <file>] [--outer-loop <file>] [--allow-empty]");
+    return 0;
+  }
   if (error) { console.error(`ERROR: ${error}`); return 2; }
   if (!cfg!.scriptsDir) {
     console.error("usage: node loadbearing-test-gate.ts --scripts <dir> [--tests <dir>] " +
