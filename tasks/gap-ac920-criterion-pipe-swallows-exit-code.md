@@ -172,3 +172,11 @@ DIRECT_EXIT=1
 ## Dark Axis
 
 该轴仍暗,理由: 本任务只产证据与人的裁定请求（META 记录 + 任务体），不改任何生产代码、模块依赖、延迟或并发/资源行为；无 L_D/L_G 轴读数可采。
+
+## Blocker
+
+**2026-10-23T17:37:39.029Z — worker 未落地（exited-not-landed）**
+
+- 未落地原因：step=suite: oom-killed (3) — recovery exhausted at floor concurrency 32 — no declared rung produced a complete verdict (64,48,32); needs a code/config fix, see plugin/scripts/full-suite-runner.ts
+- run_id：wk-prod-anchor
+- session_id：334985f0-035d-4064-9db9-eb8e76561cb3
