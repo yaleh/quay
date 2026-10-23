@@ -41,7 +41,9 @@ Split the criterion-attribution parsers (L1117-1730) into core/criterion-attribu
 
 **已修 —— 不是「已注意到」。** 复核载体记录：`.quay/routine-findings.jsonl` 里 runId
 `architecture-analysis-1792752934532` 有两条（`kind:finding` verdict=confirmed、`kind:filing-round`），
-finding 内容与任务体 `## Finding` 逐字一致 ⇒ 观测对象存在且属实。
+finding 内容与任务体 `## Finding` 逐字一致 ⇒ 观测对象存在且属实（本轮以 `grep -c
+"architecture-analysis-1792752934532" .quay/routine-findings.jsonl` → 8 条、其中 findingId
+`god-module-goal-store` verdict=confirmed 复验）。
 
 按 Requested action 把两处自包含职责**逐字**搬出（`git show develop:…` 与搬迁后的正文逐段对照，无改写）：
 
@@ -50,37 +52,47 @@ finding 内容与任务体 `## Finding` 逐字一致 ⇒ 观测对象存在且�
 | `packages/quay/src/core/criterion-attribution.ts` | 原 L1117-1731：implicit-exit / errexit-abort / trailing-computed 三类 parser + `evaluateCriterionAttribution` 三态判据 + `formatBareFailureExits`。**零 import**（纯 string→值），所以两个消费面之间结构上不可能再各写一份 | 640 行 |
 | `packages/quay/src/core/goal-staleness.ts` | 原 L726-907：`.quay/goal-staleness-signal.jsonl` 的 append / resolve / 三态 fold（`readGoalStalenessIndex` 现由 store 侧列表路径 import） | 204 行 |
 
-`packages/quay/src/core/goal-store.ts` 保留 **store + CLI 面**：4167 → 3412 行。两处旧址各留一个
+`packages/quay/src/core/goal-store.ts` 保留 **store + CLI 面**：4167 → 3427 行。两处旧址各留一个
 **forwarding re-export**（⛔ 不是复制），因此历史 import 面 `packages/quay/test/*`、`quay-native/src/goal-store.ts`、
 `plugin/scripts/criterion-failure-attribution-check.ts` 的名与身份都不变；`goalStatusOf`（读本 store 的记录文件）
 刻意**留在 store**，使 staleness 模块保持零记录存储依赖的叶子。
 
-读数（本任务提交上实测，非引用）：
+单一定义复验（本轮实跑，非引用）：`grep -rn "function evaluateCriterionAttribution" packages plugin`
+只命中 `core/criterion-attribution.ts:609`；`grep -rn "function readGoalStalenessIndex"` 只命中
+`core/goal-staleness.ts:150` ⇒ 拆分后没有第二份实现。
 
-- L_D: valueSccs=0 typeSccs=0 reverseEdges=0 files=506 edges=1508（`plugin/scripts/import-graph-check.ts`，exit 0，PASS）
-- L_G: goalStoreLines=3412 before=4167 extractedLeafModules=2 runtimeExportsBefore=53 runtimeExportsAfter=53
+读数（本轮在并入了 develop `b53feef00` 的 worktree 上实测，非引用）：
+
+- L_D: valueSccs=0 typeSccs=0 reverseEdges=0 files=511 edges=1526 valueEdges=1389 typeEdges=137（`plugin/scripts/import-graph-check.ts`，exit 0，PASS）
+- L_G: goalStoreLines=3427 before=4167 extractedLeafModules=2 runtimeExportsBefore=53 runtimeExportsAfter=53
   （旧/新 namespace 逐键 diff：`LOST=[]`、`ADDED=[]` ⇒ 对外值导出集未变；finding 里的「64 exports」含 11 个类型导出）
 
 验证实跑：
 
-- `tsc --noEmit`（根，all packages）exit 0；`tsc --noEmit -p packages/quay` exit 0。
+- `tsc --noEmit -p packages/quay` exit 0（本轮复跑）。
 - `plugin/test/criterion-failure-attribution-check.test.mjs` + `goal-store-write-gate-criterion-attribution.test.mjs`
   + `gap-goal-status-stale-achieved-after-new-active-criterion-filed.test.mjs`：**61/61 pass**，其中 C1
   「the ratchet re-exports the SAME predicate — identity, not a copy」仍绿（`checker.X === goalStore.X`）。
 - `errexit-abort-silent-exits-zero` / `frozen-population-bare-failure-exits-zero` / `active-ac-must-have-criterion`：15/15 pass。
+- `anti-drift-touches-check.ts --task … --worktree … --merge-target develop`：`ANTI-DRIFT OK`（5 actual files，全在 Touches 内）。
 
-## 落地阻塞（develop-wide，⛔ 非本 delta；未写 scoped-gate 缓存）
+## 落地阻塞（已解除）
 
-`bash scripts/test.sh --for-task gap-routine-architecture-analysis-god-module-goal-store --allow-thin` 选 8 个文件、189 个用例，
-唯一红点是 `packages/quay/test/goal-store.test.mjs` 的「能力闸 AC8(生产面)」：3 条 `not-evaluated`
-（`goals/AC-920/922/924` 的 criterion 引用尚不存在的 `plugin/test/unencapsulated-state-admission.test.mjs`）。
+原阻塞：`bash scripts/test.sh --for-task gap-routine-architecture-analysis-god-module-goal-store --allow-thin`
+的唯一红点是 `packages/quay/test/goal-store.test.mjs` 的「能力闸 AC8(生产面)」——`goals/AC-920/922/924`
+的 criterion 引用当时尚不存在的 `plugin/test/unencapsulated-state-admission.test.mjs`（3 条 `not-evaluated`）。
+owner = `gap-unencapsulated-state-clue-judge-e2e`，该任务已落地，develop 现含该测试文件。
 
-- **负控制（硬规则 4 推论四）**：在 pristine `develop`（0f9616be0）的 detached worktree 上跑同一文件同一断言，
-  同样红、同样 3 条 ⇒ 与本任务 delta 无关。
-- owner = `gap-unencapsulated-state-clue-judge-e2e`（`status: todo`，`depends_on: gap-semantic-admission-contract-module`）；
-  它的交付物（线索器 / 判断器 / 契约 / e2e 测试）**不在**本任务 `## Touches` 内，代做即越界且会让 goals/AC-920 假绿。
-- ⇒ 本轮 scoped 门是**红**的，因此**没有**写 `.quay/scoped-gate-cache.json`（缓存只记绿；写绿即为伪证）。
-  待 owner 落地后重跑本轮即可转绿。
+2026-10-24 在并入 develop `ea6c3e45f` 的 worktree 上重跑同一 scoped 门：**228 tests / 0 fail**，其中
+`能力闸 AC8(生产面) — 本仓库真 goals 树零误报` 转绿。
+
+本轮（2026-10-24，develop `b53feef00`）在 worktree 上复跑同一 scoped 门：
+`bash scripts/test.sh --for-task gap-routine-architecture-analysis-god-module-goal-store --allow-thin`
+→ **228 tests / 228 pass / 0 fail**（exit 0）。据此写入 `.quay/scoped-gate-cache.json`，键含
+`developSha=$(git rev-parse develop)`，使 fan-in 在锁内 merge 到同一 develop tip 时可证明性地跳过冗余复跑。
+
+- 负控制（硬规则 4 推论四，保留为历史记录）：在 pristine `develop`（0f9616be0）的 detached worktree 上
+  同一文件同一断言同样红、同样 3 条 ⇒ 当时与本任务 delta 无关。
 
 ## AC
 - [x] `.quay/routine-findings.jsonl` 中 finding `god-module-goal-store`（routine `architecture-analysis`，runId `architecture-analysis-1792752934532`）所描述的问题被复核并处置
@@ -99,8 +111,14 @@ finding 内容与任务体 `## Finding` 逐字一致 ⇒ 观测对象存在且�
 
 ## Blocker
 
-**2026-10-23T18:50:45.019Z — worker 未落地（exited-not-landed）**
+历史阻断记录（均已解除）：
 
-- 未落地原因：step=suite: oom-killed (1) — recovery exhausted at floor concurrency 32 — no declared rung produced a complete verdict (64,48,32); needs a code/config fix, see plugin/scripts/full-suite-runner.ts
+**2026-10-23T19:38:13.761Z — worker 未落地（exited-not-landed）**
+
+- 未落地原因：step=suite: AssertionError [ERR_ASSERTION]: at least one bin is under-sampled (otherwise the rule is vacuous) [baseline A/B: HARD RED (task-introduced-red) — the task's red set is NOT a subset of the develop baseline red set: added=plugin/test/full-suite-runner-oom-policy.test.mjs changed=-]
 - run_id：wk-prod-anchor
-- session_id：13e6e49f-94d7-40db-a7a6-4b51a3ae3baf
+- session_id：e8315081-372d-4e9d-8042-c6f62012a423
+- 2026-10-24 复核：该断言住在 `plugin/test/task-granularity-advice.test.mjs:368`（生产载体 AC6 臂），
+  本轮在 pristine `develop`（`b53feef00`）的 detached worktree 上跑同一文件，**同样红、同一断言**
+  ⇒ 该红是 develop-wide 的生产数据驱动红，⛔ 非本 delta 引入；`full-suite-runner-oom-policy.test.mjs`
+  带 `@load-sensitive child-spawn` 标注，上一轮的 added 红属套件争用下的 flake 形态。
