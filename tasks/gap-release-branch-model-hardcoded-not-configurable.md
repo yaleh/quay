@@ -2,7 +2,7 @@
 id: gap-release-branch-model-hardcoded-not-configurable
 title: quay 交付物：发布线/release/hotfix 分支模型硬编码于
   quay（master/release-*/release/*）不可配置，被驱动项目无法声明并核验自己的发布分支模型
-status: todo
+status: ready
 labels:
   - gap
 parent: null
