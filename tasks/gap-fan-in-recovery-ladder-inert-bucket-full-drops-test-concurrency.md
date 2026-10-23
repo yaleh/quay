@@ -2,7 +2,7 @@
 id: gap-fan-in-recovery-ladder-inert-bucket-full-drops-test-concurrency
 title: 恢复阶梯的降档对 hub(bucket full=1) 轮次静默失效：test.sh 的 bucket_full 分支丢掉 rest_args ⇒
   --lane-count 64/48/32 全部跑回 main≤128 ⇒ OOM 永远解不掉
-status: todo
+status: ready
 labels:
   - gap
 parent: null
