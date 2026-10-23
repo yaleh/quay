@@ -184,6 +184,46 @@ R3 `spawns-test-sh` 的 **shrink-only** ratchet 约束 —— 新建一个 spawn
 `full-suite-runner-phases.test.mjs` 的 AC16 仍是**代理量**那一半的 keeper（runner 确实把 N 拼进 argv），
 两半合起来覆盖 runner→argv→scheduler 整条链。
 
+### Landing blocker — 48 车道恢复档暴露的「新回归」：逐调用重探 CLI 的瞬态（2026-10-24）
+
+**阶梯本身已生效**：48 车道恢复轮的完整判词
+（`.quay/fan-in-suite-gap-fan-in-recovery-ladder-inert-bucket-full-drops-test-concurrency~wk-prod-anchor~recovery-48-1792790045972-28885c.log`）：
+```
+2218:scheduler: unified group-budget scheduler (serial≤32 lowconc≤32 main≤48)
+24265:[full-suite-runner] SUITE-PLAN planned=1046 terminal=1046 missing=0 source=probe:test.sh --list-files plan_error=null completeness=complete oomKill=0 telemetry=ok laneCount=48
+```
+⇒ `main≤48`、`oomKill=0`、`completeness=complete`（1046/1046，missing=0）。这是第一个**没被 OOM 杀死**的
+更低并发档，直接满足 DoD 的第二条（「给出完整终态 SUITE-PLAN + 无 SUITE-INCOMPLETE」）。
+该轮仍 `fail 7`：6 个文件在原轮（128）就已同样红（`quay-init` / `task-granularity-advice` /
+`full-suite-runner-cgroup` / `capability-catalog`（2 条）/ `needs-human-parking-recheck`），
+唯一的**新回归**（AC13(b) 的定义：原轮跑过且通过、更低并发下变红）是
+`plugin/test/ownership-active-slice-adapter.test.mjs`。
+
+**成因（不是并发本身）**：该测试每次 `computeSliceDelta()` 都重新 `resolveSliceDelta()` —— 后者是一个
+`spawnSync("node", [cli, "slice-delta", "--help"], { timeout: 30_000 })` 的探针。suite 负载下探针超时 ⇒
+`available:false` ⇒ `computeSliceDelta` 返回 `status:"unavailable"`（**该分支不带 `delta` 键**）。而测试的
+能力闸 `STAYS_CAPABLE` 只排除了 `not-evaluated`，把 `unavailable` 当成「有能力」⇒ 断言读
+`r.delta.removed_edges` 时抛 `TypeError`。逐字失败：
+```
+test at plugin/test/ownership-active-slice-adapter.test.mjs:109:1
+✖ AC1: the REAL candidate ① … (34564.752384ms)
+  TypeError: Cannot read properties of undefined (reading 'removed_edges')
+```
+耗时吻合：AC1 = 34.5s，AC2 = 3.0s ⇒ 差值 ≈ 30s 的探针超时；单独跑该文件 14/14 全绿（28.4s）。
+
+**对照（判据能取假，硬规则 4c）**：写一个 wrapper CLI（`.quay/ac-slice-probe-control/archguard-probe-fail-on-2nd.mjs`，
+经 `ARCHGUARD_CLI` 注入，除「第 2 次 `slice-delta --help` 探针失败」外全部转发真 CLI）：
+- **旧文件**（`git show HEAD:` 副本）：探针 **7** 次、**5 条失败**，逐字复现上面的
+  `TypeError: Cannot read properties of undefined (reading 'removed_edges')`；
+- **修复后**：探针 **1** 次、**14/14 绿**（同一个失败注入下）。
+⇒ 注入不变时，只有「是否逐调用重探」决定结果：判据不是恒真标签。
+
+**修法（只改测试文件，⛔ 不动生产模块 / 不动 `docs/analysis/ownership-active-slice-adapter.mjs`）**：
+`computeSliceDelta` 本就提供 `deps.sliceDelta` 注入位，测试在模块加载时也已解析过一次（`INSTALLED`）；
+把它传入即可 —— 同一进程内 CLI 面不会变，重复探针不产生任何读数、只产生瞬态。
+两处调用点都补（硬规则 5b：`replayDeps` 与其同族兄弟 `minimalRun`，后者在负对照里正是第二个探针的来源）；
+`STAYS_CAPABLE` 同时把 `unavailable` 明确排除（硬规则 3b：未取到读数不得与「有能力」同形）。
+
 ## DoD
 
 - 真实载体读数：至少一条 `main≤32` 来自**真实 fan-in 运行**写下的 `.quay/fan-in-suite-*.log`（或
@@ -193,14 +233,14 @@ R3 `spawns-test-sh` 的 **shrink-only** ratchet 约束 —— 新建一个 spawn
   `.quay/suite-memory-evidence-real32b-1792781576.json` 的 `concurrency.maxConcurrentOverall = 32`。
 - 一个此前因此 OOM 的 hub 任务，其 `recovery-32` 轮 `oomKill` 读数为 0（或该轮给出完整终态
   `SUITE-PLAN` + 无 `SUITE-INCOMPLETE`），即阶梯在地板档真的降下去了。
-  ⚠️ **未达 0**（如实记录）：本任务的真实 32 车道执行轮 `oomKill = 1`、`SUITE-INCOMPLETE reason=oom-killed`
+  ✅ **已被 recovery-48 轮真实满足**（`SUITE-PLAN … planned=1046 terminal=1046 missing=0
+  completeness=complete oomKill=0 laneCount=48`，见 ## Evidence 的 Landing blocker 节）。
+  ⚠️ 此前那次 `recovery-32` 轮曾 **未达 0**（如实记录）：`oomKill = 1`、`SUITE-INCOMPLETE reason=oom-killed`
   （`peakBytes=34360094720` vs `memoryMaxBytes=34359738368`，仅超 348 KiB）。阶梯本身**已真的降下去**
-  （`maxConcurrentOverall=32`，见上一条），但这一轮仍被杀一次。同一份证据给出了残差的成因方向：
+  （`maxConcurrentOverall=32`，见上一条），但那一轮仍被杀一次。同一份证据给出了残差的成因方向：
   `processTreeAccounting` 显示 **planned（车道）进程峰值 39 个 / 4.4 GB**，而 **descendant 峰值 200 个 /
   32.3 GB**（`maxRssBytes=36.2 GB`）—— 峰值由某个测试的**后代进程树**贡献，⛔ 不是 32 条车道本身。
   ⇒ 「再降 `--lane-count`」对这一残差无效；需要单独定位那个 200 进程 / 32GB 的后代子树（另立任务）。
-  本条 DoD 的「地板档真的降下去了」已由 `maxConcurrentOverall=32` 直接证明，但「oomKill=0」这一
-  具体读数**没有被本任务的修复满足**，不冒充满足。
 - `scripts/test.sh` 两处兄弟调用都已修（AC4 的命中数为 0 遗漏），并有可复核注释说明
   「bucket 回退全量时必须转发 rest_args，否则 `--lane-count` 静默失效」。
   ✅ 见 AC4；注释在 `scripts/test.sh` 的两处调用上方（逐字含「⛔ BOTH full-suite fallbacks below MUST
@@ -212,6 +252,7 @@ R3 `spawns-test-sh` 的 **shrink-only** ratchet 约束 —— 新建一个 spawn
 
 - `scripts/test.sh`
 - `plugin/test/runner-grouping-flags-only.test.mjs`
+- `plugin/test/ownership-active-slice-adapter.test.mjs`
 - `plugin/scripts/full-suite-runner.ts`
 - `plugin/test/full-suite-runner-phases.test.mjs`
 - `tasks/gap-fan-in-recovery-ladder-inert-bucket-full-drops-test-concurrency.md`
