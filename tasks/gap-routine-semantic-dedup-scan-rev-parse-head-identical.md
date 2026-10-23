@@ -3,7 +3,7 @@ id: gap-routine-semantic-dedup-scan-rev-parse-head-identical
 title: "semantic-dedup-scan: Bodies identical including the SHA regex and
   try/catch-null, and both take the same single root parameter, so the two names
   are purely historical."
-status: ready
+status: done
 labels:
   - gap
   - routine-filed
