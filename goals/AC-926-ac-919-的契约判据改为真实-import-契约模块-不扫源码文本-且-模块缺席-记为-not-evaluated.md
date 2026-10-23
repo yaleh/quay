@@ -1,7 +1,7 @@
 ---
 id: AC-926
 title: AC-919 的契约判据改为真实 import 契约模块（不扫源码文本），且「模块缺席」记为 not-evaluated 而非 fail
-status: draft
+status: active
 kind: criterion
 goal: GOAL-911
 criterion: "node --input-type=module -e 'const
@@ -51,6 +51,17 @@ origin: "criteria[AC-919].criterion in this round's readings is a source-text
   only: AC-919 keeps its status until a human retires it, and
   tasks/gap-semantic-admission-contract-module.md AC1 (which pins AC-919's
   current criterion text) would need re-pointing by that same human decision."
+activatedAt: 2026-10-23T08:41:06.508Z
+statusLog:
+  - at: 2026-10-23T08:41:06.508Z
+    from: draft
+    to: active
+    actor: goal-driver
+    reason: "triage: activate"
 supersedes:
   - AC-919
+fidelity:
+  verdict: faithful
+  reason: "fidelity judge: faithful"
+  at: 2026-10-23T08:41:06.508Z
 ---
