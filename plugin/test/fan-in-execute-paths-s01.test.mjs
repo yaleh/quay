@@ -57,7 +57,7 @@ test("① REAL test delta — plugin/test/*.test.mjs must classify as code (test
 });
 
 
-test("① REAL doc delta — tasks/ + goals/ + docs/ + adr/ + .quay/ only must classify as doc (skip full suite)", async (t) => {
+test("① REAL doc delta — tasks/ + goals/ + meta/ + docs-managed/ + docs/ + adr/ + .quay/ only must classify as doc (skip full suite)", async (t) => {
   // 判据2 ① 镜像: a pure-doc delta classified as code would WASTE a full-suite run (该跳却重跑).
   // NOTE: orchestration/*-tick-core.md is deliberately NOT here — it is read by tick-core-static-check
   // / rhythm-consumer (`@static-object orchestration/*-tick-core.md`), so it classifies as CODE
@@ -69,9 +69,14 @@ test("① REAL doc delta — tasks/ + goals/ + docs/ + adr/ + .quay/ only must c
   // why this fixture samples docs/proposals/ + docs/references/ instead. Same class, same treatment:
   // the `.quay/` surface stays covered below by a genuinely doc-only, non-checker-read path
   // (gap-pre-fix-upgraded-project-unresolvable-binding-undetected).
+  // NOTE 3: `meta/` + `docs-managed/` are the quay-written markdown STORES (`quay meta write`,
+  // document-store) that gap-doc-surfaces-missing-meta-prefix added to DOC_SURFACES — a task whose AC
+  // requires a META ruling record must not pay a full suite (gap-ac920 OOM'd 3× on a 2-md delta).
   const files = {
     "tasks/gap-fan-in-execute-three-unverified-paths.md": "status: ready\n",
     "goals/AC-999-fake.md": "status: ready\n",
+    "meta/META-017-fake-ruling.md": "status: ready\n",
+    "docs-managed/DOC-999-fake.md": "status: active\n",
     "docs/proposals/exp5-crystallization-strategy.md": "x\n",
     "docs/references/git.md": "y\n",
     "adr/ADR-010-scheduled-milestone-e2e-incl-browser-tests.md": "y\n",
