@@ -42,6 +42,24 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const pkgDir = path.resolve(__dirname, "..");
 const DEFAULT_PLUGIN_ROOT = path.resolve(pkgDir, "..", "..", "plugin");
 
+// ── Bound the esbuild SERVICE's Go heap (gap-suite-oom-lane-scaled-ladder-floor-32-no-lower-rung) ──
+// `bundleEntries` runs every `build()` through ONE long-lived esbuild child process (the JS API's
+// service binary). Go's GC has no ceiling by default (it targets ~2x live heap), so a service that
+// stays alive across 115+ builds can balloon far past what any single build needs.
+//
+// MEASURED 2026-10-24 by the suite's per-second cgroup sampler (`.quay/hogwatch.log`): a single
+// esbuild service reached `rss=16221928KB` (16.2 GB), parented by a test's
+// `node … build-plugin-dist.mjs /tmp/shipped-set-stub-…`; a second concurrent invocation carried
+// another 10.6 GB. Two of them at once filled the suite cgroup's declared 32 GiB MemoryMax and the
+// kernel OOM-killed descendants — the reason a 15-lane round still `oomKill=1` while a 126-lane
+// round peaked at only 26 GB (what dies is a child-process accident, not the lane count).
+//
+// `GOMEMLIMIT` is a SOFT limit: past it the Go GC collects harder, it never aborts the build. The
+// value is 35x a healthy build's measured peak RSS (~113 MB, see entryBundleWidth), so it does not
+// bind a normal build — it only stops a runaway service from taking the whole suite down. An
+// explicit caller value wins (env is the override; this is the default).
+if (!process.env.GOMEMLIMIT) process.env.GOMEMLIMIT = "4GiB";
+
 // Load-bearing banner (identical rationale to Core's build-dist.mjs): yaml's CJS-interop shim
 // performs a dynamic require() that an ESM esbuild bundle cannot satisfy without a real `require`
 // in scope. cap-from-gate.ts / read-probe-spec.ts / drivable-workspace-check.ts import yaml, so
