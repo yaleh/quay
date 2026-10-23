@@ -1,7 +1,7 @@
 ---
 id: gap-instrument-decay-postlanding-two-rounds
 title: instrument-decay 落地后两轮生产复查：同一 pair 第二轮记 already-filed、gap-filing spawn 数不增
-status: todo
+status: ready
 labels:
   - gap
 parent: null
