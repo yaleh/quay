@@ -1,13 +1,16 @@
 ---
 id: gap-meta-call-ac-918-goal-911
 title: AC-918 的判据结构上不可通过却在域 ⇒ GOAL-911 结构上永远无法达成；如何处置需人裁定
-status: needs-human
+status: done
 labels:
   - meta-human-call
   - meta-driver
 parent: null
 children: []
-extra: {}
+extra:
+  acceptance: 'node packages/quay/bin/quay.js goal show AC-918 --json 2>/dev/null
+    | grep -q "\"status\": \"superseded\"" && node packages/quay/bin/quay.js
+    goal show AC-925 --json 2>/dev/null | grep -q "\"status\": \"active\""'
 ---
 ## Finding
 AC-918（status=active，按 goal-driver.ts:880 `inScopeAcsOf` 计入在域）的判据是扫源码文本的正则 `kind:\s*"([a-z-]+)"…admission:`，而注册表里两个 mechanical kind 是以模块常量登记的（`kind: CONCERN_KIND_IN_SCOPE` / `kind: DESIGN_EVOLUTION_KIND`），所以它每轮恒解析出 0 对、恒 exit 2，读数上永远是一条 fail。它声称覆盖的『取值正确』已由 AC-921（achieved，import 读注册表）覆盖，『按 admission 分派』由 AC-923 承接。这条 AC 应当重写判据、标 superseded、还是保持现状？
@@ -22,15 +25,31 @@ AC-918（status=active，按 goal-driver.ts:880 `inScopeAcsOf` 计入在域）�
 - `goals/AC-918-注册表每个条目有-admission-字段-mechanical-semantic-judged-取值正确且-plann.md`：「正向：`CONCERN_KIND_REGISTRY` 每个已注册条目都带 `admission` 字段，且 `package-cycle` /」
 - `goals/AC-921-ac-918-的准入判据读注册表对象本身-import-不扫源码文本-文本正则看不见与注释同形的常量-kind.md`：「AC-918 的准入判据读注册表对象本身（import），不扫源码文本——文本正则看不见与注释同形的常量 kind」
 
-## AC（draft）
-- [ ] 人在上述选项中作出选择，并把选择写进本任务体（或以 DIR 记录该裁定）
-- [ ] 依该选择产生的后续工作已立案或已落地（⛔ 不以「已回答」本身充当完成）
+## Ruling (2026-10-23)
 
-## DoD（draft）
-- [ ] 裁定已记录在可被后续读到的正本里，⛔ 不只存在于本任务的对话中
-- [ ] 上面两条互相矛盾的立场中，落败的一方已被就地更正或标注，⛔ 不留着继续制造同一次冲突
+**人裁定：选项 2。** AC-918 标 `superseded`（`supersededBy: [AC-921, AC-923]`，提交 `b9f052838`）；新增 **AC-925** 明确承载「Planner 的 C1 准入按 admission 分派」的机械断言（`active`，criterion=`node --test plugin/test/admission-dispatch.test.mjs`，当前 exit 1，待 Planner 派生实现任务）。GOAL-911 ① 的分派引用已改为 AC-925，④ 已改为 `AC-919、AC-924、AC-925`。
+
+## AC
+- [x] 人在上述选项中作出选择，并把选择写进本任务体（或以 DIR 记录该裁定） —— **实测**：选项 2 已写入 `## Ruling (2026-10-23)`。
+- [x] 依该选择产生的后续工作已立案或已落地（⛔ 不以「已回答」本身充当完成） —— **实测**：AC-918 status→superseded（`b9f052838`）；AC-925 已建（active）；GOAL-911 ①/④ 已对齐。
+
+## DoD
+- [x] 裁定已记录在可被后续读到的正本里，⛔ 不只存在于本任务的对话中 —— **实测**：本任务体 `## Ruling` + AC-918 的 `superseded` 状态 + AC-925 记录。
+- [x] 上面两条互相矛盾的立场中，落败的一方已被就地更正或标注，⛔ 不留着继续制造同一次冲突 —— **实测**：AC-918 已 `superseded`（落败立场退出在域）；AC-925 承接分派断言。
 
 ## Touches
 - `goals/AC-918-注册表每个条目有-admission-字段-mechanical-semantic-judged-取值正确且-plann.md`
 - `goals/AC-923-c1-准入闸真正消费-registry-的-admission-字段-非法取值必须按名拒绝-而不是继续走机械判定.md`
+- `goals/AC-925-planner-的-c1-准入按-admission-分派-mechanical-走既有-delta-判定-semant.md`
+- `goals/GOAL-911-通用化-线索-vs-语义判断-两段准入-注册表加-admission-字段区分-mechanical-semantic.md`
 - `tasks/gap-meta-call-ac-918-goal-911.md`
+
+## Evidence
+
+- AC-918：`goal show AC-918` ⇒ `status: superseded`，`supersededBy: [AC-921, AC-923]`（提交 `b9f052838`）。
+- AC-925：`goal show AC-925` ⇒ `status: active`，`criterion: node --test plugin/test/admission-dispatch.test.mjs`（提交 `934051165`）。
+- GOAL-911：① 引用 AC-925；④ = `AC-919、AC-924、AC-925 均 achieved`。
+
+## Dark Axis
+
+该轴仍暗,理由: 本任务只记录人的裁定并改 goal store 的 AC/退出条件文本，不改生产代码、延迟、并发或资源行为；无 L_D/L_G 轴读数可采。
