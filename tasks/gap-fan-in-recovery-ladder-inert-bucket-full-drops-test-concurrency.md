@@ -263,8 +263,8 @@ test at plugin/test/ownership-active-slice-adapter.test.mjs:109:1
 
 ## Blocker
 
-**2026-10-23T21:22:37.396Z — worker 未落地（exited-not-landed）**
+**2026-10-23T22:01:02.683Z — worker 未落地（exited-not-landed）**
 
-- 未落地原因：step=suite: oom-killed (1) — new regression at lower concurrency: plugin/test/ownership-active-slice-adapter.test.mjs (passed at the original concurrency 128, fails at 48) — needs a code fix
+- 未落地原因：step=suite: oom-killed (1) — recovery exhausted at floor concurrency 32 — no declared rung produced a complete verdict (64,48,32); needs a code/config fix, see plugin/scripts/full-suite-runner.ts
 - run_id：wk-prod-anchor
-- session_id：d6dad293-4112-427f-af6e-6caa52195d69
+- session_id：14acc26f-e14c-4687-b471-49c8da0ef7c3
