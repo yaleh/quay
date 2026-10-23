@@ -2,7 +2,7 @@
 id: gap-fan-in-step-trace-rate-stopped-adjudication
 title: fan-in-step-trace.jsonl 的 5 个 rate-stopped 分组：4
   个是罕见例外路径、suite-rerun-green 被持续基线红条件性遮蔽；Shape B 没有机器可读的「已裁定例外」
-status: todo
+status: ready
 labels:
   - gap
   - defect
