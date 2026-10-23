@@ -227,3 +227,72 @@ R3 `spawns-test-sh` 的 **shrink-only** ratchet 约束 —— 新建一个 spawn
 - 未落地原因：step=suite: oom-killed (3) — recovery exhausted at floor concurrency 32 — no declared rung produced a complete verdict (64,48,32); needs a code/config fix, see plugin/scripts/full-suite-runner.ts
 - run_id：wk-prod-anchor
 - session_id：432e6257-472e-46e9-906b-e600f4c73db1
+
+## Round 2026-10-24 — 复位轮实测与残差定位（本轮未改代码）
+
+**本轮做了什么**：把 develop 合入工作树（4 个提交，全部是 task 状态记录 / 无关文档），逐条复核 AC，
+跑 scoped 门（`tests 75 / pass 75 / fail 0`）与 anti-drift（2 个实际改动文件，全在 `## Touches` 内）。
+**没有新增代码改动** —— 修复本身在前几轮已落地且仍然成立（见下）。落地仍被 `oomKill ≥ 1` 挡住。
+
+### AC 复核（本轮，合并后的树上）
+
+- **AC4**：`grep -nF 'run_selected "$(effective_groups)"' scripts/test.sh` ⇒ 4 条命中；
+  `1779` / `1785` 两条已转发 `"${rest_args[@]}"`（hub 回退 + selector 空集回退），
+  `1613` 是 `$# -eq 0` 无参分支（结构上无参数可转发），`1931` 是 flags-only 分支且本就转发 `"$@"`。
+  **遗漏数 = 0**；`scripts/test.sh:1772` 的注释逐字含「⛔ BOTH full-suite fallbacks below MUST forward」。
+- **AC5**：`node --test plugin/test/runner-grouping-flags-only.test.mjs` ⇒
+  `✔ bucket-full fallback: --test-concurrency reaches the SCHEDULER (scheduler: main≤N), not just argv`。
+- **AC1–AC3**：`## Evidence` 里的真实载体读数（`.quay/fan-in-suite-*.log` 的 `main≤32`、
+  `concurrency.maxConcurrentOverall=32`）本轮未触碰，仍成立。
+
+### 残差实测：`# fail 7` 不是本任务引入；唯一拦住落地的是 `oomKill ≥ 1`
+
+同一 runId 的四轮（同一棵受测树，`.quay/verification-round.jsonl` round 3037–3040）：
+
+| 轮次 | laneCount | fail | oomKill | SUITE-INCOMPLETE |
+|---|---|---|---|---|
+| 3037（原轮） | 128 | 18 | 3 | oom-killed |
+| 3038（recovery-64） | 64 | 9 | 1 | oom-killed |
+| 3039（recovery-48） | 48 | 19 | 2 | oom-killed |
+| 3040（recovery-32） | 32 | 7 | 1 | oom-killed |
+
+四轮都是 `planned=1046 terminal=1046 missing=0` —— **没有任何计划文件缺终态**，被 OOM 杀的是后代进程。
+
+- 第 3040 轮（32 车道）内存证据 `.quay/suite-memory-evidence-mfi-…-1792782862395-781417.json`：
+  `peakBytes=34,359,820,288` vs `memoryMaxBytes=34,359,738,368` —— 仅超 **81,920 字节（80 KiB）**；
+  `concurrency.laneCount=32`、`maxConcurrentOverall=32`（**阶梯确实降到位了**）。
+- `processTreeAccounting`：`plannedMax=40 / 4.5 GB`，`descendantMax=204 / 30.2 GB`，`maxProcesses=254`。
+  ⇒ 峰值由**每条车道派生的后代进程**承担（≈1 GB/车道），不是某一条失控子树。
+- 用第 3040 轮的 `perFile[]` 区间独立重算：**最大重叠并发 = 32**（正好等于请求车道数）。重叠的 32 个文件
+  里含 `full-suite-runner-phases`、多份 `worker-fan-in-*` / `worker-driver-fan-in-*`、`goal-driver-*`
+  等**大量派生子进程**的测试；单文件 `memPeakKb` 峰值 950,648 KB。
+
+### 对 `## DoD` 里「再降 --lane-count 对这一残差无效」的更正
+
+该句当时是**未经对照的推断**（硬规则 4 推论四）。本轮读数给出反向证据：峰值随
+**并发车道数 × 每车道后代进程**缩放（32 车道 ⇒ 后代 30.2 GB；最大重叠恰为 32）。
+⇒ **更低的恢复档（24 / 16）是合理的下一杠杆**；「必须单独定位某棵 200 进程子树」不是唯一解释。
+（原 DoD 段落保留在上方不删，此处为更正，不是抹除。）
+
+### 为什么本轮修不掉它（结构性，不是遗漏）
+
+fan-in 的恢复阶梯与 runner 都从**主检出**加载：
+`worker-fan-in.ts` 的 `resolveMechanicalSuiteCommand` 用 `kernelSiblingArgv("full-suite-runner.ts")`
+（kernel 安装位置 = 主检出），只有 `--root <worktree>` 让 `scripts/test.sh` 取自本分支工作树。
+⇒ 在本分支修改 `plugin/scripts/worker-fan-in.ts`（阶梯）或 `full-suite-runner.ts`（内存策略）
+**在本次落地之前不会生效**（循环依赖）；本分支唯一能改变本次 fan-in 结果的载体是 `scripts/test.sh`，
+而它的修复已验证成立。
+
+### 给下一层（需在主检出落地，或由人裁定）
+
+1. 扩展 `SUITE_RECOVERY_CONCURRENCY_LADDER`（`plugin/scripts/worker-fan-in.ts`，现为 `[64,48,32]`）
+   增加 24 / 16 两档；或按上一轮 `peakBytes / maxConcurrentOverall` 推导下一档（**先用读数再设数值**，
+   硬规则 4）。梯子仍须声明式且严格降序（AC13 不变）。
+2. 第 3040 轮的 6 个红文件是 **develop 侧既存红**：3040 的红集合 ⊂ 3037 的红集合，**新增回归 = ∅**。
+   逐条（本轮在合并后的树上单独复跑，均可复现）：
+   `capability-catalog`（`release-model-check.ts` 的 question = "2026-10-23"、cadence 非五枚举值）、
+   `needs-human-parking-recheck`（该树真实板 needs-human 计数 = 0 ⇒ 断言 "carries needs-human tasks" 失败）、
+   `task-granularity-advice`（AC6 生产分箱「至少一箱欠采样」）、
+   以及 `quay-init` / `full-suite-runner-cgroup` / `release-cut` 三个 @load-sensitive 文件（负载相关，
+   本轮单独复跑时 `quay-init` 与 `release-cut` 仍红）。
+   既存红等价（A/B）本可豁免它们，但该通道要求本轮先成为 `complete-red` ⇒ 仍以第 1 条为前提。
