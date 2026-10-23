@@ -3,7 +3,7 @@ id: gap-routine-semantic-dedup-scan-parseargs-seven-forked-loops
 title: "semantic-dedup-scan: Sixteen definitions delegate to the exported base
   parseArgs while seven hand-roll forked loops with divergent input languages
   (--root= form, positional-forbidd"
-status: todo
+status: ready
 labels:
   - gap
   - routine-filed
