@@ -1,7 +1,7 @@
 ---
 id: gap-meta-call-ac-918-goal-911
 title: AC-918 的判据结构上不可通过却在域 ⇒ GOAL-911 结构上永远无法达成；如何处置需人裁定
-status: needs-human
+status: todo
 labels:
   - meta-human-call
   - meta-driver
