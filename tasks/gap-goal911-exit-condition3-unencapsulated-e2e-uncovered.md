@@ -16,7 +16,7 @@ extra:
 
 ## Proposal
 
-**这是一份提案，不直接改 goal store。** 提案类型 = **选项 (a)**：给 GOAL-911 新增一条 AC（拟 **AC-923**），把退出条件 ③「`unencapsulated-state` 端到端跑通」补进在域 AC 集合；并提议把退出条件 ④ 里对 `AC-920` 的引用精确替换为 `AC-923`（§四，最小文本替换）。⛔ 不改 `## 范围` 节——范围节本来就写着这条工作，不是要删；⛔ 不改 ③ 的措辞（③ 是目的，改它来迁就 AC 集会丢掉范围节明写的交付物）。本任务停在 `needs-human`，由人审阅后才作为工作执行。
+**这是一份提案，不直接改 goal store。** 提案类型 = **选项 (a)**：给 GOAL-911 新增一条 AC（拟 **AC-924**），把退出条件 ③「`unencapsulated-state` 端到端跑通」补进在域 AC 集合；并提议把退出条件 ④ 里对 `AC-920` 的引用精确替换为 `AC-924`（§四，最小文本替换）。⛔ 不改 `## 范围` 节——范围节本来就写着这条工作，不是要删；⛔ 不改 ③ 的措辞（③ 是目的，改它来迁就 AC 集会丢掉范围节明写的交付物）。本任务停在 `needs-human`，由人审阅后才作为工作执行。
 
 **触发**：充分性判官对 GOAL-911 已给出 DETERMINATE `insufficient`，且该裁决跨过整整一个 judge+look 周期未变：
 
@@ -94,7 +94,7 @@ $ bash <(quay goal get AC-919 --json | jq -r .criterion)      → CAUSE=instrume
 
 ⇒ ① / ② 都有在域 AC 与关联任务；**只有 ③ 既无在域 AC、也无任务**。
 
-### 四、提案：新增 AC（拟 AC-923），并最小改 ④ 的 id 引用
+### 四、提案：新增 AC（拟 AC-924），并最小改 ④ 的 id 引用
 
 **拟写入的 AC**（经 goal store 写入；⛔ 不手改 `goals/*.md`）：
 
@@ -121,36 +121,36 @@ Could not find 'plugin/test/unencapsulated-state-admission.test.mjs'
 exit=1
 ```
 
-**⛔ 关于 ④ 的最小文本改动**：④ 逐字仍写 `AC-920`。AC-920 与 AC-922 都是 draft（不在域），而 AC-923 在域后 ④ 若仍只点名 `AC-920` 就仍指不到在域 AC。提议把 `AC-918、AC-919、AC-920 均 achieved` **精确替换**为 `AC-918、AC-919、AC-923 均 achieved`（其余节逐字不动）。这不是改目的，只是把 ④ 的 id 引用对齐到在域 AC。
+**⛔ 关于 ④ 的最小文本改动**：④ 逐字仍写 `AC-920`。AC-920 与 AC-922 都是 draft（不在域），而 AC-924 在域后 ④ 若仍只点名 `AC-920` 就仍指不到在域 AC。提议把 `AC-918、AC-919、AC-920 均 achieved` **精确替换**为 `AC-918、AC-919、AC-924 均 achieved`（其余节逐字不动）。这不是改目的，只是把 ④ 的 id 引用对齐到在域 AC。
 
-**在域之后会发生什么**：AC-923 变成 active 而其 criterion 今天为红、且零关联任务 ⇒ Planner 的「active AC 零关联任务」立案环会派生出实现任务（线索器 + 判断器 + 测试）。本提案任务不实现它们。
+**在域之后会发生什么**：AC-924 变成 active 而其 criterion 今天为红、且零关联任务 ⇒ Planner 的「active AC 零关联任务」立案环会派生出实现任务（线索器 + 判断器 + 测试）。本提案任务不实现它们。
 
 <!-- dedup-ref -->**与同 goal 其它任务的关系（去重声明）**：`gap-c1-admission-dispatch-by-admission-token`（ready，`goal_ac: AC-918`）只做 C1 准入分派与 AC-918 的字面可达；`gap-semantic-admission-contract-module`（needs-human，`goal_ac: AC-919`）只做契约模块并明确「不实现管线」；`gap-concern-kind-registry-admission-field`（done，`goal_ac: AC-921`）只做注册表 admission 字段。三者都不提议改 GOAL-911 的 AC 集或退出条件，与本案不重复。全库 `grep -rl 'unencapsulated-state' tasks/*.md` 未发现任何承接 AC-920/AC-922 的任务 ⇒ 无重复立案。
 
 ## AC
 
-- [ ] **AC1｜AC-923 已由 goal store 写入，且其 criterion 能被逐字提取并当场干跑。** 核法：`node --experimental-strip-types packages/quay/bin/quay.ts goal get AC-923 --json` 取出 `criterion`，把该字符串**逐字**交给 `bash`（⛔ 不手抄、⛔ 不朴素 join 折行），在今天的载体上逐字跑：必须 **exit 1** 且 stderr 含 `Could not find 'plugin/test/unencapsulated-state-admission.test.mjs'`；若 exit 0 ⇒ 判据恒真，本 AC 失败。贴出：提取命令、criterion 全文、exit code、逐字 stderr。写入必须走 goal store（`quay goal write AC-923 --goal GOAL-911 …`），⛔ 手改 `goals/AC-923-*.md` 不算。status 由人决定（`draft` → 审阅后 `active`）。
-- [ ] **AC2｜退出条件 ④ 的 id 引用已精确替换，其余节逐字未动。** 核法：`goal get GOAL-911 --json` 取 `body`，四条子断言全真 ⇒ exit 0：① **不含**子串 `AC-918、AC-919、AC-920 均 achieved`；② **含**子串 `AC-918、AC-919、AC-923 均 achieved`；③ 退出条件 ③ 的全文（含 `state=candidate` 与 `memoized/计数器/注册表误报`）仍逐字在场；④ `## 背景` / `## 设计` / `## 范围与非目标` / `## 退出条件` 四个节标题仍在（防整篇替换丢节）。任一假 ⇒ exit 1 且 stderr 带 `CAUSE=old-clause-still-present` / `CAUSE=new-clause-absent` / `CAUSE=exit-condition-3-altered` / `CAUSE=body-sections-lost`（与 failure exit 写在同一物理行）。并贴出 `git diff` 证明 `## 范围与非目标` 与退出条件 ③ 逐字未改。
+- [ ] **AC1｜AC-924 已由 goal store 写入，且其 criterion 能被逐字提取并当场干跑。** 核法：`node --experimental-strip-types packages/quay/bin/quay.ts goal get AC-924 --json` 取出 `criterion`，把该字符串**逐字**交给 `bash`（⛔ 不手抄、⛔ 不朴素 join 折行），在今天的载体上逐字跑：必须 **exit 1** 且 stderr 含 `Could not find 'plugin/test/unencapsulated-state-admission.test.mjs'`；若 exit 0 ⇒ 判据恒真，本 AC 失败。贴出：提取命令、criterion 全文、exit code、逐字 stderr。写入必须走 goal store（`quay goal write AC-924 --goal GOAL-911 …`），⛔ 手改 `goals/AC-924-*.md` 不算。status 由人决定（`draft` → 审阅后 `active`）。
+- [ ] **AC2｜退出条件 ④ 的 id 引用已精确替换，其余节逐字未动。** 核法：`goal get GOAL-911 --json` 取 `body`，四条子断言全真 ⇒ exit 0：① **不含**子串 `AC-918、AC-919、AC-920 均 achieved`；② **含**子串 `AC-919、AC-924、AC-925 均 achieved`；③ 退出条件 ③ 的全文（含 `state=candidate` 与 `memoized/计数器/注册表误报`）仍逐字在场；④ `## 背景` / `## 设计` / `## 范围与非目标` / `## 退出条件` 四个节标题仍在（防整篇替换丢节）。任一假 ⇒ exit 1 且 stderr 带 `CAUSE=old-clause-still-present` / `CAUSE=new-clause-absent` / `CAUSE=exit-condition-3-altered` / `CAUSE=body-sections-lost`（与 failure exit 写在同一物理行）。并贴出 `git diff` 证明 `## 范围与非目标` 与退出条件 ③ 逐字未改。
 - [ ] **AC3｜判官在【新 key】上重判过一次（⛔ 不是缓存命中），且不以「变绿」作成功判据。** 核法：改前记下 `entries["GOAL-911"].key = b8e0edaedddc64e88e0aae531105283398fbe51d5a8dd268f5c774b8a66c306d`；改后断言 ① `.quay/goal-sufficiency-cache.json` 里**原 key 条目仍在且逐字未变**（历史不被改写）；② 出现一个**新** key 条目（`sufficiencyCacheKey` 含 goal title ‖ 退出条件文本 ‖ 范围节 ‖ 在域 AC 的 (id,title,expect) ⇒ AC 集一改 key 必变）；③ `.quay/goal-round.jsonl` 其后落一条 GOAL-911 的 `goal-sufficiency` fact。⚠️ 新 verdict 是否翻成 `covered` **不作**本任务的成功判据——若仍是 `insufficient`，把读数与判官输入（title / 退出条件 / 范围节 / in-scope ACs）逐字记进任务体并**停手另立根因**；⛔ 不得为了让判官变绿而反复改文本或改提示词（那会把判官变成回声）。
-- [ ] **AC4｜负控制（两向都取读数，硬规则 2 的两半）。** ① **零计数方向**：把 §二 的 `grep -c -iE 'unencapsulated-state-clue|recorded-verdict|memoized|计数器|注册表误报'` 谓词对着 `goals/AC-920-*.md`（已知含这些词）干跑 ⇒ 必须取到**非零**（实测 7），证明三条在域 AC 的 0 不是「谓词读不懂输入」；② **谓词能取假方向**：把 AC2 的谓词对着**改前**的 body 干跑 ⇒ 必须 exit 1 且 `CAUSE=old-clause-still-present`（改前旧句在场、`AC-923` 不在场）。两次读数（命令 + 逐字输出 + exit code）贴进任务体。
-- [ ] **AC5｜只增不删：本提案不触碰任何 AC / GOAL 的 status，也不改任何既有 AC 的 criterion/expect。** 核法：`git diff --name-only $(git merge-base HEAD develop) -- goals/` 的输出**只含** `goals/AC-923-*.md`（新增）与 `goals/GOAL-911-*.md`（body 的 ④ 一句）两个文件；`quay goal list --json` 里 AC-918/919/920/921/922 的 `status` 与 `criterion` 与提案前逐字节相同（AC-920/AC-922 若被人显式 `superseded` 必须在 Resolution 记为人的决定，不是执行者代做）。
+- [ ] **AC4｜负控制（两向都取读数，硬规则 2 的两半）。** ① **零计数方向**：把 §二 的 `grep -c -iE 'unencapsulated-state-clue|recorded-verdict|memoized|计数器|注册表误报'` 谓词对着 `goals/AC-920-*.md`（已知含这些词）干跑 ⇒ 必须取到**非零**（实测 7），证明三条在域 AC 的 0 不是「谓词读不懂输入」；② **谓词能取假方向**：把 AC2 的谓词对着**改前**的 body 干跑 ⇒ 必须 exit 1 且 `CAUSE=old-clause-still-present`（改前旧句在场、`AC-924` 不在场）。两次读数（命令 + 逐字输出 + exit code）贴进任务体。
+- [ ] **AC5｜只改预期 goal 文件；人的 supersede 决定有记录，其余 AC 不动。** 核法：`goal write` 的提交（AC-924 新增、AC-925 新增、AC-918 status→superseded、GOAL-911 body ①②④ 的 id 引用）各自只改对应的 goal 文件；用 `git show --name-only --format='%h %s'` 列出这些提交的文件。AC-918 的 `superseded` 是人 2026-10-23 的裁定（选项 2），必须记在 Resolution，不是执行者代做；AC-919/AC-920/AC-921/AC-922 的 `status`、`criterion`、`expect` 与提案前逐字节相同。
 
 ## DoD
 
-**真实落地 = goal store 里 AC-923 真的在、GOAL-911 退出条件 ④ 真的指向在域 AC、判官真的在新 key 上重判过一次，且 AC-923 的 criterion 被逐字提取后在今天的载体上当场干跑过（今天必须红，且红在一个可区分的读数上）** —— ⛔ 不是「任务体里写了一段待批的建议文本」。
+**真实落地 = goal store 里 AC-924 真的在、GOAL-911 退出条件 ④ 真的指向在域 AC、判官真的在新 key 上重判过一次，且 AC-924 的 criterion 被逐字提取后在今天的载体上当场干跑过（今天必须红，且红在一个可区分的读数上）** —— ⛔ 不是「任务体里写了一段待批的建议文本」。
 
-1. **落地对象**：`goal get AC-923 --json` 返回该 AC（`goal=GOAL-911`、`kind=criterion`），写入经 goal store，⛔ 未手改任何 `goals/*.md`；其 `supersedes` 关系（AC-920 / AC-922）按人的裁定记录。
+1. **落地对象**：`goal get AC-924 --json` 返回该 AC（`goal=GOAL-911`、`kind=criterion`），写入经 goal store，⛔ 未手改任何 `goals/*.md`；其 `supersedes` 关系（AC-920 / AC-922）按人的裁定记录。
 2. **可被打红**：AC1 的干跑 exit 1 + `Could not find …` 逐字输出；AC4 的两向读数都在（负控制非零 + 改前 body 触发 `old-clause-still-present`）。
 3. **文本最小改动**：AC2 的四条子断言 + `## 范围与非目标` 与退出条件 ③ 逐字未改的 `git diff`。
 4. **判据不空转**：AC3 的新 key 条目 + 轮记录 fact（⛔ 不是缓存命中；⛔ 不以 verdict 变绿为成功判据）；新 verdict 若仍 `insufficient`，判官输入逐字留痕并另立根因。
 5. **证据留痕**：上述读数落成 `.quay/ac923-*` 证据文件或写进任务体，可被下一轮独立复算。
 
-⛔ **本任务不动任何状态**：不写 GOAL-911 的 `status`（保持 `active`）、不翻任何 AC 为 achieved / draft / retired；是否退休 AC-920 与 AC-922 是人的决定。
+⛔ **本任务不改 GOAL-911 的 `status`（保持 `active`）**；AC-918 的 `superseded` 是人 2026-10-23 的裁定（选项 2），不由执行者代做，必须记在 Resolution；AC-920/AC-922 是否退休仍是人的决定。
 
 ## Touches
 
-- goals/AC-923-unencapsulated-state-端到端跑通-线索器只产-candidate-判断器拒绝-memoized-计数器-注册表误报.md (new)
+- goals/AC-924-unencapsulated-state-端到端跑通-线索器只产-candidate-判断器拒绝-memoized-计数器-注册表误报.md (new)
 - goals/GOAL-911-通用化-线索-vs-语义判断-两段准入-注册表加-admission-字段区分-mechanical-semantic.md
 - tasks/gap-goal911-exit-condition3-unencapsulated-e2e-uncovered.md
 
-⛔ **无代码路径、不进套件**：本任务的产物是 goal store 里的 **AC-923 记录 + GOAL-911 退出条件 ④ 的文本**，其判据是 AC1/AC2/AC4 的可执行谓词当场干跑。线索器（`plugin/scripts/unencapsulated-state-clue.ts`）、判断器与端到端测试（`plugin/test/unencapsulated-state-admission.test.mjs`）是 AC-923 在域后由 Planner 派生出的**下游实现任务**的 Touches，不是本提案任务的 Touches。
+⛔ **无代码路径、不进套件**：本任务的产物是 goal store 里的 **AC-924 记录 + GOAL-911 退出条件 ④ 的文本**，其判据是 AC1/AC2/AC4 的可执行谓词当场干跑。线索器（`plugin/scripts/unencapsulated-state-clue.ts`）、判断器与端到端测试（`plugin/test/unencapsulated-state-admission.test.mjs`）是 AC-924 在域后由 Planner 派生出的**下游实现任务**的 Touches，不是本提案任务的 Touches。
