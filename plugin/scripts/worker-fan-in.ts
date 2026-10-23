@@ -858,8 +858,17 @@ export function classifyRecoveryRound(
 }
 
 /** AC10/AC13 — 恢复轮**声明式**的并发降档梯。降序；**最后一个是地板**（AC13 的「floor concurrency N」
- *  就是它）。⛔ 声明式而非开放式：序列被这张表**有界**（AC13 的「不得无限重复同一组参数」）。 */
-export const SUITE_RECOVERY_CONCURRENCY_LADDER: readonly number[] = [64, 48, 32];
+ *  就是它）。⛔ 声明式而非开放式：序列被这张表**有界**（AC13 的「不得无限重复同一组参数」）。
+ *
+ *  地板必须是**能装进声明 memory_max 的档**，否则阶梯在溢出点就停了、所有档位同形
+ *  （gap-suite-oom-lane-scaled-ladder-floor-32-no-lower-rung）。32 曾经是地板，但实测在声明 32G 下
+ *  仍打满并溢出 —— 32 车道轮的 cgroup 读数 `peakBytes=34359820288` vs `memoryMaxBytes=34359738368`
+ *  （`oomKill=1`，`.quay/suite-memory-evidence-mfi-…-1792782862395-781417.json`），后代的真实成本约
+ *  `descendantMax=204 / descendantRssAtMaxBytes=30224683008` ≈ 1 GB/车道，而 `perFileHighWaterBytes`
+ *  （≈150 MB）低估约 7×。⇒ 地板降到 16：同一棵树上把 workspace 的 serial/lowconc 夹子压到 16 后
+ *  一轮实测 cgroup `memory.peak` ≈ 3.3 GB（`.quay/verif16-1792798366.log` 的 scheduler 头
+ *  `serial≤16 lowconc≤16`）⇒ 余量充足。⛔ `memory_max` 逐字不动（人 2026-10-15 裁定 32G）。 */
+export const SUITE_RECOVERY_CONCURRENCY_LADDER: readonly number[] = [64, 48, 32, 16];
 
 /** AC13 — 梯子的地板档（最后一项）。 */
 export function suiteRecoveryFloor(): number {

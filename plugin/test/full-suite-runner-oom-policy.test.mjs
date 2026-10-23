@@ -987,10 +987,13 @@ test("unit — the recovery ladder is DECLARED and bounded; the step-down is com
   }
   assert.equal(suiteRecoveryFloor(), SUITE_RECOVERY_CONCURRENCY_LADDER[SUITE_RECOVERY_CONCURRENCY_LADDER.length - 1]);
 
-  // 原轮并发 64 ⇒ 严格更低的档，降序（下一档 48 排最前）。原轮并发 16（低于地板）⇒ 空序列。
-  assert.deepEqual(recoveryConcurrencySteps(64), [48, 32]);
-  assert.deepEqual(recoveryConcurrencySteps(48), [32]);
-  assert.deepEqual(recoveryConcurrencySteps(16), [], "already below the floor ⇒ no lower declared rung exists");
+  // 原轮并发 64 ⇒ 严格更低的档，降序（下一档 48 排最前）。原轮并发 16（= 地板）⇒ 空序列。
+  assert.deepEqual(recoveryConcurrencySteps(64), [48, 32, 16]);
+  assert.deepEqual(recoveryConcurrencySteps(48), [32, 16]);
+  // gap-suite-oom-lane-scaled-ladder-floor-32-no-lower-rung 的正面判据：32 车道的原轮**必须**还有
+  // 一个更低的档（旧梯子 [64,48,32] 在这里返回 []，恰好把「溢出点」伪装成「没有更低的档」）。
+  assert.deepEqual(recoveryConcurrencySteps(32), [16], "a 32-lane round still has a declared rung BELOW the OOM point");
+  assert.deepEqual(recoveryConcurrencySteps(16), [], "already at the floor ⇒ no lower declared rung exists");
   // 三态：**读不到原轮并发**（`unknown`）⇒ 整条梯子，⛔ 不是空序列 —— 空序列会被读成「无需恢复」。
   assert.deepEqual(recoveryConcurrencySteps(null), [...SUITE_RECOVERY_CONCURRENCY_LADDER]);
 
@@ -1222,7 +1225,7 @@ test("AC10/AC11 — an incomplete round triggers EXACTLY ONE independent, full, 
 });
 
 test("AC13(a) — bounded retry: exhausting the declared ladder at its FLOOR blocks with a concrete next step naming that floor (⛔ never the same parameters again); a round already at/below the floor blocks with the distinct exhausted token", async (t) => {
-  // ① 原轮并发 64 ⇒ 两档 (48, 32) 都**仍然 incomplete** ⇒ 在地板处阻塞。
+  // ① 原轮并发 64 ⇒ 三档 (48, 32, 16) 都**仍然 incomplete** ⇒ 在地板处阻塞。
   const m = makeMechRepo("rec-floor");
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "rec-floor-"));
   const argvFile = path.join(dir, "argv.txt");
@@ -1236,13 +1239,13 @@ test("AC13(a) — bounded retry: exhausting the declared ladder at its FLOOR blo
     ...concurrencyAwareSuite(m, { scriptFile: path.join(dir, "suite.sh"), argvFile, firstLogFile, recoveryLogFile, recoveryExit: 1 }),
   }));
   assert.equal(r.outcome, "red", "still incomplete at every declared rung ⇒ stays blocked");
-  assert.match(String(r.reason), /recovery exhausted at floor concurrency 32/, "the next step names the FLOOR");
+  assert.match(String(r.reason), /recovery exhausted at floor concurrency 16/, "the next step names the FLOOR");
   assert.match(String(r.reason), /needs a code\/config fix/, "…and says what kind of fix is needed (⛔ not 'retry')");
   const seenFloor = recoveryRoundsSeen(argvFile);
-  assert.deepEqual(laneCountsOf(seenFloor), ["48", "32"], "each declared rung is tried EXACTLY once, descending, and the sequence then STOPS (⛔ no identical-parameter loop)");
-  // 每一档读的都是**它自己**那份日志（⛔ 不是两档共用原轮那份、互相覆写）。
-  assert.deepEqual(seenFloor.map(logFileOf).map((f) => /recovery-(\d+)-/.exec(String(f))?.[1]), ["48", "32"], "each rung's argv names ITS OWN log path (the rung number is in it)");
-  assert.equal(new Set(seenFloor.map(logFileOf)).size, 2, "the two rungs do NOT share a log file");
+  assert.deepEqual(laneCountsOf(seenFloor), ["48", "32", "16"], "each declared rung is tried EXACTLY once, descending, and the sequence then STOPS (⛔ no identical-parameter loop)");
+  // 每一档读的都是**它自己**那份日志（⛔ 不是各档共用原轮那份、互相覆写）。
+  assert.deepEqual(seenFloor.map(logFileOf).map((f) => /recovery-(\d+)-/.exec(String(f))?.[1]), ["48", "32", "16"], "each rung's argv names ITS OWN log path (the rung number is in it)");
+  assert.equal(new Set(seenFloor.map(logFileOf)).size, 3, "the three rungs do NOT share a log file");
   const steps = trackedSteps(m.repo, "mfi-rec-floor");
   assert.ok(steps.some((e) => e.step === "suite-recovery-blocked"), "the exhaustion is traced durably");
 
@@ -1258,10 +1261,10 @@ test("AC13(a) — bounded retry: exhausting the declared ladder at its FLOOR blo
     ...concurrencyAwareSuite(m2, { scriptFile: path.join(dir2, "suite.sh"), argvFile: argv2, firstLogFile: f2, recoveryLogFile: f2, recoveryExit: 0 }),
   }));
   assert.equal(r2.outcome, "red", "no lower declared rung ⇒ blocked");
-  assert.match(String(r2.reason), /recovery exhausted at floor concurrency 32/, "…with the floor named");
-  // ⚠️ 零读数的配套动作：同一条谓词先对着**已知为真**的样本干跑一次（上面 ① 那个 argvFile 里确实有 2 个
+  assert.match(String(r2.reason), /recovery exhausted at floor concurrency 16/, "…with the floor named");
+  // ⚠️ 零读数的配套动作：同一条谓词先对着**已知为真**的样本干跑一次（上面 ① 那个 argvFile 里确实有 3 个
   //    恢复轮）——否则「0」与「谓词根本匹配不到任何东西」同形。
-  assert.equal(recoveryRoundsSeen(argvFile).length, 2, "positive control: the SAME predicate DOES match real recovery rungs");
+  assert.equal(recoveryRoundsSeen(argvFile).length, 3, "positive control: the SAME predicate DOES match real recovery rungs");
   assert.equal(recoveryRoundsSeen(argv2).length, 0, "⛔ ZERO recovery attempts were spawned (no identical-parameter retry)");
 });
 
