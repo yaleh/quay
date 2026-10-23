@@ -52,16 +52,38 @@ readPriorInstrumentDecayFilings(root, ".quay/quality-round.jsonl") → prior siz
 
 ## AC
 
-- [ ] AC1 生产缺省路径取真：在主检出上不传 `roundLogPath` 调用 `readPriorInstrumentDecayFilings("<root>")`，当 `.quay/quality-round.jsonl` 尾部 500 行含 `filing:"filed"` 的键时返回非空集合且含 `fan-in-step-trace.jsonl|rate-stopped`。贴出修前（0）与修后（≥1）两次读数。判据可假：把 `.quay/` 从 join 里去掉 ⇒ 回到 0。
-- [ ] AC2 负对照（正确文件里没有 filing）：临时 workspace 的 `.quay/quality-round.jsonl` 只有无 filings 的轮记录 ⇒ 返回空集；同时 `<root>/quality-round.jsonl` 放一条 `filing:"filed"` ⇒ 仍须返回空集（证明读的是 `.quay/`，不是根目录）。贴出两次输出。
-- [ ] AC3 两轮不重复立案（缺省路径，不经注入）：在带真实 `.quay/` 布局的临时 workspace 上跑 `runInstrumentDecayRound` 两次，`gapWorkerCmd` 用计数桩；第一轮 spawn 计数 = 1 且记 `filed`，第二轮记 `already-filed` 且 spawn 计数仍 = 1。贴出两轮的 `filings` 与计数。⛔ 测试内不得显式传 `roundLogPath`。
-- [ ] AC4 单一来源：读侧与写手使用同一 `.quay/` 派生（复用 `ROUND_LOG_REL`），`grep -c 'quality-round.jsonl' plugin/scripts/quality-gate-driver.ts` 的词面量不增加；贴出 grep 结果与 diff。
+- [x] AC1 生产缺省路径取真：在主检出上不传 `roundLogPath` 调用 `readPriorInstrumentDecayFilings("<root>")`，当 `.quay/quality-round.jsonl` 尾部 500 行含 `filing:"filed"` 的键时返回非空集合且含 `fan-in-step-trace.jsonl|rate-stopped`。贴出修前（0）与修后（≥1）两次读数。判据可假：把 `.quay/` 从 join 里去掉 ⇒ 回到 0。
+- [x] AC2 负对照（正确文件里没有 filing）：临时 workspace 的 `.quay/quality-round.jsonl` 只有无 filings 的轮记录 ⇒ 返回空集；同时 `<root>/quality-round.jsonl` 放一条 `filing:"filed"` ⇒ 仍须返回空集（证明读的是 `.quay/`，不是根目录）。贴出两次输出。
+- [x] AC3 两轮不重复立案（缺省路径，不经注入）：在带真实 `.quay/` 布局的临时 workspace 上跑 `runInstrumentDecayRound` 两次，`gapWorkerCmd` 用计数桩；第一轮 spawn 计数 = 1 且记 `filed`，第二轮记 `already-filed` 且 spawn 计数仍 = 1。贴出两轮的 `filings` 与计数。⛔ 测试内不得显式传 `roundLogPath`。
+- [x] AC4 单一来源：读侧与写手使用同一 `.quay/` 派生（复用 `ROUND_LOG_REL`），`grep -c 'quality-round.jsonl' plugin/scripts/quality-gate-driver.ts` 的词面量不增加；贴出 grep 结果与 diff。
 
 ## DoD
 
 - [ ] AC1-AC4 全绿；`scripts/test.sh --for-task <id>` 通过；改动合入 develop。
 - [ ] 真实落地（不是 fixture）：合入后至少两个生产 instrument-decay 轮次中，同一 pair 的第二轮记为 `already-filed`、gap-filing spawn 数不增；贴出两轮的 `ts` / `filings`（读 `.quay/quality-round.jsonl`），窗口起点必须晚于本任务落地提交。
 - [ ] 不新增第二份去重台账，也不改 `filing:"filed"` 的语义（该语义仍表示「已交给 agent」）。
+
+## Evidence
+
+（2026-10-23 worker 轮；主检出 `/data/home/yale/work/quay`，实现分支 `task/gap-instrument-decay-dedup-reader-round-log-path`，提交 `d9610e05a`）
+
+- **AC1（生产缺省路径取真）**：主检出生产载体 `.quay/quality-round.jsonl`（15,332,066 B；尾部 500 行含 2 条 instrument-decay 轮）上的两次读数：
+  - 修前（develop 版 `readPriorInstrumentDecayFilings(root)`，即 `roundLogPath ?? path.join(root, ROUND_LOG_REL)`）：`size = 0 []`
+  - 修后（本分支同一调用，不传 `roundLogPath`）：`size = 1 ["fan-in-step-trace.jsonl|rate-stopped"]`；`resolveRoundLogFile(root)` = `/data/home/yale/work/quay/.quay/quality-round.jsonl`
+  - 判据可假（负控制）：把读侧改回旧的 `join(root, ROUND_LOG_REL)` 后，两条新增测试由 `pass 2` 变 `fail 2 / pass 0`。
+- **AC2（负对照两半）**：临时 workspace 两次输出——
+  - `.quay/quality-round.jsonl` 只有无 filings 的轮记录、同时 `<root>/quality-round.jsonl` 放一条 `filing:"filed"` ⇒ `[]`（根目录那份不被读）
+  - 再向 `.quay/quality-round.jsonl` 追加一条 `filing:"filed"` ⇒ `["dot-quay.jsonl|rate-stopped"]`
+- **AC3（两轮不重复立案，缺省路径）**：`plugin/test/quality-gate-driver.test.mjs` 新增用例「runInstrumentDecayRound — 紧接的第二轮经【生产缺省路径】去重（⛔ 测试不传 roundLogPath）」绿：第一轮 `filing=filed`、`worker.calls()=1`；驱动把上一轮 Fact 写到 `<root>/.quay/quality-round.jsonl` 后，第二轮 `filing=already-filed`、`reason` 含 `already-filed=1`、`worker.calls()` 仍 `=1`。两轮均不传 `roundLogPath`（旧的 AC5 测试显式传路径 ⇒ 只被 fixture 满足）。
+- **AC4（单一来源）**：`grep -c 'quality-round.jsonl' plugin/scripts/quality-gate-driver.ts`：develop `12` → 本分支 `11`（不增加）。diff：新增唯一派生 `resolveRoundLogFile(root, roundLogPath?)`，读侧 `readPriorInstrumentDecayFilings` 与写手（`main()` 的心跳落点）都改为调用它 —— `path.join(root, ".quay", ROUND_LOG_REL)` 只在 helper 内出现一次。
+- **scoped 门**：任务 worktree 内 `scripts/test.sh --for-task gap-instrument-decay-dedup-reader-round-log-path` ⇒ 116 tests / 116 pass / 0 fail，exit 0（scoped 静态检查 tier 全绿；`it0-split-or-commit-check --changed` 报 NOT-EVALUATED 因子分支 delta 不含任务文件，不等同 PASS）。
+- **DoD-3（不改语义）**：diff 只改路径派生；`filing:"filed"` 的写入点与取值未动，未新增任何去重台账（仍读同一 round 载体尾部 500 行）。
+- **DoD 未勾选（诚实读数，⛔ 不自判）**：DoD-1 的「改动合入 develop」属于 fan-in/驱动动作；DoD-2 要求「落地提交之后」的两个生产轮次读数，执行者结构上无法在落地前取得 —— 本任务停在 needs-human 的机械判据（`unsatisfiableUnannotatedAc`）命中的正是 DoD-1 的「合入 develop」一句。未写 done/verifiedBy，未加「（待外部）」注解（自豁免，须由人/作者裁定）。
+
+## ADR-007 dark axis
+
+- L_D: valueSccs=0 typeSccs=0 reverseEdges=0 (import-graph-check: files=506 edges=1508, kernelChecked=true violations=0)
+- L_G: 该轴仍暗,理由:本次只改一处路径派生（1 个 helper + 2 个调用点），未新增跨包 import 边，archguard 的包级依赖形状无增量。
 
 ## Touches
 
