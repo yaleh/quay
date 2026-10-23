@@ -79,10 +79,17 @@ Extract one `makeEngineModuleLoader(root, cache, unresolved[])` into a shared ro
 `routine-engine-module-loader.ts`；「不得静态 import `docs/analysis`」那一半**仍判定各自例程的源码**。
 控制本身没有变弱：谓词、它的非零 mutation 对照都原样保留，只是跟随到了唯一实现处。
 
-### 能力目录
+### 能力目录（QUESTION / CADENCE / INVALIDATION / LAST_REAFFIRMED / MATCHING **+ CONSUMER**）
 新增 `plugin/scripts/*.ts` 必须带声明（`capability-catalog.sh` 的 AC1c：未声明即红）。
 `plugin/scripts/capability-catalog-declarations.json` 的 QUESTION / CADENCE / INVALIDATION / LAST_REAFFIRMED / MATCHING
 五表各补一行；实跑 `bash plugin/scripts/capability-catalog.sh --summary` ⇒ `398 scripts | 398 declared | 0 unclassified`。
+
+**第六张表 CONSUMER —— 上一轮遗漏，正是那次 suite 红的真因（本轮补上）**：本文件 cadence 声明为 `按需`，
+而 `rhythm-consumer-check` 判据2 要求「按需」机制必须有一行 CONSUMER 说明**谁按、在什么条件下按**，
+否则「按需」=「无人」⇒ RED。缺这一行 ⇒ `STATIC_CHECK_FAILED: rhythm-consumer-check exit=1` ⇒ 整套 suite 判红
+（上一轮 `exited-not-landed` 的 `step=suite ... incomplete` 是它的下游表现，不是 suite 基础设施故障）。
+补上后的实测读数：`node --experimental-strip-types plugin/scripts/rhythm-consumer-check.ts --check` ⇒
+判据1 238 judged / 0 violation · 判据2 155 judged / 0 violation · 判据3 5 judged / 0 violation，**exit 0**。
 
 ## Effect Prediction 复核
 `concept_recurs_after_merge` 的终局判据是下一次 archguard 读数里同一 concept 不再复发；本轮能取到的直接量是
@@ -103,7 +110,9 @@ Extract one `makeEngineModuleLoader(root, cache, unresolved[])` into a shared ro
   - `node --experimental-strip-types --test plugin/test/open-semantic-discovery-routine.test.mjs` ⇒ 132 pass / 0 fail
   - `node --experimental-strip-types --test plugin/test/arch-discovery-routine.test.mjs plugin/test/cross-project-dogfood-routine.test.mjs` ⇒ 55 pass / 0 fail
   - `node --experimental-strip-types --test plugin/test/discovery-closed-loop-report.test.mjs` ⇒ 25 pass / 0 fail
+  - 五个相关测试文件一次并跑（本轮 2026-10-23 复跑）⇒ tests 271 / pass 271 / fail 0
   - `bash plugin/scripts/capability-catalog.sh --summary` ⇒ 398 scripts | 398 declared | 0 unclassified
+  - `node --experimental-strip-types plugin/scripts/rhythm-consumer-check.ts --check` ⇒ 判据1/2/3 全 ok，exit 0
   - `node --experimental-strip-types plugin/scripts/import-graph-check.ts . --json` ⇒ valueSccs=0 · typeSccs=0 · reverseEdges=0
 - [x] ⛔ 探针只立案不执行：本任务若需要跑产出者/修复，由派发链执行，⛔ 不由例程代跑
   - 实现与验证均由派发链的 worker 会话在其任务 worktree 内执行；例程只产出 finding 与立案。
@@ -130,3 +139,4 @@ Extract one `makeEngineModuleLoader(root, cache, unresolved[])` into a shared ro
 - 未落地原因：step=suite: incomplete suite (615/615 files) — recovery exhausted at floor concurrency 32 — no declared rung produced a complete verdict (64,48,32); needs a code/config fix, see plugin/scripts/full-suite-runner.ts
 - run_id：wk-prod-anchor
 - session_id：82bb17ff-f221-4439-ab3b-cbaaee5de17d
+- 真因（本轮查明并修复，非 suite 基础设施）：`rhythm-consumer-check` 判据2 RED —— 新文件声明为「按需」却缺 CONSUMER 行 ⇒ 静态门红 ⇒ suite 判红；已补 CONSUMER 行，`rhythm-consumer-check --check` 实测 exit 0。
