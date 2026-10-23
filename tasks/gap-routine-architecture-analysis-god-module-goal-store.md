@@ -101,8 +101,8 @@ owner = `gap-unencapsulated-state-clue-judge-e2e`，该任务已落地，develop
 
 ## Blocker
 
-**2026-10-23T17:54:37.738Z — worker 未落地（exited-not-landed）**
+**2026-10-23T18:50:45.019Z — worker 未落地（exited-not-landed）**
 
-- 未落地原因：step=suite: oom-killed (2) — recovery red set is NOT a subset of the develop baseline red set: added=plugin/test/full-suite-runner-cgroup.test.mjs changed=- — needs a code fix
+- 未落地原因：step=suite: oom-killed (1) — recovery exhausted at floor concurrency 32 — no declared rung produced a complete verdict (64,48,32); needs a code/config fix, see plugin/scripts/full-suite-runner.ts
 - run_id：wk-prod-anchor
-- session_id：d41a9414-a7fa-4530-b04d-5fade7152988
+- session_id：13e6e49f-94d7-40db-a7a6-4b51a3ae3baf
