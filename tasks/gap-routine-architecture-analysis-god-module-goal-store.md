@@ -99,8 +99,8 @@ finding 内容与任务体 `## Finding` 逐字一致 ⇒ 观测对象存在且�
 
 ## Blocker
 
-**2026-10-23T18:50:45.019Z — worker 未落地（exited-not-landed）**
+**2026-10-23T19:38:13.761Z — worker 未落地（exited-not-landed）**
 
-- 未落地原因：step=suite: oom-killed (1) — recovery exhausted at floor concurrency 32 — no declared rung produced a complete verdict (64,48,32); needs a code/config fix, see plugin/scripts/full-suite-runner.ts
+- 未落地原因：step=suite: AssertionError [ERR_ASSERTION]: at least one bin is under-sampled (otherwise the rule is vacuous) [baseline A/B: HARD RED (task-introduced-red) — the task's red set is NOT a subset of the develop baseline red set: added=plugin/test/full-suite-runner-oom-policy.test.mjs changed=-]
 - run_id：wk-prod-anchor
-- session_id：13e6e49f-94d7-40db-a7a6-4b51a3ae3baf
+- session_id：e8315081-372d-4e9d-8042-c6f62012a423
