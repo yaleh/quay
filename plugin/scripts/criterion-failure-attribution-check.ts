@@ -80,10 +80,12 @@ import { parse as parseYaml } from "yaml";
 // `arg-parsing-helper-family`, routine `semantic-dedup-scan`).
 import { emitPass, emitFail, emitNotEvaluated, helpExit, isDirectEntry, flagValue } from "./gate-script-base.ts";
 import { repoRoot } from "./repo-root.ts";
-import { bareFailureExitsOfCriterion, type BareLine } from "../../packages/quay/src/core/goal-store.ts";
+import { bareFailureExitsOfCriterion, type BareLine } from "../../packages/quay/src/core/criterion-attribution.ts";
 
 // ── the moved predicate, re-exported (see the ⛔ note above — ONE implementation lives in
-//    packages/quay/src/goal-store.ts; this module's consumers keep importing it from here) ──────────
+//    packages/quay/src/core/criterion-attribution.ts, the leaf extracted from goal-store.ts by
+//    tasks/gap-routine-architecture-analysis-god-module-goal-store; this module's consumers keep
+//    importing it from here, and the store re-exports the SAME bindings) ───────────────────────────
 export {
   FAILURE_EXIT_RE,
   hasTrailingComputedFailureExit,
@@ -101,7 +103,7 @@ export {
   type Segment,
   type BareLine,
   type CriterionAttributionVerdict,
-} from "../../packages/quay/src/core/goal-store.ts";
+} from "../../packages/quay/src/core/criterion-attribution.ts";
 
 // ── surfaces ────────────────────────────────────────────────────────────────────────────────────────
 
