@@ -3,7 +3,7 @@ id: gap-routine-semantic-dedup-scan-parse-line-list-identical
 title: "semantic-dedup-scan: Byte-identical split/trim/filter-#-and-blank list
   parser under two names, in two files that already import from the same
   ratchet-baseline helper module."
-status: todo
+status: ready
 labels:
   - gap
   - routine-filed
