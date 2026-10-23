@@ -49,7 +49,15 @@ const EXPECTED_STAYS = ["CoverageFloorEntry", "DEFAULT_ACCEPTANCE_TIMEOUT_MS", "
 const proposalFor = (moves) => ({ concern: "gate/config rides the cycle through its loader file", slice: { scope_root: LOCKED.scope_root, subject: "", moves, consumers: [] } });
 // `computeSliceDelta` reads `root` only for provenance git calls when `deps.analyzePackageGraph` is injected —
 // the graph comes from the fixture, which IS the locked tree.
-const replayDeps = () => ({ analyzePackageGraph: () => ({ file: ARCH_FIXTURE, json: archJson() }), git: (a) => (a[0] === "rev-parse" ? `${LOCKED.tree_sha}\n` : "") });
+// Pin the surface resolved ONCE at module load (`INSTALLED`, below) instead of letting `computeSliceDelta`
+// re-probe the CLI on every call. That probe is `spawnSync(node <cli> slice-delta --help)` under a 30s
+// timeout, so under suite load it can TIME OUT and `resolveSliceDelta()` then reports `available:false` ⇒
+// `computeSliceDelta` returns `status:"unavailable"` — a shape that carries NO `delta`. (Observed: the same
+// file passes standalone, and in the 48-lane fan-in run AC1 alone took 34.5s vs 3.0s for AC2 — the +30s is
+// exactly the probe timeout.) The surface cannot change within one process, so re-probing adds no reading,
+// only a transient failure mode. When the surface IS unavailable, every real-candidate test skips below
+// before this factory is ever reached.
+const replayDeps = () => ({ sliceDelta: INSTALLED, analyzePackageGraph: () => ({ file: ARCH_FIXTURE, json: archJson() }), git: (a) => (a[0] === "rev-parse" ? `${LOCKED.tree_sha}\n` : "") });
 const runCandidate = (moves, commit, deps = {}) => computeSliceDelta({ root: REPO, commit, proposal: proposalFor(moves), deps: { ...replayDeps(), ...deps } });
 
 // ── the adapter's complement (no CLI needed) ────────────────────────────────────────────────────
@@ -102,7 +110,11 @@ let probe;
 const PROBE = () => (probe ??= INSTALLED.available ? runCandidate(MOVE_75, LOCKED.commit_75) : null);
 // A CLI that predates the `stays` clause ignores the declaration and still refuses for the same coverage
 // shortfall — the adapter flags that (`stays_ignored_by_tool`) instead of letting it look like a fix.
-const STAYS_CAPABLE = () => { const p = PROBE(); return !!(p && p.status !== "not-evaluated" && p.stays_ignored_by_tool !== true); };
+// `unavailable` (the surface could not be RESOLVED) is a THIRD state, distinct from `not-evaluated` (the
+// CLI ran and refused a cut) and from `evaluated`. Counting it as "capable" is what made a transient probe
+// failure reach the assertions below, where the missing `delta` threw a TypeError instead of the file's own
+// explicit skip (硬规则 3b: an un-taken reading must never be shaped like a taken one).
+const STAYS_CAPABLE = () => { const p = PROBE(); return !!(p && p.status !== "not-evaluated" && p.status !== "unavailable" && p.stays_ignored_by_tool !== true); };
 const SKIP_REASON = () => !INSTALLED.available ? `no usable ArchGuard slice-delta on this host (${INSTALLED.reason})`
   : `the installed ArchGuard ${INSTALLED.version} does not implement proposedCut.stays — it ignores the declaration and refuses with the same 切法覆盖不足 (stays_ignored_by_tool=${PROBE() && PROBE().stays_ignored_by_tool}); the real-candidate readings need a build carrying the stays clause`;
 
@@ -276,7 +288,9 @@ const MINIMAL = {
 const minimalRun = () => computeSliceDelta({
   root: REPO, commit: "0000000000000000000000000000000000000000",
   proposal: proposalFor([{ file: "x.ts", from: "X", to: "D", symbols: ["foo"] }]),
-  deps: { analyzePackageGraph: () => ({ file: "", json: { extensions: { tsAnalysis: { moduleGraph: MINIMAL } } } }), git: (a) => (a[0] === "rev-parse" ? "t\n" : "") },
+  // Same pinned surface as `replayDeps` (硬规则 5b: the sibling call site of the same defect — without it a
+  // transient probe makes this run `unavailable`, which is neither a reading nor a skip).
+  deps: { sliceDelta: INSTALLED, analyzePackageGraph: () => ({ file: "", json: { extensions: { tsAnalysis: { moduleGraph: MINIMAL } } } }), git: (a) => (a[0] === "rev-parse" ? "t\n" : "") },
 });
 
 test("AC10b: readings — the detector applied to the real candidates and to the minimal counterexample is RECORDED, not gated", (t) => {
