@@ -2,7 +2,7 @@
 id: gap-unencapsulated-state-clue-judge-e2e
 title: unencapsulated-state 端到端：线索器只产 candidate（真实仓库）+ recorded-verdict 判断器拒绝
   memoized/计数器/注册表误报 + Planner semantic-judged 路由（GOAL-911 AC-924）
-status: todo
+status: ready
 labels:
   - gap
 parent: null

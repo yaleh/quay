@@ -1,7 +1,7 @@
 ---
 id: gap-semantic-admission-contract-module
 title: 两段准入契约落成一份可复用模块 semantic-admission-contract.mjs（GOAL-911 AC-919）
-status: ready
+status: done
 labels:
   - gap
 parent: null
@@ -152,11 +152,3 @@ bash scripts/test.sh --for-task gap-semantic-admission-contract-module   → exi
 - tasks/gap-semantic-admission-contract-module.md
 - docs/analysis/semantic-admission-contract.mjs (new)
 - plugin/test/semantic-admission-contract.test.mjs (new)
-
-## Blocker
-
-**2026-10-23T09:50:56.340Z — worker 未落地（exited-not-landed）**
-
-- 未落地原因：step=suite: oom-killed (3) — recovery exhausted at floor concurrency 32 — no declared rung produced a complete verdict (64,48,32); needs a code/config fix, see plugin/scripts/full-suite-runner.ts
-- run_id：wk-prod-anchor
-- session_id：bfca68e0-53b1-4ebe-872a-1ab51dc94700
