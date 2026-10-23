@@ -17,7 +17,7 @@ import fs from "node:fs";
 import { repoRoot } from "./repo-root.ts";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { helpExit, isDirectEntry } from "./gate-script-base.ts";
+import { helpExit, isDirectEntry, normalizeRel } from "./gate-script-base.ts";
 import { acquireCoreSrc } from "./core-src-import.ts";
 import { walkFiles as walkFilesShared } from "./fs-walk.ts";
 // The ONE "is this path a quay runtime artifact?" implementation + the manifest reader (Core, shared
@@ -43,16 +43,20 @@ export const OVERBROAD = new Set(["**", "*", "**/*", "./**", "**/**"]);
 // is single-source (used by matchGlob callers, isOverbroadDeclaration, and anti-drift) so path-shape
 // tricks (`./`, `//`, `a/./b`, `a/../a/b`, trailing `/`, backslashes) cannot spoof identity — closes
 // the DIR-044 increment-5 audit's H1 (dot-segment) class and the `.//`→`/a` normalization bug.
-export function normalizePath(p) {
-  const parts = String(p).replace(/\\/g, "/").split("/");
-  const out = [];
-  for (const seg of parts) {
-    if (seg === "" || seg === ".") continue;
-    if (seg === "..") { out.pop(); continue; }
-    out.push(seg);
-  }
-  return out.join("/");
-}
+//
+// ⛔ NO BODY HERE — alias only. The implementation is `normalizeRel` in ./gate-script-base.ts, where
+// gap-b3 unified four byte-identical copies. This file's copy survived that unification even though
+// the file ALREADY imports gate-script-base (line 20) — the 硬规则 5b sibling-site shape, filed as
+// `.quay/routine-findings.jsonl` finding `dup-normalize-path-fifth-copy` (routine
+// `architecture-analysis`, runId `architecture-analysis-1792752934532`). The EXPORT NAME stays
+// `normalizePath` because six sibling modules import it from THIS module
+// (anti-drift-touches-check, check-set-after-change-check, concurrent-batch-scheduler,
+// derive-touches-heuristic, driver-filters, and fan-in-execute's generated block) — an alias keeps
+// their import edges intact while leaving exactly ONE body repo-wide.
+// ⛔ `const`, not `export { normalizeRel as normalizePath }`: that re-export form binds the EXPORT
+// TABLE only and leaves no module-scope binding, so this module's own call sites below threw
+// `ReferenceError: normalizePath is not defined` (the alias must be a local declaration).
+export const normalizePath = normalizeRel;
 
 // A DECLARATION is overbroad — too broad to meaningfully constrain a milestone's writes — when, after
 // canonicalization, it contains a wildcard reachable with FEWER THAN TWO concrete (wildcard-free)
