@@ -29,11 +29,11 @@ AC-918（status=active，按 goal-driver.ts:880 `inScopeAcsOf` 计入在域）�
 
 **人裁定：选项 2。** AC-918 标 `superseded`（`supersededBy: [AC-921, AC-923]`，提交 `b9f052838`）；新增 **AC-925** 明确承载「Planner 的 C1 准入按 admission 分派」的机械断言（`active`，criterion=`node --test plugin/test/admission-dispatch.test.mjs`，当前 exit 1，待 Planner 派生实现任务）。GOAL-911 ① 的分派引用已改为 AC-925，④ 已改为 `AC-919、AC-924、AC-925`。
 
-## AC（draft）
+## AC
 - [x] 人在上述选项中作出选择，并把选择写进本任务体（或以 DIR 记录该裁定） —— **实测**：选项 2 已写入 `## Ruling (2026-10-23)`。
 - [x] 依该选择产生的后续工作已立案或已落地（⛔ 不以「已回答」本身充当完成） —— **实测**：AC-918 status→superseded（`b9f052838`）；AC-925 已建（active）；GOAL-911 ①/④ 已对齐。
 
-## DoD（draft）
+## DoD
 - [x] 裁定已记录在可被后续读到的正本里，⛔ 不只存在于本任务的对话中 —— **实测**：本任务体 `## Ruling` + AC-918 的 `superseded` 状态 + AC-925 记录。
 - [x] 上面两条互相矛盾的立场中，落败的一方已被就地更正或标注，⛔ 不留着继续制造同一次冲突 —— **实测**：AC-918 已 `superseded`（落败立场退出在域）；AC-925 承接分派断言。
 
