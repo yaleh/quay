@@ -66,11 +66,14 @@ import { buildNonCodeMask, enumerativeExistence } from "./checker-lib.ts";
 import { helpExit, readFileSafe, createSelftest, flagValue } from "./gate-script-base.ts";
 import { canonicalTestFiles } from "./canonical-test-files.ts";
 export { canonicalTestFiles };
-// The `# baseline-count:` ceiling parser lives in ratchet-baseline.ts — the ONE home of the token.
-// It was a local body here AND a byte-identical copy in test-isolation-check.ts, each reading the
-// token with its own end-anchored regex (tasks/
-// gap-routine-semantic-dedup-scan-parse-baseline-count-divergent-anchor).
-import { parseBaselineCount } from "./ratchet-baseline.ts";
+// The `# baseline-count:` ceiling parser AND the entry-line grammar live in ratchet-baseline.ts —
+// the ONE home of the token and of the non-comment-line set. The ceiling parser was a local body
+// here AND a byte-identical copy in test-isolation-check.ts, each reading the token with its own
+// end-anchored regex (tasks/
+// gap-routine-semantic-dedup-scan-parse-baseline-count-divergent-anchor); the entry-line body was
+// the same shape of duplication (tasks/
+// gap-routine-semantic-dedup-scan-parse-line-list-identical).
+import { parseBaselineCount, parseRatchetEntryLines } from "./ratchet-baseline.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -149,12 +152,14 @@ export function groupDeclRE(): RegExp {
 }
 
 /** Parse the exemption data file: one repo-relative path per line, '#' comments and blanks
- * ignored. Returns the raw entry list (unsorted, as authored). */
+ * ignored. Returns the raw entry list (unsorted, as authored).
+ *
+ * The body is `ratchet-baseline.ts`'s `parseRatchetEntryLines` — this wrapper survives only to bind
+ * this consumer's NOUN ("exemptions"). It used to be a byte-identical copy of
+ * test-isolation-check.ts's `parseViolationList` under a second name (tasks/
+ * gap-routine-semantic-dedup-scan-parse-line-list-identical). */
 export function parseExemptionList(text: string): string[] {
-  return text
-    .split(/\r?\n/)
-    .map((l) => l.trim())
-    .filter((l) => l.length > 0 && !l.startsWith("#"));
+  return parseRatchetEntryLines(text);
 }
 
 /** The RATCHET CEILING (the `# baseline-count: <n>` header of the data file) — this is the

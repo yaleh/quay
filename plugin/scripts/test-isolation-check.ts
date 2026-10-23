@@ -110,11 +110,14 @@ import {
   hasNodeTestImport,
   canonicalTestFiles,
 } from "./test-framework-policy-check.ts";
-// The `# baseline-count:` ceiling parser lives in ratchet-baseline.ts — the ONE home of the token.
-// This file's copy was byte-identical to test-framework-policy-check.ts's (both end-anchored, both
-// diverging from the entry-set readers' grammar) — tasks/
-// gap-routine-semantic-dedup-scan-parse-baseline-count-divergent-anchor.
-import { parseBaselineCount } from "./ratchet-baseline.ts";
+// The `# baseline-count:` ceiling parser AND the entry-line grammar live in ratchet-baseline.ts —
+// the ONE home of the token and of the non-comment-line set. This file's ceiling copy was
+// byte-identical to test-framework-policy-check.ts's (both end-anchored, both diverging from the
+// entry-set readers' grammar) — tasks/
+// gap-routine-semantic-dedup-scan-parse-baseline-count-divergent-anchor. Its entry-line copy was
+// byte-identical under a second name — tasks/
+// gap-routine-semantic-dedup-scan-parse-line-list-identical.
+import { parseBaselineCount, parseRatchetEntryLines } from "./ratchet-baseline.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -893,12 +896,14 @@ export function detectAll(src: string, rel: string): Violation[] {
 
 // ── data file parsing ────────────────────────────────────────────────────────────────────────────────
 
-/** Parse the data file: one `<rel>:<rule>` entry per line, '#' comments and blanks ignored. */
+/** Parse the data file: one `<rel>:<rule>` entry per line, '#' comments and blanks ignored.
+ *
+ * The body is `ratchet-baseline.ts`'s `parseRatchetEntryLines` — this wrapper survives only to bind
+ * this consumer's NOUN ("violations"). It used to be a byte-identical copy of
+ * test-framework-policy-check.ts's `parseExemptionList` under a second name (tasks/
+ * gap-routine-semantic-dedup-scan-parse-line-list-identical). */
 export function parseViolationList(text: string): string[] {
-  return text
-    .split(/\r?\n/)
-    .map((l) => l.trim())
-    .filter((l) => l.length > 0 && !l.startsWith("#"));
+  return parseRatchetEntryLines(text);
 }
 
 /** The commit-surviving ratchet ceiling from the header (`# baseline-count: <n>`) — MECHANISM is
