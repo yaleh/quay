@@ -50,7 +50,7 @@
 
 import fs from "node:fs";
 import path from "node:path";
-import { isDirectEntry } from "./gate-script-base.ts";
+import { isDirectEntry, parseArgs as baseParseArgs } from "./gate-script-base.ts";
 import { execFileSync } from "node:child_process";
 
 import { verified, notEvaluated, failed, driverResultToExit } from "./checker-io.ts";
@@ -388,6 +388,18 @@ const USAGE = `outer-anchor-check.ts — AC80 三层 prompt 正本 + 不变式�
 
   退出码: 0=OK（正本存在+指针形式合格+逐字节一致）  1=VIOLATED（任一检查失败）  2=NOT-EVALUATED（正本缺失/未提供活 prompt）`;
 
+// Thin adapter over the ONE canonical parser (gate-script-base.ts `parseArgs`) — this file carried one
+// of the seven hand-rolled token loops named by `semantic-dedup-scan` finding
+// `parseargs-seven-forked-loops` (runId `semantic-dedup-scan-1792752400273`, verdict
+// `divergent-implementation`). It keeps this command's flag set and `main`'s own usage text
+// (`help:"return"`); `argv` is the SLICED tail, so the two leading slots are re-attached here.
+//   • Unknown flags: the retired loop ignored them and everything they were followed by — that is
+//     `unknown:"skip"` (drop the token, consume NOTHING after it), not `"accept"` (which would swallow
+//     a following `--json` as the unknown flag's value).
+//   • A flag whose value is absent reads as "" here. For `--root` that folds to cwd (the retired
+//     loop's `?? out.root`, and `--root ""` resolved to cwd anyway); for `--canonical-file` /
+//     `--cron-prompt` it folds to null = "not provided" ⇒ the checker reports NOT-EVALUATED (exit 2),
+//     never a verdict — 硬规则 3b: an unreadable input must not come back shaped like a pass.
 function parseArgs(argv: string[]): {
   layer: string;
   root: string;
@@ -397,26 +409,31 @@ function parseArgs(argv: string[]): {
   json: boolean;
   help: boolean;
 } {
-  const out = {
-    layer: "",
-    root: process.cwd(),
-    canonicalFile: null as string | null,
-    cronPrompt: null as string | null,
-    stdin: false,
-    json: false,
-    help: false,
+  const parsed = baseParseArgs(["node", "outer-anchor-check.ts", ...argv], {
+    minArgs: 0,
+    usage: "--layer inner|outer [--root <repo>] [--canonical-file <path>] [--cron-prompt <text>|--stdin] [--json]",
+    help: "return",
+    unknown: "skip",
+    flags: {
+      layer: { type: "string" },
+      root: { type: "string" },
+      "canonical-file": { type: "string" },
+      "cron-prompt": { type: "string" },
+      stdin: { type: "boolean" },
+      json: { type: "boolean" },
+    },
+  });
+  const str = (v: string | boolean | undefined): string => (typeof v === "string" ? v : "");
+  const orNull = (v: string): string | null => (v === "" ? null : v);
+  return {
+    layer: str(parsed.flags.layer),
+    root: str(parsed.flags.root) || process.cwd(),
+    canonicalFile: orNull(str(parsed.flags["canonical-file"])),
+    cronPrompt: orNull(str(parsed.flags["cron-prompt"])),
+    stdin: parsed.flags.stdin === true,
+    json: parsed.flags.json === true,
+    help: parsed.help === true,
   };
-  for (let i = 0; i < argv.length; i++) {
-    const a = argv[i];
-    if (a === "--layer") out.layer = argv[++i] ?? "";
-    else if (a === "--root") out.root = argv[++i] ?? out.root;
-    else if (a === "--canonical-file") out.canonicalFile = argv[++i] ?? null;
-    else if (a === "--cron-prompt") out.cronPrompt = argv[++i] ?? null;
-    else if (a === "--stdin") out.stdin = true;
-    else if (a === "--json") out.json = true;
-    else if (a === "--help" || a === "-h") out.help = true;
-  }
-  return out;
 }
 
 // Bundler-safe entry guard — see gate-script-base.isDirectEntry

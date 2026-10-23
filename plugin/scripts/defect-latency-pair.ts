@@ -61,7 +61,7 @@
  */
 import path from "node:path";
 import { spawnSync } from "node:child_process";
-import { seededRng } from "./gate-script-base.ts";
+import { seededRng, parseArgs as baseParseArgs } from "./gate-script-base.ts";
 
 // ── 取值词表：三态，⛔ 「读不出来」不得与「高置信」共用取值（硬规则 3b）──────────
 export type Confidence = "high" | "low" | "unresolvable";
@@ -846,6 +846,7 @@ export function renderSample(rows: PairRecord[], seed: number, pool: number): st
 }
 
 // ── CLI ──────────────────────────────────────────────────────────────────────
+const USAGE = "defect-latency-pair.ts [--root <dir>] [--ref <rev>] [--emit-json|--json] [--sample <n>] [--seed <n>] [--only <substr>]";
 interface Args {
   root: string;
   ref: string;
@@ -855,25 +856,70 @@ interface Args {
   only: string | null;
 }
 
-export function parseArgs(argv: string[]): Args | { error: string } {
-  const a: Args = { root: process.cwd(), ref: "develop", emitJson: false, sample: null, seed: 20260914, only: null };
-  for (let i = 0; i < argv.length; i++) {
-    const t = argv[i];
-    if (t === "--root") a.root = argv[++i];
-    else if (t === "--ref") a.ref = argv[++i];
-    else if (t === "--emit-json" || t === "--json") a.emitJson = true;
-    else if (t === "--sample") a.sample = Number(argv[++i]);
-    else if (t === "--seed") a.seed = Number(argv[++i]);
-    else if (t === "--only") a.only = argv[++i];
-    else return { error: `unknown flag: ${t}` };
-  }
-  if (a.sample !== null && !Number.isFinite(a.sample)) return { error: "--sample needs a number" };
-  if (!Number.isFinite(a.seed)) return { error: "--seed needs a number" };
-  return a;
+// Thin adapter over the ONE canonical parser (gate-script-base.ts `parseArgs`) — this file carried one
+// of the seven hand-rolled token loops named by `semantic-dedup-scan` finding
+// `parseargs-seven-forked-loops` (runId `semantic-dedup-scan-1792752400273`, verdict
+// `divergent-implementation`). It keeps this command's LIBRARY-shaped error model (`{error}` returned,
+// never `process.exit` — `errors:"return"`) and `argv` is the SLICED tail, so the two leading slots
+// are re-attached here. Numeric coercion and defaults stay HERE, at the call site, as the sibling
+// adapters do (the shared parser speaks strings only).
+//   • `--emit-json` / `--json` are two spellings of one boolean, so both are declared and OR-ed.
+//   • Unknown flags and bare positionals still fail (the retired loop's `unknown flag:` channel); the
+//     message for an unknown FLAG is now the shared `unknown argument: --x` — a usage-error text
+//     change only, exit code unchanged (2).
+//   • `--help` now takes the shared contract (usage + exit 0 via `main`) instead of the retired loop's
+//     `unknown flag: --help` (exit 2); `help:"return"` keeps the parser itself non-exiting.
+//   • A flag given with no value reads as "" from the shared parser. `Number("")` is 0, so folding it
+//     straight into the numeric check would turn `--sample` into "sample 0" — a value the user never
+//     supplied (硬规则 3b). It stays an error instead, exactly as the retired loop's `Number(undefined)`
+//     ⇒ NaN did.
+export function parseArgs(argv: string[]): Args | { error: string } | { help: true } {
+  const parsed = baseParseArgs(["node", "defect-latency-pair", ...argv], {
+    minArgs: 0,
+    usage: USAGE,
+    help: "return",
+    errors: "return",
+    unknown: "reject",
+    flags: {
+      root: { type: "string" },
+      ref: { type: "string" },
+      "emit-json": { type: "boolean" },
+      json: { type: "boolean" },
+      sample: { type: "string" },
+      seed: { type: "string" },
+      only: { type: "string" },
+    },
+  });
+  if (parsed.help) return { help: true };
+  if (parsed.error) return { error: parsed.error };
+  if (parsed.args.length > 0) return { error: `unknown flag: ${parsed.args[0]}` };
+  const str = (v: string | boolean | undefined): string => (typeof v === "string" ? v : "");
+  const num = (v: string | boolean | undefined, flag: string, fallback: number): number | { error: string } => {
+    if (v === undefined) return fallback;
+    if (v === "") return { error: `${flag} needs a number` };
+    const n = Number(v);
+    return Number.isFinite(n) ? n : { error: `${flag} needs a number` };
+  };
+  const sample = num(parsed.flags.sample, "--sample", NaN);
+  if (typeof sample !== "number") return sample;
+  const seed = num(parsed.flags.seed, "--seed", 20260914);
+  if (typeof seed !== "number") return seed;
+  return {
+    root: str(parsed.flags.root) || process.cwd(),
+    ref: str(parsed.flags.ref) || "develop",
+    emitJson: parsed.flags["emit-json"] === true || parsed.flags.json === true,
+    sample: parsed.flags.sample === undefined ? null : sample,
+    seed,
+    only: str(parsed.flags.only) === "" ? null : str(parsed.flags.only),
+  };
 }
 
 function main(argv: string[]): number {
   const parsed = parseArgs(argv);
+  if ("help" in parsed) {
+    process.stdout.write(`usage: ${USAGE}\n`);
+    return 0;
+  }
   if ("error" in parsed) {
     process.stderr.write(`${parsed.error}\n`);
     return 2;

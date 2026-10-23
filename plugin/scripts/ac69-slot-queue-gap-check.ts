@@ -40,7 +40,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { helpExit } from "./gate-script-base.ts";
+import { parseArgs as baseParseArgs } from "./gate-script-base.ts";
 
 /** The committed measurement record (relative to repo root). */
 export const RECORD_REL = "docs/analysis/ac69-slot-release-vs-dispatch-gap.json";
@@ -137,16 +137,31 @@ export function checkRecord(recordPath: string): RecordSummary {
 
 // ── CLI ──────────────────────────────────────────────────────────────────────────────────────────────
 
+// Thin adapter over the ONE canonical parser (gate-script-base.ts `parseArgs`) — this file carried one
+// of the seven hand-rolled token loops named by `semantic-dedup-scan` finding
+// `parseargs-seven-forked-loops` (runId `semantic-dedup-scan-1792752400273`, verdict
+// `divergent-implementation`). Only the command's flag set lives here; `argv` is the SLICED tail, so
+// the two leading slots the shared parser skips are re-attached.
+//   • Unknown flags: the retired loop ignored them (and any value token after them) — `unknown:"skip"`
+//     keeps exactly that, and `--help`/`-h` now take the shared usage-then-exit-0 contract.
+//   • A flag whose value is absent reads as "" here; the retired loop kept the previous default
+//     (`argv[++i] ?? root`). Both readings collapse to the same root, because `--root ""` resolved to
+//     cwd as well (`path.resolve("")`), so no input changes shape.
 function parseArgs(argv: string[]): { root: string; record: string; json: boolean } {
-  let root = process.cwd();
-  let record = "";
-  let json = false;
-  for (let i = 0; i < argv.length; i++) {
-    const a = argv[i];
-    if (a === "--root") root = argv[++i] ?? root;
-    else if (a === "--record") record = argv[++i] ?? record;
-    else if (a === "--json") json = true;
-  }
+  const parsed = baseParseArgs(["node", "ac69-slot-queue-gap-check.ts", ...argv], {
+    minArgs: 0,
+    usage: "[--root <dir>] [--record <file>] [--json]",
+    unknown: "skip",
+    flags: {
+      root: { type: "string" },
+      record: { type: "string" },
+      json: { type: "boolean" },
+    },
+  });
+  const str = (v: string | boolean | undefined): string => (typeof v === "string" ? v : "");
+  const root = str(parsed.flags.root) || process.cwd();
+  let record = str(parsed.flags.record);
+  const json = parsed.flags.json === true;
   if (!record) {
     const base = path.resolve(root);
     record = path.join(base, RECORD_REL);
@@ -156,9 +171,7 @@ function parseArgs(argv: string[]): { root: string; record: string; json: boolea
 
 // Import.meta guard: only run the CLI when executed directly (not when imported by the test).
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  const args = process.argv.slice(2);
-  if (args.includes("--help") || args.includes("-h")) helpExit("usage: node ac69-slot-queue-gap-check.ts [--root <dir>] [--record <file>] [--json]");
-  const { root, record, json } = parseArgs(args);
+  const { root, record, json } = parseArgs(process.argv.slice(2));
   const result = checkRecord(record);
   if (json) {
     process.stdout.write(JSON.stringify({ ok: result.ok, reason: result.reason, code: result.code, fields: result.fields, root }) + "\n");

@@ -162,6 +162,16 @@ export function helpExit(usage: string): never {
 // Filed as semantic-dedup-scan finding `parseargs-handrolled-residuals` (runId
 // `semantic-dedup-scan-1791631645924`, verdict `divergent-implementation`, suggestedAction `unify`),
 // which named exactly the four residual carriers those keys absorb.
+//
+// STATE OF THE FAMILY (measured 2026-10-23, finding `parseargs-seven-forked-loops`, runId
+// `semantic-dedup-scan-1792752400273`): 22 module-level `parseArgs` declarations remain under
+// plugin/scripts — this export, 21 thin adapters that CALL it, and ZERO hand-rolled token loops. The
+// seven loops that finding still counted (ac69-slot-queue-gap-check / defect-latency-pair /
+// loadbearing-test-gate / outer-anchor-check / peer-identity-probe / slice-readings / suite-lpt-order)
+// needed no new spec key: the keys above were already sufficient, they simply had not migrated.
+// `plugin/test/gate-script-base-adoption.test.mjs` holds the family-wide ratchet (a NEW bypassing
+// parser reds it without anyone updating a list), so this comment's number is re-derivable, not
+// asserted.
 export function parseArgs(argv: string[], spec: CliSpec): ParsedArgs {
   const result: ParsedArgs = { args: [], flags: {} };
   const raw = argv.slice(2);
