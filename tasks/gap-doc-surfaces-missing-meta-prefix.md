@@ -18,12 +18,7 @@ extra: {}
 ### 事实一：直接读数（2026-10-24，cwd=/data/home/yale/work/quay）
 
 ```
-$ node --no-warnings --experimental-strip-types -e '
-  import("./plugin/scripts/select-static-checks-for-touches.ts").then((m)=>{
-    const r=m.classifyDeltaPaths(".", ["meta/META-017-x.md","tasks/gap-x.md","goals/AC-920-x.md"]);
-    console.log("codePaths=",r.codePaths);
-    console.log("surfaces=",JSON.stringify(r.decision.docSurfaces));
-  })'
+$ node --no-warnings --experimental-strip-types -e '\n  import("./plugin/scripts/select-static-checks-for-touches.ts").then((m)=>{\n    const r=m.classifyDeltaPaths(".", ["meta/META-017-x.md","tasks/gap-x.md","goals/AC-920-x.md"]);\n    console.log("codePaths=",r.codePaths);\n    console.log("surfaces=",JSON.stringify(r.decision.docSurfaces));\n  })'
 codePaths= [ 'meta/META-017-x.md' ]
 surfaces= ["tasks/","goals/","docs/","adr/",".quay/","measurements/","milestones/","orchestration/archive/","plugin/loop/"]
 ```
@@ -58,19 +53,19 @@ surfaces= ["tasks/","goals/","docs/","adr/",".quay/","measurements/","milestones
 
 ## AC
 
-- [ ] AC1 对照读数：贴 `classifyDeltaPaths(root, ["meta/x.md"])` 修复前 `codePaths=["meta/x.md"]`、
+- [x] AC1 对照读数：贴 `classifyDeltaPaths(root, ["meta/x.md"])` 修复前 `codePaths=["meta/x.md"]`、
   修复后 `codePaths=[]`；以及 `isDocPath("meta/x.md", null, docSurfaces)` 修复前 false / 修复后 true。
   两条命令 + 两对输出逐字进 Evidence。
-- [ ] AC2 判据能取假（负对照）：修复后，一个**真正的代码**路径仍被判 code（例：
+- [x] AC2 判据能取假（负对照）：修复后，一个**真正的代码**路径仍被判 code（例：
   `plugin/scripts/meta-driver.ts` 或 `packages/quay/src/meta-store.ts`），且 `meta/` 前缀不会误吞它
   （`meta-driver.ts` 在 `plugin/scripts/` 下，⛔ 不是 `meta/` 目录）。贴该路径的 `codePaths` 读数。
-- [ ] AC3 兄弟实例一次查全（硬规则 5b）：把 `DOC_SURFACES` 的命中与前 3 条内容贴进提交，并逐条判定
+- [x] AC3 兄弟实例一次查全（硬规则 5b）：把 `DOC_SURFACES` 的命中与前 3 条内容贴进提交，并逐条判定
   quay 自有写面里还有哪些缺失（至少覆盖 `meta/`、`state/`、`measurements/`、`.quay/` 与实际存在的目录）；
   ⛔ 只补 `meta/` 而不给这张逐条清单视为未完成。
-- [ ] AC4 真实载体（不是 fixture）：`git -C <worktree> diff --name-only develop...HEAD` 对
+- [x] AC4 真实载体（不是 fixture）：`git -C <worktree> diff --name-only develop...HEAD` 对
   `gap-ac920-criterion-pipe-swallows-exit-code` 返回的两条 markdown（`meta/…md` + `tasks/…md`）经修复后的
   classifier 输出为**空**；贴该命令与输出。
-- [ ] AC5 单测：`select-static-checks-for-touches.test.mjs`（或同族测试）新增断言「`meta/` 是 doc surface
+- [x] AC5 单测：`select-static-checks-for-touches.test.mjs`（或同族测试）新增断言「`meta/` 是 doc surface
   且真正的代码路径仍是 code」，并证明该断言在移除 `meta/` 表项时变红（贴红/绿两次运行）。
 
 ## DoD
@@ -89,6 +84,128 @@ surfaces= ["tasks/","goals/","docs/","adr/",".quay/","measurements/","milestones
 - `plugin/test/select-static-checks-for-touches.test.mjs`
 - `plugin/test/fan-in-execute-paths-s01.test.mjs`
 - `tasks/gap-doc-surfaces-missing-meta-prefix.md`
+
+## Evidence
+
+实现提交：`9b12db8d0`（分支 `task/gap-doc-surfaces-missing-meta-prefix`，worktree
+`/data/home/yale/work/quay-worktrees/gap-doc-surfaces-missing-meta-prefix`）。
+
+### AC1 —— 修复前/后对照读数（逐字）
+
+修复前 = `git show develop:plugin/scripts/select-static-checks-for-touches.ts` 放回同一 `plugin/scripts/`
+布局（兄弟模块 symlink、`node_modules` symlink）后 import；修复后 = worktree 里的实现。root 均为
+本任务 worktree（registry mode）。命令：
+
+```bash
+node --no-warnings --experimental-strip-types -e "
+const m = await import('<…/select-static-checks-for-touches.ts>');
+const r = m.classifyDeltaPaths('<worktree>', ['meta/x.md']);
+console.log('codePaths=', JSON.stringify(r.codePaths));
+console.log('docSurfaces=', JSON.stringify(r.decision.docSurfaces));
+console.log('isDocPath(meta/x.md,null,docSurfaces)=', m.isDocPath('meta/x.md', null, r.decision.docSurfaces));
+"
+```
+
+```
+=== BEFORE ===
+codePaths= ["meta/x.md"]
+docSurfaces= ["tasks/","goals/","docs/","adr/",".quay/","measurements/","milestones/","orchestration/archive/","plugin/loop/"]
+isDocPath(meta/x.md,null,docSurfaces)= false
+
+=== AFTER ===
+codePaths= []
+docSurfaces= ["tasks/","goals/","docs/","docs-managed/","meta/","adr/",".quay/","measurements/","milestones/","orchestration/archive/","plugin/loop/"]
+isDocPath(meta/x.md,null,docSurfaces)= true
+```
+
+### AC2 —— 负对照：真代码路径仍是 code（逐字）
+
+```
+plugin/scripts/meta-driver.ts => codePaths= ["plugin/scripts/meta-driver.ts"] isDocPath= false
+packages/quay/src/meta-store.ts => codePaths= ["packages/quay/src/meta-store.ts"] isDocPath= false
+isUnderDocSurface("plugin/scripts/meta-driver.ts")= false
+```
+
+（`isUnderDocSurface` 是段前缀匹配 `p === s || p.startsWith(s + "/")`，不是子串匹配 —— 名字里含
+`meta` 但不在 `meta/` 目录下的文件不会被吞。）
+
+### AC3 —— 兄弟实例逐条清单（硬规则 5b；本 worktree 实测）
+
+`DOC_SURFACES` 命中（`grep -rn "DOC_SURFACES" plugin/scripts/select-static-checks-for-touches.ts`）前 3 条内容：
+
+```
+:297:export const DOC_SURFACES = [
+:308: *  ⛔ `DOC_SURFACES` above is NOT a valid default here. It is quay's OWN layout (docs/, adr/,
+:313:export const CONSERVATIVE_DOC_SURFACES = ["tasks", "goals", ".quay"];
+```
+
+逐面判定（registry `@static-object` 命中数 / 文件类型 census / 结论）：
+
+| 面 | registry 命中 | 文件类型 | 判定 |
+|---|---|---|---|
+| `meta/` | 0 | 16 md | **新增 DOC**（META 存储，`quay meta write` 写面） |
+| `docs-managed/` | 0 | 26 md | **新增 DOC**（document-store 写面） |
+| `state/` | — | 目录不存在 | 不加（本树无此面；凭空加一个不存在的面是死条目） |
+| `measurements/` | 0 | 4 json + 1 txt | 已在表内，保持 |
+| `.quay/` | 0（`config.yml` 单独命中 ⇒ 该文件仍 code） | 75 json + 4 jsonl + … | 已在表内，保持（registry override 优先） |
+| `tasks/` | 2 | 2985 md | 已在表内（task-file carve-out 先于 registry） |
+| `goals/` | 0 | 298 md | 已在表内，保持 |
+| `adr/` `docs/` `milestones/` `orchestration/archive/` `plugin/loop/` | 0 | md/json | 已在表内，保持 |
+| `archive/` | — | 18 ts + 39 mjs + 5 js + 7 sh + 27 md | ⛔ 不加：含可执行 checkers，是代码面 |
+| `experiments/` | 2（`experiments/*/test/`） | 27 ts + 72 mjs + 26 sh | ⛔ 不加：活 checkers |
+| `test/` | — | 2 sh（e2e 驱动） | ⛔ 不加：可执行 |
+| `plugin/` `packages/` `scripts/` | — | 产品 | ⛔ 一律不加 |
+
+`CONSERVATIVE_DOC_SURFACES`（`tasks, goals, .quay`）**本任务不动**：它是第三方面（无 registry、无
+`loop.doc_surfaces` 声明）的 fail-closed 下限，`packages/quay/src/init.ts` 的 `doc_surfaces` 镜像与之
+同值；放宽它会把第三方的同名目录判成 doc，与本任务「不放宽其它面」的边界冲突。
+
+### AC4 —— 真实载体（gap-ac920，非 fixture）
+
+```bash
+$ git -C /data/home/yale/work/quay-worktrees/gap-ac920-criterion-pipe-swallows-exit-code \
+      -c core.quotepath=off diff --name-only develop...HEAD
+meta/META-017-请裁定-ac-920-判据-2-1-tail-6-恒-pass-的处置-改判据-退役-保持现状-ac-922-已-sup.md
+tasks/gap-ac920-criterion-pipe-swallows-exit-code.md
+
+# 这两条路径喂给修复后的 classifier（root = 该任务 worktree）：
+mode= registry
+codePaths= []
+```
+
+### AC5 —— 单测红/绿两次运行（逐字）
+
+新增断言在 `plugin/test/select-static-checks-for-touches.test.mjs`：`meta/` 与 `docs-managed/` 是 doc
+surface（`isDocPath` + `classifyDeltaPaths` 两路），`plugin/scripts/meta-driver.ts` /
+`packages/quay/src/meta-store.ts` 仍是 code；并含一个进程内可证伪对照（把 `meta/` 从 surface 列表里
+过滤掉后同一谓词必须翻回 false）。`fan-in-execute-paths-s01.test.mjs` 的 REAL doc-delta 用例加入
+`meta/` + `docs-managed/` 文件，走真实 fan-in step-2 bash 判定。
+
+绿（修复版）：
+
+```
+$ node --no-warnings --experimental-strip-types --test plugin/test/select-static-checks-for-touches.test.mjs
+ℹ tests 24  ℹ pass 24  ℹ fail 0
+$ node --no-warnings --experimental-strip-types --test plugin/test/fan-in-execute-paths-s01.test.mjs
+ℹ tests 10  ℹ pass 10  ℹ fail 0
+```
+
+红（临时从表中删掉 `"meta/"`，跑完立即还原）：
+
+```
+$ node --no-warnings --experimental-strip-types --test --test-name-pattern "DOC_SURFACES" plugin/test/select-static-checks-for-touches.test.mjs
+✖ DOC_SURFACES — meta/ and docs-managed/ are doc surfaces, a real code path stays code
+  AssertionError [ERR_ASSERTION]: meta/META-017-a-ruling.md must be DOC (quay-written markdown store)
+  false !== true
+ℹ pass 0  ℹ fail 1
+```
+
+### DoD 状态（诚实记录）
+
+- 反例判据：AC2/AC5 的负对照已给出（真代码路径非空、去掉表项即红）——「doc-only 跳过」不是恒真标签。
+- 真实载体读数（`gap-ac920` 的**下一次** fan-in 日志出现 `doc-only delta → skip suite`）：由 driver 在
+  本任务 fan-in 落地后对 gap-ac920 的下一轮产生，**本会话不可自证**；⛔ 不以 fixture 读数替代
+  （硬规则 4 推论三）。本任务提供的可核前置是 AC4：它那条真实 delta 经修复后 classifier 已为空。
 
 ## Dark Axis
 
