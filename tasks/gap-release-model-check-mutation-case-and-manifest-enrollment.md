@@ -78,7 +78,7 @@ totalGuards 198  declaredCount 8
 
 （2026-10-23，worktree `/home/yale/work/quay-worktrees/gap-release-model-check-mutation-case-and-manifest-enrollment`，commits `a437cce3a` + `0b7d6b571`，develop 已并入 `6ff57ad22`）
 
-- ADR-007 dark-axis：该轴仍暗,理由:本任务只新增一个 checker-mutation case 与 run_static_checks 内一行注册，未新增或删除任何模块依赖边、包边界或 import 关系，L_D 与 L_G 在该增量上没有可测变化。
+- 该轴仍暗,理由:本任务只新增一个 checker-mutation case 与 run_static_checks 内一行注册，未新增或删除任何模块依赖边、包边界或 import 关系（ADR-007 dark-axis：L_D 与 L_G 在该增量上没有可测变化）。
 
 ### AC1 BEFORE 读数（逐字，动手前）
 
