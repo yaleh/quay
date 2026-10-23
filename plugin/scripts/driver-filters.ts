@@ -1221,8 +1221,11 @@ function applyStatusAlignments(root: string, alignments: Map<string, string>): b
 }
 
 /** `git rev-parse HEAD` at `root`, or null. Best-effort: null is recorded as "no commit", never a
- *  fabricated sha. */
-function revParseHeadOf(root: string): string | null {
+ *  fabricated sha.
+ *  SINGLE SOURCE (gap-routine-semantic-dedup-scan-rev-parse-head-identical): ready-pool-check.ts
+ *  imported a byte-identical `revParseHead` copy; it now imports this one (ready-pool-check already
+ *  depends on this module, so no new edge and no value cycle). ⛔ do not re-copy the body. */
+export function revParseHeadOf(root: string): string | null {
   try {
     const sha = execFileSync("git", ["-C", root, "rev-parse", "HEAD"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
     return /^[0-9a-f]{40,64}$/i.test(sha) ? sha : null;
