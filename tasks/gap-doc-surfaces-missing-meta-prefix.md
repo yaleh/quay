@@ -2,7 +2,7 @@
 id: gap-doc-surfaces-missing-meta-prefix
 title: DOC_SURFACES 缺 `meta/` ⇒ 任何必须写 META 记录的任务被判 code delta 并跑全量
   suite（gap-ac920 因此 3 轮卡在 OOM）
-status: ready
+status: done
 labels:
   - gap
 parent: null
