@@ -44,7 +44,7 @@
 //   node --experimental-strip-types suite-lpt-order.ts --root <r> --baseline docs/analysis/suite-perfile-duration-baseline.json < files.txt
 import fs from "node:fs";
 import path from "node:path";
-import { isDirectEntry } from "./gate-script-base.ts";
+import { isDirectEntry, parseArgs as baseParseArgs } from "./gate-script-base.ts";
 
 /** Strip the worktree-root prefix (same 口径 as measure-trend-check.normalizePerFileKey) and then a
  *  plain repo-root prefix, so BOTH a main-checkout absolute path and a worktree absolute path
@@ -58,25 +58,37 @@ export function repoRelKey(file: string, root: string): string {
   return rel.replace(/^\.\//, "");
 }
 
+// Thin adapter over the ONE canonical parser (gate-script-base.ts `parseArgs`) — this file carried one
+// of the seven hand-rolled token loops named by `semantic-dedup-scan` finding
+// `parseargs-seven-forked-loops` (runId `semantic-dedup-scan-1792752400273`, verdict
+// `divergent-implementation`). Three properties of the retired loop are preserved deliberately:
+//   • the `--flag=value` spelling (`--root=<dir>`, `--baseline=<file>`, `--rounds=<n>`) — the shared
+//     parser's `=` arm is exactly what this command's callers in scripts/test.sh use;
+//   • EVERY other token is ignored (unknown flags AND bare positionals), since this command owns a
+//     stdin/stdout contract and treats argv as advisory — `unknown:"skip"`;
+//   • an unusable `--rounds` (no value, non-integer, < 1) silently keeps the default 3, as before.
+// `argv` is the WHOLE `process.argv` (the retired loop started at index 2 itself); a valueless
+// `--root` reads as "" here, which `path.resolve("")` folds to cwd — the same value the retired
+// loop's "leave `root` at its default" arm produced.
 function parseArgs(argv: string[]): { root: string; rounds: number; baseline: string } {
-  let root = process.cwd();
+  const parsed = baseParseArgs(argv, {
+    minArgs: 0,
+    usage: "[--root <dir>] [--rounds <n>] [--baseline <file>]",
+    unknown: "skip",
+    flags: {
+      root: { type: "string" },
+      rounds: { type: "string" },
+      baseline: { type: "string" },
+    },
+  });
+  const str = (v: string | boolean | undefined): string => (typeof v === "string" ? v : "");
   let rounds = 3;
-  let baseline = "";
-  for (let i = 2; i < argv.length; i++) {
-    const a = argv[i];
-    if (a === "--root" && i + 1 < argv.length) root = argv[++i];
-    else if (a.startsWith("--root=")) root = a.slice("--root=".length);
-    else if (a === "--baseline" && i + 1 < argv.length) baseline = argv[++i];
-    else if (a.startsWith("--baseline=")) baseline = a.slice("--baseline=".length);
-    else if (a === "--rounds" && i + 1 < argv.length) {
-      const n = Number(argv[++i]);
-      if (Number.isInteger(n) && n >= 1) rounds = n;
-    } else if (a.startsWith("--rounds=")) {
-      const n = Number(a.slice("--rounds=".length));
-      if (Number.isInteger(n) && n >= 1) rounds = n;
-    }
+  const rawRounds = str(parsed.flags.rounds);
+  if (rawRounds !== "") {
+    const n = Number(rawRounds);
+    if (Number.isInteger(n) && n >= 1) rounds = n;
   }
-  return { root: path.resolve(root), rounds, baseline };
+  return { root: path.resolve(str(parsed.flags.root) || process.cwd()), rounds, baseline: str(parsed.flags.baseline) };
 }
 
 /** Read a PER-FILE rolling average from the carrier: for each repo-rel key, average that file's own
