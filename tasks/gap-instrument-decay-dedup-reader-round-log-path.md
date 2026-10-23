@@ -59,8 +59,8 @@ readPriorInstrumentDecayFilings(root, ".quay/quality-round.jsonl") → prior siz
 
 ## DoD
 
-- [ ] AC1-AC4 全绿；`scripts/test.sh --for-task <id>` 通过；贴出输出。
-- [ ] 不新增第二份去重台账，也不改 `filing:"filed"` 的语义（该语义仍表示「已交给 agent」）。
+- [x] AC1-AC4 全绿；`scripts/test.sh --for-task <id>` 通过；贴出输出。
+- [x] 不新增第二份去重台账，也不改 `filing:"filed"` 的语义（该语义仍表示「已交给 agent」）。
 
 > post-landing 的两轮生产复查已拆到 `gap-instrument-decay-postlanding-two-rounds`，不在本任务 DoD 内。
 
@@ -72,14 +72,15 @@ readPriorInstrumentDecayFilings(root, ".quay/quality-round.jsonl") → prior siz
   - 修前（develop 版 `readPriorInstrumentDecayFilings(root)`，即 `roundLogPath ?? path.join(root, ROUND_LOG_REL)`）：`size = 0 []`
   - 修后（本分支同一调用，不传 `roundLogPath`）：`size = 1 ["fan-in-step-trace.jsonl|rate-stopped"]`；`resolveRoundLogFile(root)` = `/data/home/yale/work/quay/.quay/quality-round.jsonl`
   - 判据可假（负控制）：把读侧改回旧的 `join(root, ROUND_LOG_REL)` 后，两条新增测试由 `pass 2` 变 `fail 2 / pass 0`。
+  - 合并 develop 后用本分支代码复跑（2026-10-23）：`resolveRoundLogFile(root)` = `/data/home/yale/work/quay/.quay/quality-round.jsonl`，缺省路径 `size = 1 ["fan-in-step-trace.jsonl|rate-stopped"]`，与显式 `.quay/` 路径读数同值。
 - **AC2（负对照两半）**：临时 workspace 两次输出——
   - `.quay/quality-round.jsonl` 只有无 filings 的轮记录、同时 `<root>/quality-round.jsonl` 放一条 `filing:"filed"` ⇒ `[]`（根目录那份不被读）
   - 再向 `.quay/quality-round.jsonl` 追加一条 `filing:"filed"` ⇒ `["dot-quay.jsonl|rate-stopped"]`
 - **AC3（两轮不重复立案，缺省路径）**：`plugin/test/quality-gate-driver.test.mjs` 新增用例「runInstrumentDecayRound — 紧接的第二轮经【生产缺省路径】去重（⛔ 测试不传 roundLogPath）」绿：第一轮 `filing=filed`、`worker.calls()=1`；驱动把上一轮 Fact 写到 `<root>/.quay/quality-round.jsonl` 后，第二轮 `filing=already-filed`、`reason` 含 `already-filed=1`、`worker.calls()` 仍 `=1`。两轮均不传 `roundLogPath`（旧的 AC5 测试显式传路径 ⇒ 只被 fixture 满足）。
 - **AC4（单一来源）**：`grep -c 'quality-round.jsonl' plugin/scripts/quality-gate-driver.ts`：develop `12` → 本分支 `11`（不增加）。diff：新增唯一派生 `resolveRoundLogFile(root, roundLogPath?)`，读侧 `readPriorInstrumentDecayFilings` 与写手（`main()` 的心跳落点）都改为调用它 —— `path.join(root, ".quay", ROUND_LOG_REL)` 只在 helper 内出现一次。
-- **scoped 门**：任务 worktree 内 `scripts/test.sh --for-task gap-instrument-decay-dedup-reader-round-log-path` ⇒ 116 tests / 116 pass / 0 fail，exit 0（scoped 静态检查 tier 全绿；`it0-split-or-commit-check --changed` 报 NOT-EVALUATED 因子分支 delta 不含任务文件，不等同 PASS）。
-- **DoD-3（不改语义）**：diff 只改路径派生；`filing:"filed"` 的写入点与取值未动，未新增任何去重台账（仍读同一 round 载体尾部 500 行）。
-- **DoD 未勾选（诚实读数，⛔ 不自判）**：DoD-1 的「改动合入 develop」属于 fan-in/驱动动作；DoD-2 要求「落地提交之后」的两个生产轮次读数，执行者结构上无法在落地前取得 —— 本任务停在 needs-human 的机械判据（`unsatisfiableUnannotatedAc`）命中的正是 DoD-1 的「合入 develop」一句。未写 done/verifiedBy，未加「（待外部）」注解（自豁免，须由人/作者裁定）。
+- **scoped 门（合并 develop 后重跑，2026-10-23）**：任务 worktree 内 `bash scripts/test.sh --for-task gap-instrument-decay-dedup-reader-round-log-path --allow-thin` ⇒ `tests 116 / pass 116 / fail 0`，`EXIT=0`。scoped 静态检查 tier 全绿：`import-graph-check: files=506 edges=1508 (value 1371 / type 137)` + `valueSccs=0 typeSccs=0 reverseEdges=0` PASS；`task-file-bypass-check` PASS（39 hit 全在 allowlist）；`mirror-pair-drift-check` PASS。唯一 NOT-EVALUATED 是 `it0-split-or-commit-check --changed`（该 delta 判定按 `base develop` 归因，任务文件已在 develop 侧）——⛔ 不等同 PASS，全量 tier 在 full-suite 门再跑。新增两个用例在本轮输出中可见：`runInstrumentDecayRound — 紧接的第二轮经【生产缺省路径】去重（⛔ 测试不传 roundLogPath）` ✔、`readPriorInstrumentDecayFilings — 缺省路径是 <root>/.quay/quality-round.jsonl（⛔ repo root）` ✔。
+- **DoD-2（不改语义）**：diff 只改路径派生；`filing:"filed"` 的写入点与取值未动，未新增任何去重台账（仍读同一 round 载体尾部 500 行）。
+- **DoD 阻塞已解除（2026-10-23）**：上轮 `unsatisfiableUnannotatedAc` 命中的是旧 DoD-1 的「改动合入 develop」一句；develop 侧已把 DoD 收窄（删除该句与「真实落地」一项，post-landing 两轮生产复查拆到 `gap-instrument-decay-postlanding-two-rounds`）。本轮按收窄后的 DoD 逐条核对：DoD-1 = AC1-AC4 全绿 + scoped 门 `EXIT=0`（上方读数）；DoD-2 = diff 只改路径派生（上方读数）。合并/ff 属 fan-in 机械动作，⛔ 执行者不在此自判。
 
 ## ADR-007 dark axis
 
@@ -97,3 +98,5 @@ readPriorInstrumentDecayFilings(root, ".quay/quality-round.jsonl") → prior siz
 **执行 2026-10-22T05:24:19.665Z — 连续修满重试上限仍不合格（标 needs-human）**
 
 - 阻碍原因：unsatisfiableUnannotatedAc=[AC1-AC4 全绿；`scripts/test.sh --for-task <id>` 通过；改动合入 develop。]（连续 3 轮被结构上不可派的拦截挡住 ⇒ 作者/人改写；⛔ 不派 fix worker）
+
+**已解除（2026-10-23）**：develop 侧已把 DoD 收窄（删掉 ``改动合入 develop`` 与 ``真实落地`` 两项，post-landing 两轮生产复查拆到 `gap-instrument-decay-postlanding-two-rounds`）⇒ 该阻塞理由不再适用。本记录保留为审计轨迹。
