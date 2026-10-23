@@ -90,6 +90,31 @@ finding 的「16 delegate / 7 hand-roll」：7 与实测完全对上；16 按其
 - scoped 门缓存：`worker-driver.ts --write-scoped-gate-cache` ⇒ `{"event":"scoped-gate-cache-written","developSha":"fc17b0ca2e1d7e6b4553f4f0cdbce626cef92890"}`。
 - AC/DoD 闸：`task_check` ⇒ `ok:true, acTotal:2 acChecked:2, dodTotal:2 dodChecked:2`。
 
+### 续做轮（2026-10-23，全量 suite 四个 rung 全 OOM 之后）
+
+前置状态：分支此前已有 4 个提交、AC 2/2；上一轮 `exited-not-landed` 的原因是 fan-in 全量 suite `oom-killed`。本轮**不重做实现**，只复核与收尾：
+
+- 并入 develop `969e2a308`（合并提交 `f1c2af6ce`，**0 behind / 5 ahead**，无冲突、无未合并路径）；代码面 diff 仍是原来那 9 个文件，全部在 `## Touches` 内。
+- scoped 门第三次（develop `969e2a308`）：**exit 0 · tests 315 · pass 315 · fail 0**。
+- 反漂移硬闸：**ANTI-DRIFT OK: 9 actual file(s), all within declared Touches (12 glob(s))**，exit 0。
+- scoped 门缓存：`{"event":"scoped-gate-cache-written","developSha":"969e2a308aac28273dc02d96e70360261c43b20a"}`。
+- `task_check` ⇒ `ok:true, acTotal:2 acChecked:2, dodTotal:2 dodChecked:2`。
+
+**全量 suite 红的归因（读 4 个 rung 日志 + 逐文件隔离复跑，⛔ 不是「与本任务无关」的空话）**
+
+1. **OOM 是承载资源问题，不是本任务 delta**：四个 rung（126 探针 / 64 / 48 / 32）的 `oomKill` 依次为 3 / 2 / 1 / 1；
+   `suite-memory-evidence-*.json` 读数 `peakBytes=34360000512` 对 `memoryMaxBytes=34359738368`（32 GiB 声明预算，`bound:declared`），
+   `memoryTelemetry.statMax.anonBytes=33517527040`。floor rung `laneCount=32` 时 `maxConcurrentOverall` 仍为 **48**
+   （调度器的 reliability cap 压住总数）⇒ **降低 rung 并不降低实际并发**，恢复阶梯在本机structurally 无法退出 OOM。
+   该缺口已有独立任务在管（`gap-full-suite-scope-oom-policy-stops-whole-suite-unattributable` / `gap-full-suite-runner-dedupe-memory-envelope-to-probe`），
+   修复点在 `full-suite-runner.ts` / 调度器，**不在本任务 `## Touches`**。
+2. **delta-unrelated 红逐个隔离复核**（本 worktree，`node --test --test-concurrency=1 <file>`）：
+   - `packages/quay/test/npm-pack-e2e.test.mjs`：**11/11 绿** ⇒ 负载诱发 flake。
+   - `plugin/test/shipped-set.test.mjs`：**11/11 绿** ⇒ 负载诱发 flake。
+   - `plugin/test/task-granularity-advice.test.mjs`：AC6 生产臂**隔离下仍红** —— 该臂读**主检出**的 `.quay/worker-outcome.jsonl`（`MAIN_CARRIER`，worktree 按设计不接收它）⇒ 数据配额型 develop-wide 红。
+   - `plugin/test/needs-human-parking-recheck.test.mjs`：AC1 **隔离下仍红** —— `the real board carries needs-human tasks (got 0)`，同为主检出实时板态的数据型红。
+   两条都不是本任务 9 文件 delta 造成的（delta-relatedness 机检亦为 UNRELATED，且一阶导入不相交）。
+
 ## AC
 - [x] `.quay/routine-findings.jsonl` 中 finding `parseargs-seven-forked-loops`（routine `semantic-dedup-scan`，runId `semantic-dedup-scan-1792752400273`）所描述的问题被复核并处置
 - [x] 处置结论可核：要么修掉，要么写明「已有机制在管、失败在哪一步」，⛔ 不以「已注意到」结案
@@ -122,3 +147,4 @@ finding 的「16 delegate / 7 hand-roll」：7 与实测完全对上；16 按其
 - 未落地原因：step=suite: oom-killed (3) — recovery exhausted at floor concurrency 32 — no declared rung produced a complete verdict (64,48,32); needs a code/config fix, see plugin/scripts/full-suite-runner.ts
 - run_id：wk-prod-anchor
 - session_id：7ffa8463-3e90-4625-ab4c-a3625042fd52
+- 复核（本轮）：该 blocker 仍未解除，且已定位为**共享承载资源 + 恢复阶梯不降实际并发**的独立机制缺口（见上节），不是本任务 delta；本任务的 scoped 门 / 反漂移 / AC-DoD 三项均已绿。
