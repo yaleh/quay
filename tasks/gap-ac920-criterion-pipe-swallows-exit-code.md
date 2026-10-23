@@ -204,8 +204,8 @@ fan-in 若仍被 OOM 挡下，那是套件基础设施的独立问题，应另�
 
 ## Blocker
 
-**2026-10-23T17:37:39.029Z — worker 未落地（exited-not-landed）**
+**2026-10-23T18:22:49.738Z — worker 未落地（exited-not-landed）**
 
-- 未落地原因：step=suite: oom-killed (3) — recovery exhausted at floor concurrency 32 — no declared rung produced a complete verdict (64,48,32); needs a code/config fix, see plugin/scripts/full-suite-runner.ts
+- 未落地原因：step=suite: oom-killed (1) — recovery exhausted at floor concurrency 32 — no declared rung produced a complete verdict (64,48,32); needs a code/config fix, see plugin/scripts/full-suite-runner.ts
 - run_id：wk-prod-anchor
-- session_id：334985f0-035d-4064-9db9-eb8e76561cb3
+- session_id：a496b116-919f-4338-b690-4e4aabc8fe7c
