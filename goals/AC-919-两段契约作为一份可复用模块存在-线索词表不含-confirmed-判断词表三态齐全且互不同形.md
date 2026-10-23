@@ -1,7 +1,7 @@
 ---
 id: AC-919
 title: 两段契约作为一份可复用模块存在，线索词表不含 confirmed、判断词表三态齐全且互不同形
-status: active
+status: achieved
 kind: criterion
 goal: GOAL-911
 criterion: "node -e 'const fs=require(\"fs\");const
@@ -29,6 +29,11 @@ statusLog:
     to: active
     actor: goal-driver
     reason: "triage: activate"
+  - at: 2026-10-23T12:59:36.457Z
+    from: active
+    to: achieved
+    actor: goal-driver
+    reason: "I2: criterion pass"
 fidelity:
   verdict: faithful
   reason: "fidelity judge: faithful"
