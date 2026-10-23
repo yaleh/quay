@@ -29,6 +29,7 @@ import {
   baselinePath,
   checkBaselineShrinkOnly,
   parseBaselineCount,
+  parseRatchetEntryLines,
   parseRatchetBaselineText,
   readRatchetBaseline,
   writeRatchetBaseline,
@@ -81,6 +82,35 @@ test("parseRatchetBaselineText: absent ceiling token ⇒ null (no ceiling enforc
 test("parseRatchetBaselineText: a '#' INSIDE an entry is not a comment (only a line-initial one is)", () => {
   const { baseline } = parseRatchetBaselineText("# hash-in-entry\ntasks/a.md: V#1\n");
   assert.deepEqual([...baseline], ["tasks/a.md: V#1"]);
+});
+
+// tasks/gap-routine-semantic-dedup-scan-parse-line-list-identical: the entry-line grammar is its
+// own export now that TWO consumers (`parseExemptionList` / `parseViolationList`) delegate to it.
+// These arms pin what the delegation must preserve: ORDER (the callers re-emit the list as
+// authored), `\r?\n` (a CRLF file must not leave `\r` glued to each entry), and the fact that the
+// list form does NOT collapse duplicates (the Set form does, one layer up).
+test("parseRatchetEntryLines: order preserved, blanks/comments dropped, entries trimmed", () => {
+  assert.deepEqual(
+    parseRatchetEntryLines("# header\n\n  tasks/b.md: V2  \n#\ntasks/a.md: V1\n"),
+    ["tasks/b.md: V2", "tasks/a.md: V1"],
+  );
+});
+
+test("parseRatchetEntryLines: CRLF is one line break, not an entry with a trailing '\\r'", () => {
+  assert.deepEqual(parseRatchetEntryLines("tasks/a.md: V1\r\ntasks/b.md: V2\r\n"), [
+    "tasks/a.md: V1",
+    "tasks/b.md: V2",
+  ]);
+});
+
+test("parseRatchetEntryLines: the LIST keeps duplicates — Set-collapsing is parseRatchetBaselineText's job", () => {
+  // Distinct from `parseRatchetBaselineText`, which returns a Set: a caller that re-emits the list
+  // (the shrink-only writer's round-trip) must see what was authored, not a silent dedupe.
+  assert.deepEqual(parseRatchetEntryLines("tasks/a.md: V1\ntasks/a.md: V1\n"), [
+    "tasks/a.md: V1",
+    "tasks/a.md: V1",
+  ]);
+  assert.equal(parseRatchetBaselineText("tasks/a.md: V1\ntasks/a.md: V1\n").baseline.size, 1);
 });
 
 test("BASELINE_COUNT_RE is unanchored at the end — the regex the seven extracted readers used", () => {

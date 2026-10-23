@@ -62,15 +62,32 @@ export function parseBaselineCount(text: string): number | null {
   return m ? Number(m[1]) : null;
 }
 
+/** The entry-line grammar of a ratchet data file, as a LIST: one entry per non-blank, non-comment
+ * (`#`-initial) line, trimmed, in the order authored (duplicates kept — the callers that want a
+ * Set collapse them themselves).
+ *
+ * Why this is here rather than at each consumer (tasks/
+ * gap-routine-semantic-dedup-scan-parse-line-list-identical, the `semantic-dedup-scan` routine's
+ * `parse-line-list-identical` finding, kind `byte-identical-body`, verdict `real-duplication`):
+ * `test-framework-policy-check.ts`'s `parseExemptionList` and `test-isolation-check.ts`'s
+ * `parseViolationList` carried byte-identical split/trim/filter bodies under two names, in two
+ * files that both already import this module — and `parseRatchetBaselineText` held a THIRD copy of
+ * the same grammar inline. The non-comment-line set is named in this module's header as SHARED
+ * mechanism; the entry NOUN ("exemptions" / "violations") is what each consumer owns, so their
+ * exported wrappers stay and delegate here (硬规则 5b: fix the source, not one copy).
+ *
+ * `\r?\n` (not `\n`) is the grammar the three extracted bodies used — pinned, not incidental: a
+ * CRLF-authored data file must not leave a trailing `\r` glued to every entry. */
+export function parseRatchetEntryLines(text: string): string[] {
+  return text
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter((l) => l.length > 0 && !l.startsWith("#"));
+}
+
 /** Parse a baseline file's TEXT into `{ baseline, baselineCount }`. Pure — the unit-testable half. */
 export function parseRatchetBaselineText(text: string): RatchetBaseline {
-  const baseline = new Set<string>();
-  for (const line of text.split(/\r?\n/)) {
-    const t = line.trim();
-    if (!t || t.startsWith("#")) continue;
-    baseline.add(t);
-  }
-  return { baseline, baselineCount: parseBaselineCount(text) };
+  return { baseline: new Set(parseRatchetEntryLines(text)), baselineCount: parseBaselineCount(text) };
 }
 
 /** The absolute path of a committed baseline file: `<root>` + the consumer's own
