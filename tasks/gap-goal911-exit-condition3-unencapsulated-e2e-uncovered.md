@@ -3,7 +3,7 @@ id: gap-goal911-exit-condition3-unencapsulated-e2e-uncovered
 title: GOAL-911 充分性判官判 insufficient 跨一整个 judge+look
   周期未变：退出条件③「unencapsulated-state 端到端跑通」在在域 AC 集合零覆盖（AC-920/AC-922 均 draft）⇒ 提
   option (a)：新增一条 AC（拟 AC-923）+ ④ 的 id 最小替换
-status: todo
+status: ready
 labels:
   - gap
   - goal-sufficiency
