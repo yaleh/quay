@@ -112,6 +112,16 @@ bash scripts/test.sh --for-task gap-semantic-admission-contract-module   → exi
 
 另按 driver 的 fan-in 口径跑过同一条门加 `--allow-thin`：exit 0，同样包含新测试文件；scoped-gate cache 已写入（developSha `7a47b273…`）。`// @test-group engine` 已在测试文件第一行。
 
+**本轮（2026-10-23，第二次落地尝试）复验（cwd = worktree `/home/yale/work/quay-worktrees/gap-semantic-admission-contract-module`）**
+
+- 实现提交 `254ab2fa0`；merge develop（`2b50a2eb…`）后 worktree HEAD `411c21658`
+- AC-919 criterion 原文实跑：`exit=0` / `OK: contract present; clue excludes confirmed; judge verdicts present`
+- 反向三臂复跑：① `exit=1` `CAUSE=judge verdict missing: needs-more-evidence`；② `exit=1` `CAUSE=clue vocabulary contains confirmed (hard-rule 3b: clue must not be isomorphic to verdict)`；③ `exit=2` `CAUSE=instrument-failure: docs/analysis/semantic-admission-contract.mjs missing`；`cp` 回拷后 md5 一致（`6a4eb73d…`）且 criterion 复绿
+- `node --test plugin/test/semantic-admission-contract.test.mjs` → tests 6 / pass 6 / fail 0
+- AC6：`JUDGE_VERDICTS =` count=1；`needs-more-evidence` count=5，无第二份词表声明
+- 机械门：`bash scripts/test.sh --for-task gap-semantic-admission-contract-module --allow-thin` → `GATE_EXIT=0`（含本测试 6/6）；scoped-gate cache 已写（developSha `2b50a2eb…`）
+- anti-drift Touches：`ANTI-DRIFT OK: task gap-semantic-admission-contract-module — 2 actual file(s), all within declared Touches (3 glob(s))`
+
 ## Dark Axis（ADR-007）
 
 - 该轴仍暗,理由:本任务只在 docs/analysis 新增一个零 import 的独立契约模块及其测试,不触及产品依赖图
