@@ -1,0 +1,39 @@
+[
+  {
+    "subject": "plugin/fixtures/unencapsulated-state/true-state-cluster.ts",
+    "verdict": "confirmed",
+    "rationale": "Five module-level mutable containers/`let`s (snapshots, eventLog, subscribers, lastRebuildAt, rebuildCount) are mutated by free functions, including a clear/rebuild lifecycle that rebuilds the SAME collections from outside any owning object. A reader can observe a half-rebuilt cluster, which is exactly the intermediate the encapsulated replacement (DashboardSnapshotStore) removed.",
+    "counterfactual": "If the same five names were captured inside one owning object with a single lifecycle method (the DashboardSnapshotStore shape), or if `rebuild()` produced new containers instead of clearing the module-level ones, the exposure would be gone and this sample would have to be refuted — it is confirmed because neither holds.",
+    "provenance": "tasks/gap-dashboard-snapshot-store-encapsulate-state.md (measured inventory of the pre-encapsulation serve-dashboard snapshot cluster), vendored verbatim as a fixture because the live shape is now a class.",
+    "provenanceKind": "recorded-verdict-replay",
+    "recordedBy": "human-ruled task body (gap-unencapsulated-state-clue-judge-e2e)",
+    "recordedAt": "2026-10-23"
+  },
+  {
+    "subject": "plugin/fixtures/unencapsulated-state/memoized-probe.ts",
+    "verdict": "refuted",
+    "rationale": "The Map is a pure memo of a deterministic computation: it is never cleared, never rebuilt, and no second field has to stay consistent with it. Live counterparts: gate/config/loader.ts:61 cachedSink and observation.ts:387 taskStatusRefCache.",
+    "provenance": "packages/quay/src/gate/config/loader.ts:61 (cachedSink), packages/quay/src/observation.ts:387 (taskStatusRefCache)",
+    "provenanceKind": "recorded-verdict-replay",
+    "recordedBy": "human-ruled task body (gap-unencapsulated-state-clue-judge-e2e)",
+    "recordedAt": "2026-10-23"
+  },
+  {
+    "subject": "plugin/fixtures/unencapsulated-state/diagnostic-counter.ts",
+    "verdict": "refuted",
+    "rationale": "A single monotone diagnostic counter: only incremented, never reset, and independent of any other field. There is no cluster and no externally observable intermediate. Live counterpart: observation.ts:397 singleTaskGitSpawnCount.",
+    "provenance": "packages/quay/src/observation.ts:397 (singleTaskGitSpawnCount)",
+    "provenanceKind": "recorded-verdict-replay",
+    "recordedBy": "human-ruled task body (gap-unencapsulated-state-clue-judge-e2e)",
+    "recordedAt": "2026-10-23"
+  },
+  {
+    "subject": "plugin/fixtures/unencapsulated-state/encapsulated-registry.ts",
+    "verdict": "refuted",
+    "rationale": "The mutable Map is a private class field with a single owner and lifecycle-guarded mutation; the other table is Object.freeze'd and never mutated at all. That is state WITH an owner, which is the opposite of the concern. Live counterparts: DashboardSnapshotStore (private fields + lifecycle) and CONCERN_KIND_REGISTRY (frozen table).",
+    "provenance": "docs/analysis/ownership-active-limited-proposal.mjs CONCERN_KIND_REGISTRY (frozen) + the DashboardSnapshotStore class that collected the vendored cluster",
+    "provenanceKind": "recorded-verdict-replay",
+    "recordedBy": "human-ruled task body (gap-unencapsulated-state-clue-judge-e2e)",
+    "recordedAt": "2026-10-23"
+  }
+]

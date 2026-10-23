@@ -26,6 +26,8 @@
     "NEW_SCRIPT_REGISTRATION_REQUIRED so a new-script task must declare it in Touches."
   ],
   "QUESTION": {
+    "unencapsulated-state-clue.ts": "Where in this tree does mutable state live OUTSIDE any owning object? — mechanised as a CLUE question: scan source files and report, per file, whether the mechanical signal fired (candidate / clear / not-evaluated). It never emits a verdict — stage 2 is unencapsulated-state-judge.ts — so the candidate count is a lead list, not a finding (GOAL-911 AC-924; task gap-unencapsulated-state-clue-judge-e2e).",
+    "unencapsulated-state-judge.ts": "Given an unencapsulated-state candidate clue, is the concern ACTUALLY present — on recorded evidence? Replays a RECORDED verdict (never a live model) per subject: confirmed (with its counterfactual) / refuted / needs-more-evidence; a subject the corpus does not name is needs-more-evidence, never a confirmation, and an unreadable corpus is a named refusal instead of an empty verdict list (GOAL-911 AC-924).",
     "verify-plugin-channel-assertions.ts": "Does a Claude Code plugin-channel install actually WORK — not merely install, start its drivers and answer HTTP? For one install it judges, each as PASS / FAIL / NOT-EVALUATED: the config /quay:init wrote is accepted by BOTH quay config validate and the MCP config_validate tool; the version carriers (VERSION, .claude-plugin/plugin.json, and the byte bundle's own quay --version) agree and carry no -dev; the project .quay/plugin pointer resolves to the verified install and the native provider freezes no path/mcp_entry into config.yml; quay driver status --json exposes loaded_version / path_quay_version / pointer and does not report the pointer behind; the serve host runs in its OWN quay-serve-*.scope (read from /proc/<pid>/cgroup) with a non-empty .quay/serve.log and a server loaded_version that is not behind; and the install record at the requested scope resolves to the verified directory. A local upgrade drill (--upgrade-from) runs the link-to-old, re-init, link-to-new, validate sequence.",
     "release-cut.sh": "How does a RELEASE CUT — the whole SPEC §4/§12 sequence, not just its last three steps — happen as ONE re-runnable command instead of a remembered list? Measured 2026-09-24 (the v0.12.0 cut): ~12 hand-steps, of which two bit — release-branch-finish.sh --cut requires HEAD == base, so it could not be run from the main checkout (HEAD=author) and the cut moved into an INDEPENDENT CLONE, where the finish record landed in that clone's .quay/ (invisible to the main ledger AC-320 reads); and the next-version bump necessarily staled the closure-ratchet baseline, which the prose never mentioned. This command does the sequence in one invocation: preflight (tag free / version-consistent / clean tree / develop not behind the remote) -> a LINKED WORKTREE off develop (never a clone, never a branch switch in the main checkout) -> release-branch-finish.sh --cut --tag (merge back + tag the merge point + delete) -> push -> dispatch release.yml and echo the run URL -> next-version bump on develop + stamp-version + closure-ratchet re-anchor -> remove the worktree, each stage with its own CAUSE= and exit code, plus an --dry-run that prints every step (including the ledger's ABSOLUTE landing path) while writing nothing?",
     "release-cut.mjs": "plugin/scripts/release-cut.mjs —— release-cut.sh 的【执行体】：那条「一条命令切版」是否真的实现了 SPEC §4/§12 的全链（只读 preflight：tag 未存在 / 版本一致 / 树无 tracked 改动 / develop 未落后远端 → 在 develop 上建 LINKED WORKTREE（⛔ 不是独立 clone、⛔ 不在主检出切分支）→ release-branch-finish.sh --cut --tag（合回 + 在合并点打 tag + 删分支）→ push tag 与 develop → dispatch release.yml 并回显 run URL → develop 上 bump 下一版 + stamp-version + closure-ratchet 重锚并提交 → 清理自建 worktree），每一步自带 CAUSE= 与退出码，且 --dry-run 打印全部步骤（含台账落点的绝对路径）而不写？入口形态仍是 bash plugin/scripts/release-cut.sh（薄壳 exec 本文件），本文件是逻辑正本",
@@ -436,6 +438,8 @@
     "verification-marginal-return.ts": "invariant:一个 checker/闸 的拦截数只有三种取值（查过且有 / 查过且零 / 未查），「没有拦截通道」绝不与「拦截数 = 0」同形（硬规则 6 + 3b）—— 并给出判据：谓词 isPureTax 必须对一个【已知有拦截】的行干跑一次返回 false"
   },
   "CADENCE": {
+    "unencapsulated-state-clue.ts": "按需",
+    "unencapsulated-state-judge.ts": "按需",
     "verify-plugin-channel-assertions.ts": "按需",
     "release-cut.sh": "按需",
     "release-cut.mjs": "按需",
@@ -836,6 +840,8 @@
     "needs-human-parking-recheck.ts": "每轮"
   },
   "INVALIDATION": {
+    "unencapsulated-state-clue.ts": "失效前提：① 契约模块 docs/analysis/semantic-admission-contract.mjs 仍导出 CLUE_STATES/clueRecord 且没有 direct-entry guard（本脚本运行时按路径加载它，若改名或长出 entry guard，加载形态须同步）；② 两个机械读数（模块级 let/var 绑定；集合声明与 .set/.add/.delete/.clear 调用点）仍覆盖「有状态声明」的主要形态 —— 若代码风格整体转向不可变数据，读数会恒低而脚本照旧报 clear，那时须重新标定谓词而不是调阈值；③ 默认扫描面仍是 packages/quay/src + plugin/scripts。",
+    "unencapsulated-state-judge.ts": "失效前提：① recorded-verdict corpus（plugin/fixtures/unencapsulated-state/recorded-verdicts.json）仍是判决的唯一来源，且每条带 rationale + provenance（缺任一条即 corpus-malformed 具名拒绝）；② 契约模块仍导出 JUDGE_VERDICTS/judgeRecord 且 confirmed 必须带 counterfactual；③ 载体记录仍用 clue_subject（或 subject）指明它承载的线索 subject —— 若 Planner 改字段名，语义注入口落到 needs-more-evidence（fail closed，不会误确认）。",
     "verify-plugin-channel-assertions.ts": "失效前提：Claude Code plugin 仍是唯一的发布/安装渠道，且 release.yml 的 verify-plugin-channel 仍是发布门禁（门禁若移到别处，断言实现不变但调用点须同步）；断言依赖的直接量仍存在——VERSION、.claude-plugin/plugin.json、bin/quay --version、项目 .quay/plugin 链接、.quay/config.yml 的 providers.native、/proc/<pid>/cgroup、.quay/server.json、.quay/serve.log、installed_plugins.json。任一量改由另一个载体承载（例如版本改从被测对象自报接口取）⇒ 本条口径需同步，否则会把读不懂误判为合格。",
     "release-cut.sh": "失效前提：release 切版仍是「从 develop 切 release/vX → 合回 → 在合并点打 tag → 删分支 → push → dispatch release.yml → develop 上 bump 下一版 + closure-ratchet 重锚」这一串（SPEC §4 + §12），且 develop 仍是合回目标、VERSION 仍是唯一版本来源、release-branch-finish.sh 仍是 --cut 的落地载体；若切版改由 CI 内部完成（本命令的前提「develop 未被任何 worktree 占用 / 主检出干净 / tag 未存在」随之失效）、或下一版号规则不再是 (Y+1).0、或 closure-ratchet 基线不再随版本 bump 变脏（那一步的重锚可去掉），本条口径需同步",
     "release-cut.mjs": "失效前提：① 入口形态仍是 bash plugin/scripts/release-cut.sh（薄壳 exec 本文件）—— 入口若换成别的形态（或逻辑搬回 .sh、或换成 --experimental-strip-types 的 .ts），本条与 sh-census 的读数需同步；② release-branch-finish.sh 仍是 --cut 的落地载体、且 --trace-path 仍能给出台账绝对路径；③ develop 仍是合回目标、VERSION 仍是唯一版本来源、下一版号仍是 (Y+1).0、closure-ratchet 基线仍随版本 bump 变脏。任一改变则本条口径需同步",
@@ -1236,6 +1242,8 @@
     "needs-human-parking-recheck.ts": "失效前提：① promotion-driver.ts 仍是每轮跑的那个常驻消费者（读数若改挂别的循环，CONSUMER 行须同步）；② 停放记录的形态仍是 driver-filters.markNeedsHuman 写的 ## Needs-Human 段 + 「- 阻碍原因：<判据 token>=…」行（注记格式若变，token 识别须同步）；③ PARKING_JUDGES 里登记的判据仍由 ready-pool-check.ts 导出且函数名/语义不变（判据改名或删除 ⇒ 全部任务落 no-registered-judge，读数变成恒空但 evaluated 仍为 true —— 新判据必须同时登记 token 与同一实现）；④ needs-human 仍无机械再入队路径（人 2026-09-20 裁定）——若将来允许机械再入队，本探测器应从只读读数改为写路径。"
   },
   "LAST_REAFFIRMED": {
+    "unencapsulated-state-clue.ts": "2026-10-23",
+    "unencapsulated-state-judge.ts": "2026-10-23",
     "verify-plugin-channel-assertions.ts": "2026-10-06",
     "release-cut.sh": "2026-09-24",
     "release-cut.mjs": "2026-09-24",
@@ -1636,6 +1644,8 @@
     "needs-human-parking-recheck.ts": "2026-10-22"
   },
   "MATCHING": {
+    "unencapsulated-state-clue.ts": "position",
+    "unencapsulated-state-judge.ts": "position",
     "verify-plugin-channel-assertions.ts": "position",
     "release-cut.sh": "keyword",
     "release-cut.mjs": "keyword",
@@ -2037,6 +2047,8 @@
     "needs-human-parking-recheck.ts": "position"
   },
   "CONSUMER": {
+    "unencapsulated-state-clue.ts": "谁按：准入链的 stage 1 —— plugin/scripts/unencapsulated-state-judge.ts 消费其候选，semanticAdmissionFromJudge 再把判决交给 evaluateCarrier 的 semantic-judged 路由；也可手动 node --experimental-strip-types plugin/scripts/unencapsulated-state-clue.ts --root <dir> --json。条件=要回答「这棵树上哪里可能有未封装的可变状态」而不把它当成结论",
+    "unencapsulated-state-judge.ts": "谁按：evaluateCarrier/runProposalCli 的 semantic-judged 路由（经 semanticAdmissionFromJudge 注入）与端到端测试 plugin/test/unencapsulated-state-admission.test.mjs；也可手动 node --experimental-strip-types plugin/scripts/unencapsulated-state-judge.ts --subjects <a,b> --json。条件=要判定一个候选线索究竟是不是真缺陷",
     "verify-plugin-channel-assertions.ts": ".github/workflows/release.yml 的 verify-plugin-channel 步骤（CI 门禁调用点）与发布前本地演练（README「发布前本地演练」）。",
     "release-cut.sh": "谁按：切一次 release 的人按（bash plugin/scripts/release-cut.sh <X.Y.Z>；--dry-run 先看计划，--no-push/--no-dispatch 用于本地或测试切版），也由 SPEC §4/§12 的读者按（那两节的手工步骤散文已改为指向本命令的一行指针）；条件=要把整条切版协议作为一次可重复、每步留 CAUSE= 的动作执行、要在真仓库上切出下一个版本而不手工切换分支或另建一个 clone、或要在动手前先看一次切版会创建/推送/提交什么",
     "release-cut.mjs": "谁按：切一次 release 的人经薄壳按（bash plugin/scripts/release-cut.sh <X.Y.Z>），也可直接 node plugin/scripts/release-cut.mjs <X.Y.Z>；本文件不独立对外，唯一入口形态是 release-cut.sh",

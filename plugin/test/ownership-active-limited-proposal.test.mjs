@@ -436,16 +436,24 @@ test("AC1(registry): CONCERN_KIND_REGISTRY is exported, and every entry carries 
     assert.equal(typeof e.deltaComputable, "boolean");
     assert.equal(typeof e.negativeControl, "boolean");
   }
-  // the two mechanized kinds are exactly the two whose instruments are landed
+  // The mechanized kinds are exactly those whose instruments are landed. `unencapsulated-state` JOINED
+  // this set on 2026-10-23 (task gap-unencapsulated-state-clue-judge-e2e, GOAL-911 AC-924) because its
+  // judge landed — the registry's own rule is "a semantic-judged kind ... only by landing the judge", NOT
+  // "by piling on mechanical signals". ⛔ Explicitly listed, never derived: this pin is what makes the
+  // flip a recorded decision instead of a side effect.
   const mechanized = CONCERN_KIND_REGISTRY.filter((e) => e.mechanized).map((e) => e.kind).sort();
-  assert.deepEqual(mechanized, ["design-evolution-regression", "package-cycle"]);
-  // and both carry the DIR-133-ruling-1 occurrence threshold of 2
+  assert.deepEqual(mechanized, ["design-evolution-regression", "package-cycle", "unencapsulated-state"]);
+  // and both mechanical kinds carry the DIR-133-ruling-1 occurrence threshold of 2
   for (const k of ["package-cycle", "design-evolution-regression"]) {
     assert.equal(concernKindEntry(k).occurrenceThreshold, 2, `${k}.occurrenceThreshold`);
   }
   // the two registered slates are NOT mechanized and say which detector they wait for
   assert.match(concernKindEntry("spine-without-extension-point").detector, /gap-worker-fan-in-cross-cutting-hooks-not-covered-by-extension-point/);
   assert.match(concernKindEntry("god-file-size").detector, /NOT LANDED/);
+  // the LANDED semantic-judged kind names its two real entry points and no longer claims "NOT LANDED"
+  assert.match(concernKindEntry("unencapsulated-state").detector, /plugin\/scripts\/unencapsulated-state-clue\.ts/);
+  assert.match(concernKindEntry("unencapsulated-state").detector, /plugin\/scripts\/unencapsulated-state-judge\.ts/);
+  assert.doesNotMatch(concernKindEntry("unencapsulated-state").detector, /NOT LANDED/);
 });
 
 // ── AC2: each concern_kind reports ITS OWN state — the tokens are pairwise distinct ────────────────
