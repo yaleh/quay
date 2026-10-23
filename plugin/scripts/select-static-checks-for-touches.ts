@@ -279,10 +279,24 @@ export function matchesObject(object, touch) {
 
 /** Known task-board / documentation / telemetry surfaces — a delta that ONLY touches these is already
  *  verified by the scoped + doc phases the fan-in always runs. Registry overrides fire first (a
- *  checker-read path under docs/, e.g. docs/analysis/ac69-*.json, is code). */
+ *  checker-read path under docs/, e.g. docs/analysis/ac69-*.json, is code).
+ *
+ *  `meta/` and `docs-managed/` are the two quay-written STORES that were missing from this table
+ *  (gap-doc-surfaces-missing-meta-prefix, the sibling of gap-doc-surfaces-missing-goals-prefix):
+ *  `quay meta write` commits `meta/META-*.md` and document-store commits `docs-managed/DOC-*.md`.
+ *  Both hold ONLY markdown and NO checker registers a path under them as an `@static-object`
+ *  (measured: parseStaticCheckRegistry ∩ {meta/*, docs-managed/*} = ∅) — so they are doc in exactly
+ *  the same sense as `tasks/` and `goals/`. Omitting `meta/` made every task whose AC REQUIRES a META
+ *  ruling record pay a full suite: gap-ac920's delta was 2 markdown files yet its fan-in re-ran the
+ *  suite and OOM-killed 3 times in a row.
+ *
+ *  ⛔ Sibling audit (hard rule 5b — fix the cluster, not the reported instance): `archive/`,
+ *  `experiments/` and `test/` actually carry executable checkers (.ts/.mjs/.sh — measured), so they
+ *  stay CODE faces; `state/` does not exist in this tree. Do not add `plugin/`, `packages/` or
+ *  `scripts/` — those are the product. */
 export const DOC_SURFACES = [
-  "tasks/", "goals/", "docs/", "adr/", ".quay/", "measurements/", "milestones/",
-  "orchestration/archive/", "plugin/loop/",
+  "tasks/", "goals/", "docs/", "docs-managed/", "meta/", "adr/", ".quay/", "measurements/",
+  "milestones/", "orchestration/archive/", "plugin/loop/",
 ];
 
 /** The conservative, layout-INDEPENDENT doc-surface default — used when this tree carries NO quay

@@ -703,6 +703,43 @@ t("companion — the CLI's --list tier/object parse agrees with the pure parse (
   assert.equal((cmd.stdout.match(/--check-changed/g) ?? []).length, 1, `exactly one --check-changed command must be emitted: ${cmd.stdout}`);
 });
 
+// ── DOC_SURFACES completeness: meta/ + docs-managed/ (gap-doc-surfaces-missing-meta-prefix) ────────
+//
+// THE DEFECT: `meta/` (the store `quay meta write` commits META-*.md into) was absent from
+// DOC_SURFACES. A task whose AC REQUIRES a META ruling record therefore carried a `meta/…md` path in
+// its delta ⇒ classifyDeltaPaths returned it in codePaths ⇒ needSuite=true ⇒ full suite. Measured on
+// gap-ac920: 3 consecutive fan-ins `exited-not-landed` (`step=suite: oom-killed`) for a 2-markdown delta.
+// `docs-managed/` is the same class (document-store's DOC-*.md), audited in the same pass (硬规则 5b).
+//
+// FALSIFIABILITY (both directions, 硬规则 2/4): the positive must depend on the TABLE ENTRY (the
+// surfaces list minus `meta/` must flip it back to code), and the negative control must prove the
+// prefix does not swallow a real code path whose NAME contains `meta` (`meta-driver.ts` lives in
+// plugin/scripts/, not under `meta/`).
+
+t("DOC_SURFACES — meta/ and docs-managed/ are doc surfaces, a real code path stays code", async () => {
+  const mod = await importMod();
+  const registry = mod.parseStaticCheckRegistry(fs.readFileSync(TEST_SH, "utf8"));
+
+  // ① positive: the quay-written markdown stores are doc — both through isDocPath and the fan-in entry.
+  for (const p of ["meta/META-017-a-ruling.md", "docs-managed/DOC-001-a-managed-doc.md"]) {
+    assert.equal(mod.isDocPath(p, registry), true, `${p} must be DOC (quay-written markdown store)`);
+    assert.deepEqual(mod.classifyDeltaPaths(REPO_ROOT, [p]).codePaths, [], `${p} must not land in codePaths`);
+  }
+
+  // ② negative control: real code faces stay code (the table addition must not widen the surface).
+  for (const p of ["plugin/scripts/meta-driver.ts", "packages/quay/src/meta-store.ts"]) {
+    assert.equal(mod.isDocPath(p, registry), false, `${p} must stay CODE`);
+    assert.deepEqual(mod.classifyDeltaPaths(REPO_ROOT, [p]).codePaths, [p], `${p} must stay in codePaths`);
+  }
+
+  // ③ the green in ① depends on the table entry, not on the path shape: drop `meta/` and the SAME
+  // predicate must say CODE. (This is the in-process half of the red/green mutation evidence.)
+  const withoutMeta = mod.DOC_SURFACES.filter((s) => s !== "meta/");
+  assert.notDeepEqual(withoutMeta, mod.DOC_SURFACES, "the mutation must actually change the surface list");
+  assert.equal(mod.isDocPath("meta/META-017-a-ruling.md", null, withoutMeta), false);
+  assert.equal(mod.isDocPath("meta/META-017-a-ruling.md", null, mod.DOC_SURFACES), true);
+});
+
 // ── AC5: this file is node:test + @test-group engine (self-evident) ──────────────────────────────
 
 t("AC5 — this test file is node:test with an engine @test-group", () => {
