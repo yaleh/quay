@@ -1,7 +1,7 @@
 ---
 id: gap-semantic-admission-contract-module
 title: 两段准入契约落成一份可复用模块 semantic-admission-contract.mjs（GOAL-911 AC-919）
-status: needs-human
+status: todo
 labels:
   - gap
 parent: null
