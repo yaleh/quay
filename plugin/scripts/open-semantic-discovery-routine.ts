@@ -147,9 +147,14 @@ import os from "node:os";
 import path from "node:path";
 import { createHash } from "node:crypto";
 import { execFileSync, spawn } from "node:child_process";
-import { fileURLToPath, pathToFileURL } from "node:url";
 import YAML from "yaml";
 import { isDue, parseTrigger } from "./routine-scheduler.ts";
+// ⛔ THE ENGINE-MODULE LOADER IS SHARED, NOT COPIED (routine `architecture-analysis` finding
+// `dup-discovery-module-loader`): the resolve-then-lazily-import arrow, its "not found at …" / "import
+// failed: …" wording and its by-resolved-path cache used to be byte-identical here and in
+// discovery-method-routine.ts. One implementation now serves both; this file keeps only its own engine
+// FILE LIST, its own cache map and its own refusal prefix (硬规则 5b).
+import { importEngineModuleAt, makeEngineModuleLoader, resolveEngineModuleIn } from "./routine-engine-module-loader.ts";
 import { launchArgv, readAnchorStart, STOPPED_MID_ROUND, StoppedMidRoundError, isStoppedMidRound, type AnchorStartReading, type Fact, type RoutineSpec } from "./driver-runtime.ts";
 import { ROUTINE_LAST_RUN_REL, readLastRunMap } from "./probe-routine.ts";
 import { isDirectEntry } from "./gate-script-base.ts";
@@ -1768,9 +1773,11 @@ export const OPEN_DISCOVERY_ENGINE_MODULES = [
   REGISTRY_MODULE_FILE,
 ] as const;
 
-/** The repo this FILE lives in (…/plugin/scripts/<this> → repo root). Used only to BUILD a candidate
- *  path — nothing is resolved through it until the runtime `import()`. */
-export const SCRIPT_REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
+/** The repo this FILE lives in (…/plugin/scripts/<this> → repo root). NOW OWNED BY THE SHARED LOADER
+ *  (`routine-engine-module-loader.ts`) and re-exported here because callers and tests import it from
+ *  this route. It is used only to BUILD a candidate path — nothing is resolved through it until the
+ *  runtime `import()`. */
+export { SCRIPT_REPO_ROOT } from "./routine-engine-module-loader.ts";
 
 /** The narrow interface this file consumes from arch-hypothesis-generation.mjs. Declared here rather than
  *  reached through a type-position import of an out-of-artifact path (the same reason the loader exists). */
@@ -1930,40 +1937,23 @@ export interface OpenDiscoveryModules {
 const _engineModuleCache = new Map<string, unknown>();
 
 /** Resolve one engine module to an absolute path, returning the candidates it TRIED so a refusal can name
- *  them (an unresolvable engine is a `failed` round, not a silent zero). */
+ *  them (an unresolvable engine is a `failed` round, not a silent zero). The body is the SHARED
+ *  `resolveEngineModuleIn` — the sibling routine resolves the same way from the same `docs/analysis` and
+ *  must not carry a second copy (routine finding `dup-discovery-module-loader`). */
 export function resolveEngineModule(root: string, file: string): { path: string | null; tried: string[] } {
-  const tried = [
-    path.join(SCRIPT_REPO_ROOT, ANALYSIS_DIR_REL, file),
-    path.join(root, ANALYSIS_DIR_REL, file),
-  ];
-  for (const candidate of tried) {
-    if (fs.existsSync(candidate)) return { path: candidate, tried };
-  }
-  return { path: null, tried };
+  return resolveEngineModuleIn(root, file, ANALYSIS_DIR_REL);
 }
 
 /** Load the engine modules, or THROW a refusal naming every module that could not be resolved and the
  *  candidate paths tried. Throwing (rather than returning a `{ok:false}` a caller might forget to check) is
- *  deliberate: the round converts it into its own `failed` reason. */
+ *  deliberate: the round converts it into its own `failed` reason.
+ *
+ *  ⛔ THE `load` ARROW IS NOT DEFINED HERE: it was byte-identical to its sibling's copy, refusal wording
+ *  included, so both now come from `makeEngineModuleLoader` (硬规则 5b). Only the module FILE LIST and
+ *  the refusal's own prefix are this routine's. */
 export async function loadOpenDiscoveryModules(root: string): Promise<OpenDiscoveryModules> {
   const unresolved: string[] = [];
-  const load = async (file: string): Promise<unknown> => {
-    const r = resolveEngineModule(root, file);
-    if (r.path === null) {
-      unresolved.push(`${file} — not found at ${r.tried.join(" or ")}`);
-      return null;
-    }
-    const cached = _engineModuleCache.get(r.path);
-    if (cached !== undefined) return cached;
-    try {
-      const mod = (await import(/* @vite-ignore */ pathToFileURL(r.path).href)) as unknown;
-      _engineModuleCache.set(r.path, mod);
-      return mod;
-    } catch (e) {
-      unresolved.push(`${file} — import failed: ${(e as Error).message}`);
-      return null;
-    }
-  };
+  const load = makeEngineModuleLoader(root, _engineModuleCache, unresolved, ANALYSIS_DIR_REL);
   const hyp = await load(HYPOTHESIS_MODULE_FILE);
   const portfolio = await load(PORTFOLIO_MODULE_FILE);
   const ledger = await load(LEDGER_MODULE_FILE);
@@ -1995,11 +1985,7 @@ export async function loadOpenDiscoveryModules(root: string): Promise<OpenDiscov
 export async function loadStreamDiagnostics(root: string): Promise<HypothesisModule["streamDiagnostics"]> {
   const r = resolveEngineModule(root, HYPOTHESIS_MODULE_FILE);
   if (r.path === null) throw new Error(`ARCH_HYPOTHESIS_UNRESOLVED — ${HYPOTHESIS_MODULE_FILE} not found at ${r.tried.join(" or ")}`);
-  let mod = _engineModuleCache.get(r.path);
-  if (mod === undefined) {
-    mod = await import(/* @vite-ignore */ pathToFileURL(r.path).href);
-    _engineModuleCache.set(r.path, mod);
-  }
+  const mod = await importEngineModuleAt(r.path, _engineModuleCache);
   const fn = (mod as HypothesisModule).streamDiagnostics;
   if (typeof fn !== "function") throw new Error(`ARCH_HYPOTHESIS_UNRESOLVED — ${r.path} exports no streamDiagnostics`);
   return fn;
