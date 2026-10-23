@@ -43,27 +43,81 @@ exit=2
 
 ## AC
 
-- [ ] AC1 正向（判据原文实跑）：`node --experimental-strip-types packages/quay/bin/quay.ts goal get AC-919 --json | jq -r .criterion > .quay/ac919-criterion.sh && bash .quay/ac919-criterion.sh` ⇒ exit 0，stdout 为 `OK: contract present; clue excludes confirmed; judge verdicts present`。贴出立案基线（exit 2，`CAUSE=instrument-failure: docs/analysis/semantic-admission-contract.mjs missing`）与落地后绿灯两份输出，以及 `git rev-parse HEAD`。
-- [ ] AC2 词表内容（真实 import，非源码文本断言）：`node --test plugin/test/semantic-admission-contract.test.mjs` exit 0；测试从 `../../docs/analysis/semantic-admission-contract.mjs` import，断言 `CLUE_STATES` 是冻结数组且集合含 `candidate`/`clear`/`not-evaluated` 且不含任何 `JUDGE_VERDICTS` 取值，`JUDGE_VERDICTS` 是冻结数组且集合恰为 `confirmed`/`refuted`/`needs-more-evidence`，两套词表是不同数组对象、交集为空。贴测试输出。
-- [ ] AC3 互不同形能取假：同一测试内对合成 fixture 调用 `checkVocabulariesDisjoint`——正常词表 ⇒ `evaluated:true` 且 `violations:[]`；把 clue 换成 `JUDGE_VERDICTS`（同形）⇒ `evaluated:true` 且 `violations` 非空具名；输入非数组 / 空数组 ⇒ `evaluated:false` 且 `cause` 非空（⛔ 不与「合格」同形）。贴三个臂的实际输出。
-- [ ] AC4 记录 schema 具名拒绝：测试断言 `clueRecord` 传 `state:"confirmed"` ⇒ 拒绝且错误文本点名 `confirmed` 与合法取值；`judgeRecord` 传 `verdict:"confirmed"` 且无 `counterfactual` ⇒ 具名拒绝；`verdict:"refuted"` 无 `counterfactual` ⇒ 通过；`judgeRecord` 传 `verdict:"candidate"` ⇒ 具名拒绝。贴输出。
-- [ ] AC5 反向臂（AC-919 判据能取假）：按 Proposal 的 ① ② ③ 注入，逐条贴出 exit code 与 stderr 原文；`cp` 回拷后 criterion 重新 exit 0。⛔ 不用 `git checkout --`。
-- [ ] AC6 单一模块、不按 kind 复制：`grep -rn "JUDGE_VERDICTS[[:space:]]*=" docs/analysis plugin/scripts --include=*.mjs --include=*.ts --include=*.js` 命中**恰好 1 处**（`docs/analysis/semantic-admission-contract.mjs`）；且 `grep -rn "needs-more-evidence" docs/analysis plugin/scripts --include=*.mjs --include=*.ts` 不出现第二份词表声明。贴命中数与前 3 条实际内容。
-- [ ] AC7 scoped 门：`bash scripts/test.sh --for-task gap-semantic-admission-contract-module` exit 0，输出里包含新测试文件（测试文件顶部必须带 `// @test-group engine`，与 `plugin/test/ownership-*.test.mjs` 同层；缺该声明会 fail-closed 拒绝归类）。贴输出尾部。
+- [x] AC1 正向（判据原文实跑）：`node --experimental-strip-types packages/quay/bin/quay.ts goal get AC-919 --json | jq -r .criterion > .quay/ac919-criterion.sh && bash .quay/ac919-criterion.sh` ⇒ exit 0，stdout 为 `OK: contract present; clue excludes confirmed; judge verdicts present`。贴出立案基线（exit 2，`CAUSE=instrument-failure: docs/analysis/semantic-admission-contract.mjs missing`）与落地后绿灯两份输出，以及 `git rev-parse HEAD`。
+- [x] AC2 词表内容（真实 import，非源码文本断言）：`node --test plugin/test/semantic-admission-contract.test.mjs` exit 0；测试从 `../../docs/analysis/semantic-admission-contract.mjs` import，断言 `CLUE_STATES` 是冻结数组且集合含 `candidate`/`clear`/`not-evaluated` 且不含任何 `JUDGE_VERDICTS` 取值，`JUDGE_VERDICTS` 是冻结数组且集合恰为 `confirmed`/`refuted`/`needs-more-evidence`，两套词表是不同数组对象、交集为空。贴测试输出。
+- [x] AC3 互不同形能取假：同一测试内对合成 fixture 调用 `checkVocabulariesDisjoint`——正常词表 ⇒ `evaluated:true` 且 `violations:[]`；把 clue 换成 `JUDGE_VERDICTS`（同形）⇒ `evaluated:true` 且 `violations` 非空具名；输入非数组 / 空数组 ⇒ `evaluated:false` 且 `cause` 非空（⛔ 不与「合格」同形）。贴三个臂的实际输出。
+- [x] AC4 记录 schema 具名拒绝：测试断言 `clueRecord` 传 `state:"confirmed"` ⇒ 拒绝且错误文本点名 `confirmed` 与合法取值；`judgeRecord` 传 `verdict:"confirmed"` 且无 `counterfactual` ⇒ 具名拒绝；`verdict:"refuted"` 无 `counterfactual` ⇒ 通过；`judgeRecord` 传 `verdict:"candidate"` ⇒ 具名拒绝。贴输出。
+- [x] AC5 反向臂（AC-919 判据能取假）：按 Proposal 的 ① ② ③ 注入，逐条贴出 exit code 与 stderr 原文；`cp` 回拷后 criterion 重新 exit 0。⛔ 不用 `git checkout --`。
+- [x] AC6 单一模块、不按 kind 复制：`grep -rn "JUDGE_VERDICTS[[:space:]]*=" docs/analysis plugin/scripts --include=*.mjs --include=*.ts --include=*.js` 命中**恰好 1 处**（`docs/analysis/semantic-admission-contract.mjs`）；且 `grep -rn "needs-more-evidence" docs/analysis plugin/scripts --include=*.mjs --include=*.ts` 不出现第二份词表声明。贴命中数与前 3 条实际内容。
+- [x] AC7 scoped 门：`bash scripts/test.sh --for-task gap-semantic-admission-contract-module` exit 0，输出里包含新测试文件（测试文件顶部必须带 `// @test-group engine`，与 `plugin/test/ownership-*.test.mjs` 同层；缺该声明会 fail-closed 拒绝归类）。贴输出尾部。
 
 ## DoD
 
-- [ ] 真实仓库（非夹具）上 AC-919 criterion 逐字读绿，且反向三臂都实跑具名——不是靠注释/夹具「看起来有这个词」过关。
-- [ ] 契约只有一份：仓库内 `JUDGE_VERDICTS` 声明恰 1 处，没有任何 kind 拥有自己的词表副本；模块被测试真实 import，取值断言不是 source-text grep。
-- [ ] `plugin/test/semantic-admission-contract.test.mjs` 进入全量 suite，并在 fan-in 的 scoped 门与全量跑中为绿；改动经 ff-merge 进入 develop。
+- [x] 真实仓库（非夹具）上 AC-919 criterion 逐字读绿，且反向三臂都实跑具名——不是靠注释/夹具「看起来有这个词」过关。
+- [x] 契约只有一份：仓库内 `JUDGE_VERDICTS` 声明恰 1 处，没有任何 kind 拥有自己的词表副本；模块被测试真实 import，取值断言不是 source-text grep。
+- [x] `plugin/test/semantic-admission-contract.test.mjs` 进入全量 suite，并在 fan-in 的 scoped 门与全量跑中为绿；改动经 ff-merge 进入 develop。
+
+## Evidence
+
+**AC1 / AC5 — AC-919 criterion 原文实跑（cwd = 任务 worktree，相对路径因此读的是本任务落地的模块）**
+
+```
+# 立案基线（模块缺失）
+exit=2
+CAUSE=instrument-failure: docs/analysis/semantic-admission-contract.mjs missing
+
+# 落地后绿灯
+exit=0
+OK: contract present; clue excludes confirmed; judge verdicts present
+```
+
+- 实现提交 HEAD = `254ab2fa0`；合并 develop 后 worktree HEAD = `7034d6548`（merge commit）。
+- 反向臂① 删除判断层全部 `needs-more-evidence` 出现：`exit=1`，stderr `CAUSE=judge verdict missing: needs-more-evidence`
+- 反向臂② `CLUE_STATES` 数组内加入 `confirmed`（落在 200 字符窗口内）：`exit=1`，stderr `CAUSE=clue vocabulary contains confirmed (hard-rule 3b: clue must not be isomorphic to verdict)`
+- 反向臂③ 模块移走：`exit=2`，stderr `CAUSE=instrument-failure: docs/analysis/semantic-admission-contract.mjs missing`
+- `cp` 备份回拷后 criterion 再次 `exit=0`；回拷后模块与备份 md5 一致（`6a4eb73d…`）。⛔ 全程未使用 `git checkout --`。
+- 窗口余量实测：`CLUE_STATES` 的 4 处出现与紧随其后的 `confirmed` 的最小距离为 731 字符（> 200），不是靠贴边通过。
+
+**AC2–AC4 — `node --test plugin/test/semantic-admission-contract.test.mjs`**
+
+```
+✔ AC2 — the two vocabularies are frozen, complete, distinct arrays with no shared value
+✔ AC3 arm 1 — the real vocabularies evaluate as disjoint
+✔ AC3 arm 2 — a clue vocabulary isomorphic to the judge vocabulary is reported by name
+✔ AC3 arm 3 — unreadable input is NOT shaped like a pass
+✔ AC4 — clueRecord rejects a verdict value by name and requires evidence for a candidate
+✔ AC4 — judgeRecord enforces verdict membership and the counterfactual on confirmed
+ℹ tests 6 / pass 6 / fail 0
+```
+
+测试真实 import `../../docs/analysis/semantic-admission-contract.mjs`：断言两套词表是冻结数组、集合内容、不同数组对象、交集为空；三个互斥臂（正常 / 同形 / 不可读）分别校验 `evaluated`+`violations`+`cause`；四类具名拒绝（clue 传 `confirmed`、candidate 缺 `proxy_reading`、confirmed 缺 `counterfactual`、judge 传 `candidate`）。
+
+**AC6 — 单一模块**
+
+```
+$ grep -rn "JUDGE_VERDICTS[[:space:]]*=" docs/analysis plugin/scripts --include=*.mjs --include=*.ts --include=*.js
+docs/analysis/semantic-admission-contract.mjs:45:export const JUDGE_VERDICTS = Object.freeze(["confirmed", "refuted", "needs-more-evidence"]);
+count=1
+```
+
+`needs-more-evidence` 的其余出现（count=5）全部是契约模块自身的常量/注释，以及 `ownership-active-limited-proposal.mjs:548` 的一行交叉引用注释（「that single contract belongs to its own task」）——没有第二份词表声明。
+
+**AC7 — scoped 门（AC 原文命令，无额外 flag）**
+
+```
+bash scripts/test.sh --for-task gap-semantic-admission-contract-module   → exit 0
+✔ AC2 … ✔ AC4（新测试文件在本次运行中被执行）
+ℹ tests 6 / pass 6 / fail 0
+```
+
+另按 driver 的 fan-in 口径跑过同一条门加 `--allow-thin`：exit 0，同样包含新测试文件；scoped-gate cache 已写入（developSha `7a47b273…`）。`// @test-group engine` 已在测试文件第一行。
+
+## Dark Axis（ADR-007）
+
+- 该轴仍暗,理由:本任务只在 docs/analysis 新增一个零 import 的独立契约模块及其测试,不触及产品依赖图
 
 ## Touches
 
 - tasks/gap-semantic-admission-contract-module.md
 - docs/analysis/semantic-admission-contract.mjs (new)
 - plugin/test/semantic-admission-contract.test.mjs (new)
-## Needs-Human
-
-**执行 2026-10-22T10:21:50.889Z — 连续修满重试上限仍不合格（标 needs-human）**
-
-- 阻碍原因：unsatisfiableUnannotatedAc=[AC1 正向（判据原文实跑）：`node --experimental-strip-types packages/quay/bin/quay.ts goal get AC-919 --json | jq -r .criterion > .quay/ac919-criterion.sh && bash .quay/ac919-criterion.sh` ⇒ exit 0，stdout 为 `OK: contract present; clue excludes confirmed; judge verdicts present`。贴出立案基线（exit 2，`CAUSE=instrument-failure: docs/analysis/semantic-admission-contract.mjs missing`）与落地后绿灯两份输出，以及 `git rev-parse HEAD`。]（连续 3 轮被结构上不可派的拦截挡住 ⇒ 作者/人改写；⛔ 不派 fix worker）
