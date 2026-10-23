@@ -63,6 +63,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { isDirectEntry } from "./gate-script-base.ts";
+import { escapeRegExp } from "./regex-escape.ts";
 import { resolveEngineModuleIn, importEngineModuleAt, SCRIPT_REPO_ROOT } from "./routine-engine-module-loader.ts";
 
 export const EXIT_OK = 0;
@@ -239,7 +240,12 @@ export function analyzeSource(raw: string): SourceReading {
   return { statefulDeclarations, mutationSites, declarations, mutations };
 }
 
-const escapeRegExp = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+// `escapeRegExp` is imported from `./regex-escape.ts` (the plugin entry point to the kernel leaf):
+// the escape body has exactly ONE declaration site in the production tree
+// (`packages/quay/src/kernel/regex-escape.ts`), pinned by
+// `packages/quay/test/kernel-regex-escape.test.mjs` ④. Declaring a private copy here — which the first
+// draft of this scanner did — reds that family check even though the body is byte-identical, and a
+// second copy is free to drift (hard rule 5b).
 
 /** The state a reading maps to. ≥2 readings ⇒ `candidate`, else `clear`. Pure and total. */
 export function stateOfReading(reading: SourceReading): "candidate" | "clear" {
