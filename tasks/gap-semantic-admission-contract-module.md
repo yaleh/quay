@@ -60,8 +60,8 @@ exit=2
 ## Touches
 
 - tasks/gap-semantic-admission-contract-module.md
-- docs/analysis/semantic-admission-contract.mjs
-- plugin/test/semantic-admission-contract.test.mjs
+- docs/analysis/semantic-admission-contract.mjs (new)
+- plugin/test/semantic-admission-contract.test.mjs (new)
 ## Needs-Human
 
 **执行 2026-10-22T10:21:50.889Z — 连续修满重试上限仍不合格（标 needs-human）**
