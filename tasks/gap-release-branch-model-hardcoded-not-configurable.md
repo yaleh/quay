@@ -77,3 +77,11 @@ extra:
 - plugin/test/release-model-check.test.mjs
 - plugin/test/release-cut.test.mjs
 - tasks/gap-release-branch-model-hardcoded-not-configurable.md
+
+## Blocker
+
+**2026-10-23T04:46:53.643Z — worker 未落地（exited-not-landed）**
+
+- 未落地原因：step=suite: AssertionError [ERR_ASSERTION]: 2 条现存判据被误判为非只读 —— 这把闸在生产上会开始拒绝真判据 [baseline A/B: HARD RED (task-introduced-red) — the task's red set is NOT a subset of the develop baseline red set: added=plugin/test/help-contract-incompatible-behaviors.test.mjs,plugin/test/quay-init-characterization.test.mjs changed=-]
+- run_id：wk-prod-anchor
+- session_id：6fb86b5c-a38b-41f1-93ee-2b3636edd2f6
