@@ -184,11 +184,18 @@ DIRECT_EXIT=1
   这解释了为什么四轮读数几乎一致。⇒ 根因 = 「地板档无效」+「32G 上限低于本仓库当前套件的实测峰值」，
   ⛔ 与本任务 delta（只有一个 `meta/` 文档）无关。
 
-本 worktree 的缓解（**只改 gitignored 的 workspace 配置；⛔ 不进任何分支、⛔ 不动 memory_max**）：
-`.quay/config.yml` 的 `serial_concurrency` / `lowconc_concurrency` 由 48 降到 32
-（按实测的线性比例**估算** ≈22 GiB，非实测；留约 30% 余量）。人 2026-10-15 的 `memory_max: 32G` 逐字保留 ——
-降的是项目自己的安全杠杆（并发，见 config 注释里 AC3 表的结论），不是声明上限。
-⚠️ 这是 worktree-local 的临时措施，**不构成对 AC-920 的任何处置**，也没有改变本任务的任何 AC 判定；
+本轮的缓解（**只改 gitignored 的 workspace 配置；⛔ 不进任何分支、⛔ 不动 memory_max**）：
+先改的是 worktree 的 `.quay/config.yml`，随即实测发现 `scripts/test.sh` 会跑 `refresh-worktree-quay.sh`，
+把 main checkout 的 `.quay/` **覆盖式**拷回 worktree（改完后该文件被还原成 48/48，mtime 回到 10-23 11:49）
+⇒ 生效面只能是 **workspace 根那个 gitignored 文件** `/data/home/yale/work/quay/.quay/config.yml`
+（`scripts/worktree-include.sh` 的单一来源；它不进任何分支，也不进任何 diff）。
+把 `serial_concurrency` / `lowconc_concurrency` 由 48 降到 32，读回：
+`suite-params.ts --root /data/home/yale/work/quay` ⇒
+`{"serial_concurrency":32,"lowconc_concurrency":32,"max_oversubscription":1,"memory_max":"32G",…}`。
+依据：**32 本来就是已经声明的恢复阶梯地板**（`SUITE_RECOVERY_CONCURRENCY_LADDER=[64,48,32]`），
+原先因为本文件的 48 夹子而不可达；这里只是让它真的可达，⛔ 不是新设一个安全判断。
+人 2026-10-15 的 `memory_max: 32G` 逐字保留。32 并发下的内存**估算** ≈22 GiB（按 48→33.6 GiB 线性折算，非实测）。
+⚠️ 这是 workspace-local 的运行参数调整，**不构成对 AC-920 的任何处置**，也没有改变本任务的任何 AC 判定；
 fan-in 若仍被 OOM 挡下，那是套件基础设施的独立问题，应另案处理。
 
 ## Dark Axis
