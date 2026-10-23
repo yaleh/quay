@@ -55,8 +55,10 @@ extra:
 - **AC5**：`bash plugin/scripts/capability-catalog.sh` ⇒ `summary: 397 scripts | 397 declared | 0 unclassified | 392 ship`；落地前为 `396 declared`（新增脚本使 scripts 397，恰好 +1 声明）。
 - **sh-census 说明**：`release-branch-finish.sh` 的模型读取用 awk/pure-bash 实现，而非 `node --experimental-strip-types` 调用——后者会把整个 495 行 bash 载体变成 census 计费的 embedded-interpreter 程序（实测 `embeddedInterpreterLines` 6853 > 基线 6501）；改后 census 6501 ≤ 6501 通过。
 - **回归修复（2026-10-23，第二轮）**：首轮 suite 红两条，均已在本轮修好——
-  - `plugin/test/help-contract-incompatible-behaviors.test.mjs` AC1：`release-model-check.ts --help` 原本落进 `parseCli` 的 `null`（usage error，exit 2）分支。现 `--help`/`-h` 返回独立的 `"help"`：usage 打到 stdout、**exit 0**、零业务副作用，与全部 `-check.ts` 共用的 help 契约一致（`--help` 单跑 exit 0 已验）。
-  - `plugin/test/quay-init-characterization.test.mjs` AC2：fresh install 的 `.quay/config.yml` 哈希钉随 Section 5 模板新增而移动，已 RE-ANCHOR 并写明理由；其余五个 surface 文件哈希不变，`init.ts` 相对 develop 仅一个 hunk（`git diff develop..<branch>` 已核）。
+  - `plugin/test/help-contract-incompatible-behaviors.test.mjs` AC1：`release-model-check.ts --help` 原本落进 `parseCli` 的 `null`（usage error，exit 2）分支。现 `--help`/`-h` 返回独立的 `"help"`：usage 打到 stdout、**exit 0**、零业务副作用，与全部 `-check.ts` 共用的 help 契约一致（`--help` 单跑 exit 0 已验；该测试 4/4 复跑绿）。
+  - `plugin/test/quay-init-characterization.test.mjs` AC2：fresh install 的 `.quay/config.yml` 哈希钉随 Section 5 模板新增而移动，已 RE-ANCHOR 并写明理由；其余五个 surface 文件哈希不变，`init.ts` 相对 develop 仅一个 hunk（`git diff develop..<branch>` 已核；该测试 4/4 复跑绿）。
+- **scoped 门**：`scripts/test.sh --for-task gap-release-branch-model-hardcoded-not-configurable --allow-thin` ⇒ 18 个选中测试文件、339 tests / 339 pass / 0 fail，exit 0。
+- **anti-drift**：`anti-drift-touches-check.ts` ⇒ `ANTI-DRIFT OK — 15 actual file(s), all within declared Touches (16 glob(s))`，exit 0。
 
 ## ADR-007 dark axis
 
@@ -82,8 +84,6 @@ extra:
 - plugin/test/quay-init-characterization.test.mjs
 - tasks/gap-release-branch-model-hardcoded-not-configurable.md
 
-## Blocker (resolved)
+## Blocker
 
-**2026-10-23T04:46:53.643Z — 首轮 worker 未落地（exited-not-landed）**：`plugin/test/help-contract-incompatible-behaviors.test.mjs` + `plugin/test/quay-init-characterization.test.mjs` 两条 red。
-
-**2026-10-23 第二轮处理**：两条均按上文「回归修复」修好并在本地复跑为绿；不是放宽任何一条闸——help 契约是把 `--help` 从 usage-error 路径拆成 success 路径，characterization 是模板变更后的正常 re-anchor（其余 surface 哈希不变）。
+（历史记录：2026-10-23T04:46:53.643Z 首轮 worker exited-not-landed——`plugin/test/help-contract-incompatible-behaviors.test.mjs` + `plugin/test/quay-init-characterization.test.mjs` 两条 red。**2026-10-23 第二轮已解决**：help 契约把 `--help` 从 usage-error 路径拆成 success 路径；characterization 是模板变更后的正常 re-anchor（其余 surface 哈希不变）。两条均本地复跑为绿，未放宽任何闸。）
