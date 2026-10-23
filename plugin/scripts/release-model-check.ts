@@ -329,11 +329,14 @@ export function judgeReleaseModel(root: string): MeterReading {
 const USAGE =
   "Usage: release-model-check.ts --root <repo> [--json]\n" +
   "       release-model-check.ts --print-globs|--print-model --root <repo>\n" +
+  "       release-model-check.ts --help\n" +
   "Exit: 0 = pass (configured model holds) | 1 = fail | 3 = not-evaluated (could not read) |\n" +
   "      4 = not-configured (no release: section — ⛔ NOT a pass) | 2 = usage/environment error.\n" +
   "⛔ With no arguments this is a USAGE ERROR; it never judges process.cwd() implicitly.";
 
-function parseCli(argv: string[]): { root: string; json: boolean; printGlobs: boolean; printModel: boolean } | null {
+function parseCli(
+  argv: string[]
+): { root: string; json: boolean; printGlobs: boolean; printModel: boolean } | "help" | null {
   let root = "";
   let json = false;
   let printGlobs = false;
@@ -346,7 +349,11 @@ function parseCli(argv: string[]): { root: string; json: boolean; printGlobs: bo
     } else if (a === "--json") json = true;
     else if (a === "--print-globs") printGlobs = true;
     else if (a === "--print-model") printModel = true;
-    else if (a === "--help" || a === "-h") return null;
+    // `--help` is a SUCCESS path (exit 0, usage on stdout, zero business side effect) — the
+    // contract every `-check.ts` shares (plugin/test/help-contract-incompatible-behaviors AC1).
+    // ⛔ Do not fold it into the `null` (usage-error, exit 2) path: that made a harness asking
+    // "what are your flags?" read a failure and was the exact red this file introduced.
+    else if (a === "--help" || a === "-h") return "help";
     else return null;
   }
   if (root === "") return null;
@@ -389,6 +396,10 @@ function main(argv: string[]): number {
     return 2;
   }
   const cli = parseCli(argv);
+  if (cli === "help") {
+    process.stdout.write(USAGE + "\n");
+    return 0;
+  }
   if (!cli) {
     process.stderr.write(USAGE + "\n");
     return 2;
