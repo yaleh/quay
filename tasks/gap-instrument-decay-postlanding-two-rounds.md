@@ -56,3 +56,11 @@ depends_on:
 ## Touches
 
 - tasks/gap-instrument-decay-postlanding-two-rounds.md
+
+## Blocker
+
+**2026-10-23T07:35:18.471Z — worker 未落地（exited-not-landed）**
+
+- 未落地原因：AC 未全勾（checked 0/2，剩余未勾 2）——续做只需验证并勾选 AC
+- run_id：wk-prod-anchor
+- session_id：271673ee-972e-43a9-9f76-5b72128fa4aa
