@@ -220,6 +220,10 @@ import { validateGeneralization, promotionStatusForLevel, PROMOTION_REPORT_ONLY_
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(SCRIPT_DIR, "..", "..");
 const ROUTINE_SRC = path.join(REPO_ROOT, "plugin", "scripts", "open-semantic-discovery-routine.ts");
+// The runtime engine-module loader is SHARED with the sibling routine (routine `architecture-analysis`
+// finding `dup-discovery-module-loader`). The "resolved path, never a static specifier" control follows
+// the code to the one place that now performs the import; the static-import half still judges ROUTINE_SRC.
+const ENGINE_LOADER_SRC = path.join(REPO_ROOT, "plugin", "scripts", "routine-engine-module-loader.ts");
 const GIT_ENV = { ...process.env, GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@t", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@t" };
 
 // ── fixture plumbing ─────────────────────────────────────────────────────────────────────────────────
@@ -1006,7 +1010,11 @@ test("case (i) — the engine is resolved at runtime: NO static out-of-artifact 
   assert.doesNotMatch(src, STATIC_ENGINE_IMPORT, "no static import may reach docs/analysis from this shipped file");
   const mutated = `${src}\nimport { x } from "../../docs/analysis/arch-hypothesis-generation.mjs";\n`;
   assert.match(mutated, STATIC_ENGINE_IMPORT, "the mutation must turn the same predicate red");
-  assert.match(src, /await import\(\/\* @vite-ignore \*\/ pathToFileURL\(/, "the loader must import a RESOLVED path, so the bundler cannot see a specifier to inline");
+  // …and the runtime resolution it is replaced by is really there — in the SHARED loader both routines
+  // call (the extract is the fix for routine finding `dup-discovery-module-loader`; pinning this routine's
+  // own text would pin a copy the extract deliberately removed).
+  const loaderSrc = fs.readFileSync(ENGINE_LOADER_SRC, "utf8");
+  assert.match(loaderSrc, /await import\(\/\* @vite-ignore \*\/ pathToFileURL\(/, "the loader must import a RESOLVED path, so the bundler cannot see a specifier to inline");
 });
 
 // ── (j) the investigator reads real source, rooted at the pin ────────────────────────────────────────

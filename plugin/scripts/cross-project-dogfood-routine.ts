@@ -54,11 +54,13 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
 import YAML from "yaml";
 
 import { isDirectEntry, flagValue } from "./gate-script-base.ts";
 import { isDue, parseTrigger } from "./routine-scheduler.ts";
+// ⛔ THE ENGINE-MODULE RESOLUTION AND RUNTIME IMPORT ARE SHARED, NOT COPIED (routine
+// `architecture-analysis` finding `dup-discovery-module-loader`, 硬规则 5b): see `loadEngineModule` below.
+import { importEngineModuleAt, resolveEngineModuleIn } from "./routine-engine-module-loader.ts";
 import {
   INVOKED_BY_DEFAULT,
   INVOKED_BY_MANUAL,
@@ -745,22 +747,21 @@ export interface HypothesisModuleLike {
 export const HYPOTHESIS_MODULE_FILE = "arch-hypothesis-generation.mjs";
 export const PORTFOLIO_MODULE_FILE = "discovery-portfolio.mjs";
 export const ANALYSIS_DIR_REL = path.posix.join("docs", "analysis");
-/** The repo this FILE lives in (…/plugin/scripts/<this> → repo root). Used only to BUILD a candidate
- *  path — nothing is resolved through it until the runtime `import()`. */
-export const SCRIPT_REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
+/** The repo this FILE lives in (…/plugin/scripts/<this> → repo root in the dev tree, plugin root in the
+ *  shipped bundle). NOW OWNED BY THE SHARED LOADER (`routine-engine-module-loader.ts`); re-exported so
+ *  the module's public surface does not change. */
+export { SCRIPT_REPO_ROOT } from "./routine-engine-module-loader.ts";
 
 const _moduleCache = new Map<string, unknown>();
+/** ⛔ THE RESOLUTION AND THE RUNTIME IMPORT ARE SHARED, NOT COPIED (routine `architecture-analysis`
+ *  finding `dup-discovery-module-loader`, 硬规则 5b): this body used to inline the same two-candidate
+ *  loop and the same memoised `import()` as the two sibling routines, with only the refusal shape
+ *  differing. The refusal shape IS this function's own (it throws one named error rather than
+ *  accumulating `unresolved[]`), so only that is left here. */
 async function loadEngineModule(root: string, file: string): Promise<unknown> {
-  const tried = [path.join(SCRIPT_REPO_ROOT, ANALYSIS_DIR_REL, file), path.join(root, ANALYSIS_DIR_REL, file)];
-  for (const candidate of tried) {
-    if (!fs.existsSync(candidate)) continue;
-    const cached = _moduleCache.get(candidate);
-    if (cached !== undefined) return cached;
-    const mod = (await import(/* @vite-ignore */ pathToFileURL(candidate).href)) as unknown;
-    _moduleCache.set(candidate, mod);
-    return mod;
-  }
-  throw new Error(`CROSS_PROJECT_ENGINE_UNRESOLVED — ${file} not found at ${tried.join(" or ")}`);
+  const r = resolveEngineModuleIn(root, file, ANALYSIS_DIR_REL);
+  if (r.path === null) throw new Error(`CROSS_PROJECT_ENGINE_UNRESOLVED — ${file} not found at ${r.tried.join(" or ")}`);
+  return importEngineModuleAt(r.path, _moduleCache);
 }
 export const loadHypothesisModule = async (root: string): Promise<HypothesisModuleLike> =>
   (await loadEngineModule(root, HYPOTHESIS_MODULE_FILE)) as HypothesisModuleLike;
