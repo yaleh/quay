@@ -182,13 +182,3 @@ DIRECT_EXIT=1
 ## Dark Axis
 
 该轴仍暗,理由: 本任务只产证据与人的裁定请求（META 记录 + 任务体），不改任何生产代码、模块依赖、延迟或并发/资源行为；无 L_D/L_G 轴读数可采。
-
-## Blocker
-
-**2026-10-23T19:06:56.963Z — worker 未落地（exited-not-landed）**
-
-- 未落地原因：step=suite: oom-killed (3) — new regression at lower concurrency: plugin/test/driver-anchor-takeover.test.mjs,packages/quay/test/serve-system-body-i18n.test.mjs (passed at the original concurrency 128, fails at 64) — needs a code fix
-- run_id：wk-prod-anchor
-- session_id：04bc2893-ef9e-4f35-a158-937b81f4834f
-
-**retry 轮（2026-10-24）处置**：该 blocker 属 **suite 阶段的全量测试负载/OOM**，两个被点名文件都不在本任务 Touches 内（本任务零代码改动）；本轮已按 worker 职责完成 pre-merge + scoped 门（exit 0）+ anti-drift（exit 0），全量 suite 由 driver 的机械 fan-in 执行。
