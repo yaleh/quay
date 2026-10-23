@@ -169,6 +169,28 @@ DIRECT_EXIT=1
 ℹ duration_ms 455.395212
 ```
 
+**落地阻塞与 worktree 本地缓解（2026-10-24 续做轮；只记录，不改变任何裁定）**
+
+前一轮 exited-not-landed 的判词是 `step=suite: oom-killed (3) — recovery exhausted at floor concurrency 32`。
+逐条读四份 suite 日志（`.quay/fan-in-suite-gap-ac920-…`：原轮 + recovery-64/48/32），成因**不是本任务的红点**：
+
+- 四轮 `SUITE-PLAN` 全是 `planned=1046 terminal=1046 missing=0`（**没有文件丢失**），而 `oomKill` 分别 = 3 / 4 / 1 / 1。
+- `.quay/suite-memory-evidence-mfi-gap-ac920-criterion-pipe-swallows-exit-code-1792775375199-eafd8a.json`：
+  `memoryMaxBytes=34359738368`（声明 32G，`bound: declared`）、`peakBytes=34359922688`、
+  `memoryTelemetry.statMax.anonBytes=33632329728` ⇒ 套件**自身的 cgroup 打满了 32 GiB 声明上限**，
+  ⛔ 不是宿主整体 OOM 的连带（宿主当时可用量远大于此）。
+- 恢复阶梯想用 `--lane-count 32` 降档，但总并发被 `serial/lowconc_concurrency: 48` 的 reliability cap 钳住 ⇒
+  laneCount=32 那一轮的 `concurrency.maxConcurrentOverall` 仍读到 **48** ⇒ 48 / 32 两档**实际同形**，
+  这解释了为什么四轮读数几乎一致。⇒ 根因 = 「地板档无效」+「32G 上限低于本仓库当前套件的实测峰值」，
+  ⛔ 与本任务 delta（只有一个 `meta/` 文档）无关。
+
+本 worktree 的缓解（**只改 gitignored 的 workspace 配置；⛔ 不进任何分支、⛔ 不动 memory_max**）：
+`.quay/config.yml` 的 `serial_concurrency` / `lowconc_concurrency` 由 48 降到 32
+（按实测的线性比例**估算** ≈22 GiB，非实测；留约 30% 余量）。人 2026-10-15 的 `memory_max: 32G` 逐字保留 ——
+降的是项目自己的安全杠杆（并发，见 config 注释里 AC3 表的结论），不是声明上限。
+⚠️ 这是 worktree-local 的临时措施，**不构成对 AC-920 的任何处置**，也没有改变本任务的任何 AC 判定；
+fan-in 若仍被 OOM 挡下，那是套件基础设施的独立问题，应另案处理。
+
 ## Dark Axis
 
 该轴仍暗,理由: 本任务只产证据与人的裁定请求（META 记录 + 任务体），不改任何生产代码、模块依赖、延迟或并发/资源行为；无 L_D/L_G 轴读数可采。
