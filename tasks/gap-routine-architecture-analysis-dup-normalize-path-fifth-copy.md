@@ -3,7 +3,7 @@ id: gap-routine-architecture-analysis-dup-normalize-path-fifth-copy
 title: "architecture-analysis: archguard dup hash e964e05c0cd10901: the 10-line
   dot-segment net-path normalizer exists twice byte-identically (2
   implementations repo-wide, `grep -rn 'seg ="
-status: ready
+status: done
 labels:
   - gap
   - routine-filed
