@@ -96,3 +96,18 @@ finding 内容与任务体 `## Finding` 逐字一致 ⇒ 观测对象存在且�
 - `packages/quay/src/core/goal-staleness.ts`
 - `plugin/scripts/criterion-failure-attribution-check.ts`
 - `tasks/gap-routine-architecture-analysis-god-module-goal-store.md`
+
+## Blocker
+
+**2026-10-23T12:54:53.094Z — worker 未落地（exited-not-landed）**
+
+- 未落地原因：step=scoped-gate: TOUCHES-DIR-GLOB-HINT: 1 directory-level tasks/*.md glob(s) — enumerate concrete files or add（已知全局锁）(hint only, not a violation)
+✖ 能力闸 AC8(生产面) — 本仓库真 goals 树零误报：这把闸不是无差别拒绝 (45.857452ms)
+ℹ fail 1
+✖ failing tests:
+✖ 能力闸 AC8(生产面) — 本仓库真 goals 树零误报：这把闸不是无差别拒绝 (45.857452ms)
+  AssertionError [ERR_ASSERTION]: 3 条现存判据被误判为非只读 —— 这把闸在生产上会开始拒绝真判据
+    actual: [ `AC-920-unencapsulated-state-端到端跑通-线索器只产-candidate-判断器拒绝-memoized-误报.md: not-evaluated [{"rule":"uncertifiable-executed-artifact","detail":"plugin/test/unencapsulated-state-admission.test.mjs","proof":"does not resolve under the criterion's cwd, so its capability cannot be established (and the interpreter would report its absence as a plain failure, ⛔ not as not-evaluated)"}]`, `AC-922-ac-920-的端到端判据取-node-test-自身的退出码-不让-tail-吞掉失败.md: not-evaluated [{"rule":"uncertifiable-executed-artifact","detail":"plugin/test/unencapsulated-state-admission.test.mjs","proof":"does not resolve under the criterion's cwd, so its capability cannot be established (and the interpreter would report its absence as a plain failure, ⛔ not as not-evaluated)"}]`, `AC-924-unencapsulated-state-端到端跑通-线索器对真实仓库只产-candidate-从不写-confirme.md: not-evaluated [{"rule":"uncertifiable-executed-artifact","detail":"plugin/test/unencapsulated-state-admission.test.mjs","proof":"does not resolve under the criterion's cwd, so its capability cannot be established (and the interpreter would report its absence as a plain failure, ⛔ not as not-evaluated)"}]` ],
+    expected: [],
+- run_id：wk-prod-anchor
+- session_id：aba7da44-dff7-4cf0-b66c-24e2b1a1a75d
