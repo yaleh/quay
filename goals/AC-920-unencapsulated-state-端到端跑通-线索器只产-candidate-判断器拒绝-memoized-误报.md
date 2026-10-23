@@ -1,7 +1,7 @@
 ---
 id: AC-920
 title: unencapsulated-state 端到端跑通：线索器只产 candidate、判断器拒绝 memoized 误报并确认真状态簇
-status: draft
+status: active
 kind: criterion
 goal: GOAL-911
 criterion: node --test plugin/test/unencapsulated-state-admission.test.mjs 2>&1 | tail -6
@@ -16,4 +16,15 @@ expect: 正向：`plugin/test/unencapsulated-state-admission.test.mjs` 全绿（
   `confirmed`，测试红（线索器词表里根本没有这个值）。
 origin: GOAL-911 设计：unencapsulated-state 作为第一个 semantic-judged kind
   端到端跑通，含负对照（判断器拒绝 memoized/计数器/注册表误报）
+activatedAt: 2026-10-23T16:41:22.776Z
+statusLog:
+  - at: 2026-10-23T16:41:22.776Z
+    from: draft
+    to: active
+    actor: goal-driver
+    reason: "triage: activate"
+fidelity:
+  verdict: faithful
+  reason: "fidelity judge: faithful"
+  at: 2026-10-23T16:41:22.776Z
 ---
