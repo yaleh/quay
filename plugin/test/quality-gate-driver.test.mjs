@@ -3298,6 +3298,94 @@ test("runInstrumentDecayRound — no registered carrier present ⇒ not-evaluate
   assert.match(fact.reason, /no-carrier/);
 });
 
+// ── 形状 B 的裁定接进生产轮次（gap-fan-in-step-trace-rate-stopped-adjudication）────────────────────
+// 裁定生效 ⇒ 该分组不计入 decayed（不立案），但**计数与读数必须仍然出现在 reason/value 里**；
+// 裁定过期 ⇒ 回到 instrument-dark 并重新立案。⛔ 任何一方向都不能让「已裁定例外」变成隐身衣。
+
+const ADJ_FUTURE = "2026-11-22T00:00:00.000Z";
+const ADJ_PAST = "2026-10-01T00:00:00.000Z";
+const ADJ_NOW_MS = Date.parse("2026-10-23T00:00:00.000Z");
+const ADJ_RECENT = "2026-10-23T06:00:00.000Z";
+const ADJ_OLD = "2026-10-14T00:00:00.000Z";
+
+/** 一个 Shape B 命中的最小描述符（merge-develop 在写，old-group 停在 9 天前）。 */
+function adjudicatedManifest(reviewAfter) {
+  return [{
+    file: "adj-trace.jsonl",
+    groupBy: "step",
+    expected: ["merge-develop"],
+    shapeB: true,
+    note: "fixture",
+    adjudicated: [{
+      group: "old-group",
+      kind: "rare-by-design",
+      reason: "only written on a rare exceptional path",
+      reviewAfter,
+    }],
+  }];
+}
+
+function writeAdjudicatedCarrier(dir) {
+  writeJsonl(dir, "adj-trace.jsonl", [
+    { event: "step-end", step: "merge-develop", ts: ADJ_RECENT },
+    { event: "step-end", step: "old-group", ts: ADJ_OLD },
+  ]);
+}
+
+test("runInstrumentDecayRound — 裁定生效 ⇒ verified（不立案），但 adjudicatedCount 仍在 reason 与 value 里", async (t) => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "qg-decay-adj-"));
+  t.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
+  writeAdjudicatedCarrier(tmp);
+  const worker = makeGapWorker(tmp);
+  const fact = await runInstrumentDecayRound(tmp, instDecayOpts({
+    manifest: adjudicatedManifest(ADJ_FUTURE),
+    nowMs: ADJ_NOW_MS,
+    gapWorkerCmd: worker.cmd,
+    priorFilings: [],
+    roundLogPath: path.join(tmp, "quality-round.jsonl"),
+  }));
+
+  assert.equal(fact.state, "verified");
+  assert.equal(fact.value.decayedCount, 0, "an adjudicated group is not decay");
+  assert.equal(fact.value.adjudicatedCount, 1);
+  assert.equal(fact.value.filings.length, 0, "nothing to file when nothing decayed");
+  assert.equal(worker.calls().length, 0, "zero spawns for an adjudicated round");
+  // ⛔ 「不算腐烂」不得等于「从读数里消失」：reason 点名条数与分组，value.carriers 带上整条裁定。
+  assert.match(fact.reason, /1 adjudicated \(not decay/);
+  assert.match(fact.reason, /old-group \(rare-by-design\)/);
+  const carrier = fact.value.carriers.find((c) => c.file === "adj-trace.jsonl");
+  assert.equal(carrier.decayed.length, 0);
+  assert.equal(carrier.adjudicated.length, 1);
+  assert.equal(carrier.adjudicated[0].state, "rare-by-design");
+  assert.equal(carrier.adjudicated[0].reviewAfter, ADJ_FUTURE);
+  assert.equal(carrier.adjudicated[0].count, 1, "the real reading travels with the adjudication");
+});
+
+test("runInstrumentDecayRound — 裁定过期 ⇒ 回到 instrument-dark 并重新立案（⛔ 不是永久豁免）", async (t) => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "qg-decay-adj-exp-"));
+  t.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
+  writeAdjudicatedCarrier(tmp);
+  const worker = makeGapWorker(tmp);
+  const fact = await runInstrumentDecayRound(tmp, instDecayOpts({
+    manifest: adjudicatedManifest(ADJ_PAST),
+    nowMs: ADJ_NOW_MS,
+    gapWorkerCmd: worker.cmd,
+    priorFilings: [],
+    roundLogPath: path.join(tmp, "quality-round.jsonl"),
+  }));
+
+  assert.equal(fact.state, "instrument-dark", "an expired adjudication must not hide the finding");
+  assert.equal(fact.value.decayedCount, 1);
+  assert.equal(fact.value.adjudicatedCount, 0);
+  assert.equal(fact.value.filings.length, 1);
+  assert.equal(fact.value.filings[0].key, "adj-trace.jsonl|rate-stopped");
+  assert.equal(fact.value.filings[0].filing, "filed");
+  assert.equal(worker.calls().length, 1);
+  // 拒绝理由随读数进 value（reason 只点名 pair，明细在 carrier 读数里）。
+  assert.match(fact.value.carriers.find((c) => c.file === "adj-trace.jsonl").decayed[0].detail, /adjudication expired at 2026-10-01/);
+});
+
+
 test("runInstrumentDecayRound — clean carrier ⇒ verified, but uncovered carriers are NOT silently healthy", async (t) => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "qg-decay-clean-"));
   t.after(() => fs.rmSync(tmp, { recursive: true, force: true }));

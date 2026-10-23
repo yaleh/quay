@@ -20,6 +20,16 @@
 // 伴生对照是结构性的防误报：一个单分组（或全分组同旧）的载体，其唯一分组就是它自己的「最新」，
 // 结构上不可能满足「比某个伴生分组更旧」⇒ 永不误报（AC2 反向判据）。
 //
+// 形状 B 的裁定（adjudication，gap-fan-in-step-trace-rate-stopped-adjudication）：
+//   Shape B 只能看见「末次写入太旧」，它无法区分【按设计罕见/条件性不可达】与【写手腐烂】——两者
+//   在输出上同形（硬规则 3b）。描述符因此可以携带**机器可读**的裁定声明（`adjudicated`）：
+//     • rare-by-design       —— 该分组只在罕见例外路径上写；触发未发生 ⇒ 缺席是正常的。
+//     • conditional-on-input —— 该分组的输入条件当前恒假（例：持续基线红让 rerun 绿分支不可达）；
+//                                条件命令 exit 0 ⇒ 缺席已解释，exit≠0 ⇒ 条件不再成立 ⇒ 仍报腐烂。
+//   ⛔ 裁定**必须可过期**：`reviewAfter` 是必填项，过了就回到 decayed[]（不提供永久豁免开关）。
+//   ⛔ 裁定不是豁免的隐身衣：被裁定的分组进独立的 `adjudicated[]`，**计数与读数照样输出**，
+//      只是不计入 `decayedCount` —— 「不算腐烂」不得等于「从读数里消失」。
+//
 // 两种【照常写入】的暗形态（gap-instrument-decay-check-unwired-and-blind-to-content-dark）：
 //   C. content-dark   带 `evaluated` 字段的载体，从首条起每条都是 false（≥2 条记录——1 条可能是冷启动
 //                     时序，这是最小结构条件，不是调出来的阈值）。载体在写，但写的全是「没评估成」。
@@ -91,8 +101,29 @@ export interface CarrierSpec {
   artifact?: ArtifactSpec;
   /** 形状 D 不适用的理由（与 `artifact` 二选一）。 */
   artifactNotApplicable?: string;
+  /** 形状 B 的机器可读裁定声明（见头注「形状 B 的裁定」）。缺省 []。 */
+  adjudicated?: Adjudication[];
   /** 写手溯源——为什么这些分组【应当】在这个载体里。 */
   note: string;
+}
+
+/** 裁定的两种形态。 */
+export type AdjudicationKind = "rare-by-design" | "conditional-on-input";
+
+/** 一条机器可读的裁定声明（描述符的一部分，人审查过；⛔ 不是自由文本 note 的替代品——
+ *  note 从不被判定逻辑读取，这正是本任务修的缺陷）。 */
+export interface Adjudication {
+  /** 被裁定的分组名（与 Shape B 的分组键精确相等）。 */
+  group: string;
+  kind: AdjudicationKind;
+  /** 为什么缺席是正常的（一句话；空串 ⇒ 声明无效，不产生豁免）。 */
+  reason: string;
+  /** 仅 `conditional-on-input`：可执行的条件读数命令（在载体 root 下 `sh -c` 执行）。
+   *  exit 0 ⇒ 声明的条件仍成立（缺席已解释）；exit≠0 / 超时 / spawn 失败 ⇒ 条件不成立 ⇒ 仍报腐烂
+   *  （fail-closed 到「报腐烂」，不是 fail-open 到「已解释」）。 */
+  conditionCmd?: string;
+  /** 裁定失效时刻（ISO，必填）。过了 ⇒ 分组回到 `decayed[]`。⛔ 留空/读不懂 ⇒ 不产生豁免。 */
+  reviewAfter: string;
 }
 
 /** 形状 D 的读取位置：每个「作用域」一条（覆盖源路径 + 产物时间戳 + 该作用域是否已评估）。 */
@@ -128,6 +159,61 @@ export const MANIFEST: CarrierSpec[] = [
     // 子系统的加载面）；改判别键取值必须同时改这里，缺一即静默失效（本文件的词表一贯是人审查过的声明，
     // 见头注「词表是【人审查过的声明】，不是从代码推导」）。
     skipKind: "goal-merge",
+    // 5 个 rate-stopped 分组的机器可读裁定（gap-fan-in-step-trace-rate-stopped-adjudication 的现场
+    // 取证，逐条写在 reason 里：触发普查为 0 的三组、条件性不可达的一组、真回归信号一组）。
+    // ⚠️ reviewAfter 一律是**必须重看的日期**，不是「永久白名单」——过期即回到 decayed[]。
+    adjudicated: [
+      {
+        group: "verification-round-record",
+        kind: "rare-by-design",
+        reason:
+          "recordDelegatedRound(force) 只在 hungByWatchdog || spawnFailed 时补写；watchdog-killed 全历史 7 轮、" +
+          "最后一轮 startedAt 2026-10-14T11:21:43Z（早于本组末次写入 2026-10-14T11:41:51Z），spawn-failed 全历史 0 轮" +
+          " ⇒ 触发事件没有发生，写手路径仍在。",
+        reviewAfter: "2026-11-22T00:00:00.000Z",
+      },
+      {
+        group: "catch-up-develop",
+        kind: "rare-by-design",
+        reason:
+          "只有 fan-in 的 mergeTarget != develop（任务落回 goal 分支）才走 `if (mergeTarget !== \"develop\")` 这一步；" +
+          "最后一次 goal 落地 2026-10-10T19:27:53Z 之后 goal-merge 执行 0 次、当前不存在 goal/* 分支 ⇒ 输入不存在。",
+        reviewAfter: "2026-11-22T00:00:00.000Z",
+      },
+      {
+        group: "suite-rerun-green",
+        kind: "conditional-on-input",
+        reason:
+          "in-round rerun 的绿分支被持续基线红遮蔽：plugin/test/task-granularity-advice.test.mjs 在 develop 基线红集合里" +
+          "（.quay/baseline-red-rounds.jsonl 11 条签名），含它的 rerun 只可能回来 rerun-red ⇒ 绿分支条件性不可达。" +
+          "条件读的是【最新一条 rerun 记录】：它一变绿、或不再点名该文件，本裁定立即失效。",
+        // ⚠️ 只读、亚秒级、可证伪：取载体尾部最后一条 step=rerun 的记录，断言它仍是 rerun-red 且点名该文件。
+        // ⛔ 不读 append-only 的 baseline-red 台账——那份台账只增不减，一旦为真就永远为真（单向闩锁不是读数）。
+        conditionCmd:
+          `node -e 'const fs=require("fs");let L=fs.readFileSync(".quay/fan-in-step-trace.jsonl","utf8").split("\\n");` +
+          `let last=null;for(let i=L.length-1;i>=0;i--){if(!L[i].trim())continue;let r;try{r=JSON.parse(L[i])}catch{continue}` +
+          `if(r.step==="rerun"){last=r;break}}` +
+          `process.exit(last&&last.state==="rerun-red"&&Array.isArray(last.files)&&` +
+          `last.files.indexOf("plugin/test/task-granularity-advice.test.mjs")>=0?0:1)'`,
+        reviewAfter: "2026-11-22T00:00:00.000Z",
+      },
+      {
+        group: "suite-recovery-certified",
+        kind: "rare-by-design",
+        reason:
+          "「恢复轮干净跑完」的终端分支；2026-10-21T04:50:38Z 之后恢复流程仍发生 7 次，全部经另一终端分支 " +
+          "suite-recovery-baseline-exempt 落地并写 suite-recovery-accepted（7 条）⇒ 恢复机制在跑，只是 certified 触发未发生。",
+        reviewAfter: "2026-11-22T00:00:00.000Z",
+      },
+      {
+        group: "suite-recovery-new-regression",
+        kind: "rare-by-design",
+        reason:
+          "只在「原并发下通过的文件在更低并发下变红」时写（suite-recovery 阶梯的 new-regression 分支），" +
+          "全历史 1 条 ⇒ 真回归信号，本身低频。",
+        reviewAfter: "2026-11-22T00:00:00.000Z",
+      },
+    ],
     note:
       "worker-driver.ts 机械 fan-in 步骤链。前 8 个经 step()/appendFanInStepTrace 写共享载体；" +
       "后 4 个（ac-precheck/suite-*）自 a5a301e03 起被 trace() 改写到 per-run 日志，" +
@@ -221,8 +307,34 @@ export interface DecayFinding {
   kind: DecayKind;
   count: number;
   lastWriteMs: number | null;
-  /** 读数细节（D：产物时间戳 vs 覆盖路径最新提交；C：暗区间）。 */
+  /** 读数细节（D：产物时间戳 vs 覆盖路径最新提交；C：暗区间；B 的裁定被拒：拒绝理由）。 */
   detail: string | null;
+}
+
+/** 一条**生效中**的裁定（形状 B 命中 + 声明存在 + 未过期 + 条件成立）。
+ *
+ *  ⛔ 它不出现在 `decayed[]`、不计入 `decayedCount`，但**必须**出现在输出里（含 count / lastWrite）：
+ *  「不算腐烂」不等于「从读数里消失」（AC5 / 硬规则 3b）。 */
+export interface AdjudicatedFinding {
+  group: string;
+  /** 声明里的裁定种类。 */
+  kind: AdjudicationKind;
+  /** 生效后的读数态：按设计罕见 / 条件成立故缺席已解释。 */
+  state: "rare-by-design" | "explained-absent";
+  reason: string;
+  reviewAfter: string;
+  /** `conditional-on-input` 的条件读数（命令 + 退出码）；`rare-by-design` ⇒ null。 */
+  condition: { cmd: string; exitCode: number | null; error: string | null } | null;
+  /** 该分组此刻的真实读数——裁定不隐藏它。 */
+  count: number;
+  lastWriteMs: number | null;
+}
+
+/** 裁定求值结果：`exempt:false` 时 `denialReason` 写进 DecayFinding.detail（为什么豁免不成立）。 */
+export interface AdjudicationVerdict {
+  exempt: boolean;
+  finding: AdjudicatedFinding | null;
+  denialReason: string | null;
 }
 
 export interface Companion {
@@ -298,6 +410,8 @@ export interface CarrierResult {
   freshestMs: number | null;
   groupCount: number;
   decayed: DecayFinding[];
+  /** 生效中的裁定（Shape B 命中但被解释）。⛔ 不计入 decayed，但必须可见。 */
+  adjudicated: AdjudicatedFinding[];
   companions: Companion[];
   /** 形状 C（内容全暗）读数——`not-applicable` 是描述符的声明，不是「查不到」。 */
   contentDark: ShapeCReading;
@@ -548,11 +662,85 @@ export function discoverUncovered(root: string, manifest: CarrierSpec[] = MANIFE
   return [...entries.values()].sort((a, b) => a.file.localeCompare(b.file));
 }
 
+// ── 形状 B 的裁定求值 ──────────────────────────────────────────────────────────────────────────────
+/** 条件命令的 wall-clock 上限（毫秒）。⛔ 这不是成本阈值，是**活性安全界**：条件命令由描述符声明，
+ *  设计上只读、亚秒级；一个挂死的命令不得把常驻检测器一起挂住。 */
+export const ADJUDICATION_CONDITION_TIMEOUT_MS = 60_000;
+
+/** 求值一条裁定声明。
+ *
+ *  四态而非布尔（硬规则 3b）：**读不懂的声明不产生豁免**——缺 reason / reviewAfter 读不出 / 未知 kind /
+ *  conditional-on-input 缺条件命令，全部走 `exempt:false` + 一个可读的 `denialReason`（该分组照常报腐烂）。
+ *  失败方向必须偏向「报腐烂」：条件是「当前结构性不可达」，它一旦不成立就该重新看见腐烂。 */
+export function evaluateAdjudication(
+  root: string,
+  decl: Adjudication,
+  count: number,
+  lastWriteMs: number | null,
+  nowMs: number,
+): AdjudicationVerdict {
+  const deny = (why: string): AdjudicationVerdict => ({ exempt: false, finding: null, denialReason: why });
+  const reason = typeof decl.reason === "string" ? decl.reason.trim() : "";
+  if (reason === "") return deny("adjudication carries no reason — a bare exemption is not an adjudication");
+  const reviewMs = typeof decl.reviewAfter === "string" ? Date.parse(decl.reviewAfter) : NaN;
+  if (!Number.isFinite(reviewMs)) {
+    return deny(
+      `adjudication reviewAfter ${JSON.stringify(decl.reviewAfter)} is unreadable — an adjudication must be expirable`,
+    );
+  }
+  if (reviewMs <= nowMs) {
+    return deny(
+      `adjudication expired at ${decl.reviewAfter} — re-review it (an adjudication is not a permanent exemption)`,
+    );
+  }
+  if (decl.kind !== "rare-by-design" && decl.kind !== "conditional-on-input") {
+    return deny(`unknown adjudication kind ${JSON.stringify(decl.kind)}`);
+  }
+  if (decl.kind === "rare-by-design") {
+    return {
+      exempt: true,
+      finding: {
+        group: decl.group, kind: decl.kind, state: "rare-by-design",
+        reason, reviewAfter: decl.reviewAfter, condition: null, count, lastWriteMs,
+      },
+      denialReason: null,
+    };
+  }
+  const cmd = typeof decl.conditionCmd === "string" ? decl.conditionCmd.trim() : "";
+  if (cmd === "") return deny("conditional-on-input adjudication carries no conditionCmd — there is no reading to trust");
+  const r = spawnSync("sh", ["-c", cmd], {
+    cwd: root,
+    encoding: "utf8",
+    timeout: ADJUDICATION_CONDITION_TIMEOUT_MS,
+  });
+  if (r.error || r.status !== 0) {
+    const why = r.error
+      ? `spawn error: ${r.error.message}`
+      : `exit ${r.status === null ? `signal ${String(r.signal)}` : r.status}`;
+    return deny(`condition command did not hold (${why}) — the declared cause is gone; the absence is unexplained`);
+  }
+  return {
+    exempt: true,
+    finding: {
+      group: decl.group, kind: decl.kind, state: "explained-absent",
+      reason, reviewAfter: decl.reviewAfter,
+      condition: { cmd, exitCode: r.status, error: String(r.stderr ?? "").trim().slice(0, 200) || null },
+      count, lastWriteMs,
+    },
+    denialReason: null,
+  };
+}
+
 // ── 单载体分析 ──────────────────────────────────────────────────────────────────────────────────────
-export function analyzeCarrier(root: string, spec: CarrierSpec, staleSeconds: number): CarrierResult {
+export function analyzeCarrier(
+  root: string,
+  spec: CarrierSpec,
+  staleSeconds: number,
+  nowMs: number = Date.now(),
+): CarrierResult {
   const empty: CarrierResult = {
     file: spec.file, evaluated: false, reason: "carrier-missing",
-    totalRecords: 0, freshestMs: null, groupCount: 0, decayed: [], companions: [],
+    totalRecords: 0, freshestMs: null, groupCount: 0, decayed: [], adjudicated: [], companions: [],
     contentDark: { state: "not-evaluated", records: 0, falseRecords: 0, reason: "carrier-missing", darkInterval: null },
     staleEvaluated: { state: "not-evaluated", reason: "carrier-missing", recordTs: null, recordStale: null, scopes: [] },
   };
@@ -590,11 +778,27 @@ export function analyzeCarrier(root: string, spec: CarrierSpec, staleSeconds: nu
   }
 
   // Shape B：有历史记录的分组，末次写入比载体最新（伴生分组仍在写）老超过 staleSeconds。
+  // 命中后先问描述符有没有对它的裁定声明：未过期且条件成立 ⇒ 进 adjudicated[]（读数照出，不计腐烂）。
+  const adjudications = new Map<string, Adjudication>();
+  for (const a of spec.adjudicated ?? []) {
+    if (typeof a.group === "string" && a.group !== "" && !adjudications.has(a.group)) adjudications.set(a.group, a);
+  }
+  const adjudicated: AdjudicatedFinding[] = [];
   if (spec.shapeB !== false && freshestMs !== null && staleSeconds > 0) {
     const gapMs = staleSeconds * 1000;
     for (const [k, g] of groups) {
       if (g.count === 0 || g.lastWriteMs === null) continue;
       if (freshestMs - g.lastWriteMs > gapMs) {
+        const decl = adjudications.get(k);
+        if (decl !== undefined) {
+          const verdict = evaluateAdjudication(root, decl, g.count, g.lastWriteMs, nowMs);
+          if (verdict.exempt && verdict.finding !== null) {
+            adjudicated.push(verdict.finding);
+            continue;
+          }
+          decayed.push({ group: k, kind: "rate-stopped", count: g.count, lastWriteMs: g.lastWriteMs, detail: verdict.denialReason });
+          continue;
+        }
         decayed.push({ group: k, kind: "rate-stopped", count: g.count, lastWriteMs: g.lastWriteMs, detail: null });
       }
     }
@@ -644,7 +848,7 @@ export function analyzeCarrier(root: string, spec: CarrierSpec, staleSeconds: nu
 
   return {
     file: spec.file, evaluated: true, reason: null,
-    totalRecords, freshestMs, groupCount: groups.size, decayed, companions,
+    totalRecords, freshestMs, groupCount: groups.size, decayed, adjudicated, companions,
     contentDark, staleEvaluated,
   };
 }
@@ -654,6 +858,8 @@ export interface AnalyzeOutcome {
   anyEvaluated: boolean;
   anyDecayed: boolean;
   decayedCount: number;
+  /** 生效中的裁定总数。⛔ 与 decayedCount 分开计数——它们不是腐烂，但也不得消失。 */
+  adjudicatedCount: number;
   /** 未覆盖的载体（⛔ 不计入 healthyCount）。 */
   uncovered: UncoveredEntry[];
   uncoveredCount: number;
@@ -663,20 +869,22 @@ export interface AnalyzeOutcome {
 
 export function analyzeAll(
   root: string,
-  opts: { staleSeconds: number; carrier?: string },
+  opts: { staleSeconds: number; carrier?: string; nowMs?: number },
   manifest: CarrierSpec[] = MANIFEST,
 ): AnalyzeOutcome {
   const specs = opts.carrier
     ? manifest.filter((m) => m.file === opts.carrier || path.basename(m.file) === opts.carrier)
     : manifest;
-  const carriers = specs.map((spec) => analyzeCarrier(root, spec, opts.staleSeconds));
+  const nowMs = opts.nowMs ?? Date.now();
+  const carriers = specs.map((spec) => analyzeCarrier(root, spec, opts.staleSeconds, nowMs));
   const anyEvaluated = carriers.some((c) => c.evaluated);
   const anyDecayed = carriers.some((c) => c.decayed.length > 0);
   const decayedCount = carriers.reduce((n, c) => n + c.decayed.length, 0);
+  const adjudicatedCount = carriers.reduce((n, c) => n + c.adjudicated.length, 0);
   // --carrier 是聚焦查询：覆盖面对它不是读数（只报它自己），⛔ 不因此把整个 .quay 扫一遍。
   const uncovered = opts.carrier ? [] : discoverUncovered(root, manifest);
   const healthyCount = carriers.filter((c) => c.evaluated && c.decayed.length === 0).length;
-  return { carriers, anyEvaluated, anyDecayed, decayedCount, uncovered, uncoveredCount: uncovered.length, healthyCount };
+  return { carriers, anyEvaluated, anyDecayed, decayedCount, adjudicatedCount, uncovered, uncoveredCount: uncovered.length, healthyCount };
 }
 
 // ── 时间戳抽取（通用：按字段优先级尝试，缺值 = 未查）───────────────────────────────────────────────
@@ -747,6 +955,20 @@ function printHuman(outcome: AnalyzeOutcome): void {
       console.log(`  companion (still writing): ${brief}`);
     }
   }
+  // 生效中的裁定：不在腐烂清单里，但**照样打印**（⛔ 「不算腐烂」≠「从读数里消失」）。
+  for (const c of outcome.carriers) {
+    if (c.adjudicated.length === 0) continue;
+    console.log(`INSTRUMENT-ADJUDICATED: .quay/${c.file} — ${c.adjudicated.length} group(s) adjudicated (NOT counted as decay)`);
+    for (const a of c.adjudicated) {
+      const cond = a.condition === null
+        ? ""
+        : ` condition=${a.condition.cmd} exit=${a.condition.exitCode === null ? "?" : a.condition.exitCode}`;
+      console.log(
+        `  adjudicated: ${a.group} — ${a.state} (last=${fmt(a.lastWriteMs)}, ${a.count} records)${cond}; ` +
+        `reviewAfter=${a.reviewAfter}; ${a.reason}`,
+      );
+    }
+  }
   // 已结束的暗区间（AC1）：修复落地后当前不再判暗，但「曾经从哪条起暗了多少条」必须仍然可见。
   for (const c of outcome.carriers) {
     const iv = c.contentDark.darkInterval;
@@ -762,7 +984,8 @@ function printHuman(outcome: AnalyzeOutcome): void {
     }
   }
   if (!outcome.anyDecayed) {
-    console.log(`instrument-decay-check: ok — no instrument decay (${outcome.healthyCount} carrier(s) healthy, ${outcome.uncoveredCount} uncovered)`);
+    const adj = outcome.adjudicatedCount > 0 ? `, ${outcome.adjudicatedCount} adjudicated (not decay)` : "";
+    console.log(`instrument-decay-check: ok — no instrument decay (${outcome.healthyCount} carrier(s) healthy${adj}, ${outcome.uncoveredCount} uncovered)`);
   }
 }
 
@@ -799,6 +1022,18 @@ function printDecayReport(outcome: AnalyzeOutcome): void {
       lastWrite: fmt(d.lastWriteMs),
       detail: d.detail,
     })),
+    // 生效中的裁定：独立读数面（⛔ 不计入 decayedCount，但**必须**在这里，否则「已裁定例外」
+    // 就从读数里消失了——那正是本任务要修的缺陷的镜像）。
+    adjudicated: c.adjudicated.map((a) => ({
+      group: a.group,
+      kind: a.kind,
+      state: a.state,
+      reason: a.reason,
+      reviewAfter: a.reviewAfter,
+      condition: a.condition,
+      count: a.count,
+      lastWrite: fmt(a.lastWriteMs),
+    })),
     companions: c.companions.map((cp) => ({
       group: cp.group,
       count: cp.count,
@@ -811,6 +1046,7 @@ function printDecayReport(outcome: AnalyzeOutcome): void {
     ok: !outcome.anyDecayed,
     evaluated: outcome.anyEvaluated,
     decayedCount: outcome.decayedCount,
+    adjudicatedCount: outcome.adjudicatedCount,
     healthyCount: outcome.healthyCount,
     uncoveredCount: outcome.uncoveredCount,
     uncovered: outcome.uncovered,
@@ -879,6 +1115,10 @@ export function main(argv: string[]): number {
       "C content-dark (every record evaluated:false, reported as a start/count/ended interval), " +
       "D stale-evaluated (artifact predates the newest commit touching its covered source), " +
       "plus an uncovered list that is never counted healthy. " +
+      "Shape B honours machine-readable adjudications declared by the descriptor (rare-by-design / " +
+      "conditional-on-input with an executable conditionCmd); an adjudication older than its reviewAfter, " +
+      "or with no reason, exempts nothing — those groups come back as decay. Adjudicated groups are reported " +
+      "in their own `adjudicated[]` and never counted in decayedCount. " +
       "0 = no decay, 1 = decay, 2 = usage/env error, 3 = NOT-EVALUATED (no carrier evaluable)."
     );
     return 0;
