@@ -263,8 +263,8 @@ test at plugin/test/ownership-active-slice-adapter.test.mjs:109:1
 
 ## Blocker
 
-**2026-10-23T22:01:02.683Z — worker 未落地（exited-not-landed）**
+**2026-10-23T22:35:17.642Z — worker 未落地（exited-not-landed）**
 
-- 未落地原因：step=suite: oom-killed (1) — recovery exhausted at floor concurrency 32 — no declared rung produced a complete verdict (64,48,32); needs a code/config fix, see plugin/scripts/full-suite-runner.ts
+- 未落地原因：step=suite: oom-killed (2) — recovery exhausted at floor concurrency 32 — no declared rung produced a complete verdict (64,48,32); needs a code/config fix, see plugin/scripts/full-suite-runner.ts
 - run_id：wk-prod-anchor
-- session_id：14acc26f-e14c-4687-b471-49c8da0ef7c3
+- session_id：5f8eee7f-1186-4ffc-8337-bc7939637ed6
