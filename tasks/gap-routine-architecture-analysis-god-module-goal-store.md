@@ -99,8 +99,8 @@ finding 内容与任务体 `## Finding` 逐字一致 ⇒ 观测对象存在且�
 
 ## Blocker
 
-**2026-10-23T16:57:52.339Z — worker 未落地（exited-not-landed）**
+**2026-10-23T17:54:37.738Z — worker 未落地（exited-not-landed）**
 
-- 未落地原因：step=suite: oom-killed (3) — recovery exhausted at floor concurrency 32 — no declared rung produced a complete verdict (64,48,32); needs a code/config fix, see plugin/scripts/full-suite-runner.ts
+- 未落地原因：step=suite: oom-killed (2) — recovery red set is NOT a subset of the develop baseline red set: added=plugin/test/full-suite-runner-cgroup.test.mjs changed=- — needs a code fix
 - run_id：wk-prod-anchor
-- session_id：95cac233-666e-4de1-b9a2-3eb906fd26fb
+- session_id：d41a9414-a7fa-4530-b04d-5fade7152988
