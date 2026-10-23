@@ -83,7 +83,3 @@ extra:
 - plugin/test/release-cut.test.mjs
 - plugin/test/quay-init-characterization.test.mjs
 - tasks/gap-release-branch-model-hardcoded-not-configurable.md
-
-## Blocker
-
-（历史记录：2026-10-23T04:46:53.643Z 首轮 worker exited-not-landed——`plugin/test/help-contract-incompatible-behaviors.test.mjs` + `plugin/test/quay-init-characterization.test.mjs` 两条 red。**2026-10-23 第二轮已解决**：help 契约把 `--help` 从 usage-error 路径拆成 success 路径；characterization 是模板变更后的正常 re-anchor（其余 surface 哈希不变）。两条均本地复跑为绿，未放宽任何闸。）
