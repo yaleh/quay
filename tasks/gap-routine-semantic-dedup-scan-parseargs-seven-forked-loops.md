@@ -114,3 +114,11 @@ finding 的「16 delegate / 7 hand-roll」：7 与实测完全对上；16 按其
 - `plugin/scripts/suite-lpt-order.ts`
 - `plugin/test/gate-script-base-adoption.test.mjs`
 - `tasks/gap-routine-semantic-dedup-scan-parseargs-seven-forked-loops.md`
+
+## Blocker
+
+**2026-10-23T12:36:30.944Z — worker 未落地（exited-not-landed）**
+
+- 未落地原因：step=suite: oom-killed (3) — recovery exhausted at floor concurrency 32 — no declared rung produced a complete verdict (64,48,32); needs a code/config fix, see plugin/scripts/full-suite-runner.ts
+- run_id：wk-prod-anchor
+- session_id：7ffa8463-3e90-4625-ab4c-a3625042fd52
