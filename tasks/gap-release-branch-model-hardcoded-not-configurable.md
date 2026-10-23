@@ -48,12 +48,15 @@ extra:
 
 - **AC1**：`grep -c 'release' packages/quay/src/config.ts` = 1（显式转导出 `readReleaseConfig` / `parseReleaseConfig` / `ReleaseConfig` 等，实现在 `core/config.ts`）；`grep -c 'release:' packages/quay/src/init.ts` = 1（Section 5 模板，含五个键的默认值）。
 - **AC2**：`grep -cE 'release-\*|release/\*'` 三文件均 0；`grep -c '"master"' release-master-advance-needs-check.ts` = 0。config 读取点（位置判定）：`release-branch-janitor.ts:258 readReleaseModel(root)`、`release-reading-sandbox.ts:335 readReleaseModel(root)`、`release-master-advance-needs-check.ts:212 readReleaseModel(root)`、`release-cut.mjs readReleaseModel(root)`（经 `release-model-check.ts --print-model`）、`release-branch-finish.sh` 的 `load_release_model` 读 `.quay/config.yml` 的 `release:` 节（纯 bash；⛔ 不内嵌 node，见下）。
-- **AC3**：四态 exit code 0/1/3/4 且 status 四值 `pass`/`fail`/`not-evaluated`/`not-configured` 两两不同（`plugin/test/release-model-check.test.mjs` 的 pairwise 测试）。负控制：tip 越过 tag 的 fixture 报 `fail`(1)；无 `release:` 节的 repo 报 `not-configured`(4) —— **非 pass**，且与「section 存在但读不懂」的 `not-evaluated`(3) 不共用取值（硬规则 3b：没配 ≠ 读不懂）。`advance=ci` 时另判 `advance-master.needs:` 覆盖，缺 workflow 报 `not-evaluated`。
+- **AC3**：四态 exit code 0/1/3/4 且 status 四值 `pass`/`fail`/`not-evaluated`/`not-configured` 两两不同（`plugin/test/release-model-check.test.mjs` 的 pairwise 测试）。负控制：tip 越过 tag 的 fixture 报 `fail`(1)；无 `release:` 节的 repo 报 `not-configured`(4) —— **非 pass**，且与「section 存在但读不懂」的 `not-evaluated`(3) 不共用取值（硬规则 3b：没配 ≠ 读不懂）。`advance=ci` 时另判 `advance-master.needs:` 覆盖，缺 workflow 报 `not-evaluated`。本轮复验（临时 git repo）：无节=4/not-configured、tip 在 tag 上=0/pass、tag 后提交=1/fail、`line: 5`=3/not-evaluated。
 - **AC4（生产载体）**：`/data/home/yale/work/quay/.quay/config.yml` 已落 `release:` 节（line=master / baseline=develop / globs=[release/*, release-*] / tag_prefix=v / advance=ci）；在**主检出**上运行：
   `node --experimental-strip-types plugin/scripts/release-model-check.ts --root /data/home/yale/work/quay --json`
   ⇒ `{"status":"pass","ok":true,"evaluated":true,...,"invariants":[{"id":"line-readable","state":"pass","detail":"refs/heads/master resolves to ae28758aa36a1d04fa4e4455505f608eb9437fd6"},{"id":"line-parked-on-tag","state":"pass","detail":"line tip is held by v0.8.0"},{"id":"advance-ci-needs","state":"pass",...}]}`，exit 0。这是真实读数（非 fixture）。
 - **AC5**：`bash plugin/scripts/capability-catalog.sh` ⇒ `summary: 397 scripts | 397 declared | 0 unclassified | 392 ship`；落地前为 `396 declared`（新增脚本使 scripts 397，恰好 +1 声明）。
 - **sh-census 说明**：`release-branch-finish.sh` 的模型读取用 awk/pure-bash 实现，而非 `node --experimental-strip-types` 调用——后者会把整个 495 行 bash 载体变成 census 计费的 embedded-interpreter 程序（实测 `embeddedInterpreterLines` 6853 > 基线 6501）；改后 census 6501 ≤ 6501 通过。
+- **回归修复（2026-10-23，第二轮）**：首轮 suite 红两条，均已在本轮修好——
+  - `plugin/test/help-contract-incompatible-behaviors.test.mjs` AC1：`release-model-check.ts --help` 原本落进 `parseCli` 的 `null`（usage error，exit 2）分支。现 `--help`/`-h` 返回独立的 `"help"`：usage 打到 stdout、**exit 0**、零业务副作用，与全部 `-check.ts` 共用的 help 契约一致（`--help` 单跑 exit 0 已验）。
+  - `plugin/test/quay-init-characterization.test.mjs` AC2：fresh install 的 `.quay/config.yml` 哈希钉随 Section 5 模板新增而移动，已 RE-ANCHOR 并写明理由；其余五个 surface 文件哈希不变，`init.ts` 相对 develop 仅一个 hunk（`git diff develop..<branch>` 已核）。
 
 ## ADR-007 dark axis
 
@@ -76,12 +79,11 @@ extra:
 - plugin/scripts/capability-catalog-declarations.json
 - plugin/test/release-model-check.test.mjs
 - plugin/test/release-cut.test.mjs
+- plugin/test/quay-init-characterization.test.mjs
 - tasks/gap-release-branch-model-hardcoded-not-configurable.md
 
-## Blocker
+## Blocker (resolved)
 
-**2026-10-23T04:46:53.643Z — worker 未落地（exited-not-landed）**
+**2026-10-23T04:46:53.643Z — 首轮 worker 未落地（exited-not-landed）**：`plugin/test/help-contract-incompatible-behaviors.test.mjs` + `plugin/test/quay-init-characterization.test.mjs` 两条 red。
 
-- 未落地原因：step=suite: AssertionError [ERR_ASSERTION]: 2 条现存判据被误判为非只读 —— 这把闸在生产上会开始拒绝真判据 [baseline A/B: HARD RED (task-introduced-red) — the task's red set is NOT a subset of the develop baseline red set: added=plugin/test/help-contract-incompatible-behaviors.test.mjs,plugin/test/quay-init-characterization.test.mjs changed=-]
-- run_id：wk-prod-anchor
-- session_id：6fb86b5c-a38b-41f1-93ee-2b3636edd2f6
+**2026-10-23 第二轮处理**：两条均按上文「回归修复」修好并在本地复跑为绿；不是放宽任何一条闸——help 契约是把 `--help` 从 usage-error 路径拆成 success 路径，characterization 是模板变更后的正常 re-anchor（其余 surface 哈希不变）。
