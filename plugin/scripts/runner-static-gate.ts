@@ -68,7 +68,7 @@
 # annotation (and an optional `# @static-class <doc|operational>` class marker) that
 # select-static-checks-for-touches.ts parses (the SAME single source checker-mutation-check.sh
 # parses — never a hand-maintained list, AC3).
-# @checker-count 68 — the number of run_checker entries in the FUNCTION BELOW (counted by
+# @checker-count 69 — the number of run_checker entries in the FUNCTION BELOW (counted by
 # plugin/scripts/checker-count-drift-check.ts). Adding/removing a checker means updating this line,
 # and the check is what tells you; do not restate the number in prose.
 run_static_checks() {
@@ -989,6 +989,28 @@ run_static_checks() {
   # @static-tier change
   # @static-object .github/workflows/release.yml plugin/scripts/release-master-advance-needs-check.ts plugin/scripts/checker-mutation-cases/release-master-advance-needs-check.sh
   run_checker "release-master-advance-needs-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/release-master-advance-needs-check.ts" --root "${repo_root}"
+  echo "== release model check — 注册面 + mutation case (gap-release-model-check-mutation-case-and-manifest-enrollment) =="
+  # release-model-check.ts 是「一个项目【声明的】发布模型是否成立」的通用量具（line 可读 / 停在
+  # release tag 上 / advance=ci 时推进 job 的 needs 覆盖全部）。它此前【从未被执行过、也没有 mutation
+  # case、不在任何被解析的注册面】⇒ P4 谱系检测器把它判为 suspicious（never-fired ∧ 未被证明能红，与
+  # 一个彻底坏掉的守卫不可区分，硬规则 3b）。这一行把它接进 run_static_checks，于是
+  # ①checker-mutation-check.sh 的【自动解析】manifest 拾取它（名单从不手写），它的 case
+  # (checker-mutation-cases/release-model-check.sh) 由 --check 实际执行；②每轮套件真的执行它，
+  # .quay/checker-cost.jsonl 因此落行（hard rule 4 推论三：在生产载体上「被执行过」，不是靠 --only 手跑一次）。
+  #
+  # ⛔ 喂【确定性 fixture】，不用 ${repo_root} 当被测根 —— 两个理由各自单独致命：
+  #   ① 本仓 `.quay/config.yml` 被根锚定 gitignore（.gitignore:601）⇒ fresh checkout / CI 里没有
+  #      `release:` 节 ⇒ checker 返回 exit 4 (not-configured)，而 run_checker 只把 exit 3 当
+  #      NOT-EVALUATED 放行（checker-cost-lib.sh:158-161），**exit 4 是 RED** ⇒ 会把所有没有本地 config
+  #      的检出判红。⛔ 也不许把 not-configured 改成 pass（硬规则 3b：没配 ≠ 合格）。
+  #   ② 被测对象是「某个项目【声明的】模型」，本仓自己有没有 release: 节与这条接线自检无关；指向
+  #      ${repo_root} 会把「本仓配置变了」变成无关任务的套件红。
+  # fixture 在本次运行的临时目录里现建（git repo + tag + .quay/config.yml + release.yml），任何检出上
+  # 恒绿。⛔ 整条命令必须在【一行】内自足：scoped 门只 eval 注册行本身（select-static-checks-for-touches.ts
+  # 的 commandLine = 该行原文），前面单独一行的 fixture 构建【不会】随之执行。
+  # @static-tier change
+  # @static-object plugin/scripts/release-model-check.ts plugin/scripts/checker-mutation-cases/release-model-check.sh plugin/test/release-model-check.test.mjs plugin/scripts/release-master-advance-needs-check.ts plugin/scripts/runner-static-gate.ts
+  run_checker "release-model-check" bash -c 'set -u; d="$(mktemp -d "${TMPDIR:-/tmp}/release-model-fixture-XXXXXX")" || exit 2; trap "rm -rf \"$d\"" EXIT; git -C "$d" init -q -b main >/dev/null 2>&1 && git -C "$d" -c user.name=fixture -c user.email=fixture@example.com -c commit.gpgsign=false commit -q --allow-empty -m fixture >/dev/null 2>&1 && git -C "$d" tag v1.0.0 || exit 2; mkdir -p "$d/.quay" "$d/.github/workflows"; printf "%s\n" "release:" "  line: main" "  baseline: develop" "  tag_prefix: v" "  advance: ci" > "$d/.quay/config.yml"; printf "%s\n" "name: Release" "jobs:" "  build:" "    runs-on: self-hosted" "    steps:" "      - run: echo build" "  verify:" "    runs-on: self-hosted" "    steps:" "      - run: echo verify" "  advance-master:" "    needs: [build, verify]" "    runs-on: self-hosted" "    steps:" "      - run: echo advance" > "$d/.github/workflows/release.yml"; node --no-warnings --experimental-strip-types "$1" --root "$d" --json' release-model-check "${repo_root}/plugin/scripts/release-model-check.ts"
   echo "== workflow-runner-self-hosted check (gap-metered-hosted-runner-jobs-to-self-hosted, AC-319) =="
   # Every job of every .github/workflows/*.{yml,yaml} must carry `self-hosted` in its `runs-on`, so
   # the metered hosted-runner billing gate (measured 2026-09-24: 7 of this repo's 8 jobs came back
