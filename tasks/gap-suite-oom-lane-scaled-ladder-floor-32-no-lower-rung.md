@@ -64,6 +64,40 @@ runner 写出 `SUITE-INCOMPLETE reason=oom-killed` ⇒ fan-in 判 `oom-killed (n
   且 `oomKill=0`（⛔ 不是 fixture / 注入数据）。
 - 该轮所在任务的 fan-in 不再以 `recovery exhausted at floor concurrency …` 收场。
 
+## 逐秒采样定因：肇事者是测试内的 esbuild service（2026-10-24，同日实测）
+
+上一节把峰值归因到「车道数 × 每车道后代进程」。**同日的逐秒采样把这个解释证伪了一半**：把
+`max_oversubscription` 压到 0.125（`main≤15`，cgroup `cgroup.procs` 实测最多 47 个进程、历史 126 车道轮
+58 个进程的 1/10）后，同一条命令**仍然** `peak=32768 MiB` 打满 32 GiB 上限、`oom_kill=1`。
+
+逐秒采样（每秒扫 `cgroup.procs`，记录 RSS > 2 GB 的进程与其 parent）抓到逐字证据：
+
+```
+rss=16221928KB pid=993409 cmd=/data/home/yale/work/quay/node_modules/@esbuild/linux-x64/bin/esbuild --service=0.28.1 --ping
+  parent=node --experimental-strip-types /tmp/shipped-set-stub-ih6dYg/packages/quay/scripts/build-plugin-dist.mjs /tmp/shipped-set-stub-ih6dYg/.tmp-dist
+rss=10616032KB pid=1002481 cmd=/data/home/yale/work/quay/node_modules/@esbuild/linux-x64/bin/esbuild --service=0.28.1 --ping
+  parent=node --experimental-strip-types /tmp/release-cut-release-model-Jww4Lt/release-cut-shipped-set-gh2RHt/tree/packages/quay/scripts/build-plugin-dist.mjs ...
+```
+
+⇒ **单个 esbuild service 进程长到 16.2 GB**；两个测试内的 `build-plugin-dist.mjs` 各拉一个（10–16 GB），
+同时出现即打满 32 GiB。这与车道数无关（126 车道轮峰值 26.3 GB、15 车道轮 32 GB），也解释了为什么
+`heavy_threshold_mb`（按**逐文件** `mem_peak_kb` 选桶）抓不到它们 —— esbuild 是**孙进程**，逐文件峰值
+只有 306 MiB（`shipped-set`）/ 57 MiB（`release-cut`），而真实占用在 pgid 之外的后代里。
+
+`grep -rln build-plugin-dist plugin/test packages/quay/test` ⇒ **16 个测试文件**会拉这条构建链，所以
+「哪两个撞在一起」是概率事件 —— 这正好解释同一棵树有时 oomKill=0、有时 1–5。
+
+**对修法的直接影响**（比原建议更优先）：
+
+1. 真正的止血点是把 `build-plugin-dist` 子进程**限制在它自己的 memory scope / `NODE_OPTIONS` malloc 上限**内，
+   或让这 16 个测试走一个串行分档（不能靠 `heavy_threshold_mb`，它读的是逐文件峰值）。
+2. 恢复阶梯加低档（16）**单独不足以**解决：15 车道实测仍 OOM。两件事都要做。
+
+Evidence（本轮真实载体，非 fixture）：
+`.quay/verif15-1792798594.log`（`scheduler: unified group-budget scheduler (serial≤16 lowconc≤16 main≤15)`）、
+`.quay/hogwatch.log`（逐秒 RSS 采样，上面两条逐字来自这里）、
+`run-u774652.scope` 的 `memory.events`（`oom 2 / oom_kill 1`）。
+
 ## Touches
 
 - `plugin/scripts/worker-fan-in.ts`
