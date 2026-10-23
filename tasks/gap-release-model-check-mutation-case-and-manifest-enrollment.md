@@ -164,3 +164,11 @@ preventive（8 条）: checker-mechanical-spine-check.ts | checker-mutation-chec
 - `bash plugin/scripts/checker-mutation-check.sh --check` ⇒ exit 0；`checkers_total: 88` / `checkers_with_mutation: 88` / `uncovered: 0` / `mutations_that_stayed_green: 0` / `mutations_that_always_red: 0` / `not_evaluated: 0`。
 - `bash scripts/test.sh --for-task gap-release-model-check-mutation-case-and-manifest-enrollment --allow-thin` ⇒ exit 0（scoped 门绿）。
 - 附带：`anti-drift-touches-check.ts --task … --worktree … --merge-target develop` ⇒ `ANTI-DRIFT OK — 2 actual file(s), all within declared Touches (6 glob(s))`。
+
+## Blocker
+
+**2026-10-23T06:39:11.494Z — worker 未落地（exited-not-landed）**
+
+- 未落地原因：step=dark-axis: dark-axis (ADR-007 per-milestone predicate) refused the flip — MISSING: MISSING — the task body records no L_D/L_G reading (a numeric quantity at an axis-anchored line) and carries no explicit "该轴仍暗,理由:<...>" declaration. ADR-007 requires one or the other before the task may be called done.
+- run_id：wk-prod-anchor
+- session_id：c608d859-d7aa-4a0d-91b6-83aea65f6465
