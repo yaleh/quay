@@ -104,7 +104,7 @@ AC924-4 覆盖「confirmed 候选走 Planner 的 semantic-judged 路由且 mecha
 
 ## Evidence
 
-**AC1 — AC-920 判据「恒 pass」的对照实测**（空沙箱，`cwd=$(mktemp -d)`，2026-10-23，经 `/bin/sh -c` 与 acceptance runner 同形）
+**AC1 — AC-920 判据「恒 pass」的对照实测**（空沙箱，`cwd=$(mktemp -d)`，2026-10-23 立案当轮 / 2026-10-24 retry 轮各复验一次，经 `/bin/sh -c` 与 acceptance runner 同形）
 
 命令一（AC-920 criterion 逐字）：
 ```
@@ -122,10 +122,11 @@ DIRECT_EXIT=1
 ```
 
 ⇒ 同一沙箱、同一条路径：不经 pipe ⇒ **1**，经 AC-920 的 pipe ⇒ **0**。该判据结构上不可能取假（硬规则 4）。
+**retry 轮（2026-10-24）复验同形**：`PIPE_EXIT=0` / `DIRECT_EXIT=1`，两次读数逐字相同。
 
 对照（载体本身是绿的，故「恒 pass」不来自真实通过）：在 worktree 里直接跑同一条 `node --test …` ⇒ `REAL_DIRECT_EXIT=0`，`tests 6 / pass 6 / fail 0`。
 
-**AC2 — 三个 goal 读数（逐字，2026-10-23）**
+**AC2 — 三个 goal 读数（逐字，2026-10-23；retry 轮 2026-10-24 读回一致）**
 
 - `quay goal show AC-920 --json` ⇒ `"status": "active"`、`"supersededBy": []`、`"criterion": "node --test plugin/test/unencapsulated-state-admission.test.mjs 2>&1 | tail -6"`
 - `quay goal show AC-922 --json` ⇒ `"status": "achieved"`、`"supersedes": ["AC-920"]`
@@ -134,7 +135,7 @@ DIRECT_EXIT=1
 **AC3 — board-visible META 记录（已写、已读回）**
 
 - 写入（cwd = 本 worktree）：`node packages/quay/bin/quay.js meta write META-017 --title "…" --body-file /tmp/ac920-meta-body.md --root <worktree>` ⇒ `wrote META-017`；commit `d7d93b693 meta: META-017 create by cli:1736617`；文件 `meta/META-017-请裁定-ac-920-判据-2-1-tail-6-恒-pass-的处置-改判据-退役-保持现状-ac-922-已-sup.md`。**body 由脚本 `ac920-gen-meta.mjs` 从三个 goal JSON + 两次沙箱实测直接生成**（非手打）；正文含 a/b/c 三个选项、各自成本与不可逆点，并逐字引用 AC-922 origin 的 `Retirement/rewording of AC-920 remains a human decision; this item only declares the replacement relation.`
-- 读回：`node packages/quay/bin/quay.js meta get META-017 --json` ⇒ `{"id":"META-017","status":"proposed","handler":"meta-driver","reply":null,"bodyBytes":3200}`
+- 读回：`node packages/quay/bin/quay.js meta get META-017 --json` ⇒ `{"id":"META-017","status":"proposed","handler":"meta-driver","reply":null,"bodyBytes":3200}`（写入当轮）；**retry 轮 2026-10-24 读回** ⇒ `{"id":"META-017","status":"proposed","handler":"meta-driver","reply":null,"bodyBytes":4786}`（此后正文补充过 a/b/c 的成本/不可逆点，字节数增长；`status`/`reply` 未变 ⇒ 人尚未裁定）。
 
 **AC4 — 投递到 live manager 会话：通道不可用（如实记录，未静默）**
 
@@ -144,21 +145,26 @@ DIRECT_EXIT=1
 - 最后一次写 `orchestration/manager-tick-log.md` 的会话 = `125853d3-c375-4b3a-af96-02bae9f95ad4`（meta-cc tool_use 命中 `2026-10-16T13:16:49.531Z`）；其 transcript 末次修改 `2026-10-17 01:51:25 +0800`，且不在 `claude agents --json` 中 ⇒ **已非 live**。
 - 投递尝试（`SendMessage` 到该最后已知 manager 会话）：`{"success":false,"message":"No agent named '125853d3-c375-4b3a-af96-02bae9f95ad4' is reachable.\nUse ListAgents to see everyone you can message."}`
 - ⇒ **manager 通道不可用（无 live manager 会话）**；未向任何非 manager 会话误投。**已用替代通道 = META-017**（board-visible meta store；meta-driver 存活：`.quay/meta-driver.pid` → driver-anchor pid `2054437`，轮次载体最新 `round 181 @ 2026-10-23T17:00:59.802Z`，会读到该记录并作答/上报）。
+- **retry 轮（2026-10-24）复验**：`ListAgents` ⇒ 仍是 10 个 peer、**无 manager**；`claude agents --json` ⇒ 20 个 agent，`cwd=/data/home/yale/work/quay` 的只有 `f96878f0`（项目架构审查与文档对比）、`432e6257`（quay-task-worker, busy）、`4fb5278c`（quay-task-worker, busy），`name ~= /manager/i` 匹配 **0** ⇒ manager 通道仍不可用。替代通道活性复验：`ps -p 2054437` ⇒ `2054437 MainThread 06:01:09`（存活），`.quay/meta-driver-round.jsonl` 最新 `{"round":295,"run_id":"mt-prod-anchor","pid":2054437,"ts":"2026-10-23T19:07:55.587Z","halted":false}` ⇒ meta-driver 在跑，会读到 META-017。**注意**：META-017 当前只在任务分支上（`git show develop:meta/` 不含它），fan-in 落地后才进入 meta-driver 读取的 develop 载体。
 
 **AC5 — 裁定前未改 AC-920 的 goal 记录**
 
 - `git log --oneline -1 -- 'goals/AC-920-*.md'` ⇒ `fd9125e50 goals: AC-920 status draft→active by cli:2858506`（仍是立案前那条）
 - `git status --porcelain goals/` ⇒ **空输出**
 - `quay goal show AC-920 --json` ⇒ 仍 `"status": "active"`、criterion 逐字未变（见 AC2）。本轮未出现任何改 AC-920 status/criterion 的 goal write 提交。
+- **retry 轮（2026-10-24）复验**：`git log --oneline -1 -- 'goals/AC-920-*.md'` ⇒ 仍 `fd9125e50`；`git status --porcelain goals/` ⇒ 空输出；`goal show AC-920` ⇒ 仍 `active`、`supersededBy: []`。
 
-**AC6 — scoped 门**
+**AC6 — scoped 门**（在任务 worktree、以最终 Touches 运行）
 
-- `bash scripts/test.sh --for-task gap-ac920-criterion-pipe-swallows-exit-code --allow-thin` ⇒ **exit 0**（在本 worktree、以最终 Touches 运行；尾段如下）
+- 立案轮：`bash scripts/test.sh --for-task gap-ac920-criterion-pipe-swallows-exit-code --allow-thin` ⇒ **exit 0**
+- **retry 轮 2026-10-24（先 `git merge --no-edit develop` 再跑）⇒ exit 0**，尾段：
 ```
-✔ AC924-3(judge): recorded-verdict replay matches the LITERAL table and confirms only with a counterfactual (1.139373ms)
-✔ AC924-4(planner): a confirmed candidate is admitted by the semantic route and the mechanical delta is never read (2.60565ms)
-✔ AC924-5(vocabulary): the contract module is the single declaration site and carries no entry guard (0.894199ms)
-✔ AC924-6(clue-predicate): comments and literal text are not hits, and a binary file is not-evaluated (0.217195ms)
+✔ AC924-1(clue): the real repository scan emits ONLY clue-layer states and never a confirmation (303.626635ms)
+✔ AC924-2(clue): all four samples are candidates, and not one is a confirmation (0.938438ms)
+✔ AC924-3(judge): recorded-verdict replay matches the LITERAL table and confirms only with a counterfactual (1.140734ms)
+✔ AC924-4(planner): a confirmed candidate is admitted by the semantic route and the mechanical delta is never read (2.767456ms)
+✔ AC924-5(vocabulary): the contract module is the single declaration site and carries no entry guard (0.8889ms)
+✔ AC924-6(clue-predicate): comments and literal text are not hits, and a binary file is not-evaluated (0.190376ms)
 ℹ tests 6
 ℹ suites 0
 ℹ pass 6
@@ -166,37 +172,12 @@ DIRECT_EXIT=1
 ℹ cancelled 0
 ℹ skipped 0
 ℹ todo 0
-ℹ duration_ms 455.395212
+ℹ duration_ms 367.993921
 ```
 
-**落地阻塞与 worktree 本地缓解（2026-10-24 续做轮；只记录，不改变任何裁定）**
+**anti-drift Touches 预检（retry 轮 2026-10-24，与 driver fan-in 同一条命令）**
 
-前一轮 exited-not-landed 的判词是 `step=suite: oom-killed (3) — recovery exhausted at floor concurrency 32`。
-逐条读四份 suite 日志（`.quay/fan-in-suite-gap-ac920-…`：原轮 + recovery-64/48/32），成因**不是本任务的红点**：
-
-- 四轮 `SUITE-PLAN` 全是 `planned=1046 terminal=1046 missing=0`（**没有文件丢失**），而 `oomKill` 分别 = 3 / 4 / 1 / 1。
-- `.quay/suite-memory-evidence-mfi-gap-ac920-criterion-pipe-swallows-exit-code-1792775375199-eafd8a.json`：
-  `memoryMaxBytes=34359738368`（声明 32G，`bound: declared`）、`peakBytes=34359922688`、
-  `memoryTelemetry.statMax.anonBytes=33632329728` ⇒ 套件**自身的 cgroup 打满了 32 GiB 声明上限**，
-  ⛔ 不是宿主整体 OOM 的连带（宿主当时可用量远大于此）。
-- 恢复阶梯想用 `--lane-count 32` 降档，但总并发被 `serial/lowconc_concurrency: 48` 的 reliability cap 钳住 ⇒
-  laneCount=32 那一轮的 `concurrency.maxConcurrentOverall` 仍读到 **48** ⇒ 48 / 32 两档**实际同形**，
-  这解释了为什么四轮读数几乎一致。⇒ 根因 = 「地板档无效」+「32G 上限低于本仓库当前套件的实测峰值」，
-  ⛔ 与本任务 delta（只有一个 `meta/` 文档）无关。
-
-本轮的缓解（**只改 gitignored 的 workspace 配置；⛔ 不进任何分支、⛔ 不动 memory_max**）：
-先改的是 worktree 的 `.quay/config.yml`，随即实测发现 `scripts/test.sh` 会跑 `refresh-worktree-quay.sh`，
-把 main checkout 的 `.quay/` **覆盖式**拷回 worktree（改完后该文件被还原成 48/48，mtime 回到 10-23 11:49）
-⇒ 生效面只能是 **workspace 根那个 gitignored 文件** `/data/home/yale/work/quay/.quay/config.yml`
-（`scripts/worktree-include.sh` 的单一来源；它不进任何分支，也不进任何 diff）。
-把 `serial_concurrency` / `lowconc_concurrency` 由 48 降到 32，读回：
-`suite-params.ts --root /data/home/yale/work/quay` ⇒
-`{"serial_concurrency":32,"lowconc_concurrency":32,"max_oversubscription":1,"memory_max":"32G",…}`。
-依据：**32 本来就是已经声明的恢复阶梯地板**（`SUITE_RECOVERY_CONCURRENCY_LADDER=[64,48,32]`），
-原先因为本文件的 48 夹子而不可达；这里只是让它真的可达，⛔ 不是新设一个安全判断。
-人 2026-10-15 的 `memory_max: 32G` 逐字保留。32 并发下的内存**估算** ≈22 GiB（按 48→33.6 GiB 线性折算，非实测）。
-⚠️ 这是 workspace-local 的运行参数调整，**不构成对 AC-920 的任何处置**，也没有改变本任务的任何 AC 判定；
-fan-in 若仍被 OOM 挡下，那是套件基础设施的独立问题，应另案处理。
+- `node --no-warnings --experimental-strip-types plugin/scripts/anti-drift-touches-check.ts --task gap-ac920-criterion-pipe-swallows-exit-code --worktree <worktree> --merge-target develop` ⇒ `ANTI-DRIFT OK: task gap-ac920-criterion-pipe-swallows-exit-code — 2 actual file(s), all within declared Touches (4 glob(s))`，exit 0。实际改动 = `meta/META-017-…md`（新增）+ `tasks/gap-ac920-criterion-pipe-swallows-exit-code.md`（任务体）；`goals/AC-920-…md` 与 `plugin/test/unencapsulated-state-admission.test.mjs` 只读未改。
 
 ## Dark Axis
 
@@ -209,3 +190,5 @@ fan-in 若仍被 OOM 挡下，那是套件基础设施的独立问题，应另�
 - 未落地原因：step=suite: oom-killed (3) — new regression at lower concurrency: plugin/test/driver-anchor-takeover.test.mjs,packages/quay/test/serve-system-body-i18n.test.mjs (passed at the original concurrency 128, fails at 64) — needs a code fix
 - run_id：wk-prod-anchor
 - session_id：04bc2893-ef9e-4f35-a158-937b81f4834f
+
+**retry 轮（2026-10-24）处置**：该 blocker 属 **suite 阶段的全量测试负载/OOM**，两个被点名文件都不在本任务 Touches 内（本任务零代码改动）；本轮已按 worker 职责完成 pre-merge + scoped 门（exit 0）+ anti-drift（exit 0），全量 suite 由 driver 的机械 fan-in 执行。
