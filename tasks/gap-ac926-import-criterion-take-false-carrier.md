@@ -120,3 +120,12 @@ AC-926 的存在理由正是「只在注释里提到词表也能变绿」。但�
 
 - plugin/test/ac926-semantic-admission-criterion.test.mjs (new)
 - tasks/gap-ac926-import-criterion-take-false-carrier.md
+
+## Blocker
+
+**2026-10-23T13:10:45.469Z — worker 未落地（exited-not-landed）**
+
+- 未落地原因：step=ff: fan-in-ff-merge: suite 证书 — suite_head..tip 恰为本任务的单个 flip-done 提交（身份判定：仅 M tasks/gap-ac926-import-criterion-take-false-carrier.md）⇒ 判惰性，⛔ 未调分类器
+fan-in-ff-merge: FF FAILED — ! [rejected]            task/gap-ac926-import-criterion-take-false-carrier -> develop (non-fast-forward); not a fast-forward. Retry record written (attempt 1). Return to 无锁段 step 1 (merge develop again — 必须 merge 不得 rebase, AC75), re-judge the delta (step 2) and re-run.
+fan-in-ff-merge: measure ff_only_locked=false
+- run_id：wk-prod-anchor
