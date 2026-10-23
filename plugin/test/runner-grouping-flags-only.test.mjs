@@ -32,9 +32,12 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { touchesHub } from "../scripts/suite-bucket-hub-list.ts";
+import { extractTouchesSection, parseTouchEntries } from "../scripts/touches-parser.ts";
+import { defaultTestConcurrency } from "../scripts/runner-concurrency.ts";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const repoRoot = join(__dirname, "..", "..");
@@ -109,4 +112,69 @@ test("AC1 (structural): the DEFAULT-glob flags-only branch exists and routes ext
   // holds by construction (this is what makes a changed selection impossible to hide).
   assert.match(src, /echo "selected \$\{#files\[@\]\} files \(groups=\$\{groups\}\)"/,
     "run_selected must self-report its selection count (AC4), counted from the same select_files output --list-files prints");
+});
+
+// ── gap-fan-in-recovery-ladder-inert-bucket-full-drops-test-concurrency AC5 ─────────────────────
+// AC16 in full-suite-runner-phases.test.mjs pins a PROXY: the runner splices --test-concurrency=N
+// into the spawned argv. The defect this task fixes sat DOWNSTREAM of that assertion — the runner
+// spliced N correctly and test.sh's bucket-full fallback then DROPPED the flag, so the recovery
+// ladder's rungs (64/48/32) all ran at the nproc-derived default (`scheduler: … main≤127/128`) and
+// OOM'd identically while reading as declared step-downs (硬规则 4b: a proxy量 that stopped
+// reflecting the actual).
+//
+// This assertion reads the DIRECT quantity: the `scheduler:` header the REAL test.sh hands the
+// scheduler, via QUAY_TEST_PLAN_ONLY=1 (test.sh prints the header and exits before the
+// lock/gate/build/static phases; the header comes from the SAME `bucket_test_concurrency` expression
+// the real invocation uses, so it cannot drift from what the scheduler receives).
+//
+// HOME: this file is one of the four already-baselined spawners of the real scripts/test.sh
+// (plugin/test-isolation-violations.txt R3 `spawns-test-sh` — a SHRINK-ONLY ratchet). A dedicated new
+// test file that spawns test.sh would be a NEW violation the ratchet correctly refuses, so the
+// downstream assertion lives with the existing argv→behavior family instead.
+//
+// The hub task is DERIVED from the store (sorted scan + touchesHub), never hard-coded: a live task id
+// leaves the store, and a hard-coded one would silently stop probing the branch.
+test("bucket-full fallback: --test-concurrency reaches the SCHEDULER (scheduler: main≤N), not just argv", () => {
+  const taskDir = join(repoRoot, "tasks");
+  const hubTask = readdirSync(taskDir)
+    .filter((f) => f.endsWith(".md"))
+    .sort()
+    .find((f) => {
+      const { section } = extractTouchesSection(readFileSync(join(taskDir, f), "utf8"));
+      const entries = parseTouchEntries(section);
+      return entries.length > 0 && touchesHub(entries);
+    });
+  assert.ok(
+    hubTask,
+    "the task store must contain at least one task whose ## Touches hit a hub file (scripts/test.sh, full-suite-runner.ts, …) — the hub/FAIL-OPEN fallback is otherwise untestable",
+  );
+  const taskId = hubTask.replace(/\.md$/, "");
+
+  // The probe N must differ from the host-derived default, otherwise "the flag was forwarded" and
+  // "the default happened to equal N" are indistinguishable (硬规则 4c: the predicate must be able to
+  // take false — dry-run it against a known-different value first).
+  const derivedDefault = defaultTestConcurrency();
+  const probeN = derivedDefault === 7 ? 9 : 7;
+
+  const env = { ...process.env, QUAY_TEST_PLAN_ONLY: "1", QUAY_TEST_SKIP_QUAY_REFRESH: "1", QUAY_TEST_SKIP_RESOURCE_GATE: "1" };
+  for (const k of Object.keys(env)) if (k.startsWith("NODE_TEST_")) delete env[k];
+  const r = spawnSync("bash", [testSh, "--buckets", taskId, `--test-concurrency=${probeN}`], {
+    cwd: repoRoot,
+    encoding: "utf8",
+    timeout: 180000,
+    maxBuffer: 10 * 1024 * 1024,
+    env,
+  });
+  assert.equal(r.status, 0, `plan-only probe must exit 0; got ${r.status}\nstdout:\n${r.stdout}\nstderr:\n${r.stderr}`);
+  assert.match(
+    r.stdout,
+    /__BUCKETS__ .*full=1/,
+    `the derived task must exercise the hub/FAIL-OPEN full-suite fallback (the branch that dropped the flag); task=${taskId}, output:\n${r.stdout}`,
+  );
+  const mains = [...r.stdout.matchAll(/scheduler: .*main≤(\d+)\)/g)].map((m) => Number(m[1]));
+  assert.ok(mains.length > 0, `the run must print a scheduler: header; output:\n${r.stdout}`);
+  assert.ok(
+    mains.includes(probeN),
+    `test.sh's bucket fallback must hand --test-concurrency=${probeN} to the scheduler (host default is ${derivedDefault}); got main≤${mains.join(" / ")} — the flag was dropped between argv and the scheduler:\n${r.stdout}`,
+  );
 });
