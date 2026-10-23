@@ -34,19 +34,36 @@ extra:
 
 ## AC
 
-- [ ] config schema 含 `release:` 节且 `quay init` 模板写出默认值——`grep -n 'release' packages/quay/src/config.ts` 与 `grep -n 'release:' packages/quay/src/init.ts` 均非零命中
-- [ ] 5 个 release 脚本的裸 `master`/`release-*`/`release/*` 字面量替换为 config 读取——`grep -cE 'release-\*|release/\*' plugin/scripts/release-branch-finish.sh plugin/scripts/release-branch-janitor.ts plugin/scripts/release-reading-sandbox.ts` 合计 0，`grep -c '"master"' plugin/scripts/release-master-advance-needs-check.ts` 为 0，且各脚本含读 `release:` config 的调用（位置判定）
-- [ ] `plugin/scripts/release-model-check.ts` 对四态给出可区分输出——「无 release 节」「合格」「不合格」「无法评估」互不复用取值；负控制：tip 不在任何 tag 上的 fixture repo 报 fail、无 release 节的 repo 报 not-evaluated 而非 pass
-- [ ] quay 自身 `.quay/config.yml` 落 `release:` 节，且 meter 在 quay 主检出上给出真实读数（生产载体，非 fixture，硬规则 4 推论三）
-- [ ] 新脚本登记 capability-catalog——`plugin/scripts/capability-catalog-declarations.json` 增条目，`bash plugin/scripts/capability-catalog.sh` 自报声明数较落地前 +1
+- [x] config schema 含 `release:` 节且 `quay init` 模板写出默认值——`grep -n 'release' packages/quay/src/config.ts` 与 `grep -n 'release:' packages/quay/src/init.ts` 均非零命中
+- [x] 5 个 release 脚本的裸 `master`/`release-*`/`release/*` 字面量替换为 config 读取——`grep -cE 'release-\*|release/\*' plugin/scripts/release-branch-finish.sh plugin/scripts/release-branch-janitor.ts plugin/scripts/release-reading-sandbox.ts` 合计 0，`grep -c '"master"' plugin/scripts/release-master-advance-needs-check.ts` 为 0，且各脚本含读 `release:` config 的调用（位置判定）
+- [x] `plugin/scripts/release-model-check.ts` 对四态给出可区分输出——「无 release 节」「合格」「不合格」「无法评估」互不复用取值；负控制：tip 不在任何 tag 上的 fixture repo 报 fail、无 release 节的 repo 报 not-evaluated 而非 pass
+- [x] quay 自身 `.quay/config.yml` 落 `release:` 节，且 meter 在 quay 主检出上给出真实读数（生产载体，非 fixture，硬规则 4 推论三）
+- [x] 新脚本登记 capability-catalog——`plugin/scripts/capability-catalog-declarations.json` 增条目，`bash plugin/scripts/capability-catalog.sh` 自报声明数较落地前 +1
 
 ## DoD
 
 真实落地：quay 主检出的 `.quay/config.yml` 携带 `release:` 节，`release-model-check.ts` 在主检出上给出真实读数（读生产载体，非 fixture）；5 个 release 脚本不再含裸 `master`/`release-*`/`release/*` 字面量。仅「测试存在」或「config 写好了但无脚本消费」不算。
 
+## Evidence
+
+- **AC1**：`grep -c 'release' packages/quay/src/config.ts` = 1（显式转导出 `readReleaseConfig` / `parseReleaseConfig` / `ReleaseConfig` 等，实现在 `core/config.ts`）；`grep -c 'release:' packages/quay/src/init.ts` = 1（Section 5 模板，含五个键的默认值）。
+- **AC2**：`grep -cE 'release-\*|release/\*'` 三文件均 0；`grep -c '"master"' release-master-advance-needs-check.ts` = 0。config 读取点（位置判定）：`release-branch-janitor.ts:258 readReleaseModel(root)`、`release-reading-sandbox.ts:335 readReleaseModel(root)`、`release-master-advance-needs-check.ts:212 readReleaseModel(root)`、`release-cut.mjs readReleaseModel(root)`（经 `release-model-check.ts --print-model`）、`release-branch-finish.sh` 的 `load_release_model` 读 `.quay/config.yml` 的 `release:` 节（纯 bash；⛔ 不内嵌 node，见下）。
+- **AC3**：四态 exit code 0/1/3/4 且 status 四值 `pass`/`fail`/`not-evaluated`/`not-configured` 两两不同（`plugin/test/release-model-check.test.mjs` 的 pairwise 测试）。负控制：tip 越过 tag 的 fixture 报 `fail`(1)；无 `release:` 节的 repo 报 `not-configured`(4) —— **非 pass**，且与「section 存在但读不懂」的 `not-evaluated`(3) 不共用取值（硬规则 3b：没配 ≠ 读不懂）。`advance=ci` 时另判 `advance-master.needs:` 覆盖，缺 workflow 报 `not-evaluated`。
+- **AC4（生产载体）**：`/data/home/yale/work/quay/.quay/config.yml` 已落 `release:` 节（line=master / baseline=develop / globs=[release/*, release-*] / tag_prefix=v / advance=ci）；在**主检出**上运行：
+  `node --experimental-strip-types plugin/scripts/release-model-check.ts --root /data/home/yale/work/quay --json`
+  ⇒ `{"status":"pass","ok":true,"evaluated":true,...,"invariants":[{"id":"line-readable","state":"pass","detail":"refs/heads/master resolves to ae28758aa36a1d04fa4e4455505f608eb9437fd6"},{"id":"line-parked-on-tag","state":"pass","detail":"line tip is held by v0.8.0"},{"id":"advance-ci-needs","state":"pass",...}]}`，exit 0。这是真实读数（非 fixture）。
+- **AC5**：`bash plugin/scripts/capability-catalog.sh` ⇒ `summary: 397 scripts | 397 declared | 0 unclassified | 392 ship`；落地前为 `396 declared`（新增脚本使 scripts 397，恰好 +1 声明）。
+- **sh-census 说明**：`release-branch-finish.sh` 的模型读取用 awk/pure-bash 实现，而非 `node --experimental-strip-types` 调用——后者会把整个 495 行 bash 载体变成 census 计费的 embedded-interpreter 程序（实测 `embeddedInterpreterLines` 6853 > 基线 6501）；改后 census 6501 ≤ 6501 通过。
+
+## ADR-007 dark axis
+
+- L_D: valueSccs=0 typeSccs=0 reverseEdges=0 (import-graph-check: files=505 edges=1503, kernelChecked=true violations=0)
+- L_G: 该轴仍暗,理由:本次只把既有发布协议的字面量改为声明式读取，没有新增/改变 archguard 所测的包级依赖形状，故未取得新的 L_G 读数。
+
 ## Touches
 
 - packages/quay/src/config.ts
+- packages/quay/src/core/config.ts
 - packages/quay/src/config-validate.ts
 - packages/quay/src/init.ts
 - plugin/scripts/release-cut.mjs
@@ -55,6 +72,7 @@ extra:
 - plugin/scripts/release-reading-sandbox.ts
 - plugin/scripts/release-master-advance-needs-check.ts
 - plugin/scripts/release-model-check.ts
+- plugin/scripts/git-runner.ts
 - plugin/scripts/capability-catalog-declarations.json
 - plugin/test/release-model-check.test.mjs
 - plugin/test/release-cut.test.mjs
