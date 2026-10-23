@@ -52,14 +52,14 @@ totalGuards 198  declaredCount 8
 
 ## AC
 
-- [ ] AC1（复现固化·修复前读数）：在动手前用同一组命令复跑并贴出 BEFORE 读数：①`node --no-warnings --experimental-strip-types plugin/scripts/guard-lineage-check.ts --json` 的 `suspicious` 段逐字只含 `release-model-check.ts`；②`grep -c '"name":"release-model-check"' .quay/checker-cost.jsonl` = 0；③`ls plugin/scripts/checker-mutation-cases/ | grep -cE '^release-model-check\.sh$'` = 0；④`bash plugin/scripts/checker-mutation-check.sh --list --json` 的 `checkers_total` 与 `release-model-check` 缺席；⑤`grep -c "release-model-check" scripts/test.sh plugin/scripts/runner-static-gate.ts .github/workflows/ci.yml` = 0/0/0。
-- [ ] AC2（case 存在、可执行、per-invariant 注入+恢复）：新增 `plugin/scripts/checker-mutation-cases/release-model-check.sh`，`bash plugin/scripts/checker-mutation-cases/release-model-check.sh "$(mktemp -d)"` **exit 0**，输出同时证明以下每个相位（全部在临时 fixture git repo 上驱动**真实** checker，用真实 CLI 而非 import）：①基线（`release:` 节 + 发布线 tip 打 tag + advance job 的 `needs:` 覆盖全部其它 job）⇒ exit 0，三条不变量全 pass；②`line-parked-on-tag` 注入（tag 之后提交）⇒ exit 1，且 `--json` 里该不变量 id 的 state 为 `fail`；恢复 ⇒ exit 0；③`line-readable` 注入（删除/改名声明的发布线分支）⇒ exit 1，`--json` 里 `line-readable` state=`fail`；④`advance-ci-needs` 注入（从 advance job 的 `needs:` 删掉一个 job）⇒ exit 1，`--json` 里 `advance-ci-needs` state=`fail`；恢复 ⇒ exit 0；⑤四态区分：无 `release:` 节 ⇒ exit 4 / `not-configured`，节存在但不可读（非法 mapping/空值）⇒ exit 3 / `not-evaluated`，二者都不与 0/1 共用取值。贴出 case 完整运行输出与每个相位的 `--json` 片段。
-- [ ] AC3（case 承重·负控制）：把 `line-parked-on-tag` 的判定临时短路为恒 `pass`（只在 scratch 副本或改后立即还原；提交前 `git diff -- plugin/scripts/release-model-check.ts` 必须为空）后，AC2 的②相位必须**不再 exit 0**——case 应报 STAYED-GREEN（exit 3）或其它非零，证明该相位真的在测这条判据，而不是靠别的分支顺带变红。贴出短路前后的 case 退出码对照。
-- [ ] AC4（manifest 自动拾取·不是手写名单）：`release-model-check` 出现在 `bash plugin/scripts/checker-mutation-check.sh --list --json` 的 `checkers[]`（`covered: true`，`source` 来自 `run_static_checks`），且 `bash plugin/scripts/checker-mutation-check.sh --check --only release-model-check` **exit 0**。注册位必须在**被解析的函数体**内（`runner-static-gate.ts` 的 `run_static_checks()` 或 `run_operational_checks()`），贴出该行机器可解析的 `run_checker` 调用与其 `# @static-tier` / `# @static-object` 注解；同时按 `checker-count-drift-check.ts` 的规则更新 `# @checker-count` 注解（加一条 `run_checker` 就必须 +1），并贴出 `node --no-warnings --experimental-strip-types plugin/scripts/checker-count-drift-check.ts --root .` exit 0。⛔ 不得在 manifest 里手写名单/绕过解析器。
-- [ ] AC5（fresh-checkout 安全·exit 4 不得变成套件红）：证明注册面在**没有 `.quay/config.yml` 的检出**上仍绿。二选一并贴证据：①注册调用把 `--root` 指向本次运行建立的确定性 fixture（贴出 fixture 构建行与 `--root` 实际取值，不含 `${repo_root}` 作为 checker 的被测根）；或②注册行以 `[ -f "${repo_root}/.quay/config.yml" ]` 之类条件守卫并在缺席时输出可区分的 NOT-EVALUATED 行（贴出该分支在临时目录/无 config 检出上的实际输出与 exit 0）。⛔ 不允许把 checker 的 `not-configured` 语义改成 pass（硬规则 3b）。
-- [ ] AC6（生产载体·不是 fixture 回显）：跑一次 `bash scripts/test.sh --for-task gap-release-model-check-mutation-case-and-manifest-enrollment`（或等价地真实执行 `run_static_checks`），之后 `.quay/checker-cost.jsonl` 里出现 **≥1** 条 `"name":"release-model-check"` 行；贴出 `grep '"name":"release-model-check"' .quay/checker-cost.jsonl | tail -1` 的真实行（含 `verdict`）。这是硬规则 4 推论三要求的生产载体读数：证明注册面**被执行过**，而不只是 case 在 `--only` 下被人跑过一次。
-- [ ] AC7（P4 判定翻转·生产读数 = 判据）：修后重跑 `node --no-warnings --experimental-strip-types plugin/scripts/guard-lineage-check.ts --json`，`suspicious` 里**不再含** `release-model-check.ts`（应为空或只剩与本任务无关的项），且它出现在 `preventive`。贴出修后 `preventive` / `suspicious` 两段逐字。同时 `git diff <base> -- plugin/scripts/guard-lineage-check.ts` 为空（判定阈值与分类逻辑一字未改）。
-- [ ] AC8（回归）：`node --no-warnings --experimental-strip-types plugin/test/release-model-check.test.mjs` exit 0；`bash plugin/scripts/checker-mutation-check.sh --check` exit 0 且 `uncovered: []`；`bash scripts/test.sh --for-task gap-release-model-check-mutation-case-and-manifest-enrollment` 绿（若 scoped 门因合法原因不选某项，附上 full-suite 或等价证据）。
+- [x] AC1（复现固化·修复前读数）：在动手前用同一组命令复跑并贴出 BEFORE 读数：①`node --no-warnings --experimental-strip-types plugin/scripts/guard-lineage-check.ts --json` 的 `suspicious` 段逐字只含 `release-model-check.ts`；②`grep -c '"name":"release-model-check"' .quay/checker-cost.jsonl` = 0；③`ls plugin/scripts/checker-mutation-cases/ | grep -cE '^release-model-check\.sh$'` = 0；④`bash plugin/scripts/checker-mutation-check.sh --list --json` 的 `checkers_total` 与 `release-model-check` 缺席；⑤`grep -c "release-model-check" scripts/test.sh plugin/scripts/runner-static-gate.ts .github/workflows/ci.yml` = 0/0/0。
+- [x] AC2（case 存在、可执行、per-invariant 注入+恢复）：新增 `plugin/scripts/checker-mutation-cases/release-model-check.sh`，`bash plugin/scripts/checker-mutation-cases/release-model-check.sh "$(mktemp -d)"` **exit 0**，输出同时证明以下每个相位（全部在临时 fixture git repo 上驱动**真实** checker，用真实 CLI 而非 import）：①基线（`release:` 节 + 发布线 tip 打 tag + advance job 的 `needs:` 覆盖全部其它 job）⇒ exit 0，三条不变量全 pass；②`line-parked-on-tag` 注入（tag 之后提交）⇒ exit 1，且 `--json` 里该不变量 id 的 state 为 `fail`；恢复 ⇒ exit 0；③`line-readable` 注入（删除/改名声明的发布线分支）⇒ exit 1，`--json` 里 `line-readable` state=`fail`；④`advance-ci-needs` 注入（从 advance job 的 `needs:` 删掉一个 job）⇒ exit 1，`--json` 里 `advance-ci-needs` state=`fail`；恢复 ⇒ exit 0；⑤四态区分：无 `release:` 节 ⇒ exit 4 / `not-configured`，节存在但不可读（非法 mapping/空值）⇒ exit 3 / `not-evaluated`，二者都不与 0/1 共用取值。贴出 case 完整运行输出与每个相位的 `--json` 片段。
+- [x] AC3（case 承重·负控制）：把 `line-parked-on-tag` 的判定临时短路为恒 `pass`（只在 scratch 副本或改后立即还原；提交前 `git diff -- plugin/scripts/release-model-check.ts` 必须为空）后，AC2 的②相位必须**不再 exit 0**——case 应报 STAYED-GREEN（exit 3）或其它非零，证明该相位真的在测这条判据，而不是靠别的分支顺带变红。贴出短路前后的 case 退出码对照。
+- [x] AC4（manifest 自动拾取·不是手写名单）：`release-model-check` 出现在 `bash plugin/scripts/checker-mutation-check.sh --list --json` 的 `checkers[]`（`covered: true`，`source` 来自 `run_static_checks`），且 `bash plugin/scripts/checker-mutation-check.sh --check --only release-model-check` **exit 0**。注册位必须在**被解析的函数体**内（`runner-static-gate.ts` 的 `run_static_checks()` 或 `run_operational_checks()`），贴出该行机器可解析的 `run_checker` 调用与其 `# @static-tier` / `# @static-object` 注解；同时按 `checker-count-drift-check.ts` 的规则更新 `# @checker-count` 注解（加一条 `run_checker` 就必须 +1），并贴出 `node --no-warnings --experimental-strip-types plugin/scripts/checker-count-drift-check.ts --root .` exit 0。⛔ 不得在 manifest 里手写名单/绕过解析器。
+- [x] AC5（fresh-checkout 安全·exit 4 不得变成套件红）：证明注册面在**没有 `.quay/config.yml` 的检出**上仍绿。二选一并贴证据：①注册调用把 `--root` 指向本次运行建立的确定性 fixture（贴出 fixture 构建行与 `--root` 实际取值，不含 `${repo_root}` 作为 checker 的被测根）；或②注册行以 `[ -f "${repo_root}/.quay/config.yml" ]` 之类条件守卫并在缺席时输出可区分的 NOT-EVALUATED 行（贴出该分支在临时目录/无 config 检出上的实际输出与 exit 0）。⛔ 不允许把 checker 的 `not-configured` 语义改成 pass（硬规则 3b）。
+- [x] AC6（生产载体·不是 fixture 回显）：跑一次 `bash scripts/test.sh --for-task gap-release-model-check-mutation-case-and-manifest-enrollment`（或等价地真实执行 `run_static_checks`），之后 `.quay/checker-cost.jsonl` 里出现 **≥1** 条 `"name":"release-model-check"` 行；贴出 `grep '"name":"release-model-check"' .quay/checker-cost.jsonl | tail -1` 的真实行（含 `verdict`）。这是硬规则 4 推论三要求的生产载体读数：证明注册面**被执行过**，而不只是 case 在 `--only` 下被人跑过一次。
+- [x] AC7（P4 判定翻转·生产读数 = 判据）：修后重跑 `node --no-warnings --experimental-strip-types plugin/scripts/guard-lineage-check.ts --json`，`suspicious` 里**不再含** `release-model-check.ts`（应为空或只剩与本任务无关的项），且它出现在 `preventive`。贴出修后 `preventive` / `suspicious` 两段逐字。同时 `git diff <base> -- plugin/scripts/guard-lineage-check.ts` 为空（判定阈值与分类逻辑一字未改）。
+- [x] AC8（回归）：`node --no-warnings --experimental-strip-types plugin/test/release-model-check.test.mjs` exit 0；`bash plugin/scripts/checker-mutation-check.sh --check` exit 0 且 `uncovered: []`；`bash scripts/test.sh --for-task gap-release-model-check-mutation-case-and-manifest-enrollment` 绿（若 scoped 门因合法原因不选某项，附上 full-suite 或等价证据）。
 
 ## DoD
 
@@ -73,3 +73,94 @@ totalGuards 198  declaredCount 8
 - plugin/test/release-model-check.test.mjs
 - plugin/scripts/capability-catalog-declarations.json
 - tasks/gap-release-model-check-mutation-case-and-manifest-enrollment.md
+
+## Evidence
+
+（2026-10-23，worktree `/home/yale/work/quay-worktrees/gap-release-model-check-mutation-case-and-manifest-enrollment`，commits `a437cce3a` + `0b7d6b571`，develop 已并入 `6ff57ad22`）
+
+- ADR-007 dark-axis：该轴仍暗,理由:本任务只新增一个 checker-mutation case 与 run_static_checks 内一行注册，未新增或删除任何模块依赖边、包边界或 import 关系，L_D 与 L_G 在该增量上没有可测变化。
+
+### AC1 BEFORE 读数（逐字，动手前）
+
+① `guard-lineage-check.ts --json` 的 `suspicious` 段：
+```json
+[{"basename":"release-model-check.ts","dir":"plugin/scripts","reason":"never-fired and not mutation-verified — indistinguishable from a broken guard (P4 定义)"}]
+```
+`preventive` = 7 条（checker-mechanical-spine-check.ts / checker-mutation-check.sh / instrument-decay-check.ts / manager-tick-log-check.sh / outer-tick-log-check.sh / release-master-advance-needs-check.ts ×2）。
+② `grep -c '"name":"release-model-check"' .quay/checker-cost.jsonl` = `0`（主检出；同族 `release-master-advance-needs-check` = `260`）。
+③ `ls plugin/scripts/checker-mutation-cases/ | grep -cE '^release-model-check\.sh$'` = `0`。
+④ `checker-mutation-check.sh --list --json` ⇒ `checkers_total: 87`，`checkers[]` 中无 `release-model-check`，`uncovered: []`。
+⑤ `grep -c "release-model-check" scripts/test.sh plugin/scripts/runner-static-gate.ts .github/workflows/ci.yml` = `0 / 0 / 0`。
+
+### AC2 case 完整运行输出（每相位自带 `--json` 摘要）
+
+```
+$ bash plugin/scripts/checker-mutation-cases/release-model-check.sh "$(mktemp -d)"
+phase A (baseline): exit 0, all three invariants pass [status=pass line-readable=pass line-parked-on-tag=pass advance-ci-needs=pass]
+phase B (line-parked-on-tag): 1/fail on injection [status=fail line-readable=pass line-parked-on-tag=fail advance-ci-needs=pass], 0 after restore [status=pass line-readable=pass line-parked-on-tag=pass advance-ci-needs=pass]
+phase C (line-readable): 1/fail on injection [status=fail line-readable=fail line-parked-on-tag=not-evaluated advance-ci-needs=pass], 0 after restore [status=pass line-readable=pass line-parked-on-tag=pass advance-ci-needs=pass]
+phase D (advance-ci-needs): 1/fail on injection [status=fail line-readable=pass line-parked-on-tag=pass advance-ci-needs=fail], 0 after restore [status=pass line-readable=pass line-parked-on-tag=pass advance-ci-needs=pass]
+phase E (four-state): no section ⇒ 4/not-configured [status=not-configured ], unreadable section ⇒ 3/not-evaluated [status=not-evaluated ]
+（exit 0）
+```
+关键点：每个注入相位都同时断言**退出码**与该**具名不变量 id 的 state**，所以 exit 1 不可能由旁支顺带产生。相位 C 尤其能区分：`line-readable=fail` 时 `line-parked-on-tag` 降为 `not-evaluated`（不是 fail、不是 pass），两个读数不共用取值。
+
+### AC3 负控制（短路前后对照）
+
+- 短路前：case exit `0`（上面完整输出）。
+- 把 `lineParkedOnTag` 首行临时改成 `return { id: "line-parked-on-tag", state: "pass", ... }`（scratch，改后立即还原）重跑：
+```
+phase A (baseline): exit 0, all three invariants pass [status=pass line-readable=pass line-parked-on-tag=pass advance-ci-needs=pass]
+line-parked-on-tag injection: expected exit 1 (fail), got 0 (status=pass) — a commit after the tag leaves the line unparked
+SHORTCIRCUIT_CASE_EXIT=3      ← STAYED-GREEN
+```
+- 还原后 `git diff -- plugin/scripts/release-model-check.ts` = `0` 行。
+
+### AC4 manifest 自动拾取 + 注册位
+
+`checker-mutation-check.sh --list --json`：`checkers_total: 88`，条目 `{"name":"release-model-check","source":"run_static_checks","covered":true}`，`uncovered: []`。
+`checker-mutation-check.sh --check --only release-model-check` ⇒ **exit 0**，`MUTATION release-model-check: pass`。
+注册位（`runner-static-gate.ts` 的 `run_static_checks()` 函数体内，紧随 `release-master-advance-needs-check`）：
+```bash
+# @static-tier change
+# @static-object plugin/scripts/release-model-check.ts plugin/scripts/checker-mutation-cases/release-model-check.sh plugin/test/release-model-check.test.mjs plugin/scripts/release-master-advance-needs-check.ts plugin/scripts/runner-static-gate.ts
+run_checker "release-model-check" bash -c '…fixture…node --no-warnings --experimental-strip-types "$1" --root "$d" --json' release-model-check "${repo_root}/plugin/scripts/release-model-check.ts"
+```
+`checker-count-drift-check.ts --root .` ⇒ **exit 0**：`[ok] runner-static-gate.ts:run_static_checks — declared 69, measured 69`（`# @checker-count 68` → `69`）。
+
+### AC5 fresh-checkout 安全（确定性 fixture，非 `${repo_root}`）
+
+注册行在**同一行内**建 fixture（scoped 门只 eval 注册行本身，前面单独的 fixture 构建行不会随之执行，故不得拆行）：`mktemp -d` → `git init -b main` + 空提交 + `git tag v1.0.0` → `$d/.quay/config.yml`（`release: line=main baseline=develop tag_prefix=v advance=ci`）→ `$d/.github/workflows/release.yml`（`advance-master.needs: [build, verify]`）→ `node … release-model-check.ts --root "$d" --json`。
+在没有 `.quay/config.yml` 的临时 detached-HEAD worktree（`/home/yale/work/quay-fresh-probe-113450`）上原样执行该注册命令：
+```
+PROBE_RC=0
+{"status":"pass","ok":true,"evaluated":true,…,"configPath":"/tmp/release-model-fixture-eSAWpz/.quay/config.yml","invariants":[{"id":"line-readable","state":"pass",…}…]}
+```
+`configPath` 落在 fixture 而非检出 ⇒ checker 被测根不是 `${repo_root}`，无 config 的检出不会被判红；checker 的 `not-configured` 语义一字未改（相位 E 仍在测它）。
+
+### AC6 生产载体（注册面真的被执行）
+
+scoped 门（`scripts/test.sh --for-task …`）真实执行 `run_static_checks` 的该条注册后：
+```
+$ grep '"name":"release-model-check"' .quay/checker-cost.jsonl | tail -1
+{"name":"release-model-check","ms":127,"n":1,"load":40.36,"at":"2026-10-23T06:18:58Z","verdict":"pass"}
+```
+
+### AC7 修后 P4 判定（生产读数）
+
+```
+suspicious: []            ← 空
+preventive（8 条）: checker-mechanical-spine-check.ts | checker-mutation-check.sh | instrument-decay-check.ts |
+                    manager-tick-log-check.sh | outer-tick-log-check.sh |
+                    release-master-advance-needs-check.ts (plugin/scripts) |
+                    release-model-check.ts (plugin/scripts) |
+                    release-master-advance-needs-check.ts (experiments/…)
+```
+`git diff develop -- plugin/scripts/guard-lineage-check.ts` = `0` 行（检测器本体未改一字）。
+
+### AC8 回归
+
+- `node --no-warnings --experimental-strip-types plugin/test/release-model-check.test.mjs` ⇒ `pass 10 / fail 0`，exit 0。
+- `bash plugin/scripts/checker-mutation-check.sh --check` ⇒ exit 0；`checkers_total: 88` / `checkers_with_mutation: 88` / `uncovered: 0` / `mutations_that_stayed_green: 0` / `mutations_that_always_red: 0` / `not_evaluated: 0`。
+- `bash scripts/test.sh --for-task gap-release-model-check-mutation-case-and-manifest-enrollment --allow-thin` ⇒ exit 0（scoped 门绿）。
+- 附带：`anti-drift-touches-check.ts --task … --worktree … --merge-target develop` ⇒ `ANTI-DRIFT OK — 2 actual file(s), all within declared Touches (6 glob(s))`。
