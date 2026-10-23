@@ -1,7 +1,7 @@
 ---
 id: gap-suite-oom-lane-scaled-ladder-floor-32-no-lower-rung
 title: 套件内存峰值随总并发线性增长（32 车道 ⇒ 34.36 GB 打满声明 32G），而恢复阶梯地板档 32 没有更低档 ⇒ 所有降档同形、OOM 解不掉
-status: todo
+status: ready
 labels:
   - gap
   - defect
