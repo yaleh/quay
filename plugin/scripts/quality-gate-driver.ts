@@ -3284,13 +3284,23 @@ export function buildInstrumentDecayGapWorkerArgv(
   return launchArgv("fix-worker", prompt, root);
 }
 
+/** 轮载体的【唯一】路径派生——写手（心跳落点）与读手（上一轮 Fact 去重）共用。
+ *
+ *  `ROUND_LOG_REL` 是 `.quay/`-相对路径（registry carriers[0]），⛔ 直接 `join(root, ROUND_LOG_REL)`
+ *  会落到 repo root，与 `driver-runtime` 的 carrierStats 读 `.quay/` 分叉（写侧已由
+ *  `gap-meta-round-log-rel` 修过）。读侧曾是同一文件里的兄弟实例、漏改 ⇒ 生产上读 ENOENT ⇒ 空 Set
+ *  ⇒ 每个 (载体,形态) 每轮重新立案（硬规则 5b：同一原则的其它适用点必须一并修）。 */
+export function resolveRoundLogFile(root: string, roundLogPath?: string): string {
+  return roundLogPath ? path.resolve(roundLogPath) : path.join(root, ".quay", ROUND_LOG_REL);
+}
+
 /** 上一轮已立案的 pair 键——从 round 载体（`.quay/quality-round.jsonl`）的尾部读，⛔ 不新造台账。
  *
  *  WHY the tail only: the round log is an append-only heartbeat carrier (63k+ lines in production).
  *  The previous round's Fact is what we need; scanning the whole file every 360m would grow without
  *  bound. 500 lines is far more than one round's worth (a round is ONE line). */
 export function readPriorInstrumentDecayFilings(root: string, roundLogPath?: string): Set<string> {
-  const file = roundLogPath ?? path.join(root, ROUND_LOG_REL);
+  const file = resolveRoundLogFile(root, roundLogPath);
   const out = new Set<string>();
   let text: string;
   try {
@@ -4282,10 +4292,9 @@ export async function main(argv: string[]): Promise<number> {
   const routineWatchdogMs = routineWatchdogRaw !== undefined && isNonNegInt(routineWatchdogRaw)
     ? Number(routineWatchdogRaw) : ROUTINE_WATCHDOG_MS_DEFAULT;
 
-  // 心跳落点 = .quay/。ROUND_LOG_REL 是 .quay/-相对路径（registry carriers[0]），⛔ 直接 join rootDir
-  // 会把心跳写到 repo-root quality-round.jsonl，与 driver-runtime carrierStats 读 .quay/ 分叉 ⇒
-  // liveness 监测读不到心跳、假报 stall（gap-meta-round-log-rel）。
-  const roundLogFile = roundLogPath ? path.resolve(roundLogPath) : path.join(rootDir, ".quay", ROUND_LOG_REL);
+  // 心跳落点 = .quay/。与读侧共用 `resolveRoundLogFile` 这一条派生（⛔ 两处各写一遍就是本任务
+  // 修的漂移面：写侧修过、读侧漏改 ⇒ 去重台账在生产上恒为空）。
+  const roundLogFile = resolveRoundLogFile(rootDir, roundLogPath);
   const resolvedRunId = runId || `qg-${Date.now()}`;
 
   // probe 轨道（SPEC §5.2）：声明在 `.quay/config.yml` `loop.routines:` 里、由本 driver 的例程表承载。
