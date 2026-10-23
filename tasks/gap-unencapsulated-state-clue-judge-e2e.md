@@ -207,3 +207,11 @@ hits=1
 - `tasks/gap-unencapsulated-state-clue-judge-e2e.md`
 
 ⛔ `docs/analysis/semantic-admission-contract.mjs` **不在**本任务 Touches：它由 peer `gap-semantic-admission-contract-module`（AC-919）交付，本条只消费、不改写（写它就与 peer 的验收面重叠）。
+
+## Blocker
+
+**2026-10-23T15:13:40.795Z — worker 未落地（exited-not-landed）**
+
+- 未落地原因：step=suite: oom-killed (3) — recovery exhausted at floor concurrency 32 — no declared rung produced a complete verdict (64,48,32); needs a code/config fix, see plugin/scripts/full-suite-runner.ts
+- run_id：wk-prod-anchor
+- session_id：eae554d3-0061-49b8-a743-27a926e715d5
