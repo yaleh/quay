@@ -80,12 +80,12 @@ AC924-4 覆盖「confirmed 候选走 Planner 的 semantic-judged 路由且 mecha
 
 ## AC
 
-- [ ] AC1 AC-920 criterion 的「恒 pass」被对照实测钉住并写进 `## Evidence`：空沙箱里逐字跑 AC-920 criterion ⇒ exit 0，而同一条 `node --test plugin/test/unencapsulated-state-admission.test.mjs` 不经 pipe ⇒ exit 1；贴两条完整命令、stderr 首行与两个 exit code。
-- [ ] AC2 记录不一致的三个读数逐字贴进 `## Evidence`：`quay goal show AC-920 --json` ⇒ `"status": "active"` + `"supersededBy": []` + criterion 含 `tail -6`；`quay goal show AC-922 --json` ⇒ `"status": "achieved"` + `"supersedes": ["AC-920"]`；`quay goal show GOAL-911 --json` 的退出条件 ④ 不含 AC-920。
-- [ ] AC3 处置裁定请求落成 board-visible 的 META 记录：`node packages/quay/bin/quay.js meta write META-<NNN> --title "…" --body-file <path>`（正文含 a/b/c 三个选项、各自成本与不可逆点、AC-922 origin 的逐字约束；⛔ body 由脚本生成，不手打多行命令），随后 `node packages/quay/bin/quay.js meta get META-<NNN> --json` 读回并贴进 Evidence（含 `status` / `reply`）。
-- [ ] AC4 裁定请求已投递到当前 live manager 会话：`ListAgents` → `SendMessage`（⛔ 不用 `supervisor-deliver.sh` 默认路径）；Evidence 记录目标会话名与消息摘要。若通道不可用，写明失败读数与已用的替代通道，⛔ 不静默。
-- [ ] AC5 裁定前不改 AC-920 的 goal 记录：`git log --oneline -1 -- 'goals/AC-920-*.md'` 仍是立案前的 `fd9125e50`，且 `git status --porcelain goals/` 为空输出。
-- [ ] AC6 scoped 门：`bash scripts/test.sh --for-task gap-ac920-criterion-pipe-swallows-exit-code --allow-thin` exit 0。
+- [x] AC1 AC-920 criterion 的「恒 pass」被对照实测钉住并写进 `## Evidence`：空沙箱里逐字跑 AC-920 criterion ⇒ exit 0，而同一条 `node --test plugin/test/unencapsulated-state-admission.test.mjs` 不经 pipe ⇒ exit 1；贴两条完整命令、stderr 首行与两个 exit code。
+- [x] AC2 记录不一致的三个读数逐字贴进 `## Evidence`：`quay goal show AC-920 --json` ⇒ `"status": "active"` + `"supersededBy": []` + criterion 含 `tail -6`；`quay goal show AC-922 --json` ⇒ `"status": "achieved"` + `"supersedes": ["AC-920"]`；`quay goal show GOAL-911 --json` 的退出条件 ④ 不含 AC-920。
+- [x] AC3 处置裁定请求落成 board-visible 的 META 记录：`node packages/quay/bin/quay.js meta write META-<NNN> --title "…" --body-file <path>`（正文含 a/b/c 三个选项、各自成本与不可逆点、AC-922 origin 的逐字约束；⛔ body 由脚本生成，不手打多行命令），随后 `node packages/quay/bin/quay.js meta get META-<NNN> --json` 读回并贴进 Evidence（含 `status` / `reply`）。
+- [x] AC4 裁定请求已投递到当前 live manager 会话：`ListAgents` → `SendMessage`（⛔ 不用 `supervisor-deliver.sh` 默认路径）；Evidence 记录目标会话名与消息摘要。若通道不可用，写明失败读数与已用的替代通道，⛔ 不静默。
+- [x] AC5 裁定前不改 AC-920 的 goal 记录：`git log --oneline -1 -- 'goals/AC-920-*.md'` 仍是立案前的 `fd9125e50`，且 `git status --porcelain goals/` 为空输出。
+- [x] AC6 scoped 门：`bash scripts/test.sh --for-task gap-ac920-criterion-pipe-swallows-exit-code --allow-thin` exit 0。
 
 ## DoD
 
@@ -98,5 +98,77 @@ AC924-4 覆盖「confirmed 候选走 Planner 的 semantic-judged 路由且 mecha
 - `goals/AC-920-unencapsulated-state-端到端跑通-线索器只产-candidate-判断器拒绝-memoized-误报.md`
 - `plugin/test/unencapsulated-state-admission.test.mjs`
 - `tasks/gap-ac920-criterion-pipe-swallows-exit-code.md`
+- `meta/META-017-请裁定-ac-920-判据-2-1-tail-6-恒-pass-的处置-改判据-退役-保持现状-ac-922-已-sup.md`
 
 <!-- 说明：前两个文件本任务只读/只跑，不修改；Touches 用来说明裁定对象与 criterion 的承载者。 -->
+
+## Evidence
+
+**AC1 — AC-920 判据「恒 pass」的对照实测**（空沙箱，`cwd=$(mktemp -d)`，2026-10-23，经 `/bin/sh -c` 与 acceptance runner 同形）
+
+命令一（AC-920 criterion 逐字）：
+```
+$ cd $(mktemp -d) && /bin/sh -c 'node --test plugin/test/unencapsulated-state-admission.test.mjs 2>&1 | tail -6'
+Could not find 'plugin/test/unencapsulated-state-admission.test.mjs'
+PIPE_EXIT=0
+# 整条管线 stderr 为空：2>&1 已把 stderr 送进 pipe，tail 把它打印在 stdout；退出码 = tail 的退出码
+```
+
+命令二（同一条测试路径，不经 pipe，同一个空沙箱）：
+```
+$ cd $(mktemp -d) && /bin/sh -c 'node --test plugin/test/unencapsulated-state-admission.test.mjs'
+Could not find 'plugin/test/unencapsulated-state-admission.test.mjs'
+DIRECT_EXIT=1
+```
+
+⇒ 同一沙箱、同一条路径：不经 pipe ⇒ **1**，经 AC-920 的 pipe ⇒ **0**。该判据结构上不可能取假（硬规则 4）。
+
+对照（载体本身是绿的，故「恒 pass」不来自真实通过）：在 worktree 里直接跑同一条 `node --test …` ⇒ `REAL_DIRECT_EXIT=0`，`tests 6 / pass 6 / fail 0`。
+
+**AC2 — 三个 goal 读数（逐字，2026-10-23）**
+
+- `quay goal show AC-920 --json` ⇒ `"status": "active"`、`"supersededBy": []`、`"criterion": "node --test plugin/test/unencapsulated-state-admission.test.mjs 2>&1 | tail -6"`
+- `quay goal show AC-922 --json` ⇒ `"status": "achieved"`、`"supersedes": ["AC-920"]`
+- `quay goal show GOAL-911 --json` 的退出条件 ④ 逐字：`④ AC-919、AC-924、AC-925 均 achieved（①②③ 全部由这三条 AC 的 criterion 与 expect 覆盖）。` ⇒ **不含 AC-920**
+
+**AC3 — board-visible META 记录（已写、已读回）**
+
+- 写入（cwd = 本 worktree）：`node packages/quay/bin/quay.js meta write META-017 --title "…" --body-file /tmp/ac920-meta-body.md --root <worktree>` ⇒ `wrote META-017`；commit `d7d93b693 meta: META-017 create by cli:1736617`；文件 `meta/META-017-请裁定-ac-920-判据-2-1-tail-6-恒-pass-的处置-改判据-退役-保持现状-ac-922-已-sup.md`。**body 由脚本 `ac920-gen-meta.mjs` 从三个 goal JSON + 两次沙箱实测直接生成**（非手打）；正文含 a/b/c 三个选项、各自成本与不可逆点，并逐字引用 AC-922 origin 的 `Retirement/rewording of AC-920 remains a human decision; this item only declares the replacement relation.`
+- 读回：`node packages/quay/bin/quay.js meta get META-017 --json` ⇒ `{"id":"META-017","status":"proposed","handler":"meta-driver","reply":null,"bodyBytes":3200}`
+
+**AC4 — 投递到 live manager 会话：通道不可用（如实记录，未静默）**
+
+- `ListAgents` 返回 10 个 peer：claudecodeui-28 / 重启后 Claude Code 会话自动恢复 / 输入框历史导航与输入建议 / 人类 I/O 带宽与 UI 设计原则 / claudecodeui-90 / claudecodeui-task-worker / archguard 架构语义映射 / lan-7b / 移动模式 Architecture 标签页 / CloudCLI architecture tab 架构图渲染 —— **无一是 manager**。
+- `claude agents --json`（21 个 agent）中 `cwd === "/data/home/yale/work/quay"` 的只有 3 个：`f96878f0`「项目架构审查与文档对比」(bg/blocked)、`334985f0`「quay-task-worker」(本 worker)、`d41a9414`「quay-task-worker」(并发 worker)；`name ~= /manager/i` 匹配 **0**。
+- `tmux ls` ⇒ cloudcli-2 / lan-1 / ppwr-3 / test-sess —— 无 manager 的历史锚命名 `quay-*`。
+- 最后一次写 `orchestration/manager-tick-log.md` 的会话 = `125853d3-c375-4b3a-af96-02bae9f95ad4`（meta-cc tool_use 命中 `2026-10-16T13:16:49.531Z`）；其 transcript 末次修改 `2026-10-17 01:51:25 +0800`，且不在 `claude agents --json` 中 ⇒ **已非 live**。
+- 投递尝试（`SendMessage` 到该最后已知 manager 会话）：`{"success":false,"message":"No agent named '125853d3-c375-4b3a-af96-02bae9f95ad4' is reachable.\nUse ListAgents to see everyone you can message."}`
+- ⇒ **manager 通道不可用（无 live manager 会话）**；未向任何非 manager 会话误投。**已用替代通道 = META-017**（board-visible meta store；meta-driver 存活：`.quay/meta-driver.pid` → driver-anchor pid `2054437`，轮次载体最新 `round 181 @ 2026-10-23T17:00:59.802Z`，会读到该记录并作答/上报）。
+
+**AC5 — 裁定前未改 AC-920 的 goal 记录**
+
+- `git log --oneline -1 -- 'goals/AC-920-*.md'` ⇒ `fd9125e50 goals: AC-920 status draft→active by cli:2858506`（仍是立案前那条）
+- `git status --porcelain goals/` ⇒ **空输出**
+- `quay goal show AC-920 --json` ⇒ 仍 `"status": "active"`、criterion 逐字未变（见 AC2）。本轮未出现任何改 AC-920 status/criterion 的 goal write 提交。
+
+**AC6 — scoped 门**
+
+- `bash scripts/test.sh --for-task gap-ac920-criterion-pipe-swallows-exit-code --allow-thin` ⇒ **exit 0**（在本 worktree、以最终 Touches 运行；尾段如下）
+```
+✔ AC924-3(judge): recorded-verdict replay matches the LITERAL table and confirms only with a counterfactual (1.139373ms)
+✔ AC924-4(planner): a confirmed candidate is admitted by the semantic route and the mechanical delta is never read (2.60565ms)
+✔ AC924-5(vocabulary): the contract module is the single declaration site and carries no entry guard (0.894199ms)
+✔ AC924-6(clue-predicate): comments and literal text are not hits, and a binary file is not-evaluated (0.217195ms)
+ℹ tests 6
+ℹ suites 0
+ℹ pass 6
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 455.395212
+```
+
+## Dark Axis
+
+该轴仍暗,理由: 本任务只产证据与人的裁定请求（META 记录 + 任务体），不改任何生产代码、模块依赖、延迟或并发/资源行为；无 L_D/L_G 轴读数可采。
