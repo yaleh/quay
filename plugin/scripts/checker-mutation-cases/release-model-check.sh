@@ -146,6 +146,21 @@ invariant_state() {
     });' "$1"
 }
 
+# The `--json` reading distilled to the two fields this case judges on (status + per-invariant
+# state). Printed after every phase so the case's OWN output carries the evidence that the named
+# judgment — not some sibling branch — is what moved.
+report() {
+  printf '%s' "${_out}" | node -e '
+    let s = "";
+    process.stdin.on("data", (d) => (s += d)).on("end", () => {
+      try {
+        const j = JSON.parse(s);
+        const inv = (j.invariants || []).map((i) => `${i.id}=${i.state}`).join(" ");
+        process.stdout.write(`status=${j.status} ${inv}`);
+      } catch { process.stdout.write("UNPARSEABLE"); }
+    });'
+}
+
 fail_phase() { echo "$1" >&2; exit 3; }
 
 # ── A: baseline GREEN, all three invariants PASS ────────────────────────────────────────────────
@@ -166,7 +181,7 @@ for inv in line-readable line-parked-on-tag advance-ci-needs; do
   st="$(invariant_state "${inv}")"
   [ "${st}" = "pass" ] || fail_phase "baseline: invariant '${inv}' is '${st}', expected 'pass' — a baseline that does not exercise all three judges cannot prove the injections are the thing going red"
 done
-echo "phase A (baseline): exit 0, all three invariants pass"
+echo "phase A (baseline): exit 0, all three invariants pass [$(report)]"
 
 # ── B: line-parked-on-tag INJECTION — a commit on the line AFTER its tag ────────────────────────
 (
@@ -177,6 +192,7 @@ read_checker
 [ "${_rc}" = "1" ] || fail_phase "line-parked-on-tag injection: expected exit 1 (fail), got ${_rc} (status=$(status_of)) — a commit after the tag leaves the line unparked"
 st="$(invariant_state "line-parked-on-tag")"
 [ "${st}" = "fail" ] || fail_phase "line-parked-on-tag injection: invariant state is '${st}', expected 'fail' — the named judgment did not move, so the exit 1 came from somewhere else"
+inj="$(report)"
 # restore: the line goes back to standing on its tag
 (
   cd "${workdir}" || exit 2
@@ -184,7 +200,7 @@ st="$(invariant_state "line-parked-on-tag")"
 ) || exit 2
 read_checker
 [ "${_rc}" = "0" ] || fail_phase "ALWAYS-RED after restoring the parked line: exit ${_rc}, not 0 (status=$(status_of))"
-echo "phase B (line-parked-on-tag): 1/fail on injection, 0 after restore"
+echo "phase B (line-parked-on-tag): 1/fail on injection [${inj}], 0 after restore [$(report)]"
 
 # ── C: line-readable INJECTION — the declared line's branch is gone ─────────────────────────────
 (
@@ -195,13 +211,14 @@ read_checker
 [ "${_rc}" = "1" ] || fail_phase "line-readable injection: expected exit 1 (fail), got ${_rc} (status=$(status_of)) — the declared line no longer resolves and the checker did not say so"
 st="$(invariant_state "line-readable")"
 [ "${st}" = "fail" ] || fail_phase "line-readable injection: invariant state is '${st}', expected 'fail' — an unresolvable declared line must be a FAIL, never a shared not-evaluated/pass value"
+inj="$(report)"
 (
   cd "${workdir}" || exit 2
   git branch -m parked-line main
 ) || exit 2
 read_checker
 [ "${_rc}" = "0" ] || fail_phase "ALWAYS-RED after restoring the declared line: exit ${_rc}, not 0 (status=$(status_of))"
-echo "phase C (line-readable): 1/fail on injection, 0 after restore"
+echo "phase C (line-readable): 1/fail on injection [${inj}], 0 after restore [$(report)]"
 
 # ── D: advance-ci-needs INJECTION — one job dropped from the advancing job's needs ──────────────
 write_workflow_needs_incomplete
@@ -209,10 +226,11 @@ read_checker
 [ "${_rc}" = "1" ] || fail_phase "advance-ci-needs injection: expected exit 1 (fail), got ${_rc} (status=$(status_of)) — a job is no longer in advance-master.needs and the checker stayed ${_rc}"
 st="$(invariant_state "advance-ci-needs")"
 [ "${st}" = "fail" ] || fail_phase "advance-ci-needs injection: invariant state is '${st}', expected 'fail'"
+inj="$(report)"
 write_workflow_covered
 read_checker
 [ "${_rc}" = "0" ] || fail_phase "ALWAYS-RED after restoring the covered workflow: exit ${_rc}, not 0 (status=$(status_of))"
-echo "phase D (advance-ci-needs): 1/fail on injection, 0 after restore"
+echo "phase D (advance-ci-needs): 1/fail on injection [${inj}], 0 after restore [$(report)]"
 
 # ── E1: no `release:` section ⇒ exit 4 / not-configured (⛔ not a pass) ─────────────────────────
 cat > "${cfg}" <<'YAML'
@@ -223,12 +241,13 @@ YAML
 read_checker
 [ "${_rc}" = "4" ] || fail_phase "four-state: a config with NO release: section exited ${_rc}, expected 4 (not-configured) — 'declared nothing' must not share a value with pass (0) or fail (1)"
 [ "$(status_of)" = "not-configured" ] || fail_phase "four-state: no release: section reported status '$(status_of)', expected 'not-configured'"
+e1="$(report)"
 
 # ── E2: `release:` present but UNREADABLE ⇒ exit 3 / not-evaluated (⛔ not pass, ⛔ not 4) ──────
 printf 'release: []\n' > "${cfg}"
 read_checker
 [ "${_rc}" = "3" ] || fail_phase "four-state: a present-but-unreadable release: section exited ${_rc}, expected 3 (not-evaluated) — 'could not read' must be distinguishable from both 'nothing declared' (4) and 'judged and failed' (1)"
 [ "$(status_of)" = "not-evaluated" ] || fail_phase "four-state: unreadable release: section reported status '$(status_of)', expected 'not-evaluated'"
-echo "phase E (four-state): no section ⇒ 4/not-configured, unreadable section ⇒ 3/not-evaluated"
+echo "phase E (four-state): no section ⇒ 4/not-configured [${e1}], unreadable section ⇒ 3/not-evaluated [$(report)]"
 
 exit 0
