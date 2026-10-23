@@ -2,7 +2,7 @@
 id: gap-ac920-criterion-pipe-swallows-exit-code
 title: AC-920 判据 `2>&1 | tail -6` 吞掉 node --test 退出码 ⇒ 结构上恒 pass；AC-922 已
   supersedes 但 AC-920 自身 supersededBy 为空、仍 active ⇒ 处置（改判据 vs 退役）需人裁定
-status: ready
+status: done
 labels:
   - gap
   - meta-human-call
