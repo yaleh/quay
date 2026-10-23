@@ -1,7 +1,7 @@
 ---
 id: gap-ac926-import-criterion-take-false-carrier
 title: AC-926 的 import 判据缺可取假的验收载体：注释-only 模块在旧判据下 exit 0、缺席路径 exit 3 无人钉住（GOAL-911）
-status: todo
+status: ready
 labels:
   - gap
 parent: null
