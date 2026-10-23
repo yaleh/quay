@@ -71,7 +71,7 @@ finding 的「16 delegate / 7 hand-roll」：7 与实测完全对上；16 按其
 3. 谓词修正（实测假阳性，⛔ 不是放宽）：`defect-latency-pair.ts:206` 的 `raw.startsWith("--- ")` 是 `git show` diff 头解析，旧谓词的 `startsWith("--` 分支会把它误判成 argv 循环；已收窄为**精确** `"--"` 字面量，并以一条负控制钉住（diff 头不命中、argv `--` 前缀命中）。
 4. 受影响套件实跑（本 worktree，逐文件 `node --test`）：ac69-slot-queue-gap-check / defect-latency-pair / suite-lpt-order / outer-anchor-check / slice-readings / peer-identity-probe / suite-scheduler / carrier-retention / worker-fan-in-hooks / gate-script-base(-arg-modes/-help-mode/-adoption) / outer-cron-registry / session-primitives-adoption —— 全绿。
 5. `laydown-set-check.sh --list` 收敛前后同为 `scripts_derived: 124` / `tests_resolved: 229` —— 七条本就 `import` gate-script-base，无新模块边。
-6. scoped 门 `scripts/test.sh --for-task gap-routine-semantic-dedup-scan-parseargs-seven-forked-loops --allow-thin` ⇒ 见 `## Verification`（绿，exit 0）。
+6. scoped 门：见下 `## Verification`（两次实跑，均 exit 0 / 315 通过 / 0 失败）。
 
 ### 输入语言差异（enumerable，⛔ 不是「行为不变」的空话）
 - `--help`：loadbearing-test-gate（旧 = unknown arg，exit 2）、defect-latency-pair（旧 = unknown flag，exit 2）、suite-lpt-order（旧 = 忽略后继续读 stdin）⇒ 现统一走共享 help 契约（usage + exit 0）。库形 parser 本身仍不 `process.exit`（`help:"return"` + 调用方 `main` 打印）。
@@ -79,7 +79,16 @@ finding 的「16 delegate / 7 hand-roll」：7 与实测完全对上；16 按其
 - 尾部无值的 string flag 读作 `""`，**不折叠成默认值**（硬规则 3b）；数值 flag 仍按旧语义报错（`--sample needs a number`）。
 
 ## Verification
-见本任务提交 `semantic-dedup-scan: converge the seven residual hand-rolled parseArgs loops` 与 AC 复核读数（上表 21/1/0）。
+实跑读数（全部在本任务 worktree 内）：
+
+- 实现提交：`7aabc3951`（semantic-dedup-scan: converge the seven residual hand-rolled parseArgs loops），9 个文件，全部在 `## Touches` 内。
+- scoped 门（与 fan-in 同一条）：`bash scripts/test.sh --for-task gap-routine-semantic-dedup-scan-parseargs-seven-forked-loops --allow-thin`
+  - 第一次（develop `d02b5357b`）：**exit 0 · tests 315 · pass 315 · fail 0**
+  - 第二次（并入 develop `fc17b0ca2` 后）：**exit 0 · tests 315 · pass 315 · fail 0**
+  - 两次之间 develop 前进的只有一个**他人的任务文件**（`tasks/gap-routine-architecture-analysis-dup-discovery-module-loader.md`）；`git diff --stat <第一次门后的树>..HEAD -- . ':!tasks'` 为空 ⇒ 代码面与被门过的树逐字节相同。
+- 收尾反漂移硬闸：`anti-drift-touches-check.ts --task … --worktree … --merge-target develop` ⇒ **ANTI-DRIFT OK: 9 actual file(s), all within declared Touches (12 glob(s))**，exit 0。
+- scoped 门缓存：`worker-driver.ts --write-scoped-gate-cache` ⇒ `{"event":"scoped-gate-cache-written","developSha":"fc17b0ca2e1d7e6b4553f4f0cdbce626cef92890"}`。
+- AC/DoD 闸：`task_check` ⇒ `ok:true, acTotal:2 acChecked:2, dodTotal:2 dodChecked:2`。
 
 ## AC
 - [x] `.quay/routine-findings.jsonl` 中 finding `parseargs-seven-forked-loops`（routine `semantic-dedup-scan`，runId `semantic-dedup-scan-1792752400273`）所描述的问题被复核并处置
