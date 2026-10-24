@@ -28,14 +28,19 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { repoRoot } from "./repo-root.ts";
+// The `--root` resolution rule lives in gate-script-base.ts; this file's private copy ("--root if
+// given, else REPO_ROOT", including its own `argv.indexOf("--root")` parse) was the same rule with a
+// DIFFERENT default — it now passes that default as the second argument (semantic-dedup-scan runId
+// `semantic-dedup-scan-1792847536579`, findingId `root-resolveroot`). Same for the arg parse:
+// `flagValue` is the shared one. ⚠️ one reading changes with it: `--root ""` used to fall back to
+// REPO_ROOT (the retired falsy form); it now resolves to cwd, exactly as `--root ""` already did at
+// every other `--root` caller — flagValue's documented contract.
+import { flagValue, resolveRoot } from "./gate-script-base.ts";
 
 const REPO_ROOT = repoRoot();
 
 // `--root <path>` overrides the workspace root (test-hermetic; production default = repo root).
-function resolveRoot(argv: string[]): string {
-  const idx = argv.indexOf("--root");
-  return idx !== -1 && argv[idx + 1] ? path.resolve(argv[idx + 1]) : REPO_ROOT;
-}
+// The RULE lives in gate-script-base.ts; only that default is local.
 const LOG_PATH = path.join(REPO_ROOT, "orchestration", "inner-idle-log.jsonl");
 
 export const VALID_IDLE_REASONS = Object.freeze([
@@ -94,7 +99,7 @@ function printUsage(stream: NodeJS.WritableStream): void {
 }
 
 function main(argv: string[]): number {
-  const root = resolveRoot(argv);
+  const root = resolveRoot(flagValue(argv, "--root"), REPO_ROOT);
   if (argv.includes("--append")) {
     const reasonIdx = argv.indexOf("--reason");
     const noteIdx = argv.indexOf("--note");

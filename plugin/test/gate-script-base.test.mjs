@@ -215,6 +215,12 @@ test("CONTROL: an empty-string value reads as `\"\"`, and is NOT indistinguishab
 // `resolveroot`, runId `semantic-dedup-scan-1790028867335`, verdict `real-duplication`): five checkers
 // carried this byte-identical body. These tests pin the RESOLUTION RULE (not just "it compiles"),
 // because the rule is what the five call sites inherited and must keep.
+//
+// SECOND ROUND (same task id, later finding): semantic-dedup-scan runId
+// `semantic-dedup-scan-1792847536579`, findingId `root-resolveroot`, verdict
+// `divergent-implementation` ("only fan-in-runid + inner-idle-log are genuinely foldable into a
+// resolveRoot(rootArg, defaultRoot)"). The rule is shared; the DEFAULT is now the second parameter, so
+// the two `--root else repo-root` callers converge here while keeping their own fallback.
 
 test("resolveRoot: absent flag ⇒ cwd, absolute", () => {
   assert.equal(resolveRoot(undefined), path.resolve(process.cwd()));
@@ -237,24 +243,56 @@ test("resolveRoot: an ABSOLUTE value is returned as-is", () => {
 
 test("resolveRoot: an EMPTY-STRING value resolves to cwd (the 3b hazard flagValue documents is inert here)", () => {
   // `flagValue(args, "--root")` returns `""` (not undefined) when invoked as `--root ""`. That value
-  // reaches `rootArg ?? cwd` unchanged — `??` falls back only on null/undefined — so the resolution is
-  // `path.resolve("")`, which IS cwd. No silent-substitution defect, but recorded so it is a known
-  // reading rather than an accident.
+  // reaches `rootArg ?? defaultRoot` unchanged — `??` falls back only on null/undefined — so the
+  // resolution is `path.resolve("")`, which IS cwd. No silent-substitution defect, but recorded so it
+  // is a known reading rather than an accident. This holds for EVERY caller, including the two that
+  // pass a repo-root `defaultRoot`: an explicitly-passed empty value never reads as absent.
   assert.equal(resolveRoot(""), path.resolve(process.cwd()));
+  assert.equal(resolveRoot("", "/tmp/some/default"), path.resolve(process.cwd()));
 });
 
-test("resolveRoot: the extracted body lives in the base ONLY — the five callers carry no private copy", () => {
+// ── resolveRoot(rootArg, defaultRoot): the second half of the extraction ────────────────────────────
+// Two callers defaulted `--root` to the REPO ROOT instead of cwd (fan-in-runid-check, inner-idle-log)
+// and each carried a private copy of the rule to do it. The rule — not the default — is the shared
+// concept, so the default became a parameter.
+
+test("resolveRoot: absent flag + defaultRoot ⇒ defaultRoot (absolute, untouched)", () => {
+  assert.equal(resolveRoot(undefined, "/tmp/some/default"), path.resolve("/tmp/some/default"));
+});
+
+test("resolveRoot: a RELATIVE defaultRoot resolves against cwd like any relative path", () => {
+  // The default is a path value, not a second convention: it goes through the same `path.resolve`.
+  assert.equal(resolveRoot(undefined, "late/fallback"), path.resolve(process.cwd(), "late/fallback"));
+});
+
+test("resolveRoot: the flag WINS over defaultRoot — absolute and relative alike", () => {
+  assert.equal(resolveRoot("/tmp/named", "/tmp/some/default"), path.resolve("/tmp/named"));
+  assert.equal(resolveRoot("named", "/tmp/some/default"), path.resolve(process.cwd(), "named"));
+});
+
+test("resolveRoot: arity-1 (cwd default) is byte-equivalent to resolveRoot(x, process.cwd())", () => {
+  // The five original callers were NOT migrated to the two-argument form; this pins that the new
+  // parameter did not move their reading.
+  for (const arg of [undefined, "", ".", "/tmp/some/root"]) {
+    assert.equal(resolveRoot(arg), resolveRoot(arg, process.cwd()), `reading changed for ${JSON.stringify(arg)}`);
+  }
+});
+
+test("resolveRoot: the extracted body lives in the base ONLY — no caller carries a private copy", () => {
   // The mechanical statement of the finding, kept as a regression guard: if a caller re-inlines the
-  // body (or a sixth appears), this goes RED instead of quietly regrowing the duplication the routine
-  // filed. The predicate is positional (the exact statement text), so a comment mentioning it does not
-  // count.
-  const BODY = "return path.resolve(rootArg ?? process.cwd());";
+  // body (or a further copy appears), this goes RED instead of quietly regrowing the duplication the
+  // routine filed. The predicate is positional (the exact statement text), so a comment mentioning it
+  // does not count.
+  const BODY = "return path.resolve(rootArg ?? defaultRoot);";
   const callers = [
     "concurrency-literal-check.ts",
     "instrument-failure-check.ts",
     "landing-target-check.ts",
     "suite-slot-ssot-check.ts",
     "task-file-bypass-check.ts",
+    // the two repo-root-default callers folded in by finding `root-resolveroot`
+    "fan-in-runid-check.ts",
+    "inner-idle-log.ts",
   ];
 
   const hits = (file) => fs.readFileSync(file, "utf8").split("\n").filter((l) => l.trim() === BODY).length;
@@ -269,6 +307,35 @@ test("resolveRoot: the extracted body lives in the base ONLY — the five caller
   for (const caller of callers) {
     const src = fs.readFileSync(path.join(SCRIPTS_DIR, caller), "utf8");
     assert.match(src, /import \{[^}]*\bresolveRoot\b[^}]*\} from "\.\/gate-script-base\.ts"/, `${caller} does not import resolveRoot from the base`);
+  }
+});
+
+test("resolveRoot: the two repo-root callers carry no private copy of the OLD rule either", () => {
+  // Positional, per caller: the exact statements the private copies used. A comment quoting them does
+  // not match (the comparison is on trimmed full lines), and a future re-inline under another spelling
+  // still trips the "private function named resolveRoot" check below.
+  const RETIRED = {
+    "fan-in-runid-check.ts": [
+      "if (rootArg) return path.resolve(rootArg);",
+      "return repoRoot(path.dirname(fileURLToPath(import.meta.url)));",
+    ],
+    "inner-idle-log.ts": [
+      'const idx = argv.indexOf("--root");',
+      "return idx !== -1 && argv[idx + 1] ? path.resolve(argv[idx + 1]) : REPO_ROOT;",
+    ],
+  };
+  for (const [caller, lines] of Object.entries(RETIRED)) {
+    const src = fs.readFileSync(path.join(SCRIPTS_DIR, caller), "utf8").split("\n").map((l) => l.trim());
+    for (const retired of lines) {
+      assert.equal(src.filter((l) => l === retired).length, 0, `${caller} still carries the private root-rule statement: ${retired}`);
+    }
+    // ... and neither declares a local function named `resolveRoot` (name reuse would shadow the import
+    // and make the two checks above pass while the shared rule is silently bypassed — 硬规则 8).
+    assert.doesNotMatch(
+      fs.readFileSync(path.join(SCRIPTS_DIR, caller), "utf8"),
+      /^\s*(?:export\s+)?function\s+resolveRoot\b/m,
+      `${caller} declares its own resolveRoot — it must import the shared one`,
+    );
   }
 });
 

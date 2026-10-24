@@ -50,6 +50,11 @@ Extract one readJsonlStrict(path) helper and make both readers delegate; AC: one
 - 硬规则 5b 同载体检索：`grep -c "is not a JSON object" plugin/scripts/discovery-method-routine.ts` ⇒ 2 行（`:508` 文档注释 + `:524` 唯一 throw；提取前是 2 条 throw）。`plugin/scripts/arch-discovery-routine.ts:361/400` 属另一条例程的独立实现，不在本 finding、也不在本任务 Touches 内，未改动。
 - 提交：`246f88557`（task branch `task/gap-routine-architecture-analysis-dup-strict-jsonl-reader-two-copies`）。
 - 测试：`bash scripts/test.sh plugin/test/discovery-method-routine.test.mjs` ⇒ exit 0，60/60 pass；新增用例 `both JSONL readers — ONE strict reader, both call sites, a non-object line still THROWS` 对两条读函数分别断言 missing / 正常对象行 / `[]`、`42`、`null`、字符串行抛 `/is not a JSON object/` / 破行抛 `/is not valid JSON/`。
+- 上一轮 suite 红（`added=experiments/quay-perpetual-stream/test/symlink-mirror-invocation.test.mjs`）已复核为 **live-state flake，非本任务 delta**：
+  - 复现尝试：在本 worktree 单独跑 `node --experimental-strip-types --test experiments/quay-perpetual-stream/test/symlink-mirror-invocation.test.mjs` ⇒ 48/48 pass（含 `[task-status-drift-check.ts] symlink-path and real-path invocations produce identical stdout/stderr/exit code` 这一条）。
+  - 机制：日志里唯一差异行是 `gap-b15-telemetry-snapshot-untracked (… Touches file(s) not in tree)`。该任务的 Touches 含裸目录条目 `milestones/fast-mode-telemetry/`，`task-status-drift-check.ts` 的 `touchesAllExist` 用 `fs.existsSync` 判它；git 不跟踪空目录，该目录只在运行时 telemetry 产物存在时才在盘上（实测：worktree 里该目录存在但为空，`git check-ignore` 不命中）。全量 suite 并行跑时，两次相隔数秒的调用之间该目录出现/消失即产生差异 —— 与 symlink/real 调用路径无关（该测试的 `redactLiveBranchState` 只豁免 STRANDED 块，不覆盖此行）。
+  - 与本任务的关系：本任务 delta 仅 2 个文件（`plugin/scripts/discovery-method-routine.ts`、`plugin/test/discovery-method-routine.test.mjs`），与该测试无交集；`anti-drift-touches-check` 亦判定 2/2 文件全部在 Touches 内。⛔ 该测试不在本任务 ## Touches 内，未改动。
+- 本轮落地前置：`git merge develop` 无冲突；scoped 门 `scripts/test.sh --for-task … --allow-thin` ⇒ exit 0；anti-drift ⇒ `ANTI-DRIFT OK … 2 actual file(s), all within declared Touches`。
 
 ## GIT axes (ADR-007)
 - 该轴仍暗,理由:本任务只在 `plugin/scripts/discovery-method-routine.ts` 内部合并两个等价读函数，import 图与包边界零变化，未采集 archguard L_D/L_G 读数。
