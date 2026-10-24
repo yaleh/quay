@@ -113,6 +113,12 @@ import { REGISTRY_REL_CANDIDATES } from "./select-static-checks-for-touches.ts";
 // routine `semantic-dedup-scan`; see packages/quay/test/kernel-regex-escape.test.mjs ④ and
 // packages/quay/src/kernel/regex-escape.ts's 5b boundary note).
 import { escapeRegExp } from "./regex-escape.ts";
+// The ONE direct-entry guard (finding `misc-isdirectentry`, routine `semantic-dedup-scan`, runId
+// `semantic-dedup-scan-1792847536579`: this file and workflow-event-schema.mjs each carried a
+// basename-equality copy). ⛔ The 3-arg named form is REQUIRED — the bare `isDirectEntry(import.meta)`
+// form is a type error on purpose, because its URL fallback fired for every inlined module and
+// hijacked bundles' main (gap-drivers-yml-interval-not-honored-for-routine-kinds).
+import { isDirectEntry } from "./gate-script-base.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -799,22 +805,11 @@ function main(): number {
   return verdict.verdict === "reject" ? 1 : 0;
 }
 
-/** 直跑判定（import 测试时不执行 main）：realpath(process.argv[1]) === 本文件自身。 */
-function isDirectEntry(): boolean {
-  const entry = process.argv[1];
-  if (!entry) return false;
-  try {
-    // Bundling-safe basename check: under esbuild import.meta.url is the BUNDLE path for every
-    // inlined module, so a realpath comparison would fire this module's CLI when it is inlined
-    // into another entry (verified: ready-pool-check.js ran precommit-guard's main). Compare the
-    // invoked file's basename against THIS module's own basename instead.
-    return path.basename(entry).replace(/\.(?:js|ts|mjs)$/, "") === "precommit-guard";
-  } catch {
-    return false;
-  }
-}
-
-if (isDirectEntry()) {
+// 直跑判定（import 测试时不执行 main）——判定体在 gate-script-base.ts 单源，本文件只传自己的
+// expectedBase。Bundling-safe：比较的是【被调用文件】的 basename，不是 import.meta.url
+// （后者在 esbuild 下对每个 inlined 模块都是同一个 bundle 路径 —— verified: ready-pool-check.js
+// 曾跑起 precommit-guard 的 main）。
+if (isDirectEntry(import.meta, process.argv[1], "precommit-guard")) {
   process.exit(main());
 }
 

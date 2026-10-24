@@ -1340,9 +1340,11 @@ function isDirectEntryArity(cond) {
 
 /**
  * Does this module import the SHARED `isDirectEntry` from gate-script-base? The arity rule binds the
- * shared helper only: a module that DEFINES its own isDirectEntry decides its own semantics (two do —
- * workflow-event-schema.mjs and precommit-guard.ts — and both are name-based/inert; flagging them by
- * arity alone would be a false positive).
+ * shared helper only: a module that DEFINES its own isDirectEntry decides its own semantics, so
+ * flagging a local definition by arity alone would be a false positive. The carve-out stays for that
+ * future case — as of 2026-10-24 the corpus has none: the two real local definitions
+ * (workflow-event-schema.mjs and precommit-guard.ts) were extracted into the shared helper (finding
+ * `misc-isdirectentry`, routine `semantic-dedup-scan`).
  */
 export function importsSharedEntryHelper(text) {
   return /import\s*\{[^}]*\bisDirectEntry\b[^}]*\}\s*from\s*["'][^"']*gate-script-base\.ts["']/.test(text);
