@@ -3,7 +3,7 @@ id: gap-routine-architecture-analysis-dup-strict-jsonl-reader-two-copies
 title: "architecture-analysis: archguard dup 97719ef99c4433c0: 251 tokens/19
   lines; both bodies are the same strict JSONL-object reader (missing flag,
   throw on non-object) differing only i"
-status: todo
+status: ready
 labels:
   - gap
   - routine-filed
