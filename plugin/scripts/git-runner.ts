@@ -17,6 +17,13 @@
 // — both folding any git failure into `false`. That predicate now exists here once, as `ancestry`,
 // and it returns THREE states so that fold stays a caller decision (see its doc comment).
 //
+// A THIRD pass (.quay/routine-findings.jsonl, finding `git-showfile-headexists` — symbols
+// `gitShowFile` / `gitHeadExists`, kind `byte-identical-body`, runId
+// `semantic-dedup-scan-1792847536579`) found the HEAD-existence probe and the `<ref>:<path>` show
+// wrapper copied between test-framework-policy-check.ts and test-isolation-check.ts — the copy even
+// carried a "mirrors test-framework-policy-check.ts" comment. They now live here as `headExists` /
+// `showFile`.
+//
 // ⛔ What this module deliberately does NOT do: fold "could not look" into a value. Every helper
 // whose outcome can be NOT-DETERMINABLE returns `null` — never an empty string / empty array
 // standing in for "none there" (hard rule 3b). Callers keep that null distinct from a real value.
@@ -59,6 +66,33 @@ export function revParseSha(root: string, revision: string): string | null {
   if (r.status !== 0) return null;
   const sha = r.stdout.trim();
   return sha.length > 0 ? sha : null;
+}
+
+/** Does `git -C <root>` resolve a HEAD commit (a usable git worktree)? THREE states, matching
+ *  `ancestry`'s rule: `true` = HEAD resolves, `false` = git ANSWERED "no" (not a repository, or an
+ *  unborn branch), `null` = git could not be ASKED (the process never ran — the runner reports -1).
+ *
+ *  The two ratchet checkers (test-framework-policy-check.ts / test-isolation-check.ts) carried this
+ *  body byte-identically, each folding every failure into `false` via a throwing `execFileSync`
+ *  (semantic-dedup-scan finding `git-showfile-headexists`, runId
+ *  `semantic-dedup-scan-1792847536579`). Both call sites treat "not a usable git worktree" as
+ *  FAIL-CLOSED (exit 2 with a message telling the caller to pass --baseline-file), so there the
+ *  `null ⇒ false` fold is the conservative direction for BOTH non-true states — it stays at the
+ *  call sites, not in here. */
+export function headExists(root: string): boolean | null {
+  const r = git(root, ['rev-parse', '--verify', 'HEAD']);
+  if (r.status === 0) return true;
+  if (r.status === -1) return null;
+  return false;
+}
+
+/** The committed text of `rel` at `ref` (`git show <ref>:<rel>`). `null` = the blob is not there
+ *  OR the read could not be performed — the same fold as `revParseSha`, and the ratchet checkers
+ *  treat it identically ("no committed baseline yet" ⇒ bootstrap), which is only reachable after
+ *  `headExists` already returned true. */
+export function showFile(root: string, ref: string, rel: string): string | null {
+  const r = git(root, ['show', `${ref}:${rel}`]);
+  return r.status === 0 ? r.stdout : null;
 }
 
 /** Is `ancestor` an ancestor of (or equal to) `descendant`? — `git merge-base --is-ancestor`, whose

@@ -74,6 +74,10 @@ export { canonicalTestFiles };
 // the same shape of duplication (tasks/
 // gap-routine-semantic-dedup-scan-parse-line-list-identical).
 import { parseBaselineCount, parseRatchetEntryLines } from "./ratchet-baseline.ts";
+// The HEAD-existence probe and the `<ref>:<path>` reader are the shared git primitives — they were
+// byte-identical copies here and in test-isolation-check.ts (.quay/routine-findings.jsonl finding
+// `git-showfile-headexists`, runId `semantic-dedup-scan-1792847536579`).
+import { headExists, showFile } from "./git-runner.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -297,29 +301,11 @@ export function runPolicyChecks(i: PolicyCheckInput): string[] {
 }
 
 // ── git baseline resolution ─────────────────────────────────────────────────────────────────────────
-
-/** True iff `git -C <root>` resolves a HEAD commit (usable git worktree). */
-function gitHeadExists(root: string): boolean {
-  try {
-    execFileSync("git", ["-C", root, "rev-parse", "--verify", "HEAD"], {
-      stdio: ["ignore", "ignore", "ignore"],
-    });
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-function gitShowFile(root: string, ref: string, rel: string): string | null {
-  try {
-    return execFileSync("git", ["-C", root, "show", `${ref}:${rel}`], {
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "ignore"],
-    });
-  } catch {
-    return null;
-  }
-}
+//
+// The HEAD-existence probe and the `<ref>:<path>` reader live in git-runner.ts (`headExists` /
+// `showFile`) — they were byte-identical copies here and in test-isolation-check.ts
+// (.quay/routine-findings.jsonl finding `git-showfile-headexists`, runId
+// `semantic-dedup-scan-1792847536579`). Only `gitTestFilesAtRef` (a single copy, no twin) stays local.
 
 function gitTestFilesAtRef(root: string, ref: string): Set<string> {
   const out = new Set<string>();
@@ -400,7 +386,7 @@ export function main(argv: string[]): number {
     // the file set so AC5's "new" classification has a baseline.
   } else {
     // No overrides — the git baseline is REQUIRED. Fail closed unless it is a true bootstrap.
-    const gitOk = gitHeadExists(root);
+    const gitOk = headExists(root);
     if (!gitOk) {
       console.error(
         "ERROR: test-framework-policy-check needs a git baseline (git HEAD) to enforce the AC4 ratchet and AC5 @test-group rule, but this is not a usable git worktree. " +
@@ -408,7 +394,7 @@ export function main(argv: string[]): number {
       );
       process.exit(2);
     }
-    const committed = gitShowFile(root, "HEAD", dataFileRel);
+    const committed = showFile(root, "HEAD", dataFileRel);
     if (committed === null) {
       // TRUE bootstrap: the data file is not yet committed (the mechanism's first commit). The
       // current list becomes the baseline; the ratchet starts being enforceable after this commit.
