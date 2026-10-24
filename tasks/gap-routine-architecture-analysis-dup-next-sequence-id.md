@@ -3,7 +3,7 @@ id: gap-routine-architecture-analysis-dup-next-sequence-id
 title: "architecture-analysis: archguard dup 6e19b6d306d82356: 97 tokens/8
   lines; both scan ^PREFIX-(\\d{3,})$ for max+1, differing only in the AC/GOAL
   literal."
-status: todo
+status: ready
 labels:
   - gap
   - routine-filed
