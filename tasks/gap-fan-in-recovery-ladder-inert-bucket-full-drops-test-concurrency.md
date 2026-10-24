@@ -261,14 +261,6 @@ test at plugin/test/ownership-active-slice-adapter.test.mjs:109:1
 
 该轴仍暗,理由: 本任务只改 `scripts/test.sh` 一个 bash 分支的 argv 转发、一个 plan-only 探针 seam 与一条下游断言，不新增/删除模块、不改变依赖方向（L_D/L_G 无读数可采）；内存与并发行为的变化由 AC1/DoD 的真实 `.quay/fan-in-suite-*.log` 与 `concurrency.maxConcurrentOverall` 读数直接度量。
 
-## Blocker
-
-**2026-10-23T22:35:17.642Z — worker 未落地（exited-not-landed）**
-
-- 未落地原因：step=suite: oom-killed (2) — recovery exhausted at floor concurrency 32 — no declared rung produced a complete verdict (64,48,32); needs a code/config fix, see plugin/scripts/full-suite-runner.ts
-- run_id：wk-prod-anchor
-- session_id：5f8eee7f-1186-4ffc-8337-bc7939637ed6
-
 ## Round 2026-10-24 — 复位轮实测与残差定位（本轮未改代码）
 
 **本轮做了什么**：把 develop 合入工作树（4 个提交，全部是 task 状态记录 / 无关文档），逐条复核 AC，
