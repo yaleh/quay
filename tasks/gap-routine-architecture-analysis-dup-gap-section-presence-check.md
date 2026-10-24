@@ -3,7 +3,7 @@ id: gap-routine-architecture-analysis-dup-gap-section-presence-check
 title: "architecture-analysis: archguard dup 0bdbac73a819ef6f: 118 tokens/11
   lines; the two checks differ only in section name and code prefix, so a third
   section would be copied a third t"
-status: ready
+status: done
 labels:
   - gap
   - routine-filed
