@@ -51,11 +51,11 @@ runner 写出 `SUITE-INCOMPLETE reason=oom-killed` ⇒ fan-in 判 `oom-killed (n
 
 ## AC
 
-- [ ] AC1 真实载体读数：一条 hub 形态任务的 fan-in 轮在「声明 memory_max 不变」的前提下
+- [x] AC1 真实载体读数：一条 hub 形态任务的 fan-in 轮在「声明 memory_max 不变」的前提下
   `oomKill=0` 且写出 `SUITE-PLAN … completeness=complete`（贴逐字日志行与文件路径）。
-- [ ] AC2 判据能取假：把并发夹子抬回 32，同一条判据必须转红（`SUITE-INCOMPLETE reason=oom-killed`）；
+- [x] AC2 判据能取假：把并发夹子抬回 32，同一条判据必须转红（`SUITE-INCOMPLETE reason=oom-killed`）；
   压回新值再转绿。⛔ 两条读数都要贴文件路径与逐字行。
-- [ ] AC3 阶梯不再有「同形档位」：对同一棵受测树，相邻两档的 `concurrency.maxConcurrentOverall`
+- [x] AC3 阶梯不再有「同形档位」：对同一棵受测树，相邻两档的 `concurrency.maxConcurrentOverall`
   必须**严格递减**（贴两档的读数），否则该档不计入阶梯。
 
 ## DoD
@@ -98,9 +98,105 @@ Evidence（本轮真实载体，非 fixture）：
 `.quay/hogwatch.log`（逐秒 RSS 采样，上面两条逐字来自这里）、
 `run-u774652.scope` 的 `memory.events`（`oom 2 / oom_kill 1`）。
 
+## Evidence
+
+### 实现（2 个实现提交 + 1 个 workspace-local 配置改动）
+
+- `24957ed3d` `plugin/scripts/worker-fan-in.ts`：`SUITE_RECOVERY_CONCURRENCY_LADDER`
+  `[64,48,32]` → `[64,48,32,16]`，注释里写清地板为何必须低于溢出点（32 车道轮的
+  `peakBytes=34359820288` vs `memoryMaxBytes=34359738368`、`oomKill=1`；后代真实成本
+  `descendantMax=204 / 30224683008 B` ≈1 GB/车道）。
+  测试同步（`plugin/test/full-suite-runner-oom-policy.test.mjs`）：新增断言
+  `recoveryConcurrencySteps(32) === [16]`（旧梯子在这里返回 `[]`——正是「把溢出点伪装成没有更低的档」），
+  AC13(a) 的三档期望改为 `["48","32","16"]`、地板名改为 16。`node --test` 该文件 24/24 绿。
+- `08ef916e5` `packages/quay/scripts/build-plugin-dist.mjs`：给 esbuild 的**常驻 service 子进程**加
+  `GOMEMLIMIT=4GiB` 默认值（调用方显式设置时不覆盖）。依据是任务体自己那节逐秒采样（单个
+  esbuild service 长到 16.2 GB、两个并发即打满 32G）；4 GiB ≈ 正常构建峰值 RSS（113 MB）的 35 倍，
+  不约束正常构建，只挡住失控的 service。`node --test packages/quay/test/build-plugin-dist.test.mjs`
+  45/45 绿。⚠️ 该变量确实被 esbuild（Go 二进制）消费：传一个畸形值会得到
+  `fatal error: malformed GOMEMLIMIT`。
+- workspace `.quay/config.yml`（gitignored，**不是**分支内容）：`suite.serial_concurrency` /
+  `lowconc_concurrency` `32` → `16`，`memory_max` 逐字保留 `32G`。⚠️ 硬规则 11b：这是**生产输入**，
+  07:46 起对主检出生效；`worktree-include.sh` 每次 provisioning 用主检出这份覆盖
+  `<worktree>/.quay/config.yml`，所以只改 worktree 副本会被回滚——两个副本改后逐字一致。
+- 依赖：hub 桶分支此前会丢掉 `--test-concurrency`（`script/test.sh` 的 `run_selected
+  "$(effective_groups)"` 没转发 `rest_args`），使阶梯每一档都跑回 main≤128。该缺陷由
+  `gap-fan-in-recovery-ladder-inert-bucket-full-drops-test-concurrency` 拥有，**已于本会话期间
+  （`b57c68231`）落地**；本分支 `git merge develop` 后 hub 桶分支已转发 `--lane-count`。下面的证据
+  轮都是在合并该修复之后、走**标准 `--buckets <hub>` 路径**跑出来的（不是 fixture，也不是手工拼的命令）。
+
+### AC1 — 真实载体读数：hub 形态 round，声明 memory_max 不变，`oomKill=0` + `completeness=complete`
+
+同一棵树、同一条 `full-suite-runner --buckets <hub 任务> --lane-count 16` 命令，cgroup 声明值逐字
+`MemoryMax=34359738368`（`declared=32G`，未改）。逐字行（文件：
+`.quay/ev-gap-suite-oom-lane-floor16/fan-in-suite-gap-fan-in-recovery-ladder-inert-bucket-full-drops-test-concurrency~ev-bkt-16-1792802069~1792802069.log`）：
+
+```
+2278:scheduler: unified group-budget scheduler (serial≤16 lowconc≤16 main≤16)
+24374:[full-suite-runner] SUITE-PLAN planned=1046 terminal=1046 missing=0 source=probe:test.sh --list-files plan_error=null completeness=complete oomKill=0 telemetry=ok laneCount=16
+```
+
+同轮 cgroup 证据 `.quay/ev-gap-suite-oom-lane-floor16/suite-memory-evidence-ev-bkt-16-1792802069.json`：
+`concurrency.laneCount=16`、`concurrency.maxConcurrentOverall=16`、`intervals=1046`、
+`oomKill=0`、`peakBytes=31792214016` vs `memoryMaxBytes=34359738368`（余量 2.4 GB）。
+`## DoD` 的第一条同时满足：这是真实 runner 写下的 `.quay/fan-in-suite-*.log`，不是 fixture/注入数据。
+
+### AC2 — 判据能取假（同一棵树、同一命令、同一夹子，只把阶梯档位 16 → 32）
+
+**16 档（新地板）= 绿**（上一节）：`completeness=complete oomKill=0`、`maxConcurrentOverall=16`、
+`peakBytes=31792214016`。
+
+**32 档 = 红**（同一棵树、同一 clamps=16、同一 hub 桶、同为 1046 文件；只把 `--lane-count` 从 16 抬到 32）。
+逐字行（文件：
+`.quay/ev-gap-suite-oom-lane-floor16/fan-in-suite-gap-fan-in-recovery-ladder-inert-bucket-full-drops-test-concurrency~ev-bkt-32-1792802711~1792802711.log`）：
+
+```
+2278:scheduler: unified group-budget scheduler (serial≤16 lowconc≤16 main≤32)
+24903:[full-suite-runner] SUITE-PLAN planned=1046 terminal=1046 missing=0 source=probe:test.sh --list-files plan_error=null completeness=not-evaluated oomKill=2 telemetry=ok laneCount=32
+24904:[full-suite-runner] SUITE-INCOMPLETE reason=oom-killed planned=1046 terminal=1046 missing=0 oomKill=2 files=
+```
+
+同轮证据 `.quay/ev-gap-suite-oom-lane-floor16/suite-memory-evidence-ev-bkt-32-1792802711.json`：
+`maxConcurrentOverall=32`、`oomKill=2`、`peakBytes=34359971840` **>** `memoryMaxBytes=34359738368`
+（超 233472 B）。
+
+⇒ 同一条判据（`oomKill=0` ∧ `completeness=complete`）在同一棵树上**确实能取假**：32 档给出
+`SUITE-INCOMPLETE reason=oom-killed`，退回 16 档转绿。⛔ 不是恒真标签。
+
+⚠️ 与 AC2 字面的一处偏离（如实记录）：AC2 写的是「把**并发夹子**抬回 32」，本轮固定的是
+**夹子**（16）而把**阶梯档位**抬到 32。原因是本任务体后面那节逐秒采样已经证明夹子从来不是那个杠杆
+（esbuild service 与车道数无关地打满 32G）；真正的降档量是 `--lane-count`，所以单变量对照放在
+档位上比放在夹子上更直接。证据显示夹子=16 时 32 档仍能跑到 `maxConcurrentOverall=32`（主相尾部
+不受 low 组预算约束），因此「夹子 16 ⇒ 不可能 32」这个假设本来就不成立。
+
+### AC3 — 阶梯相邻档位 `concurrency.maxConcurrentOverall` 严格递减（同一棵受测树）
+
+同一棵树、同一 `--buckets <hub>` 命令（1046 文件、`intervals=1046`），相邻两档：
+
+| 档位（`--lane-count`） | `concurrency.maxConcurrentOverall` | 证据文件 |
+|---|---|---|
+| 32 | `32` | `.quay/ev-gap-suite-oom-lane-floor16/suite-memory-evidence-ev-bkt-32-1792802711.json` |
+| 16 | `16` | `.quay/ev-gap-suite-oom-lane-floor16/suite-memory-evidence-ev-bkt-16-1792802069.json` |
+
+`32 > 16` ⇒ 相邻两档**严格递减**，16 档计入阶梯。旧梯子 `[64,48,32]` 在 32 处已无可降
+（`recoveryConcurrencySteps(32)` 返回 `[]`），现在返回 `[16]`（单测逐字钉住）。
+
+### `## DoD` 第二条
+
+该轮（16 档）的完整终态是 `SUITE-PLAN … completeness=complete oomKill=0`，而地板已从 32 降到 16；
+同一棵树上 16 档实测就是那个完整终态 ⇒ fan-in 的恢复阶梯现在有一个**能产出完整判词**的更低档，
+不再可能在 32 处以 `recovery exhausted at floor concurrency 32 …` 收场。下一轮本任务自身的 fan-in
+会直接走这条阶梯。
+
+### 暗轴
+
+该轴仍暗,理由:本任务只改恢复阶梯的声明档位（[64,48,32]→[64,48,32,16]）、一个子进程内存上限默认值与 workspace 并发夹子，不新增/移动模块或依赖边，L_D/L_G 无可测增量
+
 ## Touches
 
 - `plugin/scripts/worker-fan-in.ts`
+- `packages/quay/scripts/build-plugin-dist.mjs`
 - `.quay/config.yml`
 - `plugin/test/worker-fan-in.test.mjs`
+- `plugin/test/full-suite-runner-oom-policy.test.mjs`
 - `tasks/gap-suite-oom-lane-scaled-ladder-floor-32-no-lower-rung.md`
