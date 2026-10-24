@@ -2681,7 +2681,11 @@ export async function runMechanicalFanIn(opts: MechanicalFanInOptions): Promise<
     // 4. delta 断言面判定（doc-only 跳过 suite，code 跑 suite；判不出 fail-closed 跑 suite）。
     const deltaT0 = Date.now();
     const fork = await mechSh(["git", "-C", worktree, "merge-base", mergeTarget, "HEAD"], 30_000);
-    const deltaFiles = await mechSh(["git", "-C", worktree, "diff", "--name-only", (fork.stdout || "").trim(), "HEAD"], 30_000);
+    // ⚠️ `-c core.quotepath=false`（gap-fan-in-suite-skip-quoted-nonascii-doc-path）：git 默认把非 ASCII
+    //    路径 C-quote 成 `"meta/META-017-\350\257\267….md"`，该形态不再以 `meta/` 开头 ⇒ isDocPath 返回
+    //    false ⇒ 整棵树被判 code ⇒ doc-only fan-in 永不进 skip 分支（生产实测 4 次全量 suite 白跑，其中
+    //    一轮 OOM）。与本文件外其它同类调用点同款（硬规则 5b：缺陷成簇）。
+    const deltaFiles = await mechSh(["git", "-C", worktree, "-c", "core.quotepath=false", "diff", "--name-only", (fork.stdout || "").trim(), "HEAD"], 30_000);
     const deltaList = (deltaFiles.stdout || "").split("\n").map((s) => s.trim()).filter(Boolean);
     let codeDelta = "";
     if (deltaList.length > 0) {
@@ -2699,7 +2703,9 @@ export async function runMechanicalFanIn(opts: MechanicalFanInOptions): Promise<
       if (prevCommit) {
         const anc = await mechSh(["git", "-C", worktree, "merge-base", "--is-ancestor", prevCommit, "HEAD"], 30_000);
         if (anc.ok) {
-          const sincePrev = await mechSh(["git", "-C", worktree, "diff", "--name-only", prevCommit, "HEAD"], 30_000);
+          // 同上一处：这条输出也直接喂 `--classify-delta`（reuse-advance 判定），C-quote 会把非 ASCII 的
+          // doc/inert 前进面判成 code ⇒ 白白丢掉一次可复用的 green suite。
+          const sincePrev = await mechSh(["git", "-C", worktree, "-c", "core.quotepath=false", "diff", "--name-only", prevCommit, "HEAD"], 30_000);
           const sinceList = (sincePrev.stdout || "").split("\n").map((s) => s.trim()).filter(Boolean);
           const adv = await mechSh([...classify, "--classify-delta", "--root", worktree, ...sinceList], 120_000);
           // 前进面全 doc/inert ⇒ 复用上一 green（同一映射：【没判出来】不构成复用理由）
