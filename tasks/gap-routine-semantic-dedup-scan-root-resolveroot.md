@@ -3,7 +3,7 @@ id: gap-routine-semantic-dedup-scan-root-resolveroot
 title: "semantic-dedup-scan: Four different root semantics under one name; only
   fan-in-runid + inner-idle-log are genuinely foldable into a
   resolveRoot(rootArg, defaultRoot)."
-status: todo
+status: ready
 labels:
   - gap
   - routine-filed
