@@ -27,6 +27,7 @@ import {
   existingProposalKeys,
   proposalBoardStatus,
   nextAcId,
+  nextSequenceId,
   parseProbeOutput,
   fileProposals,
   writeDraftProposal,
@@ -244,7 +245,23 @@ test('existingProposalKeys 与候选用同一个渲染函数 ⇒ 同内容的提
   assert.ok([...existing][0].length > 0);
 });
 
-// ── nextAcId ─────────────────────────────────────────────────────────────────
+// ── nextSequenceId / 两个薄包装 ───────────────────────────────────────────────
+// 唯一的扫描定义在 nextSequenceId（archguard dup 6e19b6d306d82356）；下面三条一起把它的两侧都钉住：
+// ① 两个 id 在 fixture 上不变（等价性），② prefix 是字面量而非正则（转义生效），③ digits 真的参与判定。
+test('nextSequenceId: max+1 + digits 补零；prefix 只匹配自己的族', () => {
+  const records = [{ id: 'AC-001' }, { id: 'AC-179' }, { id: 'GOAL-042' }];
+  assert.equal(nextSequenceId(records, 'AC'), 'AC-180');
+  assert.equal(nextSequenceId(records, 'GOAL'), 'GOAL-043');
+  // digits 同时是「匹配的最短位数」与「补零位数」（旧正则 `\d{3,}` + padStart(3) 的同款耦合）。
+  assert.equal(nextSequenceId([{ id: 'AC-0001' }, { id: 'AC-0179' }], 'AC', 4), 'AC-0180');
+  assert.equal(nextSequenceId([{ id: 'AC-179' }], 'AC', 4), 'AC-0001');
+  assert.equal(nextSequenceId([], 'AC'), 'AC-001');
+  // 位数不足的编号不是本族编号（同旧正则的 \d{3,}）——⛔ 不能被当成 max 的来源。
+  assert.equal(nextSequenceId([{ id: 'AC-9' }], 'AC'), 'AC-001');
+  // 前缀里的正则元字符按字面处理：'A.C' 不得匹配 'AXC-001'。
+  assert.equal(nextSequenceId([{ id: 'AXC-001' }], 'A.C'), 'A.C-001');
+});
+
 test('nextAcId: 取 max+1，⛔ 不复用已存在编号', () => {
   assert.equal(nextAcId([{ id: 'AC-001' }, { id: 'AC-179' }, { id: 'GOAL-003' }]), 'AC-180');
   assert.equal(nextAcId([]), 'AC-001');

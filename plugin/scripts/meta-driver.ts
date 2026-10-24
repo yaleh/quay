@@ -78,6 +78,9 @@ import { stripEvidenceTimestamp, createMetaStore } from "./driver-runtime.ts";
 // 必须用同一段标题（OVERRIDE_SECTION）与同一抽取逻辑（extractSectionContent），⛔ 不各写一份
 // （硬规则 5b：同一原则在第二个载体上的适用点必须复用同一判据，否则标题漂移会让检查器与本文件各说各话）。
 import { extractSectionContent, OVERRIDE_SECTION } from "./dispatch-preference-check.ts";
+// 正则转义的单一真相源（同 24 个 plugin/scripts 消费者）——下面的 nextSequenceId 由字面前缀拼正则，
+// ⛔ 不在此处内联第二份 escaper（那正是本任务要消掉的重复的同类）。
+import { escapeRegExp } from "./regex-escape.ts";
 
 /** 载体：每轮一条记录（与 quality-round.jsonl 同族，gitignored 运行时状态）。 */
 export const ROUND_CARRIER_REL = path.join(".quay", "meta-driver-round.jsonl");
@@ -1213,14 +1216,23 @@ export function existingProposalKeys(records: Array<Record<string, unknown>>): B
   return new BoardKeys(owners);
 }
 
-/** 下一个可用 AC id（max + 1，三位补零）。⛔ 不复用已存在的编号（硬规则 8：编号不得复用）。 */
-export function nextAcId(records: Array<Record<string, unknown>>): string {
+/** 下一个可用的顺序编号：扫 `${prefix}-<≥digits 位数字>`，取 max+1，按 digits 左补零。
+ *  ⛔ 不复用已存在的编号（硬规则 8：编号不得复用）。
+ *  为什么是一个函数而不是两套：AC 与 GOAL 的**唯一**差别就是前缀字面量与位数，两份各自演化的
+ *  扫描循环是对同一规则的第二个定义（硬规则 5b）——archguard dup 6e19b6d306d82356 记的就是它。 */
+export function nextSequenceId(records: Array<Record<string, unknown>>, prefix: string, digits = 3): string {
+  const re = new RegExp(`^${escapeRegExp(prefix)}-(\\d{${digits},})$`);
   let max = 0;
   for (const r of records) {
-    const m = String(r.id ?? "").match(/^AC-(\d{3,})$/);
+    const m = String(r.id ?? "").match(re);
     if (m) max = Math.max(max, Number(m[1]));
   }
-  return `AC-${String(max + 1).padStart(3, "0")}`;
+  return `${prefix}-${String(max + 1).padStart(digits, "0")}`;
+}
+
+/** 下一个可用 AC id（薄包装：nextSequenceId 是唯一定义）。⛔ 不复用已存在的编号（硬规则 8：编号不得复用）。 */
+export function nextAcId(records: Array<Record<string, unknown>>): string {
+  return nextSequenceId(records, "AC");
 }
 
 /** 写一条 draft 提案。⛔ 永不传 --status：goal-store 的 write 缺省即 draft（构造上惰性）。 */
@@ -2047,14 +2059,9 @@ export interface DecisionItem {
   touches?: string;
 }
 
-/** 下一个可用 GOAL id（max+1）。⛔ 不复用编号（硬规则 8）。 */
+/** 下一个可用 GOAL id（薄包装：nextSequenceId 是唯一定义）。⛔ 不复用编号（硬规则 8）。 */
 export function nextGoalId(records: Array<Record<string, unknown>>): string {
-  let max = 0;
-  for (const r of records) {
-    const m = String(r.id ?? "").match(/^GOAL-(\d{3,})$/);
-    if (m) max = Math.max(max, Number(m[1]));
-  }
-  return `GOAL-${String(max + 1).padStart(3, "0")}`;
+  return nextSequenceId(records, "GOAL");
 }
 
 /** 决策的 origin 正文：问题 + 选项 + 读数出处。`origin` 是 goal-store 的必填 fail-closed 字段，

@@ -3,7 +3,7 @@ id: gap-routine-architecture-analysis-dup-strict-jsonl-reader-two-copies
 title: "architecture-analysis: archguard dup 97719ef99c4433c0: 251 tokens/19
   lines; both bodies are the same strict JSONL-object reader (missing flag,
   throw on non-object) differing only i"
-status: ready
+status: done
 labels:
   - gap
   - routine-filed
@@ -63,11 +63,3 @@ Extract one readJsonlStrict(path) helper and make both readers delegate; AC: one
 - `plugin/scripts/discovery-method-routine.ts`
 - `plugin/test/discovery-method-routine.test.mjs`
 - `tasks/gap-routine-architecture-analysis-dup-strict-jsonl-reader-two-copies.md`
-
-## Blocker
-
-**2026-10-24T14:28:00.502Z — worker 未落地（exited-not-landed）**
-
-- 未落地原因：step=suite: AssertionError [ERR_ASSERTION]: at least one bin is under-sampled (otherwise the rule is vacuous) [baseline A/B: HARD RED (task-introduced-red) — the task's red set is NOT a subset of the develop baseline red set: added=experiments/quay-perpetual-stream/test/symlink-mirror-invocation.test.mjs changed=-]
-- run_id：wk-prod-anchor
-- session_id：a7a630f0-bd08-47ca-b7c8-fb6109e4b458
