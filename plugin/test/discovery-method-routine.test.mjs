@@ -816,6 +816,32 @@ test("readDiscoveryMethodConfig — an absent section is present:false with no e
   assert.throws(() => readCarrierRounds(path.join(ws, CARRIER_REL)), /not valid JSON/);
 });
 
+test("both JSONL readers — ONE strict reader, both call sites, a non-object line still THROWS", () => {
+  // task gap-routine-architecture-analysis-dup-strict-jsonl-reader-two-copies: the carrier reader and
+  // the ledger reader had byte-identical bodies (missing flag + throw on non-object), differing only in
+  // the path variable. They now both delegate to one `readJsonlStrict`. This pins the property that
+  // delegation must not lose: absent ≠ unreadable (硬规则 3b), on BOTH call sites.
+  const ws = makeWorkspace();
+  const arms = [
+    ["readCarrierRounds", readCarrierRounds, path.join(ws, CARRIER_REL)],
+    ["readLedgerRecords", readLedgerRecords, path.join(ws, BUDGET_LEDGER_REL)],
+  ];
+  for (const [name, read, p] of arms) {
+    fs.mkdirSync(path.dirname(p), { recursive: true });
+    assert.deepEqual(read(p), { missing: true, records: [] }, `${name}: an absent file is its own value, not an error`);
+
+    fs.writeFileSync(p, '{"kind":"a"}\n\n{"kind":"b"}\n', "utf8");
+    assert.deepEqual(read(p), { missing: false, records: [{ kind: "a" }, { kind: "b" }] }, `${name}: object lines parse`);
+
+    for (const bad of ["[]", "42", "null", '"a string"']) {
+      fs.writeFileSync(p, `{"kind":"ok"}\n${bad}\n`, "utf8");
+      assert.throws(() => read(p), /:2 is not a JSON object/, `${name}: line ${bad} is not an object ⇒ THROW`);
+    }
+    fs.writeFileSync(p, '{"kind":"ok"}\n{ torn\n', "utf8");
+    assert.throws(() => read(p), /:2 is not valid JSON/, `${name}: a torn line ⇒ THROW`);
+  }
+});
+
 test("discoveryMethodRoutineFromConfig — absent ⇒ NO routine assembled (the host's routine set is unchanged)", () => {
   const absent = makeWorkspace();
   writeConfig(absent, "loop:\n  board: native\n");
