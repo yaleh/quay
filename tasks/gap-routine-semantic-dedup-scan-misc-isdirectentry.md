@@ -3,7 +3,7 @@ id: gap-routine-semantic-dedup-scan-misc-isdirectentry
 title: "semantic-dedup-scan: Three basename-equality copies; precommit-guard and
   the .mjs inline their own name literal instead of calling the parameterised
   shared version (the .mjs one ma"
-status: todo
+status: ready
 labels:
   - gap
   - routine-filed
