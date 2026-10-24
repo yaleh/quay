@@ -50,7 +50,7 @@ classifyDeltaPaths(root, [quoted]).codePaths.length = 1
 
 <!-- dedup-ref --> 合并判断 = **separate**：open `gap-instrument-decay-dedup-reader-round-log-path`（todo）改的是 `quality-gate-driver.ts` 的立案去重读侧路径，与本条无共享机制；本条的写面是 `worker-fan-in.ts` 的 delta 分类输入。
 
-**prior-claim**：
+prior-claim:
 - `gap-ff-merge-quotepath-breaks-inert-retry`（done）—— 同一缺陷类的上一处；它自己声明余下 37 个调用点留给后续任务，本条是那两个闸门调用点的后续。
 - `gap-fan-in-step-trace-suite-step-stopped-writing`（done）—— 修的是 writer-split（suite 决策步只写 per-run 日志）；该腐烂已消失（`ac-precheck`/`suite-start`/`suite-end` 现均在共享载体里持续写入），本条是**另一个成因**的缺席。
 - `gap-fan-in-step-trace-rate-stopped-adjudication`（done）—— 为 5 个其它分组建了机器可读裁定；`suite-skip` 当时不在 `decayed[]`，故未被它覆盖。
