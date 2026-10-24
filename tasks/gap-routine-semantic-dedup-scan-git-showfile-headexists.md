@@ -2,7 +2,7 @@
 id: gap-routine-semantic-dedup-scan-git-showfile-headexists
 title: "semantic-dedup-scan: Both bodies byte-identical modulo line wrapping and
   a comment saying it mirrors the other file."
-status: todo
+status: ready
 labels:
   - gap
   - routine-filed
