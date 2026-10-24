@@ -502,13 +502,14 @@ export function readDiscoveryMethodConfig(workspaceRoot: string): DiscoveryMetho
   return { present: true, config, error };
 }
 
-// ── the carrier: append-only JSONL of scan-round lines ──────────────────────────────────────────────
-/** Read the carrier's existing lines. Returns `{missing:true}` when the file does not exist. A line
- *  that is not JSON, or is not an object, THROWS — an unreadable carrier must never be shaped like
- *  "0 previous rounds" (硬规则 3b). */
-export function readCarrierRounds(carrierPath: string): { missing: boolean; records: Record<string, unknown>[] } {
-  if (!fs.existsSync(carrierPath)) return { missing: true, records: [] };
-  const raw = fs.readFileSync(carrierPath, "utf8");
+/** THE one strict JSONL-object reader — the carrier and the ledger are both append-only JSONL, and
+ *  both must answer "unreadable" and "absent" with different values (硬规则 3b). Returns
+ *  `{missing:true}` ONLY when the file does not exist: that is a real "no records yet", its own value
+ *  and NOT an error. A line that is not JSON, or is not a JSON object, THROWS — an unreadable carrier
+ *  must never be shaped like "0 previous records". */
+function readJsonlStrict(filePath: string): { missing: boolean; records: Record<string, unknown>[] } {
+  if (!fs.existsSync(filePath)) return { missing: true, records: [] };
+  const raw = fs.readFileSync(filePath, "utf8");
   const records: Record<string, unknown>[] = [];
   const lines = raw.split("\n");
   for (let i = 0; i < lines.length; i++) {
@@ -518,12 +519,19 @@ export function readCarrierRounds(carrierPath: string): { missing: boolean; reco
     try {
       rec = JSON.parse(line);
     } catch (e) {
-      throw new Error(`${carrierPath}:${i + 1} is not valid JSON — ${(e as Error).message}`);
+      throw new Error(`${filePath}:${i + 1} is not valid JSON — ${(e as Error).message}`);
     }
-    if (!rec || typeof rec !== "object" || Array.isArray(rec)) throw new Error(`${carrierPath}:${i + 1} is not a JSON object`);
+    if (!rec || typeof rec !== "object" || Array.isArray(rec)) throw new Error(`${filePath}:${i + 1} is not a JSON object`);
     records.push(rec as Record<string, unknown>);
   }
   return { missing: false, records };
+}
+
+// ── the carrier: append-only JSONL of scan-round lines ──────────────────────────────────────────────
+/** Read the carrier's existing lines. Delegates to `readJsonlStrict` — absent vs unreadable are
+ *  distinct values, and an unreadable carrier must never be shaped like "0 previous rounds" (硬规则 3b). */
+export function readCarrierRounds(carrierPath: string): { missing: boolean; records: Record<string, unknown>[] } {
+  return readJsonlStrict(carrierPath);
 }
 
 /** Append records to the carrier (dir auto-created). One write ⇒ the round's lines land together. */
@@ -620,28 +628,12 @@ export function modelCallsInWindow(records: readonly Record<string, unknown>[], 
  *  spawn; `outcome` = what happened to it; `lock-recovered` = a stale lock holder was reclaimed. */
 export type LedgerRecordKind = "reserve" | "outcome" | "lock-recovered";
 
-/** Read the ledger. `missing:true` when the file does not exist — a real "no reservations yet", which is
- *  its own value and NOT an error. A line that is not a JSON object THROWS: an unreadable ledger must
- *  never be shaped like "nothing was spent" (硬规则 3b) — that is the exact under-count this task
- *  exists to remove, one level down. */
+/** Read the ledger by delegating to `readJsonlStrict`. `missing:true` when the file does not exist — a
+ *  real "no reservations yet", which is its own value and NOT an error. A line that is not a JSON
+ *  object THROWS: an unreadable ledger must never be shaped like "nothing was spent" (硬规则 3b) —
+ *  that is the exact under-count this task exists to remove, one level down. */
 export function readLedgerRecords(ledgerPath: string): { missing: boolean; records: Record<string, unknown>[] } {
-  if (!fs.existsSync(ledgerPath)) return { missing: true, records: [] };
-  const raw = fs.readFileSync(ledgerPath, "utf8");
-  const records: Record<string, unknown>[] = [];
-  const lines = raw.split("\n");
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
-    if (!line.trim()) continue;
-    let rec: unknown;
-    try {
-      rec = JSON.parse(line);
-    } catch (e) {
-      throw new Error(`${ledgerPath}:${i + 1} is not valid JSON — ${(e as Error).message}`);
-    }
-    if (!rec || typeof rec !== "object" || Array.isArray(rec)) throw new Error(`${ledgerPath}:${i + 1} is not a JSON object`);
-    records.push(rec as Record<string, unknown>);
-  }
-  return { missing: false, records };
+  return readJsonlStrict(ledgerPath);
 }
 
 /** Append records to the ledger (dir auto-created). One `appendFileSync` call ⇒ the records land
