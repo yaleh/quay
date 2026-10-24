@@ -200,3 +200,11 @@ Evidence（本轮真实载体，非 fixture）：
 - `plugin/test/worker-fan-in.test.mjs`
 - `plugin/test/full-suite-runner-oom-policy.test.mjs`
 - `tasks/gap-suite-oom-lane-scaled-ladder-floor-32-no-lower-rung.md`
+
+## Blocker
+
+**2026-10-24T01:14:24.615Z — worker 未落地（exited-not-landed）**
+
+- 未落地原因：step=suite: AssertionError [ERR_ASSERTION]: at least one bin is under-sampled (otherwise the rule is vacuous) [baseline A/B: HARD RED (changed-assertion) — the task's red set is NOT a subset of the develop baseline red set: added=- changed=plugin/test/full-suite-runner-cgroup.test.mjs]
+- run_id：wk-prod-anchor
+- session_id：8ee3c1d8-a654-4506-b165-f7b1de7199ed
