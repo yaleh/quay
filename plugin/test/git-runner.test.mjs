@@ -24,7 +24,7 @@ import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { ancestry } from "../scripts/git-runner.ts";
+import { ancestry, headExists, showFile } from "../scripts/git-runner.ts";
 import { buildNonCodeMask } from "../scripts/checker-lib.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -93,6 +93,52 @@ test("ancestry: a directory that is not a repository is null", () => {
   assert.equal(ancestry(dir, "HEAD", "HEAD"), null);
 });
 
+// ── headExists / showFile: the byte-identical pair the two ratchet checkers carried ──────────
+//
+// Both checkers use `headExists` as a FAIL-CLOSED bootstrap probe (exit 2 when it is not a usable
+// git worktree) and `showFile` as "the committed copy of the data file, or none". The cases below
+// pin the states the extraction had to preserve, not just the happy path.
+
+test("headExists: a usable git worktree is true", () => {
+  const { dir } = makeRepo();
+  assert.equal(headExists(dir), true);
+});
+
+test("headExists: a directory that is not a repository is false — git ANSWERED no", () => {
+  const dir = mkTemp("git-runner-nonrepo-");
+  assert.equal(headExists(dir), false);
+});
+
+test("headExists: git missing is null — the process never ran (not folded into false)", () => {
+  // The arm the two callers fold themselves (`null ⇒ fail closed`). Reaching it needs a git that
+  // does not exist: run the helper in a subprocess whose PATH is empty, launched by absolute path.
+  const dir = mkTemp("git-runner-nogit-");
+  const libPath = JSON.stringify(path.join(SCRIPTS_DIR, "git-runner.ts"));
+  const script = `import { headExists } from ${libPath}; process.stdout.write(JSON.stringify(headExists(process.argv[1])));`;
+  const r = spawnSync(process.execPath, ["--no-warnings", "--experimental-strip-types", "-e", script, dir], {
+    encoding: "utf8",
+    timeout: 30_000,
+    env: { ...process.env, PATH: "" },
+  });
+  assert.equal(r.status, 0, `subprocess failed: ${r.stderr}`);
+  assert.equal(r.stdout, "null", "a missing git binary must NOT read as `false` (hard rule 3b)");
+});
+
+test("showFile: returns the committed text of <ref>:<rel>", () => {
+  const { dir, first } = makeRepo();
+  assert.equal(showFile(dir, first, "a.txt"), "one\n");
+});
+
+test("showFile: a path absent at that ref is null", () => {
+  const { dir, first } = makeRepo();
+  assert.equal(showFile(dir, first, "nope.txt"), null);
+});
+
+test("showFile: an unresolvable ref is null", () => {
+  const { dir } = makeRepo();
+  assert.equal(showFile(dir, "0".repeat(40), "a.txt"), null);
+});
+
 // ── regression: the predicate lives in ONE place (the guard that makes the extraction stick) ──
 
 /** The carriers that each held a copy with different plumbing before the extraction — the two the
@@ -135,4 +181,54 @@ test("regression: the ONE home exports the three-state predicate", () => {
   const lib = fs.readFileSync(path.join(SCRIPTS_DIR, "git-runner.ts"), "utf8");
   assert.match(lib, /export function ancestry\b/);
   assert.match(lib, /boolean \| null/, "`ancestry` must keep the null arm — it is not a boolean fold");
+});
+
+// ── regression: headExists / showFile — the `git-showfile-headexists` extraction ──────────────
+//
+// The pair was byte-identical between the two ratchet checkers (the copy even said it "mirrors"
+// the other), so the same guard shape as `ancestry` applies: both carriers must reach the shared
+// module, neither may declare the invocation again, and the null arm must survive.
+
+/** The two ratchet checkers that carried the pair — the files the finding named. */
+const GIT_READ_CARRIERS = [
+  "test-framework-policy-check.ts",
+  "test-isolation-check.ts",
+];
+
+test("regression: no carrier declares its own HEAD probe or `<ref>:<path>` reader", () => {
+  // 硬规则 2 — by POSITION: run over the non-code mask, so the extraction's own comments (which
+  // spell these names) cannot satisfy it while a real declaration/invocation always does.
+  for (const name of GIT_READ_CARRIERS) {
+    const src = fs.readFileSync(path.join(SCRIPTS_DIR, name), "utf8");
+    const mask = buildNonCodeMask(src);
+    const offenders = [];
+    for (const needle of ["rev-parse", "function gitHeadExists", "function gitShowFile"]) {
+      for (const m of src.matchAll(new RegExp(needle.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "g"))) {
+        if (mask[m.index] === 0) offenders.push(src.slice(m.index, m.index + 40).split("\n")[0]);
+      }
+    }
+    assert.deepEqual(
+      offenders,
+      [],
+      `${name} still declares/invokes a git probe of its own (finding \`git-showfile-headexists\` is back). ` +
+        `Import \`headExists\` / \`showFile\` from ./git-runner.ts instead.`,
+    );
+  }
+});
+
+test("regression: every carrier imports `headExists` and `showFile` from the shared module", () => {
+  for (const name of GIT_READ_CARRIERS) {
+    const src = fs.readFileSync(path.join(SCRIPTS_DIR, name), "utf8");
+    assert.match(
+      src,
+      /import \{[^}]*\bheadExists\b[^}]*\bshowFile\b[^}]*\} from "\.\/git-runner\.ts"/,
+      `${name} must import both helpers from ./git-runner.ts`,
+    );
+  }
+});
+
+test("regression: the ONE home exports the pair, with `headExists` keeping its null arm", () => {
+  const lib = fs.readFileSync(path.join(SCRIPTS_DIR, "git-runner.ts"), "utf8");
+  assert.match(lib, /export function headExists\(root: string\): boolean \| null/);
+  assert.match(lib, /export function showFile\(root: string, ref: string, rel: string\): string \| null/);
 });

@@ -78,3 +78,11 @@ Replace both with one nextSequenceId(records, prefix, digits) and keep thin wrap
 - `plugin/scripts/meta-driver.ts`
 - `plugin/test/meta-driver.test.mjs`
 - `tasks/gap-routine-architecture-analysis-dup-next-sequence-id.md`
+
+## Blocker
+
+**2026-10-24T14:47:30.346Z — worker 未落地（exited-not-landed）**
+
+- 未落地原因：step=suite: AssertionError [ERR_ASSERTION]: at least one bin is under-sampled (otherwise the rule is vacuous) [baseline A/B: HARD RED (task-introduced-red) — the task's red set is NOT a subset of the develop baseline red set: added=plugin/test/worktree-process-reaper.test.mjs changed=-]
+- run_id：wk-prod-anchor
+- session_id：85a1bebc-ce20-4441-bc55-6231d225b863
