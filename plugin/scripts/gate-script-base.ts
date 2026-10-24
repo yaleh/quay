@@ -293,12 +293,29 @@ export function flagValue(argv: readonly string[], name: string): string | undef
 // existed only to feed the private copy is gone with it.
 //
 // ⛔ NOT the same function as `repoRoot()` (repo-root.ts): that one WALKS UPWARD from a start dir to
-// discover the repo/workspace root; this one only converts a value the caller already named. The three
-// checkers that default `--root` to the REPO ROOT instead of cwd (fan-in-runid-check / inner-idle-log /
-// crystallization-half-life) are therefore a different behavior and are deliberately NOT folded in
-// here — that divergence is a separate filed finding (`resolveroot-2`).
-export function resolveRoot(rootArg: string | undefined): string {
-  return path.resolve(rootArg ?? process.cwd());
+// discover the repo/workspace root; this one only converts a value the caller already named.
+//
+// THE `defaultRoot` PARAMETER — the second half of the same extraction (semantic-dedup-scan routine,
+// runId `semantic-dedup-scan-1792847536579`, findingId `root-resolveroot`, verdict
+// `divergent-implementation`, suggestedAction `extract`): two callers (fan-in-runid-check /
+// inner-idle-log) had re-implemented the SAME "`--root` if given, else a default" rule with a
+// DIFFERENT default (the repo root rather than cwd). The rule, not the default, is the shared concept,
+// so the default became a parameter: `resolveRoot(flagValue(args, "--root"), repoRoot())` keeps each
+// caller's own fallback visible at its call site while the resolution rule lives here once.
+//
+// ⛔ STILL DELIBERATELY OUT (they are NOT "the same function with another default"):
+//   • crystallization-half-life.ts's `resolveRoot` returns a discriminated `{root}|{error,code}` with
+//     a SEED walk — an evaluation result, not a path conversion.
+//   • packages/quay/src/driver-control.ts's `resolveRoot` DISCOVERS a workspace root (`findConfig`
+//     walk) and returns `null` when there is none — a different concept, and a different side of the
+//     package boundary (product core must not import plugin/scripts).
+//
+// `""` — an explicitly-passed empty `--root ""` — resolves to cwd for EVERY caller: `??` falls back
+// only on null/undefined, so `path.resolve("")` is the answer and the default is NOT substituted.
+// That is flagValue's own contract (it retires the falsy form so a passed value never reads as
+// absent); a caller that wants the old falsy reading must write `|| undefined` itself.
+export function resolveRoot(rootArg: string | undefined, defaultRoot: string = process.cwd()): string {
+  return path.resolve(rootArg ?? defaultRoot);
 }
 
 // ── parseJsonArg ────────────────────────────────────────────────────────────────────────────────────
