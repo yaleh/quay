@@ -540,28 +540,45 @@ export function checkDirectiveSections(task, kind) {
 // multi-round Plan-check machinery — that stays DIR-117's directive-class domain.
 import { checkWiringCoverage } from "./wiring-coverage-check.ts";
 
-export function checkGapFinding(task) {
-  const sec = extractSection(task.body, "Finding");
+// The role each required gap section plays, and what a substantive body for it must contain.
+// Kept per-section (not derived from the heading) because these are the only two strings that
+// legitimately differ between the checks — everything else is shared in ONE body below.
+const GAP_SECTION_HINTS = {
+  "Finding": {
+    missing: "plays the role '## Proposal' plays for directives — problem framing + root cause",
+    placeholder: "needs real problem framing + root cause, not a stub",
+  },
+  "Requested action": {
+    missing: "plays the role a Proposal's chosen mechanism plays",
+    placeholder: "needs a real chosen mechanism, not a stub",
+  },
+};
+
+// SINGLE BODY for both gap-tier section-presence checks. `section` is the `## ` heading to
+// extract, `codePrefix` the assertion-code stem (`<prefix>-missing|placeholder|present`); the
+// per-section role wording comes from GAP_SECTION_HINTS. Extracted from two byte-identical
+// checks that differed only in heading + code prefix (archguard dup 0bdbac73a819ef6f) — both
+// exports below are thin wrappers, and every code/message they return is unchanged.
+export function checkRequiredSection(task, section, codePrefix) {
+  const hints = GAP_SECTION_HINTS[section];
+  if (!hints) throw new Error(`checkRequiredSection: no hints registered for section '${section}'`);
+  const sec = extractSection(task.body, section);
   if (sec === null) {
-    return { ok: false, code: "gap-finding-missing", message: "no '## Finding' section found (plays the role '## Proposal' plays for directives — problem framing + root cause)" };
+    return { ok: false, code: `${codePrefix}-missing`, message: `no '## ${section}' section found (${hints.missing})` };
   }
   const trimmed = sec.trim();
   if (trimmed.length < 40) {
-    return { ok: false, code: "gap-finding-placeholder", message: "'## Finding' is empty/placeholder-only (needs real problem framing + root cause, not a stub)" };
+    return { ok: false, code: `${codePrefix}-placeholder`, message: `'## ${section}' is empty/placeholder-only (${hints.placeholder})` };
   }
-  return { ok: true, code: "gap-finding-present", message: `'## Finding' present (${trimmed.length} chars)` };
+  return { ok: true, code: `${codePrefix}-present`, message: `'## ${section}' present (${trimmed.length} chars)` };
+}
+
+export function checkGapFinding(task) {
+  return checkRequiredSection(task, "Finding", "gap-finding");
 }
 
 export function checkGapRequestedAction(task) {
-  const sec = extractSection(task.body, "Requested action");
-  if (sec === null) {
-    return { ok: false, code: "gap-requested-action-missing", message: "no '## Requested action' section found (plays the role a Proposal's chosen mechanism plays)" };
-  }
-  const trimmed = sec.trim();
-  if (trimmed.length < 40) {
-    return { ok: false, code: "gap-requested-action-placeholder", message: "'## Requested action' is empty/placeholder-only (needs a real chosen mechanism, not a stub)" };
-  }
-  return { ok: true, code: "gap-requested-action-present", message: `'## Requested action' present (${trimmed.length} chars)` };
+  return checkRequiredSection(task, "Requested action", "gap-requested-action");
 }
 
 // Mechanism-claim wiring coverage, applied to `## Requested action` (the gap-task analogue of
