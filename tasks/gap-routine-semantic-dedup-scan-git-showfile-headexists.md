@@ -81,6 +81,21 @@ extract
 L_G 未在本轮重测：本次只是把两个函数体搬进既有共享模块（该模块此前已被 4 个脚本依赖），不改变包边界或抽象归属，
 故不给该轴的编造读数。
 
+## Evidence
+
+**2026-10-24（复用同一 worktree 的续做轮）—— 上一轮 suite 红的复核：未复现，且与本任务 delta 无交集。**
+
+- 上轮被判「新增红」的 `experiments/quay-perpetual-stream/test/symlink-mirror-invocation.test.mjs`，
+  失败内容全部落在 `task-status-drift-check.ts` 报告里**未被 redact 的**任务存储读数上（两次调用之间
+  `gap-b15-telemetry-snapshot-untracked` 的 `Touches file(s) not in tree` 一行发生变化）——即 live-board 读数的时序差异。
+  该 checker **不 import `git-runner.ts`**（按位置 grep：`headExists`/`showFile` 零命中），本任务 delta 不经过它。
+- 单独重跑该文件：**48 passed, 0 failed, exit 0**。
+- 本轮复核实跑（均在任务 worktree 内）：`git-runner.test.mjs` → 17/17；`test-framework-policy-check.ts --selftest`
+  → 22/22；`test-isolation-check.ts --selftest` → 58/58。
+- scoped 门 `scripts/test.sh --for-task gap-routine-semantic-dedup-scan-git-showfile-headexists --allow-thin` → **exit 0**。
+  如实记录：第一次调用时 `test-file-snapshot-check` 曾 exit=1；随后直接重跑该 checker **3/3 exit 0**、整门重跑亦绿 ⇒ 未复现，未作因果断言。
+- `anti-drift-touches-check.ts --merge-target develop`：**PASS** —— 4 个实际改动文件全部在 `## Touches` 内。
+
 ## Touches
 - `plugin/scripts/test-framework-policy-check.ts`
 - `plugin/scripts/test-isolation-check.ts`
@@ -95,3 +110,4 @@ L_G 未在本轮重测：本次只是把两个函数体搬进既有共享模块�
 - 未落地原因：step=suite: AssertionError [ERR_ASSERTION]: at least one bin is under-sampled (otherwise the rule is vacuous) [baseline A/B: HARD RED (task-introduced-red) — the task's red set is NOT a subset of the develop baseline red set: added=experiments/quay-perpetual-stream/test/symlink-mirror-invocation.test.mjs changed=-]
 - run_id：wk-prod-anchor
 - session_id：30f158b5-2394-49a3-99b9-49269069e746
+- 续做轮处置：见上 `## Evidence`（该红未复现；本轮 scoped 门与 anti-drift 均绿）。
