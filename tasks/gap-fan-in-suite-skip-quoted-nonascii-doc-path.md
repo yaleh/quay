@@ -2,7 +2,7 @@
 id: gap-fan-in-suite-skip-quoted-nonascii-doc-path
 title: fan-in-step-trace.jsonl 的 suite-skip 读数恒暗：非 ASCII 文档路径被 git C-quote 后判成
   code delta ⇒ doc-only fan-in 永不进 skip 分支（同窗口 4 次全量 suite 白跑）
-status: ready
+status: done
 labels:
   - gap
   - defect
