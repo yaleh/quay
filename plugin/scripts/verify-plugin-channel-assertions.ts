@@ -384,19 +384,57 @@ export function judgeVersionConsistency(v: InstalledVersions): AssertionResult {
   return { id, state: "PASS", detail: `all carriers agree on ${distinct[0]} and none is -dev` };
 }
 
-/** `.quay/plugin` (the project's pointer) must resolve to the plugin Core is verifying. */
-export function judgePointer(linkReal: string | null, installedReal: string | null): AssertionResult {
+/** The project pointer reading, split into the three cases the judge must tell apart (硬规则 5b: this is
+ *  the SECOND judge over `.quay/plugin` in this file — `judgeDriverStatusReadings` is the first). */
+export interface ProjectPointerReading {
+  /** the path exists at all (lstat succeeded) */
+  present: boolean;
+  /** the present path is a symlink (a regular file/dir is user content Q1's migration refuses to touch) */
+  isSymlink: boolean;
+  /** the symlink's resolved target (null when dangling / unresolvable) */
+  real: string | null;
+}
+
+/** `.quay/plugin` (the project's pointer) must resolve to the plugin Core is verifying.
+ *
+ *  `.quay/plugin` is RETIRED (canonical: driver-runtime.ts's `PointerReadingState`; write-side task:
+ *  gap-quay-init-retire-project-plugin-link): a project without it is the NORMAL state, so this
+ *  assertion PASSES on absence instead of degrading to NOT-EVALUATED forever. The other two non-pass
+ *  cases keep their own meaning: a present-but-unreadable path (not a symlink / dangling) is
+ *  NOT-EVALUATED (⛔ "cannot read" ≠ retired, 硬规则 3b), and a symlink at another version is FAIL. */
+export function judgePointer(pointer: ProjectPointerReading, installedReal: string | null): AssertionResult {
   const id = "project-pointer";
-  if (linkReal === null) {
-    return { id, state: "NOT-EVALUATED", detail: "the project has no `.quay/plugin` link (or it does not resolve) — nothing to compare" };
+  if (!pointer.present) {
+    return { id, state: "PASS", detail: ".quay/plugin is absent — retired (quay init no longer creates it); nothing to compare, and that is the normal state" };
+  }
+  if (!pointer.isSymlink) {
+    return { id, state: "NOT-EVALUATED", detail: "`.quay/plugin` exists but is not a symlink (user content, not a pointer) — cannot read it as a version relation" };
+  }
+  if (pointer.real === null) {
+    return { id, state: "NOT-EVALUATED", detail: "the project's `.quay/plugin` symlink does not resolve — nothing to compare" };
   }
   if (installedReal === null) {
     return { id, state: "NOT-EVALUATED", detail: "the installed plugin directory does not resolve — cannot compare the pointer to it" };
   }
-  if (linkReal !== installedReal) {
-    return { id, state: "FAIL", detail: `.quay/plugin → ${linkReal}, but the verified install is ${installedReal} (a stale/other-version pointer)` };
+  if (pointer.real !== installedReal) {
+    return { id, state: "FAIL", detail: `.quay/plugin → ${pointer.real}, but the verified install is ${installedReal} (a stale/other-version pointer)` };
   }
   return { id, state: "PASS", detail: `.quay/plugin resolves to the verified install (${installedReal})` };
+}
+
+/** Read the project pointer for `judgePointer` (lstat first: presence, kind and resolution are three
+ *  different facts — collapsing them into one `realpathOrNull` is what made "retired" unrepresentable). */
+export function readProjectPointer(projectDir: string): ProjectPointerReading {
+  const linkPath = path.join(projectDir, ".quay", "plugin");
+  let present = false;
+  let isSymlink = false;
+  try {
+    present = true;
+    isSymlink = fs.lstatSync(linkPath).isSymbolicLink();
+  } catch {
+    return { present: false, isSymlink: false, real: null };
+  }
+  return { present, isSymlink, real: isSymlink ? realpathOrNull(linkPath) : null };
 }
 
 /** The native provider must NOT freeze a path / mcp_entry into the project config (Core resolves
@@ -466,6 +504,13 @@ export function judgeDriverStatusReadings(json: unknown): AssertionResult {
   }
   if (pointerState === "behind") {
     return { id, state: "FAIL", detail: "`driver status --json`.pointer=behind — `.quay/plugin` points at an OLDER plugin than the running Core" };
+  }
+  // `.quay/plugin` is RETIRED (canonical: driver-runtime.ts's `PointerReadingState`; write-side task:
+  // gap-quay-init-retire-project-plugin-link) — its absence is the NORMAL state, so the verifier
+  // must not degrade to NOT-EVALUATED forever on every migrated project. `not-evaluated` keeps its own
+  // meaning below: the path is there but cannot be read as a version relation (⛔ "cannot read" ≠ retired).
+  if (pointerState === "retired") {
+    return { id, state: "PASS", detail: `readings present; pointer=retired (.quay/plugin is retired — absence is the normal state), loaded_version=${String(obj.loaded_version)}, path_quay_version=${String(obj.path_quay_version)}` };
   }
   if (pointerState === "not-evaluated") {
     return { id, state: "NOT-EVALUATED", detail: `readings present, but pointer=not-evaluated (loaded_version=${String(obj.loaded_version)}, path_quay_version=${String(obj.path_quay_version)})` };
@@ -956,8 +1001,8 @@ export async function runAssertions(opts: RunnerOptions): Promise<AssertionResul
   // 4b. the reachable shell set: every `.sh` the artifact carries is one the runtime can reach.
   push(judgeShippedShellReachable(opts.installedDir, readSourceShellReachability()));
 
-  // 5. `.quay/plugin` → the verified install.
-  push(judgePointer(realpathOrNull(path.join(projectDir, ".quay", "plugin")), installedReal));
+  // 5. `.quay/plugin` → the verified install (absent = retired = PASS; see judgePointer).
+  push(judgePointer(readProjectPointer(projectDir), installedReal));
 
   // 6. native provider not frozen in the project config.
   push(readAndJudgeNativeConfig(projectDir));

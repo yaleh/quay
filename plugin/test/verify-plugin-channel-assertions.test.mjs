@@ -33,7 +33,9 @@ import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
 import {
   describeMarketplaceSource,
+  judgeDriverStatusReadings,
   judgeInstallMatchesBuiltArtifact,
+  judgePointer,
   judgeShippedSetClean,
   readBuiltArtifact,
   readMarketplaceReading,
@@ -405,15 +407,69 @@ test("③ pointer at another version directory ⇒ project-pointer FAIL", () => 
   assert.match(assertionLine(r.stdout, "project-pointer"), /^project-pointer FAIL/);
 });
 
-test("③b a missing pointer is NOT-EVALUATED (exit 3), never PASS", () => {
+// `.quay/plugin` is RETIRED (canonical: driver-runtime.ts's PointerReadingState; write-side task
+// gap-quay-init-retire-project-plugin-link):
+// its absence is the NORMAL state after migration, so the release gate must PASS on it — NOT-EVALUATED
+// would make every migrated project fail the gate forever (gap-driver-status-pointer-retired-state AC3).
+test("③b a missing pointer is PASS (retired), never NOT-EVALUATED", () => {
   const f = allPassFixture("ptr-missing");
   fs.rmSync(path.join(f.project, ".quay", "plugin"));
   const r = runScript(["--installed", f.installed, "--project", f.project, "--scope", "project"], {
     QUAY_VERIFY_PROC_ROOT: f.procRoot,
     QUAY_VERIFY_HOME: f.home,
   });
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.match(assertionLine(r.stdout, "project-pointer"), /^project-pointer PASS/);
+  assert.match(assertionLine(r.stdout, "project-pointer"), /retired/);
+});
+
+// §3b's negative control: a path that EXISTS but is not a symlink is user content Q1's migration refuses
+// to touch — "cannot read" must NOT be folded into "retired" (硬规则 3b).
+test("③c a pointer path that is not a symlink is NOT-EVALUATED, never PASS", () => {
+  const f = allPassFixture("ptr-notlink");
+  const link = path.join(f.project, ".quay", "plugin");
+  fs.rmSync(link);
+  fs.mkdirSync(link);
+  const r = runScript(["--installed", f.installed, "--project", f.project, "--scope", "project"], {
+    QUAY_VERIFY_PROC_ROOT: f.procRoot,
+    QUAY_VERIFY_HOME: f.home,
+  });
   assert.equal(r.status, 3, r.stdout + r.stderr);
   assert.match(assertionLine(r.stdout, "project-pointer"), /^project-pointer NOT-EVALUATED/);
+});
+
+// AC3 (gap-driver-status-pointer-retired-state): `driver status --json`.pointer's five states must be
+// judged distinctly — retired ⇒ PASS, behind ⇒ FAIL, not-evaluated ⇒ NOT-EVALUATED (⛔ not PASS).
+test("AC3 judgeDriverStatusReadings — pointer=retired ⇒ PASS, behind ⇒ FAIL, not-evaluated ⇒ NOT-EVALUATED", () => {
+  const base = { loaded_version: "current", path_quay_version: "current" };
+  const retired = judgeDriverStatusReadings({ ...base, pointer: { state: "retired" } });
+  assert.equal(retired.state, "PASS", `retired 必须 PASS（否则迁移后的项目永久降级）: ${retired.detail}`);
+  assert.match(retired.detail, /retired/);
+
+  const behind = judgeDriverStatusReadings({ ...base, pointer: { state: "behind" } });
+  assert.equal(behind.state, "FAIL", "behind 仍是 FAIL（⛔ 放宽 retired 不得顺手放过 behind）");
+
+  const notEval = judgeDriverStatusReadings({ ...base, pointer: { state: "not-evaluated" } });
+  assert.equal(notEval.state, "NOT-EVALUATED", "读不懂仍是 NOT-EVALUATED（⛔ 不与 retired 同形）");
+
+  const current = judgeDriverStatusReadings({ ...base, pointer: { state: "current" } });
+  assert.equal(current.state, "PASS", "current 仍 PASS");
+
+  const ahead = judgeDriverStatusReadings({ ...base, pointer: { state: "ahead" } });
+  assert.equal(ahead.state, "PASS", "ahead 仍 PASS（本判据只禁 behind）");
+});
+
+test("AC3 judgePointer — retired(absent)/unreadable(dangling, non-symlink)/stale are three different verdicts", () => {
+  const absent = judgePointer({ present: false, isSymlink: false, real: null }, "/installed");
+  assert.equal(absent.state, "PASS", "absent = retired ⇒ PASS");
+  const nonLink = judgePointer({ present: true, isSymlink: false, real: null }, "/installed");
+  assert.equal(nonLink.state, "NOT-EVALUATED", "present but not a symlink ⇒ NOT-EVALUATED（读不懂 ≠ 已退役）");
+  const dangling = judgePointer({ present: true, isSymlink: true, real: null }, "/installed");
+  assert.equal(dangling.state, "NOT-EVALUATED", "dangling ⇒ NOT-EVALUATED");
+  const stale = judgePointer({ present: true, isSymlink: true, real: "/old" }, "/installed");
+  assert.equal(stale.state, "FAIL", "resolves elsewhere ⇒ FAIL");
+  const ok = judgePointer({ present: true, isSymlink: true, real: "/installed" }, "/installed");
+  assert.equal(ok.state, "PASS", "resolves to the verified install ⇒ PASS");
 });
 
 test("native provider freezing path/mcp_entry ⇒ config-native-not-frozen FAIL", () => {
