@@ -1,7 +1,7 @@
 ---
 id: gap-task-log-no-tail-cursor-for-initial-sync
 title: task log 零条 transitions 时 nextCursor 为 null：外部消费者无法「一次全量打底 + 从当前尾部增量」，只能猜时间窗
-status: todo
+status: ready
 labels:
   - gap
 parent: null
