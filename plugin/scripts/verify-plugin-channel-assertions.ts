@@ -889,7 +889,11 @@ export async function runAssertions(opts: RunnerOptions): Promise<AssertionResul
   const homeDir = opts.homeDir ?? process.env.HOME ?? "";
 
   if (opts.upgradeFrom) {
-    // ── upgrade drill (local mode): link→old ⇒ run init ⇒ link→new ⇒ validate ────────────────
+    // ── upgrade drill (local mode): link→old ⇒ run init ⇒ link DELETED ⇒ validate ──────────────
+    // The `.quay/plugin` guidance link is RETIRED (human ruling 2026-10-25): `quay init` no longer
+    // creates it and DELETES a symlink an older version left behind. So the drill's second reading is
+    // "the old link is GONE", not "the link was re-pointed" — the retirement step is exactly what the
+    // upgrade must do to a project that still carries one.
     const oldReal = realpathOrNull(opts.upgradeFrom);
     const linkBefore = realpathOrNull(path.join(projectDir, ".quay", "plugin"));
     push(
@@ -911,9 +915,9 @@ export async function runAssertions(opts: RunnerOptions): Promise<AssertionResul
 
     const linkAfter = realpathOrNull(path.join(projectDir, ".quay", "plugin"));
     push(
-      linkAfter !== null && installedReal !== null && linkAfter === installedReal
-        ? { id: "upgrade-link-after", state: "PASS", detail: `.quay/plugin now points at the new plugin tree (${installedReal})` }
-        : { id: "upgrade-link-after", state: "FAIL", detail: `after init, .quay/plugin → ${String(linkAfter)}, expected ${String(installedReal)} — /quay:init did not re-point the link` },
+      linkAfter === null
+        ? { id: "upgrade-link-after", state: "PASS", detail: ".quay/plugin was DELETED by the re-init (the guidance link is retired)" }
+        : { id: "upgrade-link-after", state: "FAIL", detail: `after init, .quay/plugin → ${String(linkAfter)} still exists — the retirement step did not run` },
     );
 
     const v = runInstalledCli(opts.installedDir, ["config", "validate", "--root", projectDir], projectDir);

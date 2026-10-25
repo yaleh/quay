@@ -364,9 +364,11 @@ claude plugin list --json | jq -r '.[] | select(.id=="quay@quay") | .scope' | so
 claude plugin update quay@quay --scope <the scope just printed>
 ```
 
-Then **re-run `/quay:init`** in each project: it re-points that project's
-`.quay/plugin` symlink at the newly installed version's directory, drops the retired native
-`path`/`mcp_entry` lines, and fills any version-level `loop:` default the new version added
+Then **re-run `/quay:init`** in each project: it drops the retired native
+`path`/`mcp_entry` lines, removes any `.quay/plugin` guidance symlink an older version created
+(that link is **no longer created** — see
+[how an external consumer locates the CLI](docs/references/external-consumer-cli-location.md)),
+and fills any version-level `loop:` default the new version added
 (`board`, `gates`, …) without touching your comments, so `quay config validate` passes right after.
 Restart the session to apply; running drivers keep the old version until
 `quay driver restart` (`quay driver status` shows `loaded-version-behind`).
@@ -392,9 +394,10 @@ before dispatching a release. It is a **checker**: run it from a **source checko
 the installed tree). It asserts what the gate used to assume: the config
 `/quay:init` wrote passes `quay config validate` **and** the MCP `config_validate`
 tool; the version carriers (`VERSION`, `.claude-plugin/plugin.json`, and the byte
-bundle's own `quay --version`) agree and carry no `-dev`; `.quay/plugin` resolves to
-the verified install and the native provider freezes no `path`/`mcp_entry` into the
-config; the driver and server version readings exist; and the serve host runs in its
+bundle's own `quay --version`) agree and carry no `-dev`; the native provider freezes no
+`path`/`mcp_entry` into the config and the project-plugin pointer is judged rather than assumed
+(`.quay/plugin` is no longer created — a project with no link reads `NOT-EVALUATED`, a stale one
+reads `FAIL`); the driver and server version readings exist; and the serve host runs in its
 own `quay-serve-*.scope`. Each assertion prints `PASS` / `FAIL` / `NOT-EVALUATED`;
 exit `0` = all passed, `1` = a FAIL, `3` = could not judge (never conflated with a
 pass).
@@ -424,9 +427,10 @@ QUAY_VERIFY_HOME="$H" node --experimental-strip-types \
 
 Run it with `--scope project` too (install `--scope project` from inside `$P`). For
 the **upgrade drill** — the path that historically broke most often — start from a
-project whose `.quay/plugin` points at a previous plugin tree and add
-`--upgrade-from <previous-plugin-tree>`: the script asserts link→old, re-runs
-`/quay:init`, then asserts link→new and a passing validate. Use `--json` for a
+project still carrying the old `.quay/plugin` link (pointing at a previous plugin
+tree) and add `--upgrade-from <previous-plugin-tree>`: the script asserts link→old,
+re-runs `/quay:init`, then asserts the link is **DELETED** (that guidance link is
+retired — init no longer creates it) and a passing validate. Use `--json` for a
 machine-readable report.
 
 ## Configuration

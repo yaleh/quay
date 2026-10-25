@@ -554,6 +554,145 @@ export const WORKER_ROUND_REL = ".quay/worker-round.jsonl";
 
 // WORKER_DISPATCH_REL 已随 dispatch 载体抽到 driver-shared.ts（本文件 re-export 保持旧 import 面）。
 
+// ── `.quay/live-state.json` — 在飞/相位的字节级、事件驱动快照（gap-live-state-small-carrier-…）───
+//
+// 载体名 / wire schema / 相位词表都 import 自 core 的零依赖叶模块 `driver-vocab.ts`（读侧
+// `observation.readLiveState` 与 `cli/help.ts` 从同一处取）⇒ 写侧与读侧**结构上不可能**对同一文件
+// 用不同名字/不同相位词表（⛔ 不在此另抄一份字面量）。
+import { LIVE_STATE_REL, LIVE_STATE_SCHEMA, type WorkerLivePhase } from "../../packages/quay/src/driver-vocab.ts";
+
+/** 快照里的一条在飞任务。**字段集是发布契约**（外部消费者按它反序列化）：
+ *  ⛔ 新增字段 = breaking change；缺值用 null（workerPid），⛔ 不省略键。 */
+export interface WorkerLiveEntry {
+  taskId: string;
+  runId: string;
+  phase: WorkerLivePhase;
+  startedAtMs: number;
+  workerPid: number | null;
+  lastHeartbeatMs: number;
+}
+
+export interface WorkerLiveSnapshot {
+  schema: typeof LIVE_STATE_SCHEMA;
+  writtenAt: string;
+  source: "worker-driver";
+  inFlight: WorkerLiveEntry[];
+}
+
+/**
+ * `.quay/live-state.json` 的**唯一写入方**：原子重写（tmp + rename），`writtenAt` = 本次写入时刻，
+ * 每条 `lastHeartbeatMs` 同步刷新。调用点是常驻环里的四个事件（见 `LiveStateProjection`）。
+ *
+ * ⛔ 它是**投影，不是新真相源**：在飞集合的权威仍是 driver 自己的 `running` / dispatch 载体；本文件
+ * 只是它的原子快照，读侧据 `writtenAt` 判断是否可信（`observation.readLiveState` 的四态）。
+ * ⛔ 写入失败不致命（运行时日志同族），但必须**不静默**：调用方 `#write` 把错误写 stderr。
+ */
+export function writeWorkerLiveState(
+  rootDir: string,
+  entries: readonly WorkerLiveEntry[],
+  { nowMs = Date.now() }: { nowMs?: number } = {},
+): WorkerLiveSnapshot {
+  const snapshot: WorkerLiveSnapshot = {
+    schema: LIVE_STATE_SCHEMA,
+    writtenAt: new Date(nowMs).toISOString(),
+    source: "worker-driver",
+    inFlight: entries
+      .map((e) => ({ ...e, lastHeartbeatMs: nowMs }))
+      .sort((a, b) => a.taskId.localeCompare(b.taskId)),
+  };
+  const file = path.join(rootDir, LIVE_STATE_REL);
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  // tmp 名带 pid：同进程的并发写仍被单线程串行化；跨进程（异常双 driver）也不会互踩半个文件。
+  const tmp = `${file}.${process.pid}.tmp`;
+  fs.writeFileSync(tmp, `${JSON.stringify(snapshot, null, 2)}\n`);
+  fs.renameSync(tmp, file); // rename 在同一文件系统内原子 ⇒ 读者永远看不到半个 JSON
+  return snapshot;
+}
+
+/** 快照投影的输入：`running` 条目上的 driver 侧已知量。 */
+export interface LiveStateInput {
+  taskId: string;
+  runId: string;
+  phase: WorkerLivePhase;
+  startedAtMs: number;
+  workerPid: number | null;
+}
+
+/**
+ * driver 侧的相位投影：记住每个在飞任务**在哪个时刻被 driver 观测到哪一相位**，并在四个事件上
+ * 重写快照：
+ *   ① `spawn`     — worker 进程 spawn 成功（implementing）；
+ *   ② `exit`      — 子进程退出（进入落地流水线 ⇒ fan-in；否则 awaiting-land）；
+ *   ③ `terminal`  — 终态计算完成 ⇒ 条目离开在飞集；
+ *   ④ `heartbeat` — 每轮无条件一次（保底新鲜度），以调用方的**权威在飞集**同步本投影。
+ *
+ * ⛔ 只用于**写快照**：本类不参与任何派发/判停/重试判定（权威是常驻环的 `running` + 载体读取）。
+ * ⛔ 不做相位推导：相位由调用方在它确实知道的时刻传入（spawn / child exit / outcome），不从这里
+ * 读别的载体「猜」（硬规则 3b：读不到 ≠ 可以编造）。`nowMs` 可注入 ⇒ 测试能确定性地驱动四个事件。
+ */
+export class LiveStateProjection {
+  readonly #rootDir: string;
+  readonly #now: () => number;
+  readonly #entries = new Map<string, WorkerLiveEntry>();
+
+  constructor(rootDir: string, { nowMs = () => Date.now() }: { nowMs?: () => number } = {}) {
+    this.#rootDir = rootDir;
+    this.#now = nowMs;
+  }
+
+  /** ① spawn 成功。`workerPid` 为 null = 进程没起来（spawn-failed 也会很快被 `terminal` 收走）。 */
+  spawn(input: LiveStateInput): void {
+    this.#entries.set(input.taskId, { ...input, lastHeartbeatMs: this.#now() });
+    this.#write();
+  }
+
+  /** ② worker 进程退出。`fan-in` = 立刻进入落地流水线；`awaiting-land` = 不会跑 fan-in（非零退出 /
+   *  spawn 失败 / 无 worktree），实现已结束、终态与落地判定尚未完成。 */
+  exit(taskId: string, phase: "fan-in" | "awaiting-land"): void {
+    const entry = this.#entries.get(taskId);
+    if (entry == null) return; // 未观测到 spawn（或已终态）⇒ 不凭空造条目
+    entry.phase = phase;
+    this.#write();
+  }
+
+  /** ③ 终态计算完成：条目离开在飞集。返回是否真的有条目被移除（可区分「移除了」与「本就不在」）。 */
+  terminal(taskId: string): boolean {
+    const removed = this.#entries.delete(taskId);
+    if (removed) this.#write();
+    return removed;
+  }
+
+  /** ④ 每轮心跳：以调用方的权威在飞集同步投影（补上冷启动/接管条目、移除已不在飞者），并刷新
+   *  `writtenAt` / 每条 `lastHeartbeatMs`。⛔ 传进来的 `phase` 就是权威相位（调用方在转换点写过）。 */
+  heartbeat(known: readonly LiveStateInput[]): void {
+    const now = this.#now();
+    const ids = new Set(known.map((k) => k.taskId));
+    for (const id of [...this.#entries.keys()]) {
+      if (!ids.has(id)) this.#entries.delete(id);
+    }
+    for (const k of known) this.#entries.set(k.taskId, { ...k, lastHeartbeatMs: now });
+    this.#write();
+  }
+
+  /** 当前投影（排序后的克隆）——测试/取证用；⛔ 消费方不应把它当权威在飞集。 */
+  snapshot(): WorkerLiveEntry[] {
+    return [...this.#entries.values()]
+      .map((e) => ({ ...e }))
+      .sort((a, b) => a.taskId.localeCompare(b.taskId));
+  }
+
+  #write(): void {
+    try {
+      writeWorkerLiveState(this.#rootDir, [...this.#entries.values()], { nowMs: this.#now() });
+    } catch (err) {
+      // 运行时日志同族的失败语义：不致命，⛔ 但绝不静默（静默会让「载体停更」与「一切正常」同形）。
+      process.stderr.write(
+        `worker-driver: live-state write failed — ${err instanceof Error ? err.message : String(err)}\n`,
+      );
+    }
+  }
+}
+
 /** 终态枚举：**completed（退出码 0 且落地——成功态就是它）** / exited-not-landed（退出码 0 但没落地）/
  *  failed（非零退出）/ killed（被信号杀）/ timed-out（超时 SIGTERM）/ spawn-failed（起不来）/
  *  not-dispatched（halt 未派）。
@@ -5198,6 +5337,8 @@ function runOneWorker({
   detachSignal,
   role = "task-worker",
   argvSource = "launchArgv",
+  onSpawned,
+  onWorkerExited,
 }: {
   taskId: string;
   selectorReason: string;
@@ -5220,6 +5361,11 @@ function runOneWorker({
   judgeQuickDeath?: QuickDeathJudge;
   /** 停机脱钩信号（常驻环注入；批量路径不注入——那条路没有 kind 停机语义）。 */
   detachSignal?: WorkerDetachSignal;
+  /** live-state 事件钩子（常驻环注入；批量路径不注入——那条路没有常驻在飞集可投影）。
+   *  ① spawn 返回后（pid 已知或 null）；② 子进程 close 事件里（`workerExitedAtMs` 同一处直接量，
+   *  ⛔ 不在 fan-in 之后补）。两者都在**同一个** runOneWorker 生命周期里，不另起观察路径。 */
+  onSpawned?: (workerPid: number | null) => void;
+  onWorkerExited?: (info: { code: number | null; signal: string | null; spawnError: string | null }) => void;
 }): Promise<WorkerRunResult> {
   // Dispatch-time slice baseline (fire-and-forget; fail-open — see queueSliceBaseline).
   if (role === "task-worker") queueSliceBaseline(taskId, rootDir);
@@ -5261,6 +5407,10 @@ function runOneWorker({
       child.stderr.on("error", () => { /* best-effort */ });
     }
     const workerPid = child && child.pid ? child.pid : null;
+    // ① live-state：spawn 已返回（pid 已知或 null）。常驻环在这里记 implementing；批量路径不注入。
+    // ⛔ 叫 onSpawned 而不是 onSpawnStart：此刻 `spawn()` 已返回，但子进程**尚未被确认活着**——
+    // 紧随其后的 'error'/'close' 会把它收成终态（两条都是事件，不靠轮询）。
+    onSpawned?.(workerPid);
     let timedOut = false;
     let timer: ReturnType<typeof setTimeout> | null = null;
     let finished = false;
@@ -5491,6 +5641,12 @@ function runOneWorker({
       // （`child.on("close")` 的子进程退出时刻，由内核投递）。⛔ 不要在 finish() 里再补一次
       // Date.now()——那时 fan-in 已经跑完，读到的会是 fan-in 结束时刻（正是本任务要分开的两个相位）。
       if (workerExitedAtMs === null) workerExitedAtMs = Date.now();
+      // ② live-state：child exit 是 driver 确实知道的第二个相位边界（implementing → fan-in /
+      // awaiting-land）。与上面的 `workerExitedAtMs` 同一处取值——⛔ 不在 finish() 里再补一次
+      // （那时可能是 fan-in 结束时刻）。已脱钩 ⇒ 本循环不再报告它（下一个循环的 reconcile 接管）。
+      if (!isDetached()) {
+        onWorkerExited?.({ code, signal: s ?? null, spawnError });
+      }
       void finishAsync(code, s ?? null, spawnError);
     });
 
@@ -5556,6 +5712,13 @@ interface RunningWorker {
   /** 派发时刻（epoch ms）——round 载体 in_flight_task_starts 的数据源（gap-live-fan-in-window-
    *  elapsed-zero：Live 页 fan-in 窗口 elapsed 需真起点，driver 派发时已知）。 */
   startedAtMs: number;
+  /** 该次尝试的 runId（live-state 快照字段；与 outcome/round 载体同源，⛔ 不另编一个）。 */
+  runId: string;
+  /** worker 子进程 pid（spawn 回调写入；spawn 失败 / 冷启动接管时为 null）。 */
+  workerPid: number | null;
+  /** driver 侧观测到的执行相位——**只用于 live-state 投影**，⛔ 不参与任何派发/判停判定。
+   *  spawn ⇒ implementing；child exit ⇒ fan-in（进入落地流水线）或 awaiting-land（不跑 fan-in）。 */
+  phase: WorkerLivePhase;
   promise: Promise<WorkerRunResult>;
   /** 停机脱钩（gap-worker-kind-stop-waits-for-all-in-flight-workers-instead-of-detaching-for-
    *  adoption）：kind 停机时把本 worker 留给下一个循环。返回 `true` = 已脱钩；`false` = **不可脱钩**
@@ -5720,6 +5883,47 @@ export async function runResidentLoop(opts: ResidentOptions): Promise<number> {
     return map;
   };
 
+  // `.quay/live-state.json` 的唯一写入器 + 四个事件调用点（gap-live-state-small-carrier-…）：
+  //   ① spawnSelected（spawn 成功）② runOneWorker 的 child close（exit）③ onWorkerFinished（terminal）
+  //   ④ writeRound（每轮心跳）。⛔ 投影只用于写快照，不参与任何派发/判停判定。
+  const liveState = new LiveStateProjection(rootDir);
+  /**
+   * 本刻的**权威在飞集**（常驻环自己的 `running` + 冷启动观测到的存活 worker），投影成快照条目。
+   * ⛔ 这是唯一一处把 driver 状态翻译成 live-state 条目的代码（四个调用点共用）——不各写一份。
+   */
+  const liveStateInputs = (): LiveStateInput[] => {
+    const out: LiveStateInput[] = running
+      .filter((r) => !r.done) // 终态已算完的条目在下一次 reap 前仍在 running 里，⛔ 不得回报为在飞
+      .map((r) => ({
+        taskId: r.task,
+        runId: r.runId,
+        phase: r.phase,
+        startedAtMs: r.startedAtMs,
+        workerPid: r.workerPid,
+      }));
+    const seen = new Set(out.map((e) => e.taskId));
+    if (coldInflight.size > 0) {
+      // 冷启动在飞（上一个 driver 留下、本进程没有 promise 的存活 worker）也属于本工作区的在飞集。
+      // dispatch 载体给出真实 runId / 起点 / pid；**无记录**（手工起的 worker）⇒ 起点取本刻（readLive
+      // 对缺起点同样回退 nowMs：诚实「刚起步」，⛔ 不伪造一段长 elapsed）。
+      let store: Record<string, DispatchRecord> = {};
+      try { store = readDispatchStore(dispatchStoreFile(rootDir)); } catch { store = {}; }
+      const nowMs = Date.now();
+      for (const id of coldInflight) {
+        if (seen.has(id)) continue;
+        const rec = store[id];
+        out.push({
+          taskId: id,
+          runId: rec?.runId ?? `worker-${id}`,
+          phase: "implementing",
+          startedAtMs: typeof rec?.startedAtMs === "number" ? rec.startedAtMs : nowMs,
+          workerPid: typeof rec?.workerPid === "number" ? rec.workerPid : null,
+        });
+      }
+    }
+    return out;
+  };
+
   // round 心跳（AC138-3）：worker-outcome 只在任务真完成时写，池空时 outcome 停更会被 supervisor
   // status 的 last_record_ts（读全载体 max）误读为「死亡」；round 每轮循环无条件写一条作 liveness 直接量。
   const roundFile = path.join(rootDir, WORKER_ROUND_REL);
@@ -5773,6 +5977,9 @@ export async function runResidentLoop(opts: ResidentOptions): Promise<number> {
       undetachableWorkers: detached.undetachable,
     });
     try { appendHeartbeatLine(roundFile, record); } catch { /* 记录写失败不致命（运行时日志，⛔ 不因日志炸循环） */ }
+    // ④ live-state 心跳（每轮无条件一次）：保底新鲜度 —— 三个边沿事件之外，读者最多看到一个 round
+    // 周期前的快照（≥ 边沿驱动的部分不会陈旧；此处的频率只需低于读侧的 stale 阈值）。
+    liveState.heartbeat(liveStateInputs());
     if (json) process.stdout.write(`${JSON.stringify({ event: "round", ...record })}\n`);
   };
 
@@ -5990,6 +6197,9 @@ export async function runResidentLoop(opts: ResidentOptions): Promise<number> {
    *     计入连续未落地会因基建原因把任务 park。 */
   const onWorkerFinished = (rw: RunningWorker, r: WorkerRunResult): WorkerRunResult => {
     rw.done = true;
+    // ③ live-state：终态计算完成 ⇒ 该条目离开在飞快照（已落地 / 已判非在飞）。放在 done 之后：
+    // 即使投影的 heartbeat 恰在此刻跑，`liveStateInputs` 也已把它滤掉（同一份 `done` 标志）。
+    liveState.terminal(rw.task);
     results.push(r);
     const event = normalizeWorkerOutcome(r);
     const reports = workerPool.dispatchOutcome(event, { root: rootDir });
@@ -6033,6 +6243,9 @@ export async function runResidentLoop(opts: ResidentOptions): Promise<number> {
     // gap-live-fan-in-window-elapsed-zero：派发时刻（driver 决定 spawn 该 task 的此刻）——round 载体
     // in_flight_task_starts 的真起点，readLive 据此算 fan-in 窗口 elapsed（⛔ 恒 nowMs 的旧行为）。
     rw.startedAtMs = Date.now();
+    rw.runId = runIdForTask;
+    rw.workerPid = null; // spawn 回调在 runOneWorker 的同步段里填（此处已 push 之前的占位）
+    rw.phase = "implementing";
     // 停机脱钩信号（gap-worker-kind-stop-…）：worker 侧与循环侧共享同一份对象——循环置 `detached`，
     // worker 侧在跨进收尾流水线时置 `pipelineStarted`。
     const detachSignal: WorkerDetachSignal = {};
@@ -6053,8 +6266,27 @@ export async function runResidentLoop(opts: ResidentOptions): Promise<number> {
       // 判定注入：写载体之前跑（见 QuickDeathJudge），onWorkerFinished 消费结论、⛔ 不再重算。
       judgeQuickDeath: judgeQuickDeathFor(sel.task),
       detachSignal,
+      // ① spawn 成功（pid 已知或 null）。runOneWorker 的同步段在返回 Promise 前就会调用它 ⇒ 本行
+      // 之后的 `running.push` 之前 rw.workerPid 已定值；真正的写盘放在 push 之后（见下）。
+      onSpawned: (pid) => { rw.workerPid = pid; },
+      // ② child exit：进入落地流水线的记 fan-in；否则（非零退出 / spawn 失败）记 awaiting-land
+      // ——实现已结束、判词尚未算出。⛔ 此处不预测 AC 短路（那是 finishAsync 内的判据），
+      // 「进入落地流水线」本身就是 driver 在 exit 这一刻确实知道的相位。
+      onWorkerExited: ({ code, spawnError }) => {
+        const phase: "fan-in" | "awaiting-land" = code === 0 && spawnError === null ? "fan-in" : "awaiting-land";
+        rw.phase = phase;
+        liveState.exit(rw.task, phase);
+      },
     }).then((r) => onWorkerFinished(rw, r));
     running.push(rw);
+    // ① 的落盘点：push 之后写一次（此刻在飞集已包含本条目）⇒ 读者在 spawn 事件后立刻可读到它。
+    liveState.spawn({
+      taskId: rw.task,
+      runId: rw.runId,
+      phase: "implementing",
+      startedAtMs: rw.startedAtMs,
+      workerPid: rw.workerPid,
+    });
     if (json) {
       process.stdout.write(
         `${JSON.stringify({ event: "selector-picked", task: sel.task, selector_reason: sel.reason, in_flight_count: running.length, run_id: runIdForTask })}\n`,
@@ -6129,6 +6361,9 @@ export async function runResidentLoop(opts: ResidentOptions): Promise<number> {
           rw.task = taskId;
           rw.done = false;
           rw.startedAtMs = record.startedAtMs; // 原始派发时刻（⛔ 不是接管时刻——fan-in 窗口 elapsed 真起点）
+          rw.runId = record.runId;
+          rw.workerPid = record.workerPid;
+          rw.phase = "fan-in"; // worker 已退出、本循环正在接管它的机械 fan-in（driver 确实知道的相位）
           // ⛔ 不可脱钩，恒 `false`：这条分支一进来就【同步开跑】了退出后流水线（机械 fan-in），
           // 它的产出只能由本循环收尾（中途退环 ⇒ 下一个循环把同一 dispatch 当孤儿再跑一次 fan-in）。
           rw.detach = () => false;
@@ -6154,6 +6389,9 @@ export async function runResidentLoop(opts: ResidentOptions): Promise<number> {
         rw.task = taskId;
         rw.done = false;
         rw.startedAtMs = record.startedAtMs; // 原始派发时刻（⛔ 不是 adopt 时刻——fan-in 窗口 elapsed 真起点）
+        rw.runId = record.runId;
+        rw.workerPid = record.workerPid;
+        rw.phase = "implementing"; // 进程仍存活（classifyOrphanDispatch 的 adopt 分支）⇒ 在实现中
         // 停机脱钩（同 spawnSelected）：被接管的 worker 只要还没进退出流水线，就可以再一次被下一个
         // 循环接管（链式停机/重启不会把它的归宿弄丢）。
         const detachSignal: WorkerDetachSignal = {};
