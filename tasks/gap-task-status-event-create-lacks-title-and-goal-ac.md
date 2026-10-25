@@ -1,7 +1,7 @@
 ---
 id: gap-task-status-event-create-lacks-title-and-goal-ac
 title: v1 create 事件不带 title / goal_ac，外部消费者收到新任务事件后仍只能再读一次全量
-status: ready
+status: superseded
 labels:
   - gap
 parent: null
@@ -38,3 +38,7 @@ v1 状态事件在创建时写 `from:null, kind:"create"`（`packages/quay-nativ
 - `packages/quay/src/cli/task-log.ts`（转出同步）
 - `packages/quay/src/cli/help.ts`（事件契约段）
 - `packages/quay/test/task-log.test.mjs`
+
+## 撤销记录
+
+2026-10-25：消费方 claudecodeui 明确不需要本项——它收到 create 事件后做一次 `task list --json --no-body`（254ms）刷新即可，标题修改由周期性全量兜底覆盖；本仓库也没有其他消费者依赖 create 事件的 `title` / `goal_ac`。任务在 `todo → ready` 之后被撤为 `superseded`，未派发、未执行。若将来出现真实消费者，重新立案即可，本记录不构成阻塞。
