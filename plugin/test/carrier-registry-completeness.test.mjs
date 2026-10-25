@@ -70,6 +70,38 @@ function ownerIsRealModule(owner) {
   }
 }
 
+/** `readers` is a TWO-VALUED declaration (硬规则 3b — the honest "not audited yet" must not share a
+ *  shape with "audited"):
+ *    · "unaudited"            — the pre-audit placeholder (declaration-only);
+ *    · [<repo-relative path>] — an ENUMERATED, non-empty reader list; every path must be a real
+ *                               module file (a fabricated reader is an undeclared claim).
+ *  Returns a problem string, or null when the value is well-formed.
+ *
+ *  WHY an array (tasks/gap-worker-dispatch-carrier-owner-and-contract-unregistered AC1): a carrier
+ *  whose readers are actually known must be able to SAY so; `unaudited` was the only legal value, so
+ *  `worker-dispatch.json` could not be registered with its real readers. Widening the schema is the
+ *  fix; a bare string OTHER than "unaudited" is still rejected (it is neither honest placeholder nor
+ *  an enumeration). */
+function readersProblem(entry) {
+  const r = entry?.readers;
+  if (r === "unaudited") return null;
+  if (!Array.isArray(r) || r.length === 0) {
+    return `${entry?.name}: readers ${JSON.stringify(r)} (must be "unaudited" or a non-empty array of repo-relative module paths)`;
+  }
+  const bad = r.filter((p) => !ownerIsRealModule(p));
+  if (bad.length > 0) return `${entry?.name}: readers names non-module path(s) ${JSON.stringify(bad)}`;
+  return null;
+}
+
+/** Carriers whose readers are KNOWN and must therefore be enumerated (not "unaudited"). A carrier
+ *  listed here that regresses to the placeholder fails below — the enumeration cannot silently rot. */
+const READERS_MUST_BE_ENUMERATED = new Map([
+  [
+    "worker-dispatch.json",
+    ["plugin/scripts/worker-driver.ts", "plugin/scripts/duration-report.ts"],
+  ],
+]);
+
 /** Every carrier name carried by a single string/template literal VALUE (path-segment semantics). */
 function carrierNamesInValue(value) {
   const out = [];
@@ -215,9 +247,48 @@ test("structure: each entry has name/kind/owner/readers; kind ∈ vocabulary", (
     seen.add(e.name);
     if (!KIND_VOCABULARY.has(e.kind)) problems.push(`${e.name}: kind "${e.kind}" not in vocabulary`);
     if (typeof e.owner !== "string" || !e.owner) problems.push(`${e.name}: empty owner`);
-    if (e.readers !== "unaudited") problems.push(`${e.name}: readers "${e.readers}" (declaration-only ⇒ "unaudited")`);
+    const rp = readersProblem(e);
+    if (rp !== null) problems.push(rp);
   }
   assert.deepEqual(problems, [], problems.join("\n"));
+});
+
+// ── the audited-reader gate (AC1 of the dispatch-carrier task) ──────────────────────────────────
+// A carrier whose readers ARE known must enumerate them; the placeholder is only honest while nobody
+// has looked. This can take false in both directions (the negative control below proves it).
+
+test("readers: known-reader carriers enumerate their real readers (not the placeholder)", () => {
+  const byName = new Map(readRegistry().map((e) => [e.name, e]));
+  const problems = [];
+  for (const [name, expected] of READERS_MUST_BE_ENUMERATED) {
+    const entry = byName.get(name);
+    if (!entry) {
+      problems.push(`${name}: declared as an audited-reader carrier but missing from the registry`);
+      continue;
+    }
+    if (!Array.isArray(entry.readers)) {
+      problems.push(`${name}: readers is ${JSON.stringify(entry.readers)} but this carrier's readers are KNOWN ⇒ enumerate them`);
+      continue;
+    }
+    for (const p of expected) {
+      if (!entry.readers.includes(p)) problems.push(`${name}: reader ${p} missing from the enumeration`);
+    }
+  }
+  assert.deepEqual(problems, [], problems.join("\n"));
+});
+
+test("readers (negative control): a fabricated reader path and a bare string are both rejected", () => {
+  // 谓词能取假 —— 否则上面那条 gate 与「恒真」同形。
+  assert.notEqual(
+    readersProblem({ name: "x", readers: ["plugin/scripts/does-not-exist-reader.ts"] }),
+    null,
+    "a non-existent reader module must be rejected",
+  );
+  assert.notEqual(readersProblem({ name: "x", readers: "audited" }), null, 'a bare string other than "unaudited" must be rejected');
+  assert.notEqual(readersProblem({ name: "x", readers: [] }), null, "an empty enumeration must be rejected");
+  // 正向对照：两种合法形态都必须通过。
+  assert.equal(readersProblem({ name: "x", readers: "unaudited" }), null);
+  assert.equal(readersProblem({ name: "x", readers: ["plugin/scripts/duration-report.ts"] }), null);
 });
 
 // ── (3) DRIVER_KINDS-declared carriers carry their driver as owner ──────────────────────────────
