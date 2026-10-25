@@ -22,6 +22,15 @@
 # the bundle sitting right there. See "Interpreter resolution" below
 # (gap-ac261-shim-node-autodetect-nvm-fallback).
 #
+# EXTERNAL CONSUMERS (a cron job, a systemd unit, a server, another agent runtime):
+# this shim is reachable through PATH only inside a Claude Code session, because
+# Claude Code is what puts <plugin-root>/bin on its Bash tool's PATH — and it does
+# not export ${CLAUDE_PLUGIN_ROOT} to anything. Such a process must resolve THIS
+# FILE from the Claude Code plugin install record; the single canonical contract,
+# with a runnable reference implementation, is
+# docs/references/external-consumer-cli-location.md. ⛔ Do not rely on `quay` being
+# on PATH there: it may be a different build than the one the project pins.
+#
 # The bundle is generated (gitignored) and built by plugin/scripts/sync-vendor.sh;
 # the root `npm install` postinstall, scripts/test.sh, publish-dist-branch.sh and
 # packages/quay/scripts/package.sh all run that build, so both delivery channels

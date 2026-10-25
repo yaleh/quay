@@ -35,6 +35,9 @@
 //                     时序，这是最小结构条件，不是调出来的阈值）。载体在写，但写的全是「没评估成」。
 //   D. stale-evaluated 最新一条有 evaluated:true 作用域的记录，其产物时间戳早于【覆盖源路径的最新提交】。
 //                     它与真正的健康状态从外部看完全相同（读数说「已评估、0 环」），比 C 更危险。
+//                     ⚠️ 例外：描述符用 `artifactIndependentWhen` 声明的 live 读数（如
+//                     `basis:"single-directory"`，结论来自 `git ls-files` 而非产物）不做这个比较，
+//                     并**显式**记 `artifact-independent`（⛔ 不是静默跳过，硬规则 3b）。
 //   两种形态都允许例外声明：描述符可注明 D 无输入（记录里没有产物时间戳/覆盖路径，或例程直接读 git）。
 //
 // 覆盖面诚实（硬规则 3b）：没有 `evaluated` 字段、也未登记描述符的载体列入 `uncovered`，
@@ -138,6 +141,22 @@ export interface ArtifactSpec {
   scopeEvaluatedField?: string;
   /** 作用域名字段（报告里点名用）。缺省 `scope`。 */
   scopeNameField?: string;
+  /** 「该作用域的 cycle 结论不依赖产物」的机器可读判定（gap-arch-cycle-single-directory-basis-never-due）。
+   *
+   *  为什么需要：有些读数的 provenance 是 LIVE 输入（`single-directory` 的 `git ls-files`），
+   *  `artifactTimestamp` 只是「我们看过哪份产物」，不承载结论。此前检测器看不到这个区别 ⇒ 一条
+   *  **当前**的 live 读数只要挂着旧产物时间戳就被判 stale；而写手侧为了绕开它写了一个恒为 0 的
+   *  `commitsSinceArtifact`（硬规则 4：恒真的量不是测量）。
+   *  `field` 取到 `equals` ⇒ 该作用域记 `artifact-independent`，**显式跳过**产物 vs 提交比较
+   *  （⛔ 不是静默跳过：跳过这件事本身进读数，硬规则 3b）。
+   *  缺省 ⇒ 没有这种作用域，既有比较对所有作用域生效。 */
+  artifactIndependentWhen?: {
+    field: string;
+    equals: string | boolean;
+    /** 载体自己记录的直接量字段名（live file list 的读取时刻）。缺省 ⇒ 不读取时刻，
+     *  读数里显式写 `readAt:null`（「没记」而不是「等于 0」）。 */
+    readAtField?: string;
+  };
 }
 
 /** suite-recovery / suite-recovery-blocked 共用的条件读数（两者由同一段恢复阶梯代码写，
@@ -332,11 +351,19 @@ export const MANIFEST: CarrierSpec[] = [
       artifactTsField: "artifactTimestamp",
       scopeEvaluatedField: "evaluated",
       scopeNameField: "scope",
+      // gap-arch-cycle-single-directory-basis-never-due: a `single-directory` scope's cycle count comes
+      // from `git ls-files` at read time, NOT from the persisted artifact — so an old
+      // `artifactTimestamp` is provenance, not evidence that the reading is stale. Without this the
+      // detector reported `scripts` stale every round while the carrier simultaneously reported it as
+      // a current reading (`commitsSinceArtifact:0`), i.e. the two readings disagreed by construction.
+      artifactIndependentWhen: { field: "basis", equals: "single-directory", readAtField: "fileListReadAt" },
     },
     note:
       "arch-cycle-report 例程每轮追加一行。记录级 evaluated 是「全部作用域都可读」；作用域级 evaluated " +
       "是「这一作用域可读」。形态 D 取**最后一条含已评估作用域**的记录（记录级 false 只表示并非全部" +
-      "作用域可读，不表示什么都没评估）。作用域 source 是 repo 相对路径 ⇒ D 的对照量是 git 提交时刻。",
+      "作用域可读，不表示什么都没评估）。作用域 source 是 repo 相对路径 ⇒ D 的对照量是 git 提交时刻。" +
+      "作用域 basis=single-directory 时读数是 live 文件列表派生的 ⇒ 标 artifact-independent，不做" +
+      "「产物 vs 最新提交」比较（⛔ 跳过本身进读数）。",
   },
   {
     // AC1 的负对照：31/31 条 evaluated:true ⇒ 形状 C 必须不命中（而不是「样本刚好绿」）。
@@ -460,7 +487,11 @@ export interface ShapeCReading {
   darkInterval: ContentDarkInterval | null;
 }
 
-/** 形状 D：一个作用域的产物时间戳 vs 覆盖源路径的最新提交。 */
+/** 形状 D：一个作用域的产物时间戳 vs 覆盖源路径的最新提交。
+ *
+ *  `state:"artifact-independent"` 是一条**通过**的读数，不是「未评估」：该作用域的 cycle 结论来自
+ *  live 输入，产物时间戳只承载 provenance ⇒ 「产物早于最新提交」对它不构成过期证据。它必须自成一态
+ *  （⛔ 不与 `fresh` 合并、更不与 `stale` 合并：跳过比较这件事本身要可读）。 */
 export interface StaleScopeReading {
   scope: string;
   source: string;
@@ -468,8 +499,20 @@ export interface StaleScopeReading {
   artifactMs: number | null;
   commitMs: number | null;
   commitSha: string | null;
-  state: "stale" | "fresh" | "not-evaluated";
+  state: "stale" | "fresh" | "not-evaluated" | "artifact-independent";
   reason: string | null;
+  /** `state:"artifact-independent"` 时为判定依据（描述符字段/取值 + 载体自己记的 live 读取时刻）；
+   *  其余为 null。 */
+  independence: ArtifactIndependence | null;
+}
+
+/** 一条 artifact-independence 判定：**哪个字段**取到什么值，以及载体记录的 live 直接量。
+ *  ⛔ `readAt` 取的是载体里的字段（判据能取假），不是描述符的回显。 */
+export interface ArtifactIndependence {
+  field: string;
+  value: string | boolean;
+  /** 载体里 live file list 的读取时刻；字段缺失/读不懂 ⇒ null（「没记」，⛔ 不是「刚读过」）。 */
+  readAt: string | null;
 }
 
 /** 形状 D 的四态（同上：`not-evaluated` 与 `fresh` 必须可区分）。 */
@@ -486,6 +529,10 @@ export interface ShapeDReading {
    *  不复用这个名字做新语义）。它此前**没有任何下游**，现在至少随 Fact 一起被消费。 */
   recordStale: boolean | null;
   scopes: StaleScopeReading[];
+  /** 被判定为 artifact-independent 的作用域名（`state:"artifact-independent"` 的同一批，记录级点名）。
+   *  ⛔ 空数组 = 「比过了」；这一态与 `state:"fresh"` 同时出现是正常的（live 读数当前、产物不承载
+   *  结论）——它把「为什么没做那个比较」留在读数面上（硬规则 3b）。 */
+  artifactIndependentScopes: string[];
 }
 
 export interface CarrierResult {
@@ -612,7 +659,7 @@ export function gitLatestCommitForPath(root: string, source: string): GitCommitT
  *  ⛔ 四态：无描述符 ⇒ not-applicable（并带 descriptor 给出的理由）；无可用记录 / 任一作用域读不出
  *  ⇒ not-evaluated；有 stale ⇒ stale；否则 fresh。 */
 export function analyzeStaleEvaluated(records: Record<string, unknown>[], spec: CarrierSpec, root: string): ShapeDReading {
-  const na = (reason: string): ShapeDReading => ({ state: "not-applicable", reason, recordTs: null, recordStale: null, scopes: [] });
+  const na = (reason: string): ShapeDReading => ({ state: "not-applicable", reason, recordTs: null, recordStale: null, scopes: [], artifactIndependentScopes: [] });
   if (spec.evaluatedField === undefined || spec.artifact === undefined) {
     return na(spec.artifactNotApplicable ?? "descriptor declares no artifact (artifact timestamp + covered paths)");
   }
@@ -638,6 +685,7 @@ export function analyzeStaleEvaluated(records: Record<string, unknown>[], spec: 
       recordTs: null,
       recordStale: null,
       scopes: [],
+      artifactIndependentScopes: [],
     };
   }
 
@@ -656,17 +704,38 @@ export function analyzeStaleEvaluated(records: Record<string, unknown>[], spec: 
     const artifactTs = typeof artifactTsRaw === "string" && artifactTsRaw !== "" ? artifactTsRaw : null;
     const artifactMs = artifactTs === null ? null : (Number.isFinite(Date.parse(artifactTs)) ? Date.parse(artifactTs) : null);
 
+    // ARTIFACT INDEPENDENCE first (gap-arch-cycle-single-directory-basis-never-due): if the descriptor
+    // says this scope's field marks a live reading, the artifact timestamp is PROVENANCE ONLY. Compare
+    // nothing and say so — an old artifact must not make a current live reading look stale, and ⛔ the
+    // skip must not be silent (硬规则 3b: "skipped" and "checked and fresh" are different facts).
+    const independenceSpec = art.artifactIndependentWhen;
+    if (independenceSpec !== undefined && s[independenceSpec.field] === independenceSpec.equals) {
+      const readAtRaw = independenceSpec.readAtField === undefined ? undefined : s[independenceSpec.readAtField];
+      const readAt = typeof readAtRaw === "string" && readAtRaw !== "" ? readAtRaw : null;
+      scopes.push({
+        scope, source, artifactTs, artifactMs,
+        commitMs: null, commitSha: null,
+        state: "artifact-independent",
+        reason:
+          `'${independenceSpec.field}'='${String(independenceSpec.equals)}' ⇒ this reading comes from the live file list` +
+          `${readAt === null ? " (no read timestamp recorded)" : ` read at ${readAt}`}, so ${art.artifactTsField} ${artifactTs ?? "(none)"} ` +
+          `is provenance only and is NOT compared against the latest commit touching ${source || "(no source)"}`,
+        independence: { field: independenceSpec.field, value: independenceSpec.equals, readAt },
+      });
+      continue;
+    }
+
     if (source === "") {
-      scopes.push({ scope, source, artifactTs, artifactMs, commitMs: null, commitSha: null, state: "not-evaluated", reason: `scope has no '${art.sourceField}' — no covered path to compare against` });
+      scopes.push({ scope, source, artifactTs, artifactMs, commitMs: null, commitSha: null, state: "not-evaluated", reason: `scope has no '${art.sourceField}' — no covered path to compare against`, independence: null });
       continue;
     }
     if (artifactMs === null) {
-      scopes.push({ scope, source, artifactTs, artifactMs, commitMs: null, commitSha: null, state: "not-evaluated", reason: artifactTs === null ? `scope has no '${art.artifactTsField}'` : `unparseable artifact timestamp '${artifactTs}'` });
+      scopes.push({ scope, source, artifactTs, artifactMs, commitMs: null, commitSha: null, state: "not-evaluated", reason: artifactTs === null ? `scope has no '${art.artifactTsField}'` : `unparseable artifact timestamp '${artifactTs}'`, independence: null });
       continue;
     }
     const commit = gitLatestCommitForPath(root, source);
     if (commit.ms === null) {
-      scopes.push({ scope, source, artifactTs, artifactMs, commitMs: null, commitSha: commit.sha, state: "not-evaluated", reason: `git could not resolve the latest commit: ${commit.error}` });
+      scopes.push({ scope, source, artifactTs, artifactMs, commitMs: null, commitSha: commit.sha, state: "not-evaluated", reason: `git could not resolve the latest commit: ${commit.error}`, independence: null });
       continue;
     }
     // 严格小于：产物【早于】覆盖路径的最新提交才是过期。相等时无法区分先后 ⇒ 记 fresh（同一秒）。
@@ -678,15 +747,20 @@ export function analyzeStaleEvaluated(records: Record<string, unknown>[], spec: 
       reason: stale
         ? `artifact ${artifactTs} predates the latest commit touching ${source} (${new Date(commit.ms).toISOString()} ${commit.sha ?? ""})`.trim()
         : null,
+      independence: null,
     });
   }
 
+  const artifactIndependentScopes = scopes.filter((s) => s.state === "artifact-independent").map((s) => s.scope);
   if (scopes.length === 0) {
-    return { state: "not-evaluated", reason: "the chosen record carries no evaluated scope with a comparable artifact", recordTs, recordStale, scopes };
+    return { state: "not-evaluated", reason: "the chosen record carries no evaluated scope with a comparable artifact", recordTs, recordStale, scopes, artifactIndependentScopes };
   }
-  if (scopes.some((s) => s.state === "stale")) return { state: "stale", reason: null, recordTs, recordStale, scopes };
-  if (scopes.some((s) => s.state === "not-evaluated")) return { state: "not-evaluated", reason: "at least one scope could not be compared", recordTs, recordStale, scopes };
-  return { state: "fresh", reason: null, recordTs, recordStale, scopes };
+  if (scopes.some((s) => s.state === "stale")) return { state: "stale", reason: null, recordTs, recordStale, scopes, artifactIndependentScopes };
+  if (scopes.some((s) => s.state === "not-evaluated")) return { state: "not-evaluated", reason: "at least one scope could not be compared", recordTs, recordStale, scopes, artifactIndependentScopes };
+  // No stale, nothing unevaluable ⇒ fresh. Scopes that were SKIPPED because they are artifact-
+  // independent are named in `artifactIndependentScopes` — the verdict is "fresh" only for the
+  // comparisons that actually happened.
+  return { state: "fresh", reason: null, recordTs, recordStale, scopes, artifactIndependentScopes };
 }
 
 /** 首条可解析记录（uncovered 发现只看这一条——measure-history 有 127 万行，⛔ 不整份读）。 */
@@ -828,7 +902,7 @@ export function analyzeCarrier(
     file: spec.file, evaluated: false, reason: "carrier-missing",
     totalRecords: 0, freshestMs: null, groupCount: 0, decayed: [], adjudicated: [], companions: [],
     contentDark: { state: "not-evaluated", records: 0, falseRecords: 0, reason: "carrier-missing", darkInterval: null },
-    staleEvaluated: { state: "not-evaluated", reason: "carrier-missing", recordTs: null, recordStale: null, scopes: [] },
+    staleEvaluated: { state: "not-evaluated", reason: "carrier-missing", recordTs: null, recordStale: null, scopes: [], artifactIndependentScopes: [] },
   };
   const records = readCarrierRecords(root, spec);
   if (records === null) return empty;
@@ -1091,6 +1165,8 @@ function printDecayReport(outcome: AnalyzeOutcome): void {
       reason: c.staleEvaluated.reason,
       recordTs: c.staleEvaluated.recordTs,
       recordStale: c.staleEvaluated.recordStale,
+      /** 未做「产物 vs 提交」比较的 live 读数（显式点名——跳过必须可读，硬规则 3b）。 */
+      artifactIndependentScopes: c.staleEvaluated.artifactIndependentScopes,
       scopes: c.staleEvaluated.scopes.map((s) => ({
         scope: s.scope,
         source: s.source,
@@ -1099,6 +1175,7 @@ function printDecayReport(outcome: AnalyzeOutcome): void {
         commitSha: s.commitSha,
         state: s.state,
         reason: s.reason,
+        independence: s.independence,
       })),
     },
     decayed: c.decayed.map((d) => ({
