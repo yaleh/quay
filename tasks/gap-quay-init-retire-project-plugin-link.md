@@ -61,3 +61,9 @@ extra:
 - `plugin/skills/init/SKILL.md`
 - `README.md`
 - `plugin/scripts/verify-deliver-coldstart.sh`
+- `plugin/scripts/quay-init-steps.ts`（`refresh-plugin-link` 步骤 → `retire-plugin-link`；创建链接的可达路径必须一起删掉）
+- `plugin/scripts/verify-plugin-channel-assertions.ts`（`--upgrade-from` 演练原来断言「链接改指新版本」，retire 之后必须断言「链接被删除」）
+- `plugin/scripts/capability-catalog-declarations.json`（上面那个 checker 的声明口径同步）
+- `plugin/test/quay-init-stable-plugin-link.test.mjs`（端到端钉住链接的测试：改钉 retire 语义）
+- `plugin/test/driver-runtime-loaded-version-drift.test.mjs`（AC3c 静态扫描：原来断言 init.ts 是唯一写入者，现在断言**没有**任何源码构造该链接）
+- `CHANGELOG.md`（AC8 breaking-change 条目）
