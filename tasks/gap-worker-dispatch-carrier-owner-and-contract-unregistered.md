@@ -2,7 +2,7 @@
 id: gap-worker-dispatch-carrier-owner-and-contract-unregistered
 title: .quay/worker-dispatch.json 在 carrier registry 里 owner=unowned-yet /
   readers=unaudited，外部读者无法判断「在飞」与「崩溃残留」
-status: ready
+status: done
 labels:
   - gap
 parent: null
@@ -81,13 +81,3 @@ extra:
 - `plugin/test/duration-report.test.mjs`（AC4 三态 + 两条反向 fixture）
 - `plugin/test/worker-driver.test.mjs`（schema 标记断言）
 - `plugin/test/carrier-registry-completeness.test.mjs`（readers 枚举 schema + 回归闸）
-
-## Blocker
-
-**2026-10-25T14:19:35.422Z — worker 未落地（exited-not-landed）**
-
-- 未落地原因：step=suite: AssertionError [ERR_ASSERTION]: at least one bin is under-sampled (otherwise the rule is vacuous) [baseline A/B: HARD RED (task-introduced-red) — the task's red set is NOT a subset of the develop baseline red set: added=plugin/test/driver-runtime-control-plane.test.mjs changed=-]
-- run_id：wk-prod-anchor
-- session_id：beb10389-ef2e-4896-9203-9a3c301ab90a
-- **2026-10-25 二次轮复核：该 blocker 未复现**——`driver-runtime-control-plane.test.mjs` 单跑 6/6 绿，
-  真因是内核分配端口落入 undici prohibited-port 表的宿主 flake（详见 Evidence 末条），⛔ 不是本 delta 引入。

@@ -51,6 +51,12 @@ import { parseFrontmatterCompletely, frontmatterStatus } from "./task-schema.ts"
 import { listTaskIds } from "./fast-mode-telemetry.ts";
 // 入口判定按**文件名**认身份（bundle-safe，见文件末尾的注释）。
 import { isDirectEntry } from "./gate-script-base.ts";
+// dispatch 载体的只读三态判定（live / residue / not-evaluated）与 pid 判定只有一份，住在
+// driver-shared.ts（gap-worker-dispatch-carrier-owner-and-contract-unregistered）。
+// ⛔ 不 import worker-driver.ts：`worker-driver → relaxed-dispatch-ledger → 本文件` 已是值边，反向
+// import 会成值环（import-graph-check 的 valueSccs 棘轮钉在 0）。契约 →
+// docs/references/worker-dispatch-carrier.md。
+import { readDispatchStoreClassified, resolveWorkerProcessName } from "./driver-shared.ts";
 
 // ── 取值词表：三态，⛔「未评估」不得与数值共用形状（硬规则 3b）──────────────────────────────
 export const NOT_EVALUATED = "NOT-EVALUATED" as const;
@@ -103,7 +109,36 @@ export interface InFlightAttempt {
   ageMs: MaybeNum;
   /** 恒 `false`——in-flight 尝试**不得**进任何时长统计；这个字段让读者不必靠「记录缺席」去猜。 */
   terminal: false;
+  /** 只读三态判定的取值：本行恒 `live`（pid 存活 ∧ cmdline 仍是本任务的 worker）。
+   *  `residue` 走 DispatchResidueRow，⛔ 不混进右删失集（否则「崩溃残留」会被读成「还在跑」）。 */
+  state: "live";
+  /** 记录自报的 schema 标记；v1 之前写的记录没有该字段 ⇒ null（⛔ 不用字段形状猜版本）。 */
+  schema: string | null;
   source: string;
+}
+
+/** 派发记录里的**残留**条目（文件里有记录，但 pid 已死 / cmdline 已不是本任务的 worker）。
+ *  它【不是】在飞，但也**不是「无在飞」**——必须单列，⛔ 不得被折进右删失集或静默丢弃。 */
+export interface DispatchResidueRow {
+  task: string;
+  runId: string | null;
+  workerPid: number | null;
+  dispatchedAtMs: number | null;
+  state: "residue";
+  schema: string | null;
+  source: string;
+}
+
+/** dispatch 载体的只读读数：文件级三态 + 逐条 live/residue + 结构不可读的条数。 */
+export interface DispatchStoreState {
+  /** 文件级：`not-evaluated` = 缺失 / 不可读 / 解析失败（⛔ 不是「无在飞」）。 */
+  status: "ok" | "not-evaluated";
+  /** 成因枚举（`status === "ok"` 时为 "ok"）。 */
+  fileState: "ok" | "missing" | "unreadable" | "malformed";
+  live: InFlightAttempt[];
+  residue: DispatchResidueRow[];
+  /** 记录本身结构不可读（没有可用的 workerPid/taskId）⇒ 无法判定 live/residue 的条数。 */
+  notEvaluatedRecords: number;
 }
 
 /** 一条任务的报告行。 */
@@ -146,8 +181,18 @@ export interface DurationReport {
     legacyLockJoinMismatches: MaybeNum;
     legacyLockJoinComparable: MaybeNum;
   };
-  /** 右删失：有派发记录、无终态（`terminal:false`）。 */
+  /** 右删失：有派发记录、无终态（`terminal:false`）——**只**含 live 条目。 */
   inFlightAttempts: { count: number; rows: InFlightAttempt[]; agesMs: Dist };
+  /** dispatch 载体的只读三态读数：residue 单列（⛔ 不折进 inFlightAttempts，也不折成「无在飞」），
+   *  文件级 not-evaluated 如实报出。 */
+  dispatchStore: {
+    status: "ok" | "not-evaluated";
+    fileState: "ok" | "missing" | "unreadable" | "malformed";
+    live: number;
+    residue: number;
+    notEvaluatedRecords: number;
+    residueRows: DispatchResidueRow[];
+  };
   tasks: {
     finished: number;
     /** 任务级：ready → 首次派发（排队）。 */
@@ -264,32 +309,66 @@ export function toAttemptRecord(rec: Record<string, unknown>): AttemptRecord | n
   };
 }
 
-/** 读 `.quay/worker-dispatch.json`（在飞尝试的**直接量**载体：driver 在 spawn 后立刻写、终态清）。 */
-export function readInFlightAttempts(root: string, nowMs: number): InFlightAttempt[] {
+/** 读 `.quay/worker-dispatch.json` 并做**只读三态判定**（在飞尝试的**直接量**载体：driver 在 spawn 后
+ *  立刻写、终态清）。
+ *
+ *  三态来自载体的唯一判定 `readDispatchStoreClassified`（driver-shared.ts，内部用同一份
+ *  classifyOrphanDispatch）：
+ *    · live          ⇒ 进 `live`（右删失集）；
+ *    · residue       ⇒ 进 `residue`（有记录但 pid 已死/cmdline 不匹配 ⇒ **不是**在飞，⛔ 也不折成「无在飞」）；
+ *    · not-evaluated ⇒ 文件缺失/不可读/解析失败（`status:"not-evaluated"`）或单条记录结构不可读
+ *                      （`notEvaluatedRecords`）。
+ *  `procDir` / `workerName` 是测试缝：缺省读真 /proc 与本 workspace 的 `.quay/profiles.yml`。
+ *  ⛔ 不按窗口过滤——右删失的意义正是「此刻还活着」。 */
+export function readDispatchStoreState(
+  root: string,
+  nowMs: number,
+  procDir: string = "/proc",
+  workerName: string = resolveWorkerProcessName(root),
+): DispatchStoreState {
   const file = path.join(root, ".quay", "worker-dispatch.json");
-  let raw: unknown;
-  try {
-    raw = JSON.parse(fs.readFileSync(file, "utf8"));
-  } catch {
-    return [];
-  }
-  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return [];
-  const out: InFlightAttempt[] = [];
-  for (const [task, v] of Object.entries(raw as Record<string, unknown>)) {
-    if (!v || typeof v !== "object") continue;
-    const o = v as Record<string, unknown>;
+  const reading = readDispatchStoreClassified(file, procDir, workerName);
+  const live: InFlightAttempt[] = [];
+  const residue: DispatchResidueRow[] = [];
+  let notEvaluatedRecords = 0;
+  for (const entry of reading.entries) {
+    if (entry.state === "not-evaluated") {
+      notEvaluatedRecords++;
+      continue;
+    }
+    const o = (entry.record ?? {}) as Record<string, unknown>;
     const dispatchedAtMs = num(o.startedAtMs);
-    out.push({
-      task,
+    const base = {
+      task: entry.taskId,
       runId: str(o.runId),
       workerPid: num(o.workerPid),
       dispatchedAtMs,
-      ageMs: dispatchedAtMs === null ? NOT_EVALUATED : nowMs - dispatchedAtMs,
-      terminal: false,
+      schema: entry.schema,
       source: ".quay/worker-dispatch.json",
-    });
+    };
+    if (entry.state === "live") {
+      live.push({
+        ...base,
+        ageMs: dispatchedAtMs === null ? NOT_EVALUATED : nowMs - dispatchedAtMs,
+        terminal: false,
+        state: "live",
+      });
+    } else {
+      residue.push({ ...base, state: "residue" });
+    }
   }
-  return out;
+  return { status: reading.status, fileState: reading.fileState, live, residue, notEvaluatedRecords };
+}
+
+/** 在飞尝试（右删失集）：**只**是 live 条目。残留条目经 readDispatchStoreState().residue 单列，
+ *  ⛔ 不在这里被折成「没有在飞」。 */
+export function readInFlightAttempts(
+  root: string,
+  nowMs: number,
+  procDir: string = "/proc",
+  workerName: string = resolveWorkerProcessName(root),
+): InFlightAttempt[] {
+  return readDispatchStoreState(root, nowMs, procDir, workerName).live;
 }
 
 /** 任务级：`ready_at`（status-events 里第一条 `to:"ready"`）与终态。 */
@@ -339,6 +418,10 @@ export interface BuildOptions {
   sinceMs: number;
   untilMs: number;
   nowMs?: number;
+  /** /proc 测试缝（缺省 "/proc"）——用于把 dispatch 记录判成 live / residue。 */
+  procDir?: string;
+  /** worker `-n` 名（缺省按 root 的 `.quay/profiles.yml` 解析，解析失败回落 WORKER_PROCESS_NAME）。 */
+  workerName?: string;
 }
 
 /** 组装整份报告（纯读；⛔ 不写任何文件）。 */
@@ -383,7 +466,9 @@ export function buildDurationReport(opts: BuildOptions): DurationReport {
   }
 
   // 在飞尝试：直接量载体。⛔ 不按窗口过滤——右删失的意义正是「此刻还活着」。
-  const inFlight = readInFlightAttempts(root, nowMs);
+  // 三态：live 进右删失集；residue 单列；文件级 not-evaluated 如实报出（⛔ 三者不互相折平）。
+  const dispatch = readDispatchStoreState(root, nowMs, opts.procDir, opts.workerName);
+  const inFlight = dispatch.live;
   const inFlightAges = inFlight
     .map((a) => a.ageMs)
     .filter((a): a is number => a !== NOT_EVALUATED);
@@ -458,7 +543,15 @@ export function buildDurationReport(opts: BuildOptions): DurationReport {
     window: { sinceMs, sinceIso: new Date(sinceMs).toISOString(), untilMs, untilIso: new Date(untilMs).toISOString() },
     sources: {
       "worker-outcome.jsonl": { path: ".quay/worker-outcome.jsonl", present: outcome.present, records: outcome.present ? outcome.records.length : NOT_EVALUATED },
-      "worker-dispatch.json": { path: ".quay/worker-dispatch.json", present: fs.existsSync(path.join(root, ".quay", "worker-dispatch.json")), records: fs.existsSync(path.join(root, ".quay", "worker-dispatch.json")) ? inFlight.length : NOT_EVALUATED },
+      // records = 文件中记录条数（live + residue + 结构不可读）；文件级未评估 ⇒ NOT-EVALUATED（⛔ 不报 0）。
+      "worker-dispatch.json": {
+        path: ".quay/worker-dispatch.json",
+        present: dispatch.fileState !== "missing",
+        records:
+          dispatch.status === "ok"
+            ? dispatch.live.length + dispatch.residue.length + dispatch.notEvaluatedRecords
+            : NOT_EVALUATED,
+      },
       "task-status-events.jsonl": {
         path: ".quay/task-status-events.jsonl",
         present: fs.existsSync(path.join(root, ".quay", "task-status-events.jsonl")),
@@ -477,6 +570,14 @@ export function buildDurationReport(opts: BuildOptions): DurationReport {
       legacyLockJoinMismatches: legacyComparable === 0 ? NOT_EVALUATED : legacyMismatch,
     },
     inFlightAttempts: { count: inFlight.length, rows: inFlight, agesMs: dist(inFlightAges) },
+    dispatchStore: {
+      status: dispatch.status,
+      fileState: dispatch.fileState,
+      live: dispatch.live.length,
+      residue: dispatch.residue.length,
+      notEvaluatedRecords: dispatch.notEvaluatedRecords,
+      residueRows: dispatch.residue,
+    },
     tasks: {
       finished: rows.length - inFlightTasks.length,
       queueWaitMs: dist(queueWaits),
@@ -507,6 +608,21 @@ export function renderReport(r: DurationReport): string {
   L.push("sources:");
   for (const [k, v] of Object.entries(r.sources)) {
     L.push(`  ${k}: ${v.present ? `present (${v.records} records)` : "ABSENT → 该段 NOT-EVALUATED"}`);
+  }
+  L.push(
+    `dispatch store: ${r.dispatchStore.status} (fileState=${r.dispatchStore.fileState})` +
+      `  live=${r.dispatchStore.live} residue=${r.dispatchStore.residue}` +
+      ` not-evaluated-records=${r.dispatchStore.notEvaluatedRecords}`,
+  );
+  if (r.dispatchStore.status !== "ok") {
+    L.push(`  ⚠️ 载体未评估（${r.dispatchStore.fileState}）⇒ 在飞读数不可得，⛔ 不读作「无在飞」`);
+  }
+  if (r.dispatchStore.residue > 0) {
+    L.push(`  ⚠️ residue = 记录在但 pid 已死 / cmdline 已不是本任务的 worker ⇒【不是在飞】，也【不是没有在飞】（单列，⛔ 不进右删失集）`);
+    for (const x of r.dispatchStore.residueRows.slice(0, 10)) {
+      L.push(`  residue        ${x.task}  pid=${x.workerPid ?? "?"}  run=${x.runId ?? "?"}`);
+    }
+    if (r.dispatchStore.residue > 10) L.push(`  … 另 ${r.dispatchStore.residue - 10} 条 residue`);
   }
   L.push("");
   L.push(`attempts (finished in window: ${r.attempts.finished})`);
