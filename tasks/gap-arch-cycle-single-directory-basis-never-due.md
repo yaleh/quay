@@ -132,3 +132,7 @@ node --experimental-strip-types plugin/scripts/instrument-decay-check.ts --root 
 两次都含 `plugin/test/arch-cycle-reading.test.mjs`（19，含本任务两条新测试）与 `plugin/test/instrument-decay-check.test.mjs`（39，含本任务两条新测试）。完整日志：worktree `.quay/worker-evidence-ac1/scoped-gate.txt`（58）与 `scoped-gate-final.txt`（174）。
 
 **DoD 无新增 spawn**：`refreshBehindScopes` / `runArchCycleRound` 的 spawn 路径未改；`scopeNeedsRefresh` 对 `behindSources:null` 仍返回 false（单目录 scope 仍不进 due 集，Plan item 4），故例程 tick 的 analyze 次数不因本条增加。`plugin/scripts/quality-gate-driver.ts` 的改动只是把新字段写进载体记录的形状声明（`ArchCycleHistoryRecord.scopes[]`），无行为变化。
+
+## Dark axis（ADR-007）
+
+- 该轴仍暗,理由:本条只改 arch-cycle 读数的 provenance 字段与检测器的 artifact-independence 判定，未触碰模块/依赖结构；且 DoD 明确不新增 analyze spawn，本轮没有运行结构分析 ⇒ 没有 L_D/L_G 数值读数可用（结构轴对本条没有输入，不等于「已测为 0」）。
