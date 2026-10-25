@@ -95,8 +95,9 @@ Flags:
                byte-identical. Nothing is deleted silently.
   --json       Print ONE machine-readable JSON report on stdout (the same document the MCP
                \`init\` tool returns): outcome, the keys filled/migrated/removed, warnings,
-               whether the result validated, and the .quay/plugin link status. Human-facing
-               progress moves to stderr so stdout stays parseable.
+               whether the result validated, and what the .quay/plugin retirement step did
+               (retired / absent / refused). Human-facing progress moves to stderr so stdout
+               stays parseable.
   --project <name>
                The project's name, used for the .quay/profiles.yml role session prefixes
                (<name>-task-worker, …). Default: the basename of the target root.
@@ -265,9 +266,8 @@ Description:
   const branchModelOnly = initFlags["branch-model-only"] === true;
   const project = typeof initFlags.project === "string" ? initFlags.project : undefined;
   // The plugin root THIS run executes from — threaded so the upgrade can resolve the native binding
-  // and refresh `<root>/.quay/plugin` AFTER the config write. ⛔ Never a registry lookup (the link
-  // names the plugin root that is actually running — see init.ts's own ruling). Unset ⇒ the link
-  // step is skipped here; the shell's own step still owns it until AC-331.
+  // and read the version carriers. ⛔ It has nothing to do with `<root>/.quay/plugin`: that guidance
+  // link is RETIRED (human ruling 2026-10-25) and init only ever deletes one.
   const pluginRoot = typeof initFlags["plugin-root"] === "string"
     ? initFlags["plugin-root"]
     : typeof process.env.CLAUDE_PLUGIN_ROOT === "string" && process.env.CLAUDE_PLUGIN_ROOT !== ""
@@ -367,10 +367,6 @@ Description:
       // The doc-branch NAME, when the caller gave one. Absent ⇒ `runInit` resolves the target's
       // `loop.doc_branch`, else the `author` convention (the retired shell entry's own precedence).
       docBranchName,
-      // AC-331: the CLI must lay the WHOLE closed set alone, and the `.quay/plugin` link is part of it.
-      // The fresh arm (no existing link) may therefore point at a source checkout; an existing link is
-      // still left untouched and reported NOT-EVALUATED (the 2026-10-06 ruling). See runInit.
-      allowSourceCheckoutLink: true,
     });
 
     // The ONE report (AC-330): `--json` prints exactly this, and the MCP `init` tool returns it

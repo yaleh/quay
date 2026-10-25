@@ -10,11 +10,12 @@ import fs from "node:fs";
 import path from "node:path";
 import { TASK_STATUS } from "../core/types.ts";
 import { parseFrontmatter } from "../core/frontmatter-store-base.ts";
-// Touches annotation stripping — the ONE kernel definition, shared with plugin/scripts/touches-parser.ts
-// (task gap-three-pure-judges-kernel-single-def for the full-width half, and
-// gap-routine-semantic-dedup-scan-strip-touch-annotation for the composite entry strip). The kernel
+// Touches entry normalization — the ONE kernel definition, shared with plugin/scripts/touches-parser.ts
+// (task gap-three-pure-judges-kernel-single-def for the full-width half,
+// gap-routine-semantic-dedup-scan-strip-touch-annotation for the composite entry strip, and
+// gap-routine-semantic-dedup-scan-parse-touch-paths for the whole bullet→path pipeline). The kernel
 // is the one location both layers reach without a `packages/**` → `plugin/**` reverse edge.
-import { stripTouchAnnotation } from "../kernel/touches-annotation.ts";
+import { parseTouchBulletPaths } from "../kernel/touches-annotation.ts";
 import type { InFlightTask } from "./model.ts";
 
 // ── Cross-task blocking visibility (gap-webui-cross-task-blocking-visibility) ───────────────────
@@ -28,14 +29,26 @@ import type { InFlightTask } from "./model.ts";
 //
 // PARSE-SOURCE NOTE (hard rule: single source of truth): the AUTHORITATIVE Touches parser is
 // plugin/scripts/touches-parser.ts (parseTouchEntries / extractTouchesSection). Core cannot import
-// plugin/ (packages/quay/src has zero plugin/ imports — readBoardLanding shells out instead), and a
-// subprocess would be overkill for a pure parse, so the display-surface parser below mirrors that
-// module's documented behavior (quote/backtick strip → trailing (…)/（…） annotation strip → masked
-// backtick strip → leading ./ strip). It is a DECLARED-PATH SET intersection, deliberately NOT the
-// dispatch mechanism's expand-then-check (checkTouchesPair/expandDeclaredTouches): the display shows
-// "whose declared files overlap", which is the same judgment surface the tick-log prose describes,
-// while slot-refill's own expand-and-check remains the single dispatch truth. A parse divergence on
-// an edge-case annotation can at worst mis-render ONE blocking row, never a dispatch decision.
+// plugin/ (packages/quay/src has zero plugin/ imports — readBoardLanding shells out instead), so the
+// ENTRY pipeline is the kernel leaf `packages/quay/src/kernel/touches-annotation.ts`'s
+// `parseTouchBulletPaths` — the same function object the plugin parser re-exports as
+// `parseTouchEntries` (reachable from both layers without a `packages/**` → `plugin/**` reverse edge;
+// it ships self-contained through build-plugin-dist's `coreSrcAliasPlugin`). Task
+// gap-routine-semantic-dedup-scan-parse-touch-paths removed the hand-maintained copy that used to
+// live here — a divergence is now structurally impossible, not prose-forbidden.
+//
+// It is a DECLARED-PATH SET intersection, deliberately NOT the dispatch mechanism's
+// expand-then-check (checkTouchesPair/expandDeclaredTouches): the display shows "whose declared files
+// overlap", which is the same judgment surface the tick-log prose describes, while slot-refill's own
+// expand-and-check remains the single dispatch truth.
+//
+// ⚠️ The SECTION LOCATOR (`extractTouchesSection` below) is still a local simplification of the
+// plugin's, NOT shared: it takes the FIRST heading matching /^touches\b/i, while the plugin's adds the
+// exact-`Touches`-wins + highest-level tie-break selection rule (gap-touches-parser-early-subheading-
+// latch-hides-declaration). The two agree on every task body in this store today; the difference only
+// shows on an early `### Touches …` subheading, where core would latch early and read no entries.
+// Left as-is by the extraction task above (its finding names the ENTRY pipeline): changing it also
+// changes which rows the display shows, which needs its own before/after evidence.
 
 /** A task's blocking-relevant facts, parsed from its on-disk `tasks/<id>.md`. */
 export interface BlockingTask {
@@ -67,27 +80,16 @@ export function extractTouchesSection(body: string): { hasSection: boolean; sect
   return { hasSection, section: out.join("\n") };
 }
 
-// Touches-entry annotation strip: ONE definition in the kernel leaf
-// (`./kernel/touches-annotation.ts`), shared with plugin/scripts/touches-parser.ts. This module
-// used to carry a hand-maintained mirror of the composite algorithm (leading-path cut + both
-// trailing annotation spellings to a fixed point); task
-// gap-routine-semantic-dedup-scan-strip-touch-annotation removed that copy — the two files now
-// delegate to the same function object, so they cannot drift.
+// Touches-entry pipeline: ONE definition in the kernel leaf (`./kernel/touches-annotation.ts`),
+// shared with plugin/scripts/touches-parser.ts. This module used to carry a hand-maintained mirror of
+// both halves — the composite annotation strip (removed by
+// gap-routine-semantic-dedup-scan-strip-touch-annotation) and the eight-step bullet→path pipeline
+// around it (removed by gap-routine-semantic-dedup-scan-parse-touch-paths). Re-exporting the kernel
+// function object means the two layers cannot drift; `parseTouchPaths` stays as the name Core's own
+// consumers import (observation.ts does `export *` from this module).
 
-/** Parse a `## Touches` bullet list into bare path strings (mirrors touches-parser.ts parseTouchEntries). */
-export function parseTouchPaths(touchesSection: string): string[] {
-  if (!touchesSection) return [];
-  return touchesSection
-    .split(/\r?\n/)
-    .map((l) => l.trim())
-    .filter((l) => /^[-*]\s+/.test(l))
-    .map((l) => l.replace(/^[-*]\s+/, "").trim())
-    .map((l) => l.replace(/^[`"'']+|[`"'']+$/g, "").trim())
-    .map(stripTouchAnnotation)
-    .map((l) => l.replace(/^[`"'']+|[`"'']+$/g, "").trim())
-    .map((l) => l.replace(/^\.\//, "").trim())
-    .filter(Boolean);
-}
+/** Parse a `## Touches` bullet list into bare path strings. Alias of the kernel's ONE pipeline. */
+export { parseTouchBulletPaths as parseTouchPaths };
 
 /**
  * The cross-task blocking computation — PURE (unit-testable). For each in-flight task id X:
@@ -163,7 +165,7 @@ export function readTaskBlockingInputs(root: string): BlockingTask[] {
     const dependsOn = Array.isArray(frontmatter.depends_on)
       ? frontmatter.depends_on.filter((d): d is string => typeof d === "string")
       : [];
-    const touches = parseTouchPaths(extractTouchesSection(body).section);
+    const touches = parseTouchBulletPaths(extractTouchesSection(body).section);
     out.push({ id, status, dependsOn, touches });
   }
   return out;

@@ -20,6 +20,10 @@
 //        not-yet-created file, never by an un-stripped annotation.
 //
 // Run: scripts/test.sh plugin/test/touches-parser-parity.test.mjs
+//
+// gap-routine-semantic-dedup-scan-parse-touch-paths extended the parity set with Core's
+// `parseTouchPaths` (packages/quay/src/observation/blocking.ts): it was the same eight-step pipeline
+// copied verbatim, but it was not a member of ANY parity set, so the mirror was pinned by prose only.
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -30,6 +34,11 @@ import { parseBulletList } from "../scripts/select-tests-for-touches.ts";
 import { extractTouchesGlobs } from "../scripts/prepare-admission-check.ts";
 import { checkTouches } from "../scripts/task-schema.ts";
 import { checkTaskAntiDrift } from "../scripts/anti-drift-touches-check.ts";
+// Core's display-surface entry. It used to be a hand-maintained COPY of the same eight-step pipeline
+// (gap-routine-semantic-dedup-scan-parse-touch-paths) and was NOT in this parity set, so nothing but a
+// prose comment held the two in step. It is now the kernel function object, and it is a member of
+// PARSERS below — a re-introduced Core-local copy diverges here.
+import { parseTouchPaths as coreParseTouchPaths } from "../../packages/quay/src/observation/blocking.ts";
 
 // ── AC3 fixture set ───────────────────────────────────────────────────────────────────────────────
 // Each fixture is a `## Touches` bullet line. `bodyOf` wraps it in a minimal execution-type task
@@ -68,6 +77,10 @@ const bodyOf = (section) => `**type:** execution\n\n## Touches\n${section}`;
 // expected to agree EXACTLY on the fixture set — that is the parity claim (AC3).
 const PARSERS = {
   parseTouchEntries: (body, section) => parseTouchEntries(section),
+  // Core's display-surface parser (packages/quay/src/observation/blocking.ts). Added by
+  // gap-routine-semantic-dedup-scan-parse-touch-paths: the finding's second half was that this
+  // mirror was NOT a member of any parity set, so only a prose comment kept it in step.
+  parseTouchPaths: (body, section) => coreParseTouchPaths(section),
   parseBulletList: (body, section) => parseBulletList(section),
   extractTouchesGlobs: (body, section) => extractTouchesGlobs(section),
   parseTouches: (body) => parseTouches(body).globs,

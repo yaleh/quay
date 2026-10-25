@@ -42,7 +42,7 @@ steps (each mirrors the python3 invocation it replaced in plugin/scripts/quay-in
   ensure-loop-config  <cfg> <repo_root> <test_command> <tmux_session> <worktree_root> <dry_run:true|false>
   ensure-carrier-env  <cfg> <ws_root> <dry_run:true|false>
   reconcile-config    <cfg> <dry_run:true|false>
-  refresh-plugin-link <ws_root> <plugin_root> <dry_run:true|false>
+  retire-plugin-link  <ws_root> <dry_run:true|false>
   migrate-mcp-entry   <cfg> <install_provider> <install_runtime> <install_core> <ws_root> <dry_run> <backup_ts>
   derive-loop-scripts <out-file> <plugin_root> <never-laydown-names>
   laydown-set         <plugin_root> [never-laydown-names]
@@ -104,9 +104,14 @@ async function main(): Promise<void> {
       core.reconcileConfigFile({ cfgPath: args[0]!, dryRun: args[1] === "true" });
       return;
     }
-    case "refresh-plugin-link": {
-      need(3);
-      core.refreshProjectPluginLink({ wsRoot: args[0]!, pluginRoot: args[1] || null, dryRun: args[2] === "true" });
+    case "retire-plugin-link": {
+      // Human ruling 2026-10-25: `/quay:init` no longer CREATES `<ws>/.quay/plugin`. This step only
+      // deletes a symlink an older init left behind; a regular file/directory at that name is the
+      // user's and is reported `refused`, never touched. The state word is printed so the shell has a
+      // reading (⛔ this step CLI's stdout is total by contract).
+      need(2);
+      const reading = core.retireProjectPluginLink({ wsRoot: args[0]!, dryRun: args[1] === "true" });
+      process.stdout.write(reading.state + "\n");
       return;
     }
     case "migrate-mcp-entry": {

@@ -489,8 +489,7 @@ test("AC4-pointer④ — link target WITHOUT a plugin.json ⇒ pointer=not-evalu
 });
 
 // AC3 (this task) — Core must not WRITE the link. `driver status` is the Core path this file can run
-// cheaply; the static half (`grep` that only refreshProjectPluginLink constructs it) lives in the
-// task's AC3 evidence.
+// cheaply; the static half (`grep` for any source that constructs it) is AC3c below.
 test("AC3 — `driver status` leaves the `.quay/plugin` link byte-identical (Core never writes it)", (t) => {
   const core = fixturePluginRoot(t, "core15e", "0.15.0");
   const { home, root } = driftedWorld(t, "ptr5");
@@ -533,7 +532,7 @@ test("AC3b — the MCP-launch path (`quay task list`) leaves the `.quay/plugin` 
   assert.equal(fs.readlinkSync(link), before, "Core must NOT rewrite `.quay/plugin` on the MCP-launch path");
 });
 
-test("AC3c — STATIC: the ONLY source that constructs AND writes `.quay/plugin` is init.ts's refreshProjectPluginLink", () => {
+test("AC3c — STATIC: NO source constructs `.quay/plugin` any more (the link is RETIRED, 2026-10-25)", () => {
   const REPO_ROOT = path.resolve(__dirname, "..", "..");
   const dirs = [path.join(REPO_ROOT, "packages", "quay", "src"), path.join(REPO_ROOT, "plugin", "scripts")];
   const offenders = [];
@@ -548,8 +547,11 @@ test("AC3c — STATIC: the ONLY source that constructs AND writes `.quay/plugin`
     }
   };
   for (const d of dirs) walk(d);
-  assert.deepEqual(offenders, [path.join("packages", "quay", "src", "init.ts")],
-    `the ONLY writer of .quay/plugin must be init.ts (Core runtime paths must never write it); got ${JSON.stringify(offenders)}`);
+  // `quay init` only DELETES a link an older version left behind (`retireProjectPluginLink`), so the
+  // writer set is EMPTY. ⛔ The claim is stronger than "init is the only writer": Core runtime paths
+  // still must never write it, and now nothing does.
+  assert.deepEqual(offenders, [],
+    `no source may construct .quay/plugin (the guidance link is retired); got ${JSON.stringify(offenders)}`);
 });
 
 // ══ gap-server-status-six-serial-driver-runtime-cold-spawns ═══════════════════════════════════════

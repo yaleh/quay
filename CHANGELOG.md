@@ -1,5 +1,32 @@
 # Changelog
 
+## Unreleased — ⚠️ BREAKING: `quay init` no longer creates `<project>/.quay/plugin`
+
+**Breaking change.** `/quay:init` no longer creates the project-internal guidance symlink
+`<project>/.quay/plugin`. An existing **symlink** left by an older version is DELETED by the next
+init; a **regular file or directory** at that name is the user's content — it is refused and left
+byte-identical. External consumers that located the CLI through `<project>/.quay/plugin/…` must
+resolve it from the **Claude Code plugin scope records** instead
+(`docs/references/external-consumer-cli-location.md`). Core never read the link
+(`plugin-root.ts` resolves from its own install location), so no binding moves — but a script that
+still hard-codes the path will stop resolving.
+
+**Release ordering (blocking for the publish, not for the merge).** ⛔ Do not publish this change
+until the CloudCLI-side resolver (`claudecodeui` task
+`gap-quay-entrypoint-resolver-via-claude-plugin-scopes`) is deployed.
+
+#### Changed
+
+- `quay init --json`'s `pluginLink` now reports the retirement: `retired` (a symlink was deleted) /
+  `absent` (nothing was there) / `refused` (a regular file or directory, untouched) — plus
+  `would-retire` under `--dry-run`, and `delete-failed` / `unreadable` as auxiliary failure states.
+  `not-run` still means the step was never reached.
+- The `quay-init.sh` step CLI's `refresh-plugin-link` step is replaced by `retire-plugin-link`; the
+  create-a-link path is gone.
+- `verify-deliver-coldstart.sh` resolves the upgraded project's runtime from the delivered plugin
+  root instead of the retired link; the `--upgrade-from` drill in
+  `verify-plugin-channel-assertions.ts` now asserts the link is **deleted** after re-init.
+
 ## v0.6.1 (2026-08-21) — documentation close-out (T1-T5) + cross-host/cross-project verification
 
 The 134+ commit release (人令② publish) closes out the delivery-facing documentation and the

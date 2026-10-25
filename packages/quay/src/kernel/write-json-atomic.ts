@@ -6,6 +6,18 @@
 // writeRulingObserverState) and four non-atomic (direct writeFileSync: mirror-full-suite-state.ts
 // writeMirrorState, red-window-triage.ts writeState, runner-state-write.ts writeState,
 // suite-state-trigger.ts writeSuiteState) — and the split itself was invisible to any check.
+//
+// ── 2026-10-25: THE SPLIT WAS STILL PARTIALLY OPEN, AND THAT HALF IS NOW CLOSED ───────────────────
+// `.quay/routine-findings.jsonl` finding `write-state-atomic-split` (routine `semantic-dedup-scan`,
+// runId `semantic-dedup-scan-1792940684375`) found one behaviour with THREE implementations still live:
+// two more inline copies of the tmp+rename idiom (ci-runs-collect.ts writeState, driver-anchor.ts
+// writeState) plus one plainly non-atomic writer (meta-driver.ts writeState — bare writeFileSync, so a
+// concurrent reader could see a zero-length/half-written `.quay/meta-driver-state.json` and fall back to
+// never-judged). All three now delegate here, as do two sibling read-back carriers in the same files
+// (driver-anchor.ts writeTakeoverRecord, meta-driver.ts's action-record scan carrier — hard rule 5b:
+// the named instance is not the only applicable point). The "single implementation" invariant is pinned
+// by `plugin/test/writestate-single-implementation.test.mjs`, which fails if an inline tmp+rename or a
+// plain JSON writeFileSync reappears in any of those writers.
 // This module is the ONE atomic write: serialize to a unique temp file in the SAME directory,
 // then renameSync it over the target. rename(2) is atomic on POSIX, so a concurrent reader sees
 // either the previous complete file or the new complete file — never a torn, half-written JSON.

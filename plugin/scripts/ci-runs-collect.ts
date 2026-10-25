@@ -76,6 +76,10 @@ import { repoRoot } from "./repo-root.ts";
 // the ~73 hand-written copies of the indexOf+next-arg idiom in plugin/scripts
 // (.quay/routine-findings.jsonl finding `arg-parsing-helper-family`, routine `semantic-dedup-scan`).
 import { flagValue } from "./gate-script-base.ts";
+// 状态文件的原子写只有一份实现（kernel `writeJsonAtomic`，tmp + renameSync）：本文件曾把同一段
+// tmp+rename 惯例**内联复写**一遍（.quay/routine-findings.jsonl finding `write-state-atomic-split`，
+// routine semantic-dedup-scan，2026-10-25）——一处行为三个实现，且分裂本身对任何检查不可见。
+import { writeJsonAtomic } from "./write-json-atomic.ts";
 import {
   attributeRun,
   jobNeverStarted,
@@ -1225,10 +1229,8 @@ function readState(statePath: string): CollectState {
 
 function writeState(statePath: string, state: CollectState): void {
   try {
-    fs.mkdirSync(path.dirname(statePath), { recursive: true });
-    const tmp = `${statePath}.tmp-${process.pid}`;
-    fs.writeFileSync(tmp, JSON.stringify(state) + "\n");
-    fs.renameSync(tmp, statePath);
+    // 原子写：委托 kernel 的**唯一**实现（tmp + renameSync），⛔ 不再内联复写同一段惯例。
+    writeJsonAtomic(statePath, state);
   } catch {
     // 状态写不进去 ⇒ 下一轮会重采一次（fail-open 方向安全：多采 > 停采），⛔ 不因此判失败
   }

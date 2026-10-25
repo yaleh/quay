@@ -1274,7 +1274,7 @@ async function block14(workspaceRoot) {
     const dispatchVerbs = [
       "adr", "goal", "meta", "task", "action", "serve", "server", "mcp", "init", "config", "gate",
       "gate-log", "complete", "adjudicate", "promote", "retreat", "run", "migrate", "provider",
-      "manager", "driver", "lanes",
+      "manager", "driver", "lanes", "live-state",
     ];
     const missing = dispatchVerbs.filter((v) => !synopsisVerbs.includes(v));
     const extra = synopsisVerbs.filter((v) => !dispatchVerbs.includes(v));

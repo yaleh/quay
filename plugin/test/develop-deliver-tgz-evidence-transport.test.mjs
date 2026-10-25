@@ -695,14 +695,20 @@ test("AC8 — every shipped-CLI invocation in verify-deliver-coldstart.sh is ver
 //   · config_native_mcp_entry() — the bound bundle path (its sha is compared to the DELIVERED one), and
 //   · binding_state()            — the form word (the gate requires `path-resolved`).
 // Commit 76f89ce82 (gap-project-quay-pointer-is-init-plugin-root-…) removed
-// providers.native.path/mcp_entry — Core resolves <plugin-root>/vendor/quay-native and the project's
-// binding IS its `.quay/plugin` link. A reading written for the OLD config-carried form goes
-// `<unread>`/`unreadable` under the new one ⇒ AC-238 can never be written ⇒ AC-214's ONLY remedy
-// (re-run the producer) is structurally unable to refresh AC-238/239 (硬规则 5b — the sibling this
-// task's call-site fix exposed). This drives the two readers (extracted by POSITION) against fixtures.
+// providers.native.path/mcp_entry — Core resolves <plugin-root>/vendor/quay-native. A reading written
+// for the OLD config-carried form goes `<unread>`/`unreadable` under the new one ⇒ AC-238 can never be
+// written ⇒ AC-214's ONLY remedy (re-run the producer) is structurally unable to refresh AC-238/239
+// (硬规则 5b — the sibling this task's call-site fix exposed).
 //
-// Three-valued, never boolean (硬规则 3b): a plugin-linked root resolves; a root with NO link stays
-// not-evaluated (fail-closed, not a silent pass); a bare-path mcp_entry stays RED.
+// UPDATED by gap-quay-init-retire-project-plugin-link (2026-10-25): the `.quay/plugin` link that used
+// to name that plugin root is RETIRED — init no longer creates it and deletes an old one. So the two
+// readers now take the plugin root as an argument (`$2`, else the script's own plugin root) and the
+// link is NEVER read. This drives the two readers (extracted by POSITION) against fixtures.
+//
+// Three-valued, never boolean (硬规则 3b): a plugin root carrying the vendored bundle resolves; one
+// without it stays not-evaluated (fail-closed, not a silent pass); a bare-path mcp_entry stays RED.
+// ② is the falsifiable half of the retirement: a link whose decoy tree DOES carry a bundle must not
+// make an empty plugin root read as resolved.
 const VDC_SCRIPT = path.join(REPO_ROOT, "plugin", "scripts", "verify-deliver-coldstart.sh");
 
 function extractFn(src, name) {
@@ -733,6 +739,12 @@ test("post-upgrade binding reading follows the plugin-root semantics (76f89ce82)
       }
       return r;
     };
+    const mkPluginRoot = (name, { bundle = true } = {}) => {
+      const p = path.join(tmp, name);
+      mkdirSync(path.join(p, "vendor", "quay-native", "dist"), { recursive: true });
+      if (bundle) writeFileSync(path.join(p, "vendor", "quay-native", "dist", "quay-native.js"), "fake\n");
+      return p;
+    };
     const scriptsDir = path.join(REPO_ROOT, "plugin", "scripts");
     const read = (expr) => {
       const r = spawnSync("bash", ["-c",
@@ -742,27 +754,31 @@ test("post-upgrade binding reading follows the plugin-root semantics (76f89ce82)
       return (r.stdout || "").trim();
     };
 
-    // ① new semantics (no mcp_entry) + a `.quay/plugin` link whose vendored bundle exists
-    //    ⇒ the binding IS resolvable ⇒ path-resolved; the bound entry is the plugin-vendored bundle.
-    const linked = mkRoot("linked", { link: true });
-    assert.equal(read(`binding_state '${linked}'`), "path-resolved",
-      "a project whose .quay/plugin link resolves to a real vendored quay-native bundle IS bound to a project-controlled path (new semantics)");
-    const entry = read(`config_native_mcp_entry '${linked}'`);
-    assert.match(entry, /\/vendor\/quay-native\/dist\/quay-native\.js$/,
-      `the bound entry must resolve through the plugin link, got: ${entry}`);
+    // ① new semantics (no mcp_entry) + an explicit plugin root carrying the vendored bundle
+    //    ⇒ the binding IS resolvable ⇒ path-resolved; the bound entry is THAT root's bundle.
+    const proot = mkPluginRoot("plugin-real");
+    const linked = mkRoot("linked", { link: true }); // a link is present — and must NOT be the source
+    assert.equal(read(`binding_state '${linked}' '${proot}'`), "path-resolved",
+      "a project whose plugin root carries a real vendored quay-native bundle IS bound to a project-controlled path (new semantics)");
+    const entry = read(`config_native_mcp_entry '${linked}' '${proot}'`);
+    assert.match(entry, /\/plugin-real\/vendor\/quay-native\/dist\/quay-native\.js$/,
+      `the bound entry must resolve through the PLUGIN ROOT argument, got: ${entry}`);
 
-    // ② SAME config but NO `.quay/plugin` link ⇒ NOT-EVALUATED / empty, never a silent pass.
-    const unlinked = mkRoot("unlinked", { link: false });
-    assert.equal(read(`binding_state '${unlinked}'`), "no-mcp-entry",
-      "without the plugin link the new-semantics binding is NOT established — it must not read as path-resolved");
-    assert.equal(read(`config_native_mcp_entry '${unlinked}'`), "",
-      "without the plugin link there is no bound entry — empty (the caller's sha gate then fails closed)");
+    // ② RETIRED LINK: the project still has a `.quay/plugin` link (whose decoy tree DOES carry a
+    //    vendored bundle), but the plugin root in force carries none ⇒ NOT-EVALUATED / empty.
+    //    This is falsifiable: any code path that still reads the link would return path-resolved.
+    const linkedNoRoot = mkRoot("linked-no-root", { link: true });
+    const emptyProot = mkPluginRoot("plugin-empty", { bundle: false });
+    assert.equal(read(`binding_state '${linkedNoRoot}' '${emptyProot}'`), "no-mcp-entry",
+      "the retired .quay/plugin link is never a binding source — an empty plugin root must not read as path-resolved");
+    assert.equal(read(`config_native_mcp_entry '${linkedNoRoot}' '${emptyProot}'`), "",
+      "with no vendored bundle under the plugin root there is no bound entry — empty (the caller's sha gate then fails closed)");
 
-    // ③ a pre-migration bare-PATH binding stays RED even when a plugin link exists (the reading must
+    // ③ a pre-migration bare-PATH binding stays RED even when a plugin root resolves (the reading must
     //    not paper over the very defect it exists to detect).
     const bare = mkRoot("bare", { link: true, bareEntry: true });
-    assert.equal(read(`binding_state '${bare}'`), "bare-path-name",
-      "a bare-path mcp_entry must stay bare-path-name (RED) — the plugin-link fallback must not mask it");
+    assert.equal(read(`binding_state '${bare}' '${proot}'`), "bare-path-name",
+      "a bare-path mcp_entry must stay bare-path-name (RED) — the plugin-root fallback must not mask it");
   } finally {
     rmSync(tmp, { recursive: true, force: true });
   }

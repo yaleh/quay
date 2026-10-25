@@ -29,10 +29,6 @@ import {
 // (finding `escaperegexp-sweep-missed-two`, routine `semantic-dedup-scan`; see
 // packages/quay/test/kernel-regex-escape.test.mjs ④).
 import { escapeRegExp } from "./kernel/regex-escape.ts";
-// The ONE plugin-tree resolver (gap-project-quay-pointer-is-init-plugin-root-and-version-records-
-// derive-from-it): the project link's source-checkout guard reuses `isPluginSourceCheckout` so the
-// "is this an install or a working tree" judgment cannot fork into two spellings.
-import { isPluginSourceCheckout, resolvePluginRoot } from "./core/plugin-root.ts";
 // The ONE binding judge (gap-config-validate-requires-mcp-entry-contradicts-native-default-resolver):
 // `verify_provider_runtime_existence`'s reader resolves the native provider's runtime file through
 // the SAME function the runtime and the validator use, so an omitted binding is verified (from the
@@ -753,11 +749,13 @@ export interface InitResult {
    */
   postWriteBranchModelFailure?: string;
   /**
-   * The `.quay/plugin` link step's outcome for THIS run. Three states, never folded into a boolean
-   * (硬规则 3b): `linked` (the link was refreshed), `not-evaluated` (the step RAN and could not
-   * decide — an unknown or source-checkout plugin root) and `not-run` (this outcome path never
-   * reaches the step, so nobody looked). "not-run" ≠ "not-evaluated": the first means no judgment was
-   * attempted, the second means one was attempted and the input was undecidable.
+   * The `.quay/plugin` RETIREMENT step's outcome for THIS run. Three required states, never folded
+   * into a boolean (硬规则 3b): `retired` (a symlink was deleted), `absent` (there was nothing at the
+   * path) and `refused` (something is there that the closed set does not own — a regular file or
+   * directory — left byte-identical). Auxiliary states that must never be read as one of those:
+   * `would-retire` (a `--dry-run` found a link and wrote nothing), `delete-failed` (the unlink
+   * failed), `unreadable` (the path could not be inspected at all) and `not-run` (this outcome path
+   * never reaches the step, so nobody looked).
    */
   pluginLink: PluginLinkOutcome;
   /**
@@ -809,10 +807,10 @@ export interface AutoCommitReading {
 }
 
 /**
- * Outcome of the `.quay/plugin` link step (see `InitResult.pluginLink`): the two readings
- * `refreshProjectPluginLink` can produce, plus `not-run` for the outcome paths that never reach the
- * step. ⛔ `not-run` is NOT `not-evaluated` — the first means nobody looked, the second means someone
- * looked and the input was undecidable (硬规则 3b: those must never share a value).
+ * Outcome of the `.quay/plugin` RETIREMENT step (see `InitResult.pluginLink`) — the readings
+ * `retireProjectPluginLink` can produce, plus `not-run` for the outcome paths that never reach the
+ * step. ⛔ `not-run` is NOT `absent` — the first means nobody looked, the second means someone looked
+ * and found nothing (硬规则 3b: those must never share a value).
  */
 export type PluginLinkOutcome = ProjectPluginLinkReading | { state: "not-run"; reason: string };
 
@@ -840,10 +838,9 @@ export interface InitOptions {
   dropIncompatible?: boolean;
   /**
    * The plugin root THIS run executes from (`CLAUDE_PLUGIN_ROOT` / `--plugin-root`). Threaded to the
-   * candidate validator's native-binding resolution, and used to refresh `<root>/.quay/plugin` AFTER
-   * the config write succeeds (GOAL-029 ordering: a link pointing at a version whose config upgrade
-   * failed would name a runtime the project is not configured for). Absent ⇒ the link step is
-   * skipped (the shell's own `refresh-plugin-link` step still owns it until AC-331).
+   * candidate validator's native-binding resolution and to the version carriers. ⛔ It does NOT
+   * decide anything about `<root>/.quay/plugin` any more: that path is RETIRED (human ruling
+   * 2026-10-25) and the step only ever deletes a link there, which needs no target.
    */
   pluginRoot?: string | null;
   /**
@@ -933,16 +930,6 @@ export interface InitOptions {
    *                        a NON-interactive one DECLINES (never sweeps a user's uncommitted work).
    */
   autoCommitConfig?: "yes" | "no" | "prompt";
-  /**
-   * Allow the `.quay/plugin` guidance link to point at a SOURCE CHECKOUT (the dev tree) when the
-   * target has NO link yet. ⛔ Default false: on an EXISTING project a source-checkout root must leave
-   * the link untouched and report NOT-EVALUATED (gap-project-quay-pointer-is-init-plugin-root-and-
-   * version-records-derive-from-it (A)) — a working tree is not an install, and silently re-pointing
-   * a project at one would freeze it to uncommitted state. The FRESH-install arm is the one case where
-   * nothing is being preserved and the closed set would otherwise be incomplete (AC-331 requires the
-   * link), so the caller opts in explicitly.
-   */
-  allowSourceCheckoutLink?: boolean;
 }
 
 /**
@@ -2023,21 +2010,16 @@ function runInitImpl(opts: InitOptions): Omit<InitResult, "workspaceRoot" | "doc
     if (!opts.dryRun && !up.report.untouched) {
       writeFileAtomic(configPath, up.content);
     }
-    // The `.quay/plugin` link refresh runs AFTER the config write succeeded (GOAL-029 ordering): a
-    // link pointing at a version whose config upgrade failed would name a runtime the project is not
-    // configured for. Only when the plugin root is known — the shell's own step still owns the link
-    // until AC-331; an unknown root is SKIPPED here, and the outcome rides on `pluginLink` so the
-    // JSON report can carry it (硬规则 3b: "skipped" is its own state, never folded into "linked").
+    // The `.quay/plugin` RETIREMENT step runs AFTER the config write succeeded. It no longer needs to
+    // know which plugin this run came from — it only ever deletes a symlink — so it runs on EVERY
+    // upgrade, including `--dry-run` (report only, nothing unlinked: AC5).
     // ⛔ Its progress lines go through `opts.log`: on `--json` they must land on stderr, or they
     // corrupt the one JSON document stdout is promised to carry.
-    const pluginLink: PluginLinkOutcome = opts.dryRun || !opts.pluginRoot
-      ? {
-        state: "not-run",
-        reason: opts.dryRun
-          ? "a dry run writes nothing, so the link step is not run"
-          : "no plugin root was given for this run (CLAUDE_PLUGIN_ROOT / --plugin-root unset)",
-      }
-      : refreshProjectPluginLink({ wsRoot: root, pluginRoot: opts.pluginRoot, dryRun: false, log: opts.log });
+    const pluginLink: PluginLinkOutcome = retireProjectPluginLink({
+      wsRoot: root,
+      dryRun: opts.dryRun,
+      log: opts.log,
+    });
     // The closed set is committed outside `--dry-run` (nothing to commit) — the shipped shell entry
     // runs this step on EVERY mode, so a re-run can commit scaffolds an earlier run left behind.
     const upgradeAutoCommit = opts.dryRun ? undefined : autoCommitClosedSet(root, opts.autoCommitConfig ?? "prompt", readPluginVersion(opts.pluginRoot));
@@ -2142,7 +2124,7 @@ function runInitImpl(opts: InitOptions): Omit<InitResult, "workspaceRoot" | "doc
       branchModel,
       branchModelReport,
       ...docBranchFields,
-      pluginLink: { state: "not-run", reason: "a dry run writes nothing, so the link step is not run" },
+      pluginLink: retireProjectPluginLink({ wsRoot: root, dryRun: true, log: opts.log }),
       validated: freshVerdict.ok,
       ...(freshVerdict.ok ? {} : { validationIssues: freshVerdict.issues }),
     };
@@ -2199,30 +2181,10 @@ function runInitImpl(opts: InitOptions): Omit<InitResult, "workspaceRoot" | "doc
     fs.mkdirSync(path.dirname(settingsPath), { recursive: true });
     writeClaudeSettings(settingsPath, readPluginName(opts.pluginRoot));
 
-    // The `.quay/plugin` guidance link (AC-331): the CLI completes the closed set on its own.
-    // `allowSourceCheckout: true` is the FRESH arm only — there is no existing link to preserve, and a
-    // dev-tree run (the goal's own environment) would otherwise leave the closed set incomplete.
-    const resolvedPluginRoot = opts.pluginRoot
-      ?? (process.env.CLAUDE_PLUGIN_ROOT && process.env.CLAUDE_PLUGIN_ROOT !== "" ? process.env.CLAUDE_PLUGIN_ROOT : resolvePluginRoot());
-    // ⛔ The source-checkout opt-in applies ONLY when the target has NO link yet. An EXISTING link is
-    // the state the 2026-10-06 ruling protects (a working tree is not an install — re-pointing a
-    // project at one would freeze it to uncommitted state), so it is left untouched and reported
-    // NOT-EVALUATED no matter what the caller asked for.
-    let linkExists = false;
-    try {
-      linkExists = fs.lstatSync(path.join(quayDir, "plugin")).isSymbolicLink();
-    } catch {
-      linkExists = false;
-    }
-    pluginLink = resolvedPluginRoot
-      ? refreshProjectPluginLink({
-        wsRoot: root,
-        pluginRoot: resolvedPluginRoot,
-        dryRun: false,
-        log: say,
-        allowSourceCheckout: opts.allowSourceCheckoutLink === true && !linkExists,
-      })
-      : { state: "not-run", reason: "no plugin root could be resolved (CLAUDE_PLUGIN_ROOT / --plugin-root / module location)" };
+    // The `.quay/plugin` RETIREMENT (human ruling 2026-10-25): init no longer creates the guidance
+    // link. A symlink left by an older init is deleted here; anything else at that name is the user's
+    // and is left byte-identical (`refused`). ⛔ There is no "create" branch left to reach.
+    pluginLink = retireProjectPluginLink({ wsRoot: root, dryRun: false, log: say });
 
     autoCommit = autoCommitClosedSet(root, opts.autoCommitConfig ?? "prompt", pluginVersion);
   } catch (err: unknown) {
@@ -2370,8 +2332,8 @@ function runInitImpl(opts: InitOptions): Omit<InitResult, "workspaceRoot" | "doc
 // `quay init --json` and the MCP `init` tool must hand back the SAME document, and that document must
 // answer the questions an operator (or a script) actually has: what happened, which keys were filled /
 // migrated / removed, what was warned about, whether the result validated, and what the `.quay/plugin`
-// link did. Two builders would drift the moment one of them learned a new field — so there is ONE, and
-// both surfaces call it.
+// retirement step did. Two builders would drift the moment one of them learned a new field — so there
+// is ONE, and both surfaces call it.
 export interface InitReport {
   /** The outcome token (`written` / `reconciled` / `unchanged` / `upgrade-invalid` / `dry-run` / …). */
   outcome: string;
@@ -2412,7 +2374,7 @@ export interface InitReport {
   projectValues: string[];
   /** Unrecognized top-level keys, PRESERVED and reported. */
   unknownKeys: string[];
-  /** The `.quay/plugin` link step's outcome (three states, see `PluginLinkOutcome`). */
+  /** The `.quay/plugin` retirement step's outcome (three required + auxiliary states, see `PluginLinkOutcome`). */
   pluginLink: PluginLinkOutcome;
   /**
    * The STANDING doc-branch invariant after this run (`checkDocBranchInvariant`) — the same four
@@ -3146,14 +3108,34 @@ export function switchEnabledProviderText(text: string, target: string): SwitchE
 // ⛔ Core NEVER writes this link from any runtime path (driver start / serve / MCP). Only `/quay:init`
 // writes it.
 //
-// NOT-EVALUATED (and the existing link is LEFT UNCHANGED — 硬规则 3b: "cannot decide" must not share
-// an outcome with "decided") when the plugin root is unknown or is a SOURCE CHECKOUT (the dev tree
-// `<repo>/plugin` is a working tree, not an install — pointing a project at it would freeze that
-// project to uncommitted state).
+// RULING (human, 2026-10-25) — the link is RETIRED. The 2026-10-06 ruling still bound the link to
+// "the plugin root the last init ran from", which is a SECOND version resolver beside the session
+// layer's plugin-scope rule; the two necessarily diverge (measured 2026-10-06: the link sat at
+// 0.14.0 while every session loaded 0.15.0). So `quay init` no longer CREATES `<ws>/.quay/plugin`:
+//
+//   · a SYMLINK left by an older init is DELETED (`retired`);
+//   · nothing at the path ⇒ `absent`;
+//   · a REGULAR FILE or DIRECTORY there is the user's content — the closed set does not own that
+//     name, so it is REFUSED and left byte-identical (`refused`);
+//   · `--dry-run` reports what it WOULD do and writes nothing (`would-retire`).
+//
+// External consumers (no Core in the loop) locate the CLI through the Claude Code plugin-scope
+// contract instead — `docs/references/external-consumer-cli-location.md`. ⛔ Nothing in Core reads
+// this path, so deleting it moves no binding.
 
 export type ProjectPluginLinkReading =
-  | { state: "linked"; pluginRoot: string; version: string | null }
-  | { state: "not-evaluated"; reason: string };
+  /** A symlink was deleted by THIS run. */
+  | { state: "retired"; path: string; target: string | null }
+  /** A `--dry-run` found a symlink and wrote nothing. */
+  | { state: "would-retire"; path: string; target: string | null }
+  /** Nothing exists at the path. */
+  | { state: "absent"; path: string }
+  /** Something that is NOT a symlink is at the path — the user's content, left untouched. */
+  | { state: "refused"; path: string; reason: string }
+  /** A symlink is at the path but the unlink failed — it is still there. */
+  | { state: "delete-failed"; path: string; reason: string }
+  /** The path could not be inspected at all — ⛔ not `absent` (missing ≠ unreadable). */
+  | { state: "unreadable"; path: string; reason: string };
 
 /** Version of a plugin ROOT (its `.claude-plugin/plugin.json` `version`). null = unreadable.
  *  ⛔ NEVER `quay --version` output — the shipped bundle embeds the dev version, so that reading is a
@@ -3170,8 +3152,6 @@ export function readPluginRootVersion(pluginRoot: string | null): string | null 
 
 export interface ProjectPluginLinkOpts {
   wsRoot: string;
-  /** The plugin root THIS init run executes from (`CLAUDE_PLUGIN_ROOT` / `--plugin-root`). */
-  pluginRoot: string | null;
   dryRun: boolean;
   /**
    * Where the human-facing lines go (default `console.log`). ⛔ `quay init --json` must put ONE
@@ -3179,79 +3159,61 @@ export interface ProjectPluginLinkOpts {
    * this step's reporting would corrupt the machine-readable output it promises.
    */
   log?: (line: string) => void;
-  /**
-   * Permit a SOURCE-CHECKOUT plugin root as the link target. ⛔ Default false, and that default is the
-   * 2026-10-06 ruling: a working tree is not an install, so an existing project's link is left
-   * untouched and the step reports NOT-EVALUATED. `true` is for the FRESH-install arm only — there is
-   * no link to preserve there, and the closed set would otherwise be incomplete (AC-331).
-   */
-  allowSourceCheckout?: boolean;
 }
 
 /**
- * Refresh `<ws>/.quay/plugin` so it points at the plugin root THIS init run executes from. Idempotent:
- * an already-correct link is re-created (cheap) but the RESULT is stable; an unknown / source-checkout
- * plugin root leaves the existing link UNTOUCHED and reports `NOT-EVALUATED` (never folded into
- * "linked").
+ * Retire `<ws>/.quay/plugin` — the guidance link `/quay:init` used to create (human ruling
+ * 2026-10-25). ⛔ This function can only DELETE a symlink; there is no create branch, by design.
+ * Idempotent: `retired` the first time, `absent` on every later run.
  *
- * A real (non-symlink) file/dir at the link path is REFUSED, never clobbered — the closed set does not
- * own arbitrary user content at that name.
+ * A real (non-symlink) file/dir at the path is REFUSED, never clobbered — the closed set does not own
+ * arbitrary user content at that name — and the reason names the path. `--dry-run` reports
+ * `would-retire` and writes nothing.
  */
-export function refreshProjectPluginLink(o: ProjectPluginLinkOpts): ProjectPluginLinkReading {
+export function retireProjectPluginLink(o: ProjectPluginLinkOpts): ProjectPluginLinkReading {
   const log = o.log ?? ((line: string) => console.log(line));
   const linkPath = path.join(o.wsRoot, ".quay", "plugin");
 
   let existing: fs.Stats | null = null;
   try {
     existing = fs.lstatSync(linkPath);
-  } catch {
-    existing = null;
-  }
-  const currentTarget = existing?.isSymbolicLink()
-    ? (() => { try { return fs.readlinkSync(linkPath); } catch { return null; } })()
-    : null;
-
-  const decide = (): ProjectPluginLinkReading => {
-    if (!o.pluginRoot) {
-      return { state: "not-evaluated", reason: "plugin root unknown (CLAUDE_PLUGIN_ROOT / --plugin-root unset)" };
+  } catch (err: unknown) {
+    const code = (err as NodeJS.ErrnoException)?.code;
+    // ENOENT (nothing there) and ENOTDIR (`.quay` is not a directory) both mean "no entry at this
+    // path". ⛔ Every other code means we could not LOOK — a different reading (硬规则 3b).
+    if (code === "ENOENT" || code === "ENOTDIR") {
+      log("  project-plugin-link: absent — no .quay/plugin entry (init no longer creates it)");
+      return { state: "absent", path: linkPath };
     }
-    const root = path.resolve(o.pluginRoot);
-    if (!fs.existsSync(path.join(root, ".claude-plugin", "plugin.json"))) {
-      return { state: "not-evaluated", reason: `${root} is not a quay plugin root (no .claude-plugin/plugin.json)` };
-    }
-    if (isPluginSourceCheckout(root) && o.allowSourceCheckout !== true) {
-      return { state: "not-evaluated", reason: `${root} is a source checkout (dev tree), not an installed plugin` };
-    }
-    return { state: "linked", pluginRoot: root, version: readPluginRootVersion(root) };
-  };
-  const reading = decide();
-
-  if (reading.state === "not-evaluated") {
-    log(`  project-plugin-link: NOT-EVALUATED — ${reading.reason} (existing link left unchanged)`);
-    return reading;
+    const reason = `${linkPath} could not be inspected (${err instanceof Error ? err.message : String(err)})`;
+    log(`  project-plugin-link: UNREADABLE — ${reason} (nothing was changed)`);
+    return { state: "unreadable", path: linkPath, reason };
   }
 
-  if (existing && !existing.isSymbolicLink()) {
-    log(`  project-plugin-link: REFUSED — ${linkPath} exists and is not a symlink (left unchanged)`);
-    return { state: "not-evaluated", reason: `${linkPath} exists and is not a symlink` };
+  if (!existing.isSymbolicLink()) {
+    const kind = existing.isDirectory() ? "directory" : "regular file";
+    const reason = `${linkPath} exists and is not a symlink (${kind})`;
+    log(`  project-plugin-link: REFUSED — ${reason}; left byte-identical (the closed set does not own it)`);
+    return { state: "refused", path: linkPath, reason };
   }
+
+  let target: string | null = null;
+  try { target = fs.readlinkSync(linkPath); } catch { target = null; }
 
   if (o.dryRun) {
-    log(
-      currentTarget === reading.pluginRoot
-        ? `  would-keep: .quay/plugin -> ${reading.pluginRoot} (v${reading.version ?? "?"}; already current)`
-        : `  would-link: .quay/plugin -> ${reading.pluginRoot} (v${reading.version ?? "?"})`,
-    );
-    return reading;
+    log(`  would-retire: .quay/plugin -> ${target ?? "<unreadable target>"} (a dry run writes nothing)`);
+    return { state: "would-retire", path: linkPath, target };
   }
 
-  fs.mkdirSync(path.dirname(linkPath), { recursive: true });
-  if (existing) {
-    try { fs.rmSync(linkPath, { force: true }); } catch { /* recreate below */ }
+  try {
+    fs.unlinkSync(linkPath);
+  } catch (err: unknown) {
+    const reason = `${linkPath} could not be deleted (${err instanceof Error ? err.message : String(err)})`;
+    log(`  project-plugin-link: DELETE-FAILED — ${reason}; the link is still there`);
+    return { state: "delete-failed", path: linkPath, reason };
   }
-  fs.symlinkSync(reading.pluginRoot, linkPath);
-  log(`  linked: .quay/plugin -> ${reading.pluginRoot} (v${reading.version ?? "?"} — the plugin root this init ran from)`);
-  return reading;
+  log(`  retired: .quay/plugin (was -> ${target ?? "<unreadable target>"}; init no longer creates it)`);
+  return { state: "retired", path: linkPath, target };
 }
 
 export interface MigrateMcpEntryOpts {
@@ -3274,14 +3236,15 @@ export interface MigrateMcpEntryOpts {
  * `migrate_stale_mcp_entry` — the UPGRADE-CHANNEL migration for the RETIRED project-local runtime.
  *
  * Ruling (AC1 of gap-dist-runtime-not-self-contained-reads-external-package-json; UPDATED by
- * gap-config-provider-path-frozen-to-versioned-cache-dir): the provider binding is migrated to the
- * project-internal STABLE link `<ws>/.quay/plugin/vendor/quay-native` (an absolute path whose TEXT
- * carries no version segment) — a rebuild to `$PLUGIN_ROOT` would re-freeze it to the running
- * version. A versioned install-cache path (which still EXISTS on disk) is now ALSO a migration
- * trigger. The now-unreferenced project-local copy is retired to a backup ONLY when it is
- * unreferenced, recognizably quay's own install-generated runtime, and STALE; a byte-current copy
- * is left byte-identical (AC3), and a directory we cannot recognize is NEVER touched (硬规则 3b:
- * "could not evaluate" must not share an output with "evaluated, fine").
+ * gap-project-quay-pointer-is-init-plugin-root-and-version-records-derive-from-it, and by the
+ * 2026-10-25 link retirement): the provider binding no longer names a provider DIRECTORY at all —
+ * `<ws>/.quay/plugin` is not created any more, so `path`/`mcp_entry` are simply DELETED here. Core
+ * resolves the native provider from its own plugin root (`plugin-root.ts`; the default is
+ * `<plugin-root>/vendor/quay-native`). A versioned install-cache path (which still EXISTS on disk) is
+ * now ALSO a migration trigger. The now-unreferenced project-local copy is retired to a backup ONLY
+ * when it is unreferenced, recognizably quay's own install-generated runtime, and STALE; a
+ * byte-current copy is left byte-identical (AC3), and a directory we cannot recognize is NEVER
+ * touched (硬规则 3b: "could not evaluate" must not share an output with "evaluated, fine").
  *
  * SCOPE GUARD: an arbitrary dangling path (e.g. `./nonexistent/runtime.js`) is left untouched so the
  * vendor-runtime negative control keeps its meaning.
@@ -4130,7 +4093,8 @@ function upgradeAndTrustSteps(): string[] {
     "  #    then `install --scope ...`: that replaces the record you have):",
     "  #      claude plugin list --json | jq -r '.[] | select(.id==\"quay@quay\") | .scope' | sort -u",
     "  #      claude plugin update quay@quay --scope <the scope just printed>",
-    "  #    then re-run /quay:init so `.quay/plugin` re-points at the new version's directory.",
+    "  #    then re-run /quay:init in the project (it fills version-level `loop:` defaults; `.quay/plugin`",
+    "  #    is no longer created — external consumers locate the CLI via the Claude Code plugin scope).",
     "",
     "  # 4. accept the trust dialog the FIRST time you enter this directory, then restart the session.",
     "After that, the enabledPlugins block below takes effect (a restart is required to apply).",

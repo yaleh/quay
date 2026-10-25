@@ -1,7 +1,7 @@
 ---
 id: gap-quay-init-retire-project-plugin-link
 title: quay init 不再生成 .quay/plugin：符号链接删除、普通文件/目录拒绝并报告，读数三态 retired/absent/refused
-status: ready
+status: done
 labels:
   - gap
 parent: null
@@ -127,10 +127,34 @@ until the CloudCLI-side resolver (claudecodeui task `gap-quay-entrypoint-resolve
 is deployed.
 ```
 
-**门/检查读数**
-- `bash scripts/test.sh --for-task gap-quay-init-retire-project-plugin-link --allow-thin` ⇒ **279/279 pass, exit 0**（含 `packages/quay/test/init.test.mjs` 的 AC1–AC5 + 闭集断言、`plugin/test/quay-init-stable-plugin-link.test.mjs` 端到端 5/5、`plugin/test/verify-plugin-channel-assertions.test.mjs` 33/33、`driver-runtime-loaded-version-drift` 的 AC3c 静态扫描）。
-- `anti-drift-touches-check.ts` ⇒ `ANTI-DRIFT OK … 13 actual file(s), all within declared Touches (14 glob(s))`。
+**门/检查读数**（第二轮 2026-10-26，合并 develop 并补登 Touches 之后的最终读数）
+- `bash scripts/test.sh --for-task gap-quay-init-retire-project-plugin-link --allow-thin` ⇒ **301/301 pass, exit 0**（含 `packages/quay/test/init.test.mjs` 的 AC1–AC5 + 闭集断言、`plugin/test/quay-init-stable-plugin-link.test.mjs` 端到端、`plugin/test/verify-plugin-channel-assertions.test.mjs` 33/33、`driver-runtime-loaded-version-drift` 的 AC3c 静态扫描，以及本轮改钉的 `plugin/test/develop-deliver-tgz-evidence-transport.test.mjs` 22/22）。
+- `anti-drift-touches-check.ts --task … --merge-target develop` ⇒ `ANTI-DRIFT OK: … 14 actual file(s), all within declared Touches (15 glob(s))`。
 - `npx tsc --noEmit` ⇒ exit 0。
+
+**第二轮（2026-10-26）— 上一轮 exited-not-landed 的 suite 红逐个复核**
+上一轮的 suite 红集比 develop 基线多 3 个文件。逐个复核：只有一个是本任务引入的语义冲突，另外两个是负载假红（同一套件里实测「单跑转绿」⇔ 套件内红，是负载敏感的既有形态，不是本任务的 delta）。
+
+```
+plugin/test/develop-deliver-tgz-evidence-transport.test.mjs   ← 真实冲突（develop 后加的测试钉住【退休前】语义）
+  该测试逐字抽出 binding_state / config_native_mcp_entry，原断言：`.quay/plugin` 链接 ⇒ path-resolved；
+  无链接 ⇒ no-mcp-entry。本任务 AC7 正是把这两个读数的 fallback 从「读链接」改成「读交付插件根」，
+  链接不再被任何路径读取 ⇒ develop 的②断言反过来失守（实测 actual='path-resolved' expected='no-mcp-entry'）。
+  修法（不是放宽断言，是改钉退休后的语义 + 把「链接不被读」做成可证伪的负控制）：
+    ① 显式插件根带 vendored bundle ⇒ path-resolved，且 entry 落在【该根】而不是诱饵链接树；
+    ② 项目仍留有指向诱饵树的 .quay/plugin 链接、但插件根里【没有】bundle ⇒ no-mcp-entry + entry 为空
+       （任何仍读链接的代码路径都会在这里返回 path-resolved ⇒ 这条断言能红）；
+    ③ 裸名 mcp_entry 仍为 bare-path-name（插件根 fallback 不得掩盖既有缺陷）。
+  读数：bash scripts/test.sh plugin/test/develop-deliver-tgz-evidence-transport.test.mjs ⇒ 22/22 pass。
+
+packages/quay/test/cli.test.mjs                                ← 负载假红（零 TAP ⇒ 被负载杀死）
+  套件内 54s / 零 TAP / 'test failed'；单跑 18.1s ⇒ pass 1/1。单独复跑转绿。
+
+packages/quay/test/gap-webui-dashboard-tests-card-latest-round-no-live-signal.test.mjs
+                                                               ← 负载假红（断言窗口只有 10 秒宽）
+  断言 /已运行 1m3\ds|已运行 \d+s/ —— 即 elapsed 必须落在 90–99s；套件内该用例耗时 12.9s ⇒ 越窗。
+  单跑 3.2s ⇒ 4/4 pass。
+```
 
 **ADR-007 暗轴**
 - 该轴仍暗,理由:本任务删除的是 Core 从不读取的指引链接（指引删掉、无绑定迁移），不改模块层级与依赖方向，未取 L_D/L_G 读数。
@@ -150,4 +174,5 @@ is deployed.
 - `plugin/test/verify-plugin-channel-assertions.test.mjs`（该 checker 的演练夹具：init 缝从「重指链接」改为「删除链接」）
 - `plugin/test/quay-init-stable-plugin-link.test.mjs`（端到端钉住链接的测试：改钉 retire 语义）
 - `plugin/test/driver-runtime-loaded-version-drift.test.mjs`（AC3c 静态扫描：原来断言 init.ts 是唯一写入者，现在断言**没有**任何源码构造该链接）
+- `plugin/test/develop-deliver-tgz-evidence-transport.test.mjs`（develop 后加的 `binding_state`/`config_native_mcp_entry` 测试：原钉住 `.quay/plugin` 链接语义，retire 后改钉「交付插件根」，并把「链接不被读」做成负控制）
 - `CHANGELOG.md`（AC8 breaking-change 条目）

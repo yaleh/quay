@@ -278,6 +278,16 @@
       "readers": "unaudited"
     },
     {
+      "name": "live-state.json",
+      "kind": "state-json",
+      "owner": "plugin/scripts/worker-driver.ts",
+      "readers": "unaudited",
+      "readerModules": [
+        "packages/quay/src/observation.ts",
+        "packages/quay/src/cli/live-state.ts"
+      ]
+    },
+    {
       "name": "malformed.jsonl",
       "kind": "jsonl-log",
       "owner": "unowned-yet",
