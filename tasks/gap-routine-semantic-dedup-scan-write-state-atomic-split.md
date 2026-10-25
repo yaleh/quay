@@ -3,7 +3,7 @@ id: gap-routine-semantic-dedup-scan-write-state-atomic-split
 title: "semantic-dedup-scan: Five writeState helpers: two re-implement the
   tmp+rename atomic idiom inline while red-window-triage/runner-state-write
   already delegate to kernel writeJsonAto"
-status: todo
+status: ready
 labels:
   - gap
   - routine-filed
