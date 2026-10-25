@@ -1,25 +1,22 @@
 // @test-group serial
 // @load-sensitive real-install
-// @load-sensitive-entry 2026-10-05 stable project plugin link (quay-init install); install family
-// quay-init-stable-plugin-link.test.mjs — gap-project-quay-pointer-is-init-plugin-root-and-version-
-// records-derive-from-it (rewritten from gap-config-provider-path-frozen-to-versioned-cache-dir).
+// @load-sensitive-entry 2026-10-25 project plugin link RETIRED (quay-init end-to-end); install family
+// quay-init-stable-plugin-link.test.mjs — gap-quay-init-retire-project-plugin-link.
 //
-// WHAT THIS PINS. `/quay:init` maintains a project-INTERNAL guidance link `<ws>/.quay/plugin` for
-// consumers that run WITHOUT Core in the loop (e.g. a CloudCLI server `execFile`, cwd = the project
-// root). Its target is THE PLUGIN ROOT THIS INIT RAN FROM (`${CLAUDE_PLUGIN_ROOT}` / `--plugin-root`).
+// WHAT THIS PINS (rewritten 2026-10-25). `/quay:init` used to maintain the project-internal guidance
+// link `<ws>/.quay/plugin -> <the plugin root the init ran from>` (the file name above is the
+// mechanism's historical name; it is kept so this suite's identity — "the project plugin link, end to
+// end" — does not move). The human ruling of 2026-10-25 RETIRES that link: it was a second version
+// resolver beside the session layer's plugin-scope rule, and the two diverge by construction (measured
+// 2026-10-06: the link sat at 0.14.0 while every session loaded 0.15.0).
 //
-// ⛔ IT IS NOT A REGISTRY LOOKUP. The predecessor resolved the target from
-// `~/.claude/plugins/installed_plugins.json` (`projectPath`-matching local/project entry wins, else
-// the `user` entry). That is a SECOND resolver: the session layer decides which version a session
-// loads, so the registry rule and the session rule necessarily diverge (measured 2026-10-06:
-// claudecodeui's project record stayed at 0.14.0 while the user entry moved to 0.15.0 and every later
-// session loaded 0.15.0). ⇒ The registry below is a fixture that is DELIBERATELY CONTRADICTORY
-// (project 0.14.0, user 0.15.0) and the assertions match the PASSED PLUGIN ROOT, never the registry.
+// The retirement's contract, pinned HERE through the REAL shell entry (`plugin/scripts/quay-init.sh`
+// → `quay init`), because a unit test of the retire function would pass while the step sat uncalled
+// (硬规则 4 推论三: "implemented" is not "wired"):
 //
-// WHY IT SPAWNS THE REAL SCRIPT (not a unit of the selection function): the claims are about what
-// `quay-init.sh` produces on disk (a symlink). A unit test of the chooser alone would pass while the
-// step sat uncalled — the "implemented but never wired" failure hard rule 4 推论三 names. So the
-// assertions read the link the install actually wrote.
+//   ① a real init creates NO `.quay/plugin` (and does not re-create one);
+//   ② a symlink an OLDER init left behind is DELETED (not re-pointed);
+//   ③ a regular file/directory at that name is the USER's content — left byte-identical.
 //
 // HERMETIC: the plugin registry is a fixture `installed_plugins.json` under a fixture `$HOME`, and
 // each plugin root is a fixture tree (symlinks to the real plugin's entries + a real manifest). ⛔ The
@@ -34,6 +31,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { fileURLToPath } from "node:url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -63,12 +61,8 @@ after(() => {
 });
 
 /** A fixture plugin ROOT that `quay-init.sh` accepts: every top-level entry of the real plugin is
- *  SYMLINKED in (so scripts/ vendor/ loop/ … all resolve), while `.claude-plugin/plugin.json` is a
- *  REAL file carrying the requested version. This is what lets a test say "init ran from 0.15.0".
- *
- *  ⛔ Not a copy of the whole tree (hundreds of files); the symlinks point at the frozen real plugin,
- *  which is exactly what an install consumes. The instantiated dir is a NORMAL directory, so
- *  `pwd -P` in quay-init.sh keeps it verbatim as the link target. */
+ *  SYMLINKED in (so scripts/ vendor/ bin/ … all resolve), while `.claude-plugin/plugin.json` is a
+ *  REAL file carrying the requested version. */
 function makePluginRoot(version) {
   const dir = makeTmp("qinit-plroot-");
   for (const e of fs.readdirSync(pluginDir)) {
@@ -80,13 +74,21 @@ function makePluginRoot(version) {
   return dir;
 }
 
-/** A fixture registry that is DELIBERATELY CONTRADICTORY to every plugin root we pass, so a
- *  regression to the registry tier rule turns an assertion red. */
-function writeRegistry(home, entries) {
+/** A fixture registry. It is DELIBERATELY CONTRADICTORY to every plugin root we pass: if any code
+ *  path ever consults the registry to re-create or re-point the link, an assertion turns red. */
+function writeRegistry(home) {
   fs.mkdirSync(path.join(home, ".claude", "plugins"), { recursive: true });
   fs.writeFileSync(
     path.join(home, ".claude", "plugins", "installed_plugins.json"),
-    JSON.stringify({ version: 2, plugins: { "quay@quay": entries } }, null, 2),
+    JSON.stringify({
+      version: 2,
+      plugins: {
+        "quay@quay": [
+          { scope: "project", projectPath: "/somewhere-else", installPath: makeTmp("qinit-inst-"), version: "0.14.0" },
+          { scope: "user", installPath: makeTmp("qinit-inst-"), version: "0.15.0" },
+        ],
+      },
+    }, null, 2),
     "utf8",
   );
 }
@@ -107,113 +109,82 @@ function runInit(ws, home, pluginRoot = pluginDir, extraArgs = []) {
   return { status: res.status, stdout: res.stdout ?? "", stderr: res.stderr ?? "" };
 }
 
-function linkTarget(ws) {
-  const p = path.join(ws, ".quay", "plugin");
-  const st = fs.lstatSync(p);
-  assert.ok(st.isSymbolicLink(), `<ws>/.quay/plugin must be a symlink; got mode ${st.mode.toString(8)}`);
-  return fs.readlinkSync(p);
-}
+const linkPath = (ws) => path.join(ws, ".quay", "plugin");
+const sha256 = (p) => createHash("sha256").update(fs.readFileSync(p)).digest("hex");
 
-// ── AC1 — the link target IS the passed plugin root ─────────────────────────────────────────────────
-test("AC1① — the link points at the PASSED plugin root, never the registry's project entry", () => {
-  const ws = makeTmp("qinit-link-ws-");
-  const home = makeTmp("qinit-link-home-");
-  // The registry says this project is pinned to 0.14.0 (project scope) and the user has 0.15.0.
-  writeRegistry(home, [
-    { scope: "project", projectPath: ws, installPath: makeTmp("qinit-inst-"), version: "0.14.0" },
-    { scope: "user", installPath: makeTmp("qinit-inst-"), version: "0.15.0" },
-  ]);
-  const root015 = makePluginRoot("0.15.0");
+// ── AC1 — a real init creates NO link ────────────────────────────────────────────────────────────────
+test("AC1 — a real `quay-init.sh` run creates no `.quay/plugin` entry", () => {
+  const ws = makeTmp("qinit-retire-ws-");
+  const home = makeTmp("qinit-retire-home-");
+  writeRegistry(home);
 
-  const r = runInit(ws, home, root015);
+  const r = runInit(ws, home, makePluginRoot("0.23.0"));
   assert.equal(r.status, 0, `init must exit 0\nstdout:\n${r.stdout}\nstderr:\n${r.stderr}`);
-  assert.equal(linkTarget(ws), fs.realpathSync(root015),
-    `the link must point at the plugin root init ran from (0.15.0), NOT the registry's project entry (0.14.0)`);
-  assert.match(r.stdout, /linked: \.quay\/plugin -> /, `the link step must be reported: ${r.stdout}`);
+  assert.throws(() => fs.lstatSync(linkPath(ws)), /ENOENT/, "⛔ init must NOT create .quay/plugin");
+  assert.match(r.stdout, /project-plugin-link: absent/, `the step must report its reading: ${r.stdout}`);
+
+  // …and a RE-RUN does not create one either (the idempotent half).
+  const again = runInit(ws, home, makePluginRoot("0.24.0"));
+  assert.equal(again.status, 0, `re-run must exit 0\nstdout:\n${again.stdout}\nstderr:\n${again.stderr}`);
+  assert.throws(() => fs.lstatSync(linkPath(ws)), /ENOENT/, "⛔ a re-run must not create it either");
 });
 
-test("AC1② — SAME registry, a DIFFERENT plugin root ⇒ the link follows the plugin root", () => {
-  // ⛔ The discriminating half: the registry is held CONSTANT and only the passed root changes. If
-  // the selection consulted the registry (the pre-fix rule), this assertion cannot track it.
-  const ws = makeTmp("qinit-link-ws-");
-  const home = makeTmp("qinit-link-home-");
-  writeRegistry(home, [
-    { scope: "project", projectPath: ws, installPath: makeTmp("qinit-inst-"), version: "0.14.0" },
-    { scope: "user", installPath: makeTmp("qinit-inst-"), version: "0.15.0" },
-  ]);
-  const root014 = makePluginRoot("0.14.0");
+// ── AC2 — an OLD link is deleted, never re-pointed ───────────────────────────────────────────────────
+test("AC2 — a symlink left by an older init is DELETED by the next run", () => {
+  const ws = makeTmp("qinit-retire-ws-");
+  const home = makeTmp("qinit-retire-home-");
+  writeRegistry(home);
+  const pluginRoot = makePluginRoot("0.23.0");
+  assert.equal(runInit(ws, home, pluginRoot).status, 0, "baseline install");
 
-  const r = runInit(ws, home, root014);
-  assert.equal(r.status, 0, `init must exit 0\nstdout:\n${r.stdout}\nstderr:\n${r.stderr}`);
-  assert.equal(linkTarget(ws), fs.realpathSync(root014), `the link must follow the passed root (0.14.0)`);
-});
+  // Simulate the pre-retirement state: a link pointing at SOME plugin tree.
+  const oldTree = makeTmp("qinit-oldtree-");
+  fs.symlinkSync(oldTree, linkPath(ws));
+  assert.equal(fs.readlinkSync(linkPath(ws)), oldTree, "premise: the old-style link is present");
 
-test("AC1③ — a re-run from a NEW plugin root re-points the LINK; the config carries no version/link", () => {
-  const ws = makeTmp("qinit-link-ws-");
-  const home = makeTmp("qinit-link-home-");
-  writeRegistry(home, [{ scope: "user", installPath: makeTmp("qinit-inst-"), version: "0.13.0" }]);
-
-  const a = makePluginRoot("0.10.0");
-  const b = makePluginRoot("0.11.0");
-  assert.equal(runInit(ws, home, a).status, 0, "baseline install");
-  assert.equal(linkTarget(ws), fs.realpathSync(a), "baseline link");
-  const cfgBefore = fs.readFileSync(path.join(ws, ".quay", "config.yml"), "utf8");
-
-  const r = runInit(ws, home, b);
+  const r = runInit(ws, home, pluginRoot);
   assert.equal(r.status, 0, `re-run must exit 0\nstdout:\n${r.stdout}\nstderr:\n${r.stderr}`);
-  assert.equal(linkTarget(ws), fs.realpathSync(b), "the link must follow the new plugin root");
-  const cfgAfter = fs.readFileSync(path.join(ws, ".quay", "config.yml"), "utf8");
-  // The native provider no longer names a directory: no `path:`/`mcp_entry:` for it, and no `.quay/plugin`.
-  const nativeBlock = /providers:\s*\n\s*native:\s*\n([\s\S]*?)\n\S/.exec(cfgAfter)?.[1] ?? cfgAfter;
-  assert.ok(!/^\s*(path|mcp_entry):/m.test(nativeBlock), `the native provider must carry no path/mcp_entry:\n${cfgAfter}`);
-  assert.ok(!/\.quay\/plugin/.test(cfgAfter), `the config must not name .quay/plugin:\n${cfgAfter}`);
-  // Assert the file did not gain a version segment anywhere, on either run.
-  // ⛔ Comments are stripped first: the generated template documents the serve fallback with
-  // `#   host: "0.0.0.0"`, which is an ADDRESS, not a plugin version — matching it would make this
-  // assertion red for a reason it does not test. What it is about is a version BAKED INTO A VALUE
-  // (the pre-AC-XXX `path: "./vendor/quay-0.15.0"` shape), so the scan is over non-comment lines.
-  const withoutComments = (s) => s.split("\n").filter((l) => !/^\s*#/.test(l)).join("\n");
-  assert.ok(!/\d+\.\d+\.\d+/.test(withoutComments(cfgBefore)), `the config must carry no version segment:\n${cfgBefore}`);
-  assert.ok(!/\d+\.\d+\.\d+/.test(withoutComments(cfgAfter)), `the config must carry no version segment:\n${cfgAfter}`);
+  assert.throws(() => fs.lstatSync(linkPath(ws)), /ENOENT/, "⛔ the link must be GONE — not re-pointed");
+  assert.match(r.stdout, /retired: \.quay\/plugin/, `the step must report the retirement: ${r.stdout}`);
 });
 
-// ── AC1④ — undecidable plugin root ⇒ NOT-EVALUATED, existing link untouched ─────────────────────────
-test("AC1④ — a SOURCE CHECKOUT plugin root (dev tree) ⇒ the link is left unchanged and NOT-EVALUATED prints", () => {
-  const ws = makeTmp("qinit-link-ws-");
-  const home = makeTmp("qinit-link-home-");
-  writeRegistry(home, []);
+// ── AC3 — a regular file/directory is the user's, left byte-identical ────────────────────────────────
+test("AC3 — a regular directory at the path is REFUSED and preserved", () => {
+  const ws = makeTmp("qinit-retire-ws-");
+  const home = makeTmp("qinit-retire-home-");
+  writeRegistry(home);
+  const pluginRoot = makePluginRoot("0.23.0");
+  assert.equal(runInit(ws, home, pluginRoot).status, 0, "baseline install");
 
-  // Baseline: a good install from a fixture root.
-  const good = makePluginRoot("0.10.0");
-  assert.equal(runInit(ws, home, good).status, 0, "baseline install");
-  assert.equal(linkTarget(ws), fs.realpathSync(good), "baseline link");
+  fs.mkdirSync(linkPath(ws));
+  fs.writeFileSync(path.join(linkPath(ws), "user-file.txt"), "the user's content\n");
+  const before = sha256(path.join(linkPath(ws), "user-file.txt"));
 
-  // Now re-run with the DEV TREE as the plugin root (the real `pluginDir` sits beside
-  // `packages/quay/src`). NOT-EVALUATED and the existing link must survive.
-  const r = runInit(ws, home, pluginDir);
+  const r = runInit(ws, home, pluginRoot);
   assert.equal(r.status, 0, `init must still exit 0\nstdout:\n${r.stdout}\nstderr:\n${r.stderr}`);
-  assert.match(r.stdout, /NOT-EVALUATED/, `a source checkout is "cannot decide", not a target: ${r.stdout}`);
-  assert.equal(linkTarget(ws), fs.realpathSync(good), `the existing link must be LEFT UNCHANGED`);
+  assert.equal(fs.lstatSync(linkPath(ws)).isDirectory(), true, "⛔ the directory must still be there");
+  assert.equal(sha256(path.join(linkPath(ws), "user-file.txt")), before, "⛔ byte-identical");
+  assert.match(r.stdout, /project-plugin-link: REFUSED/, `the step must report the refusal: ${r.stdout}`);
 });
 
-test("AC1⑤ — an ABSENT plugin root (empty CLAUDE_PLUGIN_ROOT + no --plugin-root) ⇒ NOT-EVALUATED, link unchanged", () => {
-  const ws = makeTmp("qinit-link-ws-");
-  const home = makeTmp("qinit-link-home-");
-  writeRegistry(home, []);
-  const good = makePluginRoot("0.10.0");
-  assert.equal(runInit(ws, home, good).status, 0, "baseline install");
-  assert.equal(linkTarget(ws), fs.realpathSync(good), "baseline link");
+test("AC3b — a regular FILE at the path is REFUSED and preserved", () => {
+  const ws = makeTmp("qinit-retire-ws-");
+  const home = makeTmp("qinit-retire-home-");
+  writeRegistry(home);
+  const pluginRoot = makePluginRoot("0.23.0");
+  assert.equal(runInit(ws, home, pluginRoot).status, 0, "baseline install");
 
-  // A DIRECT invocation with neither CLAUDE_PLUGIN_ROOT nor --plugin-root. quay-init fail-closes on a
-  // MISSING plugin root, so this instead points at a non-plugin directory (a real but non-quay dir):
-  // the refresh step must still refuse to re-point the link.
-  const notAPlugin = makeTmp("qinit-notplugin-");
-  const r = runInit(ws, home, notAPlugin);
-  assert.notEqual(r.status, 0, "a non-quay plugin root must fail-closed (quay-init requires plugin.json)");
-  assert.equal(linkTarget(ws), fs.realpathSync(good), `the link must be untouched by a refused run`);
+  fs.writeFileSync(linkPath(ws), "not a link\n");
+  const before = sha256(linkPath(ws));
+
+  const r = runInit(ws, home, pluginRoot);
+  assert.equal(r.status, 0, `init must still exit 0\nstdout:\n${r.stdout}\nstderr:\n${r.stderr}`);
+  assert.equal(fs.lstatSync(linkPath(ws)).isFile(), true, "⛔ the file must still be there");
+  assert.equal(sha256(linkPath(ws)), before, "⛔ byte-identical");
+  assert.match(r.stdout, /project-plugin-link: REFUSED/, `the step must report the refusal: ${r.stdout}`);
 });
 
-// ── AC6 — the scoped gate itself ran something (guards against a silently-empty selection) ─────────
+// ── sanity — this file is itself a non-trivial scoped-gate member ────────────────────────────────────
 test("AC6 — this file is itself the scoped-gate test for the task (sanity: it is non-trivial)", () => {
   assert.ok(fs.statSync(fileURLToPath(import.meta.url)).size > 1000, "the test file must be non-trivial");
 });

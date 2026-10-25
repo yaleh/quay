@@ -55,24 +55,25 @@ reason=artifact 2026-10-25T15:09:56.787Z predates the latest commit touching plu
 
 ## Acceptance Criteria
 
-- [ ] AC1 writer（夹具 + 负对照）：单目录 basis 的 scope 记录不再携带 `commitsSinceArtifact: 0`；记录携带可机读 provenance 且与 `basis:"single-directory"` 一致。贴出改动前后同一夹具的记录片段；负控制：module-graph basis 的 scope 仍正常计算 `commitsSinceArtifact`（仍能取非 0）。
-- [ ] AC2 检测器（夹具 + 负对照）：artifact 描述符能识别 artifact-independent scope 并显式报告。同一夹具中 (a) 单目录 live 读数 + 旧 `artifactTimestamp` ⇒ shape D 为 `fresh`/`artifact-independent`（不是 `stale`）；(b) module-graph scope + 旧 `artifactTimestamp` ⇒ 仍为 `stale`。贴出两种输出。
-- [ ] AC3 负控制（前提失效）：夹具中给单目录 scope 加一个子目录 .ts ⇒ `singleDirectoryBasis` 返回 false，该 scope 回到常规 due/降级路径，不再被标 artifact-independent。贴出输出。
+- [x] AC1 writer（夹具 + 负对照）：单目录 basis 的 scope 记录不再携带 `commitsSinceArtifact: 0`；记录携带可机读 provenance 且与 `basis:"single-directory"` 一致。贴出改动前后同一夹具的记录片段；负控制：module-graph basis 的 scope 仍正常计算 `commitsSinceArtifact`（仍能取非 0）。
+- [x] AC2 检测器（夹具 + 负对照）：artifact 描述符能识别 artifact-independent scope 并显式报告。同一夹具中 (a) 单目录 live 读数 + 旧 `artifactTimestamp` ⇒ shape D 为 `fresh`/`artifact-independent`（不是 `stale`）；(b) module-graph scope + 旧 `artifactTimestamp` ⇒ 仍为 `stale`。贴出两种输出。
+- [x] AC3 负控制（前提失效）：夹具中给单目录 scope 加一个子目录 .ts ⇒ `singleDirectoryBasis` 返回 false，该 scope 回到常规 due/降级路径，不再被标 artifact-independent。贴出输出。
 - [ ] AC4 生产载体：落地并同步到 develop/主检出后的下一轮记录，同一 HEAD 上 `node --experimental-strip-types plugin/scripts/instrument-decay-check.ts --root /data/home/yale/work/quay --carrier arch-cycle-history.jsonl --json` 的 `decayed` 不含 `arch-cycle-history.jsonl`，且载体不再出现「`evaluated:true` + `artifactTimestamp` 早于覆盖源最新提交 + `commitsSinceArtifact:0`」组合。贴出记录行与检测器输出。（待外部）
-- [ ] AC5 scoped gate：`bash scripts/test.sh --for-task gap-arch-cycle-single-directory-basis-never-due --allow-thin` ⇒ EXIT=0，含 `arch-cycle-reading.test.mjs` 与 `instrument-decay-check.test.mjs`；贴出测试计数与退出码。
+- [x] AC5 scoped gate：`bash scripts/test.sh --for-task gap-arch-cycle-single-directory-basis-never-due --allow-thin` ⇒ EXIT=0，含 `arch-cycle-reading.test.mjs` 与 `instrument-decay-check.test.mjs`；贴出测试计数与退出码。
 
 ## Definition of Done
 
 - [ ] 五条 AC 全绿（AC4 待外部）、改动合并进 develop（待外部）
-- [ ] 生产载体在报告时刻是当前的：`evaluated:true` 的 scope 其 freshness provenance 要么是当前产物（不早于覆盖源最新提交），要么被显式标注 artifact-independent 且带可核的直接量（live file list 读取时刻）；⛔ 不存在「旧产物 + git 派生 0」组合。
-- [ ] 单目录豁免不掩盖前提失效：scope 一旦不再是单目录，立即回到常规 due/降级路径（AC3）。
-- [ ] 无新增 spawn：本条不把 analyze 加进任何新路径；例程 tick 的 analyze 次数不因本条增加。
+- [ ] 生产载体在报告时刻是当前的：`evaluated:true` 的 scope 其 freshness provenance 要么是当前产物（不早于覆盖源最新提交），要么被显式标注 artifact-independent 且带可核的直接量（live file list 读取时刻）；⛔ 不存在「旧产物 + git 派生 0」组合。（待外部）
+- [x] 单目录豁免不掩盖前提失效：scope 一旦不再是单目录，立即回到常规 due/降级路径（AC3）。
+- [x] 无新增 spawn：本条不把 analyze 加进任何新路径；例程 tick 的 analyze 次数不因本条增加。
 
 ## Touches
 
 - tasks/gap-arch-cycle-single-directory-basis-never-due.md
 - plugin/scripts/archguard-runner.ts
 - plugin/scripts/instrument-decay-check.ts
+- plugin/scripts/quality-gate-driver.ts
 - plugin/test/arch-cycle-reading.test.mjs
 - plugin/test/instrument-decay-check.test.mjs
 
@@ -82,3 +83,56 @@ reason=artifact 2026-10-25T15:09:56.787Z predates the latest commit touching plu
 - 载体最后一行（`ts=2026-10-25T17:27:35.403Z`）：scripts scope `{evaluated:true, cycleCount:0, basis:"single-directory", artifactTimestamp:"2026-10-25T15:09:56.787Z", commitsSinceArtifact:0, behindSources:false}`；记录级 `{status:"complete", totalCycleCount:0, behindScopes:[], refresh:{attempted:true, refreshedScopes:[{scope:"src",...}], deferredScopes:[]}}`。
 - 独立直接量：`git rev-list --count --since=2026-10-25T15:09:57Z HEAD -- plugin/scripts` ⇒ `5`；`git log --format='%cI %h %s' --since=2026-10-25T15:09:57Z HEAD -- plugin/scripts` 首行 `2026-10-26T00:49:01+08:00 850a33bea Merge branch 'develop' into task/gap-routine-semantic-dedup-scan-write-state-atomic-split`。
 - 代码锚点：`plugin/scripts/archguard-runner.ts:861-866`（`git blame` ⇒ `9876faf64`，2026-10-22，来自 done 任务 `gap-arch-cycle-report-never-evaluated-aggregate-and-stale-artifacts`）；`scopeNeedsRefresh` 在 `:954-964`；检测器描述符在 `plugin/scripts/instrument-decay-check.ts:326-341`。
+
+## Evidence（实现轮，2026-10-26，worktree @ 5cb7023de + merge develop 110143476）
+
+**AC1 同一夹具的改动前后片段**。夹具生成器 `.quay/worker-evidence-ac1/snippet.mjs`（worktree 内、gitignored）：单目录 scope = `packages/quay-backlog/src`（query 产物无 moduleGraph），全部 `artifactTimestamp=2025-06-01T00:00:00Z`，随后 `2026-01-02T00:00:00Z` 有一个提交触及 `plugin/scripts`。同一脚本分别以 **develop 树**（改动前）与本分支（改动后）为 import 目标运行：
+
+改动前（develop 110143476）：
+```
+carrier record — quay-backlog-src (single-directory):
+{"scope":"quay-backlog-src","source":"packages/quay-backlog/src","evaluated":true,"cycleCount":0,"basis":"single-directory",
+ "artifactTimestamp":"2025-06-01T00:00:00Z","commitsSinceArtifact":0,"behindSources":false}
+carrier record — scripts (module-graph 负对照):
+{"scope":"scripts","source":"plugin/scripts","evaluated":true,"cycleCount":0,"basis":"module-graph",
+ "artifactTimestamp":"2025-06-01T00:00:00Z","commitsSinceArtifact":2,"behindSources":true}
+```
+
+改动后（本分支）：
+```
+carrier record — quay-backlog-src (single-directory):
+{"scope":"quay-backlog-src","source":"packages/quay-backlog/src","evaluated":true,"cycleCount":0,"basis":"single-directory",
+ "artifactTimestamp":"2025-06-01T00:00:00Z","readingFreshness":"live-file-list","fileListReadAt":"2026-10-25T17:41:32.638Z",
+ "commitsSinceArtifact":null,"behindSources":null}
+carrier record — scripts (module-graph 负对照):
+{"scope":"scripts","source":"plugin/scripts","evaluated":true,"cycleCount":0,"basis":"module-graph",
+ "artifactTimestamp":"2025-06-01T00:00:00Z","readingFreshness":"artifact","fileListReadAt":null,
+ "commitsSinceArtifact":2,"behindSources":true}
+```
+⇒ 单目录行不再有假 0；provenance（`readingFreshness:"live-file-list"` + `fileListReadAt`，即 live file list 的读取时刻）与 `basis:"single-directory"` 一致，`artifactTimestamp` 保留但只是 provenance；module-graph 行仍取到非 0（2）并保持 `behindSources:true`。
+
+**AC2 检测器（同一记录、正/负对照）**。新增测试 `形态 D — 同一记录里 single-directory（live）标 artifact-independent，module-graph 仍判 stale（AC2 正/负对照）`，绿。同一记录里两个 scope：
+- (a) `scripts`（`basis:"single-directory"`，artifactTs=`2026-10-21T16:17:56.117Z`，覆盖源最后提交 `2026-10-21T16:26:00Z`）⇒ `{state:"artifact-independent", commitMs:null, artifactTs:"2026-10-21T16:17:56.117Z", independence:{field:"basis", value:"single-directory", readAt:"2026-10-21T23:00:00.000Z"}, reason:"'basis'='single-directory' ⇒ this reading comes from the live file list read at …; artifactTimestamp … is provenance only and is NOT compared against the latest commit touching plugin/scripts"}`，记录级 `artifactIndependentScopes:["scripts"]`；只含该 scope 的记录整体 `staleEvaluated.state:"fresh"`。
+- (b) `src`（`basis:"module-graph"`，同一旧产物，覆盖源最后提交 `2026-10-21T16:27:00Z`）⇒ `{state:"stale", commitMs:1789…}`，`decayed:[{group:"src",kind:"stale-evaluated"}]`，整体 `staleEvaluated.state:"stale"`。
+- 负对照：同一份数据去掉 `basis` 声明 ⇒ 仍判 `stale`、`artifactIndependentScopes:[]`（豁免不是「这个夹具永远不报」）。
+
+**AC3 前提失效负控制**。测试 `negative control — a scope that STOPS being single-directory loses the live-file-list basis and returns to the normal due path (AC3)`，绿。基线 `{basis:"single-directory", readingFreshness:"live-file-list", scopeNeedsRefresh:false}`；加入 `packages/quay-backlog/src/nested/deep.ts` 并提交后 ⇒ `{basis:null, readingFreshness:null, evaluated:false, fileListReadAt:null, reason:/moduleGraph not produced … NOT single-directory/, scopeNeedsRefresh:true}`，且 `selectRefreshTargets(...)` 含 `quay-backlog-src` ⇒ 回到常规 due/降级路径。
+
+**AC4（待外部）**。检测器侧已在**生产载体**上转绿：
+```
+node --experimental-strip-types plugin/scripts/instrument-decay-check.ts --root /data/home/yale/work/quay --carrier arch-cycle-history.jsonl --json
+⇒ {"ok":true,"evaluated":true,"decayedCount":0,"healthyCount":1,...,"staleEvaluated":{"state":"fresh","recordTs":"2026-10-25T17:27:35.403Z",
+   "artifactIndependentScopes":["scripts","quay-native-src","quay-github-src","quay-backlog-src"],...}}
+```
+记录侧仍待**下一轮**写入（因此 AC4 保持未勾）：现存最后一行（`ts=2026-10-25T17:27:35.403Z`，改动前写入）仍带 `commitsSinceArtifact:0` —— 这是本次修复要消除的历史形状，新记录会以 `readingFreshness:"live-file-list"` + `fileListReadAt` + `commitsSinceArtifact:null` 出现。
+
+**AC5 scoped gate**：`bash scripts/test.sh --for-task gap-arch-cycle-single-directory-basis-never-due --allow-thin` ⇒ **EXIT=0**，实跑两次（同一命令，两种 Touches 状态）：
+- Touches 尚未含 `plugin/scripts/quality-gate-driver.ts` 时：`tests 58 / pass 58 / fail 0`；
+- 最终树（Touches 已含该文件 ⇒ 选择面更宽）：`tests 174 / pass 174 / fail 0`。
+两次都含 `plugin/test/arch-cycle-reading.test.mjs`（19，含本任务两条新测试）与 `plugin/test/instrument-decay-check.test.mjs`（39，含本任务两条新测试）。完整日志：worktree `.quay/worker-evidence-ac1/scoped-gate.txt`（58）与 `scoped-gate-final.txt`（174）。
+
+**DoD 无新增 spawn**：`refreshBehindScopes` / `runArchCycleRound` 的 spawn 路径未改；`scopeNeedsRefresh` 对 `behindSources:null` 仍返回 false（单目录 scope 仍不进 due 集，Plan item 4），故例程 tick 的 analyze 次数不因本条增加。`plugin/scripts/quality-gate-driver.ts` 的改动只是把新字段写进载体记录的形状声明（`ArchCycleHistoryRecord.scopes[]`），无行为变化。
+
+## Dark axis（ADR-007）
+
+- 该轴仍暗,理由:本条只改 arch-cycle 读数的 provenance 字段与检测器的 artifact-independence 判定，未触碰模块/依赖结构；且 DoD 明确不新增 analyze spawn，本轮没有运行结构分析 ⇒ 没有 L_D/L_G 数值读数可用（结构轴对本条没有输入，不等于「已测为 0」）。

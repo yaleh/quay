@@ -1,7 +1,7 @@
 ---
 id: gap-quay-init-retire-project-plugin-link
 title: quay init 不再生成 .quay/plugin：符号链接删除、普通文件/目录拒绝并报告，读数三态 retired/absent/refused
-status: ready
+status: done
 labels:
   - gap
 parent: null

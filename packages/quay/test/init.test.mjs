@@ -7,6 +7,7 @@
 import { test, after } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { makeTmpDir } from "../../../plugin/test/helpers/tmp-workspace.mjs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
@@ -26,6 +27,7 @@ import {
   LOOP_VERSION_DEFAULTS,
   migrateStaleMcpEntry,
   providerEntryFile,
+  retireProjectPluginLink,
 } from "../src/init.ts";
 import { SERVE_BINDING_FALLBACK } from "../src/serve/serve-binding.ts";
 // The project-scope version cross-check reader (gap-init-plugin-version-crosscheck-project-scope-shadow):
@@ -2333,4 +2335,159 @@ test("DECLINED auto-commit on a 0-commit repo: the run carries a machine-readabl
   const final = runCli(["init", "--check-doc-branch", "--root", dir]);
   assert.equal(final.exitCode, 0, `the repaired repo must check OK:\n${final.stdout}`);
   assert.match(final.stdout, /doc-branch-invariant: SATISFIED/);
+});
+
+// ══ gap-quay-init-retire-project-plugin-link — `.quay/plugin` is RETIRED ═══════════════════════════
+//
+// Human ruling 2026-10-25: `/quay:init` no longer CREATES the project-internal guidance link. The link
+// was a SECOND version resolver beside the session layer's plugin-scope rule, and the two diverge by
+// construction (measured 2026-10-06: the link sat at 0.14.0 while every session loaded 0.15.0). The
+// migration is: a symlink an older init left behind is DELETED; a regular file/directory at that name
+// is the USER's content — refused, byte-identical; nothing there ⇒ absent.
+//
+// ⛔ Every assertion below drives the REAL CLI (`quay init`) against a temporary workspace with the
+// real `.quay/config.yml` the first run lays down — a unit test of the function alone would pass while
+// the step sat uncalled (硬规则 4 推论三: "implemented" is not "wired").
+
+const pluginLinkPath = (ws) => path.join(ws, ".quay", "plugin");
+const sha256 = (p) => createHash("sha256").update(fs.readFileSync(p)).digest("hex");
+
+/** A real, init-able workspace: detectable test command + a FIRST init that lays the config surface. */
+function retiredWorkspace(tag) {
+  const ws = tmpDir(tag);
+  const root = fixturePluginRoot("0.23.0");
+  const r = spawnSync("node", [quayBin, "init", "--json", "--root", ws, "--plugin-root", root, "--auto-commit-skip"], { cwd: ws, encoding: "utf8" });
+  assert.equal(r.status, 0, `the baseline init must succeed:\n${r.stdout}\n${r.stderr}`);
+  return { ws, pluginRoot: root };
+}
+
+test("AC1 (retire) — a real init does NOT create `.quay/plugin`; the report says `absent`", () => {
+  const { ws, pluginRoot } = retiredWorkspace("retire-ac1");
+  assert.throws(() => fs.lstatSync(pluginLinkPath(ws)), /ENOENT/, "⛔ init must not create the link");
+  // `ls -la` reading (the AC asks for it): no `.quay/plugin` entry at all.
+  const listing = fs.readdirSync(path.join(ws, ".quay")).sort();
+  assert.ok(!listing.includes("plugin"), `the .quay dir must carry no plugin entry (got: ${listing.join(", ")})`);
+
+  const report = JSON.parse(
+    spawnSync("node", [quayBin, "init", "--json", "--root", ws, "--plugin-root", pluginRoot, "--auto-commit-skip"], { cwd: ws, encoding: "utf8" }).stdout,
+  );
+  assert.equal(report.pluginLink.state, "absent", "a project with no link reports `absent` (a reading, not a skip)");
+  assert.equal(report.pluginLink.path, pluginLinkPath(ws));
+});
+
+test("AC2 (retire) — a symlink left by an older init is DELETED and reported `retired`", () => {
+  const { ws, pluginRoot } = retiredWorkspace("retire-ac2");
+  const link = pluginLinkPath(ws);
+  const oldTarget = fixturePluginRoot("0.14.0");
+  fs.symlinkSync(oldTarget, link);
+  assert.equal(fs.lstatSync(link).isSymbolicLink(), true, "premise: the old-style link is present");
+  assert.equal(fs.readlinkSync(link), oldTarget);
+
+  const r = spawnSync("node", [quayBin, "init", "--json", "--root", ws, "--plugin-root", pluginRoot, "--auto-commit-skip"], { cwd: ws, encoding: "utf8" });
+  assert.equal(r.status, 0, `the upgrade must succeed:\n${r.stdout}\n${r.stderr}`);
+  assert.throws(() => fs.lstatSync(link), /ENOENT/, "⛔ the link must be GONE, not re-pointed");
+  const report = JSON.parse(r.stdout);
+  assert.equal(report.pluginLink.state, "retired");
+  assert.equal(report.pluginLink.target, oldTarget, "the reading names what it removed");
+});
+
+test("AC3 (retire) — a regular DIRECTORY at the path is refused, byte-identical", () => {
+  const { ws, pluginRoot } = retiredWorkspace("retire-ac3-dir");
+  const link = pluginLinkPath(ws);
+  fs.mkdirSync(link);
+  fs.writeFileSync(path.join(link, "user-file.txt"), "the user's content\n");
+  const before = sha256(path.join(link, "user-file.txt"));
+
+  const r = spawnSync("node", [quayBin, "init", "--json", "--root", ws, "--plugin-root", pluginRoot, "--auto-commit-skip"], { cwd: ws, encoding: "utf8" });
+  assert.equal(r.status, 0, `init must still succeed:\n${r.stdout}\n${r.stderr}`);
+  assert.equal(fs.lstatSync(link).isDirectory(), true, "⛔ the directory must still be there");
+  assert.equal(sha256(path.join(link, "user-file.txt")), before, "⛔ and its content byte-identical");
+  const report = JSON.parse(r.stdout);
+  assert.equal(report.pluginLink.state, "refused");
+  assert.match(report.pluginLink.reason, /\.quay\/plugin/, "the reason NAMES the path");
+  assert.equal(r.stderr.includes("REFUSED"), true, `the human line must say so:\n${r.stderr}`);
+});
+
+test("AC3 (retire) — a regular FILE at the path is refused, byte-identical", () => {
+  const { ws, pluginRoot } = retiredWorkspace("retire-ac3-file");
+  const link = pluginLinkPath(ws);
+  fs.writeFileSync(link, "not a link\n");
+  const before = sha256(link);
+
+  const r = spawnSync("node", [quayBin, "init", "--json", "--root", ws, "--plugin-root", pluginRoot, "--auto-commit-skip"], { cwd: ws, encoding: "utf8" });
+  assert.equal(r.status, 0, `init must still succeed:\n${r.stdout}\n${r.stderr}`);
+  assert.equal(fs.lstatSync(link).isFile(), true, "⛔ the file must still be there");
+  assert.equal(sha256(link), before, "⛔ and byte-identical");
+  const report = JSON.parse(r.stdout);
+  assert.equal(report.pluginLink.state, "refused");
+  assert.match(report.pluginLink.reason, /regular file/);
+});
+
+test("AC4 (retire) — `absent` / `retired` / `refused` are three DISTINCT readings; refused is not not-evaluated", () => {
+  // The three states come from the same real function over three real disk states (not hand-built).
+  const absent = retireProjectPluginLink({ wsRoot: tmpDir("retire-ac4-absent"), dryRun: false, log: () => {} });
+  const wsLink = tmpDir("retire-ac4-link");
+  fs.mkdirSync(path.join(wsLink, ".quay"), { recursive: true });
+  fs.symlinkSync("/nonexistent/plugin-tree", pluginLinkPath(wsLink));
+  const retired = retireProjectPluginLink({ wsRoot: wsLink, dryRun: false, log: () => {} });
+  const wsDir = tmpDir("retire-ac4-dir");
+  fs.mkdirSync(pluginLinkPath(wsDir), { recursive: true });
+  const refused = retireProjectPluginLink({ wsRoot: wsDir, dryRun: false, log: () => {} });
+
+  assert.deepEqual([absent.state, retired.state, refused.state], ["absent", "retired", "refused"]);
+  assert.equal(new Set([absent.state, retired.state, refused.state]).size, 3, "⛔ the three must be mutually distinct");
+  assert.notEqual(refused.state, "not-evaluated", "⛔ refused is a DECIDED state, never the undecidable one");
+  assert.notEqual(refused.state, "not-run", "⛔ …and never 'nobody looked'");
+  assert.equal(typeof refused.reason, "string");
+  // A second run after retirement is `absent` — the step is idempotent, and it does not keep claiming
+  // it retired something (硬规则 4b: a reading that can only ever say one thing is not a reading).
+  assert.equal(retireProjectPluginLink({ wsRoot: wsLink, dryRun: false, log: () => {} }).state, "absent");
+});
+
+test("AC5 (retire) — `--dry-run` reports on all three inputs and writes NOTHING", () => {
+  const mk = (tag, seed) => {
+    const ws = tmpDir(tag);
+    fs.mkdirSync(path.join(ws, ".quay"), { recursive: true });
+    seed(ws);
+    return ws;
+  };
+  const linkWs = mk("retire-ac5-link", (ws) => fs.symlinkSync("/nonexistent/plugin-tree", pluginLinkPath(ws)));
+  const dirWs = mk("retire-ac5-dir", (ws) => { fs.mkdirSync(pluginLinkPath(ws)); fs.writeFileSync(path.join(pluginLinkPath(ws), "f"), "x"); });
+  const fileWs = mk("retire-ac5-file", (ws) => fs.writeFileSync(pluginLinkPath(ws), "y"));
+  const bareWs = tmpDir("retire-ac5-bare");
+
+  const reading = (ws) => retireProjectPluginLink({ wsRoot: ws, dryRun: true, log: () => {} });
+  assert.equal(reading(linkWs).state, "would-retire", "⛔ a dry run must NOT claim it deleted anything");
+  assert.equal(fs.lstatSync(pluginLinkPath(linkWs)).isSymbolicLink(), true, "and the link is still there");
+  assert.equal(reading(dirWs).state, "refused");
+  assert.equal(reading(fileWs).state, "refused");
+  assert.equal(reading(bareWs).state, "absent");
+  assert.equal(fs.readFileSync(path.join(pluginLinkPath(dirWs), "f"), "utf8"), "x", "directory content untouched");
+  assert.equal(fs.readFileSync(pluginLinkPath(fileWs), "utf8"), "y", "file content untouched");
+
+  // …and the SAME through the real CLI's `--dry-run`, on an existing workspace.
+  const { ws } = retiredWorkspace("retire-ac5-cli");
+  fs.symlinkSync("/nonexistent/plugin-tree", pluginLinkPath(ws));
+  const r = spawnSync("node", [quayBin, "init", "--json", "--dry-run", "--root", ws], { cwd: ws, encoding: "utf8" });
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(JSON.parse(r.stdout).pluginLink.state, "would-retire");
+  assert.equal(fs.lstatSync(pluginLinkPath(ws)).isSymbolicLink(), true, "⛔ --dry-run left it alone");
+});
+
+test("closed set — `.quay/plugin` is NOT a member init lays down any more", () => {
+  const { ws } = retiredWorkspace("retire-closedset");
+  const walk = [];
+  const visit = (d) => {
+    for (const e of fs.readdirSync(d, { withFileTypes: true })) {
+      const p = path.join(d, e.name);
+      if (e.isDirectory()) visit(p);
+      else walk.push(path.relative(ws, p));
+    }
+  };
+  visit(ws);
+  assert.ok(!walk.includes(path.join(".quay", "plugin")), `the link must not be laid down (got: ${walk.join(", ")})`);
+  // The closure assertion (`quay-init-closure-assertion.ts`) records `isFile()` only, so a symlink was
+  // never counted as a member. Pin the CONSEQUENCE the retirement depends on: an old link, if one is
+  // present, is removed by the next init and therefore cannot survive into the closed set either.
+  assert.throws(() => fs.lstatSync(pluginLinkPath(ws)), /ENOENT/);
 });
