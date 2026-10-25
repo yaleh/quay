@@ -1,7 +1,7 @@
 ---
 id: gap-task-status-event-create-lacks-title-and-goal-ac
 title: v1 create 事件不带 title / goal_ac，外部消费者收到新任务事件后仍只能再读一次全量
-status: todo
+status: ready
 labels:
   - gap
 parent: null
