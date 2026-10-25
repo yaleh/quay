@@ -75,10 +75,3 @@ Q1（`gap-quay-init-retire-project-plugin-link`）之后链接成为退役状态
 ## ADR-007 dark axis
 
 该轴仍暗,理由:本任务只改编号状态词表与判定分支（新增一个取值 + lstat 分支），未新增或删除模块依赖边、未改变包聚合结构，L_D/L_G 读数不因本改动变化。
-
-## Blocker
-
-**2026-10-25T14:59:37.486Z — worker 未落地（exited-not-landed）**
-
-- 未落地原因：step=suite: AssertionError [ERR_ASSERTION]: at least one bin is under-sampled (otherwise the rule is vacuous) [baseline A/B: HARD RED (task-introduced-red) — the task's red set is NOT a subset of the develop baseline red set: added=plugin/test/fan-in-execute-paths-s06.test.mjs,packages/quay/test/gap-webui-dashboard-tests-card-latest-round-no-live-signal.test.mjs,packages/quay/test/gap-webui-accent-palette-no-success-color.test.mjs,packages/quay/test/task-log.test.mjs,packages/quay/test/kernel-regex-escape.test.mjs,packages/quay/test/kernel-canonical-buckets.test.mjs,packages/quay/test/serve-system-body-i18n.test.mjs changed=-]
-- run_id：wk-prod-anchor
