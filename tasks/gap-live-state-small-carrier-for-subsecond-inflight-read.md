@@ -1,7 +1,7 @@
 ---
 id: gap-live-state-small-carrier-for-subsecond-inflight-read
 title: .quay/live-state.json：给在飞/相位一个字节级、事件驱动的读法（spawn / worker-exit / 终态即重写）
-status: ready
+status: done
 labels:
   - gap
 parent: null
