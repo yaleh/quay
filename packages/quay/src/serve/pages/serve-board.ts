@@ -14,9 +14,9 @@ import { boardLabelsFor, boardLabel, fillLabel } from "../view/serve-i18n.ts";
 // clear/setter functions now lives in ONE class instance
 // (gap-dashboard-snapshot-store-encapsulate-state). This module is a CONSUMER — it declares no
 // module-level mutable state of its own.
-import { boardSnapshotStore, type BoardSnapshot, type BoardTaskRow } from "../io/snapshot-store.ts";
+import { boardSnapshotStore, type BoardSnapshot, type BoardTaskRow } from "../store/snapshot-store.ts";
 export { boardSnapshotStore };
-export type { BoardSnapshot } from "../io/snapshot-store.ts";
+export type { BoardSnapshot } from "../store/snapshot-store.ts";
 
 // ── /board — 三源 join 看板 (gap-web-board-needs-an-inconsistency-verdict-it-does-not-have) ──
 // The board joins 意图 (task store) + 执行 (telemetry) + 落地 (git code existence). The LANDING

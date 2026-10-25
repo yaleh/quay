@@ -25,7 +25,7 @@ import { readGitHistory, readGitRemotes, type GitHistoryCommit, type GitHistoryR
 import type { ServePageCfg, ServeIdentity } from "../view/serve-render.ts";
 import { html, escapeHtml, pageStyles, modernistStyles, renderSiteNav, renderMobileChrome, pad2, pageTitle, pageNameFor, htmlLangTag, DEFAULT_LANG, type Lang } from "../view/serve-render.ts";
 import { gitHistoryLabelsFor, gitHistoryLabel, gitHistoryClientLabelsFor, type GitHistoryKey, type GitHistoryClientLabels } from "../view/serve-i18n.ts";
-import { writeJson } from "../serve-http-json.ts";
+import { writeJson } from "./serve-http-json.ts";
 
 // ── Graph-track geometry ────────────────────────────────────────────────────────────────────────────
 // One fixed text column on the right; the graph track on the left (the git log --graph / gitk model).

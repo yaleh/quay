@@ -1,10 +1,15 @@
 // serve-live.ts — /live + /journal route handlers, split from serve-handlers.ts.
 
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { readLive, readJournal, DEFAULT_DRIVER_CAP, type LiveResult, type JournalResult, type JournalSection, type InFlightPhase, type SuiteStateView } from "../../observation.ts";
+import { readLive, readJournal, DEFAULT_DRIVER_CAP, type LiveResult, type JournalResult, type JournalSection, type InFlightPhase } from "../../observation.ts";
 import type { ServePageCfg, ServeIdentity } from "../view/serve-render.ts";
 import { html, escapeHtml, pageStyles, modernistStyles, renderMarkdown, relativeTime, renderSiteNav, renderMobileChrome, tableWrap, pageTitle, pageNameFor, htmlLangTag, DEFAULT_LANG, type Lang } from "../view/serve-render.ts";
 import { journalLabelsFor, liveLabelsFor, fillLabel, dashboardLabel, type JournalKey, type LiveKey } from "../view/serve-i18n.ts";
+// gap-routine-architecture-analysis-god-package-serve-fanout-556: the three pure formatters moved to
+// the leaf `view` package (they carry no page-handler state) so `view/serve-dashboard.ts` no longer
+// imports from `pages/`, which closed a directory cycle. This page keeps its call sites by importing
+// them; the barrel (`serve/index.ts`) re-exports the names.
+import { awaitingLandMs, formatAwaitingDuration, suiteSuffix } from "../view/serve-live-format.ts";
 
 // ── Loop-observation routes (gap-web-cannot-show-what-the-loop-is-doing-now) ────────────────
 // /live + /journal render the loop's live state from workspace observation files. The data
@@ -39,27 +44,6 @@ function renderSectionBlock(s: JournalSection, title: string, L: Record<JournalK
   return html`<h2>${title}</h2><p class="meta"><strong>${L.readFailed}</strong> — ${escapeHtml(s.reason || "")}</p>`;
 }
 
-// gap-webui-live-implcomplete-state-render: the impl-complete boundary (implCompletedAtMs) splits an
-// in-flight run into implementing (null) vs awaiting-land (non-null). The awaiting-land duration is
-// now − implCompletedAtMs, where "now" is the observation instant ALREADY embedded in the snapshot
-// (minutes = (now − startedAtMs)/60000) — so the render stays a pure function of LiveResult, with no
-// Date.now() inside it (deterministic and testable against a fixed nowMs).
-export function awaitingLandMs(t: { startedAtMs: number; minutes: number; implCompletedAtMs: number | null }): number | null {
-  if (t.implCompletedAtMs == null) return null;
-  const nowMs = t.startedAtMs + t.minutes * 60_000;
-  return Math.max(0, nowMs - t.implCompletedAtMs);
-}
-
-export function formatAwaitingDuration(ms: number | null): string {
-  if (ms == null) return "—";
-  const totalMin = Math.floor(ms / 60_000);
-  if (totalMin < 1) return "<1m";
-  if (totalMin < 60) return `${totalMin}m`;
-  const h = Math.floor(totalMin / 60);
-  const m = totalMin % 60;
-  return m === 0 ? `${h}h` : `${h}h${m}m`;
-}
-
 /** The execution-phase label for the /live 阶段 column (gap-live-fan-in-execution-phase-two-axis
  *  AC4). The phase enum is the machine key; the label is human-readable. A null/undefined phase (a
  *  hand-built task literal missing the field) degrades to —, never a fabricated phase (hard rule ③b).
@@ -84,13 +68,6 @@ export function phaseLabel(phase: InFlightPhase | null | undefined, lang: Lang =
     case "landed": return dashboardLabel("phaseLanded", lang);
     default: return "—";
   }
-}
-
-/** fan-in 阶段的套件状态后缀（full-suite-state.json — gap-live-fan-in-execution-phase-two-axis）：
- *  ` · suite green` 之类；无 suite 状态时为 ""（诚实无标注，不伪造「suite 在跑」）。 */
-export function suiteSuffix(suite: SuiteStateView | null): string {
-  if (suite == null || suite.state == null) return "";
-  return ` · suite ${suite.state}`;
 }
 
 /** The `{flags}` payload of ROW 19's `nextStepUnwired` sentence — the two lifecycle markers an

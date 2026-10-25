@@ -15,7 +15,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { DashboardSnapshotStore } from "../src/serve/io/snapshot-store.ts";
+import { DashboardSnapshotStore } from "../src/serve/store/snapshot-store.ts";
 import { dashboardSnapshotStore } from "../src/serve/view/serve-dashboard.ts";
 import { boardSnapshotStore } from "../src/serve/pages/serve-board.ts";
 

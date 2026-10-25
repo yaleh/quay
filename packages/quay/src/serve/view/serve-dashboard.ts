@@ -9,8 +9,12 @@ import { readLive, readSystem, readManagerLight, readTests, readTestsNonBlocking
 import { TASK_STATUS, type GoalRecord } from "../../abi.ts";
 import { DEFAULT_LANG, type Lang, type Manifest, type ServeIdentity, type ServePageCfg } from "./serve-render.ts";
 import { html, escapeHtml, pageStyles, modernistStyles, renderSiteNav, renderMobileChrome, relativeTime, pageTitle, renderIdentityCard, htmlLangTag, pageNameFor } from "./serve-render.ts";
-import { awaitingLandMs, formatAwaitingDuration, suiteSuffix } from "../pages/serve-live.ts";
-import { renderFanInCell } from "../feat/serve-task.ts";
+// gap-routine-architecture-analysis-god-package-serve-fanout-556: both helpers now live in this
+// leaf package (moving them here removed the `view` → `pages` / `view` → `feat` back-edges that
+// closed a directory cycle); and the shared snapshot store moved to its own leaf `store` package
+// (`view` → `store` is a one-way edge, where `view` → `io` used to be).
+import { awaitingLandMs, formatAwaitingDuration, suiteSuffix } from "./serve-live-format.ts";
+import { renderFanInCell } from "./serve-fan-in-cell.ts";
 // gap-webui-dashboard-body-copy-en-zh: the page's BODY copy resolves through serve-i18n.ts's
 // DASHBOARD_LABELS (ROW 5~8) — the same ONE-dictionary seam the nav/page chrome already uses.
 // `dashboardLabelsFor(lang)` is taken ONCE per render (each card takes its own table), never
@@ -26,9 +30,9 @@ import { FIXED_GANTT_LANES, mergeLiveAndHistoryIntervals, packLanes, type LiveGa
 // `clearXxx()` / `setXxxStepHook()` functions now lives in ONE class instance
 // (gap-dashboard-snapshot-store-encapsulate-state). This module is a CONSUMER — it declares no
 // module-level mutable state of its own.
-import { dashboardSnapshotStore, type DashboardSnapshot, type RebuildPolicy, type TaskSummary } from "../io/snapshot-store.ts";
+import { dashboardSnapshotStore, type DashboardSnapshot, type RebuildPolicy, type TaskSummary } from "../store/snapshot-store.ts";
 export { dashboardSnapshotStore };
-export type { DashboardSnapshot, TaskSummary } from "../io/snapshot-store.ts";
+export type { DashboardSnapshot, TaskSummary } from "../store/snapshot-store.ts";
 
 // ── /dashboard ─────────────────────────────────────────────────────────────────────────────────────
 

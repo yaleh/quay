@@ -36,12 +36,17 @@ export * from "./docs/serve-architecture.js";
 export * from "./view/serve-binding.js";
 export * from "./pages/serve-board.js";
 export * from "./view/serve-dashboard.js";
+// gap-routine-architecture-analysis-god-package-serve-fanout-556: the live formatters moved into
+// `view/` to keep the directory graph acyclic; the barrel keeps exporting the same names (they used
+// to arrive via `pages/serve-live.js`). `renderFanInCell` keeps arriving via `feat/serve-task.js`,
+// which re-exports it from `view/serve-fan-in-cell.ts`.
+export * from "./view/serve-live-format.js";
 export * from "./docs/serve-doc.js";
 export * from "./io/serve-git.js";
 export * from "./feat/serve-goal.js";
 export * from "./serve-handlers.js";
 export * from "./serve-heap-cap.js";
-export * from "./serve-http-json.js";
+export * from "./io/serve-http-json.js";
 export * from "./view/serve-i18n.js";
 export * from "./view/serve-lang.js";
 export * from "./pages/serve-live.js";
