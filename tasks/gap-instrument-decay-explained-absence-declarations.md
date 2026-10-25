@@ -2,7 +2,7 @@
 id: gap-instrument-decay-explained-absence-declarations
 title: instrument-decay 的 3 个 rate-stopped 分组（suite-skip / suite-recovery /
   suite-recovery-blocked）经查全是「已解释缺席」，但 MANIFEST 没有机器可读裁定 ⇒ 常驻检测器每轮重报、人工取证重做
-status: todo
+status: ready
 labels:
   - gap
   - defect
