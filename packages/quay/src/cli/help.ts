@@ -192,7 +192,7 @@ task log / task trace — the READ surface over the task-status transition carri
                     transitions".
 
 The published CONTRACT (task log --json; task trace --json is the same document minus
-transitions/nextCursor/complete/rebase, plus its own taskId/status):
+transitions/nextCursor/tailCursor/complete/rebase, plus its own taskId/status):
   {
     "transitions": [ { "order": 0, "schema": "v1", "seq": 0, "eventId": "<sha256[0:32]>",
                        "carrierEpoch": "<epoch>", "taskId": "<id>", "from": "todo", "to": "ready",
@@ -203,6 +203,7 @@ transitions/nextCursor/complete/rebase, plus its own taskId/status):
                        "reason": "…",
                        "source": "task-status-events|git", "inferred": false, "commit": "<sha|null>" } ],
     "nextCursor": { "v": 1, "carrierEpoch": "<epoch>", "seq": 3 },
+    "tailCursor": { "v": 1, "carrierEpoch": "<epoch>", "seq": <last carrier position> },
     "complete": false,
     "coverage": { "carrier": { "path": "…", "exists": true, "epoch": "…", "lines": 0, "v0": 0, "v1": 0, "corrupt": 0 },
                   "writerClasses": [ { "id": "<class>", "wired": true, "inScope": true, "callSites": ["…"], "reason": "…" } ],
@@ -225,6 +226,22 @@ transitions/nextCursor/complete/rebase, plus its own taskId/status):
               of it, so a consumer that crashes between "read a page" and "process it" re-receives
               that one boundary event instead of losing it. DEDUPE BY \`eventId\` — that is the
               documented, and only, dedup key.
+  tailCursor  Available since quay 0.23.0 (ADDITIVE — no existing key changed; nextCursor keeps its
+              definition and its value). The CARRIER'S TAIL: {v, carrierEpoch, seq}, where seq is the
+              CARRIER POSITION of the carrier's LAST event (equal to that transition's \`order\`),
+              computed from EVERY transition and ⛔ INDEPENDENT of \`--since\` / \`--until\` / \`--limit\`
+              — so it is present even when the page is EMPTY, which is exactly the reading nextCursor
+              cannot give. This is the token an external consumer takes after ONE full
+              \`task list --json --no-body\` baseline and then passes back verbatim as --since for every
+              increment: "what changed since my baseline" never depends on guessing a time window, and
+              nextCursor is never overloaded to mean a position at which nothing was delivered.
+              THREE STATES, never conflated: (i) the carrier is ABSENT ⇒ null, with
+              coverage.carrier.exists false; (ii) the carrier EXISTS with zero events ⇒ {seq: 0} — the
+              position the first event will occupy (⛔ never null); (iii) the carrier EXISTS but no line
+              is readable ⇒ null, with coverage.carrier.corrupt > 0 named in coverage.reasons. ⛔ A
+              fabricated seq:0 for (i) or (iii) is the defect this field exists to prevent.
+              The resume is INCLUSIVE, so the FIRST increment read re-delivers the boundary event
+              (order === seq) — dedupe by \`eventId\`, exactly as with nextCursor.
   rebase      true iff the supplied cursor's carrierEpoch does not match the carrier's current epoch
               (a rotation, or the first v1 append onto a legacy v0-only carrier, whose epoch literal is
               "pre-epoch"). The read then REPLAYS FROM THE BEGINNING of the current epoch and says so
