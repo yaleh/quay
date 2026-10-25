@@ -1,7 +1,11 @@
-// touches-annotation.ts — the ONE Touches annotation stripper, a kernel leaf:
+// touches-annotation.ts — the ONE Touches entry normalizer, a kernel leaf:
 //   · `stripTrailingFullWidthAnnotation` — the trailing full-width `（…）` half;
 //   · `stripTouchAnnotation` — the COMPLETE entry strip (leading-path cut + both trailing
-//     annotation spellings repeated to a fixed point), used by BOTH the plugin parser and Core.
+//     annotation spellings repeated to a fixed point), used by BOTH the plugin parser and Core;
+//   · `parseTouchBulletPaths` — the COMPLETE bullet→path pipeline (split → trim → bullet filter →
+//     bullet-marker strip → surrounding-quote strip → annotation strip → masked-backtick strip →
+//     leading `./` strip → empty drop). Same two layers: `plugin/scripts/touches-parser.ts`
+//     re-exports it as `parseTouchEntries`, Core's `observation/blocking.ts` as `parseTouchPaths`.
 //
 // ── THE DEFECT THIS CLOSES (task gap-three-pure-judges-kernel-single-def, AC-909) ───────────────
 // `stripTrailingFullWidthAnnotation` existed as TWO byte-identical definitions that shared no import
@@ -93,4 +97,60 @@ export function stripTouchAnnotation(entry: string): string {
     if (s === before) break;
   }
   return s.trim();
+}
+
+// ── normalizeTouchEntry + parseTouchBulletPaths — the COMPLETE bullet→path pipeline ──────────────
+// BEFORE (task gap-routine-semantic-dedup-scan-parse-touch-paths, finding `parse-touch-paths`,
+// routine runId `semantic-dedup-scan-1792940684375`): the eight-step pipeline below existed VERBATIM
+// in TWO files that shared no import edge —
+//   · `plugin/scripts/touches-parser.ts`      → `parseTouchEntries` (the ONE `## Touches` parser), and
+//   · `packages/quay/src/observation/blocking.ts` → `parseTouchPaths` (Core's display-surface mirror).
+// The annotation half had already been converged here (gap-routine-semantic-dedup-scan-strip-touch-
+// annotation); the remaining six steps (split → trim → bullet filter → bullet-marker strip →
+// surrounding-quote strip → leading `./` strip → empty drop) were still a hand-maintained mirror
+// pinned ONLY by a prose comment ("mirrors touches-parser.ts parseTouchEntries"). Both entries now
+// re-export THIS function object, so the mirror is structurally impossible rather than prose-pinned.
+//
+// The POST-MARKER half is factored out as `normalizeTouchEntry` because `parseTouchEntriesWithTags`
+// (same plugin file) needs exactly those five steps around its tag capture — it carried its own copy
+// and documented the path half as "BYTE-IDENTICAL to parseTouchEntries" in prose. It now calls the
+// same function, so that sentence is true by construction (硬规则 5b: fix the sibling too).
+//
+// Behavior (unchanged from both former copies — `plugin/test/touches-parser-parity.test.mjs`'s
+// fixture set is the golden, and `packages/quay/test/kernel-pure-judges.test.mjs` asserts identity):
+//   - bullets: `- ` or `* ` (leading whitespace tolerated)
+//   - surrounding quotes/backticks stripped BEFORE and AFTER the annotation strip, because the
+//     annotation may sit OUTSIDE the backticks (`` `path/x.ts` (new) ``) or INSIDE them
+//     (`` `path/x.ts (new)` ``) — the second strip removes the backtick the annotation had masked
+//   - a trailing annotation (full-width `（…）` or ASCII `(…)`) stripped by stripTouchAnnotation
+//   - a leading `./` stripped
+//   - empty entries dropped
+const TOUCH_QUOTE_STRIP_RE = /^[`"']+|[`"']+$/g;
+
+/** Strip surrounding quotes/backticks from a Touches entry (the step that must run BOTH before the
+ *  annotation strip — the annotation may sit inside the backticks — and after it — a trailing
+ *  backtick the annotation had masked). Exported because the tag-aware reader
+ *  (`parseTouchEntriesWithTags`) needs the pre-annotation form on its own, to see a trailing `(new)`
+ *  that a closing backtick would otherwise hide. */
+export function stripTouchQuotes(entry: string): string {
+  return String(entry).replace(TOUCH_QUOTE_STRIP_RE, "").trim();
+}
+
+/** Normalize ONE Touches entry whose bullet marker is already removed: surrounding quotes/backticks
+ *  (before AND after the annotation strip), the trailing annotation, and a leading `./`. */
+export function normalizeTouchEntry(entry: string): string {
+  const stripped = stripTouchAnnotation(stripTouchQuotes(entry)); // quotes → annotation → (masked) quotes
+  const cleaned = stripTouchQuotes(stripped);
+  return cleaned.replace(/^\.\//, "").trim();                    // then a leading "./"
+}
+
+export function parseTouchBulletPaths(touchesSection: string): string[] {
+  if (!touchesSection) return [];
+  return String(touchesSection)
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter((l) => /^[-*]\s+/.test(l))
+    .map((l) => l.replace(/^[-*]\s+/, "").trim())
+    .map(normalizeTouchEntry)
+    .filter(Boolean);
 }
