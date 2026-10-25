@@ -46,6 +46,22 @@ extra:
 - AC5：契约正文 §5「本载体**不**提供 phase」+ phase 唯一来源 `lanes` / `driver live`（或后续 live-state）。
 - 作用域门：`bash scripts/test.sh --for-task gap-worker-dispatch-carrier-owner-and-contract-unregistered --allow-thin`
   → EXIT=0（178 tests pass, 0 fail）。anti-drift Touches check → 8 个实际改动文件全部在声明内（9 globs）。
+- **2026-10-25 二次落地轮（上轮 exited-not-landed 的根因复核）**：
+  - 上轮 suite 红的 4 个文件里，只有 `plugin/test/driver-runtime-control-plane.test.mjs` 被判为「任务引入」
+    （delta-relatedness 报 RELATED 只是因为它 one-hop import 了本任务改动的 `driver-shared.ts`）。
+    **本轮单跑该文件：6/6 pass**（AC2/AC4 production path 522ms 通过，实测端口
+    promotion=12391 worker=9993 outer=19719 quality=1311 meta=5229 goal=22427）。
+  - **真因（宿主 flake，与本 delta 无关）**：失败是 `fetch failed / cause: Error: bad port`，
+    发生在 `callTool(started[kind].url, "halt", …)`。`serveKindControlPlane` 以 `port: 0` 由内核分配
+    （`plugin/scripts/driver-runtime.ts:857`），本机 `ip_local_port_range=1024 65535` 覆盖了 undici fetch
+    的 prohibited-port 表（2049/3659/4045/5060/5061/6000/6566/6665-6669/6679/6697/10080），
+    六个 supervisor 里任一拿到这类端口 ⇒ 客户端 `new URL()` 后请求即被拒。**develop 上同样存在**
+    （本 delta 未触碰 `driver-runtime.ts` / `control-plane-http.ts`）。⚠️ 未在本任务修（超出 Touches）；
+    需要一条独立 gap：控制面绑到 prohibited port 时应重绑定或直接判失败重取。
+  - 另 3 个红（`task-granularity-advice` / `full-suite-runner-cgroup` / `needs-human-parking-recheck`）
+    在 develop 基线**同为红**（数据/负载依赖：语料无欠采样 bin、lane 实测 <128、盘上无 needs-human 任务），
+    不在本任务的 added 集里。
+  - 本轮 `git merge develop` 后重跑同一作用域门：EXIT=0（178 pass / 0 fail）；anti-drift 仍 OK（8 files ⊂ 9 globs）。
 
 ## DoD
 
@@ -65,3 +81,13 @@ extra:
 - `plugin/test/duration-report.test.mjs`（AC4 三态 + 两条反向 fixture）
 - `plugin/test/worker-driver.test.mjs`（schema 标记断言）
 - `plugin/test/carrier-registry-completeness.test.mjs`（readers 枚举 schema + 回归闸）
+
+## Blocker
+
+**2026-10-25T14:19:35.422Z — worker 未落地（exited-not-landed）**
+
+- 未落地原因：step=suite: AssertionError [ERR_ASSERTION]: at least one bin is under-sampled (otherwise the rule is vacuous) [baseline A/B: HARD RED (task-introduced-red) — the task's red set is NOT a subset of the develop baseline red set: added=plugin/test/driver-runtime-control-plane.test.mjs changed=-]
+- run_id：wk-prod-anchor
+- session_id：beb10389-ef2e-4896-9203-9a3c301ab90a
+- **2026-10-25 二次轮复核：该 blocker 未复现**——`driver-runtime-control-plane.test.mjs` 单跑 6/6 绿，
+  真因是内核分配端口落入 undici prohibited-port 表的宿主 flake（详见 Evidence 末条），⛔ 不是本 delta 引入。
