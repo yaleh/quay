@@ -608,8 +608,22 @@ function readDirectoryCycles(root: string, workDir: string, source: string): {
   directoryCyclesBasis: "module-graph" | "single-directory" | null;
   /** WHEN the artifact this reading came from was produced (`arch.json.timestamp`, falling back to the
    *  manifest scope's `generatedAt`). null ⇒ no artifact was read. A reading without this cannot be
-   *  told apart from a current one (硬规则 4b: stale readings look exactly like fresh ones). */
+   *  told apart from a current one (硬规则 4b: stale readings look exactly like fresh ones).
+   *  ⚠️ PROVENANCE ONLY: it says which artifact was LOOKED AT, not that the cycle conclusion came from
+   *  it — see `readingFreshness`. */
   artifactTimestamp: string | null;
+  /** WHICH EVIDENCE the cycle conclusion rests on (gap-arch-cycle-single-directory-basis-never-due):
+   *  `artifact` = read from the persisted query artifact; `live-file-list` = derived from `git ls-files`
+   *  at read time (`basis:"single-directory"`); null ⇒ no reading. This is what makes
+   *  `artifactTimestamp`'s age interpretable — an artifact-derived reading ages, a live one does not.
+   *  ⛔ Hard rule 4: without this distinction a single-directory record carried a CONSTANT
+   *  `commitsSinceArtifact: 0` (a quantity that structurally cannot be non-zero), and its stale
+   *  `artifactTimestamp` made it look identical to a genuinely stale artifact reading. */
+  readingFreshness: "artifact" | "live-file-list" | null;
+  /** For `readingFreshness:"live-file-list"`: WHEN the tracked file list was read (ISO). This is the
+   *  DIRECT quantity the cycle conclusion is as-of; null for artifact-derived / not-evaluated readings.
+   *  ⛔ Not a substitute for `artifactTimestamp` — it is the opposite kind of fact. */
+  fileListReadAt: string | null;
 } {
   const notEvaluated = (reason: string, artifactTimestamp: string | null = null) => ({
     directoryCyclesEvaluated: false,
@@ -618,6 +632,8 @@ function readDirectoryCycles(root: string, workDir: string, source: string): {
     directoryCycles: null,
     directoryCyclesBasis: null,
     artifactTimestamp,
+    readingFreshness: null,
+    fileListReadAt: null,
   });
 
   const manifestRead = readQueryManifest(workDir);
@@ -688,6 +704,10 @@ function readDirectoryCycles(root: string, workDir: string, source: string): {
         directoryCycles: [],
         directoryCyclesBasis: "single-directory",
         artifactTimestamp,
+        // The cycle conclusion comes from the file list just read — the artifact above is provenance
+        // for "which analyze we looked at", NOT the evidence for `cycleCount: 0`.
+        readingFreshness: "live-file-list",
+        fileListReadAt: new Date().toISOString(),
       };
     }
     const why = sd.reason
@@ -723,6 +743,9 @@ function readDirectoryCycles(root: string, workDir: string, source: string): {
     directoryCycles: cycles,
     directoryCyclesBasis: "module-graph",
     artifactTimestamp,
+    // Read from the persisted artifact ⇒ its age is meaningful (it can fall behind the tree).
+    readingFreshness: "artifact",
+    fileListReadAt: null,
   };
 }
 
@@ -759,17 +782,24 @@ export interface DirectoryCycleScopeReading {
   basis: "module-graph" | "single-directory" | null;
   /** When the artifact THIS scope was read from was produced (arch.json `timestamp`, else the
    *  manifest scope's `generatedAt`). null ⇒ no artifact was read for this scope.
-   *  ⚠️ A `single-directory` reading is derived from the CURRENT file list, not from the artifact —
-   *  the timestamp is still recorded (it says which artifact we looked at) but it does not age the
-   *  reading; see `commitsSinceArtifact`/`behindSources` below. */
+   *  ⚠️ PROVENANCE ONLY — it says which artifact was looked at. Whether the recorded cycles actually
+   *  CAME from it is `readingFreshness` (gap-arch-cycle-single-directory-basis-never-due). */
   artifactTimestamp: string | null;
+  /** WHICH EVIDENCE this scope's cycle conclusion rests on: `artifact` (the persisted query artifact),
+   *  `live-file-list` (the tracked file list read at `fileListReadAt`), or null ⇒ not evaluated. */
+  readingFreshness: "artifact" | "live-file-list" | null;
+  /** `readingFreshness:"live-file-list"` ⇒ WHEN the file list was read (ISO). null otherwise. This is
+   *  the direct quantity such a reading is as-of; the artifact timestamp never ages it. */
+  fileListReadAt: string | null;
   /** Commits AFTER `artifactTimestamp` that touched this scope's source directory — i.e. how far the
-   *  tree has moved past the artifact the reading came from. null ⇒ NOT COMPUTABLE (no artifact
-   *  timestamp / git failed), ⛔ never 0 (硬规则 3b: "could not tell" must not read as "up to date").
-   *  For a `single-directory` reading this is 0: the reading is taken from the live file list, so it
-   *  cannot be behind its sources no matter how old the artifact is. */
+   *  tree has moved past the artifact the reading came from. null ⇒ NOT COMPUTABLE, ⛔ never 0
+   *  (硬规则 3b: "could not tell" must not read as "up to date").
+   *  ⛔ For a `live-file-list` reading this is null — NOT 0: the count is a git-derived fact about the
+   *  ARTIFACT, and that reading did not come from one. Writing 0 here was a constant that cannot be
+   *  anything else (硬规则 4), and it made a current reading indistinguishable from a stale one. */
   commitsSinceArtifact: number | null;
-  /** `commitsSinceArtifact > 0`. Three-valued: null when the count is not computable.
+  /** `commitsSinceArtifact > 0`. Three-valued: null when the count is not computable (including every
+   *  `live-file-list` reading, which has no artifact provenance to be behind).
    *  ⛔ NOT the same thing as the record-level `stale` (artifact age > scheduling interval): this one
    *  says "the sources changed after the artifact", which is what makes a reading WRONG rather than
    *  merely old. Both are kept, with their own names (hard rule 8: never reuse a name for a new
@@ -858,11 +888,14 @@ export function readDirectoryCycleReading(root: string, workDir?: string): Direc
   const resolvedWorkDir = workDir ? path.resolve(workDir) : path.join(resolvedRoot, ".archguard");
   const scopes: DirectoryCycleScopeReading[] = SCOPES.map(({ source, label }) => {
     const r = readDirectoryCycles(resolvedRoot, resolvedWorkDir, source);
-    const basis = r.directoryCyclesBasis;
-    // A single-directory reading is taken from the live file list ⇒ it cannot be behind its sources.
+    // A live-file-list reading (basis `single-directory`) has NO artifact provenance for its cycle
+    // conclusion: `commitsSinceArtifact` is a git fact about the artifact, so for it the count is
+    // NOT COMPUTABLE (null). ⛔ It must never be 0 — a constant that cannot take another value is not
+    // a measurement (硬规则 4), and in production it made a fresh live reading and a stale artifact
+    // reading byte-identical (gap-arch-cycle-single-directory-basis-never-due).
     const commitsSinceArtifact =
-      r.directoryCyclesEvaluated && basis === "single-directory"
-        ? 0
+      r.readingFreshness === "live-file-list"
+        ? null
         : commitsSince(resolvedRoot, source, r.artifactTimestamp);
     return {
       scope: label,
@@ -871,8 +904,10 @@ export function readDirectoryCycleReading(root: string, workDir?: string): Direc
       reason: r.directoryCyclesReason,
       cycleCount: r.directoryCycleCount,
       cycles: r.directoryCycles,
-      basis,
+      basis: r.directoryCyclesBasis,
       artifactTimestamp: r.artifactTimestamp,
+      readingFreshness: r.readingFreshness,
+      fileListReadAt: r.fileListReadAt,
       commitsSinceArtifact,
       behindSources: commitsSinceArtifact === null ? null : commitsSinceArtifact > 0,
     };
@@ -957,7 +992,10 @@ export interface ArchCycleRefreshResult {
  *     scope's analyze and must not turn a report tick into a blind spawn);
  *   • not-evaluated AND every scope is unreadable is NOT a refresh case for the same reason.
  *  `behindSources === null` (not computable) is NOT a trigger — ⛔ never treat "could not tell" as
- *  "behind" (that would spend an analyze on every round of a non-git workspace). */
+ *  "behind" (that would spend an analyze on every round of a non-git workspace). This is also, by
+ *  design, the state of every `live-file-list` reading (gap-arch-cycle-single-directory-basis-never-due):
+ *  its cycle conclusion does not depend on the artifact, so re-analyzing it could not change it —
+ *  ⛔ never the old fake `0` ("fresh") either, which would have claimed a git-derived measurement. */
 export function scopeNeedsRefresh(scope: DirectoryCycleScopeReading): boolean {
   if (scope.behindSources === true) return true;
   if (!scope.evaluated && typeof scope.reason === "string" && scope.reason.includes("moduleGraph not produced")) return true;

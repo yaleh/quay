@@ -108,3 +108,10 @@ package 粒度是**目录**，于是 `quay/src/serve` 本身成了那个 god pac
 - `plugin/test/worker-driver.test.mjs`
 - `docs/analysis/discovery-portfolio.mjs`
 - `tasks/gap-routine-architecture-analysis-god-package-serve-fanout-556.md`
+
+## Blocker
+
+**2026-10-25T17:41:38.114Z — worker 未落地（exited-not-landed）**
+
+- 未落地原因：step=suite: AssertionError [ERR_ASSERTION]: must print the FULL github recipe `claude plugin marketplace add yaleh/quay` (one <source> arg) [baseline A/B: HARD RED (task-introduced-red) — the task's red set is NOT a subset of the develop baseline red set: added=plugin/test/needs-human-parking-recheck.test.mjs changed=-]
+- run_id：wk-prod-anchor
