@@ -39,8 +39,11 @@ extra:
 ## Touches
 
 - `tasks/gap-worker-dispatch-carrier-owner-and-contract-unregistered.md`（自指）
-- `docs/carrier-registry.json`
-- `plugin/scripts/worker-driver.ts`（`DispatchRecord` 契约注释 + schema 字段）
-- `plugin/scripts/duration-report.ts`（既有读者对齐）
-- `plugin/test/duration-report.test.mjs`
-- `plugin/test/worker-driver.test.mjs`
+- `docs/carrier-registry.json`（条目 owner/readers + 版本）
+- `docs/references/worker-dispatch-carrier.md`（新增：契约单一正本）
+- `plugin/scripts/worker-driver.ts`（re-export 保持旧 import 面）
+- `plugin/scripts/driver-shared.ts`（dispatch 载体 + worker 身份判定落点；duration-report 经它复用同一份 classifyOrphanDispatch）
+- `plugin/scripts/duration-report.ts`（既有读者对齐三态）
+- `plugin/test/duration-report.test.mjs`（AC4 三态 + 两条反向 fixture）
+- `plugin/test/worker-driver.test.mjs`（schema 标记断言）
+- `plugin/test/carrier-registry-completeness.test.mjs`（readers 枚举 schema + 回归闸）
