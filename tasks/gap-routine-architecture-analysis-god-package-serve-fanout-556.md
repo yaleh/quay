@@ -3,7 +3,7 @@ id: gap-routine-architecture-analysis-god-package-serve-fanout-556
 title: "architecture-analysis: archguard god-packages (scope 075f2c0c @ HEAD
   01bdc8d54): serve/ has fanOut=556, fanIn=12, 25 files, 285 entities, 15687
   lines — highest fanOut in the repo a"
-status: ready
+status: done
 labels:
   - gap
   - routine-filed
