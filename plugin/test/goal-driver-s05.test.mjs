@@ -81,7 +81,14 @@ test('AC3: 六种未评估成因各出独立取值，且 signals 恒 null（⛔ 
     const absent = targetHealthFact(repoRoot, { targetRoot: path.join(emptyRoot, 'no-such-project') });
     const noTarget = targetHealthFact(emptyRoot, {});
     const noCarrier = targetHealthFact(repoRoot, { targetRoot: mk({ pluginVersion: DELIVERED_VERSION, missingCarriers: [HEALTH_REQUIRED_CARRIERS[0]] }) });
-    const noInitState = targetHealthFact(repoRoot, { targetRoot: mk({ linkAbsent: true }) });
+    const linkRetired = targetHealthFact(repoRoot, { targetRoot: mk({ linkAbsent: true }) });
+    // 「链接在但读不懂」：符号链接指向一个没有 `.claude-plugin/plugin.json` 的目录。
+    const unreadableLinkRoot = mk({ pluginVersion: DELIVERED_VERSION });
+    const emptyPluginTarget = fs.mkdtempSync(path.join(os.tmpdir(), 'goal-target-noplug-'));
+    made.push(emptyPluginTarget);
+    fs.rmSync(path.join(unreadableLinkRoot, '.quay', 'plugin'));
+    fs.symlinkSync(emptyPluginTarget, path.join(unreadableLinkRoot, '.quay', 'plugin'));
+    const linkUnreadable = targetHealthFact(repoRoot, { targetRoot: unreadableLinkRoot });
     const noPs = targetHealthFact(repoRoot, {
       targetRoot: ok,
       healthProbePrefix: cannedProbePrefix(emptyRoot, {
@@ -98,7 +105,7 @@ test('AC3: 六种未评估成因各出独立取值，且 signals 恒 null（⛔ 
       ['probe-unparseable', garbled, []],
       ['target-root-absent', absent, []],
       ['carrier-missing', noCarrier, [HEALTH_REQUIRED_CARRIERS[0]]],
-      ['plugin-link-missing', noInitState, ['.quay/plugin']],
+      ['plugin-link-unreadable', linkUnreadable, ['.quay/plugin']],
       ['process-list-unreadable', noPs, ['ps -eo pid=,args=']],
     ];
     for (const [cause, fact, detail] of cases) {
@@ -110,6 +117,14 @@ test('AC3: 六种未评估成因各出独立取值，且 signals 恒 null（⛔ 
       assert.notEqual(fact.value.verdict, 'healthy', `${cause}: ⛔ 不与 healthy 同形`);
       for (const d of detail) assert.ok(fact.value.causeDetail.includes(d), `${cause}: causeDetail 含 ${d}（实为 ${JSON.stringify(fact.value.causeDetail)}）`);
     }
+    // AC4（gap-driver-status-pointer-retired-state）：链接**不存在** = `retired`（缺省是正常态），只留在读数上，⛔ 不把整个 verdict 降级；「在但读不懂」才是 not-evaluated。
+    console.log(`AC4[link-retired]    ${linkRetired.reason}`);
+    console.log(`AC4[link-unreadable] ${linkUnreadable.reason}`);
+    assert.equal(linkRetired.value.pluginVersion.initStateMode, 'retired', '链接不存在 ⇒ initStateMode=retired');
+    assert.equal(linkRetired.value.pluginVersion.initStatePresent, false, '退役态的 present 仍是 false（字段兼容）');
+    assert.notEqual(linkRetired.value.verdict, 'not-evaluated', '⛔ 退役不得让健康读数降级为 not-evaluated');
+    assert.equal(linkRetired.value.cause, null, '退役不是 not-evaluated 的成因');
+    assert.equal(linkUnreadable.value.pluginVersion.initStateMode, 'unreadable', '链接在但读不懂 ⇒ unreadable');
     // 三态可区分（AC3 要求「贴出三态的实际输出」）：三种 verdict 各一例。
     // 「healthy」态必须有一个**真在跑**的目标 driver 进程：零进程夹具本身就是 unhealthy[not-driving]
     // （这正是本 fact 的首要信号），拿它当 healthy 对照会把两态压成一态。
@@ -174,7 +189,10 @@ test('AC4: pluginVersion 与交付物 plugin 版本并排出现，不等可机�
     assert.equal(b.value.pluginVersion.equal, false, '不等态可机械检出（AC4 的核心）');
     assert.equal(c.value.pluginVersion.equal, null, '一侧读不到 ⇒ null（⛔ 不与 true 同形，硬规则 3b）');
     assert.equal(c.value.pluginVersion.initStatePresent, false, '连链接在不在都要能区分');
-    assert.equal(c.value.cause, 'plugin-link-missing', '链接缺失的成因是 plugin-link-missing（⛔ 不是过了');
+    // 链接不存在是**退役正常态**：它不是 not-evaluated 的成因，不得让整个读数降级。
+    assert.equal(c.value.pluginVersion.initStateMode, 'retired', '链接不存在 ⇒ retired');
+    assert.equal(c.value.cause, null, '⛔ 退役不是 not-evaluated 的成因');
+    assert.notEqual(c.value.verdict, 'not-evaluated', '⛔ 退役不得让健康读数降级（这正是本任务修的缺陷）');
     // 版本读数**带陈旧度**：mismatch 时它区分「刚补跑过」与「一个月没更新」。龄取**链接本身**的
     // lstat mtime（⛔ 不跟随链接 ⇒ 用 lutimesSync 设链接自己的时间）。
     const oldSec = Math.floor(Date.now() / 1000) - 3600;

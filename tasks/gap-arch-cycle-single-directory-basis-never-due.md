@@ -2,7 +2,7 @@
 id: gap-arch-cycle-single-directory-basis-never-due
 title: arch-cycle-report 的单目录 scope 把 commitsSinceArtifact 硬编码为 0：plugin/scripts
   永不进 due 集，旧产物以 evaluated:true 上报（检测器 stale-evaluated 常亮）
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -136,3 +136,21 @@ node --experimental-strip-types plugin/scripts/instrument-decay-check.ts --root 
 ## Dark axis（ADR-007）
 
 - 该轴仍暗,理由:本条只改 arch-cycle 读数的 provenance 字段与检测器的 artifact-independence 判定，未触碰模块/依赖结构；且 DoD 明确不新增 analyze spawn，本轮没有运行结构分析 ⇒ 没有 L_D/L_G 数值读数可用（结构轴对本条没有输入，不等于「已测为 0」）。
+
+## Fleet 台账对账（case_757bce6ae882，2026-10-25T20:20Z，主检出 @ c2cb9cada）
+
+**结论：`status=ready` 是真读数，不是台账滞后。本轮 ⛔ 不改 status、⛔ 不写 done/verifiedBy——完成由本项目 fan-in 判。** Fleet 把它 escalate 成 attention 的理由（ephemeral-dev-session）核实为：实现已在任务分支上，但机械 fan-in 因等锁而长时间未落地。
+
+**① 实现已在任务分支、develop 上还没有**：分支 `task/gap-arch-cycle-single-directory-basis-never-due` @ `12c72a900`（实现提交 `5cb7023de` + 5 次 `Merge branch 'develop' into task/...`）；`git diff --shortstat develop...task/...` ⇒ `5 files changed, 363 insertions(+), 32 deletions(-)`。直接量：`git show develop:plugin/scripts/archguard-runner.ts | grep -c readingFreshness` ⇒ `0` ⇒ develop 上仍是写死 `commitsSinceArtifact:0` 的旧行为。
+
+**② 未落地的原因：机械 fan-in 在 `.git/fan-in.lock` 上等了 2h22m44s**（机器可读读数，非估算）：
+- `.quay/fan-in-gap-arch-cycle-single-directory-basis-never-due-wk-prod-anchor.log` 首步 `{"step":"acquire-fan-in-lock","wall_ms":8564464}` ⇒ 8564464 ms。
+- 等待链：`2953965`（`worker-driver --mechanical-fan-in --task <本任务>`，起 `2026-10-25T17:55:39Z`）→ `2954706` bash holder → `flock -x` 阻塞，直到 `2026-10-25T20:18:25Z` 才写出本任务**第一条** acquire 事件（此前 `.quay/fan-in-lock-events.jsonl` 里本任务 acquire 计数 = **0**）。
+- 同一窗口内同一把锁被别的任务 acquire 至少 4 次：`18:26:09Z` dup-last-suite-start-offset、`18:46:50Z` quay-init / god-package-serve-fanout-556、`19:23:11Z` dup-last-suite、`19:43:28Z` 556（持锁至 `20:18:25Z`）。
+- ⇒ **观察项（⛔ 不新立任务，硬规则 12：发生率目前 1）**：`acquireFanInLock`（`plugin/scripts/worker-fan-in.ts:1615-1620`）的注释把「排队」当作这把锁存在的价值（「unbounded——排队等待正是这把正确性锁存在的意义」），而 `flock(2)` **不提供 FIFO 公平性**：所有等待者等价竞争，先到者不优先；且等待期间**不发射任何事件**（只有 acquire 之后才有），所以「在等锁」与「在干活」在事件上同形。等待时长实测 2h22m44s。
+
+**③ 驱动侧阶段读数是代理量（硬规则 4b）**：`.quay/worker-round.jsonl` round 28 @ `20:12:31Z` 的 `in_flight_tasks` 含本任务、`in_flight_task_starts` = `17:35:18.823Z`；`filter_trace` 里 `notInFlight` = `{blocker:null, waitedMinutes:164}`。`.quay/live-state.json` 把它投影为 `phase:"implementing"`，而同一时刻它的子进程实际是 `worker-driver --mechanical-fan-in` 且在等锁 ⇒ **live-state 的阶段字段与实际阶段不符**；判「这条任务是否在干活」要用 `git log` 的 worktree 末次提交时刻 / 子进程真实 argv。
+
+**④ 报告时刻的进行态（⛔ 不是结论）**：`20:18:25Z` 拿到锁后，fan-in 依次通过 `merge-develop` / `anti-drift` / `delta`(code) / `typecheck` / `doc-check`（最后一条 `20:19:13Z`），suite 阶段尚未结束；**是否落地未知**，本记录不对它下结论。
+
+**⑤ AC4 仍不可评估**：`plugin/scripts/arch-cycle-history.jsonl` 最后一行 `ts=2026-10-25T17:52:47.909Z`，`grep -c readingFreshness` = 0 ⇒ 生产载体还没跑过「落地之后」的一轮。解除条件：本任务 fan-in 落地 develop → 下一次 arch-cycle 例程轮写入带 `readingFreshness:"live-file-list"` 的记录 → 才可能勾 AC4 / DoD。
