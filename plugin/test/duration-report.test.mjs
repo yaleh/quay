@@ -20,6 +20,7 @@ import {
   readJsonl,
   toAttemptRecord,
   readInFlightAttempts,
+  readDispatchStoreState,
   isTerminalStatus,
   buildDurationReport,
   renderReport,
@@ -49,6 +50,18 @@ function mkRoot() {
 function writeTask(root, id, status) {
   fs.writeFileSync(path.join(root, "tasks", `${id}.md`), `---\nid: ${id}\ntitle: t\nstatus: ${status}\n---\n## Proposal\n\nx\n`, "utf8");
 }
+/** 伪造 /proc：pid → 该 pid 的 cmdline（NUL 分隔，与真 procfs 同形）。测试判据必须能在**不 spawn
+ *  真进程**的前提下取假（AC4 的「伪造 pid / 伪造 cmdline」两条反向 fixture）。 */
+function mkProc(entries) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "dur-proc-"));
+  TMP_ROOTS.push(dir);
+  for (const [pid, cmdline] of Object.entries(entries)) {
+    fs.mkdirSync(path.join(dir, String(pid)), { recursive: true });
+    fs.writeFileSync(path.join(dir, String(pid), "cmdline"), String(cmdline), "utf8");
+  }
+  return dir;
+}
+const TEST_WORKER = "quay-test-worker";
 
 test("三态：空输入 ⇒ NOT-EVALUATED（⛔ 不与 0 共用取值）", () => {
   assert.equal(percentile([], 0.5), NOT_EVALUATED);
@@ -104,21 +117,75 @@ test("toAttemptRecord — 新阶段字段读取；旧记录 ⇒ 缺值(null) 且
   assert.equal(toAttemptRecord({ ts: "x" }), null, "读不出 task/ts ⇒ null（不产出一个半成品记录）");
 });
 
-test("readInFlightAttempts — terminal:false + 年龄取自派发记录（直接量）", () => {
+test("readInFlightAttempts — terminal:false + 年龄取自派发记录；live 需 pid 存活 ∧ cmdline 匹配", () => {
   const root = mkRoot();
+  const proc = mkProc({ 123: `node\0${TEST_WORKER}\0Task: T-live\0` });
   fs.writeFileSync(
     path.join(root, ".quay", "worker-dispatch.json"),
     JSON.stringify({ "T-live": { taskId: "T-live", runId: "wk-prod-anchor", workerPid: 123, startedAtMs: 1_000_000 } }),
     "utf8",
   );
-  const rows = readInFlightAttempts(root, 1_600_000);
+  const rows = readInFlightAttempts(root, 1_600_000, proc, TEST_WORKER);
   assert.equal(rows.length, 1);
   assert.equal(rows[0].terminal, false, "in-flight 尝试**必须**带显式 terminal:false");
+  assert.equal(rows[0].state, "live", "pid 存活 ∧ cmdline 含 worker 名 + task id ⇒ live");
   assert.equal(rows[0].ageMs, 600_000);
   assert.equal(rows[0].workerPid, 123);
-  // 载体缺失 ⇒ 空集（**不是**「没有在飞」这句结论——报告层用 sources.present 把它与「读到了、确是空」
-  // 分开，见 buildDurationReport 的 sources 段）。
-  assert.deepEqual(readInFlightAttempts(mkRoot(), 1), [], "无 .quay/worker-dispatch.json ⇒ 空集");
+  assert.equal(rows[0].schema, null, "legacy 记录（无 schema 字段）⇒ null，⛔ 不用字段形状猜版本");
+  // 载体缺失 ⇒ 空集（**不是**「没有在飞」这句结论——报告层用 sources.present / dispatchStore.status 把它
+  // 与「读到了、确是空」分开，见 buildDurationReport）。
+  assert.deepEqual(readInFlightAttempts(mkRoot(), 1, proc, TEST_WORKER), [], "无 .quay/worker-dispatch.json ⇒ 空集");
+  // 正向对照：**同一条记录**，只把「pid 不存在」换掉 ⇒ 不是 live 而是 residue（判据能取假）。
+  assert.deepEqual(readInFlightAttempts(root, 1_600_000, mkProc({}), TEST_WORKER), [], "pid 不存在 ⇒ 不进在飞集");
+});
+
+test("AC4 三态 — live / residue / not-evaluated 互不同形；residue 单列，⛔ 不折成「无在飞」", () => {
+  const root = mkRoot();
+  // 伪造 pid：241 存活且 cmdline 命中；242 存活但 cmdline 指向**别的 task**（pid 复用）；243 不存在。
+  const proc = mkProc({ 241: `node\0${TEST_WORKER}\0Task: T-live\0`, 242: `node\0${TEST_WORKER}\0Task: T-other\0` });
+  fs.writeFileSync(
+    path.join(root, ".quay", "worker-dispatch.json"),
+    JSON.stringify({
+      "T-live": { taskId: "T-live", runId: "r-live", workerPid: 241, startedAtMs: 1_000 },
+      "T-dead": { taskId: "T-dead", runId: "r-dead", workerPid: 243, startedAtMs: 2_000 },
+      "T-mismatch": { taskId: "T-mismatch", runId: "r-mm", workerPid: 242, startedAtMs: 3_000 },
+      "T-broken": { runId: "r-broken" }, // 缺 workerPid ⇒ 结构不可读，无法判定
+    }),
+    "utf8",
+  );
+  const st = readDispatchStoreState(root, 10_000, proc, TEST_WORKER);
+  assert.equal(st.status, "ok");
+  assert.deepEqual(st.live.map((r) => r.task), ["T-live"], "只有 pid 存活 ∧ cmdline 匹配的那条是 live");
+  assert.deepEqual(st.residue.map((r) => r.task).sort(), ["T-dead", "T-mismatch"], "pid 已死 / cmdline 不匹配 ⇒ residue");
+  assert.equal(st.notEvaluatedRecords, 1, "缺 workerPid 的记录 ⇒ 逐条 not-evaluated（⛔ 不冒充 residue）");
+
+  // 文件级 not-evaluated：缺失 vs 解析失败 —— 与「读到了、确无在飞」不同形。
+  const missing = readDispatchStoreState(mkRoot(), 1, proc, TEST_WORKER);
+  assert.equal(missing.status, "not-evaluated");
+  assert.equal(missing.fileState, "missing");
+  assert.deepEqual(missing.live, [], "文件缺失 ⇒ 在飞集为空，但 status=not-evaluated 让读者不能读成「无在飞」");
+  const badRoot = mkRoot();
+  fs.writeFileSync(path.join(badRoot, ".quay", "worker-dispatch.json"), "{ bad", "utf8");
+  const malformed = readDispatchStoreState(badRoot, 1, proc, TEST_WORKER);
+  assert.equal(malformed.status, "not-evaluated");
+  assert.equal(malformed.fileState, "malformed", "解析失败与「缺失」不同形");
+  // 「读到了、确无在飞」= ok + 空 entries（这才是真的 0）。
+  const emptyRoot = mkRoot();
+  fs.writeFileSync(path.join(emptyRoot, ".quay", "worker-dispatch.json"), "{}", "utf8");
+  const empty = readDispatchStoreState(emptyRoot, 1, proc, TEST_WORKER);
+  assert.equal(empty.status, "ok");
+  assert.deepEqual(empty.live, []);
+
+  // 报告层：residue 必须在报告里单列（⛔ 不进右删失集，也⛔ 不被静默丢弃）。
+  const rep = buildDurationReport({ root, sinceMs: 0, untilMs: 10_000, nowMs: 10_000, procDir: proc, workerName: TEST_WORKER });
+  assert.equal(rep.dispatchStore.status, "ok");
+  assert.equal(rep.dispatchStore.live, 1);
+  assert.equal(rep.dispatchStore.residue, 2);
+  assert.equal(rep.dispatchStore.notEvaluatedRecords, 1);
+  assert.equal(rep.inFlightAttempts.count, 1, "右删失集只含 live");
+  const text = renderReport(rep);
+  assert.match(text, /residue=2/, "文本渲染把 residue 条数印出来（与「无在飞」不同形）");
+  assert.match(text, /residue\s+T-dead/, "residue 条目被枚举");
 });
 
 test("buildDurationReport — 分段 + 右删失 + 未评估段并列，且载体缺席以 NOT-EVALUATED 呈现（AC3）", () => {
@@ -138,10 +205,11 @@ test("buildDurationReport — 分段 + 右删失 + 未评估段并列，且载�
     }) + "\n",
     "utf8",
   );
-  // ② 一条**在飞**尝试（只有派发记录）——右删失。
+  // ② 一条**在飞**尝试（只有派发记录）——右删失。伪造 /proc 让 pid 存活且 cmdline 命中本任务。
+  const proc = mkProc({ 900: `node\0${TEST_WORKER}\0Task: T-live\0` });
   fs.writeFileSync(
     path.join(root, ".quay", "worker-dispatch.json"),
-    JSON.stringify({ "T-live": { runId: "wk-prod-anchor", workerPid: 9, startedAtMs: Date.parse("2026-10-14T11:00:00.000Z") } }),
+    JSON.stringify({ "T-live": { runId: "wk-prod-anchor", workerPid: 900, startedAtMs: Date.parse("2026-10-14T11:00:00.000Z") } }),
     "utf8",
   );
   // ③ 任务状态事件 + 任务文件。
@@ -153,7 +221,7 @@ test("buildDurationReport — 分段 + 右删失 + 未评估段并列，且载�
   writeTask(root, "T-live", "ready");
   writeTask(root, "T-done", "done");
 
-  const rep = buildDurationReport({ root, sinceMs: Date.parse("2026-10-14T00:00:00.000Z"), untilMs: nowMs, nowMs });
+  const rep = buildDurationReport({ root, sinceMs: Date.parse("2026-10-14T00:00:00.000Z"), untilMs: nowMs, nowMs, procDir: proc, workerName: TEST_WORKER });
   assert.equal(rep.attempts.finished, 1);
   assert.equal(rep.attempts.implementationMs.n, 1);
   assert.equal(rep.attempts.implementationMs.median, 600_000, "实现段 = worker_exited_at − dispatched_at（⛔ 不是整段 900s）");
