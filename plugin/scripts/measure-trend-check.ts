@@ -46,6 +46,9 @@ import { fileURLToPath } from "node:url";
 // The ONE regex-literal escaper (kernel leaf via the plugin shim) — replaces an inline escape body at
 // the `segment` site (finding `escaperegexp-sweep-missed-two`, routine `semantic-dedup-scan`).
 import { escapeRegExp } from "./regex-escape.ts";
+// The suite-log round slice (line-anchored marker, shared with pre-verified-round-record.ts and the
+// fan-in workflow) — one rule, one home (finding `dup-last-suite-start-offset-divergent-regex`).
+import { lastSuiteStartOffset } from "./source-text-lib.ts";
 import {
   resolveWorktreeNamespace,
   DEFAULT_WORKTREE_NAMESPACE_NAME,
@@ -138,22 +141,6 @@ export function normalizePerFileKey(file: string, worktreeDir?: string | null): 
   const escaped = escapeRegExp(segment);
   const m = file.match(new RegExp(`^.*/${escaped}/[^/]+/(.+)$`));
   return m ? m[1] : file;
-}
-
-/** Byte offset of the LAST `__FANIN_SUITE_START__` LINE (anchored at line start), or -1.
- *  gap-measure-trend-check-slice-line-anchor (hard rule 5b sibling — same shape as
- *  fan-in-execute.js / pre-verified-round-record.ts): a bare
- *  `lastIndexOf("__FANIN_SUITE_START__")` ALSO matches a test-output line that merely MENTIONS the
- *  marker MID-LINE (e.g. the suite's own test description "…slices by the last __FANIN_SUITE_START__
- *  marker…"), slicing from inside the test run and DROPPING the real `__PERFILE__` lines that precede
- *  it (fake checker-misreport). The emitted marker is always at line START
- *  (`__FANIN_SUITE_START__ iso=…`), so anchoring on `^…$` excludes mid-line mentions. */
-function lastSuiteStartOffset(text: string): number {
-  const re = /^__FANIN_SUITE_START__[^\n]*$/gm;
-  let last = -1;
-  let m;
-  while ((m = re.exec(text)) !== null) last = m.index;
-  return last;
 }
 
 /** Parse `__PERFILE__ duration_ms=<dur> <full-path> passed=<bool> [end_ms=<epoch-ms>] [cpu_ms=<ms>]
