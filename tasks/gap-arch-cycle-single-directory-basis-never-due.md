@@ -2,7 +2,7 @@
 id: gap-arch-cycle-single-directory-basis-never-due
 title: arch-cycle-report 的单目录 scope 把 commitsSinceArtifact 硬编码为 0：plugin/scripts
   永不进 due 集，旧产物以 evaluated:true 上报（检测器 stale-evaluated 常亮）
-status: ready
+status: done
 labels:
   - gap
   - defect

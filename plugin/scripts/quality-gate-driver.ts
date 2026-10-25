@@ -2046,9 +2046,18 @@ export interface ArchCycleHistoryRecord {
      *  list because no package-level diagram was ever requested); null ⇒ not evaluated. */
     basis: "module-graph" | "single-directory" | null;
     /** When THIS scope's artifact was produced (arch.json `timestamp`, else the manifest scope's
-     *  `generatedAt`); null ⇒ no artifact was read for this scope. */
+     *  `generatedAt`); null ⇒ no artifact was read for this scope. PROVENANCE ONLY — whether the
+     *  cycles came FROM it is `readingFreshness`. */
     artifactTimestamp: string | null;
-    /** Commits after `artifactTimestamp` touching this scope's source dir; null ⇒ not computable. */
+    /** Which evidence the cycle conclusion rests on: `artifact` (the persisted query artifact),
+     *  `live-file-list` (the tracked file list read at `fileListReadAt`), null ⇒ not evaluated.
+     *  (gap-arch-cycle-single-directory-basis-never-due: without this, a live reading carried a
+     *  constant `commitsSinceArtifact:0` and looked identical to a stale artifact reading.) */
+    readingFreshness: "artifact" | "live-file-list" | null;
+    /** `readingFreshness:"live-file-list"` ⇒ when the file list was read (ISO); null otherwise. */
+    fileListReadAt: string | null;
+    /** Commits after `artifactTimestamp` touching this scope's source dir; null ⇒ not computable
+     *  (including EVERY `live-file-list` reading, which has no artifact to be behind — ⛔ not 0). */
     commitsSinceArtifact: number | null;
     /** `commitsSinceArtifact > 0`; null ⇒ not computable. ⛔ A DIFFERENT question from the record-level
      *  `stale` (artifact age > interval): this one says the artifact no longer covers the sources. */

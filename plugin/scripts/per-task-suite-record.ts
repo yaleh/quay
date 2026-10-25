@@ -74,6 +74,10 @@ import { spawnSync } from "node:child_process";
 // copies of the indexOf+next-arg idiom in plugin/scripts; .quay/routine-findings.jsonl finding
 // `arg-parsing-helper-family`, routine `semantic-dedup-scan`).
 import { isDirectEntry, flagValue } from "./gate-script-base.ts";
+// the CPU user/sys split admission rule is SHARED with the verification-round writer — one
+// implementation in cpu-split-contract.ts (archguard exact-clone e903751a0cc007ae: the rule was a
+// byte-identical block in both round-record writers, so a fail-closed change could land in one copy).
+import { resolveCpuSplit } from "./cpu-split-contract.ts";
 
 export const REQUIRED_FIELDS = [
   "taskId",
@@ -212,44 +216,15 @@ export function buildRecord(o) {
   }
   // gap-verification-round-cpu-split-not-recorded AC1/AC3 (sibling-instance 5b — same gnu-time source
   // the verification-round writer splits): the suite's gnu-time USER/SYSTEM cpu seconds — the "%U"/"%S"
-  // columns of the SAME line whose sum is cpu_time_s. Written ONLY alongside a real cpu_time_s
-  // (cpu_source='gnu-time'); a split without its sum is ambiguous, so a caller that passes a REAL split
-  // value with a null/absent cpu_time_s fails closed (硬规则 3b). Each component is a non-negative number
-  // or explicit null (AC6, never a misleading 0); absent components are omitted (absent-field contract).
-  // NOTE: the entry gate ignores empty/0 split args entirely — a bash caller whose capture has no
-  // gnu-time (e.g. a doc-only skip) passes `--cpu-user-s ""` and must NOT trip the fail-closed.
-  let cpuUserS;
-  let cpuSysS;
-  const splitArgs = [
-    ["cpu-user-s", o.cpuUserS, (v) => { cpuUserS = v; }],
-    ["cpu-sys-s", o.cpuSysS, (v) => { cpuSysS = v; }],
-  ];
-  const hasRealSplit = splitArgs.some(([, raw]) => {
-    if (raw == null) return false;
-    const s = String(raw).trim();
-    if (s === "" || s === "null") return false;
-    const v = Number(s);
-    // A "present" split value = anything the caller passed that is NOT the literal 0 (which normalizes
-    // to omitted, AC6). Negative / non-numeric values are still a REAL attempt at a split → they must
-    // enter validation (and fail closed) below — an invalid split must never be silently swallowed.
-    return !(Number.isFinite(v) && v === 0);
-  });
-  if (hasRealSplit) {
-    if (cpuTimeS == null) {
-      return { error: "--cpu-user-s/--cpu-sys-s require a real --cpu-time-s (the gnu-time sum); a split without its sum is ambiguous" };
-    }
-    for (const [name, raw, setter] of splitArgs) {
-      if (raw == null) continue;
-      const s = String(raw).trim();
-      if (s === "" || s === "null") continue; // considered + unavailable → omitted
-      const v = Number(s);
-      if (!Number.isFinite(v) || v < 0) {
-        return { error: `--${name} must be a non-negative number, 0, or null (got ${JSON.stringify(raw)})` };
-      }
-      if (v === 0) continue; // 0 → omitted (AC6)
-      setter(v);
-    }
-  }
+  // columns of the SAME line whose sum is cpu_time_s. The admission rule is NOT re-stated here: it is
+  // the SHARED implementation in cpu-split-contract.ts (archguard exact-clone e903751a0cc007ae — this
+  // block used to be byte-identical in both round-record writers). Written ONLY alongside a real
+  // cpu_time_s; a split without its sum fails closed (硬规则 3b); each component is a non-negative
+  // number or explicit null (AC6, never a misleading 0); absent components are omitted.
+  const split = resolveCpuSplit({ cpuUserS: o.cpuUserS, cpuSysS: o.cpuSysS, cpuTimeS });
+  if ("error" in split) return { error: split.error };
+  const cpuUserS = split.cpuUserS;
+  const cpuSysS = split.cpuSysS;
   // A SKIPPED full suite has no CPU measurement at all — a non-zero cpu_time_s with fullSuiteRan
   // false is a semantic contradiction (nothing ran), so it is fail-closed (硬规则 3b: 读不懂 ≠ 合格).
   if (fullSuiteRan === false && cpuTimeS != null) {
