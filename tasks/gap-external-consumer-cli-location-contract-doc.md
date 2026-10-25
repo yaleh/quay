@@ -1,7 +1,7 @@
 ---
 id: gap-external-consumer-cli-location-contract-doc
 title: 文档化外部消费者如何定位 quay CLI：插件 scope 记录、版本目录、Bash-tool-only PATH、.orphaned_at 清理
-status: ready
+status: done
 labels:
   - gap
 parent: null
