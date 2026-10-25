@@ -36,14 +36,14 @@ extra:
 
 ## AC
 
-- [ ] AC1（不再创建）：在临时 workspace 上跑一次真实 init（`--plugin-root` 指向一个有效插件根）后，`<ws>/.quay/plugin` **不存在**；贴 `ls -la` 与 init JSON 报告里的 `pluginLink.state`。
-- [ ] AC2（迁移：符号链接被删）：预置一个指向任意目录的 `.quay/plugin` 符号链接，再跑 init/升级 ⇒ 链接被删除，`pluginLink.state === "retired"`；贴前后 `lstat` / `readlink` 读数。
-- [ ] AC3（迁移：非符号链接被拒）：预置一个同名**普通目录**（内含一个文件）与一个同名**普通文件**，分别跑 init ⇒ 二者**原样保留**（内容/字节不变），`pluginLink.state === "refused"` 且原因点名路径；贴前后 `sha256`。⛔ 不得删除、不得覆盖。
-- [ ] AC4（三态可区分）：`absent` / `retired` / `refused` 三者取值互不同形，且 `refused` 不是 `not-evaluated`；贴三条实跑 JSON。
-- [ ] AC5（dry-run 不写）：`--dry-run` 下三种输入都只报告、不落盘（链接/目录/文件均原样），贴实跑输出。
-- [ ] AC6（消费面同步）：`plugin/skills/init/SKILL.md` 的「The project link」段删除或改写为「init 不再创建；外部消费者如何定位 CLI 见新契约文档」；README 里三处 `.quay/plugin` 描述（`:368` / `:395` / `:427`）同步。贴 `grep -rn '\.quay/plugin' README.md plugin/skills/` 的前后计数。
-- [ ] AC7（交付验证脚本同步）：`plugin/scripts/verify-deliver-coldstart.sh` 两处把 `.quay/plugin` 当 binding 的 fallback（`:1379` 与 `:4672` 附近）必须改为新的解析方式或不依赖链接；贴改动前后该脚本在目标 fixture 上的判定。
-- [ ] AC8（发布说明）：release notes / CHANGELOG 写明 breaking change，贴条目文本。
+- [x] AC1（不再创建）：在临时 workspace 上跑一次真实 init（`--plugin-root` 指向一个有效插件根）后，`<ws>/.quay/plugin` **不存在**；贴 `ls -la` 与 init JSON 报告里的 `pluginLink.state`。
+- [x] AC2（迁移：符号链接被删）：预置一个指向任意目录的 `.quay/plugin` 符号链接，再跑 init/升级 ⇒ 链接被删除，`pluginLink.state === "retired"`；贴前后 `lstat` / `readlink` 读数。
+- [x] AC3（迁移：非符号链接被拒）：预置一个同名**普通目录**（内含一个文件）与一个同名**普通文件**，分别跑 init ⇒ 二者**原样保留**（内容/字节不变），`pluginLink.state === "refused"` 且原因点名路径；贴前后 `sha256`。⛔ 不得删除、不得覆盖。
+- [x] AC4（三态可区分）：`absent` / `retired` / `refused` 三者取值互不同形，且 `refused` 不是 `not-evaluated`；贴三条实跑 JSON。
+- [x] AC5（dry-run 不写）：`--dry-run` 下三种输入都只报告、不落盘（链接/目录/文件均原样），贴实跑输出。
+- [x] AC6（消费面同步）：`plugin/skills/init/SKILL.md` 的「The project link」段删除或改写为「init 不再创建；外部消费者如何定位 CLI 见新契约文档」；README 里三处 `.quay/plugin` 描述（`:368` / `:395` / `:427`）同步。贴 `grep -rn '\.quay/plugin' README.md plugin/skills/` 的前后计数。
+- [x] AC7（交付验证脚本同步）：`plugin/scripts/verify-deliver-coldstart.sh` 两处把 `.quay/plugin` 当 binding 的 fallback（`:1379` 与 `:4672` 附近）必须改为新的解析方式或不依赖链接；贴改动前后该脚本在目标 fixture 上的判定。
+- [x] AC8（发布说明）：release notes / CHANGELOG 写明 breaking change，贴条目文本。
 
 ## DoD
 
@@ -51,6 +51,89 @@ extra:
 - 测试：`packages/quay/test/init.test.mjs` 覆盖 AC1–AC5（临时 workspace + 真 `.quay/config.yml`），并新增一条断言 `.quay/plugin` 不被计入闭集；文件头按既有约定。
 - 文档：`plugin/skills/init/SKILL.md` + README 三处 + 新契约文档（Q3 任务）互相引用；⛔ 不在两处写两份不同的解析规则。
 - 发布顺序：合并到 develop 后**不自动发布**；release 必须晚于 CloudCLI 解析器部署，release notes 标明 breaking change。
+
+## Evidence
+
+全部读数取自**任务工作树**的真实 CLI（`node packages/quay/dist/quay.js init …`，`--plugin-root <worktree>/plugin`），不是夹具注入。
+
+**AC1 — 不再创建**（`/var/tmp/ac-retire-evidence/ac1`）
+```
+$ ls -la <ws>/.quay
+-rw-rw-r-- 1 yale yale 12681 … config.yml
+-rw-rw-r-- 1 yale yale  3282 … profiles.yml          ← 没有 plugin 条目
+$ lstat .quay/plugin  ⇒ ENOENT (absent — as required)
+pluginLink = {"state":"absent","path":"…/ac1/.quay/plugin"}
+```
+
+**AC2 — 符号链接被删**
+```
+BEFORE: lstat.isSymbolicLink=true  readlink=/var/tmp/ac-retire-evidence/old-plugin-tree
+AFTER : ENOENT — deleted
+pluginLink = {"state":"retired","path":"…/ac2/.quay/plugin","target":"/var/tmp/ac-retire-evidence/old-plugin-tree"}
+```
+
+**AC3 — 普通目录 / 普通文件被拒且逐字节不变**
+```
+DIR  sha256 before=12f92e884475429ccfb3bccae085e32acfa19b025784a1c116d86b2e19c30a52
+DIR  sha256 after =12f92e884475429ccfb3bccae085e32acfa19b025784a1c116d86b2e19c30a52   still-a-directory=true
+DIR  pluginLink={"state":"refused","path":"…/ac3dir/.quay/plugin","reason":"… exists and is not a symlink (directory)"}
+FILE sha256 before=427d2569af75e2b333963b3b358d2af1bbb5ea2f0c40640138700efb4a497c33
+FILE sha256 after =427d2569af75e2b333963b3b358d2af1bbb5ea2f0c40640138700efb4a497c33   still-a-file=true
+FILE pluginLink={"state":"refused","path":"…/ac3file/.quay/plugin","reason":"… exists and is not a symlink (regular file)"}
+```
+
+**AC4 — 三态互不同形**
+```
+absent : {"state":"absent","path":"…/ac1/.quay/plugin"}
+retired: {"state":"retired","path":"…/ac2/.quay/plugin","target":"…/old-plugin-tree"}
+refused: {"state":"refused","path":"…/ac3dir/.quay/plugin","reason":"… exists and is not a symlink (directory)"}
+distinct values = 3 | refused === not-evaluated ? false
+```
+（另外两个辅助态与三态不同形：`would-retire`（dry-run 见到链接）、`delete-failed` / `unreadable`（失败面）；`not-run` 仍表示「这一步没被走到」。）
+
+**AC5 — `--dry-run` 只报告不落盘**
+```
+dry-run/link : state=would-retire  still-a-symlink=true
+dry-run/dir  : state=refused       content-intact=x
+dry-run/file : state=refused       content-intact=y
+```
+
+**AC6 — 消费面同步**（`grep -rn '\.quay/plugin' README.md plugin/skills/`）
+```
+BEFORE (develop): README.md=3 行 / plugin/skills/init/SKILL.md=4 行  ⇒ 合计 7
+AFTER  (worktree): README.md=3 行 / plugin/skills/init/SKILL.md=4 行  ⇒ 合计 7（内容全部改写为 retire 语义）
+```
+三处 README 描述改为：升级时不创建并删除旧链接（`:368`）、checker 的 pointer 读数改为「缺失 ⇒ NOT-EVALUATED，陈旧 ⇒ FAIL」（`:399`）、`--upgrade-from` 演练断言链接被**删除**（`:430`）。SKILL.md 的「The project link」节改写为「RETIRED（2026-10-25）」+ 四态表，并指向 Q3 契约文档 `docs/references/external-consumer-cli-location.md`（该文档由 `gap-external-consumer-cli-location-contract-doc` 落，尚无正本 ⇒ 本任务只链接，不在此处另写一份解析规则）。
+
+**AC7 — 交付验证脚本的两处 fallback**
+把 `verify-deliver-coldstart.sh` 的两个产品函数**逐字抽出**，在同一 fixture 上跑新旧两版（fixture：新形态 config = native 无 `path`/`mcp_entry`；交付插件根 = `<proot>/vendor/quay-native/dist/quay-native.js` 真实文件）：
+```
+fixture 无链接（retire 之后的常态）
+BEFORE (develop) — binding_state=[no-mcp-entry]        config_native_mcp_entry=[]
+AFTER  (task)    — binding_state=[path-resolved]       config_native_mcp_entry=[<worktree>/plugin/vendor/quay-native/dist/quay-native.js]
+负控制（插件根里没有 vendored bundle）⇒ AFTER 仍为 [no-mcp-entry]（不是「任何路径都算」）
+旧链接被指到诱饵树时：BEFORE 读到 decoy 的 bundle；AFTER 忽略链接、仍读交付插件根。
+```
+即：改前协议升级后的项目读不出自己的 runtime（AC-238 的 `runtime_replaced` 必然 0），改后按**交付插件根**解析；AC238 ③ 仍拿它比对 delivered bundle 的 sha，所以「陈旧/缺失」照样 fail-closed。
+
+**AC8 — CHANGELOG（breaking change 条目）**
+```
+## Unreleased — ⚠️ BREAKING: `quay init` no longer creates `<project>/.quay/plugin`
+**Breaking change.** … An existing **symlink** left by an older version is DELETED by the next init;
+a **regular file or directory** at that name is the user's content — it is refused and left
+byte-identical. External consumers … must resolve it from the **Claude Code plugin scope records** …
+**Release ordering (blocking for the publish, not for the merge).** ⛔ Do not publish this change
+until the CloudCLI-side resolver (claudecodeui task `gap-quay-entrypoint-resolver-via-claude-plugin-scopes`)
+is deployed.
+```
+
+**门/检查读数**
+- `bash scripts/test.sh --for-task gap-quay-init-retire-project-plugin-link --allow-thin` ⇒ **279/279 pass, exit 0**（含 `packages/quay/test/init.test.mjs` 的 AC1–AC5 + 闭集断言、`plugin/test/quay-init-stable-plugin-link.test.mjs` 端到端 5/5、`plugin/test/verify-plugin-channel-assertions.test.mjs` 33/33、`driver-runtime-loaded-version-drift` 的 AC3c 静态扫描）。
+- `anti-drift-touches-check.ts` ⇒ `ANTI-DRIFT OK … 13 actual file(s), all within declared Touches (14 glob(s))`。
+- `npx tsc --noEmit` ⇒ exit 0。
+
+**ADR-007 暗轴**
+- 该轴仍暗,理由:本任务删除的是 Core 从不读取的指引链接（指引删掉、无绑定迁移），不改模块层级与依赖方向，未取 L_D/L_G 读数。
 
 ## Touches
 
