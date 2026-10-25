@@ -1,7 +1,7 @@
 ---
 id: gap-live-read-cost-linear-in-round-carrier
 title: 在飞/lanes 读取成本 ∝ 载体大小：readLive 全量读 90MB worker-round.jsonl，外部消费者每轮 1.1–1.2s
-status: ready
+status: done
 labels:
   - gap
 parent: null
