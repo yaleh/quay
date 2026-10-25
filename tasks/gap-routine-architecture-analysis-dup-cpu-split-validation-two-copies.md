@@ -3,7 +3,7 @@ id: gap-routine-architecture-analysis-dup-cpu-split-validation-two-copies
 title: "architecture-analysis: archguard exact-clone hash e903751a0cc007ae: a
   7-statement / 97-token / 10-line CPU-split admission rule is byte-identical
   (comments included) in two round-r"
-status: todo
+status: ready
 labels:
   - gap
   - routine-filed
