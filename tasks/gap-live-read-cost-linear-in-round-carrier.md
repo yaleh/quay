@@ -39,3 +39,10 @@ extra:
 - 改动落在 `packages/quay/src/observation/records.ts`（尾部反向扫描）与 `packages/quay/src/observation.ts`（`.workflow-events` 读取策略），⛔ 不新增第二份 `/proc` 扫描或事件解析实现。
 - `packages/quay/test/` 内有 `node:test` 覆盖 AC2/AC3（合成载体用临时目录，⛔ 不碰真实 `.quay/`），文件头带 `// @test-group product`。
 - 若改动改变了任何已发布 JSON 字段或退出码，必须在 `packages/quay/src/cli/help.ts` 同步登记；否则不动 help。
+
+## Touches
+
+- `packages/quay/src/observation/records.ts`
+- `packages/quay/src/observation.ts`
+- `packages/quay/test/observation.test.mjs`
+- `tasks/gap-live-read-cost-linear-in-round-carrier.md`
