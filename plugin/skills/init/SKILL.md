@@ -202,6 +202,14 @@ directory. The single canonical contract for that — including what to do when 
 points at a deleted directory — is `docs/references/external-consumer-cli-location.md`. ⛔ Do not write
 a second copy of the resolution rules in this file.
 
+To get a path instead of reading the record yourself, run the reference implementation:
+
+```sh
+node --experimental-strip-types "${CLAUDE_PLUGIN_ROOT}/scripts/resolve-quay-cli.ts" --project "$PWD" --field cli
+```
+
+(exit 0 = resolved · 2 = absent · 3 = record unreadable; ⛔ it never falls back to `quay` on PATH).
+
 ## Arguments
 
 ```
