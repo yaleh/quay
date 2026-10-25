@@ -2,7 +2,7 @@
 id: gap-goal-list-no-thin-projection-no-since
 title: goal list --json 无瘦投影/无增量：397 条 786ms/1.28MB，criterion/expect/origin/body
   是外部消费者用不到的长字段
-status: todo
+status: ready
 labels:
   - gap
 parent: null
