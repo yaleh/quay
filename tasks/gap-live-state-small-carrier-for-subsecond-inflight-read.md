@@ -177,6 +177,18 @@ readLive.inFlight = ["task-agree"]  # 权威读面说它在飞
 - L_D import-graph-check (this worktree, after the change): valueSccs=0 typeSccs=0 reverseEdges=0
   （verdict.ok=true · kernelBlocked=false · gateLayerBlocked=false · retiredShimsChecked=true；本任务新增的边是 observation.ts→driver-vocab.ts、worker-driver.ts→driver-vocab.ts，均为指向零依赖叶的边，无环）
 
+### 第 3 轮复核：suite A/B 的 3 个 added 红 = 并发伪影（非本 delta 的缺陷）
+
+上一轮 fan-in 归因为 `added=packages/quay/test/ac179-criterion-address-derivation.test.mjs, packages/quay/test/task-log.test.mjs, plugin/test/shipped-entry-runnable.test.mjs`。本轮在**同一 worktree 逐个隔离跑**（`node --test <file>`）全部通过：`ac179` 9/9、`task-log` 11/11、`shipped-entry-runnable` 2/2。
+
+三者只在【全量并发 suite】里红，共同根因是**别的测试**在 suite 期间 staging 再 `rm -rf` `packages/quay/plugin/`（pack-time 暂存镜像，`.gitignore` 忽略）：
+
+- `task-log.test.mjs` 的 `(h)` 判定 `walk()` 会走进 `packages/quay/plugin/`，镜像存在期间多出 4 个 `packages/quay/plugin/scripts/*.ts` 调用点（`driver-filters` / `ready-pool-check` / `task-status-events-reconcile` / `worker-fan-in`）⇒ 未声明 writer-class；
+- `shipped-entry-runnable.test.mjs`：`npm pack --dry-run --json` 与该镜像的 staging/删除并发 ⇒ `ENOENT …/packages/quay/plugin/bin`；
+- `ac179-criterion-address-derivation.test.mjs`：fixture serve 的 `--portfile` 非原子写 + 存在性轮询 ⇒ 读到空文件 ⇒ `JSON.parse` 抛 `Unexpected end of JSON input`。
+
+基线 A/B 只在一个**干净的 develop worktree 上单独重跑失败文件**（`runBaselineEquivalence` → `resolveRerunCommand(worktree, baseDir, failed.files)`），因此结构上看不到这类并发伪影 ⇒ 三者会被机械归因为 task-introduced。这三处均在本任务 `## Touches` 之外，本轮未改动它们。
+
 ## Blocker
 
 **2026-10-25T13:26:37.488Z — worker 未落地（exited-not-landed）**

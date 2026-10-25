@@ -79,7 +79,7 @@ import { execFileSync } from "node:child_process";
 // argValue now lives in gate-script-base.ts as `flagValue` (it was one of the byte-identical
 // copies of the indexOf+next-arg idiom in plugin/scripts; .quay/routine-findings.jsonl finding
 // `arg-parsing-helper-family`, routine `semantic-dedup-scan`).
-import { isDirectEntry, flagValue } from "./gate-script-base.ts";
+import { isDirectEntry, flagValue, appendJsonlRecords } from "./gate-script-base.ts";
 
 export interface Landing {
   task: string;
@@ -397,8 +397,9 @@ export function recordNonBlockReport(
     }
   }
   if (fresh.length) {
-    fs.mkdirSync(path.dirname(p), { recursive: true });
-    fs.appendFileSync(p, `${fresh.map((e) => JSON.stringify(e)).join("\n")}\n`);
+    // 批量追加的函数体是共享的（semantic-dedup-scan finding `jsonl-batch-appenders`，硬规则 5b 的
+    // 兄弟实例清扫：本处原文是 `.map(JSON.stringify).join("\n") + "\n"` 的近形，逐字节相同）。
+    appendJsonlRecords(p, fresh);
   }
   return { path: p, recorded: fresh.length };
 }
