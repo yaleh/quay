@@ -29,3 +29,12 @@ v1 状态事件在创建时写 `from:null, kind:"create"`（`packages/quay-nativ
 - 改动落在 `packages/quay-native/src/store.ts` 的 emit 路径与 `packages/quay/src/kernel/task-transition.ts` 的记录类型；`task log --json` 的转出同步。
 - 有 `node:test` 覆盖 AC1/AC2/AC3；⛔ 不新增事件 kind，不改 `from/to` 语义。
 - 一次真实写入产生的 carrier 行（不是 fixture）被贴进任务证据。
+
+## Touches
+
+- `tasks/gap-task-status-event-create-lacks-title-and-goal-ac.md`（自指）
+- `packages/quay-native/src/store.ts`（create 事件字段）
+- `packages/quay/src/kernel/task-transition.ts`（记录类型与转出）
+- `packages/quay/src/cli/task-log.ts`（转出同步）
+- `packages/quay/src/cli/help.ts`（事件契约段）
+- `packages/quay/test/task-log.test.mjs`
