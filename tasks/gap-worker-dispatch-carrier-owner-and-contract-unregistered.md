@@ -2,7 +2,7 @@
 id: gap-worker-dispatch-carrier-owner-and-contract-unregistered
 title: .quay/worker-dispatch.json 在 carrier registry 里 owner=unowned-yet /
   readers=unaudited，外部读者无法判断「在飞」与「崩溃残留」
-status: todo
+status: ready
 labels:
   - gap
 parent: null
