@@ -19,6 +19,7 @@
 //     "transitions": [ { order, schema, seq, eventId, carrierEpoch, taskId, from, to, kind, at,
 //                        recordedAt, actor, evidence, reason?, source, inferred, commit } ],
 //     "nextCursor": { "v": 1, "carrierEpoch": "<epoch>", "seq": <carrier position of the last delivered event> },
+//     "tailCursor": { "v": 1, "carrierEpoch": "<epoch>", "seq": <carrier position of the carrier's LAST event> } | null,
 //     "complete": false,
 //     "coverage": { ... },
 //     "generatedAt": "<ISO>",
@@ -53,6 +54,17 @@
 //    live writer appended; `source: "git"` + `inferred: true` for one the reconcile pass derived from
 //    the status-line diff a commit carries. A commit MESSAGE is a claim, not a positional reading
 //    (硬规则 2), so it is never consulted.
+//
+// 5. A ZERO-EVENT PAGE STILL NAMES THE CARRIER'S TAIL (`tailCursor`, gap-task-log-no-tail-cursor-for-
+//    initial-sync). `nextCursor` is "the last DELIVERED event", so a page with no matching events
+//    (the common first call from an external consumer: `--since <now>`, or any filtered window) has
+//    no `nextCursor` — and a consumer that wants "one full baseline, then consume increments" is
+//    left guessing a time window. `tailCursor` is the OTHER quantity: where the carrier ENDS right
+//    now, computed from EVERY transition, INDEPENDENT of this page's --since/--until/--limit. It is
+//    what makes `nextCursor`'s definition unchanged (AC5) rather than overloading it.
+//    ⛔ It is never fabricated: an ABSENT carrier and a carrier whose every line is corrupt both
+//    yield `null` (their coverage readings tell them apart, and the corrupt count is a named reason),
+//    so "no tail exists" can never masquerade as "the tail is position 0" (硬规则 3/3b).
 
 import {
   PRE_EPOCH,
@@ -122,6 +134,20 @@ export interface TaskLogCoverage {
 export interface TaskLogDocument {
   transitions: TaskStatusTransitionView[];
   nextCursor: TaskLogCursor | null;
+  /** The carrier's TAIL position at read time — the resume token an external consumer starts its
+   *  incremental feed from after one full `task list` baseline. `seq` is the CARRIER POSITION of the
+   *  carrier's LAST event (equal to that transition's `order`), computed from EVERY transition and
+   *  ⛔ INDEPENDENT of this page's `--since` / `--until` / `--limit` — so it is present even when the
+   *  page is empty (which is exactly the case `nextCursor` cannot answer).
+   *  `null` has THREE distinct causes, never conflated (硬规则 3/3b); the sibling coverage readings
+   *  distinguish them and ⛔ a fabricated `seq: 0` is never substituted:
+   *    · the carrier is ABSENT                      → `coverage.carrier.exists === false`;
+   *    · the carrier exists but NO line is readable → `coverage.carrier.exists === true` and
+   *                                                    `coverage.carrier.corrupt > 0` (named in
+   *                                                    `coverage.reasons`).
+   *  A carrier that EXISTS with zero events is NOT null: it yields `seq: 0`, the position the first
+   *  event will occupy (an inclusive resume from 0 delivers that first event and everything after). */
+  tailCursor: TaskLogCursor | null;
   complete: boolean;
   coverage: TaskLogCoverage;
   generatedAt: string;
@@ -258,6 +284,35 @@ export function computeCoverage(input: CoverageInput): TaskLogCoverage {
   };
 }
 
+// ── the TAIL cursor: where the carrier ends, independent of any page filter ───────────────────────
+
+/**
+ * The carrier's TAIL resume token, or null when no tail can be NAMED. Pure over readings the caller
+ * already took (no carrier access of its own), so a test can pin all three null/zero arms directly.
+ *
+ * ⛔ The three states are NEVER collapsed into one value (硬规则 3/3b):
+ *   · absent carrier            ⇒ null  (there is no position to name — ⛔ not `seq: 0`)
+ *   · exists, zero events       ⇒ `{seq: 0}` (the position the first event will occupy)
+ *   · exists, every line corrupt ⇒ null  (unreadable is not "empty"; `corrupt > 0` names it)
+ * An existing carrier can also be all-corrupt only in the sense of "no readable transition": the
+ * last order of a partially-readable carrier IS a position, and the corrupt lines after it are
+ * counted by coverage (⛔ they never become a cursor — same rule as `highestSeq`).
+ */
+export function computeTailCursor(input: {
+  exists: boolean;
+  transitions: TaskStatusTransitionView[];
+  corrupt: number;
+  epoch: string;
+}): TaskLogCursor | null {
+  if (!input.exists) return null;
+  if (input.transitions.length > 0) {
+    const last = input.transitions[input.transitions.length - 1];
+    return { v: 1, carrierEpoch: input.epoch, seq: last.order };
+  }
+  if (input.corrupt > 0) return null;
+  return { v: 1, carrierEpoch: input.epoch, seq: 0 };
+}
+
 // ── the `--since` argument: an ISO instant OR a cursor ───────────────────────────────────────────
 
 export type SinceArg =
@@ -388,6 +443,9 @@ export function readTaskLog(root: string, opts: TaskLogOptions = {}): TaskLogRea
   const page = selected.slice(0, limit);
   const last = page.length > 0 ? page[page.length - 1] : null;
   const nextCursor: TaskLogCursor | null = last === null ? null : { v: 1, carrierEpoch: epoch, seq: last.order };
+  // ⛔ Computed from ALL transitions, NOT from `page`/`selected`: the tail answers "where does the
+  // carrier end", which a filtered page (or an empty one) must not be able to shorten.
+  const tailCursor = computeTailCursor({ exists: carrier.exists, transitions, corrupt, epoch });
 
   const reasons = [...coverage.reasons];
   if (!reachedEnd) {
@@ -404,6 +462,7 @@ export function readTaskLog(root: string, opts: TaskLogOptions = {}): TaskLogRea
     document: {
       transitions: page,
       nextCursor,
+      tailCursor,
       complete,
       coverage: { ...coverage, reasons },
       generatedAt: new Date(nowMs).toISOString(),
@@ -473,7 +532,13 @@ function renderLogTable(doc: TaskLogDocument): string {
   );
   const head = `transitions=${doc.transitions.length} complete=${doc.complete} rebase=${doc.rebase} epoch=${doc.coverage.carrier.epoch}`;
   const tail = doc.complete ? "" : `\nincomplete: ${doc.coverage.reasons.join(" | ")}`;
-  return [`${head}`, ...lines, `nextCursor: ${doc.nextCursor === null ? "null" : JSON.stringify(doc.nextCursor)}${tail}`].join("\n");
+  const fmt = (c: TaskLogCursor | null) => (c === null ? "null" : JSON.stringify(c));
+  return [
+    `${head}`,
+    ...lines,
+    `nextCursor: ${fmt(doc.nextCursor)}`,
+    `tailCursor: ${fmt(doc.tailCursor)}${tail}`,
+  ].join("\n");
 }
 
 export async function handleTaskLog(ctx: CliCtx): Promise<void> {

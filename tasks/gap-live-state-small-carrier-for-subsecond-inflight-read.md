@@ -176,3 +176,11 @@ readLive.inFlight = ["task-agree"]  # 权威读面说它在飞
 
 - L_D import-graph-check (this worktree, after the change): valueSccs=0 typeSccs=0 reverseEdges=0
   （verdict.ok=true · kernelBlocked=false · gateLayerBlocked=false · retiredShimsChecked=true；本任务新增的边是 observation.ts→driver-vocab.ts、worker-driver.ts→driver-vocab.ts，均为指向零依赖叶的边，无环）
+
+## Blocker
+
+**2026-10-25T13:26:37.488Z — worker 未落地（exited-not-landed）**
+
+- 未落地原因：step=suite: AssertionError [ERR_ASSERTION]: at least one bin is under-sampled (otherwise the rule is vacuous) [baseline A/B: HARD RED (task-introduced-red) — the task's red set is NOT a subset of the develop baseline red set: added=packages/quay/test/ac179-criterion-address-derivation.test.mjs,packages/quay/test/task-log.test.mjs,plugin/test/shipped-entry-runnable.test.mjs changed=-]
+- run_id：wk-prod-anchor
+- session_id：3c97f22e-68b6-4b75-b085-7b1ff764000a

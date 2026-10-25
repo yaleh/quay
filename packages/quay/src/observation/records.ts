@@ -413,45 +413,134 @@ interface RoundInFlightTask {
  * mechanical fan-in window — the worker process has exited (no /proc), no outcome record yet (written
  * at `finish()`, AFTER `runMechanicalFanIn`), and the driver never writes workflow-events task-start.
  * gap-live-mechanical-fan-in-inflight-invisible. Absent/unreadable round file, or a round record
- * predating the field, ⇒ [] (degrade, never throw — a real "none", not a fabricated empty). Iterates
- * every line and keeps the LAST `in_flight_tasks` array (append-order ⇒ newest wins, so a stale earlier
- * snapshot is superseded). A missing/ill-formed start for a task ⇒ startedAtMs null (honest unknown,
- * not a fabricated value).
+ * predating the field, ⇒ [] (degrade, never throw — a real "none", not a fabricated empty). Keeps the
+ * LAST `in_flight_tasks` array (append-order ⇒ newest wins, so a stale earlier snapshot is superseded).
+ * A missing/ill-formed start for a task ⇒ startedAtMs null (honest unknown, not a fabricated value).
+ *
+ * gap-live-read-cost-linear-in-round-carrier: "the LAST key-bearing line" is a TAIL property, so this
+ * now scans the carrier BACKWARDS from EOF in growing windows instead of reading + JSON-parsing every
+ * line (the live carrier is 94 MB / 61k lines: ~700 ms of a ~1.4 s `quay lanes` call, and the cost
+ * grew with the carrier, not with the in-flight count). Enumerated outcomes, never a boolean:
+ *   - a key-bearing line found in the tail window  ⇒ that record's tasks (identical to the old
+ *     "iterate all, keep the last" result — reverse order makes the first hit the last line);
+ *   - window grew to cover the whole file, no key  ⇒ [] (a real "none": every line was still
+ *     considered, so this is NOT "we did not look");
+ *   - absent/unreadable carrier                     ⇒ [] (unchanged degrade).
+ * `preReadRoundText` (a caller that already holds the text) keeps working, and is itself scanned in
+ * reverse — no production caller passes it any more (readLive no longer reads the file whole).
  */
 export function readWorkerRoundInFlightTasks(root: string, preReadRoundText?: string | null): RoundInFlightTask[] {
   try {
-    // gap-ac179-criterion-cold-miss-30s-ttl-always-expired: the round carrier is 11.7 MB on the live
-    // store; readLive already holds its text (it passes the same value to workerDriverOnlineMs), so it
-    // hands it in rather than making this read it a second time. Omitted ⇒ read from disk, unchanged.
-    const roundText = preReadRoundText !== undefined ? preReadRoundText : fs.readFileSync(path.join(root, WORKER_ROUND_REL), "utf8");
-    if (roundText == null) return [];
-    let tasks: RoundInFlightTask[] = [];
-    for (const line of String(roundText).split("\n")) {
-      const s = line.trim();
-      if (!s) continue;
-      let j: Record<string, unknown>;
-      try { j = JSON.parse(s) as Record<string, unknown>; } catch { continue; }
-      const arr = j.in_flight_tasks;
-      if (!Array.isArray(arr)) continue;
-      const starts = j.in_flight_task_starts;
-      tasks = arr
-        .filter((v): v is string => typeof v === "string" && v.length > 0)
-        .map((taskId) => {
-          let startedAtMs: number | null = null;
-          if (starts != null && typeof starts === "object" && !Array.isArray(starts)) {
-            const raw = (starts as Record<string, unknown>)[taskId];
-            if (typeof raw === "number" && Number.isFinite(raw)) {
-              startedAtMs = raw;
-            } else if (typeof raw === "string") {
-              const parsed = Date.parse(raw);
-              if (Number.isFinite(parsed)) startedAtMs = parsed;
-            }
-          }
-          return { taskId, startedAtMs };
-        });
-    }
-    return tasks;
+    if (preReadRoundText !== undefined) return lastRoundInFlightTasks(preReadRoundText) ?? [];
+    return lastRoundInFlightTasksInFile(path.join(root, WORKER_ROUND_REL)) ?? [];
   } catch {
     return [];
+  }
+}
+
+/** The last record's `in_flight_tasks` in a text blob, or null when NO line carries an array (null is
+ *  "not found", [] is "the last record names zero in-flight tasks" — those are different states). */
+function lastRoundInFlightTasks(text: string | null): RoundInFlightTask[] | null {
+  if (text == null) return null;
+  const lines = String(text).split("\n");
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const s = lines[i].trim();
+    if (!s) continue;
+    let j: Record<string, unknown>;
+    try { j = JSON.parse(s) as Record<string, unknown>; } catch { continue; }
+    const arr = j.in_flight_tasks;
+    if (!Array.isArray(arr)) continue;
+    const starts = j.in_flight_task_starts;
+    return arr
+      .filter((v): v is string => typeof v === "string" && v.length > 0)
+      .map((taskId) => {
+        let startedAtMs: number | null = null;
+        if (starts != null && typeof starts === "object" && !Array.isArray(starts)) {
+          const raw = (starts as Record<string, unknown>)[taskId];
+          if (typeof raw === "number" && Number.isFinite(raw)) {
+            startedAtMs = raw;
+          } else if (typeof raw === "string") {
+            const parsed = Date.parse(raw);
+            if (Number.isFinite(parsed)) startedAtMs = parsed;
+          }
+        }
+        return { taskId, startedAtMs };
+      });
+  }
+  return null;
+}
+
+/** First tail window. Large enough for hundreds of heartbeat lines (live lines are ~1 KB), so the
+ *  normal case is ONE pread of the last 256 KiB; `> 1` round is only paid when the tail genuinely
+ *  carries no key-bearing record. */
+const ROUND_TAIL_WINDOW_BYTES = 256 * 1024;
+
+/** Reverse-scan a round carrier file for its last key-bearing record without reading the whole file.
+ *  Returns null when even the full file carries no `in_flight_tasks` array. */
+function lastRoundInFlightTasksInFile(filePath: string): RoundInFlightTask[] | null {
+  let fd: number;
+  try {
+    fd = fs.openSync(filePath, "r");
+  } catch {
+    return null; // absent/unreadable ⇒ the caller's [] degrade
+  }
+  try {
+    const size = fs.fstatSync(fd).size;
+    let window = Math.min(size, ROUND_TAIL_WINDOW_BYTES);
+    for (;;) {
+      const start = Math.max(0, size - window);
+      const text = readRangeText(fd, start, size - start);
+      // `start > 0` ⇒ the window's FIRST line is a suffix of a line that begins before it: drop it
+      // rather than JSON.parse a truncated record (a no-newline window is entirely such a suffix).
+      const nl = text.indexOf("\n");
+      const usable = start > 0 ? (nl === -1 ? "" : text.slice(nl + 1)) : text;
+      const found = lastRoundInFlightTasks(usable);
+      if (found != null) return found;
+      if (start === 0) return null; // whole file considered, no key-bearing record
+      window = Math.min(size, window * 4);
+    }
+  } finally {
+    try { fs.closeSync(fd); } catch { /* close is best-effort; the read already succeeded or threw */ }
+  }
+}
+
+/** Read `len` bytes at `start` (positional pread; never advances the fd's shared offset). */
+function readRangeText(fd: number, start: number, len: number): string {
+  if (len <= 0) return "";
+  const buf = Buffer.allocUnsafe(len);
+  let off = 0;
+  while (off < len) {
+    const n = fs.readSync(fd, buf, off, len - off, start + off);
+    if (n <= 0) break; // EOF/truncated — parse what we got
+    off += n;
+  }
+  return buf.subarray(0, off).toString("utf8");
+}
+
+/** The default HEAD window: enough round-heartbeat lines to find the carrier's first `ts` with room
+ *  to spare, while staying independent of the carrier's total size. */
+const CARRIER_HEAD_BYTES = 64 * 1024;
+
+/**
+ * Read at most `maxBytes` from the HEAD of a carrier, without reading the rest of it (gap-live-read-
+ * cost-linear-in-round-carrier: `workerDriverOnlineMs` needs the driver's ONLINE instant — the
+ * carrier's earliest `ts`, which append-order puts in the first record — but used to be handed the
+ * whole 94 MB text and JSON-parse every line for it).
+ *
+ * A head slice may end mid-line (and mid-UTF-8-code-point); the last line is therefore possibly a
+ * truncated fragment. That is safe for the ONE consumer, `workerDriverOnlineMs`, which skips lines
+ * that do not parse as JSON — never here (this function returns text, it does not interpret it).
+ * Absent/unreadable ⇒ null (the same lossy degrade as `readCarrierText(root, rel).text`).
+ */
+export function readCarrierHeadText(root: string, rel: string, maxBytes = CARRIER_HEAD_BYTES): string | null {
+  let fd: number | null = null;
+  try {
+    fd = fs.openSync(path.join(root, rel), "r");
+    const size = fs.fstatSync(fd).size;
+    return readRangeText(fd, 0, Math.min(size, Math.max(0, maxBytes)));
+  } catch {
+    return null;
+  } finally {
+    if (fd != null) { try { fs.closeSync(fd); } catch { /* best-effort */ } }
   }
 }

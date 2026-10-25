@@ -109,6 +109,7 @@ import {
 import { computeInFlightBlocking } from "./observation/blocking.ts";
 import {
   parseWorkerOutcomeRecords,
+  readCarrierHeadText,
   readCarrierText,
   readWorkerOutcomeRecords,
   readWorkerRoundInFlightTasks,
@@ -804,9 +805,18 @@ export function readLive(
   // They used to re-read + re-parse the SAME 2.4 MB outcome carrier and 11.7 MB round carrier, which
   // measured ~250 ms of this function's event-loop block — and this function's block is exactly what
   // a concurrent `/health` waits for while the dashboard snapshot rebuilds (AC4).
+  // gap-live-read-cost-linear-in-round-carrier: the round carrier no longer has a "the whole text"
+  // consumer to share. Its two readers want opposite ENDS of an append-only file —
+  // readWorkerRoundInFlightTasks wants the LAST key-bearing record (it tail-scans the file itself and
+  // needs no text), workerDriverOnlineMs wants the FIRST `ts` — so this reads only the HEAD here
+  // instead of all 94 MB / 61k lines (~163 ms read + ~255 ms + ~283 ms of full-line JSON parses, i.e.
+  // ~700 ms of a ~1.4 s `quay lanes`, growing with the carrier rather than with the in-flight count).
   const outcomeText = readCarrierText(root, WORKER_OUTCOME_REL).text; // never throws (absent/unreadable → null)
-  let roundText: string | null = null;
-  try { roundText = fs.readFileSync(path.join(root, WORKER_ROUND_REL), "utf8"); } catch { roundText = null; }
+  // The head slice is the "same input" workerDriverOnlineMs used to get from the full text for the
+  // ONLY fact it derives from it: the earliest `ts`. The carrier is append-ordered (verified on the
+  // live 94 MB / 61,190-record carrier: record 0's ts IS the minimum), so the earliest instant is in
+  // the head; a truncated final line simply fails JSON.parse and is skipped, as before.
+  const roundHeadText = readCarrierHeadText(root, WORKER_ROUND_REL);
 
   let workerInFlight: InFlightTask[] = [];
   try {
@@ -825,7 +835,7 @@ export function readLive(
   // gap-live-fan-in-window-elapsed-zero: read the TRUE dispatch start (`in_flight_task_starts`) first;
   // only when the round carries no start for the task do we fall back to nowMs ("just now", never a
   // fabricated long elapsed — honest ③b).
-  for (const { taskId, startedAtMs } of readWorkerRoundInFlightTasks(root, roundText)) {
+  for (const { taskId, startedAtMs } of readWorkerRoundInFlightTasks(root)) {
     const started = startedAtMs ?? nowMs;
     workerInFlight.push({
       taskId,
@@ -892,7 +902,7 @@ export function readLive(
   // AC2: a workflow-events start-without-end run whose start is BEFORE the driver came online is a
   // stale inner-era ghost — its worktree may still exist (now managed by the driver), so the
   // worktree-released filter above does not remove it. Drop it here by the direct量 (start < online).
-  const workerOnlineMs = workerDriverOnlineMs(root, { outcomeText, roundText });
+  const workerOnlineMs = workerDriverOnlineMs(root, { outcomeText, roundText: roundHeadText });
   if (workerOnlineMs != null) {
     inFlight = inFlight.filter((t) => t.startedAtMs >= workerOnlineMs);
   }

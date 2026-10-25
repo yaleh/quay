@@ -133,6 +133,7 @@ import {
   resumeExitedOrphanFanIn,
   computeResumedAfterExitOutcome,
   WORKER_DISPATCH_REL,
+  WORKER_DISPATCH_RECORD_SCHEMA,
   scopedGateCommandFor,
   resolveScopedGateCommand,
   resolveDocCheckCommand,
@@ -2890,9 +2891,12 @@ test("AC1 (能取假) — dispatch 持久记录：spawn 后即写、worker 正�
   await waitFor(() => readDispatchStore(dispatchStoreFile(root))[taskId] != null, 15000);
   const rec = readDispatchStore(dispatchStoreFile(root))[taskId];
   assert.ok(rec, "spawn 后持久化文件里存在该 task 的记录（⛔ 缺失 ⇒ 假）");
-  for (const k of ["runId", "workerPid", "selectorReason", "startedAtMs", "timeoutDeadlineMs"]) {
+  for (const k of ["schema", "runId", "workerPid", "selectorReason", "startedAtMs", "timeoutDeadlineMs"]) {
     assert.ok(k in rec, `record field ${k} present`);
   }
+  // AC2 (gap-worker-dispatch-carrier-owner-and-contract-unregistered): 版本标记由 write 侧统一盖章，
+  // ⛔ 不依赖字段形状判别版本。
+  assert.equal(rec.schema, WORKER_DISPATCH_RECORD_SCHEMA, "每条新写记录带稳定的 schema 标记");
   assert.equal(rec.taskId, taskId);
   assert.equal(rec.runId, "fm-ac1");
   assert.equal(rec.selectorReason, "ac1 selector reason");

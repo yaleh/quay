@@ -76,7 +76,8 @@ Usage:
   quay adr new <id> --title <title> [--status <status>] [--body <text>|--body-file <path>] [--json] [--root <path>]
   quay adr accept|deprecate|reject <id> [--json] [--root <path>]
   quay adr supersede <id> --by <newId> [--json] [--root <path>]
-  quay goal list [--status <status>] [--kind <kind>] [--goal <goal-id>] [--no-evidence] [--json] [--root <path>]
+  quay goal list [--status <status>] [--kind <kind>] [--goal <goal-id>] [--no-evidence] [--no-body [--with-status-log]] [--since <ISO8601|epoch-ms>] [--json] [--root <path>]
+  quay goal log [--since <ISO8601|epoch-ms>] [--json] [--root <path>]
   quay goal show <id> [--json] [--root <path>]
   quay goal write <id> --origin <text> [--title <title>] [--status <status>] [--goal <goal-id>] [--criterion <cmd>] [--json] [--root <path>]
   quay goal gate <id> [--dry-run] [--json] [--root <path>]
@@ -193,7 +194,7 @@ task log / task trace — the READ surface over the task-status transition carri
                     transitions".
 
 The published CONTRACT (task log --json; task trace --json is the same document minus
-transitions/nextCursor/complete/rebase, plus its own taskId/status):
+transitions/nextCursor/tailCursor/complete/rebase, plus its own taskId/status):
   {
     "transitions": [ { "order": 0, "schema": "v1", "seq": 0, "eventId": "<sha256[0:32]>",
                        "carrierEpoch": "<epoch>", "taskId": "<id>", "from": "todo", "to": "ready",
@@ -204,6 +205,7 @@ transitions/nextCursor/complete/rebase, plus its own taskId/status):
                        "reason": "…",
                        "source": "task-status-events|git", "inferred": false, "commit": "<sha|null>" } ],
     "nextCursor": { "v": 1, "carrierEpoch": "<epoch>", "seq": 3 },
+    "tailCursor": { "v": 1, "carrierEpoch": "<epoch>", "seq": <last carrier position> },
     "complete": false,
     "coverage": { "carrier": { "path": "…", "exists": true, "epoch": "…", "lines": 0, "v0": 0, "v1": 0, "corrupt": 0 },
                   "writerClasses": [ { "id": "<class>", "wired": true, "inScope": true, "callSites": ["…"], "reason": "…" } ],
@@ -226,6 +228,22 @@ transitions/nextCursor/complete/rebase, plus its own taskId/status):
               of it, so a consumer that crashes between "read a page" and "process it" re-receives
               that one boundary event instead of losing it. DEDUPE BY \`eventId\` — that is the
               documented, and only, dedup key.
+  tailCursor  Available since quay 0.23.0 (ADDITIVE — no existing key changed; nextCursor keeps its
+              definition and its value). The CARRIER'S TAIL: {v, carrierEpoch, seq}, where seq is the
+              CARRIER POSITION of the carrier's LAST event (equal to that transition's \`order\`),
+              computed from EVERY transition and ⛔ INDEPENDENT of \`--since\` / \`--until\` / \`--limit\`
+              — so it is present even when the page is EMPTY, which is exactly the reading nextCursor
+              cannot give. This is the token an external consumer takes after ONE full
+              \`task list --json --no-body\` baseline and then passes back verbatim as --since for every
+              increment: "what changed since my baseline" never depends on guessing a time window, and
+              nextCursor is never overloaded to mean a position at which nothing was delivered.
+              THREE STATES, never conflated: (i) the carrier is ABSENT ⇒ null, with
+              coverage.carrier.exists false; (ii) the carrier EXISTS with zero events ⇒ {seq: 0} — the
+              position the first event will occupy (⛔ never null); (iii) the carrier EXISTS but no line
+              is readable ⇒ null, with coverage.carrier.corrupt > 0 named in coverage.reasons. ⛔ A
+              fabricated seq:0 for (i) or (iii) is the defect this field exists to prevent.
+              The resume is INCLUSIVE, so the FIRST increment read re-delivers the boundary event
+              (order === seq) — dedupe by \`eventId\`, exactly as with nextCursor.
   rebase      true iff the supplied cursor's carrierEpoch does not match the carrier's current epoch
               (a rotation, or the first v1 append onto a legacy v0-only carrier, whose epoch literal is
               "pre-epoch"). The read then REPLAYS FROM THE BEGINNING of the current epoch and says so
@@ -518,7 +536,8 @@ Environment contract — when the default 'acceptance' gate spawns a command:
     process.stdout.write(`quay goal — goal + AC records (GOAL-NNN / AC-NNN)
 
 Usage:
-  quay goal list [--status <status>] [--kind <kind>] [--goal <goal-id>] [--no-evidence] [--json] [--root <path>]
+  quay goal list [--status <status>] [--kind <kind>] [--goal <goal-id>] [--no-evidence] [--no-body [--with-status-log]] [--since <ISO8601|epoch-ms>] [--json] [--root <path>]
+  quay goal log [--since <ISO8601|epoch-ms>] [--json] [--root <path>]
   quay goal show <id> [--json] [--root <path>]
   quay goal write <id> --origin <text> [--title <title>] [--status <status>] [--goal <goal-id>] [--criterion <cmd>] [--branch true|false] [--json] [--root <path>]
   quay goal gate <id> [--timeout <ms>] [--dry-run] [--json] [--root <path>]
@@ -533,11 +552,36 @@ Usage:
                         .quay/gate-events.jsonl, whose cost is ∝ ledger size and independent of the
                         goal count. The full record set is still returned — a summariser that only
                         needs frontmatter (id/status/kind/title) should pass this.
+                        list --no-body  THIN PROJECTION: each row keeps ONLY id / title / status /
+                        kind / goal / updatedAt — ⛔ no body / criterion / expect / origin /
+                        statusLog. This is the surface for an external read-only panel: the full
+                        record set costs 1.28MB/786ms for 397 rows, almost all of it long
+                        fields the panel never renders. History is not lost — read it through
+                        'goal log' below, or add --with-status-log to the list call.
+                        --with-status-log  Opt the record's own statusLog back into the thin
+                        projection (the ONE long field a history-aware list consumer needs).
+                        No effect without --no-body (the full record already carries it).
+                        --since <ISO8601|epoch-ms>  INCREMENTAL READ: keep only records whose
+                        carrier mtime (updatedAt) is at/after the instant. updatedAt is a file
+                        mtime, so a git checkout/merge only makes it NEWER — the filter can
+                        OVER-report but never miss a change. A record whose mtime could not be
+                        read has no place in time and is INCLUDED (same direction), ⛔ never
+                        dropped as if unchanged.
+                        ⛔ Three-state: if the goal carrier directory is missing or unreadable,
+                        --no-body / --since / 'goal log' answer {evaluated:false, reason} and exit
+                        3 (= NOT-EVALUATED, the same code 'goal check --stale-pass' uses). An
+                        empty array therefore always means "read the carrier, nothing there".
                         write --branch true|false  Opt a GOAL into its own isolation branch
                         (SPEC-goal-branch §4.1). The branch NAME is DERIVED — 'goal/<GOAL-NNN>' —
                         ⛔ never a flag. It is created lazily from the develop tip when the goal
                         becomes active, and discarded (tip SHA recorded in statusLog) when the goal
                         is retired/superseded. The field is LOCKED once the branch exists.
+  log                   The CROSS-RECORD status-transition read: merges every record's own
+                        append-only 'statusLog' into ONE stream, ascending by 'at', each row
+                        {id, goal, kind, at, from, to, actor, reason}. 'goal' is the owning GOAL on
+                        an AC row and null on a GOAL row. ⛔ No second carrier and no second parser:
+                        the per-record statusLog stays the single source of truth. Exits 3 with
+                        {evaluated:false} when the carrier cannot be read (see 'list' above).
   gate <id>             Run the record's 'criterion' via the acceptance runner and append ONE
                         GateEvent to <root>/.quay/gate-events.jsonl. Exit 0 = pass, 1 = fail,
                         2 = usage (no such record / bad args). An EMPTY criterion fails closed.
