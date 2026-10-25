@@ -16,7 +16,7 @@
 // 里那份同名内联文本），修前它只列 2 个 kind 而真源有 6 个 ⇒ outer/quality/meta/goal 四个已实现的
 // kind 在产品表层等于不存在。
 
-import { ALL_SERVICE_NAMES, KINDS, VERBS } from "../driver-vocab.ts";
+import { ALL_SERVICE_NAMES, KINDS, LIVE_STATE_PHASES, LIVE_STATE_STALE_MS, VERBS } from "../driver-vocab.ts";
 // The task-status-event actor-kind vocabulary the `task log` contract below prints. DERIVED, not
 // re-typed — same rule as VERBS/KINDS above (⛔ this file must never become a second definition point
 // for a vocabulary). The kernel module is a LEAF (node builtins only), so importing it costs the
@@ -111,6 +111,7 @@ Usage:
   quay manager arm [--dry-run] [--json] [--verify]
   quay driver <${VERBS.join("|")}> --kind <${KINDS.join("|")}> [--root <path>]
   quay lanes [--json] [--window-hours <n>] [--root <path>]
+  quay live-state [--json] [--stale-ms <n>] [--root <path>]   (first shipped in 0.23.0)
 
 Options for task list:
   --status <status>   Filter by status (todo, ready, done, needs-human, superseded)
@@ -786,6 +787,46 @@ Usage:
   or the live telemetry carrier could not be read. ⛔ "could not read" and "no records in the window"
   are different states and never share an output (硬规则 3b) — a failed read exits non-zero and
   prints NO document, rather than 5 empty lanes that would read as "the loop is idle".
+`);
+  } else if (sub === "live-state") {
+    process.stdout.write(`quay live-state — READ-ONLY: the in-flight/phase snapshot as ONE small file read
+（first shipped in 0.23.0 · task gap-live-state-small-carrier-for-subsecond-inflight-read）
+
+Usage:
+  quay live-state [--json] [--stale-ms <n>] [--root <path>]
+
+  Reads \`.quay/live-state.json\` — the worker driver's event-driven, atomically rewritten snapshot
+  of the current in-flight tasks and their driver-known phase. No process spawn, no /proc scan, no
+  task-store walk: an external read-only consumer can obtain it by reading one small file.
+
+  ⛔ THE SNAPSHOT IS A PROJECTION, NOT THE TRUTH SOURCE. The authoritative in-flight set is still
+  the worker driver's own state; this file is a snapshot of it. \`writtenAt\` decides whether the
+  snapshot may be trusted.
+
+  \`status\` is one of FOUR distinct values (⛔ none of the first two is "zero in flight"):
+    ok           the file is readable and its writtenAt is within the staleness threshold;
+                 \`inFlight\` holds the entries (an EMPTY array here is a real "nobody in flight").
+    stale        the file is readable but writtenAt is older than the threshold — the driver has
+                 stopped rewriting it; \`inFlight\` is returned but ⛔ MUST NOT be treated as current.
+    missing      no such file — this workspace's worker driver never wrote a snapshot
+                 (⛔ different from "zero in flight"; \`inFlight\` is null = not evaluated).
+    unreadable   the file exists but cannot be read or does not validate against
+                 quay-live-state/v1 (\`inFlight\` is null; exit code 1).
+
+  Each entry: {taskId, runId, phase, startedAtMs, workerPid, lastHeartbeatMs}. \`phase\` is one of
+  ${LIVE_STATE_PHASES.join(" | ")} — the instants the driver actually knows (spawn success /
+  worker exit / outcome computed). ⛔ The driver does not know worker-internal sub-phases and this
+  carrier must not invent them.
+
+  --json             Accepted and is a no-op: the output is always JSON (like \`quay driver live\`).
+  --stale-ms <n>     Override the staleness threshold (default ${LIVE_STATE_STALE_MS} ms — derived
+                     from the driver's reconcile floor + one interval). ⛔ Changing it changes how
+                     long a snapshot stays "ok"; it never makes a missing file look like an empty one.
+  --root <path>      Workspace root (default: discovered via .quay/config.yml from cwd).
+
+  Exit codes: 0 = an evaluated reading (ok / stale / missing all exit 0 — they are real readings);
+  1 = no workspace found, or the carrier exists but is unreadable/invalid. ⛔ "could not read" and
+  "nobody in flight" never share an output (硬规则 3b).
 `);
   } else {
     // QX-007: stub for subcommands not yet documented in detail (serve, action, mcp, …).
