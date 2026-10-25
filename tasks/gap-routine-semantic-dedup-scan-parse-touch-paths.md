@@ -3,7 +3,7 @@ id: gap-routine-semantic-dedup-scan-parse-touch-paths
 title: "semantic-dedup-scan: The 8-step bullet→path pipeline is copied verbatim
   and only the annotation half is single-sourced; parseTouchPaths has one caller
   and is not covered by touches"
-status: ready
+status: done
 labels:
   - gap
   - routine-filed
