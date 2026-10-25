@@ -32,6 +32,11 @@
 //   (g) NEGATIVE CONTROL — the epoch check made a NO-OP in a scratch COPY of the CLI module graph
 //       makes (b) red. ⛔ The mutation never touches the checked-in file: this file runs concurrently
 //       with others that import it.
+//   (i-l) TAIL CURSOR (gap-task-log-no-tail-cursor-for-initial-sync) — `tailCursor` names where the
+//       carrier ENDS even when the page is empty, independently of --since/--until/--limit; resuming
+//       it is inclusive (boundary event by `eventId`, then the new ones); a replaced epoch rebases it
+//       and re-mints the tail under the new epoch; and the three no-tail states (absent /
+//       exists-but-empty / all-corrupt) are DISTINCT values, never a fabricated seq 0.
 //
 // ⛔ NO in-tree writes: every fixture lives under the shared writable-tmp helper, so this file cannot
 // enroll itself in checked-in-write-check.
@@ -245,6 +250,115 @@ test("(c) complete:false when reconcile LAGS, complete:true when every in-scope 
   assert.deepEqual(ok.coverage.reasons, [], "a complete reading has no unmet conditions");
 });
 
+// ── (i) tailCursor: the carrier's tail, present even when the PAGE is empty ──────────────────────
+// (gap-task-log-no-tail-cursor-for-initial-sync) nextCursor is "the last DELIVERED event", so a
+// consumer's first incremental call (a --since after everything on the carrier) gets an EMPTY page
+// and `nextCursor: null` — no starting position, only a guessed time window. tailCursor is the other
+// quantity. These arms are deliberately driven through the page filters and page size: an
+// implementation that derived the tail from the PAGE would pass a small un-filtered fixture and fail
+// here, which is the only thing that makes these assertions a measurement rather than an echo.
+
+test("(i) tailCursor names the carrier's LAST position even when the page is EMPTY, independent of --since/--until/--limit", () => {
+  const root = makeCarrierRoot("i");
+  const written = [];
+  for (let i = 0; i < 5; i++) written.push(writeV1(root, { taskId: `I-${i}`, at: `2026-10-01T00:00:0${i}.000Z` }));
+  const epoch = readCarrierEpoch(root);
+
+  // The consumer's first incremental call: a --since after everything the carrier holds. It matches
+  // NOTHING — nextCursor is null (its definition is unchanged), and tailCursor must still name the tail.
+  const empty = readOk(root, { since: "2026-10-05T00:00:00.000Z" });
+  assert.equal(empty.transitions.length, 0, "fixture: the page must actually be empty for this arm to mean anything");
+  assert.equal(empty.nextCursor, null, "nextCursor keeps its definition — the LAST DELIVERED event, and none was");
+  assert.deepEqual(empty.tailCursor, { v: 1, carrierEpoch: epoch, seq: 4 }, "the tail is the carrier's last position");
+  assert.equal(empty.tailCursor.seq, written.at(-1).seq, "on an append-only carrier the tail POSITION equals the last v1 seq");
+
+  // Independent of every page filter, and of the page size (a limit-truncated page must not shorten it).
+  for (const opts of [{}, { limit: 1 }, { until: "2026-10-01T00:00:01.000Z" }, { since: "2026-10-01T00:00:03.000Z" }]) {
+    const doc = readOk(root, opts);
+    assert.equal(doc.tailCursor.seq, 4, `tailCursor must ignore ${JSON.stringify(opts)}`);
+    assert.equal(doc.tailCursor.carrierEpoch, epoch, "the tail token always carries the CURRENT carrier epoch");
+  }
+
+  // AC1's identity on a page that DOES reach the end: the tail seq IS the last transition's order.
+  const full = readOk(root, {});
+  assert.equal(full.transitions.at(-1).order, full.tailCursor.seq, "tail seq === last transition order");
+});
+
+test("(j) a tail cursor resumed as --since is INCLUSIVE — the boundary event (order === seq) plus what was appended since", () => {
+  const root = makeCarrierRoot("j");
+  for (let i = 0; i < 3; i++) writeV1(root, { taskId: `J-${i}`, at: `2026-10-01T00:00:0${i}.000Z` });
+  const before = readOk(root, {});
+  const tail = before.tailCursor;
+  const boundaryId = before.transitions.at(-1).eventId;
+  assert.equal(tail.seq, 2);
+
+  // Passing the tail back verbatim re-delivers the BOUNDARY event — at-least-once, unchanged.
+  const resumed = readOk(root, { since: JSON.stringify(tail) });
+  assert.equal(resumed.rebase, false, "the tail was taken under the current epoch — no rebase");
+  assert.deepEqual(resumed.transitions.map((t) => t.order), [tail.seq], "the boundary event (order === seq) comes again");
+  assert.equal(resumed.transitions[0].eventId, boundaryId, "…with the SAME eventId, so the consumer can dedupe it");
+
+  // One event lands after the tail was taken: the SAME cursor yields the boundary + the new event.
+  writeV1(root, { taskId: "J-new", at: "2026-10-01T00:00:09.000Z" });
+  const next = readOk(root, { since: JSON.stringify(tail) });
+  assert.deepEqual(next.transitions.map((t) => t.order), [tail.seq, tail.seq + 1], "boundary + subsequent event");
+  assert.equal(next.transitions[0].eventId, boundaryId, "the boundary eventId is stable across the two reads");
+  assert.equal(next.tailCursor.seq, tail.seq + 1, "the NEW tail has advanced to the new event");
+});
+
+test("(k) a replaced/forged epoch rebases an OLD tail cursor, and the new tail carries the NEW epoch", () => {
+  const root = makeCarrierRoot("k");
+  for (let i = 0; i < 3; i++) writeV1(root, { taskId: `K-${i}`, at: `2026-10-01T00:00:0${i}.000Z` });
+  const oldEpoch = readCarrierEpoch(root);
+  const tail = readOk(root, {}).tailCursor;
+  assert.equal(tail.carrierEpoch, oldEpoch, "fixture: the tail was taken under the old epoch");
+
+  // Replace the epoch sidecar — the AC's 替换/伪造. `readCarrierEpoch` prefers the sidecar, so this is a
+  // rotation as far as the read surface can tell (the records still carry the old epoch; ⛔ never used).
+  const NEW_EPOCH = "0123456789abcdef0123456789abcdef";
+  fs.writeFileSync(
+    taskStatusEventsEpochPath(root),
+    `${JSON.stringify({ schema: "task-status-event-carrier-state/v1", epoch: NEW_EPOCH, createdAt: "2026-10-05T00:00:00.000Z" })}\n`,
+  );
+  assert.equal(readCarrierEpoch(root), NEW_EPOCH, "fixture must actually have rotated the epoch");
+
+  const doc = readOk(root, { since: JSON.stringify(tail) });
+  assert.equal(doc.rebase, true, "the OLD tail cursor cannot be honoured under a new epoch — it must be REPORTED");
+  assert.ok(typeof doc.rebaseReason === "string" && doc.rebaseReason.length > 0, "the rebase carries a reason");
+  assert.match(doc.rebaseReason, /does not match the carrier's current epoch/);
+  assert.equal(doc.transitions.length, 3, "the read replays the current epoch — ⛔ never an empty page");
+  assert.equal(doc.tailCursor.carrierEpoch, NEW_EPOCH, "the tail token is minted under the CURRENT epoch");
+  assert.equal(doc.tailCursor.seq, 2, "…and still names the carrier's last position");
+});
+
+test("(l) tailCursor is THREE-STATE: absent ⇒ null, exists-but-empty ⇒ seq 0, all-corrupt ⇒ null with the count named", () => {
+  // (i) ABSENT carrier — there is no position to name.
+  const absent = makeCarrierRoot("l-absent");
+  const a = readOk(absent, {});
+  assert.equal(a.coverage.carrier.exists, false);
+  assert.equal(a.tailCursor, null, "an absent carrier has NO tail — ⛔ never a fabricated seq:0");
+
+  // (ii) EXISTS with zero events — the position the FIRST event will occupy. Distinct from (i).
+  const empty = makeCarrierRoot("l-empty");
+  fs.writeFileSync(taskStatusEventsPath(empty), "");
+  const e = readOk(empty, {});
+  assert.equal(e.coverage.carrier.exists, true);
+  assert.deepEqual(e.tailCursor, { v: 1, carrierEpoch: readCarrierEpoch(empty), seq: 0 }, "an existing empty carrier's tail is position 0 — ⛔ never null");
+  assert.notDeepEqual(e.tailCursor, a.tailCursor, "absent and exists-but-empty must NOT collapse into one value");
+
+  // (iii) EXISTS, every line corrupt — unreadable is not empty: null, and the count is a NAMED reason.
+  const corrupt = makeCarrierRoot("l-corrupt");
+  fs.writeFileSync(taskStatusEventsPath(corrupt), "{not json\n[1,2]\n");
+  const c = readOk(corrupt, {});
+  assert.equal(c.coverage.carrier.exists, true);
+  assert.equal(c.coverage.carrier.corrupt, 2, "fixture: both lines are corrupt");
+  assert.equal(c.tailCursor, null, "nothing readable ⇒ no tail to name (⛔ not seq:0)");
+  assert.ok(
+    c.coverage.reasons.some((r) => r.includes("2 corrupt carrier line(s)")),
+    `the corrupt count must be NAMED in reasons: ${JSON.stringify(c.coverage.reasons)}`,
+  );
+});
+
 // ── (d) trace over a mixed carrier ───────────────────────────────────────────────────────────────
 
 test("(d) trace orders a mixed v0/v1/inferred carrier by position and labels every source", () => {
@@ -313,9 +427,14 @@ test("log: the real CLI publishes the contract document, and an unparseable --si
   const ok = run(["--json"]);
   assert.equal(ok.status, 0, `stderr: ${ok.stderr}`);
   const doc = JSON.parse(ok.stdout);
-  assert.deepEqual(Object.keys(doc).sort(), ["complete", "coverage", "generatedAt", "nextCursor", "rebase", "rebaseReason", "transitions"].sort());
+  assert.deepEqual(
+    Object.keys(doc).sort(),
+    ["complete", "coverage", "generatedAt", "nextCursor", "rebase", "rebaseReason", "tailCursor", "transitions"].sort(),
+  );
   assert.equal(doc.transitions.length, 1);
   assert.equal(doc.coverage.carrier.exists, true);
+  // The tail cursor is published by the REAL CLI too, not only by the library reader.
+  assert.deepEqual(doc.tailCursor, { v: 1, carrierEpoch: doc.coverage.carrier.epoch, seq: doc.transitions.at(-1).order });
 
   const bad = run(["--since", "not-a-time"]);
   assert.equal(bad.status, 1, "an unparseable --since is a usage error, not a silent fallback");
@@ -336,6 +455,11 @@ test("(f) `quay --help` Usage synopsis lists `quay task log` and `quay task trac
   assert.match(synopsis, /quay task trace <task-id>/, "the synopsis carries the trace line");
   // The contract excerpt a cross-project consumer pins, and the at-least-once dedup rule.
   assert.match(r.stdout, /"nextCursor": \{ "v": 1, "carrierEpoch": "<epoch>", "seq": 3 \}/);
+  // The tail cursor's existence, three-state rule and version are pinned in the SAME contract text a
+  // cross-project consumer accepts against (DoD: the help contract names the version it landed in).
+  assert.match(r.stdout, /"tailCursor": \{ "v": 1, "carrierEpoch": "<epoch>", "seq": <last carrier position> \}/);
+  assert.match(r.stdout, /tailCursor {2}Available since quay 0\.23\.0/);
+  assert.match(r.stdout, /THREE STATES, never conflated/);
   assert.match(r.stdout, /DEDUPE BY \\?`?eventId\\?`?/, "the dedup key is documented in --help");
   assert.match(r.stdout, /RETENTION: the carrier is APPEND-ONLY/, "the retention rule is documented in --help");
 });
