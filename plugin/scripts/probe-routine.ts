@@ -43,6 +43,9 @@ import { parseTrigger } from "./routine-scheduler.ts";
 import { readProbeSpec } from "./read-probe-spec.ts";
 import { launchArgv, resolveKernelPluginRoot, runAsync } from "./driver-runtime.ts";
 import { probeWriteViolations, snapshotTrackedChanges } from "./probe-write-guard.ts";
+// 载体批量追加的函数体是共享的，不在此重写（semantic-dedup-scan finding `jsonl-batch-appenders`，
+// 硬规则 5b）。gate-script-base 只 import node 内建模块，⛔ 不会引入下面注释里那条环。
+import { appendJsonlRecords } from "./gate-script-base.ts";
 // 机械立案步（AC5/AC6）：三道闸与 finding→任务 的形状判据都复用 routine-file-gate.ts 的单一实现，
 // ⛔ 不在这里另写一份质量/去重/限流判据。该模块只 import gate-script-base，无环
 // （⛔ 不可改 import meta-driver.ts：quality-gate-driver → probe-routine → meta-driver → quality-gate-driver
@@ -754,12 +757,11 @@ export function fileRoutineTask(
 }
 
 // ── 载体（追加式 JSONL）──────────────────────────────────────────────────────────────────────
-/** 追加记录到载体；返回实际追加条数。目录自动创建。 */
+/** 追加记录到载体；返回实际追加条数。目录自动创建。
+ *  委托给 `gate-script-base.appendJsonlRecords`（semantic-dedup-scan finding `jsonl-batch-appenders`）；
+ *  保留此名，因为本模块的调用点按这个名字读它。 */
 export function appendRoutineFindings(findingsPath: string, records: readonly Record<string, unknown>[]): number {
-  if (records.length === 0) return 0;
-  fs.mkdirSync(path.dirname(findingsPath), { recursive: true });
-  fs.appendFileSync(findingsPath, records.map((r) => JSON.stringify(r) + "\n").join(""), "utf8");
-  return records.length;
+  return appendJsonlRecords(findingsPath, records);
 }
 
 /** 例程提交身份 —— **常量，⛔ 不读宿主**（gap-commit-routine-write-no-git-identity-fallback）。

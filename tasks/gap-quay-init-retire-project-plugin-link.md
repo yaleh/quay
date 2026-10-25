@@ -151,3 +151,10 @@ is deployed.
 - `plugin/test/quay-init-stable-plugin-link.test.mjs`（端到端钉住链接的测试：改钉 retire 语义）
 - `plugin/test/driver-runtime-loaded-version-drift.test.mjs`（AC3c 静态扫描：原来断言 init.ts 是唯一写入者，现在断言**没有**任何源码构造该链接）
 - `CHANGELOG.md`（AC8 breaking-change 条目）
+
+## Blocker
+
+**2026-10-25T15:01:14.193Z — worker 未落地（exited-not-landed）**
+
+- 未落地原因：step=suite: AssertionError [ERR_ASSERTION]: at least one bin is under-sampled (otherwise the rule is vacuous) [baseline A/B: HARD RED (task-introduced-red) — the task's red set is NOT a subset of the develop baseline red set: added=plugin/test/develop-deliver-tgz-evidence-transport.test.mjs,packages/quay/test/gap-webui-dashboard-tests-card-latest-round-no-live-signal.test.mjs,packages/quay/test/cli.test.mjs changed=-]
+- run_id：wk-prod-anchor

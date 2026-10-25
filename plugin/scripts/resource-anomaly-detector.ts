@@ -53,6 +53,10 @@ import { pathToFileURL, fileURLToPath } from "node:url";
 import { parse as parseYaml } from "yaml";
 
 import { isDirectEntry } from "./gate-script-base.ts";
+// 载体批量追加的函数体是共享的，不在此重写（semantic-dedup-scan finding `jsonl-batch-appenders`）。
+// 本处原为 join-style 近似变体 `.map(JSON.stringify).join("\n") + "\n"` —— 与共享实现的
+// `.map(JSON.stringify + "\n").join("")` 对非空批次输出**逐字节相同**，故合并是行为保持的。
+import { appendJsonlRecords } from "./gate-script-base.ts";
 import type { Fact, RoutineSpec, RoutineRunContext } from "./driver-runtime.ts";
 import { gateFinding, DEFAULT_RATE, ROUTINE_TASK_PREFIX } from "./routine-file-gate.ts";
 import { readSubmittedKeys, appendSubmission } from "./architecture-review-cluster.ts";
@@ -457,11 +461,11 @@ export function readCarrierRecords(carrierPath: string): { missing: boolean; rec
   return { missing: false, records };
 }
 
+/** 追加记录到载体；返回实际追加条数。目录自动创建。
+ *  委托给 `gate-script-base.appendJsonlRecords`（semantic-dedup-scan finding `jsonl-batch-appenders`）；
+ *  保留此名，因为本模块的调用点与 plugin/test/resource-anomaly-detector.test.mjs 按这个名字读它。 */
 export function appendCarrierRecords(carrierPath: string, records: readonly Record<string, unknown>[]): number {
-  if (records.length === 0) return 0;
-  fs.mkdirSync(path.dirname(carrierPath), { recursive: true });
-  fs.appendFileSync(carrierPath, records.map((r) => JSON.stringify(r)).join("\n") + "\n", "utf8");
-  return records.length;
+  return appendJsonlRecords(carrierPath, records);
 }
 
 // ── the 24h model-call ledger (the OSD/discovery-method pattern; ⛔ no ceiling raised) ────────────
