@@ -24,7 +24,7 @@ goal/AC 的状态迁移历史**已经存在**且是单源 append-only：每条�
 
 ## AC
 
-- [ ] AC1（瘦投影）：`quay goal list --json --no-body` 存在，每条记录只保留 `id/title/status/kind/goal/updatedAt`（+ 存在时的 `statusLog`），⛔ 不含 `body/criterion/expect/origin`；在本仓库实测输出字节数 ≤ 现 `--no-evidence` 输出的 40%，贴前后两条命令的输出字节数与耗时。
+- [ ] AC1（瘦投影）：`quay goal list --json --no-body` 存在，每条记录只保留 `id/title/status/kind/goal/updatedAt`，⛔ 不含 `body/criterion/expect/origin/statusLog`——历史迁移由 AC3 的 `goal log` 提供，列表读不需要它。需要 statusLog 时用显式开关 `--with-status-log`（默认关闭）。在本仓库实测：瘦投影输出字节数 ≤ 现 `--no-evidence` 输出的 40%（不含 statusLog），并同时贴一条 `--no-body --with-status-log` 的字节数作为对照（消费方实测 138KB → 253KB，+83%）。
 - [ ] AC2（增量）：`quay goal list --json --since <ISO8601|epoch-ms>` 按 `updatedAt` 过滤；贴一次双向实跑：一个已知时间点之后改一条记录 ⇒ 该记录出现；该时间点之前不出现。
 - [ ] AC3（合并读面）：新增 `quay goal log [--since <ISO8601>] --json`，合并所有记录的 `statusLog`，按 `at` 升序返回 `{id,goal,kind,at,from,to,actor,reason}`；贴实跑输出，并给出「返回条数 = 各记录 statusLog 长度之和」的核对读数。
 - [ ] AC4（三态）：goals 目录缺失/不可读 ⇒ 与「读到 0 条」不同的取值（非零退出或 `evaluated:false`），⛔ 不得返回空数组冒充「无变化」。
