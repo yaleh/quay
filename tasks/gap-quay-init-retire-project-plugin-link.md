@@ -127,9 +127,9 @@ until the CloudCLI-side resolver (claudecodeui task `gap-quay-entrypoint-resolve
 is deployed.
 ```
 
-**门/检查读数**
-- `bash scripts/test.sh --for-task gap-quay-init-retire-project-plugin-link --allow-thin` ⇒ **279/279 pass, exit 0**（含 `packages/quay/test/init.test.mjs` 的 AC1–AC5 + 闭集断言、`plugin/test/quay-init-stable-plugin-link.test.mjs` 端到端 5/5、`plugin/test/verify-plugin-channel-assertions.test.mjs` 33/33、`driver-runtime-loaded-version-drift` 的 AC3c 静态扫描）。
-- `anti-drift-touches-check.ts` ⇒ `ANTI-DRIFT OK … all within declared Touches`。
+**门/检查读数**（第二轮 2026-10-26，合并 develop 并补登 Touches 之后的最终读数）
+- `bash scripts/test.sh --for-task gap-quay-init-retire-project-plugin-link --allow-thin` ⇒ **301/301 pass, exit 0**（含 `packages/quay/test/init.test.mjs` 的 AC1–AC5 + 闭集断言、`plugin/test/quay-init-stable-plugin-link.test.mjs` 端到端、`plugin/test/verify-plugin-channel-assertions.test.mjs` 33/33、`driver-runtime-loaded-version-drift` 的 AC3c 静态扫描，以及本轮改钉的 `plugin/test/develop-deliver-tgz-evidence-transport.test.mjs` 22/22）。
+- `anti-drift-touches-check.ts --task … --merge-target develop` ⇒ `ANTI-DRIFT OK: … 14 actual file(s), all within declared Touches (15 glob(s))`。
 - `npx tsc --noEmit` ⇒ exit 0。
 
 **第二轮（2026-10-26）— 上一轮 exited-not-landed 的 suite 红逐个复核**
