@@ -70,6 +70,11 @@ import { ROUTINE_LAST_RUN_REL, readLastRunMap, writeLastRun } from "./probe-rout
 // expression `path.resolve(dirname(import.meta.url), "..", "..")` is the same one they use (repo root in
 // the dev tree, plugin root in the shipped bundle), which is why one resolver serves all of them.
 import { resolveEngineModuleIn } from "./routine-engine-module-loader.ts";
+// The batch-appender body is shared, not copied (semantic-dedup-scan finding `jsonl-batch-appenders`,
+// 硬规则 5b): four carriers + one join-style variant had the same ensure-dir / stringify+newline /
+// single-append / return-count body. `appendJsonlRecords` is the fail-loud batch sibling of
+// `appendJsonlLine`; the exported name below is kept for this module's callers.
+import { appendJsonlRecords } from "./gate-script-base.ts";
 
 /** The routine's name — one key in `.quay/routine-last-run.json` (shared with the probe track; ⛔ names
  *  do not collide and the map is a per-name merge write). */
@@ -372,12 +377,11 @@ export function readCarrierFindings(carrierPath: string): { missing: boolean; re
   return { missing: false, records };
 }
 
-/** Append records to the carrier (dir auto-created). One write ⇒ the round's lines land together. */
+/** Append records to the carrier (dir auto-created). One write ⇒ the round's lines land together.
+ *  A delegating shim: the body is `gate-script-base.appendJsonlRecords` (semantic-dedup-scan finding
+ *  `jsonl-batch-appenders`); the name stays because this module's callers import it. */
 export function appendCarrierRecords(carrierPath: string, records: readonly Record<string, unknown>[]): number {
-  if (records.length === 0) return 0;
-  fs.mkdirSync(path.dirname(carrierPath), { recursive: true });
-  fs.appendFileSync(carrierPath, records.map((r) => JSON.stringify(r) + "\n").join(""), "utf8");
-  return records.length;
+  return appendJsonlRecords(carrierPath, records);
 }
 
 // ── reading an instrument's `--out` carrier ──────────────────────────────────────────────────────────
