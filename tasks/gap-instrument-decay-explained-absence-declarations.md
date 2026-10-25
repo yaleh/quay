@@ -189,3 +189,11 @@ ANTI-DRIFT OK: … 2 actual file(s), all within declared Touches (3 glob(s))
 - plugin/scripts/instrument-decay-check.ts
 - plugin/test/instrument-decay-check.test.mjs
 - tasks/gap-instrument-decay-explained-absence-declarations.md
+
+## Blocker
+
+**2026-10-25T05:08:17.950Z — worker 未落地（exited-not-landed）**
+
+- 未落地原因：AC 未全勾（checked 0/10，剩余未勾 10）——续做只需验证并勾选 AC
+- run_id：wk-prod-anchor
+- session_id：b5698da2-a16f-405a-b4dc-c02eacab4095
