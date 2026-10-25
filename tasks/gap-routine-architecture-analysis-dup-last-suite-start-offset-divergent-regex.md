@@ -65,3 +65,10 @@ Move the rule into one shared kernel helper imported by both checkers and the wo
 - `plugin/test/source-text-lib.test.mjs`
 - `plugin/workflows/fan-in-execute.js`
 - `tasks/gap-routine-architecture-analysis-dup-last-suite-start-offset-divergent-regex.md`
+
+## Blocker
+
+**2026-10-25T17:41:37.980Z — worker 未落地（exited-not-landed）**
+
+- 未落地原因：step=suite: AssertionError [ERR_ASSERTION]: fan-in-execute.js: pre-fix anchor count changed — the measurement drifted [baseline A/B: HARD RED (task-introduced-red) — the task's red set is NOT a subset of the develop baseline red set: added=packages/quay/test/build-plugin-dist.test.mjs changed=-]
+- run_id：wk-prod-anchor
