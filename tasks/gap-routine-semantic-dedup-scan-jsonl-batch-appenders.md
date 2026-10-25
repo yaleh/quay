@@ -3,7 +3,7 @@ id: gap-routine-semantic-dedup-scan-jsonl-batch-appenders
 title: "semantic-dedup-scan: Four batch appenders are byte-identical modulo
   parameter name (ensure dir, map JSON.stringify+newline, one appendFileSync,
   return count) with a fifth near-vari"
-status: todo
+status: ready
 labels:
   - gap
   - routine-filed
