@@ -524,15 +524,17 @@ test("usage: missing --installed/--project ⇒ exit 2; no args ⇒ exit 2", () =
 });
 
 // ── AC6: the local upgrade drill sequence and its FAIL face ──────────────────────────────────────
+// The `.quay/plugin` guidance link is RETIRED (2026-10-25): `quay init` no longer creates it, so the
+// drill's second reading is "the old link is GONE after the re-init" — not "it was re-pointed".
 
-test("upgrade drill: link→old ⇒ init ⇒ link→new ⇒ validate PASS (exit 0)", () => {
+test("upgrade drill: link→old ⇒ init ⇒ link DELETED ⇒ validate PASS (exit 0)", () => {
   const oldTree = makeInstall("up-old", { version: "0.16.0", withInit: true });
   const newTree = makeInstall("up-new", { version: "0.17.0", withInit: true });
   const project = makeProject("up-proj", { pointerTarget: oldTree });
-  // The init seam repoints the link, exactly as a real `/quay:init` would.
+  // The init seam deletes the old link, exactly as a real `/quay:init` now does (retire step).
   const r = runScript(["--installed", newTree, "--project", project, "--scope", "project", "--upgrade-from", oldTree], {
     QUAY_VERIFY_HOME: makeHome("up-home", []),
-    QUAY_VERIFY_INIT_CMD: `ln -sfn "${newTree}" "${path.join(project, ".quay", "plugin")}"`,
+    QUAY_VERIFY_INIT_CMD: `rm -f "${path.join(project, ".quay", "plugin")}"`,
   });
   assert.equal(r.status, 0, r.stdout + r.stderr);
   assert.match(assertionLine(r.stdout, "upgrade-link-before"), /^upgrade-link-before PASS/);
@@ -540,13 +542,13 @@ test("upgrade drill: link→old ⇒ init ⇒ link→new ⇒ validate PASS (exit 
   assert.match(assertionLine(r.stdout, "upgrade-validate-after"), /^upgrade-validate-after PASS/);
 });
 
-test("upgrade drill FAIL face: init does NOT repoint the link ⇒ upgrade-link-after FAIL", () => {
+test("upgrade drill FAIL face: init does NOT delete the old link ⇒ upgrade-link-after FAIL", () => {
   const oldTree = makeInstall("upf-old", { version: "0.16.0", withInit: true });
   const newTree = makeInstall("upf-new", { version: "0.17.0", withInit: true });
   const project = makeProject("upf-proj", { pointerTarget: oldTree });
   const r = runScript(["--installed", newTree, "--project", project, "--scope", "project", "--upgrade-from", oldTree], {
     QUAY_VERIFY_HOME: makeHome("upf-home", []),
-    QUAY_VERIFY_INIT_CMD: "true", // the re-init is a no-op
+    QUAY_VERIFY_INIT_CMD: "true", // the re-init is a no-op ⇒ the retired link survives
   });
   assert.equal(r.status, 1, r.stdout + r.stderr);
   assert.match(assertionLine(r.stdout, "upgrade-link-before"), /^upgrade-link-before PASS/);

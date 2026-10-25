@@ -1,7 +1,7 @@
 ---
 id: gap-quay-init-retire-project-plugin-link
 title: quay init 不再生成 .quay/plugin：符号链接删除、普通文件/目录拒绝并报告，读数三态 retired/absent/refused
-status: ready
+status: done
 labels:
   - gap
 parent: null
@@ -176,11 +176,3 @@ packages/quay/test/gap-webui-dashboard-tests-card-latest-round-no-live-signal.te
 - `plugin/test/driver-runtime-loaded-version-drift.test.mjs`（AC3c 静态扫描：原来断言 init.ts 是唯一写入者，现在断言**没有**任何源码构造该链接）
 - `plugin/test/develop-deliver-tgz-evidence-transport.test.mjs`（develop 后加的 `binding_state`/`config_native_mcp_entry` 测试：原钉住 `.quay/plugin` 链接语义，retire 后改钉「交付插件根」，并把「链接不被读」做成负控制）
 - `CHANGELOG.md`（AC8 breaking-change 条目）
-
-## Blocker
-
-**2026-10-25T15:01:14.193Z — worker 未落地（exited-not-landed）**
-
-- 未落地原因：step=suite: AssertionError [ERR_ASSERTION]: at least one bin is under-sampled (otherwise the rule is vacuous) [baseline A/B: HARD RED (task-introduced-red) — the task's red set is NOT a subset of the develop baseline red set: added=plugin/test/develop-deliver-tgz-evidence-transport.test.mjs,packages/quay/test/gap-webui-dashboard-tests-card-latest-round-no-live-signal.test.mjs,packages/quay/test/cli.test.mjs changed=-]
-- run_id：wk-prod-anchor
-- 处置：见 Evidence「第二轮（2026-10-26）」——1 个真实冲突已修（并补登 Touches），2 个负载假红经单跑复现证伪。
