@@ -126,6 +126,9 @@ node --experimental-strip-types plugin/scripts/instrument-decay-check.ts --root 
 ```
 记录侧仍待**下一轮**写入（因此 AC4 保持未勾）：现存最后一行（`ts=2026-10-25T17:27:35.403Z`，改动前写入）仍带 `commitsSinceArtifact:0` —— 这是本次修复要消除的历史形状，新记录会以 `readingFreshness:"live-file-list"` + `fileListReadAt` + `commitsSinceArtifact:null` 出现。
 
-**AC5 scoped gate**：`bash scripts/test.sh --for-task gap-arch-cycle-single-directory-basis-never-due --allow-thin` ⇒ **EXIT=0**，`tests 58 / pass 58 / fail 0`，含 `plugin/test/arch-cycle-reading.test.mjs`（19 pass，含本任务两条新测试）与 `plugin/test/instrument-decay-check.test.mjs`（39 pass，含本任务两条新测试）。完整日志：worktree `.quay/worker-evidence-ac1/scoped-gate.txt`。
+**AC5 scoped gate**：`bash scripts/test.sh --for-task gap-arch-cycle-single-directory-basis-never-due --allow-thin` ⇒ **EXIT=0**，实跑两次（同一命令，两种 Touches 状态）：
+- Touches 尚未含 `plugin/scripts/quality-gate-driver.ts` 时：`tests 58 / pass 58 / fail 0`；
+- 最终树（Touches 已含该文件 ⇒ 选择面更宽）：`tests 174 / pass 174 / fail 0`。
+两次都含 `plugin/test/arch-cycle-reading.test.mjs`（19，含本任务两条新测试）与 `plugin/test/instrument-decay-check.test.mjs`（39，含本任务两条新测试）。完整日志：worktree `.quay/worker-evidence-ac1/scoped-gate.txt`（58）与 `scoped-gate-final.txt`（174）。
 
 **DoD 无新增 spawn**：`refreshBehindScopes` / `runArchCycleRound` 的 spawn 路径未改；`scopeNeedsRefresh` 对 `behindSources:null` 仍返回 false（单目录 scope 仍不进 due 集，Plan item 4），故例程 tick 的 analyze 次数不因本条增加。`plugin/scripts/quality-gate-driver.ts` 的改动只是把新字段写进载体记录的形状声明（`ArchCycleHistoryRecord.scopes[]`），无行为变化。
