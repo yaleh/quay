@@ -3483,15 +3483,27 @@ export function pluginRootVersion(dir: string | null): string | null {
   return dir === null ? null : readVersionOfDirectory(dir);
 }
 
+/** 「项目指引链接已退役」的**正本**（日期/版本只在此处写一次，⛔ 不在第二个文件重复）：
+ *  人 2026-10-25 裁定 `/quay:init` 不再生成 `<project>/.quay/plugin`（写侧正本 =
+ *  tasks/gap-quay-init-retire-project-plugin-link.md）。外部消费者改为按 Claude 插件 scope 解析 CLI。
+ *
+ *  ⇒ 该链接**不存在**从此是**正常态**，不是「无法评估」：`retired`。第二个实现（goal-driver.ts 的
+ *  健康探针）只引用本节，⛔ 不各自再写一份退役日期/版本。 */
+export type PointerReadingState = LoadedVersionState | "retired";
+
 /** `driver status` 的 `pointer` 读数：Core 自身所在插件根 vs 项目指引链接 `.quay/plugin` 的版本关系
  *  （gap-project-quay-pointer-is-init-plugin-root-and-version-records-derive-from-it (B)）。
  *
- *  语义（⛔ 四态，`not-evaluated` 与 `current` 不同形）：`current` 链接与 Core 同版本；`behind` 链接
- *  落后于 Core（`/quay:init` 之后插件升过级）；`ahead` 链接比 Core 新（Core 是旧 checkout）；
- *  `not-evaluated` 链接缺失 / 目标无 plugin.json / Core 版本读不到。
+ *  语义（⛔ 五态互不同形；退役正本见 `PointerReadingState`）：
+ *  - `current`       链接与 Core 同版本；
+ *  - `behind`        链接落后于 Core（`/quay:init` 之后插件升过级）；
+ *  - `ahead`         链接比 Core 新（Core 是旧 checkout）；
+ *  - `retired`       链接**不存在** —— 已退役（2026-10-25），缺省是正常态。⛔ 不是 `not-evaluated`；
+ *  - `not-evaluated` **读不懂**：路径在但不是符号链接（用户内容，Q1 迁移拒绝动它）/ 目标无
+ *    plugin.json / Core 版本读不到。⛔ 「读不懂」不得与「已退役」同形（硬规则 3b）。
  *  Core ⛔ 任何路径都不写这个链接（多版本会话并存时运行期刷新会互相覆盖），只报漂移。 */
 export interface PointerReading {
-  state: LoadedVersionState;
+  state: PointerReadingState;
   coreVersion: string | null;
   coreRoot: string | null;
   linkTarget: string | null;
@@ -3504,15 +3516,34 @@ export function pointerReading(root: string, opts: { coreRoot?: string | null } 
   const coreVersion = pluginRootVersion(coreRoot);
   const linkPath = path.join(root, ".quay", "plugin");
   let linkTarget: string | null = null;
+  // 「不存在」与「在但不是符号链接」必须分开：前者是退役正常态，后者是**读不懂**的用户内容
+  // （Q1 迁移对普通文件/目录拒绝动它）。⛔ 用一个 null 同时表示两者会把它们压成同一态（硬规则 3b）。
+  let linkPresent = false;
+  let linkIsSymlink = false;
   try {
-    if (fs.lstatSync(linkPath).isSymbolicLink()) linkTarget = fs.readlinkSync(linkPath);
+    const st = fs.lstatSync(linkPath);
+    linkPresent = true;
+    linkIsSymlink = st.isSymbolicLink();
+    if (linkIsSymlink) linkTarget = fs.readlinkSync(linkPath);
   } catch {
-    linkTarget = null;
+    linkPresent = false;
   }
   const linkVersion = linkTarget === null ? null : pluginRootVersion(linkTarget);
   const base = { coreVersion, coreRoot, linkTarget, linkVersion };
-  if (linkTarget === null) {
-    return { state: "not-evaluated", ...base, reason: `no .quay/plugin symlink in ${root}` };
+  if (!linkPresent) {
+    // 退役（2026-10-25）之后「链接不存在」是**正常态**，不是「无法评估」——见 PointerReadingState。
+    return {
+      state: "retired",
+      ...base,
+      reason: "the .quay/plugin symlink is retired — its absence is the normal state (quay init no longer creates it; human ruling 2026-10-25)",
+    };
+  }
+  if (!linkIsSymlink) {
+    return {
+      state: "not-evaluated",
+      ...base,
+      reason: `the .quay/plugin path exists but is not a symlink — it is user content, not a (retired) pointer, so it cannot be read as a version relation`,
+    };
   }
   if (linkVersion === null) {
     return { state: "not-evaluated", ...base, reason: `the .quay/plugin target (${linkTarget}) carries no plugin.json version` };
@@ -3830,7 +3861,8 @@ export function statusForKind(root: string, kind: DriverKind, json: boolean, out
   // 它读的是**查询者 shell 的 PATH**，回答「人敲 `quay ...` 跑的是哪一版」。⛔ 只报，不修 PATH。
   const pq = pathQuayVersionReading();
   // 第四个漂移源（项目指引链接 `.quay/plugin` vs Core 自身）：Core ⛔ 不写链接，只报漂移。见
-  // pointerReading 的头注释。`not-evaluated`（链接缺失）⛔ 不与 `current` 同形（硬规则 3b）。
+  // pointerReading 的头注释。链接**不存在** = `retired`（2026-10-25 起缺省是正常态），⛔ 不是
+  // `not-evaluated`；`not-evaluated` 只留给「在但读不懂」（硬规则 3b）。
   const ptr = pointerReading(root);
   // AC-255 能力半边：`running` 回答「有没有一个活着的承载进程」，**答不了**「这个 kind 的循环还在转
   // 吗」——收敛形态下六个 kind 共用一个 anchor，anchor 活着时全部报 `running=1`，哪怕其中两个的循环
@@ -3893,8 +3925,8 @@ export function statusForKind(root: string, kind: DriverKind, json: boolean, out
       path_quay_version_resolved: pq.version,
       path_quay_version_relation: pq.relation,
       path_quay_version_reason: pq.reason,
-      // 第四个漂移源（项目指引链接 `.quay/plugin` vs Core 自身插件根）。四态各自独立；链接缺失 /
-      // 目标无 plugin.json ⇒ `not-evaluated`，⛔ 不与 `current` 同形（硬规则 3b）。
+      // 第四个漂移源（项目指引链接 `.quay/plugin` vs Core 自身插件根）。五态各自独立；链接**不存在**
+      // = `retired`（已退役，缺省是正常态）；`not-evaluated` 只留给「在但读不懂」，⛔ 两者不同形（硬规则 3b）。
       pointer: {
         state: ptr.state,
         core_version: ptr.coreVersion,
@@ -3954,12 +3986,13 @@ export function statusForKind(root: string, kind: DriverKind, json: boolean, out
       `${pq.version ? `:${pq.version}` : ""}` +
       `${pq.path ? `:path=${pq.path}` : ""}` +
       `${pq.state === "not-evaluated" && pq.reason ? ` (${pq.reason})` : ""} · ` +
-      // 第四个漂移源（项目指引链接 `.quay/plugin` vs Core）：state 四态 + 两侧版本 + 链接目标。
-      // ⛔ 读不到时报 `not-evaluated`（⛔ 不印空串、⛔ 不印 current——空串与「没问题」同形，硬规则 3b）。
+      // 第四个漂移源（项目指引链接 `.quay/plugin` vs Core）：五态 + 两侧版本 + 链接目标。
+      // ⛔ 读不到时报 `not-evaluated`、链接不存在报 `retired`（⛔ 不印空串、⛔ 不印 current——空串与
+      // 「没问题」同形，硬规则 3b）；两种非常态各自附 reason，别让读者靠猜。
       `pointer=${ptr.state}` +
       `${ptr.linkVersion ? `:link=${ptr.linkVersion}` : ""}` +
       `${ptr.coreVersion ? `:core=${ptr.coreVersion}` : ""}` +
-      `${ptr.state === "not-evaluated" && ptr.reason ? ` (${ptr.reason})` : ""}\n`,
+      `${(ptr.state === "not-evaluated" || ptr.state === "retired") && ptr.reason ? ` (${ptr.reason})` : ""}\n`,
     );
   }
   return 0;

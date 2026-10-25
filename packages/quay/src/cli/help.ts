@@ -682,7 +682,15 @@ Usage:
              Surface recovery after drain+stop (⛔ no need to read driver-internal exports).
   status     Report {kind, supervisor_pid, driver_pid, alive, carrier_path, carrier_records,
              last_record_ts} — last_record_ts is the carrier's last-record timestamp (not just a
-             record count, which cannot distinguish "growing" from "stalled").
+             record count, which cannot distinguish "growing" from "stalled"). --json also carries the
+             drift readings: loaded_version / path_quay_version / pointer. \`pointer\` compares Core's
+             own plugin root with the project guidance link \`.quay/plugin\`, and its state vocabulary is
+             current | behind | ahead | retired | not-evaluated:
+               retired        the link is ABSENT — retired (quay init no longer creates it), so absence
+                              is the NORMAL state, ⛔ not an error and ⛔ not "unable to evaluate";
+               not-evaluated  the path is there but cannot be read as a version relation (not a
+                              symlink / dangling target / no plugin.json / unreadable Core version) —
+                              ⛔ "cannot read" is NOT the same as "retired".
   restart    stop then start. ⚠️ Inherits the worker caveat above: while ready work exists it
              aborts WITHOUT starting (exit 1) rather than risk two loops on one kind.
   log        READ-ONLY: print the driver's recorded per-attempt log (the RAW failure text of each
