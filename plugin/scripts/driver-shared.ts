@@ -27,6 +27,14 @@ import fs from "node:fs";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
+// worker 进程身份 + dispatch 载体（gap-worker-dispatch-carrier-owner-and-contract-unregistered）：
+// 这三个都是 leaf / kernel 叶子（profile-policy → yaml，proc-identity → node:fs），⛔ 不反向 import
+// worker-driver.ts —— 那会与 `worker-driver → relaxed-dispatch-ledger → duration-report` 一起成值环
+// （import-graph-check 的 valueSccs 棘轮钉在 0）。duration-report.ts 因此能从本文件取到【同一份】
+// classifyOrphanDispatch，而不是自己再写一套 pid 判定。
+import { loadProfiles, resolveRole } from "./profile-policy.ts";
+import { readProcCmdlineText } from "../../packages/quay/src/kernel/proc-identity.ts";
+import { escapeRegExp } from "./regex-escape.ts";
 
 // ── 控制态 + 身份闸 + MCP 控制面：kernel 侧实现，本文件原样转出 ─────────────────────────────────
 // `export *`（不是逐条列举）是刻意的：逐条列举会在 kernel 新增导出时静默漏掉一个，而调用方拿到的
@@ -226,5 +234,284 @@ export function residentLoopStop(opts: ResidentLoopStopOptions = {}): ResidentLo
       wakeResolve = resolve;
       wakeTimer = setTimeout(tick, Math.min(pollMs, Math.max(0, ms)));
     }),
+  };
+}
+
+// ── worker 进程身份（两个驱动 + 只读报告共用的同一份判定）──────────────────────────────────────────
+//
+// 本组从 worker-driver.ts 抽到此处（gap-worker-dispatch-carrier-owner-and-contract-unregistered）：
+// `plugin/scripts/duration-report.ts` 必须用【同一份】classifyOrphanDispatch 判「在飞 / 残留」，而
+// `worker-driver → relaxed-dispatch-ledger → duration-report` 已是一条值边 ⇒ duration-report 反向
+// import worker-driver 会成值环。抽到本 leaf 是唯一不新增第二套 pid 判定、也不造环的落点。
+// ⛔ 判据（读数回升即方向写反）：`node --experimental-strip-types plugin/scripts/import-graph-check.ts --json`
+// 的 `valueSccs` 必须仍为 0。
+
+/** 存活 worker 进程的 `-n` 名（launchArgv 经 profile-policy.ts 解析 .quay/profiles.yml 的
+ *  `roles["task-worker"].name` 承载；AC140-2 测试钉死 name 以 quay- 开头）。
+ *  ⚠️ 这是【缺省值】，不是「本 workspace 的 worker 名」。真实名由 `.quay/profiles.yml` 承载 ⇒ 一律经
+ *  resolveWorkerProcessName(root) 取。字面常量只作解析失败时的历史缺省（quay 自己的 profiles.yml
+ *  恰好就是这个名字）。 */
+export const WORKER_PROCESS_NAME = "quay-task-worker";
+
+/** 本 workspace 的 worker 进程名（`-n <name>`）：读 `.quay/profiles.yml` 的 roles["task-worker"].name。
+ *
+ *  🔴 为什么必须解析而不能用上面的字面常量（gap-reconcile-finalizes-live-worker-as-exited-and-double-
+ *  dispatches-same-task，2026-09-13 第一手对照）：字面量 `quay-task-worker` 是【quay 自己】的命名；
+ *  第三方项目按 quay-init 的注释自行改名（quay-fleet: `fleet-task-worker`）。此前所有存活探测
+ *  （enumerateLiveWorkerCmdlines / hasLiveWorkerForTask / findLiveWorkerPid）都写死该字面量 ⇒
+ *  在 quay-fleet 上**恒不命中任何真实 worker**（硬规则 4b：一个依赖宿主的字面量，换项目就静默失效）。
+ *  后果是 reconcile 把【在飞】worker 判为「已退出」（假失败记录）并清掉冷启动排除集 ⇒ 同任务双派、
+ *  两个 worker 共用一个 worktree。对照：同一份 argv 只改角色名，hasLiveWorkerForTask 给出相反取值。
+ *
+ *  解析失败（无 profiles.yml / 无该角色 / yaml 读不懂）⇒ 回落到 WORKER_PROCESS_NAME（历史行为），
+ *  ⛔ 不抛——探测是观测，观测不得让驱动停摆；且回落方向的残余危害由 finalizeOrphanDispatch 的
+ *  /proc 存活实测兜底（见该函数）。 */
+export function resolveWorkerProcessName(root: string | null | undefined): string {
+  if (!root) return WORKER_PROCESS_NAME;
+  try {
+    const name = resolveRole(loadProfiles(root), "task-worker").name;
+    return name && name.length > 0 ? name : WORKER_PROCESS_NAME;
+  } catch {
+    return WORKER_PROCESS_NAME;
+  }
+}
+
+/** 读某 pid 的 /proc/<pid>/cmdline（归一化：NUL → 空格、trim）；pid 不存在 / 无权限 ⇒ null
+ *  （硬规则 3b：读不懂 ≠ 无存活，但调用方按 falsy 判「已死」——方向是「少 adopt」，⛔ 不误信 pid）。
+ *  读由 kernel leaf 单点实现；⛔ 保留「空 cmdline ⇒ ""」这一取值（调用方按 falsy 与 null 同判
+ *  「已死」，但取值本身不同形，见 `probePidLiveness` 对同一区分的用法）。 */
+export function readPidCmdline(pid: number, procDir: string = "/proc"): string | null {
+  const text = readProcCmdlineText(pid, procDir);
+  return text === null ? null : text.trim();
+}
+
+/** 该 task 是否有存活 worker 正在跑：某存活进程 cmdline 同时含 worker 名（-n 名）与该 task id
+ *  （worker prompt 里的 "Task: <id>"）。纯谓词，cmdline 列表注入（缺省由调用方从 /proc 取）。
+ *  task id 用【词边界】匹配，⛔ 不用裸 substring——短 id（如 `gap-t`）会作为前缀命中 `gap-test-…` /
+ *  `gap-todo-…` 的存活 worker cmdline（2026-08-24 实测：测试 task `gap-t` 误命中生产 worker
+ *  `gap-test-fixture-pollutes-bash-history` ⇒ cleanupOrphanWorktree 假跳过）。边界字符类 = 字母/数字/
+ *  下划线/连字符（task id 全由它们组成 ⇒ `gap-t` 后跟 `e` 或 `-` 都不算命中，后跟 `.`/空格/行尾才算）。 */
+export function hasLiveWorkerForTask(taskId: string, workerCmdlines: string[], workerName: string = WORKER_PROCESS_NAME): boolean {
+  const re = new RegExp(`(^|[^a-zA-Z0-9_-])${escapeRegExp(taskId)}(?![a-zA-Z0-9_-])`);
+  return workerCmdlines.some((cmd) => cmd.includes(workerName) && re.test(cmd));
+}
+
+/** 判「孤儿 dispatch 该 adopt 还是 finalize」所需的身份面（DispatchRecord 的结构子集 ⇒ 纯分类器
+ *  不必依赖载体类型）。 */
+export interface DispatchIdentity {
+  taskId: string;
+  workerPid: number;
+}
+
+/** 孤儿 dispatch 分类（纯函数）：adopt（pid 存活且 cmdline 仍是本任务的 worker）/ finalize（pid 已死 /
+ *  被复用）。复核用 hasLiveWorkerForTask 的词边界 cmdline 匹配（同 cold-start-inflight 交叉核对），⛔ 不
+ *  裸信 pid 数字——pid 复用后指向别的进程，cmdline 不再含 <worker 名> + task id ⇒ 判 finalize。
+ *  空 cmdline（僵尸已退未收尸）与读不到（null）同判「已死」。
+ *  workerName：本 workspace 的 worker `-n` 名（resolveWorkerProcessName(root)），⛔ 不用写死的
+ *  `quay-task-worker`——第三方项目改名后本函数会对【在飞】worker 恒判 finalize（2026-09-13 quay-fleet 实证）。 */
+export function classifyOrphanDispatch(
+  record: DispatchIdentity,
+  procDir: string = "/proc",
+  workerName: string = WORKER_PROCESS_NAME,
+): "adopt" | "finalize" {
+  const cmdline = readPidCmdline(record.workerPid, procDir);
+  if (!cmdline) return "finalize";
+  return hasLiveWorkerForTask(record.taskId, [cmdline], workerName) ? "adopt" : "finalize";
+}
+
+// ── dispatch 持久记录（.quay/worker-dispatch.json）───────────────────────────────────────────────
+//
+// 载体的【契约正本】= docs/references/worker-dispatch-carrier.md（⛔ 契约正文只在那里一份，本处只
+// 留实现 + 指针）。它登记在 docs/carrier-registry.json，owner = plugin/scripts/worker-driver.ts
+// （spawn 后写、终态删的唯一写者）。
+//
+// 一条记录 = spawn 后的派发影子：旧 driver 死掉后内存 running 整体丢失，但这份持久影子存活 ⇒ 新
+// driver 的 reconcile 能读到「这个 task 为什么在飞、是哪次 dispatch、跑了多久、原定超时预算是多少」，
+// 据此 adopt（纳入超时监管）或 finalize（已死补终态），⛔ 不再是「排除集之外一片黑箱」。
+
+/** 载体仓库相对路径（gitignored 运行时状态，worker-outcome.jsonl / worker-round.jsonl 同族）。 */
+export const WORKER_DISPATCH_REL = ".quay/worker-dispatch.json";
+
+/** 每条记录自带的稳定版本标记（AC2）。⛔ 读者不得用「字段形状」猜版本：没有本标记的记录是 v1 之前
+ *  写的（legacy-unversioned），按同一份读取逻辑处理但如实报 `schema: null`。 */
+export const WORKER_DISPATCH_RECORD_SCHEMA = "worker-dispatch-record/v1";
+
+/** 一条 dispatch 持久记录（spawn 后写、终态后清；driver 重启遗留的条目 = 孤儿在飞）。
+ *  契约正文 → docs/references/worker-dispatch-carrier.md。 */
+export interface DispatchRecord {
+  /** 版本标记：{@link WORKER_DISPATCH_RECORD_SCHEMA}。旧记录（本字段引入前写的）运行期可能缺失 ⇒
+   *  读取方按 `null` 处理（见 readDispatchStoreClassified 的 `schema` 字段）。 */
+  schema: string;
+  taskId: string;
+  runId: string;
+  workerPid: number;
+  selectorReason: string;
+  /** 派发时刻（epoch ms）。 */
+  startedAtMs: number;
+  /** 原始超时截止时刻（epoch ms）；0 = 无超时（与 timeoutMs>0 对齐）。adopt 沿用此值，⛔ 不重置。 */
+  timeoutDeadlineMs: number;
+  /** spawn 时的归一化 cmdline（argv 空格 join）——观测抓手 + adopt 时 hasLiveWorkerForTask 复核的参照
+   *  （⛔ 不裸信 pid 数字，避免 pid 复用误判）。 */
+  cmdlineFingerprint: string;
+}
+
+/** 写入侧的记录输入：`schema` 由 upsertDispatchRecord 统一盖章（单一写入口，⛔ 不靠每个调用点记得填）。 */
+export type DispatchRecordInput = Omit<DispatchRecord, "schema"> & { schema?: string };
+
+/** dispatch 记录文件的绝对路径。 */
+export function dispatchStoreFile(root: string): string {
+  return path.join(root, WORKER_DISPATCH_REL);
+}
+
+/** 读整份 dispatch store（taskId → record）；文件缺失 / 解析失败 ⇒ {}（fail-soft，硬规则 3b：读不懂
+ *  ≠ 无记录，但方向是「少 adopt ⇒ 维持现状」，⛔ 不是 fail-closed 到「全部孤儿」——那会误接管手工起的 worker）。
+ *  ⚠️ 需要区分「文件缺失 / 不可读 / 解析失败」的读者用 readDispatchStoreClassified（三态），⛔ 不要把
+ *  本函数的 `{}` 读成「没有在飞」。 */
+export function readDispatchStore(file: string): Record<string, DispatchRecord> {
+  let text: string;
+  try {
+    text = fs.readFileSync(file, "utf8");
+  } catch {
+    return {};
+  }
+  try {
+    const parsed = JSON.parse(text);
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) return parsed as Record<string, DispatchRecord>;
+    return {};
+  } catch {
+    return {};
+  }
+}
+
+/** 原子写整份 dispatch store（tmp + rename，外部读者绝不读到半截——与 worker-driver 的 appendWorkerPid 同手法）。 */
+export function writeDispatchStore(file: string, store: Record<string, DispatchRecord>): void {
+  try {
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    const tmp = `${file}.tmp-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    fs.writeFileSync(tmp, JSON.stringify(store, null, 2), "utf8");
+    fs.renameSync(tmp, file);
+  } catch {
+    /* dispatch store 是观测抓手 + 孤儿 adopt/finalize 的输入，写失败不改变主流程（同 appendWorkerPid） */
+  }
+}
+
+/** upsert 一条 dispatch 记录（读-改-写，原子）。`schema` 标记在此【单一写入口】盖章。 */
+export function upsertDispatchRecord(file: string, record: DispatchRecordInput): void {
+  const store = readDispatchStore(file);
+  store[record.taskId] = { ...record, schema: record.schema ?? WORKER_DISPATCH_RECORD_SCHEMA };
+  writeDispatchStore(file, store);
+}
+
+/** 移除一条 dispatch 记录（终态已算 ⇒ dispatch 已了结）。记录本不存在 ⇒ no-op（⛔ 不写 spurious 空文件）。 */
+export function removeDispatchRecord(file: string, taskId: string): void {
+  const store = readDispatchStore(file);
+  if (!(taskId in store)) return;
+  delete store[taskId];
+  writeDispatchStore(file, store);
+}
+
+// ── 只读三态判定（AC4）：live / residue / not-evaluated ───────────────────────────────────────────
+//
+// ⛔ 这三个取值互不同形，且 residue / not-evaluated **不得**被折成「无在飞」：外部读者（报告、人工
+// 排查、后续 live-state）必须能把「读到了、确无在飞」与「读不懂」「有残留」分开。pid 判定只有
+// classifyOrphanDispatch 一份（DoD：⛔ 不新增第二套）。
+
+/** 单条记录的只读判定。`not-evaluated` 只出现在【记录本身结构不可读】时（没有可用的 workerPid /
+ *  taskId）；文件级缺失/不可读见 DispatchStoreReading.status。 */
+export type DispatchEntryState = "live" | "residue" | "not-evaluated";
+
+export interface DispatchStoreEntry {
+  /** 文件 map 里的键（读者比对用它，⛔ 不用记录自报的 taskId 当键）。 */
+  taskId: string;
+  record: DispatchRecord | null;
+  state: DispatchEntryState;
+  /** 记录自报的 schema 标记；旧记录没有 ⇒ null（⛔ 不用字段形状猜版本）。 */
+  schema: string | null;
+}
+
+export interface DispatchStoreReading {
+  /** 文件级判定：ok = 读到了并逐条判过；not-evaluated = 缺失/不可读/解析失败（⛔ 不是「无在飞」）。 */
+  status: "ok" | "not-evaluated";
+  /** 未评估的成因（status === "ok" 时为 "ok"）——枚举，⛔ 不与 status 共用一个布尔。 */
+  fileState: "ok" | "missing" | "unreadable" | "malformed";
+  file: string;
+  entries: DispatchStoreEntry[];
+  /** 便捷计数（从 entries 派生，⛔ 不另存第二份判定）。 */
+  live: number;
+  residue: number;
+}
+
+/** 单条记录 → live（pid 存活且 cmdline 仍是本任务的 worker）/ residue（其余：pid 已死、cmdline 不匹配、
+ *  或 /proc 读不懂——与 classifyOrphanDispatch 的 finalize 同判，⛔ 不新增第二套 pid 判定）。 */
+export function classifyDispatchEntry(
+  record: DispatchIdentity,
+  procDir: string = "/proc",
+  workerName: string = WORKER_PROCESS_NAME,
+): "live" | "residue" {
+  return classifyOrphanDispatch(record, procDir, workerName) === "adopt" ? "live" : "residue";
+}
+
+/** 只读地把整份载体判成三态（外部读者的【唯一入口】）。读文件 → 逐条 classifyDispatchEntry。
+ *  文件缺失 / 不可读 / 解析失败 ⇒ status "not-evaluated"（entries 为 []，⛔ 不与「空 map、确无在飞」
+ *  同形——后者 status "ok" 且 entries []）。 */
+export function readDispatchStoreClassified(
+  file: string,
+  procDir: string = "/proc",
+  workerName: string = WORKER_PROCESS_NAME,
+): DispatchStoreReading {
+  const unreadable = (fileState: "missing" | "unreadable" | "malformed"): DispatchStoreReading => ({
+    status: "not-evaluated",
+    fileState,
+    file,
+    entries: [],
+    live: 0,
+    residue: 0,
+  });
+  let text: string;
+  try {
+    text = fs.readFileSync(file, "utf8");
+  } catch (e) {
+    // ENOENT = 从未写过（还没有任何派发）；其余（EACCES 等）= 文件在但读不了。两者都是 not-evaluated，
+    // 但成因不同形（⛔ 不折成一个 "missing"）。
+    const code = e && typeof e === "object" && "code" in e ? String((e as { code?: unknown }).code) : "";
+    return unreadable(code === "ENOENT" ? "missing" : "unreadable");
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    return unreadable("malformed");
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return unreadable("malformed");
+  const entries: DispatchStoreEntry[] = [];
+  for (const [taskId, value] of Object.entries(parsed as Record<string, unknown>)) {
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+      entries.push({ taskId, record: null, state: "not-evaluated", schema: null });
+      continue;
+    }
+    const record = value as Partial<DispatchRecord>;
+    const schema = typeof record.schema === "string" && record.schema.length > 0 ? record.schema : null;
+    const pid = typeof record.workerPid === "number" && Number.isFinite(record.workerPid) ? record.workerPid : null;
+    // 记录自报的 taskId 缺失时回落到 map 键（载体按 taskId 索引，键就是 writer 用的那个值）；两者都
+    // 没有可用 workerPid ⇒ 这条记录结构不可读，⛔ 不猜一个判定。
+    const identityTask = typeof record.taskId === "string" && record.taskId.length > 0 ? record.taskId : taskId;
+    if (pid === null) {
+      entries.push({ taskId, record: record as DispatchRecord, state: "not-evaluated", schema });
+      continue;
+    }
+    entries.push({
+      taskId,
+      record: record as DispatchRecord,
+      state: classifyDispatchEntry({ taskId: identityTask, workerPid: pid }, procDir, workerName),
+      schema,
+    });
+  }
+  return {
+    status: "ok",
+    fileState: "ok",
+    file,
+    entries,
+    live: entries.filter((e) => e.state === "live").length,
+    residue: entries.filter((e) => e.state === "residue").length,
   };
 }

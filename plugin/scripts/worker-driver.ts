@@ -150,10 +150,7 @@ import { lookupGoalBranchMode } from "./target-identity-literal-check.ts";
 // （splitTaskFile / statusFromFrontmatter / patchStatusField，单一 parser，⛔ 不再手搓 status 行正则）。
 import { splitTaskFile, statusFromFrontmatter, patchStatusField, commitTaskFile } from "./task-ops.ts";
 import { repoRoot } from "./repo-root.ts";
-// 转义正则元字符（task id 进 `new RegExp` 前）—— the single regex-literal escaper, the kernel leaf
-// reached via the plugin shim. Own copy was one of the twelve byte-identical bodies extracted by
-// gap-routine-semantic-dedup-scan-escapere-escaperegex-escaperegexp-fndefre-stemre.
-import { escapeRegExp } from "./regex-escape.ts";
+// escapeRegExp 的消费者已随 hasLiveWorkerForTask 迁到 driver-shared.ts；本文件不再直接使用它。
 import { parseTouchEntriesWithTags } from "./touches-parser.ts";
 import { parseLoadSensitiveAnnotation } from "./known-load-sensitive.ts";
 // AC150-3：资源门判定 + 控制态 + 身份闸 + MCP 控制面，抽到 driver-shared.ts 供 promotion-driver 复用
@@ -171,6 +168,19 @@ import {
   // gap-per-kind-stop-…：盘上停机探针的**分片轮询周期**与 resident-loop 那几个 kind 共用同一个常量
   // （⛔ 不在本文件另写一个字面量——那正是「停机延迟」这件事出现第二个真相源的形态）。
   DISK_STOP_POLL_MS_DEFAULT as WORKER_STOP_POLL_MS,
+  // worker 进程身份 + dispatch 载体（gap-worker-dispatch-carrier-owner-and-contract-unregistered）：
+  // 定义在 driver-shared.ts，本文件只 import + re-export（⛔ 不在此再写一份）。
+  WORKER_PROCESS_NAME,
+  resolveWorkerProcessName,
+  readPidCmdline,
+  hasLiveWorkerForTask,
+  classifyOrphanDispatch,
+  dispatchStoreFile,
+  readDispatchStore,
+  writeDispatchStore,
+  upsertDispatchRecord,
+  removeDispatchRecord,
+  type DispatchRecord,
 } from "./driver-shared.ts";
 export {
   CONTROL_STATE_REL,
@@ -191,6 +201,20 @@ export {
   headerValue,
   resourceGateCheck,
   serveControlPlane,
+  WORKER_PROCESS_NAME,
+  WORKER_DISPATCH_REL,
+  WORKER_DISPATCH_RECORD_SCHEMA,
+  resolveWorkerProcessName,
+  readPidCmdline,
+  hasLiveWorkerForTask,
+  classifyOrphanDispatch,
+  dispatchStoreFile,
+  readDispatchStore,
+  writeDispatchStore,
+  upsertDispatchRecord,
+  removeDispatchRecord,
+  type DispatchRecord,
+  type DispatchRecordInput,
 } from "./driver-shared.ts";
 // AC152：派发前过滤的【可组合谓词列表】单一实现（driver-filters.ts）。worker 的派发环消费
 // applyTaskFilters（函数级复用，⛔ 不各写一遍）。readTaskStatus 亦上收到 driver-filters.ts，
@@ -267,10 +291,7 @@ import {
   resolveQuaySrcModule,
   type LivenessResult,
 } from "./driver-runtime.ts";
-// gap-reconcile-finalizes-live-worker-as-exited-and-double-dispatches-same-task：worker 进程名是
-// 【配置】而非常量（`.quay/profiles.yml` roles["task-worker"].name）⇒ 存活探测必须先解析它，
-// ⛔ 不沿用写死的 `quay-task-worker`（第三方项目改名后探测恒不命中，见 resolveWorkerProcessName）。
-import { loadProfiles, resolveRole } from "./profile-policy.ts";
+// worker 进程名解析（resolveWorkerProcessName）已随进程身份判定迁到 driver-shared.ts。
 // 机械 fan-in（gap-fan-in-driver-mechanical-orchestration / SPEC-fan-in-driver-mechanical-
 // orchestration-2026-08-27）：suite 不再 detach（setsid+&+disown 孤儿）——改由 driver 直接 spawn 并 wait
 // （进程级父子，ppid 指向 driver，AC3）。复用 suite-driver.ts 的 spawnSuiteAndWait（同一单飞槽语义 +
@@ -531,9 +552,7 @@ export {
 /** round 记录（无条件心跳）的仓库相对路径（gitignored 运行时日志，worker-outcome.jsonl 同族）。 */
 export const WORKER_ROUND_REL = ".quay/worker-round.jsonl";
 
-/** dispatch 持久记录（gap-worker-driver-restart-orphan-no-outcome-no-timeout）的仓库相对路径——
- *  gitignored 运行时状态（worker-outcome.jsonl / worker-round.jsonl 同族），按 taskId 索引的单文件 map。 */
-export const WORKER_DISPATCH_REL = ".quay/worker-dispatch.json";
+// WORKER_DISPATCH_REL 已随 dispatch 载体抽到 driver-shared.ts（本文件 re-export 保持旧 import 面）。
 
 /** 终态枚举：**completed（退出码 0 且落地——成功态就是它）** / exited-not-landed（退出码 0 但没落地）/
  *  failed（非零退出）/ killed（被信号杀）/ timed-out（超时 SIGTERM）/ spawn-failed（起不来）/
@@ -644,39 +663,8 @@ export function runAutoTightenPass(root: string, nowMs: number): AutoTightenRoun
  *  引用/命名稳定性，⛔ 不再是并发解析的输入。 */
 export const MAX_TASK_SUBAGENTS_ENV = "QUAY_MAX_TASK_SUBAGENTS";
 
-/** 存活 worker 进程的 `-n` 名（launchArgv 经 profile-policy.ts 解析 .quay/profiles.yml 的
- *  `roles["task-worker"].name` 承载；AC140-2 测试钉死 name 以 quay- 开头）。
- *  冷启动在飞枚举用它识别存活 worker 进程的 cmdline（/proc/<pid>/cmdline）。
- *  AC150-3：控制态常量（CONTROL_STATE_REL/CONTROL_CALLERS_ENV/DEFAULT_CALLERS/CONTROL_HEADER/
- *  CONTROL_HEADER_NAME）已随控制面抽到 driver-shared.ts 并在本文件 re-export；本常量是 worker
- *  独有（进程名识别），保留在本文件。 */
-/** ⚠️ 这是【缺省值】，不是「本 workspace 的 worker 名」。真实名由 `.quay/profiles.yml` 的
- *  `roles["task-worker"].name` 承载 ⇒ 一律经 resolveWorkerProcessName(root) 取（见下）。
- *  字面常量只作解析失败时的历史缺省（quay 自己的 profiles.yml 恰好就是这个名字）。 */
-export const WORKER_PROCESS_NAME = "quay-task-worker";
-
-/** 本 workspace 的 worker 进程名（`-n <name>`）：读 `.quay/profiles.yml` 的 roles["task-worker"].name。
- *
- *  🔴 为什么必须解析而不能用上面的字面常量（gap-reconcile-finalizes-live-worker-as-exited-and-double-
- *  dispatches-same-task，2026-09-13 第一手对照）：字面量 `quay-task-worker` 是【quay 自己】的命名；
- *  第三方项目按 quay-init 的注释自行改名（quay-fleet: `fleet-task-worker`）。此前所有存活探测
- *  （enumerateLiveWorkerCmdlines / hasLiveWorkerForTask / findLiveWorkerPid）都写死该字面量 ⇒
- *  在 quay-fleet 上**恒不命中任何真实 worker**（硬规则 4b：一个依赖宿主的字面量，换项目就静默失效）。
- *  后果是 reconcile 把【在飞】worker 判为「已退出」（假失败记录）并清掉冷启动排除集 ⇒ 同任务双派、
- *  两个 worker 共用一个 worktree。对照：同一份 argv 只改角色名，hasLiveWorkerForTask 给出相反取值。
- *
- *  解析失败（无 profiles.yml / 无该角色 / yaml 读不懂）⇒ 回落到 WORKER_PROCESS_NAME（历史行为），
- *  ⛔ 不抛——探测是观测，观测不得让驱动停摆；且回落方向的残余危害由 finalizeOrphanDispatch 的
- *  /proc 存活实测兜底（见该函数）。 */
-export function resolveWorkerProcessName(root: string | null | undefined): string {
-  if (!root) return WORKER_PROCESS_NAME;
-  try {
-    const name = resolveRole(loadProfiles(root), "task-worker").name;
-    return name && name.length > 0 ? name : WORKER_PROCESS_NAME;
-  } catch {
-    return WORKER_PROCESS_NAME;
-  }
-}
+// WORKER_PROCESS_NAME / resolveWorkerProcessName 已抽到 driver-shared.ts（duration-report 必须用同一份
+// 判定；本文件 re-export 保持旧 import 面）。见该文件「worker 进程身份」一节。
 
 /** 常驻循环【无在飞 worker 且瞬时 WAIT】时的轮询间隔（ms，测试缝经 --interval 传小值）。与
  *  promotion-driver 的 INTERVAL_MS_DEFAULT 同语义：resource-gate-wait / pool-empty 是瞬时态
@@ -1186,16 +1174,8 @@ export function enumerateLiveWorkerCmdlines(procDir: string = "/proc", workerNam
   return out;
 }
 
-/** 该 task 是否有存活 worker 正在跑：某存活进程 cmdline 同时含 `quay-task-worker`（-n 名）与该 task id
- *  （worker prompt 里的 "Task: <id>"）。纯谓词，cmdline 列表注入（缺省由调用方从 /proc 取）。
- *  task id 用【词边界】匹配，⛔ 不用裸 substring——短 id（如 `gap-t`）会作为前缀命中 `gap-test-…` /
- *  `gap-todo-…` 的存活 worker cmdline（2026-08-24 实测：测试 task `gap-t` 误命中生产 worker
- *  `gap-test-fixture-pollutes-bash-history` ⇒ cleanupOrphanWorktree 假跳过）。边界字符类 = 字母/数字/
- *  下划线/连字符（task id 全由它们组成 ⇒ `gap-t` 后跟 `e` 或 `-` 都不算命中，后跟 `.`/空格/行尾才算）。 */
-export function hasLiveWorkerForTask(taskId: string, workerCmdlines: string[], workerName: string = WORKER_PROCESS_NAME): boolean {
-  const re = new RegExp(`(^|[^a-zA-Z0-9_-])${escapeRegExp(taskId)}(?![a-zA-Z0-9_-])`);
-  return workerCmdlines.some((cmd) => cmd.includes(workerName) && re.test(cmd));
-}
+// hasLiveWorkerForTask 已抽到 driver-shared.ts（与 readPidCmdline / classifyOrphanDispatch 同处，
+// duration-report 经它取同一份判定）。本文件 re-export 保持旧 import 面。
 
 /** 解出该 task 存活 worker 的 pid：重扫 /proc，返回第一个其 cmdline（空格 join）命中
  *  hasLiveWorkerForTask 的 pid；无命中 ⇒ null（读不到 /proc 也 null——硬规则 3b：读不懂 ≠ 无存活，
@@ -4541,102 +4521,14 @@ function appendWorkerPid(pidFile: string, workerPid: number): void {
   }
 }
 
-// ── dispatch 持久记录（gap-worker-driver-restart-orphan-no-outcome-no-timeout）────────────────────
-// driver 重启孤儿化在飞 worker 的元数据持久化：旧 driver 把 spawn 的 dispatch 元数据（selector 理由 /
-// runId / 原始派发时刻 / 原始超时截止时刻 / spawn cmdline）原子写进 <root>/.quay/worker-dispatch.json
-// （按 taskId 索引的单文件 map），在终态被正常计算时清除对应条目。旧 driver 死 ⇒ 内存 running 整体丢失，
-// 但这份持久影子存活 ⇒ 新 driver 的 reconcile 能读到「这个 task 为什么在飞、是哪次 dispatch、跑了多久、
-// 原定超时预算是多少」，据此 adopt（纳入超时监管）或 finalize（已死补终态），⛔ 不再是「排除集之外一片黑箱」。
-
-/** 一条 dispatch 持久记录（spawn 后写、终态后清；driver 重启遗留的条目 = 孤儿在飞）。 */
-export interface DispatchRecord {
-  taskId: string;
-  runId: string;
-  workerPid: number;
-  selectorReason: string;
-  /** 派发时刻（epoch ms）。 */
-  startedAtMs: number;
-  /** 原始超时截止时刻（epoch ms）；0 = 无超时（与 timeoutMs>0 对齐）。adopt 沿用此值，⛔ 不重置。 */
-  timeoutDeadlineMs: number;
-  /** spawn 时的归一化 cmdline（argv 空格 join）——观测抓手 + adopt 时 hasLiveWorkerForTask 复核的参照
-   *  （⛔ 不裸信 pid 数字，避免 pid 复用误判）。 */
-  cmdlineFingerprint: string;
-}
-
-/** dispatch 记录文件的绝对路径。 */
-export function dispatchStoreFile(root: string): string {
-  return path.join(root, WORKER_DISPATCH_REL);
-}
-
-/** 读整份 dispatch store（taskId → record）；文件缺失 / 解析失败 ⇒ {}（fail-soft，硬规则 3b：读不懂
- *  ≠ 无记录，但方向是「少 adopt ⇒ 维持现状」，⛔ 不是 fail-closed 到「全部孤儿」——那会误接管手工起的 worker）。 */
-export function readDispatchStore(file: string): Record<string, DispatchRecord> {
-  let text: string;
-  try {
-    text = fs.readFileSync(file, "utf8");
-  } catch {
-    return {};
-  }
-  try {
-    const parsed = JSON.parse(text);
-    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) return parsed as Record<string, DispatchRecord>;
-    return {};
-  } catch {
-    return {};
-  }
-}
-
-/** 原子写整份 dispatch store（tmp + rename，外部读者绝不读到半截——与 appendWorkerPid 同手法）。 */
-export function writeDispatchStore(file: string, store: Record<string, DispatchRecord>): void {
-  try {
-    fs.mkdirSync(path.dirname(file), { recursive: true });
-    const tmp = `${file}.tmp-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-    fs.writeFileSync(tmp, JSON.stringify(store, null, 2), "utf8");
-    fs.renameSync(tmp, file);
-  } catch {
-    /* dispatch store 是观测抓手 + 孤儿 adopt/finalize 的输入，写失败不改变主流程（同 appendWorkerPid） */
-  }
-}
-
-/** upsert 一条 dispatch 记录（读-改-写，原子）。 */
-export function upsertDispatchRecord(file: string, record: DispatchRecord): void {
-  const store = readDispatchStore(file);
-  store[record.taskId] = record;
-  writeDispatchStore(file, store);
-}
-
-/** 移除一条 dispatch 记录（终态已算 ⇒ dispatch 已了结）。记录本不存在 ⇒ no-op（⛔ 不写 spurious 空文件）。 */
-export function removeDispatchRecord(file: string, taskId: string): void {
-  const store = readDispatchStore(file);
-  if (!(taskId in store)) return;
-  delete store[taskId];
-  writeDispatchStore(file, store);
-}
-
-/** 读某 pid 的 /proc/<pid>/cmdline（归一化：NUL → 空格、trim）；pid 不存在 / 无权限 ⇒ null
- *  （硬规则 3b：读不懂 ≠ 无存活，但调用方按 falsy 判「已死」——方向是「少 adopt」，⛔ 不误信 pid）。
- *  读由 kernel leaf 单点实现；⛔ 保留「空 cmdline ⇒ ""」这一取值（调用方按 falsy 与 null 同判
- *  「已死」，但取值本身不同形，见 `probePidLiveness` 对同一区分的用法）。 */
-export function readPidCmdline(pid: number, procDir: string = "/proc"): string | null {
-  const text = readProcCmdlineText(pid, procDir);
-  return text === null ? null : text.trim();
-}
-
-/** 孤儿 dispatch 分类（纯函数）：adopt（pid 存活且 cmdline 仍是本任务的 worker）/ finalize（pid 已死 /
- *  被复用）。复核用 hasLiveWorkerForTask 的词边界 cmdline 匹配（同 cold-start-inflight 交叉核对），⛔ 不
- *  裸信 pid 数字——pid 复用后指向别的进程，cmdline 不再含 <worker 名> + task id ⇒ 判 finalize。
- *  空 cmdline（僵尸已退未收尸）与读不到（null）同判「已死」。
- *  workerName：本 workspace 的 worker `-n` 名（resolveWorkerProcessName(root)），⛔ 不用写死的
- *  `quay-task-worker`——第三方项目改名后本函数会对【在飞】worker 恒判 finalize（2026-09-13 quay-fleet 实证）。 */
-export function classifyOrphanDispatch(
-  record: DispatchRecord,
-  procDir: string = "/proc",
-  workerName: string = WORKER_PROCESS_NAME,
-): "adopt" | "finalize" {
-  const cmdline = readPidCmdline(record.workerPid, procDir);
-  if (!cmdline) return "finalize";
-  return hasLiveWorkerForTask(record.taskId, [cmdline], workerName) ? "adopt" : "finalize";
-}
+// ── dispatch 持久记录：实现 + 契约已抽到 driver-shared.ts ─────────────────────────────────────────
+//
+// WHY 抽走（gap-worker-dispatch-carrier-owner-and-contract-unregistered）：duration-report 必须用【同一份】
+// classifyOrphanDispatch 判「在飞 / 残留」，而 `worker-driver → relaxed-dispatch-ledger → duration-report`
+// 已是一条值边 ⇒ duration-report 反向 import 本文件会成值环。载体的类型 / 读写 / 只读三态判定
+// （live / residue / not-evaluated）与 worker 进程身份判定现住 driver-shared.ts，本文件 re-export 保持
+// 旧 import 面（worker-driver.test.mjs 等逐字不变）。
+// 契约正文（写入时机 / 原子性 / 版本标记 / 三态语义 / 不含 phase 的边界）→ docs/references/worker-dispatch-carrier.md。
 
 /** reconcile 该处理的孤儿 dispatch 清单：store 里、但不在本驱动内存 running 的条目。⛔ 记录缺失（driver
  *  从未见过，如手工起的 worker）⇒ 不在 store ⇒ 天然跳过、不越权接管；running 中的本驱动在飞 dispatch ⇒
