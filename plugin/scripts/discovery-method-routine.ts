@@ -177,6 +177,11 @@ export { pidAlive };
 // write as the timestamp, so this routine uses its own `writeLastRunStamped` (see that function).
 import { ROUTINE_LAST_RUN_REL, readLastRunMap } from "./probe-routine.ts";
 import { isDirectEntry } from "./gate-script-base.ts";
+// The batch-appender body is shared, not copied (semantic-dedup-scan finding `jsonl-batch-appenders`,
+// 硬规则 5b): this file had TWO copies (carrier + ledger) of the same ensure-dir / stringify+newline /
+// single-append / return-count body. Both exported names below stay — sibling routines
+// (`open-semantic-discovery-routine.ts`, `cross-project-dogfood-routine.ts`) import them from here.
+import { appendJsonlRecords } from "./gate-script-base.ts";
 // ⛔ The Discovery Method loop (docs/analysis/discovery-{experience-ledger,reflection,method-registry}.mjs)
 // is NEVER statically imported here — this file is SHIPPED, and a static `../../docs/analysis/*.mjs`
 // specifier both escapes the built artifact and inlines those modules' own entry guards into the driver
@@ -534,12 +539,11 @@ export function readCarrierRounds(carrierPath: string): { missing: boolean; reco
   return readJsonlStrict(carrierPath);
 }
 
-/** Append records to the carrier (dir auto-created). One write ⇒ the round's lines land together. */
+/** Append records to the carrier (dir auto-created). One write ⇒ the round's lines land together.
+ *  A delegating shim: the body is `gate-script-base.appendJsonlRecords` (semantic-dedup-scan finding
+ *  `jsonl-batch-appenders`); the name stays because sibling routines import it. */
 export function appendCarrierRecords(carrierPath: string, records: readonly Record<string, unknown>[]): number {
-  if (records.length === 0) return 0;
-  fs.mkdirSync(path.dirname(carrierPath), { recursive: true });
-  fs.appendFileSync(carrierPath, records.map((r) => JSON.stringify(r) + "\n").join(""), "utf8");
-  return records.length;
+  return appendJsonlRecords(carrierPath, records);
 }
 
 /** One instant off a carrier line: its `ts` (ISO-8601, the field every round writes). THROWS when a
@@ -637,12 +641,11 @@ export function readLedgerRecords(ledgerPath: string): { missing: boolean; recor
 }
 
 /** Append records to the ledger (dir auto-created). One `appendFileSync` call ⇒ the records land
- *  together; callers hold the lock, so two processes cannot interleave inside one reservation. */
+ *  together; callers hold the lock, so two processes cannot interleave inside one reservation.
+ *  A delegating shim: the body is `gate-script-base.appendJsonlRecords` (semantic-dedup-scan finding
+ *  `jsonl-batch-appenders`); the name stays because sibling routines import it. */
 export function appendLedgerRecords(ledgerPath: string, records: readonly Record<string, unknown>[]): number {
-  if (records.length === 0) return 0;
-  fs.mkdirSync(path.dirname(ledgerPath), { recursive: true });
-  fs.appendFileSync(ledgerPath, records.map((r) => JSON.stringify(r) + "\n").join(""), "utf8");
-  return records.length;
+  return appendJsonlRecords(ledgerPath, records);
 }
 
 /** The instant on a ledger line. THROWS when a line the budget has to READ cannot supply one: a

@@ -570,6 +570,31 @@ export function appendJsonlLine(file: string, entry: Record<string, unknown>): v
   }
 }
 
+// ── appendJsonlRecords ──────────────────────────────────────────────────────────────────────────────
+// The BATCH sibling of `appendJsonlLine`: N records → ONE `appendFileSync`, parent dir auto-created,
+// returning how many records were written. Extracted here — byte-identical apart from the parameter
+// name in four copies plus one join-style variant that emits the same bytes — by semantic-dedup-scan
+// finding `jsonl-batch-appenders` (`.quay/routine-findings.jsonl`, routine `semantic-dedup-scan`,
+// runId `semantic-dedup-scan-1792940684375`, kind `byte-identical-body`, verdict `real-duplication`,
+// requested action `extract`), which named its five carriers:
+//   plugin/scripts/arch-discovery-routine.ts:376 (appendCarrierRecords)
+//   plugin/scripts/discovery-method-routine.ts:538 (appendCarrierRecords)
+//   plugin/scripts/discovery-method-routine.ts:641 (appendLedgerRecords)
+//   plugin/scripts/probe-routine.ts:758 (appendRoutineFindings)
+//   plugin/scripts/resource-anomaly-detector.ts:463 (appendCarrierRecords)
+//
+// FAIL-LOUD BY CONTRACT — the opposite of the single-record helper above: a throw propagates, because
+// every caller here treats "the carrier did not get these lines" as a real failure it must report.
+// ⛔ Do not give it a swallowing catch; the two functions have deliberately different contracts.
+//
+// An EMPTY batch writes nothing, creates no directory, and returns 0 — the guards each copy carried.
+export function appendJsonlRecords(file: string, records: readonly Record<string, unknown>[]): number {
+  if (records.length === 0) return 0;
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.appendFileSync(file, records.map((r) => JSON.stringify(r) + "\n").join(""), "utf8");
+  return records.length;
+}
+
 // ── normalizeRel ────────────────────────────────────────────────────────────────────────────────────
 // Normalize a repo-relative path or glob to a canonical form: backslashes → forward slashes, drop
 // empty (`//`) and `.` segments, resolve `..` (a leading `..` is dropped), strip a leading `./`,

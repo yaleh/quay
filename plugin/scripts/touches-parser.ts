@@ -2,11 +2,12 @@
 import fs from "node:fs";
 import path from "node:path";
 import { isDirectEntry } from "./gate-script-base.ts";
-// The annotation-strip algorithm (full-width + ASCII, leading-path cut, fixed-point loop) is the
-// kernel's ONE definition; this module delegates and re-exports it for its own consumers (e.g.
-// task-status-drift-check.ts). Task gap-routine-semantic-dedup-scan-strip-touch-annotation removed
-// the second copy that used to live here.
-import { stripTouchAnnotation } from "../../packages/quay/src/kernel/touches-annotation.ts";
+// The annotation-strip algorithm (full-width + ASCII, leading-path cut, fixed-point loop) AND the
+// bullet→path pipeline that wraps it are the kernel's ONE definitions; this module delegates and
+// re-exports them for its own consumers (e.g. task-status-drift-check.ts). Task
+// gap-routine-semantic-dedup-scan-strip-touch-annotation removed the annotation-strip copy that used
+// to live here; gap-routine-semantic-dedup-scan-parse-touch-paths removed the pipeline copy.
+import { stripTouchAnnotation, parseTouchBulletPaths, normalizeTouchEntry, stripTouchQuotes } from "../../packages/quay/src/kernel/touches-annotation.ts";
 export { stripTouchAnnotation };
 //
 // Root cause this module exists to close (gap-task-body-has-n-parsers-and-no-authority):
@@ -57,20 +58,17 @@ export { stripTouchAnnotation };
 
 // Parse a `## Touches` bullet list into bare path/glob strings (backticks/quotes removed,
 // trailing "(…)" annotations stripped, leading `./` removed). Returns [] for a missing/empty
-// section. This is the ONE implementation — every other Touches parser delegates here.
-export function parseTouchEntries(touchesSection) {
-  if (!touchesSection) return [];
-  return touchesSection
-    .split(/\r?\n/)
-    .map((l) => l.trim())
-    .filter((l) => /^[-*]\s+/.test(l))
-    .map((l) => l.replace(/^[-*]\s+/, "").trim())
-    .map((l) => l.replace(/^[`"'']+|[`"'']+$/g, "").trim()) // surrounding quotes/backticks first
-    .map(stripTouchAnnotation)                                  // then trailing "(…)"
-    .map((l) => l.replace(/^[`"'']+|[`"'']+$/g, "").trim()) // then any backtick the annotation masked
-    .map((l) => l.replace(/^\.\//, "").trim())                  // then a leading "./"
-    .filter(Boolean);
-}
+// section.
+//
+// The WHOLE pipeline — not just the annotation half — is the kernel leaf's ONE definition
+// (`parseTouchBulletPaths` in `packages/quay/src/kernel/touches-annotation.ts`), re-exported here
+// under the historical name every consumer imports (gap-routine-semantic-dedup-scan-parse-touch-
+// paths: the eight steps below used to be copied verbatim into
+// `packages/quay/src/observation/blocking.ts`'s `parseTouchPaths`, pinned only by a prose "mirror"
+// comment). Re-exporting the FUNCTION OBJECT — rather than wrapping it in an equal-bodied local
+// function — is what makes the two layers unable to drift; `kernel-pure-judges.test.mjs` asserts
+// the identity, not merely equal output.
+export { parseTouchBulletPaths as parseTouchEntries };
 
 // Parse a `## Touches` bullet list into bare path/glob strings PLUS the trailing "(…)" annotation
 // when it is one of the structural markers the dispatch-eligibility resolve check understands:
@@ -101,7 +99,7 @@ export function parseTouchEntriesWithTags(touchesSection) {
     const m = line.match(/^[-*]\s+(.+)$/);
     if (!m) continue;
     let entry = m[1].trim();
-    entry = entry.replace(/^[`"'']+|[`"'']+$/g, "").trim(); // surrounding quotes/backticks first
+    entry = stripTouchQuotes(entry); // surrounding quotes/backticks first — so a `path (new)` tag is visible
     // Structural tag (new/delete): FIRST the common end-anchored form `path (new)`; then, when the
     // line terminates with a full-width annotation (）， not )）, the ASCII (…) sits BEFORE it —
     // `` path/x.ts (new)（描述） `` — the end-anchored match can't see it, so a pre-existing quirk
@@ -113,9 +111,11 @@ export function parseTouchEntriesWithTags(touchesSection) {
       const beforeFullWidth = entry.match(/\s*\(([^)]*)\)\s*[（]/);
       tag = tagFromAnnotation(beforeFullWidth?.[1]);
     }
-    const stripped = stripTouchAnnotation(entry); // the ONE annotation-strip implementation
-    const cleaned = stripped.replace(/^[`"'']+|[`"'']+$/g, "").trim(); // backtick the annotation masked
-    const path = cleaned.replace(/^\.\//, "").trim(); // leading "./"
+    // The post-marker half (annotation strip → masked-backtick strip → leading "./") is the kernel's
+    // ONE `normalizeTouchEntry` — the SAME five steps parseTouchEntries runs, so the "path extraction
+    // is byte-identical" claim above is structural, not prose (gap-routine-semantic-dedup-scan-
+    // parse-touch-paths, 硬规则 5b: the copy inside this very file is a sibling of the reported one).
+    const path = normalizeTouchEntry(entry);
     if (!path) continue;
     out.push({ path, tag });
   }
