@@ -79,7 +79,9 @@ node --experimental-strip-types plugin/scripts/instrument-decay-check.ts \
 
 ## Evidence
 
-**ADR-007 暗轴记录**：该轴仍暗,理由:本任务只在一个常驻检测器里新增 3 条常量声明及其测试用例——零新 import、零新模块、零跨包边，L_D/L_G 在本改动上不产生可读的机器读数（未取 archguard 读数）。
+**ADR-007 暗轴记录**（续做轮修正行首形态：上一轮把 `该轴仍暗` 写在 `**…**：` 之后的行中，而 `packages/quay/src/gate/dark-axis-record.ts` 的 `DISCLAIM_ZH_RE` 要求 `该轴仍暗` 位于行首（可选 `- `/`> `/`**` 前缀之后），故被判 MISSING）：
+
+- 该轴仍暗,理由:本任务只在常驻检测器 `plugin/scripts/instrument-decay-check.ts` 的 MANIFEST 里新增 3 条常量声明及对应用例——零新 import、零新模块、零跨包边，L_D/L_G 的可测面与改动前完全相同；本轮实读 `node experiments/quay-perpetual-stream/scripts/git-lens-instrument.mjs lg --work-dir /data/home/yale/work/quay` 返回 NOT-EVALUATED（scope-not-evaluated: 读不到 query/manifest.json），即该轴在本检出上取不到机器读数，故按 ADR-007 记「仍暗」而不是编一个数字。
 
 ### AC1 — 改动前的现状复现（2026-10-25，主检出 `/data/home/yale/work/quay`）
 
@@ -215,8 +217,8 @@ $ node --experimental-strip-types --test plugin/test/instrument-decay-check.test
 
 ## Blocker
 
-**2026-10-25T05:08:17.950Z — worker 未落地（exited-not-landed）**
+**2026-10-25T05:43:09.706Z — worker 未落地（exited-not-landed）**
 
-- 未落地原因：AC 未全勾（checked 0/10，剩余未勾 10）——续做只需验证并勾选 AC
+- 未落地原因：step=dark-axis: dark-axis (ADR-007 per-milestone predicate) refused the flip — MISSING: MISSING — the task body records no L_D/L_G reading (a numeric quantity at an axis-anchored line) and carries no explicit "该轴仍暗,理由:<...>" declaration. ADR-007 requires one or the other before the task may be called done.
 - run_id：wk-prod-anchor
-- session_id：b5698da2-a16f-405a-b4dc-c02eacab4095
+- session_id：97009f6f-a302-4e9f-9414-47ad150b3af2
