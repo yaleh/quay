@@ -5,7 +5,9 @@
 // dedup scan found: plugin/scripts/touches-parser.ts + packages/quay/src/observation.ts), plus
 // `extractSection` converged by gap-routine-semantic-dedup-scan-extract-section-byte-identical
 // (finding `extract-section-byte-identical`: packages/quay/src/task-parsing.ts +
-// plugin/scripts/task-schema.ts).
+// plugin/scripts/task-schema.ts), plus `parseTouchBulletPaths` added by
+// gap-routine-semantic-dedup-scan-parse-touch-paths (finding `parse-touch-paths`: the whole
+// bullet→path pipeline, plugin/scripts/touches-parser.ts + packages/quay/src/observation/blocking.ts).
 //
 // WHAT THIS FILE IS FOR. The task's motivating fact is structural: `countAcCheckboxes`,
 // `stripTrailingFullWidthAnnotation`, `expandGlob` and `extractSection` each existed as TWO
@@ -36,12 +38,19 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { countAcCheckboxes } from "../src/kernel/ac-checkbox-count.ts";
-import { stripTrailingFullWidthAnnotation, stripTouchAnnotation as kernelStripTouchAnnotation } from "../src/kernel/touches-annotation.ts";
+import {
+  stripTrailingFullWidthAnnotation,
+  stripTouchAnnotation as kernelStripTouchAnnotation,
+  stripTouchQuotes as kernelStripTouchQuotes,
+  normalizeTouchEntry as kernelNormalizeTouchEntry,
+  parseTouchBulletPaths as kernelParseTouchBulletPaths,
+} from "../src/kernel/touches-annotation.ts";
 import { expandGlob } from "../src/kernel/glob-expand.ts";
 import { extractSection } from "../src/kernel/extract-section.ts";
 import { countAcCheckboxes as fromProductEntry, extractSection as extractSectionFromProductEntry } from "../src/task-parsing.ts";
 import { countAcCheckboxes as fromMechanismEntry, extractSection as extractSectionFromMechanismEntry } from "../../../plugin/scripts/task-schema.ts";
-import { stripTouchAnnotation } from "../../../plugin/scripts/touches-parser.ts";
+import { stripTouchAnnotation, parseTouchEntries } from "../../../plugin/scripts/touches-parser.ts";
+import { parseTouchPaths as coreParseTouchPaths } from "../src/observation/blocking.ts";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(HERE, "..", "..", "..");
@@ -49,7 +58,7 @@ const REPO_ROOT = path.resolve(HERE, "..", "..", "..");
 // ── ① ONE definition, and it lives in kernel/ ────────────────────────────────────────────────────
 // Same surfaces the task's AC1/AC2 scan (by position — declaration lines, never prose mentions).
 const SCAN_TREES = ["packages/quay/src", "plugin/scripts", "scripts"];
-const JUDGES = ["countAcCheckboxes", "stripTrailingFullWidthAnnotation", "stripTouchAnnotation", "expandGlob", "extractSection"];
+const JUDGES = ["countAcCheckboxes", "stripTrailingFullWidthAnnotation", "stripTouchAnnotation", "stripTouchQuotes", "normalizeTouchEntry", "parseTouchBulletPaths", "expandGlob", "extractSection"];
 
 function walkTs(dir, out = []) {
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
@@ -126,6 +135,64 @@ test("② plugin touches-parser re-exports the KERNEL stripTouchAnnotation objec
     kernelStripTouchAnnotation,
     "touches-parser.ts must import/re-export the kernel stripTouchAnnotation, not carry a copy",
   );
+});
+
+// The WHOLE bullet→path pipeline (not just the annotation half) is the last two-copy algorithm the
+// semantic dedup scan found (finding `parse-touch-paths`, routine runId
+// `semantic-dedup-scan-1792940684375`): eight identical steps in plugin/scripts/touches-parser.ts
+// (`parseTouchEntries`) and packages/quay/src/observation/blocking.ts (`parseTouchPaths`), no import
+// edge, held in step by a prose "mirrors …" comment alone. Both entries now re-export the kernel
+// function object — identity, not equal output (硬规则 4 推论三: a byte-identical re-implementation
+// would pass a behavioral golden but fail this).
+test("② plugin parser and Core's blocking display re-export the KERNEL parseTouchBulletPaths object", () => {
+  assert.equal(parseTouchEntries, kernelParseTouchBulletPaths, "touches-parser.ts must re-export the kernel pipeline, not carry a copy");
+  assert.equal(coreParseTouchPaths, kernelParseTouchBulletPaths, "blocking.ts parseTouchPaths must be the kernel pipeline, not a Core-local mirror");
+  assert.equal(parseTouchEntries, coreParseTouchPaths, "the two layers must expose the SAME object");
+});
+
+test("③ parseTouchBulletPaths — every entry shape the store uses, with bullet-free / empty negative controls", () => {
+  const section = [
+    "- `a.ts` (new)",
+    "- `code/bar.ts (new)`",
+    '- "packages/b.js"',
+    "- ./packages/a.js",
+    "- plugin/test/foo.test.mjs（档位测试）",
+    "* packages/quay/**/*.test.mjs",
+    "- ",
+    "not a bullet",
+    "  - indented/bullet.ts",
+  ].join("\n");
+  const expected = [
+    "a.ts",
+    "code/bar.ts",
+    "packages/b.js",
+    "packages/a.js",
+    "plugin/test/foo.test.mjs",
+    "packages/quay/**/*.test.mjs",
+    "indented/bullet.ts",
+  ];
+  assert.deepEqual(kernelParseTouchBulletPaths(section), expected);
+  // The post-marker half the TAG-AWARE reader uses, on the same shapes — the sibling copy inside
+  // touches-parser.ts is gone, so this is the one reading both readers reach.
+  assert.equal(kernelNormalizeTouchEntry("`a.ts` (new)"), "a.ts");
+  assert.equal(kernelNormalizeTouchEntry("`code/bar.ts (new)`"), "code/bar.ts");
+  assert.equal(kernelNormalizeTouchEntry("plugin/test/foo.test.mjs（档位测试）"), "plugin/test/foo.test.mjs");
+  assert.equal(kernelNormalizeTouchEntry("./packages/a.js"), "packages/a.js");
+  // The pre-annotation quote strip the tag reader needs on its own (a closing backtick would hide a
+  // trailing `(new)` from the tag regex).
+  assert.equal(kernelStripTouchQuotes("`code/bar.ts (new)`"), "code/bar.ts (new)");
+  assert.equal(kernelStripTouchQuotes("plain/path.ts"), "plain/path.ts");
+  // Negative control: a prose entry is NOT truncated into a spurious path (the leading-path cut is
+  // gated on the token being CONCRETE), and an empty entry normalizes to "" — which is what the
+  // caller's filter(Boolean) drops.
+  assert.equal(kernelNormalizeTouchEntry("some prose with spaces"), "some prose with spaces");
+  assert.equal(kernelNormalizeTouchEntry(""), "");
+  // Negative controls: a section with no bullets and an empty/absent section both yield [] — not the
+  // whole text, not [""], not a throw. Without these the assertion above could be satisfied by a
+  // function that returns every line it is given.
+  assert.deepEqual(kernelParseTouchBulletPaths("nothing declared here"), []);
+  assert.deepEqual(kernelParseTouchBulletPaths(""), []);
+  assert.deepEqual(kernelParseTouchBulletPaths(undefined), []);
 });
 
 // ── ③ behavior: the three input classes AC5 names ────────────────────────────────────────────────

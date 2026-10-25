@@ -26,6 +26,11 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { isDirectEntry } from "./gate-script-base.ts";
+// 回读面载体的原子写只有一份实现（kernel `writeJsonAtomic`）：本文件曾把 tmp+rename 惯例**内联
+// 复写**两处（`.quay/anchor.json` 与 `.quay/anchor-takeover.json`），而 red-window-triage /
+// runner-state-write 的同类 helper 早已委托 kernel —— 一处行为三个实现
+// （.quay/routine-findings.jsonl finding `write-state-atomic-split`，routine semantic-dedup-scan，2026-10-25）。
+import { writeJsonAtomic } from "./write-json-atomic.ts";
 import {
   ANCHOR_DESIRED_REL,
   DRIVER_KINDS,
@@ -304,9 +309,9 @@ function takeoverRecordFile(root: string): string {
 
 function writeTakeoverRecord(root: string, rec: TakeoverRecord): void {
   try {
-    const f = takeoverRecordFile(root);
-    fs.mkdirSync(path.dirname(f), { recursive: true });
-    fs.writeFileSync(f, JSON.stringify(rec) + "\n", "utf8");
+    // 同一份原子写（硬规则 5b：`writeState` 不是本文件唯一的回读面载体写入点）。本处曾是裸
+    // `fs.writeFileSync` ⇒ 接管期间的并发读者可看到半写/零长度的 `.quay/anchor-takeover.json`。
+    writeJsonAtomic(takeoverRecordFile(root), rec);
   } catch { /* 回读面写失败不致命：日志行仍在（⛔ 但也不假装写成了） */ }
 }
 
@@ -582,8 +587,14 @@ export async function runAnchor(opts: AnchorOptions): Promise<number> {
   // （`kindDeclarationMap`）—— 见下面 reconcile 循环里那条注释（M1 的修法）。
   const writeState = (snap?: DeclarationSnapshot): void => {
     try {
-      fs.mkdirSync(path.dirname(paths.stateFile), { recursive: true });
-      const body = JSON.stringify({
+      // ── M2：**原子替换**（tmp + rename），⛔ 不是裸 `fs.writeFileSync` ──────────────────────────────
+      // 裸写 = `O_TRUNC` 之后写 ⇒ 并发读者可观测到**零长度/半写**的 `.quay/anchor.json`（实测：本机
+      // ambient load 下 0/32/96 三档 torn 率 5.6e-4 / 5.2e-4 / 1.4e-3；全量 suite 负载下读者把解析失败
+      // 读成 `null`，与「文件不存在」同形 ⇒ `TypeError: Cannot read properties of null (reading 'kinds')`）。
+      // 原子性本身委托 kernel 的唯一实现 `writeJsonAtomic`（本处曾把同一段 tmp+rename 惯例内联复写；
+      // finding `write-state-atomic-split`）。⛔ 字段集与语义逐字未动（只换写入方式）—— `stateFile` 的
+      // **读**侧一行未改。
+      writeJsonAtomic(paths.stateFile, {
         pid: process.pid,
         startedAt: new Date(hostStartedAt).toISOString(),
         kinds: [...active.keys()],
@@ -608,16 +619,7 @@ export async function runAnchor(opts: AnchorOptions): Promise<number> {
         // `anchor.json` 是 manager/外层/`server status` 已经在读的回读面（与 `bundle`/`takeover` 同形）。
         // ⛔ 必须与本趟 `silent` 用**同一份快照**（不传 ⇒ 现读一次，那会让两处又变成两次独立读盘）。
         declaration: kindDeclarationMap(opts.root, snap),
-      }) + "\n";
-      // ── M2：**原子替换**（tmp + rename），⛔ 不是裸 `fs.writeFileSync` ──────────────────────────────
-      // 裸写 = `O_TRUNC` 之后写 ⇒ 并发读者可观测到**零长度/半写**的 `.quay/anchor.json`（实测：本机
-      // ambient load 下 0/32/96 三档 torn 率 5.6e-4 / 5.2e-4 / 1.4e-3；全量 suite 负载下读者把解析失败
-      // 读成 `null`，与「文件不存在」同形 ⇒ `TypeError: Cannot read properties of null (reading 'kinds')`）。
-      // 与同一文件族的 `writeDesired`（driver-runtime）逐字同款：读者要么看到完整旧值、要么看到完整新值。
-      // ⛔ 字段集与语义逐字未动（只换写入方式）—— `stateFile` 的**读**侧一行未改。
-      const tmp = `${paths.stateFile}.tmp-${process.pid}`;
-      fs.writeFileSync(tmp, body, "utf8");
-      fs.renameSync(tmp, paths.stateFile);
+      });
     } catch { /* 回读面写失败不致命（日志行仍在） */ }
   };
   writeState();

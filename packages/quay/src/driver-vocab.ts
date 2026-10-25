@@ -47,6 +47,33 @@ export const KINDS = ["promotion", "worker", "outer", "quality", "meta", "goal"]
 // `DRIVER_SERVICE_KINDS` 与上面的 `KINDS` 是同一集合 —— 服务名 `driver:<kind>` 的 kind 段由它构造。
 // `peer` 是 SPEC §6.9 清单里唯一的**尚不存在**的服务（阶段 D），故刻意不在此列：把它写进来会让
 // `--only peer` 通过解析然后在没有任何实现的地方静默假成功。
+// ── `.quay/live-state.json`（gap-live-state-small-carrier-for-subsecond-inflight-read）──────────
+//
+// 两个值都同时被 **help.ts**（每次 CLI 调用静态加载）与 observation.ts（读面）消费 ⇒ 与上面
+// VERBS/KINDS 同一个理由住在本叶模块：⛔ 在帮助文本里手抄相位词表或阈值 = 第二个定义点，两边漂移
+// 时没有任何检查发现（用户看到的帮助会与读面实际接受的取值不同形）。
+
+/** `.quay/live-state.json` 的**唯一命名点**（仓库相对路径 + wire schema）。写侧
+ *  `plugin/scripts/worker-driver.ts` 与读侧 `observation.readLiveState` 都从这里 import ⇒ 两侧**结构上
+ *  不可能**对同一个文件用不同名字（那正是 carrier 常量要防的漂移）。住在本叶模块的理由：写侧在
+ *  plugin/ 树内、读侧在 packages/quay/src/，两棵树都不能安全地把对方整棵拉进来；这里是唯一同时
+ *  零依赖、又被两侧允许 import 的落点。载体登记见 docs/carrier-registry.json（`live-state.json`）。 */
+export const LIVE_STATE_REL = ".quay/live-state.json";
+/** Wire schema。⛔ 值不同 = 读不懂（读侧报 unreadable），⛔ 不静默适配。 */
+export const LIVE_STATE_SCHEMA = "quay-live-state/v1";
+
+/** `.quay/live-state.json` 的 staleness 阈值（毫秒）。**导出值，不是猜的**：worker driver 的 round
+ *  心跳周期被它自己的 reconcile 地板（`drivers.yml` worker.reconcile_interval_secs = 300 s，在飞
+ *  worker 存在时一轮最长可睡这么久）上界约束 ⇒ 阈值取「地板 + 一个 interval」= 6 min。⛔ 阈值低于
+ *  reconcile 地板会把健康 driver 的快照报成 stale（那会让 stale 这个取值失去信息量）。 */
+export const LIVE_STATE_STALE_MS = 360_000;
+
+/** driver 能**如实观测**的相位词表：spawn 成功（implementing）、子进程退出（fan-in）、终态计算完成
+ *  （条目移出快照）。⛔ driver 不知道 worker 内部子相位（例如 suite 正在跑），本词表不得扩张成一个
+ *  「猜」出来的枚举。写作侧 = plugin/scripts/worker-driver.ts，读侧 = observation.readLiveState。 */
+export const LIVE_STATE_PHASES = ["implementing", "fan-in", "awaiting-land"] as const;
+export type WorkerLivePhase = (typeof LIVE_STATE_PHASES)[number];
+
 export const HOSTED_SERVICE_NAMES = ["web", "control"];
 export const DRIVER_SERVICE_KINDS = KINDS.slice();
 export const ALL_SERVICE_NAMES = [

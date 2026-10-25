@@ -56,6 +56,11 @@ import { gateFinding, findingKey, DEFAULT_RATE, countRecentFilings, routineQuota
 // 定义，本文件读的全局窗口合计必须与 probe-routine.ts 写的是同一个文件；硬规则 5b）。
 import { ROUTINE_FINDINGS_REL } from "./probe-routine.ts";
 import { isDirectEntry } from "./gate-script-base.ts";
+// 状态载体的原子写只有一份实现（kernel `writeJsonAtomic`，tmp + renameSync）。本文件的 `writeState`
+// 曾是**裸 writeFileSync**（O_TRUNC 后写 ⇒ 并发读者可观测到零长度/半写，与「文件不存在」同形），
+// 而 red-window-triage / runner-state-write 的同类 helper 早已委托 kernel —— 一处行为三个实现
+// （.quay/routine-findings.jsonl finding `write-state-atomic-split`，routine semantic-dedup-scan，2026-10-25）。
+import { writeJsonAtomic } from "./write-json-atomic.ts";
 // ⛔ 必须 import，不能只靠下面的 re-export：`export { x } from "..."` 只绑定导出表、不在本模块作用域
 // 绑定 x，本文件内裸调用会 ReferenceError（gap-meta-driver-snapshot-tracked-changes-reference-error）。
 import { snapshotTrackedChanges, probeWriteViolations } from "./probe-write-guard.ts";
@@ -1041,9 +1046,9 @@ export async function scanActionRecords(
   const scannedAt = new Date(nowMs).toISOString();
   const scan = { scannedAt, scanMs, since, records };
   try {
-    const file = path.join(root, ACTION_RECORD_SCAN_REL);
-    fs.mkdirSync(path.dirname(file), { recursive: true });
-    fs.writeFileSync(file, JSON.stringify(scan), "utf8");
+    // 同一族载体的写侧也是原子的（硬规则 5b：`writeState` 之外，本文件还有这一处裸写；它同样是
+    // 一个被并发读的 JSON 缓存载体，裸写会让读侧看到半写 ⇒ 当作「无缓存」再扫一次）。
+    writeJsonAtomic(path.join(root, ACTION_RECORD_SCAN_REL), scan);
   } catch (e) {
     return { ok: false, reason: `scan carrier write failed: ${(e as Error).message}` };
   }
@@ -1557,9 +1562,10 @@ export function readState(root: string): MetaState {
 
 export function writeState(root: string, s: MetaState): void {
   try {
-    const f = path.join(root, STATE_REL);
-    fs.mkdirSync(path.dirname(f), { recursive: true });
-    fs.writeFileSync(f, JSON.stringify(s, null, 2) + "\n", "utf8");
+    // 原子写（委托 kernel 唯一实现）：本处曾是裸 `fs.writeFileSync` ⇒ 并发读者可看到半写/零长度的
+    // `.quay/meta-driver-state.json`，解析失败退化为 never-judged ⇒ **多判一次**（成本事故，且与
+    // 「读到旧值」同形，硬规则 3b）。字段集与语义逐字未动，只换写入方式。
+    writeJsonAtomic(path.join(root, STATE_REL), s);
   } catch { /* 状态写失败不致命；下一轮退化为 never-judged ⇒ 多判一次，不会漏判 */ }
 }
 
