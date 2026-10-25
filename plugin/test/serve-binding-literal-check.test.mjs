@@ -21,7 +21,7 @@ import {
   DOC_SURFACE_REL,
   ADVISORY_ALLOWLIST,
 } from "../scripts/serve-binding-literal-check.ts";
-import { SERVE_BINDING_FALLBACK } from "../../packages/quay/src/serve/serve-binding.ts";
+import { SERVE_BINDING_FALLBACK } from "../../packages/quay/src/serve/view/serve-binding.ts";
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const HOST = SERVE_BINDING_FALLBACK.host;

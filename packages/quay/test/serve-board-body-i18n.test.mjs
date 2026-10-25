@@ -36,8 +36,8 @@ import {
   boardLabelsFor,
   boardLabel,
   fillLabel,
-} from "../src/serve/serve-i18n.ts";
-import { peekBoardSnapshot, BOARD_SNAPSHOT_DISABLED_ENV } from "../src/serve/serve-board.ts";
+} from "../src/serve/view/serve-i18n.ts";
+import { peekBoardSnapshot, BOARD_SNAPSHOT_DISABLED_ENV } from "../src/serve/pages/serve-board.ts";
 import { readBoardExecution, readBoardLanding, clearLandingCache } from "../src/observation.ts";
 import { QUAY_NATIVE_CLI } from "./helpers/cli-entry.mjs";
 

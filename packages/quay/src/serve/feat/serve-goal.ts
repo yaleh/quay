@@ -1,8 +1,8 @@
 // serve-goal.ts — /goal + /goal/<id> route handlers, split from serve-handlers.ts.
 
 import type { IncomingMessage, ServerResponse } from "node:http";
-import type { ProviderClient } from "../provider-client.ts";
-import type { ServePageCfg } from "./serve-render.ts";
+import type { ProviderClient } from "../../provider-client.ts";
+import type { ServePageCfg } from "../view/serve-render.ts";
 import {
   html, escapeHtml, shellStyles, renderMarkdown, renderSiteNav, renderMobileChrome, renderBackLink, relativeTime, tableWrap, pageTitle,
   // AC-301 (gap-ac301-goal-page-zh-chrome-nav-current-and-own-title): the /goal LIST page consumes
@@ -11,14 +11,14 @@ import {
   // second parse is a second decision table, and it would also read a different request's inputs than
   // the one `Vary`/the cookie was declared for) and never re-derives a label.
   htmlLangTag, pageNameFor,
-} from "./serve-render.ts";
-import { readTaskSummary, isAcRollupCounted, type TaskSummary } from "./serve-dashboard.ts";
+} from "../view/serve-render.ts";
+import { readTaskSummary, isAcRollupCounted, type TaskSummary } from "../view/serve-dashboard.ts";
 // gap-webui-goal-body-copy-en-zh: this page's BODY copy dictionary (serve-i18n.ts ROW 21). The
 // roster is taken ONCE per render (`goalLabelsFor(lang)`) rather than re-read per call site; the
 // interpolated rows are filled with `fillLabel`, which THROWS on a hole the caller did not supply
 // (ROW 6 — a silently-unfilled template would render `{n}` to the reader and no "does the page carry
 // the value it should" check would go red).
-import { goalLabelsFor, fillLabel, type GoalKey } from "./serve-i18n.ts";
+import { goalLabelsFor, fillLabel, type GoalKey } from "../view/serve-i18n.ts";
 
 // ── /goal — the third sibling kind (goal store), now PROVIDER-BACKED
 // (SPEC-goal-mechanism-2026-09-06.md §5.2): these routes read goals through the

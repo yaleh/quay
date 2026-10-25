@@ -25,7 +25,7 @@ import { TASK_STATUS_EVENT_ACTOR_KINDS } from "../kernel/task-transition.ts";
 // The web binding's ONE fallback (a leaf module, zero closure deps). Interpolated rather than
 // re-typed: the help text is a DERIVED surface, so the default it prints is the same value the
 // resolver uses — the two cannot drift (gap-serve-binding-defaults-three-copies-to-one-definition-point AC8).
-import { SERVE_BINDING_FALLBACK } from "../serve/serve-binding.ts";
+import { SERVE_BINDING_FALLBACK } from "../serve/view/serve-binding.ts";
 
 // ── the product-layer single naming point for the shipped init upgrade entry ─────────────────────
 // (gap-quay-init-sh-no-single-naming-point; same shape as `RESOURCE_GATE_REL` + `scriptBasename` in

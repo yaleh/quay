@@ -1,22 +1,22 @@
 // serve-board.ts — /board route handler, split from serve-handlers.ts.
 
 import type { IncomingMessage, ServerResponse } from "node:http";
-import type { ProviderClient } from "../provider-client.ts";
-import { readBoardLanding, readBoardExecution, readTaskStatusMapAtRef, yieldToEventLoop, TASK_STATUS_DRIFT_CHECK_NAME, type BoardLanding, type BoardExecution } from "../observation.ts";
-import type { Manifest, ServePageCfg, ServeIdentity } from "./serve-render.ts";
-import { html, escapeHtml, pageStyles, modernistStyles, DEFAULT_PAGE_SIZE, buildHref, renderSiteNav, renderMobileChrome, tableWrap, pageTitle, pageNameFor, htmlLangTag, DEFAULT_LANG, type Lang } from "./serve-render.ts";
+import type { ProviderClient } from "../../provider-client.ts";
+import { readBoardLanding, readBoardExecution, readTaskStatusMapAtRef, yieldToEventLoop, TASK_STATUS_DRIFT_CHECK_NAME, type BoardLanding, type BoardExecution } from "../../observation.ts";
+import type { Manifest, ServePageCfg, ServeIdentity } from "../view/serve-render.ts";
+import { html, escapeHtml, pageStyles, modernistStyles, DEFAULT_PAGE_SIZE, buildHref, renderSiteNav, renderMobileChrome, tableWrap, pageTitle, pageNameFor, htmlLangTag, DEFAULT_LANG, type Lang } from "../view/serve-render.ts";
 // gap-webui-board-body-copy-en-zh: this page's BODY copy resolves through serve-i18n.ts's ROW 11
 // dictionary (`boardLabelsFor` / `fillLabel` / `boardLabel`) instead of hard-coded Chinese literals —
 // the same pattern gap-webui-dashboard-body-copy-en-zh established (ROW 5) and the rest of the series
 // copies. (ROW 10 is /journal's, which landed into develop first.)
-import { boardLabelsFor, boardLabel, fillLabel } from "./serve-i18n.ts";
+import { boardLabelsFor, boardLabel, fillLabel } from "../view/serve-i18n.ts";
 // The state cluster that used to be two module-level Maps + a `let` step hook + two free
 // clear/setter functions now lives in ONE class instance
 // (gap-dashboard-snapshot-store-encapsulate-state). This module is a CONSUMER — it declares no
 // module-level mutable state of its own.
-import { boardSnapshotStore, type BoardSnapshot, type BoardTaskRow } from "./snapshot-store.ts";
+import { boardSnapshotStore, type BoardSnapshot, type BoardTaskRow } from "../io/snapshot-store.ts";
 export { boardSnapshotStore };
-export type { BoardSnapshot } from "./snapshot-store.ts";
+export type { BoardSnapshot } from "../io/snapshot-store.ts";
 
 // ── /board — 三源 join 看板 (gap-web-board-needs-an-inconsistency-verdict-it-does-not-have) ──
 // The board joins 意图 (task store) + 执行 (telemetry) + 落地 (git code existence). The LANDING

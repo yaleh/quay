@@ -2,8 +2,8 @@
 
 import type { IncomingMessage, ServerResponse } from "node:http";
 import path from "node:path";
-import { createDocumentStore } from "../core/document-store.ts";
-import type { ServePageCfg } from "./serve-render.ts";
+import { createDocumentStore } from "../../core/document-store.ts";
+import type { ServePageCfg } from "../view/serve-render.ts";
 import {
   html, escapeHtml, shellStyles, renderMarkdown, renderSiteNav, renderMobileChrome, renderBackLink, pageTitle,
   // AC-302 (gap-ac302-doc-page-zh-chrome-nav-current-and-own-title): the /doc LIST page consumes the
@@ -12,10 +12,10 @@ import {
   // second parse is a second decision table, and it would also read a different request's inputs than
   // the one `Vary`/the cookie was declared for) and never re-derives a label.
   htmlLangTag, pageNameFor,
-} from "./serve-render.ts";
+} from "../view/serve-render.ts";
 // gap-webui-doc-tasks-residual-copy-en-zh: the LIST page's last Chinese string — the read-failure
 // banner — resolves through serve-i18n.ts's ROW 13, the same seam every other page's body copy uses.
-import { docTaskLabelsFor } from "./serve-i18n.ts";
+import { docTaskLabelsFor } from "../view/serve-i18n.ts";
 
 export async function handleDocList(
   req: IncomingMessage,

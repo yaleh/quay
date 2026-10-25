@@ -4,13 +4,13 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import fs from "node:fs";
 import path from "node:path";
 import YAML from "yaml";
-import type { ProviderClient } from "../provider-client.ts";
-import { readLive, readSystem, readManagerLight, readTests, readTestsNonBlocking, readGitHistory, readCurrentSuiteRun, readWorkerOutcomeRecords, yieldToEventLoop, DEFAULT_DRIVER_CAP, type LiveResult, type SystemResult, type ManagerResult, type TestsResult, type GitHistoryResult, type CurrentSuiteRun, type WorkerOutcomeRecord, type DriverKindReading } from "../observation.ts";
-import { TASK_STATUS, type GoalRecord } from "../abi.ts";
+import type { ProviderClient } from "../../provider-client.ts";
+import { readLive, readSystem, readManagerLight, readTests, readTestsNonBlocking, readGitHistory, readCurrentSuiteRun, readWorkerOutcomeRecords, yieldToEventLoop, DEFAULT_DRIVER_CAP, type LiveResult, type SystemResult, type ManagerResult, type TestsResult, type GitHistoryResult, type CurrentSuiteRun, type WorkerOutcomeRecord, type DriverKindReading } from "../../observation.ts";
+import { TASK_STATUS, type GoalRecord } from "../../abi.ts";
 import { DEFAULT_LANG, type Lang, type Manifest, type ServeIdentity, type ServePageCfg } from "./serve-render.ts";
 import { html, escapeHtml, pageStyles, modernistStyles, renderSiteNav, renderMobileChrome, relativeTime, pageTitle, renderIdentityCard, htmlLangTag, pageNameFor } from "./serve-render.ts";
-import { awaitingLandMs, formatAwaitingDuration, suiteSuffix } from "./serve-live.ts";
-import { renderFanInCell } from "./serve-task.ts";
+import { awaitingLandMs, formatAwaitingDuration, suiteSuffix } from "../pages/serve-live.ts";
+import { renderFanInCell } from "../feat/serve-task.ts";
 // gap-webui-dashboard-body-copy-en-zh: the page's BODY copy resolves through serve-i18n.ts's
 // DASHBOARD_LABELS (ROW 5~8) — the same ONE-dictionary seam the nav/page chrome already uses.
 // `dashboardLabelsFor(lang)` is taken ONCE per render (each card takes its own table), never
@@ -21,14 +21,14 @@ import { dashboardLabelsFor, fillLabel } from "./serve-i18n.ts";
 // subpath `quay/dashboard-kernel` without dragging this render module's dependency graph into a
 // consumer (gap-dashboard-kernel-export-for-cross-project-reuse). The rendering half — colour tokens,
 // i18n labels, the SVG string — stays here.
-import { FIXED_GANTT_LANES, mergeLiveAndHistoryIntervals, packLanes, type LiveGanttInterval } from "../dashboard-kernel.ts";
+import { FIXED_GANTT_LANES, mergeLiveAndHistoryIntervals, packLanes, type LiveGanttInterval } from "../../dashboard-kernel.ts";
 // The state cluster that used to be seven module-level Maps + a `let` step hook + five free
 // `clearXxx()` / `setXxxStepHook()` functions now lives in ONE class instance
 // (gap-dashboard-snapshot-store-encapsulate-state). This module is a CONSUMER — it declares no
 // module-level mutable state of its own.
-import { dashboardSnapshotStore, type DashboardSnapshot, type RebuildPolicy, type TaskSummary } from "./snapshot-store.ts";
+import { dashboardSnapshotStore, type DashboardSnapshot, type RebuildPolicy, type TaskSummary } from "../io/snapshot-store.ts";
 export { dashboardSnapshotStore };
-export type { DashboardSnapshot, TaskSummary } from "./snapshot-store.ts";
+export type { DashboardSnapshot, TaskSummary } from "../io/snapshot-store.ts";
 
 // ── /dashboard ─────────────────────────────────────────────────────────────────────────────────────
 
@@ -346,7 +346,7 @@ export {
   mergeLiveAndHistoryIntervals,
   packLanes,
   type LiveGanttInterval,
-} from "../dashboard-kernel.ts";
+} from "../../dashboard-kernel.ts";
 
 /** A merged interval → the card's colour token. In-flight by phase (livePhaseColorToken); history by
  *  fan-in outcome first (fanInOutcomeColorToken), then final_state (completed → positive; failed/

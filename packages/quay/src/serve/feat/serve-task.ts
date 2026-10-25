@@ -1,8 +1,8 @@
 // serve-task.ts — /tasks + /task/<id> route handlers, split from serve-handlers.ts.
 
 import type { IncomingMessage, ServerResponse } from "node:http";
-import type { ProviderClient } from "../provider-client.ts";
-import type { Manifest, ServePageCfg } from "./serve-render.ts";
+import type { ProviderClient } from "../../provider-client.ts";
+import type { Manifest, ServePageCfg } from "../view/serve-render.ts";
 import {
   html, escapeHtml, stripHeadings, pageStyles, modernistStyles, renderMarkdown,
   relativeTime, isSafeRelativeRedirect, DEFAULT_PAGE_SIZE, buildHref, isMissingIdTask,
@@ -12,19 +12,19 @@ import {
   // one import — `serve-render.ts` re-exports both, so the page never re-parses `?lang=`/the cookie
   // (a second parse is a second decision table) and never re-derives a label.
   htmlLangTag, pageNameFor, DEFAULT_LANG, type Lang,
-} from "./serve-render.ts";
+} from "../view/serve-render.ts";
 // gap-webui-doc-tasks-residual-copy-en-zh: this file's four remaining Chinese strings — the two
 // `.malformed-row` placeholders on /tasks and the Runs block's two states on /task/<id> — resolve
 // through serve-i18n.ts's ROW 13. `fillLabel` is taken alongside the roster because three of the
 // rows interpolate data (see ROW 13 ①).
-import { docTaskLabelsFor, fillLabel } from "./serve-i18n.ts";
+import { docTaskLabelsFor, fillLabel } from "../view/serve-i18n.ts";
 import {
   readFanInAttempts, isValidSessionId, readLiveWorkerProcesses, liveSessionIdForPid,
   workerDriverActive, readTaskStatusMapAtRef, readTaskTitleMapAtRef, readTaskCommitTimesAtRef,
   readTaskAtRefMeta, readTaskCommitTimeAtRef,
-} from "../observation.ts";
-import type { LiveWorker, WorkerOutcomeRecord } from "../observation.ts";
-import { TASK_STATUSES } from "../abi.ts";
+} from "../../observation.ts";
+import type { LiveWorker, WorkerOutcomeRecord } from "../../observation.ts";
+import { TASK_STATUSES } from "../../abi.ts";
 
 export async function handleTaskList(
   req: IncomingMessage,

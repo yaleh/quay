@@ -9,45 +9,45 @@
 
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { ProviderClient } from "../provider-client.ts";
-import type { Manifest, ServePageCfg } from "./serve-render.ts";
+import type { Manifest, ServePageCfg } from "./view/serve-render.ts";
 // gap-ac288-webui-lang-switch-mechanism: the language resolver. Its ONLY caller is
 // `handleAllRoutes` below — one parse per request, every page consumes the result (AC4's
 // transmission-surface claim; `grep -rn resolveLang packages/quay/src/` returns this line + the one
 // call, nothing else).
-import { resolveLang, parseCookieHeader, LANG_COOKIE_NAME } from "./serve-lang.ts";
+import { resolveLang, parseCookieHeader, LANG_COOKIE_NAME } from "./view/serve-lang.ts";
 
-import { handleTaskList, handleTaskDetail } from "./serve-task.ts";
-import { handleAdrList, handleAdrDetail } from "./serve-adr.ts";
-import { handleGoalList, handleGoalDetail } from "./serve-goal.ts";
-import { handleDocList, handleDocDetail } from "./serve-doc.ts";
-import { handleLive, handleJournal } from "./serve-live.ts";
-import { handleBoard } from "./serve-board.ts";
-import { handleGitHistory, handleGitHistoryJson } from "./serve-git.ts";
-import { handleSystem, handleManager } from "./serve-system.ts";
-import { handleTests, handleTestsFile } from "./serve-tests.ts";
-import { handleSessions, handleSession, handleSessionEarlier, handleSessionDownload, handleDriverLifecycle, handleNewSession, handleResumeSession, handleFanInLogView, handleFanInLogDownload } from "./serve-sessions.ts";
-import { handleArchitecture } from "./serve-architecture.ts";
-import { handleDashboard, handleDashboardCards } from "./serve-dashboard.ts";
-import { handleSend } from "./serve-send.ts";
-import { handleNeedsHuman } from "./serve-needs-human.ts";
+import { handleTaskList, handleTaskDetail } from "./feat/serve-task.ts";
+import { handleAdrList, handleAdrDetail } from "./docs/serve-adr.ts";
+import { handleGoalList, handleGoalDetail } from "./feat/serve-goal.ts";
+import { handleDocList, handleDocDetail } from "./docs/serve-doc.ts";
+import { handleLive, handleJournal } from "./pages/serve-live.ts";
+import { handleBoard } from "./pages/serve-board.ts";
+import { handleGitHistory, handleGitHistoryJson } from "./io/serve-git.ts";
+import { handleSystem, handleManager } from "./pages/serve-system.ts";
+import { handleTests, handleTestsFile } from "./feat/serve-tests.ts";
+import { handleSessions, handleSession, handleSessionEarlier, handleSessionDownload, handleDriverLifecycle, handleNewSession, handleResumeSession, handleFanInLogView, handleFanInLogDownload } from "./io/serve-sessions.ts";
+import { handleArchitecture } from "./docs/serve-architecture.ts";
+import { handleDashboard, handleDashboardCards } from "./view/serve-dashboard.ts";
+import { handleSend } from "./io/serve-send.ts";
+import { handleNeedsHuman } from "./pages/serve-needs-human.ts";
 
 // Re-export the full public surface (shared render helpers + domain render/handler functions) so
 // serve.ts's named re-exports and existing test imports remain unchanged.
-export * from "./serve-render.ts";
-export * from "./serve-task.ts";
-export * from "./serve-adr.ts";
-export * from "./serve-goal.ts";
-export * from "./serve-doc.ts";
-export * from "./serve-live.ts";
-export * from "./serve-board.ts";
-export * from "./serve-git.ts";
-export * from "./serve-system.ts";
-export * from "./serve-tests.ts";
-export * from "./serve-sessions.ts";
-export * from "./serve-architecture.ts";
-export * from "./serve-dashboard.ts";
-export * from "./serve-send.ts";
-export * from "./serve-needs-human.ts";
+export * from "./view/serve-render.ts";
+export * from "./feat/serve-task.ts";
+export * from "./docs/serve-adr.ts";
+export * from "./feat/serve-goal.ts";
+export * from "./docs/serve-doc.ts";
+export * from "./pages/serve-live.ts";
+export * from "./pages/serve-board.ts";
+export * from "./io/serve-git.ts";
+export * from "./pages/serve-system.ts";
+export * from "./feat/serve-tests.ts";
+export * from "./io/serve-sessions.ts";
+export * from "./docs/serve-architecture.ts";
+export * from "./view/serve-dashboard.ts";
+export * from "./io/serve-send.ts";
+export * from "./pages/serve-needs-human.ts";
 
 // ── Facade dispatcher (M99 pattern: single entry point keeps startServer outDegree low) ──
 

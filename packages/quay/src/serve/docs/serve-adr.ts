@@ -1,8 +1,8 @@
 // serve-adr.ts — /adr + /adr/<id> route handlers, split from serve-handlers.ts.
 
 import type { IncomingMessage, ServerResponse } from "node:http";
-import type { ProviderClient } from "../provider-client.ts";
-import type { ServePageCfg } from "./serve-render.ts";
+import type { ProviderClient } from "../../provider-client.ts";
+import type { ServePageCfg } from "../view/serve-render.ts";
 import {
   html, escapeHtml, shellStyles, renderMarkdown, renderSiteNav, renderMobileChrome, renderBackLink, pageTitle,
   // AC-300 (gap-ac300-adr-page-zh-chrome-nav-current-and-own-title): the /adr LIST page consumes the
@@ -11,8 +11,8 @@ import {
   // second parse is a second decision table, and it would also read a different request's inputs than
   // the one Vary/Cookie was declared for) and never re-derives a label.
   htmlLangTag, pageNameFor,
-} from "./serve-render.ts";
-import { DEFAULT_LANG, type Lang } from "./serve-lang.ts";
+} from "../view/serve-render.ts";
+import { DEFAULT_LANG, type Lang } from "../view/serve-lang.ts";
 
 export async function handleAdrList(
   req: IncomingMessage,

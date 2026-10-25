@@ -134,13 +134,13 @@ test("AC100(c) — the three detail-page rendering code segments contain zero ha
   // render path) is unchanged; only each function's home file moved.
   // Serve modules live under `src/serve/` (gap-routine-architecture-analysis-quay-src-serve-surface-flat-in-src).
   const fnFiles = {
-    handleAdrDetail: "serve/serve-adr.ts",
-    handleGoalDetail: "serve/serve-goal.ts",
-    goalEvidenceCell: "serve/serve-goal.ts",
-    handleDocDetail: "serve/serve-doc.ts",
-    modernistStyles: "serve/serve-render.ts",
-    detailStyles: "serve/serve-render.ts",
-    renderMarkdown: "serve/serve-render.ts",
+    handleAdrDetail: "serve/docs/serve-adr.ts",
+    handleGoalDetail: "serve/feat/serve-goal.ts",
+    goalEvidenceCell: "serve/feat/serve-goal.ts",
+    handleDocDetail: "serve/docs/serve-doc.ts",
+    modernistStyles: "serve/view/serve-render.ts",
+    detailStyles: "serve/view/serve-render.ts",
+    renderMarkdown: "serve/view/serve-render.ts",
   };
   for (const [fn, file] of Object.entries(fnFiles)) {
     const src = fs.readFileSync(path.join(__dirname, "..", "src", file), "utf8");

@@ -34,8 +34,8 @@ import {
   needsHumanLabelsFor,
   needsHumanLabel,
   fillLabel,
-} from "../src/serve/serve-i18n.ts";
-import { renderNeedsHumanPage } from "../src/serve/serve-needs-human.ts";
+} from "../src/serve/view/serve-i18n.ts";
+import { renderNeedsHumanPage } from "../src/serve/pages/serve-needs-human.ts";
 import { QUAY_NATIVE_CLI } from "./helpers/cli-entry.mjs";
 import { makeTmpDir } from "../../../plugin/test/helpers/tmp-workspace.mjs";
 import { createStore } from "../../quay-native/src/store.ts";

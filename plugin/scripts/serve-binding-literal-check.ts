@@ -43,14 +43,14 @@ import { isDirectEntry } from "./gate-script-base.ts";
 // `semantic-dedup-scan-1790995446200`). Only the traversal moved; SCAN_ROOTS and SKIP_DIRS are this
 // checker's own.
 import { listFilesInRoots } from "./fs-walk.ts";
-import { SERVE_BINDING_FALLBACK } from "../../packages/quay/src/serve/serve-binding.ts";
+import { SERVE_BINDING_FALLBACK } from "../../packages/quay/src/serve/view/serve-binding.ts";
 import { CONTROL_PLANE_DEFAULT_HOST } from "../../packages/quay/src/kernel/control-plane-http.ts";
 
 /** The scan roots — the AC's own two arguments. */
 export const SCAN_ROOTS = ["packages/quay/src", "plugin/scripts"];
 
 /** The single file allowed to hold the bind-default literal. */
-export const HOLDER_REL = "packages/quay/src/serve/serve-binding.ts";
+export const HOLDER_REL = "packages/quay/src/serve/view/serve-binding.ts";
 
 /** The declaration the single hit must ride on. */
 export const DECLARATION_MARKER = "SERVE_BINDING_FALLBACK";

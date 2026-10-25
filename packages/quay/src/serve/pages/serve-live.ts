@@ -1,10 +1,10 @@
 // serve-live.ts — /live + /journal route handlers, split from serve-handlers.ts.
 
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { readLive, readJournal, DEFAULT_DRIVER_CAP, type LiveResult, type JournalResult, type JournalSection, type InFlightPhase, type SuiteStateView } from "../observation.ts";
-import type { ServePageCfg, ServeIdentity } from "./serve-render.ts";
-import { html, escapeHtml, pageStyles, modernistStyles, renderMarkdown, relativeTime, renderSiteNav, renderMobileChrome, tableWrap, pageTitle, pageNameFor, htmlLangTag, DEFAULT_LANG, type Lang } from "./serve-render.ts";
-import { journalLabelsFor, liveLabelsFor, fillLabel, dashboardLabel, type JournalKey, type LiveKey } from "./serve-i18n.ts";
+import { readLive, readJournal, DEFAULT_DRIVER_CAP, type LiveResult, type JournalResult, type JournalSection, type InFlightPhase, type SuiteStateView } from "../../observation.ts";
+import type { ServePageCfg, ServeIdentity } from "../view/serve-render.ts";
+import { html, escapeHtml, pageStyles, modernistStyles, renderMarkdown, relativeTime, renderSiteNav, renderMobileChrome, tableWrap, pageTitle, pageNameFor, htmlLangTag, DEFAULT_LANG, type Lang } from "../view/serve-render.ts";
+import { journalLabelsFor, liveLabelsFor, fillLabel, dashboardLabel, type JournalKey, type LiveKey } from "../view/serve-i18n.ts";
 
 // ── Loop-observation routes (gap-web-cannot-show-what-the-loop-is-doing-now) ────────────────
 // /live + /journal render the loop's live state from workspace observation files. The data

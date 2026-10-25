@@ -3,14 +3,14 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { readFileSync, readdirSync, openSync, readSync, closeSync, statSync } from "node:fs";
 import path from "node:path";
-import { readTests, type TestsResult, type TestRunRecord } from "../observation.ts";
+import { readTests, type TestsResult, type TestRunRecord } from "../../observation.ts";
 // The canonical bucket set + string form are a kernel leaf: single source with the dispatch-side
 // attribution judge (which reaches the same leaf through `plugin/scripts/suite-bucket-attribution.ts`'s
 // re-export). Only the ORDER/FORM is shared — the file→bucket JUDGMENT still travels through the
 // dispatch-written artifact below. (routine `semantic-dedup-scan` finding `canonical-buckets`, task
 // gap-routine-semantic-dedup-scan-canonical-buckets.)
-import { canonicalBuckets, type Bucket } from "../kernel/canonical-buckets.ts";
-import type { ServePageCfg, ServeIdentity } from "./serve-render.ts";
+import { canonicalBuckets, type Bucket } from "../../kernel/canonical-buckets.ts";
+import type { ServePageCfg, ServeIdentity } from "../view/serve-render.ts";
 import {
   html, escapeHtml, pageStyles, modernistStyles, renderSiteNav, renderMobileChrome, pad2, obsNote, DEFAULT_PAGE_SIZE, tableWrap, pageTitle,
   // AC-298 (gap-ac298-tests-page-zh-chrome-nav-current-and-own-title): the /tests LIST page consumes
@@ -19,13 +19,13 @@ import {
   // second parse is a second decision table, and it would also read a different request's inputs than
   // the one Vary/Cookie was declared for) and never re-derives a label.
   htmlLangTag, pageNameFor, DEFAULT_LANG, type Lang,
-} from "./serve-render.ts";
-import { renderTimelineBarSvg, DEFAULT_TIMELINE_HOURS, parseTimelineHours, stateColorToken } from "./serve-dashboard.ts";
+} from "../view/serve-render.ts";
+import { renderTimelineBarSvg, DEFAULT_TIMELINE_HOURS, parseTimelineHours, stateColorToken } from "../view/serve-dashboard.ts";
 // ROW 20 (gap-webui-tests-body-copy-en-zh): this page's body-copy dictionary. `testsLabelsFor` takes
 // the whole roster once per render (the `dashboardLabelsFor` idiom); `fillLabel` fills the `{name}`
 // holes. ⛔ The page never re-reads `?lang=`/the cookie — `lang` arrives as a parameter, exactly as
 // `pageNameFor`/`htmlLangTag` do (a second parse is a second decision table).
-import { testsLabelsFor, fillLabel, type TestsKey } from "./serve-i18n.ts";
+import { testsLabelsFor, fillLabel, type TestsKey } from "../view/serve-i18n.ts";
 
 // ── /tests load curve — server-rendered SVG of the suite-load timeseries (gap-test-detail-load-timeseries) ──
 //
