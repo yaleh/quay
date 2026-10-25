@@ -398,12 +398,110 @@ test("形态 D 负对照 — 产物时间晚于所有覆盖提交 ⇒ fresh（�
   writeCarrier(dir, "arch-cycle-history.jsonl", [
     {
       ts: "2026-10-21T23:14:05.363Z", mode: "arch-cycle-report-round", evaluated: true,
-      scopes: [{ scope: "src", source: "packages/quay/src", evaluated: true, artifactTimestamp: "2026-10-21T22:00:00.000Z", cycleCount: 0 }],
+      scopes: [{ scope: "src", source: "packages/quay/src", evaluated: true, basis: "module-graph", artifactTimestamp: "2026-10-21T22:00:00.000Z", cycleCount: 0 }],
     },
   ]);
   const res = analyzeCarrier(dir, ARCH_CYCLE_SPEC, DEFAULT_STALE_SECONDS);
   assert.equal(res.staleEvaluated.state, "fresh");
+  assert.deepEqual(res.staleEvaluated.artifactIndependentScopes, [], "an artifact-derived reading was actually compared");
   assert.equal(res.decayed.filter((d) => d.kind === "stale-evaluated").length, 0);
+});
+
+// ── 形态 D × artifact-independence（gap-arch-cycle-single-directory-basis-never-due）─────────────────
+// 生产实测（2026-10-25T17:27Z）：载体同一条记录里 `scripts` 是 `basis:"single-directory"`、
+// `artifactTimestamp` 比覆盖源最新提交早 1.5h，写手为了绕开这一点把 `commitsSinceArtifact` 硬编码成 0
+// ⇒ 检测器判 stale、载体自称当前，两个读数互相矛盾。修法：描述符声明 `basis:"single-directory"` 是
+// live 读数 ⇒ 不做「产物 vs 提交」比较，并**显式**记 `artifact-independent`（⛔ 不是静默跳过）。
+
+test("形态 D — 同一记录里 single-directory（live）标 artifact-independent，module-graph 仍判 stale（AC2 正/负对照）", () => {
+  const dir = tmpDir("idc-d-independence-");
+  makeRepo(dir);
+  // 两条覆盖路径都在产物之后被提交改动过。
+  commitAt(dir, "2026-10-21T16:26:00Z", "plugin/scripts/a.ts", "export const a = 1;\n");
+  commitAt(dir, "2026-10-21T16:27:00Z", "packages/quay/src/a.ts", "export const a = 1;\n");
+  writeCarrier(dir, "arch-cycle-history.jsonl", [
+    {
+      ts: "2026-10-21T23:14:05.363Z", mode: "arch-cycle-report-round", evaluated: true,
+      scopes: [
+        {
+          scope: "scripts", source: "plugin/scripts", evaluated: true, basis: "single-directory",
+          readingFreshness: "live-file-list", fileListReadAt: "2026-10-21T23:00:00.000Z",
+          artifactTimestamp: "2026-10-21T16:17:56.117Z", cycleCount: 0,
+          commitsSinceArtifact: null, behindSources: null,
+        },
+        {
+          scope: "src", source: "packages/quay/src", evaluated: true, basis: "module-graph",
+          readingFreshness: "artifact", fileListReadAt: null,
+          artifactTimestamp: "2026-10-21T16:17:56.117Z", cycleCount: 0,
+          commitsSinceArtifact: 1, behindSources: true,
+        },
+      ],
+    },
+  ]);
+  const res = analyzeCarrier(dir, ARCH_CYCLE_SPEC, DEFAULT_STALE_SECONDS);
+  const byScope = Object.fromEntries(res.staleEvaluated.scopes.map((s) => [s.scope, s]));
+
+  // (a) live 读数 + 旧产物 ⇒ 不是 stale；跳过比较这件事本身进读数。
+  assert.equal(byScope.scripts.state, "artifact-independent");
+  assert.deepEqual(byScope.scripts.independence, {
+    field: "basis",
+    value: "single-directory",
+    readAt: "2026-10-21T23:00:00.000Z",
+  }, "the live read timestamp comes from the CARRIER, not from the descriptor");
+  assert.equal(byScope.scripts.commitMs, null, "no artifact-vs-commit comparison was made for a live reading");
+  assert.equal(byScope.scripts.artifactTs, "2026-10-21T16:17:56.117Z", "the artifact is still reported — as provenance");
+  assert.match(byScope.scripts.reason, /provenance only/);
+  assert.deepEqual(res.staleEvaluated.artifactIndependentScopes, ["scripts"], "the skip is named at the record level too");
+
+  // (b) module-graph + 同一个旧产物 ⇒ 仍然 stale（豁免不是一揽子）。
+  assert.equal(byScope.src.state, "stale");
+  assert.equal(byScope.src.commitMs, Date.parse("2026-10-21T16:27:00Z"));
+  assert.equal(byScope.src.independence, null);
+  const findings = res.decayed.filter((d) => d.kind === "stale-evaluated");
+  assert.equal(findings.length, 1);
+  assert.equal(findings[0].group, "src", "⛔ only the artifact-derived scope is reported — never the live one");
+
+  // 整体仍是 stale：同一条记录里确实有一份「读的是产物且已落后」的读数。
+  assert.equal(res.staleEvaluated.state, "stale");
+  assert.equal(res.staleEvaluated.artifactIndependentScopes.includes("src"), false);
+});
+
+test("形态 D — 只有 artifact-independent 作用域 ⇒ 整体 fresh（不是 stale，也不是 not-evaluated）", () => {
+  const dir = tmpDir("idc-d-independence-only-");
+  makeRepo(dir);
+  commitAt(dir, "2026-10-21T16:26:00Z", "plugin/scripts/a.ts", "export const a = 1;\n");
+  writeCarrier(dir, "arch-cycle-history.jsonl", [
+    {
+      ts: "2026-10-21T23:14:05.363Z", mode: "arch-cycle-report-round", evaluated: true,
+      scopes: [{
+        scope: "scripts", source: "plugin/scripts", evaluated: true, basis: "single-directory",
+        readingFreshness: "live-file-list", fileListReadAt: "2026-10-21T23:00:00.000Z",
+        artifactTimestamp: "2026-10-21T16:17:56.117Z", cycleCount: 0,
+        commitsSinceArtifact: null, behindSources: null,
+      }],
+    },
+  ]);
+  const res = analyzeCarrier(dir, ARCH_CYCLE_SPEC, DEFAULT_STALE_SECONDS);
+  assert.equal(res.staleEvaluated.state, "fresh", "a current live reading is fresh — the old artifact does not age it");
+  assert.deepEqual(res.staleEvaluated.artifactIndependentScopes, ["scripts"]);
+  assert.equal(res.decayed.filter((d) => d.kind === "stale-evaluated").length, 0);
+
+  // 负对照（同一份产物时间戳、去掉 basis 声明）⇒ 同样的数据仍被判 stale。若没有这一臂，
+  // 「artifact-independent」就可能只是「这个夹具永远不报」。
+  const dir2 = tmpDir("idc-d-independence-neg-");
+  makeRepo(dir2);
+  commitAt(dir2, "2026-10-21T16:26:00Z", "plugin/scripts/a.ts", "export const a = 1;\n");
+  writeCarrier(dir2, "arch-cycle-history.jsonl", [
+    {
+      ts: "2026-10-21T23:14:05.363Z", mode: "arch-cycle-report-round", evaluated: true,
+      scopes: [{
+        scope: "scripts", source: "plugin/scripts", evaluated: true, artifactTimestamp: "2026-10-21T16:17:56.117Z", cycleCount: 0,
+      }],
+    },
+  ]);
+  const res2 = analyzeCarrier(dir2, ARCH_CYCLE_SPEC, DEFAULT_STALE_SECONDS);
+  assert.equal(res2.staleEvaluated.state, "stale", "⛔ without the independence declaration the same old artifact IS stale");
+  assert.deepEqual(res2.staleEvaluated.artifactIndependentScopes, []);
 });
 
 test("形态 D — 读 git 的例程按声明 not-applicable（⛔ 不是 fresh，也不是 finding）", () => {
