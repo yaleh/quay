@@ -215,8 +215,8 @@ $ node --experimental-strip-types --test plugin/test/instrument-decay-check.test
 
 ## Blocker
 
-**2026-10-25T05:08:17.950Z — worker 未落地（exited-not-landed）**
+**2026-10-25T05:43:09.706Z — worker 未落地（exited-not-landed）**
 
-- 未落地原因：AC 未全勾（checked 0/10，剩余未勾 10）——续做只需验证并勾选 AC
+- 未落地原因：step=dark-axis: dark-axis (ADR-007 per-milestone predicate) refused the flip — MISSING: MISSING — the task body records no L_D/L_G reading (a numeric quantity at an axis-anchored line) and carries no explicit "该轴仍暗,理由:<...>" declaration. ADR-007 requires one or the other before the task may be called done.
 - run_id：wk-prod-anchor
-- session_id：b5698da2-a16f-405a-b4dc-c02eacab4095
+- session_id：97009f6f-a302-4e9f-9414-47ad150b3af2
