@@ -47,17 +47,32 @@ package 粒度是**目录**，于是 `quay/src/serve` 本身成了那个 god pac
 2026-10-23 的同一条 finding 被 rate 闸（3/窗口）拒收 → 从未立案 → 2026-10-25 以本任务复发。
 
 **本轮做法**：`serve.ts` 保留为 router（setup + server lifecycle）、`serve-handlers.ts` 仍是路由分发器；
-其余 19 个模块按内聚性拆进 5 个子包：
+其余 19 个模块按内聚性拆进 6 个子包：
 
-- `serve/view/`：i18n、lang、render、dashboard、binding（展示层）
+- `serve/view/`：i18n、lang、render、dashboard、binding、live-format、fan-in-cell（展示层，叶子）
 - `serve/pages/`：board、live、needs-human、system（页面 handler）
-- `serve/io/`：git、sessions、send、snapshot-store（I/O 与传输）
+- `serve/io/`：git、sessions、send、http-json（I/O 与传输）
+- `serve/store/`：snapshot-store（两个快照 store 的共享叶子）
 - `serve/feat/`：task、tests、goal（功能页 handler）
 - `serve/docs/`：adr、architecture、doc（文档面）
 
 **纯搬迁**：任何模块的导出、行为、关系图都没有变 —— 只有目录变了，以及因此必须重算的相对说明符
 （逐条 re-resolve，不是字符串替换）。唯一模块相对文件读 `webui-modernist.css` 随之加了一层 `..`；
 测试/检查器里的递归 source scan 与 repo 相对路径常量一并跟着搬。
+
+### 断环（AC-916 的常驻 guard，不是 god-package 读数的一部分）
+
+拆分本身会**新造目录环**：平铺时 `serve/` 是一个节点，切出子包后 `view → pages/feat/io → view` 三条回边
+各自闭合一个 SCC。`packages/quay/test/directory-cycle.test.mjs`（AC-916 的守卫）会因此转红。修法是把共享
+叶子下移到消费者能单向到达的地方，而不是加豁免：
+
+- `view/serve-live-format.ts` ← `pages/serve-live.ts` 的三个纯格式化函数（page 反向 import 回来）
+- `view/serve-fan-in-cell.ts` ← `feat/serve-task.ts` 的 `renderFanInCell`（task 侧 re-export 同名，公开面不变）
+- `store/snapshot-store.ts` ← `io/snapshot-store.ts`（`view → store` 单向叶子边）
+
+读数：`directory-cycle.test.mjs` 5/5 pass，`packages/quay/src` 目录级环 = 0（拆分子包前为 0，拆分未引入新的）。
+被搬迁模块的 goals 判据同步重新锚定：AC-146 → `serve/pages/serve-needs-human.ts`，AC-253 → `serve/io/serve-send.ts`
+（不重锚则搬迁会让这两条判据永久红）。
 
 ### 读数（archguard 0.1.42，scope "packages"，1125 entities / 3433 relations，拆分前后各跑一次 analyze）
 - L_G archguard: serve_fanOut=112 (before=556) serve_fanIn=19 serve_files=6 subpackages=5 all_subpackages_lt_300=true
@@ -107,6 +122,8 @@ package 粒度是**目录**，于是 `quay/src/serve` 本身成了那个 god pac
 - `plugin/test/worker-driver-retry-classification.test.mjs`
 - `plugin/test/worker-driver.test.mjs`
 - `docs/analysis/discovery-portfolio.mjs`
+- `goals/AC-146-human-interface-explicit-owner.md`
+- `goals/AC-253-会话读写原语统一到共享层-四个模块在本仓库可用且有非测试消费者-spec-阶段-a3.md`
 - `tasks/gap-routine-architecture-analysis-god-package-serve-fanout-556.md`
 
 ## Blocker
@@ -115,3 +132,9 @@ package 粒度是**目录**，于是 `quay/src/serve` 本身成了那个 god pac
 
 - 未落地原因：step=suite: AssertionError [ERR_ASSERTION]: must print the FULL github recipe `claude plugin marketplace add yaleh/quay` (one <source> arg) [baseline A/B: HARD RED (task-introduced-red) — the task's red set is NOT a subset of the develop baseline red set: added=plugin/test/needs-human-parking-recheck.test.mjs changed=-]
 - run_id：wk-prod-anchor
+
+**2026-10-26 追记**：上面这条 blocker 的 suite 红与本次拆分无关 —— 它读的是**主检出的实况**（`tasks/` 里当时
+needs-human 数为 0 ⇒ "the real board carries needs-human tasks (got 0)"），不是 worktree 的代码。同一轮 suite 里
+一起红的 5 个文件（`quay-init`、`task-granularity-advice`、`full-suite-runner-cgroup`、`capability-catalog`、
+`needs-human-parking-recheck`）全是「读主检出/真实看板实况」这一类，delta-relatedness 也判全部 UNRELATED。
+本轮另修的是真正的代码缺陷：拆分子包引入的三个目录环（见上文「断环」）。
