@@ -76,7 +76,8 @@ Usage:
   quay adr new <id> --title <title> [--status <status>] [--body <text>|--body-file <path>] [--json] [--root <path>]
   quay adr accept|deprecate|reject <id> [--json] [--root <path>]
   quay adr supersede <id> --by <newId> [--json] [--root <path>]
-  quay goal list [--status <status>] [--kind <kind>] [--goal <goal-id>] [--no-evidence] [--json] [--root <path>]
+  quay goal list [--status <status>] [--kind <kind>] [--goal <goal-id>] [--no-evidence] [--no-body [--with-status-log]] [--since <ISO8601|epoch-ms>] [--json] [--root <path>]
+  quay goal log [--since <ISO8601|epoch-ms>] [--json] [--root <path>]
   quay goal show <id> [--json] [--root <path>]
   quay goal write <id> --origin <text> [--title <title>] [--status <status>] [--goal <goal-id>] [--criterion <cmd>] [--json] [--root <path>]
   quay goal gate <id> [--dry-run] [--json] [--root <path>]
@@ -534,7 +535,8 @@ Environment contract — when the default 'acceptance' gate spawns a command:
     process.stdout.write(`quay goal — goal + AC records (GOAL-NNN / AC-NNN)
 
 Usage:
-  quay goal list [--status <status>] [--kind <kind>] [--goal <goal-id>] [--no-evidence] [--json] [--root <path>]
+  quay goal list [--status <status>] [--kind <kind>] [--goal <goal-id>] [--no-evidence] [--no-body [--with-status-log]] [--since <ISO8601|epoch-ms>] [--json] [--root <path>]
+  quay goal log [--since <ISO8601|epoch-ms>] [--json] [--root <path>]
   quay goal show <id> [--json] [--root <path>]
   quay goal write <id> --origin <text> [--title <title>] [--status <status>] [--goal <goal-id>] [--criterion <cmd>] [--branch true|false] [--json] [--root <path>]
   quay goal gate <id> [--timeout <ms>] [--dry-run] [--json] [--root <path>]
@@ -549,11 +551,36 @@ Usage:
                         .quay/gate-events.jsonl, whose cost is ∝ ledger size and independent of the
                         goal count. The full record set is still returned — a summariser that only
                         needs frontmatter (id/status/kind/title) should pass this.
+                        list --no-body  THIN PROJECTION: each row keeps ONLY id / title / status /
+                        kind / goal / updatedAt — ⛔ no body / criterion / expect / origin /
+                        statusLog. This is the surface for an external read-only panel: the full
+                        record set costs 1.28MB/786ms for 397 rows, almost all of it long
+                        fields the panel never renders. History is not lost — read it through
+                        'goal log' below, or add --with-status-log to the list call.
+                        --with-status-log  Opt the record's own statusLog back into the thin
+                        projection (the ONE long field a history-aware list consumer needs).
+                        No effect without --no-body (the full record already carries it).
+                        --since <ISO8601|epoch-ms>  INCREMENTAL READ: keep only records whose
+                        carrier mtime (updatedAt) is at/after the instant. updatedAt is a file
+                        mtime, so a git checkout/merge only makes it NEWER — the filter can
+                        OVER-report but never miss a change. A record whose mtime could not be
+                        read has no place in time and is INCLUDED (same direction), ⛔ never
+                        dropped as if unchanged.
+                        ⛔ Three-state: if the goal carrier directory is missing or unreadable,
+                        --no-body / --since / 'goal log' answer {evaluated:false, reason} and exit
+                        3 (= NOT-EVALUATED, the same code 'goal check --stale-pass' uses). An
+                        empty array therefore always means "read the carrier, nothing there".
                         write --branch true|false  Opt a GOAL into its own isolation branch
                         (SPEC-goal-branch §4.1). The branch NAME is DERIVED — 'goal/<GOAL-NNN>' —
                         ⛔ never a flag. It is created lazily from the develop tip when the goal
                         becomes active, and discarded (tip SHA recorded in statusLog) when the goal
                         is retired/superseded. The field is LOCKED once the branch exists.
+  log                   The CROSS-RECORD status-transition read: merges every record's own
+                        append-only 'statusLog' into ONE stream, ascending by 'at', each row
+                        {id, goal, kind, at, from, to, actor, reason}. 'goal' is the owning GOAL on
+                        an AC row and null on a GOAL row. ⛔ No second carrier and no second parser:
+                        the per-record statusLog stays the single source of truth. Exits 3 with
+                        {evaluated:false} when the carrier cannot be read (see 'list' above).
   gate <id>             Run the record's 'criterion' via the acceptance runner and append ONE
                         GateEvent to <root>/.quay/gate-events.jsonl. Exit 0 = pass, 1 = fail,
                         2 = usage (no such record / bad args). An EMPTY criterion fails closed.
