@@ -1,7 +1,7 @@
 ---
 id: gap-driver-status-pointer-retired-state
 title: driver status 的 pointer 读数把「链接不存在」报成 not-evaluated；Q1 之后缺省是正常态，应为 retired
-status: todo
+status: ready
 labels:
   - gap
 parent: null
