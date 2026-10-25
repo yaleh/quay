@@ -72,7 +72,7 @@ node --experimental-strip-types plugin/scripts/instrument-decay-check.ts \
 
 ## DoD
 
-- [ ] AC1–AC5 全绿并贴出实读证据；AC6 的生产轮次读数已贴出（待外部）。
+- [ ] AC1–AC5 全绿并贴出实读证据；AC6 的生产轮次读数已贴出（待外部）
 - [x] **真实落地**：常量不止活在测试里——在**主检出的真实载体**上、不带任何 fixture / 注入切换跑一次检测器，得到这 3 组不在 `decayed[]` 而带真实读数出现在 `adjudicated[]`（若该时刻另有分组变暗，逐一具名报告，⛔ 不得静默忽略，也不得因此判本条失败），并把命令与输出贴进 Evidence。fixture / 注入数据满足不算（硬规则 4 推论三）。
 - [x] 声明**可过期、不可永久化**：`reviewAfter` 全部是未来的具体时刻；把任一改到过去都能让对应分组回到 `decayed[]`（AC4 ① 即该判据）。
 - [x] ⛔ 不为让读数变绿而删分组、删 `expected` 词表项或加「永久豁免」开关；「不算腐烂」不得等于「从读数里消失」。
@@ -177,6 +177,29 @@ ANTI-DRIFT OK: … 2 actual file(s), all within declared Touches (3 glob(s))
 
 需合入 `develop` 后由下一个真实 `instrument_decay` 质量轮次产出（该轮 `ts` / `reason` / `filings` 与窗口起点
 晚于的落地 sha）。**本 worker 未取得**：worker 不跑 suite、不 merge develop，轮次发生在 ff 之后。
+
+**AC6 的承接者（「（待外部）」成立的条件）**：生产者是**常驻** `quality-gate-driver` 的 `instrument_decay`
+例程（`.quay/config.yml:281` `enabled: true`、`interval: interval:360m`），每轮把 `instrument-decay` fact 写进
+`.quay/quality-round.jsonl`，fact 自带 `decayedCount` / `adjudicatedCount` 两条独立读数；2026-10-25T05:08–05:09Z
+的生产轮次 649/650 仍在产出 ⇒ **这一路是自动的、无需人派发**。复查承接任务：`gap-instrument-decay-postlanding-two-rounds`
+（ready，同子系统，读同一 `.quay/quality-round.jsonl` 的落地后轮次）。
+
+### 续做轮次复核（2026-10-25，CONTINUE round —— 复用既有 worktree，未重做实现）
+
+上一轮已实现并勾选 AC1–AC5；本轮只做复核，并把最后一处 `（待外部）` 注解移到**行尾**：判据是
+`isExternalVerificationItem` 的 `/（待外部）\s*$/`（`ready-pool-check.ts`），原 DoD 行尾多一个 `。` ⇒ 该行被判为
+「待本任务」，fan-in 的 ac-completion gate 因此报 `checked 8/10，剩余未勾 2 含非待外部项`。复核读数（同一分支，
+`git merge develop` 之后、无 fixture / 注入切换）：
+
+```
+$ node --experimental-strip-types plugin/scripts/instrument-decay-check.ts --root /data/home/yale/work/quay --carrier fan-in-step-trace.jsonl --json
+⇒ ok:true evaluated:true decayedCount:0 adjudicatedCount:8   decayed[] = []
+  suite-skip / suite-recovery / suite-recovery-blocked 均为 state=explained-absent、condition.exitCode=0，
+  且各自仍带真实 count（79 / 121 / 44）与 lastWrite（2026-10-23T08:42:04.648Z / 2026-10-23T23:15:27.308Z）
+
+$ node --experimental-strip-types --test plugin/test/instrument-decay-check.test.mjs
+ℹ tests 37 / pass 37 / fail 0 / cancelled 0 / skipped 0 / todo 0
+```
 
 ### DoD — 真实落地 / 可过期 / 不从读数消失
 
