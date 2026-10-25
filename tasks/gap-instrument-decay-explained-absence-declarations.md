@@ -2,7 +2,7 @@
 id: gap-instrument-decay-explained-absence-declarations
 title: instrument-decay 的 3 个 rate-stopped 分组（suite-skip / suite-recovery /
   suite-recovery-blocked）经查全是「已解释缺席」，但 MANIFEST 没有机器可读裁定 ⇒ 常驻检测器每轮重报、人工取证重做
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -79,7 +79,9 @@ node --experimental-strip-types plugin/scripts/instrument-decay-check.ts \
 
 ## Evidence
 
-**ADR-007 暗轴记录**：该轴仍暗,理由:本任务只在一个常驻检测器里新增 3 条常量声明及其测试用例——零新 import、零新模块、零跨包边，L_D/L_G 在本改动上不产生可读的机器读数（未取 archguard 读数）。
+**ADR-007 暗轴记录**（续做轮修正行首形态：上一轮把 `该轴仍暗` 写在 `**…**：` 之后的行中，而 `packages/quay/src/gate/dark-axis-record.ts` 的 `DISCLAIM_ZH_RE` 要求 `该轴仍暗` 位于行首（可选 `- `/`> `/`**` 前缀之后），故被判 MISSING）：
+
+- 该轴仍暗,理由:本任务只在常驻检测器 `plugin/scripts/instrument-decay-check.ts` 的 MANIFEST 里新增 3 条常量声明及对应用例——零新 import、零新模块、零跨包边，L_D/L_G 的可测面与改动前完全相同；本轮实读 `node experiments/quay-perpetual-stream/scripts/git-lens-instrument.mjs lg --work-dir /data/home/yale/work/quay` 返回 NOT-EVALUATED（scope-not-evaluated: 读不到 query/manifest.json），即该轴在本检出上取不到机器读数，故按 ADR-007 记「仍暗」而不是编一个数字。
 
 ### AC1 — 改动前的现状复现（2026-10-25，主检出 `/data/home/yale/work/quay`）
 

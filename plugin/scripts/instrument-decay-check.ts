@@ -140,6 +140,29 @@ export interface ArtifactSpec {
   scopeNameField?: string;
 }
 
+/** suite-recovery / suite-recovery-blocked 共用的条件读数（两者由同一段恢复阶梯代码写，
+ *  缺席的直接成因是同一个：阶梯有没有「降档」或「耗尽」）。
+ *
+ *  语义：取【最近一次降档(suite-recovery) 或 耗尽(blocked)】的时刻作为窗口起点；窗口内每一条
+ *  suite-incomplete 都必须在同一 task 上等到一条 suite-recovery-accepted（或 baseline-exempt）。
+ *  ——「恢复轮自己定论了」= certifiedRun !== null ⇒ 这两个终端分支的触发不存在。
+ *  ⛔ 不是「本组多久没写」的二次包装：它读的是触发输入本身，输入一变条件立刻取假。
+ *  ⛔ 与检测器同口径排除 kind=goal-merge（那不是任务 fan-in 的步骤链）。 */
+export const RECOVERY_LADDER_CONDITION_CMD =
+  `node -e 'const fs=require("fs");const R=[];` +
+  `for(const l of fs.readFileSync(".quay/fan-in-step-trace.jsonl","utf8").split("\\n")){` +
+  `if(!l.trim())continue;let r;try{r=JSON.parse(l)}catch{continue}` +
+  `if(r.kind==="goal-merge")continue;R.push(r)}` +
+  `let start=null;` +
+  `for(const r of R)if((r.step==="suite-recovery"||r.step==="suite-recovery-blocked")&&r.ts&&(!start||r.ts>start))start=r.ts;` +
+  `if(!start)process.exit(1);` +
+  `const after=R.filter(r=>r.ts&&r.ts>start);` +
+  `const cert=after.filter(r=>r.step==="suite-recovery-accepted"||r.step==="suite-recovery-baseline-exempt");` +
+  `const inc=after.filter(r=>r.step==="suite-incomplete");` +
+  `let bad=0;` +
+  `for(const r of inc)if(!cert.some(c=>c.ts>r.ts&&c.task===r.task))bad++;` +
+  `process.exit(bad===0?0:1)'`;
+
 export const MANIFEST: CarrierSpec[] = [
   {
     file: "fan-in-step-trace.jsonl",
@@ -159,9 +182,13 @@ export const MANIFEST: CarrierSpec[] = [
     // 子系统的加载面）；改判别键取值必须同时改这里，缺一即静默失效（本文件的词表一贯是人审查过的声明，
     // 见头注「词表是【人审查过的声明】，不是从代码推导」）。
     skipKind: "goal-merge",
-    // 5 个 rate-stopped 分组的机器可读裁定（gap-fan-in-step-trace-rate-stopped-adjudication 的现场
-    // 取证，逐条写在 reason 里：触发普查为 0 的三组、条件性不可达的一组、真回归信号一组）。
+    // 8 个 rate-stopped 分组的机器可读裁定：前 5 条来自 gap-fan-in-step-trace-rate-stopped-adjudication
+    // （触发普查为 0 的三组、条件性不可达的一组、真回归信号一组）；后 3 条（suite-skip /
+    // suite-recovery / suite-recovery-blocked）来自 gap-instrument-decay-explained-absence-declarations
+    // ——同一批分组此前已在 2026-10-22、2026-10-23 两次被**散文**裁定过，第三次才落成机制。
     // ⚠️ reviewAfter 一律是**必须重看的日期**，不是「永久白名单」——过期即回到 decayed[]。
+    // ⚠️ conditional-on-input 的条件命令读的都是【载体里的触发输入】，不是「本组多久没写」：
+    //    「原因仍然缺席」与「写手还活着」是两个量，条件只对前者负责；写手腐烂由 Shape B 本身暴露。
     adjudicated: [
       {
         group: "verification-round-record",
@@ -211,6 +238,65 @@ export const MANIFEST: CarrierSpec[] = [
         reason:
           "只在「原并发下通过的文件在更低并发下变红」时写（suite-recovery 阶梯的 new-regression 分支），" +
           "全历史 1 条 ⇒ 真回归信号，本身低频。",
+        reviewAfter: "2026-11-22T00:00:00.000Z",
+      },
+      {
+        group: "suite-skip",
+        kind: "conditional-on-input",
+        reason:
+          "写手 worker-fan-in.ts:3265 只在 needSuite === false（codeDelta === \"\" 的 doc-only 落地，或 reuseSkip 的 " +
+          "develop-advance-doc-only-reuse）时写本组。末次写入 2026-10-23T08:42:04.648Z 是 gap-goal911-… 的一次真实" +
+          "doc-only 落地（per-run delta 逐字记 \"doc-only delta → skip suite\"）；此后载体里有 23 个含 ff 的落地" +
+          "（2026-10-25 实读），其中唯一没有 suite-start 的正是写出这条 suite-skip 的那个落地本身 ⇒ 跳过分支的输入" +
+          "没有再发生。条件读的是【末次 suite-skip 之后的每一次落地】：任何一个含 ff 却没有 suite-start 的落地" +
+          "（且不是末次 suite-skip 自己那次）⇒ 本裁定立即失效、回到 decayed[]。",
+        // ⚠️ 只读、亚秒级、可证伪：按 task 关联（runId 在生产载体里恒为 wk-prod-anchor，不能当作 run 键），
+        //    并要求窗口内至少一次落地（⛔ 不用「零落地」这种空转真值换绿）。
+        // ⛔ 与检测器同口径排除 kind=goal-merge：那不是任务 fan-in 的步骤链（见描述符 skipKind 注释）。
+        conditionCmd:
+          `node -e 'const fs=require("fs");const R=[];` +
+          `for(const l of fs.readFileSync(".quay/fan-in-step-trace.jsonl","utf8").split("\\n")){` +
+          `if(!l.trim())continue;let r;try{r=JSON.parse(l)}catch{continue}` +
+          `if(r.kind==="goal-merge")continue;R.push(r)}` +
+          `let last=null;` +
+          `for(const r of R)if(r.step==="suite-skip"&&r.ts&&(!last||r.ts>last.ts))last=r;` +
+          `if(!last)process.exit(1);` +
+          `const seen=new Map();` +
+          `for(const r of R){if(!r.ts||r.ts<=last.ts||!r.task)continue;` +
+          `const e=seen.get(r.task)||{ff:false,start:false};` +
+          `if(r.step==="ff")e.ff=true;if(r.step==="suite-start")e.start=true;seen.set(r.task,e)}` +
+          `let ff=0,bad=0;` +
+          `for(const [t,e] of seen){if(!e.ff)continue;ff++;if(t!==last.task&&!e.start)bad++}` +
+          `process.exit(ff>0&&bad===0?0:1)'`,
+        reviewAfter: "2026-11-22T00:00:00.000Z",
+      },
+      {
+        group: "suite-recovery",
+        kind: "conditional-on-input",
+        reason:
+          "写手 worker-fan-in.ts:3042/:3051 只在某个恢复档返回 no-conclusion 或 incomplete（**降档**）时写。" +
+          "末次写入 2026-10-23T23:15:27.308Z（OOM 风暴末轮）之后 suite-incomplete 发生 2 次" +
+          "（2026-10-24T00:01:07.835Z、2026-10-24T15:43:31.916Z，均 oom-killed），两次恢复轮都在第一档" +
+          "（concurrency 64）就产出自己的完整判词并写 suite-recovery-accepted + suite-recovery-baseline-exempt" +
+          "（00:15:35.319Z、16:01:38.392Z），降档 0 次 ⇒ 本组自己的触发没有发生；读数的下降是 OOM 修复的结果，" +
+          "不是写手停摆。条件读的是【最近一次降档/耗尽之后的每一条 suite-incomplete】：任何一条在同一 task 上" +
+          "等不到 suite-recovery-accepted / suite-recovery-baseline-exempt ⇒ 本裁定立即失效、回到 decayed[]。",
+        // ⚠️ 窗口起点 = 本组最近一次写入与 blocked 最近一次写入的**较大者**（两者由同一段阶梯代码写，
+        //    任一发生都意味着阶梯确实动了 ⇒ 之前的 incomplete 已被那次动作解释）。窗口内只要有一条
+        //    incomplete 没等到认证，就说明恢复轮没能自己定论——那正是腐烂该露头的形状。
+        conditionCmd: RECOVERY_LADDER_CONDITION_CMD,
+        reviewAfter: "2026-11-22T00:00:00.000Z",
+      },
+      {
+        group: "suite-recovery-blocked",
+        kind: "conditional-on-input",
+        reason:
+          "写手 worker-fan-in.ts:3135 只在 certifiedRun === null（阶梯耗尽、没有任何一档给出完整判词）时写。" +
+          "末次写入 2026-10-23T23:15:27.308Z 之后 suite-incomplete 2 次、两次都在第一档被认证" +
+          "（certifiedRun !== null）⇒ 触发没有发生；本组 44 条自 2026-10-14 起、最近 20 个间隔中位数 0.6h、" +
+          "全历史最大 1.8h，当前约 24h 远超自身节奏——这是「罕见的条件性缺席」，不是写手腐烂。条件与 " +
+          "suite-recovery 同一条：最近一次降档/耗尽之后每条 suite-incomplete 都必须等到后续认证。",
+        conditionCmd: RECOVERY_LADDER_CONDITION_CMD,
         reviewAfter: "2026-11-22T00:00:00.000Z",
       },
     ],
