@@ -35,3 +35,11 @@ goal/AC 的状态迁移历史**已经存在**且是单源 append-only：每条�
 - 改动落在 `packages/quay/src/cli/goal.ts`（投影与过滤）与 `packages/quay/src/cli/help.ts`（登记），⛔ 不改 Provider ABI 的 `GoalRecord` 形状——投影在 CLI 层完成。
 - `packages/quay/test/` 有 `node:test` 覆盖 AC1/AC2/AC4，fixture 用临时 workspace（真 `.quay/config.yml` + `goals/`），文件头 `// @test-group product`。
 - `quay goal log` 的合并逻辑只有一个实现，⛔ 不新增第二套 statusLog 解析。
+
+## Touches
+
+- `tasks/gap-goal-list-no-thin-projection-no-since.md`（自指）
+- `packages/quay/src/cli/goal.ts`（投影 / `--since` / `goal log`）
+- `packages/quay/src/cli/help.ts`（两个新 flag 与 `goal log` 的登记）
+- `packages/quay/test/cli-goal-read-surface.test.mjs`（新测试：投影、`--since`、三态、`goal log` 合并计数）
+- `packages/quay/test/cli.test.mjs`（若既有 goal list 断言需要同步）
