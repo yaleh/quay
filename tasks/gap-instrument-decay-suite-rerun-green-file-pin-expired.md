@@ -2,7 +2,7 @@
 id: gap-instrument-decay-suite-rerun-green-file-pin-expired
 title: instrument-decay 的 suite-rerun-green 裁定把「被点名的基线红文件」写死：该文件转绿后条件仍 exit
   1，而绿分支仍被另一持久红（full-suite-runner-cgroup AC3）遮挡
-status: todo
+status: ready
 labels:
   - gap
   - defect
