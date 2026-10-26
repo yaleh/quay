@@ -629,8 +629,8 @@ test("裁定 — conditional-on-input：条件命令 exit 0 ⇒ explained-absent
 
 // ── 生产 MANIFEST 的 8 条裁定（本任务的交付物本身）────────────────────────────────────────────────
 // 用真实描述符 + 合成载体：8 个分组都命中 Shape B，但描述符声明了裁定 ⇒ 全部进 adjudicated[]。
-// ⚠️ 其中 4 条 conditional-on-input 跑的是**生产条件命令**（suite-rerun-green 读载体尾部最后一条 rerun；
-// suite-skip / suite-recovery / suite-recovery-blocked 读各自的触发输入），因此这些用例同时证明
+// ⚠️ 其中 4 条 conditional-on-input 跑的是**生产条件命令**（suite-rerun-green 读末次本组写入之后的
+// rerun 记录；suite-skip / suite-recovery / suite-recovery-blocked 读各自的触发输入），因此这些用例同时证明
 // 「声明的可执行条件读数」真的能跑、且方向正确——不是把散文抄进 reason 就算数。
 
 const RARE_BY_DESIGN_GROUPS = [
@@ -641,7 +641,9 @@ const EXPLAINED_ABSENT_GROUPS = [
   "suite-rerun-green", "suite-skip", "suite-recovery", "suite-recovery-blocked",
 ];
 const ADJUDICATED_GROUPS = [...RARE_BY_DESIGN_GROUPS, ...EXPLAINED_ABSENT_GROUPS];
-const BASELINE_RED_FILE = "plugin/test/task-granularity-advice.test.mjs";
+// ⛔ 不是「那一个基线红文件」：suite-rerun-green 的条件是**触发式**的，点名哪个文件与裁定无关。
+//    这里用任意一个名字，正是为证明这一点（旧写的 /task-granularity-advice\.test\.mjs/ 断言是缺陷编码）。
+const ANY_RERUN_FILE = "plugin/test/some-other-suite-red.test.mjs";
 // OLD (08-30) < MID < MID2 < RECENT (09-04)，且 MID/MID2 距 RECENT < 24h（否则恢复阶梯的两个
 // 认证分组自己会被 Shape B 判成 rate-stopped，把用例变成一个与主题无关的腐烂读数）。
 const MID = "2026-09-03T18:00:00.000Z";
@@ -649,18 +651,22 @@ const MID2 = "2026-09-03T20:00:00.000Z";
 
 function manifestFixtureRows({
   lastRerunState = "rerun-red",
-  lastRerunFiles = [BASELINE_RED_FILE],
+  lastRerunFiles = [ANY_RERUN_FILE],
   strayDocOnlyLanding = false,
   omitRerun = false,
+  omitRerunState = false,
 } = {}) {
   const rows = [];
   for (const s of COMPANION_STEPS) rows.push(stepRec(s, RECENT));
   // ⛔ suite-skip 不在 RECENT 那批里：它属于本任务新裁定的 explained-absent 组，末次写入是 OLD。
   for (const s of SUITE_STEPS.filter((x) => x !== "suite-skip")) rows.push(stepRec(s, RECENT));
   for (const g of ADJUDICATED_GROUPS) rows.push(stepRec(g, OLD));
-  // omitRerun ⇒ 载体里没有触发输入（负控制 ⑤）：readable 但最后一轮重跑记录不存在。
+  // omitRerun ⇒ 载体里没有触发输入（负控制 ④）：readable 但最后一轮重跑记录不存在。
   if (!omitRerun) {
-    rows.push({ event: "step-end", step: "rerun", task: "gap-x", runId: "wk-prod-1", ts: RECENT, epoch: epochOf(RECENT), exit: 1, ok: false, state: lastRerunState, files: lastRerunFiles });
+    const rerun = { event: "step-end", step: "rerun", task: "gap-x", runId: "wk-prod-1", ts: RECENT, epoch: epochOf(RECENT), exit: 1, ok: false, state: lastRerunState, files: lastRerunFiles };
+    // omitRerunState ⇒ 记录里**没有** state 键（负控制 ⑤ 的「缺失」一半；null/未知字符串各是另外一半）。
+    if (omitRerunState) delete rerun.state;
+    rows.push(rerun);
   }
   // 恢复阶梯的条件输入：末次降档之后一次 incomplete + 它在同一 task 上的认证（= 首档自己定论）。
   rows.push(stepRec("suite-incomplete", MID));
@@ -696,7 +702,10 @@ test("生产 MANIFEST — 8 个 rate-stopped 分组全部被裁定（4 rare-by-d
     // ⛔ 已裁定 ≠ 从读数里消失：count / lastWrite 照旧输出，且都指向那组的真实末次写入。
     assert.ok(a.count > 0 && a.lastWriteMs === Date.parse(OLD), `${g} keeps its real reading in adjudicated[]`);
   }
-  assert.match(res.adjudicated.find((a) => a.group === "suite-rerun-green").condition.cmd, /task-granularity-advice\.test\.mjs/);
+  // ⛔ 触发式条件的正控制（旧写此处是 `assert.match(…, /task-granularity-advice\.test\.mjs/)` 的**反转**）：
+  //    生产的条件命令不得含任何具体文件名——把实例钉进条件，会让裁定随「当前哪个文件红」翻转（硬规则 3b）。
+  assert.doesNotMatch(res.adjudicated.find((a) => a.group === "suite-rerun-green").condition.cmd, /\.test\.mjs/);
+  assert.doesNotMatch(res.adjudicated.find((a) => a.group === "suite-rerun-green").condition.cmd, /task-granularity-advice\.test\.mjs/);
 });
 
 test("生产 MANIFEST 负控制 ① — 把 suite-skip 的 reviewAfter 改到过去 ⇒ 它回到 decayed[]，detail 点名过期", () => {
@@ -729,19 +738,30 @@ test("生产 MANIFEST 负控制 ③ — 含 ff 但没有 suite-start 的落地 �
   assert.equal(res.adjudicated.length, 7, "the other seven adjudications still hold");
 });
 
-test("生产 MANIFEST 负控制 ③ — 最新的 rerun 变绿（仍点名该文件）⇒ suite-rerun-green 的条件不成立 ⇒ 回到 decayed[]", () => {
-  const dir = tmpDir("idc-manifest-adj-neg-");
-  // ⚠️ 文件仍被点名 ⇒ 唯一让解释失效的是 `rerun-green` 这个状态本身（不是「不再点名」）。
-  writeCarrier(dir, "fan-in-step-trace.jsonl", manifestFixtureRows({ lastRerunState: "rerun-green", lastRerunFiles: [BASELINE_RED_FILE] }));
+// ── suite-rerun-green 的【触发式】条件：六条正负控制 ────────────────────────────────────────────────
+// (gap-instrument-decay-suite-rerun-green-file-pin-expired)
+// 语义：窗口 = 末次 suite-rerun-green 写入之后；窗口内 ①≥1 条 rerun ②没有 rerun-green ③状态全部已知
+//       ⇒ exit 0（explained-absent）；否则 exit 1（回到 decayed[]，fail-closed）。
+// ⛔ 条件不点名任何文件：「当前红的是哪一个文件」不再是条件的一部分——旧缺陷正是把实例钉进条件，
+//    该文件转绿后条件恒红，而「换了个红文件」与「写手真腐烂」在读数上同形（硬规则 3b）。
+
+test("suite-rerun-green 触发式控制 ① — 末次写入之后最新的 rerun 是 rerun-red（点名任意文件）⇒ explained-absent", () => {
+  const dir = tmpDir("idc-rerun-green-red-");
+  // ⚠️ 随机一个文件名：换成哪个文件都不影响裁定（这正是修法要证明的东西）。
+  writeCarrier(dir, "fan-in-step-trace.jsonl", manifestFixtureRows({
+    lastRerunState: "rerun-red", lastRerunFiles: ["plugin/test/whatever-is-red-today.test.mjs"],
+  }));
   const res = analyzeCarrier(dir, MANIFEST[0], DEFAULT_STALE_SECONDS, NOW_MS);
-  const stopped = res.decayed.filter((d) => d.kind === "rate-stopped").map((d) => d.group);
-  assert.deepEqual(stopped, ["suite-rerun-green"], "a green rerun removes the conditional-on-input explanation");
-  assert.match(res.decayed.find((d) => d.group === "suite-rerun-green").detail, /condition command did not hold/);
-  assert.equal(res.adjudicated.length, 7, "the other seven adjudications still hold");
+  assert.deepEqual(res.decayed.filter((d) => d.kind === "rate-stopped"), [], "a persistent baseline red explains the absence regardless of WHICH file");
+  const a = res.adjudicated.find((x) => x.group === "suite-rerun-green");
+  assert.ok(a, "suite-rerun-green must be in adjudicated[]");
+  assert.equal(a.state, "explained-absent");
+  assert.equal(a.condition.exitCode, 0);
+  assert.equal(res.adjudicated.length, 8);
 });
 
-test("生产 MANIFEST 正控制 ② — rerun-not-evaluated（第三态）仍点名该文件 ⇒ explained-absent（⛔ 不压成布尔）", () => {
-  const dir = tmpDir("idc-manifest-adj-nev-");
+test("suite-rerun-green 触发式控制 ② — rerun-not-evaluated（第三态）⇒ explained-absent（⛔ 不压成布尔）", () => {
+  const dir = tmpDir("idc-rerun-green-nev-");
   writeCarrier(dir, "fan-in-step-trace.jsonl", manifestFixtureRows({ lastRerunState: "rerun-not-evaluated" }));
   const res = analyzeCarrier(dir, MANIFEST[0], DEFAULT_STALE_SECONDS, NOW_MS);
   assert.deepEqual(res.decayed.filter((d) => d.kind === "rate-stopped"), [], "not-evaluated is not 'the cause is gone'");
@@ -752,18 +772,19 @@ test("生产 MANIFEST 正控制 ② — rerun-not-evaluated（第三态）仍点
   assert.equal(res.adjudicated.length, 8);
 });
 
-test("生产 MANIFEST 负控制 ④ — rerun-red 但不再点名该文件 ⇒ 条件不成立 ⇒ 回到 decayed[]", () => {
-  const dir = tmpDir("idc-manifest-adj-nofile-");
-  writeCarrier(dir, "fan-in-step-trace.jsonl", manifestFixtureRows({ lastRerunState: "rerun-red", lastRerunFiles: ["plugin/test/other.test.mjs"] }));
+test("suite-rerun-green 触发式控制 ③ — 末次写入之后出现 rerun-green ⇒ 绿分支发生了却没写出本组 ⇒ decayed[]", () => {
+  const dir = tmpDir("idc-rerun-green-hit-");
+  // ⚠️ 文件仍被点名：唯一让解释失效的是 `rerun-green` 这个状态本身（不是「不再点名」）。
+  writeCarrier(dir, "fan-in-step-trace.jsonl", manifestFixtureRows({ lastRerunState: "rerun-green", lastRerunFiles: [ANY_RERUN_FILE] }));
   const res = analyzeCarrier(dir, MANIFEST[0], DEFAULT_STALE_SECONDS, NOW_MS);
   const stopped = res.decayed.filter((d) => d.kind === "rate-stopped").map((d) => d.group);
-  assert.deepEqual(stopped, ["suite-rerun-green"], "a rerun that no longer names the baseline-red file removes the explanation");
+  assert.deepEqual(stopped, ["suite-rerun-green"], "a green rerun removes the conditional-on-input explanation");
   assert.match(res.decayed.find((d) => d.group === "suite-rerun-green").detail, /condition command did not hold/);
   assert.equal(res.adjudicated.length, 7, "the other seven adjudications still hold");
 });
 
-test("生产 MANIFEST 负控制 ⑤ — 载体里没有任何 rerun 记录 ⇒ 条件不成立 ⇒ 回到 decayed[]", () => {
-  const dir = tmpDir("idc-manifest-adj-norerun-");
+test("suite-rerun-green 触发式控制 ④ — 载体里没有任何 rerun 记录 ⇒ 条件不成立 ⇒ decayed[]", () => {
+  const dir = tmpDir("idc-rerun-green-norerun-");
   writeCarrier(dir, "fan-in-step-trace.jsonl", manifestFixtureRows({ omitRerun: true }));
   const res = analyzeCarrier(dir, MANIFEST[0], DEFAULT_STALE_SECONDS, NOW_MS);
   const stopped = res.decayed.filter((d) => d.kind === "rate-stopped").map((d) => d.group);
@@ -772,13 +793,29 @@ test("生产 MANIFEST 负控制 ⑤ — 载体里没有任何 rerun 记录 ⇒ �
   assert.equal(res.adjudicated.length, 7, "the other seven adjudications still hold");
 });
 
-test("生产 MANIFEST 负控制 ⑤b — rerun 的 state 缺失/未知 ⇒ 条件不成立（未知态不豁免）", () => {
-  const dir = tmpDir("idc-manifest-adj-unknown-");
-  writeCarrier(dir, "fan-in-step-trace.jsonl", manifestFixtureRows({ lastRerunState: null }));
-  const res = analyzeCarrier(dir, MANIFEST[0], DEFAULT_STALE_SECONDS, NOW_MS);
-  const stopped = res.decayed.filter((d) => d.kind === "rate-stopped").map((d) => d.group);
-  assert.deepEqual(stopped, ["suite-rerun-green"], "an unrecognized state must fail closed to 'report decay'");
-  assert.equal(res.adjudicated.length, 7, "the other seven adjudications still hold");
+test("suite-rerun-green 触发式控制 ⑤ — rerun 的 state 缺失/未知 ⇒ 条件不成立（未知态不豁免）", () => {
+  for (const [prefix, patch] of [
+    ["idc-rerun-green-nostate-", { omitRerunState: true }],
+    ["idc-rerun-green-unknown-", { lastRerunState: "rerun-mystery" }],
+    ["idc-rerun-green-null-", { lastRerunState: null }],
+  ]) {
+    const dir = tmpDir(prefix);
+    writeCarrier(dir, "fan-in-step-trace.jsonl", manifestFixtureRows(patch));
+    const res = analyzeCarrier(dir, MANIFEST[0], DEFAULT_STALE_SECONDS, NOW_MS);
+    const stopped = res.decayed.filter((d) => d.kind === "rate-stopped").map((d) => d.group);
+    assert.deepEqual(stopped, ["suite-rerun-green"], `${prefix}: an unrecognized state must fail closed to 'report decay'`);
+    assert.equal(res.adjudicated.length, 7, `${prefix}: the other seven adjudications still hold`);
+  }
+});
+
+test("suite-rerun-green 触发式控制 ⑥ — 生产的 condition.cmd 不含任何具体文件名（原 :699 断言反转）", () => {
+  const cmd = MANIFEST[0].adjudicated.find((a) => a.group === "suite-rerun-green").conditionCmd;
+  assert.doesNotMatch(cmd, /task-granularity-advice\.test\.mjs/, "the expired instance must not be part of the condition");
+  assert.doesNotMatch(cmd, /\.test\.mjs/, "no concrete file name at all: the condition must be trigger-driven");
+  // 条件读的是【触发输入本身】（末次本组写入之后的 rerun 记录），不是「本组多久没写」的二次包装。
+  assert.match(cmd, /suite-rerun-green/, "the window start must be this group's own last write");
+  assert.match(cmd, /rerun-red/, "a known non-green state must be an accepted window member");
+  assert.match(cmd, /rerun-not-evaluated/, "the producer's third state must be an accepted window member");
 });
 
 test("CLI --json — 裁定在机器面上：decayedCount 不含它们，adjudicated[] 独立可见", () => {

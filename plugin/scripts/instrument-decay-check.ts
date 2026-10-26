@@ -230,22 +230,34 @@ export const MANIFEST: CarrierSpec[] = [
         group: "suite-rerun-green",
         kind: "conditional-on-input",
         reason:
-          "in-round rerun 的绿分支被持续基线红遮蔽：plugin/test/task-granularity-advice.test.mjs 在 develop 基线红集合里" +
-          "（.quay/baseline-red-rounds.jsonl 27 条签名），含它的 rerun 只可能回来 rerun-red 或 rerun-not-evaluated" +
-          "（后者是「没评估成」的第三态，不是绿）⇒ 绿分支条件性不可达。" +
-          "条件读的是【最新一条 rerun 记录】：它一变绿、或不再点名该文件，本裁定立即失效。",
-        // ⚠️ 只读、亚秒级、可证伪：取载体尾部最后一条 step=rerun 的记录，断言它仍点名该文件，且状态是
-        //    rerun-red **或** rerun-not-evaluated。
-        // ⛔ 三态不得压成布尔（硬规则 3b）：旧写法只认 `state==="rerun-red"`，把写手明确保留的
-        //    `rerun-not-evaluated`（被 watchdog 中止 / 没有重跑命令 / 解析不出文件）读成「原因消失」，
-        //    于是每轮误报 rate-stopped。未知/缺失态仍 fail-closed 到 exit 1（不豁免）。
+          "in-round rerun 的绿分支被持续基线红遮蔽，读的只是这个机制：只要还有一个基线红文件挡住 suite，" +
+          "rerun 就只可能回来 rerun-red 或 rerun-not-evaluated（后者是「没评估成」的第三态，不是绿）⇒ 绿分支条件性不可达。" +
+          "当前实例是 plugin/test/full-suite-runner-cgroup.test.mjs 的 AC3（a REAL round's measured concurrency）" +
+          "——**文件名是实例说明，不是条件的一部分**：红的是哪个文件会随修/坏翻转，把实例写进条件会让裁定随之为随机读数。" +
+          "条件读的是【末次 suite-rerun-green 之后的每一条 rerun 记录】：出现一条 rerun-green、没有任何 rerun、" +
+          "或出现未知/缺失 state，本裁定立即失效、回到 decayed[]。",
+        // ⚠️ 只读、亚秒级、可证伪：窗口 = 末次 suite-rerun-green 写入之后；窗口内断言 ① 至少一条 rerun
+        //    （⛔ 不用「零 rerun」这种空转真值换绿）② 没有一条 rerun-green ③ 每条状态都是已知的
+        //    rerun-red / rerun-not-evaluated。
+        // ⛔ 触发式而非实例式：⛔ 不点名任何文件（旧写法把「被声明为红的那一个文件」钉进正/负控制，
+        //    于是该文件转绿后条件恒 exit 1 —— 声明的机制没变，声明的实例过期了；且「换了个红文件」与
+        //    「写手真腐烂」在读数上同形，硬规则 3b）。
+        // ⛔ 三态不得压成布尔（硬规则 3b）：rerun-not-evaluated 是写手明确保留的第三态，不得读成「原因消失」；
+        //    未知/缺失态与服务端「窗口内出现 rerun-green」一样 fail-closed 到 exit 1（不豁免）。
         // ⛔ 不读 append-only 的 baseline-red 台账——那份台账只增不减，一旦为真就永远为真（单向闩锁不是读数）。
+        // ⛔ 与检测器同口径排除 kind=goal-merge（那不是任务 fan-in 的步骤链）。
         conditionCmd:
-          `node -e 'const fs=require("fs");let L=fs.readFileSync(".quay/fan-in-step-trace.jsonl","utf8").split("\\n");` +
-          `let last=null;for(let i=L.length-1;i>=0;i--){if(!L[i].trim())continue;let r;try{r=JSON.parse(L[i])}catch{continue}` +
-          `if(r.step==="rerun"){last=r;break}}` +
-          `process.exit(last&&(last.state==="rerun-red"||last.state==="rerun-not-evaluated")&&Array.isArray(last.files)&&` +
-          `last.files.indexOf("plugin/test/task-granularity-advice.test.mjs")>=0?0:1)'`,
+          `node -e 'const fs=require("fs");const R=[];` +
+          `for(const l of fs.readFileSync(".quay/fan-in-step-trace.jsonl","utf8").split("\\n")){` +
+          `if(!l.trim())continue;let r;try{r=JSON.parse(l)}catch{continue}` +
+          `if(r.kind==="goal-merge")continue;R.push(r)}` +
+          `let last=null;` +
+          `for(const r of R)if(r.step==="suite-rerun-green"&&r.ts&&(!last||r.ts>last))last=r.ts;` +
+          `if(!last)process.exit(1);` +
+          `const after=R.filter(r=>r.step==="rerun"&&r.ts&&r.ts>last);` +
+          `if(after.length===0)process.exit(1);` +
+          `for(const r of after)if(r.state!=="rerun-red"&&r.state!=="rerun-not-evaluated")process.exit(1);` +
+          `process.exit(0)'`,
         reviewAfter: "2026-11-22T00:00:00.000Z",
       },
       {
