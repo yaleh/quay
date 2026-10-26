@@ -3,7 +3,7 @@ id: gap-routine-architecture-analysis-dup-parse-iso-since-two-verbs
 title: "architecture-analysis: archguard exact-clone 82266722a040a86e (101
   tokens / 7 statements / 11 lines): the two verbs' --since validators differ
   only in the error-message prefix; the"
-status: todo
+status: ready
 labels:
   - gap
   - routine-filed
