@@ -353,7 +353,7 @@ test("AC6: the verb is registered on the help surface with its first-shipped ver
     assert.match(help.stdout, /quay suite \[--json\] \[--limit <n>\] \[--since <ISO8601>\]/);
     const detail = await runCli(["suite", "--help"]);
     assert.equal(detail.code, 0);
-    assert.match(detail.stdout, /first shipped in 0\.23\.0-dev/);
+    assert.match(detail.stdout, /first shipped in 0\.24\.0-dev/);
     assert.match(detail.stdout, /finishedAt/);
     assert.match(detail.stdout, /ISO 8601/);
   } finally {
