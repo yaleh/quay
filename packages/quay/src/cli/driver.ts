@@ -35,6 +35,10 @@ import { readFanInAttempts, readLiveWorkers, type FanInAttemptsResult, type InFl
 // import `../fan-in/`，否则会新增 core-root → fan-in 边（fan-in → core-root 已存在）。
 import { probeInstruments, type InstrumentProbe, type InstrumentReading } from "../fan-in/ff-merge.ts";
 import type { CliCtx } from "./context.ts";
+// The version `driver log --since` first shipped in — ONE definition point (cli/help.ts), interpolated
+// into both help surfaces rather than re-typed here (硬规则 5b). help.ts is a leaf module, so this
+// adds nothing to the per-invocation cost the way importing provider machinery would.
+import { DRIVER_LOG_SINCE_FIRST_SHIPPED } from "./help.ts";
 
 // VERBS 与 KINDS 定义在 core-root 的 driver-vocab.ts（零依赖叶模块——help.ts 静态 import 它，⛔ 不能
 // 把这两个常量留在本文件：本文件的传递闭包带 config.ts/plugin-root.ts，实测会让 `quay --help` 每次
@@ -99,8 +103,7 @@ Usage:
              attempt — never classified, never interpreted). Reads the workspace's own runtime
              carrier through observation.readFanInAttempts, the same single reader the web
              /needs-human page and the MCP \`driver_log\` tool use. ⛔ Does NOT start/stop anything
-             and does not spawn the supervisor kernel.
-  live       READ-ONLY: print the CURRENT in-flight worker set as JSON — the machine-readable
+             and does not spawn the supervisor kernel.  live       READ-ONLY: print the CURRENT in-flight worker set as JSON — the machine-readable
              counterpart to the web dashboard's "Loop pulse" card. Reuses observation.readLive's ONE
              call chain (⛔ no second /proc scan); scoped to THIS workspace (each scanned process must
              declare its own \`Repo root:\` marker equal to --root). Always JSON. Reports
@@ -116,6 +119,13 @@ Usage:
              as an empty log.
   --task <id>                 (log only) Restrict to one task's attempts.
   --limit <n>                 (log only) Keep the most recent n attempts.
+  --since <ISO8601>           (log only) Keep only attempts whose \`ts\` is at or after this instant.
+                              Combinable with --limit: filter by --since FIRST, then keep the newest n.
+                              (first shipped in ${DRIVER_LOG_SINCE_FIRST_SHIPPED}) Both bounds make the
+                              read bounded: the carrier is scanned TAIL-FIRST in growing windows and
+                              never read whole just to keep a tail. \`totalLines\`/\`malformedLines\`
+                              then describe the WINDOW read — \`window.truncated\` says so, and
+                              \`window.since\` echoes the bound.
   --root <path>               Workspace root (default: discovered via .quay/config.yml from cwd).
   --reconcile-interval <s>    (worker only) Coordination floor: reconcile at least every N seconds
                               even if every edge event (worker exit) is lost — degrade to
@@ -176,11 +186,22 @@ carried from the workspace root (main checkout), not a short-lived worktree.
  *  ⛔ Every field it prints is the record's own value, verbatim: `reason` is NOT truncated and NOT
  *  classified (人 2026-09-20: the cause of a needs-human is an exception and an enum of causes is
  *  unreliable, so this surface shows the原文 and nothing else). The status line is the reader's own
- *  tri-state, so "the carrier could not be read" reads as itself instead of as an empty log. */
+ *  tri-state, so "the carrier could not be read" reads as itself instead of as an empty log.
+ *
+ *  The `window:` line exists because the counts above it are WINDOW-scoped on a `--limit`/`--since`
+ *  read (gap-driver-log-since-and-tail-read AC3): printing `lines: 412` with nothing else would let a
+ *  256 KiB tail read impersonate the whole 8 MB carrier. ⛔ The truncated case says so in words. */
 export function renderFanInAttemptsText(res: FanInAttemptsResult): string {
+  const w = res.window;
   const lines: string[] = [];
   lines.push(`carrier: ${res.carrier}  status: ${res.status}${res.reason != null ? `  (${res.reason})` : ""}`);
   lines.push(`lines: ${res.totalLines} (${res.malformedLines} unparseable)  attempts: ${res.attempts.length}`);
+  lines.push(
+    `window: bytes ${w.fromByte}..${w.toByte}  read=${w.bytesRead}B  since=${w.since ?? "—"}  ` +
+    (w.truncated
+      ? `truncated=true ⇒ the line counts above cover THIS TAIL WINDOW ONLY, not the whole carrier`
+      : `truncated=false ⇒ the line counts above cover the whole carrier`)
+  );
   for (const a of res.attempts) {
     lines.push("");
     lines.push(`${a.ts ?? "—"}  ${a.task ?? "—"}  run=${a.run_id ?? "—"}  state=${a.final_state ?? "—"}`);
@@ -191,6 +212,22 @@ export function renderFanInAttemptsText(res: FanInAttemptsResult): string {
     if (a.fanInLog != null) lines.push(`  fan-in log: ${a.fanInLog}`);
   }
   return lines.join("\n") + "\n";
+}
+
+/** Validate `--since`: an ISO 8601 instant. Missing ⇒ no bound. ⛔ An unparseable value is a usage
+ *  error (exit 1), never a silently-unbounded read — that would answer a different question than the
+ *  one asked (the same rule `quay suite`'s `--since` parser states). Same shape as
+ *  `parseSuiteSince`; kept here rather than imported so the two verbs' error wording stays their own. */
+export function parseDriverLogSince(raw: unknown): { sinceMs: number | null; error: string | null } {
+  if (raw === undefined) return { sinceMs: null, error: null };
+  if (typeof raw === "string") {
+    const ms = Date.parse(raw);
+    if (Number.isFinite(ms)) return { sinceMs: ms, error: null };
+  }
+  return {
+    sinceMs: null,
+    error: `quay driver log: --since requires an ISO 8601 instant (e.g. 2026-10-01T00:00:00Z; got ${JSON.stringify(raw)})`,
+  };
 }
 
 /** The `quay driver log` body — a pure function of (flags, resolved root) so the CLI and any future
@@ -215,7 +252,11 @@ export function runDriverLog(
     return { stdout: "", reason: `quay driver log: --limit requires a non-negative integer (got ${JSON.stringify(flags.limit)})`, exitCode: 1 };
   }
   const taskId = typeof flags.task === "string" ? flags.task : null;
-  const res = readFanInAttempts(root, { taskId, limit });
+  const since = parseDriverLogSince(flags.since);
+  if (since.error) {
+    return { stdout: "", reason: since.error, exitCode: 1 };
+  }
+  const res = readFanInAttempts(root, { taskId, limit, sinceMs: since.sinceMs });
   const json = resolveJsonFlag(flags);
   if (json == null) {
     return { stdout: "", reason: `quay driver log: invalid --format value (only \`json\` is accepted)`, exitCode: 1 };

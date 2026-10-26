@@ -43,6 +43,12 @@ import { SERVE_BINDING_FALLBACK } from "../serve/view/serve-binding.ts";
 // whose real home the help text is supposed to point at.
 export const QUAY_INIT_REL = "plugin/bin/quay";
 
+/** The version `quay driver log --since` first shipped in (gap-driver-log-since-and-tail-read AC5).
+ *  ONE definition point: this file's driver help prints it, and cli/driver.ts's own inline usage
+ *  interpolates the same constant (⛔ the version is never re-typed — 硬规则 5b). `--limit` shipped in
+ *  0.22.0; `--since` and the bounded tail read in the version below. */
+export const DRIVER_LOG_SINCE_FIRST_SHIPPED = "0.24.0-dev";
+
 /** `quay init --help`, the `--doc-branch-name` flag's "no default" clause. Shared VERBATIM by this
  *  file and `cli/init.ts` (both render it; the two copies used to be byte-identical duplicates). */
 export const INIT_DOC_BRANCH_NO_DEFAULT_PROSE =
@@ -696,7 +702,9 @@ Usage:
              aborts WITHOUT starting (exit 1) rather than risk two loops on one kind.
   log        READ-ONLY: print the driver's recorded per-attempt log (the RAW failure text of each
              attempt — never classified, never interpreted), through observation.readFanInAttempts
-             (the same single reader the web /needs-human page uses). ⛔ Does NOT spawn the kernel.
+             (the same single reader the web /needs-human page uses). \`--task\`/\`--limit\`/\`--since\`
+             scope it to the slice the caller asked for (see the flags below). ⛔ Does NOT spawn the
+             kernel.
   live       READ-ONLY: print the CURRENT in-flight worker set as JSON — the machine-readable
              counterpart to the web dashboard's "Loop pulse" card. Reuses observation.readLive's ONE
              call chain (⛔ no second /proc scan); scoped to THIS workspace (each scanned process must
@@ -707,6 +715,19 @@ Usage:
   --kind <${KINDS.join("|")}>   Which driver the command targets. Required for the control verbs
              (start/stop/drain/resume/status/restart); optional for the read-only \`live\` (defaults to
              \`worker\`).
+  --task <id>                 (log only) Restrict to one task's attempts.
+  --limit <n>                 (log only) Keep the most recent n attempts (shipped in 0.22.0).
+  --since <ISO8601>           (log only) Keep only attempts whose \`ts\` is at or after this instant
+                              (first shipped in ${DRIVER_LOG_SINCE_FIRST_SHIPPED}). Combinable with
+                              --limit: filter by --since FIRST, then keep the newest n.
+                              EITHER bound makes the read bounded — the carrier is scanned TAIL-FIRST
+                              in growing windows and is never read whole just to keep a tail.
+                              ⚠️ CONSEQUENCE FOR \`totalLines\`: on a bounded read it is the number of
+                              non-blank lines in the WINDOW that was read, NOT the carrier's total,
+                              and \`malformedLines\` is window-scoped too. The appended \`window\` object
+                              reports it explicitly: {fromByte, toByte, since, truncated, bytesRead} —
+                              \`truncated: true\` ⇔ the counts are the window's. A malformed line
+                              older than the window is UNKNOWN, never reported as zero.
   --root <path>               Workspace root (default: discovered via .quay/config.yml from cwd).
   --confirm-timeout <s>       (start/restart) Liveness-confirmation window (default 30). \`start\` reports
                               success ONLY after supervisor+driver are both confirmed alive; a supervisor

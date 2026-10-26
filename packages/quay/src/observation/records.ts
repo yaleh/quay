@@ -132,19 +132,53 @@ export interface ParsedWorkerOutcomes {
   malformedLines: number;
 }
 
+/** Parse ONE carrier line into an outcome record, or null when the line carries no readable record
+ *  (malformed JSON, or JSON that is not an object).
+ *
+ *  ⛔ THE per-line parser: `parseWorkerOutcomeRecordsDetailed` (whole-text accounting) and
+ *  `readFanInAttempts`' bounded tail scan (gap-driver-log-since-and-tail-read AC2) both call THIS —
+ *  a second field-mapping for the same carrier is exactly the drift this repo forbids (硬规则 5b).
+ *
+ *  ⚠️ A line that parses to a NON-OBJECT (a bare `5` / `"x"` / `[]` straight into JSON.parse) is null
+ *  rather than an all-null record: the old shape fabricated a record with 16 null fields out of a
+ *  line that carried no record at all, which is exactly the 硬规则 3b form
+ *  (「读不懂」伪装成「读到了一个空记录」). */
+export function parseWorkerOutcomeRecordLine(line: string): WorkerOutcomeRecord | null {
+  const str = (v: unknown): string | null => (typeof v === "string" && v.length > 0 ? v : null);
+  const num = (v: unknown): number | null => (typeof v === "number" && Number.isFinite(v) ? v : null);
+  const bool = (v: unknown): boolean | null => (typeof v === "boolean" ? v : null);
+  let j: Record<string, unknown>;
+  try {
+    const parsed: unknown = JSON.parse(line);
+    if (parsed == null || typeof parsed !== "object" || Array.isArray(parsed)) return null;
+    j = parsed as Record<string, unknown>;
+  } catch { return null; }
+  return {
+    ts: str(j.ts),
+    task: str(j.task),
+    selector_reason: str(j.selector_reason),
+    exit_code: num(j.exit_code),
+    signal: str(j.signal),
+    wall_clock_ms: num(j.wall_clock_ms),
+    final_state: str(j.final_state),
+    failure_reason: str(j.failure_reason),
+    started_at: str(j.started_at),
+    ended_at: str(j.ended_at),
+    worker_pid: num(j.worker_pid),
+    run_id: str(j.run_id),
+    in_flight_count: num(j.in_flight_count),
+    timed_out: bool(j.timed_out),
+    session_id: str(j.session_id),
+    mechanical_fan_in: parseMechanicalFanIn(j.mechanical_fan_in),
+  };
+}
+
 /** Parse `.quay/worker-outcome.jsonl` (one JSON object per line) into outcome records, WITH the line
  *  accounting. Pure — never throws; a malformed line is skipped (best-effort runtime log, not a store).
  *  Reads every field the driver writes (computeOutcome's 14) rather than a hand-picked subset —
  *  `worker_pid` was on disk but dropped by the old 4-field parse (gap-webui-task-runs-block AC2).
- *
- *  ⚠️ A line that parses to a NON-OBJECT (a bare `5` / `"x"` / `[]` straight into JSON.parse) counts
- *  as malformed rather than being pushed as an all-null record: the old shape fabricated a record with
- *  16 null fields out of a line that carried no record at all, which is exactly the 硬规则 3b form
- *  (「读不懂」伪装成「读到了一个空记录」). */
+ *  The per-line work is `parseWorkerOutcomeRecordLine`'s (⛔ one parser — see its doc). */
 export function parseWorkerOutcomeRecordsDetailed(text: string): ParsedWorkerOutcomes {
-  const str = (v: unknown): string | null => (typeof v === "string" && v.length > 0 ? v : null);
-  const num = (v: unknown): number | null => (typeof v === "number" && Number.isFinite(v) ? v : null);
-  const bool = (v: unknown): boolean | null => (typeof v === "boolean" ? v : null);
   const out: WorkerOutcomeRecord[] = [];
   let totalLines = 0;
   let malformedLines = 0;
@@ -152,30 +186,9 @@ export function parseWorkerOutcomeRecordsDetailed(text: string): ParsedWorkerOut
     const s = line.trim();
     if (!s) continue;
     totalLines++;
-    let j: Record<string, unknown>;
-    try {
-      const parsed: unknown = JSON.parse(s);
-      if (parsed == null || typeof parsed !== "object" || Array.isArray(parsed)) { malformedLines++; continue; }
-      j = parsed as Record<string, unknown>;
-    } catch { malformedLines++; continue; }
-    out.push({
-      ts: str(j.ts),
-      task: str(j.task),
-      selector_reason: str(j.selector_reason),
-      exit_code: num(j.exit_code),
-      signal: str(j.signal),
-      wall_clock_ms: num(j.wall_clock_ms),
-      final_state: str(j.final_state),
-      failure_reason: str(j.failure_reason),
-      started_at: str(j.started_at),
-      ended_at: str(j.ended_at),
-      worker_pid: num(j.worker_pid),
-      run_id: str(j.run_id),
-      in_flight_count: num(j.in_flight_count),
-      timed_out: bool(j.timed_out),
-      session_id: str(j.session_id),
-      mechanical_fan_in: parseMechanicalFanIn(j.mechanical_fan_in),
-    });
+    const rec = parseWorkerOutcomeRecordLine(s);
+    if (rec === null) { malformedLines++; continue; }
+    out.push(rec);
   }
   return { records: out, totalLines, malformedLines };
 }
@@ -322,6 +335,31 @@ export interface FanInAttempt extends WorkerOutcomeRecord {
  *  itself, never as 「这里没有」. */
 export type FanInAttemptsStatus = "ok" | "carrier-absent" | "carrier-unreadable" | "malformed-lines";
 
+/** WHICH BYTES of the carrier the published `totalLines`/`malformedLines`/`attempts` describe.
+ *
+ *  ⛔ THIS IS THE FIELD THAT KEEPS `totalLines` HONEST (gap-driver-log-since-and-tail-read AC3). A
+ *  bounded read cannot know the carrier's line count, and publishing a window count under a name that
+ *  has always meant "the whole file" would be exactly the 硬规则 3b failure (「只读了尾部」rendering
+ *  as 「读完了，共 N 行」). So the window is APPENDED to the result (AC4: existing keys unchanged):
+ *  `truncated: true` ⇔ the counts describe the tail window only. */
+export interface FanInAttemptsWindow {
+  /** Byte offset the reader's tail window was pread FROM. 0 ⇔ the read covered the carrier from byte
+   *  0, so the counts below ARE the carrier's. */
+  fromByte: number;
+  /** The carrier's size in bytes at read time (the window's exclusive end). */
+  toByte: number;
+  /** The `--since` bound this read applied, normalized to an ISO 8601 UTC instant (null = unbounded).
+   *  ⛔ Echoed as the NORMALIZED instant rather than the caller's raw string, so a consumer comparing
+   *  it against record `ts` values is comparing like with like. */
+  since: string | null;
+  /** true ⇔ the window did NOT start at byte 0: `totalLines` / `malformedLines` count THE WINDOW. A
+   *  malformed line older than the window is therefore UNKNOWN, not "zero" (硬规则 6). */
+  truncated: boolean;
+  /** Cumulative bytes the reader actually pread across all growth rounds — the DIRECT quantity behind
+   *  the bounded-read claim (硬规则 4b: expose it, never let the consumer infer it). */
+  bytesRead: number;
+}
+
 export interface FanInAttemptsResult {
   status: FanInAttemptsStatus;
   /** Why the carrier could not be read in full (null for `ok`/`carrier-absent`) — a sentence the
@@ -329,12 +367,17 @@ export interface FanInAttemptsResult {
   reason: string | null;
   /** The carrier path this result is ABOUT, repo-relative (data, so a caller need not hardcode it). */
   carrier: string;
-  /** Non-blank lines seen (0 when the carrier was absent/unreadable). */
+  /** Non-blank lines SEEN BY THIS READ (0 when the carrier was absent/unreadable). ⛔ Read `window`
+   *  with it: on a truncated read this is the WINDOW's line count, not the carrier's. */
   totalLines: number;
-  /** Lines that carried data but could not be read as a JSON object (enumerated — hard rule ③). */
+  /** Lines that carried data but could not be read as a JSON object (enumerated — hard rule ③).
+   *  ⛔ Window-scoped exactly like `totalLines`. */
   malformedLines: number;
   /** The attempts, in carrier order (oldest → newest). */
   attempts: FanInAttempt[];
+  /** Which bytes of the carrier the three counts above describe (AC3/AC4 — appended, never a
+   *  re-interpretation of an existing key). */
+  window: FanInAttemptsWindow;
 }
 
 /** Project a parsed outcome record onto the attempt view. Pure. */
@@ -350,48 +393,154 @@ export function fanInAttemptFromRecord(r: WorkerOutcomeRecord): FanInAttempt {
   };
 }
 
+/** One record's `ts` as epoch ms, or null when it carries no parseable instant. Hard rule 6: a
+ *  missing `ts` is UNKNOWN, never "at/after the cutoff" — a `--since` read must not count it. */
+function recordTsMs(r: WorkerOutcomeRecord): number | null {
+  if (typeof r.ts !== "string" || r.ts.length === 0) return null;
+  const ms = Date.parse(r.ts);
+  return Number.isFinite(ms) ? ms : null;
+}
+
+/** The carrier's on-disk size, for the `window.toByte` reading of the WHOLE-FILE arm (`readCarrierText`
+ *  does not report it). A stat failure after a successful read falls back to the text's UTF-8 length —
+ *  the same bytes for any well-formed carrier — rather than publishing a fabricated 0. */
+function carrierSizeBytes(root: string, rel: string, text: string): number {
+  try {
+    return fs.statSync(path.join(root, rel)).size;
+  } catch {
+    return Buffer.byteLength(text, "utf8");
+  }
+}
+
 /**
  * The ONE reader behind web / CLI / MCP (⛔ the three surfaces must not each write their own parse).
  *
  * `taskId` filters to one task's attempts (null = every task); `limit` keeps the most recent N of the
- * selected set (null = all). The returned `attempts` are in carrier order (oldest → newest) — a
- * `limit` therefore trims the OLD end, the natural "tail" reading of a runtime log.
+ * selected set (null = all); `sinceMs` keeps only attempts whose `ts` is at or after that instant
+ * (null = unbounded), and COMBINES with `limit` by filtering first, then keeping the newest N. The
+ * returned `attempts` are in carrier order (oldest → newest) — a `limit` therefore trims the OLD end,
+ * the natural "tail" reading of a runtime log.
+ *
+ * ⛔ BOUNDED READ (gap-driver-log-since-and-tail-read AC2): when `limit` or `sinceMs` is given, the
+ * carrier is read TAIL-FIRST in growing windows through the SHARED `scanJsonlTail` (the same helper
+ * `.quay/worker-round.jsonl` and `.quay/verification-round.jsonl` use — ⛔ no second window loop) and
+ * the scan stops as soon as the window can answer the question. It is never "read 50 MB, then slice".
+ * With NEITHER bound the read is the whole carrier, unchanged (`readCarrierText` + one parse pass) —
+ * that arm's cost is the caller's own request. Either way `window` says which bytes the published
+ * counts describe, so a truncated read can never impersonate a whole-file one (AC3).
  *
  * Degradation is explicit, never silent: an absent carrier answers `carrier-absent` (this workspace
  * ran no worker — correct and distinguishable), an existing-but-unreadable one answers
  * `carrier-unreadable` WITH the underlying error, and a partially-parsed one answers
- * `malformed-lines` with the count. Only `ok` means "every line was read".
+ * `malformed-lines` with the count. Only `ok` means "every line the read covered was parsed".
  */
 export function readFanInAttempts(
   root: string,
-  { taskId = null, limit = null }: { taskId?: string | null; limit?: number | null } = {},
+  { taskId = null, limit = null, sinceMs = null }: { taskId?: string | null; limit?: number | null; sinceMs?: number | null } = {},
 ): FanInAttemptsResult {
   const base = { carrier: WORKER_OUTCOME_REL, totalLines: 0, malformedLines: 0, attempts: [] as FanInAttempt[] };
-  const carrier = readCarrierText(root, WORKER_OUTCOME_REL);
-  if (carrier.status !== "ok") {
-    return {
-      ...base,
-      status: carrier.status === "absent" ? "carrier-absent" : "carrier-unreadable",
-      reason: carrier.status === "absent"
-        ? null
-        : `${WORKER_OUTCOME_REL} could not be read: ${carrier.reason ?? "unknown error"}`,
+  const bounded = limit != null || sinceMs != null;
+  const sinceIso = sinceMs != null && Number.isFinite(sinceMs) ? new Date(sinceMs).toISOString() : null;
+  const emptyWindow = (w: Partial<FanInAttemptsWindow> = {}): FanInAttemptsWindow => ({
+    fromByte: 0, toByte: 0, since: sinceIso, truncated: false, bytesRead: 0, ...w,
+  });
+
+  /** Apply the caller's SELECTION (task + cutoff). Newest-first in, newest-first out. */
+  const select = (records: WorkerOutcomeRecord[]): WorkerOutcomeRecord[] =>
+    records.filter((r) => {
+      if (taskId != null && r.task !== taskId) return false;
+      if (sinceMs == null) return true;
+      const ms = recordTsMs(r);
+      // An unparseable/missing ts cannot be shown to be at/after the cutoff ⇒ excluded, never
+      // silently counted (hard rule 6).
+      return ms !== null && ms >= sinceMs;
+    });
+
+  let totalLines: number;
+  let malformedLines: number;
+  let selected: WorkerOutcomeRecord[];
+  let window: FanInAttemptsWindow;
+
+  if (!bounded) {
+    // ── WHOLE-FILE arm (the pre-`--since` behavior, byte for byte) ────────────────────────────────
+    const carrier = readCarrierText(root, WORKER_OUTCOME_REL);
+    if (carrier.status !== "ok") {
+      return {
+        ...base,
+        status: carrier.status === "absent" ? "carrier-absent" : "carrier-unreadable",
+        reason: carrier.status === "absent"
+          ? null
+          : `${WORKER_OUTCOME_REL} could not be read: ${carrier.reason ?? "unknown error"}`,
+        window: emptyWindow(),
+      };
+    }
+    const parsed = parseWorkerOutcomeRecordsDetailed(carrier.text as string);
+    const size = carrierSizeBytes(root, WORKER_OUTCOME_REL, carrier.text as string);
+    totalLines = parsed.totalLines;
+    malformedLines = parsed.malformedLines;
+    // `parsed.records` is carrier order (oldest→newest); `selected` is normalized NEWEST-FIRST (the
+    // scan's own order) so `limit` trims the OLD end in both arms with one expression.
+    selected = select(parsed.records).reverse();
+    window = { fromByte: 0, toByte: size, since: null, truncated: false, bytesRead: size };
+  } else {
+    // ── BOUNDED arm: tail-first, grow only while the window cannot answer yet ─────────────────────
+    const scan = scanJsonlTail<WorkerOutcomeRecord>(path.join(root, WORKER_OUTCOME_REL), {
+      parse: parseWorkerOutcomeRecordLine,
+      enough: (records) => {
+        if (records.length === 0) return false; // an empty window is never an answer — keep growing
+        // Append-ordered carrier ⇒ once the OLDEST record in the window is before the cutoff,
+        // nothing beyond it can be at/after the cutoff. (Unparseable `ts` never proves that — it
+        // cannot be shown to be older, so it keeps the window growing.)
+        if (sinceMs != null) {
+          const oldestMs = recordTsMs(records[records.length - 1]);
+          if (oldestMs !== null && oldestMs < sinceMs) return true;
+        }
+        return limit != null && select(records).length >= limit;
+      },
+    });
+    if (scan.status !== "ok") {
+      return {
+        ...base,
+        status: scan.status === "absent" ? "carrier-absent" : "carrier-unreadable",
+        reason: scan.status === "absent"
+          ? null
+          : `${WORKER_OUTCOME_REL} could not be read: ${scan.reason ?? "unknown error"}`,
+        window: emptyWindow({ bytesRead: scan.bytesRead }),
+      };
+    }
+    totalLines = scan.totalLines;
+    malformedLines = scan.unparseableLines;
+    selected = select(scan.records);
+    window = {
+      fromByte: scan.fromByte,
+      toByte: scan.toByte,
+      since: sinceIso,
+      truncated: scan.fromByte > 0,
+      bytesRead: scan.bytesRead,
     };
   }
-  const parsed = parseWorkerOutcomeRecordsDetailed(carrier.text as string);
-  let attempts = parsed.records.map(fanInAttemptFromRecord);
-  if (taskId != null) attempts = attempts.filter((a) => a.task === taskId);
-  if (limit != null && Number.isFinite(limit) && limit >= 0 && attempts.length > limit) {
-    attempts = attempts.slice(attempts.length - limit);
-  }
+
+  // `selected` is NEWEST-FIRST (both arms normalize to that), so the newest N are the first N — then
+  // flip back to the published oldest→newest order.
+  let attempts = (limit != null && Number.isFinite(limit) && limit >= 0 && selected.length > limit
+    ? selected.slice(0, limit)
+    : selected).map(fanInAttemptFromRecord);
+  attempts = attempts.reverse();
+
   return {
     ...base,
-    status: parsed.malformedLines > 0 ? "malformed-lines" : "ok",
-    reason: parsed.malformedLines > 0
-      ? `${parsed.malformedLines} of ${parsed.totalLines} line(s) in ${WORKER_OUTCOME_REL} could not be parsed as a JSON record`
+    status: malformedLines > 0 ? "malformed-lines" : "ok",
+    reason: malformedLines > 0
+      ? window.truncated
+        ? `${malformedLines} of ${totalLines} line(s) in the last ${window.toByte - window.fromByte} byte(s)`
+          + ` (window ${window.fromByte}..${window.toByte}) of ${WORKER_OUTCOME_REL} could not be parsed as a JSON record`
+          + ` — ⚠️ these counts cover the WINDOW ONLY, not the whole carrier`
+        : `${malformedLines} of ${totalLines} line(s) in ${WORKER_OUTCOME_REL} could not be parsed as a JSON record`
       : null,
-    totalLines: parsed.totalLines,
-    malformedLines: parsed.malformedLines,
+    totalLines,
+    malformedLines,
     attempts,
+    window,
   };
 }
 
@@ -489,13 +638,29 @@ function lastRoundInFlightTasks(text: string | null): RoundInFlightTask[] | null
 /** Outcome of `scanJsonlTail`. `records` is NEWEST-FIRST (reverse file order). `exhausted` says
  *  whether the scan reached byte 0 — i.e. whether "no more matches" means "we looked at the whole
  *  file" vs "the bounded window had none". `bytesRead` is the cumulative positional-pread byte count
- *  across all windows (the direct quantity behind the bounded-read claim — hard rule 4b). */
+ *  across all windows (the direct quantity behind the bounded-read claim — hard rule 4b).
+ *
+ *  `fromByte`/`toByte`/`totalLines`/`unparseableLines` describe the window the RETURNED records came
+ *  from: a caller that publishes a line count MUST be able to say whether that count is the carrier's
+ *  or only the window's (硬规则 3b — a truncated read must not render as a whole-file count). They are
+ *  generic (parse-agnostic): `unparseableLines` just means "`parse` returned null". */
 export interface JsonlTailScan<T> {
   status: "ok" | "absent" | "unreadable";
   reason: string | null;
   records: T[];
   bytesRead: number;
   exhausted: boolean;
+  /** Byte offset the returned window was pread FROM. 0 ⇔ the window covered the carrier from byte 0
+   *  (the whole file was seen). When > 0 the window may begin mid-line; that partial line is dropped
+   *  and is counted in neither `totalLines` nor `unparseableLines`. */
+  fromByte: number;
+  /** The carrier's size in bytes at read time (the window's exclusive end). */
+  toByte: number;
+  /** Non-blank lines in the RETURNED WINDOW's usable text — ⛔ not the carrier's, when truncated. */
+  totalLines: number;
+  /** Lines in the returned window for which `parse` returned null (malformed, as far as this
+   *  carrier's parser can tell). */
+  unparseableLines: number;
 }
 
 export interface JsonlTailScanOptions<T> {
@@ -534,6 +699,10 @@ export function scanJsonlTail<T>(filePath: string, opts: JsonlTailScanOptions<T>
       records: [],
       bytesRead: 0,
       exhausted: false,
+      fromByte: 0,
+      toByte: 0,
+      totalLines: 0,
+      unparseableLines: 0,
     };
   }
   try {
@@ -551,14 +720,28 @@ export function scanJsonlTail<T>(filePath: string, opts: JsonlTailScanOptions<T>
       const nl = text.indexOf("\n");
       const usable = start > 0 ? (nl === -1 ? "" : text.slice(nl + 1)) : text;
       const records: T[] = [];
+      let totalLines = 0;
+      let unparseableLines = 0;
       const lines = usable.split("\n");
       for (let i = lines.length - 1; i >= 0; i--) {
         if (!lines[i].trim()) continue;
+        totalLines++;
         const rec = opts.parse(lines[i]);
         if (rec !== null) records.push(rec);
+        else unparseableLines++;
       }
       if (enough(records) || start === 0) {
-        return { status: "ok", reason: null, records, bytesRead, exhausted: start === 0 };
+        return {
+          status: "ok",
+          reason: null,
+          records,
+          bytesRead,
+          exhausted: start === 0,
+          fromByte: start,
+          toByte: size,
+          totalLines,
+          unparseableLines,
+        };
       }
       window = Math.min(size, window * 4);
     }
@@ -569,6 +752,10 @@ export function scanJsonlTail<T>(filePath: string, opts: JsonlTailScanOptions<T>
       records: [],
       bytesRead: 0,
       exhausted: false,
+      fromByte: 0,
+      toByte: 0,
+      totalLines: 0,
+      unparseableLines: 0,
     };
   } finally {
     try { fs.closeSync(fd); } catch { /* close is best-effort; the read already succeeded or threw */ }
