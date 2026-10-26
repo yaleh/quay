@@ -42,18 +42,18 @@ extra:
 
 ## AC
 
-- [ ] AC1（现状复现）在主检出运行 `node --experimental-strip-types plugin/scripts/instrument-decay-check.ts --carrier fan-in-step-trace.jsonl --json`：`carriers[0].evaluated === true`；`decayed[]` 恰含 1 条 `{group:"suite-rerun-green", kind:"rate-stopped"}`，`count === 79`、`lastWrite === "2026-10-21T16:36:58.159Z"`、`detail` 匹配 `/condition command did not hold \(exit 1\)/`；`adjudicated[]` 不含该组。贴出该段 JSON。判据可假：本组重新写入或条件修好后 `decayed[]` 变空。
-- [ ] AC2（实例过期 + 新实例仍红，两条直接量）① `node --test plugin/test/task-granularity-advice.test.mjs` ⇒ exit 0 且 `tests 17 / pass 17 / fail 0`（被声明的成因已消失）；② `node --test plugin/test/full-suite-runner-cgroup.test.mjs` ⇒ exit 1，失败用例名含 `AC3 — a REAL round's measured concurrency`（当前阻断者）。贴出两条命令的尾行与退出码。判据可假：① 回转红或 ② 转绿，本任务前提须重判。
-- [ ] AC3（触发输入读数）以末次 `suite-rerun-green`（`2026-10-21T16:36:58.159Z`）为界，脚本打印其后 `rerun` 记录数、状态分布与「最新 5 条 rerun 的 ts/state/files」。断言：记录数 ≥ 90、`rerun-green` 计数 === 0、`rerun-red` + `rerun-not-evaluated` 之和 === 记录数、最新 3 条 `files` 均不含 `plugin/test/task-granularity-advice.test.mjs`。贴出脚本与输出。判据可假：出现一条 `rerun-green`，则绿分支的触发已发生，本任务前提须重判。
-- [ ] AC4（条件改成触发式 + 六条正负控制）修改 `plugin/scripts/instrument-decay-check.ts` 中 `suite-rerun-green` 的 `conditionCmd`（⛔ 不含任何具体文件名字面量）与 `reason`。在 `plugin/test/instrument-decay-check.test.mjs` 增加/改写成六条控制并贴出用例名与 `node --test plugin/test/instrument-decay-check.test.mjs` 的 tests/pass/fail：① 末次写入后最新 rerun 为 `rerun-red`（点名任意文件）⇒ `explained-absent`；② 为 `rerun-not-evaluated` ⇒ `explained-absent`；③ 末次写入后出现 `rerun-green` ⇒ `decayed[]`（真写手腐烂）；④ 载体里没有 rerun 记录 ⇒ `decayed[]`；⑤ `state` 缺失/未知 ⇒ `decayed[]`；⑥ 把生产的 `condition.cmd` 用正则断言为**不含** `task-granularity-advice\.test\.mjs`（原 `:699` 的断言反转）。判据可假：删掉任一负控制仍全绿 ⇒ 控制没生效。
-- [ ] AC5（真实载体读数翻正）用修好的检测器读主检出的 `.quay/fan-in-step-trace.jsonl`：`suite-rerun-green` 从 `decayed[]` 消失、出现在 `adjudicated[]` 且 `state==="explained-absent"`、`condition.exitCode === 0`，而 `count`/`lastWrite` 仍是 `79` / `2026-10-21T16:36:58.159Z`（已裁定 ≠ 从读数消失）。贴出 JSON 片段。
-- [ ] AC6（不回归）`bash scripts/test.sh --for-task gap-instrument-decay-suite-rerun-green-file-pin-expired --allow-thin` 退出码 0；贴出 scoped static checks 与命中文件的 tests/pass/fail。
+- [x] AC1（现状复现）在主检出运行 `node --experimental-strip-types plugin/scripts/instrument-decay-check.ts --carrier fan-in-step-trace.jsonl --json`：`carriers[0].evaluated === true`；`decayed[]` 恰含 1 条 `{group:"suite-rerun-green", kind:"rate-stopped"}`，`count === 79`、`lastWrite === "2026-10-21T16:36:58.159Z"`、`detail` 匹配 `/condition command did not hold \(exit 1\)/`；`adjudicated[]` 不含该组。贴出该段 JSON。判据可假：本组重新写入或条件修好后 `decayed[]` 变空。
+- [x] AC2（实例过期 + 新实例仍红，两条直接量）① `node --test plugin/test/task-granularity-advice.test.mjs` ⇒ exit 0 且 `tests 17 / pass 17 / fail 0`（被声明的成因已消失）；② `node --test plugin/test/full-suite-runner-cgroup.test.mjs` ⇒ exit 1，失败用例名含 `AC3 — a REAL round's measured concurrency`（当前阻断者）。贴出两条命令的尾行与退出码。判据可假：① 回转红或 ② 转绿，本任务前提须重判。
+- [x] AC3（触发输入读数）以末次 `suite-rerun-green`（`2026-10-21T16:36:58.159Z`）为界，脚本打印其后 `rerun` 记录数、状态分布与「最新 5 条 rerun 的 ts/state/files」。断言：记录数 ≥ 90、`rerun-green` 计数 === 0、`rerun-red` + `rerun-not-evaluated` 之和 === 记录数、最新 3 条 `files` 均不含 `plugin/test/task-granularity-advice.test.mjs`。贴出脚本与输出。判据可假：出现一条 `rerun-green`，则绿分支的触发已发生，本任务前提须重判。
+- [x] AC4（条件改成触发式 + 六条正负控制）修改 `plugin/scripts/instrument-decay-check.ts` 中 `suite-rerun-green` 的 `conditionCmd`（⛔ 不含任何具体文件名字面量）与 `reason`。在 `plugin/test/instrument-decay-check.test.mjs` 增加/改写成六条控制并贴出用例名与 `node --test plugin/test/instrument-decay-check.test.mjs` 的 tests/pass/fail：① 末次写入后最新 rerun 为 `rerun-red`（点名任意文件）⇒ `explained-absent`；② 为 `rerun-not-evaluated` ⇒ `explained-absent`；③ 末次写入后出现 `rerun-green` ⇒ `decayed[]`（真写手腐烂）；④ 载体里没有 rerun 记录 ⇒ `decayed[]`；⑤ `state` 缺失/未知 ⇒ `decayed[]`；⑥ 把生产的 `condition.cmd` 用正则断言为**不含** `task-granularity-advice\.test\.mjs`（原 `:699` 的断言反转）。判据可假：删掉任一负控制仍全绿 ⇒ 控制没生效。
+- [x] AC5（真实载体读数翻正）用修好的检测器读主检出的 `.quay/fan-in-step-trace.jsonl`：`suite-rerun-green` 从 `decayed[]` 消失、出现在 `adjudicated[]` 且 `state==="explained-absent"`、`condition.exitCode === 0`，而 `count`/`lastWrite` 仍是 `79` / `2026-10-21T16:36:58.159Z`（已裁定 ≠ 从读数消失）。贴出 JSON 片段。
+- [x] AC6（不回归）`bash scripts/test.sh --for-task gap-instrument-decay-suite-rerun-green-file-pin-expired --allow-thin` 退出码 0；贴出 scoped static checks 与命中文件的 tests/pass/fail。
 
 ## DoD
 
-- [ ] AC1–AC6 全绿；`conditionCmd` 文本不含任何具体文件名字面量，且未知/缺失状态仍 fail-closed（不把「读不懂」伪装成「已解释」）。
-- [ ] 真实落地判据（DIR-026 Reading A）：生产载体 `.quay/fan-in-step-trace.jsonl` 上的检测器读数——不是 fixture——把 `suite-rerun-green` 从 `decayed[]` 移入 `adjudicated[]` 的 `explained-absent`，且该读数由 shipped 检测器产生；`reviewAfter` 仍为 `2026-11-22T00:00:00.000Z`（无永久豁免）。
-- [ ] 本条只改裁定口径，⛔ 不改写手、不修改 `plugin/test/full-suite-runner-cgroup.test.mjs`；那条持久红是独立机制，另行处理。
+- [x] AC1–AC6 全绿；`conditionCmd` 文本不含任何具体文件名字面量，且未知/缺失状态仍 fail-closed（不把「读不懂」伪装成「已解释」）。
+- [x] 真实落地判据（DIR-026 Reading A）：生产载体 `.quay/fan-in-step-trace.jsonl` 上的检测器读数——不是 fixture——把 `suite-rerun-green` 从 `decayed[]` 移入 `adjudicated[]` 的 `explained-absent`，且该读数由 shipped 检测器产生；`reviewAfter` 仍为 `2026-11-22T00:00:00.000Z`（无永久豁免）。
+- [x] 本条只改裁定口径，⛔ 不改写手、不修改 `plugin/test/full-suite-runner-cgroup.test.mjs`；那条持久红是独立机制，另行处理。
 
 ## Touches
 
@@ -90,7 +90,58 @@ LAST_3 = 2026-10-26T04:38:30.197Z / 2026-10-26T04:49:26.419Z / 2026-10-26T05:14:
 
 6. 节奏（不是 rare-by-design）：全历史 79 条，末次 `2026-10-21T16:36:58.159Z`；当前距立案 ≈ 4.6 天。前案记录的中位间隔 0.71h、历史最大 20.56h ⇒ 触发未发生的时间远超自身节奏。
 
+7. 实施后复核（2026-10-26，worker 会话；实现提交 `d5115ece1` 在 `task/gap-instrument-decay-suite-rerun-green-file-pin-expired`）。
+
+   AC1（修前，主检出）：`EXIT=1`，`decayed[]` 恰 1 条
+   ```json
+   {"ok":false,"evaluated":true,"decayedCount":1,
+    "decayed":[{"group":"suite-rerun-green","kind":"rate-stopped","count":79,
+      "lastWrite":"2026-10-21T16:36:58.159Z",
+      "detail":"condition command did not hold (exit 1) — the declared cause is gone; the absence is unexplained"}],
+    "adjudicatedGroups":["verification-round-record","catch-up-develop",
+      "suite-recovery","suite-recovery-blocked","suite-recovery-certified","suite-recovery-new-regression"]}
+   ```
+
+   AC2：① `tests 17 · pass 17 · fail 0`，`EXIT_1=0`；② `tests 72 · pass 71 · fail 1`，`EXIT_2=1`，失败用例
+   `✖ AC3 — a REAL round's measured concurrency equals an independent overlap computation, and the diagnostic is below 16 GiB`。
+
+   AC3（脚本读主检出载体）：
+   ```
+   LAST_SUITE_RERUN_GREEN=2026-10-21T16:36:58.159Z
+   AFTER_GREEN_RERUNS=93
+   DIST={"rerun-not-evaluated":6,"rerun-red":87}
+   LATEST_5=
+     2026-10-26T05:14:48.589Z state=rerun-red files=["plugin/test/full-suite-runner-cgroup.test.mjs"]
+     2026-10-26T04:49:26.419Z state=rerun-red files=["plugin/test/full-suite-runner-cgroup.test.mjs"]
+     2026-10-26T04:38:30.197Z state=rerun-red files=["plugin/test/full-suite-runner-cgroup.test.mjs"]
+     2026-10-25T22:39:24.256Z state=rerun-not-evaluated files=[…4 个文件…]
+     2026-10-25T21:43:20.713Z state=rerun-red files=[…2 个文件…]
+   TOP3_NAMES_TASK_GRANULARITY_ADVICE=0
+   ASSERT count>=90: true / rerun-green===0: true / red+not-evaluated===count: true / top3 不含该文件: true
+   ```
+
+   AC4：`node --test plugin/test/instrument-decay-check.test.mjs` ⇒ `tests 44 · pass 44 · fail 0`。六条控制名：
+   `suite-rerun-green 触发式控制 ①…⑥`（① rerun-red 任意文件 ⇒ explained-absent；② rerun-not-evaluated ⇒ explained-absent；
+   ③ rerun-green ⇒ decayed[]；④ 无 rerun ⇒ decayed[]；⑤ state 缺失/未知（缺失键 / null / 未知串三种）⇒ decayed[]；
+   ⑥ 生产 `condition.cmd` 不含 `task-granularity-advice\.test\.mjs`，且不含任何 `\.test\.mjs`）。
+   可假性验证（变异测试）：把 `conditionCmd` 临时改回旧的「点名该文件」版本 ⇒ 同一套测试 `pass 36 / fail 8`，
+   控制 ①、②、⑥ 与 CLI/adjudication 用例全部转红；还原后 `pass 44 / fail 0`。
+
+   AC5（修好的检测器读主检出载体，`--root /data/home/yale/work/quay`）：`EXIT=0`，`ok=true`、
+   `decayedCount=0`、`adjudicatedCount=7`，`suite-rerun-green` 不在 `decayed[]`：
+   ```json
+   {"group":"suite-rerun-green","kind":"conditional-on-input","state":"explained-absent",
+    "reviewAfter":"2026-11-22T00:00:00.000Z",
+    "condition":{"cmd":"node -e '…末次 suite-rerun-green 之后的 rerun 窗口…'","exitCode":0,"error":null},
+    "count":79,"lastWrite":"2026-10-21T16:36:58.159Z"}
+   ```
+
+   AC6：`bash scripts/test.sh --for-task gap-instrument-decay-suite-rerun-green-file-pin-expired --allow-thin`
+   ⇒ `EXIT=0`；scoped static checks 全 PASS/无 RED（含 `superseded-capability check: PASS`、
+   `mirror-pair-drift-check: PASS`、`PASS: no checked-in-tree writes`、suite-slot SSoT `PASS` 等）；
+   命中文件 `plugin/test/instrument-decay-check.test.mjs` ⇒ `tests 44 · pass 44 · fail 0`。
+
 ## ADR-007 dark axis
 
-- L_D: 本任务只改一个描述符的条件字符串 + 对应测试，不新增 import 边或模块依赖 ⇒ 该轴无增量。
-- L_G: 该轴仍暗,理由:同上，无可归因于本任务的 archguard 包级读数。
+- L_D: 本任务只改一个描述符的条件字符串 + 对应测试，不新增 import 边、不改模块依赖图 ⇒ 该轴无增量。
+- L_G: 该轴仍暗,理由:本任务仅替换一个裁定条件命令及其测试，未改任何 package 边界或依赖边，无可归因于本任务的 archguard 包级读数。
