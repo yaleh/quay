@@ -197,11 +197,12 @@ function fail(msg: string): never {
   process.exit(1);
 }
 
+const USAGE_TEXT =
+  "usage: node --experimental-strip-types plugin/scripts/archguard-runner.ts --root <repo-root> [--work-dir <dir>]\n";
+
 function usage(msg: string): never {
   process.stderr.write(`archguard-runner: ${msg}\n`);
-  process.stderr.write(
-    "usage: node --experimental-strip-types plugin/scripts/archguard-runner.ts --root <repo-root> [--work-dir <dir>]\n"
-  );
+  process.stderr.write(USAGE_TEXT);
   process.exit(2);
 }
 
@@ -1487,6 +1488,13 @@ function main(): void {
     } else if (args[i] === "--work-dir") {
       workDirArg = args[i + 1] ?? "";
       i++;
+    } else if (args[i] === "--help" || args[i] === "-h") {
+      // `--help` exits 0 (⛔ not usage(2)): it is the uniform FIXTURE RUN of a probe fallback path —
+      // `plugin/scripts/probe-fallback-path-check.ts` spawns `node --experimental-strip-types <path>
+      // --help` to prove the module graph RESOLVES without running the 27s/task analyze. Node
+      // resolves every static import before main() runs, so a missing/renamed module fails here.
+      process.stdout.write(USAGE_TEXT);
+      process.exit(0);
     } else {
       usage(`unknown argument: ${args[i]}`);
     }

@@ -41,6 +41,10 @@ import { spawnSync } from "node:child_process";
 import YAML from "yaml";
 import { parseTrigger } from "./routine-scheduler.ts";
 import { readProbeSpec } from "./read-probe-spec.ts";
+// ③c 前置：探针声明的 fallback 必须真的可运行。两个探针曾把 2026-09-07 归档的 `git-lens-*.ts`
+// 当作 fallback 路径 ⇒ 无 archguard 的主机走到 ERR_MODULE_NOT_FOUND ⇒ 空 findings 被记成
+// 「跑过、没发现问题」（硬规则 3b）。判定只此一份实现，本模块只调用它。
+import { checkProbeFallbacks } from "./probe-fallback-path-check.ts";
 import { launchArgv, resolveKernelPluginRoot, runAsync } from "./driver-runtime.ts";
 import { probeWriteViolations, snapshotTrackedChanges } from "./probe-write-guard.ts";
 // 载体批量追加的函数体是共享的，不在此重写（semantic-dedup-scan finding `jsonl-batch-appenders`，
@@ -1036,6 +1040,27 @@ export function llmProbeRoutine(decl: RoutineDecl, opts: ProbeRoutineOptions): R
             fallback: spec.fallback, instrumentAvailable: false,
             carrier: path.relative(opts.root, findingsPath),
           }, `instrument '${spec.instrument}' unavailable on this host (${avail.detail}) — probe not spawned; fallback declared: '${spec.fallback}'`);
+        }
+      }
+
+      // ③c 声明面一致性前置：FALLBACK 段里点名的每条路径必须存在且通过 fixture run（模块图能
+      //     解析）。⛔ 这是与 ③b 不同的失败：③b 是「本机没有主仪器」，这里是「规格自己指向了
+      //     不存在/跑不起来的路径」——两者都记 not-evaluated 且零 spawn，但理由必须不同形，
+      //     否则「路径写错了」会伪装成「主机缺仪器」（硬规则 3b）。
+      {
+        const fb = checkProbeFallbacks(pluginRoot, { probe: decl.probe as string });
+        if (!fb.evaluated) {
+          return fact("not-evaluated", {
+            fired: false, probe: decl.probe, fallback: spec.fallback,
+            carrier: path.relative(opts.root, findingsPath),
+          }, `fallback preflight could not be evaluated: ${fb.reason} — probe not spawned`);
+        }
+        if (!fb.ok) {
+          return fact("not-evaluated", {
+            fired: false, probe: decl.probe, fallback: spec.fallback,
+            fallbackPathViolations: fb.violations.map((v) => ({ path: v.relPath, probe: v.probe, line: v.line, reason: v.reason })),
+            carrier: path.relative(opts.root, findingsPath),
+          }, `declared fallback is not runnable (${fb.violations.length} path(s)): ${fb.violations.map((v) => `${v.relPath}: ${v.reason}`).join("; ")} — probe not spawned`);
         }
       }
 

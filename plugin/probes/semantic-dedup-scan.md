@@ -1,6 +1,8 @@
 ---
 instrument: archguard
-fallback: git-lens
+# The fallback is the LIVE reader set named in the body below, not the archived `git-lens-*.ts`
+# tool family (archived 2026-09-07). `probe-fallback-path-check.ts` verifies those paths pre-spawn.
+fallback: live-readers
 output_routing:
   duplication: milestone-candidate
   default: milestone-candidate
@@ -33,12 +35,16 @@ Do it with a real extractor, not with intuition:
 - PRIMARY instrument: the **archguard** MCP tool (the L_D/L_G instrument, ADR-007). Use it if it
   returns a usable scope.
 - FALLBACK (this plain-ESM repo often has no tsconfig for archguard to persist a scope — recorded
-  2026-07-20): the reclaimed git-lens proxies in `plugin/scripts`:
+  2026-07-20): the LIVE readers in `plugin/scripts` (⛔ the `git-lens-*.ts` path this block used to
+  name was archived on 2026-09-07 and does not resolve — `probe-fallback-path-check.ts` now refuses
+  this routine, zero spawn + `not-evaluated`, if any path named in a FALLBACK section is absent or
+  fails a fixture run):
   - `node --experimental-strip-types plugin/scripts/identity-replication-check.ts --root . --json` —
     P2 identity replication: which entity names / path literals are independently re-declared across
     code files without a single accessor, plus byte-identical file pairs.
-  - `node --experimental-strip-types plugin/scripts/git-lens-l-g-structural-drift.ts <dir>` — L_G
-    structural drift (dependency cycles, god-modules) over `plugin/scripts` and each `packages/*/src`.
+  - `node --experimental-strip-types plugin/scripts/archguard-runner.ts --root . [--work-dir <dir>]` —
+    L_G structural drift (directory-level dependency cycles) over the six scopes; exit 0 = no cycles
+    at either granularity, exit 1 = a cycle OR any scope not-evaluated (fail-closed).
 - Then complete the inventory yourself (grep/`node` one-liners over the two surfaces are fine):
   collect `symbol → file:line` for exported and module-level functions, and — crucially — a
   **normalized body digest** per function (strip comments/whitespace) so that byte/near-identical
