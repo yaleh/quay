@@ -8,7 +8,7 @@ import type { ProviderClient } from "../../provider-client.ts";
 import { readLive, readSystem, readManagerLight, readTests, readTestsNonBlocking, readGitHistory, readCurrentSuiteRun, readWorkerOutcomeRecords, yieldToEventLoop, DEFAULT_DRIVER_CAP, type LiveResult, type SystemResult, type ManagerResult, type TestsResult, type GitHistoryResult, type CurrentSuiteRun, type WorkerOutcomeRecord, type DriverKindReading } from "../../observation.ts";
 import { TASK_STATUS, type GoalRecord } from "../../abi.ts";
 import { DEFAULT_LANG, type Lang, type Manifest, type ServeIdentity, type ServePageCfg } from "./serve-render.ts";
-import { html, escapeHtml, pageStyles, modernistStyles, renderSiteNav, renderMobileChrome, relativeTime, pageTitle, renderIdentityCard, htmlLangTag, pageNameFor } from "./serve-render.ts";
+import { html, escapeHtml, pageStyles, modernistStyles, renderSiteNav, renderMobileChrome, relativeTime, pad2, pageTitle, renderIdentityCard, htmlLangTag, pageNameFor } from "./serve-render.ts";
 // gap-routine-architecture-analysis-god-package-serve-fanout-556: both helpers now live in this
 // leaf package (moving them here removed the `view` → `pages` / `view` → `feat` back-edges that
 // closed a directory cycle); and the shared snapshot store moved to its own leaf `store` package
@@ -197,9 +197,9 @@ function livePhaseColorToken(phase: string | null): string {
   return phase === "landed" ? "--color-positive-700" : phase === "awaiting-land" ? "--color-accent-800" : phase === "fan-in" ? "--color-accent-700" : "--color-neutral-400";
 }
 
-function pad2(n: number): string {
-  return String(n).padStart(2, "0");
-}
+// gap-routine-semantic-dedup-scan-pad2: `pad2` is imported above from ./serve-render.ts (the
+// serve-layer re-export of the core leaf) — this module redeclared a byte-equivalent copy. The
+// sparklineSvg inner copy at ~:609 stays: its source is serialized via Function#toString().
 
 /** A segmented absolute-wall-clock timeline bar (G and H share this ONE horizontal-axis conversion).
  *  Each segment is `[startMs, endMs]` on an axis spanning the past `windowHours` ending at

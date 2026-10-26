@@ -37,14 +37,41 @@ Extract one parseIsoSince(raw, verbLabel) into a shared cli helper and have both
 - recorded_at: 2026-10-26T21:59:33.088Z
 
 ## AC
-- [ ] `.quay/routine-findings.jsonl` 中 finding `dup-parse-iso-since-two-verbs`（routine `architecture-analysis`，runId `architecture-analysis-1793051973088`）所描述的问题被复核并处置
-- [ ] 处置结论可核：要么修掉，要么写明「已有机制在管、失败在哪一步」，⛔ 不以「已注意到」结案
+- [x] `.quay/routine-findings.jsonl` 中 finding `dup-parse-iso-since-two-verbs`（routine `architecture-analysis`，runId `architecture-analysis-1793051973088`）所描述的问题被复核并处置
+- [x] 处置结论可核：要么修掉，要么写明「已有机制在管、失败在哪一步」，⛔ 不以「已注意到」结案
 
 ## DoD
-- [ ] 上面的判据实跑通过
-- [ ] ⛔ 探针只立案不执行：本任务若需要跑产出者/修复，由派发链执行，⛔ 不由例程代跑
+- [x] 上面的判据实跑通过
+- [x] ⛔ 探针只立案不执行：本任务若需要跑产出者/修复，由派发链执行，⛔ 不由例程代跑
+
+## Disposition
+处置结论：**修掉**（⛔ 不是「已注意到」）。来源 finding 已按 `.quay/routine-findings.jsonl` 原文复核
+（`grep dup-parse-iso-since-two-verbs` 命中 finding + filing-round 两条，runId / ts / 符号 / 文件行号一致）。
+
+- 修复提交：`bd740f9f8`（本任务分支 `task/gap-routine-architecture-analysis-dup-parse-iso-since-two-verbs`）
+- 单一实现落在 `packages/quay/src/cli/flags.ts` 的 `parseIsoSince(raw, verbLabel)`——两个调用方本来就都
+  import `./flags.ts`（`parseFlags`/`parseVerbless`），因此零新增 import 边、无环风险。
+- `cli/driver.ts` / `cli/suite.ts` 的重复函数体已删除，改为
+  `parseIsoSince(flags.since, "quay driver log")` / `parseIsoSince(flags.since, "quay suite")`；
+  「每个 verb 保留自己的措辞」这一原注释理由由 `verbLabel` 参数直接兑现，不再需要复制函数体。
+- 报错文本逐字节不变（2026-10-27 实跑两个 verb，均 exit 1）：
+  - `quay driver log: --since requires an ISO 8601 instant (e.g. 2026-10-01T00:00:00Z; got "not-a-date")`
+  - `quay suite: --since requires an ISO 8601 instant (e.g. 2026-10-01T00:00:00Z; got "not-a-date")`
+- `npx tsc --noEmit -p packages/quay/` 退出 0。
+
+复现原判据的同一台仪器读数（archguard `detect_duplicates`，例程原 scope 形状：sources=`packages`、
+trackedOnly=true、minStatements=6、minTokens=50、topN=20）：
+
+- 修复前（routine 持久化的 scope `075f2c0c`，2026-10-26T21:59:56Z）：`totalGroups: 1`（即 group `82266722a040a86e`）
+- 修复后（本 worktree，scope `1e669d9b`）：`totalGroups: 0`，`scannedFiles: 169`，`scannedFunctions: 2344`
+- 零读数的负控制（硬规则 2）：同一判定器、同样 floors、对一份【已知为真】的两份同构函数样本运行
+  ⇒ `totalGroups: 1`（hash `b90ee393f4994687`，9 statements / 124 tokens）——证明上面的 0 是真零，
+  不是判定器对该形状不敏感。
+
+- L_D archguard: duplicate_groups=0 (before the fix: 1, hash 82266722a040a86e), scannedFunctions=2344, scannedFiles=169, minStatements=6, minTokens=50, trackedOnly=true
 
 ## Touches
 - `packages/quay/src/cli/driver.ts`
 - `packages/quay/src/cli/suite.ts`
+- `packages/quay/src/cli/flags.ts`
 - `tasks/gap-routine-architecture-analysis-dup-parse-iso-since-two-verbs.md`

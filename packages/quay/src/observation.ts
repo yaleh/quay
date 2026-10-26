@@ -48,6 +48,9 @@ import { execFileSync, execFile, spawn } from "node:child_process";
 import { pathToFileURL } from "node:url";
 import { promisify } from "node:util";
 import { QUAY_VERSION } from "./version.ts";
+// gap-routine-semantic-dedup-scan-pad2: the serve-layer canonical pad2 is not importable from
+// Core (that would be a Core → view edge); the shared definition lives in this import-free leaf.
+import { pad2 } from "./pad.ts";
 // The ONE definition of fast-mode start/end classification — shared with the plugin's
 // fast-mode-telemetry.ts (the writer/`--report` reader of the same `.workflow-events/*.jsonl`
 // store), NOT a hand-maintained mirror of it. See kernel/start-end-like.ts's header.
@@ -1303,10 +1306,6 @@ function readRecentCommits(root: string, limit: number): JournalSection {
 
 /** A tick-log entry line: `` - `HH:MMZ` `action` … `` — bullet + backtick time (HH:MMZ, no date). */
 const TICK_ENTRY_RE = /^- `(\d{2}):(\d{2})Z` /;
-
-function pad2(n: number): string {
-  return String(n).padStart(2, "0");
-}
 
 /**
  * The staleness FACT for a channel superseded by tick-log but still rendered first on the Journal
