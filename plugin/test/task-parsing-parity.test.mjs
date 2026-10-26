@@ -3,10 +3,10 @@
 // product layer (gap-abi-promote-section-parsing-flip-store-reverse-import).
 //
 // The product layer (packages/quay/src/task-parsing.ts, next to abi.ts) is the AUTHORITATIVE home
-// of extractSection / parseFrontmatterCompletely. countAcCheckboxes is now a kernel leaf
-// (packages/quay/src/kernel/ac-checkbox-count.ts) re-exported from here and from the mechanism
-// layer. The native store (packages/quay-native/src/store.ts) consumes them from there — the ONE
-// reverse import is gone.
+// of extractSection / parseFrontmatterCompletely. Both — and countAcCheckboxes — are now kernel
+// leaves (packages/quay/src/kernel/{extract-section,frontmatter,ac-checkbox-count}.ts) re-exported
+// from here and from the mechanism layer. The native store (packages/quay-native/src/store.ts)
+// consumes them from there — the ONE reverse import is gone.
 //
 // WHY this test exists: the mechanism layer (plugin/scripts/task-schema.ts + task-status-drift-check.ts)
 // still needs these functions for ITS OWN readers (parseTask / readDependsOn / the status-drift
@@ -20,11 +20,15 @@
 //     packages/quay/src/kernel/extract-section.ts; both entry points re-export it, so the identity
 //     assertion below is the convergence evidence (the twin had been byte-identical — routine
 //     `semantic-dedup-scan` finding `extract-section-byte-identical`).
-//   · parseFrontmatterCompletely — still duplicated in the mechanism layer (out of both tasks'
-//     scope), so THIS test pins it BEHAVIORALLY identical to the product source. A divergence here
-//     is the two frontmatter readers silently disagreeing (the exact drift class the promotion
-//     exists to end).
+//   · parseFrontmatterCompletely — STRUCTURALLY single since task
+//     gap-routine-semantic-dedup-scan-parse-frontmatter-completely: the one definition lives at
+//     packages/quay/src/kernel/frontmatter.ts; both entry points re-export it, so the identity
+//     assertion below is the convergence evidence (the twin had been byte-identical — routine
+//     `semantic-dedup-scan` finding `parse-frontmatter-completely`).
 //
+// All three assertions are IDENTITY (===), not behavioral parity: a re-introduced local copy fails
+// even when its body is byte-identical today, which is what makes the reduction structural.
+
 // ⚠ The former premise of this file — that the mechanism layer cannot reach the Core source tree
 // through a static import (because build-plugin-dist's bundle step does not carry that tree) — is
 // STALE. build-plugin-dist's `coreSrcAliasPlugin` re-points every `packages/quay/src/**` specifier
@@ -104,11 +108,24 @@ test("extractSection — ONE kernel definition (identity), still depth-aware", (
   assert.equal(extractSection(TASK_BODY, "Absent"), null, "absent heading ⇒ null");
 });
 
-test("parseFrontmatterCompletely — plugin copy matches product source (full YAML round-trip)", () => {
-  assert.deepEqual(
-    parseFrontmatterCompletely(FRONTMATTER),
-    productParseFrontmatterCompletely(FRONTMATTER),
+test("parseFrontmatterCompletely — ONE kernel definition (identity), full YAML round-trip", () => {
+  // STRUCTURAL, not merely behavioral (硬规则 4 推论三): after task
+  // gap-routine-semantic-dedup-scan-parse-frontmatter-completely the two entry points must expose
+  // the SAME function object, so a re-introduced local copy breaks this even if its body is
+  // byte-identical.
+  assert.equal(
+    parseFrontmatterCompletely,
+    productParseFrontmatterCompletely,
+    "task-schema.ts and task-parsing.ts must re-export the SAME kernel parseFrontmatterCompletely, not two copies",
   );
+  // Non-vacuity: the shared function actually parses nested YAML (a stub returning {} would pass the
+  // identity assertion above but fail here).
+  const fm = parseFrontmatterCompletely(FRONTMATTER);
+  assert.deepEqual(fm, productParseFrontmatterCompletely(FRONTMATTER));
+  assert.equal(fm.title, "example: with colon", "quoted scalar must survive");
+  assert.deepEqual(fm.extra.depends_on, ["gap-a", "gap-b"], "nested extra.depends_on must survive");
+  // The fail-closed shape: an empty document parses to {} (never null) so projections can destructure.
+  assert.deepEqual(parseFrontmatterCompletely(""), {});
 });
 
 // ── countAcCheckboxes: FOUR fixture classes fed to BOTH call sites ──────────────────────────────
