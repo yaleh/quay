@@ -113,7 +113,7 @@ Usage:
   quay driver <${VERBS.join("|")}> --kind <${KINDS.join("|")}> [--root <path>]
   quay lanes [--json] [--window-hours <n>] [--root <path>]
   quay live-state [--json] [--stale-ms <n>] [--root <path>]   (first shipped in 0.23.0)
-  quay suite [--json] [--limit <n>] [--since <ISO8601>] [--root <path>]   (first shipped in 0.23.0-dev)
+  quay suite [--json] [--limit <n>] [--since <ISO8601>] [--root <path>]   (first shipped in 0.24.0-dev)
 
 Options for task list:
   --status <status>   Filter by status (todo, ready, done, needs-human, superseded)
@@ -883,7 +883,7 @@ Usage:
 `);
   } else if (sub === "suite") {
     process.stdout.write(`quay suite — READ-ONLY: the workspace's suite state + most recent rounds, as bounded JSON
-（first shipped in 0.23.0-dev · task gap-suite-read-verb-current-and-recent-rounds）
+（first shipped in 0.24.0-dev · task gap-suite-read-verb-current-and-recent-rounds）
 
 Usage:
   quay suite [--json] [--limit <n>] [--since <ISO8601>] [--root <path>]

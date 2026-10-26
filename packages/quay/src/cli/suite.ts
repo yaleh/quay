@@ -40,7 +40,7 @@ import { parseVerbless } from "./flags.ts";
 import type { CliCtx } from "./context.ts";
 
 /** The version this verb first ships in — the consumer's capability probe (AC6). */
-export const SUITE_VERB_FIRST_SHIPPED = "0.23.0-dev";
+export const SUITE_VERB_FIRST_SHIPPED = "0.24.0-dev";
 
 /** One carrier's published state — the same four-value vocabulary as AC1, per carrier. */
 export interface SuiteCarrierState {
