@@ -3,7 +3,7 @@ id: gap-routine-architecture-analysis-dup-last-suite-start-offset-divergent-rege
 title: "architecture-analysis: One marker-slicing rule is implemented 3x across
   2 carriers with 2 regex spellings (/^__FANIN_SUITE_START__[^\\n]*$/gm vs
   /^__FANIN_SUITE_START__\\s/gm); they "
-status: needs-human
+status: todo
 labels:
   - gap
   - routine-filed
