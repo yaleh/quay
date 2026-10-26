@@ -47,6 +47,11 @@ import { extractTouchesSection, parseTouchEntries } from "./touches-parser.ts";
 // The ONE regex-literal escaper (kernel leaf via the plugin shim) — replaces an inline escape body in
 // the hub-glob → RegExp builder (finding `escaperegexp-sweep-missed-two`, routine `semantic-dedup-scan`).
 import { escapeRegExp } from "./regex-escape.ts";
+// The ONE path-ref normalizer (kernel leaf) — the `normalizeTouched` body this file used to carry was
+// byte-identical to suite-bucket-select.ts's and to serve-tests.ts's minus trim (routine
+// `semantic-dedup-scan` finding `normalize-touched`, task
+// gap-routine-semantic-dedup-scan-normalize-touched). The `.trim()` is the CALLER's step, kept here.
+import { normalizePathRef } from "../../packages/quay/src/kernel/path-ref.ts";
 
 
 /** The explicit hub-file list (data, not a heuristic). `*` is the only glob metacharacter. */
@@ -82,14 +87,13 @@ export function hubEntryToRegExp(entry: string): RegExp {
 // Pre-compiled once (the list is small and static).
 const HUB_PATTERNS: readonly RegExp[] = HUB_FILES.map(hubEntryToRegExp);
 
-/** Normalize a touched-path string to repo-relative (forward slashes, no leading `./`, trimmed). */
-function normalizeTouched(p: string): string {
-  return String(p).replace(/\\/g, "/").replace(/^\.\//, "").trim();
-}
-
-/** True when a repo-relative path IS a hub file (exact or `*` glob match). */
+/**
+ * True when a repo-relative path IS a hub file (exact or `*` glob match).
+ * The `.trim()` is written HERE, at the call site, because trimming is this caller's policy — the
+ * shared kernel leaf deliberately does not trim (see path-ref.ts's header).
+ */
 export function isHubFile(relPath: string): boolean {
-  const p = normalizeTouched(relPath);
+  const p = normalizePathRef(relPath).trim();
   if (!p) return false;
   return HUB_PATTERNS.some((re) => re.test(p));
 }
@@ -160,7 +164,7 @@ export function main(argv: string[]): number {
     process.stderr.write(`${usage}\n`);
     return 2;
   } else {
-    touched = positional.map(normalizeTouched).filter(Boolean);
+    touched = positional.map((p) => normalizePathRef(p).trim()).filter(Boolean);
   }
 
   const d = hubDecision(touched);
