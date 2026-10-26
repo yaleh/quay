@@ -43,7 +43,7 @@ import {
   DEFAULT_LANG,
   LANGS,
   LANG_COOKIE_NAME,
-} from "../src/serve/serve-lang.ts";
+} from "../src/serve/view/serve-lang.ts";
 import { makeTmpDir } from "../../../plugin/test/helpers/tmp-workspace.mjs";
 import { QUAY_NATIVE_CLI } from "./helpers/cli-entry.mjs";
 

@@ -1,8 +1,8 @@
 // serve-task.ts — /tasks + /task/<id> route handlers, split from serve-handlers.ts.
 
 import type { IncomingMessage, ServerResponse } from "node:http";
-import type { ProviderClient } from "../provider-client.ts";
-import type { Manifest, ServePageCfg } from "./serve-render.ts";
+import type { ProviderClient } from "../../provider-client.ts";
+import type { Manifest, ServePageCfg } from "../view/serve-render.ts";
 import {
   html, escapeHtml, stripHeadings, pageStyles, modernistStyles, renderMarkdown,
   relativeTime, isSafeRelativeRedirect, DEFAULT_PAGE_SIZE, buildHref, isMissingIdTask,
@@ -12,19 +12,26 @@ import {
   // one import — `serve-render.ts` re-exports both, so the page never re-parses `?lang=`/the cookie
   // (a second parse is a second decision table) and never re-derives a label.
   htmlLangTag, pageNameFor, DEFAULT_LANG, type Lang,
-} from "./serve-render.ts";
+} from "../view/serve-render.ts";
 // gap-webui-doc-tasks-residual-copy-en-zh: this file's four remaining Chinese strings — the two
 // `.malformed-row` placeholders on /tasks and the Runs block's two states on /task/<id> — resolve
 // through serve-i18n.ts's ROW 13. `fillLabel` is taken alongside the roster because three of the
 // rows interpolate data (see ROW 13 ①).
-import { docTaskLabelsFor, fillLabel } from "./serve-i18n.ts";
+import { docTaskLabelsFor, fillLabel } from "../view/serve-i18n.ts";
+// gap-routine-architecture-analysis-god-package-serve-fanout-556: the fan-in cell renderer moved to
+// the leaf `view` package (server-side HTML only — it has no page-handler dependencies) so that
+// `view/serve-dashboard.ts` no longer has to reach into `feat/` and close a directory cycle. This
+// module keeps its call site by importing it and RE-EXPORTS the name, so `serve-handlers.ts`'s
+// `export *` and the `serve/index.ts` barrel keep their existing public surface.
+import { renderFanInCell } from "../view/serve-fan-in-cell.ts";
+export { renderFanInCell };
 import {
   readFanInAttempts, isValidSessionId, readLiveWorkerProcesses, liveSessionIdForPid,
   workerDriverActive, readTaskStatusMapAtRef, readTaskTitleMapAtRef, readTaskCommitTimesAtRef,
   readTaskAtRefMeta, readTaskCommitTimeAtRef,
-} from "../observation.ts";
-import type { LiveWorker, WorkerOutcomeRecord } from "../observation.ts";
-import { TASK_STATUSES } from "../abi.ts";
+} from "../../observation.ts";
+import type { LiveWorker, WorkerOutcomeRecord } from "../../observation.ts";
+import { TASK_STATUSES } from "../../abi.ts";
 
 export async function handleTaskList(
   req: IncomingMessage,
@@ -546,51 +553,6 @@ export async function handleTaskList(
  *  mirrored here). The auto-scan is gated on the worker driver being active for THIS root (a
  *  non-worker workspace never scans /proc, which would surface OTHER workspaces' workers); the
  *  `liveWorkers` test seam bypasses the gate, and `sessionHome` makes the pid→sessionId join testable. */
-
-/** Render one attempt's mechanical-fan-in cell (gap-mech-fan-in-log-webui-visible-clickable B2):
- *  landed/red + first failing step + lock hold + suite outcome + landed sha, plus a view/download
- *  link when the record carries a fanInLog file name. A null record renders an honest "—" (never a
- *  fabricated "landed").
- *
- *  gap-dashboard-fanin-card-hide-reason: `mfi.reason` is unbounded free text (measured up to 1084
- *  chars) — right on /task/<id>'s Runs table (one cell per attempt), but it balloons the dashboard's
- *  five-row FAN-IN overview card. The `showReason` option (default true → /task/<id> unchanged) lets
- *  the dashboard skip that one span entirely, rather than truncate.
- *
- *  gap-dashboard-fanin-cell-inline-layout-and-id-truncation: `layout` switches field *layout* (not
- *  field selection — `showReason` already does that). `"inline"` joins the parts with " · " on one
- *  line for the dashboard's compact five-row card; the default `"stacked"` keeps the `<br>`-separated
- *  vertical stack for /task/<id>'s Runs table (its call site is unchanged). */
-export function renderFanInCell(
-  taskId: string,
-  r: WorkerOutcomeRecord,
-  opts: { showReason?: boolean; layout?: "stacked" | "inline" } = {},
-): string {
-  const mfi = r.mechanical_fan_in;
-  if (mfi == null) return "—";
-  const showReason = opts.showReason ?? true;
-  const layout = opts.layout ?? "stacked";
-  const parts: string[] = [];
-  // gap-dashboard-status-tag-badges: landed/red/unknown were bare <strong> text with no background,
-  // so the outcome blended into the row copy. Reuse the .tag soft-badge set (landed → tag-positive,
-  // red → tag-accent, unknown → tag-neutral); the failing step tag shares tag-neutral so both read
-  // as one badge family. Reason/lock/suite/sha stay plain text.
-  if (mfi.outcome === "landed") parts.push(html`<span class="tag tag-positive">landed</span>`);
-  else if (mfi.outcome === "red") parts.push(html`<span class="tag tag-accent">red</span>`);
-  else parts.push(html`<span class="tag tag-neutral">${escapeHtml(mfi.outcome ?? "?")}</span>`);
-  if (mfi.outcome === "red" && mfi.step) parts.push(html`<span class="tag tag-neutral">step ${escapeHtml(mfi.step)}</span>`);
-  if (showReason && mfi.reason != null) parts.push(html`<span style="font-size:0.75rem;color:var(--color-neutral-700)">${escapeHtml(mfi.reason)}</span>`);
-  // gap-dashboard-fanin-monospace-ids: sha/lock are git hash / duration data — same monospace stack as
-  // the 「最近提交」 card (serve-dashboard.ts) and the system resources card (serve-system.ts), so they
-  // align vertically and read as data instead of prose. Zero extra font files (system stack).
-  if (mfi.lockHoldSecs != null) parts.push(html`<span style="font-family:ui-monospace,monospace">lock ${mfi.lockHoldSecs}s</span>`);
-  if (mfi.suiteOutcome != null) parts.push(`suite ${escapeHtml(mfi.suiteOutcome)}`);
-  if (mfi.landedSha != null) parts.push(html`<span style="font-family:ui-monospace,monospace">sha <code>${escapeHtml(mfi.landedSha.slice(0, 7))}</code></span>`);
-  if (mfi.fanInLog != null && mfi.fanInLog.length > 0) {
-    parts.push(html`<a href="/fan-in-log/${encodeURIComponent(taskId)}/${encodeURIComponent(mfi.fanInLog)}">view</a> · <a href="/fan-in-log/${encodeURIComponent(taskId)}/${encodeURIComponent(mfi.fanInLog)}/download">download</a>`);
-  }
-  return parts.join(layout === "inline" ? " · " : "<br>");
-}
 
 /** The Runs block of `/task/<id>`. `lang` is the per-request language (`ServePageCfg.lang`) the
  *  dispatcher resolved; it defaults to `DEFAULT_LANG` so a direct unit call — the shape every

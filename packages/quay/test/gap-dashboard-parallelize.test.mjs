@@ -39,7 +39,7 @@ const REPO_ROOT = path.resolve(__dirname, "..", "..", "..");
 const OBSERVATION_SRC = path.join(__dirname, "..", "src", "observation.ts");
 // gap-serve-handlers-split-by-concern: handleDashboard moved to serve-dashboard.ts; the AC2
 // structural concurrency assertion now pins that file.
-const SERVE_DASHBOARD_SRC = path.join(__dirname, "..", "src", "serve", "serve-dashboard.ts");
+const SERVE_DASHBOARD_SRC = path.join(__dirname, "..", "src", "serve", "view", "serve-dashboard.ts");
 const SLOT_REFILL_TS = path.join(REPO_ROOT, "plugin", "scripts", "slot-refill.ts");
 
 // ── Structural helpers (AC1/AC2: the parallel structure is pinned in source) ───────────────────

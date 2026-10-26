@@ -21,12 +21,12 @@ import { readBranchModel, startDevelopRefBackgroundRefresh } from "../observatio
 // gap-ac179-criterion-cold-miss-30s-ttl-always-expired: the dashboard's build moves OFF the request
 // path onto a background snapshot tick, started here beside the develop-ref refresh tick (the same
 // "cold build at startup, unref'd interval, never in a request" shape).
-import { startDashboardSnapshotRefresh } from "./serve-dashboard.ts";
+import { startDashboardSnapshotRefresh } from "./view/serve-dashboard.ts";
 // gap-ac292-criterion-cold-miss-30s-ttl-always-expired: the SAME fix, applied to /board — whose
 // readers (a full-scan drift-checker subprocess + a develop-ref git scan + a provider round-trip)
 // cost 9.17–9.78 s cold against AC-292's fixed `curl --max-time 10`, i.e. they straddle the budget
 // and flip the criterion red/green per run. Started here, beside the other two ticks.
-import { startBoardSnapshotRefresh } from "./serve-board.ts";
+import { startBoardSnapshotRefresh } from "./pages/serve-board.ts";
 // GOAL-017 / AC-251 (SPEC-unified-quay-server-2026-09-13 §7 stage A2): the MCP control plane is
 // hosted by THIS process. `serveControlPlane` is imported, never reimplemented here — the control
 // plane has exactly ONE implementation (AC150-3), and stage A2 is a MERGE of two existing
@@ -36,7 +36,7 @@ import { startBoardSnapshotRefresh } from "./serve-board.ts";
 // without the product reverse-importing `plugin/**`. This import used to point at
 // plugin/scripts/driver-shared.ts; the kernel home makes it an in-package one.
 import { serveControlPlane, CONTROL_PLANE_DEFAULT_HOST, type ControlPlaneHandle } from "../kernel/control-plane-http.ts";
-import { resolveServeBinding } from "./serve-binding.ts";
+import { resolveServeBinding } from "./view/serve-binding.ts";
 import { writeServerState, removeServerState, pidAlive, CONTROL_PLANE_NAME } from "../core/server-state.ts";
 import { writeJsonAtomic } from "../kernel/write-json-atomic.ts";
 // The pid-reuse guard for the admission lock (see `inspectAdmissionLock`): a recycled pid that is

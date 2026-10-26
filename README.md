@@ -192,9 +192,14 @@ directory on the Bash tool's PATH, and the plugin ships a shim there
 (`vendor/quay/dist/quay.js` — self-contained, Node ≥ 20, no dependencies to
 install). So inside a session with the plugin enabled, `quay --help`,
 `quay config validate` and `quay task list` work with **no npm install at all**.
-Outside a Claude Code session, put the plugin's `bin/` directory on your own
-PATH — or, if the plugin channel is unavailable to you, build the npm tarball
-yourself (Option C below).
+**Outside a Claude Code session** nothing puts that directory on your `PATH`
+and `${CLAUDE_PLUGIN_ROOT}` does not exist — resolve the CLI from the plugin
+install record instead: **[how an external consumer locates the CLI][cli-location]**
+(the single canonical contract, with a runnable reference implementation).
+(If the plugin channel is unavailable to you, build the npm tarball yourself —
+Option C below.)
+
+[cli-location]: docs/references/external-consumer-cli-location.md
 
 ### Option B — from source (for development or the latest unreleased changes)
 

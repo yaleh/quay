@@ -398,12 +398,110 @@ test("形态 D 负对照 — 产物时间晚于所有覆盖提交 ⇒ fresh（�
   writeCarrier(dir, "arch-cycle-history.jsonl", [
     {
       ts: "2026-10-21T23:14:05.363Z", mode: "arch-cycle-report-round", evaluated: true,
-      scopes: [{ scope: "src", source: "packages/quay/src", evaluated: true, artifactTimestamp: "2026-10-21T22:00:00.000Z", cycleCount: 0 }],
+      scopes: [{ scope: "src", source: "packages/quay/src", evaluated: true, basis: "module-graph", artifactTimestamp: "2026-10-21T22:00:00.000Z", cycleCount: 0 }],
     },
   ]);
   const res = analyzeCarrier(dir, ARCH_CYCLE_SPEC, DEFAULT_STALE_SECONDS);
   assert.equal(res.staleEvaluated.state, "fresh");
+  assert.deepEqual(res.staleEvaluated.artifactIndependentScopes, [], "an artifact-derived reading was actually compared");
   assert.equal(res.decayed.filter((d) => d.kind === "stale-evaluated").length, 0);
+});
+
+// ── 形态 D × artifact-independence（gap-arch-cycle-single-directory-basis-never-due）─────────────────
+// 生产实测（2026-10-25T17:27Z）：载体同一条记录里 `scripts` 是 `basis:"single-directory"`、
+// `artifactTimestamp` 比覆盖源最新提交早 1.5h，写手为了绕开这一点把 `commitsSinceArtifact` 硬编码成 0
+// ⇒ 检测器判 stale、载体自称当前，两个读数互相矛盾。修法：描述符声明 `basis:"single-directory"` 是
+// live 读数 ⇒ 不做「产物 vs 提交」比较，并**显式**记 `artifact-independent`（⛔ 不是静默跳过）。
+
+test("形态 D — 同一记录里 single-directory（live）标 artifact-independent，module-graph 仍判 stale（AC2 正/负对照）", () => {
+  const dir = tmpDir("idc-d-independence-");
+  makeRepo(dir);
+  // 两条覆盖路径都在产物之后被提交改动过。
+  commitAt(dir, "2026-10-21T16:26:00Z", "plugin/scripts/a.ts", "export const a = 1;\n");
+  commitAt(dir, "2026-10-21T16:27:00Z", "packages/quay/src/a.ts", "export const a = 1;\n");
+  writeCarrier(dir, "arch-cycle-history.jsonl", [
+    {
+      ts: "2026-10-21T23:14:05.363Z", mode: "arch-cycle-report-round", evaluated: true,
+      scopes: [
+        {
+          scope: "scripts", source: "plugin/scripts", evaluated: true, basis: "single-directory",
+          readingFreshness: "live-file-list", fileListReadAt: "2026-10-21T23:00:00.000Z",
+          artifactTimestamp: "2026-10-21T16:17:56.117Z", cycleCount: 0,
+          commitsSinceArtifact: null, behindSources: null,
+        },
+        {
+          scope: "src", source: "packages/quay/src", evaluated: true, basis: "module-graph",
+          readingFreshness: "artifact", fileListReadAt: null,
+          artifactTimestamp: "2026-10-21T16:17:56.117Z", cycleCount: 0,
+          commitsSinceArtifact: 1, behindSources: true,
+        },
+      ],
+    },
+  ]);
+  const res = analyzeCarrier(dir, ARCH_CYCLE_SPEC, DEFAULT_STALE_SECONDS);
+  const byScope = Object.fromEntries(res.staleEvaluated.scopes.map((s) => [s.scope, s]));
+
+  // (a) live 读数 + 旧产物 ⇒ 不是 stale；跳过比较这件事本身进读数。
+  assert.equal(byScope.scripts.state, "artifact-independent");
+  assert.deepEqual(byScope.scripts.independence, {
+    field: "basis",
+    value: "single-directory",
+    readAt: "2026-10-21T23:00:00.000Z",
+  }, "the live read timestamp comes from the CARRIER, not from the descriptor");
+  assert.equal(byScope.scripts.commitMs, null, "no artifact-vs-commit comparison was made for a live reading");
+  assert.equal(byScope.scripts.artifactTs, "2026-10-21T16:17:56.117Z", "the artifact is still reported — as provenance");
+  assert.match(byScope.scripts.reason, /provenance only/);
+  assert.deepEqual(res.staleEvaluated.artifactIndependentScopes, ["scripts"], "the skip is named at the record level too");
+
+  // (b) module-graph + 同一个旧产物 ⇒ 仍然 stale（豁免不是一揽子）。
+  assert.equal(byScope.src.state, "stale");
+  assert.equal(byScope.src.commitMs, Date.parse("2026-10-21T16:27:00Z"));
+  assert.equal(byScope.src.independence, null);
+  const findings = res.decayed.filter((d) => d.kind === "stale-evaluated");
+  assert.equal(findings.length, 1);
+  assert.equal(findings[0].group, "src", "⛔ only the artifact-derived scope is reported — never the live one");
+
+  // 整体仍是 stale：同一条记录里确实有一份「读的是产物且已落后」的读数。
+  assert.equal(res.staleEvaluated.state, "stale");
+  assert.equal(res.staleEvaluated.artifactIndependentScopes.includes("src"), false);
+});
+
+test("形态 D — 只有 artifact-independent 作用域 ⇒ 整体 fresh（不是 stale，也不是 not-evaluated）", () => {
+  const dir = tmpDir("idc-d-independence-only-");
+  makeRepo(dir);
+  commitAt(dir, "2026-10-21T16:26:00Z", "plugin/scripts/a.ts", "export const a = 1;\n");
+  writeCarrier(dir, "arch-cycle-history.jsonl", [
+    {
+      ts: "2026-10-21T23:14:05.363Z", mode: "arch-cycle-report-round", evaluated: true,
+      scopes: [{
+        scope: "scripts", source: "plugin/scripts", evaluated: true, basis: "single-directory",
+        readingFreshness: "live-file-list", fileListReadAt: "2026-10-21T23:00:00.000Z",
+        artifactTimestamp: "2026-10-21T16:17:56.117Z", cycleCount: 0,
+        commitsSinceArtifact: null, behindSources: null,
+      }],
+    },
+  ]);
+  const res = analyzeCarrier(dir, ARCH_CYCLE_SPEC, DEFAULT_STALE_SECONDS);
+  assert.equal(res.staleEvaluated.state, "fresh", "a current live reading is fresh — the old artifact does not age it");
+  assert.deepEqual(res.staleEvaluated.artifactIndependentScopes, ["scripts"]);
+  assert.equal(res.decayed.filter((d) => d.kind === "stale-evaluated").length, 0);
+
+  // 负对照（同一份产物时间戳、去掉 basis 声明）⇒ 同样的数据仍被判 stale。若没有这一臂，
+  // 「artifact-independent」就可能只是「这个夹具永远不报」。
+  const dir2 = tmpDir("idc-d-independence-neg-");
+  makeRepo(dir2);
+  commitAt(dir2, "2026-10-21T16:26:00Z", "plugin/scripts/a.ts", "export const a = 1;\n");
+  writeCarrier(dir2, "arch-cycle-history.jsonl", [
+    {
+      ts: "2026-10-21T23:14:05.363Z", mode: "arch-cycle-report-round", evaluated: true,
+      scopes: [{
+        scope: "scripts", source: "plugin/scripts", evaluated: true, artifactTimestamp: "2026-10-21T16:17:56.117Z", cycleCount: 0,
+      }],
+    },
+  ]);
+  const res2 = analyzeCarrier(dir2, ARCH_CYCLE_SPEC, DEFAULT_STALE_SECONDS);
+  assert.equal(res2.staleEvaluated.state, "stale", "⛔ without the independence declaration the same old artifact IS stale");
+  assert.deepEqual(res2.staleEvaluated.artifactIndependentScopes, []);
 });
 
 test("形态 D — 读 git 的例程按声明 not-applicable（⛔ 不是 fresh，也不是 finding）", () => {
@@ -531,8 +629,8 @@ test("裁定 — conditional-on-input：条件命令 exit 0 ⇒ explained-absent
 
 // ── 生产 MANIFEST 的 8 条裁定（本任务的交付物本身）────────────────────────────────────────────────
 // 用真实描述符 + 合成载体：8 个分组都命中 Shape B，但描述符声明了裁定 ⇒ 全部进 adjudicated[]。
-// ⚠️ 其中 4 条 conditional-on-input 跑的是**生产条件命令**（suite-rerun-green 读载体尾部最后一条 rerun；
-// suite-skip / suite-recovery / suite-recovery-blocked 读各自的触发输入），因此这些用例同时证明
+// ⚠️ 其中 4 条 conditional-on-input 跑的是**生产条件命令**（suite-rerun-green 读末次本组写入之后的
+// rerun 记录；suite-skip / suite-recovery / suite-recovery-blocked 读各自的触发输入），因此这些用例同时证明
 // 「声明的可执行条件读数」真的能跑、且方向正确——不是把散文抄进 reason 就算数。
 
 const RARE_BY_DESIGN_GROUPS = [
@@ -543,7 +641,9 @@ const EXPLAINED_ABSENT_GROUPS = [
   "suite-rerun-green", "suite-skip", "suite-recovery", "suite-recovery-blocked",
 ];
 const ADJUDICATED_GROUPS = [...RARE_BY_DESIGN_GROUPS, ...EXPLAINED_ABSENT_GROUPS];
-const BASELINE_RED_FILE = "plugin/test/task-granularity-advice.test.mjs";
+// ⛔ 不是「那一个基线红文件」：suite-rerun-green 的条件是**触发式**的，点名哪个文件与裁定无关。
+//    这里用任意一个名字，正是为证明这一点（旧写的 /task-granularity-advice\.test\.mjs/ 断言是缺陷编码）。
+const ANY_RERUN_FILE = "plugin/test/some-other-suite-red.test.mjs";
 // OLD (08-30) < MID < MID2 < RECENT (09-04)，且 MID/MID2 距 RECENT < 24h（否则恢复阶梯的两个
 // 认证分组自己会被 Shape B 判成 rate-stopped，把用例变成一个与主题无关的腐烂读数）。
 const MID = "2026-09-03T18:00:00.000Z";
@@ -551,15 +651,23 @@ const MID2 = "2026-09-03T20:00:00.000Z";
 
 function manifestFixtureRows({
   lastRerunState = "rerun-red",
-  lastRerunFiles = [BASELINE_RED_FILE],
+  lastRerunFiles = [ANY_RERUN_FILE],
   strayDocOnlyLanding = false,
+  omitRerun = false,
+  omitRerunState = false,
 } = {}) {
   const rows = [];
   for (const s of COMPANION_STEPS) rows.push(stepRec(s, RECENT));
   // ⛔ suite-skip 不在 RECENT 那批里：它属于本任务新裁定的 explained-absent 组，末次写入是 OLD。
   for (const s of SUITE_STEPS.filter((x) => x !== "suite-skip")) rows.push(stepRec(s, RECENT));
   for (const g of ADJUDICATED_GROUPS) rows.push(stepRec(g, OLD));
-  rows.push({ event: "step-end", step: "rerun", task: "gap-x", runId: "wk-prod-1", ts: RECENT, epoch: epochOf(RECENT), exit: 1, ok: false, state: lastRerunState, files: lastRerunFiles });
+  // omitRerun ⇒ 载体里没有触发输入（负控制 ④）：readable 但最后一轮重跑记录不存在。
+  if (!omitRerun) {
+    const rerun = { event: "step-end", step: "rerun", task: "gap-x", runId: "wk-prod-1", ts: RECENT, epoch: epochOf(RECENT), exit: 1, ok: false, state: lastRerunState, files: lastRerunFiles };
+    // omitRerunState ⇒ 记录里**没有** state 键（负控制 ⑤ 的「缺失」一半；null/未知字符串各是另外一半）。
+    if (omitRerunState) delete rerun.state;
+    rows.push(rerun);
+  }
   // 恢复阶梯的条件输入：末次降档之后一次 incomplete + 它在同一 task 上的认证（= 首档自己定论）。
   rows.push(stepRec("suite-incomplete", MID));
   rows.push(stepRec("suite-recovery-accepted", MID2));
@@ -594,7 +702,10 @@ test("生产 MANIFEST — 8 个 rate-stopped 分组全部被裁定（4 rare-by-d
     // ⛔ 已裁定 ≠ 从读数里消失：count / lastWrite 照旧输出，且都指向那组的真实末次写入。
     assert.ok(a.count > 0 && a.lastWriteMs === Date.parse(OLD), `${g} keeps its real reading in adjudicated[]`);
   }
-  assert.match(res.adjudicated.find((a) => a.group === "suite-rerun-green").condition.cmd, /task-granularity-advice\.test\.mjs/);
+  // ⛔ 触发式条件的正控制（旧写此处是 `assert.match(…, /task-granularity-advice\.test\.mjs/)` 的**反转**）：
+  //    生产的条件命令不得含任何具体文件名——把实例钉进条件，会让裁定随「当前哪个文件红」翻转（硬规则 3b）。
+  assert.doesNotMatch(res.adjudicated.find((a) => a.group === "suite-rerun-green").condition.cmd, /\.test\.mjs/);
+  assert.doesNotMatch(res.adjudicated.find((a) => a.group === "suite-rerun-green").condition.cmd, /task-granularity-advice\.test\.mjs/);
 });
 
 test("生产 MANIFEST 负控制 ① — 把 suite-skip 的 reviewAfter 改到过去 ⇒ 它回到 decayed[]，detail 点名过期", () => {
@@ -627,14 +738,84 @@ test("生产 MANIFEST 负控制 ③ — 含 ff 但没有 suite-start 的落地 �
   assert.equal(res.adjudicated.length, 7, "the other seven adjudications still hold");
 });
 
-test("生产 MANIFEST 负控制 — 最新的 rerun 变绿 ⇒ suite-rerun-green 的条件不成立 ⇒ 回到 decayed[]", () => {
-  const dir = tmpDir("idc-manifest-adj-neg-");
-  writeCarrier(dir, "fan-in-step-trace.jsonl", manifestFixtureRows({ lastRerunState: "rerun-green", lastRerunFiles: ["plugin/test/other.test.mjs"] }));
+// ── suite-rerun-green 的【触发式】条件：六条正负控制 ────────────────────────────────────────────────
+// (gap-instrument-decay-suite-rerun-green-file-pin-expired)
+// 语义：窗口 = 末次 suite-rerun-green 写入之后；窗口内 ①≥1 条 rerun ②没有 rerun-green ③状态全部已知
+//       ⇒ exit 0（explained-absent）；否则 exit 1（回到 decayed[]，fail-closed）。
+// ⛔ 条件不点名任何文件：「当前红的是哪一个文件」不再是条件的一部分——旧缺陷正是把实例钉进条件，
+//    该文件转绿后条件恒红，而「换了个红文件」与「写手真腐烂」在读数上同形（硬规则 3b）。
+
+test("suite-rerun-green 触发式控制 ① — 末次写入之后最新的 rerun 是 rerun-red（点名任意文件）⇒ explained-absent", () => {
+  const dir = tmpDir("idc-rerun-green-red-");
+  // ⚠️ 随机一个文件名：换成哪个文件都不影响裁定（这正是修法要证明的东西）。
+  writeCarrier(dir, "fan-in-step-trace.jsonl", manifestFixtureRows({
+    lastRerunState: "rerun-red", lastRerunFiles: ["plugin/test/whatever-is-red-today.test.mjs"],
+  }));
+  const res = analyzeCarrier(dir, MANIFEST[0], DEFAULT_STALE_SECONDS, NOW_MS);
+  assert.deepEqual(res.decayed.filter((d) => d.kind === "rate-stopped"), [], "a persistent baseline red explains the absence regardless of WHICH file");
+  const a = res.adjudicated.find((x) => x.group === "suite-rerun-green");
+  assert.ok(a, "suite-rerun-green must be in adjudicated[]");
+  assert.equal(a.state, "explained-absent");
+  assert.equal(a.condition.exitCode, 0);
+  assert.equal(res.adjudicated.length, 8);
+});
+
+test("suite-rerun-green 触发式控制 ② — rerun-not-evaluated（第三态）⇒ explained-absent（⛔ 不压成布尔）", () => {
+  const dir = tmpDir("idc-rerun-green-nev-");
+  writeCarrier(dir, "fan-in-step-trace.jsonl", manifestFixtureRows({ lastRerunState: "rerun-not-evaluated" }));
+  const res = analyzeCarrier(dir, MANIFEST[0], DEFAULT_STALE_SECONDS, NOW_MS);
+  assert.deepEqual(res.decayed.filter((d) => d.kind === "rate-stopped"), [], "not-evaluated is not 'the cause is gone'");
+  const a = res.adjudicated.find((x) => x.group === "suite-rerun-green");
+  assert.ok(a, "suite-rerun-green must stay in adjudicated[]");
+  assert.equal(a.state, "explained-absent");
+  assert.equal(a.condition.exitCode, 0, "the producer's explicit third state must satisfy the condition");
+  assert.equal(res.adjudicated.length, 8);
+});
+
+test("suite-rerun-green 触发式控制 ③ — 末次写入之后出现 rerun-green ⇒ 绿分支发生了却没写出本组 ⇒ decayed[]", () => {
+  const dir = tmpDir("idc-rerun-green-hit-");
+  // ⚠️ 文件仍被点名：唯一让解释失效的是 `rerun-green` 这个状态本身（不是「不再点名」）。
+  writeCarrier(dir, "fan-in-step-trace.jsonl", manifestFixtureRows({ lastRerunState: "rerun-green", lastRerunFiles: [ANY_RERUN_FILE] }));
   const res = analyzeCarrier(dir, MANIFEST[0], DEFAULT_STALE_SECONDS, NOW_MS);
   const stopped = res.decayed.filter((d) => d.kind === "rate-stopped").map((d) => d.group);
   assert.deepEqual(stopped, ["suite-rerun-green"], "a green rerun removes the conditional-on-input explanation");
   assert.match(res.decayed.find((d) => d.group === "suite-rerun-green").detail, /condition command did not hold/);
   assert.equal(res.adjudicated.length, 7, "the other seven adjudications still hold");
+});
+
+test("suite-rerun-green 触发式控制 ④ — 载体里没有任何 rerun 记录 ⇒ 条件不成立 ⇒ decayed[]", () => {
+  const dir = tmpDir("idc-rerun-green-norerun-");
+  writeCarrier(dir, "fan-in-step-trace.jsonl", manifestFixtureRows({ omitRerun: true }));
+  const res = analyzeCarrier(dir, MANIFEST[0], DEFAULT_STALE_SECONDS, NOW_MS);
+  const stopped = res.decayed.filter((d) => d.kind === "rate-stopped").map((d) => d.group);
+  assert.deepEqual(stopped, ["suite-rerun-green"], "no trigger input ⇒ no explanation (fail-closed)");
+  assert.match(res.decayed.find((d) => d.group === "suite-rerun-green").detail, /condition command did not hold/);
+  assert.equal(res.adjudicated.length, 7, "the other seven adjudications still hold");
+});
+
+test("suite-rerun-green 触发式控制 ⑤ — rerun 的 state 缺失/未知 ⇒ 条件不成立（未知态不豁免）", () => {
+  for (const [prefix, patch] of [
+    ["idc-rerun-green-nostate-", { omitRerunState: true }],
+    ["idc-rerun-green-unknown-", { lastRerunState: "rerun-mystery" }],
+    ["idc-rerun-green-null-", { lastRerunState: null }],
+  ]) {
+    const dir = tmpDir(prefix);
+    writeCarrier(dir, "fan-in-step-trace.jsonl", manifestFixtureRows(patch));
+    const res = analyzeCarrier(dir, MANIFEST[0], DEFAULT_STALE_SECONDS, NOW_MS);
+    const stopped = res.decayed.filter((d) => d.kind === "rate-stopped").map((d) => d.group);
+    assert.deepEqual(stopped, ["suite-rerun-green"], `${prefix}: an unrecognized state must fail closed to 'report decay'`);
+    assert.equal(res.adjudicated.length, 7, `${prefix}: the other seven adjudications still hold`);
+  }
+});
+
+test("suite-rerun-green 触发式控制 ⑥ — 生产的 condition.cmd 不含任何具体文件名（原 :699 断言反转）", () => {
+  const cmd = MANIFEST[0].adjudicated.find((a) => a.group === "suite-rerun-green").conditionCmd;
+  assert.doesNotMatch(cmd, /task-granularity-advice\.test\.mjs/, "the expired instance must not be part of the condition");
+  assert.doesNotMatch(cmd, /\.test\.mjs/, "no concrete file name at all: the condition must be trigger-driven");
+  // 条件读的是【触发输入本身】（末次本组写入之后的 rerun 记录），不是「本组多久没写」的二次包装。
+  assert.match(cmd, /suite-rerun-green/, "the window start must be this group's own last write");
+  assert.match(cmd, /rerun-red/, "a known non-green state must be an accepted window member");
+  assert.match(cmd, /rerun-not-evaluated/, "the producer's third state must be an accepted window member");
 });
 
 test("CLI --json — 裁定在机器面上：decayedCount 不含它们，adjudicated[] 独立可见", () => {

@@ -34,7 +34,7 @@ import fs from "node:fs";
 import os from "node:os";
 import http from "node:http";
 import { startServer } from "../src/serve/serve.ts";
-import { SESSIONS_KEYS, SESSIONS_LABELS, sessionsLabelsFor, sessionLabel, fillLabel, pageNameFor } from "../src/serve/serve-i18n.ts";
+import { SESSIONS_KEYS, SESSIONS_LABELS, sessionsLabelsFor, sessionLabel, fillLabel, pageNameFor } from "../src/serve/view/serve-i18n.ts";
 import { renderSessionPage, renderSessionsPage } from "../src/serve/serve-handlers.ts";
 import { readSessions } from "../src/observation.ts";
 import { QUAY_NATIVE_CLI } from "./helpers/cli-entry.mjs";

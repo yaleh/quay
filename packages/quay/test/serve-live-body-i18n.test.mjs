@@ -44,8 +44,8 @@ import {
   liveLabel,
   dashboardLabel,
   fillLabel,
-} from "../src/serve/serve-i18n.ts";
-import { phaseLabel, renderLivePage } from "../src/serve/serve-live.ts";
+} from "../src/serve/view/serve-i18n.ts";
+import { phaseLabel, renderLivePage } from "../src/serve/pages/serve-live.ts";
 import { QUAY_NATIVE_CLI } from "./helpers/cli-entry.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));

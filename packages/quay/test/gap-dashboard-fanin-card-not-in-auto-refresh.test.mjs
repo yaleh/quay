@@ -28,8 +28,8 @@ import {
   renderFanInCardFromRecords,
   buildCardsPayload,
   checkCardRegistrationCompleteness,
-} from "../src/serve/serve-dashboard.ts";
-import { renderFanInCell } from "../src/serve/serve-task.ts";
+} from "../src/serve/view/serve-dashboard.ts";
+import { renderFanInCell } from "../src/serve/feat/serve-task.ts";
 import { readWorkerOutcomeRecords } from "../src/observation.ts";
 import { startServer } from "../src/serve/serve.ts";
 import { QUAY_NATIVE_CLI } from "./helpers/cli-entry.mjs";

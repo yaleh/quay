@@ -26,8 +26,8 @@
 //     (`import-graph-check.ts` ratchets type-level cycles too, so the direction stays one-way:
 //     serve-dashboard.ts / serve-board.ts → snapshot-store.ts.)
 
-import type { BoardExecution, BoardLanding, CurrentSuiteRun, GitHistoryResult, LiveResult, ManagerResult, SystemResult, TestsResult, WorkerOutcomeRecord } from "../observation.ts";
-import type { GoalRecord } from "../abi.ts";
+import type { BoardExecution, BoardLanding, CurrentSuiteRun, GitHistoryResult, LiveResult, ManagerResult, SystemResult, TestsResult, WorkerOutcomeRecord } from "../../observation.ts";
+import type { GoalRecord } from "../../abi.ts";
 
 /** A frontmatter-only task summary (the `includeBody:false` shape `readTaskSummary` returns). The
  *  `goal_ac` field (task→AC linkage, G7) joined the shape via gap-webui-goal-task-rollup-via-shared-

@@ -15,9 +15,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { DashboardSnapshotStore } from "../src/serve/snapshot-store.ts";
-import { dashboardSnapshotStore } from "../src/serve/serve-dashboard.ts";
-import { boardSnapshotStore } from "../src/serve/serve-board.ts";
+import { DashboardSnapshotStore } from "../src/serve/store/snapshot-store.ts";
+import { dashboardSnapshotStore } from "../src/serve/view/serve-dashboard.ts";
+import { boardSnapshotStore } from "../src/serve/pages/serve-board.ts";
 
 /** Poll `fn` until it returns truthy (or the deadline passes). Builds settle on microtasks, so a
  *  bare `await` would race the chained follow-up. */

@@ -17,7 +17,7 @@ import os from "node:os";
 import { parseVerificationRound, readLive, taskWorktreeOpen, readJournal, parseWorkerOutcomeRecords, parseWorkerOutcomeRecordsDetailed, readFanInAttempts, fanInAttemptFromRecord, workerInFlightTasks, workerDriverOnlineMs, workerTaskIdFromCmdline, readLiveWorkerProcesses, WORKER_PROCESS_NAME, WORKER_OUTCOME_REL, WORKER_ROUND_REL, isValidSessionId, sessionTranscriptPath, projectSlug, transcriptContentBlocks, parseTranscript, readTranscript, readTranscriptTail, readSession, parseClaudeAgentsJson, readTaskStatusAtRef, readTaskAtRefMeta, readTaskTitleMapAtRef, readTaskCommitTimesAtRef, readTaskCommitTimeAtRef, readTaskStatusMapAtRef, refreshDevelopRefCaches, clearTaskStatusRefCache, resetDevelopRefWalkCounts, getDevelopRefFullWalkCount, getDevelopRefBoundedWalkCount, LOOP_DRIVER_CHECK_REL, OBSERVER_REGISTRY_REL, runLoopDriverProbe, readManager, scriptBasename, RESOURCE_GATE_REL, RESOURCE_GATE_NAME, PROCESS_BUDGET_NAME, TASK_STATUS_DRIFT_CHECK_REL, TASK_STATUS_DRIFT_CHECK_NAME } from "../src/observation.ts";
 import { resolvePluginScript, resolveOrchestrationFile } from "../src/core/plugin-root.ts";
 import { renderSessionPage } from "../src/serve/serve-handlers.ts";
-import { taskRunsBlock, handleTaskList } from "../src/serve/serve-task.ts";
+import { taskRunsBlock, handleTaskList } from "../src/serve/feat/serve-task.ts";
 
 
 test("AC127: parseVerificationRound extracts the bucket-execution fields (buckets/bucket_files/bucket_duration_ms) and tolerates their absence on legacy rows (never a fabricated \"full\")", () => {
@@ -1470,6 +1470,178 @@ test("readFanInAttempts: absent / unreadable / corrupt-line are three DIFFERENT 
     assert.ok(r.reason != null && r.reason.includes("could not be read"), `the diagnostic is carried (got ${r.reason})`);
   } finally {
     fs.rmSync(unreadable, { recursive: true, force: true });
+  }
+});
+
+// ── gap-driver-log-since-and-tail-read: `sinceMs` + the bounded tail read ─────────────────────────
+//
+// The consumer (claudecodeui) reads a 4.3 MB / 1860-record carrier to see the LAST few fan-in
+// attempts. These tests pin the three properties that make that possible without lying:
+//   AC1  `sinceMs` filters on the record's own `ts` and composes with `limit` (filter → tail N);
+//   AC2  the read is TAIL-FIRST (bytesRead ≪ size) and the front of the carrier is never consulted
+//        (negative control: the front replaced with unparseable noise leaves the answer identical);
+//   AC3  the four carrier states survive, and the counts are NOT passed off as whole-file counts —
+//        `window.truncated` separates "the whole carrier was read" from "only the tail was".
+
+/** `count` outcome records, one per minute from `baseIso`, each carrying a mechanical fan-in step so
+ *  the projection has something to lift. `padBytes` inflates each line so the tail window has to be
+ *  a real fraction of the file (a few-KB fixture would fit in one window trivially and prove nothing). */
+function fanInLedger(count, baseIso, { task = "T-1", padBytes = 0 } = {}) {
+  const base = Date.parse(baseIso);
+  const out = [];
+  for (let i = 0; i < count; i++) {
+    const rec = {
+      ts: new Date(base + i * 60_000).toISOString(),
+      task,
+      run_id: `r-${i}`,
+      final_state: i % 2 === 0 ? "completed" : "exited-not-landed",
+      mechanical_fan_in: { outcome: i % 2 === 0 ? "landed" : "red", step: i % 2 === 0 ? null : "suite", reason: i % 2 === 0 ? null : `boom-${i}` },
+    };
+    if (padBytes > 0) rec.selector_reason = "x".repeat(padBytes);
+    out.push(JSON.stringify(rec));
+  }
+  return out.join("\n") + "\n";
+}
+
+test("readFanInAttempts --since (AC1): keeps ts >= since, and composes with limit as FILTER-then-TAIL-N", () => {
+  const ws = workerWorkspace("fanin-since");
+  try {
+    const ledger = fanInLedger(10, "2026-10-01T00:00:00.000Z"); // r-0 at 00:00 … r-9 at 00:09
+    fs.writeFileSync(path.join(ws, WORKER_OUTCOME_REL), ledger);
+    const sinceMs = Date.parse("2026-10-01T00:06:00.000Z");
+
+    const r = readFanInAttempts(ws, { sinceMs });
+    assert.equal(r.status, "ok");
+    assert.deepEqual(r.attempts.map((a) => a.run_id), ["r-6", "r-7", "r-8", "r-9"],
+      "only ts >= since survives, in carrier order (oldest → newest)");
+    assert.equal(r.window.since, "2026-10-01T00:06:00.000Z", "the applied bound is published, normalized to ISO");
+
+    // LIMIT ALONE: the newest N of everything.
+    assert.deepEqual(readFanInAttempts(ws, { limit: 3 }).attempts.map((a) => a.run_id), ["r-7", "r-8", "r-9"],
+      "limit alone keeps the tail");
+
+    // COMBINED: ⛔ filter by --since FIRST, then keep the newest N. The other order would return
+    // r-6,r-7,r-8 for limit=3 — the pre-filter tail would eat two of the three slots.
+    const both = readFanInAttempts(ws, { sinceMs, limit: 3 });
+    assert.deepEqual(both.attempts.map((a) => a.run_id), ["r-7", "r-8", "r-9"],
+      "since-then-limit, never limit-then-since");
+    assert.equal(both.window.since, "2026-10-01T00:06:00.000Z");
+
+    // A cutoff after every record is a REAL empty answer (status ok), not an error and not absent.
+    const late = readFanInAttempts(ws, { sinceMs: Date.parse("2027-01-01T00:00:00.000Z") });
+    assert.equal(late.status, "ok", "an empty --since window is an evaluated reading");
+    assert.deepEqual(late.attempts, []);
+
+    // taskId still composes (the selection predicates are ANDed, not replaced).
+    fs.writeFileSync(path.join(ws, WORKER_OUTCOME_REL), ledger + fanInLedger(2, "2026-10-01T00:20:00.000Z", { task: "T-2" }));
+    assert.deepEqual(readFanInAttempts(ws, { taskId: "T-2", sinceMs }).attempts.map((a) => a.task), ["T-2", "T-2"]);
+  } finally {
+    fs.rmSync(ws, { recursive: true, force: true });
+  }
+});
+
+test("readFanInAttempts bounded read (AC2): --limit reads only the TAIL — bytesRead ≪ size, and the front is never consulted", () => {
+  const ws = workerWorkspace("fanin-tail");
+  try {
+    const filePath = path.join(ws, WORKER_OUTCOME_REL);
+    // ~2 MB of records: far more than one 256 KiB window, so growth is genuinely exercised.
+    const ledger = fanInLedger(400, "2026-10-01T00:00:00.000Z", { padBytes: 4096 });
+    fs.writeFileSync(filePath, ledger);
+    const size = fs.statSync(filePath).size;
+    assert.ok(size > 1_000_000, `fixture is big enough to have a real front half (${size} bytes)`);
+
+    const limited = readFanInAttempts(ws, { limit: 5 });
+    assert.deepEqual(limited.attempts.map((a) => a.run_id), ["r-395", "r-396", "r-397", "r-398", "r-399"]);
+    assert.equal(limited.window.truncated, true, "the front was NOT covered ⇒ the counts are window-scoped");
+    assert.ok(limited.window.fromByte > 0, `the window starts after byte 0 (got ${limited.window.fromByte})`);
+    assert.equal(limited.window.toByte, size, "the window ends at EOF");
+    assert.ok(limited.window.bytesRead < size / 2,
+      `bytesRead (${limited.window.bytesRead}) is a small fraction of the ${size}-byte carrier — ⛔ no read-then-slice`);
+    assert.ok(limited.totalLines < 400, `totalLines describes the WINDOW (${limited.totalLines}), never the file's 400 lines`);
+
+    // The WHOLE-FILE arm still reads everything (that is the caller's own request) and says so.
+    const all = readFanInAttempts(ws, {});
+    assert.equal(all.window.fromByte, 0);
+    assert.equal(all.window.truncated, false);
+    assert.equal(all.window.since, null);
+    assert.equal(all.totalLines, ledger.split("\n").filter((l) => l.trim()).length,
+      "truncated=false means totalLines IS the carrier's line count");
+
+    // ⛔ NEGATIVE CONTROL: replace the carrier's FRONT with unparseable noise. If the answer is
+    // byte-identical, the front was provably never read (not merely "not used").
+    const tailStart = limited.window.fromByte;
+    const noise = Array.from({ length: 200 }, (_, i) => `<<not json ${i}>>`).join("\n") + "\n";
+    const tail = fs.readFileSync(filePath).subarray(tailStart).toString("utf8");
+    fs.writeFileSync(filePath, noise + tail);
+    const afterNoise = readFanInAttempts(ws, { limit: 5 });
+    assert.deepEqual(afterNoise.attempts, limited.attempts, "the front half is never consulted for a --limit read");
+    assert.equal(afterNoise.window.truncated, true);
+  } finally {
+    fs.rmSync(ws, { recursive: true, force: true });
+  }
+});
+
+test("readFanInAttempts bounded read (AC3): the four carrier states survive, and the counts are window-scoped — never passed off as whole-file", () => {
+  // ① carrier-absent — unchanged by the bounded arm.
+  const absent = workerWorkspace("fanin-w-absent");
+  try {
+    for (const opts of [{}, { limit: 3 }, { sinceMs: Date.parse("2026-10-01T00:00:00.000Z") }]) {
+      const r = readFanInAttempts(absent, opts);
+      assert.equal(r.status, "carrier-absent", `absent carrier under ${JSON.stringify(opts)}`);
+      assert.equal(r.window.truncated, false);
+      assert.equal(r.window.bytesRead, 0);
+    }
+  } finally {
+    fs.rmSync(absent, { recursive: true, force: true });
+  }
+
+  // ② carrier-unreadable — still its OWN value with a diagnostic, bounded or not.
+  const unreadable = workerWorkspace("fanin-w-unreadable");
+  try {
+    fs.mkdirSync(path.join(unreadable, WORKER_OUTCOME_REL), { recursive: true });
+    const r = readFanInAttempts(unreadable, { limit: 2 });
+    assert.equal(r.status, "carrier-unreadable");
+    assert.ok(r.reason != null && r.reason.includes("could not be read"), `(got ${r.reason})`);
+  } finally {
+    fs.rmSync(unreadable, { recursive: true, force: true });
+  }
+
+  // ③ malformed INSIDE the window — the status and the counts describe the window, and the reason
+  //    SAYS SO instead of implying "2 of 22 in the whole carrier".
+  const inWindow = workerWorkspace("fanin-w-malformed");
+  try {
+    // The records themselves must occupy more than one tail window, so the window starts INSIDE the
+    // ledger and genuinely ends on the malformed lines (a small fixture would be read whole).
+    const ledger = fanInLedger(40, "2026-10-01T00:00:00.000Z", { padBytes: 8192 });
+    fs.writeFileSync(path.join(inWindow, WORKER_OUTCOME_REL), ledger + "not json\n[]\n");
+    const r = readFanInAttempts(inWindow, { limit: 2 });
+    assert.equal(r.window.truncated, true, "the window did not cover the carrier");
+    assert.equal(r.status, "malformed-lines", "a malformed line in the window is still enumerated, not hidden");
+    assert.equal(r.malformedLines, 2);
+    assert.ok(r.totalLines > 2 && r.totalLines < 42, `totalLines counts the window, not the file's 42 lines (got ${r.totalLines})`);
+    assert.equal(r.attempts.length, 2, "the readable tail records are still returned");
+    assert.ok(r.reason != null && r.reason.includes("WINDOW ONLY"),
+      `the reason names the window scope (got ${r.reason})`);
+  } finally {
+    fs.rmSync(inWindow, { recursive: true, force: true });
+  }
+
+  // ④ malformed OUTSIDE the window is UNKNOWN, not "zero": status stays ok, and `truncated` — the
+  //    independent value — is what tells the caller the front was never read (硬规则 6 + 3b).
+  const outOfWindow = workerWorkspace("fanin-w-outside");
+  try {
+    // Unparseable front (≈82 KB), then ≥256 KB of good records so the tail window lands entirely
+    // inside the readable region — the noise is never in it.
+    const noise = Array.from({ length: 10 }, (_, i) => `<<noise ${i}>> ${"y".repeat(8192)}`).join("\n") + "\n";
+    fs.writeFileSync(path.join(outOfWindow, WORKER_OUTCOME_REL),
+      noise + fanInLedger(60, "2026-10-01T00:00:00.000Z", { padBytes: 8192 }));
+    const r = readFanInAttempts(outOfWindow, { limit: 2 });
+    assert.equal(r.status, "ok", "the unparseable FRONT was never read, so it is not reported as malformed");
+    assert.equal(r.malformedLines, 0);
+    assert.equal(r.window.truncated, true, "…and the caller can SEE that only the tail was read");
+    assert.deepEqual(r.attempts.map((a) => a.run_id), ["r-58", "r-59"]);
+  } finally {
+    fs.rmSync(outOfWindow, { recursive: true, force: true });
   }
 });
 

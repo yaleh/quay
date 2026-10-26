@@ -4440,9 +4440,9 @@ const root = process.argv[2] || '';
 const carrierNames = process.argv.slice(3);
 const nowMs = Date.now();
 const out = {
-  probeVersion: 1, root: root, rootPresent: false, nowMs: nowMs,
+  probeVersion: 2, root: root, rootPresent: false, nowMs: nowMs,
   roundRecords: [], driverProcesses: null,
-  initStatePresent: false, initStatePluginVersion: null,
+  initStatePresent: false, initStateMode: 'unknown', initStatePluginVersion: null,
   initStateLaidAt: null, initStateAgeSec: null,
   carriers: {}, fanInSteps: null, traceTruncated: false, fanInParseErrors: 0,
 };
@@ -4464,7 +4464,9 @@ if (out.rootPresent) {
   out.roundRecords.sort(function (a, b) { return b.mtimeMs - a.mtimeMs; });
   // 项目指引链接 <root>/.quay/plugin —— 版本从链接**目标自己**的 plugin.json 派生，龄从**链接本身**的
   // lstat mtime 派生（⛔ 不跟随链接：跟随会把目标目录的 mtime 当成「上次 init 的时刻」，那是另一个量）。
-  // 链接缺失 / 目标读不出 ⇒ 读数保持 null 且 present=false（⛔ 不与「相等/合格」同形，硬规则 3b）。
+  // ⚠️ 链接**不存在** = 'retired'（缺省是正常态；退役正本见 driver-runtime.ts 的
+  // PointerReadingState，⛔ 不在本文件重复日期/版本）；**在但读不懂** = 'unreadable'（不是符号链接 /
+  // 悬空 / 目标无 plugin.json）。⛔ 用布尔 present 把两者压成一态正是本任务修的缺陷（硬规则 3b）。
   // 路径拼成完整三段 <root>/.quay/plugin（⛔ 不写成 q 变量后接 plugin 名字的两参拼法：那正是
   // kernel-sibling-resolution-check 的 DRIVER-SCOPE 判定所报的缺陷**形**——「把 quay 自己的
   // plugin/ 树锚在 target root」的拼法恰是 <rootVar> 后紧跟第 2 段 plugin。本探针是**发往目标机
@@ -4474,15 +4476,20 @@ if (out.rootPresent) {
   try {
     const lst = fs.lstatSync(linkPath);
     out.initStatePresent = true;
+    out.initStateMode = 'unreadable'; // 先假设读不懂；只有真读出 version 才升为 'present'
     out.initStateLaidAt = lst.mtimeMs / 1000;
     out.initStateAgeSec = Math.max(0, Math.round(nowMs / 1000 - lst.mtimeMs / 1000));
   } catch (e) {
     out.initStatePresent = false;
+    out.initStateMode = 'retired';
   }
   if (out.initStatePresent) {
     try {
       const pj = JSON.parse(fs.readFileSync(path.join(linkPath, '.claude-plugin', 'plugin.json'), 'utf8'));
-      if (pj && typeof pj.version === 'string' && pj.version.length > 0) out.initStatePluginVersion = pj.version;
+      if (pj && typeof pj.version === 'string' && pj.version.length > 0) {
+        out.initStatePluginVersion = pj.version;
+        out.initStateMode = 'present';
+      }
     } catch (e) {}
   }
   const tracePath = path.join(q, 'fan-in-step-trace.jsonl'); // 目标项目自己的载体，⛔ 不是本仓同名文件
@@ -4544,8 +4551,10 @@ export type TargetHealthVerdict = "healthy" | "unhealthy" | "not-evaluated";
  *  carrier-missing       关键载体缺失（枚举在 causeDetail）——「没跑过」不得与「零信号」同形；
  *  process-list-unreadable 进程表读不到（`ps` 不可用 / 被沙箱挡）⇒ 「有没有 driver 在跑」不可知
  *                        ——⛔ 不可知不得回落成「在跑」（硬规则 3b：读不懂不得与合格同形）；
- *  plugin-link-missing   目标项目没有 `.quay/plugin` 指引链接（未 quay-init / 被删）⇒ 链接目标版本
- *                        与本 fact 的陈旧度都无从谈起 ⇒ 不能判「形状不落后」；
+ *  plugin-link-unreadable 目标项目的 `.quay/plugin` **在但读不懂**（不是符号链接 / 悬空 / 目标无
+ *                        plugin.json 或 JSON 坏）⇒ 链接目标版本与本 fact 的陈旧度都无从谈起。
+ *                        ⛔ 链接**不存在**不是这个成因：那是 `retired`（已退役，缺省是正常态；
+ *                        正本见 driver-runtime.ts 的 PointerReadingState）；
  *  trace-unreadable      **目标项目自己的** `fan-in-step-trace.jsonl` 在、但读不出来（权限 / I/O /
  *                        它其实是个目录）——⛔ 与「零失败」不同形；
  *  trace-unparseable     该载体读出来了、但其中有**读不懂的行**（JSON 坏 / 缺 epoch / ok 非布尔）
@@ -4559,7 +4568,7 @@ export type TargetHealthCause =
   | "target-root-absent"
   | "carrier-missing"
   | "process-list-unreadable"
-  | "plugin-link-missing"
+  | "plugin-link-unreadable"
   | "trace-unreadable"
   | "trace-unparseable"
   | "trace-truncated";
@@ -4580,6 +4589,13 @@ export interface TargetProbeReading {
   roundRecords: Array<{ rel: string; mtimeMs: number; bytes: number }>;
   driverProcesses: { count: number; samples: string[] } | null;
   initStatePresent: boolean;
+  /** 项目指引链接的三态（⛔ 布尔会把「已退役」与「读不懂」压成一态）：
+   *  `present` 路径在、是符号链接、目标 plugin.json 的 version 读出来了；
+   *  `retired` 路径**不存在** —— 已退役（缺省是正常态；正本见 driver-runtime.ts 的
+   *            `PointerReadingState`，⛔ 不在本文件重复日期/版本）；
+   *  `unreadable` 路径在但读不懂（不是符号链接 / 悬空 / 目标无 plugin.json 或 JSON 坏）；
+   *  `unknown` 探针没给出该读数（旧载荷 / 形态不全）—— 消费方必须 fail-closed 到 not-evaluated。 */
+  initStateMode: "present" | "retired" | "unreadable" | "unknown";
   initStatePluginVersion: string | null;
   /** `.quay/plugin` 链接的 lstat mtime（epoch 秒）与其龄（秒）——版本读数**必须带陈旧度**：
    *  不带龄的版本读数分不清「刚 init 过」与「装了一个月没更新」（同盘上任何快照读数的纪律）。 */
@@ -4627,7 +4643,9 @@ export interface TargetHealthReading {
   signals: string[];
   /** 逐条 verdict 输入当时的**可读性**快照（三条 verdict 输入：进程表、配置形状、fan-in 载体）。
    *  ⛔ not-evaluated 时恒 null（与 `signals` 同步）。它与 `cause` 冗余但**独立可得**：消费方拿到的是
-   *  一条 fact 的**自描述**——「这个 healthy 是在三条输入都读到的情况下给的」不必反查 cause 枚举就能确认。 */
+   *  一条 fact 的**自描述**——「这个 healthy 是在三条输入都读到的情况下给的」不必反查 cause 枚举就能确认。
+   *  `initStateReadable` 对 `retired` 也是 true —— 「链接已退役」是一个**读到了**的结论（缺省是正常
+   *  态），⛔ 不是「读不到」；只有 `unreadable`/`unknown` 才不可读（那两态在下面已 fail-closed）。 */
   signalScope: { livenessReadable: boolean; initStateReadable: boolean; fanInReadable: boolean } | null;
   /** 窗口内 fan-in 步骤成败（源：**目标项目自己的** `<目标根>/.quay/fan-in-step-trace.jsonl`，只算
    *  `step-end` 行——⛔ 不是本仓的同名文件）。⛔ not-evaluated 时恒 null（不与 `failed:0` 同形）。 */
@@ -4655,6 +4673,9 @@ export interface TargetHealthReading {
     delivered: string | null;
     equal: boolean | null;
     initStatePresent: boolean | null;
+    /** 链接三态（⛔ 布尔压两态）：`present` 读出了版本 / `retired` 已退役（缺省是正常态）/
+     *  `unreadable` 在但读不懂 / `unknown` 没探测。⛔ `retired` 与 `unreadable` 不同形（硬规则 3b）。 */
+    initStateMode: "present" | "retired" | "unreadable" | "unknown";
     targetAgeSec: number | null;
   };
   /** 逐条关键载体的存在性（required=true 的那几条缺失 ⇒ verdict not-evaluated）。⛔ null = 未探测。 */
@@ -4774,6 +4795,15 @@ export function parseHealthProbe(stdout: string): TargetProbeReading | null {
       return { count: dp.count, samples: Array.isArray(dp.samples) ? (dp.samples as string[]) : [] };
     })(),
     initStatePresent: r.initStatePresent === true,
+    // 显式读数优先；旧载荷（无 `initStateMode`）按 `initStatePresent` 派生——探针载荷由本文件随进程
+    // 一起送出，不存在真实的旧载荷，此分支只为既有 fixture 兼容（形态缺 ⇒ `unknown`，fail-closed）。
+    initStateMode: ((): TargetProbeReading["initStateMode"] => {
+      const m = r.initStateMode;
+      if (m === "present" || m === "retired" || m === "unreadable" || m === "unknown") return m;
+      if (r.initStatePresent === true) return "present";
+      if (r.initStatePresent === false) return "retired";
+      return "unknown";
+    })(),
     initStatePluginVersion: typeof r.initStatePluginVersion === "string" ? r.initStatePluginVersion : null,
     initStateLaidAt: typeof r.initStateLaidAt === "number" && Number.isFinite(r.initStateLaidAt) ? r.initStateLaidAt : null,
     initStateAgeSec: typeof r.initStateAgeSec === "number" && Number.isFinite(r.initStateAgeSec) ? r.initStateAgeSec : null,
@@ -4807,7 +4837,9 @@ export function deriveTargetHealth(
     fanIn: null,
     pluginVersion: {
       target: null, delivered: opts.deliveredPluginVersion, equal: null as boolean | null,
-      initStatePresent: null as boolean | null, targetAgeSec: null as number | null,
+      initStatePresent: null as boolean | null,
+      initStateMode: "unknown" as TargetProbeReading["initStateMode"],
+      targetAgeSec: null as number | null,
     },
     carriers: null,
   };
@@ -4824,6 +4856,7 @@ export function deriveTargetHealth(
       ? r.initStatePluginVersion === opts.deliveredPluginVersion
       : null,
     initStatePresent: r.initStatePresent,
+    initStateMode: r.initStateMode,
     targetAgeSec: r.initStateAgeSec,
   };
   const liveness = r.driverProcesses === null
@@ -4849,8 +4882,10 @@ export function deriveTargetHealth(
   if (r.driverProcesses === null) {
     return { ...base, verdict: "not-evaluated", cause: "process-list-unreadable", causeDetail: ["ps -eo pid=,args="], pluginVersion, liveness, roundRecords, carriers };
   }
-  if (!r.initStatePresent || r.initStatePluginVersion === null) {
-    return { ...base, verdict: "not-evaluated", cause: "plugin-link-missing", causeDetail: [".quay/plugin"], pluginVersion, liveness, roundRecords, carriers };
+  if (r.initStateMode === "unreadable" || r.initStateMode === "unknown" || (r.initStateMode === "present" && r.initStatePluginVersion === null)) {
+    // 路径在、但读不出/读不懂 ⇒ **不能判**（硬规则 3b）。⛔ 链接**不存在**不走这里：那是 `retired`
+    // （缺省是正常态），只在 pluginVersion 上留读数，不阻塞 verdict。
+    return { ...base, verdict: "not-evaluated", cause: "plugin-link-unreadable", causeDetail: [".quay/plugin"], pluginVersion, liveness, roundRecords, carriers };
   }
   // 「载体在」不等于「读得出来 / 读得懂」——⛔ 下面两条各自把一种「读不懂」挡在 healthy 之外（硬规则 3b）：
   // 否则一个坏文件（权限、它其实是个目录、JSON 坏、字段缺）会**恰好**给出 `failed:0`，与「零失败」同形。
@@ -4918,7 +4953,9 @@ function targetHealthReason(v: TargetHealthReading): string {
     ? ` pluginVersion MISMATCH ${ver.target}≠${ver.delivered}${ageNote}`
     : ver.equal === true
       ? ` pluginVersion ok${ageNote}`
-      : ` pluginVersion 读不到${ver.initStatePresent === false ? "（目标无 .quay/plugin 链接）" : ""}`;
+      : ver.initStateMode === "retired"
+        ? " pluginVersion n/a（.quay/plugin 已退役；缺省是正常态）"
+        : " pluginVersion 读不到（.quay/plugin 在但读不出）";
   const f = v.fanIn;
   const fanInNote = f === null ? "" : `, fan-in ${f.failed > 0
     ? `${f.failed} failed / ${f.steps} steps [${Object.entries(f.failedByStep).map(([k, n]) => `${k}×${n}`).join(" ")}]`

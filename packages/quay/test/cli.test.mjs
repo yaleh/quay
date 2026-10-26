@@ -1069,6 +1069,7 @@ async function main() {
   await block31();
   await block32();
   await block33();
+  await block34();
 
   fs.rmSync(tasksDir, { recursive: true, force: true });
   fs.rmSync(workspaceRoot, { recursive: true, force: true });
@@ -1270,11 +1271,12 @@ async function block14(workspaceRoot) {
     // (`provider` joined it with gap-provider-switch-no-dedicated-entry-point — a new route with no
     // synopsis line is exactly the drift this assertion exists to catch, so the list is widened here
     // in the same change that adds the route. `lanes` joined it the same way with
-    // gap-cli-lanes-json-verb-for-gantt-consumers.)
+    // gap-cli-lanes-json-verb-for-gantt-consumers; `suite` with
+    // gap-suite-read-verb-current-and-recent-rounds.)
     const dispatchVerbs = [
       "adr", "goal", "meta", "task", "action", "serve", "server", "mcp", "init", "config", "gate",
       "gate-log", "complete", "adjudicate", "promote", "retreat", "run", "migrate", "provider",
-      "manager", "driver", "lanes", "live-state",
+      "manager", "driver", "lanes", "live-state", "suite",
     ];
     const missing = dispatchVerbs.filter((v) => !synopsisVerbs.includes(v));
     const extra = synopsisVerbs.filter((v) => !dispatchVerbs.includes(v));
@@ -2715,6 +2717,135 @@ async function block33() {
       Array.isArray(bTasks) && bTasks.length === 3 && bTasks.every((t) => "body" in t),
       `without --no-body every task still carries its body (got ${JSON.stringify((bTasks || []).map((t) => "body" in t))})`
     );
+  } finally {
+    fs.rmSync(ws, { recursive: true, force: true });
+  }
+}
+
+// 34. gap-driver-log-since-and-tail-read — `quay driver log --kind worker --since <ISO8601>`.
+//
+//     The consumer (claudecodeui) polls a 4.3 MB / 1860-record `.quay/worker-outcome.jsonl` for the
+//     LAST few mechanical fan-in attempts. `--limit` existed but still read the whole carrier and
+//     sliced afterwards, and there was no time bound at all. What is pinned here, end-to-end through
+//     the real CLI entry:
+//       AC1 — `--since` returns only `ts >= since`, and composes with `--limit` as FILTER-then-TAIL-N
+//             (the reverse order would let out-of-window records eat the N slots). Three runs:
+//             no --since / --since / --since + --limit.
+//       AC2 — a bounded read is a BOUNDED read: `window.bytesRead` is a small fraction of the
+//             carrier and `window.truncated` is true, measured on a carrier larger than one window.
+//             (The wall-clock/RSS + ≥50 MB measurement lives in the task's ## Evidence — a fixture
+//             cannot be that measurement, 硬规则 4 推论三.)
+//       AC3 — `totalLines` on a bounded read is the WINDOW's line count and `window.truncated` says
+//             so; the reason text names the window. ⛔ The whole-carrier count is not impersonated.
+//       AC4 — the pre-change key set survives unchanged; `window` is the only addition.
+//       AC5 — `quay driver --help` registers `--since` AND the version it first shipped in.
+async function block34() {
+  const assert = makeAssert("driver-log-since");
+  const ws = fs.mkdtempSync(path.join(os.tmpdir(), "quay-cli-driver-log-since-"));
+  try {
+    fs.mkdirSync(path.join(ws, ".quay"), { recursive: true });
+    fs.writeFileSync(path.join(ws, ".quay", "config.yml"), "provider: native\n");
+
+    // 400 records, one per minute from 2026-10-01T00:00Z. ~8 KB each ⇒ ~3.3 MB, comfortably more
+    // than one 256 KiB tail window so the bounded read has to be genuinely bounded.
+    const base = Date.parse("2026-10-01T00:00:00.000Z");
+    const recs = [];
+    for (let i = 0; i < 400; i++) {
+      recs.push(JSON.stringify({
+        ts: new Date(base + i * 60_000).toISOString(),
+        task: "T-LOG",
+        run_id: `r-${i}`,
+        final_state: i % 2 === 0 ? "completed" : "exited-not-landed",
+        selector_reason: "x".repeat(8192),
+        mechanical_fan_in: { outcome: i % 2 === 0 ? "landed" : "red", step: i % 2 === 0 ? null : "suite",
+          reason: i % 2 === 0 ? null : `boom-${i}` },
+      }));
+    }
+    const carrierPath = path.join(ws, ".quay", "worker-outcome.jsonl");
+    fs.writeFileSync(carrierPath, recs.join("\n") + "\n");
+    const carrierSize = fs.statSync(carrierPath).size;
+
+    const runLog = async (extra) => {
+      const r = await runImport(["driver", "log", "--kind", "worker", "--json", "--root", ws, ...extra], {});
+      let json = null;
+      try { json = JSON.parse(r.stdout); } catch { /* asserted below */ }
+      return { ...r, json };
+    };
+
+    // ── AC1 run 1: no --since ────────────────────────────────────────────────────────────────────
+    const all = await runLog([]);
+    assert(all.status === 0, `AC1 (no --since) exits 0 (got ${all.status}: ${all.stderr.trim()})`);
+    assert(all.json !== null, "AC1 (no --since) prints JSON");
+    assert(all.json.status === "ok", `AC1 (no --since) status ok (got ${all.json.status})`);
+    assert(all.json.attempts.length === 400, `AC1 (no --since) returns every attempt (got ${all.json.attempts.length})`);
+    assert(all.json.window.truncated === false, "AC1 (no --since) reads the WHOLE carrier ⇒ truncated=false");
+    assert(all.json.window.fromByte === 0 && all.json.window.toByte === carrierSize,
+      `AC1 (no --since) window covers the whole carrier (${all.json.window.fromByte}..${all.json.window.toByte} of ${carrierSize})`);
+    assert(all.json.window.since === null, "AC1 (no --since) window.since is null");
+
+    // ── AC1 run 2: --since ──────────────────────────────────────────────────────────────────────
+    const sinceIso = "2026-10-01T06:30:00.000Z"; // r-390
+    const since = await runLog(["--since", sinceIso]);
+    assert(since.status === 0, `AC1 (--since) exits 0 (got ${since.status}: ${since.stderr.trim()})`);
+    assert(since.json.status === "ok", `AC1 (--since) status ok (got ${since.json.status})`);
+    const sinceRuns = since.json.attempts.map((a) => a.run_id);
+    assert(JSON.stringify(sinceRuns) === JSON.stringify(
+      Array.from({ length: 10 }, (_, k) => `r-${390 + k}`)),
+      `AC1 (--since) returns exactly ts >= since, oldest→newest (got ${sinceRuns.join(",")})`);
+    assert(since.json.attempts.every((a) => Date.parse(a.ts) >= Date.parse(sinceIso)),
+      "AC1 (--since) ⛔ every returned attempt really is at/after the bound");
+    assert(since.json.window.since === sinceIso, `AC1 (--since) the bound is echoed as ISO (got ${since.json.window.since})`);
+
+    // ── AC2: the bounded read is bounded ────────────────────────────────────────────────────────
+    assert(since.json.window.truncated === true, "AC2 (--since) did not need the whole carrier ⇒ truncated=true");
+    assert(since.json.window.fromByte > 0, `AC2 (--since) the window starts after byte 0 (got ${since.json.window.fromByte})`);
+    assert(since.json.window.bytesRead < carrierSize / 4,
+      `AC2 (--since) bytesRead (${since.json.window.bytesRead}) is a small fraction of ${carrierSize} — ⛔ no read-then-slice`);
+
+    // ── AC1 run 3: --since + --limit (filter FIRST, then keep the newest N) ──────────────────────
+    const limited = await runLog(["--since", sinceIso, "--limit", "3"]);
+    assert(limited.status === 0, `AC1 (--since + --limit) exits 0 (got ${limited.status}: ${limited.stderr.trim()})`);
+    const limitedRuns = limited.json.attempts.map((a) => a.run_id);
+    assert(JSON.stringify(limitedRuns) === JSON.stringify(["r-397", "r-398", "r-399"]),
+      `AC1 (--since + --limit) keeps the newest 3 OF THE FILTERED SET (got ${limitedRuns.join(",")}); ` +
+      `limit-then-since would have yielded r-398,r-399 only, since-then-limit r-390..r-392 only`);
+
+    // ── AC3: the counts are WINDOW-scoped, and it says so ───────────────────────────────────────
+    assert(limited.json.totalLines < 400,
+      `AC3 a bounded read reports the WINDOW's line count, not the carrier's 400 (got ${limited.json.totalLines})`);
+    assert(all.json.totalLines === 400, `AC3 the whole-carrier read still reports 400 (got ${all.json.totalLines})`);
+    const text = await runImport(["driver", "log", "--kind", "worker", "--root", ws, "--limit", "2"], {});
+    assert(text.status === 0, `AC3 text arm exits 0 (got ${text.status})`);
+    assert(/truncated=true/.test(text.stdout) && /TAIL WINDOW ONLY/.test(text.stdout),
+      `AC3 the text arm spells out that the counts are window-scoped (got: ${text.stdout.split("\n")[2]})`);
+
+    // ── AC4: the pre-change keys survive; `window` is the ONLY addition ─────────────────────────
+    const PRE_CHANGE_KEYS = ["status", "reason", "carrier", "totalLines", "malformedLines", "attempts"];
+    const keys = Object.keys(all.json);
+    for (const k of PRE_CHANGE_KEYS) assert(keys.includes(k), `AC4 the existing key '${k}' is still published`);
+    assert(JSON.stringify(keys.filter((k) => !PRE_CHANGE_KEYS.includes(k))) === '["window"]',
+      `AC4 'window' is the ONLY appended top-level key (got ${JSON.stringify(keys)})`);
+    const ATTEMPT_KEYS = ["ts", "task", "selector_reason", "exit_code", "signal", "wall_clock_ms", "final_state",
+      "failure_reason", "started_at", "ended_at", "worker_pid", "run_id", "in_flight_count", "timed_out",
+      "session_id", "mechanical_fan_in", "outcome", "step", "reason", "suiteLog", "fanInLog"];
+    assert(JSON.stringify(Object.keys(all.json.attempts[0])) === JSON.stringify(ATTEMPT_KEYS),
+      `AC4 the attempt projection is unchanged (got ${JSON.stringify(Object.keys(all.json.attempts[0]))})`);
+    assert(JSON.stringify(Object.keys(all.json.window)) === JSON.stringify(["fromByte", "toByte", "since", "truncated", "bytesRead"]),
+      `AC4 window carries exactly the documented keys (got ${JSON.stringify(Object.keys(all.json.window))})`);
+
+    // ── AC5: --since is registered in the driver help, with its first-shipped version ───────────
+    const helpRes = await runImport(["driver", "--help"], {});
+    assert(helpRes.status === 0, `AC5 'quay driver --help' exits 0 (got ${helpRes.status})`);
+    assert(/--since <ISO8601>/.test(helpRes.stdout), "AC5 the driver help registers --since");
+    assert(/first shipped in 0\.24\.0-dev/.test(helpRes.stdout),
+      "AC5 the help names the version --since first shipped in");
+    assert(/totalLines/.test(helpRes.stdout) && /WINDOW/.test(helpRes.stdout),
+      "AC5 the help says what totalLines now means on a bounded read (⛔ no silently redefined key)");
+
+    // ── an invalid --since is a USAGE ERROR, never a silently-unbounded read ────────────────────
+    const bad = await runLog(["--since", "not-a-date"]);
+    assert(bad.status === 1, `an unparseable --since exits 1 (got ${bad.status})`);
+    assert(/--since/.test(bad.stderr), `the diagnostic names --since (got ${bad.stderr.trim()})`);
   } finally {
     fs.rmSync(ws, { recursive: true, force: true });
   }

@@ -5,8 +5,8 @@ import fs from "node:fs";
 import path from "node:path";
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { readSessions, readSession, readTranscript, sessionTranscriptPath, isValidSessionId, SESSION_LAYERS, SESSION_VIEW_INITIAL_TURNS, SESSION_VIEW_EARLIER_CHUNK, type SessionsResult, type SessionDetail, type SessionViewResult, type TranscriptBlock, type TranscriptTurn } from "../observation.ts";
-import type { ServePageCfg, ServeIdentity } from "./serve-render.ts";
+import { readSessions, readSession, readTranscript, sessionTranscriptPath, isValidSessionId, SESSION_LAYERS, SESSION_VIEW_INITIAL_TURNS, SESSION_VIEW_EARLIER_CHUNK, type SessionsResult, type SessionDetail, type SessionViewResult, type TranscriptBlock, type TranscriptTurn } from "../../observation.ts";
+import type { ServePageCfg, ServeIdentity } from "../view/serve-render.ts";
 import {
   html, escapeHtml, pageStyles, modernistStyles, renderSiteNav, renderMobileChrome, obsNote, pageTitle,
   // AC-299 (gap-ac299-sessions-page-zh-chrome-nav-current-and-own-title): the /sessions LIST page
@@ -16,16 +16,16 @@ import {
   // different request's inputs than the one Vary/Cookie was declared for) and never re-derives a
   // label.
   htmlLangTag, pageNameFor, DEFAULT_LANG, type Lang,
-} from "./serve-render.ts";
-import { runDriver } from "../driver-control.ts";
+} from "../view/serve-render.ts";
+import { runDriver } from "../../driver-control.ts";
 import { renderSendForm } from "./serve-send.ts";
-import { resolvePluginScript } from "../core/plugin-root.ts";
+import { resolvePluginScript } from "../../core/plugin-root.ts";
 import { writeJson } from "./serve-http-json.ts";
 // gap-webui-sessions-body-copy-en-zh: this file's BODY copy resolves through serve-i18n.ts ROW 15.
 // ⛔ `serve-i18n.ts` (not `serve-render.ts`) because the page's own labels are that table's business;
 // `serve-render.ts` re-exports the MECHANISM (lang resolution, the ROW 1/3 chrome), which is what
 // the import above takes.
-import { sessionsLabelsFor, sessionLabel, fillLabel, sessionLayerHeading, type SessionsKey } from "./serve-i18n.ts";
+import { sessionsLabelsFor, sessionLabel, fillLabel, sessionLayerHeading, type SessionsKey } from "../view/serve-i18n.ts";
 
 // ── /sessions ──────────────────────────────────────────────────────────────────────────────────────
 

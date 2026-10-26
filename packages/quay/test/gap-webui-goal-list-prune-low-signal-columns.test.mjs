@@ -28,8 +28,8 @@ import path from "node:path";
 import fs from "node:fs";
 import http from "node:http";
 import { startServer } from "../src/serve/serve.ts";
-import { GOAL_LABELS, fillLabel } from "../src/serve/serve-i18n.ts";
-import { relativeTime } from "../src/serve/serve-render.ts";
+import { GOAL_LABELS, fillLabel } from "../src/serve/view/serve-i18n.ts";
+import { relativeTime } from "../src/serve/view/serve-render.ts";
 import { makeTmpDir } from "../../../plugin/test/helpers/tmp-workspace.mjs";
 import { QUAY_NATIVE_CLI } from "./helpers/cli-entry.mjs";
 

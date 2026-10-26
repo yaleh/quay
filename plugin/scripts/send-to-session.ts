@@ -213,7 +213,7 @@ import { readProcCmdline } from "../../packages/quay/src/kernel/proc-identity.ts
 async function loadSendSessionFrames(): Promise<
   (opts: { sockPath: string; token: string; text: string; fromName: string }) => Promise<{ ok: boolean; reason: string | null }>
 > {
-  const mod = await import("../../packages/quay/src/serve/serve-send.ts");
+  const mod = await import("../../packages/quay/src/serve/io/serve-send.ts");
   return mod.sendSessionFrames;
 }
 
@@ -249,7 +249,7 @@ if (args.includes("--keys")) {
   console.error(`  audit  = ${auditLogPath}`);
   console.error(`  bytes  = ${JSON.stringify(bytes)}（原样注入，含控制字节；⛔ 不自动补换行）`);
   try {
-    const mod = await import("../../packages/quay/src/serve/serve-send.ts");
+    const mod = await import("../../packages/quay/src/serve/io/serve-send.ts");
     const out = await mod.sendKeysToSession({ sockPath, authToken, bytes, auditLogPath, who: `script-${process.pid}` });
     if (out.delivered) {
       console.error("  ✅ DATA 帧已写出（拒绝帧未先到）");

@@ -21,10 +21,10 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { readFileSync, existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
-import { readGitHistory, readGitRemotes, type GitHistoryCommit, type GitHistoryResult, GIT_HISTORY_LIMIT } from "../observation.ts";
-import type { ServePageCfg, ServeIdentity } from "./serve-render.ts";
-import { html, escapeHtml, pageStyles, modernistStyles, renderSiteNav, renderMobileChrome, pad2, pageTitle, pageNameFor, htmlLangTag, DEFAULT_LANG, type Lang } from "./serve-render.ts";
-import { gitHistoryLabelsFor, gitHistoryLabel, gitHistoryClientLabelsFor, type GitHistoryKey, type GitHistoryClientLabels } from "./serve-i18n.ts";
+import { readGitHistory, readGitRemotes, type GitHistoryCommit, type GitHistoryResult, GIT_HISTORY_LIMIT } from "../../observation.ts";
+import type { ServePageCfg, ServeIdentity } from "../view/serve-render.ts";
+import { html, escapeHtml, pageStyles, modernistStyles, renderSiteNav, renderMobileChrome, pad2, pageTitle, pageNameFor, htmlLangTag, DEFAULT_LANG, type Lang } from "../view/serve-render.ts";
+import { gitHistoryLabelsFor, gitHistoryLabel, gitHistoryClientLabelsFor, type GitHistoryKey, type GitHistoryClientLabels } from "../view/serve-i18n.ts";
 import { writeJson } from "./serve-http-json.ts";
 
 // ── Graph-track geometry ────────────────────────────────────────────────────────────────────────────

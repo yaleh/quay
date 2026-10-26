@@ -373,17 +373,145 @@ export function readFanInLockAcquiredTasks(root: string): Set<string> {
   return held;
 }
 
-/** The raw `.quay/full-suite-state.json` object, or null when absent/unparseable (degrade, never
- *  throw). Shared by readFullSuiteState (the fan-in suite annotation) — a single read, no second
- *  carrier walk. */
-function readFullSuiteStateRaw(root: string): Record<string, unknown> | null {
+/**
+ * The three states of `.quay/full-suite-state.json` as a reader can actually observe them. A boolean
+ * "readable?" would make 「文件不在」 and 「文件在但读不懂」 the same value (硬规则 3 / 3b) — and this
+ * carrier is written on every suite state transition, so "absent" is a real, distinct fact.
+ */
+export type FullSuiteStateCarrierState = "ok" | "absent" | "unreadable";
+
+export interface FullSuiteStateCarrier {
+  state: FullSuiteStateCarrierState;
+  /** Human-readable cause for a non-ok state; null when ok. */
+  reason: string | null;
+  /** The parsed object, ONLY when state === "ok" (null otherwise — never a half-parsed value). */
+  raw: Record<string, unknown> | null;
+}
+
+/**
+ * Read `.quay/full-suite-state.json` as a THREE-state carrier. THE ONLY `JSON.parse` site for this
+ * file (every other reader — readFullSuiteStateRaw, readCurrentSuiteRun, readFullSuiteState — goes
+ * through here), so a second parser for the same carrier cannot drift in.
+ *
+ * `ENOENT` ⇒ absent. Any other read error, or a payload that is not a JSON object ⇒ unreadable
+ * (never throws: the degradation contract is the caller's, expressed in the returned state).
+ */
+export function readFullSuiteStateCarrier(root: string): FullSuiteStateCarrier {
+  let text: string;
   try {
-    const text = fs.readFileSync(path.join(root, FULL_SUITE_STATE_REL), "utf8");
-    const j = JSON.parse(text) as Record<string, unknown>;
-    return j && typeof j === "object" && !Array.isArray(j) ? j : null;
-  } catch {
-    return null;
+    text = fs.readFileSync(path.join(root, FULL_SUITE_STATE_REL), "utf8");
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException)?.code;
+    const msg = err instanceof Error ? err.message : String(err);
+    if (code === "ENOENT") {
+      return {
+        state: "absent",
+        reason: `${FULL_SUITE_STATE_REL} does not exist — no suite run has written its state in this workspace`,
+        raw: null,
+      };
+    }
+    return { state: "unreadable", reason: `${FULL_SUITE_STATE_REL} read failed: ${msg}`, raw: null };
   }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch (err) {
+    return {
+      state: "unreadable",
+      reason: `${FULL_SUITE_STATE_REL} is not valid JSON: ${err instanceof Error ? err.message : String(err)}`,
+      raw: null,
+    };
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    return {
+      state: "unreadable",
+      reason: `${FULL_SUITE_STATE_REL} is not a JSON object (got ${Array.isArray(parsed) ? "array" : typeof parsed})`,
+      raw: null,
+    };
+  }
+  return { state: "ok", reason: null, raw: parsed as Record<string, unknown> };
+}
+
+/** The raw object, or null when absent/unparseable (degrade, never throw). Shared by
+ *  readFullSuiteState (the fan-in suite annotation) — a single read, no second carrier walk. */
+function readFullSuiteStateRaw(root: string): Record<string, unknown> | null {
+  return readFullSuiteStateCarrier(root).raw;
+}
+
+/**
+ * Normalize one timestamp field of the suite state carrier to ISO 8601 UTC.
+ *
+ * ⊢ WHY (gap-suite-read-verb-current-and-recent-rounds AC1b, measured on the live store 2026-10-26):
+ * the SAME file carries TWO units — `startedAt` is an ISO string (`"2026-10-25T22:14:20.100Z"`) while
+ * `finishedAt` is an epoch SECONDS integer (`1792967664`). Handing that mixture to a consumer is a
+ * silent unit trap (the same field family, two clocks). Every timestamp this module publishes goes
+ * through here, so the published shape has ONE unit.
+ *
+ * A finite number < 1e11 is treated as epoch SECONDS (anything smaller is ~1973 in ms, and every
+ * real suite timestamp is ≥ 2026); ≥ 1e11 is epoch MILLISECONDS. A string is parsed as a date
+ * (ISO 8601 preferred). Unparseable/empty ⇒ null (honest absence, never a fabricated instant).
+ */
+export function suiteTimestampToIso(v: unknown): string | null {
+  if (typeof v === "number" && Number.isFinite(v)) {
+    const ms = v < 1e11 ? v * 1000 : v;
+    const d = new Date(ms);
+    return Number.isFinite(d.getTime()) ? d.toISOString() : null;
+  }
+  if (typeof v === "string" && v.trim() !== "") {
+    // A numeric string is the same trap in a different container — accept it as a timestamp.
+    const asNumber = Number(v);
+    if (Number.isFinite(asNumber) && /^\d+(\.\d+)?$/.test(v.trim())) {
+      return suiteTimestampToIso(asNumber);
+    }
+    const ms = Date.parse(v);
+    return Number.isFinite(ms) ? new Date(ms).toISOString() : null;
+  }
+  return null;
+}
+
+/**
+ * The rich projection of `.quay/full-suite-state.json` — the shape `quay suite --json` publishes as
+ * `current`. Extends the dashboard's original five fields (state/runner/startedAt/runId/scope) with
+ * the four the task named as missing (reason/finishedAt/durationMs/laneCount/commit/taskId), so the
+ * dashboard and the CLI read ONE projection rather than two (硬规则 5b).
+ *
+ * ⛔ All timestamps are ISO 8601 UTC (see `suiteTimestampToIso`) — `finishedAt` is normalized from the
+ * carrier's epoch-seconds integer. A field absent from the carrier ⇒ null (never 0, never "").
+ */
+export interface CurrentSuiteRun {
+  state: string | null;
+  runner: string | null;
+  /** ISO 8601 UTC (normalized — the carrier may carry epoch seconds). */
+  startedAt: string | null;
+  runId: string | null;
+  scope: string | null;
+  reason: string | null;
+  /** ISO 8601 UTC (normalized from the carrier's epoch-seconds integer). */
+  finishedAt: string | null;
+  durationMs: number | null;
+  laneCount: number | null;
+  commit: string | null;
+  taskId: string | null;
+}
+
+/** Project an already-parsed carrier object into `CurrentSuiteRun`. Pure — the ONE projection used by
+ *  readCurrentSuiteRun (dashboard) and `quay suite` (CLI). */
+export function projectCurrentSuiteRun(j: Record<string, unknown>): CurrentSuiteRun {
+  const str = (v: unknown): string | null => (typeof v === "string" && v.length > 0 ? v : null);
+  const num = (v: unknown): number | null => (typeof v === "number" && Number.isFinite(v) ? v : null);
+  return {
+    state: str(j.state),
+    runner: str(j.runner),
+    startedAt: suiteTimestampToIso(j.startedAt),
+    runId: str(j.runId),
+    scope: str(j.scope),
+    reason: str(j.reason),
+    finishedAt: suiteTimestampToIso(j.finishedAt),
+    durationMs: num(j.durationMs),
+    laneCount: num(j.laneCount),
+    commit: str(j.commit),
+    taskId: str(j.taskId),
+  };
 }
 
 /** Dashboard testsCard reading of `.quay/full-suite-state.json` — "is a suite running right now",
@@ -392,26 +520,14 @@ function readFullSuiteStateRaw(root: string): Record<string, unknown> | null {
  *  carries a `taskId` field, so readFullSuiteState's `j.taskId` requirement makes it return null on
  *  every real run — unusable for a dashboard-level running/idle read. This reader has no such
  *  requirement; null only when the state file itself is absent/unreadable (honest degrade, gap-
- *  webui-dashboard-tests-card-latest-round-no-live-signal). */
-export interface CurrentSuiteRun {
-  state: string | null;
-  runner: string | null;
-  startedAt: string | null;
-  runId: string | null;
-  scope: string | null;
-}
-
+ *  webui-dashboard-tests-card-latest-round-no-live-signal).
+ *
+ * Now a RICH projection (see CurrentSuiteRun) — the dashboard reads a subset of the same object the
+ * CLI publishes, so the two surfaces cannot diverge field-by-field. */
 export function readCurrentSuiteRun(root: string): CurrentSuiteRun | null {
   const j = readFullSuiteStateRaw(root);
   if (j == null) return null;
-  const str = (v: unknown): string | null => (typeof v === "string" && v.length > 0 ? v : null);
-  return {
-    state: str(j.state),
-    runner: str(j.runner),
-    startedAt: str(j.startedAt),
-    runId: str(j.runId),
-    scope: str(j.scope),
-  };
+  return projectCurrentSuiteRun(j);
 }
 
 /**

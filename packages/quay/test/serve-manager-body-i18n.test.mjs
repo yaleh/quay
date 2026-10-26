@@ -34,8 +34,8 @@ import {
   managerLabelsFor,
   managerLabel,
   fillLabel,
-} from "../src/serve/serve-i18n.ts";
-import { escapeHtml } from "../src/serve/serve-render.ts";
+} from "../src/serve/view/serve-i18n.ts";
+import { escapeHtml } from "../src/serve/view/serve-render.ts";
 import { readManager } from "../src/observation.ts";
 import { makeTmpDir } from "../../../plugin/test/helpers/tmp-workspace.mjs";
 import { QUAY_NATIVE_CLI } from "./helpers/cli-entry.mjs";

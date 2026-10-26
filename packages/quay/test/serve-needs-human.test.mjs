@@ -21,8 +21,8 @@ import os from "node:os";
 import http from "node:http";
 import { startServer } from "../src/serve/serve.ts";
 import { parsePromotionOutcomeRecords, readNeedsHumanLedger } from "../src/observation.ts";
-import { extractNeedsHumanReason } from "../src/serve/serve-needs-human.ts";
-import { pageNameFor } from "../src/serve/serve-i18n.ts";
+import { extractNeedsHumanReason } from "../src/serve/pages/serve-needs-human.ts";
+import { pageNameFor } from "../src/serve/view/serve-i18n.ts";
 import { QUAY_NATIVE_CLI } from "./helpers/cli-entry.mjs";
 import { createStore } from "../../quay-native/src/store.ts";
 

@@ -25,7 +25,7 @@ import { TASK_STATUS_EVENT_ACTOR_KINDS } from "../kernel/task-transition.ts";
 // The web binding's ONE fallback (a leaf module, zero closure deps). Interpolated rather than
 // re-typed: the help text is a DERIVED surface, so the default it prints is the same value the
 // resolver uses — the two cannot drift (gap-serve-binding-defaults-three-copies-to-one-definition-point AC8).
-import { SERVE_BINDING_FALLBACK } from "../serve/serve-binding.ts";
+import { SERVE_BINDING_FALLBACK } from "../serve/view/serve-binding.ts";
 
 // ── the product-layer single naming point for the shipped init upgrade entry ─────────────────────
 // (gap-quay-init-sh-no-single-naming-point; same shape as `RESOURCE_GATE_REL` + `scriptBasename` in
@@ -42,6 +42,12 @@ import { SERVE_BINDING_FALLBACK } from "../serve/serve-binding.ts";
 // ≤40-line shim over THIS entry, so naming the shim here would advertise a front for a mechanism
 // whose real home the help text is supposed to point at.
 export const QUAY_INIT_REL = "plugin/bin/quay";
+
+/** The version `quay driver log --since` first shipped in (gap-driver-log-since-and-tail-read AC5).
+ *  ONE definition point: this file's driver help prints it, and cli/driver.ts's own inline usage
+ *  interpolates the same constant (⛔ the version is never re-typed — 硬规则 5b). `--limit` shipped in
+ *  0.22.0; `--since` and the bounded tail read in the version below. */
+export const DRIVER_LOG_SINCE_FIRST_SHIPPED = "0.24.0-dev";
 
 /** `quay init --help`, the `--doc-branch-name` flag's "no default" clause. Shared VERBATIM by this
  *  file and `cli/init.ts` (both render it; the two copies used to be byte-identical duplicates). */
@@ -113,6 +119,7 @@ Usage:
   quay driver <${VERBS.join("|")}> --kind <${KINDS.join("|")}> [--root <path>]
   quay lanes [--json] [--window-hours <n>] [--root <path>]
   quay live-state [--json] [--stale-ms <n>] [--root <path>]   (first shipped in 0.23.0)
+  quay suite [--json] [--limit <n>] [--since <ISO8601>] [--root <path>]   (first shipped in 0.24.0-dev)
 
 Options for task list:
   --status <status>   Filter by status (todo, ready, done, needs-human, superseded)
@@ -682,12 +689,22 @@ Usage:
              Surface recovery after drain+stop (⛔ no need to read driver-internal exports).
   status     Report {kind, supervisor_pid, driver_pid, alive, carrier_path, carrier_records,
              last_record_ts} — last_record_ts is the carrier's last-record timestamp (not just a
-             record count, which cannot distinguish "growing" from "stalled").
+             record count, which cannot distinguish "growing" from "stalled"). --json also carries the
+             drift readings: loaded_version / path_quay_version / pointer. \`pointer\` compares Core's
+             own plugin root with the project guidance link \`.quay/plugin\`, and its state vocabulary is
+             current | behind | ahead | retired | not-evaluated:
+               retired        the link is ABSENT — retired (quay init no longer creates it), so absence
+                              is the NORMAL state, ⛔ not an error and ⛔ not "unable to evaluate";
+               not-evaluated  the path is there but cannot be read as a version relation (not a
+                              symlink / dangling target / no plugin.json / unreadable Core version) —
+                              ⛔ "cannot read" is NOT the same as "retired".
   restart    stop then start. ⚠️ Inherits the worker caveat above: while ready work exists it
              aborts WITHOUT starting (exit 1) rather than risk two loops on one kind.
   log        READ-ONLY: print the driver's recorded per-attempt log (the RAW failure text of each
              attempt — never classified, never interpreted), through observation.readFanInAttempts
-             (the same single reader the web /needs-human page uses). ⛔ Does NOT spawn the kernel.
+             (the same single reader the web /needs-human page uses). \`--task\`/\`--limit\`/\`--since\`
+             scope it to the slice the caller asked for (see the flags below). ⛔ Does NOT spawn the
+             kernel.
   live       READ-ONLY: print the CURRENT in-flight worker set as JSON — the machine-readable
              counterpart to the web dashboard's "Loop pulse" card. Reuses observation.readLive's ONE
              call chain (⛔ no second /proc scan); scoped to THIS workspace (each scanned process must
@@ -698,6 +715,19 @@ Usage:
   --kind <${KINDS.join("|")}>   Which driver the command targets. Required for the control verbs
              (start/stop/drain/resume/status/restart); optional for the read-only \`live\` (defaults to
              \`worker\`).
+  --task <id>                 (log only) Restrict to one task's attempts.
+  --limit <n>                 (log only) Keep the most recent n attempts (shipped in 0.22.0).
+  --since <ISO8601>           (log only) Keep only attempts whose \`ts\` is at or after this instant
+                              (first shipped in ${DRIVER_LOG_SINCE_FIRST_SHIPPED}). Combinable with
+                              --limit: filter by --since FIRST, then keep the newest n.
+                              EITHER bound makes the read bounded — the carrier is scanned TAIL-FIRST
+                              in growing windows and is never read whole just to keep a tail.
+                              ⚠️ CONSEQUENCE FOR \`totalLines\`: on a bounded read it is the number of
+                              non-blank lines in the WINDOW that was read, NOT the carrier's total,
+                              and \`malformedLines\` is window-scoped too. The appended \`window\` object
+                              reports it explicitly: {fromByte, toByte, since, truncated, bytesRead} —
+                              \`truncated: true\` ⇔ the counts are the window's. A malformed line
+                              older than the window is UNKNOWN, never reported as zero.
   --root <path>               Workspace root (default: discovered via .quay/config.yml from cwd).
   --confirm-timeout <s>       (start/restart) Liveness-confirmation window (default 30). \`start\` reports
                               success ONLY after supervisor+driver are both confirmed alive; a supervisor
@@ -872,8 +902,56 @@ Usage:
   1 = no workspace found, or the carrier exists but is unreadable/invalid. ⛔ "could not read" and
   "nobody in flight" never share an output (硬规则 3b).
 `);
+  } else if (sub === "suite") {
+    process.stdout.write(`quay suite — READ-ONLY: the workspace's suite state + most recent rounds, as bounded JSON
+（first shipped in 0.24.0-dev · task gap-suite-read-verb-current-and-recent-rounds）
+
+Usage:
+  quay suite [--json] [--limit <n>] [--since <ISO8601>] [--root <path>]
+
+  Reads the two suite carriers of the workspace — \`.quay/full-suite-state.json\` (the current run's
+  state) and \`.quay/verification-round.jsonl\` (the append-only rounds ledger) — through the SAME
+  readers the Web dashboard and the /tests page use. No serve process, no spawn, no second parser.
+
+  Output (always JSON; \`--json\` is accepted and is a no-op):
+    { current, rounds, carrier, evaluated }
+
+    current    {state, reason, runner, scope, startedAt, finishedAt, durationMs, laneCount,
+                commit, taskId, runId} | null.
+               ⛔ TIMESTAMPS ARE NORMALIZED: the carrier mixes units — \`startedAt\` is an ISO 8601
+               string while \`finishedAt\` is an epoch SECONDS integer (measured: startedAt
+               "2026-10-25T22:14:20.100Z", finishedAt 1792967664). BOTH are published as ISO 8601 UTC
+               here; a numeric epoch of either unit is accepted on input (a finite number < 1e11 is
+               read as SECONDS, ≥ 1e11 as MILLISECONDS).
+    rounds     [{round, startedAt, durationMs, pass, fail, state}] — NEWEST-FIRST, at most --limit
+               entries. \`startedAt\` is the ledger's own ISO string.
+    carrier    {state, reason, suiteState:{state,reason}, rounds:{state,reason,bytesRead,exhausted}}
+               The two carriers are reported SEPARATELY and never collapsed into one boolean. The
+               per-carrier state is one of: ok | absent | unreadable | empty-writer-zero-records
+               (\`empty-writer-zero-records\` = the ledger exists but no line parses — a WRITER fact,
+               not "no history yet"). The top-level \`state\` is the WORSE of the two
+               (unreadable > absent > empty-writer-zero-records > ok).
+               \`rounds.bytesRead\` is the number of bytes the reader actually pread from the ledger
+               (the bounded-read evidence) and \`rounds.exhausted\` says whether it had to reach
+               byte 0 — ⛔ the ledger is NEVER read whole unless the request's window forces it.
+    evaluated  false ⇔ an EXISTING carrier could not be read. A merely ABSENT carrier is an
+               evaluated reading ("nothing has been written"), never a failure.
+
+  --limit <n>    Most recent rounds to return. Default 20 — whose ONE definition point is
+                 \`SUITE_ROUNDS_DEFAULT_LIMIT\` in src/observation.ts (⛔ not imported here: this file is
+                 loaded by EVERY invocation, so it must not drag the observation module in just to
+                 interpolate one number). Positive integer.
+  --since <ISO8601>
+                 Only rounds whose \`startedAt\` is at or after this instant. Combinable with
+                 --limit. The reader grows its EOF window until it crosses the cutoff (or reaches the
+                 file head), so it reads only as much of the ledger as the cutoff requires.
+  --root <path>  Workspace root (default: discovered via .quay/config.yml from cwd).
+
+  Exit codes: 0 = an evaluated reading (absent carriers and an empty --since window INCLUDED);
+  1 = no workspace found, an invalid --limit/--since value, or an existing carrier that could not be
+  read. ⛔ "could not read" and "nothing written yet" never share an output (硬规则 3b).
+`);
   } else {
-    // QX-007: stub for subcommands not yet documented in detail (serve, action, mcp, …).
     process.stdout.write(`Usage: quay ${sub} [...]\nRun \`quay --help\` for full usage documentation.\n`);
   }
 }
