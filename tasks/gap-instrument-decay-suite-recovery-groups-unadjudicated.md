@@ -138,3 +138,11 @@ suite-end reason dist: {}   （窗口内没有 suite-end）
 - plugin/scripts/instrument-decay-check.ts
 - plugin/test/instrument-decay-check.test.mjs
 - tasks/gap-instrument-decay-suite-recovery-groups-unadjudicated.md
+
+## Blocker
+
+**2026-10-26T23:06:08.828Z — worker 未落地（exited-not-landed）**
+
+- 未落地原因：AC 未全勾（checked 0/7，剩余未勾 7）——续做只需验证并勾选 AC
+- run_id：wk-prod-anchor
+- session_id：4e13aff3-364a-4257-9d44-8b32bb5f605a
