@@ -231,15 +231,20 @@ export const MANIFEST: CarrierSpec[] = [
         kind: "conditional-on-input",
         reason:
           "in-round rerun 的绿分支被持续基线红遮蔽：plugin/test/task-granularity-advice.test.mjs 在 develop 基线红集合里" +
-          "（.quay/baseline-red-rounds.jsonl 11 条签名），含它的 rerun 只可能回来 rerun-red ⇒ 绿分支条件性不可达。" +
+          "（.quay/baseline-red-rounds.jsonl 27 条签名），含它的 rerun 只可能回来 rerun-red 或 rerun-not-evaluated" +
+          "（后者是「没评估成」的第三态，不是绿）⇒ 绿分支条件性不可达。" +
           "条件读的是【最新一条 rerun 记录】：它一变绿、或不再点名该文件，本裁定立即失效。",
-        // ⚠️ 只读、亚秒级、可证伪：取载体尾部最后一条 step=rerun 的记录，断言它仍是 rerun-red 且点名该文件。
+        // ⚠️ 只读、亚秒级、可证伪：取载体尾部最后一条 step=rerun 的记录，断言它仍点名该文件，且状态是
+        //    rerun-red **或** rerun-not-evaluated。
+        // ⛔ 三态不得压成布尔（硬规则 3b）：旧写法只认 `state==="rerun-red"`，把写手明确保留的
+        //    `rerun-not-evaluated`（被 watchdog 中止 / 没有重跑命令 / 解析不出文件）读成「原因消失」，
+        //    于是每轮误报 rate-stopped。未知/缺失态仍 fail-closed 到 exit 1（不豁免）。
         // ⛔ 不读 append-only 的 baseline-red 台账——那份台账只增不减，一旦为真就永远为真（单向闩锁不是读数）。
         conditionCmd:
           `node -e 'const fs=require("fs");let L=fs.readFileSync(".quay/fan-in-step-trace.jsonl","utf8").split("\\n");` +
           `let last=null;for(let i=L.length-1;i>=0;i--){if(!L[i].trim())continue;let r;try{r=JSON.parse(L[i])}catch{continue}` +
           `if(r.step==="rerun"){last=r;break}}` +
-          `process.exit(last&&last.state==="rerun-red"&&Array.isArray(last.files)&&` +
+          `process.exit(last&&(last.state==="rerun-red"||last.state==="rerun-not-evaluated")&&Array.isArray(last.files)&&` +
           `last.files.indexOf("plugin/test/task-granularity-advice.test.mjs")>=0?0:1)'`,
         reviewAfter: "2026-11-22T00:00:00.000Z",
       },
