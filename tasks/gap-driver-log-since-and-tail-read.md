@@ -2,7 +2,7 @@
 id: gap-driver-log-since-and-tail-read
 title: driver log --kind worker 没有 --since 且整读 worker-outcome.jsonl；消费方要按时间尾部取
   fan-in attempts
-status: todo
+status: ready
 labels:
   - gap
 parent: null
