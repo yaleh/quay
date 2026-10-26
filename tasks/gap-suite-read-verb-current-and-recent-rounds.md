@@ -26,6 +26,7 @@ extra:
 - [ ] AC1（动词与形状）：新增顶层只读动词 `quay suite --json`（分派/usage/help/delivery-manifest 四处同步，见 Touches），输出固定形状：
   `{ "current": {state,reason,runner,scope,startedAt,finishedAt,durationMs,laneCount,commit,taskId,runId}|null, "rounds": [{round,startedAt,durationMs,pass,fail,state}], "carrier": {state:"ok"|"absent"|"unreadable"|"empty-writer-zero-records", reason}, "evaluated": true|false }`
   贴一条真实 workspace 的实跑输出。
+- [ ] AC1b（单位陷阱）：真实 `.quay/full-suite-state.json` 里 `startedAt` 是 ISO 字符串，而 `finishedAt` 是 **epoch 秒整数**（实测 `startedAt:"2026-10-25T22:14:20.100Z"`、`finishedAt:1792967664`）。输出必须把两者归一成同一口径（建议都用 ISO 字符串）并在 help 里写明，⛔ 不得原样混合两种单位交给消费者。贴归一前后的字段读数。
 - [ ] AC2（`--limit` / `--since`）：`--limit N` 只返回最近 N 轮（默认 20）；`--since <ISO8601>` 只返回 `startedAt >= since` 的轮次；两者可组合。贴三次实跑（默认 / `--limit 3` / `--since`）。
 - [ ] AC3（有界读取，本任务最重要）：`verification-round.jsonl` ≥100MB 时 `quay suite --json` **不得整读**该文件。贴 ① ≥100MB 合成载体（或真实载体）上的墙钟与峰值 RSS；② 一条证明「只读了尾部窗口」的读数（reader seam 统计读取字节数，或把文件前半段替换成不可解析噪声后结果不变）。⛔ 不允许「先整读再 slice」。
 - [ ] AC4（三态）：`full-suite-state.json` 缺失 / 存在但不可解析 / 可读 三态在 `current` + `carrier.state` 上可区分（缺失 ⇒ `current:null` + `"absent"`；不可解析 ⇒ `current:null` + `"unreadable"` + reason）；rounds 侧「文件缺失」「存在但 0 条有效」「可读」三态同样可区分。贴四条实跑。
