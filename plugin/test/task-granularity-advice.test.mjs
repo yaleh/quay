@@ -365,7 +365,11 @@ test("AC6 (production): the quay carrier yields a full 10-bin table with at leas
   assert.equal(r.bins.length, 10);
   assert.ok(r.population.measured > 100, `expected a real sample, got ${r.population.measured}`);
   assert.ok(r.bins.some((b) => b.sufficient), "at least one bin has enough tasks to report");
-  assert.ok(r.bins.some((b) => b.insufficient), "at least one bin is under-sampled (otherwise the rule is vacuous)");
+  // ⛔ 这里**不**断言「至少一个 bin 欠采样」：那条前缀是**测试的过期假设**，不是产品不变量——它随生产
+  //    数据分布漂移（2026-10-26 实读 10/10 bin 都 sufficient，最小 bin n=132），继续钉在这里只会让
+  //    整份文件长期基线红、把 rerun 的绿分支永久遮住（gap-instrument-decay-suite-rerun-green-condition-
+  //    misreads-not-evaluated）。欠采样分支仍被真实执行：见下面的 hermetic fixture 用例，它在**已知**
+  //    欠采样的载体上断言具体哪个 bin 欠采样、且不渲染任何统计量。
   for (const b of r.bins) {
     if (b.insufficient) assert.ok(!("firstTryRate" in b));
     else {
@@ -373,6 +377,65 @@ test("AC6 (production): the quay carrier yields a full 10-bin table with at leas
       assert.ok(b.workerHoursPer1000Lines === null || b.workerHoursPer1000Lines > 0);
     }
   }
+});
+
+test("AC6 (hermetic fixture): a known under-sampled bin is marked insufficient and renders no statistics", () => {
+  // 生产读数的分布会漂移，所以「至少一个 bin 欠采样」这一分支必须在一个**输入已知**的载体上验证：
+  // 10 个 120 行的任务 ⇒ `100–150` 恰好达到 minBinN=10（sufficient）；
+  // 1 个 3500 行的任务 ⇒ `3000+` 只有 n=1（insufficient，⛔ 不是「统计量为 0」而是「读不出来」）。
+  const dir = tmpDir("gta-bins-");
+  const g = (...args) => execFileSync("git", ["-C", dir, ...args], { stdio: ["ignore", "ignore", "ignore"], encoding: "utf8" });
+  const commit = (msg) => execFileSync("git", ["-C", dir, "-c", "user.email=t@e", "-c", "user.name=t", "commit", "-qm", msg]);
+  const makeTask = (id, lines) => {
+    g("checkout", "-q", "-b", `task/${id}`, "develop");
+    fs.writeFileSync(path.join(dir, `${id}.ts`), Array.from({ length: lines }, (_, i) => `export const v${i} = ${i};`).join("\n") + "\n");
+    g("add", "-A");
+    commit(id);
+    // develop must ADVANCE for the landing merge to be a real two-parent commit (merging an ancestor is
+    // "Already up to date" and creates nothing, even with --no-ff).
+    g("checkout", "-q", "develop");
+    fs.appendFileSync(path.join(dir, "develop-log.txt"), `${id}\n`);
+    g("add", "-A");
+    commit(`develop advances for ${id}`);
+    g("checkout", "-q", `task/${id}`);
+    // Titled exactly like a fan-in ff of develop into the task branch; `diff sha^2 sha` is the task's own
+    // change (develop's log line lives on the second parent, so it is NOT attributed to the task).
+    g("merge", "--no-ff", "-m", `Merge branch 'develop' into task/${id}`, "develop");
+  };
+  g("init", "-q", "-b", "develop");
+  fs.writeFileSync(path.join(dir, "base.txt"), "x\n");
+  g("add", "-A");
+  commit("base");
+  const ids = [];
+  for (let i = 0; i < 10; i++) ids.push(`gap-bin-${i}`);
+  ids.push("gap-bin-big");
+  for (const id of ids) makeTask(id, id === "gap-bin-big" ? 3500 : 120);
+  // One outcome record per landed task ⇒ measureRoot keeps them.
+  fs.mkdirSync(path.join(dir, ".quay"), { recursive: true });
+  fs.writeFileSync(
+    path.join(dir, ".quay", "worker-outcome.jsonl"),
+    ids.map((id) => JSON.stringify({ ts: "2026-09-20T00:00:00Z", task: id, final_state: "completed", wall_clock_ms: 600000 })).join("\n") + "\n",
+    "utf8",
+  );
+
+  const r = buildReport({ roots: [dir], since: null, bootstrap: 10, seed: 1 });
+  assert.equal(r.population.measured, 11, "all eleven fixture tasks are measured");
+  assert.equal(r.bins.length, 10);
+  // 断言**具体哪个** bin 欠采样（不是「存在某个」）——fixture 的输入是已知的。
+  const under = r.bins.find((b) => b.label === "3000+");
+  assert.ok(under, "the 3000+ bin exists");
+  assert.equal(under.n, 1, "exactly the one 3500-line task lands in 3000+");
+  assert.equal(under.insufficient, true, "3000+ is under-sampled: n=1 < minBinN=10");
+  assert.equal(under.sufficient, false);
+  assert.ok(!("firstTryRate" in under), "an under-sampled bin renders NO statistic");
+  assert.ok(!("workerHoursPer1000Lines" in under));
+  const sufficient = r.bins.find((b) => b.label === "100–150");
+  assert.equal(sufficient.n, 10);
+  assert.equal(sufficient.sufficient, true, "10 tasks is exactly minBinN ⇒ sufficient");
+  assert.equal(typeof sufficient.firstTryRate, "number");
+  // The two directions the production reading still guarantees, now on known input.
+  assert.ok(r.bins.some((b) => b.insufficient), "at least one bin is under-sampled (the rule is not vacuous)");
+  assert.ok(r.bins.some((b) => b.sufficient), "at least one bin is sufficient");
 });
 
 // ── landing index / per-file history (the production reading) ────────────────────────────────────
