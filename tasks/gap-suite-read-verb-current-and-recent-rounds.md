@@ -2,7 +2,7 @@
 id: gap-suite-read-verb-current-and-recent-rounds
 title: suite 没有只读 CLI 面：外部消费者只能直接读 4.6KB state + 102MB
   verification-round.jsonl，需要 --limit/--since 的有界 JSON 动词
-status: todo
+status: ready
 labels:
   - gap
 parent: null
