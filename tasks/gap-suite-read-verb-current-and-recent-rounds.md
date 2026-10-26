@@ -134,9 +134,9 @@ $ node --experimental-strip-types packages/quay/bin/quay.ts suite --json --root 
 ### AC6 / DoD
 
 - 响应键集合恒定；空载体时仍是 `current:null` + `rounds:[]` 而非缺键。
-- `quay --help` synopsis 增加 `quay suite [--json] [--limit <n>] [--since <ISO8601>] [--root <path>]   (first shipped in 0.23.0-dev)`；`quay suite --help` 有独立详解段（含单位归一规则）。
+- `quay --help` synopsis 增加 `quay suite [--json] [--limit <n>] [--since <ISO8601>] [--root <path>]   (first shipped in 0.24.0-dev)`（v0.23.0 已发布且不含本动词，故起始版本记 0.24.0-dev）；`quay suite --help` 有独立详解段（含单位归一规则）。
 - `delivery-manifest.json` capabilities 增加 `{"name":"suite","kind":"cli-command","verifiedBy":"packages/quay/test/cli-suite.test.mjs"}`；`capability-manifest-check` PASS（cli-command source=24 manifest=24）。
-- 测试：`cli-suite.test.mjs` 6/6 通过；`cli.test.mjs`、`cli-live.test.mjs`、`lanes-cli.test.mjs`、六个 dashboard/tests 页测试全部通过；`tsc --noEmit -p packages/*/` 四个包全绿。
+- 测试：`cli-suite.test.mjs` 6/6 通过；`cli.test.mjs`、`cli-live.test.mjs`、`lanes-cli.test.mjs`、六个 dashboard/tests 页测试全部通过；`tsc --noEmit -p packages/*/` 四个包全绿；`scripts/test.sh --for-task gap-suite-read-verb-current-and-recent-rounds --allow-thin` EXIT=0。
 - ⛔ 未启动 serve、未依赖 serve 进程（读取仅限 root 下两个文件）。
 
 ## Dark-axis record (ADR-007)
