@@ -3,7 +3,7 @@ id: gap-routine-semantic-dedup-scan-parse-frontmatter-completely
 title: "semantic-dedup-scan: Both bodies are return (parseYaml(raw) ?? {}); the
   repo already admits the copy and pins it only with a parity test, while the
   same reduction was done for kern"
-status: todo
+status: ready
 labels:
   - gap
   - routine-filed
