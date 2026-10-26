@@ -2,7 +2,7 @@
 id: gap-instrument-decay-suite-rerun-green-condition-misreads-not-evaluated
 title: instrument-decay 的 suite-rerun-green 裁定把 rerun-not-evaluated 压成「原因消失」⇒
   每轮误报 rate-stopped；真实阻断是 task-granularity-advice AC6 自 2026-10-21T22:52Z 起持续基线红
-status: todo
+status: ready
 labels:
   - gap
   - defect
