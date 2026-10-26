@@ -62,7 +62,7 @@ ok:false evaluated:true totalRecords:20571 freshest:2026-10-25T22:41:55.507Z gro
 - [x] AC1–AC6 全绿；AC4 的五个正负控制与 AC5 的 fixture 用例都在真实测试文件里执行过（不是只写进任务体）。
 - [x] 探针修好之后，`suite-rerun-green` 的缺席在机器面上有正确归宿：成因仍成立 ⇒ `adjudicated[]` 的 `explained-absent`；成因消失 ⇒ `decayed[]` 的 `rate-stopped`。⛔ 不提供永久豁免（`reviewAfter` 仍为 `2026-11-22`）。
 - [x] AC5 修的是测试的**过期前提**而非产品行为：`--report --json` 的 10 个 bin 读数不变，且没有任何断言被改成恒真。
-- [ ] AC7 的生产读数已贴出（待外部）。
+- [ ] AC7 的生产读数已贴出（待外部）
 
 ## Touches
 
