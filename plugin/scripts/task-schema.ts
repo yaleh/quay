@@ -95,46 +95,22 @@ const STATUS_WORDS = "pending|resolved|deferred|applied|rejected";
 import { extractSection } from "../../packages/quay/src/kernel/extract-section.ts";
 export { extractSection };
 
-// ── parseFrontmatterCompletely — the ONE complete frontmatter parser (gap-unified-frontmatter-parser). ─
-// Single source of truth for reading a task file's YAML frontmatter. parseTask, readDependsOn, and the
-// native store's parse() ALL delegate here — there is no second frontmatter reader to drift out of sync.
-//
-// Canonical schema (the TypeScript interface this parser realizes — the complete field set a task
-// frontmatter MAY carry; unknown keys are preserved, never dropped):
-//
-//   interface TaskFrontmatter {
-//     id?: string;                 // task id (the storage key; the store falls back to the filename)
-//     title?: string;              // human title
-//     status?: string;             // todo | ready | done | needs-human | superseded
-//     labels?: string[];           // flow `[a, b]` or block `- a`
-//     parent?: string | null;      // parent task id (relation edge)
-//     children?: string[];         // child task ids (relation edge)
-//     depends_on?: string[];       // prerequisite task ids (relation edge; top-level OR legacy extra)
-//     goal_ac?: string;            // owning goal AC id (task→AC linkage, G7; top-level single scalar, optional)
-//     extra?: {
-//       schema?: string;           // "v1" — the schema marker (the grandfather boundary)
-//       dirFile?: string;          // projection-scaffolding field (forbidden by assertion A6)
-//       dirStatus?: string;        // directive disposition
-//       depends_on?: string[];     // legacy home — task_write used to nest it under extra
-//       malformed?: string[];      // store-injected diagnosis markers
-//       deliveryCriticalSource?: string; // "evidence" | "adhoc" — which source attached the delivery-critical label
-//       [key: string]: unknown;
-//     };
-//     [key: string]: unknown;      // forward-compatible: unknown fields survive the round-trip
-//   }
-//
-// Full YAML semantics (quoting, escapes, nested maps/lists) come from the `yaml` package — the SAME
-// parser the native store uses to serialize/validate — so a frontmatter written by store.serialize()
-// round-trips byte-identically through every reader. This REPLACES the old lenient hand-parse (scalars
-// only) that silently dropped nested extra structures (e.g. `extra.depends_on` read back as "").
-import { parse as parseYaml } from "yaml";
+// ── parseFrontmatterCompletely — SINGLE-SOURCE at the kernel ────────────────────────────────────
+// Task gap-routine-semantic-dedup-scan-parse-frontmatter-completely: the complete YAML frontmatter
+// parser used to exist as this body AND a byte-identical twin in
+// `packages/quay/src/task-parsing.ts`, kept in step only by
+// plugin/test/task-parsing-parity.test.mjs. The one definition — `(parseYaml(raw) ?? {})` plus the
+// canonical `TaskFrontmatter` schema doc — now lives at
+// `packages/quay/src/kernel/frontmatter.ts`; this module imports it (for its OWN readers: parseTask /
+// readDependsOn / readGoalAc / statusFromFrontmatter) and re-exports the SAME function object, so
+// every mechanism-layer consumer and the product store resolve one definition. Same reduction the
+// sibling `extractSection` and `countAcCheckboxes` took (see their notes above/below).
+
+import { parseFrontmatterCompletely } from "../../packages/quay/src/kernel/frontmatter.ts";
+export { parseFrontmatterCompletely };
 // The ONE regex-literal escaper (kernel leaf via the plugin shim) — replaces an inline escape body in
 // the section-heading matcher (finding `escaperegexp-sweep-missed-two`, routine `semantic-dedup-scan`).
 import { escapeRegExp } from "./regex-escape.ts";
-
-export function parseFrontmatterCompletely(frontmatterRaw) {
-  return (parseYaml(frontmatterRaw) ?? {});
-}
 
 // ── Projections — the ONE normalization the three readers share (they never re-parse the raw text). ──
 function asStringArray(v) {
