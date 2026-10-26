@@ -1,6 +1,6 @@
 # Canonical task frontmatter schema
 
-> Single source of truth: `plugin/scripts/task-schema.ts` — `parseFrontmatterCompletely()`.
+> Single source of truth: `packages/quay/src/kernel/frontmatter.ts` — `parseFrontmatterCompletely()`.
 > This document is a **readable view of that code**; if they ever disagree, the code wins
 > (the doc is regenerable, never a second authoritative source).
 
@@ -17,7 +17,9 @@ Before `gap-unified-frontmatter-parser`, three frontmatter readers drifted indep
 Now **all three delegate to one function**:
 
 ```ts
-// plugin/scripts/task-schema.ts
+// packages/quay/src/kernel/frontmatter.ts — the ONE definition; both layers re-export it
+import { parse as parseYaml } from "yaml";
+
 export function parseFrontmatterCompletely(frontmatterRaw) {
   return (parseYaml(frontmatterRaw) ?? {});   // full YAML semantics
 }
@@ -28,14 +30,21 @@ export function parseFrontmatterCompletely(frontmatterRaw) {
 Because they share the same parse, a field added to the schema is visible to all three
 automatically — there is no second parser to keep in sync.
 
-> (2026-10-22 correction: `store.parse()` does **not** call the `task-schema.ts` function. It imports
+> (2026-10-27 correction: the earlier note below described **two** copies —
+> `plugin/scripts/task-schema.ts` and `packages/quay/src/task-parsing.ts` — pinned only
+> behaviorally. Task `gap-routine-semantic-dedup-scan-parse-frontmatter-completely` removed that
+> pair: the one definition now lives in the kernel leaf
+> `packages/quay/src/kernel/frontmatter.ts`, and BOTH `plugin/scripts/task-schema.ts` and
+> `packages/quay/src/task-parsing.ts` import and re-export the SAME function object.
+> `plugin/test/task-parsing-parity.test.mjs` now asserts identity (`===`), not behavioral parity.)
+
+> (2026-10-22 correction, superseded by the paragraph above — kept for the history of how the
+> defect was recorded: `store.parse()` does **not** call the `task-schema.ts` function. It imported
 > `parseFrontmatterCompletely` from the product-layer copy `packages/quay/src/task-parsing.ts`
 > (`grep -n parseFrontmatterCompletely packages/quay-native/src/store.ts`; already true at this doc's
-> last commit `fc9b00cec`). So there are **two** copies, `plugin/scripts/task-schema.ts` (used by `parseTask()` /
-> `readDependsOn()`) and `packages/quay/src/task-parsing.ts` (used by `store.parse()`). They are pinned
-> behaviorally identical by `plugin/test/task-parsing-parity.test.mjs`, not shared by import. The
-> commits to `task-schema.ts` since `fc9b00cec` (`git log fc9b00cec..HEAD -- plugin/scripts/task-schema.ts`)
-> only touch heading escaping and `countAcCheckboxes`. They change no claim in this document.)
+> last commit `fc9b00cec`). So there were **two** copies, `plugin/scripts/task-schema.ts` (used by `parseTask()` /
+> `readDependsOn()`) and `packages/quay/src/task-parsing.ts` (used by `store.parse()`), pinned
+> behaviorally identical by `plugin/test/task-parsing-parity.test.mjs`, not shared by import.)
 
 ## Canonical schema (TypeScript interface)
 
