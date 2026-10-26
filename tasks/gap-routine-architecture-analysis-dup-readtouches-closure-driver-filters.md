@@ -3,7 +3,7 @@ id: gap-routine-architecture-analysis-dup-readtouches-closure-driver-filters
 title: "architecture-analysis: archguard exact-clone 7fab593681548b81 (89 tokens
   / 6 statements / 10 lines): makeTouchesAttributor re-inlines the
   readTouches+expand closure that makeTouche"
-status: todo
+status: ready
 labels:
   - gap
   - routine-filed
