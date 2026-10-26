@@ -438,6 +438,29 @@ export function readWorkerRoundInFlightTasks(root: string, preReadRoundText?: st
   }
 }
 
+/** One round record's `in_flight_tasks` (+ per-task starts), or null when the record carries no
+ *  array at all (null is "not found", [] is "the record names zero in-flight tasks" — different). */
+function inFlightTasksFromRecord(j: Record<string, unknown>): RoundInFlightTask[] | null {
+  const arr = j.in_flight_tasks;
+  if (!Array.isArray(arr)) return null;
+  const starts = j.in_flight_task_starts;
+  return arr
+    .filter((v): v is string => typeof v === "string" && v.length > 0)
+    .map((taskId) => {
+      let startedAtMs: number | null = null;
+      if (starts != null && typeof starts === "object" && !Array.isArray(starts)) {
+        const raw = (starts as Record<string, unknown>)[taskId];
+        if (typeof raw === "number" && Number.isFinite(raw)) {
+          startedAtMs = raw;
+        } else if (typeof raw === "string") {
+          const parsed = Date.parse(raw);
+          if (Number.isFinite(parsed)) startedAtMs = parsed;
+        }
+      }
+      return { taskId, startedAtMs };
+    });
+}
+
 /** The last record's `in_flight_tasks` in a text blob, or null when NO line carries an array (null is
  *  "not found", [] is "the last record names zero in-flight tasks" — those are different states). */
 function lastRoundInFlightTasks(text: string | null): RoundInFlightTask[] | null {
@@ -446,67 +469,138 @@ function lastRoundInFlightTasks(text: string | null): RoundInFlightTask[] | null
   for (let i = lines.length - 1; i >= 0; i--) {
     const s = lines[i].trim();
     if (!s) continue;
-    let j: Record<string, unknown>;
-    try { j = JSON.parse(s) as Record<string, unknown>; } catch { continue; }
-    const arr = j.in_flight_tasks;
-    if (!Array.isArray(arr)) continue;
-    const starts = j.in_flight_task_starts;
-    return arr
-      .filter((v): v is string => typeof v === "string" && v.length > 0)
-      .map((taskId) => {
-        let startedAtMs: number | null = null;
-        if (starts != null && typeof starts === "object" && !Array.isArray(starts)) {
-          const raw = (starts as Record<string, unknown>)[taskId];
-          if (typeof raw === "number" && Number.isFinite(raw)) {
-            startedAtMs = raw;
-          } else if (typeof raw === "string") {
-            const parsed = Date.parse(raw);
-            if (Number.isFinite(parsed)) startedAtMs = parsed;
-          }
-        }
-        return { taskId, startedAtMs };
-      });
+    let j: unknown;
+    try { j = JSON.parse(s); } catch { continue; }
+    if (!j || typeof j !== "object" || Array.isArray(j)) continue;
+    const found = inFlightTasksFromRecord(j as Record<string, unknown>);
+    if (found != null) return found;
   }
   return null;
 }
 
-/** First tail window. Large enough for hundreds of heartbeat lines (live lines are ~1 KB), so the
- *  normal case is ONE pread of the last 256 KiB; `> 1` round is only paid when the tail genuinely
- *  carries no key-bearing record. */
-const ROUND_TAIL_WINDOW_BYTES = 256 * 1024;
+// ── Shared bounded tail scan (ONE implementation for every append-only carrier) ────────────────────
+//
+// WHY THIS IS EXPORTED (gap-suite-read-verb-current-and-recent-rounds): `.quay/worker-round.jsonl`
+// (94 MB) and `.quay/verification-round.jsonl` (250 MB on this store) are both append-only ledgers
+// whose only useful recent slice is at the END. Two independent reverse-window loops would be the
+// "one entity, N implementations" drift this repo forbids, so the scan lives HERE and every caller
+// passes its own line parser + stop condition.
 
-/** Reverse-scan a round carrier file for its last key-bearing record without reading the whole file.
- *  Returns null when even the full file carries no `in_flight_tasks` array. */
-function lastRoundInFlightTasksInFile(filePath: string): RoundInFlightTask[] | null {
+/** Outcome of `scanJsonlTail`. `records` is NEWEST-FIRST (reverse file order). `exhausted` says
+ *  whether the scan reached byte 0 — i.e. whether "no more matches" means "we looked at the whole
+ *  file" vs "the bounded window had none". `bytesRead` is the cumulative positional-pread byte count
+ *  across all windows (the direct quantity behind the bounded-read claim — hard rule 4b). */
+export interface JsonlTailScan<T> {
+  status: "ok" | "absent" | "unreadable";
+  reason: string | null;
+  records: T[];
+  bytesRead: number;
+  exhausted: boolean;
+}
+
+export interface JsonlTailScanOptions<T> {
+  /** Parse ONE line; malformed ⇒ null (never throw — a torn tail line is not a carrier failure). */
+  parse: (line: string) => T | null;
+  /** Stop growing the window once this returns true. Default: one parsed record. */
+  enough?: (records: T[]) => boolean;
+  /** First window size. Default `JSONL_TAIL_WINDOW_BYTES` (one pread in the normal case). */
+  initialWindowBytes?: number;
+}
+
+/** First tail window. Large enough for hundreds of ~1 KB heartbeat lines, so the normal case is ONE
+ *  pread of the last 256 KiB; more rounds are only paid when the tail genuinely does not satisfy the
+ *  caller's stop condition. */
+export const JSONL_TAIL_WINDOW_BYTES = 256 * 1024;
+
+/**
+ * Read the TAIL of a JSONL carrier in growing windows, newest lines first, WITHOUT reading the whole
+ * file unless the caller's stop condition forces it (window doubles-exponentially: ×4 per round,
+ * capped at the file size).
+ *
+ * A window that starts at `start > 0` begins mid-line: its first (partial) line is DROPPED rather
+ * than parsed, so a torn prefix can never be mistaken for a record. Every round re-reads from its
+ * own `start` to EOF, so the records list never mixes stale windows.
+ */
+export function scanJsonlTail<T>(filePath: string, opts: JsonlTailScanOptions<T>): JsonlTailScan<T> {
+  const enough = opts.enough ?? ((records: T[]) => records.length > 0);
   let fd: number;
   try {
     fd = fs.openSync(filePath, "r");
-  } catch {
-    return null; // absent/unreadable ⇒ the caller's [] degrade
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException)?.code;
+    return {
+      status: code === "ENOENT" ? "absent" : "unreadable",
+      reason: err instanceof Error ? err.message : String(err),
+      records: [],
+      bytesRead: 0,
+      exhausted: false,
+    };
   }
   try {
     const size = fs.fstatSync(fd).size;
-    let window = Math.min(size, ROUND_TAIL_WINDOW_BYTES);
+    // `|| 1` keeps an empty carrier out of the zero-byte read branch — it returns an honest empty
+    // result (exhausted) instead of looping.
+    let window = Math.min(size, Math.max(1, opts.initialWindowBytes ?? JSONL_TAIL_WINDOW_BYTES)) || 1;
+    let bytesRead = 0;
     for (;;) {
       const start = Math.max(0, size - window);
-      const text = readRangeText(fd, start, size - start);
+      const { text, bytes } = readRange(fd, start, size - start);
+      bytesRead += bytes;
       // `start > 0` ⇒ the window's FIRST line is a suffix of a line that begins before it: drop it
-      // rather than JSON.parse a truncated record (a no-newline window is entirely such a suffix).
+      // rather than parse a truncated record (a no-newline window is entirely such a suffix).
       const nl = text.indexOf("\n");
       const usable = start > 0 ? (nl === -1 ? "" : text.slice(nl + 1)) : text;
-      const found = lastRoundInFlightTasks(usable);
-      if (found != null) return found;
-      if (start === 0) return null; // whole file considered, no key-bearing record
+      const records: T[] = [];
+      const lines = usable.split("\n");
+      for (let i = lines.length - 1; i >= 0; i--) {
+        if (!lines[i].trim()) continue;
+        const rec = opts.parse(lines[i]);
+        if (rec !== null) records.push(rec);
+      }
+      if (enough(records) || start === 0) {
+        return { status: "ok", reason: null, records, bytesRead, exhausted: start === 0 };
+      }
       window = Math.min(size, window * 4);
     }
+  } catch (err) {
+    return {
+      status: "unreadable",
+      reason: err instanceof Error ? err.message : String(err),
+      records: [],
+      bytesRead: 0,
+      exhausted: false,
+    };
   } finally {
     try { fs.closeSync(fd); } catch { /* close is best-effort; the read already succeeded or threw */ }
   }
 }
 
-/** Read `len` bytes at `start` (positional pread; never advances the fd's shared offset). */
-function readRangeText(fd: number, start: number, len: number): string {
-  if (len <= 0) return "";
+/** Reverse-scan a round carrier file for its last key-bearing record without reading the whole file.
+ *  Returns null when even the full file carries no `in_flight_tasks` array. */
+function lastRoundInFlightTasksInFile(filePath: string): RoundInFlightTask[] | null {
+  const scan = scanJsonlTail<Record<string, unknown>>(filePath, {
+    parse: (line) => {
+      try {
+        const j = JSON.parse(line);
+        return j && typeof j === "object" && !Array.isArray(j) ? (j as Record<string, unknown>) : null;
+      } catch {
+        return null;
+      }
+    },
+    enough: (records) => records.some((r) => Array.isArray(r.in_flight_tasks)),
+  });
+  for (const rec of scan.records) {
+    const found = inFlightTasksFromRecord(rec);
+    if (found != null) return found;
+  }
+  return null; // absent/unreadable/whole-file-without-key ⇒ the caller's [] degrade
+}
+
+/** Read `len` bytes at `start` (positional pread; never advances the fd's shared offset). Also
+ *  returns the byte count actually read, so callers that must REPORT how much of a carrier they
+ *  touched (the bounded-read contract) are not guessing from a decoded string's length. */
+function readRange(fd: number, start: number, len: number): { text: string; bytes: number } {
+  if (len <= 0) return { text: "", bytes: 0 };
   const buf = Buffer.allocUnsafe(len);
   let off = 0;
   while (off < len) {
@@ -514,7 +608,12 @@ function readRangeText(fd: number, start: number, len: number): string {
     if (n <= 0) break; // EOF/truncated — parse what we got
     off += n;
   }
-  return buf.subarray(0, off).toString("utf8");
+  return { text: buf.subarray(0, off).toString("utf8"), bytes: off };
+}
+
+/** Read `len` bytes at `start` (positional pread; never advances the fd's shared offset). */
+function readRangeText(fd: number, start: number, len: number): string {
+  return readRange(fd, start, len).text;
 }
 
 /** The default HEAD window: enough round-heartbeat lines to find the carrier's first `ts` with room

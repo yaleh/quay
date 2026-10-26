@@ -113,6 +113,7 @@ Usage:
   quay driver <${VERBS.join("|")}> --kind <${KINDS.join("|")}> [--root <path>]
   quay lanes [--json] [--window-hours <n>] [--root <path>]
   quay live-state [--json] [--stale-ms <n>] [--root <path>]   (first shipped in 0.23.0)
+  quay suite [--json] [--limit <n>] [--since <ISO8601>] [--root <path>]   (first shipped in 0.23.0-dev)
 
 Options for task list:
   --status <status>   Filter by status (todo, ready, done, needs-human, superseded)
@@ -880,8 +881,56 @@ Usage:
   1 = no workspace found, or the carrier exists but is unreadable/invalid. ⛔ "could not read" and
   "nobody in flight" never share an output (硬规则 3b).
 `);
+  } else if (sub === "suite") {
+    process.stdout.write(`quay suite — READ-ONLY: the workspace's suite state + most recent rounds, as bounded JSON
+（first shipped in 0.23.0-dev · task gap-suite-read-verb-current-and-recent-rounds）
+
+Usage:
+  quay suite [--json] [--limit <n>] [--since <ISO8601>] [--root <path>]
+
+  Reads the two suite carriers of the workspace — \`.quay/full-suite-state.json\` (the current run's
+  state) and \`.quay/verification-round.jsonl\` (the append-only rounds ledger) — through the SAME
+  readers the Web dashboard and the /tests page use. No serve process, no spawn, no second parser.
+
+  Output (always JSON; \`--json\` is accepted and is a no-op):
+    { current, rounds, carrier, evaluated }
+
+    current    {state, reason, runner, scope, startedAt, finishedAt, durationMs, laneCount,
+                commit, taskId, runId} | null.
+               ⛔ TIMESTAMPS ARE NORMALIZED: the carrier mixes units — \`startedAt\` is an ISO 8601
+               string while \`finishedAt\` is an epoch SECONDS integer (measured: startedAt
+               "2026-10-25T22:14:20.100Z", finishedAt 1792967664). BOTH are published as ISO 8601 UTC
+               here; a numeric epoch of either unit is accepted on input (a finite number < 1e11 is
+               read as SECONDS, ≥ 1e11 as MILLISECONDS).
+    rounds     [{round, startedAt, durationMs, pass, fail, state}] — NEWEST-FIRST, at most --limit
+               entries. \`startedAt\` is the ledger's own ISO string.
+    carrier    {state, reason, suiteState:{state,reason}, rounds:{state,reason,bytesRead,exhausted}}
+               The two carriers are reported SEPARATELY and never collapsed into one boolean. The
+               per-carrier state is one of: ok | absent | unreadable | empty-writer-zero-records
+               (\`empty-writer-zero-records\` = the ledger exists but no line parses — a WRITER fact,
+               not "no history yet"). The top-level \`state\` is the WORSE of the two
+               (unreadable > absent > empty-writer-zero-records > ok).
+               \`rounds.bytesRead\` is the number of bytes the reader actually pread from the ledger
+               (the bounded-read evidence) and \`rounds.exhausted\` says whether it had to reach
+               byte 0 — ⛔ the ledger is NEVER read whole unless the request's window forces it.
+    evaluated  false ⇔ an EXISTING carrier could not be read. A merely ABSENT carrier is an
+               evaluated reading ("nothing has been written"), never a failure.
+
+  --limit <n>    Most recent rounds to return. Default 20 — whose ONE definition point is
+                 \`SUITE_ROUNDS_DEFAULT_LIMIT\` in src/observation.ts (⛔ not imported here: this file is
+                 loaded by EVERY invocation, so it must not drag the observation module in just to
+                 interpolate one number). Positive integer.
+  --since <ISO8601>
+                 Only rounds whose \`startedAt\` is at or after this instant. Combinable with
+                 --limit. The reader grows its EOF window until it crosses the cutoff (or reaches the
+                 file head), so it reads only as much of the ledger as the cutoff requires.
+  --root <path>  Workspace root (default: discovered via .quay/config.yml from cwd).
+
+  Exit codes: 0 = an evaluated reading (absent carriers and an empty --since window INCLUDED);
+  1 = no workspace found, an invalid --limit/--since value, or an existing carrier that could not be
+  read. ⛔ "could not read" and "nothing written yet" never share an output (硬规则 3b).
+`);
   } else {
-    // QX-007: stub for subcommands not yet documented in detail (serve, action, mcp, …).
     process.stdout.write(`Usage: quay ${sub} [...]\nRun \`quay --help\` for full usage documentation.\n`);
   }
 }

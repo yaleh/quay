@@ -1270,11 +1270,12 @@ async function block14(workspaceRoot) {
     // (`provider` joined it with gap-provider-switch-no-dedicated-entry-point — a new route with no
     // synopsis line is exactly the drift this assertion exists to catch, so the list is widened here
     // in the same change that adds the route. `lanes` joined it the same way with
-    // gap-cli-lanes-json-verb-for-gantt-consumers.)
+    // gap-cli-lanes-json-verb-for-gantt-consumers; `suite` with
+    // gap-suite-read-verb-current-and-recent-rounds.)
     const dispatchVerbs = [
       "adr", "goal", "meta", "task", "action", "serve", "server", "mcp", "init", "config", "gate",
       "gate-log", "complete", "adjudicate", "promote", "retreat", "run", "migrate", "provider",
-      "manager", "driver", "lanes", "live-state",
+      "manager", "driver", "lanes", "live-state", "suite",
     ];
     const missing = dispatchVerbs.filter((v) => !synopsisVerbs.includes(v));
     const extra = synopsisVerbs.filter((v) => !dispatchVerbs.includes(v));

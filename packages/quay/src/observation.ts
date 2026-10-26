@@ -113,6 +113,7 @@ import {
   readCarrierText,
   readWorkerOutcomeRecords,
   readWorkerRoundInFlightTasks,
+  scanJsonlTail,
   workerInFlightTasks,
 } from "./observation/records.ts";
 
@@ -3082,6 +3083,130 @@ async function readTestsUncachedAsync(root: string): Promise<TestsResult> {
     reason = `verification-round.jsonl 读失败：${err instanceof Error ? err.message : String(err)}`;
   }
   return { status: statePathStatus, reason, runs };
+}
+
+// ── Bounded recent-rounds reader (the `quay suite --json` exit) ─────────────────────────────────────
+//
+// gap-suite-read-verb-current-and-recent-rounds: an external read-only consumer (claudecodeui's
+// Tests page) used to read `.quay/verification-round.jsonl` DIRECTLY — 102–250 MB — with its own
+// stream-from-EOF parser. The data already had ONE implementation here (`parseVerificationRound`),
+// but it was reachable only through `readTests`, which reads and parses the WHOLE ledger (cost ∝
+// carrier size, not ∝ the rounds asked for). This reader is the bounded exit: the last N rounds
+// (or every round at/after `--since`), obtained by the SHARED tail scan in observation/records.ts —
+// the same growing-window reverse read `.quay/worker-round.jsonl` uses. ⛔ No second line parser and
+// no second reverse-window loop.
+
+/** Default number of most-recent rounds `quay suite --json` returns (the `--limit` default). */
+export const SUITE_ROUNDS_DEFAULT_LIMIT = 20;
+
+/** The subset of a `TestRunRecord` the suite verb publishes per round. Deliberately small: the
+ *  full records carry `perFile`/`phase_*` arrays whose JSON is megabytes per round — the consumer's
+ *  question is 「最近几轮的成败与耗时」. The publish shape is FIXED (AC6 capability probing). */
+export interface SuiteRound {
+  round: number | null;
+  /** ISO 8601, exactly as the writer stored it (the ledger has always used ISO here). */
+  startedAt: string | null;
+  durationMs: number | null;
+  pass: number | null;
+  fail: number | null;
+  state: string | null;
+}
+
+/**
+ * The rounds ledger's carrier state. `empty-writer-zero-records` is a WRITER fact (the file exists,
+ * some writer landed it, but no line parses) — different from `absent` (no writer output at all),
+ * exactly the TestsStatus split this repo already made for the /tests page.
+ */
+export type SuiteRoundsCarrierState = "ok" | "absent" | "unreadable" | "empty-writer-zero-records";
+
+export interface SuiteRoundsReading {
+  state: SuiteRoundsCarrierState;
+  reason: string | null;
+  /** NEWEST-FIRST (same presentation order as `readTests().runs`). */
+  rounds: SuiteRound[];
+  /** Cumulative bytes the reader actually pread from the carrier — the DIRECT quantity behind the
+   *  "bounded read" claim (hard rule 4b: expose it, do not let the consumer infer it). */
+  bytesRead: number;
+  /** false ⇒ the scan stopped at its window (the answer is "the last N"); true ⇒ it reached byte 0,
+   *  i.e. the whole ledger WAS considered (nothing older exists). */
+  exhausted: boolean;
+}
+
+export interface RecentSuiteRoundsOptions {
+  /** Most-recent rounds to return. Default `SUITE_ROUNDS_DEFAULT_LIMIT`. Positive integer. */
+  limit?: number;
+  /** Epoch ms; only rounds with `startedAt >= sinceMs` are returned. null/undefined ⇒ no bound. */
+  sinceMs?: number | null;
+}
+
+/** Project the published subset. `startedAt` is left verbatim (the ledger's own ISO string). */
+function toSuiteRound(rec: TestRunRecord): SuiteRound {
+  return {
+    round: rec.round,
+    startedAt: rec.startedAt,
+    durationMs: rec.durationMs,
+    pass: rec.pass,
+    fail: rec.fail,
+    state: rec.state,
+  };
+}
+
+/**
+ * Read the most recent suite rounds WITHOUT reading the whole ledger.
+ *
+ * Stop condition for the shared tail scan:
+ *   • with `sinceMs` — grow until the OLDEST record currently in the window starts before `since`
+ *     (the ledger is append-ordered, so everything earlier is older too) or the file head is reached;
+ *   • without it — grow until the window holds `limit` parsed records or the head is reached.
+ * So the normal `--limit 20` read touches a few MB of a 250 MB ledger, never the whole file.
+ */
+export function readRecentSuiteRounds(root: string, opts: RecentSuiteRoundsOptions = {}): SuiteRoundsReading {
+  const limit = opts.limit ?? SUITE_ROUNDS_DEFAULT_LIMIT;
+  const sinceMs = opts.sinceMs ?? null;
+  const scan = scanJsonlTail<TestRunRecord>(path.join(root, ".quay", "verification-round.jsonl"), {
+    parse: parseVerificationRound,
+    enough: (records) => {
+      if (records.length === 0) return false; // keep growing: an empty window is not an answer
+      if (sinceMs != null) {
+        const ms = typeof records[records.length - 1].startedAt === "string"
+          ? Date.parse(records[records.length - 1].startedAt as string)
+          : NaN;
+        return Number.isFinite(ms) && ms < sinceMs;
+      }
+      return records.length >= limit;
+    },
+  });
+
+  if (scan.status === "absent") {
+    // The reason distinguishes 「本项目根本没有写者」 from 「写者已接入、只是还没落记录」 — the
+    // existing TestsStatus enumeration, reused rather than re-worded.
+    return { state: "absent", reason: missingRoundsLedger(root).reason, rounds: [], bytesRead: 0, exhausted: false };
+  }
+  if (scan.status === "unreadable") {
+    return { state: "unreadable", reason: scan.reason, rounds: [], bytesRead: scan.bytesRead, exhausted: false };
+  }
+  if (scan.records.length === 0) {
+    // Only reachable when the scan reached byte 0 with nothing parseable: a writer/wiring fact.
+    return {
+      state: "empty-writer-zero-records",
+      reason: EMPTY_ROUNDS_LEDGER_REASON,
+      rounds: [],
+      bytesRead: scan.bytesRead,
+      exhausted: scan.exhausted,
+    };
+  }
+
+  const recent = scan.records
+    .filter((rec) => {
+      if (sinceMs == null) return true;
+      const ms = typeof rec.startedAt === "string" ? Date.parse(rec.startedAt) : NaN;
+      // A record whose startedAt cannot be parsed cannot be shown to satisfy `--since`; exclude it
+      // (hard rule 6: a missing value is "not looked at", never "matches").
+      return Number.isFinite(ms) && ms >= sinceMs;
+    })
+    .slice(0, limit)
+    .map(toSuiteRound);
+  return { state: "ok", reason: null, rounds: recent, bytesRead: scan.bytesRead, exhausted: scan.exhausted };
 }
 
 // ── Sessions view (resolved transcript tails) ───────────────────────────────────────────────────────
