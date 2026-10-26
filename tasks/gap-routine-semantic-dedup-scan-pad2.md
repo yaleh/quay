@@ -3,7 +3,7 @@ id: gap-routine-semantic-dedup-scan-pad2
 title: "semantic-dedup-scan: serve-render.ts:1009 is the serve-layer canonical
   pad2 and serve-dashboard.ts already imports from it yet redeclares one; only
   the sparklineSvg inner copy is f"
-status: todo
+status: ready
 labels:
   - gap
   - routine-filed
