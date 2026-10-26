@@ -216,6 +216,30 @@
         "shLines": 7345
       },
       "why": "gap-design-evolution-readings-report-only-routine adds one shipped plugin script (design-evolution-readings.ts) that quality-gate-driver imports, so build-plugin-dist emits one more entry bundle (scripts/dist/design-evolution-readings.js): files 287 -> 288. Artifact built by the real publish-dist-branch.sh (sync-vendor build + build-plugin-dist + .sh reachability prune + dist closure gate) from THIS worktree's plugin/ tree; extracted with git archive. shLines unchanged (no .sh added); the three dev-only ratchet axes stay 0; bytes is reported, not gated."
+    },
+    {
+      "when": "2026-10-26T04:08:39.808Z",
+      "from": {
+        "files": 0,
+        "bytes": 0,
+        "shLines": 0,
+        "shipped": {
+          "files": 288,
+          "bytes": 63698495,
+          "shLines": 7345
+        }
+      },
+      "to": {
+        "files": 0,
+        "bytes": 0,
+        "shLines": 0
+      },
+      "shipped": {
+        "files": 299,
+        "bytes": 70362474,
+        "shLines": 7412
+      },
+      "why": "v0.23.0 cut preflight: artifact built from develop via the canonical publisher; +11 files / +67 .sh lines accumulated since the 2026-10-21 anchor (286→287) across the landed admission / design-evolution / release-model / worker-pool tasks. Re-anchored deliberately so release.yml's shipped-set-clean can pass on the tag."
     }
   ],
   "_axes": {
@@ -229,8 +253,8 @@
   "bytes": 0,
   "shLines": 0,
   "shipped": {
-    "files": 288,
-    "bytes": 63698495,
-    "shLines": 7345
+    "files": 299,
+    "bytes": 70362474,
+    "shLines": 7412
   }
 }
