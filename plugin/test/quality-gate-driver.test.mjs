@@ -477,7 +477,7 @@ test("resident loop --once writes a round record with facts (spawn real process)
   const arch = rec.facts.find((f) => f.name === "architecture-analysis");
   assert.equal(arch.state, "not-evaluated");
   assert.match(arch.reason, /instrument 'archguard' unavailable on this host/);
-  assert.match(arch.reason, /fallback declared: 'git-lens'/);
+  assert.match(arch.reason, /fallback declared: 'live-readers'/);
   assert.equal(arch.value.fired, false, "zero spawn");
 });
 
@@ -527,7 +527,7 @@ test("AC1/AC2 — architecture-analysis is default-assembled; missing archguard 
     `AC1: the assembly line must name the default-assembled routine; got:\n${missing.stderr}`);
   assert.equal(missing.fact.state, "not-evaluated");
   assert.match(missing.fact.reason, /instrument 'archguard' unavailable on this host/);
-  assert.match(missing.fact.reason, /fallback declared: 'git-lens'/, "the reason names the declared fallback");
+  assert.match(missing.fact.reason, /fallback declared: 'live-readers'/, "the reason names the declared fallback");
   assert.equal(missing.fact.value.fired, false);
   assert.ok(!fs.existsSync(probeLog), "instrument unavailable ⇒ ZERO spawn (not a spawn error)");
 
