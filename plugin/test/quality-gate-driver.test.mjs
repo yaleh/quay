@@ -3256,6 +3256,58 @@ test("runInstrumentDecayRound — 紧接的第二轮不重复立案（上一轮 
   assert.match(second.reason, /already-filed=1/);
 });
 
+test("runInstrumentDecayRound — 紧接的第二轮经【生产缺省路径】去重（⛔ 测试不传 roundLogPath）", async (t) => {
+  // gap-instrument-decay-dedup-reader-round-log-path AC3：上一轮的 Fact 由 DRIVER 写到
+  // `<root>/.quay/quality-round.jsonl`；本测试走 `instrumentDecayRoutineFromConfig` 的同一条缺省
+  // 派生（roundLogPath undefined），⛔ 不显式注入路径——否则判据只被 fixture 满足（硬规则 4 推论三）。
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "qg-decay-default-path-"));
+  t.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
+  writeJsonl(tmp, "arch-cycle-history.jsonl", [
+    { ts: "2026-10-18T10:25:51.593Z", mode: "arch-cycle-report-round", evaluated: false, scopes: [] },
+    { ts: "2026-10-21T23:14:05.363Z", mode: "arch-cycle-report-round", evaluated: false, scopes: [] },
+  ]);
+  const worker = makeGapWorker(tmp);
+
+  // Round 1: no prior carrier exists ⇒ files, ONE spawn.
+  const first = await runInstrumentDecayRound(tmp, instDecayOpts({ gapWorkerCmd: worker.cmd }));
+  assert.equal(first.value.filings[0].key, "arch-cycle-history.jsonl|content-dark");
+  assert.equal(first.value.filings[0].filing, "filed");
+  assert.equal(worker.calls().length, 1);
+
+  // The DRIVER writes every round's facts to the carrier at its PRODUCTION location: <root>/.quay/.
+  const carrier = path.join(tmp, ".quay", "quality-round.jsonl");
+  fs.writeFileSync(carrier, JSON.stringify({ round: 1, run_id: "qg-fixture", ts: new Date().toISOString(), facts: [first] }) + "\n", "utf8");
+
+  // Round 2: same findings, read back through the DEFAULT path ⇒ already-filed, ZERO new spawns.
+  const second = await runInstrumentDecayRound(tmp, instDecayOpts({ gapWorkerCmd: worker.cmd }));
+  assert.equal(second.value.filings[0].filing, "already-filed");
+  assert.equal(worker.calls().length, 1, "the immediately following round must NOT refile via the default path");
+  assert.match(second.reason, /already-filed=1/);
+});
+
+test("readPriorInstrumentDecayFilings — 缺省路径是 <root>/.quay/quality-round.jsonl（⛔ repo root）", (t) => {
+  // AC2 负对照两半：① `.quay/` 载体里没有 filings ⇒ 空集；② 同时把一条 filing:"filed" 放到
+  // `<root>/quality-round.jsonl`（历史 bug 的错落点）⇒ 仍须为空集（证明读的是 .quay/，不是根目录）。
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "qg-decay-prior-default-"));
+  t.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
+  fs.mkdirSync(path.join(tmp, ".quay"), { recursive: true });
+  fs.writeFileSync(path.join(tmp, "quality-round.jsonl"),
+    JSON.stringify({ round: 9, facts: [{ name: INSTRUMENT_DECAY_ROUTINE_NAME, value: { filings: [
+      { key: "root.jsonl|content-dark", filing: "filed" },
+    ] } }] }) + "\n", "utf8");
+  fs.writeFileSync(path.join(tmp, ".quay", "quality-round.jsonl"),
+    JSON.stringify({ round: 1, facts: [{ name: "pool-quality-judge", value: {} }] }) + "\n", "utf8");
+
+  assert.deepEqual([...readPriorInstrumentDecayFilings(tmp)], [], "no filings in the .quay/ carrier ⇒ empty, despite a filing at repo root");
+
+  fs.appendFileSync(path.join(tmp, ".quay", "quality-round.jsonl"),
+    JSON.stringify({ round: 2, facts: [{ name: INSTRUMENT_DECAY_ROUTINE_NAME, value: { filings: [
+      { key: "dot-quay.jsonl|rate-stopped", filing: "filed" },
+    ] } }] }) + "\n", "utf8");
+  const keys = readPriorInstrumentDecayFilings(tmp);
+  assert.deepEqual([...keys], ["dot-quay.jsonl|rate-stopped"], "the DEFAULT path reads the .quay/ carrier (and only it)");
+});
+
 test("readPriorInstrumentDecayFilings — reads the round carrier tail; absent carrier ⇒ no prior filings", (t) => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "qg-decay-prior-"));
   t.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
