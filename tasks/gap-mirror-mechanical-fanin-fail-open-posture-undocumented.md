@@ -59,7 +59,11 @@ export function mirrorMechanicalFanInSuiteState(opts: { … }): void {
 
 这正是硬规则 3b 的教科书形状。**判据（硬规则 3b 自己的话）：一个判定的输出词表里，若没有"未评估"这一态，它就无法区分"查过且合格"与"没查成"。** 本函数确实没有第三态——**它靠下游有第三态（`null` / `""`）而成立**。这个"靠谁成立"必须写在它旁边。
 
-## Contract
+## 说明的内容要求
+
+> 本节原为 `## Contract`，但内容是「这段说明必须逐条点名什么」的写作要求（散文/编号列表），不是
+> `measure|band|invariant|invoke|control|resume` 契约行；按 `gap-ci-red-task-contract-violations-nonblocking`
+> 的修法把散文移出 Contract 段（本任务没有可机读契约）。
 
 **产出 = 一段写在 `mirrorMechanicalFanInSuiteState` 紧邻处的说明**（代码注释；若该文件的注释密度不允许，则写在它所属的设计文档并在函数处留指针）。**⛔ 零行为改动**——不加返回值、不加日志、不改 `void`、不加 fail-closed。
 
