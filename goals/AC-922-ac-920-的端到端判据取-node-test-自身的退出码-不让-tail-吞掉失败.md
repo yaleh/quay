@@ -1,7 +1,7 @@
 ---
 id: AC-922
 title: AC-920 的端到端判据取 node --test 自身的退出码，不让 tail 吞掉失败
-status: draft
+status: achieved
 kind: criterion
 goal: GOAL-911
 criterion: node --test plugin/test/unencapsulated-state-admission.test.mjs
@@ -25,6 +25,22 @@ origin: "readings.criteria[AC-920]: verdict=not-evaluated, cause='capability' �
   third AC achieved while every test in the new file fails. Retirement/rewording
   of AC-920 remains a human decision; this item only declares the replacement
   relation."
+activatedAt: 2026-10-23T16:29:17.952Z
+statusLog:
+  - at: 2026-10-23T16:29:17.952Z
+    from: draft
+    to: active
+    actor: goal-driver
+    reason: "triage: activate"
+  - at: 2026-10-23T16:32:40.248Z
+    from: active
+    to: achieved
+    actor: goal-driver
+    reason: "I2: criterion pass"
 supersedes:
   - AC-920
+fidelity:
+  verdict: faithful
+  reason: "fidelity judge: faithful"
+  at: 2026-10-23T16:29:17.952Z
 ---

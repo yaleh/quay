@@ -20,11 +20,24 @@
 // 伴生对照是结构性的防误报：一个单分组（或全分组同旧）的载体，其唯一分组就是它自己的「最新」，
 // 结构上不可能满足「比某个伴生分组更旧」⇒ 永不误报（AC2 反向判据）。
 //
+// 形状 B 的裁定（adjudication，gap-fan-in-step-trace-rate-stopped-adjudication）：
+//   Shape B 只能看见「末次写入太旧」，它无法区分【按设计罕见/条件性不可达】与【写手腐烂】——两者
+//   在输出上同形（硬规则 3b）。描述符因此可以携带**机器可读**的裁定声明（`adjudicated`）：
+//     • rare-by-design       —— 该分组只在罕见例外路径上写；触发未发生 ⇒ 缺席是正常的。
+//     • conditional-on-input —— 该分组的输入条件当前恒假（例：持续基线红让 rerun 绿分支不可达）；
+//                                条件命令 exit 0 ⇒ 缺席已解释，exit≠0 ⇒ 条件不再成立 ⇒ 仍报腐烂。
+//   ⛔ 裁定**必须可过期**：`reviewAfter` 是必填项，过了就回到 decayed[]（不提供永久豁免开关）。
+//   ⛔ 裁定不是豁免的隐身衣：被裁定的分组进独立的 `adjudicated[]`，**计数与读数照样输出**，
+//      只是不计入 `decayedCount` —— 「不算腐烂」不得等于「从读数里消失」。
+//
 // 两种【照常写入】的暗形态（gap-instrument-decay-check-unwired-and-blind-to-content-dark）：
 //   C. content-dark   带 `evaluated` 字段的载体，从首条起每条都是 false（≥2 条记录——1 条可能是冷启动
 //                     时序，这是最小结构条件，不是调出来的阈值）。载体在写，但写的全是「没评估成」。
 //   D. stale-evaluated 最新一条有 evaluated:true 作用域的记录，其产物时间戳早于【覆盖源路径的最新提交】。
 //                     它与真正的健康状态从外部看完全相同（读数说「已评估、0 环」），比 C 更危险。
+//                     ⚠️ 例外：描述符用 `artifactIndependentWhen` 声明的 live 读数（如
+//                     `basis:"single-directory"`，结论来自 `git ls-files` 而非产物）不做这个比较，
+//                     并**显式**记 `artifact-independent`（⛔ 不是静默跳过，硬规则 3b）。
 //   两种形态都允许例外声明：描述符可注明 D 无输入（记录里没有产物时间戳/覆盖路径，或例程直接读 git）。
 //
 // 覆盖面诚实（硬规则 3b）：没有 `evaluated` 字段、也未登记描述符的载体列入 `uncovered`，
@@ -91,8 +104,29 @@ export interface CarrierSpec {
   artifact?: ArtifactSpec;
   /** 形状 D 不适用的理由（与 `artifact` 二选一）。 */
   artifactNotApplicable?: string;
+  /** 形状 B 的机器可读裁定声明（见头注「形状 B 的裁定」）。缺省 []。 */
+  adjudicated?: Adjudication[];
   /** 写手溯源——为什么这些分组【应当】在这个载体里。 */
   note: string;
+}
+
+/** 裁定的两种形态。 */
+export type AdjudicationKind = "rare-by-design" | "conditional-on-input";
+
+/** 一条机器可读的裁定声明（描述符的一部分，人审查过；⛔ 不是自由文本 note 的替代品——
+ *  note 从不被判定逻辑读取，这正是本任务修的缺陷）。 */
+export interface Adjudication {
+  /** 被裁定的分组名（与 Shape B 的分组键精确相等）。 */
+  group: string;
+  kind: AdjudicationKind;
+  /** 为什么缺席是正常的（一句话；空串 ⇒ 声明无效，不产生豁免）。 */
+  reason: string;
+  /** 仅 `conditional-on-input`：可执行的条件读数命令（在载体 root 下 `sh -c` 执行）。
+   *  exit 0 ⇒ 声明的条件仍成立（缺席已解释）；exit≠0 / 超时 / spawn 失败 ⇒ 条件不成立 ⇒ 仍报腐烂
+   *  （fail-closed 到「报腐烂」，不是 fail-open 到「已解释」）。 */
+  conditionCmd?: string;
+  /** 裁定失效时刻（ISO，必填）。过了 ⇒ 分组回到 `decayed[]`。⛔ 留空/读不懂 ⇒ 不产生豁免。 */
+  reviewAfter: string;
 }
 
 /** 形状 D 的读取位置：每个「作用域」一条（覆盖源路径 + 产物时间戳 + 该作用域是否已评估）。 */
@@ -107,7 +141,139 @@ export interface ArtifactSpec {
   scopeEvaluatedField?: string;
   /** 作用域名字段（报告里点名用）。缺省 `scope`。 */
   scopeNameField?: string;
+  /** 「该作用域的 cycle 结论不依赖产物」的机器可读判定（gap-arch-cycle-single-directory-basis-never-due）。
+   *
+   *  为什么需要：有些读数的 provenance 是 LIVE 输入（`single-directory` 的 `git ls-files`），
+   *  `artifactTimestamp` 只是「我们看过哪份产物」，不承载结论。此前检测器看不到这个区别 ⇒ 一条
+   *  **当前**的 live 读数只要挂着旧产物时间戳就被判 stale；而写手侧为了绕开它写了一个恒为 0 的
+   *  `commitsSinceArtifact`（硬规则 4：恒真的量不是测量）。
+   *  `field` 取到 `equals` ⇒ 该作用域记 `artifact-independent`，**显式跳过**产物 vs 提交比较
+   *  （⛔ 不是静默跳过：跳过这件事本身进读数，硬规则 3b）。
+   *  缺省 ⇒ 没有这种作用域，既有比较对所有作用域生效。 */
+  artifactIndependentWhen?: {
+    field: string;
+    equals: string | boolean;
+    /** 载体自己记录的直接量字段名（live file list 的读取时刻）。缺省 ⇒ 不读取时刻，
+     *  读数里显式写 `readAt:null`（「没记」而不是「等于 0」）。 */
+    readAtField?: string;
+  };
 }
+
+/** suite-recovery / suite-recovery-blocked 共用的条件读数（两者由同一段恢复阶梯代码写，
+ *  缺席的直接成因是同一个：阶梯有没有「降档」或「耗尽」）。
+ *
+ *  语义：取【最近一次降档(suite-recovery) 或 耗尽(blocked)】的时刻作为窗口起点；窗口内每一条
+ *  suite-incomplete 都必须在同一 task 上等到一条 suite-recovery-accepted（或 baseline-exempt）。
+ *  ——「恢复轮自己定论了」= certifiedRun !== null ⇒ 这两个终端分支的触发不存在。
+ *  ⛔ 不是「本组多久没写」的二次包装：它读的是触发输入本身，输入一变条件立刻取假。
+ *  ⛔ 与检测器同口径排除 kind=goal-merge（那不是任务 fan-in 的步骤链）。 */
+export const RECOVERY_LADDER_CONDITION_CMD =
+  `node -e 'const fs=require("fs");const R=[];` +
+  `for(const l of fs.readFileSync(".quay/fan-in-step-trace.jsonl","utf8").split("\\n")){` +
+  `if(!l.trim())continue;let r;try{r=JSON.parse(l)}catch{continue}` +
+  `if(r.kind==="goal-merge")continue;R.push(r)}` +
+  `let start=null;` +
+  `for(const r of R)if((r.step==="suite-recovery"||r.step==="suite-recovery-blocked")&&r.ts&&(!start||r.ts>start))start=r.ts;` +
+  `if(!start)process.exit(1);` +
+  `const after=R.filter(r=>r.ts&&r.ts>start);` +
+  `const cert=after.filter(r=>r.step==="suite-recovery-accepted"||r.step==="suite-recovery-baseline-exempt");` +
+  `const inc=after.filter(r=>r.step==="suite-incomplete");` +
+  `let bad=0;` +
+  `for(const r of inc)if(!cert.some(c=>c.ts>r.ts&&c.task===r.task))bad++;` +
+  `process.exit(bad===0?0:1)'`;
+
+/** suite-incomplete 的触发输入读数（gap-instrument-decay-suite-recovery-groups-unadjudicated）。
+ *
+ *  触发 = 一次**原轮**的 suite 日志里带 SUITE-INCOMPLETE 标记（worker-fan-in.ts:2960 解析、:2961 判定、
+ *  :2970 写本组）。同一个标记由 runner 按**同一谓词**同时落到轮次账本：`full-suite-runner.ts:4873-4878`
+ *  把 `incomplete (missing/planned)` 或 `oom-killed (n)` 写进记录的 `notEvaluated`，`:5125` 的
+ *  `if (incomplete || oomKilled)` 才是印标记行的条件 ⇒ `.quay/verification-round.jsonl` 是**独立于
+ *  本组写手**的同源读数。本条件就数它：**有没有一轮真的没得出完整结论**。⛔ 不是「本组多久没写」的
+ *  二次包装——窗口内一次 incomplete 都没有，与「本组 40h 没写」是两个量，后者由 Shape B 本身暴露。
+ *
+ *  ⚠️ 两个必须的结构判据（否则条件会在 OOM 风暴后恒红）：
+ *  ① **恢复轮与原轮共用 runId**（worker-fan-in.ts 的 `recoverySuiteCommand` 复用同一条 suite 命令，
+ *     只改 `--lane-count`/`--log-file`）⇒「同一 runId 的第一条 = 原轮，其余 = 恢复轮」是结构判据；
+ *  ② 恢复轮自己即使又被 OOM 杀，也**不会**写 suite-incomplete（阶梯只写 suite-recovery）⇒ 必须排除。
+ *     实测：170 条 incomplete/OOM 轮次里 105 条是恢复轮，不排除会把「修复后首次 OOM 风暴」误判成腐烂。
+ *
+ *  ⚠️ 时间窗 120s：实测「轮次记录落盘 → suite-incomplete 落盘」间隔 6.5–9.5s（65 个样本，p90 9.3s），
+ *     12 倍余量；⛔ 不用「零条 incomplete」这种空转真值换绿（orig===0 ⇒ exit 1）。末尾另有一条
+ *     「账本仍与载体同步」的守卫：末次 suite-incomplete 之后要么还有轮次跑过、要么它自己那轮的记录
+ *     就落在同一个 120s 窗里（写在两个不同 else 分支里）；两者皆无 ⇒ 账本已停写，读数不可信 ⇒ fail-closed。
+ *
+ *  ⛔ 与检测器同口径排除 kind=goal-merge（那不是任务 fan-in 的步骤链）。 */
+export const SUITE_INCOMPLETE_TRIGGER_CMD =
+  `node -e 'const fs=require("fs");const R=[];` +
+  `for(const l of fs.readFileSync(".quay/fan-in-step-trace.jsonl","utf8").split("\\n")){` +
+  `if(!l.trim())continue;let r;try{r=JSON.parse(l)}catch{continue}` +
+  `if(r.kind==="goal-merge")continue;R.push(r)}` +
+  `const inc=R.filter(r=>r.step==="suite-incomplete"&&r.ts);` +
+  `let last=null;for(const r of inc)if(!last||r.ts>last)last=r.ts;` +
+  `if(!last)process.exit(1);` +
+  `let raw;try{raw=fs.readFileSync(".quay/verification-round.jsonl","utf8")}catch{process.exit(1)}` +
+  `const V=[];` +
+  `for(const l of raw.split("\\n")){if(!l.trim())continue;let v;try{v=JSON.parse(l)}catch{continue}` +
+  `if(v&&typeof v.startedAt==="string")V.push(v)}` +
+  `if(V.length===0)process.exit(1);` +
+  `const first=new Map();` +
+  `for(const v of V){if(!v.runId)continue;const p=first.get(v.runId);if(!p||v.startedAt<p.startedAt)first.set(v.runId,v)}` +
+  `const endMs=v=>Date.parse(v.startedAt)+(Number.isFinite(v.durationMs)?v.durationMs:0);` +
+  `const trig=v=>{const n=typeof v.notEvaluated==="string"?v.notEvaluated:"";` +
+  `return n.indexOf("incomplete ")===0||n.indexOf("oom-killed ")===0};` +
+  `let orig=0,bad=0;` +
+  `for(const v of V){if(first.get(v.runId)!==v)continue;if(!trig(v))continue;orig++;` +
+  `const e=endMs(v);` +
+  `if(!inc.some(r=>r.task===v.taskId&&Math.abs(Date.parse(r.ts)-e)<120000))bad++}` +
+  `if(orig===0)process.exit(1);` +
+  `if(bad>0)process.exit(1);` +
+  `if(!V.some(v=>Date.parse(v.startedAt)>Date.parse(last))&&` +
+  `!V.some(v=>Math.abs(endMs(v)-Date.parse(last))<120000))process.exit(1);` +
+  `process.exit(0)'`;
+
+/** suite-recovery-accepted 的触发输入读数：**有没有一条 incomplete 等不到阶梯定论**。
+ *
+ *  本组的触发是「恢复阶梯的某一档给出了完整判词 ⇒ certifiedRun !== null ⇒ 认证」。阶梯的**每一条**
+ *  suite-incomplete 都必然以二者之一收尾（worker-fan-in.ts:3135 的 blocked / :3150 的 accepted），
+ *  所以「一条 incomplete 之后既没有 accepted 也没有 blocked」= 阶梯卡住或认证写手腐烂 ⇒ 缺席无解释。
+ *  ⛔ 不是「本组多久没写」：它读的是 incomplete 与阶梯终端的配对关系（就是 AC 里那句
+ *  「是否有 incomplete 等不到认证」），配对上就立刻取假。 */
+export const RECOVERY_ACCEPTED_TRIGGER_CMD =
+  `node -e 'const fs=require("fs");const R=[];` +
+  `for(const l of fs.readFileSync(".quay/fan-in-step-trace.jsonl","utf8").split("\\n")){` +
+  `if(!l.trim())continue;let r;try{r=JSON.parse(l)}catch{continue}` +
+  `if(r.kind==="goal-merge")continue;R.push(r)}` +
+  `const inc=R.filter(r=>r.step==="suite-incomplete"&&r.ts);` +
+  `if(inc.length===0)process.exit(1);` +
+  `let bad=0;` +
+  `for(const r of inc)if(!R.some(c=>c.ts&&c.task===r.task&&c.ts>r.ts&&` +
+  `(c.step==="suite-recovery-accepted"||c.step==="suite-recovery-blocked")))bad++;` +
+  `process.exit(bad===0?0:1)'`;
+
+/** suite-recovery-baseline-exempt 的触发输入读数：**每一次认证走的是哪一条分支**。
+ *
+ *  本组的触发是「恢复轮完整跑完但真红、且红集与基线逐字等价、且候选自己的 Touches 测试干净」
+ *  （worker-fan-in.ts:3103 在 `be.verdict.kind === "exempt"` 分支里写）。认证有且只有两条来路：
+ *  `suite-recovery-certified`（恢复轮本身是绿的，:3063）或 `suite-recovery-baseline-exempt`（:3103）
+ *  —— 二者必居其一，且都在紧随其后的 `suite-recovery-accepted`（:3150）**之前**落盘。
+ *  因此「一条 accepted 在其前置 incomplete 之后找不到 certified 也找不到 exempt」= 认证发生在一个
+ *  没有记录来路的出口上 ⇒ exempt 写手腐烂（那条 trace 被删/被改路径）。
+ *  ⛔ 不是「本组多久没写」的二次包装：读的是每次认证**走的分支**；分支一变条件立刻取假。
+ *  ⛔ 同时排除 kind=goal-merge。 */
+export const RECOVERY_EXEMPT_TRIGGER_CMD =
+  `node -e 'const fs=require("fs");const R=[];` +
+  `for(const l of fs.readFileSync(".quay/fan-in-step-trace.jsonl","utf8").split("\\n")){` +
+  `if(!l.trim())continue;let r;try{r=JSON.parse(l)}catch{continue}` +
+  `if(r.kind==="goal-merge")continue;R.push(r)}` +
+  `const acc=R.filter(r=>r.step==="suite-recovery-accepted"&&r.ts);` +
+  `if(acc.length===0)process.exit(1);` +
+  `let bad=0;` +
+  `for(const a of acc){let prev=null;` +
+  `for(const r of R)if(r.step==="suite-incomplete"&&r.task===a.task&&r.ts&&r.ts<a.ts&&(!prev||r.ts>prev))prev=r.ts;` +
+  `if(prev===null){bad++;continue}` +
+  `if(!R.some(r=>r.task===a.task&&r.ts&&r.ts>=prev&&r.ts<=a.ts&&` +
+  `(r.step==="suite-recovery-certified"||r.step==="suite-recovery-baseline-exempt")))bad++}` +
+  `process.exit(bad===0?0:1)'`;
 
 export const MANIFEST: CarrierSpec[] = [
   {
@@ -128,6 +294,190 @@ export const MANIFEST: CarrierSpec[] = [
     // 子系统的加载面）；改判别键取值必须同时改这里，缺一即静默失效（本文件的词表一贯是人审查过的声明，
     // 见头注「词表是【人审查过的声明】，不是从代码推导」）。
     skipKind: "goal-merge",
+    // 11 个 rate-stopped 分组的机器可读裁定：前 5 条来自 gap-fan-in-step-trace-rate-stopped-adjudication
+    // （触发普查为 0 的三组、条件性不可达的一组、真回归信号一组）；接着 3 条（suite-skip /
+    // suite-recovery / suite-recovery-blocked）来自 gap-instrument-decay-explained-absence-declarations
+    // ——同一批分组此前已在 2026-10-22、2026-10-23 两次被**散文**裁定过，第三次才落成机制；
+    // 最后 3 条（suite-incomplete / suite-recovery-accepted / suite-recovery-baseline-exempt）来自
+    // gap-instrument-decay-suite-recovery-groups-unadjudicated——同一条 OOM→incomplete→恢复链的**下游**终端。
+    // ⚠️ reviewAfter 一律是**必须重看的日期**，不是「永久白名单」——过期即回到 decayed[]。
+    // ⚠️ conditional-on-input 的条件命令读的都是【载体里的触发输入】，不是「本组多久没写」：
+    //    「原因仍然缺席」与「写手还活着」是两个量，条件只对前者负责；写手腐烂由 Shape B 本身暴露。
+    adjudicated: [
+      {
+        group: "verification-round-record",
+        kind: "rare-by-design",
+        reason:
+          "recordDelegatedRound(force) 只在 hungByWatchdog || spawnFailed 时补写；watchdog-killed 全历史 7 轮、" +
+          "最后一轮 startedAt 2026-10-14T11:21:43Z（早于本组末次写入 2026-10-14T11:41:51Z），spawn-failed 全历史 0 轮" +
+          " ⇒ 触发事件没有发生，写手路径仍在。",
+        reviewAfter: "2026-11-22T00:00:00.000Z",
+      },
+      {
+        group: "catch-up-develop",
+        kind: "rare-by-design",
+        reason:
+          "只有 fan-in 的 mergeTarget != develop（任务落回 goal 分支）才走 `if (mergeTarget !== \"develop\")` 这一步；" +
+          "最后一次 goal 落地 2026-10-10T19:27:53Z 之后 goal-merge 执行 0 次、当前不存在 goal/* 分支 ⇒ 输入不存在。",
+        reviewAfter: "2026-11-22T00:00:00.000Z",
+      },
+      {
+        group: "suite-rerun-green",
+        kind: "conditional-on-input",
+        reason:
+          "in-round rerun 的绿分支被持续基线红遮蔽，读的只是这个机制：只要还有一个基线红文件挡住 suite，" +
+          "rerun 就只可能回来 rerun-red 或 rerun-not-evaluated（后者是「没评估成」的第三态，不是绿）⇒ 绿分支条件性不可达。" +
+          "当前实例是 plugin/test/full-suite-runner-cgroup.test.mjs 的 AC3（a REAL round's measured concurrency）" +
+          "——**文件名是实例说明，不是条件的一部分**：红的是哪个文件会随修/坏翻转，把实例写进条件会让裁定随之为随机读数。" +
+          "条件读的是【末次 suite-rerun-green 之后的每一条 rerun 记录】：出现一条 rerun-green、没有任何 rerun、" +
+          "或出现未知/缺失 state，本裁定立即失效、回到 decayed[]。",
+        // ⚠️ 只读、亚秒级、可证伪：窗口 = 末次 suite-rerun-green 写入之后；窗口内断言 ① 至少一条 rerun
+        //    （⛔ 不用「零 rerun」这种空转真值换绿）② 没有一条 rerun-green ③ 每条状态都是已知的
+        //    rerun-red / rerun-not-evaluated。
+        // ⛔ 触发式而非实例式：⛔ 不点名任何文件（旧写法把「被声明为红的那一个文件」钉进正/负控制，
+        //    于是该文件转绿后条件恒 exit 1 —— 声明的机制没变，声明的实例过期了；且「换了个红文件」与
+        //    「写手真腐烂」在读数上同形，硬规则 3b）。
+        // ⛔ 三态不得压成布尔（硬规则 3b）：rerun-not-evaluated 是写手明确保留的第三态，不得读成「原因消失」；
+        //    未知/缺失态与服务端「窗口内出现 rerun-green」一样 fail-closed 到 exit 1（不豁免）。
+        // ⛔ 不读 append-only 的 baseline-red 台账——那份台账只增不减，一旦为真就永远为真（单向闩锁不是读数）。
+        // ⛔ 与检测器同口径排除 kind=goal-merge（那不是任务 fan-in 的步骤链）。
+        conditionCmd:
+          `node -e 'const fs=require("fs");const R=[];` +
+          `for(const l of fs.readFileSync(".quay/fan-in-step-trace.jsonl","utf8").split("\\n")){` +
+          `if(!l.trim())continue;let r;try{r=JSON.parse(l)}catch{continue}` +
+          `if(r.kind==="goal-merge")continue;R.push(r)}` +
+          `let last=null;` +
+          `for(const r of R)if(r.step==="suite-rerun-green"&&r.ts&&(!last||r.ts>last))last=r.ts;` +
+          `if(!last)process.exit(1);` +
+          `const after=R.filter(r=>r.step==="rerun"&&r.ts&&r.ts>last);` +
+          `if(after.length===0)process.exit(1);` +
+          `for(const r of after)if(r.state!=="rerun-red"&&r.state!=="rerun-not-evaluated")process.exit(1);` +
+          `process.exit(0)'`,
+        reviewAfter: "2026-11-22T00:00:00.000Z",
+      },
+      {
+        group: "suite-recovery-certified",
+        kind: "rare-by-design",
+        reason:
+          "「恢复轮干净跑完」的终端分支；2026-10-21T04:50:38Z 之后恢复流程仍发生 7 次，全部经另一终端分支 " +
+          "suite-recovery-baseline-exempt 落地并写 suite-recovery-accepted（7 条）⇒ 恢复机制在跑，只是 certified 触发未发生。",
+        reviewAfter: "2026-11-22T00:00:00.000Z",
+      },
+      {
+        group: "suite-recovery-new-regression",
+        kind: "rare-by-design",
+        reason:
+          "只在「原并发下通过的文件在更低并发下变红」时写（suite-recovery 阶梯的 new-regression 分支），" +
+          "全历史 1 条 ⇒ 真回归信号，本身低频。",
+        reviewAfter: "2026-11-22T00:00:00.000Z",
+      },
+      {
+        group: "suite-skip",
+        kind: "conditional-on-input",
+        reason:
+          "写手 worker-fan-in.ts:3265 只在 needSuite === false（codeDelta === \"\" 的 doc-only 落地，或 reuseSkip 的 " +
+          "develop-advance-doc-only-reuse）时写本组。末次写入 2026-10-23T08:42:04.648Z 是 gap-goal911-… 的一次真实" +
+          "doc-only 落地（per-run delta 逐字记 \"doc-only delta → skip suite\"）；此后载体里有 23 个含 ff 的落地" +
+          "（2026-10-25 实读），其中唯一没有 suite-start 的正是写出这条 suite-skip 的那个落地本身 ⇒ 跳过分支的输入" +
+          "没有再发生。条件读的是【末次 suite-skip 之后的每一次落地】：任何一个含 ff 却没有 suite-start 的落地" +
+          "（且不是末次 suite-skip 自己那次）⇒ 本裁定立即失效、回到 decayed[]。",
+        // ⚠️ 只读、亚秒级、可证伪：按 task 关联（runId 在生产载体里恒为 wk-prod-anchor，不能当作 run 键），
+        //    并要求窗口内至少一次落地（⛔ 不用「零落地」这种空转真值换绿）。
+        // ⛔ 与检测器同口径排除 kind=goal-merge：那不是任务 fan-in 的步骤链（见描述符 skipKind 注释）。
+        conditionCmd:
+          `node -e 'const fs=require("fs");const R=[];` +
+          `for(const l of fs.readFileSync(".quay/fan-in-step-trace.jsonl","utf8").split("\\n")){` +
+          `if(!l.trim())continue;let r;try{r=JSON.parse(l)}catch{continue}` +
+          `if(r.kind==="goal-merge")continue;R.push(r)}` +
+          `let last=null;` +
+          `for(const r of R)if(r.step==="suite-skip"&&r.ts&&(!last||r.ts>last.ts))last=r;` +
+          `if(!last)process.exit(1);` +
+          `const seen=new Map();` +
+          `for(const r of R){if(!r.ts||r.ts<=last.ts||!r.task)continue;` +
+          `const e=seen.get(r.task)||{ff:false,start:false};` +
+          `if(r.step==="ff")e.ff=true;if(r.step==="suite-start")e.start=true;seen.set(r.task,e)}` +
+          `let ff=0,bad=0;` +
+          `for(const [t,e] of seen){if(!e.ff)continue;ff++;if(t!==last.task&&!e.start)bad++}` +
+          `process.exit(ff>0&&bad===0?0:1)'`,
+        reviewAfter: "2026-11-22T00:00:00.000Z",
+      },
+      {
+        group: "suite-recovery",
+        kind: "conditional-on-input",
+        reason:
+          "写手 worker-fan-in.ts:3042/:3051 只在某个恢复档返回 no-conclusion 或 incomplete（**降档**）时写。" +
+          "末次写入 2026-10-23T23:15:27.308Z（OOM 风暴末轮）之后 suite-incomplete 发生 2 次" +
+          "（2026-10-24T00:01:07.835Z、2026-10-24T15:43:31.916Z，均 oom-killed），两次恢复轮都在第一档" +
+          "（concurrency 64）就产出自己的完整判词并写 suite-recovery-accepted + suite-recovery-baseline-exempt" +
+          "（00:15:35.319Z、16:01:38.392Z），降档 0 次 ⇒ 本组自己的触发没有发生；读数的下降是 OOM 修复的结果，" +
+          "不是写手停摆。条件读的是【最近一次降档/耗尽之后的每一条 suite-incomplete】：任何一条在同一 task 上" +
+          "等不到 suite-recovery-accepted / suite-recovery-baseline-exempt ⇒ 本裁定立即失效、回到 decayed[]。",
+        // ⚠️ 窗口起点 = 本组最近一次写入与 blocked 最近一次写入的**较大者**（两者由同一段阶梯代码写，
+        //    任一发生都意味着阶梯确实动了 ⇒ 之前的 incomplete 已被那次动作解释）。窗口内只要有一条
+        //    incomplete 没等到认证，就说明恢复轮没能自己定论——那正是腐烂该露头的形状。
+        conditionCmd: RECOVERY_LADDER_CONDITION_CMD,
+        reviewAfter: "2026-11-22T00:00:00.000Z",
+      },
+      {
+        group: "suite-recovery-blocked",
+        kind: "conditional-on-input",
+        reason:
+          "写手 worker-fan-in.ts:3135 只在 certifiedRun === null（阶梯耗尽、没有任何一档给出完整判词）时写。" +
+          "末次写入 2026-10-23T23:15:27.308Z 之后 suite-incomplete 2 次、两次都在第一档被认证" +
+          "（certifiedRun !== null）⇒ 触发没有发生；本组 44 条自 2026-10-14 起、最近 20 个间隔中位数 0.6h、" +
+          "全历史最大 1.8h，当前约 24h 远超自身节奏——这是「罕见的条件性缺席」，不是写手腐烂。条件与 " +
+          "suite-recovery 同一条：最近一次降档/耗尽之后每条 suite-incomplete 都必须等到后续认证。",
+        conditionCmd: RECOVERY_LADDER_CONDITION_CMD,
+        reviewAfter: "2026-11-22T00:00:00.000Z",
+      },
+      // ── 后 3 条：OOM→incomplete→恢复阶梯那条因果链的**下游**（gap-instrument-decay-suite-recovery-
+      //    groups-unadjudicated）。上游 4 组（suite-skip / suite-recovery / suite-recovery-blocked /
+      //    suite-recovery-certified…）已由前两条任务裁定；这 3 组是同一个 `if (incompleteMarker !== null)`
+      //    的终端分支，2026-10-23 / 2026-10-25 两次被**散文**裁定过、第三次才落成机制（硬规则 5b 的兄弟
+      //    实例遗漏形态）。⛔ 三条条件读的都是【触发输入】，不是「本组多久没写」。
+      {
+        group: "suite-incomplete",
+        kind: "conditional-on-input",
+        reason:
+          "写手 worker-fan-in.ts:2970，进入条件是 :2960 `extractSuiteIncompleteMarker(suiteLogText)` 非 null" +
+          "（:2961）——即本轮 suite 日志里带了 runner 印的 SUITE-INCOMPLETE 标记（`oom-killed (n)` /" +
+          "`incomplete (missing/planned files)`）。同一谓词由 runner 独立落进 .quay/verification-round.jsonl 的" +
+          "`notEvaluated` 字段（full-suite-runner.ts:4873-4878，印标记行的 :5125 是同一个 `incomplete || oomKilled`）" +
+          "⇒ 条件读的是**轮次账本**：只要出现一条【原轮】（同 runId 的第一条——恢复轮与它共用 runId）" +
+          "`notEvaluated` 以 `incomplete `/`oom-killed ` 开头、而载体里 120s 内没有对应的 suite-incomplete，" +
+          "就说明「一轮真的没得出完整结论」却没有被记录 ⇒ 本裁定立即失效、回到 decayed[]。" +
+          "反之窗口内没有这样的原轮 = 触发确实没发生（本组 63→65 条的历史成因是 OOM 风暴，已由" +
+          "gap-fan-in-recovery-ladder-inert-bucket-full-drops-test-concurrency / -lane-scaled-ladder-floor-32 修）。",
+        // ⚠️ 只读、亚秒级、可证伪；⛔ 恢复轮必须排除（它们自己也 OOM 时不写本组，留着会让条件在风暴后恒红）。
+        conditionCmd: SUITE_INCOMPLETE_TRIGGER_CMD,
+        reviewAfter: "2026-11-22T00:00:00.000Z",
+      },
+      {
+        group: "suite-recovery-accepted",
+        kind: "conditional-on-input",
+        reason:
+          "写手 worker-fan-in.ts:3150，只在恢复阶梯的某一档给出**完整判词**（certifiedRun !== null ⇒ 认证）" +
+          "时写；它与 :3103 的 baseline-exempt 同在 `if (incompleteMarker !== null)` 阶梯内部，没有 incomplete" +
+          " 就结构上不可达。条件读的是「**有没有一条 incomplete 等不到认证**」：阶梯的每一条 suite-incomplete" +
+          "都必然以同一 task 上的 suite-recovery-accepted（:3150）或 suite-recovery-blocked（:3135）收尾，" +
+          "任何一条 incomplete 之后二者皆无 ⇒ 阶梯卡住或认证写手腐烂 ⇒ 本裁定立即失效、回到 decayed[]。",
+        conditionCmd: RECOVERY_ACCEPTED_TRIGGER_CMD,
+        reviewAfter: "2026-11-22T00:00:00.000Z",
+      },
+      {
+        group: "suite-recovery-baseline-exempt",
+        kind: "conditional-on-input",
+        reason:
+          "写手 worker-fan-in.ts:3103，在 `be.verdict.kind === \"exempt\"`（恢复轮红集与基线逐字等价）且候选" +
+          "自己的 Touches 测试干净时写；同样只在 incomplete 阶梯内部可达。条件读的是「每一次认证**走的哪条" +
+          "分支**」：认证只有两条来路——suite-recovery-certified（:3063，恢复轮本身就是绿的）或" +
+          "suite-recovery-baseline-exempt（:3103，本组）——且都落盘在紧随其后的 suite-recovery-accepted（:3150）" +
+          "之前。任何一条 accepted 在其前置 incomplete 之后两条来路都找不到 ⇒ 认证发生在一个没有记录的出口上" +
+          "⇒ 本组写手腐烂（那段 trace 被删/改路径）⇒ 本裁定立即失效、回到 decayed[]。",
+        conditionCmd: RECOVERY_EXEMPT_TRIGGER_CMD,
+        reviewAfter: "2026-11-22T00:00:00.000Z",
+      },
+    ],
     note:
       "worker-driver.ts 机械 fan-in 步骤链。前 8 个经 step()/appendFanInStepTrace 写共享载体；" +
       "后 4 个（ac-precheck/suite-*）自 a5a301e03 起被 trace() 改写到 per-run 日志，" +
@@ -136,7 +486,9 @@ export const MANIFEST: CarrierSpec[] = [
       "（看门狗 SIGKILL / 从未 spawn）时 force 写一条（worker-fan-in.ts recordDelegatedRound）；" +
       "quay 形态（suite_runner: quay-buckets）下普通红/绿轮由 full-suite-runner 入账、不走本组。" +
       "catch-up-develop：仅当 fan-in 的 mergeTarget ≠ develop（goal 分支落地）时才有这一步。" +
-      "suite-recovery-blocked：仅当 suite 恢复阶梯耗尽（64/48/32 都无完整判词）时才写。",
+      "suite-recovery-blocked：仅当 suite 恢复阶梯耗尽（64/48/32 都无完整判词）时才写。" +
+      "suite-incomplete / suite-recovery-accepted / suite-recovery-baseline-exempt：同一条 " +
+      "incomplete 标记的下游终端（原始轮记录 / 阶梯认证 / 基线等价认证），触发未发生即结构性缺席。",
   },
   {
     file: "fan-in-lock-events.jsonl",
@@ -160,11 +512,19 @@ export const MANIFEST: CarrierSpec[] = [
       artifactTsField: "artifactTimestamp",
       scopeEvaluatedField: "evaluated",
       scopeNameField: "scope",
+      // gap-arch-cycle-single-directory-basis-never-due: a `single-directory` scope's cycle count comes
+      // from `git ls-files` at read time, NOT from the persisted artifact — so an old
+      // `artifactTimestamp` is provenance, not evidence that the reading is stale. Without this the
+      // detector reported `scripts` stale every round while the carrier simultaneously reported it as
+      // a current reading (`commitsSinceArtifact:0`), i.e. the two readings disagreed by construction.
+      artifactIndependentWhen: { field: "basis", equals: "single-directory", readAtField: "fileListReadAt" },
     },
     note:
       "arch-cycle-report 例程每轮追加一行。记录级 evaluated 是「全部作用域都可读」；作用域级 evaluated " +
       "是「这一作用域可读」。形态 D 取**最后一条含已评估作用域**的记录（记录级 false 只表示并非全部" +
-      "作用域可读，不表示什么都没评估）。作用域 source 是 repo 相对路径 ⇒ D 的对照量是 git 提交时刻。",
+      "作用域可读，不表示什么都没评估）。作用域 source 是 repo 相对路径 ⇒ D 的对照量是 git 提交时刻。" +
+      "作用域 basis=single-directory 时读数是 live 文件列表派生的 ⇒ 标 artifact-independent，不做" +
+      "「产物 vs 最新提交」比较（⛔ 跳过本身进读数）。",
   },
   {
     // AC1 的负对照：31/31 条 evaluated:true ⇒ 形状 C 必须不命中（而不是「样本刚好绿」）。
@@ -221,8 +581,34 @@ export interface DecayFinding {
   kind: DecayKind;
   count: number;
   lastWriteMs: number | null;
-  /** 读数细节（D：产物时间戳 vs 覆盖路径最新提交；C：暗区间）。 */
+  /** 读数细节（D：产物时间戳 vs 覆盖路径最新提交；C：暗区间；B 的裁定被拒：拒绝理由）。 */
   detail: string | null;
+}
+
+/** 一条**生效中**的裁定（形状 B 命中 + 声明存在 + 未过期 + 条件成立）。
+ *
+ *  ⛔ 它不出现在 `decayed[]`、不计入 `decayedCount`，但**必须**出现在输出里（含 count / lastWrite）：
+ *  「不算腐烂」不等于「从读数里消失」（AC5 / 硬规则 3b）。 */
+export interface AdjudicatedFinding {
+  group: string;
+  /** 声明里的裁定种类。 */
+  kind: AdjudicationKind;
+  /** 生效后的读数态：按设计罕见 / 条件成立故缺席已解释。 */
+  state: "rare-by-design" | "explained-absent";
+  reason: string;
+  reviewAfter: string;
+  /** `conditional-on-input` 的条件读数（命令 + 退出码）；`rare-by-design` ⇒ null。 */
+  condition: { cmd: string; exitCode: number | null; error: string | null } | null;
+  /** 该分组此刻的真实读数——裁定不隐藏它。 */
+  count: number;
+  lastWriteMs: number | null;
+}
+
+/** 裁定求值结果：`exempt:false` 时 `denialReason` 写进 DecayFinding.detail（为什么豁免不成立）。 */
+export interface AdjudicationVerdict {
+  exempt: boolean;
+  finding: AdjudicatedFinding | null;
+  denialReason: string | null;
 }
 
 export interface Companion {
@@ -262,7 +648,11 @@ export interface ShapeCReading {
   darkInterval: ContentDarkInterval | null;
 }
 
-/** 形状 D：一个作用域的产物时间戳 vs 覆盖源路径的最新提交。 */
+/** 形状 D：一个作用域的产物时间戳 vs 覆盖源路径的最新提交。
+ *
+ *  `state:"artifact-independent"` 是一条**通过**的读数，不是「未评估」：该作用域的 cycle 结论来自
+ *  live 输入，产物时间戳只承载 provenance ⇒ 「产物早于最新提交」对它不构成过期证据。它必须自成一态
+ *  （⛔ 不与 `fresh` 合并、更不与 `stale` 合并：跳过比较这件事本身要可读）。 */
 export interface StaleScopeReading {
   scope: string;
   source: string;
@@ -270,8 +660,20 @@ export interface StaleScopeReading {
   artifactMs: number | null;
   commitMs: number | null;
   commitSha: string | null;
-  state: "stale" | "fresh" | "not-evaluated";
+  state: "stale" | "fresh" | "not-evaluated" | "artifact-independent";
   reason: string | null;
+  /** `state:"artifact-independent"` 时为判定依据（描述符字段/取值 + 载体自己记的 live 读取时刻）；
+   *  其余为 null。 */
+  independence: ArtifactIndependence | null;
+}
+
+/** 一条 artifact-independence 判定：**哪个字段**取到什么值，以及载体记录的 live 直接量。
+ *  ⛔ `readAt` 取的是载体里的字段（判据能取假），不是描述符的回显。 */
+export interface ArtifactIndependence {
+  field: string;
+  value: string | boolean;
+  /** 载体里 live file list 的读取时刻；字段缺失/读不懂 ⇒ null（「没记」，⛔ 不是「刚读过」）。 */
+  readAt: string | null;
 }
 
 /** 形状 D 的四态（同上：`not-evaluated` 与 `fresh` 必须可区分）。 */
@@ -288,6 +690,10 @@ export interface ShapeDReading {
    *  不复用这个名字做新语义）。它此前**没有任何下游**，现在至少随 Fact 一起被消费。 */
   recordStale: boolean | null;
   scopes: StaleScopeReading[];
+  /** 被判定为 artifact-independent 的作用域名（`state:"artifact-independent"` 的同一批，记录级点名）。
+   *  ⛔ 空数组 = 「比过了」；这一态与 `state:"fresh"` 同时出现是正常的（live 读数当前、产物不承载
+   *  结论）——它把「为什么没做那个比较」留在读数面上（硬规则 3b）。 */
+  artifactIndependentScopes: string[];
 }
 
 export interface CarrierResult {
@@ -298,6 +704,8 @@ export interface CarrierResult {
   freshestMs: number | null;
   groupCount: number;
   decayed: DecayFinding[];
+  /** 生效中的裁定（Shape B 命中但被解释）。⛔ 不计入 decayed，但必须可见。 */
+  adjudicated: AdjudicatedFinding[];
   companions: Companion[];
   /** 形状 C（内容全暗）读数——`not-applicable` 是描述符的声明，不是「查不到」。 */
   contentDark: ShapeCReading;
@@ -412,7 +820,7 @@ export function gitLatestCommitForPath(root: string, source: string): GitCommitT
  *  ⛔ 四态：无描述符 ⇒ not-applicable（并带 descriptor 给出的理由）；无可用记录 / 任一作用域读不出
  *  ⇒ not-evaluated；有 stale ⇒ stale；否则 fresh。 */
 export function analyzeStaleEvaluated(records: Record<string, unknown>[], spec: CarrierSpec, root: string): ShapeDReading {
-  const na = (reason: string): ShapeDReading => ({ state: "not-applicable", reason, recordTs: null, recordStale: null, scopes: [] });
+  const na = (reason: string): ShapeDReading => ({ state: "not-applicable", reason, recordTs: null, recordStale: null, scopes: [], artifactIndependentScopes: [] });
   if (spec.evaluatedField === undefined || spec.artifact === undefined) {
     return na(spec.artifactNotApplicable ?? "descriptor declares no artifact (artifact timestamp + covered paths)");
   }
@@ -438,6 +846,7 @@ export function analyzeStaleEvaluated(records: Record<string, unknown>[], spec: 
       recordTs: null,
       recordStale: null,
       scopes: [],
+      artifactIndependentScopes: [],
     };
   }
 
@@ -456,17 +865,38 @@ export function analyzeStaleEvaluated(records: Record<string, unknown>[], spec: 
     const artifactTs = typeof artifactTsRaw === "string" && artifactTsRaw !== "" ? artifactTsRaw : null;
     const artifactMs = artifactTs === null ? null : (Number.isFinite(Date.parse(artifactTs)) ? Date.parse(artifactTs) : null);
 
+    // ARTIFACT INDEPENDENCE first (gap-arch-cycle-single-directory-basis-never-due): if the descriptor
+    // says this scope's field marks a live reading, the artifact timestamp is PROVENANCE ONLY. Compare
+    // nothing and say so — an old artifact must not make a current live reading look stale, and ⛔ the
+    // skip must not be silent (硬规则 3b: "skipped" and "checked and fresh" are different facts).
+    const independenceSpec = art.artifactIndependentWhen;
+    if (independenceSpec !== undefined && s[independenceSpec.field] === independenceSpec.equals) {
+      const readAtRaw = independenceSpec.readAtField === undefined ? undefined : s[independenceSpec.readAtField];
+      const readAt = typeof readAtRaw === "string" && readAtRaw !== "" ? readAtRaw : null;
+      scopes.push({
+        scope, source, artifactTs, artifactMs,
+        commitMs: null, commitSha: null,
+        state: "artifact-independent",
+        reason:
+          `'${independenceSpec.field}'='${String(independenceSpec.equals)}' ⇒ this reading comes from the live file list` +
+          `${readAt === null ? " (no read timestamp recorded)" : ` read at ${readAt}`}, so ${art.artifactTsField} ${artifactTs ?? "(none)"} ` +
+          `is provenance only and is NOT compared against the latest commit touching ${source || "(no source)"}`,
+        independence: { field: independenceSpec.field, value: independenceSpec.equals, readAt },
+      });
+      continue;
+    }
+
     if (source === "") {
-      scopes.push({ scope, source, artifactTs, artifactMs, commitMs: null, commitSha: null, state: "not-evaluated", reason: `scope has no '${art.sourceField}' — no covered path to compare against` });
+      scopes.push({ scope, source, artifactTs, artifactMs, commitMs: null, commitSha: null, state: "not-evaluated", reason: `scope has no '${art.sourceField}' — no covered path to compare against`, independence: null });
       continue;
     }
     if (artifactMs === null) {
-      scopes.push({ scope, source, artifactTs, artifactMs, commitMs: null, commitSha: null, state: "not-evaluated", reason: artifactTs === null ? `scope has no '${art.artifactTsField}'` : `unparseable artifact timestamp '${artifactTs}'` });
+      scopes.push({ scope, source, artifactTs, artifactMs, commitMs: null, commitSha: null, state: "not-evaluated", reason: artifactTs === null ? `scope has no '${art.artifactTsField}'` : `unparseable artifact timestamp '${artifactTs}'`, independence: null });
       continue;
     }
     const commit = gitLatestCommitForPath(root, source);
     if (commit.ms === null) {
-      scopes.push({ scope, source, artifactTs, artifactMs, commitMs: null, commitSha: commit.sha, state: "not-evaluated", reason: `git could not resolve the latest commit: ${commit.error}` });
+      scopes.push({ scope, source, artifactTs, artifactMs, commitMs: null, commitSha: commit.sha, state: "not-evaluated", reason: `git could not resolve the latest commit: ${commit.error}`, independence: null });
       continue;
     }
     // 严格小于：产物【早于】覆盖路径的最新提交才是过期。相等时无法区分先后 ⇒ 记 fresh（同一秒）。
@@ -478,15 +908,20 @@ export function analyzeStaleEvaluated(records: Record<string, unknown>[], spec: 
       reason: stale
         ? `artifact ${artifactTs} predates the latest commit touching ${source} (${new Date(commit.ms).toISOString()} ${commit.sha ?? ""})`.trim()
         : null,
+      independence: null,
     });
   }
 
+  const artifactIndependentScopes = scopes.filter((s) => s.state === "artifact-independent").map((s) => s.scope);
   if (scopes.length === 0) {
-    return { state: "not-evaluated", reason: "the chosen record carries no evaluated scope with a comparable artifact", recordTs, recordStale, scopes };
+    return { state: "not-evaluated", reason: "the chosen record carries no evaluated scope with a comparable artifact", recordTs, recordStale, scopes, artifactIndependentScopes };
   }
-  if (scopes.some((s) => s.state === "stale")) return { state: "stale", reason: null, recordTs, recordStale, scopes };
-  if (scopes.some((s) => s.state === "not-evaluated")) return { state: "not-evaluated", reason: "at least one scope could not be compared", recordTs, recordStale, scopes };
-  return { state: "fresh", reason: null, recordTs, recordStale, scopes };
+  if (scopes.some((s) => s.state === "stale")) return { state: "stale", reason: null, recordTs, recordStale, scopes, artifactIndependentScopes };
+  if (scopes.some((s) => s.state === "not-evaluated")) return { state: "not-evaluated", reason: "at least one scope could not be compared", recordTs, recordStale, scopes, artifactIndependentScopes };
+  // No stale, nothing unevaluable ⇒ fresh. Scopes that were SKIPPED because they are artifact-
+  // independent are named in `artifactIndependentScopes` — the verdict is "fresh" only for the
+  // comparisons that actually happened.
+  return { state: "fresh", reason: null, recordTs, recordStale, scopes, artifactIndependentScopes };
 }
 
 /** 首条可解析记录（uncovered 发现只看这一条——measure-history 有 127 万行，⛔ 不整份读）。 */
@@ -548,13 +983,87 @@ export function discoverUncovered(root: string, manifest: CarrierSpec[] = MANIFE
   return [...entries.values()].sort((a, b) => a.file.localeCompare(b.file));
 }
 
+// ── 形状 B 的裁定求值 ──────────────────────────────────────────────────────────────────────────────
+/** 条件命令的 wall-clock 上限（毫秒）。⛔ 这不是成本阈值，是**活性安全界**：条件命令由描述符声明，
+ *  设计上只读、亚秒级；一个挂死的命令不得把常驻检测器一起挂住。 */
+export const ADJUDICATION_CONDITION_TIMEOUT_MS = 60_000;
+
+/** 求值一条裁定声明。
+ *
+ *  四态而非布尔（硬规则 3b）：**读不懂的声明不产生豁免**——缺 reason / reviewAfter 读不出 / 未知 kind /
+ *  conditional-on-input 缺条件命令，全部走 `exempt:false` + 一个可读的 `denialReason`（该分组照常报腐烂）。
+ *  失败方向必须偏向「报腐烂」：条件是「当前结构性不可达」，它一旦不成立就该重新看见腐烂。 */
+export function evaluateAdjudication(
+  root: string,
+  decl: Adjudication,
+  count: number,
+  lastWriteMs: number | null,
+  nowMs: number,
+): AdjudicationVerdict {
+  const deny = (why: string): AdjudicationVerdict => ({ exempt: false, finding: null, denialReason: why });
+  const reason = typeof decl.reason === "string" ? decl.reason.trim() : "";
+  if (reason === "") return deny("adjudication carries no reason — a bare exemption is not an adjudication");
+  const reviewMs = typeof decl.reviewAfter === "string" ? Date.parse(decl.reviewAfter) : NaN;
+  if (!Number.isFinite(reviewMs)) {
+    return deny(
+      `adjudication reviewAfter ${JSON.stringify(decl.reviewAfter)} is unreadable — an adjudication must be expirable`,
+    );
+  }
+  if (reviewMs <= nowMs) {
+    return deny(
+      `adjudication expired at ${decl.reviewAfter} — re-review it (an adjudication is not a permanent exemption)`,
+    );
+  }
+  if (decl.kind !== "rare-by-design" && decl.kind !== "conditional-on-input") {
+    return deny(`unknown adjudication kind ${JSON.stringify(decl.kind)}`);
+  }
+  if (decl.kind === "rare-by-design") {
+    return {
+      exempt: true,
+      finding: {
+        group: decl.group, kind: decl.kind, state: "rare-by-design",
+        reason, reviewAfter: decl.reviewAfter, condition: null, count, lastWriteMs,
+      },
+      denialReason: null,
+    };
+  }
+  const cmd = typeof decl.conditionCmd === "string" ? decl.conditionCmd.trim() : "";
+  if (cmd === "") return deny("conditional-on-input adjudication carries no conditionCmd — there is no reading to trust");
+  const r = spawnSync("sh", ["-c", cmd], {
+    cwd: root,
+    encoding: "utf8",
+    timeout: ADJUDICATION_CONDITION_TIMEOUT_MS,
+  });
+  if (r.error || r.status !== 0) {
+    const why = r.error
+      ? `spawn error: ${r.error.message}`
+      : `exit ${r.status === null ? `signal ${String(r.signal)}` : r.status}`;
+    return deny(`condition command did not hold (${why}) — the declared cause is gone; the absence is unexplained`);
+  }
+  return {
+    exempt: true,
+    finding: {
+      group: decl.group, kind: decl.kind, state: "explained-absent",
+      reason, reviewAfter: decl.reviewAfter,
+      condition: { cmd, exitCode: r.status, error: String(r.stderr ?? "").trim().slice(0, 200) || null },
+      count, lastWriteMs,
+    },
+    denialReason: null,
+  };
+}
+
 // ── 单载体分析 ──────────────────────────────────────────────────────────────────────────────────────
-export function analyzeCarrier(root: string, spec: CarrierSpec, staleSeconds: number): CarrierResult {
+export function analyzeCarrier(
+  root: string,
+  spec: CarrierSpec,
+  staleSeconds: number,
+  nowMs: number = Date.now(),
+): CarrierResult {
   const empty: CarrierResult = {
     file: spec.file, evaluated: false, reason: "carrier-missing",
-    totalRecords: 0, freshestMs: null, groupCount: 0, decayed: [], companions: [],
+    totalRecords: 0, freshestMs: null, groupCount: 0, decayed: [], adjudicated: [], companions: [],
     contentDark: { state: "not-evaluated", records: 0, falseRecords: 0, reason: "carrier-missing", darkInterval: null },
-    staleEvaluated: { state: "not-evaluated", reason: "carrier-missing", recordTs: null, recordStale: null, scopes: [] },
+    staleEvaluated: { state: "not-evaluated", reason: "carrier-missing", recordTs: null, recordStale: null, scopes: [], artifactIndependentScopes: [] },
   };
   const records = readCarrierRecords(root, spec);
   if (records === null) return empty;
@@ -590,11 +1099,27 @@ export function analyzeCarrier(root: string, spec: CarrierSpec, staleSeconds: nu
   }
 
   // Shape B：有历史记录的分组，末次写入比载体最新（伴生分组仍在写）老超过 staleSeconds。
+  // 命中后先问描述符有没有对它的裁定声明：未过期且条件成立 ⇒ 进 adjudicated[]（读数照出，不计腐烂）。
+  const adjudications = new Map<string, Adjudication>();
+  for (const a of spec.adjudicated ?? []) {
+    if (typeof a.group === "string" && a.group !== "" && !adjudications.has(a.group)) adjudications.set(a.group, a);
+  }
+  const adjudicated: AdjudicatedFinding[] = [];
   if (spec.shapeB !== false && freshestMs !== null && staleSeconds > 0) {
     const gapMs = staleSeconds * 1000;
     for (const [k, g] of groups) {
       if (g.count === 0 || g.lastWriteMs === null) continue;
       if (freshestMs - g.lastWriteMs > gapMs) {
+        const decl = adjudications.get(k);
+        if (decl !== undefined) {
+          const verdict = evaluateAdjudication(root, decl, g.count, g.lastWriteMs, nowMs);
+          if (verdict.exempt && verdict.finding !== null) {
+            adjudicated.push(verdict.finding);
+            continue;
+          }
+          decayed.push({ group: k, kind: "rate-stopped", count: g.count, lastWriteMs: g.lastWriteMs, detail: verdict.denialReason });
+          continue;
+        }
         decayed.push({ group: k, kind: "rate-stopped", count: g.count, lastWriteMs: g.lastWriteMs, detail: null });
       }
     }
@@ -644,7 +1169,7 @@ export function analyzeCarrier(root: string, spec: CarrierSpec, staleSeconds: nu
 
   return {
     file: spec.file, evaluated: true, reason: null,
-    totalRecords, freshestMs, groupCount: groups.size, decayed, companions,
+    totalRecords, freshestMs, groupCount: groups.size, decayed, adjudicated, companions,
     contentDark, staleEvaluated,
   };
 }
@@ -654,6 +1179,8 @@ export interface AnalyzeOutcome {
   anyEvaluated: boolean;
   anyDecayed: boolean;
   decayedCount: number;
+  /** 生效中的裁定总数。⛔ 与 decayedCount 分开计数——它们不是腐烂，但也不得消失。 */
+  adjudicatedCount: number;
   /** 未覆盖的载体（⛔ 不计入 healthyCount）。 */
   uncovered: UncoveredEntry[];
   uncoveredCount: number;
@@ -663,20 +1190,22 @@ export interface AnalyzeOutcome {
 
 export function analyzeAll(
   root: string,
-  opts: { staleSeconds: number; carrier?: string },
+  opts: { staleSeconds: number; carrier?: string; nowMs?: number },
   manifest: CarrierSpec[] = MANIFEST,
 ): AnalyzeOutcome {
   const specs = opts.carrier
     ? manifest.filter((m) => m.file === opts.carrier || path.basename(m.file) === opts.carrier)
     : manifest;
-  const carriers = specs.map((spec) => analyzeCarrier(root, spec, opts.staleSeconds));
+  const nowMs = opts.nowMs ?? Date.now();
+  const carriers = specs.map((spec) => analyzeCarrier(root, spec, opts.staleSeconds, nowMs));
   const anyEvaluated = carriers.some((c) => c.evaluated);
   const anyDecayed = carriers.some((c) => c.decayed.length > 0);
   const decayedCount = carriers.reduce((n, c) => n + c.decayed.length, 0);
+  const adjudicatedCount = carriers.reduce((n, c) => n + c.adjudicated.length, 0);
   // --carrier 是聚焦查询：覆盖面对它不是读数（只报它自己），⛔ 不因此把整个 .quay 扫一遍。
   const uncovered = opts.carrier ? [] : discoverUncovered(root, manifest);
   const healthyCount = carriers.filter((c) => c.evaluated && c.decayed.length === 0).length;
-  return { carriers, anyEvaluated, anyDecayed, decayedCount, uncovered, uncoveredCount: uncovered.length, healthyCount };
+  return { carriers, anyEvaluated, anyDecayed, decayedCount, adjudicatedCount, uncovered, uncoveredCount: uncovered.length, healthyCount };
 }
 
 // ── 时间戳抽取（通用：按字段优先级尝试，缺值 = 未查）───────────────────────────────────────────────
@@ -747,6 +1276,20 @@ function printHuman(outcome: AnalyzeOutcome): void {
       console.log(`  companion (still writing): ${brief}`);
     }
   }
+  // 生效中的裁定：不在腐烂清单里，但**照样打印**（⛔ 「不算腐烂」≠「从读数里消失」）。
+  for (const c of outcome.carriers) {
+    if (c.adjudicated.length === 0) continue;
+    console.log(`INSTRUMENT-ADJUDICATED: .quay/${c.file} — ${c.adjudicated.length} group(s) adjudicated (NOT counted as decay)`);
+    for (const a of c.adjudicated) {
+      const cond = a.condition === null
+        ? ""
+        : ` condition=${a.condition.cmd} exit=${a.condition.exitCode === null ? "?" : a.condition.exitCode}`;
+      console.log(
+        `  adjudicated: ${a.group} — ${a.state} (last=${fmt(a.lastWriteMs)}, ${a.count} records)${cond}; ` +
+        `reviewAfter=${a.reviewAfter}; ${a.reason}`,
+      );
+    }
+  }
   // 已结束的暗区间（AC1）：修复落地后当前不再判暗，但「曾经从哪条起暗了多少条」必须仍然可见。
   for (const c of outcome.carriers) {
     const iv = c.contentDark.darkInterval;
@@ -762,7 +1305,8 @@ function printHuman(outcome: AnalyzeOutcome): void {
     }
   }
   if (!outcome.anyDecayed) {
-    console.log(`instrument-decay-check: ok — no instrument decay (${outcome.healthyCount} carrier(s) healthy, ${outcome.uncoveredCount} uncovered)`);
+    const adj = outcome.adjudicatedCount > 0 ? `, ${outcome.adjudicatedCount} adjudicated (not decay)` : "";
+    console.log(`instrument-decay-check: ok — no instrument decay (${outcome.healthyCount} carrier(s) healthy${adj}, ${outcome.uncoveredCount} uncovered)`);
   }
 }
 
@@ -782,6 +1326,8 @@ function printDecayReport(outcome: AnalyzeOutcome): void {
       reason: c.staleEvaluated.reason,
       recordTs: c.staleEvaluated.recordTs,
       recordStale: c.staleEvaluated.recordStale,
+      /** 未做「产物 vs 提交」比较的 live 读数（显式点名——跳过必须可读，硬规则 3b）。 */
+      artifactIndependentScopes: c.staleEvaluated.artifactIndependentScopes,
       scopes: c.staleEvaluated.scopes.map((s) => ({
         scope: s.scope,
         source: s.source,
@@ -790,6 +1336,7 @@ function printDecayReport(outcome: AnalyzeOutcome): void {
         commitSha: s.commitSha,
         state: s.state,
         reason: s.reason,
+        independence: s.independence,
       })),
     },
     decayed: c.decayed.map((d) => ({
@@ -798,6 +1345,18 @@ function printDecayReport(outcome: AnalyzeOutcome): void {
       count: d.count,
       lastWrite: fmt(d.lastWriteMs),
       detail: d.detail,
+    })),
+    // 生效中的裁定：独立读数面（⛔ 不计入 decayedCount，但**必须**在这里，否则「已裁定例外」
+    // 就从读数里消失了——那正是本任务要修的缺陷的镜像）。
+    adjudicated: c.adjudicated.map((a) => ({
+      group: a.group,
+      kind: a.kind,
+      state: a.state,
+      reason: a.reason,
+      reviewAfter: a.reviewAfter,
+      condition: a.condition,
+      count: a.count,
+      lastWrite: fmt(a.lastWriteMs),
     })),
     companions: c.companions.map((cp) => ({
       group: cp.group,
@@ -811,6 +1370,7 @@ function printDecayReport(outcome: AnalyzeOutcome): void {
     ok: !outcome.anyDecayed,
     evaluated: outcome.anyEvaluated,
     decayedCount: outcome.decayedCount,
+    adjudicatedCount: outcome.adjudicatedCount,
     healthyCount: outcome.healthyCount,
     uncoveredCount: outcome.uncoveredCount,
     uncovered: outcome.uncovered,
@@ -879,6 +1439,10 @@ export function main(argv: string[]): number {
       "C content-dark (every record evaluated:false, reported as a start/count/ended interval), " +
       "D stale-evaluated (artifact predates the newest commit touching its covered source), " +
       "plus an uncovered list that is never counted healthy. " +
+      "Shape B honours machine-readable adjudications declared by the descriptor (rare-by-design / " +
+      "conditional-on-input with an executable conditionCmd); an adjudication older than its reviewAfter, " +
+      "or with no reason, exempts nothing — those groups come back as decay. Adjudicated groups are reported " +
+      "in their own `adjudicated[]` and never counted in decayedCount. " +
       "0 = no decay, 1 = decay, 2 = usage/env error, 3 = NOT-EVALUATED (no carrier evaluable)."
     );
     return 0;

@@ -37,7 +37,7 @@ import {
   dashboardSnapshotStore,
   dashboardSnapshotDisabled,
   DASHBOARD_SNAPSHOT_DISABLED_ENV,
-} from "../src/serve/serve-dashboard.ts";
+} from "../src/serve/view/serve-dashboard.ts";
 import { readTests, readTestsNonBlocking, clearVerificationRoundCache, ROUNDS_PARSE_CHUNK_LINES } from "../src/observation.ts";
 import { makeTmpDir } from "../../../plugin/test/helpers/tmp-workspace.mjs";
 import { QUAY_NATIVE_CLI } from "./helpers/cli-entry.mjs";
@@ -176,7 +176,7 @@ test("AC1′: with a snapshot present, /dashboard runs no reader — a ledger mu
       `---\nid: ${id}\ntitle: late ac\nstatus: active\nkind: criterion\ngoal: GOAL-001\ncriterion: exit 0\nexpect: "exit 0"\norigin: test\n---\n## Rationale\nlate\n`,
     );
   }
-  await coldCaches(await import("../src/serve/serve-dashboard.ts"));
+  await coldCaches(await import("../src/serve/view/serve-dashboard.ts"));
 
   const afterMutate = await get(port, "/dashboard?lang=zh");
   assert.doesNotMatch(
@@ -196,7 +196,7 @@ test("AC1′: with a snapshot present, /dashboard runs no reader — a ledger mu
   // "mutation invisible" would be indistinguishable from "the mutation never took effect at all".
   process.env[DASHBOARD_SNAPSHOT_DISABLED_ENV] = "1";
   try {
-    await coldCaches(await import("../src/serve/serve-dashboard.ts"));
+    await coldCaches(await import("../src/serve/view/serve-dashboard.ts"));
     const legacy = await get(port, "/dashboard?lang=zh");
     assert.match(
       legacy.body,
@@ -209,7 +209,7 @@ test("AC1′: with a snapshot present, /dashboard runs no reader — a ledger mu
   }
 
   // …and a rebuild picks both mutations up again, so the snapshot is a fresh-enough view, not a freeze.
-  await coldCaches(await import("../src/serve/serve-dashboard.ts"));
+  await coldCaches(await import("../src/serve/view/serve-dashboard.ts"));
   await server.dashboardSnapshot.rebuildNow();
   const afterRebuild = await get(port, "/dashboard?lang=zh");
   assert.match(afterRebuild.body, /#9999/, "after a rebuild the sentinel round IS rendered");
@@ -219,7 +219,7 @@ test("AC1′: with a snapshot present, /dashboard runs no reader — a ledger mu
 // ── AC3′ / AC4′: concurrent requests DURING a rebuild ────────────────────────────────────────────
 
 test("AC3′+AC4′: while a rebuild runs, concurrent /dashboard stay <10s and the event loop keeps serving", async () => {
-  const dash = await import("../src/serve/serve-dashboard.ts");
+  const dash = await import("../src/serve/view/serve-dashboard.ts");
   await until(() => peekDashboardSnapshot(workspaceRoot) != null, 30_000);
 
   // ── idle control window: same probe, no rebuild — the host's own scheduling noise floor ──────
@@ -297,7 +297,7 @@ test("AC5′+AC6′: the snapshot-backed page keeps real goal data and does not 
 // ── AC2′: the negative control — switching the mechanism off restores the old behaviour ──────────
 
 test("AC2′: QUAY_DASHBOARD_SNAPSHOT_DISABLED=1 makes the snapshot inert on BOTH sides (tick and request path)", async () => {
-  const dash = await import("../src/serve/serve-dashboard.ts");
+  const dash = await import("../src/serve/view/serve-dashboard.ts");
   await until(() => peekDashboardSnapshot(workspaceRoot) != null, 30_000);
   assert.equal(dashboardSnapshotDisabled(), false, "precondition: the mechanism is on");
 

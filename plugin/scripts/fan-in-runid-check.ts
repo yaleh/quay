@@ -31,11 +31,15 @@ import fs from "node:fs";
 import { repoRoot } from "./repo-root.ts";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
-import { fileURLToPath } from "node:url";
 // getArgValue now lives in gate-script-base.ts as `flagValue` (it was one of the byte-identical
 // copies of the indexOf+next-arg idiom in plugin/scripts; .quay/routine-findings.jsonl finding
 // `arg-parsing-helper-family`, routine `semantic-dedup-scan`).
-import { isDirectEntry, flagValue } from "./gate-script-base.ts";
+// `resolveRoot` likewise: this file's private copy ("--root if given, else repoRoot()") was the same
+// rule as the shared one with a DIFFERENT default — it now passes that default as the second
+// argument (semantic-dedup-scan runId `semantic-dedup-scan-1792847536579`, findingId
+// `root-resolveroot`). `repoRoot()` with no argument is this module's own directory, exactly what the
+// private copy spelled out as `repoRoot(path.dirname(fileURLToPath(import.meta.url)))`.
+import { isDirectEntry, flagValue, resolveRoot } from "./gate-script-base.ts";
 import { extractRunIdFromCommitSubject, findFanInCommitSha } from "./fast-mode-telemetry.ts";
 
 /** A subject that identifies a fan-in merge commit (the `merge: fan-in task/<id> …` family). */
@@ -46,11 +50,8 @@ export const RUN_ID_POSITION_RE = /\(runId:\s*([^)\s]+)\)/;
 const RUN_ID_SAFE_RE = /^[A-Za-z0-9._-]+$/;
 
 // ── Repo-root detection ──────────────────────────────────────────────────────────────────────────────
-
-function resolveRoot(rootArg) {
-  if (rootArg) return path.resolve(rootArg);
-  return repoRoot(path.dirname(fileURLToPath(import.meta.url)));
-}
+// The resolution rule lives in gate-script-base.ts; only this checker's DEFAULT (the repo root, not
+// cwd) is local, passed at the call site so it stays visible there.
 
 // ── Fan-in commit discovery ──────────────────────────────────────────────────────────────────────────
 
@@ -237,7 +238,7 @@ export function main(argv) {
     process.stdout.write(usage + "\n");
     return 0;
   }
-  const root = resolveRoot(flagValue(args, "--root"));
+  const root = resolveRoot(flagValue(args, "--root"), repoRoot());
   const ourTask = flagValue(args, "--task");
   const commitArg = flagValue(args, "--commit");
   const vhsTaskId = flagValue(args, "--taskId");

@@ -162,6 +162,16 @@ export function helpExit(usage: string): never {
 // Filed as semantic-dedup-scan finding `parseargs-handrolled-residuals` (runId
 // `semantic-dedup-scan-1791631645924`, verdict `divergent-implementation`, suggestedAction `unify`),
 // which named exactly the four residual carriers those keys absorb.
+//
+// STATE OF THE FAMILY (measured 2026-10-23, finding `parseargs-seven-forked-loops`, runId
+// `semantic-dedup-scan-1792752400273`): 22 module-level `parseArgs` declarations remain under
+// plugin/scripts — this export, 21 thin adapters that CALL it, and ZERO hand-rolled token loops. The
+// seven loops that finding still counted (ac69-slot-queue-gap-check / defect-latency-pair /
+// loadbearing-test-gate / outer-anchor-check / peer-identity-probe / slice-readings / suite-lpt-order)
+// needed no new spec key: the keys above were already sufficient, they simply had not migrated.
+// `plugin/test/gate-script-base-adoption.test.mjs` holds the family-wide ratchet (a NEW bypassing
+// parser reds it without anyone updating a list), so this comment's number is re-derivable, not
+// asserted.
 export function parseArgs(argv: string[], spec: CliSpec): ParsedArgs {
   const result: ParsedArgs = { args: [], flags: {} };
   const raw = argv.slice(2);
@@ -283,12 +293,29 @@ export function flagValue(argv: readonly string[], name: string): string | undef
 // existed only to feed the private copy is gone with it.
 //
 // ⛔ NOT the same function as `repoRoot()` (repo-root.ts): that one WALKS UPWARD from a start dir to
-// discover the repo/workspace root; this one only converts a value the caller already named. The three
-// checkers that default `--root` to the REPO ROOT instead of cwd (fan-in-runid-check / inner-idle-log /
-// crystallization-half-life) are therefore a different behavior and are deliberately NOT folded in
-// here — that divergence is a separate filed finding (`resolveroot-2`).
-export function resolveRoot(rootArg: string | undefined): string {
-  return path.resolve(rootArg ?? process.cwd());
+// discover the repo/workspace root; this one only converts a value the caller already named.
+//
+// THE `defaultRoot` PARAMETER — the second half of the same extraction (semantic-dedup-scan routine,
+// runId `semantic-dedup-scan-1792847536579`, findingId `root-resolveroot`, verdict
+// `divergent-implementation`, suggestedAction `extract`): two callers (fan-in-runid-check /
+// inner-idle-log) had re-implemented the SAME "`--root` if given, else a default" rule with a
+// DIFFERENT default (the repo root rather than cwd). The rule, not the default, is the shared concept,
+// so the default became a parameter: `resolveRoot(flagValue(args, "--root"), repoRoot())` keeps each
+// caller's own fallback visible at its call site while the resolution rule lives here once.
+//
+// ⛔ STILL DELIBERATELY OUT (they are NOT "the same function with another default"):
+//   • crystallization-half-life.ts's `resolveRoot` returns a discriminated `{root}|{error,code}` with
+//     a SEED walk — an evaluation result, not a path conversion.
+//   • packages/quay/src/driver-control.ts's `resolveRoot` DISCOVERS a workspace root (`findConfig`
+//     walk) and returns `null` when there is none — a different concept, and a different side of the
+//     package boundary (product core must not import plugin/scripts).
+//
+// `""` — an explicitly-passed empty `--root ""` — resolves to cwd for EVERY caller: `??` falls back
+// only on null/undefined, so `path.resolve("")` is the answer and the default is NOT substituted.
+// That is flagValue's own contract (it retires the falsy form so a passed value never reads as
+// absent); a caller that wants the old falsy reading must write `|| undefined` itself.
+export function resolveRoot(rootArg: string | undefined, defaultRoot: string = process.cwd()): string {
+  return path.resolve(rootArg ?? defaultRoot);
 }
 
 // ── parseJsonArg ────────────────────────────────────────────────────────────────────────────────────
@@ -541,6 +568,31 @@ export function appendJsonlLine(file: string, entry: Record<string, unknown>): v
   } catch {
     // best-effort: see the contract note above — evidence loss must not kill the writer.
   }
+}
+
+// ── appendJsonlRecords ──────────────────────────────────────────────────────────────────────────────
+// The BATCH sibling of `appendJsonlLine`: N records → ONE `appendFileSync`, parent dir auto-created,
+// returning how many records were written. Extracted here — byte-identical apart from the parameter
+// name in four copies plus one join-style variant that emits the same bytes — by semantic-dedup-scan
+// finding `jsonl-batch-appenders` (`.quay/routine-findings.jsonl`, routine `semantic-dedup-scan`,
+// runId `semantic-dedup-scan-1792940684375`, kind `byte-identical-body`, verdict `real-duplication`,
+// requested action `extract`), which named its five carriers:
+//   plugin/scripts/arch-discovery-routine.ts:376 (appendCarrierRecords)
+//   plugin/scripts/discovery-method-routine.ts:538 (appendCarrierRecords)
+//   plugin/scripts/discovery-method-routine.ts:641 (appendLedgerRecords)
+//   plugin/scripts/probe-routine.ts:758 (appendRoutineFindings)
+//   plugin/scripts/resource-anomaly-detector.ts:463 (appendCarrierRecords)
+//
+// FAIL-LOUD BY CONTRACT — the opposite of the single-record helper above: a throw propagates, because
+// every caller here treats "the carrier did not get these lines" as a real failure it must report.
+// ⛔ Do not give it a swallowing catch; the two functions have deliberately different contracts.
+//
+// An EMPTY batch writes nothing, creates no directory, and returns 0 — the guards each copy carried.
+export function appendJsonlRecords(file: string, records: readonly Record<string, unknown>[]): number {
+  if (records.length === 0) return 0;
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.appendFileSync(file, records.map((r) => JSON.stringify(r) + "\n").join(""), "utf8");
+  return records.length;
 }
 
 // ── normalizeRel ────────────────────────────────────────────────────────────────────────────────────

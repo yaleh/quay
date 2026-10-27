@@ -429,15 +429,22 @@ export const CONCERN_KIND_REGISTRY = Object.freeze([
     readDelta: null,
     fingerprintOf: null,
   }),
+  // LANDED 2026-10-23 (task gap-unencapsulated-state-clue-judge-e2e, GOAL-911 AC-924). The registry's
+  // own rule for this slot was "a semantic-judged kind ... only by landing the judge" — and the judge is
+  // now landed: the clue reader below emits candidates and the recorded-verdict judge decides them.
+  // ⛔ This is NOT the mechanical shortcut the rule forbids (piling on mechanical signals); the
+  // confirmation still comes only from the judge, and `admission` stays `semantic-judged`.
+  // ⛔ `kind` and `admission` stay ADJACENT quoted literals: the GOAL-911 / AC-918 criterion pairs them in
+  // this source text, so no comment may sit between the two lines.
   Object.freeze({
     kind: "unencapsulated-state",
     admission: "semantic-judged",
-    detector: "NOT LANDED — semantic-judged slot: the clue reader (plugin/scripts/unencapsulated-state-clue.ts) and the recorded-verdict judge are not landed yet; mechanical signals may only produce candidates, never a confirmation",
+    detector: "STAGE 1 clue reader plugin/scripts/unencapsulated-state-clue.ts (CLI: --root <dir> --json; emits candidate/clear/not-evaluated only) → STAGE 2 recorded-verdict judge plugin/scripts/unencapsulated-state-judge.ts (replayVerdict / semanticAdmissionFromJudge over plugin/fixtures/unencapsulated-state/recorded-verdicts.json). Confirmation requires verdict=confirmed WITH a counterfactual; mechanical signals are candidates only",
     deltaComputable: false,
-    negativeControl: false,
-    negativeControlDetail: null,
+    negativeControl: true,
+    negativeControlDetail: "the four vendored samples (true-state-cluster / memoized-probe / diagnostic-counter / encapsulated-registry) are the judge's falsifier: the clue reader fires on ALL FOUR, while the recorded verdicts REFUTE three of them — so a rule that reads the clue as a verdict is demonstrably wrong on 3/4 of its own inputs",
     occurrenceThreshold: null,
-    mechanized: false,
+    mechanized: true,
     deltaCaliber: null,
     readDelta: null,
     fingerprintOf: null,
@@ -806,17 +813,26 @@ function malformedCarrierReason(malformedLines, underlyingReason) {
  *    is forced to `false` and its `reason` names the bad-line count. The underlying per-candidate verdict is
  *    preserved verbatim in the same reason string, so the reading is still inspectable.
  *
+ * @param {object} carrier  `{records, malformed_lines}` — as returned by `readCarrier`.
+ * @param {{semanticAdmission?:(record:object, entry:object)=>{admit:boolean, verdict?:string, counterfactual?:string}}} [opts]
+ *   `semanticAdmission` is forwarded VERBATIM to `evaluateEntryBar` (GOAL-911 / AC-924). Without it a
+ *   `semantic-judged` kind reports `CONDITION_1_SEMANTIC_NOT_EVALUATED` per candidate — its own value,
+ *   never a mechanical confirmation and never a delta refusal. The CLI does NOT load a judge by default:
+ *   the injector is the caller, because the only shipped judge today is a recorded-verdict replay and a
+ *   default would silently bind the Planner to one corpus.
+ *
  * @returns {{malformed_lines:number, carrier_unreadable:boolean, candidates:Array<object>}}
  *   each candidate entry carries `groupRecords` (its raw slice — used by the CLI's `--write` path); the CLI
  *   must NOT serialise that field to stdout.
  */
-export function evaluateCarrier(carrier) {
+export function evaluateCarrier(carrier, opts = {}) {
   const records = Array.isArray(carrier?.records) ? carrier.records : [];
   const malformed_lines = Number.isInteger(carrier?.malformed_lines) && carrier.malformed_lines > 0 ? carrier.malformed_lines : 0;
   const carrier_unreadable = malformed_lines > 0;
+  const candidateOpts = { semanticAdmission: opts?.semanticAdmission };
   const candidates = [];
   for (const [key, group] of groupByCandidate(records)) {
-    const verdict = evaluateEntryBar(group);
+    const verdict = evaluateEntryBar(group, candidateOpts);
     const row = {
       candidate: key,
       n_records: group.length,
@@ -1063,7 +1079,11 @@ export function createGoalStoreWrite(store) {
  * @param {object} o
  * @param {string[]} o.argv   the argument vector (without the node/script prefix)
  * @param {string} o.repoRoot the module's own repo root (for the goal store + driver-runtime)
- * @param {object} [o.deps]   { invokeJudge } — injected only by the suite
+ * @param {object} [o.deps]   { invokeJudge, semanticAdmission } — `invokeJudge` is the ADVISORY review's
+ *   launcher (injected only by the suite); `semanticAdmission` is the C1 judge for `semantic-judged` kinds
+ *   (GOAL-911 / AC-924), forwarded to `evaluateCarrier` → `evaluateEntryBar`. Neither is loaded by default:
+ *   a run without `deps.semanticAdmission` reports `CONDITION_1_SEMANTIC_NOT_EVALUATED` for those kinds
+ *   instead of quietly binding the Planner to one judge.
  * @returns {Promise<object>} the object the CLI serialises
  */
 export async function runProposalCli({ argv, repoRoot, deps = {} }) {
@@ -1074,7 +1094,7 @@ export async function runProposalCli({ argv, repoRoot, deps = {} }) {
   const root = val("--root", REPO_ROOT);
   const carrier = val("--carrier", path.join(root, ".quay", "ownership-shadow-proposals.jsonl"));
   const { records, malformed_lines } = readCarrier(carrier);
-  const evaluated = evaluateCarrier({ records, malformed_lines });
+  const evaluated = evaluateCarrier({ records, malformed_lines }, { semanticAdmission: deps.semanticAdmission });
   const out = [];
   const write = args.includes("--write");
   let store = null, writeSeam = null;

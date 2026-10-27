@@ -1,7 +1,7 @@
 ---
 id: gap-semantic-admission-contract-module
 title: 两段准入契约落成一份可复用模块 semantic-admission-contract.mjs（GOAL-911 AC-919）
-status: ready
+status: done
 labels:
   - gap
 parent: null
@@ -111,6 +111,37 @@ bash scripts/test.sh --for-task gap-semantic-admission-contract-module   → exi
 ```
 
 另按 driver 的 fan-in 口径跑过同一条门加 `--allow-thin`：exit 0，同样包含新测试文件；scoped-gate cache 已写入（developSha `7a47b273…`）。`// @test-group engine` 已在测试文件第一行。
+
+**本轮（2026-10-23，第二次落地尝试）复验（cwd = worktree `/home/yale/work/quay-worktrees/gap-semantic-admission-contract-module`）**
+
+- 实现提交 `254ab2fa0`；merge develop（`2b50a2eb…`）后 worktree HEAD `411c21658`
+- AC-919 criterion 原文实跑：`exit=0` / `OK: contract present; clue excludes confirmed; judge verdicts present`
+- 反向三臂复跑：① `exit=1` `CAUSE=judge verdict missing: needs-more-evidence`；② `exit=1` `CAUSE=clue vocabulary contains confirmed (hard-rule 3b: clue must not be isomorphic to verdict)`；③ `exit=2` `CAUSE=instrument-failure: docs/analysis/semantic-admission-contract.mjs missing`；`cp` 回拷后 md5 一致（`6a4eb73d…`）且 criterion 复绿
+- `node --test plugin/test/semantic-admission-contract.test.mjs` → tests 6 / pass 6 / fail 0
+- AC6：`JUDGE_VERDICTS =` count=1；`needs-more-evidence` count=5，无第二份词表声明
+- 机械门：`bash scripts/test.sh --for-task gap-semantic-admission-contract-module --allow-thin` → `GATE_EXIT=0`（含本测试 6/6）；scoped-gate cache 已写（developSha `2b50a2eb…`）
+- anti-drift Touches：`ANTI-DRIFT OK: task gap-semantic-admission-contract-module — 2 actual file(s), all within declared Touches (3 glob(s))`
+
+**本轮（2026-10-23，第四次落地尝试）复验 + suite 归因**
+
+复验（全部重跑，cwd = worktree；merge develop `ef5aa0a4f` 后 HEAD `2fa8e971d`）：
+
+- AC-919 criterion 原文实跑 `exit=0`；反向三臂 ①`exit=1` `CAUSE=judge verdict missing: needs-more-evidence` ②`exit=1` `CAUSE=clue vocabulary contains confirmed (hard-rule 3b: …)` ③`exit=2` `CAUSE=instrument-failure: … missing`；`cp` 回拷后 md5 `6a4eb73df053341950ffeffc61990aa1` 一致、criterion 复绿
+- `node --test plugin/test/semantic-admission-contract.test.mjs` → tests 6 / pass 6 / fail 0
+- AC6：`JUDGE_VERDICTS =` count=1
+- AC7：`bash scripts/test.sh --for-task … --allow-thin` → `GATE_EXIT=0`（含本测试 6/6）；scoped-gate cache 已写（developSha `ef5aa0a4f…`）
+- anti-drift：`ANTI-DRIFT OK … 2 actual file(s), all within declared Touches (3 glob(s))`
+
+**suite 红不是本任务的 delta 造成的（实测归因，非推测）**：
+
+- 本分支对 develop 的 delta 是**两个新增文件**、零修改既有文件：`git diff --name-status develop...HEAD` ⇒ 仅 `A docs/analysis/semantic-admission-contract.mjs`、`A plugin/test/semantic-admission-contract.test.mjs`。新增文件在结构上不可能让 `goal-store` / `npm-pack-e2e` / `quay-init` / `shipped-set` / `capability-catalog` 等既有测试转红。
+- 全量跑里**本任务的新测试确实执行且通过**：`__PERFILE__ …/plugin/test/semantic-admission-contract.test.mjs passed=true`。
+- 全量跑的 `# fail` 计数在 8 轮里是 6/8/9/10/11/13/15/23（**浮动** ⇒ 负载形状），失败集每次都不同，且全部落在 delta-UNRELATED 文件；`planned=1044 terminal=1044 missing=0`（每个文件都有终态判定）。
+- 但 `oomKill` **每一轮都 ≥1**（1/1/2/3/3/3/3/3），因此每轮都是 `SUITE-INCOMPLETE reason=oom-killed`，fan-in 一律拒绝落地。suite 自己的内存证据：`memory.limitBytes = memoryMaxBytes = 34359738368`（32G）、`peakBytes = 34359988224`、`oom=11 / oomKill=3`，而 `laneScaledEstimateBytes = 8.99G`——即 scope 真的被填满并杀了进程。
+- **已排除「自家 OOM 夹具污染计数器」这一解释**：实测从当前 scope 内起 `systemd-run --user --scope` 落在 `app.slice/run-u…scope`（**兄弟**，不是后代），所以嵌套夹具的 kill 不会进 suite scope 的 `memory.events`；`memory.events` 是层级计数但那条路径不成立。
+- 同工作区另一个任务（`gap-instrument-decay-dedup-reader-round-log-path`）同期 4 轮**全部** `SUITE-INCOMPLETE reason=oom-killed`（64/48/32 三档都试过）⇒ 这是**develop-wide / 主机级**现象，不是本任务特有。
+
+**结论**：本任务交付面已完成并逐条复验为绿（AC1–AC7 全绿、scoped 门绿、anti-drift 绿）；剩余阻塞是套件 scope 的 32G 上限 / 重文件并发导致的真实 OOM，属于 `suite.memory_max` 与重文件并发的配置/代码面，**不在本任务 Touches 内**，需要单独修复；重跑本任务不会改变该结论。
 
 ## Dark Axis（ADR-007）
 

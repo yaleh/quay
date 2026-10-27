@@ -35,7 +35,7 @@ import fs from "node:fs";
 import http from "node:http";
 import { startServer } from "../src/serve/serve.ts";
 import { renderLangSwitcher, SITE_NAV_ROUTES } from "../src/serve/serve-handlers.ts";
-import { NAV_KEYS, LANG_NAMES, LANG_SWITCHER_GROUP, LANG_SWITCH_ARIA } from "../src/serve/serve-i18n.ts";
+import { NAV_KEYS, LANG_NAMES, LANG_SWITCHER_GROUP, LANG_SWITCH_ARIA } from "../src/serve/view/serve-i18n.ts";
 import { makeTmpDir } from "../../../plugin/test/helpers/tmp-workspace.mjs";
 import { QUAY_NATIVE_CLI } from "./helpers/cli-entry.mjs";
 

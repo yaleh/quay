@@ -81,6 +81,28 @@ export function resolvePageSize(flags: CliFlags): { pageSize: number | null; err
   return { pageSize: n, error: null };
 }
 
+// Shared `--since` validator (gap-routine-architecture-analysis-dup-parse-iso-since-two-verbs:
+// `quay driver log` and `quay suite` carried byte-identical 101-token bodies differing only in the
+// error-message prefix; the old in-code note claimed the copy kept "each verb's own wording", but
+// `verbLabel` reproduces both strings exactly, so the stated reason did not require duplication).
+// The one thing that MUST stay per-verb is that prefix — callers pass their own command spelling.
+// ⛔ An unparseable value is a usage error (exit 1 at the call site), never a silently-unbounded
+// read — that would answer a different question than the one asked.
+export function parseIsoSince(
+  raw: unknown,
+  verbLabel: string,
+): { sinceMs: number | null; error: string | null } {
+  if (raw === undefined) return { sinceMs: null, error: null };
+  if (typeof raw === "string") {
+    const ms = Date.parse(raw);
+    if (Number.isFinite(ms)) return { sinceMs: ms, error: null };
+  }
+  return {
+    sinceMs: null,
+    error: `${verbLabel}: --since requires an ISO 8601 instant (e.g. 2026-10-01T00:00:00Z; got ${JSON.stringify(raw)})`,
+  };
+}
+
 export function parseFlags(argv: string[]): { flags: CliFlags; positional: string[] } {
   const flags = {};
   const positional = [];

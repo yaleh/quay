@@ -29,7 +29,14 @@ import { KINDS, VERBS } from "./driver-vocab.ts";
 /** Resolve the workspace root from `--root` (walk-up) or the process cwd; null when no config.
  *
  *  Exported because `cli/driver.ts`'s `runDriverLog` / `runDriverLive`（CLI 独有的两个只读动词）
- *  用它解析同一个 root —— ⛔ 不是给它们再写一份（硬规则 5b：第二份解析就是两边漂移的起点）。 */
+ *  用它解析同一个 root —— ⛔ 不是给它们再写一份（硬规则 5b：第二份解析就是两边漂移的起点）。
+ *
+ *  ⛔ 与 `plugin/scripts/gate-script-base.ts` 的同名 `resolveRoot(rootArg, defaultRoot)` **不是同一个
+ *  概念，故不合并**（semantic-dedup-scan runId `semantic-dedup-scan-1792847536579`，findingId
+ *  `root-resolveroot`，verdict `divergent-implementation`）：那一个是**把调用方已点名的值转成绝对
+ *  路径**（失败不可能发生，返回 string）；本函数是**发现工作区根**（`findConfig` 向上走，找不到就
+ *  返回 `null`），失败是一个合法的三态取值。再加上包边界——product core 不得 import
+ *  `plugin/scripts/`。⇒ 该 finding 里真正可折叠的只有 fan-in-runid-check / inner-idle-log 两处。 */
 export function resolveRoot(rootFlag: string | undefined): string | null {
   const startDir =
     typeof rootFlag === "string" && rootFlag.trim() !== "" ? path.resolve(rootFlag) : process.cwd();

@@ -7,9 +7,22 @@
 // The move is PURE RELOCATION: no module's exports, behaviour, or import graph changed — only
 // the directory they live in (and therefore the specifiers that reach them).
 //
+// SPLIT (gap-routine-architecture-analysis-god-package-serve-fanout-556, 2026-10-26): the flat
+// relocation above moved the god package rather than splitting it — archguard then flagged
+// `quay/src/serve` ITSELF (fanOut=556, 25 files, 285 entities, 15,687 lines). The surface is now
+// five cohesive subpackages, so no single package carries the whole graph:
+//   view/   — presentation: i18n table, language, HTML render, dashboard, binding policy
+//   pages/  — page handlers: board, live, needs-human, system
+//   io/     — I/O + transport: git, sessions, send, snapshot store
+//   feat/   — feature handlers: task, tests, goal
+//   docs/   — docs surface: adr, architecture, doc
+// serve.ts stays the router (setup + server lifecycle), serve-handlers.ts the route dispatcher.
+// The move is PURE RELOCATION: no module's exports, behaviour, or import graph changed — only
+// the directory they live in (and therefore the specifiers that reach them).
+//
 // ⛔ Do not import from this barrel inside the moved modules themselves. They import each other
-// by exact specifier (`./serve-render.js`), which keeps the intra-package graph explicit and
-// avoids a barrel cycle. This file is for callers OUTSIDE `src/serve/` that want the surface
+// by exact specifier (`../view/serve-render.js`), which keeps the intra-package graph explicit
+// and avoids a barrel cycle. This file is for callers OUTSIDE `src/serve/` that want the surface
 // as one unit; it is not on any hot path.
 //
 // `export *` (not a curated list): the point of the move is that the surface is ONE thing. A
@@ -18,25 +31,30 @@
 
 export * from "../core/server-state.js";
 export * from "./serve.js";
-export * from "./serve-adr.js";
-export * from "./serve-architecture.js";
-export * from "./serve-binding.js";
-export * from "./serve-board.js";
-export * from "./serve-dashboard.js";
-export * from "./serve-doc.js";
-export * from "./serve-git.js";
-export * from "./serve-goal.js";
+export * from "./docs/serve-adr.js";
+export * from "./docs/serve-architecture.js";
+export * from "./view/serve-binding.js";
+export * from "./pages/serve-board.js";
+export * from "./view/serve-dashboard.js";
+// gap-routine-architecture-analysis-god-package-serve-fanout-556: the live formatters moved into
+// `view/` to keep the directory graph acyclic; the barrel keeps exporting the same names (they used
+// to arrive via `pages/serve-live.js`). `renderFanInCell` keeps arriving via `feat/serve-task.js`,
+// which re-exports it from `view/serve-fan-in-cell.ts`.
+export * from "./view/serve-live-format.js";
+export * from "./docs/serve-doc.js";
+export * from "./io/serve-git.js";
+export * from "./feat/serve-goal.js";
 export * from "./serve-handlers.js";
 export * from "./serve-heap-cap.js";
-export * from "./serve-http-json.js";
-export * from "./serve-i18n.js";
-export * from "./serve-lang.js";
-export * from "./serve-live.js";
+export * from "./io/serve-http-json.js";
+export * from "./view/serve-i18n.js";
+export * from "./view/serve-lang.js";
+export * from "./pages/serve-live.js";
 export * from "./serve-log.js";
-export * from "./serve-needs-human.js";
-export * from "./serve-render.js";
-export * from "./serve-send.js";
-export * from "./serve-sessions.js";
-export * from "./serve-system.js";
-export * from "./serve-task.js";
-export * from "./serve-tests.js";
+export * from "./pages/serve-needs-human.js";
+export * from "./view/serve-render.js";
+export * from "./io/serve-send.js";
+export * from "./io/serve-sessions.js";
+export * from "./pages/serve-system.js";
+export * from "./feat/serve-task.js";
+export * from "./feat/serve-tests.js";

@@ -1133,7 +1133,15 @@ lpt_order_files() {
 source "${repo_root}/plugin/scripts/overhead-instrument.sh"
 
 run_selected() {
-  local groups="$1"; shift
+  # QUAY_TEST_PLAN_ONLY=1 (test support, gap-fan-in-recovery-ladder-inert-bucket-full-drops-test-
+  # concurrency AC5): print the `scheduler:` header these args WOULD hand the scheduler and exit 0
+  # before the lock/gate/build/static phases. That gives a test the DOWNSTREAM effective main budget
+  # (a 直接量) instead of the spawned argv (a 代理量) — the split that hid this task's defect (硬规则 4b).
+  # ⛔ It must be sampled HERE, at run_selected's entry: the bucket-FULL fallback short-circuits into
+  # this function, so a probe placed in the --buckets branch BEFORE that call would read the branch's
+  # own args and mask a dropped forwarding. Folded onto the `local groups` line to keep this file's
+  # sh-census `embeddedInterpreterLines` reading at its shrink-only baseline (net-zero code lines).
+  local groups="$1"; shift; [ "${QUAY_TEST_PLAN_ONLY:-0}" = "1" ] && { echo "scheduler: unified group-budget scheduler (serial≤$SERIAL_CONCURRENCY lowconc≤$LOWCONC_CONCURRENCY main≤$(bucket_test_concurrency "$@"))"; exit 0; }
   # Phase marks + oh_full are GLOBAL (no `local`): the SIGTERM/EXIT partial-fallback trap above runs
   # OUTSIDE this function's frame, and bash does not reliably give a trap handler dynamic scoping
   # into the interrupted frame — globals are the only channel for the trap to read the marks.
@@ -1761,14 +1769,20 @@ elif [ "${1:-}" = "--buckets" ]; then
   bucket_buckets="$(printf '%s' "${bucket_summary}" | sed -n 's/.*buckets=\([^ ]*\).*/\1/p')"
   bucket_files="$(printf '%s' "${bucket_summary}" | sed -n 's/.*files=\([0-9][0-9]*\).*/\1/p')"
   echo "__BUCKETS__ buckets=${bucket_buckets} files=${bucket_files} full=${bucket_full}"
+  # ⛔ BOTH full-suite fallbacks below MUST forward "${rest_args[@]}". Dropping them made
+  # `--test-concurrency=N` (delivered by full-suite-runner's --lane-count splice) die HERE: run_selected
+  # fell back to the nproc-derived default, so the recovery ladder's 64/48/32 rungs all ran at ~126-128
+  # main lanes and OOM'd identically while reading as declared step-downs
+  # (gap-fan-in-recovery-ladder-inert-bucket-full-drops-test-concurrency: 3 consecutive fan-in rounds).
   if [ "${bucket_full}" = "1" ]; then
     # Hub touch / no-bucket-triggerable ⇒ the full default suite (run_selected exits).
-    run_selected "$(effective_groups)"
+    run_selected "$(effective_groups)" "${rest_args[@]}"
   fi
   bucket_sel_out="$(node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/suite-bucket-select.ts" --root "${repo_root}" --task "${bucket_id}" --paths-only)"
   if [ -z "${bucket_sel_out}" ]; then
     echo "scripts/test.sh: --buckets ${bucket_id} — selector selected 0 test files (bucket=${bucket_buckets}); falling back to full suite" >&2
-    run_selected "$(effective_groups)"
+    # Same forwarding rule as the hub branch above (硬规则 5b: one defect, every sibling site).
+    run_selected "$(effective_groups)" "${rest_args[@]}"
   fi
   mapfile -t files <<< "${bucket_sel_out}"
   # ⛔ NO `lpt_order_files files` here (gap-suite-bash-lpt-forwarder-dead-on-default-path): on the

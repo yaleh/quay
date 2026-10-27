@@ -1327,8 +1327,8 @@ BODY
 # ⛔ 每个前置不成立都 return 0 且【不改 AC238_EVALUATED】——「读不出」是一个独立取值，不与「合格」同形
 # （硬规则 3b：恒绿的检查比没有检查更贵）。
 
-# binding_state <project-root> — the provider binding state word for a project, read by the mechanical
-# checker plugin/scripts/provider-binding-resolvability-check.ts. ⛔ 刻意【不】注入任何 $PATH 辅助。
+# binding_state <project-root> [plugin-root] — the provider binding state word for a project, read by
+# the mechanical checker plugin/scripts/provider-binding-resolvability-check.ts. ⛔ 刻意【不】注入任何 $PATH 辅助。
 #
 # WHY THIS EXISTS (tasks/gap-pre-fix-upgraded-project-unresolvable-binding-undetected): the reading at
 # ⑥ below used to be the ONLY thing asking "can the upgraded project read its own board?", and it ran
@@ -1343,7 +1343,7 @@ BODY
 # no-mcp-entry / unrecognized-shape (NOT-EVALUATED) · unreadable (the checker could not run at all —
 # ⛔ a distinct word, never confused with 合格).
 binding_state() {
-  local r="$1" out state
+  local r="$1" proot="${2:-}" out state
   # ⛔ 2>&1 (BOTH streams) is load-bearing: gate-script-base.emitVerdict writes its JSON on the stream
   #    its caller picks, and provider-binding-resolvability-check writes its NOT-EVALUATED verdicts
   #    (no-mcp-entry / unrecognized-shape / an audit throw) to **stderr** while PASS/FAIL go to stdout.
@@ -1366,18 +1366,21 @@ for p in rows:
         print(p["state"]); raise SystemExit
 print(rows[0].get("state", "unrecognized-shape"))
 ' 2>/dev/null || echo "unreadable")"
-  # ── new-semantics binding (76f89ce82 / gap-project-quay-pointer-is-init-plugin-root-…): the native
-  #    provider no longer CARRIES path/mcp_entry — Core resolves <plugin-root>/vendor/quay-native, and
-  #    the project's binding IS its `.quay/plugin` link. The checker was written for the OLD
-  #    config-carried form, so it reports `no-mcp-entry` ("nothing to judge") for the CURRENT form.
-  #    Judge that form here: a `.quay/plugin` link whose vendored quay-native bundle is a real file IS
-  #    a project-controlled, $PATH-independent binding ⇒ path-resolved. ⛔ Not a blanket relaxation —
-  #    the AC-238 gate still compares the resolved bundle's sha to the DELIVERED one (RUNTIME_REPLACED
-  #    ③), so a stale/absent link fails closed. RED states above are returned before this branch.
+  # ── new-semantics binding (76f89ce82 / gap-project-quay-pointer-is-init-plugin-root-…, UPDATED by
+  #    gap-quay-init-retire-project-plugin-link 2026-10-25): the native provider no longer CARRIES
+  #    path/mcp_entry — Core resolves <plugin-root>/vendor/quay-native from ITS OWN install location.
+  #    It used to be the project's `.quay/plugin` link that made that binding project-local; that link
+  #    is RETIRED (init no longer creates it, and deletes an old one), so the resolution is now the
+  #    PLUGIN ROOT the delivered CLI runs from — passed in by the caller (`$2`), else this script's own
+  #    plugin root (single source: this file lives in <plugin>/scripts). The checker was written for the
+  #    OLD config-carried form, so it reports `no-mcp-entry` ("nothing to judge") for the CURRENT form;
+  #    judge that form here: a plugin root whose vendored quay-native bundle is a real file IS the
+  #    runtime the project resolves ⇒ path-resolved. ⛔ Not a blanket relaxation — the AC-238 gate still
+  #    compares the resolved bundle's sha to the DELIVERED one (RUNTIME_REPLACED ③), so an absent/stale
+  #    root fails closed. RED states above are returned before this branch.
   if [ "$state" = "no-mcp-entry" ]; then
-    local pj=""
-    pj="$(cd "$r/.quay/plugin" 2>/dev/null && pwd -P || true)"
-    if [ -n "$pj" ] && [ -f "$pj/vendor/quay-native/dist/quay-native.js" ]; then
+    if [ -z "$proot" ]; then proot="$(cd "$SCRIPT_DIR/.." 2>/dev/null && pwd -P || true)"; fi
+    if [ -n "$proot" ] && [ -f "$proot/vendor/quay-native/dist/quay-native.js" ]; then
       printf 'path-resolved'; return 0
     fi
   fi
@@ -1385,7 +1388,7 @@ print(rows[0].get("state", "unrecognized-shape"))
 }
 
 step_upgrade_existing() {
-  local root="$1" npmroot qinit fresh_quay fresh_qn rtbin
+  local root="$1" npmroot qinit fresh_quay fresh_qn rtbin delivered_plugin_root
   local pre_q pre_qn post_q post_qn fresh_q fresh_qn_sha
   local old_epoch now_epoch init_rc=0 pre_set post_set tl_json tl_count sample_id sample_json
   AC238_PROJECT_ROOT="$root"
@@ -1411,6 +1414,9 @@ step_upgrade_existing() {
   fi
   npmroot="$(npm root -g --prefix "$PREFIX")"
   qinit="${npmroot}/quay/plugin/bin/quay"
+  # The delivered PLUGIN ROOT — what the project resolves its native provider from now that the
+  # retired `.quay/plugin` link no longer names it (2026-10-25).
+  delivered_plugin_root="$(dirname "$(dirname "$qinit")")"   # <prefix>/lib/node_modules/quay/plugin
   fresh_quay="${npmroot}/quay/dist/quay.js"
   fresh_qn="${npmroot}/quay-native/dist/quay-native.js"
   for f in "$qinit" "$fresh_quay" "$fresh_qn"; do
@@ -1456,7 +1462,7 @@ step_upgrade_existing() {
   # ②b 【升级前】绑定可解析性直接量（无 $PATH 辅助）。这是本项目【本来就有】的存量读数：一个从
   #     ba960f503 之前升级过来的现场，此刻停在裸名绑定上 ⇒ 本读数取 RED，而 ⑥（带 $PATH 辅助）照样绿。
   #     ⛔ 信息量读数，不参与 AC238_EVALUATED 判定——源项目本来就可能是已迁移的（post 才是门）。
-  AC238_PRE_BINDING="$(binding_state "$root")"
+  AC238_PRE_BINDING="$(binding_state "$root" "$delivered_plugin_root")"
   echo "  pre binding: pre_binding=$AC238_PRE_BINDING (read with NO \$PATH assistance — the stale-inventory reading)"
 
   # ③ 升级动作 = 跑【本次交付物自带的】quay-init。已有 config ⇒ 配置保留分支（migrate_stale_mcp_entry
@@ -1510,7 +1516,7 @@ step_upgrade_existing() {
     retired_q="$(sha256sum "$retired_dir/bin/quay.js" | awk '{print $1}')"
     retired_qn="$(sha256sum "$retired_dir/bin/quay-native.js" | awk '{print $1}')"
   fi
-  bound_entry="$(config_native_mcp_entry "$root")"
+  bound_entry="$(config_native_mcp_entry "$root" "$delivered_plugin_root")"
   if [ -n "$bound_entry" ] && [ -f "$bound_entry" ]; then
     bound_sha="$(sha256sum "$bound_entry" | awk '{print $1}')"
   fi
@@ -1538,7 +1544,7 @@ step_upgrade_existing() {
   # ⑤b 【升级后】绑定可解析性直接量（⛔ 无 $PATH 辅助）。这是本 AC 的门：升级动作若没能把 provider
   #     绑定迁到一条项目自己控制的路径上（migrate_stale_mcp_entry 不生效 / 被回归掉），post 会停在
   #     bare-path-name——而带 $PATH 辅助的读法会把它盖成绿。取值可区分（develop 侧新增的判据）。
-  AC238_POST_BINDING="$(binding_state "$root")"
+  AC238_POST_BINDING="$(binding_state "$root" "$delivered_plugin_root")"
   echo "  post binding: post_binding=$AC238_POST_BINDING (read with NO \$PATH assistance — the gate below)"
 
   # ⑥ 新 CLI 能读出旧存量（文件还在 ≠ 读得出）。⛔ 不再 PATH 前置本次安装前缀、也⛔不用
@@ -4623,7 +4629,7 @@ profile_worker_default_field() {
   printf '%s' "$v"
 }
 
-# ── config_native_mcp_entry <root> — 读升级后 config 的 providers.native.mcp_entry 里的可执行路径 ──
+# ── config_native_mcp_entry <root> [plugin-root] — 读升级后 config 的 providers.native.mcp_entry 里的可执行路径 ──
 # 当前升级语义（裁定 c / ba960f503）下，「项目此刻绑定到哪个 runtime」只写在 config 里：mcp_entry 从
 # 裸 PATH 名（或悬空路径）被迁成【本次交付物的 vendored bundle 绝对路径】。AC-238 的「旧 runtime 被真实
 # 换掉」与 AC-239 的「这个项目自己能不能读自己的盘」都以它为准 ⇒ 必须从 config 读，⛔ 不从「目录里
@@ -4632,7 +4638,7 @@ profile_worker_default_field() {
 # ⛔ 刻意【不】引入 yaml 依赖：远端不保证有 PyYAML，而这里要解的形态是闭集（`mcp_entry:` 后跟
 # `- item` 列表或 `[a, b]` 内联）。解析结果只参与 fail-closed 门（== 本次交付物），解错即门不开。
 config_native_mcp_entry() {
-  local root="$1" out pj
+  local root="$1" proot="${2:-}" out
   [ -f "$root/.quay/config.yml" ] || return 0
   out="$(python3 - "$root/.quay/config.yml" <<'PY'
 import re, sys
@@ -4661,17 +4667,19 @@ cand = [i for i in items if i.startswith("/") and i.endswith(".js")]
 sys.stdout.write(cand[0] if cand else "")
 PY
 )"
-  # ── new-semantics fallback (76f89ce82 / gap-project-quay-pointer-is-init-plugin-root-…): after the
-  #    upgrade the native provider carries NO path/mcp_entry — Core resolves <plugin-root>/vendor/
-  #    quay-native, and the project's binding IS its `.quay/plugin` link. A check written for the OLD
-  #    config-carried form reads `<unread>`/fail-closed here even though the binding is fine. Resolve
-  #    the link: the linked bundle IS the runtime the project is bound to. ⛔ Not "any path counts" —
-  #    the caller compares this entry's sha256 to the DELIVERED bundle (AC238_RUNTIME_REPLACED ③), so
-  #    an absent or stale link still fails the gate.
+  # ── new-semantics fallback (76f89ce82 / gap-project-quay-pointer-is-init-plugin-root-…, UPDATED by
+  #    gap-quay-init-retire-project-plugin-link 2026-10-25): after the upgrade the native provider
+  #    carries NO path/mcp_entry — Core resolves <plugin-root>/vendor/quay-native from its own install
+  #    location. A check written for the OLD config-carried form reads `<unread>`/fail-closed here even
+  #    though the binding is fine. Resolve it from the PLUGIN ROOT the delivered CLI runs from — `$2`,
+  #    else this script's own plugin root (this file lives in <plugin>/scripts). ⛔ The retired
+  #    `.quay/plugin` link is NEVER read: init no longer creates it, and an old one is deleted.
+  #    ⛔ Not "any path counts" — the caller compares this entry's sha256 to the DELIVERED bundle
+  #    (AC238_RUNTIME_REPLACED ③), so a stale/absent plugin root still fails the gate.
   if [ -z "$out" ]; then
-    pj="$(cd "$root/.quay/plugin" 2>/dev/null && pwd -P || true)"
-    if [ -n "$pj" ] && [ -f "$pj/vendor/quay-native/dist/quay-native.js" ]; then
-      out="$pj/vendor/quay-native/dist/quay-native.js"
+    if [ -z "$proot" ]; then proot="$(cd "$SCRIPT_DIR/.." 2>/dev/null && pwd -P || true)"; fi
+    if [ -n "$proot" ] && [ -f "$proot/vendor/quay-native/dist/quay-native.js" ]; then
+      out="$proot/vendor/quay-native/dist/quay-native.js"
     fi
   fi
   printf '%s' "$out"

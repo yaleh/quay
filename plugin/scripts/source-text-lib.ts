@@ -21,6 +21,13 @@
 // the comment-mask pair — maskComments (3 byte-agreeing copies, only two of them named by the
 // finding) and codeOnlyText (2) — and those now exist here once too (third block at the bottom).
 //
+// A FOURTH pass, from a DIFFERENT routine (`architecture-analysis`, finding
+// `dup-last-suite-start-offset-divergent-regex`, runId `architecture-analysis-1792940968187`), found
+// one marker-slicing rule written 3x across 2 carriers with 2 regex spellings — lastSuiteStartOffset
+// in measure-trend-check.ts + pre-verified-round-record.ts + fan-in-execute.js's FIX_SCOPE_GATE.
+// It now exists here once (fourth block at the bottom), because the two spellings DISAGREE on a bare
+// marker line at EOF: the divergence is a real behavior difference, not formatting.
+//
 // ⛔ What this module deliberately does NOT do: give the three comment/region primitives ONE
 // semantics. Two of them strip
 // comments of two DIFFERENT languages, and that difference is load-bearing, not cosmetic:
@@ -296,4 +303,37 @@ export function codeOnlyText(src: string): string {
     chars.push(mask[i] === 1 ? " " : src[i]);
   }
   return chars.join("");
+}
+
+/**
+ * Byte offset of the LAST `__FANIN_SUITE_START__` MARKER LINE (anchored at line start), or -1.
+ *
+ *  The suite log is rotated per fan-in round and each round starts with this marker line; readers
+ *  slice from the last one so only the CURRENT round is parsed (gap-fan-in-suite-log-cross-relaunch-
+ *  reuse). This rule used to live in three places with TWO spellings —
+ *    /^__FANIN_SUITE_START__[^\n]*$/gm   (measure-trend-check.ts, fan-in-execute.js FIX_SCOPE_GATE)
+ *    /^__FANIN_SUITE_START__\s/gm        (pre-verified-round-record.ts)
+ *  — and they agreed only because the emitter always appends ` iso=...`. On a BARE marker line at
+ *  EOF the first returns 0 and the second -1 (measured, node): a future emitter change that drops the
+ *  trailing fields/newline would silently make one reader slice the whole file and another slice
+ *  nothing, faking a checker-misreport. Finding `dup-last-suite-start-offset-divergent-regex`
+ *  (routine `architecture-analysis`, runId `architecture-analysis-1792940968187`).
+ *
+ *  Why line-anchored, NOT `lastIndexOf(marker)`: a test-output line that merely MENTIONS the marker
+ *  MID-LINE (e.g. this suite's own test description "…slices by the last __FANIN_SUITE_START__
+ *  marker…") would slice from inside the run and DROP the real `__PERFILE__` lines before it (the
+ *  fake checker-misreport closed by gap-measure-trend-check-slice-line-anchor /
+ *  gap-wiring-B-verification-round-write-path / gap-fan-in-fix-scope-gate-slice-line-anchor).
+ *
+ *  Why `(?:\s|$)` and not `[^\n]*$`: the marker is a TOKEN, so `__FANIN_SUITE_START__EXTRA` is not a
+ *  marker (\s enforces the boundary the `\s` spelling had); and `$` under the `m` flag admits a bare
+ *  marker at EOF — the exact input where the two old spellings diverged. So the shared rule keeps
+ *  BOTH old guarantees instead of silently choosing one.
+ */
+export function lastSuiteStartOffset(text: string): number {
+  const re = /^__FANIN_SUITE_START__(?:\s|$)/gm;
+  let last = -1;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(text)) !== null) last = m.index;
+  return last;
 }

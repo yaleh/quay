@@ -77,7 +77,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
-import { isDirectEntry } from "./gate-script-base.ts";
+import { isDirectEntry, parseArgs as baseParseArgs } from "./gate-script-base.ts";
 import { repoRoot as findRepoRoot } from "./repo-root.ts";
 // 单一解析器（硬规则 5b）：⛔ 不在这里重写 PATH / ARCHGUARD_RUNNER_CLI 的语义。
 import { resolveArchguardCli } from "./archguard-runner.ts";
@@ -1142,55 +1142,73 @@ interface ParsedArgs {
   json: boolean;
 }
 
+// Thin adapter over the ONE canonical parser (gate-script-base.ts `parseArgs`) — this file carried one
+// of the seven hand-rolled token loops named by `semantic-dedup-scan` finding
+// `parseargs-seven-forked-loops` (runId `semantic-dedup-scan-1792752400273`, verdict
+// `divergent-implementation`). It keeps this command's LIBRARY-shaped error model (`Result`, never
+// `process.exit` — `errors:"return"`), its `--help` sentinel (`help:"return"`; `main` maps it to the
+// usage text), and its forbidden-positionals rule (checked below, because the message is this
+// command's own). `argv` is the SLICED tail, so the two leading slots are re-attached.
+//   • A flag given with NO value reads as "" from the shared parser; the retired loop read `undefined`
+//     for that same input. Both arms below reject it with the SAME message, so an empty value never
+//     launders into a default (硬规则 3b).
+//   • An unknown flag now reports the shared `unknown argument: --x` instead of `unknown flag --x`;
+//     exit code and fail-closed behaviour are unchanged.
 function parseArgs(argv: string[]): Result<ParsedArgs> {
-  let phase: "baseline" | "post" | null = null;
-  let taskId: string | undefined;
-  let scope: string | undefined;
-  let head: string | undefined;
-  let root: string | undefined;
-  let tree: string | undefined;
-  let treeExplicit = false;
-  let configPath: string | undefined;
-  let json = false;
-  for (let i = 0; i < argv.length; i++) {
-    const a = argv[i];
-    if (a === "--baseline" || a === "--post") {
-      if (phase !== null) return fail("both --baseline and --post given (exactly one phase per invocation)");
-      phase = a === "--baseline" ? "baseline" : "post";
-    } else if (a === "--task-id") {
-      taskId = argv[++i];
-      if (taskId === undefined || taskId === "") return fail("--task-id requires a non-empty id");
-    } else if (a === "--scope") {
-      scope = argv[++i];
-      if (scope === undefined || scope === "") return fail("--scope requires a non-empty subsystem name");
-    } else if (a === "--head") {
-      head = argv[++i];
-      if (head === undefined || head === "") return fail("--head requires a rev");
-    } else if (a === "--root") {
-      root = argv[++i];
-      if (root === undefined || root === "") return fail("--root requires a path");
-    } else if (a === "--tree") {
-      tree = argv[++i];
-      if (tree === undefined || tree === "") return fail("--tree requires a path");
-      treeExplicit = true;
-    } else if (a === "--config") {
-      configPath = argv[++i];
-      if (configPath === undefined || configPath === "") return fail("--config requires a path");
-    } else if (a === "--json") {
-      json = true;
-    } else if (a === "--help" || a === "-h") {
-      return fail("help");
-    } else if (a.startsWith("--")) {
-      return fail(`unknown flag ${a}`);
-    } else {
-      return fail(`unexpected argument ${a}`);
-    }
-  }
+  const parsed = baseParseArgs(["node", "slice-readings.ts", ...argv], {
+    minArgs: 0,
+    usage: "--baseline|--post --task-id <id> [--scope <name>] [--head <rev>] [--root <dir>] [--tree <dir>] [--config <file>] [--json]",
+    help: "return",
+    errors: "return",
+    unknown: "reject",
+    flags: {
+      baseline: { type: "boolean" },
+      post: { type: "boolean" },
+      "task-id": { type: "string" },
+      scope: { type: "string" },
+      head: { type: "string" },
+      root: { type: "string" },
+      tree: { type: "string" },
+      config: { type: "string" },
+      json: { type: "boolean" },
+    },
+  });
+  if (parsed.help) return fail("help");
+  if (parsed.error) return fail(parsed.error);
+  if (parsed.args.length > 0) return fail(`unexpected argument ${parsed.args[0]}`);
+  const baseline = parsed.flags.baseline === true;
+  const post = parsed.flags.post === true;
+  if (baseline && post) return fail("both --baseline and --post given (exactly one phase per invocation)");
+  const phase = baseline ? "baseline" : post ? "post" : null;
+  const str = (v: string | boolean | undefined): string | undefined => (typeof v === "string" ? v : undefined);
+  // Same ORDER of complaints as the retired loop: the phase first (it is the last check in the loop's
+  // body), then the required id.
   if (phase === null) return fail("one of --baseline / --post is required");
-  if (taskId === undefined) return fail("--task-id is required");
+  const taskId = str(parsed.flags["task-id"]);
+  if (taskId === undefined || taskId === "") return fail("--task-id requires a non-empty id");
+  const scope = str(parsed.flags.scope);
+  if (scope === "") return fail("--scope requires a non-empty subsystem name");
+  const head = str(parsed.flags.head);
+  if (head === "") return fail("--head requires a rev");
+  const root = str(parsed.flags.root);
+  if (root === "") return fail("--root requires a path");
+  const tree = str(parsed.flags.tree);
+  if (tree === "") return fail("--tree requires a path");
+  const configPath = str(parsed.flags.config);
+  if (configPath === "") return fail("--config requires a path");
   return {
     ok: true,
-    value: { phase, taskId, scope, head, root, tree, treeExplicit, configPath, json },
+    value: {
+      phase,
+      taskId,
+      scope,
+      head,
+      root,
+      tree,
+      treeExplicit: tree !== undefined,
+      configPath,
+      json: parsed.flags.json === true,
+    },
   };
 }
 

@@ -157,9 +157,14 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
-import { fileURLToPath, pathToFileURL } from "node:url";
 import YAML from "yaml";
 import { isDue, parseTrigger } from "./routine-scheduler.ts";
+// ⛔ THE ENGINE-MODULE LOADER IS SHARED, NOT COPIED (routine `architecture-analysis` finding
+// `dup-discovery-module-loader`): the resolve-then-lazily-import arrow, its "not found at …" / "import
+// failed: …" wording and its by-resolved-path cache used to be byte-identical here and in
+// open-semantic-discovery-routine.ts. One implementation now serves both; this file keeps only its own
+// engine FILE LIST, its own cache map and its own refusal prefix (硬规则 5b).
+import { makeEngineModuleLoader, resolveEngineModuleIn } from "./routine-engine-module-loader.ts";
 import { isStoppedMidRound, pidAlive, STOPPED_MID_ROUND, StoppedMidRoundError, type Fact, type RoutineRunContext, type RoutineSpec } from "./driver-runtime.ts";
 // `pidAlive` is NOT defined here — it is the kernel leaf `packages/quay/src/kernel/pid-alive.ts`,
 // reached through this module's existing driver-runtime import (which re-exports it). This file used
@@ -172,6 +177,11 @@ export { pidAlive };
 // write as the timestamp, so this routine uses its own `writeLastRunStamped` (see that function).
 import { ROUTINE_LAST_RUN_REL, readLastRunMap } from "./probe-routine.ts";
 import { isDirectEntry } from "./gate-script-base.ts";
+// The batch-appender body is shared, not copied (semantic-dedup-scan finding `jsonl-batch-appenders`,
+// 硬规则 5b): this file had TWO copies (carrier + ledger) of the same ensure-dir / stringify+newline /
+// single-append / return-count body. Both exported names below stay — sibling routines
+// (`open-semantic-discovery-routine.ts`, `cross-project-dogfood-routine.ts`) import them from here.
+import { appendJsonlRecords } from "./gate-script-base.ts";
 // ⛔ The Discovery Method loop (docs/analysis/discovery-{experience-ledger,reflection,method-registry}.mjs)
 // is NEVER statically imported here — this file is SHIPPED, and a static `../../docs/analysis/*.mjs`
 // specifier both escapes the built artifact and inlines those modules' own entry guards into the driver
@@ -497,13 +507,14 @@ export function readDiscoveryMethodConfig(workspaceRoot: string): DiscoveryMetho
   return { present: true, config, error };
 }
 
-// ── the carrier: append-only JSONL of scan-round lines ──────────────────────────────────────────────
-/** Read the carrier's existing lines. Returns `{missing:true}` when the file does not exist. A line
- *  that is not JSON, or is not an object, THROWS — an unreadable carrier must never be shaped like
- *  "0 previous rounds" (硬规则 3b). */
-export function readCarrierRounds(carrierPath: string): { missing: boolean; records: Record<string, unknown>[] } {
-  if (!fs.existsSync(carrierPath)) return { missing: true, records: [] };
-  const raw = fs.readFileSync(carrierPath, "utf8");
+/** THE one strict JSONL-object reader — the carrier and the ledger are both append-only JSONL, and
+ *  both must answer "unreadable" and "absent" with different values (硬规则 3b). Returns
+ *  `{missing:true}` ONLY when the file does not exist: that is a real "no records yet", its own value
+ *  and NOT an error. A line that is not JSON, or is not a JSON object, THROWS — an unreadable carrier
+ *  must never be shaped like "0 previous records". */
+function readJsonlStrict(filePath: string): { missing: boolean; records: Record<string, unknown>[] } {
+  if (!fs.existsSync(filePath)) return { missing: true, records: [] };
+  const raw = fs.readFileSync(filePath, "utf8");
   const records: Record<string, unknown>[] = [];
   const lines = raw.split("\n");
   for (let i = 0; i < lines.length; i++) {
@@ -513,20 +524,26 @@ export function readCarrierRounds(carrierPath: string): { missing: boolean; reco
     try {
       rec = JSON.parse(line);
     } catch (e) {
-      throw new Error(`${carrierPath}:${i + 1} is not valid JSON — ${(e as Error).message}`);
+      throw new Error(`${filePath}:${i + 1} is not valid JSON — ${(e as Error).message}`);
     }
-    if (!rec || typeof rec !== "object" || Array.isArray(rec)) throw new Error(`${carrierPath}:${i + 1} is not a JSON object`);
+    if (!rec || typeof rec !== "object" || Array.isArray(rec)) throw new Error(`${filePath}:${i + 1} is not a JSON object`);
     records.push(rec as Record<string, unknown>);
   }
   return { missing: false, records };
 }
 
-/** Append records to the carrier (dir auto-created). One write ⇒ the round's lines land together. */
+// ── the carrier: append-only JSONL of scan-round lines ──────────────────────────────────────────────
+/** Read the carrier's existing lines. Delegates to `readJsonlStrict` — absent vs unreadable are
+ *  distinct values, and an unreadable carrier must never be shaped like "0 previous rounds" (硬规则 3b). */
+export function readCarrierRounds(carrierPath: string): { missing: boolean; records: Record<string, unknown>[] } {
+  return readJsonlStrict(carrierPath);
+}
+
+/** Append records to the carrier (dir auto-created). One write ⇒ the round's lines land together.
+ *  A delegating shim: the body is `gate-script-base.appendJsonlRecords` (semantic-dedup-scan finding
+ *  `jsonl-batch-appenders`); the name stays because sibling routines import it. */
 export function appendCarrierRecords(carrierPath: string, records: readonly Record<string, unknown>[]): number {
-  if (records.length === 0) return 0;
-  fs.mkdirSync(path.dirname(carrierPath), { recursive: true });
-  fs.appendFileSync(carrierPath, records.map((r) => JSON.stringify(r) + "\n").join(""), "utf8");
-  return records.length;
+  return appendJsonlRecords(carrierPath, records);
 }
 
 /** One instant off a carrier line: its `ts` (ISO-8601, the field every round writes). THROWS when a
@@ -615,37 +632,20 @@ export function modelCallsInWindow(records: readonly Record<string, unknown>[], 
  *  spawn; `outcome` = what happened to it; `lock-recovered` = a stale lock holder was reclaimed. */
 export type LedgerRecordKind = "reserve" | "outcome" | "lock-recovered";
 
-/** Read the ledger. `missing:true` when the file does not exist — a real "no reservations yet", which is
- *  its own value and NOT an error. A line that is not a JSON object THROWS: an unreadable ledger must
- *  never be shaped like "nothing was spent" (硬规则 3b) — that is the exact under-count this task
- *  exists to remove, one level down. */
+/** Read the ledger by delegating to `readJsonlStrict`. `missing:true` when the file does not exist — a
+ *  real "no reservations yet", which is its own value and NOT an error. A line that is not a JSON
+ *  object THROWS: an unreadable ledger must never be shaped like "nothing was spent" (硬规则 3b) —
+ *  that is the exact under-count this task exists to remove, one level down. */
 export function readLedgerRecords(ledgerPath: string): { missing: boolean; records: Record<string, unknown>[] } {
-  if (!fs.existsSync(ledgerPath)) return { missing: true, records: [] };
-  const raw = fs.readFileSync(ledgerPath, "utf8");
-  const records: Record<string, unknown>[] = [];
-  const lines = raw.split("\n");
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
-    if (!line.trim()) continue;
-    let rec: unknown;
-    try {
-      rec = JSON.parse(line);
-    } catch (e) {
-      throw new Error(`${ledgerPath}:${i + 1} is not valid JSON — ${(e as Error).message}`);
-    }
-    if (!rec || typeof rec !== "object" || Array.isArray(rec)) throw new Error(`${ledgerPath}:${i + 1} is not a JSON object`);
-    records.push(rec as Record<string, unknown>);
-  }
-  return { missing: false, records };
+  return readJsonlStrict(ledgerPath);
 }
 
 /** Append records to the ledger (dir auto-created). One `appendFileSync` call ⇒ the records land
- *  together; callers hold the lock, so two processes cannot interleave inside one reservation. */
+ *  together; callers hold the lock, so two processes cannot interleave inside one reservation.
+ *  A delegating shim: the body is `gate-script-base.appendJsonlRecords` (semantic-dedup-scan finding
+ *  `jsonl-batch-appenders`); the name stays because sibling routines import it. */
 export function appendLedgerRecords(ledgerPath: string, records: readonly Record<string, unknown>[]): number {
-  if (records.length === 0) return 0;
-  fs.mkdirSync(path.dirname(ledgerPath), { recursive: true });
-  fs.appendFileSync(ledgerPath, records.map((r) => JSON.stringify(r) + "\n").join(""), "utf8");
-  return records.length;
+  return appendJsonlRecords(ledgerPath, records);
 }
 
 /** The instant on a ledger line. THROWS when a line the budget has to READ cannot supply one: a
@@ -1101,9 +1101,11 @@ export const DISCOVERY_METHOD_ENGINE_MODULES = [
   REGISTRY_MODULE_FILE,
 ] as const;
 
-/** The repo this FILE lives in (…/plugin/scripts/<this> → repo root). Used only to BUILD a candidate
- *  path — nothing is resolved through it until the runtime `import()` above. */
-export const SCRIPT_REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
+/** The repo this FILE lives in (…/plugin/scripts/<this> → repo root). NOW OWNED BY THE SHARED LOADER
+ *  (`routine-engine-module-loader.ts`) and re-exported here because callers and tests import it from
+ *  this route. It is used only to BUILD a candidate path — nothing is resolved through it until the
+ *  runtime `import()`. */
+export { SCRIPT_REPO_ROOT } from "./routine-engine-module-loader.ts";
 
 /** A carrier read, as the ledger module returns it (narrowed to the fields this file reads). */
 export interface LedgerRead {
@@ -1166,41 +1168,24 @@ export interface DiscoveryModules {
 const _engineModuleCache = new Map<string, unknown>();
 
 /** Resolve one engine module to an absolute path. Returns the candidates it TRIED so the refusal can
- *  name them (an unresolvable engine is a `failed` round, not a silent zero). */
+ *  name them (an unresolvable engine is a `failed` round, not a silent zero). The body is the SHARED
+ *  `resolveEngineModuleIn` — the sibling routine resolves the same way from the same `docs/analysis`
+ *  and must not carry a second copy (routine finding `dup-discovery-module-loader`). */
 export function resolveEngineModule(root: string, file: string): { path: string | null; tried: string[] } {
-  const tried = [
-    path.join(SCRIPT_REPO_ROOT, DISCOVERY_MODULE_DIR_REL, file),
-    path.join(root, DISCOVERY_MODULE_DIR_REL, file),
-  ];
-  for (const candidate of tried) {
-    if (fs.existsSync(candidate)) return { path: candidate, tried };
-  }
-  return { path: null, tried };
+  return resolveEngineModuleIn(root, file, DISCOVERY_MODULE_DIR_REL);
 }
 
 /** Load the three engine modules, or THROW a refusal naming every module that could not be resolved and
  *  the candidate paths tried. Throwing (rather than returning a `{ok:false}` shape a caller might
  *  forget to check) is deliberate: every caller is a `??`-default inside the round, and the round
- *  converts the throw into its own `failed` reason. */
+ *  converts the throw into its own `failed` reason.
+ *
+ *  ⛔ THE `load` ARROW IS NOT DEFINED HERE: it was byte-identical to its sibling's copy, refusal wording
+ *  included, so both now come from `makeEngineModuleLoader` (硬规则 5b). Only the module FILE LIST and
+ *  the refusal's own prefix are this routine's. */
 export async function loadDiscoveryModules(root: string): Promise<DiscoveryModules> {
   const unresolved: string[] = [];
-  const load = async (file: string): Promise<unknown> => {
-    const r = resolveEngineModule(root, file);
-    if (r.path === null) {
-      unresolved.push(`${file} — not found at ${r.tried.join(" or ")}`);
-      return null;
-    }
-    const cached = _engineModuleCache.get(r.path);
-    if (cached !== undefined) return cached;
-    try {
-      const mod = (await import(/* @vite-ignore */ pathToFileURL(r.path).href)) as unknown;
-      _engineModuleCache.set(r.path, mod);
-      return mod;
-    } catch (e) {
-      unresolved.push(`${file} — import failed: ${(e as Error).message}`);
-      return null;
-    }
-  };
+  const load = makeEngineModuleLoader(root, _engineModuleCache, unresolved, DISCOVERY_MODULE_DIR_REL);
   const ledger = await load(LEDGER_MODULE_FILE);
   const reflection = await load(REFLECTION_MODULE_FILE);
   const registry = await load(REGISTRY_MODULE_FILE);

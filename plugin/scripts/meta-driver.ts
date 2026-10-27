@@ -56,6 +56,11 @@ import { gateFinding, findingKey, DEFAULT_RATE, countRecentFilings, routineQuota
 // 定义，本文件读的全局窗口合计必须与 probe-routine.ts 写的是同一个文件；硬规则 5b）。
 import { ROUTINE_FINDINGS_REL } from "./probe-routine.ts";
 import { isDirectEntry } from "./gate-script-base.ts";
+// 状态载体的原子写只有一份实现（kernel `writeJsonAtomic`，tmp + renameSync）。本文件的 `writeState`
+// 曾是**裸 writeFileSync**（O_TRUNC 后写 ⇒ 并发读者可观测到零长度/半写，与「文件不存在」同形），
+// 而 red-window-triage / runner-state-write 的同类 helper 早已委托 kernel —— 一处行为三个实现
+// （.quay/routine-findings.jsonl finding `write-state-atomic-split`，routine semantic-dedup-scan，2026-10-25）。
+import { writeJsonAtomic } from "./write-json-atomic.ts";
 // ⛔ 必须 import，不能只靠下面的 re-export：`export { x } from "..."` 只绑定导出表、不在本模块作用域
 // 绑定 x，本文件内裸调用会 ReferenceError（gap-meta-driver-snapshot-tracked-changes-reference-error）。
 import { snapshotTrackedChanges, probeWriteViolations } from "./probe-write-guard.ts";
@@ -78,6 +83,9 @@ import { stripEvidenceTimestamp, createMetaStore } from "./driver-runtime.ts";
 // 必须用同一段标题（OVERRIDE_SECTION）与同一抽取逻辑（extractSectionContent），⛔ 不各写一份
 // （硬规则 5b：同一原则在第二个载体上的适用点必须复用同一判据，否则标题漂移会让检查器与本文件各说各话）。
 import { extractSectionContent, OVERRIDE_SECTION } from "./dispatch-preference-check.ts";
+// 正则转义的单一真相源（同 24 个 plugin/scripts 消费者）——下面的 nextSequenceId 由字面前缀拼正则，
+// ⛔ 不在此处内联第二份 escaper（那正是本任务要消掉的重复的同类）。
+import { escapeRegExp } from "./regex-escape.ts";
 
 /** 载体：每轮一条记录（与 quality-round.jsonl 同族，gitignored 运行时状态）。 */
 export const ROUND_CARRIER_REL = path.join(".quay", "meta-driver-round.jsonl");
@@ -1038,9 +1046,9 @@ export async function scanActionRecords(
   const scannedAt = new Date(nowMs).toISOString();
   const scan = { scannedAt, scanMs, since, records };
   try {
-    const file = path.join(root, ACTION_RECORD_SCAN_REL);
-    fs.mkdirSync(path.dirname(file), { recursive: true });
-    fs.writeFileSync(file, JSON.stringify(scan), "utf8");
+    // 同一族载体的写侧也是原子的（硬规则 5b：`writeState` 之外，本文件还有这一处裸写；它同样是
+    // 一个被并发读的 JSON 缓存载体，裸写会让读侧看到半写 ⇒ 当作「无缓存」再扫一次）。
+    writeJsonAtomic(path.join(root, ACTION_RECORD_SCAN_REL), scan);
   } catch (e) {
     return { ok: false, reason: `scan carrier write failed: ${(e as Error).message}` };
   }
@@ -1213,14 +1221,23 @@ export function existingProposalKeys(records: Array<Record<string, unknown>>): B
   return new BoardKeys(owners);
 }
 
-/** 下一个可用 AC id（max + 1，三位补零）。⛔ 不复用已存在的编号（硬规则 8：编号不得复用）。 */
-export function nextAcId(records: Array<Record<string, unknown>>): string {
+/** 下一个可用的顺序编号：扫 `${prefix}-<≥digits 位数字>`，取 max+1，按 digits 左补零。
+ *  ⛔ 不复用已存在的编号（硬规则 8：编号不得复用）。
+ *  为什么是一个函数而不是两套：AC 与 GOAL 的**唯一**差别就是前缀字面量与位数，两份各自演化的
+ *  扫描循环是对同一规则的第二个定义（硬规则 5b）——archguard dup 6e19b6d306d82356 记的就是它。 */
+export function nextSequenceId(records: Array<Record<string, unknown>>, prefix: string, digits = 3): string {
+  const re = new RegExp(`^${escapeRegExp(prefix)}-(\\d{${digits},})$`);
   let max = 0;
   for (const r of records) {
-    const m = String(r.id ?? "").match(/^AC-(\d{3,})$/);
+    const m = String(r.id ?? "").match(re);
     if (m) max = Math.max(max, Number(m[1]));
   }
-  return `AC-${String(max + 1).padStart(3, "0")}`;
+  return `${prefix}-${String(max + 1).padStart(digits, "0")}`;
+}
+
+/** 下一个可用 AC id（薄包装：nextSequenceId 是唯一定义）。⛔ 不复用已存在的编号（硬规则 8：编号不得复用）。 */
+export function nextAcId(records: Array<Record<string, unknown>>): string {
+  return nextSequenceId(records, "AC");
 }
 
 /** 写一条 draft 提案。⛔ 永不传 --status：goal-store 的 write 缺省即 draft（构造上惰性）。 */
@@ -1545,9 +1562,10 @@ export function readState(root: string): MetaState {
 
 export function writeState(root: string, s: MetaState): void {
   try {
-    const f = path.join(root, STATE_REL);
-    fs.mkdirSync(path.dirname(f), { recursive: true });
-    fs.writeFileSync(f, JSON.stringify(s, null, 2) + "\n", "utf8");
+    // 原子写（委托 kernel 唯一实现）：本处曾是裸 `fs.writeFileSync` ⇒ 并发读者可看到半写/零长度的
+    // `.quay/meta-driver-state.json`，解析失败退化为 never-judged ⇒ **多判一次**（成本事故，且与
+    // 「读到旧值」同形，硬规则 3b）。字段集与语义逐字未动，只换写入方式。
+    writeJsonAtomic(path.join(root, STATE_REL), s);
   } catch { /* 状态写失败不致命；下一轮退化为 never-judged ⇒ 多判一次，不会漏判 */ }
 }
 
@@ -2047,14 +2065,9 @@ export interface DecisionItem {
   touches?: string;
 }
 
-/** 下一个可用 GOAL id（max+1）。⛔ 不复用编号（硬规则 8）。 */
+/** 下一个可用 GOAL id（薄包装：nextSequenceId 是唯一定义）。⛔ 不复用编号（硬规则 8）。 */
 export function nextGoalId(records: Array<Record<string, unknown>>): string {
-  let max = 0;
-  for (const r of records) {
-    const m = String(r.id ?? "").match(/^GOAL-(\d{3,})$/);
-    if (m) max = Math.max(max, Number(m[1]));
-  }
-  return `GOAL-${String(max + 1).padStart(3, "0")}`;
+  return nextSequenceId(records, "GOAL");
 }
 
 /** 决策的 origin 正文：问题 + 选项 + 读数出处。`origin` 是 goal-store 的必填 fail-closed 字段，

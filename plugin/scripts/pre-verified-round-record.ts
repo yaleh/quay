@@ -171,7 +171,16 @@ import { isDirectEntry, flagValue } from "./gate-script-base.ts";
 // (finding `probe-lock-held`, routine `semantic-dedup-scan`).
 import { suiteLockSlotCount, countHeldSuiteLocks } from "./suite-lock-slots.ts";
 import { resolveSharedCheckout, toIsoTimestamp } from "./per-task-suite-record.ts";
+// the CPU user/sys split admission rule is SHARED with the per-task ledger writer — one
+// implementation in cpu-split-contract.ts (archguard exact-clone e903751a0cc007ae: the rule was a
+// byte-identical block in both round-record writers, so a fail-closed change could land in one copy).
+import { resolveCpuSplit } from "./cpu-split-contract.ts";
 import { parsePerFileLines } from "./measure-trend-check.ts";
+// The suite-log round slice (line-anchored marker) — one rule, one home. This file's local copy used
+// the `\s` spelling, which returns -1 on a bare marker line at EOF while measure-trend-check's copy
+// returned 0; the shared helper keeps BOTH guarantees (finding
+// `dup-last-suite-start-offset-divergent-regex`, routine `architecture-analysis`).
+import { lastSuiteStartOffset } from "./source-text-lib.ts";
 // gap-verification-round-static-fail-no-record — the shared test-failure matcher (the SAME
 // single-definition-point FAILURE_PATTERNS full-suite-runner uses), imported from the lightweight
 // runner-red-parse.ts module (its only runtime import is tmux-leak-fail-re.ts; the full-suite-runner
@@ -243,22 +252,6 @@ const PHASE_OVERHEAD_RE = /^__OVERHEAD__\s+([A-Za-z0-9_]+)_ms=(\d+)(?:\s+partial
 const STATIC_CHECK_FAILED_RE = /^STATIC_CHECK_FAILED:\s*(\S+)\s+exit=(\d+)/;
 // Mirror full-suite-runner's failures[] cap (a pathological red round cannot grow the record unbounded).
 const MAX_RECORDED_FAILURES = 200;
-
-/** Byte offset of the LAST `__FANIN_SUITE_START__` LINE (anchored at line start), or -1.
- *  gap-wiring-B-verification-round-write-path: the previous `lastIndexOf(substring)` was fooled by the
- *  suite's OWN test output — a node:test assertion description (`✔ … — parseSuitePhases slices by the
- *  last __FANIN_SUITE_START__ marker …`) CONTAINS the marker string MID-LINE, so lastIndexOf sliced
- *  from INSIDE the test run and excluded the EARLY `overlap: running` / `overlap_<phase>_ms` markers
- *  (real round 347 recorded phase_overlap=false + lowconc_phase_ms=0 despite a genuine overlap log).
- *  Anchoring on the line START (the emitted marker is always `__FANIN_SUITE_START__ iso=…`) excludes
- *  test-output mentions. */
-function lastSuiteStartOffset(text) {
-  const re = /^__FANIN_SUITE_START__\s/gm;
-  let last = -1;
-  let m;
-  while ((m = re.exec(text)) !== null) last = m.index;
-  return last;
-}
 
 /** Parse test.sh's `__OVERHEAD__ <phase>_ms=N` lines from a suite log. Returns {} when the log is
  *  absent/unreadable (never fabricates a phase — the absent-field contract). Keyed by the raw label
@@ -660,46 +653,15 @@ export function buildPreVerifiedRoundRecord(o) {
   }
   // gap-verification-round-cpu-split-not-recorded AC1/AC3 — the gnu-time user/sys CPU split. The fan-in
   // capture parses the SAME gnu-time "%U %S" line into cpu_user_s (column 1) and cpu_sys_s (column 2);
-  // cpu_time_s is their sum (column 1 + 2). Written ONLY alongside a real cpu_time_s (cpu_source =
-  // 'gnu-time') — a split without its sum is ambiguous, so a caller that passes a REAL split value with
-  // a null/absent cpu_time_s fails closed (硬规则 3b). Each component is a non-negative number or
-  // explicit null (AC6, never a misleading 0 — the same 0→null normalization cpu_time_s follows).
-  // Absent components (the arg not passed / empty / the literal null / 0) are omitted from the record;
-  // a reader must tolerate their absence. NOTE: the entry gate ignores empty/0 split args entirely —
-  // a bash caller whose capture has no gnu-time (e.g. a doc-only skip) passes `--cpu-user-s ""` and
-  // must NOT trip the fail-closed (an unset capture var is "considered + unavailable", not a real split).
-  let cpuUserS;
-  let cpuSysS;
-  const splitArgs = [
-    ["cpu-user-s", o.cpuUserS, (v) => { cpuUserS = v; }],
-    ["cpu-sys-s", o.cpuSysS, (v) => { cpuSysS = v; }],
-  ];
-  const hasRealSplit = splitArgs.some(([, raw]) => {
-    if (raw == null) return false;
-    const s = String(raw).trim();
-    if (s === "" || s === "null") return false;
-    const v = Number(s);
-    // A "present" split value = anything the caller passed that is NOT the literal 0 (which normalizes
-    // to omitted, AC6). Negative / non-numeric values are still a REAL attempt at a split → they must
-    // enter validation (and fail closed) below — an invalid split must never be silently swallowed.
-    return !(Number.isFinite(v) && v === 0);
-  });
-  if (hasRealSplit) {
-    if (cpuTimeS == null) {
-      return { error: "--cpu-user-s/--cpu-sys-s require a real --cpu-time-s (the gnu-time sum); a split without its sum is ambiguous" };
-    }
-    for (const [name, raw, setter] of splitArgs) {
-      if (raw == null) continue;
-      const s = String(raw).trim();
-      if (s === "" || s === "null") continue; // considered + unavailable → omitted (absent-field contract)
-      const v = Number(s);
-      if (!Number.isFinite(v) || v < 0) {
-        return { error: `--${name} must be a non-negative number, 0, or null (got ${JSON.stringify(raw)})` };
-      }
-      if (v === 0) continue; // 0 → omitted (AC6 — 0 conflates "not measured" with "truly ~0")
-      setter(v);
-    }
-  }
+  // cpu_time_s is their sum (column 1 + 2). The admission rule is NOT re-stated here: it is the SHARED
+  // implementation in cpu-split-contract.ts (archguard exact-clone e903751a0cc007ae — this block used
+  // to be byte-identical in both round-record writers). Written ONLY alongside a real cpu_time_s
+  // (cpu_source = 'gnu-time'); a split without its sum fails closed (硬规则 3b); each component is a
+  // non-negative number or explicit null (AC6, never a misleading 0) and absent components are omitted.
+  const split = resolveCpuSplit({ cpuUserS: o.cpuUserS, cpuSysS: o.cpuSysS, cpuTimeS });
+  if ("error" in split) return { error: split.error };
+  const cpuUserS = split.cpuUserS;
+  const cpuSysS = split.cpuSysS;
   // gap-runner-field-hardcoded-outer-not-measurement — default 'inner' (the fan-in suite is an
   // inner-layer run), the SAME default mirror-full-suite-state.ts writes — so the verification-round
   // and the full-suite-state.json carriers agree on the runner for the same round (修前两者各说各话：

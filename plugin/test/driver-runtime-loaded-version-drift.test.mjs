@@ -366,8 +366,9 @@ function st_pidOf(root) {
 
 // ── AC4 (gap-project-quay-pointer-is-init-plugin-root-and-version-records-derive-from-it (B)) ──────
 // `pointer` = Core's OWN plugin root version vs the project guidance link `.quay/plugin`'s target
-// version. Four states, ⛔ `not-evaluated` never shares a shape with `current`. Core ⛔ writes the link
-// from no runtime path (only `/quay:init` does) — the readlink-invariance test below is that half.
+// version. Five states (the link is RETIRED, so "absent" is its own state), ⛔ `retired`
+// (absence = normal) never shares a shape with `not-evaluated` (present but unreadable). Core ⛔ writes
+// the link from no runtime path — the readlink-invariance test below is that half.
 
 /** A minimal plugin root carrying a chosen `.claude-plugin/plugin.json` version. */
 function fixturePluginRoot(t, tag, version) {
@@ -421,14 +422,60 @@ test("AC4-pointer② — SAME fixture, link at the Core version ⇒ pointer=curr
   assert.equal(st.pointer.state, "current", `同版本 ⇒ current: ${JSON.stringify(st.pointer)}`);
 });
 
-test("AC4-pointer③ — no `.quay/plugin` ⇒ pointer=not-evaluated (⛔ never current)", (t) => {
+test("AC4-pointer③ — no `.quay/plugin` ⇒ pointer=retired (the retired default state; ⛔ never not-evaluated)", (t) => {
   const core = fixturePluginRoot(t, "core15c", "0.15.0");
   const { home, root } = driftedWorld(t, "ptr3");
 
   const st = statusJsonEnv(root, home, { QUAY_PLUGIN_ROOT: core });
-  assert.equal(st.pointer.state, "not-evaluated", `链接缺失 ⇒ not-evaluated: ${JSON.stringify(st.pointer)}`);
-  assert.notEqual(st.pointer.state, "current", "⛔ not-evaluated 不得与 current 同形");
+  // `.quay/plugin` is RETIRED: a project without it is the NORMAL state after migration,
+  // so reporting `not-evaluated` here permanently degrades the verifier (gap-driver-status-pointer-retired-state AC1).
+  assert.equal(st.pointer.state, "retired", `链接缺失 ⇒ retired: ${JSON.stringify(st.pointer)}`);
+  assert.notEqual(st.pointer.state, "not-evaluated", "⛔ 退役(缺省正常态) 不得与「读不懂」同形");
+  assert.notEqual(st.pointer.state, "current", "⛔ retired 不得与 current 同形");
+  assert.match(String(st.pointer.reason), /retired/, `reason 必须说明「已退役，缺省是正常态」: ${JSON.stringify(st.pointer)}`);
   assert.equal(st.pointer.link_target, null, `无链接 ⇒ link_target 为 null: ${JSON.stringify(st.pointer)}`);
+});
+
+test("AC4-pointer③b — a non-symlink `.quay/plugin` ⇒ pointer=not-evaluated (读不懂 ≠ 已退役)", (t) => {
+  const core = fixturePluginRoot(t, "core15f", "0.15.0");
+  const { home, root } = driftedWorld(t, "ptr3b");
+  // A regular file at the retired path is USER CONTENT (Q1's migration refuses to delete it). It is not a
+  // pointer, and calling it "retired" would hide a real anomaly behind the normal state (硬规则 3b).
+  fs.writeFileSync(path.join(root, ".quay", "plugin"), "user content\n");
+
+  const st = statusJsonEnv(root, home, { QUAY_PLUGIN_ROOT: core });
+  assert.equal(st.pointer.state, "not-evaluated", `非符号链接 ⇒ not-evaluated: ${JSON.stringify(st.pointer)}`);
+  assert.match(String(st.pointer.reason), /not a symlink/, `reason 点名「不是符号链接」: ${JSON.stringify(st.pointer)}`);
+});
+
+// AC2: the five states must not collapse into each other. One shared world, four real readings.
+test("AC2-pointer⑤ — current/behind/ahead/retired/not-evaluated 五态互不同形", (t) => {
+  const core = fixturePluginRoot(t, "core15g", "0.15.0");
+
+  const wCurrent = driftedWorld(t, "ptr5a");
+  linkPlugin(t, wCurrent.root, "lk15g", "0.15.0");
+  const sCurrent = statusJsonEnv(wCurrent.root, wCurrent.home, { QUAY_PLUGIN_ROOT: core }).pointer.state;
+
+  const wBehind = driftedWorld(t, "ptr5b");
+  linkPlugin(t, wBehind.root, "lk14g", "0.14.0");
+  const sBehind = statusJsonEnv(wBehind.root, wBehind.home, { QUAY_PLUGIN_ROOT: core }).pointer.state;
+
+  const wAhead = driftedWorld(t, "ptr5c");
+  linkPlugin(t, wAhead.root, "lk16g", "0.16.0");
+  const sAhead = statusJsonEnv(wAhead.root, wAhead.home, { QUAY_PLUGIN_ROOT: core }).pointer.state;
+
+  const wRetired = driftedWorld(t, "ptr5d");
+  const sRetired = statusJsonEnv(wRetired.root, wRetired.home, { QUAY_PLUGIN_ROOT: core }).pointer.state;
+
+  const wUnreadable = driftedWorld(t, "ptr5e");
+  linkPlugin(t, wUnreadable.root, "lkbareg", null, { withManifest: false });
+  const sUnreadable = statusJsonEnv(wUnreadable.root, wUnreadable.home, { QUAY_PLUGIN_ROOT: core }).pointer.state;
+
+  assert.deepEqual(
+    [sCurrent, sBehind, sAhead, sRetired, sUnreadable],
+    ["current", "behind", "ahead", "retired", "not-evaluated"],
+    "五态各自独立取值（⛔ 任何两态同形都说明它们不可区分）",
+  );
 });
 
 test("AC4-pointer④ — link target WITHOUT a plugin.json ⇒ pointer=not-evaluated", (t) => {
@@ -442,8 +489,7 @@ test("AC4-pointer④ — link target WITHOUT a plugin.json ⇒ pointer=not-evalu
 });
 
 // AC3 (this task) — Core must not WRITE the link. `driver status` is the Core path this file can run
-// cheaply; the static half (`grep` that only refreshProjectPluginLink constructs it) lives in the
-// task's AC3 evidence.
+// cheaply; the static half (`grep` for any source that constructs it) is AC3c below.
 test("AC3 — `driver status` leaves the `.quay/plugin` link byte-identical (Core never writes it)", (t) => {
   const core = fixturePluginRoot(t, "core15e", "0.15.0");
   const { home, root } = driftedWorld(t, "ptr5");
@@ -486,7 +532,7 @@ test("AC3b — the MCP-launch path (`quay task list`) leaves the `.quay/plugin` 
   assert.equal(fs.readlinkSync(link), before, "Core must NOT rewrite `.quay/plugin` on the MCP-launch path");
 });
 
-test("AC3c — STATIC: the ONLY source that constructs AND writes `.quay/plugin` is init.ts's refreshProjectPluginLink", () => {
+test("AC3c — STATIC: NO source constructs `.quay/plugin` any more (the link is RETIRED, 2026-10-25)", () => {
   const REPO_ROOT = path.resolve(__dirname, "..", "..");
   const dirs = [path.join(REPO_ROOT, "packages", "quay", "src"), path.join(REPO_ROOT, "plugin", "scripts")];
   const offenders = [];
@@ -501,8 +547,11 @@ test("AC3c — STATIC: the ONLY source that constructs AND writes `.quay/plugin`
     }
   };
   for (const d of dirs) walk(d);
-  assert.deepEqual(offenders, [path.join("packages", "quay", "src", "init.ts")],
-    `the ONLY writer of .quay/plugin must be init.ts (Core runtime paths must never write it); got ${JSON.stringify(offenders)}`);
+  // `quay init` only DELETES a link an older version left behind (`retireProjectPluginLink`), so the
+  // writer set is EMPTY. ⛔ The claim is stronger than "init is the only writer": Core runtime paths
+  // still must never write it, and now nothing does.
+  assert.deepEqual(offenders, [],
+    `no source may construct .quay/plugin (the guidance link is retired); got ${JSON.stringify(offenders)}`);
 });
 
 // ══ gap-server-status-six-serial-driver-runtime-cold-spawns ═══════════════════════════════════════

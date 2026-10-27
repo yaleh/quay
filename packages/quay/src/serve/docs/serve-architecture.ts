@@ -1,0 +1,137 @@
+// serve-architecture.ts — /architecture route handler, split from serve-handlers.ts.
+
+import type { IncomingMessage, ServerResponse } from "node:http";
+import { readArchitecture, ARCH_RECENT_WINDOW_DAYS, type ArchitectureResult } from "../../observation.ts";
+import { architectureLabelsFor, fillLabel } from "../view/serve-i18n.ts";
+import type { ServePageCfg, ServeIdentity } from "../view/serve-render.ts";
+import { html, escapeHtml, pageStyles, modernistStyles, renderSiteNav, renderMobileChrome, obsNote, pageTitle, pageNameFor, htmlLangTag, DEFAULT_LANG, type Lang } from "../view/serve-render.ts";
+
+// ── /architecture ──────────────────────────────────────────────────────────────────────────────────
+
+interface ArchNode { label: string; x: number; y: number; w: number; h: number; highlight: "dev" | "recent" | "plain" | "stale"; fill: string; stroke: string }
+
+/** AC-303 wired this page's CHROME; gap-webui-architecture-body-copy-en-zh wired its BODY COPY.
+ *  `lang` is this request's resolved language (AC-288's mechanism, threaded in by the dispatcher via
+ *  `handleArchitecture`'s `cfg.lang`). It now reaches TWO groups of things and nothing else:
+ *
+ *  • CHROME (AC-303): the `<html lang>` attribute, the shared nav bar (`renderSiteNav`) and mobile
+ *    chrome (`renderMobileChrome`) — whose `architecture` entry already exists in NAV_LABELS
+ *    (ROW 1, 「架构」), so the nav's current item needs no new word — this page's own `<title>`
+ *    (through `pageTitle`), its `<h1>`'s page-name token (through `pageNameFor`), and the mobile
+ *    header's page label (the THIRD, lowercase token). Those three are why AC-303 exists: wiring only
+ *    the SHARED nav bar would leave the `<title>` at its English token, which is the difference
+ *    between "the nav switched" and "THIS page switched" (CAUSE=title-unchanged).
+ *
+ *  • BODY COPY (this task): every word this page authors below `<main>` — the `<h1>`'s subtitle, the
+ *    three source-note fragments, the four legend words and the table's heading + four column
+ *    headers — taken ONCE as a roster (`architectureLabelsFor`, the ROW 5/10/11 idiom) rather than
+ *    re-read per call site. ⛔ The component NAMES and PATHS stay verbatim: they are DATA.
+ *
+ *  ⚠️ The `<title>` token is the FULL string `Architecture — system component map`, em dash and
+ *  subtitle included, because `pageNameFor` is an EXACT-token lookup: registering the bare
+ *  `Architecture` would MISS this call site. That bare token is a SEPARATE key, consumed by the
+ *  `<h1>`; the lowercase `architecture` is a THIRD, consumed only by the mobile header. Three
+ *  independent lookups — see serve-i18n.ts's ROW 3 block for why they are not collapsed. The token
+ *  was `Architecture — 系统组件图` before this task; re-keying it to English is the only way to move
+ *  an en baseline that ROW 3's identity-en column pins by construction (ROW 3's RE-KEYED note).
+ *
+ *  `lang` DEFAULTS to `DEFAULT_LANG` on purpose: any direct `renderArchitecturePage()` caller that
+ *  predates it keeps rendering byte-for-byte what it rendered before, and `pageNameFor`'s en column
+ *  is the identity for every token — so the en baseline the goal criterion reads off the live page
+ *  cannot move as this page is wired. ⚠️ That property holds for CHROME only now: the body copy is
+ *  the en column of ARCHITECTURE_LABELS, and under `zh` the roster's zh column is what the page
+ *  rendered BEFORE this task, byte for byte (so `lang=zh` output does not move — this task's AC3). */
+function renderArchitecturePage(arch: ArchitectureResult, identity: ServeIdentity | null = null, lang: Lang = DEFAULT_LANG): string {
+  // The whole body-copy roster, taken once (serve-i18n.ts ROW 12).
+  const L = architectureLabelsFor(lang);
+  // The window the reader below actually used: `handleArchitecture` calls `readArchitecture(root)`
+  // with no `windowDays`, i.e. the reader's own default. Both count-bearing rows interpolate THIS
+  // value rather than a literal `7`, so the copy cannot drift from the query (ROW 12 ②).
+  const windowDays = ARCH_RECENT_WINDOW_DAYS;
+  // Fixed diagram layout; node highlights derive from git facts (recent commits / open worktrees).
+  const names = arch.components.map((c) => c.name);
+  const nodeDefs: Array<{ name: string; x: number; y: number; w: number; h: number }> = [
+    { name: "quay (Core)", x: 30, y: 20, w: 130, h: 44 },
+    { name: "web-ui", x: 30, y: 130, w: 130, h: 44 },
+    { name: "provider-abi", x: 190, y: 75, w: 130, h: 44 },
+    { name: "quay-native", x: 350, y: 20, w: 120, h: 44 },
+    { name: "quay-github", x: 350, y: 130, w: 120, h: 44 },
+  ];
+  // map design-node names → package dir names for git facts.
+  const pkgByName = new Map(arch.components.map((c) => [c.name, c]));
+  const recentNames = new Set(arch.components.filter((c) => c.recentCommits > 0).map((c) => c.name));
+  const highlightFor = (n: string): "dev" | "recent" | "plain" | "stale" => {
+    // quay (Core) is the package that owns the Web UI; quay-native/quay-github are providers.
+    const pkg = n === "quay (Core)" ? pkgByName.get("quay") : pkgByName.get(n);
+    if (arch.inDevelopment && n === "quay (Core)") return "dev";
+    if (pkg && recentNames.has(pkg.name)) return "recent";
+    if (n === "quay-github") return "stale"; // GitHub provider has had no recent write-path work (design note)
+    return "plain";
+  };
+  const fillStroke: Record<string, [string, string]> = {
+    dev: ["var(--color-accent-100)", "var(--color-accent)"],
+    recent: ["var(--color-accent-100)", "var(--color-accent-700)"],
+    stale: ["var(--color-neutral-200)", "var(--color-neutral-700)"],
+    plain: ["var(--color-surface)", "var(--color-neutral-400)"],
+  };
+  const nodes: ArchNode[] = nodeDefs.map((d) => {
+    const hl = highlightFor(d.name);
+    const [fill, stroke] = fillStroke[hl];
+    return { ...d, label: d.name, highlight: hl, x: d.x, y: d.y, w: d.w, h: d.h, fill, stroke };
+  });
+  const edges = [
+    { x1: 95, y1: 64, x2: 95, y2: 130 },
+    { x1: 95, y1: 88, x2: 190, y2: 97 },
+    { x1: 255, y1: 97, x2: 350, y2: 42 },
+    { x1: 255, y1: 97, x2: 350, y2: 152 },
+  ];
+  const svg = html`<svg viewBox="0 0 500 220" width="100%" style="background:var(--color-bg);border:1px solid var(--color-divider);border-radius:6px;max-width:100%">
+    ${edges.map((e) => html`<line x1="${e.x1}" y1="${e.y1}" x2="${e.x2}" y2="${e.y2}" style="stroke:var(--color-neutral-400)" stroke-width="1.5"></line>`).join("")}
+    ${nodes.map((n) => html`<rect x="${n.x}" y="${n.y}" width="${n.w}" height="${n.h}" style="fill:${n.fill};stroke:${n.stroke}" stroke-width="2" rx="4"></rect>`).join("")}
+    ${nodes.map((n) => html`<text x="${n.x + n.w / 2}" y="${n.y + n.h / 2}" font-size="11" text-anchor="middle" dominant-baseline="middle" style="fill:var(--color-text)">${escapeHtml(n.label)}</text>`).join("")}
+  </svg>`;
+  const componentTable = arch.components.length > 0 ? html`<h2>${fillLabel(L.tableHeading, { days: windowDays })}</h2>
+    <table>
+      <tr><th>${L.colComponent}</th><th>${L.colPath}</th><th>${fillLabel(L.colRecentCommits, { days: windowDays })}</th><th>${L.colLastCommit}</th></tr>
+      ${arch.components.map((c) => html`<tr>
+        <td>${escapeHtml(c.name)}</td>
+        <td><code>${escapeHtml(c.path)}</code></td>
+        <td>${c.recentCommits}</td>
+        <td>${c.lastCommitAt != null ? escapeHtml(new Date(c.lastCommitAt * 1000).toISOString().slice(0, 16)) : "—"}</td>
+      </tr>`).join("\n")}
+    </table>` : "";
+  // ⚠️ The four swatches are ordered dev / recent / stale / plain — the SAME order as the
+  // `highlightFor` arms above and the `fillStroke` map, and the words come from ROW 12's rows keyed
+  // by that same role, so a re-ordering cannot silently pair a swatch with another state's word.
+  const legend = html`<div style="display:flex;gap:1rem;flex-wrap:wrap;margin-bottom:1rem;font-size:0.75rem;color:var(--color-neutral-700)">
+    <span><span style="display:inline-block;width:10px;height:10px;background:var(--color-accent-100);border:2px solid var(--color-accent)"></span> ${L.stateDev}</span>
+    <span><span style="display:inline-block;width:10px;height:10px;background:var(--color-accent-100);border:2px solid var(--color-accent-700)"></span> ${L.stateRecent}</span>
+    <span><span style="display:inline-block;width:10px;height:10px;background:var(--color-neutral-200);border:2px solid var(--color-neutral-700)"></span> ${L.stateStale}</span>
+    <span><span style="display:inline-block;width:10px;height:10px;background:var(--color-surface);border:2px solid var(--color-neutral-400)"></span> ${L.stateStable}</span>
+  </div>`;
+  return html`<!doctype html>
+    ${htmlLangTag(lang)}<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Quay architecture — system component map">${modernistStyles()}${pageStyles()}<title>${pageTitle("Architecture — system component map", identity, lang)}</title></head>
+    <body>${renderMobileChrome("architecture", pageNameFor("architecture", lang), lang)}${renderSiteNav("architecture", lang)}<main id="main">
+      <h1>${pageNameFor("Architecture", lang)} — ${L.titleSuffix}</h1>
+      <p class="meta">${L.sourceLabel}<code>packages/*</code>${L.sourceGitLog}<code>git worktree list</code>${L.sourceWorktrees}</p>
+      ${obsNote(arch.status, arch.reason)}
+      ${arch.status === "ok" ? legend : ""}
+      ${arch.status === "ok" ? svg : ""}
+      ${componentTable}
+    </main></body></html>`;
+}
+
+export async function handleArchitecture(
+  req: IncomingMessage,
+  res: ServerResponse,
+  cfg: ServePageCfg,
+): Promise<void> {
+  let arch: ArchitectureResult;
+  try {
+    arch = readArchitecture(cfg.workspaceRoot);
+  } catch (err) {
+    arch = { status: "error", reason: `internal: ${err instanceof Error ? err.message : String(err)}`, components: [], inDevelopment: false };
+  }
+  res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+  res.end(renderArchitecturePage(arch, cfg.identity, cfg.lang));
+}

@@ -49,7 +49,7 @@ const KERNEL_REL = "packages/quay/src/kernel/canonical-buckets.ts";
 const FORMER_HOMES = [
   "plugin/scripts/suite-bucket-attribution.ts",
   "plugin/scripts/suite-bucket-select.ts",
-  "packages/quay/src/serve/serve-tests.ts",
+  "packages/quay/src/serve/feat/serve-tests.ts",
 ];
 
 const SCAN_ROOTS = ["plugin", "packages"];

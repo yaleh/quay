@@ -44,6 +44,11 @@ import {
   type Bucket,
 } from "./suite-bucket-attribution.ts";
 import { hubDecision, taskTouchEntries } from "./suite-bucket-hub-list.ts";
+// The ONE path-ref normalizer (kernel leaf) — see the same import in suite-bucket-hub-list.ts. The
+// former local body was byte-identical to that file's (routine `semantic-dedup-scan` finding
+// `normalize-touched`, task gap-routine-semantic-dedup-scan-normalize-touched); `.trim()` is this
+// caller's explicit step, kept at the call site.
+import { normalizePathRef } from "../../packages/quay/src/kernel/path-ref.ts";
 
 // The reattribution record (AC121): file (repo-relative) → judgment ("S" | "M").
 const REATTRIBUTION_PATH = ".quay/suite-bucket-reattribution.jsonl";
@@ -94,10 +99,10 @@ export interface EffectiveAttribution {
   source: BucketSource;
 }
 
-/** Normalize a path to repo-relative (forward slashes, strip `./`, collapse `..`). */
-function normalizeTouched(p: string): string {
-  return String(p).replace(/\\/g, "/").replace(/^\.\//, "").trim();
-}
+// Path normalization for touched paths = the shared kernel leaf + THIS file's `.trim()` policy,
+// written at each call site (the leaf deliberately does not trim; see path-ref.ts's header). The
+// former local `normalizeTouched` body — and its stale "collapse `..`" comment, a rule it never
+// applied — is gone; `..` is only resolved by `gate-script-base.ts`'s STRICTER `normalizeRel`.
 
 /** A suite test-file suffix (`.test.mjs` / `.test.ts` — the shallow-glob universe test.sh runs). */
 const TEST_FILE_SUFFIXES = [".test.mjs", ".test.ts"] as const;
@@ -254,7 +259,7 @@ export function effectiveBucketSet(fileRel: string, reattr: Map<string, string>,
 export function triggeredBuckets(touchedPaths: readonly string[]): Set<Bucket> {
   const out = new Set<Bucket>();
   for (const raw of touchedPaths ?? []) {
-    let p = normalizeTouched(raw);
+    let p = normalizePathRef(raw).trim();
     if (!p) continue;
     if (p.startsWith(EXP_SCRIPTS_PREFIX)) p = PLUGIN_SCRIPTS_PREFIX + p.slice(EXP_SCRIPTS_PREFIX.length);
     const b = classifyPath(p);
@@ -351,7 +356,7 @@ export function selectBucketsForTouches(touchedPaths: readonly string[], root = 
   // entries — sources/scripts/self — are NOT unioned: the selected set is a TEST-file set).
   const suiteFiles = new Set(files);
   for (const raw of touchedPaths ?? []) {
-    const p = normalizeTouched(raw);
+    const p = normalizePathRef(raw).trim();
     if (isTestFile(p) && suiteFiles.has(p)) selected.add(p);
   }
 
@@ -415,7 +420,7 @@ export function main(argv: string[]): number {
     process.stderr.write(`${usage}\n`);
     return 2;
   } else {
-    sel = selectBucketsForTouches(positional.map(normalizeTouched).filter(Boolean), root);
+    sel = selectBucketsForTouches(positional.map((p) => normalizePathRef(p).trim()).filter(Boolean), root);
   }
 
   if (asJson) {

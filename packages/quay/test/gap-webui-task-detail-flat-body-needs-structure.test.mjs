@@ -34,8 +34,8 @@ import { startServer } from "../src/serve/serve.ts";
 import {
   renderTaskBody, splitBodySections, shouldStructureBody,
   BODY_STRUCTURE_MIN_CHARS, BODY_STRUCTURE_MIN_SECTIONS, BODY_SECTION_FOLD_CHARS,
-} from "../src/serve/serve-task.ts";
-import { renderMarkdown } from "../src/serve/serve-render.ts";
+} from "../src/serve/feat/serve-task.ts";
+import { renderMarkdown } from "../src/serve/view/serve-render.ts";
 import { makeTmpDir } from "../../../plugin/test/helpers/tmp-workspace.mjs";
 import { QUAY_NATIVE_CLI } from "./helpers/cli-entry.mjs";
 

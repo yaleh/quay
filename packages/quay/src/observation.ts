@@ -48,6 +48,9 @@ import { execFileSync, execFile, spawn } from "node:child_process";
 import { pathToFileURL } from "node:url";
 import { promisify } from "node:util";
 import { QUAY_VERSION } from "./version.ts";
+// gap-routine-semantic-dedup-scan-pad2: the serve-layer canonical pad2 is not importable from
+// Core (that would be a Core → view edge); the shared definition lives in this import-free leaf.
+import { pad2 } from "./pad.ts";
 // The ONE definition of fast-mode start/end classification — shared with the plugin's
 // fast-mode-telemetry.ts (the writer/`--report` reader of the same `.workflow-events/*.jsonl`
 // store), NOT a hand-maintained mirror of it. See kernel/start-end-like.ts's header.
@@ -63,6 +66,11 @@ import { readTranscriptMtime } from "./primitives/session-liveness.mjs";
 import { validateSessionRecord } from "./primitives/session-schema.mjs";
 import { resolveWorktreeNamespace } from "./core/worktree-namespace.ts";
 import YAML from "yaml";
+// The `.quay/live-state.json` phase vocabulary + staleness threshold — the ZERO-IMPORT leaf shared
+// with cli/help.ts (which is statically loaded on every CLI invocation and must not import this
+// module). Re-exported below so read-face consumers get them from one place.
+import { LIVE_STATE_PHASES, LIVE_STATE_REL, LIVE_STATE_SCHEMA, LIVE_STATE_STALE_MS, type WorkerLivePhase } from "./driver-vocab.ts";
+export { LIVE_STATE_PHASES, LIVE_STATE_REL, LIVE_STATE_SCHEMA, LIVE_STATE_STALE_MS };
 // ── The four seams this module was split along (task
 //    gap-routine-architecture-analysis-observation-ts-multi-responsibility-god-module) ──────────
 // The file carried 64 direct importers and at least four unrelated responsibilities. Each now lives
@@ -104,9 +112,11 @@ import {
 import { computeInFlightBlocking } from "./observation/blocking.ts";
 import {
   parseWorkerOutcomeRecords,
+  readCarrierHeadText,
   readCarrierText,
   readWorkerOutcomeRecords,
   readWorkerRoundInFlightTasks,
+  scanJsonlTail,
   workerInFlightTasks,
 } from "./observation/records.ts";
 
@@ -799,9 +809,18 @@ export function readLive(
   // They used to re-read + re-parse the SAME 2.4 MB outcome carrier and 11.7 MB round carrier, which
   // measured ~250 ms of this function's event-loop block — and this function's block is exactly what
   // a concurrent `/health` waits for while the dashboard snapshot rebuilds (AC4).
+  // gap-live-read-cost-linear-in-round-carrier: the round carrier no longer has a "the whole text"
+  // consumer to share. Its two readers want opposite ENDS of an append-only file —
+  // readWorkerRoundInFlightTasks wants the LAST key-bearing record (it tail-scans the file itself and
+  // needs no text), workerDriverOnlineMs wants the FIRST `ts` — so this reads only the HEAD here
+  // instead of all 94 MB / 61k lines (~163 ms read + ~255 ms + ~283 ms of full-line JSON parses, i.e.
+  // ~700 ms of a ~1.4 s `quay lanes`, growing with the carrier rather than with the in-flight count).
   const outcomeText = readCarrierText(root, WORKER_OUTCOME_REL).text; // never throws (absent/unreadable → null)
-  let roundText: string | null = null;
-  try { roundText = fs.readFileSync(path.join(root, WORKER_ROUND_REL), "utf8"); } catch { roundText = null; }
+  // The head slice is the "same input" workerDriverOnlineMs used to get from the full text for the
+  // ONLY fact it derives from it: the earliest `ts`. The carrier is append-ordered (verified on the
+  // live 94 MB / 61,190-record carrier: record 0's ts IS the minimum), so the earliest instant is in
+  // the head; a truncated final line simply fails JSON.parse and is skipped, as before.
+  const roundHeadText = readCarrierHeadText(root, WORKER_ROUND_REL);
 
   let workerInFlight: InFlightTask[] = [];
   try {
@@ -820,7 +839,7 @@ export function readLive(
   // gap-live-fan-in-window-elapsed-zero: read the TRUE dispatch start (`in_flight_task_starts`) first;
   // only when the round carries no start for the task do we fall back to nowMs ("just now", never a
   // fabricated long elapsed — honest ③b).
-  for (const { taskId, startedAtMs } of readWorkerRoundInFlightTasks(root, roundText)) {
+  for (const { taskId, startedAtMs } of readWorkerRoundInFlightTasks(root)) {
     const started = startedAtMs ?? nowMs;
     workerInFlight.push({
       taskId,
@@ -887,7 +906,7 @@ export function readLive(
   // AC2: a workflow-events start-without-end run whose start is BEFORE the driver came online is a
   // stale inner-era ghost — its worktree may still exist (now managed by the driver), so the
   // worktree-released filter above does not remove it. Drop it here by the direct量 (start < online).
-  const workerOnlineMs = workerDriverOnlineMs(root, { outcomeText, roundText });
+  const workerOnlineMs = workerDriverOnlineMs(root, { outcomeText, roundText: roundHeadText });
   if (workerOnlineMs != null) {
     inFlight = inFlight.filter((t) => t.startedAtMs >= workerOnlineMs);
   }
@@ -1041,6 +1060,187 @@ export function readLiveWorkers(
   };
 }
 
+// ── `.quay/live-state.json` — the byte-level, event-driven in-flight snapshot ────────────────────
+//
+// WHY THIS CARRIER EXISTS (gap-live-state-small-carrier-for-subsecond-inflight-read): every read
+// surface built on `readLive` costs a process spawn + module import (≥100–180 ms floor) and reads
+// carriers that can be 90–124 MB (`worker-round.jsonl`) or only carry a phase-less view
+// (`worker-dispatch.json`). An external read-only consumer (claudecodeui's workspace title bar)
+// needs a snapshot it can take by reading ONE small file, without spawning anything.
+//
+// ⛔ IT IS A PROJECTION, NOT A TRUTH SOURCE. The authoritative in-flight set is still the worker
+// driver's own state (worker processes + outcome/dispatch carriers); this file is an atomically
+// rewritten snapshot of it, and `writtenAt` decides whether it may be trusted. A reader that finds
+// it stale MUST NOT treat its entries as current — which is why the reading below returns FOUR
+// distinct states and never folds `missing`/`stale`/`unreadable` into "zero in flight" (硬规则 3b).
+//
+// ⛔ ONE READER, ONE DERIVATION. The phase values are the ones the WRITER (worker-driver.ts) knows
+// at its own transition instants (spawn → implementing, child exit → fan-in, outcome computed →
+// terminal); this module only validates and reports them verbatim. It never re-derives a phase from
+// other carriers (that would be a second derivation of the same quantity).
+
+// The carrier name, wire schema, staleness threshold and phase vocabulary live in the ZERO-IMPORT
+// leaf `driver-vocab.ts` because (a) `cli/help.ts` — statically loaded on EVERY CLI invocation —
+// prints the threshold and the phases, so they must not live in this heavy module; and (b) BOTH the
+// writer (`plugin/scripts/worker-driver.ts`) and this reader import the same constants, so the two
+// sides cannot name the same carrier differently. Imported at the top of this file and re-exported
+// so the read face's consumers get everything from one place.
+export type { WorkerLivePhase };
+
+export interface LiveStateEntry {
+  taskId: string;
+  runId: string;
+  phase: WorkerLivePhase;
+  /** Dispatch instant (epoch ms). */
+  startedAtMs: number;
+  /** The worker process id, or null when the driver has no live pid for this entry (e.g. an entry
+   *  carried across a driver restart whose process id was not recoverable). */
+  workerPid: number | null;
+  /** The snapshot instant this entry was last rewritten at (epoch ms). */
+  lastHeartbeatMs: number;
+}
+
+/**
+ * The reading's FOUR-state discriminator. `ok` / `stale` / `missing` / `unreadable` are mutually
+ * exclusive values; ⛔ none of them is shaped like "zero in flight" except `ok` with an empty
+ * `inFlight` array, which is a real, evaluated reading.
+ */
+export type LiveStateStatus = "ok" | "stale" | "missing" | "unreadable";
+
+export interface LiveStateReading {
+  status: LiveStateStatus;
+  /** Why this status was chosen (null for `ok`). Carried verbatim so a caller can say WHAT was wrong. */
+  reason: string | null;
+  carrier: string;
+  /** The file's own schema string (echoed only when it validated). */
+  schema: string | null;
+  writtenAt: string | null;
+  writtenAtMs: number | null;
+  /** `nowMs - writtenAtMs` (may be negative under clock skew; null when not evaluated). */
+  ageMs: number | null;
+  staleAfterMs: number;
+  source: string | null;
+  /**
+   * The entries verbatim from the file. `null` means NOT EVALUATED (`missing` / `unreadable`) —
+   * ⛔ never `[]`, which would read as "the driver wrote a snapshot with nobody in flight". For
+   * `stale` the entries ARE returned (they exist) but the status says they may not be trusted.
+   */
+  inFlight: LiveStateEntry[] | null;
+}
+
+// One interface (not a tagged union): the repo's tsconfig has `strict: false` (no strictNullChecks),
+// where narrowing a literal-boolean discriminant does not apply — an optional-field shape says the
+// same thing and type-checks. `snapshot` is non-null exactly when `ok` is true.
+interface ParsedLiveState {
+  ok: boolean;
+  /** Why the parse failed (null on success). */
+  reason: string | null;
+  snapshot: { schema: string; writtenAt: string; writtenAtMs: number; source: string; inFlight: LiveStateEntry[] } | null;
+}
+
+/** Validate one snapshot document. Fail-closed: a shape we cannot read is `unreadable`, never a
+ *  partially-trusted reading (硬规则 3b — "could not read" must not look like "read and OK"). */
+function parseLiveStateSnapshot(text: string): ParsedLiveState {
+  const fail = (reason: string): ParsedLiveState => ({ ok: false, reason, snapshot: null });
+  let raw: unknown;
+  try {
+    raw = JSON.parse(text);
+  } catch (err) {
+    return fail(`not valid JSON: ${err instanceof Error ? err.message : String(err)}`);
+  }
+  if (raw === null || typeof raw !== "object" || Array.isArray(raw)) return fail("top-level value is not an object");
+  const o = raw as Record<string, unknown>;
+  if (o.schema !== LIVE_STATE_SCHEMA) return fail(`schema ${JSON.stringify(o.schema)} ≠ ${LIVE_STATE_SCHEMA}`);
+  if (typeof o.source !== "string" || o.source.length === 0) return fail("missing/empty source");
+  if (typeof o.writtenAt !== "string") return fail("missing writtenAt");
+  const writtenAtMs = Date.parse(o.writtenAt);
+  if (!Number.isFinite(writtenAtMs)) return fail(`writtenAt is not an ISO timestamp: ${JSON.stringify(o.writtenAt)}`);
+  if (!Array.isArray(o.inFlight)) return fail("inFlight is not an array");
+  const inFlight: LiveStateEntry[] = [];
+  for (let i = 0; i < o.inFlight.length; i++) {
+    const e = o.inFlight[i];
+    if (e === null || typeof e !== "object" || Array.isArray(e)) return fail(`inFlight[${i}] is not an object`);
+    const r = e as Record<string, unknown>;
+    const num = (v: unknown): boolean => typeof v === "number" && Number.isFinite(v);
+    if (typeof r.taskId !== "string" || r.taskId.length === 0) return fail(`inFlight[${i}].taskId is missing/empty`);
+    if (typeof r.runId !== "string" || r.runId.length === 0) return fail(`inFlight[${i}].runId is missing/empty`);
+    if (typeof r.phase !== "string" || !(LIVE_STATE_PHASES as readonly string[]).includes(r.phase)) {
+      return fail(`inFlight[${i}].phase ${JSON.stringify(r.phase)} ∉ ${LIVE_STATE_PHASES.join("|")}`);
+    }
+    if (!num(r.startedAtMs)) return fail(`inFlight[${i}].startedAtMs is not a finite number`);
+    if (r.workerPid !== null && !num(r.workerPid)) return fail(`inFlight[${i}].workerPid is neither null nor a finite number`);
+    if (!num(r.lastHeartbeatMs)) return fail(`inFlight[${i}].lastHeartbeatMs is not a finite number`);
+    inFlight.push({
+      taskId: r.taskId,
+      runId: r.runId,
+      phase: r.phase as WorkerLivePhase,
+      startedAtMs: r.startedAtMs as number,
+      workerPid: (r.workerPid === null ? null : r.workerPid) as number | null,
+      lastHeartbeatMs: r.lastHeartbeatMs as number,
+    });
+  }
+  return {
+    ok: true,
+    reason: null,
+    snapshot: { schema: LIVE_STATE_SCHEMA, writtenAt: o.writtenAt, writtenAtMs, source: o.source, inFlight },
+  };
+}
+
+/**
+ * Read `.quay/live-state.json` — ONE small file, no process spawn, no `/proc` scan, no task-store
+ * walk. The four-state result is the whole point: a caller can distinguish 「载体不存在」(the
+ * driver never wrote it / this workspace has no worker driver) from 「载体在但过期」(the driver
+ * stopped rewriting) from 「可读且在阈值内」. ⛔ A boolean "is it fresh" would collapse those.
+ *
+ * `nowMs` is a test seam (the caller controls the observation instant, like `readLive`); the
+ * staleness threshold is a parameter only so a caller with a different heartbeat budget can say so
+ * — it is NOT a per-call tuning knob for hiding staleness.
+ */
+export function readLiveState(
+  root: string,
+  { nowMs = Date.now(), staleMs = LIVE_STATE_STALE_MS }: { nowMs?: number; staleMs?: number } = {},
+): LiveStateReading {
+  const carrier = readCarrierText(root, LIVE_STATE_REL);
+  const base = { carrier: LIVE_STATE_REL, staleAfterMs: staleMs };
+  if (carrier.status === "absent") {
+    return {
+      ...base, status: "missing",
+      reason: `${LIVE_STATE_REL} does not exist — the worker driver has not written a snapshot for this workspace (⛔ NOT "zero in flight")`,
+      schema: null, writtenAt: null, writtenAtMs: null, ageMs: null, source: null, inFlight: null,
+    };
+  }
+  if (carrier.status === "unreadable" || carrier.text == null) {
+    return {
+      ...base, status: "unreadable",
+      reason: `${LIVE_STATE_REL} exists but could not be read: ${carrier.reason ?? "unknown error"} (⛔ NOT "zero in flight")`,
+      schema: null, writtenAt: null, writtenAtMs: null, ageMs: null, source: null, inFlight: null,
+    };
+  }
+  const parsed = parseLiveStateSnapshot(carrier.text);
+  if (!parsed.ok) {
+    return {
+      ...base, status: "unreadable",
+      reason: `${LIVE_STATE_REL} exists but its shape is not ${LIVE_STATE_SCHEMA}: ${parsed.reason} (⛔ NOT "zero in flight")`,
+      schema: null, writtenAt: null, writtenAtMs: null, ageMs: null, source: null, inFlight: null,
+    };
+  }
+  const snap = parsed.snapshot;
+  const ageMs = nowMs - snap.writtenAtMs;
+  const common = {
+    ...base,
+    schema: snap.schema,
+    writtenAt: snap.writtenAt,
+    writtenAtMs: snap.writtenAtMs,
+    ageMs,
+    source: snap.source,
+    inFlight: snap.inFlight,
+  };
+  if (ageMs > staleMs) {
+    return { ...common, status: "stale", reason: `writtenAt is ${ageMs}ms old (> ${staleMs}ms staleness threshold) — the snapshot is a projection and may be out of date` };
+  }
+  return { ...common, status: "ok", reason: null };
+}
+
 /** Read a file, splitting it into `## `-headed sections and keeping the most recent `max` sections. */
 function readRecentSections(root: string, relFile: string, max: number): JournalSection {
   const abs = path.join(root, relFile);
@@ -1106,10 +1306,6 @@ function readRecentCommits(root: string, limit: number): JournalSection {
 
 /** A tick-log entry line: `` - `HH:MMZ` `action` … `` — bullet + backtick time (HH:MMZ, no date). */
 const TICK_ENTRY_RE = /^- `(\d{2}):(\d{2})Z` /;
-
-function pad2(n: number): string {
-  return String(n).padStart(2, "0");
-}
 
 /**
  * The staleness FACT for a channel superseded by tick-log but still rendered first on the Journal
@@ -2886,6 +3082,130 @@ async function readTestsUncachedAsync(root: string): Promise<TestsResult> {
     reason = `verification-round.jsonl 读失败：${err instanceof Error ? err.message : String(err)}`;
   }
   return { status: statePathStatus, reason, runs };
+}
+
+// ── Bounded recent-rounds reader (the `quay suite --json` exit) ─────────────────────────────────────
+//
+// gap-suite-read-verb-current-and-recent-rounds: an external read-only consumer (claudecodeui's
+// Tests page) used to read `.quay/verification-round.jsonl` DIRECTLY — 102–250 MB — with its own
+// stream-from-EOF parser. The data already had ONE implementation here (`parseVerificationRound`),
+// but it was reachable only through `readTests`, which reads and parses the WHOLE ledger (cost ∝
+// carrier size, not ∝ the rounds asked for). This reader is the bounded exit: the last N rounds
+// (or every round at/after `--since`), obtained by the SHARED tail scan in observation/records.ts —
+// the same growing-window reverse read `.quay/worker-round.jsonl` uses. ⛔ No second line parser and
+// no second reverse-window loop.
+
+/** Default number of most-recent rounds `quay suite --json` returns (the `--limit` default). */
+export const SUITE_ROUNDS_DEFAULT_LIMIT = 20;
+
+/** The subset of a `TestRunRecord` the suite verb publishes per round. Deliberately small: the
+ *  full records carry `perFile`/`phase_*` arrays whose JSON is megabytes per round — the consumer's
+ *  question is 「最近几轮的成败与耗时」. The publish shape is FIXED (AC6 capability probing). */
+export interface SuiteRound {
+  round: number | null;
+  /** ISO 8601, exactly as the writer stored it (the ledger has always used ISO here). */
+  startedAt: string | null;
+  durationMs: number | null;
+  pass: number | null;
+  fail: number | null;
+  state: string | null;
+}
+
+/**
+ * The rounds ledger's carrier state. `empty-writer-zero-records` is a WRITER fact (the file exists,
+ * some writer landed it, but no line parses) — different from `absent` (no writer output at all),
+ * exactly the TestsStatus split this repo already made for the /tests page.
+ */
+export type SuiteRoundsCarrierState = "ok" | "absent" | "unreadable" | "empty-writer-zero-records";
+
+export interface SuiteRoundsReading {
+  state: SuiteRoundsCarrierState;
+  reason: string | null;
+  /** NEWEST-FIRST (same presentation order as `readTests().runs`). */
+  rounds: SuiteRound[];
+  /** Cumulative bytes the reader actually pread from the carrier — the DIRECT quantity behind the
+   *  "bounded read" claim (hard rule 4b: expose it, do not let the consumer infer it). */
+  bytesRead: number;
+  /** false ⇒ the scan stopped at its window (the answer is "the last N"); true ⇒ it reached byte 0,
+   *  i.e. the whole ledger WAS considered (nothing older exists). */
+  exhausted: boolean;
+}
+
+export interface RecentSuiteRoundsOptions {
+  /** Most-recent rounds to return. Default `SUITE_ROUNDS_DEFAULT_LIMIT`. Positive integer. */
+  limit?: number;
+  /** Epoch ms; only rounds with `startedAt >= sinceMs` are returned. null/undefined ⇒ no bound. */
+  sinceMs?: number | null;
+}
+
+/** Project the published subset. `startedAt` is left verbatim (the ledger's own ISO string). */
+function toSuiteRound(rec: TestRunRecord): SuiteRound {
+  return {
+    round: rec.round,
+    startedAt: rec.startedAt,
+    durationMs: rec.durationMs,
+    pass: rec.pass,
+    fail: rec.fail,
+    state: rec.state,
+  };
+}
+
+/**
+ * Read the most recent suite rounds WITHOUT reading the whole ledger.
+ *
+ * Stop condition for the shared tail scan:
+ *   • with `sinceMs` — grow until the OLDEST record currently in the window starts before `since`
+ *     (the ledger is append-ordered, so everything earlier is older too) or the file head is reached;
+ *   • without it — grow until the window holds `limit` parsed records or the head is reached.
+ * So the normal `--limit 20` read touches a few MB of a 250 MB ledger, never the whole file.
+ */
+export function readRecentSuiteRounds(root: string, opts: RecentSuiteRoundsOptions = {}): SuiteRoundsReading {
+  const limit = opts.limit ?? SUITE_ROUNDS_DEFAULT_LIMIT;
+  const sinceMs = opts.sinceMs ?? null;
+  const scan = scanJsonlTail<TestRunRecord>(path.join(root, ".quay", "verification-round.jsonl"), {
+    parse: parseVerificationRound,
+    enough: (records) => {
+      if (records.length === 0) return false; // keep growing: an empty window is not an answer
+      if (sinceMs != null) {
+        const ms = typeof records[records.length - 1].startedAt === "string"
+          ? Date.parse(records[records.length - 1].startedAt as string)
+          : NaN;
+        return Number.isFinite(ms) && ms < sinceMs;
+      }
+      return records.length >= limit;
+    },
+  });
+
+  if (scan.status === "absent") {
+    // The reason distinguishes 「本项目根本没有写者」 from 「写者已接入、只是还没落记录」 — the
+    // existing TestsStatus enumeration, reused rather than re-worded.
+    return { state: "absent", reason: missingRoundsLedger(root).reason, rounds: [], bytesRead: 0, exhausted: false };
+  }
+  if (scan.status === "unreadable") {
+    return { state: "unreadable", reason: scan.reason, rounds: [], bytesRead: scan.bytesRead, exhausted: false };
+  }
+  if (scan.records.length === 0) {
+    // Only reachable when the scan reached byte 0 with nothing parseable: a writer/wiring fact.
+    return {
+      state: "empty-writer-zero-records",
+      reason: EMPTY_ROUNDS_LEDGER_REASON,
+      rounds: [],
+      bytesRead: scan.bytesRead,
+      exhausted: scan.exhausted,
+    };
+  }
+
+  const recent = scan.records
+    .filter((rec) => {
+      if (sinceMs == null) return true;
+      const ms = typeof rec.startedAt === "string" ? Date.parse(rec.startedAt) : NaN;
+      // A record whose startedAt cannot be parsed cannot be shown to satisfy `--since`; exclude it
+      // (hard rule 6: a missing value is "not looked at", never "matches").
+      return Number.isFinite(ms) && ms >= sinceMs;
+    })
+    .slice(0, limit)
+    .map(toSuiteRound);
+  return { state: "ok", reason: null, rounds: recent, bytesRead: scan.bytesRead, exhausted: scan.exhausted };
 }
 
 // ── Sessions view (resolved transcript tails) ───────────────────────────────────────────────────────

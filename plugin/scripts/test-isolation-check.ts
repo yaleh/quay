@@ -87,7 +87,6 @@
 
 import fs from "node:fs";
 import path from "node:path";
-import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 // gap-crystallization-five-directions ④: 位置判定原语抽到 checker-lib — 本条曾经是第三次手搓
 // buildNonCodeMask (写 A16 时又犯一次), 现在与 drive-contract/test-framework-policy 共用同一库。
@@ -110,11 +109,19 @@ import {
   hasNodeTestImport,
   canonicalTestFiles,
 } from "./test-framework-policy-check.ts";
-// The `# baseline-count:` ceiling parser lives in ratchet-baseline.ts — the ONE home of the token.
-// This file's copy was byte-identical to test-framework-policy-check.ts's (both end-anchored, both
-// diverging from the entry-set readers' grammar) — tasks/
-// gap-routine-semantic-dedup-scan-parse-baseline-count-divergent-anchor.
-import { parseBaselineCount } from "./ratchet-baseline.ts";
+// The `# baseline-count:` ceiling parser AND the entry-line grammar live in ratchet-baseline.ts —
+// the ONE home of the token and of the non-comment-line set. This file's ceiling copy was
+// byte-identical to test-framework-policy-check.ts's (both end-anchored, both diverging from the
+// entry-set readers' grammar) — tasks/
+// gap-routine-semantic-dedup-scan-parse-baseline-count-divergent-anchor. Its entry-line copy was
+// byte-identical under a second name — tasks/
+// gap-routine-semantic-dedup-scan-parse-line-list-identical.
+import { parseBaselineCount, parseRatchetEntryLines } from "./ratchet-baseline.ts";
+// The HEAD-existence probe and the `<ref>:<path>` reader are the shared git primitives — this file's
+// copies were byte-identical to test-framework-policy-check.ts's under a "mirrors" comment
+// (.quay/routine-findings.jsonl finding `git-showfile-headexists`, runId
+// `semantic-dedup-scan-1792847536579`).
+import { headExists, showFile } from "./git-runner.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -893,12 +900,14 @@ export function detectAll(src: string, rel: string): Violation[] {
 
 // ── data file parsing ────────────────────────────────────────────────────────────────────────────────
 
-/** Parse the data file: one `<rel>:<rule>` entry per line, '#' comments and blanks ignored. */
+/** Parse the data file: one `<rel>:<rule>` entry per line, '#' comments and blanks ignored.
+ *
+ * The body is `ratchet-baseline.ts`'s `parseRatchetEntryLines` — this wrapper survives only to bind
+ * this consumer's NOUN ("violations"). It used to be a byte-identical copy of
+ * test-framework-policy-check.ts's `parseExemptionList` under a second name (tasks/
+ * gap-routine-semantic-dedup-scan-parse-line-list-identical). */
 export function parseViolationList(text: string): string[] {
-  return text
-    .split(/\r?\n/)
-    .map((l) => l.trim())
-    .filter((l) => l.length > 0 && !l.startsWith("#"));
+  return parseRatchetEntryLines(text);
 }
 
 /** The commit-surviving ratchet ceiling from the header (`# baseline-count: <n>`) — MECHANISM is
@@ -1002,27 +1011,12 @@ export function runIsolationChecks(i: IsolationCheckInput): string[] {
   return failures;
 }
 
-// ── git baseline resolution (mirrors test-framework-policy-check.ts) ──────────────────────────────────
-
-function gitHeadExists(root: string): boolean {
-  try {
-    execFileSync("git", ["-C", root, "rev-parse", "--verify", "HEAD"], { stdio: ["ignore", "ignore", "ignore"] });
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-function gitShowFile(root: string, ref: string, rel: string): string | null {
-  try {
-    return execFileSync("git", ["-C", root, "show", `${ref}:${rel}`], {
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "ignore"],
-    });
-  } catch {
-    return null;
-  }
-}
+// ── git baseline resolution ──────────────────────────────────────────────────────────────────────────
+//
+// `headExists` / `showFile` arrive from git-runner.ts. They used to be local copies "mirroring
+// test-framework-policy-check.ts" — byte-identical bodies under a comment saying so
+// (.quay/routine-findings.jsonl finding `git-showfile-headexists`, runId
+// `semantic-dedup-scan-1792847536579`).
 
 // ── CLI ───────────────────────────────────────────────────────────────────────────────────────────────
 
@@ -1095,14 +1089,14 @@ export function main(argv: string[]): number {
     baselineEntries = parseViolationList(baselineText);
     baselineCountHead = parseBaselineCount(baselineText);
   } else {
-    const gitOk = gitHeadExists(root);
+    const gitOk = headExists(root);
     if (!gitOk) {
       console.error(
         "ERROR: test-isolation-check needs a git baseline (git HEAD) to enforce the AC5 ratchet. Pass --baseline-file for a non-git fixture, or run in the real checkout."
       );
       return 2;
     }
-    const committed = gitShowFile(root, "HEAD", dataFileRel);
+    const committed = showFile(root, "HEAD", dataFileRel);
     if (committed !== null) {
       baselineEntries = parseViolationList(committed);
       baselineCountHead = parseBaselineCount(committed);

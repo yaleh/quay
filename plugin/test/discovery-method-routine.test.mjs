@@ -114,6 +114,10 @@ import { formatDiscoveryMethodAssembly } from "../scripts/quality-gate-driver.ts
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(SCRIPT_DIR, "..", "..");
 const ROUTINE_SRC = path.join(REPO_ROOT, "plugin", "scripts", "discovery-method-routine.ts");
+// The runtime engine-module loader is SHARED with the sibling routine (routine `architecture-analysis`
+// finding `dup-discovery-module-loader`). The "resolved path, never a static specifier" control follows
+// the code to the one place that now performs the import; the static-import half still judges ROUTINE_SRC.
+const ENGINE_LOADER_SRC = path.join(REPO_ROOT, "plugin", "scripts", "routine-engine-module-loader.ts");
 const GIT_ENV = { ...process.env, GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@t", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@t" };
 
 // ── fixtures ────────────────────────────────────────────────────────────────────────────────────────
@@ -704,8 +708,11 @@ test("the engine modules are resolved at runtime — NO static out-of-artifact i
   const mutated = `${src}\nimport { reflect } from "../../docs/analysis/discovery-reflection.mjs";\n`;
   assert.match(mutated, STATIC_ENGINE_IMPORT, "the mutation must turn the same predicate red — otherwise the control is vacuous");
   assert.notEqual(mutated, src, "the mutation control must actually change the source");
-  // …and the runtime resolution it is replaced by is really there.
-  assert.match(src, /await import\(\/\* @vite-ignore \*\/ pathToFileURL\(/, "the loader must import a RESOLVED path, so the bundler cannot see a specifier to inline");
+  // …and the runtime resolution it is replaced by is really there — in the SHARED loader both routines
+  // call (the extract is the fix for routine finding `dup-discovery-module-loader`; pinning this routine's
+  // own text would pin a copy the extract deliberately removed).
+  const loaderSrc = fs.readFileSync(ENGINE_LOADER_SRC, "utf8");
+  assert.match(loaderSrc, /await import\(\/\* @vite-ignore \*\/ pathToFileURL\(/, "the loader must import a RESOLVED path, so the bundler cannot see a specifier to inline");
 });
 
 test("resolveEngineModule — resolves from the script's own repo, and a missing module is a NAMED refusal", () => {
@@ -807,6 +814,32 @@ test("readDiscoveryMethodConfig — an absent section is present:false with no e
   fs.mkdirSync(path.dirname(path.join(ws, CARRIER_REL)), { recursive: true });
   fs.writeFileSync(path.join(ws, CARRIER_REL), "{ this is not json\n", "utf8");
   assert.throws(() => readCarrierRounds(path.join(ws, CARRIER_REL)), /not valid JSON/);
+});
+
+test("both JSONL readers — ONE strict reader, both call sites, a non-object line still THROWS", () => {
+  // task gap-routine-architecture-analysis-dup-strict-jsonl-reader-two-copies: the carrier reader and
+  // the ledger reader had byte-identical bodies (missing flag + throw on non-object), differing only in
+  // the path variable. They now both delegate to one `readJsonlStrict`. This pins the property that
+  // delegation must not lose: absent ≠ unreadable (硬规则 3b), on BOTH call sites.
+  const ws = makeWorkspace();
+  const arms = [
+    ["readCarrierRounds", readCarrierRounds, path.join(ws, CARRIER_REL)],
+    ["readLedgerRecords", readLedgerRecords, path.join(ws, BUDGET_LEDGER_REL)],
+  ];
+  for (const [name, read, p] of arms) {
+    fs.mkdirSync(path.dirname(p), { recursive: true });
+    assert.deepEqual(read(p), { missing: true, records: [] }, `${name}: an absent file is its own value, not an error`);
+
+    fs.writeFileSync(p, '{"kind":"a"}\n\n{"kind":"b"}\n', "utf8");
+    assert.deepEqual(read(p), { missing: false, records: [{ kind: "a" }, { kind: "b" }] }, `${name}: object lines parse`);
+
+    for (const bad of ["[]", "42", "null", '"a string"']) {
+      fs.writeFileSync(p, `{"kind":"ok"}\n${bad}\n`, "utf8");
+      assert.throws(() => read(p), /:2 is not a JSON object/, `${name}: line ${bad} is not an object ⇒ THROW`);
+    }
+    fs.writeFileSync(p, '{"kind":"ok"}\n{ torn\n', "utf8");
+    assert.throws(() => read(p), /:2 is not valid JSON/, `${name}: a torn line ⇒ THROW`);
+  }
 });
 
 test("discoveryMethodRoutineFromConfig — absent ⇒ NO routine assembled (the host's routine set is unchanged)", () => {

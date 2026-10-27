@@ -17,6 +17,8 @@ import type { CliCtx } from "./context.ts";
 import type { CliFlags } from "./flags.ts";
 import type { GoalRecord } from "../abi.ts";
 import { runGoalStoreCli } from "../core/goal-store.ts";
+import { loadConfig } from "../config.ts";
+import { resolveWorkspaceRootOrThrow } from "../gate/config/loader.ts";
 
 /**
  * AC2 — the staleness marker for a GOAL row's TEXT rendering
@@ -43,6 +45,222 @@ export function goalStalenessMark(g: GoalRecord): string {
   if (s.state === "stale") return `(⚠️stale:n=${s.signals?.length ?? 0})`;
   if (s.state === "not-evaluated") return "(⚠️stale:NOT-EVALUATED)";
   return "";
+}
+
+// ── the incremental / thin read surfaces (gap-goal-list-no-thin-projection-no-since) ──────────────
+//
+// WHY THIS LIVES IN THE CLI, NOT IN THE PROVIDER (DoD): the ABI's `GoalRecord` is the PROVIDER's
+// contract. `quay goal list --json` returns that whole view-model — `body` / `criterion` / `expect`
+// / `origin` / `statusLog` included — and an external read-only consumer (a workspace title-bar
+// panel) that needs only `{id,title,status,kind,goal,updatedAt}` paid 786ms / 1.28MB for 397 rows.
+// The projection is the CALLER's choice of fields, so it is applied here, after the ABI read; the
+// ABI shape is untouched.
+//
+// ⛔ The thin field set is ENUMERATED (allow-list), never "drop these four keys": a provider that
+// later grows a field must not silently start leaking it through the thin surface (hard rule 3b —
+// "the set I promised" cannot be expressed as a subtraction from a set I do not control).
+
+/** The thin projection's COMPLETE field list (AC1). `goal` is absent on GOAL rows BY SHAPE (a GOAL
+ *  carries no owning-goal pointer), and `updatedAt` is absent only when the carrier's mtime could
+ *  not be read — both are omitted rather than emitted as a `null` placeholder. */
+const THIN_LIST_FIELDS = ["id", "title", "status", "kind", "goal", "updatedAt"] as const;
+
+/** One append-only status transition, as the goal store writes it
+ *  (core/goal-store.ts `statusLog: [{at,from,to,actor,reason}]`). Declared LOCALLY: `statusLog` is
+ *  part of the provider's read surface (`toViewModel` returns it) but is deliberately NOT a field of
+ *  the ABI's `GoalRecord` — so the CLI types it here instead of widening the ABI shape (DoD). */
+type StatusLogEntry = { at?: string; from?: string; to?: string; actor?: string; reason?: string };
+type GoalReadRecord = GoalRecord & { statusLog?: StatusLogEntry[] };
+
+/** The merged `goal log` row (AC3): one statusLog entry, carrying the record it belongs to. */
+type MergedStatusEntry = {
+  id: string;
+  goal: string | null;
+  kind: string | null;
+  at: string;
+  from: string | null;
+  to: string | null;
+  actor: string | null;
+  reason: string | null;
+};
+
+/**
+ * `--since <ISO8601|epoch-ms>` (AC2). ⛔ Not `task-log.ts`'s `parseSinceArg`: that one accepts an
+ * ISO instant OR a page CURSOR (`quay task log` is paged over the task carrier); a goal record's
+ * time is its file mtime, so the goal surfaces accept an ISO instant or the raw epoch-ms reading
+ * `updatedAt` itself prints — a consumer can feed back the exact number it just read, with no
+ * round-trip through a date formatter that could shift by a timezone.
+ */
+function parseGoalSince(name: string, raw: unknown): { ms: number | null; error: string | null } {
+  const usage = `--${name} requires a value (an ISO-8601 instant or epoch milliseconds)`;
+  if (raw === true) return { ms: null, error: usage };
+  if (typeof raw !== "string" || raw.trim() === "") {
+    return { ms: null, error: `${usage}, got ${JSON.stringify(raw)}` };
+  }
+  const t = raw.trim();
+  const ms = /^-?\d+$/.test(t) ? Number(t) : Date.parse(t);
+  if (!Number.isFinite(ms)) {
+    return { ms: null, error: `--${name} ${JSON.stringify(raw)} is neither a parseable ISO-8601 instant nor epoch milliseconds` };
+  }
+  return { ms, error: null };
+}
+
+/** The thin projection (AC1). `--with-status-log` opts the transition history BACK IN — the one
+ *  field a consumer that wants history needs — because history has its own read surface
+ *  (`goal log`) and a list read should not carry it by default. */
+function thinGoalRecord(g: GoalReadRecord, withStatusLog: boolean): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const key of THIN_LIST_FIELDS) {
+    const v = (g as unknown as Record<string, unknown>)[key];
+    if (v !== undefined) out[key] = v;
+  }
+  if (withStatusLog && Array.isArray(g.statusLog)) out.statusLog = g.statusLog;
+  return out;
+}
+
+/**
+ * `--since` on a LIST read: is this record at/after the instant? `updatedAt` is the carrier file's
+ * mtime, and a git checkout/merge only ever makes it NEWER — so filtering on it can OVER-report but
+ * never under-report, which is the safe direction for a "what changed" feed (the task's own
+ * finding). A record whose mtime could not be read has NO place in time: it is INCLUDED (same
+ * over-reporting direction) rather than silently dropped, which would masquerade as "unchanged"
+ * (hard rules 3b/6).
+ */
+function updatedAtOrAfter(g: GoalReadRecord, sinceMs: number): boolean {
+  const t = typeof g.updatedAt === "number" && Number.isFinite(g.updatedAt) ? g.updatedAt : null;
+  return t === null ? true : t >= sinceMs;
+}
+
+/** Same direction rule for `goal log`'s `--since`, applied to a transition's own `at` instant. */
+function statusAtOrAfter(at: string, sinceMs: number): boolean {
+  const t = Date.parse(at);
+  return Number.isFinite(t) ? t >= sinceMs : true;
+}
+
+/**
+ * THE ONE statusLog merge (DoD: "只有一个实现，⛔ 不新增第二套 statusLog 解析").
+ * Every record's own `statusLog` is concatenated and ordered by `at` ascending. The per-record log
+ * stays the single source of truth — this adds no second carrier, no derivation, no re-parsing.
+ * `goal` is the owning GOAL on an AC row and `null` on a GOAL row (a GOAL has no owner).
+ */
+function mergeStatusLog(records: GoalReadRecord[]): MergedStatusEntry[] {
+  const out: MergedStatusEntry[] = [];
+  for (const g of records) {
+    if (!Array.isArray(g.statusLog)) continue;
+    for (const e of g.statusLog) {
+      const at = typeof e?.at === "string" ? e.at : "";
+      out.push({
+        id: String(g.id),
+        goal: typeof g.goal === "string" ? g.goal : null,
+        kind: typeof g.kind === "string" ? g.kind : null,
+        at,
+        from: typeof e?.from === "string" ? e.from : null,
+        to: typeof e?.to === "string" ? e.to : null,
+        actor: typeof e?.actor === "string" ? e.actor : null,
+        reason: typeof e?.reason === "string" ? e.reason : null,
+      });
+    }
+  }
+  const instant = (at: string): number => {
+    const t = Date.parse(at);
+    return Number.isFinite(t) ? t : Number.POSITIVE_INFINITY;
+  };
+  out.sort((a, b) => {
+    const ta = instant(a.at);
+    const tb = instant(b.at);
+    if (ta !== tb) return ta < tb ? -1 : 1;
+    return a.id.localeCompare(b.id); // stable tie-break: same-instant transitions stay grouped
+  });
+  return out;
+}
+
+// ── the carrier three-state for an incremental read (AC4) ─────────────────────────────────────────
+//
+// THE DEFECT THIS CLOSES: a missing `goals/` directory reads as an EMPTY ARRAY — indistinguishable
+// from "read the carrier, there were no changes". That is exactly the confusion an incremental
+// (`--since`) feed must not make (hard rule 3b). The store itself cannot answer the question: its
+// constructor `mkdirSync`s the directory, so by the time a provider call returns, "missing" has
+// already been rewritten into "empty". ⇒ The CLI probes the CARRIER DIRECTORY BEFORE it connects to
+// the provider (once connected, the provider process has created the directory).
+//
+// THREE VALUES, never a boolean: `present` / `not-declared` / `not-evaluated`. `not-declared` is a
+// provider that declares no local carrier layout at all (a non-native provider — e.g. the GitHub
+// stub, whose `goal_list` answer is the only reading there is): it is ⛔ NOT "present" (that would
+// claim a check happened) and ⛔ NOT "not-evaluated" (that would fail a provider which never had a
+// local directory to begin with).
+
+type GoalCarrierProbe =
+  | { state: "present"; dir: string }
+  | { state: "not-declared" }
+  | { state: "not-evaluated"; dir: string; reason: string };
+
+/**
+ * The carrier directory a provider's config DECLARES, resolved the same way the provider resolves
+ * it (`packages/quay-native/src/carrier-dirs.ts`): `QUAY_NATIVE_GOAL_DIR` when declared, else the
+ * `goals/` sibling of the resolved tasks dir, else `<workspaceRoot>/goals` (the default the
+ * provider and `quay init` share). `null` when the active provider entry declares NO tasks dir and
+ * no carrier env at all — i.e. there is no local layout to judge.
+ */
+function declaredGoalCarrierDir(workspaceRoot: string, config: unknown, providerId?: string): string | null {
+  // `config` is the parsed `.quay/config.yml` (untyped by construction — same `any` discipline as
+  // the CLI's own flag bag); only the four declared keys below are read.
+  const cfg = (config && typeof config === "object" ? config : {}) as Record<string, any>;
+  const providers: Record<string, any> =
+    cfg.providers && typeof cfg.providers === "object" ? cfg.providers : {};
+  const id = providerId ?? Object.keys(providers).find((pid) => providers[pid]?.enabled);
+  const entry = id ? providers[id] : undefined;
+  const env = entry && typeof entry.env === "object" && entry.env !== null
+    ? (entry.env as Record<string, unknown>)
+    : {};
+  const envString = (k: string): string | null => (typeof env[k] === "string" && (env[k] as string).trim() !== "" ? (env[k] as string) : null);
+  // process.env is the same knob the provider process inherits; honour it here so a workspace that
+  // pins the carrier only in its shell (no config entry) is still judged on the right directory.
+  const processEnvString = (k: string): string | null =>
+    typeof process.env[k] === "string" && (process.env[k] as string).trim() !== "" ? (process.env[k] as string) : null;
+  const goalEnv = envString("QUAY_NATIVE_GOAL_DIR") ?? processEnvString("QUAY_NATIVE_GOAL_DIR");
+  if (goalEnv) return path.resolve(workspaceRoot, goalEnv);
+  const tasks = (typeof entry?.tasks_dir === "string" && entry.tasks_dir.trim() !== "" ? entry.tasks_dir : null)
+    ?? envString("QUAY_NATIVE_TASKS_DIR")
+    ?? processEnvString("QUAY_NATIVE_TASKS_DIR");
+  if (!tasks) return null;
+  return path.join(path.dirname(path.resolve(workspaceRoot, tasks)), "goals");
+}
+
+/** Probe the carrier BEFORE the provider is connected (see the block comment above). A config that
+ *  cannot be loaded is `not-declared`: the provider path owns that error — it is reported once, by
+ *  `withProvider`, in its established shape, ⛔ never restated as a "not-evaluated" reading here. */
+function probeGoalCarrier(flags: CliFlags): GoalCarrierProbe {
+  let cfg;
+  try {
+    cfg = flags.root ? loadConfig(resolveWorkspaceRootOrThrow(flags.root)) : loadConfig();
+  } catch {
+    return { state: "not-declared" };
+  }
+  const providerId = typeof flags.provider === "string" ? flags.provider : undefined;
+  const dir = declaredGoalCarrierDir(cfg.workspaceRoot, cfg.config, providerId);
+  if (!dir) return { state: "not-declared" };
+  try {
+    fs.readdirSync(dir);
+    return { state: "present", dir };
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException)?.code ?? "UNKNOWN";
+    return {
+      state: "not-evaluated",
+      dir,
+      reason: code === "ENOENT"
+        ? `goal carrier directory does not exist: ${dir}`
+        : `goal carrier directory is unreadable (${code}): ${dir}`,
+    };
+  }
+}
+
+/** AC4's output shape: `evaluated:false` on the machine channel AND a distinct exit code (3 — the
+ *  goal mechanism's own NOT-EVALUATED code, see `goal check --stale-pass`), so neither a JSON reader
+ *  nor a shell reader can mistake "could not read the carrier" for "read it, nothing changed". */
+function emitGoalReadNotEvaluated(reason: string, wantsJson: boolean): void {
+  if (wantsJson) printJson({ evaluated: false, reason });
+  console.error(`goal read NOT-EVALUATED: ${reason}`);
+  process.exitCode = 3;
 }
 
 // ── store-level verbs: gate / check / batch (+ the store-only flags of `write`) ────────────────────
@@ -227,7 +445,7 @@ export async function handleGoal({ sub, positional, flags, wantsJson, rest }: Cl
     const { previewWorktreeDir, startPreviewServe, stopPreviewServe, readPreviewStatus } = await import("../goal-preview.ts");
     // ⛔ The displayed bind fallback is DERIVED from the ONE definition point — spelling a host
     // literal here is the second copy `serve-binding-literal-check` exists to catch.
-    const hostFallback = (await import("../serve/serve-binding.ts")).SERVE_BINDING_FALLBACK.host;
+    const hostFallback = (await import("../serve/view/serve-binding.ts")).SERVE_BINDING_FALLBACK.host;
     const previewRoot = previewWorktreeDir(mainRoot, id);
     if (action === "start") {
       const rawPort = flags.port;
@@ -255,6 +473,21 @@ export async function handleGoal({ sub, positional, flags, wantsJson, rest }: Cl
     return;
   }
   if (sub === "list") {
+    // AC1/AC2 — the thin projection and the incremental filter are the NEW read surfaces; the
+    // default (`quay goal list --json`, no flags) is byte-identical to the pre-change output (AC5),
+    // which is why neither the probe nor the projection runs unless a caller asked for one.
+    const thin = flags["no-body"] !== undefined;
+    const withStatusLog = flags["with-status-log"] !== undefined;
+    let sinceMs: number | null = null;
+    if (flags.since !== undefined) {
+      const p = parseGoalSince("since", flags.since);
+      if (p.error !== null) { console.error(`quay goal list: ${p.error}`); process.exitCode = 2; return; }
+      sinceMs = p.ms;
+    }
+    if (thin || sinceMs !== null) {
+      const probe = probeGoalCarrier(flags);
+      if (probe.state === "not-evaluated") { emitGoalReadNotEvaluated(probe.reason, wantsJson); return; }
+    }
     await withProvider(async (client) => {
       const filter: Record<string, unknown> = {};
       if (flags.status !== undefined) filter.status = flags.status;
@@ -267,10 +500,42 @@ export async function handleGoal({ sub, positional, flags, wantsJson, rest }: Cl
       // flag off the flag bag directly — `goal list` takes no positionals, so a bare
       // `--no-evidence` parses to `true` in every real invocation order.
       if (flags["no-evidence"] !== undefined) filter.includeEvidence = false;
-      const goals = await client.goalList(filter);
-      if (wantsJson) printJson(goals);
-      else if (goals.length === 0) console.log("(no goals)");
-      else for (const g of goals) console.log(`${g.id}\t${g.status}${goalStalenessMark(g)}\t${g.kind}\t${g.title}`);
+      const goals = (await client.goalList(filter)) as GoalReadRecord[];
+      // AC2: filter on the carrier mtime, in the CLI (the ABI carries the number; the window is the
+      // caller's question, not the provider's).
+      const windowed = sinceMs === null ? goals : goals.filter((g) => updatedAtOrAfter(g, sinceMs));
+      // AC1: project AFTER filtering, so the filter still sees `updatedAt` (it is in the thin set
+      // too) and the output carries only the allow-listed fields.
+      const rows: Array<GoalReadRecord | Record<string, unknown>> =
+        thin ? windowed.map((g) => thinGoalRecord(g, withStatusLog)) : windowed;
+      if (wantsJson) printJson(rows);
+      else if (rows.length === 0) console.log("(no goals)");
+      else for (const g of rows as GoalReadRecord[]) console.log(`${g.id}\t${g.status}${goalStalenessMark(g)}\t${g.kind}\t${g.title}`);
+    }, { providerId: flags.provider, root: flags.root });
+    return;
+  }
+  if (sub === "log") {
+    // AC3 — the CROSS-RECORD status-transition read: the history already lives append-only on every
+    // record (`statusLog`); what was missing was one surface that merges them. ⛔ No second carrier
+    // and no second parser: `mergeStatusLog` above is the only implementation.
+    let sinceMs: number | null = null;
+    if (flags.since !== undefined) {
+      const p = parseGoalSince("since", flags.since);
+      if (p.error !== null) { console.error(`quay goal log: ${p.error}`); process.exitCode = 2; return; }
+      sinceMs = p.ms;
+    }
+    const probe = probeGoalCarrier(flags);
+    if (probe.state === "not-evaluated") { emitGoalReadNotEvaluated(probe.reason, wantsJson); return; }
+    await withProvider(async (client) => {
+      // `includeEvidence:false`: a transition's `at` lives in the record's own frontmatter; the
+      // ledger-derived projection is not part of this answer, so a history read never pays the
+      // `.quay/gate-events.jsonl` scan (∝ ledger size).
+      const records = (await client.goalList({ includeEvidence: false })) as GoalReadRecord[];
+      const merged = mergeStatusLog(records);
+      const entries = sinceMs === null ? merged : merged.filter((e) => statusAtOrAfter(e.at, sinceMs));
+      if (wantsJson) printJson(entries);
+      else if (entries.length === 0) console.log("(no status transitions)");
+      else for (const e of entries) console.log(`${e.at}\t${e.id}\t${e.from ?? ""}→${e.to ?? ""}\t${e.actor ?? ""}\t${e.reason ?? ""}`);
     }, { providerId: flags.provider, root: flags.root });
     return;
   }
@@ -322,7 +587,7 @@ export async function handleGoal({ sub, positional, flags, wantsJson, rest }: Cl
     }, { providerId: flags.provider, root: flags.root });
     return;
   }
-  console.error(`unknown goal subcommand: ${sub} (try: list, show, write, gate, check, batch, merge, preview)`);
+  console.error(`unknown goal subcommand: ${sub} (try: list, log, show, write, gate, check, batch, merge, preview)`);
   process.exitCode = 1;
   return;
 }

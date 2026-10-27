@@ -156,7 +156,8 @@ upgrades in place, and guessing the wrong scope fails closed instead of moving t
 claude plugin list --json | jq -r '.[] | select(.id=="quay@quay") | .scope' | sort -u
 # (2) update IN PLACE, at that scope
 claude plugin update quay@quay --scope <the scope just printed>
-# (3) re-run /quay:init in the project: it re-points `.quay/plugin` at the plugin root THIS init ran from
+# (3) re-run /quay:init in the project: it fills the version-level `loop:` defaults this version added
+#     (`.quay/plugin` is NOT created any more — see "The project link is RETIRED" below)
 ```
 
 Measured 2026-10-06 / Claude Code 2.1.290 in a throwaway `CLAUDE_CONFIG_DIR`, at both scopes:
@@ -177,25 +178,37 @@ Remove-the-record-then-install re-materialized it, 0 → 1.)
 
 Then accept the trust dialog the first time you enter the directory, and restart the session.
 
-### The project link `.quay/plugin` — a GUIDANCE path, never a binding
+### The project link `.quay/plugin` — RETIRED (2026-10-25)
 
-`/quay:init` maintains the project-internal symlink `<project>/.quay/plugin`, pointing at **the plugin
-root that init ran from** (`${CLAUDE_PLUGIN_ROOT}` / `--plugin-root`). It exists for consumers that run
-**without Core in the loop** — e.g. a CloudCLI server that `execFile`s quay with `cwd` = the project
-root, so nothing else tells it which plugin belongs to this project. Point Core at it as
-`<project>/.quay/plugin/scripts/…` (or `<project>/.quay/plugin/vendor/…`).
+⛔ `/quay:init` **no longer creates** `<project>/.quay/plugin`. The link existed to point a consumer
+that runs **without Core in the loop** (e.g. a server that `execFile`s quay with `cwd` = the project
+root) at "the plugin root the last init ran from". That made it a **second version resolver** beside
+the session layer's plugin-scope rule, and the two necessarily diverge (measured 2026-10-06: the link
+sat at 0.14.0 while every session loaded 0.15.0). Nothing in Core ever read it
+(`plugin-root.ts` resolves from its own install location), so removing it moves no binding.
 
-⛔ It is a GUIDANCE pointer, **not** a configuration binding:
+What init does now — reported as `pluginLink.state` in the `--json` report:
 
-- Core never reads it to locate itself (`plugin-root.ts` resolves from its own install location), and
-  **no Core runtime path writes it** — only `/quay:init` does. Several plugin versions can be live in one
-  project at once, so a runtime auto-refresh would clobber whichever one wrote last.
-- `.quay/config.yml` does not name it. The native provider carries **no** `path`/`mcp_entry` — Core
-  resolves `<plugin-root>/vendor/quay-native` from its own install location, so the config binds no
-  version and no path.
-- It names "the plugin as of the last init" and can lag after an upgrade until the next init. That drift
-  is **reported** by `quay driver status`'s `pointer` reading (`current` / `behind` / `ahead` /
-  `not-evaluated`), never auto-corrected.
+| on disk at `<project>/.quay/plugin` | what init does | `pluginLink.state` |
+|---|---|---|
+| a symlink (left by an older init) | deletes it | `retired` |
+| nothing | nothing | `absent` |
+| a regular file or directory | **refuses**, leaves it byte-identical | `refused` |
+| `--dry-run` + a symlink | reports, writes nothing | `would-retire` |
+
+An external process that must locate the quay CLI resolves it from the **Claude Code plugin scope
+records** (`installed_plugins.json`: `scope` / `installPath` / `version`), not from the project
+directory. The single canonical contract for that — including what to do when the record is missing or
+points at a deleted directory — is `docs/references/external-consumer-cli-location.md`. ⛔ Do not write
+a second copy of the resolution rules in this file.
+
+To get a path instead of reading the record yourself, run the reference implementation:
+
+```sh
+node --experimental-strip-types "${CLAUDE_PLUGIN_ROOT}/scripts/resolve-quay-cli.ts" --project "$PWD" --field cli
+```
+
+(exit 0 = resolved · 2 = absent · 3 = record unreadable; ⛔ it never falls back to `quay` on PATH).
 
 ## Arguments
 

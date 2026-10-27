@@ -42,6 +42,24 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const pkgDir = path.resolve(__dirname, "..");
 const DEFAULT_PLUGIN_ROOT = path.resolve(pkgDir, "..", "..", "plugin");
 
+// ── Bound the esbuild SERVICE's Go heap (gap-suite-oom-lane-scaled-ladder-floor-32-no-lower-rung) ──
+// `bundleEntries` runs every `build()` through ONE long-lived esbuild child process (the JS API's
+// service binary). Go's GC has no ceiling by default (it targets ~2x live heap), so a service that
+// stays alive across 115+ builds can balloon far past what any single build needs.
+//
+// MEASURED 2026-10-24 by the suite's per-second cgroup sampler (`.quay/hogwatch.log`): a single
+// esbuild service reached `rss=16221928KB` (16.2 GB), parented by a test's
+// `node … build-plugin-dist.mjs /tmp/shipped-set-stub-…`; a second concurrent invocation carried
+// another 10.6 GB. Two of them at once filled the suite cgroup's declared 32 GiB MemoryMax and the
+// kernel OOM-killed descendants — the reason a 15-lane round still `oomKill=1` while a 126-lane
+// round peaked at only 26 GB (what dies is a child-process accident, not the lane count).
+//
+// `GOMEMLIMIT` is a SOFT limit: past it the Go GC collects harder, it never aborts the build. The
+// value is 35x a healthy build's measured peak RSS (~113 MB, see entryBundleWidth), so it does not
+// bind a normal build — it only stops a runaway service from taking the whole suite down. An
+// explicit caller value wins (env is the override; this is the default).
+if (!process.env.GOMEMLIMIT) process.env.GOMEMLIMIT = "4GiB";
+
 // Load-bearing banner (identical rationale to Core's build-dist.mjs): yaml's CJS-interop shim
 // performs a dynamic require() that an ESM esbuild bundle cannot satisfy without a real `require`
 // in scope. cap-from-gate.ts / read-probe-spec.ts / drivable-workspace-check.ts import yaml, so
@@ -647,10 +665,10 @@ export function deriveEntries(pluginRoot) {
  * depth, so map by basename — a general fallback, not a per-script list.
  *
  * gap-ac205-session-delivery-channel-transcript-confirmed: the SAME onResolve also covers
- * send-to-session.ts's DYNAMIC import — `await import("../../packages/quay/src/serve/serve-send.ts")`
+ * send-to-session.ts's DYNAMIC import — `await import("../../packages/quay/src/serve/io/serve-send.ts")`
  * (send-to-session.ts:53). onResolve fires for dynamic imports too, the filter
- * `/packages\/quay\/src\/<basename>.ts$/` matches the raw specifier's trailing
- * `packages/quay/src/serve/serve-send.ts`, and esbuild then INLINES it (bundle:true). The shipped
+ * `/packages\/quay\/src\/[A-Za-z0-9_./-]+\.(?:ts|mjs)$/` matches the raw specifier's trailing
+ * `packages/quay/src/serve/io/serve-send.ts`, and esbuild then INLINES it (bundle:true). The shipped
  * dist/send-to-session.js is therefore self-contained: the `packages/quay/src` tokens that remain
  * in the bundle are esbuild's __esm/__commonJS lazy-init registry keys + source-boundary comments
  * (shared by 15 of ~76 bundles), NOT runtime dev-tree imports — a bare-Node run of the installed
@@ -1322,9 +1340,11 @@ function isDirectEntryArity(cond) {
 
 /**
  * Does this module import the SHARED `isDirectEntry` from gate-script-base? The arity rule binds the
- * shared helper only: a module that DEFINES its own isDirectEntry decides its own semantics (two do —
- * workflow-event-schema.mjs and precommit-guard.ts — and both are name-based/inert; flagging them by
- * arity alone would be a false positive).
+ * shared helper only: a module that DEFINES its own isDirectEntry decides its own semantics, so
+ * flagging a local definition by arity alone would be a false positive. The carve-out stays for that
+ * future case — as of 2026-10-24 the corpus has none: the two real local definitions
+ * (workflow-event-schema.mjs and precommit-guard.ts) were extracted into the shared helper (finding
+ * `misc-isdirectentry`, routine `semantic-dedup-scan`).
  */
 export function importsSharedEntryHelper(text) {
   return /import\s*\{[^}]*\bisDirectEntry\b[^}]*\}\s*from\s*["'][^"']*gate-script-base\.ts["']/.test(text);

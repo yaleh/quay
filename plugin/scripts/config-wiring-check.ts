@@ -81,7 +81,7 @@ type LoopField = (typeof LOOP_FIELDS)[number];
 const SERVE_FIELDS = ["serve.host", "serve.port"] as const;
 type ServeField = (typeof SERVE_FIELDS)[number];
 /** The single module allowed to read the `serve:` keys. */
-const SERVE_READER_REL = "packages/quay/src/serve/serve-binding.ts";
+const SERVE_READER_REL = "packages/quay/src/serve/view/serve-binding.ts";
 /** The serve ENTRY that must actually call the reader (the "driver" half of the same split). */
 const SERVE_ENTRY_REL = "packages/quay/src/serve/serve.ts";
 

@@ -31,7 +31,7 @@ import os from "node:os";
 import http from "node:http";
 import { startServer } from "../src/serve/serve.ts";
 import { clearVerificationRoundCache, detectRoundWriterPath, readTests } from "../src/observation.ts";
-import { obsNote } from "../src/serve/serve-render.ts";
+import { obsNote } from "../src/serve/view/serve-render.ts";
 import { QUAY_NATIVE_CLI } from "./helpers/cli-entry.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));

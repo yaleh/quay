@@ -57,6 +57,10 @@ import { escapeRegExp as escapeRegex } from "./regex-escape.ts";
 // `arg-parsing-helper-family`, routine `semantic-dedup-scan`).
 import { flagValue } from "./gate-script-base.ts";
 import { lineOf } from "./source-text-lib.ts";
+// The ONE path-ref normalizer (kernel leaf) — the local body here was the byte-identical predicate
+// minus trim (routine `semantic-dedup-scan` finding `normalize-touched`, task
+// gap-routine-semantic-dedup-scan-normalize-touched).
+import { normalizePathRef } from "../../packages/quay/src/kernel/path-ref.ts";
 
 // ── 别名索引 ───────────────────────────────────────────────────────────────────────────────────
 
@@ -69,7 +73,7 @@ export interface Aliases {
 }
 
 export function aliasesOf(component: string): Aliases {
-  const norm = component.replace(/\\/g, "/").replace(/^\.\//, "");
+  const norm = normalizePathRef(component);
   const basename = norm.split("/").pop()!;
   const stem = basename.replace(/\.(ts|sh|mjs|js)$/, "");
   return {

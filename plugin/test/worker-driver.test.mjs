@@ -133,6 +133,7 @@ import {
   resumeExitedOrphanFanIn,
   computeResumedAfterExitOutcome,
   WORKER_DISPATCH_REL,
+  WORKER_DISPATCH_RECORD_SCHEMA,
   scopedGateCommandFor,
   resolveScopedGateCommand,
   resolveDocCheckCommand,
@@ -1171,7 +1172,7 @@ test("AC1 (能取假) — classifyDeltaRelatedness 区分「失败测试在 delt
   assert.equal(viaImport.verdict, "related", "one-hop import intersects delta ⇒ related");
 
   const unrelated = classifyDeltaRelatedness("packages/quay/test/obs.test.mjs",
-    ["packages/quay/src/serve/serve-dashboard.ts"],
+    ["packages/quay/src/serve/view/serve-dashboard.ts"],
     ["packages/quay/src/observation.ts", "packages/quay/src/serve/serve-handlers.ts"]);
   assert.equal(unrelated.verdict, "unrelated", "not in delta + one-hop imports disjoint ⇒ unrelated");
 
@@ -1219,7 +1220,7 @@ test("AC4 (能取假) — 措辞含「不是结论/重跑验证」，⛔ 不含�
 test("AC5 (能取假) — buildContinueWorkerPrompt 在 suite 红时拼入 continueRelatednessNote 输出", (t) => {
   const root = makeRoot("rel-wired");
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
-  writeRelatednessTask(root, "gap-x", ["packages/quay/src/serve/serve-dashboard.ts"]);
+  writeRelatednessTask(root, "gap-x", ["packages/quay/src/serve/view/serve-dashboard.ts"]);
   writeRelatednessTest(root, "packages/quay/test/obs.test.mjs", { loadSensitive: false });
   const suiteLog = path.join(root, ".quay", "fan-in-suite-gap-x.log");
   fs.mkdirSync(path.dirname(suiteLog), { recursive: true });
@@ -2890,9 +2891,12 @@ test("AC1 (能取假) — dispatch 持久记录：spawn 后即写、worker 正�
   await waitFor(() => readDispatchStore(dispatchStoreFile(root))[taskId] != null, 15000);
   const rec = readDispatchStore(dispatchStoreFile(root))[taskId];
   assert.ok(rec, "spawn 后持久化文件里存在该 task 的记录（⛔ 缺失 ⇒ 假）");
-  for (const k of ["runId", "workerPid", "selectorReason", "startedAtMs", "timeoutDeadlineMs"]) {
+  for (const k of ["schema", "runId", "workerPid", "selectorReason", "startedAtMs", "timeoutDeadlineMs"]) {
     assert.ok(k in rec, `record field ${k} present`);
   }
+  // AC2 (gap-worker-dispatch-carrier-owner-and-contract-unregistered): 版本标记由 write 侧统一盖章，
+  // ⛔ 不依赖字段形状判别版本。
+  assert.equal(rec.schema, WORKER_DISPATCH_RECORD_SCHEMA, "每条新写记录带稳定的 schema 标记");
   assert.equal(rec.taskId, taskId);
   assert.equal(rec.runId, "fm-ac1");
   assert.equal(rec.selectorReason, "ac1 selector reason");
@@ -4045,7 +4049,7 @@ function acAppendLegacyThirdParty(root, taskId, tsMs, basename) {
 }
 function acFixture(tag) {
   const root = makeRoot(tag);
-  acWriteTouchesTask(root, "gap-a", ["packages/quay/src/serve/serve-dashboard.ts"]); // 与失败测试无关
+  acWriteTouchesTask(root, "gap-a", ["packages/quay/src/serve/view/serve-dashboard.ts"]); // 与失败测试无关
   fs.mkdirSync(path.join(root, "plugin", "test"), { recursive: true });
   fs.writeFileSync(path.join(root, AC_UNRELATED_TEST), 'import { test } from "node:test";\n', "utf8");
   acWriteSuiteRedLog(root, "fan-in-suite-gap-a.log", AC_UNRELATED_SIG);
@@ -4191,7 +4195,7 @@ function sdeAppendFileRecord(root, taskId, tsMs, basename, files) {
 }
 
 /** 夹具：失败文件在盘上（一跳 import 读得出 ⇒ 相关性判为 unrelated 而非 unknown），Touches 默认不含它。 */
-function sdeFixture(tag, touches = ["packages/quay/src/serve/serve-dashboard.ts"]) {
+function sdeFixture(tag, touches = ["packages/quay/src/serve/view/serve-dashboard.ts"]) {
   const root = makeRoot(tag);
   acWriteTouchesTask(root, "gap-a", touches);
   fs.mkdirSync(path.join(root, "plugin", "test"), { recursive: true });
@@ -4255,7 +4259,7 @@ test("AC2（顺序·可得假）— 无 AssertionError 的整文件红：delta �
   assert.match(jOut.reason, /outside this task's Touches\/diff/, "判词如实报出「已算出：不在本任务 delta 内」");
 
   // 对照臂：同一夹具，只把该文件放进本任务 Touches ⇒ own-defect-counted。
-  const inside = sdeFixture("sde-ac2-in", [SDE_DEAD_FILE, "packages/quay/src/serve/serve-dashboard.ts"]);
+  const inside = sdeFixture("sde-ac2-in", [SDE_DEAD_FILE, "packages/quay/src/serve/view/serve-dashboard.ts"]);
   t.after(() => rmSafe(inside));
   sdeAppendFileRecord(inside, "gap-b", SDE_NOW - 3600_000, "fan-in-suite-gap-a.log", [SDE_DEAD_FILE]);
   const jIn = judgeRetryExemption(inside, "gap-a",

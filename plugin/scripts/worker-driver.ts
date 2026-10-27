@@ -150,10 +150,7 @@ import { lookupGoalBranchMode } from "./target-identity-literal-check.ts";
 // （splitTaskFile / statusFromFrontmatter / patchStatusField，单一 parser，⛔ 不再手搓 status 行正则）。
 import { splitTaskFile, statusFromFrontmatter, patchStatusField, commitTaskFile } from "./task-ops.ts";
 import { repoRoot } from "./repo-root.ts";
-// 转义正则元字符（task id 进 `new RegExp` 前）—— the single regex-literal escaper, the kernel leaf
-// reached via the plugin shim. Own copy was one of the twelve byte-identical bodies extracted by
-// gap-routine-semantic-dedup-scan-escapere-escaperegex-escaperegexp-fndefre-stemre.
-import { escapeRegExp } from "./regex-escape.ts";
+// escapeRegExp 的消费者已随 hasLiveWorkerForTask 迁到 driver-shared.ts；本文件不再直接使用它。
 import { parseTouchEntriesWithTags } from "./touches-parser.ts";
 import { parseLoadSensitiveAnnotation } from "./known-load-sensitive.ts";
 // AC150-3：资源门判定 + 控制态 + 身份闸 + MCP 控制面，抽到 driver-shared.ts 供 promotion-driver 复用
@@ -171,6 +168,19 @@ import {
   // gap-per-kind-stop-…：盘上停机探针的**分片轮询周期**与 resident-loop 那几个 kind 共用同一个常量
   // （⛔ 不在本文件另写一个字面量——那正是「停机延迟」这件事出现第二个真相源的形态）。
   DISK_STOP_POLL_MS_DEFAULT as WORKER_STOP_POLL_MS,
+  // worker 进程身份 + dispatch 载体（gap-worker-dispatch-carrier-owner-and-contract-unregistered）：
+  // 定义在 driver-shared.ts，本文件只 import + re-export（⛔ 不在此再写一份）。
+  WORKER_PROCESS_NAME,
+  resolveWorkerProcessName,
+  readPidCmdline,
+  hasLiveWorkerForTask,
+  classifyOrphanDispatch,
+  dispatchStoreFile,
+  readDispatchStore,
+  writeDispatchStore,
+  upsertDispatchRecord,
+  removeDispatchRecord,
+  type DispatchRecord,
 } from "./driver-shared.ts";
 export {
   CONTROL_STATE_REL,
@@ -191,6 +201,20 @@ export {
   headerValue,
   resourceGateCheck,
   serveControlPlane,
+  WORKER_PROCESS_NAME,
+  WORKER_DISPATCH_REL,
+  WORKER_DISPATCH_RECORD_SCHEMA,
+  resolveWorkerProcessName,
+  readPidCmdline,
+  hasLiveWorkerForTask,
+  classifyOrphanDispatch,
+  dispatchStoreFile,
+  readDispatchStore,
+  writeDispatchStore,
+  upsertDispatchRecord,
+  removeDispatchRecord,
+  type DispatchRecord,
+  type DispatchRecordInput,
 } from "./driver-shared.ts";
 // AC152：派发前过滤的【可组合谓词列表】单一实现（driver-filters.ts）。worker 的派发环消费
 // applyTaskFilters（函数级复用，⛔ 不各写一遍）。readTaskStatus 亦上收到 driver-filters.ts，
@@ -267,10 +291,7 @@ import {
   resolveQuaySrcModule,
   type LivenessResult,
 } from "./driver-runtime.ts";
-// gap-reconcile-finalizes-live-worker-as-exited-and-double-dispatches-same-task：worker 进程名是
-// 【配置】而非常量（`.quay/profiles.yml` roles["task-worker"].name）⇒ 存活探测必须先解析它，
-// ⛔ 不沿用写死的 `quay-task-worker`（第三方项目改名后探测恒不命中，见 resolveWorkerProcessName）。
-import { loadProfiles, resolveRole } from "./profile-policy.ts";
+// worker 进程名解析（resolveWorkerProcessName）已随进程身份判定迁到 driver-shared.ts。
 // 机械 fan-in（gap-fan-in-driver-mechanical-orchestration / SPEC-fan-in-driver-mechanical-
 // orchestration-2026-08-27）：suite 不再 detach（setsid+&+disown 孤儿）——改由 driver 直接 spawn 并 wait
 // （进程级父子，ppid 指向 driver，AC3）。复用 suite-driver.ts 的 spawnSuiteAndWait（同一单飞槽语义 +
@@ -438,6 +459,13 @@ import {
   // gap-fanin-suite-gate-no-baseline-equivalent-exception：既存红死锁的电路断路器（AC4）。判定住在
   // worker-fan-in.ts（耐久载体的写者与签名的定义处），本文件只消费它的读数 ⇒ 单一真相源。
   baselineRedDeadlockReading,
+  // 当前 develop 红签名集（`gap-develop-red-set-writer`）：读取 / 纯维护 / **唯一的落盘函数**——
+  // 三者都 import 到本模块的本地绑定里（⛔ 下面那条 `export { … } from` 只是再导出，不建立绑定），
+  // `applyDevelopRedObservation` 与 `--mechanical-fan-in` 入口用的就是这个绑定。
+  readDevelopRedSet,
+  maintainDevelopRedSet,
+  writeDevelopRedSet,
+  type DevelopRedObservation,
   runGoalMergeFanIn,
   appendGoalMergeResultEvent,
   // 过程日志文件名（`.quay/fan-in-<task>-<runIdSafe>.log` 的**唯一**命名函数——`readAttemptPhaseTimestamps`
@@ -531,9 +559,146 @@ export {
 /** round 记录（无条件心跳）的仓库相对路径（gitignored 运行时日志，worker-outcome.jsonl 同族）。 */
 export const WORKER_ROUND_REL = ".quay/worker-round.jsonl";
 
-/** dispatch 持久记录（gap-worker-driver-restart-orphan-no-outcome-no-timeout）的仓库相对路径——
- *  gitignored 运行时状态（worker-outcome.jsonl / worker-round.jsonl 同族），按 taskId 索引的单文件 map。 */
-export const WORKER_DISPATCH_REL = ".quay/worker-dispatch.json";
+// WORKER_DISPATCH_REL 已随 dispatch 载体抽到 driver-shared.ts（本文件 re-export 保持旧 import 面）。
+
+// ── `.quay/live-state.json` — 在飞/相位的字节级、事件驱动快照（gap-live-state-small-carrier-…）───
+//
+// 载体名 / wire schema / 相位词表都 import 自 core 的零依赖叶模块 `driver-vocab.ts`（读侧
+// `observation.readLiveState` 与 `cli/help.ts` 从同一处取）⇒ 写侧与读侧**结构上不可能**对同一文件
+// 用不同名字/不同相位词表（⛔ 不在此另抄一份字面量）。
+import { LIVE_STATE_REL, LIVE_STATE_SCHEMA, type WorkerLivePhase } from "../../packages/quay/src/driver-vocab.ts";
+
+/** 快照里的一条在飞任务。**字段集是发布契约**（外部消费者按它反序列化）：
+ *  ⛔ 新增字段 = breaking change；缺值用 null（workerPid），⛔ 不省略键。 */
+export interface WorkerLiveEntry {
+  taskId: string;
+  runId: string;
+  phase: WorkerLivePhase;
+  startedAtMs: number;
+  workerPid: number | null;
+  lastHeartbeatMs: number;
+}
+
+export interface WorkerLiveSnapshot {
+  schema: typeof LIVE_STATE_SCHEMA;
+  writtenAt: string;
+  source: "worker-driver";
+  inFlight: WorkerLiveEntry[];
+}
+
+/**
+ * `.quay/live-state.json` 的**唯一写入方**：原子重写（tmp + rename），`writtenAt` = 本次写入时刻，
+ * 每条 `lastHeartbeatMs` 同步刷新。调用点是常驻环里的四个事件（见 `LiveStateProjection`）。
+ *
+ * ⛔ 它是**投影，不是新真相源**：在飞集合的权威仍是 driver 自己的 `running` / dispatch 载体；本文件
+ * 只是它的原子快照，读侧据 `writtenAt` 判断是否可信（`observation.readLiveState` 的四态）。
+ * ⛔ 写入失败不致命（运行时日志同族），但必须**不静默**：调用方 `#write` 把错误写 stderr。
+ */
+export function writeWorkerLiveState(
+  rootDir: string,
+  entries: readonly WorkerLiveEntry[],
+  { nowMs = Date.now() }: { nowMs?: number } = {},
+): WorkerLiveSnapshot {
+  const snapshot: WorkerLiveSnapshot = {
+    schema: LIVE_STATE_SCHEMA,
+    writtenAt: new Date(nowMs).toISOString(),
+    source: "worker-driver",
+    inFlight: entries
+      .map((e) => ({ ...e, lastHeartbeatMs: nowMs }))
+      .sort((a, b) => a.taskId.localeCompare(b.taskId)),
+  };
+  const file = path.join(rootDir, LIVE_STATE_REL);
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  // tmp 名带 pid：同进程的并发写仍被单线程串行化；跨进程（异常双 driver）也不会互踩半个文件。
+  const tmp = `${file}.${process.pid}.tmp`;
+  fs.writeFileSync(tmp, `${JSON.stringify(snapshot, null, 2)}\n`);
+  fs.renameSync(tmp, file); // rename 在同一文件系统内原子 ⇒ 读者永远看不到半个 JSON
+  return snapshot;
+}
+
+/** 快照投影的输入：`running` 条目上的 driver 侧已知量。 */
+export interface LiveStateInput {
+  taskId: string;
+  runId: string;
+  phase: WorkerLivePhase;
+  startedAtMs: number;
+  workerPid: number | null;
+}
+
+/**
+ * driver 侧的相位投影：记住每个在飞任务**在哪个时刻被 driver 观测到哪一相位**，并在四个事件上
+ * 重写快照：
+ *   ① `spawn`     — worker 进程 spawn 成功（implementing）；
+ *   ② `exit`      — 子进程退出（进入落地流水线 ⇒ fan-in；否则 awaiting-land）；
+ *   ③ `terminal`  — 终态计算完成 ⇒ 条目离开在飞集；
+ *   ④ `heartbeat` — 每轮无条件一次（保底新鲜度），以调用方的**权威在飞集**同步本投影。
+ *
+ * ⛔ 只用于**写快照**：本类不参与任何派发/判停/重试判定（权威是常驻环的 `running` + 载体读取）。
+ * ⛔ 不做相位推导：相位由调用方在它确实知道的时刻传入（spawn / child exit / outcome），不从这里
+ * 读别的载体「猜」（硬规则 3b：读不到 ≠ 可以编造）。`nowMs` 可注入 ⇒ 测试能确定性地驱动四个事件。
+ */
+export class LiveStateProjection {
+  readonly #rootDir: string;
+  readonly #now: () => number;
+  readonly #entries = new Map<string, WorkerLiveEntry>();
+
+  constructor(rootDir: string, { nowMs = () => Date.now() }: { nowMs?: () => number } = {}) {
+    this.#rootDir = rootDir;
+    this.#now = nowMs;
+  }
+
+  /** ① spawn 成功。`workerPid` 为 null = 进程没起来（spawn-failed 也会很快被 `terminal` 收走）。 */
+  spawn(input: LiveStateInput): void {
+    this.#entries.set(input.taskId, { ...input, lastHeartbeatMs: this.#now() });
+    this.#write();
+  }
+
+  /** ② worker 进程退出。`fan-in` = 立刻进入落地流水线；`awaiting-land` = 不会跑 fan-in（非零退出 /
+   *  spawn 失败 / 无 worktree），实现已结束、终态与落地判定尚未完成。 */
+  exit(taskId: string, phase: "fan-in" | "awaiting-land"): void {
+    const entry = this.#entries.get(taskId);
+    if (entry == null) return; // 未观测到 spawn（或已终态）⇒ 不凭空造条目
+    entry.phase = phase;
+    this.#write();
+  }
+
+  /** ③ 终态计算完成：条目离开在飞集。返回是否真的有条目被移除（可区分「移除了」与「本就不在」）。 */
+  terminal(taskId: string): boolean {
+    const removed = this.#entries.delete(taskId);
+    if (removed) this.#write();
+    return removed;
+  }
+
+  /** ④ 每轮心跳：以调用方的权威在飞集同步投影（补上冷启动/接管条目、移除已不在飞者），并刷新
+   *  `writtenAt` / 每条 `lastHeartbeatMs`。⛔ 传进来的 `phase` 就是权威相位（调用方在转换点写过）。 */
+  heartbeat(known: readonly LiveStateInput[]): void {
+    const now = this.#now();
+    const ids = new Set(known.map((k) => k.taskId));
+    for (const id of [...this.#entries.keys()]) {
+      if (!ids.has(id)) this.#entries.delete(id);
+    }
+    for (const k of known) this.#entries.set(k.taskId, { ...k, lastHeartbeatMs: now });
+    this.#write();
+  }
+
+  /** 当前投影（排序后的克隆）——测试/取证用；⛔ 消费方不应把它当权威在飞集。 */
+  snapshot(): WorkerLiveEntry[] {
+    return [...this.#entries.values()]
+      .map((e) => ({ ...e }))
+      .sort((a, b) => a.taskId.localeCompare(b.taskId));
+  }
+
+  #write(): void {
+    try {
+      writeWorkerLiveState(this.#rootDir, [...this.#entries.values()], { nowMs: this.#now() });
+    } catch (err) {
+      // 运行时日志同族的失败语义：不致命，⛔ 但绝不静默（静默会让「载体停更」与「一切正常」同形）。
+      process.stderr.write(
+        `worker-driver: live-state write failed — ${err instanceof Error ? err.message : String(err)}\n`,
+      );
+    }
+  }
+}
 
 /** 终态枚举：**completed（退出码 0 且落地——成功态就是它）** / exited-not-landed（退出码 0 但没落地）/
  *  failed（非零退出）/ killed（被信号杀）/ timed-out（超时 SIGTERM）/ spawn-failed（起不来）/
@@ -644,39 +809,8 @@ export function runAutoTightenPass(root: string, nowMs: number): AutoTightenRoun
  *  引用/命名稳定性，⛔ 不再是并发解析的输入。 */
 export const MAX_TASK_SUBAGENTS_ENV = "QUAY_MAX_TASK_SUBAGENTS";
 
-/** 存活 worker 进程的 `-n` 名（launchArgv 经 profile-policy.ts 解析 .quay/profiles.yml 的
- *  `roles["task-worker"].name` 承载；AC140-2 测试钉死 name 以 quay- 开头）。
- *  冷启动在飞枚举用它识别存活 worker 进程的 cmdline（/proc/<pid>/cmdline）。
- *  AC150-3：控制态常量（CONTROL_STATE_REL/CONTROL_CALLERS_ENV/DEFAULT_CALLERS/CONTROL_HEADER/
- *  CONTROL_HEADER_NAME）已随控制面抽到 driver-shared.ts 并在本文件 re-export；本常量是 worker
- *  独有（进程名识别），保留在本文件。 */
-/** ⚠️ 这是【缺省值】，不是「本 workspace 的 worker 名」。真实名由 `.quay/profiles.yml` 的
- *  `roles["task-worker"].name` 承载 ⇒ 一律经 resolveWorkerProcessName(root) 取（见下）。
- *  字面常量只作解析失败时的历史缺省（quay 自己的 profiles.yml 恰好就是这个名字）。 */
-export const WORKER_PROCESS_NAME = "quay-task-worker";
-
-/** 本 workspace 的 worker 进程名（`-n <name>`）：读 `.quay/profiles.yml` 的 roles["task-worker"].name。
- *
- *  🔴 为什么必须解析而不能用上面的字面常量（gap-reconcile-finalizes-live-worker-as-exited-and-double-
- *  dispatches-same-task，2026-09-13 第一手对照）：字面量 `quay-task-worker` 是【quay 自己】的命名；
- *  第三方项目按 quay-init 的注释自行改名（quay-fleet: `fleet-task-worker`）。此前所有存活探测
- *  （enumerateLiveWorkerCmdlines / hasLiveWorkerForTask / findLiveWorkerPid）都写死该字面量 ⇒
- *  在 quay-fleet 上**恒不命中任何真实 worker**（硬规则 4b：一个依赖宿主的字面量，换项目就静默失效）。
- *  后果是 reconcile 把【在飞】worker 判为「已退出」（假失败记录）并清掉冷启动排除集 ⇒ 同任务双派、
- *  两个 worker 共用一个 worktree。对照：同一份 argv 只改角色名，hasLiveWorkerForTask 给出相反取值。
- *
- *  解析失败（无 profiles.yml / 无该角色 / yaml 读不懂）⇒ 回落到 WORKER_PROCESS_NAME（历史行为），
- *  ⛔ 不抛——探测是观测，观测不得让驱动停摆；且回落方向的残余危害由 finalizeOrphanDispatch 的
- *  /proc 存活实测兜底（见该函数）。 */
-export function resolveWorkerProcessName(root: string | null | undefined): string {
-  if (!root) return WORKER_PROCESS_NAME;
-  try {
-    const name = resolveRole(loadProfiles(root), "task-worker").name;
-    return name && name.length > 0 ? name : WORKER_PROCESS_NAME;
-  } catch {
-    return WORKER_PROCESS_NAME;
-  }
-}
+// WORKER_PROCESS_NAME / resolveWorkerProcessName 已抽到 driver-shared.ts（duration-report 必须用同一份
+// 判定；本文件 re-export 保持旧 import 面）。见该文件「worker 进程身份」一节。
 
 /** 常驻循环【无在飞 worker 且瞬时 WAIT】时的轮询间隔（ms，测试缝经 --interval 传小值）。与
  *  promotion-driver 的 INTERVAL_MS_DEFAULT 同语义：resource-gate-wait / pool-empty 是瞬时态
@@ -1186,16 +1320,8 @@ export function enumerateLiveWorkerCmdlines(procDir: string = "/proc", workerNam
   return out;
 }
 
-/** 该 task 是否有存活 worker 正在跑：某存活进程 cmdline 同时含 `quay-task-worker`（-n 名）与该 task id
- *  （worker prompt 里的 "Task: <id>"）。纯谓词，cmdline 列表注入（缺省由调用方从 /proc 取）。
- *  task id 用【词边界】匹配，⛔ 不用裸 substring——短 id（如 `gap-t`）会作为前缀命中 `gap-test-…` /
- *  `gap-todo-…` 的存活 worker cmdline（2026-08-24 实测：测试 task `gap-t` 误命中生产 worker
- *  `gap-test-fixture-pollutes-bash-history` ⇒ cleanupOrphanWorktree 假跳过）。边界字符类 = 字母/数字/
- *  下划线/连字符（task id 全由它们组成 ⇒ `gap-t` 后跟 `e` 或 `-` 都不算命中，后跟 `.`/空格/行尾才算）。 */
-export function hasLiveWorkerForTask(taskId: string, workerCmdlines: string[], workerName: string = WORKER_PROCESS_NAME): boolean {
-  const re = new RegExp(`(^|[^a-zA-Z0-9_-])${escapeRegExp(taskId)}(?![a-zA-Z0-9_-])`);
-  return workerCmdlines.some((cmd) => cmd.includes(workerName) && re.test(cmd));
-}
+// hasLiveWorkerForTask 已抽到 driver-shared.ts（与 readPidCmdline / classifyOrphanDispatch 同处，
+// duration-report 经它取同一份判定）。本文件 re-export 保持旧 import 面。
 
 /** 解出该 task 存活 worker 的 pid：重扫 /proc，返回第一个其 cmdline（空格 join）命中
  *  hasLiveWorkerForTask 的 pid；无命中 ⇒ null（读不到 /proc 也 null——硬规则 3b：读不懂 ≠ 无存活，
@@ -1673,9 +1799,50 @@ export function isShaAncestorOfBranch(root: string, sha: string, branch: string 
   return r.status === 0;
 }
 
+// ── 当前 develop 红签名集：**唯一的写侧**（`gap-develop-red-set-writer` AC4）────────────────────────
+//
+// 分工：`worker-fan-in.ts` 只**观测**（`DevelopRedObservation`，随 fan-in 结果回传）；落盘只在这里、
+// 只被 `--mechanical-fan-in` 入口调用一次。fleet 侧（另一个工作区）对同一载体只有消费权、没有写权限
+// ——「写者只有 driver 进程」因此是可核的结构事实，而不是一句约定（`plugin/test/develop-red-set.test.mjs`
+// 的 AC4 用两条判据守着：调用点数 = 1 且落在本文件；fleet 侧的只读路径不产生任何磁盘写入）。
+//
+// 判定（Plan 第 3 条）：红 ⇒ upsert 该 key；绿（本轮在 develop 基线树上真的跑过且没再红，且 develop 前进）
+// ⇒ 移除该 key——**移除就是「红消失」的机械信号**。⛔ 观测缺读数（A/B 未评估）⇒ 本轮不动载体。
+export function applyDevelopRedObservation(opts: {
+  root: string;
+  /** 取 SHA 祖先关系的 git 上下文（通常是 fan-in worktree）；缺省 = root。 */
+  worktree?: string;
+  observation: DevelopRedObservation | null | undefined;
+  /** 注入缝（测试用）；缺省走 `git merge-base --is-ancestor`。 */
+  isAncestor?: (ancestor: string, descendant: string) => boolean | null;
+}): { written: boolean; reason: string | null; develop: string | null; reds: number } {
+  const obs = opts.observation;
+  if (obs === null || obs === undefined) return { written: false, reason: "no-observation", develop: null, reds: 0 };
+  const prev = readDevelopRedSet(opts.root);
+  // 读不懂现有载体（坏 JSON / 坏行）⇒ **本轮不写**：把「读不出旧红集」当成「旧红集为空」会让
+  // 所有未观测到的 key 静默消失（硬规则 3b 的反面）。文件缺失是合法的首轮状态，不算读不懂。
+  if (!prev.evaluated && prev.reason !== "missing-file") {
+    return { written: false, reason: `carrier-unreadable: ${prev.reason}`, develop: obs.develop, reds: 0 };
+  }
+  const gitDir = opts.worktree ?? opts.root;
+  const isAncestor = opts.isAncestor ?? ((a: string, b: string): boolean | null => {
+    if (a === b) return true;
+    const r = spawnSync("git", ["-C", gitDir, "merge-base", "--is-ancestor", a, b], { encoding: "utf8" });
+    if (r.error) return null;
+    if (r.status === 0) return true;
+    // exit 1 = 明确「不是祖先」；其它（对象不存在 / 非 git 仓库）⇒ 读不懂（⛔ 不折成 false 以外的判断）。
+    return r.status === 1 ? false : null;
+  });
+  // develop 是否前进（Plan 第 3 条的移除前提③）。⛔ 读不懂祖先关系（null）⇒ **不删**任何 key——
+  // 那时「这一轮通过」说明不了「在这个 develop 上消失了」。
+  const advanced = prev.evaluated ? isAncestor(prev.set.develop, obs.develop) === true : true;
+  const next = maintainDevelopRedSet(prev.evaluated ? prev.set : null, obs, { developAdvanced: advanced });
+  const w = writeDevelopRedSet(opts.root, next);
+  return { written: w.written, reason: w.reason, develop: next.develop, reds: next.reds.length };
+}
+
 /** 落地判定（AC1 判据），经 AC153 单一不变式 verifyIndependently 表达成 DriverResult（⛔ 不信
- *  exitCode，读任务侧独立直接量）。两态输入：
- *   - `landedSha`（机械 fan-in 落地后传入）= ff 结果的落地 sha ⇒ 判定从 ff 结果派生
+ *  exitCode，读任务侧独立直接量）。两态输入： *   - `landedSha`（机械 fan-in 落地后传入）= ff 结果的落地 sha ⇒ 判定从 ff 结果派生
  *     （landedSha 是 `branch` tip/祖先 ∧ 无残留 worktree），⛔ 不读 readTaskStatus（D5）；
  *   - `landedSha` null（未跑机械 fan-in / red / 旧路径）⇒ 沿用 status-based 判定（status=done ∧ 无残留）。
  * `branch`（缺省 develop）= 本任务的合并目标分支名（resolveTaskMergeTarget：`develop` 或 `goal/<GOAL>`）——
@@ -4541,102 +4708,14 @@ function appendWorkerPid(pidFile: string, workerPid: number): void {
   }
 }
 
-// ── dispatch 持久记录（gap-worker-driver-restart-orphan-no-outcome-no-timeout）────────────────────
-// driver 重启孤儿化在飞 worker 的元数据持久化：旧 driver 把 spawn 的 dispatch 元数据（selector 理由 /
-// runId / 原始派发时刻 / 原始超时截止时刻 / spawn cmdline）原子写进 <root>/.quay/worker-dispatch.json
-// （按 taskId 索引的单文件 map），在终态被正常计算时清除对应条目。旧 driver 死 ⇒ 内存 running 整体丢失，
-// 但这份持久影子存活 ⇒ 新 driver 的 reconcile 能读到「这个 task 为什么在飞、是哪次 dispatch、跑了多久、
-// 原定超时预算是多少」，据此 adopt（纳入超时监管）或 finalize（已死补终态），⛔ 不再是「排除集之外一片黑箱」。
-
-/** 一条 dispatch 持久记录（spawn 后写、终态后清；driver 重启遗留的条目 = 孤儿在飞）。 */
-export interface DispatchRecord {
-  taskId: string;
-  runId: string;
-  workerPid: number;
-  selectorReason: string;
-  /** 派发时刻（epoch ms）。 */
-  startedAtMs: number;
-  /** 原始超时截止时刻（epoch ms）；0 = 无超时（与 timeoutMs>0 对齐）。adopt 沿用此值，⛔ 不重置。 */
-  timeoutDeadlineMs: number;
-  /** spawn 时的归一化 cmdline（argv 空格 join）——观测抓手 + adopt 时 hasLiveWorkerForTask 复核的参照
-   *  （⛔ 不裸信 pid 数字，避免 pid 复用误判）。 */
-  cmdlineFingerprint: string;
-}
-
-/** dispatch 记录文件的绝对路径。 */
-export function dispatchStoreFile(root: string): string {
-  return path.join(root, WORKER_DISPATCH_REL);
-}
-
-/** 读整份 dispatch store（taskId → record）；文件缺失 / 解析失败 ⇒ {}（fail-soft，硬规则 3b：读不懂
- *  ≠ 无记录，但方向是「少 adopt ⇒ 维持现状」，⛔ 不是 fail-closed 到「全部孤儿」——那会误接管手工起的 worker）。 */
-export function readDispatchStore(file: string): Record<string, DispatchRecord> {
-  let text: string;
-  try {
-    text = fs.readFileSync(file, "utf8");
-  } catch {
-    return {};
-  }
-  try {
-    const parsed = JSON.parse(text);
-    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) return parsed as Record<string, DispatchRecord>;
-    return {};
-  } catch {
-    return {};
-  }
-}
-
-/** 原子写整份 dispatch store（tmp + rename，外部读者绝不读到半截——与 appendWorkerPid 同手法）。 */
-export function writeDispatchStore(file: string, store: Record<string, DispatchRecord>): void {
-  try {
-    fs.mkdirSync(path.dirname(file), { recursive: true });
-    const tmp = `${file}.tmp-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-    fs.writeFileSync(tmp, JSON.stringify(store, null, 2), "utf8");
-    fs.renameSync(tmp, file);
-  } catch {
-    /* dispatch store 是观测抓手 + 孤儿 adopt/finalize 的输入，写失败不改变主流程（同 appendWorkerPid） */
-  }
-}
-
-/** upsert 一条 dispatch 记录（读-改-写，原子）。 */
-export function upsertDispatchRecord(file: string, record: DispatchRecord): void {
-  const store = readDispatchStore(file);
-  store[record.taskId] = record;
-  writeDispatchStore(file, store);
-}
-
-/** 移除一条 dispatch 记录（终态已算 ⇒ dispatch 已了结）。记录本不存在 ⇒ no-op（⛔ 不写 spurious 空文件）。 */
-export function removeDispatchRecord(file: string, taskId: string): void {
-  const store = readDispatchStore(file);
-  if (!(taskId in store)) return;
-  delete store[taskId];
-  writeDispatchStore(file, store);
-}
-
-/** 读某 pid 的 /proc/<pid>/cmdline（归一化：NUL → 空格、trim）；pid 不存在 / 无权限 ⇒ null
- *  （硬规则 3b：读不懂 ≠ 无存活，但调用方按 falsy 判「已死」——方向是「少 adopt」，⛔ 不误信 pid）。
- *  读由 kernel leaf 单点实现；⛔ 保留「空 cmdline ⇒ ""」这一取值（调用方按 falsy 与 null 同判
- *  「已死」，但取值本身不同形，见 `probePidLiveness` 对同一区分的用法）。 */
-export function readPidCmdline(pid: number, procDir: string = "/proc"): string | null {
-  const text = readProcCmdlineText(pid, procDir);
-  return text === null ? null : text.trim();
-}
-
-/** 孤儿 dispatch 分类（纯函数）：adopt（pid 存活且 cmdline 仍是本任务的 worker）/ finalize（pid 已死 /
- *  被复用）。复核用 hasLiveWorkerForTask 的词边界 cmdline 匹配（同 cold-start-inflight 交叉核对），⛔ 不
- *  裸信 pid 数字——pid 复用后指向别的进程，cmdline 不再含 <worker 名> + task id ⇒ 判 finalize。
- *  空 cmdline（僵尸已退未收尸）与读不到（null）同判「已死」。
- *  workerName：本 workspace 的 worker `-n` 名（resolveWorkerProcessName(root)），⛔ 不用写死的
- *  `quay-task-worker`——第三方项目改名后本函数会对【在飞】worker 恒判 finalize（2026-09-13 quay-fleet 实证）。 */
-export function classifyOrphanDispatch(
-  record: DispatchRecord,
-  procDir: string = "/proc",
-  workerName: string = WORKER_PROCESS_NAME,
-): "adopt" | "finalize" {
-  const cmdline = readPidCmdline(record.workerPid, procDir);
-  if (!cmdline) return "finalize";
-  return hasLiveWorkerForTask(record.taskId, [cmdline], workerName) ? "adopt" : "finalize";
-}
+// ── dispatch 持久记录：实现 + 契约已抽到 driver-shared.ts ─────────────────────────────────────────
+//
+// WHY 抽走（gap-worker-dispatch-carrier-owner-and-contract-unregistered）：duration-report 必须用【同一份】
+// classifyOrphanDispatch 判「在飞 / 残留」，而 `worker-driver → relaxed-dispatch-ledger → duration-report`
+// 已是一条值边 ⇒ duration-report 反向 import 本文件会成值环。载体的类型 / 读写 / 只读三态判定
+// （live / residue / not-evaluated）与 worker 进程身份判定现住 driver-shared.ts，本文件 re-export 保持
+// 旧 import 面（worker-driver.test.mjs 等逐字不变）。
+// 契约正文（写入时机 / 原子性 / 版本标记 / 三态语义 / 不含 phase 的边界）→ docs/references/worker-dispatch-carrier.md。
 
 /** reconcile 该处理的孤儿 dispatch 清单：store 里、但不在本驱动内存 running 的条目。⛔ 记录缺失（driver
  *  从未见过，如手工起的 worker）⇒ 不在 store ⇒ 天然跳过、不越权接管；running 中的本驱动在飞 dispatch ⇒
@@ -5306,6 +5385,8 @@ function runOneWorker({
   detachSignal,
   role = "task-worker",
   argvSource = "launchArgv",
+  onSpawned,
+  onWorkerExited,
 }: {
   taskId: string;
   selectorReason: string;
@@ -5328,6 +5409,11 @@ function runOneWorker({
   judgeQuickDeath?: QuickDeathJudge;
   /** 停机脱钩信号（常驻环注入；批量路径不注入——那条路没有 kind 停机语义）。 */
   detachSignal?: WorkerDetachSignal;
+  /** live-state 事件钩子（常驻环注入；批量路径不注入——那条路没有常驻在飞集可投影）。
+   *  ① spawn 返回后（pid 已知或 null）；② 子进程 close 事件里（`workerExitedAtMs` 同一处直接量，
+   *  ⛔ 不在 fan-in 之后补）。两者都在**同一个** runOneWorker 生命周期里，不另起观察路径。 */
+  onSpawned?: (workerPid: number | null) => void;
+  onWorkerExited?: (info: { code: number | null; signal: string | null; spawnError: string | null }) => void;
 }): Promise<WorkerRunResult> {
   // Dispatch-time slice baseline (fire-and-forget; fail-open — see queueSliceBaseline).
   if (role === "task-worker") queueSliceBaseline(taskId, rootDir);
@@ -5369,6 +5455,10 @@ function runOneWorker({
       child.stderr.on("error", () => { /* best-effort */ });
     }
     const workerPid = child && child.pid ? child.pid : null;
+    // ① live-state：spawn 已返回（pid 已知或 null）。常驻环在这里记 implementing；批量路径不注入。
+    // ⛔ 叫 onSpawned 而不是 onSpawnStart：此刻 `spawn()` 已返回，但子进程**尚未被确认活着**——
+    // 紧随其后的 'error'/'close' 会把它收成终态（两条都是事件，不靠轮询）。
+    onSpawned?.(workerPid);
     let timedOut = false;
     let timer: ReturnType<typeof setTimeout> | null = null;
     let finished = false;
@@ -5599,6 +5689,12 @@ function runOneWorker({
       // （`child.on("close")` 的子进程退出时刻，由内核投递）。⛔ 不要在 finish() 里再补一次
       // Date.now()——那时 fan-in 已经跑完，读到的会是 fan-in 结束时刻（正是本任务要分开的两个相位）。
       if (workerExitedAtMs === null) workerExitedAtMs = Date.now();
+      // ② live-state：child exit 是 driver 确实知道的第二个相位边界（implementing → fan-in /
+      // awaiting-land）。与上面的 `workerExitedAtMs` 同一处取值——⛔ 不在 finish() 里再补一次
+      // （那时可能是 fan-in 结束时刻）。已脱钩 ⇒ 本循环不再报告它（下一个循环的 reconcile 接管）。
+      if (!isDetached()) {
+        onWorkerExited?.({ code, signal: s ?? null, spawnError });
+      }
       void finishAsync(code, s ?? null, spawnError);
     });
 
@@ -5664,6 +5760,13 @@ interface RunningWorker {
   /** 派发时刻（epoch ms）——round 载体 in_flight_task_starts 的数据源（gap-live-fan-in-window-
    *  elapsed-zero：Live 页 fan-in 窗口 elapsed 需真起点，driver 派发时已知）。 */
   startedAtMs: number;
+  /** 该次尝试的 runId（live-state 快照字段；与 outcome/round 载体同源，⛔ 不另编一个）。 */
+  runId: string;
+  /** worker 子进程 pid（spawn 回调写入；spawn 失败 / 冷启动接管时为 null）。 */
+  workerPid: number | null;
+  /** driver 侧观测到的执行相位——**只用于 live-state 投影**，⛔ 不参与任何派发/判停判定。
+   *  spawn ⇒ implementing；child exit ⇒ fan-in（进入落地流水线）或 awaiting-land（不跑 fan-in）。 */
+  phase: WorkerLivePhase;
   promise: Promise<WorkerRunResult>;
   /** 停机脱钩（gap-worker-kind-stop-waits-for-all-in-flight-workers-instead-of-detaching-for-
    *  adoption）：kind 停机时把本 worker 留给下一个循环。返回 `true` = 已脱钩；`false` = **不可脱钩**
@@ -5828,6 +5931,47 @@ export async function runResidentLoop(opts: ResidentOptions): Promise<number> {
     return map;
   };
 
+  // `.quay/live-state.json` 的唯一写入器 + 四个事件调用点（gap-live-state-small-carrier-…）：
+  //   ① spawnSelected（spawn 成功）② runOneWorker 的 child close（exit）③ onWorkerFinished（terminal）
+  //   ④ writeRound（每轮心跳）。⛔ 投影只用于写快照，不参与任何派发/判停判定。
+  const liveState = new LiveStateProjection(rootDir);
+  /**
+   * 本刻的**权威在飞集**（常驻环自己的 `running` + 冷启动观测到的存活 worker），投影成快照条目。
+   * ⛔ 这是唯一一处把 driver 状态翻译成 live-state 条目的代码（四个调用点共用）——不各写一份。
+   */
+  const liveStateInputs = (): LiveStateInput[] => {
+    const out: LiveStateInput[] = running
+      .filter((r) => !r.done) // 终态已算完的条目在下一次 reap 前仍在 running 里，⛔ 不得回报为在飞
+      .map((r) => ({
+        taskId: r.task,
+        runId: r.runId,
+        phase: r.phase,
+        startedAtMs: r.startedAtMs,
+        workerPid: r.workerPid,
+      }));
+    const seen = new Set(out.map((e) => e.taskId));
+    if (coldInflight.size > 0) {
+      // 冷启动在飞（上一个 driver 留下、本进程没有 promise 的存活 worker）也属于本工作区的在飞集。
+      // dispatch 载体给出真实 runId / 起点 / pid；**无记录**（手工起的 worker）⇒ 起点取本刻（readLive
+      // 对缺起点同样回退 nowMs：诚实「刚起步」，⛔ 不伪造一段长 elapsed）。
+      let store: Record<string, DispatchRecord> = {};
+      try { store = readDispatchStore(dispatchStoreFile(rootDir)); } catch { store = {}; }
+      const nowMs = Date.now();
+      for (const id of coldInflight) {
+        if (seen.has(id)) continue;
+        const rec = store[id];
+        out.push({
+          taskId: id,
+          runId: rec?.runId ?? `worker-${id}`,
+          phase: "implementing",
+          startedAtMs: typeof rec?.startedAtMs === "number" ? rec.startedAtMs : nowMs,
+          workerPid: typeof rec?.workerPid === "number" ? rec.workerPid : null,
+        });
+      }
+    }
+    return out;
+  };
+
   // round 心跳（AC138-3）：worker-outcome 只在任务真完成时写，池空时 outcome 停更会被 supervisor
   // status 的 last_record_ts（读全载体 max）误读为「死亡」；round 每轮循环无条件写一条作 liveness 直接量。
   const roundFile = path.join(rootDir, WORKER_ROUND_REL);
@@ -5881,6 +6025,9 @@ export async function runResidentLoop(opts: ResidentOptions): Promise<number> {
       undetachableWorkers: detached.undetachable,
     });
     try { appendHeartbeatLine(roundFile, record); } catch { /* 记录写失败不致命（运行时日志，⛔ 不因日志炸循环） */ }
+    // ④ live-state 心跳（每轮无条件一次）：保底新鲜度 —— 三个边沿事件之外，读者最多看到一个 round
+    // 周期前的快照（≥ 边沿驱动的部分不会陈旧；此处的频率只需低于读侧的 stale 阈值）。
+    liveState.heartbeat(liveStateInputs());
     if (json) process.stdout.write(`${JSON.stringify({ event: "round", ...record })}\n`);
   };
 
@@ -6098,6 +6245,9 @@ export async function runResidentLoop(opts: ResidentOptions): Promise<number> {
    *     计入连续未落地会因基建原因把任务 park。 */
   const onWorkerFinished = (rw: RunningWorker, r: WorkerRunResult): WorkerRunResult => {
     rw.done = true;
+    // ③ live-state：终态计算完成 ⇒ 该条目离开在飞快照（已落地 / 已判非在飞）。放在 done 之后：
+    // 即使投影的 heartbeat 恰在此刻跑，`liveStateInputs` 也已把它滤掉（同一份 `done` 标志）。
+    liveState.terminal(rw.task);
     results.push(r);
     const event = normalizeWorkerOutcome(r);
     const reports = workerPool.dispatchOutcome(event, { root: rootDir });
@@ -6141,6 +6291,9 @@ export async function runResidentLoop(opts: ResidentOptions): Promise<number> {
     // gap-live-fan-in-window-elapsed-zero：派发时刻（driver 决定 spawn 该 task 的此刻）——round 载体
     // in_flight_task_starts 的真起点，readLive 据此算 fan-in 窗口 elapsed（⛔ 恒 nowMs 的旧行为）。
     rw.startedAtMs = Date.now();
+    rw.runId = runIdForTask;
+    rw.workerPid = null; // spawn 回调在 runOneWorker 的同步段里填（此处已 push 之前的占位）
+    rw.phase = "implementing";
     // 停机脱钩信号（gap-worker-kind-stop-…）：worker 侧与循环侧共享同一份对象——循环置 `detached`，
     // worker 侧在跨进收尾流水线时置 `pipelineStarted`。
     const detachSignal: WorkerDetachSignal = {};
@@ -6161,8 +6314,27 @@ export async function runResidentLoop(opts: ResidentOptions): Promise<number> {
       // 判定注入：写载体之前跑（见 QuickDeathJudge），onWorkerFinished 消费结论、⛔ 不再重算。
       judgeQuickDeath: judgeQuickDeathFor(sel.task),
       detachSignal,
+      // ① spawn 成功（pid 已知或 null）。runOneWorker 的同步段在返回 Promise 前就会调用它 ⇒ 本行
+      // 之后的 `running.push` 之前 rw.workerPid 已定值；真正的写盘放在 push 之后（见下）。
+      onSpawned: (pid) => { rw.workerPid = pid; },
+      // ② child exit：进入落地流水线的记 fan-in；否则（非零退出 / spawn 失败）记 awaiting-land
+      // ——实现已结束、判词尚未算出。⛔ 此处不预测 AC 短路（那是 finishAsync 内的判据），
+      // 「进入落地流水线」本身就是 driver 在 exit 这一刻确实知道的相位。
+      onWorkerExited: ({ code, spawnError }) => {
+        const phase: "fan-in" | "awaiting-land" = code === 0 && spawnError === null ? "fan-in" : "awaiting-land";
+        rw.phase = phase;
+        liveState.exit(rw.task, phase);
+      },
     }).then((r) => onWorkerFinished(rw, r));
     running.push(rw);
+    // ① 的落盘点：push 之后写一次（此刻在飞集已包含本条目）⇒ 读者在 spawn 事件后立刻可读到它。
+    liveState.spawn({
+      taskId: rw.task,
+      runId: rw.runId,
+      phase: "implementing",
+      startedAtMs: rw.startedAtMs,
+      workerPid: rw.workerPid,
+    });
     if (json) {
       process.stdout.write(
         `${JSON.stringify({ event: "selector-picked", task: sel.task, selector_reason: sel.reason, in_flight_count: running.length, run_id: runIdForTask })}\n`,
@@ -6237,6 +6409,9 @@ export async function runResidentLoop(opts: ResidentOptions): Promise<number> {
           rw.task = taskId;
           rw.done = false;
           rw.startedAtMs = record.startedAtMs; // 原始派发时刻（⛔ 不是接管时刻——fan-in 窗口 elapsed 真起点）
+          rw.runId = record.runId;
+          rw.workerPid = record.workerPid;
+          rw.phase = "fan-in"; // worker 已退出、本循环正在接管它的机械 fan-in（driver 确实知道的相位）
           // ⛔ 不可脱钩，恒 `false`：这条分支一进来就【同步开跑】了退出后流水线（机械 fan-in），
           // 它的产出只能由本循环收尾（中途退环 ⇒ 下一个循环把同一 dispatch 当孤儿再跑一次 fan-in）。
           rw.detach = () => false;
@@ -6262,6 +6437,9 @@ export async function runResidentLoop(opts: ResidentOptions): Promise<number> {
         rw.task = taskId;
         rw.done = false;
         rw.startedAtMs = record.startedAtMs; // 原始派发时刻（⛔ 不是 adopt 时刻——fan-in 窗口 elapsed 真起点）
+        rw.runId = record.runId;
+        rw.workerPid = record.workerPid;
+        rw.phase = "implementing"; // 进程仍存活（classifyOrphanDispatch 的 adopt 分支）⇒ 在实现中
         // 停机脱钩（同 spawnSelected）：被接管的 worker 只要还没进退出流水线，就可以再一次被下一个
         // 循环接管（链式停机/重启不会把它的归宿弄丢）。
         const detachSignal: WorkerDetachSignal = {};
@@ -6733,6 +6911,17 @@ export async function main(argv: string[]): Promise<number> {
       runId: runId ?? `fm-${task}-${Date.now()}`,
       mergeTarget: mechMergeTarget,
     });
+    // 当前 develop 红签名集的**唯一写侧**（AC4）：fan-in 只观测（`developRedObservation` 随结果回传），
+    // 落盘在这里。⛔ 不阻塞落地、⛔ 不改 exit code（观测写失败 ⇒ stderr 一行，结果判定逐字不变）；
+    // stderr 不污染 stdout 的单行 JSON 契约（spawn 方取 stdout 最后一条非空行）。
+    const redSet = applyDevelopRedObservation({
+      root: rootDir,
+      worktree: mechWorktree,
+      observation: result.baselineEquivalence?.developRedObservation ?? null,
+    });
+    if (!redSet.written && redSet.reason !== "no-observation") {
+      process.stderr.write(`worker-driver: develop-red-set not written: ${redSet.reason}\n`);
+    }
     process.stdout.write(`${JSON.stringify(result)}\n`);
     return result.outcome === "landed" ? 0 : 2;
   }

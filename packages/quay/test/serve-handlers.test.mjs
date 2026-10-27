@@ -32,8 +32,8 @@ import http from "node:http";
 import { startServer } from "../src/serve/serve.ts";
 import { layoutGitGraph, renderLoadCurveSvg, readSuiteLoadSamples, clipSuiteLoadSamplesToWindow, renderPerFileTable, renderPerFileTimelineSvg, bucketSetOfFile, collectFileHistory, renderFileDurationTrendSvg, renderFileHistoryTable, gitGraphClientScript, taskRunsBlock, renderFanInCell, fanInLogPath, driverActionSpec, newSessionArgs, resumeSessionArgs, WEB_DRIVER_VERBS, WEB_DRIVER_KINDS } from "../src/serve/serve-handlers.ts";
 import { readGitHistory, readLive, liveSessionIdForPid, sessionTranscriptPath, isValidSessionId, readWorkerOutcomeRecords } from "../src/observation.ts";
-import { renderLivePage } from "../src/serve/serve-live.ts";
-import { sendSessionFrames, verdictStateToDeliveryState, classifyReceipt, resolveSessionEndpoint, sendToSession, renderSendResult, HELD_EXPIRY_MS, WEB_SEND_FROM_NAME } from "../src/serve/serve-send.ts";
+import { renderLivePage } from "../src/serve/pages/serve-live.ts";
+import { sendSessionFrames, verdictStateToDeliveryState, classifyReceipt, resolveSessionEndpoint, sendToSession, renderSendResult, HELD_EXPIRY_MS, WEB_SEND_FROM_NAME } from "../src/serve/io/serve-send.ts";
 import { QUAY_NATIVE_CLI } from "./helpers/cli-entry.mjs";
 import { createStore } from "../../quay-native/src/store.ts";
 
@@ -2089,7 +2089,7 @@ test("AC1 (shared protocol) — sendSessionFrames writes the auth frame then the
 test("AC1 (no two copies) — send-to-session.ts imports the shared module instead of reimplementing the socket", () => {
   const src = fs.readFileSync(pluginScriptPath, "utf8");
   assert.doesNotMatch(src, /net\.createConnection/, "the plugin script no longer opens its own socket (logic extracted)");
-  assert.match(src, /import\("\.\.\/\.\.\/packages\/quay\/src\/serve\/serve-send\.ts"\)/, "the plugin script imports the shared serve-send.ts module");
+  assert.match(src, /import\("\.\.\/\.\.\/packages\/quay\/src\/serve\/io\/serve-send\.ts"\)/, "the plugin script imports the shared serve-send.ts module");
 });
 
 test("AC1/AC2 (falsifiable) — verdictStateToDeliveryState maps the transcript verdict to the delivery state (single source, not settings)", () => {

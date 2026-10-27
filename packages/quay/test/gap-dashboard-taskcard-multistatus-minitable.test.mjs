@@ -35,11 +35,11 @@ import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import fs from "node:fs";
-import { renderDashboardPage } from "../src/serve/serve-dashboard.ts";
+import { renderDashboardPage } from "../src/serve/view/serve-dashboard.ts";
 import { readTaskSummary, dashboardSnapshotStore } from "../src/serve/serve-handlers.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const SERVE_DASHBOARD_SRC = path.join(__dirname, "..", "src", "serve", "serve-dashboard.ts");
+const SERVE_DASHBOARD_SRC = path.join(__dirname, "..", "src", "serve", "view", "serve-dashboard.ts");
 
 /** Minimal-but-shape-valid dashboard args: every nested field renderDashboardPage touches, with
  *  the sys/mgr/live probes at their benign no-op values so the render function is exercised as a

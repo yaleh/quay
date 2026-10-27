@@ -16,7 +16,7 @@
 // 里那份同名内联文本），修前它只列 2 个 kind 而真源有 6 个 ⇒ outer/quality/meta/goal 四个已实现的
 // kind 在产品表层等于不存在。
 
-import { ALL_SERVICE_NAMES, KINDS, VERBS } from "../driver-vocab.ts";
+import { ALL_SERVICE_NAMES, KINDS, LIVE_STATE_PHASES, LIVE_STATE_STALE_MS, VERBS } from "../driver-vocab.ts";
 // The task-status-event actor-kind vocabulary the `task log` contract below prints. DERIVED, not
 // re-typed — same rule as VERBS/KINDS above (⛔ this file must never become a second definition point
 // for a vocabulary). The kernel module is a LEAF (node builtins only), so importing it costs the
@@ -25,7 +25,7 @@ import { TASK_STATUS_EVENT_ACTOR_KINDS } from "../kernel/task-transition.ts";
 // The web binding's ONE fallback (a leaf module, zero closure deps). Interpolated rather than
 // re-typed: the help text is a DERIVED surface, so the default it prints is the same value the
 // resolver uses — the two cannot drift (gap-serve-binding-defaults-three-copies-to-one-definition-point AC8).
-import { SERVE_BINDING_FALLBACK } from "../serve/serve-binding.ts";
+import { SERVE_BINDING_FALLBACK } from "../serve/view/serve-binding.ts";
 
 // ── the product-layer single naming point for the shipped init upgrade entry ─────────────────────
 // (gap-quay-init-sh-no-single-naming-point; same shape as `RESOURCE_GATE_REL` + `scriptBasename` in
@@ -42,6 +42,12 @@ import { SERVE_BINDING_FALLBACK } from "../serve/serve-binding.ts";
 // ≤40-line shim over THIS entry, so naming the shim here would advertise a front for a mechanism
 // whose real home the help text is supposed to point at.
 export const QUAY_INIT_REL = "plugin/bin/quay";
+
+/** The version `quay driver log --since` first shipped in (gap-driver-log-since-and-tail-read AC5).
+ *  ONE definition point: this file's driver help prints it, and cli/driver.ts's own inline usage
+ *  interpolates the same constant (⛔ the version is never re-typed — 硬规则 5b). `--limit` shipped in
+ *  0.22.0; `--since` and the bounded tail read in the version below. */
+export const DRIVER_LOG_SINCE_FIRST_SHIPPED = "0.24.0-dev";
 
 /** `quay init --help`, the `--doc-branch-name` flag's "no default" clause. Shared VERBATIM by this
  *  file and `cli/init.ts` (both render it; the two copies used to be byte-identical duplicates). */
@@ -76,7 +82,8 @@ Usage:
   quay adr new <id> --title <title> [--status <status>] [--body <text>|--body-file <path>] [--json] [--root <path>]
   quay adr accept|deprecate|reject <id> [--json] [--root <path>]
   quay adr supersede <id> --by <newId> [--json] [--root <path>]
-  quay goal list [--status <status>] [--kind <kind>] [--goal <goal-id>] [--no-evidence] [--json] [--root <path>]
+  quay goal list [--status <status>] [--kind <kind>] [--goal <goal-id>] [--no-evidence] [--no-body [--with-status-log]] [--since <ISO8601|epoch-ms>] [--json] [--root <path>]
+  quay goal log [--since <ISO8601|epoch-ms>] [--json] [--root <path>]
   quay goal show <id> [--json] [--root <path>]
   quay goal write <id> --origin <text> [--title <title>] [--status <status>] [--goal <goal-id>] [--criterion <cmd>] [--json] [--root <path>]
   quay goal gate <id> [--dry-run] [--json] [--root <path>]
@@ -111,6 +118,8 @@ Usage:
   quay manager arm [--dry-run] [--json] [--verify]
   quay driver <${VERBS.join("|")}> --kind <${KINDS.join("|")}> [--root <path>]
   quay lanes [--json] [--window-hours <n>] [--root <path>]
+  quay live-state [--json] [--stale-ms <n>] [--root <path>]   (first shipped in 0.23.0)
+  quay suite [--json] [--limit <n>] [--since <ISO8601>] [--root <path>]   (first shipped in 0.24.0-dev)
 
 Options for task list:
   --status <status>   Filter by status (todo, ready, done, needs-human, superseded)
@@ -192,7 +201,7 @@ task log / task trace — the READ surface over the task-status transition carri
                     transitions".
 
 The published CONTRACT (task log --json; task trace --json is the same document minus
-transitions/nextCursor/complete/rebase, plus its own taskId/status):
+transitions/nextCursor/tailCursor/complete/rebase, plus its own taskId/status):
   {
     "transitions": [ { "order": 0, "schema": "v1", "seq": 0, "eventId": "<sha256[0:32]>",
                        "carrierEpoch": "<epoch>", "taskId": "<id>", "from": "todo", "to": "ready",
@@ -203,6 +212,7 @@ transitions/nextCursor/complete/rebase, plus its own taskId/status):
                        "reason": "…",
                        "source": "task-status-events|git", "inferred": false, "commit": "<sha|null>" } ],
     "nextCursor": { "v": 1, "carrierEpoch": "<epoch>", "seq": 3 },
+    "tailCursor": { "v": 1, "carrierEpoch": "<epoch>", "seq": <last carrier position> },
     "complete": false,
     "coverage": { "carrier": { "path": "…", "exists": true, "epoch": "…", "lines": 0, "v0": 0, "v1": 0, "corrupt": 0 },
                   "writerClasses": [ { "id": "<class>", "wired": true, "inScope": true, "callSites": ["…"], "reason": "…" } ],
@@ -225,6 +235,22 @@ transitions/nextCursor/complete/rebase, plus its own taskId/status):
               of it, so a consumer that crashes between "read a page" and "process it" re-receives
               that one boundary event instead of losing it. DEDUPE BY \`eventId\` — that is the
               documented, and only, dedup key.
+  tailCursor  Available since quay 0.23.0 (ADDITIVE — no existing key changed; nextCursor keeps its
+              definition and its value). The CARRIER'S TAIL: {v, carrierEpoch, seq}, where seq is the
+              CARRIER POSITION of the carrier's LAST event (equal to that transition's \`order\`),
+              computed from EVERY transition and ⛔ INDEPENDENT of \`--since\` / \`--until\` / \`--limit\`
+              — so it is present even when the page is EMPTY, which is exactly the reading nextCursor
+              cannot give. This is the token an external consumer takes after ONE full
+              \`task list --json --no-body\` baseline and then passes back verbatim as --since for every
+              increment: "what changed since my baseline" never depends on guessing a time window, and
+              nextCursor is never overloaded to mean a position at which nothing was delivered.
+              THREE STATES, never conflated: (i) the carrier is ABSENT ⇒ null, with
+              coverage.carrier.exists false; (ii) the carrier EXISTS with zero events ⇒ {seq: 0} — the
+              position the first event will occupy (⛔ never null); (iii) the carrier EXISTS but no line
+              is readable ⇒ null, with coverage.carrier.corrupt > 0 named in coverage.reasons. ⛔ A
+              fabricated seq:0 for (i) or (iii) is the defect this field exists to prevent.
+              The resume is INCLUSIVE, so the FIRST increment read re-delivers the boundary event
+              (order === seq) — dedupe by \`eventId\`, exactly as with nextCursor.
   rebase      true iff the supplied cursor's carrierEpoch does not match the carrier's current epoch
               (a rotation, or the first v1 append onto a legacy v0-only carrier, whose epoch literal is
               "pre-epoch"). The read then REPLAYS FROM THE BEGINNING of the current epoch and says so
@@ -517,7 +543,8 @@ Environment contract — when the default 'acceptance' gate spawns a command:
     process.stdout.write(`quay goal — goal + AC records (GOAL-NNN / AC-NNN)
 
 Usage:
-  quay goal list [--status <status>] [--kind <kind>] [--goal <goal-id>] [--no-evidence] [--json] [--root <path>]
+  quay goal list [--status <status>] [--kind <kind>] [--goal <goal-id>] [--no-evidence] [--no-body [--with-status-log]] [--since <ISO8601|epoch-ms>] [--json] [--root <path>]
+  quay goal log [--since <ISO8601|epoch-ms>] [--json] [--root <path>]
   quay goal show <id> [--json] [--root <path>]
   quay goal write <id> --origin <text> [--title <title>] [--status <status>] [--goal <goal-id>] [--criterion <cmd>] [--branch true|false] [--json] [--root <path>]
   quay goal gate <id> [--timeout <ms>] [--dry-run] [--json] [--root <path>]
@@ -532,11 +559,36 @@ Usage:
                         .quay/gate-events.jsonl, whose cost is ∝ ledger size and independent of the
                         goal count. The full record set is still returned — a summariser that only
                         needs frontmatter (id/status/kind/title) should pass this.
+                        list --no-body  THIN PROJECTION: each row keeps ONLY id / title / status /
+                        kind / goal / updatedAt — ⛔ no body / criterion / expect / origin /
+                        statusLog. This is the surface for an external read-only panel: the full
+                        record set costs 1.28MB/786ms for 397 rows, almost all of it long
+                        fields the panel never renders. History is not lost — read it through
+                        'goal log' below, or add --with-status-log to the list call.
+                        --with-status-log  Opt the record's own statusLog back into the thin
+                        projection (the ONE long field a history-aware list consumer needs).
+                        No effect without --no-body (the full record already carries it).
+                        --since <ISO8601|epoch-ms>  INCREMENTAL READ: keep only records whose
+                        carrier mtime (updatedAt) is at/after the instant. updatedAt is a file
+                        mtime, so a git checkout/merge only makes it NEWER — the filter can
+                        OVER-report but never miss a change. A record whose mtime could not be
+                        read has no place in time and is INCLUDED (same direction), ⛔ never
+                        dropped as if unchanged.
+                        ⛔ Three-state: if the goal carrier directory is missing or unreadable,
+                        --no-body / --since / 'goal log' answer {evaluated:false, reason} and exit
+                        3 (= NOT-EVALUATED, the same code 'goal check --stale-pass' uses). An
+                        empty array therefore always means "read the carrier, nothing there".
                         write --branch true|false  Opt a GOAL into its own isolation branch
                         (SPEC-goal-branch §4.1). The branch NAME is DERIVED — 'goal/<GOAL-NNN>' —
                         ⛔ never a flag. It is created lazily from the develop tip when the goal
                         becomes active, and discarded (tip SHA recorded in statusLog) when the goal
                         is retired/superseded. The field is LOCKED once the branch exists.
+  log                   The CROSS-RECORD status-transition read: merges every record's own
+                        append-only 'statusLog' into ONE stream, ascending by 'at', each row
+                        {id, goal, kind, at, from, to, actor, reason}. 'goal' is the owning GOAL on
+                        an AC row and null on a GOAL row. ⛔ No second carrier and no second parser:
+                        the per-record statusLog stays the single source of truth. Exits 3 with
+                        {evaluated:false} when the carrier cannot be read (see 'list' above).
   gate <id>             Run the record's 'criterion' via the acceptance runner and append ONE
                         GateEvent to <root>/.quay/gate-events.jsonl. Exit 0 = pass, 1 = fail,
                         2 = usage (no such record / bad args). An EMPTY criterion fails closed.
@@ -637,12 +689,22 @@ Usage:
              Surface recovery after drain+stop (⛔ no need to read driver-internal exports).
   status     Report {kind, supervisor_pid, driver_pid, alive, carrier_path, carrier_records,
              last_record_ts} — last_record_ts is the carrier's last-record timestamp (not just a
-             record count, which cannot distinguish "growing" from "stalled").
+             record count, which cannot distinguish "growing" from "stalled"). --json also carries the
+             drift readings: loaded_version / path_quay_version / pointer. \`pointer\` compares Core's
+             own plugin root with the project guidance link \`.quay/plugin\`, and its state vocabulary is
+             current | behind | ahead | retired | not-evaluated:
+               retired        the link is ABSENT — retired (quay init no longer creates it), so absence
+                              is the NORMAL state, ⛔ not an error and ⛔ not "unable to evaluate";
+               not-evaluated  the path is there but cannot be read as a version relation (not a
+                              symlink / dangling target / no plugin.json / unreadable Core version) —
+                              ⛔ "cannot read" is NOT the same as "retired".
   restart    stop then start. ⚠️ Inherits the worker caveat above: while ready work exists it
              aborts WITHOUT starting (exit 1) rather than risk two loops on one kind.
   log        READ-ONLY: print the driver's recorded per-attempt log (the RAW failure text of each
              attempt — never classified, never interpreted), through observation.readFanInAttempts
-             (the same single reader the web /needs-human page uses). ⛔ Does NOT spawn the kernel.
+             (the same single reader the web /needs-human page uses). \`--task\`/\`--limit\`/\`--since\`
+             scope it to the slice the caller asked for (see the flags below). ⛔ Does NOT spawn the
+             kernel.
   live       READ-ONLY: print the CURRENT in-flight worker set as JSON — the machine-readable
              counterpart to the web dashboard's "Loop pulse" card. Reuses observation.readLive's ONE
              call chain (⛔ no second /proc scan); scoped to THIS workspace (each scanned process must
@@ -653,6 +715,19 @@ Usage:
   --kind <${KINDS.join("|")}>   Which driver the command targets. Required for the control verbs
              (start/stop/drain/resume/status/restart); optional for the read-only \`live\` (defaults to
              \`worker\`).
+  --task <id>                 (log only) Restrict to one task's attempts.
+  --limit <n>                 (log only) Keep the most recent n attempts (shipped in 0.22.0).
+  --since <ISO8601>           (log only) Keep only attempts whose \`ts\` is at or after this instant
+                              (first shipped in ${DRIVER_LOG_SINCE_FIRST_SHIPPED}). Combinable with
+                              --limit: filter by --since FIRST, then keep the newest n.
+                              EITHER bound makes the read bounded — the carrier is scanned TAIL-FIRST
+                              in growing windows and is never read whole just to keep a tail.
+                              ⚠️ CONSEQUENCE FOR \`totalLines\`: on a bounded read it is the number of
+                              non-blank lines in the WINDOW that was read, NOT the carrier's total,
+                              and \`malformedLines\` is window-scoped too. The appended \`window\` object
+                              reports it explicitly: {fromByte, toByte, since, truncated, bytesRead} —
+                              \`truncated: true\` ⇔ the counts are the window's. A malformed line
+                              older than the window is UNKNOWN, never reported as zero.
   --root <path>               Workspace root (default: discovered via .quay/config.yml from cwd).
   --confirm-timeout <s>       (start/restart) Liveness-confirmation window (default 30). \`start\` reports
                               success ONLY after supervisor+driver are both confirmed alive; a supervisor
@@ -787,8 +862,96 @@ Usage:
   are different states and never share an output (硬规则 3b) — a failed read exits non-zero and
   prints NO document, rather than 5 empty lanes that would read as "the loop is idle".
 `);
+  } else if (sub === "live-state") {
+    process.stdout.write(`quay live-state — READ-ONLY: the in-flight/phase snapshot as ONE small file read
+（first shipped in 0.23.0 · task gap-live-state-small-carrier-for-subsecond-inflight-read）
+
+Usage:
+  quay live-state [--json] [--stale-ms <n>] [--root <path>]
+
+  Reads \`.quay/live-state.json\` — the worker driver's event-driven, atomically rewritten snapshot
+  of the current in-flight tasks and their driver-known phase. No process spawn, no /proc scan, no
+  task-store walk: an external read-only consumer can obtain it by reading one small file.
+
+  ⛔ THE SNAPSHOT IS A PROJECTION, NOT THE TRUTH SOURCE. The authoritative in-flight set is still
+  the worker driver's own state; this file is a snapshot of it. \`writtenAt\` decides whether the
+  snapshot may be trusted.
+
+  \`status\` is one of FOUR distinct values (⛔ none of the first two is "zero in flight"):
+    ok           the file is readable and its writtenAt is within the staleness threshold;
+                 \`inFlight\` holds the entries (an EMPTY array here is a real "nobody in flight").
+    stale        the file is readable but writtenAt is older than the threshold — the driver has
+                 stopped rewriting it; \`inFlight\` is returned but ⛔ MUST NOT be treated as current.
+    missing      no such file — this workspace's worker driver never wrote a snapshot
+                 (⛔ different from "zero in flight"; \`inFlight\` is null = not evaluated).
+    unreadable   the file exists but cannot be read or does not validate against
+                 quay-live-state/v1 (\`inFlight\` is null; exit code 1).
+
+  Each entry: {taskId, runId, phase, startedAtMs, workerPid, lastHeartbeatMs}. \`phase\` is one of
+  ${LIVE_STATE_PHASES.join(" | ")} — the instants the driver actually knows (spawn success /
+  worker exit / outcome computed). ⛔ The driver does not know worker-internal sub-phases and this
+  carrier must not invent them.
+
+  --json             Accepted and is a no-op: the output is always JSON (like \`quay driver live\`).
+  --stale-ms <n>     Override the staleness threshold (default ${LIVE_STATE_STALE_MS} ms — derived
+                     from the driver's reconcile floor + one interval). ⛔ Changing it changes how
+                     long a snapshot stays "ok"; it never makes a missing file look like an empty one.
+  --root <path>      Workspace root (default: discovered via .quay/config.yml from cwd).
+
+  Exit codes: 0 = an evaluated reading (ok / stale / missing all exit 0 — they are real readings);
+  1 = no workspace found, or the carrier exists but is unreadable/invalid. ⛔ "could not read" and
+  "nobody in flight" never share an output (硬规则 3b).
+`);
+  } else if (sub === "suite") {
+    process.stdout.write(`quay suite — READ-ONLY: the workspace's suite state + most recent rounds, as bounded JSON
+（first shipped in 0.24.0-dev · task gap-suite-read-verb-current-and-recent-rounds）
+
+Usage:
+  quay suite [--json] [--limit <n>] [--since <ISO8601>] [--root <path>]
+
+  Reads the two suite carriers of the workspace — \`.quay/full-suite-state.json\` (the current run's
+  state) and \`.quay/verification-round.jsonl\` (the append-only rounds ledger) — through the SAME
+  readers the Web dashboard and the /tests page use. No serve process, no spawn, no second parser.
+
+  Output (always JSON; \`--json\` is accepted and is a no-op):
+    { current, rounds, carrier, evaluated }
+
+    current    {state, reason, runner, scope, startedAt, finishedAt, durationMs, laneCount,
+                commit, taskId, runId} | null.
+               ⛔ TIMESTAMPS ARE NORMALIZED: the carrier mixes units — \`startedAt\` is an ISO 8601
+               string while \`finishedAt\` is an epoch SECONDS integer (measured: startedAt
+               "2026-10-25T22:14:20.100Z", finishedAt 1792967664). BOTH are published as ISO 8601 UTC
+               here; a numeric epoch of either unit is accepted on input (a finite number < 1e11 is
+               read as SECONDS, ≥ 1e11 as MILLISECONDS).
+    rounds     [{round, startedAt, durationMs, pass, fail, state}] — NEWEST-FIRST, at most --limit
+               entries. \`startedAt\` is the ledger's own ISO string.
+    carrier    {state, reason, suiteState:{state,reason}, rounds:{state,reason,bytesRead,exhausted}}
+               The two carriers are reported SEPARATELY and never collapsed into one boolean. The
+               per-carrier state is one of: ok | absent | unreadable | empty-writer-zero-records
+               (\`empty-writer-zero-records\` = the ledger exists but no line parses — a WRITER fact,
+               not "no history yet"). The top-level \`state\` is the WORSE of the two
+               (unreadable > absent > empty-writer-zero-records > ok).
+               \`rounds.bytesRead\` is the number of bytes the reader actually pread from the ledger
+               (the bounded-read evidence) and \`rounds.exhausted\` says whether it had to reach
+               byte 0 — ⛔ the ledger is NEVER read whole unless the request's window forces it.
+    evaluated  false ⇔ an EXISTING carrier could not be read. A merely ABSENT carrier is an
+               evaluated reading ("nothing has been written"), never a failure.
+
+  --limit <n>    Most recent rounds to return. Default 20 — whose ONE definition point is
+                 \`SUITE_ROUNDS_DEFAULT_LIMIT\` in src/observation.ts (⛔ not imported here: this file is
+                 loaded by EVERY invocation, so it must not drag the observation module in just to
+                 interpolate one number). Positive integer.
+  --since <ISO8601>
+                 Only rounds whose \`startedAt\` is at or after this instant. Combinable with
+                 --limit. The reader grows its EOF window until it crosses the cutoff (or reaches the
+                 file head), so it reads only as much of the ledger as the cutoff requires.
+  --root <path>  Workspace root (default: discovered via .quay/config.yml from cwd).
+
+  Exit codes: 0 = an evaluated reading (absent carriers and an empty --since window INCLUDED);
+  1 = no workspace found, an invalid --limit/--since value, or an existing carrier that could not be
+  read. ⛔ "could not read" and "nothing written yet" never share an output (硬规则 3b).
+`);
   } else {
-    // QX-007: stub for subcommands not yet documented in detail (serve, action, mcp, …).
     process.stdout.write(`Usage: quay ${sub} [...]\nRun \`quay --help\` for full usage documentation.\n`);
   }
 }

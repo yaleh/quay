@@ -233,9 +233,18 @@ export async function run(argv, ctx = {}) {
   // — the read-only, always-JSON exit for the dashboard's packed lanes (same call chain + kernel as
   // the Web card), so an external consumer can render the gantt without importing quay.
   if (cmd === "lanes") return (await import("../src/cli/lanes.ts")).handleLanes(ctx);
+  // gap-live-state-small-carrier-for-subsecond-inflight-read: `quay live-state [--json] [--root <path>]`
+  // — the byte-level, event-driven in-flight snapshot (`.quay/live-state.json`) as a ONE-file read,
+  // with the four-state discriminator ok/stale/missing/unreadable. Read-only; no process spawn.
+  if (cmd === "live-state") return (await import("../src/cli/live-state.ts")).handleLiveState(ctx);
+  // gap-suite-read-verb-current-and-recent-rounds: `quay suite [--json] [--limit N] [--since ISO] [--root <path>]`
+  // — the bounded, always-JSON read exit over the suite carriers (`.quay/full-suite-state.json` +
+  // `.quay/verification-round.jsonl`), so an external consumer renders the Tests page by spawning
+  // this verb instead of reading quay's internal 100 MB+ ledger with its own parser.
+  if (cmd === "suite") return (await import("../src/cli/suite.ts")).handleSuite(ctx);
 
   // QX-005: updated fallback with --help hint (UQ-001/UQ-002).
-  console.error("usage: quay <adr|goal|meta|init|task list|view|create|edit|check|log|trace|gate|gate-log|complete|adjudicate|promote|retreat|run|migrate|provider|config validate|config check|action list|action run|serve|server start|server add|server stop|server restart|server status|mcp|manager start|manager arm|driver|lanes> ...\nRun `quay --help` for full usage documentation.");
+  console.error("usage: quay <adr|goal|meta|init|task list|view|create|edit|check|log|trace|gate|gate-log|complete|adjudicate|promote|retreat|run|migrate|provider|config validate|config check|action list|action run|serve|server start|server add|server stop|server restart|server status|mcp|manager start|manager arm|driver|lanes|live-state|suite> ...\nRun `quay --help` for full usage documentation.");
   process.exitCode = 1;
     }
 }

@@ -3,7 +3,7 @@
 # gap-serve-binding-defaults-three-copies-to-one-definition-point).
 #
 # The defect: the `quay serve` web binding's host default regrows OUTSIDE the ONE file allowed to
-# spell it — the single resolver's fallback declaration (packages/quay/src/serve/serve-binding.ts,
+# spell it — the single resolver's fallback declaration (packages/quay/src/serve/view/serve-binding.ts,
 # SERVE_BINDING_FALLBACK). Before this task the same quantity had three definitions and the host
 # halves DISAGREED (all-interfaces / loopback / all-interfaces), so "start the web server" listened
 # on two different surfaces depending on which entry the operator used.
@@ -34,19 +34,19 @@ workdir="${1:?usage: $name.sh <workdir>}"
 checker_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 repo_root="$(cd "${checker_dir}/../.." && pwd -P)"
 
-mkdir -p "${workdir}/packages/quay/src/serve" "${workdir}/packages/quay/src/core" "${workdir}/plugin/scripts" "${workdir}/plugin/skills/drivers"
+mkdir -p "${workdir}/packages/quay/src/serve/view" "${workdir}/packages/quay/src/core" "${workdir}/plugin/scripts" "${workdir}/plugin/skills/drivers"
 cd "${workdir}"
 
 # The host under test, read from the ONE declaration allowed to hold it (never spelled here).
 host="$(sed -n 's/.*SERVE_BINDING_FALLBACK[^"]*"\([^"]*\)".*/\1/p' \
-  "${repo_root}/packages/quay/src/serve/serve-binding.ts" | head -n 1)"
+  "${repo_root}/packages/quay/src/serve/view/serve-binding.ts" | head -n 1)"
 if [ -z "${host}" ]; then
-  echo "INFRASTRUCTURE — could not read SERVE_BINDING_FALLBACK.host from ${repo_root}/packages/quay/src/serve/serve-binding.ts (the case cannot build a meaningful fixture)" >&2
+  echo "INFRASTRUCTURE — could not read SERVE_BINDING_FALLBACK.host from ${repo_root}/packages/quay/src/serve/view/serve-binding.ts (the case cannot build a meaningful fixture)" >&2
   exit 2
 fi
 
 FIXTURE_FILES=(
-  packages/quay/src/serve/serve-binding.ts
+  packages/quay/src/serve/view/serve-binding.ts
   packages/quay/src/serve/serve.ts
   packages/quay/src/core/server-state.ts
   packages/quay/src/elsewhere.ts
@@ -54,11 +54,11 @@ FIXTURE_FILES=(
   plugin/skills/drivers/SKILL.md
 )
 write_clean() {
-  mkdir -p packages/quay/src/serve packages/quay/src/core plugin/scripts plugin/skills/drivers
+  mkdir -p packages/quay/src/serve/view packages/quay/src/core plugin/scripts plugin/skills/drivers
   rm -f "${FIXTURE_FILES[@]}"
   # The declaration (marker on its own line) + the doc surface that restates the value.
   printf 'export const SERVE_BINDING_FALLBACK = { host: "%s", port: 0 };\n' "${host}" \
-    > packages/quay/src/serve/serve-binding.ts
+    > packages/quay/src/serve/view/serve-binding.ts
   printf '# drivers\n\nquay serve --host <ip> (default host %s)\n' "${host}" \
     > plugin/skills/drivers/SKILL.md
 }
@@ -108,7 +108,7 @@ fi
 # INJECT (misplaced): the ONLY literal sits OUTSIDE the declaration → MUST go RED — the invariant is
 # not "≤1 hit" alone, it is "the hit IS the SERVE_BINDING_FALLBACK declaration".
 write_clean
-rm -f packages/quay/src/serve/serve-binding.ts
+rm -f packages/quay/src/serve/view/serve-binding.ts
 printf 'export const H = "%s";\n' "${host}" > packages/quay/src/elsewhere.ts
 if checker_cmd; then
   echo "STAYED-GREEN — a lone literal in a non-declaration file did not redden the checker (「≤1 hit」 was accepted without the declaration check)" >&2

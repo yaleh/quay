@@ -2,7 +2,7 @@
 id: AC-924
 title: unencapsulated-state 端到端跑通：线索器对真实仓库只产 candidate（从不写 confirmed），判断器经
   recorded-verdict replay 拒绝 memoized/计数器/注册表误报并确认真状态簇
-status: active
+status: achieved
 kind: criterion
 goal: GOAL-911
 criterion: node --test plugin/test/unencapsulated-state-admission.test.mjs
@@ -21,4 +21,10 @@ expect: 正向：`plugin/test/unencapsulated-state-admission.test.mjs` 全绿（
 origin: GOAL-911 退出条件③；AC-920 的实质断言 + AC-922 的可取假判据合并为一条自足 AC（AC-920 criterion 经
   tail 吞掉退出码，AC-922 expect 不含实质断言）。
 activatedAt: 2026-10-23T07:24:36.232Z
+statusLog:
+  - at: 2026-10-23T16:32:46.844Z
+    from: active
+    to: achieved
+    actor: goal-driver
+    reason: "I2: criterion pass"
 ---

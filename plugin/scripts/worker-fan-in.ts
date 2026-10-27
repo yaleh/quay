@@ -474,6 +474,11 @@ export interface MechanicalFanInOptions {
   /** 本轮重跑命令（测试缝）；缺省 = resolveRerunCommand(worktree, worktree, <失败文件>)（读
    *  `<worktree>/.quay/config.yml` 的 `loop.rerun_command`，`{files}` 整元素被文件列表 splice）。 */
   rerunCommand?: string[];
+  /** **基线侧**重跑命令（测试缝）；缺省 = `rerunCommand`（生产上两者同源，都是那条声明的
+   *  `loop.rerun_command`）。存在的理由：`gap-develop-red-set-writer` 的「基线全绿 ⇒ 评估过、零红」
+   *  这条读数只有在「本轮重跑仍红、基线重跑全绿」时才产生——生产上这两个读数由同一命令给出时不可
+   *  同轮出现，⛔ 没有这个缝就没有任何真跑过它的测试（硬规则 4 推论三：夹具能产出 ≠ 机制会产出）。 */
+  baselineRerunCommand?: string[];
   /** 重跑子进程的墙钟上限（测试缝）；缺省 RERUN_TIMEOUT_MS。⛔ 被中止 ⇒ rerun-not-evaluated（不放行）。 */
   rerunTimeoutMs?: number;
   /** 既存红 A/B 的基线树临时 worktree 路径（测试缝）；缺省 = `<dirname(worktree)>/.baseline-red-<task>-<runId>`。 */
@@ -581,6 +586,11 @@ export interface BaselineEquivalenceReading {
   baselineWorktree: string | null;
   /** 基线重跑输出落盘 basename（`.quay/` 下）；未跑 / 写失败 ⇒ null。 */
   log: string | null;
+  /** 本轮在 develop 基线树上得到的**红点观测**（`gap-develop-red-set-writer` 的输入；⛔ 本文件不落盘，
+   *  由 driver 的 `--mechanical-fan-in` 入口消费）。
+   *  `null` = 这一轮没有可用观测（A/B 未评估 / 解析不出 develop SHA / 基线重跑被中止）——**未评估**，
+   *  ⛔ 与「develop 上没有红」不同形（后者是 `points: []` + `evaluatedFiles` 非空）。 */
+  developRedObservation?: DevelopRedObservation | null;
 }
 
 /** runAsync 的结果收窄为「成/败 + 输出」，机械 fan-in 各步骤的共用判定（⛔ 不各写一遍 status!==0）。 */
@@ -858,8 +868,17 @@ export function classifyRecoveryRound(
 }
 
 /** AC10/AC13 — 恢复轮**声明式**的并发降档梯。降序；**最后一个是地板**（AC13 的「floor concurrency N」
- *  就是它）。⛔ 声明式而非开放式：序列被这张表**有界**（AC13 的「不得无限重复同一组参数」）。 */
-export const SUITE_RECOVERY_CONCURRENCY_LADDER: readonly number[] = [64, 48, 32];
+ *  就是它）。⛔ 声明式而非开放式：序列被这张表**有界**（AC13 的「不得无限重复同一组参数」）。
+ *
+ *  地板必须是**能装进声明 memory_max 的档**，否则阶梯在溢出点就停了、所有档位同形
+ *  （gap-suite-oom-lane-scaled-ladder-floor-32-no-lower-rung）。32 曾经是地板，但实测在声明 32G 下
+ *  仍打满并溢出 —— 32 车道轮的 cgroup 读数 `peakBytes=34359820288` vs `memoryMaxBytes=34359738368`
+ *  （`oomKill=1`，`.quay/suite-memory-evidence-mfi-…-1792782862395-781417.json`），后代的真实成本约
+ *  `descendantMax=204 / descendantRssAtMaxBytes=30224683008` ≈ 1 GB/车道，而 `perFileHighWaterBytes`
+ *  （≈150 MB）低估约 7×。⇒ 地板降到 16：同一棵树上把 workspace 的 serial/lowconc 夹子压到 16 后
+ *  一轮实测 cgroup `memory.peak` ≈ 3.3 GB（`.quay/verif16-1792798366.log` 的 scheduler 头
+ *  `serial≤16 lowconc≤16`）⇒ 余量充足。⛔ `memory_max` 逐字不动（人 2026-10-15 裁定 32G）。 */
+export const SUITE_RECOVERY_CONCURRENCY_LADDER: readonly number[] = [64, 48, 32, 16];
 
 /** AC13 — 梯子的地板档（最后一项）。 */
 export function suiteRecoveryFloor(): number {
@@ -1201,6 +1220,12 @@ export function readFailedTestFiles(logText: string, root?: string | null): Fail
 export interface FailureSignature {
   file: string;
   text: string;
+  /** 该红点的**测试名**——只有 spec reporter 形态（`test at <file>:N:C` + `✖ <name> (<ms>)`）才有：
+   *  那对行里测试名是**结构化**给出的。⛔ 其它两种形态（`__PERFILE__` 文件级标记 / TAP `not ok`）读不到
+   *  测试名 ⇒ 缺键（undefined），**不拿断言正文冒充**（断言正文里的数字会动，见 `developRedKey` 的注释）。
+   *  ⛔ 它**不参与** `signatureKey` / `compareFailureSignatures`（A/B 的判据仍是逐字 file+text）——
+   *  本字段只为「当前 develop 红签名集」提供稳定的 key 身份。 */
+  name?: string;
 }
 
 /** 失败签名解析三态（硬规则 3b）：`evaluated:false` = 未评估，成因在 reason 里，⛔ 不与「评估过且
@@ -1268,13 +1293,15 @@ export function parseFailureSignatures(logText: string, root?: string | null): F
   const byKey = new Map<string, { sig: FailureSignature; fromMarker: boolean; fromSpec: boolean }>();
   const order: string[] = [];
   const unresolvable: string[] = [];
-  const push = (file: string, sig: string, origin: "marker" | "tap" | "spec"): void => {
+  const push = (file: string, sig: string, origin: "marker" | "tap" | "spec", name?: string): void => {
     const f = file.trim();
     if (!f) return;
     const k = `${f}\u0000${sig}`;
     let e = byKey.get(k);
     if (e === undefined) {
-      e = { sig: { file: f, text: sig }, fromMarker: false, fromSpec: false };
+      // `name` 只在 spec 形态给出（见 FailureSignature.name）；缺键 ⇒ ⛔ 不写 `name: undefined`，
+      // 否则 `deepEqual` 与 JSON 往返都会把它与「显式空名」混同。
+      e = { sig: name === undefined ? { file: f, text: sig } : { file: f, text: sig, name }, fromMarker: false, fromSpec: false };
       byKey.set(k, e);
       order.push(k);
     }
@@ -1337,7 +1364,7 @@ export function parseFailureSignatures(logText: string, root?: string | null): F
       }
       if (name === null || name === "") continue; // 没有配对的 `✖` 行 ⇒ 不是 spec 失败块（⛔ 不落签名）
       const code = codeLine < 0 ? "" : (SIG_SPEC_CODE_RE.exec(lines[codeLine].trim())?.[1] ?? "");
-      push(rel, code === "" ? name : `${name} [code: ${code}]`, "spec");
+      push(rel, code === "" ? name : `${name} [code: ${code}]`, "spec", name);
       continue;
     }
   }
@@ -1514,6 +1541,209 @@ export function baselineRedDeadlockReading(
   if (rounds.length === 0) return { kind: "continue", consecutive: 0 };
   const current = rounds.reduce((a, b) => (b.ts >= a.ts ? b : a));
   return decideBaselineRedCircuitBreaker(rounds, current, cap, readBaselineRedRounds(root).filter((r) => r.task !== taskId));
+}
+
+// ── 当前 develop 红签名集（`.quay/develop-red-set.json`）——「某个红**消失**了」的机械信号 ────────────
+//
+// 缺陷（gap-develop-red-set-writer）：上一节的 `.quay/baseline-red-rounds.jsonl` 是 **append-only**、
+// 按 task 记「见到红」的台账 ⇒ 它**没有「红消失」事件**，读不出「当前 develop 上哪些红还在」。而 cockpit
+// 救援类的第一个自动候选要的正是「develop 上对应红签名已消失」这个**机械**信号（LLM 判「阻塞已修」的
+// AUC 0.557、无零误挂阈值 ⇒ 不能靠语义判），所以另立一份**可增可减**的快照载体。
+//
+// 分工（本任务 AC4「写者只有 driver 进程」）——**观测在本文件，落盘在 `worker-driver.ts`**：
+//   · 本文件只产出 `DevelopRedObservation`（纯数据，随 fan-in 结果回传，⛔ 不写任何文件）；
+//   · 唯一的写调用点在 `worker-driver.ts` 的 `--mechanical-fan-in` 入口（driver spawn 的那个 fan-in
+//     进程）⇒「fleet 只读、写者只有 driver」是结构性的，不是注释里的约定；`plugin/test/
+//     develop-red-set.test.mjs` 的 AC4 用例按调用点数与只读不写两条判据守着它。
+//
+// ⛔ 载体位置不可另造：就在 `.quay/` 下（与 baseline-red-rounds / full-suite-state 同族），
+//    ⛔ 不在 `.quay/` 之外复制一份。
+
+/** 当前 develop 红签名集的载体（workspace 根相对路径）。 */
+export const DEVELOP_RED_SET_REL = ".quay/develop-red-set.json";
+
+/** 载体里的一条红签名。`key` 是**身份**，`lastSignature` 只是参考。 */
+export interface DevelopRedEntry {
+  /** `<test file>::<test name>`（见 `developRedKey`）。 */
+  key: string;
+  /** 该 key 归属的测试文件（repo-relative；数组是为了让「一个 key 被多个文件共享」时仍可判移除）。 */
+  files: string[];
+  /** 首次被观测为红（ISO）。 */
+  firstSeenAt: string;
+  /** 最近一次被观测为红（ISO）。 */
+  lastSeenAt: string;
+  /** 观测到它时被挡住的 fan-in 任务（去重排序）。 */
+  blockedTasks: string[];
+  /** 原始签名文本（含断言正文 / 错误码）——**仅供人读**，⛔ 不参与身份。 */
+  lastSignature: string;
+}
+
+/** 载体的完整形状（fleet 侧按此反序列化；⛔ 新增必填字段 = breaking change）。 */
+export interface DevelopRedSet {
+  /** 这份快照描述的 develop SHA（基线重跑实际跑的那棵树）。 */
+  develop: string;
+  /** 观测时刻（ISO）。 */
+  evaluatedAt: string;
+  reds: DevelopRedEntry[];
+}
+
+/** 一条**观测到的**红点（`FailureSignature` 的投影）：身份三件套。 */
+export interface DevelopRedPoint {
+  key: string;
+  file: string;
+  signature: string;
+}
+
+/** 一轮观测（fan-in 的 baseline-red A/B 侧产出的**纯数据**；⛔ 本文件不落盘）。 */
+export interface DevelopRedObservation {
+  /** 基线重跑所在的 develop SHA（⛔ 空串/缺字段 = 这一轮没有可用观测）。 */
+  develop: string;
+  evaluatedAt: string;
+  /** 做这次观测的 fan-in 任务（进 `blockedTasks`）。 */
+  task: string;
+  /** 在 develop 基线树上观测到的红点。 */
+  points: DevelopRedPoint[];
+  /** 本轮**真的在 develop 基线树上跑过**的测试文件（= 重跑目标清单）。
+   *  ⛔ 移除判据只认这个集合：一个文件没跑过，它的 key 就**没有**被评估过（硬规则 3b）。 */
+  evaluatedFiles: string[];
+}
+
+/** 签名文本落盘的长度上限——载体是给人/机器读的参考面，⛔ 不让一条巨大的断言正文把文件撑爆。 */
+const DEVELOP_RED_SIGNATURE_MAX = 400;
+
+/** 红点的**身份**：`<test file>::<test name>`。
+ *  ⛔ 断言正文**不进**身份——数字一动（ratchet `1642→1688` → `1642→1690`）仍是同一个红点；把正文算进
+ *  key 会让「还在红」被读成「旧的消失了 + 来了一个新的」⇒ 假重派（本任务 Plan 第 2 条）。
+ *  spec 形态读不到测试名时（`name` 缺键）退化为**文件级**身份 `<file>::`——它仍不含断言正文，
+ *  且文件级红本身就是「这个文件在 develop 上是红的」这一可判事实。 */
+export function developRedKey(sig: FailureSignature): string {
+  return `${sig.file}::${sig.name ?? ""}`;
+}
+
+/** 失败签名集合 → 观测点集合（去重 by key：同一 key 的多条签名只保留第一条的签名文本作参考）。 */
+export function developRedPoints(sigs: FailureSignature[]): DevelopRedPoint[] {
+  const byKey = new Map<string, DevelopRedPoint>();
+  for (const s of sigs) {
+    const key = developRedKey(s);
+    if (byKey.has(key)) continue;
+    byKey.set(key, { key, file: s.file, signature: s.text.slice(0, DEVELOP_RED_SIGNATURE_MAX) });
+  }
+  return [...byKey.values()].sort((a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : 0));
+}
+
+/** 载体读取三态（硬规则 3b）：文件缺失 / 读不懂 / 行坏 ⇒ `evaluated:false`，⛔ 不与「空红集」同形
+ *  （后者是 `evaluated:true` + `reds: []`，含义是「develop 上没有红」）。 */
+export type DevelopRedSetRead =
+  | { evaluated: true; set: DevelopRedSet }
+  | { evaluated: false; reason: string };
+
+/** 读载体（fleet 侧只读入口，本文件里**唯一**碰这个载体的读函数）。
+ *  ⛔ 纯读：不创建、不改写、不 touch 文件——「fleet 只读」这条不变式的可测半边就是这个函数的行为。 */
+export function readDevelopRedSet(root: string): DevelopRedSetRead {
+  let text: string;
+  try {
+    text = fs.readFileSync(path.join(root, DEVELOP_RED_SET_REL), "utf8");
+  } catch (e) {
+    const code = (e as NodeJS.ErrnoException)?.code;
+    return { evaluated: false, reason: code === "ENOENT" ? "missing-file" : `read-failed: ${code ?? String(e)}` };
+  }
+  let raw: unknown;
+  try {
+    raw = JSON.parse(text);
+  } catch {
+    return { evaluated: false, reason: "unparsable-json" };
+  }
+  if (raw === null || typeof raw !== "object" || Array.isArray(raw)) return { evaluated: false, reason: "not-an-object" };
+  const obj = raw as Record<string, unknown>;
+  if (typeof obj.develop !== "string" || obj.develop.trim() === "") return { evaluated: false, reason: "missing-develop" };
+  if (typeof obj.evaluatedAt !== "string" || obj.evaluatedAt.trim() === "") return { evaluated: false, reason: "missing-evaluatedAt" };
+  if (!Array.isArray(obj.reds)) return { evaluated: false, reason: "missing-reds" };
+  const reds: DevelopRedEntry[] = [];
+  for (let i = 0; i < obj.reds.length; i += 1) {
+    const e = obj.reds[i] as Record<string, unknown> | null;
+    if (e === null || typeof e !== "object" || Array.isArray(e)) return { evaluated: false, reason: `malformed-entry[${i}]` };
+    if (typeof e.key !== "string" || e.key.trim() === "") return { evaluated: false, reason: `malformed-entry[${i}]:key` };
+    if (!Array.isArray(e.files) || !e.files.every((f) => typeof f === "string")) return { evaluated: false, reason: `malformed-entry[${i}]:files` };
+    if (typeof e.firstSeenAt !== "string") return { evaluated: false, reason: `malformed-entry[${i}]:firstSeenAt` };
+    if (typeof e.lastSeenAt !== "string") return { evaluated: false, reason: `malformed-entry[${i}]:lastSeenAt` };
+    if (!Array.isArray(e.blockedTasks) || !e.blockedTasks.every((b) => typeof b === "string")) return { evaluated: false, reason: `malformed-entry[${i}]:blockedTasks` };
+    if (typeof e.lastSignature !== "string") return { evaluated: false, reason: `malformed-entry[${i}]:lastSignature` };
+    reds.push({
+      key: e.key, files: [...e.files], firstSeenAt: e.firstSeenAt, lastSeenAt: e.lastSeenAt,
+      blockedTasks: [...e.blockedTasks], lastSignature: e.lastSignature,
+    });
+  }
+  return { evaluated: true, set: { develop: obj.develop, evaluatedAt: obj.evaluatedAt, reds } };
+}
+
+/** 观测 → 下一份快照（**纯函数**，⛔ 不碰磁盘——AC3/AC5 的判据都在这上面可判）。
+ *
+ *  · **upsert**（Plan 第 3 条前半）：本轮观测到的每个 key ⇒ 更新 `lastSeenAt` / `blockedTasks` /
+ *    `lastSignature`；`firstSeenAt` 只有**首次**出现时才设（⛔ 每轮重置会让「这红存在了多久」不可读）。
+ *  · **移除**（Plan 第 3 条后半，= 「红消失」的机械信号）：一个旧 key 被移除，必须**同时**满足
+ *    ① 它的**每个**文件本轮都在 develop 基线树上真的跑过（`evaluatedFiles`）——没跑过 ⇒ 未评估 ⇒ 保留；
+ *    ② 本轮没有观测到它（即它在那次重跑里通过了）；
+ *    ③ `developAdvanced`——当前 develop 是旧快照记录的 develop 的后代（`develop ≥ 该 key 记录的 develop`）。
+ *       不满足（develop 被回卷 / 换了基线）⇒ ⛔ 不删：那时「通过」说明不了「在这个 develop 上消失了」。
+ *  · **身份稳定**（AC5）：同一 `key` 的 `lastSignature` 文本变化（ratchet 数字变）只更新参考字段，
+ *    ⛔ 不产生新 key、⛔ 不改 `firstSeenAt`。 */
+export function maintainDevelopRedSet(
+  prev: DevelopRedSet | null,
+  obs: DevelopRedObservation,
+  opts: { developAdvanced: boolean },
+): DevelopRedSet {
+  const byKey = new Map<string, DevelopRedEntry>();
+  for (const e of prev?.reds ?? []) {
+    byKey.set(e.key, { ...e, files: [...e.files], blockedTasks: [...e.blockedTasks] });
+  }
+  const observed = new Set<string>();
+  for (const p of obs.points) {
+    observed.add(p.key);
+    const cur = byKey.get(p.key);
+    if (cur === undefined) {
+      byKey.set(p.key, {
+        key: p.key, files: [p.file], firstSeenAt: obs.evaluatedAt, lastSeenAt: obs.evaluatedAt,
+        blockedTasks: [obs.task], lastSignature: p.signature,
+      });
+      continue;
+    }
+    byKey.set(p.key, {
+      key: p.key,
+      files: [...new Set([...cur.files, p.file])].sort(),
+      firstSeenAt: cur.firstSeenAt,
+      lastSeenAt: obs.evaluatedAt,
+      blockedTasks: [...new Set([...cur.blockedTasks, obs.task])].sort(),
+      lastSignature: p.signature,
+    });
+  }
+  const evaluated = new Set(obs.evaluatedFiles);
+  for (const [key, entry] of [...byKey]) {
+    if (observed.has(key)) continue;
+    const ranThisRound = entry.files.length > 0 && entry.files.every((f) => evaluated.has(f));
+    if (ranThisRound && opts.developAdvanced) byKey.delete(key);
+  }
+  return {
+    develop: obs.develop,
+    evaluatedAt: obs.evaluatedAt,
+    reds: [...byKey.values()].sort((a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : 0)),
+  };
+}
+
+/** 落盘（原子写：tmp + rename ⇒ 读者永远看不到半个 JSON；与 `.quay/live-state.json` 同款）。
+ *  ⛔ **唯一调用点是 `worker-driver.ts` 的 `--mechanical-fan-in` 入口**（AC4）——fleet 侧只读。
+ *  返回可判的成败（硬规则 3b：写失败不得伪装成成功），但调用方按「观测不阻塞落地」处理。 */
+export function writeDevelopRedSet(root: string, set: DevelopRedSet): { written: boolean; path: string; reason: string | null } {
+  const file = path.join(root, DEVELOP_RED_SET_REL);
+  const tmp = `${file}.${process.pid}.tmp`;
+  try {
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(tmp, `${JSON.stringify(set, null, 2)}\n`, "utf8");
+    fs.renameSync(tmp, file);
+    return { written: true, path: file, reason: null };
+  } catch (e) {
+    try { fs.rmSync(tmp, { force: true }); } catch { /* best-effort */ }
+    return { written: false, path: file, reason: (e as Error)?.message ?? String(e) };
+  }
 }
 
 /** 读 fan-in 锁事件里本任务+runId 的持有时长（AC1/AC2 判据输入，纯文件读）。`lock` = 本次 acquire
@@ -2589,7 +2819,9 @@ export async function runMechanicalFanIn(opts: MechanicalFanInOptions): Promise<
     const notEvaluated = (reason: string): BaselineEquivalenceReading => {
       const v: BaselineEquivalenceVerdict = { kind: "not-evaluated", reason };
       traceVerdict(v);
-      return { verdict: v, baselineWorktree: null, log: null };
+      // ⛔ 未评估 ⇒ 观测也是 null（硬规则 3b）：这一轮拿不到「develop 上现在红什么」的可判读数，
+      // 载体这一轮**不动**（既 no upsert 也不 remove）。
+      return { verdict: v, baselineWorktree: null, log: null, developRedObservation: null };
     };
     if (!failed.evaluated) return notEvaluated(`no runnable failing-file set: ${failed.reason}`);
     const taskParse = parseFailureSignatures(taskLogText, worktree);
@@ -2618,9 +2850,30 @@ export async function runMechanicalFanIn(opts: MechanicalFanInOptions): Promise<
           }
         }
       }
-      const resolved = opts.rerunCommand !== undefined
-        ? { kind: "run" as const, argv: opts.rerunCommand }
-        : resolveRerunCommand(worktree, baseDir, failed.files);
+      // 基线重跑的目标文件 = 本轮 task 侧失败文件 ∪ 载体里**已记录的 develop 红文件**。
+      // WHY 并上后者（`gap-develop-red-set-writer` AC3 的**可达性**）：A/B 原本只重跑「task 树失败的
+      // 文件」⇒「某个 develop 红被修好了」永远不在重跑清单里 ⇒ 载体只能增不能减，「红消失」这条机械
+      // 信号只在夹具里可达（硬规则 4 推论三的反面）。并上载体自己点名的文件后，每一轮红 fan-in 都会
+      // 重新问一遍「这些红还在不在」——代价被已记录红集的大小界定，且这些文件本来就在红着。
+      // ⛔ 只在**红轮**可达：全绿轮根本进不到 A/B（那时没有 develop 侧读数，载体不动，见
+      // `BaselineEquivalenceReading.developRedObservation` 的三态说明）。
+      const recordedRedFiles = ((): string[] => {
+        const prevSet = readDevelopRedSet(root);
+        if (!prevSet.evaluated) return [];
+        const files = [...new Set(prevSet.set.reds.flatMap((e) => e.files))];
+        // ⛔ 只并上**基线树上仍然存在**的文件：已删除的文件会让重跑命令本身报错 ⇒ 一份说不出所以然的
+        // 非零日志 ⇒ A/B 变 not-evaluated ⇒ 一条陈旧记录把本来可豁免的任务变成硬红（假阻塞）。文件没了
+        // 就不是「还在红」，本轮的移除判据也认它（`evaluatedFiles` 里没有它 ⇒ 保留，等下一轮）。
+        return files.filter((f) => {
+          try { return fs.existsSync(path.join(baseDir, f)); } catch { return false; }
+        });
+      })();
+      const rerunFiles = [...new Set([...failed.files, ...recordedRedFiles])].sort();
+      const resolved = opts.baselineRerunCommand !== undefined
+        ? { kind: "run" as const, argv: opts.baselineRerunCommand }
+        : opts.rerunCommand !== undefined
+          ? { kind: "run" as const, argv: opts.rerunCommand }
+          : resolveRerunCommand(worktree, baseDir, rerunFiles);
       if (resolved.kind !== "run") return notEvaluated(`no baseline rerun command: ${resolved.reason}`);
       const logFile = path.join(root, ".quay", suiteLogFileName(task, runId, `baseline-${newSuiteLogAttemptSuffix()}`));
       const rr = await mechSh(resolved.argv, opts.rerunTimeoutMs ?? RERUN_TIMEOUT_MS);
@@ -2632,11 +2885,49 @@ export async function runMechanicalFanIn(opts: MechanicalFanInOptions): Promise<
       } catch { /* 日志 best-effort */ }
       // status===null ⇒ mechSh 墙钟到点组 kill ⇒ **未评估**（⛔ 被中止的基线重跑不得当成「基线无该红」）。
       if (rr.status === null) return notEvaluated("baseline rerun aborted");
-      const baseParse = parseFailureSignatures(combinedOutput(rr.stdout, rr.stderr), baseDir);
+      // 三态基线读数：**exit 0 + 一条失败行都没有**是一份独立的绿读数。`parseFailureSignatures` 对
+      // 这种日志返回 evaluated:false（`no-failure-signature-lines`）——那是为【红】suite 语境写的：
+      // 红 suite 解析不出签名就是读不懂。基线重跑不是红 suite，exit 0 说明这批文件在 develop 上全绿
+      // ⇒ 评估过、零红（`gap-develop-red-set-writer` 的移除信号在「全都修好了」那一轮全靠这条）。
+      // ⛔ 判据只看「**没有**失败行」：解析出签名 ⇒ 一律按签名走（⛔ 不让 exit code 推翻签名——
+      // 第三方 `rerun_command` 完全可能是 `cat <log>` 这种退出码恒 0 的形态，那不代表 develop 绿）。
+      // exit≠0 且没有任何可解析签名 ⇒ 照旧 not-evaluated（fail-closed，与改动前逐字一致）。
+      const rawBaseParse = parseFailureSignatures(combinedOutput(rr.stdout, rr.stderr), baseDir);
+      const baseParse: FailureSignatureParse = rawBaseParse.evaluated
+        ? rawBaseParse
+        : (rr.status === 0 && rawBaseParse.reason === "no-failure-signature-lines"
+            ? { evaluated: true, signatures: [] }
+            : rawBaseParse);
       if (!baseParse.evaluated) return notEvaluated(`baseline-side signatures unevaluable: ${baseParse.reason}`);
       const verdict = compareFailureSignatures(taskParse.signatures, baseParse.signatures);
       traceVerdict(verdict, { baselineFiles: baseParse.signatures.length, taskFiles: taskParse.signatures.length });
-      return { verdict, baselineWorktree: baseDir, log: baselineLog };
+      // develop 红签名集的**观测**（`gap-develop-red-set-writer`）：基线树此刻就检在 mergeTarget 上，
+      // 所以它的 HEAD 就是「这次重跑实际跑的那个 develop」——⛔ 不拿 merge 之前的 developSha 近似
+      // （develop 可能在本轮中途前进）。取不到 SHA ⇒ 观测为 null（未评估，⛔ 不伪造一个 develop 值）。
+      const baseHead = await mechSh(["git", "-C", baseDir, "rev-parse", "HEAD"], 30_000);
+      const baseHeadSha = baseHead.status === 0 ? baseHead.stdout.trim() : "";
+      const developRedObservation: DevelopRedObservation | null = baseHeadSha === ""
+        ? null
+        : {
+            develop: baseHeadSha,
+            evaluatedAt: new Date().toISOString(),
+            task,
+            points: developRedPoints(baseParse.signatures),
+            // 本轮在基线树上真的跑过的文件 = 上面 `resolved.argv` 实际拿到的重跑目标清单
+            // （task 失败文件 ∪ 已记录 develop 红文件）——⛔ 不是整棵 develop 的套件（那是另一个量，
+            // 本机制没有它的读数），也⛔ 不是只用 failed.files（那会让载体里自己点名的文件永远不被
+            // 重新评估 ⇒ 只增不减）。
+            evaluatedFiles: rerunFiles,
+          };
+      if (developRedObservation !== null) {
+        traceSuiteEvent("develop-red-set", {
+          exit: 0, wall_ms: 0, ok: true,
+          develop: developRedObservation.develop.slice(0, 12),
+          reds: developRedObservation.points.length,
+          evaluatedFiles: developRedObservation.evaluatedFiles.length,
+        });
+      }
+      return { verdict, baselineWorktree: baseDir, log: baselineLog, developRedObservation };
     } catch (e) {
       return notEvaluated(`baseline A/B error: ${(e as Error)?.message ?? String(e)}`);
     } finally {
@@ -2672,7 +2963,11 @@ export async function runMechanicalFanIn(opts: MechanicalFanInOptions): Promise<
     // 4. delta 断言面判定（doc-only 跳过 suite，code 跑 suite；判不出 fail-closed 跑 suite）。
     const deltaT0 = Date.now();
     const fork = await mechSh(["git", "-C", worktree, "merge-base", mergeTarget, "HEAD"], 30_000);
-    const deltaFiles = await mechSh(["git", "-C", worktree, "diff", "--name-only", (fork.stdout || "").trim(), "HEAD"], 30_000);
+    // ⚠️ `-c core.quotepath=false`（gap-fan-in-suite-skip-quoted-nonascii-doc-path）：git 默认把非 ASCII
+    //    路径 C-quote 成 `"meta/META-017-\350\257\267….md"`，该形态不再以 `meta/` 开头 ⇒ isDocPath 返回
+    //    false ⇒ 整棵树被判 code ⇒ doc-only fan-in 永不进 skip 分支（生产实测 4 次全量 suite 白跑，其中
+    //    一轮 OOM）。与本文件外其它同类调用点同款（硬规则 5b：缺陷成簇）。
+    const deltaFiles = await mechSh(["git", "-C", worktree, "-c", "core.quotepath=false", "diff", "--name-only", (fork.stdout || "").trim(), "HEAD"], 30_000);
     const deltaList = (deltaFiles.stdout || "").split("\n").map((s) => s.trim()).filter(Boolean);
     let codeDelta = "";
     if (deltaList.length > 0) {
@@ -2690,7 +2985,9 @@ export async function runMechanicalFanIn(opts: MechanicalFanInOptions): Promise<
       if (prevCommit) {
         const anc = await mechSh(["git", "-C", worktree, "merge-base", "--is-ancestor", prevCommit, "HEAD"], 30_000);
         if (anc.ok) {
-          const sincePrev = await mechSh(["git", "-C", worktree, "diff", "--name-only", prevCommit, "HEAD"], 30_000);
+          // 同上一处：这条输出也直接喂 `--classify-delta`（reuse-advance 判定），C-quote 会把非 ASCII 的
+          // doc/inert 前进面判成 code ⇒ 白白丢掉一次可复用的 green suite。
+          const sincePrev = await mechSh(["git", "-C", worktree, "-c", "core.quotepath=false", "diff", "--name-only", prevCommit, "HEAD"], 30_000);
           const sinceList = (sincePrev.stdout || "").split("\n").map((s) => s.trim()).filter(Boolean);
           const adv = await mechSh([...classify, "--classify-delta", "--root", worktree, ...sinceList], 120_000);
           // 前进面全 doc/inert ⇒ 复用上一 green（同一映射：【没判出来】不构成复用理由）

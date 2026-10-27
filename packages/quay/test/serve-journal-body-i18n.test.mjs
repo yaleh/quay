@@ -31,7 +31,7 @@ import fs from "node:fs";
 import { execFileSync } from "node:child_process";
 import http from "node:http";
 import { startServer } from "../src/serve/serve.ts";
-import { JOURNAL_KEYS, JOURNAL_LABELS, journalLabelsFor, fillLabel } from "../src/serve/serve-i18n.ts";
+import { JOURNAL_KEYS, JOURNAL_LABELS, journalLabelsFor, fillLabel } from "../src/serve/view/serve-i18n.ts";
 import { readJournal } from "../src/observation.ts";
 import { makeTmpDir } from "../../../plugin/test/helpers/tmp-workspace.mjs";
 import { QUAY_NATIVE_CLI } from "./helpers/cli-entry.mjs";

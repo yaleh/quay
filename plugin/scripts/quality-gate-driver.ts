@@ -248,6 +248,7 @@ import {
   DEFAULT_STALE_SECONDS as INSTRUMENT_DECAY_DEFAULT_STALE_SECONDS,
   type AnalyzeOutcome as InstrumentDecayOutcome,
   type DecayFinding as InstrumentDecayFinding,
+  type AdjudicatedFinding as InstrumentDecayAdjudicatedFinding,
   type CarrierSpec as InstrumentDecayCarrierSpec,
 } from "./instrument-decay-check.ts";
 
@@ -2045,9 +2046,18 @@ export interface ArchCycleHistoryRecord {
      *  list because no package-level diagram was ever requested); null ⇒ not evaluated. */
     basis: "module-graph" | "single-directory" | null;
     /** When THIS scope's artifact was produced (arch.json `timestamp`, else the manifest scope's
-     *  `generatedAt`); null ⇒ no artifact was read for this scope. */
+     *  `generatedAt`); null ⇒ no artifact was read for this scope. PROVENANCE ONLY — whether the
+     *  cycles came FROM it is `readingFreshness`. */
     artifactTimestamp: string | null;
-    /** Commits after `artifactTimestamp` touching this scope's source dir; null ⇒ not computable. */
+    /** Which evidence the cycle conclusion rests on: `artifact` (the persisted query artifact),
+     *  `live-file-list` (the tracked file list read at `fileListReadAt`), null ⇒ not evaluated.
+     *  (gap-arch-cycle-single-directory-basis-never-due: without this, a live reading carried a
+     *  constant `commitsSinceArtifact:0` and looked identical to a stale artifact reading.) */
+    readingFreshness: "artifact" | "live-file-list" | null;
+    /** `readingFreshness:"live-file-list"` ⇒ when the file list was read (ISO); null otherwise. */
+    fileListReadAt: string | null;
+    /** Commits after `artifactTimestamp` touching this scope's source dir; null ⇒ not computable
+     *  (including EVERY `live-file-list` reading, which has no artifact to be behind — ⛔ not 0). */
     commitsSinceArtifact: number | null;
     /** `commitsSinceArtifact > 0`; null ⇒ not computable. ⛔ A DIFFERENT question from the record-level
      *  `stale` (artifact age > interval): this one says the artifact no longer covers the sources. */
@@ -3225,6 +3235,9 @@ export interface InstrumentDecayFactValue {
   mode: "instrument-decay-round";
   evaluated: boolean;
   decayedCount: number;
+  /** 生效中的裁定数（描述符声明且未过期、条件成立）。⛔ 不计入 decayedCount，但**必须**出现在
+   *  reason 与 value 里——「已裁定例外」不得因为「不算腐烂」就从读数里消失。 */
+  adjudicatedCount: number;
   healthyCount: number;
   uncoveredCount: number;
   uncovered: InstrumentDecayOutcome["uncovered"];
@@ -3234,6 +3247,7 @@ export interface InstrumentDecayFactValue {
     contentDark: InstrumentDecayOutcome["carriers"][number]["contentDark"];
     staleEvaluated: InstrumentDecayOutcome["carriers"][number]["staleEvaluated"];
     decayed: InstrumentDecayFinding[];
+    adjudicated: InstrumentDecayAdjudicatedFinding[];
   }>;
   filings: InstrumentDecayFiling[];
   reportOnly: true;
@@ -3342,6 +3356,8 @@ export interface InstrumentDecayRoundOptions {
   roundLogPath?: string;
   /** 确定性 ts seam（当前只用于 reason 里的时间证据，不写载体）。 */
   now?: string;
+  /** 裁定过期的判定时刻（毫秒）。缺省 Date.now()；测试注入固定值。 */
+  nowMs?: number;
 }
 
 /** 跑一轮 instrument-decay 读数 + 立案。NEVER throws。
@@ -3370,6 +3386,7 @@ export async function runInstrumentDecayRound(
   const resolvedRoot = path.resolve(root);
   const outcome = analyzeInstrumentDecay(resolvedRoot, {
     staleSeconds: opts.staleSeconds ?? INSTRUMENT_DECAY_DEFAULT_STALE_SECONDS,
+    ...(opts.nowMs !== undefined ? { nowMs: opts.nowMs } : {}),
   }, opts.manifest);
 
   // 把 findings 归并成 (载体, 形态) 的 pair —— 立案的粒度是 Plan 写明的 pair，证据仍是逐 group。
@@ -3418,6 +3435,7 @@ export async function runInstrumentDecayRound(
     mode: "instrument-decay-round",
     evaluated: outcome.anyEvaluated,
     decayedCount: outcome.decayedCount,
+    adjudicatedCount: outcome.adjudicatedCount,
     healthyCount: outcome.healthyCount,
     uncoveredCount: outcome.uncoveredCount,
     uncovered: outcome.uncovered,
@@ -3427,6 +3445,7 @@ export async function runInstrumentDecayRound(
       contentDark: c.contentDark,
       staleEvaluated: c.staleEvaluated,
       decayed: c.decayed,
+      adjudicated: c.adjudicated,
     })),
     filings,
     reportOnly: true,
@@ -3438,18 +3457,29 @@ export async function runInstrumentDecayRound(
   const coverage = value.uncoveredCount > 0
     ? `${value.uncoveredCount} uncovered carrier(s) NOT counted healthy (${value.uncovered.map((u) => u.file).join(", ")})`
     : "no uncovered carriers";
+  // 裁定读数：⛔ 不得因为「不算腐烂」就从 reason 消失（AC5）。没有裁定时不加噪音。
+  const adjudicatedNote = (): string => {
+    if (outcome.adjudicatedCount === 0) return "";
+    const named = outcome.carriers
+      .flatMap((c) => c.adjudicated.map((a) => `${c.file}: ${a.group} (${a.state})`))
+      .join(", ");
+    return `${outcome.adjudicatedCount} adjudicated (not decay; reviewAfter-bounded) — ${named}`;
+  };
   if (outcome.decayedCount === 0) {
-    return { name, value, state: "verified", reason: value.uncoveredCount > 0 ? `no instrument decay; ${coverage}` : null };
+    const adj = adjudicatedNote();
+    const parts = [adj, coverage].filter((p) => p !== "");
+    return { name, value, state: "verified", reason: parts.length > 0 ? `no instrument decay; ${parts.join("; ")}` : null };
   }
   const filed = filings.filter((f) => f.filing === "filed").length;
   const already = filings.filter((f) => f.filing === "already-filed").length;
   const deferred = filings.filter((f) => f.filing === "deferred").length;
   const named = [...pairMap.values()].map((p) => `${p.file}: ${p.kind} (${p.findings.length})`).join("; ");
+  const adj = adjudicatedNote();
   return {
     name,
     value,
     state: "instrument-dark",
-    reason: `instrument-dark: ${outcome.decayedCount} finding(s) — ${named}; filings: filed=${filed} already-filed=${already} deferred=${deferred}; ${coverage}`,
+    reason: `instrument-dark: ${outcome.decayedCount} finding(s) — ${named}; filings: filed=${filed} already-filed=${already} deferred=${deferred}; ${coverage}${adj ? `; ${adj}` : ""}`,
   };
 }
 
@@ -3515,7 +3545,7 @@ export function formatInstrumentDecayAssembly(a: {
 }): string {
   if (a.error !== null) return `instrument-decay 例程已装配（${a.error} — 每轮记 failed、零读数零写入；⛔ 不回退到缺省节奏照跑）`;
   if (!a.enabled) return "instrument-decay 例程已装配（enabled:false — 每轮记 not-evaluated:disabled，零读数零写入）";
-  return `instrument-decay 例程已装配（enabled, interval=${a.intervalMinutes}m，report-only：A/B 写手停写 + C 内容全暗 + D 过期的已评估 + uncovered，读数写成 state=instrument-dark 的 Fact；腐烂是读数内容，⛔ 不是 failed；有新腐烂才 spawn gap-filing，已立案的 (载体,形态) 不重复立案）`;
+  return `instrument-decay 例程已装配（enabled, interval=${a.intervalMinutes}m，report-only：A/B 写手停写 + C 内容全暗 + D 过期的已评估 + uncovered + 描述符声明的 B 裁定（adjudicated，reviewAfter 过期即回到腐烂），读数写成 state=instrument-dark 的 Fact；腐烂是读数内容，⛔ 不是 failed；有新腐烂才 spawn gap-filing，已立案的 (载体,形态) 不重复立案）`;
 }
 
 

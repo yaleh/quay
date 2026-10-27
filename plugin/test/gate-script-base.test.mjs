@@ -32,6 +32,7 @@ import {
   readJsonLines,
   readJsonlLines,
   readJsonOrNull,
+  appendJsonlRecords,
   git,
   serializeSortedJson,
 } from "../scripts/gate-script-base.ts";
@@ -215,6 +216,12 @@ test("CONTROL: an empty-string value reads as `\"\"`, and is NOT indistinguishab
 // `resolveroot`, runId `semantic-dedup-scan-1790028867335`, verdict `real-duplication`): five checkers
 // carried this byte-identical body. These tests pin the RESOLUTION RULE (not just "it compiles"),
 // because the rule is what the five call sites inherited and must keep.
+//
+// SECOND ROUND (same task id, later finding): semantic-dedup-scan runId
+// `semantic-dedup-scan-1792847536579`, findingId `root-resolveroot`, verdict
+// `divergent-implementation` ("only fan-in-runid + inner-idle-log are genuinely foldable into a
+// resolveRoot(rootArg, defaultRoot)"). The rule is shared; the DEFAULT is now the second parameter, so
+// the two `--root else repo-root` callers converge here while keeping their own fallback.
 
 test("resolveRoot: absent flag ⇒ cwd, absolute", () => {
   assert.equal(resolveRoot(undefined), path.resolve(process.cwd()));
@@ -237,24 +244,56 @@ test("resolveRoot: an ABSOLUTE value is returned as-is", () => {
 
 test("resolveRoot: an EMPTY-STRING value resolves to cwd (the 3b hazard flagValue documents is inert here)", () => {
   // `flagValue(args, "--root")` returns `""` (not undefined) when invoked as `--root ""`. That value
-  // reaches `rootArg ?? cwd` unchanged — `??` falls back only on null/undefined — so the resolution is
-  // `path.resolve("")`, which IS cwd. No silent-substitution defect, but recorded so it is a known
-  // reading rather than an accident.
+  // reaches `rootArg ?? defaultRoot` unchanged — `??` falls back only on null/undefined — so the
+  // resolution is `path.resolve("")`, which IS cwd. No silent-substitution defect, but recorded so it
+  // is a known reading rather than an accident. This holds for EVERY caller, including the two that
+  // pass a repo-root `defaultRoot`: an explicitly-passed empty value never reads as absent.
   assert.equal(resolveRoot(""), path.resolve(process.cwd()));
+  assert.equal(resolveRoot("", "/tmp/some/default"), path.resolve(process.cwd()));
 });
 
-test("resolveRoot: the extracted body lives in the base ONLY — the five callers carry no private copy", () => {
+// ── resolveRoot(rootArg, defaultRoot): the second half of the extraction ────────────────────────────
+// Two callers defaulted `--root` to the REPO ROOT instead of cwd (fan-in-runid-check, inner-idle-log)
+// and each carried a private copy of the rule to do it. The rule — not the default — is the shared
+// concept, so the default became a parameter.
+
+test("resolveRoot: absent flag + defaultRoot ⇒ defaultRoot (absolute, untouched)", () => {
+  assert.equal(resolveRoot(undefined, "/tmp/some/default"), path.resolve("/tmp/some/default"));
+});
+
+test("resolveRoot: a RELATIVE defaultRoot resolves against cwd like any relative path", () => {
+  // The default is a path value, not a second convention: it goes through the same `path.resolve`.
+  assert.equal(resolveRoot(undefined, "late/fallback"), path.resolve(process.cwd(), "late/fallback"));
+});
+
+test("resolveRoot: the flag WINS over defaultRoot — absolute and relative alike", () => {
+  assert.equal(resolveRoot("/tmp/named", "/tmp/some/default"), path.resolve("/tmp/named"));
+  assert.equal(resolveRoot("named", "/tmp/some/default"), path.resolve(process.cwd(), "named"));
+});
+
+test("resolveRoot: arity-1 (cwd default) is byte-equivalent to resolveRoot(x, process.cwd())", () => {
+  // The five original callers were NOT migrated to the two-argument form; this pins that the new
+  // parameter did not move their reading.
+  for (const arg of [undefined, "", ".", "/tmp/some/root"]) {
+    assert.equal(resolveRoot(arg), resolveRoot(arg, process.cwd()), `reading changed for ${JSON.stringify(arg)}`);
+  }
+});
+
+test("resolveRoot: the extracted body lives in the base ONLY — no caller carries a private copy", () => {
   // The mechanical statement of the finding, kept as a regression guard: if a caller re-inlines the
-  // body (or a sixth appears), this goes RED instead of quietly regrowing the duplication the routine
-  // filed. The predicate is positional (the exact statement text), so a comment mentioning it does not
-  // count.
-  const BODY = "return path.resolve(rootArg ?? process.cwd());";
+  // body (or a further copy appears), this goes RED instead of quietly regrowing the duplication the
+  // routine filed. The predicate is positional (the exact statement text), so a comment mentioning it
+  // does not count.
+  const BODY = "return path.resolve(rootArg ?? defaultRoot);";
   const callers = [
     "concurrency-literal-check.ts",
     "instrument-failure-check.ts",
     "landing-target-check.ts",
     "suite-slot-ssot-check.ts",
     "task-file-bypass-check.ts",
+    // the two repo-root-default callers folded in by finding `root-resolveroot`
+    "fan-in-runid-check.ts",
+    "inner-idle-log.ts",
   ];
 
   const hits = (file) => fs.readFileSync(file, "utf8").split("\n").filter((l) => l.trim() === BODY).length;
@@ -269,6 +308,35 @@ test("resolveRoot: the extracted body lives in the base ONLY — the five caller
   for (const caller of callers) {
     const src = fs.readFileSync(path.join(SCRIPTS_DIR, caller), "utf8");
     assert.match(src, /import \{[^}]*\bresolveRoot\b[^}]*\} from "\.\/gate-script-base\.ts"/, `${caller} does not import resolveRoot from the base`);
+  }
+});
+
+test("resolveRoot: the two repo-root callers carry no private copy of the OLD rule either", () => {
+  // Positional, per caller: the exact statements the private copies used. A comment quoting them does
+  // not match (the comparison is on trimmed full lines), and a future re-inline under another spelling
+  // still trips the "private function named resolveRoot" check below.
+  const RETIRED = {
+    "fan-in-runid-check.ts": [
+      "if (rootArg) return path.resolve(rootArg);",
+      "return repoRoot(path.dirname(fileURLToPath(import.meta.url)));",
+    ],
+    "inner-idle-log.ts": [
+      'const idx = argv.indexOf("--root");',
+      "return idx !== -1 && argv[idx + 1] ? path.resolve(argv[idx + 1]) : REPO_ROOT;",
+    ],
+  };
+  for (const [caller, lines] of Object.entries(RETIRED)) {
+    const src = fs.readFileSync(path.join(SCRIPTS_DIR, caller), "utf8").split("\n").map((l) => l.trim());
+    for (const retired of lines) {
+      assert.equal(src.filter((l) => l === retired).length, 0, `${caller} still carries the private root-rule statement: ${retired}`);
+    }
+    // ... and neither declares a local function named `resolveRoot` (name reuse would shadow the import
+    // and make the two checks above pass while the shared rule is silently bypassed — 硬规则 8).
+    assert.doesNotMatch(
+      fs.readFileSync(path.join(SCRIPTS_DIR, caller), "utf8"),
+      /^\s*(?:export\s+)?function\s+resolveRoot\b/m,
+      `${caller} declares its own resolveRoot — it must import the shared one`,
+    );
   }
 });
 
@@ -1247,6 +1315,209 @@ test("parseArgs: deleting the shared export makes a carrier import fail (the mec
     assert.notEqual(missing.status, 0, "a consumer importing an absent export must fail to link");
 
     fs.writeFileSync(path.join(dir, "gate-script-base.ts"), "export function parseArgs() { return { args: [], flags: {} }; }\n");
+    const present = spawnSync("node", ["--experimental-strip-types", "consumer.ts"], { cwd: dir, encoding: "utf8" });
+    assert.equal(present.status, 0, "the same consumer links once the export is present");
+  });
+});
+
+// ── appendJsonlRecords: the batch appender is a single source ──────────────────────────────────────
+//
+// semantic-dedup-scan finding `jsonl-batch-appenders` (`.quay/routine-findings.jsonl`, routine
+// `semantic-dedup-scan`, runId `semantic-dedup-scan-1792940684375`, kind `byte-identical-body`, verdict
+// `real-duplication`, requested action `extract`) named FOUR batch appenders that were byte-identical
+// modulo the parameter name, plus a fifth join-style near-variant, and pointed at
+// `gate-script-base.appendJsonlLine` as the single-record sibling they sit beside. All five now
+// delegate to `appendJsonlRecords`; each keeps its own exported name because sibling modules and
+// tests import those names (`open-semantic-discovery-routine.ts` / `cross-project-dogfood-routine.ts`
+// pull `appendCarrierRecords` + `appendLedgerRecords` out of discovery-method-routine.ts;
+// plugin/test/resource-anomaly-detector.test.mjs calls `appendCarrierRecords` directly).
+//
+// ⚠️ The pin keys on the STRUCTURE (ensure-dir + one `appendFileSync` of a mapped JSONL batch + the
+// empty-batch guard), never on the function name — the five copies used five different names. Both
+// join spellings are accepted because they emit the SAME bytes for a non-empty batch:
+//   `.map((r) => JSON.stringify(r) + "\n").join("")`   and   `.map((r) => JSON.stringify(r)).join("\n") + "\n"`
+// The pre-extraction bodies are kept below as a known-true dry run: a predicate that stops matching
+// the real idiom must go RED here rather than passing vacuously (硬规则 4c).
+const BATCH_APPENDER_RE =
+  /if\(records\.length===0\)return0;fs\.mkdirSync\(path\.dirname\(\w+\),\{recursive:true\}\);fs\.appendFileSync\(\w+,records\.map\(\(r\)=>JSON\.stringify\(r\)(?:\)\.join\("\\n"\)\+"\\n"|\+"\\n"\)\.join\(""\))/;
+
+/** The five pre-extraction bodies, verbatim from `develop` at the commit before this finding was
+ *  disposed (read with `git show develop:plugin/scripts/<f>`). Known-true samples for the predicate. */
+const BATCH_APPENDER_SAMPLES = [
+  `  if (records.length === 0) return 0;
+  fs.mkdirSync(path.dirname(carrierPath), { recursive: true });
+  fs.appendFileSync(carrierPath, records.map((r) => JSON.stringify(r) + "\\n").join(""), "utf8");`,
+  `  if (records.length === 0) return 0;
+  fs.mkdirSync(path.dirname(ledgerPath), { recursive: true });
+  fs.appendFileSync(ledgerPath, records.map((r) => JSON.stringify(r) + "\\n").join(""), "utf8");`,
+  `  if (records.length === 0) return 0;
+  fs.mkdirSync(path.dirname(carrierPath), { recursive: true });
+  fs.appendFileSync(carrierPath, records.map((r) => JSON.stringify(r)).join("\\n") + "\\n", "utf8");`,
+];
+
+/** The SINGLE-record sibling's body — it has no `records` batch and must NOT be swept in, or the
+ *  ratchet would red on the very function these five now sit beside. */
+const SINGLE_RECORD_SAMPLE = `  try {
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.appendFileSync(file, JSON.stringify(entry) + "\\n");
+  } catch {}`;
+
+/** The transform variant in design-evolution-readings.ts (`appendEvolutionFindings`): a DIFFERENT
+ *  contract (maps through `evolutionFindingRecord`, catches to an `ok:false` result) — deliberately
+ *  not folded, so it must not match either. */
+const TRANSFORM_VARIANT_SAMPLE = `  fs.appendFileSync(file, findings.map((f) => JSON.stringify(evolutionFindingRecord(f, record.ts)) + "\\n").join(""));`;
+
+const BATCH_APPENDER_STRIP_WS = (s) => s.replace(/\s+/g, "");
+
+/** The four files that carried the five bodies (discovery-method-routine.ts carried TWO). */
+const BATCH_APPENDER_FORMER_CARRIERS = [
+  "arch-discovery-routine.ts",
+  "discovery-method-routine.ts",
+  "probe-routine.ts",
+  "resource-anomaly-detector.ts",
+];
+
+/** 硬规则 5b's sweep (same carrier, same principle): ONE more byte-identical emission was inlined
+ *  inside a larger function rather than standing alone as an appender — `recordNonBlockReport` in
+ *  gate-event-coverage-check.ts. It had no `return count` contract, so the standalone-appender
+ *  predicate above does not reach it; it is pinned by its own (now-removed) idiom. */
+const INLINE_BATCH_IDIOM_FORMER_CARRIERS = ["gate-event-coverage-check.ts"];
+const INLINE_BATCH_IDIOM_RE = /\.map\(\(e\)=>JSON\.stringify\(e\)\)\.join\("\\n"\)/;
+
+/** An unmapped-appender neighbour that must stay untouched: design-evolution-readings.ts maps through
+ *  a TRANSFORM (`evolutionFindingRecord`) and catches to an `ok:false` result — a different contract,
+ *  so it deliberately keeps its own body rather than routing through the throw-on-failure helper. */
+const TRANSFORM_CONTRACT_CARRIER = "design-evolution-readings.ts";
+
+/** The public names each carrier must KEEP (they are imported by siblings / tests). */
+const BATCH_APPENDER_KEPT_EXPORTS = {
+  "arch-discovery-routine.ts": ["appendCarrierRecords"],
+  "discovery-method-routine.ts": ["appendCarrierRecords", "appendLedgerRecords"],
+  "probe-routine.ts": ["appendRoutineFindings"],
+  "resource-anomaly-detector.ts": ["appendCarrierRecords"],
+};
+
+test("appendJsonlRecords: the predicate MATCHES every pre-extraction body (guards against a vacuous ratchet)", () => {
+  for (const [i, sample] of BATCH_APPENDER_SAMPLES.entries()) {
+    assert.match(
+      BATCH_APPENDER_STRIP_WS(sample),
+      BATCH_APPENDER_RE,
+      `the scan would have MISSED pre-extraction carrier sample #${i + 1} — the ratchet is vacuous`,
+    );
+  }
+  // The negative half of the same dry run: neighbours with DIFFERENT contracts must not match, or the
+  // ratchet would red on legitimate code and get "fixed" by weakening it.
+  assert.doesNotMatch(BATCH_APPENDER_STRIP_WS(SINGLE_RECORD_SAMPLE), BATCH_APPENDER_RE, "appendJsonlLine (single record) must not match");
+  assert.doesNotMatch(BATCH_APPENDER_STRIP_WS(TRANSFORM_VARIANT_SAMPLE), BATCH_APPENDER_RE, "the transform variant must not match");
+});
+
+test("appendJsonlRecords: the batch-appender body is defined exactly ONCE under plugin/scripts", () => {
+  const defs = scriptTsFiles().filter((f) => BATCH_APPENDER_RE.test(BATCH_APPENDER_STRIP_WS(sourceOf(f))));
+  assert.deepEqual(
+    defs,
+    ["gate-script-base.ts"],
+    `the batch-appender body must have a single definition; found: ${defs.length ? defs.join(", ") : "none"}`,
+  );
+});
+
+test("appendJsonlRecords: no former carrier re-inlines the body, and each IMPORTS the shared one", () => {
+  for (const f of BATCH_APPENDER_FORMER_CARRIERS) {
+    const src = sourceOf(f);
+    assert.doesNotMatch(
+      BATCH_APPENDER_STRIP_WS(src),
+      BATCH_APPENDER_RE,
+      `${f} must not re-inline the batch-appender body (import appendJsonlRecords instead)`,
+    );
+    // Deleting the private body without importing the shared one would still pass the line above, so
+    // this half is not redundant — it distinguishes "extracted" from "deleted".
+    assert.match(
+      src,
+      /import \{[^}]*\bappendJsonlRecords\b[^}]*\} from "\.\/gate-script-base\.ts"/,
+      `${f} does not import appendJsonlRecords from the base`,
+    );
+    for (const name of BATCH_APPENDER_KEPT_EXPORTS[f]) {
+      assert.match(src, new RegExp(`export function ${name}\\b`), `${f} dropped its exported name ${name}, which siblings import`);
+    }
+  }
+});
+
+test("appendJsonlRecords: the sibling the sweep turned up (inline in a bigger function) is folded too", () => {
+  for (const f of INLINE_BATCH_IDIOM_FORMER_CARRIERS) {
+    const src = sourceOf(f);
+    assert.doesNotMatch(BATCH_APPENDER_STRIP_WS(src), INLINE_BATCH_IDIOM_RE, `${f} must not re-inline the batch-emission idiom`);
+    assert.match(
+      src,
+      /import \{[^}]*\bappendJsonlRecords\b[^}]*\} from "\.\/gate-script-base\.ts"/,
+      `${f} does not import appendJsonlRecords from the base`,
+    );
+    assert.match(src, /\bappendJsonlRecords\(/, `${f} imports the shared appender but never calls it`);
+  }
+  // The deliberate non-fold, stated rather than implied: this one has a DIFFERENT contract (a
+  // transform + error-as-value, never a throw), so it keeps its own body. If someone folds it later,
+  // this assertion goes red and the change has to be a decision, not a silent drift.
+  assert.match(
+    sourceOf(TRANSFORM_CONTRACT_CARRIER),
+    /findings\.map\(\(f\) => JSON\.stringify\(evolutionFindingRecord\(/,
+    "design-evolution-readings.ts keeps its transform+error-as-value appender — folding it must be deliberate",
+  );
+});
+
+test("appendJsonlRecords: N records land as ONE append, the parent dir is created, and the count is returned", () => {
+  withTempDir("appendjsonlrecords-batch-", (dir) => {
+    // A NESTED path whose directory does not exist — the ensure-dir half.
+    const file = path.join(dir, "deep", "er", "carrier.jsonl");
+    assert.equal(appendJsonlRecords(file, [{ a: 1 }, { b: "x" }]), 2, "returns the number written");
+    assert.equal(fs.readFileSync(file, "utf8"), '{"a":1}\n{"b":"x"}\n', "one JSON object per line, trailing newline");
+
+    // A second call APPENDS (never truncates), and its count is its own batch size.
+    assert.equal(appendJsonlRecords(file, [{ c: true }]), 1);
+    assert.equal(fs.readFileSync(file, "utf8").split("\n").filter(Boolean).length, 3, "the first batch survived");
+  });
+});
+
+test("appendJsonlRecords: an empty batch writes nothing, creates no directory, and returns 0", () => {
+  withTempDir("appendjsonlrecords-empty-", (dir) => {
+    const file = path.join(dir, "never", "carrier.jsonl");
+    assert.equal(appendJsonlRecords(file, []), 0);
+    assert.equal(fs.existsSync(path.dirname(file)), false, "an empty batch must not create the parent directory");
+    assert.equal(fs.existsSync(file), false, "an empty batch must not create the file");
+  });
+});
+
+test("appendJsonlRecords: byte-identical to BOTH pre-extraction join styles on a battery of batches", () => {
+  // The whole risk of an extraction is that it changes a byte; these are the two old spellings.
+  const preExtractionBytes = (records, style) =>
+    style === "join-empty"
+      ? records.map((r) => JSON.stringify(r) + "\n").join("")
+      : records.map((r) => JSON.stringify(r)).join("\n") + "\n";
+  const cases = [
+    [{ a: 1 }],
+    [{ a: 1 }, { b: 2 }, { c: 3 }],
+    [{ nested: { z: 1, a: 2 }, arr: [1, 2], n: null, u: undefined, s: "x" }],
+    [{ s: "unicode ✓ 中文" }, { q: 'quote " and \\ backslash' }],
+  ];
+  withTempDir("appendjsonlrecords-oracle-", (dir) => {
+    for (const [i, batch] of cases.entries()) {
+      const file = path.join(dir, `case-${i}.jsonl`);
+      appendJsonlRecords(file, batch);
+      const got = fs.readFileSync(file, "utf8");
+      assert.equal(got, preExtractionBytes(batch, "join-empty"), `case #${i} drifted from the join("") spelling`);
+      assert.equal(got, preExtractionBytes(batch, "join-style"), `case #${i} drifted from the join("\\n")+"\\n" variant`);
+    }
+  });
+});
+
+test("appendJsonlRecords: deleting the shared export makes a carrier import fail (the mechanism is real)", () => {
+  withTempDir("appendjsonlrecords-negctl-", (dir) => {
+    fs.writeFileSync(path.join(dir, "gate-script-base.ts"), "export const OTHER = 1;\n");
+    fs.writeFileSync(
+      path.join(dir, "consumer.ts"),
+      'import { appendJsonlRecords } from "./gate-script-base.ts";\nconsole.log(appendJsonlRecords);\n',
+    );
+    const missing = spawnSync("node", ["--experimental-strip-types", "consumer.ts"], { cwd: dir, encoding: "utf8" });
+    assert.notEqual(missing.status, 0, "a consumer importing an absent export must fail to link");
+
+    fs.writeFileSync(path.join(dir, "gate-script-base.ts"), "export function appendJsonlRecords() { return 0; }\n");
     const present = spawnSync("node", ["--experimental-strip-types", "consumer.ts"], { cwd: dir, encoding: "utf8" });
     assert.equal(present.status, 0, "the same consumer links once the export is present");
   });

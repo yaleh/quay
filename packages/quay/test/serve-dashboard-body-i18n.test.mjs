@@ -35,11 +35,11 @@ import {
   dashboardLabel,
   fillLabel,
   chromeLabel,
-} from "../src/serve/serve-i18n.ts";
+} from "../src/serve/view/serve-i18n.ts";
 import {
   peekDashboardSnapshot,
   DASHBOARD_SNAPSHOT_DISABLED_ENV,
-} from "../src/serve/serve-dashboard.ts";
+} from "../src/serve/view/serve-dashboard.ts";
 import { readTests } from "../src/observation.ts";
 import { makeTmpDir } from "../../../plugin/test/helpers/tmp-workspace.mjs";
 import { QUAY_NATIVE_CLI } from "./helpers/cli-entry.mjs";

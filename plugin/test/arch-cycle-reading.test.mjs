@@ -322,6 +322,10 @@ test("readDirectoryCycleReading — behindSources is TRUE when the source moved 
   // A SINGLE-DIRECTORY reading is taken from the live file list, so it is never behind its sources —
   // even with a decade-old artifact. (Otherwise those scopes would be re-analyzed every interval for
   // no possible gain.)
+  // ⛔ gap-arch-cycle-single-directory-basis-never-due: "not behind" is NOT the same value as "0
+  // commits behind". The count is a git fact about the ARTIFACT and this reading did not come from
+  // one ⇒ null (not computable). The old `0` was a constant that could never be anything else
+  // (硬规则 4), and it made this row indistinguishable from a genuinely stale artifact reading.
   const single = readDirectoryCycleReading(tmp, workDir).scopes.find((s) => s.scope === "quay-github-src");
   assert.equal(single.basis, "module-graph", "this fixture gave it a graph; the single-directory arm is below");
   const noGraphDir = path.join(tmp, ".archguard-nograph");
@@ -335,9 +339,114 @@ test("readDirectoryCycleReading — behindSources is TRUE when the source moved 
   });
   const backlog = readDirectoryCycleReading(tmp, noGraphDir).scopes.find((s) => s.scope === "quay-backlog-src");
   assert.equal(backlog.basis, "single-directory");
-  assert.equal(backlog.commitsSinceArtifact, 0);
-  assert.equal(backlog.behindSources, false);
+  assert.equal(backlog.readingFreshness, "live-file-list", "the cycle conclusion comes from the file list, not the artifact");
+  assert.equal(backlog.commitsSinceArtifact, null, "⛔ never 0 — the artifact is not this reading's provenance");
+  assert.equal(backlog.behindSources, null, "「not computable」must not share a value with 「false」 (硬规则 3b)");
+  assert.notEqual(backlog.commitsSinceArtifact, 0, "the removed constant must not come back under any spelling");
 });
+
+// ── gap-arch-cycle-single-directory-basis-never-due: live-file-list provenance ────────────────────
+// The defect: `readDirectoryCycleReading` wrote `commitsSinceArtifact: 0` for every `single-directory`
+// scope. That is a git-derived field whose value was hardcoded to a constant it could never leave
+// (硬规则 4), and it made a CURRENT live reading byte-identical to a genuinely stale artifact reading:
+// production `plugin/scripts` carried `commitsSinceArtifact:0, behindSources:false, evaluated:true`
+// while `git rev-list --count --since=<artifact> HEAD -- plugin/scripts` returned 5. The fix states the
+// provenance (`readingFreshness` + `fileListReadAt`) and reports the artifact-derived count as NOT
+// COMPUTABLE, ⛔ never 0.
+
+test("readDirectoryCycleReading + carrier — a single-directory scope declares live-file-list provenance instead of a fabricated commitsSinceArtifact:0 (AC1)", (t) => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "acr-provenance-"));
+  t.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
+  // Base commit BEFORE the artifact timestamps; the only later commits are the explicit ones below.
+  makeRepoFixture(tmp, { date: "2025-12-01T00:00:00Z" });
+  const oldTs = "2025-06-01T00:00:00Z";
+  const workDir = path.join(tmp, ".archguard");
+  writeQueryFixture(workDir, tmp, {
+    timestampBySource: Object.fromEntries(SOURCES.map((s) => [s, oldTs])),
+    moduleGraphBySource: {
+      ...Object.fromEntries(SOURCES.map((s) => [s, []])),
+      "packages/quay-backlog/src": undefined, // ← graph-less ⇒ single-directory (live file list)
+    },
+  });
+  // The negative control's input: a commit AFTER the artifact that touches a module-graph scope.
+  commitAt(tmp, "2026-01-02T00:00:00Z", { "plugin/scripts/after-artifact.ts": "export const a = 1;\n" });
+
+  const reading = readDirectoryCycleReading(tmp, workDir);
+  const backlog = reading.scopes.find((s) => s.scope === "quay-backlog-src");
+  const scripts = reading.scopes.find((s) => s.scope === "scripts");
+
+  // (a) The single-directory row: provenance is the LIVE file list; the artifact count is null.
+  assert.equal(backlog.basis, "single-directory");
+  assert.equal(backlog.evaluated, true, "the live reading IS a reading");
+  assert.equal(backlog.readingFreshness, "live-file-list");
+  assert.equal(backlog.artifactTimestamp, oldTs, "the artifact looked at is still recorded — as provenance");
+  assert.equal(typeof backlog.fileListReadAt, "string", "the DIRECT quantity: when the file list was read");
+  assert.ok(Number.isFinite(Date.parse(backlog.fileListReadAt)), `fileListReadAt must be ISO, got ${backlog.fileListReadAt}`);
+  assert.ok(Math.abs(Date.now() - Date.parse(backlog.fileListReadAt)) < 60_000, "the file list was read NOW, not at the artifact's age");
+  assert.equal(backlog.commitsSinceArtifact, null, "⛔ not computable: the count is a fact about the ARTIFACT this reading did not use");
+  assert.notEqual(backlog.commitsSinceArtifact, 0, "the removed constant must not reappear");
+  assert.equal(backlog.behindSources, null, "⛔ null, not false — 「not computable」≠「not behind」");
+
+  // (b) Negative control: a module-graph row STILL computes the count, and it CAN be non-zero.
+  assert.equal(scripts.readingFreshness, "artifact");
+  assert.equal(scripts.fileListReadAt, null);
+  assert.ok(scripts.commitsSinceArtifact > 0, `expected commits since ${oldTs}, got ${scripts.commitsSinceArtifact}`);
+  assert.equal(scripts.behindSources, true);
+
+  // (c) The carrier line must carry the same provenance (this is what the detector and readers see).
+  const history = path.join(tmp, "history.jsonl");
+  const fact = runArchCycleRound(tmp, {
+    config: { enabled: true, intervalMinutes: 360 }, configPresent: true, configError: null,
+    historyPath: history, workDir, now: "2026-02-01T00:00:00Z", refresh: false,
+  });
+  assert.equal(fact.state, "verified", fact.reason ?? "");
+  const rec = JSON.parse(fs.readFileSync(history, "utf8").trim());
+  const backlogRow = rec.scopes.find((s) => s.scope === "quay-backlog-src");
+  assert.equal(backlogRow.readingFreshness, "live-file-list");
+  assert.equal(typeof backlogRow.fileListReadAt, "string");
+  assert.equal(backlogRow.commitsSinceArtifact, null);
+  assert.equal(backlogRow.behindSources, null);
+  assert.equal(/"commitsSinceArtifact":0\b/.test(JSON.stringify(backlogRow)), false, "⛔ the fabricated 0 must not survive into the carrier");
+  // And the module-graph row in the SAME carrier still carries a real count.
+  const scriptsRow = rec.scopes.find((s) => s.scope === "scripts");
+  assert.ok(scriptsRow.commitsSinceArtifact > 0, "the artifact-derived count is still measured on the row that has an artifact");
+});
+
+test("negative control — a scope that STOPS being single-directory loses the live-file-list basis and returns to the normal due path (AC3)", (t) => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "acr-premise-fails-"));
+  t.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
+  makeRepoFixture(tmp, { date: "2025-12-01T00:00:00Z" });
+  const workDir = path.join(tmp, ".archguard");
+  writeQueryFixture(workDir, tmp, {
+    timestampBySource: Object.fromEntries(SOURCES.map((s) => [s, "2025-06-01T00:00:00Z"])),
+    moduleGraphBySource: {
+      ...Object.fromEntries(SOURCES.map((s) => [s, []])),
+      "packages/quay-backlog/src": undefined,
+    },
+  });
+
+  const before = readDirectoryCycleReading(tmp, workDir).scopes.find((s) => s.scope === "quay-backlog-src");
+  assert.equal(before.basis, "single-directory");
+  assert.equal(before.readingFreshness, "live-file-list");
+  assert.equal(scopeNeedsRefresh(before), false, "a live-file-list reading is not due: analyzing cannot change it");
+
+  // The premise breaks: a tracked non-test .ts in a SUBDIRECTORY makes the judgment false.
+  commitAt(tmp, "2026-01-02T00:00:00Z", { "packages/quay-backlog/src/nested/deep.ts": "export const d = 1;\n" });
+
+  const afterReading = readDirectoryCycleReading(tmp, workDir);
+  const after = afterReading.scopes.find((s) => s.scope === "quay-backlog-src");
+  assert.equal(after.basis, null, "no longer single-directory");
+  assert.equal(after.readingFreshness, null, "⛔ the exemption must not outlive its premise");
+  assert.equal(after.evaluated, false, "no module graph + multi-directory ⇒ NOT evaluated (never \"0 cycles\")");
+  assert.equal(after.fileListReadAt, null);
+  assert.match(after.reason, /NOT single-directory/);
+  assert.equal(scopeNeedsRefresh(after), true, "back on the normal path (the artifact carries no moduleGraph ⇒ due)");
+  assert.ok(
+    selectRefreshTargets(afterReading).some((s) => s.scope === "quay-backlog-src"),
+    "the scope is back in the due set, so the refresh/downgrade machinery sees it again",
+  );
+});
+
 
 // ── refresh: EVERY due scope per round (per-scope budget), stalest first, honest skips ────────────
 // ⛔ THE OLD RULE THIS SECTION USED TO PIN — "at most ONE scope per call", "exactly one analyze per

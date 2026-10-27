@@ -164,6 +164,39 @@ function redactLiveBranchState(s) {
   );
 }
 
+// AC2 (live-TREE-state, distinct from the live-BRANCH-state block above): the EQUALITY contract is
+// about the invocation PATH, so both runs must observe the same working tree. One report line is
+// tree-state dependent and is NOT branch state: `task-status-drift-check.ts` prints
+// `, Touches file(s) not in tree` by fs.existsSync()-ing every task's declared Touches entries, and
+// `gap-b15-telemetry-snapshot-untracked` declares `milestones/fast-mode-telemetry/` — a runtime
+// artifact DIRECTORY git cannot track (only the *.json inside it is gitignored), so a fresh worktree
+// does not have it. A peer test in the same suite creates it mid-run (plugin/test/
+// fast-mode-telemetry-gitignore.test.mjs: "create it before writing the probe"), so two invocations
+// seconds apart can straddle that creation and the report then differs on exactly that one line.
+// Measured 2026-10-24 (fan-in suite log of gap-routine-architecture-analysis-dup-gap-section-
+// presence-check — a delta that touches neither this file nor any fixture): the ONLY delta was
+// `, Touches file(s) not in tree` on the gap-b15-telemetry-snapshot-untracked line; the script
+// reproduces it deterministically on demand (remove/re-create that directory and the clause
+// appears/disappears) while the same-path pair is byte-identical once the tree is quiet.
+// Fix: ONE bounded re-measure when a pair disagrees. A genuine symlink-vs-real defect is
+// DETERMINISTIC (a guard that never fires, or a root resolved from argv[1] instead of
+// import.meta.url) ⇒ it reproduces on the second pair and still fails. Only a transient TREE change
+// — which this test does not judge — can turn a red pair green. Nothing is redacted, and no tree
+// write is made here (checked-in-write-check: a test may not create entries under a checked-in path).
+function normalizeInvocation({ status, stdout, stderr }) {
+  return { status, stdout: redactLiveBranchState(redactClockFields(stdout)), stderr: redactClockFields(stderr) };
+}
+function sameInvocation(a, b) {
+  const na = normalizeInvocation(a);
+  const nb = normalizeInvocation(b);
+  return na.status === nb.status && na.stdout === nb.stdout && na.stderr === nb.stderr;
+}
+function runInvocationPair(symlinkPath, realPath, run = runNoArgs) {
+  const first = [run(symlinkPath), run(realPath)];
+  if (sameInvocation(first[0], first[1])) return first;
+  return [run(symlinkPath), run(realPath)];
+}
+
 // AC1 + AC4: the no-args signature a guard-firing symlinked CLI must present. A silent no-op
 // (exit 0, zero output) is THE defect class this file exists to catch. Output is mandatory for any
 // exit code; an exit-0 path is legitimate when it says something on STDOUT — either a deliberate
@@ -203,8 +236,9 @@ for (const { name, symlinkPath, realPath } of discovered) {
   });
 
   test(`[${name}] symlink-path and real-path invocations produce identical stdout/stderr/exit code (modulo clock fields)`, () => {
-    const viaSymlink = runNoArgs(symlinkPath);
-    const viaReal = runNoArgs(realPath);
+    // One bounded re-measure when the pair disagrees — see runInvocationPair() for the measured
+    // live-TREE-state race this absorbs and why a deterministic path defect still fails.
+    const [viaSymlink, viaReal] = runInvocationPair(symlinkPath, realPath);
     assert.equal(viaSymlink.status, viaReal.status, `${name}: exit code differs (symlink=${viaSymlink.status}, real=${viaReal.status})`);
     // AC2: redact `\d{13}` clock fields on BOTH sides so a script that embeds Date.now() (e.g.
     // milestone-worktree's `nowMs`) can still be proven identical via both invocation paths. Any
@@ -214,11 +248,11 @@ for (const { name, symlinkPath, realPath } of discovered) {
     // is NOT redacted: the branch-state report goes to stdout, so redacting stderr would only weaken
     // the comparison.
     assert.equal(
-      redactLiveBranchState(redactClockFields(viaSymlink.stdout)),
-      redactLiveBranchState(redactClockFields(viaReal.stdout)),
+      normalizeInvocation(viaSymlink).stdout,
+      normalizeInvocation(viaReal).stdout,
       `${name}: stdout differs between symlink and real invocation`
     );
-    assert.equal(redactClockFields(viaSymlink.stderr), redactClockFields(viaReal.stderr), `${name}: stderr differs between symlink and real invocation`);
+    assert.equal(normalizeInvocation(viaSymlink).stderr, normalizeInvocation(viaReal).stderr, `${name}: stderr differs between symlink and real invocation`);
   });
 }
 
@@ -259,6 +293,26 @@ test('AC2: live-branch-state redaction is scoped to the STRANDED block', () => {
   assert.ok(
     redactLiveBranchState(store('T-1') + 'task-status-drift: 1 STRANDED branch(es) — …\n').includes('STRANDED branch(es)')
   );
+});
+
+// AC2 (live-TREE-state) proof: the bounded re-measure absorbs a TRANSIENT tree change between the
+// two runs, and — the direction that matters — a DETERMINISTIC path-dependent divergence survives
+// it. Both arms use an injected runner so nothing here depends on the real repo's tree.
+test('AC2: a transient tree-state change is re-measured once, a deterministic path divergence still fails', () => {
+  const out = (stdout) => ({ status: 0, stdout, stderr: '' });
+  // arm 1: the tree changed between run 1 and run 2 (e.g. a peer test materialized the telemetry
+  // dir); the re-measured pair agrees ⇒ accepted.
+  const drifting = ['before', 'after', 'after', 'after'].map(out);
+  let i = 0;
+  const runDrifting = () => drifting[i++];
+  assert.deepEqual(runInvocationPair('symlink', 'real', runDrifting), [out('after'), out('after')]);
+  assert.equal(i, 4, 'exactly one re-measure (two extra runs) must happen — the retry is bounded');
+  // arm 2 (the control): a real symlink-vs-real defect is deterministic ⇒ the re-measured pair
+  // disagrees again and the assertion in the test body still fails.
+  const runDivergent = (p) => out(p === 'symlink' ? 'symlink' : 'real');
+  const divergentPair = runInvocationPair('symlink', 'real', runDivergent);
+  assert.deepEqual(divergentPair, [out('symlink'), out('real')]);
+  assert.equal(sameInvocation(...divergentPair), false, 'a genuine path divergence must NOT be laundered by the re-measure');
 });
 
 // AC4 proof: the guard-never-fires defect class (exit 0 with zero output) STILL fails loudly, and

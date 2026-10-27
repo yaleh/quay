@@ -26,7 +26,7 @@ import path from "node:path";
 import readline from "node:readline";
 import { execSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { createSelftest } from "./gate-script-base.ts";
+import { createSelftest, isDirectEntry } from "./gate-script-base.ts";
 
 // ── Constants ──────────────────────────────────────────────────────────────────────────────────────────
 
@@ -796,27 +796,12 @@ async function main(argv) {
   return 0;
 }
 
-// ── Direct-entry check ───────────────────────────────────────────────────────────────────────────────
-
-/**
- * Is this module being run directly (vs imported)?
- * Re-implements the isDirectEntry pattern from gate-script-base.ts for .mjs.
- *
- * @param {string} [argv1] — process.argv[1]
- * @returns {boolean}
- */
-function isDirectEntry(argv1) {
-  const entry = argv1 || process.argv[1];
-  if (!entry) return false;
-  // Bundler-friendly (gap-shipped-ts-files-are-not-bundled-80-raw-typescript-in-the-artifact):
-  // when this module is BUNDLED into another tool (fast-mode-telemetry, inner-blocked-signal),
-  // the inlined module shares the bundle's import.meta.url, so URL equality would falsely fire its
-  // CLI block. Basename match distinguishes running workflow-event-schema.mjs itself from being
-  // inlined into another entry.
-  return path.basename(entry) === "workflow-event-schema.mjs";
-}
-
-// Run CLI if invoked directly
-if (isDirectEntry()) {
+// Run CLI if invoked directly. The guard body is single-sourced in gate-script-base.ts (finding
+// `misc-isdirectentry`, routine `semantic-dedup-scan`, runId `semantic-dedup-scan-1792847536579`:
+// this file carried its own basename-equality copy even though it already imports from that module).
+// ⛔ The 3-arg named form is REQUIRED: basename, never import.meta.url — under bundling into
+// fast-mode-telemetry / inner-blocked-signal the inlined module shares the bundle's URL and a URL
+// comparison would falsely fire this CLI block.
+if (isDirectEntry(import.meta, process.argv[1], "workflow-event-schema")) {
   main(process.argv).then((code) => process.exit(code));
 }
