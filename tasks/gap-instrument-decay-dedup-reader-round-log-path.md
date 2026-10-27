@@ -3,7 +3,7 @@ id: gap-instrument-decay-dedup-reader-round-log-path
 title: instrument-decay 的立案去重台账在生产上恒为空：readPriorInstrumentDecayFilings 读
   <root>/quality-round.jsonl，而心跳写在 .quay/ —— 同一 (载体,形态) 反复重开 gap-filing
   agent（2026-10-22 已 4 轮，全部「不立案」）
-status: todo
+status: ready
 labels:
   - gap
   - defect
