@@ -3,7 +3,7 @@ id: gap-instrument-decay-suite-recovery-groups-unadjudicated
 title: instrument-decay 仍报 3 个 rate-stopped 分组（suite-incomplete /
   suite-recovery-accepted / suite-recovery-baseline-exempt）：触发缺席可证，但 MANIFEST
   无机器可读裁定
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -281,10 +281,3 @@ $ bash scripts/test.sh --for-task gap-instrument-decay-suite-recovery-groups-una
 - plugin/scripts/instrument-decay-check.ts
 - plugin/test/instrument-decay-check.test.mjs
 - tasks/gap-instrument-decay-suite-recovery-groups-unadjudicated.md
-
-## Blocker
-
-**2026-10-27T00:22:12.707Z — worker 未落地（exited-not-landed）**
-
-- 未落地原因：step=suite: AssertionError [ERR_ASSERTION]: …BELOW the requested lane count 128 — the scheduler's reliability cap is why [baseline A/B: HARD RED (task-introduced-red) — the task's red set is NOT a subset of the develop baseline red set: added=plugin/test/needs-human-parking-recheck.test.mjs changed=-]
-- run_id：wk-prod-anchor
