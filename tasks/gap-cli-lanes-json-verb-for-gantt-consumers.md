@@ -26,14 +26,24 @@ extra:
 
 ```
 invariant `quay lanes --json` 的车道分配与 Web 卡片（serve-dashboard）对**同一 workspace、同一时刻**的读数逐值相等——两者必须走同一条 live 调用链与同一个 kernel，⛔ 不得出现第二份装箱实现
-measure lanes_parity_mismatches: `node --experimental-strip-types -e "…同时取 quay lanes --json 与 serve-dashboard 的同源读数并逐值比较…"` → mismatches
-band   lanes_parity_mismatches: 0 —— 同源确定性对读，不设噪声带
+measure lanes_parity_mismatches = `node --experimental-strip-types -e "…同时取 quay lanes --json 与 serve-dashboard 的同源读数并逐值比较…"` → mismatches
+band   lanes_parity_mismatches = 0 —— 同源确定性对读，不设噪声带
 invoke `node packages/quay/bin/quay.js lanes --json --root <workspace>`
 control 故意改动 kernel 一处（例如 `packLanes` 的车道复用条件）后，同一条比较必须报出 mismatches > 0；⛔ 若改动后仍为 0，说明比较没有真的读到 kernel，判据作废
 resume 载体＝新增的 CLI 动词文件（实现载体）+ `packages/quay/src/dashboard-kernel.ts`（复用，语义不变）；落地经 task → 门 → fan-in，随后随下一版 plugin 渠道发布
 ```
 
+## 契约外说明
+
 **不变式**：`lanes.length` 恒为 5、`overflow` 只计不丢、"窗口内无记录"与"读不到 carrier"必须是**两个不同取值**（硬规则 3b）。
+
+**可执行入口**：本任务交付的动词挂在 `packages/quay/bin/quay.js`（CLI 入口，路由在 `packages/quay/src/cli/lanes.ts`），实测即 `node packages/quay/bin/quay.js lanes --json --root <workspace>`。
+
+## Dispatch review
+
+reviewer: none
+at: 2026-10-27T17:10:00+08:00
+changed: `measure lanes_parity_mismatches:` / `band lanes_parity_mismatches:` 分隔符由 `:` 改为 `=`（NAME 才被解析）；围栏外的「不变式」散文移入 `## 契约外说明`，并在该段补上 done 任务的 invoke 可执行入口路径 `packages/quay/bin/quay.js`（invoke-evidence-missing）。由 `gap-ci-red-task-contract-violations-nonblocking` 修复 contract-line-unknown + contract-measure-no-name ×2 + invoke-evidence-missing + dispatch-review-missing。
 
 ## AC
 
