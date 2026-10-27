@@ -3,7 +3,7 @@ id: gap-instrument-decay-suite-recovery-groups-unadjudicated
 title: instrument-decay 仍报 3 个 rate-stopped 分组（suite-incomplete /
   suite-recovery-accepted / suite-recovery-baseline-exempt）：触发缺席可证，但 MANIFEST
   无机器可读裁定
-status: ready
+status: done
 labels:
   - gap
   - defect
