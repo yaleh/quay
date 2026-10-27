@@ -87,7 +87,18 @@ function filesResolvingBareSpecifier(specifier) {
   const hits = [];
   for (const root of ["packages", "plugin", "scripts"]) {
     for (const file of codeFiles(path.join(repoRoot, root))) {
-      if (call.test(readFileSync(file, "utf8"))) hits.push(path.relative(repoRoot, file));
+      // ⛔ The walk→read is two steps and the tree moves between them: sibling tests stage transient
+      // fixtures under plugin/test/ (e.g. zz-runner-grouping-undeclared.test.mjs) and delete them
+      // mid-suite. A file that VANISHED is not a resolver — skip it, never crash (same convention as
+      // dead-code-after-return-check.ts scanTree: ENOENT = race, not a read error).
+      let source;
+      try {
+        source = readFileSync(file, "utf8");
+      } catch (err) {
+        if (err.code === "ENOENT") continue;
+        throw err;
+      }
+      if (call.test(source)) hits.push(path.relative(repoRoot, file));
     }
   }
   return hits.sort();
