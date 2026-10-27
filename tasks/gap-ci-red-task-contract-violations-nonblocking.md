@@ -1,7 +1,7 @@
 ---
 id: gap-ci-red-task-contract-violations-nonblocking
 title: task-contract-check 的四份任务文件契约行 VIOLATION（--no-block 记账，未阻断 CI，跟进修）
-status: todo
+status: ready
 labels:
   - gap
   - ci-red
