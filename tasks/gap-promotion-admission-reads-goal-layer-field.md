@@ -45,7 +45,7 @@ extra:
 
 ## Acceptance Criteria
 
-- [x] AC1 `plugin/scripts/ready-pool-check.ts` **活面**（非注释、非字符串字面量）中标识符 `goalAcMissing` 命中 = 0。⚠️ 配套动作（硬规则 2 两半）：非零时打印命中的前 3 条实际内容；零命中时把该谓词对一个**已知为真**的样本干跑一次，证明谓词本身会命中。
+- [x] AC1 `plugin/scripts/ready-pool-check.ts` **活面**（非注释、非字符串字面量）中标识符 `goalAcMissing` 命中 = 0。⚠️ 配套动作（硬规则 2 两半）：非零时打印命中的前 3 条实际内容；零命中时把该谓词对一个**已知为真**的样本干跑一次（真实输入：改动前的同名实体文件，即 `git show <pre-fix-sha>:plugin/scripts/ready-pool-check.ts` 的实读），证明谓词本身会命中。
 - [x] AC2 **准入面双向负控制**（本任务的取假面）：在临时 workspace（带真 `.quay/config.yml`，⛔ 裸 tasks 目录不是合法 workspace）造一条 todo 任务——带 `delivery-critical`、无 `goal_ac`、四件套齐全、依赖就绪、touches 合规。修复后晋升闸判 `eligible: true`；**把修复 revert 后**同一条判 `eligible: false`。两条真实输出都贴回本任务。
 - [x] AC3 防回退检查器存在且**能取假**：注入一个把 goal 来源量加回 `eligible` 表达式的夹具 ⇒ exit 非零；未注入时对本仓库 ⇒ exit 0；输入读不懂 ⇒ 独立取值（如 `NOT-EVALUATED` / exit 3），⛔ 不与合格同形。三种取值各贴一条真实输出。
 - [x] AC4 **原保证不回退**：`long-term-guarantee-goal-backed-check.ts` 双向负控制仍通过（真仓库绿 ∧ `--inject-unbacked-fixture` 红），且 `AC-190` criterion 复跑 exit 0。三条退出码都贴回。✅ 实测 **0 / 1 / 0**（见 Evidence §AC4）。⚠️ 本轮执行途中该正控制臂**曾是红的**——红在改动之前的 develop `d1f2ef4ff` 上（不是我改的），因另一条任务把 `goal_ac: AC-239` 写在 `extra:` 下（顶层读取不可见）；已定位、路由给其属主并随其修复转绿。该段实况完整保留在 Evidence 里——它正是本任务要的证据：删掉 task 层那份重复之后，goal 层保证仍然活着且仍然能取假。
