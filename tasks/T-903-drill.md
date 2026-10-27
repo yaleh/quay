@@ -8,9 +8,12 @@ children: []
 extra: {}
 goal_ac: AC-903
 ---
-## Contract
+## Purpose
 
 一次性的落地演练载体任务。唯一目的：让 `goal/GOAL-903` 经历一次**含追平的机械 fan-in 落地**，使 AC-322 判据在真实 store 上取到 exit 0。⛔ 无代码改动；本任务的 delta 只有本文件。`status: ready` 是刻意的：只有 ready→done 才会让 fan-in 的 flip 产出一个带 `tasks: 翻 T-903-drill done（driver 机械 fan-in）` subject 的提交。
+
+> 本节原为 `## Contract`，但内容是散文叙述而非 `measure|band|invariant|invoke|control|resume` 契约行；
+> 按 `gap-ci-red-task-contract-violations-nonblocking` 的修法把散文移出 Contract 段，本任务没有可机读的契约。
 
 ## Plan
 
