@@ -40,9 +40,9 @@ AC-260 的缺口：`dist-plugin` 交付面（marketplace 渠道真正被消费�
 ## Contract
 
 ```
-measure bad_refs = dist-plugin 分支全部 .md 中 cwd 相对 plugin/{scripts,gate-scripts}/dist/*.js 引用数（即 AC-260 的谓词）；本轮基线 96
-measure total_refs = 同一集合里 scripts/dist/*.js 引用总数；本轮基线 96
-measure dangling_root_ts = 该分支上 plugin-root 锚定的 scripts/*.ts 引用里、目标文件不存在于该分支的条数；本轮基线 11
+measure bad_refs = `python3 .quay/ac260-scan.py dist-plugin` 输出的 `BAD(cwd-relative plugin/ prefix)` 计数；修前基线 96
+measure total_refs = 同一命令输出的 `total_dist_refs` 计数；修前基线 96
+measure dangling_root_ts = 同一命令输出的 `DANGLING(plugin-root-anchored raw .ts)` 计数；修前基线 11
 band all_clear = bad_refs == 0 且 total_refs >= 1 且 dangling_root_ts == 0
 invariant root_relative_only = 重写器产出的每条路径都必须相对 plugin 根可解析；不得产出依赖「当前工作目录恰好是仓库根」的路径（消费项目里 plugin 就是树根）
 invoke `bash plugin/scripts/publish-dist-branch.sh`
@@ -65,6 +65,12 @@ resume `node --test packages/quay/test/build-plugin-dist.test.mjs`
 - [x] 「跑过一次 publish」不算落地：落地证据是**分支上的实际文件内容**，不是命令 exit 0。
 - [x] `plugin/scripts/publish-dist-branch.sh` 只被**运行**、不被修改（主发布渠道的闭包断言属 AC-263 的范围，此处不重复实现），故不进 Touches。
 - [x] 证据落 `.quay/ac260-*.txt`（修前基线 + 修后谓词原文 + AC3 的扫描计数与前 3 条命中）并随改动提交。
+
+## Dispatch review
+
+reviewer: none
+at: 2026-10-27T17:15:00+08:00
+changed: 三条 `measure` 行补上真正的生产者命令（`python3 .quay/ac260-scan.py dist-plugin`，该脚本即 AC3 扫描与三条读数的实际载体，见 Touches 与 DoD），修复 measure-no-command ×3；补 `## Dispatch review` 段。由 `gap-ci-red-task-contract-violations-nonblocking` 修复。
 
 ## Touches
 
