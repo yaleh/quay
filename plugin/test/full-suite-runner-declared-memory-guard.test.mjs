@@ -8,10 +8,14 @@
 // 32G is acceptable) — so the declaration never took effect (`bound: "host-guard"`).
 //
 // The fix (人 2026-10-15 裁定) selects the guardrail BY THE PROVENANCE OF THE DECLARATION — an explicit
-// declaration is bounded by the PROJECT-BLIND fraction (0.25 × effective host total), the project-blind
-// DEFAULT keeps the multi-scope split. `sharedHostCeilingBytes`, the 0.25 fraction and the default `16G`
-// are all untouched. The canonical statement lives in `suiteHostGuard`'s block comment in
+// declaration is bounded by the PROJECT-BLIND fraction (`SCOPE_ENVELOPE_HOST_FRACTION` × effective host
+// total), the project-blind DEFAULT keeps the multi-scope split. `sharedHostCeilingBytes` and the default
+// `16G` are untouched. The canonical statement lives in `suiteHostGuard`'s block comment in
 // plugin/scripts/full-suite-runner.ts — ⛔ not re-stated here (硬规则 5b).
+//
+// ⚠️ The fraction itself is NOT restated here (2026-10-27 raised it 0.25 → 0.5 for the 128-lane suite
+// demand); the expected project-blind BYTES below are recomputed from the constant's new value, and the
+// AC3 fixture declaration was moved above that new bound so the clamp case still exercises a clamp.
 //
 // WHY INJECTED READINGS: the three ACs are written against the 2026-10-15 read-only readings of THIS
 // host (247.0 GiB total / 17 sibling scopes). They are INJECTED, not read from the running host, so the
@@ -40,8 +44,10 @@ const GIB = 1024 ** 3;
  *  ⛔ Injected — a reading taken from the host running the suite would make these ACs host-dependent. */
 const AC_TOTAL_BYTES = 265_182_715_904; // 247.0 GiB
 const AC_SIBLING_SCOPES = 17;
-/** `defaultScopeMemoryMax(247.0 GiB, 0.25)` = the project-blind guardrail (≈ 61.74 GiB). */
-const AC_PROJECT_BLIND_BYTES = 66_295_676_928;
+/** `defaultScopeMemoryMax(247.0 GiB, SCOPE_ENVELOPE_HOST_FRACTION)` = the project-blind guardrail
+ *  (0.5 × 247.0 GiB ≈ 123.5 GiB; page-aligned). ⛔ The fraction is NOT re-spelled here — the value is
+ *  asserted to BE this pure derivation in AC1 below (硬规则 5b). */
+const AC_PROJECT_BLIND_BYTES = 132_591_357_952;
 /** `sharedHostCeilingBytes(247.0 GiB, 17)` = the multi-scope fair share (26.00 GiB, floor-dominated). */
 const AC_SPLIT_BYTES = 27_917_287_424;
 /** `32G` in bytes — the declaration 人 2026-10-15 裁定 acceptable. */
@@ -51,7 +57,7 @@ test("AC1 — a DECLARED 32G ceiling is not swallowed: the guardrail is the PROJ
   const declared = { value: "32G", source: "env" };
   const guard = suiteHostGuard({ effectiveTotalMemBytes: AC_TOTAL_BYTES, declared, siblingScopeCount: AC_SIBLING_SCOPES });
   assert.equal(guard.rule, "project-blind", "a declaration (config/env) ⇒ the project-blind rule");
-  assert.equal(guard.hostGuardBytes, AC_PROJECT_BLIND_BYTES, "0.25 × the effective host total, page-aligned");
+  assert.equal(guard.hostGuardBytes, AC_PROJECT_BLIND_BYTES, "the project-blind fraction × the effective host total, page-aligned");
   assert.equal(
     guard.hostGuardBytes,
     Number(defaultScopeMemoryMax(AC_TOTAL_BYTES, SCOPE_ENVELOPE_HOST_FRACTION)),
@@ -89,8 +95,10 @@ test("AC2 — the DEFAULT is UNCHANGED: the multi-scope split still bounds it an
 });
 
 test("AC3 — a declaration ABOVE the project-blind fraction is still clamped, with a NAMED reason", () => {
-  const declared = { value: "80G", source: "env" };
-  assert.ok(80 * GIB > AC_PROJECT_BLIND_BYTES, "the fixture declaration really is above the project-blind upper bound");
+  // The fixture sits ABOVE the project-blind bound (200G > 123.5 GiB) — the premise is asserted, not
+  // assumed (硬规则 4 推论四): if the bound ever rose past the declaration, this AC would go vacuous.
+  const declared = { value: "200G", source: "env" };
+  assert.ok(200 * GIB > AC_PROJECT_BLIND_BYTES, "the fixture declaration really is above the project-blind upper bound");
   const guard = suiteHostGuard({ effectiveTotalMemBytes: AC_TOTAL_BYTES, declared, siblingScopeCount: AC_SIBLING_SCOPES });
   assert.equal(guard.rule, "project-blind", "the guard is still selected by provenance — it did not become the split");
 

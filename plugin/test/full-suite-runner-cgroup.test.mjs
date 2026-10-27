@@ -1718,25 +1718,25 @@ test("AC2 — an override CHANGES the effective ceiling (config/env is the mecha
 });
 
 test("AC2 — a declared value ABOVE the host fraction is CLAMPED, and a small fixture host never exceeds its bound", () => {
-  // An 8 GiB effective host with the 0.25 fraction ⇒ a 2 GiB bound.
-  const clamped = suiteMemoryMax({ effectiveTotalMemBytes: 8 * GIB, declared: { value: "16G", source: "env" }, hostGuardBytes: 2 * GIB });
+  // An 8 GiB effective host with the host fraction (0.5) ⇒ a 4 GiB bound.
+  const clamped = suiteMemoryMax({ effectiveTotalMemBytes: 8 * GIB, declared: { value: "16G", source: "env" }, hostGuardBytes: 4 * GIB });
   assert.equal(clamped.bound, "host-guard", "an above-host declaration is the host-guard case");
-  assert.equal(clamped.memoryMax, String(2 * GIB), "…and the host bound is what applies");
-  assert.ok(Number(clamped.memoryMax) <= 2 * GIB, "⛔ never above the host bound");
+  assert.equal(clamped.memoryMax, String(4 * GIB), "…and the host bound is what applies");
+  assert.ok(Number(clamped.memoryMax) <= 4 * GIB, "⛔ never above the host bound");
   assert.match(clamped.reason, /exceeds the host-relative guardrail/);
 
   // The FIXTURE SMALL HOST (8 GB) end to end, via the real derivation (no injected guard): the declared
   // 16 GiB cannot leak onto a host that has 8 GiB.
   const smallHost = suiteMemoryMax({ effectiveTotalMemBytes: 8 * GIB, declared: declaredSuiteMemoryMax("16G") });
-  assert.equal(smallHost.memoryMax, String(2 * GIB), "8 GB host ⇒ 2 GiB, from the host fraction");
+  assert.equal(smallHost.memoryMax, String(4 * GIB), "8 GB host ⇒ 4 GiB, from the host fraction");
   assert.ok(Number(smallHost.memoryMax) <= 8 * GIB, "never above the whole host, let alone 16 GiB");
-  assert.equal(suiteMemoryMax({ effectiveTotalMemBytes: 4 * GIB, declared: { value: "16G", source: "default" } }).memoryMax, String(GIB), "4 GB host ⇒ 1 GiB");
+  assert.equal(suiteMemoryMax({ effectiveTotalMemBytes: 4 * GIB, declared: { value: "16G", source: "default" } }).memoryMax, String(2 * GIB), "4 GB host ⇒ 2 GiB");
   // …and a declaration UNDER the small host's bound still wins there (the clamp is an upper bound, not a rewrite).
   assert.equal(suiteMemoryMax({ effectiveTotalMemBytes: 8 * GIB, declared: { value: "512M", source: "env" } }).memoryMax, String(512 * MIB));
   // A malformed declaration degrades to the host guard (fail-safe: never forward garbage to systemd-run).
   const bad = suiteMemoryMax({ effectiveTotalMemBytes: 4 * GIB, declared: { value: "sixteen gigs", source: "env" } });
   assert.equal(bad.bound, "host-guard");
-  assert.equal(bad.memoryMax, String(GIB));
+  assert.equal(bad.memoryMax, String(2 * GIB));
   assert.match(bad.reason, /not a parseable size/);
 });
 
@@ -1960,7 +1960,7 @@ test(
     assert.equal(reading.memoryMax, DEFAULT_SYSTEMD_RUN_LIMITS.memoryMax, "the module-load template is the DECLARED constant — identical across cgroup scopes");
     assert.equal(reading.memoryMax, declaredSuiteMemoryMaxBytes(), "…and it is the ambient declaration in bytes");
     // The declaration must still NOT leak onto a 4 GiB host — the HOST-GUARDED (per-run) default clamps it.
-    assert.equal(reading.hostDefault, String(GIB), "4 GiB effective ⇒ the declaration is clamped to floor(4G × 0.25) = 1 GiB");
+    assert.equal(reading.hostDefault, String(2 * GIB), "4 GiB effective ⇒ the declaration is clamped to 0.5 × 4G = 2 GiB");
     assert.notEqual(reading.hostDefault, String(parseSystemdBytesToBytes(declaredSuiteMemoryMax().value)), "⛔ the declared default must never exceed the host bound where it is APPLIED");
     assert.ok(reading.totalmem > reading.effective, "os.totalmem() is the big host total ⇒ the SMALL value came from the cgroup cap, not from a small host");
   },
@@ -1971,8 +1971,9 @@ test(
   { skip: systemdRunAvailable() ? false : "not-evaluated: systemd-run --user --scope unavailable on this host" },
   async () => {
     // The exclusion is still load-bearing after the re-scope: if the reading consumed quay's own
-    // `quay-anchor-*` guardrail, a declared 16 GiB would be clamped to ≈0.25 × that (≈6.5 GiB) — the
-    // 2026-08-era bug in a new dress. A scope named `quay-anchor-*` with a 1G cap must be IGNORED.
+    // `quay-anchor-*` guardrail, a declared 16 GiB would be clamped to the project-blind fraction of
+    // that 1G cap (0.5 × 1G = 512M) — the 2026-08-era bug in a new dress. A scope named
+    // `quay-anchor-*` with a 1G cap must be IGNORED.
     const unit = `quay-anchor-fsr-probe-${Date.now()}-${process.pid}.scope`;
     const probe = `import(${JSON.stringify(RUNNER)}).then(m=>console.log(JSON.stringify({effective:m.readEffectiveTotalMemBytes(),memoryMax:m.DEFAULT_SYSTEMD_RUN_LIMITS.memoryMax,hostDefault:m.defaultSuiteMemoryMax(),totalmem:require("os").totalmem()}))).catch(e=>{console.error(e);process.exit(1)})`;
     const { code, out, err } = await spawnCmd([
@@ -2035,7 +2036,7 @@ test(
     const reading = JSON.parse(line);
     assert.equal(reading.effective, 4 * GIB, `the NON-quay child layer (4G) is CONSUMED and the TIGHTER quay-anchor ancestor (1G) is SKIPPED — effective=${reading.effective}`);
     assert.notEqual(reading.effective, GIB, "⛔ the quay-own ancestor's 1G was NOT consumed (that would be the feedback loop the exclusion exists to prevent)");
-    assert.equal(reading.hostDefault, String(GIB), "the declaration is clamped to the consumed 4G layer: floor(4G × 0.25) = 1G");
+    assert.equal(reading.hostDefault, String(2 * GIB), "the declaration is clamped to the consumed 4G layer: 0.5 × 4G = 2G");
     assert.equal(reading.memoryMax, DEFAULT_SYSTEMD_RUN_LIMITS.memoryMax, "the module-load template stays the DECLARED constant across cgroup shapes");
     assert.ok(reading.totalmem > reading.effective, "os.totalmem() is the big host total ⇒ the 4G came from the cgroup chain, not from a small host");
   },
@@ -2051,8 +2052,10 @@ test(
 // ⚠️ WHICH rule produces the upper bound is selected by the DECLARATION'S PROVENANCE
 // (gap-suite-declared-memory-max-swallowed-by-shared-host-split, 人 2026-10-15 裁定): an explicitly
 // DECLARED ceiling (`.quay/config.yml` `suite: memory_max:` / `QUAY_SUITE_MEMORY_MAX`) is bounded by
-// the PROJECT-BLIND `0.25 × effective host total` instead, so the shared-host split can no longer
-// silently swallow an operator's declaration. The selection's ONE home is `suiteHostGuard` in
+// the PROJECT-BLIND `SCOPE_ENVELOPE_HOST_FRACTION × effective host total` instead, so the shared-host
+// split can no longer silently swallow an operator's declaration (the fraction's VALUE lives on the
+// constant, ⛔ not restated here — 2026-10-27 raised it to cover the 128-lane suite demand). The
+// selection's ONE home is `suiteHostGuard` in
 // plugin/scripts/full-suite-runner.ts (⛔ not restated here), and its ACs live in
 // full-suite-runner-declared-memory-guard.test.mjs. The loop below injects a guard explicitly, so it
 // holds for BOTH rules — it pins `suiteMemoryMax`'s own contract, not the selection.
@@ -2090,9 +2093,9 @@ test("unit — suiteMemoryMax honours an explicitly supplied host guardrail and 
     suiteMemoryMax({ ...base, declared: { value: "8G", source: "env" } }).memoryMax,
   );
   // …and a genuinely small EFFECTIVE memory (a container) bounds it — which is why the REAL-cgroup 4G
-  // test above keeps its `floor(4G × 0.25) = 1G` expectation.
+  // test above keeps its `0.5 × 4G = 2G` expectation.
   const small = suiteMemoryMax({ effectiveTotalMemBytes: 4 * GIB, declared: { value: "16G", source: "default" } });
-  assert.equal(Number(small.memoryMax), GIB);
+  assert.equal(Number(small.memoryMax), 2 * GIB);
   assert.equal(sharedHostCeilingBytes(4 * GIB, 10 ** 6), Number(small.memoryMax));
 });
 
@@ -2110,7 +2113,7 @@ test("AC3 — the lane-scaled ESTIMATOR is pure and follows the host/concurrency
   assert.ok(Number(real.memoryMax) < Number(wide.memoryMax), "the estimator follows the concurrency input (⛔ not a constant)");
   // A small host: the host guard binds (and both halves scale with the host, never as a literal).
   const small = laneScaledScopeMemoryMax({ effectiveTotalMemBytes: 8 * GIB, laneCount: 4, perFileHighWaterBytes: 160 * MIB });
-  assert.equal(small.hostGuardBytes, 2 * GIB);
+  assert.equal(small.hostGuardBytes, 4 * GIB);
   assert.ok(Number(small.memoryMax) < 16 * GIB, "an 8 GiB host must never get a 16 GiB ceiling");
   // No measurement ⇒ its own value, not a zero.
   const none = laneScaledScopeMemoryMax({ effectiveTotalMemBytes: 246 * GIB, laneCount: 64, perFileHighWaterBytes: null });

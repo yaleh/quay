@@ -258,31 +258,40 @@ console.log(JSON.stringify({
 // memory. The fraction `0.25` silently assumes "this host runs ONE project's quay"; nothing
 // coordinates the projects, so the assumption is simply false. The fix is read-only (count the live
 // same-kind scopes, then tighten) and these tests pin its three load-bearing properties:
-//   ① N ≤ 3 ⇒ BYTE-IDENTICAL to the pre-change value (the crossover: the old formula only starts
-//      oversubscribing the host at N+1 = 5, i.e. (N+1) × 0.25 > 1);
-//   ② N ≥ 4 ⇒ strictly tighter, and never below the measured-demand floor;
+//   ① N ≤ 1/fraction − 1 ⇒ BYTE-IDENTICAL to the project-blind value (the crossover: the formula only
+//      starts oversubscribing the host once (N+1) × fraction > 1). ⚠️ The crossover is DERIVED from
+//      `ANCHOR_ENVELOPE_HOST_FRACTION` below, ⛔ not written as the literal 3 the 0.25 era produced —
+//      the fraction was raised to 0.5 on 2026-10-27, which moves the crossover to N ≤ 1;
+//   ② one step above the crossover ⇒ strictly tighter (up to the measured-demand floor);
 //   ③ the count itself is a REAL cgroup reading (real sibling scopes, a real tree walk) — not a mock.
 
 const HOST_BYTES = os.totalmem();
 
-test("shared-host — N≤3 is BYTE-IDENTICAL to the pre-change value; N≥4 tightens; the floor holds", () => {
+/** The largest sibling count at which `(N+1) × fraction ≤ 1` — i.e. the largest N that is still
+ *  within the host's budget ⇒ the project-blind value must equal the ceiling there (rederived from the
+ *  constant so the pin cannot outlive a fraction change). */
+const CROSSOVER_MAX_N = Math.floor(1 / ANCHOR_ENVELOPE_HOST_FRACTION) - 1;
+
+test("shared-host — N at/below the crossover is BYTE-IDENTICAL to the project-blind value; above it tightens; the floor holds", () => {
   const projectBlind = Number(defaultAnchorMemoryMax(HOST_BYTES));
   // Fail-open: a count that was NOT evaluated returns the project-blind value, never a fabricated number.
   assert.equal(sharedHostCeilingBytes(HOST_BYTES, null), projectBlind);
   assert.equal(sharedHostEnvelopeFraction(HOST_BYTES, null), ANCHOR_ENVELOPE_HOST_FRACTION, "not-evaluated ⇒ the ORIGINAL fraction, exactly");
-  // ① the crossover. (N+1) × 0.25 ≤ 1 ⟺ N ≤ 3 — below it the old formula was not oversubscribing
-  // anything, so tightening there would be a behaviour change with no defect behind it.
-  for (const n of [0, 1, 2, 3]) {
-    assert.equal(sharedHostCeilingBytes(HOST_BYTES, n), projectBlind, `N=${n} must be byte-identical to the pre-change value`);
+  // ① the crossover. (N+1) × fraction ≤ 1 — below it the formula was not oversubscribing anything, so
+  // tightening there would be a behaviour change with no defect behind it.
+  assert.ok(CROSSOVER_MAX_N >= 0, `the fraction leaves at least the N=0 case within budget (fraction=${ANCHOR_ENVELOPE_HOST_FRACTION})`);
+  for (let n = 0; n <= CROSSOVER_MAX_N; n++) {
+    assert.equal(sharedHostCeilingBytes(HOST_BYTES, n), projectBlind, `N=${n} must be byte-identical to the project-blind value`);
     assert.equal(sharedHostEnvelopeFraction(HOST_BYTES, n), ANCHOR_ENVELOPE_HOST_FRACTION, `N=${n} fraction`);
   }
-  // ② N=4 is the first tightening step, and the sum over the live scopes is now bounded by the host.
-  const four = sharedHostCeilingBytes(HOST_BYTES, 4);
-  assert.ok(four < projectBlind, `N=4 must be strictly tighter (got ${four} vs ${projectBlind})`);
-  assert.equal(four, Math.floor(HOST_BYTES / 5 / 4096) * 4096, "N=4 ⇒ the page-aligned host/(N+1) split");
+  // ② the first tightening step, and the sum over the live scopes is now bounded by the host.
+  const firstTightening = CROSSOVER_MAX_N + 1;
+  const four = sharedHostCeilingBytes(HOST_BYTES, firstTightening);
+  assert.ok(four < projectBlind, `N=${firstTightening} must be strictly tighter (got ${four} vs ${projectBlind})`);
+  assert.equal(four, Math.floor(HOST_BYTES / (firstTightening + 1) / 4096) * 4096, `N=${firstTightening} ⇒ the page-aligned host/(N+1) split`);
   // Monotone: more live siblings can only make each ceiling smaller (up to the floor).
   let prev = projectBlind;
-  for (const n of [4, 5, 6, 7, 8, 9, 12, 32]) {
+  for (const n of [firstTightening, 4, 5, 6, 7, 8, 9, 12, 32]) {
     const c = sharedHostCeilingBytes(HOST_BYTES, n);
     assert.ok(c <= prev, `N=${n}: ${c} must not exceed the value at the previous count (${prev})`);
     assert.ok(c >= SHARED_HOST_MIN_CEILING_BYTES, `N=${n}: ${c} must never drop below the measured-demand floor`);

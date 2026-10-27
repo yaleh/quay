@@ -59,8 +59,19 @@ export const SYSTEMD_RUN_BIN = "systemd-run";
 
 /** Default MemoryMax = host totalmem × this fraction. ⚠️ host-DERIVED on purpose: a literal ceiling
  *  is only ever "equivalent to unlimited" on the machine that wrote it and a real limit elsewhere
- *  (CLAUDE.md 硬规则 4 推论二). ⛔ Never write such a literal. */
-export const SCOPE_ENVELOPE_HOST_FRACTION = 0.25;
+ *  (CLAUDE.md 硬规则 4 推论二). ⛔ Never write such a literal.
+ *
+ *  ── 0.25 → 0.5（2026-10-27）────────────────────────────────────────────────────────────────────
+ *  这个比例是**项目盲**的 runaway guardrail（「一个进程组最多能吃掉宿主的几分之几」），不是预留：
+ *  它限制的是**最坏情况**，正常运行时 memory.current 远低于它。0.25 在本机把 suite 的声明值
+ *  `32G` 钳到 `0.25 × 61.74 GiB = 15.44 GiB`（`bound: host-guard`），而 lane-scaled 需求是
+ *  `perFileHighWater 164 MB × 128 lanes × 1.25 = 24.48 GiB` ⇒ 每轮 full-suite 都被 OOM-kill
+ *  （rounds 3110–3125，`oom_kill` 1–2 次/轮）。0.5 给出 `min(32G, 0.5 × 61.74 GiB) = 30.87 GiB`
+ *  ⇒ 覆盖需求且留 26% 余量，**仍在声明值 32G 之下**（守卫仍在起作用，⛔ 不是取消守卫）。
+ *  ⚠️ 比例是共享的单源：anchor/serve 包络与 suite 用同一条下限公式，故本改动对它们的**作用方向**是
+ *  「永不更紧、只在低同类 scope 数时更松」（`sharedHostCeilingBytes` 的 `min(projectBlind, …)` 单调性）。
+ *  这条比例的任何再次调整都必须重算 crossover：`(N+1) × fraction ≤ 1 ⟺ N ≤ 1/fraction − 1`。 */
+export const SCOPE_ENVELOPE_HOST_FRACTION = 0.5;
 
 /** Align the byte ceiling to a page boundary (same reason as the anchor: a systemd/cgroup rounding
  *  difference would otherwise show up as a few-KB mismatch in a planned-vs-in-effect comparison). */
