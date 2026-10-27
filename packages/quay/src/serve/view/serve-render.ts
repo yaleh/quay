@@ -1005,10 +1005,14 @@ export function renderBackLink(href: string, lang: Lang = DEFAULT_LANG): string 
 
 // ── Small shared helpers used by multiple domain handlers ────────────────────
 
-/** Zero-pad to two digits (shared by /git-history timestamps and /tests timeline labels). */
-export function pad2(n: number): string {
-  return n < 10 ? `0${n}` : String(n);
-}
+/** Zero-pad to two digits (shared by /git-history timestamps and /tests timeline labels).
+ *
+ *  gap-routine-semantic-dedup-scan-pad2: the ONE definition moved to the core-layer leaf
+ *  ../../pad.ts — observation.ts (Core) needs the same helper and must not import the view
+ *  layer, so the leaf is the only home both layers can reach. This module keeps exporting the
+ *  name, so every existing `from "./serve-render.ts"` importer (serve-git.ts, serve-tests.ts,
+ *  serve-dashboard.ts) is unchanged. It is a re-export only: no module-scope reference here. */
+export { pad2 } from "../../pad.ts";
 
 /** Observation-state note — "未接入/无数据" for empty, "读失败" for error, "" for ok.
  *
