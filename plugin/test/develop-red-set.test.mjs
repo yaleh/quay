@@ -393,6 +393,77 @@ test("AC3/AC4 (e2e) — a REAL fan-in observes develop's red set, and only the d
   assert.equal(read.set.develop, observation.develop);
 });
 
+test("AC3 (e2e, the REACHABILITY case) — the recorded red files are re-asked on develop; a green baseline removes them", async (t) => {
+  const task = "gap-devredset-fixture-green";
+  const fx = makeFixture("green", task);
+  t.after(() => { try { fs.rmSync(fx.base, { recursive: true, force: true }); } catch { /* best-effort */ } });
+  // A file that exists on develop and is recorded in the carrier as a current develop red.
+  const OLD_FILE = "plugin/test/old.test.mjs";
+  // ⛔ commit it on DEVELOP (the fixture's main checkout sits on `author` — committing there would make
+  // the file invisible to the baseline worktree, and the union below would silently skip it).
+  git(fx.repo, ["checkout", "-q", "develop"]);
+  write(fx.repo, OLD_FILE, "// pre-existing red, recorded in the carrier\n");
+  git(fx.repo, ["add", "-A"]);
+  git(fx.repo, ["commit", "-q", "-m", "add the pre-existing red file"]);
+  git(fx.repo, ["checkout", "-q", "author"]);
+  git(fx.worktree, ["merge", "--no-edit", "develop"]);
+  const before = git(fx.repo, ["rev-parse", "develop"]).trim();
+  fs.mkdirSync(path.join(fx.repo, ".quay"), { recursive: true });
+  fs.writeFileSync(path.join(fx.repo, DEVELOP_RED_SET_REL), JSON.stringify({
+    develop: before,
+    evaluatedAt: "2026-10-27T00:00:00.000Z",
+    reds: [{
+      key: `${OLD_FILE}::`, files: [OLD_FILE],
+      firstSeenAt: "2026-10-20T00:00:00.000Z", lastSeenAt: "2026-10-27T00:00:00.000Z",
+      blockedTasks: ["gap-some-earlier-task"], lastSignature: "still broken on develop",
+    }],
+  }, null, 2), "utf8");
+
+  const MINE_FILE = "plugin/test/mine.test.mjs";
+  const r = await runMechanicalFanIn({
+    task,
+    worktree: fx.worktree,
+    root: fx.repo,
+    runId: "devredset-e2e-green",
+    mergeTarget: "develop",
+    forceSuite: true,
+    scriptsDir: path.join(REPO, "plugin", "scripts"),
+    slotBase: fx.slotBase,
+    slotLib: SLOT_LIB,
+    silenceMs: 500,
+    ffMergeModule: FF_MERGE_MODULE,
+    suiteCapture: fx.capture,
+    suiteLogFile: path.join(fx.base, "suite.log"),
+    suiteCommand: emit(redLog(MINE_FILE, "my new test fails"), 1),
+    // The in-round rerun (on the TASK tree) still fails ⇒ the A/B is reached…
+    rerunCommand: emit(redLog(MINE_FILE, "my new test fails"), 1),
+    // …and on develop BOTH files are green: exit 0 with per-file pass markers (the real shape of a
+    // green per-file rerun — no failure lines at all).
+    baselineRerunCommand: emit(
+      `__PERFILE__ duration_ms=1 ${MINE_FILE} passed=true end_ms=1\n__PERFILE__ duration_ms=1 ${OLD_FILE} passed=true end_ms=1\n`,
+      0,
+    ),
+    baselineProvisionCommand: null,
+    scopedGateCommand: ["true"],
+    docCheckCommand: ["true"],
+  });
+  assert.equal(r.outcome, "red", "the task-introduced red must stay red");
+  assert.equal(r.baselineEquivalence?.verdict?.kind, "hard-red");
+  const observation = r.baselineEquivalence?.developRedObservation;
+  assert.ok(observation, "a GREEN baseline rerun is an evaluated, zero-red observation — not 'could not read'");
+  assert.deepEqual(observation.points, [], "nothing is red on develop any more");
+  // ⛔ the reachability half: the carrier's own file was re-run alongside the task's failed file.
+  assert.deepEqual([...observation.evaluatedFiles].sort(), [MINE_FILE, OLD_FILE].sort(),
+    `the recorded red file must be re-asked on develop, got ${JSON.stringify(observation.evaluatedFiles)}`);
+
+  // …and the driver-side writer turns that into a REMOVAL (the "red disappeared" signal).
+  const applied = applyDevelopRedObservation({ root: fx.repo, worktree: fx.worktree, observation });
+  assert.equal(applied.written, true, `driver-side write failed: ${applied.reason}`);
+  const after = readDevelopRedSet(fx.repo);
+  assert.equal(after.evaluated, true);
+  assert.deepEqual(after.set.reds, [], "the disappeared key must be gone from the carrier");
+});
+
 // ════════════════════════════════════════════════════════════════════════════════════════════════════
 // AC5 — a changed lastSignature (numbers move) does NOT change key identity
 // ════════════════════════════════════════════════════════════════════════════════════════════════════

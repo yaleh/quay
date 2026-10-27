@@ -474,6 +474,11 @@ export interface MechanicalFanInOptions {
   /** 本轮重跑命令（测试缝）；缺省 = resolveRerunCommand(worktree, worktree, <失败文件>)（读
    *  `<worktree>/.quay/config.yml` 的 `loop.rerun_command`，`{files}` 整元素被文件列表 splice）。 */
   rerunCommand?: string[];
+  /** **基线侧**重跑命令（测试缝）；缺省 = `rerunCommand`（生产上两者同源，都是那条声明的
+   *  `loop.rerun_command`）。存在的理由：`gap-develop-red-set-writer` 的「基线全绿 ⇒ 评估过、零红」
+   *  这条读数只有在「本轮重跑仍红、基线重跑全绿」时才产生——生产上这两个读数由同一命令给出时不可
+   *  同轮出现，⛔ 没有这个缝就没有任何真跑过它的测试（硬规则 4 推论三：夹具能产出 ≠ 机制会产出）。 */
+  baselineRerunCommand?: string[];
   /** 重跑子进程的墙钟上限（测试缝）；缺省 RERUN_TIMEOUT_MS。⛔ 被中止 ⇒ rerun-not-evaluated（不放行）。 */
   rerunTimeoutMs?: number;
   /** 既存红 A/B 的基线树临时 worktree 路径（测试缝）；缺省 = `<dirname(worktree)>/.baseline-red-<task>-<runId>`。 */
@@ -2845,9 +2850,30 @@ export async function runMechanicalFanIn(opts: MechanicalFanInOptions): Promise<
           }
         }
       }
-      const resolved = opts.rerunCommand !== undefined
-        ? { kind: "run" as const, argv: opts.rerunCommand }
-        : resolveRerunCommand(worktree, baseDir, failed.files);
+      // 基线重跑的目标文件 = 本轮 task 侧失败文件 ∪ 载体里**已记录的 develop 红文件**。
+      // WHY 并上后者（`gap-develop-red-set-writer` AC3 的**可达性**）：A/B 原本只重跑「task 树失败的
+      // 文件」⇒「某个 develop 红被修好了」永远不在重跑清单里 ⇒ 载体只能增不能减，「红消失」这条机械
+      // 信号只在夹具里可达（硬规则 4 推论三的反面）。并上载体自己点名的文件后，每一轮红 fan-in 都会
+      // 重新问一遍「这些红还在不在」——代价被已记录红集的大小界定，且这些文件本来就在红着。
+      // ⛔ 只在**红轮**可达：全绿轮根本进不到 A/B（那时没有 develop 侧读数，载体不动，见
+      // `BaselineEquivalenceReading.developRedObservation` 的三态说明）。
+      const recordedRedFiles = ((): string[] => {
+        const prevSet = readDevelopRedSet(root);
+        if (!prevSet.evaluated) return [];
+        const files = [...new Set(prevSet.set.reds.flatMap((e) => e.files))];
+        // ⛔ 只并上**基线树上仍然存在**的文件：已删除的文件会让重跑命令本身报错 ⇒ 一份说不出所以然的
+        // 非零日志 ⇒ A/B 变 not-evaluated ⇒ 一条陈旧记录把本来可豁免的任务变成硬红（假阻塞）。文件没了
+        // 就不是「还在红」，本轮的移除判据也认它（`evaluatedFiles` 里没有它 ⇒ 保留，等下一轮）。
+        return files.filter((f) => {
+          try { return fs.existsSync(path.join(baseDir, f)); } catch { return false; }
+        });
+      })();
+      const rerunFiles = [...new Set([...failed.files, ...recordedRedFiles])].sort();
+      const resolved = opts.baselineRerunCommand !== undefined
+        ? { kind: "run" as const, argv: opts.baselineRerunCommand }
+        : opts.rerunCommand !== undefined
+          ? { kind: "run" as const, argv: opts.rerunCommand }
+          : resolveRerunCommand(worktree, baseDir, rerunFiles);
       if (resolved.kind !== "run") return notEvaluated(`no baseline rerun command: ${resolved.reason}`);
       const logFile = path.join(root, ".quay", suiteLogFileName(task, runId, `baseline-${newSuiteLogAttemptSuffix()}`));
       const rr = await mechSh(resolved.argv, opts.rerunTimeoutMs ?? RERUN_TIMEOUT_MS);
@@ -2859,7 +2885,19 @@ export async function runMechanicalFanIn(opts: MechanicalFanInOptions): Promise<
       } catch { /* 日志 best-effort */ }
       // status===null ⇒ mechSh 墙钟到点组 kill ⇒ **未评估**（⛔ 被中止的基线重跑不得当成「基线无该红」）。
       if (rr.status === null) return notEvaluated("baseline rerun aborted");
-      const baseParse = parseFailureSignatures(combinedOutput(rr.stdout, rr.stderr), baseDir);
+      // 三态基线读数：**exit 0 + 一条失败行都没有**是一份独立的绿读数。`parseFailureSignatures` 对
+      // 这种日志返回 evaluated:false（`no-failure-signature-lines`）——那是为【红】suite 语境写的：
+      // 红 suite 解析不出签名就是读不懂。基线重跑不是红 suite，exit 0 说明这批文件在 develop 上全绿
+      // ⇒ 评估过、零红（`gap-develop-red-set-writer` 的移除信号在「全都修好了」那一轮全靠这条）。
+      // ⛔ 判据只看「**没有**失败行」：解析出签名 ⇒ 一律按签名走（⛔ 不让 exit code 推翻签名——
+      // 第三方 `rerun_command` 完全可能是 `cat <log>` 这种退出码恒 0 的形态，那不代表 develop 绿）。
+      // exit≠0 且没有任何可解析签名 ⇒ 照旧 not-evaluated（fail-closed，与改动前逐字一致）。
+      const rawBaseParse = parseFailureSignatures(combinedOutput(rr.stdout, rr.stderr), baseDir);
+      const baseParse: FailureSignatureParse = rawBaseParse.evaluated
+        ? rawBaseParse
+        : (rr.status === 0 && rawBaseParse.reason === "no-failure-signature-lines"
+            ? { evaluated: true, signatures: [] }
+            : rawBaseParse);
       if (!baseParse.evaluated) return notEvaluated(`baseline-side signatures unevaluable: ${baseParse.reason}`);
       const verdict = compareFailureSignatures(taskParse.signatures, baseParse.signatures);
       traceVerdict(verdict, { baselineFiles: baseParse.signatures.length, taskFiles: taskParse.signatures.length });
@@ -2875,9 +2913,11 @@ export async function runMechanicalFanIn(opts: MechanicalFanInOptions): Promise<
             evaluatedAt: new Date().toISOString(),
             task,
             points: developRedPoints(baseParse.signatures),
-            // 本轮在基线树上真的跑过的文件 = 重跑目标清单（`failed.files`，与上面 resolved.argv 的
-            // `{files}` 模板同源）——⛔ 不是整棵 develop 的套件（那是另一个量，本机制没有它的读数）。
-            evaluatedFiles: [...failed.files],
+            // 本轮在基线树上真的跑过的文件 = 上面 `resolved.argv` 实际拿到的重跑目标清单
+            // （task 失败文件 ∪ 已记录 develop 红文件）——⛔ 不是整棵 develop 的套件（那是另一个量，
+            // 本机制没有它的读数），也⛔ 不是只用 failed.files（那会让载体里自己点名的文件永远不被
+            // 重新评估 ⇒ 只增不减）。
+            evaluatedFiles: rerunFiles,
           };
       if (developRedObservation !== null) {
         traceSuiteEvent("develop-red-set", {
