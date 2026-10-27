@@ -274,7 +274,7 @@ $ bash scripts/test.sh --for-task gap-instrument-decay-suite-recovery-groups-una
 
 #### ADR-007 暗轴
 
-- L_D package-cycles: totalCycleCount=0 src=0 pluginScripts=0 (arch-cycle-history.jsonl 末条 @2026-10-26T22:13:33.158Z；本改动只新增字符串常量与描述符条目，未新增/删除任何 import 边，故 L_D 的依赖图与 L_G 的闭合判据在本改动面上不变)
+- L_D package-cycles: totalCycleCount=0 src=0 pluginScripts=0（`arch-cycle-history.jsonl` 末条记录，2026-10-26 22h13Z；本改动只新增字符串常量与描述符条目，未新增/删除任何 import 边，故 L_D 的依赖图与 L_G 的闭合判据在本改动面上取同一读数）
 
 ## Touches
 
