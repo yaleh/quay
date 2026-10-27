@@ -32,7 +32,7 @@
 // Run:
 //   scripts/test.sh plugin/test/release-cut.test.mjs
 
-import { test } from "node:test";
+import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync, existsSync, appendFileSync, writeFileSync, readFileSync, symlinkSync, statSync, lstatSync, readdirSync, realpathSync, linkSync, unlinkSync, accessSync, constants } from "node:fs";
@@ -86,22 +86,41 @@ function cloneLocality(parent) {
 }
 
 /**
- * A throwaway clone of this repository: no network, no `file://` transport, objects COPIED rather
- * than hardlinked. The clone IS the fixture's "main checkout" and the command's `--root`, so the
- * toolchain, the carrier files and `VERSION` are all the real ones at the real relative paths.
+ * A throwaway clone of this repository: no network, no `file://` transport. The clone IS the
+ * fixture's "main checkout" and the command's `--root`, so the toolchain, the carrier files and
+ * `VERSION` are all the real ones at the real relative paths.
  *
- * WHY `--no-hardlinks`: bare `--local` makes git hardlink every object and `die_errno("failed to
- * create link")` with NO copy fallback, the moment the destination is on another filesystem. That
- * premise belongs to the HOST, not to this repository — 2026-09-25, the repo is on /data (xfs)
- * while `os.tmpdir()` is `/` (ext4), so every test in this file died with `EXDEV` (pristine
- * baseline: 6 tests, 0 pass, 6 fail) and every fan-in's full suite was red develop-wide.
- * `--no-hardlinks` gives up the hardlinking only — the one part that cannot work cross-device —
- * and keeps the original intent (no network, no `file://` transport). The locality reading below
- * records which kind of host the run saw, instead of leaving that premise implicit in a comment.
+ * WHY ONE SHARED TEMPLATE + `--shared` (gap-release-cut-test-613s-fixture-clone-dedup): this file
+ * makes one fixture per test (18 of them), and every one used to run
+ * `git clone --local --no-hardlinks` — objects COPIED into each clone (384 MiB of objects per clone;
+ * the object copy + working-tree checkout under suite load made this file the suite's longest).
+ * The object set is identical across the 18 fixtures, so `before()` creates ONE full template clone
+ * and each fixture borrows its object store via `git clone --shared` (an alternates object-store PATH
+ * reference — ⛔ not a hardlink, so the cross-device `/data`↔`/tmp` layout that killed the old
+ * hardlinking `--local` clone with `EXDEV` does not apply). Each fixture still materialises its own
+ * working tree and commits its own deltas; the template is read-only and lives for the file's
+ * duration. The locality reading below stays: it is the measurement that says WHICH host layout this
+ * run saw, even though it no longer decides the clone's success.
  *
  * Returns { parent, root, locality } — `parent` is where the command would create its worktree,
  * which is how "no worktree was created" is checked; `locality` is that enumerated reading.
  */
+let TEMPLATE = null;
+before(() => {
+  const dir = mkdtempSync(join(tmpdir(), "release-cut-template-"));
+  TEMPLATE = join(dir, "template");
+  // --mirror: a bare repo carrying EVERY branch as refs/heads/* — ⛔ a plain clone would materialise
+  // only the source's HEAD branch, and the fixtures' `git branch develop origin/develop` /
+  // `checkout -B author origin/develop` need `origin/develop` to resolve (the cut mirrors production's
+  // shape, where the main checkout carries `author` and `develop` is a separate local branch).
+  const r = spawnSync("git", ["clone", "--mirror", "-q", repoRoot, TEMPLATE], { encoding: "utf8" });
+  assert.equal(r.status, 0, `the shared mirror template must clone: ${r.stderr}`);
+});
+after(() => {
+  if (TEMPLATE) cleanup(dirname(TEMPLATE));
+  TEMPLATE = null;
+});
+
 function makeClone(prefix) {
   const parent = mkdtempSync(join(tmpdir(), `release-cut-${prefix}-`));
   // ⛔ CLEAN UP ON OUR OWN FAILURE. Every caller does `const c = makeClone(...); try {…} finally
@@ -126,10 +145,9 @@ function makeCloneIn(parent, prefix) {
     + ` repo-dev=${srcDev ?? "unreadable"} tmp-dev=${dstDev ?? "unreadable"}\n`);
   const args = [
     "clone",
-    "--local",
-    "--no-hardlinks",
     "-q",
-    repoRoot,
+    "--shared",
+    TEMPLATE,
     root,
   ];
   const r = spawnSync("git", args, { encoding: "utf8" });
