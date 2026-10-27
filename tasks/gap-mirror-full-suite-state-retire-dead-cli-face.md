@@ -62,7 +62,11 @@ suite-driver.ts        suite-lock-slots.ts           supervisor-preempt-candidat
 
 ⛔ 但**这 16 个不能一律当"死 CLI"**：其中多数是**纯库**（`touches-parser.ts` / `suite-lock-slots.ts` / `suite-bucket-attribution.ts` / `derive-touches-heuristic.ts` …），它们的直接入口守卫是**防御性的**、从来就不是给人跑的入口。判据须区分二者（见 Contract）。
 
-## Contract
+## 判别式与处置
+
+> 本节原为 `## Contract`，但内容是判别式/处置说明（散文、列表、代码片段），不是
+> `measure|band|invariant|invoke|control|resume` 契约行；按 `gap-ci-red-task-contract-violations-nonblocking`
+> 的修法把散文移出 Contract 段（本任务没有可机读契约）。
 
 **判别式（本任务的核心产出）**——判为「死 CLI 入口面」须**同时**满足：
 
