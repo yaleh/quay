@@ -33,3 +33,5 @@ install already exists"。CI runner 的 scratch HOME 没有该记录 ⇒ 恒触�
 
 修复提交（377000a60）落地后，CI runner 无插件安装记录时该测试仍绿；若产品代码回归打印
 "already exists, use --force" 仍会红。
+
+该轴仍暗,理由:纯测试断言修复，不改动 L_D/L_G 依赖结构，本次提交未记录读数
