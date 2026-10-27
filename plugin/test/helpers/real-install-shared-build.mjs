@@ -129,6 +129,13 @@ function buildLocked(entry, buildFn) {
   }
   if (!acquired) return { evaluated: false, reason: `timed out after ${LOCK_WAIT_MS} ms waiting for a peer's build of ${entry}` };
   try {
+    // ⛔ RE-CHECK UNDER THE LOCK. Between this process's first `readEntry()` (miss) and its winning
+    // the lock, a peer may have built and published the very same entry — the window is the whole
+    // lock wait. Without this check the loser rebuilds identical bytes and REPLACES the winner's
+    // entry, i.e. the lock serialises the writes but does not deduplicate the work (measured
+    // 2026-10-28: shipped-set and shipped-shell both reported `built into the suite-shared cache`
+    // for the same entry path in one scoped-gate run).
+    if (existsSync(join(entry, "provenance.json"))) return { cacheHit: true };
     const tmp = `${entry}.tmp-${process.pid}-${Math.random().toString(36).slice(2, 10)}`;
     rmSync(tmp, { recursive: true, force: true });
     // The scratch dir the build writes into must EXIST before `buildFn` runs — a build that only
