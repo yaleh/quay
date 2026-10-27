@@ -33,6 +33,7 @@ import { execFileSync, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 import { makeTmpDir } from "./helpers/tmp-workspace.mjs";
+import { ensureSharedShippedArtifact } from "./helpers/real-install-shared-build.mjs";
 import {
   UNSHIPPED_BY_DECISION,
   codeExecRefs,
@@ -149,6 +150,18 @@ before(() => {
   }
   try {
     stub = makePublishRepo("shipped-shell-stub-");
+    // ── ONCE-PER-SUITE (gap-real-install-family-build-dedup-once-per-suite) ─────────────────────
+    // This file and plugin/test/shipped-set.test.mjs assemble the SAME stub content, so they publish
+    // the same tree; the shared helper builds that artifact once for the suite. Any helper failure is
+    // an `evaluated:false` value (never an empty directory), and the per-file build below is the
+    // unchanged fallback — a cache miss must not be able to turn this file green or red.
+    const shared = ensureSharedShippedArtifact({ repoRoot: stub, ref: "HEAD", form: "dev", syncVendor: false });
+    if (shared.evaluated) {
+      artifact = shared.dir;
+      console.log(`shipped-shell: artifact ${shared.cacheHit ? "reused from" : "built into"} the suite-shared cache (${shared.entry})`);
+      return;
+    }
+    console.log(`shipped-shell: suite-shared artifact unavailable (${shared.reason}) — building this file's own`);
     const r = runPublish(stub, "probe-shell");
     if (r.status !== 0) {
       buildError = `the real publish script FAILED (exit ${r.status}):\n${r.stdout}\n${r.stderr}`;

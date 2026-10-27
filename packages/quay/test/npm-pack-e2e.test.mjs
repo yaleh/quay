@@ -40,6 +40,10 @@ import { QUAY_NATIVE_CLI } from "./helpers/cli-entry.mjs";
 // temp copy must carry exactly the files package.sh judges, and deriving that list from the table the
 // judge itself imports is what keeps the two from drifting apart.
 import { VERSION_CARRIERS } from "../../../scripts/version-carriers.ts";
+// ONCE-PER-SUITE (gap-real-install-family-build-dedup-once-per-suite): the real-install family's
+// files used to each run the same build; this helper runs it once per suite and keys the entry by
+// the build input's CONTENT (a tree oid), so a second suite run at the same commit is a cache hit.
+import { ensureSharedPackedTarball } from "../../../plugin/test/helpers/real-install-shared-build.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const pkgDir = path.resolve(__dirname, "..");
@@ -140,16 +144,30 @@ let tempBase; // isolated temp copy of the repo layout package.sh ran in
 let tempPkg; // the package dir (tempBase/packages/quay)
 
 before(() => {
-  // Real package.sh run, in a temp COPY of the package tree: builds dist/, then
-  // npm pack -> quay-<version>.tgz, all inside the isolated copy.
-  tempBase = makeTempPackageCopy();
-  tempPkg = path.join(tempBase, "packages", "quay");
-  execFileSync("bash", [path.join(tempPkg, "scripts", "package.sh")], {
-    encoding: "utf8",
-    cwd: tempPkg,
-    stdio: "pipe",
-  });
-  tgz = path.join(tempPkg, `quay-${pkgVersion}.tgz`);
+  // ── the tarball: ONCE PER SUITE, from the SAME mechanism ──────────────────────────────────────
+  // The shared helper runs the REAL `packages/quay/scripts/package.sh` in a throwaway git worktree
+  // — the repo's own layout, so `../../plugin` and `docs/analysis` resolve exactly as they do in a
+  // real cut — and keeps the produced `quay-<version>.tgz` in a content-keyed cache. Every test
+  // below still installs and runs that tarball; what it no longer does is rebuild it per file.
+  // A helper failure answers `evaluated:false` (never an empty path), and the fallback below is the
+  // unchanged per-file build.
+  const shared = ensureSharedPackedTarball({ repoRoot });
+  if (shared.evaluated) {
+    tgz = shared.tgzPath;
+    console.log(`npm-pack-e2e: tarball ${shared.cacheHit ? "reused from" : "built into"} the suite-shared cache (${shared.entry})`);
+  } else {
+    console.log(`npm-pack-e2e: suite-shared tarball unavailable (${shared.reason}) — running this file's own package.sh`);
+    // Real package.sh run, in a temp COPY of the package tree: builds dist/, then
+    // npm pack -> quay-<version>.tgz, all inside the isolated copy.
+    tempBase = makeTempPackageCopy();
+    tempPkg = path.join(tempBase, "packages", "quay");
+    execFileSync("bash", [path.join(tempPkg, "scripts", "package.sh")], {
+      encoding: "utf8",
+      cwd: tempPkg,
+      stdio: "pipe",
+    });
+    tgz = path.join(tempPkg, `quay-${pkgVersion}.tgz`);
+  }
   assert.ok(fs.existsSync(tgz), `package.sh must produce ${tgz}`);
 
   // Install the tarball into a scratch prefix (isolated from the repo).

@@ -581,6 +581,37 @@ if (doDispatch) {
 // `git status`, which the caller may be judging), and the finally-block removes the worktree AND
 // both scratch branches on the success and the failure path alike (`--dry-run` included: its whole
 // contract is that it leaves no ref, worktree or branch behind).
+/**
+ * Resolve a PRE-BUILT shipped-set artifact offered through the test seam, or `null`.
+ *
+ * `null` means "build it yourself", and it is the answer for every unverifiable offer: an unreadable
+ * provenance file, an artifact built from a different tree, a dev-form build, a missing artifact
+ * directory, or an unresolvable `baseRef`. ⛔ None of those is a refusal — a caller that hands in a
+ * stale artifact must not turn the cut red; the preflight simply pays for the build, which is the
+ * behaviour every caller had before the seam existed.
+ *
+ * The three things that make the offer verifiable are in the returned provenance, not in the
+ * caller's word: `form` (the version stamp's branch shape), `tree` (the content the build consumed)
+ * and `publisher` (the mechanism that produced it).
+ */
+function readInjectedShippedSetArtifact(rootDir, baseRef) {
+  const offered = process.env.QUAY_TEST_SHARED_SHIPPED_SET_ARTIFACT;
+  if (!offered) return null;
+  let provenance;
+  try {
+    provenance = JSON.parse(fs.readFileSync(path.join(offered, "provenance.json"), "utf8"));
+  } catch {
+    return null;
+  }
+  if (!provenance || provenance.form !== "release") return null;
+  if (provenance.publisher !== "plugin/scripts/publish-dist-branch.sh") return null;
+  if (!fs.existsSync(path.join(offered, "artifact"))) return null;
+  const tree = git(rootDir, "rev-parse", "--verify", `${baseRef}^{tree}`);
+  if (tree.status !== 0) return null;
+  if (tree.stdout.trim() !== provenance.tree) return null;
+  return path.join(offered, "artifact");
+}
+
 function precheckShippedSetSize(rootDir, baseRef) {
   const unavailable = (reason, detail) => ({ verdict: "unavailable", reason, detail: detail ?? "" });
   let parent;
@@ -633,28 +664,57 @@ function precheckShippedSetSize(rootDir, baseRef) {
         /* best-effort: the build's own status is the honest reporter if this was needed */
       }
     }
-    const built = run("bash", [publisher, "--branch", artifactBranch], { cwd: worktree });
-    if (built.status !== 0) {
-      return unavailable(
-        `the canonical publisher (plugin/scripts/publish-dist-branch.sh, run in a worktree at '${baseRef}') exited ${built.status}`,
-        diagnosticTail(built),
-      );
-    }
-    // `git archive` of the orphan commit — the ARTIFACT a consumer receives, ⛔ never a copy of the
-    // working tree (the assembled tree has its raw .ts stripped and its .sh rewritten in place; the
-    // working tree does not). Same extraction release.yml's own step performs.
-    const archived = run("git", ["-C", worktree, "archive", "-o", artifactTar, artifactBranch]);
-    if (archived.status !== 0) {
-      return unavailable(`git archive of '${artifactBranch}' exited ${archived.status}`, diagnosticTail(archived));
-    }
-    try {
-      fs.mkdirSync(artifactDir, { recursive: true });
-    } catch (err) {
-      return unavailable(`could not create '${artifactDir}'`, err.message);
-    }
-    const extracted = run("tar", ["-xf", artifactTar, "-C", artifactDir]);
-    if (extracted.status !== 0) {
-      return unavailable(`extracting the artifact tar exited ${extracted.status}`, diagnosticTail(extracted));
+    // ── a PRE-BUILT artifact for THIS base tree, when one is offered ──────────────────────────
+    // The shipped-set build is ~23–40 s of this script's own runtime, and a caller that runs the
+    // cut many times over the SAME base tree (plugin/test/release-cut.test.mjs runs it 21 times)
+    // pays it once per invocation for an identical answer. `QUAY_TEST_SHARED_SHIPPED_SET_ARTIFACT`
+    // lets that caller hand in the artifact it already built — but ONLY when the offer is
+    // verifiable, and falling back to a real build otherwise:
+    //   • the provenance must name the TREE it was built from, and that tree must be exactly
+    //     `<baseRef>^{tree}` — a cache keyed by anything coarser (a path, a timestamp, a commit
+    //     whose metadata differs) is a proxy that drifts from the fact it stands for (硬规则 4b);
+    //   • the form must be `release` — the version stamp writes `X.Y.Z` on a release-shaped branch
+    //     and `X.Y.Z-dev` otherwise, so a dev-form artifact would answer a different question;
+    //   • the publisher must have been the real one (the entry records it) and must still exist in
+    //     the base tree — see the existence check above, which the injected path does not bypass.
+    // ⛔ It is NOT a bypass of the gate: the ceiling is still read from the BASE TREE's checker, and
+    // the artifact is still a product of `publish-dist-branch.sh`. What it skips is the rebuild.
+    const injected = readInjectedShippedSetArtifact(rootDir, baseRef);
+    const useInjected = injected !== null;
+    if (useInjected) {
+      try {
+        fs.mkdirSync(artifactDir, { recursive: true });
+      } catch (err) {
+        return unavailable(`could not create '${artifactDir}'`, err.message);
+      }
+      const copied = run("cp", ["-a", `${injected}/.`, artifactDir]);
+      if (copied.status !== 0) {
+        return unavailable("a pre-built shipped-set artifact was offered but could not be copied into the probe", diagnosticTail(copied));
+      }
+    } else {
+      const built = run("bash", [publisher, "--branch", artifactBranch], { cwd: worktree });
+      if (built.status !== 0) {
+        return unavailable(
+          `the canonical publisher (plugin/scripts/publish-dist-branch.sh, run in a worktree at '${baseRef}') exited ${built.status}`,
+          diagnosticTail(built),
+        );
+      }
+      // `git archive` of the orphan commit — the ARTIFACT a consumer receives, ⛔ never a copy of the
+      // working tree (the assembled tree has its raw .ts stripped and its .sh rewritten in place; the
+      // working tree does not). Same extraction release.yml's own step performs.
+      const archived = run("git", ["-C", worktree, "archive", "-o", artifactTar, artifactBranch]);
+      if (archived.status !== 0) {
+        return unavailable(`git archive of '${artifactBranch}' exited ${archived.status}`, diagnosticTail(archived));
+      }
+      try {
+        fs.mkdirSync(artifactDir, { recursive: true });
+      } catch (err) {
+        return unavailable(`could not create '${artifactDir}'`, err.message);
+      }
+      const extracted = run("tar", ["-xf", artifactTar, "-C", artifactDir]);
+      if (extracted.status !== 0) {
+        return unavailable(`extracting the artifact tar exited ${extracted.status}`, diagnosticTail(extracted));
+      }
     }
     // `--json` for an ENUMERATED reading (硬规则 3): the exit code alone cannot tell "over the
     // ceiling" from "forbidden content present" from "the baseline could not be read", and a

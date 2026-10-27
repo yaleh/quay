@@ -40,6 +40,8 @@ import { tmpdir } from "node:os";
 import { join, dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { ensureSharedShippedArtifact } from "./helpers/real-install-shared-build.mjs";
+
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const repoRoot = join(__dirname, "..", "..");
 const SCRIPT = join(repoRoot, "plugin", "scripts", "release-cut.sh");
@@ -49,8 +51,36 @@ function git(cwd, ...args) {
   return { status: res.status, stdout: res.stdout ?? "", stderr: res.stderr ?? "" };
 }
 
+/**
+ * The ONCE-PER-FILE shipped-set artifact (gap-real-install-family-build-dedup-once-per-suite).
+ *
+ * Without it this file's ~21 `release-cut.sh` invocations each rebuild the shipped-set artifact in
+ * the shipped-set preflight, and that build — not the fixture clone — is what made this file the
+ * suite's longest (654.7 s). `before()` builds ONE artifact, from a canonical fixture whose
+ * `develop` carries the same ceiling every other fixture plants (so the TREES are identical even
+ * though the fixtures' commit SHAs are not — see the helper's key note), and hands its path to each
+ * run through the environment.
+ *
+ * ⛔ Never set for the arms that must build: a fixture whose `develop` differs from the canonical
+ * tree in a way that can change the build (the broken publisher, the broken stamper, the 1-file
+ * ceiling) fails `release-cut.mjs`'s tree check and falls back to a real build by itself. So the
+ * negative arms stay real without this file having to enumerate them.
+ */
+let sharedArtifact = null;
+let sharedCanonical = null; // the fixture the artifact was built from; kept alive until after()
+
+function seamEnv() {
+  return sharedArtifact ? { QUAY_TEST_SHARED_SHIPPED_SET_ARTIFACT: sharedArtifact } : {};
+}
+
 function run(args, opts = {}) {
-  const res = spawnSync("bash", [SCRIPT, ...args], { encoding: "utf8", ...opts });
+  // `env` AFTER the spread: several arms pass their own env (a fake `gh`, a converged PATH) and
+  // those must be preserved — the seam is additive.
+  const res = spawnSync("bash", [SCRIPT, ...args], {
+    encoding: "utf8",
+    ...opts,
+    env: { ...process.env, ...(opts.env ?? {}), ...seamEnv() },
+  });
   return { status: res.status, stdout: res.stdout ?? "", stderr: res.stderr ?? "" };
 }
 
@@ -115,8 +145,33 @@ before(() => {
   // shape, where the main checkout carries `author` and `develop` is a separate local branch).
   const r = spawnSync("git", ["clone", "--mirror", "-q", repoRoot, TEMPLATE], { encoding: "utf8" });
   assert.equal(r.status, 0, `the shared mirror template must clone: ${r.stderr}`);
+
+  // ── the ONE artifact every passing arm consumes ────────────────────────────────────────────────
+  // Built from a canonical fixture, ⛔ not from `repoRoot` itself: the tree the preflight judges is
+  // the FIXTURE's develop, which every fixture plants the same ample ceiling on. Building here (the
+  // same clone the other tests use) makes the shared artifact's provenance tree identical to theirs.
+  // On any failure `sharedArtifact` stays null and every `run()` falls back to a real build — the
+  // file then behaves exactly as it did before this optimization (slower, never wrong).
+  sharedCanonical = makeClone("shared");
+  let art;
+  try {
+    art = ensureSharedShippedArtifact({ repoRoot: sharedCanonical.root, ref: "develop", form: "release" });
+  } catch (err) {
+    art = { evaluated: false, reason: `the shared build threw: ${String(err && err.stack ? err.stack : err)}` };
+  }
+  if (art.evaluated) {
+    sharedArtifact = art.entry; // the entry dir: artifact/ + provenance.json
+    process.stdout.write(
+      `SUITE-RELEASE-CUT-SHARED-ARTIFACT ${art.cacheHit ? "reused" : "built"} — ${art.dir} (tree ${art.tree.slice(0, 12)})\n`,
+    );
+  } else {
+    process.stdout.write(`SUITE-RELEASE-CUT-SHARED-ARTIFACT unavailable — ${art.reason}\n`);
+  }
 });
 after(() => {
+  if (sharedCanonical) cleanup(sharedCanonical.parent);
+  sharedCanonical = null;
+  sharedArtifact = null;
   if (TEMPLATE) cleanup(dirname(TEMPLATE));
   TEMPLATE = null;
 });
