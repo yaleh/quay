@@ -1,7 +1,7 @@
 ---
 id: gap-develop-red-set-writer
 title: quay driver 写 .quay/develop-red-set.json（当前 develop 红签名集）
-status: todo
+status: ready
 labels:
   - cockpit
 parent: null
