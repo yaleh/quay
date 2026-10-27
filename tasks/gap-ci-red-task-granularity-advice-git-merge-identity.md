@@ -1,7 +1,7 @@
 ---
 id: gap-ci-red-task-granularity-advice-git-merge-identity
 title: task-granularity-advice AC6 fixture 的 git merge 缺身份，CI 无宿主 git 身份时 status 128
-status: todo
+status: done
 labels:
   - gap
   - ci-red
