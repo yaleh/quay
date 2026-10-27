@@ -43,7 +43,11 @@ extra:
 
 **为什么现在立案而不是等"自然收敛"**：本仓库已有「迁移 = 创建 + 删除，只有创建被度量」的结论；该 writer 的**删除半边从未执行**，且**没有任何检查器会报出它**——catalog 登记齐全、测试绿、文件存在 ⇒ 所有机械读数都显示"正常"。
 
-## Contract
+## 退役范围与不在范围
+
+> 本节原为 `## Contract`，但内容是退役范围表与「不在范围」清单（散文/表格），不是
+> `measure|band|invariant|invoke|control|resume` 契约行；按 `gap-ci-red-task-contract-violations-nonblocking`
+> 的修法把散文移出 Contract 段（本任务没有可机读契约）。
 
 **退役范围 = 三个面，缺一即「修好一个漏兄弟」（硬规则 5b）**：
 
