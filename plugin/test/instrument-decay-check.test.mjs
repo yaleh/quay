@@ -27,8 +27,10 @@ import {
   analyzeAll,
   extractTsMs,
   DEFAULT_STALE_SECONDS,
+  SUITE_INCOMPLETE_TRIGGER_CMD,
+  RECOVERY_ACCEPTED_TRIGGER_CMD,
+  RECOVERY_EXEMPT_TRIGGER_CMD,
 } from "../scripts/instrument-decay-check.ts";
-
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "..", "..");
 const CHECKER = path.join(REPO_ROOT, "plugin", "scripts", "instrument-decay-check.ts");
@@ -736,6 +738,179 @@ test("生产 MANIFEST 负控制 ③ — 含 ff 但没有 suite-start 的落地 �
   assert.deepEqual(stopped.map((d) => d.group), ["suite-skip"], "an unexplained doc-only landing re-exposes the absence");
   assert.match(stopped[0].detail, /condition command did not hold/);
   assert.equal(res.adjudicated.length, 7, "the other seven adjudications still hold");
+});
+
+// ── 生产 MANIFEST 第 9–11 条裁定：OOM→incomplete→恢复阶梯链的【下游】三个终端 ────────────────────
+// (gap-instrument-decay-suite-recovery-groups-unadjudicated)
+// 三组（suite-incomplete / suite-recovery-accepted / suite-recovery-baseline-exempt）的写手都在
+// worker-fan-in.ts 的同一个 `if (incompleteMarker !== null)` 块里：没有 incomplete 就结构上不可达。
+// 条件读的都是【触发输入】，⛔ 不是「本组多久没写」：
+//   suite-incomplete               ← .quay/verification-round.jsonl 里【原轮】的 notEvaluated
+//                                     （runner 按同一谓词印 SUITE-INCOMPLETE 标记 + 落账本）
+//   suite-recovery-accepted        ← 每条 suite-incomplete 是否等到 accepted / blocked
+//   suite-recovery-baseline-exempt ← 每次认证走的是 certified 还是 exempt 分支
+//
+// ⚠️ 恢复轮与原轮**共用 runId**（recoverySuiteCommand 复用同一条 suite 命令）⇒「同一 runId 的第一条
+//    = 原轮」是结构判据；恢复轮即使自己又被 OOM 杀也不写 suite-incomplete，必须排除，否则条件在
+//    一次 OOM 风暴之后会恒红——负控制 ⑥ 测的就是这个排除是承重的。
+
+const SUITE_OLD = "2026-08-29T10:00:00.000Z"; // suite-incomplete 的末次写入（>24h 早于 RECENT）
+const SUITE_OLD2 = "2026-08-29T11:00:00.000Z"; // 阶梯终端（accepted / baseline-exempt）的末次写入
+const SUITE_CHAIN_GROUPS = [
+  "suite-incomplete", "suite-recovery-accepted", "suite-recovery-baseline-exempt",
+];
+
+function ledgerRound({ runId, endedAt, durationMs = 120000, laneCount = 128, notEvaluated, taskId = "gap-x" }) {
+  const startedAt = new Date(Date.parse(endedAt) - durationMs).toISOString();
+  const rec = {
+    round: 1, runId, taskId, startedAt, durationMs, laneCount,
+    state: "red", completeness: "complete", plannedFiles: 620, terminalFiles: 620,
+  };
+  if (notEvaluated !== undefined) rec.notEvaluated = notEvaluated;
+  return rec;
+}
+
+/** 三个分组都命中 Shape B（末次写入 6 天前），且触发输入都在 ⇒ 全部 explained-absent。 */
+function suiteChainFixture({
+  extraRows = [],
+  extraLedger = [],
+  extraIncompleteTask = null, // 追加一条 incomplete（无终端）⇒ 负控制 ④
+  certWithoutBranch = false, // 追加一次「没有来路的认证」⇒ 负控制 ⑤
+  recoveryOomRound = false, // 追加一条【恢复轮】OOM ⇒ 正控制 ⑥（必须仍被排除）
+} = {}) {
+  const dir = tmpDir("idc-suite-chain-");
+  const rows = [];
+  for (const s of COMPANION_STEPS) rows.push(stepRec(s, RECENT));
+  for (const s of SUITE_STEPS) rows.push(stepRec(s, RECENT));
+  rows.push(stepRec("suite-incomplete", SUITE_OLD));
+  rows.push(stepRec("suite-recovery-accepted", SUITE_OLD2));
+  rows.push(stepRec("suite-recovery-baseline-exempt", SUITE_OLD2));
+  const ledgerExtra = [];
+  // 注入的一条 incomplete **总是配上它自己的原轮账本记录**（现实里 suite-incomplete 正是那条轮次
+  // 结束 ~7s 后写的）——否则注入的就不是「触发发生了但没认证」，而是「账本本身缺条」，两种缺陷不该混在一起。
+  const addRecordedIncomplete = (task, at) => {
+    rows.push({ ...stepRec("suite-incomplete", at), task });
+    ledgerExtra.push(ledgerRound({
+      runId: `mfi-${task}-1`, taskId: task,
+      endedAt: new Date(Date.parse(at) + 5000).toISOString(), notEvaluated: "oom-killed (1)",
+    }));
+  };
+  if (extraIncompleteTask !== null) {
+    addRecordedIncomplete(extraIncompleteTask, new Date(Date.parse(SUITE_OLD2) + 60000).toISOString());
+  }
+  if (certWithoutBranch) {
+    const t1 = new Date(Date.parse(SUITE_OLD) + 30 * 60000).toISOString();
+    const t2 = new Date(Date.parse(SUITE_OLD) + 31 * 60000).toISOString();
+    addRecordedIncomplete("gap-x2", t1);
+    rows.push({ ...stepRec("suite-recovery-accepted", t2), task: "gap-x2" });
+  }
+  for (const r of extraRows) rows.push(r);
+  writeCarrier(dir, "fan-in-step-trace.jsonl", rows);
+
+  const ledger = [
+    // 原轮：结束在末次 suite-incomplete 之后 5s（实测间隔 6.5–9.5s，120s 窗内）
+    ledgerRound({ runId: "mfi-gap-x-1", endedAt: new Date(Date.parse(SUITE_OLD) + 5000).toISOString(), notEvaluated: "oom-killed (1)" }),
+    // 恢复轮：同一 runId 的第二条 ⇒ 结构性排除（即使自己也 OOM 也不该让条件变红）
+    ledgerRound({ runId: "mfi-gap-x-1", endedAt: new Date(Date.parse(SUITE_OLD) + 600000).toISOString(), laneCount: 64, notEvaluated: "oom-killed (2)" }),
+  ];
+  if (recoveryOomRound) {
+    ledger.push(ledgerRound({ runId: "mfi-gap-x-1", endedAt: new Date(Date.parse(SUITE_OLD) + 1200000).toISOString(), laneCount: 32, notEvaluated: "oom-killed (3)" }));
+  }
+  for (const r of ledgerExtra) ledger.push(r);
+  for (const r of extraLedger) ledger.push(r);
+  writeCarrier(dir, "verification-round.jsonl", ledger);
+  return dir;
+}
+
+/** 用生产条件命令直接取一次读数（cwd = 载体 root，与 detector 内部调用完全一致）。 */
+function runCondition(cmd, cwd) {
+  const r = spawnSync("sh", ["-c", cmd], { cwd, encoding: "utf8" });
+  return { status: r.status, stderr: String(r.stderr ?? "") };
+}
+
+function rateStoppedGroups(res) {
+  return res.decayed.filter((d) => d.kind === "rate-stopped").map((d) => d.group).sort();
+}
+
+test("生产 MANIFEST 第 9–11 条 — 3 个下游终端全部 explained-absent，且 count/lastWrite 照出", () => {
+  const dir = suiteChainFixture();
+  const res = analyzeCarrier(dir, MANIFEST[0], DEFAULT_STALE_SECONDS, NOW_MS);
+  assert.deepEqual(rateStoppedGroups(res), [], "no rate-stopped group may survive the three adjudications");
+  assert.deepEqual(res.adjudicated.map((a) => a.group).sort(), [...SUITE_CHAIN_GROUPS].sort());
+  for (const g of SUITE_CHAIN_GROUPS) {
+    const a = res.adjudicated.find((x) => x.group === g);
+    assert.equal(a.kind, "conditional-on-input", `${g} is condition-gated, not a permanent exemption`);
+    assert.equal(a.state, "explained-absent", `${g}: the declared condition must be a real executable reading`);
+    assert.equal(a.condition.exitCode, 0);
+    // ⛔ 已裁定 ≠ 从读数里消失（硬规则 3b）：count / lastWrite 照旧输出。
+    assert.ok(a.count > 0, `${g} keeps its record count`);
+  }
+  assert.equal(res.adjudicated.find((x) => x.group === "suite-incomplete").lastWriteMs, Date.parse(SUITE_OLD));
+  assert.equal(res.adjudicated.find((x) => x.group === "suite-recovery-accepted").lastWriteMs, Date.parse(SUITE_OLD2));
+});
+
+test("生产 MANIFEST 负控制 ④（AC3 的负控制）— incomplete 等不到认证（及无来路认证、无记录 OOM 轮）⇒ 三组全部回到 decayed[]", () => {
+  const dir = suiteChainFixture({
+    extraIncompleteTask: "gap-unresolved",
+    certWithoutBranch: true,
+    // 账本里另有一条没人记账的原轮 OOM（C1 的负控制）
+    extraLedger: [ledgerRound({
+      runId: "mfi-negative-control-1", taskId: "gap-negative-control",
+      endedAt: "2026-08-29T12:00:00.000Z", notEvaluated: "oom-killed (1)",
+    })],
+  });
+  const res = analyzeCarrier(dir, MANIFEST[0], DEFAULT_STALE_SECONDS, NOW_MS);
+  assert.deepEqual(rateStoppedGroups(res), [...SUITE_CHAIN_GROUPS].sort(),
+    "an incomplete that never gets a terminal, and an OOM round with no suite-incomplete, re-expose ALL three");
+  for (const g of SUITE_CHAIN_GROUPS) {
+    const d = res.decayed.find((x) => x.group === g);
+    assert.match(d.detail, /condition command did not hold \(exit 1\)/, `${g}: the false condition must be named`);
+  }
+  assert.equal(res.adjudicated.length, 0, "nothing is exempted while the trigger input says otherwise");
+});
+
+test("生产 MANIFEST 负控制 ⑤ — 一次认证找不到来路（无 certified / exempt）⇒ 只有 baseline-exempt 回到 decayed[]", () => {
+  const dir = suiteChainFixture({ certWithoutBranch: true });
+  const res = analyzeCarrier(dir, MANIFEST[0], DEFAULT_STALE_SECONDS, NOW_MS);
+  assert.deepEqual(rateStoppedGroups(res), ["suite-recovery-baseline-exempt"],
+    "the exempt reading is per-certification branch attribution, not a copy of the accepted reading");
+  assert.match(res.decayed.find((d) => d.group === "suite-recovery-baseline-exempt").detail, /condition command did not hold \(exit 1\)/);
+  assert.equal(res.adjudicated.length, 2, "the other two still hold");
+});
+
+test("生产 MANIFEST 负控制 ⑥ — 恢复轮自己也 OOM（同一 runId 的第二条）⇒ suite-incomplete 的裁定仍然成立", () => {
+  // ⛔ 这条是承重的：不排除恢复轮，条件会在一次 OOM 风暴之后恒红（实测 170 条 incomplete/OOM 轮次里
+  //    105 条是恢复轮），裁定就变成「风暴后永远报腐烂」——与它要消灭的误报同形。
+  const dir = suiteChainFixture({ recoveryOomRound: true });
+  const res = analyzeCarrier(dir, MANIFEST[0], DEFAULT_STALE_SECONDS, NOW_MS);
+  assert.deepEqual(rateStoppedGroups(res), [], "a recovery round that itself OOMs is not a missing suite-incomplete");
+  assert.equal(res.adjudicated.length, 3);
+  assert.equal(res.adjudicated.find((a) => a.group === "suite-incomplete").state, "explained-absent");
+});
+
+test("生产 MANIFEST 负控制 ⑦ — 账本里出现一条没被记录的原轮 OOM ⇒ 只有 suite-incomplete 回到 decayed[]", () => {
+  const dir = suiteChainFixture({
+    extraLedger: [ledgerRound({
+      runId: "mfi-unrecorded-original-1", taskId: "gap-x",
+      endedAt: new Date(Date.parse(SUITE_OLD) + 3600000).toISOString(), notEvaluated: "incomplete (12/620 missing)",
+    })],
+  });
+  const res = analyzeCarrier(dir, MANIFEST[0], DEFAULT_STALE_SECONDS, NOW_MS);
+  assert.deepEqual(rateStoppedGroups(res), ["suite-incomplete"],
+    "an original round that produced no complete verdict but left no record is exactly the rot this declares away");
+  assert.equal(res.adjudicated.length, 2, "the two recovery terminals are unaffected");
+});
+
+test("三条条件命令 — 载体或账本读不懂时 fail-closed 到 exit 1（⛔ 不是静默豁免）", () => {
+  const noLedger = suiteChainFixture();
+  fs.rmSync(path.join(noLedger, ".quay", "verification-round.jsonl"), { force: true });
+  assert.equal(runCondition(SUITE_INCOMPLETE_TRIGGER_CMD, noLedger).status, 1, "missing ledger ⇒ cannot evaluate ⇒ decay");
+
+  const emptyCarrier = tmpDir("idc-suite-chain-empty-");
+  writeCarrier(emptyCarrier, "fan-in-step-trace.jsonl", []);
+  for (const cmd of [SUITE_INCOMPLETE_TRIGGER_CMD, RECOVERY_ACCEPTED_TRIGGER_CMD, RECOVERY_EXEMPT_TRIGGER_CMD]) {
+    assert.equal(runCondition(cmd, emptyCarrier).status, 1, "no suite-incomplete in the carrier ⇒ nothing to explain ⇒ decay");
+  }
 });
 
 // ── suite-rerun-green 的【触发式】条件：六条正负控制 ────────────────────────────────────────────────
