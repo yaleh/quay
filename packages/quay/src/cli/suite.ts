@@ -36,7 +36,7 @@ import {
   type FullSuiteStateCarrierState,
 } from "../observation/liveness.ts";
 import { resolveRoot } from "../driver-control.ts";
-import { parseVerbless } from "./flags.ts";
+import { parseIsoSince, parseVerbless } from "./flags.ts";
 import type { CliCtx } from "./context.ts";
 
 /** The version this verb first ships in — the consumer's capability probe (AC6). */
@@ -99,20 +99,6 @@ export function parseSuiteLimit(raw: unknown): { limit: number; error: string | 
   return { limit: n, error: null };
 }
 
-/** Validate `--since`: an ISO 8601 instant. Missing ⇒ no bound. ⛔ An unparseable value is a usage
- *  error, never a silently-unbounded read (that would answer a different question). */
-export function parseSuiteSince(raw: unknown): { sinceMs: number | null; error: string | null } {
-  if (raw === undefined) return { sinceMs: null, error: null };
-  if (typeof raw === "string") {
-    const ms = Date.parse(raw);
-    if (Number.isFinite(ms)) return { sinceMs: ms, error: null };
-  }
-  return {
-    sinceMs: null,
-    error: `quay suite: --since requires an ISO 8601 instant (e.g. 2026-10-01T00:00:00Z; got ${JSON.stringify(raw)})`,
-  };
-}
-
 function buildDocument(
   suite: ReturnType<typeof readFullSuiteStateCarrier>,
   rounds: SuiteRoundsReading,
@@ -151,7 +137,10 @@ export function runSuite(
   }
   const limit = parseSuiteLimit(flags.limit);
   if (limit.error) return { stdout: "", reason: limit.error, exitCode: 1, document: null };
-  const since = parseSuiteSince(flags.since);
+  // ⛔ An unparseable --since is a usage error (exit 1 below), never a silently-unbounded read
+  // (that would answer a different question). Shared with `quay driver log` — cli/flags.ts
+  // parseIsoSince — and this verb supplies the one per-verb part: its command prefix.
+  const since = parseIsoSince(flags.since, "quay suite");
   if (since.error) return { stdout: "", reason: since.error, exitCode: 1, document: null };
 
   const suite = readFullSuiteStateCarrier(root);

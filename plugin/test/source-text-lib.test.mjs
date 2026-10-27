@@ -33,6 +33,15 @@
 // of the four that blanks rather than deletes, and the only one that treats a `#` inside a string as
 // code), and the same positional sweep guards its one declared home.
 //
+// A FOURTH pass, from a DIFFERENT routine (`architecture-analysis`, finding
+// `dup-last-suite-start-offset-divergent-regex`, runId `architecture-analysis-1792940968187`,
+// suggestedAction `extract`) added the suite-log round slice — lastSuiteStartOffset, which was
+// written 3x across 2 carriers with TWO regex spellings. Unlike the families above, the two old
+// spellings were NOT semantically equivalent: on a BARE marker line at EOF the `[^\n]*$` spelling
+// returns 0 and the `\s` spelling returns -1. The controls at the bottom pin the chosen semantics on
+// exactly that input AND assert agreement with both old spellings wherever BOTH accepted the line,
+// so neither spelling can quietly come back.
+//
 // Run: scripts/test.sh plugin/test/source-text-lib.test.mjs
 
 import { test } from "node:test";
@@ -54,6 +63,7 @@ import {
   snippetOf,
   maskComments,
   codeOnlyText,
+  lastSuiteStartOffset,
 } from "../scripts/source-text-lib.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -393,3 +403,135 @@ test("regression: the two names collapsed to one — `lineAt` no longer exists a
     }
   }
 });
+
+// ── the suite-log round slice: ONE home, and the divergence is pinned (fourth pass) ──────────
+//
+// Finding `dup-last-suite-start-offset-divergent-regex` (routine `architecture-analysis`, runId
+// `architecture-analysis-1792940968187`): `lastSuiteStartOffset` existed 3x with two spellings —
+// /^__FANIN_SUITE_START__[^\n]*$/gm (measure-trend-check.ts + fan-in-execute.js FIX_SCOPE_GATE) and
+// /^__FANIN_SUITE_START__\s/gm (pre-verified-round-record.ts). They agree on every line the emitter
+// produces today (` iso=…`), so the divergence was invisible — and it is a REAL behavior difference,
+// not formatting. These controls hold BOTH sides of it: agreement where both accept, and the chosen
+// answer on the one input where they did not.
+
+/** The two PRE-EXTRACTION spellings, kept ONLY as the other side of the equivalence control. The
+ *  matcher is the same "last match wins" loop all three carriers used. */
+function lastMatchOf(re) {
+  return (text) => {
+    re.lastIndex = 0; // a regex with /g carries state across calls; the carriers re-created it per call
+    let last = -1;
+    let m;
+    while ((m = re.exec(text)) !== null) last = m.index;
+    return last;
+  };
+}
+const oldDollarSpelling = lastMatchOf(/^__FANIN_SUITE_START__[^\n]*$/gm);
+const oldWhitespaceSpelling = lastMatchOf(/^__FANIN_SUITE_START__\s/gm);
+
+test("control: lastSuiteStartOffset agrees with BOTH old spellings on lines BOTH accept", () => {
+  // A real two-round rotated log: the second marker is the current round.
+  const log =
+    "__FANIN_SUITE_START__ iso=2026-08-19T00:00:00.000Z ms=100 head=old round=full\n" +
+    "__PERFILE__ duration_ms=1.1 /wt/a.test.mjs passed=true\n" +
+    "__FANIN_SUITE_START__ iso=2026-08-19T00:10:00.000Z ms=600 head=new round=full\n" +
+    "__PERFILE__ duration_ms=2.2 /wt/b.test.mjs passed=false\n";
+  const expected = log.indexOf("__FANIN_SUITE_START__ iso=2026-08-19T00:10");
+  assert.equal(lastSuiteStartOffset(log), expected, "the LAST marker line wins");
+  assert.equal(oldDollarSpelling(log), expected, "old `[^\\n]*$` spelling agrees on emitted markers");
+  assert.equal(oldWhitespaceSpelling(log), expected, "old `\\s` spelling agrees on emitted markers");
+  assert.equal(lastSuiteStartOffset(log), oldDollarSpelling(log));
+  assert.equal(lastSuiteStartOffset(log), oldWhitespaceSpelling(log));
+});
+
+test("control: a BARE marker line at EOF IS a marker — the exact input where the old spellings diverged", () => {
+  // An emitter change that writes the marker without its trailing fields/newline must not make one
+  // reader slice the whole log while another slices nothing (fake checker-misreport).
+  const bareAtEof = "__PERFILE__ stale-before-marker passed=true\n__FANIN_SUITE_START__";
+  const bareOffset = bareAtEof.indexOf("__FANIN_SUITE_START__");
+  assert.equal(lastSuiteStartOffset(bareAtEof), bareOffset, "the shared rule treats a bare marker at EOF as a marker");
+  assert.equal(oldDollarSpelling(bareAtEof), bareOffset, "the `[^\\n]*$` spelling already did");
+  assert.equal(
+    oldWhitespaceSpelling(bareAtEof),
+    -1,
+    "PIN THE DIVERGENCE: the retired `\\s` spelling does NOT see a bare marker at EOF — this is why the extraction had to choose, not merely dedupe",
+  );
+  assert.equal(lastSuiteStartOffset("__FANIN_SUITE_START__"), 0, "a lone bare marker is the current round");
+});
+
+test("control: a marker line followed by whitespace (the real emitter) still matches — `\\s` keeps its guarantee", () => {
+  // The other half of the retired `\s` spelling: the marker TOKEN must end at whitespace or EOF.
+  const emitted = "__FANIN_SUITE_START__ iso=2026-08-21T00:00:00.000Z ms=1 head=x round=full\n";
+  assert.equal(lastSuiteStartOffset(emitted), 0);
+  assert.equal(lastSuiteStartOffset("__FANIN_SUITE_START__\n"), 0, "bare marker + newline");
+  assert.equal(lastSuiteStartOffset("__FANIN_SUITE_START__EXTRA\n"), -1, "a PREFIX is not the marker (token boundary)");
+});
+
+test("control: a MID-LINE mention is not a marker, and the last MARKER LINE still wins", () => {
+  // The suite's own test output mentions the marker mid-line; slicing from there would drop the real
+  // __PERFILE__ lines before it (gap-measure-trend-check-slice-line-anchor / gap-wiring-B).
+  const mentionOnly =
+    "__PERFILE__ duration_ms=1 a.test.mjs passed=false\n" +
+    "✔ parsePerFileLines slices by the last __FANIN_SUITE_START__ marker (current round only)\n";
+  assert.equal(lastSuiteStartOffset(mentionOnly), -1, "a mid-line mention is NOT a marker");
+  assert.equal(oldDollarSpelling(mentionOnly), -1, "…and neither old spelling matched it either");
+
+  const mentionAfterMarker =
+    "__FANIN_SUITE_START__ iso=2026-08-21T00:00:00.000Z ms=1 head=x round=full\n" +
+    "__PERFILE__ duration_ms=1 a.test.mjs passed=false\n" +
+    "✔ the last __FANIN_SUITE_START__ marker slices the current round\n";
+  assert.equal(
+    lastSuiteStartOffset(mentionAfterMarker),
+    0,
+    "the mention AFTER the real marker must not move the slice point",
+  );
+});
+
+test("regression: no plugin/scripts file declares its own copy of the suite-log round slice", () => {
+  // 硬规则 2 — by POSITION: the predicate runs over the non-code mask, so this test's own prose and
+  // the extraction comments can spell the name without satisfying it.
+  const scriptsDir = path.join(REPO_ROOT, "plugin", "scripts");
+  const decl = /function\s+(lastSuiteStartOffset)\s*\(/g;
+  const offenders = [];
+  for (const name of fs.readdirSync(scriptsDir)) {
+    if (!/\.(ts|mjs|js)$/.test(name)) continue;
+    if (name === "source-text-lib.ts") continue; // the one declared home
+    const src = fs.readFileSync(path.join(scriptsDir, name), "utf8");
+    const mask = buildNonCodeMask(src);
+    for (const m of src.matchAll(decl)) {
+      if (mask[m.index] === 0) offenders.push(`${name}:${src.slice(0, m.index).split("\n").length}`);
+    }
+  }
+  assert.deepEqual(
+    offenders,
+    [],
+    `a private copy of the round slice reappeared (finding \`dup-last-suite-start-offset-divergent-regex\` is back) — got ${offenders.length}: ${JSON.stringify(offenders)}`,
+  );
+});
+
+/** The two plugin/scripts carriers that each held a private copy before the extraction. Every one
+ *  must now reach the shared module. The THIRD carrier is the fan-in workflow (separate test below —
+ *  it lives outside plugin/scripts and its call site is inside a generated inline node script). */
+const ROUND_SLICE_CARRIERS = ["measure-trend-check.ts", "pre-verified-round-record.ts"];
+
+test("regression: every plugin/scripts carrier imports the round slice from source-text-lib", () => {
+  for (const name of ROUND_SLICE_CARRIERS) {
+    const src = fs.readFileSync(path.join(REPO_ROOT, "plugin", "scripts", name), "utf8");
+    assert.match(
+      src,
+      /import\s*\{[^}]*\blastSuiteStartOffset\b[^}]*\}\s*from\s*"\.\/source-text-lib\.ts"/,
+      `${name} must import lastSuiteStartOffset from source-text-lib.ts`,
+    );
+    assert.doesNotMatch(src, /const\s+\w*Re\w*\s*=\s*\/\^__FANIN_SUITE_START__/, `${name} must not re-inline the marker regex`);
+  }
+});
+
+test("regression: the fan-in workflow's FIX_SCOPE_GATE imports the shared helper instead of an inlined regex", () => {
+  const wf = fs.readFileSync(path.join(REPO_ROOT, "plugin", "workflows", "fan-in-execute.js"), "utf8");
+  assert.ok(
+    wf.includes('import { lastSuiteStartOffset } from "${PLUGIN_ROOT}/scripts/source-text-lib.ts";'),
+    "the generated FIX_SCOPE_GATE inline script must import the shared helper (same import style as its other four)",
+  );
+  assert.ok(wf.includes("const _roundMk = lastSuiteStartOffset(logText);"), "it must CALL the helper");
+  assert.ok(!wf.includes("_roundMkRe"), "the inlined marker regex must be gone from the workflow");
+});
+
