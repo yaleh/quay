@@ -74,6 +74,7 @@ Repoint both probes' fallback block at live readers (phase-declare.ts takeLdFile
 - `plugin/scripts/probe-fallback-path-check.ts`
 - `plugin/test/probe-fallback-path-check.test.mjs`
 - `tasks/gap-routine-architecture-analysis-probe-fallback-instrument-archived-undeclared.md`
+- plugin/test/quality-gate-driver.test.mjs
 
 ## Fleet 案卷回执（case_01b4d1fb570b）
 
