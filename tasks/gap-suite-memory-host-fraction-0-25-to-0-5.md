@@ -1,7 +1,7 @@
 ---
 id: gap-suite-memory-host-fraction-0-25-to-0-5
 title: suite 内存护栏 fraction 0.25→0.5：声明 32G 被钳到 15.44 GiB，提到 30.87 GiB 覆盖 lane 需求
-status: todo
+status: ready
 labels:
   - gap
 parent: null
