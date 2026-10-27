@@ -40,3 +40,11 @@ resume 之一开头（散文移出 Contract 段或改写为契约行）；measur
 `git log` 里可见对应的 task_write 提交。
 
 该轴仍暗,理由:纯任务文件正文修复，不改动 L_D/L_G 依赖结构，本次提交未记录读数
+
+## Touches
+
+- tasks/gap-ci-red-task-contract-violations-nonblocking.md（自身：勾 AC + 贴证据）
+- tasks/T-903-drill.md（清除 VIOLATION）
+- tasks/gap-ci-runner-container-needs-user-systemd.md（清除 VIOLATION）
+- tasks/gap-cli-lanes-json-verb-for-gantt-consumers.md（清除 VIOLATION）
+- tasks/gap-ac264-quay-fleet-project-scope-plugin-only-deployment.md（清除 VIOLATION）
