@@ -1735,20 +1735,12 @@ export function buildReadyAtMsMap(root: string): Map<string, number> {
  *  `blocker`，其 `overlaps`（已排序）去掉候选自身任务文件后作 `overlapFiles`。
  *  ⛔ 不重写重叠数学（单一真相源 = touches-orthogonality-check 的 `parseTouches`/`checkTouchesPair`/
  *  `normalizePath` + concurrent-batch-scheduler 的 `expandDeclaredTouches`）；本函数只【再调一次】
- *  它们。存在这一份重复的读取闭包，正是因为 `touchesDisjoint` 谓词本身必须逐字不变（AC9 / Plan 1
- *  「五个谓词的实现一处不改」）——语义随谓词变化的方式，是两者读同一批单一真相源函数。 */
+ *  它们。谓词与归因的**两侧读取闭包来自同一个** `makeTouchesSideReaders`（routine
+ *  `architecture-analysis` finding `dup-readtouches-closure-driver-filters`）：两者读同一批单一真相源
+ *  函数这件事由「共用一份构造」保证，⛔ 不再靠两份手写闭包碰巧长得一样——后者会在任一侧改动时
+ *  静默分叉，而 AC9 / Plan 1「五个谓词的实现一处不改」仍成立（`touchesDisjoint` 谓词本体未动）。 */
 function makeTouchesAttributor(ctx: FilterContext): (id: string) => { blocker: string | null; overlapFiles: string[] } {
-  const expand = (globs: string[]) => expandDeclaredTouches(globs, ctx.root);
-  const readTouches = (id: string) => {
-    const file = path.join(ctx.root, "tasks", `${id}.md`);
-    let raw: string;
-    try {
-      raw = fs.readFileSync(file, "utf8");
-    } catch {
-      return { hasSection: false, globs: [] as string[] };
-    }
-    return parseTouches(parseTask(raw).body);
-  };
+  const { expand, readTouches } = makeTouchesSideReaders(ctx);
   return (id: string) => {
     const self = readTouches(id);
     // 候选自身的任务文件（规范化后比较；展开集里的条目由 normalizePath 产出）。
