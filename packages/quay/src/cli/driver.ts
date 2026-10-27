@@ -27,7 +27,7 @@
 //   worktree (second layer) — so the kernel never hangs on a short-lived worktree copy.
 
 import path from "node:path";
-import { parseFlags, resolveJsonFlag } from "./flags.ts";
+import { parseIsoSince, parseFlags, resolveJsonFlag } from "./flags.ts";
 import { readFanInAttempts, readLiveWorkers, type FanInAttemptsResult, type InFlightTask } from "../observation.ts";
 // gap-fan-in-instrument-availability-self-check AC3：`quay driver status --kind worker` 也报这两个 fan-in
 // 仪器的当前读数。⛔ 只读（探针不写任何 quay 状态）、⛔ 不改退出码——它是**事实**，不是拦截信号。
@@ -214,22 +214,6 @@ export function renderFanInAttemptsText(res: FanInAttemptsResult): string {
   return lines.join("\n") + "\n";
 }
 
-/** Validate `--since`: an ISO 8601 instant. Missing ⇒ no bound. ⛔ An unparseable value is a usage
- *  error (exit 1), never a silently-unbounded read — that would answer a different question than the
- *  one asked (the same rule `quay suite`'s `--since` parser states). Same shape as
- *  `parseSuiteSince`; kept here rather than imported so the two verbs' error wording stays their own. */
-export function parseDriverLogSince(raw: unknown): { sinceMs: number | null; error: string | null } {
-  if (raw === undefined) return { sinceMs: null, error: null };
-  if (typeof raw === "string") {
-    const ms = Date.parse(raw);
-    if (Number.isFinite(ms)) return { sinceMs: ms, error: null };
-  }
-  return {
-    sinceMs: null,
-    error: `quay driver log: --since requires an ISO 8601 instant (e.g. 2026-10-01T00:00:00Z; got ${JSON.stringify(raw)})`,
-  };
-}
-
 /** The `quay driver log` body — a pure function of (flags, resolved root) so the CLI and any future
  *  caller share ONE implementation (the `runDriver` pattern above). `root` is null when no
  *  `.quay/config.yml` was found (the caller reports it rather than guessing a workspace). */
@@ -252,7 +236,10 @@ export function runDriverLog(
     return { stdout: "", reason: `quay driver log: --limit requires a non-negative integer (got ${JSON.stringify(flags.limit)})`, exitCode: 1 };
   }
   const taskId = typeof flags.task === "string" ? flags.task : null;
-  const since = parseDriverLogSince(flags.since);
+  // ⛔ An unparseable --since is a usage error (exit 1 below), never a silently-unbounded read —
+  // the SAME rule `quay suite` applies; both verbs share one validator (cli/flags.ts parseIsoSince)
+  // and differ only in the command prefix they pass.
+  const since = parseIsoSince(flags.since, "quay driver log");
   if (since.error) {
     return { stdout: "", reason: since.error, exitCode: 1 };
   }

@@ -176,6 +176,11 @@ import { resolveSharedCheckout, toIsoTimestamp } from "./per-task-suite-record.t
 // byte-identical block in both round-record writers, so a fail-closed change could land in one copy).
 import { resolveCpuSplit } from "./cpu-split-contract.ts";
 import { parsePerFileLines } from "./measure-trend-check.ts";
+// The suite-log round slice (line-anchored marker) — one rule, one home. This file's local copy used
+// the `\s` spelling, which returns -1 on a bare marker line at EOF while measure-trend-check's copy
+// returned 0; the shared helper keeps BOTH guarantees (finding
+// `dup-last-suite-start-offset-divergent-regex`, routine `architecture-analysis`).
+import { lastSuiteStartOffset } from "./source-text-lib.ts";
 // gap-verification-round-static-fail-no-record — the shared test-failure matcher (the SAME
 // single-definition-point FAILURE_PATTERNS full-suite-runner uses), imported from the lightweight
 // runner-red-parse.ts module (its only runtime import is tmux-leak-fail-re.ts; the full-suite-runner
@@ -247,22 +252,6 @@ const PHASE_OVERHEAD_RE = /^__OVERHEAD__\s+([A-Za-z0-9_]+)_ms=(\d+)(?:\s+partial
 const STATIC_CHECK_FAILED_RE = /^STATIC_CHECK_FAILED:\s*(\S+)\s+exit=(\d+)/;
 // Mirror full-suite-runner's failures[] cap (a pathological red round cannot grow the record unbounded).
 const MAX_RECORDED_FAILURES = 200;
-
-/** Byte offset of the LAST `__FANIN_SUITE_START__` LINE (anchored at line start), or -1.
- *  gap-wiring-B-verification-round-write-path: the previous `lastIndexOf(substring)` was fooled by the
- *  suite's OWN test output — a node:test assertion description (`✔ … — parseSuitePhases slices by the
- *  last __FANIN_SUITE_START__ marker …`) CONTAINS the marker string MID-LINE, so lastIndexOf sliced
- *  from INSIDE the test run and excluded the EARLY `overlap: running` / `overlap_<phase>_ms` markers
- *  (real round 347 recorded phase_overlap=false + lowconc_phase_ms=0 despite a genuine overlap log).
- *  Anchoring on the line START (the emitted marker is always `__FANIN_SUITE_START__ iso=…`) excludes
- *  test-output mentions. */
-function lastSuiteStartOffset(text) {
-  const re = /^__FANIN_SUITE_START__\s/gm;
-  let last = -1;
-  let m;
-  while ((m = re.exec(text)) !== null) last = m.index;
-  return last;
-}
 
 /** Parse test.sh's `__OVERHEAD__ <phase>_ms=N` lines from a suite log. Returns {} when the log is
  *  absent/unreadable (never fabricates a phase — the absent-field contract). Keyed by the raw label
