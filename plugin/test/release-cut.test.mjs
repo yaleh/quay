@@ -74,6 +74,7 @@ function seamEnv() {
 }
 
 function run(args, opts = {}) {
+  provisionSharedArtifact();
   // `env` AFTER the spread: several arms pass their own env (a fake `gh`, a converged PATH) and
   // those must be preserved — the seam is additive.
   const res = spawnSync("bash", [SCRIPT, ...args], {
@@ -145,16 +146,38 @@ before(() => {
   // shape, where the main checkout carries `author` and `develop` is a separate local branch).
   const r = spawnSync("git", ["clone", "--mirror", "-q", repoRoot, TEMPLATE], { encoding: "utf8" });
   assert.equal(r.status, 0, `the shared mirror template must clone: ${r.stderr}`);
+});
+after(() => {
+  if (sharedCanonical) cleanup(sharedCanonical.parent);
+  sharedCanonical = null;
+  sharedArtifact = null;
+  if (TEMPLATE) cleanup(dirname(TEMPLATE));
+  TEMPLATE = null;
+});
 
-  // ── the ONE artifact every passing arm consumes ────────────────────────────────────────────────
-  // Built from a canonical fixture, ⛔ not from `repoRoot` itself: the tree the preflight judges is
-  // the FIXTURE's develop, which every fixture plants the same ample ceiling on. Building here (the
-  // same clone the other tests use) makes the shared artifact's provenance tree identical to theirs.
-  // On any failure `sharedArtifact` stays null and every `run()` falls back to a real build — the
-  // file then behaves exactly as it did before this optimization (slower, never wrong).
-  sharedCanonical = makeClone("shared");
+/**
+ * Build the ONE artifact every passing arm consumes — LAZILY, on the first `run()`.
+ *
+ * ⛔ NOT from a `before()` hook: node:test executes top-level `before()` hooks BEFORE the module
+ * finishes evaluating, so a hook that calls `makeClone()` hits this file's later `const
+ * AMPLE_SHIPPED_CEILING` in its temporal dead zone (`ReferenceError: Cannot access … before
+ * initialization`, measured 2026-10-27). Tests run after evaluation, so calling from `run()` is
+ * inside the module's initialized state by construction.
+ *
+ * Built from a canonical fixture, ⛔ not from `repoRoot` itself: the tree the preflight judges is
+ * the FIXTURE's develop, which every fixture plants the same ample ceiling on. Building from the
+ * same kind of clone the other tests use makes the provenance tree identical to theirs.
+ * On any failure `sharedArtifact` stays null and every `run()` falls back to a real build — the file
+ * then behaves exactly as it did before this optimization (slower, never wrong).
+ */
+let sharedProvisioned = false;
+function provisionSharedArtifact() {
+  if (sharedProvisioned) return;
+  sharedProvisioned = true;
+  if (!TEMPLATE) return; // before() never ran (no fixture template to clone)
   let art;
   try {
+    sharedCanonical = makeClone("shared");
     art = ensureSharedShippedArtifact({ repoRoot: sharedCanonical.root, ref: "develop", form: "release" });
   } catch (err) {
     art = { evaluated: false, reason: `the shared build threw: ${String(err && err.stack ? err.stack : err)}` };
@@ -167,14 +190,7 @@ before(() => {
   } else {
     process.stdout.write(`SUITE-RELEASE-CUT-SHARED-ARTIFACT unavailable — ${art.reason}\n`);
   }
-});
-after(() => {
-  if (sharedCanonical) cleanup(sharedCanonical.parent);
-  sharedCanonical = null;
-  sharedArtifact = null;
-  if (TEMPLATE) cleanup(dirname(TEMPLATE));
-  TEMPLATE = null;
-});
+}
 
 function makeClone(prefix) {
   const parent = mkdtempSync(join(tmpdir(), `release-cut-${prefix}-`));
