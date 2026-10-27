@@ -131,6 +131,9 @@ function buildLocked(entry, buildFn) {
   try {
     const tmp = `${entry}.tmp-${process.pid}-${Math.random().toString(36).slice(2, 10)}`;
     rmSync(tmp, { recursive: true, force: true });
+    // The scratch dir the build writes into must EXIST before `buildFn` runs — a build that only
+    // copies a finished file into it (the tarball arm) has nothing to create it.
+    mkdirSync(tmp, { recursive: true });
     try {
       buildFn(tmp);
       rmSync(entry, { recursive: true, force: true });
