@@ -22,15 +22,17 @@ cockpit 救援类第一个自动候选需要机械信号「develop 上对应红�
 
 ## AC
 
-- [ ] AC1: 文件形状符合契约（develop/evaluatedAt/reds[] 各字段齐）。
-- [ ] AC2: 键用 test file::test name，assertion 正文只进 lastSignature。
-- [ ] AC3: baseline-red 红 → upsert 该 key；绿（通过）→ 移除该 key；移除后文件不再残留已消失 key。
-- [ ] AC4: 写者只有 driver 进程（fleet 侧只读不变式；本任务测试断言写路径无 fleet 写）。
-- [ ] AC5: 同一 key 的 lastSignature 变化（如数字变）不改变 key 身份——仍按同一 key upsert，不产生新 key。
+- [x] AC1: 文件形状符合契约（develop/evaluatedAt/reds[] 各字段齐）。
+- [x] AC2: 键用 test file::test name，assertion 正文只进 lastSignature。
+- [x] AC3: baseline-red 红 → upsert 该 key；绿（通过）→ 移除该 key；移除后文件不再残留已消失 key。
+- [x] AC4: 写者只有 driver 进程（fleet 侧只读不变式；本任务测试断言写路径无 fleet 写）。
+- [x] AC5: 同一 key 的 lastSignature 变化（如数字变）不改变 key 身份——仍按同一 key upsert，不产生新 key。
 
 ## DoD
 
 在 landed 提交上，driver 在 fan-in 后维护 develop-red-set.json，fleet 能读到「当前 develop 红签名集」及「某 key 已消失」。
+
+- L_D archguard(plugin/scripts): entitySccCount=0 directoryCycleCount=0 entities=4760 relations=10773
 
 ## Touches
 
