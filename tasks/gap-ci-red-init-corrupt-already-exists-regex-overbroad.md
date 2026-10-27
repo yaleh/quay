@@ -1,7 +1,7 @@
 ---
 id: gap-ci-red-init-corrupt-already-exists-regex-overbroad
 title: init.test.mjs AC1 corrupt 的 /already exists/ 断言过宽，误伤插件安装记录提示
-status: todo
+status: done
 labels:
   - gap
   - ci-red
