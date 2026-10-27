@@ -1,7 +1,7 @@
 ---
 id: gap-real-install-family-build-dedup-once-per-suite
 title: real-install 族构建去重：build-dist+npm pack 每测试各跑一遍 → once-per-suite 共享产物
-status: ready
+status: done
 labels:
   - gap
 parent: null
