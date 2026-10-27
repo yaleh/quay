@@ -8,11 +8,14 @@ children: []
 extra: {}
 goal_ac: AC-902
 ---
-## Contract
+## 演练目的与结果
 
 一次性的落地演练载体任务（原建为 `status: done` 以避开派发竞态）。它的唯一目的是让 `goal/GOAL-902` 经历一次**含追平的机械 fan-in 落地**，从而让 AC-322 判据在真实 store 上取到 exit 0。
 
 **结果：未达成。** 2026-10-03 的演练里，`runMechanicalFanIn --merge-target goal/GOAL-902` 的 step 2b **真的造出了追平 merge 提交**（`97f4e5a59 Merge branch 'develop' into task/gap-goal902-drill-catchup-landing`），随后被 `anti-drift` 的 BASELINE-MISMATCH 判死（exit 3，因为它要求 merge target 含 develop 的 tip，而那正是追平要修的状态）⇒ **无 flip 提交**。
+
+> 本节原为 `## Contract`，但内容是叙述而非 `measure|band|invariant|invoke|control|resume` 契约行；按
+> `gap-ci-red-task-contract-violations-nonblocking` 的修法把散文移出 Contract 段（本任务没有可机读契约）。
 
 ## Plan
 
