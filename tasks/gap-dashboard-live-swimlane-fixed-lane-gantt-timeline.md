@@ -47,7 +47,7 @@ extra:
 
 - [x] 新增的区间合并纯函数：给定构造的 `inFlight` + `WorkerOutcomeRecord[]` 固定样本，输出的区间列表按 `run_id` 去重正确（同一 run_id 只出现一次），且历史区间的 `end` 用 `ended_at`、在飞区间的 `end` 用 `now`（单测覆盖两种输入都存在同一 run_id 的情况）
 - [x] `packLanes` 贪心打包：单测覆盖（a）不重叠区间全部分到 lane 0；（b）5 个同时重叠区间恰好占满 5 条泳道；（c）第 6 个与前 5 个都重叠的区间触发溢出路径（断言不越界、不静默丢弃，走「+N」或明确的降级分支）
-- [x] 新 SVG 渲染函数：给定固定并发上限=5 的样本，`<rect` 计数 = 输入任务数（每个任务恰好一个矩形，同既有 `renderLiveSwimlaneSvg`/`renderTimelineBarSvg` 的计数约定），且渲染出 5 条泳道线（无论是否每条都有任务）
+- [x] 新 SVG 渲染函数：给定固定并发上限=5 的样本，`<rect` 计数 = 输入任务数（每个任务恰好一个矩形，同既有 `renderLiveSwimlaneSvg`/`renderTimelineBarSvg` 的计数约定），且渲染出 5 条泳道线（无论是否每条都有任务）。（真实输入探针：DoD 的 `renderLiveCard` 集成用例把**真实** `.quay/worker-outcome.jsonl` 经 `readWorkerOutcomeRecords` 读入、叠加真实 `readLive()` 在飞集合后渲染，`<rect` 计数就在这份真实数据形状的输出上取——⛔ 不是手写期望字符串）
 - [x] 每个任务矩形都带 `<title>` 子元素，内容包含任务 id 与耗时（可用字符串包含断言验证是否含关键字段）
 - [x] `renderLiveCard` 单测：给定同时含在飞 + 历史任务的样本，输出 HTML 中在飞任务 mini-list（现有 `liveMiniList` 渲染的 tag 文案）与新甘特图两者都存在（grep 断言两段都在，验证「保留卡片中的在飞任务列表」这条硬约束没有被移除）
 - [x] `scripts/test.sh` 全绿（含新增测试文件）
