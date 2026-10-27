@@ -35,3 +35,5 @@ INVALIDATION 本已正确，不动。
 
 修复提交（377000a60）落地后，capability-catalog 的两个红消失，develop CI test job 不再出现
 release-model-check.ts 的 unclassified/cadence 断言失败。
+
+该轴仍暗,理由:纯声明数据/测试断言修复，不改动 L_D/L_G 依赖结构，本次提交未记录读数
