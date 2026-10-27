@@ -1,7 +1,7 @@
 ---
 id: gap-ci-red-task-log-writer-class-walk-staging-mirror
 title: task-log (h) registry 同步测试的 walk 跟进 packages/quay/plugin 暂存镜像致 ENOENT/误报
-status: todo
+status: done
 labels:
   - gap
   - ci-red
