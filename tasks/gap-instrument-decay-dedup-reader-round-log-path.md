@@ -102,11 +102,3 @@ readPriorInstrumentDecayFilings(root, ".quay/quality-round.jsonl") → prior siz
 
 <!-- dedup-ref -->
 **已解除（2026-10-23）**：develop 侧已把 DoD 收窄（删掉 ``改动合入 develop`` 与 ``真实落地`` 两项，post-landing 两轮生产复查拆到 `gap-instrument-decay-postlanding-two-rounds`）⇒ 该阻塞理由不再适用。本记录保留为审计轨迹。
-
-## Blocker
-
-**2026-10-23T08:41:25.068Z — worker 未落地（exited-not-landed）**
-
-- 未落地原因：step=suite: oom-killed (4) — recovery exhausted at floor concurrency 32 — no declared rung produced a complete verdict (64,48,32); needs a code/config fix, see plugin/scripts/full-suite-runner.ts
-- run_id：wk-prod-anchor
-- session_id：0d8f900f-83ca-47de-be81-f1e294e8565b
