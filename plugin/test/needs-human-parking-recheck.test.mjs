@@ -271,12 +271,19 @@ test("AC1(e) — promotion-driver is the LIVE consumer: every round carries the 
   }
 });
 
-test("AC1 — the REAL store: the reading partitions every needs-human task (no board-count pinning)", () => {
+test("AC1 — the REAL store: the reading partitions every needs-human task (no board-count pinning)", (t) => {
   const res = runCli(REPO_ROOT);
   assert.equal(res.status, 0, `real-repo detector must exit 0:\n${res.stdout}${res.stderr}`);
   const out = JSON.parse(res.stdout);
   assert.equal(out.evaluated, true, "the real repo has a tasks/ dir");
-  assert.ok(out.needs_human_total > 0, `the real board carries needs-human tasks (got ${out.needs_human_total})`);
+  // ⛔ The real board's needs-human count is DATA, not a product invariant: the loop flips needs-human
+  // tasks to done as their criteria are repaired, and it periodically reaches 0. When it does, the
+  // partitioning arm below has nothing to partition — so this test must NOT read that state as a
+  // product defect (it is not one) NOR as a pass (the arm would be vacuous). Skip, honestly named.
+  if (out.needs_human_total === 0) {
+    t.skip("the real board currently carries no needs-human tasks — the partitioning reading is not evaluable");
+    return;
+  }
   assert.equal(
     Object.values(out.counts).reduce((a, b) => a + b, 0),
     out.needs_human_total,

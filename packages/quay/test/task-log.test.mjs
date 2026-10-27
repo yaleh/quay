@@ -483,6 +483,13 @@ test("(h) the declared writer-class registry is IN SYNC with every real appendTa
       const full = path.join(dir, e.name);
       if (e.isDirectory()) {
         if (e.name === "node_modules" || e.name === "dist" || e.name === "vendor" || e.name === "archive") continue;
+        // ⛔ The pack-time staging mirror `packages/quay/plugin/` (delivery-standalone-smoke.sh /
+        // package.sh stage repo-root plugin/ → packages/quay/plugin/ and `rm -rf` it mid-suite) is NOT
+        // part of the source tree this registry enumerates. Walking it either crashes with ENOENT when
+        // a staged file vanishes between readdir and read, or reports the mirrored `scripts/*.ts` as
+        // undeclared callers — both are races against the mirror, not registry desync. Skip any nested
+        // `plugin` dir (the ONLY legitimate `plugin/` is the repo root, which is walked explicitly).
+        if (e.name === "plugin" && full !== path.join(repoRoot, "plugin")) continue;
         walk(full);
       } else if (/\.(ts|mts|cts)$/.test(e.name) && !/\.test\./.test(e.name) && full !== DEFINITION) {
         files.push(full);

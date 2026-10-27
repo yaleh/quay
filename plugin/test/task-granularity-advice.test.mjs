@@ -403,6 +403,12 @@ test("AC6 (hermetic fixture): a known under-sampled bin is marked insufficient a
     g("merge", "--no-ff", "-m", `Merge branch 'develop' into task/${id}`, "develop");
   };
   g("init", "-q", "-b", "develop");
+  // ⛔ Set the identity on the FIXTURE repo, not per-command: `g("merge", …)` above creates a commit
+  // with NO `-c` identity, so it inherits the ambient git config — present on dev machines, absent on
+  // the CI runner → "Committer identity unknown" (status 128). The fixture must not read the host's
+  // git identity (no-live-host-state).
+  g("config", "user.email", "t@e");
+  g("config", "user.name", "t");
   fs.writeFileSync(path.join(dir, "base.txt"), "x\n");
   g("add", "-A");
   commit("base");

@@ -900,8 +900,12 @@ test("AC1 corrupt: an unparseable .quay/config.yml is BACKED UP and REBUILT — 
   const both = out.stdout + out.stderr;
   // GOAL-029 / 人 2026-10-07: the file's STATE decides. Corrupt ⇒ salvage-by-rebuild, not refusal.
   assert.equal(out.status, 0, `an unparseable config is salvaged, not refused:\n${both}`);
+  // ⛔ Pin the OLD refusal phrase verbatim, not the bare words "already exists": the rebuild path's
+  // own install-steps advisory legitimately says "cannot tell whether a user-scope quay@quay install
+  // already exists" (when ~/.claude/plugins/installed_plugins.json is unreadable — the CI runner's
+  // scratch HOME), which is a name-conflict claim about a DIFFERENT object and must not red this test.
   assert.ok(
-    !/already exists/.test(both),
+    !/already exists, use --force/.test(both),
     `must NOT claim a name conflict — that sends the operator after a problem that does not exist:\n${both}`
   );
   // …while the REAL cause is still voiced (硬规则 3b): the parser's own message, not "already exists".
