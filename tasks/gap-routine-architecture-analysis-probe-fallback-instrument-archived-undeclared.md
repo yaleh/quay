@@ -83,3 +83,10 @@ Repoint both probes' fallback block at live readers (phase-declare.ts takeLdFile
 - **`develop` 上尚无 `a56d49106`**，任务仍为 `status=ready`，等 mechanical fan-in 落地。
 - ⛔ **不自判验收**：本记录不改 `status`、不写 `verifiedBy`；落地与完成由本项目 fan-in 判定。
 - **结论**：Fleet 的 `worker-stall` 读数对应的是「worker 会话已退出、mechanical fan-in 在锁上排队」；本任务不需要新的修复，保持 `ready` 等 fan-in。
+
+## Blocker
+
+**2026-10-27T00:09:57.432Z — worker 未落地（exited-not-landed）**
+
+- 未落地原因：step=suite: AssertionError [ERR_ASSERTION]: The input did not match the regular expression /fallback declared: 'git-lens'/. Input: [baseline A/B: HARD RED (task-introduced-red) — the task's red set is NOT a subset of the develop baseline red set: added=plugin/test/quality-gate-driver.test.mjs,plugin/test/quality-gate-driver.test.mjs changed=-]
+- run_id：wk-prod-anchor
