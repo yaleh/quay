@@ -3,7 +3,7 @@ id: gap-routine-architecture-analysis-probe-fallback-instrument-archived-undecla
 title: "architecture-analysis: Both probes still declare fallback: git-lens and
   name three scripts in plugin/scripts/ that were archived to
   archive/2026-09-07-zero-call-scripts/ and are ab"
-status: todo
+status: ready
 labels:
   - gap
   - routine-filed
