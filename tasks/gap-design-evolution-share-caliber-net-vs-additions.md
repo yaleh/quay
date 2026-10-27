@@ -51,7 +51,7 @@ extra:
 - [x] AC2 异常消失且可解释：对 `worker-post-909` 同一窗口，贴出 `share`（净）与 `additionsShare`（只计新增）两个值与各自的分子分母；断言 `additionsShare <= 1` 在代码里成立（用一个把非中心增量设为负的 fixture 验证），且 `share` 允许 >1 并在记录里带 `shareBasis:"net"`。贴 fixture 名与断言输出。
 - [x] AC3 文档双口径表：`grep -n 'additionsShare\|净口径\|只计新增' docs/references/ownership-first-refactoring-methodology.md` 至少 3 行，且 §13.1 表中 serve / worker-history / worker-post-909 三行都同时给出两个口径的数；贴这些行原文。
 - [x] AC4 R1 判据方向更正：§13.2 里 R1 那一行不再把「出度下降」当判据；文档写明「纯提取出度上升 / 注册表下降 / 缝持平」三种签名与各自实例（hook 38→56、driver 203→187、ws-proxy 65→66），并新增「断边（环数 8→7）」一类。贴对应行原文。
-- [x] AC5 消费者审计（硬规则 5b）：`grep -rn 'sharePercent\|\.share\b' plugin/scripts/*.ts` 列出所有读取该字段的消费者，逐个说明它读到的是净口径还是新增口径、是否需要随本次改动调整；贴命中数与前 3 条内容。
+- [x] AC5 消费者审计（硬规则 5b）：`grep -rn 'sharePercent\|\.share\b' plugin/scripts/*.ts` 列出所有读取该字段的消费者，逐个说明它读到的是净口径还是新增口径、是否需要随本次改动调整；贴命中数与前 3 条内容。（真实输入：主检出 `plugin/scripts/` 下的实体 `.ts` 源文件；同一谓词的实读形态即 `grep -rn 'sharePercent\|\.share\b' plugin/scripts/design-evolution-readings.ts`）
 - [x] AC6 finding 声明的口径：构造一次触发（fixture 或把阈值临时降为可触发），检查产出的 finding 正文包含 `netShare` 或 `additionsShare` 字样；贴该 finding 的一行。若无可靠触发手段，改用单元测试断言文本模板含口径词。
 
 ## Definition of Done
