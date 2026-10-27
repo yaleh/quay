@@ -33,3 +33,5 @@ smoke.sh`/`package.sh` 在 suite 运行中把 repo 根 `plugin/` 暂存成 `pack
 
 修复提交（377000a60）落地后，packaging 暂存镜像在场/被删时 (h) 测试都不红；真正的第五个写者未登记
 时（新 appendTaskStatusEvent 调用点）仍会红。
+
+该轴仍暗,理由:纯测试 walk 修复，不改动 L_D/L_G 依赖结构，本次提交未记录读数
