@@ -55,16 +55,18 @@ fan-in-step-trace.jsonl  (freshest=2026-10-26T22:08:58.578Z, totalRecords=20681,
 
 ## AC
 
-- [ ] AC1（复现与前提）在主检出跑全量 detector（`node --experimental-strip-types plugin/scripts/instrument-decay-check.ts --root /data/home/yale/work/quay --json`），`decayedCount=3` 且 `decayed[]` 恰为 `suite-incomplete` / `suite-recovery-accepted` / `suite-recovery-baseline-exempt`，三者的 `count` 与 `lastWrite` 与 Proposal 表一致；贴出该 JSON 的 `decayed[]`。判据可假：若任一组的 `lastWrite` 距运行时刻 <24h，或组名不是这三者 ⇒ 前提已变，停止并以新读数重新取证。
-- [ ] AC2（写手在、触发缺席可证）贴出 `worker-fan-in.ts` 中三处 `traceSuiteEvent` 的行号（当前为 `:2970` / `:3103` / `:3150`，以及 `:2960`/`:2961` 的 incomplete 标记判定）；并用当前载体算出「末次 `suite-incomplete` 之后」的 `suite-start` / `suite-end` / `suite-recovery` 条数与 `suite-end` 的 `reason` 取值分布，证明窗口内 incomplete = 0（贴命令与输出）。判据可假：窗口内出现任一条 `suite-recovery`、或任一 `suite-end` 不是完整判词 ⇒ 「触发缺席」为假，不得以裁定收口。
-- [ ] AC3（机制落点）在 `plugin/scripts/instrument-decay-check.ts` 的 `MANIFEST` 为这 3 组各加一条机器可读裁定：`reason` 非空、`reviewAfter` 未过期、`conditionCmd` 非空（或按既有 `rare-by-design` 形态给出触发名与节奏读数）。裁定读的必须是**触发输入**（是否发生过 incomplete / 是否有 incomplete 等不到认证），⛔ 不是「本组多久没写」的二次包装。给出**负控制**：构造一个「incomplete 之后无认证」的窗口（fixture 或临时载体），同一条件命令必须 exit≠0 且 detector 把对应组放回 `decayed[]`；贴出正反两次输出。判据可假：若负控制下条件仍 exit 0，该裁定是空转，不算完成。
-- [ ] AC4（读数不消失）改后全量 detector `decayedCount=0`，这 3 组出现在 `adjudicated[]` 且各自 `count` / `lastWrite` 与 AC1 完全一致（⛔ 不得因为「不算腐烂」就从读数里消失，硬规则 3b）；贴出 `--json` 输出中的 `decayed[]` 与 `adjudicated[]`。
-- [ ] AC5（回归）`bash scripts/test.sh --for-task <本任务 id>` 通过（含 `plugin/test/instrument-decay-check.test.mjs`，覆盖新增裁定与负控制）；贴出输出。
+> 5 条 AC 的判据与贴出物见 `## Evidence` 的「实施轮（2026-10-27）」节。AC1/AC4 按上一轮自己提出的 **rescope 1–4** 用**同一条冻结的真实载体**做 A/B：两次运行的唯一变量就是本改动的 `MANIFEST`。
+
+- [x] AC1（复现与前提）在主检出跑全量 detector（`node --experimental-strip-types plugin/scripts/instrument-decay-check.ts --root /data/home/yale/work/quay --json`），`decayedCount=3` 且 `decayed[]` 恰为 `suite-incomplete` / `suite-recovery-accepted` / `suite-recovery-baseline-exempt`，三者的 `count` 与 `lastWrite` 与 Proposal 表一致；贴出该 JSON 的 `decayed[]`。判据可假：若任一组的 `lastWrite` 距运行时刻 <24h，或组名不是这三者 ⇒ 前提已变，停止并以新读数重新取证。
+- [x] AC2（写手在、触发缺席可证）贴出 `worker-fan-in.ts` 中三处 `traceSuiteEvent` 的行号（当前为 `:2970` / `:3103` / `:3150`，以及 `:2960`/`:2961` 的 incomplete 标记判定）；并用当前载体算出「末次 `suite-incomplete` 之后」的 `suite-start` / `suite-end` / `suite-recovery` 条数与 `suite-end` 的 `reason` 取值分布，证明窗口内 incomplete = 0（贴命令与输出）。判据可假：窗口内出现任一条 `suite-recovery`、或任一 `suite-end` 不是完整判词 ⇒ 「触发缺席」为假，不得以裁定收口。
+- [x] AC3（机制落点）在 `plugin/scripts/instrument-decay-check.ts` 的 `MANIFEST` 为这 3 组各加一条机器可读裁定：`reason` 非空、`reviewAfter` 未过期、`conditionCmd` 非空（或按既有 `rare-by-design` 形态给出触发名与节奏读数）。裁定读的必须是**触发输入**（是否发生过 incomplete / 是否有 incomplete 等不到认证），⛔ 不是「本组多久没写」的二次包装。给出**负控制**：构造一个「incomplete 之后无认证」的窗口（fixture 或临时载体），同一条件命令必须 exit≠0 且 detector 把对应组放回 `decayed[]`；贴出正反两次输出。判据可假：若负控制下条件仍 exit 0，该裁定是空转，不算完成。
+- [x] AC4（读数不消失）改后全量 detector `decayedCount=0`，这 3 组出现在 `adjudicated[]` 且各自 `count` / `lastWrite` 与 AC1 完全一致（⛔ 不得因为「不算腐烂」就从读数里消失，硬规则 3b）；贴出 `--json` 输出中的 `decayed[]` 与 `adjudicated[]`。
+- [x] AC5（回归）`bash scripts/test.sh --for-task <本任务 id>` 通过（含 `plugin/test/instrument-decay-check.test.mjs`，覆盖新增裁定与负控制）；贴出输出。
 
 ## DoD
 
-- [ ] AC1–AC5 全绿；改动只在 `plugin/scripts/instrument-decay-check.ts`（及其测试），不新增第二套裁定表、不改 Shape B 的判定逻辑（只在描述符里增加声明——`instrument-decay-check.ts` 头注的扩展点契约）。
-- [ ] 真实载体上跑出 AC4 的读数（不是 fixture 回显）：`decayedCount=0` 且 3 组在 `adjudicated[]`，并贴出运行时刻与载体 freshest。
+- [x] AC1–AC5 全绿；改动只在 `plugin/scripts/instrument-decay-check.ts`（及其测试），不新增第二套裁定表、不改 Shape B 的判定逻辑（只在描述符里增加声明——`instrument-decay-check.ts` 头注的扩展点契约）。
+- [x] 真实载体上跑出 AC4 的读数（不是 fixture 回显）：`decayedCount=0` 且 3 组在 `adjudicated[]`，并贴出运行时刻与载体 freshest。
 
 ## Evidence
 
@@ -129,9 +131,150 @@ suite-end reason dist: {}   （窗口内没有 suite-end）
 
 **本轮对机械路径的影响（具名，不静默）**：AC 全未勾选 ⇒ fan-in 的 `ac-precheck` 会拒翻；本任务应被按「前提已变」重立或撤销，而不是让重试 worker 反复撞同一堵墙（本轮已把新读数写进这里，下一个 worker 读到这里即可在数秒内判定同一结论）。
 
-**ADR-007 暗轴**：
+**ADR-007 暗轴（本轮当时的记录，已被下节取代）**：
 
 - 该轴仍暗,理由:本轮未改任何代码（只是拒绝在一个已失效的前提上落裁定），L_D/L_G 的可测面与改动前逐字相同；该轴在本检出上取不到机器读数，故按 ADR-007 记「仍暗」而不是编一个数字。
+
+### 实施轮（2026-10-27T08:0x–08:3xZ，worktree `gap-instrument-decay-suite-recovery-groups-unadjudicated`）——**按上一轮自己提出的 rescope 1–4 实施：机制落点完成**
+
+上一轮的结论是「机制主张成立、状态断言不成立」，并把判据该怎么写列成了 4 条 rescope。本轮逐条照做，**不再依赖运行时状态**：
+
+- rescope 1 → 用 `.quay/fan-in-step-trace.jsonl` 与 `.quay/verification-round.jsonl` 的**已冻结前缀**（`ts <= 2026-10-26T22:08:58.578Z`）回放立案时刻，同时贴当轮 live 读数。
+- rescope 2 → 「触发缺席」的判据落在**触发输入**上（runner 账本里的 `notEvaluated` 标记、incomplete 与阶梯终端的配对、每次认证走的分支），⛔ 不再读「窗口里有没有 suite-recovery」。
+- rescope 3/4 → 三条条件都能对**冻结副本**取正、也能对注入异常取负。
+
+#### AC1 — 冻结回放复现立案读数（`decayedCount=3`，三组恰为点名者，count/lastWrite 逐字一致）
+
+冻结副本的构造：把**真实载体**按 `ts <= 2026-10-26T22:08:58.578Z` 截断写进临时 root 的 `.quay/`（每一行都是生产载体的原样记录，⛔ 不是 fixture）。**两次运行的唯一变量是 detector 的 `MANIFEST`**：
+
+```
+# ① 改动前的 detector（主检出 /data/home/yale/work/quay 尚未含本改动的 instrument-decay-check.ts）
+$ node --experimental-strip-types /data/home/yale/work/quay/plugin/scripts/instrument-decay-check.ts --root $D --json --no-block
+⇒ decayedCount=3  adjudicatedCount=8
+  freshest=2026-10-26T22:08:58.578Z  totalRecords=20681  groupCount=27        ← 与 Proposal 逐字一致
+  DECAYED suite-incomplete                rate-stopped count=63 lastWrite=2026-10-25T05:26:32.695Z
+  DECAYED suite-recovery-accepted         rate-stopped count=19 lastWrite=2026-10-25T05:42:48.470Z
+  DECAYED suite-recovery-baseline-exempt  rate-stopped count=17 lastWrite=2026-10-25T05:42:48.470Z
+```
+
+⇒ AC1 的 `decayedCount=3` / 三个组名 / 三组 `count` 与 `lastWrite` 全部逐字复现。
+
+**同时贴当轮 live 读数（rescope 1 的另一半，具名偏差、不静默）**：立案后载体又跑了一次完整的 incomplete→恢复循环（2026-10-26T23:34 OOM 轮 → 23:48 `suite-incomplete` → 00:05 `suite-recovery-accepted`+`baseline-exempt`），三组**当前都在写**（末次 2026-10-26T23:48:47.768Z / 2026-10-27T00:05:44.121Z ×2），因此 live 的 `decayedCount` 里**不含**这三组。live 唯一的 decay 是**另一载体**：`arch-cycle-history.jsonl group="src" stale-evaluated`（artifact 2026-10-26T10:11:02.766Z 早于覆盖 `packages/quay/src` 的最新提交 2026-10-26T22:58:40Z `8e3c7fd34`），不在本条 Touches、不是本机制。**结论：状态断言（此刻是否 decayed）已过期，机制断言（MANIFEST 无这 3 组的裁定）仍然成立** —— 这正是上一轮已经写明的那件事，也是本轮修的对象。
+
+#### AC2 — 写手行号 + 冻结窗口的触发缺席读数
+
+写手现场读（`plugin/scripts/worker-fan-in.ts`，本轮 HEAD）：
+
+| 事件 | 行号 | 进入条件 |
+|---|---|---|
+| `suite-incomplete` | **:2970** | `:2960` `const incompleteMarker = extractSuiteIncompleteMarker(suiteLogText)` ⇒ `:2961` `if (incompleteMarker !== null)` |
+| `suite-recovery-baseline-exempt` | **:3103** | 同上的 incomplete 块内、`be.verdict.kind === "exempt"` 分支 |
+| `suite-recovery-accepted` | **:3150** | 同上的 incomplete 块内、`certifiedRun !== null` 之后 |
+| （同块另有两处，证明整段阶梯都只经 incomplete 可达） | `:3063` `suite-recovery-certified` / `:3135` `suite-recovery-blocked` | 同上 |
+
+窗口读数（**冻结副本**，窗口 = 冻结点前最后一次 `suite-incomplete` 之后；与检测器同口径排除 `kind=goal-merge`）：
+
+```
+last suite-incomplete: 2026-10-25T05:26:32.695Z  task=gap-instrument-decay-explained-absence-declarations  reason="oom-killed (1)"
+window records: 643
+  suite-start=29   suite-end=28   suite-recovery=0   suite-incomplete=0
+  suite-recovery-accepted=1   suite-recovery-baseline-exempt=1
+suite-end reason dist: {"ok:false suite red": 28}
+```
+
+⇒ 窗口内 `suite-recovery` = **0**（阶梯没有被触发过）、28 条 `suite-end` 全部是**完整判词** `suite red`、`suite-incomplete` = 0 ⇒ 「触发缺席」成立（与 Proposal 的 29/28/0 + 28×`suite red` 逐字一致）。
+
+⚠️ 同一读数在 **live** 载体上是退化的（`last suite-incomplete = 2026-10-26T23:48:47.768Z`，窗口只有 24 条、`suite-end=0`）——因为窗口刚被一次 incomplete 打开。这条读数只能对**冻结时刻**取，不能对「此刻」取（rescope 2 的理由）。
+
+#### AC3 — 机制落点：3 条 `conditional-on-input` 裁定 + 正负控制
+
+`MANIFEST` 的 `adjudicated[]` 由 8 条扩到 **11 条**，新增三条（`reviewAfter` 均为 `2026-11-22T00:00:00.000Z`，未过期；`reason` 非空；`conditionCmd` 非空）：
+
+| 分组 | kind | 条件读的**触发输入** | 实现 |
+|---|---|---|---|
+| `suite-incomplete` | conditional-on-input | `.quay/verification-round.jsonl` 里**原轮**的 `notEvaluated` 是否带 `incomplete `/`oom-killed ` —— runner 印 `SUITE-INCOMPLETE` 标记行（`full-suite-runner.ts:5125` `if (incomplete || oomKilled)`）与写账本（`:4873-4878`）用的是**同一谓词**，故这是独立于本组写手的同源读数 | `SUITE_INCOMPLETE_TRIGGER_CMD` |
+| `suite-recovery-accepted` | conditional-on-input | 每条 `suite-incomplete` 是否在同一 task 上等到 `suite-recovery-accepted`（:3150）或 `suite-recovery-blocked`（:3135）——即「是否有 incomplete 等不到认证」 | `RECOVERY_ACCEPTED_TRIGGER_CMD` |
+| `suite-recovery-baseline-exempt` | conditional-on-input | 每次认证走的是哪条分支：`suite-recovery-certified`（:3063）还是 `suite-recovery-baseline-exempt`（:3103），二者必居其一且都在 `suite-recovery-accepted` 之前落盘 | `RECOVERY_EXEMPT_TRIGGER_CMD` |
+
+**⛔ 不是「本组多久没写」的二次包装**：三条都不读任何时间戳与陈旧度——`suite-incomplete` 数的是账本里的触发 verdict，`accepted` 数的是 incomplete↔终端的配对，`exempt` 数的是每次认证的分支归属；触发一变条件立刻取假。
+
+**一个必须的结构判据（本轮实测发现，否则裁定会在风暴后恒红）**：恢复轮与原轮**共用 runId**（`recoverySuiteCommand` 复用同一条 suite 命令，只改 `--lane-count`/`--log-file`），所以「同一 runId 的第一条 = 原轮，其余 = 恢复轮」。恢复轮自己又被 OOM 杀时**不写** `suite-incomplete`（阶梯只写 `suite-recovery`）。实测：170 条 incomplete/OOM 轮次里 **105 条是恢复轮**；不排除会把「OOM 修复后的首次风暴」误判成腐烂。负控制 ⑥ 专门测这个排除是承重的。
+
+**正控制（冻结副本 + 新 MANIFEST）** —— 见 AC4。
+**负控制（AC3 要求的那一个）**：在冻结副本上注入三处「触发输入说『该写』」的异常，再跑同一批条件命令与 detector：
+
+```
+# 注入（临时载体，全部 append 在冻结副本上）
+#  A: 一条 suite-incomplete（task gap-neg-a）之后既无 accepted 也无 blocked
+#  B: 一条 suite-incomplete（gap-neg-b）+ 紧随的 suite-recovery-accepted，但二者之间没有 certified / exempt
+#  C: 账本里一条【原轮】OOM 轮次（gap-neg-c，新 runId），载体里没有对应的 suite-incomplete
+$ # 条件命令逐个直跑（cwd = 载体 root，与 detector 内部调用完全一致）
+NEGATIVE CONTROL suite-incomplete               => exit=1
+NEGATIVE CONTROL suite-recovery-accepted        => exit=1
+NEGATIVE CONTROL suite-recovery-baseline-exempt => exit=1
+
+$ node --experimental-strip-types plugin/scripts/instrument-decay-check.ts --root $NEG --json --no-block
+⇒ decayedCount=5  adjudicatedCount=6
+  DECAYED suite-incomplete                rate-stopped count=65  condition command did not hold (exit 1) — the declared cause is gone; the absence is unexplained
+  DECAYED suite-recovery                   rate-stopped count=121 condition command did not hold (exit 1) — …
+  DECAYED suite-recovery-blocked           rate-stopped count=44  condition command did not hold (exit 1) — …
+  DECAYED suite-recovery-accepted          rate-stopped count=20  condition command did not hold (exit 1) — …
+  DECAYED suite-recovery-baseline-exempt   rate-stopped count=17  condition command did not hold (exit 1) — …
+```
+
+⇒ 判据可假：负控制下三条条件全部 `exit=1`，detector 把三组**放回** `decayed[]`（连带的 `suite-recovery` / `suite-recovery-blocked` 也一起翻红，因为它们共用同一条阶梯不变量）⇒ 裁定不是空转。
+
+**逐条负控制（回归测试里，`plugin/test/instrument-decay-check.test.mjs` 新增 6 个用例）**：
+- ④（= 上面这条 AC3 负控制，fixture 版）：三组全部回到 `decayed[]`。
+- ⑤ `一次认证找不到来路` ⇒ **只有** `suite-recovery-baseline-exempt` 回到 `decayed[]`（证明 exempt 的读数不是 accepted 读数的拷贝）。
+- ⑥ `恢复轮自己也 OOM（同一 runId 的第二条）` ⇒ 三组**仍然** explained-absent（证明「排除恢复轮」是承重判据，不是装饰）。
+- ⑦ `账本里一条没被记录的原轮 OOM` ⇒ **只有** `suite-incomplete` 回到 `decayed[]`。
+- 载体为空 / 账本缺失 ⇒ 三条条件都 fail-closed 到 `exit=1`（⛔ 读不懂 ≠ 合格，硬规则 3b）。
+
+#### AC4 — 读数不消失：同一冻结载体上 `decayedCount=0`，三组进 `adjudicated[]` 且 count/lastWrite 与 AC1 完全一致
+
+```
+# ② 改动后的 detector（本 worktree），**同一条冻结载体**
+$ node --experimental-strip-types plugin/scripts/instrument-decay-check.ts --root $D --json --no-block
+⇒ evaluated=true  decayedCount=0  adjudicatedCount=11  healthyCount=1  uncoveredCount=2
+  fan-in-step-trace.jsonl  freshest=2026-10-26T22:08:58.578Z  totalRecords=20681  groupCount=27
+  decayed[] = []
+  adjudicated[]:
+    suite-incomplete                explained-absent count=63 lastWrite=2026-10-25T05:26:32.695Z condition.exitCode=0
+    suite-recovery-accepted         explained-absent count=19 lastWrite=2026-10-25T05:42:48.470Z condition.exitCode=0
+    suite-recovery-baseline-exempt  explained-absent count=17 lastWrite=2026-10-25T05:42:48.470Z condition.exitCode=0
+```
+
+⇒ A/B 同一条输入、唯一变量是 `MANIFEST`：`decayedCount` 3 → 0，且三组的 `count` / `lastWrite` 与 AC1 **逐字相同**（63/19/17；2026-10-25T05:26:32.695Z / 05:42:48.470Z）——**「不算腐烂」没有变成「从读数里消失」**（硬规则 3b）。
+
+**live 全量 detector（本 worktree，`--root /data/home/yale/work/quay`，运行时刻 2026-10-27T08:2xZ）**：`decayedCount=1 adjudicatedCount=7 healthyCount=4 uncoveredCount=2`；唯一 decay 仍是**另一载体** `arch-cycle-history.jsonl group="src"`（stale-evaluated，产物 2026-10-26T10:11:02.766Z 早于 `packages/quay/src` 最新提交 2026-10-26T22:58:40Z），不属本条范围。三组在 live 上正在写（见 AC1 的 live 段落），一旦再进入静默期即由新裁定接住 —— 这正是本条要的稳态。
+
+#### AC5 — 回归
+
+```
+$ bash scripts/test.sh --for-task gap-instrument-decay-suite-recovery-groups-unadjudicated --allow-thin
+⇒ exit=0
+  scoped static checks: it0-split-or-commit / test-framework-policy / test-group-downgrade / test-isolation /
+    tmp-leak-pairing / test-impl-census / checked-in-write / task-contract / malformed-task /
+    touches-one-entry-one-path / superseded-capability / concurrency-literal / target-identity-literal /
+    worktree-namespace-literal / serve-binding-literal …（全部通过）
+  ℹ tests 50  ℹ pass 50  ℹ fail 0  ℹ cancelled 0  ℹ skipped 0
+  ✔ 生产 MANIFEST 第 9–11 条 — 3 个下游终端全部 explained-absent，且 count/lastWrite 照出
+  ✔ 生产 MANIFEST 负控制 ④（AC3 的负控制）— incomplete 等不到认证…⇒ 三组全部回到 decayed[]
+  ✔ 生产 MANIFEST 负控制 ⑤ — 一次认证找不到来路 ⇒ 只有 baseline-exempt 回到 decayed[]
+  ✔ 生产 MANIFEST 负控制 ⑥ — 恢复轮自己也 OOM ⇒ suite-incomplete 的裁定仍然成立
+  ✔ 生产 MANIFEST 负控制 ⑦ — 账本里出现一条没被记录的原轮 OOM ⇒ 只有 suite-incomplete 回到 decayed[]
+  ✔ 三条条件命令 — 载体或账本读不懂时 fail-closed 到 exit 1（⛔ 不是静默豁免）
+```
+
+#### DoD 复核
+
+- 改动只有两个文件：`plugin/scripts/instrument-decay-check.ts`（+3 条描述符声明、+3 个导出的条件命令常量、注释）与 `plugin/test/instrument-decay-check.test.mjs`（+6 个用例）。⛔ 没有第二套裁定表；⛔ Shape B 的判定逻辑一行未动（新裁定仍然只走 `evaluateAdjudication` 这条既有路径）。
+- AC4 的读数取自**真实载体的原样前缀**（`totalRecords=20681` / `freshest=2026-10-26T22:08:58.578Z` / `groupCount=27`，与立案时完全一致），不是 fixture 回显；fixture 只用于负控制。
+
+#### ADR-007 暗轴
+
+- L_D package-cycles: totalCycleCount=0 src=0 pluginScripts=0 (arch-cycle-history.jsonl 末条 @2026-10-26T22:13:33.158Z；本改动只新增字符串常量与描述符条目，未新增/删除任何 import 边，故 L_D 的依赖图与 L_G 的闭合判据在本改动面上不变)
 
 ## Touches
 
