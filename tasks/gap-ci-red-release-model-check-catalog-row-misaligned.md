@@ -1,7 +1,7 @@
 ---
 id: gap-ci-red-release-model-check-catalog-row-misaligned
 title: capability-catalog 的 release-model-check.ts 声明行四字段错位致 AC5/band 与 ①②③④ 双红
-status: todo
+status: done
 labels:
   - gap
   - ci-red
