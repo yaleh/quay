@@ -134,6 +134,22 @@ const SUITE_HARNESS_CACHE_FILES = new Set([
   "suite-fs-trace.jsonl",
 ]);
 
+// Loop round-state ledgers (manual full-suite 2026-10-27 exposed them mid-sweep): the resident
+// loop's round/event ledgers — gate-events.jsonl (gate engine), goal-round.jsonl (goal-driver),
+// meta-driver-round.jsonl (meta-driver), outer-round.jsonl (outer), quality-round.jsonl
+// (quality-judge). worktree-include mirrors them into the tested worktree at suite startup, and the
+// loop appends them throughout the run — so their mtime moves independently of any checker `--help`.
+// The only -check.ts files that reference gate-events.jsonl (gate-staleness-check,
+// kernel-sibling-resolution-check) READ it, and both exit from `--help` before the read — so no
+// checker `--help` can produce this tick (same class as the driver/suite-runner carriers above).
+const LOOP_ROUND_STATE_FILES = new Set([
+  "gate-events.jsonl",        // gate engine ledger, append-only (read by staleness/sibling checks)
+  "goal-round.jsonl",         // goal-driver round heartbeat
+  "meta-driver-round.jsonl",  // meta-driver round heartbeat
+  "outer-round.jsonl",        // outer-driver round heartbeat
+  "quality-round.jsonl",      // quality-judge round heartbeat
+]);
+
 /** True when `relPath` is a resident-process runtime file (never a checker `--help` side effect). */
 function isNonCheckerRuntimeFile(relPath) {
   const base = path.basename(relPath);
@@ -141,7 +157,8 @@ function isNonCheckerRuntimeFile(relPath) {
     RESIDENT_DRIVER_FILES.has(base) ||
     SUITE_RUNNER_FILES.has(base) ||
     CAP_OBSERVATION_FILES.has(base) ||
-    SUITE_HARNESS_CACHE_FILES.has(base)
+    SUITE_HARNESS_CACHE_FILES.has(base) ||
+    LOOP_ROUND_STATE_FILES.has(base)
   ) {
     return true;
   }
