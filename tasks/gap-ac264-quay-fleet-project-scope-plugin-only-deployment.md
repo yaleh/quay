@@ -109,11 +109,13 @@ code:   a371a7a  "fleet-agent: GET /sessions/:id/file?path=<rel> — @-mention c
 
 **留档**：`/home/yale/work/ac264-evidence/`（`00-before.txt`、`01-after-anchor-env.txt`、`02-fleet-done.txt`、`03-negative-control.txt`、`ac264-criterion.py`、`append-carrier.py`、`config.yml.before` / `.after-cache`）。
 
+**判据入口（done 任务的 invoke 证据）**：`quay goal gate AC-264` 的可执行入口是 `plugin/scripts/goal-driver.ts`，即 Contract 里那条 invoke：`node --experimental-strip-types plugin/scripts/goal-driver.ts --root /home/yale/work/quay-fleet`。
+
 ## Dispatch review
 
 reviewer: human
 at: 2026-09-15
-changed: 立案当轮修正 Contract 的 measure 命令拼写（载体扩展名 .jsonl），其余按人给定原样落盘
+changed: 立案当轮修正 Contract 的 measure 命令拼写（载体扩展名 .jsonl），其余按人给定原样落盘；2026-10-27 由 `gap-ci-red-task-contract-violations-nonblocking` 在 Evidence 段补记 invoke 的可执行入口路径 `plugin/scripts/goal-driver.ts`（invoke-evidence-missing）
 
 ## Touches
 
