@@ -3,7 +3,7 @@ id: gap-instrument-decay-dedup-reader-round-log-path
 title: instrument-decay 的立案去重台账在生产上恒为空：readPriorInstrumentDecayFilings 读
   <root>/quality-round.jsonl，而心跳写在 .quay/ —— 同一 (载体,形态) 反复重开 gap-filing
   agent（2026-10-22 已 4 轮，全部「不立案」）
-status: todo
+status: ready
 labels:
   - gap
   - defect
@@ -68,6 +68,7 @@ readPriorInstrumentDecayFilings(root, ".quay/quality-round.jsonl") → prior siz
 
 （2026-10-23 worker 轮；主检出 `/data/home/yale/work/quay`，实现分支 `task/gap-instrument-decay-dedup-reader-round-log-path`，提交 `d9610e05a`）
 
+<!-- dedup-ref -->
 - **AC1（生产缺省路径取真）**：主检出生产载体 `.quay/quality-round.jsonl`（15,332,066 B；尾部 500 行含 2 条 instrument-decay 轮）上的两次读数：
   - 修前（develop 版 `readPriorInstrumentDecayFilings(root)`，即 `roundLogPath ?? path.join(root, ROUND_LOG_REL)`）：`size = 0 []`
   - 修后（本分支同一调用，不传 `roundLogPath`）：`size = 1 ["fan-in-step-trace.jsonl|rate-stopped"]`；`resolveRoundLogFile(root)` = `/data/home/yale/work/quay/.quay/quality-round.jsonl`
@@ -99,6 +100,7 @@ readPriorInstrumentDecayFilings(root, ".quay/quality-round.jsonl") → prior siz
 
 - 阻碍原因：unsatisfiableUnannotatedAc=[AC1-AC4 全绿；`scripts/test.sh --for-task <id>` 通过；改动合入 develop。]（连续 3 轮被结构上不可派的拦截挡住 ⇒ 作者/人改写；⛔ 不派 fix worker）
 
+<!-- dedup-ref -->
 **已解除（2026-10-23）**：develop 侧已把 DoD 收窄（删掉 ``改动合入 develop`` 与 ``真实落地`` 两项，post-landing 两轮生产复查拆到 `gap-instrument-decay-postlanding-two-rounds`）⇒ 该阻塞理由不再适用。本记录保留为审计轨迹。
 
 ## Blocker

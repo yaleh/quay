@@ -3,7 +3,7 @@ id: gap-instrument-decay-suite-recovery-groups-unadjudicated
 title: instrument-decay 仍报 3 个 rate-stopped 分组（suite-incomplete /
   suite-recovery-accepted / suite-recovery-baseline-exempt）：触发缺席可证，但 MANIFEST
   无机器可读裁定
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -281,11 +281,3 @@ $ bash scripts/test.sh --for-task gap-instrument-decay-suite-recovery-groups-una
 - plugin/scripts/instrument-decay-check.ts
 - plugin/test/instrument-decay-check.test.mjs
 - tasks/gap-instrument-decay-suite-recovery-groups-unadjudicated.md
-
-## Blocker
-
-**2026-10-26T23:06:08.828Z — worker 未落地（exited-not-landed）**
-
-- 未落地原因：AC 未全勾（checked 0/7，剩余未勾 7）——续做只需验证并勾选 AC
-- run_id：wk-prod-anchor
-- session_id：4e13aff3-364a-4257-9d44-8b32bb5f605a

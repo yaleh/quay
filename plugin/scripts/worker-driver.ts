@@ -459,6 +459,13 @@ import {
   // gap-fanin-suite-gate-no-baseline-equivalent-exception：既存红死锁的电路断路器（AC4）。判定住在
   // worker-fan-in.ts（耐久载体的写者与签名的定义处），本文件只消费它的读数 ⇒ 单一真相源。
   baselineRedDeadlockReading,
+  // 当前 develop 红签名集（`gap-develop-red-set-writer`）：读取 / 纯维护 / **唯一的落盘函数**——
+  // 三者都 import 到本模块的本地绑定里（⛔ 下面那条 `export { … } from` 只是再导出，不建立绑定），
+  // `applyDevelopRedObservation` 与 `--mechanical-fan-in` 入口用的就是这个绑定。
+  readDevelopRedSet,
+  maintainDevelopRedSet,
+  writeDevelopRedSet,
+  type DevelopRedObservation,
   runGoalMergeFanIn,
   appendGoalMergeResultEvent,
   // 过程日志文件名（`.quay/fan-in-<task>-<runIdSafe>.log` 的**唯一**命名函数——`readAttemptPhaseTimestamps`
@@ -1792,9 +1799,50 @@ export function isShaAncestorOfBranch(root: string, sha: string, branch: string 
   return r.status === 0;
 }
 
+// ── 当前 develop 红签名集：**唯一的写侧**（`gap-develop-red-set-writer` AC4）────────────────────────
+//
+// 分工：`worker-fan-in.ts` 只**观测**（`DevelopRedObservation`，随 fan-in 结果回传）；落盘只在这里、
+// 只被 `--mechanical-fan-in` 入口调用一次。fleet 侧（另一个工作区）对同一载体只有消费权、没有写权限
+// ——「写者只有 driver 进程」因此是可核的结构事实，而不是一句约定（`plugin/test/develop-red-set.test.mjs`
+// 的 AC4 用两条判据守着：调用点数 = 1 且落在本文件；fleet 侧的只读路径不产生任何磁盘写入）。
+//
+// 判定（Plan 第 3 条）：红 ⇒ upsert 该 key；绿（本轮在 develop 基线树上真的跑过且没再红，且 develop 前进）
+// ⇒ 移除该 key——**移除就是「红消失」的机械信号**。⛔ 观测缺读数（A/B 未评估）⇒ 本轮不动载体。
+export function applyDevelopRedObservation(opts: {
+  root: string;
+  /** 取 SHA 祖先关系的 git 上下文（通常是 fan-in worktree）；缺省 = root。 */
+  worktree?: string;
+  observation: DevelopRedObservation | null | undefined;
+  /** 注入缝（测试用）；缺省走 `git merge-base --is-ancestor`。 */
+  isAncestor?: (ancestor: string, descendant: string) => boolean | null;
+}): { written: boolean; reason: string | null; develop: string | null; reds: number } {
+  const obs = opts.observation;
+  if (obs === null || obs === undefined) return { written: false, reason: "no-observation", develop: null, reds: 0 };
+  const prev = readDevelopRedSet(opts.root);
+  // 读不懂现有载体（坏 JSON / 坏行）⇒ **本轮不写**：把「读不出旧红集」当成「旧红集为空」会让
+  // 所有未观测到的 key 静默消失（硬规则 3b 的反面）。文件缺失是合法的首轮状态，不算读不懂。
+  if (!prev.evaluated && prev.reason !== "missing-file") {
+    return { written: false, reason: `carrier-unreadable: ${prev.reason}`, develop: obs.develop, reds: 0 };
+  }
+  const gitDir = opts.worktree ?? opts.root;
+  const isAncestor = opts.isAncestor ?? ((a: string, b: string): boolean | null => {
+    if (a === b) return true;
+    const r = spawnSync("git", ["-C", gitDir, "merge-base", "--is-ancestor", a, b], { encoding: "utf8" });
+    if (r.error) return null;
+    if (r.status === 0) return true;
+    // exit 1 = 明确「不是祖先」；其它（对象不存在 / 非 git 仓库）⇒ 读不懂（⛔ 不折成 false 以外的判断）。
+    return r.status === 1 ? false : null;
+  });
+  // develop 是否前进（Plan 第 3 条的移除前提③）。⛔ 读不懂祖先关系（null）⇒ **不删**任何 key——
+  // 那时「这一轮通过」说明不了「在这个 develop 上消失了」。
+  const advanced = prev.evaluated ? isAncestor(prev.set.develop, obs.develop) === true : true;
+  const next = maintainDevelopRedSet(prev.evaluated ? prev.set : null, obs, { developAdvanced: advanced });
+  const w = writeDevelopRedSet(opts.root, next);
+  return { written: w.written, reason: w.reason, develop: next.develop, reds: next.reds.length };
+}
+
 /** 落地判定（AC1 判据），经 AC153 单一不变式 verifyIndependently 表达成 DriverResult（⛔ 不信
- *  exitCode，读任务侧独立直接量）。两态输入：
- *   - `landedSha`（机械 fan-in 落地后传入）= ff 结果的落地 sha ⇒ 判定从 ff 结果派生
+ *  exitCode，读任务侧独立直接量）。两态输入： *   - `landedSha`（机械 fan-in 落地后传入）= ff 结果的落地 sha ⇒ 判定从 ff 结果派生
  *     （landedSha 是 `branch` tip/祖先 ∧ 无残留 worktree），⛔ 不读 readTaskStatus（D5）；
  *   - `landedSha` null（未跑机械 fan-in / red / 旧路径）⇒ 沿用 status-based 判定（status=done ∧ 无残留）。
  * `branch`（缺省 develop）= 本任务的合并目标分支名（resolveTaskMergeTarget：`develop` 或 `goal/<GOAL>`）——
@@ -6863,6 +6911,17 @@ export async function main(argv: string[]): Promise<number> {
       runId: runId ?? `fm-${task}-${Date.now()}`,
       mergeTarget: mechMergeTarget,
     });
+    // 当前 develop 红签名集的**唯一写侧**（AC4）：fan-in 只观测（`developRedObservation` 随结果回传），
+    // 落盘在这里。⛔ 不阻塞落地、⛔ 不改 exit code（观测写失败 ⇒ stderr 一行，结果判定逐字不变）；
+    // stderr 不污染 stdout 的单行 JSON 契约（spawn 方取 stdout 最后一条非空行）。
+    const redSet = applyDevelopRedObservation({
+      root: rootDir,
+      worktree: mechWorktree,
+      observation: result.baselineEquivalence?.developRedObservation ?? null,
+    });
+    if (!redSet.written && redSet.reason !== "no-observation") {
+      process.stderr.write(`worker-driver: develop-red-set not written: ${redSet.reason}\n`);
+    }
     process.stdout.write(`${JSON.stringify(result)}\n`);
     return result.outcome === "landed" ? 0 : 2;
   }
