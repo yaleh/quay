@@ -182,6 +182,99 @@ export const RECOVERY_LADDER_CONDITION_CMD =
   `for(const r of inc)if(!cert.some(c=>c.ts>r.ts&&c.task===r.task))bad++;` +
   `process.exit(bad===0?0:1)'`;
 
+/** suite-incomplete 的触发输入读数（gap-instrument-decay-suite-recovery-groups-unadjudicated）。
+ *
+ *  触发 = 一次**原轮**的 suite 日志里带 SUITE-INCOMPLETE 标记（worker-fan-in.ts:2960 解析、:2961 判定、
+ *  :2970 写本组）。同一个标记由 runner 按**同一谓词**同时落到轮次账本：`full-suite-runner.ts:4873-4878`
+ *  把 `incomplete (missing/planned)` 或 `oom-killed (n)` 写进记录的 `notEvaluated`，`:5125` 的
+ *  `if (incomplete || oomKilled)` 才是印标记行的条件 ⇒ `.quay/verification-round.jsonl` 是**独立于
+ *  本组写手**的同源读数。本条件就数它：**有没有一轮真的没得出完整结论**。⛔ 不是「本组多久没写」的
+ *  二次包装——窗口内一次 incomplete 都没有，与「本组 40h 没写」是两个量，后者由 Shape B 本身暴露。
+ *
+ *  ⚠️ 两个必须的结构判据（否则条件会在 OOM 风暴后恒红）：
+ *  ① **恢复轮与原轮共用 runId**（worker-fan-in.ts 的 `recoverySuiteCommand` 复用同一条 suite 命令，
+ *     只改 `--lane-count`/`--log-file`）⇒「同一 runId 的第一条 = 原轮，其余 = 恢复轮」是结构判据；
+ *  ② 恢复轮自己即使又被 OOM 杀，也**不会**写 suite-incomplete（阶梯只写 suite-recovery）⇒ 必须排除。
+ *     实测：170 条 incomplete/OOM 轮次里 105 条是恢复轮，不排除会把「修复后首次 OOM 风暴」误判成腐烂。
+ *
+ *  ⚠️ 时间窗 120s：实测「轮次记录落盘 → suite-incomplete 落盘」间隔 6.5–9.5s（65 个样本，p90 9.3s），
+ *     12 倍余量；⛔ 不用「零条 incomplete」这种空转真值换绿（orig===0 ⇒ exit 1）。末尾另有一条
+ *     「账本仍与载体同步」的守卫：末次 suite-incomplete 之后要么还有轮次跑过、要么它自己那轮的记录
+ *     就落在同一个 120s 窗里（写在两个不同 else 分支里）；两者皆无 ⇒ 账本已停写，读数不可信 ⇒ fail-closed。
+ *
+ *  ⛔ 与检测器同口径排除 kind=goal-merge（那不是任务 fan-in 的步骤链）。 */
+export const SUITE_INCOMPLETE_TRIGGER_CMD =
+  `node -e 'const fs=require("fs");const R=[];` +
+  `for(const l of fs.readFileSync(".quay/fan-in-step-trace.jsonl","utf8").split("\\n")){` +
+  `if(!l.trim())continue;let r;try{r=JSON.parse(l)}catch{continue}` +
+  `if(r.kind==="goal-merge")continue;R.push(r)}` +
+  `const inc=R.filter(r=>r.step==="suite-incomplete"&&r.ts);` +
+  `let last=null;for(const r of inc)if(!last||r.ts>last)last=r.ts;` +
+  `if(!last)process.exit(1);` +
+  `let raw;try{raw=fs.readFileSync(".quay/verification-round.jsonl","utf8")}catch{process.exit(1)}` +
+  `const V=[];` +
+  `for(const l of raw.split("\\n")){if(!l.trim())continue;let v;try{v=JSON.parse(l)}catch{continue}` +
+  `if(v&&typeof v.startedAt==="string")V.push(v)}` +
+  `if(V.length===0)process.exit(1);` +
+  `const first=new Map();` +
+  `for(const v of V){if(!v.runId)continue;const p=first.get(v.runId);if(!p||v.startedAt<p.startedAt)first.set(v.runId,v)}` +
+  `const endMs=v=>Date.parse(v.startedAt)+(Number.isFinite(v.durationMs)?v.durationMs:0);` +
+  `const trig=v=>{const n=typeof v.notEvaluated==="string"?v.notEvaluated:"";` +
+  `return n.indexOf("incomplete ")===0||n.indexOf("oom-killed ")===0};` +
+  `let orig=0,bad=0;` +
+  `for(const v of V){if(first.get(v.runId)!==v)continue;if(!trig(v))continue;orig++;` +
+  `const e=endMs(v);` +
+  `if(!inc.some(r=>r.task===v.taskId&&Math.abs(Date.parse(r.ts)-e)<120000))bad++}` +
+  `if(orig===0)process.exit(1);` +
+  `if(bad>0)process.exit(1);` +
+  `if(!V.some(v=>Date.parse(v.startedAt)>Date.parse(last))&&` +
+  `!V.some(v=>Math.abs(endMs(v)-Date.parse(last))<120000))process.exit(1);` +
+  `process.exit(0)'`;
+
+/** suite-recovery-accepted 的触发输入读数：**有没有一条 incomplete 等不到阶梯定论**。
+ *
+ *  本组的触发是「恢复阶梯的某一档给出了完整判词 ⇒ certifiedRun !== null ⇒ 认证」。阶梯的**每一条**
+ *  suite-incomplete 都必然以二者之一收尾（worker-fan-in.ts:3135 的 blocked / :3150 的 accepted），
+ *  所以「一条 incomplete 之后既没有 accepted 也没有 blocked」= 阶梯卡住或认证写手腐烂 ⇒ 缺席无解释。
+ *  ⛔ 不是「本组多久没写」：它读的是 incomplete 与阶梯终端的配对关系（就是 AC 里那句
+ *  「是否有 incomplete 等不到认证」），配对上就立刻取假。 */
+export const RECOVERY_ACCEPTED_TRIGGER_CMD =
+  `node -e 'const fs=require("fs");const R=[];` +
+  `for(const l of fs.readFileSync(".quay/fan-in-step-trace.jsonl","utf8").split("\\n")){` +
+  `if(!l.trim())continue;let r;try{r=JSON.parse(l)}catch{continue}` +
+  `if(r.kind==="goal-merge")continue;R.push(r)}` +
+  `const inc=R.filter(r=>r.step==="suite-incomplete"&&r.ts);` +
+  `if(inc.length===0)process.exit(1);` +
+  `let bad=0;` +
+  `for(const r of inc)if(!R.some(c=>c.ts&&c.task===r.task&&c.ts>r.ts&&` +
+  `(c.step==="suite-recovery-accepted"||c.step==="suite-recovery-blocked")))bad++;` +
+  `process.exit(bad===0?0:1)'`;
+
+/** suite-recovery-baseline-exempt 的触发输入读数：**每一次认证走的是哪一条分支**。
+ *
+ *  本组的触发是「恢复轮完整跑完但真红、且红集与基线逐字等价、且候选自己的 Touches 测试干净」
+ *  （worker-fan-in.ts:3103 在 `be.verdict.kind === "exempt"` 分支里写）。认证有且只有两条来路：
+ *  `suite-recovery-certified`（恢复轮本身是绿的，:3063）或 `suite-recovery-baseline-exempt`（:3103）
+ *  —— 二者必居其一，且都在紧随其后的 `suite-recovery-accepted`（:3150）**之前**落盘。
+ *  因此「一条 accepted 在其前置 incomplete 之后找不到 certified 也找不到 exempt」= 认证发生在一个
+ *  没有记录来路的出口上 ⇒ exempt 写手腐烂（那条 trace 被删/被改路径）。
+ *  ⛔ 不是「本组多久没写」的二次包装：读的是每次认证**走的分支**；分支一变条件立刻取假。
+ *  ⛔ 同时排除 kind=goal-merge。 */
+export const RECOVERY_EXEMPT_TRIGGER_CMD =
+  `node -e 'const fs=require("fs");const R=[];` +
+  `for(const l of fs.readFileSync(".quay/fan-in-step-trace.jsonl","utf8").split("\\n")){` +
+  `if(!l.trim())continue;let r;try{r=JSON.parse(l)}catch{continue}` +
+  `if(r.kind==="goal-merge")continue;R.push(r)}` +
+  `const acc=R.filter(r=>r.step==="suite-recovery-accepted"&&r.ts);` +
+  `if(acc.length===0)process.exit(1);` +
+  `let bad=0;` +
+  `for(const a of acc){let prev=null;` +
+  `for(const r of R)if(r.step==="suite-incomplete"&&r.task===a.task&&r.ts&&r.ts<a.ts&&(!prev||r.ts>prev))prev=r.ts;` +
+  `if(prev===null){bad++;continue}` +
+  `if(!R.some(r=>r.task===a.task&&r.ts&&r.ts>=prev&&r.ts<=a.ts&&` +
+  `(r.step==="suite-recovery-certified"||r.step==="suite-recovery-baseline-exempt")))bad++}` +
+  `process.exit(bad===0?0:1)'`;
+
 export const MANIFEST: CarrierSpec[] = [
   {
     file: "fan-in-step-trace.jsonl",
@@ -201,10 +294,12 @@ export const MANIFEST: CarrierSpec[] = [
     // 子系统的加载面）；改判别键取值必须同时改这里，缺一即静默失效（本文件的词表一贯是人审查过的声明，
     // 见头注「词表是【人审查过的声明】，不是从代码推导」）。
     skipKind: "goal-merge",
-    // 8 个 rate-stopped 分组的机器可读裁定：前 5 条来自 gap-fan-in-step-trace-rate-stopped-adjudication
-    // （触发普查为 0 的三组、条件性不可达的一组、真回归信号一组）；后 3 条（suite-skip /
+    // 11 个 rate-stopped 分组的机器可读裁定：前 5 条来自 gap-fan-in-step-trace-rate-stopped-adjudication
+    // （触发普查为 0 的三组、条件性不可达的一组、真回归信号一组）；接着 3 条（suite-skip /
     // suite-recovery / suite-recovery-blocked）来自 gap-instrument-decay-explained-absence-declarations
-    // ——同一批分组此前已在 2026-10-22、2026-10-23 两次被**散文**裁定过，第三次才落成机制。
+    // ——同一批分组此前已在 2026-10-22、2026-10-23 两次被**散文**裁定过，第三次才落成机制；
+    // 最后 3 条（suite-incomplete / suite-recovery-accepted / suite-recovery-baseline-exempt）来自
+    // gap-instrument-decay-suite-recovery-groups-unadjudicated——同一条 OOM→incomplete→恢复链的**下游**终端。
     // ⚠️ reviewAfter 一律是**必须重看的日期**，不是「永久白名单」——过期即回到 decayed[]。
     // ⚠️ conditional-on-input 的条件命令读的都是【载体里的触发输入】，不是「本组多久没写」：
     //    「原因仍然缺席」与「写手还活着」是两个量，条件只对前者负责；写手腐烂由 Shape B 本身暴露。
@@ -335,6 +430,53 @@ export const MANIFEST: CarrierSpec[] = [
         conditionCmd: RECOVERY_LADDER_CONDITION_CMD,
         reviewAfter: "2026-11-22T00:00:00.000Z",
       },
+      // ── 后 3 条：OOM→incomplete→恢复阶梯那条因果链的**下游**（gap-instrument-decay-suite-recovery-
+      //    groups-unadjudicated）。上游 4 组（suite-skip / suite-recovery / suite-recovery-blocked /
+      //    suite-recovery-certified…）已由前两条任务裁定；这 3 组是同一个 `if (incompleteMarker !== null)`
+      //    的终端分支，2026-10-23 / 2026-10-25 两次被**散文**裁定过、第三次才落成机制（硬规则 5b 的兄弟
+      //    实例遗漏形态）。⛔ 三条条件读的都是【触发输入】，不是「本组多久没写」。
+      {
+        group: "suite-incomplete",
+        kind: "conditional-on-input",
+        reason:
+          "写手 worker-fan-in.ts:2970，进入条件是 :2960 `extractSuiteIncompleteMarker(suiteLogText)` 非 null" +
+          "（:2961）——即本轮 suite 日志里带了 runner 印的 SUITE-INCOMPLETE 标记（`oom-killed (n)` /" +
+          "`incomplete (missing/planned files)`）。同一谓词由 runner 独立落进 .quay/verification-round.jsonl 的" +
+          "`notEvaluated` 字段（full-suite-runner.ts:4873-4878，印标记行的 :5125 是同一个 `incomplete || oomKilled`）" +
+          "⇒ 条件读的是**轮次账本**：只要出现一条【原轮】（同 runId 的第一条——恢复轮与它共用 runId）" +
+          "`notEvaluated` 以 `incomplete `/`oom-killed ` 开头、而载体里 120s 内没有对应的 suite-incomplete，" +
+          "就说明「一轮真的没得出完整结论」却没有被记录 ⇒ 本裁定立即失效、回到 decayed[]。" +
+          "反之窗口内没有这样的原轮 = 触发确实没发生（本组 63→65 条的历史成因是 OOM 风暴，已由" +
+          "gap-fan-in-recovery-ladder-inert-bucket-full-drops-test-concurrency / -lane-scaled-ladder-floor-32 修）。",
+        // ⚠️ 只读、亚秒级、可证伪；⛔ 恢复轮必须排除（它们自己也 OOM 时不写本组，留着会让条件在风暴后恒红）。
+        conditionCmd: SUITE_INCOMPLETE_TRIGGER_CMD,
+        reviewAfter: "2026-11-22T00:00:00.000Z",
+      },
+      {
+        group: "suite-recovery-accepted",
+        kind: "conditional-on-input",
+        reason:
+          "写手 worker-fan-in.ts:3150，只在恢复阶梯的某一档给出**完整判词**（certifiedRun !== null ⇒ 认证）" +
+          "时写；它与 :3103 的 baseline-exempt 同在 `if (incompleteMarker !== null)` 阶梯内部，没有 incomplete" +
+          " 就结构上不可达。条件读的是「**有没有一条 incomplete 等不到认证**」：阶梯的每一条 suite-incomplete" +
+          "都必然以同一 task 上的 suite-recovery-accepted（:3150）或 suite-recovery-blocked（:3135）收尾，" +
+          "任何一条 incomplete 之后二者皆无 ⇒ 阶梯卡住或认证写手腐烂 ⇒ 本裁定立即失效、回到 decayed[]。",
+        conditionCmd: RECOVERY_ACCEPTED_TRIGGER_CMD,
+        reviewAfter: "2026-11-22T00:00:00.000Z",
+      },
+      {
+        group: "suite-recovery-baseline-exempt",
+        kind: "conditional-on-input",
+        reason:
+          "写手 worker-fan-in.ts:3103，在 `be.verdict.kind === \"exempt\"`（恢复轮红集与基线逐字等价）且候选" +
+          "自己的 Touches 测试干净时写；同样只在 incomplete 阶梯内部可达。条件读的是「每一次认证**走的哪条" +
+          "分支**」：认证只有两条来路——suite-recovery-certified（:3063，恢复轮本身就是绿的）或" +
+          "suite-recovery-baseline-exempt（:3103，本组）——且都落盘在紧随其后的 suite-recovery-accepted（:3150）" +
+          "之前。任何一条 accepted 在其前置 incomplete 之后两条来路都找不到 ⇒ 认证发生在一个没有记录的出口上" +
+          "⇒ 本组写手腐烂（那段 trace 被删/改路径）⇒ 本裁定立即失效、回到 decayed[]。",
+        conditionCmd: RECOVERY_EXEMPT_TRIGGER_CMD,
+        reviewAfter: "2026-11-22T00:00:00.000Z",
+      },
     ],
     note:
       "worker-driver.ts 机械 fan-in 步骤链。前 8 个经 step()/appendFanInStepTrace 写共享载体；" +
@@ -344,7 +486,9 @@ export const MANIFEST: CarrierSpec[] = [
       "（看门狗 SIGKILL / 从未 spawn）时 force 写一条（worker-fan-in.ts recordDelegatedRound）；" +
       "quay 形态（suite_runner: quay-buckets）下普通红/绿轮由 full-suite-runner 入账、不走本组。" +
       "catch-up-develop：仅当 fan-in 的 mergeTarget ≠ develop（goal 分支落地）时才有这一步。" +
-      "suite-recovery-blocked：仅当 suite 恢复阶梯耗尽（64/48/32 都无完整判词）时才写。",
+      "suite-recovery-blocked：仅当 suite 恢复阶梯耗尽（64/48/32 都无完整判词）时才写。" +
+      "suite-incomplete / suite-recovery-accepted / suite-recovery-baseline-exempt：同一条 " +
+      "incomplete 标记的下游终端（原始轮记录 / 阶梯认证 / 基线等价认证），触发未发生即结构性缺席。",
   },
   {
     file: "fan-in-lock-events.jsonl",
