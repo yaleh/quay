@@ -369,6 +369,7 @@ import { parseTouches, matchGlob, normalizePath } from "${PLUGIN_ROOT}/scripts/t
 import { scanFamily, kindForFile } from "${PLUGIN_ROOT}/scripts/known-load-sensitive.ts";
 import { TMUX_LEAK_FAIL_RE } from "${PLUGIN_ROOT}/scripts/tmux-leak-fail-re.ts";
 import { readCarrierPerFile, groupByFile, baselineOf, classifyFailure } from "${PLUGIN_ROOT}/scripts/perfile-failure-rate.ts";
+import { lastSuiteStartOffset } from "${PLUGIN_ROOT}/scripts/source-text-lib.ts";
 const taskFile = process.argv[1]; const wt = process.argv[2]; const logFile = process.argv[3]; const releaseLedger = process.argv[4]; const isolateFile = process.argv[5];
 const livelockRounds = Number(process.argv[6] || 3);
 const deferLedger = process.argv[7]; const deferLivelockRounds = Number(process.argv[8] || 3);
@@ -387,12 +388,11 @@ const baselineFor = (rel) => { const history = byFile.get(rel) ?? []; const b = 
 let logText = ""; try { logText = fs.readFileSync(logFile, "utf8"); } catch (e) { logText = ""; }
 // gap-fan-in-suite-log-cross-relaunch-reuse: 按当前轮起始标记切片——只读最后一个 __FANIN_SUITE_START__
 // 之后的内容（当前轮），不整份线性 grep 旧轮；无标记（full-suite-runner/测试手写日志）⇒ 整份（向后兼容）。
-// gap-fan-in-fix-scope-gate-slice-line-anchor: 行首锚定（与 pre-verified-round-record.lastSuiteStartOffset /
-// gap-wiring-B 断言一致）——裸 lastIndexOf 会命中测试输出里【行内】提及标记的文本（gap-wiring-B 测试名含
-// __FANIN_SUITE_START__ 字样），把其后的真实 __PERFILE__ passed=false 行切掉 ⇒ 假 checker-misreport。
-const _roundMkRe = /^__FANIN_SUITE_START__[^\\n]*$/gm;
-let _roundMk = -1; let _rm;
-while ((_rm = _roundMkRe.exec(logText)) !== null) _roundMk = _rm.index;
+// gap-fan-in-fix-scope-gate-slice-line-anchor + dup-last-suite-start-offset-divergent-regex: 行首
+// 锚定的切片规则已上收 source-text-lib.ts —— measure-trend-check / pre-verified-round-record 与本
+// inline 脚本共用【一份】实现（该模块是 leaf，不 import 任何模块）。⛔ 不再在此内联 regex：两份旧
+// 拼写曾在「裸标记行 + EOF」上分歧（0 vs -1），而裸 lastIndexOf 还会命中测试输出里的行内提及。
+const _roundMk = lastSuiteStartOffset(logText);
 if (_roundMk !== -1) logText = logText.slice(_roundMk);
 let prior = {}; try { if (releaseLedger) prior = JSON.parse(fs.readFileSync(releaseLedger, "utf8")); } catch (e) { prior = {}; }
 const inScope = []; const outOfScope = []; const loadSensitiveFiles = []; let livelock = false; const seen = new Set();

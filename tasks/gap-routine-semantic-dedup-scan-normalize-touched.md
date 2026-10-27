@@ -3,7 +3,7 @@ id: gap-routine-semantic-dedup-scan-normalize-touched
 title: "semantic-dedup-scan: The two plugin copies are byte-identical (backslash
   to slash, strip leading ./, trim) and the serve copy is the same normalization
   minus trim, re-declared acro"
-status: ready
+status: done
 labels:
   - gap
   - routine-filed

@@ -48,6 +48,10 @@ import { repoRoot } from "./repo-root.ts";
 import { loadTraceCache } from "./suite-fs-trace.ts";
 import { listSuiteFiles, selectBucketsForTouches } from "./suite-bucket-select.ts";
 import { taskTouchEntries } from "./suite-bucket-hub-list.ts";
+// The ONE path-ref normalizer (kernel leaf) — the inline body here was the byte-identical predicate
+// plus trim (routine `semantic-dedup-scan` finding `normalize-touched`, task
+// gap-routine-semantic-dedup-scan-normalize-touched).
+import { normalizePathRef } from "../../packages/quay/src/kernel/path-ref.ts";
 
 export interface StaticVsTruthDrift {
   file: string;
@@ -133,7 +137,7 @@ export function checkTruthSelection(root: string, touchedPaths: readonly string[
   if (cache.size === 0) {
     return { evaluated: false, selectedCount: 0, drifts: [] };
   }
-  const literals = new Set((touchedPaths ?? []).map((t) => String(t).replace(/\\/g, "/").replace(/^\.\//, "").trim()).filter((t) => t && !/[?*]/.test(t)));
+  const literals = new Set((touchedPaths ?? []).map((t) => normalizePathRef(t).trim()).filter((t) => t && !/[?*]/.test(t)));
   if (literals.size === 0) {
     return { evaluated: false, selectedCount: 0, drifts: [] };
   }

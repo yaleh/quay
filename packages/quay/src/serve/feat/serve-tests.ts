@@ -10,6 +10,8 @@ import { readTests, type TestsResult, type TestRunRecord } from "../../observati
 // dispatch-written artifact below. (routine `semantic-dedup-scan` finding `canonical-buckets`, task
 // gap-routine-semantic-dedup-scan-canonical-buckets.)
 import { canonicalBuckets, type Bucket } from "../../kernel/canonical-buckets.ts";
+// The ONE path-ref normalizer (kernel leaf) — see the note at EFFECTIVE_PATH below.
+import { normalizePathRef } from "../../kernel/path-ref.ts";
 import type { ServePageCfg, ServeIdentity } from "../view/serve-render.ts";
 import {
   html, escapeHtml, pageStyles, modernistStyles, renderSiteNav, renderMobileChrome, pad2, obsNote, DEFAULT_PAGE_SIZE, tableWrap, pageTitle,
@@ -440,10 +442,11 @@ function truncateLabel(s: string, max: number): string {
 /** The single-truth-source artifact the dispatch side writes (mirror of suite-bucket-select.ts). */
 const EFFECTIVE_PATH = ".quay/suite-bucket-effective.jsonl";
 
-/** Normalize a file reference to the artifact's repo-relative key form (forward slashes, strip ./). */
-function normalizeFileRef(p: string): string {
-  return String(p).replace(/\\/g, "/").replace(/^\.\//, "");
-}
+// The artifact's key form is the kernel leaf `normalizePathRef` (forward slashes, leading `./`
+// stripped) — the SAME body the two plugin-side callers use (suite-bucket-hub-list.ts /
+// suite-bucket-select.ts, routine `semantic-dedup-scan` finding `normalize-touched`, task
+// gap-routine-semantic-dedup-scan-normalize-touched). ⛔ Those two additionally trim; this page does
+// NOT: artifact keys are written un-trimmed, so a whitespace-padded file ref here must not match one.
 
 /**
  * Read the dispatch-written effective bucket attribution (file → bucket set). Absent/unparseable
@@ -476,7 +479,7 @@ function readBucketEffective(root: string): Map<string, Set<Bucket>> {
 /** The bucket set of one test file, read from the dispatch-written single-truth-source artifact. */
 export function bucketSetOfFile(fileRef: string, root: string | null | undefined): Set<Bucket> {
   if (!root) return new Set();
-  return readBucketEffective(root).get(normalizeFileRef(fileRef)) ?? new Set();
+  return readBucketEffective(root).get(normalizePathRef(fileRef)) ?? new Set();
 }
 
 /** The colour key: singleton → its own; any combo → "multi"; unresolved → "unresolved". */
@@ -554,7 +557,7 @@ export function renderPerFileTimelineSvg(
   // dispatch-written single-truth-source artifact) so bars are HUE-coloured by bucket, not pass/fail.
   const effective = root ? readBucketEffective(root) : new Map<string, Set<Bucket>>();
   const attributed = rows.map((f) => {
-    const canonical = canonicalBuckets(effective.get(normalizeFileRef(f.file)) ?? new Set());
+    const canonical = canonicalBuckets(effective.get(normalizePathRef(f.file)) ?? new Set());
     return { ...f, key: bucketColorKey(canonical), label: bucketLabel(canonical, L) };
   });
 

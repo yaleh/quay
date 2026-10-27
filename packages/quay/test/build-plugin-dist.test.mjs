@@ -290,13 +290,18 @@ test("AC5 — all five shipped workflows rewrite to ZERO env-var anchors and eva
     // 4 in the finding's artifact; 3 in the source after this change moved the meta phase-detail
     // mention to the literal token `<pluginRoot>/scripts/…` (a description, not a runnable reference).
     "pool-quality-judge.js": 3,
-    // 25 occurrences on 24 lines (re-measured for gap-fan-in-execute-semantic-fallback-telemetry-
-    // blind, which added two real `plugin/scripts/worker-driver.ts` invocations — the phase=start /
-    // phase=end --record-semantic-fallback writes — plus one AC3 rationale comment naming
-    // plugin/scripts/worker-fan-in.ts). The finding's original 22 counted the published artifact,
+    // 26 occurrences on 25 lines (re-measured for
+    // gap-routine-architecture-analysis-dup-last-suite-start-offset-divergent-regex, which REPLACED
+    // the inline marker-slice regex in the FIX_SCOPE_GATE block with one import of
+    // `plugin/scripts/source-text-lib.ts` — the shared `lastSuiteStartOffset` — adding one real
+    // plugin-root reference; no anchor was deleted). Previous measurement was 25 for
+    // gap-fan-in-execute-semantic-fallback-telemetry-blind, which added two real
+    // `plugin/scripts/worker-driver.ts` invocations — the phase=start / phase=end
+    // --record-semantic-fallback writes — plus one AC3 rationale comment naming
+    // plugin/scripts/worker-fan-in.ts. The finding's original 22 counted the published artifact,
     // built with the real bundle predicate (one reference there is not a bundle entry); the
     // unit-level rewrite with bundleExists=()=>true folds that one too.
-    "fan-in-execute.js": 25,
+    "fan-in-execute.js": 26,
     // gap-delete-dead-execute-suite-fix-workflow (2026-10-07): the standalone suite-fix workflow was
     // DELETED (zero production callers) — it is no longer a shipped carrier.
     "drain-directives.js": 0,
