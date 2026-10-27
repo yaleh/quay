@@ -20,18 +20,18 @@ extra:
 1. 枚举所有独立调用 `package.sh` / `build-dist` / `npm pack` 的测试文件（grep + 列清单）。
 2. 新增一个共享构建 helper（`before()` 一次性 build+pack 到 fixture 目录；各测试消费产物，不再各自构建）。
 3. 逐个改造上述测试文件，改用共享产物；保留各自需要独立构建的负向臂（如「构建失败」类测试）除外。
-4. 验证：全量轮 release-cut 时长显著低于 654.7s，real-install 族各文件时长下降。
+4. 验证：standalone 跑 release-cut.test.mjs 时长显著低于 654.7s，real-install 族各文件时长下降。
 
 ## Acceptance Criteria
 
 - [ ] `grep -rlE "package\.sh|build-dist|npm pack" plugin/test packages/quay/test` 列出的构建调用点清单贴进本任务 evidence（非空、且覆盖 release-cut/npm-pack-e2e/shipped-set/shipped-shell-reachability/verify-deliver-coldstart/build-plugin-dist 中至少 4 个）
 - [ ] 共享构建 helper 落地：`before()` 构建一次，被改造的测试消费同一产物（grep 显示 `before(` 里 build 调用、测试体里改为引用共享路径）
 - [ ] 负向臂保留：需要「构建失败 / 产物不可用」的测试（如 AC1 precheck-unavailable）仍独立构建，不在共享之列（grep 证明）
-- [ ] 全量轮 `__PERFILE__` 里 release-cut duration_ms 显著低于 654704（记录新值）
+- [ ] standalone 跑 `node --no-warnings --experimental-strip-types --test plugin/test/release-cut.test.mjs`，总 duration 显著低于改造前基线 654.7s（记录前后两值进 evidence）
 
 ## Definition of Done
 
-once-per-suite 共享构建落地，real-install 族不再每测试重复 build+pack；全量轮 release-cut 时长显著下降；负向臂（构建失败类）未被共享化吞掉。
+once-per-suite 共享构建落地，real-install 族不再每测试重复 build+pack；release-cut standalone 时长显著下降；负向臂（构建失败类）未被共享化吞掉。
 
 ## Touches
 
