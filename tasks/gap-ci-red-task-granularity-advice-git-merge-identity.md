@@ -31,3 +31,5 @@ CI runner 的 /root/.gitconfig 无身份 ⇒ "Committer identity unknown"（stat
 
 修复提交（377000a60）落地后，CI runner 无 git 身份时 AC6 仍绿；同文件里另两个已用内联 `-c` 的
 fixture 未被改动（保持原有 hermetic 写法）。
+
+该轴仍暗,理由:纯测试 fixture 修复，不改动 L_D/L_G 依赖结构，本次提交未记录读数
