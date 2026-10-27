@@ -48,7 +48,7 @@ carrier_path=/home/yale/work/quay/.quay/goal-round.jsonl · carrier_records=5707
   - 态 A（KINDS 6 值）：`quay driver --help` → `--kind <promotion|worker|outer|quality|meta|goal>`；`quay --help` → `quay driver <start|stop|drain|resume|status|restart> --kind <promotion|worker|outer|quality|meta|goal> [--root <path>]`
   - 态 B（KINDS 7 值）：两处同步变为 `…|goal|fakekind`（用法行与 `--kind` 旗标说明各一处）
   - 还原：写入前 sha256 `f72612f0a39d8152acb04399739fce1c53fcfdb77180e17419bc955e896065d5`，还原后同一 sha（逐字节复原，两态可切换、非单向）
-- [x] AC2 三处一致：`driver.ts` 与 `help.ts` 中不再存在独立手写的 kind 列表——打印 grep 命中数**并贴出命中内容**（⛔ 计数不贴内容不算）。
+- [x] AC2 三处一致：`driver.ts` 与 `help.ts` 中不再存在独立手写的 kind 列表——打印 grep 命中数**并贴出命中内容**（⛔ 计数不贴内容不算）。谓词跑在**真实**源文件 `packages/quay/src/cli/driver.ts` 与 `packages/quay/src/cli/help.ts` 上（主检出实体文件，⛔ 不是抄一份期望清单来比）。
   - 谓词 `--kind <([a-z-]+\|[a-z|-]+)>`：driver.ts **3 → 0**，help.ts **3 → 0**
   - 谓词 `quay driver <([a-z|]+)>`：driver.ts **2 → 0**，help.ts **2 → 0**
   - 零计数的对照半边（硬规则 2：零计数要把谓词对**已知为真**的样本干跑一次）：同一谓词对 HEAD 的同名文件命中 5 条/文件，内容为
