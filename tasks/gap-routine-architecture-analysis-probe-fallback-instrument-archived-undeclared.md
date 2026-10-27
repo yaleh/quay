@@ -74,3 +74,12 @@ Repoint both probes' fallback block at live readers (phase-declare.ts takeLdFile
 - `plugin/scripts/probe-fallback-path-check.ts`
 - `plugin/test/probe-fallback-path-check.test.mjs`
 - `tasks/gap-routine-architecture-analysis-probe-fallback-instrument-archived-undeclared.md`
+
+## Fleet 案卷回执（case_01b4d1fb570b）
+
+- **案卷读数**（Fleet `resolution-cases.jsonl`，立案于 2026-10-27T00:43:46Z）：`caseId=case_01b4d1fb570b`，entity 即本任务，`category=worker-stall`，`class=delegate`，`classReason=ephemeral-dev-session`，案卷状态 `DELEGATED`；立案时读到的真实状态是 `status=ready`（`develop:tasks/gap-routine-architecture-analysis-probe-fallback-instrument-archived-undeclared.md`，commit `580e71d80`）。
+- **现场复核**（本会话读盘，⛔ 非转述）：实现已在任务分支 `task/gap-routine-architecture-analysis-probe-fallback-instrument-archived-undeclared` 的 `a56d49106`（新增 `plugin/scripts/probe-fallback-path-check.ts` 与 `plugin/test/probe-fallback-path-check.test.mjs`；repoint 两个 probe 的 FALLBACK 段；`probe-routine.ts` 加 ③c spawn 前检查）；worktree 已 merge develop（`7cedfd72b`）。
+- **fan-in 在飞、被锁排队**（观测于 2026-10-27T00:47Z）：`worker-driver.ts --mechanical-fan-in --task <本任务>` 进程存活（pid 585182，08:09 起），其子进程阻塞在 `flock -x`（锁文件 `.git/fan-in.lock`，持锁者是另一任务的 fan-in）⇒ 不是「worker 停了且无人接手」；⛔ 不要手工再起一条 fan-in。
+- **`develop` 上尚无 `a56d49106`**，任务仍为 `status=ready`，等 mechanical fan-in 落地。
+- ⛔ **不自判验收**：本记录不改 `status`、不写 `verifiedBy`；落地与完成由本项目 fan-in 判定。
+- **结论**：Fleet 的 `worker-stall` 读数对应的是「worker 会话已退出、mechanical fan-in 在锁上排队」；本任务不需要新的修复，保持 `ready` 等 fan-in。
