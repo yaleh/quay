@@ -1,7 +1,7 @@
 ---
 id: gap-ci-red-needs-human-recheck-real-board-zero-pin
 title: needs-human-parking-recheck 真实 store 测试把 needs_human_total>0 当不变量，board 为 0 时恒红
-status: todo
+status: done
 labels:
   - gap
   - ci-red
