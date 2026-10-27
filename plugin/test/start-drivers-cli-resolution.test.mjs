@@ -24,9 +24,11 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 import {
+  DRIVER_START_CONFIRM_TIMEOUT_SECS,
+  driverStartArgs,
   resolveCliInvocation,
   resolvePluginRoot,
   formatInvocation,
@@ -254,4 +256,40 @@ test("AC1 — the resolved CLI is self-reported on stderr, so the third-party si
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }
+});
+
+// ── the bundled layout itself ────────────────────────────────────────────────────────────────
+
+test("resolvePluginRoot recognises <plugin-root>/scripts/dist/ (the shipped bundle layout)", () => {
+  const tmp = tmpdir("sdr-root-dist-");
+  try {
+    const pluginRoot = path.join(tmp, "plugin");
+    const bundle = path.join(pluginRoot, "scripts", "dist", "start-drivers.js");
+    fs.mkdirSync(path.dirname(bundle), { recursive: true });
+    fs.writeFileSync(bundle, "// fake bundle\n", "utf8");
+
+    assert.equal(
+      resolvePluginRoot({}, pathToFileURL(bundle).href),
+      pluginRoot,
+      "the dist layout must resolve the plugin root instead of null (null ⇒ `quay` PATH lookup ⇒ ENOENT)",
+    );
+    // The source layout keeps its old answer.
+    const src = path.join(pluginRoot, "scripts", "start-drivers.ts");
+    fs.writeFileSync(src, "// fake source\n", "utf8");
+    assert.equal(resolvePluginRoot({}, pathToFileURL(src).href), pluginRoot);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+// ── the readiness window ─────────────────────────────────────────────────────────────────────
+
+test("driverStartArgs carries a readiness window wider than the kernel's 30 s default", () => {
+  const argv = driverStartArgs("goal", "/ws");
+  const i = argv.indexOf("--confirm-timeout");
+  assert.notEqual(i, -1, "start-drivers must pass --confirm-timeout; the default window was the failure");
+  assert.equal(argv[i + 1], String(DRIVER_START_CONFIRM_TIMEOUT_SECS));
+  assert.ok(DRIVER_START_CONFIRM_TIMEOUT_SECS > 30, "30 s is the measured-bad default (a slow kind was confirmed at 60.5 s)");
+  assert.deepEqual(argv.slice(0, 5), ["driver", "start", "--kind", "goal", "--root"]);
+  assert.equal(argv[5], "/ws");
 });
