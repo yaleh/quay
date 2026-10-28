@@ -3,7 +3,7 @@ id: gap-routine-semantic-dedup-scan-is-ancestor-three-semantics
 title: "semantic-dedup-scan: The same git ancestry question returns three
   different value sets in Core (tri-state true/false/null vs
   fold-all-errors-to-false fail-open vs 10s-timeout false"
-status: ready
+status: done
 labels:
   - gap
   - routine-filed
