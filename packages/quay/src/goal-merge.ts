@@ -21,6 +21,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { spawnSync } from "node:child_process";
+import { ancestry } from "./ancestry.ts";
 import { appendGateEvent, queryGateEvents } from "./core/gate-event-store.ts";
 import { parseFrontmatter } from "./core/frontmatter-store-base.ts";
 import { goalBranchName, goalBranchRefExists } from "./core/branch-model.ts";
@@ -74,12 +75,16 @@ function git(root: string, args: string[]): { status: number; stdout: string; st
   return { status: r.status ?? 1, stdout: (r.stdout ?? "").trim(), stderr: (r.stderr ?? "").trim() };
 }
 
+/** Is `branch` already an ancestor of `develop`? The PREDICATE is `./ancestry.ts`
+ *  (semantic-dedup-scan finding `is-ancestor-three-semantics`); the fold is this caller's own.
+ *
+ *  Fold: `null` ("git could not be asked" — unknown ref, not a repository, process never ran)
+ *  ⇒ `false`, i.e. "not yet merged". That is the fail-OPEN direction for `already-merged`, and it
+ *  is only sound because `recordGoalMergeRequest` checks the branch EXISTS first (`branch-missing`)
+ *  and `develop` is a ref of any real workspace. The alternative (fail-closed) would report a
+ *  merge request as already-satisfied on a broken instrument, which nothing would ever correct. */
 function isAncestor(root: string, ancestor: string, descendant: string): boolean {
-  // `merge-base --is-ancestor` exits 0 iff ancestor is an ancestor of descendant. Any git error
-  // (missing ref) exits non-zero — read as "not an ancestor", which for `already-merged` is the
-  // fail-OPEN direction, so the caller checks the branch EXISTS first (branch-missing) and develop
-  // exists before this is reached.
-  return git(root, ["merge-base", "--is-ancestor", ancestor, descendant]).status === 0;
+  return ancestry(root, ancestor, descendant) === true;
 }
 
 // ── goal-record reading (store dialect: <root>/goals/*.md — ⛔ no workspace/config needed) ───────
