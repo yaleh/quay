@@ -3,7 +3,7 @@ id: gap-routine-architecture-analysis-find-repo-root-duplicated
 title: "architecture-analysis: The 12-line upward walk for tasks/ + .quay is
   byte-identical in two sibling scripts (archguard group d74f85df, 107 tokens) —
   projection and regeneration can "
-status: todo
+status: ready
 labels:
   - gap
   - routine-filed
