@@ -90,3 +90,10 @@ finding 复核成立：`.quay/routine-findings.jsonl` 确有该记录（`finding
 - `packages/quay/test/serve-task.test.mjs`
 - `plugin/test/git-runner.test.mjs`
 - `tasks/gap-routine-semantic-dedup-scan-is-ancestor-three-semantics.md`
+
+## Blocker
+
+**2026-10-28T05:20:30.315Z — worker 未落地（exited-not-landed）**
+
+- 未落地原因：step=suite: AssertionError [ERR_ASSERTION]: directory cycle(s) under packages/quay/src: [[".","core","gate","gate/config","gate/factories","gate/shared","observation"]] [baseline A/B: HARD RED (task-introduced-red) — the task's red set is NOT a subset of the develop baseline red set: added=packages/quay/test/directory-cycle.test.mjs changed=-]
+- run_id：wk-prod-anchor
