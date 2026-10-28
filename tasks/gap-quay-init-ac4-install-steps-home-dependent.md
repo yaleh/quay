@@ -1,7 +1,7 @@
 ---
 id: gap-quay-init-ac4-install-steps-home-dependent
 title: quay-init AC4 红：install-steps 测试继承真实 HOME，已装机器上 present 分支不打印 fresh recipe
-status: todo
+status: ready
 labels:
   - gap
   - defect
