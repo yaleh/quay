@@ -285,9 +285,16 @@ export function goalCliResolvable(scriptRoot: string | null): boolean {
   return fs.existsSync(path.join(resolveKernelPluginRoot(), "vendor", "quay", "dist", "quay.js"));
 }
 
-/** 读全部 goal 记录。解析不了 ⇒ 抛（fail-closed：读不到输入不得继续，⛔ 不返回空数组冒充"没有"）。 */
-export async function listGoalRecords(root: string): Promise<Array<Record<string, unknown>>> {
-  const r = await runAsync(goalStoreArgv(root, ["list"]), { timeoutMs: CRITERION_TIMEOUT_MS, collectStderr: true });
+/** 读全部 goal 记录。解析不了 ⇒ 抛（fail-closed：读不到输入不得继续，⛔ 不返回空数组冒充"没有"）。
+ *
+ *  `scriptRoot` = 代码根（定位 goal-store 入口），`dataRoot` = goals/ 所在根。缺省 `dataRoot` 就是
+ *  `scriptRoot`（与 `goalStoreArgv` 同一缺省），故本模块的既有调用点 `listGoalRecords(root)` 行为不变；
+ *  goal-driver 的【测试缝】需要把两者分开时才显式传第二个参数。
+ *  **单一实现**（routine semantic-dedup-scan finding `list-goal-records-duplicated`，runId
+ *  `semantic-dedup-scan-1793162251891`）：goal-driver 从这里 import 并 re-export，⛔ 不再各带一份
+ *  byte-identical 副本。 */
+export async function listGoalRecords(scriptRoot: string | null, dataRoot: string = scriptRoot ?? ""): Promise<Array<Record<string, unknown>>> {
+  const r = await runAsync(goalStoreArgv(scriptRoot, ["list"], dataRoot), { timeoutMs: CRITERION_TIMEOUT_MS, collectStderr: true });
   if (r.error || r.status !== 0) {
     throw new Error(`goal-store list failed (exit ${r.status}): ${(r.stderr || "").trim().slice(0, 300)}`);
   }
