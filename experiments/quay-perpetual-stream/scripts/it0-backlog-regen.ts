@@ -17,6 +17,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createStore } from "../../../packages/quay-native/src/store.ts";
+import { repoRoot } from "./repo-root.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -42,22 +43,10 @@ const experimentDir = path.resolve(process.cwd(), experimentDirArg);
 const sortArg = (args.find((a) => a.startsWith("--sort=")) || "--sort=value").split("=")[1];
 const doWrite = args.includes("--write");
 
-// Repo root: walk up from experimentDir looking for tasks/ + .quay
-function findRepoRoot(startDir: string): string {
-  let dir = startDir;
-  for (let i = 0; i < 10; i++) {
-    if (fs.existsSync(path.join(dir, "tasks")) || fs.existsSync(path.join(dir, ".quay"))) {
-      return dir;
-    }
-    const parent = path.dirname(dir);
-    if (parent === dir) break;
-    dir = parent;
-  }
-  return startDir;
-}
-
-const repoRoot = findRepoRoot(process.cwd());
-const store = createStore(path.join(repoRoot, "tasks"));
+// The walk-up for tasks/ + .quay lives in repo-root.ts; duplicating it here is what let the
+// projection check disagree with this generator once one copy was corrected.
+const root = repoRoot(process.cwd());
+const store = createStore(path.join(root, "tasks"));
 
 const candidates: Task[] = store.list({ label: "milestone-candidate" });
 

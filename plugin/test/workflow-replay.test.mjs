@@ -232,3 +232,67 @@ describe("schema validation", () => {
     } finally { fs.rmSync(tmp, { recursive: true, force: true }); }
   });
 });
+
+// Call-site direction guard (gap-routine-architecture-analysis-workflow-replay-stage-order-predicates).
+// The five ordering predicates now share one `stageOrder(events, a, b, relation)` helper, so the
+// findIndex/-1-guard/compare body exists once. What the helper does NOT remove is the per-call-site
+// (subject, object, direction) triple — a transposed pair there reads plausibly and produces the
+// inverted invariant, which is precisely the bug this refactor is meant to stop propagating.
+// So every predicate is driven in BOTH configurations: the ordering it asserts must pass, and the
+// reversed one must fail. The checked-in fixtures only ever exercise the passing side (every
+// ordering assertion in them has `expected: true`), so without these arms a flipped direction
+// would keep the whole corpus green.
+const ORDERING_CASES = [
+  { predicate: "stageOrderedBefore", args: { A: "Build", B: "Audit" }, satisfied: ["Build", "Audit"] },
+  { predicate: "verifyBeforePrepared", args: {}, satisfied: ["Verify", "Prepared"] },
+  { predicate: "auditCompletesBeforeLand", args: {}, satisfied: ["Audit", "Land"] },
+  { predicate: "gateRunsAfterAudit", args: {}, satisfied: ["Audit", "Gate"] },
+  { predicate: "auditAfterNullBuild", args: {}, satisfied: ["Build", "Audit"] },
+];
+
+/** Replay a scratch case whose event stream is exactly `stages`, in that order. */
+function replayOrdering(predicate, args, stages, tag) {
+  const events = stages
+    .map((stage, i) => minimalValidEvent({
+      stage, timing: { queuedAtMs: i, startedAtMs: i, endedAtMs: i }, recordedAtMs: i,
+    }))
+    .join("\n") + "\n";
+  // compatibility-only, not normative: `auditAfterNullBuild` is a defect predicate and
+  // validateExpectations rejects a normative claim on it before any replay happens.
+  const expectations = { assertions: [{
+    id: "ord-1", description: `${predicate} call-site direction`,
+    classification: "compatibility-only", internalCategory: "compatibility-only",
+    check: { predicate, args }, expected: true,
+  }] };
+  const tmp = mkScratchCase(`order-${tag}`, {
+    "events.jsonl": events,
+    "expectations.json": JSON.stringify(expectations),
+  });
+  try {
+    const r = runWorkflowReplay(tmp);
+    assert.equal(r.assertionResults.length, 1, `${tag}: expected one assertion result, got ${r.verdict}: ${r.errors.join("; ")}`);
+    return r.assertionResults[0];
+  } finally { fs.rmSync(tmp, { recursive: true, force: true }); }
+}
+
+describe("ordering predicates — call-site direction", () => {
+  for (const c of ORDERING_CASES) {
+    it(`${c.predicate}: passes on the ordering it asserts`, () => {
+      const res = replayOrdering(c.predicate, c.args, c.satisfied, `${c.predicate}-pass`);
+      assert.equal(res.passed, true, `expected pass, got ${JSON.stringify(res.actual)}`);
+    });
+
+    it(`${c.predicate}: fails on the reversed ordering`, () => {
+      const reversed = [...c.satisfied].reverse();
+      const res = replayOrdering(c.predicate, c.args, reversed, `${c.predicate}-fail`);
+      assert.equal(res.passed, false, `reversed order must fail, got ${JSON.stringify(res.actual)}`);
+      assert.match(String(res.actual), /is not (before|after)/, `failure must name the violated relation, got ${JSON.stringify(res.actual)}`);
+    });
+
+    it(`${c.predicate}: a missing stage is reported, not read as "not ordered"`, () => {
+      const res = replayOrdering(c.predicate, c.args, [c.satisfied[0]], `${c.predicate}-missing`);
+      assert.equal(res.passed, false);
+      assert.match(String(res.actual), /stage "[^"]+" not found/, `expected a not-found reading, got ${JSON.stringify(res.actual)}`);
+    });
+  }
+});

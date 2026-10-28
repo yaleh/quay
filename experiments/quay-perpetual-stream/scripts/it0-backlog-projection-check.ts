@@ -25,6 +25,7 @@ import path from "node:path";
 import crypto from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { createStore } from "../../../packages/quay-native/src/store.ts";
+import { repoRoot } from "./repo-root.ts";
 
 interface Task {
   id: string;
@@ -45,21 +46,10 @@ const experimentDirArg = args.find((a) => !a.startsWith("--"));
 if (!experimentDirArg) usage();
 const experimentDir = path.resolve(process.cwd(), experimentDirArg);
 
-function findRepoRoot(startDir: string): string {
-  let dir = startDir;
-  for (let i = 0; i < 10; i++) {
-    if (fs.existsSync(path.join(dir, "tasks")) || fs.existsSync(path.join(dir, ".quay"))) {
-      return dir;
-    }
-    const parent = path.dirname(dir);
-    if (parent === dir) break;
-    dir = parent;
-  }
-  return startDir;
-}
-
-const repoRoot = findRepoRoot(process.cwd());
-const store = createStore(path.join(repoRoot, "tasks"));
+// Root resolution is the shared walker, never a local copy: this check and the regeneration it
+// compares against must resolve the same repo (archguard group d74f85df).
+const root = repoRoot(process.cwd());
+const store = createStore(path.join(root, "tasks"));
 
 const candidates: Task[] = store.list({ label: "milestone-candidate" });
 
