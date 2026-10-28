@@ -71,6 +71,10 @@ extract
 且必须从 `gate-script-base.ts` 导入）。`plugin/test/mirror-full-suite-state.test.mjs` 既有的 epoch `finishedAt`
 断言保持不变并通过（该文件正是复用这条转换的消费者）。
 
+实跑读数：`plugin/test/gate-script-base.test.mjs` 83 pass / 0 fail；`plugin/test/mirror-full-suite-state.test.mjs`
+7 pass / 0 fail；`scripts/test.sh --for-task gap-routine-semantic-dedup-scan-to-epoch-seconds-copied --allow-thin`
+exit 0（133 tests, 0 fail，静态检查 tier 全绿）。
+
 ## ADR-007 dark axis
 
 - L_G archguard-runner: scopes_evaluated=6 entityCycles=0 directoryCycles=0 scripts_entities=4773 scripts_relations=10796
@@ -78,12 +82,12 @@ extract
     `evaluated=true`，本改动只新增一条 `full-suite-runner.ts → gate-script-base.ts` 的既有同层导入边，未引入环）
 
 ## AC
-- [ ] `.quay/routine-findings.jsonl` 中 finding `to-epoch-seconds-copied`（routine `semantic-dedup-scan`，runId `semantic-dedup-scan-1793162251891`）所描述的问题被复核并处置
-- [ ] 处置结论可核：要么修掉，要么写明「已有机制在管、失败在哪一步」，⛔ 不以「已注意到」结案
+- [x] `.quay/routine-findings.jsonl` 中 finding `to-epoch-seconds-copied`（routine `semantic-dedup-scan`，runId `semantic-dedup-scan-1793162251891`）所描述的问题被复核并处置
+- [x] 处置结论可核：要么修掉，要么写明「已有机制在管、失败在哪一步」，⛔ 不以「已注意到」结案
 
 ## DoD
-- [ ] 上面的判据实跑通过
-- [ ] ⛔ 探针只立案不执行：本任务若需要跑产出者/修复，由派发链执行，⛔ 不由例程代跑
+- [x] 上面的判据实跑通过
+- [x] ⛔ 探针只立案不执行：本任务若需要跑产出者/修复，由派发链执行，⛔ 不由例程代跑
 
 ## Touches
 - `plugin/scripts/full-suite-runner.ts`
