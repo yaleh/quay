@@ -210,8 +210,15 @@ test(".claude/settings.json enables the plugin (project-level) + pre-approves th
 // ── AC4: explicit install steps (config does NOT auto-install) ──────────────────────────────────────
 test("AC4 — the output carries the explicit install steps and never implies config-just-works", () => {
   const ws = makeTmp();
+  // Isolated HOME: `printInstallSteps` branches on the user-scope install record (real
+  // ~/.claude/plugins/installed_plugins.json). On a machine where quay@quay is ALREADY installed at
+  // user scope, the real HOME yields `present` ⇒ the "ALREADY INSTALLED" arm prints and the fresh
+  // recipe is (correctly) ABSENT — which would red this test for a HOST fact, not a product defect.
+  // An empty HOME has no record ⇒ `not-evaluated` ⇒ the fresh recipe prints. This test's premise is
+  // the FRESH install, so pin HOME to a scratch dir (no installed_plugins.json).
+  const home = makeTmp();
   try {
-    const r = runInit(ws, INIT_ARGS(ws));
+    const r = runInitEnv(ws, INIT_ARGS(ws), { HOME: home });
     assert.equal(r.status, 0, `init must exit 0:\n${r.stderr}`);
     const out = r.stdout;
     // The explicit install step (SPEC §6 / T3): 启用 ≠ 安装, 未信任目录 settings 不被读 ⇒ 必须显式装.
