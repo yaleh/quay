@@ -266,7 +266,10 @@ export interface DeliveryInventoryEntry {
 
 export const DELIVERY_INVENTORY: DeliveryInventoryEntry[] = [
   { name: "scripts", dir: "plugin/scripts", criterion: "机制与运行时脚本" },
-  { name: "gate-scripts", dir: "plugin/gate-scripts", criterion: "闸门（经典管线 era，分层退役——文件留树、不铺）" },
+  // plugin/gate-scripts/ dropped 2026-10-28 (gap-routine-architecture-analysis-retired-gate-scripts-
+  // hand-synced-orphan): the retired classic-pipeline category was an unguarded mirror of the live
+  // experiments scripts and is now archive/2026-10-28-retired-gate-scripts-orphan/ — it is no longer
+  // a directory of the plugin bundle (or of the shipped artifact).
   { name: "skills", dir: "plugin/skills", criterion: "技能（init/cold-start/author/execute/…）" },
   { name: "probes", dir: "plugin/probes", criterion: "探针（routine track probe spec，DIR-056）" },
   { name: "loop", dir: "plugin/loop", criterion: "loop tick 文档（outer/inner/manager）" },

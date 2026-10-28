@@ -4,8 +4,18 @@
 //
 //   AC2: the classic-pipeline era gate scripts were laid into every target project's
 //        scripts/gates/ but nothing called them — dead weight shipped to every install.
-//        分层退休（Layered retirement）: the files stay in the plugin tree but are no
-//        longer laid down by quay-init and no longer synced by sync.sh.
+//        分层退休（Layered retirement）: the files are no longer laid down by quay-init and no
+//        longer synced by sync.sh.
+//
+//   ARCHIVAL (gap-routine-architecture-analysis-retired-gate-scripts-hand-synced-orphan,
+//   2026-10-28): layered retirement kept the directory in the plugin tree, but two of its files
+//   (drain-scheduler.ts / drain-dispose-corruption-check.ts) were byte-identical to the LIVE
+//   experiments/quay-perpetual-stream/scripts/ copies with NO drift checker watching the pair, and
+//   the rest were a stale mirror of those same live scripts (5 of 13 byte-identical at archiving,
+//   the others frozen at 2026-08-11). A "historical artifact" that is a mirror of live code is not
+//   an artifact — it is an unguarded second copy nobody reads. The directory is now ARCHIVED
+//   (archive/2026-10-28-retired-gate-scripts-orphan/), so the live tree holds exactly ONE copy of
+//   each script and no drift check is needed to keep it that way.
 //
 // Contract measure: dead_gates_remaining = `grep -c 'gate-scripts' plugin/scripts/quay-init.sh`
 //   — band 0 (dead gates no longer installed). The tests below pin that measure at 0 AND prove it
@@ -55,10 +65,18 @@ test('AC2: the init skill no longer advertises a --gate-scripts flag', () => {
     'the init Arguments list must no longer advertise the retired --gate-scripts flag');
 });
 
-test('AC2 (layered retirement): the retired gate scripts remain in the plugin tree as a historical artifact', () => {
+test('AC2 (archival): the retired gate scripts are OUT of the plugin tree and indexed in archive/', () => {
+  // gap-routine-architecture-analysis-retired-gate-scripts-hand-synced-orphan: the directory used
+  // to stay in the tree (分层退休). It no longer does — its 14 files were a mirror of the live
+  // experiments/quay-perpetual-stream/scripts/ copies, so the live tree carried an unguarded second
+  // copy of live code. This test goes RED if the directory is ever re-added to plugin/: a
+  // resurrected copy must be an explicit decision, not a silent one.
   const gateDir = path.join(pluginDir, 'gate-scripts');
-  assert.ok(fs.existsSync(gateDir), 'plugin/gate-scripts/ must exist (layered retirement keeps files in tree)');
-  // The 14 classic-pipeline era files that used to be distributed must still be present.
+  assert.equal(fs.existsSync(gateDir), false,
+    'plugin/gate-scripts/ must NOT exist — the retired category is ARCHIVED (archive/2026-10-28-retired-gate-scripts-orphan/plugin/gate-scripts/), not kept as a second copy of live code');
+
+  // The 14 files that used to be distributed must still be recoverable from the archive.
+  const archiveDir = path.join(repoRoot, 'archive', '2026-10-28-retired-gate-scripts-orphan', 'plugin', 'gate-scripts');
   const retired = [
     'audit-independence-check.sh', 'drain-dispose-corruption-check.ts', 'drain-scheduler.ts',
     'it0-backlog-projection-check.sh', 'it0-ceiling-check.sh',
@@ -68,8 +86,20 @@ test('AC2 (layered retirement): the retired gate scripts remain in the plugin tr
     'worktree-branch-hygiene-check.sh',
   ];
   assert.equal(retired.length, 14, 'the retired set must be the 14 classic-pipeline era gate scripts');
+  const idx = fs.readFileSync(path.join(repoRoot, 'archive', 'INDEX.tsv'), 'utf8');
   for (const f of retired) {
-    assert.ok(fs.existsSync(path.join(gateDir, f)), `plugin/gate-scripts/${f} must remain in tree (retired, not deleted)`);
+    const archived = path.join(archiveDir, f);
+    assert.ok(fs.existsSync(archived), `archive/2026-10-28-retired-gate-scripts-orphan/plugin/gate-scripts/${f} must exist (archived, not lost)`);
+    assert.match(idx, new RegExp(`^plugin/gate-scripts/${f.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\t`, 'm'),
+      `archive/INDEX.tsv must carry a row for the archived plugin/gate-scripts/${f}`);
+  }
+
+  // The DRIFT half of the original finding, made executable: the live tree holds exactly ONE copy of
+  // each script, so there is no pair left to drift. Re-creating any same-named copy under plugin/
+  // turns this RED (the archived copy is the only second copy, and archive/ is not a live surface).
+  for (const f of retired) {
+    assert.equal(fs.existsSync(path.join(pluginDir, 'scripts', f)), false,
+      `plugin/scripts/${f} must not exist — the retired copy belongs to archive/, and a live copy (where one exists at all) lives in experiments/quay-perpetual-stream/scripts/`);
   }
 });
 

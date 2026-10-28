@@ -157,7 +157,7 @@ fi
 # delivery-surface dirs) against the release surface: per-dir top-level non-hidden entry count at
 # the release tag vs at develop. Any count difference ⇒ drift_dirs>0, reported mechanically.
 # --list-drift additionally lists the file-level A/D/M per drifted dir.
-DELIVERY_DIRS=(plugin/scripts plugin/gate-scripts plugin/skills plugin/probes plugin/loop plugin/workflows plugin/agents plugin/vendor)
+DELIVERY_DIRS=(plugin/scripts plugin/skills plugin/probes plugin/loop plugin/workflows plugin/agents plugin/vendor)
 
 drift_dirs=0
 declare -a drift_report=()

@@ -47,10 +47,11 @@ function git(cwd, ...args) {
   return r.stdout.trim();
 }
 
-/** The 8 delivery-surface dirs — mirror of DELIVERY_DIRS in the .sh (selfchecked below). */
+/** The delivery-surface dirs — mirror of DELIVERY_DIRS in the .sh (selfchecked below).
+ *  plugin/gate-scripts/ was archived 2026-10-28 (gap-routine-architecture-analysis-retired-gate-
+ *  scripts-hand-synced-orphan) and is no longer a directory of the plugin bundle. */
 const DELIVERY_DIRS = [
   "plugin/scripts",
-  "plugin/gate-scripts",
   "plugin/skills",
   "plugin/probes",
   "plugin/loop",

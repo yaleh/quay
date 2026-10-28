@@ -584,9 +584,12 @@ test('DIR-070-C: Tier-B plugin copies have zero exp5/experiment-path references'
 //
 // gap-gate-scripts-laid-down-but-dead-and-not-mutation-checked (2026-08-05): plugin/gate-scripts/
 // is RETIRED — the classic-pipeline era gates were laid into target projects but nothing called
-// them (dead weight). The files remain in the plugin tree (layered retirement) but quay-init no
-// longer lays them down and sync.sh no longer syncs them. The tests below pin that retirement:
-// quay-init.sh carries ZERO 'gate-scripts' references (contract measure dead_gates_remaining = 0).
+// them (dead weight). quay-init no longer lays them down and sync.sh no longer syncs them. The
+// tests below pin that retirement: quay-init.sh carries ZERO 'gate-scripts' references (contract
+// measure dead_gates_remaining = 0).
+// gap-routine-architecture-analysis-retired-gate-scripts-hand-synced-orphan (2026-10-28): the
+// directory itself is ARCHIVED (archive/2026-10-28-retired-gate-scripts-orphan/) — it used to stay
+// in the tree, but its files were an unguarded mirror of the live experiments scripts.
 // ---------------------------------------------------------------------------
 
 test('M143: plugin/workflows/ exists with the surviving JS workflow files', () => {
@@ -608,11 +611,13 @@ test('M143: plugin/workflows/ exists with the surviving JS workflow files', () =
   }
 });
 
-test('M143: plugin/gate-scripts/ is RETIRED — kept in tree, not laid down by quay-init', () => {
-  // 分层退休（Layered retirement）: the classic-pipeline era gate scripts
-  // stay in the plugin tree as a historical artifact, but they are NO LONGER in the distribution.
+test('M143: plugin/gate-scripts/ is RETIRED and ARCHIVED — not in the tree, not laid down by quay-init', () => {
+  // The files used to stay in the plugin tree (分层退休); they are now archived
+  // (archive/2026-10-28-retired-gate-scripts-orphan/plugin/gate-scripts/). The directory must not
+  // come back: it carried a second copy of live experiments scripts with no drift guard.
   const gateDir = path.join(pluginDir, 'gate-scripts');
-  assert.ok(existsSync(gateDir), 'plugin/gate-scripts/ must exist (retired artifact kept in tree)');
+  assert.equal(existsSync(gateDir), false,
+    'plugin/gate-scripts/ must NOT exist — the retired category is archived, not kept as a mirror of live code');
   // Contract measure dead_gates_remaining: quay-init.sh must carry ZERO 'gate-scripts' references
   // (dead gates no longer laid down).
   const quayInit = readFileSync(path.join(pluginDir, 'scripts', 'quay-init.sh'), 'utf8');

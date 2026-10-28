@@ -167,15 +167,17 @@ rsync -a --exclude='.git' "${RSYNC_EXCLUDES[@]}" "${PLUGIN_DIR}/" "${WORK}/" && 
 # ERR_MODULE_NOT_FOUND at driver start. Fix: build + strip, mirroring package.sh's own proven
 # sequence exactly (same script, same exclusion, same fail-closed check), so this branch upholds
 # the same invariant the resolver already assumes.
-echo "[publish-dist-branch] building bundled plugin script entrypoints (scripts/dist/*.js + gate-scripts/dist/*.js) ..."
-rm -rf "${WORK}/scripts/dist" "${WORK}/gate-scripts/dist"
+echo "[publish-dist-branch] building bundled plugin script entrypoints (scripts/dist/*.js) ..."
+rm -rf "${WORK}/scripts/dist"
 node --experimental-strip-types "${REPO_ROOT}/packages/quay/scripts/build-plugin-dist.mjs" "${WORK}"
 echo "[publish-dist-branch] removing raw plugin .ts (bundled/inlined into dist/*.js) ..."
 # ⛔ Same exclusion as package.sh, same reason: runner-static-gate.ts is the static-check
 # REGISTRY — a bash library scripts/test.sh sources in the dev tree, named .ts only so the
 # annotation parsers see it, not a bundle entry. It ships verbatim (data/library file, not a
 # module) — see package.sh's own comment for the full incident this exclusion fixes.
-find "${WORK}/scripts" "${WORK}/gate-scripts" -name '*.ts' ! -name 'runner-static-gate.ts' -delete
+# plugin/gate-scripts/ was archived 2026-10-28 (gap-routine-architecture-analysis-retired-gate-
+# scripts-hand-synced-orphan) — the strip step covers plugin/scripts only.
+find "${WORK}/scripts" -name '*.ts' ! -name 'runner-static-gate.ts' -delete
 if [ ! -f "${WORK}/scripts/runner-static-gate.ts" ]; then
   echo "ERROR: the static-check registry (scripts/runner-static-gate.ts) is missing after the strip step." >&2
   exit 1

@@ -169,7 +169,9 @@ echo "Removing raw plugin .ts from the staged artifact (bundled/inlined into dis
 # misreported). The shipped artifact is the only place a third-party project's cert gate can read it
 # from, so it ships VERBATIM (a data/library file, not a module).
 # ⛔ Adding another non-module `.ts` here is a deliberate act: name it in the exclusion AND say why.
-find "${PLUGIN_DEST}/scripts" "${PLUGIN_DEST}/gate-scripts" -name '*.ts' ! -name 'runner-static-gate.ts' -delete
+# plugin/gate-scripts/ was archived 2026-10-28 (gap-routine-architecture-analysis-retired-gate-
+# scripts-hand-synced-orphan) — it is no longer staged, so the strip step covers plugin/scripts only.
+find "${PLUGIN_DEST}/scripts" -name '*.ts' ! -name 'runner-static-gate.ts' -delete
 # Fail closed on a future edit that re-broadens the delete (the defect above was silent for exactly
 # one packaging surface — the stage step — and no gate looked at it).
 if [ ! -f "${PLUGIN_DEST}/scripts/runner-static-gate.ts" ]; then
