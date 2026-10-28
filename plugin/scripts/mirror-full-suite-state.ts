@@ -40,16 +40,14 @@ import { toIsoTimestamp } from "./per-task-suite-record.ts";
 import { writeJsonAtomic } from "./write-json-atomic.ts";
 // readJsonOrNull — the shared parse-or-null reader (was a byte-identical private copy here and in
 // red-window-triage.ts; semantic-dedup-scan finding `read-current-state-duplicate`).
-import { readJsonOrNull } from "./gate-script-base.ts";
+import { readJsonOrNull, toEpochSeconds } from "./gate-script-base.ts";
 
 const COMMIT_RE = /^[0-9a-f]{40}$/i;
 const VALID_STATES = new Set(["green", "red"]);
 
-/** EPOCH SECONDS from an ISO-8601 string (the same conversion full-suite-runner.toEpochSeconds uses
- *  for `finishedAt` — the freshness gate parses epoch). */
-function toEpochSeconds(iso) {
-  return Math.floor(Date.parse(iso) / 1000);
-}
+// toEpochSeconds — the shared ISO→epoch-seconds conversion (was a byte-identical private copy here
+// and in full-suite-runner.ts; semantic-dedup-scan finding `to-epoch-seconds-copied`). Imported from
+// gate-script-base.ts above.
 
 /** Build the mirror state object. Returns {state} or {error} (fail-closed). */
 export function buildMirrorState(o) {
