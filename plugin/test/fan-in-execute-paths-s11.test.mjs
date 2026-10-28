@@ -1,8 +1,8 @@
 // @test-group engine
-// @load-sensitive real-detached-suite
+// @load-sensitive child-spawn
 // (full-suite 2026-10-27) the `⑧ duration REAL` case spawns a REAL detached suite (setsid) and the
 //   poll block, with `spawnSync` bounded at 30s/15s. Under 127-lane full-suite load the spawnSync
-//   exceeded its bound (`spawnSync bash ETIMEDOUT`), a host-load measurement, not a product
+//   exceeded its bound (`spawnSync bash ETIMEDOUT`) — a spawn/kill load-race, not a product
 //   regression — classify a future red as load-sensitive (isolate-rerun), not other-task.
 // fan-in-execute-paths-s11.test.mjs — the `durationMs` / bounded-wait cluster of
 // fan-in-execute-paths-s07.test.mjs, split out by gap-ac281-develop-ci-test-job-wallclock-under-30s.
