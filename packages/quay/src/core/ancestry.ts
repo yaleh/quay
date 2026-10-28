@@ -15,6 +15,15 @@
 // shared home has to be a Core-layer LEAF — this module — with each caller keeping its own fold,
 // the same disposition ../observation/model.ts and ../pad.ts took.
 //
+// ⛔ WHY IT SITS IN `core/` AND NOT AT `src/` ROOT (the first landed shape was root-level and was
+// reverted before fan-in): root placement made `core/branch-model.ts` import `../ancestry.ts`, the
+// tree's ONLY `core → .` edge — and `. → core` already exists, so that single edge closed the
+// 7-directory SCC {".", core, gate, gate/config, gate/factories, gate/shared, observation} that
+// packages/quay/test/directory-cycle.test.mjs guards (AC-916). Keeping the leaf in `core/` makes
+// the branch-model import SAME-DIRECTORY (no edge) and the two root callers import `./core/…`
+// (the pre-existing `. → core` edge), so consolidation adds ZERO directory edges. Moving this file
+// back to the root re-closes the cycle — the guard will (correctly) go red.
+//
 // THREE states, not two: `true` = git ANSWERED yes (exit 0), `false` = git ANSWERED no (exit 1
 // — a measured negative), `null` = git could not be ASKED (unknown object, not a repository,
 // the process never ran, or the timeout killed it). Folding "could not look" into a value prints

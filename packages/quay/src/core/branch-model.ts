@@ -55,7 +55,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
-import { ancestry } from "../ancestry.ts";
+import { ancestry } from "./ancestry.ts";
 
 /**
  * The landing baseline's quay role name — the SAME literal the shipped mechanism reads.
@@ -206,7 +206,7 @@ function revCount(root: string, a: string, b: string): number | null {
  *  compatibility-classification path, where a hung git must not hang the CLI. */
 const ANCESTRY_TIMEOUT_MS = 20_000;
 
-/** True iff `ancestor` is reachable from `descendant`. The PREDICATE is `../ancestry.ts`
+/** True iff `ancestor` is reachable from `descendant`. The PREDICATE is `./ancestry.ts`
  *  (semantic-dedup-scan finding `is-ancestor-three-semantics`: it was copied into this module,
  *  goal-merge.ts and observation.ts with three different value sets); this wrapper is only the
  *  timeout policy. `null` = could not be asked, and every caller below keeps it distinct from a

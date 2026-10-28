@@ -24,7 +24,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { codeOnlyText } from "../../../plugin/scripts/source-text-lib.ts";
-import { ancestry } from "../src/ancestry.ts";
+import { ancestry } from "../src/core/ancestry.ts";
 
 const dirs = [];
 
@@ -109,13 +109,13 @@ const SRC_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "s
 
 /** The three Core carriers the finding named, with the specifier each must import the leaf from. */
 const CARRIERS = [
-  { rel: "core/branch-model.ts", specifier: '"../ancestry.ts"' },
-  { rel: "goal-merge.ts", specifier: '"./ancestry.ts"' },
-  { rel: "observation.ts", specifier: '"./ancestry.ts"' },
+  { rel: "core/branch-model.ts", specifier: '"./ancestry.ts"' },
+  { rel: "goal-merge.ts", specifier: '"./core/ancestry.ts"' },
+  { rel: "observation.ts", specifier: '"./core/ancestry.ts"' },
 ];
 
 test("§6 the ONE home exports the tri-state predicate (the null arm survives the merge)", () => {
-  const leaf = fs.readFileSync(path.join(SRC_DIR, "ancestry.ts"), "utf8");
+  const leaf = fs.readFileSync(path.join(SRC_DIR, "core", "ancestry.ts"), "utf8");
   assert.match(leaf, /export function ancestry\b/);
   assert.match(leaf, /boolean \| null/, "`ancestry` must keep the null arm — it is not a boolean fold");
 });
@@ -131,7 +131,7 @@ test("§7 no Core carrier declares the invocation again — checked by POSITION,
     assert.equal(
       at,
       -1,
-      `${rel} declares the ancestry invocation again (${JSON.stringify(src.slice(at, at + 40))}) — it must delegate to src/ancestry.ts`,
+      `${rel} declares the ancestry invocation again (${JSON.stringify(src.slice(at, at + 40))}) — it must delegate to src/core/ancestry.ts`,
     );
   }
 });

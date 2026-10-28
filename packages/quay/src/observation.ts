@@ -51,7 +51,7 @@ import { QUAY_VERSION } from "./version.ts";
 // gap-routine-semantic-dedup-scan-pad2: the serve-layer canonical pad2 is not importable from
 // Core (that would be a Core → view edge); the shared definition lives in this import-free leaf.
 import { pad2 } from "./pad.ts";
-import { ancestry } from "./ancestry.ts";
+import { ancestry } from "./core/ancestry.ts";
 // The ONE definition of fast-mode start/end classification — shared with the plugin's
 // fast-mode-telemetry.ts (the writer/`--report` reader of the same `.workflow-events/*.jsonl`
 // store), NOT a hand-maintained mirror of it. See kernel/start-end-like.ts's header.
@@ -554,7 +554,7 @@ function resolveRefHead(root: string, ref: string): string | null {
  *  hung git must not hang the page. */
 const ANCESTRY_PROBE_TIMEOUT_MS = 10_000;
 
-/** Whether `ancestor` is a commit-graph ancestor of `descendant`. The PREDICATE is `./ancestry.ts`
+/** Whether `ancestor` is a commit-graph ancestor of `descendant`. The PREDICATE is `./core/ancestry.ts`
  *  (semantic-dedup-scan finding `is-ancestor-three-semantics`); this wrapper is only the timeout
  *  policy. The incremental commit-time diff is valid only when the prior head is an ancestor of the
  *  current head (the normal fast-forward fan-in shape); a non-ff rewrite falls back to a full rebuild
