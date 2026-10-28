@@ -3,7 +3,7 @@ id: gap-routine-architecture-analysis-retired-gate-scripts-hand-synced-orphan
 title: "architecture-analysis: plugin/README.md:77-84 declares
   plugin/gate-scripts RETIRED and 'no longer synced by sync.sh', yet both files
   are md5-identical to the live experiments copie"
-status: ready
+status: needs-human
 labels:
   - gap
   - routine-filed
@@ -94,3 +94,20 @@ ADR-007 暗轴记录：
 - `plugin/test/shipped-shell-reachability.test.mjs`
 - `plugin/test/verify-delivery-surface.test.mjs`
 - `tasks/gap-routine-architecture-analysis-retired-gate-scripts-hand-synced-orphan.md`
+
+## Blocker
+
+**2026-10-28T05:20:30.377Z — worker 未落地（exited-not-landed）**
+
+- 未落地原因：step=suite: AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal: [baseline A/B: HARD RED (task-introduced-red) — the task's red set is NOT a subset of the develop baseline red set: added=plugin/test/sh-census-check.test.mjs changed=-]
+- run_id：wk-prod-anchor
+
+## Needs-Human
+
+**执行 2026-10-28T06:22:03.329Z — 停派终止（失败无法归因，⛔ 不再重派）**
+
+- 阻碍原因：LOOP DEADLOCK: task gap-routine-architecture-analysis-retired-gate-scripts-hand-synced-orphan has been blocked by the SAME pre-existing red set for 3 consecutive fan-in rounds (signature unchanged across rounds). Blocked red points: plugin/test/sh-census-check.test.mjs. No other task in the carrier shares this signature yet — if more arrive, they are mutually landing gates. Suggested resolution: land ANY ONE of them first (each one's own fix is outside the blocked set, so the red set does not grow); the others' blocked sets then shrink by that red point and they land in turn. If a landing still makes it worse, a human must decide the order. ⛔ The gates were NOT relaxed: every new/changed red point still hard-fails this task (baseline-equivalence exemption never covers a red the task introduced). — 停止自动重派（电路断路器：同一既存红签名连续 3 轮未变）。⛔ 判据未放宽：本次新增 / 断言文本变化的红点仍然硬红（既存红等价豁免只覆盖「不变差」的方向）。
+- 失败步/判词：step=suite: AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal: [baseline A/B: HARD RED (task-introduced-red) — the task's red set is NOT a subset of the develop baseline red set: added=plugin/test/sh-census-check.test.mjs changed=-]
+- run_id：wk-prod-anchor
+- suite 日志：/data/home/yale/work/quay/.quay/fan-in-suite-gap-routine-architecture-analysis-retired-gate-scripts-hand-synced-orphan~wk-prod-anchor~1793164830932-9e4662.log
+- fan-in 日志：/data/home/yale/work/quay/.quay/fan-in-gap-routine-architecture-analysis-retired-gate-scripts-hand-synced-orphan-wk-prod-anchor.log

@@ -30,6 +30,7 @@ import {
   SUITE_INCOMPLETE_TRIGGER_CMD,
   RECOVERY_ACCEPTED_TRIGGER_CMD,
   RECOVERY_EXEMPT_TRIGGER_CMD,
+  BASELINE_RED_EXEMPT_TRIGGER_CMD,
 } from "../scripts/instrument-decay-check.ts";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "..", "..");
@@ -1098,3 +1099,135 @@ test("CLI --json — 形态 C/D 与 uncovered 都在机器面上（healthyCount 
   assert.equal(out.uncovered[0].file, "measure-history.jsonl");
   assert.equal(out.healthyCount, 0, "the uncovered carrier must not be counted healthy");
 });
+
+// ── 第 12 条裁定：baseline-red-exempt（**主路径**的 A/B 豁免出口）───────────────────────────────────
+// (gap-instrument-decay-baseline-red-exempt-unadjudicated)
+// 写手 worker-fan-in.ts:3482-3487：主路径的既存红等价 A/B（runBaselineEquivalence）判出 exempt 时写本组。
+// 判据 compareFailureSignatures（:1420-1446）：exempt ⇔ task 红集 ⊆ baseline 红集 ⇒ **baseline 红集为空
+// 时，非空 task 红集恒不可能是它的子集**，本组结构上不可达（直到 develop 再出现持续红）。
+//
+// ⚠️ 近名陷阱（承重）：恢复阶梯在 :3379 调的是**同一个** runBaselineEquivalence ⇒ 它也会写一条
+//    `baseline-red` 步，但那条 A/B 的收尾是 `suite-recovery-baseline-exempt`（另一组、另一条路径）。
+//    条件必须把它认作「已收尾」，⛔ 不得把它读成「主路径豁免未落痕」——否则恢复阶梯每跑一次，
+//    本条裁定就会误报主路径写手腐烂。
+// ⛔ 另有两条空转陷阱：(a) 窗口内一次 A/B 都没有不得当作解释；(b) 「本组多久没写」不是条件。
+
+const BRE_OLD = "2026-09-03T00:00:00.000Z"; // baseline-red-exempt 的末次写入（>24h 早于 RECENT）
+const BRE_CLOSURE = "2026-09-04T12:01:00.000Z"; // 恢复阶梯收尾（紧随 RECENT 那条 A/B 之后）
+
+/** baseline-red-exempt 命中 Shape B（末次写入 BRE_OLD），并带一个可变的「窗口内 A/B」形态。 */
+function baselineRedExemptFixture({
+  windowAbr = "hard-red-zero-baseline", // 窗口内 A/B 的形态（见下面的 switch）
+  withLastWrite = true,
+} = {}) {
+  const dir = tmpDir("idc-bre-");
+  const rows = [];
+  for (const s of COMPANION_STEPS) rows.push(stepRec(s, RECENT));
+  for (const s of SUITE_STEPS) rows.push(stepRec(s, RECENT));
+  if (withLastWrite) rows.push(stepRec("baseline-red-exempt", BRE_OLD));
+  // 窗口 = 末次 baseline-red-exempt 之后。A/B 放在 RECENT（与生产形态一致：窗口里有真 A/B）。
+  const ab = (extra) => ({ ...stepRec("baseline-red", RECENT), task: "gap-window", ...extra });
+  switch (windowAbr) {
+    case "hard-red-zero-baseline":
+      rows.push(ab({ verdict: "hard-red", baselineFiles: 0, taskFiles: 2 }));
+      break;
+    case "exempt-recovery-closure":
+      // 恢复阶梯的 exempt：收尾是 suite-recovery-baseline-exempt（⛔ 不是本组）——必须被认作已收尾。
+      rows.push(ab({ verdict: "exempt", baselineFiles: 0, taskFiles: 2 }));
+      rows.push({ ...stepRec("suite-recovery-baseline-exempt", BRE_CLOSURE), task: "gap-window" });
+      break;
+    case "exempt-unclosed":
+      rows.push(ab({ verdict: "exempt", baselineFiles: 0, taskFiles: 2 }));
+      break;
+    case "baseline-nonzero":
+      rows.push(ab({ verdict: "hard-red", baselineFiles: 2, taskFiles: 2 }));
+      break;
+    case "baseline-missing":
+      rows.push(ab({ verdict: "not-evaluated" }));
+      break;
+    case "omit":
+      break; // 窗口内零 A/B（空转真值陷阱）
+    default:
+      throw new Error(`unknown windowAbr ${windowAbr}`);
+  }
+  writeCarrier(dir, "fan-in-step-trace.jsonl", rows);
+  return dir;
+}
+
+test("生产 MANIFEST 第 12 条 — baseline-red-exempt explained-absent，count/lastWrite 照出（⛔ 不消失）", () => {
+  const dir = baselineRedExemptFixture();
+  const res = analyzeCarrier(dir, MANIFEST[0], DEFAULT_STALE_SECONDS, NOW_MS);
+  assert.deepEqual(rateStoppedGroups(res), [], "the declared absence must be explained, not re-reported as rot");
+  const a = res.adjudicated.find((x) => x.group === "baseline-red-exempt");
+  assert.ok(a, "baseline-red-exempt must be in adjudicated[] — an adjudication is not a disappearance");
+  assert.equal(a.kind, "conditional-on-input");
+  assert.equal(a.state, "explained-absent");
+  assert.equal(a.condition.exitCode, 0, "the structural reason must be a real executable reading");
+  assert.ok(a.count > 0 && a.lastWriteMs === Date.parse(BRE_OLD), "count / lastWrite are preserved verbatim");
+  assert.ok(Date.parse(a.reviewAfter) > NOW_MS, "reviewAfter must be unexpired");
+  assert.ok(a.reason.length > 0 && /baseline/.test(a.reason), "the reason must name the input (baseline red set)");
+});
+
+test("生产 MANIFEST 第 12 条 正控制（近名陷阱）— 恢复阶梯的 exempt A/B 由 suite-recovery-baseline-exempt 收尾 ⇒ 仍 explained-absent", () => {
+  const dir = baselineRedExemptFixture({ windowAbr: "exempt-recovery-closure" });
+  const res = analyzeCarrier(dir, MANIFEST[0], DEFAULT_STALE_SECONDS, NOW_MS);
+  assert.deepEqual(rateStoppedGroups(res), [],
+    "a recovery-ladder exemption is a CLOSED main-path-shaped A/B: treating it as rot would fire on every recovery ladder run");
+  assert.equal(res.adjudicated.find((x) => x.group === "baseline-red-exempt").condition.exitCode, 0);
+});
+
+test("生产 MANIFEST 第 12 条 负控制 ① — exempt A/B 无任何收尾 ⇒ 主路径写手腐烂 ⇒ 回到 decayed[]", () => {
+  const dir = baselineRedExemptFixture({ windowAbr: "exempt-unclosed" });
+  const res = analyzeCarrier(dir, MANIFEST[0], DEFAULT_STALE_SECONDS, NOW_MS);
+  assert.deepEqual(rateStoppedGroups(res), ["baseline-red-exempt"],
+    "an exempt verdict with no baseline-red-exempt (and no recovery closure) is exactly the writer rot this declares away");
+  assert.match(res.decayed.find((d) => d.group === "baseline-red-exempt").detail, /condition command did not hold \(exit 1\)/);
+  assert.equal(res.adjudicated.length, 0, "nothing is exempted while the trigger input says otherwise");
+});
+
+test("生产 MANIFEST 第 12 条 负控制 ② — 窗口内零 A/B ⇒ 空转真值不得当解释 ⇒ 回到 decayed[]", () => {
+  const dir = baselineRedExemptFixture({ windowAbr: "omit" });
+  assert.equal(runCondition(BASELINE_RED_EXEMPT_TRIGGER_CMD, dir).status, 1,
+    "zero A/B in the window cannot explain anything (a vacuous truth is not a measurement)");
+  const res = analyzeCarrier(dir, MANIFEST[0], DEFAULT_STALE_SECONDS, NOW_MS);
+  assert.deepEqual(rateStoppedGroups(res), ["baseline-red-exempt"]);
+});
+
+test("生产 MANIFEST 第 12 条 负控制 ③ — 窗口内 baselineFiles>0（基线红集回来了）⇒ 结构性理由消失 ⇒ 回到 decayed[]", () => {
+  const dir = baselineRedExemptFixture({ windowAbr: "baseline-nonzero" });
+  assert.equal(runCondition(BASELINE_RED_EXEMPT_TRIGGER_CMD, dir).status, 1,
+    "a non-empty baseline red set makes the group reachable again: the conditional exemption must expire");
+  const res = analyzeCarrier(dir, MANIFEST[0], DEFAULT_STALE_SECONDS, NOW_MS);
+  assert.deepEqual(rateStoppedGroups(res), ["baseline-red-exempt"]);
+});
+
+test("生产 MANIFEST 第 12 条 负控制 ④ — 窗口内 A/B 缺 baselineFiles（读不懂）⇒ fail-closed 回到 decayed[]", () => {
+  const dir = baselineRedExemptFixture({ windowAbr: "baseline-missing" });
+  assert.equal(runCondition(BASELINE_RED_EXEMPT_TRIGGER_CMD, dir).status, 1,
+    "missing reading ≠ zero (硬规则 6/3b): 'not evaluated' must never satisfy the condition");
+  const res = analyzeCarrier(dir, MANIFEST[0], DEFAULT_STALE_SECONDS, NOW_MS);
+  assert.deepEqual(rateStoppedGroups(res), ["baseline-red-exempt"]);
+});
+
+test("第 12 条 条件命令 — 载体缺失 / 本组从未写过 ⇒ exit 1（⛔ 不是静默豁免）", () => {
+  const empty = tmpDir("idc-bre-empty-");
+  writeCarrier(empty, "fan-in-step-trace.jsonl", []);
+  assert.equal(runCondition(BASELINE_RED_EXEMPT_TRIGGER_CMD, empty).status, 1, "empty carrier ⇒ nothing to explain ⇒ decay");
+
+  const noHistory = baselineRedExemptFixture({ withLastWrite: false });
+  assert.equal(runCondition(BASELINE_RED_EXEMPT_TRIGGER_CMD, noHistory).status, 1,
+    "no baseline-red-exempt history ⇒ no window anchor ⇒ cannot explain ⇒ decay");
+});
+
+test("第 12 条 MANIFEST 声明 — 与 suite-recovery-baseline-exempt 是**两条**独立裁定（近名陷阱）", () => {
+  const groups = MANIFEST[0].adjudicated.map((a) => a.group);
+  assert.ok(groups.includes("baseline-red-exempt"), "the main-path exit must be declared");
+  assert.ok(groups.includes("suite-recovery-baseline-exempt"), "the recovery-ladder exit keeps its own declaration");
+  const bre = MANIFEST[0].adjudicated.find((a) => a.group === "baseline-red-exempt");
+  const sre = MANIFEST[0].adjudicated.find((a) => a.group === "suite-recovery-baseline-exempt");
+  assert.notEqual(bre.conditionCmd, sre.conditionCmd, "two different writers/paths ⇒ two different trigger readings");
+  assert.equal(bre.kind, "conditional-on-input");
+  assert.notEqual(bre.reviewAfter, undefined);
+  assert.ok(bre.reason.includes("⊆"), "the reason states the set-inclusion criterion (exempt ⇔ task red ⊆ baseline red)");
+});
+

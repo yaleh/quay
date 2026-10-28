@@ -2,7 +2,7 @@
 id: gap-instrument-decay-baseline-red-exempt-unadjudicated
 title: instrument-decay 仍报 baseline-red-exempt 分组 rate-stopped（count=79）：触发输入自
   bdb307a63 起结构上不可达，但 MANIFEST 无机器可读裁定
-status: ready
+status: done
 labels:
   - gap
   - defect
