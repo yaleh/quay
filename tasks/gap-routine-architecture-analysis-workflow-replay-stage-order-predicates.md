@@ -3,7 +3,7 @@ id: gap-routine-architecture-analysis-workflow-replay-stage-order-predicates
 title: "architecture-analysis: Four methods share one body shape —
   findIndex(stageA), findIndex(stageB), two -1 guards, one index comparison —
   differing only in stage names and comparison "
-status: ready
+status: done
 labels:
   - gap
   - routine-filed

@@ -3,7 +3,7 @@ id: gap-routine-semantic-dedup-scan-list-goal-records-duplicated
 title: "semantic-dedup-scan: Bodies are byte-identical apart from
   goalStoreArgv's extra dataRoot argument, and goalStoreArgv already defaults
   dataRoot to scriptRoot, so one implementation "
-status: ready
+status: done
 labels:
   - gap
   - routine-filed
