@@ -42,17 +42,27 @@ const VALID_CLASSIFICATIONS = ["normative","compatibility-only","known-defect"];
 const VALID_INTERNAL_CATEGORIES = ["normative","compatibility-only","observed-but-undesired","explicitly-open-defect"];
 
 type PredicateFn = (events: StageEvent[], args: Record<string, unknown>) => unknown;
+
+type StageOrderRelation = "before" | "after";
+// Every ordering predicate is one computation: locate stage `a`, locate stage `b`, refuse when
+// either is absent, compare the two indexes. Written once — with the direction as a named
+// parameter — so a new ordering invariant cannot silently inherit a copied direction bug
+// (gap-routine-architecture-analysis-workflow-replay-stage-order-predicates).
+function stageOrder(events: StageEvent[], a: string, b: string, relation: StageOrderRelation): true | string {
+  const iA = events.findIndex(e => e.stage === a), iB = events.findIndex(e => e.stage === b);
+  if (iA === -1) return `stage "${a}" not found`;
+  if (iB === -1) return `stage "${b}" not found`;
+  const ordered = relation === "before" ? iA < iB : iA > iB;
+  return ordered ? true : `stage "${a}" is not ${relation} "${b}"`;
+}
+
 // `"workflow-runner"` is the A1a canonical sentinel for pre-agent stage boundaries (stage-start
 // events), NOT an agent dispatch. Agent aggregation (counts, scheduling decisions, dispatch-count
 // predicates) must exclude it so the boundary marker does not inflate agent tallies.
 const isAgent = (l: string | null | undefined): boolean => !!l && l !== "workflow-runner";
 const PREDICATES: Record<string, PredicateFn> = {
   stageOrderedBefore(events, args) {
-    const a = String(args.A), b = String(args.B);
-    const iA = events.findIndex(e => e.stage === a), iB = events.findIndex(e => e.stage === b);
-    if (iA === -1) return `stage "${a}" not found`;
-    if (iB === -1) return `stage "${b}" not found`;
-    return iA < iB;
+    return stageOrder(events, String(args.A), String(args.B), "before");
   },
   agentCountForStage(events, args) {
     const stage = String(args.stage), count = args.count as number;
@@ -154,14 +164,10 @@ const PREDICATES: Record<string, PredicateFn> = {
     return bld.some(e => e.outcome == null) && bld.some(e => e.outcome != null) ? true : `build events=${bld.length}`;
   },
   auditAfterNullBuild(events, _args) {
-    const bIdx = events.findIndex(e => e.stage === "Build"), aIdx = events.findIndex(e => e.stage === "Audit");
-    if (bIdx === -1) return "no build"; if (aIdx === -1) return "no audit";
-    return aIdx > bIdx ? true : "audit not after build";
+    return stageOrder(events, "Audit", "Build", "after");
   },
   verifyBeforePrepared(events, _args) {
-    const vIdx = events.findIndex(e => e.stage === "Verify"), pIdx = events.findIndex(e => e.stage === "Prepared");
-    if (vIdx === -1) return "no verify"; if (pIdx === -1) return "no prepared";
-    return vIdx < pIdx ? true : "verify not before prepared";
+    return stageOrder(events, "Verify", "Prepared", "before");
   },
   verifyHasAgentDispatches(events, args) {
     const min = args.min as number;
@@ -180,14 +186,10 @@ const PREDICATES: Record<string, PredicateFn> = {
     return !events.slice(idx+1).some(e => e.stage === "Build") ? true : "build after prepared failure";
   },
   auditCompletesBeforeLand(events, _args) {
-    const aIdx = events.findIndex(e => e.stage === "Audit"), lIdx = events.findIndex(e => e.stage === "Land");
-    if (aIdx === -1) return "no audit"; if (lIdx === -1) return "no land";
-    return aIdx < lIdx ? true : "audit not before land";
+    return stageOrder(events, "Audit", "Land", "before");
   },
   gateRunsAfterAudit(events, _args) {
-    const aIdx = events.findIndex(e => e.stage === "Audit"), gIdx = events.findIndex(e => e.stage === "Gate");
-    if (aIdx === -1) return "no audit"; if (gIdx === -1) return "no gate";
-    return gIdx > aIdx ? true : "gate not after audit";
+    return stageOrder(events, "Gate", "Audit", "after");
   },
   stageEndsWithOutcome(events, args) {
     const stage = String(args.stage);
