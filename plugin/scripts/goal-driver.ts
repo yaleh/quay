@@ -60,7 +60,8 @@ import { escapeRegExp } from "./regex-escape.ts";
 // Layer 1b 常驻循环（quality-gate-driver 的通用例程型循环 + 统一轮记录信封，同 meta-driver 的接法）。
 import { runResidentQualityGateLoop } from "./quality-gate-driver.ts";
 // goal 动词的 argv 单一构造点 + 「quay CLI 解析得出吗」的判据（同 meta-driver，⛔ 本文件不另拼路径）。
-import { goalStoreArgv, goalCliResolvable } from "./meta-driver.ts";
+// `listGoalRecords` 同属 meta-driver 的单一实现（本模块 re-export，见下方 goal-store CLI 客户端一节）。
+import { goalStoreArgv, goalCliResolvable, listGoalRecords } from "./meta-driver.ts";
 // AC155：轮询间隔的单一真相源（drivers.yml 经 driver-config 加载，⛔ 不各写一份字面量）。
 import { defaultDriverConfig, loadDriverConfig, DRIVERS_CONFIG_REL } from "./driver-config.ts";
 // G7（缺口计算）：task→AC 关联字段 goal_ac 的单一读取路径（parseFrontmatterCompletely +
@@ -276,20 +277,13 @@ export function sufficiencyStallWindowMs(
   return judge + interval;
 }
 
-// ── goal-store CLI 客户端（单一 argv 构造点经 meta-driver 的 goalStoreArgv；读/写/check 在本文件，
-//    ⛔ 不复写 meta-driver 的 listGoalRecords/gateCriterion——它们把 scriptRoot 与 dataRoot 合二为一，
-//    本 driver 要支持【测试缝】把两者分开：scriptRoot 定位 goal-store.ts，dataRoot 定位 goals/）。──
+// ── goal-store CLI 客户端（单一 argv 构造点经 meta-driver 的 goalStoreArgv；读/写/check 在本文件）。
+//    `listGoalRecords` 的**单一实现**在 meta-driver（它接受可选的 dataRoot，缺省 = scriptRoot），
+//    本模块 import 并 re-export，保留既有 import 面（routine semantic-dedup-scan finding
+//    `list-goal-records-duplicated`）。⚠️ gateCriterion 仍在本文件：它把 scriptRoot 与 dataRoot
+//    合二为一，而本 driver 的【测试缝】要把两者分开（scriptRoot 定位 goal-store.ts，dataRoot 定位 goals/）。
 
-/** 读全部 goal 记录。解析不了 ⇒ 抛（fail-closed：读不到输入不得继续，⛔ 不返回空数组冒充"没有"）。 */
-export async function listGoalRecords(scriptRoot: string | null, dataRoot: string): Promise<Array<Record<string, unknown>>> {
-  const r = await runAsync(goalStoreArgv(scriptRoot, ["list"], dataRoot), { timeoutMs: CRITERION_TIMEOUT_MS, collectStderr: true });
-  if (r.error || r.status !== 0) {
-    throw new Error(`goal-store list failed (exit ${r.status}): ${(r.stderr || "").trim().slice(0, 300)}`);
-  }
-  const parsed = JSON.parse(String(r.stdout ?? "").trim());
-  if (!Array.isArray(parsed)) throw new Error("goal-store list did not return an array");
-  return parsed as Array<Record<string, unknown>>;
-}
+export { listGoalRecords };
 
 /** 跑一条 AC 的 criterion。⚠️ 副作用是设计如此：`goal-store gate` 自己把 GateEvent 追加进
  *  `.quay/gate-events.jsonl`（evidence 是账本派生的，⛔ 不回写进 goals/*.md——
