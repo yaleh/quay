@@ -22,13 +22,25 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC4 测试改用隔离 HOME（grep 显示 `runInitEnv(ws, INIT_ARGS(ws), { HOME: ... })`），且本机 `node --test --test-name-pattern="AC4 — the output carries"` 绿
-- [ ] 负向控制：同一测试去掉 HOME 隔离仍红（`present` 分支），证明隔离是生效变量
-- [ ] `grep -n "marketplace add yaleh" packages/quay/src/init.ts` 命中（recipe 确实在产品源码，本任务不动它）
+- [x] AC4 测试改用隔离 HOME（grep 显示 `runInitEnv(ws, INIT_ARGS(ws), { HOME: ... })`），且本机 `node --test --test-name-pattern="AC4 — the output carries"` 绿
+- [x] 负向控制：同一测试去掉 HOME 隔离仍红（`present` 分支），证明隔离是生效变量
+- [x] `grep -n "marketplace add yaleh" packages/quay/src/init.ts` 命中（recipe 确实在产品源码，本任务不动它）
 
 ## Definition of Done
 
 quay-init AC4 在本机（已装 quay@quay）与干净宿主都绿；recipe 留在产品源码未被删改；同文件其它 install-steps 断言按需同样隔离。
+
+## 验证记录
+
+- 基线（改动前，真 $HOME = 本机已装 quay@quay 0.24.0）：AC4 红，`printInstallSteps` 走 `present` 分支——与任务定位一致。
+- 修复后：`{ HOME: <临时空目录> }` ⇒ `not-evaluated` ⇒ fresh recipe 打印；AC4 绿，整文件 18/18 绿。
+- 负向控制：把 `{ HOME: home }` 去掉后重跑，**红在新增的 `doesNotMatch(/ALREADY INSTALLED/)` 上**（而不是「recipe 缺席」）——隔离确为生效变量，且该断言能取假（硬规则 2 的零计数半边）。
+- Plan 第 3 步（同族 5b）：同文件 AC3（install note）的断言全部落在**两臂共有**的文本上（`upgradeAndTrustSteps()` 在 `init.ts:4014` 与 `:4085` 两个分支都追加），故无需隔离；同一次整文件运行里 AC3 跑 `present` 臂、AC4 跑新装臂，双双绿 —— 这是实测而非阅读推断。
+- ⚠️ 合并 develop 时发现该修复**已由另一会话于 2026-10-28 11:45 落在 develop**（`2dfb4be6f`，内联 `const home = makeTmp()`）。冲突按 develop 的**机制**解决（不新增第二个 helper），只保留本分支的增量：`doesNotMatch(/ALREADY INSTALLED/)` 臂断言 —— 它让「隔离失效」以自己的名字报红，而不是伪装成「recipe 丢了」（硬规则 3b）。
+
+## ADR-007 暗轴记录
+
+该轴仍暗,理由:本任务只改 plugin/test/quay-init.test.mjs 一处子进程 HOME 注入（生产代码 0 文件、新增依赖边 0 条，复用文件已 import 的 fs/os/path），L_D/L_G 无本任务可归因的读数。
 
 ## Touches
 
