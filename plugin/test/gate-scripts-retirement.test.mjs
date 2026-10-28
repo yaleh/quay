@@ -94,13 +94,16 @@ test('AC2 (archival): the retired gate scripts are OUT of the plugin tree and in
       `archive/INDEX.tsv must carry a row for the archived plugin/gate-scripts/${f}`);
   }
 
-  // The DRIFT half of the original finding, made executable: the live tree holds exactly ONE copy of
-  // each script, so there is no pair left to drift. Re-creating any same-named copy under plugin/
-  // turns this RED (the archived copy is the only second copy, and archive/ is not a live surface).
-  for (const f of retired) {
-    assert.equal(fs.existsSync(path.join(pluginDir, 'scripts', f)), false,
-      `plugin/scripts/${f} must not exist — the retired copy belongs to archive/, and a live copy (where one exists at all) lives in experiments/quay-perpetual-stream/scripts/`);
-  }
+  // The drift half of the original finding, made executable: there is no file left UNDER
+  // plugin/gate-scripts/ to disagree with a live copy, so the pair that could drift without a
+  // checker (drain-scheduler.ts / drain-dispose-corruption-check.ts, byte-identical until now) no
+  // longer exists. Five of the archived names also live in plugin/scripts/ as genuine product
+  // scripts — those are single sources with their own mirror-pair drift coverage, not this
+  // directory's copies, and this task must not touch them.
+  assert.equal(fs.existsSync(path.join(gateDir, 'drain-scheduler.ts')), false,
+    'plugin/gate-scripts/drain-scheduler.ts must be gone (its live copy is experiments/quay-perpetual-stream/scripts/drain-scheduler.ts)');
+  assert.equal(fs.existsSync(path.join(gateDir, 'drain-dispose-corruption-check.ts')), false,
+    'plugin/gate-scripts/drain-dispose-corruption-check.ts must be gone (its live copy is experiments/quay-perpetual-stream/scripts/drain-dispose-corruption-check.ts)');
 });
 
 test('AC2/AC3 end-to-end: quay-init --all lays the closed set and NO dead extension/script copies', () => {

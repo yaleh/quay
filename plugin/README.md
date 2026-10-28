@@ -83,17 +83,17 @@ ship under `plugin/scripts/` via the `--loop` category instead.
 
 **The directory is no longer in the plugin tree.** Layered retirement (2026-08-05 → 2026-10-28)
 kept the 14 files here as a "historical artifact", but they were in fact an *unguarded second
-copy* of the live scripts under `experiments/quay-perpetual-stream/scripts/`: two of them
-(`drain-scheduler.ts`, `drain-dispose-corruption-check.ts`) were byte-identical to their live
-counterparts, the rest were a stale mirror frozen at 2026-08-11, and no drift check watched the
-pair (the only such checker, `workflows-dual-copy-drift-check`, covered `.claude/workflows/` and
-was archived 2026-09-07). A copy of live code that nobody reads is not an artifact — it is a
-second source of truth waiting to disagree with the first.
+copy* of the live scripts in this workspace's experiment tree (`scripts/` next to the loop's
+methodology files): two of them (`drain-scheduler.ts`, `drain-dispose-corruption-check.ts`) were
+byte-identical to their live counterparts, the rest were a stale mirror frozen at 2026-08-11, and
+no drift check watched the pair (the only such checker, `workflows-dual-copy-drift-check`, covered
+`.claude/workflows/` and was archived 2026-09-07). A copy of live code that nobody reads is not an
+artifact — it is a second source of truth waiting to disagree with the first.
 
 The files are preserved in **`archive/2026-10-28-retired-gate-scripts-orphan/plugin/gate-scripts/`**
-and indexed in `archive/INDEX.tsv`; the live copies stay in
-`experiments/quay-perpetual-stream/scripts/`. `plugin/test/gate-scripts-retirement.test.mjs` fails
-if `plugin/gate-scripts/` ever reappears or if any archived file loses its INDEX row.
+and indexed in `archive/INDEX.tsv`; the live copies stay in the experiment workspace's `scripts/`.
+`plugin/test/gate-scripts-retirement.test.mjs` fails if `plugin/gate-scripts/` ever reappears or
+if any archived file loses its INDEX row.
 
 ### Agent types (`plugin/agents/`)
 
