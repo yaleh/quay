@@ -43,8 +43,8 @@ quay-init AC4 在本机（已装 quay@quay）与干净宿主都绿；recipe 留�
 - 现象：`scripts/test.sh --for-task …` 的静态层红在 `sh-census-check`（`embeddedInterpreterLines 6504 > baseline 6501`，该轮并行静态层只有这 1 条 `STATIC_CHECK_FAILED`，其余 checker 全过）。
 - 归因（实测，非推断）：①在 develop tip `390566853` 的干净树上同样复现（exit=1）；②checker 自己的逐文件读数把 +3 归给 `plugin/scripts/manual-full-suite.sh`（`codeLines=3, embedded=["node"]`），由 develop 提交 `8401f8b95` 引入，该提交未重记基线；③本任务 delta 不触任何 `.sh`（`git diff develop --stat` = 1 个测试文件、+5 行）。
 - 为何由本任务携带：该红**无人认领**（无未完成任务/分支/worktree 拥有此基线；6 小时内无基线提交），而 scoped 静态层**没有 baseline-red 豁免** ⇒ 全队每个 worker 的 pre-merge 门都被挡住。按共享教训 `suite-red-outside-your-delta` 第 3/5/6 条：无人认领的 develop 全局静态红可自修后落地。
-- 修法（该 checker 自身的格式约束）：只把这一条过期条目按**实测值**上调 6501→6504（`duplicateCopies` 保持 0，其余条目一字不动），并在 `_reanchorLog` 按既有 `{when,from,to,why}` 格式记下 from/to 与理由。该 checker 的 judge 只把「工作树基线 > HEAD 基线」判为非法上调 ⇒ 基线上调必须以**已提交**形式落地（未提交的改动静默不可见，这也是先确认机制后才动手的原因）。
-- ⇒ 因此 Touches 增加 `plugin/sh-census-baseline.json`：**携带理由如上，与本任务语义无关**。修好后 scoped 门复跑绿并写 scoped-gate 缓存。
+- 修法（该 checker 自身的格式约束）：只把这一条过期条目按**实测值**上调 6501→6504（`duplicateCopies` 保持 0，其余条目一字不动），并在 `_reanchorLog` 按既有 `{when,from,to,why}` 格式记下 from/to 与理由。该 checker 的 judge 只把「工作树基线 > HEAD 基线」判为非法上调 ⇒ 基线上调必须以**已提交**形式落地（未提交的改动静默不可见——先用一次未提交的 6504 试跑，结果仍报 `6501`，这就是该机制的实测证据）。
+- ⇒ Touches 因此增加 `plugin/sh-census-baseline.json`：**携带理由如上，与本任务语义无关**。已修好并提交（6501→6504，`_reanchorLog` 第 28 条），复跑同一 scoped 门 ⇒ **exit 0**：18/18 测试绿，且 `sh-census-check` 报 `PASS — embeddedInterpreterLines=6504 ≤ 6504, duplicateCopies=0 ≤ 0 (headBaseline {"embeddedInterpreterLines":6504,"duplicateCopies":0})`。留下的后续（不属于本任务）：census 所有者应裁定一个 3 行 launcher 究竟该进例外表还是留在这条轴上——已在 `_reanchorLog` 的 `why` 里写明。
 
 ## ADR-007 暗轴记录
 
