@@ -129,7 +129,7 @@ import { fileURLToPath } from "node:url";
 // parseArg now lives in gate-script-base.ts as `flagValue` (it was one of the byte-identical
 // copies of the indexOf+next-arg idiom in plugin/scripts; .quay/routine-findings.jsonl finding
 // `arg-parsing-helper-family`, routine `semantic-dedup-scan`).
-import { flagValue } from "./gate-script-base.ts";
+import { flagValue, toEpochSeconds } from "./gate-script-base.ts";
 
 import { runOnce, isRunnerInFlight, type SuiteState as TriggerSuiteState } from "./suite-state-trigger.ts";
 // gap-precommit-guard-blocks-commits-not-working-tree-edits — the assertion-surface resolution is the
@@ -450,11 +450,10 @@ export function segmentedFailureFields(failures: SuiteFailure[]): {
   };
 }
 
-// gap-batch-merge-gate-reads-stale-green: normalize an ISO 8601 timestamp to EPOCH SECONDS for the
+// gap-batch-merge-gate-reads-stale-green: `finishedAt` is normalized to EPOCH SECONDS for the
 // batch-merge freshness gate's Contract measure (`suite_freshness = int(time.time() - finishedAt)`).
-function toEpochSeconds(iso: string): number {
-  return Math.floor(Date.parse(iso) / 1000);
-}
+// toEpochSeconds — imported from gate-script-base.ts (was a byte-identical private copy here and in
+// mirror-full-suite-state.ts; semantic-dedup-scan finding `to-epoch-seconds-copied`).
 
 // ── AC6: append-only suite-duration sequence (gap-no-criterion-records-its-own-cost) ──────────────────
 // `.quay/full-suite-state.json` is a SINGLE-STATE file overwritten every round — the previous

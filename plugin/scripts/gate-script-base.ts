@@ -1076,6 +1076,16 @@ export function isIsoInstant(v: unknown): boolean {
   return typeof v === "string" && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/.test(v);
 }
 
+/** Normalize an ISO-8601 instant to EPOCH SECONDS (integer) — the unit the batch-merge freshness
+ *  gate measures (`suite_freshness = int(time.time() - finishedAt)`). Single implementation for the
+ *  two callers that used to carry byte-identical private copies (full-suite-runner.ts's suite-state
+ *  write and mirror-full-suite-state.ts's fan-in mirror write; semantic-dedup-scan finding
+ *  `to-epoch-seconds-copied`, 2026-10-28). Behavior is deliberately the pre-extraction one — an
+ *  unparseable string yields NaN, exactly as both copies did. */
+export function toEpochSeconds(iso: string): number {
+  return Math.floor(Date.parse(iso) / 1000);
+}
+
 /** Emit a verifier's result document: pretty JSON when `json`, else the `k=v` scalars of `doc` on one
  *  line followed by one indented `<k>: <json>` line per object-valued field. Byte-identical to the
  *  private copies it replaces (including the field ORDER: scalars first, then objects). */

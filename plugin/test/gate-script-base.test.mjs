@@ -35,6 +35,7 @@ import {
   appendJsonlRecords,
   git,
   serializeSortedJson,
+  toEpochSeconds,
 } from "../scripts/gate-script-base.ts";
 
 /** plugin/scripts — derived from THIS file's location so the source-scan control below cannot drift. */
@@ -1521,4 +1522,25 @@ test("appendJsonlRecords: deleting the shared export makes a carrier import fail
     const present = spawnSync("node", ["--experimental-strip-types", "consumer.ts"], { cwd: dir, encoding: "utf8" });
     assert.equal(present.status, 0, "the same consumer links once the export is present");
   });
+});
+
+test("toEpochSeconds: shared ISO→epoch-seconds conversion, no private copy left (semantic-dedup-scan finding to-epoch-seconds-copied)", () => {
+  // Behavior — byte-for-byte the conversion the two private copies performed (truncate, not round;
+  // an unparseable instant is NaN, NOT swallowed into a fabricated epoch).
+  assert.equal(toEpochSeconds("2026-08-18T04:45:36.519Z"), Math.floor(Date.parse("2026-08-18T04:45:36.519Z") / 1000));
+  assert.equal(toEpochSeconds("1970-01-01T00:00:00.000Z"), 0);
+  assert.equal(toEpochSeconds("1970-01-01T00:00:00.900Z"), 0, "sub-second precision is truncated, not rounded");
+  assert.ok(Number.isNaN(toEpochSeconds("not-a-timestamp")), "unparseable ⇒ NaN (the pre-extraction behavior, kept)");
+
+  // Dedup ratchet — the two files that carried byte-identical private copies define NONE any more and
+  // import the shared one. Scoped to the cluster on purpose: accounting-emit.ts's richer
+  // `toEpochSeconds(v): number | null` is a different resolver, not part of this duplication.
+  const CLUSTER = ["full-suite-runner.ts", "mirror-full-suite-state.ts"];
+  const IMPORT_RE = /import\s*\{[^}]*\btoEpochSeconds\b[^}]*\}\s*from\s*"\.\/gate-script-base\.ts"/;
+  for (const rel of CLUSTER) {
+    const src = sourceOf(rel);
+    assert.doesNotMatch(src, /function\s+toEpochSeconds\s*\(/, `${rel} must not re-declare toEpochSeconds`);
+    assert.match(src, IMPORT_RE, `${rel} must import toEpochSeconds from gate-script-base.ts`);
+  }
+  assert.match(sourceOf("gate-script-base.ts"), /export function toEpochSeconds\s*\(/, "the shared definition lives here");
 });
