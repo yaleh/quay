@@ -52,8 +52,9 @@ finding 复核成立：`.quay/routine-findings.jsonl` 确有该记录（`finding
   —— 调用方先查分支存在性（`branch-missing`），所以「问不到」只可能是真错误。
 - `packages/quay/src/observation.ts`：改为委托；`null ⇒ false` 在调用点写明理由 —— 保守方向是**退回全量重建**
   （代价多一次历史遍历，而假阳会永久供应半张 map）；10s 预算保留。
-- `plugin/scripts/git-runner.ts`：**代码未改**，只加一行交叉引用。两层镜像是有意的（`plugin/scripts` 不 import
-  `packages/quay` 模块图），本任务已复核，⛔ 下一轮 dedup 不应再按 divergent-implementation 立案。
+- `plugin/scripts/git-runner.ts`：**代码未改**，只在 `ancestry` 文档注释里加**一段**交叉引用（写明它指向的 Core 叶子
+  是 `packages/quay/src/core/ancestry.ts`）。两层镜像是有意的（`plugin/scripts` 不 import `packages/quay` 模块图），
+  本任务已复核，⛔ 下一轮 dedup 不应再按 divergent-implementation 立案。
 - 护栏 `packages/quay/test/ancestry.test.mjs`：§1-§5 钉**值域**（true / false / null / 不抛 / timeout 转发），
   §6-§8 是 ratchet（叶子保留 null 臂 · 三个载体按**位置**已不再声明该调用 · 每个载体都必须 import 叶子）。
 
@@ -81,6 +82,7 @@ finding 复核成立：`.quay/routine-findings.jsonl` 确有该记录（`finding
 - 既有消费者：`branch-model.test.mjs` + `goal-merge.test.mjs` → 77 pass / 0 fail；`observation.test.mjs` → 63 pass / 0 fail；
   `serve-task.test.mjs` → 12 pass / 0 fail；`plugin/test/git-runner.test.mjs` → 17 pass / 0 fail。
 - `for d in packages/*/; do npx tsc --noEmit -p "$d" || exit 1; done`（本工作区 ts-typecheck gate 的命令）→ 全绿。
+- `scripts/test.sh --for-task gap-routine-semantic-dedup-scan-is-ancestor-three-semantics --allow-thin` → exit 0。
 
 ## ADR-007 暗轴
 该轴仍暗,理由:本次是把 Core 内同一个 git 谓词的三份实现收敛到一个零出边叶子（只 import node:child_process），未新增/删除任何模块间依赖边（去重目录对集合与 develop 逐对相同，已在「目录环」一节给出读数），没有 archguard 的 L_D/L_G 读数可作真实测量。
