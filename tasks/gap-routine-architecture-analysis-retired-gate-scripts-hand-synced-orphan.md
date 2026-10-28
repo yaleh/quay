@@ -38,17 +38,59 @@ Delete plugin/gate-scripts/ (retired and undistributed) or, if retention is requ
 - statement: 修复后 `<none>` 不再以同一 subject 复发（同 concept_key 的后续记录数应为 0）
 - recorded_at: 2026-10-28T04:46:27.359Z
 
+## Disposition（复核 + 处置，2026-10-28）
+
+**复核（每条都在盘上实测，不是复述 finding）：**
+- 两个被点名的文件与 live 副本 md5 相同：`cmp` 对 `plugin/gate-scripts/{drain-scheduler.ts,drain-dispose-corruption-check.ts}` vs `experiments/quay-perpetual-stream/scripts/` 同名文件 exit 0（12c73e9c… / 1651758…）。
+- **不是两个文件，是整个目录**：14 个文件里 13 个在 experiments 侧有同名对应物；当时字节相同的是 **6** 个（除上面两个 .ts，还有 `it0-ceiling-check.sh`、`it0-ceiling-line-budget-check.sh`、`it0-dashboard-line-budget-check.sh`、`it0-gate-hash-check.sh`），另外 7 个是 2026-08-11 之后 live 副本继续演化留下的「冻结旧副本」，`it0-backlog-projection-check.sh` 无对应物。⇒ 这个目录是 live 代码的一份**无守护影子副本**，不是 README 所称的「历史工件」。
+- 运行时零引用：`quay-init.sh` / `sync.sh` 对该目录零引用（retirement test 早已钉死），`git grep 'plugin/gate-scripts/'` 无命令位置引用；shipped artifact 早在 2026-10-07 就把其中 12 个 .sh 判为 no-executing-reference 并排除（`plugin/shipped-set-baseline.json`）。
+- `21f292911` 确实是「同 124 行手工加到两侧」的那次提交（提交信息自称 byte-identical plugin/gate-scripts/ mirror）。
+
+**处置：取 finding 的第一条（删除退役目录），但按本仓 `archive/` 约定归档而不是 `rm`。**
+`git mv plugin/gate-scripts → archive/2026-10-28-retired-gate-scripts-orphan/plugin/gate-scripts`，14 行走廊写进 `archive/INDEX.tsv`（含 `restore_cmd`）。于是 live 树里每个脚本只剩**一份**，两副本漂移在结构上不再可能存在。
+- ⛔ 不选第二条（加进 sync + 字节一致检查）：对这个目录它是**错的不变量**——7/13 的 live 副本已经演化，强制字节一致等于让「退役工件」跟着每次 live 代码改动一起动，把一个想要消失的负担变成常驻税。
+- 不 `rm` 只归档：archive/ 被 architecture-analysis 例行当作 non-actionable 排除（不会以 archive 副本身份让同一 duplication 复活），同时保留可恢复性与可审计性（INDEX 的 restore_cmd + `commit` 列）。
+
+**同步更新的消费者**（目录消失后它们必然红，逐个改到绿）：`plugin/README.md`；
+`plugin/scripts/verify-delivery-surface.ts` 的 `DELIVERY_INVENTORY` + 其测试（8→7 目录）；
+`plugin/scripts/release-freshness-check.sh` 的 `DELIVERY_DIRS` + 其镜像自检测试；
+`packages/quay/scripts/package.sh` 与 `plugin/scripts/publish-dist-branch.sh` 的 strip-step `find` 路径；
+`packages/quay/test/npm-pack-e2e.test.mjs` 的必需子目录表；`plugin/test/shipped-shell-reachability.test.mjs`
+的 unreachable 断言；以及两个 retirement 测试——由「文件留在树里」翻成「目录必须不在 ∧ 文件在 archive ∧
+INDEX 有 14 行」，并把反向控制写进去（同名副本一旦放回 `plugin/gate-scripts/` 即红）。
+
+**判据可跑（实跑读数）：**
+- `node --test plugin/test/gate-scripts-retirement.test.mjs` → 5/5 pass（`AC2 (archival)` 断言目录不存在、14 文件在 archive、INDEX 14 行）。
+- `plugin/test/plugin-packaging.test.mjs` 36/37（唯一红是 M136 `sync-vendor.sh --check`：worktree 的 `packages/quay/dist` 未构建，`scripts/test.sh` 会先 build，与本改动无关，主检出上该检查 exit 0）；`plugin/test/verify-delivery-surface.test.mjs` + `release-freshness-check.test.mjs` + `publish-dist-branch-closure-gate.test.mjs` 46/46；`plugin/test/shipped-shell-reachability.test.mjs` 8/8（真产物装配）；`shipped-set` + `shipped-entry-runnable` 13/13；`packages/quay/test/npm-pack-e2e.test.mjs` 11/11；`packages/quay/test/build-plugin-dist.test.mjs` 45/45。
+- 反向控制（能取假）：把任一归档文件复制回 `plugin/gate-scripts/` ⇒ `AC2 (archival)` 红。
+
+ADR-007 暗轴记录：
+- L_G archguard: cycles=0（scan-round 2026-10-28T04:46:27Z，6 scopes，runId architecture-analysis-1793162787359；本改动只移出一个零执行引用的退役目录，不新增/删除任何 TS 模块依赖边 ⇒ 该读数不受影响）
+
 ## AC
-- [ ] `.quay/routine-findings.jsonl` 中 finding `retired-gate-scripts-hand-synced-orphan`（routine `architecture-analysis`，runId `architecture-analysis-1793162787359`）所描述的问题被复核并处置
-- [ ] 处置结论可核：要么修掉，要么写明「已有机制在管、失败在哪一步」，⛔ 不以「已注意到」结案
+- [x] `.quay/routine-findings.jsonl` 中 finding `retired-gate-scripts-hand-synced-orphan`（routine `architecture-analysis`，runId `architecture-analysis-1793162787359`）所描述的问题被复核并处置
+- [x] 处置结论可核：要么修掉，要么写明「已有机制在管、失败在哪一步」，⛔ 不以「已注意到」结案
 
 ## DoD
-- [ ] 上面的判据实跑通过
-- [ ] ⛔ 探针只立案不执行：本任务若需要跑产出者/修复，由派发链执行，⛔ 不由例程代跑
+- [x] 上面的判据实跑通过
+- [x] ⛔ 探针只立案不执行：本任务若需要跑产出者/修复，由派发链执行，⛔ 不由例程代跑
 
 ## Touches
-- `plugin/gate-scripts/drain-scheduler.ts`
+- `plugin/gate-scripts/*`
+- `archive/2026-10-28-retired-gate-scripts-orphan/plugin/gate-scripts/*`
+- `archive/INDEX.tsv`
 - `experiments/quay-perpetual-stream/scripts/drain-scheduler.ts`
-- `plugin/gate-scripts/drain-dispose-corruption-check.ts`
 - `experiments/quay-perpetual-stream/scripts/drain-dispose-corruption-check.ts`
+- `packages/quay/scripts/package.sh`
+- `packages/quay/test/npm-pack-e2e.test.mjs`
+- `plugin/README.md`
+- `plugin/scripts/capability-catalog-declarations.json`
+- `plugin/scripts/publish-dist-branch.sh`
+- `plugin/scripts/release-freshness-check.sh`
+- `plugin/scripts/verify-delivery-surface.ts`
+- `plugin/test/gate-scripts-retirement.test.mjs`
+- `plugin/test/plugin-packaging.test.mjs`
+- `plugin/test/release-freshness-check.test.mjs`
+- `plugin/test/shipped-shell-reachability.test.mjs`
+- `plugin/test/verify-delivery-surface.test.mjs`
 - `tasks/gap-routine-architecture-analysis-retired-gate-scripts-hand-synced-orphan.md`
