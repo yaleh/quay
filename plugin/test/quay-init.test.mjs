@@ -83,6 +83,27 @@ function noTmuxPathPrefix() {
   return d;
 }
 
+// isolatedFreshHome — a temp HOME with NO `~/.claude/plugins/installed_plugins.json`, i.e. exactly the
+// host shape `quay init` meets on a clean machine (this repo's CI, a container, a new laptop), and
+// therefore the shape the install-steps contract is written FOR.
+//
+// WHY THIS EXISTS (gap-quay-init-ac4-install-steps-home-dependent): `printInstallSteps` branches THREE
+// ways on `userScopedInstallReading($HOME)` — `present` (a user-scope `quay@quay` record exists) prints
+// "✓ ALREADY INSTALLED" and deliberately NOT the fresh recipe; `not-evaluated` (this shape: the record
+// is missing/unreadable) and `absent` (record readable, no user entry) both print it. `runInitEnv`
+// spreads `process.env`, so without this the subprocess inherits the OPERATOR's real $HOME: on a
+// machine that already has `quay@quay` at user scope the `present` arm wins and every fresh-recipe
+// assertion goes red. The test then measures the host, not the product — green on clean hosts, red on
+// installed ones (127-lane full run, 2026-10-28).
+//
+// The empty directory (rather than a `{"plugins":{}}` fixture record) is deliberate: "no record at
+// all" is the literal clean-host state, and it is deterministic — no fixture format to drift.
+function isolatedFreshHome() {
+  const d = fs.mkdtempSync(path.join(os.tmpdir(), "qinit-home-"));
+  _tmp.push(d);
+  return d;
+}
+
 const INIT_ARGS = (ws) => [
   "--loop", "--root", ws, "--project", "proj",
   "--test-command", "node --test", "--tmux-session", "proj-0:0.0",
@@ -211,9 +232,17 @@ test(".claude/settings.json enables the plugin (project-level) + pre-approves th
 test("AC4 — the output carries the explicit install steps and never implies config-just-works", () => {
   const ws = makeTmp();
   try {
-    const r = runInit(ws, INIT_ARGS(ws));
+    // Isolated $HOME ⇒ `not-evaluated`/`absent` (fresh host): the recipe arm is the one under test.
+    // With the operator's real $HOME this test measured whether quay@quay happened to be installed at
+    // user scope on the machine running it — see `isolatedFreshHome`.
+    const r = runInitEnv(ws, INIT_ARGS(ws), { HOME: isolatedFreshHome() });
     assert.equal(r.status, 0, `init must exit 0:\n${r.stderr}`);
     const out = r.stdout;
+    // The isolation must actually LAND on a fresh-install arm. 硬规则 3b: if it silently slipped back to
+    // the `present` arm (e.g. someone drops the env override), the recipe assertion below would fail for
+    // the right reason but blame the wrong thing — this assert names the cause.
+    assert.doesNotMatch(out, /ALREADY INSTALLED/,
+      "the isolated $HOME must put init on a fresh-install arm, NOT on the user-scope `present` arm");
     // The explicit install step (SPEC §6 / T3): 启用 ≠ 安装, 未信任目录 settings 不被读 ⇒ 必须显式装.
     //
     // ── AC5 (gap-quay-init-install-steps-invalid-and-spec-4b-dev-slot): the predicate is ANCHORED
