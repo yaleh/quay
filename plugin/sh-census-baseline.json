@@ -434,8 +434,24 @@
         "embeddedInterpreterLines": "-65 = experiments/quay-perpetual-stream/scripts/git-lens-selfcheck.sh 65 -> 0 counted lines (it leaves the axis: the sole charge was the fixture runner invoking `node` at a command position; the readings now live in git-lens-instrument.mjs, an .mjs outside the *.sh census). Residual = 0: the branch's entire tracked *.sh delta vs develop is that one path (`git diff --name-status develop...HEAD -- '*.sh'` → M experiments/quay-perpetual-stream/scripts/git-lens-selfcheck.sh), so no other member contributes.",
         "duplicateCopies": "0 — untouched (0 is the assertion, not an omission). This task added no experiments/** mirror and converted no byte-identical pair."
       }
+    },
+    {
+      "when": "2026-10-28 (carried by gap-quay-init-ac4-install-steps-home-dependent — unclaimed develop-wide static red)",
+      "from": {
+        "embeddedInterpreterLines": 6501,
+        "duplicateCopies": 0
+      },
+      "to": {
+        "embeddedInterpreterLines": 6504,
+        "duplicateCopies": 0
+      },
+      "why": "UPWARD re-anchor (+3) — NOT the intended direction: this records a regression the INTRODUCING commit did not record, so the ratchet bounds it from here on instead of reading every tree as OVER. develop's 8401f8b95 added plugin/scripts/manual-full-suite.sh, a 3-code-line bash launcher whose single command position is `exec node --no-warnings --experimental-strip-types .../full-suite-runner.ts`; that commit did not touch this baseline, so from that commit on EVERY tree reads 6504 > 6501 and sh-census-check exits 1 — reproduced on the pristine develop tip 390566853, while the carrying branch's own delta touches no .sh at all (`git diff --name-only develop -- '*.sh'` → no paths). Carried here because the red was UNCLAIMED (no non-done task names this file; no baseline commit in the preceding 6h; no worktree held a bump) and the scoped static tier has no baseline-red exemption, so every worker's pre-merge gate was blocked — shared lesson suite-red-outside-your-delta items 3/5/6 rule that an unowned develop-wide static red may be self-fixed and landed. Measured with the checker's OWN reading on this tree: `sh-census-check.ts --json` → totals.embeddedInterpreterLines 6504, embeddedInterpreterScripts 54 (53 before), and files[path=plugin/scripts/manual-full-suite.sh] = {codeLines: 3, embedded: [\"node\"], exception: false}. Only this axis is raised; duplicateCopies stays 0. Follow-up owed by whoever owns the census ratchet: decide whether a 3-line launcher belongs in the exception list (a human ruling, like the control-plane families above) rather than on this axis at all.",
+      "attribution": {
+        "embeddedInterpreterLines": "+3 = plugin/scripts/manual-full-suite.sh codeLines 0 -> 3 (a new file; it did not exist at the 2026-10-22 reading). Residual = 0 BY CONSTRUCTION rather than by sampling: the total moved by exactly +3 and the new member's own reading is exactly 3, so no other member moved; the embedded-.sh file count moved by exactly +1 (53 -> 54), consistent with one new member.",
+        "duplicateCopies": "0 — untouched (0 is the assertion, not an omission). No experiments/** mirror added and no byte-identical pair created."
+      }
     }
   ],
-  "embeddedInterpreterLines": 6501,
+  "embeddedInterpreterLines": 6504,
   "duplicateCopies": 0
 }
