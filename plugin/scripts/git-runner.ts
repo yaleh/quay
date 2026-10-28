@@ -99,7 +99,7 @@ export function showFile(root: string, ref: string, rel: string): string | null 
  *  exit code is the whole answer: 0 = yes, 1 = no, ≥2 = the invocation itself failed.
  *
  *  ⚠️ The Core layer has the SAME predicate, byte-for-byte in semantics, at
- *  `packages/quay/src/ancestry.ts` (semantic-dedup-scan finding `is-ancestor-three-semantics`, which
+ *  `packages/quay/src/core/ancestry.ts` (semantic-dedup-scan finding `is-ancestor-three-semantics`, which
  *  also collapsed Core's three divergent copies onto it). The two are DELIBERATELY not merged: this
  *  module is vendored/run standalone under `plugin/scripts` and never imports the `packages/quay`
  *  module graph. ⛔ Do not "fix" that by re-copying one into the other — the disposition is a
