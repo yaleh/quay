@@ -3,7 +3,7 @@ id: gap-routine-semantic-dedup-scan-to-epoch-seconds-copied
 title: "semantic-dedup-scan: Byte-identical Math.floor(Date.parse(iso)/1000),
   and the copier's own comment says it is 'the same conversion
   full-suite-runner.toEpochSeconds uses'; accountin"
-status: todo
+status: ready
 labels:
   - gap
   - routine-filed
