@@ -40,6 +40,7 @@ goal_ac: AC-927
 - .codex/config.toml
 - plugin/scripts/codex-stage1-spawn-verify.sh (new)
 - plugin/scripts/codex-stage1-selfcheck.sh
+- plugin/scripts/capability-catalog-declarations.json
 - plugin/test/*codex-stage1-spawn* (new)
 
 该轴仍暗，理由：本任务仅改 .codex/config.toml、两个 shell 脚本与一个测试文件，未触及 packages/* 源码依赖结构，L_D/L_G 无可测增量。
