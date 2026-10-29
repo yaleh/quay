@@ -1,7 +1,7 @@
 ---
 id: gap-full-suite-runner-cgroup-ac3-live-carrier-double-read-race
 title: full-suite-runner-cgroup AC3 双读活载体竞态——merge suite 负载下 flake
-status: todo
+status: ready
 labels:
   - gap
   - suite
