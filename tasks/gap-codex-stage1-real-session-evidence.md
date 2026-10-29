@@ -26,14 +26,16 @@ DIR-121 的 fresh-session AC（4/6/7/8）因需要「真实 Codex 会话 + 显�
 
 ## Acceptance Criteria
 
-- [ ] 证据含 fresh Codex 会话引用 + 真实 task 编辑/创建 id（非 probe/fixture）。
-- [ ] CAS 拒绝记录存在（stale expectedStatus 被拒）。
-- [ ] `node plugin/scripts/codex-stage1-live-proof-check.ts docs/codex-stage1/evidence.json` exit 0。
-- [ ] 提交只含证据文件（scoped，不碰无关路径）。
+- [x] 证据含 fresh Codex 会话引用 + 真实 task 编辑/创建 id（非 probe/fixture）。
+- [x] CAS 拒绝记录存在（stale expectedStatus 被拒）。
+- [x] `node plugin/scripts/codex-stage1-live-proof-check.ts docs/codex-stage1/evidence.json` exit 0。
+- [x] 提交只含证据文件（scoped，不碰无关路径）。
 
 ## Definition of Done
 
 真实 Codex 会话的 durable 证据已提交进 `docs/codex-stage1/evidence.json`，live-proof-check exit 0，AC-929 由 not-evaluated 变为可评估。状态 needs-human，等人开真实 Codex 会话。
+
+该轴仍暗,理由:证据采集任务，无组件代码改动（只提交 docs/codex-stage1/evidence.json），未跑 archguard/码文档比测量
 
 ## Touches
 
