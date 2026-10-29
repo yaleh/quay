@@ -279,7 +279,7 @@ test("AC1: a declared preview validates; a malformed one fails naming the field"
 test("AC2: goal preview start runs the DECLARED command; status reports running; health answers 200", async () => {
   const fx = mkConsumerFixture({
     command: ["node", "preview-server.mjs", "--port", "{port}"],
-    healthUrl: "http://127.0.0.1:{port}/healthz",
+    healthUrl: "http://{host}:{port}/healthz",
   });
   try {
     const sync = syncGoalCriterionWorktrees(fx.root, [{ id: GOAL, branch: true }]);

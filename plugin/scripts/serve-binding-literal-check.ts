@@ -74,6 +74,10 @@ export const ADVISORY_ALLOWLIST: ReadonlyArray<{ rel: string; reason: string }> 
     reason: "CONTROL_PLANE_DEFAULT_HOST — the control plane's own loopback default, a DIFFERENT quantity from the web binding (loopback by design; exported so serve.ts can publish the same value)",
   },
   {
+    rel: "packages/quay/src/core/config.ts",
+    reason: "PREVIEW_HOST_FALLBACK — the declared preview's {host} template default, a DIFFERENT quantity from the web binding (loopback by design: a preview is a local trial instance, not a network service)",
+  },
+  {
     rel: "plugin/scripts/server-partial-stop-verify.ts",
     reason: "verification-side normaliser, same 口径 as server-state.ts",
   },

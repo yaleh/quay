@@ -231,6 +231,15 @@ export interface PreviewConfig {
   healthUrl: string;
 }
 
+/** The declared preview's `{host}` template default — a DIFFERENT quantity from the serve web
+ *  binding (`serve/view/serve-binding.ts` `SERVE_BINDING_FALLBACK`), which is why this is a separate
+ *  definition point and NOT an import from `serve/` (a root-level module reaching into the UI layer
+ *  is an architecture-boundary violation, AC-917 P2). A preview is a LOCAL trial instance — the human
+ *  tries the goal's changes on their own machine before the merge — so it defaults to loopback (⛔
+ *  not all-interfaces), while `quay serve` binds all-interfaces by design. The literal is the single
+ *  definition point for this quantity: `serve-binding-literal-check.ts` allowlists this file for it. */
+export const PREVIEW_HOST_FALLBACK = "127.0.0.1";
+
 /**
  * Judge ONE raw `preview:` value (already YAML-parsed). A PRESENT value only: absence (`undefined`)
  * is the caller's decision (the runtime keeps the quay-serve fallback; the validator passes a section
