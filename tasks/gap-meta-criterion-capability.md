@@ -1,7 +1,7 @@
 ---
 id: gap-meta-criterion-capability
 title: AC-927 criterion 命令形态改为 goal-store 可认证
-status: ready
+status: done
 labels:
   - meta-driver
   - driver-candidate
