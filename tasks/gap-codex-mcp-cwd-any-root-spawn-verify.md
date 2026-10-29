@@ -24,11 +24,11 @@ goal_ac: AC-927
 
 ## Acceptance Criteria
 
-- [ ] `.codex/config.toml` 含 cwd 字段（或 args 绝对化），`codex mcp get quay` 显示 cwd。
-- [ ] `plugin/scripts/codex-stage1-spawn-verify.sh` 存在；从 `packages/quay/` 子目录运行 exit 0（server 真 spawn + initialize，非只 spawn 不验）。
-- [ ] 坏 config（cwd 指向不存在路径）时 spawn-verify exit 非 0。
-- [ ] `codex-stage1-selfcheck.sh` 从子目录运行会执行 spawn 校验（不再只读配置）。
-- [ ] `node --experimental-strip-types scripts/agents-claude-drift-check.ts` 仍 exit 0。
+- [x] `.codex/config.toml` 含 cwd 字段（或 args 绝对化），`codex mcp get quay` 显示 cwd。
+- [x] `plugin/scripts/codex-stage1-spawn-verify.sh` 存在；从 `packages/quay/` 子目录运行 exit 0（server 真 spawn + initialize，非只 spawn 不验）。
+- [x] 坏 config（cwd 指向不存在路径）时 spawn-verify exit 非 0。
+- [x] `codex-stage1-selfcheck.sh` 从子目录运行会执行 spawn 校验（不再只读配置）。
+- [x] `node --experimental-strip-types scripts/agents-claude-drift-check.ts` 仍 exit 0。
 
 ## Definition of Done
 
@@ -41,3 +41,5 @@ goal_ac: AC-927
 - plugin/scripts/codex-stage1-spawn-verify.sh (new)
 - plugin/scripts/codex-stage1-selfcheck.sh
 - plugin/test/*codex-stage1-spawn* (new)
+
+该轴仍暗，理由：本任务仅改 .codex/config.toml、两个 shell 脚本与一个测试文件，未触及 packages/* 源码依赖结构，L_D/L_G 无可测增量。
