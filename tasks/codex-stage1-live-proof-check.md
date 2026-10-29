@@ -1,7 +1,7 @@
 ---
 id: codex-stage1-live-proof-check
 title: codex-stage1-live-proof-check 只验形状不验真伪
-status: todo
+status: ready
 labels:
   - gap
   - defect
