@@ -78,15 +78,56 @@ function walkProductionSources(dir, out = []) {
   return out;
 }
 
+const relPath = (abs) => path.relative(REPO_ROOT, abs).split(path.sep).join("/");
+
+// ── the walk→read race (the mirror that moves under us) ─────────────────────────────────────────
+//
+// `packages/quay/plugin/` is a GITIGNORED npm-pack staging mirror: `packages/quay/test/
+// delivery-standalone-smoke.sh` copies the whole `plugin/` tree into it (npm's `files` whitelist is
+// package-root-relative and cannot reach the repo-root sibling `../plugin`), runs `npm pack`, then
+// `rm -rf`s it. That gate deliberately runs in the default `@test-group product` phase, so the
+// mirror appears and vanishes WHILE other test files are walking this same tree.
+//
+// A walk that lists a path and then reads it can therefore lose the file in between. That is a
+// NOT-EVALUATED reading, not a violation (硬规则 3b). So: skip, but ONLY under the mirror, and
+// REPORT it. Anywhere else ENOENT is still a hard failure — a production file that vanished is a
+// genuine defect and must not be laundered into "not covered".
+const STAGING_MIRROR_PREFIX = "packages/quay/plugin/";
+const vanishedUnderMirror = [];
+const reportedVanished = new Set();
+
+/** readFileSync, tolerating the mirror's list→read race and nothing else. `null` = vanished. */
+function readSource(abs) {
+  try {
+    return fs.readFileSync(abs, "utf8");
+  } catch (err) {
+    if (err.code !== "ENOENT" || !relPath(abs).startsWith(STAGING_MIRROR_PREFIX)) throw err;
+    vanishedUnderMirror.push(relPath(abs));
+    return null;
+  }
+}
+
+/** Report each skipped mirror path ONCE — a skipped file must be visible in the output, never a
+ *  silent hole (the difference between "judged clean" and "not judged" is the whole point). */
+function reportVanished() {
+  const fresh = vanishedUnderMirror.filter((p) => !reportedVanished.has(p));
+  if (fresh.length === 0) return;
+  for (const p of fresh) reportedVanished.add(p);
+  console.log(
+    `# staging-mirror walk→read race: skipped ${fresh.length} vanished path(s) under ${STAGING_MIRROR_PREFIX} — NOT judged (hard rule 3b: not-evaluated ≠ violation): ${fresh.join(", ")}`,
+  );
+}
+
 /** Files whose TEXT contains `needle`, as repo-relative POSIX paths. */
 function filesContaining(needle) {
   const hits = [];
   for (const root of SCAN_ROOTS) {
     for (const abs of walkProductionSources(path.join(REPO_ROOT, root))) {
-      const text = fs.readFileSync(abs, "utf8");
-      if (text.includes(needle)) hits.push(path.relative(REPO_ROOT, abs).split(path.sep).join("/"));
+      const text = readSource(abs);
+      if (text !== null && text.includes(needle)) hits.push(relPath(abs));
     }
   }
+  reportVanished();
   return hits.sort();
 }
 
@@ -273,21 +314,27 @@ test("④ the FAMILY: one declaration site and one body spelling — anywhere el
 
   // (ii) the real judgment — over the production tree, not over the controls.
   const files = SCAN_ROOTS.flatMap((root) => walkProductionSources(path.join(REPO_ROOT, root)));
+  /** The walked text, minus paths that vanished under the staging mirror (see readSource). */
+  const judged = files.flatMap((abs) => {
+    const text = readSource(abs);
+    return text === null ? [] : [{ abs, text }];
+  });
+  reportVanished();
 
-  const declaring = files.filter((abs) => declaredFamilyNames(fs.readFileSync(abs, "utf8")).length > 0).map(rel).sort();
+  const declaring = judged.filter(({ text }) => declaredFamilyNames(text).length > 0).map(({ abs }) => rel(abs)).sort();
   assert.deepEqual(
     declaring,
     [KERNEL_REL],
     `exactly one file may DECLARE a family member; found ${JSON.stringify(declaring)}`,
   );
 
-  const spellingBody = files.filter((abs) => fs.readFileSync(abs, "utf8").includes(BODY_PREFIX)).map(rel).sort();
+  const spellingBody = judged.filter(({ text }) => text.includes(BODY_PREFIX)).map(({ abs }) => rel(abs)).sort();
   assert.deepEqual(
     spellingBody,
     [KERNEL_REL],
     `exactly one file may spell the escape body; found ${JSON.stringify(spellingBody)}`,
   );
 
-  const setLoops = files.filter((abs) => isSetLoopEscape(fs.readFileSync(abs, "utf8"))).map(rel).sort();
+  const setLoops = judged.filter(({ text }) => isSetLoopEscape(text)).map(({ abs }) => rel(abs)).sort();
   assert.deepEqual(setLoops, [], `the Set-loop rewrite must be gone from the production tree; found ${JSON.stringify(setLoops)}`);
 });

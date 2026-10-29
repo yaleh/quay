@@ -96,9 +96,27 @@ function packedFiles() {
 }
 
 // Read the first 2 bytes — enough to detect a `#!` shebang.
+//
+// `npm pack` lists what existed at PACK time. `packages/quay/plugin/` is a GITIGNORED npm-pack
+// staging mirror (`packages/quay/test/delivery-standalone-smoke.sh` copies the whole `plugin/`
+// tree in, runs `npm pack`, then `rm -rf`s it) and that gate deliberately runs in the default
+// `@test-group product` phase — so a listed `plugin/...` path can be GONE by the time we read it.
+// That is a NOT-EVALUATED reading, not a violation (硬规则 3b): return `null`, the caller skips and
+// REPORTS. A path that vanishes OUTSIDE the mirror still throws — a shipped file that disappeared
+// from a package that just listed it is a genuine defect, never something to launder as "not judged".
+const STAGING_MIRROR_PREFIX = "plugin/";
+const vanishedUnderMirror = [];
+
 function readShebangPrefix(rel) {
   const abs = path.join(PKG_DIR, rel);
-  const fd = fs.openSync(abs, "r");
+  let fd;
+  try {
+    fd = fs.openSync(abs, "r");
+  } catch (err) {
+    if (err.code !== "ENOENT" || !rel.startsWith(STAGING_MIRROR_PREFIX)) throw err;
+    vanishedUnderMirror.push(rel);
+    return null;
+  }
   try {
     const buf = Buffer.alloc(2);
     const n = fs.readSync(fd, buf, 0, 2, 0);
@@ -199,7 +217,16 @@ test("every packed entry-like file is a declared bin runnable from an install la
       hookCount += 1;
       continue; // lifecycle hook, not a user-facing entry
     }
-    byState[classify(f, readShebangPrefix(f.path), binPaths)].push(f.path);
+    const shebang = readShebangPrefix(f.path);
+    if (shebang === null) continue; // vanished under the staging mirror — reported below
+    byState[classify(f, shebang, binPaths)].push(f.path);
+  }
+  // A skipped path is visible in the output, never a silent hole: "not judged" must be
+  // distinguishable from "judged clean" (硬规则 3b).
+  if (vanishedUnderMirror.length > 0) {
+    console.log(
+      `# staging-mirror walk→read race: skipped ${vanishedUnderMirror.length} packed path(s) under ${STAGING_MIRROR_PREFIX} — NOT judged (hard rule 3b: not-evaluated ≠ violation): ${vanishedUnderMirror.join(", ")}`,
+    );
   }
   const violations = [
     ...byState[State.DECLARED_BIN_NOT_RUNNABLE].map(
