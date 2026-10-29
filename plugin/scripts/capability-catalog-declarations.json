@@ -2120,6 +2120,7 @@
     "checker-io.ts": "谁按：已迁移到 DriverResult 的 checker（outer-anchor-check / load-sensitive-release-check / dead-code-after-return-check / adr016-screen-use-check）在判定函数返回 DriverResult 后经 driverResultToExit 映射退出码；条件=一个 checker 的判定结果要收敛到 DriverResult 词表（gap-b4-checker-reuse-driver-result）",
     "claim-task.sh": "谁按：派发器/inner 在认领任务分支时按；条件=任务要被某台机器认领（claim 协议）",
     "claim-task.ts": "谁按：quay-branch 命令族在 fork 候选任务时按；条件=要决定从哪个基分支 fork",
+    "codex-stage1-live-proof-audit.ts": "谁按：Codex stage1 实验者（或任何要对 DIR-121 evidence 下真值结论的人）按——codex-stage1-live-proof-check.ts 的 --help、文件头契约与成功输出都把真值结论指向本脚本；条件=要证明证据声称的每个 taskId/commit SHA/afterHash 真能从 authoritative task store（quay task view --json 回读任务存在性与 providerQualifiedId）与 Git（cat-file -e 验对象存在、show --name-only 验 changed paths、show <sha>:<task-file> 验 afterHash）回读且逐项匹配，并把回读到的任务文件跑过 task-schema-check",
     "codex-stage1-live-proof-check.ts": "谁按：Codex stage1 实验者在验证 live-proof 时按；条件=要证明 stage1 有内部一致证据",
     "config-wiring-check.ts": "谁按：配置变更者在加配置字段后按；条件=每个声明字段要恰好一个 wirer",
     "dispatch-worktree-setup.sh": "谁按：派发器在创建任务 worktree 后按；条件=worktree 要可自验证（node_modules 就绪）",
