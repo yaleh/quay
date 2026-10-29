@@ -46,6 +46,8 @@ AC7（cp 备份回退核心改动 → 变红 → cp 恢复 → 绿，不用 git 
 
 架构修正（2026-10-29 续做，修复 79d0bce01 引入的回归）：该提交为满足 serve-binding-literal-check 把声明预览 host 回退从 loopback 字面量改成 import `serve/view/serve-binding.ts` 的 `SERVE_BINDING_FALLBACK.host`——违反 architecture-boundaries P2（root-level 不得 import serve/）且制造 directory-cycle。改为在 `core/config.ts` 定义独立常量 `PREVIEW_HOST_FALLBACK`（loopback `127.0.0.1`，与 serve web binding 是不同量），`goal-preview.ts` 用之；`serve-binding-literal-check.ts` 增一条 allowlist。`architecture-boundaries` / `directory-cycle` / `serve-binding-literal-check` 三测绿；`goal-preview-trial-surface` 5/5 绿（AC2 healthUrl 改 `{host}` 显式钉死 loopback 回退）。
 
+测试基建解锁（2026-10-29 续做）：全量 suite 在 `driver-runtime-s07.test.mjs`（gap-ac203）与 `driver-restart-busy-e2e.test.mjs` 因全表 `ps -eo pid=,args=` / `pid,args` 输出（实测 ~1.16MB / 5845 进程）超过 spawnSync/execFileSync 默认 maxBuffer 1MB 而 ENOBUFS 红（`ps 读数必须可得`，硬规则 3b），阻塞本任务全量 suite fan-in。两处调用加 `maxBuffer: 64 * 1024 * 1024`（重落 48bd794d9 的修法；该提交曾搁浅在 goal/GOAL-912、未 ff 到 develop）。修后 `driver-runtime-s07` AC2/AC3 2/2 绿。
+
 ## Touches
 
 - packages/quay/src/goal-preview.ts
@@ -58,13 +60,16 @@ AC7（cp 备份回退核心改动 → 变红 → cp 恢复 → 绿，不用 git 
 - plugin/skills/manager/SKILL.md
 - plugin/skills/init/SKILL.md
 - plugin/scripts/serve-binding-literal-check.ts
+- plugin/test/helpers/driver-runtime-harness.mjs
+- plugin/test/driver-restart-busy-e2e.test.mjs
 - orchestration/SPEC-goal-branch-2026-10-03.md
 - tasks/gap-goal-branch-preview-trial-surface-declarable.md
 
 ## Blocker
 
-**2026-10-29T10:13:14.133Z — worker 未落地（exited-not-landed）**
+**2026-10-29T10:13:14.133Z — worker 未落地（exited-not-landed）→ 已解除**
 
-- 未落地原因：step=suite: AssertionError [ERR_ASSERTION]: AC2 失败路径：ps 读数必须可得（⛔ 读不到 ≠ 干净，硬规则 3b）
+- 根因：step=suite 全量 suite 在 `driver-runtime-s07.test.mjs`（gap-ac203）失败——`processesMentioning` 全表 `ps -eo pid=,args=` 输出超 spawnSync 默认 maxBuffer 1MB ⇒ ENOBUFS/status null ⇒ `ps 读数必须可得`（硬规则 3b）；同根因 `driver-restart-busy-e2e.test.mjs` `fixtureWorkerPids`。
+- 解除：重落 48bd794d9 的修法（两处全表 ps 调用加 `maxBuffer: 64 * 1024 * 1024`），Touches 增列两个测试文件。
 - run_id：wk-prod-anchor
 - session_id：1fa95090-b66f-40de-9af9-f1e467fb999c
