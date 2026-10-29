@@ -58,8 +58,7 @@
 
 import fs from "node:fs";
 import path from "node:path";
-import { StringDecoder } from "node:string_decoder";
-import { createHash, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import YAML from "yaml";
 import {
@@ -102,7 +101,7 @@ import { criterionFidelityVerdict, type FidelityInvokeJudge } from "./criterion-
 // the THIRD activation/execution question, after evaluability (P6) and fidelity. "Can this criterion
 // RUN?" and "can it be FALSE?" do not ask "is it a READING or an ACTION?" — and on the unattended
 // re-run paths (I5, the frozen rotation) an ACTION is an open-ended writer, not a check.
-import { judgeCriterionCapability, capabilityRefusalReason, readCapabilityDeclaration, type CapabilityJudgment } from "./criterion-capability.ts";
+import { capabilityRefusalAt, capabilityRefusalReason } from "./criterion-capability.ts";
 import { resolvePluginRoot } from "./plugin-root.ts";
 import { GOAL_STATUSES } from "./types.ts";
 import { mergeEnv } from "../kernel/env-merge.ts";
@@ -110,20 +109,45 @@ import { mergeEnv } from "../kernel/env-merge.ts";
 // each primitive: a goal's status flip is the only event that creates (§4.2: lazy, on `active`) or
 // discards (§4.2: `retired`/`superseded`) `goal/<id>`.
 import { ensureGoalBranch, discardGoalBranch, goalBranchName, goalBranchRefExists, goalBranchTip } from "./branch-model.ts";
-import { resolveWorktreeNamespace } from "./worktree-namespace.ts";
 // The TWO concerns extracted from this module (tasks/gap-routine-architecture-analysis-god-module-goal-store):
 // the goal-staleness carrier (leaf: one JSONL file) and the criterion failure-attribution predicate
 // (leaf: a pure function over a criterion string). This file keeps the store + CLI surface; its own
 // call sites are `write()` (record the signal / refuse an unattributable criterion) and the CLI's
 // staleness reporting. The public surface is re-exported at the sections the code used to live in,
 // so every historical importer is unchanged.
-import {
-  appendGoalStalenessSignal,
-  readGoalStalenessIndex,
-  resolveGoalStaleness,
-  type GoalStaleness,
-} from "./goal-staleness.ts";
+import { appendGoalStalenessSignal, resolveGoalStaleness } from "./goal-staleness.ts";
 import { evaluateCriterionAttribution, formatBareFailureExits } from "./criterion-attribution.ts";
+// Symbols the store's OWN remaining code still names (the CLI's verb bodies + write()'s dry-run
+// projection). ⛔ Re-exported separately below — an `export … from` creates no local binding, so
+// these are the ones this file actually USES.
+import { GOAL_ID_RE, AC_ID_RE } from "./goal-store-types.ts";
+import { SWEEP_ACTOR, ledgerEvidenceMap } from "./goal-store-ledger.ts";
+import {
+  buildCriterionRoots,
+  criterionCwdFor,
+  evaluationContext,
+} from "./goal-store-criterion-address.ts";
+import {
+  DEFAULT_SWEEP_BUDGET,
+  DEFAULT_SWEEP_MIN_AGE_MS,
+  DEFAULT_SWEEP_WALL_MS,
+} from "./goal-store-rotation.ts";
+
+import { createGoalReads } from "./goal-store-reads.ts";
+import { createGoalChecks } from "./goal-store-checks.ts";
+import { createGoalRotation } from "./goal-store-rotation.ts";
+import { createGoalSweep } from "./goal-store-sweep.ts";
+// The record shapes + id vocabulary, shared with every composed module. ⛔ Not re-declared here:
+// one shape per record, or the projections drift apart (hard rule 5b).
+import {
+  VALID_CRITERION_PHASES,
+  isGoalId,
+  isCriterionId,
+  type GoalFilter,
+  type GoalFrontmatter,
+  type GoalViewModel,
+} from "./goal-store-types.ts";
+
 
 // ADR-036 (枚举事实的单一真源): the goal-status vocabulary is DEFINED ONCE, in the ABI declaration
 // (`abi.ts:GOAL_STATUSES`), and this store derives from it — ⛔ not a second hand-copied literal.
@@ -192,501 +216,62 @@ export function goalDriverChildTimeoutMs(
   return inner.timeoutMs + judgeBound + GOAL_DRIVER_SPAWN_GRACE_MS;
 }
 
-// SPEC-goal-branch-2026-10-03 §4.7 (裁定⑭⑮) — an AC's evaluation PHASE, declared by the person/agent
-// who files it (⛔ never inferred from the criterion's text — hard rule 2). `pre-merge` is the default
-// because the misclassification directions are asymmetric: a post-merge AC left unmarked is
-// not-evaluable on the criterion worktree ⇒ the merge precondition can never be met ⇒ STUCK AND
-// VISIBLE; a pre-merge AC marked post-merge silently skips the isolation check. The default picks the
-// side that fails loudly. Only meaningful under a `branch: true` goal (a plain goal ignores it).
-export const VALID_CRITERION_PHASES: string[] = ["pre-merge", "post-merge"];
-export type CriterionPhase = "pre-merge" | "post-merge";
 
-const GOAL_ID_RE = /^GOAL-\d{3,}$/;
-const AC_ID_RE = /^AC-\d{3,}$/;
+// ── COMPOSITION SURFACE (tasks/gap-routine-architecture-analysis-god-function-creategoalstore) ────
+// `createGoalStore` was ONE 1,647-line closure factory nesting 20 declarations (archguard
+// `god-function` finding, routine `architecture-analysis`, runId
+// `architecture-analysis-1793251760204`). Its sub-surfaces now live in composed modules over the
+// SAME `goalDir` — so there is still exactly ONE derivation of every judgment (the closures moved;
+// they did not multiply):
+//   · ./goal-store-reads.ts             — projection: get / list / listWithMalformed / activeGoals /
+//                                         listActiveCriteria / isGoalAchieved
+//   · ./goal-store-checks.ts            — I3/I4 staleness, I5 achieved-but-failing, reverify scope
+//   · ./goal-store-rotation.ts          — the frozen population + the `--stale-pass` JUDGMENT
+//   · ./goal-store-sweep.ts             — the bounded rotation STEP (the only criterion-running half)
+//   · ./goal-store-ledger.ts            — the bounded gate-ledger scan the two above both read
+//   · ./goal-store-criterion-address.ts — WHICH TREE a criterion runs on
+//   · ./goal-store-types.ts             — the record shapes + id vocabulary they all share
+// ⛔ Every public symbol is RE-EXPORTED below, so no historical importer (tests, quay-native,
+// plugin/scripts) changes its import path.
 
-/**
- * The execution-surface capability gate, as a function of (criterion, the tree it will run in, the
- * workspace that owns it). Module-level because BOTH the store's four `runAcceptance` sites and the
- * standalone CLI's `gate` verb need it, and a second copy of the predicate is exactly the drift this
- * repository keeps removing (hard rule 5b). Returns null when the criterion is a reading.
- */
-function capabilityRefusalAt(criterion: string, criterionCwd: string, workspaceRoot: string): CapabilityJudgment | null {
-  const j = judgeCriterionCapability(criterion, {
-    root: criterionCwd,
-    declaration: readCapabilityDeclaration(workspaceRoot),
-  });
-  return j.capability === "read-only" ? null : j;
-}
-
-// RE-ENTRANCY GUARD env var (乙, gap-goal-achieved-but-failing-no-handler). While `checkAchievedFailing`
-// is running a criterion, it sets this in process.env; runAcceptance's spawnSync (no `env` override)
-// inherits it into the criterion's child shell. A criterion whose own command calls back into
-// `check --achieved-failing` (or `gate`) therefore spawns a grandchild that sees the var and REFUSES
-// to run criteria — bounding the recursion (the 2026-09-07 production incident was an unbounded
-// `check --staleness` → criterion → `check --staleness` chain). Exported so the falsifiability test
-// can `env -u` it to prove the observation measures real behavior.
-export const GOAL_ACCEPTANCE_ACTIVE_ENV = "QUAY_GOAL_ACCEPTANCE_ACTIVE";
-
-// ── WHICH TREE a goal verdict was obtained on (SPEC-goal-branch-2026-10-03 §7 辛 / §9.2-2, 硬规则 4c) ─
-// §7 辛 ("至少 1 个 live-probe AC 的 pass GateEvent 早于其 goal 的并入提交，且该次求值的 cwd 是预览
-// worktree，不是主检出") is unjudgeable while a goal GateEvent names no cwd: measured 2026-10-03, the
-// `AC-272` event carried only `id/item_id/gate/actor/verdict/timestamp/payload.reason` — the "which
-// tree" reading does not survive the carrier (硬规则 4c). EVERY writer of a `gate:"goal"` event now
-// records this fragment; ⛔ without a value in the CARRIER, the reading is only assumed.
-
-/** `git rev-parse HEAD^{tree}` at `cwd`, or null when it cannot be read (not a git work tree, or no
- *  HEAD yet). ⛔ null is a VALUE meaning "the tree could not be read" — never an omitted field
- *  (硬规则 3/3b: an absent `treeSha` would be indistinguishable from a pre-change event). */
-export function gitTreeSha(cwd: string): string | null {
-  const r = spawnSync("git", ["-C", cwd, "rev-parse", "HEAD^{tree}"], {
-    encoding: "utf8",
-    stdio: ["ignore", "pipe", "ignore"],
-  });
-  if (r.status !== 0 || typeof r.stdout !== "string") return null;
-  const sha = r.stdout.trim();
-  return sha === "" ? null : sha;
-}
-
-/** The payload fragment naming WHERE a goal criterion was evaluated — the quantity §7 辛 reads to
- *  tell a preview-worktree pass from a main-checkout one. `evaluationRoot` is the criterion cwd's
- *  **realpath**: ⛔ the unresolved path is not recorded, because this host's `/home/yale` is a symlink
- *  to `/data/home/yale` and an unresolved reading would make the preview worktree and the main
- *  checkout indistinguishable by string comparison. `treeSha` is the tree at that root (null when
- *  unreadable). */
-export function evaluationContext(root: string): { evaluationRoot: string; treeSha: string | null } {
-  let evaluationRoot = root;
-  try {
-    evaluationRoot = fs.realpathSync(root);
-  } catch {
-    // A missing/unresolvable root keeps the given path; `treeSha: null` still marks it unreadable
-    // rather than dropping the field (硬规则 3/3b — "could not read" must have its own value).
-  }
-  return { evaluationRoot, treeSha: gitTreeSha(evaluationRoot) };
-}
-
-/** `fs.realpathSync`, but NEVER throws and resolves a path that does not exist yet.
- *
- *  When `p` (or a suffix of it) is absent, resolve the symlinks of the **longest existing ancestor**
- *  and re-append the remaining segments — so a normal `<namespace>/goal-<id>` worktree dir resolves
- *  to the SAME string git will record for it. This is the fix for
- *  `gap-goal-criterion-worktree-registered-check-blind-to-symlinked-root`: `git worktree add` records
- *  the **realpath** (`/data/home/yale/...`) while `goalCriterionWorktreeDir` derives the **alias**
- *  (`/home/yale/...`, a symlink to it), so a `path.resolve` comparison never matched, the registered
- *  worktree was re-`add`ed each round and failed (`already exists`) — the criterion tree froze on its
- *  first tip. Both sides of that comparison now go through here.
- *
- *  ⛔ Never throws (hard rule 3b): an unresolvable path falls back to its `path.resolve` form, so
- *  "could not resolve" is never conflated with "resolved to a different place". */
-export function realpathOrSelf(p: string): string {
-  const resolved = path.resolve(p);
-  try {
-    return fs.realpathSync(resolved);
-  } catch {
-    // ENOENT/EACCES on the leaf — walk up to the nearest existing ancestor below.
-  }
-  let head = resolved;
-  const tail: string[] = [];
-  for (;;) {
-    const parent = path.dirname(head);
-    if (parent === head) return resolved; // hit the filesystem root without resolving anything
-    tail.unshift(path.basename(head));
-    head = parent;
-    try {
-      return path.join(fs.realpathSync(head), ...tail);
-    } catch {
-      // this ancestor is absent too — keep walking up
-    }
-  }
-}
-
-// ── WHICH TREE a BRANCH-MODE goal's criteria run on (SPEC-goal-branch-2026-10-03 §5 B1, ruling ⑩) ─
-//
-// THE DEFECT (B1): a criterion's cwd was unconditionally the MAIN checkout's git root. The main
-// checkout follows `develop`, while a branch-mode goal's code lives only on `goal/<id>` until it is
-// merged. A pre-merge AC whose criterion reads a goal-branch file therefore could never pass ⇒ the
-// goal could never reach `achieved` ⇒ §4.7's merge never triggers ⇒ **deadlock, not delay**. The I5
-// sweep (checkAchievedFailing) had the same cwd, so it re-ran ALREADY-ACHIEVED criteria on the main
-// checkout, reported them all as achieved-but-failing, and filed a batch of phantom gaps.
-//
-// THE FIX: one DETACHED criterion worktree per branch-mode goal (`goal-driver` owns its lifecycle —
-// create / refresh / delete, ruling ㉒), and the criterion cwd is chosen per AC from the AC's GOAL:
-// branch-mode ∧ `goal/<id>` still exists ⇒ the worktree; anything else ⇒ the main root (which is
-// also what a MERGED goal falls back to, §4.2: branch gone ⇒ back to the main checkout).
-// ⛔ The worktree is DETACHED, never a checkout of `goal/<id>` itself — a branch checked out in a
-// second worktree cannot be pushed to (`git push . <sha>:refs/heads/goal/<id>` is refused for the
-// checked-out branch), which would break the goal branch's own fast-forward.
-// ⛔ The path is DERIVED from the config-resolved worktree namespace (`loop.worktree_root`), never
-// from a hardcoded `quay-worktrees` segment (worktree-namespace.ts is the ONE resolution).
-
-/** Directory-name prefix of a goal's criterion worktree inside the worktree namespace:
- *  `<namespace>/goal-<GOAL-NNN>`. Sibling of the task worktrees, in the SAME resolved namespace. */
-export const GOAL_CRITERION_WORKTREE_PREFIX = "goal-";
-
-/** The criterion worktree path for `goalId` — derived, ⛔ never stored (hard rule 4b: the branch name
- *  and its worktree are both functions of the goal id + the workspace's worktree namespace). */
-export function goalCriterionWorktreeDir(root: string, goalId: string): string {
-  return path.join(resolveWorktreeNamespace(root).dir, `${GOAL_CRITERION_WORKTREE_PREFIX}${goalId}`);
-}
-
-/** Where an AC's criterion ran: `goal-worktree` (branch-mode goal, branch still present) or `main`
- *  (everything else — incl. a branch-mode goal whose branch is already merged/discarded). */
-export type CriterionRootSource = "main" | "goal-worktree";
-
-export interface CriterionRoot {
-  cwd: string;
-  source: CriterionRootSource;
-}
-
-/** Resolve ONE goal's criterion root. `mainRoot` is the main checkout's git root (⛔ the caller
- *  already resolved it robustly; this never re-derives it with `path.dirname`). */
-export function resolveCriterionRoot(
-  mainRoot: string,
-  goal: { id?: unknown; branch?: unknown } | null | undefined,
-): CriterionRoot {
-  const id = typeof goal?.id === "string" ? goal.id : "";
-  if (goal?.branch !== true || !isGoalId(id)) return { cwd: mainRoot, source: "main" };
-  // Branch gone (merged per §4.7, or discarded per §4.2) ⇒ the goal's code is on the main checkout
-  // again. ⛔ Derived from git, never from a stored flag: after an external `git branch -D` the
-  // stored bit would still say `true` while the reading must already be the main root.
-  if (!goalBranchRefExists(mainRoot, id)) return { cwd: mainRoot, source: "main" };
-  return { cwd: goalCriterionWorktreeDir(mainRoot, id), source: "goal-worktree" };
-}
-
-/** Per-GOAL resolution map for a whole listing — one `git` probe per GOAL, not one per AC (the sweep
- *  and I5 walk every achieved AC, and a per-AC probe would spawn a process per record). */
-export function buildCriterionRoots(
-  mainRoot: string,
-  goals: Array<Record<string, unknown>>,
-): Map<string, CriterionRoot> {
-  const byGoal = new Map<string, CriterionRoot>();
-  for (const g of goals) {
-    const id = String(g.id ?? "");
-    if (!isGoalId(id)) continue;
-    byGoal.set(id, resolveCriterionRoot(mainRoot, g as { id?: unknown; branch?: unknown }));
-  }
-  return byGoal;
-}
-
-/** The criterion cwd for one AC row, given its goal's resolved root (absent goal id / unknown goal
- *  ⇒ the main root — the same tree today's behaviour used). */
-export function criterionCwdFor(
-  mainRoot: string,
-  byGoal: Map<string, CriterionRoot>,
-  ac: { goal?: unknown },
-): string {
-  const gid = typeof ac.goal === "string" ? ac.goal : "";
-  return byGoal.get(gid)?.cwd ?? mainRoot;
-}
-
-// ── AC-242 successor: the FROZEN population and its bounded rotation re-verification ──────────────
-// gap-achieved-ac-rot-invisible-when-ledger-tail-is-stale-pass. An AC `status: achieved` whose GOAL
-// is no longer `active` and which does NOT declare `long-term: true` leaves BOTH mechanisms at once:
-//   · I5 (`checkAchievedFailing`) never runs it — `inAchievedReverifyScope` is false;
-//   · the driver's per-round gate set (`standingReverifyAcs`) never runs it — same predicate.
-// Its ledger tail therefore FREEZES at whatever the last verdict was. AC-242's original predicate
-// ("tail verdict === fail") can only see a failure that was RECORDED — so an AC that goes false
-// AFTER its last recording is tail-`pass` and is structurally invisible to every mechanism
-// (hard rule 4: a reading that cannot turn false is not a measurement; measured 2026-09-12: 4 such
-// ACs — AC-147/AC-149/AC-172/AC-228 — all tail=pass, all live-exit!=0).
-//
-// The fix is NOT a wider predicate (a predicate cannot know a criterion's current truth without
-// running it — that IS the cost) and NOT an indiscriminate widening of the reverify scope (AC-216's
-// cost boundary, stated in `inAchievedReverifyScope`'s comment). It is a BOUNDED ROTATION:
-// re-run the least-recently-verified frozen ACs, a few per invocation, and RECORD the verdict in the
-// same ledger the judgment already reads — so the tail stops being frozen and starts meaning
-// "the last time we actually looked", with a bounded and therefore known freshness.
-//
-// Measured cost basis (2026-09-12, this repo, frozen population M = 81, single-threaded):
-//   avg 1.31s/criterion over a 21-AC sample; two outliers at 7.4s and 10.6s.
-//   ⇒ one full rotation ≈ M × ~1.3s ≈ 106s ≈ 1.8 min of CPU, amortized over the rotation period.
-// With `DEFAULT_SWEEP_MIN_AGE_MS` = 1h the steady-state cost is therefore ≈ M × 1.3s / 1h ≈ 106s
-// per hour (≈3% of one core), and the per-invocation bound is
-//   ≤ min(DEFAULT_SWEEP_BUDGET × T, DEFAULT_SWEEP_WALL_MS + T)
-// where T is the criterion deadline `resolveAcceptanceTimeoutMs()` returned for THIS invocation
-// (pre-set `QUAY_ACCEPTANCE_TIMEOUT_MS` > the gate's own `timeoutMs` field > the sole default
-// `DEFAULT_ACCEPTANCE_TIMEOUT_MS`) — NOT a constant of this file.
-// ⚠️ Two honest corrections to the derivation this comment used to carry:
-//   (a) it read `min(6 × 60s, 30s) = 30s`, silently treating `T` as the literal 60s. `T` is a
-//       resolved value, so the default-value instance must be named as such: under the defaults
-//       (T = 60s, wall = 30s, budget = 6) the bound is ≤ 60s.
-//   (b) `min(budget × T, wallMs)` would be right only if the wall were enforced DURING a criterion.
-//       It is not: the `Date.now() - startedAt > wallMs` guard sits at the TOP of the loop body,
-//       i.e. BETWEEN criteria (read `sweepFrozen`) — so it bounds how many MORE criteria get
-//       STARTED, never how long the one already running may take. Hence `wallMs + T`, not `wallMs`.
-//   ⛔ Raising T therefore raises this bound linearly. That is the configured consequence of the
-//   knob, not a silent one: the same setting that buys a longer single criterion names the cost here.
-// An invocation that trips the wall budget stops early and the remaining ACs are picked up by the
-// next invocation (the rotation is resumable from the ledger ALONE: eligibility is "oldest recorded
-// verification first", so there is no cursor to drift).
-export const SWEEP_ACTOR = "goal-sweep";
-/** The AMENDMENT dry-run's actor — deliberately a DIFFERENT string from `SWEEP_ACTOR`
- *  (gap-ac242-derived-criterion-double-judged-and-amendment-unguarded, defect ②):
- *  「对一条已 achieved 的 AC 修订 criterion」时，本轮对**新**判据的空跑以本 actor 落账，读台账的人
- *  能区分「轮转按年龄轮到了它」与「判据文本变了，所以立刻重跑了一次」——两者是不同的**成因**，
- *  用同一个 actor 记就不可归因（硬规则 3：枚举态而非布尔态；这里的第二态就是「为什么这次跑了它」）。
- *  ⛔ 它与 `SWEEP_ACTOR` 一样是**轮转写者**：`gateTails` 把两者的尾部都读进 `lastSweep`（见下），
- *  否则这条空跑写下的 verdict 不会被判定面读到，机制就等于没接。 */
-export const AMEND_ACTOR = "goal-amend";
-/** ③ 的**输入面**：`check --stale-pass`（本文件 CLI 的旗标，全文唯一）。一条 AC 的 criterion 若读的是
- *  这个读数，它的真值就是【冻结population 此刻有没有为假的 AC】这一命题的派生量 —— 而那个命题的
- *  主体population 与唯一执行者都是 ③（`computeGoalGaps` 的第三个分支读到本函数的消费者）。
- *  见 `readsFrozenPopulation`。 */
-export const FROZEN_POPULATION_FLAG = "--stale-pass";
-/** 一条 criterion 是否**读的就是 ③ 的输入面**（`check --stale-pass`）。
- *
- *  为什么需要这个谓词（gap-ac242-derived-criterion-double-judged-and-amendment-unguarded 缺陷①）：
- *  同一句真相——「冻结population 中有一条 AC 此刻为假」——被**两个判官**判成两个主体：③ 正确地把它
- *  路由给那条**为假的 AC**（AC-203，已有 owner ⇒ in-progress），而 ② 常设不变式分支读到 AC-242
- *  自己的判据为红 ⇒ 为 **AC-242 立案**。AC-242 的复绿条件不在它自己的域内（它唯一的出口是把那条
- *  冻结 AC 变真），故 ② 为它立的每一条任务，其 DoD 都结构上只能由**另一条 AC 的 owner** 关闭 ——
- *  每轮一条永远关不掉的任务。⇒ 真值**派生自 ③ 主体population** 的常设判据，不得被 ② 独立立案。
- *
- *  判定**按位置**（硬规则 2）：输入不是散文，是【可执行的判据文本】本身 —— 旗标出现在判据里就是
- *  「这条判据会去读那个读数」，不是「某处提到过」。要求**成词**出现（前后是空白/引号/行界），
- *  故 `echo --stale-pass-notes` 这类子串不算。
- *
- *  ⛔ 误判的代价是**有界的**：它只会让 ② 把立案让给 ③ ——而 ③ 正是那个读数的拥有者；且 ② 只在
- *  ③ **本轮的读数为 `violated`**（即派生条件确实成立）时才让（见 goal-driver 的 `derived-routed`），
- *  读不到 / 未评估时**照旧立案**，因此闸不会恒不开。 */
-export function readsFrozenPopulation(criterion: unknown): boolean {
-  const s = typeof criterion === "string" ? criterion : "";
-  return s.split(/[\s"'`;|&()]+/).includes(FROZEN_POPULATION_FLAG);
-}
-/** 一条 criterion 的**内容指纹**（规范化空白后 sha256 的前 16 个十六进制位）。
- *
- *  用途（同一任务缺陷②）：「对一条已 achieved 的 AC 修订 criterion」后，那条 AC 既有的轮转 verdict
- *  说的**不再是当前这条判据**。判定面因此不能把它计进 `verifiedFresh`（那是「查过且全好」，而这里
- *  「查过的不是这一版」），也不能计进 `failing`（那是对当前判据下断言）⇒ 独立取值
- *  `amendedUnverified`。落账端（`sweepFrozen`）把本指纹写进事件的 `payload.criterionHash`，
- *  判定端（`checkStalePass`）逐条比对。
- *
- *  ⛔ 规范化空白（把连续空白压成单个空格再 trim）：`goal-store write` 会重排整份 frontmatter，
- *  故纯排版变化不得被读成「判据被改过」——那会让每条 AC 每次写入都被判修订、空跑一轮（成本）。
- *  而**语义**变化（增删维度、换判据）必然改变非空白文本 ⇒ 仍被捕获。 */
-export function criterionFingerprint(criterion: unknown): string {
-  const s = typeof criterion === "string" ? criterion : "";
-  return createHash("sha256").update(s.replace(/\s+/g, " ").trim(), "utf8").digest("hex").slice(0, 16);
-}
-/** Rotation cadence: an AC is eligible for re-verification once its last RECORDED verification is
- *  older than this. ⛔ Not a verdict threshold — eligibility, i.e. "when is looking again worth the
- *  cost" — and it is what bounds the steady-state cost (see the block comment above). */
-export const DEFAULT_SWEEP_MIN_AGE_MS = 60 * 60 * 1000;
-/** Criteria per invocation (the hard cap; the wall budget below can stop it earlier). */
-export const DEFAULT_SWEEP_BUDGET = 6;
-/** Budget on the wall clock an invocation may accumulate before it stops STARTING criteria — so the
- *  driver's round is not stalled by an unbounded number of slow criteria. ⚠️ It is checked BETWEEN
- *  criteria, never during one (see `sweepFrozen` and the header bound): the worst-case wall clock of
- *  an invocation is therefore `min(budget × T, wallMs + T)`, ⛔ NOT `min(budget × T, wallMs)`. */
-export const DEFAULT_SWEEP_WALL_MS = 30_000;
-/** An AC whose last RECORDED verdict is `fail` becomes eligible again at `minAgeMs / this` — i.e. a
- *  failure is re-checked sooner than a pass. Two reasons, both concrete:
- *   · the state you want to watch is the FAILING one (the mechanism exists to catch rot; a fail is
- *     the reading that can flip either way, a pass is the resting state), and
- *   · it BOUNDS a transient: when a criterion is re-scoped/fixed, the rotation re-runs it within one
- *     driver round instead of waiting out the full `minAgeMs`, so a fail recorded by the previous
- *     criterion version stops being the ledger tail — and stops holding AC-241 red — promptly.
- *  ⛔ This does NOT raise the cost bound: eligibility only ORDERS the candidates, and each invocation
- *  still runs at most `budget` criteria / `wallMs` (a persistently failing set can at most crowd out
- *  the same budget, never exceed it). */
-export const DEFAULT_FAIL_RECHECK_DIVISOR = 6;
-/** The JUDGMENT's freshness bound: a frozen AC whose last recorded verification is older than this
- *  has an UNKNOWN current truth and is reported in `staleUnverified` — ⛔ never silently counted as
- *  fine (hard rule 3b). Deliberately ≫ the rotation period: a tight bound would flap red/green as
- *  the rotation sweeps; 4× the period leaves room for a rotation that is merely behind, while still
- *  being finite. */
-export const DEFAULT_STALE_PASS_MAX_AGE_MS = 4 * 60 * 60 * 1000;
-// ⛔ `SWEEP_CRITERION_TIMEOUT_MS` USED TO LIVE HERE and is deliberately GONE
-// (gap-goal-criterion-timeout-hardcoded-60s-ignores-acceptance-timeout). It was a 60_000 literal
-// whose own comment claimed it was "the SAME value `runAcceptance` defaults to ... one literal, not
-// two" — while the repo actually carried FIVE copies, and its presence here is exactly what made the
-// goal path bypass the DIR-046 configuration surface (`QUAY_ACCEPTANCE_TIMEOUT_MS` / gates
-// `timeoutMs` / `--timeout`): the sweep read its own private constant instead of the resolved one.
-// Removing it is the fix, not a cleanup: the sweep now takes the deadline from
-// `resolveAcceptanceTimeoutMs()`, the same call the other three goal entry points use.
-
-/** One `gate:"goal"` ledger row, reduced to the fields a rotation judgment needs.
- *  `criterionHash` = the criterion fingerprint the writer verified (`payload.criterionHash`),
- *  empty string when the event predates the amendment gate or carries none — see
- *  `checkStalePass`, where "no fingerprint" is read as「不知道这条 verdict 针对哪一版判据」,
- *  ⛔ never as "it matches the current one" (hard rule 3b: 读不懂输入不得伪装成合格). */
-type GateTail = { at: string; verdict: string; actor: string; reason: string; criterionHash: string };
-
-/**
- * Per-record ledger TAILS in ONE pass: `last` = the most recent `gate:"goal"` event for the id;
- * `lastSweep` = the most recent one written by the ROTATION (`actor` ∈ {`SWEEP_ACTOR`, `AMEND_ACTOR`}).
- * Two maps because they answer two different questions — "what does the ledger say" vs "has the
- * rotation actually looked at this recently" — and collapsing them would make a rotation-written
- * verdict indistinguishable from a per-round-loop one (hard rule 4b: the tail is read as a proxy for
- * current truth, so who wrote it and when is part of the reading, not decoration).
- *
- * ⚠️ `AMEND_ACTOR` counts as a rotation writer ON PURPOSE: the amendment dry-run IS a re-verification
- * (it runs the criterion and records the verdict) — the only difference is WHY this one was picked.
- * Excluding it would make an amendment-triggered verdict invisible to the judgment it exists to feed.
- */
-// ── the BOUNDED goal-ledger scan (gap-suite-heavy-files-and-phase-concurrency-…) ─────────────────
-// THE DEFECT THIS REPLACES. Both readers below used to call
-// `queryGateEvents(logPath, { gate: "goal" })`, which materializes a `GateEvent[]` for the WHOLE
-// ledger before either of them looks at a single row. Measured 2026-10-16 on the production ledger
-// (148.7 MB / 560,752 lines, 559,192 of them `gate:"goal"`): **588.6 MB heap + 781 MB peak RSS per
-// call**, paid on EVERY goal read (`get()` and `list()` both reach `ledgerEvidenceMap`). Four
-// otherwise-trivial suite files that only READ the stored criterion — ac341, ac260-ac261, ac272,
-// gap-dashboard-goal-card-… — were measured at 1.7-1.8 GB peak for exactly this reason, and at
-// 64-way under the 16 GiB suite cgroup that is what tipped the main phase into OOM. The cost is not
-// the ledger's content, it is the ARRAY: every row is parsed and retained even though both callers
-// keep only an id-keyed running maximum.
-//
-// WHAT THIS DOES INSTEAD. Scan the file in fixed-size chunks, parse ONE line at a time, and hand
-// each `gate:"goal"` row to `visit` — so the live set is one decoded line plus the caller's own (id
-// → ≤5 fields) accumulators, and the peak no longer tracks the ledger's length. The answers are
-// unchanged by construction: on-disk order is preserved, so "last wins" and "first seen" still
-// resolve to the same rows the eager array gave.
-//
-// FORMAT CONSTRAINT. `core/gate-event-store.ts` owns the JSONL contract (one GateEvent per line);
-// this is the same read without the array, deliberately NOT a second format — the row shape below
-// mirrors the `GateEvent` fields the two readers actually consume.
-//
-// ⛔ `StringDecoder`, not `Buffer.toString()` per chunk: a multi-byte character can straddle a chunk
-// boundary and decoding the halves independently would corrupt the line (the ledger carries CJK task
-// subjects).
-//
-// FAIL-SAFE, byte-compatible with the call it replaces: `queryGateEvents` built its array EAGERLY,
-// so one malformed line threw before ANY caller saw a row and the caller's `catch` returned an empty
-// result. `false` reproduces that exactly — the caller must discard what it accumulated so far,
-// never keep a prefix of the ledger (a half-read ledger is not "no evidence", it is "unknown", and
-// hard rule 3b forbids the two sharing an output).
-type GoalLedgerRow = { id: string; timestamp: unknown; verdict: unknown; actor: unknown; payload: unknown };
-
-/** Fixed chunk size, so the scan's own memory is O(chunk) and independent of the ledger's size. */
-const GOAL_LEDGER_CHUNK_BYTES = 1 << 20;
-
-/** Visit every `gate:"goal"` row on disk at `logPath`, in append order, with bounded memory.
- *  Returns `true` when the whole ledger was read; `false` when it could not be (unreadable /
- *  malformed) — in which case the caller has seen a PREFIX and must discard it. A missing ledger is
- *  `true` with no rows (a fresh checkout has no evidence — hard rule 6, missing ≠ false). */
-function scanGoalLedger(logPath: string, visit: (row: GoalLedgerRow) => void): boolean {
-  let fd: number;
-  try {
-    fd = fs.openSync(logPath, "r");
-  } catch {
-    return true; // no ledger ⇒ no rows (the eager read produced `[]` for the same reason)
-  }
-  try {
-    const decoder = new StringDecoder("utf8");
-    const chunk = Buffer.allocUnsafe(GOAL_LEDGER_CHUNK_BYTES);
-    let carry = "";
-    const consume = (line: string): void => {
-      if (line === "") return; // blank lines: `queryGateEvents` filtered these before parsing
-      const ev = JSON.parse(line) as Record<string, unknown>;
-      if (ev.gate !== "goal") return;
-      const id = String(ev.pipeline_id ?? ev.item_id ?? "");
-      if (id === "") return;
-      visit({ id, timestamp: ev.timestamp, verdict: ev.verdict, actor: ev.actor, payload: ev.payload });
-    };
-    for (;;) {
-      const n = fs.readSync(fd, chunk, 0, GOAL_LEDGER_CHUNK_BYTES, null);
-      if (n <= 0) break;
-      const text = carry + decoder.write(chunk.subarray(0, n));
-      const lines = text.split("\n");
-      carry = lines.pop() ?? "";
-      for (const line of lines) consume(line);
-    }
-    carry += decoder.end();
-    if (carry !== "") consume(carry);
-    return true;
-  } catch {
-    return false; // unreadable/malformed ⇒ the caller keeps NO evidence (never crashes a read)
-  } finally {
-    try {
-      fs.closeSync(fd);
-    } catch {
-      /* best-effort */
-    }
-  }
-}
-
-function gateTails(goalDir: string): { last: Map<string, GateTail>; lastSweep: Map<string, GateTail> } {
-  const last = new Map<string, GateTail>();
-  const lastSweep = new Map<string, GateTail>();
-  const logPath = path.join(path.dirname(goalDir), ".quay", "gate-events.jsonl");
-  const complete = scanGoalLedger(logPath, ({ id, timestamp, verdict, actor, payload }) => {
-    const p = (payload ?? {}) as Record<string, unknown>;
-    const row: GateTail = {
-      at: String(timestamp ?? ""),
-      verdict: String(verdict ?? ""),
-      actor: String(actor ?? ""),
-      reason: typeof p.reason === "string" ? p.reason : "",
-      criterionHash: typeof p.criterionHash === "string" ? p.criterionHash : "",
-    };
-    last.set(id, row); // append order = on-disk order ⇒ the LAST matching event wins
-    if (row.actor === SWEEP_ACTOR || row.actor === AMEND_ACTOR) lastSweep.set(id, row);
-  });
-  // An unreadable/malformed ledger yields NO tails — the partial scan's rows are discarded, exactly
-  // as the eager read threw before the caller's loop started (never a half-read tail).
-  return complete ? { last, lastSweep } : { last: new Map(), lastSweep: new Map() };
-}
-
-/**
- * The judgment `check --stale-pass` returns. Enumerated, never booleanized (hard rule 3):
- * `failing` and `staleUnverified` are the two DIFFERENT answers to "is this AC still true" —
- * the first is "verified false", the second is "we have not looked recently enough to say".
- * Collapsing them would make "no longer true" and "unknown" share an output shape, which is exactly
- * the confusion this task exists to remove (hard rule 3b).
- */
-export interface StalePassReading {
-  /** Achieved ∧ criterion non-empty ∧ NOT in `inAchievedReverifyScope` — the population that
-   *  no other mechanism re-runs. */
-  frozenScope: number;
-  evaluated: boolean;
-  /** Verified CURRENT truth is false: either the rotation recorded a fail within `maxAgeMs`, or the
-   *  last recorded verdict (by anyone) is a fail. ⛔ This is the bucket that must never be silent. */
-  failing: string[];
-  /** Last recorded verdict is a pass, but no ROTATION verdict within `maxAgeMs` — current truth
-   *  UNKNOWN. Reported so the coverage gap is visible; ⛔ not a pass (hard rule 3b). */
-  staleUnverified: string[];
-  /** The last relevant verdict was NOT-EVALUATED — the criterion never got to state anything.
-   *  Three causes, all recorded by the ONE mapping (`core/acceptance-runner.ts`
-   *  `verdictFromAcceptance`): the criterion itself declared it (exit 3 — this repo's convention,
-   *  e.g. 「NOT-EVALUATED: carrier absent」), it was killed at its deadline, or its command could not
-   *  be run at all (exit 126/127 / spawn failure). ⛔ NOT a failure: "I cannot evaluate this HERE"
-   *  must not share an output shape with "this is false" — recording it as `fail` would be this
-   *  file's own original sin (conflating what was recorded with what is true) in a new place.
-   *  Reached from a ROTATION verdict (the sweep branch above) or from the last-recorded-verdict
-   *  fallback when that tail is a `goal-cli`/MCP not-evaluated event.
-   *  ⚠️ Consequence worth knowing: several frozen criteria read gitignored runtime carriers under
-   *  `.quay/`, so they legitimately report NOT-EVALUATED in a transient worktree and PASS in the
-   *  workspace that owns those carriers ⇒ the rotation is WORKSPACE-LOCAL and is driven from the
-   *  workspace the goal ring drives (the production checkout), never from a worktree copy. */
-  notEvaluated: string[];
-  /** Rotation verified within `maxAgeMs` and it passed. */
-  verifiedFresh: string[];
-  /** The last ROTATION verdict for this AC cannot be tied to the criterion text on disk now
-   *  (`payload.criterionHash` ≠ the current fingerprint, including the legacy case of an event
-   *  carrying no fingerprint at all) ⇒ that verdict says nothing about the CURRENT criterion.
-   *  A **third** answer, ⛔ sharing an output shape with neither `verifiedFresh` ("verified true") nor
-   *  `failing` ("verified false") — both would be an assertion about a criterion nobody has run
-   *  (hard rule 3b). Concretely this is the state
-   *  gap-ac242-derived-criterion-double-judged-and-amendment-unguarded found AC-203 frozen in: its
-   *  criterion was tightened while it was already `achieved`, its old `pass` kept counting as fresh,
-   *  and the forbidden state therefore existed for ~1.5h BEFORE anything could detect it.
-   *  ⛔ The tail fallback is deliberately SKIPPED for these (see `checkStalePass`): the recorded
-   *  history — including a `fail` — is about the superseded text.
-   *  ⚠️ Two causes, one bucket, and they resolve differently: a POSITIVE mismatch (the recorded
-   *  fingerprint differs from the current one) makes `sweepFrozen` give the AC top eligibility
-   *  (bypassing the age gate) and re-record it under `AMEND_ACTOR` in the same driver round; a legacy
-   *  event with NO fingerprint rides the normal age rotation instead. */
-  amendedUnverified: string[];
-  /** No `gate:"goal"` event at all — never evaluated by anything. */
-  neverGated: string[];
-  rotation: {
-    /** How many frozen ACs have EVER been touched by the rotation. 0 ⇒ the mechanism does not
-     *  exist in this workspace, which is a NOT-EVALUATED state, ⛔ not "all fine". */
-    sweptEver: number;
-    lastSweepAt: string | null;
-    minAgeMs: number;
-    maxAgeMs: number;
-  };
-}
-
+export {
+  SWEEP_ACTOR,
+  AMEND_ACTOR,
+} from "./goal-store-ledger.ts";
+export {
+  FROZEN_POPULATION_FLAG,
+  readsFrozenPopulation,
+  criterionFingerprint,
+  DEFAULT_SWEEP_MIN_AGE_MS,
+  DEFAULT_SWEEP_BUDGET,
+  DEFAULT_SWEEP_WALL_MS,
+  DEFAULT_FAIL_RECHECK_DIVISOR,
+  DEFAULT_STALE_PASS_MAX_AGE_MS,
+  type StalePassReading,
+} from "./goal-store-rotation.ts";
+export {
+  GOAL_ACCEPTANCE_ACTIVE_ENV,
+  inAchievedReverifyScope,
+} from "./goal-store-checks.ts";
+export {
+  GOAL_CRITERION_WORKTREE_PREFIX,
+  goalCriterionWorktreeDir,
+  gitTreeSha,
+  evaluationContext,
+  realpathOrSelf,
+  resolveCriterionRoot,
+  buildCriterionRoots,
+  criterionCwdFor,
+  type CriterionRootSource,
+  type CriterionRoot,
+} from "./goal-store-criterion-address.ts";
+export {
+  VALID_CRITERION_PHASES,
+  isGoalId,
+  isCriterionId,
+  type CriterionPhase,
+  type ReverifyScopeEntry,
+} from "./goal-store-types.ts";
 // Frontmatter keys the view-model owns explicitly; everything else in the frontmatter
 // (any future field) is preserved verbatim — the same discipline as adr-store/document-store.
 const OWNED_KEYS = new Set([
@@ -700,42 +285,6 @@ const OWNED_KEYS = new Set([
   // criterion's text (hard rule 2); projected as `pre-merge` when absent.
   "phase",
 ]);
-
-// ── evidence is ledger-DERIVED (gap-goal-evidence-cache-should-not-enter-git) ───────────────────
-// `evidence` is NOT a stored field: it is the gitignored `.quay/gate-events.jsonl`'s LAST
-// `gate:"goal"` event for a record, read back into the view-model at read time. The ledger path is
-// DERIVED from goalDir (`<workspaceRoot>/.quay/gate-events.jsonl`, where goalDir is
-// `<workspaceRoot>/goals`) — the same `dirname(goalDir)` derivation `readGoalConfig` already uses.
-// A fresh checkout with no ledger ⇒ no evidence ⇒ notEvaluated / "—" (hard rule 6: missing =
-// not-checked, not false). This is the SINGLE point both consumers share: `checkStaleness` reads
-// `ac.evidence.at` from `list()`'s view-models, and the native provider's `goal_list`/`goal_get`
-// verbs surface the same view-models to serve-goal.
-type LedgerEvidence = { at?: string; verdict?: string; reading?: string; firstAt?: string };
-
-function ledgerEvidenceMap(goalDir: string): Map<string, LedgerEvidence> {
-  const map = new Map<string, LedgerEvidence>();
-  const logPath = path.join(path.dirname(goalDir), ".quay", "gate-events.jsonl");
-  const complete = scanGoalLedger(logPath, ({ id, timestamp, verdict, payload }) => {
-    const reading = payload && typeof payload === "object"
-      && typeof (payload as Record<string, unknown>).reason === "string"
-      ? (payload as Record<string, unknown>).reason as string
-      : undefined;
-    // Append order = on-disk order, so the LAST matching event wins (the most recent). `firstAt`
-    // keeps the FIRST matching event (the earliest evidence) — the SAME single pass supplies both
-    // extremes with zero extra I/O (firstEvidenceAt's min is the first-seen timestamp).
-    const prev = map.get(id);
-    map.set(id, {
-      at: timestamp as string | undefined,
-      verdict: verdict as string | undefined,
-      reading,
-      firstAt: prev?.firstAt ?? (timestamp as string | undefined),
-    });
-  });
-  // An unreadable/malformed ledger yields NO evidence for any record: the partial scan's rows are
-  // discarded, exactly as the eager read threw before the caller's loop started.
-  return complete ? map : new Map();
-}
-
 // ── goal-staleness signal (gap-goal-status-stale-achieved-after-new-active-criterion-filed) ──────
 // MOVED to `./goal-staleness.ts` (tasks/gap-routine-architecture-analysis-god-module-goal-store):
 // the append-only carrier and its three-state reader are a self-contained leaf over one JSONL file.
@@ -815,116 +364,11 @@ export function readGoalConfig(workspaceRoot: string): { cap: number; staleMs: n
   }
   return { cap, staleMs };
 }
-
-interface GoalFrontmatter {
-  [key: string]: unknown;
-  id?: string;
-  title?: string;
-  status?: string;
-  kind?: string;
-  goal?: string;
-  criterion?: string;
-  expect?: string;
-  origin?: string;
-  activatedAt?: string;
-  statusLog?: Array<{ at: string; from: string; to: string; actor: string; reason: string }>;
-  labels?: string[];
-  /** GOAL 层 posture 声明（如 `measure-only`——先测量后承诺，名下 draft AC 不得判 activate，AC-215）。 */
-  posture?: string;
-  /** 本判据自己的运行期限（毫秒）。`quay goal gate` / MCP `goal_gate` 优先读它，其次
-   *  `QUAY_ACCEPTANCE_TIMEOUT_MS`，再次默认值（gap-goal-gate-verdict-single-mapping-not-evaluated）：
-   *  在此之前 goal 路径把 60000 写死，而超时判词却叫读者去调 gates.yml —— 那条建议在这条路径上
-   *  不起作用（goal 既不读 `extra.acceptance` 也不读 gates.yml）。⛔ 非「有限正数」的值被忽略而非
-   *  强转（`spawnSync({timeout: NaN})` 等于「无期限」，一个笔误会把闸门关掉）。 */
-  timeoutMs?: number;
-  evidence?: { at?: string; verdict?: string; reading?: string };
-  supersedes?: string[];
-  "superseded-by"?: string[];
-  /** AC-216：显式「长期保证」声明——`true` 的 achieved AC 其 GOAL 已 achieved/关闭也仍在 I5 复验域。 */
-  "long-term"?: boolean;
-  /** 保真性闸（GOAL-013）——激活（任何进入 active 的转换）时保真性判定的结果与理由，落在记录自身（⛔ 不只 stderr）。 */
-  fidelity?: { verdict: string; reason: string; at: string };
-  /** SPEC-goal-branch §4.1 — opt-in: the goal's tasks land on the DERIVED branch `goal/<id>`.
-   *  Absent/false = today's behavior. Only the "open or not" bit is stored; the branch NAME is
-   *  derived (⛔ never persisted, ⛔ never caller-supplied). */
-  branch?: boolean;
-  /** SPEC-goal-branch §4.7 (裁定⑭⑮) — CRITERION records only: the phase at which this AC is
-   *  evaluated. Absent ⇒ projected as `pre-merge`. Stored verbatim when explicitly declared. */
-  phase?: string;
-}
-
-interface GoalFilter {
-  status?: string;
-  kind?: string;
-  goal?: string;
-  /** gap-goal-list-ledger-scan: `false` ⇒ SKIP the derived evidence (the `.quay/gate-events.jsonl`
-   *  scan) and the two annotations that depend on it (`progress` / `staleness`). The ledger is
-   *  append-only and grows without bound (measured 165MB / 587k rows in this repo), so its cost is
-   *  ∝ ledger size and INDEPENDENT of the goal count — a consumer that only needs the goal
-   *  frontmatter (ids / statuses / titles, e.g. a fleet overview) must be able to avoid it.
-   *  ⛔ Absent ⇒ `true` (full evidence) — the pre-existing read shape is unchanged. */
-  includeEvidence?: boolean;
-}
-
-interface GoalViewModel {
-  id: unknown;
-  title: unknown;
-  status: unknown;
-  kind: unknown;
-  goal: unknown;
-  criterion: unknown;
-  expect: unknown;
-  origin: unknown;
-  /** GOAL 层 posture 声明（AC-215：`measure-only` ⇒ 名下 draft AC 分诊不得判 activate）。 */
-  posture: unknown;
-  /** The record's own criterion deadline (ms), if it declares one — read by the two goal gate
-   *  entry points via `resolveAcceptanceTimeout` (see GoalFrontmatter.timeoutMs). */
-  timeoutMs: unknown;
-  evidence: unknown;
-  activatedAt?: string;
-  statusLog?: Array<{ at: string; from: string; to: string; actor: string; reason: string }>;
-  supersedes: unknown[];
-  supersededBy: unknown[];
-  /** AC-216：`long-term: true` 的 achieved AC 跨 GOAL 关闭仍在 I5 复验域（frontmatter `long-term` 投影）。 */
-  longTerm: unknown;
-  /** SPEC-goal-branch §4.1 — opt-in isolation gate, projected from the `branch` frontmatter field.
-   *  ⛔ `false`, never `undefined`: "the field is absent" and "the goal declined a branch" are the
-   *  same answer to the ABI consumer ("this goal lands on the landing baseline"). */
-  branch: boolean;
-  /** SPEC-goal-branch §4.7 (裁定⑭⑮) — the AC's evaluation phase (frontmatter `phase` projection).
-   *  ⛔ Always one of `pre-merge` / `post-merge`, never `undefined`: "the field is absent" and "the
-   *  author declared pre-merge" are the same answer to the driver. The store refuses to persist any
-   *  other value (hard rule 3b — an unreadable value must not project as `pre-merge`). */
-  phase: CriterionPhase;
-  /** 保真性闸（GOAL-013）——激活期保真性判定的结果与理由（frontmatter `fidelity` 投影）。 */
-  fidelity: unknown;
-  body: string;
-  updatedAt?: number;
-  /** Ledger-derived (never stored, never mtime): the record's most recent goal-gate-event time. */
-  lastProgressAt?: string;
-  /** Ledger-derived (never stored, never mtime): the record's earliest goal-gate-event time. */
-  firstEvidenceAt?: string;
-  /** Derived (never stored, never mtime): whether this GOAL's own `status` field may no longer
-   *  reflect its children — a criterion was filed under it WHILE it read `achieved`
-   *  (gap-goal-status-stale-achieved-after-new-active-criterion-filed). Present on GOAL records
-   *  only. ⛔ Deliberately NOT folded into `status`: the whole defect is that one `achieved` token
-   *  covered both "genuinely closed" and "closed, then re-opened by a new child" (hard rule 3b). */
-  staleness?: GoalStaleness;
-}
-
 export interface DisposeOld {
   /** the old active goal's id */
   id: string;
   /** what happens to it: "achieved" or "superseded" */
   to: "achieved" | "superseded";
-}
-
-export function isGoalId(id: string): boolean {
-  return typeof id === "string" && GOAL_ID_RE.test(id);
-}
-
-export function isCriterionId(id: string): boolean {
-  return typeof id === "string" && AC_ID_RE.test(id);
 }
 
 /**
@@ -988,70 +432,6 @@ export {
   type CriterionAttributionVerdict,
 } from "./criterion-attribution.ts";
 
-
-// ── lastProgressAt / firstEvidenceAt for GOAL rows (M1 time columns) ──────────────────────────
-// A GOAL's time is DERIVED from its ACs' ledger-derived evidence — NEVER its own `updatedAt`
-// (mtime) and never a stored field (hard rule 4b: a quantity the measured object produces is not
-// a measurement). lastProgressAt = max over ACs of `evidence.at` (its most recent progress);
-// firstEvidenceAt = min over ACs of `evidence.firstAt` (its earliest evidence). Criterion records
-// already carry their own last/first from toViewModel (their own gate events); this pass overrides
-// the (undefined) GOAL values. Runs over the FULL pre-filter list so a `?kind=goal`/`?goal=` filter
-// can never empty a goal's AC set (hard rule 3b — the rollup and time must not collapse under filter).
-function annotateGoalProgress(all: GoalViewModel[]): void {
-  const byGoal = new Map<string, GoalViewModel[]>();
-  for (const g of all) {
-    if (typeof g.goal !== "string") continue;
-    const arr = byGoal.get(g.goal) ?? [];
-    arr.push(g);
-    byGoal.set(g.goal, arr);
-  }
-  for (const g of all) {
-    if (!isGoalId(String(g.id))) continue;
-    const acs = byGoal.get(String(g.id)) ?? [];
-    let lastMs: number | undefined;
-    let firstMs: number | undefined;
-    let lastStr: string | undefined;
-    let firstStr: string | undefined;
-    for (const ac of acs) {
-      const ev = ac.evidence as { at?: unknown; firstAt?: unknown } | undefined;
-      if (ev && typeof ev.at === "string") {
-        const t = Date.parse(ev.at);
-        if (!Number.isNaN(t) && (lastMs === undefined || t > lastMs)) { lastMs = t; lastStr = ev.at; }
-      }
-      if (ev && typeof ev.firstAt === "string") {
-        const t = Date.parse(ev.firstAt);
-        if (!Number.isNaN(t) && (firstMs === undefined || t < firstMs)) { firstMs = t; firstStr = ev.firstAt; }
-      }
-    }
-    g.lastProgressAt = lastStr;
-    g.firstEvidenceAt = firstStr;
-  }
-}
-
-/**
- * Attach the derived staleness judgment to every GOAL row in `all` (gap-goal-status-stale-achieved-
- * after-new-active-criterion-filed AC2). Reads the carrier ONCE for the whole list, ⛔ not per row —
- * the same "compute over the FULL pre-filter list" discipline `annotateGoalProgress` uses, so a
- * `?kind=criterion` filter can never change what a goal's staleness reads as.
- *
- * Set on GOAL records ONLY: staleness is a claim about a GOAL's own `status` field, and an AC
- * record carries no such field (attaching it there would be a value with no subject).
- */
-function annotateGoalStaleness(all: GoalViewModel[], goalDir: string): void {
-  if (!all.some((g) => isGoalId(String(g.id)))) return;
-  const idx = readGoalStalenessIndex(goalDir);
-  for (const g of all) {
-    if (!isGoalId(String(g.id))) continue;
-    if (!idx.evaluated) {
-      // Unreadable carrier ⇒ EVERY goal reads `not-evaluated`, never `clean` (hard rule 3b).
-      g.staleness = { state: "not-evaluated", signals: [], reason: idx.reason };
-      continue;
-    }
-    const signals = idx.byGoal.get(String(g.id)) ?? [];
-    g.staleness = signals.length > 0 ? { state: "stale", signals } : { state: "clean", signals: [] };
-  }
-}
-
 /**
  * STRIP-EVIDENCE-TIMESTAMP — the SINGLE shared judgment for "is a goal-file change substantive?"
  * (gap-goal-gate-timestamp-commit-flood). Defined HERE (Core) so BOTH goal-store's commit decision
@@ -1062,43 +442,6 @@ function annotateGoalStaleness(all: GoalViewModel[], goalDir: string): void {
  */
 export function stripEvidenceTimestamp(text: string): string {
   return text.replace(/^\s*at:\s*\S+\s*$/gm, "");
-}
-
-/**
- * AC-216 reverify scope of an ACHIEVED AC: in scope ⟺ (it is under an ACTIVE goal) OR (it explicitly
- * declares `long-term: true`). A long-term AC is a STANDING guarantee — it stays under re-verification
- * after its GOAL is achieved/closed; an undeclared one leaves with its GOAL (cost boundary, ⛔ not an
- * indiscriminate widening).
- *
- * Defined HERE (Core) so that EVERY consumer reads ONE definition — I5's own enumeration, the goal
- * driver's per-round GATE set, and the goal driver's gap-FILING set. A second copy in any consumer
- * drifts and re-opens the hole this closes: the scope was declared here but wired only into I5, so the
- * gate loop (which walked `activeGoals` only) froze the ledger tail of every out-of-active-goal
- * long-term AC at its last pre-closure verdict, and `computeGoalGaps` (which counted active ACs only)
- * never produced a work signal for one (gap-meta-computegoalgaps; hard rule 5b — "fixed in one place"
- * is not "there is only one place").
- */
-export function inAchievedReverifyScope(
-  ac: { goal?: unknown; longTerm?: unknown },
-  activeGoalIds: ReadonlySet<string>,
-): boolean {
-  return activeGoalIds.has(String(ac.goal ?? "")) || ac.longTerm === true;
-}
-
-/**
- * One ANNOTATED row of the reverify-scope reading (gap-closed-goal-acs-leave-reverify-scope-standing-
- * invariants-undeclared AC1/AC4). `goal`/`goalStatus`/`longTerm` are the DISCRIMINATING fields:
- * `inAchievedReverifyScope` has exactly TWO branches (under an ACTIVE goal, OR declared long-term),
- * and a bare id list cannot tell them apart — so a reader could see that an AC left the scope but not
- * WHY, and could not audit the leaving set against the ruling (hard rule 3: enumerate, don't boolean).
- */
-export interface ReverifyScopeEntry {
-  id: string;
-  goal: string;
-  /** The owning GOAL's CURRENT status; `absent` when no GOAL record carries that id. ⛔ Never "" —
-   *  hard rule 6: a missing value must not be shaped like a present one. */
-  goalStatus: string;
-  longTerm: boolean;
 }
 
 /**
@@ -1170,7 +513,8 @@ export function createGoalStore(
   const assertSafeStatus = makeAssertSafeStatus("goal", VALID_GOAL_STATUSES);
 
   // ── the execution-surface CAPABILITY gate (gap-criterion-side-effect-unguarded-at-write-and-execution-surface) ─
-  // EVERY `runAcceptance` call in this file goes through here first (there are four; the two UNATTENDED
+  // EVERY `runAcceptance` call in the goal store's composition goes through here first (there are
+  // four across `goal-store.ts`, `goal-store-checks.ts` and `goal-store-sweep.ts`; the two UNATTENDED
   // ones — I5 `checkAchievedFailing` and the frozen rotation `sweepFrozen` — are the ones that turn a
   // side-effecting criterion into a permanent, unwatched writer). The gate is what makes
   // 「criterion 必须是读数」 a MECHANISM rather than a convention: a caller who has never heard of this
@@ -1185,168 +529,12 @@ export function createGoalStore(
   // on a worktree that need not carry the declaration. The ARTIFACTS, by contrast, resolve against
   // the criterion's cwd, which is the tree the command will actually run in.
   const workspaceRootForCapability = path.dirname(goalDir);
-  function capabilityRefusal(criterion: string, criterionCwd: string): CapabilityJudgment | null {
-    return capabilityRefusalAt(criterion, criterionCwd, workspaceRootForCapability);
-  }
 
-  function toViewModel(
-    frontmatter: GoalFrontmatter,
-    body: string,
-    evidenceMap: Map<string, LedgerEvidence>,
-    updatedAt?: number,
-  ): GoalViewModel {
-    const evidence = evidenceMap.get(String(frontmatter.id ?? ""));
-    const vm: GoalViewModel = {
-      id: frontmatter.id,
-      title: frontmatter.title,
-      status: frontmatter.status,
-      kind: frontmatter.kind,
-      goal: frontmatter.goal,
-      criterion: frontmatter.criterion,
-      expect: frontmatter.expect,
-      origin: frontmatter.origin,
-      posture: frontmatter.posture,
-      timeoutMs: frontmatter.timeoutMs,
-      longTerm: frontmatter["long-term"] === true,
-      // Undeclared reads as `false` (SPEC §4.1: 「缺省 = false = 现状」) — a three-state answer here
-      // would put the two consumers that must treat them identically (branch or not) at odds.
-      branch: frontmatter.branch === true,
-      // SPEC-goal-branch §4.7: undeclared reads as `pre-merge` (the failure-visible default). The
-      // write path refuses any other value, so a legacy/hand-written file carrying an unknown token
-      // also projects as `pre-merge` — never as an `undefined` a driver would have to guess at.
-      phase: frontmatter.phase === "post-merge" ? "post-merge" : "pre-merge",
-      fidelity: frontmatter.fidelity,
-      evidence,
-      // Own-record time (a criterion): lastProgressAt = its LAST gate=goal event, firstEvidenceAt =
-      // its FIRST. A GOAL's own fields are undefined here (GOALs carry no criterion and are never
-      // gated themselves) — list() derives a GOAL's time from its ACs via annotateGoalProgress.
-      lastProgressAt: typeof evidence?.at === "string" ? evidence.at : undefined,
-      firstEvidenceAt: typeof evidence?.firstAt === "string" ? evidence.firstAt : undefined,
-      activatedAt: frontmatter.activatedAt,
-      statusLog: frontmatter.statusLog,
-      supersedes: frontmatter.supersedes ?? [],
-      supersededBy: frontmatter["superseded-by"] ?? [],
-      body,
-    };
-    if (updatedAt !== undefined) vm.updatedAt = updatedAt;
-    return vm;
-  }
-
-  function get(id: string): GoalViewModel | null {
-    assertSafeId(id);
-    const file = fileNameForId(goalDir, id);
-    if (!file) return null;
-    const p = path.join(goalDir, file);
-    const { frontmatter, body } = parseFrontmatter(fs.readFileSync(p, "utf8"));
-    let updatedAt: number | undefined;
-    try {
-      updatedAt = fs.statSync(p).mtimeMs;
-    } catch { /* omit */ }
-    const vm = toViewModel(frontmatter as GoalFrontmatter, body, ledgerEvidenceMap(goalDir), updatedAt);
-    // Same derived judgment `list()` attaches, for the single-record reader (goal_get / `goal show`
-    // / write()'s own return) — ⛔ no second implementation, `annotateGoalStaleness` is the ONE.
-    annotateGoalStaleness([vm], goalDir);
-    return vm;
-  }
-
-  // gap-store-list-all-or-nothing-unparseable-file-kills-whole-listing: the
-  // TOLERANT walk. A carrier file whose NAME matches the collection predicate
-  // (GOAL-* / AC-*) but whose CONTENT carries no frontmatter block poisons
-  // exactly its own entry — never the whole listing. Same shape as the three
-  // sibling stores (adr / document / meta); the failure list is the SAME
-  // `{ file, error }` shape the task board returns from `listWithMalformed()`
-  // (DoD2/DoD3).
-  //
-  // Collect-vs-throw is decided by TYPE of failure (AC4):
-  //   - `readdirSync` is NOT caught — a missing/unreadable carrier DIRECTORY
-  //     still throws; a loud failure must never degrade into an empty listing.
-  //   - `readFileSync` is NOT caught — an unreadable FILE (EACCES/ENOENT) is a
-  //     real read failure and still throws. It is not a parse failure.
-  //   - ONLY the frontmatter parse is caught → collected as a malformed entry.
-  //
-  // The malformed files are excluded BEFORE the derived annotations, which keep
-  // running over the FULL parseable list (a bad sibling file must not change
-  // what a healthy goal's progress/staleness reads as — hard rule 3b).
-  //
-  // `includeEvidence:false` (gap-goal-list-ledger-scan) is the LEDGER-FREE projection: the whole
-  // evidence derivation is skipped at its SOURCE (no `ledgerEvidenceMap` scan — that single call is
-  // the ~1.3s cost this option exists to remove) and so are the two annotations built on it. The
-  // output is still the complete `GoalViewModel[]`; `evidence` / `staleness` / `lastProgressAt` (and
-  // `firstEvidenceAt`) are simply ABSENT, ⛔ not present-and-empty — "not read" must not be able to
-  // look like "read, nothing there" (hard rule 3b).
-  function listWithMalformed(filter: GoalFilter = {}): {
-    items: GoalViewModel[];
-    malformed: Array<{ file: string; error: string }>;
-  } {
-    const includeEvidence = filter.includeEvidence !== false;
-    const evidenceMap = includeEvidence
-      ? ledgerEvidenceMap(goalDir)
-      // ⛔ the empty Map is the point, not a fallback: with the option off, no ledger read happens at
-      // all. A caller that opted out gets undefined evidence on every row (the `get()` of an empty map).
-      : new Map<string, LedgerEvidence>();
-    const malformed: Array<{ file: string; error: string }> = [];
-    const all: GoalViewModel[] = [];
-    for (const f of fs.readdirSync(goalDir)) {
-      if (!(f.endsWith(".md") && (f.startsWith("GOAL-") || f.startsWith("AC-")))) continue;
-      const p = path.join(goalDir, f);
-      const raw = fs.readFileSync(p, "utf8");
-      let parsed: { frontmatter: GoalFrontmatter; body: string } | null = null;
-      try {
-        parsed = parseFrontmatter(raw) as { frontmatter: GoalFrontmatter; body: string };
-      } catch (err) {
-        malformed.push({ file: f, error: (err as Error).message });
-      }
-      if (!parsed) continue;
-      let updatedAt: number | undefined;
-      try { updatedAt = fs.statSync(p).mtimeMs; } catch { /* optional mtime, same as get() */ }
-      all.push(toViewModel(parsed.frontmatter, parsed.body, evidenceMap, updatedAt));
-    }
-    if (includeEvidence) {
-      // GOAL rows' time is derived from their ACs — computed over the FULL list before any filter.
-      annotateGoalProgress(all);
-      // …and their staleness is derived from the side carrier, over the SAME full list (a filter must
-      // never be able to change what a goal's staleness reads as — hard rule 3b).
-      annotateGoalStaleness(all, goalDir);
-    }
-    return {
-      items: all
-        .filter((g) => (filter.status ? g.status === filter.status : true))
-        .filter((g) => (filter.kind ? g.kind === filter.kind : true))
-        .filter((g) => (filter.goal ? g.goal === filter.goal : true))
-        .sort((a, b) => String(a.id).localeCompare(String(b.id))),
-      malformed,
-    };
-  }
-
-  // The plain ARRAY view of the SAME walk: one unparseable carrier file must
-  // not take down the listing. Callers that must not lose a file — that need
-  // to know WHICH file was skipped and WHY — use listWithMalformed().
-  function list(filter: GoalFilter = {}): GoalViewModel[] {
-    return listWithMalformed(filter).items;
-  }
-
-  // I1: the (at most one) currently-active GOAL. Derived from stored status, never hand-listed.
-  function activeGoals(): GoalViewModel[] {
-    return list().filter((g) => isGoalId(String(g.id)) && g.status === "active");
-  }
-
-  // AC4: the ACTIVE SET is DERIVED from goal status, never a hand-maintained checklist.
-  // A criterion record is "active" ⟺ its goal's stored status is `active`.
-  function listActiveCriteria(): GoalViewModel[] {
-    const activeGoalIds = new Set(activeGoals().map((p) => String(p.id)));
-    return list().filter((g) => !isGoalId(String(g.id)) && activeGoalIds.has(String(g.goal)));
-  }
-
-  // I2: a GOAL is achieved ⟺ ALL its ACs are achieved. Evaluated at read time, never stored.
-  function isGoalAchieved(goalId: string): boolean {
-    assertSafeId(goalId);
-    if (!isGoalId(goalId)) {
-      throw new Error(`isGoalAchieved requires a GOAL-NNN id, got ${JSON.stringify(goalId)}`);
-    }
-    const acs = list().filter((g) => String(g.goal) === goalId);
-    if (acs.length === 0) return false; // a goal with no ACs is not achieved
-    return acs.every((g) => g.status === "achieved");
-  }
+  // ── composed sub-surfaces (gap-routine-architecture-analysis-god-function-creategoalstore) ──────
+  // ONE `goalDir`, ONE set of judgments — the factory composes, it no longer NESTS. `assertSafeId`
+  // is the store's own id gate, so every reader validates ids exactly as `write` does.
+  const { toViewModel, get, listWithMalformed, list, activeGoals, listActiveCriteria, isGoalAchieved } =
+    createGoalReads(goalDir, assertSafeId);
 
   // I1′ checker — the invariant is "active count ≤ cap", NOT "exactly one". Splitting
   // withinCap (invariant holds) from hasDirection (≥1 active) keeps "over cap" and "none
@@ -1369,507 +557,18 @@ export function createGoalStore(
     };
   }
 
-  // I3 + I4 checker (check --staleness). THREE named buckets, structurally always present
-  // (possibly empty arrays) — never a binary fresh/stale that would judge an unevaluated goal
-  // as healthy (hard rule 3b). `lastProgressAt` is DERIVED from the ACs' ledger-derived
-  // `evidence.at` max (never stored, never the goal's own `updatedAt` — hard rule 4b).
-  // `divergent` is the I4 signal: status active while `isGoalAchieved()` is true
-  // ("achieved but nobody closed it").
-  // ⛔ PURE-READ — it must NOT run criteria: an achieved criterion that itself calls
-  // `check --staleness` (AC-175) would recurse unboundedly (2026-09-07 production incident).
-  // The criterion-running I5 check lives in `checkAchievedFailing` (a SEPARATE subcommand).
-  function checkStaleness(nowMs: number = Date.now()): {
-    fresh: string[];
-    stale: string[];
-    notEvaluated: string[];
-    divergent: string[];
-    scopeSize: number;
-    evaluated: boolean;
-    cap: number;
-    staleMs: number;
-  } {
-    const all = list();
-    const fresh: string[] = [];
-    const stale: string[] = [];
-    const notEvaluated: string[] = [];
-    const divergent: string[] = [];
-    const active = activeGoals();
-    for (const g of active) {
-      const gid = String(g.id);
-      if (isGoalAchieved(gid)) divergent.push(gid); // I4 — active yet all ACs achieved
-      let lastProgressAt: number | undefined;
-      for (const ac of all.filter((r) => String(r.goal) === gid)) {
-        const ev = ac.evidence as { at?: unknown } | undefined;
-        if (ev && typeof ev.at === "string") {
-          const t = Date.parse(ev.at);
-          if (!Number.isNaN(t) && (lastProgressAt === undefined || t > lastProgressAt)) {
-            lastProgressAt = t;
-          }
-        }
-      }
-      if (lastProgressAt === undefined) {
-        notEvaluated.push(gid); // no ACs, or no evidence.at anywhere → never evaluated
-      } else if (nowMs - lastProgressAt > staleMs) {
-        stale.push(gid);
-      } else {
-        fresh.push(gid);
-      }
-    }
-    // Empty scope (0 active goals) must NOT share its output shape with "all evaluated and healthy"
-    // (hard rule 3b): with 0 active goals every bucket is empty — the SAME shape a booleanized
-    // "nothing stale / nothing divergent" reader sees for "N goals none divergent". `scopeSize` =
-    // the enumerated active-goal count, `evaluated` = whether any goal was actually judged
-    // (scopeSize > 0) — two fields that make "no objects to check" distinguishable from "checked".
-    const scopeSize = active.length;
-    return { fresh, stale, notEvaluated, divergent, scopeSize, evaluated: scopeSize > 0, cap, staleMs };
-  }
 
-  // I5 checker (check --achieved-failing). An AC `status: achieved` whose `criterion` now exits
-  // non-zero ⇒ "achieved but no longer verifiable". SEPARATE from I4 (⛔ never merged): I4 is
-  // "active yet achieved" (GOAL ids, direction "not closed"), I5 is "achieved yet failing" (AC ids,
-  // direction "no longer verifiable"). Produced ONLY by RUNNING the criterion — never a stored field.
-  // Scope: achieved ACs under ACTIVE goals ∪ achieved ACs with `long-term: true` (AC-216 — a
-  // long-term AC stays in the reverify scope after its GOAL is achieved/closed). Empty/missing
-  // criterion is SKIPPED: that is the separate `no-criterion` kind meta-driver reports, not "a
-  // criterion that now fails" (a criterion that never existed cannot have started failing).
-  // `inScope` enumerates the in-scope AC ids (hard rule 3: enumerate, don't boolean).
-  //
-  // ⛔ RE-ENTRANCY GUARD (乙): a criterion whose own shell command calls back into this checker
-  // (or `gate`) must NOT run criteria again — otherwise it recurses unboundedly. The guard is the
-  // GOAL_ACCEPTANCE_ACTIVE_ENV env var, inherited by the criterion's child shell (runAcceptance's
-  // spawnSync passes no `env`, so it inherits process.env): while running criteria we set it; a
-  // nested invocation that sees it REFUSES and reports `evaluated: false` (⛔ not an empty array
-  // masquerading as "no achieved-but-failing AC" — hard rule 3b). 甲 (structural isolation:
-  // `check --staleness` is pure-read) means the 8 real achieved criteria that call
-  // `check --staleness`/`list`/`get` never even reach this path; 乙 is defense-in-depth for a
-  // future criterion that calls the criterion-runner itself.
-  function checkAchievedFailing(): { achievedButFailing: string[]; capabilityRefused: Array<{ id: string; code: string; reason: string }>; evaluated: boolean; scopeSize: number; inScope: string[] } {
-    // Enumerate the in-scope set FIRST (pure-read — no criterion runs): achieved ACs under ACTIVE
-    // goals with a non-empty criterion. `scopeSize` is that count, and it is what makes "empty
-    // scope" (0 active goals / 0 achieved ACs under them) field-distinguishable from "ran N criteria
-    // and all passed" (hard rule 3b — ⛔ not an empty array masquerading as "no achieved-but-failing
-    // AC"). The enumeration is done before the guard check so the guard path's `scopeSize` is truthful
-    // too (it refuses to RUN, but it still knows the scope).
-    const all = list();
-    const activeGoalIds = new Set(all.filter((g) => isGoalId(String(g.id)) && g.status === "active").map((g) => String(g.id)));
-    const inScope: GoalViewModel[] = [];
-    for (const ac of all) {
-      if (!isCriterionId(String(ac.id))) continue;
-      if (ac.status !== "achieved") continue;
-      // AC-216 — in scope ⟺ (under an ACTIVE goal) OR (explicit `long-term: true`): a long-term
-      // achieved AC stays in the reverify scope even after its GOAL is achieved/closed; an
-      // undeclared one leaves with its GOAL (cost boundary — ⛔ not an indiscriminate widening).
-      // The predicate itself lives in `inAchievedReverifyScope` (single definition, shared with the
-      // goal driver's gate set and gap-filing set) — ⛔ not re-derived here.
-      if (!inAchievedReverifyScope(ac, activeGoalIds)) continue;
-      const criterion = typeof ac.criterion === "string" ? ac.criterion : "";
-      if (criterion.trim() === "") continue;
-      inScope.push(ac);
-    }
-    const scopeSize = inScope.length;
-    const inScopeIds = inScope.map((ac) => String(ac.id));
-    if (process.env[GOAL_ACCEPTANCE_ACTIVE_ENV] === "1") {
-      // `evaluated: false` is the refusal — ⛔ and `capabilityRefused: []` here means "nothing was
-      // judged", NOT "nothing was refused": the two readings are separated by `evaluated`, which is
-      // exactly why the guard reports it rather than returning an empty-shaped result (hard rule 3b).
-      return { achievedButFailing: [], capabilityRefused: [], evaluated: false, scopeSize, inScope: inScopeIds };
-    }
-    const achievedButFailing: string[] = [];
-    // The criteria this guard REFUSED to spawn — enumerated, ⛔ never folded into
-    // `achievedButFailing`: "we would not run it" is a different fact from "we ran it and it is
-    // false", and collapsing them would assert something about a criterion nobody executed
-    // (hard rule 3b).
-    const capabilityRefused: Array<{ id: string; code: string; reason: string }> = [];
-    // Criterion cwd = the git root (robust rev-parse, ⛔ not path.dirname — hard rule 4 corollary 2),
-    // falling back to goalDir's parent only when not inside a git work tree. A BRANCH-MODE goal's ACs
-    // run on that goal's criterion worktree instead (§5 B1) — without it every re-verification of a
-    // goal-branch-backed AC reports achieved-but-failing and files phantom gaps.
-    const root = resolveGitRoot(goalDir) ?? path.dirname(goalDir);
-    const criterionRoots = buildCriterionRoots(root, all as unknown as Array<Record<string, unknown>>);
-    const prev = process.env[GOAL_ACCEPTANCE_ACTIVE_ENV];
-    process.env[GOAL_ACCEPTANCE_ACTIVE_ENV] = "1";
-    try {
-      for (const ac of inScope) {
-        const criterion = typeof ac.criterion === "string" ? ac.criterion : "";
-        // Resolved deadline: the RECORD's own `timeoutMs` FIRST, then the shared env/default chain
-        // (`resolveAcceptanceTimeout` — the same resolver `goal gate` uses) — ⛔ NOT a private
-        // literal, which is what made this entry point immune to every configuration knob (see the
-        // constant's tombstone). The hint names the knob THIS path actually reads.
-        const t = resolveAcceptanceTimeout((ac as unknown as { timeoutMs?: unknown }).timeoutMs);
-        const cwd = criterionCwdFor(root, criterionRoots, ac);
-        // ⛔ BEFORE the spawn, and with no bypass arm: this path is UNATTENDED (the goal driver calls
-        // it every round), so there is no "someone present" whose consent a bypass flag could carry.
-        const refusal = capabilityRefusal(criterion, cwd);
-        if (refusal !== null) {
-          capabilityRefused.push({ id: String(ac.id), code: refusal.code ?? "criterion-capability-unevaluable", reason: capabilityRefusalReason(refusal) });
-          continue;
-        }
-        const res = runAcceptance({ command: criterion, cwd, timeoutMs: t.timeoutMs, timeoutKnob: timeoutKnobHint(t) });
-        if (!res.ok) achievedButFailing.push(String(ac.id));
-      }
-    } finally {
-      if (prev === undefined) delete process.env[GOAL_ACCEPTANCE_ACTIVE_ENV];
-      else process.env[GOAL_ACCEPTANCE_ACTIVE_ENV] = prev;
-    }
-    return { achievedButFailing, capabilityRefused, evaluated: scopeSize > 0, scopeSize, inScope: inScopeIds };
-  }
-
-  // AC1/AC4 reading (gap-closed-goal-acs-leave-reverify-scope-standing-invariants-undeclared): the
-  // ANNOTATED enumeration of the I5 reverify scope — WHO is in it, WHY (which branch of
-  // `inAchievedReverifyScope`), and WHO LEFT it. ⛔ Not merged with `checkAchievedFailing`: that
-  // returns a VERDICT (the achieved-but-failing ids); this returns the SUBSTRATE the adjudication is
-  // audited against. Two different questions; collapsing them would make "in scope" unattributable.
-  //
-  // PURE-READ (⛔ runs no criterion — that is `checkAchievedFailing`'s job and its ~42s cost).
-  // `inScope`/`scopeSize` use EXACTLY I5's predicate (achieved ∧ criterion non-empty ∧
-  // inAchievedReverifyScope) so `scopeSize` here and I5's `scopeSize` are the same number — ⛔ two
-  // readings of "the scope" that disagree would make AC4's delta check meaningless. ACs dropped for
-  // an EMPTY criterion are returned in `skippedNoCriterion` rather than vanishing silently (hard rule
-  // 3b: an object that left the enumeration must stay visible as such).
-  function checkReverifyScope(): {
-    scopeSize: number;
-    evaluated: boolean;
-    activeGoals: string[];
-    inScope: ReverifyScopeEntry[];
-    outOfScope: ReverifyScopeEntry[];
-    skippedNoCriterion: string[];
-  } {
-    const activeGoalIds = new Set(activeGoals().map((g) => String(g.id)));
-    const statusById = new Map<string, string>();
-    for (const g of list()) if (isGoalId(String(g.id))) statusById.set(String(g.id), String(g.status));
-    const inScope: ReverifyScopeEntry[] = [];
-    const outOfScope: ReverifyScopeEntry[] = [];
-    const skippedNoCriterion: string[] = [];
-    for (const ac of list()) {
-      if (!isCriterionId(String(ac.id))) continue;
-      if (ac.status !== "achieved") continue;
-      const goal = String(ac.goal ?? "");
-      const entry: ReverifyScopeEntry = {
-        id: String(ac.id),
-        goal,
-        goalStatus: statusById.get(goal) ?? "absent",
-        longTerm: ac.longTerm === true,
-      };
-      if (inAchievedReverifyScope(ac, activeGoalIds)) {
-        if (String(ac.criterion ?? "").trim() === "") skippedNoCriterion.push(entry.id);
-        else inScope.push(entry);
-      } else {
-        outOfScope.push(entry);
-      }
-    }
-    return {
-      scopeSize: inScope.length,
-      evaluated: inScope.length > 0,
-      activeGoals: [...activeGoalIds].sort(),
-      inScope,
-      outOfScope,
-      skippedNoCriterion,
-    };
-  }
-
-  // ── AC-242 successor: the FROZEN population, its bounded rotation, and the reading ────────────
-  // (gap-achieved-ac-rot-invisible-when-ledger-tail-is-stale-pass — rationale and measured cost
-  //  basis are on `DEFAULT_SWEEP_MIN_AGE_MS`'s block comment at the top of this file.)
-
-  /** The population no other mechanism re-runs: achieved ∧ criterion non-empty ∧ ⛔ NOT in
-   *  `inAchievedReverifyScope`. Shares the ONE scope predicate with I5, the driver's gate set and
-   *  the driver's gap-filing set (hard rule 5b: ⛔ never a second derivation of the same boundary). */
-  function frozenAchievedAcs(): GoalViewModel[] {
-    const activeGoalIds = new Set(activeGoals().map((g) => String(g.id)));
-    return list().filter(
-      (ac) =>
-        isCriterionId(String(ac.id)) &&
-        ac.status === "achieved" &&
-        !inAchievedReverifyScope(ac, activeGoalIds) &&
-        String(ac.criterion ?? "").trim() !== "",
-    );
-  }
-
-  /** PURE-READ judgment (⛔ runs no criterion — this is what AC-242's criterion calls every round,
-   *  so it must cost a ledger parse, not a criterion sweep). `evaluated`/`frozenScope` keep "empty
-   *  population" distinguishable from "looked at N and all fine" (hard rule 3b). */
-  function checkStalePass(nowMs: number = Date.now()): StalePassReading {
-    const maxAgeMs = DEFAULT_STALE_PASS_MAX_AGE_MS;
-    const frozen = frozenAchievedAcs();
-    const { last, lastSweep } = gateTails(goalDir);
-    const failing: string[] = [];
-    const staleUnverified: string[] = [];
-    const notEvaluated: string[] = [];
-    const verifiedFresh: string[] = [];
-    const amendedUnverified: string[] = [];
-    const neverGated: string[] = [];
-    let sweptEver = 0;
-    let lastSweepAt: string | null = null;
-    for (const ac of frozen) {
-      const id = String(ac.id);
-      const tail = last.get(id);
-      const sw = lastSweep.get(id);
-      if (sw) {
-        sweptEver++;
-        if (lastSweepAt === null || sw.at > lastSweepAt) lastSweepAt = sw.at;
-      }
-      if (!tail) {
-        neverGated.push(id);
-        continue;
-      }
-      // AMENDMENT GATE — BEFORE the freshness branches, because it changes what they MEAN. A rotation
-      // verdict is a verdict about a PARTICULAR criterion text; when the text has changed since, the
-      // verdict is about something that is no longer on disk. Neither reading is available:
-      //   · not `verifiedFresh` — that asserts "verified true", about the OLD text;
-      //   · not `failing`       — that asserts "verified false", about the OLD text too.
-      // ⇒ its own bucket. The `tail` fallback below is skipped for the same reason: the tail may BE
-      // this very event (the rotation's verdict is the tail whenever it is the last thing recorded),
-      // so falling through would re-assert the superseded verdict through the back door — exactly the
-      // 2026-09-13 AC-203 shape (`8bff44425` tightened the criterion at 03:22Z, the old `pass` kept
-      // counting as fresh, and the forbidden state existed ~1.5h before anything could see it).
-      // An event with NO fingerprint (legacy, pre-gate) lands here too: "we cannot tell which text it
-      // verified" is unknown, ⛔ not "it must have been this one" (hard rule 3b). One-time migration:
-      // such ACs converge with the normal age rotation, which re-records each WITH a fingerprint —
-      // ⛔ they are not prioritized (see `sweepFrozen`), because re-running the whole population on
-      // the round this lands is a spike the rotation was never sized for.
-      if (sw && sw.criterionHash !== criterionFingerprint(ac.criterion)) {
-        amendedUnverified.push(id);
-        continue;
-      }
-      // Order matters: a rotation verdict WITHIN the freshness bound is the current truth (either
-      // direction); outside it, fall back to the last recorded verdict by anyone — and when that is
-      // a pass, the answer is "unknown", ⛔ not "fine".
-      const swAgeMs = sw ? nowMs - Date.parse(sw.at) : Infinity;
-      if (sw && Number.isFinite(swAgeMs) && swAgeMs <= maxAgeMs) {
-        if (sw.verdict === "fail") failing.push(id);
-        else if (sw.verdict === "pass") verifiedFresh.push(id);
-        else notEvaluated.push(id); // "not-evaluated" — 判据自己声明【此地无法评估】，⛔ 不是假
-      } else if (tail.verdict === "fail") {
-        failing.push(id);
-      } else if (tail.verdict === "not-evaluated") {
-        // The tail fallback's third answer. ⛔ Without this branch a not-evaluated tail (a goal-cli
-        // event whose criterion timed out, could not spawn, or exited 126/127) fell through to
-        // `staleUnverified` — "last verdict was a pass, but we have not looked recently enough" —
-        // which asserts something about a pass that never happened
-        // (gap-goal-gate-verdict-single-mapping-not-evaluated). Same distinction the rotation branch
-        // above already draws, applied to the write path that now produces it.
-        notEvaluated.push(id);
-      } else {
-        staleUnverified.push(id);
-      }
-    }
-    const sortIds = (a: string[]) => a.sort();
-    return {
-      frozenScope: frozen.length,
-      evaluated: frozen.length > 0,
-      failing: sortIds(failing),
-      staleUnverified: sortIds(staleUnverified),
-      notEvaluated: sortIds(notEvaluated),
-      verifiedFresh: sortIds(verifiedFresh),
-      amendedUnverified: sortIds(amendedUnverified),
-      neverGated: sortIds(neverGated),
-      rotation: { sweptEver, lastSweepAt, minAgeMs: DEFAULT_SWEEP_MIN_AGE_MS, maxAgeMs },
-    };
-  }
-
-  /**
-   * One bounded ROTATION step: re-run the eligible frozen ACs' criteria and RECORD each verdict as
-   * a `gate:"goal"` event with `actor: SWEEP_ACTOR` (`AMEND_ACTOR` when the pick was driven by a
-   * criterion amendment rather than by age) — the same carrier the judgment reads, so the
-   * frozen tail stops being frozen (⛔ no second state file, and therefore no cursor to drift: the
-   * next invocation's eligibility is derived from these very events).
-   *
-   * Eligibility = "last ROTATION verdict older than `minAgeMs`", ordered oldest-first (never-touched
-   * first) ⇒ least-recently-verified-first, self-resuming, and bounded: at most `budget` criteria and
-   * at most `wallMs` of wall clock per invocation, with a hard per-criterion deadline from
-   * `resolveAcceptanceTimeoutMs()` (env > gates `timeoutMs` > default — the SAME resolved value the
-   * other three goal entry points use; see the header bound for what a raised value costs).
-   * ⛔ The rotation NEVER flips a record's status — the same ruling as
-   * I5 ("⛔ 不反向翻转 achieved→active，激活归人"): it records what it observed and nothing else.
-   */
-  async function sweepFrozen(
-    o: { budget?: number; minAgeMs?: number; wallMs?: number; nowMs?: number } = {},
-  ): Promise<{
-    evaluated: boolean;
-    refused: boolean;
-    eligible: number;
-    ran: Array<{ id: string; verdict: "pass" | "fail" | "not-evaluated"; reason: string; ms: number }>;
-    /** WHICH of the round's picks were refused by the capability gate, with the stable code. They
-     *  also appear in `ran` (as `not-evaluated` — the round did look at them and could not run
-     *  them); this field names the MECHANISM, so a reader does not have to infer it from a reason
-     *  string (hard rule 3: enumerate; ⛔ never parse the message to find the cause). */
-    capabilityRefused: Array<{ id: string; code: string }>;
-    stoppedBy: "exhausted" | "budget" | "wall";
-  }> {
-    const budget = o.budget ?? DEFAULT_SWEEP_BUDGET;
-    const minAgeMs = o.minAgeMs ?? DEFAULT_SWEEP_MIN_AGE_MS;
-    const wallMs = o.wallMs ?? DEFAULT_SWEEP_WALL_MS;
-    const nowMs = o.nowMs ?? Date.now();
-    const frozen = frozenAchievedAcs();
-    // Re-entrancy guard (same var as I5's): a criterion that itself calls back into a criterion
-    // runner must not recurse. Refusing here is a REFUSAL, not an empty result (hard rule 3b).
-    if (process.env[GOAL_ACCEPTANCE_ACTIVE_ENV] === "1") {
-      return { evaluated: false, refused: true, eligible: 0, ran: [], capabilityRefused: [], stoppedBy: "exhausted" };
-    }
-    const { lastSweep } = gateTails(goalDir);
-    const ageOf = (id: string): number => {
-      const sw = lastSweep.get(id);
-      if (!sw) return Infinity;
-      const t = Date.parse(sw.at);
-      return Number.isFinite(t) ? nowMs - t : Infinity;
-    };
-    // AMENDMENT PRIORITY (gap-ac242-…-amendment-unguarded, defect ②): a rotation verdict that
-    // POSITIVELY describes a different criterion text than the one on disk now (`criterionHash`
-    // present AND different) has no usable verdict — the judgment puts it in `amendedUnverified` —
-    // ⇒ it does not wait out `minAgeMs`. The age gate answers "how long before looking again is worth
-    // the cost"; the question here is different — "the thing we looked at is not this thing" — so age
-    // is not the right predicate at all. This is exactly the AC-203 shape: a criterion tightened at
-    // 03:22Z and a `pass` recorded for the OLD text that kept counting as fresh.
-    //
-    // ⚠️ A LEGACY event carrying NO fingerprint is deliberately NOT prioritized, although the judgment
-    // also reports it as `amendedUnverified` (see `checkStalePass`): it makes no claim at all about
-    // which text it verified, so there is no evidence of an amendment — only an unrecorded provenance.
-    // Prioritizing those would re-run the ENTIRE population (77 ACs here) on the round this code
-    // lands — a one-shot spike far outside the bound the age rotation was sized for
-    // (`DEFAULT_SWEEP_MIN_AGE_MS`'s cost comment). They converge with the normal age rotation, which
-    // re-records each with a fingerprint. Two causes, one bucket, two different eligibilities —
-    // and the distinction between them is exactly "is there a positive claim of a mismatch".
-    // ⛔ Still inside the SAME bound: these are candidates in the one eligible list, and `budget`/
-    // `wallMs` cap the invocation exactly as before (⛔ no second budget).
-    const byId = new Map(frozen.map((ac) => [String(ac.id), ac]));
-    const amendedIds = new Set(
-      frozen
-        .map((ac) => String(ac.id))
-        .filter((id) => {
-          const sw = lastSweep.get(id);
-          if (!sw || sw.criterionHash === "") return false;
-          return sw.criterionHash !== criterionFingerprint(byId.get(id)?.criterion);
-        }),
-    );
-    // Eligibility threshold per AC: a recorded FAIL is re-checked sooner (see
-    // DEFAULT_FAIL_RECHECK_DIVISOR) — ⛔ ordering only, the per-invocation bound is unchanged.
-    const eligibleAt = (id: string): boolean => ageOf(id) > (lastSweep.get(id)?.verdict === "fail" ? minAgeMs / DEFAULT_FAIL_RECHECK_DIVISOR : minAgeMs);
-    const eligible = frozen
-      .map((ac) => String(ac.id))
-      .filter((id) => amendedIds.has(id) || eligibleAt(id))
-      .sort((a, b) => {
-        // Amendments first (they are the ones with no usable verdict), then oldest-first.
-        const aa = amendedIds.has(a);
-        const ab = amendedIds.has(b);
-        if (aa !== ab) return aa ? -1 : 1;
-        const da = ageOf(a);
-        const db = ageOf(b);
-        if (da !== db) return db - da; // oldest (Infinity first) wins — least-recently-verified-first
-        return a.localeCompare(b);
-      });
-    const picked = eligible.slice(0, budget);
-    if (picked.length === 0) {
-      return { evaluated: frozen.length > 0, refused: false, eligible: eligible.length, ran: [], capabilityRefused: [], stoppedBy: "exhausted" };
-    }
-    const { appendGateEvent } = await import("./gate-event-store.ts");
-    const logPath = path.join(path.dirname(goalDir), ".quay", "gate-events.jsonl");
-    const root = resolveGitRoot(goalDir) ?? path.dirname(goalDir);
-    // §5 B1 — the rotation re-verifies a branch-mode goal's frozen AC on that goal's criterion
-    // worktree, not on the main checkout (which does not carry the goal branch's code at all).
-    const criterionRoots = buildCriterionRoots(root, list() as unknown as Array<Record<string, unknown>>);
-    const startedAt = Date.now();
-    const ran: Array<{ id: string; verdict: "pass" | "fail" | "not-evaluated"; reason: string; ms: number }> = [];
-    const capabilityRefused: Array<{ id: string; code: string }> = [];
-    const prev = process.env[GOAL_ACCEPTANCE_ACTIVE_ENV];
-    process.env[GOAL_ACCEPTANCE_ACTIVE_ENV] = "1";
-    let stoppedBy: "exhausted" | "budget" | "wall" = picked.length < eligible.length ? "budget" : "exhausted";
-    try {
-      for (const id of picked) {
-        if (Date.now() - startedAt > wallMs) {
-          stoppedBy = "wall";
-          break;
-        }
-        const criterion = String(byId.get(id)?.criterion ?? "");
-        const t0 = Date.now();
-        // A branch-mode goal's frozen AC is re-verified on ITS criterion worktree (§5 B1) — the same
-        // per-AC cwd choice the gate and I5 entry points make. ⛔ Resolved per PICKED id (≤budget),
-        // never per frozen record.
-        const cwd = criterionCwdFor(root, criterionRoots, byId.get(id) ?? {});
-        // ⛔ THE gate this whole task exists for. This loop is the INCIDENT's execution surface:
-        // `check --stale-pass --sweep` re-runs the frozen population on a schedule, forever, with
-        // nobody watching — including `achieved` ACs (measured: the incident AC was evaluated in 112
-        // goal rounds). No spawn, no bypass arm: a bypass flag cannot be "someone present" on a path
-        // no person invoked. The verdict is still RECORDED (below) so the refusal is a reading the
-        // judgment can see, not a silent skip (hard rule 3b).
-        const refusal = capabilityRefusal(criterion, cwd);
-        if (refusal !== null) {
-          // The SAME prefix every other not-evaluated verdict carries (`verdictFromAcceptance`'s
-          // `not-evaluated (${cause}): …`), so a reader greps ONE token for "we could not measure
-          // this" regardless of which mechanism produced it — ⛔ not a second vocabulary.
-          const reason = `not-evaluated (capability): ${capabilityRefusalReason(refusal)}`.slice(0, FAILURE_REASON_MAX_CHARS);
-          ran.push({ id, verdict: "not-evaluated", reason, ms: 0 });
-          capabilityRefused.push({ id, code: refusal.code ?? "criterion-capability-unevaluable" });
-          appendGateEvent(logPath, {
-            id: randomUUID(),
-            item_id: id,
-            pipeline_id: id,
-            gate: "goal",
-            // The rotation's own actor: this IS a rotation outcome (the round looked at this AC and
-            // could not run it), so it must age like any other — otherwise the same AC would be
-            // re-picked and re-refused every round, spending the budget the bound exists to protect.
-            actor: amendedIds.has(id) ? AMEND_ACTOR : SWEEP_ACTOR,
-            verdict: "not-evaluated",
-            timestamp: new Date().toISOString(),
-            payload: {
-              reason,
-              // The MECHANISM travels with the recorded reason: a reader of the ledger can tell a
-              // capability refusal from a timeout / spawn failure / exit-126 — and can branch on the
-              // code rather than parse the message.
-              capabilityCode: refusal.code,
-              capability: refusal.capability,
-              refusalRules: refusal.reasons.map((r) => ({ rule: r.rule, detail: r.detail })),
-              criterionHash: criterionFingerprint(criterion),
-              ...evaluationContext(cwd),
-            },
-          });
-          continue;
-        }
-        // The DEADLINE is record-aware `resolveAcceptanceTimeout` — the RECORD's own `timeoutMs`
-        // FIRST, then the shared config-surface chain, ⛔ not a private literal
-        // (gap-goal-criterion-timeout-hardcoded-60s-ignores-acceptance-timeout). The hint names the
-        // knob THIS path actually reads (⛔ not gates.yml, which the goal path never consults).
-        const t = resolveAcceptanceTimeout((byId.get(id) as unknown as { timeoutMs?: unknown } | undefined)?.timeoutMs);
-        const res = runAcceptance({ command: criterion, cwd, timeoutMs: t.timeoutMs, timeoutKnob: timeoutKnobHint(t) });
-        // ⛔ Through the ONE mapping (gap-goal-gate-verdict-single-mapping-not-evaluated). Before it,
-        // this site recognised only exit 3 and recorded a timeout / spawn failure / exit 126-127 as
-        // `fail` — i.e. asserted "this criterion is FALSE" about a criterion that never got to say
-        // anything (hard rule 3b, and the very conflation this task is about). `res.reason`'s own
-        // exit-3 convention is unchanged; the additional causes now travel with it.
-        const v = verdictFromAcceptance(res);
-        ran.push({ id, verdict: v.verdict, reason: v.reason.slice(0, 500), ms: Date.now() - t0 });
-        appendGateEvent(logPath, {
-          id: randomUUID(),
-          item_id: id,
-          pipeline_id: id,
-          gate: "goal",
-          // ⛔ The actor is the DRY-RUN's cause, and the two causes are distinguishable
-          // (AMEND_ACTOR vs SWEEP_ACTOR) — so a reader can tell "the age rotation reached it" from
-          // "its criterion text changed, so this round ran it immediately". Both count as rotation
-          // writes (see `gateTails`), because both are re-verifications.
-          actor: amendedIds.has(id) ? AMEND_ACTOR : SWEEP_ACTOR,
-          verdict: v.verdict,
-          timestamp: new Date().toISOString(),
-          // The fingerprint pins WHICH criterion text this verdict is about — the whole point of the
-          // amendment gate. ⛔ Recorded, not inferred later from mtime/clock (hard rule 4 corollary
-          // 2: a value that depends on the host is not a measurement).
-          // `cause` is present only when there IS one (⛔ not `cause: null` on the pass/fail events):
-          // the shape of the 8000+ existing goal events is a contract several readers parse.
-          payload: {
-            reason: v.reason,
-            ...(v.cause ? { cause: v.cause } : {}),
-            criterionHash: criterionFingerprint(criterion),
-            // WHICH tree this rotation re-verified on (SPEC §7 辛) — `cwd` here is the criterion cwd
-            // passed to `runAcceptance` above, so the two name the same tree by construction.
-            ...evaluationContext(cwd),
-          },
-        });
-      }
-    } finally {
-      if (prev === undefined) delete process.env[GOAL_ACCEPTANCE_ACTIVE_ENV];
-      else process.env[GOAL_ACCEPTANCE_ACTIVE_ENV] = prev;
-    }
-    return { evaluated: frozen.length > 0, refused: false, eligible: eligible.length, ran, capabilityRefused, stoppedBy };
-  }
+  // ── composed sub-surfaces (gap-routine-architecture-analysis-god-function-creategoalstore) ──────
+  // The three check surfaces take the SAME `goalDir`/`cap`/`staleMs` the factory resolved, and the
+  // SAME read closures — so a judgment's scope can never be re-derived from a second listing.
+  const { checkStaleness, checkAchievedFailing, checkReverifyScope } = createGoalChecks({
+    goalDir, cap, staleMs, list, activeGoals, isGoalAchieved,
+  });
+  const { frozenAchievedAcs, checkStalePass } = createGoalRotation({ goalDir, list, activeGoals });
+  // ⛔ The sweep takes the judgment's OWN `frozenAchievedAcs` — "what is frozen" has ONE definition
+  // (hard rule 5b: a second derivation of the population is exactly the drift this split must not
+  // introduce between the judgment and the thing that refreshes its tail).
+  const { sweepFrozen } = createGoalSweep({ goalDir, list, frozenAchievedAcs });
 
   /** The ONE call site of `discardGoalBranch` (SPEC-goal-branch §4.2): delete a discarded goal's
    *  branch and surface a failed delete (硬规则 3b — a statusLog that claims a rescued tip must not
@@ -2303,7 +1002,7 @@ export function createGoalStore(
         // AC executes the writer once — the exact mechanism that re-armed the storm 13 minutes after
         // the first "fix". The two questions stay separate questions (hard rule 5b: fixing one site
         // is not fixing the principle).
-        const capabilityHit = capabilityRefusal(criterionCmd, gateRoot);
+        const capabilityHit = capabilityRefusalAt(criterionCmd, gateRoot, workspaceRootForCapability);
         if (capabilityHit !== null) {
           throw new Error(`cannot activate ${id}: ${capabilityRefusalReason(capabilityHit)}`);
         }

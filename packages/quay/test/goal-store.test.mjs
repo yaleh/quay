@@ -103,6 +103,30 @@ function seedAcCli(n, goalId, { status = "draft", criterion = "true" } = {}) {
   return n(["write", id, "--title", "seeded exit condition", "--status", status, "--goal", goalId, "--criterion", criterion, "--origin", "test fixture", "--expect", EXPECT]);
 }
 
+// ── THE COMPOSED SOURCE SET (tasks/gap-routine-architecture-analysis-god-function-creategoalstore) ─
+// `createGoalStore` is a COMPOSITION since 2026-10-29: `core/goal-store.ts` keeps the store + CLI,
+// while the read / check / rotation / sweep / ledger / address / shape surfaces live in sibling
+// modules it imports. A source-level invariant — "every criterion-running site goes through the
+// capability gate", "one literal per rotation knob", "no private timeout constant" — is therefore a
+// claim about the WHOLE set, ⛔ not about one file. Reading only `goal-store.ts` would silently
+// weaken every such assertion the moment code moved, while still looking unchanged (hard rule 3b:
+// "could not evaluate" must never share an output with "evaluated and fine").
+const GOAL_STORE_MODULES = [
+  "goal-store.ts",
+  "goal-store-types.ts",
+  "goal-store-ledger.ts",
+  "goal-store-criterion-address.ts",
+  "goal-store-reads.ts",
+  "goal-store-checks.ts",
+  "goal-store-rotation.ts",
+  "goal-store-sweep.ts",
+];
+function readGoalStoreSourceSet() {
+  return GOAL_STORE_MODULES
+    .map((f) => `// ── ${f} ──\n${fs.readFileSync(new URL(`../src/core/${f}`, import.meta.url), "utf8")}`)
+    .join("\n");
+}
+
 // ── AC1: reuses frontmatter-store-base (read the import, never a copy) ────────────────────────────
 test("AC1 — goal-store imports parse/serialize/lock/filename from frontmatter-store-base", () => {
   const src = fs.readFileSync(new URL("../src/core/goal-store.ts", import.meta.url), "utf8");
@@ -1498,7 +1522,7 @@ test("AC-242 successor — 轮转有界：budget 封顶、到期对象枚举、�
   // the repo carried five copies of that number — the claim was the drift, so the assertion that
   // pinned it is inverted rather than deleted. Both directions are asserted: the literal is GONE
   // (a "kept for compatibility" edit would otherwise pass), and the shared resolver is PRESENT.
-  const src = fs.readFileSync(new URL("../src/core/goal-store.ts", import.meta.url), "utf8");
+  const src = readGoalStoreSourceSet();
   assert.doesNotMatch(src, /SWEEP_CRITERION_TIMEOUT_MS\s*=\s*60_?000/, "私有字面量必须消失——它正是绕过配置面的那个常量");
   assert.match(src, /resolveAcceptanceTimeoutMs/, "轮转扫描改取共享解析函数（单一来源，env/--timeout 才能生效）");
   assert.match(src, /DEFAULT_SWEEP_BUDGET = 6/);
@@ -2013,7 +2037,10 @@ test("能力闸 AC7 — 旁路：显式且可审计 —— 真跑得起来，但
 });
 
 test("能力闸 AC7(上限) — 旁路【不可】用于无人值守路径：sweep / I5 上没有「有人在场」可承担这个决定", () => {
-  const src = fs.readFileSync(new URL("../src/core/goal-store.ts", import.meta.url), "utf8");
+  // The four criterion-running sites now live in THREE modules (store CLI/write, checks, sweep),
+  // so the count is taken over the composed set — a per-file read would report 2 and pass for the
+  // wrong reason, or fail while the invariant still holds.
+  const src = readGoalStoreSourceSet();
   // 旁路只从 `rest.includes("--allow-side-effects")` 来（gate 子命令的显式调用）——sweepFrozen /
   // checkAchievedFailing 的拒绝分支里没有 allow 这个参数可传。⛔ 一次设定、永久生效的旁路就是漏洞。
   const refusalSites = src.match(/capabilityRefusal\(|capabilityRefusalAt\(/g) ?? [];
