@@ -474,7 +474,7 @@ export function capabilityRefusalReason(j: CapabilityJudgment): string {
  * that owns it). Returns `null` when the criterion is a reading — a non-null judgment is a REFUSAL.
  *
  * MOVED HERE from `core/goal-store.ts` (tasks/gap-routine-architecture-analysis-god-function-
- * creatgoalstore): the predicate belongs beside the judge it composes, and the store's four
+ * creategoalstore): the predicate belongs beside the judge it composes, and the store's four
  * `runAcceptance` sites now live in three composed modules (`goal-store-checks`, `goal-store-sweep`)
  * plus the CLI — all of which would otherwise import it back from the store's host file. ⛔ One
  * definition, never one per consumer (hard rule 5b).

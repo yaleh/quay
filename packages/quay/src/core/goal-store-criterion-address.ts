@@ -1,7 +1,7 @@
 // quay Core: WHICH TREE a goal criterion runs on — the criterion ADDRESS derivation family.
 //
 // Extracted verbatim from `./goal-store.ts` (tasks/gap-routine-architecture-analysis-god-function-
-// creatgoalstore). Every criterion-running entry point (the gate, I5 `checkAchievedFailing`, the
+// creategoalstore). Every criterion-running entry point (the gate, I5 `checkAchievedFailing`, the
 // frozen rotation) asks the same two questions — "where is this AC's cwd?" and "which tree was that
 // verdict obtained on?" — and the answers must be ONE derivation (hard rule 5b). Re-exported from
 // `core/goal-store.ts`, so every historical importer keeps its path.

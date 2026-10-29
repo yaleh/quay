@@ -1,6 +1,6 @@
 // @test-group product
 // Stage — the goal store's COMPOSITION SHAPE (tasks/gap-routine-architecture-analysis-god-function-
-// creatgoalstore, routine `architecture-analysis`, runId `architecture-analysis-1793251760204`).
+// creategoalstore, routine `architecture-analysis`, runId `architecture-analysis-1793251760204`).
 //
 // The finding: `createGoalStore` was a single 1,647-line closure factory (lines 1155-2802 of a
 // 3,427-line module) nesting 20 declarations, several of them whole sub-systems (the I3/I4 staleness

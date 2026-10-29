@@ -1,7 +1,7 @@
 // quay Core: the BOUNDED ROTATION step over the frozen population — `sweepFrozen`.
 //
 // Extracted verbatim from `createGoalStore`'s closure (tasks/gap-routine-architecture-analysis-
-// god-function-creatgoalstore). This is the INCIDENT's execution surface: it re-runs frozen
+// god-function-creategoalstore). This is the INCIDENT's execution surface: it re-runs frozen
 // criteria on a schedule with nobody watching, so it carries the capability gate with no bypass
 // arm and records every verdict (including refusals) into the ledger the judgment reads.
 //

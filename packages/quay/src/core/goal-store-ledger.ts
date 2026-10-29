@@ -2,7 +2,7 @@
 // `<workspaceRoot>/.quay/gate-events.jsonl` and the two derived maps over it.
 //
 // Extracted verbatim from `./goal-store.ts` (tasks/gap-routine-architecture-analysis-god-function-
-// creatgoalstore). These were already free functions taking only a path, so the move leaves their
+// creategoalstore). These were already free functions taking only a path, so the move leaves their
 // behaviour byte-identical; the store now imports them instead of owning them.
 //
 // Two readers, two questions (⛔ one scan each, bounded memory):

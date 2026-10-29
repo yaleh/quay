@@ -2,7 +2,7 @@
 // derived judgments over a listing (`activeGoals`, `listActiveCriteria`, `isGoalAchieved`).
 //
 // Extracted verbatim from `createGoalStore`'s closure (tasks/gap-routine-architecture-analysis-
-// god-function-creatgoalstore): the factory keeps the store's write + orchestration, this module
+// god-function-creategoalstore): the factory keeps the store's write + orchestration, this module
 // owns "what is on disk, projected". ⛔ PURE-READ — nothing here runs a criterion or writes a file.
 //
 // `createGoalReads` is a FACTORY over `(goalDir, assertSafeId)` rather than a set of free

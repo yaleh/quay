@@ -2,7 +2,7 @@
 // composed sub-modules share.
 //
 // Extracted from `./goal-store.ts` (tasks/gap-routine-architecture-analysis-god-function-
-// creatgoalstore): `createGoalStore` was a single 1,647-line closure factory, and every
+// creategoalstore): `createGoalStore` was a single 1,647-line closure factory, and every
 // sub-surface pulled out of it needs the SAME frontmatter/view-model shapes and the same
 // GOAL-NNN / AC-NNN predicate. Keeping them here means the reads / checks / rotation modules
 // agree on ONE definition instead of each importing the factory's host file (which would be a

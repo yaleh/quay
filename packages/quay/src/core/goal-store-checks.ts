@@ -2,7 +2,7 @@
 // achieved-but-failing sweep, and the annotated reverify-scope enumeration.
 //
 // Extracted verbatim from `createGoalStore`'s closure (tasks/gap-routine-architecture-analysis-
-// god-function-creatgoalstore). Three judgments with three different costs and three different
+// god-function-creategoalstore). Three judgments with three different costs and three different
 // outputs — kept together because they share ONE scope predicate and ONE re-entrancy guard, which
 // is exactly why they must not be re-derived per consumer (hard rule 5b).
 //

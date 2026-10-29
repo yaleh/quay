@@ -3,7 +3,7 @@
 // rotation and the judgment must share.
 //
 // Extracted verbatim from `createGoalStore`'s closure (tasks/gap-routine-architecture-analysis-
-// god-function-creatgoalstore): the frozen population is `achieved ∧ criterion non-empty ∧ ⛔ NOT
+// god-function-creategoalstore): the frozen population is `achieved ∧ criterion non-empty ∧ ⛔ NOT
 // in inAchievedReverifyScope`, so its judgment and its rotation read ONE definition of "frozen"
 // and ONE ledger (see the block comments carried below).
 //
