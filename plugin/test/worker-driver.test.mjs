@@ -178,7 +178,7 @@ import {
 import { recordGoalMergeRequest } from "../../packages/quay/src/goal-merge.ts";
 // gap-goal-merge-execution-writes-no-step-trace：判别键从【写手】取（⛔ 不在测试里重打一份字面量——
 // 改了写手的取值而测试仍绿，测的就是一个不存在的形态）。
-import { GOAL_MERGE_TRACE_KIND, GOAL_BRANCH_UNMERGED_KIND } from "../scripts/worker-fan-in.ts";
+import { GOAL_MERGE_TRACE_KIND, GOAL_UNMERGED_GAP_KIND } from "../scripts/worker-fan-in.ts";
 import { defaultLaneCount } from "../scripts/full-suite-runner.ts";
 import { spawnSuiteAndWait } from "../scripts/suite-driver.ts";
 import { suiteLockBase, suiteLockSlotPaths } from "../scripts/suite-lock-slots.ts";
@@ -5469,7 +5469,7 @@ test("goal-merge gap filing — a real content-conflict red files ONE dedup'd ga
       const fm = goalGapTaskFrontmatter(root);
       assert.ok(fm, "the gap task file exists in the task store");
       assert.equal(fm.goal_ac, GM_AC, "goal_ac points at one of the goal's ACs");
-      assert.equal(fm.extra.kind, GOAL_BRANCH_UNMERGED_KIND, "dedup identity kind recorded");
+      assert.equal(fm.extra.kind, GOAL_UNMERGED_GAP_KIND, "dedup identity kind recorded");
       assert.equal(fm.extra.goal, GM_GOAL, "dedup identity GOAL id recorded");
       assert.ok(Array.isArray(fm.labels) && fm.labels.includes("gap"), "filed as a gap task");
 
@@ -5522,7 +5522,7 @@ test("goal-merge gap filing — a non-content infra red (pre-merge-commit hook f
       assert.equal(filings.length, 1);
       assert.equal(filings[0].filed, true, "a non-content infra red files a gap too");
       const fm = goalGapTaskFrontmatter(root);
-      assert.equal(fm.extra.kind, GOAL_BRANCH_UNMERGED_KIND, "dedup identity kind recorded");
+      assert.equal(fm.extra.kind, GOAL_UNMERGED_GAP_KIND, "dedup identity kind recorded");
       assert.equal(fm.extra.goal, GM_GOAL, "dedup identity GOAL id recorded");
     });
   } finally { gmCleanup(root); }

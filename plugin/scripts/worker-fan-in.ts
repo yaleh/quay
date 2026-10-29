@@ -3861,7 +3861,7 @@ export async function appendGoalMergeResultEvent(
 // 不再为这条形态跨 goal-driver 的 task 边界。
 
 /** gap 任务的去重 kind 字面量（单一真相源：写侧与查重侧同取本常量，⛔ 不在测试里重打一份）。 */
-export const GOAL_BRANCH_UNMERGED_KIND = "goal-branch-unmerged";
+export const GOAL_UNMERGED_GAP_KIND = "goal-branch-unmerged";
 
 export interface GoalBranchGapFilingResult {
   goalId: string;
@@ -3904,7 +3904,7 @@ function findGoalBranchUnmergedTask(root: string, goalId: string, acIds: string[
     const extra = fm.extra && typeof fm.extra === "object" && !Array.isArray(fm.extra)
       ? (fm.extra as Record<string, unknown>)
       : {};
-    if (extra.kind !== GOAL_BRANCH_UNMERGED_KIND) continue;
+    if (extra.kind !== GOAL_UNMERGED_GAP_KIND) continue;
     if (extra.goal === goalId) return typeof fm.id === "string" ? fm.id : f.replace(/\.md$/, "");
     const goalAc = typeof fm.goal_ac === "string" ? fm.goal_ac : null;
     if (goalAc !== null && acIds.includes(goalAc)) return typeof fm.id === "string" ? fm.id : f.replace(/\.md$/, "");
@@ -3944,9 +3944,9 @@ function fileGoalBranchUnmergedTask(
     "node", "--no-warnings", "--experimental-strip-types", cli,
     "task", "edit", taskId,
     "--title", `goal-branch-unmerged ${goalId}: merge into develop went red — fix the goal branch so it auto-retries`,
-    "--labels", `gap,${GOAL_BRANCH_UNMERGED_KIND}`,
+    "--labels", `gap,${GOAL_UNMERGED_GAP_KIND}`,
     ...(acId ? ["--goal-ac", acId] : []),
-    "--extra", JSON.stringify({ kind: GOAL_BRANCH_UNMERGED_KIND, goal: goalId }),
+    "--extra", JSON.stringify({ kind: GOAL_UNMERGED_GAP_KIND, goal: goalId }),
     "--body", renderGoalBranchUnmergedBody(goalId, result, tipSha),
   ];
   const r = spawnSync(argv[0], argv.slice(1), {
