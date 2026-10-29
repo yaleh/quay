@@ -274,7 +274,9 @@ function makeBareRoot(tag) {
 }
 
 function processesMentioning(needle) {
-  const ps = spawnSync("ps", ["-eo", "pid=,args="], { encoding: "utf8" });
+  // ⛔ maxBuffer 必须显式放大：`ps -eo pid=,args=` 在本机进程表 ~1.09MB（5523 进程、suite 满载时更大）
+  // 超过 spawnSync 默认 1MB ⇒ child 被 SIGTERM/ENOBUFS、status null ⇒「读不到」被误当「干净」（硬规则 3b）。
+  const ps = spawnSync("ps", ["-eo", "pid=,args="], { encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
   if (ps.status !== 0 || typeof ps.stdout !== "string") return null;
   return ps.stdout.split("\n").map((l) => l.trim()).filter((l) => l && l.includes(needle));
 }

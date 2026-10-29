@@ -1,6 +1,7 @@
 // @test-group engine
 // plugin/test/codex-stage1-spawn-verify.test.mjs — gap-meta-codex-stage1-spawn-verify-sh
-// (SPEC-codex-long-term-support-2026-10-29 §4.3 Task A, goal_ac AC-927):
+// (SPEC-codex-long-term-support-2026-10-29 §4.3 Task A, goal_ac AC-927) and
+// gap-codex-mcp-cwd-any-root-spawn-verify:
 // the codex-stage1-spawn-verify.sh self-check and its integration into selfcheck. Proves
 // the configured quay MCP server actually SPAWNS + completes an MCP initialize handshake
 // from a subdirectory (the thing `codex mcp get/list` cannot see), and that a bad cwd or a
