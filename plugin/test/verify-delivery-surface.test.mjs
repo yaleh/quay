@@ -274,10 +274,10 @@ test("Contract measure — --json emits surface_categories_covered + spec_is_liv
 // AC1 — outline §6 no longer carries a committed snapshot; AC4 — `--inventory` still yields the
 // delivery-surface summary (release/human audit: one command).
 
-test("compute-at-check-time — --inventory computes the eight delivery dirs and exits 0 (no snapshot)", async () => {
+test("compute-at-check-time — --inventory computes the delivery dirs and exits 0 (no snapshot)", async () => {
   const m = await mod();
-  assert.ok(Array.isArray(m.DELIVERY_INVENTORY) && m.DELIVERY_INVENTORY.length >= 8,
-    "the delivery inventory must cover the eight plugin-bundle directories");
+  assert.ok(Array.isArray(m.DELIVERY_INVENTORY) && m.DELIVERY_INVENTORY.length >= 7,
+    "the delivery inventory must cover the plugin-bundle directories (7 since plugin/gate-scripts/ was archived 2026-10-28)");
   const r = runScript(["--inventory", "--root", REPO_ROOT]);
   assert.equal(r.status, 0, `--inventory must be a report that exits 0:\n${r.stdout}`);
   assert.match(r.stdout, /inventory_snapshot=none/, "no committed snapshot — computed at check time");

@@ -3,7 +3,7 @@ id: gap-routine-architecture-analysis-retired-gate-scripts-hand-synced-orphan
 title: "architecture-analysis: plugin/README.md:77-84 declares
   plugin/gate-scripts RETIRED and 'no longer synced by sync.sh', yet both files
   are md5-identical to the live experiments copie"
-status: ready
+status: done
 labels:
   - gap
   - routine-filed

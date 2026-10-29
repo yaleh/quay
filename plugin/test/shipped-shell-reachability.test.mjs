@@ -210,8 +210,12 @@ test("AC2: every .sh in the artifact is runtime-reachable, and the cancelled-cha
     assert.ok(reading.unreachable.includes(absent), `${absent} must be reported unreachable`);
     assert.match(reading.unreachableReasons[absent], /cancelled/, "the reason must name the cancelled channel");
   }
-  // The "no reference" class: the retired classic-pipeline gates and the dev asset-sync script.
-  for (const absent of ["sync.sh", "gate-scripts/it0-dod-check.sh", "gate-scripts/tree-hygiene-check.sh"]) {
+  // The "no reference" class: the dev asset-sync script. (The retired classic-pipeline gates that
+  // used to be reported here — gate-scripts/it0-dod-check.sh, gate-scripts/tree-hygiene-check.sh —
+  // are ARCHIVED as of 2026-10-28 (gap-routine-architecture-analysis-retired-gate-scripts-hand-
+  // synced-orphan), so they are no longer candidates at all: they are gone from the plugin tree
+  // rather than merely unreachable.)
+  for (const absent of ["sync.sh"]) {
     assert.ok(!present.includes(absent), `${absent} must NOT be in the artifact`);
     assert.equal(reading.unreachableReasons[absent], "no executing reference from any root (无引用)");
   }

@@ -240,8 +240,10 @@ test("the tarball carries the ENTIRE plugin bundle (bundle_in_pack > 0 — AC16)
   const tar = execFileSync("tar", ["-tzf", tgz], { encoding: "utf8" });
   const pluginEntries = tar.split("\n").filter((l) => l.includes("/plugin/")).length;
   assert.ok(pluginEntries > 0, `tarball must contain plugin/ entries (bundle_in_pack = ${pluginEntries})`);
-  // The task's AC1 subdirs must ALL be present (scripts/gate-scripts/skills/probes/loop/vendor/agents).
-  for (const sub of ["plugin/scripts", "plugin/gate-scripts", "plugin/skills", "plugin/probes", "plugin/loop", "plugin/vendor/quay/dist/quay.js", "plugin/vendor/quay-native/dist/quay-native.js", "plugin/agents"]) {
+  // The task's AC1 subdirs must ALL be present (scripts/skills/probes/loop/vendor/agents).
+  // plugin/gate-scripts/ was archived 2026-10-28 (gap-routine-architecture-analysis-retired-gate-
+  // scripts-hand-synced-orphan) — it is retired and no longer part of the plugin bundle.
+  for (const sub of ["plugin/scripts", "plugin/skills", "plugin/probes", "plugin/loop", "plugin/vendor/quay/dist/quay.js", "plugin/vendor/quay-native/dist/quay-native.js", "plugin/agents"]) {
     assert.ok(tar.includes(`package/${sub}`), `tarball must include ${sub}`);
   }
   // The installed copy (from the tarball, not a git clone) must also carry the bundle.
