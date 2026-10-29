@@ -678,3 +678,10 @@ adr/*.lock
 docs-managed/*.lock
 # @quay-runtime-artifact — quay-init writes this into a consumer .gitignore (quay-runtime-artifacts.txt)
 meta/*.lock
+
+# ── .quay/ untracked hygiene (2026-10-29, 人裁定方案甲) ─────────────────────────
+# 主检出累积 .quay/ 运行时状态（server.*/worker-control/*-round.jsonl/*-outcome.jsonl）
+# 与一次性验证证据（ac*-*/verify-*/wallclock-*）。已 tracked 的 .quay/ 文件（config.yml.example、
+# profiles.yml、ac260-*、goal-*-evidence/ 等）已在 git 里、不受此规则影响——gitignore 只管未跟踪文件。
+# ⛔ .quay/ 下的新证据默认不跟踪；确需跟踪的用 `git add -f` 显式提交。
+**/.quay/*
