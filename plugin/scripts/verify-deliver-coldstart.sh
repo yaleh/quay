@@ -770,7 +770,12 @@ probe_direct_measures() {
   for proc in /proc/[0-9]*; do
     pid="${proc#/proc/}"
     [ -r "$proc/cmdline" ] || continue
-    bin="$(cat "$proc/cmdline" 2>/dev/null | tr '\0' ' ' | awk '{print $1}')" || continue
+    # ⛔ 不用 `cat | tr '\0' ' ' | awk '{print $1}'`：那对每个进程 spawn 3 个子进程，本机 /proc 4272 个
+    # 进程 ⇒ ~15s 的纯 spawn/syscall 开销（--verify-only 的 16s 全在这）。bash 内建 `read -d ''` 读到
+    # 第一个 NUL（= argv[0]），零子进程（实测 0.076s vs 9.1s）；`${bin%% *}` 保留原 `awk '{print $1}'`
+    # 的取首字段语义。空/已退出进程读失败 ⇒ bin=""（与旧的 cat|tr|awk 空输入同形，basename "" 不命中）。
+    IFS= read -r -d '' bin < "$proc/cmdline" 2>/dev/null || bin=""
+    bin="${bin%% *}"
     case "$(basename -- "$bin")" in
       claude|node)
         cwd="$(readlink "$proc/cwd" 2>/dev/null || true)"

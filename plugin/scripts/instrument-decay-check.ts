@@ -275,6 +275,51 @@ export const RECOVERY_EXEMPT_TRIGGER_CMD =
   `(r.step==="suite-recovery-certified"||r.step==="suite-recovery-baseline-exempt")))bad++}` +
   `process.exit(bad===0?0:1)'`;
 
+/** baseline-red-exempt 的触发输入读数（gap-instrument-decay-baseline-red-exempt-unadjudicated）。
+ *
+ *  写手 `worker-fan-in.ts:3482-3487`：主路径的既存红等价 A/B（`runBaselineEquivalence`，其 `traceVerdict`
+ *  在 :2810-2820 写 `baseline-red` 步）判出 `exempt` 时，紧接着写本组。判据是纯函数
+ *  `compareFailureSignatures`（:1420-1446）：**`exempt` ⇔ task 侧红签名集合 ⊆ baseline 侧红签名集合**。
+ *  ⇒ 当 baseline 红集为空时，**非空** task 红集恒不可能是它的子集 ⇒ 本组结构上不可达（直到 develop
+ *  再出现持续红）。⚠️ 进入 A/B 的前提是「suite 真跑过且真红、本轮内重跑仍红」，所以「task 红集为空」
+ *  这一唯一能让空 baseline 判 exempt 的情形走不到这里。
+ *
+ *  条件读的是【窗口内 A/B 判词的形态】，⛔ 不是「本组多久没写」的二次包装：
+ *    ① 窗口 = 末次 `baseline-red-exempt` 之后；窗口内必须 **≥1 条 A/B**（⛔「一次 A/B 都没有」不得当作
+ *       解释——那是空转真值）；
+ *    ② 窗口内可读的 `baselineFiles` 必须存在且**全为 0**（结构性理由本身：基线红集为空 ⇒ exempt 不可达）。
+ *       缺值/读不懂 ⇒ exit 1（硬规则 6/3b：没查 ≠ 合格）；
+ *    ③ 写手腐烂守卫：每条 `exempt` 的 `baseline-red` 都必须等到**同 task** 的一条收尾——主路径
+ *       `baseline-red-exempt`（:3484）或恢复阶梯 `suite-recovery-baseline-exempt`（:3390）。两条都要认，
+ *       因为两条路径调的是**同一个** `runBaselineEquivalence`、都会写一条 `baseline-red`；恢复阶梯的收尾
+ *       不是本组 ⇒ ⛔ 不得把它读成「主路径豁免未落痕」（近名陷阱）。一条 exempt 在下一个同 task 的 A/B
+ *       之前（或 EOF 前）没有收尾 ⇒ 写手腐烂 ⇒ exit 1。
+ *  ⛔ 同时排除 kind=goal-merge（那不是任务 fan-in 的步骤链，与检测器同口径）。 */
+export const BASELINE_RED_EXEMPT_TRIGGER_CMD =
+  `node -e 'const fs=require("fs");const R=[];` +
+  `for(const l of fs.readFileSync(".quay/fan-in-step-trace.jsonl","utf8").split("\\n")){` +
+  `if(!l.trim())continue;let r;try{r=JSON.parse(l)}catch{continue}` +
+  `if(r.kind==="goal-merge")continue;R.push(r)}` +
+  `let last=null;` +
+  `for(const r of R)if(r.step==="baseline-red-exempt"&&r.ts&&(!last||r.ts>last))last=r.ts;` +
+  `if(!last)process.exit(1);` +
+  `const W=R.filter(r=>r.step==="baseline-red"&&r.ts&&r.ts>last);` +
+  `if(W.length===0)process.exit(1);` +
+  `const nums=W.filter(r=>typeof r.baselineFiles==="number");` +
+  `if(nums.length===0)process.exit(1);` +
+  `if(nums.some(r=>r.baselineFiles!==0))process.exit(1);` +
+  `const byTask=new Map();` +
+  `for(const r of R)if(r.task&&r.ts){const a=byTask.get(r.task)||[];a.push(r);byTask.set(r.task,a)}` +
+  `let bad=0;` +
+  `for(const [t,recs] of byTask){` +
+  `recs.sort((a,b)=>a.ts<b.ts?-1:a.ts>b.ts?1:0);` +
+  `let pending=false;` +
+  `for(const r of recs){` +
+  `if(r.step==="baseline-red"){if(pending)bad++;pending=r.verdict==="exempt"}` +
+  `else if((r.step==="baseline-red-exempt"||r.step==="suite-recovery-baseline-exempt")&&pending)pending=false}` +
+  `if(pending)bad++}` +
+  `process.exit(bad===0?0:1)'`;
+
 export const MANIFEST: CarrierSpec[] = [
   {
     file: "fan-in-step-trace.jsonl",
@@ -294,7 +339,7 @@ export const MANIFEST: CarrierSpec[] = [
     // 子系统的加载面）；改判别键取值必须同时改这里，缺一即静默失效（本文件的词表一贯是人审查过的声明，
     // 见头注「词表是【人审查过的声明】，不是从代码推导」）。
     skipKind: "goal-merge",
-    // 11 个 rate-stopped 分组的机器可读裁定：前 5 条来自 gap-fan-in-step-trace-rate-stopped-adjudication
+    // 12 个 rate-stopped 分组的机器可读裁定：前 5 条来自 gap-fan-in-step-trace-rate-stopped-adjudication
     // （触发普查为 0 的三组、条件性不可达的一组、真回归信号一组）；接着 3 条（suite-skip /
     // suite-recovery / suite-recovery-blocked）来自 gap-instrument-decay-explained-absence-declarations
     // ——同一批分组此前已在 2026-10-22、2026-10-23 两次被**散文**裁定过，第三次才落成机制；
@@ -475,6 +520,23 @@ export const MANIFEST: CarrierSpec[] = [
           "之前。任何一条 accepted 在其前置 incomplete 之后两条来路都找不到 ⇒ 认证发生在一个没有记录的出口上" +
           "⇒ 本组写手腐烂（那段 trace 被删/改路径）⇒ 本裁定立即失效、回到 decayed[]。",
         conditionCmd: RECOVERY_EXEMPT_TRIGGER_CMD,
+        reviewAfter: "2026-11-22T00:00:00.000Z",
+      },
+      {
+        group: "baseline-red-exempt",
+        kind: "conditional-on-input",
+        reason:
+          "写手 worker-fan-in.ts:3482-3487（**主路径**的既存红等价 A/B 出口）：判据是纯函数 " +
+          "compareFailureSignatures（:1420-1446），exempt ⇔ task 红集 ⊆ baseline 红集 ⇒ baseline 红集为空时，" +
+          "非空 task 红集恒不可能是它的子集，本组结构上不可达（直到 develop 再出现持续红）。当前实测：" +
+          ".quay/develop-red-set.json 的 reds=[]，且 A/B 只在 rerun 仍红时到达 ⇒「task 红集为空」这条唯一能让" +
+          "空 baseline 判 exempt 的路径走不到这里。全历史 79 条（2026-10-13T00:53:58Z → 2026-10-27T04:58:55Z，" +
+          "间隔中位数 0.58h）= 主流终端分支，不是 rare-by-design。条件读的是【窗口内 A/B 判词的形态】：" +
+          "末次本组写入之后必须 ≥1 条 A/B（⛔ 零 A/B 不是解释）、可读的 baselineFiles 必须全为 0（结构性理由" +
+          "本身）、且每条 exempt 的 baseline-red 都必须等到同 task 的收尾（主路径 baseline-red-exempt 或" +
+          "恢复阶梯 suite-recovery-baseline-exempt——两条路径共用同一个 runBaselineEquivalence，恢复阶梯的" +
+          "收尾⛔ 不得被读成主路径写手腐烂）。任何一条不成立 ⇒ 本裁定立即失效、回到 decayed[]。",
+        conditionCmd: BASELINE_RED_EXEMPT_TRIGGER_CMD,
         reviewAfter: "2026-11-22T00:00:00.000Z",
       },
     ],

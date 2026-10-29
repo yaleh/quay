@@ -55,6 +55,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
+import { ancestry } from "./ancestry.ts";
 
 /**
  * The landing baseline's quay role name — the SAME literal the shipped mechanism reads.
@@ -201,20 +202,17 @@ function revCount(root: string, a: string, b: string): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
-/** True iff `ancestor` is reachable from `descendant` (`git merge-base --is-ancestor`). */
+/** This module's liveness budget for the ancestry probe — it runs on the `quay init` /
+ *  compatibility-classification path, where a hung git must not hang the CLI. */
+const ANCESTRY_TIMEOUT_MS = 20_000;
+
+/** True iff `ancestor` is reachable from `descendant`. The PREDICATE is `./ancestry.ts`
+ *  (semantic-dedup-scan finding `is-ancestor-three-semantics`: it was copied into this module,
+ *  goal-merge.ts and observation.ts with three different value sets); this wrapper is only the
+ *  timeout policy. `null` = could not be asked, and every caller below keeps it distinct from a
+ *  measured `false` (hard rule 3b). */
 function isAncestor(root: string, ancestor: string, descendant: string): boolean | null {
-  try {
-    execFileSync("git", ["-C", root, "merge-base", "--is-ancestor", ancestor, descendant], {
-      timeout: 20_000,
-      stdio: ["ignore", "ignore", "ignore"],
-    });
-    return true; // exit 0
-  } catch (e) {
-    // exit 1 === "not an ancestor" (a MEASURED negative); any other failure === could not tell.
-    const status = (e as { status?: number }).status;
-    if (status === 1) return false;
-    return null;
-  }
+  return ancestry(root, ancestor, descendant, { timeoutMs: ANCESTRY_TIMEOUT_MS });
 }
 
 // ── default-branch detection ─────────────────────────────────────────────────────────────────────
