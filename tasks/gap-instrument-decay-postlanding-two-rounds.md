@@ -34,7 +34,7 @@ depends_on:
 
 ## Evidence
 
-**2026-10-23 复查轮（worker）：前置未满足，AC/DoD 均未勾，未翻 done。**
+**前置已满足（2026-10-29 复查）：d9610e05a 在 develop，依赖 done，可开始读生产轮次**
 
 - **落地提交未被合入**：`d9610e05a4d9647af4122835783ef6b12de6fb7d`
   （`quality-gate-driver: instrument-decay filing dedup reads <root>/.quay/quality-round.jsonl`，2026-10-23 13:29:36 +0800 = 05:29:36Z）**不在 develop**：
