@@ -3,7 +3,7 @@ id: gap-routine-semantic-dedup-scan-extract-section-copy
 title: "semantic-dedup-scan: Byte-identical 9-line heading-section extractor
   (only delta is the non-null assertion `headingMatch.index!`);
   task-shape-artifacts.ts does not import the kerne"
-status: ready
+status: done
 labels:
   - gap
   - routine-filed

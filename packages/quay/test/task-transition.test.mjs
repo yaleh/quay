@@ -33,6 +33,7 @@ import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { execFileSync, spawn } from "node:child_process";
 
+import { stripComments } from "../../../plugin/scripts/source-text-lib.ts";
 import { TASK_STATUSES as ABI_STATUSES } from "../src/abi.ts";
 import {
   TASK_STATUSES,
@@ -53,9 +54,13 @@ import {
   taskStatusEventsLockPath,
 } from "../src/kernel/task-transition.ts";
 
-/** The kernel module's own realpath — what `appendTaskStatusEvent` reports as `producer.writerModule`. */
-const KERNEL_FILE = fs.realpathSync(fileURLToPath(new URL("../src/kernel/task-transition.ts", import.meta.url)));
-/** The kernel module's own URL — what the child-process fixture imports (⛔ never a copied file). */
+/** The realpath of the module that DEFINES `appendTaskStatusEvent` — what it reports as
+ *  `producer.writerModule`. ⛔ Since the seam split (task
+ *  gap-routine-architecture-analysis-god-module-task-transition-mixed-concerns) the writer lives in
+ *  `kernel/task-status-events.ts`; this file still imports it through `task-transition.ts`'s barrel,
+ *  and the assertion below stays exact so a barrel that starts fabricating the path is caught. */
+const KERNEL_FILE = fs.realpathSync(fileURLToPath(new URL("../src/kernel/task-status-events.ts", import.meta.url)));
+/** That module's URL — what the child-process fixture imports (⛔ never a copied file). */
 const KERNEL_URL = pathToFileURL(KERNEL_FILE).href;
 
 // ── 1. vocabulary ────────────────────────────────────────────────────────────────────────────────
@@ -188,7 +193,7 @@ test("(a) appendTaskStatusEvent: the v1 record shape, and `eventId` is STABLE ac
 
     // producer: the DIRECT reading of which code ran (GOAL-030 AC-337's two fields), plus host/pid
     // and the pure-filesystem HEAD reading.
-    assert.equal(fs.realpathSync(rec.producer.writerModule), KERNEL_FILE, "producer.writerModule is the kernel realpath");
+    assert.equal(fs.realpathSync(rec.producer.writerModule), KERNEL_FILE, "producer.writerModule is the writing module's realpath");
     assert.equal(typeof rec.producer.pid, "number");
     assert.equal(typeof rec.producer.host, "string");
     assert.ok(rec.producer.host.length > 0);
@@ -432,4 +437,51 @@ test("gitBlobSha: the pure-computed blob hash equals what git itself reports for
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
+});
+
+// ── 5. the SEAM (task gap-routine-architecture-analysis-god-module-task-transition-mixed-concerns) ─
+//
+// The god-module finding was that ONE file carried two unrelated jobs (lifecycle transition
+// decisions vs the status-event carrier substrate, 1,015 lines / 47 exports). Splitting it once is
+// not the fix — a split that silently re-merges is. This test is the ratchet: the decision module
+// stays the decision table (no `node:` import, no carrier/lock DEFINITION) and the two substrate
+// modules stay where the writers look for them. It reads CODE ONLY (stripComments), so a prose
+// mention of a moved symbol cannot satisfy it (hard rule 2 — judge by position, not by keyword).
+
+test("5. seam: task-transition stays the decision table; the substrate lives in its own kernel modules", () => {
+  const kernelDir = fileURLToPath(new URL("../src/kernel/", import.meta.url));
+  const read = (f) => stripComments(fs.readFileSync(path.join(kernelDir, f), "utf8"));
+  const decision = read("task-transition.ts");
+  const substrate = read("task-status-events.ts");
+  const lock = read("file-lock.ts");
+
+  // The decision table is still here …
+  assert.match(decision, /export const LIFECYCLE_EDGES/);
+  assert.match(decision, /export function decideTransition\(/);
+  assert.match(decision, /export function patchStatusField\(/);
+  // … and imports nothing at all: an edge table + its decision are pure data / pure functions, and
+  // the substrate modules own every `node:*` import. A `node:` import reappearing here is the first
+  // sign that a third job moved back in.
+  assert.doesNotMatch(decision, /from\s+["']node:/, "the decision module must not import node builtins");
+
+  // The substrate is NOT DEFINED here any more. `export *` forwarding is not a definition.
+  for (const sym of ["appendTaskStatusEvent", "readTaskStatusEventCarrier", "acquireFileLock", "gitBlobSha"]) {
+    assert.doesNotMatch(
+      decision,
+      new RegExp(`export\\s+(?:declare\\s+)?(?:async\\s+)?(?:function|const|interface|type|class)\\s+${sym}\\b`),
+      `${sym} must be DEFINED in its own module, not re-declared in task-transition.ts`,
+    );
+  }
+  assert.match(
+    decision,
+    /export \* from "\.\/task-status-events\.ts"/,
+    "task-transition.ts must forward the substrate so every existing import specifier still resolves",
+  );
+
+  // Each moved responsibility has exactly one home.
+  assert.match(substrate, /export function appendTaskStatusEvent\(/);
+  assert.match(substrate, /export function gitBlobSha\(/);
+  assert.doesNotMatch(substrate, /export function acquireFileLock\(/, "the lock belongs to file-lock.ts");
+  assert.match(lock, /export function acquireFileLock\(/);
+  assert.match(lock, /export function withFileLock[<(]/, "the lock module owns the scoped variant too");
 });

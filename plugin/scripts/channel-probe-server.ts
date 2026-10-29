@@ -21,11 +21,11 @@
 
 import http from "node:http";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 // one (below) is now a one-line arity adapter over the shared `flagValue`; its algorithm was one of
 // the ~73 hand-written copies of the indexOf+next-arg idiom in plugin/scripts
 // (.quay/routine-findings.jsonl finding `arg-parsing-helper-family`, routine `semantic-dedup-scan`).
-import { appendJsonlLine, flagValue } from "./gate-script-base.ts";
+// `isDirectEntry` (the entry guard at the bottom) is likewise the SHARED one — see that call site.
+import { appendJsonlLine, flagValue, isDirectEntry } from "./gate-script-base.ts";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
@@ -278,10 +278,9 @@ function main(): void {
   });
 }
 
-const isDirect = (() => {
-  const a1 = process.argv[1];
-  if (!a1) return false;
-  try { return path.resolve(a1) === path.resolve(fileURLToPath(import.meta.url)); } catch { return false; }
-})();
-
-if (isDirect) main();
+// Entry guard — the SHARED `isDirectEntry` (name identity, `expectedBase` REQUIRED), extracted from
+// the byte-identical private copy this file and peer-identity-probe.ts both carried
+// (.quay/routine-findings.jsonl finding `is-direct-arrow`, routine `semantic-dedup-scan`, runId
+// `semantic-dedup-scan-1793251416079`). ⛔ Do not re-inline an `import.meta.url` comparison here:
+// under bundling every inlined module shares one URL, so a URL-based guard fires for libraries too.
+if (isDirectEntry(import.meta, process.argv[1], "channel-probe-server")) main();

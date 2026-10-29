@@ -123,7 +123,7 @@ test("promote edge: --apply flips todo→ready and appends exactly one promote e
   assert.equal(ev.kind, "promote", "AC1: the promote edge's kind comes from LIFECYCLE_EDGES");
   assert.equal(ev.schema, "task-status-event/v1", "contract v1 (gap-task-status-events-contract-v1)");
   assert.deepEqual(ev.actor, { kind: "promotion-driver", id: "ready-pool-check --apply" }, "the actor names the writer CLASS and the producing entry point");
-  assert.ok(ev.producer.writerModule.endsWith("packages/quay/src/kernel/task-transition.ts"), `producer.writerModule is the kernel module, got ${ev.producer.writerModule}`);
+  assert.ok(ev.producer.writerModule.endsWith("packages/quay/src/kernel/task-status-events.ts"), `producer.writerModule is the module that defines the writer, got ${ev.producer.writerModule}`);
   assert.equal(typeof ev.producer.pid, "number");
   assert.equal(ev.producer.entry, fs.realpathSync(SCRIPT), "producer.entry is the process entry (this run's realpath)");
   assert.equal(typeof ev.seq, "number");

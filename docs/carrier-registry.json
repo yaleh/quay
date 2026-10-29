@@ -548,13 +548,13 @@
     {
       "name": "task-status-events.jsonl",
       "kind": "jsonl-log",
-      "owner": "packages/quay/src/kernel/task-transition.ts",
+      "owner": "packages/quay/src/kernel/task-status-events.ts",
       "readers": "unaudited"
     },
     {
       "name": "task-status-events-state.json",
       "kind": "state-json",
-      "owner": "packages/quay/src/kernel/task-transition.ts",
+      "owner": "packages/quay/src/kernel/task-status-events.ts",
       "readers": "unaudited"
     },
     {
