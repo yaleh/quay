@@ -46,6 +46,10 @@ AC7（cp 备份回退核心改动 → 变红 → cp 恢复 → 绿，不用 git 
 
 架构修正（2026-10-29 续做，修复 79d0bce01 引入的回归）：该提交为满足 serve-binding-literal-check 把声明预览 host 回退从 loopback 字面量改成 import `serve/view/serve-binding.ts` 的 `SERVE_BINDING_FALLBACK.host`——违反 architecture-boundaries P2（root-level 不得 import serve/）且制造 directory-cycle。改为在 `core/config.ts` 定义独立常量 `PREVIEW_HOST_FALLBACK`（loopback `127.0.0.1`，与 serve web binding 是不同量），`goal-preview.ts` 用之；`serve-binding-literal-check.ts` 增一条 allowlist。`architecture-boundaries` / `directory-cycle` / `serve-binding-literal-check` 三测绿；`goal-preview-trial-surface` 5/5 绿（AC2 healthUrl 改 `{host}` 显式钉死 loopback 回退）。
 
+测试基建解锁（2026-10-29 续做）：全量 suite 在 `driver-runtime-s07.test.mjs`（gap-ac203）与 `driver-restart-busy-e2e.test.mjs` 因全表 `ps -eo pid=,args=` / `pid,args` 输出（实测 ~1.16MB / 5845 进程）超过 spawnSync/execFileSync 默认 maxBuffer 1MB 而 ENOBUFS 红（`ps 读数必须可得`，硬规则 3b），阻塞本任务全量 suite fan-in。两处调用加 `maxBuffer: 64 * 1024 * 1024`（重落 48bd794d9 的修法；该提交曾搁浅在 goal/GOAL-912、未 ff 到 develop）。修后 `driver-runtime-s07` AC2/AC3 2/2 绿。
+
+套件解锁（2026-10-29 续做）：全量 suite 在 `packages/quay/test/goal-store.test.mjs`「能力闸 AC8(生产面)」失败——该 sweep 把每条 criterion 一律对 repo root（主检出）判能力，而 branch-mode goal（GOAL-912）的 criterion 在 goal criterion worktree 上实跑；AC-927 的 `bash plugin/scripts/codex-stage1-spawn-verify.sh` 只落在 goal/GOAL-912 分支（`gap-meta-criterion-capability` 刻意如此），主检出不解析 ⇒ 被误判 `uncertifiable-executed-artifact`（not-evaluated）。修法：该 sweep 改用 `criterionCwdFor`（与生产同源）解析每条 criterion 的实际 cwd；branch-mode 且 worktree 未 provision 时跳过（环境事实，非过度拒绝）；branch-mode 且仅 `uncertifiable-executed-artifact` 的拒绝交由 goal-driver `missingCarriers`，不由此 sweep 报。修后 `node --no-warnings --test packages/quay/test/goal-store.test.mjs` 98/98 绿。
+
 ## Touches
 
 - packages/quay/src/goal-preview.ts
@@ -55,16 +59,20 @@ AC7（cp 备份回退核心改动 → 变红 → cp 恢复 → 绿，不用 git 
 - packages/quay/src/config.ts
 - packages/quay/test/goal-preview-trial-surface.test.mjs
 - packages/quay/test/goal-preview.test.mjs
+- packages/quay/test/goal-store.test.mjs
 - plugin/skills/manager/SKILL.md
 - plugin/skills/init/SKILL.md
 - plugin/scripts/serve-binding-literal-check.ts
+- plugin/test/helpers/driver-runtime-harness.mjs
+- plugin/test/driver-restart-busy-e2e.test.mjs
 - orchestration/SPEC-goal-branch-2026-10-03.md
 - tasks/gap-goal-branch-preview-trial-surface-declarable.md
 
 ## Blocker
 
-**2026-10-29T13:16:01.143Z — worker 未落地（exited-not-landed）**
+**2026-10-29T13:16:01.143Z — worker 未落地（exited-not-landed）→ 已解除**
 
-- 未落地原因：step=suite: AssertionError [ERR_ASSERTION]: 1 条现存判据被误判为非只读 —— 这把闸在生产上会开始拒绝真判据
+- 根因：step=suite 全量 suite 在 `packages/quay/test/goal-store.test.mjs`「能力闸 AC8(生产面)」失败——该 sweep 把每条 criterion 一律对 repo root（主检出）判能力，而 branch-mode goal（GOAL-912）的 criterion 在 goal criterion worktree 上实跑；AC-927 的 `bash plugin/scripts/codex-stage1-spawn-verify.sh` 只落在 goal/GOAL-912 分支，主检出不解析 ⇒ 被误判 `uncertifiable-executed-artifact`（not-evaluated）。
+- 解除：该 sweep 改用 `criterionCwdFor`（与生产同源）解析每条 criterion 实际 cwd；branch-mode 且 worktree 未 provision 时跳过；branch-mode 且仅 `uncertifiable-executed-artifact` 的拒绝交由 goal-driver `missingCarriers`。修后 `packages/quay/test/goal-store.test.mjs` 98/98 绿。Touches 增列 `packages/quay/test/goal-store.test.mjs`。
 - run_id：wk-prod-anchor
 - session_id：823bc9bf-08f3-4154-9aee-5ffc98908609
