@@ -3,7 +3,7 @@ id: gap-routine-semantic-dedup-scan-transcript-set-copy
 title: "semantic-dedup-scan: Same transcript-path collector at Jaccard 1.0 (202
   vs 206 chars); the .mjs copy is import-free by design (documented carve-out)
   so the correct action is a plug"
-status: todo
+status: ready
 labels:
   - gap
   - routine-filed
