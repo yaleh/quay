@@ -31,8 +31,8 @@ assert.equal(readerConcurrency, bruteMax, `the reader's ${readerConcurrency} equ
 
 ## Acceptance Criteria
 
-- [ ] 测试改为用同一组 rows 交叉验证（reader 算法 vs brute-force），不再对活载体读两次。
-- [ ] `node --test plugin/test/full-suite-runner-cgroup.test.mjs` 绿。
+- [x] 测试改为用同一组 rows 交叉验证（reader 算法 vs brute-force），不再对活载体读两次。
+- [x] `node --test plugin/test/full-suite-runner-cgroup.test.mjs` 绿。
 
 ## Definition of Done
 
