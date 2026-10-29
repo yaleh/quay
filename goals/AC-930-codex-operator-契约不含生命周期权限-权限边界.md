@@ -1,7 +1,7 @@
 ---
 id: AC-930
 title: Codex operator 契约不含生命周期权限（权限边界）
-status: active
+status: achieved
 kind: criterion
 goal: GOAL-912
 criterion: node --test plugin/test/codex-stage1-adapter.test.mjs
@@ -15,6 +15,11 @@ statusLog:
     to: active
     actor: goal-cli
     reason: 人 2026-10-29 裁定激活（SPEC §1 ③）
+  - at: 2026-10-29T07:42:36.861Z
+    from: active
+    to: achieved
+    actor: goal-driver
+    reason: "I2: criterion pass"
 long-term: true
 fidelity:
   verdict: faithful
