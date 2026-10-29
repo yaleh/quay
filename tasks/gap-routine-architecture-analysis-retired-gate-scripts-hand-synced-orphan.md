@@ -3,7 +3,7 @@ id: gap-routine-architecture-analysis-retired-gate-scripts-hand-synced-orphan
 title: "architecture-analysis: plugin/README.md:77-84 declares
   plugin/gate-scripts RETIRED and 'no longer synced by sync.sh', yet both files
   are md5-identical to the live experiments copie"
-status: needs-human
+status: ready
 labels:
   - gap
   - routine-filed
@@ -84,7 +84,7 @@ ADR-007 暗轴记录：
 - `packages/quay/scripts/package.sh`
 - `packages/quay/test/npm-pack-e2e.test.mjs`
 - `plugin/README.md`
-- plugin/sh-census-baseline.json
+- `plugin/sh-census-baseline.json`
 - `plugin/scripts/capability-catalog-declarations.json`
 - `plugin/scripts/publish-dist-branch.sh`
 - `plugin/scripts/release-freshness-check.sh`
@@ -112,3 +112,13 @@ ADR-007 暗轴记录：
 - run_id：wk-prod-anchor
 - suite 日志：/data/home/yale/work/quay/.quay/fan-in-suite-gap-routine-architecture-analysis-retired-gate-scripts-hand-synced-orphan~wk-prod-anchor~1793164830932-9e4662.log
 - fan-in 日志：/data/home/yale/work/quay/.quay/fan-in-gap-routine-architecture-analysis-retired-gate-scripts-hand-synced-orphan-wk-prod-anchor.log
+
+## 后续处置（2026-10-29，人工复位 ready）
+
+**红点定性**：`plugin/test/sh-census-check.test.mjs` 的 AC6 是**本任务自己引入**的红，不是既存红。本任务把 `plugin/gate-scripts/`（14 个文件）移入 `archive/2026-10-28-retired-gate-scripts-orphan/`，而普查的声明范围排除顶层 `archive/`（`sh-census-check.ts` 的 `ARCHIVE_PREFIX`，与 AC2 的独立 `grep -v '^archive/'` 同集合），12 个 `.sh` 因此离开普查人口（146 → 134），其中 4 个在 embedded-interpreter 棘轮轴上各计 11 行 ⇒ 实测读数 6504 → 6460。AC6 要求基线**等于**实测值（不是上界），而基线仍停在 6504 ⇒ 只要任务分支在，该测试恒红。⇒ 这不是「等别人先落地」的互锁死锁，是本任务自己欠的一次 re-anchor；电路断路器的通用建议在此不适用。
+
+**已做的修复（任务分支，提交 063d28e81）**：`plugin/sh-census-baseline.json` 的 `embeddedInterpreterLines` 6504 → 6460，并在 `_reanchorLog` 追加一条带逐文件归属的记录——`plugin/gate-scripts/audit-independence-check.sh`、`it0-backlog-projection-check.sh`、`it0-dod-check.sh`、`vmeta-lag-check.sh` 各 11 行（11×4 = 44，全部是 embedded:[node]）；其余 8 个被移动的 `.sh` 的 embedded 为空，只影响 `totals.scripts` / `totals.codeLines`（报告项，不进棘轮）。方向是**下调**，属基线本来就允许的方向；`duplicateCopies` 保持 0（该轴只数 `experiments/**/scripts` ↔ `plugin/scripts`，`plugin/gate-scripts/` 从不在其人口里）。所有数值取自检查器自己的读数，未手填。
+
+**验证读数（本轮实跑）**：`node --test plugin/test/sh-census-check.test.mjs` → 22/22 pass；`anti-drift-touches-check --task <本任务> --worktree <本任务 worktree> --merge-target develop` → OK（28 个实际改动文件全部落在 19 条 Touches 内）；`gate-scripts-retirement` 5/5、`verify-delivery-surface` 22/22、`release-freshness-check` 21/21。worktree 已 merge develop（behind=0，ahead=9）。
+
+**下一步**：复位后由 driver 重派 ⇒ 机械 fan-in（merge develop → delta → typecheck → scoped → 全量 suite → ff develop）。上一轮全量 suite 的唯一红点就是本条，预期绿；若出现**新**红点，签名变化会把电路断路器的连续计数归 1，不会被旧死锁记录卡住。
