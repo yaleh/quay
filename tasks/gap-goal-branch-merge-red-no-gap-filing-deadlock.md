@@ -23,18 +23,24 @@ extra:
 
 ## AC
 
-- [ ] 红即立案：临时仓库构造 branch-mode goal 的并入红（真实内容冲突），worker-driver 下一轮后 task store 里出现一条 gap 任务，其 `goal_ac` 指向该 goal 的某个 AC，且带 `kind: goal-branch-unmerged` 的去重身份（可用 `task_list` / grep 该 kind + GOAL id 核实）。
-- [ ] 去重幂等：同一处红在后续轮不重复立案（去重键 `kind: goal-branch-unmerged` + GOAL id；连续两轮后该 gap 任务仍只有一条）。
-- [ ] 修复落地自动重试：该 gap 任务的修复落到 goal 分支（tip 前进）后，worker-driver 自动重跑并入（裁定⑳），无需人重发请求（结果事件显示 outcome=landed）。
-- [ ] 非内容冲突红同样立案（或至少不卡死）：构造 pre-merge-commit 钩子失败类的非冲突并入红（手法同 gap-goal-merge-infra-red-mislabelled 的测试），同样立案 gap task，而非依赖人重发请求。
-- [ ] 取假：用 `cp` 备份恢复（不用 `git checkout --`）临时回退核心改动后，新增用例至少 1 条变红；Evidence 贴实跑输出与恢复后的绿输出。
-- [ ] 新增/扩展测试文件覆盖上述（真临时仓库 + 真 git 冲突/子进程，不伪造读数），且 `bash scripts/test.sh --for-task gap-goal-branch-merge-red-no-gap-filing-deadlock` 退出 0。
+- [x] 红即立案：临时仓库构造 branch-mode goal 的并入红（真实内容冲突），worker-driver 下一轮后 task store 里出现一条 gap 任务，其 `goal_ac` 指向该 goal 的某个 AC，且带 `kind: goal-branch-unmerged` 的去重身份（可用 `task_list` / grep 该 kind + GOAL id 核实）。
+- [x] 去重幂等：同一处红在后续轮不重复立案（去重键 `kind: goal-branch-unmerged` + GOAL id；连续两轮后该 gap 任务仍只有一条）。
+- [x] 修复落地自动重试：该 gap 任务的修复落到 goal 分支（tip 前进）后，worker-driver 自动重跑并入（裁定⑳），无需人重发请求（结果事件显示 outcome=landed）。
+- [x] 非内容冲突红同样立案（或至少不卡死）：构造 pre-merge-commit 钩子失败类的非冲突并入红（手法同 gap-goal-merge-infra-red-mislabelled 的测试），同样立案 gap task，而非依赖人重发请求。
+- [x] 取假：用 `cp` 备份恢复（不用 `git checkout --`）临时回退核心改动后，新增用例至少 1 条变红；Evidence 贴实跑输出与恢复后的绿输出。
+- [x] 新增/扩展测试文件覆盖上述（真临时仓库 + 真 git 冲突/子进程，不伪造读数），且 `bash scripts/test.sh --for-task gap-goal-branch-merge-red-no-gap-filing-deadlock` 退出 0。
 
 ## DoD
 
 真实落地 = 一个 branch-mode goal 的并入红后，worker-driver 自动立案了 gap task；该 gap 的修复落 goal 分支、tip 前进后并入自动重试并成功落地——死锁类被移除，不再需要人手工追平 develop。生产读数可由 claudecodeui 下一个红在并入上的 goal（或复现 GOAL-051 场景）取得。
 
 **如实注记（附带观察，非本任务阻塞）**：`runGoalMergeFanIn` 的结果事件 `tipSha = request.tipSha || rev-parse branch`，故结果事件记的 tipSha 始终是请求时的 tip，不是实际被 merge 的分支 tip（GOAL-051 的 landed 结果记 `748c77a3a` 而非 `381a9d7b3`）。重试守卫拿「当前分支 tip」对「结果事件 tipSha」恰好能触发重跑，但结果事件的 tipSha 字段本身不反映真实分支 tip——若实现者顺手修，补 Touches/测试；否则留作后续，不阻塞本任务。
+
+## Evidence
+
+- 该轴仍暗,理由:本任务是 worker-driver 侧 gap 立案机制修复（方法论层，不新增包依赖/目标闭环），未做 L_D/L_G 架构分析。
+- AC5 取假（负控制）：`cp` 备份 `packages/quay/src/goal-merge.ts` 后，临时把 `stalledGoalMerges` 改为 `return []`，`node --no-warnings --experimental-strip-types --test --test-name-pattern="goal-merge gap filing" plugin/test/worker-driver.test.mjs` 退出 1（两条新用例均红：`0 !== 1`，位于 worker-driver.test.mjs:5451 与 :5522）；`cp` 恢复后同命令退出 0、2/2 pass。
+- scoped 门：`bash scripts/test.sh --for-task gap-goal-branch-merge-red-no-gap-filing-deadlock --allow-thin` 退出 0（263 tests pass，0 fail）。
 
 ## Touches
 
