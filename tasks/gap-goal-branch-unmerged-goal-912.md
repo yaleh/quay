@@ -24,3 +24,7 @@ Fix `goal/GOAL-912` so the merge succeeds (resolve the conflict or make the veri
 
 ## DoD（draft）
 - [ ] The deadlock class is removed: the merge lands without a human re-issuing the request, and no further gap task for this goal is filed.
+
+## Touches
+
+- tasks/gap-goal-branch-unmerged-goal-912.md
