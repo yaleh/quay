@@ -3,7 +3,7 @@ id: gap-routine-architecture-analysis-god-module-task-transition-mixed-concerns
 title: "architecture-analysis: 1,015 lines/47 exports carry two unrelated jobs:
   lifecycle transition decisions (lines 76-242: LIFECYCLE_EDGES,
   decideTransition, patchStatusField) and the t"
-status: todo
+status: ready
 labels:
   - gap
   - routine-filed
