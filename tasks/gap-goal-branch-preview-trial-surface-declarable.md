@@ -44,6 +44,8 @@ AC7（cp 备份回退核心改动 → 变红 → cp 恢复 → 绿，不用 git 
 - 回退（`readPreviewDecl` 恒返回 `{ state: "default" }`，即无声明面）后跑新用例，AC2/AC4 红：`AssertionError: declared preview must start: no quay CLI entry at …/packages/quay/bin/quay.ts — the preview worktree is missing or not provisioned`（实际 `failed`、期望 `started`），整体 exit 1。
 - cp 恢复后同文件重跑：5/5 绿（pass 5 / fail 0），exit 0。
 
+架构修正（2026-10-29 续做，修复 79d0bce01 引入的回归）：该提交为满足 serve-binding-literal-check 把声明预览 host 回退从 loopback 字面量改成 import `serve/view/serve-binding.ts` 的 `SERVE_BINDING_FALLBACK.host`——违反 architecture-boundaries P2（root-level 不得 import serve/）且制造 directory-cycle。改为在 `core/config.ts` 定义独立常量 `PREVIEW_HOST_FALLBACK`（loopback `127.0.0.1`，与 serve web binding 是不同量），`goal-preview.ts` 用之；`serve-binding-literal-check.ts` 增一条 allowlist。`architecture-boundaries` / `directory-cycle` / `serve-binding-literal-check` 三测绿；`goal-preview-trial-surface` 5/5 绿（AC2 healthUrl 改 `{host}` 显式钉死 loopback 回退）。
+
 ## Touches
 
 - packages/quay/src/goal-preview.ts
@@ -55,6 +57,7 @@ AC7（cp 备份回退核心改动 → 变红 → cp 恢复 → 绿，不用 git 
 - packages/quay/test/goal-preview.test.mjs
 - plugin/skills/manager/SKILL.md
 - plugin/skills/init/SKILL.md
+- plugin/scripts/serve-binding-literal-check.ts
 - orchestration/SPEC-goal-branch-2026-10-03.md
 - tasks/gap-goal-branch-preview-trial-surface-declarable.md
 
