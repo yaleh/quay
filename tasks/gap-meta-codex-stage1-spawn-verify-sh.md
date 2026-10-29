@@ -2,7 +2,7 @@
 id: gap-meta-codex-stage1-spawn-verify-sh
 title: "落 SPEC Task A（goal_ac: AC-927）：建 codex-stage1-spawn-verify.sh + 修
   .codex/config.toml cwd"
-status: ready
+status: done
 labels:
   - meta-driver
   - driver-candidate
@@ -40,14 +40,3 @@ AC-927 的判据指向 plugin/scripts/codex-stage1-spawn-verify.sh，该文件�
 - 负控制 2（改回相对 args、无 cwd）：exit 1（`RESULT: FAIL`，no jsonrpc/result/serverInfo response）。
 - `node --test plugin/test/codex-stage1-spawn-verify.test.mjs` ⇒ 5/5 pass（含正向与两条负臂）。
 - `bash plugin/scripts/codex-stage1-selfcheck.sh`（从 packages/quay 子目录）⇒ exit 0（含 spawn-verify PASS，codex-cli 0.156.1）。
-
-## Blocker
-
-**2026-10-29T11:24:24.317Z — worker 未落地（exited-not-landed）**
-
-- 未落地原因：step=merge-develop: Auto-merging plugin/test/codex-stage1-spawn-verify.test.mjs
-CONFLICT (add/add): Merge conflict in plugin/test/codex-stage1-spawn-verify.test.mjs
-Auto-merging tasks/gap-codex-mcp-cwd-any-root-spawn-verify.md
-Automatic merge failed; fix conflicts and then commit the result.
-- run_id：wk-prod-anchor
-- session_id：e0a4f4c8-3008-4644-8d38-7247c6fbdee3
