@@ -16,7 +16,7 @@ extra: {}
 ⚠️ 机制词 `criterion-capability` 命中【已完成】任务：gap-ac925-admission-dispatch-criterion-test.md[done]、gap-criterion-side-effect-unguarded-at-write-and-execution-surface.md[done]、gap-meta-writegoalstatus.md[done]、gap-routine-architecture-analysis-god-function-creategoalstore.md[done]、gap-src-root-gate-cycle-break.md[done]——问题仍在而任务已 done ⇒ 先查那些任务为何没解决它，⛔ 不要在它们旁边新造一个并行机制。
 
 ## 结论
-已有机制在管、只是 criterion 形态与 capability judge 不兼容：`core/criterion-capability.ts` 的 `executedArtifacts` 把 `../../plugin/scripts/codex-stage1-spawn-verify.sh` 相对 gate cwd（goal-GOAL-912 worktree）解析到不存在的位置 ⇒ `uncertifiable-executed-artifact` ⇒ 判 before-execution not-evaluated。修 AC-927 的 criterion 本身（改为 judge 可解析的 `bash plugin/scripts/codex-stage1-spawn-verify.sh`），⛔ 不新建并行机制。Task A 的脚本此前只落在 goal/GOAL-912 分支，本任务按字节搬入 develop（forward-looking：goal 分支并入后 criterion 落主检出仍可跑）。
+已有机制在管、只是 criterion 形态与 capability judge 不兼容：`core/criterion-capability.ts` 的 `executedArtifacts` 把 `../../plugin/scripts/codex-stage1-spawn-verify.sh` 相对 gate cwd（goal-GOAL-912 worktree）解析到不存在的位置 ⇒ `uncertifiable-executed-artifact` ⇒ 判 before-execution not-evaluated。修 AC-927 的 criterion 本身（改为 judge 可解析的 `bash plugin/scripts/codex-stage1-spawn-verify.sh`），⛔ 不新建并行机制。脚本是 Task A 交付物、落在 goal/GOAL-912 分支（含 capability-catalog 声明），随 goal 分支并入 develop 时落地——criterion 在 goal-GOAL-912 worktree 上实跑，不依赖 develop 上有脚本。
 
 ## AC（draft）
 - [x] `node --experimental-strip-types packages/quay/src/core/goal-store.ts gate AC-927 2>&1 | grep -q 'not-evaluated' && exit 1 || exit 0` ⇒ goal-store gate AC-927 不再报 not-evaluated（返回确定 pass/fail），且把 criterion 改回 cd-prefixed 形态时判据变红
@@ -30,9 +30,8 @@ extra: {}
 - `plugin/scripts/codex-stage1-spawn-verify.sh`
 - `tasks/gap-meta-criterion-capability.md`
 
-该轴仍暗,理由:本任务仅改 goals/AC-927 的 criterion 字段、按字节搬入一个 shell 脚本、并修 task 自身 AC 命令路径，未触及 packages/* 源码依赖结构，L_D/L_G 无可测增量。
+该轴仍暗,理由:本任务仅改 goals/AC-927 的 criterion 字段并修 task 自身 AC 命令路径，未触及 packages/* 源码依赖结构，L_D/L_G 无可测增量。
 
 ## Evidence
 - 正向：`node --experimental-strip-types packages/quay/src/core/goal-store.ts gate AC-927` ⇒ `verdict: pass`、exit 0（capabilityCode=null，脚本在 goal-GOAL-912 worktree 实跑 spawn+initialize PASS）。
 - 负控制（判据能取假）：把 criterion 改回 `cd packages/quay && bash ../../plugin/scripts/codex-stage1-spawn-verify.sh` ⇒ `verdict: not-evaluated`、cause=capability、capabilityCode=criterion-capability-unevaluable ⇒ AC 命令 grep 命中 not-evaluated ⇒ exit 1（红）。
-- 脚本搬入 develop：与 goal/GOAL-912 分支字节一致（diff 空）。
