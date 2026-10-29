@@ -5,7 +5,6 @@ status: done
 labels:
   - gap
   - codex
-  - needs-human
 parent: null
 children: []
 extra:
