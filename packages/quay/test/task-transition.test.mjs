@@ -33,6 +33,7 @@ import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { execFileSync, spawn } from "node:child_process";
 
+import { stripComments } from "../../../plugin/scripts/source-text-lib.ts";
 import { TASK_STATUSES as ABI_STATUSES } from "../src/abi.ts";
 import {
   TASK_STATUSES,
@@ -436,4 +437,51 @@ test("gitBlobSha: the pure-computed blob hash equals what git itself reports for
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
+});
+
+// ── 5. the SEAM (task gap-routine-architecture-analysis-god-module-task-transition-mixed-concerns) ─
+//
+// The god-module finding was that ONE file carried two unrelated jobs (lifecycle transition
+// decisions vs the status-event carrier substrate, 1,015 lines / 47 exports). Splitting it once is
+// not the fix — a split that silently re-merges is. This test is the ratchet: the decision module
+// stays the decision table (no `node:` import, no carrier/lock DEFINITION) and the two substrate
+// modules stay where the writers look for them. It reads CODE ONLY (stripComments), so a prose
+// mention of a moved symbol cannot satisfy it (hard rule 2 — judge by position, not by keyword).
+
+test("5. seam: task-transition stays the decision table; the substrate lives in its own kernel modules", () => {
+  const kernelDir = fileURLToPath(new URL("../src/kernel/", import.meta.url));
+  const read = (f) => stripComments(fs.readFileSync(path.join(kernelDir, f), "utf8"));
+  const decision = read("task-transition.ts");
+  const substrate = read("task-status-events.ts");
+  const lock = read("file-lock.ts");
+
+  // The decision table is still here …
+  assert.match(decision, /export const LIFECYCLE_EDGES/);
+  assert.match(decision, /export function decideTransition\(/);
+  assert.match(decision, /export function patchStatusField\(/);
+  // … and imports nothing at all: an edge table + its decision are pure data / pure functions, and
+  // the substrate modules own every `node:*` import. A `node:` import reappearing here is the first
+  // sign that a third job moved back in.
+  assert.doesNotMatch(decision, /from\s+["']node:/, "the decision module must not import node builtins");
+
+  // The substrate is NOT DEFINED here any more. `export *` forwarding is not a definition.
+  for (const sym of ["appendTaskStatusEvent", "readTaskStatusEventCarrier", "acquireFileLock", "gitBlobSha"]) {
+    assert.doesNotMatch(
+      decision,
+      new RegExp(`export\\s+(?:declare\\s+)?(?:async\\s+)?(?:function|const|interface|type|class)\\s+${sym}\\b`),
+      `${sym} must be DEFINED in its own module, not re-declared in task-transition.ts`,
+    );
+  }
+  assert.match(
+    decision,
+    /export \* from "\.\/task-status-events\.ts"/,
+    "task-transition.ts must forward the substrate so every existing import specifier still resolves",
+  );
+
+  // Each moved responsibility has exactly one home.
+  assert.match(substrate, /export function appendTaskStatusEvent\(/);
+  assert.match(substrate, /export function gitBlobSha\(/);
+  assert.doesNotMatch(substrate, /export function acquireFileLock\(/, "the lock belongs to file-lock.ts");
+  assert.match(lock, /export function acquireFileLock\(/);
+  assert.match(lock, /export function withFileLock[<(]/, "the lock module owns the scoped variant too");
 });
