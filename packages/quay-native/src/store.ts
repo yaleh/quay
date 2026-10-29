@@ -261,7 +261,7 @@ export class AlreadyExistsError extends Error {
   }
 }
 
-const FRONTMATTER_RE = /^---\n([\s\S]*?)\n---\n?([\s\S]*)$/;
+const FRONTMATTER_RE = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/;
 
 /**
  * M89 (exp5-DEFECT-YAML-FRONTMATTER-COLON-CRASH): post-write YAML validation.

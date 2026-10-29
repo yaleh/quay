@@ -40,7 +40,7 @@ import path from "node:path";
 import YAML from "yaml";
 import type { Task } from "../../quay/src/abi.ts";
 
-const FRONTMATTER_RE = /^---\n([\s\S]*?)\n---\n?([\s\S]*)$/;
+const FRONTMATTER_RE = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/;
 
 /**
  * Map a Backlog.md free-form status string onto quay's task-status model

@@ -2060,7 +2060,7 @@ async function runScriptBounded(
 }
 
 /** Resolve a plugin script and run it via runScriptBounded; returns stdout or a missing-reason. */
-async function runPluginScript(root: string, rel: string, args: string[], timeoutMs = 15_000, env?: Record<string, string>): Promise<{ stdout: string | null; reason: string | null }> {
+async function runPluginScript(root: string, rel: string, args: string[], timeoutMs = Number(process.env.QUAY_PLUGIN_SCRIPT_TIMEOUT_MS || (process.platform === "win32" ? 60_000 : 15_000)), env?: Record<string, string>): Promise<{ stdout: string | null; reason: string | null }> {
   const p = resolvePluginScript(rel);
   if (!p) return { stdout: null, reason: `${rel} 缺失（产品安装无 methodology 层 → 未接入）` };
   const { stdout, exitCode } = await runScriptBounded(["bash", p, ...args], { cwd: root, timeoutMs, env });
