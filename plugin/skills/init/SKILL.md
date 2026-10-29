@@ -486,6 +486,7 @@ The init skill is a SPEC declaration point (`spec-declaration-point-check`): eve
 <!-- reference-doc: orchestration/SPEC-capability-planes-and-mechanism-lifecycle-2026-09-05.md -->
 <!-- reference-doc: orchestration/SPEC-checker-mechanical-spine-contract-2026-08-28.md -->
 <!-- reference-doc: orchestration/SPEC-codex-session-communication-host-adapter-2026-08-24.md -->
+<!-- reference-doc: orchestration/SPEC-codex-long-term-support-2026-10-29.md -->
 <!-- reference-doc: orchestration/SPEC-cold-start-one-liner.md -->
 <!-- reference-doc: orchestration/SPEC-complete-delivery-surface-2026-08-05.md -->
 <!-- reference-doc: orchestration/SPEC-context-injection-slimming-2026-09-19.md -->

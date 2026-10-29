@@ -211,6 +211,7 @@ rules* but does not re-implement each SPEC. Index (under `orchestration/` in the
 - `orchestration/SPEC-unified-quay-server-2026-09-13.md` — 统一 quay server：把 web、全部 driver、与运行中 Claude Code 会话的双向通信收进一个进程；一个项目空间 = 一个 quay server 实例 = 一个信任域（proposal·人 2026-09-13 三轮裁定；前置阅读 `SPEC-unified-driver-architecture-2026-08-23.md`）
 - `orchestration/SPEC-web-session-observability-and-control-2026-08-24.md` — web server 通用 Claude Code 会话观测 / 消息投递 / 生命周期管理：会话发现三分流（交互式·`-p`·已结束）· 统一锚点 session-id + transcript · `send-to-session.ts` socket 通道 · profile 化启动配置（proposal·人 2026-08-24 裁定三条开放问题，泛化排期在 `gap-worker-task-transcript-access-webui` 落地之后）
 - `orchestration/SPEC-codex-session-communication-host-adapter-2026-08-24.md` — Codex App Server 会话通信 Host Adapter：thread/turn 映射、宿主无关 `list/status/send/events` 契约、ack 状态、幂等性与 Claude/Codex 权限边界（proposal·不扩大 Stage 1 自治生命周期权限）
+- `orchestration/SPEC-codex-long-term-support-2026-10-29.md` — Codex 作为 quay 的长期支持宿主（交互式 operator 阶段，driver 会话链路除外）：以 goal（branch 模式）+ 2 task 承载，AC 先于 GOAL，激活归人裁定
 - `orchestration/SPEC-one-observer-two-surfaces.md` — one observer, two surfaces
 - `orchestration/SPEC-methodology-layer-architecture-2026-08-25.md` — 方法学层架构：契约面采纳而非重建抽象（checker 契约三层 / state-IO / path-root 三角色，六批次 B0-B5 棘轮演进）
 - `orchestration/SPEC-checker-mechanical-spine-contract-2026-08-28.md` — checker 机械脊柱契约（exit 0/1/2/3 语义 + --json 兑现；B1 层 1，检查器 + 豁免棘轮守着，不符者只减不增）

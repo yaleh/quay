@@ -54,6 +54,7 @@ import YAML from "yaml";
 import { goalCriterionWorktreeDir, realpathOrSelf } from "./core/goal-store.ts";
 import { readServerState, pidAlive } from "./core/server-state.ts";
 import { parsePreviewConfig, type PreviewConfig } from "./core/config.ts";
+import { SERVE_BINDING_FALLBACK } from "./serve/view/serve-binding.ts";
 import {
   entryExists,
   worktreeDepsInstallCommand,
@@ -799,7 +800,7 @@ async function startQuayPreviewServe(opts: StartPreviewOptions): Promise<Preview
  *  is `failed` — ⛔ never `started` (the fail-closed AC). */
 async function startDeclaredPreview(opts: StartPreviewOptions, config: PreviewConfig): Promise<PreviewStartReading> {
   const { previewRoot, port } = opts;
-  const host = opts.host ?? "127.0.0.1";
+  const host = opts.host ?? SERVE_BINDING_FALLBACK.host;
   const vars = { port, host };
   const healthUrl = renderPreviewTemplate(config.healthUrl, vars);
   const argv = config.command.map((tok) => renderPreviewTemplate(tok, vars));
