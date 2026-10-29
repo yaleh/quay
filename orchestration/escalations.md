@@ -680,6 +680,13 @@ restart-readiness-check 报 NOT READY，硬失败 = 16 条 stranded 任务分支
 - `task/gap-suite-scheduler-main-lpt-missing` → `7d12e5a2`（superseded）
 - `task/gap-official-dist-delivery-acceptance-resource-optimization-quay-ccui-clean-host` → `6bd55207`（ready，代码已并入 develop；worktree 未提交内容 = 纯运行时噪音 `.quay/task-status-events*`）
 
-**待确认（7 条，diff 结论已给：全部丢弃）**：档 B 三条 done（ac292 / dashboard-kernel /
-release-cut，代码均已在 develop）+ 档 C 四条大行数 superseded（execution-loop-productization 已重做 /
-retire-inner 未应用 / fan-in-ff-merge-token 目标文件已删 / suite-lpt-dual 方向已放弃）。
+**已确认丢弃（7 条，人 2026-10-29 裁定；记 tip SHA 供恢复）**：
+- `task/gap-ac292-criterion-carrier-absence-not-evaluated` → `514e7afb`（done；测试文件与 develop 逐字节一致）
+- `task/gap-dashboard-kernel-export-for-cross-project-reuse` → `d1e3464e`（done；核心 export 已落地，注释默认弃）
+- `task/gap-execution-loop-productization-p2-p4` → `65280173`（superseded；ff-merge.ts 已重做演进）
+- `task/gap-fan-in-ff-merge-token-gate-fail-closed` → `2b327680`（superseded；目标 .sh 已删）
+- `task/gap-release-cut-via-workflow-dispatch` → `6d0b0aea`（done；workflow_dispatch 已在 develop）
+- `task/gap-retire-inner-session-hygiene-scripts` → `95447732`（superseded；退休未应用）
+- `task/gap-suite-lpt-dual-process-sharding` → `73145961`（superseded；方向已放弃）
+
+**附**：`gap-official-dist-delivery` 任务 status 由 ready 翻 done（人裁定：代码已并入 develop，stranded 清理时翻正）。
