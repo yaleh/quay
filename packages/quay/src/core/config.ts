@@ -204,6 +204,74 @@ export function readReleaseConfig(startDir = process.cwd()): ReleaseConfigResolu
   return { state: "configured", config: judged.config, configPath, source: "config" };
 }
 
+// ── The `preview:` section — the DECLARED trial surface (SPEC-goal-branch §4.10) ──────────────────
+//
+// THE DEFECT THIS CLOSES (gap-goal-branch-preview-trial-surface-declarable): `goal preview` used to
+// start the preview worktree's OWN `quay.ts serve` unconditionally. In quay's own repo that IS the
+// product, so the trial surface was correct; in a CONSUMER project (claudecodeui → a CloudCLI server,
+// anything that drives its own product surface) the hard-coded serve either starts the wrong product
+// or fails to find a `quay` entry at all — so ruling ⑮ (must be triable before merge) and ruling ㉒
+// (no preview ⇒ live-probe AC is not-evaluated ⇒ cannot merge) have no landing point.
+//
+// The fix makes the trial surface DECLARABLE: a workspace may name the command that starts its
+// preview product and the health URL that says it is up. Absence keeps the historical quay-serve
+// fallback (quay's own repo declares nothing ⇒ byte-identical behaviour). The shape judge below is
+// the SINGLE definition point — `config-validate` and the runtime (`goal-preview.ts`) both ask THIS
+// function, so a config one accepts and the other rejects is impossible by construction (the same
+// contract the `release:` section above already keeps with `parseReleaseConfig`).
+
+export interface PreviewConfig {
+  /** The argv that starts the preview product, run with cwd = the preview worktree. Each token may
+   *  contain `{port}` and `{host}` placeholders, substituted from the `--port`/`--host` the human
+   *  passed to `goal preview start`. A non-empty list of non-empty strings. */
+  command: string[];
+  /** The health URL the preview product answers on once up, also a `{port}`/`{host}` template.
+   *  `start` polls it for HTTP 200; `status`/a live-probe AC read the same address from the carrier
+   *  the preview mechanism writes (`.quay/preview.json`). */
+  healthUrl: string;
+}
+
+/**
+ * Judge ONE raw `preview:` value (already YAML-parsed). A PRESENT value only: absence (`undefined`)
+ * is the caller's decision (the runtime keeps the quay-serve fallback; the validator passes a section
+ * that is not there). A present-but-empty key (`preview:` with no body ⇒ `null`) is a shape error —
+ * "declared nothing" must not read as "declared the default" (hard rule 3b).
+ */
+export function parsePreviewConfig(
+  raw: unknown
+): { ok: true; config: PreviewConfig } | { ok: false; reason: string } {
+  if (raw === undefined) return { ok: false, reason: "`preview:` is absent (the caller decides what absence means)" };
+  if (raw === null) return { ok: false, reason: "`preview:` is empty — declare command/health.url, or remove the key" };
+  if (typeof raw !== "object" || Array.isArray(raw)) {
+    return { ok: false, reason: "`preview:` must be a mapping" };
+  }
+  const p = raw as Record<string, unknown>;
+
+  const command = p.command;
+  if (!Array.isArray(command) || command.length === 0) {
+    return { ok: false, reason: "`preview.command` must be a non-empty list of argv tokens" };
+  }
+  for (const tok of command) {
+    if (typeof tok !== "string" || tok.trim() === "") {
+      return { ok: false, reason: "`preview.command` entries must be non-empty strings" };
+    }
+  }
+
+  const health = p.health;
+  const healthUrl = health && typeof health === "object" ? (health as Record<string, unknown>).url : undefined;
+  if (typeof healthUrl !== "string" || healthUrl.trim() === "") {
+    return { ok: false, reason: "`preview.health.url` must be a non-empty string (a URL template)" };
+  }
+  if (!/^https?:\/\//.test(healthUrl.trim())) {
+    return { ok: false, reason: "`preview.health.url` must start with http:// or https://" };
+  }
+
+  const unknown = Object.keys(p).filter((k) => !["command", "health"].includes(k));
+  if (unknown.length > 0) return { ok: false, reason: `unknown \`preview:\` key(s): ${unknown.join(", ")}` };
+
+  return { ok: true, config: { command: command as string[], healthUrl: healthUrl.trim() } };
+}
+
 export function activeProvider(cfg, id, pluginRoot = resolvePluginRoot()) {
   const providers = cfg.config.providers ?? {};
   if (id) {

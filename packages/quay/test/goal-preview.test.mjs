@@ -135,6 +135,13 @@ function mkPreviewFixture() {
     JSON.stringify({ pid: 4242, services: { web: { up: true } } }, null, 2),
     "utf8",
   );
+  // The DECLARED preview's carrier — also instance identity (gap-goal-branch-preview-trial-surface-
+  // declarable added it to PREVIEW_INSTANCE_FILES); it must never travel into a preview either.
+  fs.writeFileSync(
+    path.join(root, ".quay", "preview.json"),
+    JSON.stringify({ schemaVersion: 1, pid: 4243, host: "127.0.0.1", port: 4174, healthUrl: "http://127.0.0.1:4174/healthz", command: ["node", "x.mjs"], startedAt: "2026-01-01T00:00:00.000Z" }, null, 2),
+    "utf8",
+  );
   // Non-identity runtime state — a snapshot must carry it.
   fs.writeFileSync(path.join(root, ".quay", "gate-events.jsonl"), '{"gate":"x"}\n', "utf8");
   fs.writeFileSync(path.join(root, ".quay", "notes.txt"), "preview me\n", "utf8");

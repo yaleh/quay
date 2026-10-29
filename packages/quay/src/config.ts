@@ -21,3 +21,10 @@ export {
   type ReleaseAdvance,
   type ReleaseConfigResolution,
 } from "./core/config.ts";
+
+// The DECLARED trial surface (`preview:` section) — same named-forwarding reason as the release
+// block above; the bodies live in `core/config.ts`.
+export {
+  parsePreviewConfig,
+  type PreviewConfig,
+} from "./core/config.ts";
