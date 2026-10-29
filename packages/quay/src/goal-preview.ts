@@ -6,6 +6,11 @@
 // pre-merge ACs are evaluated on the SAME tree, so "what the human tried" and "what the criterion
 // verified" are the same object (⑮).
 //
+// ⚠️ THE TRIAL SURFACE IS DECLARABLE (gap-goal-branch-preview-trial-surface-declarable): the `quay
+// serve` above is the DEFAULT. A workspace may declare its own product via the `.quay/config.yml`
+// `preview:` section (command + health URL); see `readPreviewDecl` / `startDeclaredPreview` below.
+// quay's own repo declares nothing, so the serve default is byte-identical to the pre-change path.
+//
 // WHO OWNS WHAT (ruling ㉒):
 //   · the WORKTREE — goal-driver creates / refreshes / deletes it (it already evaluates there);
 //   · the SERVE   — the human starts and stops it with `quay goal preview <GOAL> start|stop|status`.
@@ -42,9 +47,13 @@
 
 import fs from "node:fs";
 import path from "node:path";
+import http from "node:http";
+import https from "node:https";
 import { spawn } from "node:child_process";
+import YAML from "yaml";
 import { goalCriterionWorktreeDir, realpathOrSelf } from "./core/goal-store.ts";
 import { readServerState, pidAlive } from "./core/server-state.ts";
+import { parsePreviewConfig, type PreviewConfig, PREVIEW_HOST_FALLBACK } from "./core/config.ts";
 import {
   entryExists,
   worktreeDepsInstallCommand,
@@ -62,12 +71,18 @@ export const PREVIEW_SERVE_LOCK_BASENAME = "server.lock";
 export const PREVIEW_SERVER_STATE_BASENAME = "server.json";
 /** The per-service liveness carrier, restated from `serve.ts`'s `SERVICE_STATE_REL`. */
 export const PREVIEW_SERVICE_STATE_BASENAME = "server-services.json";
+/** The DECLARED preview's carrier (`.quay/preview.json`) — the `preview:`-surface analogue of
+ *  `server.json`: the preview mechanism writes it when it starts a declared command, and both
+ *  `status` and a live-probe AC read it to locate the product's address. It names WHICH process
+ *  hosts this root's preview, so it is instance identity and must never travel in a snapshot. */
+export const PREVIEW_CARRIER_BASENAME = "preview.json";
 
 /** Files that identify a RUNNING INSTANCE of a root. Never copied into a preview (header). */
 export const PREVIEW_INSTANCE_FILES: readonly string[] = [
   PREVIEW_SERVER_STATE_BASENAME,
   PREVIEW_SERVE_LOCK_BASENAME,
   PREVIEW_SERVICE_STATE_BASENAME,
+  PREVIEW_CARRIER_BASENAME,
 ];
 
 /** Heavy/wasteful `.quay/` entries a snapshot skips — the same set `refresh-worktree-quay.sh`
@@ -282,8 +297,194 @@ export interface PreviewStatusReading {
   detail: string;
 }
 
-/** Read a preview instance's state from ITS OWN root's `.quay/server.json` (never the main one). */
-export function readPreviewStatus(previewRoot: string): PreviewStatusReading {
+// ── the DECLARED trial surface (`.quay/config.yml` `preview:`) ───────────────────────────────────
+//
+// A workspace MAY declare its own preview product (SPEC-goal-branch §4.10, the fix for
+// gap-goal-branch-preview-trial-surface-declarable). When it does, `goal preview start` runs that
+// command instead of the hard-coded `quay.ts serve`, waits for its declared health URL to answer
+// HTTP 200, and records the address in a carrier (`.quay/preview.json`) that `status`/`stop`/a
+// live-probe AC all read. No declaration ⇒ the historical quay-serve path below, unchanged.
+
+/** What `.quay/config.yml`'s `preview:` section resolves to AT THIS PREVIEW ROOT. Three states, ⛔
+ *  never a boolean: `configured` / `default` (no section — the quay-serve fallback) / `unreadable`
+ *  (the section is present but malformed — ⛔ NOT "default", hard rule 3b: a declared-but-broken
+ *  surface must not silently become the quay serve). */
+export type PreviewDeclReading =
+  | { state: "configured"; config: PreviewConfig }
+  | { state: "default" }
+  | { state: "unreadable"; reason: string };
+
+/** Read this preview root's `.quay/config.yml` `preview:` section. ⛔ EXACT path, no walk-up: the
+ *  preview root is a criterion worktree whose own `.quay/config.yml` is the snapshot the refresh
+ *  wrote; walking up could surface an unrelated ancestor config and mis-attribute a declaration. */
+export function readPreviewDecl(previewRoot: string): PreviewDeclReading {
+  const configPath = path.join(previewRoot, ".quay", "config.yml");
+  let raw: string;
+  try {
+    raw = fs.readFileSync(configPath, "utf8");
+  } catch {
+    return { state: "default" };
+  }
+  let parsed: unknown;
+  try {
+    parsed = YAML.parse(raw);
+  } catch (err) {
+    return { state: "unreadable", reason: `.quay/config.yml did not parse: ${String((err as Error)?.message ?? err)}` };
+  }
+  const section = parsed && typeof parsed === "object" ? (parsed as Record<string, unknown>).preview : undefined;
+  if (section === undefined) return { state: "default" };
+  const judged = parsePreviewConfig(section);
+  if ("reason" in judged) return { state: "unreadable", reason: judged.reason };
+  return { state: "configured", config: judged.config };
+}
+
+/** Substitute the `{port}` / `{host}` placeholders a `preview:` command/health template may carry. */
+export function renderPreviewTemplate(template: string, vars: { port: number; host: string }): string {
+  return template.replace(/\{port\}/g, String(vars.port)).replace(/\{host\}/g, vars.host);
+}
+
+/** The carrier `start` writes once it has spawned a declared preview — the `.quay/preview.json`
+ *  analogue of `server.json` (hard rule 4b: the address is recorded by the thing that started the
+ *  process, not derived by a reader). `healthUrl` is the RESOLVED template, so a live-probe AC reads
+ *  exactly the URL `start` verified. */
+export interface DeclaredPreviewCarrier {
+  schemaVersion: 1;
+  pid: number;
+  host: string;
+  port: number;
+  healthUrl: string;
+  command: string[];
+  startedAt: string;
+}
+
+export type DeclaredCarrierReading =
+  | { state: "present"; carrier: DeclaredPreviewCarrier; path: string }
+  | { state: "absent"; path: string }
+  | { state: "unreadable"; path: string; reason: string };
+
+export function readDeclaredPreviewCarrier(previewRoot: string): DeclaredCarrierReading {
+  const p = path.join(previewRoot, ".quay", PREVIEW_CARRIER_BASENAME);
+  let raw: string;
+  try {
+    raw = fs.readFileSync(p, "utf8");
+  } catch {
+    return { state: "absent", path: p };
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (err) {
+    return { state: "unreadable", path: p, reason: `carrier is not JSON: ${String((err as Error)?.message ?? err)}` };
+  }
+  const c = parsed as Partial<DeclaredPreviewCarrier> | null;
+  if (
+    c === null || typeof c !== "object" || c.schemaVersion !== 1 ||
+    typeof c.pid !== "number" || !Number.isInteger(c.pid) || c.pid < 1 ||
+    typeof c.host !== "string" || c.host === "" ||
+    typeof c.port !== "number" || !Number.isInteger(c.port) || c.port < 1 ||
+    typeof c.healthUrl !== "string" || c.healthUrl === ""
+  ) {
+    return { state: "unreadable", path: p, reason: "carrier does not have the declared-preview shape (schemaVersion/pid/host/port/healthUrl)" };
+  }
+  return { state: "present", carrier: c as DeclaredPreviewCarrier, path: p };
+}
+
+export function writeDeclaredPreviewCarrier(previewRoot: string, carrier: DeclaredPreviewCarrier): void {
+  const p = path.join(previewRoot, ".quay", PREVIEW_CARRIER_BASENAME);
+  fs.mkdirSync(path.dirname(p), { recursive: true });
+  fs.writeFileSync(p, JSON.stringify(carrier, null, 2), "utf8");
+}
+
+/** A health probe's outcome — three states, ⛔ not "up"/"down" (硬规则 3b): `ok` (HTTP 200),
+ *  `http-error` (answered, non-200), `unreachable` (no answer), `not-evaluated` (could not probe). */
+export type HealthProbeReading =
+  | { state: "ok"; status: 200 }
+  | { state: "http-error"; status: number }
+  | { state: "unreachable"; reason: string }
+  | { state: "not-evaluated"; reason: string };
+
+/** GET a health URL, resolving once on the FIRST terminal outcome (a timeout→error race must not
+ *  double-settle the promise). */
+export function probeHealthUrl(url: string, timeoutMs = 3000): Promise<HealthProbeReading> {
+  return new Promise((resolve) => {
+    let settled = false;
+    const settle = (r: HealthProbeReading): void => {
+      if (!settled) {
+        settled = true;
+        resolve(r);
+      }
+    };
+    const mod = url.startsWith("https://") ? https : http;
+    let req: ReturnType<typeof mod.get>;
+    try {
+      req = mod.get(url, (res) => {
+        res.resume();
+        settle(res.statusCode === 200 ? { state: "ok", status: 200 } : { state: "http-error", status: res.statusCode ?? 0 });
+      });
+    } catch (err) {
+      settle({ state: "not-evaluated", reason: String((err as Error)?.message ?? err) });
+      return;
+    }
+    req.setTimeout(timeoutMs, () => req.destroy(new Error(`health probe timed out after ${timeoutMs}ms`)));
+    req.on("error", (err) => settle({ state: "unreachable", reason: String((err as Error)?.message ?? err) }));
+  });
+}
+
+/** Spawn a detached child, resolving on the FIRST of "spawned" / "could not spawn" — the 'error'
+ *  event (a non-existent command) and the 'spawn' event are the two terminal arms, so a bad command
+ *  is a `failed` reading, ⛔ never a started-but-then-died lie. */
+function spawnDetached(
+  argv: string[],
+  opts: { cwd: string; logFd: number },
+): Promise<{ state: "spawned"; pid: number } | { state: "failed"; reason: string }> {
+  return new Promise((resolve) => {
+    let settled = false;
+    const settle = (r: { state: "spawned"; pid: number } | { state: "failed"; reason: string }): void => {
+      if (!settled) {
+        settled = true;
+        resolve(r);
+      }
+    };
+    let child: ReturnType<typeof spawn>;
+    try {
+      child = spawn(argv[0], argv.slice(1), {
+        cwd: opts.cwd,
+        detached: true,
+        stdio: ["ignore", opts.logFd, opts.logFd],
+        env: process.env,
+      });
+    } catch (err) {
+      settle({ state: "failed", reason: `spawn failed: ${String((err as Error)?.message ?? err)}` });
+      return;
+    }
+    child.once("error", (err) => settle({ state: "failed", reason: `spawn failed: ${String((err as Error)?.message ?? err)}` }));
+    child.once("spawn", () => {
+      child.unref();
+      settle({ state: "spawned", pid: child.pid as number });
+    });
+  });
+}
+
+/** Read a DECLARED preview's state from its own `.quay/preview.json`. `running` = carrier present +
+ *  pid alive (the same carrier-trust the quay-serve path places in `server.json`'s `up` field — the
+ *  HTTP-200 verification is `start`'s job, not `status`'s). */
+export function readDeclaredPreviewStatus(previewRoot: string): PreviewStatusReading {
+  const read = readDeclaredPreviewCarrier(previewRoot);
+  if (read.state === "absent") {
+    return { state: "not-running", previewRoot, pid: null, host: null, port: null, detail: `no declared preview carrier at ${read.path}` };
+  }
+  if (read.state === "unreadable") {
+    return { state: "not-evaluated", previewRoot, pid: null, host: null, port: null, detail: read.reason };
+  }
+  const c = read.carrier;
+  if (!pidAlive(c.pid)) {
+    return { state: "stale", previewRoot, pid: c.pid, host: c.host, port: c.port, detail: `carrier names pid ${c.pid}, which is DEAD` };
+  }
+  return { state: "running", previewRoot, pid: c.pid, host: c.host, port: c.port, detail: `declared preview pid ${c.pid} alive; health ${c.healthUrl}` };
+}
+
+/** Read the QUAY-serve preview's state from ITS OWN root's `.quay/server.json` (never the main one). */
+function readQuayPreviewStatus(previewRoot: string): PreviewStatusReading {
   const read = readServerState(previewRoot);
   if (read.kind === "absent") {
     return { state: "not-running", previewRoot, pid: null, host: null, port: null, detail: read.reason };
@@ -304,6 +505,18 @@ export function readPreviewStatus(previewRoot: string): PreviewStatusReading {
     port: web?.port ?? null,
     detail: `pid ${st.pid} alive${web ? `, web on ${web.host}:${web.port}` : " (no web service entry)"}`,
   };
+}
+
+/** Read a preview instance's state — the declared surface when this root declares one, else the
+ *  quay-serve carrier (the historical path, unchanged). A present-but-unreadable declaration is
+ *  `not-evaluated`, ⛔ never folded into the quay-serve fallback. */
+export function readPreviewStatus(previewRoot: string): PreviewStatusReading {
+  const decl = readPreviewDecl(previewRoot);
+  if (decl.state === "unreadable") {
+    return { state: "not-evaluated", previewRoot, pid: null, host: null, port: null, detail: `preview declaration unreadable: ${decl.reason}` };
+  }
+  if (decl.state === "configured") return readDeclaredPreviewStatus(previewRoot);
+  return readQuayPreviewStatus(previewRoot);
 }
 
 // ── stopping a preview serve ─────────────────────────────────────────────────────────────────────
@@ -378,30 +591,27 @@ function removeCarrierIfOwned(carrierPath: string, pid: number): void {
   }
 }
 
-/**
- * Stop the preview serve registered at `previewRoot` by reading ITS OWN `.quay/server.json`.
- * ⛔ NEVER `pkill -f`: the supervisor's argv literally contains the pattern the caller searched for,
- * so a pattern kill can match the caller itself (or an unrelated workspace's host).
- *
- * The registered pid is the serve CHILD under `node --watch`; the supervisor is its own process
- * group leader (start spawns detached), so the whole group is signalled — otherwise killing the
- * child would leave `node --watch` waiting for a file change forever.
- */
-export function stopPreviewServe(previewRoot: string, opts: { graceMs?: number } = {}): PreviewStopReading {
-  const graceMs = opts.graceMs ?? 5000;
-  const read = readServerState(previewRoot);
-  if (read.kind === "absent") return { state: "not-running", pid: null, signalled: null, detail: read.reason };
-  if (read.kind === "unreadable") return { state: "not-evaluated", pid: null, signalled: null, detail: read.reason };
-  const pid = read.state.pid;
-  const carrierPath = read.path;
-  const lockPath = path.join(previewRoot, ".quay", PREVIEW_SERVE_LOCK_BASENAME);
-  if (!pidAlive(pid)) {
-    // A stale carrier names a dead host. Clean it (and a matching stale lock) so the next start is
-    // not blocked by residue — but report `not-running`, not `stopped` (nothing was signalled).
-    removeCarrierIfOwned(carrierPath, pid);
-    removeLockIfOwned(lockPath, pid);
-    return { state: "not-running", pid, signalled: null, detail: `carrier names pid ${pid}, which is already DEAD — carrier cleared` };
+/** Is this pid a ZOMBIE (exited but not yet reaped)? `kill(pid, 0)` (i.e. `pidAlive`) sees a zombie as
+ *  alive, because the entry still exists in the process table. A stop path must NOT: a zombie is a
+ *  process that already exited and is only waiting for its parent to reap it — "stopped" for our
+ *  purposes, never "still alive" (which would turn an already-dead preview into a failed stop). */
+function isZombiePid(pid: number): boolean {
+  try {
+    const raw = fs.readFileSync(`/proc/${pid}/stat`, "utf8");
+    const close = raw.lastIndexOf(")");
+    if (close < 0) return false;
+    return raw.slice(close + 1).trim().split(/\s+/)[0] === "Z";
+  } catch {
+    return false;
   }
+}
+
+/** Signal a detached process and wait for it to die (SIGTERM, then SIGKILL after the grace). The
+ *  SHARED kill for the quay-serve and declared-preview paths — ⛔ never two copies (hard rule 5b).
+ *  `pid` is the registered child; when it is a process-group leader (start spawns detached) the whole
+ *  group is signalled, otherwise only the pid. */
+function stopPid(pid: number, graceMs: number): { state: "stopped" | "failed"; signalled: "group" | "pid"; detail: string } {
+  const running = (): boolean => pidAlive(pid) && !isZombiePid(pid);
   const pgid = readProcessGroupId(pid);
   // ⛔ Never group-kill our OWN group: a host that shares the caller's group (e.g. one started with
   // `detached: false`) must be signalled by pid only, or we would kill ourselves and our parent.
@@ -420,8 +630,8 @@ export function stopPreviewServe(previewRoot: string, opts: { graceMs?: number }
     signalErr = String((err as NodeJS.ErrnoException)?.code ?? (err as Error)?.message ?? err);
   }
   const deadline = Date.now() + graceMs;
-  while (Date.now() < deadline && pidAlive(pid)) sleepSync(100);
-  if (pidAlive(pid)) {
+  while (Date.now() < deadline && running()) sleepSync(100);
+  if (running()) {
     try {
       if (useGroup) process.kill(-(pgid as number), "SIGKILL");
       else process.kill(pid, "SIGKILL");
@@ -429,19 +639,70 @@ export function stopPreviewServe(previewRoot: string, opts: { graceMs?: number }
       /* fall through to the liveness re-read below */
     }
     const killDeadline = Date.now() + 2000;
-    while (Date.now() < killDeadline && pidAlive(pid)) sleepSync(100);
+    while (Date.now() < killDeadline && running()) sleepSync(100);
   }
-  if (pidAlive(pid)) {
+  if (running()) {
     return {
       state: "failed",
-      pid,
       signalled,
       detail: `pid ${pid} is STILL ALIVE after SIGTERM+SIGKILL${signalErr ? ` (first signal failed: ${signalErr})` : ""}`,
     };
   }
+  return { state: "stopped", signalled, detail: `stopped ${signalled === "group" ? `process group ${pgid}` : `pid ${pid}`}` };
+}
+
+/** Stop the QUAY-serve preview registered at `previewRoot` by reading ITS OWN `.quay/server.json`. */
+function stopQuayPreviewServe(previewRoot: string, opts: { graceMs?: number } = {}): PreviewStopReading {
+  const graceMs = opts.graceMs ?? 5000;
+  const read = readServerState(previewRoot);
+  if (read.kind === "absent") return { state: "not-running", pid: null, signalled: null, detail: read.reason };
+  if (read.kind === "unreadable") return { state: "not-evaluated", pid: null, signalled: null, detail: read.reason };
+  const pid = read.state.pid;
+  const carrierPath = read.path;
+  const lockPath = path.join(previewRoot, ".quay", PREVIEW_SERVE_LOCK_BASENAME);
+  if (!pidAlive(pid)) {
+    // A stale carrier names a dead host. Clean it (and a matching stale lock) so the next start is
+    // not blocked by residue — but report `not-running`, not `stopped` (nothing was signalled).
+    removeCarrierIfOwned(carrierPath, pid);
+    removeLockIfOwned(lockPath, pid);
+    return { state: "not-running", pid, signalled: null, detail: `carrier names pid ${pid}, which is already DEAD — carrier cleared` };
+  }
+  const r = stopPid(pid, graceMs);
   removeCarrierIfOwned(carrierPath, pid);
   removeLockIfOwned(lockPath, pid);
-  return { state: "stopped", pid, signalled, detail: `stopped ${signalled === "group" ? `process group ${pgid}` : `pid ${pid}`}; carrier cleared` };
+  return { state: r.state, pid, signalled: r.signalled, detail: r.detail };
+}
+
+/** Stop a DECLARED preview by reading ITS OWN `.quay/preview.json` (⛔ no serve lock — the
+ *  declaration replaces the serve admission lock). */
+export function stopDeclaredPreviewServe(previewRoot: string, opts: { graceMs?: number } = {}): PreviewStopReading {
+  const graceMs = opts.graceMs ?? 5000;
+  const read = readDeclaredPreviewCarrier(previewRoot);
+  if (read.state === "absent") return { state: "not-running", pid: null, signalled: null, detail: `no declared preview carrier at ${read.path}` };
+  if (read.state === "unreadable") return { state: "not-evaluated", pid: null, signalled: null, detail: read.reason };
+  const pid = read.carrier.pid;
+  if (!pidAlive(pid)) {
+    removeCarrierIfOwned(read.path, pid);
+    return { state: "not-running", pid, signalled: null, detail: `carrier names pid ${pid}, which is already DEAD — carrier cleared` };
+  }
+  const r = stopPid(pid, graceMs);
+  removeCarrierIfOwned(read.path, pid);
+  return { state: r.state, pid, signalled: r.signalled, detail: r.detail };
+}
+
+/**
+ * Stop the preview registered at `previewRoot` — the DECLARED surface when this root declares one,
+ * else the quay-serve carrier. ⛔ NEVER `pkill -f`: the child's argv literally contains the pattern a
+ * caller might search for, so a pattern kill can match the caller itself (or an unrelated workspace's
+ * host).
+ */
+export function stopPreviewServe(previewRoot: string, opts: { graceMs?: number } = {}): PreviewStopReading {
+  const decl = readPreviewDecl(previewRoot);
+  if (decl.state === "unreadable") {
+    return { state: "not-evaluated", pid: null, signalled: null, detail: `preview declaration unreadable: ${decl.reason}` };
+  }
+  if (decl.state === "configured") return stopDeclaredPreviewServe(previewRoot, opts);
+  return stopQuayPreviewServe(previewRoot, opts);
 }
 
 // ── starting a preview serve ─────────────────────────────────────────────────────────────────────
@@ -474,23 +735,10 @@ export interface StartPreviewOptions {
   logPath?: string;
 }
 
-/**
- * Start a preview serve for `previewRoot` as a DETACHED process (its own process group, so `stop`
- * can signal the `node --watch` supervisor together with the serve it spawned). Waits until the
- * root's own `.quay/server.json` names a live pid, then reports it.
- *
- * Idempotent: a preview whose carrier already names a live host is reported `already-running`
- * without spawning a second host (a second host would only be refused by the admission lock).
- */
-export async function startPreviewServe(opts: StartPreviewOptions): Promise<PreviewStartReading> {
+/** Start the QUAY-serve preview (the historical path): spawn the worktree's own `quay.ts serve`
+ *  detached and wait for `.quay/server.json` to name a live pid. */
+async function startQuayPreviewServe(opts: StartPreviewOptions): Promise<PreviewStartReading> {
   const { previewRoot, port } = opts;
-  if (!Number.isInteger(port) || port < 1) {
-    return { state: "failed", pid: null, host: null, port: null, detail: `--port must be an integer ≥ 1 (got ${JSON.stringify(port)}); a preview on an unknown port cannot be used` };
-  }
-  const before = readPreviewStatus(previewRoot);
-  if (before.state === "running") {
-    return { state: "already-running", pid: before.pid, host: before.host, port: before.port, detail: `a preview serve is already registered at ${previewRoot} (${before.detail})` };
-  }
   const entry = previewServeEntry(previewRoot);
   if (!fs.existsSync(entry)) {
     return { state: "failed", pid: null, host: null, port: null, detail: `no quay CLI entry at ${entry} — the preview worktree is missing or not provisioned (the preview must run the goal branch's OWN code)` };
@@ -530,7 +778,7 @@ export async function startPreviewServe(opts: StartPreviewOptions): Promise<Prev
   const timeoutMs = opts.timeoutMs ?? 30000;
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
-    const st = readPreviewStatus(previewRoot);
+    const st = readQuayPreviewStatus(previewRoot);
     if (st.state === "running") {
       return { state: "started", pid: st.pid, host: st.host, port: st.port, detail: `preview serve pid ${st.pid} up at ${previewRoot} (log ${logPath})` };
     }
@@ -544,4 +792,81 @@ export async function startPreviewServe(opts: StartPreviewOptions): Promise<Prev
     port: null,
     detail: `no live preview serve registered at ${previewRoot} within ${timeoutMs}ms (supervisor pid ${childPid ?? "?"}; see ${logPath})`,
   };
+}
+
+/** Start a DECLARED preview: run the configured command detached, record the carrier, and wait for
+ *  the declared health URL to answer HTTP 200. A command that cannot spawn, or never becomes healthy,
+ *  is `failed` — ⛔ never `started` (the fail-closed AC). */
+async function startDeclaredPreview(opts: StartPreviewOptions, config: PreviewConfig): Promise<PreviewStartReading> {
+  const { previewRoot, port } = opts;
+  const host = opts.host ?? PREVIEW_HOST_FALLBACK;
+  const vars = { port, host };
+  const healthUrl = renderPreviewTemplate(config.healthUrl, vars);
+  const argv = config.command.map((tok) => renderPreviewTemplate(tok, vars));
+  const logPath = opts.logPath ?? path.join(previewRoot, ".quay", "preview.log");
+  fs.mkdirSync(path.dirname(logPath), { recursive: true });
+  let logFd: number;
+  try {
+    logFd = fs.openSync(logPath, "a");
+  } catch (err) {
+    return { state: "failed", pid: null, host: null, port: null, detail: `cannot open preview log ${logPath}: ${String((err as Error)?.message ?? err)}` };
+  }
+  const spawned = await spawnDetached(argv, { cwd: previewRoot, logFd });
+  try {
+    fs.closeSync(logFd);
+  } catch {
+    /* already closed */
+  }
+  if (spawned.state === "failed") {
+    return { state: "failed", pid: null, host: null, port: null, detail: spawned.reason };
+  }
+  const pid = spawned.pid;
+  writeDeclaredPreviewCarrier(previewRoot, {
+    schemaVersion: 1,
+    pid,
+    host,
+    port,
+    healthUrl,
+    command: argv,
+    startedAt: new Date().toISOString(),
+  });
+  const timeoutMs = opts.timeoutMs ?? 30000;
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const probe = await probeHealthUrl(healthUrl, 2000);
+    if (probe.state === "ok") {
+      return { state: "started", pid, host, port, detail: `declared preview pid ${pid} up at ${healthUrl} (log ${logPath})` };
+    }
+    if (!pidAlive(pid)) break; // the process died before becoming healthy
+    sleepSync(200);
+  }
+  // Timeout or early death: clean the carrier + process so `failed` means "nothing is running" — a
+  // failed start must not leave a live-but-unaddressed preview (or a carrier that later reads stale).
+  stopDeclaredPreviewServe(previewRoot, { graceMs: 2000 });
+  return { state: "failed", pid, host, port, detail: `declared preview did not answer ${healthUrl} with HTTP 200 within ${timeoutMs}ms (pid ${pid}; see ${logPath})` };
+}
+
+/**
+ * Start a preview for `previewRoot` as a DETACHED process: the DECLARED command when this root
+ * declares a `preview:` surface, else the worktree's own `quay.ts serve` (the historical path).
+ * Waits until the product is up before reporting `started`.
+ *
+ * Idempotent: a preview whose carrier already names a live host is reported `already-running`
+ * without spawning a second host.
+ */
+export async function startPreviewServe(opts: StartPreviewOptions): Promise<PreviewStartReading> {
+  const { previewRoot, port } = opts;
+  if (!Number.isInteger(port) || port < 1) {
+    return { state: "failed", pid: null, host: null, port: null, detail: `--port must be an integer ≥ 1 (got ${JSON.stringify(port)}); a preview on an unknown port cannot be used` };
+  }
+  const decl = readPreviewDecl(previewRoot);
+  if (decl.state === "unreadable") {
+    return { state: "failed", pid: null, host: null, port: null, detail: `preview declaration unreadable: ${decl.reason}` };
+  }
+  const before = decl.state === "configured" ? readDeclaredPreviewStatus(previewRoot) : readQuayPreviewStatus(previewRoot);
+  if (before.state === "running") {
+    return { state: "already-running", pid: before.pid, host: before.host, port: before.port, detail: `a preview is already registered at ${previewRoot} (${before.detail})` };
+  }
+  if (decl.state === "configured") return startDeclaredPreview(opts, decl.config);
+  return startQuayPreviewServe(opts);
 }

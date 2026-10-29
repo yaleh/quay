@@ -1,7 +1,7 @@
 ---
 id: AC-929
 title: 真实 Codex 会话完成一次授权 operator 交易并留可机检证据
-status: active
+status: achieved
 kind: criterion
 goal: GOAL-912
 criterion: node plugin/scripts/codex-stage1-live-proof-check.ts
@@ -17,6 +17,11 @@ statusLog:
     to: active
     actor: goal-cli
     reason: 人 2026-10-29 裁定激活（SPEC §1 ③）
+  - at: 2026-10-29T15:42:59.111Z
+    from: active
+    to: achieved
+    actor: goal-driver
+    reason: "I2: criterion pass"
 fidelity:
   verdict: faithful
   reason: "fidelity judge: faithful"

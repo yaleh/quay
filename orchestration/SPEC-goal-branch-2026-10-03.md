@@ -283,6 +283,20 @@ post-merge 只留给「必须由**真实生产**跑过一段时间才产生读�
 - **没起 serve ⇒ live-probe AC 读 `not-evaluated` ⇒ pre-merge AC 不全 achieved ⇒ `quay goal merge` 拒绝**（除非 `--override` 并留痕）。「人确实试用过」由此成为并入前置条件，不需要另设一个「已试用」标志。
 - goal 并入或废弃时，goal-driver 删除预览 worktree 前先停掉其上的 serve（读该 root 的 `.quay/server.json` 取 pid）——否则留下一个 cwd 已消失的孤儿进程。
 
+**试用面可声明（消费者项目，gap-goal-branch-preview-trial-surface-declarable）**：
+- 上述 `quay serve` 是**默认试用面**——quay 自己就是产品。消费者项目（claudecodeui 的 CloudCLI server 等）在 `.quay/config.yml` 声明自己的试用面，`goal preview` 起它而不是 quay serve：
+
+  ```yaml
+  preview:
+    command: [node, preview-server.mjs, --port, "{port}"]   # 起预览产品的 argv；{port}/{host} 从 start 的 --port/--host 代入
+    health:
+      url: "http://127.0.0.1:{port}/healthz"               # 起好后答 HTTP 200 的健康端点（同样可含 {port}/{host}）
+  ```
+
+- **无声明 ⇒ 回退到 quay serve**（quay 仓库默认态，零改动、向后兼容）。声明存在但形状非法 ⇒ `config validate` 报错（`preview.command` / `preview.health.url`），运行时 `goal preview start` 返回 `failed`（⛔ 不静默回退，硬规则 3b）。
+- **起停**：`start` 跑声明命令（detached、cwd = 预览 worktree），把地址写进该 root 下的 `.quay/preview.json`（`schemaVersion:1`，含 `pid`/`host`/`port`/`healthUrl`/`command`），轮询声明健康 URL 到 HTTP 200 才报 `started`；命令不存在或健康端点始终不 200 ⇒ `failed`。`status`/`stop` 读同一份 carrier；`preview.json` 是实例身份文件，快照不复制（与 `server.json` 同列 `PREVIEW_INSTANCE_FILES`）。
+- **live-probe AC 在声明面上定位产品**：读预览 root 的 `.quay/preview.json` 取 `healthUrl`（或 `host:port`），curl 得 200 ⇒ exit 0（achieved）；carrier 不存在（没起预览）⇒ exit 3（not-evaluated）——裁定㉒「没起 ⇒ 判不出 ⇒ 不能并入」对消费者产品成立。carrier 形状与 `parsePreviewConfig`（`core/config.ts`）是**单一判断点**，validator 与运行时共用，不许各写一套。
+
 **预览实例读什么数据**：
 （已裁定㉓）
 - 任务/goal 记录：预览 worktree 自己检出的 `tasks/`、`goals/`（goal 分支带着每次追平进来的 develop 状态）。

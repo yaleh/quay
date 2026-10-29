@@ -43,6 +43,7 @@ const nativeProviderDir = path.dirname(nativeBin);
 const driftCheck = path.join(repoRoot, 'scripts', 'agents-claude-drift-check.ts');
 const selfcheck = path.join(pluginDir, 'scripts', 'codex-stage1-selfcheck.sh');
 const liveProofCheck = path.join(pluginDir, 'scripts', 'codex-stage1-live-proof-check.ts');
+const liveProofAudit = path.join(pluginDir, 'scripts', 'codex-stage1-live-proof-audit.ts');
 const schemaCheck = path.join(pluginDir, 'scripts', 'task-schema-check.ts');
 
 function read(p) {
@@ -561,7 +562,8 @@ function runLiveProof(record) {
 test('E1: a complete, internally consistent evidence record passes (exit 0)', () => {
   const r = runLiveProof(evidenceFixture());
   assert.equal(r.status, 0, `live-proof-check must accept a complete record; output:\n${r.stdout}\n${r.stderr}`);
-  assert.match(r.stdout, /LIVE-PROOF OK/);
+  assert.match(r.stdout, /SHAPE-ONLY PASS/);
+  assert.doesNotMatch(r.stdout, /LIVE-PROOF OK|evidence is true|real landing/i);
 });
 
 test('E2 (negative): missing codex session reference fails', () => {
@@ -613,4 +615,131 @@ test('E9 (negative): a record with no CREATE (only edits) fails', () => {
   const ev = evidenceFixture();
   ev.mutations = ev.mutations.filter((m) => m.kind !== 'create');
   assert.notEqual(runLiveProof(ev).status, 0);
+});
+
+// =================================================================================
+// F. LIVE-PROOF TRUTH audit (independent readback from the store + Git)
+// =================================================================================
+
+// The real evidence record this task's DoD demands: real tasks from the live store +
+// real single-file scoped commits from Git, with the afterHash the operator actually
+// produced (sha256 of `git show <commit>:<task-file>`). These SHAs are immutable
+// history on develop; the readback is against the worktree's own store and Git objects.
+function realEvidenceFixture() {
+  return {
+    codexSession: { ref: '01a18845-6491-7e41-9617-1a2becb8fabe', version: '0.165.0', trustedCheckout: true },
+    loadedSurfaces: { agentsMd: true, skills: ['quay-task-operator', 'quay-directive'] },
+    paths: { mcp: 'node packages/quay/bin/quay.ts mcp', cli: 'node packages/quay/bin/quay.ts task list --json' },
+    mutations: [
+      {
+        kind: 'create', taskId: 'codex-stage1-live-proof-check', providerQualifiedId: 'native:codex-stage1-live-proof-check',
+        authorizationRef: 'human:conv/2026-10-29#real-create', afterHash: 'afb0271ef42e9443401064f677a08220f78355353220e957f6a89a2251008d2d',
+        semanticDiff: '新建任务：live-proof-check 只验形状不验真伪', mcpReadback: true, cliReadback: true,
+        schemaCheck: { exitCode: 0 },
+        scopedCommit: { sha: '0b9feb2e7f2c7fb75dba8c15501a8aaf928f5f7c', filesChanged: ['tasks/codex-stage1-live-proof-check.md'], unrelatedChangesPreserved: true },
+      },
+      {
+        kind: 'edit', taskId: 'gap-instrument-decay-postlanding-two-rounds', providerQualifiedId: 'native:gap-instrument-decay-postlanding-two-rounds',
+        authorizationRef: 'human:conv/2026-10-29#real-edit', beforeHash: '491a26512962387c8f65694655d2ad2c52e6098a5878d6b26b7205f6f23f37f2', afterHash: 'e33dae57b05e6a1c9d5dcb4cf8fa323d36a5c07f8121134e9566f215ed5cadb9',
+        semanticDiff: '更新过时 Evidence：d9610e05a 已在 develop', mcpReadback: true, cliReadback: true,
+        schemaCheck: { exitCode: 0 },
+        scopedCommit: { sha: '8a7b1e1d4fe5e588bb118e25bed5f59d30cf49ad', filesChanged: ['tasks/gap-instrument-decay-postlanding-two-rounds.md'], unrelatedChangesPreserved: true },
+      },
+    ],
+    casNegative: { taskId: 'gap-instrument-decay-postlanding-two-rounds', expectedStatus: 'todo', actualStatus: 'ready', refused: true, beforeHash: '8fe7d9ed9bb06638', afterHash: '8fe7d9ed9bb06638' },
+  };
+}
+
+// Fields all complete, CAS before==after, but taskId / commit SHA / session are all
+// placeholders: this MUST satisfy the shape-only check yet be rejected by the truth audit.
+function placeholderEvidenceFixture() {
+  return {
+    codexSession: { ref: 'session:placeholder/000000', version: 'codex-cli 0.0.0-placeholder', trustedCheckout: true },
+    loadedSurfaces: { agentsMd: true, skills: ['quay-task-operator', 'quay-directive'] },
+    paths: { mcp: 'node packages/quay/bin/quay.ts mcp', cli: 'node packages/quay/bin/quay.ts task list --json' },
+    mutations: [
+      {
+        kind: 'create', taskId: 'TASK-PLACEHOLDER-1', providerQualifiedId: 'native:TASK-PLACEHOLDER-1',
+        authorizationRef: 'human:conv/placeholder#1', afterHash: '0000000000000000000000000000000000000000000000000000000000000001',
+        semanticDiff: '- old\n+ new', mcpReadback: true, cliReadback: true,
+        schemaCheck: { exitCode: 0 },
+        scopedCommit: { sha: '0000000000000000000000000000000000000001', filesChanged: ['tasks/TASK-PLACEHOLDER-1.md'], unrelatedChangesPreserved: true },
+      },
+      {
+        kind: 'edit', taskId: 'TASK-PLACEHOLDER-2', providerQualifiedId: 'native:TASK-PLACEHOLDER-2',
+        authorizationRef: 'human:conv/placeholder#2', beforeHash: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', afterHash: '0000000000000000000000000000000000000000000000000000000000000002',
+        semanticDiff: '- old\n+ new', mcpReadback: true, cliReadback: true,
+        schemaCheck: { exitCode: 0 },
+        scopedCommit: { sha: '0000000000000000000000000000000000000002', filesChanged: ['tasks/TASK-PLACEHOLDER-2.md'], unrelatedChangesPreserved: true },
+      },
+    ],
+    casNegative: { taskId: 'TASK-PLACEHOLDER-1', expectedStatus: 'todo', actualStatus: 'ready', refused: true, beforeHash: 'abc123', afterHash: 'abc123' },
+  };
+}
+
+function runLiveProofAudit(record, root = repoRoot) {
+  const f = path.join(os.tmpdir(), `codex-stage1-evidence-audit-${Math.random().toString(36).slice(2)}.json`);
+  fs.writeFileSync(f, JSON.stringify(record, null, 2));
+  const r = spawnSync('node', ['--experimental-strip-types', liveProofAudit, f, '--root', root], { encoding: 'utf8' });
+  fs.rmSync(f, { force: true });
+  return r;
+}
+
+test('F1 (AC1): the shape check declares SHAPE-ONLY in --help, header contract, and success output', () => {
+  const help = spawnSync('node', ['--experimental-strip-types', liveProofCheck, '--help'], { encoding: 'utf8' });
+  assert.equal(help.status, 0, `--help must exit 0; output:\n${help.stdout}\n${help.stderr}`);
+  assert.match(help.stdout, /SHAPE-ONLY/);
+  assert.match(help.stdout, /NOT a truth check/i);
+
+  const src = read(liveProofCheck);
+  assert.match(src, /SHAPE-ONLY CONTRACT/);
+  assert.match(src, /does NOT assert/i);
+
+  const ok = runLiveProof(evidenceFixture());
+  assert.equal(ok.status, 0);
+  assert.match(ok.stdout, /SHAPE-ONLY PASS/);
+  assert.match(ok.stdout, /NOT a truth claim/i);
+});
+
+test('F2 (AC2): an all-placeholder record passes the SHAPE check but the TRUTH audit rejects it and names an unreadable object', () => {
+  const rec = placeholderEvidenceFixture();
+  const shape = runLiveProof(rec);
+  assert.equal(shape.status, 0, `placeholder record must still satisfy the shape-only check; output:\n${shape.stdout}\n${shape.stderr}`);
+  const audit = runLiveProofAudit(rec);
+  assert.notEqual(audit.status, 0, 'the truth audit must reject a record whose taskId/commit/session are placeholders');
+  const combined = audit.stdout + audit.stderr;
+  assert.match(combined, /TASK-PLACEHOLDER-1|read back|does not exist|cat-file/i, 'the truth audit must name an object unreadable from the store/Git');
+});
+
+test('F3 (AC3/AC4): a real evidence record (real tasks + real scoped commits) passes the truth audit', () => {
+  const r = runLiveProofAudit(realEvidenceFixture());
+  assert.equal(r.status, 0, `truth audit must pass on real tasks + real commits; output:\n${r.stdout}\n${r.stderr}`);
+  assert.match(r.stdout, /AUDIT PASS/);
+  assert.match(r.stdout, /read back from the authoritative store/);
+  assert.match(r.stdout, /afterHash matches the committed content/);
+});
+
+test('F4 (AC4): tampering a taskId fails the truth audit', () => {
+  const rec = realEvidenceFixture();
+  rec.mutations[0].taskId = 'TASK-NOT-REAL';
+  rec.mutations[0].providerQualifiedId = 'native:TASK-NOT-REAL';
+  assert.notEqual(runLiveProofAudit(rec).status, 0, 'a tampered taskId must fail the truth audit');
+});
+
+test('F5 (AC4): tampering a commit SHA fails the truth audit', () => {
+  const rec = realEvidenceFixture();
+  rec.mutations[0].scopedCommit.sha = '0'.repeat(40);
+  assert.notEqual(runLiveProofAudit(rec).status, 0, 'a tampered commit SHA must fail the truth audit');
+});
+
+test('F6 (AC4): tampering a declared mutation field (afterHash) fails the truth audit', () => {
+  const rec = realEvidenceFixture();
+  rec.mutations[0].afterHash = 'f'.repeat(64);
+  assert.notEqual(runLiveProofAudit(rec).status, 0, 'a tampered afterHash must fail the truth audit');
+});
+
+test('F7 (AC4): tampering a scoped path fails the truth audit', () => {
+  const rec = realEvidenceFixture();
+  rec.mutations[0].scopedCommit.filesChanged = ['tasks/DIR-121.md'];
+  assert.notEqual(runLiveProofAudit(rec).status, 0, 'a tampered scoped path must fail the truth audit');
 });

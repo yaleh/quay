@@ -12,7 +12,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import YAML from "yaml";
-import { loadConfig, resolveProviderEntry, NATIVE_PROVIDER_UNRESOLVABLE, parseReleaseConfig } from "./config.ts";
+import { loadConfig, resolveProviderEntry, NATIVE_PROVIDER_UNRESOLVABLE, parseReleaseConfig, parsePreviewConfig } from "./config.ts";
 import { listGates } from "./gate/registry.ts";
 import { VALID_EXECUTION, VALID_AUDIT, VALID_STOP_RE } from "./loop-params.ts";
 
@@ -729,6 +729,24 @@ function checkReleaseSection(unifiedParsed: unknown | null): ConfigIssue[] {
   return [{ severity: "error", field: "release", message: judged.reason }];
 }
 
+/**
+ * 9c. `preview:` shape validation (gap-goal-branch-preview-trial-surface-declarable).
+ *
+ * The section is OPTIONAL — a workspace with no declaration keeps the historical quay-serve preview
+ * (quay's own repo declares nothing). But when it IS present it must be readable: the runtime
+ * (`goal-preview.ts` `readPreviewDecl`) reads this shape, and a section the validator accepts while
+ * the runtime rejects (or vice versa) would let a broken trial surface ship silently (hard rules
+ * 3b/5b). The judge is `parsePreviewConfig` — the SAME function the runtime uses.
+ */
+function checkPreviewSection(unifiedParsed: unknown | null): ConfigIssue[] {
+  if (!unifiedParsed || typeof unifiedParsed !== "object") return [];
+  const section = (unifiedParsed as Record<string, unknown>).preview;
+  if (section === undefined) return [];
+  const judged = parsePreviewConfig(section);
+  if (!("reason" in judged)) return [];
+  return [{ severity: "error", field: "preview", message: judged.reason }];
+}
+
 // ---------------------------------------------------------------------------
 // File-existence check helpers (only when checkFiles is true)
 // ---------------------------------------------------------------------------
@@ -922,6 +940,8 @@ function runChecks({ unifiedParsed, gatesParsed, loopParsed, workspaceRoot, plug
   if (loopParsed) allIssues.push(...checkRoutines(loopParsed));
   // 9b. Release-branch model shape (optional section; judged by the SAME reader the carriers use)
   if (unifiedParsed) allIssues.push(...checkReleaseSection(unifiedParsed));
+  // 9c. Preview trial-surface shape (optional section; judged by the SAME reader the runtime uses)
+  if (unifiedParsed) allIssues.push(...checkPreviewSection(unifiedParsed));
   // 10. Provider env check
   if (unifiedParsed) allIssues.push(...validateProviderEnv(unifiedParsed));
   // 11. File-existence check
