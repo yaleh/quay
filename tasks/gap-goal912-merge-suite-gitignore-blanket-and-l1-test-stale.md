@@ -1,7 +1,7 @@
 ---
 id: gap-goal912-merge-suite-gitignore-blanket-and-l1-test-stale
 title: GOAL-912 merge suite 双红：.gitignore blanket 回归 + l1-delivery 测试检查旧文件位置
-status: todo
+status: ready
 labels:
   - gap
   - suite
