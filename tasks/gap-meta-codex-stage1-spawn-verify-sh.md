@@ -2,7 +2,7 @@
 id: gap-meta-codex-stage1-spawn-verify-sh
 title: "落 SPEC Task A（goal_ac: AC-927）：建 codex-stage1-spawn-verify.sh + 修
   .codex/config.toml cwd"
-status: todo
+status: ready
 labels:
   - meta-driver
   - driver-candidate
