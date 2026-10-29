@@ -33,6 +33,10 @@ import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import { fileURLToPath } from "node:url";
+// transcript + its subagents/ dir — ONE implementation shared with
+// manager-observation-runtime-check.ts (was a byte-identical copy until finding
+// `transcript-set-copy`, routine semantic-dedup-scan, runId semantic-dedup-scan-1793251416079).
+import { transcriptSet } from "./transcript-set.mjs";
 
 // 可注入：测试把 PROJ 指到临时目录（INNER_FORENSICS_PROJ 或 _setProj）。
 // 默认会话目录自定位（gap-loop-mechanism-lives-outside-the-package-and-cannot-ship）：本文件已迁入
@@ -53,19 +57,6 @@ function pickInner() {
     .sort((a, b) => b.m - a.m);
   if (!files.length) throw new Error("找不到内层会话文件");
   return files[0].p;
-}
-
-// 内层把任务派给 subagent 执行，而 subagent 的工具调用**不在主 transcript 里**——它们在
-// <会话 UUID>/subagents/agent-*.jsonl。2026-08-02 实测：cost-model 派发后主 transcript 里
-// 全量套件 0 命中，而 subagent transcript 正在活跃写入。不合并这些文件，本工具在最需要它的
-// 场景（核实被委派的工作）完全失效。
-function transcriptSet(file) {
-  const set = [file];
-  const dir = file.replace(/\.jsonl$/, "") + "/subagents";
-  try {
-    for (const f of fs.readdirSync(dir)) if (f.endsWith(".jsonl")) set.push(path.join(dir, f));
-  } catch { /* 无 subagent 目录 */ }
-  return set;
 }
 
 function load(file, sinceMs) {

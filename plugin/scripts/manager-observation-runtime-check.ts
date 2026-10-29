@@ -44,7 +44,7 @@
 // DATA SOURCE: the outer session transcript (Claude Code JSONL under
 // $HOME/.claude/projects/<root-slug>/), including the session's own subagents/ dir (an outer
 // dispatching a subagent to observe the manager is still the outer observing the manager —
-// same set logic as inner-forensics.mjs).
+// same set logic as inner-forensics.mjs — both call the shared `./transcript-set.mjs`).
 //
 // MODES:
 //   --transcript <path>        scan ONE transcript file (+ its subagents dir)
@@ -73,6 +73,8 @@ import { isDirectEntry } from "./gate-script-base.ts";
 // twelve byte-identical bodies extracted by
 // gap-routine-semantic-dedup-scan-escapere-escaperegex-escaperegexp-fndefre-stemre.
 import { escapeRegExp } from "./regex-escape.ts";
+// transcript + its subagents/ dir — ONE implementation shared with inner-forensics.mjs.
+import { transcriptSet } from "./transcript-set.mjs";
 
 // ── Config ───────────────────────────────────────────────────────────────────────────────────────────
 
@@ -297,17 +299,9 @@ export function checkTranscriptText(text: string, config: ManagerObservationConf
 }
 
 // ── Transcript set (file + subagents) ────────────────────────────────────────────────────────────────
-
-function transcriptSet(file: string): string[] {
-  const set = [file];
-  const dir = file.replace(/\.jsonl$/, "") + "/subagents";
-  try {
-    for (const f of fs.readdirSync(dir)) {
-      if (f.endsWith(".jsonl")) set.push(path.join(dir, f));
-    }
-  } catch { /* no subagents dir */ }
-  return set;
-}
+// ONE implementation, shared with inner-forensics.mjs (`./transcript-set.mjs`). The copy that used to
+// live here was byte-identical to the .mjs one until finding `transcript-set-copy`
+// (routine semantic-dedup-scan, runId semantic-dedup-scan-1793251416079).
 
 function projectsDirForRepo(root: string): string {
   const abs = path.resolve(root);
