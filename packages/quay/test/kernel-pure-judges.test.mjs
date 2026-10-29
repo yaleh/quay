@@ -7,7 +7,10 @@
 // (finding `extract-section-byte-identical`: packages/quay/src/task-parsing.ts +
 // plugin/scripts/task-schema.ts), plus `parseTouchBulletPaths` added by
 // gap-routine-semantic-dedup-scan-parse-touch-paths (finding `parse-touch-paths`: the whole
-// bullet→path pipeline, plugin/scripts/touches-parser.ts + packages/quay/src/observation/blocking.ts).
+// bullet→path pipeline, plugin/scripts/touches-parser.ts + packages/quay/src/observation/blocking.ts),
+// plus `findShapeSection` — the kernel's own shape judge carrying a second copy of `extractSection`,
+// converged by gap-routine-semantic-dedup-scan-extract-section-copy (finding `extract-section-copy`,
+// runId `semantic-dedup-scan-1793251416079`).
 //
 // WHAT THIS FILE IS FOR. The task's motivating fact is structural: `countAcCheckboxes`,
 // `stripTrailingFullWidthAnnotation`, `expandGlob` and `extractSection` each existed as TWO
@@ -47,6 +50,7 @@ import {
 } from "../src/kernel/touches-annotation.ts";
 import { expandGlob } from "../src/kernel/glob-expand.ts";
 import { extractSection } from "../src/kernel/extract-section.ts";
+import { findShapeSection } from "../src/kernel/task-shape-artifacts.ts";
 import { countAcCheckboxes as fromProductEntry, extractSection as extractSectionFromProductEntry } from "../src/task-parsing.ts";
 import { countAcCheckboxes as fromMechanismEntry, extractSection as extractSectionFromMechanismEntry } from "../../../plugin/scripts/task-schema.ts";
 import { stripTouchAnnotation, parseTouchEntries } from "../../../plugin/scripts/touches-parser.ts";
@@ -107,6 +111,24 @@ test("② product entry, mechanism entry and kernel leaf expose the SAME countAc
 test("② product entry and mechanism entry expose the SAME kernel extractSection object", () => {
   assert.equal(extractSectionFromProductEntry, extractSection, "task-parsing.ts must re-export the kernel definition");
   assert.equal(extractSectionFromMechanismEntry, extractSection, "task-schema.ts must re-export the kernel definition");
+});
+
+// The SAME pair had a THIRD survivor, one directory away from the kernel leaf it duplicated:
+// `kernel/task-shape-artifacts.ts` carried its own `findShapeSection`, a nine-line heading-section
+// extractor byte-identical to `extract-section.ts`'s `extractSection` except for its non-null
+// assertion, with no import edge between the two. The semantic dedup scan re-reported it five times
+// before the filing that produced work (`extract-section-three-independent-copies` →
+// `extract-section-family` → `extract-section-triplication` → `xpkg-extractsection` →
+// `extract-section-find-shape-section` → `extract-section-copy`, runId
+// `semantic-dedup-scan-1793251416079`); every earlier filing was rate-capped, so the copy survived.
+// Identity — not equal output — is the assertion: re-introducing a local body fails here even when
+// it behaves identically (硬规则 4 推论三).
+test("② kernel shape judge's findShapeSection IS the kernel extractSection object", () => {
+  assert.equal(
+    findShapeSection,
+    extractSection,
+    "task-shape-artifacts.ts must re-export the kernel extractSection, not carry a copy",
+  );
 });
 
 test("③ extractSection — depth-aware slice, literal (escaped) heading, absent ⇒ null", () => {
