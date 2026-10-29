@@ -27,9 +27,9 @@ GOAL-912 goal→develop merge 的全量 suite 两个红，都不是 goal 的 cod
 
 ## Acceptance Criteria
 
-- [ ] `.gitignore` 无 blanket `**/.quay/*`，含专属 `**/.quay/loop-driver.jsonl`；`git check-ignore -v .quay/loop-driver.jsonl` 返回专属条目。
-- [ ] `node --test plugin/test/loop-driver-check.test.mjs` 绿。
-- [ ] `node --test plugin/test/l1-delivery-surface-check.test.mjs` 绿。
+- [x] `.gitignore` 无 blanket `**/.quay/*`，含专属 `**/.quay/loop-driver.jsonl`；`git check-ignore -v .quay/loop-driver.jsonl` 返回专属条目。
+- [x] `node --test plugin/test/loop-driver-check.test.mjs` 绿。
+- [x] `node --test plugin/test/l1-delivery-surface-check.test.mjs` 绿。
 
 ## Definition of Done
 
