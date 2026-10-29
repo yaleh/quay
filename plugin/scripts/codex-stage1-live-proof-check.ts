@@ -1,12 +1,12 @@
 #!/usr/bin/env node --experimental-strip-types
 /**
- * codex-stage1-live-proof-check — validator for the DIR-121 (Codex adoption Stage 1)
- * durable milestone-evidence record. This is the mechanical gate the REAL landing runs
- * against the evidence a fresh trusted-repository Codex session produces.
+ * codex-stage1-live-proof-check — SHAPE-ONLY validator for the DIR-121 (Codex
+ * adoption Stage 1) durable milestone-evidence record.
  *
  *   Usage: node --experimental-strip-types plugin/scripts/codex-stage1-live-proof-check.ts <milestone-evidence.json>
  *
- * Exits 0 iff the record is present, complete, and INTERNALLY CONSISTENT:
+ * This command checks ONLY the SHAPE and SELF-CONSISTENCY of the record. It exits 0
+ * iff the record is present, complete, and internally consistent:
  *   - a fresh Codex session reference + version + trusted-checkout flag;
  *   - loaded instruction/Skill evidence (root AGENTS.md + both repository Skills);
  *   - the MCP and CLI paths used;
@@ -19,11 +19,16 @@
  *   - a refused stale-`expectedStatus` (CAS) probe whose target content hash is
  *     unchanged (before == after) and whose expected != actual status.
  *
- * Missing fields, internally inconsistent hashes, a probe/fixture task id, an
- * un-refused CAS probe, or a non-zero schema result all FAIL non-zero. This script
- * validates the SHAPE and self-consistency of the evidence; the independent audit and
- * the real tasks themselves remain the truth checks (it does not assert the claims are
- * true of the live store — that is the fresh-session + audit's job).
+ * ⛔ SHAPE-ONLY CONTRACT: an exit 0 from THIS command does NOT assert that the evidence
+ * is TRUE of the live store, that any task/commit it names actually exists, or that a
+ * real landing happened. A record whose strings are all filled in and whose hashes are
+ * self-consistent passes here even when every taskId/commit SHA is fabricated. The TRUTH
+ * conclusion lives in the INDEPENDENT audit:
+ *
+ *   node --experimental-strip-types plugin/scripts/codex-stage1-live-proof-audit.ts <evidence.json>
+ *
+ * which reads each claimed task back from the provider-authoritative store and each
+ * commit SHA + changed paths back from Git. Only the audit's exit 0 is a truth claim.
  */
 
 import { readFileSync } from "node:fs";
@@ -40,7 +45,17 @@ function ok(cond: boolean, msg: string): void {
 }
 
 const file = process.argv[2];
-if (file === "--help" || file === "-h") helpExit("usage: node --experimental-strip-types plugin/scripts/codex-stage1-live-proof-check.ts <milestone-evidence.json>");
+if (file === "--help" || file === "-h") {
+  helpExit(
+    "codex-stage1-live-proof-check — SHAPE-ONLY validator (NOT a truth check)\n" +
+    "usage: node --experimental-strip-types plugin/scripts/codex-stage1-live-proof-check.ts <milestone-evidence.json>\n" +
+    "\n" +
+    "Exit 0 = the record is structurally complete and internally consistent ONLY.\n" +
+    "Exit 0 does NOT assert the evidence is true, that a task/commit it names exists,\n" +
+    "or that a real landing happened. For the truth conclusion run:\n" +
+    "  node --experimental-strip-types plugin/scripts/codex-stage1-live-proof-audit.ts <milestone-evidence.json>"
+  );
+}
 if (!file) {
   console.error("usage: node plugin/scripts/codex-stage1-live-proof-check.ts <milestone-evidence.json>");
   process.exit(2);
@@ -127,8 +142,8 @@ ok(isStr(cas.beforeHash) && cas.beforeHash === cas.afterHash, "casNegative: targ
 // --- summary -------------------------------------------------------------------
 console.log("");
 if (failures > 0) {
-  console.error(`LIVE-PROOF INVALID: ${failures} required field(s)/consistency check(s) failed.`);
+  console.error(`SHAPE-ONLY FAIL: ${failures} required field(s)/consistency check(s) failed (SHAPE-ONLY — this is not a truth claim).`);
   process.exit(1);
 }
-console.log("LIVE-PROOF OK: evidence record is complete and internally consistent.");
+console.log("SHAPE-ONLY PASS: evidence record is structurally complete and internally consistent (NOT a truth claim — run codex-stage1-live-proof-audit.ts for authoritative store/Git readback).");
 process.exit(0);
