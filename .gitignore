@@ -679,9 +679,33 @@ docs-managed/*.lock
 # @quay-runtime-artifact — quay-init writes this into a consumer .gitignore (quay-runtime-artifacts.txt)
 meta/*.lock
 
-# ── .quay/ untracked hygiene (2026-10-29, 人裁定方案甲) ─────────────────────────
-# 主检出累积 .quay/ 运行时状态（server.*/worker-control/*-round.jsonl/*-outcome.jsonl）
-# 与一次性验证证据（ac*-*/verify-*/wallclock-*）。已 tracked 的 .quay/ 文件（config.yml.example、
-# profiles.yml、ac260-*、goal-*-evidence/ 等）已在 git 里、不受此规则影响——gitignore 只管未跟踪文件。
-# ⛔ .quay/ 下的新证据默认不跟踪；确需跟踪的用 `git add -f` 显式提交。
-**/.quay/*
+# ── .quay/ runtime carriers — per-file gitignored, same family as gate-events.jsonl ──
+# ⛔ NOT a blanket `**/.quay/*`: a blanket swallows the per-file documentation and breaks
+# loop-driver-check's `git check-ignore -v .quay/loop-driver.jsonl` shape contract (it expects
+# the SPECIFIC rule `**/.quay/loop-driver.jsonl`). Each churning carrier is declared individually.
+# One-time verification evidence (ac*-*/verify-*/wallclock-*) is NOT covered here — those are
+# historical and should be committed/archived when they matter, not silently gitignored.
+**/.quay/loop-driver.jsonl
+**/.quay/goal-round.jsonl
+**/.quay/worker-round.jsonl
+**/.quay/worker-outcome.jsonl
+**/.quay/promotion-round.jsonl
+**/.quay/promotion-outcome.jsonl
+**/.quay/task-status-events.jsonl
+**/.quay/task-status-events-state.json
+**/.quay/store-commit-propagation.jsonl
+**/.quay/worker-dispatch.json
+**/.quay/scoped-gate-cache.json
+**/.quay/doc-check-cache.json
+**/.quay/baseline-red-rounds.jsonl
+**/.quay/server.lock
+**/.quay/server.json
+**/.quay/server-services.json
+**/.quay/serve.pid
+**/.quay/worker-control.json
+**/.quay/promotion-control.json
+**/.quay/anchor.json
+**/.quay/anchor.pid
+**/.quay/anchor-takeover.json
+**/.quay/anchor-desired.json
+**/.quay/anchor-kind-stops.json

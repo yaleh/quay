@@ -409,3 +409,40 @@ export function pendingGoalMerges(root: string): PendingGoalMerge[] {
   }
   return out;
 }
+
+/** A merge request whose most recent execution went red and whose branch still exists and is not yet
+ *  an ancestor of develop — the SPEC §4.7「有并入请求 ∧ 最近一次执行红」signal for gap filing
+ *  (裁定⑫). ⛔ NOT the same as `pendingGoalMerges`: a red merge with a FROZEN tip is exactly the
+ *  deadlock this reading exists to expose (the retry guard skips it, so nothing else advances it). */
+export interface StalledGoalMerge {
+  goalId: string;
+  request: GoalMergeRequest;
+  result: GoalMergeResult;
+  tipSha: string;
+}
+
+/** The latest red merge requests still waiting for a fix (see `StalledGoalMerge`). The LATEST request
+ *  and the LATEST result per goal win; a landed result or a deleted/ancestor branch removes the goal
+ *  from the set. */
+export function stalledGoalMerges(root: string): StalledGoalMerge[] {
+  const requests = readGoalMergeRequests(root);
+  if (requests.length === 0) return [];
+  const latestReq = new Map<string, GoalMergeRequest>();
+  for (const r of requests) latestReq.set(r.goalId, r);
+  const results = readGoalMergeResults(root);
+  const latestResult = new Map<string, GoalMergeResult>();
+  for (const r of results) latestResult.set(r.goalId, r);
+
+  const out: StalledGoalMerge[] = [];
+  for (const [goalId, request] of latestReq) {
+    if (!goalBranchRefExists(root, goalId)) continue; // branch gone ⇒ request satisfied/discarded
+    const branch = goalBranchName(goalId);
+    if (isAncestor(root, branch, "develop")) continue; // already landed
+    const tipSha = git(root, ["rev-parse", branch]).stdout;
+    if (!tipSha) continue;
+    const result = latestResult.get(goalId);
+    if (!result || result.outcome !== "red") continue; // no execution, or the last execution landed
+    out.push({ goalId, request, result, tipSha });
+  }
+  return out;
+}
