@@ -21,11 +21,11 @@ Fix `goal/GOAL-912` so the merge succeeds (resolve the conflict or make the veri
 
 ## AC（draft）
 - [x] `goal/GOAL-912` advances to a new tip and the next worker-driver round auto-runs the merge（本任务把 develop 追平进 goal 分支，fan-in ff 后 tip 前进；`pendingGoalMerges` 已返回 GOAL-912，tip 前进即触发重试）.
-- [ ] the `goal-merge-result` event for GOAL-912 shows `outcome=landed`（待外部）.
+- [ ] the `goal-merge-result` event for GOAL-912 shows `outcome=landed`（待外部）
 
 ## DoD（draft）
 - [x] No human re-issue and no further gap task for this goal：请求保持有效、重试由 `pendingGoalMerges` 派生；去重键 `kind: goal-branch-unmerged` + GOAL id 命中本任务.
-- [ ] The merge lands without a human re-issuing the request（待外部，由 worker-driver 下一轮 goal-merge 步骤复验）.
+- [ ] The merge lands without a human re-issuing the request（待外部）
 
 该轴仍暗,理由:goal 分支追平 develop 的机械合并（tip 前进），无组件代码改动，未跑 archguard/码文档比测量。
 
