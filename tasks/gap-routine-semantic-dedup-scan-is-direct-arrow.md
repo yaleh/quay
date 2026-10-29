@@ -3,7 +3,7 @@ id: gap-routine-semantic-dedup-scan-is-direct-arrow
 title: "semantic-dedup-scan: Byte-identical 'am I the entry point' arrow
   (process.argv[1] vs fileURLToPath(import.meta.url) with try/catch) in the two
   probe servers; confirmed by both the "
-status: todo
+status: ready
 labels:
   - gap
   - routine-filed
