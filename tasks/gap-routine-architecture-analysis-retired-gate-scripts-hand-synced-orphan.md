@@ -84,6 +84,7 @@ ADR-007 暗轴记录：
 - `packages/quay/scripts/package.sh`
 - `packages/quay/test/npm-pack-e2e.test.mjs`
 - `plugin/README.md`
+- plugin/sh-census-baseline.json
 - `plugin/scripts/capability-catalog-declarations.json`
 - `plugin/scripts/publish-dist-branch.sh`
 - `plugin/scripts/release-freshness-check.sh`
