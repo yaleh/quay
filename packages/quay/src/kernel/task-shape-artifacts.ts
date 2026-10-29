@@ -26,12 +26,13 @@
 // `coreSrcAliasPlugin`) re-points every `packages/quay/src/**` specifier onto the real Core source
 // tree and INLINES it, so the shipped `dist/ready-pool-check.js` stays self-contained.
 //
-// PURE LOGIC over PURE DATA — no imports beyond two kernel leaves (`shape-sections.ts`,
-// `regex-escape.ts`), no fs, no node builtins. It runs in the product bundle AND the methodology
-// layer, so it must stay side-effect-free.
+// PURE LOGIC over PURE DATA — no imports beyond three kernel leaves (`shape-sections.ts`,
+// `regex-escape.ts`, `extract-section.ts`), no fs, no node builtins. It runs in the product bundle
+// AND the methodology layer, so it must stay side-effect-free.
 
 import { SHAPE_SECTIONS } from "./shape-sections.ts";
 import { escapeRegExp } from "./regex-escape.ts";
+import { extractSection } from "./extract-section.ts";
 
 /**
  * Minimum non-whitespace content per section (QN-005): a heading followed by one word is not an
@@ -66,35 +67,30 @@ export function detectShape(body: string): TaskShape {
   return "unknown";
 }
 
-/**
- * Extract the content of a `## <heading>` section: everything after the heading line up to the next
- * line whose heading is at the SAME OR SHALLOWER depth (so a `## X` section runs through its nested
- * `### ` subheadings but stops at the next `## ` — or any `# ` — heading), or the end of the body.
- * Returns `null` when the heading is absent.
- *
- * Depth-awareness is the one behavior the two former copies disagreed on: the store's old stop
- * pattern (`^##\s`) did NOT terminate on a shallower `# ` heading, so an H1 wedged between two H2
- * sections was silently swallowed into the preceding one (three corpus tasks read `plan:true` for a
- * Contract section that was in fact empty). The depth-aware rule — already the semantics of
- * `task-parsing.ts` / `task-schema.ts` `extractSection`, and the one the methodology judge used — is
- * the single rule both judges now share. It is STRICTER, never looser: it can only end a section
- * earlier, never extend one.
- */
-export function findShapeSection(fullText: string, heading: string): string | null {
-  const headingLineRe = new RegExp(`^(##+)\\s*${escapeRegExp(heading)}\\s*$`, "im");
-  const headingMatch = fullText.match(headingLineRe);
-  if (!headingMatch) return null;
-  const depth = headingMatch[1].length;
-  const startIdx = headingMatch.index! + headingMatch[0].length;
-  const rest = fullText.slice(startIdx);
-  const stopRe = new RegExp(`^#{1,${depth}}\\s`, "m");
-  const stopMatch = rest.match(stopRe);
-  return stopMatch ? rest.slice(0, stopMatch.index) : rest;
-}
+// ── the depth-aware slicer: ONE definition, the kernel leaf ──────────────────────────────────────
+// This module used to carry its OWN `findShapeSection` — a nine-line body byte-identical to
+// `extract-section.ts`'s `extractSection` (the only delta was the non-null assertion on
+// `headingMatch.index`), with no import edge between the two, even though both sit in `kernel/`.
+// A routine `semantic-dedup-scan` finding (`extract-section-copy`, runId
+// `semantic-dedup-scan-1793251416079`) reported the pair as `real-duplication`; earlier runs had
+// re-reported the same pair under other ids (`extract-section-three-independent-copies`,
+// `extract-section-family`, `extract-section-triplication`, `xpkg-extractsection`,
+// `extract-section-find-shape-section`) and every one of those filings was rate-capped. The copy is
+// gone now: `extractSection` is IMPORTED here and re-exported under this module's historical name.
+// `findShapeSection === extractSection` is an IDENTITY, pinned by
+// `packages/quay/test/kernel-pure-judges.test.mjs` — a byte-identical re-implementation would pass
+// any behavioral golden and fail that assertion (硬规则 4 推论三).
+//
+// The rule the judges here rely on — a `## X` section runs through its nested `### ` subheadings and
+// stops at the next SAME-or-shallower heading, or the end of the body; `null` when the heading is
+// absent — is documented ONCE, at the kernel leaf. Historically the store's `^##\s` stop pattern did
+// NOT terminate on a shallower `# ` heading (an H1 wedged between two H2 sections was swallowed into
+// the preceding one); the kernel rule is strictly narrower, never looser.
+export { extractSection as findShapeSection };
 
 /** Non-whitespace length of a heading's section (0 when the heading is absent). */
 export function sectionNonWhitespaceLength(body: string, heading: string): number {
-  const sec = findShapeSection(body, heading);
+  const sec = extractSection(body, heading);
   return sec === null ? 0 : sec.replace(/\s/g, "").length;
 }
 
@@ -104,7 +100,7 @@ export function sectionNonWhitespaceLength(body: string, heading: string): numbe
  */
 export function sectionAfterHeading(fullText: string, headings: string[]): string {
   for (const h of headings) {
-    const sec = findShapeSection(fullText, h);
+    const sec = extractSection(fullText, h);
     if (sec !== null) return sec;
   }
   return "";
