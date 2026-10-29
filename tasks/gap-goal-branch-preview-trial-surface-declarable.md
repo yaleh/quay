@@ -1,7 +1,7 @@
 ---
 id: gap-goal-branch-preview-trial-surface-declarable
 title: goal preview 试用面可声明：workspace 声明消费者产品的预览命令，goal preview 起它而非写死 quay serve
-status: ready
+status: done
 labels:
   - gap
 parent: null
