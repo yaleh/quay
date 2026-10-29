@@ -63,8 +63,8 @@ AC7（cp 备份回退核心改动 → 变红 → cp 恢复 → 绿，不用 git 
 
 ## Blocker
 
-**2026-10-29T10:13:14.133Z — worker 未落地（exited-not-landed）**
+**2026-10-29T13:16:01.143Z — worker 未落地（exited-not-landed）**
 
-- 未落地原因：step=suite: AssertionError [ERR_ASSERTION]: AC2 失败路径：ps 读数必须可得（⛔ 读不到 ≠ 干净，硬规则 3b）
+- 未落地原因：step=suite: AssertionError [ERR_ASSERTION]: 1 条现存判据被误判为非只读 —— 这把闸在生产上会开始拒绝真判据
 - run_id：wk-prod-anchor
-- session_id：1fa95090-b66f-40de-9af9-f1e467fb999c
+- session_id：823bc9bf-08f3-4154-9aee-5ffc98908609
