@@ -169,6 +169,8 @@ import {
   runGoalMergeFanIn,
   pendingGoalMerges,
   readGoalMergeResults,
+  // SPEC §4.7 裁定⑫：goal 并入红的 gap 立案（worker-driver 侧）。
+  fileGoalBranchUnmergedGaps,
   // gap-attempt-task-phase-timing-fields-incomplete-lock-wait-field-broken：分阶段时间戳的读入面。
   readFanInTraceRecords,
   readAttemptPhaseTimestamps,
@@ -176,7 +178,7 @@ import {
 import { recordGoalMergeRequest } from "../../packages/quay/src/goal-merge.ts";
 // gap-goal-merge-execution-writes-no-step-trace：判别键从【写手】取（⛔ 不在测试里重打一份字面量——
 // 改了写手的取值而测试仍绿，测的就是一个不存在的形态）。
-import { GOAL_MERGE_TRACE_KIND } from "../scripts/worker-fan-in.ts";
+import { GOAL_MERGE_TRACE_KIND, GOAL_BRANCH_UNMERGED_KIND } from "../scripts/worker-fan-in.ts";
 import { defaultLaneCount } from "../scripts/full-suite-runner.ts";
 import { spawnSuiteAndWait } from "../scripts/suite-driver.ts";
 import { suiteLockBase, suiteLockSlotPaths } from "../scripts/suite-lock-slots.ts";
@@ -5379,4 +5381,149 @@ test("AC4 (能取假) — buildWorkerPrompt and buildContinueWorkerPrompt both s
     acChecked: 1, acTotal: 1, failureReason: "suite red — 3 files failed", attempts: [],
   });
   assert.doesNotMatch(unrelated, /refused BY THE dark-axis STEP/);
+});
+
+// ── gap-goal-branch-merge-red-no-gap-filing-deadlock — SPEC §4.7 裁定⑫ 的 gap 立案半边 ──────────────
+//
+// 直接量 = 真实临时仓库 + 真实 git 冲突/子进程：一个 branch-mode goal 的并入红（内容冲突或
+// pre-merge-commit 钩子失败）之后，worker-driver 侧的 `fileGoalBranchUnmergedGaps` 必须立【一条】去重
+// gap 任务（goal_ac 指向该 goal 的某个 AC、extra.kind/extra.goal = 去重身份），tip 前进后自动重试并
+// 落地。⛔ 不伪造读数——立案是真的 `quay-native task edit` 子进程，判的是磁盘上的任务文件。
+const GOAL_GAP_CLI = path.join(REPO_ROOT, "packages", "quay-native", "bin", "quay-native.ts");
+
+/** 一个带真实分叉的 branch-mode goal 仓库。主检出落在 `task/worker-test`（⛔ 不落 develop），这样
+ *  quay-native 的 commit-after-write 对 task 分支只提交、不 ff develop——develop 的 tip 全程只由
+ *  runGoalMergeFanIn 的并入移动，测试的「develop unchanged on red」断言才不会被任务文件提交污染。
+ *  `conflict:true` 时两侧改同一文件的同一行（真实内容冲突）；false 时两侧各加一个不同文件（干净合并，
+ *  供 pre-merge-commit 钩子失败类的非内容冲突红用）。 */
+function makeGoalBranchGapRepo(tag, opts = {}) {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), `goal-gap-${tag}-`));
+  const g = (...a) => execFileSync("git", ["-C", root, ...a], { encoding: "utf8" });
+  g("init", "-q"); g("config", "user.email", "t@example.com"); g("config", "user.name", "T");
+  g("branch", "-M", "develop");
+  fs.writeFileSync(path.join(root, ".gitignore"), ".quay/\n");
+  fs.mkdirSync(path.join(root, "goals"), { recursive: true });
+  fs.mkdirSync(path.join(root, "tasks"), { recursive: true });
+  const activatedAt = new Date(Date.now() - 300_000).toISOString();
+  fs.writeFileSync(path.join(root, "goals", `${GM_GOAL}-a-goal.md`),
+    `---\nid: ${GM_GOAL}\ntitle: a goal\nstatus: active\nkind: directive\nactivatedAt: ${activatedAt}\nbranch: true\n---\n\nbody long enough to parse as a goal record yes indeed\n`);
+  fs.writeFileSync(path.join(root, "goals", `${GM_AC}-a-criterion.md`),
+    `---\nid: ${GM_AC}\nstatus: active\nkind: criterion\ngoal: ${GM_GOAL}\nphase: post-merge\ncriterion: "exit 0"\n---\n\nfixture criterion attributable to ${GM_GOAL}\n`);
+  fs.writeFileSync(path.join(root, "conflict.txt"), "base line\n");
+  g("add", "-A"); g("commit", "-q", "-m", "base");
+  g("checkout", "-q", "-b", `goal/${GM_GOAL}`);
+  if (opts.conflict) {
+    fs.writeFileSync(path.join(root, "conflict.txt"), "goal line\n");
+  } else {
+    fs.writeFileSync(path.join(root, "goal-work.txt"), "goal work\n");
+  }
+  g("add", "-A"); g("commit", "-q", "-m", "goal work");
+  g("checkout", "-q", "develop");
+  if (opts.conflict) {
+    fs.writeFileSync(path.join(root, "conflict.txt"), "develop line\n");
+  } else {
+    fs.writeFileSync(path.join(root, "develop-work.txt"), "develop work\n");
+  }
+  g("add", "-A"); g("commit", "-q", "-m", "develop work");
+  g("checkout", "-q", "-b", "task/worker-test");
+  recordGoalMergeRequest({ root, goalId: GM_GOAL, reason: "tried in preview, mature enough", now: () => new Date(Date.now() - 120_000) });
+  return root;
+}
+
+/** 立案 gap 任务文件的 frontmatter（不存在 / 无 fence ⇒ null）。 */
+function goalGapTaskFrontmatter(root) {
+  const file = path.join(root, "tasks", `gap-goal-branch-unmerged-${GM_GOAL.toLowerCase()}.md`);
+  if (!fs.existsSync(file)) return null;
+  const raw = fs.readFileSync(file, "utf8");
+  const m = /^---\n([\s\S]*?)\n---/.exec(raw);
+  return m ? YAML.parse(m[1]) : null;
+}
+
+const goalGapFanInOpts = (root, suiteCommand) => ({
+  root, goalId: GM_GOAL, suiteCommand,
+  ffMergeModule: FF_MERGE_MODULE_ABS,
+  scriptsDir: path.join(REPO_ROOT, "plugin", "scripts"),
+});
+
+test("goal-merge gap filing — a real content-conflict red files ONE dedup'd gap task, and the tip advance auto-retries to landed", async () => {
+  const root = makeGoalBranchGapRepo("conflict", { conflict: true });
+  try {
+    await withExclusiveTmpdir(async () => {
+      const devBefore = execFileSync("git", ["-C", root, "rev-parse", "develop"], { encoding: "utf8" }).trim();
+      const tip = execFileSync("git", ["-C", root, "rev-parse", `goal/${GM_GOAL}`], { encoding: "utf8" }).trim();
+      const pending = pendingGoalMerges(root);
+      assert.equal(pending.length, 1, "the recorded request is pending");
+
+      const r = await runGoalMergeFanIn({ ...goalGapFanInOpts(root, ["bash", "-c", "exit 0"]), request: pending[0].request });
+      assert.equal(r.outcome, "red");
+      assert.equal(r.step, "merge-conflict", `real content conflict ⇒ merge-conflict (got ${r.step})`);
+      assert.equal(execFileSync("git", ["-C", root, "rev-parse", "develop"], { encoding: "utf8" }).trim(), devBefore, "develop unchanged on red");
+      assert.equal(execFileSync("git", ["-C", root, "rev-parse", `goal/${GM_GOAL}`], { encoding: "utf8" }).trim(), tip, "goal branch unchanged on red");
+
+      // The worker-driver round's filing step (a real quay-native task edit subprocess).
+      const filings = await fileGoalBranchUnmergedGaps(root, { quayNativeCli: GOAL_GAP_CLI });
+      assert.equal(filings.length, 1);
+      assert.equal(filings[0].filed, true);
+      assert.equal(filings[0].goalId, GM_GOAL);
+
+      const fm = goalGapTaskFrontmatter(root);
+      assert.ok(fm, "the gap task file exists in the task store");
+      assert.equal(fm.goal_ac, GM_AC, "goal_ac points at one of the goal's ACs");
+      assert.equal(fm.extra.kind, GOAL_BRANCH_UNMERGED_KIND, "dedup identity kind recorded");
+      assert.equal(fm.extra.goal, GM_GOAL, "dedup identity GOAL id recorded");
+      assert.ok(Array.isArray(fm.labels) && fm.labels.includes("gap"), "filed as a gap task");
+
+      // Dedup: a second round over the SAME red must not file a second task.
+      const filings2 = await fileGoalBranchUnmergedGaps(root, { quayNativeCli: GOAL_GAP_CLI });
+      assert.equal(filings2.length, 1);
+      assert.equal(filings2[0].filed, false, "the same red does not re-file");
+      assert.equal(
+        fs.readdirSync(path.join(root, "tasks")).filter((f) => f.endsWith(".md")).length,
+        1,
+        "exactly one task file exists in the store",
+      );
+
+      // AC3: fix the conflict on the goal branch (tip advances) ⇒ auto-retry lands, no human re-request.
+      const g = (...a) => execFileSync("git", ["-C", root, ...a], { encoding: "utf8" });
+      g("checkout", "-q", `goal/${GM_GOAL}`);
+      fs.writeFileSync(path.join(root, "conflict.txt"), "develop line\n");
+      g("add", "-A"); g("commit", "-q", "-m", "resolve conflict");
+      g("checkout", "-q", "task/worker-test");
+      const retry = pendingGoalMerges(root);
+      assert.equal(retry.length, 1, "tip advanced ⇒ retried (ruling ⑳)");
+
+      const r2 = await runGoalMergeFanIn({ ...goalGapFanInOpts(root, ["bash", "-c", "exit 0"]), request: retry[0].request });
+      assert.equal(r2.outcome, "landed", `the repair auto-retries and lands (step=${r2.step} reason=${r2.reason})`);
+      const results = readGoalMergeResults(root);
+      assert.equal(results[results.length - 1].outcome, "landed", "the result event shows landed");
+      assert.equal(pendingGoalMerges(root).length, 0, "no longer pending after landing");
+      assert.equal((await fileGoalBranchUnmergedGaps(root, { quayNativeCli: GOAL_GAP_CLI })).length, 0, "a landed goal is not stalled");
+    });
+  } finally { gmCleanup(root); }
+});
+
+test("goal-merge gap filing — a non-content infra red (pre-merge-commit hook fails) also files a gap task", async () => {
+  const root = makeGoalBranchGapRepo("hookfail", { conflict: false });
+  try {
+    // A pre-merge-commit hook that ALWAYS fails: the merge's index is clean (both sides added different
+    // files), so the only red cause is the hook — the non-content "merge-failed" shape of GOAL-904.
+    const hook = path.join(root, ".git", "hooks", "pre-merge-commit");
+    fs.mkdirSync(path.dirname(hook), { recursive: true });
+    fs.writeFileSync(hook, "#!/bin/sh\nexit 1\n", { mode: 0o755 });
+
+    await withExclusiveTmpdir(async () => {
+      const pending = pendingGoalMerges(root);
+      assert.equal(pending.length, 1, "the recorded request is pending");
+      const r = await runGoalMergeFanIn({ ...goalGapFanInOpts(root, ["bash", "-c", "exit 0"]), request: pending[0].request });
+      assert.equal(r.outcome, "red");
+      assert.equal(r.step, "merge-failed", `hook failure ⇒ merge-failed, not merge-conflict (got ${r.step})`);
+
+      const filings = await fileGoalBranchUnmergedGaps(root, { quayNativeCli: GOAL_GAP_CLI });
+      assert.equal(filings.length, 1);
+      assert.equal(filings[0].filed, true, "a non-content infra red files a gap too");
+      const fm = goalGapTaskFrontmatter(root);
+      assert.equal(fm.extra.kind, GOAL_BRANCH_UNMERGED_KIND, "dedup identity kind recorded");
+      assert.equal(fm.extra.goal, GM_GOAL, "dedup identity GOAL id recorded");
+    });
+  } finally { gmCleanup(root); }
 });

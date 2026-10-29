@@ -59,7 +59,11 @@ import { goalIdFromBranchToken, goalBranchName, goalBranchRefExists } from "../.
 // shared with `quay goal merge` and the tests); ⛔ this module never re-declares them.
 import {
   GOAL_MERGE_RESULT_GATE,
+  readGoalAcs,
+  stalledGoalMerges,
   type GoalMergeRequest,
+  type GoalMergeResult,
+  type StalledGoalMerge,
 } from "../../packages/quay/src/goal-merge.ts";
 // gate-script-base 是叶子（只 import node 内建）——⛔ 不成环。normalizeRel 供本文件的 suite 日志
 // 失败行解析（自 worker-driver.ts 迁入，见该簇的注释）。
@@ -3844,6 +3848,142 @@ export async function appendGoalMergeResultEvent(
   } catch (e) {
     return { ok: false, reason: (e as Error)?.message ?? String(e) };
   }
+}
+
+// ── goal-branch-unmerged gap filing（SPEC §4.7 裁定⑫）────────────────────────────────────────────
+//
+// `runGoalMergeFanIn` 只写 `goal-merge-result` 红事件；这半边才消掉死锁：对每个「最近一次执行红 ∧
+// 分支仍在 ∧ 非 develop 祖先」的 goal 立【一条】gap 任务，去重身份 = `kind: goal-branch-unmerged` +
+// GOAL id。任务的 `goal_ac` 指向该 goal 的某个 AC ⇒ §4.3 把修复解析回 goal 分支；tip 前进后
+// `pendingGoalMerges` 自动重试并入，并入成功后 `stalledGoalMerges` 不再报告该 goal，立案自然停止。
+//
+// ⛔ 选的是 SPEC §4.7 给的「worker-driver 侧立案」一臂（另一臂是写事件给 goal-driver 立案）——
+// 不再为这条形态跨 goal-driver 的 task 边界。
+
+/** gap 任务的去重 kind 字面量（单一真相源：写侧与查重侧同取本常量，⛔ 不在测试里重打一份）。 */
+export const GOAL_BRANCH_UNMERGED_KIND = "goal-branch-unmerged";
+
+export interface GoalBranchGapFilingResult {
+  goalId: string;
+  /** true = 本次调用【新立】了一条 gap 任务；false = 已有任务认领（去重命中）。 */
+  filed: boolean;
+  taskId: string | null;
+  reason: string;
+}
+
+/** 读一个任务文件的 frontmatter（YAML）。读不到 / 无 fence / 解析失败 ⇒ null（缺值 = 未查，硬规则 6）。 */
+function goalGapTaskFrontmatter(root: string, file: string): Record<string, unknown> | null {
+  let raw: string;
+  try {
+    raw = fs.readFileSync(path.join(root, "tasks", file), "utf8");
+  } catch {
+    return null;
+  }
+  const split = splitTaskFile(raw);
+  if (!split) return null;
+  try {
+    return (parseYaml(split.frontmatterRaw) ?? {}) as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+}
+
+/** 该 goal 是否已有带 `kind: goal-branch-unmerged` 身份的任务。identity = kind + GOAL id；`goal_ac`
+ *  命中本 goal 的 AC 集也视为同一（兼容 `extra.goal` 缺失的旧立案）。 */
+function findGoalBranchUnmergedTask(root: string, goalId: string, acIds: string[]): string | null {
+  let files: string[];
+  try {
+    files = fs.readdirSync(path.join(root, "tasks"));
+  } catch {
+    return null;
+  }
+  for (const f of files) {
+    if (!f.endsWith(".md")) continue;
+    const fm = goalGapTaskFrontmatter(root, f);
+    if (!fm) continue;
+    const extra = fm.extra && typeof fm.extra === "object" && !Array.isArray(fm.extra)
+      ? (fm.extra as Record<string, unknown>)
+      : {};
+    if (extra.kind !== GOAL_BRANCH_UNMERGED_KIND) continue;
+    if (extra.goal === goalId) return typeof fm.id === "string" ? fm.id : f.replace(/\.md$/, "");
+    const goalAc = typeof fm.goal_ac === "string" ? fm.goal_ac : null;
+    if (goalAc !== null && acIds.includes(goalAc)) return typeof fm.id === "string" ? fm.id : f.replace(/\.md$/, "");
+  }
+  return null;
+}
+
+/** 机械渲染 gap 任务体（⛔ 不把写文件的权力交给 LLM——这里是 worker-driver 的机械立案，不是语义 agent）。 */
+function renderGoalBranchUnmergedBody(goalId: string, result: GoalMergeResult, tipSha: string): string {
+  const step = result.step ?? "unknown";
+  const reason = result.reason ?? "no reason recorded";
+  return [
+    "## Finding",
+    `The branch-mode goal ${goalId} has a pending merge request into \`develop\`, and the worker-driver's latest execution went red at step \`${step}\`: ${reason}. The goal branch tip is frozen at \`${tipSha}\`, so the retry guard (\`pendingGoalMerges\`, ruling ⑳) will not re-run the merge on its own. Without a task advancing \`goal/${goalId}\`, the request deadlocks — no gap task, no fix, no auto-retry.`,
+    "",
+    "## Requested action",
+    `Fix \`goal/${goalId}\` so the merge succeeds (resolve the conflict or make the verification pass), advance the branch to a new tip, and let the worker-driver auto-retry the pending merge (ruling ⑳). Do NOT re-issue the merge request — the existing request stays valid until the branch is merged or the goal leaves \`active\`.`,
+    "",
+    "## AC（draft）",
+    `- [ ] \`goal/${goalId}\` advances to a new tip and the next worker-driver round auto-runs the merge; the \`goal-merge-result\` event for ${goalId} shows \`outcome=landed\`.`,
+    "",
+    "## DoD（draft）",
+    "- [ ] The deadlock class is removed: the merge lands without a human re-issuing the request, and no further gap task for this goal is filed.",
+    "",
+  ].join("\n");
+}
+
+/** 经 Provider ABI CLI（quay-native task edit 的 upsert 语义）立/更新一条 gap 任务。单一 spawn：create
+ *  面不暴露 `--extra`，`task edit` 对不存在的 id 是 upsert（store.write 的既有语义），故一并写入
+ *  title/labels/goal_ac/extra/body。env 把 tasks dir 指到 `root`（⛔ 不依赖 spawn 进程的 cwd）。 */
+function fileGoalBranchUnmergedTask(
+  root: string,
+  args: { taskId: string; goalId: string; acId: string | null; result: GoalMergeResult; tipSha: string; cli: string },
+): { ok: boolean; reason: string } {
+  const { taskId, goalId, acId, result, tipSha, cli } = args;
+  const argv = [
+    "node", "--no-warnings", "--experimental-strip-types", cli,
+    "task", "edit", taskId,
+    "--title", `goal-branch-unmerged ${goalId}: merge into develop went red — fix the goal branch so it auto-retries`,
+    "--labels", `gap,${GOAL_BRANCH_UNMERGED_KIND}`,
+    ...(acId ? ["--goal-ac", acId] : []),
+    "--extra", JSON.stringify({ kind: GOAL_BRANCH_UNMERGED_KIND, goal: goalId }),
+    "--body", renderGoalBranchUnmergedBody(goalId, result, tipSha),
+  ];
+  const r = spawnSync(argv[0], argv.slice(1), {
+    cwd: root,
+    env: { ...process.env, QUAY_NATIVE_TASKS_DIR: path.join(root, "tasks") },
+    encoding: "utf8",
+  });
+  if ((r.status ?? 1) !== 0) {
+    const detail = ((r.stderr ?? "").trim() || (r.stdout ?? "").trim()).slice(0, 400);
+    return { ok: false, reason: `task edit exit ${r.status}: ${detail}` };
+  }
+  return { ok: true, reason: `filed as ${taskId}` };
+}
+
+/** 对每条「最近一次执行红」的 goal 立 gap 任务（已存在则去重跳过）。⛔ 永不抛：spawn 失败落
+ *  `{ filed:false, reason }`，由调用方落轮记录（读不懂 ≠ 已处理，硬规则 3b）。 */
+export async function fileGoalBranchUnmergedGaps(
+  root: string,
+  opts: { quayNativeCli?: string; now?: () => Date } = {},
+): Promise<GoalBranchGapFilingResult[]> {
+  const stalled = stalledGoalMerges(root);
+  const out: GoalBranchGapFilingResult[] = [];
+  for (const s of stalled) {
+    const acIds = readGoalAcs(root, s.goalId).map((a) => a.id);
+    const existing = findGoalBranchUnmergedTask(root, s.goalId, acIds);
+    if (existing !== null) {
+      out.push({ goalId: s.goalId, filed: false, taskId: existing, reason: `already filed as ${existing}` });
+      continue;
+    }
+    const taskId = `gap-goal-branch-unmerged-${s.goalId.toLowerCase()}`;
+    const cli = opts.quayNativeCli ?? path.join(root, "packages", "quay-native", "bin", "quay-native.ts");
+    const res = fileGoalBranchUnmergedTask(root, {
+      taskId, goalId: s.goalId, acId: acIds[0] ?? null, result: s.result, tipSha: s.tipSha, cli,
+    });
+    out.push({ goalId: s.goalId, filed: res.ok, taskId: res.ok ? taskId : null, reason: res.reason });
+  }
+  return out;
 }
 
 export interface GoalMergeFanInOptions {

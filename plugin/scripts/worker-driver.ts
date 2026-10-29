@@ -468,6 +468,9 @@ import {
   type DevelopRedObservation,
   runGoalMergeFanIn,
   appendGoalMergeResultEvent,
+  // SPEC §4.7 裁定⑫：goal 并入红的 gap 立案（worker-driver 侧）。
+  fileGoalBranchUnmergedGaps,
+  type GoalBranchGapFilingResult,
   // 过程日志文件名（`.quay/fan-in-<task>-<runIdSafe>.log` 的**唯一**命名函数——`readAttemptPhaseTimestamps`
   // 按它定位本次尝试的过程日志，⛔ 不在这里重算 sanitize）。
   fanInLogFileName,
@@ -487,8 +490,10 @@ export {
 export {
   runGoalMergeFanIn,
   appendGoalMergeResultEvent,
+  fileGoalBranchUnmergedGaps,
   type GoalMergeFanInOptions,
   type GoalMergeFanInResult,
+  type GoalBranchGapFilingResult,
 } from "./worker-fan-in.ts";
 export {
   parseSuiteLogFailures,
@@ -6586,6 +6591,22 @@ export async function runResidentLoop(opts: ResidentOptions): Promise<number> {
       } catch (e: any) {
         // 执行侧已自行 try/catch 并落事件；此处只兜「派生/装配」的意外抛错（⛔ 不成错误轮，下一轮重试）。
         if (json) process.stdout.write(`${JSON.stringify({ event: "goal-merge-instrument-failure", cause: `CAUSE=goal-merge-step-threw — ${e?.message ?? String(e)}` })}\n`);
+      }
+
+      // 1e. goal 并入红的 gap 立案（SPEC §4.7 裁定⑫）：对「最近一次执行红 ∧ 分支仍在 ∧ 非 develop
+      //   祖先」的 goal 立【一条】去重 gap 任务（kind: goal-branch-unmerged + GOAL id，goal_ac 指向
+      //   该 goal 的某个 AC）。tip 冻结不重跑的正是这条形态——上一轮红的 goal 在本轮立案，下一轮
+      //   去重命中不重立。⛔ 本步失败绝不能让整轮抛错（下一轮重读 ledger 重试）。
+      step = "goal-merge-gap-filing";
+      try {
+        const filings = await fileGoalBranchUnmergedGaps(rootDir);
+        if (json && filings.length > 0) {
+          for (const f of filings) {
+            process.stdout.write(`${JSON.stringify({ event: "goal-merge-gap-filing", ...f })}\n`);
+          }
+        }
+      } catch (e: any) {
+        if (json) process.stdout.write(`${JSON.stringify({ event: "goal-merge-gap-filing-instrument-failure", cause: `CAUSE=goal-merge-gap-filing-threw — ${e?.message ?? String(e)}` })}\n`);
       }
 
       // 2. 池非空且未达 cap 且未判停 ⇒ 走选择环起下一个。
