@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#172e25">
+  <meta name="description" content="Quay 项目工作台 · Dashboard 静态设计原型">
+  <title>Quay — 每一步，都有着落</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='9' fill='%23172e25'/%3E%3Cpath d='M22 10H13a6 6 0 0 0 0 12h8V10m-4 8 7 7' fill='none' stroke='%23d6eea5' stroke-width='3'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="styles.css">
+  <script src="app.js" defer></script>
+</head>
+<body>
+  <a class="skip-link" href="#main">跳到主要内容</a>
+  <div class="mobile-scrim" id="mobile-scrim"></div>
+  <aside class="sidebar" id="sidebar" aria-label="主导航">
+    <button class="icon-button sidebar-close" id="menu-close" aria-label="关闭导航"><i data-icon="close"></i></button>
+    <a class="brand" href="#main" aria-label="Quay 项目概览"><span class="brand-mark" aria-hidden="true"><svg viewBox="0 0 32 32"><path d="M24 7H14a9 9 0 1 0 0 18h9V7M18 20l9 9"/></svg></span><span>quay<span class="brand-dot">.</span></span></a>
+    <button class="workspace-switch" data-detail="workspace"><span class="workspace-avatar">Q</span><span><strong>quay</strong><small>个人工作空间</small></span><i data-icon="chevrons"></i></button>
+    <nav class="nav" aria-label="工作空间页面">
+      <p class="nav-label">工作空间</p>
+      <a class="nav-link selected" href="#main" aria-current="page"><i data-icon="overview"></i>项目概览<span class="nav-active-dot"></span></a>
+      <a class="nav-link" data-route="/tasks"><i data-icon="tasks"></i>任务台账<span class="nav-count">2.4k</span></a>
+      <a class="nav-link" data-route="/goal"><i data-icon="target"></i>阶段目标<span class="nav-count">2</span></a>
+      <a class="nav-link" data-route="/needs-human"><i data-icon="inbox"></i>待人工<span class="nav-count quiet">0</span></a>
+      <p class="nav-label">运行与质量</p>
+      <a class="nav-link" data-route="/live"><i data-icon="pulse"></i>实时活动<span class="tiny-dot"></span></a>
+      <a class="nav-link" data-route="/board"><i data-icon="board"></i>执行看板</a>
+      <a class="nav-link" data-route="/tests"><i data-icon="check-square"></i>测试验证</a>
+      <a class="nav-link" data-route="/system"><i data-icon="layers"></i>系统资源</a>
+      <a class="nav-link" data-route="/manager"><i data-icon="sliders"></i>调度管理</a>
+      <a class="nav-link" data-route="/sessions"><i data-icon="terminal"></i>会话</a>
+      <p class="nav-label">记录与知识</p>
+      <a class="nav-link" data-route="/git-history"><i data-icon="branch"></i>Git 历史</a>
+      <a class="nav-link" data-route="/journal"><i data-icon="journal"></i>运行日志</a>
+      <a class="nav-link" data-route="/adr"><i data-icon="decision"></i>架构决策</a>
+      <a class="nav-link" data-route="/doc"><i data-icon="book"></i>文档</a>
+      <a class="nav-link" data-route="/architecture"><i data-icon="network"></i>架构地图</a>
+    </nav>
+    <div class="sidebar-bottom"><div class="branch-label"><i data-icon="branch"></i><span>develop</span><span class="version">v0.13.0-dev</span></div><button class="profile" data-detail="about"><span class="profile-avatar">Y</span><span><strong>Yale's workspace</strong><small>本地部署 · Native provider</small></span><i data-icon="info"></i></button></div>
+  </aside>
+
+  <div class="app-shell">
+    <header class="topbar">
+      <div class="breadcrumbs"><button class="icon-button mobile-menu" id="menu-toggle" aria-label="打开导航" aria-controls="sidebar" aria-expanded="false"><i data-icon="menu"></i></button><i data-icon="workspace"></i><span>quay</span><span class="breadcrumb-slash">/</span><strong>项目概览</strong></div>
+      <div class="topbar-actions"><button class="search-trigger" id="search-trigger"><i data-icon="search"></i><span>搜索或跳转…</span><kbd>⌘ K</kbd></button><button class="snapshot-label" data-detail="snapshot"><span class="tiny-dot"></span>静态原型<span class="snapshot-date"> · 09.24</span><i data-icon="info"></i></button><span class="top-avatar" aria-label="Yale">Y</span></div>
+    </header>
+
+    <main id="main" tabindex="-1">
+      <section class="page-heading" aria-labelledby="page-title">
+        <div><p class="eyebrow">WORKSPACE OVERVIEW</p><h1 id="page-title">每一步，都有着落<span class="heading-dot">.</span></h1><p class="page-subtitle">从目标到执行，从验证到落地。你的项目，此刻一目了然。</p></div>
+        <button class="date-control" data-detail="snapshot"><i data-icon="calendar"></i><span>2026 年 9 月 24 日<small>星期四 · 22:40 快照</small></span><i data-icon="chevron-down"></i></button>
+      </section>
+
+      <section class="metric-grid" aria-label="关键指标">
+        <button class="metric-card" data-detail="goals"><div class="metric-top"><span>进行中的目标</span><i data-icon="target"></i></div><div class="metric-value">02<span class="metric-unit">/ 05</span></div><div class="metric-bottom"><span class="metric-pill">10 / 12</span><span>验收条件已达成</span><i data-icon="arrow-up-right"></i></div></button>
+        <button class="metric-card" data-detail="execution"><div class="metric-top"><span>正在执行</span><i data-icon="pulse"></i></div><div class="metric-value">00<span class="metric-unit">/ 05</span></div><div class="metric-bottom"><span class="tiny-dot green"></span><span>调度在线 · 当前空闲</span><i data-icon="arrow-up-right"></i></div></button>
+        <button class="metric-card" data-detail="tests"><div class="metric-top"><span>最近一轮测试</span><i data-icon="check-square"></i></div><div class="metric-value">100<span class="metric-unit percent">%</span><svg class="metric-check" viewBox="0 0 32 32" aria-hidden="true"><rect x="3" y="3" width="26" height="26" rx="7"/><path d="m10 16 4 4 8-8"/></svg></div><div class="metric-bottom"><span class="metric-pill">通过</span><span>3,842 / 3,842 · 43 秒</span><i data-icon="arrow-up-right"></i></div></button>
+        <button class="metric-card" data-detail="human"><div class="metric-top"><span>等待人工处理</span><i data-icon="inbox"></i></div><div class="metric-value">00<svg class="metric-check" viewBox="0 0 32 32" aria-hidden="true"><circle cx="16" cy="16" r="13"/><path d="m10 16 4 4 8-8"/></svg></div><div class="metric-bottom"><span class="tiny-dot green"></span><span>没有需要接手的任务</span><i data-icon="arrow-up-right"></i></div></button>
+      </section>
+
+      <div class="operations-grid">
+        <section class="pulse-panel" aria-labelledby="pulse-heading">
+          <div class="panel-heading"><div class="heading-with-icon"><span class="panel-icon"><i data-icon="pulse"></i></span><div><h2 id="pulse-heading">运行脉搏</h2><p>最近三次任务的完整执行记录</p></div></div><span class="dark-status"><span class="tiny-dot"></span>调度在线</span></div>
+          <div class="pulse-summary"><div><strong id="run-count">3</strong><span>次执行完成</span><span class="pulse-divider"></span><strong id="landing-count">3</strong><span>次成功落地</span></div><div class="segmented dark" role="group" aria-label="运行时间窗口"><button data-window="1" aria-pressed="false">1h</button><button data-window="3" class="active" aria-pressed="true">3h</button><button data-window="6" aria-pressed="false">6h</button></div></div>
+          <div class="timeline" id="timeline" aria-label="最近三小时任务执行时间轴"></div>
+          <div class="pulse-footer"><div class="legend"><span><b class="legend-dot"></b>已完成</span><span><b class="legend-dot hatched"></b>空闲时段</span></div><a class="dark-link" data-route="/live">查看实时活动<i data-icon="arrow-up-right"></i></a></div>
+        </section>
+
+        <section class="resource-panel surface" aria-labelledby="resource-heading">
+          <div class="section-heading"><h2 id="resource-heading">系统就绪</h2><span class="badge positive"><span class="tiny-dot green"></span>GO</span></div>
+          <p class="muted resource-intro">资源充足，可以承接下一次执行。</p>
+          <div class="resource-row"><div><span>CPU 压力</span><strong>2.8 <small>/ 60</small></strong></div><div class="meter"><span style="width:4.67%"></span></div></div>
+          <div class="resource-row"><div><span>系统负载</span><strong>106.7 <small>/ 256</small></strong></div><div class="meter"><span style="width:41.68%"></span></div></div>
+          <div class="driver-section"><div class="driver-title"><span>调度服务</span><span><strong>6 / 6</strong> 在线</span></div><div class="driver-grid" aria-label="六个调度服务全部在线"><span><b></b>Promotion</span><span><b></b>Worker</span><span><b></b>Outer</span><span><b></b>Quality</span><span><b></b>Meta</span><span><b></b>Goal</span></div></div>
+          <a class="panel-link" data-route="/system">查看系统状态<i data-icon="arrow-right"></i></a>
+        </section>
+      </div>
+
+      <div class="progress-grid">
+        <section class="goals-section" aria-labelledby="goals-heading">
+          <div class="section-heading outside"><div class="heading-inline"><h2 id="goals-heading">目标正在靠近</h2><span class="count-chip">2</span></div><a class="text-link" data-route="/goal">全部目标<i data-icon="arrow-right"></i></a></div>
+          <div class="goals-grid">
+            <button class="goal-card" data-detail="goal020"><div class="goal-top"><span class="mono">GOAL-020</span><span class="badge positive"><span class="tiny-dot green"></span>进行中</span></div><h3>让 CI 与发布渠道<br>成为可信的守门员</h3><p>develop 首绿，三平台产物可用</p><div class="goal-progress"><span>验收进度</span><strong>7<span> / 8</span></strong></div><div class="goal-segments" aria-label="8 个验收条件中 7 个已达成"><b></b><b></b><b></b><b></b><b></b><b></b><b></b><b class="remaining"></b></div><div class="goal-bottom"><span><i data-icon="tasks"></i>18 个关联任务</span><span>查看目标<i data-icon="arrow-up-right"></i></span></div></button>
+            <button class="goal-card" data-detail="goal022"><div class="goal-top"><span class="mono">GOAL-022</span><span class="badge positive"><span class="tiny-dot green"></span>进行中</span></div><h3>让每一轮 CI<br>在 30 秒内给出答案</h3><p>减少重复装包，释放并行能力</p><div class="goal-progress"><span>验收进度</span><strong>3<span> / 4</span></strong></div><div class="goal-segments" aria-label="4 个验收条件中 3 个已达成"><b></b><b></b><b></b><b class="remaining"></b></div><div class="goal-bottom"><span><i data-icon="tasks"></i>9 个关联任务</span><span>查看目标<i data-icon="arrow-up-right"></i></span></div></button>
+          </div>
+        </section>
+        <section class="ledger-section" aria-labelledby="ledger-heading"><div class="section-heading outside"><h2 id="ledger-heading">积累下来的进展</h2><i data-icon="layers"></i></div><div class="ledger-card surface"><div class="ledger-main"><div><span class="muted">已完成任务</span><div class="ledger-number">2,349<span>个</span></div></div><svg class="ledger-glyph" viewBox="0 0 70 70" aria-hidden="true"><path d="m7 27 28-16 28 16-28 16Z"/><path d="m7 38 28 16 28-16M7 49l28 16 28-16"/><path class="glyph-check" d="m28 26 5 5 10-10"/></svg></div><div class="ledger-bar" aria-label="任务总计 2423，已完成 2349，已替代 74"><span></span><b></b></div><div class="ledger-legend"><span><b></b>已完成 <strong>96.9%</strong></span><span><b></b>已替代 74</span></div><div class="ledger-queue"><span>待办<strong>0</strong></span><span>就绪<strong>0</strong></span><span>待人工<strong>0</strong></span></div><a class="panel-link" data-route="/tasks">打开任务台账<i data-icon="arrow-right"></i></a></div></section>
+      </div>
+
+      <section class="activity-section surface" aria-labelledby="activity-heading">
+        <div class="activity-header"><div class="heading-inline"><h2 id="activity-heading">最近的每一步</h2><span class="activity-subtitle">执行有结果，落地有证据</span></div><div class="segmented" role="group" aria-label="活动类型筛选"><button class="active" data-filter="all" aria-pressed="true">全部</button><button data-filter="landing" aria-pressed="false">落地</button><button data-filter="tests" aria-pressed="false">测试</button><button data-filter="git" aria-pressed="false">提交</button></div></div>
+        <div id="activity-list" class="activity-list" aria-live="polite"></div>
+        <div class="activity-footer"><span id="activity-count">最近 5 条记录</span><a class="text-link" data-route="/journal">查看完整日志<i data-icon="arrow-right"></i></a></div>
+      </section>
+
+      <footer class="page-footer"><span><span class="footer-brand">q.</span> 每一步，都有着落。</span><button data-detail="snapshot">设计预览 · 固定快照，非实时数据<i data-icon="info"></i></button></footer>
+    </main>
+  </div>
+
+  <dialog id="detail-dialog" aria-labelledby="detail-title"><div class="dialog-header"><span class="eyebrow" id="detail-eyebrow">QUAY / INSPECT</span><button class="icon-button" data-close-dialog aria-label="关闭详情"><i data-icon="close"></i></button></div><div class="dialog-body" id="detail-body"></div><div class="dialog-footer"><span>静态原型 · 2026.09.24 快照</span><button class="button-secondary" data-close-dialog>关闭</button></div></dialog>
+  <dialog id="search-dialog" aria-label="快捷搜索"><div class="search-input-row"><i data-icon="search"></i><input id="search-input" aria-label="搜索页面、目标或任务" placeholder="搜索页面、目标或任务…" autocomplete="off"><button class="key-button" data-close-dialog aria-label="关闭搜索">Esc</button></div><div class="search-results" id="search-results" aria-live="polite"></div><div class="search-hint"><span>搜索原型中的目标、活动与页面入口</span><span><kbd>↑</kbd><kbd>↓</kbd> 选择 <kbd>↵</kbd> 打开</span></div></dialog>
+  <div class="toast" id="toast" role="status"></div>
+</body>
+</html>

@@ -660,3 +660,33 @@ manager 只搬 (a) env var 到 launch.settings.json task-worker.env（`CLAUDE_CO
 **判据（推荐）**：先做 **1 的止血**（盲抬数值是已知的止血形态、秒级可回退），让 L1 落地、迁移序走通；同时 `gap-mech-fan-in-suite-silence-watchdog-fired` 按正常 fan-in 落地真修（止血后它也不再被杀）。止血 = 用现有材料压住出血，非提前实现（硬规则 12 不违反：这是「止损」不是「实现 fix」）。
 
 **止血是否需止损判定（B18）**：`止损：需要 —— 抬 SILENCE_MS_DEFAULT 字面 15→60min`（或 env）。防的那条路径（静默看门狗误杀 suite）此刻**已启用**（9 次实锤），不是防一个不存在的成本。
+
+## 2026-10-29 — 16 条 stranded 任务分支处置（restart-readiness-check 挡 resume 的清理）
+
+**背景**：worker-driver 因 environment-fatal 停（07:48Z 瞬时 400，网关已恢复）。resume 前
+restart-readiness-check 报 NOT READY，硬失败 = 16 条 stranded 任务分支（工作保存在分支上、不在 develop）。
+人裁定：逐条 diff 判「代码是否已被重做/已在 develop」，其余默认丢弃 + 记 tip SHA。结论：**全部丢弃，无一 merge**。
+
+**已删除（2 条，代码已在 develop，ahead=0）**：
+- `task/gap-direct-to-develop-ruled-historical-99f845d9` → `eff85826e`（done，已并入）
+- `task/gap-goal033-driver-control-and-vocab-to-core` → `d1ea4331d`（done，已并入）
+
+**本轮丢弃（7 条，记 tip SHA 供 `git branch <name> <sha>` 恢复）**：
+- `task/gap-ff-propagate-structurally-broken-filing-must-target-develop` → `e07cae6e`（superseded；ff-propagate 已退役）
+- `task/gap-release-softprops-missing-explicit-tag-name` → `af8efddc`（superseded；release 工作已重做）
+- `task/gap-scoped-gate-lpt-order` → `d9a2296b`（superseded）
+- `task/gap-session-liveness-signals-perfile-timeout-flaky` → `8367cda7`（superseded）
+- `task/gap-suite-entry-inherits-host-locale-and-tz` → `b850fe43`（superseded）
+- `task/gap-suite-scheduler-main-lpt-missing` → `7d12e5a2`（superseded）
+- `task/gap-official-dist-delivery-acceptance-resource-optimization-quay-ccui-clean-host` → `6bd55207`（ready，代码已并入 develop；worktree 未提交内容 = 纯运行时噪音 `.quay/task-status-events*`）
+
+**已确认丢弃（7 条，人 2026-10-29 裁定；记 tip SHA 供恢复）**：
+- `task/gap-ac292-criterion-carrier-absence-not-evaluated` → `514e7afb`（done；测试文件与 develop 逐字节一致）
+- `task/gap-dashboard-kernel-export-for-cross-project-reuse` → `d1e3464e`（done；核心 export 已落地，注释默认弃）
+- `task/gap-execution-loop-productization-p2-p4` → `65280173`（superseded；ff-merge.ts 已重做演进）
+- `task/gap-fan-in-ff-merge-token-gate-fail-closed` → `2b327680`（superseded；目标 .sh 已删）
+- `task/gap-release-cut-via-workflow-dispatch` → `6d0b0aea`（done；workflow_dispatch 已在 develop）
+- `task/gap-retire-inner-session-hygiene-scripts` → `95447732`（superseded；退休未应用）
+- `task/gap-suite-lpt-dual-process-sharding` → `73145961`（superseded；方向已放弃）
+
+**附**：`gap-official-dist-delivery` 任务 status 由 ready 翻 done（人裁定：代码已并入 develop，stranded 清理时翻正）。

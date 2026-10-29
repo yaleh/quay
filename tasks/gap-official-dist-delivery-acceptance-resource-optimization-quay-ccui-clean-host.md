@@ -2,7 +2,7 @@
 id: gap-official-dist-delivery-acceptance-resource-optimization-quay-ccui-clean-host
 title: 资源优化能力的正式 dist
   交付验收：Quay、ClaudeCodeUI、独立干净单项目宿主三方验证（完整性负例/OOM/超时/恢复/无残留、同commit同scope前后对比）
-status: ready
+status: done
 labels:
   - gap
 parent: null
@@ -37,6 +37,7 @@ Gated on all of P0 and A-E landing first (there is nothing to package-test befor
 
 ## Definition of Done
 - AC1-AC5 checked with pasted evidence from all three hosts. No budget ceiling raised anywhere. No global user-scope plugin install modified.
+- 该轴仍暗,理由:集成验收任务，分支零自有提交（§5），无组件代码改动，未跑 archguard/码文档比测量
 
 ## Touches
 - tasks/gap-official-dist-delivery-acceptance-resource-optimization-quay-ccui-clean-host.md

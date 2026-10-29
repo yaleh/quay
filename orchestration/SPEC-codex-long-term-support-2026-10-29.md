@@ -96,14 +96,16 @@ gate-events / dispatch-record / manager-tick-log 中 DIR-121 零条；不存在�
 - **语义核心**（§10b，⛔ 不是 AC 的合取）：Codex 是 quay 的一个可安全操作、且保证被长期维持的宿主；driver 会话链路不在本 goal 范围。
 - **退出条件**（散文）：一个 fresh Codex 会话在任意工作根下都能连上 quay MCP、能在显式人授权下完成真实 task 编辑/创建并留下可机检证据、宿主侧载体单源无漂移、且 Codex 侧未获得任何超出 operator 契约的生命周期权限——并且这些保证由 goal-driver 每轮复验，不随 task 翻 done 而失效。
 
-### 4.2 四条 AC（每条都套 §12b「会回退的量」筛子）
+### 4.2 三条 AC（每条都套 §12b「会回退的量」筛子）
 
 | AC | 保证 | 会回退? | phase | 理由 |
 |---|---|---|---|---|
-| AC-927 | Codex MCP 从任意工作根连上 quay（spawn + initialize） | 会 | **pre-merge** + `long-term` | 代码判据，在判据 worktree 上跑分支代码即可验 |
-| AC-928 | 宿主侧载体单源无漂移（.agents ↔ plugin/skills ↔ .claude） | 会 | **pre-merge** + `long-term` | 同上；今天已 exit 0，复验域抓未来回归 |
+| AC-927 | Codex MCP 从任意工作根连上 quay（spawn + initialize） | 会 | **pre-merge** + `long-term` | 代码判据，在判据 worktree 上跑分支代码即可验；激活时以 `--force` 越过 evaluability（脚本是 Task A 交付物，落地前 not-evaluable） |
 | AC-929 | 真实 Codex 会话做过一次授权交易并留可机检证据 | **不会**（单调） | **pre-merge** | 证据为**提交进分支的**文件（非 gitignored 生产账本），判据 worktree 可见 |
 | AC-930 | Codex operator 契约不含生命周期权限（权限边界） | 会 | **pre-merge** + `long-term` | 代码判据（负向测试）；今天已绿，复验域抓权限 creep |
+
+⛔ **AC-928（宿主侧载体单源无漂移）已退役**：初稿把它单列，激活时 fidelity 闸判 `vacuous` 拒绝（单条
+drift-check 脚本无显式取假臂）。判定正确——drift-check 已被 AC-930 的 adapter 套件 A1–A6 覆盖，单列即冗余。
 
 ⛔ **AC-929 的关键设计选择**：DIR-121 把证据放在 gitignored `.quay/`（`milestone-evidence.json`）。在 branch 模式下，
 gitignored 账本在判据 worktree 里要么缺席要么是旧快照 ⇒ 只能 post-merge（SPEC-goal-branch §5 B1′）。
@@ -126,7 +128,7 @@ gitignored 账本在判据 worktree 里要么缺席要么是旧快照 ⇒ 只能
 
 ```
 0. 建本 SPEC（本节）
-1. ② 写 AC-927/928/929/930（draft）→ 写 GOAL-912（draft, branch:true）   ← AC 先于 GOAL，§3.2
+1. ② 写 AC-927/929/930（draft）→ 写 GOAL-912（draft, branch:true）   ← AC 先于 GOAL，§3.2
 2. ③ 激活 GOAL-912 → 分支 goal/GOAL-912 懒创建；AC 随 goal 激活
 3. 建 Task A + Task B（goal_ac 指向 AC-927/AC-929）
 4. Task A 落地到 goal 分支 → AC-927 在判据 worktree 上 achieved
