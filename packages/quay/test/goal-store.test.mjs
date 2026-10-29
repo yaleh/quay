@@ -27,7 +27,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { spawnSync, execFileSync } from "node:child_process";
-import { createGoalStore, VALID_GOAL_STATUSES, isGoalId, isCriterionId, GoalIntentConflictError, parseAdjudicationTable, GOAL_ACCEPTANCE_ACTIVE_ENV, SWEEP_ACTOR } from "../src/core/goal-store.ts";
+import { createGoalStore, VALID_GOAL_STATUSES, isGoalId, isCriterionId, GoalIntentConflictError, parseAdjudicationTable, GOAL_ACCEPTANCE_ACTIVE_ENV, SWEEP_ACTOR, buildCriterionRoots, criterionCwdFor } from "../src/core/goal-store.ts";
 import { gateFactories, makeGoalGate } from "../src/gate/factories/index.ts";
 
 // gap-ac355-criterion-false-from-goal-acceptance-active-guard: this file's behaviour must NOT depend
@@ -2110,19 +2110,52 @@ test("能力闸 AC8 — 不回归：全只读判据集上 sweep 行为不变（�
 test("能力闸 AC8(生产面) — 本仓库真 goals 树零误报：这把闸不是无差别拒绝", () => {
   // The live goals/ store of THIS workspace (packages/quay/test/ → the repo root's goals/).
   const goalsDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..", "..", "goals");
+  const mainRoot = path.dirname(goalsDir);
   const files = fs.existsSync(goalsDir) ? fs.readdirSync(goalsDir).filter((f) => f.endsWith(".md")) : [];
   assert.ok(files.length > 100, `真 goals 树必须在场，这条才有意义（实测 ${files.length} 个文件）`);
+
+  // A branch-mode goal's criterion runs on ITS detached criterion worktree (goal-driver provisions
+  // <namespace>/goal-<GOAL-NNN>), NOT on the main checkout — so it may legitimately reference a
+  // script that exists only on goal/<id> (AC-927 → codex-stage1-spawn-verify.sh, delivered on
+  // goal/GOAL-912). Resolve each criterion's cwd the way production does (criterionCwdFor), and never
+  // flag a branch-mode criterion for a branch-only artifact: that is goal-driver's `missingCarriers`
+  // report, not an over-rejection by this sweep.
+  const fileTexts = new Map();
+  for (const file of files) fileTexts.set(file, fs.readFileSync(path.join(goalsDir, file), "utf8"));
+
+  const goals = [];
+  const branchMode = new Set();
+  for (const text of fileTexts.values()) {
+    if (!/^kind:\s*goal\s*$/m.test(text)) continue;
+    const id = /^id:\s*(.+)$/m.exec(text)?.[1]?.trim();
+    if (!id) continue;
+    const branch = /^branch:\s*true\s*$/m.test(text);
+    goals.push({ id, branch });
+    if (branch) branchMode.add(id);
+  }
+  const byGoal = buildCriterionRoots(mainRoot, goals);
+
   const flagged = [];
-  for (const file of files) {
-    const lines = fs.readFileSync(path.join(goalsDir, file), "utf8").split("\n");
+  for (const [file, text] of fileTexts) {
+    const goalId = /^goal:\s*(.+)$/m.exec(text)?.[1]?.trim() ?? "";
+    const root = criterionCwdFor(mainRoot, byGoal, { goal: goalId });
+    // A branch-mode criterion's worktree may not be provisioned HERE (a fresh CI checkout): then the
+    // gate could not read its artifact, which is an environment fact, not an over-rejection (硬规则 3b).
+    if (root !== mainRoot && !fs.existsSync(root)) continue;
+    const lines = text.split("\n");
     for (let i = 0; i < lines.length; i++) {
       const m = /^criterion:\s*(.*)$/.exec(lines[i]);
       if (!m) continue;
       const parts = [m[1]];
       for (let j = i + 1; j < lines.length && !/^\S/.test(lines[j]); j++) parts.push(lines[j]);
       const criterion = parts.join("\n").trim();
-      const j2 = judgeCriterionCapability(criterion, { root: path.dirname(goalsDir) });
-      if (j2.capability !== "read-only") flagged.push(`${file}: ${j2.capability} ${JSON.stringify(j2.reasons)}`);
+      const j2 = judgeCriterionCapability(criterion, { root });
+      if (j2.capability === "read-only") continue;
+      // Only the branch-only-artifact refusal is goal-driver's domain; a DECLARED capability is a
+      // real finding that must still be surfaced even for a branch-mode goal.
+      const onlyUncertifiable = j2.reasons.every((r) => r.rule === "uncertifiable-executed-artifact");
+      if (branchMode.has(goalId) && onlyUncertifiable) continue;
+      flagged.push(`${file}: ${j2.capability} ${JSON.stringify(j2.reasons)}`);
     }
   }
   assert.deepEqual(flagged, [], `${flagged.length} 条现存判据被误判为非只读 —— 这把闸在生产上会开始拒绝真判据`);
