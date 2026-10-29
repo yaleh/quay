@@ -27,12 +27,12 @@ import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 import crypto from "node:crypto";
-import { fileURLToPath } from "node:url";
 // Shared session-liveness primitive — ONE copy, byte-identical to the pinned quay-fleet blob
 // (packages/quay/src/primitives/PROVENANCE.md).
 import { readProcStat } from "../../packages/quay/src/primitives/session-liveness.mjs";
 // Shared best-effort JSONL append — ONE copy (semantic-dedup-scan finding `append-evidence-pair`).
-import { appendJsonlLine, parseArgs as baseParseArgs } from "./gate-script-base.ts";
+// `isDirectEntry` (the entry guard at the bottom) is likewise the SHARED one — see that call site.
+import { appendJsonlLine, isDirectEntry, parseArgs as baseParseArgs } from "./gate-script-base.ts";
 
 // ── 常量 ──────────────────────────────────────────────────────────────────────────────────────────
 
@@ -645,10 +645,9 @@ function main(): void {
   }
 }
 
-const isDirect = (() => {
-  const a1 = process.argv[1];
-  if (!a1) return false;
-  try { return path.resolve(a1) === path.resolve(fileURLToPath(import.meta.url)); } catch { return false; }
-})();
-
-if (isDirect) main();
+// Entry guard — the SHARED `isDirectEntry` (name identity, `expectedBase` REQUIRED), extracted from
+// the byte-identical private copy this file and channel-probe-server.ts both carried
+// (.quay/routine-findings.jsonl finding `is-direct-arrow`, routine `semantic-dedup-scan`, runId
+// `semantic-dedup-scan-1793251416079`). ⛔ Do not re-inline an `import.meta.url` comparison here:
+// under bundling every inlined module shares one URL, so a URL-based guard fires for libraries too.
+if (isDirectEntry(import.meta, process.argv[1], "peer-identity-probe")) main();
