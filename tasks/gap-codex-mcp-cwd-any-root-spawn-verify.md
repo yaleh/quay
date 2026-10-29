@@ -1,7 +1,7 @@
 ---
 id: gap-codex-mcp-cwd-any-root-spawn-verify
 title: Codex MCP 在任意工作根下真正可用：config cwd 修复 + spawn 校验
-status: ready
+status: done
 labels:
   - gap
   - codex
@@ -41,14 +41,23 @@ goal_ac: AC-927
 - plugin/scripts/codex-stage1-spawn-verify.sh (new)
 - plugin/scripts/codex-stage1-selfcheck.sh
 - plugin/scripts/capability-catalog-declarations.json
+- plugin/skills/manager/SKILL.md
+- plugin/skills/init/SKILL.md
 - plugin/test/*codex-stage1-spawn* (new)
+- plugin/test/helpers/driver-runtime-harness.mjs
+- plugin/test/driver-restart-busy-e2e.test.mjs
 
-该轴仍暗，理由：本任务仅改 .codex/config.toml、两个 shell 脚本与一个测试文件，未触及 packages/* 源码依赖结构，L_D/L_G 无可测增量。
+该轴仍暗，理由：本任务仅改 .codex/config.toml、两个 shell 脚本、两个 SPEC 声明点（SKILL.md）、两个测试 helper 与一个测试文件，未触及 packages/* 源码依赖结构，L_D/L_G 无可测增量。
 
-## Blocker
+## Evidence
 
-**2026-10-29T09:59:13.372Z — worker 未落地（exited-not-landed）**
+**2026-10-29 — suite-red 真因修复（fan-in 阶段发现，与本任务 delta 无关但阻塞落地）**
 
-- 未落地原因：step=suite: incomplete suite (628/628 files) — recovery exhausted at floor concurrency 16 — no declared rung produced a complete verdict (64,48,32,16); needs a code/config fix, see plugin/scripts/full-suite-runner.ts
-- run_id：wk-prod-anchor
-- session_id：1e225eb9-6db9-4a04-a89b-ac781cdcae3e
+全量 suite 3 处红、同一根因：`spawnSync`/`execFileSync` 全表 `ps -eo pid=,args=`（及 `pid,args`）输出超过 Node 默认 `maxBuffer` 1MB（本机进程表实测 ~1.09MB / 5523 进程，suite 满载时更大）⇒ child 被 SIGTERM、`ENOBUFS`、`status:null` ⇒ `processesMentioning` 返回 null 被 `assertNoResidue` 报「ps 读数必须可得」（硬规则 3b：读不到 ≠ 干净）；`driver-restart-busy-e2e` 的 `fixtureWorkerPids` 直接抛 `spawnSync ps ENOBUFS`。delta-relatedness 判定为 UNRELATED，但连续两轮复现（含隔离直跑），且 baseline-equivalence A/B 因基线侧重跑在低负载下变绿而落 `not-evaluated`（`no-failure-signature-lines`）⇒ 无法豁免 ⇒ 阻塞落地。修法：两处全表 `ps` 调用加 `maxBuffer: 64 * 1024 * 1024`（与仓库既有 ENOBUFS 修法一致，见 `fan-in-runid-check.ts` / `direct-to-develop-bypass-check.ts`）。修后三个测试文件各自直跑全绿（driver-runtime-s07 2/2、driver-restart-busy-e2e 8/8、codex-stage1-spawn-verify 5/5）。
+
+**DoD 实测读数**
+
+- spawn-verify 从 `packages/quay/` 子目录：exit 0（`RESULT: PASS`，server spawned + completed MCP initialize handshake）
+- 坏 config（cwd 指向不存在路径）负控制：exit 非 0（测试断言覆盖）
+- selfcheck 从子目录：exit 0，含 `spawn-verify: quay MCP server spawned + initialized`
+- `agents-claude-drift-check.ts`：exit 0（no drift）
