@@ -46,3 +46,11 @@ live-proof-check.ts 头注释声称 validates the SHAPE and self-consistency of 
 ## ADR-007 暗轴记录
 
 - 该轴仍暗,理由:本任务为局部缺陷修复(shape-only 契约标注 + 新增真值审计脚本 + 测试),不改包/依赖结构,无可测的 L_D/L_G 读数。
+
+## Blocker
+
+**2026-10-29T16:05:13.896Z — worker 未落地（exited-not-landed）**
+
+- 未落地原因：step=suite: incomplete suite (628/628 files) — recovery exhausted at floor concurrency 16 — no declared rung produced a complete verdict (64,48,32,16); needs a code/config fix, see plugin/scripts/full-suite-runner.ts
+- run_id：wk-prod-anchor
+- session_id：9758f5db-5e56-49fc-84dd-9f8175ddf362
