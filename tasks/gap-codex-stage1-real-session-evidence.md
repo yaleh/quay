@@ -1,7 +1,7 @@
 ---
 id: gap-codex-stage1-real-session-evidence
 title: 真实 Codex 会话完成一次授权 operator 交易并留证据
-status: needs-human
+status: done
 labels:
   - gap
   - codex
