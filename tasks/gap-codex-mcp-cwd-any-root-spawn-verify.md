@@ -49,14 +49,8 @@ goal_ac: AC-927
 
 ## Blocker
 
-**2026-10-29T09:59:13.372Z — worker 未落地（exited-not-landed）**
+**2026-10-29T10:29:07.161Z — worker 未落地（exited-not-landed）**
 
-- 未落地原因：step=suite: incomplete suite (628/628 files) — recovery exhausted at floor concurrency 16 — no declared rung produced a complete verdict (64,48,32,16); needs a code/config fix, see plugin/scripts/full-suite-runner.ts
+- 未落地原因：step=suite: AssertionError [ERR_ASSERTION]: AC2 失败路径：ps 读数必须可得（⛔ 读不到 ≠ 干净，硬规则 3b）
 - run_id：wk-prod-anchor
-- session_id：1e225eb9-6db9-4a04-a89b-ac781cdcae3e
-
-**2026-10-29 — 续做：更正误诊 + 修复**
-
-- 真正根因（更正上文）：suite 红在静态检查 `spec-declaration-point-check exit=1`，非并发/incomplete。原因 = `orchestration/SPEC-codex-long-term-support-2026-10-29.md`（本任务所属 Codex program 的 SPEC）已落 goal/GOAL-912 与 develop，但未在任一声明点（`plugin/skills/manager/SKILL.md`、`plugin/skills/init/SKILL.md`）声明。该静态检查 fail-closed ⇒ suite 在跑任何测试文件前即红（0/628 terminal ⇒ 上层误报 incomplete 并徒劳降并发 64→48→32→16）。
-- 修复：在两个声明点补声明该 SPEC；两文件已入 `## Touches`。
-- 验证：worktree 内 `spec-declaration-point-check` exit 0（all 49 orchestration/SPEC-*.md declared at each of 2 declaration points）。
+- session_id：7e8241d1-b9dc-4395-b991-3bb21131d60d
