@@ -57,3 +57,11 @@ AC7（cp 备份回退核心改动 → 变红 → cp 恢复 → 绿，不用 git 
 - plugin/skills/init/SKILL.md
 - orchestration/SPEC-goal-branch-2026-10-03.md
 - tasks/gap-goal-branch-preview-trial-surface-declarable.md
+
+## Blocker
+
+**2026-10-29T10:13:14.133Z — worker 未落地（exited-not-landed）**
+
+- 未落地原因：step=suite: AssertionError [ERR_ASSERTION]: AC2 失败路径：ps 读数必须可得（⛔ 读不到 ≠ 干净，硬规则 3b）
+- run_id：wk-prod-anchor
+- session_id：1fa95090-b66f-40de-9af9-f1e467fb999c
