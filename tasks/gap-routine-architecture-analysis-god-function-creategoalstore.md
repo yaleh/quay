@@ -3,7 +3,7 @@ id: gap-routine-architecture-analysis-god-function-creategoalstore
 title: "architecture-analysis: createGoalStore is a single 1,647-line closure
   factory (lines 1155-2802) with 20 nested declarations inside a
   3,427-line/43-export module — the remainder aft"
-status: todo
+status: ready
 labels:
   - gap
   - routine-filed
