@@ -44,3 +44,11 @@ goal_ac: AC-927
 - plugin/test/*codex-stage1-spawn* (new)
 
 该轴仍暗，理由：本任务仅改 .codex/config.toml、两个 shell 脚本与一个测试文件，未触及 packages/* 源码依赖结构，L_D/L_G 无可测增量。
+
+## Blocker
+
+**2026-10-29T09:59:13.372Z — worker 未落地（exited-not-landed）**
+
+- 未落地原因：step=suite: incomplete suite (628/628 files) — recovery exhausted at floor concurrency 16 — no declared rung produced a complete verdict (64,48,32,16); needs a code/config fix, see plugin/scripts/full-suite-runner.ts
+- run_id：wk-prod-anchor
+- session_id：1e225eb9-6db9-4a04-a89b-ac781cdcae3e
