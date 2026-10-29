@@ -1,7 +1,7 @@
 ---
 id: gap-goal-branch-merge-red-no-gap-filing-deadlock
 title: goal 并入红（尤其 merge-conflict）不立案 gap task ⇒ tip 冻结 ⇒ 永不重试 ⇒ 死锁（裁定⑫ 失败升级未实现）
-status: ready
+status: done
 labels:
   - gap
   - defect

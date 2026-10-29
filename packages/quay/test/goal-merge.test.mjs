@@ -13,7 +13,7 @@ import os from "node:os";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 
-import { recordGoalMergeRequest, readGoalMergeRequests, pendingGoalMerges } from "../src/goal-merge.ts";
+import { recordGoalMergeRequest, readGoalMergeRequests, pendingGoalMerges, stalledGoalMerges } from "../src/goal-merge.ts";
 
 const _dirs = [];
 test.after(() => {
@@ -229,4 +229,27 @@ test("readGoalMergeRequests reads back the recorded request", () => {
   assert.equal(reqs.length, 1);
   assert.equal(reqs[0].actor, "alice");
   assert.equal(reqs[0].reason, "mature enough now");
+});
+
+// ── stalled red reading (SPEC §4.7 裁定⑫: the gap-filing signal, distinct from pendingGoalMerges) ──
+
+test("stalledGoalMerges reports a red merge whose branch still exists, and stops once it lands", () => {
+  const root = makeRepo({ tag: "stalled" });
+  const tip = git(root, ["rev-parse", "goal/GOAL-900"]).trim();
+  recordGoalMergeRequest({ root, goalId: "GOAL-900", reason: "mature enough now", now: () => new Date("2026-01-01T00:00:00.000Z") });
+  const req = requestEvents(root)[0];
+  appendGoalMergeResult(root, { tipSha: tip, requestEventId: req.payload.eventId, timestamp: "2026-01-01T00:05:00.000Z" });
+
+  // The tip is frozen at the red attempt, so pendingGoalMerges would NOT retry — but the red is still
+  // a stalled merge that must file a gap.
+  assert.equal(pendingGoalMerges(root).length, 0, "tip unchanged ⇒ not pending (the deadlock shape)");
+  const stalled = stalledGoalMerges(root);
+  assert.equal(stalled.length, 1);
+  assert.equal(stalled[0].goalId, "GOAL-900");
+  assert.equal(stalled[0].result.outcome, "red");
+  assert.equal(stalled[0].tipSha, tip);
+
+  // Landing the branch removes it from the stalled set (ancestor of develop ⇒ no longer red-pending).
+  git(root, ["merge", "-q", "--no-ff", "goal/GOAL-900", "-m", "merge goal"]);
+  assert.equal(stalledGoalMerges(root).length, 0, "an ancestor goal branch is not stalled");
 });
