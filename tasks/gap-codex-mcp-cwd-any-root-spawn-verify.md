@@ -1,7 +1,7 @@
 ---
 id: gap-codex-mcp-cwd-any-root-spawn-verify
 title: Codex MCP 在任意工作根下真正可用：config cwd 修复 + spawn 校验
-status: todo
+status: ready
 labels:
   - gap
   - codex
