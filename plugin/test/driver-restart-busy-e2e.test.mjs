@@ -358,7 +358,9 @@ async function buildBusyKernel(kernelDir, { workerSourceContents } = {}) {
 /** Direct quantity: the live processes whose cmdline carries `marker` (the fixture worker command). "Was
  *  this task dispatched twice?" is answered by the process table, not by a proxy. */
 function fixtureWorkerPids(marker) {
-  const out = execFileSync("ps", ["-eo", "pid,args"], { encoding: "utf8" });
+  // ⛔ maxBuffer 必须显式放大：全表 `ps -eo pid,args` 在本机超 1MB（suite 满载时更大），默认 1MB
+  // ⇒ ENOBUFS/status null（同 driver-runtime-harness.mjs processesMentioning 的修法）。
+  const out = execFileSync("ps", ["-eo", "pid,args"], { encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
   return out
     .split("\n")
     .slice(1)
