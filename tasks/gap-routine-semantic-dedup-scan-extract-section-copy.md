@@ -47,4 +47,5 @@ merge
 ## Touches
 - `packages/quay/src/kernel/extract-section.ts`
 - `packages/quay/src/kernel/task-shape-artifacts.ts`
+- `packages/quay/test/kernel-pure-judges.test.mjs`
 - `tasks/gap-routine-semantic-dedup-scan-extract-section-copy.md`
