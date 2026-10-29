@@ -80,3 +80,11 @@ extract
 - `plugin/test/transcript-set-single-implementation.test.mjs`
 - `packages/quay/src/init.ts`
 - `tasks/gap-routine-semantic-dedup-scan-transcript-set-copy.md`
+
+## Blocker
+
+**2026-10-29T06:09:44.770Z — worker 未落地（exited-not-landed）**
+
+- 未落地原因：step=suite: AssertionError [ERR_ASSERTION]: not-a-git-repo: stderrTokens.notAGitRepo [baseline A/B: HARD RED (task-introduced-red) — the task's red set is NOT a subset of the develop baseline red set: added=plugin/test/driver-runtime-control-plane.test.mjs,packages/quay/test/kernel-regex-escape.test.mjs,packages/quay/test/kernel-canonical-buckets.test.mjs,plugin/test/shipped-entry-runnable.test.mjs changed=-]
+- run_id：wk-prod-anchor
+- session_id：442d12a9-84dd-4b0c-9592-afde61b9b419
