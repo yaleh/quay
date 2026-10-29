@@ -53,9 +53,13 @@ import {
   taskStatusEventsLockPath,
 } from "../src/kernel/task-transition.ts";
 
-/** The kernel module's own realpath — what `appendTaskStatusEvent` reports as `producer.writerModule`. */
-const KERNEL_FILE = fs.realpathSync(fileURLToPath(new URL("../src/kernel/task-transition.ts", import.meta.url)));
-/** The kernel module's own URL — what the child-process fixture imports (⛔ never a copied file). */
+/** The realpath of the module that DEFINES `appendTaskStatusEvent` — what it reports as
+ *  `producer.writerModule`. ⛔ Since the seam split (task
+ *  gap-routine-architecture-analysis-god-module-task-transition-mixed-concerns) the writer lives in
+ *  `kernel/task-status-events.ts`; this file still imports it through `task-transition.ts`'s barrel,
+ *  and the assertion below stays exact so a barrel that starts fabricating the path is caught. */
+const KERNEL_FILE = fs.realpathSync(fileURLToPath(new URL("../src/kernel/task-status-events.ts", import.meta.url)));
+/** That module's URL — what the child-process fixture imports (⛔ never a copied file). */
 const KERNEL_URL = pathToFileURL(KERNEL_FILE).href;
 
 // ── 1. vocabulary ────────────────────────────────────────────────────────────────────────────────
@@ -188,7 +192,7 @@ test("(a) appendTaskStatusEvent: the v1 record shape, and `eventId` is STABLE ac
 
     // producer: the DIRECT reading of which code ran (GOAL-030 AC-337's two fields), plus host/pid
     // and the pure-filesystem HEAD reading.
-    assert.equal(fs.realpathSync(rec.producer.writerModule), KERNEL_FILE, "producer.writerModule is the kernel realpath");
+    assert.equal(fs.realpathSync(rec.producer.writerModule), KERNEL_FILE, "producer.writerModule is the writing module's realpath");
     assert.equal(typeof rec.producer.pid, "number");
     assert.equal(typeof rec.producer.host, "string");
     assert.ok(rec.producer.host.length > 0);

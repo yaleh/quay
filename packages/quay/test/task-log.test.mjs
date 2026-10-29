@@ -470,7 +470,11 @@ test("(h) the declared writer-class registry is IN SYNC with every real appendTa
   // The registry is a DECLARATION (see the kernel's own block comment), so this is the check that
   // keeps it honest: a fifth writer added to the tree without a registry entry turns this RED, and a
   // `wired: true` entry whose call site stopped calling turns it RED the other way.
-  const DEFINITION = path.join(repoRoot, "packages", "quay", "src", "kernel", "task-transition.ts");
+  // The module that DEFINES the symbol — excluded from the caller walk (a definition is not a call
+  // site). It is `kernel/task-status-events.ts` since the seam split (task
+  // gap-routine-architecture-analysis-god-module-task-transition-mixed-concerns); `task-transition.ts`
+  // only re-exports it now.
+  const DEFINITION = path.join(repoRoot, "packages", "quay", "src", "kernel", "task-status-events.ts");
   const files = [];
   const walk = (dir) => {
     let entries;
