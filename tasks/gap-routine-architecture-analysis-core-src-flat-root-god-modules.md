@@ -3,7 +3,7 @@ id: gap-routine-architecture-analysis-core-src-flat-root-god-modules
 title: "architecture-analysis: archguard flags the packages/quay/src root as a
   god package (29 files, 334 entities, tooManyFiles+tooManyEntities): init.ts
   4,154 lines/79 exports, observati"
-status: ready
+status: done
 labels:
   - gap
   - routine-filed
