@@ -10,11 +10,15 @@
 # Syntax validated against codex-cli 0.146.0 (`codex mcp list` reports the
 # project `quay` server as enabled). See plugin/scripts/codex-stage1-selfcheck.sh.
 #
-# `args[0]` is a repo-root-relative path; Codex launches the server with the
-# trusted project root as cwd. This is the same stdio command `.mcp.json`
-# registers for the Claude environment, so both hosts exercise the identical
-# provider-neutral tool surface.
+# `args[0]` is a repo-root-relative path. codex-cli 0.156.1 spawns MCP servers
+# with the SESSION working directory (where codex was launched) as cwd, not the
+# trusted project root (SPEC-codex-long-term-support-2026-10-29 §3.2, measured).
+# From a subdirectory the relative args therefore ENOENT *silently*. `cwd` pins
+# the server cwd to THIS checkout's repo root — the one codex-spawnable location —
+# so the server spawns from any working root; plugin/scripts/codex-stage1-spawn-verify.sh
+# makes a wrong cwd LOUD (exit non-zero when the server cannot spawn + initialize).
 
 [mcp_servers.quay]
 command = "node"
 args = ["packages/quay/bin/quay.ts", "mcp"]
+cwd = "/data/home/yale/work/quay"
