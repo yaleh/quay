@@ -468,3 +468,30 @@ export function capabilityRefusalReason(j: CapabilityJudgment): string {
   const why = j.reasons.map((r) => `${r.rule}: ${r.detail}${r.proof ? ` (${r.proof})` : ""}`).join("; ");
   return `${j.code}: criterion refused BEFORE execution — it is not a reading. ${why}. Fix: make it a zero-side-effect reading (assert on a file/log/state); if a real one-shot proof is needed, run it explicitly with --allow-side-effects.`;
 }
+
+/**
+ * The execution-surface GATE, as a function of (criterion, the tree it will run in, the workspace
+ * that owns it). Returns `null` when the criterion is a reading — a non-null judgment is a REFUSAL.
+ *
+ * MOVED HERE from `core/goal-store.ts` (tasks/gap-routine-architecture-analysis-god-function-
+ * creatgoalstore): the predicate belongs beside the judge it composes, and the store's four
+ * `runAcceptance` sites now live in three composed modules (`goal-store-checks`, `goal-store-sweep`)
+ * plus the CLI — all of which would otherwise import it back from the store's host file. ⛔ One
+ * definition, never one per consumer (hard rule 5b).
+ *
+ * ⛔ The DECLARATION is read from `workspaceRoot` (the workspace that owns the goal), never from
+ * `criterionCwd`: a branch-mode criterion runs on a worktree that need not carry the declaration.
+ * The ARTIFACTS, by contrast, resolve against `criterionCwd` — the tree the command will actually
+ * run in.
+ */
+export function capabilityRefusalAt(
+  criterion: string,
+  criterionCwd: string,
+  workspaceRoot: string,
+): CapabilityJudgment | null {
+  const j = judgeCriterionCapability(criterion, {
+    root: criterionCwd,
+    declaration: readCapabilityDeclaration(workspaceRoot),
+  });
+  return j.capability === "read-only" ? null : j;
+}
