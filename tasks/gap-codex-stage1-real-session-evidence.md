@@ -32,7 +32,7 @@ DIR-121 的 fresh-session AC（4/6/7/8）因需要「真实 Codex 会话 + 显�
 
 ## Definition of Done
 
-真实 Codex 会话的 durable 证据已提交进 `docs/codex-stage1/evidence.json`，live-proof-check exit 0，AC-929 由 not-evaluated 变为可评估。状态 needs-human，等人开真实 Codex 会话。
+真实 Codex 会话的 durable 证据已提交进 `docs/codex-stage1/evidence.json`，live-proof-check exit 0，AC-929 由 not-evaluated 变为可评估。已完成（2026-10-29）：人开真实 Codex 会话完成授权交易，证据提交 goal/GOAL-912（commit 4f8ccf468）。
 
 该轴仍暗,理由:证据采集任务，无组件代码改动（只提交 docs/codex-stage1/evidence.json），未跑 archguard/码文档比测量
 
