@@ -53,5 +53,7 @@ AC7（cp 备份回退核心改动 → 变红 → cp 恢复 → 绿，不用 git 
 - packages/quay/src/config.ts
 - packages/quay/test/goal-preview-trial-surface.test.mjs
 - packages/quay/test/goal-preview.test.mjs
+- plugin/skills/manager/SKILL.md
+- plugin/skills/init/SKILL.md
 - orchestration/SPEC-goal-branch-2026-10-03.md
 - tasks/gap-goal-branch-preview-trial-surface-declarable.md
