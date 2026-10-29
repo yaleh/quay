@@ -75,15 +75,57 @@ function walkProductionSources(dir, out = []) {
 
 const rel = (abs) => path.relative(REPO_ROOT, abs).split(path.sep).join("/");
 
+// ── the walk→read race (the mirror that moves under us) ─────────────────────────────────────────
+//
+// `packages/quay/plugin/` is a GITIGNORED npm-pack staging mirror: `packages/quay/test/
+// delivery-standalone-smoke.sh` copies the whole `plugin/` tree into it (npm's `files` whitelist is
+// package-root-relative and cannot reach the repo-root sibling `../plugin`), runs `npm pack`, then
+// `rm -rf`s it. That gate deliberately runs in the default `@test-group product` phase, so the
+// mirror appears and vanishes WHILE other test files are walking this same tree.
+//
+// A walk that lists a path and then reads it can therefore lose the file in between. That is a
+// NOT-EVALUATED reading, not a violation (硬规则 3b): the alternatives were (a) crash — which this
+// test did, reddening on a file that was never part of the judged surface, or (b) silently skip.
+// So: skip, but ONLY under the mirror, and REPORT it. Anywhere else ENOENT is still a hard failure —
+// a production file that vanished is a genuine defect and must not be laundered into "not covered".
+const STAGING_MIRROR_PREFIX = "packages/quay/plugin/";
+const vanishedUnderMirror = [];
+
+/** readFileSync, tolerating the mirror's list→read race and nothing else. `null` = vanished. */
+function readSource(abs) {
+  try {
+    return fs.readFileSync(abs, "utf8");
+  } catch (err) {
+    if (err.code !== "ENOENT" || !rel(abs).startsWith(STAGING_MIRROR_PREFIX)) throw err;
+    vanishedUnderMirror.push(rel(abs));
+    return null;
+  }
+}
+
 /** Files on the probe's surface whose TEXT satisfies `predicate`. */
 function filesMatching(predicate) {
   const hits = [];
   for (const root of SCAN_ROOTS) {
     for (const abs of walkProductionSources(path.join(REPO_ROOT, root))) {
-      if (predicate(fs.readFileSync(abs, "utf8"))) hits.push(rel(abs));
+      const text = readSource(abs);
+      if (text !== null && predicate(text)) hits.push(rel(abs));
     }
   }
+  reportVanished();
   return hits.sort();
+}
+
+const reportedVanished = new Set();
+
+/** Report each skipped mirror path ONCE — a skipped file must be visible in the output, never a
+ *  silent hole (the difference between "judged clean" and "not judged" is the whole point). */
+function reportVanished() {
+  const fresh = vanishedUnderMirror.filter((p) => !reportedVanished.has(p));
+  if (fresh.length === 0) return;
+  for (const p of fresh) reportedVanished.add(p);
+  console.log(
+    `# staging-mirror walk→read race: skipped ${fresh.length} vanished path(s) under ${STAGING_MIRROR_PREFIX} — NOT judged (hard rule 3b: not-evaluated ≠ violation): ${fresh.join(", ")}`,
+  );
 }
 
 /** DECLARATION predicate for `canonicalBuckets` — a re-export (`export { canonicalBuckets };`) is

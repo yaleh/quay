@@ -3575,6 +3575,9 @@ function deriveLoopScriptsOnce(pluginRoot: string, never: Set<string>): string[]
     "shape-sections.ts", "regex-escape.ts", "touches-parser.ts", "task-status.ts",
     "wiring-coverage-check.ts", "capability-catalog.sh", "l1-delivery-surface-check.ts",
     "dead-loop-check.sh", "inner-blocked-signal.ts", "inner-forensics.mjs",
+    // transcript-set.mjs: ESM `./` transitive dep of inner-forensics.mjs (invisible to the
+    // `${SCRIPT_DIR}/` closure below) — laying down the consumer without it breaks its import.
+    "transcript-set.mjs",
     "task-contract-check.ts", "task-status-drift-check.ts", "touches-orthogonality-check.ts",
     "verify-delivery-surface.ts", "precommit-guard.ts", "touches-one-entry-one-path-check.ts",
     "quay-session.ts", "repo-root.sh", "repo-root.ts", "checker-io.ts", "driver-result.ts",

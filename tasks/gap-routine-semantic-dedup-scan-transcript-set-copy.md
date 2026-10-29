@@ -3,7 +3,7 @@ id: gap-routine-semantic-dedup-scan-transcript-set-copy
 title: "semantic-dedup-scan: Same transcript-path collector at Jaccard 1.0 (202
   vs 206 chars); the .mjs copy is import-free by design (documented carve-out)
   so the correct action is a plug"
-status: ready
+status: done
 labels:
   - gap
   - routine-filed
@@ -113,11 +113,3 @@ A/B（同一批 4 文件、`--test-concurrency=4`，含 stager）：
 - `packages/quay/test/kernel-regex-escape.test.mjs`
 - `plugin/test/shipped-entry-runnable.test.mjs`
 - `tasks/gap-routine-semantic-dedup-scan-transcript-set-copy.md`
-
-## Blocker
-
-**2026-10-29T06:38:24.553Z — worker 未落地（exited-not-landed）**
-
-- 未落地原因：step=suite: AssertionError [ERR_ASSERTION]: not-a-git-repo: stderrTokens.notAGitRepo [baseline A/B: HARD RED (task-introduced-red) — the task's red set is NOT a subset of the develop baseline red set: added=plugin/test/fan-in-execute-paths-s06.test.mjs changed=-]
-- run_id：wk-prod-anchor
-- session_id：ecc3c801-7aa8-4754-9830-f7c16bb7c5a3
