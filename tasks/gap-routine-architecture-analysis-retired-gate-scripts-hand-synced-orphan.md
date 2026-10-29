@@ -96,13 +96,6 @@ ADR-007 暗轴记录：
 - `plugin/test/verify-delivery-surface.test.mjs`
 - `tasks/gap-routine-architecture-analysis-retired-gate-scripts-hand-synced-orphan.md`
 
-## Blocker
-
-**2026-10-28T05:20:30.377Z — worker 未落地（exited-not-landed）**
-
-- 未落地原因：step=suite: AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal: [baseline A/B: HARD RED (task-introduced-red) — the task's red set is NOT a subset of the develop baseline red set: added=plugin/test/sh-census-check.test.mjs changed=-]
-- run_id：wk-prod-anchor
-
 ## Needs-Human
 
 **执行 2026-10-28T06:22:03.329Z — 停派终止（失败无法归因，⛔ 不再重派）**
