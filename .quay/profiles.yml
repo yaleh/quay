@@ -24,7 +24,7 @@ profiles:
   # 三个 worker role（task-worker / selector / fix-worker）+ outer 共享的 recipe。
   worker-default:
     launcher: claude-fjdac
-    model: v4.1flash-anthropic
+    model: v4pro-anthropic
     bare: false
     auth: token            # claude-fjdac 只提供 ANTHROPIC_AUTH_TOKEN（并置空 ANTHROPIC_API_KEY）
     # ── 显式声明 permissionMode / effort（gap-role-profile-permissionmode-effort-declaration-and-provenance）
@@ -53,10 +53,13 @@ profiles:
     #   ⇒ 每次 spawn 的 selector/worker 都被网关 400 拒绝（"Invalid model name passed in
     #   model=deepseek-v..."），worker-driver 连续快速死亡。model 与下面三个 DEFAULT_*_MODEL 已对齐到
     #   网关真实存在的 v4.1flash-anthropic，⛔ 不要再改回 deepseek-*。
+    # 2026-10-29 人裁定：worker-default 的 model 与三个 DEFAULT_*_MODEL 改指 v4pro-anthropic——
+    #   v4.1flash-anthropic 在 claude-code SDK 下报 unrecognized_model（worker-driver environment-fatal
+    #   halt 签名），而 v4pro-anthropic 被网关识别（交互会话实测在跑）。⛔ 不要改回 v4.1flash-anthropic / deepseek-*。
     env:
-      ANTHROPIC_DEFAULT_HAIKU_MODEL: v4.1flash-anthropic
-      ANTHROPIC_DEFAULT_SONNET_MODEL: v4.1flash-anthropic
-      ANTHROPIC_DEFAULT_OPUS_MODEL: v4.1flash-anthropic
+      ANTHROPIC_DEFAULT_HAIKU_MODEL: v4pro-anthropic
+      ANTHROPIC_DEFAULT_SONNET_MODEL: v4pro-anthropic
+      ANTHROPIC_DEFAULT_OPUS_MODEL: v4pro-anthropic
     # fallbackModel 缺省留空：当前无已知不可用的主 model。主备回退是 policy 能力（AC1），
     # 由 profile-policy.test.mjs 用合成配置验证（model=glm-5.3 + fallbackModel=deepseek-v4-pro）。
   # manager 用原生 claude + 默认模型，显式取消继承 917k 三件套（unset 显式化旧的空串约定）。

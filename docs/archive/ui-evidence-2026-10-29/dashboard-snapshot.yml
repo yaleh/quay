@@ -1,0 +1,311 @@
+- generic [active] [ref=e1]:
+  - link "跳到主要内容" [ref=e2] [cursor=pointer]:
+    - /url: "#main"
+  - navigation "Site navigation" [ref=e3]:
+    - generic [ref=e4]:
+      - generic [ref=e5]: Quay
+      - generic [ref=e6]:
+        - generic [ref=e7]: Dashboard
+        - link "Tasks" [ref=e8] [cursor=pointer]:
+          - /url: /tasks
+      - generic [ref=e9]:
+        - link "Live" [ref=e10] [cursor=pointer]:
+          - /url: /live
+        - link "BoardNEW" [ref=e11] [cursor=pointer]:
+          - /url: /board
+        - link "System" [ref=e12] [cursor=pointer]:
+          - /url: /system
+        - link "Manager" [ref=e13] [cursor=pointer]:
+          - /url: /manager
+        - link "Needs Human" [ref=e14] [cursor=pointer]:
+          - /url: /needs-human
+      - generic [ref=e15]:
+        - link "Journal" [ref=e16] [cursor=pointer]:
+          - /url: /journal
+        - link "Git History" [ref=e17] [cursor=pointer]:
+          - /url: /git-history
+        - link "Tests" [ref=e18] [cursor=pointer]:
+          - /url: /tests
+        - link "Sessions" [ref=e19] [cursor=pointer]:
+          - /url: /sessions
+      - generic [ref=e20]:
+        - link "ADRs" [ref=e21] [cursor=pointer]:
+          - /url: /adr
+        - link "Goals" [ref=e22] [cursor=pointer]:
+          - /url: /goal
+        - link "Docs" [ref=e23] [cursor=pointer]:
+          - /url: /doc
+        - link "Architecture" [ref=e24] [cursor=pointer]:
+          - /url: /architecture
+  - main [ref=e25]:
+    - heading "Dashboard" [level=1] [ref=e26]
+    - paragraph [ref=e27]: 循环脉搏、任务台账、系统资源与三层调度状态的总览 — 每张卡片指向对应完整页面。
+    - paragraph [ref=e28]:
+      - text: 时间轴窗口（以各自最近一次运行/fan-in 结束时刻为终点的过去 3h）：
+      - link "1h" [ref=e29] [cursor=pointer]:
+        - /url: /dashboard?hours=1
+      - text: ·
+      - link "3h" [ref=e30] [cursor=pointer]:
+        - /url: /dashboard?hours=3
+      - text: ·
+      - link "6h" [ref=e31] [cursor=pointer]:
+        - /url: /dashboard?hours=6
+      - text: ·
+      - link "12h" [ref=e32] [cursor=pointer]:
+        - /url: /dashboard?hours=12
+    - generic [ref=e33]:
+      - generic [ref=e273]:
+        - generic [ref=e274]: 循环脉搏
+        - generic [ref=e275]: running
+        - paragraph [ref=e276]: 在飞 3 · 并发 3
+        - img "在飞任务泳道时间轴" [ref=e277]:
+          - generic [ref=e281]: gap-ac207-e2e-target-…
+          - generic [ref=e282]: gap-driver-runtime-dr…
+          - generic [ref=e283]: gap-goal-gap-done-tas…
+          - generic [ref=e284]: 12:46
+          - generic [ref=e285]: 15:46
+        - generic [ref=e286]:
+          - generic [ref=e287]:
+            - generic [ref=e288]:
+              - link "gap-ac207-e2e-target-driver-driven-real-commit-task-done" [ref=e289] [cursor=pointer]:
+                - /url: /task/gap-ac207-e2e-target-driver-driven-real-commit-task-done
+              - generic [ref=e290]: 实现中 · 3s
+            - generic [ref=e291]: 端到端：目标项目自己的 *-drivers 驱动出真实开发提交且任务翻 done，落 ac=GOAL-009-AC-207 记录（AC-207）
+          - generic [ref=e292]:
+            - generic [ref=e293]:
+              - link "gap-driver-runtime-driver-path-anchored-at-project-root-not-dist" [ref=e294] [cursor=pointer]:
+                - /url: /task/gap-driver-runtime-driver-path-anchored-at-project-root-not-dist
+              - generic [ref=e295]: 实现中 · 39s
+            - generic [ref=e296]: driver 在无 plugin/ 的第三方项目里真活——driver-runtime 路径锚在 opts.root 且 start-drivers 只信退出码（AC-203 exit 1）
+          - generic [ref=e297]:
+            - generic [ref=e298]:
+              - link "gap-goal-gap-done-task-not-traction-respawns-every-round" [ref=e299] [cursor=pointer]:
+                - /url: /task/gap-goal-gap-done-task-not-traction-respawns-every-round
+              - generic [ref=e300]: fan-in · 13m9s
+            - generic [ref=e301]: computeGoalGaps 牵引口径排除 done ⇒ 任务已 done 而 AC 判据仍红时每轮重复 spawn 立案（实测 AC-214 烧 6 次、轮长 65s→204s 拖慢全环 3 倍）
+        - link "查看 Live →" [ref=e302] [cursor=pointer]:
+          - /url: /live
+      - generic [ref=e64]:
+        - generic [ref=e303]:
+          - generic [ref=e304]: 系统资源
+          - paragraph [ref=e305]: cpu_stall 1.79 · loadavg 7.8
+          - generic [ref=e306]: ⇒ GO
+          - img "系统负载历史（页面停留期间）" [ref=e307]:
+            - generic [ref=e309]: cpu_stall
+            - generic [ref=e311]: loadavg
+          - link "查看系统状态 →" [ref=e312] [cursor=pointer]:
+            - /url: /system
+        - generic [ref=e313]:
+          - generic [ref=e314]: Driver
+          - generic [ref=e315]: "promotion: 运行中 · 末条记录 12s ago"
+          - generic [ref=e316]: "worker: 运行中 · 末条记录 1m ago"
+          - generic [ref=e317]: "outer: 未运行 · 末条记录 —"
+          - generic [ref=e318]: "quality: 运行中 · 末条记录 21s ago"
+          - generic [ref=e319]: "meta: 运行中 · 末条记录 19s ago"
+          - generic [ref=e320]: "goal: 运行中 · 末条记录 1m ago"
+          - link "查看三层状态 →" [ref=e321] [cursor=pointer]:
+            - /url: /manager
+    - heading "工作进展" [level=2] [ref=e84]
+    - generic [ref=e85]:
+      - generic [ref=e86]:
+        - generic [ref=e322]:
+          - generic [ref=e323]: 阶段目标
+          - generic [ref=e324]: active 3 / cap 3
+          - generic [ref=e325]:
+            - generic [ref=e326]:
+              - link "GOAL-009" [ref=e327] [cursor=pointer]:
+                - /url: /goal/GOAL-009
+              - generic [ref=e328]: fresh
+            - generic [ref=e329]: 交付面端到端自证 —— 从 build 到「driver 驱动第三方项目开发」的闭环
+            - generic [ref=e330]: AC 达成 2/8
+          - generic [ref=e331]:
+            - generic [ref=e332]:
+              - link "GOAL-010" [ref=e333] [cursor=pointer]:
+                - /url: /goal/GOAL-010
+              - generic [ref=e334]: fresh
+            - generic [ref=e335]: goal 机制的语义闭环 —— 达成判定从「AC 合取」变成「退出条件被覆盖」，且 draft 不再是死信
+            - generic [ref=e336]: AC 达成 10/12
+          - generic [ref=e337]:
+            - generic [ref=e338]:
+              - link "GOAL-011" [ref=e339] [cursor=pointer]:
+                - /url: /goal/GOAL-011
+              - generic [ref=e340]: fresh
+            - generic [ref=e341]: store-commit 传播策略按读者归位——AC/evidence 类写跟分支走，不再抢跑 develop（SPEC 阶段2）
+            - generic [ref=e342]: AC 达成 1/3
+          - link "查看 Goals →" [ref=e343] [cursor=pointer]:
+            - /url: /goal
+        - generic [ref=e344]:
+          - generic [ref=e345]: 任务台账速览
+          - generic [ref=e346]:
+            - generic "done 1880" [ref=e347]
+            - generic "ready 10" [ref=e348]
+            - generic "todo 0"
+            - generic "needs-human 2" [ref=e349]
+            - generic "superseded 63" [ref=e350]
+          - generic [ref=e351]:
+            - generic [ref=e352]: 1880 done
+            - generic [ref=e353]: 10 ready
+            - generic [ref=e354]: 0 todo
+            - generic [ref=e355]: 2 needs-human
+            - generic [ref=e356]: 63 superseded
+          - generic [ref=e357]:
+            - generic [ref=e358]: ready（最近 3 条）
+            - generic [ref=e359]:
+              - link "gap-goal-triage-activate-executed" [ref=e360] [cursor=pointer]:
+                - /url: /task/gap-goal-triage-activate-executed
+              - generic [ref=e361]: goal-driver 执行分诊 activate 判决——draft AC 经一轮 driver 后确为 active（判决零消费修复）
+              - generic [ref=e362]: 7m ago
+            - generic [ref=e363]:
+              - link "gap-dashboard-live-concurrency-duplicates-inflight-count" [ref=e364] [cursor=pointer]:
+                - /url: /task/gap-dashboard-live-concurrency-duplicates-inflight-count
+              - generic [ref=e365]: Dashboard "并发" field duplicates 在飞(inFlight) count — separate it from the real worker cap
+              - generic [ref=e366]: 33m ago
+            - generic [ref=e367]:
+              - link "gap-driver-runtime-driver-path-anchored-at-project-root-not-dist" [ref=e368] [cursor=pointer]:
+                - /url: /task/gap-driver-runtime-driver-path-anchored-at-project-root-not-dist
+              - generic [ref=e369]: driver 在无 plugin/ 的第三方项目里真活——driver-runtime 路径锚在 opts.root 且 start-drivers 只信退出码（AC-203 exit 1）
+              - generic [ref=e370]: 36m ago
+          - generic [ref=e371]:
+            - generic [ref=e372]: needs-human（最近 3 条）
+            - generic [ref=e373]:
+              - link "x" [ref=e374] [cursor=pointer]:
+                - /url: /task/x
+              - generic [ref=e375]: 16h ago
+            - generic [ref=e376]:
+              - link "DIR-121" [ref=e377] [cursor=pointer]:
+                - /url: /task/DIR-121
+              - generic [ref=e378]: "Codex Stage 1: provide a human-authorized interactive Quay task operator through AGENTS.md, repo Skills, and project MCP"
+              - generic [ref=e379]: 29d ago
+          - link "查看任务列表 →" [ref=e380] [cursor=pointer]:
+            - /url: /tasks
+      - generic [ref=e146]:
+        - generic [ref=e381]:
+          - generic [ref=e382]: 测试
+          - generic [ref=e383]: green
+          - paragraph [ref=e384]: pass 1962/1962
+          - img "过去 3 小时时间轴" [ref=e385]:
+            - generic [ref=e398]: 12:44
+            - generic [ref=e399]: 15:44
+          - generic [ref=e400]:
+            - generic [ref=e401]:
+              - generic [ref=e402]:
+                - generic [ref=e403]:
+                  - generic "#1426 green · pass 1962/1962" [ref=e404]: "#1426"
+                  - generic [ref=e405]: green
+                - generic [ref=e406]: pass 1962/1962 · 2m52s
+              - generic [ref=e407]: 4m ago
+              - generic [ref=e408]: bucket P
+            - generic [ref=e409]:
+              - generic [ref=e410]:
+                - generic [ref=e411]:
+                  - generic "#1425 green · pass 4136/4136" [ref=e412]: "#1425"
+                  - generic [ref=e413]: green
+                - generic [ref=e414]: pass 4136/4136 · 3m18s
+              - generic [ref=e415]: 11m ago
+              - generic [ref=e416]: bucket M
+            - generic [ref=e417]:
+              - generic [ref=e418]:
+                - generic [ref=e419]:
+                  - generic "#1424 green · pass 4136/4136" [ref=e420]: "#1424"
+                  - generic [ref=e421]: green
+                - generic [ref=e422]: pass 4136/4136 · 4m19s
+              - generic [ref=e423]: 18m ago
+              - generic [ref=e424]: bucket M
+            - generic [ref=e425]:
+              - generic [ref=e426]:
+                - generic [ref=e427]:
+                  - generic "#1423 green · pass 1962/1962" [ref=e428]: "#1423"
+                  - generic [ref=e429]: green
+                - generic [ref=e430]: pass 1962/1962 · 3m38s
+              - generic [ref=e431]: 24m ago
+              - generic [ref=e432]: bucket P
+            - generic [ref=e433]:
+              - generic [ref=e434]:
+                - generic [ref=e435]:
+                  - generic "#1422 red · pass 4134/4136" [ref=e436]: "#1422"
+                  - generic [ref=e437]: red
+                - generic [ref=e438]: pass 4134/4136 · 2m59s
+              - generic [ref=e439]: 34m ago
+              - generic [ref=e440]: bucket M
+          - link "查看 Tests →" [ref=e441] [cursor=pointer]:
+            - /url: /tests
+        - generic [ref=e442]:
+          - generic [ref=e443]: Fan-in
+          - paragraph [ref=e444]: 最近 5 次机械 fan-in（landed/red · 锁持有区间）
+          - img "过去 3 小时时间轴" [ref=e445]:
+            - generic [ref=e458]: 12:45
+            - generic [ref=e459]: 15:45
+          - generic [ref=e460]:
+            - generic [ref=e461]:
+              - link "gap-git-graph-pagination-appends-page-relative-col-and-torow" [ref=e462] [cursor=pointer]:
+                - /url: /task/gap-git-graph-pagination-appends-page-relative-col-and-torow
+              - generic [ref=e463]:
+                - strong [ref=e464]: landed
+                - text: lock 332ssuite donesha
+                - code [ref=e465]: 36384f5
+                - link "view" [ref=e466] [cursor=pointer]:
+                  - /url: /fan-in-log/gap-git-graph-pagination-appends-page-relative-col-and-torow/fan-in-gap-git-graph-pagination-appends-page-relative-col-and-torow-wk-prod-1788779505.log
+                - text: ·
+                - link "download" [ref=e467] [cursor=pointer]:
+                  - /url: /fan-in-log/gap-git-graph-pagination-appends-page-relative-col-and-torow/fan-in-gap-git-graph-pagination-appends-page-relative-col-and-torow-wk-prod-1788779505.log/download
+              - generic [ref=e468]: 7m ago
+            - generic [ref=e469]:
+              - link "gap-driver-runtime-driver-path-anchored-at-project-root-not-dist" [ref=e470] [cursor=pointer]:
+                - /url: /task/gap-driver-runtime-driver-path-anchored-at-project-root-not-dist
+              - generic [ref=e471]:
+                - strong [ref=e472]: red
+                - text: step fflock 400s
+                - link "view" [ref=e473] [cursor=pointer]:
+                  - /url: /fan-in-log/gap-driver-runtime-driver-path-anchored-at-project-root-not-dist/fan-in-gap-driver-runtime-driver-path-anchored-at-project-root-not-dist-wk-prod-1788779505.log
+                - text: ·
+                - link "download" [ref=e474] [cursor=pointer]:
+                  - /url: /fan-in-log/gap-driver-runtime-driver-path-anchored-at-project-root-not-dist/fan-in-gap-driver-runtime-driver-path-anchored-at-project-root-not-dist-wk-prod-1788779505.log/download
+              - generic [ref=e475]: 14m ago
+            - generic [ref=e476]:
+              - link "gap-goal-gap-done-task-not-traction-respawns-every-round" [ref=e477] [cursor=pointer]:
+                - /url: /task/gap-goal-gap-done-task-not-traction-respawns-every-round
+              - generic [ref=e478]:
+                - strong [ref=e479]: red
+                - text: step fflock 387s
+                - link "view" [ref=e480] [cursor=pointer]:
+                  - /url: /fan-in-log/gap-goal-gap-done-task-not-traction-respawns-every-round/fan-in-gap-goal-gap-done-task-not-traction-respawns-every-round-wk-prod-1788779505.log
+                - text: ·
+                - link "download" [ref=e481] [cursor=pointer]:
+                  - /url: /fan-in-log/gap-goal-gap-done-task-not-traction-respawns-every-round/fan-in-gap-goal-gap-done-task-not-traction-respawns-every-round-wk-prod-1788779505.log/download
+              - generic [ref=e482]: 20m ago
+            - generic [ref=e483]:
+              - link "gap-git-graph-pagination-appends-page-relative-col-and-torow" [ref=e484] [cursor=pointer]:
+                - /url: /task/gap-git-graph-pagination-appends-page-relative-col-and-torow
+              - generic [ref=e485]:
+                - strong [ref=e486]: red
+                - text: step fflock 369s
+                - link "view" [ref=e487] [cursor=pointer]:
+                  - /url: /fan-in-log/gap-git-graph-pagination-appends-page-relative-col-and-torow/fan-in-gap-git-graph-pagination-appends-page-relative-col-and-torow-wk-prod-1788779505.log
+                - text: ·
+                - link "download" [ref=e488] [cursor=pointer]:
+                  - /url: /fan-in-log/gap-git-graph-pagination-appends-page-relative-col-and-torow/fan-in-gap-git-graph-pagination-appends-page-relative-col-and-torow-wk-prod-1788779505.log/download
+              - generic [ref=e489]: 26m ago
+            - generic [ref=e490]:
+              - link "gap-goal-gap-done-task-not-traction-respawns-every-round" [ref=e491] [cursor=pointer]:
+                - /url: /task/gap-goal-gap-done-task-not-traction-respawns-every-round
+              - generic [ref=e492]:
+                - strong [ref=e493]: red
+                - text: step suitelock 293s
+                - link "view" [ref=e494] [cursor=pointer]:
+                  - /url: /fan-in-log/gap-goal-gap-done-task-not-traction-respawns-every-round/fan-in-gap-goal-gap-done-task-not-traction-respawns-every-round-wk-prod-1788779505.log
+                - text: ·
+                - link "download" [ref=e495] [cursor=pointer]:
+                  - /url: /fan-in-log/gap-goal-gap-done-task-not-traction-respawns-every-round/fan-in-gap-goal-gap-done-task-not-traction-respawns-every-round-wk-prod-1788779505.log/download
+              - generic [ref=e496]: 36m ago
+    - heading "变更记录" [level=2] [ref=e263]
+    - generic [ref=e264]:
+      - generic [ref=e265]:
+        - generic [ref=e266]: 最近提交
+        - paragraph [ref=e267]: "345e196 Merge branch 'develop' into task/gap-goal-gap-done-task-not-traction-respawns-every-round36384f5 tasks: 翻 gap-git-graph-pagination-appends-page-relative-col-and-torow done（driver 机械 fan-in）7ee7bf4 tasks: reset gap-git-graph-pagination-appends-page-relative-col-and-torow done→ready（fan-in 收敛「done 未落地」中间态）"
+        - link "查看 Journal →" [ref=e268] [cursor=pointer]:
+          - /url: /journal
+      - generic [ref=e269]:
+        - generic [ref=e270]: Git History
+        - paragraph [ref=e271]: 提交纵向时间轴（develop 主干 + task 分支，第三方库客户端渲染）。
+        - link "查看 Git History →" [ref=e272] [cursor=pointer]:
+          - /url: /git-history
