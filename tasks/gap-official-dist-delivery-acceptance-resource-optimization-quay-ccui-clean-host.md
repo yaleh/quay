@@ -37,6 +37,7 @@ Gated on all of P0 and A-E landing first (there is nothing to package-test befor
 
 ## Definition of Done
 - AC1-AC5 checked with pasted evidence from all three hosts. No budget ceiling raised anywhere. No global user-scope plugin install modified.
+- 该轴仍暗,理由:集成验收任务，分支零自有提交（§5），无组件代码改动，未跑 archguard/码文档比测量
 
 ## Touches
 - tasks/gap-official-dist-delivery-acceptance-resource-optimization-quay-ccui-clean-host.md
