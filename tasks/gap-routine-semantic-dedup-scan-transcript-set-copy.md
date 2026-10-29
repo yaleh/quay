@@ -64,6 +64,36 @@ extract
 ## ADR-007 暗轴
 - 该轴仍暗,理由:本次是 plugin/scripts 内的一次同层函数抽取（两份 body 合为一份 .mjs sibling），未改 packages/ 的模块依赖结构，也未跑 archguard 的 L_D/L_G 读数。
 
+## 套件红根因与处置（2026-10-29 第二轮，本 worktree 实跑 A/B）
+
+上一轮的 suite 红**不是**本 delta 的代码缺陷：5 个红里没有一个是本任务改过的文件，全部落在
+`packages/quay/plugin/` 这个 **gitignored 的 npm-pack 暂存镜像**上。
+
+根因（可复现，不是「环境」）：
+- `packages/quay/test/delivery-standalone-smoke.sh:51-56` 把整棵 `plugin/` 拷进 `$ROOT/packages/quay/plugin/`、
+  跑 `npm pack`、再 `rm -rf` 掉。该 gate 按设计留在默认 `@test-group product` 泳道
+  （2026-08-25 `gap-suite-move-27-evidenced-files-out-serial-lowconc`、22-60× 高压验证后从 serial 退回 product）。
+- 于是「先 walk 列路径、再 readFileSync」的读者会读到**中途消失**的文件 ⇒ 未捕获 ENOENT ⇒ 红。
+  仓库已为该竞态修过两处读者（`dead-code-after-return-check.test.mjs` 记过实测 186 次 ENOENT 全在
+  `packages/quay/plugin/`；`adr016-screen-use-check.test.mjs` 有同款负控制），本条只是**同一族的另外三个读者**
+  没跟上（硬规则 5b）。
+- 本任务新增了一个测试文件 ⇒ 改变了确定性分批 ⇒ 把 stager 与这三个 walker 分进同一批 ⇒ 必红。
+
+处置（窄口径，⛔ 不是放宽判据）：三处读者改成「**只在镜像前缀下**容忍 list→read 竞态，并**打印被跳过的路径**」；
+镜像以外的 ENOENT 仍然硬失败（硬规则 3b：未评估既 ≠ 违规，也 ≠ 通过）。
+
+A/B（同一批 4 文件、`--test-concurrency=4`，含 stager）：
+- 修前 ⇒ exit 1，`ℹ pass 18 / fail 1`，`ENOENT ... packages/quay/plugin/.claude/launch.settings.json`
+- 修后 ⇒ exit 0，`ℹ pass 19 / fail 0`，并打印
+  `# staging-mirror walk→read race: skipped 677 packed path(s) under plugin/ — NOT judged`
+- 单文件回归：`kernel-canonical-buckets` 4/4、`kernel-regex-escape` 6/6、`shipped-entry-runnable` 2/2。
+
+未处置（**不属本任务**，留痕不修）：
+- `plugin/test/integration-batch-merge-characterization.test.mjs` 的 `not-a-git-repo` 在 develop 基线与本分支
+  **两边都红** ⇒ 既有红，不是本任务引入。
+- `plugin/test/driver-runtime-control-plane.test.mjs` AC3 是 `port: 0` 分到的端口落进 undici 的 bad-port 名单
+  （`[TypeError: fetch failed] [cause]: bad port`），宿主相关偶发，与本 delta 无关。
+
 ## AC
 - [x] `.quay/routine-findings.jsonl` 中 finding `transcript-set-copy`（routine `semantic-dedup-scan`，runId `semantic-dedup-scan-1793251416079`）所描述的问题被复核并处置
 - [x] 处置结论可核：要么修掉，要么写明「已有机制在管、失败在哪一步」，⛔ 不以「已注意到」结案
@@ -79,6 +109,9 @@ extract
 - `plugin/scripts/capability-catalog-declarations.json`
 - `plugin/test/transcript-set-single-implementation.test.mjs`
 - `packages/quay/src/init.ts`
+- `packages/quay/test/kernel-canonical-buckets.test.mjs`
+- `packages/quay/test/kernel-regex-escape.test.mjs`
+- `plugin/test/shipped-entry-runnable.test.mjs`
 - `tasks/gap-routine-semantic-dedup-scan-transcript-set-copy.md`
 
 ## Blocker
