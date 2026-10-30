@@ -737,6 +737,36 @@ test("codex trio: generateCodexConfigToml names the installed dist bundle, never
   assert.ok(!rel.includes("/data/home/yale/work/quay"), "no hardcoded host path may appear");
 });
 
+// ── gap-codex-host-config-approval-policy-blocks-mcp ──────────────────────────────────────────────────
+// codex-cli's session approval policy defaults to `never`, under which every quay MCP tool call is
+// refused before the server is spawned. The MCP-server-scoped key that unblocks those calls is
+// `default_tools_approval_mode` (NOT the top-level profile key `approval_policy`, which codex warns is
+// "ignored" under `[mcp_servers.quay]`). The generated config must pin `approve` (positive arm), and
+// removing the line or flipping it to `prompt` must break the positive check (reverse arms). All arms
+// judge the [mcp_servers.quay] SECTION (comment lines stripped), so a comment that merely mentions the
+// key cannot satisfy the check (硬规则 2: 按位置判定).
+test("codex approval: generated config pins default_tools_approval_mode = approve, and removal/other-value breaks it", () => {
+  // The non-comment body of the [mcp_servers.quay] section — the position the key must live in.
+  const sectionBody = (toml) => {
+    const section = toml.match(/\[mcp_servers\.quay\]([\s\S]*?)(?=\n\[|\n*$)/);
+    return (section?.[1] ?? "").split("\n").filter((l) => !/^\s*#/.test(l)).join("\n");
+  };
+
+  const toml = generateCodexConfigToml("/some/project", "/opt/quay-plugin");
+
+  // Positive: the exact key=value is present INSIDE the [mcp_servers.quay] section (not merely a comment).
+  assert.match(sectionBody(toml), /default_tools_approval_mode\s*=\s*"approve"/, 'generated config must pin default_tools_approval_mode = "approve" inside [mcp_servers.quay]');
+
+  // Reverse arm 1: delete the config line → the section no longer matches.
+  const removed = toml.replace(/^default_tools_approval_mode\s*=\s*"approve"\s*$/m, "");
+  assert.doesNotMatch(sectionBody(removed), /default_tools_approval_mode\s*=\s*"approve"/, "removing the line must break the positive check");
+
+  // Reverse arm 2: flip to `prompt` (a valid enum value that does NOT auto-approve) → the positive
+  // check no longer matches, so the test is not vacuously keyed on any one value.
+  const prompt = toml.replace(/^default_tools_approval_mode\s*=\s*"approve"\s*$/m, 'default_tools_approval_mode = "prompt"');
+  assert.doesNotMatch(sectionBody(prompt), /default_tools_approval_mode\s*=\s*"approve"/, "flipping to prompt must break the positive check");
+});
+
 test("codex trio: --auto-commit-confirm commits the Codex trio (staged set derived from CLOSED_SET_ITEMS)", () => {
   const dir = tmpDir("codex-autocommit");
   const g = (args) => execFileSync("git", ["-C", dir, ...args], { encoding: "utf8" }).trim();

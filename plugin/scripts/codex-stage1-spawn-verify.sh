@@ -13,8 +13,19 @@
 # not exist all exit non-zero — the silent "enabled but not running" case this gap exists
 # to make loud (硬规则 3b).
 #
-# Exit: 0 = server spawned + initialize handshake succeeded;
-#       non-zero = config missing / server did not spawn / no initialize result.
+# `--codex-exec` (opt-in) additionally runs the REAL codex CLI (codex exec) against a freshly
+# `quay init`-laid consumer workspace whose generated `.codex/config.toml` carries
+# `default_tools_approval_mode = "approve"`, and requires `task_list` to COMPLETE (not merely
+# initialize) — the end-to-end proof that the quay MCP tools actually run under codex
+# (gap-codex-host-config-approval-policy-blocks-mcp). It uses
+# `--dangerously-bypass-approvals-and-sandbox` because that is the only non-interactive path:
+# codex refuses to load an UNTRUSTED temp dir's project-scoped `.codex/config.toml` without it
+# (verified: `codex exec -C <tmp>` alone yields `unknown MCP server 'quay'`), and a trust prompt
+# cannot be answered non-interactively. It is opt-in because it needs a live codex + LLM round
+# trip; the default path stays codex-independent.
+#
+# Exit: 0 = server spawned + initialize handshake succeeded (+ task_list via codex exec if asked);
+#       non-zero = config missing / server did not spawn / no initialize result / codex exec failed.
 
 # ── 统一 --help（gap-scripts-sprawl：用法在前、退出 0、无业务副作用）────────────────────
 if [ "${1:-}" = "--help" ] || [ "${1:-}" = "-h" ]; then
@@ -108,6 +119,59 @@ if printf '%s\n' "$RESP" | grep -q '"jsonrpc"[[:space:]]*:[[:space:]]*"2\.0"' \
 else
   bad "server did NOT complete the initialize handshake (no jsonrpc/result/serverInfo response)"
   note "       first response line: ${RESP:-<empty — spawn produced no stdout>}"
+fi
+
+# --- 4. (opt-in) real codex exec: the configured quay MCP server completes task_list -----
+# `--codex-exec` proves the quay MCP tools actually RUN under codex (not merely spawn + initialize):
+# codex exec against a freshly `quay init`-laid consumer workspace (generated config carries
+# `default_tools_approval_mode = "approve"`) must COMPLETE a quay MCP `task_list` call. The bypass
+# flag is the only non-interactive path — codex refuses to load an UNTRUSTED temp dir's
+# project-scoped `.codex/config.toml` without it, and a trust prompt cannot be answered here.
+# Opt-in because it needs a live codex + LLM round trip; the default path stays codex-independent.
+if [[ "${1:-}" = "--codex-exec" ]]; then
+  if ! command -v codex >/dev/null 2>&1; then
+    bad "--codex-exec requested but 'codex' is not on PATH"
+  else
+    CODEX_TMP="$(mktemp -d)"
+    PROBE_ID="codex-probe-$$"
+    if node --no-warnings --experimental-strip-types "$REPO_ROOT/packages/quay/bin/quay.ts" init \
+        --root "$CODEX_TMP" --plugin-root "$REPO_ROOT/plugin" --test-command true >/dev/null 2>&1; then
+      mkdir -p "$CODEX_TMP/tasks"
+      cat > "$CODEX_TMP/tasks/$PROBE_ID.md" <<EOF
+---
+id: $PROBE_ID
+title: codex probe task
+status: todo
+labels: []
+---
+## Proposal
+probe task for spawn-verify
+## Plan
+probe
+## Acceptance Criteria
+- [ ] probe
+## Definition of Done
+probe
+EOF
+      CODEX_OUT="$(timeout 180 codex exec --dangerously-bypass-approvals-and-sandbox -C "$CODEX_TMP" \
+        -o "$CODEX_TMP/last-msg.txt" \
+        "Call the quay MCP tool task_list with no arguments, then reply with ONLY the id of the first task." \
+        </dev/null 2>&1)"
+      codex_status=$?
+      LAST_MSG="$(cat "$CODEX_TMP/last-msg.txt" 2>/dev/null)"
+      if [[ "$codex_status" -eq 0 ]] && printf '%s\n%s\n' "$CODEX_OUT" "$LAST_MSG" | grep -q "$PROBE_ID"; then
+        pass "codex exec completed quay MCP task_list and returned the probe task id ($PROBE_ID)"
+      else
+        bad "codex exec did NOT complete quay MCP task_list (exit $codex_status, probe id $PROBE_ID missing). Output:"
+        printf '%s\n' "$CODEX_OUT" | sed 's/^/       /'
+      fi
+    else
+      bad "quay init could not lay down the consumer workspace for --codex-exec"
+    fi
+    rm -rf "$CODEX_TMP"
+  fi
+elif [[ -n "${1:-}" ]] && [[ "${1:-}" != "--codex-exec" ]]; then
+  bad "unknown argument: ${1:-}"
 fi
 
 note ""
