@@ -288,6 +288,30 @@
         "shLines": 7415
       },
       "why": "codex-stage1 spawn-verify.sh + selfcheck 集成使 shipped .sh 行数 +3（GOAL-912 codex 支持落地，正当增长）"
+    },
+    {
+      "when": "2026-10-30T08:21:48.660Z",
+      "from": {
+        "files": 0,
+        "bytes": 0,
+        "shLines": 0,
+        "shipped": {
+          "files": 302,
+          "bytes": 70921854,
+          "shLines": 7415
+        }
+      },
+      "to": {
+        "files": 0,
+        "bytes": 0,
+        "shLines": 0
+      },
+      "shipped": {
+        "files": 303,
+        "bytes": 70943416,
+        "shLines": 7415
+      },
+      "why": "GOAL-913 Codex 可安装宿主：.codex-plugin/plugin.json + init 落盘三件套使 shipped files +1（303）"
     }
   ],
   "_axes": {
@@ -301,8 +325,8 @@
   "bytes": 0,
   "shLines": 0,
   "shipped": {
-    "files": 302,
-    "bytes": 70921854,
+    "files": 303,
+    "bytes": 70943416,
     "shLines": 7415
   }
 }
