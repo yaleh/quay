@@ -39,17 +39,31 @@ Claude Code 侧的同构先例是 `plugin/.mcp.json`——它用 `{"command":"no
 
 ## Acceptance Criteria
 
-- [ ] AC1 正向判据绿（能取假）：仓库根 `node packages/quay/bin/quay.js goal gate AC-931 --dry-run --json` ⇒ `verdict:"pass"` / exit 0；贴 `.codex-plugin/plugin.json` 全文与 gate 输出。
-- [ ] AC2 发布面指向 dist 非 source（按位置）：`grep -c 'packages/quay/bin/quay.ts' .codex-plugin/plugin.json` = 0，且 `grep -q '"quay"'` / `grep -q 'quay.js'` / `grep -q 'mcp'` 三条都命中；贴三条 grep 的 `-c` 计数与命中行。
-- [ ] AC3 反向—source 路径（能取假）：把临时副本的 args 改成 `packages/quay/bin/quay.ts`，逐字运行 criterion shell ⇒ exit 非 0 且 stderr 含 `dev-tree source path present`；贴输出与 `EXIT=`。
-- [ ] AC4 反向—删掉声明（能取假）：把临时副本里 quay 声明删掉 ⇒ exit 非 0 且 stderr 含 `no quay MCP declaration`；贴输出与 `EXIT=`。
-- [ ] AC5 反向—删掉文件（能取假）：无 `.codex-plugin/plugin.json` 的临时目录 ⇒ exit 非 0 且 stderr 含 `absent`；贴输出与 `EXIT=`。
-- [ ] AC6 测试绿：新测试 `plugin/test/codex-plugin-surface.test.mjs` 经 `bash scripts/test.sh --for-task <本任务 id> --allow-thin` 绿（贴 pass/fail 计数）；测试从 `quay goal show AC-931 --json` 取 criterion 逐字，⛔ 不复制第二份判据。
-- [ ] AC7 同层无 source 泄漏：`grep -rn 'packages/quay/bin/quay.ts' .codex-plugin/` 计数 = 0（贴计数）。
+- [x] AC1 正向判据绿（能取假）：仓库根 `node packages/quay/bin/quay.js goal gate AC-931 --dry-run --json` ⇒ `verdict:"pass"` / exit 0；贴 `.codex-plugin/plugin.json` 全文与 gate 输出。
+- [x] AC2 发布面指向 dist 非 source（按位置）：`grep -c 'packages/quay/bin/quay.ts' .codex-plugin/plugin.json` = 0，且 `grep -q '"quay"'` / `grep -q 'quay.js'` / `grep -q 'mcp'` 三条都命中；贴三条 grep 的 `-c` 计数与命中行。
+- [x] AC3 反向—source 路径（能取假）：把临时副本的 args 改成 `packages/quay/bin/quay.ts`，逐字运行 criterion shell ⇒ exit 非 0 且 stderr 含 `dev-tree source path present`；贴输出与 `EXIT=`。
+- [x] AC4 反向—删掉声明（能取假）：把临时副本里 quay 声明删掉 ⇒ exit 非 0 且 stderr 含 `no quay MCP declaration`；贴输出与 `EXIT=`。
+- [x] AC5 反向—删掉文件（能取假）：无 `.codex-plugin/plugin.json` 的临时目录 ⇒ exit 非 0 且 stderr 含 `absent`；贴输出与 `EXIT=`。
+- [x] AC6 测试绿：新测试 `plugin/test/codex-plugin-surface.test.mjs` 经 `bash scripts/test.sh --for-task <本任务 id> --allow-thin` 绿（贴 pass/fail 计数）；测试从 `quay goal show AC-931 --json` 取 criterion 逐字，⛔ 不复制第二份判据。
+- [x] AC7 同层无 source 泄漏：`grep -rn 'packages/quay/bin/quay.ts' .codex-plugin/` 计数 = 0（贴计数）。
 
 ## Definition of Done
 
 仓库根存在 `.codex-plugin/plugin.json`，声明 `mcpServers.quay` 且 args 指向安装后 dist（`quay.js mcp`）——⛔ 不是 dev-tree source `packages/quay/bin/quay.ts`；正向判据 `quay goal gate AC-931` 在真实文件上 exit 0，且一个机械测试把三个反向回归（source 路径 / 删声明 / 删文件）钉成「exit 非 0 且 stderr 带成因」。本条只闭合 AC-931 的发布面文件；AC-932（quay init 落盘三件套）与 AC-933（spawn-verify ship 决策）是 sibling AC，各自另有任务，不在本条范围。
+
+## Evidence
+
+- AC1：worktree 根 `node packages/quay/bin/quay.js goal gate AC-931 --dry-run --json` ⇒ `verdict:"pass"`、exit 0、reason `acceptance passed (exit 0)`；`.codex-plugin/plugin.json` 全文见提交 646976481。
+- AC2：`grep -c 'packages/quay/bin/quay.ts'`=0；`grep -c '"quay"'`=2；`grep -c 'quay.js'`=2；`grep -c 'mcp'`=3。
+- AC3：EXIT=1，stderr `FAIL: dev-tree source path present`。
+- AC4：EXIT=1，stderr `FAIL: no quay MCP declaration`。
+- AC5：EXIT=1，stderr `FAIL: .codex-plugin/plugin.json absent`。
+- AC6：`bash scripts/test.sh --for-task gap-codex-plugin-publish-surface-plugin-json-mcp-dist --allow-thin` ⇒ tests 5 / pass 5 / fail 0；criterion 由测试经 `quay goal show AC-931 --json` `.criterion` 逐字取回，未复制第二份判据。
+- AC7：`grep -rn 'packages/quay/bin/quay.ts' .codex-plugin/` 计数 = 0。
+
+## ADR-007 dark-axis record
+
+该轴仍暗,理由:本任务新增声明式 JSON 发布面文件(.codex-plugin/plugin.json)与 goal-criterion 测试守卫(plugin/test/codex-plugin-surface.test.mjs),不新增生产代码依赖结构或包图边,L_D/L_G 无可测结构量
 
 ## Touches
 
