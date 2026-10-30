@@ -1,7 +1,7 @@
 ---
 id: gap-task-write-duplicates-frontmatter
 title: "6 任务文件双 frontmatter：task_write 重复写 frontmatter → 修数据 + 查根因 + 加 >1 ^id: 行检测器"
-status: todo
+status: ready
 labels:
   - gap
   - defect
