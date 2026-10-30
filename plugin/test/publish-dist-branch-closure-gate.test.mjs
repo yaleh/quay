@@ -191,6 +191,18 @@ function addMarketplaceNameStampInputs(root) {
   );
 }
 
+/** The Codex publish surface the REAL publish script now copies fail-closed (task
+ *  gap-publish-dist-branch-does-not-ship-codex-plugin-surface). The stub carries a minimal synthetic
+ *  `.codex-plugin/plugin.json` in the SHAPE the repo ships — mcpServers.quay = node quay.js mcp, against
+ *  the installed dist. The script only requires the file to be present and non-empty (it rsyncs the whole
+ *  directory), so the stub manifest's content does not affect the closure gate under test. */
+function addCodexPluginSurfaceInput(root) {
+  writeFile(
+    path.join(root, ".codex-plugin", "plugin.json"),
+    JSON.stringify({ name: "quay", version: "0.0.0", mcpServers: { quay: { command: "node", args: ["quay.js", "mcp"] } } }, null, 2) + "\n"
+  );
+}
+
 const REL_IMPORT_RE = /(?:from\s*|import\s*\(\s*)(["'])(\.{1,2}\/[^"']+)\1/g;
 
 /** The transitive RELATIVE-import closure of a repo-relative module, derived from the source rather
@@ -308,6 +320,7 @@ function makeStubRepo(tag) {
   writeFile(path.join(root, "plugin", "vendor", "quay", "dist", "quay.js"), "// stub vendor bundle\n");
   addVersionStampInputs(root);
   addMarketplaceNameStampInputs(root);
+  addCodexPluginSurfaceInput(root);
   addShippedSetRuleInputs(root);
   addShippedShellReachabilityInputs(root);
   git(root, "init", "-q", "-b", "master");

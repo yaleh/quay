@@ -466,8 +466,24 @@
         "embeddedInterpreterLines": "-44 = four .sh that LEFT the axis with the directory move, each contributing 11 counted code lines with embedded:[node] at a command position: plugin/gate-scripts/audit-independence-check.sh, plugin/gate-scripts/it0-backlog-projection-check.sh, plugin/gate-scripts/it0-dod-check.sh, plugin/gate-scripts/vmeta-lag-check.sh (11*4 = 44 = 6504 - 6460). The other 8 moved .sh carried embedded:[] and therefore contributed 0 to this axis — they leave totals.scripts (146 -> 134, now matching the 50 embedded / 134 tracked readings) and totals.codeLines (20195 -> 19743), which are reported, not ratcheted. Residual = 0 by construction from the checker's own file lists, not by sampling: develop.files minus branch.files is exactly those 12 paths, and the axis sum over the 4 embedded ones is exactly the 44-line move.",
         "duplicateCopies": "0 — untouched (0 is the assertion, not an omission). This axis counts non-symlink byte-identical pairs between experiments/**/scripts/ and plugin/scripts/; plugin/gate-scripts/ was never in either population, so archiving it moves neither side. The finding's own duplicate worry (6 byte-identical files vs the experiments copies) is discharged structurally by the move, not by this number."
       }
+    },
+    {
+      "when": "2026-10-30 (gap-publish-dist-branch-does-not-ship-codex-plugin-surface — the task's own delta)",
+      "from": {
+        "embeddedInterpreterLines": 6460,
+        "duplicateCopies": 0
+      },
+      "to": {
+        "embeddedInterpreterLines": 6462,
+        "duplicateCopies": 0
+      },
+      "why": "UPWARD re-anchor (+2) — the deliberate, one-off cost this task pays: plugin/scripts/publish-dist-branch.sh gained two code lines (a fail-closed [ -s … ] guard + the rsync) so the assembled artifact ships the repo-root .codex-plugin/plugin.json (the Codex install surface, AC-931) instead of silently omitting it. Comment lines, which carry the WHY, are free under this axis. The two lines are the entire executable footprint of the assembly at this site. Re-anchored to the checker's OWN reading on this tree (6462) — never hand-fitted.",
+      "attribution": {
+        "embeddedInterpreterLines": "+2 = plugin/scripts/publish-dist-branch.sh codeLines 92 -> 94 (the fail-closed guard line + the rsync line; the file was already ON the axis via its embedded `node --experimental-strip-types` calls). Residual = 0: this task's only tracked *.sh delta is that one file (`git diff --name-only develop -- '*.sh'`), so no other member contributes.",
+        "duplicateCopies": "0 — untouched (0 is the assertion, not an omission). No experiments/** mirror added and no byte-identical pair created."
+      }
     }
   ],
-  "embeddedInterpreterLines": 6460,
+  "embeddedInterpreterLines": 6462,
   "duplicateCopies": 0
 }
