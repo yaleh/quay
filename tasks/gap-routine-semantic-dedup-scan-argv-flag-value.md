@@ -2,7 +2,7 @@
 id: gap-routine-semantic-dedup-scan-argv-flag-value
 title: "semantic-dedup-scan: Byte-identical 3-line argv flag reader
   re-implemented in two scripts with no shared accessor."
-status: todo
+status: ready
 labels:
   - gap
   - routine-filed
