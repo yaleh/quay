@@ -2,7 +2,7 @@
 id: gap-goal-branch-unmerged-goal-912
 title: "goal-branch-unmerged GOAL-912: merge into develop went red — fix the
   goal branch so it auto-retries"
-status: ready
+status: done
 labels:
   - gap
   - goal-branch-unmerged
