@@ -1,11 +1,18 @@
 ---
 id: GOAL-913
 title: Codex 作为可安装宿主——插件发布面 + quay init 落盘三件套 + spawn-verify ship 决策
-status: draft
+status: active
 kind: goal
 origin: 人 2026-10-30 裁定：GOAL-912 成果对发布链零 ship（.codex/config.toml
   宿主硬编码、.agents/skills 与 AGENTS.md 不 ship、无 .codex-plugin 面、spawn-verify 被
   prune），本 goal 补全
+activatedAt: 2026-10-30T05:32:13.334Z
+statusLog:
+  - at: 2026-10-30T05:32:13.334Z
+    from: draft
+    to: active
+    actor: goal-cli
+    reason: 人 2026-10-30 裁定激活：Codex 可安装宿主补全
 ---
 ## 退出条件
 
