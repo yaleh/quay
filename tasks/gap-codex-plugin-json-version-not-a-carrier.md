@@ -43,4 +43,19 @@ extra:
 - scripts/version-consistency-check.test.ts
 - plugin/scripts/checker-mutation-cases/version-consistency-check.sh
 - .codex-plugin/plugin.json
+- plugin/test/release-cut.test.mjs
 - tasks/gap-codex-plugin-json-version-not-a-carrier.md
+
+## Evidence
+
+- 全量 suite 回归修复（上一轮 exited-not-landed 的根因）：`plugin/test/release-cut.test.mjs` 的 fixture 克隆 develop（carrier 登记落地前的旧树，`.codex-plugin/plugin.json` 仍 `0.26.0-dev`），而 `release-cut.mjs` 从 worktree 自身解析 `version-consistency-check.ts`（已含新 carrier）⇒ 健康 fixture 被误判 DRIFT、`CAUSE=release-cut-version-inconsistent`（实测 `--root <develop克隆>` 复现：`.codex-plugin/plugin.json 0.26.0-dev != expected 0.28.0-dev`）。修法：fixture 在 `author`（HEAD，preflight 判定的树）上把 `.codex-plugin/plugin.json` 提交为 `plugin/VERSION`（与 shipped-set ceiling 同形的 fixture 化），`node --test plugin/test/release-cut.test.mjs` 18/18 绿。
+- AC5 范围门：本轮 scoped-gate cache 已写入（`--for-task ... --allow-thin` 绿）。
+
+## Blocker
+
+**2026-10-30T12:10:58.494Z — worker 未落地（exited-not-landed）**
+
+- 未落地原因：step=suite: AssertionError [ERR_ASSERTION]: the dry run must pass on a healthy tree: CAUSE=release-cut-version-inconsistent — /data/home/yale/work/quay-worktrees/gap-codex-plugin-json-version-not-a-carrier/scripts/version-consistency-check.ts --root /tmp/release-cut-dryrun-Ytcmay/repo exited 1: the version carriers do not agree with VERSION, so the tag would name a tree whose version is already wrong; run scripts/stamp-version.ts (and fix VERSION) first. Output: [baseline A/B: HARD RED (task-introduced-red) — the task's red set is NOT a subset of the develop baseline red set: added=plugin/test/release-cut.test.mjs,... changed=-]
+- run_id：wk-prod-anchor
+- session_id：0df67499-f633-4f1b-aba1-4cdb66d51406
+- 已修复：见 `## Evidence`。
