@@ -829,7 +829,7 @@ full_suite_lock_acquire() {
   # instead of being serialized).
   _s_idx=0
   for _s_fd in "${FULL_SUITE_LOCK_FDS[@]}"; do
-    if flock -n "${_s_fd}"; then _s_held="${_s_idx}"; break; fi
+    if suite_lock_try "${_s_fd}" "${FULL_SUITE_LOCK_SLOTS[${_s_idx}]}"; then _s_held="${_s_idx}"; break; fi
     _s_idx=$((_s_idx + 1))
   done
   if [ -z "${_s_held}" ]; then
@@ -843,7 +843,7 @@ full_suite_lock_acquire() {
     while [ -z "${_s_held}" ]; do
       _s_idx=0
       for _s_fd in "${FULL_SUITE_LOCK_FDS[@]}"; do
-        if flock -w 1 "${_s_fd}"; then _s_held="${_s_idx}"; break; fi
+        if suite_lock_try "${_s_fd}" "${FULL_SUITE_LOCK_SLOTS[${_s_idx}]}" 1; then _s_held="${_s_idx}"; break; fi
         _s_idx=$((_s_idx + 1))
       done
     done
@@ -882,7 +882,7 @@ full_suite_lock_release() {
   if [ -n "${FULL_SUITE_LOCK_HELD:-}" ]; then
     _r_idx="${FULL_SUITE_LOCK_HELD}"
     if [ "${_r_idx}" -lt "${#FULL_SUITE_LOCK_FDS[@]}" ]; then
-      flock -u "${FULL_SUITE_LOCK_FDS[${_r_idx}]}" 2>/dev/null || true
+      suite_lock_release "${FULL_SUITE_LOCK_FDS[${_r_idx}]}" "${FULL_SUITE_LOCK_SLOTS[${_r_idx}]}"
     fi
     # Remove the watchdog's lane-yield marker (written on fire) on a NORMAL release — a joining suite's
     # lane formula must no longer count this (now-finished) suite as slot-less (gap-suite-lane-budget-

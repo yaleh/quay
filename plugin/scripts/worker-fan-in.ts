@@ -1829,8 +1829,23 @@ export function fanInLockFileForMergeTarget(root: string, mergeTarget: string): 
 /** 持锁 holder 的 bash 脚本（非分离直接子进程；`cat >/dev/null` 阻塞在 stdin，driver 死 ⇒ EOF ⇒ 释放）。
  *  参数：$1=锁文件 $2=taskId $3=runIdJson（已编码 `"r"` 或 `null`）$4=agentIdJson $5=事件文件
  *  $6=锁域标签（锁文件 basename，供 readFanInLockHold/事后核对「用了哪把锁」——§4.6 的 `lock` 字段）。 */
-const FAN_IN_LOCK_HOLDER = `exec {fd}>"$1" || exit 2
+const FAN_IN_LOCK_HOLDER = `if command -v flock >/dev/null 2>&1; then
+exec {fd}>"$1" || exit 2
 flock -x "$fd" || exit 2
+else
+: > "$1" 2>/dev/null || exit 2
+_lockdir="$1.d"
+while :; do
+  if mkdir "$_lockdir" 2>/dev/null; then printf '%s' "$$" > "$_lockdir/pid" 2>/dev/null || true; break; fi
+  _hp="$(cat "$_lockdir/pid" 2>/dev/null || true)"
+  if [ -n "$_hp" ] && ! kill -0 "$_hp" 2>/dev/null; then
+    rm -f "$_lockdir/pid" 2>/dev/null || true
+    rmdir "$_lockdir" 2>/dev/null || true
+    continue
+  fi
+  sleep 1
+done
+fi
 _emit() {
   printf '{"event":"%s","ts":"%s","epoch":%s,"taskId":"%s","pid":%s,"runId":%s,"agentId":%s,"lock":"%s"}\\n' "$1" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$(date +%s)" "$2" "$$" "$3" "$4" "$5"
 }
@@ -1838,7 +1853,7 @@ _emit acquire "$2" "$3" "$4" "$6" >> "$5"
 _emit acquire "$2" "$3" "$4" "$6"
 cat >/dev/null
 _emit release "$2" "$3" "$4" "$6" >> "$5"
-flock -u "$fd" 2>/dev/null || true
+if command -v flock >/dev/null 2>&1; then flock -u "$fd" 2>/dev/null || true; else rm -f "$_lockdir/pid" 2>/dev/null || true; rmdir "$_lockdir" 2>/dev/null || true; fi
 exit 0`;
 
 /** 一次 fan-in 锁的持有句柄（driver 侧）：release() 关 stdin 写端 ⇒ holder 写 release 事件 +

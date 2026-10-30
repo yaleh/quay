@@ -48,6 +48,7 @@ import { StringDecoder } from "node:string_decoder";
 import { fileURLToPath } from "node:url";
 import { spawn, spawnSync } from "node:child_process";
 import { isDirectEntry } from "./gate-script-base.ts";
+import { withWinConsolePreload } from "./win-console.ts";
 // Layer 0 · 主检出推导（order-independent，gap-main-checkout-root-derivation-recurs-three-sites）。
 import { mainCheckoutRoot, repoRoot } from "./repo-root.ts";
 // Layer 1a · filters（AC152 单一实现：可组合谓词列表，两 driver 共用）。
@@ -2128,7 +2129,12 @@ export function spawnAnchor(
   const args = anchorLaunchArgv(innerArgs, res);
   // envelope 读数是**启动者的声明**（内核读不到「上限由谁决定」），经 env 交给 anchor 去发布（Plan 步 2）；
   // ⛔ memoryMax 本身**不**走这条——它由 anchor 从 cgroup 文件读（硬规则 4b）。
-  const childEnv: NodeJS.ProcessEnv = res.source ? { ...process.env, [ANCHOR_ENVELOPE_SOURCE_ENV]: res.source } : process.env;
+  // Windows: the anchor runs the kind loops in-process, and a detached process has no console,
+  // so every sync execFileSync/execSync issued by a loop would allocate a visible console window.
+  // The preload is the only boundary that covers those sync APIs (see win-no-console.cjs).
+  const childEnv: NodeJS.ProcessEnv = withWinConsolePreload(
+    res.source ? { ...process.env, [ANCHOR_ENVELOPE_SOURCE_ENV]: res.source } : { ...process.env },
+  );
   // 共享宿主那一步的出处必须与 ceiling 同行落痕：读这份日志的人要能分辨「按 N 个同类 scope 收紧过」
   // 与「没数成、退回项目盲的 0.25」（硬规则 3b——两者若同形，「收紧没生效」就永远看不见）。
   const sharedHostNote =
@@ -2143,7 +2149,7 @@ export function spawnAnchor(
         : `driver-runtime: anchor envelope: none — ${res.reason} (${sharedHostNote})\n`,
     );
   } catch { /* 日志写失败不致命 */ }
-  const child = spawn(args[0], args.slice(1), { detached: true, stdio: ["ignore", fd, fd], env: childEnv });
+  const child = spawn(args[0], args.slice(1), { detached: true, windowsHide: true, stdio: ["ignore", fd, fd], env: childEnv });
   child.unref();
   return { pid: child.pid ?? null, error: child.pid ? null : "spawn returned no pid" };
 }
@@ -4517,8 +4523,11 @@ export async function startKind(
 
   const sup = spawn(supArgs[0], supArgs.slice(1), {
     detached: true,
+    windowsHide: true,
     stdio: ["ignore", supLogFd, supLogFd],
-    env: process.env,
+    // Same preload as spawnAnchor: this supervisor is detached too, and it respawns the
+    // driver (whose sync child processes would otherwise pop console windows).
+    env: withWinConsolePreload({ ...process.env }),
   });
   sup.unref();
   if (sup.pid) writePidFile(st.supervisorPidFile, sup.pid);

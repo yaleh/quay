@@ -113,6 +113,40 @@ if [ "${1:-}" = "--help" ] || [ "${1:-}" = "-h" ]; then
 fi
 set -euo pipefail
 
+# ── platform capability ────────────────────────────────────────────────────────────────────────────
+# Same split as resource-gate.sh: the enumeration (`ps -ww -e -o pid= -o etimes= -o args=`) and the
+# liveness read (/proc/<pid>/stat) are LINUX instruments. Under Git Bash/MSYS `ps` returns nothing,
+# so both would read as "no test processes running" — a FALSE ZERO on the very quantity the budget
+# exists to bound. On Windows the same two readings come from Win32_Process via one PowerShell call
+# per sample: cmdline (CommandLine), age (CreationDate) and consumed CPU
+# (UserModeTime+KernelModeTime, 100 ns units — any consistent unit works, only DELTAS are compared).
+RG_PLATFORM=other
+case "$(uname -s 2>/dev/null || true)" in
+  Linux*) RG_PLATFORM=linux ;;
+  MINGW*|MSYS*|CYGWIN*) RG_PLATFORM=windows ;;
+esac
+
+# One powershell invocation for the whole node process table. Empty output on failure ⇒ the caller
+# treats it as "no candidates", which is the same fail-open the Linux path has when `ps` fails: a
+# budget that wedges the caller is worse than a budget that under-reports.
+pb_windows_procs() {
+  # The WQL filter is written with PowerShell BACKTICK-escaped double quotes: this whole script body
+  # is a bash SINGLE-quoted string, so a single quote cannot appear in it (an earlier
+  # -Filter "Name=''node.exe''" form reached PowerShell malformed and returned zero rows silently).
+  # Filtered WQL (not Where-Object over every process) because this runs twice per budget read.
+  powershell -NoProfile -NonInteractive -WindowStyle Hidden -Command '
+    try {
+      Get-CimInstance Win32_Process -Filter "Name=`"node.exe`"" -ErrorAction Stop |
+        ForEach-Object {
+          $cmd = $_.CommandLine; if ($null -eq $cmd) { $cmd = "" }
+          $age = 0
+          try { $age = [int]((Get-Date) - $_.CreationDate).TotalSeconds } catch { }
+          "{0}`t{1}`t{2}`t{3}" -f $_.ProcessId, $age, [int64](($_.UserModeTime + $_.KernelModeTime) / 10000), ($cmd -replace "`r?`n", " ")
+        }
+    } catch { }
+  ' 2>/dev/null | tr -d '\r' || true
+}
+
 # AC99 — machine-readable interface: `--json` switches report mode to emit ONE JSON document on
 # stdout (the System view consumes it). Report-mode TEXT output is unchanged when absent.
 JSON=0
@@ -160,6 +194,12 @@ is_test_cmdline() {
 # "报 5 实 1" overcount was exactly an infra-counted-as-test miscount). Fail-open: a pid that exited
 # between the ps snapshot and classification is simply not in the snapshot — never wedges the budget.
 list_node_cmdline() {
+  if [ "$RG_PLATFORM" = "windows" ]; then
+    # Win32_Process rows are already node-only (the filter is Name='node.exe'); reshape
+    # pid/age/cputime/cmdline → pid/age/cmdline, the TSV shape the classifier reads.
+    pb_windows_procs | awk -F'\t' 'NF >= 4 { print $1 "\t" $2 "\t" $4 }' || true
+    return 0
+  fi
   ps -ww -e -o pid= -o etimes= -o args= 2>/dev/null | awk '
     {
       exe = $3
@@ -168,7 +208,7 @@ list_node_cmdline() {
         print $1 "\t" $2 "\t" cmdline
       }
     }
-  '
+  ' || true
 }
 
 # list_node_cmdline_pids — just the pids (the dual-read cmdline candidate count + callers that only
@@ -182,7 +222,10 @@ list_node_cmdline_pids() {
 # this returns 0 while cmdline sees node procs — the instrument-failure signal. "Reading the
 # relationship", not a hardcoded "correct" literal (CLAUDE.md hard rule 4 推论二).
 count_comm_node_mainthread() {
-  ps -e -o pid= -o comm= 2>/dev/null | awk '$2 == "node-MainThread" { c++ } END { print c+0 }'
+  # Windows has no `comm` (the MSYS ps that would report it returns nothing): the dual-read
+  # cross-check has no second instrument there, so report 0 and let the call site skip the check.
+  if [ "$RG_PLATFORM" = "windows" ]; then printf '0'; return 0; fi
+  ps -e -o pid= -o comm= 2>/dev/null | awk '$2 == "node-MainThread" { c++ } END { print c+0 }' || true
 }
 
 # test_candidates — enumerate the node processes that CLASSIFY as throttle-able tests, one
@@ -249,6 +292,12 @@ ts_field() {
 # readable at sample time. Pids that vanished between the ps snapshot and the sample are simply
 # absent from the output (never wedges the budget). One awk for the whole set (see CPU_TICKS_AWK).
 sample_cpu_ticks() {
+  if [ "$RG_PLATFORM" = "windows" ]; then
+    # Field 3 of pb_windows_procs is the process's consumed CPU (ms). Same shape the caller expects:
+    # "pid<TAB>ticks". The pid list on stdin is not needed — the whole table is enumerated.
+    pb_windows_procs | awk -F'\t' 'NF >= 4 { print $1 "\t" $3 }' || true
+    return 0
+  fi
   awk "${CPU_TICKS_AWK}"
 }
 
@@ -355,7 +404,10 @@ if ! [[ "${in_use}" =~ ^[0-9]+$ ]]; then in_use="$(read_test_procs)"; fi
 comm_count="${RESOURCE_GATE_TEST_COMM_COUNT:-$(count_comm_node_mainthread)}"
 cmdline_count="${RESOURCE_GATE_TEST_CMDLINE_COUNT:-$(list_node_cmdline_pids | wc -l)}"
 instrument_failure=0
-if [ "${comm_count}" -eq 0 ] && [ "${cmdline_count}" -gt 0 ]; then
+# The cross-check compares the comm literal against the cmdline enumeration. Windows has no comm at
+# all, so "comm=0 while cmdline>0" there is the platform, not an instrument failure — run the check
+# only where BOTH instruments exist (same reasoning as resource-gate.sh's dual-read line).
+if [ "$RG_PLATFORM" = "linux" ] && [ "${comm_count}" -eq 0 ] && [ "${cmdline_count}" -gt 0 ]; then
   instrument_failure=1
 fi
 

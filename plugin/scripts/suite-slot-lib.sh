@@ -103,6 +103,53 @@ suite_slot_paths() {
   done
 }
 
+# ── portable single-flight lock primitive ─────────────────────────────────────────────────────────
+# flock(1) is a Linux util-linux binary; Git Bash/MSYS does not ship it. Without a fallback the
+# acquire loop in scripts/test.sh never succeeds (`flock -n` fails ⇒ every slot looks BUSY) and the
+# waiter loop spins FOREVER — a hang, not an error. The fallback below keeps the same call shape
+# (fd + slot path) so call sites do not branch:
+#   · flock present  → behave EXACTLY as before (fd-based, auto-release on process exit);
+#   · flock absent   → directory lock (`mkdir` is atomic on NTFS and on POSIX), holder pid inside,
+#                      stale-holder reclaim after a pid-liveness check, release = rmdir.
+# ⛔ The flock path stays byte-identical in behavior; only the no-flock platform takes the new one.
+RG_HAVE_FLOCK=0
+command -v flock >/dev/null 2>&1 && RG_HAVE_FLOCK=1
+
+# suite_lock_try <fd> <slot-path> [wait-seconds] → 0 = acquired, 1 = busy
+suite_lock_try() {
+  local _fd="$1" _slot="$2" _wait="${3:-}"
+  if [ "${RG_HAVE_FLOCK}" = "1" ]; then
+    if [ -n "${_wait}" ]; then flock -w "${_wait}" "${_fd}"; else flock -n "${_fd}"; fi
+    return $?
+  fi
+  local _dir="${_slot}.d" _hp=""
+  if mkdir "${_dir}" 2>/dev/null; then
+    printf '%s\n' "$$" > "${_dir}/pid" 2>/dev/null || true
+    return 0
+  fi
+  # Stale reclaim: the recorded holder is gone (a crash cannot rmdir its own lock dir).
+  _hp="$(cat "${_dir}/pid" 2>/dev/null || true)"
+  if [ -n "${_hp}" ] && ! kill -0 "${_hp}" 2>/dev/null; then
+    rm -rf "${_dir}" 2>/dev/null || true
+    if mkdir "${_dir}" 2>/dev/null; then
+      printf '%s\n' "$$" > "${_dir}/pid" 2>/dev/null || true
+      return 0
+    fi
+  fi
+  [ -n "${_wait}" ] && sleep "${_wait}"
+  return 1
+}
+
+# suite_lock_release <fd> <slot-path> — idempotent; never removes a lock dir it cannot prove is ours.
+suite_lock_release() {
+  local _fd="$1" _slot="${2:-}" _dir=""
+  if [ "${RG_HAVE_FLOCK}" = "1" ]; then flock -u "${_fd}" 2>/dev/null || true; return 0; fi
+  [ -n "${_slot}" ] || return 0
+  _dir="${_slot}.d"
+  if [ "$(cat "${_dir}/pid" 2>/dev/null || true)" = "$$" ]; then rm -rf "${_dir}" 2>/dev/null || true; fi
+  return 0
+}
+
 # spawn_suite_lock_hold_watchdog — spawn the hold-cap watchdog (gap-suite-lock-starvation-long-
 # validation-hold AC1). Args: <held-fd> <flag-file> <main-pid> <hold-max-s> [timer-cut] [slot-path].
 # The watchdog runs as a child of the lock-HOLDING process (⛔ not an outside worker-driver kill): it
@@ -135,18 +182,18 @@ spawn_suite_lock_hold_watchdog() {
       while :; do
         sleep 1
         [ -e "${_flag}" ] || exit 0
-        kill -0 "${_main_pid}" 2>/dev/null || { flock -u "${_fd}" 2>/dev/null || true; rm -f "${_flag}"; exit 0; }
+        kill -0 "${_main_pid}" 2>/dev/null || { suite_lock_release "${_fd}" "${_slot_path:-}"; rm -f "${_flag}"; exit 0; }
       done
     fi
     _w_remaining="${_max_s}"
     while [ "${_w_remaining}" -gt 0 ]; do
       sleep 1
       [ -e "${_flag}" ] || exit 0
-      kill -0 "${_main_pid}" 2>/dev/null || { flock -u "${_fd}" 2>/dev/null || true; rm -f "${_flag}"; exit 0; }
+      kill -0 "${_main_pid}" 2>/dev/null || { suite_lock_release "${_fd}" "${_slot_path:-}"; rm -f "${_flag}"; exit 0; }
       _w_remaining=$((_w_remaining - 1))
     done
     if [ -e "${_flag}" ]; then
-      flock -u "${_fd}" 2>/dev/null || true
+      suite_lock_release "${_fd}" "${_slot_path:-}"
       rm -f "${_flag}"
       if [ -n "${_slot_path:-}" ]; then
         printf '%s' "${_main_pid}" > "${_slot_path}.yielded" 2>/dev/null || true

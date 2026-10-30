@@ -116,6 +116,7 @@ import { withServeHeapCap } from "../../packages/quay/src/serve/serve-heap-cap.t
 // `dist/start-drivers.js`. The LEAF is the established shape for a helper both sides need
 // (serve-log.ts / systemd-scope.ts / serve-heap-cap.ts), and it imports nothing.
 import { pidAlive } from "../../packages/quay/src/kernel/pid-alive.ts";
+import { withWinConsolePreload } from "./win-console.ts";
 
 const DRIVER_KINDS = ["promotion", "worker", "outer", "goal"] as const;
 // ⛔ This file declares NO web bind default — not the host, not the port
@@ -196,6 +197,12 @@ export function resolvePluginRoot(
   if (typeof fromEnv === "string" && fromEnv.trim() !== "") return path.resolve(fromEnv.trim());
   const scriptPath = scriptUrl.startsWith("file:") ? fileURLToPath(scriptUrl) : scriptUrl;
   const dir = path.dirname(path.resolve(scriptPath));
+  // Bundled layout: <plugin-root>/scripts/dist/start-drivers.js. Without this branch the root
+  // resolved to null, `resolveCliInvocation` fell through to `quay` on PATH, and a third-party
+  // project failed with `spawnSync quay ENOENT` (measured 2026-10-20).
+  if (path.basename(dir) === "dist" && path.basename(path.dirname(dir)) === "scripts") {
+    return path.dirname(path.dirname(dir));
+  }
   if (path.basename(dir) !== "scripts") return null; // not the <plugin-root>/scripts/ layout
   return path.dirname(dir);
 }
@@ -301,6 +308,28 @@ export function formatCliFailure(
   return lines.join("\n") + "\n";
 }
 
+/**
+ * Readiness window for `quay driver start`.
+ *
+ * The kernel default is 30 s. On a busy anchor that is too short: the anchor runs every kind loop
+ * in ONE process, and those loops still issue synchronous child processes (resourceGateCheck in
+ * driver-shared.ts is `spawnSync(..., { timeout: 20_000 })`, plus sync git calls), which blocks
+ * the reconcile timer that starts a newly-desired kind. Measured 2026-10-27 on Windows 10 / Node
+ * 24: `goal` was started 60.5 s after its desired-set update, so `start-drivers` reported
+ * `start-pending` and exited 1 even though all four drivers did come up. 180 s is 3x that reading.
+ */
+export const DRIVER_START_CONFIRM_TIMEOUT_SECS = 180;
+
+/** The argv for one kind's start, including the widened readiness window. */
+export function driverStartArgs(kind: string, root: string): string[] {
+  return [
+    "driver", "start",
+    "--kind", kind,
+    "--root", root,
+    "--confirm-timeout", String(DRIVER_START_CONFIRM_TIMEOUT_SECS),
+  ];
+}
+
 /** Run the resolved CLI synchronously; returns the raw spawnSync result (stdout/stderr/status). */
 export function runCli(
   inv: { argv0: string; args: string[] },
@@ -310,7 +339,9 @@ export function runCli(
   return spawnSync(inv.argv0, [...inv.args, ...cmdArgs], {
     encoding: "utf8",
     cwd: opts.cwd,
-    env: process.env,
+    // The CLI subprocess and every detached process it spawns inherit this env. On Windows the
+    // preload is what keeps the anchor's sync execFileSync/execSync from popping console windows.
+    env: withWinConsolePreload(process.env),
     timeout: opts.timeoutMs ?? 60000,
   });
 }
@@ -605,9 +636,15 @@ export async function startServe(
     launchArgv.slice(1),
     {
       detached: true,
+      windowsHide: true,
       stdio: log.stdio,
       cwd: root,
-      env: { ...process.env, NODE_OPTIONS: withServeHeapCap(process.env.NODE_OPTIONS) },
+      // Serve is detached and spawns session children of its own; the preload has to travel with
+      // it (and is composed AFTER the heap cap, so both flags survive in one NODE_OPTIONS).
+      env: withWinConsolePreload({
+        ...process.env,
+        NODE_OPTIONS: withServeHeapCap(process.env.NODE_OPTIONS),
+      }),
     },
   );
   // The child holds its own dup of the fd; release the parent's copy now (⛔ after spawn, never
@@ -806,7 +843,12 @@ async function main(argv: string[]): Promise<number> {
       if (!opts.json) process.stdout.write(`${kind}: already running (alive)\n`);
       continue;
     }
-    const start = runCli(inv, ["driver", "start", "--kind", kind, "--root", root], { cwd: root });
+    const start = runCli(inv, driverStartArgs(kind, root), {
+      cwd: root,
+      // The CLI kills itself at the confirm window; leave spawnSync headroom so its own
+      // start-pending diagnostic (not a bare SIGTERM) is what gets relayed.
+      timeoutMs: (DRIVER_START_CONFIRM_TIMEOUT_SECS + 20) * 1000,
+    });
     if (start.stdout) process.stdout.write(start.stdout);
     if (start.stderr) process.stderr.write(start.stderr);
     if (classifyCliFailure(start) !== null) {

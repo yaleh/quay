@@ -79,8 +79,21 @@ export function resourceGateCheck(root: string, cmd: string[] | null): { go: boo
   }
   let r: ReturnType<typeof spawnSync>;
   try {
+    // The gate's cost is platform-dependent: on Linux every reading is an /proc awk (≈1 s), while on
+    // Windows the same readings are WMI/CIM round-trips — measured ≈12 s unloaded and >20 s on a busy
+    // box (three CIM queries + ~25 MSYS process spawns). A fixed 20 s therefore turned a legitimate
+    // verdict into `spawnSync bash ETIMEDOUT — fail-closed`, i.e. a permanent WAIT on exactly the
+    // platform the gate had just learned to measure. 60 s default, overridable for slower hosts.
     r = spawnSync(argv[0], argv.slice(1), {
-      encoding: "utf8", timeout: 20_000, maxBuffer: 1 * 1024 * 1024, stdio: ["ignore", "pipe", "ignore"],
+      encoding: "utf8",
+      timeout: Number(process.env.QUAY_RESOURCE_GATE_TIMEOUT_MS || 60_000),
+      maxBuffer: 1 * 1024 * 1024,
+      stdio: ["ignore", "pipe", "ignore"],
+      // Belt and braces for the desktop-popup complaint: on Windows a console-subsystem child of a
+      // console-less process gets a NEW console window unless CREATE_NO_WINDOW is passed. The
+      // process-start preload (win-no-console.cjs) covers this globally; setting it here as well
+      // means the gate stays silent even if the preload is absent (e.g. an older install).
+      windowsHide: true,
     });
   } catch (e) {
     const msg = e && typeof e === "object" && "message" in e ? String(e.message) : String(e);

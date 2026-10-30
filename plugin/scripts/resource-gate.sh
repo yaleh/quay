@@ -98,6 +98,52 @@ if [ "${1:-}" = "--help" ] || [ "${1:-}" = "-h" ]; then
 fi
 set -euo pipefail
 
+# ── platform capability ────────────────────────────────────────────────────────────────────────────
+# The gate's structural signals are LINUX readings: /proc/pressure/cpu (PSI, 4.20+), `free -m`,
+# /proc/loadavg, and the `ps -ww -e -o pid= -o args=` form. On Windows (Git Bash / MSYS2) none of
+# them exist — and MSYS's /proc/loadavg is a FIXED constant (0.20), i.e. a value that reads as
+# "machine idle" no matter what the machine is doing. ⛔ Reading it would be the quietly-lying
+# instrument this gate exists to prevent. So: detect the platform, take the Windows readings from
+# Win32, and on a platform with no substitute keep the criterion NOT-APPLICABLE (reported, never
+# silently dropped) instead of manufacturing a number.
+#   uname -s: Linux | MINGW64_NT-… / MSYS_NT-… / CYGWIN_NT-… | Darwin | other
+RG_PLATFORM=other
+case "$(uname -s 2>/dev/null || true)" in
+  Linux*) RG_PLATFORM=linux ;;
+  MINGW*|MSYS*|CYGWIN*) RG_PLATFORM=windows ;;
+esac
+
+# ONE powershell invocation for the three Windows readings: available physical memory (MB), CPU
+# utilization (%) averaged over processors, node process count. Empty output on ANY failure — the
+# caller then treats the reading as unmeasurable (fail-closed), never as 0.
+rg_windows_signals() {
+  powershell -NoProfile -NonInteractive -WindowStyle Hidden -Command '
+    try {
+      $os  = Get-CimInstance Win32_OperatingSystem -ErrorAction Stop
+      $cpu = (Get-CimInstance Win32_Processor -ErrorAction Stop | Measure-Object -Property LoadPercentage -Average).Average
+      $n   = @(Get-Process -Name node -ErrorAction SilentlyContinue).Count
+      if ($null -eq $cpu) { "" } else { "{0} {1} {2}" -f [int]($os.FreePhysicalMemory/1024), [int]$cpu, $n }
+    } catch { "" }
+  ' 2>/dev/null | tr -d '\r' || true
+}
+
+# Cached once per invocation: the gate asks for cpu/mem/node several times below, and each
+# powershell spawn costs hundreds of milliseconds.
+RG_WIN_MEM=""; RG_WIN_CPU=""; RG_WIN_NODE=""
+# Skip the powershell spawn when BOTH readings it supplies are pinned by a test seam: a seam run is
+# hermetic, and paying ~1s of CIM query per gate invocation for values that will be overwritten is
+# pure latency (the shards invoke the gate dozens of times).
+if [ "$RG_PLATFORM" = "windows" ] && \
+   { [ -z "${RESOURCE_GATE_TEST_CPU_AVG10:-}" ] || [ -z "${RESOURCE_GATE_TEST_MEM_AVAIL_MB:-}" ]; }; then
+  _rg_win="$(rg_windows_signals)"
+  if [ -n "$_rg_win" ]; then
+    RG_WIN_MEM="${_rg_win%% *}"
+    _rg_win="${_rg_win#* }"
+    RG_WIN_CPU="${_rg_win%% *}"
+    RG_WIN_NODE="${_rg_win##* }"
+  fi
+fi
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 
 MODE="report"        # report | full-suite
@@ -175,9 +221,15 @@ done
 # ── readings (structural signals) ──────────────────────────────────────────────────────────────────
 
 # cpu some avg10 from /proc/pressure/cpu (line 1: some avg10=.. avg60=.. avg300=.. total=..)
+# Windows: no PSI — substitute Win32_Processor LoadPercentage (UTILIZATION, not stall time; the
+# substitution is reported on the `platform=` line and in the JSON `cpu_signal` field, never silent).
+# The `|| true` is load-bearing: under `set -e` an awk failure (missing PSI on a Linux kernel <4.20)
+# used to KILL the script before it reached its own fail-closed branch, so the caller saw a bare
+# "awk: fatal: cannot open file /proc/pressure/cpu" and exit 2 with no verdict/reason at all.
 read_cpu_avg10() {
+  if [ "$RG_PLATFORM" = "windows" ]; then printf '%s' "$RG_WIN_CPU"; return 0; fi
   awk 'NR==1{for(i=1;i<=NF;i++){if($i ~ /^avg10=/){sub(/^avg10=/,"",$i); print $i; exit}}}' \
-    /proc/pressure/cpu
+    /proc/pressure/cpu 2>/dev/null || true
 }
 
 # cpu some avg300 from /proc/pressure/cpu (5-minute window — the ADAPTIVE-CONCURRENCY signal;
@@ -185,18 +237,23 @@ read_cpu_avg10() {
 # (25-min tick / 15-90-min subagents), avg10 (10s) is 1-2 orders of magnitude faster than the
 # actuator and would react to jitter that dispatch cannot track). Same parse as avg10, different field.
 read_cpu_avg300() {
+  if [ "$RG_PLATFORM" = "windows" ]; then printf '%s' "$RG_WIN_CPU"; return 0; fi
   awk 'NR==1{for(i=1;i<=NF;i++){if($i ~ /^avg300=/){sub(/^avg300=/,"",$i); print $i; exit}}}' \
-    /proc/pressure/cpu
+    /proc/pressure/cpu 2>/dev/null || true
 }
 
 # mem available in MB (the `available` column of `free -m`, NOT the `free` column — AC contract).
+# Windows: `free` does not exist; Win32_OperatingSystem.FreePhysicalMemory (MB) is the substitute —
+# note it is free physical, not "available" (no reclaimable-cache estimate), so it reads LOWER than
+# Linux's available; the gate errs toward WAIT, never toward GO.
 read_mem_avail_mb() {
-  free -m | awk 'NR==2{print $7}'
+  if [ "$RG_PLATFORM" = "windows" ]; then printf '%s' "$RG_WIN_MEM"; return 0; fi
+  free -m 2>/dev/null | awk 'NR==2{print $7}' || true
 }
 
 # swap total in kB (0 ⇒ no degradation ramp; OOM is a cliff).
 read_swap_kb() {
-  awk '/^SwapTotal:/{print $2}' /proc/meminfo
+  awk '/^SwapTotal:/{print $2}' /proc/meminfo 2>/dev/null || true
 }
 
 # 1-minute load average from /proc/loadavg (field 1) — the OVERLOAD-WINDOW supplementary signal
@@ -204,7 +261,12 @@ read_swap_kb() {
 # load average counts runnable + uninterruptible tasks — it includes I/O wait and the loop's own
 # claude sessions, the quantities that tracked the red rounds (load 6.4/6.04/11.76 while PSI 8-10).
 read_loadavg() {
-  awk '{print $1}' /proc/loadavg
+  # Windows/macOS: no native load average. MSYS DOES expose /proc/loadavg, but it is a FIXED
+  # constant (measured 0.20 0.20 0.20 on an idle box and on a loaded one) — reading it would make
+  # the overload-window criterion permanently "ok". Return EMPTY so the verdict block reports the
+  # criterion as unavailable(platform) instead of manufacturing a number.
+  if [ "$RG_PLATFORM" != "linux" ]; then return 0; fi
+  awk '{print $1}' /proc/loadavg 2>/dev/null || true
 }
 
 # Instantaneous run-queue components from /proc/stat — `procs_running` (R: running + runnable) and
@@ -231,6 +293,10 @@ read_loadavg() {
 # survives ONLY as the dual-read self-check cross-count (count_comm_node_mainthread). Fail-open: a
 # pid that exited between the ps snapshot and use is simply not in the snapshot.
 list_node_cmdline() {
+  # `ps` itself is not guaranteed: under MSYS it exits non-zero for these flags — and it is slow
+  # there too (it maps the whole Windows process table, seconds per call) while returning NOTHING.
+  # Skip it on Windows: the real count comes from Get-Process (read_node_procs below).
+  if [ "$RG_PLATFORM" = "windows" ]; then return 0; fi
   ps -ww -e -o pid= -o args= 2>/dev/null | awk '
     {
       exe = $2
@@ -239,7 +305,7 @@ list_node_cmdline() {
         print $1 "\t" cmdline
       }
     }
-  '
+  ' || true
 }
 
 list_node_cmdline_pids() {
@@ -251,7 +317,8 @@ list_node_cmdline_pids() {
 # this returns 0 while cmdline sees node procs — the instrument-failure signal. "Reading the
 # relationship", not a hardcoded "correct" literal (CLAUDE.md hard rule 4 推论二).
 count_comm_node_mainthread() {
-  ps -e -o pid= -o comm= 2>/dev/null | awk '$2 == "node-MainThread" { c++ } END { print c+0 }'
+  if [ "$RG_PLATFORM" = "windows" ]; then printf '0'; return 0; fi
+  ps -e -o pid= -o comm= 2>/dev/null | awk '$2 == "node-MainThread" { c++ } END { print c+0 }' || true
 }
 
 # real node process count — CMDLINE-based enumeration (host-independent, AC2). The old
@@ -259,6 +326,10 @@ count_comm_node_mainthread() {
 # ⇒ 恒 0) — gap-node-mainthread-comm-literal-host-dependent. The comm literal survives only as the
 # dual-read self-check cross-count.
 read_node_procs() {
+  # Windows: `ps -ww -e -o pid= -o args=` returns NOTHING under MSYS (measured 2026-10-28), so the
+  # cmdline enumeration cannot see a single node process. Use the same cached powershell count that
+  # the memory/CPU readings come from (Get-Process node), which IS the real process table on Windows.
+  if [ "$RG_PLATFORM" = "windows" ]; then printf '%s' "$RG_WIN_NODE"; return 0; fi
   list_node_cmdline_pids | wc -l
 }
 
@@ -268,6 +339,9 @@ read_node_procs() {
 # pid+ppid; readlink /proc/<pid>/cwd runs ONLY for the ppid=1 candidates (not every node pid).
 read_orphans() {
   local pid ppid cwd
+  # Same reasoning as list_node_cmdline: MSYS `ps` cannot see node processes here, so the orphan
+  # scan has no candidates to find — returning early is both correct and ~seconds faster.
+  if [ "$RG_PLATFORM" = "windows" ]; then return 0; fi
   while IFS=' ' read -r pid ppid; do
     [ -n "${pid:-}" ] || continue
     [ "${ppid:-}" = "1" ] || continue
@@ -343,6 +417,21 @@ read_worktree_node_tests() {
 
 # ── apply readings (test-seam overrides honored) ───────────────────────────────────────────────────
 cpu_stall="${RESOURCE_GATE_TEST_CPU_AVG10:-$(read_cpu_avg10)}"
+# Which QUANTITY is in `cpu_stall` — and therefore which limit it is compared against. PSI
+# `some avg10` (Linux) is "fraction of the last 10s a task was runnable-but-stalled"; 60 there means
+# a genuinely CPU-starved box. Win32 LoadPercentage (Windows) is plain UTILIZATION, where an
+# ordinary busy desktop sits at 40-70% — reusing 60 would WAIT on an idle-ish machine and never
+# dispatch. So the default limit follows the reading's UNIT, not the host's name:
+#   · the Windows reader ran (no seam)        → utilization → 90
+#   · a test seam supplied a PSI-shaped value → PSI        → 60 (unchanged; the shards pin that band)
+# `RESOURCE_GATE_CPU_LIMIT` still overrides both explicitly.
+cpu_signal_kind="psi"
+if [ "$RG_PLATFORM" = "windows" ] && [ -z "${RESOURCE_GATE_TEST_CPU_AVG10:-}" ]; then
+  cpu_signal_kind="utilization"
+  if [ -z "${RESOURCE_GATE_CPU_LIMIT:-}" ]; then
+    CPU_LIMIT="${RESOURCE_GATE_WIN_CPU_LIMIT:-90}"
+  fi
+fi
 # avg300 — the adaptive-concurrency signal (AC2). Its own test seam so cap-from-gate can be
 # driven deterministically WITHOUT disturbing the avg10 verdict the gate's own GO/WAIT uses.
 cpu_stall_avg300="${RESOURCE_GATE_TEST_CPU_AVG300:-$(read_cpu_avg300)}"
@@ -445,7 +534,18 @@ fi
 # PSI some avg10 is still below the CPU limit (round-232: load 11.76 / nproc 4, PSI 8.27 < 60, old
 # gate GO). Unmeasurable load fails closed (same reasoning as the CPU guard).
 load_wait=0
-if [ -z "${load_avg}" ] || ! awk -v v="$load_avg" 'BEGIN{exit !(v ~ /^[0-9]+(\.[0-9]+)?$/)}'; then
+load_applicable=1
+# A platform that has no load average (Windows/macOS) makes this criterion NOT-APPLICABLE rather
+# than UNMEASURABLE: "the host does not have this quantity" and "we failed to read a quantity the
+# host does have" are different readings, and only the second one is a fail-closed condition
+# (硬规则 3b). The test seam still wins — `RESOURCE_GATE_TEST_LOAD_OVERRIDE=unmeasurable` keeps
+# simulating the unreadable-signal case on every platform.
+if [ "$RG_PLATFORM" != "linux" ] && [ -z "${RESOURCE_GATE_TEST_LOAD_OVERRIDE:-}" ]; then
+  load_applicable=0
+fi
+if [ "$load_applicable" = "0" ]; then
+  load_avg="UNAVAILABLE(platform)"
+elif [ -z "${load_avg}" ] || ! awk -v v="$load_avg" 'BEGIN{exit !(v ~ /^[0-9]+(\.[0-9]+)?$/)}'; then
   load_avg="UNMEASURABLE"
   load_wait=1
 elif awk -v v="$load_avg" -v n="$nproc_before" -v f="$LOAD_OVER_FACTOR" 'BEGIN{exit !(v >= n*f)}'; then
@@ -495,16 +595,25 @@ if [ "$priority_override" = "1" ]; then
 elif [ "$cpu_wait" = 1 ] && [ "$mem_wait" = 1 ]; then
   VERDICT="WAIT"
   if [ "$cpu_stall" = "UNMEASURABLE" ]; then
-    REASON='=> WAIT: 无法读取 /proc/pressure/cpu（内核无 PSI?）且内存不足——结构信号缺失时 fail-closed'
+    if [ "$RG_PLATFORM" = "linux" ]; then
+      REASON='=> WAIT: 无法读取 /proc/pressure/cpu（内核无 PSI?）且内存不足——结构信号缺失时 fail-closed'
+    else
+      REASON='=> WAIT: 本平台无可用 CPU 读数（Windows 需 powershell + Win32_Processor 可读）且内存不足——结构信号缺失时 fail-closed'
+    fi
   else
     REASON='=> WAIT: CPU 饥饿 且 内存不足。重型测试在此负载下会超时（实测 48.8s vs 隔离 2.0s），OOM 无降级段'
   fi
 elif [ "$cpu_wait" = 1 ]; then
   VERDICT="WAIT"
   if [ "$cpu_stall" = "UNMEASURABLE" ]; then
-    REASON='=> WAIT: 无法读取 /proc/pressure/cpu（内核无 PSI?）——结构信号缺失时必须 fail-closed'
+    if [ "$RG_PLATFORM" = "linux" ]; then
+      REASON='=> WAIT: 无法读取 /proc/pressure/cpu（内核无 PSI?）——结构信号缺失时必须 fail-closed'
+    else
+      REASON='=> WAIT: 本平台无可用 CPU 读数（Windows 需 powershell + Win32_Processor 可读）——结构信号缺失时必须 fail-closed'
+    fi
   else
-    printf -v REASON '=> WAIT: CPU 饥饿（some avg10 >= %s）。重型测试在此负载下会超时（实测 48.8s vs 隔离 2.0s）' "$CPU_LIMIT"
+    printf -v REASON '=> WAIT: CPU 饥饿（%s >= %s）。重型测试在此负载下会超时（实测 48.8s vs 隔离 2.0s）' \
+      "$([ "$cpu_signal_kind" = "psi" ] && echo "some avg10" || echo "utilization%")" "$CPU_LIMIT"
   fi
 elif [ "$mem_wait" = 1 ]; then
   VERDICT="WAIT"
@@ -530,7 +639,17 @@ fi
 # from the shared authority (process-budget.sh, same script test.sh/cap-from-gate read). A worktree
 # caller sees total_budget / budget_in_use / budget_available — the numbers that bound EVERY layer's
 # concurrency — instead of this gate's single-machine node_procs read alone. Shared by text + JSON.
-budget_report="$(bash "${SCRIPT_DIR}/process-budget.sh" 2>/dev/null || true)"
+# Windows: process-budget costs two full CIM enumerations (~25 s measured under load, because its
+# liveness axis takes two CPU-time samples). The driver's spawn timeout for this gate is 20 s, and
+# NOTHING in the verdict reads the budget — so on a real Windows run the subprocess is skipped and
+# the three fields report `unreadable` (honest: "not read", never a fabricated 0). A seam-driven run
+# IS hermetic and latency-insensitive, so it still calls process-budget and gets real numbers.
+if [ "$RG_PLATFORM" = "windows" ] && \
+   [ -z "${RESOURCE_GATE_TEST_NPROC:-}" ] && [ -z "${RESOURCE_GATE_TEST_NODE_PROCS:-}" ]; then
+  budget_report=""
+else
+  budget_report="$(bash "${SCRIPT_DIR}/process-budget.sh" 2>/dev/null || true)"
+fi
 budget_total="$(printf '%s\n' "${budget_report}" | sed -n 's/^total_budget=//p')"
 budget_in_use="$(printf '%s\n' "${budget_report}" | sed -n 's/^in_use=//p')"
 budget_available="$(printf '%s\n' "${budget_report}" | sed -n 's/^available=//p')"
@@ -549,7 +668,8 @@ if [ "$JSON" = "1" ]; then
   RG_WORKTREE_NODE_TESTS="$worktree_node_tests" RG_CALLER_SCOPE="$caller_scope" \
   RG_ORPHANS="${orphan_list:-}" RG_PRIORITY_OVERRIDE="${priority_override:-0}" \
   RG_CPU_WAIT="${cpu_wait:-0}" RG_MEM_WAIT="${mem_wait:-0}" RG_LOAD_WAIT="${load_wait:-0}" \
-  RG_VERDICT="$VERDICT" RG_REASON="$REASON" python3 - <<'PYEOF'
+  RG_PLATFORM="$RG_PLATFORM" RG_LOAD_APPLICABLE="$load_applicable" RG_CPU_SIGNAL="$cpu_signal_kind" \
+  RG_VERDICT="$VERDICT" RG_REASON="$REASON" PYTHONUTF8=1 python3 - <<'PYEOF'
 import json, os
 def num(v):
     if v is None or v == "" or v == "UNMEASURABLE": return None
@@ -564,6 +684,13 @@ if os.environ.get("RG_INSTRUMENT_FAILURE") == "1":
     note = ("comm 字面量 node-MainThread 恒 0 但 cmdline 见 %s 个 node 进程 —— comm 是宿主/Node 版本相关的（本机 comm 为 MainThread）; 读数以 cmdline 为准，勿按 comm 判空" % os.environ.get("RG_CMDLINE_COUNT", "?"))
 orphans = [o for o in os.environ.get("RG_ORPHANS", "").replace(";", "\n").split("\n") if o.strip()]
 print(json.dumps({
+    # Which host platform produced these readings, and which signal backs cpu_stall. On Linux it is
+    # PSI `some avg10` (stall time %); on Windows it is Win32_Processor LoadPercentage (utilization
+    # %) — a DIFFERENT quantity behind the same limit, so a reader must be able to tell them apart.
+    "platform": os.environ.get("RG_PLATFORM"),
+    "cpu_signal": os.environ.get("RG_CPU_SIGNAL") or {"linux": "psi", "windows": "utilization"}.get(os.environ.get("RG_PLATFORM"), "none"),
+    # 0 ⇒ this host has no load-average quantity at all (loadavg is null by design, not unreadable).
+    "load_applicable": num_int(os.environ.get("RG_LOAD_APPLICABLE")),
     "cpu_stall_avg10": num(os.environ.get("RG_CPU_STALL")),
     "cpu_stall_avg300": num(os.environ.get("RG_CPU_STALL_AVG300")),
     "cpu_limit": num(os.environ.get("RG_CPU_LIMIT")),
@@ -621,9 +748,23 @@ printf 'mem_avail=%sMB             [limit %s] %s\n' \
 load_threshold="$(awk -v n="$nproc_before" -v f="$LOAD_OVER_FACTOR" 'BEGIN{printf "%.0f", n*f}')"
 if [ "$load_avg" = "UNMEASURABLE" ]; then
   printf 'loadavg=%s             [limit nproc×%s≈%s] %s\n' "$load_avg" "$LOAD_OVER_FACTOR" "$load_threshold" "WAIT"
+elif [ "$load_applicable" = "0" ]; then
+  # NOT a WAIT and NOT an "ok": the host has no load-average quantity at all. Say so — a line that
+  # printed "ok" here would read as "the machine is idle", which is exactly what this gate must not
+  # pretend to know (Windows/MSYS's /proc/loadavg is a fixed 0.20).
+  printf 'loadavg=%s             [limit nproc×%s≈%s] n/a\n' "$load_avg" "$LOAD_OVER_FACTOR" "$load_threshold"
 else
   printf 'loadavg=%.2f             [limit nproc×%s≈%s] %s\n' \
     "$load_avg" "$LOAD_OVER_FACTOR" "$load_threshold" "$([ "$load_wait" = 1 ] && echo WAIT || echo ok)"
+fi
+# Platform line — printed ONLY when the platform is not Linux, so Linux text output stays
+# byte-identical. It names the substitutions in force (hard rule 3b: a substituted signal must be
+# readable as a substitution, never pass as the original).
+if [ "$RG_PLATFORM" != "linux" ]; then
+  printf 'platform=%s  cpu_stall source=%s  loadavg=unavailable  mem source=%s\n' \
+    "$RG_PLATFORM" \
+    "$([ "$cpu_signal_kind" = "utilization" ] && echo "Win32_Processor.LoadPercentage(utilization%, NOT PSI)" || echo "none")" \
+    "$([ "$RG_PLATFORM" = "windows" ] && echo "Win32_OperatingSystem.FreePhysicalMemory" || echo "none")"
 fi
 printf 'nproc=%s  node_procs=%s  %s  [nproc-invariant %s]\n' \
   "$nproc_before" "$node_procs" "$swap_label" "$nproc_invariant"
@@ -632,8 +773,16 @@ printf 'nproc=%s  node_procs=%s  %s  [nproc-invariant %s]\n' \
 # unlike the cpu_stall/mem_avail/loadavg lines it carries NO WAIT/ok marker, and nothing below reads
 # it — the verdict and the exit code are computed without these values (AC2's negative control).
 printf 'runq(R+D)=%s  procs_running=%s  procs_blocked=%s   [instantaneous /proc/stat; informational — no verdict]\n' "$runq" "$procs_running" "$procs_blocked"
-printf 'node_comm_mainthread=%s  node_cmdline_procs=%s  [dual-read self-check: %s]\n' \
-  "$comm_count" "$cmdline_count" "$([ "${instrument_failure}" = "1" ] && echo INSTRUMENT-FAILURE || echo ok)"
+if [ "$RG_PLATFORM" = "windows" ] && [ -z "${RESOURCE_GATE_TEST_COMM_COUNT:-}" ] && [ -z "${RESOURCE_GATE_TEST_CMDLINE_COUNT:-}" ]; then
+  # The dual-read self-check compares `ps -o comm=` against `ps -o args=`. Neither exists under MSYS
+  # (both return nothing), so "0 vs 0" would print `ok` — a PASS derived from an instrument that is
+  # not running. Say so instead; node_procs above comes from Get-Process and is the real count.
+  # An explicit seam override still wins: that is a simulation, and its caller expects the line.
+  printf 'node_comm_mainthread=n/a  node_cmdline_procs=n/a  [dual-read unavailable on this platform; node_procs from Get-Process]\n'
+else
+  printf 'node_comm_mainthread=%s  node_cmdline_procs=%s  [dual-read self-check: %s]\n' \
+    "$comm_count" "$cmdline_count" "$([ "${instrument_failure}" = "1" ] && echo INSTRUMENT-FAILURE || echo ok)"
+fi
 if [ "${instrument_failure}" = "1" ]; then
   printf 'instrument_failure: comm 字面量 node-MainThread 恒 0 但 cmdline 见 %s 个 node 进程 —— comm 是宿主/Node 版本相关的（本机 comm=MainThread）; 读数以 cmdline 为准，勿按 comm 判空\n' "$cmdline_count"
 fi
@@ -671,7 +820,22 @@ if [ "$mem_wait" = 1 ] && [ "$MODE" = "full-suite" ]; then
   # AC6: when memory is short, refuse the full suite AND print the current top-5 RSS processes —
   # the OOM killer picks the biggest, which is usually the inner/outer session itself.
   echo "== RSS top-5 (AC6: OOM killer 的目标 — claude 会话 RSS 424-793MB) =="
-  ps -eo pid,ppid,rss,comm --sort=-rss 2>/dev/null | head -6
+  if [ "$RG_PLATFORM" = "windows" ]; then
+    # Windows has no `ps -eo pid,ppid,rss,comm`; the same four columns come from Win32_Process.
+    # Header printed with ps's own column names so the listing stays a drop-in for existing readers
+    # (and so "the listing actually ran" is still assertable on this platform).
+    printf '%-8s %-8s %-9s %s\n' PID PPID RSS COMMAND
+    powershell -NoProfile -NonInteractive -WindowStyle Hidden -Command '
+      try {
+        Get-CimInstance Win32_Process -ErrorAction Stop |
+          Sort-Object WorkingSetSize -Descending |
+          Select-Object -First 5 |
+          ForEach-Object { "{0} {1} {2} {3}" -f $_.ProcessId, $_.ParentProcessId, [int]($_.WorkingSetSize / 1024), $_.Name }
+      } catch { }
+    ' 2>/dev/null | tr -d '\r' || true
+  else
+    ps -eo pid,ppid,rss,comm --sort=-rss 2>/dev/null | head -6 || true
+  fi
 fi
 fi  # end else (text mode); --json branch emitted above
 

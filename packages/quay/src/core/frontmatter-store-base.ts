@@ -16,7 +16,7 @@ import fs from "node:fs";
 import path from "node:path";
 import YAML from "yaml";
 
-const FRONTMATTER_RE = /^---\n([\s\S]*?)\n---\n?([\s\S]*)$/;
+const FRONTMATTER_RE = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/;
 
 /**
  * Parse a raw file's `---\n<yaml>\n---\n<body>` shape.
