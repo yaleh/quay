@@ -38,12 +38,14 @@ extract
 - recorded_at: 2026-10-30T23:08:29.530Z
 
 ## AC
-- [ ] `.quay/routine-findings.jsonl` 中 finding `read-file-or-empty`（routine `semantic-dedup-scan`，runId `semantic-dedup-scan-1793401709530`）所描述的问题被复核并处置
-- [ ] 处置结论可核：要么修掉，要么写明「已有机制在管、失败在哪一步」，⛔ 不以「已注意到」结案
+- [x] `.quay/routine-findings.jsonl` 中 finding `read-file-or-empty`（routine `semantic-dedup-scan`，runId `semantic-dedup-scan-1793401709530`）所描述的问题被复核并处置
+- [x] 处置结论可核：要么修掉，要么写明「已有机制在管、失败在哪一步」，⛔ 不以「已注意到」结案
 
 ## DoD
-- [ ] 上面的判据实跑通过
-- [ ] ⛔ 探针只立案不执行：本任务若需要跑产出者/修复，由派发链执行，⛔ 不由例程代跑
+- [x] 上面的判据实跑通过
+- [x] ⛔ 探针只立案不执行：本任务若需要跑产出者/修复，由派发链执行，⛔ 不由例程代跑
+
+该轴仍暗,理由: 本任务为机械去重提取（两处私有 readFileOrEmpty/readFile 副本改走 gate-script-base.ts 的 readFileSafe），未产生依赖/分层结构变更，故未取架构轴读数。
 
 ## Touches
 - `plugin/scripts/arch-coverage-report.ts`
