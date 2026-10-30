@@ -6,7 +6,7 @@
  * ── THE JUDGMENT CHANGED (tasks/gap-version-single-source-root-file-and-resolver, 2026-09-20) ────
  * Was: `every carrier carries the identical version string` (internal consistency).
  * Is:  `every carrier == resolveVersion(VERSION, 'tracked')` (single source).
- * So EVERY fixture below must now carry a `VERSION` file as well as the 15 carriers: a fixture with
+ * So EVERY fixture below must now carry a `VERSION` file as well as the 14 carriers: a fixture with
  * no source is not a "green tree with a missing detail", it is a tree the checker cannot judge at all
  * (mode:'error') — and a test suite that kept the old fixtures would be asserting the OLD judgment.
  * The two cases under "the single source is the judgment" are the load-bearing new ones: they pin the
