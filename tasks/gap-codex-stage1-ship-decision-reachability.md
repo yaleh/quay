@@ -2,7 +2,7 @@
 id: gap-codex-stage1-ship-decision-reachability
 title: codex-stage1 spawn-verify/selfcheck ship
   决策成文：shipped-shell-reachability.ts 记录 dev-tree-only 边界 + 产物一致性测试
-status: ready
+status: done
 labels:
   - gap
   - codex
