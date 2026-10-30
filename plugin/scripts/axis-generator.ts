@@ -52,6 +52,7 @@ import { fileURLToPath } from "node:url";
 // The registry's location has ONE owner (select-static-checks-for-touches.ts's REGISTRY_REL_CANDIDATES,
 // derived from REGISTRY_BASENAME). Read it, ⛔ never re-spell the literal here (hard rule 5b).
 import { REGISTRY_REL_CANDIDATES } from "./select-static-checks-for-touches.ts";
+import { readFileSafe } from "./gate-script-base.ts";
 
 export const AXES = ["time", "scope", "layer", "instance", "cost"];
 
@@ -124,18 +125,9 @@ export function classifyRange(criterion) {
 
 // ── Repository standing-criteria enumeration (AC1: systematic, not hand-listed) ────────────────────
 
-
-function readFile(p) {
-  try {
-    return fs.readFileSync(p, "utf8");
-  } catch {
-    return "";
-  }
-}
-
 /** Read a script's leading comment block (the `//` or `#` header) as its prose description. */
 export function readHeaderComment(filePath) {
-  const text = readFile(filePath);
+  const text = readFileSafe(filePath);
   if (!text) return "";
   const commentChars = filePath.endsWith(".sh") ? "#" : "//";
   const lines = text.split(/\r?\n/).slice(0, 60);
@@ -183,7 +175,7 @@ export function extractFunctionBody(text, name) {
 
 /** Gates from .quay/config.yml's `gates:` block (it0 / adr / fixed / testPass sections). */
 export function enumerateGates(root) {
-  const config = readFile(path.join(root, ".quay", "config.yml"));
+  const config = readFileSafe(path.join(root, ".quay", "config.yml"));
   const gates = [];
   const lines = config.split(/\r?\n/);
   let inGates = false;
@@ -219,7 +211,7 @@ export function enumerateGates(root) {
 
 /** Static checkers from runner-static-gate.ts's run_static_checks + CI workflows (same mechanical source as checker-mutation-check.ts's manifest parse — run_static_checks moved OUT of scripts/test.sh, gap-ac128-hub-split-harness-concerns). */
 export function enumerateStaticCheckers(root) {
-  const staticGate = readFile(path.join(root, REGISTRY_REL_CANDIDATES[0]));  // kernel-sibling-dev-tree-only: dev-tree-only — repo-local plugin/scripts use, not third-party sibling resolution.
+  const staticGate = readFileSafe(path.join(root, REGISTRY_REL_CANDIDATES[0]));  // kernel-sibling-dev-tree-only: dev-tree-only — repo-local plugin/scripts use, not third-party sibling resolution.
   const names = new Set();
   for (const m of extractFunctionBody(staticGate, "run_static_checks").matchAll(/\$\{repo_root\}\/plugin\/scripts\/([A-Za-z0-9_.-]+)\.(?:sh|ts)/g)) {
     names.add(m[1]);
@@ -227,7 +219,7 @@ export function enumerateStaticCheckers(root) {
   const wfDir = path.join(root, ".github", "workflows");
   if (fs.existsSync(wfDir)) {
     for (const f of fs.readdirSync(wfDir).filter((f) => f.endsWith(".yml") || f.endsWith(".yaml"))) {
-      for (const m of readFile(path.join(wfDir, f)).matchAll(/node (?:--[a-z-]+ )*scripts\/([A-Za-z0-9_.-]+)\.ts/g)) {
+      for (const m of readFileSafe(path.join(wfDir, f)).matchAll(/node (?:--[a-z-]+ )*scripts\/([A-Za-z0-9_.-]+)\.ts/g)) {
         names.add(m[1]);
       }
     }
@@ -420,7 +412,7 @@ function main(argv) {
       usage();
       process.exit(2);
     }
-    const fixture = JSON.parse(readFile(path.resolve(file)));
+    const fixture = JSON.parse(readFileSafe(path.resolve(file)));
     const report = fixture.map((c) => classifyRange(c));
     console.log(JSON.stringify(report, null, 2));
     process.exit(0);
