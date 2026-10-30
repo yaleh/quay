@@ -11,18 +11,6 @@ parent: null
 children: []
 extra: {}
 ---
----
-id: gap-run-static-checks-parallelize-boheidc
-title: "杠杆③：scripts/test.sh:225 run_static_checks() 并行化（~20+ 个独立只读检查器逐行顺序执行，boheidc 多核未兑现核数优势；零风险独立于死锁）"
-status: superseded
-role: primitive
-labels:
-  - gap
-  - defect
-  - suite-optimization
-extra:
-  schema: v1
----
 
 **type:** execution
 

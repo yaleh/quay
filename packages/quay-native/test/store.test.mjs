@@ -343,6 +343,45 @@ test("AC5: real-store scan — 0 parse failures; hazardous titles read back unch
   }
 });
 
+// ── gap-task-write-duplicates-frontmatter: a body that already carries a frontmatter block ──────
+
+test("AC4: body containing a full frontmatter block does not produce a second one", () => {
+  const { store, tasksDir } = makeStore();
+  try {
+    // The corruption the task diagnosed: a caller passes the ENTIRE previous
+    // file content (frontmatter included) as `body`. Pre-fix serialize() would
+    // emit `---\n<new fm>\n---\n---\n<old fm>\n---\n…` — two `^id:`/`^status:`
+    // lines and two contradictory statuses for a grep-based board.
+    const staleBodyFrontmatter =
+      "---\n" +
+      "id: DBL\n" +
+      "status: ready\n" +
+      "labels:\n  - stale\n" +
+      "parent: null\n" +
+      "children: []\n" +
+      "---\n";
+    const body = `${staleBodyFrontmatter}## Proposal\n\nbody survived the strip, stale frontmatter did not\n`;
+
+    const written = store.write("DBL", { title: "dup frontmatter", status: "done", body });
+    assert.ok(written, "write returns the task view model");
+
+    const raw = fs.readFileSync(path.join(tasksDir, "DBL.md"), "utf8");
+    const idCount = (raw.match(/^id: /gm) || []).length;
+    const statusCount = (raw.match(/^status: /gm) || []).length;
+    assert.equal(idCount, 1, `exactly one ^id: line; got ${idCount}\n${raw}`);
+    assert.equal(statusCount, 1, `exactly one ^status: line; got ${statusCount}\n${raw}`);
+
+    // The written status must be the one the caller supplied, not the stale
+    // value carried inside the body's own frontmatter block.
+    const got = store.get("DBL");
+    assert.equal(got?.status, "done", "status is the written value, not the body's stale 'ready'");
+    assert.ok(got.body.includes("body survived the strip"), "real body content is preserved");
+    assert.ok(!raw.includes("status: ready"), "the stale body frontmatter's status was stripped, not re-inserted");
+  } finally {
+    fs.rmSync(tasksDir, { recursive: true, force: true });
+  }
+});
+
 // ── gap-abi-missing-commit-delete-dependson-primitives: commit-after-write + task_delete ─────────
 
 function git(root, ...args) {

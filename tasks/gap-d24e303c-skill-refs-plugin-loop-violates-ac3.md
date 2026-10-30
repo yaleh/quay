@@ -12,18 +12,6 @@ parent: null
 children: []
 extra: {}
 ---
----
-id: gap-d24e303c-skill-refs-plugin-loop-violates-ac3
-title: "d24e303c 把 skills/{init,manager}/SKILL.md 的 manager-loop-tick 引用从 orchestration/ 改成 plugin/loop/，破坏 quay-init-loop-consumer-doc-refs AC3（shipped docs/skills 必须零 plugin/loop/ 引用）——红窗真失败"
-status: superseded
-role: primitive
-labels:
-  - gap
-  - defect
-  - red-window
-extra:
-  schema: v1
----
 
 **type:** defect
 

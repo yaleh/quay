@@ -550,9 +550,24 @@ export function createStore(tasksDir: string, opts?: { defaultStatus?: string })
    * after every write it re-parses the file and fails closed (rollback) on any
    * string scalar that does not round-trip byte-identically.
    */
+  /**
+   * gap-task-write-duplicates-frontmatter: strip a LEADING `---…---` frontmatter
+   * block from a body before it is concatenated after the freshly-serialized
+   * frontmatter. A caller that passes the entire previous file content (or a
+   * copy of its own frontmatter) as `body` used to make serialize() emit
+   * `---\n<new fm>\n---\n---\n<old fm>\n---\n…` — two frontmatter blocks, two
+   * `^id:` / `^status:` lines, two contradictory statuses for a grep-based
+   * board. This is the mirror of parse(): parse() splits one leading block off,
+   * serialize() must therefore never leave one inside the body it re-joins.
+   */
+  function stripLeadingFrontmatter(body) {
+    const m = FRONTMATTER_RE.exec(body);
+    return m ? (m[2] ?? "") : body;
+  }
+
   function serialize(frontmatter, body) {
     const fm = YAML.stringify(frontmatter).trimEnd();
-    return `---\n${fm}\n---\n${body}`;
+    return `---\n${fm}\n---\n${stripLeadingFrontmatter(body)}`;
   }
 
   // gap-task-list-route-is-linear-in-task-count: mtime-keyed parse cache.

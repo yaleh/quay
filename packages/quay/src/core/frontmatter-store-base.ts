@@ -30,13 +30,30 @@ export function parseFrontmatter(raw) {
 }
 
 /**
+ * gap-task-write-duplicates-frontmatter: strip a LEADING `---…---` frontmatter
+ * block from `body` before re-joining it with the freshly-serialized
+ * frontmatter. The same defect the native task store's serialize() had: a body
+ * that already carries a frontmatter block (the entire previous file content,
+ * or a copy of its own frontmatter) would otherwise produce two frontmatter
+ * blocks back-to-back — two `^id:`/`^status:` lines, two contradictory
+ * statuses. Mirror of parseFrontmatter(): whatever that parse splits off at the
+ * head must never be re-inserted here.
+ * @param {string} body
+ * @returns {string}
+ */
+export function stripLeadingFrontmatter(body) {
+  const m = FRONTMATTER_RE.exec(body);
+  return m ? (m[2] ?? "") : body;
+}
+
+/**
  * Serialize frontmatter + body back to the `---\n<yaml>\n---\n<body>` shape.
  * @param {object} frontmatter
  * @param {string} body
  * @returns {string}
  */
 export function serializeFrontmatter(frontmatter, body) {
-  return `---\n${YAML.stringify(frontmatter).trimEnd()}\n---\n${body}`;
+  return `---\n${YAML.stringify(frontmatter).trimEnd()}\n---\n${stripLeadingFrontmatter(body)}`;
 }
 
 /**

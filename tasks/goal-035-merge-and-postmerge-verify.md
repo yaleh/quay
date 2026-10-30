@@ -13,21 +13,6 @@ depends_on:
   - goal-035-needs-human-transition-contract-tests
 goal_ac: AC-358
 ---
----
-id: goal-035-merge-and-postmerge-verify
-title: GOAL-035 ③：合并请求 + 机械 fan-in + 并入形态与落地树核验（AC-358，post-merge）
-status: ready
-labels:
-  - gap
-parent: null
-children: []
-extra:
-  schema: execution
-depends_on:
-  - goal-035-needs-human-transition-unify
-  - goal-035-needs-human-transition-contract-tests
-goal_ac: AC-358
----
 **type:** execution
 
 ## Proposal
