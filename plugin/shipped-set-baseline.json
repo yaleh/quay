@@ -312,6 +312,30 @@
         "shLines": 7415
       },
       "why": "GOAL-913 Codex 可安装宿主：.codex-plugin/plugin.json + init 落盘三件套使 shipped files +1（303）"
+    },
+    {
+      "when": "2026-10-30T09:52:24.196Z",
+      "from": {
+        "files": 0,
+        "bytes": 0,
+        "shLines": 0,
+        "shipped": {
+          "files": 303,
+          "bytes": 70943416,
+          "shLines": 7415
+        }
+      },
+      "to": {
+        "files": 0,
+        "bytes": 0,
+        "shLines": 0
+      },
+      "shipped": {
+        "files": 304,
+        "bytes": 70944752,
+        "shLines": 7417
+      },
+      "why": "GOAL-913 Codex 插件发布面修复落地后 .codex-plugin/plugin.json 真正进入 artifact（files 303→304, shLines 7415→7417，正当增长）"
     }
   ],
   "_axes": {
@@ -325,8 +349,8 @@
   "bytes": 0,
   "shLines": 0,
   "shipped": {
-    "files": 303,
-    "bytes": 70943416,
-    "shLines": 7415
+    "files": 304,
+    "bytes": 70944752,
+    "shLines": 7417
   }
 }
