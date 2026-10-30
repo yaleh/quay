@@ -1,7 +1,7 @@
 ---
 id: gap-quay-init-codex-host-trio-laydown
 title: quay init 落 Codex 三件套 + CLOSED_SET_ITEMS 声明（.codex/config.toml cwd 项目相对）
-status: ready
+status: done
 labels:
   - gap
   - codex
@@ -29,12 +29,12 @@ AC-932 判据逐字（`goals/AC-932-*.md` 的 criterion）只查一件事：`pac
 
 ## Acceptance Criteria
 
-- [ ] AC-932 判据逐字复跑 exit 0（三条 grep，逐字来自 `goal show AC-932` 的 `.criterion` 字段，⛔ 不在测试里重写一份判据），贴 exit 码与 stderr（应为空）。
-- [ ] 落盘测试：`quay init` 在临时空目录真落盘三件套——`<root>/.codex/config.toml` 是文件、`<root>/.agents/skills` 是目录、`<root>/AGENTS.md` 是文件（`packages/quay/test/init.test.mjs` 里按 `path.join(dir, ...)` 断言存在+类型）。
-- [ ] cwd 项目相对测试：生成的 `.codex/config.toml` 含 `cwd = "<init 目标根>"`（或等价的绝对化项目根语义），且全文不含硬编码宿主路径（如 `"/data/home/yale/work/quay"`）。
-- [ ] auto-commit 封闭集含三件套：`autoCommitClosedSet` 的 staged-paths 与 `CLOSED_SET_ITEMS` 一致（三件套在两者中；`--auto-commit-config` 下三件套被 commit），测试或 grep paths 数组含三个字面。
-- [ ] 单源守卫：`node --experimental-strip-types scripts/agents-claude-drift-check.ts` 仍 exit 0；若从模板落 `AGENTS.md`/`.agents/skills`，模板与 `plugin/skills/` 的 canonical 契约同源（byte-identity 测试，同 launch.settings.json 既有先例），⛔ 不在 init.ts 里再复制一份会漂移的正文。
-- [ ] 范围门绿：`bash scripts/test.sh --for-task gap-quay-init-codex-host-trio-laydown --allow-thin`；全量 suite 留给 fan-in 机械阶段。
+- [x] AC-932 判据逐字复跑 exit 0（三条 grep，逐字来自 `goal show AC-932` 的 `.criterion` 字段，⛔ 不在测试里重写一份判据），贴 exit 码与 stderr（应为空）。
+- [x] 落盘测试：`quay init` 在临时空目录真落盘三件套——`<root>/.codex/config.toml` 是文件、`<root>/.agents/skills` 是目录、`<root>/AGENTS.md` 是文件（`packages/quay/test/init.test.mjs` 里按 `path.join(dir, ...)` 断言存在+类型）。
+- [x] cwd 项目相对测试：生成的 `.codex/config.toml` 含 `cwd = "<init 目标根>"`（或等价的绝对化项目根语义），且全文不含硬编码宿主路径（如 `"/data/home/yale/work/quay"`）。
+- [x] auto-commit 封闭集含三件套：`autoCommitClosedSet` 的 staged-paths 与 `CLOSED_SET_ITEMS` 一致（三件套在两者中；`--auto-commit-config` 下三件套被 commit），测试或 grep paths 数组含三个字面。
+- [x] 单源守卫：`node --experimental-strip-types scripts/agents-claude-drift-check.ts` 仍 exit 0；若从模板落 `AGENTS.md`/`.agents/skills`，模板与 `plugin/skills/` 的 canonical 契约同源（byte-identity 测试，同 launch.settings.json 既有先例），⛔ 不在 init.ts 里再复制一份会漂移的正文。
+- [x] 范围门绿：`bash scripts/test.sh --for-task gap-quay-init-codex-host-trio-laydown --allow-thin`；全量 suite 留给 fan-in 机械阶段。
 
 ## Definition of Done
 
@@ -44,5 +44,23 @@ AC-932 判据逐字（`goals/AC-932-*.md` 的 criterion）只查一件事：`pac
 
 - packages/quay/src/init/delivery-surface.ts
 - packages/quay/src/init.ts
+- packages/quay/src/cli/init.ts
 - packages/quay/test/init.test.mjs
+- packages/quay/test/install-config-driven-e2e.test.mjs
+- plugin/scripts/quay-init-closure-assertion.ts
+- plugin/test/quay-init.test.mjs
+- plugin/.codex/AGENTS.md (new)
+- orchestration/SPEC-plugin-lifecycle-single-bundle-2026-09-02.md
 - tasks/gap-quay-init-codex-host-trio-laydown.md
+
+## ADR-007 暗轴记录
+
+- 该轴仍暗,理由:本任务仅在 packages/quay 既有模块内新增生成函数与写入步骤、并在既有封闭集常量上追加条目，无跨包新依赖边，未取 L_D/L_G archguard 读数。
+
+## Blocker
+
+**2026-10-30T07:02:26.702Z — worker 未落地（exited-not-landed）**
+
+- 未落地原因：step=suite: AssertionError [ERR_ASSERTION]: A1: laid-down files must be byte-identical across the two workspaces (only the config file may differ); differing=[".codex/config.toml"] [baseline A/B: HARD RED (task-introduced-red) — the task's red set is NOT a subset of the develop baseline red set: added=packages/quay/test/install-config-driven-e2e.test.mjs changed=-]
+- run_id：wk-prod-anchor
+- session_id：f43fa1e7-1f21-442a-b837-12f765fcbb57

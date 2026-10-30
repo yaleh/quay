@@ -46,16 +46,19 @@ import { repoRoot } from "./repo-root.ts";
 // imports it for `LAYDOWN_SOURCES[0]` + its own spawn site.
 export const QUAY_INIT_REL = "plugin/scripts/quay-init.sh";
 
-// The SEVEN-item closed set (SPEC §6 QUAY-INIT-CLOSED-SET). Files are exact-match members; the `tasks/`
-// and `goals/` directories admit their descendants.
+// The closed set (SPEC §6 QUAY-INIT-CLOSED-SET). Files are exact-match members; the `tasks/`,
+// `goals/` and `.agents/skills` directories admit their descendants. The Codex trio
+// (`.codex/config.toml` / `.agents/skills` / `AGENTS.md`) is part of the set (AC-932).
 export const CLOSED_SET_FILES: ReadonlySet<string> = new Set([
   ".quay/config.yml",
   ".quay/profiles.yml",
   ".gitignore",
   ".claude/launch.settings.json",
   ".claude/settings.json",
+  ".codex/config.toml",
+  "AGENTS.md",
 ]);
-export const CLOSED_SET_DIRS: readonly string[] = ["tasks", "goals"];
+export const CLOSED_SET_DIRS: readonly string[] = ["tasks", "goals", ".agents/skills"];
 
 // The forbidden copy surface — ANY of these in the laydown is a violation (裁定 6: 不复制任何 Claude
 // Code 扩展或脚本). Directory entries carry a trailing "/" (prefix match: the dir itself + descendants);
@@ -158,8 +161,8 @@ export function runLaydownPaths(root: string): string[] | null {
   }
 }
 
-/** The SEVEN-item closed set (SPEC §6 QUAY-INIT-CLOSED-SET), `tasks/` and `goals/` directory members
- *  included — the exact paths whose per-item state a failing quay-init must mechanically
+/** The closed set (SPEC §6 QUAY-INIT-CLOSED-SET), `tasks/`, `goals/` and `.agents/skills` directory
+ *  members included — the exact paths whose per-item state a failing quay-init must mechanically
  *  report (AC3). */
 export const CLOSED_SET_ALL: readonly string[] = [
   ".quay/config.yml",
@@ -169,6 +172,9 @@ export const CLOSED_SET_ALL: readonly string[] = [
   ".gitignore",
   ".claude/launch.settings.json",
   ".claude/settings.json",
+  ".codex/config.toml",
+  ".agents/skills",
+  "AGENTS.md",
 ];
 
 /** The four states a failing quay-init's closed-set report can carry (gap-quay-init-failure-report-

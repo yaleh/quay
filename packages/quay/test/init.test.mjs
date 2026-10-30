@@ -20,6 +20,9 @@ import {
   mcpEntryForProvider,
   generateProfilesContent,
   generateLaunchSettingsContent,
+  generateCodexConfigToml,
+  generateAgentsMd,
+  CLOSED_SET_ITEMS,
   classifyConfig,
   reconcileConfigContent,
   buildInitReport,
@@ -680,6 +683,80 @@ test("profiles carrier: the inline template IS the shipped carrier byte-for-byte
     generateProfilesContent("some-other-project"),
     shipped,
     "the template must be parameterised: a different project may not reuse quay's session names"
+  );
+});
+
+// ── gap-quay-init-codex-host-trio-laydown (AC-932) ───────────────────────────────────────────────────
+// `quay init` lays down the Codex host trio — `.codex/config.toml` (MCP registration, cwd = target
+// root, args = installed dist), the `.agents/skills` host directory, and a brief `AGENTS.md` — and
+// folds all three into the closed set (CLOSED_SET_ITEMS / auto-commit). The trio must never name the
+// dev-tree source `packages/quay/bin/quay.ts` (AC-931 publish surface) nor bake in a hardcoded host
+// path; the AGENTS.md template is single-sourced (byte-identical to plugin/.codex/AGENTS.md).
+
+test("codex trio: CLOSED_SET_ITEMS carries the Codex trio (AC-932 positive arm)", () => {
+  for (const item of [".codex/config.toml", ".agents/skills", "AGENTS.md"]) {
+    assert.ok(CLOSED_SET_ITEMS.includes(item), `CLOSED_SET_ITEMS must include ${item}`);
+  }
+});
+
+test("codex trio: quay init lays down .codex/config.toml + .agents/skills/ + AGENTS.md", () => {
+  const dir = tmpDir("codex-trio");
+  runQuay(["init"], dir);
+
+  const cfg = path.join(dir, ".codex", "config.toml");
+  assert.ok(fs.existsSync(cfg) && fs.statSync(cfg).isFile(), ".codex/config.toml must be a file");
+  const skills = path.join(dir, ".agents", "skills");
+  assert.ok(fs.existsSync(skills) && fs.statSync(skills).isDirectory(), ".agents/skills must be a directory");
+  const agents = path.join(dir, "AGENTS.md");
+  assert.ok(fs.existsSync(agents) && fs.statSync(agents).isFile(), "AGENTS.md must be a file");
+
+  const toml = fs.readFileSync(cfg, "utf8");
+  assert.match(toml, /^\[mcp_servers\.quay\]$/m, "config.toml must register [mcp_servers.quay]");
+  assert.match(toml, /"mcp"/, "config.toml args must carry mcp");
+  assert.ok(
+    toml.includes(`cwd = ${JSON.stringify(path.resolve(dir))}`),
+    "config.toml cwd must be the init target root (computed, not a hardcoded host path)"
+  );
+  assert.ok(!toml.includes("/data/home/yale/work/quay"), "config.toml must not carry a hardcoded host path");
+  assert.ok(!toml.includes("packages/quay/bin/quay.ts"), "config.toml args must not be the dev-tree source (AC-931)");
+});
+
+test("codex trio: generateCodexConfigToml names the installed dist bundle, never the dev-tree source", () => {
+  const abs = generateCodexConfigToml("/some/project", "/opt/quay-plugin");
+  assert.ok(
+    abs.includes('args = ["/opt/quay-plugin/vendor/quay/dist/quay.js", "mcp"]'),
+    "with a plugin root the args must be the absolute installed dist bundle"
+  );
+  assert.ok(!abs.includes("packages/quay/bin/quay.ts"), "args must not name the dev-tree source");
+
+  const rel = generateCodexConfigToml("/some/project", null);
+  assert.ok(
+    rel.includes('args = ["vendor/quay/dist/quay.js", "mcp"]'),
+    "without a plugin root the relative artifact name is laid down (never an invented path)"
+  );
+  assert.ok(!rel.includes("/data/home/yale/work/quay"), "no hardcoded host path may appear");
+});
+
+test("codex trio: --auto-commit-confirm commits the Codex trio (staged set derived from CLOSED_SET_ITEMS)", () => {
+  const dir = tmpDir("codex-autocommit");
+  const g = (args) => execFileSync("git", ["-C", dir, ...args], { encoding: "utf8" }).trim();
+  g(["init", "-q", "-b", "main"]);
+  g(["config", "user.name", "init-test"]);
+  g(["config", "user.email", "init@example.com"]);
+  const out = runQuayAllowFail(["init", "--root", dir, "--auto-commit-confirm"], dir);
+  assert.equal(out.exitCode, 0, out.stderr ?? out.stdout);
+  const tracked = g(["ls-files"]).split("\n");
+  for (const p of [".codex/config.toml", "AGENTS.md"]) {
+    assert.ok(tracked.includes(p), `auto-commit must track ${p}`);
+  }
+});
+
+test("codex AGENTS.md carrier: the inline template IS the shipped template byte-for-byte (single source + invariant)", () => {
+  const shipped = fs.readFileSync(path.resolve(__dirname, "..", "..", "..", "plugin", ".codex", "AGENTS.md"), "utf8");
+  assert.equal(
+    generateAgentsMd(),
+    shipped,
+    "src/init.ts's AGENTS.md template must reproduce plugin/.codex/AGENTS.md byte-for-byte — edit BOTH or neither"
   );
 });
 
