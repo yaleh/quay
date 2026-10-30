@@ -234,6 +234,29 @@ test("AC2: every .sh in the artifact is runtime-reachable, and the cancelled-cha
   );
 });
 
+test("AC5: the codex-stage1 dev-tree-only tools are absent from the artifact and reported as declared-unshipped, not as reached", (t) => {
+  if (!requireArtifact(t)) return;
+  const reading = deriveReachability(repoRoot);
+  const present = artifactShells(artifact);
+  for (const absent of ["scripts/codex-stage1-spawn-verify.sh", "scripts/codex-stage1-selfcheck.sh"]) {
+    assert.ok(!present.includes(absent), `${absent} must NOT be in the artifact`);
+    assert.ok(reading.unreachable.includes(absent), `${absent} must be reported unreachable`);
+    assert.ok(!reading.unshippedByDecision.includes(absent), `${absent} is declared-unshipped (no root reaches it), not reached-then-dropped`);
+    const reason = reading.unreachableReasons[absent];
+    assert.ok(reason !== undefined, `${absent} must carry a reason`);
+    assert.ok(!reason.startsWith("REACHED by a root"), `${absent} reason must not claim a root reached it: ${reason}`);
+    assert.match(reason, /dev-tree-only/, "the reason must name dev-tree-only");
+    assert.match(reason, /ships:false/, "the reason must cite the catalog ships:false judgement");
+    assert.match(reason, /GOAL-913/, "the reason must cite GOAL-913");
+  }
+  // The decision itself is recorded with the same three anchors (dev-tree-only + catalog ships:false + GOAL-913).
+  for (const key of ["scripts/codex-stage1-spawn-verify.sh", "scripts/codex-stage1-selfcheck.sh"]) {
+    assert.match(UNSHIPPED_BY_DECISION[key], /dev-tree-only/);
+    assert.match(UNSHIPPED_BY_DECISION[key], /ships:false/);
+    assert.match(UNSHIPPED_BY_DECISION[key], /GOAL-913/);
+  }
+});
+
 test("AC2 control: an `orphan-tool.sh` nothing references, dropped into the artifact, turns it RED", (t) => {
   if (!requireArtifact(t)) return;
   const reading = deriveReachability(repoRoot);

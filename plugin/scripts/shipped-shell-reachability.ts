@@ -66,6 +66,10 @@ export const UNSHIPPED_BY_DECISION: Readonly<Record<string, string>> = {
     "serves the npm/tgz delivery channel, cancelled by human ruling 2026-09-16 — the channel it builds no longer exists",
   "scripts/deliver-verify-usage.sh":
     "serves the npm/tgz delivery channel, cancelled by human ruling 2026-09-16 — it runs the post-tgz-install usage probe on a target machine, and the only thing that invokes it (develop-deliver-tgz.sh) is itself unshipped",
+  "scripts/codex-stage1-spawn-verify.sh":
+    "dev-tree-only by decision (GOAL-913, 2026-10-30) — exp5 legacy: the DIR-121 Codex-adoption spawn-verify is motivated only by this repo's history, and the catalog declares it ships:false; it must never ship even if a root later references it",
+  "scripts/codex-stage1-selfcheck.sh":
+    "dev-tree-only by decision (GOAL-913, 2026-10-30) — exp5 legacy: the DIR-121 Codex-adoption self-check is motivated only by this repo's history, and the catalog declares it ships:false; it must never ship even if a root later references it",
 };
 
 /** Root surfaces, relative to the repo root. Absent ones are skipped (a shipped install has no
@@ -454,9 +458,16 @@ export function deriveReachability(repoRoot: string, overrides: DeriveOverrides 
   const unreachable = [...candidates].filter((c) => !reachable.has(c)).sort();
   const unreachableReasons: Record<string, string> = {};
   for (const rel of unreachable) {
-    unreachableReasons[rel] = unshipped[rel]
-      ? `REACHED by a root, but unshipped by decision: ${unshipped[rel]}`
-      : "no executing reference from any root (无引用)";
+    if (droppedByDecision.has(rel)) {
+      // A root DID reach it, and UNSHIPPED_BY_DECISION dropped it (the cancelled-channel entries).
+      unreachableReasons[rel] = `REACHED by a root, but unshipped by decision: ${unshipped[rel]}`;
+    } else if (unshipped[rel]) {
+      // Declared unshipped, but NO root currently reaches it — report the decision, never a false
+      // "REACHED by a root" (a dev-tree-only tool that is merely unreferenced must not claim a caller).
+      unreachableReasons[rel] = `declared dev-tree-only (no current root reference): ${unshipped[rel]}`;
+    } else {
+      unreachableReasons[rel] = "no executing reference from any root (无引用)";
+    }
   }
   return {
     evaluated: true,
