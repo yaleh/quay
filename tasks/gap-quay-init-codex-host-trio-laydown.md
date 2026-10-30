@@ -1,7 +1,7 @@
 ---
 id: gap-quay-init-codex-host-trio-laydown
 title: quay init 落 Codex 三件套 + CLOSED_SET_ITEMS 声明（.codex/config.toml cwd 项目相对）
-status: ready
+status: done
 labels:
   - gap
   - codex
