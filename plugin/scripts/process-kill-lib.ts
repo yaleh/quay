@@ -26,6 +26,8 @@
 // attempt — do NOT count it there, or it is counted again in the final not-alive branch. The
 // single count point is the final loop; the SIGTERM catch only `continue`s.
 
+import { syncSleep } from "../../packages/quay/src/kernel/sync-sleep.ts";
+
 /**
  * Stop a set of pids: SIGTERM each, wait a bounded grace for exit, SIGKILL survivors. Returns counts.
  * Fail-open per pid (a process that already exited mid-enumeration is not an error).
@@ -55,7 +57,7 @@ export function killProcs(pids: number[], graceMs = 3000): { killed: number; sig
     if (stillAlive.length === 0) break;
     const sleepMs = Math.min(200, Math.max(0, deadline - Date.now()));
     if (sleepMs <= 0) break;
-    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, sleepMs);
+    syncSleep(sleepMs);
   }
   for (const pid of pids) {
     let alive = false;
