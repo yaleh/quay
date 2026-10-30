@@ -2,7 +2,7 @@
 id: gap-codex-plugin-publish-surface-plugin-json-mcp-dist
 title: Codex 插件发布面：.codex-plugin/plugin.json 声明 quay MCP、args 指向安装后 dist（quay.js
   mcp）而非 dev-tree source
-status: todo
+status: ready
 labels:
   - gap
   - codex
