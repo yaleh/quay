@@ -1,7 +1,7 @@
 ---
 id: gap-publish-dist-branch-does-not-ship-codex-plugin-surface
 title: publish-dist-branch.sh 不组装 repo 根 .codex-plugin/ —— AC-931 插件发布面没进 artifact
-status: todo
+status: ready
 labels:
   - gap
   - release
