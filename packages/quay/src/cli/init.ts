@@ -16,6 +16,7 @@ import {
   providerRuntimeExistenceReport,
   deliverySurfaceL1Report,
   resolveDocBranchName,
+  closedSetBanner,
 } from "../init.ts";
 import {
   ensureDocBranch,
@@ -346,9 +347,10 @@ Description:
 
   try {
     // The closed set this run is responsible for — printed up front so the report's own lines have a
-    // referent (the shipped shell entry's banner).
+    // referent (the shipped shell entry's banner). Derived from CLOSED_SET_ITEMS (single source), so
+    // the banner cannot drift from the set the engine actually writes (硬规则 5b).
     if (!json && !branchModelOnly) {
-      say("  closed set: .quay/config.yml, .quay/profiles.yml, tasks/, goals/, .gitignore, .claude/launch.settings.json, .claude/settings.json");
+      say(`  closed set: ${closedSetBanner()}`);
     }
     const result = runInit({
       root: targetRoot,

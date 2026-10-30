@@ -79,6 +79,7 @@ import {
 } from "./init/provider-maintenance.ts";
 import {
   autoCommitClosedSet,
+  closedSetBanner,
   closedSetReport,
   ensureGitignore,
   printInstallSteps,
@@ -116,6 +117,7 @@ export {
 export {
   CLOSED_SET_ITEMS,
   autoCommitClosedSet,
+  closedSetBanner,
   closedSetFingerprint,
   closedSetReport,
   deliverySurfaceL1Report,
@@ -1579,6 +1581,86 @@ export function generateLaunchSettingsContent(): string {
   );
 }
 
+/**
+ * Generate the `.codex/config.toml` content laid down by `quay init` (AC-932): register the quay MCP
+ * server over stdio, with `cwd` pinned to the init TARGET root and `args` naming the INSTALLED dist
+ * bundle — never the dev-tree source `packages/quay/bin/quay.ts` (the AC-931 publish surface).
+ *
+ * `cwd` is the load-bearing half (SPEC-codex-long-term-support-2026-10-29 §3.2): codex-cli resolves
+ * relative `args` against the SESSION working directory, so a consumer project that omits `cwd` gets a
+ * server that ENOENTs silently from any subdirectory. The value is computed at runtime from `root`,
+ * never baked in — a hardcoded host path is exactly what AC-932's reverse arm forbids.
+ *
+ * When `pluginRoot` is known (the real install path: `/quay:init` runs from the installed plugin and
+ * carries `CLAUDE_PLUGIN_ROOT`), `args[0]` is the absolute `<pluginRoot>/vendor/quay/dist/quay.js`
+ * (the same bundle `plugin/.mcp.json` names for Claude Code). Without a plugin root there is no
+ * spawnable absolute path to compute, so the RELATIVE artifact name is laid down with the comment
+ * saying to re-run with `--plugin-root` — never an invented path (硬规则 3b).
+ */
+export function generateCodexConfigToml(root: string, pluginRoot?: string | null): string {
+  const cwd = path.resolve(root);
+  const runtime = pluginRoot
+    ? path.join(pluginRoot, "vendor", "quay", "dist", "quay.js")
+    : "vendor/quay/dist/quay.js";
+  return [
+    "# Project-scoped Codex configuration laid down by `quay init` (AC-932).",
+    "#",
+    "# Registers the quay MCP server over stdio. `cwd` pins the server's working directory to THIS",
+    "# project root — codex-cli resolves relative `args` against the session working directory, so",
+    "# without an explicit `cwd` the server ENOENTs silently from a subdirectory",
+    "# (SPEC-codex-long-term-support-2026-10-29 §3.2).",
+    "#",
+    "# `args[0]` names the INSTALLED dist bundle (vendor/quay/dist/quay.js) — the AC-931 publish",
+    "# surface — never the dev-tree source. Re-run `quay init --plugin-root <root>` if the plugin",
+    "# root could not be resolved and the relative path below is not spawnable.",
+    "",
+    "[mcp_servers.quay]",
+    'command = "node"',
+    `args = [${JSON.stringify(runtime)}, "mcp"]`,
+    `cwd = ${JSON.stringify(cwd)}`,
+    "",
+  ].join("\n");
+}
+
+/**
+ * The SHIPPED `AGENTS.md` template for CONSUMER projects (AC-932) — the ONE authored copy of the
+ * Codex-facing resident guide, byte-identical to the checked-in `plugin/.codex/AGENTS.md` (the same
+ * executable invariant as its launch.settings.json / profiles.yml siblings; the duplication is
+ * packaging, not preference — see `generateProfilesContent`). Concise by design: the repeatable
+ * workflows and the operator/directive lifecycle policy stay in `plugin/skills/`; this file only
+ * POINTS at them, so it carries no drift-prone policy text to copy (the AC-932 single-source guard).
+ */
+export function generateAgentsMd(): string {
+  return AGENTS_MD_TEMPLATE;
+}
+
+const AGENTS_MD_TEMPLATE = [
+  "# AGENTS.md",
+  "",
+  "Durable guidance for an AI agent (e.g. Codex) operating in THIS project. Laid down by",
+  "`quay init`. Concise by design — the repeatable workflows live in the quay Skills, not here.",
+  "",
+  "## What this project uses",
+  "",
+  "This project's task store is `quay` (a provider-agnostic task board). Task state is",
+  "authoritative through the Provider ABI (`.quay/config.yml`); transcripts and session notes",
+  "are diagnostic context, never authoritative state.",
+  "",
+  "## The quay MCP server",
+  "",
+  "Prefer the quay MCP server registered in `.codex/config.toml`: tools `task_list`,",
+  "`task_get`, `task_check`, `task_write`. If it is unavailable, degrade explicitly to the quay",
+  "CLI read path — never skip an authorization or a check because the MCP server is down.",
+  "",
+  "## quay Skills (invoke explicitly)",
+  "",
+  "- `$quay-task-operator` — bounded, human-authorized task read/check/create/edit transaction.",
+  "- `$quay-directive` — record a directive as a task-canonical `label:directive` task.",
+  "",
+  "The skills are single-sourced in the quay plugin (`plugin/skills/`); `.agents/skills/` is the",
+  "Codex host surface and carries no copied policy.",
+].join("\n") + "\n";
+
 /** Build the `<project>-<role>` session-name prefix. Mirrored (same rule, same output) by
  * `quay-init.sh`'s `profiles_name_prefix()`; a divergence is caught by the byte-equality test in
  * `plugin/test/profiles-role-coverage-check.test.mjs`. */
@@ -2237,6 +2319,22 @@ function runInitImpl(opts: InitOptions): Omit<InitResult, "workspaceRoot" | "doc
     // existing file keeps every unrelated key.
     fs.mkdirSync(path.dirname(settingsPath), { recursive: true });
     writeClaudeSettings(settingsPath, readPluginName(opts.pluginRoot));
+
+    // ── The Codex host trio (AC-932) ──────────────────────────────────────────────────────────────
+    // `.codex/config.toml` (MCP registration, cwd = THIS target root) + the `.agents/skills` host
+    // directory + `AGENTS.md`. All three are CREATE-IF-ABSENT, like launch.settings.json: an existing
+    // file is the consumer's own and is left alone (a config.toml already present must not be clobbered).
+    const codexConfigPath = path.join(root, ".codex", "config.toml");
+    if (!fs.existsSync(codexConfigPath)) {
+      fs.mkdirSync(path.dirname(codexConfigPath), { recursive: true });
+      fs.writeFileSync(codexConfigPath, generateCodexConfigToml(root, opts.pluginRoot), "utf8");
+    }
+    const agentsSkillsDir = path.join(root, ".agents", "skills");
+    if (!fs.existsSync(agentsSkillsDir)) fs.mkdirSync(agentsSkillsDir, { recursive: true });
+    const agentsMdPath = path.join(root, "AGENTS.md");
+    if (!fs.existsSync(agentsMdPath)) {
+      fs.writeFileSync(agentsMdPath, generateAgentsMd(), "utf8");
+    }
 
     // The `.quay/plugin` RETIREMENT (human ruling 2026-10-25): init no longer creates the guidance
     // link. A symlink left by an older init is deleted here; anything else at that name is the user's

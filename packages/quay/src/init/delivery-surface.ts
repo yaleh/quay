@@ -210,7 +210,13 @@ export function writeClaudeSettings(dst: string, pluginName: string): void {
 // auto-commit, the install-steps text, and the closed-set failure report.
 // ════════════════════════════════════════════════════════════════════════════════════════════════════
 
-/** The seven-item closed set (SPEC §6) — the exact relative paths a quay-init laydown may write. */
+/**
+ * The closed set (SPEC §6) — the exact relative paths a quay-init laydown may write. The Claude
+ * surface (`.quay/*` / `.gitignore` / `.claude/*`) plus the Codex surface (`gap-quay-init-codex-host-
+ * trio-laydown` / AC-932): `.codex/config.toml`, the `.agents/skills` host directory, and `AGENTS.md`.
+ * ⛔ This array is the SINGLE source the auto-commit staged-paths and the up-front "closed set:" banner
+ * derive from — a second literal list of the same items drifts (硬规则 5b).
+ */
 export const CLOSED_SET_ITEMS: readonly string[] = [
   ".quay/config.yml",
   ".quay/profiles.yml",
@@ -219,7 +225,20 @@ export const CLOSED_SET_ITEMS: readonly string[] = [
   ".gitignore",
   ".claude/launch.settings.json",
   ".claude/settings.json",
+  ".codex/config.toml",
+  ".agents/skills",
+  "AGENTS.md",
 ];
+
+/** The closed-set items that are DIRECTORIES — rendered with a trailing `/` in the banner so the
+ *  up-front referent reads `tasks/`, `goals/`, `.agents/skills/` (the same shape the retired shell
+ *  entry printed). This is directory-ness metadata, not a second copy of the items. */
+const CLOSED_SET_DIRECTORY_ITEMS: ReadonlySet<string> = new Set(["tasks", "goals", ".agents/skills"]);
+
+/** Render the "closed set: …" banner line (the shipped shell entry's up-front referent). */
+export function closedSetBanner(): string {
+  return CLOSED_SET_ITEMS.map((item) => (CLOSED_SET_DIRECTORY_ITEMS.has(item) ? `${item}/` : item)).join(", ");
+}
 
 /**
  * Fingerprint ONE closed-set item for the failure report: `ABSENT` / `UNREADABLE` / a content hash.
@@ -487,9 +506,11 @@ function upgradeAndTrustSteps(): string[] {
 
 /**
  * `auto_commit_laid_down`: stage ONLY the closed-set paths and commit — so the enable propagates on
- * clone. NEVER sweeps pre-existing changes: only the six laid-down paths are `git add`-ed, and an
- * unrelated edit stays uncommitted. Non-interactive without `--auto-commit-config` DECLINES (a tool
- * must not silently commit a working tree it did not create).
+ * clone. NEVER sweeps pre-existing changes: only the laid-down paths are `git add`-ed, and an
+ * unrelated edit stays uncommitted. The staged set is DERIVED from `CLOSED_SET_ITEMS` — a second
+ * literal list of the same paths drifted (硬规则 5b), so the Codex trio is staged by the same loop.
+ * Non-interactive without `--auto-commit-config` DECLINES (a tool must not silently commit a working
+ * tree it did not create).
  */
 export function autoCommitClosedSet(root: string, mode: "yes" | "no" | "prompt", pluginVersion: string): AutoCommitReading {
   const git = (args: string[]): { ok: boolean; out: string } => {
@@ -518,8 +539,7 @@ export function autoCommitClosedSet(root: string, mode: "yes" | "no" | "prompt",
       detail: "DECLINED (non-interactive — pass --auto-commit-config to commit, or --auto-commit-skip to skip)",
     };
   }
-  const paths = [".quay/config.yml", ".quay/profiles.yml", "tasks", "goals", ".gitignore", ".claude/launch.settings.json", ".claude/settings.json"];
-  for (const p of paths) {
+  for (const p of CLOSED_SET_ITEMS) {
     if (fs.existsSync(path.join(root, p))) git(["add", "--", p]);
   }
   const staged = git(["diff", "--cached", "--name-only"]).out.split("\n").map((l) => l.trim()).filter(Boolean);

@@ -90,7 +90,8 @@ const INIT_ARGS = (ws) => [
 
 // The closed set (SPEC §6) — the exact relative paths quay-init may write. `.quay/plugin` is the
 // project-internal stable symlink (gap-config-provider-path-frozen-to-versioned-cache-dir): it is a
-// symlink, not a file, and is ignored by `.quay/*` in .gitignore.
+// symlink, not a file, and is ignored by `.quay/*` in .gitignore. The Codex trio (AC-932) — `.codex/
+// config.toml` (file), `.agents/skills/` (directory, asserted below like `goals/`), `AGENTS.md` (file).
 const CLOSED_SET = [
   ".quay/config.yml",
   ".quay/profiles.yml",
@@ -98,6 +99,8 @@ const CLOSED_SET = [
   ".gitignore",
   ".claude/launch.settings.json",
   ".claude/settings.json",
+  ".codex/config.toml",
+  "AGENTS.md",
 ];
 
 function listFiles(root) {
@@ -134,6 +137,7 @@ test("AC1 — a real quay-init --loop laydown writes ONLY the seven-item closed 
       assert.ok(files.includes(c), `the closed-set member must be laid down: ${c}`);
     }
     assert.ok(fs.existsSync(path.join(ws, "goals")), "goals/ must be created (dual carrier)");
+    assert.ok(fs.existsSync(path.join(ws, ".agents", "skills")), ".agents/skills/ must be created (Codex host surface, AC-932)");
     // The retired extension-file copy surface must be ABSENT (裁定 6: 不复制扩展或脚本).
     assert.ok(!fs.existsSync(path.join(ws, ".claude", "workflows")), "no .claude/workflows copy");
     assert.ok(!fs.existsSync(path.join(ws, ".claude", "agents")), "no .claude/agents copy");

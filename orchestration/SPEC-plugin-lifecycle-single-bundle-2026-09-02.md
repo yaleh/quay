@@ -225,6 +225,11 @@ goals/                   目标目录（数据，与 tasks/ 双载体）
 【Claude Code 侧——只写配置，不写扩展】
 .claude/settings.json    enabledPlugins（本项目启用，裁定 5）
                          + permissions.allow: ["mcp__plugin_quay_quay__*"]
+
+【Codex 侧——只写宿主面，不复制策略（AC-932）】
+.codex/config.toml       quay MCP server 注册（cwd = 项目根）
+.agents/skills/          技能宿主目录（指向 plugin/skills/ 单一来源）
+AGENTS.md                Codex 常驻指引（简短，重复工作流留 Skills）
 ```
 QUAY-INIT-CLOSED-SET:BEGIN
 - .quay/config.yml
@@ -234,6 +239,9 @@ QUAY-INIT-CLOSED-SET:BEGIN
 - .gitignore
 - .claude/launch.settings.json
 - .claude/settings.json
+- .codex/config.toml
+- .agents/skills/
+- AGENTS.md
 QUAY-INIT-CLOSED-SET:END
 
 **⊢ 两组的区别是本质的**：上组是 **quay 这个产品要求的项目结构**（换个宿主也需要）；
