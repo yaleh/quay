@@ -46,6 +46,7 @@ AC-932 判据逐字（`goals/AC-932-*.md` 的 criterion）只查一件事：`pac
 - packages/quay/src/init.ts
 - packages/quay/src/cli/init.ts
 - packages/quay/test/init.test.mjs
+- packages/quay/test/install-config-driven-e2e.test.mjs
 - plugin/scripts/quay-init-closure-assertion.ts
 - plugin/test/quay-init.test.mjs
 - plugin/.codex/AGENTS.md (new)
