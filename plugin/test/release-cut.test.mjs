@@ -256,6 +256,12 @@ function makeCloneIn(parent, prefix) {
   // would refuse for a reason that is none of their subject. The ceiling's own tests set their own
   // value.
   setShippedCeilingOnDevelop(root, AMPLE_SHIPPED_CEILING);
+  // ⛔ Same premise, second carrier: `.codex-plugin/plugin.json` is judged by the WORKTREE's checker
+  // (which already carries the new carrier entry) against HEAD == `author`'s tree — which is `develop`'s
+  // tree from BEFORE the fan-in that registers the carrier also stamps the file (they land atomically).
+  // Until that lands, a "healthy" fixture would redden the version-consistency preflight for a reason
+  // that is none of this file's subject (see stampCodexPluginVersionOnAuthor).
+  stampCodexPluginVersionOnAuthor(root);
   return { parent, root, locality };
 }
 
@@ -286,6 +292,37 @@ function setShippedCeilingOnDevelop(root, ceiling) {
   assert.equal(git(root, "commit", "-q", "-m", `fixture: shipped-set size ceiling = ${ceiling.files} files / ${ceiling.shLines} .sh lines`).status, 0,
     "the ceiling must be COMMITTED — the preflight builds develop's tree, and a raised working-tree baseline is refused outright");
   assert.equal(git(root, "checkout", "-q", "author").status, 0, "return HEAD to `author` (production's shape)");
+  assert.equal(git(root, "status", "--porcelain", "--untracked-files=no").stdout.trim(), "",
+    "the fixture must be clean, or the cut would refuse on CAUSE=release-cut-dirty-tree for the wrong reason");
+}
+
+/**
+ * Stamp the fixture's checked-out `.codex-plugin/plugin.json` to `plugin/VERSION` — the tracked form
+ * every other carrier already carries (gap-codex-plugin-json-version-not-a-carrier).
+ *
+ * WHY (same shape as the shipped-set ceiling above): the version-consistency preflight runs the
+ * WORKTREE's checker (`release-cut.mjs` resolves `version-consistency-check.ts` relative to ITSELF,
+ * not to `--root`), so it already carries the new carrier entry — but it judges `--root`'s checked-out
+ * tree (HEAD == `author`), which is `develop`'s tree BEFORE the fan-in that registers the carrier also
+ * stamps the file (they land atomically). During the suite the two are a fan-in apart, so a "healthy"
+ * fixture cloned from develop reddens `CAUSE=release-cut-version-inconsistent` for a reason that is
+ * none of this file's subject. Committing the tracked form on `author` keeps the fixture healthy; once
+ * the stamp has landed on develop this is a no-op (the file already equals `plugin/VERSION`).
+ *
+ * ⛔ COMMITTED on `author`, never a working-tree edit: the preflight judges HEAD's tree, and an
+ * uncommitted edit would trip `CAUSE=release-cut-dirty-tree` for the wrong reason.
+ */
+function stampCodexPluginVersionOnAuthor(root) {
+  const p = join(root, ".codex-plugin", "plugin.json");
+  const doc = JSON.parse(readFileSync(p, "utf8"));
+  const pluginVersion = readFileSync(join(root, "plugin", "VERSION"), "utf8").trim();
+  if (doc.version !== pluginVersion) {
+    doc.version = pluginVersion;
+    writeFileSync(p, `${JSON.stringify(doc, null, 2)}\n`);
+    assert.equal(git(root, "add", ".codex-plugin/plugin.json").status, 0, "stage the codex stamp");
+    assert.equal(git(root, "commit", "-q", "-m", "fixture: stamp .codex-plugin/plugin.json to plugin/VERSION").status, 0,
+      "the codex stamp must be COMMITTED — the preflight judges HEAD's (author's) tree");
+  }
   assert.equal(git(root, "status", "--porcelain", "--untracked-files=no").stdout.trim(), "",
     "the fixture must be clean, or the cut would refuse on CAUSE=release-cut-dirty-tree for the wrong reason");
 }
