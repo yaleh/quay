@@ -1005,12 +1005,14 @@ run_static_checks() {
   #      的检出判红。⛔ 也不许把 not-configured 改成 pass（硬规则 3b：没配 ≠ 合格）。
   #   ② 被测对象是「某个项目【声明的】模型」，本仓自己有没有 release: 节与这条接线自检无关；指向
   #      ${repo_root} 会把「本仓配置变了」变成无关任务的套件红。
-  # fixture 在本次运行的临时目录里现建（git repo + tag + .quay/config.yml + release.yml），任何检出上
-  # 恒绿。⛔ 整条命令必须在【一行】内自足：scoped 门只 eval 注册行本身（select-static-checks-for-touches.ts
+  # fixture 在本次运行的临时目录里现建（git repo + tag + .quay/config.yml + release.yml + 本地
+  # origin/main 镜像），任何检出上恒绿。origin/main 是 `advance: ci` 模型里「CI 推进的远端 line」，
+  # 缺失时 `line-not-stale` 判 not-evaluated（⛔ 非 pass，硬规则 3b），故 fixture 必须带上它。
+  # ⛔ 整条命令必须在【一行】内自足：scoped 门只 eval 注册行本身（select-static-checks-for-touches.ts
   # 的 commandLine = 该行原文），前面单独一行的 fixture 构建【不会】随之执行。
   # @static-tier change
   # @static-object plugin/scripts/release-model-check.ts plugin/scripts/checker-mutation-cases/release-model-check.sh plugin/test/release-model-check.test.mjs plugin/scripts/release-master-advance-needs-check.ts plugin/scripts/runner-static-gate.ts
-  run_checker "release-model-check" bash -c 'set -u; d="$(mktemp -d "${TMPDIR:-/tmp}/release-model-fixture-XXXXXX")" || exit 2; trap "rm -rf \"$d\"" EXIT; git -C "$d" init -q -b main >/dev/null 2>&1 && git -C "$d" -c user.name=fixture -c user.email=fixture@example.com -c commit.gpgsign=false commit -q --allow-empty -m fixture >/dev/null 2>&1 && git -C "$d" tag v1.0.0 || exit 2; mkdir -p "$d/.quay" "$d/.github/workflows"; printf "%s\n" "release:" "  line: main" "  baseline: develop" "  tag_prefix: v" "  advance: ci" > "$d/.quay/config.yml"; printf "%s\n" "name: Release" "jobs:" "  build:" "    runs-on: self-hosted" "    steps:" "      - run: echo build" "  verify:" "    runs-on: self-hosted" "    steps:" "      - run: echo verify" "  advance-master:" "    needs: [build, verify]" "    runs-on: self-hosted" "    steps:" "      - run: echo advance" > "$d/.github/workflows/release.yml"; node --no-warnings --experimental-strip-types "$1" --root "$d" --json' release-model-check "${repo_root}/plugin/scripts/release-model-check.ts"
+  run_checker "release-model-check" bash -c 'set -u; d="$(mktemp -d "${TMPDIR:-/tmp}/release-model-fixture-XXXXXX")" || exit 2; trap "rm -rf \"$d\"" EXIT; git -C "$d" init -q -b main >/dev/null 2>&1 && git -C "$d" -c user.name=fixture -c user.email=fixture@example.com -c commit.gpgsign=false commit -q --allow-empty -m fixture >/dev/null 2>&1 && git -C "$d" tag v1.0.0 && git -C "$d" update-ref refs/remotes/origin/main v1.0.0 || exit 2; mkdir -p "$d/.quay" "$d/.github/workflows"; printf "%s\n" "release:" "  line: main" "  baseline: develop" "  tag_prefix: v" "  advance: ci" > "$d/.quay/config.yml"; printf "%s\n" "name: Release" "jobs:" "  build:" "    runs-on: self-hosted" "    steps:" "      - run: echo build" "  verify:" "    runs-on: self-hosted" "    steps:" "      - run: echo verify" "  advance-master:" "    needs: [build, verify]" "    runs-on: self-hosted" "    steps:" "      - run: echo advance" > "$d/.github/workflows/release.yml"; node --no-warnings --experimental-strip-types "$1" --root "$d" --json' release-model-check "${repo_root}/plugin/scripts/release-model-check.ts"
   echo "== workflow-runner-self-hosted check (gap-metered-hosted-runner-jobs-to-self-hosted, AC-319) =="
   # Every job of every .github/workflows/*.{yml,yaml} must carry `self-hosted` in its `runs-on`, so
   # the metered hosted-runner billing gate (measured 2026-09-24: 7 of this repo's 8 jobs came back
