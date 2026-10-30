@@ -44,3 +44,11 @@ extra:
 - plugin/scripts/checker-mutation-cases/version-consistency-check.sh
 - .codex-plugin/plugin.json
 - tasks/gap-codex-plugin-json-version-not-a-carrier.md
+
+## Blocker
+
+**2026-10-30T12:10:58.494Z — worker 未落地（exited-not-landed）**
+
+- 未落地原因：step=suite: AssertionError [ERR_ASSERTION]: the dry run must pass on a healthy tree: CAUSE=release-cut-version-inconsistent — /data/home/yale/work/quay-worktrees/gap-codex-plugin-json-version-not-a-carrier/scripts/version-consistency-check.ts --root /tmp/release-cut-dryrun-Ytcmay/repo exited 1: the version carriers do not agree with VERSION, so the tag would name a tree whose version is already wrong; run scripts/stamp-version.ts (and fix VERSION) first. Output: [baseline A/B: HARD RED (task-introduced-red) — the task's red set is NOT a subset of the develop baseline red set: added=plugin/test/release-cut.test.mjs,plugin/test/release-cut.test.mjs,plugin/test/release-cut.test.mjs,plugin/test/release-cut.test.mjs,plugin/test/release-cut.test.mjs,plugin/test/release-cut.test.mjs,plugin/test/release-cut.test.mjs,plugin/test/release-cut.test.mjs,plugin/test/release-cut.test.mjs,plugin/test/release-cut.test.mjs,plugin/test/release-cut.test.mjs,plugin/test/release-cut.test.mjs,plugin/test/release-cut.test.mjs,plugin/test/release-cut.test.mjs,plugin/test/release-cut.test.mjs changed=-]
+- run_id：wk-prod-anchor
+- session_id：0df67499-f633-4f1b-aba1-4cdb66d51406
