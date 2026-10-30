@@ -37,3 +37,11 @@ Fix `goal/GOAL-912` so the merge succeeds (resolve the conflict or make the veri
 ## Touches
 
 - tasks/gap-goal-branch-unmerged-goal-912.md
+
+## Blocker
+
+**2026-10-29T23:43:44.142Z — worker 未落地（exited-not-landed）**
+
+- 未落地原因：step=suite: AssertionError [ERR_ASSERTION]: the derived laydown set must ship the L1 check (explicit additions in deriveLoopScripts) [baseline A/B: HARD RED (task-introduced-red) — the task's red set is NOT a subset of the goal/GOAL-912 baseline red set: added=plugin/test/tmux-leak-scan.test.mjs,plugin/test/tmux-leak-scan.test.mjs changed=-]
+- run_id：wk-prod-anchor
+- session_id：071d9c62-14cb-4ede-b71c-1ad42d1e0906

@@ -1,7 +1,7 @@
 ---
 id: gap-goal912-merge-suite-gitignore-blanket-and-l1-test-stale
 title: GOAL-912 merge suite 双红：.gitignore blanket 回归 + l1-delivery 测试检查旧文件位置
-status: ready
+status: done
 labels:
   - gap
   - suite
@@ -42,11 +42,3 @@ GOAL-912 goal→develop merge 的全量 suite 两个红，都不是 goal 的 cod
 - `tasks/gap-goal912-merge-suite-gitignore-blanket-and-l1-test-stale.md`
 - `.gitignore`
 - `plugin/test/l1-delivery-surface-check.test.mjs`
-
-## Blocker
-
-**2026-10-29T23:02:16.933Z — worker 未落地（exited-not-landed）**
-
-- 未落地原因：step=suite: AssertionError [ERR_ASSERTION]: the scan must FAIL with a private-socket dir present: [baseline A/B: HARD RED (task-introduced-red) — the task's red set is NOT a subset of the goal/GOAL-912 baseline red set: added=plugin/test/fan-in-execute-paths-s11.test.mjs,packages/quay/test/ac179-criterion-address-derivation.test.mjs,plugin/test/tmux-leak-scan.test.mjs,plugin/test/fan-in-execute-paths-s06.test.mjs,plugin/test/fan-in-execute-paths-s06.test.mjs changed=-]
-- run_id：wk-prod-anchor
-- session_id：3c0881eb-e364-41fb-abd5-6bda4856a998
