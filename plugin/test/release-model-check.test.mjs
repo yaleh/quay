@@ -246,6 +246,10 @@ test("advance=ci is judged by the release workflow; a missing workflow is NOT-EV
   const root = makeRepo({ config: cfg });
   try {
     git(root, "tag", "1.0.0");
+    // The ci-advance model says CI advances the REMOTE line and the local line mirrors it; a
+    // complete fixture therefore carries origin/main at the same commit, so `line-not-stale` can
+    // judge (it is `not-evaluated`, ⛔ not `pass`, when the remote mirror is absent — 硬规则 3b).
+    git(root, "update-ref", "refs/remotes/origin/main", "HEAD");
     const missing = run(["--root", root, "--json"]);
     assert.equal(missing.status, 3, `an absent workflow cannot license a pass: ${missing.stdout}${missing.stderr}`);
     const mo = parseJson(missing.stdout);
@@ -278,6 +282,60 @@ test("advance=ci is judged by the release workflow; a missing workflow is NOT-EV
     const uncovered = run(["--root", root, "--json"]);
     assert.equal(uncovered.status, 1, `an uncovered advancing job must be RED: ${uncovered.stdout}${uncovered.stderr}`);
     assert.equal(parseJson(uncovered.stdout).invariants.find((i) => i.id === "advance-ci-needs").state, "fail");
+  } finally {
+    cleanup(root);
+  }
+});
+
+// ── (g) line-not-stale: a local line BEHIND origin/<line> is a stale fossil, ⛔ not a pass ──────
+
+test("line-not-stale: a local line BEHIND origin/<line> flips to FAIL while line-parked-on-tag stays green", () => {
+  const cfg = [
+    "release:",
+    '  line: "main"',
+    '  baseline: "trunk"',
+    '  globs: ["rel/*"]',
+    '  tag_prefix: ""',
+    '  advance: "ci"',
+    "",
+  ].join("\n");
+  const root = makeRepo({ config: cfg });
+  try {
+    mkdirSync(join(root, ".github", "workflows"), { recursive: true });
+    writeFileSync(
+      join(root, ".github", "workflows", "release.yml"),
+      [
+        "jobs:",
+        "  verify:",
+        "    runs-on: ubuntu-latest",
+        "  advance-master:",
+        "    needs: [verify]",
+        "    runs-on: ubuntu-latest",
+        "",
+      ].join("\n"),
+    );
+    git(root, "tag", "1.0.0");
+    git(root, "update-ref", "refs/remotes/origin/main", "HEAD");
+
+    // Baseline: local == origin/main ⇒ the mirror is synced ⇒ pass.
+    const green = run(["--root", root, "--json"]);
+    assert.equal(green.status, 0, `a synced mirror must pass: ${green.stdout}${green.stderr}`);
+    assert.equal(parseJson(green.stdout).invariants.find((i) => i.id === "line-not-stale").state, "pass");
+
+    // Injection: CI advances origin/main past the local line; local main stays on its old tag.
+    commitTo(root, "advance.txt", "a commit only the remote line carries");
+    git(root, "update-ref", "refs/remotes/origin/main", "HEAD");
+    git(root, "reset", "-q", "--hard", "1.0.0");
+
+    const stale = run(["--root", root, "--json"]);
+    assert.equal(stale.status, 1, `a local line behind origin/main must be RED: ${stale.stdout}${stale.stderr}`);
+    const j = parseJson(stale.stdout);
+    const ns = j.invariants.find((i) => i.id === "line-not-stale");
+    assert.equal(ns.state, "fail");
+    assert.match(ns.detail, /behind origin\/main/);
+    // The stale tip still passes the OLD invariant — that is exactly the blind spot this closes
+    // (gap-master-not-advanced-after-green-releases: v0.8.0 qualifies as "parked on a tag").
+    assert.equal(j.invariants.find((i) => i.id === "line-parked-on-tag").state, "pass");
   } finally {
     cleanup(root);
   }

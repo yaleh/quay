@@ -163,13 +163,17 @@ report() {
 
 fail_phase() { echo "$1" >&2; exit 3; }
 
-# ── A: baseline GREEN, all three invariants PASS ────────────────────────────────────────────────
+# ── A: baseline GREEN, all four invariants PASS ────────────────────────────────────────────────
 write_config
 write_workflow_covered
 (
   cd "${workdir}" || exit 2
   git "${GIT_ID[@]}" commit -q --allow-empty -m "fixture: release commit"
   git tag v1.0.0
+  # The ci-advance model says CI advances the REMOTE line and the local line mirrors it; the
+  # fixture therefore carries origin/main at the same commit so `line-not-stale` has a mirror to
+  # judge (⛔ absent a remote mirror the invariant is `not-evaluated`, not `pass` — 硬规则 3b).
+  git update-ref refs/remotes/origin/main HEAD
 ) || { echo "infrastructure: fixture commit/tag failed" >&2; exit 2; }
 
 read_checker
@@ -177,11 +181,11 @@ if [ "${_rc}" != "0" ]; then
   echo "baseline RED on a green fixture (checker always-red? got exit ${_rc}; status=$(status_of)) — ${_out}" >&2
   exit 4
 fi
-for inv in line-readable line-parked-on-tag advance-ci-needs; do
+for inv in line-readable line-parked-on-tag advance-ci-needs line-not-stale; do
   st="$(invariant_state "${inv}")"
-  [ "${st}" = "pass" ] || fail_phase "baseline: invariant '${inv}' is '${st}', expected 'pass' — a baseline that does not exercise all three judges cannot prove the injections are the thing going red"
+  [ "${st}" = "pass" ] || fail_phase "baseline: invariant '${inv}' is '${st}', expected 'pass' — a baseline that does not exercise all four judges cannot prove the injections are the thing going red"
 done
-echo "phase A (baseline): exit 0, all three invariants pass [$(report)]"
+echo "phase A (baseline): exit 0, all four invariants pass [$(report)]"
 
 # ── B: line-parked-on-tag INJECTION — a commit on the line AFTER its tag ────────────────────────
 (
@@ -231,6 +235,30 @@ write_workflow_covered
 read_checker
 [ "${_rc}" = "0" ] || fail_phase "ALWAYS-RED after restoring the covered workflow: exit ${_rc}, not 0 (status=$(status_of))"
 echo "phase D (advance-ci-needs): 1/fail on injection [${inj}], 0 after restore [$(report)]"
+
+# ── D2: line-not-stale INJECTION — origin/<line> advances past the local line ───────────────────
+(
+  cd "${workdir}" || exit 2
+  git "${GIT_ID[@]}" commit -q --allow-empty -m "fixture: advance the REMOTE line only"
+  git update-ref refs/remotes/origin/main HEAD
+  git reset -q --hard v1.0.0
+) || exit 2
+read_checker
+[ "${_rc}" = "1" ] || fail_phase "line-not-stale injection: expected exit 1 (fail), got ${_rc} (status=$(status_of)) — a local line behind origin/main is a stale fossil and must be RED"
+st="$(invariant_state "line-not-stale")"
+[ "${st}" = "fail" ] || fail_phase "line-not-stale injection: invariant state is '${st}', expected 'fail' — the named judgment did not move, so the exit 1 came from somewhere else"
+# The stale tip still passes line-parked-on-tag — that is exactly the blind spot this closes.
+st_parked="$(invariant_state "line-parked-on-tag")"
+[ "${st_parked}" = "pass" ] || fail_phase "line-not-stale injection: line-parked-on-tag is '${st_parked}', expected 'pass' — a stale tip parked on its old tag is precisely the reading the new judge must distinguish from a pass"
+inj="$(report)"
+# restore: origin/main back to the local line ⇒ the mirror is synced again
+(
+  cd "${workdir}" || exit 2
+  git update-ref refs/remotes/origin/main refs/heads/main
+) || exit 2
+read_checker
+[ "${_rc}" = "0" ] || fail_phase "ALWAYS-RED after restoring the synced mirror: exit ${_rc}, not 0 (status=$(status_of))"
+echo "phase D2 (line-not-stale): 1/fail on injection [${inj}], 0 after restore [$(report)]"
 
 # ── E1: no `release:` section ⇒ exit 4 / not-configured (⛔ not a pass) ─────────────────────────
 cat > "${cfg}" <<'YAML'

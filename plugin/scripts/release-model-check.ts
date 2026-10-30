@@ -14,7 +14,8 @@
 // WHAT IS CONVERGED (the invariant, not the mechanism): a project may use one `main`, a
 // `release/*` train, or hotfix branches. Nothing here forces `master`/`release/*`/hotfix. What must
 // hold is that the DECLARED line is readable, parked on a tag of the DECLARED shape, and (when
-// `advance: ci`) is advanced only by a fully-green release run.
+// `advance: ci`) is advanced only by a fully-green release run AND the local line is not a stale
+// fossil behind the CI-advanced remote line (`origin/<line>`).
 //
 // FOUR-STATE OUTPUT — the whole point (硬规则 3b):
 //
@@ -274,6 +275,51 @@ function advanceInvariant(root: string, advance: ReleaseAdvance): InvariantReadi
   return { id: "advance-ci-needs", state: "not-evaluated", detail: `the advance judge exited ${r.status}: ${(r.stderr ?? "").trim()}` };
 }
 
+/** Invariant 4 — when `advance: ci`, the CI advances the REMOTE line (origin/<line>) on a
+ *  fully-green run; the LOCAL line is only a mirror. A local line that sits BEHIND origin/<line> is
+ *  a fossil: it still passes `line-parked-on-tag` (its stale tip is held by an old tag), so without
+ *  this check the meter reads "everything normal" while the real line moved on — the 硬规则 3b/4b
+ *  shape gap-master-not-advanced-after-green-releases found. The fail detail carries the ONE repair
+ *  command, so the fix is a repeatable mechanism rather than an undocumented manual dance.
+ *  ⛔ A missing origin/<line> is `not-evaluated`, never a pass (硬规则 3b): "could not compare" must
+ *  not share a value with "not stale". The `local ahead of origin` arm is deliberately NOT a fail
+ *  here — a line advanced past its remote is the direct-commit rot already judged by
+ *  `line-parked-on-tag`, and this invariant asserts only the mirror (staleness) direction. */
+function lineNotStale(root: string, line: string, advance: ReleaseAdvance, lineOk: boolean): InvariantReading {
+  if (advance !== "ci") {
+    return { id: "line-not-stale", state: "skipped", detail: `advance=${advance} — there is no CI-advanced remote line to mirror` };
+  }
+  if (!lineOk) {
+    return { id: "line-not-stale", state: "not-evaluated", detail: "the declared line is not readable, so staleness cannot be judged" };
+  }
+  const local = gitOk(root, ["rev-parse", "--verify", "--quiet", `refs/heads/${line}`]);
+  if (!local.ok) return { id: "line-not-stale", state: "not-evaluated", detail: `could not resolve the local line: ${local.reason}` };
+  const remote = gitOk(root, ["rev-parse", "--verify", "--quiet", `refs/remotes/origin/${line}`]);
+  if (!remote.ok) {
+    return {
+      id: "line-not-stale",
+      state: "not-evaluated",
+      detail: `no remote-tracking ref origin/${line} — staleness cannot be judged locally (run: git fetch origin ${line})`,
+    };
+  }
+  const localSha = local.stdout.trim();
+  const remoteSha = remote.stdout.trim();
+  if (localSha === remoteSha) {
+    return { id: "line-not-stale", state: "pass", detail: `local ${line} equals origin/${line} (${localSha})` };
+  }
+  const behind = gitOk(root, ["rev-list", "--count", `refs/heads/${line}..refs/remotes/origin/${line}`]);
+  if (!behind.ok) return { id: "line-not-stale", state: "not-evaluated", detail: `could not count how far the local line is behind: ${behind.reason}` };
+  const n = Number(behind.stdout.trim());
+  if (Number.isInteger(n) && n > 0) {
+    return {
+      id: "line-not-stale",
+      state: "fail",
+      detail: `local ${line} is ${n} commit(s) behind origin/${line} — the release line is a stale fossil, not the most recent fully-green release (repair: git fetch origin ${line} && git branch -f ${line} origin/${line})`,
+    };
+  }
+  return { id: "line-not-stale", state: "pass", detail: `local ${line} is not behind origin/${line} (ahead/diverged is judged by line-parked-on-tag)` };
+}
+
 /** Judge a repository against its DECLARED model. Pure over `readReleaseModel` + git. */
 export function judgeReleaseModel(root: string): MeterReading {
   const resolved = readReleaseModel(root);
@@ -309,6 +355,7 @@ export function judgeReleaseModel(root: string): MeterReading {
     readable,
     lineParkedOnTag(root, cfg.line, cfg.tag_prefix, readable.state === "pass"),
     advanceInvariant(root, cfg.advance),
+    lineNotStale(root, cfg.line, cfg.advance, readable.state === "pass"),
   ];
 
   const failed = invariants.some((i) => i.state === "fail");
