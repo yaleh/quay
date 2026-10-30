@@ -173,7 +173,7 @@ test("AC5 — quay-init wiring: the L1 check ships in the derived set and is inv
   // The claim is unchanged — "the check ships with the loop (装后能跑)" — read from its NEW home, plus a
   // positive control that the phrase is really in that file (so the assertion cannot pass on an empty
   // slice, which is exactly what the pre-fix form degenerated into after the move).
-  const initTs = fs.readFileSync(path.join(REPO_ROOT, "packages", "quay", "src", "init.ts"), "utf8");
+  const initTs = fs.readFileSync(path.join(REPO_ROOT, "packages", "quay", "src", "init", "delivery-surface.ts"), "utf8");
   assert.match(initTs, /"l1-delivery-surface-check\.ts"/, "the derived laydown set must ship the L1 check (explicit additions in deriveLoopScripts)");
   // ⛔ RE-POINTED (gap-quay-init-sh-becomes-a-shim-over-bin-quay-init-and-callers-switch): the
   // post-laydown invocation moved out of the shell, which is a ≤40-line shim over the CLI now and
@@ -182,7 +182,7 @@ test("AC5 — quay-init wiring: the L1 check ships in the derived set and is inv
   // `l1_script` variable the old assertion named.
   const shell = fs.readFileSync(path.join(SCRIPTS_DIR, "quay-init.sh"), "utf8");
   assert.ok(shell.length > 0, "the shipped entry must still exist (it is a shim, not a deletion)");
-  const engine = fs.readFileSync(path.join(REPO_ROOT, "packages", "quay", "src", "init.ts"), "utf8");
+  const engine = fs.readFileSync(path.join(REPO_ROOT, "packages", "quay", "src", "init", "delivery-surface.ts"), "utf8");
   const cli = fs.readFileSync(path.join(REPO_ROOT, "packages", "quay", "src", "cli", "init.ts"), "utf8");
   assert.match(engine, /l1Script = path\.join\(pluginRoot, "scripts", "l1-delivery-surface-check\.ts"\)/, "the engine must resolve the L1 check's own path");
   assert.match(engine, /"--surface", "--root", deliveryRoot, "--spec", specFile/, "…and invoke it in --surface mode with the delivery root + SPEC");

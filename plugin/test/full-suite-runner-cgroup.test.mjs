@@ -1804,7 +1804,8 @@ test(
       for (const [a, b] of iv) if (a <= s && s < b) n++;
       if (n > bruteMax) bruteMax = n;
     }
-    assert.equal(real.actualConcurrency, bruteMax, `the reader's ${real.actualConcurrency} equals the independent count ${bruteMax}`);
+    const readerConcurrency = actualConcurrencyFromRows(rows);
+    assert.equal(readerConcurrency, bruteMax, `the reader's ${readerConcurrency} equals the independent count ${bruteMax}`);
   },
 );
 

@@ -1,0 +1,58 @@
+{
+  "codexSession": {
+    "ref": "01a18845-6491-7e41-9617-1a2becb8fabe",
+    "version": "0.165.0",
+    "trustedCheckout": true
+  },
+  "loadedSurfaces": {
+    "agentsMd": true,
+    "skills": ["quay-task-operator", "quay-directive"]
+  },
+  "paths": {
+    "mcp": "node packages/quay/bin/quay.ts mcp",
+    "cli": "node packages/quay/bin/quay.ts task list --json"
+  },
+  "mutations": [
+    {
+      "kind": "create",
+      "taskId": "codex-stage1-live-proof-check",
+      "providerQualifiedId": "native:codex-stage1-live-proof-check",
+      "authorizationRef": "人 2026-10-29 在 Codex 会话明确授权：operator 问「是否按此精确内容写入并提交？」→ yes",
+      "afterHash": "afb0271ef42e9443401064f677a08220f78355353220e957f6a89a2251008d2d",
+      "semanticDiff": "新建任务：live-proof-check 只验形状不验真伪（占位符模板除 CAS hash 外全过）",
+      "mcpReadback": true,
+      "cliReadback": true,
+      "schemaCheck": { "exitCode": 0 },
+      "scopedCommit": {
+        "sha": "0b9feb2e7f2c7fb75dba8c15501a8aaf928f5f7c",
+        "filesChanged": ["tasks/codex-stage1-live-proof-check.md"],
+        "unrelatedChangesPreserved": true
+      }
+    },
+    {
+      "kind": "edit",
+      "taskId": "gap-instrument-decay-postlanding-two-rounds",
+      "providerQualifiedId": "native:gap-instrument-decay-postlanding-two-rounds",
+      "authorizationRef": "人 2026-10-29 在 Codex 会话明确授权编辑 ## Evidence 节",
+      "beforeHash": "491a26512962387c8f65694655d2ad2c52e6098a5878d6b26b7205f6f23f37f2",
+      "afterHash": "e33dae57b05e6a1c9d5dcb4cf8fa323d36a5c07f8121134e9566f215ed5cadb9",
+      "semanticDiff": "更新过时 Evidence：d9610e05a 已在 develop、依赖任务 done，前置已满足",
+      "mcpReadback": true,
+      "cliReadback": true,
+      "schemaCheck": { "exitCode": 0 },
+      "scopedCommit": {
+        "sha": "8a7b1e1d4fe5e588bb118e25bed5f59d30cf49ad",
+        "filesChanged": ["tasks/gap-instrument-decay-postlanding-two-rounds.md"],
+        "unrelatedChangesPreserved": true
+      }
+    }
+  ],
+  "casNegative": {
+    "taskId": "gap-codex-mcp-cwd-any-root-spawn-verify",
+    "expectedStatus": "todo",
+    "actualStatus": "done",
+    "refused": true,
+    "beforeHash": "8fe7d9ed9bb06638",
+    "afterHash": "8fe7d9ed9bb06638"
+  }
+}
