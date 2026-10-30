@@ -1,7 +1,7 @@
 ---
 id: AC-933
 title: spawn-verify/selfcheck ship 决策成文 + shipped 产物与决策一致
-status: active
+status: achieved
 kind: criterion
 goal: GOAL-913
 criterion: 'if ! grep -q "codex-stage1"
@@ -18,6 +18,11 @@ statusLog:
     to: active
     actor: goal-cli
     reason: 人 2026-10-30 裁定激活；criterion 是 reading（源文件声明），完整行为由任务测试承担
+  - at: 2026-10-30T06:50:14.283Z
+    from: active
+    to: achieved
+    actor: goal-driver
+    reason: "I2: criterion pass"
 fidelity:
   verdict: faithful
   reason: "fidelity judge: faithful"

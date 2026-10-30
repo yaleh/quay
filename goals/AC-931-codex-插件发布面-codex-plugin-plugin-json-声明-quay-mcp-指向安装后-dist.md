@@ -1,7 +1,7 @@
 ---
 id: AC-931
 title: Codex 插件发布面：.codex-plugin/plugin.json 声明 quay MCP 指向安装后 dist
-status: active
+status: achieved
 kind: criterion
 goal: GOAL-913
 criterion: 'if [ ! -f .codex-plugin/plugin.json ]; then echo "FAIL:
@@ -20,6 +20,11 @@ statusLog:
     to: active
     actor: goal-cli
     reason: 人 2026-10-30 裁定激活
+  - at: 2026-10-30T06:49:37.820Z
+    from: active
+    to: achieved
+    actor: goal-driver
+    reason: "I2: criterion pass"
 fidelity:
   verdict: faithful
   reason: "fidelity judge: faithful"

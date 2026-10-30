@@ -56,3 +56,11 @@ AC-932 判据逐字（`goals/AC-932-*.md` 的 criterion）只查一件事：`pac
 ## ADR-007 暗轴记录
 
 - 该轴仍暗,理由:本任务仅在 packages/quay 既有模块内新增生成函数与写入步骤、并在既有封闭集常量上追加条目，无跨包新依赖边，未取 L_D/L_G archguard 读数。
+
+## Blocker
+
+**2026-10-30T07:02:26.702Z — worker 未落地（exited-not-landed）**
+
+- 未落地原因：step=suite: AssertionError [ERR_ASSERTION]: A1: laid-down files must be byte-identical across the two workspaces (only the config file may differ); differing=[".codex/config.toml"] [baseline A/B: HARD RED (task-introduced-red) — the task's red set is NOT a subset of the develop baseline red set: added=packages/quay/test/install-config-driven-e2e.test.mjs changed=-]
+- run_id：wk-prod-anchor
+- session_id：f43fa1e7-1f21-442a-b837-12f765fcbb57
