@@ -3,7 +3,7 @@ id: gap-routine-semantic-dedup-scan-read-file-or-empty
 title: "semantic-dedup-scan: readFileSafe is the documented single read-or-empty
   primitive yet arch-coverage-report.ts (already imports gate-script-base.ts)
   and axis-generator.ts keep byte"
-status: ready
+status: done
 labels:
   - gap
   - routine-filed
