@@ -264,6 +264,30 @@
         "shLines": 7412
       },
       "why": "v0.24.0 cut preflight: artifact built from develop 336c5bd72 via the canonical publisher (publish-dist-branch.sh) and extracted with git archive; +3 files vs the v0.23.0 dist-plugin (scripts/dist/archguard-runner.js, scripts/dist/phase-declare.js, scripts/dist/probe-fallback-path-check.js — entry bundles from tasks landed since v0.23.0, e.g. a56d49106). The three dev-only ratchet axes remain 0; only the artifact-totals ceiling is raised."
+    },
+    {
+      "when": "2026-10-30T02:39:59.258Z",
+      "from": {
+        "files": 0,
+        "bytes": 0,
+        "shLines": 0,
+        "shipped": {
+          "files": 302,
+          "bytes": 70792319,
+          "shLines": 7412
+        }
+      },
+      "to": {
+        "files": 0,
+        "bytes": 0,
+        "shLines": 0
+      },
+      "shipped": {
+        "files": 302,
+        "bytes": 70921854,
+        "shLines": 7415
+      },
+      "why": "codex-stage1 spawn-verify.sh + selfcheck 集成使 shipped .sh 行数 +3（GOAL-912 codex 支持落地，正当增长）"
     }
   ],
   "_axes": {
@@ -278,7 +302,7 @@
   "shLines": 0,
   "shipped": {
     "files": 302,
-    "bytes": 70792319,
-    "shLines": 7412
+    "bytes": 70921854,
+    "shLines": 7415
   }
 }
