@@ -1596,6 +1596,16 @@ export function generateLaunchSettingsContent(): string {
  * (the same bundle `plugin/.mcp.json` names for Claude Code). Without a plugin root there is no
  * spawnable absolute path to compute, so the RELATIVE artifact name is laid down with the comment
  * saying to re-run with `--plugin-root` — never an invented path (硬规则 3b).
+ *
+ * `default_tools_approval_mode = "approve"` is the other load-bearing half
+ * (gap-codex-host-config-approval-policy-blocks-mcp): codex-cli's session approval policy defaults to
+ * `never`, under which every quay MCP tool call is refused before the server is even spawned. The
+ * MCP-server-scoped key that unblocks those calls is `default_tools_approval_mode` (enum
+ * `auto`/`prompt`/`writes`/`approve`) — NOT the top-level profile key `approval_policy`, which codex
+ * 0.165.0 warns is "ignored" under `[mcp_servers.quay]` (verified: `approval_policy = "on-request"`
+ * leaves `task_list` refused; `default_tools_approval_mode = "approve"` lets `task_list` complete).
+ * `approve` auto-approves the quay MCP tools, which is the only value that actually fixes the silent
+ * skip under `approval: never`; the value is emitted verbatim so the reverse arm can flip it.
  */
 export function generateCodexConfigToml(root: string, pluginRoot?: string | null): string {
   const cwd = path.resolve(root);
@@ -1610,6 +1620,11 @@ export function generateCodexConfigToml(root: string, pluginRoot?: string | null
     "# without an explicit `cwd` the server ENOENTs silently from a subdirectory",
     "# (SPEC-codex-long-term-support-2026-10-29 §3.2).",
     "#",
+    "# `default_tools_approval_mode = \"approve\"` is REQUIRED: codex-cli's session approval policy",
+    "# defaults to `never`, which refuses every quay MCP tool call before the server is spawned",
+    "# (gap-codex-host-config-approval-policy-blocks-mcp). `approve` auto-approves the quay MCP tools",
+    "# so `task_list`/`task_get`/`task_write` complete under `approval: never`.",
+    "#",
     "# `args[0]` names the INSTALLED dist bundle (vendor/quay/dist/quay.js) — the AC-931 publish",
     "# surface — never the dev-tree source. Re-run `quay init --plugin-root <root>` if the plugin",
     "# root could not be resolved and the relative path below is not spawnable.",
@@ -1618,6 +1633,7 @@ export function generateCodexConfigToml(root: string, pluginRoot?: string | null
     'command = "node"',
     `args = [${JSON.stringify(runtime)}, "mcp"]`,
     `cwd = ${JSON.stringify(cwd)}`,
+    'default_tools_approval_mode = "approve"',
     "",
   ].join("\n");
 }

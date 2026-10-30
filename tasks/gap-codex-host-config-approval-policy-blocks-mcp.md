@@ -2,7 +2,7 @@
 id: gap-codex-host-config-approval-policy-blocks-mcp
 title: Codex 默认审批策略拦截 quay MCP：init 落盘 .codex/config.toml 补
   default_tools_approval_mode + spawn-verify
-status: ready
+status: done
 labels:
   - gap
   - codex
