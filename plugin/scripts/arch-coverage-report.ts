@@ -105,7 +105,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
-import { helpExit, isDirectEntry, createSelftest } from "./gate-script-base.ts";
+import { helpExit, isDirectEntry, createSelftest, readFileSafe } from "./gate-script-base.ts";
 import { repoRoot as findRepoRoot, mainCheckoutRoot } from "./repo-root.ts";
 
 // ── Exit codes (see the header contract) ────────────────────────────────────────────────────────────
@@ -719,7 +719,7 @@ export function runReport(opts: RunOptions): RunResult {
   let manifestError: string | undefined;
   let manifestParseFailed = false;
   if (manifestFound) {
-    const parsed = parseManifestText(readFileOrEmpty(manifestPath));
+    const parsed = parseManifestText(readFileSafe(manifestPath));
     if (parsed.ok) manifest = parsed.manifest;
     else {
       manifestParseFailed = true;
@@ -844,14 +844,6 @@ export function appendHistoryRecord(
     return { ok: true, path: historyPath, error: null };
   } catch (e: any) {
     return { ok: false, path: historyPath, error: String(e?.message ?? e) };
-  }
-}
-
-function readFileOrEmpty(p: string): string {
-  try {
-    return fs.readFileSync(p, "utf8");
-  } catch {
-    return "";
   }
 }
 

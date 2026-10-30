@@ -2,7 +2,7 @@
 id: gap-routine-architecture-analysis-dup-release-yml-parsers
 title: "architecture-analysis: two adjacent 6-statement functions differ only in
   the regex pattern — duplicated parse-release.yml extraction in the same file"
-status: ready
+status: done
 labels:
   - gap
   - routine-filed

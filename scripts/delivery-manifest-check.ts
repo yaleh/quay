@@ -79,23 +79,16 @@ export function readManifest(root: string): DeliveryManifest | null {
   return JSON.parse(readFileSync(p, 'utf-8'));
 }
 
-/** Parse release.yml to extract the set of artifact-producing npm pack packages */
-export function parseReleaseYmlNpmTarballs(yml: string): Set<string> {
-  const pkgs = new Set<string>();
-  // Match `bash packages/<name>/scripts/package.sh` (the wrapper that calls npm pack)
-  const re = /bash\s+packages\/([\w-]+)\/scripts\/package\.sh/g;
-  let m;
-  while ((m = re.exec(yml)) !== null) {
-    pkgs.add(m[1]);
-  }
-  return pkgs;
-}
+// Match `bash packages/<name>/scripts/package.sh` (the wrapper that calls npm pack)
+export const NPM_TARBALL_RE = /bash\s+packages\/([\w-]+)\/scripts\/package\.sh/g;
+// Match `bash packages/<name>/scripts/build-sea.sh`
+export const SEA_BINARY_RE = /bash\s+packages\/([\w-]+)\/scripts\/build-sea\.sh/g;
 
-/** Parse release.yml to extract SEA build packages */
-export function parseReleaseYmlSeaBinaries(yml: string): Set<string> {
+/** Parse release.yml to extract the set of artifact-producing packages whose build/package
+ *  invocation matches `re` (must carry the `g` flag and capture the package name as $1). */
+export function parseReleaseYmlPackages(yml: string, re: RegExp): Set<string> {
   const pkgs = new Set<string>();
-  // Match `bash packages/<name>/scripts/build-sea.sh`
-  const re = /bash\s+packages\/([\w-]+)\/scripts\/build-sea\.sh/g;
+  re.lastIndex = 0;
   let m;
   while ((m = re.exec(yml)) !== null) {
     pkgs.add(m[1]);
@@ -167,8 +160,8 @@ export function check(root: string): ManifestCheckResult {
     issues.push(`${RELEASE_YML} not found`);
   } else {
     const yml = readFileSync(releaseYmlPath, 'utf-8');
-    releaseNpmTarballs = parseReleaseYmlNpmTarballs(yml);
-    releaseSeaBinaries = parseReleaseYmlSeaBinaries(yml);
+    releaseNpmTarballs = parseReleaseYmlPackages(yml, NPM_TARBALL_RE);
+    releaseSeaBinaries = parseReleaseYmlPackages(yml, SEA_BINARY_RE);
 
     // Compare npm tarballs: manifest-declared vs release.yml-produced
     const manifestNpmSet = new Set(npmTarballs.map((t: any) => t.package));
