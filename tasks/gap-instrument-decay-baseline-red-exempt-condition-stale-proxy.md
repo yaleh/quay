@@ -3,7 +3,7 @@ id: gap-instrument-decay-baseline-red-exempt-condition-stale-proxy
 title: instrument-decay 的 baseline-red-exempt
   裁定条件把「baselineFiles===0」当结构理由——baseline 重现红集后恒误报 rate-stopped；真实触发是「窗口内没有 A/B
   判 exempt」
-status: todo
+status: ready
 labels:
   - gap
   - defect
