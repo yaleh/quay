@@ -68,19 +68,23 @@ absence 的解释是「窗口内没有 A/B 判 exempt」，与 baseline 是否�
 
 ## AC
 
-- [ ] AC1（现状复现，机器面）在主检出运行 `node --experimental-strip-types plugin/scripts/instrument-decay-check.ts --carrier fan-in-step-trace.jsonl --json --no-block`，断言：`decayed[]` 恰含 1 条 `{group:"baseline-red-exempt", kind:"rate-stopped"}`，其 `count === 83`、`lastWrite === "2026-10-29T17:24:11.160Z"`、`detail` 匹配 `/condition command did not hold \(exit 1\)/`；`adjudicated[]` 不含 `baseline-red-exempt`。贴出 `decayed` 与该组在 `companions` 之外的状态。判据可假：若探针已修好或本组恢复写入，该读数即改变。
-- [ ] AC2（写手在、触发未发生，三条实读）① 贴出 `worker-fan-in.ts:3486-3488` 的 `baseline-red-exempt` 写手现场；② 用当前载体算出「末次 `baseline-red-exempt` 之后」的 `baseline-red`（A/B）记录条数与逐条 `verdict` / `baselineFiles` / `taskFiles` / `added`，断言窗口内 ≥1 条 A/B、且**没有一条 `verdict==="exempt"`**；③ 末次 exempt A/B（`verdict==="exempt"`）后紧跟同 task 的 `baseline-red-exempt` 写入（配对完好）。判据可假：若窗口内出现一条 `verdict==="exempt"` 却没有同 task 收尾 ⇒ 写手真腐烂，「触发未发生」为假，本条改按写手修复收口。
-- [ ] AC3（机制落点 + 正负控制）修改 `BASELINE_RED_EXEMPT_TRIGGER_CMD`：**删除** `baselineFiles!==0 ⇒ exit 1`，**保留**「窗口 ≥1 条 A/B」与「`baselineFiles` 字段可读（缺值 ⇒ exit 1）」两个 fail-closed 守卫，写手腐烂守卫（每条 exempt 必须同 task 收尾）不变；并更新 MANIFEST 该条 `reason` 为机制本身（不点名当前 reds 实例）。在 `plugin/test/instrument-decay-check.test.mjs` 增加用例并贴出正负控制：① 正控制——当前真实生产载体上 `conditionCmd` exit 0、该组进入 `adjudicated[]`（`state:"explained-absent"`、`count=83`、`lastWrite` 不变）；② 负控制——窗口内一条 `baseline-red` `verdict:"exempt"` 无同 task 收尾 ⇒ exit 1、回 `decayed[]`；③ 负控制——窗口内 0 条 A/B ⇒ exit 1；④ 负控制——A/B 缺 `baselineFiles` 字段 ⇒ exit 1；⑤ 正控制（新场景）——窗口内 A/B 全 hard-red 但 `baselineFiles` 非 0（如 =2）⇒ exit 0（这是本条修的核心：baseline 非空不再误报）。判据可假：任一负控制仍被豁免 ⇒ 探针过宽；正控制 ⑤ 仍 exit 1 ⇒ 修法没生效。
-- [ ] AC4（读数不消失）改后重跑 detector：`decayed[]` 不再含 `baseline-red-exempt`；该组出现在 `adjudicated[]` 且 `count` / `lastWrite` 与 AC1 完全一致（⛔ 不得因「不算腐烂」从读数消失，硬规则 3b）。贴出 `--json` 的 `decayed[]` 与 `adjudicated[]`。
-- [ ] AC5（回归）`bash scripts/test.sh --for-task gap-instrument-decay-baseline-red-exempt-condition-stale-proxy` 通过（含 `plugin/test/instrument-decay-check.test.mjs`）；贴出 scoped 静态检查与命中文件的 tests/pass/fail。
+- [x] AC1（现状复现，机器面）在主检出运行 `node --experimental-strip-types plugin/scripts/instrument-decay-check.ts --carrier fan-in-step-trace.jsonl --json --no-block`，断言：`decayed[]` 恰含 1 条 `{group:"baseline-red-exempt", kind:"rate-stopped"}`，其 `count === 83`、`lastWrite === "2026-10-29T17:24:11.160Z"`、`detail` 匹配 `/condition command did not hold \(exit 1\)/`；`adjudicated[]` 不含 `baseline-red-exempt`。贴出 `decayed` 与该组在 `companions` 之外的状态。判据可假：若探针已修好或本组恢复写入，该读数即改变。
+- [x] AC2（写手在、触发未发生，三条实读）① 贴出 `worker-fan-in.ts:3486-3488` 的 `baseline-red-exempt` 写手现场；② 用当前载体算出「末次 `baseline-red-exempt` 之后」的 `baseline-red`（A/B）记录条数与逐条 `verdict` / `baselineFiles` / `taskFiles` / `added`，断言窗口内 ≥1 条 A/B、且**没有一条 `verdict==="exempt"`**；③ 末次 exempt A/B（`verdict==="exempt"`）后紧跟同 task 的 `baseline-red-exempt` 写入（配对完好）。判据可假：若窗口内出现一条 `verdict==="exempt"` 却没有同 task 收尾 ⇒ 写手真腐烂，「触发未发生」为假，本条改按写手修复收口。
+- [x] AC3（机制落点 + 正负控制）修改 `BASELINE_RED_EXEMPT_TRIGGER_CMD`：**删除** `baselineFiles!==0 ⇒ exit 1`，**保留**「窗口 ≥1 条 A/B」与「`baselineFiles` 字段可读（缺值 ⇒ exit 1）」两个 fail-closed 守卫，写手腐烂守卫（每条 exempt 必须同 task 收尾）不变；并更新 MANIFEST 该条 `reason` 为机制本身（不点名当前 reds 实例）。在 `plugin/test/instrument-decay-check.test.mjs` 增加用例并贴出正负控制：① 正控制——当前真实生产载体上 `conditionCmd` exit 0、该组进入 `adjudicated[]`（`state:"explained-absent"`、`count=83`、`lastWrite` 不变）；② 负控制——窗口内一条 `baseline-red` `verdict:"exempt"` 无同 task 收尾 ⇒ exit 1、回 `decayed[]`；③ 负控制——窗口内 0 条 A/B ⇒ exit 1；④ 负控制——A/B 缺 `baselineFiles` 字段 ⇒ exit 1；⑤ 正控制（新场景）——窗口内 A/B 全 hard-red 但 `baselineFiles` 非 0（如 =2）⇒ exit 0（这是本条修的核心：baseline 非空不再误报）。判据可假：任一负控制仍被豁免 ⇒ 探针过宽；正控制 ⑤ 仍 exit 1 ⇒ 修法没生效。
+- [x] AC4（读数不消失）改后重跑 detector：`decayed[]` 不再含 `baseline-red-exempt`；该组出现在 `adjudicated[]` 且 `count` / `lastWrite` 与 AC1 完全一致（⛔ 不得因「不算腐烂」从读数消失，硬规则 3b）。贴出 `--json` 的 `decayed[]` 与 `adjudicated[]`。
+- [x] AC5（回归）`bash scripts/test.sh --for-task gap-instrument-decay-baseline-red-exempt-condition-stale-proxy` 通过（含 `plugin/test/instrument-decay-check.test.mjs`）；贴出 scoped 静态检查与命中文件的 tests/pass/fail。
 
 ## DoD
 
-- [ ] AC1–AC5 全绿；改动只在 `plugin/scripts/instrument-decay-check.ts` 与 `plugin/test/instrument-decay-check.test.mjs`（+ 任务文件经 `task_write`），不改 Shape B 判定逻辑、不新增第二套裁定表——只改 `BASELINE_RED_EXEMPT_TRIGGER_CMD` 常量与 MANIFEST 该条 `reason` 文本。
-- [ ] 真实载体上跑出 AC4 的读数（不是 fixture 回显）：`adjudicated[]` 里的这一条由生产 `.quay/fan-in-step-trace.jsonl` 的实跑产生，并贴出运行时刻、载体 `freshest` 与 `count` / `lastWrite`。
+- [x] AC1–AC5 全绿；改动只在 `plugin/scripts/instrument-decay-check.ts` 与 `plugin/test/instrument-decay-check.test.mjs`（+ 任务文件经 `task_write`），不改 Shape B 判定逻辑、不新增第二套裁定表——只改 `BASELINE_RED_EXEMPT_TRIGGER_CMD` 常量与 MANIFEST 该条 `reason` 文本。
+- [x] 真实载体上跑出 AC4 的读数（不是 fixture 回显）：`adjudicated[]` 里的这一条由生产 `.quay/fan-in-step-trace.jsonl` 的实跑产生，并贴出运行时刻、载体 `freshest` 与 `count` / `lastWrite`。
 
 ## Touches
 
 - plugin/scripts/instrument-decay-check.ts
 - plugin/test/instrument-decay-check.test.mjs
 - tasks/gap-instrument-decay-baseline-red-exempt-condition-stale-proxy.md
+
+## Dark Axis
+
+- 该轴仍暗,理由:本任务只改 instrument-decay-check.ts 的 BASELINE_RED_EXEMPT_TRIGGER_CMD 条件命令与 MANIFEST reason 文本 + 测试夹具，不新增依赖/环/模块，无 L_D/L_G 读数可采。
