@@ -1,7 +1,7 @@
 ---
 id: GOAL-912
 title: Codex 作为 quay 的长期支持宿主——交互式 operator 阶段，driver 会话链路除外
-status: active
+status: achieved
 kind: goal
 origin: 人 2026-10-29 裁定「长期支持」+ goal branch 模式（SPEC-codex-long-term-support
   §1）；证据=本会话 cwd 实测与 DIR-121 无理由 superseded 核查
@@ -12,6 +12,11 @@ statusLog:
     to: active
     actor: goal-cli
     reason: 人 2026-10-29 裁定：长期支持 + goal branch 模式（SPEC-codex-long-term-support §1 ③）
+  - at: 2026-10-30T00:24:22.921Z
+    from: active
+    to: achieved
+    actor: goal-driver
+    reason: "I2: all ACs achieved + sufficiency covered"
 branch: true
 ---
 ## 退出条件
