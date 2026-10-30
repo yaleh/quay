@@ -57,3 +57,4 @@ master 推进机制已定位并修复，master ff 到最近全绿 tag，且该�
 - plugin/scripts/release-model-check.ts
 - plugin/scripts/checker-mutation-cases/release-model-check.sh
 - plugin/test/release-model-check.test.mjs
+- plugin/scripts/runner-static-gate.ts
