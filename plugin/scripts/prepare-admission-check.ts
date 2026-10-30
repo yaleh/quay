@@ -53,6 +53,7 @@ import { extractSection, checkTouches, countBoxes } from "./task-schema.ts";
 // SINGLE-SOURCE (gap-task-body-has-n-parsers-and-no-authority): the ONE Touches bullet parser.
 import { parseTouchEntries } from "./touches-parser.ts";
 import { splitSentences } from "./wiring-coverage-check.ts";
+import { syncSleep } from "../../packages/quay/src/kernel/sync-sleep.ts";
 // parsePlanStages / validatePlanStructure are inlined below (retired from
 // ./milestone-preparation-check.ts at gap-retire-the-prepare-execute-pipeline-cluster).
 
@@ -124,16 +125,13 @@ function leaseKey(workspace, taskId) {
 // `_decideResumeCli` -> `decision-exception`, `renewLease`/`releaseLease` -> `{ok:false,
 // error:'lease-missing'}`) stay intact — never masked into a false "found", never an unbounded retry.
 const LEASE_READ_RETRY_DELAYS_MS = [20, 40, 80];
-function _syncSleepMs(ms) {
-  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
-}
 export function _readLeaseFileWithRetry(p) {
   for (let i = 0; i < LEASE_READ_RETRY_DELAYS_MS.length; i++) {
     try {
       return fs.readFileSync(p, "utf8");
     } catch (err) {
       if (err.code !== "ENOENT") throw err;
-      _syncSleepMs(LEASE_READ_RETRY_DELAYS_MS[i]);
+      syncSleep(LEASE_READ_RETRY_DELAYS_MS[i]);
     }
   }
   return fs.readFileSync(p, "utf8"); // last attempt — a still-missing file propagates ENOENT here
