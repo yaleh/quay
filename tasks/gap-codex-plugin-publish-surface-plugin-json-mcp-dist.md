@@ -53,6 +53,6 @@ Claude Code 侧的同构先例是 `plugin/.mcp.json`——它用 `{"command":"no
 
 ## Touches
 
-- .codex-plugin/plugin.json
-- plugin/test/codex-plugin-surface.test.mjs
+- .codex-plugin/plugin.json (new)
+- plugin/test/codex-plugin-surface.test.mjs (new)
 - tasks/gap-codex-plugin-publish-surface-plugin-json-mcp-dist.md
