@@ -482,8 +482,24 @@
         "embeddedInterpreterLines": "+2 = plugin/scripts/publish-dist-branch.sh codeLines 92 -> 94 (the fail-closed guard line + the rsync line; the file was already ON the axis via its embedded `node --experimental-strip-types` calls). Residual = 0: this task's only tracked *.sh delta is that one file (`git diff --name-only develop -- '*.sh'`), so no other member contributes.",
         "duplicateCopies": "0 — untouched (0 is the assertion, not an omission). No experiments/** mirror added and no byte-identical pair created."
       }
+    },
+    {
+      "when": "2026-10-30 (gap-codex-host-config-approval-policy-blocks-mcp — the task's own delta)",
+      "from": {
+        "embeddedInterpreterLines": 6462,
+        "duplicateCopies": 0
+      },
+      "to": {
+        "embeddedInterpreterLines": 6575,
+        "duplicateCopies": 0
+      },
+      "why": "UPWARD re-anchor (+113) — the deliberate cost of AC2: plugin/scripts/codex-stage1-spawn-verify.sh's opt-in --codex-exec path must call the quay CLI at a command position (node --no-warnings --experimental-strip-types … quay.ts init / … quay.ts task create) to lay down and seed a consumer workspace, which moves the whole 113-code-line script INTO the embedded-node axis (embedded [] -> [node]). The rejected alternative — writing the probe task via `cat > …/tasks/*.md` — is a task-file bypass the sibling ratchet refuses, so the ABI call is the only compliant shape; comment lines (the WHY) are free. ⛔ AC6 of plugin/test/sh-census-check.test.mjs requires the committed baseline to EQUAL the live reading, not merely bound it. Measured with the checker's OWN reading on this tree: sh-census-check.ts --json → totals.embeddedInterpreterLines 6575 — never hand-fitted.",
+      "attribution": {
+        "embeddedInterpreterLines": "+113 = plugin/scripts/codex-stage1-spawn-verify.sh codeLines 0 (not embedded before) -> 113 (embedded [node] after adding the two command-position `node … quay.ts init` / `node … quay.ts task create` calls). Residual = 0 BY CONSTRUCTION: this task's only tracked *.sh delta vs develop is this one file, and its census membership is what moved (embedded [] -> [node]).",
+        "duplicateCopies": "0 — untouched (0 is the assertion, not an omission). No experiments/** mirror added and no byte-identical pair created."
+      }
     }
   ],
-  "embeddedInterpreterLines": 6462,
+  "embeddedInterpreterLines": 6575,
   "duplicateCopies": 0
 }

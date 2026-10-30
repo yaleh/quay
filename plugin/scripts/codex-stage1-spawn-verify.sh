@@ -136,34 +136,23 @@ if [[ "${1:-}" = "--codex-exec" ]]; then
     PROBE_ID="codex-probe-$$"
     if node --no-warnings --experimental-strip-types "$REPO_ROOT/packages/quay/bin/quay.ts" init \
         --root "$CODEX_TMP" --plugin-root "$REPO_ROOT/plugin" --test-command true >/dev/null 2>&1; then
-      mkdir -p "$CODEX_TMP/tasks"
-      cat > "$CODEX_TMP/tasks/$PROBE_ID.md" <<EOF
----
-id: $PROBE_ID
-title: codex probe task
-status: todo
-labels: []
----
-## Proposal
-probe task for spawn-verify
-## Plan
-probe
-## Acceptance Criteria
-- [ ] probe
-## Definition of Done
-probe
-EOF
-      CODEX_OUT="$(timeout 180 codex exec --dangerously-bypass-approvals-and-sandbox -C "$CODEX_TMP" \
-        -o "$CODEX_TMP/last-msg.txt" \
-        "Call the quay MCP tool task_list with no arguments, then reply with ONLY the id of the first task." \
-        </dev/null 2>&1)"
-      codex_status=$?
-      LAST_MSG="$(cat "$CODEX_TMP/last-msg.txt" 2>/dev/null)"
-      if [[ "$codex_status" -eq 0 ]] && printf '%s\n%s\n' "$CODEX_OUT" "$LAST_MSG" | grep -q "$PROBE_ID"; then
-        pass "codex exec completed quay MCP task_list and returned the probe task id ($PROBE_ID)"
+      if node --no-warnings --experimental-strip-types "$REPO_ROOT/packages/quay/bin/quay.ts" task create \
+          "$PROBE_ID" --title "codex probe task" --body "probe task for spawn-verify" \
+          --root "$CODEX_TMP" >/dev/null 2>&1; then
+        CODEX_OUT="$(timeout 180 codex exec --dangerously-bypass-approvals-and-sandbox -C "$CODEX_TMP" \
+          -o "$CODEX_TMP/last-msg.txt" \
+          "Call the quay MCP tool task_list with no arguments, then reply with ONLY the id of the first task." \
+          </dev/null 2>&1)"
+        codex_status=$?
+        LAST_MSG="$(cat "$CODEX_TMP/last-msg.txt" 2>/dev/null)"
+        if [[ "$codex_status" -eq 0 ]] && printf '%s\n%s\n' "$CODEX_OUT" "$LAST_MSG" | grep -q "$PROBE_ID"; then
+          pass "codex exec completed quay MCP task_list and returned the probe task id ($PROBE_ID)"
+        else
+          bad "codex exec did NOT complete quay MCP task_list (exit $codex_status, probe id $PROBE_ID missing). Output:"
+          printf '%s\n' "$CODEX_OUT" | sed 's/^/       /'
+        fi
       else
-        bad "codex exec did NOT complete quay MCP task_list (exit $codex_status, probe id $PROBE_ID missing). Output:"
-        printf '%s\n' "$CODEX_OUT" | sed 's/^/       /'
+        bad "quay task create could not seed the probe task ($PROBE_ID) in the consumer workspace"
       fi
     else
       bad "quay init could not lay down the consumer workspace for --codex-exec"
