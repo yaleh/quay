@@ -1,7 +1,7 @@
 ---
 id: gap-codex-plugin-json-version-not-a-carrier
 title: .codex-plugin/plugin.json version 硬编码且非版本载体：stamp-version 不更新
-status: ready
+status: done
 labels:
   - gap
   - codex

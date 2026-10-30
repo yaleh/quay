@@ -59,6 +59,14 @@ export interface VersionCarrier {
   /** path relative to the tree root the carrier is read/written in */
   path: string;
   /**
+   * OPTIONAL: this carrier's path inside a BUILD ARTIFACT tree, relative to that tree's root. When
+   * absent, the carrier is a build carrier iff its `path` is under the build prefix (`plugin/`), with
+   * that prefix dropped (see `buildCarriers`). When present, the carrier is ALWAYS a build carrier at
+   * exactly this path — the `.codex-plugin/plugin.json` case: repo-root (not under `plugin/`), but
+   * copied verbatim into the artifact root by `publish-dist-branch.sh`.
+   */
+  buildPath?: string;
+  /**
    * Structural read — what the JUDGMENT is made on. THROWS when the carrier cannot be evaluated
    * (never returns a value shaped like a pass).
    */
@@ -157,9 +165,10 @@ function packageLockEntry(dir: string): VersionCarrier {
 // ── THE TABLE (single home — both the judge and the generator import this) ────────────────────────
 
 /**
- * Every version-bearing file, in report order. 13 entries over 10 distinct files:
- * the 4 `packages/<name>/package.json`, the 4 `package-lock.json` workspace entries, `plugin.json`,
- * `plugin/README.md`, `plugin/vendor/quay/package.json`, `plugin/VERSION`, and `delivery-manifest.json`.
+ * Every version-bearing file, in report order. 14 entries over 11 distinct files:
+ * the 4 `packages/<name>/package.json`, the 4 `package-lock.json` workspace entries,
+ * `plugin/.claude-plugin/plugin.json`, `.codex-plugin/plugin.json`, `plugin/README.md`,
+ * `plugin/vendor/quay/package.json`, `plugin/VERSION`, and `delivery-manifest.json`.
  *
  * ── WHY THE TWO `marketplace.json` ENTRIES ARE NOT HERE (2026-09-20) ─────────────────────────────
  * `gap-version-marketplace-omit-and-spec-amendment` measured whether the `plugins[].version` field of
@@ -194,6 +203,17 @@ export const VERSION_CARRIERS: VersionCarrier[] = [
   jsonVersionField('packages/quay-github', 'packages/quay-github/package.json'),
   jsonVersionField('packages/quay-backlog', 'packages/quay-backlog/package.json'),
   jsonVersionField('plugin/.claude-plugin/plugin.json', 'plugin/.claude-plugin/plugin.json'),
+  {
+    // The Codex publish surface (AC-931) lives at REPO ROOT, not under plugin/ — publish-dist-branch.sh
+    // copies `.codex-plugin/` verbatim into the artifact root, so unlike `packages/*/package.json` and
+    // `delivery-manifest.json` it DOES ship in the plugin artifact. It is therefore BOTH a tracked
+    // carrier and a build carrier: `buildPath` spells its artifact-relative path (unchanged — the copy
+    // keeps the same relative location). Added by gap-codex-plugin-json-version-not-a-carrier: the
+    // file was a hardcoded `0.26.0-dev` literal outside the carrier table, so `stamp-version` never
+    // updated it and `version-consistency-check` never judged it while every sibling carrier moved on.
+    ...jsonVersionField('.codex-plugin/plugin.json', '.codex-plugin/plugin.json'),
+    buildPath: '.codex-plugin/plugin.json',
+  },
   {
     // Prose carrier, not a machine field: its version lives inside the sentence
     // `quay plugin v<semver> — …`. Both halves are ANCHORED to that sentence and THROW when it cannot
@@ -304,7 +324,7 @@ export const VERSION_CARRIERS: VersionCarrier[] = [
   packageLockEntry('quay-backlog'),
 ];
 
-/** The distinct files the table covers (10 for the 13 entries — package-lock contributes 4 entries). */
+/** The distinct files the table covers (11 for the 14 entries — package-lock contributes 4 entries). */
 export function carrierPaths(carriers: VersionCarrier[] = VERSION_CARRIERS): string[] {
   return [...new Set(carriers.map((c) => c.path))];
 }
@@ -392,15 +412,24 @@ export function stampedContent(raw: string, carrier: VersionCarrier, version: st
  * A build artifact tree (`plugin/` in the repo, the assembled orphan `dist-plugin` tree, the npm-pack
  * snapshot `packages/quay/plugin/`) has the PLUGIN layout at its root, not the repo layout: the
  * carriers that exist there are the ones this table spells under `plugin/`, with that prefix dropped.
+ * A carrier with an explicit `buildPath` (the `.codex-plugin/plugin.json` case) is shipped VERBATIM at
+ * that artifact-relative path instead — its repo path is not under `plugin/`, but publish-dist-branch.sh
+ * copies it into the artifact root unchanged, so it is a build carrier at the SAME relative path.
  * Projecting the table this way (rather than writing a second, hand-maintained list) is what keeps
  * "which files carry a version" a single fact: adding a carrier under `plugin/` automatically becomes
  * a build-time carrier, and the projection cannot silently omit one.
  */
 export function buildCarriers(top: string): VersionCarrier[] {
   const prefix = top.endsWith('/') ? top : `${top}/`;
-  return VERSION_CARRIERS.filter((c) => c.path.startsWith(prefix)).map((c) => ({
-    ...c,
-    path: c.path.slice(prefix.length),
-    label: `${c.label} [build:${c.path}]`,
-  }));
+  const out: VersionCarrier[] = [];
+  for (const c of VERSION_CARRIERS) {
+    const buildPath = c.buildPath;
+    if (buildPath === undefined && !c.path.startsWith(prefix)) continue;
+    out.push({
+      ...c,
+      path: buildPath !== undefined ? buildPath : c.path.slice(prefix.length),
+      label: `${c.label} [build:${c.path}]`,
+    });
+  }
+  return out;
 }
