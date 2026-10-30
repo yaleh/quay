@@ -11,7 +11,7 @@ import { tmpdir } from 'node:os';
 import { resolve, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execSync } from 'node:child_process';
-import { check, readManifest, parseReleaseYmlNpmTarballs, parseReleaseYmlSeaBinaries } from './delivery-manifest-check.ts';
+import { check, readManifest, parseReleaseYmlPackages, NPM_TARBALL_RE, SEA_BINARY_RE } from './delivery-manifest-check.ts';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(__dirname, '..');
@@ -19,25 +19,32 @@ const scriptPath = resolve(__dirname, 'delivery-manifest-check.ts');
 
 // ── Parser unit tests ─────────────────────────────────────────────────
 
-test('parseReleaseYmlNpmTarballs extracts package.sh packages', () => {
+test('parseReleaseYmlPackages extracts package.sh packages', () => {
   const yml = 'bash packages/quay/scripts/package.sh\nbash packages/quay-native/scripts/package.sh';
-  const pkgs = parseReleaseYmlNpmTarballs(yml);
+  const pkgs = parseReleaseYmlPackages(yml, NPM_TARBALL_RE);
   assert.equal(pkgs.size, 2);
   assert.ok(pkgs.has('quay'));
   assert.ok(pkgs.has('quay-native'));
 });
 
-test('parseReleaseYmlNpmTarballs returns empty for no match', () => {
-  const pkgs = parseReleaseYmlNpmTarballs('no npm pack here');
+test('parseReleaseYmlPackages returns empty for no match', () => {
+  const pkgs = parseReleaseYmlPackages('no npm pack here', NPM_TARBALL_RE);
   assert.equal(pkgs.size, 0);
 });
 
-test('parseReleaseYmlSeaBinaries extracts build-sea packages', () => {
+test('parseReleaseYmlPackages extracts build-sea packages', () => {
   const yml = 'bash packages/quay/scripts/build-sea.sh\nbash packages/quay-native/scripts/build-sea.sh';
-  const pkgs = parseReleaseYmlSeaBinaries(yml);
+  const pkgs = parseReleaseYmlPackages(yml, SEA_BINARY_RE);
   assert.equal(pkgs.size, 2);
   assert.ok(pkgs.has('quay'));
   assert.ok(pkgs.has('quay-native'));
+});
+
+test('parseReleaseYmlPackages resets a shared regex lastIndex between calls', () => {
+  // The module-level regexes are shared; a stale `g`-flag lastIndex must not bleed across calls.
+  const yml = 'bash packages/quay/scripts/package.sh';
+  assert.equal(parseReleaseYmlPackages(yml, NPM_TARBALL_RE).size, 1);
+  assert.equal(parseReleaseYmlPackages(yml, NPM_TARBALL_RE).size, 1);
 });
 
 // ── Manifest checks ───────────────────────────────────────────────────
