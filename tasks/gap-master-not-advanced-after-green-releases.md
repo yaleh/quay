@@ -1,7 +1,7 @@
 ---
 id: gap-master-not-advanced-after-green-releases
 title: master 停在 v0.8.0——v0.9~v0.24 release.yml 全绿但 master 未推进
-status: todo
+status: ready
 labels:
   - gap
   - release
