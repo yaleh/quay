@@ -110,7 +110,7 @@ function makeFixture(name: string, versions: Record<string, string>, opts: Fixtu
   return tmp;
 }
 
-/** A fixture whose 13 carriers all carry `carrierVersion`, with `VERSION` holding `base`. */
+/** A fixture whose 14 carriers all carry `carrierVersion`, with `VERSION` holding `base`. */
 function consistentFixture(name: string, base: string, carrierVersion = `${base}${DEV_SUFFIX}`): string {
   const versions: Record<string, string> = {};
   for (const p of ALL_PATHS) versions[p] = carrierVersion;
@@ -118,12 +118,12 @@ function consistentFixture(name: string, base: string, carrierVersion = `${base}
 }
 
 /**
- * Every carrier ENTRY the checker judges — 13 over 10 files. Held as entries (not files) so the count
+ * Every carrier ENTRY the checker judges — 14 over 11 files. Held as entries (not files) so the count
  * assertions below pin the union size the judge actually walks: `package-lock.json` contributes four.
  * (Was 15 over 12 until 2026-09-20, when the two `marketplace.json` `plugins[].version` entries left
  * the table with the field itself — see ALL_PATHS's note.)
  */
-const CARRIER_ENTRY_COUNT = 13;
+const CARRIER_ENTRY_COUNT = 14;
 
 /** The four `package-lock.json` workspace members whose `version` is a carrier entry. */
 const LOCK_WORKSPACE_DIRS = ['quay', 'quay-native', 'quay-github', 'quay-backlog'];
@@ -134,12 +134,13 @@ const ALL_PATHS = [
   'packages/quay-github/package.json',
   'packages/quay-backlog/package.json',
   'plugin/.claude-plugin/plugin.json',
-  'plugin/README.md',
   // ⛔ NO marketplace.json path here (2026-09-20): the two `plugins[].version` entries left the
   // carrier table when the field itself was deleted — real installs measured under an isolated
   // `CLAUDE_CONFIG_DIR` showed the CLI never reads it (the cache key comes from the fetched plugin's
   // own `plugin.json`). A marketplace advertising `9.9.9` against a `0.10.0-dev` manifest still
   // reports `0.10.0-dev`. See scripts/version-carriers.ts's table comment for the four readings.
+  '.codex-plugin/plugin.json',
+  'plugin/README.md',
   'plugin/vendor/quay/package.json',
   'plugin/VERSION',
   'delivery-manifest.json',
@@ -149,7 +150,7 @@ const ALL_PATHS = [
 
 // ── Unit tests ──────────────────────────────────────────────────────────
 
-test('readVersions returns 15 entries for the real tree', () => {
+test('readVersions returns every carrier entry for the real tree', () => {
   const entries = readVersions(repoRoot);
   assert.equal(entries.length, CARRIER_ENTRY_COUNT);
   for (const e of entries) {

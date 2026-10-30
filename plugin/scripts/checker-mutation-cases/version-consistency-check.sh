@@ -4,7 +4,7 @@
 # ── THE JUDGMENT (tasks/gap-version-single-source-root-file-and-resolver, 2026-09-20) ───────────
 # Was: every version-bearing artifact must carry the identical version (internal consistency).
 # Is:  every artifact must equal `resolveVersion(VERSION,'tracked')` — the SINGLE SOURCE at the repo
-#      root. So the fixture carries a `VERSION` file (bare `1.0.0`) AND all 13 carrier entries (10 files
+#      root. So the fixture carries a `VERSION` file (bare `1.0.0`) AND all 14 carrier entries (11 files
 #      — `package-lock.json` contributes four workspace members) stamped with the derived tracked form
 #      (`1.0.0-dev`).
 #      ⛔ 2026-09-20 (gap-version-marketplace-omit-and-spec-amendment): the two `marketplace.json`
@@ -60,7 +60,8 @@ scripts_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)/scripts"
 
 mkdir -p "${workdir}/packages/quay" "${workdir}/packages/quay-native" \
   "${workdir}/packages/quay-github" "${workdir}/packages/quay-backlog" \
-  "${workdir}/plugin/.claude-plugin" "${workdir}/plugin/vendor/quay"
+  "${workdir}/plugin/.claude-plugin" "${workdir}/plugin/vendor/quay" \
+  "${workdir}/.codex-plugin"
 
 # The derived tracked form the carriers must carry, and the bare base the source must hold.
 carrier_ver="1.0.0-dev"
@@ -73,6 +74,10 @@ mkver "quay-github" "${carrier_ver}" "${workdir}/packages/quay-github/package.js
 mkver "quay-backlog" "${carrier_ver}" "${workdir}/packages/quay-backlog/package.json"
 mkver "quay"        "${carrier_ver}" "${workdir}/plugin/vendor/quay/package.json"
 printf '{\n  "name": "quay",\n  "version": "%s",\n  "main": "dist/entry.js"\n}\n' "${carrier_ver}" > "${workdir}/plugin/.claude-plugin/plugin.json"
+# Codex publish surface (gap-codex-plugin-json-version-not-a-carrier) — a repo-root JSON carrier that
+# ships in the artifact, added to the carrier table after `.claude-plugin/plugin.json`. Absent here ⇒
+# mode:'error' ⇒ false "checker always-red" (same INVARIANT (a) as every other artifact above).
+mkver "quay"        "${carrier_ver}" "${workdir}/.codex-plugin/plugin.json"
 # Prose carrier — must be present and parseable, else the baseline reads mode:'error' (NOT exit 0).
 printf '# quay plugin\n\nquay plugin v%s - fixture.\n' "${carrier_ver}" > "${workdir}/plugin/README.md"
 # Plain-text stamp — MUST be present, else the entry reads mode:'error' and the whole case reports a
@@ -180,6 +185,7 @@ mkver "quay-github"  "1.0.1-dev" "${workdir}/packages/quay-github/package.json"
 mkver "quay-backlog" "1.0.1-dev" "${workdir}/packages/quay-backlog/package.json"
 mkver "quay"         "1.0.1-dev" "${workdir}/plugin/vendor/quay/package.json"
 printf '{\n  "name": "quay",\n  "version": "1.0.1-dev",\n  "main": "dist/entry.js"\n}\n' > "${workdir}/plugin/.claude-plugin/plugin.json"
+mkver "quay"         "1.0.1-dev" "${workdir}/.codex-plugin/plugin.json"
 printf '# quay plugin\n\nquay plugin v1.0.1-dev - fixture.\n' > "${workdir}/plugin/README.md"
 printf '1.0.1-dev\n' > "${workdir}/plugin/VERSION"
 mkmanifest "1.0.1-dev"
@@ -196,6 +202,7 @@ mkver "quay-github"  "${carrier_ver}" "${workdir}/packages/quay-github/package.j
 mkver "quay-backlog" "${carrier_ver}" "${workdir}/packages/quay-backlog/package.json"
 mkver "quay"         "${carrier_ver}" "${workdir}/plugin/vendor/quay/package.json"
 printf '{\n  "name": "quay",\n  "version": "%s",\n  "main": "dist/entry.js"\n}\n' "${carrier_ver}" > "${workdir}/plugin/.claude-plugin/plugin.json"
+mkver "quay"         "${carrier_ver}" "${workdir}/.codex-plugin/plugin.json"
 printf '# quay plugin\n\nquay plugin v%s - fixture.\n' "${carrier_ver}" > "${workdir}/plugin/README.md"
 printf '%s\n' "${carrier_ver}" > "${workdir}/plugin/VERSION"
 mkmanifest "${carrier_ver}"

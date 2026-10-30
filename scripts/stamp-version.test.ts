@@ -97,6 +97,20 @@ test('one stamp call after changing VERSION makes every carrier (and the judge) 
   assert.match(again.stdout, /wrote nothing/);
 });
 
+test('.codex-plugin/plugin.json is a tracked carrier: stamp makes it equal plugin/VERSION (AC4)', () => {
+  // The per-carrier loop above already walks every table member (so a carrier the generator misses
+  // reddens there); this is the EXPLICIT assertion the AC names — that the Codex publish surface's
+  // version lands equal to plugin/VERSION after a stamp, not just "some version that parses".
+  const tree = copyRealCarrierTree('codex-plugin');
+  writeFileSync(resolve(tree, 'VERSION'), '9.9.9\n');
+  assert.equal(runCli(stampTs, ['--root', tree]).status, 0, 'stamp must succeed');
+
+  const codexVersion = JSON.parse(readFileSync(resolve(tree, '.codex-plugin/plugin.json'), 'utf-8')).version;
+  const pluginVersion = readFileSync(resolve(tree, 'plugin/VERSION'), 'utf-8').trim();
+  assert.equal(codexVersion, '9.9.9-dev');
+  assert.equal(codexVersion, pluginVersion, 'stamped .codex-plugin/plugin.json must equal plugin/VERSION');
+});
+
 test('--check reports drift with file and before/after, and writes nothing', () => {
   const tree = copyRealCarrierTree('check');
   writeFileSync(resolve(tree, 'VERSION'), '9.9.9\n');
@@ -201,15 +215,20 @@ test('buildCarriers projects the table onto a plugin-rooted artifact tree', () =
     // nothing (measured — see version-carriers.ts), so the field was deleted and its carrier with it
     // (gap-version-marketplace-omit-and-spec-amendment, 2026-09-20). A build no longer stamps it.
     '.claude-plugin/plugin.json',
+    // `.codex-plugin/plugin.json` ships VERBATIM at the artifact root (repo-root carrier with an
+    // explicit `buildPath`), so it IS here even though its repo path is not under `plugin/`.
+    '.codex-plugin/plugin.json',
     'README.md',
     'VERSION',
     'vendor/quay/package.json',
   ]);
-  // The projection is DERIVED, so a carrier added under plugin/ appears here automatically — that is
-  // the property distinguishing it from a second hand-written list.
+  // The projection is DERIVED: a carrier added under plugin/ (or given an explicit buildPath) appears
+  // here automatically — that is the property distinguishing it from a second hand-written list.
   assert.equal(
     carriers.length,
-    VERSION_CARRIERS.filter((c) => c.path.startsWith(`${BUILD_TREE_PREFIX}/`)).length,
+    VERSION_CARRIERS.filter(
+      (c) => c.path.startsWith(`${BUILD_TREE_PREFIX}/`) || c.buildPath !== undefined,
+    ).length,
   );
 });
 
@@ -221,7 +240,9 @@ test('stamp writes the build form into an artifact tree (unit: no git needed)', 
   for (const c of buildCarriers(BUILD_TREE_PREFIX)) {
     const to = resolve(dist, c.path);
     mkdirSync(dirname(to), { recursive: true });
-    writeFileSync(to, readFileSync(resolve(tree, `plugin/${c.path}`)));
+    // buildPath carriers ship verbatim from the repo root; plugin/-prefixed ones from plugin/.
+    const srcRel = c.buildPath !== undefined ? c.buildPath : `plugin/${c.path}`;
+    writeFileSync(to, readFileSync(resolve(tree, srcRel)));
   }
   const report = stamp({
     root: dist,
@@ -239,6 +260,8 @@ test('stamp writes the build form into an artifact tree (unit: no git needed)', 
   assert.equal(readFileSync(resolve(dist, 'README.md'), 'utf-8').includes('quay plugin v9.9.9 '), true);
   const pluginJson = JSON.parse(readFileSync(resolve(dist, '.claude-plugin/plugin.json'), 'utf-8'));
   assert.equal(pluginJson.version, '9.9.9');
+  const codexPluginJson = JSON.parse(readFileSync(resolve(dist, '.codex-plugin/plugin.json'), 'utf-8'));
+  assert.equal(codexPluginJson.version, '9.9.9');
 });
 
 test('NOT-EVALUATED writes nothing at all (build mode on an unjudgeable tree)', () => {
