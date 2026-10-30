@@ -22,11 +22,11 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1 载体登记（按位置）：`grep -n 'codex-plugin' scripts/version-carriers.ts` 命中 `.codex-plugin/plugin.json` 的载体条目（非注释/字符串巧合；贴条目与行号）。
-- [ ] AC2 stamp 生效（能取假）：把 `.codex-plugin/plugin.json` 的 `version` 手工改错后 `node --no-warnings --experimental-strip-types scripts/stamp-version.ts --mode tracked --check` 报 DRIFT（exit 1）并命名该文件；改回一致后 exit 0（贴两次 `echo $?`）。
-- [ ] AC3 反向：临时从 `VERSION_CARRIERS` 删掉该条目后，把 `.codex-plugin/plugin.json` 的 `version` 改错，`--check` 仍绿（证明它此前确实不在判定集；贴 `echo $?`）。
-- [ ] AC4 测试：`scripts/stamp-version.test.ts`（其 per-carrier 循环读共享载体表）覆盖 `.codex-plugin/plugin.json`——新增显式断言 stamp 后 version 与 `plugin/VERSION` 一致。
-- [ ] AC5 范围门绿：`bash scripts/test.sh --for-task gap-codex-plugin-json-version-not-a-carrier --allow-thin` 绿。
+- [x] AC1 载体登记（按位置）：`grep -n 'codex-plugin' scripts/version-carriers.ts` 命中 `.codex-plugin/plugin.json` 的载体条目（非注释/字符串巧合；贴条目与行号）。
+- [x] AC2 stamp 生效（能取假）：把 `.codex-plugin/plugin.json` 的 `version` 手工改错后 `node --no-warnings --experimental-strip-types scripts/stamp-version.ts --mode tracked --check` 报 DRIFT（exit 1）并命名该文件；改回一致后 exit 0（贴两次 `echo $?`）。
+- [x] AC3 反向：临时从 `VERSION_CARRIERS` 删掉该条目后，把 `.codex-plugin/plugin.json` 的 `version` 改错，`--check` 仍绿（证明它此前确实不在判定集；贴 `echo $?`）。
+- [x] AC4 测试：`scripts/stamp-version.test.ts`（其 per-carrier 循环读共享载体表）覆盖 `.codex-plugin/plugin.json`——新增显式断言 stamp 后 version 与 `plugin/VERSION` 一致。
+- [x] AC5 范围门绿：`bash scripts/test.sh --for-task gap-codex-plugin-json-version-not-a-carrier --allow-thin` 绿。
 
 ## Definition of Done
 
@@ -40,5 +40,7 @@ extra:
 
 - scripts/version-carriers.ts
 - scripts/stamp-version.test.ts
+- scripts/version-consistency-check.test.ts
+- plugin/scripts/checker-mutation-cases/version-consistency-check.sh
 - .codex-plugin/plugin.json
 - tasks/gap-codex-plugin-json-version-not-a-carrier.md
