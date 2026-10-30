@@ -1,0 +1,11 @@
+{
+  "name": "quay",
+  "version": "0.26.0-dev",
+  "description": "quay: a provider-agnostic task board. Codex plugin publish surface declaring the quay MCP server (node quay.js mcp) against the installed dist, not the dev-tree source.",
+  "mcpServers": {
+    "quay": {
+      "command": "node",
+      "args": ["quay.js", "mcp"]
+    }
+  }
+}
