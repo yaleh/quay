@@ -48,4 +48,5 @@ extra:
 - packages/quay/src/init.ts
 - packages/quay/test/init.test.mjs
 - plugin/scripts/codex-stage1-spawn-verify.sh
+- plugin/sh-census-baseline.json
 - tasks/gap-codex-host-config-approval-policy-blocks-mcp.md
