@@ -103,6 +103,13 @@ const CONFIG_CLASS = new Set([
   // DIRECTORY, which `listFiles` reports as a plain entry (Dirent.isDirectory() is false for a
   // symlink), so `crossWorkspaceDiffs`' readFileSync would otherwise die EISDIR on it.
   ".quay/plugin",
+  // .codex/config.toml — gap-quay-init-codex-host-trio-laydown (AC-932): `quay init` now lays a
+  // Codex MCP registration whose `cwd` is the init TARGET root (computed at runtime, never a
+  // hardcoded host path — the AC-932 reverse arm). It is legitimately per-workspace content,
+  // exactly like .quay/config.yml's absolute paths and .quay/profiles.yml's per-workspace role
+  // names, so it is NOT a byte-identical product artifact — two workspaces' `cwd` values
+  // necessarily differ and A1 must not flag that as a determinism break.
+  ".codex/config.toml",
 ]);
 
 const substantive = (label) =>
