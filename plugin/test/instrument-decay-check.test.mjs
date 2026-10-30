@@ -1101,16 +1101,18 @@ test("CLI --json — 形态 C/D 与 uncovered 都在机器面上（healthyCount 
 });
 
 // ── 第 12 条裁定：baseline-red-exempt（**主路径**的 A/B 豁免出口）───────────────────────────────────
-// (gap-instrument-decay-baseline-red-exempt-unadjudicated)
+// (gap-instrument-decay-baseline-red-exempt-unadjudicated；
+//  gap-instrument-decay-baseline-red-exempt-condition-stale-proxy 修正过期代理)
 // 写手 worker-fan-in.ts:3482-3487：主路径的既存红等价 A/B（runBaselineEquivalence）判出 exempt 时写本组。
-// 判据 compareFailureSignatures（:1420-1446）：exempt ⇔ task 红集 ⊆ baseline 红集 ⇒ **baseline 红集为空
-// 时，非空 task 红集恒不可能是它的子集**，本组结构上不可达（直到 develop 再出现持续红）。
+// 判据 compareFailureSignatures（:1420-1446）：exempt ⇔ task 红集 ⊆ baseline 红集 ⇒ 本组触发是「窗口内
+// 至少一条 A/B 判 exempt」，与 baseline 红集是否为空无关（baseline 非空 + added>0 时 exempt 同样不可达）。
 //
 // ⚠️ 近名陷阱（承重）：恢复阶梯在 :3379 调的是**同一个** runBaselineEquivalence ⇒ 它也会写一条
 //    `baseline-red` 步，但那条 A/B 的收尾是 `suite-recovery-baseline-exempt`（另一组、另一条路径）。
 //    条件必须把它认作「已收尾」，⛔ 不得把它读成「主路径豁免未落痕」——否则恢复阶梯每跑一次，
 //    本条裁定就会误报主路径写手腐烂。
 // ⛔ 另有两条空转陷阱：(a) 窗口内一次 A/B 都没有不得当作解释；(b) 「本组多久没写」不是条件。
+// ⛔ 「baselineFiles===0」不再是条件的一部分——它是「baseline 为空 ⇒ exempt 不可达」的特例代理。
 
 const BRE_OLD = "2026-09-03T00:00:00.000Z"; // baseline-red-exempt 的末次写入（>24h 早于 RECENT）
 const BRE_CLOSURE = "2026-09-04T12:01:00.000Z"; // 恢复阶梯收尾（紧随 RECENT 那条 A/B 之后）
@@ -1193,12 +1195,14 @@ test("生产 MANIFEST 第 12 条 负控制 ② — 窗口内零 A/B ⇒ 空转�
   assert.deepEqual(rateStoppedGroups(res), ["baseline-red-exempt"]);
 });
 
-test("生产 MANIFEST 第 12 条 负控制 ③ — 窗口内 baselineFiles>0（基线红集回来了）⇒ 结构性理由消失 ⇒ 回到 decayed[]", () => {
+test("生产 MANIFEST 第 12 条 正控制 ⑤ — 窗口内 A/B 全 hard-red 但 baselineFiles 非 0（如 =2）⇒ exit 0（baseline 非空不再误报）", () => {
   const dir = baselineRedExemptFixture({ windowAbr: "baseline-nonzero" });
-  assert.equal(runCondition(BASELINE_RED_EXEMPT_TRIGGER_CMD, dir).status, 1,
-    "a non-empty baseline red set makes the group reachable again: the conditional exemption must expire");
+  assert.equal(runCondition(BASELINE_RED_EXEMPT_TRIGGER_CMD, dir).status, 0,
+    "baselineFiles!==0 is NOT a proxy for exempt-reachability: hard-red + non-empty baseline keeps the group absent");
   const res = analyzeCarrier(dir, MANIFEST[0], DEFAULT_STALE_SECONDS, NOW_MS);
-  assert.deepEqual(rateStoppedGroups(res), ["baseline-red-exempt"]);
+  assert.deepEqual(rateStoppedGroups(res), [],
+    "the absence is explained by 'no A/B judged exempt in the window', regardless of baseline emptiness");
+  assert.equal(res.adjudicated.find((x) => x.group === "baseline-red-exempt").condition.exitCode, 0);
 });
 
 test("生产 MANIFEST 第 12 条 负控制 ④ — 窗口内 A/B 缺 baselineFiles（读不懂）⇒ fail-closed 回到 decayed[]", () => {
