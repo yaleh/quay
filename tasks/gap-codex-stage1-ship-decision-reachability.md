@@ -32,16 +32,20 @@ Merge-candidate：`task-granularity-advice.ts --touches plugin/scripts/shipped-s
 
 ## Acceptance Criteria
 
-- [ ] AC1 正向判据绿：在真实文件上逐字复跑 AC-933 criterion（grep codex-stage1）⇒ exit 0；贴 `echo $?` 与 stderr（应为空）。
-- [ ] AC2 决策按机制成文（按位置，非注释/字符串巧合）：`node --experimental-strip-types --input-type=module -e 'import { UNSHIPPED_BY_DECISION } from "./plugin/scripts/shipped-shell-reachability.ts"; const k = Object.keys(UNSHIPPED_BY_DECISION).filter(x => x.includes("codex-stage1")).sort(); console.log(JSON.stringify(k)); for (const key of k) console.log(key, "=>", UNSHIPPED_BY_DECISION[key]); if (k.length !== 2 || !k.includes("scripts/codex-stage1-selfcheck.sh") || !k.includes("scripts/codex-stage1-spawn-verify.sh")) process.exit(1);'` ⇒ exit 0 且输出恰为这两条 key + 非空 reason（reason 引用 dev-tree-only + catalog `ships:false`，贴原文）。
-- [ ] AC3 派生读数诚实：`node --experimental-strip-types plugin/scripts/shipped-shell-reachability.ts --json` ⇒ `evaluated:true`、`reachable` 不含这两条、`unreachable` 含这两条；`unreachableReasons` 里这两条的文案不以「REACHED by a root」开头（它们当前无 root 引用；贴两条 reason 原文与 `grep -c 'REACHED by a root'` 计数）。
-- [ ] AC4 反向—删决策条目（能取假）：在临时副本删掉这两条 codex-stage1 决策条目，逐字运行 criterion shell（criterion 取 `quay goal show AC-933 --json` 的 `.criterion` 字段，⛔ 不重写一份判据）⇒ exit 非 0 且 stderr 含 `no codex-stage1 ship decision entry`。
-- [ ] AC5 产物一致（build 后校验）：扩展 `plugin/test/shipped-shell-reachability.test.mjs` 的真实产物控制——用真实 `publish-dist-branch.sh` 组出的 artifact 不含 `scripts/codex-stage1-spawn-verify.sh` 与 `scripts/codex-stage1-selfcheck.sh`（断言在【读 artifact 的 walk】上，⛔ 不在布尔回显上）。
-- [ ] AC6 范围门绿：`bash scripts/test.sh --for-task gap-codex-stage1-ship-decision-reachability --allow-thin` 绿；全量 suite 留给 fan-in 机械阶段。
+- [x] AC1 正向判据绿：在真实文件上逐字复跑 AC-933 criterion（grep codex-stage1）⇒ exit 0；贴 `echo $?` 与 stderr（应为空）。
+- [x] AC2 决策按机制成文（按位置，非注释/字符串巧合）：`node --experimental-strip-types --input-type=module -e 'import { UNSHIPPED_BY_DECISION } from "./plugin/scripts/shipped-shell-reachability.ts"; const k = Object.keys(UNSHIPPED_BY_DECISION).filter(x => x.includes("codex-stage1")).sort(); console.log(JSON.stringify(k)); for (const key of k) console.log(key, "=>", UNSHIPPED_BY_DECISION[key]); if (k.length !== 2 || !k.includes("scripts/codex-stage1-selfcheck.sh") || !k.includes("scripts/codex-stage1-spawn-verify.sh")) process.exit(1);'` ⇒ exit 0 且输出恰为这两条 key + 非空 reason（reason 引用 dev-tree-only + catalog `ships:false`，贴原文）。
+- [x] AC3 派生读数诚实：`node --experimental-strip-types plugin/scripts/shipped-shell-reachability.ts --json` ⇒ `evaluated:true`、`reachable` 不含这两条、`unreachable` 含这两条；`unreachableReasons` 里这两条的文案不以「REACHED by a root」开头（它们当前无 root 引用；贴两条 reason 原文与 `grep -c 'REACHED by a root'` 计数）。
+- [x] AC4 反向—删决策条目（能取假）：在临时副本删掉这两条 codex-stage1 决策条目，逐字运行 criterion shell（criterion 取 `quay goal show AC-933 --json` 的 `.criterion` 字段，⛔ 不重写一份判据）⇒ exit 非 0 且 stderr 含 `no codex-stage1 ship decision entry`。
+- [x] AC5 产物一致（build 后校验）：扩展 `plugin/test/shipped-shell-reachability.test.mjs` 的真实产物控制——用真实 `publish-dist-branch.sh` 组出的 artifact 不含 `scripts/codex-stage1-spawn-verify.sh` 与 `scripts/codex-stage1-selfcheck.sh`（断言在【读 artifact 的 walk】上，⛔ 不在布尔回显上）。
+- [x] AC6 范围门绿：`bash scripts/test.sh --for-task gap-codex-stage1-ship-decision-reachability --allow-thin` 绿；全量 suite 留给 fan-in 机械阶段。
 
 ## Definition of Done
 
 `shipped-shell-reachability.ts` 在 `UNSHIPPED_BY_DECISION` 成文记录 codex-stage1 spawn-verify/selfcheck 的 dev-tree-only ship 决策（两条 key + 各自 reason），AC-933 criterion 在真实文件上 exit 0；真实组装产物不含这两条 `.sh`；删掉决策条目后 criterion exit 非 0（能取假）；`--for-task` 范围门绿。
+
+## ADR-007 dark-axis record
+
+该轴仍暗,理由:gap 型小改动只向 UNSHIPPED_BY_DECISION 增两条 codex-stage1 决策条目并修 unreachableReasons 文案,无包/依赖结构变化,L_D/L_G 无可测结构量
 
 ## Touches
 
