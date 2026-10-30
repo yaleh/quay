@@ -346,7 +346,11 @@ test("AC5: real-store scan — 0 parse failures; hazardous titles read back unch
 // ── gap-task-write-duplicates-frontmatter: a body that already carries a frontmatter block ──────
 
 test("AC4: body containing a full frontmatter block does not produce a second one", () => {
-  const { store, tasksDir } = makeStore();
+  // ⛔ rename the destructured dir (not `tasksDir`): the AC5 test above declares a simple
+  // `const tasksDir = path.join(REPO_ROOT, "tasks")` live-data dir, and test-isolation-check's
+  // R7 resolves a later `fs.rmSync(<var>)` back to that SAME-named live dir — a name-collision
+  // false positive. A unique name has no simple declaration, so the write resolves to null (safe).
+  const { store, tasksDir: dblTasksDir } = makeStore();
   try {
     // The corruption the task diagnosed: a caller passes the ENTIRE previous
     // file content (frontmatter included) as `body`. Pre-fix serialize() would
@@ -365,7 +369,7 @@ test("AC4: body containing a full frontmatter block does not produce a second on
     const written = store.write("DBL", { title: "dup frontmatter", status: "done", body });
     assert.ok(written, "write returns the task view model");
 
-    const raw = fs.readFileSync(path.join(tasksDir, "DBL.md"), "utf8");
+    const raw = fs.readFileSync(path.join(dblTasksDir, "DBL.md"), "utf8");
     const idCount = (raw.match(/^id: /gm) || []).length;
     const statusCount = (raw.match(/^status: /gm) || []).length;
     assert.equal(idCount, 1, `exactly one ^id: line; got ${idCount}\n${raw}`);
@@ -378,7 +382,7 @@ test("AC4: body containing a full frontmatter block does not produce a second on
     assert.ok(got.body.includes("body survived the strip"), "real body content is preserved");
     assert.ok(!raw.includes("status: ready"), "the stale body frontmatter's status was stripped, not re-inserted");
   } finally {
-    fs.rmSync(tasksDir, { recursive: true, force: true });
+    fs.rmSync(dblTasksDir, { recursive: true, force: true });
   }
 });
 
