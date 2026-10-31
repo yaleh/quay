@@ -20,7 +20,7 @@ extra:
 
 正确布局：`.mcp.json` 与 `vendor/` 是 `.codex-plugin/` 的**兄弟**（插件包根），且 dist 复用 artifact 根已有的 `vendor/quay/dist/quay.js`（claude 插件 dist），⛔ 不再在 `.codex-plugin/` 内多打一份。
 
-前驱 `gap-codex-plugin-surface-not-installable`（done）的 AC4 当时过的是另一种布局（证据里 `installedPath …/quay/local`，与真实 `…/quay/0.28.0` 不同），ship 出来的布局没被真实装过一次。本任务修布局并让 AC4 钉住「从 shipped artifact 直接装 + `codex mcp list` 出现 quay」。merge-candidate：`peers: []`。
+前驱 `gap-codex-plugin-surface-not-installable`（done）的 AC4 当时过的是另一种布局（证据里 `installedPath …/quay/local`，与真实 `…/quay/0.28.0` 不同），ship 出来的布局没被真实装过一次。本任务修布局并让 AC3 钉住「从 shipped artifact 直接装 + `codex mcp list` 出现 quay」。merge-candidate：`peers: []`。
 
 ## Acceptance Criteria
 
@@ -29,7 +29,7 @@ extra:
 - [ ] AC3 **shipped artifact 直接装**（钉住）：从组装出的 artifact 组 codex marketplace → `codex plugin marketplace add <pkg>` + `codex plugin add quay@<mkt>` 成功，且 **`codex mcp list`（中立目录 /tmp）出现 quay**（贴 `codex plugin list` 与 `codex mcp list --json`）。
 - [ ] AC4 功能：装后 `codex exec --dangerously-bypass-approvals-and-sandbox` 从某 quay 项目调 `task_list` 返回该项目任务（贴最终报告）。
 - [ ] AC5 反向（能取假）：临时把 `.mcp.json` 放回 `.codex-plugin/` 内再装 ⇒ `codex mcp list` **无** quay（贴运行记录；还原后复绿）。
-- [ ] AC6 测试+范围门：`plugin/test/codex-plugin-surface.test.mjs` 断言新布局（`.mcp.json` 在 `.codex-plugin/` 外、`validateCodexPackage` 更新），反向把 `.mcp.json` 移回内层 ⇒ 测试红；`bash scripts/test.sh --for-task <id> --allow-thin` 绿。
+- [ ] AC6 测试+范围门：`plugin/test/codex-plugin-surface.test.mjs` 断言新布局（`.mcp.json` 在 `.codex-plugin/` 外、`validateCodexPackage` 更新），反向把 `.mcp.json` 移回内层 ⇒ 测试红；`bash scripts/test.sh --for-task gap-codex-plugin-mcp-json-nested-in-wrong-level --allow-thin` 绿。
 
 ## Definition of Done
 
@@ -47,4 +47,4 @@ extra:
 - plugin/scripts/publish-dist-branch.sh
 - plugin/test/codex-plugin-surface.test.mjs
 - plugin/test/publish-dist-branch-closure-gate.test.mjs
-- tasks/gap-codex-plugin-surface-not-installable.md
+- tasks/gap-codex-plugin-mcp-json-nested-in-wrong-level.md
