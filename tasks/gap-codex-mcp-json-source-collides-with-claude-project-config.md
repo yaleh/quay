@@ -51,4 +51,6 @@ repo 根 `.mcp.json` 回空（AC-165 原则恢复）、codex 源在 `.codex-plug
 - plugin/scripts/publish-dist-branch.sh
 - plugin/test/codex-plugin-surface.test.mjs
 - plugin/test/publish-dist-branch-closure-gate.test.mjs
+- plugin/test/shipped-set.test.mjs
+- plugin/test/shipped-shell-reachability.test.mjs
 - tasks/gap-codex-mcp-json-source-collides-with-claude-project-config.md
