@@ -14,6 +14,7 @@
     "mcp"
   ],
   "mcpServers": "./.mcp.json",
+  "skills": "./skills/",
   "interface": {
     "displayName": "quay",
     "shortDescription": "Provider-agnostic task board",

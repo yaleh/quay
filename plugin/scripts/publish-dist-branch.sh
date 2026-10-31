@@ -235,7 +235,17 @@ echo "[publish-dist-branch] rewriting staged invokers (docs/.sh/quay-init) to re
 # ratchets the effective-line count of every embedded-interpreter .sh and refuses a worktree baseline
 # above git HEAD's, so a new code line here cannot be recovered by re-anchoring. Comment lines are
 # excluded from that count; code lines are not.
-node --experimental-strip-types "${REPO_ROOT}/packages/quay/scripts/build-plugin-dist.mjs" --rewrite "${WORK}" && node "${REPO_ROOT}/scripts/stamp-version.mjs" --mode build --root "${WORK}" --git-root "${REPO_ROOT}" && node "${REPO_ROOT}/scripts/version-consistency-check.mjs" --stamp-bundle-tree "${WORK}" && node "${REPO_ROOT}/scripts/version-consistency-check.mjs" --bundle-tree "${WORK}" && { _pruned=0; while IFS= read -r _ex; do [ -n "$_ex" ] || continue; if [ ! -e "${WORK}/${_ex}" ]; then echo "ERROR: shipped-shell list names ${_ex}, which is absent from the assembled tree — the derived list and the tree disagree." >&2; exit 1; fi; rm -f "${WORK}/${_ex}"; _pruned=$((_pruned + 1)); done <<< "$SHELL_EXCLUDES"; echo "[publish-dist-branch] pruned ${_pruned} .sh file(s) no runtime surface reaches"; }
+# ⛔ CODEX SKILLS SURFACE (gap-codex-plugin-ship-human-facing-skills, human 2026-10-31): chained onto
+#    the SAME line (NOT a new code line — sh-census-check ratchets embedded-interpreter .sh lines).
+#    The Claude Code channel ships the FULL plugin/skills/ set (auto-scanned `skills/`); the Codex
+#    channel ships ONLY the human-facing operational skills — quay-init (source dir `init`, renamed so
+#    the /skills menu does not show a bare `init`), quay-file-task, quay-directive, quay-task-operator.
+#    The narrowing runs AFTER the build/strip/rewrite/prune above, so the artifact's dist bundles are
+#    still derived from the FULL skill set (the closure gate below derives its required-set against the
+#    SOURCE tree), while the assembled `skills/` carries exactly the four. Fail-closed under `set -e`:
+#    a missing source skill aborts (never a 3-skill artifact), and the sed rewrites the copied init
+#    frontmatter `name:` in place (the assembled copy, never plugin/skills/init itself).
+node --experimental-strip-types "${REPO_ROOT}/packages/quay/scripts/build-plugin-dist.mjs" --rewrite "${WORK}" && node "${REPO_ROOT}/scripts/stamp-version.mjs" --mode build --root "${WORK}" --git-root "${REPO_ROOT}" && node "${REPO_ROOT}/scripts/version-consistency-check.mjs" --stamp-bundle-tree "${WORK}" && node "${REPO_ROOT}/scripts/version-consistency-check.mjs" --bundle-tree "${WORK}" && { _pruned=0; while IFS= read -r _ex; do [ -n "$_ex" ] || continue; if [ ! -e "${WORK}/${_ex}" ]; then echo "ERROR: shipped-shell list names ${_ex}, which is absent from the assembled tree — the derived list and the tree disagree." >&2; exit 1; fi; rm -f "${WORK}/${_ex}"; _pruned=$((_pruned + 1)); done <<< "$SHELL_EXCLUDES"; echo "[publish-dist-branch] pruned ${_pruned} .sh file(s) no runtime surface reaches"; } && { rm -rf "${WORK}/skills.codex"; mkdir -p "${WORK}/skills.codex"; for _s in quay-file-task quay-directive quay-task-operator init; do mv "${WORK}/skills/${_s}" "${WORK}/skills.codex/"; done; mv "${WORK}/skills.codex/init" "${WORK}/skills.codex/quay-init"; rm -rf "${WORK}/skills"; mv "${WORK}/skills.codex" "${WORK}/skills"; sed -i 's/^name: init$/name: quay-init/' "${WORK}/skills/quay-init/SKILL.md"; echo "[publish-dist-branch] codex skills surface assembled: quay-init quay-file-task quay-directive quay-task-operator"; }
 
 # ── AC-263: the dist reference-closure gate for THIS channel — and it must ABORT, not warn ────────
 # The npm-tarball channel has had an equivalent assertion since gap-plugin-dist-entry-derivation-
