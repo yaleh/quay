@@ -14,15 +14,19 @@
 #      literal `~/.local/share/quay/…` committed in `.mcp.json` would ENOENT at spawn time. This is
 #      the per-machine post-install step that turns the portable template into a runnable path.
 #
-# Usage: bash plugin/scripts/codex-mcp-sync.sh [--mcp-json <path>] [--install-only]
+# Usage: bash plugin/scripts/codex-mcp-sync.sh [--mcp-json <path>] [--install-only] [--dist-root <dir>]
 #   --mcp-json <path>  the `.mcp.json` to rewrite `~` -> `$HOME` in (default: the codex package
 #                      root's `.mcp.json`, found by walking up to `.codex-plugin/plugin.json`)
 #   --install-only     install the dist but do NOT rewrite any `.mcp.json` (the publish flow's mode)
+#   --dist-root <dir>  install the dist from THIS tree (vendor/quay/dist/quay.js + native + kernel
+#                      anchor live under <dir>) instead of walking up from this script's own location —
+#                      the publish flow passes the assembled artifact root so the freshly-published
+#                      dist is installed, never a possibly-stale source checkout
 
 # ── 统一 --help（gap-scripts-sprawl：用法在前、退出 0、无业务副作用）────────────────────
 if [ "${1:-}" = "--help" ] || [ "${1:-}" = "-h" ]; then
   _gap_help_lib="$(dirname "${BASH_SOURCE[0]}")/gate-script-lib.sh"
-  if [ -f "$_gap_help_lib" ]; then . "$_gap_help_lib"; tool_help "$0"; else echo "用法: bash $(basename "$0") [--mcp-json <path>] [--install-only]"; fi
+  if [ -f "$_gap_help_lib" ]; then . "$_gap_help_lib"; tool_help "$0"; else echo "用法: bash $(basename "$0") [--mcp-json <path>] [--install-only] [--dist-root <dir>]"; fi
   exit 0
 fi
 set -euo pipefail
@@ -31,11 +35,13 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 
 MCP_JSON=""
 INSTALL_ONLY=false
+DIST_ROOT_OVERRIDE=""
 
 while [ $# -gt 0 ]; do
   case "$1" in
     --mcp-json) MCP_JSON="$2"; shift 2 ;;
     --install-only) INSTALL_ONLY=true; shift ;;
+    --dist-root) DIST_ROOT_OVERRIDE="$2"; shift 2 ;;
     *) echo "ERROR: unknown argument: $1" >&2; exit 2 ;;
   esac
 done
@@ -43,9 +49,18 @@ done
 # ── Resolve the DIST root (contains vendor/quay/dist/quay.js) and the CODEX package root (contains
 #    .codex-plugin/plugin.json) by walking up from this script. The SOURCE repo nests them
 #    (repo/plugin and repo/), while the ASSEMBLED artifact flattens them (both at the artifact root);
-#    the walk-up handles both without hardcoding a level count. ────────────────────────────────────
+#    the walk-up handles both without hardcoding a level count. An explicit --dist-root OVERRIDES the
+#    walk-up (gap-codex-mcp-sync-installs-stale-main-checkout-dist): the publish flow must install the
+#    freshly-assembled artifact's dist, ⛔ never a possibly-stale source checkout's walk-up result. ──
 DIST_ROOT=""
 CODEX_ROOT=""
+if [ -n "$DIST_ROOT_OVERRIDE" ]; then
+  if [ ! -d "$DIST_ROOT_OVERRIDE" ]; then
+    echo "ERROR: --dist-root is not a directory: ${DIST_ROOT_OVERRIDE}" >&2
+    exit 2
+  fi
+  DIST_ROOT="$DIST_ROOT_OVERRIDE"
+fi
 _dir="$SCRIPT_DIR"
 while [ "$_dir" != "/" ] && [ "$_dir" != "." ]; do
   if [ -z "$DIST_ROOT" ] && [ -s "$_dir/vendor/quay/dist/quay.js" ]; then DIST_ROOT="$_dir"; fi

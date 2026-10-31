@@ -39,6 +39,7 @@ const repoRoot = path.resolve(pluginDir, "..");
 const PUBLISH_SCRIPT = path.join(pluginDir, "scripts", "publish-dist-branch.sh");
 const BUILD_PLUGIN_DIST = path.join(repoRoot, "packages", "quay", "scripts", "build-plugin-dist.mjs");
 const NODE_MODULES = path.join(repoRoot, "node_modules");
+const CODEX_MCP_SYNC = path.join(pluginDir, "scripts", "codex-mcp-sync.sh");
 
 function writeFile(p, content, mode) {
   fs.mkdirSync(path.dirname(p), { recursive: true });
@@ -454,4 +455,74 @@ test("AC2: the real publish script exits non-zero and commits nothing when a ref
     "",
     "a failed gate must leave no branch behind (the later commit/push steps must not have run)"
   );
+});
+
+// ── CODEX-MCP-SYNC INSTALL SOURCE (gap-codex-mcp-sync-installs-stale-main-checkout-dist) ──────────
+// The publish flow's post-push sync used to run `codex-mcp-sync.sh --install-only` with no explicit
+// source, so the script walked up from the CALLING checkout's plugin/scripts and installed that
+// checkout's `plugin/vendor/quay/dist/quay.js` — which can be a stale generated mirror (the walk-up
+// default is exactly the regression this task closes). The fix pins the install SOURCE to the
+// freshly-assembled artifact via `--dist-root "$WORK"`.
+
+/** A synthetic dist tree in the shape the sync script reads: core bundle + native provider + the
+ *  kernel anchor, with a real COPY of codex-mcp-sync.sh (so the walk-up default resolves against
+ *  THIS tree). The dist body is a marker so the test judges WHICH tree was installed from. */
+function writeCodexSyncTree(root, distMarker) {
+  writeFile(path.join(root, "vendor", "quay", "dist", "quay.js"), distMarker);
+  writeFile(path.join(root, "vendor", "quay-native", "dist", "quay-native.js"), `${distMarker}-native`);
+  writeFile(path.join(root, "scripts", "dist", "driver-runtime.js"), `${distMarker}-kernel`);
+  writeFile(path.join(root, "plugin", "scripts", "codex-mcp-sync.sh"), fs.readFileSync(CODEX_MCP_SYNC));
+  return root;
+}
+
+test("AC1: publish-dist-branch.sh passes --dist-root \"$WORK\" on its post-push sync call (position)", () => {
+  const src = fs.readFileSync(PUBLISH_SCRIPT, "utf8");
+  assert.match(
+    src,
+    /codex-mcp-sync\.sh"\s+--install-only\s+--dist-root\s+"\$WORK"/,
+    "the post-push sync must install the dist from the assembled artifact root ($WORK), not the walk-up default",
+  );
+});
+
+test("AC1/AC3: codex-mcp-sync.sh --dist-root installs the named tree; the walk-up default installs the source tree (reverse control)", () => {
+  const tmp = makeTmpDir("codex-sync-dist-root-");
+  try {
+    // The "stale source" tree carries the script, so the walk-up default resolves to it — the exact
+    // old-behavior shape. The "built artifact" tree is what publish-dist-branch.sh now passes.
+    const stale = writeCodexSyncTree(path.join(tmp, "stale-source"), "STALE-DIST");
+    const built = writeCodexSyncTree(path.join(tmp, "built-artifact"), "BUILT-DIST");
+    const staleScript = path.join(stale, "plugin", "scripts", "codex-mcp-sync.sh");
+
+    const withDistRoot = spawnSync("bash", [staleScript, "--install-only", "--dist-root", built], {
+      encoding: "utf8",
+      env: { ...process.env, HOME: path.join(tmp, "home-built") },
+    });
+    assert.equal(
+      withDistRoot.status,
+      0,
+      `--dist-root run must succeed:\n${withDistRoot.stdout}\n${withDistRoot.stderr}`,
+    );
+    assert.equal(
+      fs.readFileSync(path.join(tmp, "home-built", ".local", "share", "quay", "quay.js"), "utf8"),
+      "BUILT-DIST",
+      "--dist-root must install the built artifact's dist, not the source tree's",
+    );
+
+    const withoutDistRoot = spawnSync("bash", [staleScript, "--install-only"], {
+      encoding: "utf8",
+      env: { ...process.env, HOME: path.join(tmp, "home-stale") },
+    });
+    assert.equal(
+      withoutDistRoot.status,
+      0,
+      `walk-up default run must succeed:\n${withoutDistRoot.stdout}\n${withoutDistRoot.stderr}`,
+    );
+    assert.equal(
+      fs.readFileSync(path.join(tmp, "home-stale", ".local", "share", "quay", "quay.js"), "utf8"),
+      "STALE-DIST",
+      "without --dist-root the walk-up default installs the source tree's (stale) dist — the regression this task closes",
+    );
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
 });

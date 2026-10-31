@@ -310,8 +310,11 @@ if $DO_PUSH; then
   #    push line (⛔ NOT a new code line — sh-census-check ratchets embedded-interpreter .sh lines).
   #    A successful publish (the upgrade flow) keeps the stable location ~/.local/share/quay/ in sync
   #    with the dist just published; --install-only means a publisher never rewrites the committed
-  #    portable .mcp.json against its own $HOME. Fail-closed under `set -e`. ──
-  git -C "$WORK" push --force "$REMOTE" "HEAD:refs/heads/${BRANCH}" && bash "${PLUGIN_DIR}/scripts/codex-mcp-sync.sh" --install-only
+  #    portable .mcp.json against its own $HOME. --dist-root "$WORK" pins the install SOURCE to the
+  #    freshly-assembled artifact (gap-codex-mcp-sync-installs-stale-main-checkout-dist) — the walk-up
+  #    default would find this checkout's ${PLUGIN_DIR}, whose vendor/ dist can be stale. Fail-closed
+  #    under `set -e`. ──
+  git -C "$WORK" push --force "$REMOTE" "HEAD:refs/heads/${BRANCH}" && bash "${PLUGIN_DIR}/scripts/codex-mcp-sync.sh" --install-only --dist-root "$WORK"
   echo "[publish-dist-branch] pushed. ${REMOTE}/${BRANCH} now at ${NEW_SHA}"
 else
   echo "[publish-dist-branch] --push not given; built+committed locally only (in a throwaway worktree, now discarded on exit)."
