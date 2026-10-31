@@ -32,6 +32,7 @@ import { PREFLIGHT_POLICY_VERSION, releaseLease, safeTaskIdSegment, _readLeaseFi
 // no-second-implementation discipline the ProposalReview phase's own wiring-coverage-check dispatch
 // already follows).
 import { extractMechanismClaims, splitSentences } from "./wiring-coverage-check.ts";
+import { syncSleep } from "../../packages/quay/src/kernel/sync-sleep.ts";
 
 export function sha256(text) {
   return crypto.createHash("sha256").update(text, "utf8").digest("hex");
@@ -1852,10 +1853,6 @@ const EPOCH_LOCK_RETRY_DELAYS_MS = [20, 40, 80, 160, 320, 640];
 // section, it crashed and needs reclaiming, not a permanent deadlock.
 const EPOCH_LOCK_STALE_MS = 30 * 1000;
 
-function _syncSleepMs(ms) {
-  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
-}
-
 // Test-only injectable hold-delay (gap-prepare-milestone-epoch-cli-toctou-and-tamper-hardening
 // review finding: the original disabled-lock regression test only caught a broken lock ~57% of
 // the time on a real machine, since natural OS-scheduling variance doesn't reliably force two
@@ -1885,7 +1882,7 @@ function _acquireEpochLock(workspace, taskId) {
       // single-flight mechanism `prepare-admission-check.ts`'s `_grantLeaseAtomic` establishes.
       fs.writeFileSync(lockPath, JSON.stringify(holder), { flag: "wx" });
       const testHoldMs = _epochLockTestHoldDelayMs();
-      if (testHoldMs > 0) _syncSleepMs(testHoldMs);
+      if (testHoldMs > 0) syncSleep(testHoldMs);
       return { lockPath, token };
     } catch (err) {
       if (err.code !== "EEXIST") throw err;
@@ -1931,7 +1928,7 @@ function _acquireEpochLock(workspace, taskId) {
         }
       }
       if (attempt < EPOCH_LOCK_RETRY_DELAYS_MS.length) {
-        _syncSleepMs(EPOCH_LOCK_RETRY_DELAYS_MS[attempt]);
+        syncSleep(EPOCH_LOCK_RETRY_DELAYS_MS[attempt]);
       }
     }
   }

@@ -3,7 +3,7 @@ id: gap-routine-semantic-dedup-scan-sync-sleep-atomics
 title: "semantic-dedup-scan: Exact Atomics.wait sync-sleep re-implemented in
   three plugin scripts plus goal-preview.ts with no shared accessor
   (process-kill-lib.ts carries another inline c"
-status: ready
+status: done
 labels:
   - gap
   - routine-filed

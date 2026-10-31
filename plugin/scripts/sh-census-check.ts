@@ -66,6 +66,7 @@ import { baselinePath, checkBaselineShrinkOnly as checkBaselineShrinkOnlyShared 
 // uses: it resolves by root SHAPE, not by counting levels.
 // ⛔ The retired literal is not re-written here — see the ratchet-checker's own header convention.
 import { repoRoot } from "./repo-root.ts";
+import { syncSleep } from "../../packages/quay/src/kernel/sync-sleep.ts";
 
 // ── constants ───────────────────────────────────────────────────────────────────────────────────────
 
@@ -417,12 +418,6 @@ const TRANSIENT_READ_CODES = new Set(["ENOENT", "EACCES", "EPERM", "EBUSY", "EMF
  *  `timeoutMs`, else 60 s), and 145 doomed reads × 305 ms must not become a timeout of its own. */
 const READ_BACKOFF_MS = [5, 25, 75, 200] as const;
 
-/** Synchronous sleep. `Atomics.wait` on a private SharedArrayBuffer is the one Node-native way to
- *  block the main thread without spawning a `sleep` binary or spinning the CPU. */
-function sleepSync(ms: number): void {
-  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
-}
-
 function isTransientReadError(err: unknown): boolean {
   const code = (err as NodeJS.ErrnoException | null)?.code;
   return typeof code === "string" && TRANSIENT_READ_CODES.has(code);
@@ -494,7 +489,7 @@ function readTrackedAbs(root: string, abs: string): { ok: true; text: string } |
       lastErr = err;
       if (!isTransientReadError(err)) break;
       const backoff = READ_BACKOFF_MS[attempt];
-      if (backoff !== undefined) sleepSync(backoff);
+      if (backoff !== undefined) syncSleep(backoff);
     }
   }
   const rel = path.relative(root, abs).split(path.sep).join("/");

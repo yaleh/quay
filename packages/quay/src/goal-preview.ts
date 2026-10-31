@@ -61,6 +61,7 @@ import {
   runWorktreeDepsInstall,
   type WorktreeDepsDecision,
 } from "./worktree-deps.ts";
+import { syncSleep } from "./kernel/sync-sleep.ts";
 
 /** The serve-lock file, restated from `serve.ts`'s `SERVE_LOCK_REL` — see the header. Not imported
  *  from `serve.ts` on purpose: this module is a LEAF (it is re-exported through the drivers' Layer 0
@@ -554,10 +555,6 @@ export function readProcessGroupId(pid: number): number | null {
   return Number.isInteger(pgrp) && pgrp > 0 ? pgrp : null;
 }
 
-function sleepSync(ms: number): void {
-  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
-}
-
 /** The pid recorded in a root's serve LOCK (a bare `<pid>\n`), or null when absent/unreadable. */
 function readLockPid(lockPath: string): number | null {
   try {
@@ -630,7 +627,7 @@ function stopPid(pid: number, graceMs: number): { state: "stopped" | "failed"; s
     signalErr = String((err as NodeJS.ErrnoException)?.code ?? (err as Error)?.message ?? err);
   }
   const deadline = Date.now() + graceMs;
-  while (Date.now() < deadline && running()) sleepSync(100);
+  while (Date.now() < deadline && running()) syncSleep(100);
   if (running()) {
     try {
       if (useGroup) process.kill(-(pgid as number), "SIGKILL");
@@ -639,7 +636,7 @@ function stopPid(pid: number, graceMs: number): { state: "stopped" | "failed"; s
       /* fall through to the liveness re-read below */
     }
     const killDeadline = Date.now() + 2000;
-    while (Date.now() < killDeadline && running()) sleepSync(100);
+    while (Date.now() < killDeadline && running()) syncSleep(100);
   }
   if (running()) {
     return {
@@ -783,7 +780,7 @@ async function startQuayPreviewServe(opts: StartPreviewOptions): Promise<Preview
       return { state: "started", pid: st.pid, host: st.host, port: st.port, detail: `preview serve pid ${st.pid} up at ${previewRoot} (log ${logPath})` };
     }
     if (st.state === "stale") break; // a dead pid landed in the carrier — the spawn is not coming up
-    sleepSync(200);
+    syncSleep(200);
   }
   return {
     state: "failed",
@@ -838,7 +835,7 @@ async function startDeclaredPreview(opts: StartPreviewOptions, config: PreviewCo
       return { state: "started", pid, host, port, detail: `declared preview pid ${pid} up at ${healthUrl} (log ${logPath})` };
     }
     if (!pidAlive(pid)) break; // the process died before becoming healthy
-    sleepSync(200);
+    syncSleep(200);
   }
   // Timeout or early death: clean the carrier + process so `failed` means "nothing is running" — a
   // failed start must not leave a live-but-unaddressed preview (or a carrier that later reads stale).

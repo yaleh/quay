@@ -3,7 +3,7 @@ id: gap-routine-architecture-analysis-god-package-plugin-scripts
 title: "architecture-analysis: fanOut 3607 across 314 files / 4772 entities —
   flat scripts dir has outgrown one package; largest files are 4-7k lines
   (worker-driver 7155, full-suite-runner"
-status: ready
+status: done
 labels:
   - gap
   - routine-filed
