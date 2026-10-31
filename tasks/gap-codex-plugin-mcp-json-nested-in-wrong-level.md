@@ -2,7 +2,7 @@
 id: gap-codex-plugin-mcp-json-nested-in-wrong-level
 title: codex 插件：.mcp.json/vendor 提到插件根兄弟 + args 绝对化（不依赖会话 cwd），钉住 shipped
   artifact 直接装后 mcp list 出现 quay
-status: todo
+status: ready
 labels:
   - gap
   - codex
