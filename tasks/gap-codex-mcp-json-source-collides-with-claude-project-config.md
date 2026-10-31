@@ -29,11 +29,11 @@ merge-candidate：`peers: []`。前驱：`gap-ac165-remove-root-mcp-json-quay-en
 
 ## Acceptance Criteria
 
-- [ ] AC1 布局（按位置）：repo 根 `.mcp.json` == `{"mcpServers": {}}`（无 quay 键，合法 JSON）；`.codex-plugin/.mcp.json` 存在且 `args[0]` == `"~/.local/share/quay/quay.js"`（可移植模板，含 `~`）。贴两文件全文。
-- [ ] AC2 组装：`publish-dist-branch.sh` 组装出的 artifact 里，`.codex-plugin/` 内**只有 `plugin.json`**（无 `.mcp.json`），且 artifact **根** `.mcp.json` == codex 源（`~` 模板）。贴组装产物 `find` 结果 + 两处 `.mcp.json` 内容。
-- [ ] AC3 codex 回归验证（复用前任务 AC）：从组装 artifact 组 marketplace → `codex plugin add quay@<mkt>` → `codex mcp list`（中立 /tmp）出现 quay → 从 meta-cc `codex exec` 调 `task_list` 返回任务（贴 `codex plugin list`、`codex mcp list`、最终报告）。
-- [ ] AC4 Claude Code 回归验证（能取假）：repo 根 `.mcp.json` 为空时 Claude Code 的 quay MCP 由插件级 `plugin/.mcp.json`（`${CLAUDE_PLUGIN_ROOT}`）提供——`grep -q 'CLAUDE_PLUGIN_ROOT' plugin/.mcp.json` exit 0 且 repo 根 `.mcp.json` 无 `quay`；反向：临时把 `~` 模板写回 repo 根 `.mcp.json` ⇒ `node '~/.local/share/quay/quay.js' --version` ENOENT（证明该形态不能被 Claude Code 直接 spawn；还原后复绿）。
-- [ ] AC5 测试+范围门：`plugin/test/codex-plugin-surface.test.mjs` 断言新布局（`.codex-plugin/.mcp.json` 为源 + repo 根 `.mcp.json` 空）；反向两处各打红一次；`bash scripts/test.sh --for-task gap-codex-mcp-json-source-collides-with-claude-project-config --allow-thin` 绿。
+- [x] AC1 布局（按位置）：repo 根 `.mcp.json` == `{"mcpServers": {}}`（无 quay 键，合法 JSON）；`.codex-plugin/.mcp.json` 存在且 `args[0]` == `"~/.local/share/quay/quay.js"`（可移植模板，含 `~`）。贴两文件全文。
+- [x] AC2 组装：`publish-dist-branch.sh` 组装出的 artifact 里，`.codex-plugin/` 内**只有 `plugin.json`**（无 `.mcp.json`），且 artifact **根** `.mcp.json` == codex 源（`~` 模板）。贴组装产物 `find` 结果 + 两处 `.mcp.json` 内容。
+- [x] AC3 codex 回归验证（复用前任务 AC）：从组装 artifact 组 marketplace → `codex plugin add quay@<mkt>` → `codex mcp list`（中立 /tmp）出现 quay → 从 meta-cc `codex exec` 调 `task_list` 返回任务（贴 `codex plugin list`、`codex mcp list`、最终报告）。
+- [x] AC4 Claude Code 回归验证（能取假）：repo 根 `.mcp.json` 为空时 Claude Code 的 quay MCP 由插件级 `plugin/.mcp.json`（`${CLAUDE_PLUGIN_ROOT}`）提供——`grep -q 'CLAUDE_PLUGIN_ROOT' plugin/.mcp.json` exit 0 且 repo 根 `.mcp.json` 无 `quay`；反向：临时把 `~` 模板写回 repo 根 `.mcp.json` ⇒ `node '~/.local/share/quay/quay.js' --version` ENOENT（证明该形态不能被 Claude Code 直接 spawn；还原后复绿）。
+- [x] AC5 测试+范围门：`plugin/test/codex-plugin-surface.test.mjs` 断言新布局（`.codex-plugin/.mcp.json` 为源 + repo 根 `.mcp.json` 空）；反向两处各打红一次；`bash scripts/test.sh --for-task gap-codex-mcp-json-source-collides-with-claude-project-config --allow-thin` 绿。
 
 ## Definition of Done
 
