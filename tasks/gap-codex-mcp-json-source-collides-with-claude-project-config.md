@@ -2,7 +2,7 @@
 id: gap-codex-mcp-json-source-collides-with-claude-project-config
 title: codex .mcp.json 源与 Claude Code 项目 .mcp.json 碰撞：源移到 .codex-plugin/、publish
   单独拷到 artifact 根、repo 根回空（AC-165 原则回归修复）
-status: ready
+status: done
 labels:
   - gap
   - codex
