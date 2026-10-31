@@ -36,18 +36,28 @@
 //
 // Run: scripts/test.sh plugin/test/codex-plugin-surface.test.mjs
 
-import { test } from "node:test";
+import { test, before } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 
+import { ensureSharedShippedArtifact } from "./helpers/real-install-shared-build.mjs";
+
 const ROOT = path.resolve(import.meta.dirname, "..", "..");
 const PLUGIN_JSON = path.join(ROOT, ".codex-plugin", "plugin.json");
 const CODEX_SOURCE_MCP = path.join(ROOT, ".codex-plugin", ".mcp.json");
 const ROOT_MCP_JSON = path.join(ROOT, ".mcp.json");
 const QUAY_BIN = path.join(ROOT, "packages", "quay", "bin", "quay.js");
+const INIT_TS = path.join(ROOT, "packages", "quay", "src", "init.ts");
+
+// ── the codex skills delivery surface (gap-codex-plugin-ship-human-facing-skills, 2026-10-31) ────
+// 人脸操作面 (ship): quay-init (source dir `init`, renamed so the /skills menu never shows a bare
+// `init`), quay-file-task, quay-directive, quay-task-operator. 编排面 + 参考类 (do NOT ship).
+const HUMAN_FACING_SKILLS = ["quay-init", "quay-file-task", "quay-directive", "quay-task-operator"];
+const ORCHESTRATION_SKILLS = ["loop-driver", "manager", "cold-start", "drivers", "routines", "execute", "quay-task-to-plan", "extension-point-refactor"];
+const REFERENCE_SKILLS = ["quay-native-methodology", "quay-webui-bootstrap-methodology"];
 
 // ── AC-931's criterion, read verbatim from the goal store (never re-typed) ────────────────────
 function readAc931Criterion() {
@@ -419,4 +429,85 @@ test("negative control: removing the file fails with `absent`", () => {
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }
+});
+
+// ── CODEX SKILLS DELIVERY SURFACE (gap-codex-plugin-ship-human-facing-skills, human 2026-10-31) ──
+
+test("the codex manifest declares the human-facing skills surface (`skills: ./skills/`)", () => {
+  const manifest = JSON.parse(fs.readFileSync(PLUGIN_JSON, "utf8"));
+  assert.equal(
+    manifest.skills,
+    "./skills/",
+    `.codex-plugin/plugin.json must declare "skills": "./skills/" — codex resolves it against the plugin root (the sibling of .codex-plugin/, where publish-dist-branch.sh assembles the narrowed skills/)`,
+  );
+});
+
+test("AC5: packages/quay/src/init.ts creates .agents/skills/ EMPTY — no copy-skills path (position grep, reverse-controlable)", () => {
+  const src = fs.readFileSync(INIT_TS, "utf8");
+  // The reverse control (AC5 反向): if someone re-adds a "copy skills into .agents/skills/" path,
+  // the same line that names `agentsSkillsDir` will also name a copy primitive — this grep hits.
+  const offenders = src.split("\n").filter(
+    (l) => /agentsSkillsDir/.test(l) && /\b(copyFileSync|cpSync|writeFileSync|copySync|readdirSync|readFileSync|createReadStream|renameSync|linkSync|symlinkSync)\b/.test(l),
+  );
+  assert.deepEqual(
+    offenders,
+    [],
+    `init.ts must only mkdir .agents/skills/, never copy skill files into it (offending lines: ${offenders.join(" | ") || "(none)"})`,
+  );
+  // The empty-dir host must exist, or the "no copy" assertion above would be vacuously green (rule 4).
+  assert.match(src, /agentsSkillsDir\s*=\s*path\.join\(root, "\.agents", "skills"\)/);
+  assert.match(src, /mkdirSync\(agentsSkillsDir/);
+});
+
+// The real assembled artifact's skills surface is built ONCE by the product's own publish script
+// (never re-implemented): plugin/scripts/publish-dist-branch.sh narrows the artifact's `skills/` to
+// the four human-facing skills and renames `init` -> `quay-init`. A build failure is environmental
+// (no vendored runtime) and is reported as a SKIP, never folded into a green (硬规则 3b).
+let skillsArtifact = null;
+let skillsArtifactError = null;
+function requireSkillsArtifact(t) {
+  if (skillsArtifact) return skillsArtifact;
+  if (skillsArtifactError) {
+    t.skip(skillsArtifactError);
+    return null;
+  }
+  try {
+    const shared = ensureSharedShippedArtifact({ repoRoot: ROOT, ref: "HEAD", form: "dev", syncVendor: true });
+    if (shared.evaluated) {
+      skillsArtifact = shared.dir;
+    } else {
+      skillsArtifactError = `shared shipped artifact unavailable: ${shared.reason}`;
+    }
+  } catch (err) {
+    skillsArtifactError = `building the shared shipped artifact threw: ${String(err && err.stack ? err.stack : err)}`;
+  }
+  if (!skillsArtifact) {
+    t.skip(skillsArtifactError);
+    return null;
+  }
+  return skillsArtifact;
+}
+
+test("AC2/AC4: the assembled codex artifact's skills/ is EXACTLY the four human-facing skills (编排面 + 参考类 absent)", (t) => {
+  const artifact = requireSkillsArtifact(t);
+  if (!artifact) return;
+  const skillsDir = path.join(artifact, "skills");
+  const dirs = fs.readdirSync(skillsDir, { withFileTypes: true })
+    .filter((d) => d.isDirectory())
+    .map((d) => d.name)
+    .sort();
+  assert.deepEqual(
+    dirs,
+    [...HUMAN_FACING_SKILLS].sort(),
+    `the codex artifact's skills/ must contain exactly the four human-facing skills`,
+  );
+  for (const s of ORCHESTRATION_SKILLS.concat(REFERENCE_SKILLS)) {
+    assert.ok(
+      !fs.existsSync(path.join(skillsDir, s)),
+      `${s} must NOT ship in the codex skills surface (编排面/参考类 not delivered)`,
+    );
+  }
+  // The rename is a real content change in the assembled copy, never in plugin/skills/init itself.
+  const qinit = fs.readFileSync(path.join(skillsDir, "quay-init", "SKILL.md"), "utf8");
+  assert.match(qinit, /^name: quay-init$/m, "the renamed init skill must carry `name: quay-init`");
 });
