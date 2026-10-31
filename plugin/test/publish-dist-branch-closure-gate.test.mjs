@@ -398,6 +398,22 @@ test("AC2: the real publish script exits non-zero and commits nothing when a ref
     "quay-dev",
     "the stamp must act on the assembled COPY, never on the source plugin/"
   );
+  // The assembled CODEX surface (gap-codex-mcp-json-source-collides-with-claude-project-config):
+  // `.codex-plugin/` carries ONLY `plugin.json` (the source `.mcp.json` is excluded from the rsync),
+  // and the artifact-root `.mcp.json` IS that source (the `~` template codex resolves at the package
+  // root). Reading from the committed orphan branch — the exact artifact a consumer fetches.
+  const publishedCodexEntries = git(stub, "ls-tree", "--name-only", `${branch}:.codex-plugin`).split("\n").filter(Boolean);
+  assert.deepEqual(
+    publishedCodexEntries,
+    ["plugin.json"],
+    ".codex-plugin/ in the assembled artifact must carry ONLY plugin.json (the source .mcp.json must not be nested there)"
+  );
+  const publishedRootMcp = JSON.parse(git(stub, "show", `${branch}:.mcp.json`));
+  assert.equal(
+    publishedRootMcp.mcpServers?.quay?.args?.[0],
+    "~/.local/share/quay/quay.js",
+    "the artifact-root .mcp.json must be the codex source (`~` template), not the empty Claude Code project config"
+  );
   git(stub, "branch", "-D", branch);
 
   // red: one referenced bundle removed from the tree the gate reads
