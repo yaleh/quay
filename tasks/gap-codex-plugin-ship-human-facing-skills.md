@@ -3,7 +3,7 @@ id: gap-codex-plugin-ship-human-facing-skills
 title: codex 插件 ship 人脸操作面
   skills（quay-init/quay-file-task/quay-directive/quay-task-operator），编排面不交付；⛔ 不经
   quay init 落盘复制
-status: ready
+status: done
 labels:
   - gap
   - codex
