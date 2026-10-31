@@ -433,7 +433,8 @@
     "worker-fan-in-hooks.ts": "机械 fan-in 的【横切步骤扩展点】在哪 —— 翻转前后要跑、但【不属于「worker 结局处理」】的那些步骤（读数、暗轴谓词、将来的审计/指标），现在是不是由 worker-fan-in.ts 之外的注册表按【阶段有序步骤表】驱动：registerFanInHook({name, phase, run}) 注册、PHASE_ORDER（pre-flip → flip → post-flip）决定顺序、runFanInHooks 是中心文件唯一的调用点（中心不点名任何钩子），新增一个横切步骤是否【零改动中心文件】；正臂 = 从中心文件之外注册的钩子被触发【恰好 1 次】（计数断言 triggered=1，⛔ 不是「handler 存在」），负臂 = 未注册时 triggered=0 且 handlerRegistered=false，注入泄漏 = 把分派器换成无视注册表的实现后负臂必红；从而让「扩展点只盖叶子、不盖主干」这条在两个代码库（quay worker 与 claudecodeui 驱动）同形的缺陷，第一次有一个可计数、可注入反证的主干扩展点（tasks/gap-worker-fan-in-cross-cutting-hooks-not-covered-by-extension-point；DIR-133 裁定 2 四件套）？",
     "needs-human-parking-recheck.ts": "Is any needs-human task parked on a mechanical criterion that NO LONGER HOLDS — for every status:needs-human task, re-run the judge NAMED in its LAST ## Needs-Human 阻碍原因 line (currently unsatisfiableUnannotatedAc) against the CURRENT body, and report ONLY the tasks where that judge is clean today while the task is still parked (the parking reason has expired, the task blocks its goal AC, and nobody was told: AC-919 read fail for 42 consecutive rounds while its only blocking criterion was already clean)? Tasks whose criterion still fires, tasks parked for a non-mechanical reason, and tasks whose input could not be read are counted in their OWN buckets and never reported as stale (硬规则 3b), and no status is ever written (needs-human has no mechanical re-enqueue path, 人 2026-09-20).",
     "manual-full-suite.sh": "How does a human manually run the FULL suite — the heavy partition + memory policy + round recording the loop applies — as ONE re-runnable command, ⛔ NOT scripts/test.sh which runs the heavy files in the main body at nproc and skips the declared heavy tail (full-suite-runner.ts --root <main> --sync auto-provisions a one-shot worktree, records the round to <main>/.quay, tears it down)?",
-    "task-double-frontmatter-check.ts": "Which task files carry two back-to-back frontmatter blocks (a duplicated id:/status: from the task_write body path) — the corruption that produces two contradictory status readings?"
+    "task-double-frontmatter-check.ts": "Which task files carry two back-to-back frontmatter blocks (a duplicated id:/status: from the task_write body path) — the corruption that produces two contradictory status readings?",
+    "codex-mcp-sync.sh": "How does the Codex plugin's quay MCP dist get installed/synced to the stable version-independent location ~/.local/share/quay/ (and its .mcp.json tilde prefix expanded to the home directory so codex's direct node spawn resolves it)?"
   },
   "GUARD_OBJECT": {
     "manager-tick-log-check.sh": "runtime:orchestration/manager-tick-log.md",
@@ -853,7 +854,8 @@
     "worker-fan-in-hooks.ts": "每轮",
     "needs-human-parking-recheck.ts": "每轮",
     "manual-full-suite.sh": "按需",
-    "task-double-frontmatter-check.ts": "按需"
+    "task-double-frontmatter-check.ts": "按需",
+    "codex-mcp-sync.sh": "升级/安装时（publish-dist-branch.sh --push 调用 --install-only；用户装后跑一次）"
   },
   "INVALIDATION": {
     "resolve-quay-cli.ts": "失效前提：① Claude Code still records plugin installs in ~/.claude/plugins/installed_plugins.json with the field set this resolver reads (scope / projectPath / installPath / version per plugin id quay@quay / quay@quay-dev) — measured 2026-10-26 on 2.1.310; a record-schema change makes readInstallRecord report not-evaluated, which is a NAMED refusal, not a silent wrong answer; ② the session layer's tier rule is unchanged (a projectPath-matching project/local entry wins over the user entry) — the SAME rule is implemented in packages/quay/src/loaded-version.ts (projectScopedVersionReading) and recorded in packages/quay/src/init.ts's plugin-link header, so a change must move all three together; ③ an installed plugin root still carries bin/quay and vendor/quay/dist/quay.js; ④ the retired <project>/.quay/plugin is never reintroduced as a resolution input (if it were, this resolver's refusal to read it would become wrong rather than conservative).",
@@ -1263,7 +1265,8 @@
     "worker-fan-in-hooks.ts": "失效前提：① 阶段顺序仍由 PHASE_ORDER（pre-flip → flip → post-flip）决定、且中心文件只调 runFanInHooks 一次；若顺序被移回中心硬编码（或 runFanInHooks 不再是唯一入口）⇒「顺序是注册数据」这条判据失去对象；② 内置消费者仍经 registerFanInHook 注册在 worker-fan-in-hooks.ts（若某个步骤又被写回 worker-fan-in.ts 直调）⇒ 主干扩展点退化为叶子、中心文件增长回流的结构性成因复现；③ 钩子结果仍是 {ok} 拒绝语义（若改成静默跳过 / 异常吞掉）⇒ 负臂与注入泄漏两臂失去可区分性（硬规则 3b）；④ worker-fan-in-hooks.ts 仍是叶子（⛔ 不 import worker-fan-in.ts）——若反向边出现即成值环，import-graph-check 的 valueSccs 会是第一个读数。",
     "needs-human-parking-recheck.ts": "失效前提：① promotion-driver.ts 仍是每轮跑的那个常驻消费者（读数若改挂别的循环，CONSUMER 行须同步）；② 停放记录的形态仍是 driver-filters.markNeedsHuman 写的 ## Needs-Human 段 + 「- 阻碍原因：<判据 token>=…」行（注记格式若变，token 识别须同步）；③ PARKING_JUDGES 里登记的判据仍由 ready-pool-check.ts 导出且函数名/语义不变（判据改名或删除 ⇒ 全部任务落 no-registered-judge，读数变成恒空但 evaluated 仍为 true —— 新判据必须同时登记 token 与同一实现）；④ needs-human 仍无机械再入队路径（人 2026-09-20 裁定）——若将来允许机械再入队，本探测器应从只读读数改为写路径。",
     "manual-full-suite.sh": "失效前提：full-suite-runner.ts 的手动入口形态（--root <main> --sync ⇒ 一次性 worktree 自动 provision + state 落 <main>/.quay + 跑完拆除）不再成立",
-    "task-double-frontmatter-check.ts": "失效前提：① task 文件的 frontmatter 仍以行首 --- 开始、store 的 parse() 只读首块（若分隔符或行首缩进改变，本检测器的块切分须同步）；② 双 frontmatter 的签名仍是「首块后紧跟第二个 --- 块」——若未来改为按 ^id: 裸计数（会把 Evidence code fence 内引用的 goal 文件误判），本脚本须同步。测试：干净任务集 exit 0，含双块的副本 exit 1。"
+    "task-double-frontmatter-check.ts": "失效前提：① task 文件的 frontmatter 仍以行首 --- 开始、store 的 parse() 只读首块（若分隔符或行首缩进改变，本检测器的块切分须同步）；② 双 frontmatter 的签名仍是「首块后紧跟第二个 --- 块」——若未来改为按 ^id: 裸计数（会把 Evidence code fence 内引用的 goal 文件误判），本脚本须同步。测试：干净任务集 exit 0，含双块的副本 exit 1。",
+    "codex-mcp-sync.sh": "负控制失效：dist 缺/空或 kernel anchor 缺失时脚本仍 exit 0（--install-only 只装不重写 .mcp.json）"
   },
   "LAST_REAFFIRMED": {
     "resolve-quay-cli.ts": "2026-10-26",
@@ -1673,7 +1676,8 @@
     "worker-fan-in-hooks.ts": "2026-10-22",
     "needs-human-parking-recheck.ts": "2026-10-22",
     "manual-full-suite.sh": "2026-10-28",
-    "task-double-frontmatter-check.ts": "2026-10-30"
+    "task-double-frontmatter-check.ts": "2026-10-30",
+    "codex-mcp-sync.sh": "2026-10-31"
   },
   "MATCHING": {
     "resolve-quay-cli.ts": "enumerative",
@@ -2083,7 +2087,8 @@
     "worker-fan-in-hooks.ts": "enumerative",
     "needs-human-parking-recheck.ts": "position",
     "manual-full-suite.sh": "keyword",
-    "task-double-frontmatter-check.ts": "position"
+    "task-double-frontmatter-check.ts": "position",
+    "codex-mcp-sync.sh": "keyword"
   },
   "CONSUMER": {
     "resolve-quay-cli.ts": "谁按：外部消费者按 docs/references/external-consumer-cli-location.md §5.2 运行它（node --experimental-strip-types <plugin-root>/scripts/resolve-quay-cli.ts --project <dir> [--json|--field <name>]；安装形态跑 scripts/dist/resolve-quay-cli.js），并以退出码 0/2/3 判态；plugin/skills/init/SKILL.md 的 The project link 段指向它作为唯一参考实现。⛔ 不是 Core 运行时依赖——Core 用 packages/quay/src/core/plugin-root.ts 从自身安装位置解析，从不读插件安装记录。",

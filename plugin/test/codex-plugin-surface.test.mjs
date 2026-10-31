@@ -9,18 +9,19 @@
 //       never a second copy).
 //
 //   (2) The codex-INSTALLABLE manifest shape (task gap-codex-plugin-surface-not-installable; layout
-//       fixed by gap-codex-plugin-mcp-json-nested-in-wrong-level — Bug A layout, Bug B session-cwd
-//       independence):
+//       + args fixed by gap-codex-plugin-mcp-json-nested-in-wrong-level — Bug A layout, Bug B
+//       session-cwd independence, 方案 A stable path):
 //       `.codex-plugin/plugin.json` must be the codex-legal form — `mcpServers` is a PATH STRING
 //       `"./.mcp.json"` (not an inline object), plus `author` and the `interface` block — and
 //       `.mcp.json` must live at the PLUGIN PACKAGE ROOT (`.codex-plugin/`'s SIBLING, not inside it —
 //       codex resolves the path string relative to the package root) declaring the quay MCP server
-//       through the self-locating wrapper (`args[0]="codex-mcp-wrapper.js"` + `cwd:"."`) so the
-//       self-contained in-package dist is reachable from ANY session cwd, never
-//       `~/.claude/plugins/cache/...`. A shared `validateCodexPackage(root)` returns a LOUD failure
-//       list, so the positive test can take the value false and the negative controls (inline
-//       mcpServers; `.mcp.json` nested back inside `.codex-plugin/`; relative args with no cwd) red
-//       on the exact cause.
+//       with `args[0]` = the stable version-independent path `~/.local/share/quay/quay.js` and NO
+//       `cwd` (codex then spawns with the session cwd, which Core's findConfig() needs; a relative
+//       `cwd` would pin to the plugin install root). The dist lives at that stable location, installed
+//       by plugin/scripts/codex-mcp-sync.sh — never `~/.claude/plugins/cache/...`. A shared
+//       `validateCodexPackage(root)` returns a LOUD failure list, so the positive test can take the
+//       value false and the negative controls (inline mcpServers; `.mcp.json` nested back inside
+//       `.codex-plugin/`; relative args with a `cwd` — the Bug B relapse) red on the exact cause.
 //
 //   The test carries its OWN negative controls: the AC-931 criterion is run against three
 //   throwaway `.codex-plugin/plugin.json` states — (a) args re-pointed at the dev-tree source,
@@ -86,8 +87,9 @@ function writePluginJson(tmp, manifest) {
 // Reads `.codex-plugin/plugin.json` + the SIBLING `.mcp.json` under `root`. `mcpServers` must be
 // the path string "./.mcp.json" (codex resolves it relative to the plugin package root — the SIBLING
 // of `.codex-plugin/`, not inside it); the `.mcp.json` must declare mcpServers.quay as stdio against
-// the in-package dist (a relative path — an absolute `~/.claude/plugins/cache/...` would break the
-// moment the Claude Code cache is cleared). The OLD nested layout (`.codex-plugin/.mcp.json` or
+// the STABLE version-independent path `~/.local/share/quay/<dist>` (方案 A — installed there by
+// codex-mcp-sync.sh, never the in-package vendor/ nor `~/.claude/plugins/cache/...`), with NO `cwd`
+// (codex then spawns with the session cwd). The OLD nested layout (`.codex-plugin/.mcp.json` or
 // `.codex-plugin/vendor/`) must be absent — that is the whole gap this validator pins (硬规则 2:
 // position, not keyword).
 function validateCodexPackage(root) {
@@ -140,15 +142,16 @@ function validateCodexPackage(root) {
       if (server.command !== "node") {
         failures.push(`mcpServers.quay.command must be node, got ${JSON.stringify(server.command)}`);
       }
-      if (!Array.isArray(server.args) || server.args[0] !== "codex-mcp-wrapper.js") {
+      const stablePath = Array.isArray(server.args) && typeof server.args[0] === "string" && server.args[0].startsWith("~/.local/share/quay/");
+      if (!stablePath) {
         failures.push(
-          `mcpServers.quay.args[0] must be the self-locating wrapper "codex-mcp-wrapper.js" (a relative dist path breaks under codex's session cwd), got ${JSON.stringify(server.args)}`,
+          `mcpServers.quay.args[0] must be the stable version-independent path ~/.local/share/quay/<dist> (方案 A — codex does not expand ~ and resolves relative args against the session cwd), got ${JSON.stringify(server.args)}`,
         );
       }
       if (!server.args?.includes("mcp")) failures.push("mcpServers.quay.args must include mcp");
-      if (typeof server.cwd !== "string" || server.cwd.trim() === "") {
+      if (server.cwd !== undefined) {
         failures.push(
-          "mcpServers.quay.cwd must be set (codex resolves a relative cwd against the plugin root, so the wrapper's args resolve from any session cwd)",
+          "mcpServers.quay.cwd must be ABSENT (codex then spawns with the session cwd, which Core's findConfig() walks up from; a relative cwd resolves against the plugin install root and breaks workspace discovery)",
         );
       }
     }
@@ -167,16 +170,22 @@ test("AC-931 criterion passes on this repo's .codex-plugin/plugin.json", () => {
   assert.equal(res.stderr, "", "a passing AC-931 run must not write to stderr");
 });
 
-test("the codex package carries the installable manifest + self-contained .mcp.json (position)", () => {
+test("the codex package carries the installable manifest + stable-path .mcp.json (position)", () => {
   const failures = validateCodexPackage(ROOT);
   assert.deepEqual(
     failures,
     [],
     `codex package validation failed:\n  - ${failures.join("\n  - ")}`,
   );
-  // Position, not keyword: the .mcp.json must not reference the claude plugin cache anywhere.
+  // Position, not keyword: the .mcp.json must not reference the claude plugin cache anywhere, and
+  // args[0] must be the stable version-independent path (方案 A).
   const rawMcp = fs.readFileSync(MCP_JSON, "utf8");
   assert.doesNotMatch(rawMcp, /plugins\/cache/, ".mcp.json must not reference the claude plugin cache");
+  const parsed = JSON.parse(rawMcp);
+  assert.ok(
+    parsed.mcpServers?.quay?.args?.[0]?.startsWith("~/.local/share/quay/"),
+    `.mcp.json args[0] must be the stable path ~/.local/share/quay/<dist>, got ${JSON.stringify(parsed.mcpServers?.quay?.args)}`,
+  );
 });
 
 test("negative control: an inline mcpServers object fails validation with `mcpServers is not a path string`", () => {
@@ -197,7 +206,7 @@ test("negative control: an inline mcpServers object fails validation with `mcpSe
     fs.writeFileSync(
       path.join(tmp, ".mcp.json"),
       JSON.stringify(
-        { mcpServers: { quay: { command: "node", args: ["codex-mcp-wrapper.js", "mcp"], cwd: "." } } },
+        { mcpServers: { quay: { command: "node", args: ["~/.local/share/quay/quay.js", "mcp"] } } },
         null,
         2,
       ) + "\n",
@@ -252,7 +261,7 @@ test("negative control: .mcp.json nested back inside .codex-plugin/ fails valida
   }
 });
 
-test("negative control: relative args with no cwd (Bug B relapse) fails validation", () => {
+test("negative control: relative args with a cwd (Bug B relapse) fails validation", () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "codex-rel-args-"));
   try {
     writePluginJson(tmp, {
@@ -267,12 +276,13 @@ test("negative control: relative args with no cwd (Bug B relapse) fails validati
         capabilities: ["Interactive"],
       },
     });
-    // The Bug B relapse: args[0] back to the relative dist path, and cwd removed — codex resolves the
-    // relative args against the SESSION cwd, so the dist ENOENTs from any project without its own vendor/.
+    // The Bug B relapse: args[0] back to the relative dist path AND a `cwd` pinned back in — codex
+    // resolves the relative args against the SESSION cwd (dist ENOENTs from any project without its
+    // own vendor/) and the relative cwd against the PLUGIN INSTALL ROOT (breaks findConfig()).
     fs.writeFileSync(
       path.join(tmp, ".mcp.json"),
       JSON.stringify(
-        { mcpServers: { quay: { command: "node", args: ["vendor/quay/dist/quay.js", "mcp"] } } },
+        { mcpServers: { quay: { command: "node", args: ["vendor/quay/dist/quay.js", "mcp"], cwd: "." } } },
         null,
         2,
       ) + "\n",
@@ -280,12 +290,12 @@ test("negative control: relative args with no cwd (Bug B relapse) fails validati
     );
     const failures = validateCodexPackage(tmp);
     assert.ok(
-      failures.some((f) => f.includes("args[0] must be the self-locating wrapper")),
+      failures.some((f) => f.includes("stable version-independent path ~/.local/share/quay/")),
       `expected the relative-args .mcp.json to fail on args[0], got ${JSON.stringify(failures)}`,
     );
     assert.ok(
-      failures.some((f) => f.includes("cwd must be set")),
-      `expected the relative-args .mcp.json to also fail on the missing cwd, got ${JSON.stringify(failures)}`,
+      failures.some((f) => f.includes("cwd must be ABSENT")),
+      `expected the relative-args .mcp.json to also fail on the re-added cwd, got ${JSON.stringify(failures)}`,
     );
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });

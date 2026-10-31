@@ -155,21 +155,23 @@ SHELL_EXCLUDES="$(node --no-warnings --experimental-strip-types "${PLUGIN_DIR}/s
 rsync -a --exclude='.git' "${RSYNC_EXCLUDES[@]}" "${PLUGIN_DIR}/" "${WORK}/" && node "${REPO_ROOT}/scripts/stamp-marketplace-name.mjs" --root "${WORK}" --repo-root "${REPO_ROOT}"
 
 # ── THE CODEX PLUGIN SURFACE (gap-codex-plugin-surface-not-installable; layout + args fixed by
-#    gap-codex-plugin-mcp-json-nested-in-wrong-level — Bug A layout, Bug B session-cwd-independence)
+#    gap-codex-plugin-mcp-json-nested-in-wrong-level — Bug A layout, Bug B session-cwd-independence;
+#    方案 A stable-path resolution)
 # The Claude Code channel ships plugin/.claude-plugin/marketplace.json; the Codex channel's publish
 # surface lives at REPO ROOT (`.codex-plugin/` = the codex plugin package's manifest). Codex resolves
 # `plugin.json`'s `mcpServers: "./.mcp.json"` path string relative to the PLUGIN PACKAGE ROOT — the
 # SIBLING of `.codex-plugin/`, not inside it — so `.mcp.json` must sit at the package root
-# (`${REPO_ROOT}/.mcp.json` → `${WORK}/.mcp.json`). Bug B: codex resolves RELATIVE args against the
-# SESSION cwd (not the plugin root), so `.mcp.json` names `codex-mcp-wrapper.js` with `cwd: "."` —
-# codex turns that relative `cwd` into the plugin install root, the wrapper re-spawns the real dist
-# against the recovered session cwd, and the dist it uses is the artifact-root dist already rsynced
-# from plugin/ above — ⛔ NOT a second copy nested under `.codex-plugin/vendor/` (the nested layout
-# installed but `codex mcp list` never registered quay). Fail-closed: a publish without a non-empty
-# manifest, .mcp.json, wrapper, or artifact-root dist must abort, never silently ship an artifact that
+# (`${REPO_ROOT}/.mcp.json` → `${WORK}/.mcp.json`). Bug B + 方案 A (human 2026-10-31): codex resolves
+# RELATIVE args against the SESSION cwd AND does NOT expand `~`/`${HOME}`/`${CODEX_PLUGIN_ROOT}`, so
+# `.mcp.json` declares `args[0]` = the stable version-independent path `~/.local/share/quay/quay.js`
+# with NO `cwd` (codex then spawns with the session cwd, which is what Core's findConfig() needs), and
+# the dist is installed to that stable location by plugin/scripts/codex-mcp-sync.sh — ⛔ NOT embedded
+# inside the plugin package (no `.codex-plugin/vendor/`, no wrapper). The artifact still rsyncs the
+# built dist above because it is the SOURCE the sync step copies from. Fail-closed: a publish without a
+# non-empty manifest, .mcp.json, or artifact-root dist must abort, never silently ship an artifact that
 # cannot install on the Codex host (硬规则 3b — "missing" must not be indistinguishable from "copied").
-[ -s "${REPO_ROOT}/.codex-plugin/plugin.json" ] && [ -s "${REPO_ROOT}/.mcp.json" ] && [ -s "${REPO_ROOT}/codex-mcp-wrapper.js" ] || { echo "ERROR: .codex-plugin/plugin.json, .mcp.json or codex-mcp-wrapper.js missing or empty — refusing to publish without the Codex plugin surface." >&2; exit 1; }
-rsync -a --exclude='.git' "${REPO_ROOT}/.codex-plugin/" "${WORK}/.codex-plugin/" && rsync -a --exclude='.git' "${REPO_ROOT}/.mcp.json" "${REPO_ROOT}/codex-mcp-wrapper.js" "${WORK}/" && [ -s "${WORK}/vendor/quay/dist/quay.js" ] && [ -s "${WORK}/codex-mcp-wrapper.js" ] || { echo "ERROR: artifact-root dist vendor/quay/dist/quay.js or codex-mcp-wrapper.js missing — refusing to publish the Codex plugin surface." >&2; exit 1; }
+[ -s "${REPO_ROOT}/.codex-plugin/plugin.json" ] && [ -s "${REPO_ROOT}/.mcp.json" ] || { echo "ERROR: .codex-plugin/plugin.json or .mcp.json missing or empty — refusing to publish without the Codex plugin surface." >&2; exit 1; }
+rsync -a --exclude='.git' "${REPO_ROOT}/.codex-plugin/" "${WORK}/.codex-plugin/" && rsync -a --exclude='.git' "${REPO_ROOT}/.mcp.json" "${WORK}/" && [ -s "${WORK}/vendor/quay/dist/quay.js" ] || { echo "ERROR: artifact-root dist vendor/quay/dist/quay.js missing — refusing to publish the Codex plugin surface." >&2; exit 1; }
 
 # gap-dist-plugin-missing-node-modules-task-schema-yaml: this branch used to ship the copied
 # plugin/scripts (and gate-scripts) as RAW .ts alongside whatever dist/*.js happened to already
@@ -285,7 +287,12 @@ echo "[publish-dist-branch] orphan commit ready: ${NEW_SHA}"
 
 if $DO_PUSH; then
   echo "[publish-dist-branch] force-pushing ${BRANCH} -> ${REMOTE} ..."
-  git -C "$WORK" push --force "$REMOTE" "HEAD:refs/heads/${BRANCH}"
+  # ── Codex 方案 A upgrade sync (gap-codex-plugin-mcp-json-nested-in-wrong-level): chained onto the
+  #    push line (⛔ NOT a new code line — sh-census-check ratchets embedded-interpreter .sh lines).
+  #    A successful publish (the upgrade flow) keeps the stable location ~/.local/share/quay/ in sync
+  #    with the dist just published; --install-only means a publisher never rewrites the committed
+  #    portable .mcp.json against its own $HOME. Fail-closed under `set -e`. ──
+  git -C "$WORK" push --force "$REMOTE" "HEAD:refs/heads/${BRANCH}" && bash "${PLUGIN_DIR}/scripts/codex-mcp-sync.sh" --install-only
   echo "[publish-dist-branch] pushed. ${REMOTE}/${BRANCH} now at ${NEW_SHA}"
 else
   echo "[publish-dist-branch] --push not given; built+committed locally only (in a throwaway worktree, now discarded on exit)."

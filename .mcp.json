@@ -2,8 +2,7 @@
   "mcpServers": {
     "quay": {
       "command": "node",
-      "args": ["codex-mcp-wrapper.js", "mcp"],
-      "cwd": "."
+      "args": ["~/.local/share/quay/quay.js", "mcp"]
     }
   }
 }

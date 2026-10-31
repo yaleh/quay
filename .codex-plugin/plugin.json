@@ -1,7 +1,7 @@
 {
   "name": "quay",
   "version": "0.29.0-dev",
-  "description": "quay: a provider-agnostic task board. Exposes the quay MCP server (task_list / task_get / task_write / task_check / action_list / action_run) over stdio against the self-contained dist bundled inside this plugin package.",
+  "description": "quay: a provider-agnostic task board. Exposes the quay MCP server (task_list / task_get / task_write / task_check / action_list / action_run) over stdio against the dist installed at the stable version-independent location ~/.local/share/quay/ (see plugin/scripts/codex-mcp-sync.sh).",
   "author": {
     "name": "quay"
   },
