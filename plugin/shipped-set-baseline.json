@@ -384,6 +384,30 @@
         "shLines": 7480
       },
       "why": "0.29.0: codex-mcp-sync.sh 同步机制 + codex 插件布局修复（.mcp.json 提级/args 绝对化）新 shipped .sh（正当增长）"
+    },
+    {
+      "when": "2026-10-31T12:45:20.742Z",
+      "from": {
+        "files": 0,
+        "bytes": 0,
+        "shLines": 0,
+        "shipped": {
+          "files": 306,
+          "bytes": 70964533,
+          "shLines": 7480
+        }
+      },
+      "to": {
+        "files": 0,
+        "bytes": 0,
+        "shLines": 0
+      },
+      "shipped": {
+        "files": 287,
+        "bytes": 70752234,
+        "shLines": 7489
+      },
+      "why": "0.30.0: codex skills 交付面 + codex-mcp-sync --dist-root + vendored-dist 版本一致性检测等新 shipped（正当增长）"
     }
   ],
   "_axes": {
@@ -397,8 +421,8 @@
   "bytes": 0,
   "shLines": 0,
   "shipped": {
-    "files": 306,
-    "bytes": 70964533,
-    "shLines": 7480
+    "files": 287,
+    "bytes": 70752234,
+    "shLines": 7489
   }
 }
