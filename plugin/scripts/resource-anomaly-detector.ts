@@ -52,7 +52,7 @@ import path from "node:path";
 import { pathToFileURL, fileURLToPath } from "node:url";
 import { parse as parseYaml } from "yaml";
 
-import { isDirectEntry } from "./gate-script-base.ts";
+import { isDirectEntry, flagValue } from "./gate-script-base.ts";
 // 载体批量追加的函数体是共享的，不在此重写（semantic-dedup-scan finding `jsonl-batch-appenders`）。
 // 本处原为 join-style 近似变体 `.map(JSON.stringify).join("\n") + "\n"` —— 与共享实现的
 // `.map(JSON.stringify + "\n").join("")` 对非空批次输出**逐字节相同**，故合并是行为保持的。
@@ -935,11 +935,6 @@ export function resourceDiagnosticRoutineFromConfig(root: string, opts: Resource
 }
 
 // ── CLI (the fixture-driven evidence surface the ACs paste from) ─────────────────────────────────
-function flagValue(argv: string[], flag: string): string | null {
-  const i = argv.indexOf(flag);
-  return i >= 0 && i + 1 < argv.length ? argv[i + 1] : null;
-}
-
 export async function main(argv: string[] = process.argv.slice(2)): Promise<number> {
   if (argv.includes("--help") || argv.includes("-h")) {
     process.stdout.write([
@@ -963,10 +958,10 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
 
   // ── effect re-test mode (AC4): a DIRECT re-measurement, ⛔ not the fix task's own AC.
   const before = flagValue(argv, "--effect-before");
-  if (before !== null) {
+  if (before !== undefined) {
     // ⛔ Drop EMPTY tokens before Number(): `Number("")` is 0, so a blank `--effect-after ""` would
     // otherwise parse to `[0]` and read as `restored` — a zero window that looks like a good reading.
-    const parse = (s: string | null) =>
+    const parse = (s: string | null | undefined) =>
       String(s ?? "").split(",").map((x) => x.trim()).filter((x) => x !== "").map(Number).filter((x) => Number.isFinite(x));
     const r = effectRetest({
       metric: flagValue(argv, "--metric") ?? "per-file durationMs",

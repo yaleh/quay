@@ -47,7 +47,7 @@ import path from "node:path";
 import { StringDecoder } from "node:string_decoder";
 import { fileURLToPath } from "node:url";
 import { spawn, spawnSync } from "node:child_process";
-import { isDirectEntry } from "./gate-script-base.ts";
+import { isDirectEntry, flagValue } from "./gate-script-base.ts";
 // Layer 0 · 主检出推导（order-independent，gap-main-checkout-root-derivation-recurs-three-sites）。
 import { mainCheckoutRoot, repoRoot } from "./repo-root.ts";
 // Layer 1a · filters（AC152 单一实现：可组合谓词列表，两 driver 共用）。
@@ -2397,12 +2397,6 @@ export interface DispatchProvenance {
  *  且 N 落在 `argv_prompt_elided_bytes` ⇒ 读者知道被省了多少，⛔ 不是静默截断（硬规则 3b）。 */
 export const PROVENANCE_ARGV_PROMPT_MAX_BYTES = 512;
 
-/** 从一份 argv 里取某个标志的值（`--flag <v>` 形制；缺 ⇒ null）。⛔ 只认紧邻的下一个元素。 */
-function argvFlagValue(argv: readonly string[], flag: string): string | null {
-  const i = argv.indexOf(flag);
-  return i >= 0 && i + 1 < argv.length ? argv[i + 1] : null;
-}
-
 /** 把 argv 里最后一个超长元素（worker prompt）换成显式占位符，返回 [argv, 被省略的字节数]。 */
 function elideArgvPrompt(argv: readonly string[]): { argv: string[]; elided: number } {
   const last = argv[argv.length - 1];
@@ -2520,7 +2514,7 @@ export function dispatchProvenance(
     argv: recordedArgv,
     argv_prompt_elided_bytes: elided,
     // 从【实际 argv】读，⛔ 不从 declared 读——`--model` 没被追加时这里就是 null（硬规则 6）。
-    model_alias: argvFlagValue(recordedArgv, "--model"),
+    model_alias: flagValue(recordedArgv, "--model") ?? null,
     model_real: real.model,
     model_real_from: real.from,
     model_real_unavailable: real.unavailable,

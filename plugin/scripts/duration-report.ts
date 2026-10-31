@@ -50,7 +50,7 @@ import path from "node:path";
 import { parseFrontmatterCompletely, frontmatterStatus } from "./task-schema.ts";
 import { listTaskIds } from "./fast-mode-telemetry.ts";
 // 入口判定按**文件名**认身份（bundle-safe，见文件末尾的注释）。
-import { isDirectEntry } from "./gate-script-base.ts";
+import { isDirectEntry, flagValue } from "./gate-script-base.ts";
 // dispatch 载体的只读三态判定（live / residue / not-evaluated）与 pid 判定只有一份，住在
 // driver-shared.ts（gap-worker-dispatch-carrier-owner-and-contract-unregistered）。
 // ⛔ 不 import worker-driver.ts：`worker-driver → relaxed-dispatch-ledger → 本文件` 已是值边，反向
@@ -685,11 +685,6 @@ export function parseWindow(argv: string[], nowMs: number): { sinceMs: number; u
   }
   if (sinceMs > untilMs) return null;
   return { sinceMs, untilMs };
-}
-
-function flagValue(argv: string[], name: string): string | null {
-  const i = argv.indexOf(name);
-  return i >= 0 && i + 1 < argv.length ? argv[i + 1] : null;
 }
 
 function main(argv: string[]): number {

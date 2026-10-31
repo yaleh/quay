@@ -275,20 +275,22 @@ export const RECOVERY_EXEMPT_TRIGGER_CMD =
   `(r.step==="suite-recovery-certified"||r.step==="suite-recovery-baseline-exempt")))bad++}` +
   `process.exit(bad===0?0:1)'`;
 
-/** baseline-red-exempt 的触发输入读数（gap-instrument-decay-baseline-red-exempt-unadjudicated）。
+/** baseline-red-exempt 的触发输入读数（gap-instrument-decay-baseline-red-exempt-unadjudicated；
+ *  gap-instrument-decay-baseline-red-exempt-condition-stale-proxy 修正过期代理）。
  *
  *  写手 `worker-fan-in.ts:3482-3487`：主路径的既存红等价 A/B（`runBaselineEquivalence`，其 `traceVerdict`
  *  在 :2810-2820 写 `baseline-red` 步）判出 `exempt` 时，紧接着写本组。判据是纯函数
  *  `compareFailureSignatures`（:1420-1446）：**`exempt` ⇔ task 侧红签名集合 ⊆ baseline 侧红签名集合**。
- *  ⇒ 当 baseline 红集为空时，**非空** task 红集恒不可能是它的子集 ⇒ 本组结构上不可达（直到 develop
- *  再出现持续红）。⚠️ 进入 A/B 的前提是「suite 真跑过且真红、本轮内重跑仍红」，所以「task 红集为空」
- *  这一唯一能让空 baseline 判 exempt 的情形走不到这里。
+ *  ⇒ 本组的真实触发是「窗口内至少一条 A/B 判 `exempt`」，与 baseline 红集**是否为空无关**：baseline 非空
+ *  且 task 引入基线之外的新红（`added>0`）时，`exempt ⇔ task 红集 ⊆ baseline 红集` 同样不成立。
  *
  *  条件读的是【窗口内 A/B 判词的形态】，⛔ 不是「本组多久没写」的二次包装：
  *    ① 窗口 = 末次 `baseline-red-exempt` 之后；窗口内必须 **≥1 条 A/B**（⛔「一次 A/B 都没有」不得当作
  *       解释——那是空转真值）；
- *    ② 窗口内可读的 `baselineFiles` 必须存在且**全为 0**（结构性理由本身：基线红集为空 ⇒ exempt 不可达）。
- *       缺值/读不懂 ⇒ exit 1（硬规则 6/3b：没查 ≠ 合格）；
+ *    ② `baselineFiles` 字段必须可读（⛔ 缺值/读不懂 ⇒ exit 1，硬规则 6/3b：没查 ≠ 合格）。⛔ 不得再检查
+ *       `baselineFiles` 的取值——「baseline 为空 ⇒ exempt 不可达」是特例代理，baseline 非空 + added>0 时
+ *       exempt 同样不可达（2026-10-30 实读：窗口内 4 条 A/B 全 hard-red、其中 2 条 baselineFiles=2，旧条件
+ *       把「baseline 非空」误当成「exempt 可达」而恒误报 rate-stopped）；
  *    ③ 写手腐烂守卫：每条 `exempt` 的 `baseline-red` 都必须等到**同 task** 的一条收尾——主路径
  *       `baseline-red-exempt`（:3484）或恢复阶梯 `suite-recovery-baseline-exempt`（:3390）。两条都要认，
  *       因为两条路径调的是**同一个** `runBaselineEquivalence`、都会写一条 `baseline-red`；恢复阶梯的收尾
@@ -307,7 +309,6 @@ export const BASELINE_RED_EXEMPT_TRIGGER_CMD =
   `if(W.length===0)process.exit(1);` +
   `const nums=W.filter(r=>typeof r.baselineFiles==="number");` +
   `if(nums.length===0)process.exit(1);` +
-  `if(nums.some(r=>r.baselineFiles!==0))process.exit(1);` +
   `const byTask=new Map();` +
   `for(const r of R)if(r.task&&r.ts){const a=byTask.get(r.task)||[];a.push(r);byTask.set(r.task,a)}` +
   `let bad=0;` +
@@ -527,15 +528,15 @@ export const MANIFEST: CarrierSpec[] = [
         kind: "conditional-on-input",
         reason:
           "写手 worker-fan-in.ts:3482-3487（**主路径**的既存红等价 A/B 出口）：判据是纯函数 " +
-          "compareFailureSignatures（:1420-1446），exempt ⇔ task 红集 ⊆ baseline 红集 ⇒ baseline 红集为空时，" +
-          "非空 task 红集恒不可能是它的子集，本组结构上不可达（直到 develop 再出现持续红）。当前实测：" +
-          ".quay/develop-red-set.json 的 reds=[]，且 A/B 只在 rerun 仍红时到达 ⇒「task 红集为空」这条唯一能让" +
-          "空 baseline 判 exempt 的路径走不到这里。全历史 79 条（2026-10-13T00:53:58Z → 2026-10-27T04:58:55Z，" +
+          "compareFailureSignatures（:1420-1446），exempt ⇔ task 红集 ⊆ baseline 红集 ⇒ 本组的真实触发是" +
+          "「窗口内至少一条 A/B 判 exempt」，与 baseline 红集是否为空无关——baseline 非空且 task 引入基线之外" +
+          "的新红（added>0）时 exempt 同样不可达。全历史 79 条（2026-10-13T00:53:58Z → 2026-10-27T04:58:55Z，" +
           "间隔中位数 0.58h）= 主流终端分支，不是 rare-by-design。条件读的是【窗口内 A/B 判词的形态】：" +
-          "末次本组写入之后必须 ≥1 条 A/B（⛔ 零 A/B 不是解释）、可读的 baselineFiles 必须全为 0（结构性理由" +
-          "本身）、且每条 exempt 的 baseline-red 都必须等到同 task 的收尾（主路径 baseline-red-exempt 或" +
-          "恢复阶梯 suite-recovery-baseline-exempt——两条路径共用同一个 runBaselineEquivalence，恢复阶梯的" +
-          "收尾⛔ 不得被读成主路径写手腐烂）。任何一条不成立 ⇒ 本裁定立即失效、回到 decayed[]。",
+          "末次本组写入之后必须 ≥1 条 A/B（⛔ 零 A/B 不是解释）、baselineFiles 字段可读（⛔ 缺值/读不懂即" +
+          "fail-closed，不检查其取值——baseline 是否为空不是 exempt 可达性的判据）、且每条 exempt 的" +
+          "baseline-red 都必须等到同 task 的收尾（主路径 baseline-red-exempt 或恢复阶梯" +
+          "suite-recovery-baseline-exempt——两条路径共用同一个 runBaselineEquivalence，恢复阶梯的收尾⛔ 不得被" +
+          "读成主路径写手腐烂）。任何一条不成立 ⇒ 本裁定立即失效、回到 decayed[]。",
         conditionCmd: BASELINE_RED_EXEMPT_TRIGGER_CMD,
         reviewAfter: "2026-11-22T00:00:00.000Z",
       },
