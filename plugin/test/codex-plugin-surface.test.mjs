@@ -9,22 +9,26 @@
 //       never a second copy).
 //
 //   (2) The codex-INSTALLABLE manifest shape (task gap-codex-plugin-surface-not-installable; layout
-//       fixed by gap-codex-plugin-mcp-json-nested-in-wrong-level):
+//       fixed by gap-codex-plugin-mcp-json-nested-in-wrong-level — Bug A layout, Bug B session-cwd
+//       independence):
 //       `.codex-plugin/plugin.json` must be the codex-legal form — `mcpServers` is a PATH STRING
 //       `"./.mcp.json"` (not an inline object), plus `author` and the `interface` block — and
 //       `.mcp.json` must live at the PLUGIN PACKAGE ROOT (`.codex-plugin/`'s SIBLING, not inside it —
 //       codex resolves the path string relative to the package root) declaring the quay MCP server
-//       against the SELF-CONTAINED in-package dist (`vendor/quay/dist/quay.js`), never
+//       through the self-locating wrapper (`args[0]="codex-mcp-wrapper.js"` + `cwd:"."`) so the
+//       self-contained in-package dist is reachable from ANY session cwd, never
 //       `~/.claude/plugins/cache/...`. A shared `validateCodexPackage(root)` returns a LOUD failure
 //       list, so the positive test can take the value false and the negative controls (inline
-//       mcpServers; `.mcp.json` nested back inside `.codex-plugin/`) red on the exact cause.
+//       mcpServers; `.mcp.json` nested back inside `.codex-plugin/`; relative args with no cwd) red
+//       on the exact cause.
 //
 //   The test carries its OWN negative controls: the AC-931 criterion is run against three
 //   throwaway `.codex-plugin/plugin.json` states — (a) args re-pointed at the dev-tree source,
 //   (b) the quay declaration removed, (c) the file removed — and each must exit 1 with the LOUD
 //   cause on stderr. The installable-shape validator is run against an inline-mcpServers manifest
-//   and must name `mcpServers is not a path string`; and against the OLD nested layout (`.mcp.json`
-//   back inside `.codex-plugin/`) it must name the layout failure. Without them the positive
+//   and must name `mcpServers is not a path string`; against the OLD nested layout (`.mcp.json`
+//   back inside `.codex-plugin/`) it must name the layout failure; and against relative args with no
+//   cwd (the Bug B relapse) it must name the args[0]/cwd failures. Without them the positive
 //   assertions would also pass against a trivially-green check (硬规则 3b / 4).
 //
 // Run: scripts/test.sh plugin/test/codex-plugin-surface.test.mjs
@@ -136,12 +140,17 @@ function validateCodexPackage(root) {
       if (server.command !== "node") {
         failures.push(`mcpServers.quay.command must be node, got ${JSON.stringify(server.command)}`);
       }
-      if (!Array.isArray(server.args) || server.args[0] !== "vendor/quay/dist/quay.js") {
+      if (!Array.isArray(server.args) || server.args[0] !== "codex-mcp-wrapper.js") {
         failures.push(
-          `mcpServers.quay.args[0] must be the in-package relative dist "vendor/quay/dist/quay.js", got ${JSON.stringify(server.args)}`,
+          `mcpServers.quay.args[0] must be the self-locating wrapper "codex-mcp-wrapper.js" (a relative dist path breaks under codex's session cwd), got ${JSON.stringify(server.args)}`,
         );
       }
       if (!server.args?.includes("mcp")) failures.push("mcpServers.quay.args must include mcp");
+      if (typeof server.cwd !== "string" || server.cwd.trim() === "") {
+        failures.push(
+          "mcpServers.quay.cwd must be set (codex resolves a relative cwd against the plugin root, so the wrapper's args resolve from any session cwd)",
+        );
+      }
     }
   }
   return failures;
@@ -188,7 +197,7 @@ test("negative control: an inline mcpServers object fails validation with `mcpSe
     fs.writeFileSync(
       path.join(tmp, ".mcp.json"),
       JSON.stringify(
-        { mcpServers: { quay: { command: "node", args: ["vendor/quay/dist/quay.js", "mcp"] } } },
+        { mcpServers: { quay: { command: "node", args: ["codex-mcp-wrapper.js", "mcp"], cwd: "." } } },
         null,
         2,
       ) + "\n",
@@ -237,6 +246,46 @@ test("negative control: .mcp.json nested back inside .codex-plugin/ fails valida
     assert.ok(
       failures.includes(".mcp.json missing at the package root"),
       `expected the nested-.mcp.json layout to also name the missing root .mcp.json, got ${JSON.stringify(failures)}`,
+    );
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test("negative control: relative args with no cwd (Bug B relapse) fails validation", () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "codex-rel-args-"));
+  try {
+    writePluginJson(tmp, {
+      name: "quay",
+      version: "0.29.0-dev",
+      author: { name: "quay" },
+      mcpServers: "./.mcp.json",
+      interface: {
+        displayName: "quay",
+        shortDescription: "provider-agnostic task board",
+        category: "Developer Tools",
+        capabilities: ["Interactive"],
+      },
+    });
+    // The Bug B relapse: args[0] back to the relative dist path, and cwd removed — codex resolves the
+    // relative args against the SESSION cwd, so the dist ENOENTs from any project without its own vendor/.
+    fs.writeFileSync(
+      path.join(tmp, ".mcp.json"),
+      JSON.stringify(
+        { mcpServers: { quay: { command: "node", args: ["vendor/quay/dist/quay.js", "mcp"] } } },
+        null,
+        2,
+      ) + "\n",
+      "utf8",
+    );
+    const failures = validateCodexPackage(tmp);
+    assert.ok(
+      failures.some((f) => f.includes("args[0] must be the self-locating wrapper")),
+      `expected the relative-args .mcp.json to fail on args[0], got ${JSON.stringify(failures)}`,
+    );
+    assert.ok(
+      failures.some((f) => f.includes("cwd must be set")),
+      `expected the relative-args .mcp.json to also fail on the missing cwd, got ${JSON.stringify(failures)}`,
     );
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });

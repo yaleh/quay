@@ -193,12 +193,13 @@ function addMarketplaceNameStampInputs(root) {
 
 /** The Codex publish surface the REAL publish script now copies fail-closed (gap-codex-plugin-
  *  surface-not-installable, successor to gap-publish-dist-branch-does-not-ship-codex-plugin-surface;
- *  layout fixed by gap-codex-plugin-mcp-json-nested-in-wrong-level). The stub carries a minimal
- *  synthetic pair in the SHAPE the repo ships — `.codex-plugin/plugin.json` with `mcpServers` as a
- *  PATH STRING (`"./.mcp.json"`), and the SIBLING `.mcp.json` at the package ROOT (not inside
- *  `.codex-plugin/`) declaring the quay stdio server against the self-contained dist. The script
- *  requires both files present and non-empty (it rsyncs `.codex-plugin/` and copies `.mcp.json` to
- *  the artifact root), so the stub pair's content does not affect the closure gate under test. */
+ *  layout + args fixed by gap-codex-plugin-mcp-json-nested-in-wrong-level). The stub carries a minimal
+ *  synthetic triple in the SHAPE the repo ships — `.codex-plugin/plugin.json` with `mcpServers` as a
+ *  PATH STRING (`"./.mcp.json"`), the SIBLING `.mcp.json` at the package ROOT (not inside
+ *  `.codex-plugin/`) declaring the quay stdio server through the self-locating wrapper, and that
+ *  wrapper at the package root. The script requires all three present and non-empty (it rsyncs
+ *  `.codex-plugin/` and copies `.mcp.json` + the wrapper to the artifact root), so the stub trio's
+ *  content does not affect the closure gate under test. */
 function addCodexPluginSurfaceInput(root) {
   writeFile(
     path.join(root, ".codex-plugin", "plugin.json"),
@@ -206,7 +207,11 @@ function addCodexPluginSurfaceInput(root) {
   );
   writeFile(
     path.join(root, ".mcp.json"),
-    JSON.stringify({ mcpServers: { quay: { command: "node", args: ["vendor/quay/dist/quay.js", "mcp"] } } }, null, 2) + "\n"
+    JSON.stringify({ mcpServers: { quay: { command: "node", args: ["codex-mcp-wrapper.js", "mcp"], cwd: "." } } }, null, 2) + "\n"
+  );
+  writeFile(
+    path.join(root, "codex-mcp-wrapper.js"),
+    "// stub codex-mcp-wrapper — the closure gate under test never executes it\n"
   );
 }
 

@@ -94,12 +94,14 @@ function makePublishRepo(tag) {
   fs.copyFileSync(path.join(repoRoot, ".claude-plugin", "marketplace.json"), path.join(root, ".claude-plugin", "marketplace.json"));
   // The Codex publish surface is a repo-ROOT sibling of .claude-plugin/ (not under plugin/); the
   // publish script now fails closed without it, so the stub must carry it (same reason as the
-  // marketplace.json copy above). It is BOTH the codex-legal manifest (`.codex-plugin/plugin.json`)
-  // AND the sibling `.mcp.json` at the package ROOT it points at (gap-codex-plugin-mcp-json-nested-
-  // in-wrong-level moved `.mcp.json` out of `.codex-plugin/`), so the stub copies both.
+  // marketplace.json copy above). It is the codex-legal manifest (`.codex-plugin/plugin.json`), the
+  // sibling `.mcp.json` at the package ROOT, and the self-locating wrapper it names
+  // (gap-codex-plugin-mcp-json-nested-in-wrong-level moved `.mcp.json` out of `.codex-plugin/` and
+  // routed it through the wrapper), so the stub copies all three.
   fs.mkdirSync(path.join(root, ".codex-plugin"), { recursive: true });
   fs.copyFileSync(path.join(repoRoot, ".codex-plugin", "plugin.json"), path.join(root, ".codex-plugin", "plugin.json"));
   fs.copyFileSync(path.join(repoRoot, ".mcp.json"), path.join(root, ".mcp.json"));
+  fs.copyFileSync(path.join(repoRoot, "codex-mcp-wrapper.js"), path.join(root, "codex-mcp-wrapper.js"));
   cpRecursive(pluginDir, path.join(root, "plugin"));
   git(root, "init", "-q", "-b", "master");
   git(root, "add", "-A");
