@@ -83,8 +83,6 @@ depends_on:
 
 ## Parked
 
-**PARKED** (worker-recorded escalation, 2026-10-27 — execution suspended: the post-landing observation window is still empty).
-
 Why parked: AC1 needs **two natural production instrument-decay rounds** whose window starts after the parent landed on
 develop (`2026-10-27T04:30:04Z`). The production carrier currently holds **0** such rounds (last one `2026-10-27T03:23:09.851Z`,
 67 min before the landing). Every worker round dispatched before those rounds accrue re-derives exactly this same reading —
