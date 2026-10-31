@@ -125,9 +125,12 @@ function makePublishRepo(tag) {
   fs.copyFileSync(path.join(repoRoot, ".claude-plugin", "marketplace.json"), path.join(root, ".claude-plugin", "marketplace.json"));
   // The Codex publish surface is a repo-ROOT sibling of .claude-plugin/ (not under plugin/); the
   // publish script now fails closed without it, so the stub must carry it — the same reason the
-  // marketplace.json copy above exists (task gap-publish-dist-branch-does-not-ship-codex-plugin-surface).
+  // marketplace.json copy above exists. It is BOTH the codex-legal manifest
+  // (`.codex-plugin/plugin.json`) AND the sibling `.codex-plugin/.mcp.json` it points at
+  // (gap-codex-plugin-surface-not-installable split mcpServers into a path string), so both are copied.
   fs.mkdirSync(path.join(root, ".codex-plugin"), { recursive: true });
   fs.copyFileSync(path.join(repoRoot, ".codex-plugin", "plugin.json"), path.join(root, ".codex-plugin", "plugin.json"));
+  fs.copyFileSync(path.join(repoRoot, ".codex-plugin", ".mcp.json"), path.join(root, ".codex-plugin", ".mcp.json"));
   cpRecursive(pluginDir, path.join(root, "plugin"));
   git(root, "init", "-q", "-b", "master");
   git(root, "add", "-A");

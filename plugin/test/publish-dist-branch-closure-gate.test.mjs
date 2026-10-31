@@ -191,15 +191,21 @@ function addMarketplaceNameStampInputs(root) {
   );
 }
 
-/** The Codex publish surface the REAL publish script now copies fail-closed (task
- *  gap-publish-dist-branch-does-not-ship-codex-plugin-surface). The stub carries a minimal synthetic
- *  `.codex-plugin/plugin.json` in the SHAPE the repo ships — mcpServers.quay = node quay.js mcp, against
- *  the installed dist. The script only requires the file to be present and non-empty (it rsyncs the whole
- *  directory), so the stub manifest's content does not affect the closure gate under test. */
+/** The Codex publish surface the REAL publish script now copies fail-closed (gap-codex-plugin-
+ *  surface-not-installable, successor to gap-publish-dist-branch-does-not-ship-codex-plugin-surface).
+ *  The stub carries a minimal synthetic pair in the SHAPE the repo ships — `.codex-plugin/plugin.json`
+ *  with `mcpServers` as a PATH STRING (`"./.mcp.json"`), and the sibling `.codex-plugin/.mcp.json`
+ *  declaring the quay stdio server against the self-contained dist. The script only requires both
+ *  files to be present and non-empty (it rsyncs the whole directory), so the stub pair's content does
+ *  not affect the closure gate under test. */
 function addCodexPluginSurfaceInput(root) {
   writeFile(
     path.join(root, ".codex-plugin", "plugin.json"),
-    JSON.stringify({ name: "quay", version: "0.0.0", mcpServers: { quay: { command: "node", args: ["quay.js", "mcp"] } } }, null, 2) + "\n"
+    JSON.stringify({ name: "quay", version: "0.0.0", mcpServers: "./.mcp.json" }, null, 2) + "\n"
+  );
+  writeFile(
+    path.join(root, ".codex-plugin", ".mcp.json"),
+    JSON.stringify({ mcpServers: { quay: { command: "node", args: ["vendor/quay/dist/quay.js", "mcp"] } } }, null, 2) + "\n"
   );
 }
 
