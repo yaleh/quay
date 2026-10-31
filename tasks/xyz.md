@@ -1,6 +1,6 @@
 ---
 id: xyz
-status: ready
+status: done
 labels: []
 parent: null
 children: []
