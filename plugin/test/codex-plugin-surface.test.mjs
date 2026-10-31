@@ -8,20 +8,24 @@
 //       fetches it VERBATIM from `quay goal show AC-931 --json` and executes THAT string (ADR-004:
 //       never a second copy).
 //
-//   (2) The codex-INSTALLABLE manifest shape (task gap-codex-plugin-surface-not-installable):
+//   (2) The codex-INSTALLABLE manifest shape (task gap-codex-plugin-surface-not-installable; layout
+//       fixed by gap-codex-plugin-mcp-json-nested-in-wrong-level):
 //       `.codex-plugin/plugin.json` must be the codex-legal form — `mcpServers` is a PATH STRING
 //       `"./.mcp.json"` (not an inline object), plus `author` and the `interface` block — and
-//       `.codex-plugin/.mcp.json` must declare the quay MCP server against the SELF-CONTAINED
-//       in-package dist (`vendor/quay/dist/quay.js`), never `~/.claude/plugins/cache/...`. A
-//       shared `validateCodexPackage(root)` returns a LOUD failure list, so the positive test can
-//       take the value false and the negative control (inline mcpServers) reds on the exact cause.
+//       `.mcp.json` must live at the PLUGIN PACKAGE ROOT (`.codex-plugin/`'s SIBLING, not inside it —
+//       codex resolves the path string relative to the package root) declaring the quay MCP server
+//       against the SELF-CONTAINED in-package dist (`vendor/quay/dist/quay.js`), never
+//       `~/.claude/plugins/cache/...`. A shared `validateCodexPackage(root)` returns a LOUD failure
+//       list, so the positive test can take the value false and the negative controls (inline
+//       mcpServers; `.mcp.json` nested back inside `.codex-plugin/`) red on the exact cause.
 //
 //   The test carries its OWN negative controls: the AC-931 criterion is run against three
 //   throwaway `.codex-plugin/plugin.json` states — (a) args re-pointed at the dev-tree source,
 //   (b) the quay declaration removed, (c) the file removed — and each must exit 1 with the LOUD
 //   cause on stderr. The installable-shape validator is run against an inline-mcpServers manifest
-//   and must name `mcpServers is not a path string`. Without them the positive assertions would
-//   also pass against a trivially-green check (硬规则 3b / 4).
+//   and must name `mcpServers is not a path string`; and against the OLD nested layout (`.mcp.json`
+//   back inside `.codex-plugin/`) it must name the layout failure. Without them the positive
+//   assertions would also pass against a trivially-green check (硬规则 3b / 4).
 //
 // Run: scripts/test.sh plugin/test/codex-plugin-surface.test.mjs
 
@@ -34,7 +38,7 @@ import { spawnSync } from "node:child_process";
 
 const ROOT = path.resolve(import.meta.dirname, "..", "..");
 const PLUGIN_JSON = path.join(ROOT, ".codex-plugin", "plugin.json");
-const MCP_JSON = path.join(ROOT, ".codex-plugin", ".mcp.json");
+const MCP_JSON = path.join(ROOT, ".mcp.json");
 const QUAY_BIN = path.join(ROOT, "packages", "quay", "bin", "quay.js");
 
 // ── AC-931's criterion, read verbatim from the goal store (never re-typed) ────────────────────
@@ -75,14 +79,26 @@ function writePluginJson(tmp, manifest) {
 }
 
 // ── the codex-installable package validator: returns a LOUD list of failures (never a boolean) ──
-// Reads `.codex-plugin/plugin.json` + `.codex-plugin/.mcp.json` under `root`. `mcpServers` must be
-// the path string "./.mcp.json" (codex resolves it relative to the plugin package root); the
-// `.mcp.json` must declare mcpServers.quay as stdio against the in-package dist (a relative path —
-// an absolute `~/.claude/plugins/cache/...` would break the moment the Claude Code cache is cleared).
+// Reads `.codex-plugin/plugin.json` + the SIBLING `.mcp.json` under `root`. `mcpServers` must be
+// the path string "./.mcp.json" (codex resolves it relative to the plugin package root — the SIBLING
+// of `.codex-plugin/`, not inside it); the `.mcp.json` must declare mcpServers.quay as stdio against
+// the in-package dist (a relative path — an absolute `~/.claude/plugins/cache/...` would break the
+// moment the Claude Code cache is cleared). The OLD nested layout (`.codex-plugin/.mcp.json` or
+// `.codex-plugin/vendor/`) must be absent — that is the whole gap this validator pins (硬规则 2:
+// position, not keyword).
 function validateCodexPackage(root) {
   const failures = [];
   const pluginJson = path.join(root, ".codex-plugin", "plugin.json");
-  const mcpJson = path.join(root, ".codex-plugin", ".mcp.json");
+  const mcpJson = path.join(root, ".mcp.json");
+  const nestedMcpJson = path.join(root, ".codex-plugin", ".mcp.json");
+  const nestedVendor = path.join(root, ".codex-plugin", "vendor");
+
+  if (fs.existsSync(nestedMcpJson)) {
+    failures.push(".codex-plugin/.mcp.json must not exist (.mcp.json lives at the package root, a SIBLING of .codex-plugin/)");
+  }
+  if (fs.existsSync(nestedVendor)) {
+    failures.push(".codex-plugin/vendor must not exist (the dist lives at the package-root vendor/, not inside .codex-plugin/)");
+  }
 
   let manifest;
   try {
@@ -106,7 +122,7 @@ function validateCodexPackage(root) {
   }
 
   if (!fs.existsSync(mcpJson)) {
-    failures.push(".mcp.json missing");
+    failures.push(".mcp.json missing at the package root");
   } else {
     let mcp;
     try {
@@ -170,7 +186,7 @@ test("negative control: an inline mcpServers object fails validation with `mcpSe
       },
     });
     fs.writeFileSync(
-      path.join(tmp, ".codex-plugin", ".mcp.json"),
+      path.join(tmp, ".mcp.json"),
       JSON.stringify(
         { mcpServers: { quay: { command: "node", args: ["vendor/quay/dist/quay.js", "mcp"] } } },
         null,
@@ -182,6 +198,45 @@ test("negative control: an inline mcpServers object fails validation with `mcpSe
     assert.ok(
       failures.includes("mcpServers is not a path string"),
       `expected the inline-mcpServers manifest to fail with "mcpServers is not a path string", got ${JSON.stringify(failures)}`,
+    );
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test("negative control: .mcp.json nested back inside .codex-plugin/ fails validation (the old wrong layout)", () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "codex-nested-mcp-"));
+  try {
+    writePluginJson(tmp, {
+      name: "quay",
+      version: "0.29.0-dev",
+      author: { name: "quay" },
+      mcpServers: "./.mcp.json",
+      interface: {
+        displayName: "quay",
+        shortDescription: "provider-agnostic task board",
+        category: "Developer Tools",
+        capabilities: ["Interactive"],
+      },
+    });
+    // The OLD wrong layout: .mcp.json nested INSIDE .codex-plugin/ (and nothing at the package root).
+    fs.writeFileSync(
+      path.join(tmp, ".codex-plugin", ".mcp.json"),
+      JSON.stringify(
+        { mcpServers: { quay: { command: "node", args: ["vendor/quay/dist/quay.js", "mcp"] } } },
+        null,
+        2,
+      ) + "\n",
+      "utf8",
+    );
+    const failures = validateCodexPackage(tmp);
+    assert.ok(
+      failures.includes(".codex-plugin/.mcp.json must not exist (.mcp.json lives at the package root, a SIBLING of .codex-plugin/)"),
+      `expected the nested-.mcp.json layout to fail with the layout cause, got ${JSON.stringify(failures)}`,
+    );
+    assert.ok(
+      failures.includes(".mcp.json missing at the package root"),
+      `expected the nested-.mcp.json layout to also name the missing root .mcp.json, got ${JSON.stringify(failures)}`,
     );
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });

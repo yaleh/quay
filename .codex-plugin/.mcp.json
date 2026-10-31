@@ -1,8 +1,0 @@
-{
-  "mcpServers": {
-    "quay": {
-      "command": "node",
-      "args": ["vendor/quay/dist/quay.js", "mcp"]
-    }
-  }
-}
