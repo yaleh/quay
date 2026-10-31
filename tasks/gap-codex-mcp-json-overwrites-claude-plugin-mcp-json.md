@@ -2,7 +2,7 @@
 id: gap-codex-mcp-json-overwrites-claude-plugin-mcp-json
 title: codex .mcp.json 覆盖 artifact 根 Claude Code .mcp.json：publish 不再把 codex 源写到
   artifact 根（peer 报 plugin:quay:quay CONNECTION_CLOSED）
-status: todo
+status: ready
 labels:
   - gap
   - codex
