@@ -46,3 +46,11 @@ artifact 根 `.mcp.json` 归 Claude Code（`${CLAUDE_PLUGIN_ROOT}`）、codex `.
 - plugin/test/codex-plugin-surface.test.mjs
 - plugin/test/publish-dist-branch-closure-gate.test.mjs
 - tasks/gap-codex-mcp-json-overwrites-claude-plugin-mcp-json.md
+
+## Blocker
+
+**2026-10-31T11:23:17.704Z — worker 未落地（exited-not-landed）**
+
+- 未落地原因：step=suite: AssertionError [ERR_ASSERTION]: ⛔ a host that did not die must not share an output with one that did — the caller would spawn a second host on top of it [baseline A/B: HARD RED (task-introduced-red) — the task's red set is NOT a subset of the develop baseline red set: added=plugin/test/start-drivers.test.mjs changed=-]
+- run_id：wk-prod-anchor
+- session_id：1e4db2f0-ed16-483f-bdbd-90514cb075de
