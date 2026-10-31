@@ -49,6 +49,7 @@ extra:
 - .mcp.json
 - .codex-plugin/.mcp.json
 - .codex-plugin/plugin.json
+- plugin/scripts/capability-catalog-declarations.json
 - plugin/scripts/codex-mcp-sync.sh
 - plugin/scripts/publish-dist-branch.sh
 - plugin/test/codex-plugin-surface.test.mjs
