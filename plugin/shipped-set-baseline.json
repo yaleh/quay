@@ -360,6 +360,30 @@
         "shLines": 7417
       },
       "why": "0.28.0: codex 插件包(.codex-plugin/.mcp.json + manifest 适配)与 task-double-frontmatter 检测器等新 shipped 文件（正当增长）"
+    },
+    {
+      "when": "2026-10-31T06:09:45.411Z",
+      "from": {
+        "files": 0,
+        "bytes": 0,
+        "shLines": 0,
+        "shipped": {
+          "files": 307,
+          "bytes": 73833859,
+          "shLines": 7417
+        }
+      },
+      "to": {
+        "files": 0,
+        "bytes": 0,
+        "shLines": 0
+      },
+      "shipped": {
+        "files": 306,
+        "bytes": 70964533,
+        "shLines": 7480
+      },
+      "why": "0.29.0: codex-mcp-sync.sh 同步机制 + codex 插件布局修复（.mcp.json 提级/args 绝对化）新 shipped .sh（正当增长）"
     }
   ],
   "_axes": {
@@ -373,8 +397,8 @@
   "bytes": 0,
   "shLines": 0,
   "shipped": {
-    "files": 307,
-    "bytes": 73833859,
-    "shLines": 7417
+    "files": 306,
+    "bytes": 70964533,
+    "shLines": 7480
   }
 }
