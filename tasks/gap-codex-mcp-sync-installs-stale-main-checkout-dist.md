@@ -2,7 +2,7 @@
 id: gap-codex-mcp-sync-installs-stale-main-checkout-dist
 title: codex-mcp-sync 装主检出陈旧 dist：publish 发布后 sync 应装 built artifact 的
   dist（--dist-root）
-status: todo
+status: ready
 labels:
   - gap
   - codex
