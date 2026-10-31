@@ -24,12 +24,12 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1 artifact 根 `.mcp.json` 归 Claude Code：`publish-dist-branch.sh` 组装产物里 `grep -q 'CLAUDE_PLUGIN_ROOT' <artifact>/.mcp.json` exit 0 且 `grep -q 'local/share/quay' <artifact>/.mcp.json` exit 1（贴 `.mcp.json` 全文）。
-- [ ] AC2 codex 源仍在且不写 artifact 根：`.codex-plugin/.mcp.json` 存在（`~` 模板），publish 组装产物 artifact 根 `.mcp.json` 无 codex 内容、`.codex-plugin/` 内只有 `plugin.json`（贴 `find` 结果）。
-- [ ] AC3 Claude Code 回归：从 assembled artifact 装 Claude Code 插件后，`plugin:quay:quay` 的 args = `${CLAUDE_PLUGIN_ROOT}/vendor/quay/dist/quay.js`（读已装插件 `.mcp.json`，非 `~`/绝对 codex 路径）。
-- [ ] AC4 codex 回归：codex marketplace 从 `.codex-plugin/.mcp.json` 组 → `codex plugin add quay@<mkt>` → `codex mcp list`（中立 /tmp）有 quay → 从 meta-cc `codex exec` task_list 通（贴两处运行）。
-- [ ] AC5 反向（能取假）：临时把 codex 源拷回 artifact 根 ⇒ artifact `.mcp.json` 变 codex `~`（`grep -q 'local/share/quay'` exit 0）；还原后复绿。
-- [ ] AC6 测试+范围门：`plugin/test/codex-plugin-surface.test.mjs`（或 `publish-dist-branch-closure-gate.test.mjs`）断言 artifact 根 `.mcp.json` 是 Claude Code 版、codex 源不覆盖；`bash scripts/test.sh --for-task gap-codex-mcp-json-overwrites-claude-plugin-mcp-json --allow-thin` 绿。
+- [x] AC1 artifact 根 `.mcp.json` 归 Claude Code：`publish-dist-branch.sh` 组装产物里 `grep -q 'CLAUDE_PLUGIN_ROOT' <artifact>/.mcp.json` exit 0 且 `grep -q 'local/share/quay' <artifact>/.mcp.json` exit 1（贴 `.mcp.json` 全文）。
+- [x] AC2 codex 源仍在且不写 artifact 根：`.codex-plugin/.mcp.json` 存在（`~` 模板），publish 组装产物 artifact 根 `.mcp.json` 无 codex 内容、`.codex-plugin/` 内只有 `plugin.json`（贴 `find` 结果）。
+- [x] AC3 Claude Code 回归：从 assembled artifact 装 Claude Code 插件后，`plugin:quay:quay` 的 args = `${CLAUDE_PLUGIN_ROOT}/vendor/quay/dist/quay.js`（读已装插件 `.mcp.json`，非 `~`/绝对 codex 路径）。
+- [x] AC4 codex 回归：codex marketplace 从 `.codex-plugin/.mcp.json` 组 → `codex plugin add quay@<mkt>` → `codex mcp list`（中立 /tmp）有 quay → 从 meta-cc `codex exec` task_list 通（贴两处运行）。
+- [x] AC5 反向（能取假）：临时把 codex 源拷回 artifact 根 ⇒ artifact `.mcp.json` 变 codex `~`（`grep -q 'local/share/quay'` exit 0）；还原后复绿。
+- [x] AC6 测试+范围门：`plugin/test/codex-plugin-surface.test.mjs`（或 `publish-dist-branch-closure-gate.test.mjs`）断言 artifact 根 `.mcp.json` 是 Claude Code 版、codex 源不覆盖；`bash scripts/test.sh --for-task gap-codex-mcp-json-overwrites-claude-plugin-mcp-json --allow-thin` 绿。
 
 ## Definition of Done
 
