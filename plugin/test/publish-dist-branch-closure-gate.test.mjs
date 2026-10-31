@@ -193,20 +193,21 @@ function addMarketplaceNameStampInputs(root) {
 
 /** The Codex publish surface the REAL publish script now copies fail-closed (gap-codex-plugin-
  *  surface-not-installable, successor to gap-publish-dist-branch-does-not-ship-codex-plugin-surface;
- *  layout + args fixed by gap-codex-plugin-mcp-json-nested-in-wrong-level). The stub carries a minimal
+ *  layout + args fixed by gap-codex-plugin-mcp-json-nested-in-wrong-level; SOURCE split by
+ *  gap-codex-mcp-json-source-collides-with-claude-project-config). The stub carries a minimal
  *  synthetic pair in the SHAPE the repo ships — `.codex-plugin/plugin.json` with `mcpServers` as a
- *  PATH STRING (`"./.mcp.json"`), and the SIBLING `.mcp.json` at the package ROOT (not inside
- *  `.codex-plugin/`) declaring the quay stdio server against the stable version-independent path
- *  `~/.local/share/quay/quay.js`. The script requires both present and non-empty (it rsyncs
- *  `.codex-plugin/` and copies `.mcp.json` to the artifact root), so the stub pair's content does not
- *  affect the closure gate under test. */
+ *  PATH STRING (`"./.mcp.json"`), and the codex `.mcp.json` SOURCE INSIDE `.codex-plugin/` (not the
+ *  repo root, which is Claude Code's project config) declaring the quay stdio server against the
+ *  stable version-independent path `~/.local/share/quay/quay.js`. The script requires both present
+ *  and non-empty (it rsyncs `.codex-plugin/` excluding `.mcp.json` and copies that source to the
+ *  artifact root), so the stub pair's content does not affect the closure gate under test. */
 function addCodexPluginSurfaceInput(root) {
   writeFile(
     path.join(root, ".codex-plugin", "plugin.json"),
     JSON.stringify({ name: "quay", version: "0.0.0", mcpServers: "./.mcp.json" }, null, 2) + "\n"
   );
   writeFile(
-    path.join(root, ".mcp.json"),
+    path.join(root, ".codex-plugin", ".mcp.json"),
     JSON.stringify({ mcpServers: { quay: { command: "node", args: ["~/.local/share/quay/quay.js", "mcp"] } } }, null, 2) + "\n"
   );
 }
@@ -396,6 +397,22 @@ test("AC2: the real publish script exits non-zero and commits nothing when a ref
     JSON.parse(fs.readFileSync(path.join(stub, "plugin", ".claude-plugin", "marketplace.json"), "utf8")).name,
     "quay-dev",
     "the stamp must act on the assembled COPY, never on the source plugin/"
+  );
+  // The assembled CODEX surface (gap-codex-mcp-json-source-collides-with-claude-project-config):
+  // `.codex-plugin/` carries ONLY `plugin.json` (the source `.mcp.json` is excluded from the rsync),
+  // and the artifact-root `.mcp.json` IS that source (the `~` template codex resolves at the package
+  // root). Reading from the committed orphan branch — the exact artifact a consumer fetches.
+  const publishedCodexEntries = git(stub, "ls-tree", "--name-only", `${branch}:.codex-plugin`).split("\n").filter(Boolean);
+  assert.deepEqual(
+    publishedCodexEntries,
+    ["plugin.json"],
+    ".codex-plugin/ in the assembled artifact must carry ONLY plugin.json (the source .mcp.json must not be nested there)"
+  );
+  const publishedRootMcp = JSON.parse(git(stub, "show", `${branch}:.mcp.json`));
+  assert.equal(
+    publishedRootMcp.mcpServers?.quay?.args?.[0],
+    "~/.local/share/quay/quay.js",
+    "the artifact-root .mcp.json must be the codex source (`~` template), not the empty Claude Code project config"
   );
   git(stub, "branch", "-D", branch);
 
