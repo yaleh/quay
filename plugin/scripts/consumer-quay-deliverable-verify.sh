@@ -67,13 +67,15 @@ else
 fi
 
 # ③ Codex MCP（mcp list + task_list）
+# ⚠️ `codex exec` 在 stdin 打开时会读 stdin（挂在 "Reading additional input from stdin..."）甚至
+#    把技能输出写到 /dev/tty，`$(... 2>&1)` 抓不到 ⇒ `</dev/null` 强制非交互、输出走 stdout/stderr。
 note "=== ③ Codex MCP ==="
 if timeout 30 codex mcp list --json 2>/dev/null | grep -q '"quay"'; then
   ok "codex mcp list 有 quay"
 else
   bad "codex mcp list 无 quay"
 fi
-cx_mcp_out="$(timeout 300 codex exec --dangerously-bypass-approvals-and-sandbox -C "$ROOT" "$CX_TASKLIST_PROMPT" 2>&1)"
+cx_mcp_out="$(timeout 300 codex exec --dangerously-bypass-approvals-and-sandbox -C "$ROOT" "$CX_TASKLIST_PROMPT" </dev/null 2>&1)"
 note "$cx_mcp_out" | tail -6
 if printf '%s\n' "$cx_mcp_out" | grep -qiE 'task|任务|total|条|count'; then
   ok "codex task_list 有返回"
@@ -83,7 +85,7 @@ fi
 
 # ④ Codex skills（$quay-task-operator，单引号防 bash 展开 $）
 note "=== ④ Codex skills (\$quay-task-operator) ==="
-cx_skill_out="$(timeout 300 codex exec --dangerously-bypass-approvals-and-sandbox -C "$ROOT" "$CX_SKILL_PROMPT" 2>&1)"
+cx_skill_out="$(timeout 300 codex exec --dangerously-bypass-approvals-and-sandbox -C "$ROOT" "$CX_SKILL_PROMPT" </dev/null 2>&1)"
 note "$cx_skill_out" | tail -6
 if printf '%s\n' "$cx_skill_out" | grep -qiE 'task|任务|total|条|count'; then
   ok '$quay-task-operator 可调用'
