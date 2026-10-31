@@ -80,6 +80,15 @@ gate-events / dispatch-record / manager-tick-log 中 DIR-121 零条；不存在�
 
 ⇒ **这是本 SPEC 要修的第一类缺陷：静默失败 + 现有判据无法区分「查过且合格」与「没查成」（硬规则 3b）。**
 
+#### 3.2b codex **插件** `.mcp.json` 的路径解析（2026-10-31 补测，原 §7-3「未测」已补上）
+
+【实测 2026-10-31，codex-cli 0.165.0】项目级 `.codex/config.toml` 之外，本仓库后来又 ship 了 codex 插件表面（`.codex-plugin/` + `.mcp.json`）。把 user-scope 插件装上后，从 meta-cc（一个**没有自己 quay project-config 的 quay 项目**）调 `task_list` ⇒ `initialize response: connection closed`；直接 `node vendor/quay/dist/quay.js`（相对 args）⇒ ENOENT。
+
+三条结论：
+1. codex 插件 `.mcp.json` 的 `args` 同样按**会话 cwd** 解析（`codex mcp list` 显示该 server `Cwd: -`），与项目级 config 一致；相对 args 从任意子目录/别的项目崩。
+2. codex **没有** `${CLAUDE_PLUGIN_ROOT}` 等价占位符（`strings` 无命中）——Claude Code 侧 `plugin/.mcp.json` 那条「占位符→绝对路径」的路在 codex 走不通。
+3. 故 codex 插件路的处理办法（人 2026-10-31 裁定）：**稳定绝对路径**——dist 单独装到 `~/.local/share/quay/`，`.mcp.json` 写绝对 args，升级时同步更新该稳定位置（见 `gap-codex-plugin-mcp-json-nested-in-wrong-level`）。
+
 ### 3.3 机械面底座今天仍全绿（可复用，不是重新发明）
 
 【实测 2026-10-29】`node --test plugin/test/codex-stage1-adapter.test.mjs` → 26/26 pass；
@@ -158,5 +167,5 @@ gitignored 账本在判据 worktree 里要么缺席要么是旧快照 ⇒ 只能
 
 1. **branch 模式适配代价**：本 goal 的代码足迹小（config 一行 + 一个脚本），branch 的隔离收益边际；保留它是因为人裁定②（继续真实试点 goal branch）。若 AC-929 的「证据提交进分支」设计在实现期被证伪（如 live-proof-check 依赖 gitignored 账本），退回「AC-929 post-merge」或由人改判 `branch: false`。
 2. **app-server 是 experimental**：0.149.1→0.153.4→0.156.1 协议在漂（【转引】并行会话）。本 SPEC 只用 `codex exec` + MCP 面，不碰 app-server，故不受直接影响，但 Task B 的「fresh 会话」验证要按当时版本实跑。
-3. **Codex 插件 `.mcp.json` 的 cwd 语义未测**：本仓库没有 `.codex-plugin/`，那条路的 cwd 行为不在本 SPEC 证据内；本 SPEC 只覆盖**项目级 `.codex/config.toml`** 这条路。
+3. **Codex 插件 `.mcp.json` 的 cwd 语义已补测**（2026-10-31，见 §3.2b）：args 按会话 cwd 解析、无 `${CLAUDE_PLUGIN_ROOT}` 占位符；处理办法 = 稳定绝对路径 `~/.local/share/quay/`（`gap-codex-plugin-mcp-json-nested-in-wrong-level`）。
 4. **quay-task subagent 的 tool-allowlist 无 Codex 等价物**（【转引】并行会话）：Codex 插件 schema 无 agents、无 per-agent tool allowlist ⇒ 缓解靠「服务端受限 ABI 或只读沙箱子线程 + MCP 写」，性质从「结构不可能」退化为「协议约定」。AC-930 的负向测试是这一退化的长期看守。
