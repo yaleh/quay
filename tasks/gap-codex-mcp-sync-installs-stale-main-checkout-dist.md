@@ -22,10 +22,10 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1 显式源：`codex-mcp-sync.sh` 支持 `--dist-root <dir>`（或等价），`publish-dist-branch.sh` 发布后以 `--dist-root "$WORK"`（built artifact）调用 `--install-only`，⛔ 不再依赖从 `PLUGIN_DIR` 向上找。贴脚本 diff 与调用行。
-- [ ] AC2 修复验证（能取假）：在主检出 vendored dist 陈旧的条件下（当前即 0.25.0-dev vs VERSION 0.30.0-dev）跑一次 publish，`node ~/.local/share/quay/quay.js --version` == **built artifact 的版本**（非 0.25.0-dev）。贴 publish 后 `--version` 输出。
-- [ ] AC3 反向：临时把 `--dist-root` 去掉（回退到旧行为）⇒ sync 装的是主检出陈旧 dist（`--version` == 0.25.0-dev）；还原后复绿。
-- [ ] AC4 测试+范围门：`plugin/test/publish-dist-branch-closure-gate.test.mjs`（或 `codex-plugin-surface.test.mjs`）断言 publish 后 sync 装 built dist；`bash scripts/test.sh --for-task gap-codex-mcp-sync-installs-stale-main-checkout-dist --allow-thin` 绿。
+- [x] AC1 显式源：`codex-mcp-sync.sh` 新增 `--dist-root <dir>`（`DIST_ROOT_OVERRIDE` 覆盖 walk-up，非目录 ⇒ exit 2）；`publish-dist-branch.sh` 发布后调用行改为 `bash "${PLUGIN_DIR}/scripts/codex-mcp-sync.sh" --install-only --dist-root "$WORK"`（built artifact），⛔ 不再依赖从 `PLUGIN_DIR` 向上找。
+- [x] AC2 修复验证（能取假）：worktree vendored dist = 0.25.0-dev（VERSION 0.30.0）条件下跑 `publish-dist-branch.sh --no-build --push`（bare remote + temp HOME），publish 后 `node ~/.local/share/quay/quay.js --version` == `0.30.0-dev`（built artifact 版本，非 0.25.0-dev）。
+- [x] AC3 反向：旧行为 `codex-mcp-sync.sh --install-only`（无 `--dist-root`）⇒ 装主检出陈旧 dist，`--version` == `0.25.0-dev`；加回 `--dist-root "$WORK"` ⇒ `0.30.0-dev` 复绿。
+- [x] AC4 测试+范围门：`plugin/test/publish-dist-branch-closure-gate.test.mjs` 新增两条——①位置断言 publish 后 sync 调用带 `--dist-root "$WORK"`；②行为断言（能取假，含反向）`--dist-root` 装 built tree、walk-up 默认装 stale tree；`bash scripts/test.sh --for-task gap-codex-mcp-sync-installs-stale-main-checkout-dist --allow-thin` 绿（5 tests pass）。
 
 ## Definition of Done
 
