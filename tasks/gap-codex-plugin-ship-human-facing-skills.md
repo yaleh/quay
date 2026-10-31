@@ -25,12 +25,12 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1 分类（按位置，贴清单+判定依据）：人脸操作面 = `quay-init`/`quay-file-task`/`quay-directive`/`quay-task-operator`；编排面 = `loop-driver`/`manager`/`cold-start`/`drivers`/`routines`/`execute`/`quay-task-to-plan`/`extension-point-refactor` 不交付。
-- [ ] AC2 组装：`publish-dist-branch.sh` 组装出的 codex 插件包含 `skills/` 目录且**恰含**上述 4 个人脸 skills（`find <codex-pkg>/skills -mindepth 1 -maxdepth 1 -type d` 输出 == 这 4 个）；`.codex-plugin/plugin.json` 声明 `"skills": "./skills/"`（贴 manifest 片段 + `find` 结果）。
-- [ ] AC3 验证：从 assembled artifact 组 marketplace → `codex plugin add quay@<mkt>` → 在 meta-cc（或等价项目）codex 里 `$quay-task-operator` / `$quay-directive` 可见（贴 codex 技能发现/调用结果）。
-- [ ] AC4 反向（能取假）：编排面 skills 不在 codex 插件包内（`find <codex-pkg>/skills -name 'loop-driver'` 空、`-name 'manager'` 空）。
-- [ ] AC5 约束（quay init 不复制，能取假）：`quay init` 后目标项目 `.agents/skills/` **不含** quay 技能文件（`find <target>/.agents/skills -maxdepth 1 -name 'quay-*'` 空），且 `packages/quay/src/init.ts` 无「复制 skills 进 `.agents/skills/`」路径（grep 空）；反向：若有人加回复制路径 ⇒ AC5 grep 命中。
-- [ ] AC6 测试+范围门：`plugin/test/codex-plugin-surface.test.mjs` 断言 skills 交付面（4 个在、编排面不在）+ init 不复制；`bash scripts/test.sh --for-task gap-codex-plugin-ship-human-facing-skills --allow-thin` 绿。
+- [x] AC1 分类（按位置，贴清单+判定依据）：人脸操作面 = `quay-init`/`quay-file-task`/`quay-directive`/`quay-task-operator`；编排面 = `loop-driver`/`manager`/`cold-start`/`drivers`/`routines`/`execute`/`quay-task-to-plan`/`extension-point-refactor` 不交付。
+- [x] AC2 组装：`publish-dist-branch.sh` 组装出的 codex 插件包含 `skills/` 目录且**恰含**上述 4 个人脸 skills（`find <codex-pkg>/skills -mindepth 1 -maxdepth 1 -type d` 输出 == 这 4 个）；`.codex-plugin/plugin.json` 声明 `"skills": "./skills/"`（贴 manifest 片段 + `find` 结果）。
+- [x] AC3 验证：从 assembled artifact 组 marketplace → `codex plugin add quay@<mkt>` → 在 meta-cc（或等价项目）codex 里 `$quay-task-operator` / `$quay-directive` 可见（贴 codex 技能发现/调用结果）。
+- [x] AC4 反向（能取假）：编排面 skills 不在 codex 插件包内（`find <codex-pkg>/skills -name 'loop-driver'` 空、`-name 'manager'` 空）。
+- [x] AC5 约束（quay init 不复制，能取假）：`quay init` 后目标项目 `.agents/skills/` **不含** quay 技能文件（`find <target>/.agents/skills -maxdepth 1 -name 'quay-*'` 空），且 `packages/quay/src/init.ts` 无「复制 skills 进 `.agents/skills/`」路径（grep 空）；反向：若有人加回复制路径 ⇒ AC5 grep 命中。
+- [x] AC6 测试+范围门：`plugin/test/codex-plugin-surface.test.mjs` 断言 skills 交付面（4 个在、编排面不在）+ init 不复制；`bash scripts/test.sh --for-task gap-codex-plugin-ship-human-facing-skills --allow-thin` 绿。
 
 ## Definition of Done
 
