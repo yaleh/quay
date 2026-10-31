@@ -1,7 +1,7 @@
 ---
 id: gap-main-checkout-vendored-dist-stale
 title: 主检出 vendored dist 陈旧 0.25.0-dev（VERSION 0.30.0-dev）：sync-vendor 重建 + 版本一致性检测
-status: todo
+status: ready
 labels:
   - gap
   - defect
