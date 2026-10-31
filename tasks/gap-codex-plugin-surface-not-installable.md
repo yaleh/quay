@@ -2,7 +2,7 @@
 id: gap-codex-plugin-surface-not-installable
 title: .codex-plugin/ 非合法 codex 插件 manifest：mcpServers 应指向 .mcp.json + 补
   interface/author + dist 自包含
-status: todo
+status: ready
 labels:
   - gap
   - codex
