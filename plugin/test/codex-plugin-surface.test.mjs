@@ -1,23 +1,27 @@
 // @test-group engine
-// codex-plugin-surface.test.mjs — the in-repo guard for AC-931's publish-surface criterion
-// (task gap-codex-plugin-publish-surface-plugin-json-mcp-dist).
+// codex-plugin-surface.test.mjs — the in-repo guard for the codex publish surface, two predicates:
 //
-// WHY this test exists: AC-931's criterion (goals/AC-931-*.md) checks that the repo root carries a
-// `.codex-plugin/plugin.json` that declares the quay MCP server against the INSTALLED dist
-// (`quay.js mcp`) and NOT the dev-tree source (`packages/quay/bin/quay.ts`). That predicate lives
-// only in the goal store and is evaluated by the goal driver — a later edit that re-points the
-// manifest at the dev-tree source (or drops the declaration / the file) would be invisible until the
-// next goal-driver round.
+//   (1) AC-931's criterion (task gap-codex-plugin-publish-surface-plugin-json-mcp-dist): the repo
+//       root carries a `.codex-plugin/plugin.json` that declares the quay MCP server against the
+//       INSTALLED dist (`quay.js mcp`) and NOT the dev-tree source (`packages/quay/bin/quay.ts`).
+//       That predicate lives ONLY in the goal store and is evaluated by the goal driver — this test
+//       fetches it VERBATIM from `quay goal show AC-931 --json` and executes THAT string (ADR-004:
+//       never a second copy).
 //
-// SINGLE SOURCE (ADR-004): this test does NOT restate the predicate. It fetches AC-931's `criterion`
-// field VERBATIM from `quay goal show AC-931 --json` (the same store the goal driver evaluates) and
-// executes THAT string. Copying the three greps here would be a second home for one rule.
+//   (2) The codex-INSTALLABLE manifest shape (task gap-codex-plugin-surface-not-installable):
+//       `.codex-plugin/plugin.json` must be the codex-legal form — `mcpServers` is a PATH STRING
+//       `"./.mcp.json"` (not an inline object), plus `author` and the `interface` block — and
+//       `.codex-plugin/.mcp.json` must declare the quay MCP server against the SELF-CONTAINED
+//       in-package dist (`vendor/quay/dist/quay.js`), never `~/.claude/plugins/cache/...`. A
+//       shared `validateCodexPackage(root)` returns a LOUD failure list, so the positive test can
+//       take the value false and the negative control (inline mcpServers) reds on the exact cause.
 //
-// The test carries its OWN negative controls: the same criterion is run against three throwaway
-// `.codex-plugin/plugin.json` states — (a) args re-pointed at the dev-tree source, (b) the quay
-// declaration removed, (c) the file removed — and each must exit 1 with the LOUD cause on stderr
-// (`dev-tree source path present` / `no quay MCP declaration` / `absent`). Without them the positive
-// assertion would also pass against a criterion that is trivially green (硬规则 3b / 4).
+//   The test carries its OWN negative controls: the AC-931 criterion is run against three
+//   throwaway `.codex-plugin/plugin.json` states — (a) args re-pointed at the dev-tree source,
+//   (b) the quay declaration removed, (c) the file removed — and each must exit 1 with the LOUD
+//   cause on stderr. The installable-shape validator is run against an inline-mcpServers manifest
+//   and must name `mcpServers is not a path string`. Without them the positive assertions would
+//   also pass against a trivially-green check (硬规则 3b / 4).
 //
 // Run: scripts/test.sh plugin/test/codex-plugin-surface.test.mjs
 
@@ -30,6 +34,7 @@ import { spawnSync } from "node:child_process";
 
 const ROOT = path.resolve(import.meta.dirname, "..", "..");
 const PLUGIN_JSON = path.join(ROOT, ".codex-plugin", "plugin.json");
+const MCP_JSON = path.join(ROOT, ".codex-plugin", ".mcp.json");
 const QUAY_BIN = path.join(ROOT, "packages", "quay", "bin", "quay.js");
 
 // ── AC-931's criterion, read verbatim from the goal store (never re-typed) ────────────────────
@@ -69,6 +74,63 @@ function writePluginJson(tmp, manifest) {
   );
 }
 
+// ── the codex-installable package validator: returns a LOUD list of failures (never a boolean) ──
+// Reads `.codex-plugin/plugin.json` + `.codex-plugin/.mcp.json` under `root`. `mcpServers` must be
+// the path string "./.mcp.json" (codex resolves it relative to the plugin package root); the
+// `.mcp.json` must declare mcpServers.quay as stdio against the in-package dist (a relative path —
+// an absolute `~/.claude/plugins/cache/...` would break the moment the Claude Code cache is cleared).
+function validateCodexPackage(root) {
+  const failures = [];
+  const pluginJson = path.join(root, ".codex-plugin", "plugin.json");
+  const mcpJson = path.join(root, ".codex-plugin", ".mcp.json");
+
+  let manifest;
+  try {
+    manifest = JSON.parse(fs.readFileSync(pluginJson, "utf8"));
+  } catch (e) {
+    return [`${pluginJson} unreadable: ${e.message}`];
+  }
+  if (typeof manifest.mcpServers !== "string") {
+    failures.push("mcpServers is not a path string");
+  } else if (manifest.mcpServers !== "./.mcp.json") {
+    failures.push(`mcpServers must be "./.mcp.json", got ${JSON.stringify(manifest.mcpServers)}`);
+  }
+  if (!manifest.author) failures.push("author missing");
+  const iface = manifest.interface;
+  if (!iface) failures.push("interface missing");
+  else {
+    if (!iface.displayName) failures.push("interface.displayName missing");
+    if (!iface.shortDescription) failures.push("interface.shortDescription missing");
+    if (!iface.category) failures.push("interface.category missing");
+    if (!Array.isArray(iface.capabilities)) failures.push("interface.capabilities not an array");
+  }
+
+  if (!fs.existsSync(mcpJson)) {
+    failures.push(".mcp.json missing");
+  } else {
+    let mcp;
+    try {
+      mcp = JSON.parse(fs.readFileSync(mcpJson, "utf8"));
+    } catch (e) {
+      return failures.concat([`${mcpJson} unreadable: ${e.message}`]);
+    }
+    const server = mcp.mcpServers?.quay;
+    if (!server) failures.push(".mcp.json has no mcpServers.quay");
+    else {
+      if (server.command !== "node") {
+        failures.push(`mcpServers.quay.command must be node, got ${JSON.stringify(server.command)}`);
+      }
+      if (!Array.isArray(server.args) || server.args[0] !== "vendor/quay/dist/quay.js") {
+        failures.push(
+          `mcpServers.quay.args[0] must be the in-package relative dist "vendor/quay/dist/quay.js", got ${JSON.stringify(server.args)}`,
+        );
+      }
+      if (!server.args?.includes("mcp")) failures.push("mcpServers.quay.args must include mcp");
+    }
+  }
+  return failures;
+}
+
 test("AC-931 criterion passes on this repo's .codex-plugin/plugin.json", () => {
   const criterion = readAc931Criterion();
   const res = runCriterion(criterion, ROOT);
@@ -80,26 +142,50 @@ test("AC-931 criterion passes on this repo's .codex-plugin/plugin.json", () => {
   assert.equal(res.stderr, "", "a passing AC-931 run must not write to stderr");
 });
 
-test("the publish surface declares quay against the installed dist, not the dev-tree source (position)", () => {
-  const raw = fs.readFileSync(PLUGIN_JSON, "utf8");
-  assert.doesNotMatch(
-    raw,
-    /packages\/quay\/bin\/quay\.ts/,
-    "manifest must not reference the dev-tree source path",
+test("the codex package carries the installable manifest + self-contained .mcp.json (position)", () => {
+  const failures = validateCodexPackage(ROOT);
+  assert.deepEqual(
+    failures,
+    [],
+    `codex package validation failed:\n  - ${failures.join("\n  - ")}`,
   );
-  const manifest = JSON.parse(raw);
-  const server = manifest.mcpServers?.quay;
-  assert.ok(server && typeof server === "object", "manifest must declare mcpServers.quay");
-  assert.equal(server.command, "node", "mcpServers.quay.command must be node");
-  assert.ok(Array.isArray(server.args), "mcpServers.quay.args must be an array");
-  assert.ok(
-    server.args.includes("quay.js"),
-    `args must point at the installed dist; got ${JSON.stringify(server.args)}`,
-  );
-  assert.ok(
-    server.args.includes("mcp"),
-    `args must include the mcp subcommand; got ${JSON.stringify(server.args)}`,
-  );
+  // Position, not keyword: the .mcp.json must not reference the claude plugin cache anywhere.
+  const rawMcp = fs.readFileSync(MCP_JSON, "utf8");
+  assert.doesNotMatch(rawMcp, /plugins\/cache/, ".mcp.json must not reference the claude plugin cache");
+});
+
+test("negative control: an inline mcpServers object fails validation with `mcpServers is not a path string`", () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "codex-inline-mcp-"));
+  try {
+    writePluginJson(tmp, {
+      name: "quay",
+      version: "0.28.0-dev",
+      author: { name: "quay" },
+      mcpServers: { quay: { command: "node", args: ["quay.js", "mcp"] } },
+      interface: {
+        displayName: "quay",
+        shortDescription: "provider-agnostic task board",
+        category: "Developer Tools",
+        capabilities: ["Interactive"],
+      },
+    });
+    fs.writeFileSync(
+      path.join(tmp, ".codex-plugin", ".mcp.json"),
+      JSON.stringify(
+        { mcpServers: { quay: { command: "node", args: ["vendor/quay/dist/quay.js", "mcp"] } } },
+        null,
+        2,
+      ) + "\n",
+      "utf8",
+    );
+    const failures = validateCodexPackage(tmp);
+    assert.ok(
+      failures.includes("mcpServers is not a path string"),
+      `expected the inline-mcpServers manifest to fail with "mcpServers is not a path string", got ${JSON.stringify(failures)}`,
+    );
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
 });
 
 test("negative control: re-pointing args at the dev-tree source fails with `dev-tree source path present`", () => {

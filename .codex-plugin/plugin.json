@@ -1,11 +1,29 @@
 {
   "name": "quay",
   "version": "0.28.0-dev",
-  "description": "quay: a provider-agnostic task board. Codex plugin publish surface declaring the quay MCP server (node quay.js mcp) against the installed dist, not the dev-tree source.",
-  "mcpServers": {
-    "quay": {
-      "command": "node",
-      "args": ["quay.js", "mcp"]
-    }
+  "description": "quay: a provider-agnostic task board. Exposes the quay MCP server (task_list / task_get / task_write / task_check / action_list / action_run) over stdio against the self-contained dist bundled inside this plugin package.",
+  "author": {
+    "name": "quay"
+  },
+  "repository": "https://github.com/yaleh/quay",
+  "license": "MIT",
+  "keywords": [
+    "quay",
+    "task-board",
+    "task-management",
+    "mcp"
+  ],
+  "mcpServers": "./.mcp.json",
+  "interface": {
+    "displayName": "quay",
+    "shortDescription": "Provider-agnostic task board",
+    "longDescription": "Use the quay MCP server to read and write tasks on a quay task board: task_list, task_get, task_write, task_check, action_list, and action_run over whichever provider the target workspace's .quay/config.yml enables.",
+    "developerName": "quay",
+    "category": "Developer Tools",
+    "capabilities": [
+      "Interactive",
+      "Write"
+    ],
+    "websiteURL": "https://github.com/yaleh/quay"
   }
 }

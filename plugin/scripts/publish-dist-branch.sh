@@ -154,15 +154,18 @@ if [ "${#RSYNC_EXCLUDES[@]}" -eq 0 ]; then echo "ERROR: shipped-set exclusion li
 SHELL_EXCLUDES="$(node --no-warnings --experimental-strip-types "${PLUGIN_DIR}/scripts/shipped-shell-reachability.ts" --print-excludes)"
 rsync -a --exclude='.git' "${RSYNC_EXCLUDES[@]}" "${PLUGIN_DIR}/" "${WORK}/" && node "${REPO_ROOT}/scripts/stamp-marketplace-name.mjs" --root "${WORK}" --repo-root "${REPO_ROOT}"
 
-# ── THE CODEX PLUGIN SURFACE (task gap-publish-dist-branch-does-not-ship-codex-plugin-surface) ──────
+# ── THE CODEX PLUGIN SURFACE (gap-codex-plugin-surface-not-installable) ──────────────────────────────
 # The Claude Code channel ships plugin/.claude-plugin/marketplace.json; the Codex channel's publish
-# surface lives at REPO ROOT (`.codex-plugin/plugin.json` — it declares mcpServers.quay =
-# `node quay.js mcp` against the INSTALLED dist, AC-931). It is NOT under plugin/, so the rsync above
-# never carried it and every artifact was missing the whole Codex install surface. Fail-closed: a
-# publish without a non-empty manifest must abort, never silently ship an artifact that cannot install
-# on the Codex host (硬规则 3b — "missing" must not be indistinguishable from "copied").
-[ -s "${REPO_ROOT}/.codex-plugin/plugin.json" ] || { echo "ERROR: ${REPO_ROOT}/.codex-plugin/plugin.json missing or empty — refusing to publish without the Codex plugin surface." >&2; exit 1; }
-rsync -a --exclude='.git' "${REPO_ROOT}/.codex-plugin/" "${WORK}/.codex-plugin/"
+# surface lives at REPO ROOT (`.codex-plugin/` = the codex plugin package). Its manifest
+# `.codex-plugin/plugin.json` is the codex-legal form (mcpServers → "./.mcp.json" path string +
+# author + interface), and `.codex-plugin/.mcp.json` declares the quay MCP server against a dist that
+# is bundled INSIDE this package (vendor/quay/dist/quay.js) — never ~/.claude/plugins/cache/... — so
+# the installed Codex plugin survives a cleared Claude Code plugin cache. Fail-closed: a publish
+# without a non-empty manifest or .mcp.json, or without the dist, must abort, never silently ship an
+# artifact that cannot install on the Codex host (硬规则 3b — "missing" must not be indistinguishable
+# from "copied").
+[ -s "${REPO_ROOT}/.codex-plugin/plugin.json" ] && [ -s "${REPO_ROOT}/.codex-plugin/.mcp.json" ] || { echo "ERROR: .codex-plugin/plugin.json or .codex-plugin/.mcp.json missing or empty — refusing to publish without the Codex plugin surface." >&2; exit 1; }
+rsync -a --exclude='.git' "${REPO_ROOT}/.codex-plugin/" "${WORK}/.codex-plugin/" && install -D -m 755 "${DIST_JS}" "${WORK}/.codex-plugin/vendor/quay/dist/quay.js"
 
 # gap-dist-plugin-missing-node-modules-task-schema-yaml: this branch used to ship the copied
 # plugin/scripts (and gate-scripts) as RAW .ts alongside whatever dist/*.js happened to already
