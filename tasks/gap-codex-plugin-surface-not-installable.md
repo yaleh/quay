@@ -57,4 +57,15 @@ codex 插件格式（0.165.0，实测自 openai-curated marketplace 的 `.codex-
 - .codex-plugin/.mcp.json
 - plugin/scripts/publish-dist-branch.sh
 - plugin/test/codex-plugin-surface.test.mjs
+- plugin/test/shipped-set.test.mjs
+- plugin/test/shipped-shell-reachability.test.mjs
+- plugin/test/publish-dist-branch-closure-gate.test.mjs
 - tasks/gap-codex-plugin-surface-not-installable.md
+
+## Blocker
+
+**2026-10-31T02:46:25.662Z — worker 未落地（exited-not-landed）**
+
+- 未落地原因：step=suite: AssertionError [ERR_ASSERTION]: the real publish script FAILED (exit 1): [baseline A/B: HARD RED (task-introduced-red) — the task's red set is NOT a subset of the develop baseline red set: added=plugin/test/shipped-shell-reachability.test.mjs,plugin/test/shipped-shell-reachability.test.mjs,plugin/test/shipped-shell-reachability.test.mjs,plugin/test/shipped-shell-reachability.test.mjs,plugin/test/shipped-shell-reachability.test.mjs,plugin/test/publish-dist-branch-closure-gate.test.mjs,plugin/test/fan-in-execute-paths-s06.test.mjs changed=-]
+- run_id：wk-prod-anchor
+- session_id：7564af97-7583-45c4-8e1c-489b16322d39
