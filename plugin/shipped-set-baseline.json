@@ -336,6 +336,30 @@
         "shLines": 7417
       },
       "why": "GOAL-913 Codex 插件发布面修复落地后 .codex-plugin/plugin.json 真正进入 artifact（files 303→304, shLines 7415→7417，正当增长）"
+    },
+    {
+      "when": "2026-10-31T03:19:51.294Z",
+      "from": {
+        "files": 0,
+        "bytes": 0,
+        "shLines": 0,
+        "shipped": {
+          "files": 304,
+          "bytes": 70944752,
+          "shLines": 7417
+        }
+      },
+      "to": {
+        "files": 0,
+        "bytes": 0,
+        "shLines": 0
+      },
+      "shipped": {
+        "files": 307,
+        "bytes": 73833859,
+        "shLines": 7417
+      },
+      "why": "0.28.0: codex 插件包(.codex-plugin/.mcp.json + manifest 适配)与 task-double-frontmatter 检测器等新 shipped 文件（正当增长）"
     }
   ],
   "_axes": {
@@ -349,8 +373,8 @@
   "bytes": 0,
   "shLines": 0,
   "shipped": {
-    "files": 304,
-    "bytes": 70944752,
+    "files": 307,
+    "bytes": 73833859,
     "shLines": 7417
   }
 }
