@@ -1,0 +1,14 @@
+{
+  "pairs": {
+    "tree-hygiene-check.sh": {
+      "reason": "structural path-depth difference, NOT drift: plugin/scripts/ is 2 directory levels deep so repo root is $HERE/../.. , while experiments/quay-perpetual-stream/scripts/ is 3 levels deep so repo root is $HERE/../../.. — byte-identity is the WRONG invariant for a script whose repo-root resolution depends on its own directory depth. The two copies must keep their own depth-correct ROOT= line.",
+      "pluginSha256": "9206f2366d36d49bdbd19734549e5b85a85b97e6dac06541d433c377cef5e8fd",
+      "experimentsSha256": "b45ce2bc3606eddb79490681d8343769b8ca13a8649cec107ba69cdce16bb45a"
+    },
+    "worktree-branch-hygiene-check.sh": {
+      "reason": "structural path-depth difference, NOT drift: same as tree-hygiene-check.sh — plugin/scripts/ (depth 2) resolves repo root as $HERE/../.. while experiments/quay-perpetual-stream/scripts/ (depth 3) resolves it as $HERE/../../.. . Byte-identity is the WRONG invariant for this pair.",
+      "pluginSha256": "d1f495d7bbb008ba888e4d358a2868119d0858c9c9d1ab5d10bfcf9aecddc045",
+      "experimentsSha256": "aba00f7737348f649eb6481ad360941fa31bd57a7c649abba2b44fe5168f7e2d"
+    }
+  }
+}

@@ -1,0 +1,25 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "quay",
+  "description": "DOGFOOD marketplace for THIS repository's working tree: register <repo>/plugin at USER scope (machine-specific path, never committed) and enable quay@quay-dev in the repo's .claude/settings.json. The name is deliberately NOT `quay`: a marketplace name is ONE machine-wide slot, and a directory marketplace loads its plugin in place, so a `quay` slot pointing here would make every project on the machine run this dev tree. Published copies (dist-plugin via plugin/scripts/publish-dist-branch.sh, the npm tarball via packages/quay/scripts/package.sh) are stamped back to the release channel's name by scripts/stamp-marketplace-name.mjs.",
+  "owner": {
+    "name": "Yale Huang",
+    "url": "https://github.com/yaleh"
+  },
+  "plugins": [
+    {
+      "name": "quay",
+      "source": ".",
+      "description": "quay: a provider-agnostic task board. Bundles the quay MCP server, quay-directive skill, loop-driver skill, and author/execute authoring skills.",
+      "license": "MIT",
+      "homepage": "https://github.com/yaleh/quay",
+      "category": "productivity",
+      "tags": [
+        "task-board",
+        "loop-driver",
+        "baime",
+        "directive"
+      ]
+    }
+  ]
+}
