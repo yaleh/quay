@@ -42,7 +42,7 @@ extra:
 
 ## ADR-007 dark-axis record
 
-该轴仍暗,理由:布局搬移 + args 稳定绝对化 + dist 同步机制,无包/依赖结构变化,L_D/L_G 无可测结构量。
+该轴仍暗,理由:布局搬移 + args 自定位 wrapper,无包/依赖结构变化,L_D/L_G 无可测结构量。
 
 ## Touches
 
