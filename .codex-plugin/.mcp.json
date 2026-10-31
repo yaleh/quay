@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "quay": {
+      "command": "node",
+      "args": ["~/.local/share/quay/quay.js", "mcp"]
+    }
+  }
+}
