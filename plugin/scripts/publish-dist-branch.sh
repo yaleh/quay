@@ -157,29 +157,30 @@ rsync -a --exclude='.git' "${RSYNC_EXCLUDES[@]}" "${PLUGIN_DIR}/" "${WORK}/" && 
 # ── THE CODEX PLUGIN SURFACE (gap-codex-plugin-surface-not-installable; layout + args fixed by
 #    gap-codex-plugin-mcp-json-nested-in-wrong-level — Bug A layout, Bug B session-cwd-independence;
 #    方案 A stable-path resolution; SOURCE split by
-#    gap-codex-mcp-json-source-collides-with-claude-project-config — the codex `.mcp.json` source now
-#    lives INSIDE `.codex-plugin/` because the repo-root `.mcp.json` belongs to Claude Code's
-#    project-level MCP config, which spawns node DIRECTLY (no `~` expansion), so ONE repo-root file
-#    cannot serve both hosts)
-# The Claude Code channel ships plugin/.claude-plugin/marketplace.json; the Codex channel's publish
-# surface lives at REPO ROOT (`.codex-plugin/` = the codex plugin package's manifest). Codex resolves
-# `plugin.json`'s `mcpServers: "./.mcp.json"` path string relative to the PLUGIN PACKAGE ROOT — the
-# SIBLING of `.codex-plugin/`, not inside it — so the ASSEMBLED artifact must carry `.mcp.json` at the
-# artifact root. The SOURCE tree keeps that file at `${REPO_ROOT}/.codex-plugin/.mcp.json` (a portable
-# `~` template that is NOT a legal Claude Code project config); this step rsyncs `.codex-plugin/`
-# EXCLUDING `.mcp.json` (so the artifact's `.codex-plugin/` carries ONLY `plugin.json`) and then copies
-# that one source file to the artifact root as `.mcp.json`. Bug B + 方案 A (human 2026-10-31): codex
-# resolves RELATIVE args against the SESSION cwd AND does NOT expand `~`/`${HOME}`/`${CODEX_PLUGIN_ROOT}`,
-# so `.mcp.json` declares `args[0]` = the stable version-independent path `~/.local/share/quay/quay.js`
-# with NO `cwd` (codex then spawns with the session cwd, which is what Core's findConfig() needs), and
-# the dist is installed to that stable location by plugin/scripts/codex-mcp-sync.sh — ⛔ NOT embedded
-# inside the plugin package (no `.codex-plugin/vendor/`, no wrapper). The artifact still rsyncs the
-# built dist above because it is the SOURCE the sync step copies from. Fail-closed: a publish without a
-# non-empty manifest, source .mcp.json, or artifact-root dist must abort, never silently ship an
-# artifact that cannot install on the Codex host (硬规则 3b — "missing" must not be indistinguishable
-# from "copied").
+#    gap-codex-mcp-json-source-collides-with-claude-project-config; artifact-root ownership restored by
+#    gap-codex-mcp-json-overwrites-claude-plugin-mcp-json — human 2026-10-31)
+# The Claude Code channel ships plugin/.claude-plugin/marketplace.json, and the artifact-root `.mcp.json`
+# is Claude Code's PLUGIN-LEVEL config from `plugin/.mcp.json` (a top-level `{"quay":…}` carrying
+# `${CLAUDE_PLUGIN_ROOT}`, rsynced by the main `plugin/` step above). The Codex channel's publish
+# surface lives at REPO ROOT as `.codex-plugin/` (the codex plugin package's manifest), and its
+# `.mcp.json` SOURCE stays INSIDE `.codex-plugin/` (a portable `~` template) — consumed separately by
+# the codex marketplace build surface, ⛔ NEVER written into the Claude Code artifact: Claude Code and
+# codex read the SAME artifact-root path with MUTUALLY-EXCLUSIVE content (one needs
+# `${CLAUDE_PLUGIN_ROOT}`, the other the `~` template + codex-mcp-sync expansion), so ONE file cannot
+# serve both hosts. This step therefore rsyncs `.codex-plugin/` EXCLUDING `.mcp.json` (so the
+# artifact's `.codex-plugin/` carries ONLY `plugin.json`) and does NOT copy that source to the artifact
+# root — the artifact-root `.mcp.json` stays the Claude Code one from `plugin/.mcp.json`. Bug B +
+# 方案 A (human 2026-10-31): codex resolves RELATIVE args against the SESSION cwd AND does NOT expand
+# `~`/`${HOME}`/`${CODEX_PLUGIN_ROOT}`, so the codex SOURCE declares `args[0]` = the stable
+# version-independent path `~/.local/share/quay/quay.js` with NO `cwd` (codex then spawns with the
+# session cwd, which is what Core's findConfig() needs), and the dist is installed to that stable
+# location by plugin/scripts/codex-mcp-sync.sh — ⛔ NOT embedded inside the plugin package (no
+# `.codex-plugin/vendor/`, no wrapper). The artifact still rsyncs the built dist above because it is
+# the SOURCE the sync step copies from. Fail-closed: a publish without a non-empty manifest, source
+# .mcp.json, or artifact-root dist must abort, never silently ship an artifact that cannot install on
+# the Codex host (硬规则 3b — "missing" must not be indistinguishable from "copied").
 [ -s "${REPO_ROOT}/.codex-plugin/plugin.json" ] && [ -s "${REPO_ROOT}/.codex-plugin/.mcp.json" ] || { echo "ERROR: .codex-plugin/plugin.json or .codex-plugin/.mcp.json missing or empty — refusing to publish without the Codex plugin surface." >&2; exit 1; }
-rsync -a --exclude='.git' --exclude='.mcp.json' "${REPO_ROOT}/.codex-plugin/" "${WORK}/.codex-plugin/" && rsync -a --exclude='.git' "${REPO_ROOT}/.codex-plugin/.mcp.json" "${WORK}/" && [ -s "${WORK}/vendor/quay/dist/quay.js" ] || { echo "ERROR: artifact-root dist vendor/quay/dist/quay.js missing — refusing to publish the Codex plugin surface." >&2; exit 1; }
+rsync -a --exclude='.git' --exclude='.mcp.json' "${REPO_ROOT}/.codex-plugin/" "${WORK}/.codex-plugin/" && [ -s "${WORK}/vendor/quay/dist/quay.js" ] || { echo "ERROR: artifact-root dist vendor/quay/dist/quay.js missing — refusing to publish the Codex plugin surface." >&2; exit 1; }
 
 # gap-dist-plugin-missing-node-modules-task-schema-yaml: this branch used to ship the copied
 # plugin/scripts (and gate-scripts) as RAW .ts alongside whatever dist/*.js happened to already

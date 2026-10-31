@@ -19,8 +19,10 @@
 //       (codex then spawns with the session cwd, which Core's findConfig() needs). The REPO-ROOT
 //       `.mcp.json` is Claude Code's PROJECT-LEVEL config and must carry NO `quay` key (the AC-165
 //       principle — quay reaches Claude Code via `plugin/.mcp.json`'s `${CLAUDE_PLUGIN_ROOT}`); the
-//       publish step inverts this for the ASSEMBLED artifact (`.codex-plugin/` → only `plugin.json`,
-//       source `.mcp.json` copied to the artifact root). A shared `validateSourceCodexPackage(root)`
+//       publish step keeps this split in the ASSEMBLED artifact too (`.codex-plugin/` → only
+//       `plugin.json`, the artifact-root `.mcp.json` stays `plugin/.mcp.json`'s Claude Code form, and
+//       the codex source `.mcp.json` is NOT written to the artifact root —
+//       gap-codex-mcp-json-overwrites-claude-plugin-mcp-json). A shared `validateSourceCodexPackage(root)`
 //       returns a LOUD failure list, so the positive test can take the value false and the negative
 //       controls red on the exact cause.
 //
@@ -142,8 +144,9 @@ function validateSourceCodexPackage(root) {
     if (!Array.isArray(iface.capabilities)) failures.push("interface.capabilities not an array");
   }
 
-  // The codex SOURCE `.mcp.json` lives INSIDE `.codex-plugin/` (a portable `~` template; the publish
-  // step copies it out to the artifact root, where codex resolves plugin.json's "./.mcp.json").
+  // The codex SOURCE `.mcp.json` lives INSIDE `.codex-plugin/` (a portable `~` template, consumed by
+  // the codex marketplace build surface; the publish step does NOT copy it out to the artifact root —
+  // the artifact-root `.mcp.json` stays `plugin/.mcp.json`'s Claude Code form).
   if (!fs.existsSync(sourceMcp)) {
     failures.push(
       ".codex-plugin/.mcp.json missing (the codex `.mcp.json` source lives inside .codex-plugin/, not at the repo root — the repo root belongs to Claude Code's project config)",
