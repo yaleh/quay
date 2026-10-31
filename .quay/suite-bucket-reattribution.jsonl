@@ -93,6 +93,7 @@
 {"file":"plugin/test/pane-state-classify.test.mjs","judgment":"M","mechanism":"S+M","signal":[]}
 {"file":"plugin/test/per-task-suite-record-check.test.mjs","judgment":"S","mechanism":"S+M","signal":["lane"]}
 {"file":"plugin/test/pipe-exit-code-check.test.mjs","judgment":"M","mechanism":"S+M","signal":[]}
+{"file":"plugin/test/plugin-test-spawns-vendored-bundle.test.mjs","judgment":"M","mechanism":"S","signal":[]}
 {"file":"plugin/test/pool-quality-judge.test.mjs","judgment":"M","mechanism":"S+M","signal":[]}
 {"file":"plugin/test/portability-strategy-check.test.mjs","judgment":"M","mechanism":"S","signal":[]}
 {"file":"plugin/test/pre-verified-round-record.test.mjs","judgment":"S","mechanism":"S+M","signal":["__GROUP__","lane","concurrency"]}

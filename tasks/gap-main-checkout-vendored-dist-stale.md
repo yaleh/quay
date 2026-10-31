@@ -1,7 +1,7 @@
 ---
 id: gap-main-checkout-vendored-dist-stale
 title: 主检出 vendored dist 陈旧 0.25.0-dev（VERSION 0.30.0-dev）：sync-vendor 重建 + 版本一致性检测
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -22,10 +22,10 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1 重建：`node plugin/vendor/quay/dist/quay.js --version` == `cat plugin/VERSION`（贴两值）。
-- [ ] AC2 陈旧检测（能取假）：新增检测（脚本或测试）断言 vendored dist `--version` == `plugin/VERSION`；反向——把 dist 临时换成一个旧版本 ⇒ 检测 exit 非 0 并报版本不一致（贴两次运行）。
-- [ ] AC3 检测接入：该检测接入现有静态检查面（或 `plugin/test/` 单测），使 VERSION bump 后未重建能红。
-- [ ] AC4 测试+范围门：`bash scripts/test.sh --for-task gap-main-checkout-vendored-dist-stale --allow-thin` 绿。
+- [x] AC1 重建：`node plugin/vendor/quay/dist/quay.js --version` == `cat plugin/VERSION`（两值均 0.30.0-dev）。
+- [x] AC2 陈旧检测（能取假）：新增检测（脚本或测试）断言 vendored dist `--version` == `plugin/VERSION`；反向——把 dist 临时换成一个旧版本 ⇒ 检测 exit 非 0 并报版本不一致（负控制两次运行：打补丁副本 --version=0.0.0-stale-fixture ⇒ 检测 exit 1）。
+- [x] AC3 检测接入：该检测接入现有静态检查面（或 `plugin/test/` 单测），使 VERSION bump 后未重建能红。
+- [x] AC4 测试+范围门：`bash scripts/test.sh --for-task gap-main-checkout-vendored-dist-stale --allow-thin` 绿。
 
 ## Definition of Done
 
@@ -39,4 +39,5 @@ extra:
 
 - plugin/vendor/quay/dist/quay.js
 - plugin/test/plugin-test-spawns-vendored-bundle.test.mjs
+- .quay/suite-bucket-reattribution.jsonl
 - tasks/gap-main-checkout-vendored-dist-stale.md
