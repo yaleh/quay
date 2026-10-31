@@ -463,8 +463,9 @@ test("AC5: packages/quay/src/init.ts creates .agents/skills/ EMPTY — no copy-s
 });
 
 // The real assembled artifact's skills surface is built ONCE by the product's own publish script
-// (never re-implemented): plugin/scripts/publish-dist-branch.sh narrows the artifact's `skills/` to
-// the four human-facing skills and renames `init` -> `quay-init`. A build failure is environmental
+// (never re-implemented): plugin/scripts/publish-dist-branch.sh keeps the artifact's `skills/` FULL
+// for the Claude Code channel and COPIES the four human-facing skills into the Codex-specific
+// `.codex-plugin/skills/` (renaming `init` -> `quay-init`). A build failure is environmental
 // (no vendored runtime) and is reported as a SKIP, never folded into a green (硬规则 3b).
 let skillsArtifact = null;
 let skillsArtifactError = null;
@@ -491,26 +492,43 @@ function requireSkillsArtifact(t) {
   return skillsArtifact;
 }
 
-test("AC2/AC4: the assembled codex artifact's skills/ is EXACTLY the four human-facing skills (编排面 + 参考类 absent)", (t) => {
+test("AC2/AC4: the artifact keeps `skills/` FULL for Claude Code AND assembles the codex `.codex-plugin/skills/` to EXACTLY the four human-facing skills", (t) => {
   const artifact = requireSkillsArtifact(t);
   if (!artifact) return;
-  const skillsDir = path.join(artifact, "skills");
-  const dirs = fs.readdirSync(skillsDir, { withFileTypes: true })
+
+  // Claude Code surface: `skills/` stays FULL (编排面 + 参考类 must still be there — the earlier
+  // narrowing regressed the shared `skills/` 14→4, so this half is the reverse control for that).
+  const ccSkillsDir = path.join(artifact, "skills");
+  const ccDirs = fs.readdirSync(ccSkillsDir, { withFileTypes: true })
+    .filter((d) => d.isDirectory())
+    .map((d) => d.name);
+  for (const s of ORCHESTRATION_SKILLS.concat(REFERENCE_SKILLS)) {
+    assert.ok(
+      ccDirs.includes(s),
+      `${s} must REMAIN in the Claude Code skills/ surface (the earlier narrowing deleted it)`,
+    );
+  }
+
+  // Codex surface: `.codex-plugin/skills/` is exactly the four human-facing skills.
+  const codexSkillsDir = path.join(artifact, ".codex-plugin", "skills");
+  const dirs = fs.readdirSync(codexSkillsDir, { withFileTypes: true })
     .filter((d) => d.isDirectory())
     .map((d) => d.name)
     .sort();
   assert.deepEqual(
     dirs,
     [...HUMAN_FACING_SKILLS].sort(),
-    `the codex artifact's skills/ must contain exactly the four human-facing skills`,
+    `the codex .codex-plugin/skills/ must contain exactly the four human-facing skills`,
   );
   for (const s of ORCHESTRATION_SKILLS.concat(REFERENCE_SKILLS)) {
     assert.ok(
-      !fs.existsSync(path.join(skillsDir, s)),
+      !fs.existsSync(path.join(codexSkillsDir, s)),
       `${s} must NOT ship in the codex skills surface (编排面/参考类 not delivered)`,
     );
   }
   // The rename is a real content change in the assembled copy, never in plugin/skills/init itself.
-  const qinit = fs.readFileSync(path.join(skillsDir, "quay-init", "SKILL.md"), "utf8");
+  const qinit = fs.readFileSync(path.join(codexSkillsDir, "quay-init", "SKILL.md"), "utf8");
   assert.match(qinit, /^name: quay-init$/m, "the renamed init skill must carry `name: quay-init`");
+  const srcInit = fs.readFileSync(path.join(ROOT, "plugin", "skills", "init", "SKILL.md"), "utf8");
+  assert.match(srcInit, /^name: init$/m, "the source plugin/skills/init must stay `name: init` (only the copy is renamed)");
 });
