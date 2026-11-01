@@ -20,13 +20,21 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1 checker 对 quay dev-tree 与 claudecodeui shipped 两份 profiles.yml 均报绿（两者分别命中「全缺省」或「全一致」分支）。
-- [ ] AC2 负控制：合成「DEFAULT_* 三值之一 != model」的配置被报红（贴 checker 输出）。
-- [ ] AC3 该 checker 进 run_static_checks（或既有 profiles-role-coverage-check 入口），测试全绿。
+- [x] AC1 checker 对 quay dev-tree 与 claudecodeui shipped 两份 profiles.yml 均报绿（两者分别命中「全缺省」或「全一致」分支）。
+  - quay dev-tree（全一致）：`--check --root <worktree> --json` → `modelInvariantViolations: []`、`modelInvariantCarriers` 覆盖 shipped/init/dev-tree 三份（dev-tree `.quay/profiles.yml` 的 DEFAULT_*==model）。
+  - claudecodeui shipped（全缺省）：追加 `--carrier /data/home/yale/work/claudecodeui/.quay/profiles.yml` → 4 carriers 全绿（worker-default model=v4.1flash、无 DEFAULT_*）。
+- [x] AC2 负控制：合成「DEFAULT_* 三值之一 != model」的配置被报红（贴 checker 输出）。
+  - checker 输出（exit 1）：`modelInvariantViolations: ["carrier:/tmp/gap-single-model-negative-carrier.yml:task-worker: DEFAULT_* != model — model=\"v4.1flash\", but ANTHROPIC_DEFAULT_OPUS_MODEL=\"deepseek-v4-pro\""]`。
+- [x] AC3 该 checker 进 run_static_checks（或既有 profiles-role-coverage-check 入口），测试全绿。
+  - 既有入口 `plugin/scripts/runner-static-gate.ts` 已收录本 checker（`run_checker "profiles-role-coverage-check" …`）；`node --test plugin/test/profiles-role-coverage-check.test.mjs` 10/10 绿（含 2 个正控制 + 2 个负控制）。
 
 ## Definition of Done
 
 - AC1–AC3 带真实证据勾选；checker 是「读宿主」而非字面量（换模型/换项目继续有效）。
+
+## ADR-007 暗轴记录
+
+- 该轴仍暗,理由:本任务为局部 checker 增强（profiles-role-coverage-check.ts 加单会话单模型不变式 + 测试负/正控制），不改包/依赖结构、不新增跨层引用（沿用既有 profile-policy.ts/yaml 依赖），无可测的 L_D/L_G 读数。
 
 ## Touches
 - plugin/scripts/profiles-role-coverage-check.ts
