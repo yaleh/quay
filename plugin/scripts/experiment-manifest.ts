@@ -51,7 +51,6 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import crypto from "node:crypto";
 import { spawnSync } from "node:child_process";
 // The shared gate-script primitives (⛔ not a private copy): flag parsing / the direct-entry guard /
 // the fail-closed git runner. `checker-mechanical-spine-check` and the position/slice-name family
@@ -60,6 +59,7 @@ import { flagValue, isDirectEntry, git } from "./gate-script-base.ts";
 // The ONE atomic JSON state write (⛔ not a private tmp+rename copy — that split is what
 // gap-writestate-atomicity-split closed, and a seventh body would re-open it).
 import { writeJsonAtomic } from "./write-json-atomic.ts";
+import { sha256OfString } from "./sha256.ts";
 
 // ── The declared experiment ──────────────────────────────────────────────────────────────────────
 
@@ -172,14 +172,10 @@ export function canonicalJson(value: unknown): string {
   return `{${keys.map((k) => `${JSON.stringify(k)}:${canonicalJson(obj[k])}`).join(",")}}`;
 }
 
-export function sha256Hex(text: string): string {
-  return crypto.createHash("sha256").update(text, "utf8").digest("hex");
-}
-
 /** The declared-policy half of the identity: the config summary, hashed. A policy change (e.g. a
  *  different MemoryMax) is an identity change, so the checkpoints taken under the old one are not reused. */
 export function computePolicyHash(config: Record<string, unknown> | null | undefined): string {
-  return sha256Hex(canonicalJson(config ?? null));
+  return sha256OfString(canonicalJson(config ?? null));
 }
 
 export function computeIdentity(opts: {
@@ -214,7 +210,7 @@ function fmt(v: string | null): string {
 /** The inputs hash of a stage: the manifest's shared inputs + the stage's own inputs. A change in
  *  either (e.g. the lane list) invalidates that stage's checkpoint. */
 export function computeStageInputsHash(manifest: ExperimentManifest, stage: ExperimentStage): string {
-  return sha256Hex(canonicalJson({ inputs: manifest.inputs, stage: stage.inputs, id: stage.id }));
+  return sha256OfString(canonicalJson({ inputs: manifest.inputs, stage: stage.inputs, id: stage.id }));
 }
 
 // ── Reading the carriers (缺值 ≠ 读不懂 — 硬规则 3b) ────────────────────────────────────────────────
