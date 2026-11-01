@@ -22,9 +22,9 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1 新增/扩展一个测试，断言 `buildWorkerPrompt` + `buildContinueWorkerPrompt` 合并输出字符数较基线下降 ≥ 25%（基线在实现第一步先提交）。
-- [ ] AC2 负控制（不变量集）：合并输出仍逐字包含至少这四根针——worktree 绝对路径护栏关键词、`task_write`（非 hand-edit checkbox）、anti-drift 的 argv 命令、`exit — the worker-driver takes over`（grep 逐字）。
-- [ ] AC3 一个真实 worker spawn 的 prompt（`worker-outcome.jsonl` 或 transcript 读出）能跑通、且 AC2 的针仍逐字在场（贴 prompt 长度与 grep 命中）。
+- [x] AC1 新增/扩展一个测试，断言 `buildWorkerPrompt` + `buildContinueWorkerPrompt` 合并输出字符数较基线下降 ≥ 25%（基线在实现第一步先提交）。
+- [x] AC2 负控制（不变量集）：合并输出仍逐字包含至少这四根针——worktree 绝对路径护栏关键词、`task_write`（非 hand-edit checkbox）、anti-drift 的 argv 命令、`exit — the worker-driver takes over`（grep 逐字）。
+- [x] AC3 一个真实 worker spawn 的 prompt（`worker-outcome.jsonl` 或 transcript 读出）能跑通、且 AC2 的针仍逐字在场（贴 prompt 长度与 grep 命中）。
 
 ## Definition of Done
 
@@ -35,3 +35,11 @@ extra:
 - plugin/scripts/worker-driver.ts
 - plugin/test/worker-driver.test.mjs
 - tasks/gap-worker-prompt-note-family-slimming.md
+
+## Evidence
+
+- baseline 提交 `c8880f4d3`：瘦身前合并归一化字符数 12137（测试读数，第一步提交）。
+- AC1：归一化合并字符数 8646 ≤ 9102（=12137×0.75），较基线下降 28.8%；`plugin/test/worker-driver.test.mjs` 断言。
+- AC2：四根针在 create 与 continue 两个 prompt 均逐字命中——`file_path MUST be`（worktree 绝对路径护栏）、`task_write`（非 hand-edit checkbox）、`anti-drift-touches-check.ts --task`（anti-drift argv）、`exit — the worker-driver takes over`（grep 逐字）；同文件 `AC2 (negative control)` 断言。
+- AC3：生产派发路径 `workerPromptForTask`（slimmed 代码，root=`/data/home/yale/work/quay`）产出真实 worker spawn prompt（CONTINUE，raw 6799 字符 / 归一化 6556 字符），AC2 四根针 grep 全部命中；`workerArgvForTask` 末参数 === 该 prompt。
+- 该轴仍暗,理由:纯 prompt 文本瘦身,不改依赖结构或架构分层,无架构/依赖数值读数。
