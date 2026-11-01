@@ -52,4 +52,12 @@ extra:
 - .quay/profiles.yml
 - packages/quay/src/init.ts
 - plugin/scripts/profiles-role-coverage-check.ts
+- plugin/test/quay-init-characterization.test.mjs
+- plugin/test/profile-policy.test.mjs
 - tasks/gap-role-effort-tiering-selector-pool-judge-meta-driver.md
+
+## 续做记录（本轮）
+
+- 上轮 suite 红（`.quay/profiles.yml moved` + `NEW-AC5`）的两条测试基线已重锚到本改动的目标形态：
+  - `plugin/test/quay-init-characterization.test.mjs`：fresh-install `.quay/profiles.yml` hash 重锚 `0f781fbc… → d41750ea…`（唯一移动的文件；其余五 surface 文件 hash 不变，同历次重锚的交叉核）。
+  - `plugin/test/profile-policy.test.mjs`：`NEW-AC5` 从「shipped carrier 全部 role 不声明 effort」收紧为「只有 selector/pool-judge/meta-driver 三个窄判定 role 声明 `effort: low`，其余 role 与全部 profile 仍不声明；permissionMode 仍谁都不声明」。
