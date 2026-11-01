@@ -30,11 +30,12 @@
 
 /** The closed set of legal languages. `en` is the default; both are first-class — no language has
  *  a dedicated branch anywhere in this module (see `resolveLang`). */
-export const LANGS = ["en", "zh"] as const;
-
-export type Lang = (typeof LANGS)[number];
-
-export const DEFAULT_LANG: Lang = "en";
+// The closed language set lives in ./i18n/lang.ts (see its header): the label modules there need
+// `Lang` / `DEFAULT_LANG` without importing back into this directory (which would close a
+// directory-level cycle). This file re-exports them so its public surface is unchanged.
+export { LANGS, DEFAULT_LANG } from "./i18n/lang.ts";
+export type { Lang } from "./i18n/lang.ts";
+import { LANGS, DEFAULT_LANG, type Lang } from "./i18n/lang.ts";
 
 /** Where the resolved language came from. `"invalid"` is NOT a synonym for `"default"` — see the
  *  header's WHY note. It means "a query value was present and unreadable"; `lang` then falls back

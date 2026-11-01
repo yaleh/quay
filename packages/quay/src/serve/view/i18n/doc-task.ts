@@ -3,7 +3,7 @@
 // ⛔ This file is a VERBATIM extraction — the words here are the same source of truth they
 // were in serve-i18n.ts; serve-i18n.ts is now only a barrel re-exporting this module.
 
-import { DEFAULT_LANG, type Lang } from "../serve-lang.ts";
+import { DEFAULT_LANG, type Lang } from "./lang.ts";
 import { fillLabel } from "./fill.ts";
 
 // ── ROW 13: the /doc + /tasks + /task/<id> RESIDUAL EDGE-STATE copy ──────────────────────────────

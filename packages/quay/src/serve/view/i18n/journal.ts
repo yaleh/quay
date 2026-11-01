@@ -3,7 +3,7 @@
 // ⛔ This file is a VERBATIM extraction — the words here are the same source of truth they
 // were in serve-i18n.ts; serve-i18n.ts is now only a barrel re-exporting this module.
 
-import { DEFAULT_LANG, type Lang } from "../serve-lang.ts";
+import { DEFAULT_LANG, type Lang } from "./lang.ts";
 
 // ── ROW 10: the /journal BODY copy (gap-webui-journal-body-copy-en-zh) ──────────────────────────
 //

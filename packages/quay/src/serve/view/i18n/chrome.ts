@@ -3,7 +3,7 @@
 // ⛔ This file is a VERBATIM extraction — the words here are the same source of truth they
 // were in serve-i18n.ts; serve-i18n.ts is now only a barrel re-exporting this module.
 
-import { DEFAULT_LANG, type Lang } from "../serve-lang.ts";
+import { DEFAULT_LANG, type Lang } from "./lang.ts";
 
 /** The 15 nav views, in the order the site nav renders them. Closed by construction: every consumer
  *  indexes `NAV_LABELS` by this union, so a 16th view cannot reach the nav without a word for it in
