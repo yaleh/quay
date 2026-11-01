@@ -31,4 +31,5 @@ develop 的 shipped-set 基线反映「skills 全量恢复」后的真实 artifa
 
 ## Touches
 
+- tasks/gap-develop-shipped-set-baseline-stale-after-skills-restore.md
 - plugin/shipped-set-baseline.json
