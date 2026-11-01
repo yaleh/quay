@@ -3,7 +3,8 @@
 > 只读、可复跑。记录 fan-in step-4 delta 判定的**现行判定 vs 候选规则判定**；
 > 现行放行决策逐字不变（AC6：本任务不放松 fail-closed、不启用跳过、不缩短落地锁、不改 AC/DoD/G3）。
 > 候选规则版本：`fan-in-delta-shadow-v1`，规则名 `doc-surface-exact-object-only`。
-> 影子记录载体：`.quay/fan-in-delta-shadow.jsonl`（gitignored 运行时数据，每 fan-in 一条）。
+> 影子记录载体：`.quay/fan-in-step-trace.jsonl` 的 `delta-shadow` step-end（与 suite-skip/suite-end 同一
+> 共享载体，每 fan-in 一条；⛔ 不新增 carrier，carrier-registry 与 gitignore 棘轮不受影响）。
 
 ## 复跑命令
 
@@ -21,6 +22,12 @@ cd /data/home/yale/work/quay-worktrees/gap-fan-in-delta-shadow-evaluation
 git diff --name-only develop...HEAD \
   | xargs node --experimental-strip-types plugin/scripts/select-static-checks-for-touches.ts \
       --classify-delta --shadow --root "$PWD"
+```
+
+**读取影子记录**（从共享 step-trace 载体过滤 `delta-shadow`）：
+
+```bash
+grep '"step":"delta-shadow"' /data/home/yale/work/quay/.quay/fan-in-step-trace.jsonl
 ```
 
 **真实窗口样本构成**（对既有 fan-in 过程日志 `.quay/fan-in-*.log` 的 `step:"delta"` 判定做计数，

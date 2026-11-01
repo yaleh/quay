@@ -2476,36 +2476,25 @@ export function appendFanInTrace(file: string, entry: Record<string, unknown>): 
 // The shadow record is a PURE OBSERVATION appended at the step-4 delta judgment: current verdict vs the
 // ONE candidate rule (`--classify-delta --shadow`), plus the identity fields (task / runId /
 // perSuiteRunId / baseline/candidate SHA / delta) the report needs to re-derive and JOIN the record to
-// the full-verification result (AC2/AC4). Writing is best-effort — a shadow write failure must never
-// change the fan-in's release decision (AC6: 影子失败不改变现行裁决). The record file is
-// `.quay/fan-in-delta-shadow.jsonl` (gitignored runtime data, like the step trace).
-
-/** The shadow record file, relative to the workspace root. */
-export const DELTA_SHADOW_FILE = ".quay/fan-in-delta-shadow.jsonl";
-
-/** Append one shadow record (JSONL). Fail-open: a write failure is a diagnostic, ⛔ never a fan-in
- *  failure — the shadow is an observation, not a gate (AC6). */
-export function appendDeltaShadowRecord(root: string, record: Record<string, unknown>): void {
-  try {
-    const file = path.join(root, DELTA_SHADOW_FILE);
-    fs.mkdirSync(path.dirname(file), { recursive: true });
-    fs.appendFileSync(file, JSON.stringify({ ts: new Date().toISOString(), ...record }) + "\n", "utf8");
-  } catch {
-    // best-effort: a shadow write failure must not change the release decision (AC6).
-  }
-}
+// the full-verification result (AC2/AC4). It is written into the EXISTING shared carrier
+// `.quay/fan-in-step-trace.jsonl` as a `delta-shadow` step-end event (the same carrier that already
+// holds suite-skip / suite-end / scoped-gate) — ⛔ no NEW carrier, so the carrier-registry completeness
+// gate and the gitignore ratchet are untouched. Writing is best-effort (appendFanInStepTrace swallows a
+// write failure) — a shadow write failure must never change the fan-in's release decision (AC6).
 
 /** Build ONE delta shadow record from the step-4 judgment inputs. Pure (no IO) — the caller already
  *  has the git SHAs and the shadow classify JSON. `currentCodeDelta` is the raw `--classify-delta`
  *  stdout ("" = doc-only, path list = code, CLASSIFY_FAILED = could not judge); `shadow` is the parsed
- *  `--classify-delta --shadow` JSON line (or null when the shadow classify itself failed). */
+ *  `--classify-delta --shadow` JSON line (or null when the shadow classify itself failed). The returned
+ *  object is spread into `appendFanInStepTrace(…, "delta-shadow", "end", …)` — task/runId/ts live on
+ *  the carrier envelope, everything below is the shadow's own structured reading. */
 export function buildDeltaShadowRecord(fields: {
-  task: string; runId: string; perSuiteRunId: string; mergeTarget: string;
+  perSuiteRunId: string; mergeTarget: string;
   baselineSha: string; candidateSha: string; delta: string[];
   currentCodeDelta: string; needSuite: boolean; reuseSkip: boolean;
   shadow: Record<string, unknown> | null; shadowError: string | null;
 }): Record<string, unknown> {
-  const { task, runId, perSuiteRunId, mergeTarget, baselineSha, candidateSha, delta, currentCodeDelta, needSuite, reuseSkip, shadow, shadowError } = fields;
+  const { perSuiteRunId, mergeTarget, baselineSha, candidateSha, delta, currentCodeDelta, needSuite, reuseSkip, shadow, shadowError } = fields;
   const classifyFailed = currentCodeDelta === CLASSIFY_FAILED;
   const currentCodePaths = classifyFailed ? [] : currentCodeDelta.split("\n").map((s) => s.trim()).filter(Boolean);
   const candidateCodePaths = (shadow && !shadow.classifyFailed && Array.isArray(shadow.candidateCodePaths))
@@ -2515,11 +2504,9 @@ export function buildDeltaShadowRecord(fields: {
     ? (shadow.candidateSkippable as string[])
     : null;
   return {
-    kind: "fan-in-delta-shadow",
+    kind: "delta-shadow",
     ruleVersion: shadow && typeof shadow.ruleVersion === "string" ? shadow.ruleVersion : "unknown",
     ruleName: shadow && typeof shadow.ruleName === "string" ? shadow.ruleName : "unknown",
-    task,
-    runId,
     perSuiteRunId,
     mergeTarget,
     baselineSha,
@@ -2536,7 +2523,7 @@ export function buildDeltaShadowRecord(fields: {
       codePaths: candidateCodePaths,
       skippable: candidateSkippable,
     },
-    divergence: shadow && typeof shadow.divergence === "string" ? shadow.divergence : (shadowError ? "not-evaluated" : "not-evaluated"),
+    divergence: shadow && typeof shadow.divergence === "string" ? shadow.divergence : "not-evaluated",
     shadowError,
   };
 }
@@ -3091,7 +3078,8 @@ export async function runMechanicalFanIn(opts: MechanicalFanInOptions): Promise<
 
     // 4c. delta 影子评估（gap-fan-in-delta-shadow-evaluation）：现行放行不变（AC6），只记录「现行判定 vs
     //     候选规则判定」+ 身份/基准/候选 SHA + 分歧。影子 classify 失败 ⇒ shadow=null + shadowError，
-    //     ⛔ 不改变 needSuite/codeDelta（影子失败不改变现行裁决）。记录写失败 fail-open（同 appendFanInTrace）。
+    //     ⛔ 不改变 needSuite/codeDelta（影子失败不改变现行裁决）。记录写进共享载体 fan-in-step-trace.jsonl
+    //     的 `delta-shadow` step-end（appendFanInStepTrace fail-open，同 suite-skip/suite-end）。
     const shadowT0 = Date.now();
     let shadowDecision: Record<string, unknown> | null = null;
     let shadowError: string | null = null;
@@ -3108,17 +3096,21 @@ export async function runMechanicalFanIn(opts: MechanicalFanInOptions): Promise<
       }
     }
     const candidateHead = await mechSh(["git", "-C", worktree, "rev-parse", "HEAD"], 30_000);
-    appendDeltaShadowRecord(root, buildDeltaShadowRecord({
-      task, runId, perSuiteRunId, mergeTarget,
-      baselineSha: (fork.stdout || "").trim(),
-      candidateSha: (candidateHead.stdout || "").trim(),
-      delta: deltaList,
-      currentCodeDelta: codeDelta,
-      needSuite,
-      reuseSkip,
-      shadow: shadowDecision,
-      shadowError,
-    }));
+    appendFanInStepTrace(root, task, runId, "delta-shadow", "end", {
+      ok: true,
+      durationMs: Date.now() - shadowT0,
+      ...buildDeltaShadowRecord({
+        perSuiteRunId, mergeTarget,
+        baselineSha: (fork.stdout || "").trim(),
+        candidateSha: (candidateHead.stdout || "").trim(),
+        delta: deltaList,
+        currentCodeDelta: codeDelta,
+        needSuite,
+        reuseSkip,
+        shadow: shadowDecision,
+        shadowError,
+      }),
+    });
     trace({ step: "delta-shadow", exit: 0, wall_ms: Date.now() - shadowT0, ok: true, reason: shadowError ? `shadow not-evaluated: ${shadowError}` : (shadowDecision ? String(shadowDecision.divergence ?? "recorded") : "empty delta (no shadow record)") });
 
     // 5. ts-typecheck ∥ doc-check 并行（merge+anti-drift 后二者相互独立，可并行；doc-check 提前到

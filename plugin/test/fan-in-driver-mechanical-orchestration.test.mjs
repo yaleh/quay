@@ -563,12 +563,13 @@ test("gap-fan-in-delta-shadow-evaluation — a real mechanical fan-in writes a s
     });
     assert.equal(r.outcome, "landed", `shadow must NOT change the release decision (step=${r.step} reason=${r.reason})`);
 
-    // The shadow record is a real observation, not a fixture: read it back from .quay/.
-    const shadowFile = path.join(repo, ".quay", "fan-in-delta-shadow.jsonl");
-    assert.equal(fs.existsSync(shadowFile), true, "a real mechanical fan-in must write a shadow record");
-    const lines = fs.readFileSync(shadowFile, "utf8").trim().split("\n").filter(Boolean);
-    const recs = lines.map((l) => JSON.parse(l)).filter((x) => x.kind === "fan-in-delta-shadow");
-    assert.ok(recs.length >= 1, "at least one fan-in-delta-shadow record must exist");
+    // The shadow record is a real observation, not a fixture: read it back from the shared step-trace
+    // carrier (the same .quay/fan-in-step-trace.jsonl that holds suite-skip/suite-end/scoped-gate).
+    const traceFile = path.join(repo, ".quay", "fan-in-step-trace.jsonl");
+    assert.equal(fs.existsSync(traceFile), true, "a real mechanical fan-in must write the step-trace carrier");
+    const lines = fs.readFileSync(traceFile, "utf8").trim().split("\n").filter(Boolean);
+    const recs = lines.map((l) => JSON.parse(l)).filter((x) => x.step === "delta-shadow");
+    assert.ok(recs.length >= 1, "at least one delta-shadow step-trace record must exist");
     const rec = recs.find((x) => x.task === TASK);
     assert.ok(rec, "the shadow record must carry the task identity");
     assert.equal(rec.runId, runId);
