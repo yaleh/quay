@@ -43,3 +43,11 @@ extra:
 - scripts/stamp-version.ts
 - plugin/test/codex-mcp-sync-detached-stale-dist.test.mjs
 - tasks/gap-codex-mcp-sync-installs-stale-dist-from-detached-worktree.md
+
+## Blocker
+
+**2026-11-01T03:54:09.145Z — worker 未落地（exited-not-landed）**
+
+- 未落地原因：step=suite: AssertionError [ERR_ASSERTION]: baseline publish must succeed: [baseline A/B: HARD RED (task-introduced-red) — the task's red set is NOT a subset of the develop baseline red set: added=plugin/test/publish-dist-branch-closure-gate.test.mjs changed=-]
+- run_id：wk-prod-anchor
+- session_id：03323a1c-d02c-4836-9a5d-57306de6aa61
