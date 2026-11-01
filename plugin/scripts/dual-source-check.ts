@@ -17,7 +17,7 @@
 
 import fs from "node:fs";
 import path from "node:path";
-import { emitPass, emitFail, readRootRel } from "./gate-script-base.ts";
+import { emitPass, emitFail, readRootRel, norm } from "./gate-script-base.ts";
 
 interface Responsibility {
   name: string;             // the responsibility that must have a single executor
@@ -55,9 +55,9 @@ export const REGISTRY: Responsibility[] = [
 ];
 
 // ── normalization: strip backticks, collapse whitespace ──
-export function norm(s: string): string {
-  return s.replace(/`/g, "").replace(/\s+/g, " ").trim();
-}
+// The ONE definition lives in gate-script-base.ts (semantic-dedup-scan finding `norm` / B4);
+// re-exported here so the historical import path (this module + its test) stays valid.
+export { norm };
 
 export function hasMarker(content: string, marker: string): boolean {
   return norm(content).includes(norm(marker));

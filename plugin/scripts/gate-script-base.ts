@@ -595,6 +595,25 @@ export function appendJsonlRecords(file: string, records: readonly Record<string
   return records.length;
 }
 
+// ── norm (strip backticks + collapse whitespace + trim) ──────────────────────────────────────────────
+// The ONE "normalize a prose/token line for positional matching" primitive: strip backticks, collapse
+// every whitespace run to a single space, trim. Extracted — byte-identical from two private copies — by
+// semantic-dedup-scan finding `norm` (`.quay/routine-findings.jsonl`, routine `semantic-dedup-scan`,
+// runId `semantic-dedup-scan-1793491958069`, findingId `B4`, kind `byte-identical-body`, verdict
+// `real-duplication`, suggestedAction `extract`), which named its carriers:
+//   plugin/scripts/ac61-staleness-disposition-check.ts:62 / plugin/scripts/dual-source-check.ts:58.
+// Both carriers now import this one definition and re-export it under their historical path, so the
+// checker tests that import `norm` from the carrier keep working unchanged.
+//
+// ⛔ NOT the same function as `retired-clause-check.ts`'s local `norm`: that one ALSO strips
+// line-comment prefixes (`#` / `//`), which is load-bearing for matching fenced .sh/.ts archive
+// bodies across line boundaries. The two are DIFFERENT concepts and are deliberately NOT folded
+// together — folding would change the retired-clause checker's marker matching. The ac61 comment that
+// used to claim "mirrors retired-clause-check.norm" was wrong on exactly this point and is fixed there.
+export function norm(s: string): string {
+  return s.replace(/`/g, "").replace(/\s+/g, " ").trim();
+}
+
 // ── normalizeRel ────────────────────────────────────────────────────────────────────────────────────
 // Normalize a repo-relative path or glob to a canonical form: backslashes → forward slashes, drop
 // empty (`//`) and `.` segments, resolve `..` (a leading `..` is dropped), strip a leading `./`,
