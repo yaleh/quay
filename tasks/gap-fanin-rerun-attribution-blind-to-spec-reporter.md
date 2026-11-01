@@ -3,7 +3,7 @@ id: gap-fanin-rerun-attribution-blind-to-spec-reporter
 title: fan-in in-round rerun attribution parses only TAP — node spec-reporter
   logs (test at <file>:line + ✖) are never attributed ⇒ every flake is parked as
   unattributable needs-human after 2 rounds
-status: ready
+status: done
 labels:
   - gap
   - defect
