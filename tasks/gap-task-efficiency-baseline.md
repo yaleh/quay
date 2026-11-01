@@ -35,7 +35,7 @@ extra:
 - [ ] 改动通过相应检查，报告无未经测量的优化收益承诺，任务状态及 AC/DoD 仅由有明确授权的流程推进。
 
 ## Touches
-- scripts/task-efficiency-baseline.mjs
-- scripts/task-efficiency-baseline.test.mjs
-- docs/analysis/task-efficiency-baseline.md
+- scripts/task-efficiency-baseline.mjs (new)
+- scripts/task-efficiency-baseline.test.mjs (new)
+- docs/analysis/task-efficiency-baseline.md (new)
 - tasks/gap-task-efficiency-baseline.md
