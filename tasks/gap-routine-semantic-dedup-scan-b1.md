@@ -2,7 +2,7 @@
 id: gap-routine-semantic-dedup-scan-b1
 title: "semantic-dedup-scan: Seven named wrappers across six files all reduce to
   the same 1-2 line createHash('sha256') body; ~30 repo-wide call sites."
-status: ready
+status: done
 labels:
   - gap
   - routine-filed
