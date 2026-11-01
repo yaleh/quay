@@ -21,11 +21,11 @@ extra:
 
 ## AC
 
-- [ ] 分支①：`buildSufficiencyFollowupPrompt({id:'GOAL-018',title:'t',body:'## body\nx'},[],'/tmp/r',1)` 输出含 `GOAL-018 充分性 insufficient：正文缺非空 ## 退出条件 节`（由新增单测断言，机械可查）。
-- [ ] 分支②：`buildSufficiencyFollowupPrompt({id:'GOAL-005',title:'t',body:'## 退出条件\n\n1. x\n'},[],'/tmp/r',1)` 输出含 `GOAL-005 充分性 insufficient：在域 AC 集合为空`。
-- [ ] prompt 输出同时点名 `## Needs-Human` 与 `## Proposal`（各 `String.includes` 为真，单测断言）。
-- [ ] `node --no-warnings --experimental-strip-types --test plugin/test/goal-sufficiency-followup.test.mjs` exit 0。
-- [ ] `node plugin/scripts/task-schema-check.ts tasks/gap-goal-gapfiling-card-facing-summary.md` exit 0 且 `node packages/quay/bin/quay.ts task check gap-goal-gapfiling-card-facing-summary --json` 的 `missing` 为 `[]`。
+- [x] 分支①：`buildSufficiencyFollowupPrompt({id:'GOAL-018',title:'t',body:'## body\nx'},[],'/tmp/r',1)` 输出含 `GOAL-018 充分性 insufficient：正文缺非空 ## 退出条件 节`（由新增单测断言，机械可查）。
+- [x] 分支②：`buildSufficiencyFollowupPrompt({id:'GOAL-005',title:'t',body:'## 退出条件\n\n1. x\n'},[],'/tmp/r',1)` 输出含 `GOAL-005 充分性 insufficient：在域 AC 集合为空`。
+- [x] prompt 输出同时点名 `## Needs-Human` 与 `## Proposal`（各 `String.includes` 为真，单测断言）。
+- [x] `node --no-warnings --experimental-strip-types --test plugin/test/goal-sufficiency-followup.test.mjs` exit 0。
+- [x] `node plugin/scripts/task-schema-check.ts tasks/gap-goal-gapfiling-card-facing-summary.md` exit 0 且 `node packages/quay/bin/quay.ts task check gap-goal-gapfiling-card-facing-summary --json` 的 `missing` 为 `[]`。
 
 ## DoD
 
@@ -36,3 +36,7 @@ extra:
 - plugin/scripts/goal-driver.ts
 - plugin/test/goal-sufficiency-followup.test.mjs
 - tasks/gap-goal-gapfiling-card-facing-summary.md
+
+## ADR-007 暗轴
+
+该轴仍暗,理由:仅改 prompt 文本与单测，未触碰依赖结构/目标闭包轴
