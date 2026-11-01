@@ -3134,6 +3134,11 @@ function instDecayOpts(extra = {}) {
     config: { enabled: true, intervalMinutes: INSTRUMENT_DECAY_INTERVAL_MIN_DEFAULT },
     configPresent: true,
     configError: null,
+    // 缺省注入确定性 GO 资源门：这批测试断言的是立案/去重/裁定语义（filing:"filed"），不是资源门
+    // （资源门有独立的 resource-gate.test.mjs 单测，且本文件下方 AC2(b) 覆盖「闸拒绝 ⇒ 不重试」）。
+    // ⛔ 走真实资源门会让 `filing:"filed"` 在整机高负载（full suite 并发）下读成 `deferred`——
+    // load-sensitive 假红（gap-routine-architecture-analysis-god-package-core 实测两轮同点红）。
+    resourceGateArgv: ["node", "-e", "process.stdout.write(JSON.stringify({verdict:'GO',reason:'fixture'}))"],
     ...extra,
   };
 }
