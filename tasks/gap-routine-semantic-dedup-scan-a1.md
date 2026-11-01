@@ -47,10 +47,17 @@ extract
 字段保留在共享函数里，Core 调用方不传该字段、native 调用方传该字段 ⇒ 两者文本逐字节不变（runtime
 检查已验证 under/over-budget 两种形态）。两个内联定义已删除。验证：`for d in packages/*/; do npx
 tsc --noEmit -p "$d"; done` 全绿；scoped 选中的 10 个非 npm-pack-e2e 测试文件 `node --test` 全绿
-（build-dist / mcp-handlers / mcp-server / plugin-packaging 等）。scoped 门的 npm-pack-e2e 文件红是
-既有无关缺陷（`plugin/scripts/consumer-quay-deliverable-verify.sh` 未在
-capability-catalog-declarations.json 声明 ⇒ catalog 入口闸 UNCLASSIFIED=1，非本任务改动引起，主检出
-复现同红）。
+（build-dist / mcp-handlers / mcp-server / plugin-packaging 等）。scoped 门原红于 npm-pack-e2e 的根因
+不在本任务改动，而是 develop 上两个已落地 plugin/scripts 脚本未在 capability-catalog-declarations.json
+登记 QUESTION 表 ⇒ catalog 入口闸 UNCLASSIFIED>0 ⇒ package.sh delivery-form 门红 ⇒ npm-pack-e2e 11 例
+全红。其一 `consumer-quay-deliverable-verify.sh`（2026-10-31 codex-plugin 任务漏登记）已由另一 ready
+任务 gap-routine-architecture-analysis-god-package-serve-view-7368b251 用「declared + NOT_SHIPPED
+(dev-tree only)」处置；其二 `plugin/scripts/sha256.ts`（sibling 任务 gap-routine-semantic-dedup-scan-b1
+抽出但漏登记，触犯 NEW_SCRIPT_REGISTRATION_REQUIRED）无主。本续做轮按既有先例补齐两条 QUESTION +
+CADENCE/INVALIDATION/LAST_REAFFIRMED/MATCHING 登记——consumer-quay-deliverable-verify.sh 的登记与那
+一 ready 任务逐字节一致并标 NOT_SHIPPED，sha256.ts 按 source-text-lib.ts 的 primitive 登记先例——
+catalog 转绿（411 declared / 0 unclassified / exit 0）。此登记是 scoped 门转绿的必要前提，故把
+capability-catalog-declarations.json 加进本任务 ## Touches。
 
 ## DoD
 - [x] 上面的判据实跑通过
@@ -62,6 +69,7 @@ capability-catalog-declarations.json 声明 ⇒ catalog 入口闸 UNCLASSIFIED=1
 - `packages/quay/src/mcp-handlers.ts`
 - `packages/quay-native/src/mcp-server.ts`
 - `packages/quay/src/task-list-content.ts`
+- `plugin/scripts/capability-catalog-declarations.json`
 - `tasks/gap-routine-semantic-dedup-scan-a1.md`
 
 ## Blocker
