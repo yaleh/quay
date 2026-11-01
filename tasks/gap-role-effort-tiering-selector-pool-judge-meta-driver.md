@@ -22,16 +22,27 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1 `plugin/.quay/profiles.yml` 的 selector/pool-judge/meta-driver 三 role 各含 `effort: low`，且 worker-default profile 本身不含 effort（或仍为 high，不被本任务改动）。
-- [ ] AC2 dev-tree 根 `.quay/profiles.yml` 与 AC1 同构。
-- [ ] AC3 `resolveRole("selector")` / `resolveRole("pool-judge")` / `resolveRole("meta-driver")` 解析结果 `effort: "low"`，且 `resolveRole("task-worker")` / `resolveRole("fix-worker")` 仍为 `effort: "high"`（贴解析结果）。
-- [ ] AC4 一条真实 selector/pool-judge 或 meta-driver spawn 的 argv 含 `--effort low`（贴 argv）。
-- [ ] AC5 `profiles-role-coverage-check.ts` 全绿。
+- [x] AC1 `plugin/.quay/profiles.yml` 的 selector/pool-judge/meta-driver 三 role 各含 `effort: low`，且 worker-default profile 本身不含 effort（或仍为 high，不被本任务改动）。
+  - shipped carrier（plugin/.quay/profiles.yml）：selector `effort: low`（:55）/ pool-judge（:70）/ meta-driver（:74）；worker-default（:13）无 `effort` 字段，未被本任务改动。
+- [x] AC2 dev-tree 根 `.quay/profiles.yml` 与 AC1 同构。
+  - dev-tree carrier（.quay/profiles.yml）：selector `effort: low`（:102）/ pool-judge（:125）/ meta-driver（:131）；worker-default `effort: high`（:40）逐字保持。
+- [x] AC3 `resolveRole("selector")` / `resolveRole("pool-judge")` / `resolveRole("meta-driver")` 解析结果 `effort: "low"`，且 `resolveRole("task-worker")` / `resolveRole("fix-worker")` 仍为 `effort: "high"`（贴解析结果）。
+  - 实测（profile-policy.ts readProfilesConfig + resolveRole，worktree root）：
+    `selector => effort: "low"`；`pool-judge => effort: "low"`；`meta-driver => effort: "low"`；
+    `task-worker => effort: "high"`；`fix-worker => effort: "high"`；`outer => effort: "high"`。
+- [x] AC4 一条真实 selector/pool-judge 或 meta-driver spawn 的 argv 含 `--effort low`（贴 argv）。
+  - `launchArgv("meta-driver", "hello", <worktree>)` 产出 argv 含 `[10] --effort [11] low`（其后 `-n quay-meta-driver -p hello`）；selector/pool-judge 同含 `--effort low`（selector 额外带 mcpBlacklist 的 `--strict-mcp-config --mcp-config …`）。
+- [x] AC5 `profiles-role-coverage-check.ts` 全绿。
+  - `node --no-warnings --experimental-strip-types plugin/scripts/profiles-role-coverage-check.ts --root <worktree> --json` → exit 0，`status:"pass"`，`message:"init output covers all 5 requested role(s) and matches the shipped carrier; … single-model invariant green on 3 carrier(s)"`。
 
 ## Definition of Done
 
 - AC1–AC5 全部带真实证据勾选。
 - task-worker/fix-worker/outer 的 effort 与改动前逐字一致（AC3 覆盖）。
+
+## ADR-007 暗轴记录
+
+- 该轴仍暗,理由:本任务仅改两份 profiles.yml 的 role 层 `effort` 字段，未增删任何 import/包依赖边、未新增/移动模块、未跑 L_D/L_G 仪器，无可采的 L_D/L_G 读数。
 
 ## Touches
 - plugin/.quay/profiles.yml
