@@ -52,3 +52,11 @@ AC3 例外真实读数：本机 /data/home/yale/.claude/projects 下按 custom-t
 验证：隔离 worktree 中 `node plugin/scripts/profiles-role-coverage-check.ts --check --json` exit 0（含真实 init 输出）；`node --test plugin/test/driver-runtime-s08.test.mjs` 5/5 通过。新 worktree 初跑因缺 gitignored vendor 构建文件失败，链接主检出现有 vendor dist 后重跑通过，未修改测试。真实本机配置的 launchArgv 解析（仅解析，不 spawn）确认三角色带 strict-mcp-config：task-worker 保留 plugin_archguard_archguard/plugin_meta-cc_meta-cc/plugin_quay_quay；selector/fix-worker 仅留 plugin_quay_quay；outer/manager/pool-judge/meta-driver argv 与修改前逐字一致。机制代码零改动。
 
 后续需由明确授权的落地流程集成并验证真实执行；这份记录不替代任务 AC/DoD 和生产证据。
+
+## Blocker
+
+**2026-11-01T13:07:36.247Z — worker 未落地（exited-not-landed）**
+
+- 未落地原因：step=suite: AssertionError [ERR_ASSERTION]: testsCard shows an elapsed-time reading [baseline A/B: HARD RED (task-introduced-red) — the task's red set is NOT a subset of the develop baseline red set: added=packages/quay/test/gap-webui-dashboard-tests-card-latest-round-no-live-signal.test.mjs,plugin/test/quay-init-characterization.test.mjs changed=-]
+- run_id：wk-prod-anchor
+- session_id：8724c037-a24f-482d-bd93-ed989e1fe8e7
