@@ -2,7 +2,7 @@
 id: gap-routine-semantic-dedup-scan-a1
 title: "semantic-dedup-scan: Same budget/summary logic duplicated across Core
   and native, already diverged (native adds scannedFiles + directory arm)."
-status: todo
+status: ready
 labels:
   - gap
   - routine-filed
