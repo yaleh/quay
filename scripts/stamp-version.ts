@@ -36,11 +36,14 @@
  *
  * Usage:
  *   node --experimental-strip-types scripts/stamp-version.ts [--mode tracked|build] [--root <dir>]
- *     [--git-root <dir>] [--check] [--json]
+ *     [--git-root <dir>] [--repo-layout] [--check] [--json]
  *     --mode      tracked (default) | build
  *     --root      the tree whose carriers are read/written (default: this script's repo root)
  *     --git-root  the checkout whose branch/tags/VERSION decide the target (default: --root in
  *                 tracked mode, this script's repo root in build mode)
+ *     --repo-layout build mode only: stamp the REPO's own tree (`plugin/` carriers keep their prefix,
+ *                 repo-root carriers like `.codex-plugin/plugin.json` stay at the repo root) instead of
+ *                 a flattened artifact tree. Pass `--root <repo>` with it.
  *     --check     report only — never write. Exit 1 when any carrier differs (or cannot be read).
  *     --json      emit a machine-readable summary on stdout (the verdict, not the prose)
  *
@@ -75,6 +78,27 @@ export const repoRoot = resolve(__dirname, '..');
 
 /** The prefix a build artifact tree drops: its root IS the plugin root (see `buildCarriers`). */
 export const BUILD_TREE_PREFIX = 'plugin';
+
+/**
+ * The REPO-layout build carriers — the same set `buildCarriers` projects onto an artifact tree, but at
+ * their REPO paths (plugin carriers keep the `plugin/` prefix; a carrier with an explicit `buildPath`,
+ * e.g. `.codex-plugin/plugin.json`, already lives at the repo root and is kept verbatim).
+ *
+ * WHY THIS EXISTS (gap-codex-mcp-sync-installs-stale-dist-from-detached-worktree): `sync-vendor.sh`
+ * stamps the REPO's `plugin/` tree in build mode (not a flattened artifact tree). `buildCarriers` drops
+ * the `plugin/` prefix and re-paths the repo-root `.codex-plugin/plugin.json` carrier to the artifact
+ * root, so stamping `--root plugin/` looks for `plugin/.codex-plugin/plugin.json` — which does not
+ * exist — and the whole stamp aborts (nothing written, and the caller's `&&` chain silently skipped
+ * the bundle-tree restamp, leaving the vendored bundle at its build-time `-dev` version on a release
+ * build). This projection restores the repo paths so `stamp-version --mode build --repo-layout
+ * --root <repo>` stamps the repo's own tree correctly.
+ */
+export function repoLayoutBuildCarriers(top: string): VersionCarrier[] {
+  const prefix = top.endsWith('/') ? top : `${top}/`;
+  return buildCarriers(top).map((c) =>
+    c.buildPath !== undefined ? c : { ...c, path: `${prefix}${c.path}` },
+  );
+}
 
 export interface StampEntry {
   label: string;
@@ -197,7 +221,7 @@ export function stamp(opts: {
 export function usage(): string {
   return (
     'usage: node --experimental-strip-types scripts/stamp-version.ts [--mode tracked|build] ' +
-    '[--root <dir>] [--git-root <dir>] [--check] [--json]'
+    '[--root <dir>] [--git-root <dir>] [--repo-layout] [--check] [--json]'
   );
 }
 
@@ -220,6 +244,7 @@ export function main(argv: string[], env: { repoRoot?: string } = {}): number {
   let gitRoot: string | null = null;
   let checkOnly = false;
   let jsonMode = false;
+  let repoLayout = false;
 
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
@@ -246,6 +271,8 @@ export function main(argv: string[], env: { repoRoot?: string } = {}): number {
       gitRoot = resolve(v);
     } else if (a === '--check') {
       checkOnly = true;
+    } else if (a === '--repo-layout') {
+      repoLayout = true;
     } else if (a === '--json') {
       jsonMode = true;
     } else if (a === '-h' || a === '--help') {
@@ -265,7 +292,12 @@ export function main(argv: string[], env: { repoRoot?: string } = {}): number {
   const sourceRoot = gitRoot ?? (mode === 'build' ? base : targetRoot);
 
   const src = readBaseVersion(sourceRoot);
-  const carriers = mode === 'build' ? buildCarriers(BUILD_TREE_PREFIX) : VERSION_CARRIERS;
+  const carriers =
+    mode === 'build'
+      ? repoLayout
+        ? repoLayoutBuildCarriers(BUILD_TREE_PREFIX)
+        : buildCarriers(BUILD_TREE_PREFIX)
+      : VERSION_CARRIERS;
 
   /** Print and hand the exit code back to the caller — `main` returns, it never exits the process. */
   const fail = (payload: Record<string, unknown>, text: string, code: number): number => {

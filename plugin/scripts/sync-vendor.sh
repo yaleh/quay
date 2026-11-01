@@ -556,7 +556,7 @@ else
   # .sh, and its guard refuses a worktree baseline above git HEAD's — so a new code line here cannot be
   # bought back by re-anchoring. Pure comment lines are excluded from that count (these are); code lines
   # are not.
-  echo "[sync-vendor] stamping the built plugin tree (build-form, branch-aware)..." && node "${REPO_ROOT}/scripts/stamp-version.mjs" --mode build --root "${PLUGIN_DIR}" --git-root "${REPO_ROOT}" && node "${REPO_ROOT}/scripts/version-consistency-check.mjs" --stamp-bundle-tree "${PLUGIN_DIR}" && node "${REPO_ROOT}/scripts/version-consistency-check.mjs" --bundle-tree "${PLUGIN_DIR}"
+  echo "[sync-vendor] stamping the built plugin tree (build-form, branch-aware)..." && node "${REPO_ROOT}/scripts/stamp-version.mjs" --mode build --repo-layout --root "${REPO_ROOT}" --git-root "${REPO_ROOT}" && node "${REPO_ROOT}/scripts/version-consistency-check.mjs" --stamp-bundle-tree "${PLUGIN_DIR}" && node "${REPO_ROOT}/scripts/version-consistency-check.mjs" --bundle-tree "${PLUGIN_DIR}" || { echo "ERROR: version stamp / bundle-tree gate failed — refusing to leave a possibly-stale vendored bundle (a detached/release build must not ship its -dev form)." >&2; exit 1; }
   # gap-dist-runtime-not-self-contained-reads-external-package-json (AC3): the
   # completion claim is now ACCURATE — src/version.ts embeds the version at build
   # time (esbuild json loader inlines it into dist/quay.js), so the vendored
