@@ -1169,9 +1169,26 @@ function normalizedCombinedPromptChars() {
 /** 瘦身前基线（第一步已提交）：combined 归一化字符数 = 12137。 */
 const WORKER_PROMPT_SLIM_BASELINE = 12137;
 
-test("gap-worker-prompt-note-family-slimming — baseline (step 1, committed before slimming): combined prompt char count equals the pinned baseline", () => {
+test("gap-worker-prompt-note-family-slimming — AC1: buildWorkerPrompt + buildContinueWorkerPrompt combined char count down ≥25% vs the committed baseline", () => {
   const combined = normalizedCombinedPromptChars();
-  assert.equal(combined, WORKER_PROMPT_SLIM_BASELINE, `pre-slim combined chars should equal the committed baseline ${WORKER_PROMPT_SLIM_BASELINE}`);
+  const threshold = Math.floor(WORKER_PROMPT_SLIM_BASELINE * 0.75);
+  assert.ok(combined <= threshold, `combined normalized chars ${combined} must be ≤ ${threshold} (baseline ${WORKER_PROMPT_SLIM_BASELINE}, −25%)`);
+});
+
+test("gap-worker-prompt-note-family-slimming — AC2 (negative control): the four arbitration needles stay verbatim in BOTH prompts", () => {
+  const cases = [
+    ["create", buildWorkerPrompt("gap-x", "/r")],
+    ["continue", buildContinueWorkerPrompt("gap-x", "/r", {
+      worktreePath: "/wt", branchCommits: 3, branchHeadSubject: "x", acChecked: 0, acTotal: 3, failureReason: "r", attempts: [],
+    })],
+  ];
+  for (const [name, prompt] of cases) {
+    assert.match(prompt, /file_path MUST be .* absolute path/, `${name}: worktree absolute-path guard needle`);
+    assert.match(prompt, /task_write/, `${name}: task_write (ABI) needle`);
+    assert.match(prompt, /do NOT hand-edit/, `${name}: not-hand-edit-checkbox needle`);
+    assert.match(prompt, /anti-drift-touches-check\.ts --task gap-x --worktree/, `${name}: anti-drift argv needle`);
+    assert.ok(prompt.includes("exit — the worker-driver takes over"), `${name}: driver take-over exit needle (verbatim)`);
+  }
 });
 
 // ── gap-continue-prompt-delta-relatedness-note — 续做 prompt 两条结构性信号 ─────────────────────────
