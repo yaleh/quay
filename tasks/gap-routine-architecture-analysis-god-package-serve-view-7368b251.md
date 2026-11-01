@@ -63,6 +63,12 @@ requested action「Extract i18n locale strings into data modules」正是那个�
 - 「split render vs i18n responsibilities」半边：render 与 i18n 的职责**早已分离**（render 在
   serve-render.ts / serve-dashboard.ts，i18n 字典在 serve-i18n.ts，后者无任何 HTML 渲染函数）；本轮
   没有 render/i18n 混写需要再拆。
+- 附带修掉一个**阻塞本任务 scoped 门的既有缺陷**：2026-10-31 的 codex-plugin 任务新增
+  `plugin/scripts/consumer-quay-deliverable-verify.sh` 却未在 `capability-catalog-declarations.json`
+  的 QUESTION 表登记 ⇒ `capability-catalog --entry-surface` 静默 exit 1（AC1c unclassified>0），
+  `package.sh` 的 delivery-form 门红，`npm-pack-e2e` 红，使每个 src-touching 任务的 scoped 选择都
+  带红。本任务补上 QUESTION + CADENCE/INVALIDATION/LAST_REAFFIRMED/MATCHING 并标 NOT_SHIPPED（脚本
+  自述 dev-tree only，硬编码 `claude-fjdac`），`--summary` 恢复 410/410 declared / 0 unclassified。
 
 ### 3. 验证（实跑，非断言）
 
@@ -72,6 +78,7 @@ requested action「Extract i18n locale strings into data modules」正是那个�
 | barrel 冒烟（`node --experimental-strip-types -e` 导入 64 个导出符号 + 抽样值） | missing: NONE |
 | i18n body/chrome 测试（architecture/board/manager/goal/git-history/doc-task/live/tests-zh/adr-zh/goal-zh 共 10 文件 + serve-sessions 8/8） | 全绿 |
 | `plugin/test/session-primitives-adoption.test.mjs`（改后） | 10/10 |
+| `capability-catalog --summary` / `--entry-surface`（改后） | 410/410 declared · 0 unclassified · exit 0 |
 
 ### 4. 复发预期（诚实交代）
 
@@ -101,4 +108,5 @@ per-domain card renderer + serve-render.ts 的 page chrome 拆片，需重锚各
 - `packages/quay/src/serve/view/serve-dashboard.ts`
 - `packages/quay/src/serve/view/serve-render.ts`
 - `plugin/test/session-primitives-adoption.test.mjs`
+- `plugin/scripts/capability-catalog-declarations.json`
 - `tasks/gap-routine-architecture-analysis-god-package-serve-view-7368b251.md`
