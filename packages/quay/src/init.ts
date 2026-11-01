@@ -1763,6 +1763,7 @@ const SHIPPED_PROFILES_TEMPLATE = [
   "  selector:",
   "    profile: worker-default",
   "    name: quay-selector",
+  "    effort: low           # 窄判定 role 降档（role 层，不动共享 worker-default 的高 effort）",
   "    mcpBlacklist:",
   "      - chrome-devtools",
   "      - playwright",
@@ -1777,9 +1778,11 @@ const SHIPPED_PROFILES_TEMPLATE = [
   "  pool-judge:",
   "    profile: worker-default",
   "    name: quay-pool-judge",
+  "    effort: low",
   "  meta-driver:",
   "    profile: worker-default",
   "    name: quay-meta-driver",
+  "    effort: low",
   "",
 ].join("\n");
 
