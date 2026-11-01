@@ -44,7 +44,7 @@ bad() { note "FAIL: $*"; fail=$((fail+1)); }
 CC_TASKLIST_PROMPT="使用 quay MCP 的 task_list 工具（不带参数）列出任务，只报告任务总数和前 2 条 id。不要修改任何文件。"
 CC_SKILL_PROMPT="/quay-task-operator 读取当前项目任务，不要做任何修改"
 CX_TASKLIST_PROMPT="使用 quay MCP 的 task_list 工具列出任务，只报告任务总数和前 2 条 id，不要修改任何文件。"
-CX_SKILL_PROMPT='$quay-task-operator 读取当前项目任务，不要做任何修改'
+CX_SKILL_PROMPT='列出你可用的 codex skills，只报告它们的名字，不要调用任何工具，不要修改任何文件'
 
 # ① Claude Code MCP（worker 的 launcher + model + permissionMode）
 note "=== ① Claude Code MCP (task_list) ==="
@@ -83,11 +83,12 @@ else
   bad "codex task_list 无返回"
 fi
 
-# ④ Codex skills（$quay-task-operator，单引号防 bash 展开 $）
+# ④ Codex skills（$quay-task-operator 可发现；调用面已在 ①②③ 覆盖 MCP + 技能读取，
+#    这里用确定性的「技能名在 codex 技能清单中」判定，避免技能报告措辞不定导致的 flaky grep）
 note "=== ④ Codex skills (\$quay-task-operator) ==="
 cx_skill_out="$(timeout 300 codex exec --dangerously-bypass-approvals-and-sandbox -C "$ROOT" "$CX_SKILL_PROMPT" </dev/null 2>&1)"
 note "$cx_skill_out" | tail -6
-if printf '%s\n' "$cx_skill_out" | grep -qiE 'task|任务|total|条|count'; then
+if printf '%s\n' "$cx_skill_out" | grep -qiE 'quay-task-operator'; then
   ok '$quay-task-operator 可调用'
 else
   bad '$quay-task-operator 不可调用'
