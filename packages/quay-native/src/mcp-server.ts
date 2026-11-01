@@ -36,41 +36,14 @@ import { evaluationContext } from "../../quay/src/core/goal-store.ts";
 import { randomUUID } from "node:crypto";
 
 // ── task_list's text/content budget ────────────────────────────────────────────────────────────
-// gap-abi-task-list-times-out-at-2000-tasks-head-of-line-blocks-mcp: an MCP tool result that
-// carries `structuredContent` AND a `content[0].text` of the SAME JSON ships those bytes TWICE —
-// the SDK serializes the whole result object over stdio. The transport's framing is super-linear
-// in payload (ReadBuffer.append does a Buffer.concat per incoming chunk, then the receiver
-// JSON.parses AND zod-validates the whole message), measured here as ~60 ms for a 0.8 MB result,
-// ~1 s for 3.3 MB, ~3 s for 8.4 MB. So the duplicate is not a constant factor, it is the half of
-// the payload that turns a usable response into a queue-blocking one.
-//
-// Below the budget the text form is kept VERBATIM (every existing small response — and every test
-// that reads it — is byte-identical); above it, the text becomes a one-line summary and the data
-// lives once, in structuredContent. The budget is deliberately far below the point where the
-// framing cost turns super-linear.
-const TEXT_PAYLOAD_BUDGET_BYTES = 256 * 1024;
-
-/** Build a task_list result's `content` block under the budget above. `json` MUST be the exact
- *  serialization of `summarySource` — it is measured to decide, and returned verbatim when small. */
-function budgetedTaskListContent(
-  payload: Record<string, unknown>,
-  summarySource: { count: number; total: number; page: number; totalPages: number; scannedFiles: boolean },
-): Array<{ type: "text"; text: string }> {
-  const json = JSON.stringify(payload, null, 2);
-  if (json.length <= TEXT_PAYLOAD_BUDGET_BYTES) return [{ type: "text" as const, text: json }];
-  return [
-    {
-      type: "text" as const,
-      text:
-        `task_list: ${summarySource.count} task(s) — page ${summarySource.page}/${Math.max(1, summarySource.totalPages)} ` +
-        `of ${summarySource.total} matching task(s)` +
-        `${summarySource.scannedFiles ? "" : " (resolved from the directory listing; no task file was read)"}. ` +
-        `This page (${json.length} bytes) is in this result's structuredContent. ` +
-        `The text form is omitted above ${TEXT_PAYLOAD_BUDGET_BYTES} bytes because a second copy of the ` +
-        `same bytes doubles the stdio payload, whose framing cost grows super-linearly.`,
-    },
-  ];
-}
+// The serialize/measure/summary split is the ONE shared definition in Core's
+// task-list-content.ts (reached by relative path, the same direction
+// search-index.ts / core/* run). See that file for the
+// gap-abi-task-list-times-out-at-2000-tasks-head-of-line-blocks-mcp rationale
+// and the gap-routine-semantic-dedup-scan-a1 drift history (this copy had grown
+// a `scannedFiles` arm Core's copy lacked; the shared function carries it as an
+// optional flag so both call sites keep their byte-identical text).
+import { budgetedTaskListContent } from "../../quay/src/task-list-content.ts";
 
 export async function startMcpServer({ tasksDir, adrDir, goalDir, metaDir, defaultStatus }: { tasksDir: string; adrDir?: string; goalDir?: string; metaDir?: string; defaultStatus?: string }): Promise<void> {
   // DIR-047: pass the per-provider default_task_status through to the store
