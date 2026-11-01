@@ -36,3 +36,4 @@ extra:
 - plugin/scripts/codex-mcp-sync.sh
 - plugin/scripts/publish-dist-branch.sh
 - plugin/scripts/sync-vendor.sh
+- tasks/gap-codex-mcp-sync-installs-stale-dist-from-detached-worktree.md
