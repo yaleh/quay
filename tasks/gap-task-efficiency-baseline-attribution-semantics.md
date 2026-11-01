@@ -28,20 +28,22 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1 `node --test scripts/task-efficiency-baseline.test.mjs` exit 0；新增反例在旧实现上能失败、修后通过，覆盖同 task 多尝试、复用 run_id、窗口外 suite、缺 startedAt、歧义关联和重复 suite。窗口内没有唯一证据时，不使用同 task 的全部历史 recs 兜底。
-- [ ] AC2 同一测试命令含落地正负控制：只有受测 commit、suite green 或 final_state=completed 的记录不算成功落地；真实成功目标 ref 更新能识别；后一次落地不污染前一次失败。无法确认的样本显式 unknown/not-evaluated，不并入成功分母，不把未知说成已失败。
-- [ ] AC3 同一测试命令验证 CPU/验证时长身份去重：一条真实 suite 被重复记录或被多次尝试候选命中不使总量翻倍；歧义记录单列且不参与确定归属聚合。CPU 只取真实计量，报告同时给唯一 suite 数、关联覆盖率与未归属记录，不用 wall-time 换算 CPU。
-- [ ] AC4 `node scripts/task-efficiency-baseline.mjs --help` exit 0，JSON/Markdown 输出均不再把墙钟比例称作 ITE/Idle Time Efficiency；费用 ITE 无确认公式时未评估。墙钟覆盖指标有独立名称、公式、缺失和重叠处理测试，不用 Math.min(1, ...) 掩盖重复累计。
-- [ ] AC5 同一测试命令区分明确分类器失败、前序中止、suite 未完成与缺日志；无 suite-end/skip 不能自动判分类失败。pool-empty 不构成持续积压，resource-gate-wait 不单独证明持续队列；没有直接队列证据时 E5 输出未知，不采用未获依据的 p50>60s 自动启动结论。
-- [ ] AC6 对 docs/analysis/task-efficiency-baseline.md 中原窗口 2026-08-23T07:18:06.081Z 至 2026-11-01T12:16:58.513Z 真跑，报告保留完整复跑命令、代码版本/输入指纹、旧新统计差异、覆盖率与未知项，并至少下钻一个历史重派任务、一条误关联验证轮和一条受测但未证实落地记录；若某类真实样本不存在则给出可复跑检索及缺席读数。
-- [ ] AC7 `git diff --check` exit 0，变更只在声明 Touches 内；CSV 缺失保持费用未评估，不修改 E2 放行、锁范围、资源调度、AC/DoD 或 G3，不启动 E5。
+- [x] AC1 `node --test scripts/task-efficiency-baseline.test.mjs` exit 0；新增反例在旧实现上能失败、修后通过，覆盖同 task 多尝试、复用 run_id、窗口外 suite、缺 startedAt、歧义关联和重复 suite。窗口内没有唯一证据时，不使用同 task 的全部历史 recs 兜底。
+- [x] AC2 同一测试命令含落地正负控制：只有受测 commit、suite green 或 final_state=completed 的记录不算成功落地；真实成功目标 ref 更新能识别；后一次落地不污染前一次失败。无法确认的样本显式 unknown/not-evaluated，不并入成功分母，不把未知说成已失败。
+- [x] AC3 同一测试命令验证 CPU/验证时长身份去重：一条真实 suite 被重复记录或被多次尝试候选命中不使总量翻倍；歧义记录单列且不参与确定归属聚合。CPU 只取真实计量，报告同时给唯一 suite 数、关联覆盖率与未归属记录，不用 wall-time 换算 CPU。
+- [x] AC4 `node scripts/task-efficiency-baseline.mjs --help` exit 0，JSON/Markdown 输出均不再把墙钟比例称作 ITE/Idle Time Efficiency；费用 ITE 无确认公式时未评估。墙钟覆盖指标有独立名称、公式、缺失和重叠处理测试，不用 Math.min(1, ...) 掩盖重复累计。
+- [x] AC5 同一测试命令区分明确分类器失败、前序中止、suite 未完成与缺日志；无 suite-end/skip 不能自动判分类失败。pool-empty 不构成持续积压，resource-gate-wait 不单独证明持续队列；没有直接队列证据时 E5 输出未知，不采用未获依据的 p50>60s 自动启动结论。
+- [x] AC6 对 docs/analysis/task-efficiency-baseline.md 中原窗口 2026-08-23T07:18:06.081Z 至 2026-11-01T12:16:58.513Z 真跑，报告保留完整复跑命令、代码版本/输入指纹、旧新统计差异、覆盖率与未知项，并至少下钻一个历史重派任务、一条误关联验证轮和一条受测但未证实落地记录；若某类真实样本不存在则给出可复跑检索及缺席读数。
+- [x] AC7 `git diff --check` exit 0，变更只在声明 Touches 内；CSV 缺失保持费用未评估，不修改 E2 放行、锁范围、资源调度、AC/DoD 或 G3，不启动 E5。
 
 ## Definition of Done
 
-- [ ] 修正工具对真实工作区固定窗口运行并更新报告，读者能从 task/attempt/suite/目标 SHA 下钻复核关键关联与拒绝关联原因；只有新增 fixture、测试通过或换名不算交付。
-- [ ] 报告显式撤回受错误口径影响的旧成功落地数、CPU 合计、分类失败数与 E5 判词，逐项给修正值或未评估及原因；不得声称本任务已经完成费用优化或证明锁是吞吐瓶颈。
-- [ ] 相关检查通过且变更实际进入约定落地流程；本次立案保持所有 AC/DoD 未勾选，执行验收由有明确授权的流程处理。
+- [x] 修正工具对真实工作区固定窗口运行并更新报告，读者能从 task/attempt/suite/目标 SHA 下钻复核关键关联与拒绝关联原因；只有新增 fixture、测试通过或换名不算交付。
+- [x] 报告显式撤回受错误口径影响的旧成功落地数、CPU 合计、分类失败数与 E5 判词，逐项给修正值或未评估及原因；不得声称本任务已经完成费用优化或证明锁是吞吐瓶颈。
+- [x] 相关检查通过且变更实际进入约定落地流程；本次立案保持所有 AC/DoD 未勾选，执行验收由有明确授权的流程处理。
 
+
+- 该轴仍暗,理由:本任务只修只读统计工具与报告，不触碰架构依赖，未做 L_D/L_G 数值测量。
 ## Touches
 - scripts/task-efficiency-baseline.mjs
 - scripts/task-efficiency-baseline.test.mjs
