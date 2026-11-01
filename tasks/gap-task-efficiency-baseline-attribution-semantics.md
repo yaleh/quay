@@ -1,7 +1,7 @@
 ---
 id: gap-task-efficiency-baseline-attribution-semantics
 title: E1 统计口径修正：尝试/suite/落地证据关联、指标定义与 E5 缺失语义
-status: ready
+status: done
 labels:
   - gap
   - defect
