@@ -2,7 +2,7 @@
 id: gap-meta-driver-probe-readings-inline-over-1mb
 title: meta-driver probe 每轮 >1MB readings JSON 整段内联 fresh prompt——改机械预聚合/只发
   delta/落盘惰性 Read
-status: ready
+status: done
 labels:
   - gap
 parent: null
