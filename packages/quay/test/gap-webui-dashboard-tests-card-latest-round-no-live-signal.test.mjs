@@ -113,7 +113,10 @@ test("AC1: a live-running suite (no taskId field, real writer shape) renders 运
   const r = await request(port, "/dashboard?lang=zh");
   assert.equal(r.status, 200);
   assert.ok(r.body.includes("运行中"), "testsCard shows 运行中 while a suite is live");
-  assert.ok(/已运行 1m3\ds|已运行 \d+s/.test(r.body), "testsCard shows an elapsed-time reading");
+  // The elapsed reading is `formatSeconds` output: `\d+s` | `\d+m\d+s` | `\d+h\d+m`. Match the FULL
+  // format space, not a 10s wall-clock window — under full-suite load `rebuildNow()` can take >10s,
+  // pushing a 90s-old startedAt past the old `1m3\ds` window and red-ing a load-flaky assertion.
+  assert.ok(/已运行 \d+(?:h\d+m|m\d+s|s)/.test(r.body), "testsCard shows an elapsed-time reading");
   assert.ok(r.body.includes("runner inner"), "testsCard names the runner");
 });
 

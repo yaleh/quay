@@ -223,7 +223,13 @@ const PINNED = {
       // UNCHANGED, the same cross-check as the re-anchors above; init.ts's delta versus develop is
       // a single hunk inside `generateConfigContent` (verified with `git diff develop..<branch>`).
       ".quay/config.yml  6f24c975ac10e8a47b7453be13fef6a687a053e278f9f5f915ad7cc5985c2850",
-      ".quay/profiles.yml  0f781fbcc8140fd1b4732d877f8484f2c6f14856e2419167281976678b748bb0",
+      // RE-ANCHORED 2026-11-01 (gap-mcp-blacklist-extend-meta-cc-archguard-plantuml): the fresh
+      // `generateProfilesContent("quay")` template gained the meta-cc/archguard/plantuml entries on the
+      // task-worker/fix-worker/selector `mcpBlacklist` lists — kept byte-identical to the shipped
+      // `plugin/.quay/profiles.yml` carrier (`init.test.mjs` profiles-carrier invariant) — so
+      // `.quay/profiles.yml` legitimately moved. The other FIVE surface files hash UNCHANGED (the same
+      // targeted cross-check as the re-anchors above).
+      ".quay/profiles.yml  d82c5a3fa34d5cc17b3c7472493cca02057b030a01e453662faf5d6951c9d0ab",
       // RE-ANCHORED 2026-10-13 (gap-goal-driver-hardcoded-120s-spawn-kill-preempts-record-timeout-and-
       // orphans-goal-locks Plan item 3c): the single-source runtime-artifact manifest gained FOUR
       // frontmatter-store lockfile patterns (`goals/*.lock`, `adr/*.lock`, `docs-managed/*.lock`,
