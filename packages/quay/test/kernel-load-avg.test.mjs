@@ -92,7 +92,23 @@ const SCAN_EXTS = new Set([".ts", ".mjs", ".js"]);
 const PROBE_EXCLUDED_SEGMENTS = new Set(["node_modules", "dist", "archive", "test", "__tests__", "fixtures"]);
 
 function walkProductionSources(dir, out = []) {
-  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+  let entries;
+  try {
+    entries = fs.readdirSync(dir, { withFileTypes: true });
+  } catch (err) {
+    // `packages/quay/plugin/` is the GITIGNORED npm-pack STAGING MIRROR: packages/quay/test/
+    // delivery-standalone-smoke.sh copies the whole `plugin/` tree there, runs `npm pack`, then
+    // `rm -rf`s it — while other test files walk this same tree. A DIRECTORY that vanished
+    // between its parent's listing and this readdir is NOT-EVALUATED, not a violation (硬规则
+    // 3b): skip it, and SAY SO. Anywhere else ENOENT is still a hard failure.
+    const slashPath = dir.split(path.sep).join("/");
+    if (err.code === "ENOENT" && (slashPath.includes("/packages/quay/plugin/") || slashPath.endsWith("/packages/quay/plugin"))) {
+      console.log(`# staging-mirror walk→read race: skipped vanished dir ${slashPath} — NOT judged (hard rule 3b)`);
+      return out;
+    }
+    throw err;
+  }
+  for (const entry of entries) {
     if (PROBE_EXCLUDED_SEGMENTS.has(entry.name)) continue;
     if (entry.name.startsWith(".")) continue;
     const abs = path.join(dir, entry.name);
