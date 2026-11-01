@@ -83,7 +83,7 @@ state=computed, distance=5, contentCommits=4, contentMerges=1, bookkeepingMerges
 3. **无配置改动**：`plugin/freshness-producers.json`（Touches 里那一行）逐项复核结论是「正确、无需变更」—— 本 finding 未引入任何未被 `_ac239_refresh_shape` / `preconditions` 覆盖的新事实，⛔ 不追加运行史。
 4. **探针只立案不执行**：产出者由**派发链**（同轮兄弟任务的 worker）执行，探针职责止于立案。
 
-- L_G：该轴仍暗,理由:本次处置仅复核 finding 并确认 AC-239 已由同轮 AC-238 的产出者运行刷新为 d=5/margin 195，未改 packages/ 依赖结构，未运行 archguard 仪器
+- L_G：该轴仍暗,理由:本次处置仅复核 finding 并确认 AC-239 已由同轮 AC-238 的产出者运行刷新，未改 packages/ 依赖结构，未运行 archguard 仪器
 
 ### ⑤ 本任务 ⛔ 未做的事（逐条，不以沉默代替）
 
