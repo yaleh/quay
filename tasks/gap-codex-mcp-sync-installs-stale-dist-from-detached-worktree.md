@@ -2,7 +2,7 @@
 id: gap-codex-mcp-sync-installs-stale-dist-from-detached-worktree
 title: publish 自 detached worktree 运行时 codex-mcp-sync 装 stale dist（0.31.0-dev 而非
   tag 版）
-status: ready
+status: done
 labels:
   - gap
   - codex
