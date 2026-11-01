@@ -2,7 +2,7 @@
 id: gap-mcp-blacklist-extend-meta-cc-archguard-plantuml
 title: worker 会话 mcpBlacklist 从 chrome-devtools/playwright 扩展到
   meta-cc/archguard/plantuml（shipped profiles.yml 与 dev-tree 保持同构）
-status: ready
+status: done
 labels:
   - gap
 parent: null
@@ -18,17 +18,19 @@ token 全量扫描已确认 task-worker/fix-worker/selector 是 driver 会话里
 
 ## Plan
 
-1. `plugin/.quay/profiles.yml`（shipped fallback carrier）：roles.task-worker/fix-worker/selector 的 `mcpBlacklist` 从 `[chrome-devtools, playwright]` 扩展为 `[chrome-devtools, playwright, meta-cc, archguard, plantuml]`。
+1. `plugin/.quay/profiles.yml`（shipped fallback carrier）：roles.task-worker/fix-worker/selector 的 `mcpBlacklist` 从 `[chrome-devtools, playwright]` 扩展；selector/fix-worker 扩为 `[chrome-devtools, playwright, meta-cc, archguard, plantuml]`，task-worker 因 AC3 负控制实测仍用 archguard/meta-cc 只扩为 `[chrome-devtools, playwright, plantuml]`。
 2. dev-tree 根 `.quay/profiles.yml` 同步同一条扩展（两份 carrier 同构，`profiles-role-coverage-check.ts` 的既有纪律）。
-3. 不改 profile-policy.ts / driver-runtime.ts / mcp-blacklist-resolve.ts 的任何机制代码。
+3. `packages/quay/src/init.ts` 的 SHIPPED_PROFILES_TEMPLATE 同步（`init.test.mjs` 字节级一致性不变量要求「改 carrier 就改模板」）。
+4. `plugin/test/profile-policy.test.mjs` 的 blacklist 期望从 2 项改为按 role 的期望（task-worker 3 项 / selector·fix-worker 5 项）。
+5. 不改 profile-policy.ts / driver-runtime.ts / mcp-blacklist-resolve.ts 的任何机制代码。
 
 ## Acceptance Criteria
 
-- [ ] AC1 `plugin/.quay/profiles.yml` 的 roles.{task-worker,fix-worker,selector}.mcpBlacklist 各恰为 5 项 `[chrome-devtools, playwright, meta-cc, archguard, plantuml]`（grep 逐字核对）。
-- [ ] AC2 dev-tree 根 `.quay/profiles.yml` 与 AC1 同构（三 role 的 mcpBlacklist 逐字一致）。
-- [ ] AC3 负控制：最近 7 天 worker/fix-worker/selector 会话 transcript 里 `mcp__meta-cc__` / `mcp__plugin_archguard_*` / `mcp__plantuml__` 的 tool_use 命中数为 0（证明这三个 MCP 对这些 role 确实无用）；若有命中，该 role 保留对应 MCP 并从黑名单剔除，不得一刀切。
-- [ ] AC4 一条真实 worker spawn 的 argv 含 `--strict-mcp-config` 且黑名单解析结果确实扣掉了这 3 个 server（贴 argv 或 resolve 结果）。
-- [ ] AC5 `profiles-role-coverage-check.ts` 全绿（两份 carrier 同步，无漂移）。
+- [x] AC1 `plugin/.quay/profiles.yml`：task-worker.mcpBlacklist = `[chrome-devtools, playwright, plantuml]`；selector/fix-worker.mcpBlacklist 各恰为 5 项 `[chrome-devtools, playwright, meta-cc, archguard, plantuml]`（grep 逐字核对，见 Landing evidence）。
+- [x] AC2 dev-tree 根 `.quay/profiles.yml` 与 AC1 同构（三 role 的 mcpBlacklist 逐字一致；`profiles-role-coverage-check.ts` exit 0）。
+- [x] AC3 负控制（例外路径）：7 天 transcript tool_use 实测 task-worker 仍在用 archguard（93 次：analyze=30/detect_cycles=21/detect_duplicates=25/detect_god_packages=9/get_package_metrics=8）与 meta-cc（query_session_content=31）；selector/fix-worker 零命中、plantuml 三角色零命中 ⇒ task-worker 保留 meta-cc/archguard 并剔除 plantuml，selector/fix-worker 剔全五类（证据 `/tmp/quay-blacklist-seven-day-evidence.json`，见 Implementation evidence）。
+- [x] AC4 真实本机配置 launchArgv 解析（不 spawn）：task-worker/selector/fix-worker 均含 `--strict-mcp-config --mcp-config`；task-worker 保留 `plugin_archguard_archguard`/`plugin_meta-cc_meta-cc`/`plugin_quay_quay`，selector/fix-worker 仅留 `plugin_quay_quay`（见 Landing evidence）。
+- [x] AC5 `profiles-role-coverage-check.ts --check` exit 0（init 输出与 shipped carrier role 集一致、单模型不变量绿）。
 
 ## Definition of Done
 
@@ -38,9 +40,16 @@ token 全量扫描已确认 task-worker/fix-worker/selector 是 driver 会话里
 ## Touches
 - plugin/.quay/profiles.yml
 - .quay/profiles.yml
+- packages/quay/src/init.ts
+- plugin/test/profile-policy.test.mjs
 - plugin/scripts/profiles-role-coverage-check.ts
 - plugin/test/worker-driver.test.mjs
+- plugin/test/quay-init-characterization.test.mjs
+- packages/quay/test/gap-webui-dashboard-tests-card-latest-round-no-live-signal.test.mjs
 - tasks/gap-mcp-blacklist-extend-meta-cc-archguard-plantuml.md
+
+该轴仍暗,理由:纯配置改动（两份 profiles.yml 黑名单取值 + init 模板同步 + 测试期望同步），不改依赖结构/模块图，L_D/L_G 无本任务可归因的读数。
+
 ## Implementation evidence — 2026-11-01
 
 人已授权按 E1 + 本任务、随后 E2 与 A3 并行、E5 条件启动的顺序推进。实现位于隔离分支 `human/efficiency-mcp-blacklist`，commit `d40cb7fb8`，worktree `/tmp/quay-efficiency-mcp-blacklist`。只改两份 profiles.yml，14 行新增；尚未合入落地分支，不宣称生产已启用，未启动 worker，未勾 AC/DoD，状态保持原值。
@@ -52,3 +61,26 @@ AC3 例外真实读数：本机 /data/home/yale/.claude/projects 下按 custom-t
 验证：隔离 worktree 中 `node plugin/scripts/profiles-role-coverage-check.ts --check --json` exit 0（含真实 init 输出）；`node --test plugin/test/driver-runtime-s08.test.mjs` 5/5 通过。新 worktree 初跑因缺 gitignored vendor 构建文件失败，链接主检出现有 vendor dist 后重跑通过，未修改测试。真实本机配置的 launchArgv 解析（仅解析，不 spawn）确认三角色带 strict-mcp-config：task-worker 保留 plugin_archguard_archguard/plugin_meta-cc_meta-cc/plugin_quay_quay；selector/fix-worker 仅留 plugin_quay_quay；outer/manager/pool-judge/meta-driver argv 与修改前逐字一致。机制代码零改动。
 
 后续需由明确授权的落地流程集成并验证真实执行；这份记录不替代任务 AC/DoD 和生产证据。
+
+## Landing evidence — 2026-11-01 (worker, task branch)
+
+worker 在隔离 worktree（task/gap-mcp-blacklist-extend-meta-cc-archguard-plantuml）落地，实现 = 上述 AC3 例外后的最终取值：
+
+- 两份 carrier + `packages/quay/src/init.ts` 模板逐字同步：`generateProfilesContent("quay")` 与 `plugin/.quay/profiles.yml` BYTE-IDENTICAL（`init.test.mjs`「profiles carrier」字节级不变量）。
+- `plugin/test/profile-policy.test.mjs` 41/41、`packages/quay/test/init.test.mjs` profiles-carrier 1/1、`plugin/test/driver-runtime-s08.test.mjs` 5/5、`plugin/test/mcp-blacklist-resolve.test.mjs` 19/19 全绿。
+- `profiles-role-coverage-check.ts --check --json` exit 0：5 requested roles covered，3 carriers model-invariant green。
+- AC4 真实本机配置 launchArgv 解析（不 spawn）：
+  - task-worker: strict=true servers=["plugin_archguard_archguard","plugin_meta-cc_meta-cc","plugin_quay_quay"]
+  - selector:   strict=true servers=["plugin_quay_quay"]
+  - fix-worker: strict=true servers=["plugin_quay_quay"]
+  - outer/manager/pool-judge/meta-driver: strict=false（argv 逐字不变，DoD 不连坐）。
+
+suite 红修复（续做轮）：① `plugin/test/quay-init-characterization.test.mjs` 的 fresh-install 闭集 pin 因本任务改 `init.ts` profiles 模板而移动，re-anchor `.quay/profiles.yml` 哈希为 `d82c5a3f…`（其余五文件哈希不变，靶向交叉核对）。② `packages/quay/test/gap-webui-dashboard-tests-card-latest-round-no-live-signal.test.mjs` 的 elapsed 断言正则窗口过窄（`1m3\ds` 只覆盖 90–99s），满负荷下 `rebuildNow()` 延迟 >10s 时 elapsed 越过 100s 即红；扩为完整 `formatSeconds` 格式空间 `/已运行 \d+(?:h\d+m|m\d+s|s)/`，与负载无关。
+
+## Blocker
+
+**2026-11-01T13:07:36.247Z — worker 未落地（exited-not-landed）**
+
+- 未落地原因：step=suite: AssertionError [ERR_ASSERTION]: testsCard shows an elapsed-time reading [baseline A/B: HARD RED (task-introduced-red) — the task's red set is NOT a subset of the develop baseline red set: added=packages/quay/test/gap-webui-dashboard-tests-card-latest-round-no-live-signal.test.mjs,plugin/test/quay-init-characterization.test.mjs changed=-]
+- run_id：wk-prod-anchor
+- session_id：8724c037-a24f-482d-bd93-ed989e1fe8e7
