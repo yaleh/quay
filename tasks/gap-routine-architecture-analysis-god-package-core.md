@@ -2,7 +2,7 @@
 id: gap-routine-architecture-analysis-god-package-core
 title: "architecture-analysis: fanIn 302 / fanOut 138, 215 entities in 27 files;
   goal-store.ts is 135KB."
-status: ready
+status: done
 labels:
   - gap
   - routine-filed
