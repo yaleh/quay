@@ -48,3 +48,11 @@ extra:
 ## Evidence
 
 2026-11-01 续做（exited-not-landed 后）：fan-in suite HARD RED `baseline A/B: task-introduced-red added=plugin/test/publish-dist-branch-closure-gate.test.mjs`。根因非环境、非直接 delta——该测试文件不在本任务 Touches，但其 spawn 真实 publish-dist-branch.sh：本任务对 `publish-dist-branch.sh:251` 的 `|| exit 1` fail-closed 把此前被 `set -e` 静默吞掉的非末尾 `&&` 失败暴露出来。closure-gate 测试的 stub 自 js-carrier anchor gate（96429beb8，build-plugin-dist --rewrite 零 `.js` carrier 即 NOT-EVALUATED）与 bundle-tree gate（version-consistency-check）进链后，其 baseline publish 一直靠 build-plugin-dist 先失败短路整条 stamp 链而"假绿"。修复 = 补齐 stub 至整链可完成：① `plugin/workflows/demo.js`（≥1 `.js` carrier）；② `scripts/version-consistency-check.{mjs,ts}` 入 stub；③ vendor bundle 携带 `package_default.version` token；④ `plugin/skills/{quay-file-task,quay-directive,quay-task-operator,init}` 入 stub；⑤ 陈旧断言 `.codex-plugin` 仅 `["plugin.json"]` 改为 `["plugin.json","skills"]`（codex-skills 块实际产出 `skills/`）。单文件 `node --experimental-strip-types --test plugin/test/publish-dist-branch-closure-gate.test.mjs` 5/5 绿。
+
+## Blocker
+
+**2026-11-01T03:54:09.145Z — worker 未落地（exited-not-landed）**
+
+- 未落地原因：step=suite: AssertionError [ERR_ASSERTION]: baseline publish must succeed: [baseline A/B: HARD RED (task-introduced-red) — the task's red set is NOT a subset of the develop baseline red set: added=plugin/test/publish-dist-branch-closure-gate.test.mjs changed=-]
+- run_id：wk-prod-anchor
+- session_id：03323a1c-d02c-4836-9a5d-57306de6aa61
