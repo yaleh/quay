@@ -28,13 +28,13 @@
 
 import fs from "node:fs";
 import path from "node:path";
-import crypto from "node:crypto";
 import { execFileSync } from "node:child_process";
 // getArgValue now lives in gate-script-base.ts as `flagValue` (it was one of the byte-identical
 // copies of the indexOf+next-arg idiom in plugin/scripts; .quay/routine-findings.jsonl finding
 // `arg-parsing-helper-family`, routine `semantic-dedup-scan`).
 import { helpExit, isDirectEntry, flagValue } from "./gate-script-base.ts";
 import { repoRoot } from "./repo-root.ts";
+import { sha256OfBuffer } from "./sha256.ts";
 
 /** The manifest carrying the pin (repo-root-relative). */
 export const MANIFEST_REL = "plugin/scripts/primitives-drift-manifest.json";
@@ -66,10 +66,6 @@ export interface PrimitivesDriftResult {
   fleetSha: string;
   pinnedFleetShaResolved: string | null;
   files: FileReading[];
-}
-
-function sha256OfBuffer(buf: Buffer): string {
-  return crypto.createHash("sha256").update(buf).digest("hex");
 }
 
 function sha256OfFile(abs: string): string | null {

@@ -38,9 +38,9 @@
 
 import fs from "node:fs";
 import path from "node:path";
-import { createHash } from "node:crypto";
 import { execSync } from "node:child_process";
 import { createSelftest, parseJsonArg, git, gitLastCommitForPath, serializeSortedJson, printJsonCompact } from "./gate-script-base.ts";
+import { sha256OfString, sha256OfBuffer } from "./sha256.ts";
 import {
   SCHEMA_VERSION as A1_SCHEMA_VERSION,
   VALID_STAGES,
@@ -202,14 +202,11 @@ function receiptError(code: string, message: string): Error & { code: string } {
 }
 
 // ── sha256 helpers ───────────────────────────────────────────────────────────────────────────────────
+// The bodies live ONCE, in ./sha256.ts (semantic-dedup-scan finding `B1`, runId
+// `semantic-dedup-scan-1793491958069`). The names stay exported because finding-backpropagate.ts
+// re-exports `sha256OfString`; the re-export is a delegation, not a second implementation.
 
-export function sha256OfBuffer(buf: Buffer): string {
-  return createHash("sha256").update(buf).digest("hex");
-}
-
-export function sha256OfString(s: string): string {
-  return createHash("sha256").update(s, "utf8").digest("hex");
-}
+export { sha256OfString, sha256OfBuffer };
 
 export function sha256File(filePath: string): string {
   const buf = fs.readFileSync(filePath);
