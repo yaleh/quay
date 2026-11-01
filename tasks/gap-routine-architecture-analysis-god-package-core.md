@@ -49,3 +49,11 @@ Split goal-store into per-goal read/write modules and separate branch-model poli
 - `packages/quay/src/core/branch-model.ts`
 - `packages/quay/src/core/criterion-attribution.ts`
 - `tasks/gap-routine-architecture-analysis-god-package-core.md`
+
+## Blocker
+
+**2026-11-01T02:18:32.059Z — worker 未落地（exited-not-landed）**
+
+- 未落地原因：step=suite: AssertionError [ERR_ASSERTION]: Expected values to be strictly equal: [baseline A/B: HARD RED (task-introduced-red) — the task's red set is NOT a subset of the develop baseline red set: added=plugin/test/quality-gate-driver.test.mjs,plugin/test/quality-gate-driver.test.mjs changed=-]
+- run_id：wk-prod-anchor
+- session_id：d6071cae-ae98-40c0-86c5-ebac18eba53c
