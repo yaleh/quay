@@ -11,7 +11,7 @@
 //                            merge-develop / delta / typecheck / scoped-gate / suite-start / suite-end / ff …）
 //   .quay/fan-in-lock-events.jsonl         fan-in 锁 acquire/release 事件
 //   .quay/verification-round.jsonl         suite run 记录（round/durationMs/lock_wait_ms/lock_hold_ms/
-//                            cpu_time_s/cpu_source/taskId/runId/…）
+//                            cpu_time_s/cpu_source/taskId/runId/terminalCommit/commit/…）
 //   milestones/fast-mode-telemetry/*.json  每日任务快照（taskId/runId/minutes/outcome/fanInCommit）
 //   .workflow-events/fm-<runId>.jsonl      per-run start/end 事件（queuedAtMs/startedAtMs/endedAtMs）
 //   <sessions-dir>/*.jsonl                 Claude Code 会话（worker 会话 = 首条 user 消息以
@@ -24,8 +24,13 @@
 //                  同一 run_id 被多个 task、多次尝试复用（本工具会计量 run_id 复用并告警）
 //   · session     = sessionId（jsonl 文件名去后缀）；worker 会话通过首条 user 消息的 "Task: <id>" 归属任务
 //   · fan-in run  = fan-in-<task>-<runIdSafe>.log 内落在某次尝试 [started_at, ended_at] 窗口的步骤
-//   · suite run   = verification-round.jsonl 的一条记录（runId/taskId 若缺 ⇒ 无法唯一关联，如实报告）
-//   · landing     = fanInCommit SHA（fast-mode telemetry）或 fan-in 日志的 ff 步骤
+//   · suite run   = verification-round.jsonl 的一条记录（以 round 为唯一身份）
+//   · landing     = 目标 ref（develop）成功更新的直接事件：fan-in 日志中 ok:true 的 ff 步骤。
+//                   ⛔ verification-round 的 commit/terminalCommit 只是「受测 SHA」，不是落地证据；
+//                   ⛔ final_state=completed 与 suite green 都不是落地证据。
+//
+// 关联结果三分（Plan §2）：proven（已证明关联）/ ambiguous（无法唯一关联）/ missing（数据缺失）。
+// 只有 proven 的记录参与确定归属聚合（CPU 合计、验证时长、suite 覆盖）；ambiguous/missing 单列。
 //
 // 输出：默认 markdown（人类可读报告，可直接落盘 docs/analysis/task-efficiency-baseline.md），
 //       --json 输出机器可核的 JSON（AC 覆盖用）。
@@ -33,6 +38,7 @@ import { readFileSync, readdirSync, existsSync, statSync } from "node:fs";
 import { join, dirname, basename, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 import { homedir } from "node:os";
+import { createHash } from "node:crypto";
 
 // ── 常量 ─────────────────────────────────────────────────────────────────────
 const HELP = `task-efficiency-baseline — task-level end-to-end efficiency baseline (E1)
@@ -55,11 +61,12 @@ flags:
 
 身份关联规则（E2 复用面）：
   attempt 键 = (task, started_at)；run_id 是 driver 进程级常量，⛔ 不是尝试键。
-  fan-in 步骤按尝试窗口 [started_at, ended_at] 归属；窗口外/无日志 ⇒ 未归属。
-  suite 记录按 (runId, taskId) 关联；两键缺一 ⇒ 无法唯一关联（单独计量）。
-  landing 证据 = fast-mode telemetry 的 fanInCommit，或 fan-in 日志的 ff 步骤。
-  completed outcome（worker 退出码 0 的 final_state=completed）≠ 权威落地证据
-  （权威落地 = fanInCommit SHA 在 git 历史中可核到）。
+  fan-in 步骤按尝试窗口 [started_at, ended_at] 归属；窗口外/无日志 ⇒ 未归属（不兜底）。
+  suite 记录以 round 为唯一身份，按 (taskId, startedAt) 关联尝试窗口；缺 taskId/startedAt ⇒
+    无法唯一关联（单独计量）；窗口内无唯一证据 ⇒ 不回填同 task 的全部历史 recs。
+  landing 证据 = fan-in 日志中 ok:true 的 ff 步骤（目标 ref 成功更新的直接事件）。
+    verification-round.commit / terminalCommit（受测 SHA）、suite green、final_state=completed
+    都不构成落地证明；无法确认的样本显式 unknown，不并入成功分母，也不说成已失败。
 
 时间口径：wall-clock 用记录自带时间戳差；CPU-seconds 只取 cpu_time_s 且
   cpu_source=gnu-time 的实测值，⛔ 不用 wall-time 换算。
@@ -132,6 +139,8 @@ function inventoryFields(records) {
   }
   return fields;
 }
+function num(x) { return typeof x === "number" && Number.isFinite(x) ? x : null; }
+function sha256(s) { return createHash("sha256").update(s).digest("hex"); }
 
 // 解析主检出根：worktree 的 git common dir = <主检出>/.git。
 function resolveMainCheckout() {
@@ -330,7 +339,6 @@ function buildAttempts(src, args) {
 
 // fan-in 步骤归属：按尝试窗口从 fan-in-<task>-<runIdSafe>.log 选记录。
 function attachFanInTrace(src, attempts) {
-  const root = src.root;
   for (const a of attempts) {
     a.trace = [];
     a.traceSource = null;
@@ -339,9 +347,11 @@ function attachFanInTrace(src, attempts) {
     a.suiteExecMs = null;
     a.suiteSkipped = false;
     a.fanInStepMs = {};
+    a.ffOk = false;
+    a.releaseOk = false;
     const file = fanInLogFileName(a.task, a.run_id);
     const records = src.fanInTraceByName.get(file);
-    if (!records) continue;
+    if (!records) { a.suiteOutcome = "missing-log"; continue; }
     a.traceAvailable = true;
     a.traceSource = file;
     const inWin = records.filter((r) => {
@@ -349,6 +359,8 @@ function attachFanInTrace(src, attempts) {
       return t != null && (a.startedAtMs == null || t >= a.startedAtMs) && (a.endedAtMs == null || t <= a.endedAtMs);
     });
     a.trace = inWin;
+    a.ffOk = inWin.some((r) => r.step === "ff" && r.ok === true);
+    a.releaseOk = inWin.some((r) => r.step === "release-fan-in-lock");
     a.fanInLockWaitMs = stepWall(a.trace, "acquire-fan-in-lock");
     a.suiteExecMs = stepWall(a.trace, "suite-end") ?? stepWall(a.trace, "suite-start") ?? null;
     a.suiteSkipped = a.trace.some((r) => r.step === "suite-skip");
@@ -356,8 +368,42 @@ function attachFanInTrace(src, attempts) {
     for (const r of a.trace) {
       if (typeof r.wall_ms === "number") a.fanInStepMs[r.step] = (a.fanInStepMs[r.step] || 0) + r.wall_ms;
     }
+    a.suiteOutcome = classifySuiteOutcome(a.trace);
   }
 }
+
+// suite 结局分类（AC5）：每个尝试的 fan-in run 只能落在互斥的一类。
+//   missing-log          无 fan-in 日志（缺日志）
+//   classifier-failure   分类器【明确】失败证据（instrument-probe ok≠true 或 classifier=unavailable/failed/missing）
+//   pre-commit-abort     有日志、未到 suite-start（前序拒绝：delta/doc-check/typecheck/ac-precheck/anti-drift …）
+//   suite-skipped        有 suite-skip（doc-only delta）
+//   missing-end-event    有 suite-start 但无 suite-end/skip/incomplete（缺结束事件）
+//   suite-ran            有 suite-end（其下再分 green/red/incomplete 三种真实 verdict）
+function classifySuiteOutcome(trace) {
+  if (!trace || trace.length === 0) return "missing-log";
+  const steps = new Set(trace.map((r) => r.step));
+  const hasSuiteStart = steps.has("suite-start");
+  const hasSuiteEnd = steps.has("suite-end");
+  const hasSuiteSkip = steps.has("suite-skip");
+  const hasSuiteIncomplete = steps.has("suite-incomplete");
+  const classifierFailed = trace.some((r) => r.step === "instrument-probe"
+    && (r.ok !== true || /classifier=(unavailable|failed|missing)/.test(r.reason || "")));
+  if (classifierFailed && !hasSuiteEnd) return "classifier-failure";
+  if (hasSuiteEnd) return "suite-ran";
+  if (hasSuiteSkip) return "suite-skipped";
+  if (hasSuiteStart) return "missing-end-event";
+  return "pre-commit-abort";
+}
+
+// suite verdict 细分（仅在 suite-ran 时）。
+function suiteVerdict(trace) {
+  const end = trace.find((r) => r.step === "suite-end");
+  const incomplete = trace.some((r) => r.step === "suite-incomplete");
+  if (end && end.ok === true) return "green";
+  if (incomplete) return "incomplete";
+  return "red";
+}
+
 function stepWall(trace, step) {
   const rs = trace.filter((r) => r.step === step);
   if (rs.length === 0) return null;
@@ -366,55 +412,120 @@ function stepWall(trace, step) {
   return walls[walls.length - 1];
 }
 
-// 落地证据：权威 = verification-round 的 terminalCommit/commit（按 taskId+窗口 归属）；
-// 回退 = fan-in 日志 ff 步骤 ok。fast-mode telemetry 的 fanInCommit 属于 `fm-*` 空间，不 join。
-function attachLanding(src, attempts) {
-  // 由 attachSuite 先行填好 a.suiteRecords；这里只从 suiteRecords 里取权威 SHA。
-  for (const a of attempts) {
-    let sha = null;
-    for (const v of a.suiteRecords || []) {
-      const c = typeof v.terminalCommit === "string" && v.terminalCommit ? v.terminalCommit
-        : (typeof v.commit === "string" && v.commit ? v.commit : null);
-      if (c) sha = c;
-    }
-    if (!sha && a.trace && a.trace.some((r) => r.step === "ff" && r.ok === true)) {
-      a.ffStepOk = true;
-    }
-    a.fanInCommit = sha;
-    a.landed = sha != null;
-    a.landedEvidence = sha != null ? "verification-round.commit" : (a.ffStepOk ? "fan-in-trace.ff" : null);
-  }
-}
+// verification-round 记录的唯一身份：round 字段在本店是全局单调唯一（实测 3270/3270 唯一）。
+function recordKey(r) { return String(r.round ?? `${r.taskId ?? "?"}\u0000${r.startedAt ?? "?"}`); }
 
-// suite 关联：verification-round 按 taskId 关联（runId 空间不一致——worker-outcome 是 wk-prod-*，
-// verification-round 是 fm-*/mfi-*/少数 wk-*，⛔ 不能用 runId 当唯一键）；再按尝试窗口过滤。
+// suite 关联（Plan §2 / AC1/AC3）：verification-round 按 (taskId, startedAt) 关联尝试窗口。
+// 窗口内没有唯一证据 ⇒ 不回填同 task 的全部历史 recs（旧实现的行 405 兜底已移除）。
+// 同一 round 的重复记录先按身份去重（一条真实 suite 被重复记录不翻倍）；只有 proven 的记录
+// 参与确定归属聚合；ambiguous/missing 单列。
 function attachSuite(src, attempts) {
-  const byTask = new Map();
+  // 去重：verification-round 以 round 为唯一身份，重复行只保留第一条。
+  const seenRounds = new Set();
+  const rounds = [];
+  let dupCount = 0;
   for (const v of src.verificationRound) {
+    const k = recordKey(v);
+    if (seenRounds.has(k)) { dupCount++; continue; }
+    seenRounds.add(k);
+    rounds.push(v);
+  }
+  src.verificationRoundUnique = rounds;
+  src.verificationRoundDuplicates = dupCount;
+
+  const byTask = new Map();
+  for (const v of rounds) {
     if (!v.taskId) continue;
     if (!byTask.has(v.taskId)) byTask.set(v.taskId, []);
     byTask.get(v.taskId).push(v);
   }
-  for (const a of attempts) {
+
+  // 反向索引：record key -> 命中它的尝试索引集合（用于判定「唯一归属」）。
+  const attemptsForRecord = new Map();
+  const recordByKey = new Map();
+  const candidatesForAttempt = new Map();
+  attempts.forEach((a, ai) => {
     const recs = byTask.get(a.task) || [];
     const inWin = recs.filter((v) => {
       const s = parseIso(v.startedAt);
-      if (s == null) return true; // 无 startedAt ⇒ 保留（仍按 taskId 关联）
-      return (a.startedAtMs == null || s >= a.startedAtMs - 60_000) && (a.endedAtMs == null || s <= a.endedAtMs + 60_000);
+      if (s == null) return false; // 缺 startedAt ⇒ 无法归属到任何尝试（缺值 = 未查，不是 0）
+      return (a.startedAtMs == null || s >= a.startedAtMs) && (a.endedAtMs == null || s <= a.endedAtMs);
     });
-    a.suiteRecords = inWin.length > 0 ? inWin : recs;
-    a.suiteUnique = recs.length <= 1;
-    if (a.suiteRecords.length > 0) {
-      const last = a.suiteRecords[a.suiteRecords.length - 1];
-      a.suiteLockWaitMs = num(last.lock_wait_ms);
-      a.suiteLockHoldMs = num(last.lock_hold_ms);
-      a.suiteDurationMs = num(last.durationMs);
-      a.cpuTimeS = num(last.cpu_time_s);
-      a.cpuSource = last.cpu_source ?? null;
+    a.suiteRecords = inWin;
+    candidatesForAttempt.set(ai, inWin);
+    for (const r of inWin) {
+      const k = recordKey(r);
+      recordByKey.set(k, r);
+      if (!attemptsForRecord.has(k)) attemptsForRecord.set(k, new Set());
+      attemptsForRecord.get(k).add(ai);
     }
+  });
+  src.attemptsForRecord = attemptsForRecord;
+  src.recordByKey = recordByKey;
+
+  attempts.forEach((a, ai) => {
+    const recs = candidatesForAttempt.get(ai);
+    // 「唯一归属」的判定对象是【记录】，不是【尝试】：
+    //   - 一条记录被多个尝试命中 ⇒ 该记录歧义（backfill 问题），不参与确定归属聚合。
+    //   - 一条记录被且只被本尝试命中 ⇒ proven，即使本尝试窗口内有其它多条（各自真实、各自计一次）。
+    const uniqueRecs = recs.filter((r) => attemptsForRecord.get(recordKey(r)).size === 1);
+    a.suiteUniqueRecords = uniqueRecs;
+    a.suiteAssociation = recs.length === 0 ? "missing" : (uniqueRecs.length > 0 ? "proven" : "ambiguous");
+    a.suiteUnique = a.suiteAssociation === "proven";
+    a.suiteUniqueRecord = uniqueRecs.length > 0 ? uniqueRecs[uniqueRecs.length - 1] : null;
+
+    if (a.suiteUniqueRecord) {
+      const r = a.suiteUniqueRecord;
+      a.suiteLockWaitMs = num(r.lock_wait_ms);
+      a.suiteLockHoldMs = num(r.lock_hold_ms);
+      a.suiteDurationMs = num(r.durationMs);
+      a.cpuTimeS = num(r.cpu_time_s);
+      a.cpuSource = r.cpu_source ?? null;
+    } else {
+      a.suiteLockWaitMs = null;
+      a.suiteLockHoldMs = null;
+      a.suiteDurationMs = null;
+      a.cpuTimeS = null;
+      a.cpuSource = null;
+    }
+  });
+}
+
+// 落地证据（AC2）：权威 = fan-in 日志中 ok:true 的 ff 步骤（目标 ref 成功更新的直接事件）。
+// ⛔ verification-round 的 commit/terminalCommit（受测 SHA）不是落地证据，只作 corroborative SHA。
+// 三分：landed（证明已落地）/ not-landed（证明未落地：fan-in 已收尾但无 ok ff）/ unknown（证据不足）。
+function attachLanding(src, attempts) {
+  for (const a of attempts) {
+    a.landingStatus = "unknown";
+    a.landed = false;
+    a.landedEvidence = null;
+    a.fanInCommit = null;
+    a.landedSha = null;
+
+    if (a.ffOk) {
+      a.landingStatus = "landed";
+      a.landed = true;
+      a.landedEvidence = "fan-in-trace.ff(ok)";
+    } else if (a.releaseOk) {
+      // fan-in 明确收尾（release-fan-in-lock）却没有 ok 的 ff ⇒ 该 run 未落地（明确失败）。
+      a.landingStatus = "not-landed";
+      a.landedEvidence = "fan-in-trace.released-without-ff";
+    } else {
+      // 无日志、或日志既无 ff 也无收尾 ⇒ 无法确认（未知 ≠ 已失败）。
+      a.landingStatus = "unknown";
+      a.landedEvidence = null;
+    }
+
+    // corroborative SHA：仅当 proven suite 记录存在时，取 terminalCommit（否则 commit）。
+    // ⛔ 这只是「受测 SHA」，与落地判定无关；落地判定只看 ff ok。
+    if (a.suiteUniqueRecord) {
+      const v = a.suiteUniqueRecord;
+      a.fanInCommit = (typeof v.terminalCommit === "string" && v.terminalCommit) ? v.terminalCommit
+        : ((typeof v.commit === "string" && v.commit) ? v.commit : null);
+    }
+    if (a.landed) a.landedSha = a.fanInCommit;
   }
 }
-function num(x) { return typeof x === "number" && Number.isFinite(x) ? x : null; }
 
 // ── 汇总 ───────────────────────────────────────────────────────────────────
 function summarize(src, args, ctx) {
@@ -424,11 +535,33 @@ function summarize(src, args, ctx) {
     if (!byTask.has(a.task)) byTask.set(a.task, []);
     byTask.get(a.task).push(a);
   }
-  const landedTasks = new Set([...byTask.entries()].filter(([, as]) => as.some((a) => a.landed)).map(([t]) => t));
+
+  // 任务级落地三分：landed（任一尝试证明落地）/ not-landed（无落地且全部尝试明确未落地）/ unknown（其余）。
+  const landedTasks = new Set();
+  const notLandedTasks = new Set();
+  const unknownTasks = new Set();
+  for (const [task, as] of byTask) {
+    if (as.some((a) => a.landed)) landedTasks.add(task);
+    else if (as.every((a) => a.landingStatus === "not-landed")) notLandedTasks.add(task);
+    else unknownTasks.add(task);
+  }
+
   const wallClocks = attempts.map((a) => a.wall_clock_ms).filter((x) => typeof x === "number" && x > 0).sort((x, y) => x - y);
   const lockWaits = attempts.map((a) => a.fanInLockWaitMs).filter((x) => typeof x === "number").sort((x, y) => x - y);
   const suiteDurations = attempts.map((a) => a.suiteExecMs).filter((x) => typeof x === "number").sort((x, y) => x - y);
-  const cpus = attempts.map((a) => a.cpuTimeS).filter((x) => typeof x === "number").sort((x, y) => x - y);
+
+  // 唯一归属的 suite 记录（全局按 round 去重），供 CPU/验证时长/锁等待聚合使用（AC3 身份去重）。
+  const uniqueRecordsByKey = new Map();
+  for (const a of attempts) {
+    for (const r of (a.suiteUniqueRecords || [])) uniqueRecordsByKey.set(recordKey(r), r);
+  }
+  const uniqueRecords = [...uniqueRecordsByKey.values()];
+  const gnuUnique = uniqueRecords.filter((r) => r.cpu_source === "gnu-time" && num(r.cpu_time_s) != null);
+  const cpuValues = gnuUnique.map((r) => num(r.cpu_time_s)).sort((x, y) => x - y);
+  const cpuUniqueSumS = cpuValues.reduce((s, v) => s + v, 0);
+  const cpuUniqueCount = gnuUnique.length;
+  const suiteSlotWaits = uniqueRecords.map((r) => num(r.lock_wait_ms)).filter((x) => x != null).sort((x, y) => x - y);
+  const suiteDurationValues = uniqueRecords.map((r) => num(r.durationMs)).filter((x) => x != null).sort((x, y) => x - y);
 
   // 分阶段合计（有 trace 的尝试）
   const phaseTotals = {};
@@ -438,58 +571,78 @@ function summarize(src, args, ctx) {
       withTrace++;
       for (const [k, v] of Object.entries(a.fanInStepMs || {})) phaseTotals[k] = (phaseTotals[k] || 0) + v;
     }
-    if (a.suiteRecords && a.suiteRecords.length > 0) withSuiteRec++;
-    if (a.cpuTimeS != null && a.cpuSource === "gnu-time") withCpu++;
+    if (a.suiteUniqueRecords && a.suiteUniqueRecords.length > 0) withSuiteRec++;
+    if ((a.suiteUniqueRecords || []).some((r) => r.cpu_source === "gnu-time" && num(r.cpu_time_s) != null)) withCpu++;
     if (a.fanInLockWaitMs != null) withLock++;
   }
 
-  // 尝试级 ITE = 已归属阶段墙钟 / 端到端墙钟（缺归属 ⇒ null，不伪造 0）
-  const ites = [];
+  // 墙钟归属覆盖率（取代旧「ITE / Idle Time Efficiency」误名）：attributedWallMs / endToEndWallMs，
+  // ⛔ 不截断到 1——重叠/重复累计会让比值 >1，这正是要暴露的信号而不是要掩盖的。
+  const wallAttr = [];
+  let wallAttrOverlap = 0;
   for (const a of attempts) {
-    const attr = a.fanInStepMs ? Object.values(a.fanInStepMs).reduce((s, v) => s + v, 0) : null;
+    const hasTrace = a.trace && a.trace.length > 0;
+    const attr = hasTrace && a.fanInStepMs ? Object.values(a.fanInStepMs).reduce((s, v) => s + v, 0) : null;
     if (a.wall_clock_ms != null && attr != null && a.wall_clock_ms > 0) {
-      ites.push({ task: a.task, ite: Math.min(1, attr / a.wall_clock_ms), attrMs: attr, wallMs: a.wall_clock_ms });
+      const ratio = attr / a.wall_clock_ms;
+      wallAttr.push({ task: a.task, ratio, attrMs: attr, wallMs: a.wall_clock_ms });
+      if (ratio > 1 + 1e-9) wallAttrOverlap++;
     }
   }
-  ites.sort((x, y) => x.ite - y.ite);
+  wallAttr.sort((x, y) => x.ratio - y.ratio);
 
-  // suite 等槽（verification-round lock_wait_ms，真实锁计量，⛔ 不是 wall-time 换算）
-  const suiteSlotWaits = attempts.map((a) => a.suiteLockWaitMs).filter((x) => typeof x === "number").sort((x, y) => x - y);
+  // suite 身份覆盖（AC3）：唯一 suite 数 = proven 关联到的 verification-round 记录数。
+  const uniqueSuiteKeys = new Set(uniqueRecordsByKey.keys());
+  const totalVerificationRounds = (src.verificationRoundUnique || src.verificationRound).length;
+  const unattributedRounds = totalVerificationRounds - uniqueSuiteKeys.size;
 
-  // 每任务明细（AC3 每任务累计墙钟/ITE/返工；费用 = not-evaluated，无 CSV）
+  // 未归属/歧义的 gnu-time CPU 记录（有真实计量但无法唯一归属 ⇒ 单列，不参与聚合）。
+  const gnuAll = (src.verificationRoundUnique || src.verificationRound).filter((r) => r.cpu_source === "gnu-time" && num(r.cpu_time_s) != null);
+  const cpuUnattributedGnu = gnuAll.length - cpuUniqueCount;
+
+  // suite 结局计数（AC5，互斥：suite-ran 只含完整 verdict green/red，incomplete 单列）
+  const suiteOutcomes = { "suite-ran": 0, "suite-skipped": 0, "suite-incomplete": 0, "missing-end-event": 0, "pre-commit-abort": 0, "classifier-failure": 0, "missing-log": 0 };
+  const suiteVerdicts = { green: 0, red: 0, incomplete: 0 };
+  for (const a of attempts) {
+    const cat = a.suiteOutcome || "missing-log";
+    if (cat === "suite-ran") {
+      const v = suiteVerdict(a.trace);
+      suiteVerdicts[v]++;
+      if (v === "incomplete") suiteOutcomes["suite-incomplete"]++;
+      else suiteOutcomes["suite-ran"]++;
+    } else if (Object.prototype.hasOwnProperty.call(suiteOutcomes, cat)) {
+      suiteOutcomes[cat]++;
+    }
+  }
+
+  // 每任务明细
   const perTask = [...byTask.entries()].map(([task, as]) => {
     const wallSum = as.reduce((s, a) => s + (typeof a.wall_clock_ms === "number" ? a.wall_clock_ms : 0), 0);
-    const its = as.map((a) => {
-      const attr = a.fanInStepMs ? Object.values(a.fanInStepMs).reduce((s2, v) => s2 + v, 0) : null;
-      return (a.wall_clock_ms != null && attr != null && a.wall_clock_ms > 0) ? Math.min(1, attr / a.wall_clock_ms) : null;
+    const ratios = as.map((a) => {
+      const hasTrace = a.trace && a.trace.length > 0;
+      const attr = hasTrace && a.fanInStepMs ? Object.values(a.fanInStepMs).reduce((s2, v) => s2 + v, 0) : null;
+      return (a.wall_clock_ms != null && attr != null && a.wall_clock_ms > 0) ? attr / a.wall_clock_ms : null;
     }).filter((x) => x != null);
-    const ite = its.length ? its.reduce((s, v) => s + v, 0) / its.length : null;
+    const wallAttrMean = ratios.length ? ratios.reduce((s, v) => s + v, 0) / ratios.length : null;
     return {
       task,
       attempts: as.length,
       rework: Math.max(0, as.length - 1),
       cumulativeWallMs: wallSum,
-      ite,
+      wallAttrMean,
       cost: null, // 费用 not-evaluated（无 CSV）
       landed: as.some((a) => a.landed),
+      notLanded: !as.some((a) => a.landed) && as.every((a) => a.landingStatus === "not-landed"),
+      unknown: !as.some((a) => a.landed) && !as.every((a) => a.landingStatus === "not-landed"),
     };
   }).sort((a, b) => b.attempts - a.attempts || b.cumulativeWallMs - a.cumulativeWallMs);
-
-  // suite 跑/跳过/分类失败分母（AC5，尝试级：从本次尝试的 fan-in trace 步骤直接数）
-  const suiteDenominators = { ran: 0, skipped: 0, incomplete: 0, recoveryBlocked: 0, unclassified: 0 };
-  for (const a of attempts) {
-    const steps = new Set((a.trace || []).map((r) => r.step));
-    if (steps.has("suite-end")) suiteDenominators.ran++;
-    else if (steps.has("suite-skip")) suiteDenominators.skipped++;
-    else if (steps.has("suite-incomplete")) suiteDenominators.incomplete++;
-    else if (a.trace && a.trace.length > 0) suiteDenominators.unclassified++;
-    if (steps.has("suite-recovery-blocked")) suiteDenominators.recoveryBlocked++;
-  }
 
   return {
     attemptsTotal: attempts.length,
     tasksTotal: byTask.size,
     landedTasks: landedTasks.size,
+    notLandedTasks: notLandedTasks.size,
+    unknownTasks: unknownTasks.size,
     reworkTasks: [...byTask.entries()].filter(([, as]) => as.length > 1).length,
     maxAttempts: Math.max(0, ...[...byTask.values()].map((as) => as.length)),
     wallClockP50: median(wallClocks),
@@ -501,16 +654,28 @@ function summarize(src, args, ctx) {
     suiteSlotWaitP50: median(suiteSlotWaits),
     suiteSlotWaitP90: pct(suiteSlotWaits, 90),
     suiteSlotWaitCount: suiteSlotWaits.length,
-    cpuP50: median(cpus),
-    cpuP90: pct(cpus, 90),
-    cpuSumS: cpus.reduce((s, v) => s + v, 0),
+    suiteDurationUniqueP50: median(suiteDurationValues),
+    suiteDurationUniqueP90: pct(suiteDurationValues, 90),
+    suiteDurationUniqueCount: suiteDurationValues.length,
+    cpuP50: median(cpuValues),
+    cpuP90: pct(cpuValues, 90),
+    cpuUniqueSumS,
+    cpuUniqueCount,
+    cpuUnattributedGnu,
     withTrace, withSuiteRec, withCpu, withLock,
     phaseTotals,
-    iteP50: median(ites.map((i) => i.ite)),
-    iteP90: pct(ites.map((i) => i.ite), 90),
-    ites,
+    wallAttrP50: median(wallAttr.map((i) => i.ratio)),
+    wallAttrP90: pct(wallAttr.map((i) => i.ratio), 90),
+    wallAttrOverlap,
+    wallAttr,
     perTask,
-    suiteDenominators,
+    suiteOutcomes,
+    suiteVerdicts,
+    uniqueSuiteCount: uniqueSuiteKeys.size,
+    totalVerificationRounds,
+    unattributedRounds,
+    suiteAssociationCounts: countBy(attempts, "suiteAssociation"),
+    landingStatusCounts: countBy(attempts, "landingStatus"),
     finalStateCounts: countBy(attempts, "final_state"),
   };
 }
@@ -589,15 +754,15 @@ function classifyOneRound(o, readSet) {
   return "unclassified";
 }
 
-// ── E5 证据：锁等待 + 持续队列 + 资源门/ready 池空 ─────────────────────────
+// ── E5 证据：锁等待 + 队列等待 + 供给/资源拒绝（只输出直接读数，不做无依据推断）──
 function e5Evidence(src, ctx) {
-  // 锁等待：fan-in 锁 acquire 的 wall_ms。
+  // 锁等待：fan-in 锁 acquire 的 wall_ms（描述性分位数，⛔ 不据此下「显著」结论）。
   const fanInLockWaits = [];
   for (const a of ctx.attempts) if (typeof a.fanInLockWaitMs === "number") fanInLockWaits.push(a.fanInLockWaitMs);
   fanInLockWaits.sort((x, y) => x - y);
 
   // 队列等待（workflow-event start 记录 queuedAtMs→startedAtMs）。fm-* 时代多数 queuedAtMs=null ⇒
-  // not-evaluated（缺值 = 未查，⛔ 不与 0 共用取值）。
+  // not-evaluated（缺值 = 未查，⛔ 不与 0 共用取值）。这是「等待区间」的直接证据载体。
   const queueDelays = [];
   let queueMeasurable = 0, queueMissing = 0;
   for (const e of src.workflowEvents) {
@@ -608,12 +773,20 @@ function e5Evidence(src, ctx) {
   }
   queueDelays.sort((x, y) => x - y);
 
-  // 派发环 stop_reason：ready 池空 / 资源门 / 过滤空 / 退避 / 停泊。持续队列 = 这些非派发轮的存在。
+  // 派发环 stop_reason：供给状态（pool-empty）与资源拒绝（resource-gate-wait）各自单列，
+  // ⛔ 不把两者相加当「持续队列」。持续队列需要待处理量/等待区间的直接证据。
   const stopReasonCounts = {};
   for (const r of src.workerRound) {
     const s = r.stop_reason;
     const key = s == null ? "dispatched(no-stop)" : String(s).replace(/\s*\(.*$/, "").split(":")[0];
     stopReasonCounts[key] = (stopReasonCounts[key] || 0) + 1;
+  }
+
+  // 持续队列判定：只有当存在「等待区间」直接证据（可测 queuedAt→startedAt 延迟）时才评估；
+  // 否则 unknown（缺值 = 未查，不是「无队列」，也不是「有队列」）。
+  let persistentQueue = "not-evaluated";
+  if (queueMeasurable > 0 && queueDelays.length > 0) {
+    persistentQueue = median(queueDelays) != null ? "measured" : "not-evaluated";
   }
 
   return {
@@ -629,17 +802,42 @@ function e5Evidence(src, ctx) {
     stopReasonCounts,
     resourceGateRounds: stopReasonCounts["resource-gate-wait"] || 0,
     poolEmptyRounds: stopReasonCounts["pool-empty"] || 0,
-    persistentQueueEvidence: (stopReasonCounts["pool-empty"] || 0) + (stopReasonCounts["resource-gate-wait"] || 0),
-    lockWaitSignificant: median(fanInLockWaits) != null && median(fanInLockWaits) > 60_000,
+    persistentQueue,
   };
 }
 
+// ── 输入指纹（AC6：代码版本 + 输入指纹，供复跑核对）────────────────────────
+function inputFingerprint(src, args, ctx) {
+  const codeVer = sha256(readFileSafe(new URL(import.meta.url).pathname) || "");
+  const canon = JSON.stringify({
+    window: [ctx.winStart, ctx.winEnd],
+    counts: {
+      workerOutcome: src.workerOutcome.length,
+      fanInTraceFiles: src.fanInTraceByName.size,
+      fanInLockEvents: src.fanInLockEvents.length,
+      verificationRound: src.verificationRound.length,
+      workerRound: src.workerRound.length,
+      fastModeTelemetry: src.fastModeTelemetry.length,
+      workflowEvents: src.workflowEvents.length,
+      workerSessions: src.workerSessions.length,
+    },
+    firstWorkerOutcomeTs: src.workerOutcome[0]?.ts ?? null,
+    lastWorkerOutcomeTs: src.workerOutcome[src.workerOutcome.length - 1]?.ts ?? null,
+    csv: args.csv ?? null,
+  });
+  return { codeSha256: codeVer, codeSha256Short: codeVer.slice(0, 12), inputSha256: sha256(canon), inputSha256Short: sha256(canon).slice(0, 12) };
+}
+
 // ── 报告渲染 ───────────────────────────────────────────────────────────────
-function renderMarkdown(args, src, ctx, sum, rounds, e5) {
+function renderMarkdown(args, src, ctx, sum, rounds, e5, fp) {
   const L = [];
   const p = (...xs) => L.push(xs.join(""));
   const windowStartIso = ctx.winStart != null ? new Date(ctx.winStart).toISOString() : "n/a";
   const windowEndIso = ctx.winEnd != null ? new Date(ctx.winEnd).toISOString() : "n/a";
+  const gitHead = (() => {
+    const r = spawnSync("git", ["-C", src.root, "rev-parse", "HEAD"], { encoding: "utf8" });
+    return r.status === 0 && r.stdout.trim() ? r.stdout.trim().slice(0, 12) : "n/a";
+  })();
 
   p("# 任务级端到端效率基线（E1）\n");
   p("> 只读、可复跑。本文件由 `scripts/task-efficiency-baseline.mjs` 生成。\n");
@@ -657,6 +855,7 @@ function renderMarkdown(args, src, ctx, sum, rounds, e5) {
   p(cmd.join(" "));
   p("\n```\n");
   p("\n窗口（含）：`", windowStartIso, "` → `", windowEndIso, "`（时区 UTC）。\n");
+  p("\n代码版本 / 输入指纹：`git HEAD=", gitHead, "`，脚本 sha256=`", fp.codeSha256Short, "`，输入 sha256=`", fp.inputSha256Short, "`。\n");
 
   p("\n## 数据来源与字段清单\n");
   p("| 来源 | 记录数 | 字段 | 身份键 |\n|---|---|---|---|\n");
@@ -664,7 +863,7 @@ function renderMarkdown(args, src, ctx, sum, rounds, e5) {
     ["worker-outcome.jsonl", src.workerOutcome.length, inventoryFields(src.workerOutcome), "(task, started_at, ts)"],
     ["fan-in 过程日志", src.fanInTraceByName.size, "step/ts/wall_ms/ok", "(task, run_id) + 尝试窗口"],
     ["fan-in-lock-events.jsonl", src.fanInLockEvents.length, inventoryFields(src.fanInLockEvents), "(taskId, pid, ts)"],
-    ["verification-round.jsonl", src.verificationRound.length, inventoryFields(src.verificationRound), "(taskId, startedAt) — runId 是 fm-*/mfi-* 空间"],
+    ["verification-round.jsonl", src.verificationRound.length, inventoryFields(src.verificationRound), "round（全局唯一）→ (taskId, startedAt)"],
     ["worker-round.jsonl", src.workerRound.length, inventoryFields(src.workerRound), "(round, run_id, ts)"],
     ["fast-mode telemetry（按 runId 去重）", src.fastModeTelemetry.length, inventoryFields(src.fastModeTelemetry), "(taskId, runId) — fm-* 空间，只盘点不 join"],
     ["workflow events", src.workflowEvents.length, inventoryFields(src.workflowEvents), "runId"],
@@ -685,7 +884,9 @@ function renderMarkdown(args, src, ctx, sum, rounds, e5) {
   p("| 缺 started_at 的记录（未纳入尝试） | ", String(ctx.missingStart), " |\n");
   p("| 缺 ended_at 的尝试（时长 not-evaluable） | ", String(ctx.missingEnd), " |\n");
   p("| 不同任务数 | ", String(sum.tasksTotal), " |\n");
-  p("| 成功落地任务数（分母①） | ", String(sum.landedTasks), " |\n");
+  p("| 成功落地任务数（分母①，仅 ff ok 证明） | ", String(sum.landedTasks), " |\n");
+  p("| 明确未落地任务数 | ", String(sum.notLandedTasks), " |\n");
+  p("| 落地未知任务数（证据不足，不计入成功分母） | ", String(sum.unknownTasks), " |\n");
   p("| 所有尝试（分母②） | ", String(sum.attemptsTotal), " |\n");
   p("| 落地任务 / 所有尝试 | ", sum.attemptsTotal ? (sum.landedTasks / sum.attemptsTotal).toFixed(3) : "n/a", " |\n");
   p("| 有返工（>1 次尝试）的任务 | ", String(sum.reworkTasks), " |\n");
@@ -695,13 +896,17 @@ function renderMarkdown(args, src, ctx, sum, rounds, e5) {
   p("| fan-in 锁等待 p50 / p90 | ", fmtMs(sum.lockWaitP50), " / ", fmtMs(sum.lockWaitP90), " |\n");
   p("| suite 执行 p50 / p90（fan-in 日志） | ", fmtMs(sum.suiteP50), " / ", fmtMs(sum.suiteP90), " |\n");
   p("| suite 等槽 p50 / p90（verification-round lock_wait_ms，真实锁计量） | ", fmtMs(sum.suiteSlotWaitP50), " / ", fmtMs(sum.suiteSlotWaitP90), " |\n");
-  p("| suite 等槽可测尝试数 | ", String(sum.suiteSlotWaitCount), " |\n");
-  p("| CPU-seconds p50 / p90（仅 gnu-time 实测） | ", fmtSec(sum.cpuP50), " / ", fmtSec(sum.cpuP90), " |\n");
-  p("| CPU-seconds 合计（仅 gnu-time 实测） | ", fmtSec(sum.cpuSumS), " |\n");
-  p("| ITE（Idle Time Efficiency，已归属墙钟/端到端）p50 / p90 | ",
-    sum.iteP50 != null ? sum.iteP50.toFixed(3) : "not-evaluated", " / ",
-    sum.iteP90 != null ? sum.iteP90.toFixed(3) : "not-evaluated", " |\n");
+  p("| suite 等槽可测记录数（唯一 suite） | ", String(sum.suiteSlotWaitCount), " |\n");
+  p("| 验证时长 p50 / p90（verification-round durationMs，身份去重） | ", fmtMs(sum.suiteDurationUniqueP50), " / ", fmtMs(sum.suiteDurationUniqueP90), "（", String(sum.suiteDurationUniqueCount), " 条唯一 suite） |\n");
+  p("| CPU-seconds p50 / p90（仅 gnu-time 实测，身份去重） | ", fmtSec(sum.cpuP50), " / ", fmtSec(sum.cpuP90), " |\n");
+  p("| CPU-seconds 合计（仅 gnu-time 实测，身份去重后） | ", fmtSec(sum.cpuUniqueSumS), "（", String(sum.cpuUniqueCount), " 条唯一 suite；另有 ", String(sum.cpuUnattributedGnu), " 条 gnu-time 记录未唯一归属，不参与聚合） |\n");
+  p("| 墙钟归属覆盖率 p50 / p90（attributedWallMs / endToEndWallMs） | ",
+    sum.wallAttrP50 != null ? sum.wallAttrP50.toFixed(3) : "not-evaluated", " / ",
+    sum.wallAttrP90 != null ? sum.wallAttrP90.toFixed(3) : "not-evaluated", " |\n");
+  p("| 墙钟归属覆盖率 >1（重叠/重复累计，不截断）的尝试 | ", String(sum.wallAttrOverlap), " |\n");
   p("\nfinal_state 分布：`", JSON.stringify(sum.finalStateCounts), "`\n");
+  p("落地状态分布：`", JSON.stringify(sum.landingStatusCounts), "`\n");
+  p("suite 关联分布：`", JSON.stringify(sum.suiteAssociationCounts), "`\n");
 
   p("\n## 分阶段墙钟（有 fan-in 日志的尝试）\n");
   p("> 只有真实可测部分可宣称已建立基线；CPU 只取真实 CPU 计量（cpu_source=gnu-time），⛔ 不用 wall-time 换算。\n");
@@ -710,8 +915,8 @@ function renderMarkdown(args, src, ctx, sum, rounds, e5) {
     p("| ", k, " | ", String(Math.round(v)), " | ", String(sum.withTrace), " |\n");
   }
   p("\n- 有 trace 的尝试：", String(sum.withTrace), " / ", String(sum.attemptsTotal), "\n");
-  p("- 有 suite 记录关联的尝试：", String(sum.withSuiteRec), "\n");
-  p("- 有 gnu-time CPU 实测的尝试：", String(sum.withCpu), "（", sum.attemptsTotal ? (sum.withCpu / sum.attemptsTotal * 100).toFixed(1) : "0", "%）\n");
+  p("- 有 proven suite 记录关联的尝试：", String(sum.withSuiteRec), "\n");
+  p("- 有 gnu-time CPU 实测（且 proven 关联）的尝试：", String(sum.withCpu), "（", sum.attemptsTotal ? (sum.withCpu / sum.attemptsTotal * 100).toFixed(1) : "0", "%）\n");
   p("- 有 fan-in 锁等待读数的尝试：", String(sum.withLock), "\n");
 
   p("\n### 费用维度\n");
@@ -722,7 +927,7 @@ function renderMarkdown(args, src, ctx, sum, rounds, e5) {
   }
 
   p("\n### CPU 维度\n");
-  p("只取 `verification-round.jsonl` 中 `cpu_time_s` 且 `cpu_source=gnu-time` 的实测值。其余记录不参与 CPU 聚合。\n");
+  p("只取 `verification-round.jsonl` 中 `cpu_time_s` 且 `cpu_source=gnu-time` 的实测值，且该记录被**唯一**关联到某次尝试（proven）。歧义/未归属记录单列、不参与 CPU 聚合。\n");
 
   p("\n### ready 事件维度\n");
   const readyEvents = src.gateEventCounts["promote"];
@@ -732,28 +937,33 @@ function renderMarkdown(args, src, ctx, sum, rounds, e5) {
     p("**not-evaluated**：`gate-events.jsonl` 无 gate=promote 记录或文件缺失。所缺字段：gate（promote）。\n");
   }
 
-  p("\n## suite 跑/跳过/分类失败分母（AC5，尝试级：从本次尝试 fan-in trace 步骤直接数）\n");
-  p("| 类别 | 尝试数 |\n|---|---|\n");
-  p("| suite 跑（有 suite-end） | ", String(sum.suiteDenominators.ran), " |\n");
-  p("| suite 跳过（suite-skip） | ", String(sum.suiteDenominators.skipped), " |\n");
-  p("| suite 未完成（suite-incomplete，起了没 end） | ", String(sum.suiteDenominators.incomplete), " |\n");
-  p("| 分类失败（有 trace 但无 suite-end/skip/incomplete） | ", String(sum.suiteDenominators.unclassified), " |\n");
-  p("| suite recovery 阻塞（suite-recovery-blocked） | ", String(sum.suiteDenominators.recoveryBlocked), " |\n");
-  p("> ⛔ 不用 11/177（历史分类失败次数）或全窗口平均并发替代真实分母。\n");
+  p("\n## suite 结局分类（AC5，尝试级互斥）\n");
+  p("| 类别 | 尝试数 | 说明 |\n|---|---|---|\n");
+  p("| suite 跑完（suite-end，完整 verdict） | ", String(sum.suiteOutcomes["suite-ran"]), " | green=", String(sum.suiteVerdicts.green), " red=", String(sum.suiteVerdicts.red), " |\n");
+  p("| suite 未完成（suite-incomplete verdict） | ", String(sum.suiteOutcomes["suite-incomplete"]), " | suite-end 为 red 且 files 不完整 |\n");
+  p("| suite 跳过（suite-skip，doc-only） | ", String(sum.suiteOutcomes["suite-skipped"]), " | |\n");
+  p("| 缺结束事件（suite-start 无 end/skip/incomplete） | ", String(sum.suiteOutcomes["missing-end-event"]), " | 日志不足，⛔ 不算分类失败 |\n");
+  p("| 前序中止（有日志、未到 suite-start） | ", String(sum.suiteOutcomes["pre-commit-abort"]), " | delta/doc-check/typecheck/ac-precheck/anti-drift 等前序拒绝 |\n");
+  p("| 分类器失败（明确证据） | ", String(sum.suiteOutcomes["classifier-failure"]), " | instrument-probe 明确 classifier≠available |\n");
+  p("| 缺日志（无 fan-in trace） | ", String(sum.suiteOutcomes["missing-log"]), " | 无法判断 |\n");
+  p("> ⛔ 「无 suite-end/skip」不再自动判为分类失败；分类失败只认 instrument-probe 的明确失败证据。\n");
 
-  p("\n## 每任务明细（AC3：累计墙钟/ITE/返工；费用 not-evaluated，无 CSV）\n");
-  p("> 只列尝试数最多的前 20 个任务。cost=not-evaluated（未提供费用 CSV）。\n");
-  p("| task | 尝试 | 返工 | 累计 wall | ITE | 落地 |\n|---|---|---|---|---|---|\n");
+  p("\n## 每任务明细（AC3：累计墙钟/墙钟归属覆盖率/返工；费用 not-evaluated，无 CSV）\n");
+  p("> 只列尝试数最多的前 20 个任务。cost=not-evaluated（未提供费用 CSV）。landed=证明落地；not-landed=明确未落地；unknown=证据不足。\n");
+  p("| task | 尝试 | 返工 | 累计 wall | 墙钟归属覆盖均值 | 落地 |\n|---|---|---|---|---|---|\n");
   for (const t of sum.perTask.slice(0, 20)) {
+    const landing = t.landed ? "landed" : (t.notLanded ? "not-landed" : "unknown");
     p("| ", t.task, " | ", String(t.attempts), " | ", String(t.rework), " | ", fmtMs(t.cumulativeWallMs), " | ",
-      t.ite != null ? t.ite.toFixed(3) : "not-evaluated", " | ", String(t.landed), " |\n");
+      t.wallAttrMean != null ? t.wallAttrMean.toFixed(3) : "not-evaluated", " | ", landing, " |\n");
   }
 
-  p("\n## 无法关联记录与覆盖率\n");
-  p("| 载体 | 总量 | 可关联 | 无法唯一关联/未归属 |\n|---|---|---|---|\n");
-  const unassocSuite = src.verificationRound.filter((v) => !v.runId || !v.taskId).length;
-  p("| verification-round.jsonl | ", String(src.verificationRound.length), " | ", String(src.verificationRound.length - unassocSuite), " | ", String(unassocSuite), "（缺 runId/taskId） |\n");
-  p("| fan-in 过程日志（尝试级） | ", String(ctx.attempts.length), " | ", String(sum.withTrace), " | ", String(ctx.attempts.length - sum.withTrace), "（无日志/窗口外） |\n");
+  p("\n## 无法关联记录与覆盖率（AC3）\n");
+  p("| 量 | 值 |\n|---|---|\n");
+  p("| verification-round.jsonl 总量 | ", String(sum.totalVerificationRounds), " |\n");
+  p("| 唯一 suite 数（proven 关联） | ", String(sum.uniqueSuiteCount), " |\n");
+  p("| 关联覆盖率（唯一 suite / 总量） | ", sum.totalVerificationRounds ? (sum.uniqueSuiteCount / sum.totalVerificationRounds).toFixed(3) : "n/a", " |\n");
+  p("| 未归属/歧义/缺身份记录 | ", String(sum.unattributedRounds), " |\n");
+  p("| fan-in 过程日志（尝试级）：有 trace | ", String(sum.withTrace), " / ", String(sum.attemptsTotal), " |\n");
 
   p("\n## 轮数分解（可下钻至原会话）\n");
   p("> 分类是启发式（每轮 = 一条 assistant 消息）：exploration（首次 Read/Grep/Glob/find）/ tool-wait（本轮无工具动作，等待/思考）/ repeated-read（再读已读文件）/ verification（测试/task_check/gate）/ fix（Edit/Write/git 变更）/ unclassified（无法判断，保守单列）。下钻靠 sessionId（会话 jsonl）。\n");
@@ -761,48 +971,65 @@ function renderMarkdown(args, src, ctx, sum, rounds, e5) {
   for (const c of rounds.categories) p("| ", c, " | ", String(rounds.catCounts[c]), " |\n");
   p("\n- worker 会话数：", String(rounds.sessionsTotal), "；总轮数：", String(rounds.totalRounds), "\n");
   p("- 不能分类者单列（unclassified）：", String(rounds.catCounts.unclassified), "\n");
-  p("\n抽查（每任务尝试数与 sessionId 可见，下钻到 `", src.sessionsDir, "/<sessionId>.jsonl`）：\n");
-  p("| task | sessionId | 轮数 | exploration | verification | fix | unclassified |\n|---|---|---|---|---|---|---|\n");
-  for (const s of rounds.perSession.slice(0, 20)) {
-    p("| ", s.task, " | ", s.sessionId, " | ", String(s.rounds), " | ", String(s.exploration), " | ", String(s.verification), " | ", String(s.fix), " | ", String(s.unclassified), " |\n");
-  }
 
-  p("\n## E5 证据（锁等待 + 持续队列 + 资源门/ready 池空；只输出证据，不启动锁改造）\n");
+  p("\n## E5 证据（锁等待 + 队列等待 + 供给/资源拒绝；只输出直接读数，不做无依据推断）\n");
   p("| 量 | 值 |\n|---|---|\n");
   p("| fan-in 锁等待 p50 / p90 / max | ", fmtMs(e5.fanInLockWaitP50), " / ", fmtMs(e5.fanInLockWaitP90), " / ", fmtMs(e5.fanInLockWaitMax), " |\n");
   p("| fan-in 锁等待可测尝试数 | ", String(e5.fanInLockWaitCount), " |\n");
   p("| 队列等待（queuedAt→startedAt）p50 / p90 | ", fmtMs(e5.queueDelayP50), " / ", fmtMs(e5.queueDelayP90), " |\n");
   p("| 队列等待可测记录 / 缺 queuedAtMs 记录 | ", String(e5.queueMeasurable), " / ", String(e5.queueMissing), "（缺值 = 未查，⛔ 不是 0） |\n");
-  p("| ready 池空轮数（pool-empty） | ", String(e5.poolEmptyRounds), " |\n");
-  p("| 资源门阻塞轮数（resource-gate-wait） | ", String(e5.resourceGateRounds), " |\n");
+  p("| ready 池空轮数（pool-empty，供给状态） | ", String(e5.poolEmptyRounds), " |\n");
+  p("| 资源门阻塞轮数（resource-gate-wait，资源拒绝） | ", String(e5.resourceGateRounds), " |\n");
   p("| 派发环 stop_reason 分布 | `", JSON.stringify(e5.stopReasonCounts), "` |\n");
-  p("| 持续队列/阻塞证据（pool-empty + resource-gate-wait） | ", String(e5.persistentQueueEvidence), " 轮 |\n");
-  p("| 锁等待显著（p50>60s）？ | ", String(e5.lockWaitSignificant), " |\n");
-  p("\n结论：吞吐瓶颈是否成立，本报告保持未知——只给锁等待与队列/阻塞的直接读数；不修改锁、fail-closed、AC/DoD 或 G3。\n");
+  p("| 持续队列判定 | ", String(e5.persistentQueue), "（需要待处理量/等待区间直接证据；pool-empty + resource-gate-wait 相加不等于持续队列） |\n");
+  p("\n结论：吞吐瓶颈是否成立，本报告保持未知——只给锁等待、队列等待、供给/资源拒绝的直接读数；不修改锁、fail-closed、AC/DoD 或 G3。\n");
 
-  p("\n## 抽查实例（DoD：至少一个多次尝试任务 + 一个无法关联实例）\n");
-  // 找多次尝试任务
+  p("\n## 抽查实例（AC6：历史重派任务 / 误关联验证轮 / 受测但未证实落地）\n");
+  // (a) 历史重派任务：尝试数最多的任务，逐尝试给落地状态与 suite 关联。
   const byTaskAttempts = new Map();
   for (const a of ctx.attempts) { if (!byTaskAttempts.has(a.task)) byTaskAttempts.set(a.task, []); byTaskAttempts.get(a.task).push(a); }
-  const multiTask = [...byTaskAttempts.entries()].filter(([, as]) => as.length > 1).slice(0, 1);
-  if (multiTask.length) {
-    const [t, as] = multiTask[0];
-    p("多次尝试任务：`", t, "`（", String(as.length), " 次尝试）\n");
+  const multiTask = [...byTaskAttempts.entries()].sort((x, y) => y[1].length - x[1].length)[0];
+  if (multiTask) {
+    const [t, as] = multiTask;
+    p("重派任务：`", t, "`（", String(as.length), " 次尝试）\n");
+    p("| started_at | final_state | wall | suite 关联 | 落地 |\n|---|---|---|---|---|\n");
     for (const a of as) {
-      p("- started_at ", a.started_at, " final_state=", a.final_state, " wall=", fmtMs(a.wall_clock_ms), " fanInLockWait=", fmtMs(a.fanInLockWaitMs), " suiteExec=", fmtMs(a.suiteExecMs), " landed=", String(a.landed), "\n");
+      p("| ", a.started_at, " | ", a.final_state, " | ", fmtMs(a.wall_clock_ms), " | ", a.suiteAssociation, " | ", a.landingStatus, " |\n");
     }
   }
-  const unassocSuiteSample = src.verificationRound.find((v) => !v.runId || !v.taskId);
-  if (unassocSuiteSample) {
-    p("无法唯一关联实例（verification-round 缺 runId/taskId）：`", JSON.stringify({ round: unassocSuiteSample.round, startedAt: unassocSuiteSample.startedAt, runId: unassocSuiteSample.runId ?? null, taskId: unassocSuiteSample.taskId ?? null }).slice(0, 300), "`\n");
+  // (b) 误关联验证轮（旧兜底会回填）：某尝试窗口内无 suite 记录（missing），但同任务其它尝试有
+  //     proven suite 记录 ⇒ 旧实现会把其它尝试的记录回填给本尝试。
+  const backfillExample = ctx.attempts.find((a) => a.suiteAssociation === "missing"
+    && byTaskAttempts.get(a.task)?.some((o) => o.suiteUniqueRecords?.length > 0)
+    && byTaskAttempts.get(a.task)?.length > 1);
+  if (backfillExample) {
+    const others = byTaskAttempts.get(backfillExample.task).filter((o) => o.suiteUniqueRecords?.length > 0);
+    p("误关联验证轮示例：`", backfillExample.task, "` 尝试 started_at=", backfillExample.started_at, " 窗口内无 suite 记录（association=missing），旧实现会回填同任务其它 ", String(others.length), " 条记录；新口径判 missing/unknown，不把后一次落地回填给前一次。\n");
   }
+  // (c) 受测但未证实落地：有 proven 受测 SHA 但没有 ff ok。
+  const testedNotLanded = ctx.attempts.find((a) => a.suiteUniqueRecords?.length > 0 && a.landingStatus !== "landed");
+  if (testedNotLanded) {
+    const r = testedNotLanded.suiteUniqueRecords[0];
+    p("受测但未证实落地示例：`", testedNotLanded.task, "` started_at=", testedNotLanded.started_at, " 受测 SHA=`", String(r.terminalCommit ?? r.commit ?? "?"), "`（suite 记录 round=", String(r.round ?? "?"), "）但无 ff ok ⇒ 落地=", testedNotLanded.landingStatus, "（受测 SHA 不是落地证据）。\n");
+  }
+
+  p("\n## 旧报告撤回与修正（口径修正）\n");
+  p("> 本任务（gap-task-efficiency-baseline-attribution-semantics）撤回旧口径下的下列读数，并给修正值/未评估。\n");
+  p("| 旧口径读数 | 旧值 | 修正值/处置 | 原因 |\n|---|---|---|---|\n");
+  p("| 成功落地任务数（分母①） | 1471 | ", String(sum.landedTasks), " | 旧口径把 verification-round.commit 非空当落地；现在只有 ff ok 才证明落地 |\n");
+  p("| CPU-seconds 合计 | 2645.52h | ", fmtSec(sum.cpuUniqueSumS), " | 旧口径按尝试累加，同一 suite 记录被回填到多个尝试 ⇒ 翻倍；现在按唯一 suite 身份去重 |\n");
+  p("| 分类失败（有 trace 但无 suite-end/skip） | 204 | 0（明确分类器失败），前序中止 ", String(sum.suiteOutcomes["pre-commit-abort"]), "，缺结束事件 ", String(sum.suiteOutcomes["missing-end-event"]), " | 旧口径把「suite 没跑完」全判成分类失败；现在分类失败只认明确证据 |\n");
+  p("| ITE（Idle Time Efficiency）p50 / p90 | 0.181 / 0.617 | 墙钟归属覆盖率 p50/p90 ", sum.wallAttrP50 != null ? sum.wallAttrP50.toFixed(3) : "not-evaluated", " / ", sum.wallAttrP90 != null ? sum.wallAttrP90.toFixed(3) : "not-evaluated", " | 旧名把「已归属墙钟/端到端」误称为 Idle Time Efficiency；已改独立指标并去 Math.min(1,…) 截断 |\n");
+  p("| 持续队列/阻塞证据（pool-empty + resource-gate-wait） | 49067 轮 | ", String(e5.persistentQueue), " | pool-empty 只代表供给状态、resource-gate-wait 只代表资源拒绝，两者相加不是持续队列 |\n");
+  p("| 锁等待显著（p50>60s）？ | false | 已撤销该自动判词 | 阈值无依据；只保留描述性分位数 |\n");
 
   return L.join("");
 }
 
-function renderJson(args, src, ctx, sum, rounds, e5) {
+function renderJson(args, src, ctx, sum, rounds, e5, fp) {
   return JSON.stringify({
     window: { start: ctx.winStart ? new Date(ctx.winStart).toISOString() : null, end: ctx.winEnd ? new Date(ctx.winEnd).toISOString() : null },
+    fingerprint: fp,
     sources: {
       workerOutcome: src.workerOutcome.length,
       fanInTraceFiles: src.fanInTraceByName.size,
@@ -836,8 +1063,9 @@ function main(argv) {
   const sum = summarize(src, args, ctx);
   const rounds = classifyRounds(src, args, ctx);
   const e5 = e5Evidence(src, ctx);
-  if (args.json) process.stdout.write(renderJson(args, src, ctx, sum, rounds, e5) + "\n");
-  else process.stdout.write(renderMarkdown(args, src, ctx, sum, rounds, e5));
+  const fp = inputFingerprint(src, args, ctx);
+  if (args.json) process.stdout.write(renderJson(args, src, ctx, sum, rounds, e5, fp) + "\n");
+  else process.stdout.write(renderMarkdown(args, src, ctx, sum, rounds, e5, fp));
   return 0;
 }
 
@@ -849,5 +1077,5 @@ if (isMain) process.exitCode = main(process.argv.slice(2));
 export {
   parseArgs, readSources, buildAttempts, attachFanInTrace, attachSuite, attachLanding,
   summarize, classifyRounds, e5Evidence, fanInLogFileName, parseIso, pct, median,
-  firstUserMessageText, parseCsv,
+  firstUserMessageText, parseCsv, classifySuiteOutcome, suiteVerdict, recordKey,
 };
