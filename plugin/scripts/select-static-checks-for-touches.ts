@@ -456,6 +456,147 @@ export function isDocPath(pathStr, registry, docSurfaces = DOC_SURFACES) {
   return false; // product code / unknown path ⇒ code (fail-closed)
 }
 
+// ── Fan-in delta shadow evaluation (gap-fan-in-delta-shadow-evaluation) ──────────────────────────────
+//
+// The fan-in step-4 delta judgment ("doc-only ⇒ skip the full suite; code ⇒ run it") is a RELEASE
+// decision. This task does NOT change it (AC6): the shadow evaluation only RECORDS, alongside the
+// current judgment, what a CANDIDATE narrowing rule would have decided, plus a structured per-path
+// reason for the current verdict. The full suite the current judgment requires is still run — the
+// shadow never short-circuits it — so that same run is the CONTROL against which the candidate's
+// skip-safety is later measured (AC4: 候选跳过的样本仍有现行完整验证证据).
+//
+// THE ONE CANDIDATE RULE (AC3/AC5): `doc-surface-exact-object-only`. A path is candidate-doc
+// (skip-safe under the hypothesis) iff it is a task file, or it lies under a doc surface AND no
+// change/full-tier checker's EXACT-file `@static-object` matches it. The coverage argument the
+// shadow is here to test: a checker's exact-file objects are its precise "I read THIS file" signal,
+// while directory-prefix and `*`/`**` globs over-register (they name a family, not a concrete read).
+//
+// This is a HYPOTHESIS, not a claim — and the negative controls (AC3) pin its falsification: the
+// registry DOES register doc-surface files via globs (`plugin/loop/*-tick-core.md`,
+// `plugin/loop/*-loop-tick.md`, read by rhythm-consumer-check / judgment-consumer-check /
+// retired-clause-check), so a NEW `plugin/loop/<x>-tick-core.md` would be candidate-doc while the
+// current rule (and the suite) treats it as code. The shadow record must therefore REPORT that
+// divergence as a candidate miss candidate, never hide it behind a zero-observed-miss reading (AC5).
+
+/** The shadow rule's version — written into every shadow record so a reading can be re-derived
+ *  against the rule that produced it (AC2: 规则版本). */
+export const SHADOW_RULE_VERSION = "fan-in-delta-shadow-v1";
+/** The shadow rule's name — the ONE candidate evaluated by this task (AC3/AC5: 只选择一个类别). */
+export const SHADOW_RULE_NAME = "doc-surface-exact-object-only";
+
+/** True iff a checker `@static-object` is a CONCRETE file (no `*`, no directory-prefix `/`, not
+ *  `**`). This is the signal the candidate rule uses to distinguish "a checker declared THIS file"
+ *  from "a checker declared a family that happens to match". ⛔ The raw string must be inspected —
+ *  `normalizeRel` strips a trailing `/`, so `plugin/` and `plugin` both normalise to `plugin` and the
+ *  directory/文件 distinction would be lost (matchesObject also relies on that same normalisation). */
+export function isExactObject(object) {
+  const raw = String(object).replace(/\\/g, "/").replace(/^\.\//, "");
+  if (!raw || raw === "**") return false;
+  return !raw.includes("*") && !raw.endsWith("/");
+}
+
+/** Structured per-path classification — the "why" the fan-in's bare code-path list does not carry.
+ *  Four verdict rules, each distinguishable (AC2): task-carve-out / checker-object-match /
+ *  doc-surface / unknown-fail-closed. A reader can tell "a checker reads this" from "we failed
+ *  closed on a path we do not recognise". */
+export function classifyDeltaPathDetailed(decision, p) {
+  const path = String(p).replace(/\\/g, "/").replace(/^\.\//, "").replace(/\/+$/, "");
+  if (!path) return { path, verdict: "doc", rule: "empty-path", matchedCheckers: [] };
+  if (path === "tasks" || path.startsWith("tasks/")) {
+    return { path, verdict: "doc", rule: "task-carve-out", matchedCheckers: [] };
+  }
+  const registry = decision.registry ?? [];
+  const matched = registry.filter(
+    (c) => (c.tier === "change" || c.tier === "full") && c.objects.some((o) => matchesObject(o, path)),
+  );
+  if (matched.length > 0) {
+    return { path, verdict: "code", rule: "checker-object-match", matchedCheckers: matched.map((c) => c.name) };
+  }
+  if (isUnderDocSurface(path, decision.docSurfaces)) {
+    return { path, verdict: "doc", rule: "doc-surface", matchedCheckers: [] };
+  }
+  return { path, verdict: "code", rule: "unknown-fail-closed", matchedCheckers: [] };
+}
+
+/** The candidate rule's path predicate. Same task-file carve-out as the current rule; then: an
+ *  EXACT-file checker object match ⇒ code; otherwise a doc-surface path ⇒ candidate-doc; anything
+ *  else (product code / unknown path) ⇒ code (fail-closed, ⛔ never a narrower verdict than the
+ *  current rule for non-doc-surface paths — the candidate only narrows INSIDE the doc surface). */
+export function isCandidateDocPath(p, registry, docSurfaces = DOC_SURFACES) {
+  const path = normalizeRel(String(p));
+  if (!path) return true;
+  if (path === "tasks" || path.startsWith("tasks/")) return true;
+  const exactObjects = (registry ?? [])
+    .filter((c) => c.tier === "change" || c.tier === "full")
+    .flatMap((c) => c.objects)
+    .filter(isExactObject);
+  if (exactObjects.some((o) => matchesObject(o, path))) return false; // an EXACT declaration reads it ⇒ code
+  if (isUnderDocSurface(path, docSurfaces)) return true; // glob-only / no match on a doc surface ⇒ candidate-doc
+  return false; // product code / unknown path ⇒ code (fail-closed, same as the current rule)
+}
+
+/** Distinguish the `.quay/config.yml` `loop.doc_surfaces` read states (AC2: 配置不可读 ≠ 未声明 ≠
+ *  空声明 ≠ 类型错误). `readDeclaredDocSurfaces` collapses all of these into `null` (never an invented
+ *  declaration, hard rule 3b) — that is correct for the CLASSIFICATION, but the shadow record must be
+ *  able to say WHICH state produced "no declaration". */
+export function readDocSurfacesConfigState(root) {
+  const cfgPath = path.join(root, ".quay", "config.yml");
+  let parsed;
+  try {
+    parsed = parseYaml(fs.readFileSync(cfgPath, "utf8"));
+  } catch {
+    return { state: fs.existsSync(cfgPath) ? "unreadable" : "absent", declared: null };
+  }
+  const loop = parsed && typeof parsed === "object" ? parsed.loop : undefined;
+  const declared = loop && typeof loop === "object" ? loop[DOC_SURFACES_KEY] : undefined;
+  if (declared === undefined) return { state: "absent", declared: null };
+  if (!Array.isArray(declared)) return { state: "invalid-type", declared: null };
+  const out = declared
+    .filter((s) => typeof s === "string")
+    .map((s) => normalizeRel(s))
+    .filter((s) => s !== "");
+  if (out.length === 0) return { state: "empty", declared: null };
+  return { state: "declared", declared: [...new Set(out)] };
+}
+
+/** The fan-in's shadow decision over a delta — current verdict vs the ONE candidate rule, with the
+ *  per-path reason and the divergence. `classifyFailed:true` is a DISTINGUISHABLE state (⛔ never
+ *  shaped like "empty coverage", hard rule 3b): it means the judgment itself could not be produced
+ *  (e.g. a registry file exists but cannot be read), not that the delta has no code. */
+export function shadowDeltaDecision(root, paths) {
+  try {
+    const decision = resolveDocSurfaceDecision(root);
+    const configState = readDocSurfacesConfigState(root);
+    const normPaths = (paths ?? []).map(normalizeRel).filter(Boolean);
+    const currentCodePaths = normPaths.filter((p) => !isDocPath(p, decision.registry, decision.docSurfaces));
+    const candidateCodePaths = normPaths.filter((p) => !isCandidateDocPath(p, decision.registry, decision.docSurfaces));
+    const divergence = candidateCodePaths.length < currentCodePaths.length
+      ? "candidate-narrower"
+      : candidateCodePaths.length > currentCodePaths.length ? "candidate-wider" : "agree";
+    return {
+      classifyFailed: false,
+      ruleVersion: SHADOW_RULE_VERSION,
+      ruleName: SHADOW_RULE_NAME,
+      mode: decision.mode,
+      registryPath: decision.registryPath,
+      configState: configState.state,
+      docSurfaces: decision.docSurfaces,
+      currentCodePaths,
+      candidateCodePaths,
+      candidateSkippable: currentCodePaths.filter((p) => !candidateCodePaths.includes(p)),
+      divergence,
+      perPath: normPaths.map((p) => classifyDeltaPathDetailed(decision, p)),
+    };
+  } catch (e) {
+    return {
+      classifyFailed: true,
+      ruleVersion: SHADOW_RULE_VERSION,
+      ruleName: SHADOW_RULE_NAME,
+      error: (e as Error)?.message ?? String(e),
+    };
+  }
+}
+
 // ── Fan-in orchestration bootstrap detection (gap-fan-in-orchestration-bootstrap-self-fix) ────────────
 //
 // THE DEFECT (from the task title): fan-in orchestration files
@@ -1003,7 +1144,18 @@ export function main(argv) {
   // real verdict ("these paths are code"), not an un-evaluable one. This branch runs BEFORE the
   // registry requirement below — it is the one mode that does not need the registry at all.
   if (classifyDelta) {
-    const { decision, codePaths } = classifyDeltaPaths(root, positionalArgs(args));
+    const paths = positionalArgs(args);
+    // --classify-delta --shadow <path>… — the fan-in delta shadow evaluation
+    // (gap-fan-in-delta-shadow-evaluation): ONE JSON line with the current verdict, the candidate
+    // rule's verdict, the per-path reason and the divergence. ⛔ A separate face from `--resolution`
+    // (which ff-merge's instrument probe parses byte-for-byte) — the shadow is a NEW consumer, so its
+    // richer shape must not widen the probe's contract. classifyFailed:true is a distinguishable
+    // state, never shaped like "empty coverage" (hard rule 3b).
+    if (args.includes("--shadow")) {
+      console.log(JSON.stringify(shadowDeltaDecision(root, paths)));
+      return 0;
+    }
+    const { decision, codePaths } = classifyDeltaPaths(root, paths);
     if (resolutionMode) {
       console.log(docSurfaceDecisionLine(decision));
       return 0;

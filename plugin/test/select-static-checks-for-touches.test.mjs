@@ -747,3 +747,126 @@ t("AC5 — this test file is node:test with an engine @test-group", () => {
   assert.match(src, /from "node:test"/, "imports node:test");
   assert.match(src, /^\/\/ @test-group engine/m, "declares @test-group engine");
 });
+
+// ── gap-fan-in-delta-shadow-evaluation ─────────────────────────────────────────────────────────────
+// The fan-in delta shadow evaluation records, alongside the CURRENT verdict, what ONE candidate rule
+// would have decided — without changing the release decision (AC6). These tests pin the candidate's
+// coverage argument AND its falsification:
+//   AC2 — the structured shadow output distinguishes current/candidate, reasons, rule version,
+//         classify-failed, unknown-path, config unreadable — ⛔ never shaped like "empty coverage".
+//   AC3 — the negative controls: the candidate must NOT auto-claim safety for cross-package consumers,
+//         build/pack/lock files, shared fixtures, test discovery, static-checker-reads-docs, cert
+//         invalidation or target-branch advance (file suffix / non-HUB_FILES are NOT coverage).
+
+const SHADOW_RULE_VERSION = "fan-in-delta-shadow-v1";
+const SHADOW_RULE_NAME = "doc-surface-exact-object-only";
+
+t("shadow — isExactObject distinguishes exact-file objects from dir-prefix / glob / **", async () => {
+  const mod = await importMod();
+  assert.equal(mod.isExactObject("docs/analysis/ac69-slot-release-vs-dispatch-gap.json"), true, "exact file ⇒ exact");
+  assert.equal(mod.isExactObject("plugin/loop/fast-mode-tick-core.md"), true, "exact file ⇒ exact");
+  assert.equal(mod.isExactObject("plugin/"), false, "directory-prefix is NOT an exact-file object");
+  assert.equal(mod.isExactObject("orchestration/*-tick-core.md"), false, "a `*` glob is NOT an exact-file object");
+  assert.equal(mod.isExactObject("**/*.sh"), false, "a `**` suffix glob is NOT an exact-file object");
+  assert.equal(mod.isExactObject("**"), false, "`**` is NOT an exact-file object");
+});
+
+t("shadow AC2 — shadowDeltaDecision is structured, distinguishable, and never shaped like empty coverage", async () => {
+  const mod = await importMod();
+  // The REAL registry (TEST_SH) — the MINI fixture has no doc-surface globs, so the divergence /
+  // exact-object cases would be vacuous. shadowDeltaDecision reads the registry from REPO_ROOT.
+  const d = mod.shadowDeltaDecision(REPO_ROOT, [
+    "docs/analysis/ac69-slot-release-vs-dispatch-gap.json",
+    "docs/plain.md",
+    "plugin/loop/hypothetical-new-tick-core.md",
+    "package-lock.json",
+  ]);
+  assert.equal(d.classifyFailed, false);
+  assert.equal(d.ruleVersion, SHADOW_RULE_VERSION);
+  assert.equal(d.ruleName, SHADOW_RULE_NAME);
+  // quay's own tree carries the registry ⇒ mode=registry (the dev layout).
+  assert.equal(d.mode, "registry");
+  // per-path reasons are enumerated (硬规则 3：枚举，不布尔).
+  const byPath = Object.fromEntries(d.perPath.map((r) => [r.path, r]));
+  assert.equal(byPath["docs/analysis/ac69-slot-release-vs-dispatch-gap.json"]?.verdict, "code");
+  assert.equal(byPath["docs/plain.md"]?.rule, "doc-surface");
+  assert.equal(byPath["package-lock.json"]?.rule, "unknown-fail-closed", "a lock file is unknown ⇒ fail-closed code, distinguishable from checker-match");
+  // divergence is a three-state word, not a boolean.
+  assert.ok(["candidate-narrower", "candidate-wider", "agree"].includes(d.divergence));
+});
+
+t("shadow AC2 — config unreadable / absent are distinguishable states, not empty coverage", async () => {
+  const mod = await importMod();
+  // absent: no .quay/config.yml at all.
+  const absent = makeWorkspace({});
+  try {
+    assert.equal(mod.readDocSurfacesConfigState(absent).state, "absent");
+  } finally {
+    cleanup(absent);
+  }
+  // unreadable: a .quay/config.yml that is not valid YAML.
+  const unreadable = makeWorkspace({ ".quay/config.yml": ":\t: ::: not yaml \n\t{" });
+  try {
+    assert.equal(mod.readDocSurfacesConfigState(unreadable).state, "unreadable");
+  } finally {
+    cleanup(unreadable);
+  }
+  // invalid-type: loop.doc_surfaces is not a list.
+  const invalid = makeWorkspace({ ".quay/config.yml": "loop:\n  doc_surfaces: nope\n" });
+  try {
+    assert.equal(mod.readDocSurfacesConfigState(invalid).state, "invalid-type");
+  } finally {
+    cleanup(invalid);
+  }
+  // declared: a real list.
+  const declared = makeWorkspace({ ".quay/config.yml": "loop:\n  doc_surfaces:\n    - docs\n" });
+  try {
+    assert.equal(mod.readDocSurfacesConfigState(declared).state, "declared");
+    assert.deepEqual(mod.readDocSurfacesConfigState(declared).declared, ["docs"]);
+  } finally {
+    cleanup(declared);
+  }
+});
+
+t("shadow AC3 — negative controls: the candidate does NOT claim safety for the listed code faces", async () => {
+  const mod = await importMod();
+  const registry = mod.parseStaticCheckRegistry(fs.readFileSync(TEST_SH, "utf8"));
+  // Each of these is a code face the candidate must NOT narrow to doc (AC3).
+  const mustStayCode = [
+    "packages/quay-github/src/issue-store.ts",       // cross-package consumer
+    "packages/quay/src/fan-in/ff-merge.ts",          // suite cert / ff
+    "package.json",                                  // build/pack manifest
+    "package-lock.json",                             // lock file
+    "plugin/test/fixtures/shared-fixture.mjs",       // shared fixture
+    "scripts/test.sh",                               // test discovery
+    "orchestration/manager-tick-core.md",            // static checker reads docs
+    "docs/analysis/ac69-slot-release-vs-dispatch-gap.json", // exact-file checker object
+    "docs/analysis/criterion-failure-attribution.baseline.json", // exact-file checker object
+  ];
+  for (const p of mustStayCode) {
+    assert.equal(mod.isCandidateDocPath(p, registry), false, `candidate must keep ${p} CODE`);
+  }
+  // Positive narrowing (the ONE category the candidate evaluates): a doc-surface path matched only via
+  // a GLOB (not an exact object) — the hypothesis the shadow is here to test.
+  assert.equal(mod.isCandidateDocPath("plugin/loop/hypothetical-new-tick-core.md", registry), true,
+    "candidate narrows a glob-only plugin/loop doc-surface path");
+  // …and the CURRENT rule keeps it code (that is exactly the divergence the shadow records).
+  assert.equal(mod.isDocPath("plugin/loop/hypothetical-new-tick-core.md", registry), false,
+    "the current rule keeps the same path CODE (divergence = candidate-narrower)");
+  // A non-doc-surface product path must stay code even when only globs match it (fail-closed).
+  assert.equal(mod.isCandidateDocPath("plugin/scripts/new-check.ts", registry), false,
+    "candidate must NOT narrow a product path (not under a doc surface)");
+});
+
+t("shadow AC3 — shadowDeltaDecision reports candidate-narrower divergence and the skippable set", async () => {
+  const mod = await importMod();
+  // The REAL registry: `plugin/loop/hypothetical-new-tick-core.md` is matched by the `plugin/`
+  // dir-prefix and `plugin/loop/*-tick-core.md` globs (current ⇒ code) but by NO exact-file object
+  // (candidate ⇒ doc) — the ONE divergence the shadow is here to measure.
+  const d = mod.shadowDeltaDecision(REPO_ROOT, ["plugin/loop/hypothetical-new-tick-core.md"]);
+  assert.equal(d.classifyFailed, false);
+  assert.deepEqual(d.currentCodePaths, ["plugin/loop/hypothetical-new-tick-core.md"]);
+  assert.deepEqual(d.candidateCodePaths, []);
+  assert.deepEqual(d.candidateSkippable, ["plugin/loop/hypothetical-new-tick-core.md"]);
+  assert.equal(d.divergence, "candidate-narrower");
+});
