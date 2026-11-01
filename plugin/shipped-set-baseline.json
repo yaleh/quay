@@ -408,6 +408,30 @@
         "shLines": 7489
       },
       "why": "0.30.0: codex skills 交付面 + codex-mcp-sync --dist-root + vendored-dist 版本一致性检测等新 shipped（正当增长）"
+    },
+    {
+      "when": "2026-11-01T01:44:21.803Z",
+      "from": {
+        "files": 0,
+        "bytes": 0,
+        "shLines": 0,
+        "shipped": {
+          "files": 287,
+          "bytes": 70752234,
+          "shLines": 7489
+        }
+      },
+      "to": {
+        "files": 0,
+        "bytes": 0,
+        "shLines": 0
+      },
+      "shipped": {
+        "files": 315,
+        "bytes": 71881060,
+        "shLines": 16477
+      },
+      "why": "0.30.1 hotfix: skills/ regression fix restores the full 14-skill Claude Code surface (files 287->310)"
     }
   ],
   "_axes": {
@@ -421,8 +445,8 @@
   "bytes": 0,
   "shLines": 0,
   "shipped": {
-    "files": 287,
-    "bytes": 70752234,
-    "shLines": 7489
+    "files": 315,
+    "bytes": 71881060,
+    "shLines": 16477
   }
 }
