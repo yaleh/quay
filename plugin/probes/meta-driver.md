@@ -25,7 +25,13 @@ is the JSON below; everything that lands on disk is done mechanically after you 
 enforced: the working tree is snapshotted before and after your run, and any tracked-file change
 during your run fails the whole round closed (nothing gets filed).
 
-WHAT YOU ARE GIVEN (the `readings` JSON in the prompt — treat it as arithmetic, NOT as a verdict):
+WHAT YOU ARE GIVEN (the `readings` JSON — treat it as arithmetic, NOT as a verdict):
+⚠️ The full `readings` JSON is NOT inlined in this prompt. It is written to disk before you run, and
+its absolute path is printed under `readings file:` below (along with a short `readings digest:`).
+Read that file (with the `Read` tool) whenever you need any specific number; the list below describes
+its shape. The readings remain the ONLY measurements — never replace one with a count you derived
+yourself. If the `readings file:` path is missing or the file cannot be read, say so in your output
+and treat that dimension as unreadable, ⛔ do NOT fabricate a reading.
 - `goals`: each ACTIVE goal record (id, title, status).
 - `criteria`: every AC belonging to those goals, each with its declared `criterion` (a runnable shell
   command), its record `status`, and the `verdict`/`reason` from ACTUALLY RUNNING that criterion this
