@@ -1,7 +1,7 @@
 ---
 id: gap-task-efficiency-baseline
 title: E1：任务级端到端效率基线——关联尝试/会话/fan-in/suite/落地，分清费用、时间与计算
-status: ready
+status: done
 labels:
   - gap
 parent: null
@@ -21,18 +21,20 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1 `node --test scripts/task-efficiency-baseline.test.mjs` exit 0：重复尝试、重复记录、跨窗口任务、缺结束事件、复用 run_id、suite 无法唯一关联均有反例，缺失不能变成零或成功。
-- [ ] AC2 `node scripts/task-efficiency-baseline.mjs --help` exit 0；公开输入 schema、时区、窗口边界、数据来源及身份关联规则，明确 completed outcome 与权威落地证据的区别。
-- [ ] AC3 以真实窗口运行报告并在 docs/analysis/task-efficiency-baseline.md 给出完整复跑命令：成功落地任务/所有尝试两套分母、p50/p90、每任务累计费用/ITE与返工，无法关联记录数量及覆盖率可机械核对。
-- [ ] AC4 报告逐项列出 worker/fan-in 等锁/suite 等槽与执行/其它可测步骤；CPU-seconds 只取真实 CPU 计量，不能用 wall-time 换算。缺 CSV、ready 事件或 CPU 数据均明确 not-evaluated 并给所缺字段。
-- [ ] AC5 轮数分解可下钻至原会话，不能分类者单列；报告实测 suite 跑/跳过/分类失败分母、资源门拒绝及 ready 池空证据，不能用 11/177 或全窗口平均并发替代。
-- [ ] AC6 基线报告给出 E2 可复用的身份/窗口接口，以及 E5 锁等待与持续队列证据；未确认吞吐瓶颈时结论保持未知，不修改锁、fail-closed、AC/DoD 或 G3。
+- [x] AC1 `node --test scripts/task-efficiency-baseline.test.mjs` exit 0：重复尝试、重复记录、跨窗口任务、缺结束事件、复用 run_id、suite 无法唯一关联均有反例，缺失不能变成零或成功。
+- [x] AC2 `node scripts/task-efficiency-baseline.mjs --help` exit 0；公开输入 schema、时区、窗口边界、数据来源及身份关联规则，明确 completed outcome 与权威落地证据的区别。
+- [x] AC3 以真实窗口运行报告并在 docs/analysis/task-efficiency-baseline.md 给出完整复跑命令：成功落地任务/所有尝试两套分母、p50/p90、每任务累计费用/ITE与返工，无法关联记录数量及覆盖率可机械核对。
+- [x] AC4 报告逐项列出 worker/fan-in 等锁/suite 等槽与执行/其它可测步骤；CPU-seconds 只取真实 CPU 计量，不能用 wall-time 换算。缺 CSV、ready 事件或 CPU 数据均明确 not-evaluated 并给所缺字段。
+- [x] AC5 轮数分解可下钻至原会话，不能分类者单列；报告实测 suite 跑/跳过/分类失败分母、资源门拒绝及 ready 池空证据，不能用 11/177 或全窗口平均并发替代。
+- [x] AC6 基线报告给出 E2 可复用的身份/窗口接口，以及 E5 锁等待与持续队列证据；未确认吞吐瓶颈时结论保持未知，不修改锁、fail-closed、AC/DoD 或 G3。
 
 ## Definition of Done
 
-- [ ] 工具对当前工作区真实遥测运行，提交可复跑报告及覆盖率读数，抽查至少一个多次尝试任务和一个无法关联实例；证据必须来自真实对象而非仅 fixture。
-- [ ] CSV 若无法取得，明确记录费用维度未评估与需要的输入，不把 token 估计写成实际账单；只有真实可测部分可宣称已建立基线。
-- [ ] 改动通过相应检查，报告无未经测量的优化收益承诺，任务状态及 AC/DoD 仅由有明确授权的流程推进。
+- [x] 工具对当前工作区真实遥测运行，提交可复跑报告及覆盖率读数，抽查至少一个多次尝试任务和一个无法关联实例；证据必须来自真实对象而非仅 fixture。
+- [x] CSV 若无法取得，明确记录费用维度未评估与需要的输入，不把 token 估计写成实际账单；只有真实可测部分可宣称已建立基线。
+- [x] 改动通过相应检查，报告无未经测量的优化收益承诺，任务状态及 AC/DoD 仅由有明确授权的流程推进。
+
+该轴仍暗,理由:只读报告工具不改架构依赖结构，L_D/L_G 对本任务不适用
 
 ## Touches
 - scripts/task-efficiency-baseline.mjs (new)
