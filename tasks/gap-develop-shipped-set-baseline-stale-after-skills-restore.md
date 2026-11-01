@@ -1,7 +1,7 @@
 ---
 id: gap-develop-shipped-set-baseline-stale-after-skills-restore
 title: develop shipped-set 基线未随 skills 回归修复重锚（287，实际 315）
-status: todo
+status: ready
 labels:
   - gap
   - release
