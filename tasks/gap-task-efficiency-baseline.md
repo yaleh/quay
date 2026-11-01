@@ -1,7 +1,7 @@
 ---
 id: gap-task-efficiency-baseline
 title: E1：任务级端到端效率基线——关联尝试/会话/fan-in/suite/落地，分清费用、时间与计算
-status: todo
+status: ready
 labels:
   - gap
 parent: null
