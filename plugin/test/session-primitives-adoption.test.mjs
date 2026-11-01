@@ -398,6 +398,9 @@ test("AC5 — observation.ts runs the validator at its output boundary and refus
   // exactly once in serve-sessions.ts, in the render expression) — instead of pinning the
   // pre-localization source form, which is precisely what this localization removed.
   assert.match(sessions, /refusedStateRecord/, "the render surface resolves the refusal frame row");
-  const i18n = fs.readFileSync(path.join(REPO_ROOT, "packages/quay/src/serve/view/serve-i18n.ts"), "utf8");
+  // gap-routine-architecture-analysis-god-package-serve-view moved ROW 15's dictionary verbatim into
+  // serve/view/i18n/sessions.ts (serve-i18n.ts is now a barrel). The assertion still FOLLOWS THE COPY:
+  // the zh column's home moved, its bytes did not.
+  const i18n = fs.readFileSync(path.join(REPO_ROOT, "packages/quay/src/serve/view/i18n/sessions.ts"), "utf8");
   assert.match(i18n, /状态记录不可用/, "and that row's zh column still carries the refusal wording");
 });

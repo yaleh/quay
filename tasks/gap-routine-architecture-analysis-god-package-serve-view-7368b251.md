@@ -2,7 +2,7 @@
 id: gap-routine-architecture-analysis-god-package-serve-view-7368b251
 title: "architecture-analysis: fanIn 564 / fanOut 222, 118 entities in 7 files;
   serve-i18n.ts alone is 202KB."
-status: ready
+status: done
 labels:
   - gap
   - routine-filed
@@ -63,6 +63,13 @@ requested action「Extract i18n locale strings into data modules」正是那个�
 - 「split render vs i18n responsibilities」半边：render 与 i18n 的职责**早已分离**（render 在
   serve-render.ts / serve-dashboard.ts，i18n 字典在 serve-i18n.ts，后者无任何 HTML 渲染函数）；本轮
   没有 render/i18n 混写需要再拆。
+- 拆出后 `directory-cycle.test.mjs` arm 1 抓到一个**目录环**（`serve/view ↔ serve/view/i18n`）：14 个
+  `i18n/*.ts` 模块 `import { DEFAULT_LANG, type Lang } from "../serve-lang.ts"`（父目录），而 barrel
+  （父目录里的 serve-i18n.ts）`export ... from "./i18n/*"` ⇒ 子目录↔父目录 SCC。修法：把闭语言集
+  （`LANGS`/`Lang`/`DEFAULT_LANG`）下沉到自包含的 `i18n/lang.ts`（无父目录 import），`serve-lang.ts`
+  原样 re-export 这三者（其公开面不变，`serve/index.ts`/`serve-handlers.ts`/`serve-render.ts`/
+  `serve-adr.ts` 等 importer 零改动），14 个模块改 `import ... from "./lang.ts"`（同目录，非跨目录边）⇒
+  环消除。
 - 附带修掉一个**阻塞本任务 scoped 门的既有缺陷**：2026-10-31 的 codex-plugin 任务新增
   `plugin/scripts/consumer-quay-deliverable-verify.sh` 却未在 `capability-catalog-declarations.json`
   的 QUESTION 表登记 ⇒ `capability-catalog --entry-surface` 静默 exit 1（AC1c unclassified>0），
@@ -74,10 +81,10 @@ requested action「Extract i18n locale strings into data modules」正是那个�
 
 | 判据 | 结果 |
 |---|---|
-| per-package `npx tsc --noEmit`（packages/quay、quay-native、quay-github、quay-backlog） | 全绿 |
-| barrel 冒烟（`node --experimental-strip-types -e` 导入 64 个导出符号 + 抽样值） | missing: NONE |
-| i18n body/chrome 测试（architecture/board/manager/goal/git-history/doc-task/live/tests-zh/adr-zh/goal-zh 共 10 文件 + serve-sessions 8/8） | 全绿 |
-| `plugin/test/session-primitives-adoption.test.mjs`（改后） | 10/10 |
+| `directory-cycle.test.mjs`（拆后） | 5/5 全绿（arm 1 零目录环） |
+| per-package `npx tsc --noEmit`（packages/quay，拆后） | 全绿 |
+| i18n/lang 相关测试（serve-i18n/serve-lang/serve-lang-switcher/body-i18n + session-primitives-adoption） | 173/173 全绿 |
+| barrel 冒烟（`node --experimental-strip-types -e` 导入全部导出符号 + 抽样值 + serve-lang 公开面） | missing: NONE |
 | `capability-catalog --summary` / `--entry-surface`（改后） | 410/410 declared · 0 unclassified · exit 0 |
 
 ### 4. 复发预期（诚实交代）
@@ -105,6 +112,7 @@ per-domain card renderer + serve-render.ts 的 page chrome 拆片，需重锚各
 ## Touches
 - `packages/quay/src/serve/view/serve-i18n.ts`
 - `packages/quay/src/serve/view/i18n/*.ts`
+- `packages/quay/src/serve/view/serve-lang.ts`
 - `packages/quay/src/serve/view/serve-dashboard.ts`
 - `packages/quay/src/serve/view/serve-render.ts`
 - `plugin/test/session-primitives-adoption.test.mjs`
