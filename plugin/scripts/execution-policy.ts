@@ -29,8 +29,8 @@
 //
 // Byte-identical mirror: plugin/scripts/execution-policy.ts
 
-import { createHash } from "node:crypto";
 import { createSelftest, parseJsonArg, serializeSortedJson } from "./gate-script-base.ts";
+import { sha256OfString } from "./sha256.ts";
 
 // ── Contract version ───────────────────────────────────────────────────────────────────────────────
 
@@ -120,10 +120,8 @@ export interface InvalidationResult {
 }
 
 // ── sha256 helpers ───────────────────────────────────────────────────────────────────────────────────
-
-export function sha256OfString(s: string): string {
-  return createHash("sha256").update(s, "utf8").digest("hex");
-}
+// (the body lives ONCE, in ./sha256.ts — semantic-dedup-scan finding `B1`, runId
+// `semantic-dedup-scan-1793491958069`; this file's local copy was removed)
 
 // ── Deterministic canonical serialization (same precedent as stage-receipt.ts serializeReceipt) ────
 

@@ -30,9 +30,9 @@
 
 import fs from "node:fs";
 import path from "node:path";
-import { createHash } from "node:crypto";
 import { execSync } from "node:child_process";
 import { createSelftest, parseJsonArg, git, gitLastCommitForPath, serializeSortedJson, printJsonCompact } from "./gate-script-base.ts";
+import { sha256OfBuffer } from "./sha256.ts";
 
 // ── Types ───────────────────────────────────────────────────────────────────────────────────────────
 
@@ -88,10 +88,8 @@ function identityError(code: string, message: string): Error & { code: string } 
 }
 
 // ── sha256 helpers ──────────────────────────────────────────────────────────────────────────────────
-
-function sha256OfBuffer(buf: Buffer): string {
-  return createHash("sha256").update(buf).digest("hex");
-}
+// (the body lives ONCE, in ./sha256.ts — semantic-dedup-scan finding `B1`, runId
+// `semantic-dedup-scan-1793491958069`; this file's private copy was removed)
 
 // ── git helpers — the shared fail-closed `git(args, cwd): GitResult` and `gitLastCommitForPath` now
 // live in gate-script-base.ts. This file's byte-identical private `git()` and `deriveWorkflowSourceCommit`

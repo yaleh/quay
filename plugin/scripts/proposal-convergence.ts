@@ -19,7 +19,6 @@
 // experiments/quay-perpetual-stream/test/proposal-convergence.test.mjs's
 // "prepare-milestone.js inline caps match capsFor()" cross-check test.
 
-import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { isDirectEntry, parseArgs } from "./gate-script-base.ts";
@@ -33,10 +32,7 @@ import { PREFLIGHT_POLICY_VERSION, releaseLease, safeTaskIdSegment, _readLeaseFi
 // already follows).
 import { extractMechanismClaims, splitSentences } from "./wiring-coverage-check.ts";
 import { syncSleep } from "../../packages/quay/src/kernel/sync-sleep.ts";
-
-export function sha256(text) {
-  return crypto.createHash("sha256").update(text, "utf8").digest("hex");
-}
+import { sha256OfString as sha256 } from "./sha256.ts";
 
 // ── capsFor — the ONE fail-closed policy surface (DIR-125 Requested-action item 3): callers may
 // LOWER these values (see validateConvergenceCounters / prepare-milestone.js's `$a.maxDeltaRounds`
