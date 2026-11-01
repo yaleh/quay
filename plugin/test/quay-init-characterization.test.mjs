@@ -223,7 +223,12 @@ const PINNED = {
       // UNCHANGED, the same cross-check as the re-anchors above; init.ts's delta versus develop is
       // a single hunk inside `generateConfigContent` (verified with `git diff develop..<branch>`).
       ".quay/config.yml  6f24c975ac10e8a47b7453be13fef6a687a053e278f9f5f915ad7cc5985c2850",
-      ".quay/profiles.yml  0f781fbcc8140fd1b4732d877f8484f2c6f14856e2419167281976678b748bb0",
+      // RE-ANCHORED 2026-11-01 (gap-role-effort-tiering-selector-pool-judge-meta-driver): the shipped
+      // profiles template (SHIPPED_PROFILES_TEMPLATE in packages/quay/src/init.ts) now carries
+      // `effort: low` on the three narrow-judgment roles (selector / pool-judge / meta-driver), so the
+      // fresh install's `.quay/profiles.yml` legitimately moved. Only this file moved — the other FIVE
+      // surface files hash UNCHANGED, the same targeted cross-check as the re-anchors above.
+      ".quay/profiles.yml  d41750ea5d94057dbc9c3d644d9768c6c59185eb59fed09db5ac676a2b6e6389",
       // RE-ANCHORED 2026-10-13 (gap-goal-driver-hardcoded-120s-spawn-kill-preempts-record-timeout-and-
       // orphans-goal-locks Plan item 3c): the single-source runtime-artifact manifest gained FOUR
       // frontmatter-store lockfile patterns (`goals/*.lock`, `adr/*.lock`, `docs-managed/*.lock`,

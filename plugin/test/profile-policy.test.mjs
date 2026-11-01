@@ -16,7 +16,9 @@
 //   NEW-AC3 — launchArgv 追加 `--permission-mode <v>` / `--effort <v>`；**未声明 ⇒ argv 逐字不变**。
 //   NEW-AC4 — 派发 provenance：声明值 / 覆盖来源 / 真实 argv / transcript 真实 model；
 //             alias 与 real **两个字段**，默认不合并。
-//   NEW-AC5 — shipped 模板不声明这两个字段、不路由任何本机 dev 取值（按**解析值**判，⛔ 非 grep 全文）。
+//   NEW-AC5 — shipped 模板不路由任何本机 dev 取值；effort 只由三个窄判定 role（selector/pool-judge/
+//             meta-driver）在角色层声明 `low`（gap-role-effort-tiering-selector-pool-judge-meta-driver），
+//             其余 role 与全部 profile 仍不声明（按**解析值**判，⛔ 非 grep 全文）。
 //
 // Run: scripts/test.sh plugin/test/profile-policy.test.mjs
 
@@ -505,7 +507,7 @@ test("NEW-AC2 — the closed enum is the 不扩大授权 defence, and it FALSIFI
   }
 });
 
-test("NEW-AC5 — the shipped carrier declares neither new field and routes no dev-only value", () => {
+test("NEW-AC5 — the shipped carrier routes no dev-only value and declares effort ONLY on the three narrow roles", () => {
   const shippedYml = fs.readFileSync(path.join(REPO_ROOT, "plugin", ".quay", "profiles.yml"), "utf8");
   const shippedSettings = fs.readFileSync(path.join(REPO_ROOT, "plugin", ".claude", "launch.settings.json"), "utf8");
   // ① 本机 dev 路由的**字面量**在任何位置都不得出现（含注释——注释里的地址照样会被照抄）。
@@ -525,12 +527,24 @@ test("NEW-AC5 — the shipped carrier declares neither new field and routes no d
     assert.equal(p.permissionMode, undefined, `shipped profile ${pname}: must not declare permissionMode`);
     assert.equal(p.effort, undefined, `shipped profile ${pname}: must not declare effort`);
   }
+  // gap-role-effort-tiering-selector-pool-judge-meta-driver（2026-11-01）：shipped carrier 的角色层
+  // 现在**刻意**为三个窄判定 role 声明 `effort: low`（role 层覆盖，⛔ 不写进共享 worker-default，避免
+  // 连坐 outer/task-worker/fix-worker）。所以「不声明 effort」的断言收紧为「只有这三个 role 声明」，
+  // ⛔ 不再是「所有 role 都不声明」。permissionMode 仍是谁都不声明。
+  const EFFORT_LOW_ROLES = ["selector", "pool-judge", "meta-driver"];
   for (const [rname, r] of Object.entries(cfg.roles ?? {})) {
     assert.equal(r.permissionMode, undefined, `shipped role ${rname}: must not declare permissionMode`);
-    assert.equal(r.effort, undefined, `shipped role ${rname}: must not declare effort`);
+    if (EFFORT_LOW_ROLES.includes(rname)) {
+      assert.equal(r.effort, "low", `shipped role ${rname}: must declare effort: low (narrow-judgment tier-down)`);
+    } else {
+      assert.equal(r.effort, undefined, `shipped role ${rname}: must not declare effort (inherits worker-default's)`);
+    }
   }
-  // ③ 逐角色解析确认：shipped carrier 下每个 role 都不追加这两个标志（第三方不声明 ⇒ argv 逐字不变）。
-  for (const role of ["task-worker", "selector", "fix-worker", "outer", "manager", "pool-judge", "meta-driver"]) {
+  // ③ 逐角色解析确认：三个窄判定 role 解析出 `--effort low`，其余 role 仍不追加该标志（argv 逐字不变）。
+  for (const role of EFFORT_LOW_ROLES) {
+    assert.equal(resolveRole(cfg, role).effort, "low", `${role}: shipped carrier must resolve effort=low`);
+  }
+  for (const role of ["task-worker", "fix-worker", "outer", "manager"]) {
     const r = resolveRole(cfg, role);
     assert.equal(r.permissionMode, null, `${role}: shipped carrier must not declare permissionMode`);
     assert.equal(r.effort, null, `${role}: shipped carrier must not declare effort`);
