@@ -22,14 +22,18 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1 复现（能取假）：detached worktree@tag 发布后，~/.local/share/quay/quay.js 内嵌版本 != tag（贴 grep 读数），而 dist-plugin bundle == tag（对照）。
-- [ ] AC2 根因定位：找出 $WORK 里 bundle 版本为 stale 的机制（sync-vendor 版本来源 / stamp-bundle-tree 未生效，贴代码位置）。
-- [ ] AC3 修复：修复后重跑，--install-only 装的 quay.js 内嵌版本 == tag（贴 grep 读数）。
-- [ ] AC4 测试：`scripts/test.sh --for-task gap-codex-mcp-sync-installs-stale-dist-from-detached-worktree` 绿（含反向控制）。
+- [x] AC1 复现（能取假）：detached@v0.30.1 worktree 跑 build 步后，`codex-mcp-sync.sh --install-only --dist-root <worktree>/plugin` 装的 `~/.local/share/quay/quay.js` 内嵌 `"0.30.1-dev"`（`grep -aoE '"0\.[0-9]+\.[0-9]+(-dev)?"'` 读数）≠ tag `v0.30.1`；对照 `git show origin/dist-plugin:vendor/quay/dist/quay.js` 内嵌 `0.30.1` == tag。build 步日志：`STAMP-VERSION: ERROR — 1 carrier(s) could not be judged; nothing was written.`（bundle 未重戳）。
+- [x] AC2 根因定位：`plugin/scripts/sync-vendor.sh:559` 的 build-mode stamp 链跑 `stamp-version.mjs --mode build --root "${PLUGIN_DIR}"`，但 `scripts/version-carriers.ts` 的 `.codex-plugin/plugin.json` carrier 带 `buildPath`（在 REPO ROOT，不在 `plugin/` 下）⇒ 读 `plugin/.codex-plugin/plugin.json` ENOENT ⇒ `stamp-version` exit 1；该链是 `&&` 连接、`set -e` 对非末尾 `&&` 失败不触发 ⇒ `--stamp-bundle-tree`/`--bundle-tree` 被静默跳过 ⇒ bundle 停在 build-time `-dev`。
+- [x] AC3 修复：`scripts/stamp-version.ts` 新增 `--repo-layout`（`repoLayoutBuildCarriers` 还原 repo 路径）；`sync-vendor.sh` 改 `--repo-layout --root "${REPO_ROOT}"` 且 `|| { …; exit 1; }` fail-closed；`publish-dist-branch.sh:251` stamp 链加 `|| exit 1`。修复后重跑：`BUNDLE-EMBEDDED-STAMP: OK — re-derived 1 bundle(s) to 0.30.1`，`codex-mcp-sync.sh --install-only --dist-root <worktree>/plugin` 装的 `~/.local/share/quay/quay.js` 内嵌 `"0.30.1"` == tag（grep 读数）。
+- [x] AC4 测试：`bash scripts/test.sh --for-task gap-codex-mcp-sync-installs-stale-dist-from-detached-worktree --allow-thin` 绿（11 tests pass，含 `plugin/test/codex-mcp-sync-detached-stale-dist.test.mjs` 两条：--repo-layout 戳 repo 树含 repo-root codex carrier + 反向 `--bundle-tree` 打红；sync-vendor/publish stamp 链 fail-closed 位置断言）。
 
 ## Definition of Done
 
 从任意 detached/tag worktree 发布时，codex-mcp-sync 自动安装的 dist 与发布 tag 版本一致，不再装主检出的 stale dist。
+
+## ADR-007 dark-axis record
+
+该轴仍暗,理由:版本戳记脚本修复（stamp-version --repo-layout + sync-vendor/publish stamp 链 fail-closed），无包/依赖结构变化，L_D/L_G 无可测结构量。
 
 ## Touches
 
