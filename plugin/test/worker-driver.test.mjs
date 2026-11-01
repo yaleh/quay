@@ -196,7 +196,7 @@ import { ensureBranchModel } from "../../packages/quay/src/core/branch-model.ts"
 // gap-worker-kind-stop-waits-for-all-in-flight-workers-instead-of-detaching-for-adoption：`recordKindStop`
 // 是 `stop --kind worker` 的【写侧原语】——夹具经它触发停机，⛔ 不手写一份 JSON 形状（改天写侧变了，
 // 手写的夹具会继续「通过」，测的就不是那条通道了）。
-import { kernelSiblingArgv, recordKindStop, clearKindStop } from "../scripts/driver-runtime.ts";
+import { kernelSiblingArgv, resolveKernelScriptsDir, recordKindStop, clearKindStop } from "../scripts/driver-runtime.ts";
 // gap-routine-semantic-dedup-scan-append-heartbeat-vs-round：round 落盘 append 的【共享家】——
 // SSOT 棘轮拿它做同一性对照（worker-driver 的 appendRoundToFile 必须 === 它）。
 import { appendHeartbeatLine } from "../scripts/driver-runtime.ts";
@@ -1143,6 +1143,35 @@ test("gap-worker-prompt-ac-check-via-abi-not-hand-edit — 单一真相源：两
   const sharedMarker = "record the AC state through the Provider ABI";
   assert.ok(create.includes(sharedMarker), "create prompt carries the shared acCheckNote marker");
   assert.ok(cont.includes(sharedMarker), "continue prompt carries the SAME acCheckNote marker (not a forked copy)");
+});
+
+// ── gap-worker-prompt-note-family-slimming — buildWorkerPrompt/buildContinueWorkerPrompt 合并长度瘦身 ──
+// 基线（第一步提交）：先把瘦身前两个 builder 的合并输出字符数落成一个已提交的测试读数，之后瘦身提交
+// 把断言换成「较基线下降 ≥ 25%」。读数按 kernel 安装路径归一化（替换成固定 token），跨 checkout 路径稳定。
+
+/** 归一化后的合并输出字符数（kernel 安装路径 → `<KERNEL>`，消除机器相关路径长度）。 */
+function normalizedCombinedPromptChars() {
+  const kernelDir = resolveKernelScriptsDir();
+  const norm = (s) => s.split(kernelDir).join("<KERNEL>");
+  const create = norm(buildWorkerPrompt("gap-x", "/r"));
+  const cont = norm(buildContinueWorkerPrompt("gap-x", "/r", {
+    worktreePath: "/wt",
+    branchCommits: 3,
+    branchHeadSubject: "x",
+    acChecked: 0,
+    acTotal: 3,
+    failureReason: "r",
+    attempts: [],
+  }));
+  return create.length + cont.length;
+}
+
+/** 瘦身前基线（第一步已提交）：combined 归一化字符数 = 12137。 */
+const WORKER_PROMPT_SLIM_BASELINE = 12137;
+
+test("gap-worker-prompt-note-family-slimming — baseline (step 1, committed before slimming): combined prompt char count equals the pinned baseline", () => {
+  const combined = normalizedCombinedPromptChars();
+  assert.equal(combined, WORKER_PROMPT_SLIM_BASELINE, `pre-slim combined chars should equal the committed baseline ${WORKER_PROMPT_SLIM_BASELINE}`);
 });
 
 // ── gap-continue-prompt-delta-relatedness-note — 续做 prompt 两条结构性信号 ─────────────────────────
