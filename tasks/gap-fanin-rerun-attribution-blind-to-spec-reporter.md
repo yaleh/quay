@@ -45,16 +45,16 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1 正控：把 quay-fleet 生产 suite 日志的逐字摘录（`test at test/notification-pipeline-resolution-gate.test.mjs:645:1` + 紧随的 `✖ AC-064(1) …`，以及 `test at test/dogfood-p0.test.mjs:344:1` + `✖ AC-012's criterion pipeline …`）喂给 `readFailedTestFiles` ⇒ `{evaluated:true, files:["test/notification-pipeline-resolution-gate.test.mjs","test/dogfood-p0.test.mjs"]}`；同一份摘录走 in-round rerun 路径时不再落到 `rerun-not-evaluated: no-failing-lines-in-suite-log`。
-- [ ] AC2 负控（逐条贴读数）：
+- [x] AC1 正控：把 quay-fleet 生产 suite 日志的逐字摘录（`test at test/notification-pipeline-resolution-gate.test.mjs:645:1` + 紧随的 `✖ AC-064(1) …`，以及 `test at test/dogfood-p0.test.mjs:344:1` + `✖ AC-012's criterion pipeline …`）喂给 `readFailedTestFiles` ⇒ `{evaluated:true, files:["test/notification-pipeline-resolution-gate.test.mjs","test/dogfood-p0.test.mjs"]}`；同一份摘录走 in-round rerun 路径时不再落到 `rerun-not-evaluated: no-failing-lines-in-suite-log`。
+- [x] AC2 负控（逐条贴读数）：
   (a) 只有 `✖ failing tests:` 块头或独立 `✖ name`、没有任何 `test at` ⇒ 仍 `evaluated:false, reason:"no-failing-lines-in-suite-log"`；
   (b) 只有 `ℹ fail 1` 摘要行 ⇒ 仍不归因；
   (c) `test at` 后没有配对的 `✖` ⇒ 不归因；
   (d) 既有 TAP `not ok` 夹具与 `passed=false` 夹具结果逐字节不变（现有用例全绿）；
   (e) 变异臂：去掉新增的 spec 分支 ⇒ AC1 变红，其余负控不变。
-- [ ] AC3 真实重放：把 quay-fleet 的 `.quay/fan-in-suite-gap-knowledge-live-carrier-derivation~wk-prod-anchor~1793522910959-bda3e2.log` 只读拷贝为本仓 fixture，跑 `parseSuiteLogFailures` 断言归因到 `test/dogfood-p0.test.mjs`；粘贴 verdict JSON。
-- [ ] AC4 回归：`node --test plugin/test/worker-driver.test.mjs plugin/test/worker-driver-fan-in-s04.test.mjs plugin/test/worker-driver-fan-in-s07.test.mjs plugin/test/worker-fan-in-spec-attribution.test.mjs` 退出码 0。
-- [ ] AC5 文档：`docs/evidence/2026-11-01-fanin-rerun-spec-attribution.md`（新）记录上面每条命令、退出码与真实日志摘录，并注明本修复只让红点可归因/可重跑，⛔ 不豁免任何真实红。
+- [x] AC3 真实重放：把 quay-fleet 的 `.quay/fan-in-suite-gap-knowledge-live-carrier-derivation~wk-prod-anchor~1793522910959-bda3e2.log` 只读拷贝为本仓 fixture，跑 `parseSuiteLogFailures` 断言归因到 `test/dogfood-p0.test.mjs`；粘贴 verdict JSON。
+- [x] AC4 回归：`node --test plugin/test/worker-driver.test.mjs plugin/test/worker-driver-fan-in-s04.test.mjs plugin/test/worker-driver-fan-in-s07.test.mjs plugin/test/worker-fan-in-spec-attribution.test.mjs` 退出码 0。
+- [x] AC5 文档：`docs/evidence/2026-11-01-fanin-rerun-spec-attribution.md`（新）记录上面每条命令、退出码与真实日志摘录，并注明本修复只让红点可归因/可重跑，⛔ 不豁免任何真实红。
 
 ## Definition of Done
 
@@ -67,3 +67,7 @@ extra:
 - plugin/test/fixtures/spec-reporter-suite-log-bda3e2.txt (new)
 - docs/evidence/2026-11-01-fanin-rerun-spec-attribution.md (new)
 - tasks/gap-fanin-rerun-attribution-blind-to-spec-reporter.md (self)
+
+## 暗轴（ADR-007）
+
+该轴仍暗,理由:本任务只修 suite 日志解析器的 spec 归因分支，不改依赖结构/包边界，L_D/L_G 未产生可测变化
