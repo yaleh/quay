@@ -41,3 +41,22 @@ token 全量扫描已确认 task-worker/fix-worker/selector 是 driver 会话里
 - plugin/scripts/profiles-role-coverage-check.ts
 - plugin/test/worker-driver.test.mjs
 - tasks/gap-mcp-blacklist-extend-meta-cc-archguard-plantuml.md
+## Implementation evidence — 2026-11-01
+
+人已授权按 E1 + 本任务、随后 E2 与 A3 并行、E5 条件启动的顺序推进。实现位于隔离分支 `human/efficiency-mcp-blacklist`，commit `d40cb7fb8`，worktree `/tmp/quay-efficiency-mcp-blacklist`。只改两份 profiles.yml，14 行新增；尚未合入落地分支，不宣称生产已启用，未启动 worker，未勾 AC/DoD，状态保持原值。
+
+AC3 例外真实读数：本机 /data/home/yale/.claude/projects 下按 custom-title/agent-name 识别角色，消息时间窗口 2026-10-25T12:40:42.554434Z → 2026-11-01T12:40:42.554434Z；最近修改的已命名会话 task-worker=647、selector=636、fix-worker=231。解析 assistant message.content 的 tool_use（不把 prompt 文本命中算调用）：task-worker 的 archguard 93 次（analyze=30、detect_cycles=21、detect_duplicates=25、detect_god_packages=9、get_package_metrics=8），meta-cc query_session_content=31 次。selector/fix-worker 未命中这两个 MCP；plantuml 三角色未命中。该覆盖仅限本机有角色标记的 transcript，不证明其他机器或未命名会话为零。取证结果 /tmp/quay-blacklist-seven-day-evidence.json 为本次诊断材料，非权威任务状态。
+
+因此遵从原 AC3 的保留例外：task-worker 黑名单为 [chrome-devtools, playwright, plantuml]，保留 meta-cc 与 archguard；selector/fix-worker 为 [chrome-devtools, playwright, meta-cc, archguard, plantuml]。两份 carrier 同构。
+
+验证：隔离 worktree 中 `node plugin/scripts/profiles-role-coverage-check.ts --check --json` exit 0（含真实 init 输出）；`node --test plugin/test/driver-runtime-s08.test.mjs` 5/5 通过。新 worktree 初跑因缺 gitignored vendor 构建文件失败，链接主检出现有 vendor dist 后重跑通过，未修改测试。真实本机配置的 launchArgv 解析（仅解析，不 spawn）确认三角色带 strict-mcp-config：task-worker 保留 plugin_archguard_archguard/plugin_meta-cc_meta-cc/plugin_quay_quay；selector/fix-worker 仅留 plugin_quay_quay；outer/manager/pool-judge/meta-driver argv 与修改前逐字一致。机制代码零改动。
+
+后续需由明确授权的落地流程集成并验证真实执行；这份记录不替代任务 AC/DoD 和生产证据。
+
+## Blocker
+
+**2026-11-01T13:07:36.247Z — worker 未落地（exited-not-landed）**
+
+- 未落地原因：step=suite: AssertionError [ERR_ASSERTION]: testsCard shows an elapsed-time reading [baseline A/B: HARD RED (task-introduced-red) — the task's red set is NOT a subset of the develop baseline red set: added=packages/quay/test/gap-webui-dashboard-tests-card-latest-round-no-live-signal.test.mjs,plugin/test/quay-init-characterization.test.mjs changed=-]
+- run_id：wk-prod-anchor
+- session_id：8724c037-a24f-482d-bd93-ed989e1fe8e7
