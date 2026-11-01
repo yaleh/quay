@@ -382,6 +382,23 @@ test('AC1: argv 末参数是 prompt；seam 覆盖前缀时 prompt 仍追加在�
   assert.ok(argv[2].includes('goal_id=GOAL-005'), 'prompt 作末参数追加（测试缝可捕获真实 prompt）');
 });
 
+test('AC1/AC2: prompt 内嵌 card-facing 摘要——机械两分支各含对应句子（GOAL id 已替换），且点名 ## Needs-Human 与 ## Proposal', () => {
+  // 分支①：无退出条件 ⇒「正文缺非空 ## 退出条件 节」（即便同时零在域 AC，分支顺序先判退出条件）。
+  const pNone = buildSufficiencyFollowupPrompt({ id: 'GOAL-018', title: 't', body: '## body\nx' }, [], '/tmp/r', 1);
+  assert.ok(pNone.includes('GOAL-018 充分性 insufficient：正文缺非空 ## 退出条件 节'), '分支①：无退出条件的机械句（GOAL id 已替换）');
+  // 分支②：零在域 AC ⇒「在域 AC 集合为空」。
+  const pEmpty = buildSufficiencyFollowupPrompt({ id: 'GOAL-005', title: 't', body: '## 退出条件\n\n1. x\n' }, [], '/tmp/r', 1);
+  assert.ok(pEmpty.includes('GOAL-005 充分性 insufficient：在域 AC 集合为空'), '分支②：零在域 AC 的机械句（GOAL id 已替换）');
+  // 两个 prompt 都点名 `## Needs-Human` 与 `## Proposal`（AC3）。
+  for (const p of [pNone, pEmpty]) {
+    assert.ok(p.includes('## Needs-Human'), 'prompt 点名 ## Needs-Human');
+    assert.ok(p.includes('## Proposal'), 'prompt 点名 ## Proposal');
+  }
+  // ⛔ 语义 insufficient（有退出条件 + 有在域 AC）没有机械句——不误发「在域 AC 为空」。
+  const pSemantic = buildSufficiencyFollowupPrompt({ id: 'GOAL-005', title: 't', body: EXIT_CONDITIONS }, [{ id: 'AC-061', title: 'a', expect: 'e' }], '/tmp/r', 1);
+  assert.ok(!pSemantic.includes('在域 AC 集合为空'), '语义 insufficient ⛔ 不得误带机械句');
+});
+
 // ── ⑤ runGoalRound 集成（轮记录 + 端到端落一条记录）──────────────────────────────────────
 
 const judgeCmd = (verdict) => ['node', '-e', `process.stdout.write(JSON.stringify({verdict:${JSON.stringify(verdict)}}))`];
@@ -457,6 +474,7 @@ test('AC1: 机械层 insufficient（body 缺 `## 退出条件`，⛔ 从未调�
     assert.equal(sufficiencyFacts[0].value.sufficiency.verdict, 'insufficient', '机械层判 insufficient');
     assert.equal(fact.value.sufficiency_stall.filed, 1, 'GOAL-018 形态（本任务实例①）也 file');
     assert.ok(readMarker(marker)[0].prompt.includes('NONE'), 'prompt 如实说「没有退出条件」——请人补的正是它');
+    assert.ok(readMarker(marker)[0].prompt.includes('GOAL-018 充分性 insufficient：正文缺非空 ## 退出条件 节'), 'E2E: 机械 insufficient 的真实 filed prompt 也含 card-facing 句子');
   } finally {
     resetSufficiencyCacheForTest();
     fs.rmSync(tmp, { recursive: true, force: true });

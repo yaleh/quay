@@ -2814,6 +2814,15 @@ export function buildSufficiencyFollowupPrompt(
   const acs = inScopeAcs.map(
     (ac) => `  - ${String(ac.id ?? "")}: ${String(ac.title ?? "").replace(/\s+/g, " ").trim()}\n    expect: ${String(ac.expect ?? "").replace(/\s+/g, " ").trim()}`,
   );
+  // card-facing 摘要的机械句（⛔ 零 LLM：句子按机械分支选定、不生成）。分支顺序与
+  // `goalSufficiencyVerdict` 一致——先判无退出条件、再判零在域 AC；语义 insufficient（有退出条件 +
+  // 有在域 AC）没有机械句，故为 null（其 card-facing 摘要仍由下方「quote VERBATIM」的既有指令承载）。
+  const mechanicalReason =
+    exit === ""
+      ? `${gid} 充分性 insufficient：正文缺非空 ## 退出条件 节`
+      : acs.length === 0
+        ? `${gid} 充分性 insufficient：在域 AC 集合为空`
+        : null;
   return [
     "You are a goal-sufficiency follow-up agent in the quay repo. A goal's sufficiency judge has rendered a DETERMINATE verdict of `insufficient` for this goal, and that verdict has stayed unchanged well past one full judge+look cycle. The verdict means: the goal's in-scope AC set does NOT cover the goal's exit conditions.",
     "⛔ No other mechanism consumes this verdict. It has been repeating in the round log every round with nobody acting on it, so the goal will stay stuck at `active` forever unless someone changes either the AC set or the exit-conditions text. That is the job your task creates.",
@@ -2834,6 +2843,13 @@ export function buildSufficiencyFollowupPrompt(
     "  (a) a candidate NEW AC, with a runnable criterion, that closes a gap between the exit conditions and the current AC set; or",
     "  (b) a REVISION of the exit-conditions / scope text, if the exit conditions as written demand more than this goal should.",
     "In the task body: quote VERBATIM the exit condition (or the part of the goal title) that is currently uncovered, say why the existing AC set does not cover it, and say why your proposal does. A proposal that does not name the uncovered part is not reviewable and will be rejected.",
+    ...(mechanicalReason === null
+      ? []
+      : [
+          "The task body MUST also carry a card-facing decision summary, VERBATIM (the sentence is mechanically determined — copy it exactly, ⛔ do not reword or regenerate it). Put it in exactly ONE of these two places:",
+          `  (a) inside a \`## Needs-Human\` section, as the line \`阻碍原因：${mechanicalReason}\`; or`,
+          `  (b) as the FIRST line of the \`## Proposal\` section: \`${mechanicalReason}\`.`,
+        ]),
     "⛔ Do NOT write the goal store. ⛔ Do NOT mark any GOAL or AC achieved / active / draft / retired. ⛔ Do NOT edit `goals/*.md`. Your product is a TASK, not a state change — a human decides the AC set.",
     "File ONE task via the `quay-file-task` skill (Skill tool). ⛔ Not more than one. If an in-flight task already proposes an AC / exit-condition change for this goal, do NOT file a duplicate — report that task's id instead.",
     "Then move it to `status: needs-human` (task_write MCP) so a human reviews the proposal before it is dispatched as work.",
