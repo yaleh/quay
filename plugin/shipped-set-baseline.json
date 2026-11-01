@@ -408,6 +408,30 @@
         "shLines": 7489
       },
       "why": "0.30.0: codex skills 交付面 + codex-mcp-sync --dist-root + vendored-dist 版本一致性检测等新 shipped（正当增长）"
+    },
+    {
+      "when": "2026-11-01T03:16:42.937Z",
+      "from": {
+        "files": 0,
+        "bytes": 0,
+        "shLines": 0,
+        "shipped": {
+          "files": 287,
+          "bytes": 70752234,
+          "shLines": 7489
+        }
+      },
+      "to": {
+        "files": 0,
+        "bytes": 0,
+        "shLines": 0
+      },
+      "shipped": {
+        "files": 310,
+        "bytes": 71419783,
+        "shLines": 7489
+      },
+      "why": "re-anchor develop to the REAL 0.31.0 artifact after the skills/ full-restore regression fix: release-shaped publish-dist-branch.sh build measures files 287->310, bytes 70752234->71419783, shLines 7489 (unchanged). ⛔ NOT 315 — the 0.30.1 hotfix re-anchor (315) was measured from a DETACHED head carrying no version tag, which skips the .sh prune; release.yml's shipped-set-clean builds from the tag (release-form) and prunes, so its reading is 310. This is the reading release-cut.sh 0.31.0 --dry-run reproduces."
     }
   ],
   "_axes": {
@@ -421,8 +445,8 @@
   "bytes": 0,
   "shLines": 0,
   "shipped": {
-    "files": 287,
-    "bytes": 70752234,
+    "files": 310,
+    "bytes": 71419783,
     "shLines": 7489
   }
 }
