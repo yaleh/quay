@@ -1,7 +1,7 @@
 ---
 id: gap-single-session-single-model-invariant
 title: 单会话单模型不变式检查——防 model 与 ANTHROPIC_DEFAULT_*_MODEL 不一致导致会话内模型漂移打穿缓存
-status: todo
+status: ready
 labels:
   - gap
 parent: null
