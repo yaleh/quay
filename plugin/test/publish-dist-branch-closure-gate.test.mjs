@@ -173,6 +173,24 @@ function addVersionStampInputs(root) {
   for (const [rel, body] of Object.entries(carriers)) writeFile(path.join(root, rel), body);
 }
 
+/** The bundle-tree consistency gate the REAL publish script runs in the SAME fail-closed stamp
+ *  chain (publish-dist-branch.sh:251): `version-consistency-check.mjs --stamp-bundle-tree` and
+ *  `--bundle-tree`, chained after stamp-version with `&&`. Its runner + entry must be copied from
+ *  the repo (same discipline as the stamp inputs above); its transitive deps (resolve-version.ts,
+ *  version-carriers.ts) are already carried by addVersionStampInputs. Before the stamp chain went
+ *  fail-closed (gap-codex-mcp-sync-installs-stale-dist-from-detached-worktree), a missing module
+ *  here was a swallowed non-final `&&` failure (set -e exempts it) and the baseline publish
+ *  "succeeded" while silently skipping BOTH bundle-tree gates — the stub, not the script, was
+ *  incomplete. */
+function addVersionConsistencyCheckInputs(root) {
+  for (const rel of [
+    "scripts/version-consistency-check.mjs",
+    "scripts/version-consistency-check.ts",
+  ]) {
+    writeFile(path.join(root, rel), fs.readFileSync(path.join(repoRoot, rel)));
+  }
+}
+
 /** The marketplace-name stamp the REAL publish script runs right after its rsync (2026-09-23): the
  *  stamp entry is copied from the repo (same discipline as the version stamp above), the two
  *  marketplaces are minimal synthetic ones in the SHAPE the repo ships — plugin/ named `quay-dev`
@@ -213,6 +231,22 @@ function addCodexPluginSurfaceInput(root) {
     path.join(root, ".codex-plugin", ".mcp.json"),
     JSON.stringify({ mcpServers: { quay: { command: "node", args: ["~/.local/share/quay/quay.js", "mcp"] } } }, null, 2) + "\n"
   );
+}
+
+/** The four human-facing skills the REAL publish script copies into the artifact's
+ *  `.codex-plugin/skills/` (the codex-skills block, chained onto the now-fail-closed stamp chain):
+ *  quay-file-task, quay-directive, quay-task-operator, and `init` (renamed quay-init, `name:` sed-
+ *  rewritten). The stub carries minimal synthetic SKILL.md files — `init` must carry a `name: init`
+ *  line for that sed; the other three only need to exist so `cp -R` does not abort. No dist/*.js
+ *  reference in any of them (so the closure gate's required-count stays 2). */
+function addCodexSkillsInputs(root) {
+  const names = { "quay-file-task": "quay-file-task", "quay-directive": "quay-directive", "quay-task-operator": "quay-task-operator", init: "init" };
+  for (const [dir, name] of Object.entries(names)) {
+    writeFile(
+      path.join(root, "plugin", "skills", dir, "SKILL.md"),
+      `---\nname: ${name}\ndescription: "stub ${name} skill"\n---\n\n# ${name} stub\n`
+    );
+  }
 }
 
 /** The Claude Code plugin-level `.mcp.json` the REAL publish script ships at the artifact root — the
@@ -344,11 +378,30 @@ function makeStubRepo(tag) {
     path.join(root, "plugin", "skills", "demo", "SKILL.md"),
     "# demo\n\nRun: `node --experimental-strip-types plugin/scripts/alpha-tool.ts`\n"
   );
-  writeFile(path.join(root, "plugin", "vendor", "quay", "dist", "quay.js"), "// stub vendor bundle\n");
+  // The js-carrier anchor gate (build-plugin-dist.mjs --rewrite → assertJsCarrierAnchorsInert)
+  // scans skills/loop/probes/agents/workflows for `.js` carriers and refuses NOT-EVALUATED on
+  // zero (硬规则 3b) — the real tree always ships plugin/workflows/*.js, so the stub must carry
+  // ≥1 inert `.js` carrier or the now-fail-closed stamp chain (publish-dist-branch.sh:251) aborts
+  // the baseline publish here. Inert means no `${CLAUDE_PLUGIN_ROOT}` anchor (the gate's subject)
+  // and no `scripts/dist/*.js` reference (so the closure gate's required-count stays 2).
+  writeFile(
+    path.join(root, "plugin", "workflows", "demo.js"),
+    "// stub workflow carrier — inert: no dist/*.js reference, no plugin-root anchor\n"
+  );
+  // The bundle-tree gate (version-consistency-check --stamp-bundle-tree/--bundle-tree, now reached
+  // because the stamp chain is fail-closed) requires the Core bundle to carry the esbuild-inlined
+  // `package_default` object with a `version` field — the stub's minimal bundle must carry it, or
+  // `restampEmbeddedVersion` throws "no inlined package_default.version token" and the publish aborts.
+  writeFile(
+    path.join(root, "plugin", "vendor", "quay", "dist", "quay.js"),
+    "package_default = { name: \"quay\", version: \"0.0.0\" };\n"
+  );
   addVersionStampInputs(root);
+  addVersionConsistencyCheckInputs(root);
   addMarketplaceNameStampInputs(root);
   addCodexPluginSurfaceInput(root);
   addClaudeCodePluginMcpInput(root);
+  addCodexSkillsInputs(root);
   addShippedSetRuleInputs(root);
   addShippedShellReachabilityInputs(root);
   git(root, "init", "-q", "-b", "master");
@@ -418,7 +471,8 @@ test("AC2: the real publish script exits non-zero and commits nothing when a ref
     "the stamp must act on the assembled COPY, never on the source plugin/"
   );
   // The assembled CODEX surface (gap-codex-mcp-json-overwrites-claude-plugin-mcp-json):
-  // `.codex-plugin/` carries ONLY `plugin.json` (the source `.mcp.json` is excluded from the rsync),
+  // `.codex-plugin/` carries `plugin.json` + the codex skills surface `skills/` (the source
+  // `.mcp.json` is excluded from the rsync — it stays in the repo-root `.codex-plugin/.mcp.json`),
   // and the artifact-root `.mcp.json` is Claude Code's plugin-level config (`plugin/.mcp.json` with
   // `${CLAUDE_PLUGIN_ROOT}`) — ⛔ NOT the codex `~` template, which stays in `.codex-plugin/.mcp.json`
   // and is consumed by the codex marketplace build surface. Reading from the committed orphan branch —
@@ -426,8 +480,8 @@ test("AC2: the real publish script exits non-zero and commits nothing when a ref
   const publishedCodexEntries = git(stub, "ls-tree", "--name-only", `${branch}:.codex-plugin`).split("\n").filter(Boolean);
   assert.deepEqual(
     publishedCodexEntries,
-    ["plugin.json"],
-    ".codex-plugin/ in the assembled artifact must carry ONLY plugin.json (the source .mcp.json must not be nested there)"
+    ["plugin.json", "skills"],
+    ".codex-plugin/ in the assembled artifact must carry plugin.json + the codex skills surface (the source .mcp.json must not be nested there)"
   );
   const publishedRootMcp = JSON.parse(git(stub, "show", `${branch}:.mcp.json`));
   assert.equal(
