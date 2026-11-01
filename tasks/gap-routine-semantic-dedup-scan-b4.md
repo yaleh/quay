@@ -2,7 +2,7 @@
 id: gap-routine-semantic-dedup-scan-b4
 title: "semantic-dedup-scan: Byte-identical strip/collapse/trim normalizer; the
   ac61 comment names a third copy (retired-clause-check.norm)."
-status: ready
+status: done
 labels:
   - gap
   - routine-filed
