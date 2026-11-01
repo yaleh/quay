@@ -44,6 +44,8 @@ token 全量扫描已确认 task-worker/fix-worker/selector 是 driver 会话里
 - plugin/test/profile-policy.test.mjs
 - plugin/scripts/profiles-role-coverage-check.ts
 - plugin/test/worker-driver.test.mjs
+- plugin/test/quay-init-characterization.test.mjs
+- packages/quay/test/gap-webui-dashboard-tests-card-latest-round-no-live-signal.test.mjs
 - tasks/gap-mcp-blacklist-extend-meta-cc-archguard-plantuml.md
 
 该轴仍暗,理由:纯配置改动（两份 profiles.yml 黑名单取值 + init 模板同步 + 测试期望同步），不改依赖结构/模块图，L_D/L_G 无本任务可归因的读数。
@@ -72,3 +74,5 @@ worker 在隔离 worktree（task/gap-mcp-blacklist-extend-meta-cc-archguard-plan
   - selector:   strict=true servers=["plugin_quay_quay"]
   - fix-worker: strict=true servers=["plugin_quay_quay"]
   - outer/manager/pool-judge/meta-driver: strict=false（argv 逐字不变，DoD 不连坐）。
+
+suite 红修复（续做轮）：① `plugin/test/quay-init-characterization.test.mjs` 的 fresh-install 闭集 pin 因本任务改 `init.ts` profiles 模板而移动，re-anchor `.quay/profiles.yml` 哈希为 `d82c5a3f…`（其余五文件哈希不变，靶向交叉核对）。② `packages/quay/test/gap-webui-dashboard-tests-card-latest-round-no-live-signal.test.mjs` 的 elapsed 断言正则窗口过窄（`1m3\ds` 只覆盖 90–99s），满负荷下 `rebuildNow()` 延迟 >10s 时 elapsed 越过 100s 即红；扩为完整 `formatSeconds` 格式空间 `/已运行 \d+(?:h\d+m|m\d+s|s)/`，与负载无关。
