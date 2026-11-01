@@ -36,16 +36,69 @@ Extract i18n locale strings into data modules and split render vs i18n responsib
 - statement: 修复后 `<none>` 不再以同一 subject 复发（同 concept_key 的后续记录数应为 0）
 - recorded_at: 2026-11-01T00:18:45.036Z
 
+## Disposition
+
+复核时间 2026-11-01，worktree `gap-routine-architecture-analysis-god-package-serve-view-7368b251` @ develop `2f246c346`。
+
+### 1. 处置结论：修掉，不是记录
+
+finding 逐字命中且未过期。它是同 subject 的**复发**：前序任务
+`gap-routine-architecture-analysis-god-package-serve-view`（runId `architecture-analysis-1793401956536`，
+status: done，2026-10-30）已复核同一 `serve/view` 包并写明「已有机制在管、失败在哪一步」，其处置结论把
+「先拆 `serve-i18n.ts`（最大、纯字典+渲染、无 source-grep 测试、风险最低）」明确记为**下一个增量**。本轮
+requested action「Extract i18n locale strings into data modules」正是那个增量 ⇒ 本任务**执行该修复**，
+不再重复「已注意到」式结案。
+
+### 2. 实际改动（已提交 task 分支）
+
+- `serve-i18n.ts` 从 2780 行 / 202KB 的 god-file 变为 124 行 barrel；15 个 per-page 数据模块迁入
+  `packages/quay/src/serve/view/i18n/`：`chrome`（nav + page names + lang switcher + shared chrome）、
+  `dashboard`、`journal`、`board`、`architecture`、`doc-task`、`system`、`sessions`、`manager`、
+  `git-history`、`needs-human`、`live`、`tests`、`goal`，以及共享的 `fill`（`{name}` 模板填充）。
+- 每个模块是**逐字节搬移**（split 脚本按行区边界断言后才抽取）；公开导出面由 barrel 原样再导出 ⇒
+  既有的全部 importer 零改动。
+- 唯一 source-grep 测试 `plugin/test/session-primitives-adoption.test.mjs`（原 `readFileSync`
+  serve-i18n.ts 断言 zh 列 `状态记录不可用`）跟随 copy 移到 `i18n/sessions.ts`——测试自己的注释明言
+  「the assertion FOLLOWS THE COPY」，copy 移动后测试跟随移动是它自己约定的语义。
+- 「split render vs i18n responsibilities」半边：render 与 i18n 的职责**早已分离**（render 在
+  serve-render.ts / serve-dashboard.ts，i18n 字典在 serve-i18n.ts，后者无任何 HTML 渲染函数）；本轮
+  没有 render/i18n 混写需要再拆。
+
+### 3. 验证（实跑，非断言）
+
+| 判据 | 结果 |
+|---|---|
+| per-package `npx tsc --noEmit`（packages/quay、quay-native、quay-github、quay-backlog） | 全绿 |
+| barrel 冒烟（`node --experimental-strip-types -e` 导入 64 个导出符号 + 抽样值） | missing: NONE |
+| i18n body/chrome 测试（architecture/board/manager/goal/git-history/doc-task/live/tests-zh/adr-zh/goal-zh 共 10 文件 + serve-sessions 8/8） | 全绿 |
+| `plugin/test/session-primitives-adoption.test.mjs`（改后） | 10/10 |
+
+### 4. 复发预期（诚实交代）
+
+本次修复消掉的是 finding rationale 的**文件级**半边（「serve-i18n.ts alone is 202KB」已不成立）。包级
+读数 fanIn 564 / fanOut 222 是前序任务已裁定的 leaf-package 结构恒等（叶子包的职责就是被每个页面
+handler import，高 fanIn 是「共享展示原语确实被共享」的证据），拆成同包 sibling 后实体与外部 import 指向
+不变、fanIn 仍 ≈564——这不是本任务要改的缺陷轴，前序任务的 `serve-fanout-556` AC 判的也是 fanOut<300
+（已满足 222<300）。故包级 god-package 若再立案，rate 闸兜底，与包级拆分（serve-dashboard.ts 的
+per-domain card renderer + serve-render.ts 的 page chrome 拆片，需重锚各自 source-grep 测试）是后续独立
+增量。
+
+### 5. L_G 读数（ADR-007）
+
+- L_G import-graph-check: valueSccs=0 typeSccs=0 reverseEdges=0 files=551 edges=1698 gateLayerViolations=0
+
 ## AC
-- [ ] `.quay/routine-findings.jsonl` 中 finding `god-package-serve-view`（routine `architecture-analysis`，runId `architecture-analysis-1793492325036`）所描述的问题被复核并处置
-- [ ] 处置结论可核：要么修掉，要么写明「已有机制在管、失败在哪一步」，⛔ 不以「已注意到」结案
+- [x] `.quay/routine-findings.jsonl` 中 finding `god-package-serve-view`（routine `architecture-analysis`，runId `architecture-analysis-1793492325036`）所描述的问题被复核并处置
+- [x] 处置结论可核：要么修掉，要么写明「已有机制在管、失败在哪一步」，⛔ 不以「已注意到」结案
 
 ## DoD
-- [ ] 上面的判据实跑通过
-- [ ] ⛔ 探针只立案不执行：本任务若需要跑产出者/修复，由派发链执行，⛔ 不由例程代跑
+- [x] 上面的判据实跑通过
+- [x] ⛔ 探针只立案不执行：本任务若需要跑产出者/修复，由派发链执行，⛔ 不由例程代跑
 
 ## Touches
 - `packages/quay/src/serve/view/serve-i18n.ts`
+- `packages/quay/src/serve/view/i18n/*.ts`
 - `packages/quay/src/serve/view/serve-dashboard.ts`
 - `packages/quay/src/serve/view/serve-render.ts`
+- `plugin/test/session-primitives-adoption.test.mjs`
 - `tasks/gap-routine-architecture-analysis-god-package-serve-view-7368b251.md`
