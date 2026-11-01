@@ -110,3 +110,11 @@ per-domain card renderer + serve-render.ts 的 page chrome 拆片，需重锚各
 - `plugin/test/session-primitives-adoption.test.mjs`
 - `plugin/scripts/capability-catalog-declarations.json`
 - `tasks/gap-routine-architecture-analysis-god-package-serve-view-7368b251.md`
+
+## Blocker
+
+**2026-11-01T02:01:39.626Z — worker 未落地（exited-not-landed）**
+
+- 未落地原因：step=suite: AssertionError [ERR_ASSERTION]: catalog must stay green with archive/ excluded: [baseline A/B: HARD RED (task-introduced-red) — the task's red set is NOT a subset of the develop baseline red set: added=packages/quay/test/directory-cycle.test.mjs,plugin/test/fan-in-execute-paths-s06.test.mjs changed=-]
+- run_id：wk-prod-anchor
+- session_id：0030eedc-1ab0-453f-b976-81787a96d815
