@@ -228,10 +228,10 @@ const PINNED = {
       // same shipped template and OVERLAP in the same emitted file — (a) `effort: low` on the three
       // narrow-judgment roles (selector / pool-judge / meta-driver), and (b) meta-cc/archguard/plantuml
       // added to the task-worker/fix-worker/selector `mcpBlacklist` lists. Neither side's recorded hash
-      // survives (d41750ea… vs d82c5a3f…); the hash below is the MERGED template's, verified
-      // byte-equal to the merged `plugin/.quay/profiles.yml`. The other FIVE surface files hash
-      // UNCHANGED, the same targeted cross-check as the re-anchors above.
-      ".quay/profiles.yml  7133e73285ddec0f2a64db521e4684598f4cbeaa28beae8f99021966cfcb2f5a",
+      // survives (d41750ea… vs d82c5a3f…); the hash below is the MERGED template's fresh-install
+      // output. The other FIVE surface files hash UNCHANGED, the same targeted cross-check as the
+      // re-anchors above.
+      ".quay/profiles.yml  8ec2d6c5bd2192fe32c226742af771bc567c22fc67641a05dc54d0f05e53622a",
       // RE-ANCHORED 2026-10-13 (gap-goal-driver-hardcoded-120s-spawn-kill-preempts-record-timeout-and-
       // orphans-goal-locks Plan item 3c): the single-source runtime-artifact manifest gained FOUR
       // frontmatter-store lockfile patterns (`goals/*.lock`, `adr/*.lock`, `docs-managed/*.lock`,
