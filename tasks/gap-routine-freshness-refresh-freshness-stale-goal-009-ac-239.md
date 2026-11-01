@@ -3,7 +3,7 @@ id: gap-routine-freshness-refresh-freshness-stale-goal-009-ac-239
 title: "freshness-refresh: margin 9 (d=191, evidence_ts 2026-10-22T12:00:12Z,
   age 242.31h) -> margin/K=0.045 <= threshold 0.0714: window would be exhausted
   by tip advance before a producer"
-status: ready
+status: done
 labels:
   - gap
   - routine-filed
