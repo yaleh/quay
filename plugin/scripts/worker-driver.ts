@@ -2315,7 +2315,7 @@ export interface WorkerCmdOptions {
 function driverFanInNote(): string {
   return [
     `exit — the worker-driver takes over your worktree and mechanically runs fan-in`,
-    `(merge develop → delta 判定 → typecheck → scoped门 → suite → ff) to develop.`,
+    `(merge develop → delta 判定 → typecheck → scoped门 → suite → ff).`,
     `You do NOT run the suite and do NOT call the fan-in workflow yourself.`,
   ].join(" ");
 }
@@ -2328,12 +2328,10 @@ function driverFanInNote(): string {
  *  烧掉整条 fan-in。创建 prompt 与续做 prompt 共用。 */
 function acCheckNote(): string {
   return [
-    `after implementing, go through each Acceptance Criterion one-by-one and verify it is satisfied by your work;`,
-    `then record the AC state through the Provider ABI — do NOT hand-edit the \`- [ ]\`/\`- [x]\` checkbox`,
-    `characters in the task file yourself: call \`task_check\` to confirm, then call \`task_write\` with the`,
-    `updated \`## Acceptance Criteria\` section (satisfied criteria as \`- [x]\`); \`task_write\` commits`,
-    `\`tasks/<id>.md\` branch-aware on its own, so the tick reaches fan-in's ac-precheck exactly as a hand-edit would —`,
-    `an AC left unchecked fails fan-in's ac-precheck and burns the whole fan-in run.`,
+    `verify each Acceptance Criterion one-by-one; record the AC state through the Provider ABI — do NOT`,
+    `hand-edit the \`- [ ]\`/\`- [x]\` checkboxes: \`task_check\` to confirm, then \`task_write\` the updated`,
+    `\`## Acceptance Criteria\` section (satisfied as \`- [x]\`); \`task_write\` commits \`tasks/<id>.md\``,
+    `branch-aware, so the tick reaches fan-in's ac-precheck (an unchecked AC fails it and burns the run).`,
   ].join(" ");
 }
 
@@ -2347,10 +2345,9 @@ function acCheckNote(): string {
 function bashWriteTargetGuardNote(root: string, worktreeClause: string): string {
   return [
     `⛔ THIS GUARD ALSO COVERS BASH: any Bash command, shell script, or inline \`node -e\`/\`python -c\``,
-    `that writes a file must target ${worktreeClause} — Bash does NOT sense shell \`cd\` either,`,
-    `so never hardcode the main-checkout root \`${root}\` as a write target inside a script`,
-    `(e.g. \`cat > "$WT/x.mjs"\` whose script body contains \`const T = "${root}/…"\` + \`fs.writeFileSync\`);`,
-    `writing under \`${root}\` from Bash lands the files in the develop shared checkout exactly like a main-checkout file_path does.`,
+    `that writes a file must target ${worktreeClause} — never hardcode the main-checkout root \`${root}\` as a`,
+    `write target (writing under \`${root}\` lands the files in the develop shared checkout, exactly like a`,
+    `main-checkout file_path does).`,
   ].join(" ");
 }
 
@@ -2370,12 +2367,12 @@ function preMergeNote(task: string, root: string, worktree: string): string {
     lines.push(
       `(ii) run the SAME scoped gate the driver's fan-in runs: \`${scoped.argv.join(" ")}\`;`,
       `(iii) if red, fix and rerun until green;`,
-      `(iv) once green, record the scoped-gate cache so fan-in skips the now-redundant scoped gate: \`${scopedGateCacheWriteSignature(task, root, worktree)}\`;`,
+      `(iv) then record the scoped-gate cache: \`${scopedGateCacheWriteSignature(task, root, worktree)}\`;`,
       `(v) commit and exit.`,
     );
   } else if (scoped.kind === "skip") {
     lines.push(
-      `(ii) skip the scoped gate (${scoped.reason}: this project declares no loop.scoped_command in .quay/config.yml — the driver's fan-in goes straight to the full-suite step);`,
+      `(ii) no scoped gate is declared (${scoped.reason}: the driver's fan-in goes straight to the full suite);`,
       `(iii) commit and exit.`,
     );
   } else {
@@ -2418,11 +2415,10 @@ function antiDriftPreExitNote(task: string, root: string, worktree: string): str
   return [
     `ALSO before exiting, run the SAME anti-drift Touches check the driver's fan-in runs as a HARD pre-merge gate:`,
     `\`${argv.join(" ")} --task ${task} --worktree ${worktree} --merge-target ${mergeTarget}\`.`,
-    `It diffs your worktree against \`${mergeTarget}\` and exits 1 naming every file you changed outside the task's`,
-    `declared \`## Touches\`. If it reports a violation, fix it inside THIS session — do NOT exit and let the retry`,
-    `worker pay a whole new session for it: either (a) declare the file in \`## Touches\` **through the task ABI**`,
-    `(\`task_write\`) when the write is genuinely part of the task — a hand edit does not reach fan-in — or (b) revert`,
-    `the stray write.`,
+    `It exits 1 naming every file you changed outside the task's declared \`## Touches\`. If it reports a`,
+    `violation, fix it inside THIS session — do NOT exit and let the retry worker pay a whole new session:`,
+    `(a) declare the file in \`## Touches\` **through the task ABI** (\`task_write\`) when the write is genuinely`,
+    `part of the task — a hand edit does not reach fan-in — or (b) revert the stray write.`,
   ].join(" ");
 }
 
@@ -2678,9 +2674,9 @@ function dispatchSetupSignature(root: string, worktree: string, base?: string): 
 function darkAxisRecordNote(): string {
   return [
     `ADR-007 dark-axis record — the mechanical fan-in REFUSES the done flip unless the task body carries ONE of:`,
-    `(a) a numeric L_D/L_G reading: the axis token (\`L_D\` / \`L_G\`) at a LINE START (after at most a bullet/quote/checkbox prefix) plus at least one concrete \`key=value\`/\`key: value\` quantity on that line or its indented continuation lines — e.g. \`- L_G archguard: cycles=0\` or \`- L_D: code:doc=1:8\`; a prose mention of "L_G"/"L_D" is NOT a reading;`,
-    `(b) the explicit declaration \`该轴仍暗,理由:<one-line reason>\` (or \`axis still dark, reason: <one-line reason>\`) — a bare "still dark" with no reason does NOT discharge it.`,
-    `Record whichever is true for this task in the task body through \`task_write\` (never by hand-editing the file).`,
+    `(a) a numeric L_D/L_G reading: token \`L_D\`/\`L_G\` at a LINE START plus a concrete \`key=value\`/\`key: value\` quantity — e.g. \`- L_G archguard: cycles=0\`; a prose mention is NOT a reading;`,
+    `(b) \`该轴仍暗,理由:<one-line reason>\` — a bare "still dark" does NOT discharge it.`,
+    `Record whichever via \`task_write\` (never hand-edit the file).`,
   ].join(" ");
 }
 
@@ -2712,14 +2708,14 @@ export function buildWorkerPrompt(task: string, root: string): string {
     `Task: ${task}. Repo root: ${root}.`,
     `Run the implementation chain: (1) create an isolated git worktree for ${task}, ${baseNote}then immediately`,
     `provision it by running \`${dispatchSetupSignature(root, "<the worktree path you created in step 1>", mergeTarget)}\``,
-    `(node_modules symlink-to-main + config.yml via worktree-include — the mechanism, not agent-remembering);`,
+    `(node_modules symlink + config.yml via worktree-include — mechanism, not agent-remembering);`,
     `(2) implement the task per its Proposal/Plan/AC/DoD, committing your implementation on the task branch; ${acCheckNote()}`,
     `${darkAxisRecordNote()}`,
     `(2b) ${preMergeNote(task, root, "<the worktree path you created in step 1>")}`,
     `(2c) ${antiDriftPreExitNote(task, root, "<the worktree path you created in step 1>")}`,
     `${experimentResumeClause(root, task, null) ?? ""}`,
     `(3) ${driverFanInNote()}`,
-    `⚠️ CRITICAL: for CODE files, every Read/Edit/Write file_path MUST be the absolute path of the worktree you created in step 1 — never the main-checkout path \`${root}\`, never a relative path. Claude Code's file tools use absolute paths and do NOT sense shell \`cd\`; a main-checkout or relative path lands your implementation in the develop shared checkout, not your worktree. ${bashWriteTargetGuardNote(root, "the absolute path of the worktree you created in step 1")} This rule does NOT cover the task file — that is edited only via \`task_write\` (see step 2 above), never Read/Edit/Write.`,
+    `⚠️ CRITICAL: for CODE files, every Read/Edit/Write file_path MUST be your worktree's absolute path — never the main-checkout path \`${root}\`, never a relative path (file tools do NOT sense shell \`cd\`). ${bashWriteTargetGuardNote(root, "your worktree's absolute path")} This rule does NOT cover the task file — it is edited only via \`task_write\`, never Read/Edit/Write.`,
     `You own your worktree fully; apart from the final merge (done by the driver) do not touch develop.`,
   ].join(" ");
 }
@@ -2914,15 +2910,15 @@ export async function continueStateForTaskAsync(root: string, taskId: string): P
  *  否则下一轮 fan-in 的 merge step 再失败。 */
 function continueConflictResolutionNote(): string {
   return [
-    `CONFLICT RESOLUTION — if the prior mechanical fan-in left the worktree with unmerged paths (UU in \`git status\`), or \`git merge develop\` reports CONFLICT, resolve it BEFORE continuing implementation; ⛔ never exit while unmerged paths remain (the next fan-in merge step would fail again).`,
-    `(1) outline doc (docs/proposals/quay-product-outline.md — its §6 DELIVERY-INVENTORY counts are computed at check-time, no snapshot to recompute): take the develop version (\`git checkout develop -- docs/proposals/quay-product-outline.md\`); ⛔ do NOT hand-merge the counts.`,
-    `(2) code files (e.g. worker-driver.ts): read both sides of the diff and take the semantic union of the two changes (keep both changes where they do not conflict).`,
-    `(2b) task files (\`tasks/<id>.md\` — your own task body or another task's): take the per-hunk union of both sides — keep develop's edits (a driver/manager may have narrowed \`## Touches\`, appended \`## Needs-Human\`, or flipped \`status:\`) AND keep your branch's edits (\`- [x]\` AC ticks, \`## Evidence\` additions). ⛔ do NOT "take the develop version" — that silently drops your AC ticks and the next fan-in's ac-precheck goes red with a misleading reason. ⛔ do NOT write \`status:\` frontmatter yourself: on a \`status:\` conflict take develop's value verbatim (the promotion/worker driver owns that field).`,
-    `(3) dual-copy files (a workflow script that lives in BOTH \`.claude/workflows/*\` AND its \`plugin/workflows/*\` mirror): take the develop version, then re-sync BOTH copies byte-identical (\`git checkout develop -- .claude/workflows/<file> plugin/workflows/<file>\`); ⛔ do NOT take a semantic union — a union would make the two copies diverge and the dual-copy drift check would go red.`,
-    `(4) tick doc (orchestration/*-tick-core.md, e.g. orchestration/fast-mode-tick-core.md — not outline, not code): take the develop version (\`git checkout develop -- <file>\`); ⛔ do NOT hand-merge.`,
-    `(5) modify/delete CONFLICT (one side deleted the file, the other modified it): first judge WHICH side deleted — if YOUR task branch deleted it intentionally (a replacement implementation lives on the branch, e.g. a TS reincarnation of a deleted shell script) first read develop's version (\`git show develop:<file>\`) and absorb any develop-side semantic changes into your replacement implementation (e.g. writeSuiteCapture fail-open + capture 缺失回退) — THEN accept the deletion (\`git rm <file>\`), ⛔ never \`git rm\` a branch-side intentional deletion before absorbing develop's post-branch changes or you silently drop them; if develop deleted it, accept develop's deletion (\`git rm <file>\`). ⛔ never silently restore the deleted file (reviving a retired implementation), and never treat your branch's intentional deletion as "take the develop version".`,
+    `CONFLICT RESOLUTION — if the worktree has unmerged paths (UU in \`git status\`) or \`git merge develop\` reports CONFLICT, resolve it BEFORE continuing implementation; ⛔ never exit while unmerged paths remain.`,
+    `(1) outline doc (docs/proposals/quay-product-outline.md): take the develop version (\`git checkout develop -- docs/proposals/quay-product-outline.md\`); ⛔ do NOT hand-merge the counts.`,
+    `(2) code files: read both sides and take the semantic union (keep both changes where they do not conflict).`,
+    `(2b) task files (\`tasks/<id>.md\`): take the per-hunk union — keep develop's edits (\`## Touches\`/Needs-Human/\`status:\`) AND keep your branch's edits (\`- [x]\` AC ticks, \`## Evidence\`). ⛔ do NOT "take the develop version" (it silently drops your AC ticks). ⛔ do NOT write \`status:\` frontmatter yourself: on a \`status:\` conflict take develop's value verbatim.`,
+    `(3) dual-copy files (\`.claude/workflows/*\` ↔ \`plugin/workflows/*\`): take the develop version, then re-sync BOTH copies byte-identical; ⛔ do NOT take a semantic union.`,
+    `(4) tick doc (orchestration/*-tick-core.md): take the develop version (\`git checkout develop -- <file>\`); ⛔ do NOT hand-merge.`,
+    `(5) modify/delete CONFLICT: first judge WHICH side deleted — if your branch deleted intentionally (a replacement lives on the branch), read develop's version (\`git show develop:<file>\`) and absorb its changes, THEN \`git rm <file>\`; if develop deleted, \`git rm <file>\`. ⛔ never silently restore the deleted file.`,
     `(6) \`git add <resolved files>\` then \`git commit --no-edit\` to complete the merge.`,
-    `FF NOT FAST-FORWARD — if the prior failure was \`step=ff: ... not fast-forward\` (NOT a merge CONFLICT; develop advanced during the long suite so the task branch fell behind): merge develop again (\`git merge develop\`, resolving any conflict per the rules above), \`git commit --no-edit\`, then re-exit — the driver re-runs fan-in and the ff will then succeed. ⛔ do NOT re-implement; this failure is branch-lag, not a code defect.`,
+    `FF NOT FAST-FORWARD — if the prior failure was \`step=ff: ... not fast-forward\` (develop advanced during the long suite): merge develop again (\`git merge develop\`, resolving any conflict per the rules above), \`git commit --no-edit\`, then re-exit — the driver re-runs fan-in and the ff will then succeed. ⛔ do NOT re-implement.`,
   ].join(" ");
 }
 
@@ -2934,7 +2930,7 @@ const CONTINUE_ATTEMPT_LIST_MAX = 3;
  *  只带最后一条 reason（旧）⇒ 重跑 worker 看不到前两次栽在哪；本段把最近 N 次 exited-not-landed 尝试的
  *  (ts, step, reason) 拼进 prompt（⛔ 只取最后一条是病根）。 */
 function continueAttemptsNote(attempts: ExitedNotLandedAttempt[]): string {
-  if (attempts.length === 0) return "no prior exited-not-landed attempts on record.";
+  if (attempts.length === 0) return "";
   const recent = attempts.slice(-CONTINUE_ATTEMPT_LIST_MAX);
   const lines = recent.map((a) => {
     const ts = a.ts ? a.ts.slice(0, 19) : "unknown-ts";
@@ -4420,25 +4416,23 @@ export function buildContinueWorkerPrompt(task: string, root: string, state: Con
   return [
     `You are a per-task worker in the quay repo (SPEC-worker-driven-inner §5 阶段 2).`,
     `Task: ${task}. Repo root: ${root}.`,
-    `CONTINUE (reuse, ⛔ do NOT create): a worktree for ${task} already exists at ${wt}`,
-    `on branch task/${task} from a prior exited-not-landed round — reuse it; do NOT run \`git worktree add\``,
-    `(it would fail: the path/branch already exists). Prior round state: branch task/${task} already has`,
-    `${commits} commits${head}; Acceptance Criteria currently checked ${ac};`,
-    `the last round exited-not-landed because: ${reason}.`,
+    `CONTINUE (reuse, do NOT create): a worktree for ${task} already exists at ${wt} on branch task/${task}`,
+    `from a prior exited-not-landed round — reuse it; do NOT run \`git worktree add\` (the path/branch already`,
+    `exists). Prior round: ${commits} commits${head}; Acceptance Criteria checked ${ac}; exited-not-landed because: ${reason}.`,
     `${continueAttemptsNote(attempts)}`,
     `${continueSuiteLogNote(attempts)}`,
     `${continueRelatednessNote(root, task, attempts)}`,
     `${continueConflictResolutionNote()}`,
     `${continueDarkAxisNote(state)}`,
     `${darkAxisRecordNote()}`,
-    `Re-provision the existing worktree first (idempotent, no-op if already set up): \`${dispatchSetupSignature(root, wt, resolveTaskMergeTarget(task, root))}\`.`,
+    `Re-provision the existing worktree (idempotent): \`${dispatchSetupSignature(root, wt, resolveTaskMergeTarget(task, root))}\`.`,
     `Run the remaining chain in the existing worktree: (1) continue implementing per the task's`,
     `Proposal/Plan/AC/DoD (⛔ do not redo the ${commits} commits already on the branch); ${acCheckNote()}`,
     `(1b) ${preMergeNote(task, root, wt)}`,
     `(1c) ${antiDriftPreExitNote(task, root, wt)}`,
     `${experimentResumeClause(root, task, state.worktreePath) ?? ""}`,
     `(2) ${driverFanInNote()}.`,
-    `⚠️ CRITICAL: for CODE files, every Read/Edit/Write file_path MUST be the worktree absolute path ${wt} — never the main-checkout path \`${root}\`, never a relative path. Claude Code's file tools use absolute paths and do NOT sense shell \`cd\`; a main-checkout or relative path lands your change in develop, not your worktree. ${bashWriteTargetGuardNote(root, `the absolute path of the existing worktree \`${wt}\``)} This rule does NOT cover the task file — that is edited only via \`task_write\` (see above), never Read/Edit/Write.`,
+    `⚠️ CRITICAL: for CODE files, every Read/Edit/Write file_path MUST be the worktree absolute path ${wt} — never the main-checkout path \`${root}\`, never a relative path (file tools do NOT sense shell \`cd\`). ${bashWriteTargetGuardNote(root, `the absolute path of the existing worktree \`${wt}\``)} This rule does NOT cover the task file — it is edited only via \`task_write\`, never Read/Edit/Write.`,
     `You own this worktree fully; apart from the final merge do not touch develop.`,
   ].join(" ");
 }

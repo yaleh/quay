@@ -196,7 +196,7 @@ import { ensureBranchModel } from "../../packages/quay/src/core/branch-model.ts"
 // gap-worker-kind-stop-waits-for-all-in-flight-workers-instead-of-detaching-for-adoption：`recordKindStop`
 // 是 `stop --kind worker` 的【写侧原语】——夹具经它触发停机，⛔ 不手写一份 JSON 形状（改天写侧变了，
 // 手写的夹具会继续「通过」，测的就不是那条通道了）。
-import { kernelSiblingArgv, recordKindStop, clearKindStop } from "../scripts/driver-runtime.ts";
+import { kernelSiblingArgv, resolveKernelScriptsDir, recordKindStop, clearKindStop } from "../scripts/driver-runtime.ts";
 // gap-routine-semantic-dedup-scan-append-heartbeat-vs-round：round 落盘 append 的【共享家】——
 // SSOT 棘轮拿它做同一性对照（worker-driver 的 appendRoundToFile 必须 === 它）。
 import { appendHeartbeatLine } from "../scripts/driver-runtime.ts";
@@ -1143,6 +1143,52 @@ test("gap-worker-prompt-ac-check-via-abi-not-hand-edit — 单一真相源：两
   const sharedMarker = "record the AC state through the Provider ABI";
   assert.ok(create.includes(sharedMarker), "create prompt carries the shared acCheckNote marker");
   assert.ok(cont.includes(sharedMarker), "continue prompt carries the SAME acCheckNote marker (not a forked copy)");
+});
+
+// ── gap-worker-prompt-note-family-slimming — buildWorkerPrompt/buildContinueWorkerPrompt 合并长度瘦身 ──
+// 基线（第一步提交）：先把瘦身前两个 builder 的合并输出字符数落成一个已提交的测试读数，之后瘦身提交
+// 把断言换成「较基线下降 ≥ 25%」。读数按 kernel 安装路径归一化（替换成固定 token），跨 checkout 路径稳定。
+
+/** 归一化后的合并输出字符数（kernel 安装路径 → `<KERNEL>`，消除机器相关路径长度）。 */
+function normalizedCombinedPromptChars() {
+  const kernelDir = resolveKernelScriptsDir();
+  const norm = (s) => s.split(kernelDir).join("<KERNEL>");
+  const create = norm(buildWorkerPrompt("gap-x", "/r"));
+  const cont = norm(buildContinueWorkerPrompt("gap-x", "/r", {
+    worktreePath: "/wt",
+    branchCommits: 3,
+    branchHeadSubject: "x",
+    acChecked: 0,
+    acTotal: 3,
+    failureReason: "r",
+    attempts: [],
+  }));
+  return create.length + cont.length;
+}
+
+/** 瘦身前基线（第一步已提交）：combined 归一化字符数 = 12137。 */
+const WORKER_PROMPT_SLIM_BASELINE = 12137;
+
+test("gap-worker-prompt-note-family-slimming — AC1: buildWorkerPrompt + buildContinueWorkerPrompt combined char count down ≥25% vs the committed baseline", () => {
+  const combined = normalizedCombinedPromptChars();
+  const threshold = Math.floor(WORKER_PROMPT_SLIM_BASELINE * 0.75);
+  assert.ok(combined <= threshold, `combined normalized chars ${combined} must be ≤ ${threshold} (baseline ${WORKER_PROMPT_SLIM_BASELINE}, −25%)`);
+});
+
+test("gap-worker-prompt-note-family-slimming — AC2 (negative control): the four arbitration needles stay verbatim in BOTH prompts", () => {
+  const cases = [
+    ["create", buildWorkerPrompt("gap-x", "/r")],
+    ["continue", buildContinueWorkerPrompt("gap-x", "/r", {
+      worktreePath: "/wt", branchCommits: 3, branchHeadSubject: "x", acChecked: 0, acTotal: 3, failureReason: "r", attempts: [],
+    })],
+  ];
+  for (const [name, prompt] of cases) {
+    assert.match(prompt, /file_path MUST be .* absolute path/, `${name}: worktree absolute-path guard needle`);
+    assert.match(prompt, /task_write/, `${name}: task_write (ABI) needle`);
+    assert.match(prompt, /do NOT hand-edit/, `${name}: not-hand-edit-checkbox needle`);
+    assert.match(prompt, /anti-drift-touches-check\.ts --task gap-x --worktree/, `${name}: anti-drift argv needle`);
+    assert.ok(prompt.includes("exit — the worker-driver takes over"), `${name}: driver take-over exit needle (verbatim)`);
+  }
 });
 
 // ── gap-continue-prompt-delta-relatedness-note — 续做 prompt 两条结构性信号 ─────────────────────────
