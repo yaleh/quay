@@ -26,7 +26,7 @@
 // source is not present in the tree (an installed-plugin-only layout) A1/A3 have no input, and the
 // checker says so instead of reporting a green it did not earn.
 //
-// Usage: node --experimental-strip-types profiles-role-coverage-check.ts [--check] [--root <dir>] [--json]
+// Usage: node --experimental-strip-types profiles-role-coverage-check.ts [--check] [--root <dir>] [--carrier <profiles.yml>]… [--json]
 // Exit:  0 = pass | 1 = fail | 2 = usage/env error | 3 = NOT-EVALUATED
 
 import fs from "node:fs";
@@ -35,8 +35,9 @@ import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { emitPass, emitFail, emitNotEvaluated, helpExit } from "./gate-script-base.ts";
-import { readProfilesConfig } from "./profile-policy.ts";
+import { readProfilesConfig, resolveRole, type ProfilesConfig } from "./profile-policy.ts";
 import { repoRoot } from "./repo-root.ts";
+import { parse as parseYaml } from "yaml";
 
 /** Directories under plugin/scripts/ that are NOT driver sources (fixtures / archived copies). */
 const CORPUS_EXCLUDES = ["checker-mutation-cases", "archive", "node_modules", "dist"];
@@ -57,6 +58,90 @@ const RETIRED_ROLES: ReadonlySet<string> = new Set(["inner"]);
  * driver" can be reported without either failing these or silently blessing them.
  */
 const DIRECTLY_STARTED_ROLES: ReadonlySet<string> = new Set(["manager", "outer"]);
+
+/**
+ * Single-session-single-model invariant (gap-single-session-single-model-invariant). A session's
+ * model has TWO config sources that can disagree — `launchArgv`'s `--model` (profile.model) and the
+ * env keys `ANTHROPIC_DEFAULT_{HAIKU,SONNET,OPUS}_MODEL` (what Claude Code feeds subagents / default
+ * models). When they disagree, a mid-session spawn or fallback silently switches model and the
+ * prompt-cache prefix invalidates (cache_read 0.05–0.1× → cache_write 1.25× or fresh 1×). The two
+ * carriers in the wild already express the two legal shapes:
+ *   · quay dev-tree (`.quay/profiles.yml`) — all three DEFAULT_* == model (self-consistent);
+ *   · claudecodeui shipped                  — all three DEFAULT_* ABSENT (the launcher wrapper carries
+ *     the model mapping as the single source).
+ * Anything else — some keys present, or a present key != the resolved model — is the mixed state that
+ * IS the silent mid-session model drift. This is a per-carrier, per-RESOLVED-ROLE judgment (the env
+ * the launched session actually receives after profile+role merge), never a template-literal
+ * comparison (hard rule 4b: read the host, not a hardcoded model name).
+ */
+const DEFAULT_MODEL_KEYS = [
+  "ANTHROPIC_DEFAULT_HAIKU_MODEL",
+  "ANTHROPIC_DEFAULT_SONNET_MODEL",
+  "ANTHROPIC_DEFAULT_OPUS_MODEL",
+] as const;
+
+/**
+ * The invariant for ONE resolved profile: all three DEFAULT_* absent, or all three present and equal
+ * to `model`. Returns [] when the invariant holds; otherwise one human-readable violation per defect
+ * (partial declaration / a value != model). `label` names the carrier:role for the report.
+ */
+export function singleModelInvariantViolations(
+  label: string,
+  model: string | null,
+  env: Record<string, string>,
+): string[] {
+  const declared = DEFAULT_MODEL_KEYS.filter((k) => env[k] !== undefined);
+  if (declared.length === 0) return [];
+  const out: string[] = [];
+  const missing = DEFAULT_MODEL_KEYS.filter((k) => env[k] === undefined);
+  if (missing.length > 0) {
+    out.push(
+      `${label}: partial ANTHROPIC_DEFAULT_*_MODEL declaration — declared ${declared.join(", ")}, missing ${missing.join(", ")} ` +
+        `(legal states are all three == model, or all three absent)`,
+    );
+  }
+  const mismatched = DEFAULT_MODEL_KEYS.filter((k) => env[k] !== undefined && env[k] !== model);
+  if (mismatched.length > 0) {
+    out.push(
+      `${label}: DEFAULT_* != model — model=${JSON.stringify(model)}, but ${mismatched
+        .map((k) => `${k}=${JSON.stringify(env[k])}`)
+        .join(", ")}`,
+    );
+  }
+  return out;
+}
+
+/** The invariant across every role of one carrier: resolve each role, check its merged env vs model. */
+function carrierModelInvariantViolations(config: ProfilesConfig, label: string): string[] {
+  const out: string[] = [];
+  const roles = config.roles ?? {};
+  for (const roleName of Object.keys(roles)) {
+    try {
+      const resolved = resolveRole(config, roleName);
+      out.push(...singleModelInvariantViolations(`${label}:${roleName}`, resolved.model, resolved.env));
+    } catch (e) {
+      out.push(
+        `${label}: role "${roleName}" could not be resolved for the model invariant: ${e instanceof Error ? e.message : String(e)}`,
+      );
+    }
+  }
+  return out;
+}
+
+/** Read + parse one profiles.yml by FILE path (the `--carrier` surface takes a file, not a root). */
+function readProfilesFile(file: string): ProfilesConfig {
+  const raw = fs.readFileSync(file, "utf8");
+  let doc: unknown;
+  try {
+    doc = parseYaml(raw);
+  } catch (e) {
+    throw new Error(`profiles config is not valid YAML: ${file} — ${e instanceof Error ? e.message : String(e)}`);
+  }
+  if (doc === null || typeof doc !== "object" || Array.isArray(doc)) {
+    throw new Error(`profiles config must be a YAML mapping: ${file}`);
+  }
+  return doc as ProfilesConfig;
+}
 
 /**
  * The role-name extractor. The needle is assembled at runtime on purpose: this file lives in
@@ -137,9 +222,11 @@ interface Result {
   retiredPresent: string[];
   directRoles: string[];
   unknownRoles: string[];
+  modelInvariantViolations: string[];
+  modelInvariantCarriers: string[];
 }
 
-function evaluate(root: string): Result {
+function evaluate(root: string, extraCarriers: string[] = []): Result {
   const pluginRoot = path.join(root, "plugin");
   const files = driverSources(pluginRoot);
   const requestedSet = new Set<string>();
@@ -157,13 +244,18 @@ function evaluate(root: string): Result {
     retiredPresent: [],
     directRoles: [],
     unknownRoles: [],
+    modelInvariantViolations: [],
+    modelInvariantCarriers: [],
   };
 
   // ── The OTHER template (the one `quay-init.sh` copies into a project) ───────────────────────────
   let shipped: Set<string> | null = null;
   try {
-    shipped = roleSet(readProfilesConfig(pluginRoot));
+    const shippedConfig = readProfilesConfig(pluginRoot);
+    shipped = roleSet(shippedConfig);
     res.shippedRoles = sorted(shipped);
+    res.modelInvariantViolations.push(...carrierModelInvariantViolations(shippedConfig, "shipped"));
+    res.modelInvariantCarriers.push(`${pluginRoot}/.quay/profiles.yml`);
   } catch (e) {
     res.notEvaluatedReason = `shipped carrier unreadable (${pluginRoot}/.quay/profiles.yml): ${e instanceof Error ? e.message : String(e)}`;
     return res;
@@ -200,13 +292,17 @@ function evaluate(root: string): Result {
       return res;
     }
     let init: Set<string>;
+    let initConfig: ProfilesConfig;
     try {
-      init = roleSet(readProfilesConfig(ws));
+      initConfig = readProfilesConfig(ws);
+      init = roleSet(initConfig);
     } catch (e) {
       res.notEvaluatedReason = `init produced no readable .quay/profiles.yml: ${e instanceof Error ? e.message : String(e)}`;
       return res;
     }
     res.initRoles = sorted(init);
+    res.modelInvariantViolations.push(...carrierModelInvariantViolations(initConfig, "init"));
+    res.modelInvariantCarriers.push(`${ws}/.quay/profiles.yml`);
 
     for (const role of requestedSet) if (!init.has(role)) res.missingFromInit.push(role);
     for (const role of requestedSet) if (!shipped.has(role)) res.missingFromShipped.push(role);
@@ -219,6 +315,34 @@ function evaluate(root: string): Result {
         res.unknownRoles.push(role);
       }
     }
+
+    // ── The dev-tree root carrier (`.quay/profiles.yml`) — the "all three == model" legal shape.
+    const devTreeCarrier = path.join(root, ".quay", "profiles.yml");
+    if (fs.existsSync(devTreeCarrier)) {
+      try {
+        res.modelInvariantViolations.push(...carrierModelInvariantViolations(readProfilesConfig(root), "dev-tree"));
+        res.modelInvariantCarriers.push(devTreeCarrier);
+      } catch (e) {
+        res.modelInvariantViolations.push(
+          `dev-tree carrier unreadable (${devTreeCarrier}): ${e instanceof Error ? e.message : String(e)}`,
+        );
+        res.modelInvariantCarriers.push(devTreeCarrier);
+      }
+    }
+
+    // ── Explicit `--carrier <file>` inputs (cross-project evidence, e.g. claudecodeui's carrier).
+    for (const carrierFile of extraCarriers) {
+      try {
+        res.modelInvariantViolations.push(...carrierModelInvariantViolations(readProfilesFile(carrierFile), `carrier:${carrierFile}`));
+        res.modelInvariantCarriers.push(carrierFile);
+      } catch (e) {
+        res.modelInvariantViolations.push(
+          `carrier unreadable (${carrierFile}): ${e instanceof Error ? e.message : String(e)}`,
+        );
+        res.modelInvariantCarriers.push(carrierFile);
+      }
+    }
+
     return res;
   } finally {
     fs.rmSync(ws, { recursive: true, force: true });
@@ -229,13 +353,16 @@ function main(argv: string[]): number {
   const args = argv.slice(2);
   if (args.includes("--help") || args.includes("-h")) {
     helpExit(
-      "usage: node --experimental-strip-types profiles-role-coverage-check.ts [--check] [--root <dir>] [--json]\n" +
+      "usage: node --experimental-strip-types profiles-role-coverage-check.ts [--check] [--root <dir>] [--carrier <profiles.yml>]… [--json]\n" +
         "\n" +
-        "Does a REAL init produce a profile carrier defining every profile role the drivers request?\n" +
+        "Does a REAL init produce a profile carrier defining every profile role the drivers request,\n" +
+        "and does every carrier obey the single-session-single-model invariant (all three\n" +
+        "ANTHROPIC_DEFAULT_*_MODEL absent, or all three equal to the resolved model)?\n" +
         "Exit 0 = pass, 1 = fail, 2 = usage/env error, 3 = NOT-EVALUATED (no init artifact obtainable).",
     );
   }
   let root = repoRoot();
+  const extraCarriers: string[] = [];
   for (let i = 0; i < args.length; i++) {
     if (args[i] === "--root") {
       const v = args[i + 1];
@@ -244,12 +371,20 @@ function main(argv: string[]): number {
         return 2;
       }
       root = path.resolve(v);
-      break;
+      i++;
+    } else if (args[i] === "--carrier") {
+      const v = args[i + 1];
+      if (!v) {
+        process.stderr.write("profiles-role-coverage-check: --carrier requires a value\n");
+        return 2;
+      }
+      extraCarriers.push(path.resolve(v));
+      i++;
     }
   }
   const asJson = args.includes("--json");
 
-  const res = evaluate(root);
+  const res = evaluate(root, extraCarriers);
 
   if (res.notEvaluatedReason) {
     return emitNotEvaluated(res.notEvaluatedReason, res, { json: asJson });
@@ -258,7 +393,8 @@ function main(argv: string[]): number {
     res.missingFromInit.length ||
     res.missingFromShipped.length ||
     res.divergent.length ||
-    res.retiredPresent.length
+    res.retiredPresent.length ||
+    res.modelInvariantViolations.length
   ) {
     const parts: string[] = [];
     if (res.missingFromInit.length) parts.push(`init output lacks requested role(s): ${res.missingFromInit.join(", ")}`);
@@ -267,11 +403,17 @@ function main(argv: string[]): number {
     if (res.retiredPresent.length) {
       parts.push(`retired profile role(s) shipped to every new project: ${res.retiredPresent.join(", ")}`);
     }
+    if (res.modelInvariantViolations.length) {
+      parts.push(`single-session-single-model invariant violated: ${res.modelInvariantViolations.join(" | ")}`);
+    }
     return emitFail(parts.join("; "), res, { json: asJson });
   }
   const notes: string[] = [];
   if (res.directRoles.length) notes.push(`directly-started (no launchArgv call site): ${res.directRoles.join(", ")}`);
   if (res.unknownRoles.length) notes.push(`unconsumed by any known consumer: ${res.unknownRoles.join(", ")}`);
+  if (res.modelInvariantCarriers.length) {
+    notes.push(`single-model invariant green on ${res.modelInvariantCarriers.length} carrier(s)`);
+  }
   return emitPass(
     `init output covers all ${res.requested.length} requested role(s) and matches the shipped carrier` +
       (notes.length ? `; ${notes.join("; ")}` : ""),
@@ -280,4 +422,6 @@ function main(argv: string[]): number {
   );
 }
 
-process.exit(main(process.argv));
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  process.exit(main(process.argv));
+}
