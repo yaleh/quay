@@ -33,6 +33,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { norm } from "./gate-script-base.ts";
 
 export const TASK_FILE_REL = "tasks/gap-ac61-staleness-list-item-disposition.md";
 export const LIST_ITEMS = ["A-1", "A-2", "A-3", "A-4", "A-5", "A-6", "A-7", "B-1", "B-2", "B-3", "B-4"];
@@ -58,10 +59,11 @@ export const C7_LIVE_MARKERS = [
 export const DISPOSITION_HEADING = "AC61 处置记录";
 export const CLASSIFICATION_HEADING = "integration 命中逐条分类";
 
-/** Normalize: strip backticks, collapse whitespace, trim (mirrors retired-clause-check.norm). */
-export function norm(s: string): string {
-  return s.replace(/`/g, "").replace(/\s+/g, " ").trim();
-}
+/** Normalize: strip backticks, collapse whitespace, trim — the ONE definition lives in
+ *  gate-script-base.ts (semantic-dedup-scan finding `norm` / B4); re-exported here so the
+ *  historical import path (this module + its test) stays valid. ⛔ Not the same as
+ *  retired-clause-check.ts's local `norm`, which ALSO strips `#`/`//` comment prefixes. */
+export { norm };
 
 /** Extract the content of a `## <key>` section (through the next `## ` heading or EOF). */
 export function extractH2(text: string, key: string): string | null {
