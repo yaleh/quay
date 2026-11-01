@@ -435,7 +435,7 @@
     "needs-human-parking-recheck.ts": "Is any needs-human task parked on a mechanical criterion that NO LONGER HOLDS — for every status:needs-human task, re-run the judge NAMED in its LAST ## Needs-Human 阻碍原因 line (currently unsatisfiableUnannotatedAc) against the CURRENT body, and report ONLY the tasks where that judge is clean today while the task is still parked (the parking reason has expired, the task blocks its goal AC, and nobody was told: AC-919 read fail for 42 consecutive rounds while its only blocking criterion was already clean)? Tasks whose criterion still fires, tasks parked for a non-mechanical reason, and tasks whose input could not be read are counted in their OWN buckets and never reported as stale (硬规则 3b), and no status is ever written (needs-human has no mechanical re-enqueue path, 人 2026-09-20).",
     "manual-full-suite.sh": "How does a human manually run the FULL suite — the heavy partition + memory policy + round recording the loop applies — as ONE re-runnable command, ⛔ NOT scripts/test.sh which runs the heavy files in the main body at nproc and skips the declared heavy tail (full-suite-runner.ts --root <main> --sync auto-provisions a one-shot worktree, records the round to <main>/.quay, tears it down)?",
     "task-double-frontmatter-check.ts": "Which task files carry two back-to-back frontmatter blocks (a duplicated id:/status: from the task_write body path) — the corruption that produces two contradictory status readings?",
-    "codex-mcp-sync.sh": "How does the Codex plugin's quay MCP dist get installed/synced to the stable version-independent location ~/.local/share/quay/ (and its .mcp.json tilde prefix expanded to the home directory so codex's direct node spawn resolves it)?",
+    "codex-mcp-sync.sh": "How does the Codex plugin's quay MCP dist get installed/synced to the stable version-independent location ~/.local/share/quay/ (and its .mcp.json tilde prefix expanded to the home directory so codex's direct node spawn resolves it)? Run on demand: publish-dist-branch.sh --push calls it with --install-only, and the user runs it once after install.",
     "sha256.ts": "Is the sha256 helper pair (sha256OfString / sha256OfBuffer) defined ONCE as a plugin-scripts leaf, so every caller imports it instead of each re-implementing the createHash(\"sha256\").update(...).digest(\"hex\") body — the seven independently-declared wrappers the semantic-dedup-scan routine found (finding B1, runId semantic-dedup-scan-1793491958069: experiment-manifest / proposal-convergence / execution-policy / stage-receipt / run-identity / primitives-drift-check)?",
     "consumer-quay-deliverable-verify.sh": "Does quay's shipped deliverable actually WORK from a CONSUMER project — all four consumer surfaces (Claude Code MCP task_list, Claude Code /quay-task-operator skill, Codex MCP task_list via codex exec, Codex $quay-task-operator skill) reach the project's OWN task store when pointed at a consumer workspace (--root <project>), each judged PASS/FAIL by the presence of a real task-listing response — a dev-tree verification that runs the repo's worker launcher (claude-fjdac) + Codex CLI, not a shipped consumer tool?"
   },
@@ -859,7 +859,7 @@
     "needs-human-parking-recheck.ts": "每轮",
     "manual-full-suite.sh": "按需",
     "task-double-frontmatter-check.ts": "按需",
-    "codex-mcp-sync.sh": "升级/安装时（publish-dist-branch.sh --push 调用 --install-only；用户装后跑一次）",
+    "codex-mcp-sync.sh": "按需",
     "sha256.ts": "按需",
     "consumer-quay-deliverable-verify.sh": "按需"
   },

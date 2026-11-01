@@ -10,15 +10,23 @@
 # Syntax validated against codex-cli 0.146.0 (`codex mcp list` reports the
 # project `quay` server as enabled). See plugin/scripts/codex-stage1-selfcheck.sh.
 #
-# `args[0]` is a repo-root-relative path. codex-cli 0.156.1 spawns MCP servers
-# with the SESSION working directory (where codex was launched) as cwd, not the
-# trusted project root (SPEC-codex-long-term-support-2026-10-29 §3.2, measured).
-# From a subdirectory the relative args therefore ENOENT *silently*. `cwd` pins
-# the server cwd to THIS checkout's repo root — the one codex-spawnable location —
-# so the server spawns from any working root; plugin/scripts/codex-stage1-spawn-verify.sh
-# makes a wrong cwd LOUD (exit non-zero when the server cannot spawn + initialize).
+# `args[0]` is a repo-root-relative path, so the server must be spawned with the
+# REPO ROOT as its cwd. codex-cli 0.156.1 spawns MCP servers with the SESSION
+# working directory (SPEC-codex-long-term-support-2026-10-29 §3.2, measured), so
+# launch codex from the repo root, or pass `codex -C <repo-root>`.
+#
+# ⛔ Deliberately NO `cwd =` field below. This file is TRACKED, and codex has no
+# `${...}`/`~` expansion for that field (§3.2b, measured):
+#   - an ABSOLUTE cwd pins ONE machine's checkout path — it broke CI on every
+#     runner whose checkout lives elsewhere (2026-11-02), and is wrong for every
+#     other developer too;
+#   - a RELATIVE cwd is resolved against the session cwd, i.e. it is a no-op for
+#     exactly the subdirectory launch it would be meant to fix.
+# So "spawnable from any working root" cannot be expressed in a tracked file at
+# all; the launch-point requirement above is the honest form. The check stays
+# loud: plugin/scripts/codex-stage1-spawn-verify.sh spawns the configured server
+# and completes an MCP initialize handshake, exiting non-zero when it cannot.
 
 [mcp_servers.quay]
 command = "node"
 args = ["packages/quay/bin/quay.ts", "mcp"]
-cwd = "/data/home/yale/work/quay"

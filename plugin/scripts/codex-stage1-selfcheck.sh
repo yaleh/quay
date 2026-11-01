@@ -5,9 +5,11 @@
 # version, and confirms `codex mcp list` includes an enabled project `quay` server —
 # WITHOUT the repository having gained any model, reasoning, sandbox, approval, hook,
 # automation, telemetry, or meta-cc configuration (those belong to later stages).
-# It ALSO runs codex-stage1-spawn-verify.sh from a packages/quay subdirectory, so the
-# check measures "the server actually spawns + initializes" and not merely "the config
-# parses" — `codex mcp get/list` alone cannot tell an enabled server from a silent ENOENT.
+# It ALSO runs codex-stage1-spawn-verify.sh from the repo root (the launch point the
+# tracked config requires — it deliberately declares no `cwd`; see .codex/config.toml),
+# so the check measures "the server actually spawns + initializes" and not merely "the
+# config parses" — `codex mcp get/list` alone cannot tell an enabled server from a
+# silent ENOENT.
 #
 # Exit: 0 = config valid + server spawns/initializes + (codex present) project quay server enabled;
 #       1 = config invalid / forbidden key present / server did not spawn / (codex present) quay not enabled.
@@ -60,14 +62,18 @@ else
   bad "quay server does not invoke the expected quay.ts mcp stdio command"
 fi
 
-# codex-cli 0.156.1 resolves the server's relative `args` against the SESSION working
-# directory (not the trusted project root), so without an explicit repo-root `cwd` the
-# relative args ENOENT silently from a subdirectory. The field must be present; the
-# spawn-verify step below is what makes a WRONG value loud.
+# codex-cli 0.156.1 resolves a configured `cwd` as-is (absolute) or against the SESSION
+# working directory (relative), and has NO placeholder/`~` expansion (SPEC §3.2/§3.2b,
+# measured) — so a TRACKED config can only stay portable by declaring NO cwd at all and
+# documenting the launch point instead (see .codex/config.toml's header). What must stay
+# loud is the failure this field used to hide: an ABSOLUTE cwd pins one machine's checkout
+# path and silently breaks every other checkout — CI included (observed 2026-11-02, where
+# this exact pinned path made the whole develop CI red on a runner). The spawn-verify step
+# below proves the config really spawns + initializes.
 if grep -Eq '^[[:space:]]*cwd[[:space:]]*=[[:space:]]*"' "$CONFIG"; then
-  pass "registers an explicit cwd for [mcp_servers.quay] (server spawnable from any working root)"
+  bad "unexpected cwd= for [mcp_servers.quay] — this TRACKED config must not pin a machine-specific checkout path (CI's checkout lives elsewhere)"
 else
-  bad "no cwd= value for [mcp_servers.quay] — relative args would ENOENT from a subdirectory"
+  pass "no machine-specific cwd for [mcp_servers.quay] (server is launched against the repo root)"
 fi
 
 # Stage 1 scope guard: NONE of these may appear as an ACTUAL setting. These are the
@@ -83,16 +89,17 @@ else
   pass "no forbidden Stage-1 keys (model/reasoning/sandbox/approval/hook/automation/telemetry/meta-cc)"
 fi
 
-# --- 1b. spawn-verify: the server must ACTUALLY spawn + initialize from a subdirectory ---
+# --- 1b. spawn-verify: the server must ACTUALLY spawn + initialize --------------------
 # Codex-independent (spawns the configured `node packages/quay/bin/quay.ts mcp` directly),
 # so it also runs in codex-less environments and measures the thing `codex mcp get/list`
-# cannot: "enabled" vs "running". A wrong cwd or reverted relative args fails LOUD here.
-SPAWN_OUT="$( (cd "$REPO_ROOT/packages/quay" && bash "$SCRIPT_DIR/codex-stage1-spawn-verify.sh") 2>&1 )"
+# cannot: "enabled" vs "running". Runs from the REPO ROOT — the launch point the tracked
+# config requires (it declares no cwd; see .codex/config.toml). A spawn failure is LOUD here.
+SPAWN_OUT="$( (cd "$REPO_ROOT" && bash "$SCRIPT_DIR/codex-stage1-spawn-verify.sh") 2>&1 )"
 spawn_status=$?
 if [[ "$spawn_status" -eq 0 ]]; then
-  pass "spawn-verify: quay MCP server spawned + initialized from a packages/quay subdirectory"
+  pass "spawn-verify: quay MCP server spawned + initialized from the repo root"
 else
-  bad "spawn-verify FAILED: quay MCP server did NOT spawn + initialize from a packages/quay subdirectory:"
+  bad "spawn-verify FAILED: quay MCP server did NOT spawn + initialize from the repo root:"
   printf '%s\n' "$SPAWN_OUT" | sed 's/^/       /'
 fi
 
