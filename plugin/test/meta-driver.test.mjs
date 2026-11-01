@@ -33,6 +33,7 @@ import {
   writeDraftProposal,
   buildProbePrompt,
   readingsDigest,
+  META_DRIVER_READINGS_REL,
   collectSyncHealth,
   stripEvidenceTimestamp,
   settleEvidenceWrites,
@@ -1601,12 +1602,98 @@ test('CLI: 未知参数 ⇒ exit 2（⛔ 不静默忽略）', async () => {
 });
 
 // ── buildProbePrompt ─────────────────────────────────────────────────────────
-test('buildProbePrompt: 读数逐字进 prompt（语义半不自采证）', () => {
-  const readings = { goals: [{ id: 'GOAL-001', title: 't', status: 'active' }], criteria: [], divergences: [], focus: 'retire X' };
+// 一个字段齐全、且足够大的 MetaRoundReadings 夹具（长 reason 文本模拟生产里 >1MB 的真实读数）。
+function largeReadings(n = 1500) {
+  const reason = 'criterion failing detail: '.repeat(60); // ~1500 字符/条 ⇒ 合计 ~2.2MB
+  const criteria = Array.from({ length: n }, (_, i) => ({
+    id: `AC-${String(i).padStart(4, '0')}`,
+    title: `criterion ${i}`,
+    goal: 'GOAL-001',
+    status: 'active',
+    criterion: 'true',
+    verdict: 'fail',
+    reason,
+    cause: null,
+  }));
+  return {
+    goals: [{ id: 'GOAL-001', title: 't', status: 'active' }],
+    criteria,
+    divergences: [],
+    drivers: [{
+      kind: 'goal', running: true, supervisorAlive: true, driverAlive: true,
+      carrierRecords: 1, carrierLastTs: null, staleSecs: 0, carrierUnreadable: [],
+    }],
+    syncHealth: {
+      window: 200, ffSynced: 0, notFf: 0, notFfBenign: 0, notFfBehind: 0, ffError: 0,
+      semanticBegin: 0, semanticResolved: 0, semanticConflict: 0, semanticAlignFailed: 0,
+      semanticFfFailed: 0, semanticTakeDevelopRefused: 0, lastEvent: null, lastTs: null,
+    },
+    metaRecords: [],
+    inertCheckers: [],
+    focus: null,
+    timeSeries: [],
+    actionRecordFailures: {
+      state: 'none', aggregates: [], reason: null, scannedAt: null, scanMs: null, since: null,
+      recordsScanned: null, thresholdSessions: null,
+    },
+  };
+}
+
+test('buildProbePrompt: 大 readings 只落盘路径+摘要，prompt 不再内联全量 JSON（AC1/AC3/DoD）', () => {
+  const readings = largeReadings();
+  const fullJson = JSON.stringify(readings);
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'meta-driver-readings-'));
+  const p = buildProbePrompt('OBJECTIVE TEXT', readings, { root });
+  // AC3：prompt 不再内联全量 JSON——任何一条 criterion / 长 reason 文本都不出现。
+  assert.ok(p.startsWith('OBJECTIVE TEXT'));
+  assert.ok(!p.includes('"AC-0000"'), 'prompt 不得再内联任何一条 criterion 的 JSON');
+  assert.ok(!p.includes(readings.criteria[0].reason.slice(0, 40)), 'prompt 不得再内联长 reason 文本');
+  assert.ok(!p.includes('"verdict"'), 'prompt 不得再内联 readings 的 JSON 结构');
+  // AC3：prompt 只有路径 + 摘要。
+  assert.ok(p.includes('readings file:'), 'prompt 必须给出落盘路径');
+  assert.ok(p.includes('readings digest:'), 'prompt 必须给出机械摘要');
+  // AC1：较基线（= 旧 prompt 的 readings JSON 部分）下降 ≥80%，且 <50KB（取更严者）。
+  const reduction = 1 - p.length / fullJson.length;
+  assert.ok(p.length < fullJson.length * 0.2,
+    `prompt ${p.length} 字符应 < 基线 20%（基线 readings JSON = ${fullJson.length} 字符；实测下降 ${(reduction * 100).toFixed(1)}%）`);
+  assert.ok(p.length < 50_000, `prompt ${p.length} 字符应 < 50KB`);
+  // DoD：落盘文件可还原完整读数（与旧内联的是同一份 JSON.stringify 语义）。
+  const onDisk = JSON.parse(fs.readFileSync(path.join(root, META_DRIVER_READINGS_REL), 'utf8'));
+  assert.deepEqual(onDisk, JSON.parse(fullJson), '落盘文件必须逐结构还原完整 readings');
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test('buildProbePrompt: 无 root 时不落盘、prompt 明示未持久化（⛔ 不内联兜底）', () => {
+  const readings = largeReadings(3);
   const p = buildProbePrompt('OBJECTIVE TEXT', readings);
   assert.ok(p.startsWith('OBJECTIVE TEXT'));
-  assert.ok(p.includes('"GOAL-001"'));
-  assert.ok(p.includes('retire X'), 'focus 必须进 prompt');
+  assert.ok(!p.includes('"AC-0000"'), '无 root 时也不得内联 readings JSON');
+  assert.ok(p.includes('(not persisted this round)'), '未落盘必须明示，而不是伪装成落盘了');
+});
+
+// AC2：parseProbeOutput 输出形状与改动前同构（parity 测试——probe 瘦身后解析面不受影响）。
+test('parseProbeOutput parity: 大 readings 瘦身后，probe 输出解析形状不变（AC2）', () => {
+  const out = parseProbeOutput(JSON.stringify({
+    divergences: [{ id: 'AC-0001', kind: 'pass-but-unflipped', interpretation: 'x', recommendation: 'y' }],
+    proposals: [{ goal: 'GOAL-001', title: 'p', criterion: 'true', expect: 'e', origin: 'AC-0001 fail' }],
+    autoDrive: [{
+      title: 'a', problem: 'p', evidenceKey: 'drivers.goal.running', mechanismKeyword: 'goal-driver',
+      criterion: 'true', expect: 'e', touches: 'plugin/scripts/meta-driver.ts',
+    }],
+    decisions: [{ title: 'd', question: 'q', options: 'o', evidenceKey: 'syncHealth.notFf', origin: 'o' }],
+    metaRecordOpinions: [{ metaId: 'META-001', hasOpinion: true, note: 'n' }],
+  }));
+  assert.ok(out, '合法输出必须可解析');
+  assert.equal(out.divergences.length, 1);
+  assert.equal(out.proposals.length, 1);
+  assert.equal(out.autoDrive.length, 1);
+  assert.equal(out.decisions.length, 1);
+  assert.equal(out.metaRecordOpinions.length, 1);
+  assert.deepEqual(out.proposals[0], {
+    goal: 'GOAL-001', title: 'p', criterion: 'true', expect: 'e', origin: 'AC-0001 fail',
+  });
+  assert.equal(out.autoDrive[0].evidenceKey, 'drivers.goal.running');
+  assert.equal(out.metaRecordOpinions[0].hasOpinion, true);
 });
 
 // ── 载体选择 + 防逃逸语义闸 ──────────────────────────────────────────────────

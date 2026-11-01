@@ -26,6 +26,7 @@ import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { launchArgv } from "../scripts/driver-runtime.ts";
+import { singleModelInvariantViolations } from "../scripts/profiles-role-coverage-check.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PLUGIN_ROOT = path.resolve(__dirname, "..");
@@ -189,3 +190,44 @@ test("the produced carrier is the shipped template, differing only by the role-n
   const swap = (text, prefix) => text.replace(/^(\s*name:\s*)quay-/gm, `$1${prefix}-`);
   assert.equal(produced, swap(shipped, "prefix-swap"), "the shell entry must lay the shipped carrier down verbatim, with the project-derived names");
 });
+
+// ── gap-single-session-single-model-invariant ──────────────────────────────────────────────────────
+// A session's model has TWO config sources that can disagree: profile.model (--model) and the env
+// keys ANTHROPIC_DEFAULT_{HAIKU,SONNET,OPUS}_MODEL (what Claude Code feeds subagents / default
+// models). Disagreement = a mid-session silent model switch = prompt-cache prefix invalidation.
+// The two legal shapes: all three DEFAULT_* absent (launcher wrapper carries the mapping — the
+// claudecodeui shipped shape), or all three present and equal to model (self-consistent — the quay
+// dev-tree shape). A partial/mismatched declaration is the defect; each arm below has a reachable red.
+
+test("single-model invariant — all three DEFAULT_* equal to model is legal (quay dev-tree shape)", () => {
+  const v = singleModelInvariantViolations("dev-tree:worker-default", "v4pro-anthropic", {
+    ANTHROPIC_DEFAULT_HAIKU_MODEL: "v4pro-anthropic",
+    ANTHROPIC_DEFAULT_SONNET_MODEL: "v4pro-anthropic",
+    ANTHROPIC_DEFAULT_OPUS_MODEL: "v4pro-anthropic",
+  });
+  assert.deepEqual(v, [], "all three equal to model must pass the invariant");
+});
+
+test("single-model invariant — all three DEFAULT_* absent with a non-null model is legal (claudecodeui shipped shape)", () => {
+  const v = singleModelInvariantViolations("shipped:worker-default", "v4.1flash", {});
+  assert.deepEqual(v, [], "all three absent must pass the invariant even when the wrapper carries the model mapping");
+});
+
+test("single-model invariant — negative control: one DEFAULT_* != model must be flagged", () => {
+  const v = singleModelInvariantViolations("synthetic:worker-default", "v4.1flash", {
+    ANTHROPIC_DEFAULT_HAIKU_MODEL: "v4.1flash",
+    ANTHROPIC_DEFAULT_SONNET_MODEL: "v4.1flash",
+    ANTHROPIC_DEFAULT_OPUS_MODEL: "deepseek-v4-pro",
+  });
+  assert.ok(v.length > 0, "a mismatched DEFAULT_* must be a violation");
+  assert.match(v.join("\n"), /DEFAULT_\* != model/, "the mismatch must name the mismatched key and value");
+});
+
+test("single-model invariant — negative control: a partial declaration (only OPUS) must be flagged", () => {
+  const v = singleModelInvariantViolations("synthetic:worker-default", "v4.1flash", {
+    ANTHROPIC_DEFAULT_OPUS_MODEL: "deepseek-v4-pro",
+  });
+  assert.ok(v.length > 0, "declaring some but not all three must be a violation");
+  assert.match(v.join("\n"), /partial ANTHROPIC_DEFAULT_\*_MODEL declaration/, "the partial state must be named as such");
+});
+

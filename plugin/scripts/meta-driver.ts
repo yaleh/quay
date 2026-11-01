@@ -2367,14 +2367,41 @@ export async function fileDecisions(
 
 // ── 语义半 ────────────────────────────────────────────────────────────────────────────────────────
 
+/** 语义半读数的落盘相对路径（.quay 下、gitignored；每轮原子覆写）。
+ *  prompt 只带路径 + 稳定摘要，完整 JSON 落盘让 probe 惰性 Read
+ *  （gap-meta-driver-probe-readings-inline-over-1mb：整段 JSON 内联曾是每轮 >1MB fresh input）。 */
+export const META_DRIVER_READINGS_REL = path.join(".quay", "meta-driver-readings.json");
+
 /** 组装 probe prompt 的**单一构造点**（复刻 launchArgv 的 AC140 纪律：一次性入口与常驻入口
- *  共用同一个组装函数，⛔ 不各拼一份）。 */
-export function buildProbePrompt(objective: string, readings: MetaRoundReadings): string {
+ *  共用同一个组装函数，⛔ 不各拼一份）。
+ *  ⛔ 不再把 `JSON.stringify(readings)` 整段内联进 prompt：readings 实测可达 >1MB，作为每轮全新
+ *  fresh input 按 1× 计费是纯浪费（driver 全量 fresh_input 里最大的一块）。改为：完整 readings
+ *  落盘（<root>/.quay/meta-driver-readings.json，与旧内联的是**同一份** `JSON.stringify` 语义），
+ *  prompt 只带**路径** + **稳定摘要**（readingsDigest）+ 一条「按需 Read」指令。probe 规格已授予
+ *  Read 权限；FILE-ONLY 守卫只拦 tracked 文件改动（落盘在 .quay 下、gitignored ⇒ 不触发违约）。 */
+export function buildProbePrompt(
+  objective: string,
+  readings: MetaRoundReadings,
+  opts: { root?: string; readingsPath?: string } = {},
+): string {
+  const readingsPath = opts.readingsPath ?? (opts.root ? path.join(opts.root, META_DRIVER_READINGS_REL) : null);
+  if (readingsPath) {
+    // 落盘失败 ⇒ 语义半这轮拿不到完整读数。⛔ 不内联兜底（那正是本任务要消灭的形态）；prompt 里
+    // 明示「未落盘」，probe 把缺读数读成 not-evaluated 而不是自采证（硬规则 3b）。
+    try {
+      writeJsonAtomic(readingsPath, readings);
+    } catch {
+      // 吞掉：语义半仍可跑（读不到文件会 not-evaluated），但绝不退化成整段内联。
+    }
+  }
+  const digest = readingsDigest(readings);
   return [
     objective.trim(),
     "",
     "READINGS (mechanically collected this round — arithmetic, not a verdict):",
-    JSON.stringify(readings),
+    `readings file: ${readingsPath ?? "(not persisted this round)"}`,
+    `readings digest: ${digest}`,
+    "The full readings JSON is on disk at the path above. Read that file when you need any specific number. The readings remain the ONLY measurements — never replace one with a count you derived yourself.",
   ].join("\n");
 }
 
@@ -2600,7 +2627,7 @@ async function runMetaRoundInner(opts: MetaRoundOptions): Promise<MetaRoundResul
     };
   }
 
-  const prompt = buildProbePrompt(objective, readings);
+  const prompt = buildProbePrompt(objective, readings, { root });
   // ⛔ prompt 走 **stdin** 而不是 argv：本轮的 readings JSON 实测可达 >1 MB，作为单个 argv 元素
   //    必然撞 Linux `MAX_ARG_STRLEN`（128 KiB）⇒ `spawn E2BIG`，语义半每轮必死
   //    （gap-launchargv-prompt-in-argv-exceeds-max-arg-strlen）。promptViaStdin 只影响本条路径，
