@@ -76,3 +76,11 @@ worker 在隔离 worktree（task/gap-mcp-blacklist-extend-meta-cc-archguard-plan
   - outer/manager/pool-judge/meta-driver: strict=false（argv 逐字不变，DoD 不连坐）。
 
 suite 红修复（续做轮）：① `plugin/test/quay-init-characterization.test.mjs` 的 fresh-install 闭集 pin 因本任务改 `init.ts` profiles 模板而移动，re-anchor `.quay/profiles.yml` 哈希为 `d82c5a3f…`（其余五文件哈希不变，靶向交叉核对）。② `packages/quay/test/gap-webui-dashboard-tests-card-latest-round-no-live-signal.test.mjs` 的 elapsed 断言正则窗口过窄（`1m3\ds` 只覆盖 90–99s），满负荷下 `rebuildNow()` 延迟 >10s 时 elapsed 越过 100s 即红；扩为完整 `formatSeconds` 格式空间 `/已运行 \d+(?:h\d+m|m\d+s|s)/`，与负载无关。
+
+## Blocker
+
+**2026-11-01T13:07:36.247Z — worker 未落地（exited-not-landed）**
+
+- 未落地原因：step=suite: AssertionError [ERR_ASSERTION]: testsCard shows an elapsed-time reading [baseline A/B: HARD RED (task-introduced-red) — the task's red set is NOT a subset of the develop baseline red set: added=packages/quay/test/gap-webui-dashboard-tests-card-latest-round-no-live-signal.test.mjs,plugin/test/quay-init-characterization.test.mjs changed=-]
+- run_id：wk-prod-anchor
+- session_id：8724c037-a24f-482d-bd93-ed989e1fe8e7
