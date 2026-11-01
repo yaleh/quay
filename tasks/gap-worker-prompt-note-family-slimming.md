@@ -2,7 +2,7 @@
 id: gap-worker-prompt-note-family-slimming
 title: worker prompt note
   族（buildWorkerPrompt/buildContinueWorkerPrompt）瘦身——指针+短指令去重，不整段删事故反制
-status: todo
+status: ready
 labels:
   - gap
 parent: null
