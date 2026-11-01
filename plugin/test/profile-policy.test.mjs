@@ -297,12 +297,22 @@ test("SHIPPED — task-worker/fix-worker keep CLAUDE_CODE_PRINT_BG_WAIT_CEILING_
   }
 });
 
-// ── ROLE-LEVEL mcpBlacklist（gap-worker-mcp-blacklist-strict-config AC1）──────────────────────────
-// 纯写代码的三个 role 派发时不连浏览器 MCP；⛔ 字段必须挂【角色】层——outer 与它们共享
+// ── ROLE-LEVEL mcpBlacklist（gap-worker-mcp-blacklist-strict-config AC1 + gap-mcp-blacklist-extend-meta-cc-archguard-plantuml）──
+// 纯写代码的三个 role 派发时不连无用的 MCP；⛔ 字段必须挂【角色】层——outer 与它们共享
 // worker-default profile，挂 profile 会把 outer 连坐（而 outer 按 ADR-010 可能真需要浏览器工具）。
+// 2026-11-01 扩展（gap-mcp-blacklist-extend-*）：AC3 负控制 7 天 transcript 实测 task-worker 仍在用
+// archguard（93 次）与 meta-cc（31 次）⇒ 该 role 只黑 chrome-devtools/playwright/plantuml；
+// selector/fix-worker 零命中 ⇒ 黑全五类；plantuml 三角色零命中 ⇒ 全黑。
 
 const BLACKLISTED_ROLES = ["task-worker", "selector", "fix-worker"];
 const MUST_NOT_BE_BLACKLISTED = ["outer", "manager", "pool-judge", "meta-driver"];
+// 按 role 的期望黑名单（已排序，与 [...mcpBlacklist].sort() 逐字比对）。task-worker 因 AC3
+// 保留例外只黑 3 项（保留 archguard/meta-cc）。
+const EXPECTED_BLACKLIST = {
+  "task-worker": ["chrome-devtools", "plantuml", "playwright"],
+  selector: ["archguard", "chrome-devtools", "meta-cc", "plantuml", "playwright"],
+  "fix-worker": ["archguard", "chrome-devtools", "meta-cc", "plantuml", "playwright"],
+};
 
 test("AC1 — the three code-writing roles carry the role-level mcpBlacklist", () => {
   const cfg = readProfilesConfig(REPO_ROOT);
@@ -310,8 +320,8 @@ test("AC1 — the three code-writing roles carry the role-level mcpBlacklist", (
     const r = resolveRole(cfg, role);
     assert.deepEqual(
       [...r.mcpBlacklist].sort(),
-      ["chrome-devtools", "playwright"],
-      `role ${role} must blacklist both browser MCP servers`,
+      EXPECTED_BLACKLIST[role],
+      `role ${role} must blacklist exactly ${EXPECTED_BLACKLIST[role].length} MCP servers`,
     );
   }
 });
@@ -334,7 +344,7 @@ test("AC1 — SHIPPED carrier carries the same role-level blacklist (⛔ not dev
   // down the other" shipped once). A dev-tree-only edit leaves the feature inert for every install.
   const shipped = readProfilesConfig(path.join(REPO_ROOT, "plugin"));
   for (const role of BLACKLISTED_ROLES) {
-    assert.deepEqual([...resolveRole(shipped, role).mcpBlacklist].sort(), ["chrome-devtools", "playwright"]);
+    assert.deepEqual([...resolveRole(shipped, role).mcpBlacklist].sort(), EXPECTED_BLACKLIST[role]);
   }
   for (const role of MUST_NOT_BE_BLACKLISTED) {
     assert.deepEqual(resolveRole(shipped, role).mcpBlacklist, []);

@@ -49,6 +49,7 @@ roles:
     mcpBlacklist:
       - chrome-devtools
       - playwright
+      - plantuml
   selector:
     profile: worker-default
     name: quay-selector
@@ -56,6 +57,9 @@ roles:
     mcpBlacklist:
       - chrome-devtools
       - playwright
+      - meta-cc
+      - archguard
+      - plantuml
   fix-worker:
     profile: worker-default
     name: quay-fix-worker
@@ -64,6 +68,9 @@ roles:
     mcpBlacklist:
       - chrome-devtools
       - playwright
+      - meta-cc
+      - archguard
+      - plantuml
   pool-judge:
     profile: worker-default
     name: quay-pool-judge
