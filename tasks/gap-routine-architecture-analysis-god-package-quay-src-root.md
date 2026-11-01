@@ -2,7 +2,7 @@
 id: gap-routine-architecture-analysis-god-package-quay-src-root
 title: "architecture-analysis: fanIn 484 / fanOut 423, 296 entities in 29 files
   — root aggregates cli/core/kernel/serve/observation/gate."
-status: ready
+status: done
 labels:
   - gap
   - routine-filed
