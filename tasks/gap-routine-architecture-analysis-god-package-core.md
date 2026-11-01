@@ -114,6 +114,21 @@ QUESTION 表声明 ⇒ UNCLASSIFIED=1 ⇒ `package.sh` fail-closed。本任务�
 CADENCE / INVALIDATION / LAST_REAFFIRMED / MATCHING 六项声明（与同类 dev-tree 脚本
 `codex-stage1-spawn-verify.sh` 同形），`--entry-surface` 由 exit 1 复绿为 exit 0（unclassified 1→0）。
 
+### 8. 附：为跑绿 suite 顺手修复的 develop 侧 load-sensitive 测试（与本 finding 无关，但阻塞了本任务的 fan-in）
+
+suite 连续两轮撞同一红点 `plugin/test/quality-gate-driver.test.mjs` 的两条 `runInstrumentDecayRound`
+（「紧接的第二轮经【生产缺省路径】去重」「裁定过期 ⇒ 回到 instrument-dark 并重新立案」）断言
+`filing:"filed"` 却读到 `deferred`：这两条走 `instDecayOpts` 却**未注入确定性资源门**，落到
+`resourceGateCheck(root, null)` 的真实 `resource-gate.sh --for full-suite`——整机在 full suite 并发下 load
+越过阈值 ⇒ 资源门 WAIT ⇒ 立案被推迟成 `deferred`（load-sensitive 假红，与 delta 无关）。本任务给
+`instDecayOpts` 缺省注入 GO 资源门（`resourceGateArgv`），让这族测试断言的是立案/去重/裁定语义而非资源门
+（资源门有独立的 `resource-gate.test.mjs` 单测 + 本文件 AC2(b) 有状态闸测试）。全文件 118/118 绿。
+
+（另注：`archive-exclusion-wiring.test.mjs` 仍红是因 develop 上 `sha256.ts` 被 semantic-dedup-scan B1
+**刻意**不声明为 capability（其头注释明说「deliberately absent from the QUESTION table」）却仍在
+`plugin/scripts/` 被 catalog 枚举 ⇒ UNCLASSIFIED=1。该红在 develop 基线侧同样存在（非本任务引入、不在
+本任务 Touches 内），留给 catalog 渲染器 / 该任务的后续处置。）
+
 ## AC
 - [x] `.quay/routine-findings.jsonl` 中 finding `god-package-core`（routine `architecture-analysis`，runId `architecture-analysis-1793492325036`）所描述的问题被复核并处置
 - [x] 处置结论可核：要么修掉，要么写明「已有机制在管、失败在哪一步」，⛔ 不以「已注意到」结案
@@ -128,4 +143,5 @@ CADENCE / INVALIDATION / LAST_REAFFIRMED / MATCHING 六项声明（与同类 dev
 - `packages/quay/src/core/branch-model-types.ts`
 - `packages/quay/src/core/criterion-attribution.ts`
 - `plugin/scripts/capability-catalog-declarations.json`
+- `plugin/test/quality-gate-driver.test.mjs`
 - `tasks/gap-routine-architecture-analysis-god-package-core.md`
