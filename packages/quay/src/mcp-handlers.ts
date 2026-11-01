@@ -35,39 +35,13 @@ export interface ConnectedProvider {
 import { stripHeadings } from "./search-index.ts";
 export { stripHeadings };
 
-// gap-abi-task-list-times-out-at-2000-tasks-head-of-line-blocks-mcp: an MCP tool result that
-// carries `structuredContent` AND a `content[0].text` holding the SAME JSON ships those bytes
-// TWICE — the SDK serializes the whole result object over stdio, whose framing is super-linear
-// in payload (ReadBuffer does a Buffer.concat per incoming chunk; the receiver then JSON.parses
-// AND zod-validates the entire message). Measured on this host: a ~0.8 MB result round-trips in
-// ~60 ms, ~3.3 MB in ~1 s, ~8.4 MB in ~3 s. The duplicate is therefore not a constant factor —
-// it is the half of the payload that decides whether a list request queue-blocks the server.
-//
-// Below the budget the text form is kept VERBATIM (every existing small response, and every test
-// that reads it, is byte-identical); above it the text becomes a one-line summary and the data
-// lives exactly once, in structuredContent. The budget sits far below where the framing cost
-// turns super-linear.
-const TEXT_PAYLOAD_BUDGET_BYTES = 256 * 1024;
-
-/** Build task_list's `content` block under the budget above. `payload` is measured, and returned
- *  verbatim when it fits — so the small-payload surface is unchanged. */
-function budgetedTaskListContent(
-  payload: Record<string, unknown>,
-  summary: { count: number; total: number; page: number; totalPages: number },
-): Array<{ type: "text"; text: string }> {
-  const json = JSON.stringify(payload, null, 2);
-  if (json.length <= TEXT_PAYLOAD_BUDGET_BYTES) return [{ type: "text" as const, text: json }];
-  return [
-    {
-      type: "text" as const,
-      text:
-        `task_list: ${summary.count} task(s) — page ${summary.page}/${Math.max(1, summary.totalPages)} ` +
-        `of ${summary.total} matching task(s). This page (${json.length} bytes) is in this result's ` +
-        `structuredContent. The text form is omitted above ${TEXT_PAYLOAD_BUDGET_BYTES} bytes because a ` +
-        `second copy of the same bytes doubles the stdio payload, whose framing cost grows super-linearly.`,
-    },
-  ];
-}
+// task_list's budgeted `content` block (the serialize/measure/summary split) is
+// the ONE shared definition in ./task-list-content.ts — see that file for the
+// gap-abi-task-list-times-out-at-2000-tasks-head-of-line-blocks-mcp rationale
+// and the gap-routine-semantic-dedup-scan-a1 drift history (the native Provider
+// had already grown a `scannedFiles` arm this copy lacked). Imported so a
+// future budget change cannot reach one MCP surface and miss the other.
+import { budgetedTaskListContent } from "./task-list-content.ts";
 
 export function registerTaskHandlers(
   server: McpServer,
