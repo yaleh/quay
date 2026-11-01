@@ -2,7 +2,7 @@
 id: gap-mcp-blacklist-extend-meta-cc-archguard-plantuml
 title: worker 会话 mcpBlacklist 从 chrome-devtools/playwright 扩展到
   meta-cc/archguard/plantuml（shipped profiles.yml 与 dev-tree 保持同构）
-status: todo
+status: ready
 labels:
   - gap
 parent: null
