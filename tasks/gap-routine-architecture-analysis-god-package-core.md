@@ -105,6 +105,15 @@ node --experimental-strip-types plugin/scripts/import-graph-check.ts --json
 - L_G archguard: entityCount=215 fanIn=302 fanOut=138 cycleCount=0
 - L_G import-graph-check: valueSccs=0 typeSccs=0 reverseEdges=0
 
+### 7. 附：为跑绿 scoped 门顺手修复的 develop 侧 catalog 断裂（与本 finding 无关，但阻塞了本任务的 fan-in）
+
+scoped 门（`--for-task … --allow-thin`）选中的 packaging crosscut 测试（`npm-pack-e2e` / `build-dist` /
+`plugin-packaging`）因 develop 上 `plugin/scripts/capability-catalog-declarations.json` 的 AC1c 闸断裂而红：
+`consumer-quay-deliverable-verify.sh`（dev-tree-only 脚本，commit `375171dcf`）进入了 artifact 却未在
+QUESTION 表声明 ⇒ UNCLASSIFIED=1 ⇒ `package.sh` fail-closed。本任务补了该脚本的 QUESTION + NOT_SHIPPED +
+CADENCE / INVALIDATION / LAST_REAFFIRMED / MATCHING 六项声明（与同类 dev-tree 脚本
+`codex-stage1-spawn-verify.sh` 同形），`--entry-surface` 由 exit 1 复绿为 exit 0（unclassified 1→0）。
+
 ## AC
 - [x] `.quay/routine-findings.jsonl` 中 finding `god-package-core`（routine `architecture-analysis`，runId `architecture-analysis-1793492325036`）所描述的问题被复核并处置
 - [x] 处置结论可核：要么修掉，要么写明「已有机制在管、失败在哪一步」，⛔ 不以「已注意到」结案
@@ -118,4 +127,5 @@ node --experimental-strip-types plugin/scripts/import-graph-check.ts --json
 - `packages/quay/src/core/branch-model.ts`
 - `packages/quay/src/core/branch-model-types.ts`
 - `packages/quay/src/core/criterion-attribution.ts`
+- `plugin/scripts/capability-catalog-declarations.json`
 - `tasks/gap-routine-architecture-analysis-god-package-core.md`
