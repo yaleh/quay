@@ -75,6 +75,16 @@ function fanInLogFileName(task, runId) {
 function readFileSafe(p) {
   try { return readFileSync(p, "utf8"); } catch { return null; }
 }
+// 流式统计 gate-events.jsonl 的 gate 种类（大文件，不整读 JSON；坏行跳过）。
+function countGateEventKinds(p) {
+  const counts = {};
+  let text;
+  try { text = readFileSync(p, "utf8"); } catch { return counts; }
+  const re = /"gate":"([^"]+)"/g;
+  let m;
+  while ((m = re.exec(text)) !== null) counts[m[1]] = (counts[m[1]] || 0) + 1;
+  return counts;
+}
 function readJsonl(p) {
   const text = readFileSafe(p);
   if (text == null) return [];
@@ -186,6 +196,9 @@ function readSources(args) {
   // 4b) worker-round.jsonl（每轮派发环的 stop_reason：pool-empty / resource-gate-wait / filtered-empty /
   //     backoff / mcp-halt —— AC5 的资源门拒绝与 ready 池空证据）
   src.workerRound = readJsonl(join(qdir, "worker-round.jsonl"));
+
+  // 4c) gate-events.jsonl（205MB 级，流式只数 gate 类型，不整读）—— ready 事件 = gate=promote。
+  src.gateEventCounts = countGateEventKinds(join(qdir, "gate-events.jsonl"));
 
   // 5) fast-mode telemetry（每日快照是【累计】的——windowStart 固定、tasks 数组逐日累积到 340 封顶。
   //    按 runId 去重、保留【最后一次】出现（最新快照的 fanInCommit 才是终值）。⛔ 其 runId 是 `fm-*`
@@ -440,6 +453,39 @@ function summarize(src, args, ctx) {
   }
   ites.sort((x, y) => x.ite - y.ite);
 
+  // suite 等槽（verification-round lock_wait_ms，真实锁计量，⛔ 不是 wall-time 换算）
+  const suiteSlotWaits = attempts.map((a) => a.suiteLockWaitMs).filter((x) => typeof x === "number").sort((x, y) => x - y);
+
+  // 每任务明细（AC3 每任务累计墙钟/ITE/返工；费用 = not-evaluated，无 CSV）
+  const perTask = [...byTask.entries()].map(([task, as]) => {
+    const wallSum = as.reduce((s, a) => s + (typeof a.wall_clock_ms === "number" ? a.wall_clock_ms : 0), 0);
+    const its = as.map((a) => {
+      const attr = a.fanInStepMs ? Object.values(a.fanInStepMs).reduce((s2, v) => s2 + v, 0) : null;
+      return (a.wall_clock_ms != null && attr != null && a.wall_clock_ms > 0) ? Math.min(1, attr / a.wall_clock_ms) : null;
+    }).filter((x) => x != null);
+    const ite = its.length ? its.reduce((s, v) => s + v, 0) / its.length : null;
+    return {
+      task,
+      attempts: as.length,
+      rework: Math.max(0, as.length - 1),
+      cumulativeWallMs: wallSum,
+      ite,
+      cost: null, // 费用 not-evaluated（无 CSV）
+      landed: as.some((a) => a.landed),
+    };
+  }).sort((a, b) => b.attempts - a.attempts || b.cumulativeWallMs - a.cumulativeWallMs);
+
+  // suite 跑/跳过/分类失败分母（AC5，尝试级：从本次尝试的 fan-in trace 步骤直接数）
+  const suiteDenominators = { ran: 0, skipped: 0, incomplete: 0, recoveryBlocked: 0, unclassified: 0 };
+  for (const a of attempts) {
+    const steps = new Set((a.trace || []).map((r) => r.step));
+    if (steps.has("suite-end")) suiteDenominators.ran++;
+    else if (steps.has("suite-skip")) suiteDenominators.skipped++;
+    else if (steps.has("suite-incomplete")) suiteDenominators.incomplete++;
+    else if (a.trace && a.trace.length > 0) suiteDenominators.unclassified++;
+    if (steps.has("suite-recovery-blocked")) suiteDenominators.recoveryBlocked++;
+  }
+
   return {
     attemptsTotal: attempts.length,
     tasksTotal: byTask.size,
@@ -452,6 +498,9 @@ function summarize(src, args, ctx) {
     lockWaitP90: pct(lockWaits, 90),
     suiteP50: median(suiteDurations),
     suiteP90: pct(suiteDurations, 90),
+    suiteSlotWaitP50: median(suiteSlotWaits),
+    suiteSlotWaitP90: pct(suiteSlotWaits, 90),
+    suiteSlotWaitCount: suiteSlotWaits.length,
     cpuP50: median(cpus),
     cpuP90: pct(cpus, 90),
     cpuSumS: cpus.reduce((s, v) => s + v, 0),
@@ -460,6 +509,8 @@ function summarize(src, args, ctx) {
     iteP50: median(ites.map((i) => i.ite)),
     iteP90: pct(ites.map((i) => i.ite), 90),
     ites,
+    perTask,
+    suiteDenominators,
     finalStateCounts: countBy(attempts, "final_state"),
   };
 }
@@ -643,6 +694,8 @@ function renderMarkdown(args, src, ctx, sum, rounds, e5) {
   p("| 尝试 wall-clock p50 / p90 | ", fmtMs(sum.wallClockP50), " / ", fmtMs(sum.wallClockP90), " |\n");
   p("| fan-in 锁等待 p50 / p90 | ", fmtMs(sum.lockWaitP50), " / ", fmtMs(sum.lockWaitP90), " |\n");
   p("| suite 执行 p50 / p90（fan-in 日志） | ", fmtMs(sum.suiteP50), " / ", fmtMs(sum.suiteP90), " |\n");
+  p("| suite 等槽 p50 / p90（verification-round lock_wait_ms，真实锁计量） | ", fmtMs(sum.suiteSlotWaitP50), " / ", fmtMs(sum.suiteSlotWaitP90), " |\n");
+  p("| suite 等槽可测尝试数 | ", String(sum.suiteSlotWaitCount), " |\n");
   p("| CPU-seconds p50 / p90（仅 gnu-time 实测） | ", fmtSec(sum.cpuP50), " / ", fmtSec(sum.cpuP90), " |\n");
   p("| CPU-seconds 合计（仅 gnu-time 实测） | ", fmtSec(sum.cpuSumS), " |\n");
   p("| ITE（Idle Time Efficiency，已归属墙钟/端到端）p50 / p90 | ",
@@ -670,6 +723,31 @@ function renderMarkdown(args, src, ctx, sum, rounds, e5) {
 
   p("\n### CPU 维度\n");
   p("只取 `verification-round.jsonl` 中 `cpu_time_s` 且 `cpu_source=gnu-time` 的实测值。其余记录不参与 CPU 聚合。\n");
+
+  p("\n### ready 事件维度\n");
+  const readyEvents = src.gateEventCounts["promote"];
+  if (readyEvents != null) {
+    p("ready 事件 = `gate-events.jsonl` 中 gate=promote 的条数：**", String(readyEvents), "**。gate 分布：`", JSON.stringify(src.gateEventCounts), "`\n");
+  } else {
+    p("**not-evaluated**：`gate-events.jsonl` 无 gate=promote 记录或文件缺失。所缺字段：gate（promote）。\n");
+  }
+
+  p("\n## suite 跑/跳过/分类失败分母（AC5，尝试级：从本次尝试 fan-in trace 步骤直接数）\n");
+  p("| 类别 | 尝试数 |\n|---|---|\n");
+  p("| suite 跑（有 suite-end） | ", String(sum.suiteDenominators.ran), " |\n");
+  p("| suite 跳过（suite-skip） | ", String(sum.suiteDenominators.skipped), " |\n");
+  p("| suite 未完成（suite-incomplete，起了没 end） | ", String(sum.suiteDenominators.incomplete), " |\n");
+  p("| 分类失败（有 trace 但无 suite-end/skip/incomplete） | ", String(sum.suiteDenominators.unclassified), " |\n");
+  p("| suite recovery 阻塞（suite-recovery-blocked） | ", String(sum.suiteDenominators.recoveryBlocked), " |\n");
+  p("> ⛔ 不用 11/177（历史分类失败次数）或全窗口平均并发替代真实分母。\n");
+
+  p("\n## 每任务明细（AC3：累计墙钟/ITE/返工；费用 not-evaluated，无 CSV）\n");
+  p("> 只列尝试数最多的前 20 个任务。cost=not-evaluated（未提供费用 CSV）。\n");
+  p("| task | 尝试 | 返工 | 累计 wall | ITE | 落地 |\n|---|---|---|---|---|---|\n");
+  for (const t of sum.perTask.slice(0, 20)) {
+    p("| ", t.task, " | ", String(t.attempts), " | ", String(t.rework), " | ", fmtMs(t.cumulativeWallMs), " | ",
+      t.ite != null ? t.ite.toFixed(3) : "not-evaluated", " | ", String(t.landed), " |\n");
+  }
 
   p("\n## 无法关联记录与覆盖率\n");
   p("| 载体 | 总量 | 可关联 | 无法唯一关联/未归属 |\n|---|---|---|---|\n");
@@ -703,7 +781,6 @@ function renderMarkdown(args, src, ctx, sum, rounds, e5) {
   p("\n结论：吞吐瓶颈是否成立，本报告保持未知——只给锁等待与队列/阻塞的直接读数；不修改锁、fail-closed、AC/DoD 或 G3。\n");
 
   p("\n## 抽查实例（DoD：至少一个多次尝试任务 + 一个无法关联实例）\n");
-  const multiAttempt = [...new Map(sum.ites.map((i) => [i.task, i])).values()].filter(() => true).slice(0, 0);
   // 找多次尝试任务
   const byTaskAttempts = new Map();
   for (const a of ctx.attempts) { if (!byTaskAttempts.has(a.task)) byTaskAttempts.set(a.task, []); byTaskAttempts.get(a.task).push(a); }
