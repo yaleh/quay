@@ -1,7 +1,7 @@
 ---
 id: gap-goal-gapfiling-card-facing-summary
 title: "gap 立案写 card-facing 决策摘要：## Needs-Human 阻碍原因 / ## Proposal 首行结论"
-status: ready
+status: done
 labels:
   - gap
 parent: null
