@@ -1136,8 +1136,9 @@ export function parseSuiteLogFailures(logText: string, root?: string | null): Su
     if (!files.includes(rel)) files.push(rel);
   };
 
-  for (const raw of String(logText ?? "").split("\n")) {
-    const line = raw.trim();
+  const lines = String(logText ?? "").split("\n");
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = lines[i].trim();
     if (line.includes("passed=false")) {
       const token = suiteTokenBeforePassedFalse(line);
       if (!token) continue;
@@ -1146,6 +1147,15 @@ export function parseSuiteLogFailures(logText: string, root?: string | null): Su
       if (cls === "file") addFile(token);
       else if (cls === "pseudo-stage") notePseudo(token);
       else noteUnclassified(token);
+      continue;
+    }
+    // node spec reporter 失败块（`test at <file>:<line>:<col>` + 紧随的 `✖ <name> (<ms>)`）：身份源 =
+    // `test at` 的 <file>；配对的 `✖` 是「这是一个失败点」的判据（⛔ 没有配对 ⇒ 不归因、不计数）。
+    const at = SIG_TEST_AT_RE.exec(line);
+    if (at) {
+      if (specFailurePair(lines, i) === null) continue;
+      failingLines += 1;
+      addFile(at[1]);
       continue;
     }
     const rest = suiteNotOkRest(line);
@@ -1261,6 +1271,31 @@ const SIG_SPEC_CODE_RE = /^\s*code:\s*['"]([^'"]+)['"]\s*$/;
 /** 从 `test at` 行起、找配对的 `✖` 行与错误码行的有界前瞻（一个 spec 失败块的长度量级）。 */
 const SIG_SPEC_LOOKAHEAD = 40;
 
+/** 从 `test at` 行（`lines[i]`）起，找配对的 `✖ <name> (<ms>)`（有界前瞻）；找不到 ⇒ null（⛔ 不伪造）。
+ *  错误码行（`code: 'ERR_…'`）作为 detail 一并返回。⛔ 本函数是 spec 配对解析的唯一正本——两个消费者
+ *  `parseFailureSignatures`（基线 A/B 失败签名）与 `parseSuiteLogFailures`（本轮重跑失败文件归因）共用它，
+ *  ⛔ 不写第二份正则（gap-fanin-rerun-attribution-blind-to-spec-reporter：这是它的第 2 个消费者）。 */
+function specFailurePair(lines: string[], i: number): { name: string; code: string } | null {
+  let name: string | null = null;
+  let codeLine = -1;
+  const end = Math.min(lines.length, i + 1 + SIG_SPEC_LOOKAHEAD);
+  for (let j = i + 1; j < end; j += 1) {
+    const l = lines[j].trim();
+    if (l === "") continue;
+    if (SIG_TEST_AT_RE.test(l)) break; // 下一个失败块开始 ⇒ 本块结束（⛔ 不越界取名）
+    if (name === null) {
+      const m = SIG_SPEC_FAIL_RE.exec(l);
+      if (!m) break;
+      name = m[1].trim().replace(SIG_SPEC_DURATION_RE, "").trim();
+      continue;
+    }
+    if (SIG_SPEC_CODE_RE.test(l)) { codeLine = j; break; }
+  }
+  if (name === null || name === "") return null; // 没有配对的 `✖` 行 ⇒ 不是 spec 失败块
+  const code = codeLine < 0 ? "" : (SIG_SPEC_CODE_RE.exec(lines[codeLine].trim())?.[1] ?? "");
+  return { name, code };
+}
+
 /** 绝对路径 → repo-relative；不在 root 下 / 无 root ⇒ null（**读不懂的独立取值**，⛔ 不削成「看着像
  *  repo-relative」的假路径——那会把两棵树上不同的文件判成同一个）。相对路径原样归一。 */
 function signatureRelPath(token: string, root: string | null): string | null {
@@ -1349,26 +1384,9 @@ export function parseFailureSignatures(logText: string, root?: string | null): F
       sawFailureLine = true;
       const rel = signatureRelPath(at[1], root ?? null);
       if (rel === null) { noteUnresolvable(at[1]); continue; }
-      // 配对的 `✖ <name>`：从 `test at` 的下一行起有界前瞻，取**第一条**非空行；它必须以 `✖` 开头，
-      // 否则这个块读不懂（⛔ 不拿别的行冒充测试名）。
-      let name: string | null = null;
-      let codeLine = -1;
-      const end = Math.min(lines.length, i + 1 + SIG_SPEC_LOOKAHEAD);
-      for (let j = i + 1; j < end; j += 1) {
-        const l = lines[j].trim();
-        if (l === "") continue;
-        if (SIG_TEST_AT_RE.test(l)) break; // 下一个失败块开始 ⇒ 本块结束（⛔ 不越界取名）
-        if (name === null) {
-          const m = SIG_SPEC_FAIL_RE.exec(l);
-          if (!m) break;
-          name = m[1].trim().replace(SIG_SPEC_DURATION_RE, "").trim();
-          continue;
-        }
-        if (SIG_SPEC_CODE_RE.test(l)) { codeLine = j; break; }
-      }
-      if (name === null || name === "") continue; // 没有配对的 `✖` 行 ⇒ 不是 spec 失败块（⛔ 不落签名）
-      const code = codeLine < 0 ? "" : (SIG_SPEC_CODE_RE.exec(lines[codeLine].trim())?.[1] ?? "");
-      push(rel, code === "" ? name : `${name} [code: ${code}]`, "spec", name);
+      const pair = specFailurePair(lines, i);
+      if (pair === null) continue; // 没有配对的 `✖` 行 ⇒ 不是 spec 失败块（⛔ 不落签名）
+      push(rel, pair.code === "" ? pair.name : `${pair.name} [code: ${pair.code}]`, "spec", pair.name);
       continue;
     }
   }

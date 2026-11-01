@@ -1,0 +1,24 @@
+✖ failing tests:
+
+test at test/dogfood-p0.test.mjs:344:1
+✖ AC-012's criterion pipeline runs verbatim through sh -c against the real checkout and exits 0 (13462.952177ms)
+  AssertionError [ERR_ASSERTION]: criterion command exited 1
+    command: node bin/quay-fleet.mjs dogfood-report --phase p0 --root /data/home/yale/work/quay-fleet --json | node -e "const r=JSON.parse(require('fs').readFileSync(0,'utf8'));process.exit(r.ok===true&&r.checks.length>=5&&r.checks.every(c=>c.pass)?0:1)"
+    stderr: 
+  
+  1 !== 0
+  
+      at TestContext.<anonymous> (file:///data/home/yale/work/quay-fleet-worktrees/gap-knowledge-live-carrier-derivation/test/dogfood-p0.test.mjs:353:10)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1402:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:974:18)
+      at Test.postRun (node:internal/test_runner/test:1542:19)
+      at Test.run (node:internal/test_runner/test:1467:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 1,
+    expected: 0,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
