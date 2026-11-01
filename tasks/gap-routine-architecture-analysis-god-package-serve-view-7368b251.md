@@ -2,7 +2,7 @@
 id: gap-routine-architecture-analysis-god-package-serve-view-7368b251
 title: "architecture-analysis: fanIn 564 / fanOut 222, 118 entities in 7 files;
   serve-i18n.ts alone is 202KB."
-status: ready
+status: done
 labels:
   - gap
   - routine-filed
