@@ -2472,6 +2472,62 @@ export function appendFanInTrace(file: string, entry: Record<string, unknown>): 
   } catch { /* best-effort runtime log */ }
 }
 
+// ── Fan-in delta shadow evaluation (gap-fan-in-delta-shadow-evaluation) ──────────────────────────────
+// The shadow record is a PURE OBSERVATION appended at the step-4 delta judgment: current verdict vs the
+// ONE candidate rule (`--classify-delta --shadow`), plus the identity fields (task / runId /
+// perSuiteRunId / baseline/candidate SHA / delta) the report needs to re-derive and JOIN the record to
+// the full-verification result (AC2/AC4). It is written into the EXISTING shared carrier
+// `.quay/fan-in-step-trace.jsonl` as a `delta-shadow` step-end event (the same carrier that already
+// holds suite-skip / suite-end / scoped-gate) — ⛔ no NEW carrier, so the carrier-registry completeness
+// gate and the gitignore ratchet are untouched. Writing is best-effort (appendFanInStepTrace swallows a
+// write failure) — a shadow write failure must never change the fan-in's release decision (AC6).
+
+/** Build ONE delta shadow record from the step-4 judgment inputs. Pure (no IO) — the caller already
+ *  has the git SHAs and the shadow classify JSON. `currentCodeDelta` is the raw `--classify-delta`
+ *  stdout ("" = doc-only, path list = code, CLASSIFY_FAILED = could not judge); `shadow` is the parsed
+ *  `--classify-delta --shadow` JSON line (or null when the shadow classify itself failed). The returned
+ *  object is spread into `appendFanInStepTrace(…, "delta-shadow", "end", …)` — task/runId/ts live on
+ *  the carrier envelope, everything below is the shadow's own structured reading. */
+export function buildDeltaShadowRecord(fields: {
+  perSuiteRunId: string; mergeTarget: string;
+  baselineSha: string; candidateSha: string; delta: string[];
+  currentCodeDelta: string; needSuite: boolean; reuseSkip: boolean;
+  shadow: Record<string, unknown> | null; shadowError: string | null;
+}): Record<string, unknown> {
+  const { perSuiteRunId, mergeTarget, baselineSha, candidateSha, delta, currentCodeDelta, needSuite, reuseSkip, shadow, shadowError } = fields;
+  const classifyFailed = currentCodeDelta === CLASSIFY_FAILED;
+  const currentCodePaths = classifyFailed ? [] : currentCodeDelta.split("\n").map((s) => s.trim()).filter(Boolean);
+  const candidateCodePaths = (shadow && !shadow.classifyFailed && Array.isArray(shadow.candidateCodePaths))
+    ? (shadow.candidateCodePaths as string[])
+    : null;
+  const candidateSkippable = (shadow && !shadow.classifyFailed && Array.isArray(shadow.candidateSkippable))
+    ? (shadow.candidateSkippable as string[])
+    : null;
+  return {
+    kind: "delta-shadow",
+    ruleVersion: shadow && typeof shadow.ruleVersion === "string" ? shadow.ruleVersion : "unknown",
+    ruleName: shadow && typeof shadow.ruleName === "string" ? shadow.ruleName : "unknown",
+    perSuiteRunId,
+    mergeTarget,
+    baselineSha,
+    candidateSha,
+    delta,
+    current: {
+      classifyFailed,
+      codePaths: currentCodePaths,
+      needSuite,
+      reuseSkip,
+    },
+    candidate: {
+      classifyFailed: shadow ? (shadow.classifyFailed === true) : true,
+      codePaths: candidateCodePaths,
+      skippable: candidateSkippable,
+    },
+    divergence: shadow && typeof shadow.divergence === "string" ? shadow.divergence : "not-evaluated",
+    shadowError,
+  };
+}
+
 // ── scoped-gate cache（gap-worker-premerge-scoped-gate-cache）──────────────────────────────────────
 // worker 退出前 agent-mediated pre-merge + scoped test 后，机械记录 (task, developSha, verdict=pass)
 // 到 .quay/scoped-gate-cache.json（仿 .quay/doc-check-cache.json 的既有模式）。driver 锁内
@@ -3019,6 +3075,43 @@ export async function runMechanicalFanIn(opts: MechanicalFanInOptions): Promise<
     }
     const needSuite = opts.forceSuite === true || codeDelta === CLASSIFY_FAILED || (codeDelta !== "" && !reuseSkip);
     trace({ step: "delta", exit: 0, wall_ms: Date.now() - deltaT0, ok: true, reason: needSuite ? (codeDelta === CLASSIFY_FAILED ? "classify failed → run suite (fail-closed)" : `code delta (${codeDelta || "forced"}) → run suite`) : (reuseSkip ? "code delta + doc/inert-only develop advance → reuse prev green (skip suite)" : "doc-only delta → skip suite") });
+
+    // 4c. delta 影子评估（gap-fan-in-delta-shadow-evaluation）：现行放行不变（AC6），只记录「现行判定 vs
+    //     候选规则判定」+ 身份/基准/候选 SHA + 分歧。影子 classify 失败 ⇒ shadow=null + shadowError，
+    //     ⛔ 不改变 needSuite/codeDelta（影子失败不改变现行裁决）。记录写进共享载体 fan-in-step-trace.jsonl
+    //     的 `delta-shadow` step-end（appendFanInStepTrace fail-open，同 suite-skip/suite-end）。
+    const shadowT0 = Date.now();
+    let shadowDecision: Record<string, unknown> | null = null;
+    let shadowError: string | null = null;
+    if (deltaList.length > 0) {
+      const sh = await mechSh([...classify, "--classify-delta", "--shadow", "--root", worktree, ...deltaList], 120_000);
+      if (sh.ok) {
+        try {
+          shadowDecision = JSON.parse((sh.stdout || "").trim()) as Record<string, unknown>;
+        } catch {
+          shadowError = `shadow classify unparseable output: ${(sh.stdout || "").trim().slice(0, 120)}`;
+        }
+      } else {
+        shadowError = `shadow classify exited ${sh.status}: ${combinedOutput(sh.stdout, sh.stderr).slice(0, 120)}`;
+      }
+    }
+    const candidateHead = await mechSh(["git", "-C", worktree, "rev-parse", "HEAD"], 30_000);
+    appendFanInStepTrace(root, task, runId, "delta-shadow", "end", {
+      ok: true,
+      durationMs: Date.now() - shadowT0,
+      ...buildDeltaShadowRecord({
+        perSuiteRunId, mergeTarget,
+        baselineSha: (fork.stdout || "").trim(),
+        candidateSha: (candidateHead.stdout || "").trim(),
+        delta: deltaList,
+        currentCodeDelta: codeDelta,
+        needSuite,
+        reuseSkip,
+        shadow: shadowDecision,
+        shadowError,
+      }),
+    });
+    trace({ step: "delta-shadow", exit: 0, wall_ms: Date.now() - shadowT0, ok: true, reason: shadowError ? `shadow not-evaluated: ${shadowError}` : (shadowDecision ? String(shadowDecision.divergence ?? "recorded") : "empty delta (no shadow record)") });
 
     // 5. ts-typecheck ∥ doc-check 并行（merge+anti-drift 后二者相互独立，可并行；doc-check 提前到
     //    scoped-gate 之前——廉价失败先于昂贵）。合并为一次 gate 判定：任一非零 ⇒ red → 语义会话兜底。

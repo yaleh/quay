@@ -532,3 +532,57 @@ test("gap-fan-in-flip-done-already-done-not-landed AC4 — 正常 ready flip 行
     fs.rmSync(base, { recursive: true, force: true });
   }
 });
+
+// ── gap-fan-in-delta-shadow-evaluation ─────────────────────────────────────────────────────────────
+// The delta shadow record is a PURE OBSERVATION appended at the step-4 delta judgment; it must be
+// written during a real mechanical fan-in (AC6: 至少一个真实 delta 走生产判定路径) AND must never
+// change the release decision (AC6: 影子失败不改变现行裁决). The happy path here is the real
+// runMechanicalFanIn, not a fixture-only call — the record is read back from `.quay/` after landing.
+
+test("gap-fan-in-delta-shadow-evaluation — a real mechanical fan-in writes a shadow record and still lands", async () => {
+  const { base, repo, worktree, slotBase, capture } = makeRepoWithWorktree();
+  const runId = "mf-run-shadow";
+  const suiteLog = path.join(base, "suite.log");
+  try {
+    const r = await runMechanicalFanIn({
+      task: TASK,
+      worktree,
+      root: repo,
+      runId,
+      mergeTarget: "develop",
+      forceSuite: true,
+      scriptsDir: SCRIPTS_DIR, ffMergeModule: FF_MERGE_MODULE,
+      slotBase,
+      slotLib: SLOT_LIB,
+      silenceMs: 5000,
+      suiteCapture: capture,
+      suiteLogFile: suiteLog,
+      suiteCommand: ["bash", "-c", "echo suite-running; exit 0"],
+      scopedGateCommand: ["true"],
+      docCheckCommand: ["true"],
+    });
+    assert.equal(r.outcome, "landed", `shadow must NOT change the release decision (step=${r.step} reason=${r.reason})`);
+
+    // The shadow record is a real observation, not a fixture: read it back from the shared step-trace
+    // carrier (the same .quay/fan-in-step-trace.jsonl that holds suite-skip/suite-end/scoped-gate).
+    const traceFile = path.join(repo, ".quay", "fan-in-step-trace.jsonl");
+    assert.equal(fs.existsSync(traceFile), true, "a real mechanical fan-in must write the step-trace carrier");
+    const lines = fs.readFileSync(traceFile, "utf8").trim().split("\n").filter(Boolean);
+    const recs = lines.map((l) => JSON.parse(l)).filter((x) => x.step === "delta-shadow");
+    assert.ok(recs.length >= 1, "at least one delta-shadow step-trace record must exist");
+    const rec = recs.find((x) => x.task === TASK);
+    assert.ok(rec, "the shadow record must carry the task identity");
+    assert.equal(rec.runId, runId);
+    assert.ok(rec.perSuiteRunId && rec.perSuiteRunId.length > 0, "the shadow record must carry the suite identity (perSuiteRunId)");
+    assert.ok(/^[0-9a-f]{40}$/i.test(rec.baselineSha ?? ""), `baselineSha must be a git sha, got ${rec.baselineSha}`);
+    assert.ok(/^[0-9a-f]{40}$/i.test(rec.candidateSha ?? ""), `candidateSha must be a git sha, got ${rec.candidateSha}`);
+    assert.deepEqual(rec.delta, ["docs/feature.md"], "the shadow record must carry the delta list");
+    // conservative-default mode (the hermetic repo has no registry and no config) ⇒ docs/ is code in
+    // BOTH the current and the candidate rule ⇒ divergence=agree (not-evaluated is a red flag here).
+    assert.equal(rec.current.classifyFailed, false);
+    assert.equal(rec.candidate.classifyFailed, false);
+    assert.equal(rec.divergence, "agree");
+  } finally {
+    fs.rmSync(base, { recursive: true, force: true });
+  }
+});
