@@ -2,7 +2,7 @@
 id: gap-role-effort-tiering-selector-pool-judge-meta-driver
 title: selector/pool-judge/meta-driver 三个窄判定 role 降 effort 到 low（role 层，不动
   worker-default）
-status: ready
+status: done
 labels:
   - gap
 parent: null
