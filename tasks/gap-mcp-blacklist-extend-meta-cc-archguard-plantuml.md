@@ -14,6 +14,8 @@ extra:
 
 token 全量扫描已确认 task-worker/fix-worker/selector 是 driver 会话里 cache_read 最大的三类（claudecodeui-task-worker 44.2B、quay-task-worker 26.4B、quay-fleet-task-worker 9.1B）。cache_read 与「每轮常驻上下文」线性相关，而 MCP tool schema 就常驻在每轮都重读的缓存前缀里。`gap-worker-mcp-blacklist-strict-config`（done）已经把 chrome-devtools/playwright 从三个纯写代码 role 上摘掉（实测省 ~3.24GB RSS + 两套 schema），但 meta-cc（查会话历史）、archguard（架构分析）、plantuml（画图）对 task-worker/fix-worker/selector 同样无用：这三个 role 只走 quay MCP（task_get/task_write/task_check 是 ABI 强制面）+ Read/Bash/Edit。它们却仍被连接到每个 worker 会话、把 schema 灌进每轮上下文。机制已存在（role 层 `mcpBlacklist` → `driver-runtime.ts:2331 launchArgv` → `mcp-blacklist-resolve.ts` → `--strict-mcp-config --mcp-config <inline json>`），本任务只扩展黑名单取值，不改机制。
 
+⛔ 防误伤边界（本任务范围）：`mcpBlacklist` 只摘被 spawn 会话【连接的 MCP server】，不断 CLI——meta-cc 经 Bash 的 CLI 调用、architecture-* 任务走 archguard CLI 都不受本黑名单影响；且 AC3 负控制是安全阀：某 role 实测仍在会话内调这些 MCP 时，该 role 保留对应 MCP 并从黑名单剔除（不一刀切）。
+
 ## Plan
 
 1. `plugin/.quay/profiles.yml`（shipped fallback carrier）：roles.task-worker/fix-worker/selector 的 `mcpBlacklist` 从 `[chrome-devtools, playwright]` 扩展为 `[chrome-devtools, playwright, meta-cc, archguard, plantuml]`。
