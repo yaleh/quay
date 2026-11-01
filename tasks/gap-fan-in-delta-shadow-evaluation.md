@@ -1,7 +1,7 @@
 ---
 id: gap-fan-in-delta-shadow-evaluation
 title: E2：delta 分类解释与影子评估——现行放行不变，测可证缩小全量验证面的收益
-status: ready
+status: done
 labels:
   - gap
 parent: null
