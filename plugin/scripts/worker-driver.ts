@@ -7015,7 +7015,8 @@ export async function runVerify(opts: {
   runBaseline?: boolean;
 }): Promise<VerifyRunReading> {
   const { task, worktree, root } = opts;
-  const timeoutMs = opts.timeoutMs ?? 120_000;
+  // 完整 scoped 门（本仓库形态 = scripts/test.sh --for-task）实测量级 ~110s，⛔ 120s 会贴线误杀。
+  const timeoutMs = opts.timeoutMs ?? VERIFY_BASELINE_RERUN_TIMEOUT_MS;
   const t0 = Date.now();
   const argv = scopedGateCommandFor(task, worktree);
   if (argv === null) {
@@ -7089,7 +7090,7 @@ async function verifyScopedFallback(
   if (argv === null) {
     return { task, worktree, state: "not-evaluated", argv: null, files: [], exitCode: null, wallMs: 0, reason, fellBackToScopedGate: true, output: "" };
   }
-  const run = await mechSh(argv, 120_000);
+  const run = await mechSh(argv, VERIFY_BASELINE_RERUN_TIMEOUT_MS);
   return {
     task, worktree, state: "not-evaluated", argv, files: [], exitCode: run.status,
     wallMs: Date.now() - t0, reason, fellBackToScopedGate: true, output: combinedOutput(run.stdout, run.stderr),
