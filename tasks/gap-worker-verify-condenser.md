@@ -46,13 +46,13 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1 `node --test plugin/test/worker-verify.test.mjs`（新）exit 0；fixture 至少覆盖：①TAP 与 spec-reporter 两种格式的失败文件解析；②多文件失败；③无失败行 ⇒ `not-evaluated`，不得判绿；④基线树不可用 ⇒ `not-evaluated` + 全部记 `must-fix`；⑤同一文件在基线也红 ⇒ `baseline-red`，不在 `must-fix` 列表。
-- [ ] AC2 `--verify-run` 实际执行的 argv 必须与 `scopedGateCommandFor(task, worktree)` 逐元素相等（断言，不是"等价"）；验证覆盖面因此与现状完全一致。
-- [ ] AC3 `--verify-rerun` 调用的 argv 来自 `resolveRerunCommand`，`{files}` 按整元素 splice 只放入 `must-fix` 文件；`must-fix` 为空时 exit 0 且输出 `nothing-to-rerun`；`loop.rerun_command` 未声明 ⇒ `not-evaluated` 并退回完整 scoped gate，⛔ 不得跳过验证。
-- [ ] AC4 worker prompt 的 create 与 continue 两个构造点都指向该入口，且仍逐字包含"退出前跑完整 scoped gate"；`plugin/test/worker-driver.test.mjs` 断言四根既有不变量（worktree 绝对路径 / `task_write` / anti-drift argv / exit 指令）仍在。
-- [ ] AC5 真实运行证据（贴进任务体）：在本仓库取一次真实红（临时 worktree 内故意改坏一个测试文件）与一次全绿，记录两次的 argv、`must-fix` / `baseline-red` 分类、重跑文件数与耗时；负控制证明被改坏的文件仍被判 `must-fix`。
-- [ ] AC6 验证面不变：fan-in 侧全量 suite 路径零改动；grep 证明未新增任何"跳过 scoped gate / 跳过 suite"的分支；退出前的完整 gate 是硬路径（缺它则测试失败）。
-- [ ] AC7 `git diff --check` exit 0，改动只在声明 Touches 内；不修改 `.quay/profiles.yml`、`.quay/config.yml`、任何 gate/AC/DoD。
+- [x] AC1 `node --test plugin/test/worker-verify.test.mjs`（新）exit 0；fixture 至少覆盖：①TAP 与 spec-reporter 两种格式的失败文件解析；②多文件失败；③无失败行 ⇒ `not-evaluated`，不得判绿；④基线树不可用 ⇒ `not-evaluated` + 全部记 `must-fix`；⑤同一文件在基线也红 ⇒ `baseline-red`，不在 `must-fix` 列表。
+- [x] AC2 `--verify-run` 实际执行的 argv 必须与 `scopedGateCommandFor(task, worktree)` 逐元素相等（断言，不是"等价"）；验证覆盖面因此与现状完全一致。
+- [x] AC3 `--verify-rerun` 调用的 argv 来自 `resolveRerunCommand`，`{files}` 按整元素 splice 只放入 `must-fix` 文件；`must-fix` 为空时 exit 0 且输出 `nothing-to-rerun`；`loop.rerun_command` 未声明 ⇒ `not-evaluated` 并退回完整 scoped gate，⛔ 不得跳过验证。
+- [x] AC4 worker prompt 的 create 与 continue 两个构造点都指向该入口，且仍逐字包含"退出前跑完整 scoped gate"；`plugin/test/worker-driver.test.mjs` 断言四根既有不变量（worktree 绝对路径 / `task_write` / anti-drift argv / exit 指令）仍在。
+- [x] AC5 真实运行证据（贴进任务体）：在本仓库取一次真实红（临时 worktree 内故意改坏一个测试文件）与一次全绿，记录两次的 argv、`must-fix` / `baseline-red` 分类、重跑文件数与耗时；负控制证明被改坏的文件仍被判 `must-fix`。
+- [x] AC6 验证面不变：fan-in 侧全量 suite 路径零改动；grep 证明未新增任何"跳过 scoped gate / 跳过 suite"的分支；退出前的完整 gate 是硬路径（缺它则测试失败）。
+- [x] AC7 `git diff --check` exit 0，改动只在声明 Touches 内；不修改 `.quay/profiles.yml`、`.quay/config.yml`、任何 gate/AC/DoD。
 
 ## Definition of Done
 
@@ -70,3 +70,11 @@ extra:
 - plugin/scripts/worker-fan-in.ts
 - plugin/test/worker-verify.test.mjs (new)
 - tasks/gap-worker-verify-condenser.md
+
+## Evidence
+
+`--verify-run` 真实运行（cwd=worktree，`--root /data/home/yale/work/quay`，本 worktree `/data/home/yale/work/quay-worktrees/gap-worker-verify-condenser`）：
+
+- 全绿：argv = `["bash","<worktree>/scripts/test.sh","--for-task","gap-worker-verify-condenser","--allow-thin"]`（与 `scopedGateCommandFor(task, worktree)` 逐元素相等），exit 0，classification `green`，wallMs 137967，mustFix=[] baselineRed=[]。
+- 真实红（`plugin/test/worker-driver.test.mjs` 尾部临时加一条 `assert.equal(1,2)` 失败测试）：argv 同上，exit 1，classification `must-fix`，mustFix=["plugin/test/worker-driver.test.mjs"]，baselineRed=[]，wallMs 101130，重跑文件数 1（develop 基线树重跑该文件全绿 ⇒ 任务引入，负控制成立：被改坏的文件仍判 must-fix）。
+- 保守回退（新建文件 `plugin/test/worker-verify.test.mjs` 尾部临时加失败测试）：exit 1，classification `not-evaluated`，reason="baseline-signatures: no-failure-signature-lines"，mustFix=["plugin/test/worker-verify.test.mjs"]（新文件不在 develop ⇒ 基线无法评估 ⇒ ⛔ 不静默判绿）。
