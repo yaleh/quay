@@ -64,5 +64,6 @@ Split observation/init monoliths and remove the re-export barrel so subpackages 
 - `packages/quay/src/observation/task-status-ref.ts`
 - `packages/quay/src/observation/live-state.ts`
 - `plugin/scripts/task-file-bypass-check.ts`
+- `plugin/test/task-file-bypass-check.test.mjs`
 - `packages/quay/src/init.ts`
 - `tasks/gap-routine-architecture-analysis-fan-hub-quay-src.md`
