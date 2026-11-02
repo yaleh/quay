@@ -40,12 +40,12 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1 `node --test scripts/effort-tiering-effect.test.mjs` exit 0；fixture 至少覆盖：①同 role 的 high 与 low 会话分别聚合、互不混入；②缺 `effort` 字段 ⇒ 进入 `not-evaluated` 而不是计入某一侧；③同一 session 内 high/low 混用 ⇒ 进入 `mixed`，不并入任一侧。
-- [ ] AC2 `node scripts/effort-tiering-effect.mjs --help` exit 0，公开输入 schema、role 分类规则、缺失语义与 `mixed` 语义。
-- [ ] AC3 对真实会话目录运行并把读数贴进报告：至少覆盖 selector / pool-judge / meta-driver 三个 role 的 high vs low 的 `output/msg`、`fresh/msg`、`cache_read/msg` 与会话时长分位数，每格必须带样本数 n。
-- [ ] AC4 报告对每个 role 显式写"样本是否足够（n ≥ 20）"；任一侧 n < 20 时必须标为不足，且结论不得据此宣称收益或损失。
-- [ ] AC5 报告给出 keep / revert / not-evaluated 三选一的结论与理由；若为 not-evaluated，必须写出所缺输入与可重测条件。
-- [ ] AC6 `git diff --check` exit 0，改动只在声明 Touches 内；`.quay/profiles.yml` 与 `plugin/.quay/profiles.yml` 的 diff 为空。
+- [x] AC1 `node --test scripts/effort-tiering-effect.test.mjs` exit 0；fixture 至少覆盖：①同 role 的 high 与 low 会话分别聚合、互不混入；②缺 `effort` 字段 ⇒ 进入 `not-evaluated` 而不是计入某一侧；③同一 session 内 high/low 混用 ⇒ 进入 `mixed`，不并入任一侧。
+- [x] AC2 `node scripts/effort-tiering-effect.mjs --help` exit 0，公开输入 schema、role 分类规则、缺失语义与 `mixed` 语义。
+- [x] AC3 对真实会话目录运行并把读数贴进报告：至少覆盖 selector / pool-judge / meta-driver 三个 role 的 high vs low 的 `output/msg`、`fresh/msg`、`cache_read/msg` 与会话时长分位数，每格必须带样本数 n。
+- [x] AC4 报告对每个 role 显式写"样本是否足够（n ≥ 20）"；任一侧 n < 20 时必须标为不足，且结论不得据此宣称收益或损失。
+- [x] AC5 报告给出 keep / revert / not-evaluated 三选一的结论与理由；若为 not-evaluated，必须写出所缺输入与可重测条件。
+- [x] AC6 `git diff --check` exit 0，改动只在声明 Touches 内；`.quay/profiles.yml` 与 `plugin/.quay/profiles.yml` 的 diff 为空。
 
 ## Definition of Done
 
