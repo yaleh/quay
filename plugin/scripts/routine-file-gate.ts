@@ -22,7 +22,8 @@ import { DEFAULT_ROUTINE_QUOTA_K, DEFAULT_ROUTINE_QUOTA_WINDOW_MS } from "./driv
 export const DEFAULT_RATE = DEFAULT_ROUTINE_QUOTA_K; // ≤ K routine-filed tasks per window (tunable)
 
 // ── findingKey ───────────────────────────────────────────────────────────────────────────────────
-// The dedup key for a task's `## Finding` section. TWO sources, in priority order:
+// The dedup key for a task's `## Finding` section. TWO sources, in priority order (with a
+// kind-scoped override for `dupKind: god-package`, noted at the boundary paragraph below):
 //
 //   ① THE SUBJECT — the symbols the finding names (`symbols: \`a\`, \`b\`` in a candidate text;
 //      `- 观测符号：\`a\`、\`b\`` in a filed task body — ONE parser reads both spellings). Normalized
@@ -51,6 +52,16 @@ export const DEFAULT_RATE = DEFAULT_ROUTINE_QUOTA_K; // ≤ K routine-filed task
 // over-block that turns a noisy track off. The symbol set is the axis that survives.
 // ⛔ Do NOT fold the file set back into the key; that is exactly what made the old key round-specific.
 //
+// EXCEPTION, kind-scoped (gap-routine-file-gate-god-package-dedup-by-package-identity): for
+// `dupKind: god-package` the symbols ARE the unstable axis — archguard re-samples a god-package's
+// observation symbols every round, so the exact-set key above never converges and the same package
+// re-files every round, RATE-limited rather than deduped (measured 2026-10/11 on the carrier: the
+// same `plugin/scripts` package arrived as `readjsonlines,readjsonllines` then
+// `isstaticcheckfailureline,extractstaticcheckdetail` then `runopensemanticdiscovery,runresidentloop,…`).
+// Its subject is therefore the PACKAGE (the common directory prefix of `files`), which survives the
+// round boundary; see `packageIdentityKey`/`findingSubjectKey`. ⛔ NOT the raw file SET — that is the
+// over-broad key the paragraph above measured as collapsing 121 distinct clusters under 40 values.
+//
 // The two sources carry DISTINCT prefixes so a value from one can never equal a value from the other
 // (硬规则 3b: 「没有 subject」与「有 subject」不得共用一种键形，否则"读不出主语"会伪装成"命中").
 // Measured over all 544 carrier finding records: 360 distinct symbol sets, **0 shared across two
@@ -78,12 +89,83 @@ const FINDING_SECTION = /##\s+Finding\s*\n([\s\S]*?)(?:\n##\s|\n*$)/i;
  *  token ⇒ "" — a real "names no symbols", ⛔ never a key of the literal `<none>`. */
 const SYMBOLS_LINE = /^[ \t]*[-*]?[ \t]*(?:观测符号|symbols)[ \t]*[:：][ \t]*(.*)$/im;
 
-/** The finding's mechanical subject: the sorted, lowercased symbol set it names. "" when the finding
- *  names no symbols — a legitimate state (the freshness routine's ids are not symbols), ⛔ not an
- *  error and not a key (硬规则 6: 缺值 ≠ 为假; a fabricated key would dedup everything against it). */
+/** The `kind:` line, in either spelling the two renderers emit — the candidate's `kind: \`x\`` and
+ *  the filed body's `- kind：\`x\``. Scoped to a line START (like SYMBOLS_LINE) so a prose mention of
+ *  "god-package" is not read as a kind (硬规则 2: 按位置判定，不按关键词). */
+const KIND_LINE = /^[ \t]*[-*]?[ \t]*kind[ \t]*[:：][ \t]*(.*)$/im;
+
+/** The files line/block, in either spelling — the candidate's `files: \`a\`, \`b\`` (ONE line) and
+ *  the filed body's `- 涉及文件：` + `- \`a\`` bullets. ⛔ ONE parser for both (the same symmetry the
+ *  symbol parser has): the candidate and the board task MUST key identically. */
+const FILES_LINE = /^[ \t]*files[ \t]*[:：][ \t]*(.*)$/im;
+const FILES_BLOCK = /^[ \t]*[-*][ \t]*(?:涉及文件|files)[ \t]*[:：][ \t]*$/im;
+
+/** The finding's own `dupKind` ("" = none named / no `## Finding`). ⛔ 缺值 ≠ 为假 (硬规则 6): a
+ *  fabricated kind would re-route every key. */
+export function findingKind(taskText) {
+  const section = String(taskText).match(FINDING_SECTION);
+  if (!section) return "";
+  const line = section[1].match(KIND_LINE);
+  if (!line) return "";
+  const m = line[1].match(/`([^`]+)`/);
+  return m ? m[1].trim().toLowerCase() : "";
+}
+
+/** The files the finding names, in either spelling the two renderers emit. Returns the RAW tokens
+ *  (still `path:line`); the caller owns what to derive from them. [] = none named / no `## Finding`. */
+export function findingFiles(taskText) {
+  const section = String(taskText).match(FINDING_SECTION);
+  if (!section) return [];
+  const body = section[1];
+  const inline = body.match(FILES_LINE);
+  if (inline) {
+    const tokens = [...inline[1].matchAll(/`([^`]+)`/g)].map((m) => m[1].trim()).filter(Boolean);
+    if (tokens.length) return tokens;
+  }
+  const block = body.match(FILES_BLOCK);
+  if (!block) return [];
+  const after = body.slice((block.index ?? 0) + block[0].length);
+  const out = [];
+  for (const raw of after.split("\n")) {
+    if (!raw.trim()) continue; // the tail of the `- 涉及文件：` line is empty after its colon
+    const m = raw.match(/^[ \t]*[-*][ \t]*`([^`]+)`[ \t]*$/);
+    if (!m) break; // the first non-file bullet (e.g. `- kind：…`) ends the file block
+    out.push(m[1].trim());
+  }
+  return out.filter(Boolean);
+}
+
+/** The god-package's identity: the longest common DIRECTORY prefix of the finding's files (a
+ *  `path:line` token → its dirname). "" when there are no files or they share no directory — a real
+ *  "no package identity", ⛔ never a fabricated key (硬规则 6). */
+export function packageIdentityKey(files) {
+  const dirs = files
+    .map((f) => path.posix.dirname(String(f).replace(/:\d+$/, "").trim()))
+    .filter((d) => d && d !== ".");
+  if (!dirs.length) return "";
+  let prefix = dirs[0].split("/").filter(Boolean);
+  for (const d of dirs.slice(1)) {
+    const parts = d.split("/").filter(Boolean);
+    let i = 0;
+    while (i < prefix.length && i < parts.length && prefix[i] === parts[i]) i += 1;
+    prefix = prefix.slice(0, i);
+  }
+  return prefix.join("/").toLowerCase();
+}
+
+/** The finding's mechanical subject: the sorted, lowercased symbol set it names — EXCEPT for
+ *  `dupKind: god-package`, whose subject is the PACKAGE identity (the common directory prefix of
+ *  `files`), because archguard re-samples a god-package's symbols every round and the symbol key
+ *  never converges for it (see the header's boundary exception). "" when the finding names neither —
+ *  a legitimate state (the freshness routine's ids are not symbols), ⛔ not an error and not a key
+ *  (硬规则 6: 缺值 ≠ 为假; a fabricated key would dedup everything against it). */
 export function findingSubjectKey(taskText) {
   const section = String(taskText).match(FINDING_SECTION);
   if (!section) return "";
+  if (findingKind(taskText) === "god-package") {
+    const pkg = packageIdentityKey(findingFiles(taskText));
+    return pkg ? `package:${pkg}` : "";
+  }
   const line = section[1].match(SYMBOLS_LINE);
   if (!line) return "";
   const syms = [...line[1].matchAll(/`([^`]+)`/g)].map((m) => m[1].trim().toLowerCase()).filter(Boolean);
