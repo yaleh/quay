@@ -1,7 +1,7 @@
 ---
 id: gap-e1-round-count-and-landing-carrier
 title: E1 计数修正：轮数按 message.id 去重（现 2.2× 高估）、落地证据并集 fan-in-step-trace（现少算 17 个任务）
-status: todo
+status: ready
 labels:
   - gap
   - defect
