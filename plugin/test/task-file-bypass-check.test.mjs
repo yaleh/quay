@@ -164,5 +164,5 @@ test("AC6: the allowlist is an exported constant data object, not scattered inli
 test("scan() groups the real corpus with 0 new hits and a populated allowlisted set", () => {
   const r = scan(REPO_ROOT);
   assert.equal(r.newHits.length, 0, JSON.stringify(r.newHits));
-  assert.ok(r.allowlistedFiles.has("packages/quay/src/observation.ts"), "observation.ts must be an allowlisted hit file");
+  assert.ok(r.allowlistedFiles.has("packages/quay/src/observation/task-status-ref.ts"), "task-status-ref.ts must be an allowlisted hit file (git-ref reads moved here from observation.ts)");
 });
