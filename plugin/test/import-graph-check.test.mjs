@@ -24,7 +24,7 @@ import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import {
-  baselineFile,
+  BASELINE_FILE_REL,
   checkBaselineShrinkOnly,
   countsOf,
   decide,
@@ -36,6 +36,7 @@ import {
   RETIRED_SRC_ROOT_SHIMS,
   tarjanSccs,
 } from "../scripts/import-graph-check.ts";
+import { baselinePath } from "../scripts/ratchet-baseline.ts";
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 
@@ -432,7 +433,7 @@ test("the non-JSON reading DOES print the human verdict line", () => {
  *  three-valued exit code rather than "baseline missing ⇒ 2"). */
 function ratchetFixture(files) {
   const root = fixture(files);
-  const bAbs = baselineFile(root);
+  const bAbs = baselinePath(root, BASELINE_FILE_REL);
   fs.mkdirSync(path.dirname(bAbs), { recursive: true });
   fs.writeFileSync(bAbs, JSON.stringify(ZERO, null, 2) + "\n");
   return root;
@@ -509,7 +510,7 @@ test("AC-911 — the real tree reads zero resurrected shims (the ratchet measure
 // ── the real repo: AC2 / AC3 / AC4 as readings, not prose ────────────────────────────────────────────
 
 const REAL = readImportGraph(REPO_ROOT);
-const REAL_BASELINE = readBaselineFile(baselineFile(REPO_ROOT));
+const REAL_BASELINE = readBaselineFile(baselinePath(REPO_ROOT, BASELINE_FILE_REL));
 
 test("AC2 — the real repo reads as evaluated, and the value cycle contains the known pair", () => {
   assert.equal(REAL.evaluated, true, `real repo read failed: ${REAL.reason}`);

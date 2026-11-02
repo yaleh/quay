@@ -220,15 +220,9 @@ export function checkSubset(current: Surface, baseline: Surface): SubsetVerdict 
 
 // ── baseline file ───────────────────────────────────────────────────────────────────────────────────
 
-/** This ratchet's baseline path — the DERIVATION is the shared `baselinePath`; this consumer owns
- * only its own `BASELINE_FILE_REL` constant (the `baseline-file-quad` finding, 硬规则 5b). */
-export function baselineFile(root: string): string {
-  return baselinePath(root, BASELINE_FILE_REL);
-}
-
 export function readBaseline(root: string): Surface | null {
   try {
-    const raw = JSON.parse(fs.readFileSync(baselineFile(root), "utf8"));
+    const raw = JSON.parse(fs.readFileSync(baselinePath(root, BASELINE_FILE_REL), "utf8"));
     if (
       !Array.isArray(raw.cli_verbs) ||
       !Array.isArray(raw.web_routes) ||
@@ -247,7 +241,7 @@ export function readBaseline(root: string): Surface | null {
 }
 
 export function writeBaseline(root: string, surface: Surface): void {
-  const p = baselineFile(root);
+  const p = baselinePath(root, BASELINE_FILE_REL);
   fs.mkdirSync(path.dirname(p), { recursive: true });
   fs.writeFileSync(
     p,
