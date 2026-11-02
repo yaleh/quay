@@ -1,7 +1,7 @@
 ---
 id: gap-meta-collectactionrecordfailures-2
 title: collectActionRecordFailures 刷新失败时静默服务 52 天旧载体（reason=null）
-status: todo
+status: ready
 labels:
   - meta-driver
   - driver-candidate
