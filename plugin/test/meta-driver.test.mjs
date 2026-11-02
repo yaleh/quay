@@ -2473,11 +2473,14 @@ test('collectActionRecordFailures: 未定阈值 ⇒ unthresholded（清单照出
     assert.equal(r2.scanMs, 1234, 'scan_ttl 未配置 ⇒ 不重扫');
     assert.equal(r2.thresholdSessions, 2);
     // ④ 配了 scan_ttl 且载体过期、binary:null（无 meta-cc）⇒ 扫描失败但有旧载体 ⇒ 落回旧载体
-    //    （值仍来自**真实**扫描，age 由 scannedAt 暴露），⛔ 不能冒充「无越阈项」。
+    //    （值仍来自**真实**扫描，age 由 scannedAt 暴露），⛔ 不能冒充「无越阈项」；且 reason 必须
+    //    命名这次扫描失败（gap-meta-collectactionrecordfailures-2：stale-served 与 fresh 在 reason
+    //    上可区分，⛔ 不再静默回退——硬规则 3b）。
     fs.writeFileSync(path.join(tmp, '.quay', 'config.yml'), 'action_record_failures:\n  min_sessions: 2\n  scan_ttl: 1h\n', 'utf8');
     const r3 = await collectActionRecordFailures(tmp, { now: Date.parse('2026-09-12T05:00:00Z'), binary: null });
     assert.equal(r3.state, 'crossed');
     assert.equal(r3.scannedAt, '2026-09-12T01:59:00Z', '旧载体的时刻暴露年龄');
+    assert.ok(r3.reason !== null && r3.reason.startsWith('scan-failed'), `stale fallback 必须命名扫描失败，实际: ${r3.reason}`);
     // ⑤ 无载体 + 扫描失败 ⇒ not-evaluated（⛔ 不是 none、⛔ 不是 unthresholded）。
     fs.rmSync(path.join(tmp, ACTION_RECORD_SCAN_REL));
     const r4 = await collectActionRecordFailures(tmp, { now: Date.parse('2026-09-12T05:00:00Z'), binary: null });
