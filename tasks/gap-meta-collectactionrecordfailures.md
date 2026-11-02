@@ -2,7 +2,7 @@
 id: gap-meta-collectactionrecordfailures
 title: Activate the action-record failure aggregation reading (min_sessions +
   scan_ttl)
-status: ready
+status: done
 labels:
   - meta-driver
   - driver-candidate
