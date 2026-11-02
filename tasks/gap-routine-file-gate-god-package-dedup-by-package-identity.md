@@ -1,7 +1,7 @@
 ---
 id: gap-routine-file-gate-god-package-dedup-by-package-identity
 title: "routine-file-gate: god-package dedup 键用包身份而非精确符号集（4 sibling 已点名、0 次立案的缺口）"
-status: todo
+status: ready
 labels:
   - gap
   - architecture-analysis
