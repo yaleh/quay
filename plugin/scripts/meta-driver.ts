@@ -931,7 +931,8 @@ export function aggregateActionFailures(
 
 /** meta-cc MCP 可执行文件的定位（单一真相源）。优先级：`QUAY_META_CC_MCP` 显式覆盖 →
  *  `~/.claude/plugins/cache/<marketplace>/<plugin>/<version>/bin/meta-cc-mcp`（取最高版本）→
- *  `~/.local/bin/meta-cc-mcp`（meta-cc 自己的 `make install` 落点）。
+ *  `~/.local/share/meta-cc/bin/meta-cc-mcp`（meta-cc 当前安装落点）→
+ *  `~/.local/bin/meta-cc-mcp`（meta-cc 旧 `make install` 落点）。
  *  ⛔ 找不到 ⇒ null（调用侧转 not-evaluated，⛔ 不是「没有重复失败」）。 */
 export function locateMetaCcMcp(env: Record<string, string | undefined> = process.env, home: string = os.homedir()): string | null {
   const explicit = env.QUAY_META_CC_MCP;
@@ -951,6 +952,8 @@ export function locateMetaCcMcp(env: Record<string, string | undefined> = proces
       }
     }
   } catch { /* 无 cache 目录 ⇒ 继续走下一个候选 */ }
+  const share = path.join(home, ".local", "share", "meta-cc", "bin", "meta-cc-mcp");
+  if (fs.existsSync(share)) found.push(share);
   const local = path.join(home, ".local", "bin", "meta-cc-mcp");
   if (fs.existsSync(local)) found.push(local);
   if (found.length === 0) return null;

@@ -2,7 +2,7 @@
 id: gap-meta-locatemetaccmcp
 title: locateMetaCcMcp misses meta-cc's moved install path — action-record scan
   stale for 52 days
-status: ready
+status: done
 labels:
   - meta-driver
   - driver-candidate
@@ -17,11 +17,14 @@ actionRecordFailures scan fails because locateMetaCcMcp has no search path for ~
 ⚠️ 机制词 `locateMetaCcMcp` 命中【已完成】任务：gap-meta-collectactionrecordfailures-2.md[done]——问题仍在而任务已 done ⇒ 先查那些任务为何没解决它，⛔ 不要在它们旁边新造一个并行机制。
 
 ## AC（draft）
-- [ ] `node --experimental-strip-types --input-type=module -e "const m=await import('./plugin/scripts/meta-driver.ts');const fs=await import('node:fs');const b=m.locateMetaCcMcp();if(!b||!fs.existsSync(b)){console.error('locateMetaCcMcp unresolved: '+b);process.exit(1)}console.log('located: '+b)"` ⇒ locateMetaCcMcp resolves an existing meta-cc-mcp binary on this machine (currently returns null => scan-failed)
+- [x] `node --experimental-strip-types --input-type=module -e "const m=await import('./plugin/scripts/meta-driver.ts');const fs=await import('node:fs');const b=m.locateMetaCcMcp();if(!b||!fs.existsSync(b)){console.error('locateMetaCcMcp unresolved: '+b);process.exit(1)}console.log('located: '+b)"` ⇒ locateMetaCcMcp resolves an existing meta-cc-mcp binary on this machine (currently returns null => scan-failed)
 
 ## DoD（draft）
-- [ ] 上面的判据实跑通过，且判据本身能取假（改坏实现时会红）
-- [ ] 若结论是「已有机制在管、只是失败」，则修那个机制，⛔ 不新建并行机制
+- [x] 上面的判据实跑通过，且判据本身能取假（改坏实现时会红）
+- [x] 若结论是「已有机制在管、只是失败」，则修那个机制，⛔ 不新建并行机制
+
+## Dark-axis
+- 该轴仍暗,理由:本任务为局部缺陷修复（locateMetaCcMcp 增补 ~/.local/share/meta-cc/bin 搜索路径 + 单测），不改包/依赖结构，无可测的 L_D/L_G 读数。
 
 ## Touches
 - `plugin/scripts/meta-driver.ts`

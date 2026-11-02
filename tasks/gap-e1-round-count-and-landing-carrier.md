@@ -1,7 +1,7 @@
 ---
 id: gap-e1-round-count-and-landing-carrier
 title: E1 计数修正：轮数按 message.id 去重（现 2.2× 高估）、落地证据并集 fan-in-step-trace（现少算 17 个任务）
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -35,12 +35,12 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1 `node --test scripts/task-efficiency-baseline.test.mjs` exit 0；新增反例至少覆盖：①同一 `message.id` 的多条 block 记录只计 1 轮；②缺 `message.id` 的记录计入 `roundsMissingId` 而不是静默丢弃或合并；③落地来自 `.log`、来自 `step-trace`、来自两者（只计 1 次）；④两处都没有 ⇒ `unknown`，不并入成功分母；⑤同一 `(task, runId)` 重复 ff ok 不重复计数。
-- [ ] AC2 同窗口真实运行：`totalRounds` 必须等于 10,392（轮数台账同窗口读数）；若不等，报告必须逐项解释差异，⛔ 不得改窗口或改任务集合去凑数。
-- [ ] AC3 同窗口真实运行：`landedTasks` 必须等于 94；不等则解释（含每个来源的计数：`log` / `step-trace` / `both` / `unknown`）。
-- [ ] AC4 `docs/analysis/task-efficiency-baseline.md` 更新：旧值 22,863 轮 / 77 落地 → 新值，显式标注旧值为"未按 message.id 去重的行数口径"，并给出复跑命令。
-- [ ] AC5 attempts / suite / 锁等待 / 费用维度的判定语义与输出字段不变；`--help` 增加轮数去重与落地载体并集的说明；`roundsMissingId` 在 JSON 与 Markdown 中都可见。
-- [ ] AC6 `git diff --check` exit 0，改动只在声明 Touches 内；不修改任何 gate / AC / DoD / driver 配置。
+- [x] AC1 `node --test scripts/task-efficiency-baseline.test.mjs` exit 0；新增反例至少覆盖：①同一 `message.id` 的多条 block 记录只计 1 轮；②缺 `message.id` 的记录计入 `roundsMissingId` 而不是静默丢弃或合并；③落地来自 `.log`、来自 `step-trace`、来自两者（只计 1 次）；④两处都没有 ⇒ `unknown`，不并入成功分母；⑤同一 `(task, runId)` 重复 ff ok 不重复计数。
+- [x] AC2 同窗口真实运行：`totalRounds` 必须等于 10,392（轮数台账同窗口读数）；若不等，报告必须逐项解释差异，⛔ 不得改窗口或改任务集合去凑数。
+- [x] AC3 同窗口真实运行：`landedTasks` 必须等于 94；不等则解释（含每个来源的计数：`log` / `step-trace` / `both` / `unknown`）。
+- [x] AC4 `docs/analysis/task-efficiency-baseline.md` 更新：旧值 22,863 轮 / 77 落地 → 新值，显式标注旧值为"未按 message.id 去重的行数口径"，并给出复跑命令。
+- [x] AC5 attempts / suite / 锁等待 / 费用维度的判定语义与输出字段不变；`--help` 增加轮数去重与落地载体并集的说明；`roundsMissingId` 在 JSON 与 Markdown 中都可见。
+- [x] AC6 `git diff --check` exit 0，改动只在声明 Touches 内；不修改任何 gate / AC / DoD / driver 配置。
 
 ## Definition of Done
 

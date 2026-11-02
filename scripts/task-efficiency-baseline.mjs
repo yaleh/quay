@@ -64,9 +64,17 @@ flags:
   fan-in 步骤按尝试窗口 [started_at, ended_at] 归属；窗口外/无日志 ⇒ 未归属（不兜底）。
   suite 记录以 round 为唯一身份，按 (taskId, startedAt) 关联尝试窗口；缺 taskId/startedAt ⇒
     无法唯一关联（单独计量）；窗口内无唯一证据 ⇒ 不回填同 task 的全部历史 recs。
-  landing 证据 = fan-in 日志中 ok:true 的 ff 步骤（目标 ref 成功更新的直接事件）。
+  landing 证据 = fan-in 日志中 ok:true 的 ff 步骤（目标 ref 成功更新的直接事件）∪
+    fan-in-step-trace.jsonl 中 step=ff 的 step-end ok:true（近期 run 缺 .log 载体时由此补充）。
+    两处都读到按 (task, runId) 归并计一次（来源 log/step-trace/both）；两处都没有 ⇒ unknown。
     verification-round.commit / terminalCommit（受测 SHA）、suite green、final_state=completed
     都不构成落地证明；无法确认的样本显式 unknown，不并入成功分母，也不说成已失败。
+
+轮数口径（E1 计数修正）：
+  轮 = 按 message.id 去重后的 assistant 消息。同一个 message.id 会被 apiBlockIndex 拆成多条
+  assistant jsonl 记录（thinking/text/tool_use 各一条），按行数会把一轮多 block 重复计；
+  本工具合并同 id 的全部 block 后再计 1 轮（分类取该轮工具动作并集）。缺 message.id 的记录
+  逐条计 1 轮，写进独立的 roundsMissingId 计数器，⛔ 不与去重后的轮数合并。
 
 时间口径：wall-clock 用记录自带时间戳差；CPU-seconds 只取 cpu_time_s 且
   cpu_source=gnu-time 的实测值，⛔ 不用 wall-time 换算。
@@ -211,15 +219,20 @@ function readSources(args) {
   // 1) worker-outcome.jsonl
   src.workerOutcome = readJsonl(join(root, ".quay", "worker-outcome.jsonl"));
 
-  // 2) fan-in 过程日志（按磁盘扫描，去重）
+  // 2) fan-in 过程日志（按磁盘扫描，去重）。
+  // ⛔ 不能按文件名排除 "suite"：`fan-in-<task>-<runIdSafe>.log` 的 task 名里含 "suite" 是合法任务
+  // （如 gap-*-suite-*），旧 `!f.includes("suite")` 会把它们的落地/套件日志整体排除，制造「缺 .log 载体」假象。
   const qdir = join(root, ".quay");
-  src.fanInTraceFiles = readdirSync(qdir).filter((f) => f.startsWith("fan-in-") && f.endsWith(".log") && !f.includes("suite"));
+  src.fanInTraceFiles = readdirSync(qdir).filter((f) => f.startsWith("fan-in-") && f.endsWith(".log"));
   const traceByName = new Map();
   for (const f of src.fanInTraceFiles) {
     const records = readJsonl(join(qdir, f)).filter((r) => typeof r.step === "string");
     if (records.length > 0) traceByName.set(f, records);
   }
   src.fanInTraceByName = traceByName;
+
+  // 2c) fan-in-step-trace.jsonl —— 近期 run 缺 .log 载体时的落地证据补充（step=ff 的 step-end ok:true）。
+  src.stepTrace = readJsonl(join(qdir, "fan-in-step-trace.jsonl"));
 
   // 3) fan-in-lock-events.jsonl
   src.fanInLockEvents = readJsonl(join(qdir, "fan-in-lock-events.jsonl"));
@@ -377,7 +390,19 @@ function buildAttempts(src, args) {
 }
 
 // fan-in 步骤归属：按尝试窗口从 fan-in-<task>-<runIdSafe>.log 选记录。
+// 落地证据补充：fan-in-step-trace.jsonl 的 step=ff step-end ok:true（按 (task, runId) 归并）。
+// ff 发生在 worker 的 ended_at 之后（driver 在 worker 退出后再 fan-in），⛔ 不能以 ended_at 作上界
+// 过滤落地证据 —— 只保留下界 started_at；「只归给该任务最后一条尝试」的门控在 attachLanding。
 function attachFanInTrace(src, attempts) {
+  // step-trace ff-ok 索引：按 `task\u0000runId` 归并，同一 (task, runId) 的重复 ff ok 只作一次存在性判定。
+  const stepFfOkByKey = new Map();
+  for (const r of (src.stepTrace || [])) {
+    if (r.event !== "step-end" || r.step !== "ff" || r.ok !== true) continue;
+    const key = `${r.task}\u0000${String(r.runId)}`;
+    if (!stepFfOkByKey.has(key)) stepFfOkByKey.set(key, []);
+    stepFfOkByKey.get(key).push(r);
+  }
+
   for (const a of attempts) {
     a.trace = [];
     a.traceSource = null;
@@ -386,28 +411,46 @@ function attachFanInTrace(src, attempts) {
     a.suiteExecMs = null;
     a.suiteSkipped = false;
     a.fanInStepMs = {};
-    a.ffOk = false;
+    a.ffOkLog = false;
+    a.ffOkStepTrace = false;
     a.releaseOk = false;
+
+    // step-trace 落地证据（不依赖 .log 载体；只保留下界 started_at，上界留给 attachLanding 的最后尝试门控）。
+    const stepRecs = stepFfOkByKey.get(`${a.task}\u0000${String(a.run_id)}`) || [];
+    const stepInWin = stepRecs.filter((r) => {
+      const t = parseIso(r.ts);
+      return t != null && (a.startedAtMs == null || t >= a.startedAtMs);
+    });
+    a.ffOkStepTrace = stepInWin.length > 0;
+
     const file = fanInLogFileName(a.task, a.run_id);
     const records = src.fanInTraceByName.get(file);
-    if (!records) { a.suiteOutcome = "missing-log"; continue; }
-    a.traceAvailable = true;
-    a.traceSource = file;
-    const inWin = records.filter((r) => {
-      const t = parseIso(r.ts);
-      return t != null && (a.startedAtMs == null || t >= a.startedAtMs) && (a.endedAtMs == null || t <= a.endedAtMs);
-    });
-    a.trace = inWin;
-    a.ffOk = inWin.some((r) => r.step === "ff" && r.ok === true);
-    a.releaseOk = inWin.some((r) => r.step === "release-fan-in-lock");
-    a.fanInLockWaitMs = stepWall(a.trace, "acquire-fan-in-lock");
-    a.suiteExecMs = stepWall(a.trace, "suite-end") ?? stepWall(a.trace, "suite-start") ?? null;
-    a.suiteSkipped = a.trace.some((r) => r.step === "suite-skip");
-    a.fanInStepMs = {};
-    for (const r of a.trace) {
-      if (typeof r.wall_ms === "number") a.fanInStepMs[r.step] = (a.fanInStepMs[r.step] || 0) + r.wall_ms;
+    if (!records) {
+      a.suiteOutcome = "missing-log";
+    } else {
+      a.traceAvailable = true;
+      a.traceSource = file;
+      const inWin = records.filter((r) => {
+        const t = parseIso(r.ts);
+        return t != null && (a.startedAtMs == null || t >= a.startedAtMs) && (a.endedAtMs == null || t <= a.endedAtMs);
+      });
+      a.trace = inWin;
+      // ff 落地证据：只保留下界 started_at（ff 可能晚于 ended_at）。
+      const ffRecs = records.filter((r) => {
+        const t = parseIso(r.ts);
+        return t != null && (a.startedAtMs == null || t >= a.startedAtMs);
+      });
+      a.ffOkLog = ffRecs.some((r) => r.step === "ff" && r.ok === true);
+      a.releaseOk = inWin.some((r) => r.step === "release-fan-in-lock");
+      a.fanInLockWaitMs = stepWall(a.trace, "acquire-fan-in-lock");
+      a.suiteExecMs = stepWall(a.trace, "suite-end") ?? stepWall(a.trace, "suite-start") ?? null;
+      a.suiteSkipped = a.trace.some((r) => r.step === "suite-skip");
+      a.fanInStepMs = {};
+      for (const r of a.trace) {
+        if (typeof r.wall_ms === "number") a.fanInStepMs[r.step] = (a.fanInStepMs[r.step] || 0) + r.wall_ms;
+      }
+      a.suiteOutcome = classifySuiteOutcome(a.trace);
     }
-    a.suiteOutcome = classifySuiteOutcome(a.trace);
   }
 }
 
@@ -530,21 +573,35 @@ function attachSuite(src, attempts) {
   });
 }
 
-// 落地证据（AC2）：权威 = fan-in 日志中 ok:true 的 ff 步骤（目标 ref 成功更新的直接事件）。
+// 落地证据（AC2）：权威 = fan-in 日志中 ok:true 的 ff 步骤（目标 ref 成功更新的直接事件）∪
+// fan-in-step-trace 的 step=ff step-end ok:true。两处都读到按 (task, runId) 归并计一次。
 // ⛔ verification-round 的 commit/terminalCommit（受测 SHA）不是落地证据，只作 corroborative SHA。
 // 三分：landed（证明已落地）/ not-landed（证明未落地：fan-in 已收尾但无 ok ff）/ unknown（证据不足）。
+// ff 是任务级终态事件、发生在 worker ended_at 之后 ⇒ 只归给该任务最后一条尝试（按 startedAtMs），
+// ⛔ 不把后一次落地回填给前一次（同一任务多条尝试共享同一 run_id）。
 function attachLanding(src, attempts) {
+  // 每个任务的最后一条尝试 = 落地尝试（attempts 已按 startedAtMs 升序，最后一次覆盖即最大 startedAtMs）。
+  const lastByTask = new Map();
+  for (const a of attempts) lastByTask.set(a.task, a);
+
   for (const a of attempts) {
     a.landingStatus = "unknown";
     a.landed = false;
     a.landedEvidence = null;
+    a.landingSource = "unknown";
     a.fanInCommit = null;
     a.landedSha = null;
 
-    if (a.ffOk) {
+    const isLast = lastByTask.get(a.task) === a;
+    const hasFf = a.ffOkLog || a.ffOkStepTrace;
+
+    if (isLast && hasFf) {
       a.landingStatus = "landed";
       a.landed = true;
-      a.landedEvidence = "fan-in-trace.ff(ok)";
+      a.landingSource = a.ffOkLog && a.ffOkStepTrace ? "both" : (a.ffOkLog ? "log" : "step-trace");
+      a.landedEvidence = a.ffOkLog && a.ffOkStepTrace
+        ? "fan-in-trace.ff(ok)+step-trace.ff(ok)"
+        : (a.ffOkLog ? "fan-in-trace.ff(ok)" : "step-trace.ff(ok)");
     } else if (a.releaseOk) {
       // fan-in 明确收尾（release-fan-in-lock）却没有 ok 的 ff ⇒ 该 run 未落地（明确失败）。
       a.landingStatus = "not-landed";
@@ -715,6 +772,7 @@ function summarize(src, args, ctx) {
     unattributedRounds,
     suiteAssociationCounts: countBy(attempts, "suiteAssociation"),
     landingStatusCounts: countBy(attempts, "landingStatus"),
+    landingSourceCounts: countBy(attempts, "landingSource"),
     finalStateCounts: countBy(attempts, "final_state"),
   };
 }
@@ -726,7 +784,7 @@ function countBy(arr, k) {
 
 // ── 轮数分解（会话）───────────────────────────────────────────────────────
 function classifyRounds(src, args, ctx) {
-  // 每个 worker 会话，逐条 assistant 消息（round）分类。
+  // 每个 worker 会话，按 message.id 去重后的 assistant 消息（round）分类。
   const sessions = args.task
     ? src.workerSessions.filter((s) => s.task === args.task)
     : src.workerSessions;
@@ -736,6 +794,7 @@ function classifyRounds(src, args, ctx) {
   const sessionsDir = src.sessionsDir;
   const { winStart, winEnd } = ctx;
   let totalRounds = 0;
+  let roundsMissingId = 0; // 缺 message.id 的 assistant 记录逐条计 1 轮，独立计数，⛔ 不与去重后的轮数合并
   let unwindowed = 0, unwindowedOutside = 0, unwindowedMissing = 0;
   const readCacheBySession = new Map();
 
@@ -750,16 +809,31 @@ function classifyRounds(src, args, ctx) {
       if (m === "missing") unwindowedMissing++; else unwindowedOutside++;
       continue;
     }
-    const rounds = [];
-    const readSet = new Set();
+    // 按 message.id 分组 assistant 记录：同一个 message.id 被 apiBlockIndex 拆成多条记录
+    // （thinking/text/tool_use 各一条），合并同 id 的全部 block 后再计 1 轮。
+    const byId = new Map();
+    const missingIdRecords = [];
     for (const line of text.split("\n")) {
       if (!line.trim()) continue;
       let o; try { o = JSON.parse(line); } catch { continue; }
       if (o.type !== "assistant") continue;
-      const cat = classifyOneRound(o, readSet);
+      const id = o.message?.id;
+      if (id == null) { missingIdRecords.push(o); continue; }
+      if (!byId.has(id)) byId.set(id, []);
+      byId.get(id).push(o);
+    }
+    const rounds = [];
+    const readSet = new Set();
+    for (const recs of byId.values()) {
+      const toolUses = [];
+      for (const r of recs) toolUses.push(...collectToolUses(r));
+      const cat = classifyOneRound(toolUses, readSet);
       rounds.push(cat);
       totalRounds++;
     }
+    // 缺 message.id 的记录逐条计 1 轮，写进独立计数器，⛔ 不并入分类、也不与去重后的轮数合并。
+    roundsMissingId += missingIdRecords.length;
+
     readCacheBySession.set(s.sessionId, readSet);
     const sc = {};
     for (const c of categories) sc[c] = rounds.filter((r) => r === c).length;
@@ -767,13 +841,15 @@ function classifyRounds(src, args, ctx) {
   }
   for (const p of perSession) for (const c of categories) catCounts[c] += p[c];
   // sessionsTotal = 窗口内会话数（不是任务过滤后的全集数）；unwindowed 单列。
-  return { totalRounds, catCounts, perSession, categories, sessionsTotal: perSession.length, unwindowed, unwindowedOutside, unwindowedMissing };
+  return { totalRounds, roundsMissingId, catCounts, perSession, categories, sessionsTotal: perSession.length, unwindowed, unwindowedOutside, unwindowedMissing };
 }
 
-function classifyOneRound(o, readSet) {
+function collectToolUses(o) {
   const msgs = o.message?.content;
-  const toolUses = (Array.isArray(msgs) ? msgs : []).filter((m) => m.type === "tool_use");
+  return (Array.isArray(msgs) ? msgs : []).filter((m) => m && m.type === "tool_use");
+}
 
+function classifyOneRound(toolUses, readSet) {
   // 无任何工具动作的 assistant 轮 = 等待/思考（tool-wait）。
   if (toolUses.length === 0) return "tool-wait";
 
@@ -886,6 +962,7 @@ function inputFingerprint(src, args, ctx) {
     counts: {
       workerOutcome: src.workerOutcome.length,
       fanInTraceFiles: src.fanInTraceByName.size,
+      stepTrace: src.stepTrace.length,
       fanInLockEvents: src.fanInLockEvents.length,
       verificationRound: src.verificationRound.length,
       workerRound: src.workerRound.length,
@@ -978,6 +1055,7 @@ function renderMarkdown(args, src, ctx, sum, rounds, e5, fp) {
   p("| 墙钟归属覆盖率 >1（重叠/重复累计，不截断）的尝试 | ", String(sum.wallAttrOverlap), " |\n");
   p("\nfinal_state 分布：`", JSON.stringify(sum.finalStateCounts), "`\n");
   p("落地状态分布：`", JSON.stringify(sum.landingStatusCounts), "`\n");
+  p("落地证据来源分布（log / step-trace / both / unknown）：`", JSON.stringify(sum.landingSourceCounts), "`\n");
   p("suite 关联分布：`", JSON.stringify(sum.suiteAssociationCounts), "`\n");
 
   p("\n## 分阶段墙钟（有 fan-in 日志的尝试）\n");
@@ -1040,10 +1118,11 @@ function renderMarkdown(args, src, ctx, sum, rounds, e5, fp) {
   p("\n## 轮数分解（可下钻至原会话）\n");
   p("窗口：`", windowStartIso, "` → `", windowEndIso, "`；unwindowed 会话：", String(rounds.unwindowed),
     "（窗口外 ", String(rounds.unwindowedOutside), "，缺时间戳 ", String(rounds.unwindowedMissing), "，不计入窗口读数）。\n");
-  p("> 分类是启发式（每轮 = 一条 assistant 消息）：exploration（首次 Read/Grep/Glob/find）/ tool-wait（本轮无工具动作，等待/思考）/ repeated-read（再读已读文件）/ verification（测试/task_check/gate）/ fix（Edit/Write/git 变更）/ unclassified（无法判断，保守单列）。下钻靠 sessionId（会话 jsonl）。\n");
+  p("> 分类是启发式（每轮 = 一条按 message.id 去重后的 assistant 消息）：exploration（首次 Read/Grep/Glob/find）/ tool-wait（本轮无工具动作，等待/思考）/ repeated-read（再读已读文件）/ verification（测试/task_check/gate）/ fix（Edit/Write/git 变更）/ unclassified（无法判断，保守单列）。下钻靠 sessionId（会话 jsonl）。\n");
   p("| 类别 | 轮数 |\n|---|---|\n");
   for (const c of rounds.categories) p("| ", c, " | ", String(rounds.catCounts[c]), " |\n");
-  p("\n- worker 会话数：", String(rounds.sessionsTotal), "；总轮数：", String(rounds.totalRounds), "\n");
+  p("\n- worker 会话数：", String(rounds.sessionsTotal), "；总轮数（按 message.id 去重）：", String(rounds.totalRounds), "\n");
+  p("- 缺 message.id 逐条计 1 轮的记录（roundsMissingId，⛔ 不与去重后的轮数合并）：", String(rounds.roundsMissingId), "\n");
   p("- 不能分类者单列（unclassified）：", String(rounds.catCounts.unclassified), "\n");
 
   p("\n## E5 证据（锁等待 + 队列等待 + 供给/资源拒绝；只输出直接读数，不做无依据推断）\n");
@@ -1091,14 +1170,12 @@ function renderMarkdown(args, src, ctx, sum, rounds, e5, fp) {
   }
 
   p("\n## 旧报告撤回与修正（口径修正）\n");
-  p("> 本任务（gap-task-efficiency-baseline-attribution-semantics）撤回旧口径下的下列读数，并给修正值/未评估。\n");
-  p("| 旧口径读数 | 旧值 | 修正值/处置 | 原因 |\n|---|---|---|---|\n");
-  p("| 成功落地任务数（分母①） | 1471 | ", String(sum.landedTasks), " | 旧口径把 verification-round.commit 非空当落地；现在只有 ff ok 才证明落地 |\n");
-  p("| CPU-seconds 合计 | 2645.52h | ", fmtSec(sum.cpuUniqueSumS), " | 旧口径按尝试累加，同一 suite 记录被回填到多个尝试 ⇒ 翻倍；现在按唯一 suite 身份去重 |\n");
-  p("| 分类失败（有 trace 但无 suite-end/skip） | 204 | 0（明确分类器失败），前序中止 ", String(sum.suiteOutcomes["pre-commit-abort"]), "，缺结束事件 ", String(sum.suiteOutcomes["missing-end-event"]), " | 旧口径把「suite 没跑完」全判成分类失败；现在分类失败只认明确证据 |\n");
-  p("| ITE（Idle Time Efficiency）p50 / p90 | 0.181 / 0.617 | 墙钟归属覆盖率 p50/p90 ", sum.wallAttrP50 != null ? sum.wallAttrP50.toFixed(3) : "not-evaluated", " / ", sum.wallAttrP90 != null ? sum.wallAttrP90.toFixed(3) : "not-evaluated", " | 旧名把「已归属墙钟/端到端」误称为 Idle Time Efficiency；已改独立指标并去 Math.min(1,…) 截断 |\n");
-  p("| 持续队列/阻塞证据（pool-empty + resource-gate-wait） | 49067 轮 | ", String(e5.persistentQueue), " | pool-empty 只代表供给状态、resource-gate-wait 只代表资源拒绝，两者相加不是持续队列 |\n");
-  p("| 锁等待显著（p50>60s）？ | false | 已撤销该自动判词 | 阈值无依据；只保留描述性分位数 |\n");
+  p("> 本任务（gap-e1-round-count-and-landing-carrier）撤回旧口径下的下列读数，并给修正值。复跑命令见文首。\n");
+  p("| 旧口径读数 | 旧值 | 修正值 | 原因 |\n|---|---|---|---|\n");
+  p("| 轮数（同窗口 totalRounds） | 22,863 | ", String(rounds.totalRounds),
+    " | 旧口径按 `type:assistant` 行数计，同一 `message.id` 被 apiBlockIndex 拆成多条记录（thinking/text/tool_use）重复计 ⇒ 2.2× 高估；这是「未按 message.id 去重的行数口径」。现在按 message.id 去重（缺 id 单列 roundsMissingId=", String(rounds.roundsMissingId), "） |\n");
+  p("| 成功落地任务数（同窗口 landedTasks） | 77 | ", String(sum.landedTasks),
+    " | 旧口径只读 `.log` 且 (a) 按文件名 `!f.includes(\"suite\")` 误排除 task 名含 suite 的 `.log`、(b) 以尝试窗口 `[started_at, ended_at]` 上界过滤 ff（而 ff 发生在 worker ended_at 之后）⇒ 少算 17 个落地任务。现在修复 `.log` 扫描、并集 `fan-in-step-trace.jsonl` 的 `step=ff` 的 `step-end` 且 `ok:true`，且 ff 只归给任务最后一条尝试（落地证据来源分布 log/step-trace/both/unknown=`", JSON.stringify(sum.landingSourceCounts), "`） |\n");
 
   return L.join("");
 }
@@ -1110,6 +1187,7 @@ function renderJson(args, src, ctx, sum, rounds, e5, fp) {
     sources: {
       workerOutcome: src.workerOutcome.length,
       fanInTraceFiles: src.fanInTraceByName.size,
+      stepTrace: src.stepTrace.length,
       fanInLockEvents: src.fanInLockEvents.length,
       verificationRound: src.verificationRound.length,
       fastModeTelemetry: src.fastModeTelemetry.length,

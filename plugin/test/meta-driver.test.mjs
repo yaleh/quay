@@ -2502,6 +2502,26 @@ test('locateMetaCcMcp: 无候选 ⇒ null；QUAY_META_CC_MCP 指向不存在 ⇒
   }
 });
 
+// 肯定用例：当前安装落点 ~/.local/share/meta-cc/bin/meta-cc-mcp 必须被定位（52 天旧载体的直接成因）。
+test('locateMetaCcMcp: ~/.local/share/meta-cc/bin 落点被定位；旧 ~/.local/bin 落点仍被定位', () => {
+  const fakeHome = fs.mkdtempSync(path.join(os.tmpdir(), 'meta-afr-share-'));
+  try {
+    const shareBin = path.join(fakeHome, '.local', 'share', 'meta-cc', 'bin');
+    const localBin = path.join(fakeHome, '.local', 'bin');
+    fs.mkdirSync(shareBin, { recursive: true });
+    fs.mkdirSync(localBin, { recursive: true });
+    fs.writeFileSync(path.join(shareBin, 'meta-cc-mcp'), '#!/bin/sh\n');
+    fs.writeFileSync(path.join(localBin, 'meta-cc-mcp'), '#!/bin/sh\n');
+    assert.equal(locateMetaCcMcp({}, fakeHome), path.join(shareBin, 'meta-cc-mcp'),
+      '~/.local/share/meta-cc/bin 是可执行文件的当前落点，必须命中');
+    fs.rmSync(path.join(shareBin, 'meta-cc-mcp'));
+    assert.equal(locateMetaCcMcp({}, fakeHome), path.join(localBin, 'meta-cc-mcp'),
+      'share 落点缺失时退回旧 ~/.local/bin 落点');
+  } finally {
+    fs.rmSync(fakeHome, { recursive: true, force: true });
+  }
+});
+
 // ── gap-meta-driver-admission-gates-pass-when-they-cannot-know ────────────────────────────────────
 // 同一缺陷族（硬规则 3b：一个「评估不了」的闸返回了与「评估过且合格」同形的答案）的三个实例，
 // 每例一条对照 AC：(a) owner 搜索在状态过滤【之前】被 cap 截断；(b) null 读数被当证据准入；
