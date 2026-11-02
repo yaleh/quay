@@ -2,7 +2,7 @@
 id: gap-prompt-inline-data-scan
 title: 把 meta-driver 的 −88% fresh/轮 作为模板，全量扫描 driver 的 prompt 组装点——按机制列出仍把数据内联进
   prompt 的候选与实测体积
-status: ready
+status: done
 labels:
   - gap
 parent: null
