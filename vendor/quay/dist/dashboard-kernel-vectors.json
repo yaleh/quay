@@ -1,0 +1,178 @@
+{
+  "schemaVersion": 1,
+  "contract": "quay/dashboard-kernel",
+  "package": "quay",
+  "kernelVersion": "0.18.0-dev",
+  "generatedFor": "gap-dashboard-kernel-export-for-cross-project-reuse",
+  "purpose": "Cross-project equivalence vector for the gantt packing kernel. An EXTERNAL consumer (first known: claudecodeui's Quay tab) replays each vector against its own copy of the published `quay/dashboard-kernel` build and asserts it gets byte-identical lane assignment + overflow. This is how a consumer proves it is running the SAME algorithm as quay's own dashboard card, not a re-implementation that merely looks similar.",
+  "howToReplay": [
+    "import { mergeLiveAndHistoryIntervals, packLanes } from \"quay/dashboard-kernel\";",
+    "For each vector: const merged = mergeLiveAndHistoryIntervals(v.input.inFlight, v.input.records, v.input.windowStartMs, v.input.nowMs);",
+    "assert.deepEqual(merged, v.expectedMerged);",
+    "assert.deepEqual(packLanes(merged), v.expectedLanes);",
+    "Record timestamps in `records` are ISO-8601 strings (the worker-outcome carrier's own format); `inFlight` timestamps and every `expected*` timestamp are epoch milliseconds.",
+    "Time-only comparisons are on epoch ms; a consumer that formats them for display must not compare formatted strings."
+  ],
+  "vectors": [
+    {
+      "name": "sequential-history-packs-onto-one-lane",
+      "why": "Three back-to-back historical runs never overlap, so the greedy packer must reuse lane 0 for all three (not just append lanes), and must report zero overflow.",
+      "input": {
+        "nowMs": 1700000000000,
+        "windowStartMs": 1699978400000,
+        "inFlight": [],
+        "records": [
+          {
+            "task": "X",
+            "run_id": "rx",
+            "started_at": "2023-11-14T19:13:20.000Z",
+            "ended_at": "2023-11-14T20:13:20.000Z",
+            "final_state": "completed",
+            "mechanical_fan_in": { "outcome": "merged" }
+          },
+          {
+            "task": "Y",
+            "run_id": "ry",
+            "started_at": "2023-11-14T20:13:20.000Z",
+            "ended_at": "2023-11-14T21:13:20.000Z",
+            "final_state": "completed",
+            "mechanical_fan_in": { "outcome": "skipped" }
+          },
+          {
+            "task": "Z",
+            "run_id": "rz",
+            "started_at": "2023-11-14T21:13:20.000Z",
+            "ended_at": "2023-11-14T22:13:20.000Z",
+            "final_state": "failed",
+            "mechanical_fan_in": { "outcome": "suite-red" }
+          }
+        ]
+      },
+      "expectedMerged": [
+        {
+          "taskId": "X",
+          "runId": "rx",
+          "startMs": 1699989200000,
+          "endMs": 1699992800000,
+          "phase": null,
+          "finalState": "completed",
+          "fanInOutcome": "merged"
+        },
+        {
+          "taskId": "Y",
+          "runId": "ry",
+          "startMs": 1699992800000,
+          "endMs": 1699996400000,
+          "phase": null,
+          "finalState": "completed",
+          "fanInOutcome": "skipped"
+        },
+        {
+          "taskId": "Z",
+          "runId": "rz",
+          "startMs": 1699996400000,
+          "endMs": 1700000000000,
+          "phase": null,
+          "finalState": "failed",
+          "fanInOutcome": "suite-red"
+        }
+      ],
+      "expectedLanes": {
+        "lanes": [
+          [
+            { "taskId": "X", "runId": "rx", "startMs": 1699989200000, "endMs": 1699992800000, "phase": null, "finalState": "completed", "fanInOutcome": "merged" },
+            { "taskId": "Y", "runId": "ry", "startMs": 1699992800000, "endMs": 1699996400000, "phase": null, "finalState": "completed", "fanInOutcome": "skipped" },
+            { "taskId": "Z", "runId": "rz", "startMs": 1699996400000, "endMs": 1700000000000, "phase": null, "finalState": "failed", "fanInOutcome": "suite-red" }
+          ]
+        ],
+        "overflow": 0
+      }
+    },
+    {
+      "name": "six-simultaneous-in-flight-fills-five-lanes-then-overflows",
+      "why": "Six runs started at the SAME instant (all still in flight, all ending at `now`) exceed the fixed 5-lane cap by exactly one. The cap is a hard visual contract, so the packer must fill lanes 0..4 one-apiece and surface the 6th as `overflow: 1` — never index-clip it, never drop it.",
+      "input": {
+        "nowMs": 1700000000000,
+        "windowStartMs": 1699978400000,
+        "inFlight": [
+          { "taskId": "w1", "runId": "round-1", "startedAtMs": 1699996400000, "phase": "implementing" },
+          { "taskId": "w2", "runId": "round-1", "startedAtMs": 1699996400000, "phase": "implementing" },
+          { "taskId": "w3", "runId": "round-1", "startedAtMs": 1699996400000, "phase": "implementing" },
+          { "taskId": "w4", "runId": "round-1", "startedAtMs": 1699996400000, "phase": "implementing" },
+          { "taskId": "w5", "runId": "round-1", "startedAtMs": 1699996400000, "phase": "implementing" },
+          { "taskId": "w6", "runId": "round-1", "startedAtMs": 1699996400000, "phase": "implementing" }
+        ],
+        "records": []
+      },
+      "expectedMerged": [
+        { "taskId": "w1", "runId": "round-1", "startMs": 1699996400000, "endMs": 1700000000000, "phase": "implementing", "finalState": null, "fanInOutcome": null },
+        { "taskId": "w2", "runId": "round-1", "startMs": 1699996400000, "endMs": 1700000000000, "phase": "implementing", "finalState": null, "fanInOutcome": null },
+        { "taskId": "w3", "runId": "round-1", "startMs": 1699996400000, "endMs": 1700000000000, "phase": "implementing", "finalState": null, "fanInOutcome": null },
+        { "taskId": "w4", "runId": "round-1", "startMs": 1699996400000, "endMs": 1700000000000, "phase": "implementing", "finalState": null, "fanInOutcome": null },
+        { "taskId": "w5", "runId": "round-1", "startMs": 1699996400000, "endMs": 1700000000000, "phase": "implementing", "finalState": null, "fanInOutcome": null },
+        { "taskId": "w6", "runId": "round-1", "startMs": 1699996400000, "endMs": 1700000000000, "phase": "implementing", "finalState": null, "fanInOutcome": null }
+      ],
+      "expectedLanes": {
+        "lanes": [
+          [{ "taskId": "w1", "runId": "round-1", "startMs": 1699996400000, "endMs": 1700000000000, "phase": "implementing", "finalState": null, "fanInOutcome": null }],
+          [{ "taskId": "w2", "runId": "round-1", "startMs": 1699996400000, "endMs": 1700000000000, "phase": "implementing", "finalState": null, "fanInOutcome": null }],
+          [{ "taskId": "w3", "runId": "round-1", "startMs": 1699996400000, "endMs": 1700000000000, "phase": "implementing", "finalState": null, "fanInOutcome": null }],
+          [{ "taskId": "w4", "runId": "round-1", "startMs": 1699996400000, "endMs": 1700000000000, "phase": "implementing", "finalState": null, "fanInOutcome": null }],
+          [{ "taskId": "w5", "runId": "round-1", "startMs": 1699996400000, "endMs": 1700000000000, "phase": "implementing", "finalState": null, "fanInOutcome": null }]
+        ],
+        "overflow": 1
+      }
+    },
+    {
+      "name": "window-filter-drops-out-of-window-history-and-future-in-flight-dedup-keeps-the-in-flight-side",
+      "why": "Two independent filter rules plus the cross-source dedup in one vector: (a) a historical run that ENDED before windowStartMs must not appear, (b) an in-flight run that STARTS after nowMs must not appear, (c) a run present in BOTH sources must collapse to ONE interval keyed on (taskId, startMs) — the in-flight side wins, so its open end (`now`) and its phase survive and the historical finalState/fanInOutcome are dropped.",
+      "input": {
+        "nowMs": 1700000000000,
+        "windowStartMs": 1699989200000,
+        "inFlight": [
+          { "taskId": "dup-task", "runId": "r1", "startedAtMs": 1699998200000, "phase": "implementing" },
+          { "taskId": "future-task", "runId": "r2", "startedAtMs": 1700003600000, "phase": "implementing" }
+        ],
+        "records": [
+          {
+            "task": "dup-task",
+            "run_id": "r0",
+            "started_at": "2023-11-14T21:43:20.000Z",
+            "ended_at": "2023-11-14T22:03:20.000Z",
+            "final_state": "completed",
+            "mechanical_fan_in": { "outcome": "merged" }
+          },
+          {
+            "task": "old-task",
+            "run_id": "r3",
+            "started_at": "2023-11-14T12:13:20.000Z",
+            "ended_at": "2023-11-14T13:13:20.000Z",
+            "final_state": "failed",
+            "mechanical_fan_in": null
+          },
+          {
+            "task": "recent-task",
+            "run_id": "r4",
+            "started_at": "2023-11-14T21:23:20.000Z",
+            "ended_at": "2023-11-14T21:33:20.000Z",
+            "final_state": "completed",
+            "mechanical_fan_in": { "outcome": "skipped" }
+          }
+        ]
+      },
+      "expectedMerged": [
+        { "taskId": "dup-task", "runId": "r1", "startMs": 1699998200000, "endMs": 1700000000000, "phase": "implementing", "finalState": null, "fanInOutcome": null },
+        { "taskId": "recent-task", "runId": "r4", "startMs": 1699997000000, "endMs": 1699997600000, "phase": null, "finalState": "completed", "fanInOutcome": "skipped" }
+      ],
+      "expectedLanes": {
+        "lanes": [
+          [
+            { "taskId": "recent-task", "runId": "r4", "startMs": 1699997000000, "endMs": 1699997600000, "phase": null, "finalState": "completed", "fanInOutcome": "skipped" },
+            { "taskId": "dup-task", "runId": "r1", "startMs": 1699998200000, "endMs": 1700000000000, "phase": "implementing", "finalState": null, "fanInOutcome": null }
+          ]
+        ],
+        "overflow": 0
+      }
+    }
+  ]
+}

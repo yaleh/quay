@@ -1,0 +1,20 @@
+{
+  "discipline": "登记一条 = 从此这条失败被机械归为 known-flake（豁免一次人看）。方向不可逆：把真缺陷登记成 flake 会永久豁免它，反过来只是多一次人看。故每条必须带 ①首次登记日期 ②指向一次性复现证据的引用，且证据要能读出「别的任务/别的 commit 也红过」。⛔ 不许拿「看起来像 flake」「上次也红过」当证据。删条目要把 evidence 里的读数一并核对一遍。",
+  "flakes": [
+    {
+      "test": "plugin/test/tmux-leak-scan.test.mjs::R2 — TRANSIENT NEW residue (the round-95 shape) clears within the bound → CLEAN + note",
+      "firstRegistered": "2026-09-13",
+      "evidence": ".quay/verification-round.jsonl 全史 perFile 读数：该文件 passed=false 共 7 轮，分属 7 个互不相关的任务（round 879 gap-outer-session-check-waitforclaude-timeout-flaky / 945 gap-concurrency-cap-state-help-contract-mtime-race / 1151 gap-meta-ac-184 / 1215 gap-ac157-exclusion-wiring-criterion-divergence / …），load 分别 27.87 38.19 38.75 40.03 43.27 45.22 46.87 —— 与任务归属无关且与负载单调相关。机制：测试先 mkdir 瞬时残留再起 detached sleep 0.6s reaper，要求 check 首扫发生在 0.6s 之前；余量实测约 240ms（空载 R2 838/839/845ms，红那轮 1311ms）。复现证据另见 .quay/fan-in-suite-*.log 中 ^✖ R2 — TRANSIENT NEW residue 命中 1 份（124 份中）"
+    },
+    {
+      "test": "plugin/test/worker-driver-fan-in-s02.test.mjs::AC3 (gap-worker-driver-async-selector-readypool) — a slow selector does not freeze the floor (round heartbeat keeps firing while the selector is slow)",
+      "firstRegistered": "2026-09-15",
+      "evidence": ".quay/verification-round.jsonl 全史 perFile 读数：该文件 passed=false 共 20 轮，分属 17 个互不相关的任务，load 7.97~75.71（p50 约 33）。该文件在本仓历史上 124 份 fan-in-suite 日志中，^✖ AC3 (gap-worker-driver-async-selector-readypool) 命中 0 份 —— 本条的测试级证据弱于文件级证据，登记依据以文件级 + 判据的墙钟结构为准（判据是绝对窗口：--reconcile-interval 1 语义下 10s 内要写 >=3 条心跳，而每个 pass 要 spawn 新子进程；全量套件下并发 16~26 路，余量很小）"
+    },
+    {
+      "test": "packages/quay/test/gap-git-graph-adopt-git-column-algorithm-and-decorate-labels.test.mjs::AC3: the rendered label set equals the %D-nonempty commit set; develop appears once",
+      "firstRegistered": "2026-09-14",
+      "evidence": ".quay/verification-round.jsonl 全史 perFile 读数：该文件 passed=false 共 3 轮，分属 3 个互不相关的任务（round 1595 gap-verification-round-bound-to-quay-shaped-suite-entry / 1692 gap-abi-task-list-times-out-at-2000-tasks-head-of-line-blocks-mcp / 1727 gap-dist-plugin-missing-node-modules-task-schema-yaml），load 25.36 37.76 44.76 ⇒ 别的任务、别的 commit 也红过。机制：判据拿 live 仓库两个快照对拍（readGitHistory 的 TTL 缓存键里不含 ref 状态），本仓 fleet 每几分钟建/并分支 ⇒ 条件周期性成立；单跑 0/36 复现不了"
+    }
+  ]
+}
