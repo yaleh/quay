@@ -270,6 +270,21 @@ export function readGoalAc(frontmatterRaw) {
   return frontmatterGoalAc(parseFrontmatterCompletely(frontmatterRaw));
 }
 
+// ── readFrontField — the ONE raw-frontmatter single-field reader
+//    (gap-routine-semantic-dedup-scan-read-front-field-divergent). ──
+// Formerly two hand-kept twins in ready-pool-check.ts and slot-refill.ts, differing only in whether the
+// field name was escaped before interpolation into the regex — slot-refill interpolated it RAW,
+// ready-pool-check escaped it (its copy carried the comment pointing at the extractSection rule,
+// gap-extract-section-heading-interpolated-unescaped-into-regexp). Both now resolve to THIS single
+// definition: the key IS escaped (the same metacharacter-literal rule as extractSection), so a field
+// name containing regex metacharacters is matched literally. All current callers pass plain field names
+// (`status` / `role` / `parent`), so escaping is a no-op for them — the merge removes the divergence,
+// not their behavior.
+export function readFrontField(frontmatterRaw, key) {
+  const m = frontmatterRaw.match(new RegExp(`^${escapeRegExp(key)}:\\s*(\\S+)`, "m"));
+  return m ? m[1].replace(/^["']|["']$/g, "") : null;
+}
+
 // ── readTaskStatusAtRef / fetchTaskStatusAtRef — the ONE status-at-a-ref reader (sync + async variant),
 //    gap-task-status-parsing-reimplemented-13-sites. ──
 // Formerly VERBATIM-COPIED 3× (driver-filters.ts, ready-pool-check.ts, worker-driver.ts async) with zero

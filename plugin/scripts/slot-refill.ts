@@ -72,7 +72,7 @@ import fs from "node:fs";
 import { repoRoot } from "./repo-root.ts";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
-import { parseTask, extractSection, readDependsOn } from "./task-schema.ts";
+import { parseTask, extractSection, readDependsOn, readFrontField } from "./task-schema.ts";
 import {
   analyzeTasks,
   readTaskFilesAtRefBatch,
@@ -419,11 +419,6 @@ export function classifyNonLandingCause({ hasRetryRecord = false, suiteRed = fal
   if (suiteRed) return "suite-red";
   if (workerFinalState === "timed-out" || workerFinalState === "killed" || workerFinalState === "failed") return "worker-round-end";
   return "unknown";
-}
-
-function readFrontField(frontmatterRaw, key) {
-  const m = frontmatterRaw.match(new RegExp(`^${key}:\\s*(\\S+)`, "m"));
-  return m ? m[1].replace(/^["']|["']$/g, "") : null;
 }
 
 /** ALL prerequisites done (parent AND every depends_on entry) ⇒ deps ready. Mirrors ready-pool-check's

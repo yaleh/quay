@@ -167,12 +167,6 @@ import { repoRoot } from "./repo-root.ts";
 // this dir into consumers WITHOUT a packages/ source tree — a static `import` of store.ts from here
 // would ERR_MODULE_NOT_FOUND in a laid-down consumer.
 import { SHAPE_SECTIONS } from "./shape-sections.ts";
-// The single regex-literal escaper (kernel leaf reached via the plugin shim) — the SAME one
-// packages/quay-native/src/store.ts uses, which makes the "same byte semantics / single-judge
-// contract" the two files documented by comment structural. Own copy was one of the twelve
-// byte-identical bodies extracted by
-// gap-routine-semantic-dedup-scan-escapere-escaperegex-escaperegexp-fndefre-stemre.
-import { escapeRegExp } from "./regex-escape.ts";
 // Re-export for backward-compat importers (e.g. gate-shape-dispatch.test.mjs) — SHAPE_SECTIONS is
 // the single source now, not a local hand-copied map.
 export { SHAPE_SECTIONS };
@@ -189,7 +183,7 @@ import { artifactsComplete, detectShape, MIN_SECTION_CHARS } from "../../package
 export { artifactsComplete, detectShape, MIN_SECTION_CHARS };
 import path from "node:path";
 import { execFileSync } from "node:child_process";
-import { parseTask, extractSection, readDependsOn, readTaskStatusAtRef } from "./task-schema.ts";
+import { parseTask, extractSection, readDependsOn, readTaskStatusAtRef, readFrontField } from "./task-schema.ts";
 // ADR-007 per-milestone predicate (tasks/gap-adr007-per-milestone-dark-axis-enforcement-gate) — the
 // pool report answers "would this ready task survive the ready→done dark-axis gate?" BEFORE it is
 // dispatched. The classification is Core's (packages/quay/src/gate/dark-axis-record.ts), reached
@@ -759,14 +753,6 @@ export const RED_WINDOW_MIN_DEFAULT = 3;
 // (task gap-extract-section-heading-interpolated-unescaped-into-regexp) — so callers pass the raw
 // registered heading (`## AC (draft)` matches literally) and must NOT pre-escape (that would
 // double-escape the backslashes and break the match).
-
-function readFrontField(frontmatterRaw, key) {
-  // `key` is interpolated into a regex, so it is escaped first (same metacharacter-literal rule as
-  // extractSection above — task gap-extract-section-heading-interpolated-unescaped-into-regexp, 5b
-  // sibling). All current callers pass plain field names, so this is a no-op for them.
-  const m = frontmatterRaw.match(new RegExp(`^${escapeRegExp(key)}:\\s*(\\S+)`, "m"));
-  return m ? m[1].replace(/^["']|["']$/g, "") : null;
-}
 
 /** Kind classification by task-id prefix: `gap-*` defects > `DIR-*` capabilities > other. */
 export function classifyKind(id) {
