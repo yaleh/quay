@@ -26,15 +26,19 @@ god-package-plugin-scripts / god-package-quay-src-root / god-package-core）均�
 `plugin/scripts`）做 dedup subject 键，不再用精确符号集；已 disposition 的包名走抑制表。
 
 ## AC
-- [ ] `routine-file-gate.ts` 对 `dupKind: god-package` 的 finding 用包身份（公共目录前缀）计算 dedup 键，`findingSubjectKey`/`findingKey` 对 god-package 不再返回 `symbols:<set>` 形键
-- [ ] 可核回放：`.quay/routine-findings.jsonl` 里 `god-package-plugin-scripts` 的三轮 finding 记录（runId `architecture-analysis-1792599464308` / `-1793401956536` / `-1793622670475`）在新键下收敛为同一键（`recurrenceByKey` 或等价读法把三轮归为 recurrence≥3）
-- [ ] 单测覆盖 god-package 键收敛 + 非 god-package 键不变（fixture-pinned，`routine-file-gate.test.mjs`）
+- [x] `routine-file-gate.ts` 对 `dupKind: god-package` 的 finding 用包身份（公共目录前缀）计算 dedup 键，`findingSubjectKey`/`findingKey` 对 god-package 不再返回 `symbols:<set>` 形键
+- [x] 可核回放：`.quay/routine-findings.jsonl` 里 `god-package-plugin-scripts` 的三轮 finding 记录（runId `architecture-analysis-1792599464308` / `-1793401956536` / `-1793622670475`）在新键下收敛为同一键（`recurrenceByKey` 或等价读法把三轮归为 recurrence≥3）
+- [x] 单测覆盖 god-package 键收敛 + 非 god-package 键不变（fixture-pinned，`routine-file-gate.test.mjs`）
 
 ## DoD
-- [ ] 上面的判据实跑通过
-- [ ] 修复后的 dedup 键对既有 `god-package-plugin-scripts` / `god-package-quay-src-root` 三轮记录收敛为同一键（可重放 `recurrenceByKey`）
-- [ ] ⛔ 探针只立案不执行：本修复由派发链（worker）执行，不由例程代跑
+- [x] 上面的判据实跑通过
+- [x] 修复后的 dedup 键对既有 `god-package-plugin-scripts` / `god-package-quay-src-root` 三轮记录收敛为同一键（可重放 `recurrenceByKey`）
+- [x] ⛔ 探针只立案不执行：本修复由派发链（worker）执行，不由例程代跑
 
 ## Touches
 - `plugin/scripts/routine-file-gate.ts`
+- `plugin/test/routine-file-gate.test.mjs`
 - `tasks/gap-routine-file-gate-god-package-dedup-by-package-identity.md`
+
+## ADR-007 dark axis
+- 该轴仍暗,理由:本修复只改 routine-file-gate 的 dedup 键（god-package→包身份），不移动包/依赖结构，L_D/L_G 读数不因本任务变化
