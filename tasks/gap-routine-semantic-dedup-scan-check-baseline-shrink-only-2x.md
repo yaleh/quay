@@ -2,7 +2,7 @@
 id: gap-routine-semantic-dedup-scan-check-baseline-shrink-only-2x
 title: "semantic-dedup-scan: Byte-identical wrappers delegating to
   checkBaselineShrinkOnlyShared."
-status: todo
+status: ready
 labels:
   - gap
   - routine-filed
