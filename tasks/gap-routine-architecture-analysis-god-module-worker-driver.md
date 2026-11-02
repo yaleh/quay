@@ -2,7 +2,7 @@
 id: gap-routine-architecture-analysis-god-module-worker-driver
 title: "architecture-analysis: worker-driver.ts is 7149 lines, the repo's
   largest module; runResidentLoop outDegree=95"
-status: todo
+status: ready
 labels:
   - gap
   - routine-filed
