@@ -3,7 +3,7 @@ id: gap-routine-semantic-dedup-scan-baseline-file-3x
 title: "semantic-dedup-scan: Byte-identical one-line wrappers returning
   baselinePath(root,BASELINE_FILE_REL); derivation already shared in
   ratchet-baseline.ts."
-status: ready
+status: done
 labels:
   - gap
   - routine-filed
