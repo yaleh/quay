@@ -2,7 +2,7 @@
 id: gap-worker-verify-condenser
 title: worker 验证循环下沉：复用 fan-in 的失败文件解析 + 基线 A/B，把 verify 轮压成紧凑 must-fix
   表并只重跑失败文件（验证面不变）
-status: todo
+status: ready
 labels:
   - gap
 parent: null
