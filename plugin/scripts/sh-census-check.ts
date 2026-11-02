@@ -58,7 +58,7 @@ import { helpExit, isDirectEntry, flagValue, createSelftest } from "./gate-scrip
 // `lineAt` was this file's own copy of the 1-based newline counter (semantic-dedup-scan
 // `lineof-lineat`); the family lives once in source-text-lib.ts under ONE name.
 import { lineOf } from "./source-text-lib.ts";
-import { baselinePath, checkBaselineShrinkOnly as checkBaselineShrinkOnlyShared } from "./ratchet-baseline.ts";
+import { baselinePath, checkBaselineShrinkOnly } from "./ratchet-baseline.ts";
 // Its private `defaultRoot()` — the third byte-identical copy of "up exactly two levels from the
 // script dir" — was the same finding the semantic-dedup-scan routine filed as
 // `defaultroot-byte-identical-quad` (runId `semantic-dedup-scan-1792033478766`, verdict
@@ -871,19 +871,9 @@ export interface RatchetVerdict {
   bootstrap: boolean;
 }
 
-/** 只降不升判定（对基线文件自身）：工作树基线任一轴高于 git HEAD 基线 ⇒ raised。
- *  判定机制在 `ratchet-baseline.ts`（`baseline-shrink-only-copy` finding）；本包装只绑定本棘轮自己的
- * 轴列表（`BASELINE_AXES`），保留本模块的公开面与既有测试形态。 */
-export function checkBaselineShrinkOnly(
-  worktree: Baseline | null,
-  head: Baseline | null,
-): { raised: (keyof Baseline)[]; bootstrap: boolean } {
-  return checkBaselineShrinkOnlyShared(worktree, head, BASELINE_AXES);
-}
-
 export function judge(measured: Baseline, baseline: Baseline, worktree: Baseline | null, head: Baseline | null): RatchetVerdict {
   const over = BASELINE_AXES.filter((k) => measured[k] > baseline[k]);
-  const shrink = checkBaselineShrinkOnly(worktree, head);
+  const shrink = checkBaselineShrinkOnly(worktree, head, BASELINE_AXES);
   return { ok: over.length === 0 && shrink.raised.length === 0, over, baselineRaised: shrink.raised, headBaseline: head, bootstrap: shrink.bootstrap };
 }
 

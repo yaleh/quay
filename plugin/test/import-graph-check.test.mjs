@@ -24,8 +24,8 @@ import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import {
+  BASELINE_AXES,
   BASELINE_FILE_REL,
-  checkBaselineShrinkOnly,
   countsOf,
   decide,
   extractImports,
@@ -36,7 +36,7 @@ import {
   RETIRED_SRC_ROOT_SHIMS,
   tarjanSccs,
 } from "../scripts/import-graph-check.ts";
-import { baselinePath } from "../scripts/ratchet-baseline.ts";
+import { baselinePath, checkBaselineShrinkOnly } from "../scripts/ratchet-baseline.ts";
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 
@@ -170,10 +170,10 @@ test("tarjanSccs finds the cycle and leaves acyclic nodes as singletons", () => 
 
 test("checkBaselineShrinkOnly: equal and lower pass, a raise is caught, absent HEAD is labelled bootstrap", () => {
   const head = { valueSccs: 1, typeSccs: 2, reverseEdges: 5 };
-  assert.deepEqual(checkBaselineShrinkOnly({ ...head }, head), { raised: [], bootstrap: false });
-  assert.deepEqual(checkBaselineShrinkOnly({ valueSccs: 0, typeSccs: 1, reverseEdges: 0 }, head), { raised: [], bootstrap: false });
-  assert.deepEqual(checkBaselineShrinkOnly({ ...head, typeSccs: 3 }, head), { raised: ["typeSccs"], bootstrap: false });
-  assert.deepEqual(checkBaselineShrinkOnly({ valueSccs: 9, typeSccs: 9, reverseEdges: 9 }, null), { raised: [], bootstrap: true });
+  assert.deepEqual(checkBaselineShrinkOnly({ ...head }, head, BASELINE_AXES), { raised: [], bootstrap: false });
+  assert.deepEqual(checkBaselineShrinkOnly({ valueSccs: 0, typeSccs: 1, reverseEdges: 0 }, head, BASELINE_AXES), { raised: [], bootstrap: false });
+  assert.deepEqual(checkBaselineShrinkOnly({ ...head, typeSccs: 3 }, head, BASELINE_AXES), { raised: ["typeSccs"], bootstrap: false });
+  assert.deepEqual(checkBaselineShrinkOnly({ valueSccs: 9, typeSccs: 9, reverseEdges: 9 }, null, BASELINE_AXES), { raised: [], bootstrap: true });
 });
 
 // ── the checker BITES on real trees (AC1) ───────────────────────────────────────────────────────────
