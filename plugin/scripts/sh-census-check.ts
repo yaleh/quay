@@ -887,12 +887,6 @@ export function judge(measured: Baseline, baseline: Baseline, worktree: Baseline
   return { ok: over.length === 0 && shrink.raised.length === 0, over, baselineRaised: shrink.raised, headBaseline: head, bootstrap: shrink.bootstrap };
 }
 
-/** This ratchet's baseline path — the DERIVATION is the shared `baselinePath`; this consumer owns
- * only its own `BASELINE_FILE_REL` constant (the `baseline-file-quad` finding, 硬规则 5b). */
-export function baselineFile(root: string): string {
-  return baselinePath(root, BASELINE_FILE_REL);
-}
-
 /**
  * 读工作树基线。`root` 给出时走与普查同一条 resilient 读路（工作树 → 有界重试 → git 索引），
  * 因为基线文件本身也是一个 tracked 文件、也会被 ff-merge 原地 unlink+recreate：
@@ -953,7 +947,7 @@ export interface Decision {
 export function decide(root: string, opts: CensusOptions & { baselineAbs?: string } = {}): Decision {
   const reading = readCensus(root, opts);
   if (!reading.evaluated) return { reading, baseline: null, verdict: null, code: 2, relForHead: "" };
-  const baselineAbs = opts.baselineAbs ?? baselineFile(root);
+  const baselineAbs = opts.baselineAbs ?? baselinePath(root, BASELINE_FILE_REL);
   const baseline = readBaselineFile(baselineAbs, root);
   if (baseline === null) return { reading, baseline: null, verdict: null, code: 2, relForHead: "" };
   const relForHead = path.relative(root, baselineAbs).split(path.sep).join("/");
@@ -1316,7 +1310,7 @@ export function main(argv: string[]): number {
   const here = path.dirname(fileURLToPath(import.meta.url));
   const root = path.resolve(flagValue(args, "--root") ?? positional ?? repoRoot(here));
   const exceptionsAbs = path.resolve(flagValue(args, "--exceptions") ?? exceptionsFile(root));
-  const baselineAbs = path.resolve(flagValue(args, "--baseline") ?? baselineFile(root));
+  const baselineAbs = path.resolve(flagValue(args, "--baseline") ?? baselinePath(root, BASELINE_FILE_REL));
 
   const { reading, baseline, verdict, code, relForHead } = decide(root, { exceptionsAbs, baselineAbs });
 

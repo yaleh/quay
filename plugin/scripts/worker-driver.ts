@@ -5818,6 +5818,13 @@ export interface ResidentOptions {
  *     - 瞬时 WAIT（resource-gate-wait / pool-empty / Touches-deps 过滤）⇒ ⛔ 不 latch：本轮不派、
  *       下一轮重读 stopCondition；无在飞 worker 时等 intervalMs 重读，⛔ 不退出（退出 = 把恢复外包给
  *       supervisor 重启）。退出码 = 首个非零 worker 码（仅在终态 latch 后返回）。
+ *
+ * 拆分状态（god-module finding `god-module-worker-driver`，runId architecture-analysis-1793622670475）：
+ *   机械 fan-in 半边【已拆】→ worker-fan-in.ts（gap-arch-worker-fan-in-extract-from-worker-driver，done）。
+ *   常驻环半边由 gap-worker-driver-resident-loop-decomposition-discovery（done）做了四关注点切分
+ *   （①状态机 ②派发决策 ③派发执行 ④落账）与执行顺序 ④→①（②③ 是控制脊、⛔ 不做第一刀），但其 DoD
+ *   明确「不实现拆分、不开 goal」⇒ 分析→执行交接从未发生、无后续执行任务，故 finding 复发。
+ *   下一执行增量 = ④ 落账（writeRound/writeErrorRound → worker-round-ledger.ts），再 ① 状态机。
  */
 export async function runResidentLoop(opts: ResidentOptions): Promise<number> {
   const { rootDir, cap, timeoutMs, workerCmdOpts, selectorArgv, readyPoolArgv, resourceGateArgv, outcomeFile, runId, runPrefix, json, pidFile, livenessCmd, intervalMs, reconcileMs, maxRetries, backoffCfg } = opts;
