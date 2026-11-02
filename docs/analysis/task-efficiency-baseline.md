@@ -229,3 +229,37 @@ ready 事件 = `gate-events.jsonl` 中 gate=promote 的条数：**99**。gate �
 | ITE（Idle Time Efficiency）p50 / p90 | 0.181 / 0.617 | 墙钟归属覆盖率 p50/p90 0.334 / 0.686 | 旧名把「已归属墙钟/端到端」误称为 Idle Time Efficiency；已改独立指标并去 Math.min(1,…) 截断 |
 | 持续队列/阻塞证据（pool-empty + resource-gate-wait） | 49067 轮 | not-evaluated | pool-empty 只代表供给状态、resource-gate-wait 只代表资源拒绝，两者相加不是持续队列 |
 | 锁等待显著（p50>60s）？ | false | 已撤销该自动判词 | 阈值无依据；只保留描述性分位数 |
+
+## 窗口口径撤回与两窗口差异（gap-e1-baseline-window-ignored-by-rounds-e5）
+
+> 本条撤回上一版报告把「窗口读数」当作窗口读数的用法：旧口径里 `--window-start/--window-end`
+> 只作用于 attempts 侧，`rounds.*`（会话轮数分解）与 `e5.stopReasonCounts`（派发环 stop_reason）
+> 从不读窗口参数——任何窗口下这两个小节都是**全量读数**，且逐字相同。因此上一版报告里下列数值
+> 是**旧口径下的全量读数**，不是窗口读数。修正后（本任务）`rounds` 按会话首条记录时间戳、
+> `e5.stopReason` 按 worker-round.ts、`e5.queueDelay` 按 workflow-event.recordedAtMs 落到窗口，
+> 窗口外/缺时间戳的记录单列 `unwindowed`（「无法评估」有独立取值，不与窗口读数共用输出）。
+
+旧口径下的全量读数（本报告上一版既有数值，未静默改写，仅在此标注口径）：
+- `rounds.totalRounds` = 176504（bug 报告当时为 169144）
+- `rounds.sessionsTotal` = 945（bug 报告当时为 904）
+- `e5.stopReasonCounts` = `{"dispatched(no-stop)":2823,"resource-gate-wait":691,"mcp-halt":3810,"backoff":939,"filtered-empty":11136,"pool-empty":48408}`（bug 报告当时 pool-empty=49411）
+- `e5.poolEmptyRounds` = 48408（bug 报告当时为 49411）
+
+修正后两窗口读数（本任务重跑，差异一目了然）：
+
+| 项目 | 旧口径全量读数 | 窗口1 修正读数 | 窗口2 修正读数 | 差异 |
+|---|---|---|---|---|
+| `rounds.totalRounds` | 176504 | 3433 | 1227 | 不同（3433 vs 1227） |
+| `rounds.sessionsTotal` | 945 | 18 | 7 | 不同（18 vs 7） |
+| `e5.stopReasonCounts` | `{"dispatched(no-stop)":2823,"resource-gate-wait":691,"mcp-halt":3810,"backoff":939,"filtered-empty":11136,"pool-empty":48408}` | `{"pool-empty":868,"filtered-empty":66,"dispatched(no-stop)":12,"resource-gate-wait":3}` | `{"pool-empty":997,"filtered-empty":21,"resource-gate-wait":2,"dispatched(no-stop)":1}` | 不同 |
+| `e5.poolEmptyRounds` | 48408 | 868 | 997 | 不同（868 vs 997） |
+
+unwindowed 计数（窗口外，不计入窗口读数）：
+- 窗口1：会话 886 / 派发环 67910 / 队列等待 394（缺时间戳均为 0）
+- 窗口2：会话 897 / 派发环 67838 / 队列等待 394（缺时间戳均为 0）
+
+复现命令（一条命令可复现两窗口差异）：
+```bash
+node scripts/task-efficiency-baseline.mjs --json --window-start 2026-10-31T14:00:00Z --window-end 2026-11-01T12:00:00Z
+node scripts/task-efficiency-baseline.mjs --json --window-start 2026-11-01T18:00:00Z --window-end 2026-11-02T13:30:00Z
+```
