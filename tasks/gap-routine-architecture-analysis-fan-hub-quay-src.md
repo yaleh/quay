@@ -2,7 +2,7 @@
 id: gap-routine-architecture-analysis-fan-hub-quay-src
 title: "architecture-analysis: packages/quay/src has fanIn=486 fanOut=424 across
   30 files incl. 3907-line observation.ts and 2965-line init.ts"
-status: todo
+status: ready
 labels:
   - gap
   - routine-filed
