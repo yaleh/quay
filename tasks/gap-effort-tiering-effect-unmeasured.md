@@ -2,7 +2,7 @@
 id: gap-effort-tiering-effect-unmeasured
 title: role 降 effort 到 low 已在生产生效，但 output token 与延迟未见下降（meta-driver 反而
   +12%）——交付一次可复跑的对照读数并给出 keep/revert/not-evaluated
-status: todo
+status: ready
 labels:
   - gap
 parent: null
