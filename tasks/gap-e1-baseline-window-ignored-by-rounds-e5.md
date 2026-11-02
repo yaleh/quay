@@ -1,7 +1,7 @@
 ---
 id: gap-e1-baseline-window-ignored-by-rounds-e5
 title: E1 只读基线工具的 --window-start/--window-end 未作用于轮数分解与 E5 小节——窗口外恒定读数伪装成窗口读数
-status: ready
+status: done
 labels:
   - gap
   - defect
