@@ -36,12 +36,12 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1 报告给出任务库逐状态计数，且按位置核对：把 `grep -n '^status: <value>'` 的前 3 条实际匹配内容贴出，区分 frontmatter 与正文散文行；给出真实 frontmatter 分布（申报时实测 done/superseded/ready/todo/needs-human = 3030/76/1/0/1，执行当日必须重取，不得沿用本读数）。
-- [ ] AC2 报告给出至少 3 个整日的 stop_reason 窗口读数，把 `pool-empty`、`filtered-empty`、`resource-gate-wait` 分开列示并给出各自占该日 tick 的百分比；命令必须显式带窗口。
-- [ ] AC3 产出率用两套分母各算一次：落地任务数 / 总 tick，与 落地任务数 / 可派发 tick；两套数字都写进报告，不得只给后者。
-- [ ] AC4 报告明确写出结论层：当可用工作 = 0 时，"执行效率优化"不可测（not-evaluated），不得用空闲率反推执行变差；若可用工作 > 0 仍有长时间 `pool-empty`，必须指出被什么过滤。
-- [ ] AC5 报告给出"下一批工作从哪里来"的可执行判据（生成层 / 发现层 / 人工注入 三者之一），并明确本条不改变任何派发、promotion 或 AC/DoD 门。
-- [ ] AC6 `git diff --check` exit 0，改动只在声明 Touches 内。
+- [x] AC1 报告给出任务库逐状态计数，且按位置核对：把 `grep -n '^status: <value>'` 的前 3 条实际匹配内容贴出，区分 frontmatter 与正文散文行；给出真实 frontmatter 分布（申报时实测 done/superseded/ready/todo/needs-human = 3030/76/1/0/1，执行当日必须重取，不得沿用本读数）。
+- [x] AC2 报告给出至少 3 个整日的 stop_reason 窗口读数，把 `pool-empty`、`filtered-empty`、`resource-gate-wait` 分开列示并给出各自占该日 tick 的百分比；命令必须显式带窗口。
+- [x] AC3 产出率用两套分母各算一次：落地任务数 / 总 tick，与 落地任务数 / 可派发 tick；两套数字都写进报告，不得只给后者。
+- [x] AC4 报告明确写出结论层：当可用工作 = 0 时，"执行效率优化"不可测（not-evaluated），不得用空闲率反推执行变差；若可用工作 > 0 仍有长时间 `pool-empty`，必须指出被什么过滤。
+- [x] AC5 报告给出"下一批工作从哪里来"的可执行判据（生成层 / 发现层 / 人工注入 三者之一），并明确本条不改变任何派发、promotion 或 AC/DoD 门。
+- [x] AC6 `git diff --check` exit 0，改动只在声明 Touches 内。
 
 ## Definition of Done
 
