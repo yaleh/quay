@@ -2,7 +2,7 @@
 id: gap-routine-semantic-dedup-scan-read-front-field-divergent
 title: "semantic-dedup-scan: Same helper in two files; one escapes the key into
   the regex, the other interpolates it unescaped."
-status: ready
+status: done
 labels:
   - gap
   - routine-filed
