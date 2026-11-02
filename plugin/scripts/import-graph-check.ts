@@ -765,13 +765,6 @@ export function judge(
   };
 }
 
-/** The committed baseline's absolute path under `root` — the DERIVATION is the shared
- * `baselinePath`; this consumer owns only its own `BASELINE_FILE_REL` (the `baseline-file-quad`
- * finding, 硬规则 5b). */
-export function baselineFile(root: string): string {
-  return baselinePath(root, BASELINE_FILE_REL);
-}
-
 export function readBaselineFile(abs: string): Baseline | null {
   try {
     const raw = JSON.parse(fs.readFileSync(abs, "utf8")) as Partial<Baseline>;
@@ -864,7 +857,7 @@ export function runBaselineRaiseCase(): { ok: boolean; detail: string } {
   try {
     fs.mkdirSync(path.join(dir, "src"), { recursive: true });
     fs.writeFileSync(path.join(dir, "src", "only.ts"), "export const only = 1;\n");
-    const bAbs = baselineFile(dir);
+    const bAbs = baselinePath(dir, BASELINE_FILE_REL);
     fs.mkdirSync(path.dirname(bAbs), { recursive: true });
     fs.writeFileSync(bAbs, JSON.stringify(c.head, null, 2) + "\n");
     const env = { ...process.env, GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_SYSTEM: "/dev/null" };
@@ -1283,7 +1276,7 @@ export interface Decision {
  * predicate behind it (AC5 asks for 「⇒ exit 1」, and a case that re-implements the mapping would be
  * asserting its own arithmetic).
  */
-export function decide(root: string, baselineAbs: string = baselineFile(root)): Decision {
+export function decide(root: string, baselineAbs: string = baselinePath(root, BASELINE_FILE_REL)): Decision {
   const reading = readImportGraph(root);
   if (!reading.evaluated) return { reading, baseline: null, verdict: null, code: 2, relForHead: "" };
   const baseline = readBaselineFile(baselineAbs);
@@ -1329,7 +1322,7 @@ export function main(argv: string[]): number {
   const positional = args.find((a, i) => !a.startsWith("--") && !(i > 0 && args[i - 1] === "--baseline"));
   const here = path.dirname(fileURLToPath(import.meta.url));
   const root = path.resolve(flagValue(args, "--root") ?? positional ?? repoRoot(here));
-  const baselineAbs = path.resolve(flagValue(args, "--baseline") ?? baselineFile(root));
+  const baselineAbs = path.resolve(flagValue(args, "--baseline") ?? baselinePath(root, BASELINE_FILE_REL));
 
   const { reading, baseline, verdict, code, relForHead } = decide(root, baselineAbs);
   if (!reading.evaluated) {
