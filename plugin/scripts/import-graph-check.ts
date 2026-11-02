@@ -64,7 +64,7 @@ import { helpExit, isDirectEntry, flagValue } from "./gate-script-base.ts";
 // `lineAt` was this file's own copy of the 1-based newline counter — same body as eleven others
 // (semantic-dedup-scan `lineof-lineat`); the family lives once in source-text-lib.ts under ONE name.
 import { lineOf } from "./source-text-lib.ts";
-import { baselinePath, checkBaselineShrinkOnly as checkBaselineShrinkOnlyShared } from "./ratchet-baseline.ts";
+import { baselinePath, checkBaselineShrinkOnly } from "./ratchet-baseline.ts";
 // Its own private `defaultRoot()` — "up exactly two levels from the script dir" — was one of the
 // THREE byte-identical bodies filed by the semantic-dedup-scan routine as
 // `defaultroot-byte-identical-quad` (runId `semantic-dedup-scan-1792033478766`). `repoRoot` is the
@@ -724,19 +724,6 @@ export interface RatchetVerdict {
  *  cannot silently shrink when a baseline object is built partially. */
 export const BASELINE_AXES = ["valueSccs", "typeSccs", "reverseEdges"] as const;
 
-/**
- * The shrink-only judgment for the baseline FILE ITSELF (AC5): the working-tree baseline may not exceed
- * the git-HEAD baseline on any axis. The mechanism lives in `ratchet-baseline.ts` (the
- * `baseline-shrink-only-copy` finding); this wrapper keeps THIS ratchet's axis binding and its public
- * surface, so the self-test can exercise the ±1 judgment without a git repo.
- */
-export function checkBaselineShrinkOnly(
-  worktree: Baseline | null,
-  head: Baseline | null,
-): { raised: (keyof Baseline)[]; bootstrap: boolean } {
-  return checkBaselineShrinkOnlyShared(worktree, head, BASELINE_AXES);
-}
-
 /** The gate judgment: the reading must not exceed the baseline, the baseline must not have been raised
  *  past HEAD, and the kernel boundary (when the directory exists) must hold. */
 export function judge(
@@ -747,7 +734,7 @@ export function judge(
 ): RatchetVerdict {
   const counts = countsOf(reading);
   const over = BASELINE_AXES.filter((k) => counts[k] > baseline[k]);
-  const shrink = checkBaselineShrinkOnly(worktreeBaseline, headBaseline);
+  const shrink = checkBaselineShrinkOnly(worktreeBaseline, headBaseline, BASELINE_AXES);
   const kernelBlocked = reading.kernelChecked && reading.kernelViolations.length > 0;
   const retiredShimsBlocked = reading.retiredShimHits.length > 0;
   // A collected hit is RED regardless of coverage: the provider file that produced it is itself
@@ -834,10 +821,10 @@ export const BASELINE_RAISE_CASE = {
 /** ±1 on every axis: equal ⇒ no raise, one lower ⇒ no raise, one higher ⇒ RAISE (exit 1's trigger). */
 export function runBaselineRaiseCase(): { ok: boolean; detail: string } {
   const c = BASELINE_RAISE_CASE;
-  const eq = checkBaselineShrinkOnly(c.equal, c.head);
-  const lo = checkBaselineShrinkOnly(c.lowered, c.head);
-  const hi = checkBaselineShrinkOnly(c.raised, c.head);
-  const boot = checkBaselineShrinkOnly(c.raised, null);
+  const eq = checkBaselineShrinkOnly(c.equal, c.head, BASELINE_AXES);
+  const lo = checkBaselineShrinkOnly(c.lowered, c.head, BASELINE_AXES);
+  const hi = checkBaselineShrinkOnly(c.raised, c.head, BASELINE_AXES);
+  const boot = checkBaselineShrinkOnly(c.raised, null, BASELINE_AXES);
   const predicateOk =
     eq.raised.length === 0 &&
     eq.bootstrap === false &&
