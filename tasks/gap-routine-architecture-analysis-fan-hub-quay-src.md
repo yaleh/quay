@@ -47,3 +47,10 @@ Split observation/init monoliths and remove the re-export barrel so subpackages 
 - `packages/quay/src/observation.ts`
 - `packages/quay/src/init.ts`
 - `tasks/gap-routine-architecture-analysis-fan-hub-quay-src.md`
+
+## Blocker
+
+**2026-11-02T13:28:01.517Z — worker 未落地（exited-not-landed）**
+
+- 未落地原因：step=suite: AssertionError [ERR_ASSERTION]: observation.ts must import from "./core/ancestry.ts" [baseline A/B: HARD RED (task-introduced-red) — the task's red set is NOT a subset of the develop baseline red set: added=packages/quay/test/ancestry.test.mjs,packages/quay/test/directory-cycle.test.mjs,packages/quay/test/architecture-boundaries.test.mjs changed=-]
+- run_id：wk-prod-anchor
