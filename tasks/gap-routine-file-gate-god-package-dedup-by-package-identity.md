@@ -32,6 +32,8 @@ god-package-plugin-scripts / god-package-quay-src-root / god-package-core）均�
 
 ## DoD
 - [ ] 上面的判据实跑通过
+- [ ] 修复后的 dedup 键对既有 `god-package-plugin-scripts` / `god-package-quay-src-root` 三轮记录收敛为同一键（可重放 `recurrenceByKey`）
+- [ ] ⛔ 探针只立案不执行：本修复由派发链（worker）执行，不由例程代跑
 
 ## Touches
 - `plugin/scripts/routine-file-gate.ts`
