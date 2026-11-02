@@ -98,12 +98,31 @@ function walkProductionSources(dir, out = []) {
   return out;
 }
 
+/** readFileSync, tolerating the staging mirror's list→read race and nothing else. `null` = vanished.
+ *  `packages/quay/plugin/` is the GITIGNORED npm-pack staging mirror: packages/quay/test/
+ *  delivery-standalone-smoke.sh copies the whole `plugin/` tree there, runs `npm pack`, then
+ *  `rm -rf`s it — while other test files walk this same tree. A FILE that vanished between the
+ *  walk and this read is NOT-EVALUATED, not a violation (硬规则 3b): skip it, and SAY SO. Anywhere
+ *  else ENOENT is still a hard failure (a production file that vanished is a genuine defect and
+ *  must not be laundered into "not covered"). */
+function readSource(abs) {
+  try {
+    return fs.readFileSync(abs, "utf8");
+  } catch (err) {
+    const slashPath = abs.split(path.sep).join("/");
+    if (err.code !== "ENOENT" || !slashPath.includes("/packages/quay/plugin/")) throw err;
+    console.log(`# staging-mirror walk→read race: skipped vanished file ${slashPath} — NOT judged (hard rule 3b)`);
+    return null;
+  }
+}
+
 /** Files whose TEXT contains `needle`, as repo-relative POSIX paths. */
 function filesContaining(needle) {
   const hits = [];
   for (const root of SCAN_ROOTS) {
     for (const abs of walkProductionSources(path.join(REPO_ROOT, root))) {
-      if (fs.readFileSync(abs, "utf8").includes(needle)) {
+      const text = readSource(abs);
+      if (text !== null && text.includes(needle)) {
         hits.push(path.relative(REPO_ROOT, abs).split(path.sep).join("/"));
       }
     }
@@ -225,4 +244,15 @@ test("⑤ both plugin CLIs still RUN against a positional path (a deleted module
   const sel = run("plugin/scripts/suite-bucket-select.ts", ["./plugin/scripts/full-suite-runner.ts", "--summary"]);
   assert.equal(sel.status, 0, `suite-bucket-select.ts must exit 0; stderr=${sel.stderr}`);
   assert.match(sel.stdout, /buckets=full/, "the select CLI's positional normalization path must still run");
+});
+
+test("readSource skips ENOENT ONLY under the npm-pack staging mirror (negative control)", () => {
+  // 硬规则 3b：镜像下消失 = 不可判定（跳过并打印）；镜像之外的消失仍是硬失败 ——
+  // 生产文件不见是真缺陷，不得被洗成「没覆盖到」。
+  assert.equal(readSource(path.join(REPO_ROOT, "packages/quay/plugin/__vanished-probe__.ts")), null);
+  assert.throws(
+    () => readSource(path.join(REPO_ROOT, "packages/quay/__vanished-probe__.ts")),
+    /ENOENT/,
+    "a vanished file OUTSIDE the staging mirror must still throw",
+  );
 });
