@@ -31,12 +31,12 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1 `node --test scripts/prompt-inline-scan.test.mjs` exit 0；fixture 至少覆盖：①插值大对象/`JSON.stringify(readings)` 的组装点 ⇒ `inline-data`；②只拼静态文本 ⇒ `fixed-prose`；③落盘 + 路径指针 ⇒ `pointer`；④无法解析的输入 ⇒ `not-evaluated`，不得与"干净"共用输出。
-- [ ] AC2 谓词干跑证据：对 git 历史中改造前的 `buildProbePrompt`（`patch` 前版本）运行扫描，必须判为 `inline-data` 并把命令与输出贴进报告；跑不出来 ⇒ 扫描器不算完成。
-- [ ] AC3 扫描真实仓库后，报告给出每个分类的计数与完整命中清单（file:line + 分类），并至少对 3 个组装点人工核对分类与位置一致（按位置判定，注释/字符串里提到不算命中）。
-- [ ] AC4 每个 `inline-data` 命中都有处置（已改为指针 / 仍内联 / 非 prompt）；每个"仍内联"命中附至少一条真实生产读数（sessionId + 首条 user 消息字符数 + 读取时刻），不得只给静态估算。
-- [ ] AC5 报告给 top-3 候选的实测体积与"预期节省或 not-evaluated"，并明确本条不修改任何 prompt 内容。
-- [ ] AC6 `git diff --check` exit 0，改动只在声明 Touches 内；`plugin/scripts/meta-driver.ts` / `plugin/scripts/worker-driver.ts` 的 diff 为空。
+- [x] AC1 `node --test scripts/prompt-inline-scan.test.mjs` exit 0；fixture 至少覆盖：①插值大对象/`JSON.stringify(readings)` 的组装点 ⇒ `inline-data`；②只拼静态文本 ⇒ `fixed-prose`；③落盘 + 路径指针 ⇒ `pointer`；④无法解析的输入 ⇒ `not-evaluated`，不得与"干净"共用输出。
+- [x] AC2 谓词干跑证据：对 git 历史中改造前的 `buildProbePrompt`（`patch` 前版本）运行扫描，必须判为 `inline-data` 并把命令与输出贴进报告；跑不出来 ⇒ 扫描器不算完成。
+- [x] AC3 扫描真实仓库后，报告给出每个分类的计数与完整命中清单（file:line + 分类），并至少对 3 个组装点人工核对分类与位置一致（按位置判定，注释/字符串里提到不算命中）。
+- [x] AC4 每个 `inline-data` 命中都有处置（已改为指针 / 仍内联 / 非 prompt）；每个"仍内联"命中附至少一条真实生产读数（sessionId + 首条 user 消息字符数 + 读取时刻），不得只给静态估算。
+- [x] AC5 报告给 top-3 候选的实测体积与"预期节省或 not-evaluated"，并明确本条不修改任何 prompt 内容。
+- [x] AC6 `git diff --check` exit 0，改动只在声明 Touches 内；`plugin/scripts/meta-driver.ts` / `plugin/scripts/worker-driver.ts` 的 diff 为空。
 
 ## Definition of Done
 
