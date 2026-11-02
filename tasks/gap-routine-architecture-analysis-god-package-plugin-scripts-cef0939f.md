@@ -2,7 +2,7 @@
 id: gap-routine-architecture-analysis-god-package-plugin-scripts-cef0939f
 title: "architecture-analysis: plugin/scripts holds 317 files / 4777 entities
   (77.7% of repo's 6144) in a flat 2-subdir directory, fanOut=3622"
-status: ready
+status: done
 labels:
   - gap
   - routine-filed
