@@ -2,7 +2,7 @@
 id: gap-ci-red-on-version-tagged-commit
 title: CI 对「被打成版本 tag 的提交」恒红 —— build 形态在该提交上解析成 release 形态，套件里 tracked-vs-build
   的比较全部失败
-status: todo
+status: ready
 labels:
   - gap
   - defect
