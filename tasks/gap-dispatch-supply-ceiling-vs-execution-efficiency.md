@@ -1,7 +1,7 @@
 ---
 id: gap-dispatch-supply-ceiling-vs-execution-efficiency
 title: 派发环 93–98% tick 空闲的主因是任务存量枯竭而非执行效率——量化供给上限后再决定优化目标落在哪一层
-status: todo
+status: ready
 labels:
   - gap
 parent: null
