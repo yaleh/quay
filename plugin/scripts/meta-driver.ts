@@ -926,7 +926,7 @@ export function aggregateActionFailures(
   const state: ActionFailureReading["state"] = min === null
     ? "unthresholded"
     : aggregates.some((a) => a.crossed) ? "crossed" : "none";
-  return { state, aggregates, reason: null, ...meta, recordsScanned: records.length };
+  return { state, aggregates, reason: opts.reason ?? null, ...meta, recordsScanned: records.length };
 }
 
 /** meta-cc MCP 可执行文件的定位（单一真相源）。优先级：`QUAY_META_CC_MCP` 显式覆盖 →
@@ -1076,6 +1076,7 @@ export async function collectActionRecordFailures(
   const fresh = scan !== null && cfg.scanTtlMs !== null
     && (nowMs - Date.parse(scan.scannedAt)) < cfg.scanTtlMs;
   const allowScan = opts.allowScan !== false;
+  let staleReason: string | null = null;
   if (!fresh && allowScan && cfg.scanTtlMs !== null) {
     const r = await scanActionRecords(root, cfg, { now: nowMs, binary: opts.binary });
     if (r.ok) scan = r.scan;
@@ -1084,8 +1085,12 @@ export async function collectActionRecordFailures(
         state: "not-evaluated", aggregates: null, reason: `scan-failed: ${r.reason}`,
         scannedAt: null, scanMs: null, since: null, recordsScanned: null, thresholdSessions: null,
       };
+    } else {
+      // 扫描失败但有旧载体 ⇒ 落到下面用旧载体（值仍来自**真实**扫描，只是旧），但【必须】在
+      // reason 上命名这次扫描失败——⛔ 不再静默回退：stale-served 与 fresh 读数同形（硬规则 3b），
+      // 正是本任务的缺陷。`scannedAt` 会暴露年龄，但 digest 只取 crossed 签名、对年龄盲视。
+      staleReason = `scan-failed: ${r.reason} (served stale carrier scannedAt=${scan.scannedAt})`;
     }
-    // 扫描失败但有旧载体 ⇒ 落到下面用旧载体（值仍来自**真实**扫描，只是旧；`scannedAt` 会暴露年龄）。
   }
   if (scan === null) {
     return {
@@ -1098,6 +1103,7 @@ export async function collectActionRecordFailures(
   // 两者解耦。否则「不定阈值」就等于「不看语料」，AC7 会落空。
   return aggregateActionFailures(scan.records, {
     minSessions: cfg.minSessions, scannedAt: scan.scannedAt, scanMs: scan.scanMs, since: scan.since,
+    reason: staleReason,
   });
 }
 
