@@ -33,11 +33,11 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1 `node --test scripts/task-efficiency-baseline.test.mjs` exit 0；新增反例至少覆盖：①同一语料两个窗口的 `rounds.*` 与 `e5.stopReasonCounts` 读数必须不同；②窗口外会话/派发轮既不计入窗口读数、也不被静默丢弃，而是计入独立 `unwindowed`；③缺时间戳记录同样进入 `unwindowed`，不得变成 0 或成功。
-- [ ] AC2 用两个不同窗口各跑一次 `--json`，`rounds.totalRounds`、`rounds.sessionsTotal`、`e5.stopReasonCounts`、`e5.poolEmptyRounds` 四项中至少三项必须不同；把两窗口的这四个读数与完整命令贴进报告。
-- [ ] AC3 `--help` 明确写出每个小节的窗口语义与 `unwindowed` 语义；报告页在每个受影响小节标题下打印窗口区间与 `unwindowed` 计数。
-- [ ] AC4 在 `docs/analysis/task-efficiency-baseline.md` 重跑并记录：旧（恒定）读数 → 修正后两窗口读数，逐项给差异；原报告既有数值不得被静默改写，必须标注"旧口径下的全量读数"。
-- [ ] AC5 `git diff --check` exit 0，改动只在声明 Touches 内；不修改 attempts 侧的关联/落地判定，不放宽任何 fail-closed。
+- [x] AC1 `node --test scripts/task-efficiency-baseline.test.mjs` exit 0；新增反例至少覆盖：①同一语料两个窗口的 `rounds.*` 与 `e5.stopReasonCounts` 读数必须不同；②窗口外会话/派发轮既不计入窗口读数、也不被静默丢弃，而是计入独立 `unwindowed`；③缺时间戳记录同样进入 `unwindowed`，不得变成 0 或成功。
+- [x] AC2 用两个不同窗口各跑一次 `--json`，`rounds.totalRounds`、`rounds.sessionsTotal`、`e5.stopReasonCounts`、`e5.poolEmptyRounds` 四项中至少三项必须不同；把两窗口的这四个读数与完整命令贴进报告。
+- [x] AC3 `--help` 明确写出每个小节的窗口语义与 `unwindowed` 语义；报告页在每个受影响小节标题下打印窗口区间与 `unwindowed` 计数。
+- [x] AC4 在 `docs/analysis/task-efficiency-baseline.md` 重跑并记录：旧（恒定）读数 → 修正后两窗口读数，逐项给差异；原报告既有数值不得被静默改写，必须标注"旧口径下的全量读数"。
+- [x] AC5 `git diff --check` exit 0，改动只在声明 Touches 内；不修改 attempts 侧的关联/落地判定，不放宽任何 fail-closed。
 
 ## Definition of Done
 
