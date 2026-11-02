@@ -146,12 +146,21 @@ test('tracked mode is ALWAYS <base>-dev, on every branch and at every tag', () =
 
 // ── pure: build mode (AC2 cases 2-4) ─────────────────────────────────────────────────────────
 
-test('build mode: HEAD at tag vX.Y.Z strips the suffix', () => {
-  const r = resolveVersion('9.9.9', { mode: 'build', branch: 'develop', tagsAtHead: ['v9.9.9'] });
-  assert.equal(r.evaluated, true);
-  assert.equal(r.version, '9.9.9');
-  // Falsifiable: the same ctx WITHOUT the tag is -dev. Without this pair, "the tag was read" and
-  // "build always returns bare" are indistinguishable.
+test('build mode: a matching tag at HEAD only strips the suffix on a DETACHED HEAD, never on a named branch', () => {
+  // The CI-on-a-tagged-commit case (gap-ci-red-on-version-tagged-commit): the commit is pushed to
+  // develop/master and then tagged, so CI checks it out ON the branch while the tag points at the same
+  // commit. The branch is authoritative — the tested working tree stays -dev.
+  const onBranch = resolveVersion('9.9.9', { mode: 'build', branch: 'develop', tagsAtHead: ['v9.9.9'] });
+  assert.equal(onBranch.evaluated, true);
+  assert.equal(onBranch.version, '9.9.9-dev');
+
+  // The tag only decides the build form when HEAD is DETACHED (the release artifact's checkout).
+  const detached = resolveVersion('9.9.9', { mode: 'build', branch: null, tagsAtHead: ['v9.9.9'] });
+  assert.equal(detached.evaluated, true);
+  assert.equal(detached.version, '9.9.9');
+
+  // Falsifiable: the same ctx WITHOUT the tag is -dev, so "the tag was read" and "build always
+  // returns -dev on a branch" are distinguishable.
   assert.equal(resolveVersion('9.9.9', { mode: 'build', branch: 'develop', tagsAtHead: [] }).version, '9.9.9-dev');
 });
 
@@ -250,7 +259,7 @@ test('readGitContext reads a real branch and a real tag at HEAD', () => {
   });
 });
 
-test('REAL git: tag v0.0.1 / release-2 branch ⇒ --mode build has no suffix; a plain branch keeps -dev', () => {
+test('REAL git: release/* branch and a DETACHED tag ⇒ --mode build has no suffix; a plain branch (tagged or not) keeps -dev', () => {
   withRepo('0.0.1', (dir) => {
     // (a) plain branch, no tag ⇒ -dev
     const plain = runCli(dir, '--mode', 'build');
@@ -263,12 +272,20 @@ test('REAL git: tag v0.0.1 / release-2 branch ⇒ --mode build has no suffix; a 
     assert.equal(rel.status, 0, rel.stderr);
     assert.equal(rel.stdout.trim(), '0.0.1', 'a release branch must build without the -dev suffix');
 
-    // (c) a real tag v0.0.1 at HEAD on a plain branch ⇒ bare
+    // (c) a real tag v0.0.1 at HEAD on a plain branch ⇒ STILL -dev (gap-ci-red-on-version-tagged-
+    //     commit: the commit was pushed to the branch and then tagged, so the branch is authoritative).
     git(dir, 'checkout', '-q', 'develop');
     git(dir, 'tag', 'v0.0.1');
     const tagged = runCli(dir, '--mode', 'build');
     assert.equal(tagged.status, 0, tagged.stderr);
-    assert.equal(tagged.stdout.trim(), '0.0.1', 'the tag commit must build without the -dev suffix');
+    assert.equal(tagged.stdout.trim(), '0.0.1-dev', 'a tag at HEAD on a named branch must keep the -dev suffix');
+
+    // (c2) the SAME tag, DETACHED ⇒ bare — the release artifact's checkout is what strips the suffix.
+    git(dir, 'checkout', '-q', '--detach', 'v0.0.1');
+    const detachedAtTag = runCli(dir, '--mode', 'build');
+    assert.equal(detachedAtTag.status, 0, detachedAtTag.stderr);
+    assert.equal(detachedAtTag.stdout.trim(), '0.0.1', 'a detached HEAD at the tag must build without the -dev suffix');
+    git(dir, 'checkout', '-q', 'develop');
 
     // (d) tracked mode is branch/tag-blind: the SAME tagged tree still reads -dev
     const tracked = runCli(dir, '--mode', 'tracked');

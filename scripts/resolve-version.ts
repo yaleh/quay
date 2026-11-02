@@ -23,8 +23,13 @@
  *   every branch. The tracked carriers are deliberately NOT branch-dependent: a `release/*` branch
  *   still commits `X.Y.Z-dev` (the tag commit no longer self-describes; the released version is a
  *   property of the BUILD, not of the commit).
- * `build` — the form a build/release artifact carries: `X.Y.Z` (no suffix) iff HEAD is exactly at tag
- *   `vX.Y.Z`, OR the current branch is `release/*`; otherwise `X.Y.Z-dev`.
+ * `build` — the form a build/release artifact carries: `X.Y.Z` (no suffix) iff the current branch is
+ *   `release/*`, OR HEAD is DETACHED and exactly at tag `vX.Y.Z`; otherwise `X.Y.Z-dev`.
+ *   ⚠️ A version tag at HEAD on a NAMED non-release branch does NOT make it a release build. That is
+ *   the CI-on-a-tagged-commit case (gap-ci-red-on-version-tagged-commit): the commit was pushed to
+ *   `develop`/`master` and then tagged, so CI checks it out ON the branch while the tag points at the
+ *   same commit. The tested working tree must stay `-dev`; the tag belongs to the ARTIFACT built from
+ *   a DETACHED checkout of it, not to the branch tip.
  *
  * ── THREE-VALUED, NEVER BOOLEAN (hard rule 3b) ───────────────────────────────────────────────────
  * `build` cannot always be judged: a detached HEAD carrying no version tag is neither "a release
@@ -38,7 +43,10 @@
  * `resolveVersion` THROWS (never returns) when HEAD carries version-shaped tag(s) `v<semver>` and none
  * is `v`+VERSION. A tag in the tree that disagrees with the single source is a real incoherence
  * (somebody tagged a commit whose VERSION says otherwise); resolving it to "the released version"
- * would launder the incoherence into a shipped artifact.
+ * would launder the incoherence into a shipped artifact. The mismatch guard applies on EVERY HEAD
+ * shape (branch or detached): a branch tip tagged with the wrong version is still incoherent. A
+ * MATCHING tag, by contrast, only decides the build form when HEAD is DETACHED — on a named branch
+ * the branch name is authoritative (see the build-mode note above).
  *
  *   ⚠️ Deliberately OUT of the fail-closed set: tags that are NOT version-shaped (this repo carries
  *   many, e.g. observation/evidence tags). A non-version tag at HEAD is not evidence about the
@@ -193,12 +201,17 @@ export function resolveVersion(base: string, ctx: ResolveContext = {}): ResolveR
           'resolve to a released version).',
       );
     }
-    return {
-      evaluated: true,
-      version: parsed,
-      mode,
-      reason: `HEAD is at tag ${expected}`,
-    };
+    // A MATCHING version tag at HEAD is a release build ONLY when HEAD is detached (the tag IS the
+    // build surface: release.yml checks out the tag detached, and the channel gate detaches onto it).
+    // On a named branch a tag at HEAD is the CI-on-a-tagged-commit case — the branch decides below.
+    if (branch === null) {
+      return {
+        evaluated: true,
+        version: parsed,
+        mode,
+        reason: `HEAD is detached at tag ${expected}`,
+      };
+    }
   }
 
   if (branch === null) {
@@ -225,7 +238,7 @@ export function resolveVersion(base: string, ctx: ResolveContext = {}): ResolveR
     evaluated: true,
     version: `${parsed}${DEV_SUFFIX}`,
     mode,
-    reason: `branch ${branch} is not a release branch and HEAD carries no version tag`,
+    reason: `branch ${branch} is not a release branch and HEAD is not a detached version tag`,
   };
 }
 
