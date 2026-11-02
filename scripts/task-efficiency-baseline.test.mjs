@@ -23,6 +23,7 @@ function baseSrc(overrides = {}) {
     csv: null,
     workerOutcome: [],
     fanInTraceByName: new Map(),
+    stepTrace: [],
     fanInLockEvents: [],
     verificationRound: [],
     workerRound: [],
@@ -67,7 +68,7 @@ function writeWorkerSession(dir, id, task, tsMs, assistantRecords = []) {
   writeFileSync(join(dir, `${id}.jsonl`), lines.join("\n") + "\n");
   return { sessionId: id, task, file: `${id}.jsonl` };
 }
-const thinkAssist = (n) => Array.from({ length: n }, () => ({ type: "assistant", message: { role: "assistant", content: [{ type: "text", text: "thinking" }] } }));
+const thinkAssist = (n) => Array.from({ length: n }, (_, i) => ({ type: "assistant", message: { id: `msg-${i}`, role: "assistant", content: [{ type: "text", text: "thinking" }] } }));
 
 test("--help 解析 exit 0 语义", () => {
   assert.equal(parseArgs(["--help"]).help, true);
@@ -391,8 +392,8 @@ test("classifyRounds 可下钻至 sessionId，且不可分类者单列", () => {
   const sessionId = "sess-1";
   const lines = [
     JSON.stringify({ type: "user", message: { role: "user", content: "You are a per-task worker in the quay repo (SPEC-worker-driven-inner §5 阶段 2). Task: gap-a. Repo root: /x." } }),
-    JSON.stringify({ type: "assistant", message: { role: "assistant", content: [{ type: "text", text: "thinking" }] } }),
-    JSON.stringify({ type: "assistant", message: { role: "assistant", content: [{ type: "tool_use", name: "Edit", input: { file_path: "/x/f.txt" } }] } }),
+    JSON.stringify({ type: "assistant", message: { id: "m1", role: "assistant", content: [{ type: "text", text: "thinking" }] } }),
+    JSON.stringify({ type: "assistant", message: { id: "m2", role: "assistant", content: [{ type: "tool_use", name: "Edit", input: { file_path: "/x/f.txt" } }] } }),
   ];
   writeFileSync(join(dir, `${sessionId}.jsonl`), lines.join("\n") + "\n");
   const src = baseSrc({ sessionsDir: dir, workerSessions: [{ sessionId, task: "gap-a", file: `${sessionId}.jsonl` }] });
@@ -517,4 +518,95 @@ test("缺时间戳记录进入 unwindowed，不得变成 0/成功（AC1 ③）",
 
 test("fanInLogFileName 与 worker-fan-in.ts 同形：非法字符替换为 _", () => {
   assert.equal(fanInLogFileName("gap-a", "wk-prod/1"), "fan-in-gap-a-wk-prod_1.log");
+});
+
+test("轮数去重：同一 message.id 被 apiBlockIndex 拆成多条 block 记录只计 1 轮（AC1 ①）", () => {
+  const dir = mkdtempSync(join(tmpdir(), "rounds-dedup-"));
+  const sessionId = "s-dedup";
+  const lines = [
+    JSON.stringify({ type: "user", message: { role: "user", content: "You are a per-task worker in the quay repo (SPEC-worker-driven-inner §5 阶段 2). Task: gap-a. Repo root: /x." } }),
+    JSON.stringify({ type: "assistant", message: { id: "m-same", role: "assistant", content: [{ type: "text", text: "thinking" }] } }),
+    JSON.stringify({ type: "assistant", message: { id: "m-same", role: "assistant", content: [{ type: "tool_use", name: "Read", input: { file_path: "/x/a.txt" } }] } }),
+  ];
+  writeFileSync(join(dir, `${sessionId}.jsonl`), lines.join("\n") + "\n");
+  const src = baseSrc({ sessionsDir: dir, workerSessions: [{ sessionId, task: "gap-a", file: `${sessionId}.jsonl` }] });
+  const ctx = buildAttempts(src, { windowStart: null, windowEnd: null, task: null });
+  const rounds = classifyRounds(src, { task: null }, ctx);
+  assert.equal(rounds.totalRounds, 1); // 两条同 id 的记录合并为 1 轮
+  assert.equal(rounds.roundsMissingId, 0);
+  assert.equal(rounds.catCounts.exploration, 1); // 合并后的工具并集：Read ⇒ exploration
+});
+
+test("轮数去重：缺 message.id 的记录计入 roundsMissingId，不并入去重后的轮数（AC1 ②）", () => {
+  const dir = mkdtempSync(join(tmpdir(), "rounds-missing-id-"));
+  const sessionId = "s-missing-id";
+  const lines = [
+    JSON.stringify({ type: "user", message: { role: "user", content: "You are a per-task worker in the quay repo (SPEC-worker-driven-inner §5 阶段 2). Task: gap-a. Repo root: /x." } }),
+    JSON.stringify({ type: "assistant", message: { id: "m1", role: "assistant", content: [{ type: "text", text: "thinking" }] } }),
+    JSON.stringify({ type: "assistant", message: { role: "assistant", content: [{ type: "text", text: "no id 1" }] } }),
+    JSON.stringify({ type: "assistant", message: { role: "assistant", content: [{ type: "text", text: "no id 2" }] } }),
+  ];
+  writeFileSync(join(dir, `${sessionId}.jsonl`), lines.join("\n") + "\n");
+  const src = baseSrc({ sessionsDir: dir, workerSessions: [{ sessionId, task: "gap-a", file: `${sessionId}.jsonl` }] });
+  const ctx = buildAttempts(src, { windowStart: null, windowEnd: null, task: null });
+  const rounds = classifyRounds(src, { task: null }, ctx);
+  assert.equal(rounds.totalRounds, 1); // 只有 m1 计入去重后的轮数
+  assert.equal(rounds.roundsMissingId, 2); // 两条缺 id 逐条计 1 轮，独立计数器
+});
+
+test("落地载体并集：来自 .log、来自 step-trace、来自两者只计一次（AC1 ③）", () => {
+  const t0 = new Date("2026-10-01T00:00:00Z").getTime();
+  const a1 = wo("gap-log", t0, { run_id: "r1" });
+  const a2 = wo("gap-step", t0, { run_id: "r2" });
+  const a3 = wo("gap-both", t0, { run_id: "r3" });
+  const src = baseSrc({ workerOutcome: [a1, a2, a3] });
+  withTrace(src, "gap-log", "r1", [trace("ff", t0 + 5 * MIN)]);
+  src.stepTrace = [
+    { event: "step-end", step: "ff", task: "gap-step", runId: "r2", ts: ISO(t0 + 5 * MIN), ok: true },
+    { event: "step-end", step: "ff", task: "gap-both", runId: "r3", ts: ISO(t0 + 5 * MIN), ok: true },
+  ];
+  withTrace(src, "gap-both", "r3", [trace("ff", t0 + 5 * MIN)]);
+  const ctx = buildAttempts(src, { windowStart: null, windowEnd: null, task: null });
+  attachFanInTrace(src, ctx.attempts);
+  attachSuite(src, ctx.attempts);
+  attachLanding(src, ctx.attempts);
+  const sum = summarize(src, { task: null }, ctx);
+  assert.equal(sum.landedTasks, 3); // 三个任务各落地一次，both 不翻倍
+  const bySource = Object.fromEntries(ctx.attempts.map((a) => [a.task, a.landingSource]));
+  assert.equal(bySource["gap-log"], "log");
+  assert.equal(bySource["gap-step"], "step-trace");
+  assert.equal(bySource["gap-both"], "both");
+});
+
+test("落地证据：两处都没有 ⇒ unknown，不并入成功分母（AC1 ④）", () => {
+  const t0 = new Date("2026-10-01T00:00:00Z").getTime();
+  const a = wo("gap-none", t0, { run_id: "r-none" });
+  const src = baseSrc({ workerOutcome: [a] }); // 无 .log、无 stepTrace
+  const ctx = buildAttempts(src, { windowStart: null, windowEnd: null, task: null });
+  attachFanInTrace(src, ctx.attempts);
+  attachSuite(src, ctx.attempts);
+  attachLanding(src, ctx.attempts);
+  assert.equal(ctx.attempts[0].landed, false);
+  assert.equal(ctx.attempts[0].landingStatus, "unknown");
+  assert.equal(ctx.attempts[0].landingSource, "unknown");
+  const sum = summarize(src, { task: null }, ctx);
+  assert.equal(sum.landedTasks, 0); // unknown 不并入成功分母
+  assert.equal(sum.unknownTasks, 1);
+});
+
+test("落地去重：同一 (task, runId) 重复 ff ok 不重复计数（AC1 ⑤）", () => {
+  const t0 = new Date("2026-10-01T00:00:00Z").getTime();
+  const a = wo("gap-dup", t0, { run_id: "r-dup" });
+  const src = baseSrc({ workerOutcome: [a] });
+  src.stepTrace = [
+    { event: "step-end", step: "ff", task: "gap-dup", runId: "r-dup", ts: ISO(t0 + 5 * MIN), ok: true },
+    { event: "step-end", step: "ff", task: "gap-dup", runId: "r-dup", ts: ISO(t0 + 6 * MIN), ok: true },
+  ];
+  const ctx = buildAttempts(src, { windowStart: null, windowEnd: null, task: null });
+  attachFanInTrace(src, ctx.attempts);
+  attachSuite(src, ctx.attempts);
+  attachLanding(src, ctx.attempts);
+  assert.equal(ctx.attempts[0].ffOkStepTrace, true); // 存在性判定，不是计数
+  const sum = summarize(src, { task: null }, ctx);
+  assert.equal(sum.landedTasks, 1); // 不因重复 ff ok 翻倍
 });
