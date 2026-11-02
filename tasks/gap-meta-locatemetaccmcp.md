@@ -2,7 +2,7 @@
 id: gap-meta-locatemetaccmcp
 title: locateMetaCcMcp misses meta-cc's moved install path — action-record scan
   stale for 52 days
-status: ready
+status: done
 labels:
   - meta-driver
   - driver-candidate
