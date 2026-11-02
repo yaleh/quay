@@ -1191,6 +1191,37 @@ test("gap-worker-prompt-note-family-slimming — AC2 (negative control): the fou
   }
 });
 
+// gap-worker-verify-condenser AC4：两个 prompt 构造点都指向 worker 验证入口（--verify-run / --verify-rerun），
+// 且仍逐字含「退出前跑完整 scoped gate」（preMergeNote），四根既有不变量（worktree 绝对路径 / task_write /
+// anti-drift argv / exit 指令）仍在。⛔ 按位置判定：命中必须在实现步骤内（worker-driver.ts 与 --verify-run 相邻）。
+test("gap-worker-verify-condenser AC4 — create 与 continue 两个构造点都指向 --verify-run / --verify-rerun 入口，且预退出完整 scoped 门仍在", (t) => {
+  const root = makeRoot("verify-prompt");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  // 本仓库形态：声明了 scoped_command ⇒ preMergeNote 走「跑完整 scoped 门」分支（逐字含 run the SAME scoped gate）。
+  fs.writeFileSync(path.join(root, ".quay", "config.yml"),
+    "loop:\n  suite_runner: quay-buckets\n" +
+    '  scoped_command: ["bash", "{worktree}/scripts/test.sh", "--for-task", "{task}", "--allow-thin"]\n' +
+    '  rerun_command: ["bash", "{worktree}/scripts/test.sh", "{files}"]\n', "utf8");
+  const cases = [
+    ["create", buildWorkerPrompt("gap-x", root)],
+    ["continue", buildContinueWorkerPrompt("gap-x", root, {
+      worktreePath: "/wt", branchCommits: 3, branchHeadSubject: "x", acChecked: 0, acTotal: 3, failureReason: "r", attempts: [],
+    })],
+  ];
+  for (const [name, prompt] of cases) {
+    assert.match(prompt, /worker-driver\.(?:ts|js) --verify-run --task gap-x --worktree/, `${name}: points at the --verify-run entry (worker-driver + flag adjacent)`);
+    assert.match(prompt, /--verify-rerun --task gap-x --worktree/, `${name}: points at the --verify-rerun entry`);
+    // 退出前完整 scoped 门仍是硬路径（preMergeNote 逐字保留）。
+    assert.match(prompt, /before exiting, do the pre-merge \+ scoped-gate step/, `${name}: before-exit full scoped gate step retained`);
+    assert.match(prompt, /run the SAME scoped gate the driver's fan-in runs/, `${name}: full scoped gate command retained`);
+    // 四根既有不变量仍在。
+    assert.match(prompt, /file_path MUST be .* absolute path/, `${name}: worktree absolute-path guard`);
+    assert.match(prompt, /task_write/, `${name}: task_write (ABI)`);
+    assert.match(prompt, /anti-drift-touches-check\.ts --task gap-x --worktree/, `${name}: anti-drift argv`);
+    assert.ok(prompt.includes("exit — the worker-driver takes over"), `${name}: driver take-over exit`);
+  }
+});
+
 // ── gap-continue-prompt-delta-relatedness-note — 续做 prompt 两条结构性信号 ─────────────────────────
 
 // 写一个带 ## Touches 的任务文件（非 git makeRoot，delta = Touches）。

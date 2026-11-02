@@ -408,8 +408,23 @@ function instrumentSummary(p: InstrumentProbe): string {
  *  ⛔ 经 export 暴露给 worker-driver.ts 的 preMergeNote（它的唯一区域外消费者）——但【不】在
  *  worker-driver.ts 的 re-export 面上（消费方是 prompt 构建，不是旧 import 面的测试），故 AC2 的导出面
  *  逐字不变仍成立。 */
+/** worker-driver 自入口的可执行前缀（"node" + 本 kernel 安装位置的 worker-driver 解析）——单一真相源：
+ *  worker 侧 `--verify-run` / `--verify-rerun` 的 prompt 子句（gap-worker-verify-condenser）与下面的
+ *  scoped-gate-cache 签名共用同一个入口，⛔ 两处各写一份 `node …worker-driver.ts` 会漂移（一条改成
+ *  `--no-warnings` 或改成 dist/*.js，另一条不跟进 ⇒ prompt 里出现两个不一致的入口）。 */
+export function workerDriverSelfInvocation(): string {
+  return workerDriverSelfArgv().join(" ");
+}
+
+/** worker 侧 scoped-gate 缓存写入 CLI 签名（gap-worker-premerge-scoped-gate-cache 阶段 a）：worker 在
+ *  退出前跑绿 scoped 门后，用这条命令机械写入 (task, developSha, pass) 缓存（⛔ 不靠 agent 手写 JSON）。
+ *  developSha 用 `git -C <worktree> rev-parse develop`（worker 已 merge develop ⇒ develop 即其验证过的 tip）。
+ *  入口经 workerDriverSelfArgv 锚在本 kernel 安装位置（⛔ 非 root/plugin/scripts/worker-driver.ts）。
+ *  ⛔ 经 export 暴露给 worker-driver.ts 的 preMergeNote（它的唯一区域外消费者）——但【不】在
+ *  worker-driver.ts 的 re-export 面上（消费方是 prompt 构建，不是旧 import 面的测试），故 AC2 的导出面
+ *  逐字不变仍成立。 */
 export function scopedGateCacheWriteSignature(task: string, root: string, worktree: string): string {
-  return `${workerDriverSelfArgv().join(" ")} --write-scoped-gate-cache --task ${task} --develop-sha "$(git -C ${worktree} rev-parse develop)" --root ${root}`;
+  return `${workerDriverSelfInvocation()} --write-scoped-gate-cache --task ${task} --develop-sha "$(git -C ${worktree} rev-parse develop)" --root ${root}`;
 }
 
 // ── 机械 fan-in（gap-fan-in-driver-mechanical-orchestration / SPEC 2026-08-27）────────────────────

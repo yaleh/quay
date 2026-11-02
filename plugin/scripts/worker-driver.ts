@@ -459,6 +459,20 @@ import {
   // gap-fanin-suite-gate-no-baseline-equivalent-exception：既存红死锁的电路断路器（AC4）。判定住在
   // worker-fan-in.ts（耐久载体的写者与签名的定义处），本文件只消费它的读数 ⇒ 单一真相源。
   baselineRedDeadlockReading,
+  // gap-worker-verify-condenser：worker 会话内验证入口（--verify-run / --verify-rerun）复用 fan-in 的
+  // 失败文件解析 + 签名比较 + 命令解析，⛔ 不复制第二份实现（值环方向：worker-fan-in ⛔ import 本文件）。
+  readFailedTestFiles,
+  parseFailureSignatures,
+  compareFailureSignatures,
+  resolveRerunCommand,
+  mechSh,
+  combinedOutput,
+  scopedGateCommandFor,
+  workerDriverSelfInvocation,
+  type FailureSignature,
+  type FailureSignatureParse,
+  type FailedTestFilesReading,
+  type BaselineEquivalenceVerdict,
   // 当前 develop 红签名集（`gap-develop-red-set-writer`）：读取 / 纯维护 / **唯一的落盘函数**——
   // 三者都 import 到本模块的本地绑定里（⛔ 下面那条 `export { … } from` 只是再导出，不建立绑定），
   // `applyDevelopRedObservation` 与 `--mechanical-fan-in` 入口用的就是这个绑定。
@@ -508,6 +522,13 @@ export {
   type CapabilityDecl,
   type LoopFanInContract,
   type ScopedGateResolution,
+  // gap-worker-verify-condenser：worker 会话内验证入口消费/复用的 fan-in 解析面（测试经 worker-driver
+  // 的 import 面拿同一实现，⛔ 不直接 import worker-fan-in 的另一个模块实例）。
+  readFailedTestFiles,
+  type FailedTestFilesReading,
+  type FailureSignatureParse,
+  resolveRerunCommand,
+  workerDriverSelfInvocation,
   type MechanicalFanInOptions,
   type MechanicalFanInStepVerdict,
   type MechanicalFanInResult,
@@ -2689,6 +2710,15 @@ function continueDarkAxisNote(state: ContinueWorkerState): string {
   return `The previous round was refused BY THE dark-axis STEP (verbatim: ${reason}) — add the missing L_D/L_G reading or 该轴仍暗,理由:... declaration to the task body via \`task_write\` before exiting.`;
 }
 
+/** worker 会话内验证入口（gap-worker-verify-condenser）的 prompt 子句：把「自己跑 scoped 门并读原始日志」
+ *  换成「调用 --verify-run / --verify-rerun」。入口与 scoped-gate-cache 写入同一 `node …worker-driver.ts`
+ *  （workerDriverSelfInvocation 单一真相源）。⛔ 极简：预退出跑完整 scoped 门仍是 preMergeNote 的硬路径
+ *  （本子句不替代它）；长度受 gap-worker-prompt-note-family-slimming 的合并字符上限约束。 */
+function verifyLoopNote(task: string, root: string, worktree: string): string {
+  const base = workerDriverSelfInvocation();
+  return `ITERATIVE VERIFY: WT=${worktree}; \`${base} --verify-run --task ${task} --worktree "$WT" --root ${root}\`; \`--verify-rerun --task ${task} --worktree "$WT"\` (must-fix only)`;
+}
+
 /** 创建 prompt（无保留 worktree 时的 implement-only prompt，单一真相源）。续做 prompt 见
  *  buildContinueWorkerPrompt；两者由 workerPromptForTask 按「保留 worktree 在不在」择一。
  *  gap-fan-in-driver-mechanical-orchestration：worker 只实现、实现后退出（⛔ 不自己跑 suite / 不调
@@ -2711,6 +2741,7 @@ export function buildWorkerPrompt(task: string, root: string): string {
     `(node_modules symlink + config.yml via worktree-include — mechanism, not agent-remembering);`,
     `(2) implement the task per its Proposal/Plan/AC/DoD, committing your implementation on the task branch; ${acCheckNote()}`,
     `${darkAxisRecordNote()}`,
+    `${verifyLoopNote(task, root, "<the worktree path you created in step 1>")}`,
     `(2b) ${preMergeNote(task, root, "<the worktree path you created in step 1>")}`,
     `(2c) ${antiDriftPreExitNote(task, root, "<the worktree path you created in step 1>")}`,
     `${experimentResumeClause(root, task, null) ?? ""}`,
@@ -4428,6 +4459,7 @@ export function buildContinueWorkerPrompt(task: string, root: string, state: Con
     `Re-provision the existing worktree (idempotent): \`${dispatchSetupSignature(root, wt, resolveTaskMergeTarget(task, root))}\`.`,
     `Run the remaining chain in the existing worktree: (1) continue implementing per the task's`,
     `Proposal/Plan/AC/DoD (⛔ do not redo the ${commits} commits already on the branch); ${acCheckNote()}`,
+    `${verifyLoopNote(task, root, wt)}`,
     `(1b) ${preMergeNote(task, root, wt)}`,
     `(1c) ${antiDriftPreExitNote(task, root, wt)}`,
     `${experimentResumeClause(root, task, state.worktreePath) ?? ""}`,
@@ -6808,6 +6840,302 @@ export async function runResidentLoop(opts: ResidentOptions): Promise<number> {
   return bad ? bad.exitCode : 0;
 }
 
+// ── worker 会话内验证入口（gap-worker-verify-condenser）────────────────────────────────────────────
+// 病根：worker 每轮验证都要**自己跑 scoped 门并读原始日志找失败文件**，且对既存红（baseline-red）与本轮
+// 回归不加区分。fan-in 侧已有全部机械件（readFailedTestFiles / parseFailureSignatures /
+// compareFailureSignatures / resolveRerunCommand / scopedGateCommandFor），worker 侧一个没用上。
+// 本段把它们暴露成 `--verify-run` / `--verify-rerun` 两个入口：第一次跑逐字相同的 scoped 门并把日志压成
+// 紧凑失败表 + baseline A/B 分类（baseline-red / must-fix）；后续只重跑 must-fix 文件。⛔ 不砍验证面：
+// 退出前完整 scoped 门仍是硬路径（preMergeNote 不变）；读不懂 ⇒ not-evaluated 且全部失败保守记 must-fix。
+
+/** 一条紧凑失败行（file = repo-relative 失败测试文件；test = spec reporter 才有的测试名；cause = 断言/错误码文本）。 */
+export interface VerifyFailureRow {
+  file: string;
+  test: string | null;
+  cause: string;
+}
+
+/** `--verify-run` 红轮的分类结果（三态可分的 per-file 判词 + 保守回退）。 */
+export interface VerifyFailureClassification {
+  /** 失败文件解析（三态，来自 readFailedTestFiles）。 */
+  failed: FailedTestFilesReading;
+  /** 基线是否可用（false ⇒ baselineSignatures 为 null，全部失败保守记 must-fix）。 */
+  baselineAvailable: boolean;
+  /** 任务侧失败签名解析（三态）。 */
+  taskSignatures: FailureSignatureParse;
+  /** 基线侧失败签名解析（三态）；null = 基线不可用。 */
+  baselineSignatures: FailureSignatureParse | null;
+  /** must-fix 文件（去重排序）：本轮引入 / 断言文本变化，不在基线红集合里。 */
+  mustFix: string[];
+  /** baseline-red 文件（去重排序）：逐字也在 develop 基线红集合里。 */
+  baselineRed: string[];
+  /** 聚合分类：任一 must-fix ⇒ must-fix；全 baseline-red ⇒ baseline-red；读不懂 ⇒ not-evaluated。 */
+  classification: "baseline-red" | "must-fix" | "not-evaluated";
+  /** classification === "not-evaluated" 时的成因 token（非空）；其余为 null。 */
+  reason: string | null;
+}
+
+/** 红轮失败文件 → baseline-red / must-fix 分类（纯函数；⛔ 无 I/O，夹具直接测）。baselineSignatures = null
+ *  表示基线树不可用 ⇒ 保守地把全部失败当 must-fix 且 classification=not-evaluated（⛔ 不静默判绿）。
+ *  baselineSignatures = {evaluated:true, signatures:[]} 表示基线对这批文件全绿 ⇒ 任务侧失败全是 must-fix。 */
+export function classifyVerifyFailures(
+  failed: FailedTestFilesReading,
+  taskSignatures: FailureSignatureParse,
+  baselineSignatures: FailureSignatureParse | null,
+): VerifyFailureClassification {
+  if (!failed.evaluated) {
+    return {
+      failed, baselineAvailable: false, taskSignatures, baselineSignatures,
+      mustFix: [], baselineRed: [], classification: "not-evaluated", reason: failed.reason,
+    };
+  }
+  if (baselineSignatures === null) {
+    return {
+      failed, baselineAvailable: false, taskSignatures, baselineSignatures,
+      mustFix: [...failed.files].sort(), baselineRed: [],
+      classification: "not-evaluated", reason: "baseline-tree-unavailable",
+    };
+  }
+  if (!taskSignatures.evaluated || !baselineSignatures.evaluated) {
+    return {
+      failed, baselineAvailable: true, taskSignatures, baselineSignatures,
+      mustFix: [...failed.files].sort(), baselineRed: [], classification: "not-evaluated",
+      reason: !taskSignatures.evaluated ? `task-signatures: ${taskSignatures.reason}` : `baseline-signatures: ${baselineSignatures.reason}`,
+    };
+  }
+  const verdict = compareFailureSignatures(taskSignatures.signatures, baselineSignatures.signatures);
+  if (verdict.kind === "not-evaluated") {
+    return {
+      failed, baselineAvailable: true, taskSignatures, baselineSignatures,
+      mustFix: [...failed.files].sort(), baselineRed: [], classification: "not-evaluated", reason: verdict.reason,
+    };
+  }
+  if (verdict.kind === "exempt") {
+    return {
+      failed, baselineAvailable: true, taskSignatures, baselineSignatures,
+      mustFix: [], baselineRed: [...failed.files].sort(), classification: "baseline-red", reason: null,
+    };
+  }
+  const mustFixSet = new Set<string>();
+  for (const a of verdict.added) mustFixSet.add(a.file);
+  for (const c of verdict.changed) mustFixSet.add(c.file);
+  const mustFix = [...mustFixSet].sort();
+  const baselineRed = failed.files.filter((f) => !mustFixSet.has(f)).sort();
+  return {
+    failed, baselineAvailable: true, taskSignatures, baselineSignatures,
+    mustFix, baselineRed, classification: "must-fix", reason: null,
+  };
+}
+
+/** 签名集合 → 紧凑失败表（file / test / cause）。 */
+function failureRowsFromSigs(sigs: FailureSignature[]): VerifyFailureRow[] {
+  return sigs.map((s) => ({ file: s.file, test: s.name ?? null, cause: s.text }));
+}
+
+/** `--verify-run` 的读数（落进 stdout 单行 JSON）。 */
+export interface VerifyRunReading {
+  task: string;
+  worktree: string;
+  /** 实际执行的 scoped 门 argv（= scopedGateCommandFor(task, worktree)，AC2）；null = 命令无法解析。 */
+  argv: string[] | null;
+  /** argv 为 null 时的成因（skip / fail）。 */
+  argvReason: string | null;
+  exitCode: number | null;
+  wallMs: number;
+  classification: "green" | VerifyFailureClassification["classification"];
+  mustFix: string[];
+  baselineRed: string[];
+  baselineAvailable: boolean;
+  failures: VerifyFailureRow[];
+  reason: string | null;
+  /** 写下的 verify-state 文件（供 --verify-rerun 读）；未写 ⇒ null。 */
+  stateFile: string | null;
+}
+
+/** verify-run 状态文件的路径（worktree 内 gitignored .quay/，⛔ 不进分支）。 */
+function verifyStateFile(worktree: string, task: string): string {
+  return path.join(worktree, ".quay", `verify-state-${task}.json`);
+}
+
+/** 基线重跑超时（与本仓库 rerun_command 的实测量级对齐：1 文件 ~32s + 静态检查 ~25s）。 */
+export const VERIFY_BASELINE_RERUN_TIMEOUT_MS = 300_000;
+
+/** 在 develop 基线树上重跑同一批失败文件（机械 A/B 的 worker 侧复用）。⛔ 任何一步读不懂 ⇒
+ *  signatures=null + reason（保守记 not-evaluated，绝不伪造「基线也红/基线绿」）。exit 0 且无失败行 ⇒
+ *  {evaluated:true, signatures:[]}（基线对这批文件全绿，与「读不懂」可区分）。 */
+async function runVerifyBaseline(
+  task: string,
+  worktree: string,
+  root: string,
+  files: string[],
+): Promise<{ signatures: FailureSignatureParse | null; reason: string | null; baselineRoot: string | null }> {
+  const baseDir = path.join(path.dirname(worktree), `.verify-baseline-${task}-${process.pid}-${Date.now()}`);
+  let cleaned = false;
+  const cleanup = async (): Promise<void> => {
+    if (cleaned) return;
+    cleaned = true;
+    try { fs.rmSync(baseDir, { recursive: true, force: true }); } catch { /* best-effort */ }
+    await mechSh(["git", "-C", worktree, "worktree", "prune"], 60_000).catch(() => undefined);
+  };
+  try {
+    const add = await mechSh(["git", "-C", worktree, "worktree", "add", "--detach", baseDir, "develop"], 120_000);
+    if (!add.ok) {
+      return { signatures: null, reason: `baseline-worktree-add-failed: ${(add.stderr || add.stdout || "").trim() || `exit ${add.status}`}`, baselineRoot: null };
+    }
+    // 基线树要能跑 rerun_command（本仓库 = bash <base>/scripts/test.sh）⇒ node_modules + config.yml。
+    const provisionScript = resolveKernelShellSibling("dispatch-worktree-setup.sh");
+    if (provisionScript !== null) {
+      await mechSh(["bash", provisionScript, baseDir, "--root", root], 300_000);
+    }
+    const resolved = resolveRerunCommand(worktree, baseDir, files);
+    if (resolved.kind !== "run") return { signatures: null, reason: resolved.reason, baselineRoot: baseDir };
+    const rr = await mechSh(resolved.argv, VERIFY_BASELINE_RERUN_TIMEOUT_MS);
+    const text = combinedOutput(rr.stdout, rr.stderr);
+    const parsed = parseFailureSignatures(text, baseDir);
+    // 基线重跑不是红 suite：exit 0 + 一条失败行都没有 ⇒ 评估过、零红（⛔ 不与「读不懂」同形）。
+    const signatures: FailureSignatureParse = parsed.evaluated
+      ? parsed
+      : (rr.status === 0 && parsed.reason === "no-failure-signature-lines"
+          ? { evaluated: true, signatures: [] }
+          : parsed);
+    return { signatures, reason: null, baselineRoot: baseDir };
+  } catch (e) {
+    return { signatures: null, reason: `baseline-A-B-error: ${(e as Error)?.message ?? String(e)}`, baselineRoot: null };
+  } finally {
+    await cleanup();
+  }
+}
+
+/** `--verify-run` 的执行体（scoped 门 → 红则 baseline A/B 分类 → 写 verify-state）。 */
+export async function runVerify(opts: {
+  task: string;
+  worktree: string;
+  root: string;
+  timeoutMs?: number;
+  runBaseline?: boolean;
+}): Promise<VerifyRunReading> {
+  const { task, worktree, root } = opts;
+  const timeoutMs = opts.timeoutMs ?? 120_000;
+  const t0 = Date.now();
+  const argv = scopedGateCommandFor(task, worktree);
+  if (argv === null) {
+    const r = resolveScopedGateCommand(task, worktree, worktree);
+    return {
+      task, worktree, argv: null, argvReason: r.kind === "fail" ? r.reason : r.reason, exitCode: null,
+      wallMs: 0, classification: "not-evaluated", mustFix: [], baselineRed: [], baselineAvailable: false,
+      failures: [], reason: r.kind === "fail" ? r.reason : r.reason, stateFile: null,
+    };
+  }
+  const run = await mechSh(argv, timeoutMs);
+  const wallMs = Date.now() - t0;
+  const output = combinedOutput(run.stdout, run.stderr);
+  if (run.status === 0) {
+    return {
+      task, worktree, argv, argvReason: null, exitCode: 0, wallMs, classification: "green",
+      mustFix: [], baselineRed: [], baselineAvailable: true, failures: [], reason: null, stateFile: null,
+    };
+  }
+  const failed = readFailedTestFiles(output, worktree);
+  const taskSignatures = parseFailureSignatures(output, worktree);
+  const baseline = opts.runBaseline === false
+    ? { signatures: null, reason: "baseline-disabled", baselineRoot: null }
+    : (failed.evaluated
+        ? await runVerifyBaseline(task, worktree, root, failed.files)
+        : { signatures: null, reason: failed.reason, baselineRoot: null });
+  const classification = classifyVerifyFailures(failed, taskSignatures, baseline.signatures);
+  const failures = classification.taskSignatures.evaluated
+    ? failureRowsFromSigs(classification.taskSignatures.signatures)
+    : failed.evaluated ? failed.files.map((f) => ({ file: f, test: null, cause: "" })) : [];
+  let stateFile: string | null = null;
+  try {
+    const file = verifyStateFile(worktree, task);
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, `${JSON.stringify({
+      task, mustFix: classification.mustFix, baselineRed: classification.baselineRed,
+      classification: classification.classification, writtenAt: new Date().toISOString(),
+    })}\n`, "utf8");
+    stateFile = file;
+  } catch { /* best-effort：写失败不改变读数 */ }
+  return {
+    task, worktree, argv, argvReason: null, exitCode: run.status, wallMs,
+    classification: classification.classification, mustFix: classification.mustFix,
+    baselineRed: classification.baselineRed, baselineAvailable: classification.baselineAvailable,
+    failures, reason: classification.reason, stateFile,
+  };
+}
+
+/** `--verify-rerun` 的读数。 */
+export interface VerifyRerunReading {
+  task: string;
+  worktree: string;
+  state: "rerun-done" | "nothing-to-rerun" | "not-evaluated";
+  argv: string[] | null;
+  files: string[];
+  exitCode: number | null;
+  wallMs: number;
+  reason: string | null;
+  fellBackToScopedGate: boolean;
+  output: string;
+}
+
+/** `--verify-rerun` 无法按文件重跑时的保守回退：跑完整 scoped 门（⛔ 不跳过验证）。 */
+async function verifyScopedFallback(
+  task: string,
+  worktree: string,
+  reason: string,
+): Promise<VerifyRerunReading> {
+  const t0 = Date.now();
+  const argv = scopedGateCommandFor(task, worktree);
+  if (argv === null) {
+    return { task, worktree, state: "not-evaluated", argv: null, files: [], exitCode: null, wallMs: 0, reason, fellBackToScopedGate: true, output: "" };
+  }
+  const run = await mechSh(argv, 120_000);
+  return {
+    task, worktree, state: "not-evaluated", argv, files: [], exitCode: run.status,
+    wallMs: Date.now() - t0, reason, fellBackToScopedGate: true, output: combinedOutput(run.stdout, run.stderr),
+  };
+}
+
+/** `--verify-rerun` 的执行体：只重跑 verify-run 落下的 must-fix 文件（`{files}` 整元素 splice）。 */
+export async function runVerifyRerun(opts: {
+  task: string;
+  worktree: string;
+  root?: string;
+  timeoutMs?: number;
+}): Promise<VerifyRerunReading> {
+  const { task, worktree } = opts;
+  const timeoutMs = opts.timeoutMs ?? VERIFY_BASELINE_RERUN_TIMEOUT_MS;
+  const t0 = Date.now();
+  let mustFix: string[] | null = null;
+  let stateReason: string | null = null;
+  try {
+    const raw = JSON.parse(fs.readFileSync(verifyStateFile(worktree, task), "utf8")) as { task?: unknown; mustFix?: unknown };
+    if (raw.task === task && Array.isArray(raw.mustFix) && raw.mustFix.every((f) => typeof f === "string")) {
+      mustFix = raw.mustFix;
+    } else {
+      stateReason = "verify-state-unreadable";
+    }
+  } catch {
+    stateReason = "verify-state-missing";
+  }
+  if (mustFix === null) {
+    return await verifyScopedFallback(task, worktree, stateReason ?? "verify-state-unreadable");
+  }
+  if (mustFix.length === 0) {
+    return { task, worktree, state: "nothing-to-rerun", argv: null, files: [], exitCode: 0, wallMs: Date.now() - t0, reason: null, fellBackToScopedGate: false, output: "" };
+  }
+  const resolved = resolveRerunCommand(worktree, worktree, mustFix);
+  if (resolved.kind !== "run") {
+    return await verifyScopedFallback(task, worktree, resolved.reason);
+  }
+  const run = await mechSh(resolved.argv, timeoutMs);
+  return {
+    task, worktree, state: "rerun-done", argv: resolved.argv, files: mustFix,
+    exitCode: run.status, wallMs: Date.now() - t0, reason: null, fellBackToScopedGate: false,
+    output: combinedOutput(run.stdout, run.stderr),
+  };
+}
+
 // ── CLI 主流程 ─────────────────────────────────────────────────────────────────────────────────────
 
 export async function main(argv: string[]): Promise<number> {
@@ -6846,6 +7174,8 @@ export async function main(argv: string[]): Promise<number> {
   let semanticFallbackPhase: string | undefined;
   let semanticFallbackOutcome: string | undefined;
   let semanticFallbackReportFlag = false;
+  let verifyRunFlag = false;
+  let verifyRerunFlag = false;
 
   for (let i = 0; i < args.length; i++) {
     const a = args[i];
@@ -6883,6 +7213,8 @@ export async function main(argv: string[]): Promise<number> {
     else if (a === "--phase") semanticFallbackPhase = args[++i];
     else if (a === "--fallback-outcome") semanticFallbackOutcome = args[++i];
     else if (a === "--semantic-fallback-report") semanticFallbackReportFlag = true;
+    else if (a === "--verify-run") verifyRunFlag = true;
+    else if (a === "--verify-rerun") verifyRerunFlag = true;
     else if (a === "--help" || a === "-h") {
       console.log(
         "worker-driver — SPEC §5 阶段 2+3+4：spawn 多 worker（并发 N + 超时 SIGTERM + ⛔ 不 stash 主检出 + MCP 控制面 + 常驻选择环）\n" +
@@ -6899,6 +7231,8 @@ export async function main(argv: string[]): Promise<number> {
           "  [--backoff-max-ms <ms>]  退避等待上限 ms（指数增长封顶，缺省 300000）\n" +
           "  --mechanical-fan-in --task <id> --worktree <path>  每任务新进程入口：加载当前代码跑机械 fan-in，stdout 单行 JSON result（exit 0=landed / 2=red）\n" +
           "  --write-scoped-gate-cache --task <id> --develop-sha <sha>  写 scoped-gate 缓存（worker 退出前跑绿后调用；stdout 单行 JSON）\n" +
+          "  --verify-run --task <id> --worktree <path> [--root <repo>]  跑逐字相同的 scoped 门并把日志压成紧凑失败表 + baseline A/B 分类（baseline-red / must-fix）；stdout 单行 JSON（exit 0=已读数 / 2=缺参）\n" +
+          "  --verify-rerun --task <id> --worktree <path>  只重跑 verify-run 落下的 must-fix 文件（`{files}` 整元素 splice）；must-fix 为空 ⇒ nothing-to-rerun；rerun_command 未声明 ⇒ not-evaluated 并退回完整 scoped 门；stdout 单行 JSON\n" +
           "  --append-complete-gate-event --task <id> [--actor <a>]  写 `complete` pass GateEvent 到 <root>/.quay/gate-events.jsonl（语义 fan-in workflow 的 flip 落地补写；exit 0=已写 / 2=缺参）\n" +
           "  --fan-in-flake-report [--root <repo>] [--json]  只读：按失败测试文件聚合 .quay/worker-outcome.jsonl 里的 suite 红轮次（redRounds / tasks / 首红→末红 / rerunGreenRounds），stdout 单行 JSON\n" +
           "  --record-semantic-fallback --task <id> --phase <start|end> [--fallback-outcome <landed|red|aborted>] [--run-id <id>] [--reason <s>]  写一条语义兜底尝试到 <root>/.quay/fan-in-semantic-fallback.jsonl（--phase end 必须带 --fallback-outcome；exit 0=已写 / 2=缺参或词表外取值）\n" +
@@ -7017,6 +7351,34 @@ export async function main(argv: string[]): Promise<number> {
     const cacheFile = path.join(rootDir, ".quay", "scoped-gate-cache.json");
     writeScopedGateCache(cacheFile, scopedGateKey(task, scopedGateCacheDevelopSha));
     process.stdout.write(`${JSON.stringify({ event: "scoped-gate-cache-written", task, developSha: scopedGateCacheDevelopSha, cacheFile })}\n`);
+    return 0;
+  }
+
+  // --verify-run：worker 会话内验证入口（gap-worker-verify-condenser）。跑逐字相同的 scoped 门（argv =
+  // scopedGateCommandFor）→ 绿则 green；红则解析失败文件、起 develop 基线树做 A/B 分类 → 写 verify-state
+  // 供 --verify-rerun 读。stdout 单行 JSON；exit 0 = 已读数 / 2 = 缺参（fail-closed）。
+  if (verifyRunFlag) {
+    const task = tasks[0];
+    if (!task || !mechWorktree) {
+      console.error("worker-driver: --verify-run requires --task <id> and --worktree <path>");
+      return 2;
+    }
+    const reading = await runVerify({ task, worktree: mechWorktree, root: rootDir });
+    process.stdout.write(`${JSON.stringify({ event: "verify-run", ...reading })}\n`);
+    return 0;
+  }
+
+  // --verify-rerun：只重跑 verify-run 落下的 must-fix 文件（`{files}` 整元素 splice）。must-fix 为空 ⇒
+  // nothing-to-rerun；rerun_command 未声明 / 状态缺失 ⇒ not-evaluated 并退回完整 scoped 门（⛔ 不跳过验证）。
+  // stdout 单行 JSON；exit 0 = 已读数 / 2 = 缺参（fail-closed）。
+  if (verifyRerunFlag) {
+    const task = tasks[0];
+    if (!task || !mechWorktree) {
+      console.error("worker-driver: --verify-rerun requires --task <id> and --worktree <path>");
+      return 2;
+    }
+    const reading = await runVerifyRerun({ task, worktree: mechWorktree, root: rootDir });
+    process.stdout.write(`${JSON.stringify({ event: "verify-rerun", ...reading })}\n`);
     return 0;
   }
 
