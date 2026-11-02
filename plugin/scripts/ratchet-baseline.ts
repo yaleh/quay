@@ -117,8 +117,13 @@ export function baselinePath(root: string, rel: string): string {
  *  null ⇒ bootstrap, worktree null ⇒ no raise, otherwise compare every axis), diverging only in
  *  where the axis list came from (`Object.keys(worktree)` vs each module's `BASELINE_AXES`). The
  *  mechanism is the judgment; the AXIS LIST is what each ratchet genuinely owns, so it stays at
- *  the call site and is passed in — the call sites' exported wrappers remain so each ratchet's
- *  public surface (and its test) keeps its own axis binding (硬规则 5b). */
+ *  the call site and is passed in. The follow-up finding
+ *  (tasks/gap-routine-semantic-dedup-scan-check-baseline-shrink-only-2x, the `semantic-dedup-scan`
+ *  routine's `check-baseline-shrink-only-2x` finding, kind `identity-replication`, verdict
+ *  `real-duplication`) then flagged the REMAINING byte-identical two-line wrappers that the first
+ *  pass left behind in import-graph-check and sh-census-check, and removed them too: those callers
+ *  now call THIS function directly with their own `BASELINE_AXES` (硬规则 5b — the fix is the
+ *  shared source, not a re-bind wrapper). */
 export function checkBaselineShrinkOnly<A extends string>(
   worktree: Record<A, number> | null,
   head: Record<A, number> | null,

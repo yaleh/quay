@@ -24,10 +24,10 @@ import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import {
+  BASELINE_AXES,
   BASELINE_FILE_REL,
   EXCEPTIONS_FILE_REL,
   buildFixture,
-  checkBaselineShrinkOnly,
   countCodeLines,
   decide,
   extractEmbeddedInterpreters,
@@ -37,6 +37,7 @@ import {
   readCensus,
   scanCopies,
 } from "../scripts/sh-census-check.ts";
+import { checkBaselineShrinkOnly } from "../scripts/ratchet-baseline.ts";
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 
@@ -173,10 +174,10 @@ test("byte-identical non-symlink copies are duplicates; a symlink is NOT (it is 
 
 test("checkBaselineShrinkOnly: equal and lower pass, a raise is caught, absent HEAD is labelled bootstrap", () => {
   const head = { embeddedInterpreterLines: 8666, duplicateCopies: 38 };
-  assert.deepEqual(checkBaselineShrinkOnly({ ...head }, head), { raised: [], bootstrap: false });
-  assert.deepEqual(checkBaselineShrinkOnly({ embeddedInterpreterLines: 0, duplicateCopies: 0 }, head), { raised: [], bootstrap: false });
-  assert.deepEqual(checkBaselineShrinkOnly({ ...head, duplicateCopies: 39 }, head), { raised: ["duplicateCopies"], bootstrap: false });
-  assert.deepEqual(checkBaselineShrinkOnly({ embeddedInterpreterLines: 9, duplicateCopies: 9 }, null), { raised: [], bootstrap: true });
+  assert.deepEqual(checkBaselineShrinkOnly({ ...head }, head, BASELINE_AXES), { raised: [], bootstrap: false });
+  assert.deepEqual(checkBaselineShrinkOnly({ embeddedInterpreterLines: 0, duplicateCopies: 0 }, head, BASELINE_AXES), { raised: [], bootstrap: false });
+  assert.deepEqual(checkBaselineShrinkOnly({ ...head, duplicateCopies: 39 }, head, BASELINE_AXES), { raised: ["duplicateCopies"], bootstrap: false });
+  assert.deepEqual(checkBaselineShrinkOnly({ embeddedInterpreterLines: 9, duplicateCopies: 9 }, null, BASELINE_AXES), { raised: [], bootstrap: true });
 });
 
 test("judge reds on EITHER axis and on a raised baseline, and greens only when all three hold", () => {
