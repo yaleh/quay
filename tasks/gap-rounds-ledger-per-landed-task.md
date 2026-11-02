@@ -45,14 +45,14 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1 `node --test scripts/rounds-ledger.test.mjs` exit 0；fixture 至少覆盖：①同一任务多会话正确合并；②同一 `message.id` 的多 block 记录只计 1 轮；③一轮内含 verify+edit 两种工具时按优先级只归一类且原始工具计数保留；④缺会话文件/fan-in trace ⇒ `not-evaluated`，不得变成 0 或成功；⑤返工原因无法判定 ⇒ `unknown` 单列，不并入已知类。
-- [ ] AC2 `node scripts/rounds-ledger.mjs --help` exit 0，公开：会话→任务关联规则、轮数去重规则、阶段优先级、落地证据定义、成本权重（0.1× 与 0.05× 两套）与缺失语义。
-- [ ] AC3 对固定窗口真跑并写入报告，复现基线：任务数 94、worker 会话 129、轮数 10,392、轮/任务 110.6、加权 eq 185.8M（0.1×/5×）；任一数字对不上必须给出差异原因，不得静默改口径。
-- [ ] AC4 报告给出全局阶段占比（inspect / edit / verify / fix / orchestration）与 top 10 任务的阶段拆解；至少一个任务下钻到会话级（每会话的轮数、阶段、结局）。
-- [ ] AC5 返工台账：每个非首次会话都有 `fan-in-red` / `worker-exited` / `crash-or-timeout` / `superseded` / `unknown` 之一，给出计数与占比；`unknown` 占比必须显式报告。
-- [ ] AC6 与 E1 工具交叉核对：同一窗口、同一任务子集下，轮数与加权成本与 E1 的差异在报告中逐项列出（可比 / 不可比 / 解释），不得只声称"一致"。
-- [ ] AC7 只读：`git diff` 不含 `.quay/profiles.yml`、`plugin/scripts/*driver*`、任何 gate/AC/DoD 文件；不改变派发、验证或 suite 覆盖面。
-- [ ] AC8 `git diff --check` exit 0，改动只在声明 Touches 内。
+- [x] AC1 `node --test scripts/rounds-ledger.test.mjs` exit 0；fixture 至少覆盖：①同一任务多会话正确合并；②同一 `message.id` 的多 block 记录只计 1 轮；③一轮内含 verify+edit 两种工具时按优先级只归一类且原始工具计数保留；④缺会话文件/fan-in trace ⇒ `not-evaluated`，不得变成 0 或成功；⑤返工原因无法判定 ⇒ `unknown` 单列，不并入已知类。
+- [x] AC2 `node scripts/rounds-ledger.mjs --help` exit 0，公开：会话→任务关联规则、轮数去重规则、阶段优先级、落地证据定义、成本权重（0.1× 与 0.05× 两套）与缺失语义。
+- [x] AC3 对固定窗口真跑并写入报告，复现基线：任务数 94、worker 会话 129、轮数 10,392、轮/任务 110.6、加权 eq 185.8M（0.1×/5×）；任一数字对不上必须给出差异原因，不得静默改口径。
+- [x] AC4 报告给出全局阶段占比（inspect / edit / verify / fix / orchestration）与 top 10 任务的阶段拆解；至少一个任务下钻到会话级（每会话的轮数、阶段、结局）。
+- [x] AC5 返工台账：每个非首次会话都有 `fan-in-red` / `worker-exited` / `crash-or-timeout` / `superseded` / `unknown` 之一，给出计数与占比；`unknown` 占比必须显式报告。
+- [x] AC6 与 E1 工具交叉核对：同一窗口、同一任务子集下，轮数与加权成本与 E1 的差异在报告中逐项列出（可比 / 不可比 / 解释），不得只声称"一致"。
+- [x] AC7 只读：`git diff` 不含 `.quay/profiles.yml`、`plugin/scripts/*driver*`、任何 gate/AC/DoD 文件；不改变派发、验证或 suite 覆盖面。
+- [x] AC8 `git diff --check` exit 0，改动只在声明 Touches 内。
 
 ## Definition of Done
 
