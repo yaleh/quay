@@ -10,6 +10,7 @@ import { tmpdir } from "node:os";
 import {
   buildAttempts, attachFanInTrace, attachSuite, attachLanding, summarize,
   classifyRounds, e5Evidence, fanInLogFileName, parseArgs, classifySuiteOutcome,
+  tsToMs, windowMembership, sessionFirstTsMs,
 } from "./task-efficiency-baseline.mjs";
 
 const ISO = (d) => new Date(d).toISOString();
@@ -55,6 +56,18 @@ function withTrace(src, task, runId, recs) {
   src.fanInTraceByName.set(fanInLogFileName(task, runId), recs);
   return src;
 }
+
+// 写一个带 enqueue 时间戳的 worker 会话 jsonl（窗口过滤看首条 timestamp 记录）。
+function writeWorkerSession(dir, id, task, tsMs, assistantRecords = []) {
+  const lines = [
+    JSON.stringify({ type: "queue-operation", operation: "enqueue", timestamp: ISO(tsMs), sessionId: id }),
+    JSON.stringify({ type: "user", message: { role: "user", content: `You are a per-task worker in the quay repo (SPEC-worker-driven-inner §5 阶段 2). Task: ${task}. Repo root: /x.` } }),
+    ...assistantRecords.map((a) => JSON.stringify(a)),
+  ];
+  writeFileSync(join(dir, `${id}.jsonl`), lines.join("\n") + "\n");
+  return { sessionId: id, task, file: `${id}.jsonl` };
+}
+const thinkAssist = (n) => Array.from({ length: n }, () => ({ type: "assistant", message: { role: "assistant", content: [{ type: "text", text: "thinking" }] } }));
 
 test("--help 解析 exit 0 语义", () => {
   assert.equal(parseArgs(["--help"]).help, true);
@@ -352,11 +365,11 @@ test("E5：pool-empty 不构成持续积压，resource-gate-wait 不单独证明
   const src = baseSrc({
     workerOutcome: [wo("gap-a", t0)],
     workerRound: [
-      { stop_reason: "pool-empty (no dispatchable candidate in the ready pool)" },
-      { stop_reason: "resource-gate-wait: {\"load\":99}" },
-      { stop_reason: null },
+      { ts: ISO(t0 + 1 * MIN), stop_reason: "pool-empty (no dispatchable candidate in the ready pool)" },
+      { ts: ISO(t0 + 2 * MIN), stop_reason: "resource-gate-wait: {\"load\":99}" },
+      { ts: ISO(t0 + 3 * MIN), stop_reason: null },
     ],
-    workflowEvents: [{ eventKind: "start", timing: { queuedAtMs: null, startedAtMs: t0 } }],
+    workflowEvents: [{ eventKind: "start", recordedAtMs: t0 + 1 * MIN, timing: { queuedAtMs: null, startedAtMs: t0 } }],
   });
   const ctx = buildAttempts(src, { windowStart: null, windowEnd: null, task: null });
   attachFanInTrace(src, ctx.attempts);
@@ -367,6 +380,8 @@ test("E5：pool-empty 不构成持续积压，resource-gate-wait 不单独证明
   assert.equal(e5.queueMissing, 1);
   assert.equal(e5.queueDelayP50, null); // 缺值 = 未查，不是 0
   assert.equal(e5.persistentQueue, "not-evaluated"); // 无直接队列证据 ⇒ 未知
+  assert.equal(e5.stopReasonUnwindowed, 0);
+  assert.equal(e5.queueUnwindowed, 0);
   assert.equal(Object.hasOwn(e5, "lockWaitSignificant"), false); // 撤销 p50>60s 自动判词
   assert.equal(Object.hasOwn(e5, "persistentQueueEvidence"), false); // 撤销 pool-empty+resource-gate-wait 相加
 });
@@ -388,6 +403,116 @@ test("classifyRounds 可下钻至 sessionId，且不可分类者单列", () => {
   assert.equal(rounds.catCounts.toolWait ?? rounds.catCounts["tool-wait"], 1);
   assert.equal(rounds.catCounts.fix, 1);
   assert.equal(rounds.perSession[0].sessionId, sessionId);
+});
+
+test("windowMembership/tsToMs/sessionFirstTsMs：missing 与 outside 有独立取值（AC1 ③ 的判定库）", () => {
+  const t0 = new Date("2026-11-01T00:00:00Z").getTime();
+  assert.equal(tsToMs("2026-11-01T00:00:00Z"), t0);
+  assert.equal(tsToMs(1786552923731), 1786552923731);
+  assert.equal(tsToMs(null), null);
+  assert.equal(tsToMs("not-a-date"), null);
+  assert.equal(windowMembership(null, t0, t0 + 10 * MIN), "missing");
+  assert.equal(windowMembership(t0 - 1, t0, t0 + 10 * MIN), "outside");
+  assert.equal(windowMembership(t0 + 11 * MIN, t0, t0 + 10 * MIN), "outside");
+  assert.equal(windowMembership(t0, t0, t0 + 10 * MIN), "inside");
+  assert.equal(windowMembership(null, null, null), "inside");
+  assert.equal(sessionFirstTsMs(JSON.stringify({ type: "queue-operation", operation: "enqueue", timestamp: "2026-11-01T00:00:00Z" }) + "\n"), t0);
+  assert.equal(sessionFirstTsMs(JSON.stringify({ type: "user", message: {} })), null);
+});
+
+test("窗口作用于 rounds/e5：同一语料两个窗口的 rounds.* 与 stopReasonCounts 必须不同（AC1 ①）", () => {
+  const dir = mkdtempSync(join(tmpdir(), "win-differ-"));
+  const t0 = new Date("2026-11-01T00:00:00Z").getTime();
+  const s1 = writeWorkerSession(dir, "s1", "gap-a", t0 + 1 * MIN, thinkAssist(3));
+  const s2 = writeWorkerSession(dir, "s2", "gap-a", t0 + 60 * MIN, thinkAssist(5));
+  const src = baseSrc({
+    sessionsDir: dir,
+    workerSessions: [s1, s2],
+    workerRound: [
+      { ts: ISO(t0 + 2 * MIN), stop_reason: "pool-empty" },
+      { ts: ISO(t0 + 62 * MIN), stop_reason: "resource-gate-wait: {\"load\":99}" },
+    ],
+  });
+  const run = (startMs, endMs) => {
+    const ctx = buildAttempts(src, { windowStart: ISO(startMs), windowEnd: ISO(endMs), task: null });
+    return { rounds: classifyRounds(src, { task: null }, ctx), e5: e5Evidence(src, ctx) };
+  };
+  const w1 = run(t0, t0 + 30 * MIN);
+  const w2 = run(t0 + 30 * MIN, t0 + 90 * MIN);
+  assert.equal(w1.rounds.totalRounds, 3);
+  assert.equal(w2.rounds.totalRounds, 5);
+  assert.notEqual(w1.rounds.totalRounds, w2.rounds.totalRounds);
+  assert.equal(w1.rounds.sessionsTotal, 1);
+  assert.equal(w2.rounds.sessionsTotal, 1);
+  assert.deepEqual(w1.e5.stopReasonCounts, { "pool-empty": 1 });
+  assert.deepEqual(w2.e5.stopReasonCounts, { "resource-gate-wait": 1 });
+  assert.notDeepEqual(w1.e5.stopReasonCounts, w2.e5.stopReasonCounts);
+});
+
+test("窗口外会话/派发轮不计入窗口读数，计入独立 unwindowed（AC1 ②）", () => {
+  const dir = mkdtempSync(join(tmpdir(), "win-outside-"));
+  const t0 = new Date("2026-11-01T00:00:00Z").getTime();
+  const s1 = writeWorkerSession(dir, "s1", "gap-a", t0 + 1 * MIN, thinkAssist(3));
+  const s2 = writeWorkerSession(dir, "s2", "gap-a", t0 + 60 * MIN, thinkAssist(5));
+  const src = baseSrc({
+    sessionsDir: dir,
+    workerSessions: [s1, s2],
+    workerRound: [
+      { ts: ISO(t0 + 2 * MIN), stop_reason: "pool-empty" },
+      { ts: ISO(t0 + 62 * MIN), stop_reason: "resource-gate-wait" },
+    ],
+    workflowEvents: [
+      { eventKind: "start", recordedAtMs: t0 + 2 * MIN, timing: { queuedAtMs: null, startedAtMs: t0 + 2 * MIN } },
+      { eventKind: "start", recordedAtMs: t0 + 62 * MIN, timing: { queuedAtMs: null, startedAtMs: t0 + 62 * MIN } },
+    ],
+  });
+  const ctx = buildAttempts(src, { windowStart: ISO(t0), windowEnd: ISO(t0 + 30 * MIN), task: null });
+  const rounds = classifyRounds(src, { task: null }, ctx);
+  assert.equal(rounds.sessionsTotal, 1);
+  assert.equal(rounds.totalRounds, 3);
+  assert.equal(rounds.unwindowed, 1);
+  assert.equal(rounds.unwindowedOutside, 1);
+  assert.equal(rounds.unwindowedMissing, 0);
+  const e5 = e5Evidence(src, ctx);
+  assert.equal(e5.poolEmptyRounds, 1);
+  assert.equal(e5.resourceGateRounds, 0);
+  assert.equal(e5.stopReasonUnwindowed, 1);
+  assert.equal(e5.stopReasonUnwindowedOutside, 1);
+  assert.equal(e5.queueMeasurable, 0);
+  assert.equal(e5.queueMissing, 1);
+  assert.equal(e5.queueUnwindowed, 1);
+  assert.equal(e5.queueUnwindowedOutside, 1);
+});
+
+test("缺时间戳记录进入 unwindowed，不得变成 0/成功（AC1 ③）", () => {
+  const dir = mkdtempSync(join(tmpdir(), "win-missing-"));
+  const t0 = new Date("2026-11-01T00:00:00Z").getTime();
+  const sessionId = "s-nots";
+  const lines = [
+    JSON.stringify({ type: "user", message: { role: "user", content: "You are a per-task worker in the quay repo (SPEC-worker-driven-inner §5 阶段 2). Task: gap-a. Repo root: /x." } }),
+    JSON.stringify({ type: "assistant", message: { role: "assistant", content: [{ type: "text", text: "thinking" }] } }),
+  ];
+  writeFileSync(join(dir, `${sessionId}.jsonl`), lines.join("\n") + "\n");
+  const src = baseSrc({
+    sessionsDir: dir,
+    workerSessions: [{ sessionId, task: "gap-a", file: `${sessionId}.jsonl` }],
+    workerRound: [{ stop_reason: "pool-empty" }], // 缺 ts
+    workflowEvents: [{ eventKind: "start", timing: { queuedAtMs: null, startedAtMs: t0 } }], // 缺 recordedAtMs
+  });
+  const ctx = buildAttempts(src, { windowStart: ISO(t0), windowEnd: ISO(t0 + 30 * MIN), task: null });
+  const rounds = classifyRounds(src, { task: null }, ctx);
+  assert.equal(rounds.sessionsTotal, 0);
+  assert.equal(rounds.totalRounds, 0);
+  assert.equal(rounds.unwindowed, 1);
+  assert.equal(rounds.unwindowedMissing, 1);
+  const e5 = e5Evidence(src, ctx);
+  assert.equal(e5.poolEmptyRounds, 0);
+  assert.equal(e5.stopReasonUnwindowed, 1);
+  assert.equal(e5.stopReasonUnwindowedMissing, 1);
+  assert.equal(e5.queueMeasurable, 0);
+  assert.equal(e5.queueMissing, 0);
+  assert.equal(e5.queueUnwindowed, 1);
+  assert.equal(e5.queueUnwindowedMissing, 1);
 });
 
 test("fanInLogFileName 与 worker-fan-in.ts 同形：非法字符替换为 _", () => {

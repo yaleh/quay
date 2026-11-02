@@ -70,6 +70,14 @@ flags:
 
 时间口径：wall-clock 用记录自带时间戳差；CPU-seconds 只取 cpu_time_s 且
   cpu_source=gnu-time 的实测值，⛔ 不用 wall-time 换算。
+
+窗口语义（每小节独立，同一 --window-start/--window-end 过滤口径）：
+  attempts/summary    按 worker-outcome.started_at（既有行为）。
+  rounds（会话轮数）  按会话首条记录时间戳过滤；窗口外/缺时间戳的会话单列 unwindowed，不计入窗口读数。
+  e5.queueDelay       按 workflow-event.recordedAtMs 过滤；窗口外/缺 recordedAtMs 的记录单列 queueUnwindowed。
+  e5.stopReason       按 worker-round.ts 过滤；窗口外/缺 ts 的记录单列 stopReasonUnwindowed。
+  unwindowed          窗口外或取不到时间戳的记录——「无法评估」有独立取值（missing）与「窗口外」（outside）
+                      分列，⛔ 不与「已按窗口统计」的读数共用输出，也不得静默丢弃成 0/成功。
 `;
 
 // fan-in 日志文件名（与 worker-fan-in.ts 的 fanInLogFileName 同形：runId 非 [A-Za-z0-9_.-] 换成 _）。
@@ -106,6 +114,23 @@ function readJsonl(p) {
 function parseIso(s) {
   const t = Date.parse(s);
   return Number.isFinite(t) ? t : null;
+}
+// 时间戳统一到 epoch ms：ISO 字符串走 Date.parse，数字按 epoch ms（如 workflow-event 的 recordedAtMs）。
+function tsToMs(x) {
+  if (typeof x === "number" && Number.isFinite(x)) return x;
+  if (typeof x === "string") return parseIso(x);
+  return null;
+}
+// 窗口归属三分（缺值 = 未查，不得与「在窗口内」共用取值）：
+//   inside   在窗口内（或未指定窗口 ⇒ 全集）
+//   outside  有时间戳但落在窗口外
+//   missing  取不到时间戳（无法评估）
+function windowMembership(tsMs, winStart, winEnd) {
+  if (winStart == null && winEnd == null) return "inside";
+  if (tsMs == null) return "missing";
+  if (winStart != null && tsMs < winStart) return "outside";
+  if (winEnd != null && tsMs > winEnd) return "outside";
+  return "inside";
 }
 function pct(sorted, p) {
   if (sorted.length === 0) return null;
@@ -275,6 +300,20 @@ function firstUserMessageText(text) {
       if (Array.isArray(c)) return c.map((x) => x.text || "").join("");
       return "";
     }
+  }
+  return null;
+}
+
+// 会话首条记录时间戳：逐行找第一条带可解析 `timestamp` 字段的记录（worker 会话 = queue-operation enqueue）。
+// 取不到 ⇒ null（由窗口归属函数落为 missing，⛔ 不静默丢弃）。
+function sessionFirstTsMs(text) {
+  for (const line of text.split("\n")) {
+    if (!line.trim()) continue;
+    let o;
+    try { o = JSON.parse(line); } catch { continue; }
+    if (o.timestamp === undefined || o.timestamp === null) continue;
+    const t = tsToMs(o.timestamp);
+    if (t != null) return t;
   }
   return null;
 }
@@ -695,13 +734,22 @@ function classifyRounds(src, args, ctx) {
   const catCounts = Object.fromEntries(categories.map((c) => [c, 0]));
   const perSession = [];
   const sessionsDir = src.sessionsDir;
+  const { winStart, winEnd } = ctx;
   let totalRounds = 0;
+  let unwindowed = 0, unwindowedOutside = 0, unwindowedMissing = 0;
   const readCacheBySession = new Map();
 
   for (const s of sessions) {
     const p = join(sessionsDir, s.file);
     const text = readFileSafe(p);
     if (text == null) continue;
+    // 会话按首条记录时间戳落入窗口才纳入；窗口外/缺时间戳单列 unwindowed（不静默丢弃）。
+    const m = windowMembership(sessionFirstTsMs(text), winStart, winEnd);
+    if (m !== "inside") {
+      unwindowed++;
+      if (m === "missing") unwindowedMissing++; else unwindowedOutside++;
+      continue;
+    }
     const rounds = [];
     const readSet = new Set();
     for (const line of text.split("\n")) {
@@ -718,7 +766,8 @@ function classifyRounds(src, args, ctx) {
     perSession.push({ sessionId: s.sessionId, task: s.task, rounds: rounds.length, ...sc });
   }
   for (const p of perSession) for (const c of categories) catCounts[c] += p[c];
-  return { totalRounds, catCounts, perSession, categories, sessionsTotal: sessions.length };
+  // sessionsTotal = 窗口内会话数（不是任务过滤后的全集数）；unwindowed 单列。
+  return { totalRounds, catCounts, perSession, categories, sessionsTotal: perSession.length, unwindowed, unwindowedOutside, unwindowedMissing };
 }
 
 function classifyOneRound(o, readSet) {
@@ -756,6 +805,7 @@ function classifyOneRound(o, readSet) {
 
 // ── E5 证据：锁等待 + 队列等待 + 供给/资源拒绝（只输出直接读数，不做无依据推断）──
 function e5Evidence(src, ctx) {
+  const { winStart, winEnd } = ctx;
   // 锁等待：fan-in 锁 acquire 的 wall_ms（描述性分位数，⛔ 不据此下「显著」结论）。
   const fanInLockWaits = [];
   for (const a of ctx.attempts) if (typeof a.fanInLockWaitMs === "number") fanInLockWaits.push(a.fanInLockWaitMs);
@@ -763,10 +813,18 @@ function e5Evidence(src, ctx) {
 
   // 队列等待（workflow-event start 记录 queuedAtMs→startedAtMs）。fm-* 时代多数 queuedAtMs=null ⇒
   // not-evaluated（缺值 = 未查，⛔ 不与 0 共用取值）。这是「等待区间」的直接证据载体。
+  // 先按 recordedAtMs 落入窗口；窗口外/缺 recordedAtMs 单列 queueUnwindowed（不静默丢弃）。
   const queueDelays = [];
   let queueMeasurable = 0, queueMissing = 0;
+  let queueUnwindowed = 0, queueUnwindowedOutside = 0, queueUnwindowedMissing = 0;
   for (const e of src.workflowEvents) {
     if (e.eventKind !== "start") continue;
+    const m = windowMembership(tsToMs(e.recordedAtMs), winStart, winEnd);
+    if (m !== "inside") {
+      queueUnwindowed++;
+      if (m === "missing") queueUnwindowedMissing++; else queueUnwindowedOutside++;
+      continue;
+    }
     const q = e.timing?.queuedAtMs, st = e.timing?.startedAtMs;
     if (typeof q === "number" && typeof st === "number") { queueMeasurable++; if (st >= q) queueDelays.push(st - q); }
     else queueMissing++;
@@ -775,8 +833,16 @@ function e5Evidence(src, ctx) {
 
   // 派发环 stop_reason：供给状态（pool-empty）与资源拒绝（resource-gate-wait）各自单列，
   // ⛔ 不把两者相加当「持续队列」。持续队列需要待处理量/等待区间的直接证据。
+  // 先按 ts 落入窗口；窗口外/缺 ts 单列 stopReasonUnwindowed（不静默丢弃）。
   const stopReasonCounts = {};
+  let stopReasonUnwindowed = 0, stopReasonUnwindowedOutside = 0, stopReasonUnwindowedMissing = 0;
   for (const r of src.workerRound) {
+    const m = windowMembership(tsToMs(r.ts), winStart, winEnd);
+    if (m !== "inside") {
+      stopReasonUnwindowed++;
+      if (m === "missing") stopReasonUnwindowedMissing++; else stopReasonUnwindowedOutside++;
+      continue;
+    }
     const s = r.stop_reason;
     const key = s == null ? "dispatched(no-stop)" : String(s).replace(/\s*\(.*$/, "").split(":")[0];
     stopReasonCounts[key] = (stopReasonCounts[key] || 0) + 1;
@@ -799,7 +865,13 @@ function e5Evidence(src, ctx) {
     queueDelayCount: queueDelays.length,
     queueMeasurable,
     queueMissing,
+    queueUnwindowed,
+    queueUnwindowedOutside,
+    queueUnwindowedMissing,
     stopReasonCounts,
+    stopReasonUnwindowed,
+    stopReasonUnwindowedOutside,
+    stopReasonUnwindowedMissing,
     resourceGateRounds: stopReasonCounts["resource-gate-wait"] || 0,
     poolEmptyRounds: stopReasonCounts["pool-empty"] || 0,
     persistentQueue,
@@ -966,6 +1038,8 @@ function renderMarkdown(args, src, ctx, sum, rounds, e5, fp) {
   p("| fan-in 过程日志（尝试级）：有 trace | ", String(sum.withTrace), " / ", String(sum.attemptsTotal), " |\n");
 
   p("\n## 轮数分解（可下钻至原会话）\n");
+  p("窗口：`", windowStartIso, "` → `", windowEndIso, "`；unwindowed 会话：", String(rounds.unwindowed),
+    "（窗口外 ", String(rounds.unwindowedOutside), "，缺时间戳 ", String(rounds.unwindowedMissing), "，不计入窗口读数）。\n");
   p("> 分类是启发式（每轮 = 一条 assistant 消息）：exploration（首次 Read/Grep/Glob/find）/ tool-wait（本轮无工具动作，等待/思考）/ repeated-read（再读已读文件）/ verification（测试/task_check/gate）/ fix（Edit/Write/git 变更）/ unclassified（无法判断，保守单列）。下钻靠 sessionId（会话 jsonl）。\n");
   p("| 类别 | 轮数 |\n|---|---|\n");
   for (const c of rounds.categories) p("| ", c, " | ", String(rounds.catCounts[c]), " |\n");
@@ -973,6 +1047,9 @@ function renderMarkdown(args, src, ctx, sum, rounds, e5, fp) {
   p("- 不能分类者单列（unclassified）：", String(rounds.catCounts.unclassified), "\n");
 
   p("\n## E5 证据（锁等待 + 队列等待 + 供给/资源拒绝；只输出直接读数，不做无依据推断）\n");
+  p("窗口：`", windowStartIso, "` → `", windowEndIso, "`；队列等待 unwindowed：", String(e5.queueUnwindowed),
+    "（窗口外 ", String(e5.queueUnwindowedOutside), "，缺 recordedAtMs ", String(e5.queueUnwindowedMissing), "）；stop_reason unwindowed：",
+    String(e5.stopReasonUnwindowed), "（窗口外 ", String(e5.stopReasonUnwindowedOutside), "，缺 ts ", String(e5.stopReasonUnwindowedMissing), "）。\n");
   p("| 量 | 值 |\n|---|---|\n");
   p("| fan-in 锁等待 p50 / p90 / max | ", fmtMs(e5.fanInLockWaitP50), " / ", fmtMs(e5.fanInLockWaitP90), " / ", fmtMs(e5.fanInLockWaitMax), " |\n");
   p("| fan-in 锁等待可测尝试数 | ", String(e5.fanInLockWaitCount), " |\n");
@@ -1078,4 +1155,5 @@ export {
   parseArgs, readSources, buildAttempts, attachFanInTrace, attachSuite, attachLanding,
   summarize, classifyRounds, e5Evidence, fanInLogFileName, parseIso, pct, median,
   firstUserMessageText, parseCsv, classifySuiteOutcome, suiteVerdict, recordKey,
+  tsToMs, windowMembership, sessionFirstTsMs,
 };
