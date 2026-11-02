@@ -43,12 +43,15 @@ import {
   escalationKey,
   escalationMarkerByKey,
   escalationMarkerLine,
+  findingFiles,
   findingKey,
+  findingKind,
   findingSubjectKey,
   gateEscalation,
   gateFinding,
   isActionable,
   isThrottleRejection,
+  packageIdentityKey,
   proseKey,
   readTaskStatus,
   recurrenceByKey,
@@ -935,5 +938,142 @@ test("resolveTaskCliEntry — a third-party host resolves the VENDORED bundle fr
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
     fs.rmSync(kernel, { recursive: true, force: true });
+  }
+});
+
+// ── ㉕ the god-package dedup key is the PACKAGE, ⛔ not the symbol set ───────────────────────────
+// (gap-routine-file-gate-god-package-dedup-by-package-identity; measured on `.quay/routine-findings.jsonl`).
+// `dupKind: god-package` findings re-sample their observation symbols every round, so the exact-symbol
+// key never converges and the SAME package re-files every round, RATE-limited rather than deduped.
+// The fix keys god-package findings on the PACKAGE (the common directory prefix of `files`), which
+// survives a round boundary. Fixtures are the production carrier's OWN records, quoted VERBATIM
+// (runId + findingId given), ⛔ not invented prose — a hand-written "different symbols" would test the
+// fixture, not the corpus (硬规则 4 推论三).
+
+// runId architecture-analysis-1792599464308 / findingId plugin-scripts-flat-god-directory
+const GOD_PKG_ROUND_1 = {
+  id: "plugin-scripts-flat-god-directory",
+  kind: "god-package",
+  symbols: ["resolveWorkerProcessName", "runAutoTightenPass", "isFinalState", "readJsonLines", "readJsonlLines"],
+  files: [
+    "plugin/scripts/worker-driver.ts:602",
+    "plugin/scripts/gate-script-base.ts:434",
+    "plugin/scripts/driver-runtime.ts:1",
+  ],
+  verdict: "confirmed",
+  rationale: "archguard god-package: plugin/scripts = 299 top-level .ts, 4466 entities, 189347 lines, fanOut 3163 with fanIn 0 — one flat namespace where any script may import any other, so no structural boundary (cycle ratchet only) separates kernel, drivers, checkers and routines.",
+  suggestedAction: "Introduce domain subdirectories (drivers/ checkers/ routines/ lib/) with an import-graph allowlist extending the existing import-graph-baseline.json; move incrementally, one domain per task.",
+};
+// runId architecture-analysis-1793401956536 / findingId god-package-plugin-scripts
+const GOD_PKG_ROUND_2 = {
+  id: "god-package-plugin-scripts",
+  kind: "god-package",
+  symbols: ["withPerFileCpuPreload", "isStaticCheckFailureLine", "extractStaticCheckDetail"],
+  files: [
+    "plugin/scripts/full-suite-runner.ts:239",
+    "plugin/scripts/worker-driver.ts:1",
+  ],
+  verdict: "CONFIRMED",
+  rationale: "fanOut 3607 across 314 files / 4772 entities — flat scripts dir has outgrown one package; largest files are 4-7k lines (worker-driver 7155, full-suite-runner 5866)",
+  suggestedAction: "group scripts by surface (driver/check/reading) into sub-packages and split megascripts at their natural seams",
+};
+// runId architecture-analysis-1793622670475 / findingId god-package-plugin-scripts
+const GOD_PKG_ROUND_3 = {
+  id: "god-package-plugin-scripts",
+  kind: "god-package",
+  symbols: ["runResidentLoop", "runOpenSemanticDiscovery", "withPerFileCpuPreload"],
+  files: [
+    "plugin/scripts/worker-driver.ts:5822",
+    "plugin/scripts/open-semantic-discovery-routine.ts:3816",
+    "plugin/scripts/full-suite-runner.ts:239",
+  ],
+  verdict: "CONFIRMED",
+  rationale: "plugin/scripts holds 317 files / 4777 entities (77.7% of repo's 6144) in a flat 2-subdir directory, fanOut=3622",
+  suggestedAction: "Split plugin/scripts into thematic subdirs (drivers/, probes/, readers/, gates/) by responsibility",
+};
+// runId architecture-analysis-1793492325036 / findingId god-package-quay-src-root
+const GOD_PKG_QUAY_SRC_ROOT = {
+  id: "god-package-quay-src-root",
+  kind: "god-package",
+  symbols: ["dashboard-kernel", "mcp-server", "goal-merge"],
+  files: [
+    "packages/quay/src/dashboard-kernel.ts:1",
+    "packages/quay/src/mcp-server.ts:1",
+    "packages/quay/src/goal-merge.ts:1",
+  ],
+  verdict: "god-package",
+  rationale: "fanIn 484 / fanOut 423, 296 entities in 29 files — root aggregates cli/core/kernel/serve/observation/gate.",
+  suggestedAction: "Move root-level modules into their owning sub-package, keeping only true barrel re-exports.",
+};
+
+const godPkgCarrierLine = (runId, f) => carrierLine({
+  ts: "2026-11-02T12:31:10.475Z", kind: "finding", routine: "architecture-analysis", probe: "architecture-analysis",
+  runId, findingId: f.id, dupKind: "god-package", symbols: f.symbols, files: f.files,
+  verdict: f.verdict, rationale: f.rationale, suggestedAction: f.suggestedAction,
+});
+
+test("㉕ packageIdentityKey: the common directory prefix, with line numbers never entering the key", () => {
+  assert.equal(packageIdentityKey(GOD_PKG_ROUND_1.files), "plugin/scripts");
+  assert.equal(packageIdentityKey(["plugin/scripts/a.ts:1", "plugin/scripts/b.ts:2"]), "plugin/scripts");
+  assert.equal(packageIdentityKey(["packages/quay/src/a.ts:1", "packages/quay/src/b.ts:2"]), "packages/quay/src");
+  assert.equal(packageIdentityKey([]), "", "no files ⇒ no package identity (⛔ not a fabricated key)");
+  assert.equal(packageIdentityKey(["a.ts:1"]), "", "a root-level file has no package directory");
+});
+
+test("㉕ god-package: the three production rounds converge on the PACKAGE key (⛔ not the symbol set)", () => {
+  const symSets = [GOD_PKG_ROUND_1, GOD_PKG_ROUND_2, GOD_PKG_ROUND_3]
+    .map((f) => [...f.symbols].sort().join(","));
+  assert.equal(new Set(symSets).size, 3, "the three rounds really do drift on symbols — that drift is the defect");
+  const texts = [GOD_PKG_ROUND_1, GOD_PKG_ROUND_2, GOD_PKG_ROUND_3].map(routineFindingCandidateText);
+  for (const t of texts) {
+    assert.equal(findingKind(t), "god-package", "the candidate carries its own dupKind");
+    assert.equal(findingSubjectKey(t), "package:plugin/scripts", "god-package subject = the package, ⛔ not symbols:<set>");
+    assert.equal(findingKey(t), "package:plugin/scripts");
+    assert.equal(findingSubjectKey(t).startsWith("symbols:"), false);
+  }
+  assert.equal(new Set(texts.map(findingKey)).size, 1, "one package ⇒ one key, across all three rounds");
+});
+
+test("㉕ god-package symmetry: the candidate and the filed task body key identically", () => {
+  const ctx = { ...CONTEXT, routine: "architecture-analysis", probe: "architecture-analysis",
+    runId: "architecture-analysis-1793622670475", ts: "2026-11-02T12:31:10.475Z" };
+  for (const f of [GOD_PKG_ROUND_2, GOD_PKG_QUAY_SRC_ROOT]) {
+    assert.equal(findingKey(routineFindingCandidateText(f)), findingKey(renderRoutineTaskBody(f, ctx)),
+      "the two renderers spell kind/files differently (`kind: …`/`files: …` vs `- kind：…`/`- 涉及文件：`) — ONE parser must read both");
+  }
+});
+
+test("㉕ god-package NO OVER-BLOCK: a different package keeps a different key", () => {
+  const a = findingKey(routineFindingCandidateText(GOD_PKG_ROUND_1));
+  const b = findingKey(routineFindingCandidateText(GOD_PKG_QUAY_SRC_ROOT));
+  assert.notEqual(a, b, "plugin/scripts and packages/quay/src are two packages, ⛔ not one");
+  assert.equal(a, "package:plugin/scripts");
+  assert.equal(b, "package:packages/quay/src");
+});
+
+test("㉕ non-god-package keys are UNCHANGED: the symbol subject still keys symbols", () => {
+  assert.equal(findingKind(routineFindingCandidateText(ROUND_A)), "same-symbol-multi-file");
+  assert.equal(findingSubjectKey(routineFindingCandidateText(ROUND_A)), "symbols:assertsafeid");
+  assert.equal(findingKey(routineFindingCandidateText(ROUND_A)), "symbols:assertsafeid");
+  assert.equal(findingSubjectKey(routineFindingCandidateText(ROUND_B)), "symbols:assertsafeid");
+});
+
+test("㉕ god-package recurrenceByKey replay: the three production runIds count as ONE subject", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "gate-godpkg-"));
+  try {
+    const carrier = path.join(dir, "routine-findings.jsonl");
+    fs.writeFileSync(carrier, [
+      godPkgCarrierLine("architecture-analysis-1792599464308", GOD_PKG_ROUND_1),
+      godPkgCarrierLine("architecture-analysis-1793401956536", GOD_PKG_ROUND_2),
+      godPkgCarrierLine("architecture-analysis-1793622670475", GOD_PKG_ROUND_3),
+      // a non-finding record in the same round must NOT inflate the count (the carrier is a mix of kinds)
+      carrierLine({ ts: "2026-11-02T12:31:10.475Z", kind: "filing-round", routine: "architecture-analysis",
+        runId: "architecture-analysis-1793622670475", filed: [] }),
+    ].join(""), "utf8");
+    const rec = recurrenceByKey(carrier);
+    assert.ok(rec instanceof Map, "a readable carrier yields a reading");
+    assert.equal(rec.get("package:plugin/scripts"), 3, "three DISTINCT runIds report the same package ⇒ recurrence 3");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
   }
 });
