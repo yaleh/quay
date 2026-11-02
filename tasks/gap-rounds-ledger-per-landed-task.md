@@ -1,7 +1,7 @@
 ---
 id: gap-rounds-ledger-per-landed-task
 title: 轮数台账：按落地任务拆分 inspect/edit/verify/fix/orchestration 轮数与返工原因，作为「成本/落地任务」的公共优化标尺
-status: todo
+status: ready
 labels:
   - gap
 parent: null
