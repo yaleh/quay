@@ -60,8 +60,7 @@ import { helpExit, isDirectEntry, emitPass, emitFail, emitNotEvaluated, flagValu
 // sibling ABI-consolidation tasks land) is a one-line diff — a deliberate, reviewed edit, not inline
 // scattered logic. `expected` = the measured hit count at baseline; a drift is a WARN, never a fail.
 export const ALLOWLIST: Record<string, { reason: string; expected: number }> = {
-  "packages/quay/src/observation.ts": { reason: "formerly the git-ref task-facts quarantine; those reads moved verbatim to ./observation/task-status-ref.ts (gap-routine-architecture-analysis-fan-hub-quay-src), so this file now measures 0 — kept as a ratchet anchor", expected: 0 },
-  "packages/quay/src/observation/task-status-ref.ts": { reason: "git-ref task status/title/commit-time reads (git show/ls-tree/log + one fs.readFileSync on tasks/) — moved verbatim from observation.ts (gap-routine-architecture-analysis-fan-hub-quay-src); the ONLY serve-path task-facts reader, same dependency boundary as before", expected: 6 },
+  "packages/quay/src/observation.ts": { reason: "documented quarantine for git-ref reads (git show/ls-tree/log + one fs.readFileSync on tasks/) — the ONLY serve-path task-facts reader, re-implemented with git because it is the serve path's own dependency boundary", expected: 6 },
   "packages/quay/src/fan-in/ff-merge.ts": { reason: "fan-in ff-merge porcelain reads ` M tasks/*.md` via git (clean-tree auto-converge) — seeded from the Plan allowlist (its task-path is inside a comment/porcelain string, so it currently measures 0 hits)", expected: 0 },
   "packages/quay/src/config-validate.ts": { reason: "workspace config validation reads config/gates/loop files, not task files — seeded from the Plan allowlist for the sibling config-writer consolidation", expected: 0 },
   "packages/quay/src/init.ts": { reason: "quay-init creates the tasks/ dir skeleton (mkdir of the empty store) — not a per-task-file read/write; seeded from the Plan allowlist", expected: 0 },

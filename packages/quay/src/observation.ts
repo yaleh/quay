@@ -51,11 +51,13 @@ import { QUAY_VERSION } from "./version.ts";
 // gap-routine-semantic-dedup-scan-pad2: the serve-layer canonical pad2 is not importable from
 // Core (that would be a Core → view edge); the shared definition lives in this import-free leaf.
 import { pad2 } from "./pad.ts";
+import { ancestry } from "./core/ancestry.ts";
 // The ONE definition of fast-mode start/end classification — shared with the plugin's
 // fast-mode-telemetry.ts (the writer/`--report` reader of the same `.workflow-events/*.jsonl`
 // store), NOT a hand-maintained mirror of it. See kernel/start-end-like.ts's header.
 import { isStartLike, isEndLike } from "./kernel/start-end-like.ts";
-import { TASK_STATUS } from "./abi.ts";
+import { parseFrontmatter } from "./core/frontmatter-store-base.ts";
+import { TASK_STATUS, isTaskStatus, type TaskStatus } from "./abi.ts";
 import { resolvePluginScript, resolvePluginScriptExec, resolveOrchestrationFile } from "./core/plugin-root.ts";
 // Shared session read/write primitives — ONE copy of each, byte-identical to the pinned quay-fleet
 // blob (packages/quay/src/primitives/PROVENANCE.md; re-checked by plugin/scripts/primitives-drift-check.ts).
@@ -70,21 +72,17 @@ import YAML from "yaml";
 // module). Re-exported below so read-face consumers get them from one place.
 import { LIVE_STATE_PHASES, LIVE_STATE_REL, LIVE_STATE_SCHEMA, LIVE_STATE_STALE_MS, type WorkerLivePhase } from "./driver-vocab.ts";
 export { LIVE_STATE_PHASES, LIVE_STATE_REL, LIVE_STATE_SCHEMA, LIVE_STATE_STALE_MS };
-// ── The seams this module was split along ─────────────────────────────────────────────────────
-// (task gap-routine-architecture-analysis-observation-ts-multi-responsibility-god-module, 2026-10-22,
-//  then gap-routine-architecture-analysis-fan-hub-quay-src, 2026-11-02).
-// The file carried 64 direct importers and several unrelated responsibilities. Each now lives in its
-// own module under ./observation/, and this module keeps ONLY the role the header names (assemble
-// the workspace readings for the serve path) plus the barrel re-exports below — so every existing
-// `from "./observation.ts"` import resolves exactly as before:
-//   · ./observation/events.ts              — fast-mode event pairing (pairInFlight / readEventsFromDir);
-//   · ./observation/liveness.ts            — liveness + activity signals (activity, /proc, driver carriers);
-//   · ./observation/blocking.ts            — the Touches / depends_on cross-task blocking computation;
-//   · ./observation/records.ts             — worker-outcome / mechanical-fan-in record parsing;
-//   · ./observation/needs-human-ledger.ts  — the promotion-outcome "was ever needs-human" ledger;
-//   · ./observation/task-status-ref.ts     — git-ref task status/title/commit-time reads (develop-first);
-//   · ./observation/live-state.ts          — the `.quay/live-state.json` four-state snapshot reader;
-//   · ./observation/model.ts               — the zero-import leaf they all share (view-model + carrier paths).
+// ── The four seams this module was split along (task
+//    gap-routine-architecture-analysis-observation-ts-multi-responsibility-god-module) ──────────
+// The file carried 64 direct importers and at least four unrelated responsibilities. Each now lives
+// in its own module under ./observation/, and this module keeps ONLY the role the header names
+// (assemble the workspace readings for the serve path) plus the barrel re-exports below — so every
+// existing `from "./observation.ts"` import resolves exactly as before:
+//   · ./observation/events.ts    — fast-mode event pairing (pairInFlight / readEventsFromDir);
+//   · ./observation/liveness.ts  — liveness + activity signals (activity, /proc, driver carriers);
+//   · ./observation/blocking.ts  — the Touches / depends_on cross-task blocking computation;
+//   · ./observation/records.ts   — worker-outcome / mechanical-fan-in record parsing;
+//   · ./observation/model.ts     — the zero-import leaf they all share (view-model + carrier paths).
 // ⛔ The dependency direction is one-way: seams → model (and liveness → records). No seam imports
 // this module, so the split cannot introduce an import cycle.
 import {
@@ -122,16 +120,12 @@ import {
   scanJsonlTail,
   workerInFlightTasks,
 } from "./observation/records.ts";
-import { readTaskStatusForLive } from "./observation/task-status-ref.ts";
 
 export * from "./observation/model.ts";
 export * from "./observation/events.ts";
 export * from "./observation/liveness.ts";
 export * from "./observation/blocking.ts";
 export * from "./observation/records.ts";
-export * from "./observation/needs-human-ledger.ts";
-export * from "./observation/task-status-ref.ts";
-export * from "./observation/live-state.ts";
 
 const execFileP = promisify(execFile);
 
@@ -234,6 +228,491 @@ export function liveSessionIdForPid(pid: string, home: string = os.homedir()): s
   } catch {
     return null;
   }
+}
+
+
+
+
+
+// ── needs-human 显式承接（gap-ac146-human-interface-explicit-owner） ──────────────────────────
+// The promotion-driver's outcome ledger (AC134) carries `action: "needs-human"` records — the
+// historical "was ever escalated to a human" ledger, INCLUDING tasks whose store status has since
+// moved on (the 3 real needs-human samples were later re-dispatched to done/superseded, so their
+// status alone no longer surfaces them). The /needs-human page reads this carrier so a needs-human
+// event stays visible to a human even after the task store moves on — the store status
+// (`status: needs-human`) is the "currently awaiting" truth; this ledger is the "was ever
+// awaiting" truth. Both are independent reads of workspace runtime state, so both are quarantined
+// here beside the worker-outcome/round carriers (same convention, same degradation contract).
+
+/** The promotion-driver's outcome ledger, repo-relative (AC134, gap-ac134-promotion-outcome-ledger). */
+export const PROMOTION_OUTCOME_REL = ".quay/promotion-outcome.jsonl";
+
+/** One promotion-outcome record (AC134 shape). Fields are best-effort runtime-log reads — a
+ *  missing/unknown field degrades to null, never a fabricated value (hard rule ③b). */
+export interface PromotionOutcomeRecord {
+  task_id: string | null;
+  action: string | null;
+  detail: string | null;
+  ts: string | null;
+}
+
+/** Parse `.quay/promotion-outcome.jsonl` (one JSON object per line) into records. Pure — never
+ *  throws; a malformed/torn-tail line is skipped (best-effort runtime log, not a store). */
+export function parsePromotionOutcomeRecords(text: string): PromotionOutcomeRecord[] {
+  const str = (v: unknown): string | null => (typeof v === "string" && v.length > 0 ? v : null);
+  const out: PromotionOutcomeRecord[] = [];
+  for (const line of String(text).split("\n")) {
+    const s = line.trim();
+    if (!s) continue;
+    let j: Record<string, unknown>;
+    try { j = JSON.parse(s) as Record<string, unknown>; } catch { continue; }
+    const result = (j.result && typeof j.result === "object" ? j.result : {}) as Record<string, unknown>;
+    out.push({
+      task_id: str(j.task_id),
+      action: str(j.action),
+      detail: str(result.detail),
+      ts: str(j.ts),
+    });
+  }
+  return out;
+}
+
+/** Read the needs-human ledger: promotion-outcome records with action === "needs-human", newest
+ *  first. Absent/unreadable ⇒ [] (degrade, never throw — a workspace that never ran the
+ *  promotion-driver has no ledger, which is a real "none", not a read failure). */
+export function readNeedsHumanLedger(root: string): PromotionOutcomeRecord[] {
+  try {
+    const abs = path.join(root, PROMOTION_OUTCOME_REL);
+    if (!fs.existsSync(abs)) return [];
+    return parsePromotionOutcomeRecords(fs.readFileSync(abs, "utf8"))
+      .filter((r) => r.action === "needs-human")
+      .sort((a, b) => (b.ts ?? "").localeCompare(a.ts ?? ""));
+  } catch {
+    return [];
+  }
+}
+
+/** Read a single task's status frontmatter from the on-disk store. Missing/unreadable ⇒ null (never
+ *  throws). This is the FALLBACK read: tasks/gap-web-task-status-reads-stale-main-checkout makes the
+ *  canonical store the develop git ref (the manager working branch's disk is a STALE agent-proxy,
+ *  硬规则 4b); `readTaskStatusForLive` reads develop first and falls back here when the ref/path is
+ *  unavailable (not a git repo, no develop ref, a fresh task not yet committed to develop). */
+function readTaskStatusOnDisk(root: string, taskId: string): TaskStatus | null {
+  try {
+    const raw = fs.readFileSync(path.join(root, "tasks", `${taskId}.md`), "utf8");
+    const parsed = parseFrontmatter(raw);
+    const fm = parsed.frontmatter as Record<string, unknown>;
+    return isTaskStatus(fm.status) ? fm.status : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Read `<ref>:tasks/<taskId>.md` frontmatter `status:` + `title:`. Cache-first (AC3): when the batch
+ *  readers (list page / background refresh) already hold this task's status AND title, return them from
+ *  cache with ZERO git subprocesses; otherwise fall back to ONE `git show` (the single-task develop-ref
+ *  read — object store only, never checks out `ref`, never touches fan-in). null when the ref/path is
+ *  unavailable or the frontmatter is unreadable — callers fall back to the on-disk read. The /task
+ *  detail page reads BOTH halves from this one call (status + title develop-first, so list and detail
+ *  agree), and `readTaskStatusAtRef` is its status-only projection. */
+export function readTaskAtRefMeta(root: string, ref: string, taskId: string): { status: TaskStatus | null; title: string | null } | null {
+  const key = `${root}\n${ref}`;
+  const statusEntry = taskStatusRefCache.get(key);
+  const titleEntry = taskTitleRefCache.get(key);
+  if (statusEntry != null && titleEntry != null && statusEntry.map.has(taskId) && titleEntry.map.has(taskId)) {
+    return {
+      status: statusEntry.map.get(taskId) ?? null,
+      title: titleEntry.map.get(taskId) ?? null,
+    };
+  }
+  singleTaskGitSpawnCount++;
+  let out: string;
+  try {
+    out = execFileSync("git", ["-C", root, "show", `${ref}:tasks/${taskId}.md`], {
+      encoding: "utf8", timeout: 10_000, stdio: ["ignore", "pipe", "pipe"],
+    });
+  } catch {
+    return null;
+  }
+  try {
+    const parsed = parseFrontmatter(out);
+    const fm = parsed.frontmatter as Record<string, unknown>;
+    return {
+      status: isTaskStatus(fm.status) ? fm.status : null,
+      title: typeof fm.title === "string" ? fm.title : null,
+    };
+  } catch {
+    return null;
+  }
+}
+
+/** Read `<ref>:tasks/<taskId>.md` status frontmatter (the single-task half of the develop-ref read;
+ *  `git show` reads the object store only — never checks out `ref`, never touches fan-in). null when
+ *  the ref/path is unavailable or the frontmatter is unreadable — callers fall back to the on-disk
+ *  read. Mirrors plugin/scripts/worker-driver.ts's `readTaskStatusAtRef` (the same `git show
+ *  develop:tasks/<id>.md` judgment, re-implemented here because observation.ts is the ONLY serve-path
+ *  module allowed to know git). */
+export function readTaskStatusAtRef(root: string, ref: string, taskId: string): TaskStatus | null {
+  return readTaskAtRefMeta(root, ref, taskId)?.status ?? null;
+}
+
+/** Read the raw contents of a set of task files at a git ref in ONE `git cat-file --batch` process,
+ *  fed the blob SHAs from `listTaskFilesAtRef` — a direct object read, ~6× faster than re-resolving a
+ *  `ref:path` refspec per file (硬规则 4b: the refspec form walks the tree once per file). Returns
+ *  Map<taskId, rawContent> for the files PRESENT at the ref. Empty map on any git failure (never a
+ *  positive from an unavailable source). Mirrors plugin/scripts/ready-pool-check.ts's dispatch-read batch. */
+function readTaskFilesAtRefBatch(root: string, ref: string, files: Array<{ id: string; sha: string }>): Map<string, string> {
+  if (files.length === 0) return new Map();
+  const input = files.map((f) => f.sha).join("\n") + "\n";
+  let buf: Buffer;
+  try {
+    buf = execFileSync("git", ["-C", root, "cat-file", "--batch"], {
+      input,
+      maxBuffer: 64 * 1024 * 1024,
+      timeout: 30_000,
+      stdio: ["pipe", "pipe", "ignore"],
+    });
+  } catch {
+    return new Map();
+  }
+  const map = new Map<string, string>();
+  let off = 0;
+  for (const f of files) {
+    const nl = buf.indexOf(0x0a, off);
+    if (nl === -1) break;
+    const header = buf.slice(off, nl).toString("utf8");
+    off = nl + 1;
+    const m = / blob (\d+)$/.exec(header);
+    if (!m) continue; // `<sha> missing` (or unparseable) — no content line; off is already past the header
+    const size = Number(m[1]);
+    map.set(f.id, buf.slice(off, off + size).toString("utf8"));
+    off += size + 1; // skip content + the trailing newline after it
+  }
+  return map;
+}
+
+/** TTL for the batched develop-status cache — a rendered /tasks list need not re-run `git cat-file`
+ *  over the whole tree on every refresh within the same render burst (AC4: 1500+ tasks). */
+export const TASK_STATUS_REF_CACHE_TTL_MS = 2000;
+
+const taskStatusRefCache = new Map<string, { at: number; map: Map<string, TaskStatus> }>();
+const taskTitleRefCache = new Map<string, { at: number; map: Map<string, string> }>();
+// The commit-time cache carries the ref's HEAD sha at build time so a later refresh can diff
+// `oldHead..newHead` incrementally instead of re-walking the whole `tasks/` history (gap-tasks-page-
+// develop-ref-full-history-git-log-cost AC2).
+const taskCommitTimesRefCache = new Map<string, { at: number; head: string | null; map: Map<string, number> }>();
+
+/** Test seam (AC3): the number of single-task git subprocesses (`git show` / `git log -1`) spawned by
+ *  the detail-page read face (`readTaskAtRefMeta` / `readTaskCommitTimeAtRef`). A cache hit must spawn
+ *  ZERO — the counter lets the test assert that instead of a timing proxy. */
+let singleTaskGitSpawnCount = 0;
+export function resetSingleTaskGitSpawnCount(): void { singleTaskGitSpawnCount = 0; }
+export function getSingleTaskGitSpawnCount(): number { return singleTaskGitSpawnCount; }
+
+/** Test seam (AC1/AC4 of gap-suite-wallclock-budgets-literals-depend-on-host-capacity): how many
+ *  `git log` walks the commit-time reader spawned, split by COST CLASS —
+ *  `full` = the unbounded `git log <ref> -- tasks/` walk over the ref's whole history;
+ *  `bounded` = the incremental `oldHead..newHead` diff (O(new commits)).
+ *  A COUNT, not a wall-clock proxy: the /tasks request path reads CACHE-ONLY (`serve-task.ts`
+ *  `readTaskCommitTimesAtRef(..., {cacheOnly:true})`) so a request must spawn ZERO full walks no
+ *  matter how slow the host is; the full walk belongs to the background refresh, off the request
+ *  path. A loaded host makes a walk SLOWER, not more frequent — which is exactly why the property
+ *  has to be measured as a count (硬规则 4b: 优先观测直接量，不要用代理量). */
+let developRefFullWalkCount = 0;
+let developRefBoundedWalkCount = 0;
+export function resetDevelopRefWalkCounts(): void {
+  developRefFullWalkCount = 0;
+  developRefBoundedWalkCount = 0;
+}
+export function getDevelopRefFullWalkCount(): number { return developRefFullWalkCount; }
+export function getDevelopRefBoundedWalkCount(): number { return developRefBoundedWalkCount; }
+
+/** Clear the batched develop-ref caches (test seam — a fixture that rewrites the develop ref
+ *  mid-test must not read a cached prior read). Clears status + title + commit-time together: the
+ *  three develop-ref read faces share one source of truth and one TTL clock. */
+/** Test seam (gap-ac292 AC3): how many times the develop-ref status-map read actually BUILT — i.e.
+ *  a cache miss that goes on to `git ls-tree` + `cat-file --batch` over EVERY task file at the ref.
+ *  A COUNT, not a wall-clock proxy: `/board`'s request path reads the snapshot, so a request must
+ *  trigger ZERO builds no matter how large the store is; the build belongs to the background tick.
+ *  (硬规则 4b: a loaded host makes the scan SLOWER, not more frequent — so frequency is the only
+ *  reading that isolates the property under test.) */
+let taskStatusRefBuildCount = 0;
+export function getTaskStatusRefBuildCount(): number { return taskStatusRefBuildCount; }
+export function resetTaskStatusRefBuildCount(): void { taskStatusRefBuildCount = 0; }
+
+export function clearTaskStatusRefCache(): void {
+  taskStatusRefCache.clear();
+  taskTitleRefCache.clear();
+  taskCommitTimesRefCache.clear();
+}
+
+/** List the task files (`.md` under `tasks/`) at a git ref in ONE `git ls-tree -r` pass, carrying each
+ *  file's blob SHA (NOT `--name-only`): the batched content read feeds `cat-file --batch` the blob SHA
+ *  — a direct object read, ~6× faster than re-resolving a `ref:path` refspec per file (硬规则 4b: the
+ *  refspec form walks the tree once per file). Returns [{ id, sha }]. Empty array on any git failure. */
+function listTaskFilesAtRef(root: string, ref: string): Array<{ id: string; sha: string }> {
+  try {
+    const out = execFileSync("git", ["-C", root, "ls-tree", "-r", ref, "--", "tasks/"], {
+      encoding: "utf8", timeout: 10_000, stdio: ["ignore", "pipe", "pipe"],
+    });
+    const files: Array<{ id: string; sha: string }> = [];
+    for (const line of out.split(/\r?\n/)) {
+      const tab = line.indexOf("\t");
+      if (tab === -1) continue; // no path column (malformed line)
+      const meta = line.slice(0, tab).split(/\s+/); // `<mode> <type> <sha>`
+      const rel = line.slice(tab + 1);
+      if (meta.length < 3 || meta[1] !== "blob" || !rel.endsWith(".md")) continue;
+      const base = rel.split("/").pop() ?? "";
+      const id = base.slice(0, -3);
+      if (id.length > 0) files.push({ id, sha: meta[2] });
+    }
+    return files;
+  } catch {
+    return [];
+  }
+}
+
+/** Read every task's `status:` frontmatter at a git ref in ONE `git ls-tree` + ONE `git cat-file
+ *  --batch` pair (two subprocesses total for a ~1500-task tree), short-TTL cached. Returns a
+ *  Map<taskId, TaskStatus> of the ids PRESENT at the ref; absent ids are missing (callers fall back
+ *  to the working-tree read). Empty map on any git failure — never a positive from an unavailable
+ *  source (硬规则 ③b). */
+export function readTaskStatusMapAtRef(
+  root: string,
+  ref: string,
+  { nowMs = Date.now(), ttlMs = TASK_STATUS_REF_CACHE_TTL_MS, force = false } = {},
+): Map<string, TaskStatus> {
+  const key = `${root}\n${ref}`;
+  const hit = taskStatusRefCache.get(key);
+  if (!force && hit != null && nowMs - hit.at < ttlMs) return hit.map;
+  taskStatusRefBuildCount++;
+  const map = new Map<string, TaskStatus>();
+  try {
+    const rawMap = readTaskFilesAtRefBatch(root, ref, listTaskFilesAtRef(root, ref));
+    for (const [id, raw] of rawMap) {
+      try {
+        const parsed = parseFrontmatter(raw);
+        const fm = parsed.frontmatter as Record<string, unknown>;
+        if (isTaskStatus(fm.status)) map.set(id, fm.status);
+      } catch {
+        // unparseable frontmatter at the ref — leave absent (caller falls back to disk), never fabricate
+      }
+    }
+  } catch {
+    // git unavailable / not a repo / no such ref — empty map, callers fall back to the disk read
+  }
+  taskStatusRefCache.set(key, { at: nowMs, map });
+  return map;
+}
+
+/** Read every task's `title:` frontmatter at a git ref in ONE `git ls-tree` + ONE `git cat-file
+ *  --batch` pair, short-TTL cached. The title half of the develop-ref read — the /tasks divergence
+ *  marker compares the disk title against the develop title, so the list needs BOTH maps without a
+ *  per-task `git show`. Absent ids are missing (callers fall back to the disk title). Empty map on
+ *  any git failure — never a positive from an unavailable source (硬规则 ③b). */
+export function readTaskTitleMapAtRef(
+  root: string,
+  ref: string,
+  { nowMs = Date.now(), ttlMs = TASK_STATUS_REF_CACHE_TTL_MS, force = false } = {},
+): Map<string, string> {
+  const key = `${root}\n${ref}`;
+  const hit = taskTitleRefCache.get(key);
+  if (!force && hit != null && nowMs - hit.at < ttlMs) return hit.map;
+  const map = new Map<string, string>();
+  try {
+    const rawMap = readTaskFilesAtRefBatch(root, ref, listTaskFilesAtRef(root, ref));
+    for (const [id, raw] of rawMap) {
+      try {
+        const parsed = parseFrontmatter(raw);
+        const fm = parsed.frontmatter as Record<string, unknown>;
+        if (typeof fm.title === "string") map.set(id, fm.title);
+      } catch {
+        // unparseable frontmatter at the ref — leave absent (caller falls back to disk)
+      }
+    }
+  } catch {
+    // git unavailable / not a repo / no such ref — empty map, callers fall back to the disk read
+  }
+  taskTitleRefCache.set(key, { at: nowMs, map });
+  return map;
+}
+
+/** Resolve `<ref>^{commit}` to the commit sha (the ref's current HEAD). null when the ref/object is
+ *  unavailable (git down, not a repo, no such ref). */
+function resolveRefHead(root: string, ref: string): string | null {
+  try {
+    const out = execFileSync("git", ["-C", root, "rev-parse", `${ref}^{commit}`], {
+      encoding: "utf8", timeout: 10_000, stdio: ["ignore", "pipe", "pipe"],
+    }).trim();
+    return out.length > 0 ? out : null;
+  } catch {
+    return null;
+  }
+}
+
+/** This module's liveness budget for the ancestry probe — it runs on the /live read path, where a
+ *  hung git must not hang the page. */
+const ANCESTRY_PROBE_TIMEOUT_MS = 10_000;
+
+/** Whether `ancestor` is a commit-graph ancestor of `descendant`. The PREDICATE is `./core/ancestry.ts`
+ *  (semantic-dedup-scan finding `is-ancestor-three-semantics`); this wrapper is only the timeout
+ *  policy. The incremental commit-time diff is valid only when the prior head is an ancestor of the
+ *  current head (the normal fast-forward fan-in shape); a non-ff rewrite falls back to a full rebuild
+ *  instead of silently returning a partial map.
+ *
+ *  Fold: `null` ("git could not be asked" — timeout, not a repo, unknown object) ⇒ `false`, i.e.
+ *  "assume not an ancestor". The conservative direction HERE is the FULL REBUILD: a false negative
+ *  costs one extra history walk, while a false positive would serve a partial map forever. */
+function isAncestor(root: string, ancestor: string, descendant: string): boolean {
+  return ancestry(root, ancestor, descendant, { timeoutMs: ANCESTRY_PROBE_TIMEOUT_MS }) === true;
+}
+
+/** Parse `git log --format=%cI --name-only` output (newest-first) into Map<taskId, epochMs> — the
+ *  FIRST occurrence of a file is its last commit. Pure; never throws. */
+function parseCommitTimesLog(out: string): Map<string, number> {
+  const map = new Map<string, number>();
+  let cur: number | null = null;
+  for (const line of out.split(/\r?\n/)) {
+    const t = line.trim();
+    if (!t) continue;
+    if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/.test(t)) {
+      cur = Date.parse(t);
+    } else if (cur != null && t.startsWith("tasks/") && t.endsWith(".md")) {
+      const id = t.slice("tasks/".length, -3);
+      if (!map.has(id)) map.set(id, cur); // first occurrence = last commit (log is newest-first)
+    }
+  }
+  return map;
+}
+
+/** Read every task's last-commit time at a git ref, incrementally maintained (AC2): the FIRST build
+ *  walks the whole `tasks/` history in ONE `git log --format=%cI --name-only` pass (single subprocess);
+ *  a later refresh diffs only `oldHead..newHead` and merges the new commits onto the prior map — never
+ *  re-walking the full history. The updated-at source: a develop-derived status ⇒ updated = that file's
+ *  last commit time on develop, so a disk mtime bump after a develop flip no longer moves the display.
+ *  Returns Map<taskId, epochMs>; absent ids are missing (callers fall back to disk mtime). Empty map on
+ *  any git failure. */
+export function readTaskCommitTimesAtRef(
+  root: string,
+  ref: string,
+  { nowMs = Date.now(), ttlMs = TASK_STATUS_REF_CACHE_TTL_MS, force = false, cacheOnly = false } = {},
+): Map<string, number> {
+  const key = `${root}\n${ref}`;
+  const hit = taskCommitTimesRefCache.get(key);
+  if (cacheOnly) {
+    // Request-path read: the cache only, never spawn git — the background refresh owns the build (the
+    // full history walk lives at startup, off the request path). Empty when cold: the caller falls back
+    // to the disk mtime (fail-open). A present-but-TTL-expired map is still returned — the background
+    // refresh, not a request, is what keeps it fresh.
+    return hit != null ? hit.map : new Map();
+  }
+  if (!force && hit != null && nowMs - hit.at < ttlMs) return hit.map;
+
+  const head = resolveRefHead(root, ref);
+  const fullBuild = (): Map<string, number> => {
+    developRefFullWalkCount++;
+    try {
+      const out = execFileSync("git", ["-C", root, "log", "--format=%cI", "--name-only", ref, "--", "tasks/"], {
+        encoding: "utf8", timeout: 30_000, stdio: ["ignore", "pipe", "pipe"],
+      });
+      return parseCommitTimesLog(out);
+    } catch {
+      return new Map(); // git unavailable / not a repo / no such ref
+    }
+  };
+
+  let map: Map<string, number>;
+  if (head == null) {
+    map = new Map(); // git unavailable / no such ref — fail-open empty (callers fall back to disk mtime)
+  } else if (hit != null && hit.head === head) {
+    map = hit.map; // head unchanged since the last build — the map is still current; refresh the TTL clock only
+  } else if (hit != null && hit.head != null && isAncestor(root, hit.head, head)) {
+    // Incremental: merge the commits in (oldHead, head] onto the prior map. A task touched in the
+    // range gets its newer time; one untouched keeps its prior time. The `isAncestor` guard keeps a
+    // non-fast-forward rewrite from producing a silently-wrong partial map.
+    map = new Map(hit.map);
+    developRefBoundedWalkCount++;
+    try {
+      const out = execFileSync("git", ["-C", root, "log", "--format=%cI", "--name-only", `${hit.head}..${head}`, "--", "tasks/"], {
+        encoding: "utf8", timeout: 30_000, stdio: ["ignore", "pipe", "pipe"],
+      });
+      for (const [id, t] of parseCommitTimesLog(out)) map.set(id, t);
+    } catch {
+      map = fullBuild(); // incremental failed (e.g. non-ff rewrite) — never return a partial map
+    }
+  } else {
+    map = fullBuild(); // cold (no prior head) or non-ff — full rebuild
+  }
+  taskCommitTimesRefCache.set(key, { at: nowMs, head, map });
+  return map;
+}
+
+/** Read a single task's last-commit time at a ref. Cache-first (AC3): when the batch commit-time
+ *  reader already holds this task, return it from cache with ZERO git subprocesses; otherwise fall back
+ *  to `git log -1 --format=%cI ref -- tasks/<id>.md`. The /task detail page's `last updated` source —
+ *  the same develop-derived time as the list's updated column (list and detail must agree, not
+ *  list=done/detail=ready). null when the file has no commit at the ref (caller falls back to disk
+ *  mtime). */
+export function readTaskCommitTimeAtRef(root: string, ref: string, taskId: string): number | null {
+  const entry = taskCommitTimesRefCache.get(`${root}\n${ref}`);
+  if (entry != null && entry.map.has(taskId)) {
+    return entry.map.get(taskId) ?? null;
+  }
+  singleTaskGitSpawnCount++;
+  try {
+    const out = execFileSync("git", ["-C", root, "log", "-1", "--format=%cI", ref, "--", `tasks/${taskId}.md`], {
+      encoding: "utf8", timeout: 10_000, stdio: ["ignore", "pipe", "pipe"],
+    }).trim();
+    if (!out) return null;
+    const ms = Date.parse(out);
+    return Number.isFinite(ms) ? ms : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Force-refresh the three develop-ref read caches for one (root, ref) — status + title + commit-time
+ *  together (one ls-tree / one cat-file / one incremental-or-full git log). The three caches share one
+ *  TTL clock and one truth; refreshing them together keeps the detail-page cache-first reads
+ *  (readTaskAtRefMeta / readTaskCommitTimeAtRef) coherent with the list-page reads. Never throws (AC4):
+ *  a git failure is caught inside each reader and again here — the prior cache is kept, the next
+ *  refresh re-fills it. */
+export function refreshDevelopRefCaches(root: string, ref: string): void {
+  try {
+    // Build the slowest face FIRST (the commit-time history walk), so the fast status/title caches end
+    // up freshest when this returns. Each reader stamps its own `Date.now()` at build time (not a shared
+    // clock) — a request right after the refresh hits status/title within their TTL.
+    readTaskCommitTimesAtRef(root, ref, { force: true });
+    readTaskTitleMapAtRef(root, ref, { force: true });
+    readTaskStatusMapAtRef(root, ref, { force: true });
+  } catch {
+    // never throw out of the refresh tick — each reader already degrades; this is belt-and-suspenders
+  }
+}
+
+/** Start the background refresh tick that keeps the develop-ref read caches warm OFF the request path
+ *  (plan §2). Runs one full build immediately (the cold full-history walk lives here, at startup, not in
+ *  a request), then re-refreshes every `intervalMs`. Returns a stop() function; the interval is unref'd
+ *  so it never keeps the process alive. */
+export function startDevelopRefBackgroundRefresh(
+  root: string,
+  ref: string,
+  { intervalMs = 15_000 } = {},
+): { stop: () => void } {
+  const run = (): void => refreshDevelopRefCaches(root, ref);
+  run(); // the cold full build (status + title + commit-time) — at startup, off the request path
+  const handle = setInterval(run, intervalMs);
+  (handle as unknown as { unref?: () => void }).unref?.();
+  return { stop: () => clearInterval(handle) };
+}
+
+/** readLive's task-status read: the canonical develop ref first, the on-disk store as fallback. A
+ *  task landed on develop (status done) but not yet synced to the manager working branch's disk still
+ *  reads as done here — the landed task leaves the in-flight view immediately (AC1). A fresh task that
+ *  exists only on disk (not yet committed to develop) falls back to the disk read (AC2). */
+export function readTaskStatusForLive(root: string, taskId: string): TaskStatus | null {
+  const atRef = readTaskStatusAtRef(root, "develop", taskId);
+  return atRef ?? readTaskStatusOnDisk(root, taskId);
 }
 
 /** Task statuses that mean "no worker is currently running for this task" — the terminal/non-live
@@ -610,6 +1089,160 @@ export function readLiveWorkers(
 // sides cannot name the same carrier differently. Imported at the top of this file and re-exported
 // so the read face's consumers get everything from one place.
 export type { WorkerLivePhase };
+
+export interface LiveStateEntry {
+  taskId: string;
+  runId: string;
+  phase: WorkerLivePhase;
+  /** Dispatch instant (epoch ms). */
+  startedAtMs: number;
+  /** The worker process id, or null when the driver has no live pid for this entry (e.g. an entry
+   *  carried across a driver restart whose process id was not recoverable). */
+  workerPid: number | null;
+  /** The snapshot instant this entry was last rewritten at (epoch ms). */
+  lastHeartbeatMs: number;
+}
+
+/**
+ * The reading's FOUR-state discriminator. `ok` / `stale` / `missing` / `unreadable` are mutually
+ * exclusive values; ⛔ none of them is shaped like "zero in flight" except `ok` with an empty
+ * `inFlight` array, which is a real, evaluated reading.
+ */
+export type LiveStateStatus = "ok" | "stale" | "missing" | "unreadable";
+
+export interface LiveStateReading {
+  status: LiveStateStatus;
+  /** Why this status was chosen (null for `ok`). Carried verbatim so a caller can say WHAT was wrong. */
+  reason: string | null;
+  carrier: string;
+  /** The file's own schema string (echoed only when it validated). */
+  schema: string | null;
+  writtenAt: string | null;
+  writtenAtMs: number | null;
+  /** `nowMs - writtenAtMs` (may be negative under clock skew; null when not evaluated). */
+  ageMs: number | null;
+  staleAfterMs: number;
+  source: string | null;
+  /**
+   * The entries verbatim from the file. `null` means NOT EVALUATED (`missing` / `unreadable`) —
+   * ⛔ never `[]`, which would read as "the driver wrote a snapshot with nobody in flight". For
+   * `stale` the entries ARE returned (they exist) but the status says they may not be trusted.
+   */
+  inFlight: LiveStateEntry[] | null;
+}
+
+// One interface (not a tagged union): the repo's tsconfig has `strict: false` (no strictNullChecks),
+// where narrowing a literal-boolean discriminant does not apply — an optional-field shape says the
+// same thing and type-checks. `snapshot` is non-null exactly when `ok` is true.
+interface ParsedLiveState {
+  ok: boolean;
+  /** Why the parse failed (null on success). */
+  reason: string | null;
+  snapshot: { schema: string; writtenAt: string; writtenAtMs: number; source: string; inFlight: LiveStateEntry[] } | null;
+}
+
+/** Validate one snapshot document. Fail-closed: a shape we cannot read is `unreadable`, never a
+ *  partially-trusted reading (硬规则 3b — "could not read" must not look like "read and OK"). */
+function parseLiveStateSnapshot(text: string): ParsedLiveState {
+  const fail = (reason: string): ParsedLiveState => ({ ok: false, reason, snapshot: null });
+  let raw: unknown;
+  try {
+    raw = JSON.parse(text);
+  } catch (err) {
+    return fail(`not valid JSON: ${err instanceof Error ? err.message : String(err)}`);
+  }
+  if (raw === null || typeof raw !== "object" || Array.isArray(raw)) return fail("top-level value is not an object");
+  const o = raw as Record<string, unknown>;
+  if (o.schema !== LIVE_STATE_SCHEMA) return fail(`schema ${JSON.stringify(o.schema)} ≠ ${LIVE_STATE_SCHEMA}`);
+  if (typeof o.source !== "string" || o.source.length === 0) return fail("missing/empty source");
+  if (typeof o.writtenAt !== "string") return fail("missing writtenAt");
+  const writtenAtMs = Date.parse(o.writtenAt);
+  if (!Number.isFinite(writtenAtMs)) return fail(`writtenAt is not an ISO timestamp: ${JSON.stringify(o.writtenAt)}`);
+  if (!Array.isArray(o.inFlight)) return fail("inFlight is not an array");
+  const inFlight: LiveStateEntry[] = [];
+  for (let i = 0; i < o.inFlight.length; i++) {
+    const e = o.inFlight[i];
+    if (e === null || typeof e !== "object" || Array.isArray(e)) return fail(`inFlight[${i}] is not an object`);
+    const r = e as Record<string, unknown>;
+    const num = (v: unknown): boolean => typeof v === "number" && Number.isFinite(v);
+    if (typeof r.taskId !== "string" || r.taskId.length === 0) return fail(`inFlight[${i}].taskId is missing/empty`);
+    if (typeof r.runId !== "string" || r.runId.length === 0) return fail(`inFlight[${i}].runId is missing/empty`);
+    if (typeof r.phase !== "string" || !(LIVE_STATE_PHASES as readonly string[]).includes(r.phase)) {
+      return fail(`inFlight[${i}].phase ${JSON.stringify(r.phase)} ∉ ${LIVE_STATE_PHASES.join("|")}`);
+    }
+    if (!num(r.startedAtMs)) return fail(`inFlight[${i}].startedAtMs is not a finite number`);
+    if (r.workerPid !== null && !num(r.workerPid)) return fail(`inFlight[${i}].workerPid is neither null nor a finite number`);
+    if (!num(r.lastHeartbeatMs)) return fail(`inFlight[${i}].lastHeartbeatMs is not a finite number`);
+    inFlight.push({
+      taskId: r.taskId,
+      runId: r.runId,
+      phase: r.phase as WorkerLivePhase,
+      startedAtMs: r.startedAtMs as number,
+      workerPid: (r.workerPid === null ? null : r.workerPid) as number | null,
+      lastHeartbeatMs: r.lastHeartbeatMs as number,
+    });
+  }
+  return {
+    ok: true,
+    reason: null,
+    snapshot: { schema: LIVE_STATE_SCHEMA, writtenAt: o.writtenAt, writtenAtMs, source: o.source, inFlight },
+  };
+}
+
+/**
+ * Read `.quay/live-state.json` — ONE small file, no process spawn, no `/proc` scan, no task-store
+ * walk. The four-state result is the whole point: a caller can distinguish 「载体不存在」(the
+ * driver never wrote it / this workspace has no worker driver) from 「载体在但过期」(the driver
+ * stopped rewriting) from 「可读且在阈值内」. ⛔ A boolean "is it fresh" would collapse those.
+ *
+ * `nowMs` is a test seam (the caller controls the observation instant, like `readLive`); the
+ * staleness threshold is a parameter only so a caller with a different heartbeat budget can say so
+ * — it is NOT a per-call tuning knob for hiding staleness.
+ */
+export function readLiveState(
+  root: string,
+  { nowMs = Date.now(), staleMs = LIVE_STATE_STALE_MS }: { nowMs?: number; staleMs?: number } = {},
+): LiveStateReading {
+  const carrier = readCarrierText(root, LIVE_STATE_REL);
+  const base = { carrier: LIVE_STATE_REL, staleAfterMs: staleMs };
+  if (carrier.status === "absent") {
+    return {
+      ...base, status: "missing",
+      reason: `${LIVE_STATE_REL} does not exist — the worker driver has not written a snapshot for this workspace (⛔ NOT "zero in flight")`,
+      schema: null, writtenAt: null, writtenAtMs: null, ageMs: null, source: null, inFlight: null,
+    };
+  }
+  if (carrier.status === "unreadable" || carrier.text == null) {
+    return {
+      ...base, status: "unreadable",
+      reason: `${LIVE_STATE_REL} exists but could not be read: ${carrier.reason ?? "unknown error"} (⛔ NOT "zero in flight")`,
+      schema: null, writtenAt: null, writtenAtMs: null, ageMs: null, source: null, inFlight: null,
+    };
+  }
+  const parsed = parseLiveStateSnapshot(carrier.text);
+  if (!parsed.ok) {
+    return {
+      ...base, status: "unreadable",
+      reason: `${LIVE_STATE_REL} exists but its shape is not ${LIVE_STATE_SCHEMA}: ${parsed.reason} (⛔ NOT "zero in flight")`,
+      schema: null, writtenAt: null, writtenAtMs: null, ageMs: null, source: null, inFlight: null,
+    };
+  }
+  const snap = parsed.snapshot;
+  const ageMs = nowMs - snap.writtenAtMs;
+  const common = {
+    ...base,
+    schema: snap.schema,
+    writtenAt: snap.writtenAt,
+    writtenAtMs: snap.writtenAtMs,
+    ageMs,
+    source: snap.source,
+    inFlight: snap.inFlight,
+  };
+  if (ageMs > staleMs) {
+    return { ...common, status: "stale", reason: `writtenAt is ${ageMs}ms old (> ${staleMs}ms staleness threshold) — the snapshot is a projection and may be out of date` };
+  }
+  return { ...common, status: "ok", reason: null };
+}
 
 /** Read a file, splitting it into `## `-headed sections and keeping the most recent `max` sections. */
 function readRecentSections(root: string, relFile: string, max: number): JournalSection {
