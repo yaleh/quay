@@ -1797,6 +1797,94 @@ test("AC3③ (纯函数) — parsePorcelain 按位置区分已跟踪改动 / 未
   assert.deepEqual(d.untracked, []);
 });
 
+// ════════════════════════════════════════════════════════════════════════════════════════════════════
+// take-develop 拒绝的【消抖】（gap-cross-project-dogfood-quay-self-usage-c2-rk5czv）：同一成因的拒绝
+// 不得逐 tick 重发——一次阻塞 = 一条事件（生产实测：一个 `.mcp.json` 脏工作树 25 分钟写出 21 条逐字
+// 相同的拒绝事件，淹没 syncHealth 窗口）。成因 = reason + offendingPaths；阻塞被成功同步清除后再阻塞，
+// 即便同因也必须落新事件。
+// ════════════════════════════════════════════════════════════════════════════════════════════════════
+
+const DIRTY_CONFIG = "providers:\n  native:\n    enabled: true\n  arch_discovery:\n    enabled: true\n";
+
+function countRefusals(root) {
+  return syncEvents(root).filter((e) => e.event === "doc-develop-sync-semantic-take-develop-refused").length;
+}
+
+test("消抖 — 同一成因的拒绝不逐 tick 重发（一次阻塞 = 一条事件）", (t) => {
+  const root = makeBehindFixture("debounce-same-cause", {
+    developSets: { ".quay/config.yml": CONFIG_DEVELOP },
+    dirtyFiles: { ".quay/config.yml": DIRTY_CONFIG },
+  });
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+
+  syncDocDevelopBidirectional(root);
+  assert.equal(countRefusals(root), 1, "首次阻塞必须落一条拒绝事件（⛔ 未拒绝 ⇒ 本控制空转）");
+  const first = syncEvents(root).find((e) => e.event === "doc-develop-sync-semantic-take-develop-refused");
+  assert.equal(first.reason, "dirty-working-tree");
+  assert.deepEqual(first.offendingPaths, [".quay/config.yml"]);
+
+  // 同一成因再跑一轮同步：拒绝被消抖，不再追加同一条事件。
+  syncDocDevelopBidirectional(root);
+  assert.equal(countRefusals(root), 1, "同因拒绝不得逐 tick 重发（消抖）");
+  assert.equal(
+    syncEvents(root).filter((e) => e.event === "doc-develop-sync-semantic-take-develop-refused").length,
+    1,
+    "拒绝事件条数仍为 1（一次阻塞 = 一条事件）",
+  );
+});
+
+test("消抖 — 成因变化（offendingPaths 不同）⇒ 落新拒绝事件", (t) => {
+  const root = makeBehindFixture("debounce-cause-change", {
+    developSets: { ".quay/config.yml": CONFIG_DEVELOP, "docs/notes.md": "# notes\n\ndevelop-side\n" },
+    dirtyFiles: { ".quay/config.yml": DIRTY_CONFIG },
+  });
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+
+  syncDocDevelopBidirectional(root); // 成因 1：.quay/config.yml
+  assert.equal(countRefusals(root), 1);
+
+  // 换成另一个会阻塞 merge 的已跟踪文件：成因 2 = docs/notes.md（config.yml 先还原干净）。
+  fs.writeFileSync(path.join(root, ".quay", "config.yml"), CONFIG_BASELINE, "utf8");
+  fs.writeFileSync(path.join(root, "docs", "notes.md"), "# notes\n\nlocal second cause\n", "utf8");
+  syncDocDevelopBidirectional(root);
+
+  const refusals = syncEvents(root).filter((e) => e.event === "doc-develop-sync-semantic-take-develop-refused");
+  assert.equal(refusals.length, 2, "成因变了必须落新拒绝事件");
+  assert.deepEqual(refusals.map((r) => r.offendingPaths), [[".quay/config.yml"], ["docs/notes.md"]],
+    "两条事件的成因逐条可区分（⛔ 不是计数）");
+});
+
+test("消抖 — 阻塞被成功同步清除后再阻塞（同因）⇒ 落新拒绝事件", (t) => {
+  const root = makeBehindFixture("debounce-cleared-then-reblocked", {
+    developSets: { ".quay/config.yml": CONFIG_DEVELOP },
+    dirtyFiles: { ".quay/config.yml": DIRTY_CONFIG },
+  });
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+
+  syncDocDevelopBidirectional(root); // 阻塞 1
+  assert.equal(countRefusals(root), 1);
+
+  // 清除：工作树还原干净后同步成功（ff-synced），上一次阻塞结束。
+  fs.writeFileSync(path.join(root, ".quay", "config.yml"), CONFIG_BASELINE, "utf8");
+  syncDocDevelopBidirectional(root);
+  assert.equal(countRefusals(root), 1, "清除后不得追加拒绝事件");
+  assert.ok(
+    syncEvents(root).some((e) => e.event === "doc-develop-sync-ff-synced"),
+    "前置：清除路径确实走 ff-synced（⛔ 未成功同步 ⇒ 本控制空转）",
+  );
+
+  // develop 再前进，author 重新落后 ⇒ 再次阻塞（成因同为 .quay/config.yml）。
+  git(root, "checkout", "-q", "develop");
+  fs.writeFileSync(path.join(root, ".quay", "config.yml"), CONFIG_DEVELOP + "  # second develop move\n", "utf8");
+  git(root, "add", ".quay/config.yml");
+  git(root, "commit", "-q", "-m", "develop-side: move again");
+  git(root, "checkout", "-q", "author");
+  fs.writeFileSync(path.join(root, ".quay", "config.yml"), DIRTY_CONFIG, "utf8");
+
+  syncDocDevelopBidirectional(root);
+  assert.equal(countRefusals(root), 2, "清除后再阻塞（即便同因）必须落新拒绝事件（成功事件打断消抖）");
+});
+
 
 // ════════════════════════════════════════════════════════════════════════════════════════════════════
 // gap-park-reason-mislabels-ac-precheck-as-suite-red 点 3 — markNeedsHuman 的小标题与提交消息必须由

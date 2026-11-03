@@ -968,11 +968,63 @@ function untrackedOverwrittenByReset(root: string, untracked: string[]): string[
   return untracked.filter((p) => tracked.has(p));
 }
 
+/** 两个字符串数组是否逐项相等（消抖判据用）。⛔ 顺序敏感：`git status --porcelain` 对同一状态给出
+ *  的路径序是确定的，顺序变了就是成因变了。 */
+function sameStringArray(a: unknown, b: unknown): boolean {
+  const A = Array.isArray(a) ? (a as unknown[]).map(String) : [];
+  const B = Array.isArray(b) ? (b as unknown[]).map(String) : [];
+  return A.length === B.length && A.every((v, i) => v === B[i]);
+}
+
+/** 同步成功/清除事件（消抖的「阻塞已结束」标记）。出现它 ⇒ 上一次 take-develop 拒绝代表的阻塞已不再
+ *  持续，下一轮再拒绝是【新阻塞】，必须重新落痕（⛔ 不消抖）。 */
+function isSyncClearedEvent(e: string, r: Record<string, unknown>): boolean {
+  if (e === "doc-develop-sync-ff-synced") return true;
+  if (e === "doc-develop-sync-semantic-resolved") return true;
+  // 双向汇总里的 doc→develop 成功（ff-push 或语义兜底）也意味着阻塞已清；"false" 是拒绝/失败，不算清除。
+  if (e === "doc-develop-sync-bidirectional") return r.docToDevelop === true || r.docToDevelop === "true";
+  return false;
+}
+
+/** 读【仍在持续的那一次 take-develop 拒绝】的成因，供消抖比较。从载体末尾往回扫：先遇到拒绝 ⇒ 该次
+ *  阻塞仍在持续（拒绝与本 tick 之间没有成功事件）；先遇到成功/清除事件 ⇒ 上一次阻塞已结束 ⇒ 返回 null
+ *  （新拒绝是新阻塞，不消抖）。读不到/坏行 ⇒ null（不消抖——读不懂不得与「同因」同形，硬规则 6）。 */
+function lastOngoingRefusal(root: string): { reason: unknown; offendingPaths: unknown } | null {
+  let text: string;
+  try { text = fs.readFileSync(path.join(root, DOC_DEVELOP_SYNC_EVENT_REL), "utf8"); } catch { return null; }
+  const lines = text.split("\n");
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const t = lines[i].trim();
+    if (!t) continue;
+    let r: Record<string, unknown>;
+    try { r = JSON.parse(t); } catch { continue; }
+    const e = String(r.event ?? "");
+    if (e === "doc-develop-sync-semantic-take-develop-refused") {
+      return { reason: r.reason, offendingPaths: r.offendingPaths };
+    }
+    if (isSyncClearedEvent(e, r)) return null;
+  }
+  return null;
+}
+
 /** 落一条 take-develop 拒绝事件（拒绝与「已同步」必须在载体上不同形，硬规则 3b）。⛔ 无论成因为何，
- *  恒记工作树读数（point 3）——「拒了、工作树本来干净」与「拒了、工作树里正是这些路径」由此可区分。 */
+ *  恒记工作树读数（point 3）——「拒了、工作树本来干净」与「拒了、工作树里正是这些路径」由此可区分。
+ *
+ *  消抖（gap-cross-project-dogfood-quay-self-usage-c2-rk5czv，Option B「按状态变化消抖」）：同一【成因】
+ *  的拒绝不得逐 tick 重发——一次阻塞 = 一条事件（生产实测：一个 `.mcp.json` 脏工作树在 25 分钟里写出
+ *  21 条逐字相同的拒绝事件，淹没 syncHealth 窗口）。成因 = reason + offendingPaths；工作树的最新读数
+ *  仍保留在【首次】该成因的事件里。成因变了 ⇒ 落新事件。 */
 function refuseTakeDevelop(
   root: string, cur: string, reason: string, offendingPaths: string[], discarded: string[], resolution: string,
 ): void {
+  const last = lastOngoingRefusal(root);
+  if (
+    last !== null
+    && last.reason === reason
+    && sameStringArray(last.offendingPaths, offendingPaths)
+  ) {
+    return; // 消抖：同一成因的拒绝仍在持续，不重复落痕
+  }
   const dirt = workingTreeDirtiness(root);
   writeDocDevelopSyncEvent(root, {
     event: "doc-develop-sync-semantic-take-develop-refused", phase: "take-develop", branch: cur,
