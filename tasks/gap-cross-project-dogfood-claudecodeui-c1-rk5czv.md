@@ -2,7 +2,7 @@
 id: gap-cross-project-dogfood-claudecodeui-c1-rk5czv
 title: "[cross-project dogfood] Quay's selector treats a null subprocess exit
   (spawn/timeout) as 'no valid pick' and still dispatches candidates[0],…"
-status: todo
+status: ready
 labels:
   - gap
   - cross-project-dogfood
