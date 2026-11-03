@@ -6717,8 +6717,11 @@ export async function runResidentLoop(opts: ResidentOptions): Promise<number> {
         step = "selector";
         const sel = await runSelectorWorker(candidates, selectorArgv, rootDir);
         if (!sel) {
-          // 候选非空但 selector 未能给出任何选择（理论上 parseSelectorOutput 必回退首个，不会 null）。
-          waitReason = "pool-empty (selector returned no candidate)";
+          // 候选非空但 selector 交不出选择：现在唯一来源是 selector 子进程 infra 失败（spawn/超时，
+          //   exit null）——parseSelectorOutput 对非空候选必回退首个、不再返回 null（cross-project
+          //   dogfood cpd-771863-1793687392142-rk5czv c1：null exit 曾退化成派 candidates[0]）。
+          //   与「pool-empty」不同形（硬规则 3b）：selector 基建故障绝不当空池报告。
+          waitReason = "selector-infra-failure (selector worker spawn/timeout) — no dispatch this round";
           break;
         }
         step = "spawn-worker";
