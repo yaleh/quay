@@ -87,6 +87,28 @@ test("AC142 AC1 — selector spawn captures stderr; fallback reason carries it (
 });
 
 
+test("cross-project dogfood cpd-771863 c1 — null exit (spawn/timeout) fails closed, ⛔ no candidates[0] fallback", async () => {
+  const candidates = ["gap-a", "gap-b"];
+  // parseSelectorOutput: exitCode === null 是 selector 基建故障（spawn 失败/超时），不是「没选出来」。
+  // 旧实现把它当「no valid pick」回退 candidates[0]，把基建故障静默退化成任意派发。现在必须 fail-closed。
+  assert.equal(parseSelectorOutput("", candidates, null), null, "null exit + empty stdout ⇒ null (no dispatch)");
+  // 负控制：即使 stdout 里恰好有个候选 id，null exit 仍不可信（进程没跑完/没起），不得采纳。
+  assert.equal(
+    parseSelectorOutput("gap-a because it looked done\n", candidates, null),
+    null,
+    "null exit + non-empty stdout ⇒ still null (partial output from a failed run is untrusted)",
+  );
+  // 负控制：非 null 非零 exit（selector 跑完但没选出）仍照旧回退首个候选——本修复只堵 null exit，不碰旧契约。
+  const ran = parseSelectorOutput("", candidates, 1);
+  assert.equal(ran.task, "gap-a");
+  assert.match(ran.reason, /exit 1/);
+
+  // runSelectorWorker: 真实 spawn 失败（binary 不存在）⇒ r.error ⇒ null exit ⇒ 返回 null（不派发）。
+  const r = await runSelectorWorker(candidates, ["/nonexistent/selector-binary-xyz"], "/r");
+  assert.equal(r, null, `selector infra failure must not dispatch: ${JSON.stringify(r)}`);
+});
+
+
 test("AC129 pure — shuffle returns a permutation of its input", () => {
   const src = ["gap-a", "gap-b", "gap-c", "gap-d"];
   const got = shuffle(src);

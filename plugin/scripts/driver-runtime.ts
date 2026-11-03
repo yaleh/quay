@@ -2923,13 +2923,20 @@ export function defaultSelectorArgv(candidateIds: string[], root: string): strin
  *  cpd-943549-1791888744490-fuepz9 实测：首行是在说 `orchestration/dispatch-preference.md` 不存在，
  *  真正的选择在后续行）。旧实现取 `split("\n")[0]`，散文首行的首 token（如 "No"）不是候选 id ⇒
  *  **静默回退 candidates[0]**，丢掉模型已经给出的正确选择，且失败与「模型没选出来」同形（硬规则 3b）。
- *  约定仍是「一行 `<task-id> <reason>`」，故取**首个首 token 命中候选的行**；一行都没有才回退。 */
+ *  约定仍是「一行 `<task-id> <reason>`」，故取**首个首 token 命中候选的行**；一行都没有才回退。
+ *
+ *  ⛔ exitCode === null（spawn 失败 / 超时）是 selector **基础设施故障**，不是「模型没选出来」——
+ *  子进程根本没跑完/没起，其 stdout 不可信。此时若照旧回退 candidates[0]，就把 selector 的基建故障
+ *  静默退化成「任意派发」（cross-project dogfood round cpd-771863-1793687392142-rk5czv c1 实测）。
+ *  故 null exit ⇒ 返回 null（fail-closed，不派发），与「跑完但没选出」可区分（硬规则 3b）。 */
 export function parseSelectorOutput(
   stdout: string,
   candidates: string[],
   exitCode: number | null,
   stderr: string | null = null,
 ): { task: string; reason: string } | null {
+  // null exit = spawn 失败/超时 ⇒ selector 基础设施故障，stdout 不可信 ⇒ fail-closed（不派发）。
+  if (exitCode === null) return null;
   const lines = String(stdout ?? "")
     .split("\n")
     .map((l) => l.trim())
@@ -2962,6 +2969,8 @@ export async function runSelectorWorker(
   if (candidates.length === 0) return null;
   const argv = fixedArgv ?? defaultSelectorArgv(candidates, root);
   const r = await runAsync(argv, { timeoutMs: 120_000, collectStderr: true });
+  // r.error（spawn 失败/超时）⇒ parseSelectorOutput 收 null exit ⇒ 返回 null：selector 基建故障
+  // fail-closed 不派发，⛔ 不退化成 candidates[0]（cross-project dogfood cpd-771863-1793687392142-rk5czv c1）。
   return parseSelectorOutput(r.stdout, candidates, r.error ? null : r.status, r.stderr.trim() || null);
 }
 
