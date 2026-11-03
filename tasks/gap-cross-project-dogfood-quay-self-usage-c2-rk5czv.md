@@ -3,7 +3,7 @@ id: gap-cross-project-dogfood-quay-self-usage-c2-rk5czv
 title: "[cross-project dogfood] Quay's meta-driver re-emits the same
   take-develop rejection every tick with no debounce or human escalation, so
   one…"
-status: todo
+status: ready
 labels:
   - gap
   - cross-project-dogfood
