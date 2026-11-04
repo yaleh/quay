@@ -41,7 +41,7 @@
 
 import fs from "node:fs";
 import path from "node:path";
-import { isDirectEntry } from "./gate-script-base.ts";
+import { isDirectEntrySafe } from "./gate-script-base.ts";
 import { escapeRegExp } from "./regex-escape.ts";
 // The recursive walk over the scan roots lives in fs-walk.ts (was a byte-identical private copy here
 // and in serve-binding-literal-check.ts / worktree-namespace-literal-check.ts — finding
@@ -178,11 +178,4 @@ function main(argv: string[]): number {
   return report.ok ? 0 : 1;
 }
 
-function invokedDirectly(): boolean {
-  try {
-    return isDirectEntry(import.meta, undefined, "registry-path-literal-check");
-  } catch {
-    return false;
-  }
-}
-if (invokedDirectly()) process.exit(main(process.argv.slice(2)));
+if (isDirectEntrySafe("registry-path-literal-check")) process.exit(main(process.argv.slice(2)));

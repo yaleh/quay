@@ -29,7 +29,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { isDirectEntry } from "./gate-script-base.ts";
+import { isDirectEntrySafe } from "./gate-script-base.ts";
 // The recursive walk over SCAN_ROOTS lives in fs-walk.ts (was a byte-identical private copy here and
 // in registry-path-literal-check.ts / serve-binding-literal-check.ts — finding
 // `walkFiles-scan-surface-family`, routine `semantic-dedup-scan`, runId
@@ -143,11 +143,4 @@ function main(argv: string[]): number {
   return report.ok ? 0 : 1;
 }
 
-const invokedDirectly = (() => {
-  try {
-    return isDirectEntry(import.meta, undefined, "worktree-namespace-literal-check");
-  } catch {
-    return false;
-  }
-})();
-if (invokedDirectly) process.exit(main(process.argv.slice(2)));
+if (isDirectEntrySafe("worktree-namespace-literal-check")) process.exit(main(process.argv.slice(2)));

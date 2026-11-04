@@ -56,7 +56,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
-import { helpExit, isDirectEntry, readJsonLines } from "./gate-script-base.ts";
+import { helpExit, isDirectEntrySafe, readJsonLines } from "./gate-script-base.ts";
 
 export const DEFAULT_MAPPING_REL = "plugin/freshness-producers.json";
 
@@ -608,11 +608,4 @@ function main(argv: string[]): number {
   return report.ok ? 0 : 1;
 }
 
-const invokedDirectly = (() => {
-  try {
-    return isDirectEntry(import.meta, undefined, "freshness-producer-coverage-check");
-  } catch {
-    return false;
-  }
-})();
-if (invokedDirectly) process.exit(main(process.argv.slice(2)));
+if (isDirectEntrySafe("freshness-producer-coverage-check")) process.exit(main(process.argv.slice(2)));

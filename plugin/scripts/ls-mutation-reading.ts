@@ -68,7 +68,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { execFileSync, spawnSync } from "node:child_process";
-import { isDirectEntry, flagValue } from "./gate-script-base.ts";
+import { isDirectEntrySafe, flagValue } from "./gate-script-base.ts";
 import { escapeRegExp } from "./regex-escape.ts";
 // The 1-based newline counter lives ONCE in source-text-lib.ts (finding `lineof-lineat`):
 // a private copy here would re-open that family and red plugin/test/source-text-lib.test.mjs.
@@ -649,11 +649,4 @@ function main(argv: string[]): number {
   }
 }
 
-const invokedDirectly = (() => {
-  try {
-    return isDirectEntry(import.meta, undefined, "ls-mutation-reading");
-  } catch {
-    return false;
-  }
-})();
-if (invokedDirectly) process.exit(main(process.argv.slice(2)));
+if (isDirectEntrySafe("ls-mutation-reading")) process.exit(main(process.argv.slice(2)));
