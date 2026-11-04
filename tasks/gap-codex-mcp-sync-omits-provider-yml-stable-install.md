@@ -1,7 +1,7 @@
 ---
 id: gap-codex-mcp-sync-omits-provider-yml-stable-install
 title: codex-mcp-sync 稳定安装漏装 vendor/quay-native/provider.yml（bundle 与其 manifest 未同进同出）
-status: todo
+status: ready
 labels:
   - gap
   - defect
