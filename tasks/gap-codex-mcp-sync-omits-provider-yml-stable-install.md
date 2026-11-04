@@ -87,3 +87,11 @@ grep -rc "ENOENT: no such file or directory, open '/data/home/yale/.local/share/
 - plugin/scripts/codex-mcp-sync.sh
 - plugin/test/codex-mcp-sync-provider-manifest.test.mjs (new)
 - tasks/gap-codex-mcp-sync-omits-provider-yml-stable-install.md
+
+## Blocker
+
+**2026-11-04T15:45:35.421Z — worker 未落地（exited-not-landed）**
+
+- 未落地原因：step=suite: oom-killed (1) — recovery red set is NOT a subset of the develop baseline red set: added=plugin/test/publish-dist-branch-closure-gate.test.mjs changed=- — needs a code fix
+- run_id：wk-prod-anchor
+- session_id：e1a21528-8d04-4639-8cbf-14ff51b70c8e
