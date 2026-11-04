@@ -1,7 +1,7 @@
 ---
 id: gap-worker-round-action-field-conflates-dispatch-and-wait
 title: worker-round 的 action 字段语义混装：dispatch 假阳性（cap 满轮 72/89）与 stop 混淆终态/瞬时
-status: todo
+status: ready
 labels:
   - gap
   - defect
