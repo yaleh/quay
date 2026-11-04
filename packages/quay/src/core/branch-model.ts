@@ -730,20 +730,24 @@ export function ensureDocBranch(root: string, opts: EnsureDocBranchOptions): Doc
   // indistinguishable there); it is its own git read. A non-zero exit (ref vanished mid-run, or a
   // shallow/foreign read) yields `null` — 0 is trusted ONLY when the command succeeded.
   base.behindBaseline = baselineContainsName ? revCount(root, name, LANDING_BASELINE_ROLE) : null;
-  const behind = base.behindBaseline !== null && base.behindBaseline > 0;
-  // The doc branch has commits the baseline does NOT contain — a real fork. It is switched to AS IS,
-  // never merged, never re-pointed, and the report says so explicitly (never silently "reusable").
+  // A strict ancestor (behind, no unique commits) is the lossless-fast-forward case; a real fork
+  // (ahead, has unique commits) is switched to as-is and reported diverged. Same tip (both true) is
+  // the unchanged reusable case. Both predicates rest on the ANCESTRY booleans (already non-null),
+  // not on the lag read: the ff is lossless whether or not `revCount` could measure the exact N.
+  const strictAncestor = baselineContainsName && !nameContainsBaseline;
   const diverged = nameContainsBaseline && !baselineContainsName;
 
   // ── STRICT ANCESTOR ⇒ lossless fast-forward (gap-quay-init-doc-branch-strict-ancestor-…) ────────
-  // `behind` is true exactly when `baselineContainsName` (name is the baseline's ancestor / same tip)
-  // AND the lag is > 0 — i.e. `name` is a STRICT ancestor with no unique commits. `git branch -f
-  // <name> develop` moves only the ref (no tree change, no backup ref needed); then `git checkout
-  // <name>` puts the main checkout onto the doc branch at the CURRENT tree instead of an older one.
-  if (behind) {
+  // `name` is a STRICT ancestor of the baseline: no unique commits. `git branch -f <name> develop`
+  // moves only the ref (no tree change, no backup ref needed); then `git checkout <name>` puts the
+  // main checkout onto the doc branch at the CURRENT tree instead of an older one.
+  if (strictAncestor) {
+    const lagClause =
+      base.behindBaseline !== null
+        ? `it is ${base.behindBaseline} commit(s) BEHIND the landing baseline '${LANDING_BASELINE_ROLE}' (${baselineSha.slice(0, 8)})`
+        : `it is BEHIND the landing baseline '${LANDING_BASELINE_ROLE}' (${baselineSha.slice(0, 8)}) by an unreadable amount`;
     const ffDetail =
-      `'${name}' (${preexistingSha.slice(0, 8)}) — it is ${base.behindBaseline} commit(s) BEHIND the ` +
-      `landing baseline '${LANDING_BASELINE_ROLE}' (${baselineSha.slice(0, 8)}) with no unique ` +
+      `'${name}' (${preexistingSha.slice(0, 8)}) — ${lagClause} with no unique ` +
       `commits (strict ancestor)`;
     if (dryRun) {
       return {
