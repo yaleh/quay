@@ -59,6 +59,7 @@ invariant 不再报 `satisfied`；再贴一次同 tip 的正样本对照（仍�
 ## Touches
 
 - packages/quay/src/core/branch-model.ts
+- packages/quay/src/core/branch-model-types.ts
 - packages/quay/src/cli/init.ts
 - packages/quay/test/doc-branch-lag-report.test.mjs (new)
 - tasks/gap-quay-init-doc-branch-behind-baseline-reports-satisfied.md
