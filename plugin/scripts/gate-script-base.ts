@@ -826,6 +826,29 @@ export function isDirectEntry(importMeta: ImportMeta, argv1: string | undefined,
   return path.basename(entry).replace(/\.(?:js|ts|mjs)$/, "") === expectedBase;
 }
 
+// ── isDirectEntrySafe ────────────────────────────────────────────────────────────────────────────────
+// Fail-closed wrapper around isDirectEntry: returns false on ANY throw instead of letting it escape
+// the top-level CLI guard. Extracted (routine `semantic-dedup-scan`, finding `invoked-directly-guard`,
+// runId `semantic-dedup-scan-1793780123988`, verdict real-duplication, suggestedAction extract) from
+// freshness-producer-coverage-check.ts / probe-fallback-path-check.ts / serve-binding-literal-check.ts /
+// worktree-namespace-literal-check.ts / ls-mutation-reading.ts / registry-path-literal-check.ts, which
+// each carried an identical try/catch-to-false IIFE differing only in the filename literal. Callers now
+// write:
+//   if (isDirectEntrySafe("tool-name")) process.exit(main(process.argv.slice(2)));
+export function isDirectEntrySafe(expectedBase: string): boolean {
+  try {
+    // `importMeta` is deliberately not consulted by isDirectEntry (identity is name-based, never
+    // URL-based — contract above), so the wrapper passes undefined rather than gate-script-base.ts's
+    // own import.meta. That also keeps this pure library (no CLI block) from matching
+    // symlink-mirror-invocation.test.mjs's GUARD_PATTERN (`/isDirectEntry\(import\.meta/`), which
+    // discovers guarded CLIs by code position and would otherwise false-red gate-script-base.ts on
+    // its silent no-args symlink invocation.
+    return isDirectEntry(undefined as unknown as ImportMeta, undefined, expectedBase);
+  } catch {
+    return false;
+  }
+}
+
 // ── git helpers ─────────────────────────────────────────────────────────────────────────────────────
 // The ONE in-process `git <args...>` runner for gate scripts. Extracted (routine `semantic-dedup-scan`,
 // finding `git-helper-collector-gate`, runId `semantic-dedup-scan-1790995446200`, verdict
