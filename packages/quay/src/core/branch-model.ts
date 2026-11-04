@@ -731,32 +731,84 @@ export function ensureDocBranch(root: string, opts: EnsureDocBranchOptions): Doc
   // shallow/foreign read) yields `null` — 0 is trusted ONLY when the command succeeded.
   base.behindBaseline = baselineContainsName ? revCount(root, name, LANDING_BASELINE_ROLE) : null;
   const behind = base.behindBaseline !== null && base.behindBaseline > 0;
+  // The doc branch has commits the baseline does NOT contain — a real fork. It is switched to AS IS,
+  // never merged, never re-pointed, and the report says so explicitly (never silently "reusable").
+  const diverged = nameContainsBaseline && !baselineContainsName;
 
+  // ── STRICT ANCESTOR ⇒ lossless fast-forward (gap-quay-init-doc-branch-strict-ancestor-…) ────────
+  // `behind` is true exactly when `baselineContainsName` (name is the baseline's ancestor / same tip)
+  // AND the lag is > 0 — i.e. `name` is a STRICT ancestor with no unique commits. `git branch -f
+  // <name> develop` moves only the ref (no tree change, no backup ref needed); then `git checkout
+  // <name>` puts the main checkout onto the doc branch at the CURRENT tree instead of an older one.
+  if (behind) {
+    const ffDetail =
+      `'${name}' (${preexistingSha.slice(0, 8)}) — it is ${base.behindBaseline} commit(s) BEHIND the ` +
+      `landing baseline '${LANDING_BASELINE_ROLE}' (${baselineSha.slice(0, 8)}) with no unique ` +
+      `commits (strict ancestor)`;
+    if (dryRun) {
+      return {
+        ...base,
+        state: "behind",
+        action: "fast-forwarded",
+        ok: true,
+        notEvaluated: false,
+        sha: baselineSha,
+        detail: `would fast-forward ${ffDetail} — nothing is lost, so no backup ref is created; the main checkout would then move to '${name}' at the current tree`,
+      };
+    }
+    const ff = git(root, ["branch", "-f", name, LANDING_BASELINE_ROLE]);
+    if (ff.ok !== true) {
+      return {
+        ...base,
+        state: "behind",
+        action: "failed",
+        ok: false,
+        notEvaluated: false,
+        sha: preexistingSha,
+        detail: `could not fast-forward ${ffDetail}: git branch -f ${name} returned non-zero: ${ff.err}`,
+      };
+    }
+    const co = git(root, ["checkout", name]);
+    return {
+      ...base,
+      state: "behind",
+      action: co.ok === true ? "fast-forwarded" : "failed",
+      ok: co.ok === true,
+      notEvaluated: false,
+      sha: baselineSha,
+      detail:
+        co.ok === true
+          ? `fast-forwarded ${ffDetail} to '${LANDING_BASELINE_ROLE}' (${baselineSha.slice(0, 8)}) — nothing lost (strict ancestor), then switched the main checkout to '${name}' at the current tree`
+          : `fast-forwarded ${ffDetail} to '${LANDING_BASELINE_ROLE}' but could not switch the main checkout to '${name}': git checkout returned non-zero: ${co.err}`,
+    };
+  }
+
+  // ── same tip / diverged (ahead) ⇒ switch only, never re-point ───────────────────────────────────
   if (dryRun) {
     return {
       ...base,
-      state: behind ? "behind" : "reusable",
+      state: "reusable",
       action: "switched",
       ok: true,
       notEvaluated: false,
       sha: preexistingSha,
-      detail: behind
-        ? `would switch the main checkout to the existing related branch '${name}' (${preexistingSha.slice(0, 8)}) — ⚠️ it is ${base.behindBaseline} commit(s) BEHIND the landing baseline '${LANDING_BASELINE_ROLE}', so the working copy would fall back to an older tree`
+      detail: diverged
+        ? `would switch the main checkout to the existing related branch '${name}' (${preexistingSha.slice(0, 8)}) — ⚠️ diverged: it has unique commits NOT on '${LANDING_BASELINE_ROLE}'; left as is, never merged or re-pointed`
         : `would switch the main checkout to the existing related branch '${name}' (${preexistingSha.slice(0, 8)}) — unchanged, never renamed or re-pointed`,
     };
   }
   const r = git(root, ["checkout", name]);
   return {
     ...base,
-    state: behind ? "behind" : "reusable",
+    state: "reusable",
     action: r.ok === true ? "switched" : "failed",
     ok: r.ok === true,
     notEvaluated: false,
     sha: preexistingSha,
     detail:
       r.ok === true
-        ? behind
-          ? `switched the main checkout to the existing related branch '${name}' (${preexistingSha.slice(0, 8)}) — ⚠️ it is ${base.behindBaseline} commit(s) BEHIND the landing baseline '${LANDING_BASELINE_ROLE}', so the working copy is now on an older tree`
+        ? diverged
+          ? `switched the main checkout to the existing related branch '${name}' (${preexistingSha.slice(0, 8)}) — ⚠️ diverged: it has unique commits NOT on '${LANDING_BASELINE_ROLE}'; left as is, never merged or re-pointed`
           : `switched the main checkout to the existing related branch '${name}' (${preexistingSha.slice(0, 8)}) — unchanged, never renamed or re-pointed`
         : `could not switch to the existing branch '${name}': git checkout returned non-zero: ${r.err}`,
   };
@@ -951,10 +1003,13 @@ export function formatDocBranchReport(report: DocBranchReport): string {
   // property of the branch rather than as a change to THEIR checkout: measured 2026-10-12 on a fresh
   // repository, the branch flipped `develop` → `author` between two runs with no summary line saying
   // so (gap-init-branch-model-runs-before-auto-commit-fresh-repo-needs-two-runs).
-  // Only the three actions that MOVE it can print it; `noop`/`blocked`/`unreadable`/`failed` leave
+  // Only the four actions that MOVE it can print it; `noop`/`blocked`/`unreadable`/`failed` leave
   // the checkout where it was and must not claim otherwise.
   const movedCheckout =
-    report.action === "created" || report.action === "switched" || report.action === "adopted";
+    report.action === "created" ||
+    report.action === "switched" ||
+    report.action === "adopted" ||
+    report.action === "fast-forwarded";
   if (movedCheckout && report.checkedOut !== null) {
     lines.push(
       `  main checkout: ${report.checkedOut} -> ${report.name}` +

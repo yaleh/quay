@@ -93,8 +93,11 @@ export type DocBranchState =
   | "absent"
   /** ①: the main checkout IS on the landing baseline and a RELATED branch carries the name. */
   | "reusable"
-  /** ①: a RELATED branch carries the name but is BEHIND the landing baseline — the checkout would
-   *  fall back to an older tree (gap-quay-init-doc-branch-behind-baseline-reports-satisfied). */
+  /** ①: a RELATED branch carries the name but is BEHIND the landing baseline (a strict ancestor —
+   *  no unique commits). The doc branch is fast-forwarded to the baseline before the checkout moves
+   *  onto it, so the working copy lands on the CURRENT tree, never an older one
+   *  (gap-quay-init-doc-branch-behind-baseline-reports-satisfied gave the reading;
+   *  gap-quay-init-doc-branch-strict-ancestor-fast-forward made it lossless). */
   | "behind"
   /** ①: the name is taken by a branch with NO ancestry relation to the baseline — a real collision. */
   | "blocked"
@@ -105,7 +108,7 @@ export type DocBranchState =
  *  FAILED is not silently reported as the classification it failed to act on, and so an `adopted`
  *  collision (`state: "blocked"`, `action: "adopted"`) does not print the refusal marker the shell
  *  relays on. */
-export type DocBranchAction = "created" | "switched" | "noop" | "blocked" | "adopted" | "unreadable" | "failed";
+export type DocBranchAction = "created" | "switched" | "fast-forwarded" | "noop" | "blocked" | "adopted" | "unreadable" | "failed";
 
 export interface DocBranchReport {
   state: DocBranchState;

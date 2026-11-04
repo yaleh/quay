@@ -2,6 +2,11 @@
 // doc-branch-lag-report — a doc branch BEHIND the landing baseline must be reported as a lag,
 // never as "unchanged/reusable" or "satisfied" (gap-quay-init-doc-branch-behind-baseline-reports-satisfied).
 //
+// Follow-up (gap-quay-init-doc-branch-strict-ancestor-fast-forward): the STRICT-ANCESTOR behind case
+// (no unique commits on the doc branch) is now fast-forwarded onto the baseline before the checkout
+// moves, so the `ensureDocBranch` half of these tests asserts the ACTION `fast-forwarded` (and the
+// moved ref) while the `checkDocBranchInvariant` half still reports the read-only `behind` state.
+//
 // The defect: `ensureDocBranch` classified an existing related doc branch as `reusable` whenever the
 // two ancestry directions agreed it was related, and `checkDocBranchInvariant` answered `satisfied`
 // the moment the checkout was OFF `develop` — so a main checkout parked on a doc branch 1057 commits
@@ -74,7 +79,7 @@ function runQuayInit(args, cwd) {
 
 // ── AC1: the doc-branch bootstrap reports the explicit lag ───────────────────────────────────────
 
-test("AC1: a doc branch behind develop reports behindBaseline === N (and its own state)", () => {
+test("AC1: a strict-ancestor doc branch behind develop fast-forwards losslessly (its own state + lag)", () => {
   const dir = behindRepo("ac1", 3);
   const beforeDevelop = git(dir, ["rev-parse", "develop"]);
   const beforeAuthor = git(dir, ["rev-parse", "author"]);
@@ -82,14 +87,16 @@ test("AC1: a doc branch behind develop reports behindBaseline === N (and its own
   const r = ensureDocBranch(dir, { name: "author" });
 
   assert.equal(r.behindBaseline, 3, "the lag is a git-rev-list READ, not a boolean-derived guess");
-  assert.equal(r.state, "behind", "behind must not be shaped like the reusable/unchanged case");
-  assert.equal(r.action, "switched", "the checkout still switches — this task changes no behavior");
+  assert.equal(r.state, "behind", "behind is the classification; the fast-forward is the ACTION");
+  assert.equal(r.action, "fast-forwarded", "the strict ancestor is fast-forwarded, not just switched");
   assert.equal(r.ok, true);
   assert.equal(git(dir, ["rev-parse", "--abbrev-ref", "HEAD"]), "author");
-  // ⛔ No ref moved: the doc branch and the baseline are byte-identical to before the call.
+  // ⛔ The doc branch IS fast-forwarded onto the baseline (this task's behavior change): the baseline
+  // stays put while `author` moves onto the current tree — nothing lost (no unique commits).
   assert.equal(git(dir, ["rev-parse", "develop"]), beforeDevelop);
-  assert.equal(git(dir, ["rev-parse", "author"]), beforeAuthor);
-  assert.match(formatDocBranchReport(r), /\[SWITCHED\] doc-branch -> author/);
+  assert.equal(git(dir, ["rev-parse", "author"]), beforeDevelop, "author is fast-forwarded onto develop");
+  assert.notEqual(git(dir, ["rev-parse", "author"]), beforeAuthor, "premise: the ref really moved");
+  assert.match(formatDocBranchReport(r), /\[FAST-FORWARDED\] doc-branch -> author/);
   assert.match(formatDocBranchReport(r), /3 commit\(s\) BEHIND the landing baseline 'develop'/);
 });
 
@@ -147,9 +154,9 @@ test("AC4: `quay init --dry-run` prints the lag number on the doc-branch line", 
   assert.match(r.stdout, /5 commit\(s\) BEHIND the landing baseline 'develop'/);
 });
 
-// ── AC5: behavior is unchanged — the behind case still moves HEAD exactly as before ───────────────
+// ── AC5: the behind case moves HEAD onto the doc branch AND fast-forwards the ref ─────────────────
 
-test("AC5: the behind checkout still lands on the doc branch, with no ref moved", () => {
+test("AC5: the behind checkout lands on the doc branch and the ref is fast-forwarded onto develop", () => {
   const dir = behindRepo("ac5", 6);
   const beforeDevelop = git(dir, ["rev-parse", "develop"]);
   const beforeAuthor = git(dir, ["rev-parse", "author"]);
@@ -157,12 +164,13 @@ test("AC5: the behind checkout still lands on the doc branch, with no ref moved"
 
   const r = ensureDocBranch(dir, { name: "author" });
 
-  // Same HEAD result the pre-task `reusable` arm produced: the main checkout is now on the doc branch.
+  // The main checkout still lands on the doc branch — same tree (the ff moved the ref, not a file).
   assert.equal(git(dir, ["rev-parse", "--abbrev-ref", "HEAD"]), "author");
-  assert.notEqual(git(dir, ["rev-parse", "HEAD"]), beforeHead, "HEAD moved onto the doc branch, exactly as before");
-  // …and NO other ref moved.
+  assert.equal(git(dir, ["rev-parse", "HEAD"]), beforeHead, "the working tree is unchanged — the checkout moved only onto the same commit under the doc branch");
+  // …the baseline does not move, and the doc branch is fast-forwarded onto it.
   assert.equal(git(dir, ["rev-parse", "develop"]), beforeDevelop);
-  assert.equal(git(dir, ["rev-parse", "author"]), beforeAuthor);
-  assert.equal(r.action, "switched");
+  assert.equal(git(dir, ["rev-parse", "author"]), beforeDevelop, "author is fast-forwarded onto develop");
+  assert.notEqual(git(dir, ["rev-parse", "author"]), beforeAuthor, "premise: the ref really moved");
+  assert.equal(r.action, "fast-forwarded");
   assert.equal(r.state, "behind");
 });
