@@ -40,7 +40,7 @@
 | 载体 | 写者 | 何时写 | 每行/内容 |
 |---|---|---|---|
 | `.quay/worker-outcome.jsonl` | `appendOutcome` / `appendOutcomeToFile`（worker-driver.ts:788，**含 `assertFinalState` 词表闸**） | 每任务终态一次（取值见下「`final_state` 的成功态是 `completed`」；**成功态 = `completed`**） | 终态、exit_code、reason、worker_pid、run_id、session_id、wall clock、`mechanical_fan_in{step, verdict{step,exitCode,summary,logFile}, reason, lockHoldSecs, suiteOutcome, suitePid, landedSha}`、worktree_cleanup_* |
-| `.quay/worker-round.jsonl` | `appendRoundToFile` / `computeWorkerRoundRecord`（worker-driver.ts:844） | 常驻循环【每轮】无条件一条（含池空/判停轮，作 liveness 直接量） | ts（首字段）、round、run_id、pid、action(start/dispatch/idle/stop)、in_flight、pool、stop_reason、liveness、cold_start_inflight、needs_human、needs_human_committed |
+| `.quay/worker-round.jsonl` | `appendRoundToFile` / `computeWorkerRoundRecord`（worker-driver.ts:844） | 常驻循环【每轮】无条件一条（含池空/判停轮，作 liveness 直接量） | ts（首字段）、round、run_id、pid、action(start/dispatch/wait/idle/stop)、terminal、in_flight、pool、stop_reason、liveness、cold_start_inflight、needs_human、needs_human_committed |
 
 - **分工**（⛔ 不混用）：outcome 只在任务真终态写；round 每轮写。池空时 outcome 停更会被 supervisor
   `last_record_ts`（读全载体 max）误读为「死亡」，故 round 是无条件心跳。

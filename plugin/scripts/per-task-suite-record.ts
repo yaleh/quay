@@ -73,7 +73,7 @@ import { spawnSync } from "node:child_process";
 // getArgValue now lives in gate-script-base.ts as `flagValue` (it was one of the byte-identical
 // copies of the indexOf+next-arg idiom in plugin/scripts; .quay/routine-findings.jsonl finding
 // `arg-parsing-helper-family`, routine `semantic-dedup-scan`).
-import { isDirectEntry, flagValue } from "./gate-script-base.ts";
+import { isDirectEntry, flagValue, makeCliFail } from "./gate-script-base.ts";
 // the CPU user/sys split admission rule is SHARED with the verification-round writer — one
 // implementation in cpu-split-contract.ts (archguard exact-clone e903751a0cc007ae: the rule was a
 // byte-identical block in both round-record writers, so a fail-closed change could land in one copy).
@@ -388,11 +388,7 @@ export function main(argv) {
   const stateFile = flagValue(args, "--state-file");
   const asJson = args.includes("--json");
 
-  const fail = (msg) => {
-    if (asJson) console.log(JSON.stringify({ ok: false, error: msg }));
-    else console.error(`per-task-suite-record: ${msg}`);
-    return 2;
-  };
+  const fail = makeCliFail("per-task-suite-record", asJson);
 
   let stateFileValues = {};
   if (stateFile) {
