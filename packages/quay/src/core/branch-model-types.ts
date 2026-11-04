@@ -200,7 +200,7 @@ export type DocBranchInvariantReason =
 
 export interface DocBranchInvariantReport {
   state: DocBranchInvariantState;
-  /** False ONLY for `violated` — `pending` and `not-evaluated` are not failures (hard rule 3b). */
+  /** False for `violated` and `behind` — `pending` and `not-evaluated` are not failures (hard rule 3b). */
   ok: boolean;
   /** True iff the verdict was WITHHELD (`state === "not-evaluated"`) — distinct from `ok === true`. */
   notEvaluated: boolean;
