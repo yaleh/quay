@@ -2163,6 +2163,29 @@ export function runPushLagPass(root: string, branch: string, remote: string, rou
 }
 
 /**
+ * worker round 的 `action` 判定（gap-worker-round-action-field-conflates-dispatch-and-wait）：四态语义，
+ * ⛔ 不再用「`reason != null ? "stop" : inFlight > 0 ? "dispatch" : "idle"`」——那会把【终态 halt】与
+ * 【瞬时等待】压成同一个 `stop`，又把【cap 已满的空转轮】（inFlight>0 但本轮未 spawn）误标成 `dispatch`。
+ *   - stop     — 终态停泊（mcp-halt，terminal=true）；只这一种写 stop。
+ *   - wait     — 瞬时等待（resource-gate-wait / pool-empty / filtered-empty / backoff / selector-infra-
+ *                failure，terminal=false）；下一轮重读闸/池，⛔ 不退出。
+ *   - dispatch — 本轮【实际】spawn 了 ≥1 个 worker（spawned>0），且 ready-pool 步确实跑过（pool!==null，
+ *                pool===null ⇒ 本轮物理上不可能派发）。
+ *   - idle     — 以上皆非：cap 已满的空转轮（在飞占满 cap、循环体未进入）、kind 停机且无在飞等无动作轮。
+ * `terminal` 由 stopCondition() 的 `sc.terminal` 原样透传（halt=true / 其余=false），⛔ 在写盘这步不再丢弃。
+ */
+export function computeWorkerRoundAction(opts: {
+  reason: string | null;
+  terminal: boolean;
+  spawned: number;
+  pool: number | null;
+}): "wait" | "stop" | "dispatch" | "idle" {
+  if (opts.reason !== null) return opts.terminal ? "stop" : "wait";
+  if (opts.spawned > 0 && opts.pool !== null) return "dispatch";
+  return "idle";
+}
+
+/**
  * 一条 worker round 记录（AC138-3 无条件心跳）：⛔ 与 outcome 分工——outcome 只在任务真完成（或
  * 终态）时写，池空时 outcome 停更会被 supervisor status 的 last_record_ts（读全载体 max）误读为
  * 「死亡」；round 每轮循环无条件写一条（含池空/判停轮），作 liveness 直接量。ts 是首字段
@@ -2173,10 +2196,12 @@ export function computeWorkerRoundRecord(opts: {
   runId: string;
   pid: number;
   at: string;
-  action: "start" | "dispatch" | "idle" | "stop" | "error";
+  action: "start" | "dispatch" | "idle" | "stop" | "wait" | "error";
   inFlight: number;
   pool: number | null;
   stopReason: string | null;
+  /** stopCondition() 的 `terminal` 原样透传（halt=true / 瞬时等待与其它非停轮=false）。缺省 false。 */
+  terminal?: boolean;
   /** 驻留环错误边界（gap-worker-driver-resident-loop-intermittent-hang）：本轮循环体抛错时的原始
    *  message（⛔ 无错 ⇒ null）。 */
   error?: string | null;
@@ -2275,6 +2300,7 @@ export function computeWorkerRoundRecord(opts: {
     in_flight: opts.inFlight,
     pool: opts.pool,
     stop_reason: opts.stopReason,
+    terminal: opts.terminal ?? false,
     error: opts.error ?? null,
     error_step: opts.errorStep ?? null,
     liveness: opts.liveness ?? null,
@@ -6013,17 +6039,18 @@ export async function runResidentLoop(opts: ResidentOptions): Promise<number> {
   // round 心跳（AC138-3）：worker-outcome 只在任务真完成时写，池空时 outcome 停更会被 supervisor
   // status 的 last_record_ts（读全载体 max）误读为「死亡」；round 每轮循环无条件写一条作 liveness 直接量。
   const roundFile = path.join(rootDir, WORKER_ROUND_REL);
-  const writeRound = (round: number, inFlight: number, pool: number | null, reason: string | null, liveness: LivenessResult | null, reconciled: string[], supersededReclaim: ReclaimSupersededResult | null, detached: { detached: string[]; undetachable: string[] } = { detached: [], undetachable: [] }): void => {
+  const writeRound = (round: number, inFlight: number, pool: number | null, reason: string | null, terminal: boolean, spawned: number, liveness: LivenessResult | null, reconciled: string[], supersededReclaim: ReclaimSupersededResult | null, detached: { detached: string[]; undetachable: string[] } = { detached: [], undetachable: [] }): void => {
     computeGoalBranchReading(); // SPEC-goal-branch §4.3/§4.9：写记录前现读本轮在飞任务的落地目标与未标注重叠
     const record = computeWorkerRoundRecord({
       round,
       runId: runId ?? runPrefix,
       pid: process.pid,
       at: new Date().toISOString(),
-      action: reason != null ? "stop" : inFlight > 0 ? "dispatch" : "idle",
+      action: computeWorkerRoundAction({ reason, terminal, spawned, pool }),
       inFlight,
       pool,
       stopReason: reason,
+      terminal,
       liveness,
       coldStartInflight: [...coldInflight].sort(),
       // gap-live-mechanical-fan-in-inflight-invisible：round 带上具体 task id（含机械 fan-in 窗口——
@@ -6084,6 +6111,7 @@ export async function runResidentLoop(opts: ResidentOptions): Promise<number> {
       inFlight,
       pool,
       stopReason: `error (step=${step}): ${message}`,
+      terminal: false,
       error: message,
       errorStep: step,
       liveness,
@@ -6514,6 +6542,7 @@ export async function runResidentLoop(opts: ResidentOptions): Promise<number> {
     autoTightenReading = null; // 每轮复位（同上：⛔ 上一轮的收紧读数不漏进本轮——「没跑该步 ⇒ null」据此成立）
     let poolSeen: number | null = null;
     let waitReason: string | null = null;
+    let spawnedThisRound = 0; // gap-worker-round-action-field-conflates-dispatch-and-wait：本轮实际 spawn 计数
     let step = "start";
     try {
       // 冷启动在飞【现观测】（每趟 pass，SPEC §5.2 actual=observe()）：worker 退出 / worktree 消失任一
@@ -6739,6 +6768,7 @@ export async function runResidentLoop(opts: ResidentOptions): Promise<number> {
           }
         }
         await spawnSelected(sel);
+        spawnedThisRound += 1; // spawnSelected 成功返回即本轮实际 spawn 了一个 worker（⛔ 抛错则走 error 轮）
       }
 
       // 2'. kind 停机（`stop --kind worker` / `restart --kind worker`）⇒ 在飞 worker **脱钩**留在原地
@@ -6762,7 +6792,9 @@ export async function runResidentLoop(opts: ResidentOptions): Promise<number> {
       }
 
       // AC138-3 无条件心跳：每轮循环写一条（⛔ 池空/判停轮也写——outcome 在这些轮不写）。
-      //   终态 stopReason 与瞬时 waitReason 都记 action=stop（观测面保留 stop_reason 读数，AC2）。
+      //   action 四态（gap-worker-round-action-field-conflates-dispatch-and-wait）：终态 halt 写 stop
+      //   （terminal=true）；瞬时等待写 wait（terminal=false）；本轮实际 spawn 写 dispatch；其余（cap
+      //   已满空转 / kind 停机无在飞）写 idle。⛔ 不再把 stop 与 wait 压成一个 stop、也不把 cap 满当 dispatch。
       // GOAL-037（AC-367）：轮末的**自动收紧**一步——判「放宽比不放宽多花太多」并把收紧落进既有
       //   控制态载体。放在 writeRound **之前**：本步的读数要进本轮记录（它是本轮发生的第 N 件事，
       //   ⛔ 不推到下一轮——下一轮可能因停机而永不发生，那会让「已收紧但无人知道」成立）。
@@ -6770,7 +6802,7 @@ export async function runResidentLoop(opts: ResidentOptions): Promise<number> {
       step = "auto-tighten";
       autoTightenReading = runAutoTightenPass(rootDir, Date.now());
       step = "write-round";
-      writeRound(round, running.length, poolSeen, stopReason ?? waitReason, liveness, reconciled, supersededReclaimResult, { detached: detachedTasks, undetachable: undetachableRws.map((rw) => rw.task) });
+      writeRound(round, running.length, poolSeen, stopReason ?? waitReason, stopReason !== null, spawnedThisRound, liveness, reconciled, supersededReclaimResult, { detached: detachedTasks, undetachable: undetachableRws.map((rw) => rw.task) });
 
       // 3. kind 停机请求已到 ∧ 没有「收尾流水线已在跑」的在飞 ⇒ 立刻退环，⛔ 不等在飞跑完。
       //    （生产 driver argv 无 --json ⇒ 退环这件事的可观测载体是 round 记录的 detached_workers
