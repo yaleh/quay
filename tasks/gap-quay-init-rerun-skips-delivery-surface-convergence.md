@@ -2,7 +2,7 @@
 id: gap-quay-init-rerun-skips-delivery-surface-convergence
 title: quay init 在合法 config 上重跑只对账 config、不收敛交付面（Codex 三件套 + 4 条孤儿锁 gitignore
   规则到不了老项目）
-status: ready
+status: done
 labels:
   - gap
   - defect
