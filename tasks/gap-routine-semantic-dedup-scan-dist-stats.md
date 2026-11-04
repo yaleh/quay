@@ -46,7 +46,7 @@ extract
 - `node --no-warnings --experimental-strip-types --test plugin/test/dist-stats-ssot.test.mjs` → 8/8 pass；其中 ② 断言 leaf 声明本 cluster、③ 断言两个消费者只 import 不再 declare、④ 断言两消费者与 leaf 是同一函数对象、⑤ 行为 oracle 钉住空样本策略、⑥ 断言两个消费者不再携带 leaf 的 byte-identical body 行。
 - `node --no-warnings --experimental-strip-types --test plugin/test/duration-report.test.mjs plugin/test/fan-in-queueing-model.test.mjs` → 31/31 pass；`plugin/test/touches-relax-ledger.test.mjs plugin/test/touches-relax-auto-tighten.test.mjs` → 18/18 pass。
 - `node --no-warnings --experimental-strip-types --test plugin/test/capability-catalog.test.mjs` → 18/18 pass（新 leaf 已登记进 catalog，`--summary` 自报 412 scripts | 412 declared | 0 unclassified，EXIT=0）。
-- `grep -rnE "export function (dist|percentile)\\b" plugin/scripts` → 修复后 `dist`/`percentile` 声明各 1 处（均 `plugin/scripts/dist-stats.ts`）；修复前 `duration-report.ts` / `fan-in-queueing-model.ts` 各 1 处（即 finding 记录的位置）。
+- 复核判据（可核，非声明）：finding 记录的两个位置已消失——对 `plugin/scripts/duration-report.ts` 与 `plugin/scripts/fan-in-queueing-model.ts` 跑 grep（`export function (dist|percentile)\b`、`export interface Dist\b`、`export const NOT_EVALUATED\b`、`export type MaybeNum\b`）→ **0 命中**；本 cluster 的声明只在 `plugin/scripts/dist-stats.ts`（dist / percentile / Dist / MaybeNum / NOT_EVALUATED 各 1 处）。
 - 落地提交：`3ff20663d`（worktree `task/gap-routine-semantic-dedup-scan-dist-stats`）。
 
 **5b 边界（修好一处 ≠ 只在一处，写明而非沉默略过）**：`defect-latency-pair.ts` 自带同形不同策的 `dist`/`percentile`（空样本用 `null` 而非字符串哨兵），那是独立的 rate-gated finding `percentile-duplicate` / `percentile-conventions-diverged`，本任务只收敛字符串哨兵这一对，未扩大范围。`plugin/scripts/` 内其余同名 `NOT_EVALUATED` 是 exit-code 哨兵（finding `sentinel-not-evaluated-names`），属另一个 finding，同样不在本任务 Touches。
