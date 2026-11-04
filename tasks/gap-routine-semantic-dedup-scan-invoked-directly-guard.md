@@ -3,7 +3,7 @@ id: gap-routine-semantic-dedup-scan-invoked-directly-guard
 title: 'semantic-dedup-scan: Identical
   isDirectEntry(import.meta,undefined,"<file>") try/catch-to-false guard
   differing only in filename literal across four files.'
-status: ready
+status: done
 labels:
   - gap
   - routine-filed
