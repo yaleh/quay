@@ -86,6 +86,7 @@ grep -rc "ENOENT: no such file or directory, open '/data/home/yale/.local/share/
 
 - plugin/scripts/codex-mcp-sync.sh
 - plugin/test/codex-mcp-sync-provider-manifest.test.mjs (new)
+- plugin/test/publish-dist-branch-closure-gate.test.mjs
 - tasks/gap-codex-mcp-sync-omits-provider-yml-stable-install.md
 
 ## ADR-007
