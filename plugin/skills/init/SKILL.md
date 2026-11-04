@@ -1,6 +1,6 @@
 ---
 name: init
-description: "Initialize a workspace as a quay project — write the six-file config surface (.quay/config.yml, .quay/profiles.yml, tasks/, .gitignore, .claude/launch.settings.json, .claude/settings.json) and print the explicit quay plugin install steps. Idempotent."
+description: "Initialize a workspace as a quay project — write the closed-set config surface (see 'Write surface') and print the explicit quay plugin install steps. Idempotent."
 allowed-tools: Bash, Read
 ---
 
@@ -71,18 +71,31 @@ fresh-install template used to emit `serve.host`/`serve.port` while the script's
 Now neither writes it: an absent section IS the fallback. A user who pins their own `host:`/`port:`
 keeps it verbatim (nothing writes under `serve:` on upgrade).
 
-## Write surface (the six-file closed set)
+## Write surface (the ten-item closed set)
+
+The closed set is the SINGLE source `CLOSED_SET_ITEMS` in
+`packages/quay/src/init/delivery-surface.ts`; the list below is its SKILL-side rendering and must not
+drift from it (`packages/quay/test/init-rerun-convergence.test.mjs` AC5 guards it — an item removed
+here reds the suite).
 
 ```
-.quay/config.yml            provider map + loop params (generated)
-.quay/profiles.yml          launcher/model carrier (plugin template, verbatim)
-tasks/                      task directory (created, empty)
-.gitignore                  quay runtime-state ignore entries (appended, idempotent)
+.quay/config.yml              provider map + loop params (generated)
+.quay/profiles.yml            launcher/model carrier (plugin template, verbatim)
+tasks/                        task directory (created, empty)
+goals/                        goal directory (created, empty)
+.gitignore                    quay runtime-state ignore entries (appended, idempotent)
 .claude/launch.settings.json  per-role launch config (plugin template, verbatim)
-.claude/settings.json       enabledPlugins + permissions.allow (generated)
+.claude/settings.json         enabledPlugins + permissions.allow (generated)
+.codex/config.toml            Codex MCP registration (create-if-absent)
+.agents/skills/               Codex host skills directory (created, empty)
+AGENTS.md                     Codex-facing resident guide (create-if-absent)
 ```
 
-Nothing else is written. The retired extension-file copy machinery (`copy_one` / `copy_dir` /
+Each item is CREATE-IF-ABSENT except `.quay/config.yml` (generated/reconciled) and
+`.claude/settings.json` (read-modify-write); nothing pre-existing is overwritten. Re-running init on
+an already-initialized project converges the Codex trio and the `.gitignore` runtime rules too
+(`gap-quay-init-rerun-skips-delivery-surface-convergence`), so a surface added by a later version
+reaches existing projects. The retired extension-file copy machinery (`copy_one` / `copy_dir` /
 `derive_loop_scripts` / `write_state_file` + the managed/conflict/stale three-state machine) was
 archived with `gap-quay-init-closure-shrink-body` (AC168).
 

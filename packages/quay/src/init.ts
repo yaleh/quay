@@ -857,6 +857,14 @@ export interface InitResult {
   /** The explicit install-steps text a fresh install prints (`printInstallSteps`). */
   installSteps?: string;
   /**
+   * The delivery-surface paths this run ADDED on a valid-config rerun (the Codex trio and/or
+   * `.gitignore`) — `gap-quay-init-rerun-skips-delivery-surface-convergence`. Empty when nothing was
+   * missing (a second run reports nothing) and absent on outcome paths that never converge.
+   */
+  deliverySurfaceAdded?: string[];
+  /** `.gitignore` convergence warnings (e.g. the runtime-artifact manifest could not be read). */
+  deliverySurfaceWarnings?: string[];
+  /**
    * The project-scope plugin-version cross-check (gap-init-plugin-version-crosscheck-project-scope-shadow):
    * which version THIS project will actually load (the session layer's `projectPath` tier rule) vs the
    * version running init. Carried on EVERY outcome (the wrapper attaches it) so a caller can tell
@@ -1677,6 +1685,55 @@ const AGENTS_MD_TEMPLATE = [
   "Codex host surface and carries no copied policy.",
 ].join("\n") + "\n";
 
+/**
+ * `writeCodexTrioIfAbsent` — create-if-absent laydown of the Codex host trio (`.codex/config.toml`,
+ * the `.agents/skills` host directory, and `AGENTS.md`). Returns the relative paths ACTUALLY created
+ * this run (empty when all three pre-existed) so a caller can report them. Never overwrites: an
+ * existing file is the consumer's own and is left byte-identical (the same discipline as
+ * `.claude/launch.settings.json`).
+ */
+function writeCodexTrioIfAbsent(root: string, pluginRoot?: string | null): string[] {
+  const added: string[] = [];
+  const codexConfigPath = path.join(root, ".codex", "config.toml");
+  if (!fs.existsSync(codexConfigPath)) {
+    fs.mkdirSync(path.dirname(codexConfigPath), { recursive: true });
+    fs.writeFileSync(codexConfigPath, generateCodexConfigToml(root, pluginRoot), "utf8");
+    added.push(".codex/config.toml");
+  }
+  const agentsSkillsDir = path.join(root, ".agents", "skills");
+  if (!fs.existsSync(agentsSkillsDir)) {
+    fs.mkdirSync(agentsSkillsDir, { recursive: true });
+    added.push(".agents/skills");
+  }
+  const agentsMdPath = path.join(root, "AGENTS.md");
+  if (!fs.existsSync(agentsMdPath)) {
+    fs.writeFileSync(agentsMdPath, generateAgentsMd(), "utf8");
+    added.push("AGENTS.md");
+  }
+  return added;
+}
+
+/**
+ * `convergeDeliverySurface` — the RERUN half of the delivery-surface laydown
+ * (gap-quay-init-rerun-skips-delivery-surface-convergence). An existing project with a VALID config
+ * used to reach only the config reconcile and never the create-if-absent delivery surface, so the
+ * Codex trio and the `.gitignore` runtime rules added by a later version never reached it. This runs
+ * the same create-if-absent writes the fresh path runs — WITHOUT overwriting any pre-existing file —
+ * and reports what it added. `.gitignore` is reported as added whenever `ensureGitignore` appended
+ * its blocks (idempotent: a second run reports nothing).
+ */
+function convergeDeliverySurface(
+  root: string,
+  opts: { pluginRoot?: string | null; runtimeArtifactsManifest?: string | null; log?: (l: string) => void } = {},
+): { added: string[]; warnings: string[] } {
+  const say = opts.log ?? ((l: string) => console.log(l));
+  const added = writeCodexTrioIfAbsent(root, opts.pluginRoot);
+  for (const p of added) say(`  added: ${p}`);
+  const gi = ensureGitignore(root, { runtimeArtifactsManifest: opts.runtimeArtifactsManifest, log: say });
+  if (gi.wrote) added.push(".gitignore");
+  return { added, warnings: gi.warnings };
+}
+
 /** Build the `<project>-<role>` session-name prefix. Mirrored (same rule, same output) by
  * `quay-init.sh`'s `profiles_name_prefix()`; a divergence is caught by the byte-equality test in
  * `plugin/test/profiles-role-coverage-check.test.mjs`. */
@@ -2185,6 +2242,20 @@ function runInitImpl(opts: InitOptions): Omit<InitResult, "workspaceRoot" | "doc
       dryRun: opts.dryRun,
       log: opts.log,
     });
+    // ── Delivery-surface convergence on RERUN (gap-quay-init-rerun-skips-delivery-surface-convergence) ──
+    // A valid config used to stop here and never reach the create-if-absent laydown the fresh path
+    // runs, so the Codex trio and the `.gitignore` runtime rules added by a later version never
+    // reached an already-initialized project. Run the same create-if-absent writes now — WITHOUT
+    // overwriting anything — and report what was added so the fix is observable, never silent.
+    // ⛔ `--dry-run` writes nothing, so it records no added paths (its job is the plan, not the disk).
+    let deliverySurfaceAdded: string[] = [];
+    let deliverySurfaceWarnings: string[] = [];
+    if (!opts.dryRun) {
+      const manifest = opts.pluginRoot ? path.join(opts.pluginRoot, "scripts", "quay-runtime-artifacts.txt") : null;
+      const converged = convergeDeliverySurface(root, { pluginRoot: opts.pluginRoot, runtimeArtifactsManifest: manifest, log: say });
+      deliverySurfaceAdded = converged.added;
+      deliverySurfaceWarnings = converged.warnings;
+    }
     // The closed set is committed outside `--dry-run` (nothing to commit) — the shipped shell entry
     // runs this step on EVERY mode, so a re-run can commit scaffolds an earlier run left behind.
     const upgradeAutoCommit = opts.dryRun ? undefined : autoCommitClosedSet(root, opts.autoCommitConfig ?? "prompt", readPluginVersion(opts.pluginRoot));
@@ -2192,6 +2263,8 @@ function runInitImpl(opts: InitOptions): Omit<InitResult, "workspaceRoot" | "doc
       outcome: up.report.untouched ? "unchanged" : "reconciled",
       content: up.content,
       pluginLink,
+      deliverySurfaceAdded,
+      ...(deliverySurfaceWarnings.length > 0 ? { deliverySurfaceWarnings } : {}),
       ...(upgradeAutoCommit ? { autoCommit: upgradeAutoCommit } : {}),
       ...base,
     };
@@ -2350,17 +2423,8 @@ function runInitImpl(opts: InitOptions): Omit<InitResult, "workspaceRoot" | "doc
     // `.codex/config.toml` (MCP registration, cwd = THIS target root) + the `.agents/skills` host
     // directory + `AGENTS.md`. All three are CREATE-IF-ABSENT, like launch.settings.json: an existing
     // file is the consumer's own and is left alone (a config.toml already present must not be clobbered).
-    const codexConfigPath = path.join(root, ".codex", "config.toml");
-    if (!fs.existsSync(codexConfigPath)) {
-      fs.mkdirSync(path.dirname(codexConfigPath), { recursive: true });
-      fs.writeFileSync(codexConfigPath, generateCodexConfigToml(root, opts.pluginRoot), "utf8");
-    }
-    const agentsSkillsDir = path.join(root, ".agents", "skills");
-    if (!fs.existsSync(agentsSkillsDir)) fs.mkdirSync(agentsSkillsDir, { recursive: true });
-    const agentsMdPath = path.join(root, "AGENTS.md");
-    if (!fs.existsSync(agentsMdPath)) {
-      fs.writeFileSync(agentsMdPath, generateAgentsMd(), "utf8");
-    }
+    // The write is the SAME single helper the valid-config rerun path uses (硬规则 5b — one writer).
+    writeCodexTrioIfAbsent(root, opts.pluginRoot);
 
     // The `.quay/plugin` RETIREMENT (human ruling 2026-10-25): init no longer creates the guidance
     // link. A symlink left by an older init is deleted here; anything else at that name is the user's
@@ -2555,6 +2619,12 @@ export interface InitReport {
   projectValues: string[];
   /** Unrecognized top-level keys, PRESERVED and reported. */
   unknownKeys: string[];
+  /**
+   * Delivery-surface paths added this run on a valid-config rerun (the Codex trio and/or
+   * `.gitignore`) — `gap-quay-init-rerun-skips-delivery-surface-convergence`. Empty when nothing was
+   * missing, so a second run reports no additions (AC3 idempotence).
+   */
+  deliverySurfaceAdded: string[];
   /** The `.quay/plugin` retirement step's outcome (three required + auxiliary states, see `PluginLinkOutcome`). */
   pluginLink: PluginLinkOutcome;
   /**
@@ -2577,6 +2647,7 @@ export function buildInitReport(result: InitResult, o: { dryRun: boolean }): Ini
   const unknownKeys = result.upgrade?.unknownKeys ?? [];
   const warnings = [
     ...unknownKeys.map((k) => `unrecognized top-level config key "${k}" — kept as-is (not deleted)`),
+    ...(result.deliverySurfaceWarnings ?? []),
     ...(result.validated === false
       ? issues.filter((i) => i.severity === "error").map((i) => `candidate config did not validate: ${i.field} — ${i.message}`)
       : []),
@@ -2599,6 +2670,7 @@ export function buildInitReport(result: InitResult, o: { dryRun: boolean }): Ini
     dropped: result.upgrade?.dropped ?? [],
     projectValues: result.upgrade?.projectValues ?? [],
     unknownKeys,
+    deliverySurfaceAdded: result.deliverySurfaceAdded ?? [],
     pluginLink: result.pluginLink,
     docBranchInvariant: result.docBranchInvariant,
     ...(o.dryRun ? { content: result.content } : {}),

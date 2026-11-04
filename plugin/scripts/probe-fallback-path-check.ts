@@ -46,7 +46,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
-import { isDirectEntry } from "./gate-script-base.ts";
+import { isDirectEntrySafe } from "./gate-script-base.ts";
 import { parseFrontmatter } from "./read-probe-spec.ts";
 
 /** A FALLBACK declaration marker inside a probe body (case-insensitive). A BLOCKQUOTE line carrying
@@ -387,11 +387,4 @@ function main(argv: string[]): number {
   return report.ok ? 0 : 1;
 }
 
-const invokedDirectly = (() => {
-  try {
-    return isDirectEntry(import.meta, undefined, "probe-fallback-path-check");
-  } catch {
-    return false;
-  }
-})();
-if (invokedDirectly) process.exit(main(process.argv.slice(2)));
+if (isDirectEntrySafe("probe-fallback-path-check")) process.exit(main(process.argv.slice(2)));
