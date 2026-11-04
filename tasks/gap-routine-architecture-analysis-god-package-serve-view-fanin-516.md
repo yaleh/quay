@@ -2,7 +2,7 @@
 id: gap-routine-architecture-analysis-god-package-serve-view-fanin-516
 title: "architecture-analysis: web view layer is the most-imported surface;
   every serve page/cell pulls its render+binding helpers"
-status: ready
+status: done
 labels:
   - gap
   - routine-filed
