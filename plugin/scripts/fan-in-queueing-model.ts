@@ -48,19 +48,11 @@ import { spawnSync } from "node:child_process";
 // 本文件只**引用**它，⛔ 不自造第二套键（硬规则 5b）。键共享、策略各自留在消费者处——见
 // `pairLockHolds` 的 POLICY 注解（gap-fan-in-lock-hold-pairing-two-divergent-keys）。
 import { lockHoldKey } from "./fan-in-ff-protocol-check.ts";
-
-// ── 取值词表：三态，⛔ 「未评估」不得与数值共用形状 ───────────────────────────────
-export const NOT_EVALUATED = "NOT-EVALUATED" as const;
-export type MaybeNum = number | typeof NOT_EVALUATED;
-
-export interface Dist {
-  n: number;
-  min: MaybeNum;
-  median: MaybeNum;
-  p90: MaybeNum;
-  max: MaybeNum;
-  mean: MaybeNum;
-}
+// dist 百分位摘要 + 空样本策略的【唯一】定义在 dist-stats.ts（semantic-dedup-scan finding
+// `dist-stats`）。本文件 import 供本地使用、re-export 保持旧 import 面
+// （fan-in-queueing-model.test.mjs 仍从这里取 percentile/dist/NOT_EVALUATED）。
+import { NOT_EVALUATED, percentile, dist, type MaybeNum, type Dist } from "./dist-stats.ts";
+export { NOT_EVALUATED, percentile, dist, type MaybeNum, type Dist } from "./dist-stats.ts";
 
 export interface LockHold {
   taskId: string | null;
@@ -101,28 +93,6 @@ export interface FanInAttempt {
   totalSecs: MaybeNum;
   /** |total − (wait+suite+other)| / total。 */
   residual: MaybeNum;
-}
-
-// ── 统计小工具（不引第三方）─────────────────────────────────────────────────────
-export function percentile(sorted: number[], p: number): MaybeNum {
-  if (sorted.length === 0) return NOT_EVALUATED;
-  const i = Math.min(sorted.length - 1, Math.max(0, Math.floor((sorted.length - 1) * p)));
-  return sorted[i];
-}
-
-export function dist(xs: number[]): Dist {
-  if (xs.length === 0) {
-    return { n: 0, min: NOT_EVALUATED, median: NOT_EVALUATED, p90: NOT_EVALUATED, max: NOT_EVALUATED, mean: NOT_EVALUATED };
-  }
-  const s = [...xs].sort((a, b) => a - b);
-  return {
-    n: s.length,
-    min: s[0],
-    median: percentile(s, 0.5),
-    p90: percentile(s, 0.9),
-    max: s[s.length - 1],
-    mean: s.reduce((a, b) => a + b, 0) / s.length,
-  };
 }
 
 /** ISO 时间戳 → 毫秒 epoch。⛔ 不用 Date.parse（它对带 Z 的串依赖实现，且静默接受杂串）。 */
