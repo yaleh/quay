@@ -165,7 +165,7 @@ import path from "node:path";
 // getArgValue now lives in gate-script-base.ts as `flagValue` (it was one of the byte-identical
 // copies of the indexOf+next-arg idiom in plugin/scripts; .quay/routine-findings.jsonl finding
 // `arg-parsing-helper-family`, routine `semantic-dedup-scan`).
-import { isDirectEntry, flagValue } from "./gate-script-base.ts";
+import { isDirectEntry, flagValue, makeCliFail } from "./gate-script-base.ts";
 // countHeldSuiteLocks (with the probeLockHeld primitive it reduces over) comes from the canonical slot
 // module too — the local suiteLockPaths/probeLockHeld pair that used to shadow it here is gone
 // (finding `probe-lock-held`, routine `semantic-dedup-scan`).
@@ -999,11 +999,7 @@ export function main(argv) {
   const recordFileOverride = flagValue(args, "--record-file");
   const asJson = args.includes("--json");
 
-  const fail = (msg) => {
-    if (asJson) console.log(JSON.stringify({ ok: false, error: msg }));
-    else console.error(`pre-verified-round-record: ${msg}`);
-    return 2;
-  };
+  const fail = makeCliFail("pre-verified-round-record", asJson);
 
   const built = buildPreVerifiedRoundRecord({
     taskId: flagValue(args, "--task-id"),
