@@ -99,9 +99,9 @@ test("AC3 — resource-gate WAIT ⇒ resident loop stops starting workers (zero 
   await waitFor(() => readRoundLines(root).length >= 1);
   assert.equal(drv.events().some((e) => e.event === "worker-spawned"), false, "AC3: no worker spawned while resource-gate reports WAIT");
   assert.equal(readOutcomeLines(root).length, 0, "zero outcome records — nothing was dispatched");
-  const stop = readRoundLines(root).find((r) => r.action === "stop");
-  assert.ok(stop, "the stop round is recorded (not silent)");
-  assert.match(stop.stop_reason, /resource-gate-wait/);
+  const wait = readRoundLines(root).find((r) => r.action === "wait");
+  assert.ok(wait, "the wait round is recorded (not silent)");
+  assert.match(wait.stop_reason, /resource-gate-wait/);
   assert.equal(drv.child.exitCode, null, "WAIT is transient — the driver does NOT exit (no permanent latch)");
 });
 

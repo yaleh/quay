@@ -227,7 +227,7 @@ test("AC1 (gap-worker-driver-stopreason-latch-permanent-stop) — gate first WAI
 });
 
 
-test("AC2 (gap-worker-driver-stopreason-latch-permanent-stop) — adjacent stop rounds re-acquire the resource reading (⛔ not byte-identical)", async (t) => {
+test("AC2 (gap-worker-driver-stopreason-latch-permanent-stop) — adjacent wait rounds re-acquire the resource reading (⛔ not byte-identical)", async (t) => {
   const root = makeRoot("stop-latch-ac2");
   // gate: always WAIT (exit 1) but each call prints an incrementing reading ⇒ stop_reason differs per round.
   const gateCnt = path.join(root, "gate.cnt");
@@ -243,10 +243,10 @@ test("AC2 (gap-worker-driver-stopreason-latch-permanent-stop) — adjacent stop 
   t.after(() => drv.stop());
   t.after(() => rmSafe(root));
   await waitFor(() => readRoundLines(root).length >= 3, 15000);
-  const stops = readRoundLines(root).filter((r) => r.action === "stop");
-  assert.ok(stops.length >= 2, "at least two stop rounds written (the driver re-reads the gate each poll)");
-  assert.match(stops[0].stop_reason, /resource-gate-wait/);
-  assert.match(stops[1].stop_reason, /resource-gate-wait/);
-  assert.notEqual(stops[0].stop_reason, stops[1].stop_reason, "AC2: adjacent stop readings differ (re-acquired each round, ⛔ not latched byte-identical)");
+  const waits = readRoundLines(root).filter((r) => r.action === "wait");
+  assert.ok(waits.length >= 2, "at least two wait rounds written (the driver re-reads the gate each poll)");
+  assert.match(waits[0].stop_reason, /resource-gate-wait/);
+  assert.match(waits[1].stop_reason, /resource-gate-wait/);
+  assert.notEqual(waits[0].stop_reason, waits[1].stop_reason, "AC2: adjacent wait readings differ (re-acquired each round, ⛔ not latched byte-identical)");
   await drv.stop();
 });
