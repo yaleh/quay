@@ -52,3 +52,11 @@ extract
 - `plugin/scripts/serve-binding-literal-check.ts`
 - `plugin/scripts/worktree-namespace-literal-check.ts`
 - `tasks/gap-routine-semantic-dedup-scan-invoked-directly-guard.md`
+
+## Blocker
+
+**2026-11-04T09:30:41.987Z — worker 未落地（exited-not-landed）**
+
+- 未落地原因：step=suite: oom-killed (4) — recovery red set is NOT a subset of the develop baseline red set: added=experiments/quay-perpetual-stream/test/symlink-mirror-invocation.test.mjs changed=- — needs a code fix
+- run_id：wk-prod-anchor
+- session_id：45d6199b-49e6-4b3a-8f82-de7e7de2a387
