@@ -2,7 +2,7 @@
 id: gap-routine-semantic-dedup-scan-dist-stats
 title: "semantic-dedup-scan: Byte-identical dist(xs:number[]):Dist percentile
   summary (n/min/median/p90/max/mean)."
-status: ready
+status: done
 labels:
   - gap
   - routine-filed
