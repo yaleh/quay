@@ -1,7 +1,7 @@
 ---
 id: gap-quay-init-doc-branch-strict-ancestor-fast-forward
 title: ensureDocBranch 对严格祖先的 doc 分支应无损快进到基线再切换（真分叉保持只切不动）
-status: todo
+status: ready
 labels:
   - gap
   - defect

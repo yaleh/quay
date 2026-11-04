@@ -34,6 +34,7 @@ import { QUAY_NATIVE_CLI } from "./helpers/cli-entry.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const SERVE_DASHBOARD_SRC = path.join(__dirname, "..", "src", "serve", "view", "serve-dashboard.ts");
+const SERVE_LIVE_CELL_SRC = path.join(__dirname, "..", "src", "serve", "view", "serve-live-cell.ts");
 const FIXED_NOW_MS = 1_700_000_000_000; // deterministic wall-clock anchor for window math
 
 /** The git PRIMARY checkout root — where the drivers write the REAL `.quay/*.jsonl` runtime data.
@@ -108,11 +109,15 @@ test("AC1 (F): recentRuns row renders a relativeTime string + raw buckets; absen
 });
 
 test("AC2: renderTimelineBarSvg is defined once and called from both G and H", () => {
-  const src = fs.readFileSync(SERVE_DASHBOARD_SRC, "utf8");
-  const defs = src.split("function renderTimelineBarSvg").length - 1;
+  // gap-routine-architecture-analysis-god-package-serve-view-fanin-516: the definition now lives in
+  // serve-live-cell.ts (the extracted per-cell module); serve-dashboard.ts keeps the two call sites
+  // (G = testsCard, H = fan-in card) and re-exports the name for the unchanged public surface.
+  const cell = fs.readFileSync(SERVE_LIVE_CELL_SRC, "utf8");
+  const defs = cell.split("function renderTimelineBarSvg").length - 1;
   assert.equal(defs, 1, "exactly one `function renderTimelineBarSvg` definition");
+  const src = fs.readFileSync(SERVE_DASHBOARD_SRC, "utf8");
   const calls = src.split("renderTimelineBarSvg(").length - 1;
-  assert.ok(calls >= 3, `renderTimelineBarSvg( appears ≥3 times (1 def + G + H calls), got ${calls}`);
+  assert.ok(calls >= 2, `renderTimelineBarSvg( appears ≥2 times (G + H calls), got ${calls}`);
 });
 
 test("AC3 (G): testsCard timeline <rect> count == in-window parseable records", () => {
@@ -281,7 +286,7 @@ test("AC3 (fan-in bar anchor): windowEnd=latest release → non-empty; windowEnd
 });
 
 test("AC4 (windowEndMs naming/role): signature params are segments, windowHours, windowEndMs; ≥3 hits", () => {
-  const src = fs.readFileSync(SERVE_DASHBOARD_SRC, "utf8");
+  const src = fs.readFileSync(SERVE_LIVE_CELL_SRC, "utf8");
   const count = src.split("windowEndMs").length - 1;
   assert.ok(count >= 3, `windowEndMs appears ≥3 times (signature + call-site computations), got ${count}`);
   const sigStart = src.indexOf("function renderTimelineBarSvg(");

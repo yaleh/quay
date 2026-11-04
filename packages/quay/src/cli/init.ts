@@ -116,11 +116,13 @@ Flags:
                "when the main checkout is on the landing baseline 'develop' and the repository
                has a commit, the doc-only branch must be carrying the edits". Prints one
                machine-readable line:
-                   doc-branch-invariant: SATISFIED|VIOLATED|PENDING|NOT-EVALUATED (reason: ...)
-               Exit 1 only when VIOLATED. PENDING (no commits yet, so no doc branch can be
-               forked) and NOT-EVALUATED (detached HEAD, no name supplied) are their own states
-               and exit 0 — a withheld verdict is not a violation. Nothing is created or moved;
-               run this after any non-quay process has committed a laid-down workspace.
+                   doc-branch-invariant: SATISFIED|VIOLATED|BEHIND|PENDING|NOT-EVALUATED (reason: ...)
+               Exit 1 when VIOLATED or BEHIND (the doc branch is BEHIND the landing baseline —
+               the working copy is parked on an older tree). PENDING (no commits yet, so no doc
+               branch can be forked) and NOT-EVALUATED (detached HEAD, no name supplied) are
+               their own states and exit 0 — a withheld verdict is not a violation. Nothing is
+               created or moved; run this after any non-quay process has committed a laid-down
+               workspace.
   --adopt-branch-model
                When the project already has a 'develop' (or 'author') that is NOT
                a continuation of its default branch, preserve the existing tip
@@ -308,7 +310,7 @@ Description:
     } else {
       say(formatDocBranchInvariantReport(invariant));
     }
-    process.exitCode = invariant.state === "violated" ? 1 : 0;
+    process.exitCode = invariant.state === "violated" || invariant.state === "behind" ? 1 : 0;
     return;
   }
 
