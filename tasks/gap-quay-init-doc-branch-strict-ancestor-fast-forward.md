@@ -32,7 +32,7 @@ depends_on:
 - [x] `--dry-run` 负控制：落后场景下 dry-run 前后 ref sha 不变，输出含 `would fast-forward`。
 - [x] 可达性断言：ff 前后 `git rev-list --count develop..<name>` 为 0 且无新增不可达提交（`git fsck --no-dangling` 前后一致）。
 - [x] 幂等：ff 后再跑一次 init，ref 不再移动、报告不再是 fast-forwarded。
-- [ ] 范围门绿：`bash scripts/test.sh --for-task gap-quay-init-doc-branch-strict-ancestor-fast-forward --allow-thin`。
+- [x] 范围门绿：`bash scripts/test.sh --for-task gap-quay-init-doc-branch-strict-ancestor-fast-forward --allow-thin`。
 
 ## DoD
 
