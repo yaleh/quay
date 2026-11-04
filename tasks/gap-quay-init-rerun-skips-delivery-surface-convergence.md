@@ -45,18 +45,31 @@ fresh 跑 `written/absent`，三件套全在；删掉三件套后再跑 `unchang
 
 ## AC
 
-- [ ] 合法 config + 缺少三件套的项目上重跑 `quay init` 后三者恢复（文件/目录类型断言）——`node --test packages/quay/test/init-rerun-convergence.test.mjs` exit 0。
-- [ ] 合法 config + `.gitignore` 缺 manifest 条目的项目上重跑后，4 条锁规则各出现且**恰好 1 次**（`grep -cF 'goals/*.lock'` == 1，其余三条同）。
-- [ ] 幂等负控制：对已是最新的项目重跑，报告 `added` 为空、`.quay/config.yml` 字节不变、`git status --porcelain` 无新增（证明不是「每次 init 都翻目录」）。
-- [ ] 不覆盖负控制：预置自定义内容的 `AGENTS.md` 与 `.codex/config.toml`，重跑后逐字节不变。
-- [ ] 单源守卫：一条测试读 `CLOSED_SET_ITEMS` 并对每一项断言它出现在 `plugin/skills/init/SKILL.md` 的写面清单里（少一项即红），使「Nothing else is written」这类过期说法不能再漂。
-- [ ] 范围门绿：`bash scripts/test.sh --for-task gap-quay-init-rerun-skips-delivery-surface-convergence --allow-thin`。
+- [x] 合法 config + 缺少三件套的项目上重跑 `quay init` 后三者恢复（文件/目录类型断言）——`node --test packages/quay/test/init-rerun-convergence.test.mjs` exit 0。
+- [x] 合法 config + `.gitignore` 缺 manifest 条目的项目上重跑后，4 条锁规则各出现且**恰好 1 次**（`grep -cF 'goals/*.lock'` == 1，其余三条同）。
+- [x] 幂等负控制：对已是最新的项目重跑，报告 `added` 为空、`.quay/config.yml` 字节不变、`git status --porcelain` 无新增（证明不是「每次 init 都翻目录」）。
+- [x] 不覆盖负控制：预置自定义内容的 `AGENTS.md` 与 `.codex/config.toml`，重跑后逐字节不变。
+- [x] 单源守卫：一条测试读 `CLOSED_SET_ITEMS` 并对每一项断言它出现在 `plugin/skills/init/SKILL.md` 的写面清单里（少一项即红），使「Nothing else is written」这类过期说法不能再漂。
+- [x] 范围门绿：`bash scripts/test.sh --for-task gap-quay-init-rerun-skips-delivery-surface-convergence --allow-thin`。
 
 ## DoD
 
 在「旧项目形态」的临时仓库（`.quay/config.yml` 合法、缺三件套与 4 条锁规则）上真跑一次 `quay init`（非单测替身），
 贴：init 真实输出（含 `added` 清单）、`ls -la` 显示三件套、四条锁规则各 `grep -c` = 1 的读数；随后第二次重跑
 `added` 为空且 `git status --porcelain` 干净。`--for-task` 范围门绿。仅 fixture 绿不算落地。
+
+
+**真跑证据（2026-11-04，worktree）**：
+
+- 第一次重跑（旧项目形态：`.quay/config.yml` 合法、删三件套、`.gitignore` 去掉 4 条锁规则）真实输出含
+  `added: .codex/config.toml` / `added: .agents/skills` / `added: AGENTS.md` /
+  `appended: quay runtime-artifact block (4 pattern(s))`；`--json` 报告
+  `deliverySurfaceAdded = [".codex/config.toml", ".agents/skills", "AGENTS.md", ".gitignore"]`。
+- `ls -la` 三件套：`.codex/config.toml`（file）、`.agents/skills/`（dir）、`AGENTS.md`（file）均存在。
+- 四条锁规则各 `grep -cF` = 1：`goals/*.lock`=1、`adr/*.lock`=1、`docs-managed/*.lock`=1、`meta/*.lock`=1。
+- 第二次重跑：`--json` `deliverySurfaceAdded = []`，`git status --porcelain` 为空。
+
+- 该轴仍暗,理由:本任务在 packages/quay 内新增两个私有 helper 并改写 ensureGitignore 的控制流，未新增/移动模块或跨包依赖边，L_D/L_G 对本改动无判别力，且未运行 archguard。
 
 ## Touches
 
