@@ -2,7 +2,7 @@
 id: gap-routine-architecture-analysis-god-package-plugin-scripts-flat-317-files
 title: "architecture-analysis: single flat directory holds the entire
   methodology script surface; largest entity cluster in the repo"
-status: todo
+status: ready
 labels:
   - gap
   - routine-filed
