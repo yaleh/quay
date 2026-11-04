@@ -57,10 +57,11 @@ import { isDirectEntry, flagValue } from "./gate-script-base.ts";
 // import 会成值环（import-graph-check 的 valueSccs 棘轮钉在 0）。契约 →
 // docs/references/worker-dispatch-carrier.md。
 import { readDispatchStoreClassified, resolveWorkerProcessName } from "./driver-shared.ts";
-
-// ── 取值词表：三态，⛔「未评估」不得与数值共用形状（硬规则 3b）──────────────────────────────
-export const NOT_EVALUATED = "NOT-EVALUATED" as const;
-export type MaybeNum = number | typeof NOT_EVALUATED;
+// dist 百分位摘要 + 空样本策略的【唯一】定义在 dist-stats.ts（semantic-dedup-scan finding
+// `dist-stats`）。本文件 import 供本地使用、re-export 保持旧 import 面（relaxed-dispatch-ledger.ts /
+// touches-relax-tighten.ts / duration-report.test.mjs 仍从这里取 percentile/dist/NOT_EVALUATED）。
+import { NOT_EVALUATED, percentile, dist, type MaybeNum, type Dist } from "./dist-stats.ts";
+export { NOT_EVALUATED, percentile, dist, type MaybeNum, type Dist } from "./dist-stats.ts";
 
 /** 一条尝试记录里本模块读的全部字段（其余原样忽略；⛔ 不复制一份完整 schema）。 */
 export interface AttemptRecord {
@@ -89,15 +90,6 @@ export interface PhaseDurations {
   faninMs: MaybeNum;
   lockWaitMs: MaybeNum;
   suiteMs: MaybeNum;
-}
-
-export interface Dist {
-  n: number;
-  min: MaybeNum;
-  median: MaybeNum;
-  p90: MaybeNum;
-  max: MaybeNum;
-  mean: MaybeNum;
 }
 
 /** 在飞（右删失）一条尝试的读数。 */
@@ -210,27 +202,7 @@ export interface DurationReport {
   inFlightTasks: { count: number; rows: InFlightTask[]; agesMs: Dist };
 }
 
-// ── 统计小工具（⛔ 不引第三方）────────────────────────────────────────────────────────────
-export function percentile(sorted: number[], p: number): MaybeNum {
-  if (sorted.length === 0) return NOT_EVALUATED;
-  return sorted[Math.min(sorted.length - 1, Math.max(0, Math.floor((sorted.length - 1) * p)))];
-}
-
-export function dist(xs: number[]): Dist {
-  if (xs.length === 0) {
-    return { n: 0, min: NOT_EVALUATED, median: NOT_EVALUATED, p90: NOT_EVALUATED, max: NOT_EVALUATED, mean: NOT_EVALUATED };
-  }
-  const s = [...xs].sort((a, b) => a - b);
-  return {
-    n: s.length,
-    min: s[0],
-    median: percentile(s, 0.5),
-    p90: percentile(s, 0.9),
-    max: s[s.length - 1],
-    mean: s.reduce((a, b) => a + b, 0) / s.length,
-  };
-}
-
+// ── 统计小工具（percentile/dist 已迁到 dist-stats.ts；本文件只留差值两态）────────────────────
 /** 差值两态：任一端缺 ⇒ NOT-EVALUATED（⛔ 不用 0 冒充「没有差」）。 */
 export function deltaMs(endMs: number | null, startMs: number | null): MaybeNum {
   if (endMs === null || startMs === null) return NOT_EVALUATED;

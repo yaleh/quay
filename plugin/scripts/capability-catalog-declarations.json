@@ -437,7 +437,8 @@
     "task-double-frontmatter-check.ts": "Which task files carry two back-to-back frontmatter blocks (a duplicated id:/status: from the task_write body path) — the corruption that produces two contradictory status readings?",
     "codex-mcp-sync.sh": "How does the Codex plugin's quay MCP dist get installed/synced to the stable version-independent location ~/.local/share/quay/ (and its .mcp.json tilde prefix expanded to the home directory so codex's direct node spawn resolves it)? Run on demand: publish-dist-branch.sh --push calls it with --install-only, and the user runs it once after install.",
     "sha256.ts": "Is the sha256 helper pair (sha256OfString / sha256OfBuffer) defined ONCE as a plugin-scripts leaf, so every caller imports it instead of each re-implementing the createHash(\"sha256\").update(...).digest(\"hex\") body — the seven independently-declared wrappers the semantic-dedup-scan routine found (finding B1, runId semantic-dedup-scan-1793491958069: experiment-manifest / proposal-convergence / execution-policy / stage-receipt / run-identity / primitives-drift-check)?",
-    "consumer-quay-deliverable-verify.sh": "Does quay's shipped deliverable actually WORK from a CONSUMER project — all four consumer surfaces (Claude Code MCP task_list, Claude Code /quay-task-operator skill, Codex MCP task_list via codex exec, Codex $quay-task-operator skill) reach the project's OWN task store when pointed at a consumer workspace (--root <project>), each judged PASS/FAIL by the presence of a real task-listing response — a dev-tree verification that runs the repo's worker launcher (claude-fjdac) + Codex CLI, not a shipped consumer tool?"
+    "consumer-quay-deliverable-verify.sh": "Does quay's shipped deliverable actually WORK from a CONSUMER project — all four consumer surfaces (Claude Code MCP task_list, Claude Code /quay-task-operator skill, Codex MCP task_list via codex exec, Codex $quay-task-operator skill) reach the project's OWN task store when pointed at a consumer workspace (--root <project>), each judged PASS/FAIL by the presence of a real task-listing response — a dev-tree verification that runs the repo's worker launcher (claude-fjdac) + Codex CLI, not a shipped consumer tool?",
+    "dist-stats.ts": "What is the ONE implementation of the NOT-EVALUATED-string percentile summary dist (n/min/median/p90/max/mean) and its percentile helper, and what does an EMPTY sample answer — i.e. is the statistic declared in exactly one place (this module) with NOT-EVALUATED as the empty sentinel for every statistic field (n=0, min/median/p90/max/mean = NOT-EVALUATED), instead of the two byte-identical copies that duration-report.ts and fan-in-queueing-model.ts each hand-maintained — so a MEASURED zero can never be read as a sample that was never taken, and both consumers import (and re-export) the SAME function object rather than a parity-tested twin (routine semantic-dedup-scan, finding dist-stats, runId semantic-dedup-scan-1793780123988)?"
   },
   "GUARD_OBJECT": {
     "manager-tick-log-check.sh": "runtime:orchestration/manager-tick-log.md",
@@ -861,7 +862,8 @@
     "task-double-frontmatter-check.ts": "按需",
     "codex-mcp-sync.sh": "按需",
     "sha256.ts": "按需",
-    "consumer-quay-deliverable-verify.sh": "按需"
+    "consumer-quay-deliverable-verify.sh": "按需",
+    "dist-stats.ts": "按需"
   },
   "INVALIDATION": {
     "resolve-quay-cli.ts": "失效前提：① Claude Code still records plugin installs in ~/.claude/plugins/installed_plugins.json with the field set this resolver reads (scope / projectPath / installPath / version per plugin id quay@quay / quay@quay-dev) — measured 2026-10-26 on 2.1.310; a record-schema change makes readInstallRecord report not-evaluated, which is a NAMED refusal, not a silent wrong answer; ② the session layer's tier rule is unchanged (a projectPath-matching project/local entry wins over the user entry) — the SAME rule is implemented in packages/quay/src/loaded-version.ts (projectScopedVersionReading) and recorded in packages/quay/src/init.ts's plugin-link header, so a change must move all three together; ③ an installed plugin root still carries bin/quay and vendor/quay/dist/quay.js; ④ the retired <project>/.quay/plugin is never reintroduced as a resolution input (if it were, this resolver's refusal to read it would become wrong rather than conservative).",
@@ -1275,7 +1277,8 @@
     "task-double-frontmatter-check.ts": "失效前提：① task 文件的 frontmatter 仍以行首 --- 开始、store 的 parse() 只读首块（若分隔符或行首缩进改变，本检测器的块切分须同步）；② 双 frontmatter 的签名仍是「首块后紧跟第二个 --- 块」——若未来改为按 ^id: 裸计数（会把 Evidence code fence 内引用的 goal 文件误判），本脚本须同步。测试：干净任务集 exit 0，含双块的副本 exit 1。",
     "codex-mcp-sync.sh": "负控制失效：dist 缺/空或 kernel anchor 缺失时脚本仍 exit 0（--install-only 只装不重写 .mcp.json）",
     "sha256.ts": "失效前提：sha256.ts 仍是这些调用者做 sha256 哈希时的唯一实现（它们 import 本模块的 sha256OfString / sha256OfBuffer）；若某个调用者改回自己手搓一份 createHash(\"sha256\") 副本、或这些原语被上收到别的包，本条退休",
-    "consumer-quay-deliverable-verify.sh": "失效前提：① claude-fjdac / v4pro-anthropic 仍是本仓库 worker profile 的 launcher/model；② quay 仍以 Claude Code + Codex 双宿主发布（MCP + skills 四通道）；③ codex mcp list --json 输出仍含 \"quay\" 键；④ 脚本用到的 --permission-mode bypassPermissions 与 --dangerously-bypass-approvals-and-sandbox 旗标仍是两宿主的可执行形态。"
+    "consumer-quay-deliverable-verify.sh": "失效前提：① claude-fjdac / v4pro-anthropic 仍是本仓库 worker profile 的 launcher/model；② quay 仍以 Claude Code + Codex 双宿主发布（MCP + skills 四通道）；③ codex mcp list --json 输出仍含 \"quay\" 键；④ 脚本用到的 --permission-mode bypassPermissions 与 --dangerously-bypass-approvals-and-sandbox 旗标仍是两宿主的可执行形态。",
+    "dist-stats.ts": "失效前提：仍有多个消费者需要同一个 NOT-EVALUATED-string 的 dist/percentile（duration-report.ts / fan-in-queueing-model.ts 均 import 并 re-export 本模块），且空样本仍须与「测到的 0」可区分（NOT-EVALUATED ≠ 0）；若 dist 只剩一个消费者、或该统计量整体退役 ⇒ 本条退休"
   },
   "LAST_REAFFIRMED": {
     "resolve-quay-cli.ts": "2026-10-26",
@@ -1689,7 +1692,8 @@
     "task-double-frontmatter-check.ts": "2026-10-30",
     "codex-mcp-sync.sh": "2026-10-31",
     "sha256.ts": "2026-11-01",
-    "consumer-quay-deliverable-verify.sh": "2026-11-01"
+    "consumer-quay-deliverable-verify.sh": "2026-11-01",
+    "dist-stats.ts": "2026-11-04"
   },
   "MATCHING": {
     "resolve-quay-cli.ts": "enumerative",
@@ -2103,7 +2107,8 @@
     "task-double-frontmatter-check.ts": "position",
     "codex-mcp-sync.sh": "keyword",
     "sha256.ts": "n/a",
-    "consumer-quay-deliverable-verify.sh": "enumerative"
+    "consumer-quay-deliverable-verify.sh": "enumerative",
+    "dist-stats.ts": "n/a"
   },
   "CONSUMER": {
     "resolve-quay-cli.ts": "谁按：外部消费者按 docs/references/external-consumer-cli-location.md §5.2 运行它（node --experimental-strip-types <plugin-root>/scripts/resolve-quay-cli.ts --project <dir> [--json|--field <name>]；安装形态跑 scripts/dist/resolve-quay-cli.js），并以退出码 0/2/3 判态；plugin/skills/init/SKILL.md 的 The project link 段指向它作为唯一参考实现。⛔ 不是 Core 运行时依赖——Core 用 packages/quay/src/core/plugin-root.ts 从自身安装位置解析，从不读插件安装记录。",
@@ -2317,7 +2322,8 @@
     "release-model-check.ts": "谁按：要给一个 quay 驱动项目核验它自己声明的发布分支模型时人工/会话运行（node --experimental-strip-types plugin/scripts/release-model-check.ts --root <repo> [--json]）；也是 release-cut.mjs（经 --print-model 读 baseline/tag_prefix/globs）、release-branch-finish.sh（经 --print-model 或调用方交手的 RELEASE_BRANCH_GLOBS）、release-branch-janitor.ts 与 release-reading-sandbox.ts（import readReleaseModel / makeBranchMatcher）的唯一模型读取处。条件=要区分「没配发布模型」与「配置了且合格」、或在真实仓库上判定发布线是否被直接提交过",
     "manual-full-suite.sh": "谁按：要手动验证全量（heavy 分区/内存策略/轮次记录）的人按（bash plugin/scripts/manual-full-suite.sh [<root>]）",
     "task-double-frontmatter-check.ts": "谁按：手动 node --experimental-strip-types plugin/scripts/task-double-frontmatter-check.ts [<task-file.md|dir> ...]；默认扫描 <repo-root>/tasks。当前未接入任何 registry，按需手动运行。",
-    "sha256.ts": "谁按：plugin/scripts 下需要 sha256 hex 摘要的载体 —— experiment-manifest / proposal-convergence / execution-policy / stage-receipt / run-identity / primitives-drift-check（及任何新调用者）import sha256OfString / sha256OfBuffer；条件=需要字符串或缓冲的 sha256 hex 摘要，且希望全仓只有一个版本"
+    "sha256.ts": "谁按：plugin/scripts 下需要 sha256 hex 摘要的载体 —— experiment-manifest / proposal-convergence / execution-policy / stage-receipt / run-identity / primitives-drift-check（及任何新调用者）import sha256OfString / sha256OfBuffer；条件=需要字符串或缓冲的 sha256 hex 摘要，且希望全仓只有一个版本",
+    "dist-stats.ts": "谁按：duration-report.ts（import + re-export 保持旧 import 面，供 relaxed-dispatch-ledger.ts / touches-relax-tighten.ts / duration-report.test.mjs 取用）/ fan-in-queueing-model.ts（import + re-export 保持旧 import 面，供 fan-in-queueing-model.test.mjs 取用）；条件=两处须 import 同一份实现（⛔ 非平行副本），且本模块不得 import 任一消费者（否则环复原）"
   },
   "SUPERSEDED": {
     "send-keys-verified.sh": "REMOVED 2026-08-10 (gap-retired-script-still-callable, human ruling) — superseded by send-keys-reliable.sh under outer ruling F (2026-08-04); its md5 pane-hash criterion is ADR-016-forbidden. Deleted with its test (send-keys-verified.test.mjs) and leak doc (send-keys-verified-test-leaks-tmux-servers.md). Crystallization residue poisons context — the implementation must NOT exist.",

@@ -27,7 +27,7 @@ test("AC138-3 pure — computeWorkerRoundRecord: ts is the first field (supervis
 
 test("AC138-3 — pool-empty round still writes a round heartbeat (⛔ outcome stays absent; round is the liveness carrier)", async (t) => {
   const root = makeRoot("ac138-round");
-  // ready-pool returns empty ⇒ resident loop records a stop round then polls (no worker spawned; it no
+  // ready-pool returns empty ⇒ resident loop records a wait round then polls (no worker spawned; it no
   // longer exits on pool-empty — pool-empty is transient, promotion-driver keeps filling it).
   const drv = spawnResident(root, [
     "--ready-pool-cmd", "node -e console.log(JSON.stringify({ready:[],pool:0}))",
@@ -42,7 +42,7 @@ test("AC138-3 — pool-empty round still writes a round heartbeat (⛔ outcome s
   const rounds = readRoundLines(root);
   assert.ok(rounds.length >= 1, "at least one round record written even when the pool is empty");
   const last = rounds[rounds.length - 1];
-  assert.equal(last.action, "stop", "pool-empty round is recorded as stop (not dispatch)");
+  assert.equal(last.action, "wait", "pool-empty round is recorded as wait (not dispatch)");
   assert.match(last.stop_reason, /pool-empty/);
   assert.equal(last.in_flight, 0);
   assert.ok(last.ts, "round record carries a ts field (the supervisor's last_record_ts reads it)");
