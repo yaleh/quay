@@ -28,7 +28,7 @@ extra:
 
 修法：
 1. `DocBranchReport` 增加显式落后量（如 `behindBaseline: number | null`；`null` = 未评估，⛔ 不用 0 冒充），
-   由 `git rev-list --count <name>..develop` 求得；⛔ 不得用 `baselineContainsName` / `nameContainsBaseline` 两个布尔推导该量——同 tip 时两者同时为真，「落后 0」与「相同 tip」在那里不可区分。
+   由 `git rev-list --count <name>..develop` 求得；⛔ 不得用 `baselineContainsName` / `nameContainsBaseline` 两个布尔推导该量——同 tip 时两者同时为真，「落后 0」与「相同 tip」在那里不可区分。该量只在本分支（`baselineContainsName === true`，即 name 是 develop 祖先或同 tip）内读取；命令非零退出（ref 不存在或不在该仓库）⇒ 写 `null`，`0` 只在命令成功返回时可信；若将来在分支外复用，改用 `git rev-list --left-right --count develop...name` 一次取两侧。
 2. `state` / `detail` 对「related 且落后」给出独立取值，不得与「related 且同 tip / 领先」同形；
 3. `checkDocBranchInvariant` 在落后时不得报 `satisfied`——给独立态并在人读输出里打印落后量；
 4. `--dry-run` 与真跑都要打印该读数。
