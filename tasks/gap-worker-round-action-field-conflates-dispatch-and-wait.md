@@ -92,3 +92,11 @@ cap 满轮不再出现 `dispatch` 假阳性、`terminal` 位在载体上可读�
 - plugin/test/worker-round-action-semantics.test.mjs (new)
 - orchestration/worker-driver-log-carriers.md
 - tasks/gap-worker-round-action-field-conflates-dispatch-and-wait.md
+
+## Blocker
+
+**2026-11-04T08:56:21.322Z — worker 未落地（exited-not-landed）**
+
+- 未落地原因：step=suite: AssertionError [ERR_ASSERTION]: at least two stop rounds written (the driver re-reads the gate each poll) [baseline A/B: HARD RED (task-introduced-red) — the task's red set is NOT a subset of the develop baseline red set: added=plugin/test/worker-driver-fan-in-s02.test.mjs,plugin/test/worker-driver-resident-s02.test.mjs,plugin/test/worker-driver-resident-s03.test.mjs changed=-]
+- run_id：wk-prod-anchor
+- session_id：e1b5aa14-ad9b-49c2-9338-8309966bd4b1

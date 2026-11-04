@@ -776,6 +776,23 @@ export function requireArg(value: any, name: string): void {
   }
 }
 
+// ── makeCliFail ─────────────────────────────────────────────────────────────────────────────────────
+// Build the per-script `fail` closure shared by the record-writer CLIs (per-task-suite-record.ts and
+// pre-verified-round-record.ts used to carry byte-identical copies; .quay/routine-findings.jsonl
+// finding `fail-helper`, routine `semantic-dedup-scan`). It is NOT `emitFail` — that is the verdict
+// emitter (exit 1, `{status, ok, message}`); this is the usage/environment-error reporter:
+//   · --json mode   prints `{ ok: false, error: msg }` to stdout;
+//   · human mode    prints `<prefix>: <msg>` to stderr;
+//   · returns 2     (the caller owns whether to exit, same as the pre-extraction closure did).
+// `prefix` is the only per-script variation (the log prefix); `asJson` is captured once at call time.
+export function makeCliFail(prefix: string, asJson: boolean): (msg: string) => number {
+  return (msg: string) => {
+    if (asJson) console.log(JSON.stringify({ ok: false, error: msg }));
+    else console.error(`${prefix}: ${msg}`);
+    return 2;
+  };
+}
+
 // ── isDirectEntry ───────────────────────────────────────────────────────────────────────────────────
 // Standard "is this file being run directly?" check for CLI scripts.
 // Usage (expectedBase is REQUIRED — see below):
