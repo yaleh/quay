@@ -820,7 +820,13 @@ export function isDirectEntry(importMeta: ImportMeta, argv1: string | undefined,
 //   if (isDirectEntrySafe("tool-name")) process.exit(main(process.argv.slice(2)));
 export function isDirectEntrySafe(expectedBase: string): boolean {
   try {
-    return isDirectEntry(import.meta, undefined, expectedBase);
+    // `importMeta` is deliberately not consulted by isDirectEntry (identity is name-based, never
+    // URL-based — contract above), so the wrapper passes undefined rather than gate-script-base.ts's
+    // own import.meta. That also keeps this pure library (no CLI block) from matching
+    // symlink-mirror-invocation.test.mjs's GUARD_PATTERN (`/isDirectEntry\(import\.meta/`), which
+    // discovers guarded CLIs by code position and would otherwise false-red gate-script-base.ts on
+    // its silent no-args symlink invocation.
+    return isDirectEntry(undefined as unknown as ImportMeta, undefined, expectedBase);
   } catch {
     return false;
   }
