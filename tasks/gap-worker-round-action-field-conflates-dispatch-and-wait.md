@@ -92,6 +92,10 @@ cap 满轮不再出现 `dispatch` 假阳性、`terminal` 位在载体上可读�
 - plugin/test/worker-round-action-semantics.test.mjs (new)
 - orchestration/worker-driver-log-carriers.md
 - tasks/gap-worker-round-action-field-conflates-dispatch-and-wait.md
+- plugin/test/worker-driver-fan-in-s02.test.mjs
+- plugin/test/worker-driver-fan-in-s03.test.mjs
+- plugin/test/worker-driver-resident-s02.test.mjs
+- plugin/test/worker-driver-resident-s03.test.mjs
 
 ## ADR-007 暗轴记录
 
