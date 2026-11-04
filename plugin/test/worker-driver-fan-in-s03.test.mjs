@@ -18,8 +18,8 @@ test("AC3 (gap-worker-driver-stopreason-latch-permanent-stop) — pool non-empty
   t.after(() => rmSafe(root));
   await waitFor(() => readRoundLines(root).length >= 3, 15000);
   assert.equal(drv.child.exitCode, null, "AC3: pool non-empty + gate WAIT + no in-flight ⇒ driver does NOT exit directly");
-  const stops = readRoundLines(root).filter((r) => r.action === "stop");
-  assert.ok(stops.length >= 2, "AC3: the driver polled (≥2 stop rounds) — it did not exit after the first WAIT round");
+  const waits = readRoundLines(root).filter((r) => r.action === "wait");
+  assert.ok(waits.length >= 2, "AC3: the driver polled (≥2 wait rounds) — it did not exit after the first WAIT round");
   await drv.stop();
 });
 

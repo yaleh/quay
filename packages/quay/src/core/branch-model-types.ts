@@ -93,6 +93,9 @@ export type DocBranchState =
   | "absent"
   /** ①: the main checkout IS on the landing baseline and a RELATED branch carries the name. */
   | "reusable"
+  /** ①: a RELATED branch carries the name but is BEHIND the landing baseline — the checkout would
+   *  fall back to an older tree (gap-quay-init-doc-branch-behind-baseline-reports-satisfied). */
+  | "behind"
   /** ①: the name is taken by a branch with NO ancestry relation to the baseline — a real collision. */
   | "blocked"
   /** HEAD detached/unborn, not a work tree, or undecidable ancestry — verdict WITHHELD. */
@@ -128,6 +131,13 @@ export interface DocBranchReport {
   preexistingSha: string | null;
   /** The doc branch's sha AFTER the operation (null when nothing was established). */
   sha: string | null;
+  /**
+   * Commits on the landing baseline that the doc branch does NOT contain — the explicit lag reading
+   * `git rev-list --count <name>..develop`. `null` = NOT assessed (⛔ never 0 masquerading as "same
+   * tip": 0 is only meaningful when the read succeeded and the branch is the baseline's ancestor or
+   * the same tip). `0` = same tip / not behind.
+   */
+  behindBaseline: number | null;
   detail: string;
 }
 
@@ -172,7 +182,7 @@ export interface BaselineCheckoutReport {
 }
 
 /** The standing invariant's classification — a CLASSIFICATION, never a boolean (hard rule 3). */
-export type DocBranchInvariantState = "satisfied" | "violated" | "pending" | "not-evaluated";
+export type DocBranchInvariantState = "satisfied" | "violated" | "behind" | "pending" | "not-evaluated";
 
 /** The machine-readable cause attached to the state (enumerated, never prose-matched downstream). */
 export type DocBranchInvariantReason =
@@ -180,6 +190,7 @@ export type DocBranchInvariantReason =
   | "on-baseline-no-doc-branch"
   | "on-baseline-doc-branch-elsewhere"
   | "on-baseline-doc-branch-collision"
+  | "doc-branch-behind-baseline"
   | "no-commits-yet"
   | "detached-head"
   | "not-a-git-worktree"
@@ -189,7 +200,7 @@ export type DocBranchInvariantReason =
 
 export interface DocBranchInvariantReport {
   state: DocBranchInvariantState;
-  /** False ONLY for `violated` — `pending` and `not-evaluated` are not failures (hard rule 3b). */
+  /** False for `violated` and `behind` — `pending` and `not-evaluated` are not failures (hard rule 3b). */
   ok: boolean;
   /** True iff the verdict was WITHHELD (`state === "not-evaluated"`) — distinct from `ok === true`. */
   notEvaluated: boolean;
@@ -203,6 +214,12 @@ export interface DocBranchInvariantReport {
   docBranch: string;
   /** The named doc branch's sha, or null when it does not exist. */
   docBranchSha: string | null;
+  /**
+   * Commits on the landing baseline that the doc branch does NOT contain (null when not assessed).
+   * Carried on both the `behind` and `satisfied`/`violated` readings that measured it, so the lag is
+   * never recomputed from a prose string downstream.
+   */
+  behindBaseline: number | null;
   detail: string;
   /** The single command that repairs a `violated` state; null otherwise. */
   remedy: string | null;
