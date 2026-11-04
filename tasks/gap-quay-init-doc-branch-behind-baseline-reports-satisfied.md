@@ -35,17 +35,26 @@ extra:
 
 ## AC
 
-- [ ] 单测：构造 doc 分支落后 develop N（N ≥ 1）的仓库，`ensureDocBranch` 报告 `behindBaseline === N`——`node --test packages/quay/test/doc-branch-lag-report.test.mjs` exit 0。
-- [ ] 单测：同条件下 `checkDocBranchInvariant` 的 state 不等于 `satisfied`，且报告携带同一落后量。
-- [ ] 负控制：doc 分支与 develop 同 tip 时仍报 `satisfied` 且 `behindBaseline === 0`（证明不是把「一切非基线」都打成红）。
-- [ ] 人读输出（非 `--json`）在落后时打印落后数：断言 `quay init --dry-run` 的 doc-branch 行文本含该数字。
-- [ ] 行为不变负控制：落后场景下本任务实现前后 `git rev-parse --abbrev-ref HEAD` 结果一致（本条不引入任何 ref 移动）。
-- [ ] 范围门绿：`bash scripts/test.sh --for-task gap-quay-init-doc-branch-behind-baseline-reports-satisfied --allow-thin`。
+- [x] 单测：构造 doc 分支落后 develop N（N ≥ 1）的仓库，`ensureDocBranch` 报告 `behindBaseline === N`——`node --test packages/quay/test/doc-branch-lag-report.test.mjs` exit 0。
+- [x] 单测：同条件下 `checkDocBranchInvariant` 的 state 不等于 `satisfied`，且报告携带同一落后量。
+- [x] 负控制：doc 分支与 develop 同 tip 时仍报 `satisfied` 且 `behindBaseline === 0`（证明不是把「一切非基线」都打成红）。
+- [x] 人读输出（非 `--json`）在落后时打印落后数：断言 `quay init --dry-run` 的 doc-branch 行文本含该数字。
+- [x] 行为不变负控制：落后场景下本任务实现前后 `git rev-parse --abbrev-ref HEAD` 结果一致（本条不引入任何 ref 移动）。
+- [x] 范围门绿：`bash scripts/test.sh --for-task gap-quay-init-doc-branch-behind-baseline-reports-satisfied --allow-thin`。
 
 ## DoD
 
 在落后 ≥1 的临时仓库上真跑 `quay init --dry-run`（非单测替身），贴原始输出：doc-branch 行含落后量、
 invariant 不再报 `satisfied`；再贴一次同 tip 的正样本对照（仍报 satisfied）。`--for-task` 范围门绿。
+
+落后 2 的原始输出（`quay init --branch-model-only --dry-run --doc-branch-name author`，checkout 在 develop）：
+  [SWITCHED] doc-branch -> author — would switch the main checkout to the existing related branch 'author' (1e15d33a) — ⚠️ it is 2 commit(s) BEHIND the landing baseline 'develop', so the working copy would fall back to an older tree
+  doc-branch-invariant: VIOLATED (reason: on-baseline-doc-branch-elsewhere) — … (⚠️ it is 2 commit(s) BEHIND 'develop'); remedy: quay init --doc-branch-name author
+
+同 tip 正样本（checkout 在 author 上）：
+  doc-branch-invariant: SATISFIED (reason: not-on-baseline) — the main checkout is on 'author', not the landing baseline 'develop' — the doc-branch invariant holds
+
+- 该轴仍暗,理由:本任务只改 packages/quay/src/core/branch-model.ts 与 packages/quay/src/cli/init.ts 的读数与判别逻辑（新增 behindBaseline 字段与 behind 状态），未新增模块依赖边（revCount 已在同文件内），故 L_D/L_G 无本任务可归因的结构读数。
 
 ## Touches
 
