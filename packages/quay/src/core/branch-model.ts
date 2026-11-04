@@ -526,12 +526,15 @@ export function formatBranchModelReport(report: BranchModelReport): string {
  * baseline, put the main checkout on a doc branch so human edits and driver commits stop sharing one
  * branch and one index.
  *
- * Four states, each its own answer (this is what AC1 pins):
+ * Six states, each its own answer (this is what AC1 pins):
  *   - main checkout already OFF the landing baseline (whatever its name) ⇒ `independent`, NO-OP.
  *   - ON the baseline, name free ⇒ create that branch AT THE BASELINE'S TIP and switch to it; the
  *     tree is byte-identical (same commit), so this is pure git metadata.
  *   - ON the baseline, name taken by a RELATED branch ⇒ switch to it (the existing doc branch wins;
  *     ⛔ never renamed, never re-pointed).
+ *   - ON the baseline, name taken by a RELATED branch that is BEHIND the baseline ⇒ still switch to
+ *     it (no behavior change), but report `behind` with the explicit lag (gap-quay-init-doc-branch-
+ *     behind-baseline-reports-satisfied) instead of the reusable/unchanged wording.
  *   - ON the baseline, name taken by an UNRELATED branch ⇒ `blocked`, nothing moves — silently
  *     re-pointing a ref that means something to the target project is the damage class the adopt
  *     path of `ensureBranchModel` exists to make an EXPLICIT decision, and no such decision was made
@@ -551,6 +554,7 @@ export function ensureDocBranch(root: string, opts: EnsureDocBranchOptions): Doc
     baselineSha: null as string | null,
     preexistingSha: null as string | null,
     sha: null as string | null,
+    behindBaseline: null as number | null,
   };
   const notEvaluated = (detail: string): DocBranchReport => ({
     ...base,
@@ -718,28 +722,42 @@ export function ensureDocBranch(root: string, opts: EnsureDocBranchOptions): Doc
     };
   }
 
+  // ── the explicit lag reading (gap-quay-init-doc-branch-behind-baseline-reports-satisfied) ──────
+  // `name` is the baseline's ancestor (or the SAME tip) exactly here — `baselineContainsName ===
+  // true`. That is the one branch where "how far behind is the doc branch" is a meaningful, READABLE
+  // quantity: `git rev-list --count <name>..develop`. ⛔ It is NOT derived from the two `isAncestor`
+  // booleans above (at the same tip BOTH are true, so "behind 0" and "same tip" would be
+  // indistinguishable there); it is its own git read. A non-zero exit (ref vanished mid-run, or a
+  // shallow/foreign read) yields `null` — 0 is trusted ONLY when the command succeeded.
+  base.behindBaseline = baselineContainsName ? revCount(root, name, LANDING_BASELINE_ROLE) : null;
+  const behind = base.behindBaseline !== null && base.behindBaseline > 0;
+
   if (dryRun) {
     return {
       ...base,
-      state: "reusable",
+      state: behind ? "behind" : "reusable",
       action: "switched",
       ok: true,
       notEvaluated: false,
       sha: preexistingSha,
-      detail: `would switch the main checkout to the existing related branch '${name}' (${preexistingSha.slice(0, 8)}) — unchanged, never renamed or re-pointed`,
+      detail: behind
+        ? `would switch the main checkout to the existing related branch '${name}' (${preexistingSha.slice(0, 8)}) — ⚠️ it is ${base.behindBaseline} commit(s) BEHIND the landing baseline '${LANDING_BASELINE_ROLE}', so the working copy would fall back to an older tree`
+        : `would switch the main checkout to the existing related branch '${name}' (${preexistingSha.slice(0, 8)}) — unchanged, never renamed or re-pointed`,
     };
   }
   const r = git(root, ["checkout", name]);
   return {
     ...base,
-    state: "reusable",
+    state: behind ? "behind" : "reusable",
     action: r.ok === true ? "switched" : "failed",
     ok: r.ok === true,
     notEvaluated: false,
     sha: preexistingSha,
     detail:
       r.ok === true
-        ? `switched the main checkout to the existing related branch '${name}' (${preexistingSha.slice(0, 8)}) — unchanged, never renamed or re-pointed`
+        ? behind
+          ? `switched the main checkout to the existing related branch '${name}' (${preexistingSha.slice(0, 8)}) — ⚠️ it is ${base.behindBaseline} commit(s) BEHIND the landing baseline '${LANDING_BASELINE_ROLE}', so the working copy is now on an older tree`
+          : `switched the main checkout to the existing related branch '${name}' (${preexistingSha.slice(0, 8)}) — unchanged, never renamed or re-pointed`
         : `could not switch to the existing branch '${name}': git checkout returned non-zero: ${r.err}`,
   };
 }
@@ -973,11 +991,15 @@ export function formatDocBranchReport(report: DocBranchReport): string {
 // every init and from a check verb — it mutates nothing (no branch created, HEAD not moved, no file
 // written) — which is what lets it be a resident reading instead of a one-shot step.
 //
-// FOUR STATES, never a boolean (hard rule 3):
+// FIVE STATES, never a boolean (hard rule 3):
 //   satisfied     — the checkout is NOT on the landing baseline; nothing to do (the negative control:
 //                   a project already on its doc branch must read as OK, not as "no violation found").
 //   violated      — the checkout IS on the baseline, a commit exists, and no usable doc branch is
 //                   carrying the role. `ok: false`; the caller's exit code is non-zero.
+//   behind        — the checkout is ON the doc branch, but that branch is BEHIND the landing baseline:
+//                   the working copy is parked on an older tree. `ok: false`; exit non-zero. Its own
+//                   state (gap-quay-init-doc-branch-behind-baseline-reports-satisfied), never folded
+//                   into `satisfied`.
 //   pending       — the checkout is on the baseline but the repository has ZERO commits (the state
 //                   init's declined auto-commit leaves behind). ⛔ NOT satisfied: a doc branch cannot
 //                   be forked from a commit that does not exist, and the next external commit would
@@ -993,7 +1015,7 @@ export function formatDocBranchReport(report: DocBranchReport): string {
 /**
  * Judge the standing doc-branch invariant at `root`. READ-ONLY: it runs `git` queries and nothing
  * else — no branch is created, HEAD is not moved, no file is written. See the section header for the
- * four states and the three init paths this closes.
+ * five states and the three init paths this closes.
  */
 export function checkDocBranchInvariant(root: string, opts: DocBranchInvariantOptions): DocBranchInvariantReport {
   const name = (opts.name ?? "").trim();
@@ -1002,16 +1024,22 @@ export function checkDocBranchInvariant(root: string, opts: DocBranchInvariantOp
     state: DocBranchInvariantState,
     reason: DocBranchInvariantReason,
     detail: string,
-    extra: { checkedOut?: string | null; docBranchSha?: string | null; remedy?: string | null } = {},
+    extra: {
+      checkedOut?: string | null;
+      docBranchSha?: string | null;
+      behindBaseline?: number | null;
+      remedy?: string | null;
+    } = {},
   ): DocBranchInvariantReport => ({
     state,
-    ok: state !== "violated",
+    ok: state !== "violated" && state !== "behind",
     notEvaluated: state === "not-evaluated",
     reason,
     checkedOut: extra.checkedOut ?? null,
     baseline,
     docBranch: name,
     docBranchSha: extra.docBranchSha ?? null,
+    behindBaseline: extra.behindBaseline ?? null,
     detail,
     remedy: extra.remedy ?? null,
   });
@@ -1033,7 +1061,37 @@ export function checkDocBranchInvariant(root: string, opts: DocBranchInvariantOp
   // ① The invariant already holds: the checkout is somewhere other than the landing baseline.
   //    ⛔ Checked BEFORE the commit count and BEFORE the name: whether it holds is knowable without
   //    either, and a project that is already off the baseline gets its true answer with no config.
+  //    ⛔ ONE exception (gap-quay-init-doc-branch-behind-baseline-reports-satisfied): being OFF the
+  //    baseline is NOT automatically OK when the checkout sits on the doc branch ITSELF and that
+  //    branch is BEHIND the baseline — that is the main checkout silently parked on an older tree,
+  //    the exact production risk the invariant exists to surface. `behind` is its own state.
   if (checkedOut !== baseline) {
+    if (name !== "" && name !== baseline && checkedOut === name) {
+      const docBranchSha = resolveSha(root, name);
+      const behind =
+        docBranchSha !== null && isAncestor(root, name, baseline) === true
+          ? revCount(root, name, baseline)
+          : null;
+      if (behind !== null && behind > 0) {
+        return report(
+          "behind",
+          "doc-branch-behind-baseline",
+          `the main checkout is on the doc branch '${name}' (${docBranchSha!.slice(0, 8)}) which is ` +
+            `${behind} commit(s) BEHIND the landing baseline '${baseline}' — the working copy is on an older tree`,
+          { checkedOut, docBranchSha, behindBaseline: behind },
+        );
+      }
+      // The negative control: same tip (or otherwise not behind) is STILL satisfied, with the READ
+      // amount on the report — never a null masquerading as "not assessed" when it WAS assessed.
+      if (behind !== null) {
+        return report(
+          "satisfied",
+          "not-on-baseline",
+          `the main checkout is on '${checkedOut}', not the landing baseline '${baseline}' — the doc-branch invariant holds`,
+          { checkedOut, docBranchSha, behindBaseline: behind },
+        );
+      }
+    }
     return report(
       "satisfied",
       "not-on-baseline",
@@ -1118,13 +1176,21 @@ export function checkDocBranchInvariant(root: string, opts: DocBranchInvariantOp
       { checkedOut, docBranchSha, remedy: `${remedy} --adopt-branch-model` },
     );
   }
+  // The related-branch case carries the lag reading too: a doc branch that exists but is BEHIND the
+  // baseline is the older-tree shape the checkout must not be moved onto silently. `behindBaseline`
+  // is read only when `baselineContainsName` (name is the baseline's ancestor / same tip); otherwise
+  // the "behind" quantity is not the question this branch answers and it stays null.
+  const behindBaseline = baselineContainsName ? revCount(root, name, baseline) : null;
+  const behindClause = behindBaseline !== null && behindBaseline > 0
+    ? ` (⚠️ it is ${behindBaseline} commit(s) BEHIND '${baseline}')`
+    : "";
   return report(
     "violated",
     "on-baseline-doc-branch-elsewhere",
     `the doc-branch invariant is violated: the main checkout is on the landing baseline '${baseline}' ` +
       `while the related doc branch '${name}' (${docBranchSha.slice(0, 8)}) exists — the working copy ` +
-      `must be ON it, or human edits and the driver's commits share one branch and one index`,
-    { checkedOut, docBranchSha, remedy },
+      `must be ON it, or human edits and the driver's commits share one branch and one index${behindClause}`,
+    { checkedOut, docBranchSha, behindBaseline, remedy },
   );
 }
 
@@ -1138,11 +1204,13 @@ export function formatDocBranchInvariantReport(report: DocBranchInvariantReport)
   const mark =
     report.state === "violated"
       ? "VIOLATED"
-      : report.state === "pending"
-        ? "PENDING"
-        : report.state === "not-evaluated"
-          ? "NOT-EVALUATED"
-          : "SATISFIED";
+      : report.state === "behind"
+        ? "BEHIND"
+        : report.state === "pending"
+          ? "PENDING"
+          : report.state === "not-evaluated"
+            ? "NOT-EVALUATED"
+            : "SATISFIED";
   const head = `doc-branch-invariant: ${mark} (reason: ${report.reason}) — ${report.detail}`;
   return report.remedy ? `${head}; remedy: ${report.remedy}` : head;
 }
