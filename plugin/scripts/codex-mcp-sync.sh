@@ -54,18 +54,22 @@ while [ $# -gt 0 ]; do
   esac
 done
 
-# ── The stable install destination + the post-install assertion. The assertion is a REAL read through
-#    node's fs.readFileSync (the same mechanism packages/quay-native/src/manifest.ts readManifest uses),
-#    not a `test -s` proxy: missing ⇒ ENOENT, empty ⇒ exit 1, unreadable ⇒ exit 1. It is deliberately
-#    FALSIFIABLE (硬规则 3b): "not installed" must never be indistinguishable from "installed", so the
-#    install path runs it at the end AND --verify-install lets an existing install re-check itself
-#    without re-copying. ─────────────────────────────────────────────────────────────────────────────
+# ── The stable install destination + the post-install assertion. The assertion reads the manifest's
+#    actual contents (head -c 1 after a -s gate) — a real read, not a bare `test` proxy, and pure bash
+#    so the shell census does not gain an embedded-interpreter script. It is deliberately FALSIFIABLE
+#    (硬规则 3b): missing ⇒ -s fails, empty ⇒ -s fails, unreadable ⇒ head fails; "not installed" must
+#    never be indistinguishable from "installed". The install path runs it at the end AND
+#    --verify-install lets an existing install re-check itself without re-copying. ───────────────────
 DEST="${HOME}/.local/share/quay"
 
 _assert_manifest_installed() {
   local _m="${DEST}/vendor/quay-native/provider.yml"
-  node -e 'const fs=require("node:fs");const p=process.argv[1];const s=fs.readFileSync(p,"utf8");if(!s.trim().length)process.exit(1);' "$_m" \
-    || { echo "ERROR: installed manifest missing/empty/unreadable after install: ${_m}" >&2; return 1; }
+  if [ ! -s "$_m" ]; then
+    echo "ERROR: installed manifest missing or empty after install: ${_m}" >&2
+    return 1
+  fi
+  head -c 1 "$_m" >/dev/null 2>&1 \
+    || { echo "ERROR: installed manifest unreadable after install: ${_m}" >&2; return 1; }
 }
 
 if $VERIFY_INSTALL; then
