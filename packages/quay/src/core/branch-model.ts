@@ -526,12 +526,15 @@ export function formatBranchModelReport(report: BranchModelReport): string {
  * baseline, put the main checkout on a doc branch so human edits and driver commits stop sharing one
  * branch and one index.
  *
- * Four states, each its own answer (this is what AC1 pins):
+ * Six states, each its own answer (this is what AC1 pins):
  *   - main checkout already OFF the landing baseline (whatever its name) ⇒ `independent`, NO-OP.
  *   - ON the baseline, name free ⇒ create that branch AT THE BASELINE'S TIP and switch to it; the
  *     tree is byte-identical (same commit), so this is pure git metadata.
  *   - ON the baseline, name taken by a RELATED branch ⇒ switch to it (the existing doc branch wins;
  *     ⛔ never renamed, never re-pointed).
+ *   - ON the baseline, name taken by a RELATED branch that is BEHIND the baseline ⇒ still switch to
+ *     it (no behavior change), but report `behind` with the explicit lag (gap-quay-init-doc-branch-
+ *     behind-baseline-reports-satisfied) instead of the reusable/unchanged wording.
  *   - ON the baseline, name taken by an UNRELATED branch ⇒ `blocked`, nothing moves — silently
  *     re-pointing a ref that means something to the target project is the damage class the adopt
  *     path of `ensureBranchModel` exists to make an EXPLICIT decision, and no such decision was made
