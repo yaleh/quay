@@ -21,12 +21,23 @@
 
 - **tick** = `.quay/worker-round.jsonl` 的一行（一个 round）。
 - **可派发 tick（dispatchable tick）** = `action=="dispatch"` 的行（该 tick 实际派发了至少一个新任务）。
+  > ⚠️ **本条定义与生产实现不符（2026-11-04 实测，缺陷未修）**：`plugin/scripts/worker-driver.ts:6023`
+  > 的 `reason != null ? "stop" : inFlight > 0 ? "dispatch" : "idle"` 在 **cap 已满、本轮未派发**时同样写
+  > `action="dispatch"`——此时派发循环 `while (running.length < cap …)` 根本没进入，`waitReason` 保持
+  > `null`，于是落到 `inFlight > 0` 分支。因此**照本定义直接读该字段会高估可派发 tick**（7 日窗口内
+  > 89 标称中 72 条是 cap 满的空转轮）。可复跑的替代判据与更正后的读数见 §AC3「更正」小节；缺陷任务：
+  > `gap-worker-round-action-field-conflates-dispatch-and-wait`。
 - **落地任务（landed task）** = `.quay/gate-events.jsonl` 里 `gate=="complete"` 的事件（`payload.to=="done"`，done 翻转）。
 - **三种"没有派发"**（互斥，按 `stop_reason` 前缀分类）：
   - **真空闲**：`pool-empty` —— 可派发池（ready 且非在飞）为空。
   - **被过滤**：`filtered-empty` —— 有候选但被依赖/Touches/在飞/资源门过滤。
   - **资源门拒绝**：`resource-gate-wait` —— 资源门（load/cpu/mem）拒绝，未到派发判定。
   - 另有 `mcp-halt`（控制面停泊）与 `backoff`（候选快速死亡退避），单列、不与上述三种混淆。
+- **`action=="stop"` 不能区分终态与瞬时**：终态停机（`mcp-halt`）与全部瞬时等待（`pool-empty` /
+  `filtered-empty` / `resource-gate-wait` / `backoff`）共用同一个 `action="stop"`——生产者其实算出了该判别位
+  （`driver-runtime.ts:2170-2183` 的 `terminal: true|false`），却在写盘时（`worker-driver.ts:6773` 的
+  `stopReason ?? waitReason`）丢弃。实测全量 70,882 行中，`action="stop"` 且 `in_flight>0` 的 7,986 行里
+  只有 18 行是终态。⇒ 上文三种"没有派发"只能按 `stop_reason` 前缀分类；⛔ **不得用 `action` 判断循环是否停止**。
 
 ---
 
@@ -127,6 +138,10 @@ PY
   与提案申报的"约 99%"一致，但此处是按整日窗口分列后的独立读数。
 - `resource-gate-wait` 在近三日占比 ≤0.4%（10-30 / 10-31 为零）——**资源门不是当前空闲主因**。
 - `mcp-halt` 只在 10-29 出现 12.7%（当日控制面停泊窗口），近三日为零。
+- ⚠️ **`dispatched` 列是标称值**（同一条 `action` 缺陷，见 §口径定义 第一条警示）：含 cap 已满的空转轮。
+  按 `pool !== null` 更正后，上表四个整日为 **10-29:1、10-30:3、10-31:0、11-01:2**（原 `3/10/1/12`）；
+  11-02 partial 中标称 3 条里 2 条为真实派发（窗口端点与上表切法略有差异）。其余各列按 `stop_reason`
+  分类，不受该缺陷影响。更正的完整口径与复跑命令见 §AC3「更正」。
 
 ---
 
@@ -168,13 +183,57 @@ PY
 |---|---|
 | 落地任务数（`gate=complete`） | 93 |
 | 总 tick | 6791 |
-| 可派发 tick（`action=dispatch`） | 89（占总 tick 1.31%） |
+| 可派发 tick（`action=dispatch`，**标称值——见下方更正，口径有缺陷**） | 89（占总 tick 1.31%） |
 | **旧算法：落地 / 总 tick** | 93 / 6791 = **0.0137（1.37%）** |
-| **新算法：落地 / 可派发 tick** | 93 / 89 = **1.045（104.5%）** |
+| **新算法：落地 / 可派发 tick**（原读数，⚠️ **已作废**） | 93 / 89 = **1.045（104.5%）** |
 
-- 7 日逐日可派发 tick：`10-26:25, 10-27:23, 10-28:15, 10-29:3, 10-30:10, 10-31:1, 11-01:12`，日均 ≈ 12.7。
-- **解读**：新分母暴露了真正的约束——7 日内只有 89 个 tick 有活可派（1.31%），而落地数 93 已经"追平甚至超过"派发数
-  （落地滞后于派发，横截面比值可以 >1，见下）。也就是说，**派发供给是唯一瓶颈，不是执行/落地效率**。
+> ### 更正（2026-11-04）：上面的 89 与 104.5% 建立在有缺陷的口径上，不得再引用
+>
+> `action=="dispatch"` 在 **cap 已满的空转轮**也会写出（机制见 §口径定义 第一条警示）。**结构判据**：派发
+> 只可能发生在 ready-pool 步之后（`worker-driver.ts:6663`），而该步跑过时 `pool` 必为数字
+> （`readyPoolCheck` 返回 `pool: number`，`driver-runtime.ts:2887`；循环体抛错轮走 `action="error"`）
+> ⇒ **`pool === null` ⟺ 本轮物理上不可能派发**。
+>
+> 复跑（与 AC3 同一窗口、同一载体）：
+>
+> ```bash
+> python3 - <<'PY'
+> import json
+> W_START, W_END = '2026-10-26T00:00:00.000Z', '2026-11-02T00:00:00.000Z'
+> lab = real = 0
+> for line in open('.quay/worker-round.jsonl'):
+>     line = line.strip()
+>     if not line: continue
+>     d = json.loads(line)
+>     if not (W_START <= d.get('ts','') < W_END): continue
+>     if d.get('action') == 'dispatch':
+>         lab += 1
+>         if d.get('pool') is not None: real += 1
+> print('labelled dispatch =', lab, '| pool != null (real) =', real)
+> PY
+> ```
+>
+> | 量 | 原读数 | 更正后 |
+> |---|---|---|
+> | 标称 `action=dispatch` | 89 | 89（不变） |
+> | 其中 `pool === null`（cap 满空转，结构上不可能派发） | 未测 | **72** |
+> | 再并入第二判据（与同 run 上一轮 `in_flight` + `in_flight_tasks` 全同） | — | **74** |
+> | 真实派发轮（上界） | 89 | **17**（严格界 15） |
+> | 落地 / 可派发 tick | 93 / 89 = 104.5% | **93 / 17 = 5.47**（严格界 93 / 15 = 6.20） |
+>
+> 逐日更正（原 `25/23/15/3/10/1/12` → 真实 `6/1/4/1/3/0/2`）：`10-26:6, 10-27:1, 10-28:4, 10-29:1,
+> 10-30:3, 10-31:0, 11-01:2`。
+>
+> **结论方向不变、且更强**：7 日内真实派发轮只有 17 轮，而落地 93 个 ⇒「派发供给是瓶颈，不是执行/落地
+> 效率」仍是本报告的结论。但**原 104.5% 这个比值、以及为它给的"落地滞后于派发，横截面比值可以 >1"的解释
+> 作废**——它们是把 cap 满的空转轮当成派发轮之后的事后合理化。缺陷任务：
+> `gap-worker-round-action-field-conflates-dispatch-and-wait`。
+
+- 7 日逐日可派发 tick（**标称值，含空转轮**）：`10-26:25, 10-27:23, 10-28:15, 10-29:3, 10-30:10, 10-31:1, 11-01:12`，日均 ≈ 12.7
+  （**真实值 17 / 7 ≈ 2.4**，逐日见上方更正表）。
+- **解读**：新分母暴露了真正的约束——7 日内只有 **17** 个 tick 真的派发了任务（占 0.25%），而落地数 93
+  远高于派发轮数 ⇒ 派发供给是唯一瓶颈，不是执行/落地效率。（注：比值按轮计而非按任务计，故 >1 本身
+  不构成矛盾；原 104.5% 的"落地追平派发"表述已随更正作废。）
 
 ---
 
@@ -190,7 +249,8 @@ PY
   是供给枯竭的结果，不是执行劣化的证据（硬规则 4 推论四：能解释现象 ≠ 被检验的结论）。
 - **"可用工作 > 0 却长时间 pool-empty"在本窗口不成立**：`pool-empty` 是真实供给枯竭（`todo=0`、`ready` 全在飞），
   **不是被过滤器藏住了可用工作**。被过滤是另一个独立现象，且在本窗口确有一个对照日：
-  - **2026-10-26**：`total=1148`，`filtered-empty=1123 (97.8%)`、`pool-empty=0`、`dispatched=25`。
+  - **2026-10-26**：`total=1148`，`filtered-empty=1123 (97.8%)`、`pool-empty=0`、`dispatched=25`（**标称值**；
+    按 `pool !== null` 更正为 **6**——见 §AC3「更正」）。
     该日池里有候选，但被 `depsSatisfied` 过滤器挡住（抽样 `filter_trace` 首条：任务
     `gap-instrument-decay-postlanding-two-rounds`，`filter=depsSatisfied`，`blocker=None`）——
     这是**依赖未满足 / 派发争用**，不是执行慢，也不是供给枯竭。该日与近三日（pool-empty 主导）是两个不同象限，
@@ -237,10 +297,15 @@ PY
 | pool-empty | 49411 | 71.76% |
 | filtered-empty | 11180 | 16.24% |
 | mcp-halt | 3810 | 5.53% |
-| dispatched | 2685 | 3.90% |
+| dispatched（标称，含 cap 满空转轮——见下） | 2685 | 3.90% |
 | backoff | 939 | 1.36% |
 | resource-gate-wait | 693 | 1.01% |
 | idle | 141 | 0.20% |
+
+> ⚠️ 同一条 `action` 缺陷影响本表：`dispatched` 的标称 2,685 中，按 `pool !== null` 只有 **1,521** 条
+> 可能真的派发（56.6%）；按 `pool === null` 判为 cap 满空转的共 1,163 条。其余各类按 `stop_reason`
+> 分类，不受影响。更正口径见 §AC3「更正」，缺陷任务
+> `gap-worker-round-action-field-conflates-dispatch-and-wait`。
 
 与 `docs/analysis/task-efficiency-baseline.md` E5 段（窗口至 2026-11-01）对得上：该报告
 `pool-empty=48408` / `resource-gate-wait=691` / `mcp-halt=3810` / `filtered-empty=11136`；
