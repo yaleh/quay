@@ -1,7 +1,7 @@
 ---
 id: gap-worker-round-action-field-conflates-dispatch-and-wait
 title: worker-round 的 action 字段语义混装：dispatch 假阳性（cap 满轮 72/89）与 stop 混淆终态/瞬时
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -73,10 +73,10 @@ extra:
 
 ## AC
 
-- [ ] `action` 值域新增独立取值 `wait`，`computeWorkerRoundRecord` 的类型与写点支持四态（`wait` / `stop` / `dispatch` / `idle`），且 `dispatch` 仅在 `pool !== null` 且本轮 spawn 计数 > 0 时写出——`node --test plugin/test/worker-round-action-semantics.test.mjs` exit 0，用例覆盖 cap 满轮、瞬时等待轮、终态 halt 轮、真实派发轮四种。
-- [ ] round 记录新增 `terminal: boolean` 显式位，由 `stopCondition()` 的 `terminal` 原样透传；同一测试断言 halt 轮 `terminal === true`、`resource-gate-wait` 轮 `terminal === false` 且 `action === "wait"`。
-- [ ] `orchestration/worker-driver-log-carriers.md` 的 action 值域行含 `wait` 与 `terminal` 位：`grep -c 'wait' orchestration/worker-driver-log-carriers.md` ≥ 1，且该文件不再出现只列 `start/dispatch/idle/stop` 的旧值域行（`grep -c 'start/dispatch/idle/stop' orchestration/worker-driver-log-carriers.md` = 0）。
-- [ ] 负控制：把 `action` 的判定退回旧三元表达式后，上述测试必须变红（证明测试不是恒真）。
+- [x] `action` 值域新增独立取值 `wait`，`computeWorkerRoundRecord` 的类型与写点支持四态（`wait` / `stop` / `dispatch` / `idle`），且 `dispatch` 仅在 `pool !== null` 且本轮 spawn 计数 > 0 时写出——`node --test plugin/test/worker-round-action-semantics.test.mjs` exit 0，用例覆盖 cap 满轮、瞬时等待轮、终态 halt 轮、真实派发轮四种。
+- [x] round 记录新增 `terminal: boolean` 显式位，由 `stopCondition()` 的 `terminal` 原样透传；同一测试断言 halt 轮 `terminal === true`、`resource-gate-wait` 轮 `terminal === false` 且 `action === "wait"`。
+- [x] `orchestration/worker-driver-log-carriers.md` 的 action 值域行含 `wait` 与 `terminal` 位：`grep -c 'wait' orchestration/worker-driver-log-carriers.md` ≥ 1，且该文件不再出现只列 `start/dispatch/idle/stop` 的旧值域行（`grep -c 'start/dispatch/idle/stop' orchestration/worker-driver-log-carriers.md` = 0）。
+- [x] 负控制：把 `action` 的判定退回旧三元表达式后，上述测试必须变红（证明测试不是恒真）。
 - [ ] 生产载体抽样：driver 用新代码重启并至少写出一轮之后，`.quay/worker-round.jsonl` 的新增行中 `action=="dispatch" ∧ pool==null` 计数为 0，且出现至少 1 行 `action=="wait"`（待外部）
 
 ## DoD
@@ -92,11 +92,11 @@ cap 满轮不再出现 `dispatch` 假阳性、`terminal` 位在载体上可读�
 - plugin/test/worker-round-action-semantics.test.mjs (new)
 - orchestration/worker-driver-log-carriers.md
 - tasks/gap-worker-round-action-field-conflates-dispatch-and-wait.md
+- plugin/test/worker-driver-fan-in-s02.test.mjs
+- plugin/test/worker-driver-fan-in-s03.test.mjs
+- plugin/test/worker-driver-resident-s02.test.mjs
+- plugin/test/worker-driver-resident-s03.test.mjs
 
-## Blocker
+## ADR-007 暗轴记录
 
-**2026-11-04T08:56:21.322Z — worker 未落地（exited-not-landed）**
-
-- 未落地原因：step=suite: AssertionError [ERR_ASSERTION]: at least two stop rounds written (the driver re-reads the gate each poll) [baseline A/B: HARD RED (task-introduced-red) — the task's red set is NOT a subset of the develop baseline red set: added=plugin/test/worker-driver-fan-in-s02.test.mjs,plugin/test/worker-driver-resident-s02.test.mjs,plugin/test/worker-driver-resident-s03.test.mjs changed=-]
-- run_id：wk-prod-anchor
-- session_id：e1b5aa14-ad9b-49c2-9338-8309966bd4b1
+- 该轴仍暗,理由:本任务为局部缺陷修复(worker round 记录字段语义 + 测试 + 文档值域),不改包/依赖结构,无可测的 L_D/L_G 读数。

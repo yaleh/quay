@@ -355,16 +355,22 @@ export function ensureGitignore(root: string, opts: { runtimeArtifactsManifest?:
     say(`  WARNING: ${warnings[warnings.length - 1]}`);
     return { wrote, warnings };
   }
-  if (blockPresent(RUNTIME_HEADER)) {
-    say("  skipped: .gitignore already carries the quay runtime-artifact block");
-    return { wrote, warnings };
-  }
+  // PATTERN-GRANULAR, not block-granular (gap-quay-init-rerun-skips-delivery-surface-convergence):
+  // the header being present does NOT mean every manifest pattern is — a project initialised by an
+  // older manifest has the header but not the newer orphan-lock rules (`goals/*.lock` etc.). So the
+  // header presence only decides whether the header line itself is re-written; each manifest pattern
+  // is appended iff absent. Idempotent: when every pattern is already there, nothing is written.
   const present = new Set(existing().split("\n").map((l) => l.trim()));
-  const lines = [RUNTIME_HEADER];
+  const lines: string[] = [];
+  if (!present.has(RUNTIME_HEADER)) lines.push(RUNTIME_HEADER);
   for (const p of patterns) if (!present.has(p)) lines.push(p);
-  fs.appendFileSync(gi, lines.join("\n") + "\n", "utf8");
-  wrote = true;
-  say(`  appended: quay runtime-artifact block (${patterns.length} pattern(s))`);
+  if (lines.length > 0) {
+    fs.appendFileSync(gi, lines.join("\n") + "\n", "utf8");
+    wrote = true;
+    say(`  appended: quay runtime-artifact block (${lines.length - (present.has(RUNTIME_HEADER) ? 0 : 1)} pattern(s))`);
+  } else {
+    say("  skipped: .gitignore already carries the quay runtime-artifact block");
+  }
   return { wrote, warnings };
 }
 
