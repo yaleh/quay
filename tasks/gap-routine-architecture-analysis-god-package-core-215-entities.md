@@ -2,7 +2,7 @@
 id: gap-routine-architecture-analysis-god-package-core-215-entities
 title: "architecture-analysis: core mixes ADR store, gate/acceptance verdicts,
   ancestry, config, and contract validation in one package"
-status: ready
+status: done
 labels:
   - gap
   - routine-filed
