@@ -100,3 +100,11 @@ cap 满轮不再出现 `dispatch` 假阳性、`terminal` 位在载体上可读�
 ## ADR-007 暗轴记录
 
 - 该轴仍暗,理由:本任务为局部缺陷修复(worker round 记录字段语义 + 测试 + 文档值域),不改包/依赖结构,无可测的 L_D/L_G 读数。
+
+## Blocker
+
+**2026-11-04T08:56:21.322Z — worker 未落地（exited-not-landed）**
+
+- 未落地原因：step=suite: AssertionError [ERR_ASSERTION]: at least two stop rounds written (the driver re-reads the gate each poll) [baseline A/B: HARD RED (task-introduced-red) — the task's red set is NOT a subset of the develop baseline red set: added=plugin/test/worker-driver-fan-in-s02.test.mjs,plugin/test/worker-driver-resident-s02.test.mjs,plugin/test/worker-driver-resident-s03.test.mjs changed=-]
+- run_id：wk-prod-anchor
+- session_id：e1b5aa14-ad9b-49c2-9338-8309966bd4b1
