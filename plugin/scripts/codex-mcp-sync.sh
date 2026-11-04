@@ -6,6 +6,10 @@
 # (never embedded inside the plugin package), with an upgrade flow calling this script to keep it
 # in sync with the current version.
 #
+# ⚠️ 按需运行（on-demand）——本脚本不是插件升级钩子，升级插件后需重跑一次 `--install-only`，否则稳定
+#   安装停在旧版（`~/.local/share/quay/quay.js` 不会自动刷新）；`--verify-install` 可随时复核已装
+#   manifest 是否仍可读。
+#
 # Two jobs, split so the publish flow can run only the install half (a publisher must NOT rewrite
 # the committed, portable `.mcp.json` against its own `$HOME`):
 #   1. INSTALL the current dist + the native provider + the kernel anchor to `~/.local/share/quay/`.
@@ -14,10 +18,12 @@
 #      literal `~/.local/share/quay/…` committed in `.mcp.json` would ENOENT at spawn time. This is
 #      the per-machine post-install step that turns the portable template into a runnable path.
 #
-# Usage: bash plugin/scripts/codex-mcp-sync.sh [--mcp-json <path>] [--install-only] [--dist-root <dir>]
+# Usage: bash plugin/scripts/codex-mcp-sync.sh [--mcp-json <path>] [--install-only] [--verify-install] [--dist-root <dir>]
 #   --mcp-json <path>  the `.mcp.json` to rewrite `~` -> `$HOME` in (default: the codex package
 #                      root's `.mcp.json`, found by walking up to `.codex-plugin/plugin.json`)
 #   --install-only     install the dist but do NOT rewrite any `.mcp.json` (the publish flow's mode)
+#   --verify-install   verify an EXISTING install's provider manifest is readable (the same assertion
+#                      the install path runs at its end); does NOT copy or rewrite any `.mcp.json`
 #   --dist-root <dir>  install the dist from THIS tree (vendor/quay/dist/quay.js + native + kernel
 #                      anchor live under <dir>) instead of walking up from this script's own location —
 #                      the publish flow passes the assembled artifact root so the freshly-published
@@ -26,7 +32,7 @@
 # ── 统一 --help（gap-scripts-sprawl：用法在前、退出 0、无业务副作用）────────────────────
 if [ "${1:-}" = "--help" ] || [ "${1:-}" = "-h" ]; then
   _gap_help_lib="$(dirname "${BASH_SOURCE[0]}")/gate-script-lib.sh"
-  if [ -f "$_gap_help_lib" ]; then . "$_gap_help_lib"; tool_help "$0"; else echo "用法: bash $(basename "$0") [--mcp-json <path>] [--install-only] [--dist-root <dir>]"; fi
+  if [ -f "$_gap_help_lib" ]; then . "$_gap_help_lib"; tool_help "$0"; else echo "用法: bash $(basename "$0") [--mcp-json <path>] [--install-only] [--verify-install] [--dist-root <dir>]"; fi
   exit 0
 fi
 set -euo pipefail
@@ -35,16 +41,38 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 
 MCP_JSON=""
 INSTALL_ONLY=false
+VERIFY_INSTALL=false
 DIST_ROOT_OVERRIDE=""
 
 while [ $# -gt 0 ]; do
   case "$1" in
     --mcp-json) MCP_JSON="$2"; shift 2 ;;
     --install-only) INSTALL_ONLY=true; shift ;;
+    --verify-install) VERIFY_INSTALL=true; shift ;;
     --dist-root) DIST_ROOT_OVERRIDE="$2"; shift 2 ;;
     *) echo "ERROR: unknown argument: $1" >&2; exit 2 ;;
   esac
 done
+
+# ── The stable install destination + the post-install assertion. The assertion is a REAL read through
+#    node's fs.readFileSync (the same mechanism packages/quay-native/src/manifest.ts readManifest uses),
+#    not a `test -s` proxy: missing ⇒ ENOENT, empty ⇒ exit 1, unreadable ⇒ exit 1. It is deliberately
+#    FALSIFIABLE (硬规则 3b): "not installed" must never be indistinguishable from "installed", so the
+#    install path runs it at the end AND --verify-install lets an existing install re-check itself
+#    without re-copying. ─────────────────────────────────────────────────────────────────────────────
+DEST="${HOME}/.local/share/quay"
+
+_assert_manifest_installed() {
+  local _m="${DEST}/vendor/quay-native/provider.yml"
+  node -e 'const fs=require("node:fs");const p=process.argv[1];const s=fs.readFileSync(p,"utf8");if(!s.trim().length)process.exit(1);' "$_m" \
+    || { echo "ERROR: installed manifest missing/empty/unreadable after install: ${_m}" >&2; return 1; }
+}
+
+if $VERIFY_INSTALL; then
+  _assert_manifest_installed
+  echo "[codex-mcp-sync] --verify-install: installed manifest readable at ${DEST}/vendor/quay-native/provider.yml"
+  exit 0
+fi
 
 # ── Resolve the DIST root (contains vendor/quay/dist/quay.js) and the CODEX package root (contains
 #    .codex-plugin/plugin.json) by walking up from this script. The SOURCE repo nests them
@@ -70,21 +98,24 @@ while [ "$_dir" != "/" ] && [ "$_dir" != "." ]; do
 done
 
 # ── Fail-closed: refuse to sync from a tree that has no built dist (硬规则 3b — "no dist to copy"
-#    must never be indistinguishable from "copied"). ─────────────────────────────────────────────
+#    must never be indistinguishable from "copied"). provider.yml travels with the native bundle
+#    (sync-vendor.sh:210 — the bundle resolves it relative to its own location, so the pair must stay
+#    together), so a missing/empty manifest here is the SAME class of refusal as a missing bundle. ──
 CORE_DIST="${DIST_ROOT}/vendor/quay/dist/quay.js"
 NATIVE_DIST="${DIST_ROOT}/vendor/quay-native/dist/quay-native.js"
-for _src in "$CORE_DIST" "$NATIVE_DIST"; do
+NATIVE_MANIFEST="${DIST_ROOT}/vendor/quay-native/provider.yml"
+for _src in "$CORE_DIST" "$NATIVE_DIST" "$NATIVE_MANIFEST"; do
   if [ ! -s "$_src" ]; then
     echo "ERROR: ${_src} missing or empty — build the plugin first (bash plugin/scripts/sync-vendor.sh)." >&2
     exit 1
   fi
 done
 
-DEST="${HOME}/.local/share/quay"
 mkdir -p "${DEST}/vendor/quay-native/dist" "${DEST}/scripts/dist"
 
 cp "$CORE_DIST" "${DEST}/quay.js"
 cp "$NATIVE_DIST" "${DEST}/vendor/quay-native/dist/quay-native.js"
+cp "$NATIVE_MANIFEST" "${DEST}/vendor/quay-native/provider.yml"
 
 # The kernel anchor that lets Core's resolvePluginRoot() recognize the stable location as a plugin
 # root (so the native provider's default entry resolves from there). The bundled form ships in the
@@ -101,8 +132,15 @@ else
   exit 1
 fi
 
+# ── End-of-install verification: the manifest was actually copied (byte-identical to source) and is
+#    actually readable. This is the falsifiable assertion (硬规则 3b) — a copy step that silently
+#    produced an empty/partial/missing file must exit non-zero here, never pass as "installed". ────
+cmp "$NATIVE_MANIFEST" "${DEST}/vendor/quay-native/provider.yml" \
+  || { echo "ERROR: copied manifest does not match source: ${DEST}/vendor/quay-native/provider.yml" >&2; exit 1; }
+_assert_manifest_installed
+
 echo "[codex-mcp-sync] installed dist to ${DEST}:"
-ls -la "${DEST}" "${DEST}/vendor/quay-native/dist" "${DEST}/scripts/dist" 2>/dev/null
+ls -la "${DEST}" "${DEST}/vendor/quay-native" "${DEST}/vendor/quay-native/dist" "${DEST}/scripts/dist" 2>/dev/null
 
 # ── The per-machine rewrite: expand `~` -> $HOME in args[0] so codex's direct node spawn resolves
 #    the dist. Only the exact stable-prefix is touched; anything else is left byte-identical. ─────
