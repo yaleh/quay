@@ -68,12 +68,12 @@ grep -rc "ENOENT: no such file or directory, open '/data/home/yale/.local/share/
 
 ## AC
 
-- [ ] 安装完整性：临时 HOME 下跑 `codex-mcp-sync.sh --install-only`，`$HOME/.local/share/quay/vendor/quay-native/provider.yml` 存在，且与 `$DIST_ROOT/vendor/quay-native/provider.yml` `cmp` exit 0。
-- [ ] fail-closed 预检（负控制）：删掉源 `provider.yml` 后运行脚本必须 exit≠0，且 stderr 指名该路径——证明「没装」不与「装好」同形。
-- [ ] 安装后断言可取假：把已装好的 `provider.yml` 删除或置空后重跑，脚本 exit≠0（断言本身不是摆设）。
-- [ ] 回归用例三臂全绿：`node --test plugin/test/codex-mcp-sync-provider-manifest.test.mjs` exit 0。
-- [ ] 脚本头注释写明按需语义与升级后重跑要求：`grep -c '升级插件后需重跑' plugin/scripts/codex-mcp-sync.sh` ≥ 1。
-- [ ] 范围门绿：`bash scripts/test.sh --for-task gap-codex-mcp-sync-omits-provider-yml-stable-install --allow-thin`。
+- [x] 安装完整性：临时 HOME 下跑 `codex-mcp-sync.sh --install-only`，`$HOME/.local/share/quay/vendor/quay-native/provider.yml` 存在，且与 `$DIST_ROOT/vendor/quay-native/provider.yml` `cmp` exit 0。
+- [x] fail-closed 预检（负控制）：删掉源 `provider.yml` 后运行脚本必须 exit≠0，且 stderr 指名该路径——证明「没装」不与「装好」同形。
+- [x] 安装后断言可取假：把已装好的 `provider.yml` 删除或置空后重跑，脚本 exit≠0（断言本身不是摆设）。
+- [x] 回归用例三臂全绿：`node --test plugin/test/codex-mcp-sync-provider-manifest.test.mjs` exit 0。
+- [x] 脚本头注释写明按需语义与升级后重跑要求：`grep -c '升级插件后需重跑' plugin/scripts/codex-mcp-sync.sh` ≥ 1。
+- [x] 范围门绿：`bash scripts/test.sh --for-task gap-codex-mcp-sync-omits-provider-yml-stable-install --allow-thin`。
 
 ## DoD
 
@@ -87,3 +87,7 @@ grep -rc "ENOENT: no such file or directory, open '/data/home/yale/.local/share/
 - plugin/scripts/codex-mcp-sync.sh
 - plugin/test/codex-mcp-sync-provider-manifest.test.mjs (new)
 - tasks/gap-codex-mcp-sync-omits-provider-yml-stable-install.md
+
+## ADR-007
+
+该轴仍暗,理由:本次改动是 shell 安装器缺项修复，不改包依赖/模块结构，L_D/L_G 无增量读数可测。
