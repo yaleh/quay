@@ -2,7 +2,7 @@
 id: gap-quay-init-doc-branch-behind-baseline-reports-satisfied
 title: ensureDocBranch 把主检出切到落后基线的 doc 分支且不带落后量读数；checkDocBranchInvariant 同时报
   satisfied
-status: ready
+status: done
 labels:
   - gap
   - defect
