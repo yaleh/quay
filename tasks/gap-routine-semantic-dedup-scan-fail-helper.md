@@ -2,7 +2,7 @@
 id: gap-routine-semantic-dedup-scan-fail-helper
 title: "semantic-dedup-scan: Identical fail(msg) except per-script log prefix;
   both emit {ok:false,error} in --json mode else stderr and return 2."
-status: ready
+status: done
 labels:
   - gap
   - routine-filed
