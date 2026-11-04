@@ -519,11 +519,15 @@ test("AC2: the real publish script exits non-zero and commits nothing when a ref
 // freshly-assembled artifact via `--dist-root "$WORK"`.
 
 /** A synthetic dist tree in the shape the sync script reads: core bundle + native provider + the
- *  kernel anchor, with a real COPY of codex-mcp-sync.sh (so the walk-up default resolves against
- *  THIS tree). The dist body is a marker so the test judges WHICH tree was installed from. */
+ *  provider manifest + the kernel anchor, with a real COPY of codex-mcp-sync.sh (so the walk-up
+ *  default resolves against THIS tree). The dist body is a marker so the test judges WHICH tree was
+ *  installed from. The manifest is required by codex-mcp-sync.sh's fail-closed precheck since
+ *  gap-codex-mcp-sync-omits-provider-yml-stable-install (provider.yml travels with the native
+ *  bundle). */
 function writeCodexSyncTree(root, distMarker) {
   writeFile(path.join(root, "vendor", "quay", "dist", "quay.js"), distMarker);
   writeFile(path.join(root, "vendor", "quay-native", "dist", "quay-native.js"), `${distMarker}-native`);
+  writeFile(path.join(root, "vendor", "quay-native", "provider.yml"), `${distMarker}-manifest`);
   writeFile(path.join(root, "scripts", "dist", "driver-runtime.js"), `${distMarker}-kernel`);
   writeFile(path.join(root, "plugin", "scripts", "codex-mcp-sync.sh"), fs.readFileSync(CODEX_MCP_SYNC));
   return root;
