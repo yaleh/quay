@@ -75,4 +75,5 @@ extra:
 - plugin/scripts/worker-driver.ts
 - plugin/test/worker-driver-resident-s07.test.mjs
 - plugin/scripts/conflict-resolution-rules.ts
+- plugin/scripts/capability-catalog-declarations.json
 - tasks/gap-arbitrary-semantics-unenforced-carriers.md
