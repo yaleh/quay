@@ -437,8 +437,8 @@
     "task-double-frontmatter-check.ts": "Which task files carry two back-to-back frontmatter blocks (a duplicated id:/status: from the task_write body path) — the corruption that produces two contradictory status readings?",
     "codex-mcp-sync.sh": "How does the Codex plugin's quay MCP dist get installed/synced to the stable version-independent location ~/.local/share/quay/ (and its .mcp.json tilde prefix expanded to the home directory so codex's direct node spawn resolves it)? Run on demand: publish-dist-branch.sh --push calls it with --install-only, and the user runs it once after install.",
     "sha256.ts": "Is the sha256 helper pair (sha256OfString / sha256OfBuffer) defined ONCE as a plugin-scripts leaf, so every caller imports it instead of each re-implementing the createHash(\"sha256\").update(...).digest(\"hex\") body — the seven independently-declared wrappers the semantic-dedup-scan routine found (finding B1, runId semantic-dedup-scan-1793491958069: experiment-manifest / proposal-convergence / execution-policy / stage-receipt / run-identity / primitives-drift-check)?",
-    "consumer-quay-deliverable-verify.sh": "Does quay's shipped deliverable actually WORK from a CONSUMER project — all four consumer surfaces (Claude Code MCP task_list, Claude Code /quay-task-operator skill, Codex MCP task_list via codex exec, Codex $quay-task-operator skill) reach the project's OWN task store when pointed at a consumer workspace (--root <project>), each judged PASS/FAIL by the presence of a real task-listing response — a dev-tree verification that runs the repo's worker launcher (claude-fjdac) + Codex CLI, not a shipped consumer tool?",
-    "dist-stats.ts": "What is the ONE implementation of the NOT-EVALUATED-string percentile summary dist (n/min/median/p90/max/mean) and its percentile helper, and what does an EMPTY sample answer — i.e. is the statistic declared in exactly one place (this module) with NOT-EVALUATED as the empty sentinel for every statistic field (n=0, min/median/p90/max/mean = NOT-EVALUATED), instead of the two byte-identical copies that duration-report.ts and fan-in-queueing-model.ts each hand-maintained — so a MEASURED zero can never be read as a sample that was never taken, and both consumers import (and re-export) the SAME function object rather than a parity-tested twin (routine semantic-dedup-scan, finding dist-stats, runId semantic-dedup-scan-1793780123988)?"
+    "dist-stats.ts": "What is the ONE implementation of the NOT-EVALUATED-string percentile summary dist (n/min/median/p90/max/mean) and its percentile helper, and what does an EMPTY sample answer — i.e. is the statistic declared in exactly one place (this module) with NOT-EVALUATED as the empty sentinel for every statistic field (n=0, min/median/p90/max/mean = NOT-EVALUATED), instead of the two byte-identical copies that duration-report.ts and fan-in-queueing-model.ts each hand-maintained — so a MEASURED zero can never be read as a sample that was never taken, and both consumers import (and re-export) the SAME function object rather than a parity-tested twin (routine semantic-dedup-scan, finding dist-stats, runId semantic-dedup-scan-1793780123988)?",
+    "conflict-resolution-rules.ts": "Does the fan-in merge-conflict protocol's machine-decidable rules — (3) dual-copy byte-identical sync, (4) tick-doc take-develop, (5) modify/delete deletion-side — live as ONE executable carrier (conflictAction decided by position + resolveConflictMechanically running the real git commands), so a worker resolving a conflict executes them instead of re-deriving them from prompt prose that a worker could ignore (gap-arbitrary-semantics-unenforced-carriers AC2)?"
   },
   "GUARD_OBJECT": {
     "manager-tick-log-check.sh": "runtime:orchestration/manager-tick-log.md",
@@ -862,8 +862,8 @@
     "task-double-frontmatter-check.ts": "按需",
     "codex-mcp-sync.sh": "按需",
     "sha256.ts": "按需",
-    "consumer-quay-deliverable-verify.sh": "按需",
-    "dist-stats.ts": "按需"
+    "dist-stats.ts": "按需",
+    "conflict-resolution-rules.ts": "按需"
   },
   "INVALIDATION": {
     "resolve-quay-cli.ts": "失效前提：① Claude Code still records plugin installs in ~/.claude/plugins/installed_plugins.json with the field set this resolver reads (scope / projectPath / installPath / version per plugin id quay@quay / quay@quay-dev) — measured 2026-10-26 on 2.1.310; a record-schema change makes readInstallRecord report not-evaluated, which is a NAMED refusal, not a silent wrong answer; ② the session layer's tier rule is unchanged (a projectPath-matching project/local entry wins over the user entry) — the SAME rule is implemented in packages/quay/src/loaded-version.ts (projectScopedVersionReading) and recorded in packages/quay/src/init.ts's plugin-link header, so a change must move all three together; ③ an installed plugin root still carries bin/quay and vendor/quay/dist/quay.js; ④ the retired <project>/.quay/plugin is never reintroduced as a resolution input (if it were, this resolver's refusal to read it would become wrong rather than conservative).",
@@ -1277,8 +1277,8 @@
     "task-double-frontmatter-check.ts": "失效前提：① task 文件的 frontmatter 仍以行首 --- 开始、store 的 parse() 只读首块（若分隔符或行首缩进改变，本检测器的块切分须同步）；② 双 frontmatter 的签名仍是「首块后紧跟第二个 --- 块」——若未来改为按 ^id: 裸计数（会把 Evidence code fence 内引用的 goal 文件误判），本脚本须同步。测试：干净任务集 exit 0，含双块的副本 exit 1。",
     "codex-mcp-sync.sh": "负控制失效：dist 缺/空或 kernel anchor 缺失时脚本仍 exit 0（--install-only 只装不重写 .mcp.json）",
     "sha256.ts": "失效前提：sha256.ts 仍是这些调用者做 sha256 哈希时的唯一实现（它们 import 本模块的 sha256OfString / sha256OfBuffer）；若某个调用者改回自己手搓一份 createHash(\"sha256\") 副本、或这些原语被上收到别的包，本条退休",
-    "consumer-quay-deliverable-verify.sh": "失效前提：① claude-fjdac / v4pro-anthropic 仍是本仓库 worker profile 的 launcher/model；② quay 仍以 Claude Code + Codex 双宿主发布（MCP + skills 四通道）；③ codex mcp list --json 输出仍含 \"quay\" 键；④ 脚本用到的 --permission-mode bypassPermissions 与 --dangerously-bypass-approvals-and-sandbox 旗标仍是两宿主的可执行形态。",
-    "dist-stats.ts": "失效前提：仍有多个消费者需要同一个 NOT-EVALUATED-string 的 dist/percentile（duration-report.ts / fan-in-queueing-model.ts 均 import 并 re-export 本模块），且空样本仍须与「测到的 0」可区分（NOT-EVALUATED ≠ 0）；若 dist 只剩一个消费者、或该统计量整体退役 ⇒ 本条退休"
+    "dist-stats.ts": "失效前提：仍有多个消费者需要同一个 NOT-EVALUATED-string 的 dist/percentile（duration-report.ts / fan-in-queueing-model.ts 均 import 并 re-export 本模块），且空样本仍须与「测到的 0」可区分（NOT-EVALUATED ≠ 0）；若 dist 只剩一个消费者、或该统计量整体退役 ⇒ 本条退休",
+    "conflict-resolution-rules.ts": "失效前提：fan-in 的 merge develop 冲突仍按 (3)/(4)/(5) 规则消解，且这些规则仍被 worker-driver.ts 的 continueConflictResolutionNote 委托给本模块的 --resolve；若冲突消解协议改写、或这些规则迁回 driver 原生执行，本条随迁"
   },
   "LAST_REAFFIRMED": {
     "resolve-quay-cli.ts": "2026-10-26",
@@ -1692,8 +1692,8 @@
     "task-double-frontmatter-check.ts": "2026-10-30",
     "codex-mcp-sync.sh": "2026-10-31",
     "sha256.ts": "2026-11-01",
-    "consumer-quay-deliverable-verify.sh": "2026-11-01",
-    "dist-stats.ts": "2026-11-04"
+    "dist-stats.ts": "2026-11-04",
+    "conflict-resolution-rules.ts": "2026-11-05"
   },
   "MATCHING": {
     "resolve-quay-cli.ts": "enumerative",
@@ -2107,8 +2107,8 @@
     "task-double-frontmatter-check.ts": "position",
     "codex-mcp-sync.sh": "keyword",
     "sha256.ts": "n/a",
-    "consumer-quay-deliverable-verify.sh": "enumerative",
-    "dist-stats.ts": "n/a"
+    "dist-stats.ts": "n/a",
+    "conflict-resolution-rules.ts": "n/a"
   },
   "CONSUMER": {
     "resolve-quay-cli.ts": "谁按：外部消费者按 docs/references/external-consumer-cli-location.md §5.2 运行它（node --experimental-strip-types <plugin-root>/scripts/resolve-quay-cli.ts --project <dir> [--json|--field <name>]；安装形态跑 scripts/dist/resolve-quay-cli.js），并以退出码 0/2/3 判态；plugin/skills/init/SKILL.md 的 The project link 段指向它作为唯一参考实现。⛔ 不是 Core 运行时依赖——Core 用 packages/quay/src/core/plugin-root.ts 从自身安装位置解析，从不读插件安装记录。",
@@ -2339,8 +2339,7 @@
     "it0-enforcement-with-design-check.sh": "exp5 legacy — the ADR-011 enforcement-with-design gate is an exp5-methodology invariant",
     "it0-enforcement-with-design-check.ts": "exp5 legacy — canonical implementation of the enforcement-with-design gate",
     "audit-independence-check.sh": "exp5 legacy — the DIR-032 audit-independence gate is an exp5-methodology invariant",
-    "audit-independence-check.ts": "exp5 legacy — canonical implementation of the audit-independence gate",
-    "consumer-quay-deliverable-verify.sh": "dev-tree only — uses the host-specific worker launcher (claude-fjdac) + model (v4pro-anthropic); a consumer-project verification drill to iterate once the codex MCP/skills shipping tasks land, not a shipped consumer tool"
+    "audit-independence-check.ts": "exp5 legacy — canonical implementation of the audit-independence gate"
   },
   "PUBLIC_ENTRYPOINTS": {
     "cap-from-gate.sh": "consumer-facing: the adaptive-cap gate invocation documented in the tick docs",

@@ -26,7 +26,13 @@
 // test can copy it to a temp dir, mutate a rule, and re-run it — the negative arm that proves the guard
 // no longer just asserts a string (AC2's "删掉/改错对应规则后检查必红").
 //
-// Usage (library): worker-driver.ts imports `conflictAction` / `resolveConflictMechanically`.
+// Usage (library): worker-driver-resident-s07.test.mjs imports `conflictAction` / `dualCopyPeer` /
+// `isDualCopyFile` / `isTickDoc` / `resolveConflictMechanically` directly for the contract check
+// (the test asserts the module's BEHAVIOR — real git operations — not a prompt string).
+// This module is the EXECUTABLE carrier for rules (3)/(4)/(5): the rules are decided here by
+// POSITION and EXECUTED by real git commands, then asserted by the behavior test. worker-driver.ts
+// is deliberately NOT changed (its prompt carries the same rules as prose for the agent-executed
+// half — outline/code/task-file/ff — and must not grow; see the task's AC2 evidence).
 // Usage (CLI, for the worker / tests):
 //   node --experimental-strip-types plugin/scripts/conflict-resolution-rules.ts --judge <rel> <status> [--json]
 //   node --experimental-strip-types plugin/scripts/conflict-resolution-rules.ts --resolve <root> <rel> <status> [--json]

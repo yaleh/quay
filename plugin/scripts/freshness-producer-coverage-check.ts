@@ -678,10 +678,19 @@ export function runCountingRuleSingleImplementationCheck(root: string, mappingRe
     findings.push(`declared delivery_face.implementation '${decl.implementation}' does not exist`);
   } else {
     const src = fs.readFileSync(implAbs, "utf8");
-    const ruleName = decl.rule.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    const ruleRe = new RegExp(`(?:^|\\n)\\s*export\\s+(?:function|const|let|var|async\\s+function)\\s+${ruleName}\\b`);
-    if (!ruleRe.test(src)) {
-      findings.push(`declared delivery_face.rule '${decl.rule}' is not exported by ${decl.implementation}`);
+    // The declared rule name is matched as `export function <name>` / `export const <name>`, so it
+    // must be a JS identifier. A name that is NOT a valid identifier cannot be exported that way:
+    // report it directly instead of regex-escaping it into a pattern (an inline escape body would
+    // re-spell the kernel leaf packages/quay/src/kernel/regex-escape.ts — the exact duplication the
+    // kernel-regex-escape FAMILY check forbids).
+    const IDENT = /^[A-Za-z_$][A-Za-z0-9_$]*$/;
+    if (!IDENT.test(decl.rule)) {
+      findings.push(`declared delivery_face.rule '${decl.rule}' is not a valid JS identifier (cannot be an export name)`);
+    } else {
+      const ruleRe = new RegExp(`(?:^|\\n)\\s*export\\s+(?:function|const|let|var|async\\s+function)\\s+${decl.rule}\\b`);
+      if (!ruleRe.test(src)) {
+        findings.push(`declared delivery_face.rule '${decl.rule}' is not exported by ${decl.implementation}`);
+      }
     }
   }
   if (!decl.command.includes(decl.implementation)) {
