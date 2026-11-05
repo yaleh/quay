@@ -67,8 +67,8 @@ extra:
 
 ## Blocker
 
-**2026-11-05T15:43:25.102Z — worker 未落地（exited-not-landed）**
+**2026-11-05T16:20:11.478Z — worker 未落地（exited-not-landed）**
 
-- 未落地原因：step=suite: oom-killed (3) — recovery red set is NOT a subset of the develop baseline red set: added=plugin/test/archive-exclusion-wiring.test.mjs,packages/quay/test/kernel-regex-escape.test.mjs changed=- — needs a code fix
+- 未落地原因：step=suite: incomplete suite (636/636 files) — recovery exhausted at floor concurrency 16 — no declared rung produced a complete verdict (64,48,32,16); needs a code/config fix, see plugin/scripts/full-suite-runner.ts
 - run_id：wk-prod-anchor
-- session_id：a296922b-5a42-4882-818a-4349333633ed
+- session_id：15463ffd-a477-4225-99ee-3f8de07c3db6
