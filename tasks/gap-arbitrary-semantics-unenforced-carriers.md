@@ -1,7 +1,7 @@
 ---
 id: gap-arbitrary-semantics-unenforced-carriers
 title: 武断实现语义缺可执行承接：⑬ 计数规则无单实现守卫 / ⑥⑦⑧ 冲突消解只活在 prompt 散文 / ⑫⑭ 载体未定位
-status: ready
+status: needs-human
 labels:
   - gap
   - defect
@@ -72,3 +72,14 @@ extra:
 - 未落地原因：step=suite: oom-killed (2) — recovery red set is NOT a subset of the develop baseline red set: added=plugin/test/full-suite-runner-cgroup.test.mjs changed=- — needs a code fix
 - run_id：wk-prod-anchor
 - session_id：07da625a-d056-4975-b056-cc8f0153a06e
+
+## Needs-Human
+
+**执行 2026-11-05T16:44:45.467Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：worker-driver 连续 3 次 exited-not-landed 未落地（重试上限）
+- 失败步/判词：step=suite: oom-killed (2) — recovery red set is NOT a subset of the develop baseline red set: added=plugin/test/full-suite-runner-cgroup.test.mjs changed=- — needs a code fix
+- run_id：wk-prod-anchor
+- session_id：07da625a-d056-4975-b056-cc8f0153a06e
+- suite 日志：/data/home/yale/work/quay/.quay/fan-in-suite-gap-arbitrary-semantics-unenforced-carriers~wk-prod-anchor~1793896230415-427678.log
+- fan-in 日志：/data/home/yale/work/quay/.quay/fan-in-gap-arbitrary-semantics-unenforced-carriers-wk-prod-anchor.log
