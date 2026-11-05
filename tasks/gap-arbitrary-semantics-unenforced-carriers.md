@@ -64,3 +64,11 @@ extra:
 - plugin/scripts/worker-driver.ts
 - plugin/test/worker-driver-resident-s07.test.mjs
 - tasks/gap-arbitrary-semantics-unenforced-carriers.md
+
+## Blocker
+
+**2026-11-05T15:43:25.102Z — worker 未落地（exited-not-landed）**
+
+- 未落地原因：step=suite: oom-killed (3) — recovery red set is NOT a subset of the develop baseline red set: added=plugin/test/archive-exclusion-wiring.test.mjs,packages/quay/test/kernel-regex-escape.test.mjs changed=- — needs a code fix
+- run_id：wk-prod-anchor
+- session_id：a296922b-5a42-4882-818a-4349333633ed
