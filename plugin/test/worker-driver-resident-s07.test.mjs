@@ -3,7 +3,8 @@
 // SPLIT from worker-driver-resident.test.mjs by gap-suite-split-15-over-30s-test-files — shard 7/8 (5 tests). Shared fixtures: ./helpers/worker-driver-resident-harness.mjs (single source).
 
 import { test } from "node:test";
-import { DRIVER, assert, branchHeadSubject, buildContinueWorkerPrompt, fs, lastExitedNotLandedReason } from "./helpers/worker-driver-resident-harness.mjs";
+import { DRIVER, assert, branchHeadSubject, buildContinueWorkerPrompt, fs, lastExitedNotLandedReason, makeGitRoot, os, path, runGit, spawnSync, REPO_ROOT } from "./helpers/worker-driver-resident-harness.mjs";
+import { conflictAction, dualCopyPeer, isDualCopyFile, isTickDoc, resolveConflictMechanically } from "../scripts/conflict-resolution-rules.ts";
 
 test("AC1/AC2/AC3 (能取假) — buildContinueWorkerPrompt encodes the merge-conflict resolution protocol (outline take-develop / code semantic-union / commit --no-edit)", () => {
   const p = buildContinueWorkerPrompt("gap-x", "/r", {
@@ -115,3 +116,94 @@ test("gap-continue-conflict-rule-missing-task-files — 结构面 (能取假): w
 // 修法（原 B）：lastExitedNotLandedReason 改读 mechanical_fan_in（step + reason 拼接「step=merge-develop:
 // CONFLICT in <file>」）。原 A（driver 对 derived 文件机械重算）已退役：outline §6 DELIVERY-INVENTORY 快照被
 // gap-delivery-inventory-check-time-computation 删除（计数改 check-time 计算），无 derived 文件可重算。
+
+// ── gap-arbitrary-semantics-unenforced-carriers AC2 — rules (3)/(4)/(5) have an EXECUTABLE carrier ──
+// ⑥⑦⑧ 的规则 (3) dual-copy / (4) tick-doc / (5) modify-delete 从「prompt 散文」升成可执行承接：决策函数
+// conflictAction 按位置（路径模式 + git status 冲突码）给机械动作，resolveConflictMechanically 真跑 git。
+// 负臂把规则表里的 modify/delete 删掉后重跑（⛔ 不是 assert.match 字符串在场）⇒ 动作变 manual ⇒ 红。
+
+test("gap-arbitrary-semantics-unenforced-carriers AC2 — rules (3)/(4)/(5) are machine-decidable by POSITION (conflictAction)", () => {
+  // (3) dual-copy: both copies classify as dual-copy-sync, with the peer derived (never a keyword guess).
+  assert.equal(conflictAction(".claude/workflows/fan-in-execute.js", "UU").kind, "dual-copy-sync");
+  assert.equal(conflictAction("plugin/workflows/fan-in-execute.js", "UU").kind, "dual-copy-sync");
+  assert.equal(dualCopyPeer(".claude/workflows/fan-in-execute.js"), "plugin/workflows/fan-in-execute.js");
+  assert.equal(dualCopyPeer("plugin/workflows/fan-in-execute.js"), ".claude/workflows/fan-in-execute.js");
+  assert.equal(dualCopyPeer("packages/quay/src/x.ts"), null);
+  assert.ok(isDualCopyFile(".claude/workflows/x.js"));
+  assert.ok(!isDualCopyFile(".claude/workflows/a/b.js"), "a nested path is not a dual-copy file");
+  // (4) tick doc: only `orchestration/*-tick-core.md`.
+  assert.equal(conflictAction("orchestration/manager-tick-core.md", "UU").kind, "take-develop");
+  assert.ok(isTickDoc("orchestration/manager-tick-core.md"));
+  assert.ok(!isTickDoc("orchestration/other.md"));
+  // (5) modify/delete: DU (deleted by us) and UD (deleted by them) both accept the deletion.
+  assert.equal(conflictAction("tasks/x.md", "DU").kind, "delete-side");
+  assert.equal(conflictAction("tasks/x.md", "UD").kind, "delete-side");
+  // a code file is NOT machine-decidable.
+  assert.equal(conflictAction("packages/quay/src/x.ts", "UU").kind, "manual");
+});
+
+test("gap-arbitrary-semantics-unenforced-carriers AC2 — resolveConflictMechanically actually performs the git resolution", () => {
+  // take-develop: the working-tree edit is replaced by develop's committed content.
+  const take = makeGitRoot("ac2-take");
+  runGit(take, ["branch", "-M", "develop"]);
+  fs.mkdirSync(path.join(take, "orchestration"), { recursive: true });
+  fs.writeFileSync(path.join(take, "orchestration", "manager-tick-core.md"), "develop-version\n", "utf8");
+  runGit(take, ["add", "orchestration/manager-tick-core.md"]);
+  runGit(take, ["commit", "-q", "-m", "tick doc"]);
+  fs.writeFileSync(path.join(take, "orchestration", "manager-tick-core.md"), "branch-version\n", "utf8");
+  const takeRes = resolveConflictMechanically(take, "orchestration/manager-tick-core.md", "UU");
+  assert.equal(takeRes.resolved, true, takeRes.reason);
+  assert.equal(takeRes.action, "take-develop");
+  assert.equal(fs.readFileSync(path.join(take, "orchestration", "manager-tick-core.md"), "utf8"), "develop-version\n");
+
+  // delete-side: modify/delete accepts the deletion with git rm.
+  const del = makeGitRoot("ac2-delete");
+  runGit(del, ["branch", "-M", "develop"]);
+  fs.writeFileSync(path.join(del, "dead.md"), "x\n", "utf8");
+  runGit(del, ["add", "dead.md"]);
+  runGit(del, ["commit", "-q", "-m", "dead"]);
+  const delRes = resolveConflictMechanically(del, "dead.md", "DU");
+  assert.equal(delRes.resolved, true, delRes.reason);
+  assert.equal(delRes.action, "delete-side");
+  assert.equal(fs.existsSync(path.join(del, "dead.md")), false, "git rm must remove the file");
+
+  // dual-copy-sync: both copies end byte-identical to develop's version.
+  const dual = makeGitRoot("ac2-dual");
+  runGit(dual, ["branch", "-M", "develop"]);
+  fs.mkdirSync(path.join(dual, ".claude", "workflows"), { recursive: true });
+  fs.mkdirSync(path.join(dual, "plugin", "workflows"), { recursive: true });
+  fs.writeFileSync(path.join(dual, ".claude", "workflows", "x.js"), "develop\n", "utf8");
+  fs.writeFileSync(path.join(dual, "plugin", "workflows", "x.js"), "develop\n", "utf8");
+  runGit(dual, ["add", ".claude", "plugin"]);
+  runGit(dual, ["commit", "-q", "-m", "dual copies"]);
+  fs.writeFileSync(path.join(dual, ".claude", "workflows", "x.js"), "branch\n", "utf8");
+  const dualRes = resolveConflictMechanically(dual, ".claude/workflows/x.js", "UU");
+  assert.equal(dualRes.resolved, true, dualRes.reason);
+  assert.equal(dualRes.action, "dual-copy-sync");
+  assert.equal(fs.readFileSync(path.join(dual, ".claude", "workflows", "x.js"), "utf8"), "develop\n");
+  assert.equal(fs.readFileSync(path.join(dual, "plugin", "workflows", "x.js"), "utf8"), "develop\n");
+});
+
+test("gap-arbitrary-semantics-unenforced-carriers AC2 — 负臂 (能取假): deleting the modify/delete rule changes the ACTION, not a string", () => {
+  const srcPath = path.join(REPO_ROOT, "plugin", "scripts", "conflict-resolution-rules.ts");
+  const src = fs.readFileSync(srcPath, "utf8");
+  const mutated = src.replace(/new Set\(\["DU", "UD"\]\)/, "new Set([])");
+  assert.notEqual(mutated, src, "mutation anchor drifted — the negative arm would be vacuous");
+  assert.ok(mutated.includes("new Set([])"), "the mutation must leave its marker");
+
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ac2-mutant-"));
+  try {
+    fs.writeFileSync(path.join(dir, "conflict-resolution-rules.ts"), mutated, "utf8");
+    fs.copyFileSync(path.join(REPO_ROOT, "plugin", "scripts", "gate-script-base.ts"), path.join(dir, "gate-script-base.ts"));
+    const r = spawnSync(
+      process.execPath,
+      ["--experimental-strip-types", path.join(dir, "conflict-resolution-rules.ts"), "--judge", "tasks/x.md", "DU", "--json"],
+      { encoding: "utf8" },
+    );
+    assert.equal(r.status, 1, `the mutated rule table must classify modify/delete as manual (exit 1), got ${r.status}: ${r.stderr}`);
+    const j = JSON.parse(r.stdout);
+    assert.equal(j.kind, "manual", "after deleting the modify/delete rule, DU is no longer delete-side");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});

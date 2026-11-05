@@ -54,6 +54,9 @@ import {
   classifyMergeContribution,
   deliveryFaceDistance,
   measureDeliveryFaceDistance,
+  isCountingRuleCode,
+  findCountingRuleImplementations,
+  runCountingRuleSingleImplementationCheck,
 } from "../scripts/freshness-producer-coverage-check.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -247,10 +250,14 @@ test("③ MUTATION (the old rule restored) ⇒ the same fixture reads the phanto
 
   const dir = mkTmp("ac214-9th-mutant-");
   fs.writeFileSync(path.join(dir, "freshness-producer-coverage-check.ts"), mutated, "utf8");
-  // Its only relative import — copied beside it so the mutant is runnable without touching the tree.
+  // Its relative imports — copied beside it so the mutant is runnable without touching the tree.
   fs.copyFileSync(
     path.join(REPO_ROOT, "plugin", "scripts", "gate-script-base.ts"),
     path.join(dir, "gate-script-base.ts"),
+  );
+  fs.copyFileSync(
+    path.join(REPO_ROOT, "plugin", "scripts", "source-text-lib.ts"),
+    path.join(dir, "source-text-lib.ts"),
   );
 
   const r = spawnSync(
@@ -384,6 +391,7 @@ test("⑤ the criterion DERIVES its rule from `delivery_face.command` — mutate
   const dir = mkTmp("ac214-9th-mutant5-");
   fs.writeFileSync(path.join(dir, "freshness-producer-coverage-check.ts"), mutated, "utf8");
   fs.copyFileSync(path.join(REPO_ROOT, "plugin", "scripts", "gate-script-base.ts"), path.join(dir, "gate-script-base.ts"));
+  fs.copyFileSync(path.join(REPO_ROOT, "plugin", "scripts", "source-text-lib.ts"), path.join(dir, "source-text-lib.ts"));
   const red = criterionWorkspace((m) => {
     m.delivery_face.command = [
       process.execPath,
@@ -415,4 +423,101 @@ test("⑥ the probe's shown command is rendered from `delivery_face.command` (dr
   assert.ok(!probe.includes("rev-list --count"), "the probe must not hand-roll the pre-2026-09-25 count");
   // The declaration's own materialised form must be runnable as written: the script it names exists.
   assert.ok(fs.existsSync(path.join(REPO_ROOT, argv[argv.indexOf("--delivery-face-distance") - 1])), "declared script must exist");
+});
+
+// ── ⑦ the counting rule has EXACTLY ONE implementation (gap-arbitrary-semantics-unenforced-carriers AC1) ──
+
+test("⑦ pure: the counting-rule signature is a CODE-position judgment, not a keyword grep", () => {
+  // The implementation's actual argv is code ⇒ a hit.
+  assert.ok(
+    isCountingRuleCode(
+      'const args = ["rev-list", "--count", "--no-merges"];\n' +
+        'const merges = ["rev-list", "--merges"];\n' +
+        'const auto = ["merge-tree", "--write-tree", a, b];\n',
+    ),
+    "the counting rule's code shape must be recognized",
+  );
+  // A comment that QUOTES the rule is blanked by codeOnlyText ⇒ NOT a hit (硬规则 2: position, not keyword).
+  assert.equal(
+    isCountingRuleCode('// the rule: rev-list --count --no-merges --merges merge-tree --write-tree\nreturn 1;\n'),
+    false,
+    "a comment quoting the rule must NOT count as an implementation",
+  );
+  // A naive rev-list count (the pre-2026-09-25 rule) lacks the merge-classification ⇒ NOT a hit.
+  assert.equal(
+    isCountingRuleCode('git(root, ["rev-list", "--count", `${base}..develop`, "--", "x"]);\n'),
+    false,
+    "a naive rev-list --count must NOT be the counting rule",
+  );
+});
+
+function singleImplWorkspace(withSecond) {
+  const root = mkTmp("ac1-single-impl-");
+  fs.mkdirSync(path.join(root, "plugin", "scripts"), { recursive: true });
+  const mapping = JSON.parse(fs.readFileSync(path.join(REPO_ROOT, MAPPING_REL), "utf8"));
+  fs.writeFileSync(
+    path.join(root, "plugin", "freshness-producers.json"),
+    JSON.stringify({ delivery_face: mapping.delivery_face }, null, 2),
+    "utf8",
+  );
+  fs.copyFileSync(
+    path.join(REPO_ROOT, IMPL_REL),
+    path.join(root, "plugin", "scripts", "freshness-producer-coverage-check.ts"),
+  );
+  if (withSecond) {
+    fs.writeFileSync(
+      path.join(root, "plugin", "scripts", "second-counting-rule.ts"),
+      '// a second hand-written counting rule\n' +
+        'export const argv = ["rev-list", "--count", "--no-merges", "--merges", "merge-tree", "--write-tree"];\n',
+      "utf8",
+    );
+  }
+  return root;
+}
+
+function runSingleImplCli(root) {
+  const r = spawnSync(
+    process.execPath,
+    ["--experimental-strip-types", path.join(REPO_ROOT, IMPL_REL), "--counting-rule-single-implementation", "--root", root, "--json"],
+    { encoding: "utf8" },
+  );
+  let json = null;
+  try {
+    json = JSON.parse(r.stdout);
+  } catch {
+    json = null;
+  }
+  return { status: r.status, json, stdout: r.stdout ?? "", stderr: r.stderr ?? "" };
+}
+
+test("⑦ positive: the real repo has exactly one counting-rule implementation, and it is the declared one", () => {
+  const impls = findCountingRuleImplementations(REPO_ROOT)
+    .map((abs) => path.relative(REPO_ROOT, abs).split(path.sep).join("/"))
+    .sort();
+  assert.deepEqual(impls, ["plugin/scripts/freshness-producer-coverage-check.ts"], `exactly one implementation expected, got: ${impls.join(", ")}`);
+
+  const rep = runCountingRuleSingleImplementationCheck(REPO_ROOT);
+  assert.equal(rep.evaluated, true);
+  assert.equal(rep.ok, true, rep.reason);
+  assert.equal(rep.implementations.length, 1);
+  assert.equal(rep.implementations[0], "plugin/scripts/freshness-producer-coverage-check.ts");
+
+  const cli = runSingleImplCli(REPO_ROOT);
+  assert.equal(cli.status, 0, `CLI must exit 0 (stderr=${cli.stderr})`);
+  assert.equal(cli.json.ok, true);
+  assert.equal(cli.json.implementations.length, 1);
+});
+
+test("⑦ negative: injecting a second hand-written counting implementation MUST red the guard", () => {
+  const root = singleImplWorkspace(false);
+  const green = runSingleImplCli(root);
+  assert.equal(green.status, 0, `one implementation must be green (stderr=${green.stderr})`);
+  assert.equal(green.json.implementations.length, 1);
+
+  const root2 = singleImplWorkspace(true);
+  const red = runSingleImplCli(root2);
+  assert.equal(red.status, 1, `a second implementation must exit 1, got ${red.status} (stderr=${red.stderr})`);
+  assert.equal(red.json.ok, false);
+  assert.equal(red.json.implementations.length, 2);
+  assert.match(red.json.reason, /2 counting-rule implementations found/);
 });
