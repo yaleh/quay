@@ -321,6 +321,92 @@ export const BASELINE_RED_EXEMPT_TRIGGER_CMD =
   `if(pending)bad++}` +
   `process.exit(bad===0?0:1)'`;
 
+/** 第一类「suite 绿之后的落地步骤」的条件读数（gap-instrument-decay-suite-red-blocks-landing-steps-
+ *  unadjudicated）：anti-drift-land / ac-gate / ff / dark-axis / slice-readings-post 五步都位于
+ *  runMechanicalFanIn 的 suite 绿块之后（suite 放行 → anti-drift-land → ac-gate → 钩子 dark-axis /
+ *  slice-readings-post → ff）。它们的结构性触发是【suite 放行】；放行从未发生 ⇒ 缺席已解释。
+ *
+ *  条件读的是【窗口内的落地尝试与 suite 放行】，⛔ 不是「本组多久没写」的二次包装：
+ *    ① 窗口 = 该组末次写入之后；窗口内必须 ≥1 次落地尝试（merge-develop / suite-start 在场，
+ *       ⛔ 零尝试 = loop 死 = exit 1——空转真值不是测量，硬规则 4）；
+ *    ② 窗口内不得出现一次 suite 放行（suite-end ok:true / suite-skip / suite-rerun-green /
+ *       baseline-red-exempt / suite-recovery-accepted）；有放行而本组没写 ⇒ 写手腐烂 ⇒ exit 1。
+ *  ⛔ 同时排除 kind=goal-merge（那不是任务 fan-in 的步骤链，与检测器同口径）。 */
+export function landingStepConditionCmd(group: string): string {
+  const G = JSON.stringify(group);
+  return (
+    `node -e 'const fs=require("fs");const R=[];` +
+    `for(const l of fs.readFileSync(".quay/fan-in-step-trace.jsonl","utf8").split("\\n")){` +
+    `if(!l.trim())continue;let r;try{r=JSON.parse(l)}catch{continue}` +
+    `if(r.kind==="goal-merge")continue;R.push(r)}` +
+    `const G=${G};` +
+    `let last=null;` +
+    `for(const r of R)if(r.step===G&&r.ts&&(!last||r.ts>last))last=r.ts;` +
+    `if(!last)process.exit(1);` +
+    `const after=R.filter(r=>r.ts&&r.ts>last);` +
+    `let attempt=0;for(const r of after)if(r.step==="merge-develop"||r.step==="suite-start")attempt++;` +
+    `if(attempt===0)process.exit(1);` +
+    `for(const r of after)if((r.step==="suite-end"&&r.ok===true)||r.step==="suite-skip"||` +
+    `r.step==="suite-rerun-green"||r.step==="baseline-red-exempt"||r.step==="suite-recovery-accepted")process.exit(1);` +
+    `process.exit(0)'`
+  );
+}
+
+/** 第二类「rerun 不可达」的条件读数（gap-instrument-decay-suite-red-blocks-landing-steps-unadjudicated）。
+ *
+ *  rerun 只在 suite 红 + 非 inconclusive + 失败文件解析出 ≥1 个点名文件时写（worker-fan-in.ts:2856
+ *  /:2877）。红若全是 OOM/incomplete 形态，恢复阶梯在 rerun 之前接管（worker-fan-in.ts 先写
+ *  suite-incomplete 再进恢复阶梯），rerun 结构上不可达。
+ *
+ *  条件读的是【窗口内每一条 suite-end ok:false 是否都伴随 suite-incomplete】：
+ *    ① 窗口 = 末次 rerun 写入之后；
+ *    ② 每一条 suite-end ok:false 都必须等到同 task 的一条 suite-incomplete（ts 在其后）；
+ *       ⛔ 出现一条没有 suite-incomplete 的普通红（本该走到 rerun）而 rerun 没写 ⇒ exit 1。
+ *  ⛔ 同时排除 kind=goal-merge。 */
+export const RERUN_UNREACHABLE_CONDITION_CMD =
+  `node -e 'const fs=require("fs");const R=[];` +
+  `for(const l of fs.readFileSync(".quay/fan-in-step-trace.jsonl","utf8").split("\\n")){` +
+  `if(!l.trim())continue;let r;try{r=JSON.parse(l)}catch{continue}` +
+  `if(r.kind==="goal-merge")continue;R.push(r)}` +
+  `let last=null;` +
+  `for(const r of R)if(r.step==="rerun"&&r.ts&&(!last||r.ts>last))last=r.ts;` +
+  `if(!last)process.exit(1);` +
+  `const after=R.filter(r=>r.ts&&r.ts>last);` +
+  `for(const r of after)if(r.step==="suite-end"&&r.ok===false){` +
+  `if(!after.some(c=>c.step==="suite-incomplete"&&c.task===r.task&&c.ts&&c.ts>r.ts))process.exit(1)}` +
+  `process.exit(0)'`;
+
+/** suite-rerun-green 的条件读数（gap-instrument-decay-suite-rerun-green-condition-misreads-not-evaluated
+ *  + -file-pin-expired 之后再修，gap-instrument-decay-suite-red-blocks-landing-steps-unadjudicated）：
+ *  读的是 rerun 的【可达性】，⛔ 不是「末次 green 之后 ≥1 条 rerun」的过期代理。
+ *
+ *  写手 worker-fan-in.ts:3590 只在 rerun 转绿时写。rerun 本身不可达（红全是 OOM/incomplete、恢复阶梯
+ *  接管）⇒ 窗口内 rerun=0 ⇒ 绿分支同样不可达。条件：
+ *    ① 窗口 = 末次 suite-rerun-green 写入之后；
+ *    ② 窗口内 rerun 记录 0 条：证成红全是 OOM/incomplete——每一条 suite-end ok:false 都必须等到同 task
+ *       的一条 suite-incomplete（⛔ 不再要求「≥1 条 rerun」：rerun 本身不可达时该代理恒 exit 1，把
+ *       「声明成因消失」误报出来——本任务修的正是这个）；
+ *    ③ 窗口内 rerun 记录非 0：沿用三态判据——出现 rerun-green 而没写本组 ⇒ exit 1；未知/缺失 state ⇒
+ *       exit 1（不豁免，硬规则 3b）。
+ *  ⛔ 不点名任何红文件实例（旧写法把实例钉进条件，该文件转绿后条件恒红，且「换了个红文件」与
+ *     「写手真腐烂」在读数上同形）。
+ *  ⛔ 同时排除 kind=goal-merge。 */
+export const SUITE_RERUN_GREEN_CONDITION_CMD =
+  `node -e 'const fs=require("fs");const R=[];` +
+  `for(const l of fs.readFileSync(".quay/fan-in-step-trace.jsonl","utf8").split("\\n")){` +
+  `if(!l.trim())continue;let r;try{r=JSON.parse(l)}catch{continue}` +
+  `if(r.kind==="goal-merge")continue;R.push(r)}` +
+  `let last=null;` +
+  `for(const r of R)if(r.step==="suite-rerun-green"&&r.ts&&(!last||r.ts>last))last=r.ts;` +
+  `if(!last)process.exit(1);` +
+  `const after=R.filter(r=>r.ts&&r.ts>last);` +
+  `const rerun=after.filter(r=>r.step==="rerun");` +
+  `if(rerun.length===0){` +
+  `for(const r of after)if(r.step==="suite-end"&&r.ok===false){` +
+  `if(!after.some(c=>c.step==="suite-incomplete"&&c.task===r.task&&c.ts&&c.ts>r.ts))process.exit(1)}}` +
+  `else{for(const r of rerun)if(r.state!=="rerun-red"&&r.state!=="rerun-not-evaluated")process.exit(1)}` +
+  `process.exit(0)'`;
+
 export const MANIFEST: CarrierSpec[] = [
   {
     file: "fan-in-step-trace.jsonl",
@@ -346,6 +432,10 @@ export const MANIFEST: CarrierSpec[] = [
     // ——同一批分组此前已在 2026-10-22、2026-10-23 两次被**散文**裁定过，第三次才落成机制；
     // 最后 3 条（suite-incomplete / suite-recovery-accepted / suite-recovery-baseline-exempt）来自
     // gap-instrument-decay-suite-recovery-groups-unadjudicated——同一条 OOM→incomplete→恢复链的**下游**终端。
+    // 再后 6 条（anti-drift-land / ac-gate / ff / dark-axis / slice-readings-post / rerun）+ suite-rerun-green
+    // 的条件与 reason 重写，来自 gap-instrument-decay-suite-red-blocks-landing-steps-unadjudicated——2026-11-04T16:06
+    // 起 task-introduced 红（full-suite-runner-cgroup）把每一轮 fan-in 挡死在 suite 闸，五个落地步骤与 rerun
+    // 的结构性触发没有再发生。
     // ⚠️ reviewAfter 一律是**必须重看的日期**，不是「永久白名单」——过期即回到 decayed[]。
     // ⚠️ conditional-on-input 的条件命令读的都是【载体里的触发输入】，不是「本组多久没写」：
     //    「原因仍然缺席」与「写手还活着」是两个量，条件只对前者负责；写手腐烂由 Shape B 本身暴露。
@@ -371,34 +461,87 @@ export const MANIFEST: CarrierSpec[] = [
         group: "suite-rerun-green",
         kind: "conditional-on-input",
         reason:
-          "in-round rerun 的绿分支被持续基线红遮蔽，读的只是这个机制：只要还有一个基线红文件挡住 suite，" +
-          "rerun 就只可能回来 rerun-red 或 rerun-not-evaluated（后者是「没评估成」的第三态，不是绿）⇒ 绿分支条件性不可达。" +
-          "当前实例是 plugin/test/full-suite-runner-cgroup.test.mjs 的 AC3（a REAL round's measured concurrency）" +
-          "——**文件名是实例说明，不是条件的一部分**：红的是哪个文件会随修/坏翻转，把实例写进条件会让裁定随之为随机读数。" +
-          "条件读的是【末次 suite-rerun-green 之后的每一条 rerun 记录】：出现一条 rerun-green、没有任何 rerun、" +
-          "或出现未知/缺失 state，本裁定立即失效、回到 decayed[]。",
-        // ⚠️ 只读、亚秒级、可证伪：窗口 = 末次 suite-rerun-green 写入之后；窗口内断言 ① 至少一条 rerun
-        //    （⛔ 不用「零 rerun」这种空转真值换绿）② 没有一条 rerun-green ③ 每条状态都是已知的
-        //    rerun-red / rerun-not-evaluated。
+          "写手 worker-fan-in.ts:3590 只在 in-round rerun 转绿时写。rerun 本身不可达（红全是 OOM/incomplete " +
+          "形态、恢复阶梯在 rerun 之前接管）⇒ 窗口内 rerun=0 ⇒ 绿分支同样结构上不可达。条件读的是 rerun 的" +
+          "【可达性】：rerun 0 条时证成红全是 OOM/incomplete（每条 suite-end ok:false 都等到同 task 的 " +
+          "suite-incomplete）；rerun 非 0 时沿用三态判据（出现 rerun-green 而没写本组、或未知/缺失 state，本" +
+          "裁定立即失效、回到 decayed[]）。⛔ 不点名任何红文件实例——那会让裁定随「当前哪个文件红」翻转。",
+        // ⚠️ 只读、亚秒级、可证伪：窗口 = 末次 suite-rerun-green 写入之后。窗口内 rerun 0 条时读 OOM/
+        //    incomplete 可达性（⛔ 不再要求「≥1 条 rerun」——rerun 本身不可达时该代理恒 exit 1，把「声明
+        //    成因消失」误报出来，本任务修的正是这个）；rerun 非 0 时读三态（rerun-red / rerun-not-evaluated
+        //    是合法态，rerun-green / 缺失 / 未知 fail-closed 到 exit 1）。
         // ⛔ 触发式而非实例式：⛔ 不点名任何文件（旧写法把「被声明为红的那一个文件」钉进正/负控制，
         //    于是该文件转绿后条件恒 exit 1 —— 声明的机制没变，声明的实例过期了；且「换了个红文件」与
         //    「写手真腐烂」在读数上同形，硬规则 3b）。
-        // ⛔ 三态不得压成布尔（硬规则 3b）：rerun-not-evaluated 是写手明确保留的第三态，不得读成「原因消失」；
-        //    未知/缺失态与服务端「窗口内出现 rerun-green」一样 fail-closed 到 exit 1（不豁免）。
-        // ⛔ 不读 append-only 的 baseline-red 台账——那份台账只增不减，一旦为真就永远为真（单向闩锁不是读数）。
+        // ⛔ 三态不得压成布尔（硬规则 3b）：rerun-not-evaluated 是写手明确保留的第三态，不得读成「原因消失」。
         // ⛔ 与检测器同口径排除 kind=goal-merge（那不是任务 fan-in 的步骤链）。
-        conditionCmd:
-          `node -e 'const fs=require("fs");const R=[];` +
-          `for(const l of fs.readFileSync(".quay/fan-in-step-trace.jsonl","utf8").split("\\n")){` +
-          `if(!l.trim())continue;let r;try{r=JSON.parse(l)}catch{continue}` +
-          `if(r.kind==="goal-merge")continue;R.push(r)}` +
-          `let last=null;` +
-          `for(const r of R)if(r.step==="suite-rerun-green"&&r.ts&&(!last||r.ts>last))last=r.ts;` +
-          `if(!last)process.exit(1);` +
-          `const after=R.filter(r=>r.step==="rerun"&&r.ts&&r.ts>last);` +
-          `if(after.length===0)process.exit(1);` +
-          `for(const r of after)if(r.state!=="rerun-red"&&r.state!=="rerun-not-evaluated")process.exit(1);` +
-          `process.exit(0)'`,
+        conditionCmd: SUITE_RERUN_GREEN_CONDITION_CMD,
+        reviewAfter: "2026-11-22T00:00:00.000Z",
+      },
+      // ── 6 条新增（gap-instrument-decay-suite-red-blocks-landing-steps-unadjudicated）：2026-11-04T16:06
+      //    起的 task-introduced 红（full-suite-runner-cgroup）把每一轮 fan-in 挡死在 suite 闸（suite-end
+      //    ok:false → suite-incomplete → suite-recovery-blocked），没有一次 suite 放行 ⇒ 下面五个落地步骤
+      //    与 rerun 的结构性触发没有再发生。⛔ 五个落地步骤共用同一条条件（落地尝试在场 + 无放行）；rerun
+      //    读的是「红是否全是 OOM/incomplete」（恢复阶梯接管）。
+      {
+        group: "anti-drift-land",
+        kind: "conditional-on-input",
+        reason:
+          "写手 worker-fan-in.ts:3674，位于 suite 绿块之后的落地步骤；只有 suite 放行（绿/skip/rerun-green/" +
+          "baseline-red-exempt/recovery-accepted）后才可达。2026-11-04T16:06:54.996Z 之后每次落地尝试都在 " +
+          "suite 闸被挡回（suite-end ok:false + suite-incomplete + suite-recovery-blocked），无一次放行 ⇒ " +
+          "触发未发生。条件读的是窗口内【落地尝试在场 + 无 suite 放行】，不是「本组多久没写」。",
+        conditionCmd: landingStepConditionCmd("anti-drift-land"),
+        reviewAfter: "2026-11-22T00:00:00.000Z",
+      },
+      {
+        group: "ac-gate",
+        kind: "conditional-on-input",
+        reason:
+          "写手 worker-fan-in.ts:3676，位于 suite 绿块之后的落地步骤；只有 suite 放行后才可达。" +
+          "2026-11-04T16:06:55.292Z 之后每次落地尝试都在 suite 闸被挡回（suite-end ok:false + suite-incomplete" +
+          " + suite-recovery-blocked），无一次放行 ⇒ 触发未发生。条件读的是窗口内【落地尝试在场 + 无 suite 放行】。",
+        conditionCmd: landingStepConditionCmd("ac-gate"),
+        reviewAfter: "2026-11-22T00:00:00.000Z",
+      },
+      {
+        group: "ff",
+        kind: "conditional-on-input",
+        reason:
+          "写手 worker-fan-in.ts:3710/:3724，位于 suite 绿块之后的落地步骤；只有 suite 放行后才可达。" +
+          "2026-11-04T16:06:55.458Z 之后每次落地尝试都在 suite 闸被挡回（suite-end ok:false + suite-incomplete" +
+          " + suite-recovery-blocked），无一次放行 ⇒ 触发未发生。条件读的是窗口内【落地尝试在场 + 无 suite 放行】。",
+        conditionCmd: landingStepConditionCmd("ff"),
+        reviewAfter: "2026-11-22T00:00:00.000Z",
+      },
+      {
+        group: "dark-axis",
+        kind: "conditional-on-input",
+        reason:
+          "写手 worker-fan-in-hooks.ts:264–272（pre-flip 钩子），只有 suite 放行后 runFanInHooks 跑到 pre-flip " +
+          "阶段才写。2026-11-04T16:06:55.303Z 之后每次落地尝试都在 suite 闸被挡回，钩子从未跑到 ⇒ 触发未发生。" +
+          "条件读的是窗口内【落地尝试在场 + 无 suite 放行】。",
+        conditionCmd: landingStepConditionCmd("dark-axis"),
+        reviewAfter: "2026-11-22T00:00:00.000Z",
+      },
+      {
+        group: "slice-readings-post",
+        kind: "conditional-on-input",
+        reason:
+          "写手 worker-fan-in-hooks.ts:351（post-flip 钩子），只有 suite 放行后 flip 完成才写。2026-11-04T16:06:55.356Z" +
+          " 之后每次落地尝试都在 suite 闸被挡回、从未 flip ⇒ 触发未发生。条件读的是窗口内【落地尝试在场 + 无 suite 放行】。",
+        conditionCmd: landingStepConditionCmd("slice-readings-post"),
+        reviewAfter: "2026-11-22T00:00:00.000Z",
+      },
+      {
+        group: "rerun",
+        kind: "conditional-on-input",
+        reason:
+          "写手 worker-fan-in.ts:2856/:2877，只在 suite 红 + 非 inconclusive + 失败文件解析出 ≥1 个点名文件时" +
+          "写。当前红全是 OOM/incomplete 形态，恢复阶梯在 rerun 之前接管（suite-incomplete 在场、" +
+          "suite-recovery-blocked 收尾）⇒ rerun 结构上不可达。条件读的是窗口内每一条 suite-end ok:false 是否" +
+          "都伴随 suite-incomplete；出现无 suite-incomplete 的普通红而 rerun 没写 ⇒ 立即失效、回到 decayed[]。",
+        conditionCmd: RERUN_UNREACHABLE_CONDITION_CMD,
         reviewAfter: "2026-11-22T00:00:00.000Z",
       },
       {
