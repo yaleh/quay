@@ -5,7 +5,7 @@ title: >-
   / dark-axis /
     slice-readings-post 无裁定 + suite-rerun-green 裁定条件又过期）：真实成因是 2026-11-04T16:06 起 task-introduced
     红（full-suite-runner-cgroup）挡死落地、无 fan-in 穿过 suite 闸
-status: ready
+status: done
 labels:
   - gap
   - defect
