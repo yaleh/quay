@@ -182,6 +182,7 @@ export { SHAPE_SECTIONS };
 import { artifactsComplete, detectShape, MIN_SECTION_CHARS } from "../../packages/quay/src/kernel/task-shape-artifacts.ts";
 export { artifactsComplete, detectShape, MIN_SECTION_CHARS };
 import path from "node:path";
+import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { parseTask, extractSection, readDependsOn, readTaskStatusAtRef, readFrontField } from "./task-schema.ts";
 // ADR-007 per-milestone predicate (tasks/gap-adr007-per-milestone-dark-axis-enforcement-gate) — the
@@ -238,16 +239,18 @@ import {
 // parallel copy of "which files does a Touches declaration intend to touch?").
 // MERGE-SURFACE LIVENESS (gap-merge-worktree-surface-lacks-liveness-overbroad AC2) shares the SAME
 // single source as the task-worktree arm (gap-routine-semantic-dedup-scan-worktree-liveness-
-// predicate-private): `isDeadInFlightWorktree` (the dead predicate) + `lastCommitMsOfWorktree` (the
-// direct quantity it reads) + `INFLIGHT_WORKTREE_STALE_MS` (the threshold) all live in
-// concurrent-batch-scheduler.ts. This file used to carry byte-identical private copies of the first
-// two (`isDeadMergeWorktree` / `lastCommitMsOfWorktree`) — 硬规则 5b: a divergence between the two
-// paths silently flips dead to alive on one of them, so the copy is deleted, not maintained.
+// predicate-private): `isDeadInFlightWorktree` (the dead predicate) + `INFLIGHT_WORKTREE_STALE_MS`
+// (the threshold) live in concurrent-batch-scheduler.ts. This file used to carry byte-identical
+// private copies of the dead predicate — 硬规则 5b: a divergence between the two paths silently flips
+// dead to alive on one of them, so the copy is deleted, not maintained.
+// ⛔ The per-worktree `lastCommitMsOfWorktree` import was RETIRED here (gap-anchor-polling-git-fork-
+// storm): it is one git fork PER WORKTREE, and this file reads the same quantity for ALL worktrees in
+// two forks via `worktreeLastCommitMsMap` below. The predicate (`isDeadInFlightWorktree`) is still the
+// shared one — only the measurement of its `lastCommitMs` input changed shape.
 import {
   expandDeclaredTouches,
   INFLIGHT_WORKTREE_STALE_MS,
   isDeadInFlightWorktree,
-  lastCommitMsOfWorktree,
 } from "./concurrent-batch-scheduler.ts";
 // MERGE-WORKTREE LIVENESS (gap-merge-worktree-surface-lacks-liveness-overbroad AC2): the same
 // worktree-process-reaper /proc enumerator the in-flight-worktree liveness uses (concurrent-batch-
@@ -316,6 +319,66 @@ import { checkTaskOneEntryOnePath, readOneEntryBaseline } from "./touches-one-en
 // touches-parser single source, so a `(delete)`-tagged touch (whose absence from the landing ref is
 // the DESIRED end state) is excluded from the veto below.
 import { parseTouchEntriesWithTags } from "./touches-parser.ts";
+
+// ═════════════════════════════════════════════════════════════════════════════════════════════════
+// GIT SUBPROCESS ACCOUNTING (tasks/gap-anchor-polling-git-fork-storm)
+//
+// THE MEASUREMENT PROBLEM: "this checker forks too many git processes" was observed ONLY as a
+// host-wide bpftrace reading (31,918 git execs in a 10 s window, attribution table by parent
+// process). No per-call number existed, so every proposed fix ("cache it", "batch it") was
+// unfalsifiable from inside this file, and an optimisation could move the cost somewhere else and
+// still "pass".
+//
+// THE INSTRUMENT: EVERY git spawn in this file goes through `gitExec()`. It counts the spawn
+// (`gitExecCount()`, for an in-process importer) and — when `QUAY_GIT_EXEC_LOG` names a file —
+// appends ONE JSON line per spawn `{argv, tag}`. The log is the COUNTING FIXTURE's instrument:
+// `plugin/test/ready-pool-check-git-exec-count.test.mjs` spawns the real CLI over a synthetic
+// N-task workspace and counts REAL leaf spawns by line count. Never a wall-clock inference (a
+// slow host would make that reading move on its own), never a monkey-patched child_process.
+//
+// ⛔ The log is a test/experiment seam, not a production knob: unset ⇒ one string compare per
+// spawn, no I/O, no behaviour change.
+let _gitExecCount = 0;
+const _gitExecTags = new Map(); // tag -> count (attribution without re-reading the log)
+
+/** How many git processes this module spawned in the current process. */
+export function gitExecCount() {
+  return _gitExecCount;
+}
+
+/** Per-tag breakdown of `gitExecCount()` — `{ tag: count }`. */
+export function gitExecTags() {
+  return Object.fromEntries(_gitExecTags);
+}
+
+/** Reset the in-process counters (tests; a CLI process starts at zero anyway). */
+export function resetGitExecCount() {
+  _gitExecCount = 0;
+  _gitExecTags.clear();
+}
+
+/**
+ * Run one git subprocess. The ONLY sanctioned way this file may spawn git.
+ * @param {string} tag  short attribution label ("merge-head", "ref-exists", …) — written to the log
+ * @param {string[]} args git argv (WITHOUT the leading "git")
+ * @param {object} [opts] execFileSync options, unchanged
+ */
+function gitExec(tag, args, opts) {
+  _gitExecCount++;
+  _gitExecTags.set(tag, (_gitExecTags.get(tag) || 0) + 1);
+  const logFile = process.env.QUAY_GIT_EXEC_LOG;
+  if (logFile) {
+    try {
+      fs.appendFileSync(logFile, `${JSON.stringify({ tag, argv: args })}\n`);
+    } catch { /* the log is an instrument; a failed write must not change the run */ }
+  }
+  return execFileSync("git", args, opts);
+}
+
+/** True when `QUAY_GIT_EXEC_LOG` is set (the counting fixture's mode). */
+export function gitExecLogEnabled() {
+  return !!process.env.QUAY_GIT_EXEC_LOG;
+}
 
 /** Default concurrency cap (max in-flight subagents) — derived from driver-config's
  *  defaultDriverConfig().worker.cap (the DISPATCH single source, AC155), NOT a parallel literal.
@@ -481,7 +544,7 @@ export function computeLandingBlocked({ developBehindMaster, integrationStalenes
  *  root isn't a git repo (a missing ref / non-git test workspace is NOT landing-blocked). */
 export function readGitRevCount(root, range) {
   try {
-    const out = execFileSync("git", ["-C", root, "rev-list", "--count", range], {
+    const out = gitExec("rev-count", ["-C", root, "rev-list", "--count", range], {
       encoding: "utf8", timeout: 10_000, stdio: ["ignore", "pipe", "ignore"],
     });
     const n = Number.parseInt(out.trim(), 10);
@@ -496,7 +559,7 @@ export function readGitRevCount(root, range) {
  *  single-line downstream without an integration ref never reports landing-blocked). */
 export function readLastCommitMs(root, ref) {
   try {
-    const out = execFileSync("git", ["-C", root, "log", "-1", "--format=%ct", ref], {
+    const out = gitExec("last-commit", ["-C", root, "log", "-1", "--format=%ct", ref], {
       encoding: "utf8", timeout: 10_000, stdio: ["ignore", "pipe", "ignore"],
     });
     const sec = Number.parseInt(out.trim(), 10);
@@ -539,7 +602,7 @@ export function detectLandingBlocked(root, { develop = "develop", integration = 
  *  them). This is the AC3 negative-control shape. Fail-soft: any git failure ⇒ false. */
 export function hasUnmergedEntries(wtPath) {
   try {
-    const out = execFileSync("git", ["-C", wtPath, "ls-files", "-u"], {
+    const out = gitExec("unmerged-entries", ["-C", wtPath, "ls-files", "-u"], {
       encoding: "utf8", timeout: 5_000, stdio: ["ignore", "pipe", "ignore"],
     });
     return out.trim().length > 0;
@@ -548,24 +611,45 @@ export function hasUnmergedEntries(wtPath) {
   }
 }
 
+/** The git dir of a worktree WITHOUT spawning git: a linked worktree's `<path>/.git` is a FILE
+ *  containing `gitdir: <abs path>`; the main checkout's is a directory. Returns null when unreadable
+ *  (caller falls back to the previous behaviour rather than fabricating an answer). */
+export function worktreeGitDir(wtPath) {
+  try {
+    const dotGit = path.join(wtPath, ".git");
+    if (fs.statSync(dotGit).isDirectory()) return dotGit;
+    const text = fs.readFileSync(dotGit, "utf8").trim();
+    const m = /^gitdir:\s*(.+)$/m.exec(text);
+    return m ? path.resolve(wtPath, m[1].trim()) : null;
+  } catch {
+    return null;
+  }
+}
+
 /** True when a git MERGE is in progress in `wtPath` — the MERGE_HEAD file exists (`git merge` writes
  *  it from the start of the merge, before any conflict resolution). A worktree mid-merge is exactly
- *  the "merge 中的 worktree" whose uncommitted surface is a conflict surface for new dispatches. */
+ *  the "merge 中的 worktree" whose uncommitted surface is a conflict surface for new dispatches.
+ *
+ *  ⛔ ZERO GIT PROCESSES (gap-anchor-polling-git-fork-storm): this used to be
+ *  `git -C <wt> rev-parse --git-path MERGE_HEAD` — ONE git fork PER WORKTREE, and the merge-surface
+ *  scan calls it for EVERY open worktree on the host (measured 2026-11-06: 77 worktrees ⇒ 77
+ *  `git rev-parse` forks per ready-pool-check call, 77 more for `ls-files -u`). `rev-parse
+ *  --git-path` only RESOLVES the path; the path is derivable from `<wt>/.git` by the documented
+ *  linked-worktree layout, so the resolution itself was pure fork cost. */
 export function mergeHeadPresent(wtPath) {
-  try {
-    const p = execFileSync("git", ["-C", wtPath, "rev-parse", "--git-path", "MERGE_HEAD"], {
-      encoding: "utf8", timeout: 5_000, stdio: ["ignore", "pipe", "ignore"],
-    }).trim();
-    return p.length > 0 && fs.existsSync(p);
-  } catch {
-    return false;
-  }
+  const gitDir = worktreeGitDir(wtPath);
+  if (gitDir === null) return false; // unreadable worktree ⇐ not a merge (the pre-fix fail-soft answer)
+  return fs.existsSync(path.join(gitDir, "MERGE_HEAD"));
 }
 
 /** True when a git MERGE is in flight in `wtPath` — MERGE_HEAD present OR unmerged (`UU`) entries.
  *  The union is deliberate: MERGE_HEAD catches an in-progress merge before conflicts are detected;
  *  unmerged entries catch a conflicted merge even if MERGE_HEAD has been removed (the negative-control
- *  shape). A task worktree without a merge in progress carries neither ⇒ never flagged. */
+ *  shape). A task worktree without a merge in progress carries neither ⇒ never flagged.
+ *
+ *  ⛔ The `ls-files -u` fork is the EXPENSIVE half and is now reached only when MERGE_HEAD is absent
+ *  AND the worktree is not known-dead (see `resolveMergeWorktreeSurfaces`'s liveness-first order):
+ *  a dead worktree never contributes a surface, so probing its index was pure fork cost. */
 export function isMergeWorktree(wtPath) {
   return mergeHeadPresent(wtPath) || hasUnmergedEntries(wtPath);
 }
@@ -579,7 +663,7 @@ export function isMergeWorktree(wtPath) {
  *  (never a fabricated surface). */
 export function unmergedConflictPaths(wtPath) {
   try {
-    const out = execFileSync("git", ["-C", wtPath, "ls-files", "-u"], {
+    const out = gitExec("conflict-paths", ["-C", wtPath, "ls-files", "-u"], {
       encoding: "utf8", timeout: 5_000, stdio: ["ignore", "pipe", "ignore"],
     });
     const files = new Set();
@@ -625,15 +709,73 @@ export function resolveMergeWorktreeSurfaces(worktrees, {
   for (const wt of worktrees || []) {
     if (!wt || !wt.path) continue;
     if (mainRoot !== null && path.resolve(wt.path) === mainRoot) continue; // main checkout, not a merge worktree
-    if (!isMerge(wt.path)) continue;
-    // LIVENESS (AC2): a DEAD mid-merge worktree (zero live processes + stale HEAD commit — the
-    // exited-not-landed merge-develop half-failure shape) must not present a conflict surface,
-    // else a dead 3-file conflict locks out the whole dispatch pool.
+    // LIVENESS (AC2) — evaluated BEFORE the merge probe (gap-anchor-polling-git-fork-storm): a DEAD
+    // mid-merge worktree (zero live processes + stale HEAD commit — the exited-not-landed
+    // merge-develop half-failure shape) must not present a conflict surface, else a dead 3-file
+    // conflict locks out the whole dispatch pool. Since a dead worktree contributes NOTHING, probing
+    // its index first was pure fork cost: `isMerge` runs `git ls-files -u` (a spawn) for every
+    // worktree that is not MERGE_HEAD, i.e. for every dead one. Ordering the cheap /proc fact first
+    // is observationally identical (the surface set is the same) and bounds the forked half to the
+    // worktrees that can actually contribute.
     const lv = liveness ? liveness(wt) : null;
     if (isDeadInFlightWorktree(lv, nowMs, staleMs)) continue;
+    if (!isMerge(wt.path)) continue;
     const files = conflictFiles(wt.path);
     if (files.length === 0) continue; // a merge with no conflict surface blocks nothing
     out.push({ name: path.basename(wt.path), path: wt.path, files });
+  }
+  return out;
+}
+
+/** `{ path -> lastCommitMs }` for every open worktree, from ONE `for-each-ref` (+ at most ONE
+ *  `git log --no-walk` for detached HEADs). ⛔ Replaces the per-worktree
+ *  `lastCommitMsOfWorktree()` (one git fork EACH — 77 forks per ready-pool-check call on the
+ *  2026-11-06 host). The worktree's HEAD is read off DISK (`<gitdir>/HEAD`, an fs read), the branch
+ *  tip times come from the single ref listing, and only the OIDs that are not branch tips (detached
+ *  worktrees) need the second call. Unreadable ⇒ an empty map ⇒ `lastCommitMs` unknown ⇒ the
+ *  conservative "alive" the old null produced. */
+export function worktreeLastCommitMsMap(root, worktrees) {
+  const out = new Map(); // worktree path -> ms (or absent = unknown)
+  const byBranch = new Map(); // refs/heads/x -> ms
+  try {
+    const r = gitExec("ref-committer-dates", ["-C", root, "for-each-ref", "--format=%(refname)%00%(committerdate:unix)"], {
+      encoding: "utf8", timeout: 15_000, stdio: ["ignore", "pipe", "ignore"],
+    });
+    for (const line of r.split("\n")) {
+      const [ref, secs] = line.split("\0");
+      const n = Number(secs);
+      if (ref && Number.isFinite(n)) byBranch.set(ref, n * 1000);
+    }
+  } catch { /* unreadable refs ⇒ unknown */ }
+  const detachedOids = new Map(); // oid -> [worktree path]
+  for (const wt of worktrees || []) {
+    if (!wt || !wt.path) continue;
+    const gitDir = worktreeGitDir(wt.path);
+    let head = null;
+    try { head = gitDir ? fs.readFileSync(path.join(gitDir, "HEAD"), "utf8").trim() : null; } catch { head = null; }
+    if (!head) continue;
+    const ref = /^ref:\s*(.+)$/.exec(head);
+    if (ref) {
+      const ms = byBranch.get(ref[1].trim());
+      if (ms !== undefined) out.set(wt.path, ms);
+    } else if (/^[0-9a-f]{40,64}$/.test(head)) {
+      const list = detachedOids.get(head) || [];
+      list.push(wt.path);
+      detachedOids.set(head, list);
+    }
+  }
+  if (detachedOids.size > 0) {
+    try {
+      const r = gitExec("detached-committer-dates", ["-C", root, "log", "--no-walk=unsorted", "--format=%H %ct", ...[...detachedOids.keys()]], {
+        encoding: "utf8", timeout: 15_000, stdio: ["ignore", "pipe", "ignore"],
+      });
+      for (const line of r.split("\n")) {
+        const [oid, secs] = line.trim().split(/\s+/);
+        const n = Number(secs);
+        if (!oid || !Number.isFinite(n)) continue;
+        for (const p of detachedOids.get(oid) || []) out.set(p, n * 1000);
+      }
+    } catch { /* unknown */ }
   }
   return out;
 }
@@ -645,17 +787,28 @@ export function resolveMergeWorktreeSurfaces(worktrees, {
  *  names), `path` its absolute path, `files` the unmerged-conflict surface (non-empty). A DEAD
  *  mid-merge worktree (zero live processes + stale commit) contributes nothing (liveness, AC2).
  *  Fail-soft: non-git root / unreadable worktree list / empty surface ⇒ [] — never a fabricated
- *  block. */
+ *  block.
+ *
+ *  ⛔ FORK BUDGET (gap-anchor-polling-git-fork-storm): this scan used to fork 2 git processes per
+ *  OPEN WORKTREE on the host (`rev-parse --git-path MERGE_HEAD` + `ls-files -u`), plus one
+ *  `git log -1` per dead worktree for liveness — O(worktrees), not O(tasks), and the host's
+ *  worktree count grows without bound (measured 2026-11-06: 77 worktrees ⇒ 168 git forks per
+ *  `ready-pool-check` call, 92% of its total). Now: MERGE_HEAD is an fs read, liveness times come
+ *  from `worktreeLastCommitMsMap` (2 forks total), and `ls-files -u` is reached only for the
+ *  LIVE worktrees that lack MERGE_HEAD. */
 export function computeMergeWorktreeSurfaces(root) {
   const worktrees = listWorktrees(root);
   // Enumerate live processes ONCE (shared across every worktree) — the /proc scan is the cost, and
   // it must not be re-done per worktree (same as concurrent-batch-scheduler's computeInFlightWorktreeTouches).
   const procs = enumerateProcs();
+  const lastCommitMs = worktreeLastCommitMsMap(root, worktrees);
   return resolveMergeWorktreeSurfaces(worktrees, {
     root,
     liveness: (wt) => ({
       hasLiveProcess: procs.some((p) => p.state !== "Z" && cwdUnder(p.cwd, wt.path)),
-      lastCommitMs: lastCommitMsOfWorktree(wt.path),
+      // ABSENT (not null) for a worktree whose HEAD time could not be resolved; `isDeadInFlightWorktree`
+      // treats unknown as alive, which is the conservative direction it already documented.
+      lastCommitMs: lastCommitMs.has(wt.path) ? lastCommitMs.get(wt.path) : null,
     }),
   });
 }
@@ -788,7 +941,7 @@ export function kindOrder(kind) {
  *  unavailable source). Called ONCE per analyzeTasks (the pool scan), never per task. */
 export function buildCommitTraceIndex(repoRoot) {
   try {
-    const out = execFileSync("git", ["log", "--all", "--format=%s"], {
+    const out = gitExec("commit-trace", ["log", "--all", "--format=%s"], {
       cwd: repoRoot, encoding: "utf8", timeout: 15_000, maxBuffer: 64 * 1024 * 1024,
       stdio: ["ignore", "pipe", "ignore"],
     });
@@ -1070,25 +1223,59 @@ export function judgeUnsatisfiableUnannotatedAc(body) {
 
 /** Does the landing ref resolve in this repo? Non-git roots (the makeWorkspace test fixture) have no
  *  ref — there is no tree to check against, so the veto must stay OFF (fail-soft, original behavior). */
-function gitRefExists(repoRoot, ref) {
+// ── REF-TREE SET (gap-anchor-polling-git-fork-storm) ────────────────────────────────────────────
+// `hasTouchAbsentFromRef` used to answer "is this path in the landing ref's tree?" with ONE
+// `git cat-file -e <ref>:<path>` PER DECLARED TOUCH (plus one `rev-parse` per ready task for the ref
+// itself) — O(ready tasks × touches) forks per tick, i.e. exactly the "per-task git derivation with
+// no cache" the finding describes. The ref's tree is CONTENT-ADDRESSED and immutable for the life of
+// one process, so ONE `git ls-tree -r --name-only <ref>` names every path and every later question is
+// a Set lookup. Fail-soft: an unreadable tree (non-git root / missing ref) caches null, which the
+// caller reads as "no veto" — the exact pre-fix behaviour when the ref did not resolve.
+const _refTreeCache = new Map(); // `${repoRoot}\0${ref}` -> Set<string> | null
+
+/** Every path in `ref`'s tree (repo-relative), or null when the tree could not be read. Memoized per
+ *  (root, ref) — the ref cannot move under a single short-lived process, and a caller that needs a
+ *  different ref gets its own entry. */
+export function refTreePaths(repoRoot, ref) {
+  const key = `${repoRoot}\0${ref}`;
+  if (_refTreeCache.has(key)) return _refTreeCache.get(key);
+  let set = null;
   try {
-    const out = execFileSync("git", ["-C", repoRoot, "rev-parse", "--verify", "-q", ref], {
-      encoding: "utf8", stdio: ["ignore", "pipe", "ignore"],
+    const out = gitExec("ref-tree", ["-C", repoRoot, "ls-tree", "-r", "--name-only", ref], {
+      encoding: "utf8", maxBuffer: 256 * 1024 * 1024, timeout: 30_000, stdio: ["ignore", "pipe", "ignore"],
     });
-    return out.trim().length > 0;
+    set = new Set(out.split("\n").filter(Boolean));
   } catch {
-    return false;
+    set = null;
   }
+  _refTreeCache.set(key, set);
+  return set;
 }
 
-/** Is `path` present in the landing ref's tree? `git cat-file -e <ref>:<path>` exit 0 ⇒ present. */
-function gitFileExistsAtRef(repoRoot, ref, pathName) {
+/** True when `ref` resolves to a commit-ish. Memoized per (root, ref) — it was one `git rev-parse`
+ *  per ready task. */
+const _refExistsCache = new Map(); // `${repoRoot}\0${ref}` -> boolean
+function gitRefExists(repoRoot, ref) {
+  const key = `${repoRoot}\0${ref}`;
+  if (_refExistsCache.has(key)) return _refExistsCache.get(key);
+  let ok = false;
   try {
-    execFileSync("git", ["-C", repoRoot, "cat-file", "-e", `${ref}:${pathName}`], { stdio: "ignore" });
-    return true;
+    const out = gitExec("ref-exists", ["-C", repoRoot, "rev-parse", "--verify", "-q", ref], {
+      encoding: "utf8", stdio: ["ignore", "pipe", "ignore"],
+    });
+    ok = out.trim().length > 0;
   } catch {
-    return false;
+    ok = false;
   }
+  _refExistsCache.set(key, ok);
+  return ok;
+}
+
+/** Is `path` present in the landing ref's tree? Answered from the ONE memoized `refTreePaths` set.
+ *  Kept as a function (and still exported-shape-compatible) so the judgment below reads unchanged. */
+function gitFileExistsAtRef(repoRoot, ref, pathName) {
+  const tree = refTreePaths(repoRoot, ref);
+  return tree === null ? true : tree.has(pathName); // unreadable tree ⇒ "present" ⇒ no veto (fail-soft)
 }
 
 /** True when a declared CODE-ROOT Touches file (specific, non-glob, non-`(delete)`) is ABSENT from the
@@ -2721,7 +2908,7 @@ export function readTaskFilesAtRefBatch(root, ref, ids) {
   const input = ids.map((id) => `${ref}:tasks/${id}.md`).join("\n") + "\n";
   let buf;
   try {
-    buf = execFileSync("git", ["-C", root, "cat-file", "--batch"], {
+    buf = gitExec("read-tasks-batch", ["-C", root, "cat-file", "--batch"], {
       input,
       maxBuffer: 64 * 1024 * 1024,
       timeout: 30_000,
@@ -2846,20 +3033,55 @@ export function isWriteFacePropagationFailure(rec) {
 /** Commits that touch `tasks/<id>.md` and exist on HEAD (the write face) but NOT on `ref` — the
  *  DIRECT量 for "which side is behind". `> 0` ⇒ the write face carries a version of this task file
  *  the ref does not. Returns null when the reading could not be taken (no ref / git failure) —
- *  never a positive from an unavailable source (硬规则 5/6). */
+ *  never a positive from an unavailable source (硬规则 5/6).
+ *
+ *  ⛔ BATCHED (gap-anchor-polling-git-fork-storm): this used to be ONE `git rev-list --count
+ *  ref..HEAD -- tasks/<id>.md` per SUSPECT task — O(tasks) forks for a quantity that ONE
+ *  `git log --format= --name-only ref..HEAD -- tasks/` answers for every task at once. The range is
+ *  per (root, ref) and the result is memoized for the life of the process. A task absent from the
+ *  batch is 0 (the batch enumerated every path the range touches). */
+const _commitsAheadCache = new Map(); // `${root}\0${ref}\0${headOid}` -> Map<path, count> | null
+const _headOidCache = new Map(); // `head\0<root>` -> oid | null
+function _headOidOf(root) {
+  const key = `head\0${root}`;
+  if (_headOidCache.has(key)) return _headOidCache.get(key);
+  let oid = null;
+  try {
+    oid = gitExec("head-oid", ["-C", root, "rev-parse", "HEAD"], {
+      encoding: "utf8", timeout: 30_000, stdio: ["ignore", "pipe", "ignore"],
+    }).trim() || null;
+  } catch { oid = null; }
+  _headOidCache.set(key, oid);
+  return oid;
+}
+
+function _commitsAheadMap(root, ref) {
+  const headOid = _headOidOf(root);
+  const key = `${root}\0${ref}\0${headOid}`;
+  if (_commitsAheadCache.has(key)) return _commitsAheadCache.get(key);
+  let map = null;
+  try {
+    const out = gitExec(
+      "commits-ahead-batch",
+      ["-C", root, "log", "--format=", "--name-only", `${ref}..HEAD`, "--", "tasks/"],
+      { encoding: "utf8", maxBuffer: 64 * 1024 * 1024, timeout: 30_000, stdio: ["ignore", "pipe", "ignore"] },
+    );
+    map = new Map();
+    for (const line of out.split("\n")) {
+      const p = line.trim();
+      if (!p) continue;
+      map.set(p, (map.get(p) || 0) + 1);
+    }
+  } catch { map = null; }
+  _commitsAheadCache.set(key, map);
+  return map;
+}
+
 export function commitsAheadOfRefForTask(root, ref, id) {
   if (!ref) return null;
-  try {
-    const out = execFileSync(
-      "git",
-      ["-C", root, "rev-list", "--count", `${ref}..HEAD`, "--", `tasks/${id}.md`],
-      { encoding: "utf8", timeout: 30_000, stdio: ["ignore", "pipe", "ignore"] },
-    ).trim();
-    const n = Number(out);
-    return Number.isFinite(n) ? n : null;
-  } catch {
-    return null;
-  }
+  const map = _commitsAheadMap(root, ref);
+  if (map === null) return null; // unreadable range ⇒ "not measured", never a fabricated 0
+  return map.get(`tasks/${id}.md`) || 0;
 }
 
 /** The body-freshness judgment: `{ status, reason, evidence }` with status ∈
@@ -2937,6 +3159,7 @@ export function judgeBodyFreshness({ root, id, ref, lastRecords }) {
 const RPC_CACHE_VERSION = 1;
 const RPC_STORE_CACHE_FILE = "ready-pool-store-cache.json";
 const RPC_HISTORY_CACHE_FILE = "ready-pool-history-cache.json";
+const RPC_BACKOFF_FILE = "ready-pool-backoff.json";
 // Size cap for the store cache (the history cache is O(history), not O(churn), and needs no cap).
 // Sized to hold several times the current store (19 MB for 2,141 tasks) so a normal poll — which
 // re-keeps everything it reads — never trips it, while unbounded churn still cannot accumulate.
@@ -2967,7 +3190,7 @@ function rpcCacheDir(root) {
   if (_gitCacheDirs.has(root)) return _gitCacheDirs.get(root);
   let dir = null;
   try {
-    const out = execFileSync("git", ["-C", root, "rev-parse", "--git-common-dir"], {
+    const out = gitExec("common-dir", ["-C", root, "rev-parse", "--git-common-dir"], {
       encoding: "utf8", timeout: 30_000, stdio: ["ignore", "pipe", "ignore"],
     }).trim();
     if (out) {
@@ -3022,6 +3245,171 @@ function writeCacheJsonSerialized(file, text) {
   } catch { /* fail-soft: the uncached path is always available */ }
 }
 
+// ═════════════════════════════════════════════════════════════════════════════════════════════════
+// TICK BACKOFF (tasks/gap-anchor-polling-git-fork-storm, AC5)
+//
+// THE COST THIS TARGETS: the anchor runs this checker on a fixed cadence whether or not anything
+// changed. Every tick re-derives the same pool from the same git content — the caches above make each
+// individual derivation cheap, but the tick itself still forks the (now bounded) probe set, walks the
+// store, re-runs every candidate judgment, and re-walks the tree for Touches expansion.
+//
+// THE MECHANISM: a COMPLETE input fingerprint (the change key) is recorded with each full run. When a
+// tick's key is byte-identical to the previous tick's for K consecutive ticks, the tick REPLAYS the
+// previous report instead of recomputing it, and says so — `backoff.mode = "quiescent"`, with the age
+// of the replayed report and the list of fields re-derived anyway.
+//
+// ⛔ WHAT MAKES THE REPLAY SOUND, and what does not:
+//   - The change key covers EVERY input `analyzeTasks` reads: the landing ref's OID, HEAD, every
+//     branch tip, the task store's on-disk signature (name/size/mtime), the propagation + suite
+//     ledgers, and the worktree set. A change in ANY of them breaks the key ⇒ full recompute.
+//   - Fields that depend on the WALL CLOCK rather than on that state (`landing_blocked`, which is a
+//     staleness window) are RECOMPUTED on the replaying tick and patched into the report — replaying
+//     a time-derived verdict is exactly the "cached proxy for a direct quantity" failure (硬规则 4b).
+//   - The replay is for the PURE DETECTOR path only: `--apply` / `--revaluate-apply` always
+//     recompute (a write must never be decided by a replayed report).
+//   - `QUAY_READY_POOL_BACKOFF=0` disables it (the negative control); `..._BACKOFF_K` sets K.
+// ═════════════════════════════════════════════════════════════════════════════════════════════════
+
+/** K = the number of consecutive unchanged ticks after which a ticking report is labelled `quiescent`
+ *  (default 3). ⛔ It does NOT gate the replay: the replay begins at the FIRST unchanged tick, because
+ *  the report is a pure function of a COMPLETE input fingerprint — a hit is already a proof of "no
+ *  input changed", and re-deriving a proven-unchanged answer for two more ticks is exactly the cost
+ *  this task exists to remove. K only separates "same state as one tick ago" (labelled `cache-hit`)
+ *  from "N stable ticks in a row" (labelled `quiescent`), which is what a reader wants to know about
+ *  a report they are about to trust. */
+export function backoffThresholdK() {
+  const n = Number(process.env.QUAY_READY_POOL_BACKOFF_K);
+  return Number.isFinite(n) && n >= 1 ? n : 3;
+}
+
+/** Backoff kill-switch (test/experiment seam). */
+export function backoffEnabled() {
+  return process.env.QUAY_READY_POOL_BACKOFF !== "0";
+}
+
+/** `size:mtimeMs` signature of every `.md` in `dir` (sorted), or `-` when the dir is unreadable.
+ *  FS ONLY — this is the cheap half of the change key: a task file edited on disk is a write-face
+ *  change the analysis DOES read, so it must break the key even when no git ref moved. */
+function dirSignature(dir, filter = () => true) {
+  try {
+    const names = fs.readdirSync(dir).filter(filter).sort();
+    const parts = [];
+    for (const n of names) {
+      try {
+        const st = fs.statSync(path.join(dir, n));
+        if (st.isFile()) parts.push(`${n}:${st.size}:${Math.trunc(st.mtimeMs)}`);
+      } catch { parts.push(`${n}:?`); }
+    }
+    return parts.join("|");
+  } catch {
+    return "-";
+  }
+}
+
+/** `size:mtimeMs` of ONE file, or `-`. */
+function fileSignature(file) {
+  try {
+    const st = fs.statSync(file);
+    return `${st.size}:${Math.trunc(st.mtimeMs)}`;
+  } catch {
+    return "-";
+  }
+}
+
+/** The worktree SET, fs-only: the HEAD file of each `<common-dir>/worktrees/<name>/` entry (git
+ *  writes one dir per linked worktree, and its HEAD file is what a branch switch rewrites). */
+function worktreeSignature(root) {
+  const dir = rpcCacheDir(root);
+  if (!dir) return "-";
+  const common = path.dirname(dir);
+  try {
+    const names = fs.readdirSync(path.join(common, "worktrees")).sort();
+    const parts = [];
+    for (const n of names) {
+      let head = "?";
+      try { head = fs.readFileSync(path.join(common, "worktrees", n, "HEAD"), "utf8").trim(); } catch { /* unknown */ }
+      parts.push(`${n}=${head}`);
+    }
+    return parts.join("|");
+  } catch {
+    return "-";
+  }
+}
+
+/** One git probe, recorded so the report can ENUMERATE the probes a tick paid for (AC2's "O(1)
+ *  HEAD/mtime probes, listed one by one"). */
+function _probe(root, tag, argv) {
+  try {
+    return gitExec(tag, ["-C", root, ...argv], {
+      encoding: "utf8", timeout: 30_000, stdio: ["ignore", "pipe", "ignore"],
+    }).trim();
+  } catch {
+    return null; // unreadable ⇒ null ⇒ the key records "unknown" (never a fabricated value)
+  }
+}
+
+/**
+ * The COMPLETE input fingerprint for `analyzeTasks`, plus the enumerated probe list it cost.
+ * @returns {{ key: string, probes: Array<{tag:string, argv:string[], value:(string|null)}> }}
+ */
+export function computeChangeKey(root, { develop = "develop", integration = "integration", master = "master", landRef = null } = {}) {
+  const probes = [];
+  const add = (tag, argv) => {
+    const value = _probe(root, tag, argv);
+    probes.push({ tag, argv: ["git", ...argv], value });
+    return value;
+  };
+  // The two HEAD probes + the ref listing: O(1) in the task count, and all three are needed — the
+  // landing ref's OID and HEAD name the committed state, the family covers `git log --all` (the
+  // commit-trace index reads --all, so a new branch/commit anywhere changes the report).
+  const landing = landRef || landingRef(root, { candidates: [integration, develop, master] });
+  const landOid = add("probe-land-ref", ["rev-parse", "--verify", "-q", landing]);
+  const headOid = add("probe-head", ["rev-parse", "HEAD"]);
+  const refs = add("probe-refs", ["for-each-ref", "--format=%(refname)%00%(objectname)", "refs/heads"]);
+  const storeSig = dirSignature(path.join(root, "tasks"), (n) => n.endsWith(".md"));
+  const ledgerSig = [
+    fileSignature(path.join(root, PROPAGATION_LEDGER_REL)),
+    fileSignature(path.join(root, ".quay", "per-task-suite-records.jsonl")),
+    fileSignature(path.join(root, ".quay", "verification-round.jsonl")),
+    fileSignature(path.join(root, ".quay", "worker-control.json")),
+    fileSignature(path.join(root, ".quay", "promotion-control.json")),
+  ].join(",");
+  const wtSig = worktreeSignature(root);
+  const payload = JSON.stringify({ v: 1, landing, landOid, headOid, refs, storeSig, ledgerSig, wtSig });
+  let key;
+  try {
+    key = createHash("sha256").update(payload).digest("hex");
+  } catch {
+    key = `len:${payload.length}:${keySetSignature([payload])}`; // fail-soft: still a stable key
+  }
+  return { key, probes };
+}
+
+/** Read the persisted backoff state (absent/corrupt ⇒ null — 缺值 = 未查). */
+export function readBackoffState(root) {
+  const file = rpcCacheFile(root, RPC_BACKOFF_FILE);
+  if (!file) return null;
+  const o = readCacheJson(file);
+  if (!o || typeof o.key !== "string" || typeof o.streak !== "number") return null;
+  return o;
+}
+
+/** Persist the backoff state (report included only on a full run). */
+export function writeBackoffState(root, state) {
+  const file = rpcCacheFile(root, RPC_BACKOFF_FILE);
+  if (!file) return;
+  writeCacheJson(file, { v: RPC_CACHE_VERSION, ...state });
+}
+
+/** Re-derive the WALL-CLOCK-dependent fields of a replayed report (see the block comment above). */
+export function refreshClockFields(report, root, { develop = "develop", integration = "integration", master = "master", now = Date.now() } = {}) {
+  if (!report || typeof report !== "object") return report;
+  const lb = detectLandingBlocked(root, { develop, integration, master, now });
+  report.landing_blocked = lb.landing_blocked;
+  report.landing_blocked_reason = lb.reason;
+  return report;
+}
+
 /** A cheap signature of a key SET (not its values) — used to skip rewriting a multi-MB cache file
  *  whose entry set did not change. Order-independent (keys are sorted) so a readdir ordering change
  *  is not mistaken for a content change. */
@@ -3039,7 +3427,7 @@ function keySetSignature(keys) {
  *  git failure (caller falls back to the uncached batched read). */
 export function listRefTaskBlobs(root, ref) {
   try {
-    const out = execFileSync("git", ["-C", root, "ls-tree", "-r", ref, "tasks/"], {
+    const out = gitExec("ls-tree-tasks", ["-C", root, "ls-tree", "-r", ref, "tasks/"], {
       encoding: "utf8", maxBuffer: 64 * 1024 * 1024, timeout: 30_000, stdio: ["ignore", "pipe", "ignore"],
     });
     const map = new Map();
@@ -3062,7 +3450,7 @@ export function listRefTaskBlobs(root, ref) {
 /** `git rev-parse --verify <ref>^{commit}` → OID, or null. */
 function resolveCommitOid(root, ref) {
   try {
-    const out = execFileSync("git", ["-C", root, "rev-parse", "--verify", "-q", `${ref}^{commit}`], {
+    const out = gitExec("resolve-oid", ["-C", root, "rev-parse", "--verify", "-q", `${ref}^{commit}`], {
       encoding: "utf8", timeout: 30_000, stdio: ["ignore", "pipe", "ignore"],
     }).trim();
     return out || null;
@@ -3076,7 +3464,7 @@ function resolveCommitOid(root, ref) {
  *  / rebased / unrelated tip answers false ⇒ full rebuild (fail-soft toward correctness). */
 function isAncestorCommit(root, a, b) {
   try {
-    execFileSync("git", ["-C", root, "merge-base", "--is-ancestor", a, b], { timeout: 30_000, stdio: "ignore" });
+    gitExec("is-ancestor", ["-C", root, "merge-base", "--is-ancestor", a, b], { timeout: 30_000, stdio: "ignore" });
     return true;
   } catch {
     return false;
@@ -4156,8 +4544,62 @@ function main(argv) {
   // so a disk-read here would re-promote the same task every tick (duplicate same-content commits).
   // Same taskReadRef as the dispatch-read arm below: develop is the single source of truth.
   let result;
-  if (revaluateApply) result = applyRevaluations(base);
-  else result = apply ? applyPromotions({ ...base, taskReadRef: develop }) : analyzeTasks({ ...base, taskReadRef: develop });
+  if (revaluateApply) {
+    result = applyRevaluations(base);
+  } else if (apply) {
+    result = applyPromotions({ ...base, taskReadRef: develop });
+  } else if (backoffEnabled()) {
+    // ── TICK BACKOFF (AC5) — pure detector path only ──────────────────────────────────────────────
+    // The change key is computed BEFORE the analysis: it is what decides whether there is anything
+    // to analyse. Every input `analyzeTasks` reads is in it (see computeChangeKey), so "same key"
+    // means "same report" — except for the WALL-CLOCK-derived fields, which are recomputed on the
+    // replayed tick and patched in (`refreshClockFields`).
+    const { key, probes } = computeChangeKey(rootDir, { develop, integration, master });
+    const K = backoffThresholdK();
+    const prev = readBackoffState(rootDir);
+    const streak = prev && prev.key === key ? prev.streak + 1 : 0;
+    if (prev && prev.key === key && prev.report) {
+      const replayed = refreshClockFields(JSON.parse(JSON.stringify(prev.report)), rootDir, { develop, integration, master });
+      replayed.backoff = {
+        mode: streak >= K ? "quiescent" : "cache-hit",
+        unchanged_streak: streak,
+        threshold_k: K,
+        change_key: key,
+        replayed_report_from: prev.at ?? null,
+        replayed_report_age_ms: prev.at ? Date.now() - Date.parse(prev.at) : null,
+        probes: probes.map((p) => ({ tag: p.tag, argv: p.argv })),
+        recomputed: ["landing_blocked", "landing_blocked_reason"],
+        note:
+          "no derivation re-ran: every input in the change key is byte-identical to the last full tick " +
+          "(the report is a pure function of that key); wall-clock-derived fields were recomputed. " +
+          `mode quiescent from streak ${K}; set QUAY_READY_POOL_BACKOFF=0 to disable.`,
+      };
+      writeBackoffState(rootDir, { key, streak, at: prev.at ?? null, report: prev.report });
+      if (process.env.CHECKER_COST_SKIP !== "1") {
+        recordCheckerCost({ root: rootDir, name: "ready-pool-check", ms: Date.now() - t0, n: replayed.pool, load: getLoad1() });
+      }
+      process.stdout.write(`${JSON.stringify(replayed, null, 2)}\n`);
+      return 0;
+    }
+    result = analyzeTasks({ ...base, taskReadRef: develop });
+    result.backoff = {
+      mode: "full",
+      unchanged_streak: streak,
+      threshold_k: K,
+      change_key: key,
+      probes: probes.map((p) => ({ tag: p.tag, argv: p.argv })),
+      note: "inputs changed (no replayable report for this key) ⇒ full derivation",
+    };
+    writeBackoffState(rootDir, {
+      key,
+      streak,
+      at: new Date().toISOString(),
+      report: JSON.stringify(result).length <= 8 * 1024 * 1024 ? JSON.parse(JSON.stringify(result)) : null,
+    });
+  } else {
+    result = analyzeTasks({ ...base, taskReadRef: develop });
+  }
+
   if (process.env.CHECKER_COST_SKIP !== "1") {
     recordCheckerCost({ root: rootDir, name: "ready-pool-check", ms: Date.now() - t0, n: result.pool, load: getLoad1() });
   }

@@ -451,13 +451,19 @@ export function taskIdFromTouches(touchesSection) {
  *  Reachability FROM the chosen ref is what keeps STRANDED-branch commits out — a commit on an
  *  unmerged task/* branch is not reachable from integration/develop/master, preserving the original
  *  "only MASTER-REACHABLE commits count" intent (AC3 negative control). */
+const _landingRefCache = new Map(); // `${repoRoot}\0${candidates.join(",")}` -> ref
 export function landingRef(repoRoot, opts = {}) {
   if (opts.ref) return opts.ref;
   const candidates = opts.candidates ?? ["integration", "develop", "master"];
+  // MEMOIZED per (root, candidate list): the resolution ran once per stranded-classification entry
+  // plus once for the scan, and each implausible candidate cost a `rev-parse` fork.
+  const cacheKey = `${repoRoot}\0${candidates.join(",")}`;
+  if (_landingRefCache.has(cacheKey)) return _landingRefCache.get(cacheKey);
   for (const ref of candidates) {
-    const r = gitTry(repoRoot, ["rev-parse", "--verify", "-q", ref]);
-    if (r.ok && r.out.trim().length > 0) return ref;
+    const r = gitTry(repoRoot, ["rev-parse", "--verify", "-q", ref], null, "landing-ref-exists");
+    if (r.ok && r.out.trim().length > 0) { _landingRefCache.set(cacheKey, ref); return ref; }
   }
+  _landingRefCache.set(cacheKey, "master");
   return "master";
 }
 
@@ -517,7 +523,7 @@ export function gitHistoryLanded(rawTaskText, repoRoot, opts = {}) {
   // appear — web-board's 0950b0b6 was hidden until --full-history). The signal needs those merges
   // (they carry the task reference), so disable simplification.
   const ref = landingRef(repoRoot, opts);
-  const r = gitTry(repoRoot, ["log", ref, "--full-history", "--format=%H%x00%P%x00%s", "--", ...paths]);
+  const r = gitTry(repoRoot, ["log", ref, "--full-history", "--format=%H%x00%P%x00%s", "--", ...paths], null, "task-path-log");
   if (!r.ok || !r.out) return false;
   for (const line of r.out.split("\n")) {
     const parts = line.split("\0");
@@ -551,7 +557,7 @@ export function buildGitHistoryIndex(repoRoot, opts = {}) {
   const ref = landingRef(repoRoot, opts);
   let raw;
   try {
-    raw = execFileSync("git", [
+    raw = gitExec("history-index", [
       "log", ref, "--full-history", "-m", "--name-only", "--no-renames",
       "--format=%H%x00%P%x00%s",
     ], { cwd: repoRoot, encoding: "utf8", maxBuffer: 256 * 1024 * 1024, stdio: ["ignore", "pipe", "ignore"] });
@@ -680,9 +686,51 @@ export function hasDoneChildren(rawTask, tasksDir) {
 //   merged-then-reverted — Gate 2 missing files → STRANDED (content reverted away from master)
 //   has-uncommitted      — Gate 3 non-empty → worktree holds live work (reported; never deleted)
 //   merged-clean         — Gates 1+2+3 safe → NOT reported (a normal --clean-stale target)
-function gitTry(repoRoot, args, cwd) {
+// ═════════════════════════════════════════════════════════════════════════════════════════════════
+// GIT SUBPROCESS ACCOUNTING (tasks/gap-anchor-polling-git-fork-storm)
+//
+// Same instrument as ready-pool-check.ts's `gitExec()`: EVERY git spawn in this file goes through
+// `gitExec()`, which counts it (`gitExecCount()`) and — when `QUAY_GIT_EXEC_LOG` names a file —
+// appends one JSON line per spawn `{tag, argv}`. The log is the COUNTING FIXTURE's instrument
+// (`plugin/test/ready-pool-check-git-exec-count.test.mjs` counts REAL leaf spawns by line count,
+// never a wall-clock inference).
+//
+// ⛔ The log is a test/experiment seam, not a production knob: unset ⇒ one string compare per
+// spawn, no I/O, no behaviour change.
+let _gitExecCount = 0;
+const _gitExecTags = new Map(); // tag -> count
+
+function gitExec(tag, args, opts) {
+  _gitExecCount++;
+  _gitExecTags.set(tag, (_gitExecTags.get(tag) || 0) + 1);
+  const logFile = process.env.QUAY_GIT_EXEC_LOG;
+  if (logFile) {
+    try {
+      fs.appendFileSync(logFile, `${JSON.stringify({ tag, argv: args })}\n`);
+    } catch { /* the log is an instrument; a failed write must not change the run */ }
+  }
+  return execFileSync("git", args, opts);
+}
+
+/** How many git processes this module spawned in the current process. */
+export function gitExecCount() {
+  return _gitExecCount;
+}
+
+/** Per-tag breakdown of `gitExecCount()` — `{ tag: count }`. */
+export function gitExecTags() {
+  return Object.fromEntries(_gitExecTags);
+}
+
+/** Reset the in-process counters (tests; a CLI process starts at zero anyway). */
+export function resetGitExecCount() {
+  _gitExecCount = 0;
+  _gitExecTags.clear();
+}
+
+function gitTry(repoRoot, args, cwd, tag = "git-try") {
   try {
-    const out = execFileSync("git", args, {
+    const out = gitExec(tag, args, {
       cwd: cwd || repoRoot, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"],
     });
     return { ok: true, out: out.trim() };
@@ -694,7 +742,7 @@ function gitTry(repoRoot, args, cwd) {
 // Branch names that carry live milestone/task work — the ONLY namespaces the stranded alarm scopes
 // to. Legacy experiment-*/worktree-wf_*/salvage/* branches are historical, not live worktrees.
 export function listWorkBranches(repoRoot) {
-  const r = gitTry(repoRoot, ["branch", "--list", "milestone/*", "task/*"]);
+  const r = gitTry(repoRoot, ["branch", "--list", "milestone/*", "task/*"], null, "list-work-branches");
   if (!r.ok) return [];
   return r.out.split("\n").map((l) => l.trim().replace(/^[*+]\s*/, "")).filter(Boolean);
 }
@@ -706,7 +754,7 @@ export function listWorkBranches(repoRoot) {
 // return the merge-added files that are missing from the landing ref's CURRENT tree (a `git revert`
 // of the merge removes exactly those files).
 function _mergeAddedMissing(repoRoot, tipSha, landing = "master") {
-  const merges = gitTry(repoRoot, ["log", "--merges", "--format=%H %P", landing]);
+  const merges = gitTry(repoRoot, ["log", "--merges", "--format=%H %P", landing], null, "merge-list");
   if (!merges.ok) return { error: merges.out };
   let merge = null;
   for (const line of merges.out.split("\n")) {
@@ -714,36 +762,101 @@ function _mergeAddedMissing(repoRoot, tipSha, landing = "master") {
     if (parts.length >= 3 && parts[2] === tipSha) { merge = parts[0]; break; }
   }
   if (!merge) return { error: `no merge commit on ${landing} has branch tip ${tipSha} as a parent` };
-  const added = gitTry(repoRoot, ["diff", "--name-only", "--diff-filter=A", `${merge}^1..${merge}`]);
+  const added = gitTry(repoRoot, ["diff", "--name-only", "--diff-filter=A", `${merge}^1..${merge}`], null, "merge-added");
   if (!added.ok) return { error: added.out };
   const missing = [];
   for (const f of added.out.split("\n").filter(Boolean)) {
-    if (!gitTry(repoRoot, ["cat-file", "-e", `${landing}:${f}`]).ok) missing.push(f);
+    if (!gitTry(repoRoot, ["cat-file", "-e", `${landing}:${f}`], null, "cat-file-landing").ok) missing.push(f);
   }
   return { missing };
 }
 
-// Map a branch name → its worktree's absolute path (if any), via `git worktree list --porcelain`.
-function _worktreeForBranch(repoRoot, branch) {
-  const r = gitTry(repoRoot, ["worktree", "list", "--porcelain"]);
-  if (!r.ok) return null;
-  let cur = null;
-  for (const line of r.out.split("\n")) {
-    if (line.startsWith("worktree ")) { cur = line.slice("worktree ".length).trim(); continue; }
-    if (line.startsWith("branch ") && line.slice("branch ".length).trim() === `refs/heads/${branch}`) return cur;
+// ── PER-SCAN GIT FACTS, BATCHED (tasks/gap-anchor-polling-git-fork-storm) ───────────────────────
+// `classifyBranch` ran for EVERY `milestone/*`/`task/*` branch, and asked six per-branch git
+// questions. Three of them are functions of the WHOLE repo, not of the branch:
+//   - `git worktree list --porcelain`                (identical for every branch)
+//   - `git rev-list --first-parent <landing>`        (a FULL-history dump, identical for every branch)
+//   - each branch's tip OID + last-commit date       (one `for-each-ref` names them all)
+//   - "is this branch merged into <landing>"         (one `git branch --merged/--no-merged` split)
+// Measured 2026-11-06 on the live host: 80 git spawns per drift-check run, of which 12 were the
+// IDENTICAL `worktree list` and 7 were the IDENTICAL full first-parent dump. They are memoized per
+// (root, landing) for the life of the process — the same short-lived-CLI lifetime argument the
+// branch-divergence cache below already relies on.
+const _worktreeListCache = new Map(); // repoRoot -> Map<refs/heads/x, worktreePath> | null
+function _worktreeMapForRepo(repoRoot) {
+  if (_worktreeListCache.has(repoRoot)) return _worktreeListCache.get(repoRoot);
+  const r = gitTry(repoRoot, ["worktree", "list", "--porcelain"], null, "worktree-list");
+  let map = null;
+  if (r.ok) {
+    map = new Map();
+    let cur = null;
+    for (const line of r.out.split("\n")) {
+      if (line.startsWith("worktree ")) { cur = line.slice("worktree ".length).trim(); continue; }
+      if (line.startsWith("branch ") && cur) map.set(line.slice("branch ".length).trim(), cur);
+    }
   }
-  return null;
+  _worktreeListCache.set(repoRoot, map);
+  return map;
+}
+
+const _refFactsCache = new Map(); // repoRoot -> Map<refname, {oid, isoDate}> | null
+function _refFacts(repoRoot) {
+  if (_refFactsCache.has(repoRoot)) return _refFactsCache.get(repoRoot);
+  const r = gitTry(repoRoot, ["for-each-ref", "--format=%(refname)%00%(objectname)%00%(committerdate:iso-strict)"], null, "for-each-ref");
+  let map = null;
+  if (r.ok) {
+    map = new Map();
+    for (const line of r.out.split("\n")) {
+      const [ref, oid, date] = line.split("\0");
+      if (!ref || !oid) continue;
+      map.set(ref, { oid, isoDate: date || null });
+    }
+  }
+  _refFactsCache.set(repoRoot, map);
+  return map;
+}
+
+const _mergedIntoCache = new Map(); // `${repoRoot}\0${landing}` -> Set<branchShort> | null
+function _mergedInto(repoRoot, landing) {
+  const key = `${repoRoot}\0${landing}`;
+  if (_mergedIntoCache.has(key)) return _mergedIntoCache.get(key);
+  const r = gitTry(repoRoot, ["branch", "--merged", landing, "--format=%(refname:short)"], null, "branch-merged");
+  let set = null;
+  if (r.ok) set = new Set(r.out.split("\n").map((l) => l.trim()).filter(Boolean));
+  _mergedIntoCache.set(key, set);
+  return set;
+}
+
+const _firstParentCache = new Map(); // `${repoRoot}\0${landing}` -> Set<oid> | null
+function _firstParentSet(repoRoot, landing) {
+  const key = `${repoRoot}\0${landing}`;
+  if (_firstParentCache.has(key)) return _firstParentCache.get(key);
+  const r = gitTry(repoRoot, ["rev-list", "--first-parent", landing], null, "landing-first-parent");
+  const set = r.ok ? new Set(r.out.split("\n").filter(Boolean)) : null;
+  _firstParentCache.set(key, set);
+  return set;
+}
+
+// Map a branch name → its worktree's absolute path (if any), via the memoized `git worktree list`.
+function _worktreeForBranch(repoRoot, branch) {
+  const map = _worktreeMapForRepo(repoRoot);
+  if (!map) return null;
+  return map.get(`refs/heads/${branch}`) ?? null;
 }
 
 function _shortstatInsertions(repoRoot, branch, landing = "master") {
-  const r = gitTry(repoRoot, ["diff", `${landing}...${branch}`, "--shortstat"]);
+  const r = gitTry(repoRoot, ["diff", `${landing}...${branch}`, "--shortstat"], null, "branch-shortstat");
   if (!r.ok) return null;
   const m = r.out.match(/(\d+)\s+insertions?\(\+\)/);
   return m ? Number(m[1]) : null;
 }
 
 function _lastCommitDate(repoRoot, branch) {
-  const r = gitTry(repoRoot, ["log", "-1", "--format=%cI", branch]);
+  const facts = _refFacts(repoRoot);
+  const f = facts ? facts.get(`refs/heads/${branch}`) : null;
+  if (f && f.isoDate) return f.isoDate;
+  // Detached/unlisted ref ⇒ the per-branch call is still correct (and rare).
+  const r = gitTry(repoRoot, ["log", "-1", "--format=%cI", branch], null, "branch-last-commit");
   return r.ok ? r.out : null;
 }
 
@@ -756,9 +869,16 @@ function _lastCommitDate(repoRoot, branch) {
 export function classifyBranch(repoRoot, branch, landing = "master") {
   const wt = _worktreeForBranch(repoRoot, branch);
   const base = { branch, worktreeRel: wt };
-  const ancestor = gitTry(repoRoot, ["merge-base", "--is-ancestor", branch, landing]);
-  if (!ancestor.ok) {
-    const cnt = gitTry(repoRoot, ["rev-list", "--count", branch, "--not", landing]);
+  // "Is this branch an ancestor of <landing>?" — ONE `git branch --merged <landing>` split answers it
+  // for every branch (a per-branch `merge-base --is-ancestor` was one spawn each). An unreadable
+  // split ⇒ null ⇒ fall back to the per-branch probe, so an unmeasurable source never silently
+  // reads as "not merged" (硬规则 6).
+  const mergedSet = _mergedInto(repoRoot, landing);
+  const isMerged = mergedSet
+    ? mergedSet.has(branch)
+    : gitTry(repoRoot, ["merge-base", "--is-ancestor", branch, landing], null, "branch-ancestor").ok;
+  if (!isMerged) {
+    const cnt = gitTry(repoRoot, ["rev-list", "--count", branch, "--not", landing], null, "branch-ahead-count");
     const aheadCount = cnt.ok ? Number(cnt.out) : NaN;
     return {
       ...base, classification: "has-commits",
@@ -768,11 +888,17 @@ export function classifyBranch(repoRoot, branch, landing = "master") {
     };
   }
   // Gate 2 — merged; check revert only for merge-entered branches (tip NOT on landing's first-parent).
-  const tip = gitTry(repoRoot, ["rev-parse", branch]);
-  const firstParent = gitTry(repoRoot, ["rev-list", "--first-parent", landing]);
+  // The tip OID comes from the ONE `for-each-ref` listing; the first-parent set is built once per
+  // (root, landing) instead of dumping the full first-parent history per branch.
+  const facts = _refFacts(repoRoot);
+  const tipOid = facts && facts.get(`refs/heads/${branch}`) ? facts.get(`refs/heads/${branch}`).oid : null;
+  const firstParent = _firstParentSet(repoRoot, landing);
   let onFirstParent = false;
-  if (tip.ok && firstParent.ok) onFirstParent = firstParent.out.split("\n").includes(tip.out);
+  if (tipOid && firstParent) onFirstParent = firstParent.has(tipOid);
   if (!onFirstParent) {
+    const tip = tipOid
+      ? { ok: true, out: tipOid }
+      : gitTry(repoRoot, ["rev-parse", branch], null, "branch-tip");
     const m = _mergeAddedMissing(repoRoot, tip.out, landing);
     if (m.error) return { ...base, classification: "error", detail: m.error };
     if (m.missing.length > 0) {
@@ -787,7 +913,7 @@ export function classifyBranch(repoRoot, branch, landing = "master") {
   }
   // Gate 3 — worktree clean? (inside the worktree, not the primary checkout)
   if (wt) {
-    const st = gitTry(repoRoot, ["status", "--porcelain"], wt);
+    const st = gitTry(repoRoot, ["status", "--porcelain"], wt, "worktree-status");
     if (st.ok && st.out !== "") {
       return {
         ...base, classification: "has-uncommitted", aheadCount: 0,
@@ -838,7 +964,7 @@ export function entriesInBranchDiff(repoRoot, entries, branch, landing = "master
   const key = `${repoRoot}\n${landing}...${branch}`;
   let diverged = _branchDiffCache.get(key);
   if (diverged === undefined) {
-    const r = gitTry(repoRoot, ["diff", "--name-only", `${landing}...${branch}`]);
+    const r = gitTry(repoRoot, ["diff", "--name-only", `${landing}...${branch}`], null, "branch-diff");
     diverged = r.ok ? new Set(r.out.split("\n").filter(Boolean)) : null;
     _branchDiffCache.set(key, diverged);
   }
