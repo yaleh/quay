@@ -261,6 +261,82 @@ export class AlreadyExistsError extends Error {
   }
 }
 
+// ── PARK DURABILITY: a whole-task write may not carry a task OUT of `needs-human` ───────────────
+//
+// gap-needs-human-park-overwritten-by-inflight-worker (measured 2026-11-06 on this host).
+//
+// THE DEFECT. A task was parked (`ready → needs-human`) while a worker was in flight on it. Three
+// times in ~15 minutes the park was reverted — the commit diff was exactly ONE frontmatter line,
+// `-status: needs-human` / `+status: todo` — and the promotion driver then saw `todo` and promoted it
+// straight back to `ready`. The writer was the in-flight worker's own `task_write`: it carried the
+// WHOLE task it had read earlier (body + the status it saw then), so `frontmatter.status = status`
+// below silently reinstated a status the worker does not own. The park is only as durable as the last
+// in-flight worker's read — and a reverted park burns a full suite (~20 min / 60+ cores here).
+//
+// WHY IT IS THE STORE'S JOB, not a worker-side convention. `store.write()` is the single write face
+// every front door funnels through (CLI, native MCP, Core MCP passthrough), it is the only place that
+// sees the ON-DISK status and the incoming patch inside the same lock, and the worker is an LLM that
+// cannot be relied on to declare "I am a stale writer". A guard the caller must opt into would be
+// absent exactly when the defect fires.
+//
+// WHAT COUNTS AS "A STATUS THE WRITER DOES NOT OWN". `needs-human` is the escalate state
+// (`packages/quay/src/kernel/task-transition.ts`'s `LIFECYCLE_EDGES`: `todo|ready → needs-human`,
+// kind `escalate`, actor `needs-human-writer`) — i.e. the state is reached by an escalation to a
+// human, never by a content write. A patch that supplies OTHER fields (body/title/labels/parent/
+// children/extra/depends_on/goal_ac) is a whole-task replacement: the shape an agent or a fan-in
+// writes from a snapshot it read earlier. That patch must not also move the task out of the park.
+//
+// THE TWO DELIBERATE EXITS (a fix that blocks them is not a fix — AC2's negative control):
+//   · a STATUS-ONLY write (`quay task edit <id> --status ready`, the human/manager unpark) — the
+//     caller is asking for exactly one thing, the status, so it is a decision, not a stale replay;
+//   · ANY write that supplies `expectedStatus` — the caller CAS-asserted the status it read
+//     (`needs-human`), which is the strongest available statement that the move is intentional
+//     (this is also the path `runCompleteOutOfBand` uses for `needs-human → done`).
+// Everything else keeps the on-disk park and writes the rest of the patch — the content half (the
+// worker's AC tick) still lands, and the dropped status is reported on stderr rather than applied
+// silently (硬规则 3b: an unobservable substitution is indistinguishable from a clean write).
+//
+// SCOPE: `needs-human` only. It is the one state this defect was measured on and the one the edge
+// table declares as escalation-only; widening it to every status would change the meaning of
+// ordinary `task edit --status X --body Y` callers, which is a different decision than this one.
+
+/** The status whose park a whole-task write may not silently revert. */
+export const PARK_GUARD_STATUS = TASK_STATUS.NEEDS_HUMAN;
+
+/** Three-state verdict of the park guard (硬规则 3b — "not a park" and "a deliberate exit" are
+ *  DIFFERENT answers; collapsing them into a boolean would make an unreadable/non-park input look
+ *  like a checked-and-allowed one). */
+export type ParkGuardVerdict =
+  | { verdict: "no-status" }
+  | { verdict: "not-parked"; diskStatus: string | null }
+  | { verdict: "deliberate"; because: "status-only" | "cas" }
+  | { verdict: "preserve"; from: string; requested: string };
+
+/**
+ * Decide whether a write must PRESERVE the on-disk `needs-human` park instead of applying the
+ * caller's `status`. Pure — the write face supplies what it read inside the lock.
+ *
+ * @param diskStatus      the status currently on disk (`null` for a creation)
+ * @param requestedStatus the `status` in the patch, or `undefined` when the patch omits it
+ * @param expectedStatus  the caller's CAS guard, or `undefined`
+ * @param contentWrite    whether the SAME patch carries a non-status field (whole-task replacement)
+ */
+export function parkGuardVerdict(args: {
+  diskStatus: string | null;
+  requestedStatus: string | undefined;
+  expectedStatus: string | undefined;
+  contentWrite: boolean;
+}): ParkGuardVerdict {
+  const { diskStatus, requestedStatus, expectedStatus, contentWrite } = args;
+  if (requestedStatus === undefined) return { verdict: "no-status" };
+  if (diskStatus !== PARK_GUARD_STATUS) return { verdict: "not-parked", diskStatus };
+  if (expectedStatus !== undefined) return { verdict: "deliberate", because: "cas" };
+  if (!contentWrite) return { verdict: "deliberate", because: "status-only" };
+  // Re-asserting the same status is not a move out of the park — nothing to protect.
+  if (requestedStatus === PARK_GUARD_STATUS) return { verdict: "not-parked", diskStatus };
+  return { verdict: "preserve", from: diskStatus, requested: requestedStatus };
+}
+
 const FRONTMATTER_RE = /^---\n([\s\S]*?)\n---\n?([\s\S]*)$/;
 
 /**
@@ -1674,8 +1750,41 @@ export function createStore(tasksDir: string, opts?: { defaultStatus?: string })
         if (expectedStatus !== undefined && frontmatter.status !== expectedStatus) {
           throw new ConflictError(id, expectedStatus, frontmatter.status as string | null);
         }
+        // PARK DURABILITY (gap-needs-human-park-overwritten-by-inflight-worker) — see
+        // `parkGuardVerdict`'s own comment for the measured defect and the two deliberate exits.
+        // The judgment reads the frontmatter THIS write is mutating (never a second parse) and runs
+        // inside the same lock acquisition as the CAS check above, so a park landing between the read
+        // and the write cannot slip past it.
+        let appliedStatus: string | undefined = status;
+        if (status !== undefined) {
+          const contentWrite =
+            title !== undefined ||
+            labels !== undefined ||
+            parent !== undefined ||
+            children !== undefined ||
+            extra !== undefined ||
+            body !== undefined ||
+            depends_on !== undefined ||
+            goal_ac !== undefined;
+          const parkGuard = parkGuardVerdict({
+            diskStatus: beforeStatus,
+            requestedStatus: status,
+            expectedStatus,
+            contentWrite,
+          });
+          if (parkGuard.verdict === "preserve") {
+            // The rest of the patch still lands (a stale worker's AC tick must not be lost);
+            // only the status it does not own is dropped — and the substitution is REPORTED, never
+            // silent. stderr (not a throw): the write succeeded, and refusing it outright would
+            // discard the content half for no gain.
+            appliedStatus = undefined;
+            console.error(
+              `quay-native store: task_write "${id}" carried status "${parkGuard.requested}" in a whole-task write while the task is parked at "${parkGuard.from}" — the park is PRESERVED (send a status-only write, or pass expectedStatus, to leave needs-human deliberately)`
+            );
+          }
+        }
         if (title !== undefined) frontmatter.title = title;
-        if (status !== undefined) frontmatter.status = status;
+        if (appliedStatus !== undefined) frontmatter.status = appliedStatus;
         if (labels !== undefined) frontmatter.labels = labels;
         // M35: children applied before parent, mirroring github's
         // writeRelations() ordering (the two fields don't interact, but

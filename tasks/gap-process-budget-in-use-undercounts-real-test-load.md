@@ -1,7 +1,7 @@
 ---
 id: gap-process-budget-in-use-undercounts-real-test-load
 title: process-budget.sh 的 in_use 把真实 test workers 判成 no_cpu_delta，读数比实际低两个数量级
-status: ready
+status: done
 labels:
   - gap
 parent: null
