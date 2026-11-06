@@ -4,15 +4,19 @@ title: 端到端：driver 自己立案的任务落地并使本 AC 机械翻 achi
 status: draft
 kind: criterion
 goal: GOAL-914
-criterion: node -e "const fs=require('fs');const
+criterion: node -e "const fs=require('fs');const rootRe=/^tasks$/;const
+  names=fs.readdirSync('.').filter(n=>rootRe.test(n));if(names.length!==1){console.error('tasks
+  dir missing');process.exit(1)};const
   p='.quay/goal-filing.jsonl';if(!fs.existsSync(p)){console.error('no
   goal-filing ledger');process.exit(1)};const
   rows=fs.readFileSync(p,'utf8').split('\n').filter(Boolean).map(s=>{try{return
   JSON.parse(s)}catch{return null}}).filter(Boolean);const
   filed=rows.filter(r=>r.state==='filed'&&r.ac==='AC-937');if(filed.length<1){console.error('no
   driver-filed task for AC-937');process.exit(1)};const
-  tasks=fs.readdirSync('tasks').filter(f=>f.endsWith('.md')).map(f=>fs.readFileSync('tasks/'+f,'utf8'));const
-  landed=tasks.some(t=>/^goal_ac:\s*AC-937\s*$/m.test(t)&&/^status:\s*done\s*$/m.test(t));if(!landed){console.error('driver-filed
+  fileRe=/^tasks\/[^/]+\.md$/;const
+  taskFiles=fs.readdirSync('tasks').map(f=>'tasks/'+f).filter(p=>fileRe.test(p));const
+  landed=taskFiles.some(p=>{const t=fs.readFileSync(p,'utf8');return
+  /^goal_ac:\s*AC-937\s*$/m.test(t)&&/^status:\s*done\s*$/m.test(t)});if(!landed){console.error('driver-filed
   task for AC-937 not
   done');process.exit(1)};console.log(JSON.stringify({filed:filed.length,landed:true}));"
 expect: "exit 0；.quay/goal-filing.jsonl 中有 AC-937 的 filed 行；tasks/ 中存在 goal_ac:
