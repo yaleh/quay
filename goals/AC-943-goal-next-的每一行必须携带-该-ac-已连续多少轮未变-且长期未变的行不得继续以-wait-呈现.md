@@ -1,7 +1,7 @@
 ---
 id: AC-943
 title: goal next 的每一行必须携带「该 AC 已连续多少轮未变」，且长期未变的行不得继续以 wait 呈现
-status: active
+status: achieved
 kind: criterion
 goal: GOAL-914
 criterion: "node -e \"const{execSync}=require('child_process');const
@@ -37,6 +37,11 @@ statusLog:
     to: active
     actor: goal-driver
     reason: "triage: activate"
+  - at: 2026-11-06T22:00:23.275Z
+    from: active
+    to: achieved
+    actor: goal-driver
+    reason: "I2: criterion pass"
 fidelity:
   verdict: faithful
   reason: "fidelity judge: faithful"
