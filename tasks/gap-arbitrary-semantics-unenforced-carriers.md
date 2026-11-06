@@ -65,14 +65,6 @@ extra:
 - plugin/test/worker-driver-resident-s07.test.mjs
 - tasks/gap-arbitrary-semantics-unenforced-carriers.md
 
-## Blocker
-
-**2026-11-05T16:44:43.624Z — worker 未落地（exited-not-landed）**
-
-- 未落地原因：step=suite: oom-killed (2) — recovery red set is NOT a subset of the develop baseline red set: added=plugin/test/full-suite-runner-cgroup.test.mjs changed=- — needs a code fix
-- run_id：wk-prod-anchor
-- session_id：07da625a-d056-4975-b056-cc8f0153a06e
-
 ## Needs-Human
 
 **执行 2026-11-05T16:44:45.467Z — 连续修满重试上限仍不合格（标 needs-human）**
