@@ -27,11 +27,11 @@ goal_ac: AC-936
 
 ## AC
 
-- [ ] `node --test packages/quay/test/goal-request.test.mjs plugin/test/goal-driver.test.mjs` 退出码 0。
-- [ ] `goal request` 的 `--reason` <8 非空白字符 ⇒ exit 1，不写行。
-- [ ] driver 每轮消费 submitted；终态 accepted/refused/not-evaluated；同一 requestId 只有一条终态。
-- [ ] 负控：缺 goal/缺 AC/未知 AC/只读 workspace ⇒ 具名拒绝，零写。
-- [ ] live 证据：`.quay/goal-requests.jsonl` 的一条 submitted→accepted/refused 链，逐字写入证据文档。
+- [x] `node --test packages/quay/test/goal-request.test.mjs plugin/test/goal-driver.test.mjs` 退出码 0。
+- [x] `goal request` 的 `--reason` <8 非空白字符 ⇒ exit 1，不写行。
+- [x] driver 每轮消费 submitted；终态 accepted/refused/not-evaluated；同一 requestId 只有一条终态。
+- [x] 负控：缺 goal/缺 AC/未知 AC/只读 workspace ⇒ 具名拒绝，零写。
+- [x] live 证据：`.quay/goal-requests.jsonl` 的一条 submitted→accepted/refused 链，逐字写入证据文档。
 
 ## DoD
 
