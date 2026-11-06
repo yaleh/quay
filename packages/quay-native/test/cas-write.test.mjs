@@ -10,6 +10,7 @@
 //
 // Run: node test/cas-write.test.mjs
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { execFile } from "node:child_process";
@@ -18,7 +19,14 @@ import { createStore, ConflictError } from "../src/store.ts";
 
 const execFileAsync = promisify(execFile);
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const tasksDir = path.join(__dirname, ".tmp-cas-test");
+
+// PROCESS-PRIVATE TEMP DIR, never a path inside the checked-in tree
+// (plugin/scripts/checked-in-write-check.ts's invariant: 测试不得在已签入路径下创建或删除条目).
+// This used to be `<test dir>/.tmp-cas-test` — inside the repo — and the store's status-event
+// carrier resolved the REPO's git root from it, so every run appended to the live
+// `.quay/task-status-events.jsonl` and left a write entry under `packages/quay-native/test/`.
+// Judged (and reported) the moment this file entered a delta; fixed here rather than grandfathered.
+let tasksDir = null;
 
 let failures = 0;
 function assert(cond, msg) {
@@ -31,8 +39,8 @@ function assert(cond, msg) {
 }
 
 function resetStore() {
-  fs.rmSync(tasksDir, { recursive: true, force: true });
-  fs.mkdirSync(tasksDir, { recursive: true });
+  if (tasksDir !== null) fs.rmSync(tasksDir, { recursive: true, force: true });
+  tasksDir = fs.mkdtempSync(path.join(os.tmpdir(), "quay-native-cas-write-"));
   return createStore(tasksDir);
 }
 
@@ -207,7 +215,7 @@ testStatusOnlyUnparkStillWorks();
 testCasUnparkWithContentStillWorks();
 testGuardDoesNotFreezeOrdinaryWrites();
 
-fs.rmSync(tasksDir, { recursive: true, force: true });
+if (tasksDir !== null) fs.rmSync(tasksDir, { recursive: true, force: true });
 
 if (failures > 0) {
   console.error(`\n${failures} failure(s).`);
