@@ -31,6 +31,48 @@ export interface DriverKindConfig {
   reconcileIntervalSecs: number;
 }
 
+// ── goal 立案节流（gap-goal-driver-filing-throttle，`drivers.yml kinds.goal.filing`）──────────────
+// WHY 这里是唯一声明点：立案节流此前**不存在**——`runGapSpawnPass` 只有每轮全局 `spawn_cap`，同一个 AC
+// 只要仍处缺口态，下一轮就能再立案一次。生产读数（`.quay/goal-round.jsonl` 的 `gap_spawns`，2026-09-07
+// → 2026-11-06）：373 次立案事件、172 个 AC、其中 74 个 AC 被重复立案；AC-214 同一 AC 立案 34 次、相邻
+// 两次最短间隔 **2.9 分钟**（详细读数见 docs/evidence/2026-11-06-goal-filing-throttle.md）。
+// ⇒ 成本不是「重复任务」，是同一 AC 的重复立案成本；节流是 per-AC 维度，不是全局名额维度。
+//
+// ⛔ 两个旋钮都是**策略值**（不是测量值），且都能由 drivers.yml 覆盖 —— 与 routine_quota 的先例同风格：
+// 声明一个保守起点 + 说清它保守在哪，⛔ 不假装它是从事故阈值反推出来的最优值。
+//   perAcCooldownMs：一次立案的**可观察结果**落定需要多久。实测同一 filed 行的核验延迟 475.7s
+//     （spawned 07:49:45.867Z → filed 07:57:41.597Z），而真实重复间隔是 2.9–17.9 分钟 ⇒ 6h ≫ 两者，
+//     使得任何在冷却窗内的重复立案，按构造都是对「世界没变」的再立案（硬规则 4 推论四：措辞是假说，
+//     所以它同时是**可覆盖的配置项**，不是写死的常量）。
+//   perAcPerDay：与同文件 `routine_quota.default_k: 3`（人已裁定的「单例程每日立案上限」）取同一个数
+//     —— 同一条「每日立案上限」政策，两个消费面共用一个取值，⛔ 不另造第二个数。
+// ⚠️ 两个缺省常量的**定义点**在 routine_quota 段之后（`DEFAULT_GOAL_FILING_*`）：perAcPerDay 直接引
+// `DEFAULT_ROUTINE_QUOTA_K`，把定义放在它之前会撞 TDZ，而在两处各写一个 3 就是第二份字面量。
+
+/** 立案节流配置。 */
+export interface GoalFilingConfig {
+  /** 同一 AC 两次立案之间的最小间隔（毫秒）。0 = 不设冷却（显式关闭，⛔ 不是「非法值」）。 */
+  perAcCooldownMs: number;
+  /** 同一 AC 在**尾随 24h 窗口**内的立案次数上限（≥1）。 */
+  perAcPerDay: number;
+  /** 非空 ⇒ 本段【读到了】但有字段被回退到缺省（硬规则 3b：与「没写这一段」不同形）。 */
+  warnings: readonly string[];
+}
+
+/** 缺省立案节流配置（drivers.yml 缺失/无本段时的回退；也是 parse 的 base）。 */
+export function defaultGoalFilingConfig(): GoalFilingConfig {
+  return {
+    perAcCooldownMs: DEFAULT_GOAL_FILING_COOLDOWN_MS,
+    perAcPerDay: DEFAULT_GOAL_FILING_PER_AC_PER_DAY,
+    warnings: [],
+  };
+}
+
+/** goal kind 的配置块：通用三项 + 立案节流（⛔ 只有 goal 有 `filing` 段）。 */
+export interface GoalKindConfig extends DriverKindConfig {
+  filing: GoalFilingConfig;
+}
+
 /** 完整 driver 配置（promotion + worker + outer + quality + meta + goal）。 */
 export interface DriverConfig {
   promotion: DriverKindConfig;
@@ -38,7 +80,7 @@ export interface DriverConfig {
   outer: DriverKindConfig;
   quality: DriverKindConfig;
   meta: DriverKindConfig;
-  goal: DriverKindConfig;
+  goal: GoalKindConfig;
 }
 
 /** 缺省配置（drivers.yml 缺失/不可解析时的回退；也是 parse 的 base）。 */
@@ -54,7 +96,8 @@ export function defaultDriverConfig(): DriverConfig {
     // meta：机制演进复核例程型 kind，同 quality/outer——无并发概念，cap 仅为字段齐整。
     meta: { cap: DEFAULT_DRIVER_CAP, intervalMs: DEFAULT_INTERVAL_MS, reconcileIntervalSecs: 0 },
     // goal：goal 机械环例程型 kind，同 quality/outer/meta——无并发概念，cap 仅为字段齐整。
-    goal: { cap: DEFAULT_DRIVER_CAP, intervalMs: DEFAULT_INTERVAL_MS, reconcileIntervalSecs: 0 },
+    // `filing` = 立案节流的两项（见上方「goal 立案节流」一节）；⛔ 只有 goal 有这一段。
+    goal: { cap: DEFAULT_DRIVER_CAP, intervalMs: DEFAULT_INTERVAL_MS, reconcileIntervalSecs: 0, filing: defaultGoalFilingConfig() },
   };
 }
 
@@ -97,7 +140,57 @@ export function loadDriverConfig(root: string): DriverConfig {
     outer: mergeKindConfig(kinds.outer, d.outer),
     quality: mergeKindConfig(kinds.quality, d.quality),
     meta: mergeKindConfig(kinds.meta, d.meta),
-    goal: mergeKindConfig(kinds.goal, d.goal),
+    // goal 的 filing 段与通用三项**分别**合并：`kinds.goal.filing` 是嵌套映射，⛔ 不能交给
+    // mergeKindConfig（它只认 cap/interval_ms/reconcile_interval_secs 三个标量）。
+    goal: {
+      ...mergeKindConfig(kinds.goal, d.goal),
+      filing: mergeGoalFilingConfig(goalFilingSectionOf(kinds.goal), d.goal.filing),
+    },
+  };
+}
+
+/** 取 `kinds.goal.filing` 段（非映射 ⇒ undefined，与「段不存在」同一路径 ⇒ 缺省）。 */
+function goalFilingSectionOf(goalRaw: unknown): unknown {
+  const r = (goalRaw && typeof goalRaw === "object" ? goalRaw : {}) as Record<string, unknown>;
+  return r.filing;
+}
+
+/**
+ * 合并 `kinds.goal.filing`。⛔ 三类输入必须**可分**（硬规则 3b）：
+ *   · 段不存在 / 不是映射 ⇒ 全部取缺省，`warnings` **为空**（「没写这一段」不是一个异常）；
+ *   · 段在场且字段缺席 ⇒ 该字段取缺省，`warnings` 仍为空（用户只是没写这一项）；
+ *   · 段在场但字段值荒谬 ⇒ 该字段回退缺省 **并留痕**（「读到但荒谬」，与「没写」不同形）。
+ * 荒谬 = 会让节流**变松**或不可判读的取值：冷却 < 0 / 非有限数 / 非整数；每日上限 < 1 或非整数。
+ * ⚠️ 冷却 `0` 是**合法值**（显式关闭节流，同 `ci_runs_collect_throttle_ms` 的 `>= 0` 约定），⛔ 不算荒谬。
+ */
+export function mergeGoalFilingConfig(raw: unknown, d: GoalFilingConfig): GoalFilingConfig {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return { ...d, warnings: [] };
+  const s = raw as Record<string, unknown>;
+  const warnings: string[] = [];
+  // ⚠️ 拼写两种都接受：本文件其余字段是 snake_case（`spawn_cap` / `gap_worker_timeout_ms`），而任务的 AC
+  // 逐字写的是 `perAcCooldownMs` / `perAcPerDay`（= 本接口的字段名）。两处都必须能写 ⇒ 同义键，snake 优先。
+  // ⛔ 这是**同一个旋钮的两种拼写**，不是两个旋钮：同义键同时给出且取值不同时，snake 胜出（确定、可测）。
+  const pick = (snake: string, camel: string, fallback: number, valid: (v: unknown) => v is number, rule: string): number => {
+    if (snake in s) {
+      const v = s[snake];
+      if (valid(v)) return v;
+      warnings.push(`kinds.goal.filing.${snake}: ${JSON.stringify(v)} ${rule} ⇒ 回退缺省 ${fallback}`);
+      return fallback;
+    }
+    if (camel in s) {
+      const v = s[camel];
+      if (valid(v)) return v;
+      warnings.push(`kinds.goal.filing.${camel}: ${JSON.stringify(v)} ${rule} ⇒ 回退缺省 ${fallback}`);
+      return fallback;
+    }
+    return fallback;
+  };
+  const isCooldown = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v) && Number.isInteger(v) && v >= 0;
+  const isPerDay = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v) && Number.isInteger(v) && v >= 1;
+  return {
+    perAcCooldownMs: pick("per_ac_cooldown_ms", "perAcCooldownMs", d.perAcCooldownMs, isCooldown, "不是 ≥0 的整数毫秒"),
+    perAcPerDay: pick("per_ac_per_day", "perAcPerDay", d.perAcPerDay, isPerDay, "不是 ≥1 的整数"),
+    warnings,
   };
 }
 
@@ -133,6 +226,15 @@ export const DEFAULT_ROUTINE_QUOTA_K = 3;
  *  ⛔ 不是从事故阈值反推的实测值。
  *  concurrency-default-fallback: 同上——routine 速率配额缺省，非并发数。 */
 export const DEFAULT_ROUTINE_QUOTA_GLOBAL_CEILING = 12;
+
+/** 缺省 per-AC 立案冷却（毫秒）。⚠️ **策略值**（不是测量值），推导理由见文件上方「goal 立案节流」
+ *  一节：实测 filed 行核验延迟 475.7s、真实同 AC 重复立案间隔 2.9–17.9 分钟 ⇒ 6h ≫ 两者。
+ *  concurrency-default-fallback: ⛔ 不是并发数——是【立案速率】的冷却缺省（同上一条的诚实声明条款）。 */
+export const DEFAULT_GOAL_FILING_COOLDOWN_MS = 6 * 60 * 60 * 1000;
+/** 缺省 per-AC 每日立案上限。⚠️ **策略值**，与 `DEFAULT_ROUTINE_QUOTA_K` **同一个取值**（同一条
+ *  「每日立案上限」政策；⛔ 不另写一个 3 —— 那就成了第二个字面量）。
+ *  concurrency-default-fallback: 同上——立案速率配额缺省，非并发数。 */
+export const DEFAULT_GOAL_FILING_PER_AC_PER_DAY = DEFAULT_ROUTINE_QUOTA_K;
 
 /** routine 配额配置。 */
 export interface RoutineQuotaConfig {

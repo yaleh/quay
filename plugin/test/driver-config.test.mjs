@@ -17,6 +17,9 @@ import {
   defaultDriverConfig,
   loadDriverConfig,
   driverCap,
+  DEFAULT_GOAL_FILING_COOLDOWN_MS,
+  DEFAULT_GOAL_FILING_PER_AC_PER_DAY,
+  defaultGoalFilingConfig,
   DEFAULT_ROUTINE_QUOTA_K,
   DEFAULT_ROUTINE_QUOTA_WINDOW_MS,
   DEFAULT_ROUTINE_QUOTA_GLOBAL_CEILING,
@@ -275,6 +278,70 @@ test("routine_quota — 留痕区分「读不到」与「读到但荒谬」（�
   assert.equal(d.defaultK, DEFAULT_ROUTINE_QUOTA_K);
   assert.equal(d.globalCeiling, DEFAULT_ROUTINE_QUOTA_GLOBAL_CEILING);
   assert.deepEqual(d.perRoutine, {});
+});
+
+// ── goal 立案节流（gap-goal-driver-filing-throttle）─────────────────────────────────────────────
+// `kinds.goal.filing` 是**声明式**旋钮：per-AC 冷却 + 每日上限。三条契约：
+//   ① 段缺失 ⇒ 缺省（节流有一个有理由的起点，⛔ 因为「配置没写」就变成不节流）；
+//   ② 段在场且字段荒谬 ⇒ fail-closed 回退缺省 **并留痕**（荒谬值让节流变松 = 危险方向）；
+//   ③ 两种拼写（snake_case / camelCase）都认 —— 后者是任务 AC 逐字用的名字。
+test("kinds.goal.filing — 缺省回落 / 两种拼写 / 非法值 fail-closed 并留痕", () => {
+  // ① 无 drivers.yml ⇒ 缺省，且**无留痕**（「没写这一段」不是异常）。
+  const missing = tmpdir();
+  const a = loadDriverConfig(missing).goal.filing;
+  assert.equal(a.perAcCooldownMs, DEFAULT_GOAL_FILING_COOLDOWN_MS);
+  assert.equal(a.perAcPerDay, DEFAULT_GOAL_FILING_PER_AC_PER_DAY);
+  assert.deepEqual(a.warnings, [], "读不到 ⇒ 无留痕（与「读到但荒谬」不同形）");
+  // 日上限缺省与同文件的 routine 配额上限**同一个取值**（同一条「每日立案上限」政策，⛔ 两个数）。
+  assert.equal(DEFAULT_GOAL_FILING_PER_AC_PER_DAY, DEFAULT_ROUTINE_QUOTA_K);
+
+  // ② snake_case（本文件的既定拼写）⇒ 读到该值（证明读的是文件，不是代码默认）。
+  const snake = tmpdir();
+  writeDriversYml(snake, "version: 1\nkinds:\n  goal:\n    filing:\n      per_ac_cooldown_ms: 3600000\n      per_ac_per_day: 2\n");
+  let f = loadDriverConfig(snake).goal.filing;
+  assert.equal(f.perAcCooldownMs, 3_600_000, "改 per_ac_cooldown_ms ⇒ 读数跟着变");
+  assert.equal(f.perAcPerDay, 2);
+  assert.deepEqual(f.warnings, []);
+
+  // ③ camelCase（任务 AC 的字段名）⇒ 同样读到。
+  const camel = tmpdir();
+  writeDriversYml(camel, "version: 1\nkinds:\n  goal:\n    filing:\n      perAcCooldownMs: 1800000\n      perAcPerDay: 5\n");
+  f = loadDriverConfig(camel).goal.filing;
+  assert.equal(f.perAcCooldownMs, 1_800_000);
+  assert.equal(f.perAcPerDay, 5);
+
+  // ④ 荒谬值 ⇒ 回退缺省 + 留痕（冷却负数 / 日上限 0 / 非数）。
+  for (const [key, bad] of [
+    ["per_ac_cooldown_ms", "-1"],
+    ["per_ac_cooldown_ms", "abc"],
+    ["per_ac_per_day", "0"],
+    ["per_ac_per_day", "-3"],
+  ]) {
+    const d = tmpdir();
+    writeDriversYml(d, `version: 1\nkinds:\n  goal:\n    filing:\n      ${key}: ${bad}\n`);
+    const got = loadDriverConfig(d).goal.filing;
+    assert.equal(got[key === "per_ac_cooldown_ms" ? "perAcCooldownMs" : "perAcPerDay"],
+      key === "per_ac_cooldown_ms" ? DEFAULT_GOAL_FILING_COOLDOWN_MS : DEFAULT_GOAL_FILING_PER_AC_PER_DAY,
+      `${key}=${bad} ⇒ 回退缺省（危险方向 fail-closed）`);
+    assert.equal(got.warnings.length, 1, `${key}=${bad} ⇒ 恰一条留痕`);
+    assert.ok(got.warnings[0].includes(key), `留痕点名到字段（实测：${got.warnings[0]}）`);
+  }
+
+  // ⑤ 冷却 0 是**合法值**（显式关闭冷却），⛔ 不算荒谬 ⇒ 无留痕。
+  const off = tmpdir();
+  writeDriversYml(off, "version: 1\nkinds:\n  goal:\n    filing:\n      per_ac_cooldown_ms: 0\n");
+  const offCfg = loadDriverConfig(off).goal.filing;
+  assert.equal(offCfg.perAcCooldownMs, 0);
+  assert.deepEqual(offCfg.warnings, [], "0 合法（同 ci_runs_collect_throttle_ms 的 >= 0 约定）");
+
+  // ⑥ 段不是映射 ⇒ 视同「没写」（缺省、无留痕）。
+  const notMap = tmpdir();
+  writeDriversYml(notMap, "version: 1\nkinds:\n  goal:\n    filing: 3\n");
+  assert.deepEqual(loadDriverConfig(notMap).goal.filing, { ...defaultGoalFilingConfig(), warnings: [] });
+
+  // ⑦ 真实仓库的 drivers.yml（= 生产真源）此前没有本段 ⇒ 取缺省，节流从落地起就有起点。
+  const real = loadDriverConfig(REPO_ROOT).goal.filing;
+  assert.ok(real.perAcCooldownMs >= 0 && real.perAcPerDay >= 1, `真源读数必须可用（实测 ${JSON.stringify(real)}）`);
 });
 
 after(() => {

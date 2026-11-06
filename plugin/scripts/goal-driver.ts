@@ -3276,11 +3276,179 @@ export function reconcileGoalFiling(
   return { ...base, evaluated: true };
 }
 
+// ── 立案节流（gap-goal-driver-filing-throttle）：每 AC 冷却 + 每日上限 ─────────────────────────────
+//
+// 缺口（本任务 Proposal）：`runGapSpawnPass` 此前只有**每轮全局** `spawn_cap`——同一个 AC 只要仍处缺口
+// 态，下一轮就能再立案一次，没有任何 per-AC 维度。生产读数（`.quay/goal-round.jsonl` 的 `gap_spawns`，
+// 2026-09-07 → 2026-11-06）：373 次立案事件 / 172 个 AC / 74 个 AC 被重复立案；AC-214 34 次、最短间隔
+// 2.9 分钟（逐字读数见 docs/evidence/2026-11-06-goal-filing-throttle.md）。这不是「重复任务」，是同一
+// AC 的重复立案成本。
+//
+// 选区（本实现）：**先节流、后切名额**。⛔ 顺序不可反：先 `slice(0, cap)` 会让一条仍在冷却里的 AC
+// 占掉一个名额、把一条真正可立案的 AC 挤到下一轮——节流就变成了「用冷却换空转」。
+//
+// 台账 = `readGoalFilingLedger`（单一真相源，⛔ 不另读 `goal-round` 的 `gap_spawns` 重推一遍口径）：
+//   · `spawned` 行的 `at`          = 一次立案**意图**的时刻
+//   · `filed`/`not-filed` 行的 `spawnedAt` = 同一次意图（跨行可读）。两者按 `requestId` 去重 ⇒ 一次
+//     立案只计一次（⛔ 不因「意图 + 结论」两行而算成两次）。
+//   ⇒ `lastFiledAt` = 该 AC 最近一次立案意图的时刻；`filed`/`not-filed` **两种终态都算**（节流管的是
+//   成本，不是成功率：一次 not-filed 的 spawn 一样烧了 token）。
+
+/** 立案节流的「一日」窗口（毫秒）。⚠️ 语义常量（一天的宽度），⛔ 不是宿主相关的资源上限。 */
+export const GOAL_FILING_DAY_MS = 24 * 60 * 60 * 1000;
+
+/** 一条候选 AC 被节流的成因（枚举，⛔ 布尔）。四态互不同形——尤其两个 `unreadable`：
+ *  「台账读不动」与「台账里的时间戳读不懂」是**两个不同的仪器故障**，⛔ 不得与「还在冷却」共用一个取值
+ *  （硬规则 3b）。三种被节流的取值方向一致（都不 spawn），但读者能据此知道该修哪里。 */
+export type GoalFilingThrottleReason = "cooldown" | "daily-cap" | "ledger-time-unreadable" | "ledger-unreadable";
+
+/** 一条被节流的候选 AC 的读数（**具名、不静默**：AC3 要求轮 fact 里逐条可读）。 */
+export interface GoalFilingThrottleEntry {
+  ac: string;
+  goal: string;
+  reason: GoalFilingThrottleReason;
+  /** 何时可以再立案（ISO）。⛔ 两个 `unreadable` 取值下为 null —— 「不知道」不与「已排定」同形。 */
+  nextEligibleAt: string | null;
+  /** 该 AC 最近一次立案意图的时刻（ISO）。无历史 ⇒ null（**合法的「从没立过案」**，是一个非常态）。 */
+  lastFiledAt: string | null;
+  /** 尾随 24h 窗口内该 AC 的立案次数（去重后）。台账读不动 ⇒ null（⛔ 不是 0）。 */
+  filingsInWindow: number | null;
+}
+
+/** 一次节流选取的读数。⛔ `evaluated:false` + `cause` = **没判成**（台账读不动），与
+ *  「判过、零条被节流」不同形（硬规则 3b）——后者是 `evaluated:true` + 空数组。 */
+export interface GoalFilingThrottleReading {
+  evaluated: boolean;
+  cause: string | null;
+  /** 送入节流的候选数（= `isFilingGapState` 为真的缺口数）。 */
+  candidates: number;
+  /** 节流后仍可立案的 AC 数。 */
+  eligible: number;
+  /** 逐条被节流的候选（`candidates - eligible` 条，⛔ 只报计数不报名单会让「谁被挡住」不可查）。 */
+  throttled: GoalFilingThrottleEntry[];
+}
+
+/** 该 AC 的全部立案**意图**时刻（毫秒），按 `requestId` 去重（一次立案 = 一行意图，⛔ 不是两行）。
+ *  `unparseable` = 有几行时间戳读不懂（⛔ 不丢弃它们：丢掉最晚的那行会让节流变松，见调用方）。 */
+function filingAttemptsOf(
+  rows: readonly GoalFilingRow[],
+  ac: string,
+): { times: number[]; unparseable: number } {
+  // 一次立案的**意图时刻**：`spawned.at`（意图行）或 `filed`/`not-filed.spawnedAt`（结论行回指的同一
+  // 时刻）。同一个 requestId 的两行因此指向同一个值 ⇒ 用 Map 按 requestId 去重，⛔ 不数成两次立案。
+  const byRequest = new Map<string, unknown>();
+  for (const r of rows) {
+    if (r.ac !== ac) continue;
+    const ts = r.state === "spawned" ? r.at : (r as GoalFilingTerminalRow).spawnedAt;
+    if (!byRequest.has(r.requestId)) byRequest.set(r.requestId, ts);
+  }
+  const times: number[] = [];
+  let unparseable = 0;
+  for (const ts of byRequest.values()) {
+    const ms = Date.parse(String(ts ?? ""));
+    if (Number.isFinite(ms)) times.push(ms);
+    else unparseable++;
+  }
+  return { times, unparseable };
+}
+
+/**
+ * 立案节流的**纯判定面**：给定候选 AC 集 + 台账读数 + 配置 + 时刻，返回仍可立案的 AC 与逐条被节流的
+ * 读数。⛔ 无 I/O、⛔ 不改入参（AC4 的负控钉的就是「节流不得改变 `goal-gaps` 的状态取值」）。
+ *
+ * 判定顺序（每一步都是**独立取值**，⛔ 不折叠）：
+ *   1. 台账读不动（`readable:false`）⇒ 全部候选 `ledger-unreadable`（fail-closed：读数不可用时不 spawn，
+ *      ⛔ 不把「不知道有没有立过案」当成「没立过」——那正是重复立案的方向）。
+ *   2. 该 AC 有读不懂的时间戳 ⇒ `ledger-time-unreadable`（fail-closed，同上：丢掉最晚一行会让节流变松）。
+ *   3. 距最近一次立案 < 冷却 ⇒ `cooldown`，`nextEligibleAt = 最近一次 + 冷却`。
+ *   4. 尾随 24h 内立案次数 ≥ 日上限 ⇒ `daily-cap`，`nextEligibleAt = 窗口内**最早**那次 + 24h`
+ *      （那一刻它离开窗口 ⇒ 最早可能重新可立案的时刻；⛔ 不等于「届时一定立」——第 3 步仍要过）。
+ *   5. 其余 ⇒ 可立案。
+ */
+export function goalFilingThrottle<T extends { ac: string; goal: string }>(
+  candidates: ReadonlyArray<T>,
+  ledger: Pick<GoalFilingLedgerRead, "readable" | "rows" | "cause">,
+  cfg: { perAcCooldownMs: number; perAcPerDay: number },
+  nowMs: number,
+): { reading: GoalFilingThrottleReading; eligible: T[] } {
+  const throttled: GoalFilingThrottleEntry[] = [];
+  const eligible: T[] = [];
+  const base = { candidates: candidates.length, eligible: 0, throttled };
+  if (!ledger.readable) {
+    for (const c of candidates) {
+      throttled.push({
+        ac: c.ac,
+        goal: c.goal,
+        reason: "ledger-unreadable",
+        nextEligibleAt: null,
+        lastFiledAt: null,
+        filingsInWindow: null,
+      });
+    }
+    return {
+      reading: { evaluated: false, cause: ledger.cause ?? "ledger-unreadable", ...base },
+      eligible,
+    };
+  }
+  for (const c of candidates) {
+    const { times, unparseable } = filingAttemptsOf(ledger.rows, c.ac);
+    if (unparseable > 0) {
+      throttled.push({
+        ac: c.ac, goal: c.goal, reason: "ledger-time-unreadable",
+        nextEligibleAt: null,
+        lastFiledAt: times.length > 0 ? new Date(Math.max(...times)).toISOString() : null,
+        filingsInWindow: null,
+      });
+      continue;
+    }
+    if (times.length === 0) {
+      // 「从没立过案」是一个**测量**（台账存在且该 AC 无行），⛔ 不是读不懂 ⇒ 直接可立案。
+      eligible.push(c);
+      continue;
+    }
+    const last = Math.max(...times);
+    const inWindow = times.filter((t) => nowMs - t < GOAL_FILING_DAY_MS);
+    const entry = (reason: GoalFilingThrottleReason, nextEligibleAt: string | null): void => {
+      throttled.push({
+        ac: c.ac, goal: c.goal, reason, nextEligibleAt,
+        lastFiledAt: new Date(last).toISOString(),
+        filingsInWindow: inWindow.length,
+      });
+    };
+    if (nowMs - last < cfg.perAcCooldownMs) {
+      entry("cooldown", new Date(last + cfg.perAcCooldownMs).toISOString());
+      continue;
+    }
+    if (inWindow.length >= cfg.perAcPerDay) {
+      entry("daily-cap", new Date(Math.min(...inWindow) + GOAL_FILING_DAY_MS).toISOString());
+      continue;
+    }
+    eligible.push(c);
+  }
+  return {
+    reading: { evaluated: true, cause: null, ...base, eligible: eligible.length },
+    eligible,
+  };
+}
+
+/** 逐态计数的**可读摘要**（按态名排序 ⇒ 同一份输入恒得同一串，便于人读与 diff）。 */
+export function throttleSummary(reading: GoalFilingThrottleReading): string {
+  const counts = new Map<GoalFilingThrottleReason, number>();
+  for (const t of reading.throttled) counts.set(t.reason, (counts.get(t.reason) ?? 0) + 1);
+  return [...counts.entries()]
+    .sort((a, b) => a[0].localeCompare(b[0]))
+    .map(([r, n]) => `${r}=${n}`)
+    .join(" ");
+}
+
 /** G9 缺口语义环的 spawn pass 结果。 */
 export interface GapSpawnPassResult {
   spawned: number;
   llmInvoked: boolean;
   outcomes: GapSpawnOutcome[];
+  /** 立案节流本轮的选取读数（每 AC 冷却 + 日上限，输入 = 立案台账）。⛔ 恒非 null：
+   *  `evaluated:false + cause` = 没判成（台账读不动），⛔ 不与「判过且零条被节流」同形（硬规则 3b）。 */
+  throttle: GoalFilingThrottleReading;
   /** 立案台账本轮写下的 `spawned` 行（⛔ 与 spawn 结果分开：spawn 的 exitCode **不是**立案结论）。 */
   filing: {
     ledger: string;
@@ -3423,6 +3591,9 @@ export function runGapSpawnPass(
     filingRound?: string;
     /** 台账路径覆盖（测试缝）；缺省 `<root>/.quay/goal-filing.jsonl`。 */
     filingLedgerPath?: string;
+    /** 立案节流配置覆盖（测试缝）；缺省 = `loadDriverConfig(root).goal.filing`（drivers.yml
+     *  `kinds.goal.filing`，见 driver-config.ts 的「goal 立案节流」一节）。 */
+    filingThrottle?: { perAcCooldownMs: number; perAcPerDay: number };
     /** 时钟（测试缝）。 */
     now?: () => Date;
   } = {},
@@ -3431,16 +3602,23 @@ export function runGapSpawnPass(
   const ledger = opts.filingLedgerPath ?? goalFilingLedgerPath(root);
   const filing: GapSpawnPassResult["filing"] = { ledger, appended: 0, rows: [], errors: [] };
   const gapAcs = gaps.filter((g) => isFilingGapState(g.state));
-  if (gapAcs.length === 0 || opts.halted) return { spawned: 0, llmInvoked: false, outcomes, filing };
+  // 立案节流（gap-goal-driver-filing-throttle）：**先节流、后切名额**（理由见上方「立案节流」一节）。
+  // ⚠️ 它在 halt / 资源门 / 名额之前算：①只读台账，零副作用；②使得「本轮没 spawn」的**成因**可区分
+  // （halt / 资源门 / 冷却 / 日上限 / 全局名额是五种不同的事，⛔ 不得都表现为一个 0）。
+  const throttleCfg = opts.filingThrottle ?? loadDriverConfig(root).goal.filing;
+  const throttleNowMs = (opts.now ?? (() => new Date()))().getTime();
+  const { reading: throttle, eligible } = goalFilingThrottle(gapAcs, readGoalFilingLedger(ledger), throttleCfg, throttleNowMs);
+  if (gapAcs.length === 0 || opts.halted) return { spawned: 0, llmInvoked: false, outcomes, filing, throttle };
   // 资源门（AC150-1 同族）：spawn LLM gap-filing agent 前判定，WAIT ⇒ 退避本轮（⛔ 机械 criterion/
   // 缺口读数不受约束，零 LLM）。
   const gate = resourceGateCheck(root, opts.resourceGateArgv ?? null);
-  if (!gate.go) return { spawned: 0, llmInvoked: false, outcomes, filing };
+  if (!gate.go) return { spawned: 0, llmInvoked: false, outcomes, filing, throttle };
   // 每轮上限读配置（goalSpawnCap：CLI --spawn-cap → drivers.yml goal.spawn_cap → 缺省），⛔ 不写死。
   const cap = goalSpawnCap(root, opts.spawnCap);
   // 每 spawn 超时读配置（goalGapWorkerTimeoutMs：显式 → drivers.yml goal.gap_worker_timeout_ms → 缺省）。
   const timeoutMs = goalGapWorkerTimeoutMs(root, opts.gapWorkerTimeoutMs);
-  const targets = gapAcs.slice(0, cap);
+  // ⛔ 名额切在**节流之后**：还在冷却里的 AC 不得占掉一个名额再空转。
+  const targets = eligible.slice(0, cap);
   const round = opts.filingRound ?? (opts.now ?? (() => new Date()))().toISOString();
   let llmInvoked = false;
   for (let i = 0; i < targets.length; i++) {
@@ -3482,7 +3660,7 @@ export function runGapSpawnPass(
       stdout: truncateStdoutTail(r.stdout), stderr: r.stderr, timedOut: r.timedOut,
     });
   }
-  return { spawned: outcomes.length, llmInvoked, outcomes, filing };
+  return { spawned: outcomes.length, llmInvoked, outcomes, filing, throttle };
 }
 
 // ── 充分性卡死信号（AC1~AC3 / gap-goal-sufficiency-insufficient-has-no-followup-signal）────────
@@ -4027,6 +4205,13 @@ export interface GoalRoundReadings {
    *  ⛔ 与 `filing`（结论）分开：把两者折成一个字段会让「本轮 spawn 了」与「上一轮 spawn 立没立案」
    *  共用同一个形状（硬规则 3b）。 */
   filing_spawned: GapSpawnPassResult["filing"];
+  /** 立案节流（gap-goal-driver-filing-throttle）本轮选取读数：`{evaluated, cause, candidates, eligible,
+   *  throttled[]}`，每条被节流的候选带 `{ac, goal, reason, nextEligibleAt, lastFiledAt, filingsInWindow}`。
+   *  ⛔ 恒非 null 且**每轮都写**：`throttled: []` = 查过且本轮零条被节流（一个测量），
+   *  `evaluated:false + cause` = 没判成（台账读不动）——两者不同形（硬规则 3b）。
+   *  ⛔ 它是把「本轮为什么没立案」从五种成因（halt / 资源门 / 冷却 / 日上限 / 全局名额）里区分出来的
+   *  那一半：只报 `spawned: 0` 时五者同形。 */
+  filing_throttled: GoalFilingThrottleReading;
 }
 
 /** ⑩ 不可达的 draft：draft GOAL 及其名下的 draft AC（gap-goal-driver-draft-ac-invisible-yet-blocking
@@ -4719,6 +4904,8 @@ export async function runGoalRound(root: string, opts: GoalRoundOptions = {}): P
     // 立案台账：核对读数（上一轮 spawned 行的**结论**）与本轮写下的 spawned 行（**意图**）分开落。
     filing,
     filing_spawned: spawnPass.filing,
+    // 立案节流（gap-goal-driver-filing-throttle）：本轮 per-AC 冷却/日上限的逐条读数。
+    filing_throttled: spawnPass.throttle,
   };
   // ⑥c 缺口可见性 fact（gap-goal-driver-computed-gaps-never-surfaced-as-a-round-fact）：`gaps` 在 ⑤ 算出后
   // 此前只喂 `runGapSpawnPass`，本 fact 把它（非安静态子集）落进轮记录 ⇒ 「哪条 AC 卡在 workable /
@@ -4765,6 +4952,10 @@ export async function runGoalRound(root: string, opts: GoalRoundOptions = {}): P
         // 没核对成 ⇒ `-`（⛔ 不折成 0——读不到与「核过且零 open」同形正是硬规则 3b 禁止的）。
         `filing=${filing.evaluated ? `${filing.appended}/${filing.openAfter}` : "-"} ` +
         `filingSpawned=${spawnPass.filing.appended} ` +
+        // 立案节流（gap-goal-driver-filing-throttle）：`/候选数` + 逐条成因（`cooldown=1 daily-cap=1`）。
+        // ⛔ 没判成 ⇒ `-`（不折成 0——「读不到台账」与「判过且零条被节流」同形正是硬规则 3b 禁止的）。
+        `filing-throttled=${spawnPass.throttle.evaluated ? `${spawnPass.throttle.throttled.length}/${spawnPass.throttle.candidates}` : "-"}` +
+        (spawnPass.throttle.throttled.length > 0 ? `(${throttleSummary(spawnPass.throttle)})` : "") + " " +
         // ⑨ CI run 采集：`ok(a+b+c)` = 追加 a / 补全 b / 归因 c；其余态逐字带出 status（⛔ 不折成一个布尔）。
         `ciRuns=${ciRuns.status}` +
         (ciRuns.status === "ok"
