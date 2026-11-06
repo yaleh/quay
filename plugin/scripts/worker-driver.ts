@@ -6275,6 +6275,14 @@ export async function runResidentLoop(opts: ResidentOptions): Promise<number> {
           exitedNotLandedStops.push({ task: r.taskId, kind: "stop-terminal", verdict: exemption.verdict, reason: deadlock.diagnostic, suiteLogHash: null });
           if (json) process.stdout.write(`${JSON.stringify({ event: "baseline-red-deadlock", task: r.taskId, ...deadlock })}\n`);
           deadlockReading = { kind: "stop-terminal", consecutive: deadlock.consecutive, diagnostic: deadlock.diagnostic };
+        } else if (deadlock != null && deadlock.kind === "re-anchor") {
+          // gap-baseline-red-breaker-cannot-distinguish-reanchor：陈旧红集**不是**死锁（判定时刻新鲜重测
+          // 已有 red point exit 0）。⛔ 显式分支，不靠「没匹配上 stop-terminal ⇒ 静默落回可重派」：
+          // 判词进 `exited_not_landed_stops` + json 事件留痕，`deadlock` 读数是 `continue`（⇒ 走既有
+          // count-and-retry 重派路径，⛔ 不 park），诊断原文一并带下去。
+          exitedNotLandedStops.push({ task: r.taskId, kind: "re-anchor", verdict: exemption.verdict, reason: deadlock.diagnostic, suiteLogHash: null });
+          if (json) process.stdout.write(`${JSON.stringify({ event: "baseline-red-reanchor", task: r.taskId, ...deadlock })}\n`);
+          deadlockReading = { kind: "continue", consecutive: deadlock.consecutive, diagnostic: deadlock.diagnostic };
         }
         exitedNotLanded = {
           evaluated: true,
