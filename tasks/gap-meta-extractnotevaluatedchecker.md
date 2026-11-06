@@ -1,7 +1,7 @@
 ---
 id: gap-meta-extractnotevaluatedchecker
 title: 机械 fan-in 的镜像 state 丢掉 notEvaluatedCheckers，meta-driver 的惰性守卫读数因此在生产上恒为 []
-status: todo
+status: ready
 labels:
   - meta-driver
   - driver-candidate
