@@ -212,9 +212,17 @@ export const GOAL_NEXT_ACTION_KINDS: readonly GoalNextActionKind[] = [
  *  decision, not a mechanism action. `computeGoalGaps` folds that cause into `stalled`; this
  *  projection reads the task statuses to tell the two apart again (the successor task
  *  gap-goal-driver-blocked-taxonomy splits the STATE itself, this rank is the same distinction one
- *  level up, available today without changing computeGoalGaps). */
+ *  level up, available today without changing computeGoalGaps).
+ *
+ *  `stuck-wait` is likewise NOT a `GapState` (tasks/gap-goal-next-unchanged-rounds-escalation): it is
+ *  the DERIVED rank of a `wait` row that has looked identical for
+ *  `GOAL_NEXT_UNCHANGED_ESCALATE_THRESHOLD` consecutive rounds. It sits immediately below
+ *  `needs-human` because it IS a human action now — "waiting for the world" stopped being new
+ *  information, so somebody has to decide whether the wait is still the right answer. ⛔ The row's
+ *  `gapState` keeps saying what is TRUE (`world-gated` / `derived-routed` / `standing-ok`). */
 export type GoalNextRank =
   | "needs-human"
+  | "stuck-wait"
   | "blocked-needs-human"
   | "blocked-promotion"
   | "blocked-dispatch"
@@ -237,6 +245,7 @@ export type GoalNextRank =
  *  and below `needs-human`, i.e. the position `stalled` always occupied. */
 export const GOAL_NEXT_PRIORITY: readonly GoalNextRank[] = [
   "needs-human",
+  "stuck-wait",
   "blocked-needs-human",
   "blocked-promotion",
   "blocked-dispatch",
@@ -254,6 +263,134 @@ export const GOAL_NEXT_PRIORITY: readonly GoalNextRank[] = [
 ];
 
 const RANK_INDEX = new Map<GoalNextRank, number>(GOAL_NEXT_PRIORITY.map((r, i) => [r, i]));
+
+// ── persistence: how long has this row looked like this? (gap-goal-next-unchanged-rounds-escalation) ─
+//
+// THE DEFECT THIS CLOSES. Every row above is a snapshot of ONE round. The `world-gated` mapping is
+// fixed (`owner: "world"` / `action.kind: "wait"`), so round 1 and round 53 produced byte-identical
+// rows: "the wait just started" and "this has been stuck for 53 rounds" were indistinguishable on the
+// projection face. Production 2026-11-06 measured the same `GOAL-914/AC-936` wait row literally
+// unchanged across 6 consecutive rounds while the round carrier's own `goal:AC-936:verdict` streak
+// already said `count=53, crossed=true (threshold 8)` — the persistence EXISTED, it simply was not
+// wired to the projection.
+//
+// ⛔ THE ONE WAY THIS GOES SILENTLY WRONG: computing the streak from the PRESENTED row. The
+// escalation rewrites `rank`/`owner`/`action.kind`, so a presented-row streak resets the round after
+// it fires — escalate at 8, streak=1 at 9, escalate at 16, forever. Every single-round reading would
+// still "look right". Hence `streakKey`: a stable PRE-escalation signature emitted on every row.
+
+/** How many PRIOR consecutive rounds a `wait` row may stay identical before it is escalated.
+ *
+ *  ⚠️ `unchangedRounds` counts the CURRENT round too, so the escalation fires at
+ *  `unchangedRounds > GOAL_NEXT_UNCHANGED_ESCALATE_THRESHOLD` — i.e. the 9th identical round. The
+ *  boundary is pinned by the task's own AC (`gap-goal-next-unchanged-rounds-escalation`): 7 identical
+ *  prior rounds + this one (= 8) still reads `world`/`wait`; 8 identical prior rounds + this one
+ *  (= 9) reads `human`/`ask-human`/`stuck-wait`. ⛔ Do not "simplify" this to `>= 8`: that is the
+ *  off-by-one the AC's two halves exist to catch.
+ *
+ *  The value 8 and its safety-net semantics match meta-driver's `VERDICT_UNCHANGED_THRESHOLD`, for the
+ *  same measured reason (streaks longer than 7 were the persistent ones; ≤7 was normal latency). ⛔
+ *  Core does NOT import that constant: `plugin/**` importing Core is the allowed direction, the
+ *  reverse edge is forbidden (import-graph-check). The number is restated with its justification, ⛔
+ *  not copied as a mechanism — neither is derived from the other, so there is no second source. */
+export const GOAL_NEXT_UNCHANGED_ESCALATE_THRESHOLD = 8;
+
+/** The ESCALATION-INVARIANT signature of a row (`<ac>|<gapState>|<baseRank>|<baseOwner>|<baseKind>`).
+ *
+ *  A row read back from the carrier carries its own `streakKey` — that is the authoritative value and
+ *  it is what the streak counts. A row written by an OLDER driver has no such field; its signature is
+ *  reconstructed from the fields it does have, which is faithful because those rows predate the
+ *  escalation (their presented fields ARE their base fields).
+ *
+ *  `null` = the row is too malformed to anchor a streak. ⛔ Such a round must BREAK the count rather
+ *  than be skipped: "could not read the signature" is not "unchanged" (hard rule 3b). */
+export function streakKeyOf(row: Record<string, unknown>): string | null {
+  const stored = row.streakKey;
+  if (typeof stored === "string" && stored !== "") return stored;
+  const action = row.action;
+  const kind = action !== null && typeof action === "object" ? (action as Record<string, unknown>).kind : undefined;
+  if (
+    typeof row.ac !== "string" || row.ac === "" ||
+    typeof row.gapState !== "string" ||
+    typeof row.rank !== "string" ||
+    typeof row.owner !== "string" ||
+    typeof kind !== "string"
+  ) return null;
+  return `${row.ac}|${row.gapState}|${row.rank}|${row.owner}|${kind}`;
+}
+
+/** How many consecutive rounds (this one included) the row's signature has been identical.
+ *
+ *  Walks the history backwards from the NEWEST round and stops at the first round that:
+ *   · has no row for this `ac` — the goal's chosen row was a different criterion that round, so this
+ *     row's run began after it (⛔ counting through it would claim a continuity that never existed);
+ *   · carries a row with `unchangedRoundsEvaluated === false` — that round could not read its own
+ *     history, so it is UNMEASURED, not unchanged;
+ *   · carries a different signature (or one that cannot be read at all — same reason).
+ *
+ *  `history === null` (the carrier could not be read) ⇒ `{count: 0, evaluated: false}`. ⛔ NOT
+ *  `{count: 1, evaluated: true}`: "the instrument failed" and "the very first round" must not share a
+ *  reading (hard rule 3b). Rounds that carried no `goal-next` fact at all are already filtered out by
+ *  the caller (`readGoalNextHistory`) — they neither count nor break, because they say nothing about
+ *  this row either way. */
+export function unchangedRoundsOf(
+  row: Record<string, unknown>,
+  history: GoalNextHistoryRound[] | null,
+): { count: number; evaluated: boolean } {
+  if (history === null) return { count: 0, evaluated: false };
+  const key = streakKeyOf(row);
+  if (key === null) return { count: 0, evaluated: false };
+  let count = 1;
+  for (let i = history.length - 1; i >= 0; i--) {
+    const rows = Array.isArray(history[i]?.rows) ? history[i].rows : [];
+    const prior = rows.find((r) => r !== null && typeof r === "object" && (r as Record<string, unknown>).ac === row.ac);
+    if (prior === undefined) break;
+    const p = prior as Record<string, unknown>;
+    if (p.unchangedRoundsEvaluated === false) break;
+    if (streakKeyOf(p) !== key) break;
+    count++;
+  }
+  return { count, evaluated: true };
+}
+
+/** WHY a row is waiting, in the words a reader needs to judge "is this stuck or is it meant to be
+ *  quiet". The escalation fires on `action.kind === "wait"` for ALL THREE wait states, so the reason
+ *  text has to say which one it is (⛔ one generic "still waiting" would hide the difference between
+ *  "nobody can produce this" and "a standing invariant keeps holding"). */
+const WAIT_CAUSE: Partial<Record<GapState, string>> = {
+  "world-gated": "waiting for the world — the truth is a future production event no worker can produce",
+  "derived-routed": "waiting for another AC — this red is routed to the AC that owns the derived population",
+  "standing-ok": "a standing invariant that keeps holding",
+};
+
+/** Decorate one row with the persistence dimension, escalating a long-lived `wait`. */
+function withPersistence(
+  row: Omit<GoalNextRow, "streakKey" | "unchangedRounds" | "unchangedRoundsEvaluated" | "escalated">,
+  history: GoalNextHistoryRound[] | null,
+): GoalNextRow {
+  const baseKey = `${row.ac}|${row.gapState}|${row.rank}|${row.owner}|${row.action.kind}`;
+  const streak = unchangedRoundsOf({ ...row, streakKey: baseKey } as unknown as Record<string, unknown>, history);
+  const escalated = streak.evaluated && streak.count > GOAL_NEXT_UNCHANGED_ESCALATE_THRESHOLD && row.action.kind === "wait";
+  if (!escalated) {
+    return { ...row, streakKey: baseKey, unchangedRounds: streak.count, unchangedRoundsEvaluated: streak.evaluated, escalated: false };
+  }
+  const cause = WAIT_CAUSE[row.gapState] ?? "waiting";
+  return {
+    ...row,
+    // ⛔ `gapState` is NOT rewritten: it keeps saying what is true right now. Only the "who would
+    // have to act" half escalates — the same discipline gap-goal-driver-blocked-taxonomy established.
+    rank: "stuck-wait",
+    owner: "human",
+    action: {
+      kind: "ask-human",
+      reason: `this criterion has looked identical for ${streak.count} consecutive rounds (${cause}); the wait is no longer new information — a human must decide whether it is still the right answer`,
+    },
+    streakKey: baseKey,
+    unchangedRounds: streak.count,
+    unchangedRoundsEvaluated: true,
+    escalated: true,
+  };
+}
 
 /** One projected next step. `ac` is the criterion the step is about; `gapState` is the HONEST reading
  *  it came from (⛔ so an escalated legacy `stalled`-with-a-needs-human-task still says `stalled` here
@@ -274,6 +411,35 @@ export interface GoalNextRow {
   action: { kind: GoalNextActionKind; reason: string };
   evidenceRefs: string[];
   blocker: GoalBlocker | null;
+  /** The row's signature **before** the persistence escalation touched `rank` / `owner` /
+   *  `action.kind` or `gapState`. Emitted on EVERY row so the next round can count the streak
+   *  without re-deriving it (and, crucially, without counting the escalated presentation — see
+   *  `streakKeyOf`). */
+  streakKey: string;
+  /** Consecutive rounds (this one included) the row has had the SAME `streakKey`. `1` = this round
+   *  is the first of the current run. ⛔ `0` — never `1` — when the history could not be read: see
+   *  `unchangedRoundsEvaluated`. */
+  unchangedRounds: number;
+  /** `false` = the history carrier was unreadable, so `unchangedRounds` is "not measured", ⛔ NOT
+   *  "measured at 0". The two must not share a value (hard rule 3b: an instrument failure must not
+   *  wear the shape of a good reading). */
+  unchangedRoundsEvaluated: boolean;
+  /** `true` = this row WAS escalated by persistence (a long-lived `wait`). Redundant with
+   *  `rank === "stuck-wait"` on purpose: a reader that only knows the old rank vocabulary still sees
+   *  that something happened, and the field is the one the CLI/tests assert on. */
+  escalated: boolean;
+}
+
+/** One earlier round's `goal-next` rows, as read back from the round carrier. `history` arrays are
+ *  ordered OLDEST → NEWEST and end at the round BEFORE the one being projected.
+ *
+ *  Rows are the RAW recorded objects, not `GoalNextRow`: a round written by an older driver has no
+ *  streak fields, and that is a real reading of that round (`streakKeyOf` reconstructs the signature
+ *  from the fields it does have) — ⛔ not a reason to pretend the round is absent. */
+export interface GoalNextHistoryRound {
+  /** That round's ordinal, when the carrier recorded one (provenance only — ⛔ never a decision input). */
+  round?: unknown;
+  rows: Array<Record<string, unknown>>;
 }
 
 /** The owner/action each state implies. ⛔ ONE table: a second copy anywhere is the drift this
@@ -352,7 +518,7 @@ function evidenceRefsFor(ac: string, taskFacts: GoalTaskFact[] | null): string[]
 }
 
 /** The row for one gap reading. */
-function rowFor(gap: GoalGap, taskFacts: GoalTaskFact[] | null): GoalNextRow {
+function rowFor(gap: GoalGap, taskFacts: GoalTaskFact[] | null): Omit<GoalNextRow, "streakKey" | "unchangedRounds" | "unchangedRoundsEvaluated" | "escalated"> {
   const rank = rankOf(gap, taskFacts);
   // `blocker` travels verbatim from the reading (⛔ never re-derived here); `null` = not a blocked
   // state, which the row's `gapState` already says — the two are not conflated because `gapState` is
@@ -396,7 +562,7 @@ function rowFor(gap: GoalGap, taskFacts: GoalTaskFact[] | null): GoalNextRow {
  *  and its `ac` is never empty — a GOAL cannot be active without at least one AC record (the store's
  *  activation gate enforces AC-first), and if that invariant were ever broken the row still carries
  *  the goal id, with `ac: ""` as the visible symptom. */
-function fallbackRow(goalId: string, acsOfGoal: string[]): GoalNextRow {
+function fallbackRow(goalId: string, acsOfGoal: string[]): Omit<GoalNextRow, "streakKey" | "unchangedRounds" | "unchangedRoundsEvaluated" | "escalated"> {
   const ac = acsOfGoal.length > 0 ? [...acsOfGoal].sort(compareIds)[0] : "";
   return {
     goal: goalId,
@@ -427,11 +593,19 @@ function fallbackRow(goalId: string, acsOfGoal: string[]): GoalNextRow {
  * computed from that same snapshot already read `not-evaluated`, and the only thing lost here is the
  * needs-human escalation — which must never be guessed from a missing snapshot (hard rule 6:
  * missing = not checked, ⛔ not "no").
+ *
+ * `history` is the ordered (oldest → newest) `goal-next` rows of the PREVIOUS rounds, ending at the
+ * round before this one. It is the ONLY input that carries time: everything else is one snapshot.
+ *  · omitted / `[]` ⇒ every row is the first of its run (`unchangedRounds: 1`, evaluated `true`).
+ *  · `null` ⇒ the carrier could not be read ⇒ every row reads `unchangedRounds: 0` AND
+ *    `unchangedRoundsEvaluated: false`, and ⛔ nothing escalates (an unreadable history must not
+ *    manufacture "everything is fine" NOR "everything is stuck"; hard rule 3b).
  */
 export function goalNextProjection(
   records: Array<Record<string, unknown>>,
   gaps: Array<GoalGap>,
   taskFacts: GoalTaskFact[] | null,
+  history: GoalNextHistoryRound[] | null = [],
 ): GoalNextRow[] {
   // The active-GOAL set — the same predicate the driver's `activeGoalIdsOf` uses (id prefix + status),
   // derived here from `records` so the projection has no second source for "which goals are active".
@@ -447,7 +621,7 @@ export function goalNextProjection(
       const acsOfGoal = records
         .filter((r) => String(r.id ?? "").startsWith("AC-") && String(r.goal ?? "") === goalId)
         .map((r) => String(r.id ?? ""));
-      rows.push(fallbackRow(goalId, acsOfGoal));
+      rows.push(withPersistence(fallbackRow(goalId, acsOfGoal), history));
       continue;
     }
     // Pick the best candidate: rank first (the declared priority), then AC id (stable, numeric-aware).
@@ -455,7 +629,7 @@ export function goalNextProjection(
     // order, i.e. on the record file order — the same state would project differently across rounds.
     let best: GoalNextRow | null = null;
     for (const gap of candidates) {
-      const row = rowFor(gap, taskFacts);
+      const row = withPersistence(rowFor(gap, taskFacts), history);
       if (best === null) { best = row; continue; }
       const dRank = (RANK_INDEX.get(row.rank) ?? Number.MAX_SAFE_INTEGER) - (RANK_INDEX.get(best.rank) ?? Number.MAX_SAFE_INTEGER);
       if (dRank < 0 || (dRank === 0 && compareIds(row.ac, best.ac) < 0)) best = row;

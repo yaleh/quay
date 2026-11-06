@@ -564,11 +564,14 @@ export { parseBinaryVerdict } from "../../packages/quay/src/kernel/verdict-parse
 // 字面量）。`GapState` / `GoalGap` 也随之上收——它们此前定义在 goal-driver 里，而 CLI 侧要读同一套词表。
 export {
   goalNextProjection,
+  unchangedRoundsOf,
+  streakKeyOf,
   GAP_STATES,
   BLOCKED_GAP_STATES,
   GOAL_NEXT_PRIORITY,
   GOAL_NEXT_OWNERS,
   GOAL_NEXT_ACTION_KINDS,
+  GOAL_NEXT_UNCHANGED_ESCALATE_THRESHOLD,
 } from "../../packages/quay/src/core/goal-analysis.ts";
 export type {
   BlockedGapState,
@@ -577,11 +580,21 @@ export type {
   GoalBlockerTask,
   GoalGap,
   GoalNextActionKind,
+  GoalNextHistoryRound,
   GoalNextOwner,
   GoalNextRank,
   GoalNextRow,
   GoalTaskFact,
 } from "../../packages/quay/src/core/goal-analysis.ts";
+// gap-goal-next-unchanged-rounds-escalation：轮载体的有界 tail 读 + `goal-next` 历史抽取。Core 的
+// 单一实现（CLI 与 driver 共用同一个读法，⛔ 各写一份就是硬规则 5b 的漂移），driver 只取符号——
+// AC-262：driver 不写 Core 源码树字面量。
+export {
+  readRoundLogTail,
+  readGoalNextHistory,
+  GOAL_ROUND_TAIL_BYTES,
+  GOAL_NEXT_HISTORY_MAX_ROUNDS,
+} from "../../packages/quay/src/core/goal-round-carrier.ts";
 
 // `pidAlive`：**本文件曾是它的第四份副本**，且是唯一把 EPERM（exists-but-not-ours）读成 DEAD 的一份
 // ⇒ `rmCarrierUnlessForeignLive`（存在的理由正是「别删掉一个外来的活进程在盘上唯一的记录」）与

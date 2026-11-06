@@ -751,3 +751,114 @@ test("⑪ an UNREADABLE request ledger is reported as evaluated:false + cause, a
     fs.rmSync(tmp, { recursive: true, force: true });
   }
 });
+
+// ── ⑫ 持久度：`goal-next` 行带 unchangedRounds，连续 ≥8 轮的 wait 行升级为人动作 ────────────────
+// (tasks/gap-goal-next-unchanged-rounds-escalation / AC-943)
+//
+// 单轮快照里没有「持续多久」这一维——`world-gated` 的映射是固定的 `world`/`wait`，于是第 1 轮与第
+// 53 轮的行逐字相同（生产 2026-11-06 实测：GOAL-914/AC-936 的等待行连续 6 轮不变）。本用例在**真轮**
+// 上钉三件事：①每一行都带持久度三字段；②载体读不到时是 0 + evaluated:false（⛔ 不是 1）；
+// ③连续 8 轮相同的等待行，本轮（第 9 轮）升级成 `stuck-wait`/`human`/`ask-human`，而 `gapState` 仍
+// 诚实地说 `world-gated`。⛔ 不是 fixture 直接喂投影函数——那已经由 goal-analysis.test.mjs 覆盖；
+// 这里走的是 driver 的真实读载体 → 投影 → fact 的整条链路。
+
+/** 造一轮：carrier 是投给 driver 的轮载体路径（它同时是 history 的读面）。 */
+async function persistenceRound(tmp, carrier) {
+  return runGoalRound(tmp, {
+    scriptRoot: repoRoot,
+    gapWorkerCmd: "true",
+    resourceGateArgv: ["true"],
+    spawnCap: 0, // ⛔ 只读投影，不 spawn
+    goalRoundCarrierPath: carrier,
+    now: () => new Date(T0),
+  });
+}
+
+/** 把 `row` 原样写进 `n` 个历史轮（每轮一条 goal-next fact，信封与 computeRoundRecord 一致）。 */
+function seedHistoryRounds(carrier, row, n, { firstRound = 1 } = {}) {
+  const lines = [];
+  for (let i = 0; i < n; i++) {
+    lines.push(JSON.stringify({
+      round: firstRound + i,
+      run_id: "fixture",
+      ts: "2026-11-06T00:00:00.000Z",
+      halted: false,
+      facts: [{ name: "goal-next", value: { rows: [row], evaluated: true, cause: null }, state: "verified", reason: "fixture" }],
+      stopped_mid_round: false,
+      skipped_routines: [],
+    }));
+  }
+  fs.writeFileSync(carrier, `${lines.join("\n")}\n`, "utf8");
+}
+
+test("⑫ goal-next 每行带持久度三字段；载体读不到 ⇒ 0 + evaluated:false；连续 8 轮未变 ⇒ 升级", async () => {
+  const tmp = tmpdir("persistence");
+  try {
+    fs.mkdirSync(path.join(tmp, "goals"), { recursive: true });
+    fs.mkdirSync(path.join(tmp, "tasks"), { recursive: true });
+    fs.mkdirSync(path.join(tmp, ".quay"), { recursive: true });
+    writeStandingGoalFile(tmp, { id: "GOAL-001", status: "active", kind: "goal" });
+    // 判据读生产载体（`.quay/<file>`）⇒ 关联任务全非牵引时按 `classifyCriterionKind` 判 `world-gated`
+    // ⇒ 投影 owner=world / action.kind=wait——正是「等世界」那一类。
+    writeStandingGoalFile(tmp, {
+      id: "AC-002", status: "active", kind: "criterion", goal: "GOAL-001",
+      criterion: `node -e 'require("fs").readFileSync(".quay/ci-runs.jsonl");process.exit(1)'`,
+    });
+    fs.writeFileSync(
+      path.join(tmp, "tasks", "t-done.md"),
+      "---\nid: t-done\nstatus: done\ngoal_ac: AC-002\n---\n## Proposal\n\n已完成的关联任务（非牵引 ⇒ 判据仍红时按载体三分）。\n",
+    );
+    const carrier = path.join(tmp, ".quay", "goal-round.jsonl");
+
+    // ① 载体不存在 ⇒ history 读不到 ⇒ 每行 0 / evaluated:false（⛔ 不是 1，也不是「没这字段」）
+    const r1 = await persistenceRound(tmp, carrier);
+    const rows1 = r1.nextFacts[0].value.rows;
+    assert.equal(rows1.length, 1);
+    assert.equal(rows1[0].gapState, "world-gated", `fixture 前提：判据读生产载体 ⇒ world-gated（实测 ${rows1[0].gapState}）`);
+    for (const row of rows1) {
+      assert.equal(typeof row.streakKey, "string", "streakKey 落在 fact 里");
+      assert.ok(row.streakKey.length > 0);
+      assert.equal(typeof row.unchangedRounds, "number");
+      assert.equal(typeof row.unchangedRoundsEvaluated, "boolean");
+      assert.equal(row.unchangedRounds, 0, "读不到历史 ⇒ 0（⛔ 不冒充「第一轮」）");
+      assert.equal(row.unchangedRoundsEvaluated, false);
+      assert.equal(row.escalated, false, "历史读不到时 ⛔ 不升级（不制造假卡死）");
+    }
+
+    // ② 载体存在但空 ⇒ 读到了、零历史轮 ⇒ 1 / evaluated:true
+    // （`runGoalRound` 自己**不写**轮记录——写轮记录的是常驻循环——故这里显式造一个空载体，
+    //   这正是「读到了、但还没有历史轮」这一态的入口。）
+    fs.writeFileSync(carrier, "", "utf8");
+    const r2 = await persistenceRound(tmp, carrier);
+    const rows2 = r2.nextFacts[0].value.rows;
+    assert.equal(rows2[0].unchangedRounds, 1);
+    assert.equal(rows2[0].unchangedRoundsEvaluated, true);
+    assert.equal(rows2[0].escalated, false);
+    assert.equal(rows2[0].owner, "world");
+    assert.equal(rows2[0].action.kind, "wait");
+
+    // ③ 把该行原样写进 8 个历史轮 ⇒ 本轮（第 9 轮）必须升级
+    seedHistoryRounds(carrier, rows2[0], 8);
+    const r3 = await persistenceRound(tmp, carrier);
+    const row3 = r3.nextFacts[0].value.rows[0];
+    assert.equal(row3.unchangedRounds, 9, "8 个历史轮 + 本轮");
+    assert.equal(row3.escalated, true);
+    assert.equal(row3.rank, "stuck-wait");
+    assert.equal(row3.owner, "human", "「等世界」等够了就不再是等，而是需要人裁决");
+    assert.equal(row3.action.kind, "ask-human");
+    assert.equal(row3.gapState, "world-gated", "⛔ reading 仍然是诚实的：升级只改 rank/owner/action");
+    assert.equal(row3.streakKey, rows2[0].streakKey, "streakKey 是升级前的签名，升级前后逐字相同");
+    // 升级行数落进 fact 的 reason（⛔ 不只在 value 里让人自己数）
+    assert.match(r3.nextFacts[0].reason, /升级 1 行/, `实测：${r3.nextFacts[0].reason}`);
+
+    // ④ 负控制：把已有载体换成「只有 1 轮历史」⇒ 同一条判据下 ⛔ 不升级（升级是量出来的，不是写死的）
+    seedHistoryRounds(carrier, rows2[0], 1);
+    const r4 = await persistenceRound(tmp, carrier);
+    const row4 = r4.nextFacts[0].value.rows[0];
+    assert.equal(row4.unchangedRounds, 2);
+    assert.equal(row4.escalated, false);
+    assert.equal(row4.owner, "world");
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
