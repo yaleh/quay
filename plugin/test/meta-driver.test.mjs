@@ -85,6 +85,8 @@ import {
   extractActionFailureRecords,
   describeResultShape,
   readingsDigestPartsForActionFailures,
+  collectParkingReadings,
+  readingsDigestPartsForParking,
   parseDurationMs,
   readActionRecordConfig,
   readActionRecordScan,
@@ -94,6 +96,8 @@ import {
   goalStoreArgv,
 } from '../scripts/meta-driver.ts';
 import { createMetaStore } from '../../packages/quay/src/meta-store.ts';
+// 停放载体的路径单一真相源（⛔ 测试里不重拼字面量：重拼一份就等于允许生产方换路径而测试仍绿）。
+import { PARKING_READING_REL } from '../scripts/needs-human-parking-recheck.ts';
 // 全局天花板的单一真相源：载体相对路径（probe-routine.ts）与配置读取面（driver-config.ts）。
 import { ROUTINE_FINDINGS_REL } from '../scripts/probe-routine.ts';
 import { routineGlobalCeiling, routineWindowMs } from '../scripts/driver-config.ts';
@@ -2851,4 +2855,211 @@ test('AC(c) — 提案 dedup 读 owner 状态：superseded/achieved 不拦；dra
     assert.doesNotMatch(r[0].reason, /NOT EVALUATED/, '它【已】被评估过 ⇒ 理由不得读作「未评估」');
     assert.doesNotMatch(r[0].reason, /bare Set/, '理由不得再自述为「裸 Set」');
   }
+});
+
+// ── 停放读数（gap-meta-scanparkingboard）─────────────────────────────────────
+// 被钉住的缺陷：promotion-driver 每轮把 body-PARKED 的 unpark 结果落进
+// `.quay/needs-human-parking-recheck.json`，而 meta-driver 的 collectReadings 从不读它 ⇒
+// 「解停条件已成立而任务仍 PARKED」到不了唯一能处置它的层（任务被派发池排除、依赖它的 todo 被饿死）。
+// 这些用例钉三件事：①读数**来自生产载体**（不是重跑一遍探测器冒充）；②载体不可用时才回退现扫，
+// 且回退是**可见的**；③未评估 ⛔ 不与「四态全 0」或「一条都没有」同形（硬规则 3b/6）。
+
+const PARKING_AT = '2026-11-06T00:00:00.000Z';
+
+const parkedEntry = (id, state = 'unpark-passed') => ({
+  id, status: 'ready', command: 'echo landed', expectedOutput: 'landed',
+  exitCode: state === 'unpark-passed' ? 0 : 1, output: state === 'unpark-passed' ? 'landed\n' : 'blocked\n',
+  state, note: 'fixture',
+});
+
+/** 生产载体的夹具（形状逐字对齐 `scanParkingBoard` 的落盘：两臂 + 四态 counts + entries/stale）。 */
+function carrierFixture(root, {
+  counts = { 'unpark-passed': 1, 'unpark-still-blocked': 0, 'no-unpark-check': 0, 'not-evaluated': 0 },
+  entries = null, tasks = null, stale = [], nhTasks = [],
+  parkedOverrides = {}, topOverrides = {},
+} = {}) {
+  const pEntries = entries ?? [parkedEntry('gap-fixture-parked-passed')];
+  const pTasks = tasks ?? [...pEntries];
+  const nh = {
+    at: PARKING_AT, root, evaluated: true, reason: null,
+    needs_human_total: nhTasks.length, reported_stale: stale.length,
+    counts: {
+      'parking-reason-stale': stale.length, 'still-blocked': 0, 'no-registered-judge': 0,
+      'not-evaluated': nhTasks.length - stale.length,
+    },
+    stale, tasks: nhTasks,
+  };
+  const parked = {
+    at: PARKING_AT, root, evaluated: true, reason: null,
+    parked_total: pTasks.length, reported_passed: pEntries.length, timeout_ms: 10000,
+    counts, entries: pEntries, tasks: pTasks, ...parkedOverrides,
+  };
+  return { ...nh, parked, ...topOverrides };
+}
+
+function writeParkingCarrier(root, obj) {
+  const file = path.join(root, PARKING_READING_REL);
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, typeof obj === 'string' ? obj : `${JSON.stringify(obj, null, 2)}\n`);
+  return file;
+}
+
+/** 一个 body-PARKED 的任务体（与 ready-pool-check.isParked / readUnparkDeclaration 的真实形状一致）。 */
+function writeParkedTask(root, id, command = 'echo landed') {
+  const body =
+    `---\nid: ${id}\ntitle: "fixture ${id}"\nstatus: ready\nlabels:\n  - gap\nparent: null\nchildren: []\nextra: {}\n---\n` +
+    `**PARKED**（fixture, 2026-11-06 — execution suspended pending the check below）\n\n` +
+    `## Proposal\n\nFixture task for the meta-driver parking reading (well over forty non-whitespace characters).\n\n` +
+    `## Unpark\n\n- **unpark 检查（只读、可直接跑）**：\`${command}\` —— 输出 \`landed\` 即解除 park。\n`;
+  fs.mkdirSync(path.join(root, 'tasks'), { recursive: true });
+  fs.writeFileSync(path.join(root, 'tasks', `${id}.md`), body);
+}
+
+test('parking 正臂: 读数取自生产载体（计数与载体逐字一致；⛔ 不重跑探测器冒充读数）', (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'meta-parking-carrier-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  // 前提：这个根**没有 tasks/**。现扫必然 evaluated:false（no-tasks-dir）⇒ 若实现自作主张重扫，
+  // 下面的 evaluated:true 就不可能成立（负控制内建在夹具里，⛔ 不是另加一条断言就能伪装）。
+  assert.equal(fs.existsSync(path.join(root, 'tasks')), false, '前提：夹具根没有 tasks/');
+  const counts = { 'unpark-passed': 2, 'unpark-still-blocked': 5, 'no-unpark-check': 0, 'not-evaluated': 0 };
+  const entries = [parkedEntry('gap-a'), parkedEntry('gap-b')];
+  const tasks = [...entries, parkedEntry('gap-c', 'unpark-still-blocked'), parkedEntry('gap-d', 'unpark-still-blocked')];
+  writeParkingCarrier(root, carrierFixture(root, { counts, entries, tasks }));
+
+  const r = collectParkingReadings(root, { now: Date.parse(PARKING_AT) + 1000 });
+  assert.equal(r.parked.source, 'carrier');
+  assert.equal(r.parked.evaluated, true, `载体可读时必须出判定：${JSON.stringify(r.parked)}`);
+  assert.equal(r.parked.counts, undefined === r.parked.counts ? undefined : r.parked.counts);
+  assert.deepEqual(r.parked.counts, counts, '四态计数必须与载体逐字一致（AC 的等值判据）');
+  assert.deepEqual(r.parked.entries.map((e) => e.id), ['gap-a', 'gap-b']);
+  assert.equal(r.parked.ageMs, 1000, '年龄由载体 at 与 now 算出（载体新鲜度对读数是可见的）');
+  assert.equal(r.needsHuman.source, 'carrier');
+  // 与 AC 判据同一形态的等值比较（JSON 文本级）：读出来的就是盘上那四个数。
+  const onDisk = JSON.parse(fs.readFileSync(path.join(root, PARKING_READING_REL), 'utf8'));
+  assert.equal(JSON.stringify(onDisk.parked.counts), JSON.stringify(r.parked.counts));
+});
+
+test('parking 正臂: 载体缺失 ⇒ 现跑同一个探测器（live-scan），四态齐全且回退可见', (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'meta-parking-scan-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writeParkedTask(root, 'gap-fixture-live-passed', 'echo landed');
+  writeParkedTask(root, 'gap-fixture-live-blocked', 'false');
+  // 前提：没有载体（否则这条用例就退化成上一条）。
+  assert.equal(fs.existsSync(path.join(root, PARKING_READING_REL)), false, '前提：夹具里没有生产载体');
+
+  const r = collectParkingReadings(root);
+  assert.equal(r.parked.source, 'live-scan');
+  assert.equal(r.parked.evaluated, true, `任务目录可读 ⇒ 必须出判定：${JSON.stringify(r.parked)}`);
+  assert.match(String(r.parked.carrierProblem), /no carrier/, '回退必须留在读数里（⛔ 静默换源）');
+  for (const k of ['unpark-passed', 'unpark-still-blocked', 'no-unpark-check', 'not-evaluated']) {
+    assert.equal(typeof r.parked.counts[k], 'number', `四态之一缺失：${k} in ${JSON.stringify(r.parked.counts)}`);
+  }
+  assert.deepEqual(r.parked.entries.map((e) => e.id), ['gap-fixture-live-passed'], '只上报「检查已通过」的那条');
+  assert.equal(r.parked.counts['unpark-still-blocked'], 1);
+});
+
+test('parking 负臂: 两路都读不成 ⇒ evaluated:false + reason，counts 为 null（⛔ 不与四态全 0 同形）', (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'meta-parking-none-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  // 没有载体、也没有 tasks/ ⇒ 现扫同样 evaluated:false。
+  const r = collectParkingReadings(root, { allowScan: false });
+  assert.equal(r.parked.evaluated, false);
+  assert.equal(r.parked.counts, null, '未评估时 counts 必须是 null——全 0 会被读成「查过了，一条都没有」');
+  assert.equal(r.parked.entries, null);
+  assert.ok(r.parked.reason && r.parked.reason.length > 0, '未评估必须带 reason');
+  assert.equal(r.needsHuman.evaluated, false);
+  assert.equal(r.needsHuman.counts, null);
+});
+
+test('parking 负臂: 载体本身 evaluated:false（生产方落的是全 0 计数）⇒ 消费侧翻成 null，带上它自己的 reason', (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'meta-parking-uneval-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const zero = { 'unpark-passed': 0, 'unpark-still-blocked': 0, 'no-unpark-check': 0, 'not-evaluated': 0 };
+  writeParkingCarrier(root, carrierFixture(root, {
+    parkedOverrides: { evaluated: false, reason: 'no-tasks-dir', counts: zero, entries: [], tasks: [], reported_passed: 0 },
+  }));
+
+  const r = collectParkingReadings(root, { allowScan: false });
+  assert.equal(r.parked.source, 'carrier', '生产方自己没评估成，仍是一个有效读数（不是本层读不懂）');
+  assert.equal(r.parked.evaluated, false);
+  assert.equal(r.parked.reason, 'no-tasks-dir');
+  assert.equal(r.parked.counts, null, '载体里的全 0 计数 ⛔ 不得原样透传（那会把「没查成」读成「全部仍阻塞」）');
+});
+
+test('parking 负臂: 载体读不懂/自相矛盾/来自别的工作区 ⇒ 不采用；allowScan:false 时是未评估而非空清单', (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'meta-parking-bad-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+
+  // (a) 不是 JSON
+  writeParkingCarrier(root, '{ this is not json');
+  const a = collectParkingReadings(root, { allowScan: false });
+  assert.equal(a.parked.evaluated, false);
+  assert.match(String(a.parked.carrierProblem), /unreadable/);
+  assert.equal(a.parked.counts, null);
+
+  // (b) 自相矛盾：reported_passed 与 entries 长度不一致 ⇒ 载体不是这一版写出来的，整臂不信
+  const bad = carrierFixture(root, { parkedOverrides: { reported_passed: 9 } });
+  writeParkingCarrier(root, bad);
+  const b = collectParkingReadings(root, { allowScan: false });
+  assert.equal(b.parked.evaluated, false);
+  assert.match(String(b.parked.carrierProblem), /self-inconsistent/);
+
+  // (c) 载体描述的是另一个工作区 ⇒ 不能把别处的板读成这一轮的这块板
+  const other = fs.mkdtempSync(path.join(os.tmpdir(), 'meta-parking-other-'));
+  try {
+    writeParkingCarrier(root, carrierFixture(other));
+    const c = collectParkingReadings(root, { allowScan: false });
+    assert.equal(c.parked.evaluated, false);
+    assert.match(String(c.parked.carrierProblem), /different workspace/);
+  } finally {
+    fs.rmSync(other, { recursive: true, force: true });
+  }
+});
+
+test('parking digest: 点名清单进摘要；计数/年龄不进（⛔ 每轮抖动的量不得唤醒语义半）', () => {
+  const withParking = (p) => {
+    const r = mkReadings('fail', 'same');
+    r.parking = p;
+    return r;
+  };
+  const arm = (over = {}) => ({
+    at: PARKING_AT, evaluated: true, reason: null, source: 'carrier', carrierProblem: null, ageMs: 1000,
+    counts: { 'unpark-passed': 1, 'unpark-still-blocked': 0, 'no-unpark-check': 4, 'not-evaluated': 0 },
+    parkedTotal: 5, reportedPassed: 1, entries: [parkedEntry('gap-goal-driver-filing-ledger')],
+    ...over,
+  });
+  const nhArm = (over = {}) => ({
+    at: PARKING_AT, evaluated: true, reason: null, source: 'carrier', carrierProblem: null, ageMs: 1000,
+    counts: { 'parking-reason-stale': 0, 'still-blocked': 0, 'no-registered-judge': 0, 'not-evaluated': 0 },
+    needsHumanTotal: 0, reportedStale: 0, stale: [], ...over,
+  });
+  const reading = (parked, needsHuman = nhArm()) => withParking({ parked, needsHuman });
+
+  const base = reading(arm());
+  // ①「解停条件已成立」这件事必须改变摘要（否则语义半不被唤醒，读数仍然到不了能处置它的层）
+  assert.notEqual(readingsDigest(base), readingsDigest(reading(arm({ entries: [], counts: { ...arm().counts, 'unpark-passed': 0, 'no-unpark-check': 5 }, reportedPassed: 0 }))),
+    '点名清单从有到无必须改变摘要');
+  assert.notEqual(readingsDigest(base), readingsDigest(reading(arm({ entries: [parkedEntry('gap-other')] }))),
+    '被点名的 id 换了必须改变摘要');
+  // ②四态里的常态计数与年龄 ⛔ 不进摘要（它们每轮都可能变，进了会让变化检测恒为真）
+  assert.equal(readingsDigest(base), readingsDigest(reading(arm({ counts: { ...arm().counts, 'unpark-still-blocked': 3 }, ageMs: 999999, at: '2026-01-01T00:00:00.000Z' }))),
+    '计数/年龄变化不得改变摘要');
+  // ③未评估与「一条都没有」不同形（硬规则 3b）
+  const unevaluated = reading(arm({ evaluated: false, reason: 'no carrier', source: null, counts: null, entries: null }));
+  const none = reading(arm({ entries: [], reportedPassed: 0, counts: { ...arm().counts, 'unpark-passed': 0, 'no-unpark-check': 5 } }));
+  assert.notEqual(readingsDigest(unevaluated), readingsDigest(none));
+  assert.notEqual(readingsDigest(unevaluated), readingsDigest(base));
+  // ④读数整维缺失 ⛔ 不得与「查过、没有一条」同形（硬规则 3b 的合格侧伪装）
+  const missing = mkReadings('fail', 'same');
+  const allUnevaluated = reading(
+    arm({ evaluated: false, reason: 'no carrier', source: null, counts: null, entries: null }),
+    nhArm({ evaluated: false, reason: 'no carrier', source: null, counts: null, stale: null }),
+  );
+  assert.notEqual(readingsDigest(missing), readingsDigest(none), '缺这一维 ⛔ 不得落成 parked:none');
+  assert.equal(readingsDigest(missing), readingsDigest(allUnevaluated), '缺这一维与两臂皆未评估同 token');
+  // ⑤needs-human 臂同一条纪律（兄弟实例，硬规则 5b）
+  assert.notEqual(readingsDigest(base), readingsDigest(reading(arm(), nhArm({ stale: [{ id: 'gap-nh', state: 'parking-reason-stale', judge: 'unsatisfiableUnannotatedAc', recordedReason: 'x', currentHits: [], note: 'n' }], reportedStale: 1, counts: { 'parking-reason-stale': 1, 'still-blocked': 0, 'no-registered-judge': 0, 'not-evaluated': 0 } }))),
+    'needs-human 停放理由失效也必须改变摘要');
+  // ⑥纯函数：⛔ 不改输入、⛔ 不抛（缺字段的旧读数照样能算）
+  assert.deepEqual(readingsDigestPartsForParking(undefined).length, 2);
 });

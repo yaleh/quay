@@ -55,6 +55,19 @@ import { gateFinding, findingKey, DEFAULT_RATE, countRecentFilings, routineQuota
 // 载体相对路径的单一真相源（⛔ 不在此处硬写字面量「.quay/routine-findings.jsonl」——那会制造第二份
 // 定义，本文件读的全局窗口合计必须与 probe-routine.ts 写的是同一个文件；硬规则 5b）。
 import { ROUTINE_FINDINGS_REL } from "./probe-routine.ts";
+// 停放读数（gap-meta-scanparkingboard）：`.quay/needs-human-parking-recheck.json` 的**第一个消费者**。
+// 生产方是 promotion-driver（每轮 `scanParkingBoard` → `writeParkingReading`），而本文件的
+// collectReadings 从不读它 ⇒ 「解停条件已成立而任务仍 PARKED」这个读数没有消费者：任务被派发池
+// 排除（永不翻 done）、依赖它的 todo 被 judgeDeps 无限期饿死（GOAL-914 的 AC-939 链就是这么卡住的）。
+// ⛔ 不在这里重写探测器、也不重拼载体路径：路径与扫描回退都取自同一个模块（硬规则 5b）。
+import {
+  PARKING_READING_REL,
+  scanParkingBoard,
+  type ParkedUnparkEntry,
+  type ParkedUnparkState,
+  type ParkingRecheck,
+  type ParkingState,
+} from "./needs-human-parking-recheck.ts";
 import { isDirectEntry } from "./gate-script-base.ts";
 // 状态载体的原子写只有一份实现（kernel `writeJsonAtomic`，tmp + renameSync）。本文件的 `writeState`
 // 曾是**裸 writeFileSync**（O_TRUNC 后写 ⇒ 并发读者可观测到零长度/半写，与「文件不存在」同形），
@@ -233,6 +246,12 @@ export interface MetaRoundReadings {
   /** 【第七类读数】动作记录（会话语料）失败聚合——本文件里**唯一不读状态载体**的一类
    *  （GOAL-014 选项①）。三态见 `ActionFailureReading`；digest 只取越阈项的签名与三态 token。 */
   actionRecordFailures: ActionFailureReading;
+  /** 【停放读数】两个「已停放但可能该解停」的人群——body-PARKED 的宣告式 unpark 检查是否已通过，
+   *  以及 needs-human 的停放理由是否已失效（gap-meta-scanparkingboard）。
+   *  来源是 promotion-driver 每轮落盘的 `.quay/needs-human-parking-recheck.json`：⛔ 不复跑第二套
+   *  判据（消费者，不是并列生产者）。两臂各自三态；`evaluated:false` 时 `counts` 为 null（⛔ 全 0 ——
+   *  「查过且一个都没有」与「没查成」不同形，硬规则 3b/6）。 */
+  parking: ParkingRoundReading;
 }
 
 // ── 机械半 ────────────────────────────────────────────────────────────────────────────────────────
@@ -1362,6 +1381,9 @@ export async function collectReadings(root: string, cliFocus: string | null): Pr
     focus,
     timeSeries,
     actionRecordFailures,
+    // 停放读数（gap-meta-scanparkingboard）：promotion-driver 每轮落盘的载体 → 本层每轮消费。
+    // ⛔ 默认允许回退现扫（载体缺失时），因为「没读成」必须与「没有一条该解停」可区分（硬规则 3b）。
+    parking: collectParkingReadings(root),
   };
 }
 
@@ -1720,6 +1742,293 @@ export function collectInertCheckers(root: string): string[] {
   return out;
 }
 
+// ── 停放读数（gap-meta-scanparkingboard）─────────────────────────────────────────────────────────
+// 问题：promotion-driver 每轮把 `scanParkingBoard` 的结果落进 `.quay/needs-human-parking-recheck.json`，
+// 而 collectReadings 从不读它 ⇒ 两臂都只有生产者、没有消费者。后果不是「少一个数字」：body-PARKED
+// 的任务被派发池排除（`isParked`）、永不翻 done，而 judgeDeps 把任何非 done 非 superseded 的依赖都算
+// 活跃阻塞 ⇒ 它后面的 todo 被无限期饿死（GOAL-914：gap-goal-driver-filing-ledger 的宣告式检查
+// 已经打印 `landed`，而 gap-goal-filing-chain-audit 仍每轮 pending）。
+// 修法 = **接消费者**：读同一个载体、用同一个探测器做回退，⛔ 不新建并行机制（DoD 第 2 条）。
+// 本层只读数：删 PARKED 标记 / 翻 done / 重入队都仍是人（manager）的动作。
+
+/** 两臂共用的读数骨架。三态纪律：`evaluated:true` ⇒ `counts` 是四态计数；`evaluated:false` ⇒
+ *  `reason` 非空且 `counts` 为 **null**。⛔ 不填 0 —— 0 是「查过、一个都没有」这个**判定**，与
+ *  「没查成」不同形（硬规则 3b/6；生产方在未评估时落的是全 0，本层必须把它翻成 null 才不会
+ *  在消费端把「没查成」读成「全部仍阻塞/全部已解停」）。 */
+export interface ParkingArmBase {
+  evaluated: boolean;
+  reason: string | null;
+  /** 本轮读数从哪来：`carrier` = 生产载体（promotion-driver 每轮落盘）；`live-scan` = 载体不可用时
+   *  现跑同一个 `scanParkingBoard`；`null` = 两路都没成（未评估）。⛔ 三者不合并成一个 token。 */
+  source: "carrier" | "live-scan" | null;
+  /** 载体没被采用的原因（`source:"live-scan"` 时说明为什么回退；`source:"carrier"` 时为 null）。 */
+  carrierProblem: string | null;
+  /** 读数的采集时刻与其年龄（ms）。读不出日期 ⇒ 两个字段都 null（⛔ 不填 0 冒充「刚刚」）。 */
+  at: string | null;
+  ageMs: number | null;
+}
+
+/** body-PARKED 人群（ARM 2）。`entries` 是探测器**报出来**的那些（宣告式 unpark 检查已通过而任务
+ *  仍 PARKED）——也就是唯一需要人处置的清单；其余任务在 `counts` 里按四态分桶。 */
+export interface ParkedUnparkArm extends ParkingArmBase {
+  counts: Record<ParkedUnparkState, number> | null;
+  parkedTotal: number | null;
+  reportedPassed: number | null;
+  entries: ParkedUnparkEntry[] | null;
+}
+
+/** needs-human 人群（ARM 1，同一个载体的另一半）。两臂一起消费：只接一臂就是把「读数没人读」这个
+ *  缺陷的兄弟实例留在原地（硬规则 5b）。 */
+export interface NeedsHumanParkingArm extends ParkingArmBase {
+  counts: Record<ParkingState, number> | null;
+  needsHumanTotal: number | null;
+  reportedStale: number | null;
+  stale: ParkingRecheck[] | null;
+}
+
+export interface ParkingRoundReading {
+  parked: ParkedUnparkArm;
+  needsHuman: NeedsHumanParkingArm;
+}
+
+const PARKED_COUNT_KEYS = ["unpark-passed", "unpark-still-blocked", "no-unpark-check", "not-evaluated"] as const;
+const NEEDS_HUMAN_COUNT_KEYS = ["parking-reason-stale", "still-blocked", "no-registered-judge", "not-evaluated"] as const;
+const PARKED_STATES: readonly ParkedUnparkState[] = PARKED_COUNT_KEYS;
+const NEEDS_HUMAN_STATES: readonly ParkingState[] = NEEDS_HUMAN_COUNT_KEYS;
+
+/** 四态计数。缺键或非数值 ⇒ **null**（整臂未评估），⛔ 不逐键补 0：补出来的 0 会让
+ *  「四态里少了一态」伪装成「那一态是零条」（硬规则 6：缺值 = 未查，不是为假）。 */
+function readFourStateCounts<K extends string>(raw: unknown, keys: readonly K[]): Record<K, number> | null {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const src = raw as Record<string, unknown>;
+  const out = {} as Record<K, number>;
+  for (const k of keys) {
+    const v = src[k];
+    if (typeof v !== "number" || !Number.isFinite(v)) return null;
+    out[k] = v;
+  }
+  return out;
+}
+
+/** 取值域必须落在枚举里——读到不认识的 state 说明载体不是本层理解的形状，整臂判未评估
+ *  （⛔ 不把未知态归到 `not-evaluated`：那是给「跑过但读不出结果」用的，与「载体读不懂」不同源）。 */
+function readEnumState<T extends string>(raw: unknown, allowed: readonly T[]): T | null {
+  return typeof raw === "string" && (allowed as readonly string[]).includes(raw) ? (raw as T) : null;
+}
+
+const strOrNull = (v: unknown): string | null => (typeof v === "string" ? v : null);
+const numOrNull = (v: unknown): number | null => (typeof v === "number" && Number.isFinite(v) ? v : null);
+
+/** 载体里一条 body-PARKED 条目 → 本层形状。缺 `id` 或缺可识别的 `state` ⇒ null（该臂整臂不可信）。 */
+function readParkedEntry(raw: unknown): ParkedUnparkEntry | null {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const r = raw as Record<string, unknown>;
+  const id = typeof r.id === "string" ? r.id.trim() : "";
+  const state = readEnumState(r.state, PARKED_STATES);
+  if (id === "" || state === null) return null;
+  return {
+    id,
+    status: strOrNull(r.status),
+    state,
+    command: strOrNull(r.command),
+    expectedOutput: strOrNull(r.expectedOutput),
+    exitCode: numOrNull(r.exitCode),
+    output: strOrNull(r.output),
+    note: strOrNull(r.note),
+  };
+}
+
+/** 载体里一条 needs-human 条目 → 本层形状。`currentHits` 逐条保留（判定要能被人复查，⛔ 只留计数）。 */
+function readNeedsHumanEntry(raw: unknown): ParkingRecheck | null {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const r = raw as Record<string, unknown>;
+  const id = typeof r.id === "string" ? r.id.trim() : "";
+  const state = readEnumState(r.state, NEEDS_HUMAN_STATES);
+  if (id === "" || state === null) return null;
+  const hits = Array.isArray(r.currentHits) ? r.currentHits.filter((h): h is string => typeof h === "string") : [];
+  return { id, state, judge: strOrNull(r.judge), recordedReason: strOrNull(r.recordedReason), currentHits: hits, note: strOrNull(r.note) };
+}
+
+/** `at` → 时刻与年龄。读不出 ⇒ 两者都 null。 */
+function readArmTime(at: unknown, nowMs: number): { at: string | null; ageMs: number | null } {
+  const s = typeof at === "string" ? at : null;
+  const parsed = s === null ? NaN : Date.parse(s);
+  // 未来时刻（时钟回拨/手改载体）⇒ ageMs 取 0 而不是负数——负数会读成「比现在更新」。
+  return { at: s, ageMs: Number.isFinite(parsed) ? Math.max(0, nowMs - parsed) : null };
+}
+
+/** 同一工作区？两次 realpath 都成功才比 realpath（worktree 常经 symlink），否则退回 path.resolve。
+ *  载体描述的是**另一个**工作区时不能采用：那是「读数在，但不是这一轮的这块板」（硬规则 5）。 */
+function sameWorkspace(carrierRoot: string, root: string): boolean {
+  const norm = (p: string): string => { try { return fs.realpathSync(p); } catch { return path.resolve(p); } };
+  return norm(carrierRoot) === norm(root);
+}
+
+function unevaluatedArm(reason: string, carrierProblem: string | null): ParkingArmBase {
+  return { evaluated: false, reason, source: null, carrierProblem, at: null, ageMs: null };
+}
+
+/** 生产载体 → 两臂。`ok:false` 时 `problem` 指名是哪一环读不懂（⛔ 不返回「空读数」——空读数与
+ *  「一条都没有」同形，硬规则 3b）。载体的 `evaluated:false` **是**一个有效读数（生产方自己没评估成），
+ *  照样消费，只是把它的全 0 计数翻成 null 并带上它自己的 reason。 */
+function parkingFromCarrier(root: string, nowMs: number):
+  | { ok: true; reading: ParkingRoundReading }
+  | { ok: false; problem: string } {
+  let raw: unknown;
+  try {
+    raw = JSON.parse(fs.readFileSync(path.join(root, PARKING_READING_REL), "utf8"));
+  } catch (e) {
+    const code = (e as NodeJS.ErrnoException)?.code;
+    return {
+      ok: false,
+      problem: code === "ENOENT"
+        ? `no carrier at ${PARKING_READING_REL}`
+        : `carrier unreadable (${(e as Error).message})`,
+    };
+  }
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return { ok: false, problem: "carrier is not a JSON object" };
+  const o = raw as Record<string, unknown>;
+  const carrierRoot = typeof o.root === "string" ? o.root : "";
+  if (carrierRoot === "") return { ok: false, problem: "carrier carries no root" };
+  if (!sameWorkspace(carrierRoot, root)) return { ok: false, problem: `carrier describes a different workspace (${carrierRoot})` };
+
+  // ── ARM 2（parked）：本任务的判据点名的就是它 ──
+  const p = o.parked;
+  if (!p || typeof p !== "object" || Array.isArray(p)) return { ok: false, problem: "carrier has no parked arm" };
+  const pw = p as Record<string, unknown>;
+  if (typeof pw.evaluated !== "boolean") return { ok: false, problem: "carrier parked arm has no boolean evaluated" };
+  const time = readArmTime(pw.at, nowMs);
+  let parked: ParkedUnparkArm;
+  if (pw.evaluated === true) {
+    const counts = readFourStateCounts(pw.counts, PARKED_COUNT_KEYS);
+    if (counts === null) return { ok: false, problem: "carrier parked arm lacks the four-state counts" };
+    if (!Array.isArray(pw.entries) || !Array.isArray(pw.tasks)) return { ok: false, problem: "carrier parked arm lacks entries/tasks arrays" };
+    const entries: ParkedUnparkEntry[] = [];
+    for (const e of pw.entries) { const one = readParkedEntry(e); if (one === null) return { ok: false, problem: "carrier parked arm has an unreadable entry" }; entries.push(one); }
+    for (const e of pw.tasks) { if (readParkedEntry(e) === null) return { ok: false, problem: "carrier parked arm has an unreadable task entry" }; }
+    // 计数必须与上报清单自洽：`reported_passed` 与 entries 长度不一致 ⇒ 载体不是这一版写出来的。
+    const reported = numOrNull(pw.reported_passed);
+    if (reported !== null && reported !== entries.length) {
+      return { ok: false, problem: `carrier parked arm is self-inconsistent (reported_passed=${reported} but entries=${entries.length})` };
+    }
+    parked = {
+      evaluated: true, reason: null, source: "carrier", carrierProblem: null, ...time,
+      counts, parkedTotal: numOrNull(pw.parked_total), reportedPassed: reported, entries,
+    };
+  } else {
+    parked = {
+      evaluated: false, reason: strOrNull(pw.reason) ?? "carrier parked arm is not evaluated", source: "carrier", carrierProblem: null,
+      ...time, counts: null, parkedTotal: null, reportedPassed: null, entries: null,
+    };
+  }
+
+  // ── ARM 1（needs-human）：同一个载体的另一半，字段在顶层 ──
+  if (typeof o.evaluated !== "boolean") return { ok: false, problem: "carrier has no boolean top-level evaluated (needs-human arm)" };
+  const nhTime = readArmTime(o.at, nowMs);
+  let needsHuman: NeedsHumanParkingArm;
+  if (o.evaluated === true) {
+    const counts = readFourStateCounts(o.counts, NEEDS_HUMAN_COUNT_KEYS);
+    if (counts === null) return { ok: false, problem: "carrier needs-human arm lacks the four-state counts" };
+    if (!Array.isArray(o.stale) || !Array.isArray(o.tasks)) return { ok: false, problem: "carrier needs-human arm lacks stale/tasks arrays" };
+    const stale: ParkingRecheck[] = [];
+    for (const e of o.stale) { const one = readNeedsHumanEntry(e); if (one === null) return { ok: false, problem: "carrier needs-human arm has an unreadable stale entry" }; stale.push(one); }
+    for (const e of o.tasks) { if (readNeedsHumanEntry(e) === null) return { ok: false, problem: "carrier needs-human arm has an unreadable task entry" }; }
+    const reported = numOrNull(o.reported_stale);
+    if (reported !== null && reported !== stale.length) {
+      return { ok: false, problem: `carrier needs-human arm is self-inconsistent (reported_stale=${reported} but stale=${stale.length})` };
+    }
+    needsHuman = {
+      evaluated: true, reason: null, source: "carrier", carrierProblem: null, ...nhTime,
+      counts, needsHumanTotal: numOrNull(o.needs_human_total), reportedStale: reported, stale,
+    };
+  } else {
+    needsHuman = {
+      evaluated: false, reason: strOrNull(o.reason) ?? "carrier needs-human arm is not evaluated", source: "carrier", carrierProblem: null,
+      ...nhTime, counts: null, needsHumanTotal: null, reportedStale: null, stale: null,
+    };
+  }
+  return { ok: true, reading: { parked, needsHuman } };
+}
+
+/** 载体不可用时的回退：现跑**同一个** `scanParkingBoard`（⛔ 不写第二套判据）。回退不是静默的——
+ *  `source:"live-scan"` + `carrierProblem` 把「生产载体这条链断了」留在读数里。 */
+function parkingFromLiveScan(root: string, nowMs: number, carrierProblem: string): ParkingRoundReading {
+  const scan = scanParkingBoard(root, { now: new Date(nowMs) });
+  const pTime = readArmTime(scan.parked.at, nowMs);
+  const nTime = readArmTime(scan.at, nowMs);
+  return {
+    parked: {
+      evaluated: scan.parked.evaluated === true,
+      reason: scan.parked.evaluated === true ? null : (scan.parked.reason ?? "live scan did not evaluate"),
+      source: "live-scan", carrierProblem, ...pTime,
+      counts: scan.parked.evaluated === true ? scan.parked.counts : null,
+      parkedTotal: scan.parked.evaluated === true ? scan.parked.parked_total : null,
+      reportedPassed: scan.parked.evaluated === true ? scan.parked.reported_passed : null,
+      entries: scan.parked.evaluated === true ? scan.parked.entries : null,
+    },
+    needsHuman: {
+      evaluated: scan.evaluated === true,
+      reason: scan.evaluated === true ? null : (scan.reason ?? "live scan did not evaluate"),
+      source: "live-scan", carrierProblem, ...nTime,
+      counts: scan.evaluated === true ? scan.counts : null,
+      needsHumanTotal: scan.evaluated === true ? scan.needs_human_total : null,
+      reportedStale: scan.evaluated === true ? scan.reported_stale : null,
+      stale: scan.evaluated === true ? scan.stale : null,
+    },
+  };
+}
+
+/** 采停放读数：**先读生产载体**（`carrier`），读不成才现跑探测器（`live-scan`），两路都不成才
+ *  `evaluated:false` + `reason`。`allowScan:false` 用于「只要载体、⛔ 别 spawn 子进程」的调用方。
+ *  ⚠️ 回退会 spawn 宣告式 unpark 命令（每个有上限的读取，见 DEFAULT_UNPARK_TIMEOUT_MS）。 */
+export function collectParkingReadings(
+  root: string,
+  opts: { now?: number; allowScan?: boolean } = {},
+): ParkingRoundReading {
+  const nowMs = opts.now ?? Date.now();
+  const fromCarrier = parkingFromCarrier(root, nowMs);
+  if (fromCarrier.ok) return fromCarrier.reading;
+  if (opts.allowScan !== false) {
+    try {
+      return parkingFromLiveScan(root, nowMs, fromCarrier.problem);
+    } catch (e) {
+      const reason = `${fromCarrier.problem}; live scan failed (${(e as Error).message})`;
+      return {
+        parked: { ...unevaluatedArm(reason, fromCarrier.problem), counts: null, parkedTotal: null, reportedPassed: null, entries: null },
+        needsHuman: { ...unevaluatedArm(reason, fromCarrier.problem), counts: null, needsHumanTotal: null, reportedStale: null, stale: null },
+      };
+    }
+  }
+  return {
+    parked: { ...unevaluatedArm(fromCarrier.problem, fromCarrier.problem), counts: null, parkedTotal: null, reportedPassed: null, entries: null },
+    needsHuman: { ...unevaluatedArm(fromCarrier.problem, fromCarrier.problem), counts: null, needsHumanTotal: null, reportedStale: null, stale: null },
+  };
+}
+
+/** 停放读数对摘要的贡献（gap-meta-scanparkingboard）：只取**会改变判读结论**的位——两臂各
+ *  ①未评估 ②「被点名要人处置」的 id 清单。⛔ 计数与年龄一律不进（四态里 `no-unpark-check`
+ *  随任务增删而变、`unpark-still-blocked` 是常态，进摘要会让语义半每轮被唤醒——同 staleSecs 的纪律）。
+ *  未评估与「一条都没有」用**不同 token**（`parked:u` vs `parked:none`，硬规则 3b）。 */
+export function readingsDigestPartsForParking(p: ParkingRoundReading | null | undefined): string[] {
+  const parts: string[] = [];
+  if (!p || typeof p !== "object") return ["parked:u", "nhparking:u"];
+  const ids = (list: Array<{ id?: unknown }> | null | undefined): string[] =>
+    [...new Set((Array.isArray(list) ? list : []).map((e) => String(e?.id ?? "").trim()).filter((s) => s !== ""))].sort();
+  const parked = p.parked;
+  if (!parked || typeof parked !== "object" || parked.evaluated !== true || !parked.counts) parts.push("parked:u");
+  else {
+    const list = ids(parked.entries);
+    parts.push(...(list.length > 0 ? list.map((id) => `parked-passed:${id}`) : ["parked:none"]));
+  }
+  const nh = p.needsHuman;
+  if (!nh || typeof nh !== "object" || nh.evaluated !== true || !nh.counts) parts.push("nhparking:u");
+  else {
+    const list = ids(nh.stale);
+    parts.push(...(list.length > 0 ? list.map((id) => `nh-stale:${id}`) : ["nhparking:none"]));
+  }
+  return parts;
+}
+
 // ── 变化检测（语义半的触发闸）────────────────────────────────────────────────────────────────────
 
 /** 语义半的触发状态（gitignored 运行时状态，与轮载体分开——它是【状态】不是【记录】）。 */
@@ -1789,6 +2098,10 @@ export function readingsDigest(readings: MetaRoundReadings): string {
     // 三态 token 用独立前缀（`actfail-state:` / `actfail-x:`），⛔ 不让一个签名的字面值
     // 与状态 token 撞形（硬规则 8：编号/命名不得复用——缺席被伪装成在场）。
     ...readingsDigestPartsForActionFailures(readings.actionRecordFailures),
+    // 停放读数（gap-meta-scanparkingboard）：⛔ 只取「哪几条被点名要人处置」与两臂的未评估位。
+    // **必须进**：不进的话「解停条件已成立」这件事不改变摘要 ⇒ 语义半不被唤醒 ⇒ 本任务只是把数字
+    // 塞进 JSON，读数仍然到不了能处置它的层（这正是缺陷本身）。计数/年龄不进（见该函数注释）。
+    ...readingsDigestPartsForParking(readings.parking),
   ];
   return createHash("sha256").update(parts.join("|")).digest("hex").slice(0, 16);
 }
@@ -2825,6 +3138,10 @@ async function runMetaRoundInner(opts: MetaRoundOptions): Promise<MetaRoundResul
     // 第七类读数也进记录（DoD：生产载体上可见、且「无越阈项」与「语料读不到」在记录上可区分）：
     // state 三态 + aggregates 全清单（含计数）。⛔ 计数进记录、不进 digest——digest 只取越阈签名。
     actionRecordFailures: readings.actionRecordFailures,
+    // 停放读数也进轮记录（gap-meta-scanparkingboard）：⛔ 只在 collectReadings 里返回而不落记录，
+    // 「这个入口有没有被消费」在生产载体上就不可见（同 metaRecords 那条实测教训）。计数进记录、
+    // ⛔ 不进 digest（digest 只取点名清单与未评估位，见 readingsDigestPartsForParking）。
+    parking: readings.parking,
     // 结算处置进读数：evidenceKept 非空 = 本轮真有 verdict 变化（有信息，待提交）；
     // 全 restored = 本轮只是刷新了时间戳（无信息）。这让「观测的副作用」自身可观测。
     evidenceRestored: settlement.restored.length,
