@@ -1,7 +1,7 @@
 ---
 id: AC-937
 title: 端到端：driver 自己立案的任务落地并使本 AC 机械翻 achieved
-status: active
+status: achieved
 kind: criterion
 goal: GOAL-914
 criterion: node -e "const fs=require('fs');const rootRe=/^tasks$/;const
@@ -29,6 +29,11 @@ statusLog:
     to: active
     actor: goal-cli
     reason: ""
+  - at: 2026-11-06T17:22:06.828Z
+    from: active
+    to: achieved
+    actor: goal-driver
+    reason: "I2: criterion pass"
 fidelity:
   verdict: faithful
   reason: "fidelity judge: faithful"
