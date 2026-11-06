@@ -1,7 +1,7 @@
 ---
 id: gap-meta-needs-human-parking-recheck-3
 title: 给 unpark-passed 一个执行者：解除 gap-goal-driver-filing-ledger 的过期停泊并按任务体自己的指令翻 done
-status: ready
+status: done
 labels:
   - meta-driver
   - driver-candidate
