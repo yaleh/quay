@@ -1,7 +1,7 @@
 ---
 id: AC-936
 title: goal request 队列：提交、消费、幂等
-status: draft
+status: active
 kind: criterion
 goal: GOAL-914
 criterion: node -e "const fs=require('fs');const
@@ -20,5 +20,16 @@ expect: exit 0；.quay/goal-requests.jsonl 中至少一条 submitted 请求被�
   重放不产生第二条终态。
 origin: 人 2026-11-06 授权；证据：消费者侧 goal-reconcile 通道 10 条 submitted 无消费者且 goalId 写成
   AC id（仅作证据）；本 AC 在 quay 侧建自己的请求队列。
+activatedAt: 2026-11-06T07:20:34.614Z
+statusLog:
+  - at: 2026-11-06T07:20:34.614Z
+    from: draft
+    to: active
+    actor: goal-cli
+    reason: ""
+fidelity:
+  verdict: faithful
+  reason: "fidelity judge: faithful"
+  at: 2026-11-06T07:20:34.614Z
 ---
 本 AC 由 gap-goal-request-queue 实现。
