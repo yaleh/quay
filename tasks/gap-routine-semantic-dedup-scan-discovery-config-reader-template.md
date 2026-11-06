@@ -3,7 +3,7 @@ id: gap-routine-semantic-dedup-scan-discovery-config-reader-template
 title: "semantic-dedup-scan: the three readers are one 1154-char template
   differing only in the loop key and parse callee, and each of the three
   routines carries about six more near-identi"
-status: ready
+status: needs-human
 labels:
   - gap
   - routine-filed
@@ -101,3 +101,6 @@ extract
 - 未落地原因：step=suite: oom-killed (2) — recovery red set is NOT a subset of the develop baseline red set: added=plugin/test/archive-exclusion-wiring.test.mjs changed=- — needs a code fix
 - run_id：wk-prod-anchor
 - session_id：773208ce-65bb-4efb-83c0-f407058089c0
+
+
+2026-11-06 人工暂停（宿主降载期间）：本任务上一轮已实现但在 merge-develop 步骤反复失败（worktree 内有未提交改动阻止 merge），本次运行中已被人工终止（suite 峰值 32.8 GB / ~60 核 esbuild）。恢复条件：先清干净该 worktree 的未提交改动，宿主 loadavg 回落后改回 ready 重派。
