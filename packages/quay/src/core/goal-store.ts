@@ -1396,8 +1396,11 @@ export function createGoalStore(
 //                               divergence (exit 1 when a divergent goal exists). PURE-READ.
 //                               Carries scopeSize + evaluated (0 active goal ⇒ evaluated:false).
 //   check --achieved-failing  — I5 achieved-but-failing (exit 1 when an achieved-but-failing AC
-//                               exists OR the scope is empty — evaluated:false; runs each achieved
-//                               AC's criterion under a re-entrancy guard). Carries scopeSize.
+//                               exists OR the scope is empty — evaluated:false; exit 4 when nothing
+//                               is FAILING but some in-scope criterion was NOT-EVALUATED — timeout /
+//                               spawn / not-runnable / declared `exit 3`; runs each achieved AC's
+//                               criterion under a re-entrancy guard). Carries scopeSize and the three
+//                               buckets: achievedButFailing / achievedNotEvaluated / capabilityRefused.
 //   check --reverify-scope [--adjudication <md>] — PURE-READ annotated enumeration of the I5 scope
 //                               (inScope/outOfScope, each with goal/status/longTerm). With
 //                               --adjudication <task.md> it cross-checks the AC2 ruling table: exit 1
@@ -2092,7 +2095,20 @@ export async function runGoalStoreCli(argv: string[]): Promise<number> {
       if (rest.includes("--achieved-failing")) {
         const r = store.checkAchievedFailing();
         process.stdout.write(JSON.stringify(r, null, 2) + "\n");
-        return r.achievedButFailing.length === 0 && r.evaluated ? 0 : 1;
+        // EXPLICIT THREE-STATE EXIT (gap-goal-achieved-failing-folds-not-evaluated-into-red):
+        //   0 = evaluated, and every in-scope criterion PASSED.
+        //   1 = at least one achieved AC's criterion is genuinely FAILING — unchanged — OR nothing was
+        //       evaluated at all (`evaluated:false`, e.g. the re-entrancy guard) — also unchanged.
+        //   4 = nothing is failing, but at least one achieved AC could NOT be judged (timeout / spawn /
+        //       not-runnable / declared). ⛔ NOT 0: "we could not measure this" must never share a value
+        //       with "looked and all clean" (hard rule 3b). 0/1/2/3 are already taken by this
+        //       subcommand's siblings (2 = usage, 3 = `--stale-pass` NOT-EVALUATED); 4 is the first
+        //       unused one. Documented in `quay goal check --help`.
+        // ⛔ `achievedButFailing` is checked FIRST: a red is the more actionable fact, and it must keep
+        // the exit code its existing consumers already branch on.
+        if (r.achievedButFailing.length > 0) return 1;
+        if (r.achievedNotEvaluated.length > 0) return 4;
+        return r.evaluated ? 0 : 1;
       }
       if (rest.includes("--staleness")) {
         const r = store.checkStaleness();

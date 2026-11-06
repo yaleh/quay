@@ -417,21 +417,46 @@ export async function checkStaleness(
 }
 
 /** 读 I5 achieved-but-failing（复用 goal-store 的单一真相源 checkAchievedFailing，⛔ 不在本文件重算）。
- *  退出码 1 = 存在 achieved-but-failing AC 或未评估（是发现不是错误），打印 JSON 到 stdout。
+ *  退出码 1 = 存在 achieved-but-failing AC（是发现不是错误），4 = 无红但有 NOT-EVALUATED，
+ *  3 = 空作用域；三者都把 JSON 打到 stdout，故这里只看 stdout、只看 `r.error`（spawn/超时才是错误）。
  *  读不懂 ⇒ null。
  *  scopeSize/evaluated 透传 goal-store 的取值（0 作用域 ⇒ evaluated:false、scopeSize:0——
- *  空作用域与「查过且全过」按字段区分，⛔ 同形，硬规则 3b）。 */
+ *  空作用域与「查过且全过」按字段区分，⛔ 同形，硬规则 3b）。
+ *
+ *  ⛔ `achievedNotEvaluated` 是**独立的第三个桶**（gap-goal-achieved-failing-folds-not-evaluated-into-red）：
+ *  「criterion 超时 / 起不来 / 不可运行 / 自陈 exit 3」不等于「criterion 为假」。它被**带出来**是为了
+ *  让下游看见（`computeGoalGaps` 的常设不变式分支把它读成 not-evaluated，⛔ 既不是 standing-ok 也不是
+ *  standing-violated），但**永不并入** `achievedButFailing`——后者是 goal standings 里立 gap 的输入面，
+ *  并进去就是每轮立一条 phantom gap。 */
 export async function checkAchievedFailing(
   scriptRoot: string | null,
   dataRoot: string,
-): Promise<{ achievedButFailing: string[]; evaluated: boolean; scopeSize: number; inScope: string[] } | null> {
+): Promise<{
+  achievedButFailing: string[];
+  achievedNotEvaluated: Array<{ id: string; cause: string; reason: string }>;
+  evaluated: boolean;
+  scopeSize: number;
+  inScope: string[];
+} | null> {
   const r = await runAsync(goalStoreArgv(scriptRoot, ["check", "--achieved-failing"], dataRoot), { timeoutMs: CRITERION_TIMEOUT_MS, collectStderr: true });
   if (r.error) return null;
   try {
     const j = JSON.parse(String(r.stdout ?? "").trim());
     const arr = (v: unknown): string[] => (Array.isArray(v) ? v.map(String) : []);
+    // 逐条校验形状：读不懂的条目**丢弃**而不是拼成 `{id:"undefined"}`——后者会变成一个看似可归因的
+    // AC id（硬规则 3b：读不懂不得伪装成一条读数）。桶本身仍然出现（空数组 ≠ 该字段缺席）。
+    const notEvaluated = Array.isArray(j.achievedNotEvaluated)
+      ? j.achievedNotEvaluated
+          .filter((e: unknown) => e !== null && typeof e === "object" && typeof (e as { id?: unknown }).id === "string")
+          .map((e: { id: string; cause?: unknown; reason?: unknown }) => ({
+            id: String(e.id),
+            cause: String(e.cause ?? ""),
+            reason: String(e.reason ?? ""),
+          }))
+      : [];
     return {
       achievedButFailing: arr(j.achievedButFailing),
+      achievedNotEvaluated: notEvaluated,
       evaluated: j.evaluated === true,
       scopeSize: typeof j.scopeSize === "number" ? j.scopeSize : -1,
       inScope: arr(j.inScope),
@@ -2217,6 +2242,10 @@ export function standingReverifyAcs(
  *  ⚠️ 第五态 `not-evaluated` 的第二个来源：I5 判违反、而**立案前复核**（`recheckStandingFailing`，
  *  `standingRecheck` 入参）跑不成 ⇒ 独立取值 not-evaluated（⛔ 既不与 standing-ok 也不与
  *  standing-violated 同形）；复核 `cleared` ⇒ 不产生读数（那次 fail 是读数失准，⛔ 不立案）。
+ *  ⚠️ 第三个来源（gap-goal-achieved-failing-folds-not-evaluated-into-red）：I5 自己的**第三个桶**
+ *  `standings.achievedNotEvaluated`（criterion 超时 / 起不来 / 不可运行 / 自陈 exit 3）⇒ 同样落
+ *  not-evaluated：⛔ 不立案（并进 achievedButFailing 会每轮立一条 phantom gap），也 ⛔ 不与
+ *  standing-ok 同形（那会把「测不了」读成「此刻成立」）。
  *  违反但已有在飞任务 ⇒ 复用 ① 的 in-progress / stalled。⛔ 此前这个域只被 I5 跑、不进本读数：
  *  achievedButFailing 只落轮读数与一行日志，「违规」既无写入者也无执行者
  *  （gap-meta-computegoalgaps）。
@@ -2269,7 +2298,16 @@ export function computeGoalGaps(
   records: Array<Record<string, unknown>>,
   taskFacts: Array<{ id: string; status: string | null; goalAc: string | null }> | null,
   judgment: ReadyPoolJudgment | null = null,
-  standings: { achievedButFailing: string[]; evaluated: boolean } | null = null,
+  standings: {
+    achievedButFailing: string[];
+    /** I5's THIRD bucket — achieved ACs the criterion could NOT judge (timeout / spawn /
+     *  not-runnable / declared exit 3). ⛔ NEVER merged into `achievedButFailing`: this bucket must
+     *  not file a gap (that was the phantom-gap defect), but it must also not be read as
+     *  `standing-ok` (that would be the mirror false-green). Optional so existing callers/tests that
+     *  only pass the failing bucket keep their exact behaviour. */
+    achievedNotEvaluated?: Array<{ id: string; cause: string; reason: string }>;
+    evaluated: boolean;
+  } | null = null,
   frozen: FrozenFailingReading | null = null,
   frozenRecheck: PrefilingRecheckReading | null = null,
   standingRecheck: PrefilingRecheckReading | null = null,
@@ -2292,6 +2330,15 @@ export function computeGoalGaps(
   // `inAchievedReverifyScope`，⛔ 不各自重推一遍口径——硬规则 5b）。
   const standingIds = new Set(standingReverifyAcs(records, activeGoalIds).map((r) => String(r.id ?? "")));
   const standingFailing = standings === null ? null : new Set(standings.achievedButFailing);
+  // ② 的第四种输入：I5 判「无法评估」（超时 / 起不来 / 不可运行 / exit 3）。**独立集合**，
+  // ⛔ 绝不并进 `standingFailing`（那会立 phantom gap——正是本任务修的缺陷），也 ⛔ 绝不静默：
+  // 不单独处理的话，这类 AC 会掉进下面的 `!standingFailing.has(id)` ⇒ 被读成 `standing-ok`
+  // （「此刻成立」），这是同一缺陷的镜像半边（硬规则 3b：读不到不得与合格同形）。
+  // 缺省（既有调用方 / 单测不传该键）⇒ null，逐字节保持今日行为。
+  const standingNotEvaluated =
+    standings === null || standings.achievedNotEvaluated === undefined
+      ? null
+      : new Set(standings.achievedNotEvaluated.map((e) => String(e.id)));
   // ③ 的成员 = 域外（未声明 long-term 且 GOAL 非 active）∧ achieved ∧ criterion 非空。与 goal-store 的
   // `frozenAchievedAcs()` **同谓词**（同一处 `inAchievedReverifyScope` + 同一条 criterion 非空规则）。
   const frozenIds = new Set(
@@ -2377,6 +2424,14 @@ export function computeGoalGaps(
       // 常设不变式：问句是「此刻成立吗」，⛔ 不是「有没有任务」。读不到（无 tasks 输入 / I5 未评估）
       // 给独立取值 not-evaluated——⛔ 绝不与 standing-ok 同形（硬规则 3b）。
       if (taskFacts === null || standingFailing === null) {
+        out.push({ goal, ac: id, state: "not-evaluated", taskCount: null });
+        continue;
+      }
+      // I5 说「这条没评估成」（超时 / 起不来 / 不可运行 / 自陈 exit 3）⇒ **独立的 not-evaluated**：
+      // ⛔ 不立案（`isFilingGapState("not-evaluated") === false`，这就是 phantom gap 的修复），
+      // 但也 ⛔ 不落 `standing-ok`（读不到 ≠ 此刻成立）。必须排在 `!standingFailing.has` 之前，
+      // 否则它会被当成绿。缺省 `null`（既有调用方没带该桶）⇒ 不改变今日行为。
+      if (standingNotEvaluated !== null && standingNotEvaluated.has(id)) {
         out.push({ goal, ac: id, state: "not-evaluated", taskCount: null });
         continue;
       }

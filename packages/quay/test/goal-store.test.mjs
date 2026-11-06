@@ -599,6 +599,121 @@ test("I5 CLI — check --achieved-failing exits 1 on an achieved-but-failing AC,
   assert.deepEqual(JSON.parse(chk2.stdout).achievedButFailing, []);
 });
 
+// ── gap-goal-achieved-failing-folds-not-evaluated-into-red (atom H10): I5 is THREE-VALUED ──────────
+// The defect: this path imported `verdictFromAcceptance` and never called it, so `if (!res.ok)` folded
+// every non-zero outcome — including a TIMEOUT and a criterion DECLARING `exit 3` ("not measurable
+// here") — into `achievedButFailing` ⇒ the goal driver's `standingFailing` ⇒ a PHANTOM standing gap
+// filed every round. A non-zero exit is not the same fact as "the criterion is false".
+//
+// Negative arm (the reading this fix must change): before the change,
+//   grep -n verdictFromAcceptance packages/quay/src/core/goal-store-checks.ts
+// printed ONLY the import line (15:import …). The tests below are the positive arm.
+
+/** A CLI runner with a caller-supplied env (the timeout arm needs QUAY_ACCEPTANCE_TIMEOUT_MS). */
+function goalCliWithEnv(root, env) {
+  const cli = new URL("../src/core/goal-store.ts", import.meta.url).pathname;
+  return (cmd) => spawnSync("node", ["--experimental-strip-types", cli, "--root", root, ...cmd], {
+    encoding: "utf8",
+    env: { ...process.env, ...env },
+  });
+}
+
+/** Seed one ACTIVE goal (AC-first: the goal must not be born active with zero ACs) and its ACs. */
+function seedGoalWithAcsCli(n, goalId, acs) {
+  assert.equal(n(["write", acs[0].id, "--title", acs[0].title, "--status", acs[0].status, "--goal", goalId, "--criterion", acs[0].criterion, "--origin", "o", "--expect", EXPECT]).status, 0);
+  assert.equal(n(["write", goalId, "--title", goalId, "--status", "active", "--origin", "o", "--body", GOAL_BODY]).status, 0);
+  for (const ac of acs.slice(1)) {
+    assert.equal(n(["write", ac.id, "--title", ac.title, "--status", ac.status, "--goal", goalId, "--criterion", ac.criterion, "--origin", "o", "--expect", EXPECT]).status, 0, `fixture setup: ${ac.id}`);
+  }
+}
+
+test("H10 AC1 — I5 three-state dispatch: exit 1 ⇒ achievedButFailing, exit 3 (declared) ⇒ achievedNotEvaluated(declared), timeout ⇒ achievedNotEvaluated(timeout), pass ⇒ neither", () => {
+  const root = tmpDir("i5-threestate");
+  fs.mkdirSync(path.join(root, ".quay"), { recursive: true });
+  fs.mkdirSync(path.join(root, "goals"), { recursive: true });
+  const n = goalCliWithEnv(root, {});
+  seedGoalWithAcsCli(n, "GOAL-030", [
+    { id: "AC-030", title: "declares not-measurable", status: "achieved", criterion: "echo 'CAUSE=not-measurable-here' >&2; exit 3" },
+    { id: "AC-031", title: "genuinely red", status: "achieved", criterion: "echo 'CAUSE=really-false' >&2; exit 1" },
+    { id: "AC-032", title: "green", status: "achieved", criterion: "true" },
+  ]);
+
+  const chk = n(["check", "--achieved-failing"]);
+  const out = JSON.parse(chk.stdout);
+  // ⛔ exit 3 is NOT a failure: nothing folded it into failing.
+  assert.deepEqual(out.achievedButFailing, ["AC-031"], "only the real `exit 1` is in achievedButFailing");
+  assert.deepEqual(
+    out.achievedNotEvaluated.map((e) => [e.id, e.cause]),
+    [["AC-030", "declared"]],
+    "a criterion DECLARING exit 3 lands in its own bucket, named with its cause",
+  );
+  assert.match(out.achievedNotEvaluated[0].reason, /not-evaluated \(declared\)/, "the reason carries the cause token a reader greps for");
+  assert.equal(out.evaluated, true);
+  assert.ok(!out.achievedNotEvaluated.some((e) => e.id === "AC-032"), "a PASSING criterion is in neither bucket");
+  // All three buckets are PRESENT on the output (an absent key would be indistinguishable from "empty").
+  for (const k of ["achievedButFailing", "achievedNotEvaluated", "capabilityRefused"]) {
+    assert.ok(Array.isArray(out[k]), `the JSON must carry the ${k} bucket`);
+  }
+  // ⛔ In particular the declared AC is not silently in BOTH buckets.
+  assert.ok(!out.achievedButFailing.includes("AC-030"));
+
+  // Timeout arm — a DIFFERENT cause, never the same value as a fail (the fixture's criterion is
+  // `sleep 2`, killed at a 1000ms deadline via the documented knob).
+  const tRoot = tmpDir("i5-timeout");
+  fs.mkdirSync(path.join(tRoot, ".quay"), { recursive: true });
+  fs.mkdirSync(path.join(tRoot, "goals"), { recursive: true });
+  const nt = goalCliWithEnv(tRoot, { QUAY_ACCEPTANCE_TIMEOUT_MS: "1000" });
+  seedGoalWithAcsCli(nt, "GOAL-031", [
+    { id: "AC-033", title: "slow", status: "achieved", criterion: "sleep 2" },
+  ]);
+  const tOut = JSON.parse(nt(["check", "--achieved-failing"]).stdout);
+  assert.deepEqual(tOut.achievedButFailing, [], "a KILLED criterion never said it is false");
+  assert.deepEqual(tOut.achievedNotEvaluated.map((e) => [e.id, e.cause]), [["AC-033", "timeout"]], "a timeout is its own cause");
+});
+
+test("H10 AC2 — `check --achieved-failing` exits 0 (all green) / 1 (a real red) / 4 (only NOT-EVALUATED)", () => {
+  const make = (tag) => {
+    const root = tmpDir(tag);
+    fs.mkdirSync(path.join(root, ".quay"), { recursive: true });
+    fs.mkdirSync(path.join(root, "goals"), { recursive: true });
+    return root;
+  };
+
+  // (a) all green ⇒ 0
+  const green = make("i5-exit-green");
+  const ng = goalCliWithEnv(green, {});
+  seedGoalWithAcsCli(ng, "GOAL-032", [{ id: "AC-034", title: "green", status: "achieved", criterion: "true" }]);
+  const g = ng(["check", "--achieved-failing"]);
+  assert.equal(g.status, 0, `all green ⇒ 0:\n${g.stdout}${g.stderr}`);
+  assert.deepEqual(JSON.parse(g.stdout).achievedButFailing, []);
+  assert.deepEqual(JSON.parse(g.stdout).achievedNotEvaluated, []);
+
+  // (b) a real red ⇒ 1 (unchanged for existing consumers)
+  const red = make("i5-exit-red");
+  const nr = goalCliWithEnv(red, {});
+  seedGoalWithAcsCli(nr, "GOAL-033", [{ id: "AC-035", title: "red", status: "achieved", criterion: "echo 'CAUSE=red' >&2; exit 1" }]);
+  const r = nr(["check", "--achieved-failing"]);
+  assert.equal(r.status, 1, `a failing criterion ⇒ 1:\n${r.stdout}${r.stderr}`);
+
+  // (c) NOTHING failing, but the only in-scope criterion declared "not measurable" ⇒ 4 (⛔ not 0)
+  const ne = make("i5-exit-not-evaluated");
+  const nn = goalCliWithEnv(ne, {});
+  seedGoalWithAcsCli(nn, "GOAL-034", [{ id: "AC-036", title: "declared", status: "achieved", criterion: "echo 'CAUSE=no' >&2; exit 3" }]);
+  const d = nn(["check", "--achieved-failing"]);
+  assert.equal(d.status, 4, `only NOT-EVALUATED ⇒ 4, ⛔ never 0 (hard rule 3b):\n${d.stdout}${d.stderr}`);
+  const dOut = JSON.parse(d.stdout);
+  assert.deepEqual(dOut.achievedButFailing, [], "exit 4 is NOT a red");
+  assert.deepEqual(dOut.achievedNotEvaluated.map((e) => e.cause), ["declared"]);
+  assert.notEqual(d.status, 0, "「could not evaluate」 must never share a value with「looked and all clean」");
+
+  // (d) empty scope (evaluated:false) keeps its pre-existing non-zero exit (⛔ not widened by this change)
+  const empty = make("i5-exit-empty");
+  const ne2 = goalCliWithEnv(empty, {});
+  const e = ne2(["check", "--achieved-failing"]);
+  assert.equal(e.status, 1, `empty scope stays 1 (evaluated:false):\n${e.stdout}${e.stderr}`);
+  assert.equal(JSON.parse(e.stdout).evaluated, false);
+});
+
 // ── gap-goal-store-abi-encapsulation-provider-backed: shim + gateFactories ────────────────────────
 // AC-176 (grep 断言, mirror-drift guard): the goal-id regex has ONE definition — in Core's
 // goal-store.ts. The native provider's goal-store.ts is a FORWARDING re-export shim (the same

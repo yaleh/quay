@@ -195,6 +195,59 @@ test('冻结population：查过且全好 ⇒ 零读数；查不成 ⇒ 逐条 no
     '未传读数 ⇒ not-evaluated（fail-visible：调用方漏传不得与「查过且全好」同形）');
 });
 
+// ── atom H10 (gap-goal-achieved-failing-folds-not-evaluated-into-red): I5's THIRD bucket ──────────
+// 消费者侧的两点（任务 AC3 要求点名）：
+//   ① 解析点 `goal-driver.ts` 的 `checkAchievedFailing()` —— 它现在把 `achievedNotEvaluated` 作为
+//      **独立字段**带出（逐条 `{id, cause, reason}`），⛔ 从不并入 `achievedButFailing`；
+//   ② 立 gap 点 `computeGoalGaps()` 的 `standingFailing` —— 只由 `standings.achievedButFailing` 构造。
+// 这条测试钉住 ②：常设不变式 population（achieved ∧ long-term ∧ GOAL 非 active）里，一条「测不了」的
+// AC 落 **not-evaluated**（⛔ 不立案、⛔ 也不是 standing-ok），而真红照旧 standing-violated。
+test('H10 AC3 — I5 的 achievedNotEvaluated 不立 gap（⛔ 不与 standing-ok / standing-violated 同形）', () => {
+  // standingReverifyAcs 的口径：achieved ∧ long-term ∧ GOAL 非 active ∧ criterion 非空。
+  const recs = [
+    { id: 'GOAL-001', status: 'achieved' },
+    { id: 'AC-001', status: 'achieved', goal: 'GOAL-001', criterion: 'echo "CAUSE=cosmic" >&2; exit 3', longTerm: true },
+  ];
+  const notEvaluatedStandings = {
+    achievedButFailing: [],
+    achievedNotEvaluated: [{ id: 'AC-001', cause: 'timeout', reason: 'not-evaluated (timeout): killed after 1000ms' }],
+    evaluated: true,
+  };
+
+  // 负臂：I5 只说「无法评估」⇒ 读数存在（not-evaluated），但**不是缺口** ⇒ spawn 选取面拒绝。
+  const ne = computeGoalGaps(recs, [], null, notEvaluatedStandings).find((x) => x.ac === 'AC-001');
+  assert.equal(ne.state, 'not-evaluated', '「测不了」是独立取值');
+  assert.equal(ne.taskCount, null, 'taskCount=null（⛔ 不与 0 同形）');
+  assert.equal(isFilingGapState(ne.state), false, '⛔ 不得立 gap（并进 achievedButFailing 就是每轮一条 phantom gap）');
+  assert.notEqual(ne.state, 'standing-ok', '⛔ 也不得读成「此刻成立」（镜像假绿，硬规则 3b）');
+  assert.notEqual(ne.state, 'standing-violated', '⛔ 更不得读成「此刻违反」——那是对没人跑过的判据下断言');
+
+  // 正臂（证明负臂不是恒真）：同一 fixture，把读数换成「真的红了」⇒ 必须立案。
+  const red = computeGoalGaps(recs, [], null, { achievedButFailing: ['AC-001'], achievedNotEvaluated: [], evaluated: true })
+    .find((x) => x.ac === 'AC-001');
+  assert.equal(red.state, 'standing-violated');
+  assert.equal(isFilingGapState(red.state), true, '真红仍然立案——负臂的「不立」不能由「一律不立」满足');
+
+  // 两桶同时非空（不同 AC）：红优先立案，未评估那条不得把红洗掉。
+  const recs2 = [
+    { id: 'GOAL-002', status: 'achieved' },
+    { id: 'AC-010', status: 'achieved', goal: 'GOAL-002', criterion: 'echo "CAUSE=red" >&2; exit 1', longTerm: true },
+    { id: 'AC-011', status: 'achieved', goal: 'GOAL-002', criterion: 'sleep 2', longTerm: true },
+  ];
+  const both = computeGoalGaps(recs2, [], null, {
+    achievedButFailing: ['AC-010'],
+    achievedNotEvaluated: [{ id: 'AC-011', cause: 'timeout', reason: 'not-evaluated (timeout): x' }],
+    evaluated: true,
+  });
+  assert.equal(both.find((x) => x.ac === 'AC-010').state, 'standing-violated');
+  assert.equal(both.find((x) => x.ac === 'AC-011').state, 'not-evaluated');
+  assert.equal(both.filter((x) => isFilingGapState(x.state)).map((x) => x.ac).join(','), 'AC-010', '只立红的那条');
+
+  // 向后兼容：旧调用方不带 `achievedNotEvaluated` 键 ⇒ 逐字节保持今日行为（standing-ok / 立案照旧）。
+  const legacy = computeGoalGaps(recs, [], null, { achievedButFailing: [], evaluated: true }).find((x) => x.ac === 'AC-001');
+  assert.equal(legacy.state, 'standing-ok', '缺键（旧调用方）⇒ 不改变今日行为');
+});
+
 
 test('冻结population：frozen-violated 进 spawn 选取面；prompt 带三条合法终态', () => {
   const records = [

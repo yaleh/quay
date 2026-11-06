@@ -608,7 +608,11 @@ Usage:
   check                 Read the goal mechanism's own three-state readings, in the goal store's
                         single implementation:
                           --staleness         which GOALs' 'achieved' may be outdated (I3) + divergences (I4)
-                          --achieved-failing  achieved ACs whose criterion is currently FAILING (I5)
+                          --achieved-failing  achieved ACs whose criterion is currently FAILING (I5);
+                                              exit 0 = every in-scope criterion PASSED,
+                                              1 = at least one FAILING (or nothing evaluated),
+                                              4 = none failing, but at least one NOT-EVALUATED
+                                              (timeout / spawn / not-runnable / declared exit 3)
                           --stale-pass        the frozen population's "currently false" reading (AC-242);
                                               exit 0 = clean, 1 = violated, 3 = NOT-EVALUATED
                           --stale-pass --sweep  run one BOUNDED rotation first (cost-bounded), then the same read
