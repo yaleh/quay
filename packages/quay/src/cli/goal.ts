@@ -20,7 +20,7 @@ import { runGoalStoreCli } from "../core/goal-store.ts";
 // The goal-next projection's VOCABULARY (AC-935). ⛔ Imported, never re-declared here: the goal-driver
 // writes the same rows through this module (via its Core import surface) — two copies of the state /
 // owner / action word-lists would be a second source that drifts (hard rule 5b).
-import { GAP_STATES, GOAL_NEXT_OWNERS, GOAL_NEXT_ACTION_KINDS } from "../core/goal-analysis.ts";
+import { GAP_STATES, BLOCKED_GAP_STATES, GOAL_NEXT_OWNERS, GOAL_NEXT_ACTION_KINDS } from "../core/goal-analysis.ts";
 import { loadConfig } from "../config.ts";
 import { resolveWorkspaceRootOrThrow } from "../gate/config/loader.ts";
 
@@ -330,6 +330,22 @@ function goalNextRowProblem(row: unknown): string | null {
   const action = r.action as Record<string, unknown> | undefined;
   if (!action || typeof action !== "object" || !GOAL_NEXT_ACTION_KINDS.includes(action.kind as never)) {
     return `row ${r.goal}/${r.ac}: action.kind ${JSON.stringify(action?.kind)} is not an action`;
+  }
+  // A `blocked-*` row MUST carry its blocker (gap-goal-driver-blocked-taxonomy): the whole point of
+  // splitting `stalled` was that "which task blocks this, and why" is readable. ⛔ Absent blocker on a
+  // non-blocked row is legal — those rows are not blocked readings at all, and rows written by an
+  // OLDER driver cannot carry the field either.
+  if (BLOCKED_GAP_STATES.includes(r.gapState as never)) {
+    const b = r.blocker as Record<string, unknown> | undefined;
+    if (!b || typeof b !== "object") return `row ${r.goal}/${r.ac}: blocked row has no blocker`;
+    if (b.cause !== r.gapState) return `row ${r.goal}/${r.ac}: blocker.cause ${JSON.stringify(b.cause)} ≠ gapState ${JSON.stringify(r.gapState)}`;
+    const tasks = b.tasks;
+    if (!Array.isArray(tasks) || tasks.length === 0) return `row ${r.goal}/${r.ac}: blocker.tasks is not a non-empty array`;
+    for (const t of tasks) {
+      const e = t as Record<string, unknown> | null;
+      if (!e || typeof e.id !== "string" || e.id === "") return `row ${r.goal}/${r.ac}: blocker task id is not a non-empty string`;
+      if (!BLOCKED_GAP_STATES.includes(e.cause as never)) return `row ${r.goal}/${r.ac}: blocker task ${e.id} cause ${JSON.stringify(e.cause)} is not a blocked cause`;
+    }
   }
   return null;
 }

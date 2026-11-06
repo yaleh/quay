@@ -261,7 +261,9 @@ function derivedCriterionRecords() {
 
 const derivedByAc = (gaps) => new Map(gaps.map((g) => [g.ac, g]));
 
-const ALL_GAP_STATES = ['gap', 'workable', 'world-gated', 'unclassified', 'stalled', 'not-evaluated', 'standing-violated', 'frozen-violated', 'derived-routed', 'in-progress', 'standing-ok'];
+// Every `GapState` value. ⚠️ `stalled` stays listed for INPUT compatibility (the driver no longer
+// emits it — see gap-goal-driver-blocked-taxonomy); the three `blocked-*` states are what it emits.
+const ALL_GAP_STATES = ['gap', 'workable', 'world-gated', 'unclassified', 'stalled', 'blocked-needs-human', 'blocked-promotion', 'blocked-dispatch', 'not-evaluated', 'standing-violated', 'frozen-violated', 'derived-routed', 'in-progress', 'standing-ok'];
 
 const QUIET_GAP_STATES = ['in-progress', 'standing-ok'];
 

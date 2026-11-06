@@ -119,8 +119,10 @@ test("AC2: ordering is needs-human → stalled → workable → gap → world-ga
   const rows2 = goalNextProjection(records2, gaps2, []);
   assert.deepEqual(ranks(rows2), ["stalled", "workable", "gap", "world-gated", "not-evaluated"], "declared priority order");
   // …and that order is the EXPORTED one, filtered to the ranks this fixture actually has (the
-  // `needs-human` rank needs a task snapshot, so it is absent here by construction).
-  assert.deepEqual(ranks(rows2), GOAL_NEXT_PRIORITY.filter((r) => r !== "needs-human").slice(0, 5), "the five ranks are the exported priority verbatim");
+  // `needs-human` rank needs a task snapshot, and the blocked-* ranks need a blocker, so all four are
+  // absent here by construction — ⛔ the fixture is not extended to cover every rank, which would
+  // turn this into a test of the fixture).
+  assert.deepEqual(ranks(rows2), GOAL_NEXT_PRIORITY.filter((r) => order.includes(r)), "the five ranks are the exported priority verbatim");
 });
 
 // ── AC3 — the vocabularies are enumerations, and a missing reading is its own value ──────────────
@@ -154,6 +156,42 @@ test("AC3: owner / action.kind / gapState are always values from the exported en
   assert.equal(byAc("AC-004").owner, "worker", "stalled ⇒ worker");
   assert.equal(byAc("AC-004").action.kind, "fix-artifacts", "stalled ⇒ fix-artifacts");
   assert.equal(byAc("AC-001").action.kind, "file-task", "gap ⇒ file-task");
+});
+
+// ── AC4 (gap-goal-driver-blocked-taxonomy) — the three blocked causes map to three DIFFERENT
+//    owners/actions, and the blocker travels through the projection verbatim ───────────────────────
+
+test("AC4: blocked-needs-human / -promotion / -dispatch project to human-ask-human / worker-fix-artifacts / worker-fix-dispatch", () => {
+  const records = [goalRec("GOAL-001"), goalRec("GOAL-002"), goalRec("GOAL-003")];
+  const blocker = (cause, id) => ({ cause, tasks: [{ id, cause }] });
+  const gaps = [
+    { ...gap("GOAL-001", "AC-001", "blocked-needs-human", 1), blocker: blocker("blocked-needs-human", "t-nh") },
+    { ...gap("GOAL-002", "AC-002", "blocked-promotion", 1), blocker: blocker("blocked-promotion", "t-todo") },
+    { ...gap("GOAL-003", "AC-003", "blocked-dispatch", 1), blocker: blocker("blocked-dispatch", "t-ready") },
+  ];
+  const rows = goalNextProjection(records, gaps, []);
+  const byAc = new Map(rows.map((r) => [r.ac, r]));
+
+  assert.equal(byAc.get("AC-001").owner, "human", "needs-human ⇒ a HUMAN moves it");
+  assert.equal(byAc.get("AC-001").action.kind, "ask-human");
+  assert.equal(byAc.get("AC-002").owner, "worker", "promotion ⇒ a worker fixes the artifacts");
+  assert.equal(byAc.get("AC-002").action.kind, "fix-artifacts");
+  assert.equal(byAc.get("AC-003").owner, "worker", "dispatch ⇒ a worker fixes the dispatch blocker");
+  assert.equal(byAc.get("AC-003").action.kind, "fix-dispatch", "⛔ its own action, not the promotion one");
+  assert.deepEqual(
+    new Set(rows.map((r) => `${r.owner}/${r.action.kind}`)),
+    new Set(["human/ask-human", "worker/fix-artifacts", "worker/fix-dispatch"]),
+    "three causes ⇒ three distinct owner/action pairs (⛔ none collapses into another)",
+  );
+  for (const row of rows) {
+    assert.equal(row.blocker.cause, row.gapState, "the blocker travels verbatim from the reading");
+    assert.equal(row.rank, row.gapState, "each blocked state is its own rank (no flattening back to stalled)");
+  }
+  // ⛔ the legacy `stalled` literal is still ACCEPTED as input (older carriers / fixtures) — it just is
+  // never produced any more; dropping it would make old rows unprojectable.
+  const [legacy] = goalNextProjection([goalRec("GOAL-001")], [gap("GOAL-001", "AC-001", "stalled", 1)], []);
+  assert.equal(legacy.rank, "stalled");
+  assert.equal(legacy.blocker, null, "a legacy row has no blocker (⛔ not an empty one)");
 });
 
 test("AC3 negative control: a goal with NO gap reading is `not-evaluated`, ⛔ never 'nothing to do'", () => {

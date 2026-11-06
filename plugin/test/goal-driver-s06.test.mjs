@@ -298,7 +298,7 @@ test('AC3 全词表立案面：workable 与 gap/standing-violated/frozen-violate
   assert.deepEqual(r.outcomes.map((o) => o.ac), ['AC-W']);
   // 与另外两个 population 对照：standing-violated / frozen-violated 同样立案（四态同列，workable ⛔ 不独占）。
   assert.deepEqual(
-    ['gap', 'workable', 'world-gated', 'unclassified', 'standing-violated', 'frozen-violated', 'stalled', 'not-evaluated', 'standing-ok', 'derived-routed', 'in-progress']
+    ['gap', 'workable', 'world-gated', 'unclassified', 'standing-violated', 'frozen-violated', 'stalled', 'blocked-needs-human', 'blocked-promotion', 'blocked-dispatch', 'not-evaluated', 'standing-ok', 'derived-routed', 'in-progress']
       .filter((s) => isFilingGapState(s)).sort(),
     ['frozen-violated', 'gap', 'standing-violated', 'workable'],
     '立案面恰为四态（⛔ 不多不少——world-gated/unclassified 被有意排除）');

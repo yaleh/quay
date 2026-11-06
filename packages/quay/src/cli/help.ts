@@ -586,10 +586,16 @@ Usage:
                         is retired/superseded. The field is LOCKED once the branch exists.
   next                  The NEXT-STEP projection read (tasks/gap-goal-next-projection, AC-935):
                         prints ONE row per ACTIVE goal answering "what happens next, and whose is
-                        it" — {goal, ac, gapState, rank, owner, action, evidenceRefs}, sorted by
-                        needs-human → stalled → workable → gap → world-gated → not-evaluated (ties
-                        by AC id). owner ∈ {driver, worker, human, world}; action.kind ∈
-                        {file-task, resume-task, fix-artifacts, ask-human, wait}.
+                        it" — {goal, ac, gapState, rank, owner, action, evidenceRefs, blocker},
+                        sorted by needs-human → blocked-needs-human → blocked-promotion →
+                        blocked-dispatch → stalled → workable → gap → world-gated → not-evaluated
+                        (ties by AC id). owner ∈ {driver, worker, human, world}; action.kind ∈
+                        {file-task, resume-task, fix-artifacts, fix-dispatch, ask-human, wait}.
+                        A blocked-* row carries 'blocker': {cause, tasks:[{id, cause}]} — WHICH
+                        linked task cannot advance and how (needs-human ⇒ ask a human;
+                        promotion ⇒ fix the four artifacts; dispatch ⇒ fix dependencies/worktree).
+                        'stalled' survives only as an input literal for carriers written before
+                        the 2026-11-07 split; the driver no longer emits it.
                         It READS the newest 'goal-next' fact from the round carrier
                         (<root>/.quay/goal-round.jsonl, or --round-log) and ⛔ never re-computes the
                         projection — the driver and this surface share ONE implementation

@@ -53,7 +53,7 @@ import { isDirectEntry } from "./gate-script-base.ts";
 // Core `criterion-capability.ts` 的单一实现，gap-meta-writegoalstatus）：⛔ 不从激活拒绝的散文里抠
 // 缺失载体——store 把它回传成**被截断到 200 字符**的 stderr，路径正好落在截断点之外（硬规则 4c：
 // 判据点名的量必须穿过所有中间层还取得到）；同一判定器在本进程重判得到的 `reasons[].detail` 才是。
-import { DRIVER_KINDS, runAsync, launchArgv, splitArgs, kernelSiblingArgv, kernelConfigPath, resolveQuayCodeRoot, parseBinaryVerdict, goalDriverChildTimeoutMs, GOAL_STORE_SIGTERM_GRACE_MS, readLockPid, judgeCriterionCapability, readCapabilityDeclaration, goalNextProjection, type Fact, type RoutineSpec, type GapState, type GoalGap, type GoalNextRow } from "./driver-runtime.ts";
+import { DRIVER_KINDS, runAsync, launchArgv, splitArgs, kernelSiblingArgv, kernelConfigPath, resolveQuayCodeRoot, parseBinaryVerdict, goalDriverChildTimeoutMs, GOAL_STORE_SIGTERM_GRACE_MS, readLockPid, judgeCriterionCapability, readCapabilityDeclaration, goalNextProjection, BLOCKED_GAP_STATES, type Fact, type RoutineSpec, type GapState, type GoalGap, type GoalNextRow, type BlockedGapState, type GoalBlocker, type GoalBlockerTask } from "./driver-runtime.ts";
 // The ONE regex-literal escaper (kernel leaf via the plugin shim) — replaces an inline escape body at
 // the heading-literal site (finding `escaperegexp-sweep-missed-two`, routine `semantic-dedup-scan`).
 import { escapeRegExp } from "./regex-escape.ts";
@@ -2131,16 +2131,71 @@ export interface ReadyPoolJudgment {
   excludedReadyIds: Set<string>;
 }
 
-/** 一条关联任务是否「无法自行前进」（G9 stalled 的结构判据）：
- *  todo ⇒ 不在 eligibleTodoIds（晋升门判不合格 / 不在候选，含 fixture/parked）；ready ⇒ 在
- *  excludedReadyIds（被 pool 排除）；needs-human ⇒ 已离开 todo/ready、需人处理（有处理者但
- *  不能自行前进，⛔ 与 judgment 无关）。其余状态（done/superseded）本就不在「推进中」集合
- *  （computeGoalGaps 只数 todo/ready/needs-human）。 */
+/** 一条关联任务「无法自行前进」的**成因**（枚举，⛔ 不布尔）——`isTaskStuck` 的枚举化半边，
+ *  **单一真相源**（`isTaskStuck` 就是它取非 null；⛔ 两处各写一份谓词即漂移，硬规则 5b）：
+ *  · `blocked-needs-human` 任务已离开 todo/ready、需人处理（⛔ 与 judgment 无关：needs-human 不需要
+ *    ready-pool 结构量就能判「不能自行前进」）。
+ *  · `blocked-promotion`   todo 但不在 eligibleTodoIds（晋升门判不合格 / 不在候选，含 fixture/parked）
+ *    ⇒ 缺的是四件套。
+ *  · `blocked-dispatch`    ready 但在 excludedReadyIds（被 pool 排除）⇒ 派不出去，查依赖与 worktree。
+ *  · `null`                可自行前进（todo 合格 / ready 可派发），或本就不在「推进中」集合
+ *    （done/superseded —— computeGoalGaps 只数 todo/ready/needs-human）。 */
+export function taskBlockCause(
+  task: { id: string; status: string | null },
+  judgment: ReadyPoolJudgment,
+): BlockedGapState | null {
+  if (task.status === TASK_STATUS.NEEDS_HUMAN) return "blocked-needs-human";
+  if (task.status === "todo") return judgment.eligibleTodoIds.has(task.id) ? null : "blocked-promotion";
+  if (task.status === "ready") return judgment.excludedReadyIds.has(task.id) ? "blocked-dispatch" : null;
+  return null;
+}
+
+/** 一条关联任务是否「无法自行前进」（G9 的结构判据）。⛔ 只是上面 `taskBlockCause` 的布尔投影 ——
+ *  保留旧名给既有调用方/单测，判定不另写一遍。 */
 export function isTaskStuck(task: { id: string; status: string | null }, judgment: ReadyPoolJudgment): boolean {
-  if (task.status === TASK_STATUS.NEEDS_HUMAN) return true;
-  if (task.status === "todo") return !judgment.eligibleTodoIds.has(task.id);
-  if (task.status === "ready") return judgment.excludedReadyIds.has(task.id);
-  return false;
+  return taskBlockCause(task, judgment) !== null;
+}
+
+/** 一组在飞任务的**阻断读数**：**全部**无法自行前进 ⇒ 一条 `blocked-*` 态 + 逐条成因；否则 null
+ *  （不是「卡住」）。`state` 取 `BLOCKED_GAP_STATES` 的**优先级序**里的第一个（needs-human >
+ *  promotion > dispatch：人的决定解开其余一切），而 `blocker.tasks` 逐条带出**每一条任务自己的**
+ *  成因（硬规则 3：⛔ 不把第二种成因压在第一种下面）。
+ *
+ *  `judgment === null`（读不到 ready-pool-check）⇒ 只有 needs-human 成因可判（它不需要结构量）；
+ *  任一任务读不懂成因 ⇒ 整组**不判** blocked（回落 in-progress）——⛔ 不把「读不懂」伪装成「卡住」，
+ *  今日语义逐字保留。 */
+export function blockedReadingOf(
+  tasks: Array<{ id: string; status: string | null }>,
+  judgment: ReadyPoolJudgment | null,
+): { state: BlockedGapState; blocker: GoalBlocker } | null {
+  if (tasks.length === 0) return null;
+  const perTask: GoalBlockerTask[] = [];
+  for (const t of tasks) {
+    const cause = judgment === null
+      ? (t.status === TASK_STATUS.NEEDS_HUMAN ? "blocked-needs-human" : null)
+      : taskBlockCause(t, judgment);
+    if (cause === null) return null; // 有可自行前进（或读不懂）的任务 ⇒ 整组不是 blocked
+    perTask.push({ id: t.id, cause });
+  }
+  perTask.sort((a, b) => a.id.localeCompare(b.id, "en", { numeric: true }));
+  const cause = BLOCKED_GAP_STATES.find((s) => perTask.some((t) => t.cause === s));
+  // `perTask` 非空且每条都有成因 ⇒ find 必命中；写成显式分支只为让类型可证（⛔ 不 assert）。
+  if (cause === undefined) return null;
+  return { state: cause, blocker: { cause, tasks: perTask } };
+}
+
+/** 一组在飞任务的缺口读数：全阻断 ⇒ 对应 `blocked-*` 态（带 blocker）；否则 `in-progress`。
+ *  ⛔ 五处曾各自写一遍「全 needs-human / 全 isTaskStuck / 否则 in-progress」的三段式 —— 收敛到这里，
+ *  新增一种成因只改 `taskBlockCause` 一处（硬规则 5b）。 */
+function inFlightOrBlocked(
+  goal: string,
+  ac: string,
+  inFlight: Array<{ id: string; status: string | null }>,
+  judgment: ReadyPoolJudgment | null,
+): GoalGap {
+  const blocked = blockedReadingOf(inFlight, judgment);
+  if (blocked === null) return { goal, ac, state: "in-progress", taskCount: inFlight.length };
+  return { goal, ac, state: blocked.state, taskCount: inFlight.length, blocker: blocked.blocker };
 }
 
 /** 「牵引」状态集合的单一真相源：一条关联任务处于「推进中」的状态（todo/ready/needs-human）。
@@ -2186,12 +2241,15 @@ export function standingReverifyAcs(
  *  互不同形，gap-done-unresolved-conflates-workable-with-world-gated）**：workable（判据只读仓库内工作
  *  产物 ⇒ 还有 worker 能改变它 ⇒ 立案）/ world-gated（判据读 `.quay/<file>` 生产载体 ⇒ 真值是立案之后
  *  的未来生产事件、无 worker 能产出 ⇒ ⛔ 不 spawn，走复读路由）/ unclassified（读不到/解析不出判据 ⇒
- *  独立取值、⛔ 不消耗名额）；另加 stalled（有牵引任务但全都无法自行前进——G9，judgment 提供结构量；
- *  ⚠️ needs-human 亦属 stalled：已离开 todo/ready、需人处理，有处理者但不能自行前进，且与 judgment 无关）
- *  / in-progress（有牵引且可前进）/ not-evaluated（taskFacts == null）。
- *  judgment===null（读不到 ready-pool-check）⇒ 不判 stalled（⛔ 不把「读不懂」伪装成「卡住」，
- *  也不伪装成「推进中」——stalled 只是对 in-progress 的细化，读不懂时回到 in-progress），
- *  ⛔ 例外：关联集合全为 needs-human 时无论 judgment 有无都判 stalled（needs-human 不需要
+ *  独立取值、⛔ 不消耗名额）；另加**三态阻断**（有牵引任务但全都无法自行前进——G9，按**成因**分派，
+ *  见 `blockedReadingOf` / `taskBlockCause`）：blocked-needs-human（全 parked needs-human ⇒ 人）/
+ *  blocked-promotion（全 todo 过不了晋升门 ⇒ 修四件套）/ blocked-dispatch（全 ready 被 pool 排除 ⇒
+ *  查依赖与 worktree）；外加 in-progress（有牵引且可前进）/ not-evaluated（taskFacts == null）。
+ *  ⚠️ 旧字面量 `stalled` 保留在 `GapState` 词表里做**迁移期兼容**（旧轮载体、fixture、历史导入面），
+ *  但本函数 **不再 emit 它**（2026-11-07 起，gap-goal-driver-blocked-taxonomy）。
+ *  judgment===null（读不到 ready-pool-check）⇒ 不判 promotion/dispatch（⛔ 不把「读不懂」伪装成
+ *  「卡住」，也不伪装成「推进中」——它们只是对 in-progress 的细化，读不懂时回到 in-progress），
+ *  ⛔ 例外：关联集合全为 needs-human 时无论 judgment 有无都判 blocked-needs-human（needs-human 不需要
  *  ready-pool 结构量即可判定「不能自行前进」）。
  *  ⛔ 本仓任务无独立 in-flight 态——派发中的任务 status 仍为 todo/ready，故「牵引」集合 =
  *  {todo, ready, needs-human}（单一真相源 = isTractionStatus）。done/superseded 等非牵引态
@@ -2390,12 +2448,10 @@ export function computeGoalGaps(
         out.push({ goal, ac: id, state: "not-evaluated", taskCount: null });
       } else if (inFlight.length === 0) {
         out.push({ goal, ac: id, state: "frozen-violated", taskCount: 0 });
-      } else if (inFlight.every((t) => t.status === TASK_STATUS.NEEDS_HUMAN)) {
-        out.push({ goal, ac: id, state: "stalled", taskCount: inFlight.length });
-      } else if (judgment !== null && inFlight.every((t) => isTaskStuck(t, judgment))) {
-        out.push({ goal, ac: id, state: "stalled", taskCount: inFlight.length });
       } else {
-        out.push({ goal, ac: id, state: "in-progress", taskCount: inFlight.length });
+        // 在飞但全都无法自行前进 ⇒ 按**成因**三态（blocked-needs-human / -promotion / -dispatch，
+        // 见 `blockedReadingOf`）；否则 in-progress。⛔ 不再压成同一个 `stalled`。
+        out.push(inFlightOrBlocked(goal, id, inFlight, judgment));
       }
       continue;
     }
@@ -2462,12 +2518,8 @@ export function computeGoalGaps(
       const inFlight = taskFacts.filter((t) => t.goalAc === id && isTractionStatus(t.status));
       if (inFlight.length === 0) {
         out.push({ goal, ac: id, state: "standing-violated", taskCount: 0 });
-      } else if (inFlight.every((t) => t.status === TASK_STATUS.NEEDS_HUMAN)) {
-        out.push({ goal, ac: id, state: "stalled", taskCount: inFlight.length });
-      } else if (judgment !== null && inFlight.every((t) => isTaskStuck(t, judgment))) {
-        out.push({ goal, ac: id, state: "stalled", taskCount: inFlight.length });
       } else {
-        out.push({ goal, ac: id, state: "in-progress", taskCount: inFlight.length });
+        out.push(inFlightOrBlocked(goal, id, inFlight, judgment));
       }
       continue;
     }
@@ -2522,15 +2574,18 @@ export function computeGoalGaps(
         state = classifyCriterionKind(r.criterion);
         taskCount = allAssociated.length; // 枚举关联数（⛔ 非布尔化，硬规则 3）
       }
-    } else if (traction.every((t) => t.status === TASK_STATUS.NEEDS_HUMAN)) {
-      state = "stalled";
-      taskCount = count;
-    } else if (judgment !== null && traction.every((t) => isTaskStuck(t, judgment))) {
-      state = "stalled";
-      taskCount = count;
     } else {
-      state = "in-progress";
-      taskCount = count;
+      // 有牵引但全都无法自行前进 ⇒ 按成因三态（见 `blockedReadingOf`）；否则 in-progress。
+      // ⛔ 三态互不同形（硬规则 3b）：needs-human 要人、promotion 要四件套、dispatch 要查依赖/worktree，
+      // 处置完全不同，压回一个 `stalled` 正是本任务修的缺陷（gap-goal-driver-blocked-taxonomy）。
+      const blocked = blockedReadingOf(traction, judgment);
+      if (blocked === null) {
+        state = "in-progress";
+        taskCount = count;
+      } else {
+        out.push({ goal, ac: id, state: blocked.state, taskCount: count, blocker: blocked.blocker });
+        continue;
+      }
     }
     out.push({ goal, ac: id, state, taskCount });
   }
@@ -3418,7 +3473,9 @@ export interface GapSpawnPassResult {
  *  判据只读**仓库内工作产物** ⇒ 还有 worker 能改变它）+ `standing-violated`（AC-216 复验域内常设不变式
  *  此刻违反且无在飞任务）+ `frozen-violated`（**冻结population**：已离开复验域、台账尾读数说此刻为假、
  *  且无在飞任务——⛔ 与 standing-violated 是两个 population（域外/域内），合并即把「离开域后没人管」
- *  这条正好要修的形态重新藏起来）。其余态⛔ 不消耗 spawn 名额：stalled/in-progress 已有人在处理，
+ *  这条正好要修的形态重新藏起来）。其余态⛔ 不消耗 spawn 名额：blocked-*（needs-human / promotion /
+ *  dispatch）/in-progress 已有人或已在处理（blocked-* 的下一步是**修那条任务**，⛔ 不是再立一条新任务），
+ *  `stalled` 是迁移期输入字面量（⛔ 本轮 fact 不再 emit，见 computeGoalGaps），
  *  `world-gated`（判据读生产载体 ⇒ 真值是未来生产事件、⛔ 无 worker 能产出它——见 `worldGatedRoutes` 的
  *  复读路由）、`unclassified` 是**读不到判据载体**（硬规则 3b），standing-ok 无工作要立，
  *  not-evaluated 是读不到 tasks/I5 而不是缺口，`derived-routed` 的红归 ③ 的主体 AC、⛔ 不归这条元判据
@@ -3472,10 +3529,16 @@ export function worldGatedRoutes(
  *  ⛔ `taskCount` 原样带出（`not-evaluated` 时是 `null`，⛔ 不与 `0` 同形，硬规则 3）。 */
 export function gapViewEntries(
   gaps: Array<GoalGap>,
-): Array<{ goal: string; ac: string; state: GapState; taskCount: number | null }> {
+): Array<{ goal: string; ac: string; state: GapState; taskCount: number | null; blocker?: GoalBlocker }> {
   return gaps
     .filter((g) => !GAP_VIEW_QUIET_STATES.includes(g.state))
-    .map((g) => ({ goal: g.goal, ac: g.ac, state: g.state, taskCount: g.taskCount }));
+    // ⚠️ `blocker` 只对被阻断的读数是第五键——非阻断条目仍是**恰好四键**（既有消费方的形状不变，
+    // ⛔ 也不给它们补一个空的 blocker：空对象会与「查过且无阻断」同形，硬规则 3b）。
+    .map((g) =>
+      g.blocker === undefined
+        ? { goal: g.goal, ac: g.ac, state: g.state, taskCount: g.taskCount }
+        : { goal: g.goal, ac: g.ac, state: g.state, taskCount: g.taskCount, blocker: g.blocker },
+    );
 }
 
 /** 组装 `goal-gaps` fact。⛔ 两个半边必须**可分**（硬规则 3b）：
