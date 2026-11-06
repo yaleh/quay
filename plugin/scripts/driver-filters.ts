@@ -1037,6 +1037,9 @@ function refuseTakeDevelop(
 /** 结构冲突下的终局解：硬取 develop，丢弃 doc 侧独有提交（人 2026-09-06 裁定允许）。
  *  **这是让「语义同步必成功、永不卡死」第一次真正成立的那一步**——在此之前结构冲突即
  *  return false 且无升级接线（实测 21/26 卡死在那里）。
+ *  ⛔ 但本函数末尾的两个守卫（可弃性 / 工作树）是这条不变量的**例外**：它们【有意拒绝】并让同步
+ *  等待（不永久 wedge，冻结期间不算「成功」）；该阻塞由 meta-driver 读数承载升级——人 2026-11-06
+ *  裁定，见 `tasks/gap-meta-call-author-develop-take-develop-30.md`。
  *  ⛔ 允许丢失 ≠ 允许静默丢失：被丢弃的提交先逐条枚举进事件（硬规则 3 枚举不布尔），
  *  再 reset。丢了什么在载体里查得到，⛔ 不是「同步成功」四个字。
  *  ⛔ 允许丢失 ≠ 允许丢任何东西（gap-develop-sync-reset-hard-destroys-third-party-project-tree）：
