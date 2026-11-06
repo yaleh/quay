@@ -122,6 +122,10 @@ extra:
 
 在真实宿主上用**同口径**复采一次 bpftrace execve trace（同一个 10 秒窗口、同一谓词），`git` exec 总量较基线 31,918/10s 显著下降，且归属表里 `ready-pool-check.ts` 与 `task-status-drift-check.js` 不再是前两名 —— 修复前后的归属表逐字贴进任务体。只证明「加了缓存代码」或只跑单测不算（DIR-026 Reading A）；fixture 计数是必要不充分条件，生产 execve 读数是判据。
 
+## Dark axis (ADR-007)
+
+该轴仍暗,理由:全机 execve 窗口被背景噪声淹没(同机背靠背两个 10 秒窗口 23,917 vs 50,562)，取不到可比的 L_G 全机读数；本任务的判据落在每调用/每子树 git spawn 计数上，未改任何模块的依赖方向(L_D 无变化)。
+
 ## Touches
 
 - plugin/scripts/ready-pool-check.ts
