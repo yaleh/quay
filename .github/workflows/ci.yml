@@ -81,9 +81,12 @@ jobs:
     # server-restart* / verification-marginal-return 等），10 分钟这个字面量已经不够。⛔ 不是回归，
     # 是套件规模增长追上了预算；把预算调宽，⛔ 不要把并发再往上堆（4 核 runner，堆并发只加剧争用，
     # 参见下面「Run tests」步骤自己的注释）。
-    # 上面这段全部是 ubuntu-latest 4 核时代的记录，保留是因为回退时（见上）这个 25 分钟预算和
+    # 上面这段全部是 ubuntu-latest 4 核时代的记录，保留是因为回退时（见上）这个预算和
     # --test-concurrency=8 要一起恢复；tokyo-alpha 是 128 核，budget 留宽松值即可，不必收紧。
-    timeout-minutes: 25
+    # 2026-11-06: 25 → 40。runner 容器加了 --cpus=32 --memory=64g（见 gh-runner-quay.service），
+    # 同一套件在 32 核配额下会比原来（无上限、~nproc 车道）慢；25 分钟会把它砍在中途。
+    # ⛔ 恢复 25 的前提是 CI 移到独立宿主，或 process-budget 读数修好后车道数自然收敛。
+    timeout-minutes: 40
     # 2026-09-16 (gap-tokyo-alpha-runner-env-lacks-pyyaml-suite-red): the job DECLARES the locale it
     # runs the suite under instead of inheriting whatever the runner host happens to be. Two
     # order-sensitive assertions — plugin/test/test-file-snapshot.test.mjs and

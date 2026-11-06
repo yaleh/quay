@@ -112,9 +112,23 @@ while IFS= read -r rel; do
   case "$rel" in
     .quay/node-compile-cache/*|.quay/full-suite-*.log|.quay/manager-inbox/*|.quay/outer-inbox/*)
       skipped=$((skipped + 1)); continue ;;
+    # 2026-11-06: the two append-only DRIVER round ledgers are pure machine-local history and were
+    # 59% of every worktree snapshot's BYTES (meta 2.0G + goal 350M of a 3.9-4.0G snapshot; main
+    # .quay/ is 8.6G / 443,026 files). Measured on this host: one refresh copied multi-GB per run,
+    # and a single scoped-gate run emitted cp 1,638 / mkdir 1,637 / dirname 1,639 execs in ~5 s —
+    # the dominant residual process-churn source once all suites had stopped. Nothing the suite
+    # reads is in them (config/gates/runtime carriers below still copy; the runner writes its own
+    # round records). ⚠️ Only these two are excluded here on purpose: gate-events/verification-round/
+    # measure-history stay copied because live checkers may read them; shrinking those needs the
+    # test coverage tracked by gap-worktree-quay-snapshot-copies-multi-gb-ledgers.
+    .quay/meta-driver-round.jsonl|.quay/goal-round.jsonl)
+      skipped=$((skipped + 1)); continue ;;
   esac
   mkdir -p "${worktree}/$(dirname "${rel}")"
-  cp -p "${root}/${rel}" "${worktree}/${rel}" && copied=$((copied + 1)) || true
+  # --reflink=auto: on a reflink-capable FS (XFS with reflink=1 — verified on /data 2026-11-06:
+  # copying the 357 MB goal ledger consumed 640 KB) the copy shares extents, so the snapshot costs
+  # metadata instead of bytes; on any other FS cp silently falls back to a normal copy.
+  cp -p --reflink=auto "${root}/${rel}" "${worktree}/${rel}" && copied=$((copied + 1)) || true
 done < <(git -C "${root}" ls-files --others --ignored --exclude-standard -- .quay/ ':(exclude).quay/node-compile-cache/**' 2>/dev/null)
 
 echo "refresh-worktree-quay: copied ${copied} file(s) (${skipped} heavy/wasteful skipped) from ${root}/.quay into ${worktree}/.quay" >&2
