@@ -24,11 +24,12 @@ buildProbePrompt persists the full readings JSON to .quay/meta-driver-readings.j
 - [x] 若结论是「已有机制在管、只是失败」，则修那个机制，⛔ 不新建并行机制
 
 ## Evidence
-- 判据实跑（工作树 `/home/yale/work/quay-worktrees/gap-meta-buildprobeprompt`，2026-11-07）：`{"namedFiles":10}`，exit 0 —— 10 个被点名文件 = manifest + 9 个 part，全部存在、全部 < 262,144 B，合起来带 `SENTINEL-READINGS-MARKER`。
+- 判据实跑（工作树 `/home/yale/work/quay-worktrees/gap-meta-buildprobeprompt`，2026-11-07，含 suite-red 修复后的当前 HEAD）：`{"namedFiles":11}`，exit 0 —— 11 个被点名文件 = manifest 3,322 B + 10 个 part（最大 114,419 B），逐个 statSync 实测全部 < 262,144 B，合起来带 `SENTINEL-READINGS-MARKER`。
 - 生产读数实跑：现行 `.quay/meta-driver-readings.json` = **753,799 B**（> Read 上限，缺陷复现）⇒ 同一份 readings 切成 **6 个 part**（最大 116,339 B）+ manifest 2,434 B；按 part 文件自带的 `note` 语义重建后 `isDeepStrictEqual(重建, 原 readings) === true`（⛔ 不是靠丢字段把文件变小）。
 - 负控（判据能取假，`plugin/test/meta-driver.test.mjs`）：同一夹具下单文件 ≥ 256KB 被断言为真；把 prompt 指回单文件 ⇒ 同一条「超限」谓词命中 1 个 ⇒ 证明该臂可红；修复后的真实 prompt 不再点名该单文件。
 - 边界用例：300KB 单个超长字符串字段按字符切、逐字可还原；上一轮多出来的 part 不残留（整目录重建）；小读数仍是一条完整值切片（⛔ 不无谓切碎）。
-- `bash scripts/test.sh --for-task gap-meta-buildprobeprompt --allow-thin` = exit 0；`plugin/test/meta-driver.test.mjs` 181/181 pass。
+- **suite-red 修复（上一轮 exited-not-landed 的真因）**：`reshardTighter` 曾内联第 13 份 escape body，被 `packages/quay/test/kernel-regex-escape.test.mjs` ①（byte-identical body 只许一处）/④（family 判定）判红——red 面确由本任务引入，非环境。改为复用文件里**已存在**的 `./regex-escape.ts` 导入后：kernel-regex-escape 6/6 pass、`plugin/test/meta-driver.test.mjs` 181/181 pass、`packages/quay/test/build-plugin-dist.test.mjs` 45/45 pass。
+- `bash scripts/test.sh --for-task gap-meta-buildprobeprompt --allow-thin` = exit 0（本轮重跑见下）；`plugin/test/meta-driver.test.mjs` 181/181 pass。
 - 机制归属（DoD 第 2 条）：修的是**同一个**落盘点 `buildProbePrompt`（它的落盘载体从「一个超限单文件」变成「manifest + 预算内切片」，单文件仍写出供 jq/node/cat 这类不吃 Read 上限的消费者用）；⛔ 未新建第二个 prompt 组装点、未新建并行读数采集机制。
 
 ## Touches
@@ -40,11 +41,3 @@ buildProbePrompt persists the full readings JSON to .quay/meta-driver-readings.j
 
 ## ADR-007 暗轴（L_D）
 - L_D import-graph-check: valueSccs=0 typeSccs=0 reverseEdges=0 files=562 edges=1741
-
-## Blocker
-
-**2026-11-06T21:28:02.951Z — worker 未落地（exited-not-landed）**
-
-- 未落地原因：step=suite: AssertionError [ERR_ASSERTION]: exactly one file may spell the escape body; found ["packages/quay/src/kernel/regex-escape.ts","plugin/scripts/meta-driver.ts"] [baseline A/B: HARD RED (task-introduced-red) — the task's red set is NOT a subset of the develop baseline red set: added=packages/quay/test/kernel-regex-escape.test.mjs changed=-]
-- run_id：wk-prod-anchor
-- session_id：3748ec78-547f-450f-beb1-cc8a9facc7c7
