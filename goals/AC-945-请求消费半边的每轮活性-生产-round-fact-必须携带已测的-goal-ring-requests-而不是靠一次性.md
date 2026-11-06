@@ -1,7 +1,7 @@
 ---
 id: AC-945
 title: 请求消费半边的每轮活性：生产 round fact 必须携带已测的 goal-ring.requests，而不是靠一次性静态台账
-status: active
+status: achieved
 kind: criterion
 goal: GOAL-914
 criterion: "node -e \"const fs=require('fs');const
@@ -32,6 +32,11 @@ statusLog:
     to: active
     actor: goal-driver
     reason: "triage: activate"
+  - at: 2026-11-06T23:51:34.598Z
+    from: active
+    to: achieved
+    actor: goal-driver
+    reason: "I2: criterion pass"
 fidelity:
   verdict: faithful
   reason: "fidelity judge: faithful"
