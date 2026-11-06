@@ -2991,11 +2991,280 @@ export interface GapSpawnOutcome {
   timedOut: boolean;
 }
 
+// ── 立案台账（.quay/goal-filing.jsonl）：spawn → filed/not-filed 的可核实生命周期 ────────────────
+//
+// 症状：`runGapSpawnPass` 此前只记 `gap_spawns[].exitCode`，并明写「不验证立没立案，下一轮
+// readTaskFacts 独立复核」。下一轮复核能看出「该 AC 有没有带 goal_ac 的任务」，但**看不出三种完全不同
+// 的成因**：agent 根本没落盘 / 落了盘但没写 goal_ac / 落了盘但被 quay-file-task 的去重挡下。三者在下一
+// 轮都表现为同一个 `gap`，于是驱动再次 spawn（生产上 AC-109 一天内 5 次 spawn 混着这个成分）。
+//
+// 本台账把【spawn 意图】与【下一轮的核验结论】分成两类行落盘：
+//   {state:"spawned"}     spawn **之前**写（requestId / ac / goal / at / promptSha / round）
+//   {state:"filed"}       下一轮 readTaskFacts 之后，找到一个 `goal_ac == ac` 且 mtime 晚于 spawned.at
+//                          的任务 ⇒ 该次 spawn 真的立了案
+//   {state:"not-filed"}   ⛔ **独立取值**（不与 filed 同形，硬规则 3b），reason 是枚举：
+//                           no-task           tasks/ 里没有任何在 spawn 之后落盘的文件
+//                           no-goal-ac        有文件落盘，但没有一个带 `goal_ac == ac`
+//                           deduped-by-skill  零新文件，但**已存在**一条认领该 AC 的任务（quay-file-task
+//                                             的去重谓词：`gap` 态下任何状态的既有认领都算重复）
+//                           spawn-time-unreadable  spawned.at 读不懂 ⇒ 时钟不可比（⛔ 不与前三种同形）
+// `not-filed` **不直接重派**——节流归 gap-goal-driver-filing-throttle（本任务只落读数）。
+//
+// 行形态是**对外契约**：GOAL-914 的 AC-934 判据逐字读 `state` / `requestId`，⛔ 改名会让它恒红。
+
+/** 台账载体 basename（.quay/ 下，gitignored 运行时载体；已登记 docs/carrier-registry.json）。 */
+export const GOAL_FILING_BASENAME = "goal-filing.jsonl";
+/** 台账相对路径（相对 workspace root）。 */
+export const GOAL_FILING_REL = path.join(".quay", GOAL_FILING_BASENAME);
+
+/** `not-filed` 的成因（枚举，⛔ 布尔）。四态互不同形——尤其 `spawn-time-unreadable`：
+ *  「时钟读不懂」不得与「确实没立案」共用一个取值（硬规则 3b）。 */
+export type GoalFilingReason = "no-task" | "no-goal-ac" | "deduped-by-skill" | "spawn-time-unreadable";
+
+/** 一次 spawn 的意图行（spawn **之前**写）。 */
+export interface GoalFilingSpawnedRow {
+  state: "spawned";
+  requestId: string;
+  ac: string;
+  goal: string;
+  at: string;
+  /** spawn 的 prompt 的 sha256 前缀（把「spawn 了什么」也钉进载体，⛔ 不只一个时间戳）。 */
+  promptSha: string;
+  round: string;
+}
+
+/** 一次 spawn 的核验终态行（下一轮写）。 */
+export interface GoalFilingTerminalRow {
+  state: "filed" | "not-filed";
+  requestId: string;
+  ac: string;
+  goal: string;
+  /** 核验时刻。 */
+  at: string;
+  /** 对应 spawned 行的 at（跨行可读，⛔ 不要求读者回原行拼装）。 */
+  spawnedAt: string;
+  taskId: string | null;
+  reason: GoalFilingReason | null;
+}
+
+export type GoalFilingRow = GoalFilingSpawnedRow | GoalFilingTerminalRow;
+
+/** 台账路径（单一构造点）。 */
+export function goalFilingLedgerPath(root: string): string {
+  return path.join(root, GOAL_FILING_REL);
+}
+
+/** requestId 的稳定派生：`<goal>|<ac>|<round>|<序号>`。同一轮重放同一条缺口 ⇒ 同一个 id（可去重）；
+ *  下一轮的同一缺口 ⇒ 不同 round ⇒ 新 id（**两次 spawn 是两件事**，⛔ 不折叠）。 */
+export function goalFilingRequestId(goal: string, ac: string, round: string, index: number): string {
+  return `${goal}|${ac}|${round}|${index}`;
+}
+
+/** prompt 指纹（sha256 前 16 hex）。 */
+export function goalFilingPromptSha(prompt: string): string {
+  return createHash("sha256").update(prompt).digest("hex").slice(0, 16);
+}
+
+export interface GoalFilingLedgerRead {
+  /** false = 台账存在但读不动（⛔ 与「台账还不存在」不同形）。 */
+  readable: boolean;
+  rows: GoalFilingRow[];
+  /** 解析不出的行数（跳过并计数，⛔ 不让一行坏数据拖垮整份台账）。 */
+  badLines: number;
+  cause: string | null;
+}
+
+/** 读台账。文件**不存在** ⇒ readable:true + 零行（「从未 spawn 过」是一个测量，不是读不动）。 */
+export function readGoalFilingLedger(ledgerPath: string): GoalFilingLedgerRead {
+  let text: string;
+  try {
+    text = fs.readFileSync(ledgerPath, "utf8");
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code === "ENOENT") return { readable: true, rows: [], badLines: 0, cause: null };
+    return { readable: false, rows: [], badLines: 0, cause: `ledger-unreadable: ${(e as Error).message}` };
+  }
+  const rows: GoalFilingRow[] = [];
+  let badLines = 0;
+  for (const line of text.split("\n")) {
+    const s = line.trim();
+    if (s === "") continue;
+    let o: unknown;
+    try {
+      o = JSON.parse(s);
+    } catch {
+      badLines++;
+      continue;
+    }
+    const rec = (o && typeof o === "object" ? o : {}) as Record<string, unknown>;
+    const state = String(rec.state ?? "");
+    const requestId = rec.requestId;
+    const isKnownState = state === "spawned" || state === "filed" || state === "not-filed";
+    if (!isKnownState || typeof requestId !== "string" || requestId === "") {
+      badLines++;
+      continue;
+    }
+    rows.push(rec as unknown as GoalFilingRow);
+  }
+  return { readable: true, rows, badLines, cause: null };
+}
+
+/** 追加一行（fsync-less append；⛔ 失败不杀整轮——调用方把 error 记进读数）。 */
+export function appendGoalFilingRow(ledgerPath: string, row: GoalFilingRow): { ok: boolean; error: string | null } {
+  try {
+    fs.mkdirSync(path.dirname(ledgerPath), { recursive: true });
+    fs.appendFileSync(ledgerPath, `${JSON.stringify(row)}\n`);
+    return { ok: true, error: null };
+  } catch (e) {
+    return { ok: false, error: (e as Error).message };
+  }
+}
+
+/** 一条 open spawned 行的核验结论。 */
+export interface GoalFilingReconcileEntry {
+  requestId: string;
+  ac: string;
+  goal: string;
+  state: "filed" | "not-filed";
+  reason: GoalFilingReason | null;
+  taskId: string | null;
+}
+
+/** 台账核对读数（落进轮 fact 的 `value.filing`，供节流任务消费）。⛔ 三态可分（硬规则 3b）：
+ *  evaluated:false + cause = **没核对成**；evaluated:true + openAfter:0 = **查过且全部有终态**。 */
+export interface GoalFilingReading {
+  evaluated: boolean;
+  cause: string | null;
+  ledger: string;
+  /** 跳过并计数的坏行数。 */
+  badLines: number;
+  /** 本轮开始时仍 open 的 spawned 行数。 */
+  openBefore: number;
+  /** 本轮写终态之后仍 open 的 spawned 行数（恒 0，除非写终态失败——⛔ 不假装成功）。 */
+  openAfter: number;
+  /** 本轮写下的终态行数。 */
+  appended: number;
+  /** 逐条核验结论。 */
+  reconciled: GoalFilingReconcileEntry[];
+  /** 写终态失败的 requestId（⛔ 零诊断：失败必须留痕）。 */
+  errors: string[];
+}
+
+/** 下一轮（readTaskFacts **之后**）对每条仍 open 的 spawned 行核对并写终态。
+ *
+ *  `taskFacts === null`（tasks/ 读不到）⇒ 不写任何终态，落 `evaluated:false + cause:"tasks-unreadable"`：
+ *  读不到输入时写「没立案」就是把「不知道」写成结论（硬规则 3b/6）。
+ *
+ *  ⚠️ mtime 口径是 Plan 写定的「创建/更新时间晚于 spawned.at」。它的已知局限：与本 AC 无关的并发任务
+ *  文件更新也会落进 `newer`，使 `no-task` 被判成 `no-goal-ac`——两者都是 `not-filed`，只影响成因细分，
+ *  ⛔ 不影响「立没立案」这个二值结论。 */
+export function reconcileGoalFiling(
+  dataRoot: string,
+  taskFacts: Array<{ id: string; status: string | null; goalAc: string | null }> | null,
+  opts: { ledgerPath?: string; now?: () => Date } = {},
+): GoalFilingReading {
+  const ledgerPath = opts.ledgerPath ?? goalFilingLedgerPath(dataRoot);
+  const nowIso = (opts.now ?? (() => new Date()))().toISOString();
+  const base: GoalFilingReading = {
+    evaluated: false,
+    cause: null,
+    ledger: ledgerPath,
+    badLines: 0,
+    openBefore: 0,
+    openAfter: 0,
+    appended: 0,
+    reconciled: [],
+    errors: [],
+  };
+  if (taskFacts === null) return { ...base, cause: "tasks-unreadable" };
+  const read = readGoalFilingLedger(ledgerPath);
+  base.badLines = read.badLines;
+  if (!read.readable) return { ...base, cause: read.cause ?? "ledger-unreadable" };
+  const terminalIds = new Set(
+    read.rows.filter((r) => r.state === "filed" || r.state === "not-filed").map((r) => r.requestId),
+  );
+  const open = read.rows.filter((r): r is GoalFilingSpawnedRow => r.state === "spawned" && !terminalIds.has(r.requestId));
+  base.openBefore = open.length;
+  base.openAfter = open.length;
+  if (open.length === 0) return { ...base, evaluated: true };
+
+  // 任务文件的 mtime：只在**确有 open 行**时取（常见路径零成本）。文件在 readdir 与 stat 之间消失 ⇒ 跳过
+  // 该条（与 readTaskFacts 的 best-effort 同口径：不让一条坏文件拖垮整份核对）。
+  const mtimeById = new Map<string, number>();
+  for (const t of taskFacts) {
+    try {
+      mtimeById.set(t.id, fs.statSync(path.join(dataRoot, "tasks", `${t.id}.md`)).mtimeMs);
+    } catch {
+      /* vanished / unreadable ⇒ 跳过（⛔ 不当 0 时刻用——那会把「读不到」伪装成「很久以前」） */
+    }
+  }
+  const claimsAc = (ac: string): Array<{ id: string }> => taskFacts.filter((t) => t.goalAc === ac);
+  const existsOpenAfter = (ms: number): Array<{ id: string; goalAc: string | null }> =>
+    taskFacts.filter((t) => {
+      const m = mtimeById.get(t.id);
+      return typeof m === "number" && m > ms;
+    });
+
+  for (const row of open) {
+    const spawnedAtMs = Date.parse(row.at);
+    let state: "filed" | "not-filed";
+    let reason: GoalFilingReason | null = null;
+    let taskId: string | null = null;
+    if (!Number.isFinite(spawnedAtMs)) {
+      // 时钟不可比 ⇒ 独立取值（⛔ 不猜「没立案」，也⛔ 不猜「立了」）。
+      state = "not-filed";
+      reason = "spawn-time-unreadable";
+    } else {
+      const newer = existsOpenAfter(spawnedAtMs);
+      const filedTask = newer.find((t) => t.goalAc === row.ac) ?? null;
+      if (filedTask !== null) {
+        state = "filed";
+        taskId = filedTask.id;
+      } else if (newer.length > 0) {
+        state = "not-filed";
+        reason = "no-goal-ac";
+      } else if (claimsAc(row.ac).length > 0) {
+        state = "not-filed";
+        reason = "deduped-by-skill";
+      } else {
+        state = "not-filed";
+        reason = "no-task";
+      }
+    }
+    const entry: GoalFilingReconcileEntry = { requestId: row.requestId, ac: row.ac, goal: row.goal, state, reason, taskId };
+    const w = appendGoalFilingRow(ledgerPath, {
+      state,
+      requestId: row.requestId,
+      ac: row.ac,
+      goal: row.goal,
+      at: nowIso,
+      spawnedAt: row.at,
+      taskId,
+      reason,
+    });
+    if (!w.ok) {
+      base.errors.push(`${row.requestId}: ${w.error}`);
+      continue; // ⛔ 不把写失败的行算作已核对：openAfter 仍把它计为 open。
+    }
+    base.appended++;
+    base.openAfter--;
+    base.reconciled.push(entry);
+  }
+  return { ...base, evaluated: true };
+}
+
 /** G9 缺口语义环的 spawn pass 结果。 */
 export interface GapSpawnPassResult {
   spawned: number;
   llmInvoked: boolean;
   outcomes: GapSpawnOutcome[];
+  /** 立案台账本轮写下的 `spawned` 行（⛔ 与 spawn 结果分开：spawn 的 exitCode **不是**立案结论）。 */
+  filing: {
+    ledger: string;
+    appended: number;
+    rows: Array<{ requestId: string; ac: string; goal: string; at: string }>;
+    /** 写台账失败（⛔ 不静默：spawn 照常发生，但台账少一行的原因必须留下来）。 */
+    errors: string[];
+  };
 }
 
 /** spawn 选取面：哪些缺口态该立案（**单一真相源**——`runGapSpawnPass` 与判据都读它，⛔ 不各写一份谓词）。
@@ -3110,7 +3379,11 @@ export function gapViewFact(
 
 /** G9 缺口语义环的 spawn pass：可立案缺口（isFilingGapState）非空 ⇒ 过 halt + 资源门 + 每轮上限，
  *  逐条 spawn 短命 agent（一条 gap AC 一个 agent，经 quay-file-task 立案）。返回 spawned（实际 spawn 数）
- *  与 llmInvoked（派生自真实 argv，⛔ 不硬编码）。⛔ 不验证立没立案（下一轮 readTaskFacts 独立复核）。 */
+ *  与 llmInvoked（派生自真实 argv，⛔ 不硬编码）。
+ *
+ *  **本 pass 在每条 spawn 之前写一行 `spawned` 进 `.quay/goal-filing.jsonl`**（见上方的立案台账一节），
+ *  但⛔ 仍**不在本 pass 里**判立案结论——spawn 的 exitCode 是诊断量，不是立案结论；核验由
+ *  `reconcileGoalFiling` 在**下一轮** readTaskFacts 之后做（⛔ 不信 agent 自述）。 */
 export function runGapSpawnPass(
   gaps: Array<GoalGap>,
   records: Array<Record<string, unknown>>,
@@ -3122,20 +3395,29 @@ export function runGapSpawnPass(
     spawnCap?: number;
     resourceGateArgv?: string[] | null;
     halted?: boolean;
+    /** 本轮标识（requestId 的稳定派生项）。缺省 = 本 pass 开始时刻（同一轮内恒同一串）。 */
+    filingRound?: string;
+    /** 台账路径覆盖（测试缝）；缺省 `<root>/.quay/goal-filing.jsonl`。 */
+    filingLedgerPath?: string;
+    /** 时钟（测试缝）。 */
+    now?: () => Date;
   } = {},
 ): GapSpawnPassResult {
   const outcomes: GapSpawnOutcome[] = [];
+  const ledger = opts.filingLedgerPath ?? goalFilingLedgerPath(root);
+  const filing: GapSpawnPassResult["filing"] = { ledger, appended: 0, rows: [], errors: [] };
   const gapAcs = gaps.filter((g) => isFilingGapState(g.state));
-  if (gapAcs.length === 0 || opts.halted) return { spawned: 0, llmInvoked: false, outcomes };
+  if (gapAcs.length === 0 || opts.halted) return { spawned: 0, llmInvoked: false, outcomes, filing };
   // 资源门（AC150-1 同族）：spawn LLM gap-filing agent 前判定，WAIT ⇒ 退避本轮（⛔ 机械 criterion/
   // 缺口读数不受约束，零 LLM）。
   const gate = resourceGateCheck(root, opts.resourceGateArgv ?? null);
-  if (!gate.go) return { spawned: 0, llmInvoked: false, outcomes };
+  if (!gate.go) return { spawned: 0, llmInvoked: false, outcomes, filing };
   // 每轮上限读配置（goalSpawnCap：CLI --spawn-cap → drivers.yml goal.spawn_cap → 缺省），⛔ 不写死。
   const cap = goalSpawnCap(root, opts.spawnCap);
   // 每 spawn 超时读配置（goalGapWorkerTimeoutMs：显式 → drivers.yml goal.gap_worker_timeout_ms → 缺省）。
   const timeoutMs = goalGapWorkerTimeoutMs(root, opts.gapWorkerTimeoutMs);
   const targets = gapAcs.slice(0, cap);
+  const round = opts.filingRound ?? (opts.now ?? (() => new Date()))().toISOString();
   let llmInvoked = false;
   for (let i = 0; i < targets.length; i++) {
     const g = targets[i];
@@ -3149,13 +3431,33 @@ export function runGapSpawnPass(
     );
     // llm_invoked 派生自真实 argv（⛔ 不硬编码 true）；全部 targets 用同一命令前缀 ⇒ 取首条即可。
     if (i === 0) llmInvoked = isLlmInvocation(argv, opts.llmCommands ?? LLM_COMMAND_SET_DEFAULT);
+    // 台账**先**于 spawn 落盘（Plan 步骤 2）：spawn 是同步的，写在线程里等于「先有结论再有问题」；
+    // 写失败 ⛔ 不阻断 spawn（fail-soft），但错误必须留痕——否则台账会静默少一行。
+    const at = (opts.now ?? (() => new Date()))().toISOString();
+    const prompt = argv.length > 0 ? String(argv[argv.length - 1]) : "";
+    const requestId = goalFilingRequestId(g.goal, g.ac, round, i);
+    const w = appendGoalFilingRow(ledger, {
+      state: "spawned",
+      requestId,
+      ac: g.ac,
+      goal: g.goal,
+      at,
+      promptSha: goalFilingPromptSha(prompt),
+      round,
+    });
+    if (w.ok) {
+      filing.appended++;
+      filing.rows.push({ requestId, ac: g.ac, goal: g.goal, at });
+    } else {
+      filing.errors.push(`${requestId}: ${w.error}`);
+    }
     const r = spawnGapWorker(argv, root, timeoutMs);
     outcomes.push({
       ac: g.ac, goal: g.goal, exitCode: r.exitCode,
       stdout: truncateStdoutTail(r.stdout), stderr: r.stderr, timedOut: r.timedOut,
     });
   }
-  return { spawned: outcomes.length, llmInvoked, outcomes };
+  return { spawned: outcomes.length, llmInvoked, outcomes, filing };
 }
 
 // ── 充分性卡死信号（AC1~AC3 / gap-goal-sufficiency-insufficient-has-no-followup-signal）────────
@@ -3690,6 +3992,16 @@ export interface GoalRoundReadings {
    *  ⛔ 恒非 null：没跑这条读数时它是显式的 `disabled`，⛔ 不与「采集了零条」同形（硬规则 3b）。
    *  它是 AC-265 判据**本地载体**的活性证明，也是该判据「采集停了」与「CI 真红」的分界。 */
   ciRuns: CiRunsRoundReading;
+  /** 立案台账（`.quay/goal-filing.jsonl`）本轮核对读数（gap-goal-driver-filing-ledger）：
+   *  本轮写终态的条数 + 逐条 `{state, reason, taskId}` + 仍 open 的行数。
+   *  ⛔ 恒非 null（**每轮都核对**）：`evaluated:false` + `cause` = 没核对成（tasks/ 读不到），
+   *  ⛔ 不与「核对过且零条 open」同形（硬规则 3b）。下游节流任务（gap-goal-driver-filing-throttle）
+   *  消费的就是这个字段。 */
+  filing: GoalFilingReading;
+  /** 立案台账本轮写下的 `spawned` 行（**意图**，⛔ 不是立案结论）：`{ledger, appended, rows, errors}`。
+   *  ⛔ 与 `filing`（结论）分开：把两者折成一个字段会让「本轮 spawn 了」与「上一轮 spawn 立没立案」
+   *  共用同一个形状（硬规则 3b）。 */
+  filing_spawned: GapSpawnPassResult["filing"];
 }
 
 /** ⑩ 不可达的 draft：draft GOAL 及其名下的 draft AC（gap-goal-driver-draft-ac-invisible-yet-blocking
@@ -3778,6 +4090,20 @@ export interface GoalRoundOptions {
   ciRunsThrottleMs?: number;
   /** ⑨ 采集函数注入（测试缝）。缺省 = ci-runs-collect 的 collectForRound（真跑 gh）。 */
   ciRunsCollectFn?: (root: string, opts: { throttleMs?: number }) => CiRunsRoundReading;
+  /** 本轮标识（立案台账 requestId 的稳定派生项；测试缝：同一输入 ⇒ 同一 requestId，可断言重放）。 */
+  roundTag?: string;
+  /** 立案台账路径覆盖（测试缝）。缺省 `<root>/.quay/goal-filing.jsonl`。 */
+  filingLedgerPath?: string;
+  /** 时钟（测试缝）。 */
+  now?: () => Date;
+  /** `goal list` 的调用注入（测试缝）。缺省 = meta-driver 的 listGoalRecords。
+   *  ⚠️ 接缝存在的理由：pass 1 必须 `noEvidence:true`、pass 2 必须带 evidence，这是**调用事实**，
+   *  ⛔ 不是一句注释——注入后两次调用的 opts 可被逐字断言（AC「grep 可核」的可执行形态）。 */
+  listGoalRecordsFn?: (
+    scriptRoot: string | null,
+    dataRoot: string,
+    opts: { noEvidence?: boolean },
+  ) => Promise<Array<Record<string, unknown>>>;
 }
 
 export interface GoalRoundResult {
@@ -3830,9 +4156,18 @@ export async function runGoalRound(root: string, opts: GoalRoundOptions = {}): P
     };
   }
 
+  // 本轮标识（立案台账的 requestId 稳定派生项；一次 runGoalRound 内恒同一串）。
+  const roundTag = opts.roundTag ?? new Date().toISOString();
+  // list 的两处调用点（pass 1 / pass 2）只差 `noEvidence`：pass 1 不消费 evidence（唯一消费者
+  // `ledgerTailVerdict` 在 pass 2），而 evidence 由 206MB 的 `.quay/gate-events.jsonl` 派生（实测 14.4s
+  // vs 1.4s）。测试缝可整体替换（`listGoalRecordsFn`），使「pass 1 要 no-evidence、pass 2 要 evidence」
+  // 成为**可观测的调用事实**，而不是一句注释。
+  const listRecords = opts.listGoalRecordsFn ?? ((sr: string | null, dr: string, o: { noEvidence?: boolean }) => listGoalRecords(sr, dr, o));
+
   let records: Array<Record<string, unknown>>;
   try {
-    records = await listGoalRecords(scriptRoot, dataRoot);
+    // pass 1：无台账投影（`--no-evidence`）。
+    records = await listRecords(scriptRoot, dataRoot, { noEvidence: true });
   } catch (e) {
     return {
       fact: { name: "goal-ring", value: { phase: "list" }, state: "failed", reason: `list failed: ${(e as Error).message}` },
@@ -3841,6 +4176,15 @@ export async function runGoalRound(root: string, opts: GoalRoundOptions = {}): P
       gapFacts: [gapViewFact(null, "goal-list-unreadable")],
     };
   }
+
+  // ⑤ 的输入（tasks/*.md 的 goal_ac）在这里就位，**先于 pass 1**：`reconcileGoalFiling` 要给上一轮留下的
+  // `spawned` 行写终态，而 AC-934 这类「台账有没有 open 行」的判据就在 pass 1 里跑。若照旧在 pass 1 之后
+  // 才读，每条 spawn 会让判据多红一整轮（真值正确、读法滞后）。tasks/ 不被 pass 1 修改（pass 1 只翻 goal
+  // 记录），故把这个只读快照提前不改变任何语义。
+  const taskFacts = await readTaskFacts(dataRoot);
+  // 立案台账核对（Plan 步骤 3/4）：对仍 open 的 spawned 行写 filed / not-filed 终态。⛔ 不重派——
+  // 节流归 gap-goal-driver-filing-throttle；本处只把「立没立案、为何没立」写成可核的读数。
+  const filing = reconcileGoalFiling(dataRoot, taskFacts, { ledgerPath: opts.filingLedgerPath, now: opts.now });
 
   const isGoal = (r: Record<string, unknown>): boolean => String(r.id ?? "").startsWith("GOAL-");
   const isAc = (r: Record<string, unknown>): boolean => String(r.id ?? "").startsWith("AC-");
@@ -4051,7 +4395,8 @@ export async function runGoalRound(root: string, opts: GoalRoundOptions = {}): P
   let ledger = probeLedger(dataRoot);
   if (ledger.readable) {
     try {
-      const fresh = await listGoalRecords(scriptRoot, dataRoot);
+      // pass 2：**保留** evidence 刷新（`noEvidence:false`）——本 pass 判关闭时读的正是台账尾 verdict。
+      const fresh = await listRecords(scriptRoot, dataRoot, { noEvidence: false });
       const evidenceById = new Map(fresh.map((r) => [String(r.id ?? ""), r.evidence]));
       for (const r of records) {
         const id = String(r.id ?? "");
@@ -4173,7 +4518,7 @@ export async function runGoalRound(root: string, opts: GoalRoundOptions = {}): P
   // AC 给「此刻为假 / 查不成 / 无读数（此刻为真）」。taskFacts==null ⇒ 逐条 not-evaluated。
   // stalled 的结构量来自 ready-pool-check（只在存在 goal_ac 关联任务时才跑，避免每轮无谓地起一次昂贵的
   // 全池判定）。`achievedFailing`（③④ 刚读的 I5 读数）直接传进去——复验域的态由它判，⛔ 不重跑一遍判据。
-  const taskFacts = await readTaskFacts(dataRoot);
+  // `taskFacts` 在函数开头就读了（见上：立案台账核对必须早于 pass 1），此处复用同一份快照。
   const hasGoalAcTasks = taskFacts !== null && taskFacts.some((t) => t.goalAc !== null);
   const judgment = hasGoalAcTasks ? await readReadyPoolJudgment(root, opts.readyPoolCmd) : null;
   // ① 缺口分类读取**本轮判据读数**（gap-goal-active-ac-gap-classification-ignores-round-verdict）：pass 1
@@ -4258,6 +4603,10 @@ export async function runGoalRound(root: string, opts: GoalRoundOptions = {}): P
     spawnCap: opts.spawnCap,
     resourceGateArgv: opts.resourceGateArgv,
     halted,
+    // 立案台账：spawn 之前逐条写 `spawned` 行（下一轮由 reconcileGoalFiling 写终态）。
+    filingRound: roundTag,
+    filingLedgerPath: opts.filingLedgerPath,
+    now: opts.now,
   });
 
   // ⑥b 充分性卡死信号（AC1~AC3）：pass 1 收集的裁决集非空（或本轮为空——一样要过台账，把上一轮留下的
@@ -4342,6 +4691,9 @@ export async function runGoalRound(root: string, opts: GoalRoundOptions = {}): P
     gap_spawns: spawnPass.outcomes,
     sufficiency_stall: stallPass,
     ciRuns,
+    // 立案台账：核对读数（上一轮 spawned 行的**结论**）与本轮写下的 spawned 行（**意图**）分开落。
+    filing,
+    filing_spawned: spawnPass.filing,
   };
   // ⑥c 缺口可见性 fact（gap-goal-driver-computed-gaps-never-surfaced-as-a-round-fact）：`gaps` 在 ⑤ 算出后
   // 此前只喂 `runGapSpawnPass`，本 fact 把它（非安静态子集）落进轮记录 ⇒ 「哪条 AC 卡在 workable /
@@ -4384,6 +4736,10 @@ export async function runGoalRound(root: string, opts: GoalRoundOptions = {}): P
         // ⑧b 激活阻塞（gap-meta-writegoalstatus）：被能力闸拒绝的 draft AC 数。⛔ 加进这一行不是陪衬——
         // 拦截发生了却在轮记录的一行摘要里读不出来，正是 `closeUnmergedBranch` 那次 5b 遗漏的形态。
         `activationBlocked=${activationBlocked.length} ` +
+        // 立案台账（gap-goal-driver-filing-ledger）：`terminal/open` = 本轮写终态条数 / 仍 open 的行数；
+        // 没核对成 ⇒ `-`（⛔ 不折成 0——读不到与「核过且零 open」同形正是硬规则 3b 禁止的）。
+        `filing=${filing.evaluated ? `${filing.appended}/${filing.openAfter}` : "-"} ` +
+        `filingSpawned=${spawnPass.filing.appended} ` +
         // ⑨ CI run 采集：`ok(a+b+c)` = 追加 a / 补全 b / 归因 c；其余态逐字带出 status（⛔ 不折成一个布尔）。
         `ciRuns=${ciRuns.status}` +
         (ciRuns.status === "ok"
