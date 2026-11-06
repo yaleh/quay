@@ -41,10 +41,30 @@ export function parseCanonicalGlobs(repoRoot: string): string[] {
 
 /** The working-tree test files covered by scripts/test.sh's canonical glob, repo-relative, deduped
  * by realpath (matching build_deduped_files in scripts/test.sh). Returns the realpath's
- * repo-relative path, so a symlink globbed BEFORE its target collapses to the target. */
+ * repo-relative path, so a symlink globbed BEFORE its target collapses to the target.
+ *
+ * THE ROOT IS REALPATH'D TOO (measured 2026-11-06). The function realpath'd each FILE but computed
+ * `path.relative(repoRoot, <realpath>)` against the CALLER's spelling of the root. On this host
+ * `/home/yale` is a symlink to `/data/home/yale`, and the documented task-worktree location is
+ * `/home/yale/work/quay-worktrees/<id>` — so every file came back as
+ * `../../../../../data/home/yale/work/quay-worktrees/<id>/plugin/test/x.test.mjs`, which matches NO
+ * baseline entry. `test-isolation-check` then reported BOTH "N CURRENT violations with no entry"
+ * (the bogus path) AND the same N as "STALE" (the real entries never matched), i.e. a fail-closed
+ * red on every worktree under a symlinked prefix — no test-touching task could land from one.
+ * Realpathing the root is the exact mirror of what the loop already does to the file, so a
+ * symlinked and a canonical prefix produce the SAME repo-relative list. */
 export function canonicalTestFiles(repoRoot: string): string[] {
   const seen = new Set<string>();
   const out: string[] = [];
+  // The file side is realpath'd below; relativising against an unrealpath'd root can only produce
+  // traversal paths. A root that cannot be realpath'd (it should always exist) falls back to the
+  // caller's spelling — the same fail-soft the per-file realpath already uses.
+  let rootReal = repoRoot;
+  try {
+    rootReal = fs.realpathSync(repoRoot);
+  } catch {
+    rootReal = repoRoot;
+  }
   for (const pattern of parseCanonicalGlobs(repoRoot)) {
     for (const abs of expandGlob(pattern, repoRoot)) {
       let rp = abs;
@@ -55,7 +75,7 @@ export function canonicalTestFiles(repoRoot: string): string[] {
       }
       if (seen.has(rp)) continue;
       seen.add(rp);
-      out.push(path.relative(repoRoot, rp).split(path.sep).join("/"));
+      out.push(path.relative(rootReal, rp).split(path.sep).join("/"));
     }
   }
   return out.sort();
