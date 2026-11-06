@@ -62,15 +62,15 @@ goal_ac: AC-943
 
 ## AC
 
-- [ ] `node --test packages/quay/test/goal-analysis.test.mjs` 退出码 0（既有行形状断言已随四字段更新）。
-- [ ] 纯函数边界：`history=[]` ⇒ 每行 `{unchangedRounds:1, unchangedRoundsEvaluated:true}`；7 轮相同 + 本轮 ⇒ `8` 且仍 `owner:"world"/kind:"wait"`；8 轮相同 + 本轮 ⇒ `9` 且 `owner:"human"`、`action.kind==="ask-human"`、`rank==="stuck-wait"`、`gapState` 仍 `world-gated`、`streakKey` 与未升级时逐字相同。
-- [ ] 负控制 1（升级不改 streak 输入）：把一条已升级行当作下一轮 history，下一轮该行 `unchangedRounds` 必须继续递增（≥10 的下一个值），⛔ 不回落成 1；把 history 里某一轮的 `streakKey` 改一个字 ⇒ 归 1。
-- [ ] 负控制 2（读不到 ≠ 未变）：`history===null` ⇒ 每行 `unchangedRounds===0 && unchangedRoundsEvaluated===false` 且无一行 `escalated===true`。
-- [ ] 载体读取：fixture 轮载体含 8 条相同 `goal-next` 行 ⇒ `readGoalNextHistory` 返回 8 条；文件不存在 ⇒ `null`（断言 `!== []`）；超 `maxRounds` ⇒ 只返回最近的 N 条。
-- [ ] driver 链路：用 fixture 载体跑一轮 `runGoalRound`，`round.facts` 里 `goal-next` 的**每一行**都含 `streakKey`/`unchangedRounds`/`unchangedRoundsEvaluated`，且启用 fixture 历史时那条连续 8 轮的等待行已升级。
-- [ ] CLI 读面：`--round-log` 指向缺 `unchangedRounds` 的旧格式轮 ⇒ exit 3 且 stdout 为 `{evaluated:false,...}`；指向合规轮 ⇒ exit 0，stdout 数组每行 `typeof unchangedRounds === "number"`。
-- [ ] AC-943 判据本体：`node --experimental-strip-types packages/quay/bin/quay.ts goal next --root . --json` 满足「每行数字型 unchangedRounds ∧ 无 `unchangedRounds>=8 && action.kind==='wait'` 的行」——需主检出跑过一轮新 goal-driver 才成立，本轮执行者做不出来（待外部）。
-- [ ] `node --test plugin/test/goal-driver.test.mjs plugin/test/goal-driver-s01.test.mjs` 退出码 0。
+- [x] `node --test packages/quay/test/goal-analysis.test.mjs` 退出码 0（既有行形状断言已随四字段更新）。
+- [x] 纯函数边界：`history=[]` ⇒ 每行 `{unchangedRounds:1, unchangedRoundsEvaluated:true}`；7 轮相同 + 本轮 ⇒ `8` 且仍 `owner:"world"/kind:"wait"`；8 轮相同 + 本轮 ⇒ `9` 且 `owner:"human"`、`action.kind==="ask-human"`、`rank==="stuck-wait"`、`gapState` 仍 `world-gated`、`streakKey` 与未升级时逐字相同。
+- [x] 负控制 1（升级不改 streak 输入）：把一条已升级行当作下一轮 history，下一轮该行 `unchangedRounds` 必须继续递增（≥10 的下一个值），⛔ 不回落成 1；把 history 里某一轮的 `streakKey` 改一个字 ⇒ 归 1。
+- [x] 负控制 2（读不到 ≠ 未变）：`history===null` ⇒ 每行 `unchangedRounds===0 && unchangedRoundsEvaluated===false` 且无一行 `escalated===true`。
+- [x] 载体读取：fixture 轮载体含 8 条相同 `goal-next` 行 ⇒ `readGoalNextHistory` 返回 8 条；文件不存在 ⇒ `null`（断言 `!== []`）；超 `maxRounds` ⇒ 只返回最近的 N 条。
+- [x] driver 链路：用 fixture 载体跑一轮 `runGoalRound`，`round.facts` 里 `goal-next` 的**每一行**都含 `streakKey`/`unchangedRounds`/`unchangedRoundsEvaluated`，且启用 fixture 历史时那条连续 8 轮的等待行已升级。
+- [x] CLI 读面：`--round-log` 指向缺 `unchangedRounds` 的旧格式轮 ⇒ exit 3 且 stdout 为 `{evaluated:false,...}`；指向合规轮 ⇒ exit 0，stdout 数组每行 `typeof unchangedRounds === "number"`。
+- [ ] AC-943 判据本体：`node --experimental-strip-types packages/quay/bin/quay.ts goal next --root . --json` 满足「每行数字型 unchangedRounds ∧ 无 `unchangedRounds>=8 && action.kind==='wait'` 的行」——需主检出跑过一轮新 goal-driver 才成立，本轮执行者做不出来。（待外部）
+- [x] `node --test plugin/test/goal-driver.test.mjs plugin/test/goal-driver-s01.test.mjs` 退出码 0。
 
 ## DoD
 
@@ -79,3 +79,43 @@ goal_ac: AC-943
 升级路径必须被**真实数据**走过一次或给出它当前的距阈值读数：生产载体里 2026-11-06 19:53–20:44Z 已有 6 条连续 `world-gated/world/wait` 行，落地后继续累积；若 `unchangedRounds` 已达 8，该行必须已呈 `ask-human`/`human`/`stuck-wait`；若尚未到 8，证据文档必须写明当前值 N 与「还差几轮」，并用 fixture 轮的 driver 输出证明同一代码路径在 ≥8 时确实升级（fixture 证明的是路径存在，⛔ 不能替代生产读数的存在性）。证据文档与 `quay goal next --json` 原始输出一并贴进任务或证据文件。
 
 不是 DoD：字段加上了、单测绿了、而生产载体里一轮都没出现过 —— 那只是「能产出」，不是「已产出」。
+
+## Evidence
+
+### 实现落点（提交 88ec67d0d，分支 task/gap-goal-next-unchanged-rounds-escalation）
+
+- Core 纯函数（`packages/quay/src/core/goal-analysis.ts`）：`GoalNextRow` 四字段 + `GOAL_NEXT_UNCHANGED_ESCALATE_THRESHOLD` + `streakKeyOf` / `unchangedRoundsOf` / `withPersistence`；`goalNextProjection(records, gaps, taskFacts, history = [])`；`GOAL_NEXT_PRIORITY` 新增 `stuck-wait`（紧接 `needs-human` 之后）。
+- 轮载体单一实现（新 `packages/quay/src/core/goal-round-carrier.ts`）：`readRoundLogTail` 从 `cli/goal.ts` 上收（有界 tail、丢半行），新增 `readGoalNextHistory`（文件不可读 ⇒ `null`，⛔ 不是 `[]`；无 `goal-next` fact 的轮被过滤、既不计数也不打断）。
+- driver 接线（`plugin/scripts/goal-driver.ts` + `driver-runtime.ts`）：`GoalRoundOptions.goalRoundCarrierPath` 测试缝；⑤b 读 history 传投影；`goal-next` fact 的 reason 带升级行数；`main()` 把 `--round-log` 同一个文件同时接给读面（否则读的与写的是两个文件）。
+- CLI（`packages/quay/src/cli/goal.ts` + `help.ts`）：行校验新增三字段（旧格式轮 ⇒ exit 3，⛔ 不补 0），文本模式行尾 `rounds=<N|NOT-EVALUATED>` 与 `⬆escalated`；help 同步。
+
+### 边界取值的一处口径说明（透明记录）
+
+Plan 写的是 `unchangedRounds >= 8` 触发升级，而 AC 的两半逐字钉住了另一条边界：7 个相同历史轮 + 本轮（= 8）**仍**是 `world/wait`，8 个 + 本轮（= 9）才升级。实现按 **AC** 落地（`unchangedRounds > GOAL_NEXT_UNCHANGED_ESCALATE_THRESHOLD`，即 8 个**先前**轮之后），常量注释里写明了禁止「简化」成 `>= 8`。
+
+### AC 逐条（命令与读数，2026-11-07 于本 worktree）
+
+- AC1：`node --test packages/quay/test/goal-analysis.test.mjs` ⇒ exit 0，`tests 21 / pass 21 / fail 0`。
+- AC2/AC3/AC4（纯函数三态与两条负控制）：同一文件的 `AC2 persistence: …`（history=[] ⇒ 1/evaluated；7+1=8 仍 wait；8+1=9 ⇒ `human`/`ask-human`/`stuck-wait`/`gapState=world-gated`/`streakKey` 不变）、`AC3 negative control 1`（已升级行做 history ⇒ 10，⛔ 不回落 1；改一个字符 ⇒ 1）、`AC4 negative control 2`（`history===null` ⇒ 0 + `evaluated:false` + 无 escalated）全部 pass。
+- AC5：`node --test packages/quay/test/goal-round-carrier.test.mjs` ⇒ exit 0，`tests 5 / pass 5`（8 轮 ⇒ 8 条；缺失 ⇒ `null` 且 `!== []`；`maxRounds` 取最新 N；无 fact 的轮被过滤；半行被丢弃）。
+- AC6：`plugin/test/goal-driver.test.mjs` 的 `⑫ …` ⇒ 真跑 4 轮 `runGoalRound`：载体不存在 ⇒ 每行 0/`evaluated:false`/无升级；空载体 ⇒ 1/true；8 个历史轮 ⇒ 第 9 轮 `unchangedRounds=9`、`stuck-wait`/`human`/`ask-human`、`gapState` 仍 `world-gated`、fact reason 带「升级 1 行」；1 个历史轮 ⇒ 2 且不升级。
+- AC7：同文件 `AC7 CLI: a round from the PREVIOUS driver …` ⇒ exit 3 + `{evaluated:false, reason:…streakKey…}`；`AC7 CLI: a compliant round …` ⇒ exit 0 且每行 `typeof unchangedRounds === "number"`，文本模式 `rounds=9` + `escalated`。
+- AC8（AC-943 判据本体）：**未勾**，本轮执行者结构上做不出来（需落地后主检出跑一轮新 goal-driver）——已按（待外部）标注。
+- AC9：`node --test plugin/test/goal-driver.test.mjs plugin/test/goal-driver-s01.test.mjs` ⇒ exit 0，`tests 46 / pass 46 / fail 0`。
+- 预合并门：`bash scripts/test.sh --for-task gap-goal-next-unchanged-rounds-escalation --allow-thin` ⇒ exit 0；`anti-drift-touches-check.ts --merge-target develop` ⇒ `ANTI-DRIFT OK … 9 actual file(s), all within declared Touches`。
+
+### 生产读数（DoD 的第二半：当前值 N 与还差几轮）
+
+本 worktree 落地**之前**的真实读数（只读主检出载体 `.quay/goal-round.jsonl`，351.6MiB，按实现同一算法逐轮回数）：
+
+- 最新一轮 `round=3 @ 2026-11-06T21:13:18.050Z` 的 `GOAL-914/AC-936` 行 `world-gated/world-gated/world/wait`，其 `unchangedRounds` 若由新代码计算 = **1**（上一轮的 GOAL 行被 `AC-943/gap/gap/driver/file-task` 占据 ⇒ 该 AC 的行不连续，计数从本轮重新开始）。
+- 同窗口内该行连续不变的最大值 = **6**（`round 2..1 @ 19:53–20:44Z`，与 Proposal 的实测一致）。
+- 距阈值：按实现的边界（`unchangedRounds > 8`），从 N=1 起还需 **8 个连续相同轮**；若中间出现「本 GOAL 的选中行换 AC」，计数按设计归 1（那不是同一行）。
+- 读数窗口是否够深：代码的 8MiB tail 在该载体上覆盖 **14** 个带 `goal-next` 的轮（≥ 阈值 8），故有界 tail 不构成「永远数不到阈值」的截断。
+
+`quay goal next --root . --json` 的原始输出要等主检出跑过一轮新 goal-driver 才有（当前最新轮是旧驱动写的、行里没有持久度字段，按 AC7 的口径会 exit 3 NOT-EVALUATED —— 这正是「旧格式轮 ⛔ 不补 0」那条负控制的形状，不是本次实现失败）。
+
+### ADR-007 暗轴记录
+
+- L_D code:doc — docLines=0 codeLines=793 ratio=0.000 verdict=PASS flagged=false（`experiments/quay-perpetual-stream/scripts/git-lens-instrument.mjs ld --numstat-file`，输入 = 本分支 vs develop 的 `git diff --numstat`，2026-11-07 实测）
+该轴仍暗,理由:本工作区没有 archguard query manifest（`git-lens-instrument.mjs lg` 返回 `scope-not-evaluated`，archguard MCP 在本 worker 会话不可用），故 L_G 无目录级环读数；本改动只新增一个 Core 叶子模块 `goal-round-carrier.ts`，新增边为 `cli/goal.ts → carrier`、`driver-runtime.ts → carrier`、`carrier → goal-analysis.ts`（仅类型），全部单向、不引入包级环。
