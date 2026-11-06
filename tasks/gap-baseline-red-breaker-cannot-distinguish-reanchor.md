@@ -51,9 +51,8 @@ extra:
 
 ## Evidence
 
-复跑（唯一入口）：`node --nwarnings` 无关；实际为
-`node --no-warnings --experimental-strip-types --test plugin/test/worker-fan-in-baseline-red.test.mjs`
-（该文件是本任务 Touches 内唯一测试文件；scoped 门同一条命令也跑它，见下「门」段）
+复跑（唯一入口）：`node --no-warnings --experimental-strip-types --test plugin/test/worker-fan-in-baseline-red.test.mjs`
+（它是本任务 Touches 内的测试文件；下「门」段的 `scripts/test.sh --for-task … --allow-thin` 也覆盖它）
 
 ### AC1 — 正臂 + 聚合优先级（逐字读数）
 
