@@ -1,7 +1,7 @@
 ---
 id: gap-develop-red-set-empty-conflates-clean-with-not-evaluated
 title: develop 红基线集把「评估过且全绿」与「没评估成」写成同一个空集 ⇒ 每次负载 flake 都被判成本任务引入
-status: todo
+status: ready
 labels:
   - gap
 parent: null
