@@ -1,7 +1,7 @@
 ---
 id: gap-meta-call-ac-936-needs-a-human-run-goal-request-in
 title: AC-936 needs a human-run goal request in the main checkout
-status: todo
+status: ready
 labels:
   - meta-human-call
   - meta-driver
