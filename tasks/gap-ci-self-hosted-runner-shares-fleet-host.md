@@ -1,7 +1,7 @@
 ---
 id: gap-ci-self-hosted-runner-shares-fleet-host
 title: self-hosted CI runner 与 quay fleet 同机跑同一 repo 的 suite（第 4 个并发源）
-status: todo
+status: ready
 labels:
   - gap
 parent: null
