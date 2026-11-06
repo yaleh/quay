@@ -925,7 +925,9 @@ export function deriveGoalCarrierSignals(
 /** 动作记录扫描结果的载体（gitignored 运行时状态，与轮载体分开——它是【缓存】不是【记录】）。 */
 export const ACTION_RECORD_SCAN_REL = path.join(".quay", "action-record-scan.json");
 
-/** 一条动作记录失败（= meta-cc 查询结果里的一条 `tool_result` with `is_error`）。
+/** 一条动作记录失败（= meta-cc `query_session_signals type=errors` 结果里的一条记录；
+ *  其**实际交付形态**是投影后的 `{category, error_text, session_id, timestamp, tool_name}`，
+ *  ⛔ 不是原始 transcript 的 `message.content[].is_error` —— 见 `errorTextsFromRecord`）。
  *  `signature` 是归一化后的错误签名（同一错误的多次出现归到同一个键）；`sessionId` 是
  *  【跨会话】这个维度的承载——聚合要数的是「命中几个不同会话」，⛔ 不是「总共几条」。 */
 export interface ActionFailureRecord {
@@ -1071,10 +1073,20 @@ export function describeResultShape(queryResult: unknown): string {
   }
 }
 
-/** 从一条会话记录里枚举全部错误文本（`message.content[]` 里 `is_error:true` 的 tool_result）。
+/** 从一条会话记录里枚举全部错误文本。**枚举**候选承载点，⛔ 不赌单一键名/单一形态：
+ *   ① meta-cc `query_session_signals type=errors` 的**实际交付形态**（2026-11-06 对活语料实测，
+ *      逐字取自 `meta-cc` 的返回）：
+ *        `{category, error_text, session_id, timestamp, tool_name}`
+ *      —— `error_text` 才是本条记录的错误正文；**没有** `message.content[].is_error`。
+ *      ⛔ 漏掉这一支 = 逐条静默跳过 ⇒ 整类读数恒报 `none` 且与「查过、没有重复失败」同形
+ *      （硬规则 3b 的镜像：读到了语料、一个字段都没认出、报「检查通过」）。
+ *   ② 原始 transcript 形态：`message.content[]` 里 `is_error:true` 的 tool_result（本函数首版的
+ *      唯一一支；仍是 meta-cc 某些视图/版本可能交付的形状，保留）。
+ *   ③ 规范化 provider 形态：字符串 `error` / `error_message`。
  *  读不出任何结构 ⇒ []（本条记录没贡献），⛔ 不抛。 */
 function errorTextsFromRecord(rec: Record<string, unknown>): string[] {
   const out: string[] = [];
+  // ② 原始 transcript 形态
   const msg = rec.message;
   const content = msg && typeof msg === "object" ? (msg as Record<string, unknown>).content : undefined;
   if (Array.isArray(content)) {
@@ -1082,11 +1094,16 @@ function errorTextsFromRecord(rec: Record<string, unknown>): string[] {
       if (!c || typeof c !== "object") continue;
       const cc = c as Record<string, unknown>;
       if (cc.is_error !== true) continue;
-      out.push(flattenContentText(cc.content));
+      const text = flattenContentText(cc.content);
+      if (text.trim()) out.push(text);
     }
   }
-  // `error` 字段（部分 provider 的规范化形态）——⛔ 别赌单一键名，两条路都试。
-  if (out.length === 0 && typeof rec.error === "string" && rec.error.trim()) out.push(rec.error);
+  if (out.length > 0) return out;
+  // ①/③ 投影形态 / 规范化形态——逐条枚举候选键名（⛔ 不赌单一键名）。
+  for (const k of ["error_text", "errorText", "error", "error_message", "errorMessage"]) {
+    const v = rec[k];
+    if (typeof v === "string" && v.trim()) { out.push(v); break; }
+  }
   return out;
 }
 

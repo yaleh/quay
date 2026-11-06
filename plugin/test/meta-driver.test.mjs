@@ -2665,6 +2665,42 @@ test('extractActionFailureRecords: 读不懂 ⇒ null（⛔ 不与「读懂了�
   assert.deepEqual(extractActionFailureRecords(mkMetaCcResult([])), [], '读懂了、零记录 ⇒ []');
 });
 
+// 真实交付形态回归（2026-11-06 对活语料实测）：meta-cc `query_session_signals type=errors` 返回的是
+// **投影记录** `{category, error_text, session_id, timestamp, tool_name}`——里面**没有**
+// `message.content[].is_error`。首版只认 `is_error` ⇒ 每条记录静默跳过 ⇒ 整类读数恒报 `none`，
+// 且与「查过、无跨会话重复」同形（硬规则 3b 的镜像：读到了语料、一个字段都没认出、报「检查通过」）。
+// ⛔ 这一条固定的是【生产载体上真实出现的形状】（上面 query_session_signals 的返回），不是为解析器
+// 量身定做的 fixture——`mkErrRow` 那一支是首版作者记录的「实测」，实际交付的却是投影形态。
+const mkProjectedErrRow = (sessionId, text, ts = '2026-11-06T18:41:43.380Z', category = 'bash_exit_code') => ({
+  category, error_text: text, session_id: sessionId, timestamp: ts, tool_name: 'Bash',
+});
+test('真实交付形态：投影记录（error_text / session_id）必须被抽取并聚合（⛔ 不是只看 is_error）', () => {
+  const payload = {
+    data: [
+      mkProjectedErrRow('s1', 'Exit code 1\nls: boom'),
+      mkProjectedErrRow('s2', 'Exit code 1\nls: boom'),
+      mkProjectedErrRow('s3', 'Exit code 127\nfoo: not found'),
+    ],
+    mode: 'inline',
+  };
+  const recs = extractActionFailureRecords(payload);
+  assert.ok(Array.isArray(recs), '投影形态必须被读懂（⛔ null——null 会让读数落 not-evaluated）');
+  assert.equal(recs.length, 3, `每条投影记录贡献一条（⛔ 静默跳过）；实得 ${JSON.stringify(recs)}`);
+  assert.deepEqual(recs.map((r) => r.sessionId), ['s1', 's2', 's3'], 'session_id → sessionId（跨会话维度的承载）');
+  assert.equal(recs[0].ts, '2026-11-06T18:41:43.380Z', 'timestamp → ts');
+  const agg = aggregateActionFailures(recs, { minSessions: 2 });
+  assert.equal(agg.recordsScanned, 3, 'recordsScanned 必须 > 0（缺陷的现场读数正是 0）');
+  assert.equal(agg.state, 'crossed');
+  assert.equal(agg.aggregates[0].sessions, 2);
+  assert.equal(agg.aggregates[0].count, 2);
+  assert.match(agg.aggregates[0].signature, /^Exit code 1 /, '退出码类别逐字保留（不归一化成 <n>）');
+  // 取假控制：同一份语料抬阈值到 3 ⇒ 结论翻（证明这条测试在测聚合，不是恒真）。
+  assert.equal(aggregateActionFailures(extractActionFailureRecords(payload), { minSessions: 3 }).state, 'none');
+  // 投影记录没有错误正文 ⇒ 不贡献记录（⛔ 造出一条签名 "" 的假记录）。
+  assert.deepEqual(extractActionFailureRecords({ data: [{ category: 'uncategorized', session_id: 's9' }] }), [],
+    '读懂了、但该条无错误文本 ⇒ []（⛔ null）');
+});
+
 // AC4：取假控制，**双向**。只跑一次「报出来了」不算——必须证明把量降到阈值以下结论会翻。
 test('AC4: 双向取假控制——跨会话重复 ⇒ 报出；降到阈值以下 ⇒ 不报（两次结果必须不同）', () => {
   const rows = (n) => Array.from({ length: n }, (_, i) => mkErrRow(`s${i}`, 'Unknown skill: quay-file-task'));
