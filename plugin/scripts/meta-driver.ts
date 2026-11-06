@@ -2082,6 +2082,75 @@ export function readingsDigestPartsForParking(p: ParkingRoundReading | null | un
   return parts;
 }
 
+// ── 读数声明覆盖（gap-meta-readingsdigestpartsforparking）───────────────────────────────────────
+// 缺陷：`plugin/probes/meta-driver.md` 只声明了 readings 的**一部分**顶层键。`timeSeries` /
+// `inertCheckers` / `actionRecordFailures` / `parking` 四个键每轮随 readings 一并送到语义半，
+// 却既无释义也无处置口径 ⇒ 读到了、但没有任何动作由它触发（「有输入无输出」，兄弟实例
+// `gap-meta-addressedtasks-input-without-output-channel`）。同类缺陷发生过一次、兄弟实例原样留在
+// 同一文件里，正是硬规则 5b 的形态。
+//
+// 判据必须能取假且不能靠手写清单：**键清单从接口声明本身按位置取**（⛔ 不在测试或此处写死一份
+// 键名数组——那份清单会在下一次给 readings 加键时静默过期，而「静默过期」正是本缺陷的形态）。
+// ⛔ 不按关键词扫全文：`L_D`-式的关键词判定会把散文里的提及当成声明（硬规则 2）；这里认的是
+// 接口块内两格缩进的成员行。
+
+/** readings 顶层键的接口名（键清单的唯一来源）。 */
+export const META_ROUND_READINGS_INTERFACE = "MetaRoundReadings";
+
+/** 从 `export interface MetaRoundReadings { … }` 的**接口体**按位置取出顶层键。
+ *  嵌套成员都写在行内的 `Array<{ … }>` 里，因此「两格缩进的 `key:` 行」恰好只命中顶层键。
+ *  读不出接口块 / 块内零键 ⇒ **null**（硬规则 3b：读不懂不得与「没有缺声明」同形——`[]` 是
+ *  「查过、全声明了」这个**判定**，两者不可共用取值）。 */
+export function readingsTopLevelKeys(sourceText: string): string[] | null {
+  const text = typeof sourceText === "string" ? sourceText : "";
+  const open = text.indexOf(`export interface ${META_ROUND_READINGS_INTERFACE} {`);
+  if (open < 0) return null;
+  const bodyStart = text.indexOf("\n", open);
+  if (bodyStart < 0) return null;
+  const rest = text.slice(bodyStart + 1);
+  const end = rest.search(/^}$/m); // 接口体的闭合花括号在行首
+  if (end < 0) return null;
+  const keys: string[] = [];
+  for (const m of rest.slice(0, end).matchAll(/^ {2}([A-Za-z_$][\w$]*)\??:/gm)) keys.push(m[1]);
+  return keys.length === 0 ? null : keys;
+}
+
+/** 未在 probe 规格里具名的 readings 顶层键（排序、去重）。
+ *  `keys` 为 null/空、或 `probeText` 为空 ⇒ **null**（未评估：连键清单或规格都读不出，就无法对
+ *  「覆盖是否完整」出结论；⛔ 不与 `[]` =「查过、一个都不缺」同形）。 */
+export function undeclaredReadingsKeys(
+  keys: readonly string[] | null | undefined,
+  probeText: string,
+): string[] | null {
+  if (!Array.isArray(keys) || keys.length === 0) return null;
+  if (typeof probeText !== "string" || probeText.trim() === "") return null;
+  return [...new Set(keys)].filter((k) => !probeText.includes(k)).sort();
+}
+
+/** 规格里某个读数键的**声明块**：从行首的 `- \`<key>\`` 项目符号起，到下一个同级项目符号
+ *  （行首 `- `）为止，去掉行尾空行。找不到 ⇒ null。
+ *  ⛔ 不用 `includes` 判「具名」：`focus` 会命中 `--focus`、任何键都会命中散文里的提及。
+ *  「被声明」= 它有一个属于自己的项目符号块，块里才有释义与处置口径。 */
+export function probeKeyBlock(probeText: string, key: string): string | null {
+  if (typeof probeText !== "string" || typeof key !== "string" || key === "") return null;
+  const lines = probeText.split("\n");
+  const head = `- \`${key}\``;
+  const start = lines.findIndex((l) => l.startsWith(head));
+  if (start < 0) return null;
+  let end = lines.length;
+  for (let i = start + 1; i < lines.length; i++) {
+    if (lines[i].startsWith("- ")) { end = i; break; }
+  }
+  const block = lines.slice(start, end).join("\n").replace(/\s+$/, "");
+  return block === "" ? null : block;
+}
+
+/** 一个声明块的**非空白字符数**——释义/处置口径的密度下限用（⛔ 不是「词出现过」的代理量：
+ *  一个只写了键名的项目符号在这里得 0 附近的值，恰好该被判不合格）。 */
+export function declarationDensity(block: string | null): number {
+  return typeof block === "string" ? block.replace(/\s+/g, "").length : 0;
+}
+
 // ── 变化检测（语义半的触发闸）────────────────────────────────────────────────────────────────────
 
 /** 语义半的触发状态（gitignored 运行时状态，与轮载体分开——它是【状态】不是【记录】）。 */
