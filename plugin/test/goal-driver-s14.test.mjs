@@ -26,6 +26,7 @@ import {
   goalFilingLedgerPath,
   goalFilingRequestId,
   readGoalFilingLedger,
+  readTaskFacts,
   reconcileGoalFiling,
   runGapSpawnPass,
   runGoalRound,
@@ -117,7 +118,7 @@ test("① spawn **之前**写 spawned 行：spawn 时台账里已经有它（真
 
 // ── ② filed ──────────────────────────────────────────────────────────────────────────────────────
 
-test("② 下一轮核对 ⇒ filed：带 goal_ac 的任务在 spawn 之后落盘", () => {
+test("② 下一轮核对 ⇒ filed：带 goal_ac 的任务在 spawn 之后落盘", async () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "goal-filing-filed-"));
   try {
     fs.mkdirSync(path.join(tmp, "tasks"), { recursive: true });
@@ -126,9 +127,7 @@ test("② 下一轮核对 ⇒ filed：带 goal_ac 的任务在 spawn 之后落�
     const spawnedAtMs = Date.parse(spawned.at);
     const file = writeTask(tmp, { id: "gap-task-a", goalAc: "AC-001" });
     setMtime(file, spawnedAtMs + 5000);
-    const reading = reconcileGoalFiling(tmp, [
-      { id: "gap-task-a", status: "todo", goalAc: "AC-001" },
-    ]);
+    const reading = reconcileGoalFiling(tmp, await readTaskFacts(tmp));
     assert.equal(reading.evaluated, true);
     assert.equal(reading.openBefore, 1);
     assert.equal(reading.openAfter, 0, "核对后不再有 open 行");
@@ -148,12 +147,12 @@ test("② 下一轮核对 ⇒ filed：带 goal_ac 的任务在 spawn 之后落�
 
 // ── ③ not-filed 的三种成因（枚举，⛔ 布尔） ──────────────────────────────────────────────────────
 
-test("③a not-filed/no-task：agent 根本没落盘（负控：⛔ 不得写成 filed）", () => {
+test("③a not-filed/no-task：agent 根本没落盘（负控：⛔ 不得写成 filed）", async () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "goal-filing-notask-"));
   try {
     fs.mkdirSync(path.join(tmp, "tasks"), { recursive: true });
     spawnOnce(tmp);
-    const reading = reconcileGoalFiling(tmp, []);
+    const reading = reconcileGoalFiling(tmp, await readTaskFacts(tmp));
     const entry = reading.reconciled[0];
     assert.equal(entry.state, "not-filed");
     assert.notEqual(entry.state, "filed", "负控：没立案不得与立案同形");
@@ -164,7 +163,7 @@ test("③a not-filed/no-task：agent 根本没落盘（负控：⛔ 不得写成
   }
 });
 
-test("③b not-filed/no-goal-ac：落了盘但没写 goal_ac（负控：⛔ 不得写成 filed）", () => {
+test("③b not-filed/no-goal-ac：落了盘但没写 goal_ac（负控：⛔ 不得写成 filed）", async () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "goal-filing-nogoalac-"));
   try {
     fs.mkdirSync(path.join(tmp, "tasks"), { recursive: true });
@@ -172,7 +171,7 @@ test("③b not-filed/no-goal-ac：落了盘但没写 goal_ac（负控：⛔ 不�
     const spawnedAtMs = Date.parse(r.filing.rows[0].at);
     const file = writeTask(tmp, { id: "unclaimed", goalAc: null });
     setMtime(file, spawnedAtMs + 5000);
-    const reading = reconcileGoalFiling(tmp, [{ id: "unclaimed", status: "todo", goalAc: null }]);
+    const reading = reconcileGoalFiling(tmp, await readTaskFacts(tmp));
     const entry = reading.reconciled[0];
     assert.equal(entry.state, "not-filed");
     assert.equal(entry.reason, "no-goal-ac");
@@ -182,7 +181,7 @@ test("③b not-filed/no-goal-ac：落了盘但没写 goal_ac（负控：⛔ 不�
   }
 });
 
-test("③c not-filed/deduped-by-skill：零新文件，但已有一条认领该 AC 的任务", () => {
+test("③c not-filed/deduped-by-skill：零新文件，但已有一条认领该 AC 的任务", async () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "goal-filing-dedup-"));
   try {
     fs.mkdirSync(path.join(tmp, "tasks"), { recursive: true });
@@ -190,7 +189,7 @@ test("③c not-filed/deduped-by-skill：零新文件，但已有一条认领该 
     const prior = writeTask(tmp, { id: "prior-claim", status: "done", goalAc: "AC-001" });
     const r = spawnOnce(tmp);
     setMtime(prior, Date.parse(r.filing.rows[0].at) - 60_000);
-    const reading = reconcileGoalFiling(tmp, [{ id: "prior-claim", status: "done", goalAc: "AC-001" }]);
+    const reading = reconcileGoalFiling(tmp, await readTaskFacts(tmp));
     const entry = reading.reconciled[0];
     assert.equal(entry.state, "not-filed");
     assert.equal(entry.reason, "deduped-by-skill");
@@ -210,7 +209,7 @@ test("③d 三成因是**互不相同**的取值（枚举，⛔ 布尔折叠）"
 
 // ── ④ 坏行 + 重放 ────────────────────────────────────────────────────────────────────────────────
 
-test("④ 坏行跳过并计数；重放不写第二条终态（幂等）", () => {
+test("④ 坏行跳过并计数；重放不写第二条终态（幂等）", async () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "goal-filing-replay-"));
   try {
     fs.mkdirSync(path.join(tmp, "tasks"), { recursive: true });
@@ -224,7 +223,7 @@ test("④ 坏行跳过并计数；重放不写第二条终态（幂等）", () =
     assert.equal(read.badLines, 3, "坏行跳过并计数（⛔ 不让一行坏数据拖垮整份台账）");
     assert.equal(read.rows.length, 1, "有效行照常读出");
 
-    const first = reconcileGoalFiling(tmp, []);
+    const first = reconcileGoalFiling(tmp, await readTaskFacts(tmp));
     assert.equal(first.badLines, 3, "核对读数把坏行数带出来");
     assert.equal(first.appended, 1);
     assert.equal(first.openAfter, 0);
@@ -232,7 +231,7 @@ test("④ 坏行跳过并计数；重放不写第二条终态（幂等）", () =
     assert.equal(terminalRows(ledger, requestId).length, 1);
 
     // 重放：同一条已 terminate 的行不再被核对 ⇒ 零新行、零 open。
-    const second = reconcileGoalFiling(tmp, []);
+    const second = reconcileGoalFiling(tmp, await readTaskFacts(tmp));
     assert.equal(second.appended, 0, "重放不产生第二行终态");
     assert.equal(second.openBefore, 0);
     assert.equal(second.openAfter, 0);

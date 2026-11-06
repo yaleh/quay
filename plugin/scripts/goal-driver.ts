@@ -867,12 +867,21 @@ export async function sweepFrozenAcs(
   }
 }
 
-/** 读 tasks/*.md → 每条 { id, status, goalAc }。⛔ 读不到 tasks 目录（不存在 / 读失败）⇒ null，
+/** 一条 task 的读数。`mtimeMs` = 该任务文件的最后修改时刻（null = 取不到）——**立案台账的核对口径**
+ *  要它（「任务在 spawn 之后才落盘吗」），而直接在这里取而不是在消费方另开一条 tasks/ 路径，
+ *  保持「谁读任务文件」只有这一处（task-file-bypass ratchet 的意图）。 */
+export interface TaskFact {
+  id: string;
+  status: string | null;
+  goalAc: string | null;
+  /** 文件 mtime（毫秒）；null = stat 失败（⛔ 不当 0 用：那会把「读不到」伪装成「很久以前」）。 */
+  mtimeMs: number | null;
+}
+
+/** 读 tasks/*.md → 每条 { id, status, goalAc, mtimeMs }。⛔ 读不到 tasks 目录（不存在 / 读失败）⇒ null，
  * 与「零任务」不同形（硬规则 3b：读不懂输入不得返回空数组冒充「没有任务」）。单文件读失败跳过该条
  *  （best-effort，不冒充「该任务无 goal_ac」，也不让一条坏文件拖垮整个缺口读数）。 */
-export async function readTaskFacts(
-  dataRoot: string,
-): Promise<Array<{ id: string; status: string | null; goalAc: string | null }> | null> {
+export async function readTaskFacts(dataRoot: string): Promise<TaskFact[] | null> {
   const dir = path.join(dataRoot, "tasks");
   let files: string[];
   try {
@@ -880,21 +889,37 @@ export async function readTaskFacts(
   } catch {
     return null;
   }
-  const out: Array<{ id: string; status: string | null; goalAc: string | null }> = [];
+  const out: TaskFact[] = [];
   for (const f of files) {
     const id = f.slice(0, -".md".length);
+    const file = path.join(dir, f);
     let raw: string;
+    let mtimeMs: number | null = null;
     try {
-      raw = fs.readFileSync(path.join(dir, f), "utf8");
+      raw = fs.readFileSync(file, "utf8");
+      mtimeMs = fs.statSync(file).mtimeMs;
     } catch {
       continue;
     }
     const m = raw.match(/^---\r?\n([\s\S]*?)\r?\n---/);
     if (!m) continue;
     const fm = parseFrontmatterCompletely(m[1]);
-    out.push({ id, status: frontmatterStatus(fm), goalAc: frontmatterGoalAc(fm) });
+    out.push({ id, status: frontmatterStatus(fm), goalAc: frontmatterGoalAc(fm), mtimeMs });
   }
   return out;
+}
+
+/** tasks/ 下的 `.md` 文件数（null = 读不到）。立案台账用它判「spawn 之后**有没有新文件落盘**」——
+ *  ⛔ 不用「有没有文件被改过」当替代量：本仓的 promotion/worker driver 每几分钟就会改一条既有任务的
+ *  状态，那会让 `no-task` 在真实生产里恒不可达（每一次未立案都会被判成 `no-goal-ac`）。
+ *  ⚠️ 读法与 `readTaskFacts` 同形（`dir` 变量承载路径），故本函数不新增一处直接 tasks/ 路径操作。 */
+export function countTaskFiles(dataRoot: string): number | null {
+  const dir = path.join(dataRoot, "tasks");
+  try {
+    return fs.readdirSync(dir).filter((f) => f.endsWith(".md")).length;
+  } catch {
+    return null;
+  }
 }
 
 // ── 纯推导（可单测）────────────────────────────────────────────────────────────────────────
@@ -3031,6 +3056,9 @@ export interface GoalFilingSpawnedRow {
   /** spawn 的 prompt 的 sha256 前缀（把「spawn 了什么」也钉进载体，⛔ 不只一个时间戳）。 */
   promptSha: string;
   round: string;
+  /** spawn 那一刻 `tasks/*.md` 的文件数（null = 读不到）。核对时用它判「有没有**新文件**落盘」——
+   *  ⛔ 不用「有没有文件被改过」（那会把并发的状态翻转误读成立案）。 */
+  taskCount: number | null;
 }
 
 /** 一次 spawn 的核验终态行（下一轮写）。 */
@@ -3159,7 +3187,7 @@ export interface GoalFilingReading {
  *  ⛔ 不影响「立没立案」这个二值结论。 */
 export function reconcileGoalFiling(
   dataRoot: string,
-  taskFacts: Array<{ id: string; status: string | null; goalAc: string | null }> | null,
+  taskFacts: TaskFact[] | null,
   opts: { ledgerPath?: string; now?: () => Date } = {},
 ): GoalFilingReading {
   const ledgerPath = opts.ledgerPath ?? goalFilingLedgerPath(dataRoot);
@@ -3187,22 +3215,12 @@ export function reconcileGoalFiling(
   base.openAfter = open.length;
   if (open.length === 0) return { ...base, evaluated: true };
 
-  // 任务文件的 mtime：只在**确有 open 行**时取（常见路径零成本）。文件在 readdir 与 stat 之间消失 ⇒ 跳过
-  // 该条（与 readTaskFacts 的 best-effort 同口径：不让一条坏文件拖垮整份核对）。
-  const mtimeById = new Map<string, number>();
-  for (const t of taskFacts) {
-    try {
-      mtimeById.set(t.id, fs.statSync(path.join(dataRoot, "tasks", `${t.id}.md`)).mtimeMs);
-    } catch {
-      /* vanished / unreadable ⇒ 跳过（⛔ 不当 0 时刻用——那会把「读不到」伪装成「很久以前」） */
-    }
-  }
-  const claimsAc = (ac: string): Array<{ id: string }> => taskFacts.filter((t) => t.goalAc === ac);
-  const existsOpenAfter = (ms: number): Array<{ id: string; goalAc: string | null }> =>
-    taskFacts.filter((t) => {
-      const m = mtimeById.get(t.id);
-      return typeof m === "number" && m > ms;
-    });
+  // 「spawn 之后有没有**新文件**落盘」：文件数是主判据（见 countTaskFiles 的注释）；读不到计数时
+  // 回落到「有没有文件的 mtime 晚于 spawned.at」（较弱，但⛔ 不把「读不到」当成「没有」）。
+  const currentTaskCount = countTaskFiles(dataRoot);
+  const newerThan = (ms: number): TaskFact[] =>
+    taskFacts.filter((t) => typeof t.mtimeMs === "number" && t.mtimeMs > ms);
+  const claimsAc = (ac: string): TaskFact[] => taskFacts.filter((t) => t.goalAc === ac);
 
   for (const row of open) {
     const spawnedAtMs = Date.parse(row.at);
@@ -3214,12 +3232,19 @@ export function reconcileGoalFiling(
       state = "not-filed";
       reason = "spawn-time-unreadable";
     } else {
-      const newer = existsOpenAfter(spawnedAtMs);
-      const filedTask = newer.find((t) => t.goalAc === row.ac) ?? null;
+      const newer = newerThan(spawnedAtMs);
+      const recordedCount = typeof row.taskCount === "number" ? row.taskCount : null;
+      // 两侧计数都读得到 ⇒ 文件数是硬判据；任一读不到 ⇒ 回落到 mtime（⛔ 不把「读不到」当「没长」）。
+      const countsComparable = recordedCount !== null && currentTaskCount !== null;
+      const grew = countsComparable ? (currentTaskCount as number) > (recordedCount as number) : newer.length > 0;
+      // 「可能是新立案」= 有增长的空间。计数可比且**没长** ⇒ 结构上不可能有新文件 ⇒ ⛔ 不判 filed
+      // （否则一条既有认领被并发状态翻转就会被误读成「这次 spawn 立了案」）。
+      const mayBeFiled = countsComparable ? grew : true;
+      const filedTask = (mayBeFiled ? newer.find((t) => t.goalAc === row.ac) ?? null : null);
       if (filedTask !== null) {
         state = "filed";
         taskId = filedTask.id;
-      } else if (newer.length > 0) {
+      } else if (grew) {
         state = "not-filed";
         reason = "no-goal-ac";
       } else if (claimsAc(row.ac).length > 0) {
@@ -3444,6 +3469,7 @@ export function runGapSpawnPass(
       at,
       promptSha: goalFilingPromptSha(prompt),
       round,
+      taskCount: countTaskFiles(root),
     });
     if (w.ok) {
       filing.appended++;
