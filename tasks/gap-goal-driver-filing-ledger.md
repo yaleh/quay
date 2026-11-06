@@ -12,8 +12,11 @@ extra:
 depends_on: []
 goal_ac: AC-934
 ---
+> **PARKED**（2026-11-06，worker `gap-goal-filing-ledger-landing`）— 实现已完整并被并入落地分支，⛔ 不要重新派发本任务（重派会重复实现同一份 958 行改动）。落地状态、决定与 unpark 检查见文末「## Landing status」。
+
 ## Proposal
 
+<!-- dedup-ref -->
 `runGapSpawnPass` 只记录 `gap_spawns[].exitCode`，并在注释里明写「不验证立没立案，下一轮 readTaskFacts 独立复核」（plugin/scripts/goal-driver.ts:3057）。下一轮复核能看出「该 AC 有没有带 goal_ac 的任务」，但看不出三种完全不同的成因：agent 根本没落盘、落了盘但没写 goal_ac、落了盘但被 quay-file-task 的去重挡下。三者在下一轮都表现为同一个 `gap`，于是驱动会再次 spawn。生产上 AC-109 一天内 5 次 spawn 混着这个成分（消费者侧读数，仅作证据）。
 
 本任务新增 `.quay/goal-filing.jsonl`：spawn 前写 `spawned`（带 requestId / ac / goal / at / promptSha），下一轮读完 tasks 后写 `filed` 或 `not-filed` 终态。`not-filed` 是独立取值，不与 `filed` 同形；它不直接重派，交给后续节流任务按冷却处理。
@@ -67,3 +70,25 @@ goal_ac: AC-934
 - 未落地原因：step=suite: incomplete suite (547/637 files) — recovery baseline-equivalence not evaluable at concurrency 16 — needs a code fix
 - run_id：wk-prod-anchor
 - session_id：fe5ebfa2-cd2c-4bc8-a1f0-0812ed282f50
+
+**2026-11-06 — 该 Blocker 的成因已由 `gap-goal-filing-ledger-landing` 复核并处理**：同一条实现分支对 develop 的
+干跑 `git merge-tree --write-tree develop task/gap-goal-driver-filing-ledger` 退出 0、无 `CONFLICT` ⇒ 那次失败是
+**本机负载/基础设施读数**，不是代码红。落地由 `gap-goal-filing-ledger-landing` 承担，本任务不再重新派发。
+
+## Landing status
+
+**2026-11-06 — 实现已被 `gap-goal-filing-ledger-landing` 并入落地分支，等待 mechanical fan-in ff 进 develop。**
+
+- 本任务分支 tip `64fe08b25ef966eaa15dc18aebb02d6e920e148d`（领先 develop 9 个提交，含实现提交 `840956f44`）已被合并进
+  落地分支 `task/gap-goal-filing-ledger-landing` 的合并提交 `88a9882dc6459406527a2cf6bde973573ed6eb47`；
+  在落地分支上 `git merge-base --is-ancestor task/gap-goal-driver-filing-ledger HEAD` = 0。
+- 落地前干跑：`git merge-tree --write-tree develop task/gap-goal-driver-filing-ledger` exit 0（无冲突）。
+- 证据：`docs/evidence/2026-11-06-goal-filing-ledger.md` §9「落地与工作区树读数」（含 AC-938 判据的落地前红 / 落地树绿两次输出，以及负臂第一次因 neg worktree 缺 `node_modules` 而红的仪器故障留痕）。
+- **决定（留给 human/manager）**：本任务**不**由 worker 自行翻 done。落地分支 ff 进 develop 之后，它已满足
+  landed-implementation 形态（`git log develop --grep gap-goal-driver-filing-ledger` 可命中 `7c70f0de8`），
+  届时按 `quay task check gap-goal-driver-filing-ledger` 走 ready→done 即可。在此之前本文件顶部的 `**PARKED**`
+  标记把它挡在派发池之外，⛔ 不重新派发——本任务 AC 已全勾、实现已完整，重派只会重复实现同一份 958 行改动。
+- **unpark 检查（只读、可直接跑）**：`git -C /data/home/yale/work/quay merge-base --is-ancestor 64fe08b25 develop && echo landed`
+  —— 输出 `landed` 即表示实现已在 develop 上；删掉本文件顶部那行 `> **PARKED**` 后按上一条翻 done。
+- worktree `/data/home/yale/work/quay-worktrees/gap-goal-driver-filing-ledger` 已在本轮移除：移除前
+  `git status --porcelain` 为空，且 `git merge-base --is-ancestor task/gap-goal-driver-filing-ledger <落地分支 HEAD>` 已为 0。
