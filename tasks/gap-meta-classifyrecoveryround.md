@@ -74,7 +74,7 @@ worker-fan-in.ts 的主路径已按 SUITE-NOT-RUN 标记区分「没跑」与「
 
 ## Blocker
 
-**2026-11-06T11:46:06.566Z — worker 未落地（exited-not-landed）**
+**2026-11-06T13:13:48.833Z — worker 未落地（exited-not-landed）**
 
-- 未落地原因：step=suite: oom-killed (2) — recovery exhausted at floor concurrency 16 — no declared rung produced a complete verdict (16); needs a code/config fix, see plugin/scripts/full-suite-runner.ts
+- 未落地原因：step=suite: AssertionError [ERR_ASSERTION]: 未登记的载体 / unregistered carriers (code has a carrier name that docs/carrier-registry.json does not declare — add an entry): [baseline A/B: HARD RED (task-introduced-red) — the task's red set is NOT a subset of the develop baseline red set: added=plugin/test/carrier-registry-completeness.test.mjs changed=-]
 - run_id：wk-prod-anchor
