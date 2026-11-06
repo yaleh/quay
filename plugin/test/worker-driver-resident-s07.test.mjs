@@ -4,7 +4,7 @@
 
 import { test } from "node:test";
 import { DRIVER, assert, branchHeadSubject, buildContinueWorkerPrompt, fs, lastExitedNotLandedReason, makeGitRoot, os, path, runGit, spawnSync, REPO_ROOT } from "./helpers/worker-driver-resident-harness.mjs";
-import { conflictAction, dualCopyPeer, isDualCopyFile, isTickDoc, resolveConflictMechanically } from "../scripts/conflict-resolution-rules.ts";
+import { conflictAction, dualCopyPeer, isDualCopyFile, isTickDoc, isTakeDevelopDoc, resolveConflictMechanically, takeDevelopDocPromptRules, takeDevelopDocRule } from "../scripts/conflict-resolution-rules.ts";
 
 test("AC1/AC2/AC3 (能取假) — buildContinueWorkerPrompt encodes the merge-conflict resolution protocol (outline take-develop / code semantic-union / commit --no-edit)", () => {
   const p = buildContinueWorkerPrompt("gap-x", "/r", {
@@ -207,3 +207,126 @@ test("gap-arbitrary-semantics-unenforced-carriers AC2 — 负臂 (能取假): de
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+// ── gap-conflict-outline-half-only-in-prompt-prose ────────────────────────────────────────────────
+// THE DEFECT: the "outline doc ⇒ take the develop version" rule existed TWICE — mechanically nowhere
+// (the `isTickDoc` regex is `^orchestration/[^/]*-tick-core\.md$`, so a UU on the outline fell to
+// `manual`) and as prompt PROSE in worker-driver (`(1) outline doc (…): take the develop version`).
+// The prose half had no executable carrier ⇒ a worker that ignored it still passed the suite
+// (硬规则 9: 可见性 ≠ 执行). FIX: ONE registry (`TAKE_DEVELOP_DOC_RULES`) that the mechanical decision
+// AND the prompt prose both render from, and `isTickDoc` survives as a NAMED SUBSET (its name must not
+// drift to cover the outline — 硬规则 8: 编号/命名不得复用).
+//
+// 改前逐字读数（本 worktree、改代码之前，命令
+//   `node --experimental-strip-types plugin/scripts/conflict-resolution-rules.ts --judge docs/proposals/quay-product-outline.md UU --json`）:
+//   {"kind":"manual","reason":"not a machine-decidable rule — resolve semantically","peer":null}   exit=1
+// 改后逐字读数见下面 AC1 断言（同一个调用 ⇒ kind:"take-develop"）。
+
+const OUTLINE_REL = "docs/proposals/quay-product-outline.md";
+
+test("gap-conflict-outline-half-only-in-prompt-prose AC1 — the outline flips manual→take-develop, and isTickDoc does NOT drift to cover it", () => {
+  const action = conflictAction(OUTLINE_REL, "UU");
+  assert.equal(action.kind, "take-develop", "AC1: the outline conflict is machine-decidable after the fix");
+  // The reason must NAME the matched rule (a bare "take-develop" cannot be audited back to a registry entry).
+  assert.match(action.reason, /rule: outline-doc/, "AC1: the reason names which registry rule matched");
+  assert.equal(takeDevelopDocRule(OUTLINE_REL)?.id, "outline-doc");
+  assert.equal(isTakeDevelopDoc(OUTLINE_REL), true, "AC1: the outline is a take-develop doc");
+  // The NAME DOES NOT DRIFT: `isTickDoc` keeps meaning exactly `orchestration/*-tick-core.md`.
+  assert.equal(isTickDoc("orchestration/manager-tick-core.md"), true, "AC1: isTickDoc still true for tick-core");
+  assert.equal(isTickDoc(OUTLINE_REL), false, "AC1: isTickDoc is FALSE for the outline (name must not widen)");
+  assert.equal(isTickDoc("orchestration/other.md"), false, "AC1: isTickDoc stays a family of tick-core docs only");
+  // 取假: the rule is the EXACT path, not the `docs/proposals/` directory or a keyword.
+  assert.equal(conflictAction("docs/proposals/some-other-proposal.md", "UU").kind, "manual",
+    "AC1 (取假): a neighbouring proposal does NOT take develop — the selector is the exact path");
+  assert.equal(conflictAction(OUTLINE_REL, "DU").kind, "delete-side",
+    "AC1: the modify/delete code still wins (position/code precedence unchanged)");
+});
+
+test("gap-conflict-outline-half-only-in-prompt-prose AC2 — resolveConflictMechanically really runs `git checkout develop --` on a CONFLICTED outline (file content, not a return string)", () => {
+  const root = makeGitRoot("outline-take-develop");
+  runGit(root, ["branch", "-M", "develop"]);
+  fs.mkdirSync(path.join(root, "docs", "proposals"), { recursive: true });
+  fs.writeFileSync(path.join(root, OUTLINE_REL), "develop-counts=1\n", "utf8");
+  runGit(root, ["add", OUTLINE_REL]);
+  runGit(root, ["commit", "-q", "-m", "outline on develop"]);
+
+  // A real branch (not just a dirty file): this is what the driver merges into.
+  runGit(root, ["checkout", "-q", "-b", "task/x"]);
+  fs.writeFileSync(path.join(root, OUTLINE_REL), "branch-counts=2\n", "utf8");
+  runGit(root, ["add", OUTLINE_REL]);
+  runGit(root, ["commit", "-q", "-m", "branch edits the outline"]);
+
+  runGit(root, ["checkout", "-q", "develop"]);
+  fs.writeFileSync(path.join(root, OUTLINE_REL), "develop-counts=99\n", "utf8");
+  runGit(root, ["add", OUTLINE_REL]);
+  runGit(root, ["commit", "-q", "-m", "develop moves on"]);
+
+  runGit(root, ["checkout", "-q", "task/x"]);
+  const merge = spawnSync("git", ["-C", root, "merge", "develop"], { encoding: "utf8" });
+  assert.notEqual(merge.status, 0, "fixture: the merge must actually conflict");
+  // The fixture must really be conflicted — an un-conflicted tree would make this test vacuous.
+  assert.match(runGit(root, ["status", "--porcelain"]), new RegExp(`UU ${OUTLINE_REL}`),
+    "fixture: the outline is an unmerged path (UU)");
+
+  const res = resolveConflictMechanically(root, OUTLINE_REL, "UU");
+  assert.equal(res.resolved, true, res.reason);
+  assert.equal(res.action, "take-develop");
+  assert.equal(fs.readFileSync(path.join(root, OUTLINE_REL), "utf8"), "develop-counts=99\n",
+    "AC2: the outline's CONTENT is develop's version after the mechanical resolution");
+  assert.equal(fs.readFileSync(path.join(root, OUTLINE_REL), "utf8").includes("branch-counts=2"), false,
+    "AC2: the branch side is gone (no hand-merge)");
+});
+
+test("gap-conflict-outline-half-only-in-prompt-prose AC3 — the worker prompt renders from the SAME registry (no second list in worker-driver)", () => {
+  // (a) The prompt CONTAINS the registry's rendering verbatim ⇒ the prompt is a pure function of it.
+  const rendered = takeDevelopDocPromptRules().join(" ");
+  const p = buildContinueWorkerPrompt("gap-x", "/r", {
+    worktreePath: "/wt",
+    branchCommits: 3,
+    branchHeadSubject: "implement gap-x",
+    acChecked: 2,
+    acTotal: 5,
+    failureReason: `mechanical fan-in red at merge develop (CONFLICT in ${OUTLINE_REL})`,
+  });
+  assert.ok(p.includes(rendered), "AC3: the prompt carries the registry rendering verbatim (single source)");
+  assert.match(p, /take the develop version/, "AC3: the take-develop instruction survives the registry render");
+  assert.match(p, /do NOT hand-merge the counts/, "AC3: the outline's ⛔ clause survives the registry render");
+  // (b) worker-driver holds ZERO occurrences of the path string — the prose literal is gone.
+  const src = fs.readFileSync(DRIVER, "utf8");
+  const occurrences = src.split("quay-product-outline").length - 1;
+  assert.equal(occurrences, 0, `AC3: worker-driver.ts must hold no literal outline path, found ${occurrences}`);
+});
+
+test("gap-conflict-outline-half-only-in-prompt-prose AC3 — 负臂 (能取假): deleting the registry row flips BOTH the decision AND the prompt half", () => {
+  const srcPath = path.join(REPO_ROOT, "plugin", "scripts", "conflict-resolution-rules.ts");
+  const src = fs.readFileSync(srcPath, "utf8");
+  const mutated = src.replace(/\n  \{\n    id: "outline-doc",[\s\S]*?\n  \},/, "");
+  assert.notEqual(mutated, src, "mutation anchor drifted — the negative arm would be vacuous");
+  assert.equal(mutated.includes("outline-doc"), false, "the mutation must actually remove the registry row");
+  assert.equal(mutated.includes("quay-product-outline"), false, "the mutation must remove the path literal too");
+
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ac3-outline-mutant-"));
+  try {
+    fs.writeFileSync(path.join(dir, "conflict-resolution-rules.ts"), mutated, "utf8");
+    fs.copyFileSync(path.join(REPO_ROOT, "plugin", "scripts", "gate-script-base.ts"), path.join(dir, "gate-script-base.ts"));
+    const entry = path.join(dir, "conflict-resolution-rules.ts");
+    // Side 1 — the MECHANICAL decision goes back to manual.
+    const judge = spawnSync(process.execPath,
+      ["--experimental-strip-types", entry, "--judge", OUTLINE_REL, "UU", "--json"], { encoding: "utf8" });
+    assert.equal(judge.status, 1, `mutant: the outline must fall back to manual (exit 1), got ${judge.status}: ${judge.stderr}`);
+    assert.equal(JSON.parse(judge.stdout).kind, "manual", "mutant: kind is manual again");
+    // Side 2 — the PROMPT half loses the outline rule (same module, same mutation).
+    const render = spawnSync(process.execPath,
+      ["--experimental-strip-types", entry, "--render-prompt-rules"], { encoding: "utf8" });
+    assert.equal(render.status, 0, render.stderr);
+    assert.equal(render.stdout.includes("quay-product-outline"), false,
+      "mutant: the rendered prompt rules no longer name the outline");
+    assert.equal(render.stdout.includes("outline doc"), false, "mutant: the outline rule line is gone");
+    // Negative control: the tick-doc entry SURVIVES — the mutation removed exactly one rule, not the table.
+    assert.ok(render.stdout.includes("tick doc (orchestration/*-tick-core.md)"),
+      "mutant: the tick-doc rule must survive (the mutation is targeted, not a table wipe)");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+

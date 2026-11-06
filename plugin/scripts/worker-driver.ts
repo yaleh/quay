@@ -124,6 +124,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { randomUUID, createHash } from "node:crypto";
 import { spawn, spawnSync } from "node:child_process";
 import { isDirectEntry, normalizeRel } from "./gate-script-base.ts";
+import { takeDevelopDocPromptRules } from "./conflict-resolution-rules.ts";
 import { readProcCmdlineText } from "../../packages/quay/src/kernel/proc-identity.ts";
 import { TASK_STATUS } from "./task-status.ts";
 import { extractSection, countAcCheckboxes, fetchTaskStatusAtRef, parseFrontmatterCompletely, frontmatterGoalAc } from "./task-schema.ts";
@@ -2960,19 +2961,23 @@ export async function continueStateForTaskAsync(root: string, taskId: string): P
 /** 冲突消解协议（gap-continue-prompt-conflict-resolution-protocol + gap-fan-in-continue-resolution-
  *  dual-copy-and-ff-not-fast-forward）：机械 fan-in 的 merge develop 步在 CONTINUE 轮撞冲突时，旧
  *  prompt 只带失败原因、不含消解指令 ⇒ 消冲突靠 worker 自行发挥（运气）。本段按文件类型分派消解动作：
- *  outline 冲突取 develop 版（⛔ 不手并计数）、code 文件取语义并集、任务文件（tasks/<id>.md）取 per-hunk
- *  并集（⛔ 不取 develop 版，否则抹掉本轮 - [x] AC 勾选）、dual-copy 文件两副本同步字节一致、
- *  非 outline 非 code 的 tick doc 取 develop 版、modify/delete 判删除侧、ff-not-fast-forward 重 merge
+ *  take-develop docs（tick doc / outline）取 develop 版（⛔ 不手并计数）、code 文件取语义并集、
+ *  任务文件（tasks/<id>.md）取 per-hunk 并集（⛔ 不取 develop 版，否则抹掉本轮 - [x] AC 勾选）、
+ *  dual-copy 文件两副本同步字节一致、modify/delete 判删除侧、ff-not-fast-forward 重 merge
  *  develop 再 ff，然后 `git commit --no-edit` 完成 merge——⛔ 禁止带着 unmerged paths（UU）退出，
- *  否则下一轮 fan-in 的 merge step 再失败。 */
+ *  否则下一轮 fan-in 的 merge step 再失败。
+ *  ⛔ 规则 (1) 的路径与文案**不在此处写**——它从 conflict-resolution-rules.ts 的
+ *  TAKE_DEVELOP_DOC_RULES 注册表渲染（gap-conflict-outline-half-only-in-prompt-prose：同一「取
+ *  develop 版」语义曾有机械与散文两份，散文那份（outline）没有执行承接；改注册表 ⇒ 决策与 prompt
+ *  同时变化）。原 (4) tick-doc 一条已并入 (1)（同一注册表的 `tick-doc` 条目）——**编号 (4) 留空，
+ *  ⛔ 不复用**（硬规则 8：编号不得复用）。 */
 function continueConflictResolutionNote(): string {
   return [
     `CONFLICT RESOLUTION — if the worktree has unmerged paths (UU in \`git status\`) or \`git merge develop\` reports CONFLICT, resolve it BEFORE continuing implementation; ⛔ never exit while unmerged paths remain.`,
-    `(1) outline doc (docs/proposals/quay-product-outline.md): take the develop version (\`git checkout develop -- docs/proposals/quay-product-outline.md\`); ⛔ do NOT hand-merge the counts.`,
+    `(1) take-develop docs: ${takeDevelopDocPromptRules().join(" ")}`,
     `(2) code files: read both sides and take the semantic union (keep both changes where they do not conflict).`,
     `(2b) task files (\`tasks/<id>.md\`): take the per-hunk union — keep develop's edits (\`## Touches\`/Needs-Human/\`status:\`) AND keep your branch's edits (\`- [x]\` AC ticks, \`## Evidence\`). ⛔ do NOT "take the develop version" (it silently drops your AC ticks). ⛔ do NOT write \`status:\` frontmatter yourself: on a \`status:\` conflict take develop's value verbatim.`,
     `(3) dual-copy files (\`.claude/workflows/*\` ↔ \`plugin/workflows/*\`): take the develop version, then re-sync BOTH copies byte-identical; ⛔ do NOT take a semantic union.`,
-    `(4) tick doc (orchestration/*-tick-core.md): take the develop version (\`git checkout develop -- <file>\`); ⛔ do NOT hand-merge.`,
     `(5) modify/delete CONFLICT: first judge WHICH side deleted — if your branch deleted intentionally (a replacement lives on the branch), read develop's version (\`git show develop:<file>\`) and absorb its changes, THEN \`git rm <file>\`; if develop deleted, \`git rm <file>\`. ⛔ never silently restore the deleted file.`,
     `(6) \`git add <resolved files>\` then \`git commit --no-edit\` to complete the merge.`,
     `FF NOT FAST-FORWARD — if the prior failure was \`step=ff: ... not fast-forward\` (develop advanced during the long suite): merge develop again (\`git merge develop\`, resolving any conflict per the rules above), \`git commit --no-edit\`, then re-exit — the driver re-runs fan-in and the ff will then succeed. ⛔ do NOT re-implement.`,
@@ -6270,6 +6275,14 @@ export async function runResidentLoop(opts: ResidentOptions): Promise<number> {
           exitedNotLandedStops.push({ task: r.taskId, kind: "stop-terminal", verdict: exemption.verdict, reason: deadlock.diagnostic, suiteLogHash: null });
           if (json) process.stdout.write(`${JSON.stringify({ event: "baseline-red-deadlock", task: r.taskId, ...deadlock })}\n`);
           deadlockReading = { kind: "stop-terminal", consecutive: deadlock.consecutive, diagnostic: deadlock.diagnostic };
+        } else if (deadlock != null && deadlock.kind === "re-anchor") {
+          // gap-baseline-red-breaker-cannot-distinguish-reanchor：陈旧红集**不是**死锁（判定时刻新鲜重测
+          // 已有 red point exit 0）。⛔ 显式分支，不靠「没匹配上 stop-terminal ⇒ 静默落回可重派」：
+          // 判词进 `exited_not_landed_stops` + json 事件留痕，`deadlock` 读数是 `continue`（⇒ 走既有
+          // count-and-retry 重派路径，⛔ 不 park），诊断原文一并带下去。
+          exitedNotLandedStops.push({ task: r.taskId, kind: "re-anchor", verdict: exemption.verdict, reason: deadlock.diagnostic, suiteLogHash: null });
+          if (json) process.stdout.write(`${JSON.stringify({ event: "baseline-red-reanchor", task: r.taskId, ...deadlock })}\n`);
+          deadlockReading = { kind: "continue", consecutive: deadlock.consecutive, diagnostic: deadlock.diagnostic };
         }
         exitedNotLanded = {
           evaluated: true,

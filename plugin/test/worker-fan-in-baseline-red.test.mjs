@@ -42,6 +42,7 @@ import {
   decideBaselineRedCircuitBreaker,
   readBaselineRedRounds,
   baselineRedDeadlockReading,
+  probeBlockedRedPoints,
   BASELINE_RED_ROUNDS_REL,
 } from "../scripts/worker-fan-in.ts";
 import {
@@ -153,9 +154,11 @@ test("AC4 (circuit breaker) — N consecutive rounds with the SAME signature sto
   ];
   const current = { task: "T", signature: sig, ts: 300, blocked: ["plugin/test/r2.test.mjs"] };
   const peers = [{ task: "U", signature: sig, ts: 250, blocked: ["plugin/test/r2.test.mjs"] }];
-  // cap 3: three consecutive identical-signature rounds ⇒ stop.
-  const stop = decideBaselineRedCircuitBreaker(prior, current, 3, peers);
+  // cap 3: three consecutive identical-signature rounds ⇒ stop. The probes are the measurement the
+  // caller made at decision time — here every blocked red point still exits non-zero (still red).
+  const stop = decideBaselineRedCircuitBreaker(prior, current, 3, peers, [{ point: "plugin/test/r2.test.mjs", exit: 1 }]);
   assert.equal(stop.kind, "stop-terminal");
+  assert.equal(stop.basis, "confirmed-deadlock");
   assert.equal(stop.consecutive, 3);
   assert.deepEqual(stop.peers, ["U"]);
   assert.match(stop.diagnostic, /LOOP DEADLOCK/);
@@ -171,6 +174,132 @@ test("AC4 (circuit breaker) — N consecutive rounds with the SAME signature sto
     current, 2, [],
   );
   assert.equal(reset.kind, "continue", "a changed signature is a different wall — the streak must reset");
+});
+
+// ════════════════════════════════════════════════════════════════════════════════════════════════════
+// gap-baseline-red-breaker-cannot-distinguish-reanchor —— 断路器必须区分「陈旧红集（欠 re-anchor）」与
+// 「确认死锁」。三个臂各自一条测试（AC1 正臂 + 多点聚合 / AC2 null+空 / AC3 新鲜测量 + 有界超时）。
+// ════════════════════════════════════════════════════════════════════════════════════════════════════
+const CB_SIG = failureSignatureSetKey([{ file: "plugin/test/r2.test.mjs", text: "r2 is broken" }]);
+const CB_PRIOR = [
+  { task: "T", signature: CB_SIG, ts: 100, blocked: ["plugin/test/r2.test.mjs"] },
+  { task: "T", signature: CB_SIG, ts: 200, blocked: ["plugin/test/r2.test.mjs"] },
+];
+const CB_CURRENT = { task: "T", signature: CB_SIG, ts: 300, blocked: ["plugin/test/r2.test.mjs"] };
+
+// ── AC1 正臂①：任一被挡 point 此刻 exit 0 ⇒ re-anchor（不是死锁），诊断点名该 point ─────────────────
+test("AC1/① — a blocked red point whose checker now exits 0 is a STALE red set: verdict re-anchor, diagnostic says 欠 re-anchor and names the point", () => {
+  const v = decideBaselineRedCircuitBreaker(CB_PRIOR, CB_CURRENT, 3, [], [{ point: "plugin/test/r2.test.mjs", exit: 0 }]);
+  assert.equal(v.kind, "re-anchor", "exit 0 means the recorded red set is stale — it must NOT be reported as a deadlock");
+  assert.deepEqual(v.stalePoints, ["plugin/test/r2.test.mjs"]);
+  assert.match(v.diagnostic, /欠 re-anchor/);
+  assert.match(v.diagnostic, /不是死锁/);
+  assert.match(v.diagnostic, /plugin\/test\/r2\.test\.mjs/, "the stale point must be named verbatim");
+  assert.equal(v.diagnostic.includes("LOOP DEADLOCK"), false, "a stale red set must never carry the deadlock verdict token");
+  const literal = `kind=${v.kind} basis=(none) stalePoints=${JSON.stringify(v.stalePoints)}`;
+  console.log(`[AC1/①] ${literal}`);
+});
+
+// ── AC1 正臂（多点混合，单独一条）：一个 0 + 一个非 0 ⇒ 仍是 re-anchor（0 压过非 0）────────────────
+test("AC1/① multi-point aggregation — one point exit 0 mixed with one point exit 1 STILL yields re-anchor (0 outranks non-zero), and both points are reported", () => {
+  const prior = [
+    { task: "T2", signature: CB_SIG, ts: 100, blocked: ["plugin/test/r2.test.mjs", "plugin/test/r3.test.mjs"] },
+    { task: "T2", signature: CB_SIG, ts: 200, blocked: ["plugin/test/r2.test.mjs", "plugin/test/r3.test.mjs"] },
+  ];
+  const current = { task: "T2", signature: CB_SIG, ts: 300, blocked: ["plugin/test/r2.test.mjs", "plugin/test/r3.test.mjs"] };
+  const probes = [
+    { point: "plugin/test/r2.test.mjs", exit: 0 },
+    { point: "plugin/test/r3.test.mjs", exit: 1 },
+  ];
+  const v = decideBaselineRedCircuitBreaker(prior, current, 3, [], probes);
+  assert.equal(v.kind, "re-anchor", "ONE stale red point is enough: the red set is no longer the same set");
+  assert.deepEqual(v.stalePoints, ["plugin/test/r2.test.mjs"]);
+  assert.deepEqual(v.probes, probes, "per-point results are carried verbatim (no folding into one value)");
+  assert.match(v.diagnostic, /plugin\/test\/r2\.test\.mjs/, "the stale point is named");
+  assert.match(v.diagnostic, /plugin\/test\/r3\.test\.mjs=exit 1/, "the still-red point is named with its own exit");
+  // Negative control on the aggregation order: flip it so BOTH are non-zero ⇒ confirmed deadlock (③).
+  const bothRed = decideBaselineRedCircuitBreaker(prior, current, 3, [], [
+    { point: "plugin/test/r2.test.mjs", exit: 1 },
+    { point: "plugin/test/r3.test.mjs", exit: 2 },
+  ]);
+  assert.equal(bothRed.kind, "stop-terminal");
+  assert.equal(bothRed.basis, "confirmed-deadlock");
+  assert.match(bothRed.diagnostic, /LOOP DEADLOCK/);
+  console.log(`[AC1/① multi] mixed kind=${v.kind} stale=${JSON.stringify(v.stalePoints)} | both-nonzero kind=${bothRed.kind} basis=${bothRed.basis}`);
+});
+
+// ── AC1 正臂③：全部非 0 ⇒ stop-terminal + 现有 LOOP DEADLOCK 诊断（逐字读数与②对比用）──────────────
+test("AC1/③ — every blocked point still exits non-zero ⇒ stop-terminal with the existing LOOP DEADLOCK diagnostic", () => {
+  const v = decideBaselineRedCircuitBreaker(CB_PRIOR, CB_CURRENT, 3, [], [{ point: "plugin/test/r2.test.mjs", exit: 1 }]);
+  assert.equal(v.kind, "stop-terminal");
+  assert.equal(v.basis, "confirmed-deadlock");
+  assert.match(v.diagnostic, /LOOP DEADLOCK/);
+  assert.equal(v.diagnostic.includes("未评估"), false, "a measured deadlock must not also claim 未评估");
+  console.log(`[AC1/③] kind=${v.kind} basis=${v.basis} diagnostic=${JSON.stringify(v.diagnostic)}`);
+});
+
+// ── AC2 负臂（单独一条）：probes 为空 / 含 exit null 且无 0 ⇒ stop-terminal + 未评估，⛔ 无死锁判词 ────
+test("AC2 — an empty probe list or an unevaluable (null) probe stops WITHOUT claiming a deadlock: diagnostic says 未评估 and never LOOP DEADLOCK, and is verbatim-different from both the exit-0 and the all-non-zero arms", () => {
+  const empty = decideBaselineRedCircuitBreaker(CB_PRIOR, CB_CURRENT, 3, [], []);
+  const nullProbe = decideBaselineRedCircuitBreaker(CB_PRIOR, CB_CURRENT, 3, [], [{ point: "plugin/test/r2.test.mjs", exit: null }]);
+  const mixedNull = decideBaselineRedCircuitBreaker(CB_PRIOR, CB_CURRENT, 3, [], [
+    { point: "plugin/test/r2.test.mjs", exit: 1 },
+    { point: "plugin/test/r3.test.mjs", exit: null },
+  ]);
+  for (const [label, v] of [["empty", empty], ["null", nullProbe], ["mixed-null", mixedNull]]) {
+    assert.equal(v.kind, "stop-terminal", `${label}: stop (no redispatch) but do NOT claim a deadlock`);
+    assert.equal(v.basis, "not-evaluated", `${label}: the reading basis must be a distinct value, not a string sniff`);
+    assert.match(v.diagnostic, /未评估/, `${label}: the diagnostic must say 未评估`);
+    assert.equal(v.diagnostic.includes("LOOP DEADLOCK"), false, `${label}: an unmeasured breaker must never print the deadlock verdict`);
+  }
+  // ⛔ 优先级：0 压过 null（陈旧已被证实 ⇒ 重锚是安全动作），空数组按 null 处理、不回落成 ③。
+  const zeroBeatsNull = decideBaselineRedCircuitBreaker(CB_PRIOR, CB_CURRENT, 3, [], [
+    { point: "plugin/test/r2.test.mjs", exit: 0 },
+    { point: "plugin/test/r3.test.mjs", exit: null },
+  ]);
+  assert.equal(zeroBeatsNull.kind, "re-anchor", "0 must outrank null");
+  // 三侧逐字读数（不同形是断言，不是印象）：
+  const zeroArm = decideBaselineRedCircuitBreaker(CB_PRIOR, CB_CURRENT, 3, [], [{ point: "plugin/test/r2.test.mjs", exit: 0 }]);
+  const nonzeroArm = decideBaselineRedCircuitBreaker(CB_PRIOR, CB_CURRENT, 3, [], [{ point: "plugin/test/r2.test.mjs", exit: 1 }]);
+  assert.notEqual(nullProbe.diagnostic, zeroArm.diagnostic, "null arm must differ verbatim from the exit-0 arm");
+  assert.notEqual(nullProbe.diagnostic, nonzeroArm.diagnostic, "null arm must differ verbatim from the all-non-zero arm");
+  assert.notEqual(empty.diagnostic, nullProbe.diagnostic, "empty vs null-probe: the cause must stay distinguishable");
+  console.log(`[AC2] zero-exit     : ${JSON.stringify(zeroArm.diagnostic)}`);
+  console.log(`[AC2] null-probe    : ${JSON.stringify(nullProbe.diagnostic)}`);
+  console.log(`[AC2] empty-probes  : ${JSON.stringify(empty.diagnostic)}`);
+  console.log(`[AC2] all-non-zero  : ${JSON.stringify(nonzeroArm.diagnostic)}`);
+});
+
+// ── AC3：新鲜测量 + 有界超时 —— 注入一个必然超时的 checker ⇒ exit null（⛔ 不抛、⛔ 不当成仍然红）────
+test("AC3 — the decision-time probe runs the point's own checker with a wall-clock bound; a checker that never returns yields exit:null (未评估), never an exception and never 'still red'", () => {
+  const t0 = Date.now();
+  const probes = probeBlockedRedPoints(
+    process.cwd(),
+    ["plugin/test/r2.test.mjs", "plugin/test/r3.test.mjs"],
+    // 必然超时的 checker：sleep 30 远超 200ms 上限。没有 {files} ⇒ 每个 point 跑同一条命令。
+    { probeCommand: ["bash", "-c", "sleep 30"], probeTimeoutMs: 200 },
+  );
+  const wall = Date.now() - t0;
+  assert.equal(probes.length, 2);
+  for (const p of probes) assert.equal(p.exit, null, "a timed-out checker is 未评估 — NOT 0 (green) and NOT 1 (still red)");
+  assert.ok(wall < 10_000, `the probe must be bounded by its wall-clock limit (took ${wall}ms)`);
+  // …and that reading is what the breaker consumes: stop, but without a deadlock claim.
+  const v = decideBaselineRedCircuitBreaker(CB_PRIOR, CB_CURRENT, 3, [], probes);
+  assert.equal(v.kind, "stop-terminal");
+  assert.equal(v.basis, "not-evaluated");
+  assert.match(v.diagnostic, /未评估/);
+  assert.equal(v.diagnostic.includes("LOOP DEADLOCK"), false);
+  // Positive control on the SAME seam: a checker that exits non-zero ⇒ a real measured exit (not null).
+  const red = probeBlockedRedPoints(process.cwd(), ["plugin/test/r2.test.mjs"], { probeCommand: ["bash", "-c", "exit 7"], probeTimeoutMs: 5_000 });
+  assert.deepEqual(red, [{ point: "plugin/test/r2.test.mjs", exit: 7 }]);
+  // …and a checker that exits 0 ⇒ re-anchor (the whole point of this task, measured end-to-end through the seam).
+  const green = probeBlockedRedPoints(process.cwd(), ["plugin/test/r2.test.mjs"], { probeCommand: ["bash", "-c", "exit 0"], probeTimeoutMs: 5_000 });
+  const reV = decideBaselineRedCircuitBreaker(CB_PRIOR, CB_CURRENT, 3, [], green);
+  assert.equal(reV.kind, "re-anchor");
+  // The point-selection is bounded too: points beyond the cap stay `null` (未评估), they never become 0.
+  const capped = probeBlockedRedPoints(process.cwd(), ["a.test.mjs", "b.test.mjs", "c.test.mjs"], { probeCommand: ["bash", "-c", "exit 0"], maxProbePoints: 1 });
+  assert.deepEqual(capped.map((p) => p.exit), [0, null, null]);
+  console.log(`[AC3] timeout-injected: ${JSON.stringify(probes)} wall=${wall}ms verdict=${v.kind}/${v.basis} | exit7=${JSON.stringify(red)} | capped=${JSON.stringify(capped.map((p) => p.exit))} | re-anchor-on-exit0=${reV.kind}`);
 });
 
 // ── e2e 夹具：真实 git 仓库（worktree/merge/anti-drift/ac-gate/flip/ff 全真跑）───────────────────────
@@ -323,9 +452,26 @@ test("AC2 (e2e negative control) — a task-introduced red is NOT exempt: the re
     JSON.stringify({ task: fx.task, signature: rounds[0].signature, ts: now + 1, blocked: rounds[0].blocked }),
     JSON.stringify({ task: fx.task, signature: rounds[0].signature, ts: now + 2, blocked: rounds[0].blocked }),
   ].join("\n") + "\n", "utf8");
+  // The fixture repo declares no `loop.rerun_command` ⇒ there is no checker to run ⇒ the reading is
+  // 未评估 (stop, but NO deadlock claim). This is the honest production behaviour for a workspace that
+  // never declared how to rerun a single red point (hard rule 3b), and it is the arm this fixture is in.
   const breaker = baselineRedDeadlockReading(fx.repo, fx.task, 3);
   assert.equal(breaker.kind, "stop-terminal");
-  assert.match(breaker.diagnostic, /LOOP DEADLOCK/);
+  assert.equal(breaker.basis, "not-evaluated");
+  assert.match(breaker.diagnostic, /未评估/);
+  assert.equal(breaker.diagnostic.includes("LOOP DEADLOCK"), false);
+  // The SAME reader, with the point's checker actually measured at decision time:
+  //   still red (exit 1) ⇒ the original LOOP DEADLOCK diagnostic;
+  //   now green (exit 0) ⇒ re-anchor instead of a deadlock.
+  const stillRed = baselineRedDeadlockReading(fx.repo, fx.task, 3, Date.now(), { probeCommand: ["bash", "-c", "exit 1"] });
+  assert.equal(stillRed.kind, "stop-terminal");
+  assert.equal(stillRed.basis, "confirmed-deadlock");
+  assert.match(stillRed.diagnostic, /LOOP DEADLOCK/);
+  const stale = baselineRedDeadlockReading(fx.repo, fx.task, 3, Date.now(), { probeCommand: ["bash", "-c", "exit 0"] });
+  assert.equal(stale.kind, "re-anchor", "a red point that now exits 0 means the recorded set is stale, not a deadlock");
+  assert.deepEqual(stale.stalePoints, ["plugin/test/mine.test.mjs"]);
+  assert.match(stale.diagnostic, /欠 re-anchor/);
+  assert.equal(stale.diagnostic.includes("LOOP DEADLOCK"), false);
 });
 
 // ── 未评估面：Rerun 命令读不懂 / 基线跑不起来 ⇒ 维持硬红（⛔ 任何 A/B 失败都退回改动前行为）──────────
