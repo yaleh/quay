@@ -3,7 +3,7 @@ id: gap-routine-semantic-dedup-scan-release-branch-prefix
 title: "semantic-dedup-scan: the globs-to-prefix derivation is exported by the
   declared release-model authority yet release-cut.mjs hand-copies it although
   it already spawns that module fo"
-status: todo
+status: ready
 labels:
   - gap
   - routine-filed
