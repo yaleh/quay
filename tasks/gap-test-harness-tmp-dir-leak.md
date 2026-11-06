@@ -165,3 +165,10 @@ EXIT=0
 ## ADR-007 dark axis
 
 - L_G：该轴仍暗,理由:本任务只在 harness 侧新增叶子脚本（`temp-root-reaper.ts` → `gate-script-base.ts` + node 内建；`suite-temp-root.sh` 只被 `scripts/test.sh` source），未新增或反转任何包间依赖边，也未触碰 `packages/**` 的架构面；archguard 的 L_D/L_G 读数按仓库既有裁定由 milestone 级承担（`gap-fan-in-remove-archguard-gate`：逐任务布尔闸 244 次运行零指引价值），本轮未产出可比的 L_D/L_G 数字。
+
+## Blocker
+
+**2026-11-06T11:46:06.635Z — worker 未落地（exited-not-landed）**
+
+- 未落地原因：step=suite: AssertionError [ERR_ASSERTION]: an artifact embedding a non-declared Node must never pass the release gate [baseline A/B: HARD RED (task-introduced-red) — the task's red set is NOT a subset of the develop baseline red set: added=packages/quay/test/verify-sea-artifact.test.mjs,packages/quay/test/verify-sea-artifact.test.mjs,packages/quay/test/verify-sea-artifact.test.mjs,packages/quay/test/verify-sea-artifact.test.mjs,packages/quay/test/verify-sea-artifact.test.mjs,packages/quay/test/verify-sea-artifact.test.mjs,packages/quay/test/verify-sea-artifact.test.mjs changed=-]
+- run_id：wk-prod-anchor

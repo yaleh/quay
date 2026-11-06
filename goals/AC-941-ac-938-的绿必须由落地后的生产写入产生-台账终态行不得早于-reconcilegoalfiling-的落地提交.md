@@ -1,7 +1,7 @@
 ---
 id: AC-941
 title: AC-938 的绿必须由落地后的生产写入产生：台账终态行不得早于 reconcileGoalFiling 的落地提交
-status: draft
+status: achieved
 kind: criterion
 goal: GOAL-914
 criterion: "node --experimental-strip-types --input-type=module -e \"import fs
@@ -32,4 +32,20 @@ origin: readings.criteria 里 AC-938 的 criterion 只做两件事：断言 type
   自身标题要排除的「一次证据跑留下的静态文件」。当前 `.quay/goal-filing.jsonl` 的唯一终态行
   at=2026-11-06T07:57:41.597Z 与
   tasks/gap-goal-filing-ledger-landing.md（status=ready，尚未落地）一致地表明该行早于实现。
+activatedAt: 2026-11-06T12:22:33.334Z
+statusLog:
+  - at: 2026-11-06T12:22:33.334Z
+    from: draft
+    to: active
+    actor: goal-driver
+    reason: "triage: activate"
+  - at: 2026-11-06T13:10:47.287Z
+    from: active
+    to: achieved
+    actor: goal-driver
+    reason: "I2: criterion pass"
+fidelity:
+  verdict: faithful
+  reason: "fidelity judge: faithful"
+  at: 2026-11-06T12:22:33.334Z
 ---

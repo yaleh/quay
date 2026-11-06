@@ -1,7 +1,7 @@
 ---
 id: AC-938
 title: AC-934 的绿必须来自工作区树上真实存在的台账写入代码，而不是任务 worktree 一次证据跑留下的静态文件
-status: active
+status: achieved
 kind: criterion
 goal: GOAL-914
 criterion: node --experimental-strip-types --input-type=module -e "import fs
@@ -32,6 +32,11 @@ statusLog:
     to: active
     actor: goal-driver
     reason: "triage: activate"
+  - at: 2026-11-06T13:09:48.957Z
+    from: active
+    to: achieved
+    actor: goal-driver
+    reason: "I2: criterion pass"
 supersedes:
   - AC-934
 fidelity:

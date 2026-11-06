@@ -14,6 +14,19 @@
 import { test } from "node:test";
 import { assert, computeGoalGaps, derivedByAc, derivedCriterionRecords, evRecord, fs, goalCliResolvable, goalStoreArgv, isFilingGapState, judgeCmd, os, parseFrozenFailingReading, path, readsFrozenPopulation, repoRoot, resetObjectiveTestState, runGapSpawnPass, runGoalRound, writeEvidenceCarrier, writeGoalFile } from "./helpers/goal-driver-harness.mjs";
 
+// gap-goal-driver-filing-ledger: `runGapSpawnPass` 现在会在 **root** 下写 `.quay/goal-filing.jsonl`
+// （spawn 之前的立案意图行）。本文件此前把 `os.tmpdir()` 直接当 root 传进去——那会让测试往**共享宿主
+// 目录**写运行时载体（shared-lessons: no-live-host-state-in-tests）。给每个调用一个私有可写根。
+const spawnRoots = [];
+function spawnRoot() {
+  const d = fs.mkdtempSync(path.join(os.tmpdir(), 'goal-spawn-root-'));
+  spawnRoots.push(d);
+  return d;
+}
+test.after(() => {
+  for (const d of spawnRoots) fs.rmSync(d, { recursive: true, force: true });
+});
+
 test('DoD: runGoalRound 同时产出两层 fact（goal-sufficiency 与 goal-objective 并列，⛔ 互不含对方的键）', async () => {
   resetObjectiveTestState();
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'goal-objective-round-'));
@@ -106,7 +119,7 @@ test('派生判据 (a)：无 owner ⇒ ③ 产 frozen-violated，② ⛔ 不产 
   assert.equal(by.get('AC-214').state, 'standing-ok', '对照组：非派生的常设判据此刻成立 ⇒ 仍走原判定');
 
   // 端到端：spawn 选取面只挑 AC-203 一条。
-  const r = runGapSpawnPass(gaps, records, os.tmpdir(), { gapWorkerCmd: 'true', resourceGateArgv: ['true'], spawnCap: 5 });
+  const r = runGapSpawnPass(gaps, records, spawnRoot(), { gapWorkerCmd: 'true', resourceGateArgv: ['true'], spawnCap: 5 });
   assert.deepEqual(r.outcomes.map((o) => o.ac), ['AC-203'], '只有 ③ 的主体 AC 消耗名额（AC-242 不再每轮一条）');
 });
 
@@ -123,7 +136,7 @@ test('派生判据 (b)：有 owner（现状）⇒ ③ 产 in-progress，② 同�
   assert.equal(by.get('AC-203').state, 'in-progress', '③ 认得 owner ⇒ 不再重复立案');
   assert.equal(by.get('AC-242').state, 'derived-routed', '② 仍让位（有主更要让位）');
   assert.equal(isFilingGapState(by.get('AC-242').state), false);
-  const r = runGapSpawnPass(gaps, records, os.tmpdir(), { gapWorkerCmd: 'true', resourceGateArgv: ['true'], spawnCap: 5 });
+  const r = runGapSpawnPass(gaps, records, spawnRoot(), { gapWorkerCmd: 'true', resourceGateArgv: ['true'], spawnCap: 5 });
   assert.deepEqual(r.outcomes, [], '两条都不该消耗名额');
 });
 
@@ -149,7 +162,7 @@ test('派生判据 (c) 负控制：闸不恒开 —— ③ 说不了话时仍立
   const g3 = derivedByAc(computeGoalGaps(records, [], null, standings214, clean));
   assert.equal(g3.get('AC-214').state, 'standing-violated', '普通常设判据的违反照旧立案');
   assert.ok(isFilingGapState(g3.get('AC-214').state));
-  const r3 = runGapSpawnPass(computeGoalGaps(records, [], null, standings214, clean), records, os.tmpdir(), { gapWorkerCmd: 'true', resourceGateArgv: ['true'], spawnCap: 5 });
+  const r3 = runGapSpawnPass(computeGoalGaps(records, [], null, standings214, clean), records, spawnRoot(), { gapWorkerCmd: 'true', resourceGateArgv: ['true'], spawnCap: 5 });
   assert.deepEqual(r3.outcomes.map((o) => o.ac), ['AC-214'], '让位没有把整个 ② 分支关掉（闸不恒开）');
 
   // (c3) ③ 的违反对象无主 ⇒ 立案**仍然发生**（只是发生在 ③ 的主体 AC 上）。
@@ -280,7 +293,7 @@ test('AC3 全词表立案面：workable 与 gap/standing-violated/frozen-violate
   assert.notEqual(by.get('AC-G').state, by.get('AC-U').state, 'world-gated ≠ unclassified（硬规则 3b）');
   assert.notEqual(by.get('AC-W').state, by.get('AC-U').state, 'workable ≠ unclassified（硬规则 3b）');
   // runGapSpawnPass 选取面 = 只有 workable 一条（⛔ world-gated/unclassified 空耗名额）。
-  const r = runGapSpawnPass(computeGoalGaps(records, tasks), records, os.tmpdir(),
+  const r = runGapSpawnPass(computeGoalGaps(records, tasks), records, spawnRoot(),
     { gapWorkerCmd: 'true', resourceGateArgv: ['true'], spawnCap: 5 });
   assert.deepEqual(r.outcomes.map((o) => o.ac), ['AC-W']);
   // 与另外两个 population 对照：standing-violated / frozen-violated 同样立案（四态同列，workable ⛔ 不独占）。

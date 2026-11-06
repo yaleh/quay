@@ -1,7 +1,7 @@
 ---
 id: gap-goal-filing-ledger-landing
 title: goal-filing 台账代码落地：把 reconcileGoalFiling 并入 develop 并在工作区树取 AC-938 读数
-status: ready
+status: done
 labels:
   - gap
   - goal-driver
