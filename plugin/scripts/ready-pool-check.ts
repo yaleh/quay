@@ -1283,6 +1283,10 @@ export function notYetFlipped(task, repoRoot, gitIndex, opts = null) {
   // Same presence rule as `worktrees`: an EMPTY set means "nothing to ground against" (exact equality
   // only), which is different from "not supplied" (read the store here).
   if (opts && !Array.isArray(opts) && opts.taskIds) o.taskIds = opts.taskIds;
+  // The once-per-scan landing-ref tree (see refTreePaths). Copied by PRESENCE like the two above:
+  // `undefined` means "not supplied, compute your own"; a `null` tree is a MEANINGFUL input
+  // ("the ref's tree could not be read") and must survive the copy, so the check is `!== undefined`.
+  if (opts && !Array.isArray(opts) && opts.refTree !== undefined) o.refTree = opts.refTree;
   // LEFTOVER-WORKTREE EXEMPTION — HOISTED ABOVE EVERY ARM
   // (gap-nyf-doneflipready-arm-bypasses-leftover-worktree-exemption): an OPEN `task/<id>` worktree is
   // the DIRECT "fan-in not yet complete" quantity (ff-merge success is what deletes it) — while it
