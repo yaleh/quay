@@ -62,6 +62,15 @@
       "readers": "unaudited"
     },
     {
+      "name": "baseline-red-rounds.jsonl",
+      "kind": "jsonl-log",
+      "owner": "plugin/scripts/worker-fan-in.ts",
+      "readers": [
+        "plugin/scripts/worker-fan-in.ts",
+        "plugin/scripts/worker-driver.ts"
+      ]
+    },
+    {
       "name": "blocked-escalations.jsonl",
       "kind": "jsonl-log",
       "owner": "unowned-yet",
