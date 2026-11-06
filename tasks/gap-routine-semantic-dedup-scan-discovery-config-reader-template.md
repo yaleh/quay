@@ -3,7 +3,7 @@ id: gap-routine-semantic-dedup-scan-discovery-config-reader-template
 title: "semantic-dedup-scan: the three readers are one 1154-char template
   differing only in the loop key and parse callee, and each of the three
   routines carries about six more near-identi"
-status: todo
+status: ready
 labels:
   - gap
   - routine-filed
