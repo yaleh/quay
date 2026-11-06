@@ -38,6 +38,7 @@
 
 import fs from "node:fs";
 import path from "node:path";
+import { execFileSync } from "node:child_process";
 import { pathToFileURL } from "node:url";
 
 export const CHECKER_COST_FILENAME = "checker-cost.jsonl";
@@ -140,6 +141,61 @@ function main(argv: string[]): number {
   }
   recordCheckerCost({ root, name, ms, n, load, verdict });
   return 0;
+}
+
+// ═════════════════════════════════════════════════════════════════════════════════════════════════
+// GIT SUBPROCESS ACCOUNTING (tasks/gap-anchor-polling-git-fork-storm)
+//
+// WHY IT LIVES HERE: this module already owns "how much did a criterion COST" — `recordCheckerCost`
+// appends one row per run so a slope is visible instead of inferred. The git FORK COUNT is the same
+// kind of reading one level down (`ready-pool-check` was 168 git processes per call and nothing
+// recorded it). Keeping it in ONE module rather than copy-pasted into each checker also keeps a
+// checkable invariant intact: `task-status-drift-check.ts` is pinned to ZERO filesystem-write
+// primitives (its AC6), so the append cannot live in that file.
+//
+// THE INSTRUMENT: `gitExec(tag, argv, opts)` is the ONLY sanctioned way these checkers spawn git.
+// It counts the spawn (`gitExecCount()`) and — when `QUAY_GIT_EXEC_LOG` names a file — appends ONE
+// JSON line per spawn `{tag, argv}`. Tests count REAL leaf spawns from that log; never a wall-clock
+// inference (a slow host would move that on its own), never a monkey-patched `child_process`.
+//
+// ⛔ Unset `QUAY_GIT_EXEC_LOG` ⇒ one string compare per spawn, no I/O, no behaviour change.
+// ⛔ The log target is named by the CALLER's environment, never derived from the workspace — this is
+//    a measurement seam, not a carrier.
+let _gitExecCount = 0;
+const _gitExecTags = new Map();
+
+/** Run one git subprocess through the accounting instrument (the only sanctioned git spawn). */
+export function gitExec(tag, args, opts = undefined) {
+  _gitExecCount++;
+  _gitExecTags.set(tag, (_gitExecTags.get(tag) || 0) + 1);
+  const logFile = process.env.QUAY_GIT_EXEC_LOG;
+  if (logFile) {
+    try {
+      fs.appendFileSync(logFile, `${JSON.stringify({ tag, argv: args })}\n`);
+    } catch { /* the log is an instrument; a failed write must not change the run */ }
+  }
+  return execFileSync("git", args, opts);
+}
+
+/** How many git processes this process spawned through `gitExec`. */
+export function gitExecCount() {
+  return _gitExecCount;
+}
+
+/** Per-tag breakdown of `gitExecCount()` — `{ tag: count }`. */
+export function gitExecTags() {
+  return Object.fromEntries(_gitExecTags);
+}
+
+/** Reset the in-process counters (tests; a CLI process starts at zero anyway). */
+export function resetGitExecCount() {
+  _gitExecCount = 0;
+  _gitExecTags.clear();
+}
+
+/** True when `QUAY_GIT_EXEC_LOG` is set (the counting fixture's mode). */
+export function gitExecLogEnabled() {
+  return !!process.env.QUAY_GIT_EXEC_LOG;
 }
 
 // Bundler-friendly direct-entry guard (gap-shipped-ts-files-are-not-bundled-80-raw-typescript-in-the-
