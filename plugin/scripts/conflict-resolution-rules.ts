@@ -13,13 +13,19 @@
 //                    resolution ("take develop's version, then re-sync BOTH copies byte-identical")
 //                    is fully mechanical: `git checkout develop -- <rel>` + copy the resolved bytes to
 //                    the peer path.
-//   (4) tick-doc   — `orchestration/*-tick-core.md` takes the develop version. Fully mechanical:
-//                    `git checkout develop -- <rel>`.
+//   (4) take-develop docs — the docs that take develop's version wholesale. Fully mechanical:
+//                    `git checkout develop -- <rel>`. The set is a REGISTRY (`TAKE_DEVELOP_DOC_RULES`),
+//                    not a predicate per doc: `orchestration/*-tick-core.md` (tick docs) and the
+//                    outline doc. This registry is the SINGLE SOURCE for both the mechanical decision
+//                    (`conflictAction`) and the worker prompt prose (`takeDevelopDocPromptRules`) —
+//                    gap-conflict-outline-half-only-in-prompt-prose: before that, the outline rule
+//                    lived ONLY in worker-driver.ts's prompt string, so a UU on the outline fell to
+//                    `manual` while the prompt told the worker to take develop.
 //   (5) modify/delete — the "which side deleted" judgment is DERIVABLE from the `git status --porcelain`
 //                    conflict code (`DU` = deleted by us / `UD` = deleted by them) and the resolution is
 //                    the same either way: accept the deletion with `git rm`. Fully mechanical.
-//   ⛔ NOT here: outline doc / code files / task files (2b) / ff-not-fast-forward — those remain
-//      agent-executed and are NOT in this task's scope (the prompt still carries them).
+//   ⛔ NOT here: code files / task files (2b) / ff-not-fast-forward — those remain agent-executed and
+//      are NOT in this task's scope (the prompt still carries them).
 //
 // WHY A SEPARATE HERMETIC MODULE: worker-driver.ts imports dozens of modules, so a mutation test of a
 // rule table INSIDE it cannot re-import the mutated copy. This module imports only node builtins, so a
@@ -27,13 +33,15 @@
 // no longer just asserts a string (AC2's "删掉/改错对应规则后检查必红").
 //
 // Usage (library): worker-driver-resident-s07.test.mjs imports `conflictAction` / `dualCopyPeer` /
-// `isDualCopyFile` / `isTickDoc` / `resolveConflictMechanically` directly for the contract check
+// `isDualCopyFile` / `isTickDoc` / `takeDevelopDocRule` / `isTakeDevelopDoc` /
+// `takeDevelopDocPromptRules` / `resolveConflictMechanically` directly for the contract check
 // (the test asserts the module's BEHAVIOR — real git operations — not a prompt string).
 // This module is the EXECUTABLE carrier for rules (3)/(4)/(5): the rules are decided here by
 // POSITION and EXECUTED by real git commands, then asserted by the behavior test. worker-driver.ts
-// is deliberately NOT changed (its prompt carries the same rules as prose for the agent-executed
-// half — outline/code/task-file/ff — and must not grow past the gap-worker-prompt-note-family-slimming
-// 25% baseline).
+// imports `takeDevelopDocPromptRules` so the take-develop PROSE it puts in the worker prompt is
+// rendered from this same registry (gap-conflict-outline-half-only-in-prompt-prose: one rule, two
+// carriers, one source). The agent-executed half (code/task-file/ff) stays prose in worker-driver,
+// which must not grow past the gap-worker-prompt-note-family-slimming 25% baseline.
 // Usage (CLI, for the worker / tests):
 //   node --experimental-strip-types plugin/scripts/conflict-resolution-rules.ts --judge <rel> <status> [--json]
 //   node --experimental-strip-types plugin/scripts/conflict-resolution-rules.ts --resolve <root> <rel> <status> [--json]
@@ -68,10 +76,81 @@ export function isDualCopyFile(rel: string): boolean {
   return dualCopyPeer(rel) !== null;
 }
 
+/** A take-develop doc is selected either by an EXACT repo-relative path or by a path-family RegExp. */
+export type TakeDevelopDocSelector = string | RegExp;
+
+export interface TakeDevelopDocRule {
+  /** stable id — reported in the `conflictAction` reason so the matched rule is nameable. */
+  id: string;
+  /** POSITION selector: the exact path, or the family pattern. Never a content keyword. */
+  selector: TakeDevelopDocSelector;
+  /** the doc class, as the worker prompt names it. */
+  note: string;
+  /** the ⛔ clause the worker prompt carries for this doc class. */
+  forbid: string;
+}
+
+/**
+ * THE REGISTRY — every doc whose merge conflict is resolved by taking develop's version, and the ONLY
+ * place those paths live. Both carriers render from it:
+ *   • `conflictAction` → `take-develop` (mechanical, decided by POSITION), and
+ *   • `takeDevelopDocPromptRules` → the worker prompt's conflict-resolution note.
+ * Adding a doc here changes the decision AND the prose in one edit; there is no second list to drift.
+ */
+export const TAKE_DEVELOP_DOC_RULES: ReadonlyArray<TakeDevelopDocRule> = [
+  {
+    id: "tick-doc",
+    selector: /^orchestration\/[^/]*-tick-core\.md$/,
+    note: "tick doc (orchestration/*-tick-core.md)",
+    forbid: "⛔ do NOT hand-merge.",
+  },
+  {
+    id: "outline-doc",
+    selector: "docs/proposals/quay-product-outline.md",
+    note: "outline doc",
+    forbid: "⛔ do NOT hand-merge the counts.",
+  },
+];
+
+function selectorMatches(selector: TakeDevelopDocSelector, norm: string): boolean {
+  return typeof selector === "string" ? norm === selector : selector.test(norm);
+}
+
+/** The registry rule matching `rel`, or null. Decided by POSITION (exact path / path pattern). */
+export function takeDevelopDocRule(rel: string): TakeDevelopDocRule | null {
+  const norm = rel.split(path.sep).join("/");
+  for (const rule of TAKE_DEVELOP_DOC_RULES) {
+    if (selectorMatches(rule.selector, norm)) return rule;
+  }
+  return null;
+}
+
+/** True iff `rel` is ANY take-develop doc in the registry. */
+export function isTakeDevelopDoc(rel: string): boolean {
+  return takeDevelopDocRule(rel) !== null;
+}
+
+/**
+ * The prompt line for one rule, rendered FROM the registry entry (single source). `git checkout
+ * develop -- <file>` is emitted only for exact-path rules — a path-family rule cannot name one file,
+ * so it keeps the `<file>` placeholder the worker substitutes after reading `git status`.
+ */
+export function renderTakeDevelopDocRule(rule: TakeDevelopDocRule): string {
+  const target = typeof rule.selector === "string" ? rule.selector : "<file>";
+  return `${rule.note}: take the develop version (\`git checkout develop -- ${target}\`); ${rule.forbid}`;
+}
+
+/** Every take-develop doc rule rendered for the worker prompt — the whole prompt half of the registry. */
+export function takeDevelopDocPromptRules(): string[] {
+  return TAKE_DEVELOP_DOC_RULES.map(renderTakeDevelopDocRule);
+}
+
+/** The tick-doc rule id — `isTickDoc` is the NAMED SUBSET of the registry (kept for its readers). */
+const TICK_DOC_RULE_ID = "tick-doc";
+
 /** True iff `rel` is a tick doc under `orchestration/` (`*-tick-core.md`). */
 export function isTickDoc(rel: string): boolean {
-  const norm = rel.split(path.sep).join("/");
-  return /^orchestration\/[^/]*-tick-core\.md$/.test(norm);
+  return takeDevelopDocRule(rel)?.id === TICK_DOC_RULE_ID;
 }
 
 /** The two modify/delete conflict codes from `git status --porcelain` (both mean "accept the deletion"). */
@@ -106,10 +185,11 @@ export function conflictAction(rel: string, status: string): ConflictAction {
       peer: dualCopyPeer(rel),
     };
   }
-  if (isTickDoc(rel)) {
+  const takeDevelop = takeDevelopDocRule(rel);
+  if (takeDevelop) {
     return {
       kind: "take-develop",
-      reason: "tick-doc conflict — take the develop version",
+      reason: `${takeDevelop.note} conflict — take the develop version (rule: ${takeDevelop.id})`,
       peer: null,
     };
   }
@@ -177,6 +257,7 @@ export function resolveConflictMechanically(root: string, rel: string, status: s
 function usage(): string {
   return "usage: conflict-resolution-rules.ts --judge <rel> <status> [--json]\n" +
     "       conflict-resolution-rules.ts --resolve <root> <rel> <status> [--json]\n" +
+    "       conflict-resolution-rules.ts --render-prompt-rules\n" +
     "Exit: 0 = definite machine action / resolved; 1 = manual (not machine-resolvable) / resolution failed; 2 = usage";
 }
 
@@ -190,7 +271,14 @@ function main(argv: string[]): number {
   const rest = args.filter((a) => a !== "--json");
   const judgeIdx = rest.indexOf("--judge");
   const resolveIdx = rest.indexOf("--resolve");
-  if (judgeIdx !== -1 && resolveIdx !== -1) { process.stderr.write(usage() + "\n"); return 2; }
+  const renderIdx = rest.indexOf("--render-prompt-rules");
+  if ([judgeIdx, resolveIdx, renderIdx].filter((i) => i !== -1).length > 1) { process.stderr.write(usage() + "\n"); return 2; }
+  if (renderIdx !== -1) {
+    // The prompt half of THIS registry, rendered from the loaded module — the negative arm runs this
+    // against a mutated copy to prove the prompt and the mechanical decision share one source.
+    for (const line of takeDevelopDocPromptRules()) process.stdout.write(line + "\n");
+    return 0;
+  }
   if (judgeIdx !== -1) {
     const rel = rest[judgeIdx + 1];
     const status = rest[judgeIdx + 2];
