@@ -3237,10 +3237,9 @@ export function reconcileGoalFiling(
       // 两侧计数都读得到 ⇒ 文件数是硬判据；任一读不到 ⇒ 回落到 mtime（⛔ 不把「读不到」当「没长」）。
       const countsComparable = recordedCount !== null && currentTaskCount !== null;
       const grew = countsComparable ? (currentTaskCount as number) > (recordedCount as number) : newer.length > 0;
-      // 「可能是新立案」= 有增长的空间。计数可比且**没长** ⇒ 结构上不可能有新文件 ⇒ ⛔ 不判 filed
-      // （否则一条既有认领被并发状态翻转就会被误读成「这次 spawn 立了案」）。
-      const mayBeFiled = countsComparable ? grew : true;
-      const filedTask = (mayBeFiled ? newer.find((t) => t.goalAc === row.ac) ?? null : null);
+      // 没有增长 ⇒ 结构上不可能有新文件 ⇒ ⛔ 不判 filed（否则一条既有认领被并发状态翻转就会被误读成
+      // 「这次 spawn 立了案」）。计数读不到时 grew 已回落到 mtime，这里不需要第三个分支。
+      const filedTask = grew ? (newer.find((t) => t.goalAc === row.ac) ?? null) : null;
       if (filedTask !== null) {
         state = "filed";
         taskId = filedTask.id;
