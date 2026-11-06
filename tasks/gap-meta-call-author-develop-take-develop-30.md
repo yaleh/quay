@@ -1,7 +1,7 @@
 ---
 id: gap-meta-call-author-develop-take-develop-30
 title: author↔develop 同步 take-develop 拒绝（脏工作树/不可弃提交）持续时无消抖、无升级——一个脏文件冻结同步 30+ 分钟
-status: needs-human
+status: done
 labels:
   - meta-human-call
   - meta-driver
