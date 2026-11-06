@@ -1437,6 +1437,16 @@ export interface SyncHealth {
    *  `…-take-develop-refused` 事件上，而它后面还跟着一条双向同步汇总事件 ⇒ `lastEvent` 也读不到，
    *  于是新状态在聚合读数里**既不入桶也不当最后事件** ⇒ 与「一切正常」同形（硬规则 3b）。 */
   semanticTakeDevelopRefused: number;
+  /** ⚠️ 2026-11-06 补（gap-meta-synchealth-doc-to-develop-outcome-invisible）：doc→develop 的
+   *  **最近结局**，三态（⛔ 不用布尔——布尔的 false 会把「拒绝」与「读不懂」压成同一个值，硬规则 3b/6）：
+   *    - `"ok"`      — 窗口内最后一条 `doc-develop-sync-bidirectional` 的 `docToDevelop` 为真；
+   *    - `"refused"` — 该值为假 ⇒ doc→develop 被拒/失败（**阻塞中**，成因在共享检出的脏工作树，
+   *                    属人的领地）；此前它只在 `doc-develop-sync-bidirectional` 事件的字段里，而
+   *                    `lastEvent` 只取事件名 ⇒ 「阻塞中」与「健康」在聚合读数里同形 ⇒ 摘要不变 ⇒
+   *                    语义半永不被唤醒（2026-10-31 那次 30+ 分钟冻结全程静默就是这么来的）；
+   *    - `"unknown"` — 窗口内无该事件 / 值非布尔 / 其后有坏行 / 载体读不出 ⇒ **未评估**，⛔ 不与
+   *                    `"ok"` 同形（硬规则 6：缺值 = 未查，不是为假）。 */
+  lastDocToDevelop: "ok" | "refused" | "unknown";
   lastEvent: string | null;
   lastTs: string | null;
 }
@@ -1447,13 +1457,21 @@ export function collectSyncHealth(root: string, window = 200): SyncHealth {
     window, ffSynced: 0, notFf: 0, notFfBenign: 0, notFfBehind: 0, ffError: 0,
     semanticBegin: 0, semanticResolved: 0, semanticConflict: 0, semanticAlignFailed: 0, semanticFfFailed: 0,
     semanticTakeDevelopRefused: 0,
+    // 缺省即「未评估」：载体不存在 / 读不出 / 窗口内无该事件时都落在这里（⛔ 不填 "ok"——
+    // 把「没读到」当成「同步健康」正是本任务要消灭的那种同形，硬规则 3b）。
+    lastDocToDevelop: "unknown",
     lastEvent: null, lastTs: null,
   };
   let lines: string[];
   try { lines = fs.readFileSync(file, "utf8").trim().split("\n"); } catch { return h; }
   for (const line of lines.slice(-window)) {
     let r: Record<string, unknown>;
-    try { r = JSON.parse(line); } catch { continue; }
+    try { r = JSON.parse(line); } catch {
+      // 坏行 ⇒ 该位置之后的「最后结局」不可知（它可能就是被吞掉的那条 bidirectional 事件）。
+      // 按位置否定上次判定：坏行【在】最后一条 bidirectional 之前 ⇒ 后面的好事件会再覆盖回来。
+      h.lastDocToDevelop = "unknown";
+      continue;
+    }
     const e = String(r.event ?? "");
     if (e === "doc-develop-sync-ff-synced") h.ffSynced++;
     else if (e === "doc-develop-sync-not-ff") {
@@ -1471,6 +1489,14 @@ export function collectSyncHealth(root: string, window = 200): SyncHealth {
     else if (e === "doc-develop-sync-semantic-align-failed") h.semanticAlignFailed++;
     else if (e === "doc-develop-sync-semantic-ff-failed") h.semanticFfFailed++;
     else if (e === "doc-develop-sync-semantic-take-develop-refused") h.semanticTakeDevelopRefused++;
+    else if (e === "doc-develop-sync-bidirectional") {
+      // doc→develop 的三态派生：写侧落 `String(docToDevelop)`（"true"/"false"），旧/手工事件可能是
+      // 原生布尔 ⇒ 两种形态都认；**其余任何值（缺键/数字/其它串）一律 "unknown"**，⛔ 不猜。
+      const v = r.docToDevelop;
+      h.lastDocToDevelop = v === true || v === "true" ? "ok"
+        : v === false || v === "false" ? "refused"
+        : "unknown";
+    }
     if (e) { h.lastEvent = e; h.lastTs = typeof r.ts === "string" ? r.ts : null; }
   }
   return h;
@@ -1540,7 +1566,12 @@ export function readingsDigest(readings: MetaRoundReadings): string {
       return `drv:${d.kind}:${run}:${unread}`;
     }).sort(),
     // 同步只取【最近是否在失败】这个位，⛔ 不取计数。
-    `sync:${readings.syncHealth.lastEvent ?? "none"}`,
+    // gap-meta-synchealth-doc-to-develop-outcome-invisible：仅取 lastEvent 时，「doc→develop 被拒」
+    // 与「健康」同形（拒绝态藏在 bidirectional 事件的字段里）⇒ 摘要不变 ⇒ 语义半永不被唤醒。
+    // 补三态 `lastDocToDevelop`（ok/refused/unknown）：阻塞**开始**与**结束**时摘要各变一次、阻塞
+    // 持续期间不变 ⇒ 语义半至多各判读一次，天然消抖。⛔ 不引入计数/时间阈值（硬规则 4 推论一：
+    // 成本结构未实测前不设阈值）。字段结构性缺失 ⇒ "unknown"（不与 "ok" 同形，硬规则 3b）。
+    `sync:${readings.syncHealth.lastEvent ?? "none"}:${readings.syncHealth.lastDocToDevelop ?? "unknown"}`,
     // 寄给它的消息：id + status 都进摘要。**必须进**——否则人新发一条 META 记录不会改变摘要，
     // 变化检测闸会把那一轮判为"读数没变"而跳过语义半 ⇒ 这个入口在定时轮里等于不存在。
     ...readings.metaRecords.map((m) => `meta:${m.id}:${m.status}`).sort(),

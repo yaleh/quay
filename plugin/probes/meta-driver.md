@@ -79,6 +79,20 @@ and treat that dimension as unreadable, ⛔ do NOT fabricate a reading.
   once hid the dominant failure (23 entries, 2 resolved, 21 stuck at conflict) and made the fallback
   look like it barely ran. `notFf` carries `ahead`/`behind` at its source, so "ahead only" (benign —
   the doc branch just committed, nothing to pull) is distinguishable from a real divergence.
+  `lastDocToDevelop` is a **tri-state** (`"ok"` / `"refused"` / `"unknown"`) describing the *outcome* of
+  the most recent doc→develop sync in the window — `lastEvent` alone only names the event, so a refused
+  doc→develop (which lands as a field on a `doc-develop-sync-bidirectional` event that otherwise looks
+  exactly like a healthy one) used to be indistinguishable from health. Disposition:
+  - `"refused"` — doc→develop is **blocked right now**. The cause lives in the shared checkout's
+    uncommitted / would-be-overwritten working-tree state (`takeDevelopDiscardingDoc` refuses rather
+    than destroy non-discardable commits), which is **the human's territory**: name the offending paths
+    from the accompanying `-take-develop-refused` record and say what must be cleaned, ⛔ do not
+    "fix" it by resetting a shared tree. This is a *state*, not a new notification channel — it is
+    judged once when the block starts and once when it clears, because the digest (below) only changes
+    on those two transitions. The order for deciding "which mechanism owns it" is unchanged.
+  - `"ok"` — the last doc→develop in the window succeeded (ff or semantic fallback).
+  - `"unknown"` — **not evaluated**: no such event in the window, an unrecognizable value, a malformed
+    line after it, or an unreadable carrier. ⛔ Never read `"unknown"` as `"ok"`.
 - `metaRecords`: `proposed` META records (`meta/META-NNN.md`) — **messages sent TO you**. This is how
   a bare defect or requirement reaches you: a human (or any layer) writes a META record (the fifth
   store kind, peer to task/adr/goal/document — NOT a task label) via `quay meta write`, and it shows
