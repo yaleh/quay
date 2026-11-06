@@ -27,11 +27,11 @@ goal_ac: AC-935
 
 ## AC
 
-- [ ] `node --test plugin/test/goal-driver.test.mjs packages/quay/test/goal-analysis.test.mjs` 退出码 0。
-- [ ] `GapState` 含三个新取值；轮 fact 不再 emit `stalled`；每个 blocked 行带 blocker 与 owner。
-- [ ] 负控：needs-human 任务不被判成 blocked-promotion；todo 过不了晋升门不被判成 blocked-needs-human。
-- [ ] 最新 round fact 中出现至少一条 `blocked-*`，owner 在枚举内。
-- [ ] 不写 task 状态：`git diff` 只含 goal 侧文件。
+- [x] `node --test plugin/test/goal-driver.test.mjs packages/quay/test/goal-analysis.test.mjs` 退出码 0。
+- [x] `GapState` 含三个新取值；轮 fact 不再 emit `stalled`；每个 blocked 行带 blocker 与 owner。
+- [x] 负控：needs-human 任务不被判成 blocked-promotion；todo 过不了晋升门不被判成 blocked-needs-human。
+- [x] 最新 round fact 中出现至少一条 `blocked-*`，owner 在枚举内。
+- [x] 不写 task 状态：`git diff` 只含 goal 侧文件。
 
 ## DoD
 
