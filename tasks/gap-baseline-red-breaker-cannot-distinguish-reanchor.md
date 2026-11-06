@@ -2,7 +2,7 @@
 id: gap-baseline-red-breaker-cannot-distinguish-reanchor
 title: baseline-red 断路器不能区分 re-anchor 与 LOOP DEADLOCK：只比签名、诊断恒写死锁，被红 checker 自身
   exit 0 的信号缺失
-status: ready
+status: done
 labels:
   - gap
   - defect
