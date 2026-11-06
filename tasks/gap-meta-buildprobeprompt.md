@@ -40,3 +40,11 @@ buildProbePrompt persists the full readings JSON to .quay/meta-driver-readings.j
 
 ## ADR-007 暗轴（L_D）
 - L_D import-graph-check: valueSccs=0 typeSccs=0 reverseEdges=0 files=562 edges=1741
+
+## Blocker
+
+**2026-11-06T21:28:02.951Z — worker 未落地（exited-not-landed）**
+
+- 未落地原因：step=suite: AssertionError [ERR_ASSERTION]: exactly one file may spell the escape body; found ["packages/quay/src/kernel/regex-escape.ts","plugin/scripts/meta-driver.ts"] [baseline A/B: HARD RED (task-introduced-red) — the task's red set is NOT a subset of the develop baseline red set: added=packages/quay/test/kernel-regex-escape.test.mjs changed=-]
+- run_id：wk-prod-anchor
+- session_id：3748ec78-547f-450f-beb1-cc8a9facc7c7
