@@ -1,7 +1,7 @@
 ---
 id: gap-ac939-ledger-binding-regression-lock
 title: "AC-939 判据回归锁：绑定台账 filed 的 taskId，且任意带 goal_ac: AC-937 的 done 任务不得替代"
-status: ready
+status: done
 labels:
   - gap
   - goal-driver
