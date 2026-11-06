@@ -27,11 +27,11 @@ goal_ac: AC-934
 
 ## AC
 
-- [ ] `node --test plugin/test/goal-driver.test.mjs plugin/test/driver-config.test.mjs` 退出码 0。
-- [ ] `drivers.yml kinds.goal.filing.perAcCooldownMs/perAcPerDay` 可配置；缺失取缺省，非法值 fail-closed。
-- [ ] 同一 AC 在上次立案后未过冷却时不再 spawn，轮 fact 出现 `filing-throttled` 行（含 `nextEligibleAt`）。
-- [ ] 负控：冷却已过 + 未超日上限 ⇒ 仍可立案；节流不得改变 `goal-gaps` 的状态取值。
-- [ ] live 证据：真实轮次中的一条节流读数或两次立案的间隔读数，逐字写入证据文档。
+- [x] `node --test plugin/test/goal-driver.test.mjs plugin/test/driver-config.test.mjs` 退出码 0。
+- [x] `drivers.yml kinds.goal.filing.perAcCooldownMs/perAcPerDay` 可配置；缺失取缺省，非法值 fail-closed。
+- [x] 同一 AC 在上次立案后未过冷却时不再 spawn，轮 fact 出现 `filing-throttled` 行（含 `nextEligibleAt`）。
+- [x] 负控：冷却已过 + 未超日上限 ⇒ 仍可立案；节流不得改变 `goal-gaps` 的状态取值。
+- [x] live 证据：真实轮次中的一条节流读数或两次立案的间隔读数，逐字写入证据文档。
 
 ## DoD
 
