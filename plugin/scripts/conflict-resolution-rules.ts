@@ -30,9 +30,10 @@
 // `isDualCopyFile` / `isTickDoc` / `resolveConflictMechanically` directly for the contract check
 // (the test asserts the module's BEHAVIOR — real git operations — not a prompt string).
 // This module is the EXECUTABLE carrier for rules (3)/(4)/(5): the rules are decided here by
-// POSITION and EXECUTED by real git commands, then asserted by the behavior test. worker-driver.ts
-// is deliberately NOT changed (its prompt carries the same rules as prose for the agent-executed
-// half — outline/code/task-file/ff — and must not grow; see the task's AC2 evidence).
+// POSITION and EXECUTED by real git commands, then asserted by the behavior test. worker-driver.ts's
+// `continueConflictResolutionNote` delegates rules (3)/(4)/(5) to this module's `--resolve` (the
+// prompt names the carrier, so the worker runs the executable half rather than re-deriving it from
+// prose); outline/code/task-file/ff stay as prose for the agent-executed half.
 // Usage (CLI, for the worker / tests):
 //   node --experimental-strip-types plugin/scripts/conflict-resolution-rules.ts --judge <rel> <status> [--json]
 //   node --experimental-strip-types plugin/scripts/conflict-resolution-rules.ts --resolve <root> <rel> <status> [--json]
