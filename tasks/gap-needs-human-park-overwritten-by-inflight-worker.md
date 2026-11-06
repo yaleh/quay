@@ -1,7 +1,7 @@
 ---
 id: gap-needs-human-park-overwritten-by-inflight-worker
 title: 在飞 worker 的 task_write 会把 needs-human 覆盖回 todo —— 挂起不是原子的
-status: todo
+status: ready
 labels:
   - gap
 parent: null
