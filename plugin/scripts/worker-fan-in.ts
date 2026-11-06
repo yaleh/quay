@@ -1489,9 +1489,42 @@ export interface BaselineRedRound {
 
 export const BASELINE_RED_ROUNDS_REL = ".quay/baseline-red-rounds.jsonl";
 
+/** 判定时刻对一个 red point 的**新鲜**重测读数。
+ *
+ *  ⛔ 为什么必须新鲜测、不能从 `BaselineRedRound` / suite 结果里取：那两者记录的是**产生红的那一轮**，
+ *  那一刻 checker 按定义就非 0 ⇒ 把它存下来再读出来对「现在是不是还红」零信息（硬规则 4：一个结构上
+ *  不可能取假的量不是测量）。
+ *  `exit === null` 是独立的第三态（超时 / 项目没声明 rerun 命令 / 命令读不懂 / 进程起不来）——⛔ 与
+ *  「仍然红」（非 0）和「已不再红」（0）都不同形（硬规则 3b）。 */
+export interface CheckerProbe {
+  /** 被探测的 red point（诊断里点名用的同一串，通常是失败测试文件的 repo-relative 路径）。 */
+  point: string;
+  /** checker 自己的 exit；`null` = 没测成（未评估）。 */
+  exit: number | null;
+}
+
 export type CircuitBreakerVerdict =
   | { kind: "continue"; consecutive: number }
-  | { kind: "stop-terminal"; consecutive: number; signature: string; peers: string[]; diagnostic: string };
+  | {
+      kind: "stop-terminal";
+      consecutive: number;
+      signature: string;
+      peers: string[];
+      /** 判据基础（⛔ 不是靠 diagnostic 文本判）：`confirmed-deadlock` = 每个被挡 point 此刻仍然红；
+       *  `not-evaluated` = 没测成 ⇒ 停派，但**不得**声称死锁（硬规则 3b）。 */
+      basis: "confirmed-deadlock" | "not-evaluated";
+      probes: CheckerProbe[];
+      diagnostic: string;
+    }
+  | {
+      kind: "re-anchor";
+      consecutive: number;
+      signature: string;
+      /** 此刻 `exit === 0` 的 red point：**已不再红** ⇒ 记录的红集陈旧 ⇒ 欠 re-anchor，不是死锁。 */
+      stalePoints: string[];
+      probes: CheckerProbe[];
+      diagnostic: string;
+    };
 
 /** 读耐久载体（坏行跳过；文件缺失 ⇒ []——⛔ 不伪造历史）。 */
 export function readBaselineRedRounds(root: string): BaselineRedRound[] {
@@ -1522,16 +1555,13 @@ export function appendBaselineRedRound(root: string, round: BaselineRedRound): v
   } catch { /* best-effort */ }
 }
 
-/** 电路断路器判定（纯函数）：同一任务**连续** `cap` 轮（含本轮）撞同一签名 ⇒ stop-terminal。
- *  `cap` 建议与 `RETRY_CAP_DEFAULT` 对齐（调用方传 `maxRetries`）。`allRounds` 供诊断点名**同签名的
- *  其它任务**（三方死锁的「哪几个任务」半边）——缺省只报本任务。⛔ 只判「签名不变」；签名一变即重置
- *  连续计数（那说明是另一堵墙，交给既有重试上限路径）。 */
-export function decideBaselineRedCircuitBreaker(
+/** 同一签名连续轮数（含本轮）+ 这些轮共同挡住的 red point 集合。
+ *  **单一定义点**：纯函数（写进诊断）与测量侧（决定探测哪几个 point）都从这里取——两处各算一份会让
+ *  「诊断点名的」与「实际探测的」不是同一批（硬规则 5b）。 */
+export function baselineRedStreak(
   prior: BaselineRedRound[],
   current: BaselineRedRound,
-  cap: number,
-  allRounds: BaselineRedRound[] = [],
-): CircuitBreakerVerdict {
+): { consecutive: number; blocked: string[] } {
   const same = prior
     .filter((r) => r.task === current.task && r.ts <= current.ts)
     .sort((a, b) => a.ts - b.ts);
@@ -1540,13 +1570,67 @@ export function decideBaselineRedCircuitBreaker(
     if (same[i].signature !== current.signature) break;
     consecutive += 1;
   }
+  // ⛔ 不能写 `same.slice(-(consecutive - 1))`：`consecutive === 1` 时 `slice(-0)` 返回**整个**数组。
+  const streak = same.slice(Math.max(0, same.length - (consecutive - 1)));
+  const blocked = [...new Set([...current.blocked, ...streak.flatMap((r) => r.blocked)])].sort();
+  return { consecutive, blocked };
+}
+
+/** 电路断路器判定（纯函数，⛔ 不读盘、不 spawn）：同一任务**连续** `cap` 轮（含本轮）撞同一签名 ⇒
+ *  stop-terminal 或 re-anchor。
+ *  `cap` 建议与 `RETRY_CAP_DEFAULT` 对齐（调用方传 `maxRetries`）。`allRounds` 供诊断点名**同签名的
+ *  其它任务**（三方死锁的「哪几个任务」半边）——缺省只报本任务。⛔ 只判「签名不变」；签名一变即重置
+ *  连续计数（那说明是另一堵墙，交给既有重试上限路径）。
+ *
+ *  `checkerProbes` = 调用方在**判定时刻新鲜测**出来的逐 point exit（见 `CheckerProbe`）。三态聚合，
+ *  **优先级不可调换**（`0` 压过 `null`；空数组按 `null` 处理，⛔ 不回落成「确认死锁」）：
+ *    ① 任一 `exit === 0` ⇒ `re-anchor`（记录的红集已陈旧，死锁不成立，重锚是安全动作）；
+ *    ② 否则 probes 为空 / 任一 `exit === null` ⇒ `stop-terminal` + `basis:"not-evaluated"`（⛔ 无死锁判词）；
+ *    ③ 否则（全部非 0 且至少一条）⇒ `stop-terminal` + `basis:"confirmed-deadlock"` + 死锁诊断。 */
+export function decideBaselineRedCircuitBreaker(
+  prior: BaselineRedRound[],
+  current: BaselineRedRound,
+  cap: number,
+  allRounds: BaselineRedRound[] = [],
+  checkerProbes: CheckerProbe[] = [],
+): CircuitBreakerVerdict {
+  const { consecutive, blocked } = baselineRedStreak(prior, current);
   if (!(cap >= 1) || consecutive < cap) return { kind: "continue", consecutive };
   const peers = [...new Set(
     allRounds
       .filter((r) => r.task !== current.task && r.signature === current.signature)
       .map((r) => r.task),
   )].sort();
-  const blocked = [...new Set([...current.blocked, ...same.slice(-(consecutive - 1)).flatMap((r) => r.blocked)])].sort();
+  const probeText = checkerProbes.length === 0
+    ? "(没有可探测的 red point)"
+    : checkerProbes.map((p) => `${p.point}=${p.exit === null ? "未评估" : `exit ${p.exit}`}`).join(", ");
+  // ① 陈旧已被证实 ⇒ 重锚（⛔ 优先级最高：0 压过 null）。
+  const stalePoints = [...new Set(checkerProbes.filter((p) => p.exit === 0).map((p) => p.point))].sort();
+  if (stalePoints.length > 0) {
+    const diagnostic = [
+      `欠 re-anchor，不是死锁: task ${current.task} 连续 ${consecutive} 轮撞同一签名，但判定时刻新鲜重测发现已有点不再红`,
+      `(checker exit 0 ⇒ 记录的红集陈旧，死锁不成立). Probed at decision time: ${probeText}.`,
+      `Stale red points (此刻已不再红): ${stalePoints.join(", ")}.`,
+      `Suggested resolution: 重锚这条任务的既存红基线/台账后重派（⛔ 不按死锁排序人工裁决落地顺序）；红集刷新后若仍同签名受阻，下一轮才会落到确认死锁判词。`,
+      `⛔ The gates were NOT relaxed: every new/changed red point still hard-fails this task (baseline-equivalence exemption never covers a red the task introduced).`,
+    ].join(" ");
+    return { kind: "re-anchor", consecutive, signature: current.signature, stalePoints, probes: checkerProbes, diagnostic };
+  }
+  // ② 没测成 ≠ 确认死锁（硬规则 3b）：停派，但诊断里必须留「未评估」，⛔ 不得写死锁判词。
+  if (checkerProbes.length === 0 || checkerProbes.some((p) => p.exit === null)) {
+    const missing = checkerProbes.filter((p) => p.exit === null).map((p) => p.point).sort();
+    const diagnostic = [
+      `未评估（not evaluated）: task ${current.task} 连续 ${consecutive} 轮撞同一签名，但「这些 red point 此刻是否仍然红」没测成`,
+      `⇒ ⛔ 不判定为死锁。Probed at decision time: ${probeText}.`,
+      checkerProbes.length === 0
+        ? `没有可探测的 red point（记录里没有归因到任何文件）——停派，但没有「仍然红」的读数。`
+        : `无法获得读数的 red point: ${missing.join(", ")}（超时 / 项目未声明 rerun 命令 / 命令读不懂 / 进程起不来）。`,
+      `Suggested resolution: 先把逐 point 的 checker 跑成可读（声明 loop.rerun_command 或人工确认这些红点是否还在），再决定是重锚还是排序裁决。`,
+      `⛔ The gates were NOT relaxed: every new/changed red point still hard-fails this task (baseline-equivalence exemption never covers a red the task introduced).`,
+    ].join(" ");
+    return { kind: "stop-terminal", consecutive, signature: current.signature, peers, basis: "not-evaluated", probes: checkerProbes, diagnostic };
+  }
+  // ③ 全部非 0 且至少一条 ⇒ 死锁（原有的判词与诊断，逐字保留）。
   const diagnostic = [
     `LOOP DEADLOCK: task ${current.task} has been blocked by the SAME pre-existing red set for ${consecutive} consecutive fan-in rounds`,
     `(signature unchanged across rounds). Blocked red points: ${blocked.length > 0 ? blocked.join(", ") : "(none attributed)"}.`,
@@ -1556,21 +1640,111 @@ export function decideBaselineRedCircuitBreaker(
     `Suggested resolution: land ANY ONE of them first (each one's own fix is outside the blocked set, so the red set does not grow); the others' blocked sets then shrink by that red point and they land in turn. If a landing still makes it worse, a human must decide the order.`,
     `⛔ The gates were NOT relaxed: every new/changed red point still hard-fails this task (baseline-equivalence exemption never covers a red the task introduced).`,
   ].join(" ");
-  return { kind: "stop-terminal", consecutive, signature: current.signature, peers, diagnostic };
+  return { kind: "stop-terminal", consecutive, signature: current.signature, peers, basis: "confirmed-deadlock", probes: checkerProbes, diagnostic };
+}
+
+// ── 判定时刻的新鲜测量（I/O 侧；纯函数 `decideBaselineRedCircuitBreaker` ⛔ 不读盘、不 spawn）──────
+
+/** 逐 point 的墙钟上限。依据：checker = 项目自己声明的 `loop.rerun_command`（本仓库是
+ *  `bash {worktree}/scripts/test.sh {files}`），该入口带 ~25s 固定静态检查开销、单文件实测 32s
+ *  （2026-10-11 读数，见 `.quay/config.yml` 的 rerun_command 注释）⇒ 90s ≈ 2.8× 余量；再小就等于
+ *  把「慢机」记成「未评估」。 */
+export const CHECKER_PROBE_TIMEOUT_MS = 90_000;
+
+/** 一次判定最多**同步**探测几个 point。超出的保持 `exit: null`（未评估），⛔ 不截断成「仍然红」。 */
+export const CHECKER_PROBE_MAX_POINTS = 3;
+
+/** 一次判定的总预算（所有点合计）。断路器跑在 driver 的 worker 终态记账路径上且是同步的 ⇒ 必须有
+ *  上界：`MAX_POINTS × TIMEOUT` 的理论上限 270s 被它压到 180s，超预算的剩余点直接 `null`（未评估）。
+ *  ⛔ 判据宁可「未评估」也不让断路器自己变成卡死点。 */
+export const CHECKER_PROBE_TOTAL_BUDGET_MS = 180_000;
+
+/** 测量侧的测试缝（生产上全部缺省）。 */
+export interface BaselineRedProbeOptions {
+  /** 逐点 checker 的 argv 模板（`{worktree}` / `{files}` 占位符，与 `loop.rerun_command` 同形）。
+   *  缺省 ⇒ 用本工作区 `.quay/config.yml` 声明的 `loop.rerun_command`。 */
+  probeCommand?: string[];
+  probeTimeoutMs?: number;
+  probeBudgetMs?: number;
+  maxProbePoints?: number;
+}
+
+/** 同步跑一次 checker，返回**它自己的** exit；`null` = 没测成。
+ *  ⛔ 永不抛（spawn 失败 / 墙钟超时 / 被信号杀死 ⇒ `null`）：测量失败不得把异常抛进 driver 的终态
+ *  记账路径，也不得伪装成「仍然红」（非 0）或「已不红」（0）。 */
+function runCheckerProbe(argv: string[], timeoutMs: number): number | null {
+  let r: ReturnType<typeof spawnSync>;
+  try {
+    r = spawnSync(argv[0], argv.slice(1), {
+      // stdio 全忽略：没有管道就不会出现「孙进程持管道 ⇒ 返回被拖住」的失败模式（只关心 exit）。
+      stdio: ["ignore", "ignore", "ignore"],
+      timeout: timeoutMs,
+      killSignal: "SIGKILL",
+      // detached ⇒ 子进程自成进程组。spawnSync 的超时只杀**直接**子进程，孙进程会存活继续跑
+      // ⇒ 下面按组补一刀（与 mechSh 的组 kill 同因）。
+      detached: true,
+    });
+  } catch {
+    return null;
+  }
+  if (r.error != null || r.status === null) {
+    try { if (typeof r.pid === "number" && r.pid > 0) process.kill(-r.pid, "SIGKILL"); } catch { /* 已退出 */ }
+    return null;
+  }
+  return r.status;
+}
+
+/** 对一批 red point 逐个**新鲜测量**（判定时刻跑；⛔ 不从 `BaselineRedRound` 取历史 exit —— 见
+ *  `CheckerProbe` 头注释）。三重上界：点数额、总预算、逐点墙钟。
+ *  未声明/读不懂 rerun 命令的 point ⇒ `exit: null`（未评估），⛔ 不伪造一个「仍然红」。 */
+export function probeBlockedRedPoints(
+  root: string,
+  points: string[],
+  opts: BaselineRedProbeOptions = {},
+): CheckerProbe[] {
+  const perPoint = opts.probeTimeoutMs ?? CHECKER_PROBE_TIMEOUT_MS;
+  const maxPoints = Math.max(0, opts.maxProbePoints ?? CHECKER_PROBE_MAX_POINTS);
+  const deadline = Date.now() + Math.max(0, opts.probeBudgetMs ?? CHECKER_PROBE_TOTAL_BUDGET_MS);
+  const out: CheckerProbe[] = [];
+  for (const point of points) {
+    if (out.length >= maxPoints) { out.push({ point, exit: null }); continue; }
+    const remaining = deadline - Date.now();
+    if (!(remaining > 0)) { out.push({ point, exit: null }); continue; }
+    let argv: string[] | null;
+    if (opts.probeCommand !== undefined) {
+      argv = applyFileTemplate(opts.probeCommand, { worktree: root, files: [point] });
+    } else {
+      const resolved = resolveRerunCommand(root, root, [point]);
+      argv = resolved.kind === "run" ? resolved.argv : null;
+    }
+    if (argv === null || argv.length === 0) { out.push({ point, exit: null }); continue; }
+    out.push({ point, exit: runCheckerProbe(argv, Math.min(perPoint, remaining)) });
+  }
+  return out;
 }
 
 /** 驱动侧入口：本任务当前的「既存红死锁」读数（供 worker-driver 决定是否停派）。
- *  无记录 / 未达上限 ⇒ `{ kind:"continue", consecutive }`。 */
+ *  无记录 / 未达上限 ⇒ `{ kind:"continue", consecutive }`。
+ *  **达上限时才测量**（测量有代价）：先判连续轮数，够 cap 才逐 red point 新鲜重测，再把读数交给
+ *  纯函数聚合。 */
 export function baselineRedDeadlockReading(
   root: string,
   taskId: string,
   cap: number,
   nowMs: number = Date.now(),
+  probeOpts: BaselineRedProbeOptions = {},
 ): CircuitBreakerVerdict {
-  const rounds = readBaselineRedRounds(root).filter((r) => r.task === taskId);
+  const all = readBaselineRedRounds(root);
+  const rounds = all.filter((r) => r.task === taskId);
   if (rounds.length === 0) return { kind: "continue", consecutive: 0 };
   const current = rounds.reduce((a, b) => (b.ts >= a.ts ? b : a));
-  return decideBaselineRedCircuitBreaker(rounds, current, cap, readBaselineRedRounds(root).filter((r) => r.task !== taskId));
+  // ⛔ `prior` 必须排除本轮自身：把它也当 prior 会让连续计数多算一轮（2 轮就撞 cap 3），诊断里的
+  // 「连续 N 轮」同样虚报——一个只说「连撞 3 轮」却只发生过 2 轮的判词，读者无法与真死锁区分。
+  const prior = rounds.filter((r) => r !== current);
+  const streak = baselineRedStreak(prior, current);
+  if (!(cap >= 1) || streak.consecutive < cap) return { kind: "continue", consecutive: streak.consecutive };
+  const probes = probeBlockedRedPoints(root, streak.blocked, probeOpts);
+  return decideBaselineRedCircuitBreaker(prior, current, cap, all.filter((r) => r.task !== taskId), probes);
 }
 
 // ── 当前 develop 红签名集（`.quay/develop-red-set.json`）——「某个红**消失**了」的机械信号 ────────────
