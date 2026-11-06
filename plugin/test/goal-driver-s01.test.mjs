@@ -139,11 +139,11 @@ test('readTaskFacts: 读 tasks/*.md 的 status+goal_ac；目录不存在 ⇒ nul
 // ── G9 缺口语义环（tasks/gap-goal-driver-gap-semantic-filing-ring）──────────────────────────
 
 
-test('computeGoalGaps 四态：stalled = 关联任务全无法自行前进（结构量，⛔ 计时器）', () => {
+test('computeGoalGaps 四态：关联任务全无法自行前进 ⇒ 按成因分 blocked-promotion / blocked-dispatch（⛔ 计时器）', () => {
   const records = [
-    { id: 'AC-170', goal: 'GOAL-001', status: 'active' },  // 关联 todo 被判不合格 ⇒ stalled
+    { id: 'AC-170', goal: 'GOAL-001', status: 'active' },  // 关联 todo 被判不合格 ⇒ blocked-promotion
     { id: 'AC-171', goal: 'GOAL-001', status: 'active' },  // 关联 todo 合格 ⇒ in-progress
-    { id: 'AC-172', goal: 'GOAL-001', status: 'active' },  // 关联 ready 被排除 ⇒ stalled
+    { id: 'AC-172', goal: 'GOAL-001', status: 'active' },  // 关联 ready 被排除 ⇒ blocked-dispatch
     { id: 'AC-173', goal: 'GOAL-001', status: 'active' },  // 关联 ready 可派发 ⇒ in-progress
     { id: 'AC-174', goal: 'GOAL-001', status: 'active' },  // 无关联任务 ⇒ gap
   ];
@@ -159,15 +159,23 @@ test('computeGoalGaps 四态：stalled = 关联任务全无法自行前进（结
   };
   const gaps = computeGoalGaps(records, taskFacts, judgment);
   const g = (ac) => gaps.find((x) => x.ac === ac);
-  assert.equal(g('AC-170').state, 'stalled', '关联 todo 全被判不合格 ⇒ stalled');
+  assert.equal(g('AC-170').state, 'blocked-promotion', '关联 todo 全被判不合格 ⇒ blocked-promotion（缺四件套）');
   assert.equal(g('AC-171').state, 'in-progress', '关联 todo 有合格者 ⇒ in-progress');
-  assert.equal(g('AC-172').state, 'stalled', '关联 ready 全被排除 ⇒ stalled');
+  assert.equal(g('AC-172').state, 'blocked-dispatch', '关联 ready 全被排除 ⇒ blocked-dispatch（派不出去）');
   assert.equal(g('AC-173').state, 'in-progress', '关联 ready 有可派发者 ⇒ in-progress');
   assert.equal(g('AC-174').state, 'gap');
   assert.equal(g('AC-174').taskCount, 0);
-  // judgment===null（读不到 ready-pool-check）⇒ 不判 stalled（⛔ 读不懂 ≠ 卡住，回到 in-progress）
+  // 每条 blocked 行带 blocker：cause 与 state 一致，tasks 逐条带出是哪条任务、哪种成因（⛔ 不是布尔）
+  assert.deepEqual(g('AC-170').blocker, { cause: 'blocked-promotion', tasks: [{ id: 't-stuck-todo', cause: 'blocked-promotion' }] });
+  assert.deepEqual(g('AC-172').blocker, { cause: 'blocked-dispatch', tasks: [{ id: 't-stuck-ready', cause: 'blocked-dispatch' }] });
+  // 非阻断态不装 blocker（⛔ 不给它们补一个空对象——那会与「查过且无阻断」同形）
+  assert.equal(g('AC-171').blocker, undefined);
+  assert.equal(g('AC-173').blocker, undefined);
+  assert.equal(g('AC-174').blocker, undefined);
+  // judgment===null（读不到 ready-pool-check）⇒ 不判阻断（⛔ 读不懂 ≠ 卡住，回到 in-progress）
   const noJudgment = computeGoalGaps(records, taskFacts, null);
-  assert.equal(noJudgment.find((x) => x.ac === 'AC-170').state, 'in-progress', 'judgment=null ⇒ 不判 stalled');
+  assert.equal(noJudgment.find((x) => x.ac === 'AC-170').state, 'in-progress', 'judgment=null ⇒ 不判 blocked-promotion');
+  assert.equal(noJudgment.find((x) => x.ac === 'AC-172').state, 'in-progress', 'judgment=null ⇒ 不判 blocked-dispatch');
 });
 
 
@@ -182,46 +190,84 @@ test('isTaskStuck: todo 不在 eligible 集合 ⇒ stuck；ready 在 excluded �
   assert.equal(isTaskStuck({ id: 'e', status: 'superseded' }, judgment), false);
 });
 
-// ── needs-human ⇒ stalled（gap-goal-gap-needs-human-invisible-burns-spawn-slot）────────────────
-// 关联任务翻 needs-human 后，computeGoalGaps 不再报 gap（taskCount=0），而是 stalled（taskCount=真实
-// 关联数）——needs-human 是「有处理者、但不能自行前进」，与「无任务 ⇒ gap」不同形。
+// ── needs-human ⇒ blocked-needs-human（gap-goal-gap-needs-human-invisible-burns-spawn-slot）──────
+// 关联任务翻 needs-human 后，computeGoalGaps 不再报 gap（taskCount=0），而是 blocked-needs-human
+// （taskCount=真实关联数）——needs-human 是「有处理者、但不能自行前进」，与「无任务 ⇒ gap」不同形。
 
 
-test('AC1: 关联任务全为 needs-human ⇒ stalled，taskCount = 该 AC 的 needs-human 任务数（不再是 0）', () => {
+test('AC1: 关联任务全为 needs-human ⇒ blocked-needs-human，taskCount = 该 AC 的 needs-human 任务数（不再是 0）', () => {
   const records = [{ id: 'AC-X', goal: 'GOAL-001', status: 'active' }];
   const taskFacts = [{ id: 'gap-ac158', status: 'needs-human', goalAc: 'AC-X' }];
   const gaps = computeGoalGaps(records, taskFacts);
   assert.equal(gaps.length, 1);
-  assert.equal(gaps[0].state, 'stalled');
+  assert.equal(gaps[0].state, 'blocked-needs-human');
   assert.equal(gaps[0].taskCount, 1);
+  assert.deepEqual(gaps[0].blocker, { cause: 'blocked-needs-human', tasks: [{ id: 'gap-ac158', cause: 'blocked-needs-human' }] }, 'blocker 逐条带出哪条任务要人处理');
   // 两条 needs-human 任务 ⇒ taskCount=2（枚举关联数，⛔ 非布尔化——硬规则 3）
   const gaps2 = computeGoalGaps(records, [
     { id: 'gap-a', status: 'needs-human', goalAc: 'AC-X' },
     { id: 'gap-b', status: 'needs-human', goalAc: 'AC-X' },
   ]);
-  assert.equal(gaps2[0].state, 'stalled');
+  assert.equal(gaps2[0].state, 'blocked-needs-human');
   assert.equal(gaps2[0].taskCount, 2);
+  assert.deepEqual(gaps2[0].blocker.tasks.map((t) => t.id), ['gap-a', 'gap-b'], 'blocker.tasks 枚举（按 id 排序，稳定）');
 });
 
 
-test('AC2: 负控制——三态两两不等（needs-human ⇒ stalled；ready 可晋升 ⇒ in-progress；无关联 ⇒ gap）', () => {
+test('AC2: 负控制——三态两两不等（needs-human ⇒ blocked-needs-human；ready 可晋升 ⇒ in-progress；无关联 ⇒ gap）', () => {
   const records = [{ id: 'AC-X', goal: 'GOAL-001', status: 'active' }];
-  // needs-human ⇒ stalled（正）
-  const stalled = computeGoalGaps(records, [{ id: 't', status: 'needs-human', goalAc: 'AC-X' }])[0];
+  // needs-human ⇒ blocked-needs-human（正）
+  const blocked = computeGoalGaps(records, [{ id: 't', status: 'needs-human', goalAc: 'AC-X' }])[0];
   // ready + judgment 判其可晋升（不在 excluded）⇒ in-progress
   const judgment = { eligibleTodoIds: new Set(), excludedReadyIds: new Set() };
   const inProgress = computeGoalGaps(records, [{ id: 't', status: 'ready', goalAc: 'AC-X' }], judgment)[0];
   // taskFacts 不含该 goalAc ⇒ gap、taskCount=0
   const gap = computeGoalGaps(records, [{ id: 'other', status: 'todo', goalAc: 'AC-OTHER' }])[0];
-  assert.equal(stalled.state, 'stalled');
-  assert.equal(stalled.taskCount, 1);
+  assert.equal(blocked.state, 'blocked-needs-human');
+  assert.equal(blocked.taskCount, 1);
   assert.equal(inProgress.state, 'in-progress');
   assert.equal(gap.state, 'gap');
   assert.equal(gap.taskCount, 0);
   // 三次断言的 state 必须两两不等（判据能取假）
-  assert.notEqual(stalled.state, inProgress.state, 'stalled ≠ in-progress');
-  assert.notEqual(stalled.state, gap.state, 'stalled ≠ gap');
+  assert.notEqual(blocked.state, inProgress.state, 'blocked-needs-human ≠ in-progress');
+  assert.notEqual(blocked.state, gap.state, 'blocked-needs-human ≠ gap');
   assert.notEqual(inProgress.state, gap.state, 'in-progress ≠ gap');
+});
+
+
+test('AC3: 负控制——两种成因不互相误判（needs-human 不判成 promotion；过不了晋升门的 todo 不判成 needs-human）', () => {
+  const records = [{ id: 'AC-X', goal: 'GOAL-001', status: 'active' }];
+  const judgment = { eligibleTodoIds: new Set(['t-ok']), excludedReadyIds: new Set(['t-ready-excluded']) };
+  // ① needs-human 正控 + promotion / dispatch 负控：needs-human 这条绝不落成另外两态
+  const nh = computeGoalGaps(records, [{ id: 't-nh', status: 'needs-human', goalAc: 'AC-X' }], judgment)[0];
+  assert.equal(nh.state, 'blocked-needs-human');
+  assert.notEqual(nh.state, 'blocked-promotion', 'needs-human 不被判成 blocked-promotion');
+  assert.notEqual(nh.state, 'blocked-dispatch', 'needs-human 不被判成 blocked-dispatch');
+  // ② promotion 正控 + needs-human 负控：一条不合格的 todo 不是「需要人处理」
+  const promo = computeGoalGaps(records, [{ id: 't-bad-todo', status: 'todo', goalAc: 'AC-X' }], judgment)[0];
+  assert.equal(promo.state, 'blocked-promotion');
+  assert.notEqual(promo.state, 'blocked-needs-human', 'todo 过不了晋升门不被判成 blocked-needs-human');
+  // ③ dispatch 正控 + promotion 负控：一条被 pool 排除的 ready 不是「缺四件套」（它已经 ready 了）
+  const disp = computeGoalGaps(records, [{ id: 't-ready-excluded', status: 'ready', goalAc: 'AC-X' }], judgment)[0];
+  assert.equal(disp.state, 'blocked-dispatch');
+  assert.notEqual(disp.state, 'blocked-promotion', 'ready 被排除不被判成 blocked-promotion');
+  // ④ 混合成因：needs-human 优先（人的决定解开其余一切），但 blocker.tasks 逐条保留各自成因
+  const mixed = computeGoalGaps(records, [
+    { id: 't-nh', status: 'needs-human', goalAc: 'AC-X' },
+    { id: 't-bad-todo', status: 'todo', goalAc: 'AC-X' },
+  ], judgment)[0];
+  assert.equal(mixed.state, 'blocked-needs-human', 'needs-human 优先级最高');
+  assert.deepEqual(mixed.blocker.tasks, [
+    { id: 't-bad-todo', cause: 'blocked-promotion' },
+    { id: 't-nh', cause: 'blocked-needs-human' },
+  ], '⛔ 第二种成因不被压在第一种下面（硬规则 3 枚举）');
+  // ⑤ 混合且有一条可自行前进 ⇒ 不是阻断（in-progress），⛔ 不被「有 stuck」布尔化误判
+  const progressing = computeGoalGaps(records, [
+    { id: 't-nh', status: 'needs-human', goalAc: 'AC-X' },
+    { id: 't-ok', status: 'todo', goalAc: 'AC-X' },
+  ], judgment)[0];
+  assert.equal(progressing.state, 'in-progress', '有一条能自己走 ⇒ 整组不是 blocked');
+  assert.equal(progressing.blocker, undefined);
 });
 
 
@@ -330,7 +376,7 @@ test('AC2 词表可区分：GapState 含 workable/world-gated/unclassified，与
   // 定义处**，driver 侧另 pin 一条「仍经 Layer 0 的导入面 re-export」，既有导入面不变。断言强度不降：
   // 原来的字面量断言在 goal-driver.ts 上，现在拆成「Core 定义 + driver 取符号」两半。
   const coreSrc = fs.readFileSync(new URL('../../packages/quay/src/core/goal-analysis.ts', import.meta.url), 'utf8');
-  assert.match(coreSrc, /export type GapState =\s*\|\s*"in-progress"\s*\|\s*"gap"\s*\|\s*"workable"\s*\|\s*"world-gated"\s*\|\s*"unclassified"\s*\|\s*"stalled"\s*\|\s*"not-evaluated"/, 'GapState 词表含 workable/world-gated/unclassified（Core 唯一定义处）');
+  assert.match(coreSrc, /export type GapState =\s*\|\s*"in-progress"\s*\|\s*"gap"\s*\|\s*"workable"\s*\|\s*"world-gated"\s*\|\s*"unclassified"\s*\|\s*"stalled"\s*\|\s*"blocked-needs-human"\s*\|\s*"blocked-promotion"\s*\|\s*"blocked-dispatch"\s*\|\s*"not-evaluated"/, 'GapState 词表含 workable/world-gated/unclassified + blocked 三态（Core 唯一定义处）');
   const driverSrc = fs.readFileSync(new URL('../scripts/goal-driver.ts', import.meta.url), 'utf8');
   assert.match(driverSrc, /export type \{ GapState \} from "\.\/driver-runtime\.ts"/, 'driver 仍经 driver-runtime 的 Core 导入面 re-export GapState（既有导入面不变）');
   const workRec = { id: 'AC-X', goal: 'GOAL-001', status: 'active', criterion: 'test -f src/x.ts' };
@@ -361,7 +407,7 @@ test('AC3 两处同修：牵引判定收进 isTractionStatus，字面量重复�
 });
 
 
-test('AC4: stalled 不消耗 spawn 名额（选取面只取 state==="gap"）', () => {
+test('AC4: blocked-* 不消耗 spawn 名额（选取面只取 state==="gap"）', () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'goal-driver-stalledspawn-'));
   try {
     const records = [
@@ -370,12 +416,12 @@ test('AC4: stalled 不消耗 spawn 名额（选取面只取 state==="gap"）', (
       { id: 'AC-159', goal: 'GOAL-001', title: 'a159', expect: 'e2', status: 'active' },
     ];
     const gaps = [
-      { goal: 'GOAL-001', ac: 'AC-158', state: 'stalled', taskCount: 1 },
+      { goal: 'GOAL-001', ac: 'AC-158', state: 'blocked-promotion', taskCount: 1 },
       { goal: 'GOAL-001', ac: 'AC-159', state: 'gap', taskCount: 0 },
     ];
     const r = runGapSpawnPass(gaps, records, tmp, { gapWorkerCmd: 'true', resourceGateArgv: ['true'], spawnCap: 3 });
     assert.equal(r.spawned, 1, '只有 AC-159 一条 gap ⇒ spawn 1');
-    // 选取结果的 ac 集合与仅 state==="gap" 的子集逐一相等（stalled 不在选取面）
+    // 选取结果的 ac 集合与仅 state==="gap" 的子集逐一相等（blocked-* 不在选取面）
     const gapOnlyAcs = gaps.filter((g) => g.state === 'gap').map((g) => g.ac);
     assert.deepEqual(r.outcomes.map((o) => o.ac), gapOnlyAcs);
   } finally {

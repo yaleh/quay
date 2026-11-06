@@ -538,12 +538,16 @@ export { parseBinaryVerdict } from "../../packages/quay/src/kernel/verdict-parse
 export {
   goalNextProjection,
   GAP_STATES,
+  BLOCKED_GAP_STATES,
   GOAL_NEXT_PRIORITY,
   GOAL_NEXT_OWNERS,
   GOAL_NEXT_ACTION_KINDS,
 } from "../../packages/quay/src/core/goal-analysis.ts";
 export type {
+  BlockedGapState,
   GapState,
+  GoalBlocker,
+  GoalBlockerTask,
   GoalGap,
   GoalNextActionKind,
   GoalNextOwner,

@@ -46,7 +46,22 @@
  *  unclassified      the classifier could not read/parse the criterion text (missing/empty) ⇒ an
  *                    independent value: ⛔ neither `workable` nor `world-gated`, and it consumes no
  *                    spawn slot (hard rule 3b: an unreadable input must not wear a substantive state).
- *  stalled           tasks exist but none can advance on its own (G9 structural judgement)
+ *  stalled           ⚠️ LEGACY / INPUT-ONLY since 2026-11-07 (gap-goal-driver-blocked-taxonomy): the
+ *                    old single value for "tasks exist but none can advance on its own". It stays in
+ *                    the union for compatibility (round carriers written before the split, fixtures,
+ *                    every historical importer), ⛔ but `computeGoalGaps` NEVER emits it again — the
+ *                    three causes below replace it, because they have three different owners
+ *                    (ask a human / fix the four artifacts / fix dispatch), and folding them into one
+ *                    value made the driver report "stalled" for all of them.
+ *  blocked-needs-human  every in-traction task linked to this criterion is parked `needs-human` ⇒ a
+ *                    HUMAN must move it (owner `human`, action `ask-human`). Cause needs no ready-pool
+ *                    structural reading: a needs-human task has already left todo/ready.
+ *  blocked-promotion every in-traction task is `todo` and the author→ready promotion gate does NOT
+ *                    accept it (not in `eligibleTodoIds`) ⇒ the four artifacts are what is missing
+ *                    (owner `worker`, action `fix-artifacts`).
+ *  blocked-dispatch  every in-traction task is `ready` and the pool EXCLUDES it (in
+ *                    `excludedReadyIds`) ⇒ the task cannot be dispatched; look at its dependencies and
+ *                    worktree (owner `worker`, action `fix-dispatch`).
  *  not-evaluated     the tasks input is unreadable (taskFacts == null), or the I5 reading for the
  *                    AC-216 re-verify domain is unreadable (standings == null)
  *  standing-ok       AC-216 re-verify domain only: the standing invariant (achieved ∧ long-term ∧
@@ -76,6 +91,9 @@ export type GapState =
   | "world-gated"
   | "unclassified"
   | "stalled"
+  | "blocked-needs-human"
+  | "blocked-promotion"
+  | "blocked-dispatch"
   | "not-evaluated"
   | "standing-ok"
   | "standing-violated"
@@ -91,6 +109,9 @@ export const GAP_STATES: readonly GapState[] = [
   "world-gated",
   "unclassified",
   "stalled",
+  "blocked-needs-human",
+  "blocked-promotion",
+  "blocked-dispatch",
   "not-evaluated",
   "standing-ok",
   "standing-violated",
@@ -98,13 +119,51 @@ export const GAP_STATES: readonly GapState[] = [
   "derived-routed",
 ];
 
+/** The three `blocked-*` causes, in PRIORITY order (a task set whose members are blocked by
+ *  different causes is reported under the first one that occurs — "a human must move it" outranks
+ *  "fix the artifacts", which outranks "fix dispatch": a human decision unblocks every other cause).
+ *
+ *  ⛔ ONE list: the driver's cause classifier (`taskBlockCause`), the group reading
+ *  (`blockedReadingOf`), the projection's rank table and the CLI's row validation all branch on THIS
+ *  array — a second copy anywhere is the drift this module exists to prevent (hard rule 5b). */
+export type BlockedGapState = "blocked-needs-human" | "blocked-promotion" | "blocked-dispatch";
+
+export const BLOCKED_GAP_STATES: readonly BlockedGapState[] = [
+  "blocked-needs-human",
+  "blocked-promotion",
+  "blocked-dispatch",
+];
+
+/** One linked task and the cause IT carries (⚠️ per-task, ⛔ not the group's winner — a set can hold
+ *  two different causes, and collapsing them would hide the second one; hard rule 3). */
+export interface GoalBlockerTask {
+  id: string;
+  cause: BlockedGapState;
+}
+
+/** WHY a criterion's in-traction tasks cannot advance (present iff `state` is one of `blocked-*`).
+ *
+ *  ⛔ `cause` is the GROUP's reading — the highest-priority cause among `tasks` (`BLOCKED_GAP_STATES`
+ *  order) — while `tasks` ENUMERATES every stuck task with its own cause, so "which task blocks it"
+ *  is readable without re-deriving the judgement the driver already made. */
+export interface GoalBlocker {
+  cause: BlockedGapState;
+  tasks: GoalBlockerTask[];
+}
+
 /** One AC's gap reading. `taskCount` is `null` only for `not-evaluated` (⛔ a different shape from
- *  `0`: when the reading could not be taken, "how many tasks are its" has no answer). */
+ *  `0`: when the reading could not be taken, "how many tasks are its" has no answer).
+ *
+ *  `blocker` is present IFF `state` is one of `blocked-*` (⚠️ optional rather than required-null so a
+ *  round carrier written BEFORE the split still parses: its `stalled` rows have no blocker and are
+ *  not lied about — absence there means "this reading predates the split", which is exactly what a
+ *  legacy `stalled` row is). */
 export interface GoalGap {
   goal: string;
   ac: string;
   state: GapState;
   taskCount: number | null;
+  blocker?: GoalBlocker;
 }
 
 /** The task snapshot the projection reads (`readTaskFacts` in the goal-driver). Structurally typed
@@ -126,12 +185,19 @@ export const GOAL_NEXT_OWNERS: readonly GoalNextOwner[] = ["driver", "worker", "
 
 /** What that owner would do next. ENUMERATED for the same reason. ⛔ `wait` is a REAL action here —
  *  "the truth is a future production event / nobody has anything to do" — not a missing value. */
-export type GoalNextActionKind = "file-task" | "resume-task" | "fix-artifacts" | "ask-human" | "wait";
+export type GoalNextActionKind =
+  | "file-task"
+  | "resume-task"
+  | "fix-artifacts"
+  | "fix-dispatch"
+  | "ask-human"
+  | "wait";
 
 export const GOAL_NEXT_ACTION_KINDS: readonly GoalNextActionKind[] = [
   "file-task",
   "resume-task",
   "fix-artifacts",
+  "fix-dispatch",
   "ask-human",
   "wait",
 ];
@@ -149,6 +215,9 @@ export const GOAL_NEXT_ACTION_KINDS: readonly GoalNextActionKind[] = [
  *  level up, available today without changing computeGoalGaps). */
 export type GoalNextRank =
   | "needs-human"
+  | "blocked-needs-human"
+  | "blocked-promotion"
+  | "blocked-dispatch"
   | "stalled"
   | "workable"
   | "gap"
@@ -161,9 +230,16 @@ export type GoalNextRank =
   | "derived-routed"
   | "standing-ok";
 
-/** The ranking, highest priority first (see `GoalNextRank`). */
+/** The ranking, highest priority first (see `GoalNextRank`).
+ *
+ *  ⚠️ `stalled` stays in this order for INPUT compatibility only (fixtures and rows in round
+ *  carriers written before the split). The three `blocked-*` ranks sit immediately above it
+ *  and below `needs-human`, i.e. the position `stalled` always occupied. */
 export const GOAL_NEXT_PRIORITY: readonly GoalNextRank[] = [
   "needs-human",
+  "blocked-needs-human",
+  "blocked-promotion",
+  "blocked-dispatch",
   "stalled",
   "workable",
   "gap",
@@ -180,10 +256,15 @@ export const GOAL_NEXT_PRIORITY: readonly GoalNextRank[] = [
 const RANK_INDEX = new Map<GoalNextRank, number>(GOAL_NEXT_PRIORITY.map((r, i) => [r, i]));
 
 /** One projected next step. `ac` is the criterion the step is about; `gapState` is the HONEST reading
- *  it came from (⛔ so an escalated `stalled`-with-a-needs-human-task still says `stalled` here — the
- *  escalation is visible in `rank`/`owner`/`action`, not by rewriting the reading). `evidenceRefs`
- *  are stable tokens pointing at what the row was derived from (`gap:<ac>`, `task:<id>:<status>`), so
- *  a reader can trace the row back to the same round's carriers. */
+ *  it came from (⛔ so an escalated legacy `stalled`-with-a-needs-human-task still says `stalled` here
+ *  — the escalation is visible in `rank`/`owner`/`action`, not by rewriting the reading).
+ *  `evidenceRefs` are stable tokens pointing at what the row was derived from (`gap:<ac>`,
+ *  `task:<id>:<status>`), so a reader can trace the row back to the same round's carriers.
+ *
+ *  `blocker` is copied VERBATIM from the gap reading (`GoalGap.blocker`) whenever the state is one of
+ *  `blocked-*`, and is `null` otherwise. ⛔ It is NOT re-derived here: the cause was decided where the
+ *  ready-pool judgement was available (`computeGoalGaps`), and re-deciding it from task statuses in
+ *  the projection would be a second judge of the same question (hard rule 5b). */
 export interface GoalNextRow {
   goal: string;
   ac: string;
@@ -192,6 +273,7 @@ export interface GoalNextRow {
   owner: GoalNextOwner;
   action: { kind: GoalNextActionKind; reason: string };
   evidenceRefs: string[];
+  blocker: GoalBlocker | null;
 }
 
 /** The owner/action each state implies. ⛔ ONE table: a second copy anywhere is the drift this
@@ -205,8 +287,15 @@ const STATE_PLAN: Record<GapState, { owner: GoalNextOwner; kind: GoalNextActionK
   gap: { owner: "driver", kind: "file-task", reason: "no task is linked to this criterion; file one" },
   // Tasks exist but all finished while the criterion still fails ⇒ the work is not done; file again.
   workable: { owner: "driver", kind: "file-task", reason: "linked tasks are no longer in traction but the criterion still fails; file a task" },
-  // Tasks exist but none can advance on its own (promotion gate / pool exclusion).
+  // ⚠️ LEGACY row (never emitted by `computeGoalGaps` since the split): kept so a row read back from
+  // an older carrier still projects to the owner/action it had. New readings use the three below.
   stalled: { owner: "worker", kind: "fix-artifacts", reason: "linked tasks cannot advance on their own; fix what blocks them" },
+  // Every in-traction task is parked needs-human ⇒ a HUMAN decision is the next step, not a worker's.
+  "blocked-needs-human": { owner: "human", kind: "ask-human", reason: "every task linked to this criterion is parked needs-human; a human must move it" },
+  // Every in-traction task is a todo the author→ready gate rejects ⇒ the four artifacts are missing.
+  "blocked-promotion": { owner: "worker", kind: "fix-artifacts", reason: "linked todo tasks do not pass the author→ready promotion gate; fix their artifacts" },
+  // Every in-traction task is a ready the pool excludes ⇒ it can never be dispatched as it stands.
+  "blocked-dispatch": { owner: "worker", kind: "fix-dispatch", reason: "linked ready tasks are excluded from the dispatch pool; check their dependencies and worktree" },
   // The reading itself could not be taken — an instrument failure, not "nothing to do".
   "not-evaluated": { owner: "driver", kind: "fix-artifacts", reason: "the gap reading could not be taken; restore the reading" },
   // A red standing invariant with no in-flight owner ⇒ file.
@@ -230,10 +319,16 @@ function compareIds(a: string, b: string): number {
   return a.localeCompare(b, "en", { numeric: true });
 }
 
-/** The rank of one gap reading, after the needs-human escalation. */
+/** The rank of one gap reading, after the needs-human escalation.
+ *
+ *  ⚠️ The escalation now survives for the LEGACY `stalled` input only: since the split, a reading
+ *  whose tasks are all parked needs-human says so ITSELF (`blocked-needs-human`), so no escalation is
+ *  needed to see it. A legacy `stalled` row read back from an older carrier still escalates exactly as
+ *  before — dropping that would silently demote every historical needs-human goal in `quay goal next`. */
 function rankOf(gap: GoalGap, taskFacts: GoalTaskFact[] | null): GoalNextRank {
   if (gap.state === "stalled" && hasNeedsHumanTask(gap.ac, taskFacts)) return "needs-human";
-  // Every remaining state is its own rank (see GOAL_NEXT_PRIORITY).
+  // Every remaining state is its own rank (see GOAL_NEXT_PRIORITY) — the three blocked-* states
+  // ARE ranks, so the cause travels into the rank instead of being flattened back into `stalled`.
   return gap.state;
 }
 
@@ -259,7 +354,12 @@ function evidenceRefsFor(ac: string, taskFacts: GoalTaskFact[] | null): string[]
 /** The row for one gap reading. */
 function rowFor(gap: GoalGap, taskFacts: GoalTaskFact[] | null): GoalNextRow {
   const rank = rankOf(gap, taskFacts);
-  if (rank === "needs-human") {
+  // `blocker` travels verbatim from the reading (⛔ never re-derived here); `null` = not a blocked
+  // state, which the row's `gapState` already says — the two are not conflated because `gapState` is
+  // always present.
+  const blocker = gap.blocker ?? null;
+  // The ONLY way rank ≠ state is the legacy needs-human escalations (see `rankOf`).
+  if (rank !== gap.state) {
     return {
       goal: gap.goal,
       ac: gap.ac,
@@ -268,6 +368,7 @@ function rowFor(gap: GoalGap, taskFacts: GoalTaskFact[] | null): GoalNextRow {
       owner: "human",
       action: { kind: "ask-human", reason: "a task linked to this criterion is parked needs-human; a human must move it" },
       evidenceRefs: evidenceRefsFor(gap.ac, taskFacts),
+      blocker,
     };
   }
   const plan = STATE_PLAN[gap.state];
@@ -279,6 +380,7 @@ function rowFor(gap: GoalGap, taskFacts: GoalTaskFact[] | null): GoalNextRow {
     owner: plan.owner,
     action: { kind: plan.kind, reason: plan.reason },
     evidenceRefs: evidenceRefsFor(gap.ac, taskFacts),
+    blocker,
   };
 }
 
@@ -307,6 +409,9 @@ function fallbackRow(goalId: string, acsOfGoal: string[]): GoalNextRow {
       reason: "the gap reading produced no entry for this active goal; restore the reading",
     },
     evidenceRefs: [`gap:${goalId}:absent`],
+    // ⛔ `null`, not an empty blocker: this row is not a blocked reading at all (its `gapState` says
+    // `not-evaluated`). An empty `{cause, tasks: []}` would wear the shape of a measured blocker.
+    blocker: null,
   };
 }
 

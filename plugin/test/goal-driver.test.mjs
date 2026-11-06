@@ -15,6 +15,8 @@
 //   ⑦ 负控：节流**不改变** `goal-gaps` 的状态取值；⑧ 轮 fact 里出现 `filing-throttled` 行。
 //   ⑨ (tasks/gap-goal-next-projection) 轮 fact 里出现 `goal-next` 行 —— 每 active GOAL 恰好一行，
 //      与 `goal-ring.value.next` 逐字等价，owner / action.kind 在枚举内。
+//   ⑩ (tasks/gap-goal-driver-blocked-taxonomy) 轮 fact 里 blocked 三态各自出现（带 blocker + owner），
+//      该轮 ⛔ 不再 emit `stalled`。
 //
 // Run: node --test plugin/test/goal-driver.test.mjs
 
@@ -47,7 +49,7 @@ import {
 import { repoRoot, writeStandingGoalFile } from "./helpers/goal-driver-harness.mjs";
 // The projection's vocabulary lives in ONE Core module (tasks/gap-goal-next-projection) — the driver
 // reaches it through `driver-runtime.ts`; the test asserts the round fact against the same enums.
-import { GAP_STATES, GOAL_NEXT_OWNERS, GOAL_NEXT_ACTION_KINDS } from "../../packages/quay/src/core/goal-analysis.ts";
+import { GAP_STATES, BLOCKED_GAP_STATES, GOAL_NEXT_OWNERS, GOAL_NEXT_ACTION_KINDS } from "../../packages/quay/src/core/goal-analysis.ts";
 
 const HOUR = 60 * 60 * 1000;
 
@@ -464,7 +466,7 @@ test("⑨ 轮 fact 出现 `goal-next` 行：每 active GOAL 一行，且与 `val
     assert.equal(rows[0].owner, "driver");
     assert.equal(rows[0].action.kind, "file-task");
 
-    // ③ 枚举：owner ∈ 四个、action.kind ∈ 五个、gapState ∈ GapState 词表（硬规则 3：不布尔）
+    // ③ 枚举：owner ∈ 四个、action.kind ∈ 六个、gapState ∈ GapState 词表（硬规则 3：不布尔）
     assert.ok(GOAL_NEXT_OWNERS.includes(rows[0].owner), "owner 在枚举内");
     assert.ok(GOAL_NEXT_ACTION_KINDS.includes(rows[0].action.kind), "action.kind 在枚举内");
     assert.ok(GAP_STATES.includes(rows[0].gapState), "gapState 在枚举内");
@@ -478,6 +480,102 @@ test("⑨ 轮 fact 出现 `goal-next` 行：每 active GOAL 一行，且与 `val
     // ⑤ 负控：投影是**读面**，不改变任何既有判定 —— spawn 仍然只由 gaps 决定（spawnCap=0 ⇒ 0 次）
     assert.equal(r.fact.value.spawned, 0, "投影存在与否都不改变 spawn");
     assert.equal(r.fact.value.gaps.find((x) => x.ac === "AC-002")?.state, "gap", "原缺口读数不变");
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+// ── ⑩ 轮 fact：blocked 三态（tasks/gap-goal-driver-blocked-taxonomy）──────────────────────────
+//
+// 一个 `stalled` 同时表示三件处置完全不同的事（请人 / 修四件套 / 查依赖与 worktree）。本用例在
+// **真的一轮** runGoalRound 上钉住：三态各自出现、各自带 blocker（哪条任务、哪种成因）与 owner，
+// 且该轮 **不再 emit `stalled`**（它只作为迁移期输入字面量留在词表里）。
+// 三条负控：①能自行前进的关联任务 ⇒ in-progress（⛔ 不被「有 stuck」布尔化误判）；
+//          ②needs-human 的 AC 不被判成 promotion/dispatch，反之亦然；
+//          ③非阻断行不装 blocker（⛔ 不补空对象——空对象会与「查过且无阻断」同形）。
+
+test("⑩ 轮 fact：blocked 三态各自出现（带 blocker + owner），且该轮 ⛔ 不再 emit stalled", async () => {
+  const tmp = tmpdir("blocked");
+  try {
+    fs.mkdirSync(path.join(tmp, "goals"), { recursive: true });
+    fs.mkdirSync(path.join(tmp, "tasks"), { recursive: true });
+    // 四个 active GOAL，各自一条 active AC —— `goal-next` 是「每 active GOAL 恰好一行」，故一条 AC
+    // 一个 GOAL 才能把三态同时投影出来（同 GOAL 下只会选优先级最高的那条）。
+    const ACs = [
+      { goal: "GOAL-001", ac: "AC-010", task: "t-needs-human", status: "needs-human" },
+      { goal: "GOAL-002", ac: "AC-011", task: "t-bad-todo", status: "todo" },
+      { goal: "GOAL-003", ac: "AC-012", task: "t-excluded-ready", status: "ready" },
+      { goal: "GOAL-004", ac: "AC-013", task: "t-fine-ready", status: "ready" }, // 负控：可自行前进
+    ];
+    for (const { goal, ac, task, status } of ACs) {
+      writeStandingGoalFile(tmp, { id: goal, status: "active", kind: "goal" });
+      writeStandingGoalFile(tmp, { id: ac, status: "active", kind: "criterion", goal, criterion: "exit 1" });
+      fs.writeFileSync(
+        path.join(tmp, "tasks", `${task}.md`),
+        `---\nid: ${task}\nstatus: ${status}\ngoal_ac: ${ac}\n---\n## Proposal\n\n一笔真实任务载体（本用例的唯一控制量是 ready-pool 的判定面）。\n`,
+      );
+    }
+    // ready-pool-check 的测试缝：`t-bad-todo` 不合格（缺四件套）、`t-excluded-ready` 被排除（派不出去）。
+    const rp = path.join(tmp, "ready-pool.sh");
+    fs.writeFileSync(
+      rp,
+      `#!/bin/bash\ncat <<'JSON'\n{"candidates":[{"id":"t-bad-todo","eligible":false}],"excluded":[{"id":"t-excluded-ready","reason":"dep-unmet"}]}\nJSON\n`,
+    );
+
+    const r = await runGoalRound(tmp, {
+      scriptRoot: repoRoot,
+      gapWorkerCmd: "true",
+      resourceGateArgv: ["true"],
+      readyPoolCmd: ["bash", rp],
+      spawnCap: 0, // 本用例只读读数，⛔ 不 spawn
+      now: () => new Date(T0),
+    });
+
+    // ① goal-gaps fact（缺口视图）：三态各一条，blocker 与 state 一致
+    const gaps = r.gapFacts[0].value.gaps;
+    const gapOf_ = (ac) => gaps.find((g) => g.ac === ac);
+    assert.equal(gapOf_("AC-010")?.state, "blocked-needs-human");
+    assert.equal(gapOf_("AC-011")?.state, "blocked-promotion");
+    assert.equal(gapOf_("AC-012")?.state, "blocked-dispatch");
+    assert.deepEqual(gapOf_("AC-010").blocker, { cause: "blocked-needs-human", tasks: [{ id: "t-needs-human", cause: "blocked-needs-human" }] }, "哪些任务要人处理，逐条可读");
+    assert.deepEqual(gapOf_("AC-011").blocker, { cause: "blocked-promotion", tasks: [{ id: "t-bad-todo", cause: "blocked-promotion" }] });
+    assert.deepEqual(gapOf_("AC-012").blocker, { cause: "blocked-dispatch", tasks: [{ id: "t-excluded-ready", cause: "blocked-dispatch" }] });
+    assert.equal(gapOf_("AC-013"), undefined, "负控：可自行前进的 ready ⇒ in-progress（安静态，不进视图）");
+
+    // ② goal-next fact：每 active GOAL 一行，三态的 owner / action 按成因映射
+    const next = r.nextFacts[0];
+    assert.equal(next.state, "verified");
+    const byAc = new Map(next.value.rows.map((row) => [row.ac, row]));
+    assert.equal(byAc.size, 4, "四个 active GOAL ⇒ 四行");
+    const nh = byAc.get("AC-010");
+    const promo = byAc.get("AC-011");
+    const disp = byAc.get("AC-012");
+    const fine = byAc.get("AC-013");
+    assert.equal(nh.owner, "human");
+    assert.equal(nh.action.kind, "ask-human");
+    assert.equal(promo.owner, "worker");
+    assert.equal(promo.action.kind, "fix-artifacts");
+    assert.equal(disp.owner, "worker");
+    assert.equal(disp.action.kind, "fix-dispatch", "dispatch 成因有自己的 action（⛔ 不与 promotion 共用 fix-artifacts）");
+    assert.equal(fine.gapState, "in-progress");
+    assert.equal(fine.action.kind, "resume-task");
+    assert.equal(fine.blocker, null, "负控：非阻断行不装 blocker（⛔ 空对象会与「查过且无阻断」同形）");
+
+    // ③ 每个 blocked 行都带 blocker 与 owner，且 blocker.cause 与 gapState 一致
+    for (const row of [nh, promo, disp]) {
+      assert.ok(BLOCKED_GAP_STATES.includes(row.gapState), `gapState ${row.gapState} 是 blocked-*`);
+      assert.ok(GOAL_NEXT_OWNERS.includes(row.owner), "owner 在枚举内");
+      assert.ok(GOAL_NEXT_ACTION_KINDS.includes(row.action.kind), "action.kind 在枚举内");
+      assert.equal(row.blocker.cause, row.gapState, "blocker.cause ≡ gapState（⛔ 两处口径不一致即漂移）");
+      assert.ok(Array.isArray(row.blocker.tasks) && row.blocker.tasks.length > 0, "blocker.tasks 枚举非空");
+    }
+    // ④ 排序：needs-human 在最前（宣告的优先级序）
+    assert.equal(next.value.rows[0].ac, "AC-010", `排序按 GOAL_NEXT_PRIORITY（实测：${next.value.rows.map((x) => x.ac)}）`);
+
+    // ⑤ AC2 的另一半：该轮 ⛔ 不再 emit `stalled`（既不在决议值里，也不在行文的 reason 里）
+    for (const g of gaps) assert.notEqual(g.state, "stalled", "缺口视图不再出现 stalled");
+    for (const row of next.value.rows) assert.notEqual(row.gapState, "stalled", "投影行不再出现 stalled");
+    assert.doesNotMatch(JSON.stringify(next.value), /"stalled"/, "goal-next fact 的序列化里没有 stalled 取值");
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }
