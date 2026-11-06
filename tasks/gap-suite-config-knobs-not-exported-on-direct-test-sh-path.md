@@ -1,7 +1,7 @@
 ---
 id: gap-suite-config-knobs-not-exported-on-direct-test-sh-path
 title: "scripts/test.sh 的 suite: 配置提升没有 export，直接路径上 QUAY_* 旋钮对子进程不可见"
-status: todo
+status: ready
 labels:
   - gap
 parent: null
