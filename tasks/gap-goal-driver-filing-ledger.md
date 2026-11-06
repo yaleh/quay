@@ -33,16 +33,18 @@ goal_ac: AC-934
 
 ## AC
 
-- [ ] `node --test plugin/test/goal-driver-s14.test.mjs` 退出码 0，新增用例覆盖 filed / not-filed / 坏行 / 重放（原写 `plugin/test/goal-driver.test.mjs`：该单体已被 gap-suite-split-15-over-30s-test-files 拆成 s01..s13，且 AC-279 的判据**要求它不存在** ⇒ 新用例落在 shard s14，见 Evidence 的「AC1 路径更正」）。
-- [ ] `runGapSpawnPass` 在 spawn 前写 `spawned` 行；下一轮对每条 open 的 spawned 写 `filed` 或 `not-filed`，两者是不同取值。
-- [ ] `not-filed` 的 reason 能区分 `no-task` / `no-goal-ac` / `deduped-by-skill`（枚举，不布尔）。
-- [ ] pass 1 的 `goal list` argv 含 `--no-evidence`；pass 2 仍带 evidence；`grep` 可核。
-- [ ] `listGoalRecords` 的 timeout 从 `drivers.yml kinds.goal.list_timeout_ms` 派生；缺省 180000，非法值回落并记原因。
-- [ ] live 证据：`.quay/goal-filing.jsonl` 中至少一条真实 `spawned` 对应一条 `filed`，证据文档逐字记录该行与对应 task id。
+- [x] `node --test plugin/test/goal-driver-s14.test.mjs` 退出码 0，新增用例覆盖 filed / not-filed / 坏行 / 重放（原写 `plugin/test/goal-driver.test.mjs`：该单体已被 gap-suite-split-15-over-30s-test-files 拆成 s01..s13，且 AC-279 的判据**要求它不存在** ⇒ 新用例落在 shard s14，见证据文档 §7「AC1 路径更正」）。
+- [x] `runGapSpawnPass` 在 spawn 前写 `spawned` 行；下一轮对每条 open 的 spawned 写 `filed` 或 `not-filed`，两者是不同取值。
+- [x] `not-filed` 的 reason 能区分 `no-task` / `no-goal-ac` / `deduped-by-skill`（枚举，不布尔）。
+- [x] pass 1 的 `goal list` argv 含 `--no-evidence`；pass 2 仍带 evidence；`grep` 可核。
+- [x] `listGoalRecords` 的 timeout 从 `drivers.yml kinds.goal.list_timeout_ms` 派生；缺省 180000，非法值回落并记原因。
+- [x] live 证据：`.quay/goal-filing.jsonl` 中至少一条真实 `spawned` 对应一条 `filed`，证据文档逐字记录该行与对应 task id。
 
 ## DoD
 
 真实交付物是 goal-driver 的 filing 台账、pass 1 的无 evidence 读面、可配置的 list 超时，以及一份 live 证据。证据必须来自实现落地之后的真实 spawn（`.quay/goal-filing.jsonl` 的行 + 对应 `tasks/*.md` 的 goal_ac），不能只用 fixture；负控必须证明 `no-task` 与 `no-goal-ac` 不会被写成 `filed`。全量 `bash scripts/test.sh` 绿。
+
+证据文档：`docs/evidence/2026-11-06-goal-filing-ledger.md`（逐字抄录 spawned/filed 两行；filed 指向 `gap-goal-filing-chain-audit`，其 frontmatter 带 `goal_ac: AC-937`；真实 spawn 读数 `exitCode=0 / llmInvoked=true`）。
 
 ## ADR-007 dark axis
 
