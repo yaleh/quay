@@ -1,7 +1,7 @@
 ---
 id: gap-goal-driver-filing-ledger
 title: goal-driver 立案台账：spawn→filed/not-filed 的可核实生命周期
-status: ready
+status: done
 labels:
   - gap
   - goal-driver
@@ -12,7 +12,6 @@ extra:
 depends_on: []
 goal_ac: AC-934
 ---
-> **PARKED**（2026-11-06，worker `gap-goal-filing-ledger-landing`）— 实现已完整并被并入落地分支，⛔ 不要重新派发本任务（重派会重复实现同一份 958 行改动）。落地状态、决定与 unpark 检查见文末「## Landing status」。
 
 ## Proposal
 
@@ -92,3 +91,8 @@ goal_ac: AC-934
   —— 输出 `landed` 即表示实现已在 develop 上；删掉本文件顶部那行 `> **PARKED**` 后按上一条翻 done。
 - worktree `/data/home/yale/work/quay-worktrees/gap-goal-driver-filing-ledger` 已在本轮移除：移除前
   `git status --porcelain` 为空，且 `git merge-base --is-ancestor task/gap-goal-driver-filing-ledger <落地分支 HEAD>` 已为 0。
+  - **2026-11-07 — 解停执行（worker `gap-meta-needs-human-parking-recheck-3`）**：任务体自己声明的 unpark 检查
+    `git -C /data/home/yale/work/quay merge-base --is-ancestor 64fe08b25 develop && echo landed` 输出 `landed`（exit 0），
+    `quay-native task check gap-goal-driver-filing-ledger` = `ok:true / acChecked 6/6 / eligible to move to done` ⇒
+    按本任务文末的指令删掉顶部 `> **PARKED**` 行并以 CAS(`expectedStatus: ready`) 翻 `status: done`。
+    下游 `gap-goal-driver-filing-throttle`（depends_on 本任务）自此不再被本任务的状态挡在可晋升集合之外。
