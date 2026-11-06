@@ -314,6 +314,22 @@ test("CLI --telemetry prints the one-line record, and exit 3 marks a refused eva
   assert.match(refused.stdout, /leaked=NOT-EVALUATED/);
 });
 
+test("CLI --prefix '' sweeps EVERY entry — the exit path of a private run root cannot leave non-quay-* fixtures", () => {
+  const root = makeTmpDir("reaper-cli-empty-prefix-");
+  const quay = mkOldDir(root, "quay-a", 5 * HOUR);
+  const other = mkOldDir(root, "fsr-lanes-b", 5 * HOUR);
+
+  const r = spawnSync(
+    process.execPath,
+    ["--no-warnings", "--experimental-strip-types", REAPER, "--root", root, "--prefix", "", "--max-age", "1h", "--json"],
+    { encoding: "utf8" },
+  );
+  assert.equal(r.status, 0, r.stderr);
+  const parsed = JSON.parse(r.stdout);
+  assert.deepEqual(parsed.candidates.sort(), [other, quay].sort(), "both families are candidates");
+  assert.equal(fs.existsSync(quay) || fs.existsSync(other), false, "neither survives");
+});
+
 test("CLI rejects an unparsable --max-age with exit 2", () => {
   const r = spawnSync(
     process.execPath,

@@ -108,8 +108,11 @@ suite_temp_root_guard() {
   [ -n "${owner}" ] && [ -n "${root}" ] && [ -n "${reaper}" ] || return 0
   # setsid keeps the janitor OUT of the suite's process group, so a group-wide kill of a hung suite
   # (the runner's teardown) does not take the janitor with it — which would resurrect the leak.
+  # 1s poll, not 30s: the reap must land within a second or two of the owner's death, otherwise a
+  # "run it and count /tmp before/after" reading measures the POLLING GAP rather than the leak
+  # (measured: a 5s poll made a correct cleanup look like a leftover dir).
   script='owner="$1"; root="$2"; reaper="$3"
-while kill -0 "$owner" 2>/dev/null; do sleep 5; done
+while kill -0 "$owner" 2>/dev/null; do sleep 1; done
 [ -d "$root" ] || exit 0
 bash "$reaper" --root "$root" --prefix "" --max-age 0 --no-default-excludes --telemetry >&2
 rmdir "$root" 2>/dev/null || true'
