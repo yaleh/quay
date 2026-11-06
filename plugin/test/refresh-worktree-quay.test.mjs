@@ -128,14 +128,20 @@ function makeExecCounter() {
   return { dir, log, count, reset, env };
 }
 
-/** Copy of the script with extra lines injected into the REFRESH_SNAPSHOT_EXCLUDE declaration. */
+/** Copy of the script with extra lines injected into the REFRESH_SNAPSHOT_EXCLUDE declaration.
+ *  ⛔ the temp copy is deliberately NOT named `refresh-worktree-quay.sh`: this is a throwaway fixture
+ *  under os.tmpdir(), not the packaged entry (the real pin is `SCRIPT` above, which holds the
+ *  `plugin/scripts/…` path form). A bare-filename literal equal to a packaged script name is what
+ *  `registry-bare-filename-scan.ts` classifies as a §12e `test-pin` reference — this fixture is not
+ *  one, and pretending it is moves the real script out of the committed dead-set snapshot for the
+ *  wrong reason. The script is self-location-free (no `$0`/`BASH_SOURCE`), so the name is irrelevant. */
 function scriptWithDeclaration(extraLines) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "refresh-quay-script-"));
   const src = fs.readFileSync(SCRIPT, "utf8");
   const anchor = "REFRESH_SNAPSHOT_EXCLUDE=(\n";
   assert.ok(src.includes(anchor), "the declaration anchor must exist in the script (AC3)");
   const mutated = src.replace(anchor, anchor + extraLines.map((l) => `  "${l}"\n`).join(""));
-  const p = path.join(dir, "refresh-worktree-quay.sh");
+  const p = path.join(dir, "refresh-quay-declaration-probe.sh");
   fs.writeFileSync(p, mutated, { mode: 0o755 });
   return { dir, script: p };
 }
