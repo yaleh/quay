@@ -22,7 +22,7 @@ AC-936 的判据要求主检出 `.quay/goal-requests.jsonl` 里至少一条被 d
 - `docs/evidence/2026-11-06-goal-request-queue.md`：「它由第一个真正调用该动词的人创建。worker 的写守卫禁止把主检出路径当作写目标」
 - `goals/GOAL-914-goal-driver-自驱闭环-立案生命周期-下一步投影与请求消费-quay-native.md`：「结果是：goal 的推进仍然依赖人读 round fact、人写任务、人恢复卡住的任务。」
 
-**PARKED**（2026-11-07，worker 会话记录，等人工裁定）：见 ## Worker Reading（读数 + 三条落地清单）与 ## Needs-Human（人可读的阻碍原因）；解停条件是一条可直接跑的只读检查，见 §5。本标记的理由见 §4：本任务的 `needs-human` 停放已被外部写入连退回三次。
+**PARKED**（2026-11-07，worker 会话记录，等人工裁定）：见 ## Worker Reading（读数 + 三条落地清单）与 ## Needs-Human（人可读的阻碍原因）；放的机械条件是一条可直接跑的只读检查，见 §5。本标记的理由见 §4：本任务的 `needs-human` 停放已被外部写入连退回三次。
 
 ## Worker Reading (2026-11-07) — 本任务需要 worker 产不出的东西
 
@@ -109,8 +109,9 @@ node --experimental-strip-types packages/quay/bin/quay.ts goal request GOAL-914 
 重复同一实验），所以「谁写的」仍只是假说。本 worker 不据此改判据、不改 store、不杀进程。
 
 **处置**：既然 `needs-human` 停放守不住，本轮改用**不依赖 status 的机制**——行首 `**PARKED**` 标记（`ready-pool-check`
-的 `isParked` 按它把任务排除出候选池），并把解停条件写成一条可直接跑的只读检查（§5）。⛔ 这不是替人做裁定：
-标记的解停条件是「主检出里真的出现了被消费的请求」，一条与人无关的机械判据。
+的 `isParked` 按它把任务排除出候选池），并把机械放行条件写成一条可直接跑的只读检查（§5）。⛔ 这不是替人做裁定：
+标记的放行条件是「主检出里真的出现了被消费的请求」，一条与人无关的机械判据。
+该标记已用**真判据**验过两个方向：`isParked(真实 body)` = `true`，把标记行删掉后 = `false`。
 
 这与已立案的 `tasks/gap-needs-human-park-overwritten-by-inflight-worker.md` 是**同一形态的再现**（该任务自己
 在 2026-11-06T10:28/10:35 也被退回两次）。
@@ -120,19 +121,17 @@ node --experimental-strip-types packages/quay/bin/quay.ts goal request GOAL-914 
 
 ### 5. 人用来一眼确认「该放出来了」的只读命令
 
-- **unpark 检查（只读、可直接跑）**：`node -e "const fs=require('fs');const p='.quay/goal-requests.jsonl';if(!fs.existsSync(p)){console.log('AC-936-request-consumed=ledger-absent');process.exit(1)}const d=fs.readFileSync(p,'utf8').split('\n').filter(Boolean).map(s=>{try{return JSON.parse(s)}catch{return null}}).filter(r=>r&&['accepted','refused','not-evaluated'].includes(r.state)&&typeof r.consumedAt==='string'&&r.consumedAt);if(!d.length){console.log('AC-936-request-consumed=0');process.exit(1)}console.log('AC-936-request-consumed='+d.length)"` 输出 `AC-936-request-consumed=`
-
-在 `/data/home/yale/work/quay` 下跑：`AC-936-request-consumed=1` 或更大 ⇒ 选项 ① 已经生效；`ledger-absent` / `=0` ⇒ 还没生效。
+在 `/data/home/yale/work/quay` 下运行下面这条：`AC-936-request-consumed=1` 或更大 ⇒ 选项 ① 已经生效；`ledger-absent` / `=0` ⇒ 还没生效。
 
 两个方向本次都跑过（硬规则 2 的两半）：**主检出今天** = `AC-936-request-consumed=ledger-absent` / exit 1（取假方向受控）；
 **正控**（worktree 里放一行带 `consumedAt` 的终态行）= `AC-936-request-consumed=1` / exit 0（谓词确实能命中）。
-该命令只读：`judgeCriterionCapability` 判为 `{"capability":"read-only","code":null}`，
-故 `needs-human-parking-recheck.ts` 的 body-PARKED 桶每轮可安全复跑它（这一桶只扫带行首 `**PARKED**` 标记的任务，
-本任务现在带该标记 ⇒ 它**有**自动消费者，跑通即报 `unpark-passed`）。
+该命令只读：`judgeCriterionCapability` 判为 `{"capability":"read-only","code":null}`，故每轮复跑安全。
 
-⛔ 但 `needs-human` 那一桶**不**看它：`scanNeedsHumanParking` 只重跑阻碍原因里点名的机械判据，本任务不点名任何一条
-⇒ 该桶读数是 `no-registered-judge`（「人的决定没有机械判据可复跑」，这是读数不是失败）。
-**解停这件事本身仍由人做**——把本任务的 `**PARKED**` 行删掉（或直接完成本任务），这条命令只是让人不必重读全文。
+⛔ 这一桶之外没有别人会替人做这一步：`scanNeedsHumanParking` 只重跑阻碍原因里点名的机械判据，本任务不点名任何一条
+⇒ 那条读数恒为 `no-registered-judge`（「人的决定没有机械判据可复跑」，是读数不是失败）。把本任务的行首 `**PARKED**`
+标记删掉、或直接完成本任务，都仍是人的动作；下面这条命令只是让人不必重读全文。
+
+- **unpark 检查（只读、可直接跑）**：`node -e "const fs=require('fs');const p='.quay/goal-requests.jsonl';if(!fs.existsSync(p)){console.log('AC-936-request-consumed=ledger-absent');process.exit(1)}const d=fs.readFileSync(p,'utf8').split('\n').filter(Boolean).map(s=>{try{return JSON.parse(s)}catch{return null}}).filter(r=>r&&['accepted','refused','not-evaluated'].includes(r.state)&&typeof r.consumedAt==='string'&&r.consumedAt);if(!d.length){console.log('AC-936-request-consumed=0');process.exit(1)}console.log('AC-936-request-consumed='+d.length)"` 输出 `AC-936-request-consumed=`
 
 ### 6. 记录边界（硬规则 4b / 4c）
 
