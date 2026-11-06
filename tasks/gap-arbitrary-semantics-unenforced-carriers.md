@@ -1,7 +1,7 @@
 ---
 id: gap-arbitrary-semantics-unenforced-carriers
 title: 武断实现语义缺可执行承接：⑬ 计数规则无单实现守卫 / ⑥⑦⑧ 冲突消解只活在 prompt 散文 / ⑫⑭ 载体未定位
-status: ready
+status: done
 labels:
   - gap
   - defect
