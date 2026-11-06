@@ -479,8 +479,10 @@ import {
   // `applyDevelopRedObservation` 与 `--mechanical-fan-in` 入口用的就是这个绑定。
   readDevelopRedSet,
   maintainDevelopRedSet,
+  markDevelopRedNotEvaluated,
   writeDevelopRedSet,
-  type DevelopRedObservation,
+  type DevelopRedReading,
+  type DevelopRedState,
   runGoalMergeFanIn,
   appendGoalMergeResultEvent,
   // SPEC §4.7 裁定⑫：goal 并入红的 gap 立案（worker-driver 侧）。
@@ -1828,44 +1830,69 @@ export function isShaAncestorOfBranch(root: string, sha: string, branch: string 
 
 // ── 当前 develop 红签名集：**唯一的写侧**（`gap-develop-red-set-writer` AC4）────────────────────────
 //
-// 分工：`worker-fan-in.ts` 只**观测**（`DevelopRedObservation`，随 fan-in 结果回传）；落盘只在这里、
+// 分工：`worker-fan-in.ts` 只**观测**（`DevelopRedReading`，随 fan-in 结果回传）；落盘只在这里、
 // 只被 `--mechanical-fan-in` 入口调用一次。fleet 侧（另一个工作区）对同一载体只有消费权、没有写权限
 // ——「写者只有 driver 进程」因此是可核的结构事实，而不是一句约定（`plugin/test/develop-red-set.test.mjs`
 // 的 AC4 用两条判据守着：调用点数 = 1 且落在本文件；fleet 侧的只读路径不产生任何磁盘写入）。
 //
 // 判定（Plan 第 3 条）：红 ⇒ upsert 该 key；绿（本轮在 develop 基线树上真的跑过且没再红，且 develop 前进）
-// ⇒ 移除该 key——**移除就是「红消失」的机械信号**。⛔ 观测缺读数（A/B 未评估）⇒ 本轮不动载体。
+// ⇒ 移除该 key——**移除就是「红消失」的机械信号**。
+//
+// 三态落盘（`gap-develop-red-set-empty-conflates-clean-with-not-evaluated`）：判定的**只有**「完整评估过」
+// 的观测；一次**没评估成**的观测（`state: "not-evaluated"`）写出的是一份**显式的未评估载体**
+// （`state` + `reasonKind` + `reason`，`reds` 原样沿用），⛔ 不再「本轮不写」—— 那会让旧的 `reds: []`
+// 继续冒充「基线干净」，正是本任务要消灭的折叠。`null`（这一轮没进 A/B）仍不写：它是不适用，⛔ 不是
+// 「没评估成」（两者在类型上分开）。
 export function applyDevelopRedObservation(opts: {
   root: string;
   /** 取 SHA 祖先关系的 git 上下文（通常是 fan-in worktree）；缺省 = root。 */
   worktree?: string;
-  observation: DevelopRedObservation | null | undefined;
+  observation: DevelopRedReading | null | undefined;
   /** 注入缝（测试用）；缺省走 `git merge-base --is-ancestor`。 */
   isAncestor?: (ancestor: string, descendant: string) => boolean | null;
-}): { written: boolean; reason: string | null; develop: string | null; reds: number } {
+}): {
+  written: boolean; reason: string | null; develop: string | null; reds: number;
+  /** 本次落盘的评估态（未写 ⇒ null）。消费方据**这三个互不相等的取值**分叉，⛔ 不据 `reds.length`。 */
+  state: DevelopRedState | null;
+} {
   const obs = opts.observation;
-  if (obs === null || obs === undefined) return { written: false, reason: "no-observation", develop: null, reds: 0 };
+  if (obs === null || obs === undefined) {
+    return { written: false, reason: "no-observation", develop: null, reds: 0, state: null };
+  }
   const prev = readDevelopRedSet(opts.root);
   // 读不懂现有载体（坏 JSON / 坏行）⇒ **本轮不写**：把「读不出旧红集」当成「旧红集为空」会让
   // 所有未观测到的 key 静默消失（硬规则 3b 的反面）。文件缺失是合法的首轮状态，不算读不懂。
   if (!prev.evaluated && prev.reason !== "missing-file") {
-    return { written: false, reason: `carrier-unreadable: ${prev.reason}`, develop: obs.develop, reds: 0 };
+    return { written: false, reason: `carrier-unreadable: ${prev.reason}`, develop: null, reds: 0, state: null };
   }
-  const gitDir = opts.worktree ?? opts.root;
-  const isAncestor = opts.isAncestor ?? ((a: string, b: string): boolean | null => {
-    if (a === b) return true;
-    const r = spawnSync("git", ["-C", gitDir, "merge-base", "--is-ancestor", a, b], { encoding: "utf8" });
-    if (r.error) return null;
-    if (r.status === 0) return true;
-    // exit 1 = 明确「不是祖先」；其它（对象不存在 / 非 git 仓库）⇒ 读不懂（⛔ 不折成 false 以外的判断）。
-    return r.status === 1 ? false : null;
-  });
-  // develop 是否前进（Plan 第 3 条的移除前提③）。⛔ 读不懂祖先关系（null）⇒ **不删**任何 key——
-  // 那时「这一轮通过」说明不了「在这个 develop 上消失了」。
-  const advanced = prev.evaluated ? isAncestor(prev.set.develop, obs.develop) === true : true;
-  const next = maintainDevelopRedSet(prev.evaluated ? prev.set : null, obs, { developAdvanced: advanced });
+  const prevSet = prev.evaluated ? prev.set : null;
+  // ── 两条分支，**一个**写调用点（既有 AC4 的「写者唯一」判据按调用点数计，⛔ 不因新增分支而放宽）──
+  let next;
+  if (obs.state === "not-evaluated") {
+    // 未评估：写一份**显式的**未评估载体（AC1 ①），`reds` 原样沿用。
+    next = markDevelopRedNotEvaluated(prevSet, obs);
+    // ⛔ 一个说不出 develop 是谁的载体没有信息量（且会让旧读者把它当「这一版 develop 上没有红」）。
+    // 首轮就没评估成 ⇒ 不写（调用方已被告知 reason），⛔ 不伪造一个 SHA。
+    if (next.develop.trim() === "") {
+      return { written: false, reason: "not-evaluated-without-develop-sha", develop: null, reds: 0, state: null };
+    }
+  } else {
+    const gitDir = opts.worktree ?? opts.root;
+    const isAncestor = opts.isAncestor ?? ((a: string, b: string): boolean | null => {
+      if (a === b) return true;
+      const r = spawnSync("git", ["-C", gitDir, "merge-base", "--is-ancestor", a, b], { encoding: "utf8" });
+      if (r.error) return null;
+      if (r.status === 0) return true;
+      // exit 1 = 明确「不是祖先」；其它（对象不存在 / 非 git 仓库）⇒ 读不懂（⛔ 不折成 false 以外的判断）。
+      return r.status === 1 ? false : null;
+    });
+    // develop 是否前进（Plan 第 3 条的移除前提③）。⛔ 读不懂祖先关系（null）⇒ **不删**任何 key——
+    // 那时「这一轮通过」说明不了「在这个 develop 上消失了」。
+    const advanced = prevSet !== null ? isAncestor(prevSet.develop, obs.develop) === true : true;
+    next = maintainDevelopRedSet(prevSet, obs, { developAdvanced: advanced });
+  }
   const w = writeDevelopRedSet(opts.root, next);
-  return { written: w.written, reason: w.reason, develop: next.develop, reds: next.reds.length };
+  return { written: w.written, reason: w.reason, develop: next.develop, reds: next.reds.length, state: next.state };
 }
 
 /** 落地判定（AC1 判据），经 AC153 单一不变式 verifyIndependently 表达成 DriverResult（⛔ 不信

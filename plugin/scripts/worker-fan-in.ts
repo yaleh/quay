@@ -598,11 +598,16 @@ export interface BaselineEquivalenceReading {
   baselineWorktree: string | null;
   /** 基线重跑输出落盘 basename（`.quay/` 下）；未跑 / 写失败 ⇒ null。 */
   log: string | null;
-  /** 本轮在 develop 基线树上得到的**红点观测**（`gap-develop-red-set-writer` 的输入；⛔ 本文件不落盘，
+  /** 本轮在 develop 基线树上得到的**读数**（`gap-develop-red-set-writer` 的输入；⛔ 本文件不落盘，
    *  由 driver 的 `--mechanical-fan-in` 入口消费）。
-   *  `null` = 这一轮没有可用观测（A/B 未评估 / 解析不出 develop SHA / 基线重跑被中止）——**未评估**，
-   *  ⛔ 与「develop 上没有红」不同形（后者是 `points: []` + `evaluatedFiles` 非空）。 */
-  developRedObservation?: DevelopRedObservation | null;
+   *  **三态**（`gap-develop-red-set-empty-conflates-clean-with-not-evaluated`）：
+   *    · `{state:"evaluated", …}` —— 一次**完整**的基线评估，`points` / `evaluatedFiles` 有效；
+   *    · `{state:"not-evaluated", reasonKind, reason}` —— 进了 A/B 但**没读成**（OOM / 不完整 /
+   *      watchdog / 声明缺失 …），成因闭集在 `reasonKind`；⛔ 它**没有** `points` 字段，所以在**类型上**
+   *      就不可能被读成「develop 上没有红」；
+   *    · `null` —— 这一轮**根本没进 A/B**（不适用）。⛔ 与 `not-evaluated` 不同形。
+   *  ⚠️ 旧实现把后两者都压成 `null` ⇒ 载体这一轮不动 ⇒ 旧的 `reds: []` 继续说「develop 干净」。 */
+  developRedObservation?: DevelopRedReading | null;
 }
 
 /** runAsync 的结果收窄为「成/败 + 输出」，机械 fan-in 各步骤的共用判定（⛔ 不各写一遍 status!==0）。 */
@@ -1782,12 +1787,50 @@ export interface DevelopRedEntry {
   lastSignature: string;
 }
 
-/** 载体的完整形状（fleet 侧按此反序列化；⛔ 新增必填字段 = breaking change）。 */
+/** 基线评估态（`gap-develop-red-set-empty-conflates-clean-with-not-evaluated`）。
+ *
+ *  病：旧载体只有 `{develop, evaluatedAt, reds}` ⇒ **`reds: []` 同时**表示「基线跑过且全绿」与
+ *  「基线压根没评估成 / 被 OOM 杀 / 被 watchdog 杀」。fleet 与转发层按 `reds: []` 分叉 ⇒ 一个没评估成
+ *  的窗口读成「develop 干净的」⇒ 硬规则 3b 的原型（两种不同的世界共用一个取值）。
+ *
+ *  ⇒ 三值显式落盘，**三者互不相等**：
+ *    · `clean`         —— 一次**完整**的基线评估跑过，develop 上零红；
+ *    · `reds`          —— 一次**完整**的基线评估跑过，develop 上有红（`reds` 非空）；
+ *    · `not-evaluated` —— 这次没拿到可用读数（OOM / 不完整 / watchdog / 声明缺失 …），成因在
+ *                        `reasonKind` + `reason` 里；`reds` 是**上一次已知**的红集，⛔ 不是「现在没有红」。
+ *  ⛔ 三者不得互相折叠：`not-evaluated` 既不是「本任务引入了红」，也不是「基线是干净的」。 */
+export type DevelopRedState = "clean" | "reds" | "not-evaluated";
+
+/** `not-evaluated` 的**成因 token**（闭集；AC3：三类主因必须可区分，⛔ 不是共用一个 null）。
+ *  `oom-killed` / `incomplete` / `watchdog-killed` 是 AC3 点名的三类；其余是同一族的其它未评估成因
+ *  （⛔ 不与「跑了且红」同形，也⛔ 不与「跑了且绿」同形）。 */
+export type DevelopRedReasonKind =
+  | "oom-killed"
+  | "incomplete"
+  | "watchdog-killed"
+  | "spawn-failed"
+  | "baseline-worktree-add-failed"
+  | "no-baseline-rerun-command"
+  | "task-side-signatures-unevaluable"
+  | "baseline-side-signatures-unevaluable"
+  | "missing-develop-sha"
+  | "baseline-ab-error"
+  | "legacy-carrier-no-state";
+
+/** 载体的完整形状（fleet 侧按此反序列化）。
+ *  ⚠️ `state` / `reasonKind` / `reason` 是**新增**字段：旧读者忽略它们 ⇒ 仍会把 `not-evaluated`
+ *  读成 `reds: []`（本仓外的 fleet 消费面需要它自己的任务跟进，见本任务 Evidence）。 */
 export interface DevelopRedSet {
   /** 这份快照描述的 develop SHA（基线重跑实际跑的那棵树）。 */
   develop: string;
   /** 观测时刻（ISO）。 */
   evaluatedAt: string;
+  /** 基线评估态（见 `DevelopRedState`）。⛔ 缺这个字段的旧载体**不得**被读成 `clean`。 */
+  state: DevelopRedState;
+  /** 成因 token；⛔ 当且仅当 `state === "not-evaluated"` 时非 null（另外两态恒 `null`）。 */
+  reasonKind: DevelopRedReasonKind | null;
+  /** 成因的**逐字**说明（含计数/细节），落盘可读；⛔ 当且仅当 `state === "not-evaluated"` 时非空。 */
+  reason: string | null;
   reds: DevelopRedEntry[];
 }
 
@@ -1798,8 +1841,11 @@ export interface DevelopRedPoint {
   signature: string;
 }
 
-/** 一轮观测（fan-in 的 baseline-red A/B 侧产出的**纯数据**；⛔ 本文件不落盘）。 */
+/** 一轮**评估成功**的观测（fan-in 的 baseline-red A/B 侧产出的**纯数据**；⛔ 本文件不落盘）。
+ *  ⛔ `state` 是判别键：`not-evaluated` 的观测是另一种形状（见 `DevelopRedNotEvaluated`），
+ *  它**没有** `points` / `evaluatedFiles` —— 「没评估成」在**类型上**就拿不到「零红」这个读数。 */
 export interface DevelopRedObservation {
+  state: "evaluated";
   /** 基线重跑所在的 develop SHA（⛔ 空串/缺字段 = 这一轮没有可用观测）。 */
   develop: string;
   evaluatedAt: string;
@@ -1811,6 +1857,26 @@ export interface DevelopRedObservation {
    *  ⛔ 移除判据只认这个集合：一个文件没跑过，它的 key 就**没有**被评估过（硬规则 3b）。 */
   evaluatedFiles: string[];
 }
+
+/** 一轮**没评估成**的观测（同一个 A/B 侧产出，形状**故意不同**）。
+ *  这是本任务的核心半边：认不出「没评估成」的调用方只能把它写成 `reds: []`。 */
+export interface DevelopRedNotEvaluated {
+  state: "not-evaluated";
+  /** 做这次观测的 fan-in 任务。 */
+  task: string;
+  /** 这次**尝试**的时刻（ISO）——⛔ 不是「上次成功评估的时刻」。 */
+  evaluatedAt: string;
+  /** 成因闭集 token（三类主因 `oom-killed` / `incomplete` / `watchdog-killed` 互不相等）。 */
+  reasonKind: DevelopRedReasonKind;
+  /** 成因的逐字说明（含计数/细节），非空。 */
+  reason: string;
+  /** 若这一轮其实知道基线树在哪个 SHA 上，就带上（不知道 ⇒ 省略；⛔ 不伪造）。 */
+  develop?: string;
+}
+
+/** A/B 侧回传给 driver 的两种「非 null」读数。`null`（调用方表达）= 这一轮**没进 A/B**（不适用），
+ *  ⛔ 与 `not-evaluated`（进了、但没读成）不同形。 */
+export type DevelopRedReading = DevelopRedObservation | DevelopRedNotEvaluated;
 
 /** 签名文本落盘的长度上限——载体是给人/机器读的参考面，⛔ 不让一条巨大的断言正文把文件撑爆。 */
 const DEVELOP_RED_SIGNATURE_MAX = 400;
@@ -1841,7 +1907,21 @@ export type DevelopRedSetRead =
   | { evaluated: true; set: DevelopRedSet }
   | { evaluated: false; reason: string };
 
+/** 成因 token 的闭集（读侧校验用）。⛔ 不在这里就「猜一个」：不认识 ⇒ 读不懂（硬规则 3b）。 */
+const DEVELOP_RED_REASON_KINDS: ReadonlySet<string> = new Set<DevelopRedReasonKind>([
+  "oom-killed", "incomplete", "watchdog-killed", "spawn-failed", "baseline-worktree-add-failed",
+  "no-baseline-rerun-command", "task-side-signatures-unevaluable", "baseline-side-signatures-unevaluable",
+  "missing-develop-sha", "baseline-ab-error", "legacy-carrier-no-state",
+]);
+
 /** 读载体（fleet 侧只读入口，本文件里**唯一**碰这个载体的读函数）。
+ *
+ *  ⚠️ 返回值里的 `evaluated` 描述的是**这个文件能否解析**（文件缺失 / 坏 JSON / 坏行），
+ *  ⛔ **不是**「基线评估成功与否」——后者是 `set.state`，两者是不同的量（本任务的 DoD 红线②）。
+ *
+ *  旧载体（没有 `state` 字段）⇒ `state: "not-evaluated"` + `reasonKind: "legacy-carrier-no-state"`：
+ *  一份说不出自己评估态的载体**不可能**被读成 `clean`（硬规则 6：缺值 = 未查）。
+ *
  *  ⛔ 纯读：不创建、不改写、不 touch 文件——「fleet 只读」这条不变式的可测半边就是这个函数的行为。 */
 export function readDevelopRedSet(root: string): DevelopRedSetRead {
   let text: string;
@@ -1862,6 +1942,39 @@ export function readDevelopRedSet(root: string): DevelopRedSetRead {
   if (typeof obj.develop !== "string" || obj.develop.trim() === "") return { evaluated: false, reason: "missing-develop" };
   if (typeof obj.evaluatedAt !== "string" || obj.evaluatedAt.trim() === "") return { evaluated: false, reason: "missing-evaluatedAt" };
   if (!Array.isArray(obj.reds)) return { evaluated: false, reason: "missing-reds" };
+  // ── 评估态（本任务新增）──────────────────────────────────────────────────────────────────────
+  // ⛔ 缺 `state` 的旧载体**不得**默认成 `clean`（那正是本任务要消灭的折叠）；它落进 `not-evaluated`，
+  //    成因 token 自成一类 `legacy-carrier-no-state`，与三类主因互不相等。
+  let state: DevelopRedState;
+  let reasonKind: DevelopRedReasonKind | null;
+  let reason: string | null;
+  if (obj.state === undefined) {
+    state = "not-evaluated";
+    reasonKind = "legacy-carrier-no-state";
+    reason = "carrier has no `state` field: this snapshot cannot distinguish 'evaluated and clean' from 'not evaluated'";
+  } else {
+    if (obj.state !== "clean" && obj.state !== "reds" && obj.state !== "not-evaluated") {
+      return { evaluated: false, reason: `bad-state: ${JSON.stringify(obj.state)}` };
+    }
+    state = obj.state;
+    if (state === "not-evaluated") {
+      if (typeof obj.reasonKind !== "string" || !DEVELOP_RED_REASON_KINDS.has(obj.reasonKind)) {
+        return { evaluated: false, reason: "not-evaluated-without-reasonKind" };
+      }
+      if (typeof obj.reason !== "string" || obj.reason.trim() === "") {
+        return { evaluated: false, reason: "not-evaluated-without-reason" };
+      }
+      reasonKind = obj.reasonKind as DevelopRedReasonKind;
+      reason = obj.reason;
+    } else {
+      // 另两态的 `reason*` 必须是 null（⛔ 不允许「clean 但带着一个 reason」这种可两边读的形状）。
+      if (obj.reasonKind != null || obj.reason != null) {
+        return { evaluated: false, reason: `reason-on-${state}` };
+      }
+      reasonKind = null;
+      reason = null;
+    }
+  }
   const reds: DevelopRedEntry[] = [];
   for (let i = 0; i < obj.reds.length; i += 1) {
     const e = obj.reds[i] as Record<string, unknown> | null;
@@ -1877,7 +1990,37 @@ export function readDevelopRedSet(root: string): DevelopRedSetRead {
       blockedTasks: [...e.blockedTasks], lastSignature: e.lastSignature,
     });
   }
-  return { evaluated: true, set: { develop: obj.develop, evaluatedAt: obj.evaluatedAt, reds } };
+  // `state` 与 `reds` 必须自洽：`clean` ⇔ 零红、`reds` ⇔ 非空。⛔ 不自洽 ⇒ 读不懂（否则「state 说 clean
+  // 但 reds 非空」这种载体在两个读者眼里会得到相反的结论）。
+  if (state === "clean" && reds.length !== 0) return { evaluated: false, reason: "state-clean-with-reds" };
+  if (state === "reds" && reds.length === 0) return { evaluated: false, reason: "state-reds-without-reds" };
+  return { evaluated: true, set: { develop: obj.develop, evaluatedAt: obj.evaluatedAt, state, reasonKind, reason, reds } };
+}
+
+/** 载体对**消费侧**的投影（AC2）：三个取值互不相等，消费方必须**分别**处理。
+ *
+ *  ⛔ 两个方向都必须被挡住（只挡一个是本任务要防的两次相反误判）：
+ *    ① `not-evaluated` **不得**被消费成「本任务引入了红」（不得凭它落到 task-introduced-red 一类判词）；
+ *    ② `not-evaluated` **不得**被消费成「基线是干净的、可以豁免」（不得因 `reds: []` 把任务侧红判成基线子集）。
+ *  也就是说：载体态**本身不构成任何 verdict 的输入**——verdict 只能由本轮在 develop 基线树上的**新读数**
+ *  决定；本投影唯一的用途是「要不要把已记录的红文件再问一遍」以及审计。 */
+export type DevelopRedSetView =
+  | { kind: "clean"; set: DevelopRedSet }
+  | { kind: "reds"; set: DevelopRedSet }
+  | { kind: "not-evaluated"; reason: string; reasonKind: DevelopRedReasonKind | null; set: DevelopRedSet | null }
+  /** 载体缺失 / 读不懂：同样是「没有可用读数」，⛔ 不与 `clean` 同形。 */
+  | { kind: "unreadable"; reason: string; set: null };
+
+export function developRedSetView(read: DevelopRedSetRead): DevelopRedSetView {
+  if (!read.evaluated) {
+    // 文件缺失是合法的首轮状态，但**仍不是**「clean」：没有读数就是没有读数。
+    return { kind: "unreadable", reason: read.reason, set: null };
+  }
+  const set = read.set;
+  if (set.state === "not-evaluated") {
+    return { kind: "not-evaluated", reason: set.reason ?? "unspecified", reasonKind: set.reasonKind, set };
+  }
+  return set.state === "reds" ? { kind: "reds", set } : { kind: "clean", set };
 }
 
 /** 观测 → 下一份快照（**纯函数**，⛔ 不碰磁盘——AC3/AC5 的判据都在这上面可判）。
@@ -1926,10 +2069,39 @@ export function maintainDevelopRedSet(
     const ranThisRound = entry.files.length > 0 && entry.files.every((f) => evaluated.has(f));
     if (ranThisRound && opts.developAdvanced) byKey.delete(key);
   }
+  const nextReds = [...byKey.values()].sort((a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : 0));
   return {
     develop: obs.develop,
     evaluatedAt: obs.evaluatedAt,
-    reds: [...byKey.values()].sort((a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : 0)),
+    // 一次**完整**的评估 ⇒ 评估态由红集本身决定，⛔ 不再借用 `reds: []` 表达两件事。
+    state: nextReds.length === 0 ? "clean" : "reds",
+    reasonKind: null,
+    reason: null,
+    reds: nextReds,
+  };
+}
+
+/** 一次**没评估成**的基线评估 → 下一份快照（**纯函数**，⛔ 不碰磁盘）。
+ *
+ *  ⛔ 三条不变量（AC1 / DoD 红线）：
+ *    ① 写出的是 `state: "not-evaluated"` + 非空 `reason`——⛔ 不折成 `reds: []`（那是 `clean` 的形状）；
+ *    ② `reds` **原样沿用**上一份已知红集（⛔ 不 upsert、⛔ 不 remove）——「某个红消失了」这条机械信号
+ *       的输入不能被一次没评估成的轮次清空，也⛔ 不能凭空长出新红；
+ *    ③ 成因 `reasonKind` 是闭集 token，`reason` 是逐字说明（OOM / 不完整 / watchdog 三者互不相等）。
+ *  `prev` 为 null（首轮就没评估成）⇒ `reds: []` 但 `state` 仍是 `not-evaluated`
+ *  ——这正是本任务的存在理由：**同一份空数组，两种世界**。 */
+export function markDevelopRedNotEvaluated(
+  prev: DevelopRedSet | null,
+  reading: DevelopRedNotEvaluated,
+): DevelopRedSet {
+  return {
+    // ⛔ 不伪造 SHA：本轮确实知道基线树在哪 ⇒ 用它；否则沿用上一份（没有上一份 ⇒ 空串由调用方拒绝写）。
+    develop: reading.develop ?? prev?.develop ?? "",
+    evaluatedAt: reading.evaluatedAt,
+    state: "not-evaluated",
+    reasonKind: reading.reasonKind,
+    reason: reading.reason,
+    reds: (prev?.reds ?? []).map((e) => ({ ...e, files: [...e.files], blockedTasks: [...e.blockedTasks] })),
   };
 }
 
@@ -3076,16 +3248,26 @@ export async function runMechanicalFanIn(opts: MechanicalFanInOptions): Promise<
         ...extra,
       });
     };
-    const notEvaluated = (reason: string): BaselineEquivalenceReading => {
+    // ⛔ **未评估 ⇒ 观测不是 null**（本任务的核心修正）：null 已被「这一轮根本没进 A/B（不适用）」
+    // 占用，把「进了但没读成」也压成 null ⇒ 载体这一轮**不动**、旧的 `reds: []` 继续说「develop 干净」
+    // —— 正是硬规则 3b 的那个折叠。现在每一次「没评估成」都带着成因 token 回传，由 driver 侧落盘。
+    const notEvaluated = (reasonKind: DevelopRedReasonKind, reason: string): BaselineEquivalenceReading => {
       const v: BaselineEquivalenceVerdict = { kind: "not-evaluated", reason };
-      traceVerdict(v);
-      // ⛔ 未评估 ⇒ 观测也是 null（硬规则 3b）：这一轮拿不到「develop 上现在红什么」的可判读数，
-      // 载体这一轮**不动**（既 no upsert 也不 remove）。
-      return { verdict: v, baselineWorktree: null, log: null, developRedObservation: null };
+      traceVerdict(v, { reasonKind });
+      return {
+        verdict: v, baselineWorktree: null, log: null,
+        developRedObservation: {
+          state: "not-evaluated", task, evaluatedAt: new Date().toISOString(), reasonKind, reason,
+        },
+      };
     };
-    if (!failed.evaluated) return notEvaluated(`no runnable failing-file set: ${failed.reason}`);
+    if (!failed.evaluated) {
+      return notEvaluated("task-side-signatures-unevaluable", `no runnable failing-file set: ${failed.reason}`);
+    }
     const taskParse = parseFailureSignatures(taskLogText, worktree);
-    if (!taskParse.evaluated) return notEvaluated(`task-side signatures unevaluable: ${taskParse.reason}`);
+    if (!taskParse.evaluated) {
+      return notEvaluated("task-side-signatures-unevaluable", `task-side signatures unevaluable: ${taskParse.reason}`);
+    }
     const baseDir = opts.baselineWorktree
       ?? path.join(path.dirname(worktree), `.baseline-red-${task}-${runIdSafe}`);
     let baselineLog: string | null = null;
@@ -3093,7 +3275,10 @@ export async function runMechanicalFanIn(opts: MechanicalFanInOptions): Promise<
       // 陈旧残留（上一轮被中断）⇒ 先清；git worktree add 对已存在路径报错。
       try { fs.rmSync(baseDir, { recursive: true, force: true }); } catch { /* best-effort */ }
       const add = await mechSh(["git", "-C", worktree, "worktree", "add", "--detach", baseDir, mergeTarget], 120_000);
-      if (!add.ok) return notEvaluated(`baseline worktree add failed: ${(add.stderr || add.stdout || "").trim() || `exit ${add.status}`}`);
+      if (!add.ok) {
+        return notEvaluated("baseline-worktree-add-failed",
+          `baseline worktree add failed: ${(add.stderr || add.stdout || "").trim() || `exit ${add.status}`}`);
+      }
       // 基线树要能跑 [rerun_command]（本仓库是 `bash {worktree}/scripts/test.sh`）⇒ node_modules + config.yml。
       // best-effort：失败只记 trace，随后重跑若跑不起来会落 not-evaluated（⛔ 不把 provisioning 失败当成
       // 「等价」）。`null` = 夹具明确声明不需要 provisioning。
@@ -3117,10 +3302,18 @@ export async function runMechanicalFanIn(opts: MechanicalFanInOptions): Promise<
       // 重新问一遍「这些红还在不在」——代价被已记录红集的大小界定，且这些文件本来就在红着。
       // ⛔ 只在**红轮**可达：全绿轮根本进不到 A/B（那时没有 develop 侧读数，载体不动，见
       // `BaselineEquivalenceReading.developRedObservation` 的三态说明）。
+      //
+      // 消费侧（AC2）——载体态经 `developRedSetView` 分叉，⛔ 三个方向都不许塌成两个：
+      //   · `clean`      ⇒ 没有已记录的红文件可并；
+      //   · `reds`       ⇒ 并上它点名的文件（「红消失」信号的可达性）；
+      //   · `not-evaluated` ⇒ **仍并上上一份已知红集**（它们可能还在红，⛔ 不能因为「这一轮没读成」
+      //                     就把它们从重跑清单里删掉），但⛔ **不据此得出任何 verdict**——本轮的判定
+      //                      只来自下面在 develop 树上**新跑**出来的签名（方向 ①② 都不给载体投票权）。
+      //   · `unreadable` ⇒ 同上：没有读数 ≠ 干净的基线，也 ≠ 有红。
+      const carrierView = developRedSetView(readDevelopRedSet(root));
       const recordedRedFiles = ((): string[] => {
-        const prevSet = readDevelopRedSet(root);
-        if (!prevSet.evaluated) return [];
-        const files = [...new Set(prevSet.set.reds.flatMap((e) => e.files))];
+        if (carrierView.set === null) return [];
+        const files = [...new Set(carrierView.set.reds.flatMap((e) => e.files))];
         // ⛔ 只并上**基线树上仍然存在**的文件：已删除的文件会让重跑命令本身报错 ⇒ 一份说不出所以然的
         // 非零日志 ⇒ A/B 变 not-evaluated ⇒ 一条陈旧记录把本来可豁免的任务变成硬红（假阻塞）。文件没了
         // 就不是「还在红」，本轮的移除判据也认它（`evaluatedFiles` 里没有它 ⇒ 保留，等下一轮）。
@@ -3134,7 +3327,9 @@ export async function runMechanicalFanIn(opts: MechanicalFanInOptions): Promise<
         : opts.rerunCommand !== undefined
           ? { kind: "run" as const, argv: opts.rerunCommand }
           : resolveRerunCommand(worktree, baseDir, rerunFiles);
-      if (resolved.kind !== "run") return notEvaluated(`no baseline rerun command: ${resolved.reason}`);
+      if (resolved.kind !== "run") {
+        return notEvaluated("no-baseline-rerun-command", `no baseline rerun command: ${resolved.reason}`);
+      }
       const logFile = path.join(root, ".quay", suiteLogFileName(task, runId, `baseline-${newSuiteLogAttemptSuffix()}`));
       const rr = await mechSh(resolved.argv, opts.rerunTimeoutMs ?? RERUN_TIMEOUT_MS);
       // 与 runInRoundRerun 同族命名（落地时被 pruneTaskSuiteLogs 一并轮转，⛔ 不新增孤儿日志族）。
@@ -3143,8 +3338,30 @@ export async function runMechanicalFanIn(opts: MechanicalFanInOptions): Promise<
         fs.writeFileSync(logFile, combinedOutput(rr.stdout, rr.stderr), "utf8");
         baselineLog = path.basename(logFile);
       } catch { /* 日志 best-effort */ }
-      // status===null ⇒ mechSh 墙钟到点组 kill ⇒ **未评估**（⛔ 被中止的基线重跑不得当成「基线无该红」）。
-      if (rr.status === null) return notEvaluated("baseline rerun aborted");
+      // status===null ⇒ mechSh 墙钟到点**组 kill**（或 spawn 失败）⇒ **未评估**（⛔ 被中止的基线重跑
+      // 不得当成「基线无该红」）。两类成因分开记：看门狗中止 ≠ 进程起不来（AC3 的第三类）。
+      if (rr.status === null) {
+        const watchdog = /spawn timeout/i.test(String(rr.error?.message ?? ""));
+        return notEvaluated(
+          watchdog ? "watchdog-killed" : "spawn-failed",
+          `${watchdog ? "watchdog-killed" : "spawn-failed"}: baseline rerun aborted (${rr.error?.message ?? "no exit status"})`,
+        );
+      }
+      const baseCombined = combinedOutput(rr.stdout, rr.stderr);
+      // ── 完整性 / OOM 标记（AC1 的 ①②，`gap-develop-red-set-empty-conflates-clean-with-not-evaluated`）──
+      // 病：基线重跑被 OOM 杀 / 只跑了一部分时，runner 仍可能 exit 0 且**没有任何失败签名行** ⇒ 下面那条
+      // 「exit 0 + 无失败行 = 评估过、零红」会把「没评估成」写成 `clean`。标记行是 runner 与 fan-in
+      // **同源**（`SUITE_LOG_INCOMPLETE_PREFIX`）的结构化事实，⛔ 不是从措辞里猜。
+      // 前缀与 full-suite-runner.ts 同源 ⇒ 第三方 `rerun_command` 走同一 runner 时同样生效。
+      const baseIncomplete = extractSuiteIncompleteMarker(baseCombined);
+      if (baseIncomplete !== null) {
+        return notEvaluated(
+          baseIncomplete.reason === "oom-killed" ? "oom-killed" : "incomplete",
+          baseIncomplete.reason === "oom-killed"
+            ? `oom-killed: baseline rerun lost ${baseIncomplete.missing} of ${baseIncomplete.planned ?? "unknown"} planned files (oomKill=${baseIncomplete.oomKill}, terminal=${baseIncomplete.terminal})`
+            : `incomplete: baseline rerun is missing ${baseIncomplete.missing} of ${baseIncomplete.planned ?? "unknown"} planned files (terminal=${baseIncomplete.terminal}, oomKill=${baseIncomplete.oomKill})`,
+        );
+      }
       // 三态基线读数：**exit 0 + 一条失败行都没有**是一份独立的绿读数。`parseFailureSignatures` 对
       // 这种日志返回 evaluated:false（`no-failure-signature-lines`）——那是为【红】suite 语境写的：
       // 红 suite 解析不出签名就是读不懂。基线重跑不是红 suite，exit 0 说明这批文件在 develop 上全绿
@@ -3152,44 +3369,47 @@ export async function runMechanicalFanIn(opts: MechanicalFanInOptions): Promise<
       // ⛔ 判据只看「**没有**失败行」：解析出签名 ⇒ 一律按签名走（⛔ 不让 exit code 推翻签名——
       // 第三方 `rerun_command` 完全可能是 `cat <log>` 这种退出码恒 0 的形态，那不代表 develop 绿）。
       // exit≠0 且没有任何可解析签名 ⇒ 照旧 not-evaluated（fail-closed，与改动前逐字一致）。
-      const rawBaseParse = parseFailureSignatures(combinedOutput(rr.stdout, rr.stderr), baseDir);
+      const rawBaseParse = parseFailureSignatures(baseCombined, baseDir);
       const baseParse: FailureSignatureParse = rawBaseParse.evaluated
         ? rawBaseParse
         : (rr.status === 0 && rawBaseParse.reason === "no-failure-signature-lines"
             ? { evaluated: true, signatures: [] }
             : rawBaseParse);
-      if (!baseParse.evaluated) return notEvaluated(`baseline-side signatures unevaluable: ${baseParse.reason}`);
+      if (!baseParse.evaluated) {
+        return notEvaluated("baseline-side-signatures-unevaluable", `baseline-side signatures unevaluable: ${baseParse.reason}`);
+      }
       const verdict = compareFailureSignatures(taskParse.signatures, baseParse.signatures);
       traceVerdict(verdict, { baselineFiles: baseParse.signatures.length, taskFiles: taskParse.signatures.length });
       // develop 红签名集的**观测**（`gap-develop-red-set-writer`）：基线树此刻就检在 mergeTarget 上，
       // 所以它的 HEAD 就是「这次重跑实际跑的那个 develop」——⛔ 不拿 merge 之前的 developSha 近似
-      // （develop 可能在本轮中途前进）。取不到 SHA ⇒ 观测为 null（未评估，⛔ 不伪造一个 develop 值）。
+      // （develop 可能在本轮中途前进）。取不到 SHA ⇒ 观测是**未评估**（⛔ 不伪造一个 develop 值，
+      // ⛔ 也不能压成 null——那会让载体保持旧的 `clean`）。
       const baseHead = await mechSh(["git", "-C", baseDir, "rev-parse", "HEAD"], 30_000);
       const baseHeadSha = baseHead.status === 0 ? baseHead.stdout.trim() : "";
-      const developRedObservation: DevelopRedObservation | null = baseHeadSha === ""
-        ? null
-        : {
-            develop: baseHeadSha,
-            evaluatedAt: new Date().toISOString(),
-            task,
-            points: developRedPoints(baseParse.signatures),
-            // 本轮在基线树上真的跑过的文件 = 上面 `resolved.argv` 实际拿到的重跑目标清单
-            // （task 失败文件 ∪ 已记录 develop 红文件）——⛔ 不是整棵 develop 的套件（那是另一个量，
-            // 本机制没有它的读数），也⛔ 不是只用 failed.files（那会让载体里自己点名的文件永远不被
-            // 重新评估 ⇒ 只增不减）。
-            evaluatedFiles: rerunFiles,
-          };
-      if (developRedObservation !== null) {
-        traceSuiteEvent("develop-red-set", {
-          exit: 0, wall_ms: 0, ok: true,
-          develop: developRedObservation.develop.slice(0, 12),
-          reds: developRedObservation.points.length,
-          evaluatedFiles: developRedObservation.evaluatedFiles.length,
-        });
+      if (baseHeadSha === "") {
+        return notEvaluated("missing-develop-sha", `baseline worktree HEAD unreadable: ${(baseHead.stderr || "").trim() || `exit ${baseHead.status}`}`);
       }
+      const developRedObservation: DevelopRedObservation = {
+        state: "evaluated",
+        develop: baseHeadSha,
+        evaluatedAt: new Date().toISOString(),
+        task,
+        points: developRedPoints(baseParse.signatures),
+        // 本轮在基线树上真的跑过的文件 = 上面 `resolved.argv` 实际拿到的重跑目标清单
+        // （task 失败文件 ∪ 已记录 develop 红文件）——⛔ 不是整棵 develop 的套件（那是另一个量，
+        // 本机制没有它的读数），也⛔ 不是只用 failed.files（那会让载体里自己点名的文件永远不被
+        // 重新评估 ⇒ 只增不减）。
+        evaluatedFiles: rerunFiles,
+      };
+      traceSuiteEvent("develop-red-set", {
+        exit: 0, wall_ms: 0, ok: true,
+        develop: developRedObservation.develop.slice(0, 12),
+        reds: developRedObservation.points.length,
+        evaluatedFiles: developRedObservation.evaluatedFiles.length,
+      });
       return { verdict, baselineWorktree: baseDir, log: baselineLog, developRedObservation };
     } catch (e) {
-      return notEvaluated(`baseline A/B error: ${(e as Error)?.message ?? String(e)}`);
+      return notEvaluated("baseline-ab-error", `baseline A/B error: ${(e as Error)?.message ?? String(e)}`);
     } finally {
       // 基线树是临时的：无论成败都清掉（best-effort）。
       try { fs.rmSync(baseDir, { recursive: true, force: true }); } catch { /* best-effort */ }
