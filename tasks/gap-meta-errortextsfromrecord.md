@@ -2,7 +2,7 @@
 id: gap-meta-errortextsfromrecord
 title: "meta-driver action-record reading is a false clean: extractor drops
   meta-cc's `error_text` field"
-status: ready
+status: done
 labels:
   - meta-driver
   - driver-candidate
