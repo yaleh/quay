@@ -68,11 +68,14 @@ $ find /tmp -maxdepth 1 -name 'quay-*' | wc -l
 - plugin/scripts/capability-catalog-declarations.json
 - plugin/scripts/overhead-instrument.sh
 - plugin/sh-census-baseline.json
+- packages/quay/scripts/verify-sea-artifact.sh
 - tasks/gap-test-harness-tmp-dir-leak.md
 
 > Touches 里 `temp-root-reaper.ts` 是拟新增的载体；执行器若判定应复用/扩展现有的临时根 helper，按实情把真实路径登记进本节并留痕（⛔ 不要为了迁就本节另造一个文件）。
 >
 > **实际落地时的登记（留痕，2026-11-06）**：`temp-root-reaper.ts` 按原计划新增；但它不能由 `scripts/test.sh` 直接调用——`sh-census-check` 的 `embeddedInterpreterLines` 是【文件级】棘轮，`.sh` 里只要出现一个 `node` 就整文件计行，直接内联会是 +57。故拆成 `temp-root-reaper.sh`（2 行薄 wrapper，承担计数）+ `suite-temp-root.sh`（逻辑，无内嵌解释器 ⇒ 不计入）。`capability-catalog-declarations.json`（新脚本必须声明）、`overhead-instrument.sh`（它的 `trap … EXIT` 会覆盖早先装的 trap，必须链式而非替换）、`sh-census-baseline.json`（+3 的 committed re-anchor）随之进入 Touches。
+>
+> **续做轮追加登记（2026-11-06）**：`packages/quay/scripts/verify-sea-artifact.sh` —— 本分支的快照让一个**既有** flake 变红（§AC7），它不是本任务的功能载体；登记它是为了让 anti-drift 的 Touches 判定与实际改动一致。
 
 ## 证据（2026-11-06 本机实测，全部为真实运行读数）
 
@@ -162,6 +165,34 @@ EXIT=0
 
 在 merge 了 develop（`705363252`）之后重跑；`worker-driver --verify-run` 同源读数为 `{exitCode:0, classification:"green", mustFix:[]}`，`--verify-rerun` 无可重跑项（fellBackToScopedGate，同样 exit 0）。`anti-drift-touches-check`：9 个实际改动文件全部落在 Touches（10 glob）内。
 
+**续做轮（2026-11-06，合并 develop 落后 78 个提交之后）**：
+
+```text
+$ bash scripts/test.sh --for-task gap-test-harness-tmp-dir-leak --allow-thin
+...
+ℹ tests 17
+ℹ pass 17
+ℹ fail 0
+tmp-root-telemetry: root=/tmp/quay-suite-1937601-affsJy created=0 reaped=0 leaked=0 evaluated=true
+EXIT=0
+```
+
+`worker-driver --verify-run`：`{"exitCode":0,"classification":"green","mustFix":[],"baselineAvailable":true,"failures":[]}`；
+`worker-driver --verify-rerun`：`{"state":"not-evaluated","reason":"verify-state-missing","fellBackToScopedGate":true,"exitCode":0}`。
+
+### §AC7 上一轮 suite 红（`verify-sea-artifact`）：既有 flake，非本任务 delta
+
+上一轮 exited-not-landed 的红是 `packages/quay/test/verify-sea-artifact.test.mjs`（7/13 红，`MISSING: 'slot-refill' is not reverse-searchable in the artifact`）。续做轮定位并修掉：
+
+- **不是本任务的 delta**：`verify-sea-artifact.test.mjs` 不在本任务 Touches、也不被本任务任何改动 import（机械 delta-relatedness 亦判 UNRELATED）。
+- **根因 ①（真正的缺陷）**：`packages/quay/scripts/verify-sea-artifact.sh` 在 `set -euo pipefail` 下写
+  `grep -rlF -- "$m" "$BUNDLE_DIR" | grep -q .`。reader 读到第一行就退出 ⇒ producer 被 **SIGPIPE** 杀掉（PATH wrapper 实测 **RC=141**）⇒ `pipefail` 让整条管道非零 ⇒ 一个**确实存在的命中**被读成 MISSING。
+  同一份 bundle：该文件**单跑 13/13 绿**，套件并发下 **6/13 红**（`slot-refill` 一族匹配文件最多、最先被扫出，最易触发）。
+- **根因 ②（为什么这一轮才显形）**：本分支落后 develop 78 个提交，未包含 `00cb0beb5`（`@test-group-downgrade` 把 packaging/SEA 一族降回 serial）。上一轮因此按 `product` 并发跑这一族。**合并 develop 后回到 `serial`，但 SIGPIPE 未修 ⇒ 仍 6/13 红**，所以序列化不是修复。
+- **修法**：改成 `grep -rqF -- "$m" "$BUNDLE_DIR"`（去掉管道，首命中即 exit 0）。语义等价（只问「有没有命中」）。
+- **读数**：修后同一文件连跑 **5 次，每次 13/13 pass / 0 fail**；负控制 `verify-sea-artifact.sh <无 plugin/ 的 bundle>` → 逐一报 6 个 `MISSING`、`ERROR: 6 of 6 mechanism names are NOT present`、exit 1（判据仍能取假，不是被改成恒真）。
+- **范围**：同型 `| grep -q` 在 `packages/quay/scripts` + `plugin/scripts` 的 `.sh` 中共 **20** 个文件命中；本轮只修这一个已被观测到变红的载体，不扩大改动面。
+
 ## ADR-007 dark axis
 
 - L_G：该轴仍暗,理由:本任务只在 harness 侧新增叶子脚本（`temp-root-reaper.ts` → `gate-script-base.ts` + node 内建；`suite-temp-root.sh` 只被 `scripts/test.sh` source），未新增或反转任何包间依赖边，也未触碰 `packages/**` 的架构面；archguard 的 L_D/L_G 读数按仓库既有裁定由 milestone 级承担（`gap-fan-in-remove-archguard-gate`：逐任务布尔闸 244 次运行零指引价值），本轮未产出可比的 L_D/L_G 数字。
@@ -172,3 +203,4 @@ EXIT=0
 
 - 未落地原因：step=suite: AssertionError [ERR_ASSERTION]: an artifact embedding a non-declared Node must never pass the release gate [baseline A/B: HARD RED (task-introduced-red) — the task's red set is NOT a subset of the develop baseline red set: added=packages/quay/test/verify-sea-artifact.test.mjs,packages/quay/test/verify-sea-artifact.test.mjs,packages/quay/test/verify-sea-artifact.test.mjs,packages/quay/test/verify-sea-artifact.test.mjs,packages/quay/test/verify-sea-artifact.test.mjs,packages/quay/test/verify-sea-artifact.test.mjs,packages/quay/test/verify-sea-artifact.test.mjs changed=-]
 - run_id：wk-prod-anchor
+- **续做轮处置（2026-11-06）**：根因与修法见 §AC7 —— 是**既有的 pipefail+SIGPIPE flake**叠加「分支落后 develop 78 个提交」；已合并 develop 并修掉该 flake，本任务自身 AC 无新增未完成项。
