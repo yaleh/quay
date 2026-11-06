@@ -1,7 +1,7 @@
 ---
 id: gap-goal-filing-chain-audit
 title: goal-filing 整链审计：filed 行的 taskId 与任务落地状态交叉核对
-status: ready
+status: done
 labels:
   - gap
   - goal-driver
