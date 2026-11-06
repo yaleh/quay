@@ -44,7 +44,14 @@ goal_ac: AC-935
 ## Touches
 
 - packages/quay/src/core/goal-analysis.ts
+- packages/quay/src/cli/goal.ts
+- packages/quay/src/cli/help.ts
 - plugin/scripts/goal-driver.ts
+- plugin/scripts/driver-runtime.ts
+- packages/quay/test/goal-analysis.test.mjs
 - plugin/test/goal-driver.test.mjs
+- plugin/test/goal-driver-s01.test.mjs
+- plugin/test/goal-driver-s06.test.mjs
+- plugin/test/helpers/goal-driver-harness.mjs
 - docs/evidence/2026-11-06-goal-blocked-taxonomy.md (new)
 - tasks/gap-goal-driver-blocked-taxonomy.md
