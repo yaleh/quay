@@ -1,7 +1,7 @@
 ---
 id: gap-meta-readparkingrecord
 title: needs-human 停放理由有两个生产者、一个读者：worker 写的 `## Blocker` 段 parking-recheck 读不到
-status: ready
+status: done
 labels:
   - meta-driver
   - driver-candidate
