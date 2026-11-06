@@ -10,7 +10,7 @@ children: []
 extra:
   schema: execution
 depends_on:
-  - gap-goal-next-projection
+  - gap-goal-driver-blocked-taxonomy
 goal_ac: AC-936
 ---
 ## Proposal
