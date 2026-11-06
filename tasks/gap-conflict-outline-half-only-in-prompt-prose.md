@@ -2,7 +2,7 @@
 id: gap-conflict-outline-half-only-in-prompt-prose
 title: outline 文档冲突规则只在 prompts 散文里：isTickDoc 只匹配
   orchestration/*-tick-core.md，outline 落到 manual，机械消解半边缺失
-status: ready
+status: done
 labels:
   - gap
   - defect
