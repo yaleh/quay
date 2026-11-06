@@ -57,3 +57,10 @@ goal-driver 每轮算出大量缺口读数，但没有一条回答"这个 goal �
 - plugin/test/goal-driver.test.mjs
 - docs/evidence/2026-11-06-goal-next-projection.md (new)
 - tasks/gap-goal-next-projection.md
+
+## Blocker
+
+**2026-11-06T17:54:31.586Z — worker 未落地（exited-not-landed）**
+
+- 未落地原因：step=suite: AssertionError [ERR_ASSERTION]: GapState 词表含 workable/world-gated/unclassified [baseline A/B: HARD RED (task-introduced-red) — the task's red set is NOT a subset of the develop baseline red set: added=plugin/test/goal-driver-s01.test.mjs,plugin/test/goal-driver-s06.test.mjs changed=-]
+- run_id：wk-prod-anchor
