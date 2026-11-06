@@ -3121,42 +3121,293 @@ export async function fileDecisions(
 
 // ── 语义半 ────────────────────────────────────────────────────────────────────────────────────────
 
-/** 语义半读数的落盘相对路径（.quay 下、gitignored；每轮原子覆写）。
- *  prompt 只带路径 + 稳定摘要，完整 JSON 落盘让 probe 惰性 Read
- *  （gap-meta-driver-probe-readings-inline-over-1mb：整段 JSON 内联曾是每轮 >1MB fresh input）。 */
+/** 语义半读数的**单文件**落盘相对路径（.quay 下、gitignored；每轮原子覆写）。
+ *  ⚠️ 这个文件**不是** probe 的取数路径（gap-meta-buildprobeprompt）：生产实测 753,799 B，超过
+ *  Read 工具 262,144 B 的单文件上限 ⇒ 「Read that file」这条唯一被点名的取数方式，恰好在需要数字
+ *  的那一轮机械不可读。它保留给**不吃 Read 上限**的消费者（jq / node / 人用 cat 看全量）；probe
+ *  走下面按预算切片的 parts 载体（两者在同一次构造里写出，是同一份 readings）。 */
 export const META_DRIVER_READINGS_REL = path.join(".quay", "meta-driver-readings.json");
+
+/** 切片载体目录（.quay 下、gitignored；每轮**整目录重建**，⛔ 不累积——残留的 part-NNN 是纯误读源）。 */
+export const META_DRIVER_READINGS_PARTS_REL = path.join(".quay", "meta-driver-readings.parts");
+/** 切片清单（小文件）：probe 先读它，再由它点名本轮每个 part 与各自的字节数。 */
+export const META_DRIVER_READINGS_MANIFEST_REL = path.join(META_DRIVER_READINGS_PARTS_REL, "manifest.json");
+
+/** Read 工具的单文件上限——判据、probe 规格、切片预算引用**同一个数**（⛔ 不在别处再写一遍字面量）。 */
+export const READ_TOOL_MAX_BYTES = 256 * 1024;
+/** 单个 part 文件的字节预算 = 上限的一半：中文 reason 的 UTF-8 字节数可达 JS 字符数的 3 倍，
+ *  按 `Buffer.byteLength` 实测（⛔ 不按字符数估），留 2× 余量给 envelope 与多字节文本。 */
+export const READINGS_PART_BUDGET_BYTES = READ_TOOL_MAX_BYTES / 2;
+
+/** 一条切片：readings 的一个**可独立读出**的部分。重建规则 =「同一 `path` 的切片按 `range` 升序拼接」。
+ *  · `range: null`（kind `value`）⇒ `value` 就是该 path 处的完整值；
+ *  · kind `array` ⇒ `value` 是该 path 处数组的 `[range[0], range[1])` 项；
+ *  · kind `string` ⇒ `value` 是该 path 处字符串的 `[range[0], range[1])` 字符（超长字符串在数组/对象
+ *    层切不开，只能按字符切；否则一个超预算的字符串就会让整个 part 超过 Read 上限——硬规则 3b：
+ *    ⛔ 不允许「切不动」伪装成「切好了」）。 */
+export interface ReadingsShard {
+  path: string;
+  kind: "value" | "array" | "string";
+  range: [number, number] | null;
+  total: number | null;
+  value: unknown;
+}
+
+/** 一个 part 文件的**值**（由 `writeJsonAtomic` 原子写出）。`note` 让每个文件自解释，probe 即使
+ *  只读了某一片也能正确理解它是不是完整值。 */
+export interface ReadingsPart {
+  part: number;
+  of: number;
+  note: string;
+  shards: ReadingsShard[];
+}
+
+/** 切片清单：probe 用它判断「我要的那个 path 在哪一个 part 里」，避免把所有片都读进上下文。 */
+export interface ReadingsPartsManifest {
+  format: "meta-driver-readings-shards/v1";
+  readToolMaxBytes: number;
+  partBudgetBytes: number;
+  /** 完整 readings 单文件的字节数（= `.quay/meta-driver-readings.json` 的大小，供人对照）。 */
+  totalBytes: number;
+  partCount: number;
+  parts: Array<{ file: string; bytes: number; carries: string[] }>;
+  reconstruct: string;
+}
+
+const PART_NOTE = "Rebuild each \"path\": kind \"array\" shards place their items starting at \"range[0]\" (identical to concatenation when the ranges are contiguous; a gap means those items were sharded individually under their own \"path[i]…\" entries); kind \"string\" shards join their substrings in \"range\" order; \"range\": null (kind \"value\") is already the complete value.";
+
+/** `JSON.stringify` 的**字节**长度（UTF-8）。⛔ 不用 `String.length`：`Read` 上限按字节算，
+ *  中文 reason 一字 3 B，用字符数会把超限文件判成合格（硬规则 3b）。 */
+function jsonByteLen(v: unknown): number {
+  const s = JSON.stringify(v);
+  return Buffer.byteLength(s === undefined ? "null" : s, "utf8");
+}
+
+/** 切片值时用的**值**预算。它按 compact JSON 度量，而落盘是 pretty-printed（缩进会把每个数组项/
+ *  对象键摊到单独一行，实测可涨到 2-4 倍）⇒ 取 part 预算的 1/4，让「一条切片装进一个 part」有
+ *  足够余量；真正的**硬保证**由 `packReadingsParts` 的实测把守（见那里的兜底）。 */
+const READINGS_SHARD_VALUE_BUDGET = READINGS_PART_BUDGET_BYTES / 4;
+
+/** 把一个值在**指定 path 上**递归切成放得进 `valueBudget` 的切片（数组切项、对象切键、字符串切字符）。
+ *  `path` 参数是给「超限切片再切细」用的：再切出来的切片必须落在同一个 path 坐标里。 */
+function shardValueAt(p: string, value: unknown, valueBudget: number, out: ReadingsShard[]): void {
+  if (jsonByteLen(value) <= valueBudget) {
+    out.push({ path: p, kind: "value", range: null, total: null, value });
+    return;
+  }
+  if (Array.isArray(value)) {
+    const sizes = value.map((v) => jsonByteLen(v));
+    let i = 0;
+    while (i < value.length) {
+      // 单项本身就超预算 ⇒ 下沉到该项内部再切（path 变成 `path[i]`，⛔ 不吐一个超限的切片）。
+      if (sizes[i] + 2 > valueBudget) { shardValueAt(`${p}[${i}]`, value[i], valueBudget, out); i += 1; continue; }
+      let j = i;
+      let sum = 2; // `[` + `]`
+      while (j < value.length && sum + sizes[j] + (j > i ? 1 : 0) <= valueBudget) {
+        sum += sizes[j] + (j > i ? 1 : 0);
+        j += 1;
+      }
+      out.push({ path: p, kind: "array", range: [i, j], total: value.length, value: value.slice(i, j) });
+      i = j;
+    }
+    return;
+  }
+  if (value !== null && typeof value === "object") {
+    for (const [k, v] of Object.entries(value as Record<string, unknown>)) shardValueAt(p === "" ? k : `${p}.${k}`, v, valueBudget, out);
+    return;
+  }
+  if (typeof value === "string") {
+    let start = 0;
+    while (start < value.length) {
+      let len = Math.min(value.length - start, Math.max(1, valueBudget - p.length - 64));
+      for (;;) {
+        const cand: ReadingsShard = {
+          path: p, kind: "string", range: [start, start + len], total: value.length, value: value.slice(start, start + len),
+        };
+        // 转义序列（引号/反斜杠/控制字符）会让 JSON 文本比原字符更长 ⇒ 实测后收缩。
+        if (jsonByteLen(cand) <= valueBudget || len <= 1) { out.push(cand); break; }
+        len = Math.max(1, Math.floor(len / 2));
+      }
+      start += len;
+    }
+    return;
+  }
+  // number / boolean / null 不可能超预算；走到这里说明与实测不一致 ⇒ 原样输出（不静默丢值）。
+  out.push({ path: p, kind: "value", range: null, total: null, value });
+}
+
+/** 把 readings 切成**每条都放得进一个 part** 的切片列表。纯函数——落盘与重建由调用方/测试各自做，
+ *  因此可以在不写盘的情况下断言切片性质。 */
+export function shardReadings(readings: unknown, valueBudget: number = READINGS_SHARD_VALUE_BUDGET): ReadingsShard[] {
+  const out: ReadingsShard[] = [];
+  shardValueAt("", readings, valueBudget, out);
+  return out;
+}
+
+/** part 文件的值（`pack` 与 `write` 共用**同一个构造函数**——两处各拼一份就会出现"量的是 A、
+ *  写的是 B"的预算缺口）。 */
+function partValue(shards: ReadingsShard[], part = 999, of = 999): ReadingsPart {
+  return { part, of, note: PART_NOTE, shards };
+}
+
+/** part 文件的**实际字节数**（与 `writeJsonAtomic` 写出的字节逐字节一致：2 空格缩进 + 结尾换行）。 */
+function partBytes(shards: ReadingsShard[], part = 999, of = 999): number {
+  return Buffer.byteLength(JSON.stringify(partValue(shards, part, of), null, 2) + "\n", "utf8");
+}
+
+/** 把一条**单独装就超预算**的切片再切细，并把切出来的坐标抬回原数组/原字符串。
+ *  ⛔ 不抬坐标就会出现「切片内第 5 项」被当成「原数组第 5 项」的静默错位。 */
+function reshardTighter(s: ReadingsShard, budget: number): ReadingsShard[] {
+  const out: ReadingsShard[] = [];
+  shardValueAt(s.path, s.value, Math.max(256, Math.floor((budget - 1024) / 4)), out);
+  if (s.range === null) return out;
+  const base = s.range[0];
+  const esc = s.path.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const itemIdx = new RegExp(`^${esc}\\[(\\d+)\\]`);
+  return out.map((n) => {
+    const next: ReadingsShard = { ...n };
+    if (next.kind === "value" && next.range === null) {
+      // 再切后整体已放得下 ⇒ 它语义上仍是原切片的那个区间，⛔ 不能变成「完整值」。
+      next.kind = Array.isArray(s.value) ? "array" : "string";
+      next.range = [s.range![0], s.range![1]];
+    } else if (next.range) {
+      next.range = [next.range[0] + base, next.range[1] + base];
+    }
+    if (next.kind !== "value") next.total = s.total;
+    // 切片内部下沉产生的 `path[localIdx]` ⇒ 换成原数组的下标。
+    next.path = next.path.replace(itemIdx, (_m, idx: string) => `${s.path}[${Number(idx) + base}]`);
+    return next;
+  });
+}
+
+/** 把切片装进 ≤ `budget` 字节的文件。返回每个文件的切片组。
+ *  **硬保证**：每个返回的组序列化后 < `budget`（Read 上限的一半）。做法是**实测**每个候选组的
+ *  实际字节数（pretty-printed 后量，⛔ 不用 compact 估算——缩进会把估算值撑破），超了就收口；
+ *  单条切片自己也超限时再切细重排，直到全部装得下。 */
+export function packReadingsParts(shards: ReadingsShard[], budget: number = READINGS_PART_BUDGET_BYTES): ReadingsShard[][] {
+  const packOnce = (list: ReadingsShard[]): ReadingsShard[][] => {
+    const groups: ReadingsShard[][] = [];
+    let cur: ReadingsShard[] = [];
+    for (const s of list) {
+      cur.push(s);
+      if (cur.length > 1 && partBytes(cur) > budget) { cur.pop(); groups.push(cur); cur = [s]; }
+    }
+    if (cur.length > 0) groups.push(cur);
+    return groups;
+  };
+  let list = shards;
+  // 有界收敛：每轮把「单条就超限」的切片再切细；切细只会让切片更短，故必然终止（最多几轮）。
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    const groups = packOnce(list);
+    const bad = groups.find((g) => g.length === 1 && partBytes(g) > budget);
+    if (!bad) return groups;
+    const target = bad[0];
+    list = list.flatMap((s) => (s === target ? reshardTighter(s, budget) : [s]));
+  }
+  return packOnce(list);
+}
+
+/** 切片在清单里的可读标签：`criteria[0..199]` / `actionRecordFailures.aggregates[0..99]` / `drivers`。 */
+function shardLabel(s: ReadingsShard): string {
+  return s.range ? `${s.path}[${s.range[0]}..${s.range[1] - 1}]` : s.path;
+}
+
+/** 落盘切片载体：整目录重建 + manifest。返回清单（prompt 只从它取文件路径，⛔ 不自己拼文件名）。 */
+export function writeReadingsParts(root: string, readings: MetaRoundReadings): ReadingsPartsManifest {
+  const dir = path.join(root, META_DRIVER_READINGS_PARTS_REL);
+  const groups = packReadingsParts(shardReadings(readings));
+  // 上一轮的目录可能切出更多文件：整目录删掉重建，否则残留的 part-NNN 会让按 manifest 读的 probe
+  // 读到过期切片（硬规则 3b：读到的必须是本轮读数）。
+  fs.rmSync(dir, { recursive: true, force: true });
+  fs.mkdirSync(dir, { recursive: true });
+  const parts = groups.map((group, i) => {
+    const file = path.join(dir, `part-${String(i).padStart(3, "0")}.json`);
+    const value: ReadingsPart = { part: i + 1, of: groups.length, note: PART_NOTE, shards: group };
+    const bytes = Buffer.byteLength(JSON.stringify(value, null, 2) + "\n", "utf8");
+    // 硬保证的最后一关：⛔ 绝不写出一个超 Read 上限却被 prompt 点名的文件（那正是本任务要消灭的
+    // 形态）。切细后仍超限 ⇒ 抛给调用方，由它走「明说未切片」的诚实路径（硬规则 3b）。
+    if (bytes > READINGS_PART_BUDGET_BYTES) throw new Error(`readings part ${i + 1} is ${bytes} B, over the ${READINGS_PART_BUDGET_BYTES} B budget`);
+    writeJsonAtomic(file, value);
+    return {
+      file,
+      bytes,
+      carries: [...new Set(group.map(shardLabel))],
+    };
+  });
+  const manifest: ReadingsPartsManifest = {
+    format: "meta-driver-readings-shards/v1",
+    readToolMaxBytes: READ_TOOL_MAX_BYTES,
+    partBudgetBytes: READINGS_PART_BUDGET_BYTES,
+    totalBytes: Buffer.byteLength(JSON.stringify(readings, null, 2) + "\n", "utf8"),
+    partCount: parts.length,
+    parts,
+    reconstruct: "Read the part file(s) whose \"carries\" lists the path you need, then rebuild that path: kind \"array\" shards place their items starting at \"range[0]\" (concatenation is what you get when the ranges are contiguous — a gap means those items were sharded individually under their own \"path[i]…\" entries), kind \"string\" shards join their substrings in \"range\" order, \"range\": null (kind \"value\") is already the complete value. \"range\" is an item range for arrays and a CHARACTER range for strings. Nested paths use \".\" between object keys and \"[i]\" for an item position.",
+  };
+  writeJsonAtomic(path.join(root, META_DRIVER_READINGS_MANIFEST_REL), manifest);
+  return manifest;
+}
 
 /** 组装 probe prompt 的**单一构造点**（复刻 launchArgv 的 AC140 纪律：一次性入口与常驻入口
  *  共用同一个组装函数，⛔ 不各拼一份）。
- *  ⛔ 不再把 `JSON.stringify(readings)` 整段内联进 prompt：readings 实测可达 >1MB，作为每轮全新
- *  fresh input 按 1× 计费是纯浪费（driver 全量 fresh_input 里最大的一块）。改为：完整 readings
- *  落盘（<root>/.quay/meta-driver-readings.json，与旧内联的是**同一份** `JSON.stringify` 语义），
- *  prompt 只带**路径** + **稳定摘要**（readingsDigest）+ 一条「按需 Read」指令。probe 规格已授予
- *  Read 权限；FILE-ONLY 守卫只拦 tracked 文件改动（落盘在 .quay 下、gitignored ⇒ 不触发违约）。 */
+ *  ⛔ 不把 `JSON.stringify(readings)` 整段内联进 prompt：readings 实测可达 >1MB，作为每轮全新
+ *  fresh input 按 1× 计费是纯浪费（gap-meta-driver-probe-readings-inline-over-1mb）。改为落盘 +
+ *  prompt 只带**路径**与**稳定摘要**（readingsDigest）。
+ *  ⛔ 也⛔ 不点名那个单文件：它实测 753,799 B > Read 的 262,144 B 上限 ⇒ 「按需 Read 那个文件」
+ *  在需要数字的轮次必然失败（gap-meta-buildprobeprompt）。prompt 点名的是**切片**：先 manifest
+ *  （小），再按需读其中某一片——每一片都 < 预算，合起来仍是完整 readings。
+ *  probe 规格已授予 Read 权限；FILE-ONLY 守卫只拦 tracked 文件改动（落盘在 .quay 下、gitignored
+ *  ⇒ 不触发违约）。 */
 export function buildProbePrompt(
   objective: string,
   readings: MetaRoundReadings,
   opts: { root?: string; readingsPath?: string } = {},
 ): string {
   const readingsPath = opts.readingsPath ?? (opts.root ? path.join(opts.root, META_DRIVER_READINGS_REL) : null);
+  // 切片优先：这是 probe 唯一读得到的形态。落盘失败 ⇒ 退回单文件路径并**明说**它可能超 Read 上限
+  // （硬规则 3b：⛔ 不让「没切成」与「切成了」同形，也⛔ 不内联兜底）。
+  let manifestPath: string | null = null;
+  let partFiles: string[] = [];
+  if (opts.root) {
+    try {
+      const manifest = writeReadingsParts(opts.root, readings);
+      manifestPath = path.join(opts.root, META_DRIVER_READINGS_MANIFEST_REL);
+      partFiles = manifest.parts.map((p) => p.file);
+    } catch {
+      manifestPath = null;
+      partFiles = [];
+    }
+  }
+  let singleFile: string | null = null;
   if (readingsPath) {
-    // 落盘失败 ⇒ 语义半这轮拿不到完整读数。⛔ 不内联兜底（那正是本任务要消灭的形态）；prompt 里
-    // 明示「未落盘」，probe 把缺读数读成 not-evaluated 而不是自采证（硬规则 3b）。
     try {
       writeJsonAtomic(readingsPath, readings);
+      singleFile = readingsPath;
     } catch {
       // 吞掉：语义半仍可跑（读不到文件会 not-evaluated），但绝不退化成整段内联。
     }
   }
   const digest = readingsDigest(readings);
-  return [
+  const lines = [
     objective.trim(),
     "",
     "READINGS (mechanically collected this round — arithmetic, not a verdict):",
-    `readings file: ${readingsPath ?? "(not persisted this round)"}`,
-    `readings digest: ${digest}`,
-    "The full readings JSON is on disk at the path above. Read that file when you need any specific number. The readings remain the ONLY measurements — never replace one with a count you derived yourself.",
-  ].join("\n");
+  ];
+  if (manifestPath !== null) {
+    lines.push(`readings manifest: ${manifestPath}`);
+    lines.push("readings part files (the FULL readings JSON, split so every file stays under the Read tool's 256KB cap — read the manifest first, then only the parts carrying the paths you need):");
+    lines.push(...partFiles);
+    lines.push(`readings digest: ${digest}`);
+    lines.push("The full readings JSON is on disk in the part files listed above; the manifest maps every path to the part that carries it. Read the manifest, then Read the part(s) you need when you need a specific number. The readings remain the ONLY measurements — never replace one with a count you derived yourself.");
+  } else if (singleFile !== null) {
+    lines.push(`readings file: ${singleFile}`);
+    lines.push(`readings digest: ${digest}`);
+    lines.push("⚠️ The sharded carriers could NOT be written this round, so the full readings are only in the single file above — it may exceed the Read tool's 256KB cap. If Read refuses it, treat that dimension as unreadable (not-evaluated); ⛔ do NOT fabricate a reading. The readings remain the ONLY measurements.");
+  } else {
+    lines.push("readings manifest: (not persisted this round)");
+    lines.push(`readings digest: ${digest}`);
+    lines.push("⚠️ The readings could not be persisted this round: treat every dimension as unreadable (not-evaluated), ⛔ do NOT fabricate a reading.");
+  }
+  return lines.join("\n");
 }
 
 /** 解析语义半的输出。读不懂 ⇒ null（调用侧转 not-evaluated / failed，⛔ 不当空结果放行）。 */

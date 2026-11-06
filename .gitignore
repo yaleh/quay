@@ -252,6 +252,12 @@ packages/quay/plugin/
 # prompt，改为落盘让 probe 惰性 Read（gap-meta-driver-probe-readings-inline-over-1mb）。运行态、
 # never git-tracked，与 state/round 同族；每轮原子覆写同一路径、不累积。
 **/.quay/meta-driver-readings.json
+# meta-driver 语义半的【切片读数载体】——上面那个单文件实测 753,799 B > Read 工具 256KB/文件上限，
+# 于是「Read that file」这条唯一取数路径在需要数字的轮次必然失败（gap-meta-buildprobeprompt）。
+# 改为一组按预算切片的 part 文件（manifest + part-NNN.json，合起来仍是同一份完整 readings），
+# prompt 只点名这些片。运行态、never git-tracked；每轮**整目录重建**、不累积。
+# ⚠️ 这一条不是可选项：未 ignore 的目录会以 `??` 出现在主检出，挡住 fan-in 的 clean-tree 检查。
+**/.quay/meta-driver-readings.parts/
 # meta-driver 第七类读数（动作记录失败聚合）的【扫描缓存】——一次全量语料扫描实测 ≥20 分钟
 # （5513 文件 / 3.93 GB，2026-09-12），故结果落盘、按 scan_ttl 复用。运行态、never git-tracked，
 # 与上面同族（gap-meta-driver-action-record-failure-aggregation-reading）。

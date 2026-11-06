@@ -26,12 +26,20 @@ enforced: the working tree is snapshotted before and after your run, and any tra
 during your run fails the whole round closed (nothing gets filed).
 
 WHAT YOU ARE GIVEN (the `readings` JSON — treat it as arithmetic, NOT as a verdict):
-⚠️ The full `readings` JSON is NOT inlined in this prompt. It is written to disk before you run, and
-its absolute path is printed under `readings file:` below (along with a short `readings digest:`).
-Read that file (with the `Read` tool) whenever you need any specific number; the list below describes
-its shape. The readings remain the ONLY measurements — never replace one with a count you derived
-yourself. If the `readings file:` path is missing or the file cannot be read, say so in your output
-and treat that dimension as unreadable, ⛔ do NOT fabricate a reading.
+⚠️ The full `readings` JSON is NOT inlined in this prompt. It is written to disk before you run, SPLIT
+into part files so that every one of them stays under the `Read` tool's 256KB per-file cap (the single
+whole-readings file is routinely larger than that cap, which is exactly why it is never the path you are
+told to read). The prompt prints a small `readings manifest:` file plus the `readings part files:` list,
+along with a short `readings digest:`.
+Read the manifest first: it names each part and the readings paths (`carries`) that part holds. Then
+Read ONLY the part(s) carrying the path you need — e.g. one `criteria[i..j]` slice, or
+`actionRecordFailures.aggregates[i..j]`. Each part is a list of `shards`; rebuild a path from its shards
+as the part's own `note` says: kind `array` shards place their items starting at `range[0]` (a gap means
+those items were sharded individually under their own `path[i]…` entries), kind `string` shards join
+substrings in `range` order, and `range: null` is already the complete value. The list below describes
+the shape of the readings. The readings remain the ONLY measurements — never replace one with a count
+you derived yourself. If the `readings manifest:` path is missing, or a part cannot be read, say so in
+your output and treat that dimension as unreadable, ⛔ do NOT fabricate a reading.
 - `goals`: each ACTIVE goal record (id, title, status).
 - `criteria`: every AC belonging to those goals, each with its declared `criterion` (a runnable shell
   command), its record `status`, and the `verdict`/`reason` from ACTUALLY RUNNING that criterion this

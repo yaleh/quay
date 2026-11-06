@@ -36,6 +36,13 @@ import {
   buildProbePrompt,
   readingsDigest,
   META_DRIVER_READINGS_REL,
+  META_DRIVER_READINGS_MANIFEST_REL,
+  META_DRIVER_READINGS_PARTS_REL,
+  READ_TOOL_MAX_BYTES,
+  READINGS_PART_BUDGET_BYTES,
+  shardReadings,
+  packReadingsParts,
+  writeReadingsParts,
   collectSyncHealth,
   stripEvidenceTimestamp,
   settleEvidenceWrites,
@@ -1893,6 +1900,44 @@ function largeReadings(n = 1500) {
   };
 }
 
+/** prompt 里被点名、且**真实存在**的读数文件——与 gap-meta-buildprobeprompt 的 AC 同一条提取谓词：
+ *  按空白切词、去掉行尾逗号/分号、只保留以 `/` 开头的真实文件（硬规则 2：复用一个谓词，不各写一份）。 */
+function namedReadingsFiles(prompt) {
+  return [...new Set(prompt.split(/\s+/).map((t) => t.replace(/[,;]+$/, '')).filter((t) => t.startsWith('/')))]
+    .filter((p) => { try { return fs.statSync(p).isFile(); } catch { return false; } });
+}
+
+/** 按 part 文件自带的 `note` 语义重建 readings：数组切片按 `range[0]` 落位（连续区间即拼接）、
+ *  字符串切片按 `range` 升序拼接、`range: null` 即完整值。用例用它证明「切片合起来仍是完整读数」。 */
+function rebuildFromParts(partFiles) {
+  const shards = partFiles.flatMap((f) => JSON.parse(fs.readFileSync(f, 'utf8')).shards);
+  const byPath = new Map();
+  for (const s of shards) {
+    if (s.range === null) { byPath.set(s.path, s.value); continue; }
+    const prev = byPath.get(s.path);
+    if (s.kind === 'array') {
+      const arr = prev ?? new Array(s.total).fill(undefined);
+      s.value.forEach((v, i) => { arr[s.range[0] + i] = v; });
+      byPath.set(s.path, arr);
+    } else {
+      byPath.set(s.path, (prev ?? '') + s.value);
+    }
+  }
+  const out = {};
+  const depth = (p) => p.split(/[.[]/).filter(Boolean).length;
+  // 由浅到深落位：数组切片先建容器，再填 `path[i].field` 这类个体切片。
+  for (const [p, value] of [...byPath.entries()].sort((a, b) => depth(a[0]) - depth(b[0]))) {
+    const segs = p.replace(/\[(\d+)\]/g, '.$1').split('.');
+    let cur = out;
+    for (let i = 0; i < segs.length - 1; i += 1) {
+      if (cur[segs[i]] === undefined) cur[segs[i]] = /^\d+$/.test(segs[i + 1]) ? [] : {};
+      cur = cur[segs[i]];
+    }
+    cur[segs[segs.length - 1]] = value;
+  }
+  return out;
+}
+
 test('buildProbePrompt: 大 readings 只落盘路径+摘要，prompt 不再内联全量 JSON（AC1/AC3/DoD）', () => {
   const readings = largeReadings();
   const fullJson = JSON.stringify(readings);
@@ -1904,7 +1949,7 @@ test('buildProbePrompt: 大 readings 只落盘路径+摘要，prompt 不再内�
   assert.ok(!p.includes(readings.criteria[0].reason.slice(0, 40)), 'prompt 不得再内联长 reason 文本');
   assert.ok(!p.includes('"verdict"'), 'prompt 不得再内联 readings 的 JSON 结构');
   // AC3：prompt 只有路径 + 摘要。
-  assert.ok(p.includes('readings file:'), 'prompt 必须给出落盘路径');
+  assert.ok(p.includes('readings manifest:'), 'prompt 必须给出切片清单路径');
   assert.ok(p.includes('readings digest:'), 'prompt 必须给出机械摘要');
   // AC1：较基线（= 旧 prompt 的 readings JSON 部分）下降 ≥80%，且 <50KB（取更严者）。
   const reduction = 1 - p.length / fullJson.length;
@@ -1917,12 +1962,103 @@ test('buildProbePrompt: 大 readings 只落盘路径+摘要，prompt 不再内�
   fs.rmSync(root, { recursive: true, force: true });
 });
 
+// gap-meta-buildprobeprompt —— 缺陷本体：单文件实测 753,799 B > Read 工具的 262,144 B 上限，
+// 于是 prompt 里那句「Read that file」在**需要数字的那一轮**机械不可读。修法不是内联、也不是少给
+// 读数，而是把它切成一组每片都读得到的文件，合起来仍是同一份 readings。
+test('gap-meta-buildprobeprompt AC: prompt 点名的读数文件都存在/都 < 256KB/合起来带全量读数', () => {
+  const criteria = Array.from({ length: 1200 }, (_, i) => ({
+    id: `AC-${i}`, title: 'SENTINEL-READINGS-MARKER', goal: 'GOAL-000', status: 'achieved',
+    criterion: 'true', verdict: 'pass', reason: 'x'.repeat(600), cause: null, supersedes: [], supersededBy: [],
+  }));
+  const readings = {
+    goals: [{ id: 'GOAL-000', title: 't', status: 'active' }], criteria, divergences: [], drivers: [],
+    syncHealth: { lastEvent: 'none', lastDocToDevelop: 'ok' }, metaRecords: [], inertCheckers: [],
+    timeSeries: [], actionRecordFailures: { state: 'none', aggregates: [] }, parking: {}, focus: null,
+  };
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'mdr-'));
+  const prompt = buildProbePrompt('objective', readings, { root });
+  const named = namedReadingsFiles(prompt);
+  assert.ok(named.length >= 1, 'prompt 必须点名至少一个真实存在的读数文件');
+  assert.ok(named.map((f) => fs.readFileSync(f, 'utf8')).join('\n').includes('SENTINEL-READINGS-MARKER'),
+    '被点名的文件必须真的带读数内容（⛔ 不是点了个空壳）');
+  const over = named.filter((f) => fs.statSync(f).size >= 262144);
+  assert.deepEqual(over.map((f) => `${f} ${fs.statSync(f).size}`), [],
+    'prompt ⛔ 不得点名超过 Read 工具 256KB 上限的文件');
+  // 点名的文件**合起来仍是完整 readings**（⛔ 不是靠丢字段把文件变小）。
+  const manifest = JSON.parse(fs.readFileSync(path.join(root, META_DRIVER_READINGS_MANIFEST_REL), 'utf8'));
+  assert.deepEqual(rebuildFromParts(manifest.parts.map((x) => x.file)), readings, '切片必须能重建完整读数');
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+// 负控制（DoD「判据本身能取假」）：这个夹具下**单文件本身就超上限** ⇒ 若实现退回「点名单文件」，
+// 上面那条 AC 必须红。这里把该臂单独钉住，避免它变成一条永远为真的装饰。
+test('gap-meta-buildprobeprompt 负控制: 同一夹具的单文件超上限 ⇒ 退回点名单文件必被判红', () => {
+  const readings = largeReadings();
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'mdr-neg-'));
+  try {
+    buildProbePrompt('objective', readings, { root });
+    const single = path.join(root, META_DRIVER_READINGS_REL);
+    assert.ok(fs.statSync(single).size >= READ_TOOL_MAX_BYTES,
+      `夹具必须真复现缺陷：单文件 ${fs.statSync(single).size} B 应 ≥ ${READ_TOOL_MAX_BYTES} B`);
+    // 把 prompt 指回单文件 ⇒ 同一条谓词的「超限」臂命中（这就是修复前每轮的形状）。
+    const regressed = namedReadingsFiles(`readings file: ${single}`);
+    assert.equal(regressed.filter((f) => fs.statSync(f).size >= READ_TOOL_MAX_BYTES).length, 1,
+      '谓词必须能把「点名超限文件」判红，否则 AC 只是装饰');
+    // 而真实 prompt 里那个路径**不得**出现（修复后的形状）。
+    const real = buildProbePrompt('objective', readings, { root });
+    assert.ok(!namedReadingsFiles(real).includes(single), '修复后 prompt ⛔ 不得再点名单文件');
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('buildProbePrompt: 无 root 时不落盘、prompt 明示未持久化（⛔ 不内联兜底）', () => {
   const readings = largeReadings(3);
   const p = buildProbePrompt('OBJECTIVE TEXT', readings);
   assert.ok(p.startsWith('OBJECTIVE TEXT'));
   assert.ok(!p.includes('"AC-0000"'), '无 root 时也不得内联 readings JSON');
   assert.ok(p.includes('(not persisted this round)'), '未落盘必须明示，而不是伪装成落盘了');
+});
+
+// 切片本身的两条性质：①小读数不被无谓地切碎（这条让「切了」与「没必要切」可区分，硬规则 3b）；
+// ②单个超长字符串字段按字符切——否则一个 >预算 的字符串会让整个 part 超 Read 上限。
+test('shardReadings: 小读数 = 单条完整值切片（⛔ 不无谓切碎）；超长字符串按字符切片且逐字可还原', () => {
+  const small = shardReadings({ goals: [{ id: 'GOAL-1' }], focus: null });
+  assert.equal(small.length, 1);
+  assert.deepEqual(small[0], { path: '', kind: 'value', range: null, total: null, value: { goals: [{ id: 'GOAL-1' }], focus: null } });
+
+  const text = 'z'.repeat(300_000);
+  const shards = shardReadings({ focus: text });
+  const stringShards = shards.filter((s) => s.kind === 'string');
+  assert.ok(stringShards.length >= 2, '超长字符串必须被切成多片');
+  assert.equal(stringShards.map((s) => s.value).join(''), text, '按 range 升序拼接必须逐字还原');
+  for (const s of stringShards) {
+    assert.ok(Buffer.byteLength(JSON.stringify(s), 'utf8') < READINGS_PART_BUDGET_BYTES,
+      '单片（含 envelope）必须 < part 预算');
+  }
+  for (const group of packReadingsParts(shards)) {
+    assert.ok(Buffer.byteLength(JSON.stringify({ part: 999, of: 999, note: '', shards: group }, null, 2), 'utf8') < READINGS_PART_BUDGET_BYTES,
+      '打包后的每个 part 必须 < 预算（那是 Read 上限的一半）');
+  }
+});
+
+// 上一轮切出的 part 文件数与本轮不同 ⇒ 必须整目录重建：残留的 part-NNN 会让按 manifest 读的 probe
+// 读到过期切片（硬规则 3b：读到的必须是本轮读数，⛔ 不是上一轮的）。
+test('writeReadingsParts: 整目录重建，上一轮多出来的 part 不残留', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'mdr-parts-'));
+  try {
+    const big = writeReadingsParts(root, largeReadings());
+    assert.ok(big.partCount > 1, '大读数必须切出多片');
+    const dir = path.join(root, META_DRIVER_READINGS_PARTS_REL);
+    assert.ok(fs.readdirSync(dir).length > 2);
+    const small = writeReadingsParts(root, largeReadings(2));
+    const files = fs.readdirSync(dir).sort();
+    assert.deepEqual(files, [...small.parts.map((p) => path.basename(p.file)), 'manifest.json'].sort(),
+      '目录里只允许存在本轮 manifest 与它点名的 part');
+    for (const p of small.parts) assert.ok(p.bytes <= READINGS_PART_BUDGET_BYTES);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
 });
 
 // AC2：parseProbeOutput 输出形状与改动前同构（parity 测试——probe 瘦身后解析面不受影响）。
