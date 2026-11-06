@@ -1278,7 +1278,7 @@
     "codex-mcp-sync.sh": "负控制失效：dist 缺/空或 kernel anchor 缺失时脚本仍 exit 0（--install-only 只装不重写 .mcp.json）",
     "sha256.ts": "失效前提：sha256.ts 仍是这些调用者做 sha256 哈希时的唯一实现（它们 import 本模块的 sha256OfString / sha256OfBuffer）；若某个调用者改回自己手搓一份 createHash(\"sha256\") 副本、或这些原语被上收到别的包，本条退休",
     "dist-stats.ts": "失效前提：仍有多个消费者需要同一个 NOT-EVALUATED-string 的 dist/percentile（duration-report.ts / fan-in-queueing-model.ts 均 import 并 re-export 本模块），且空样本仍须与「测到的 0」可区分（NOT-EVALUATED ≠ 0）；若 dist 只剩一个消费者、或该统计量整体退役 ⇒ 本条退休",
-    "conflict-resolution-rules.ts": "失效前提：fan-in 的 merge develop 冲突仍按 (3)/(4)/(5) 规则消解，且这些规则仍被 worker-driver.ts 的 continueConflictResolutionNote 委托给本模块的 --resolve；若冲突消解协议改写、或这些规则迁回 driver 原生执行，本条随迁"
+    "conflict-resolution-rules.ts": "失效前提：fan-in 的 merge develop 冲突仍按 (3)/(4)/(5) 规则消解，且这些规则的可执行承接仍是本模块 + 行为测试（契约检查，⛔ 不靠 prompt 字符串——worker-driver.ts 的 prompt 保持原样以守住 gap-worker-prompt-note-family-slimming 的 25% 基线）；若冲突消解协议改写、或这些规则迁回 driver 原生执行，本条随迁"
   },
   "LAST_REAFFIRMED": {
     "resolve-quay-cli.ts": "2026-10-26",
