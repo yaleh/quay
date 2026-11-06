@@ -128,10 +128,15 @@ export function createGoalChecks(d: GoalCheckDeps) {
     return { fresh, stale, notEvaluated, divergent, scopeSize, evaluated: scopeSize > 0, cap, staleMs };
   }
 
-  // I5 checker (check --achieved-failing). An AC `status: achieved` whose `criterion` now exits
-  // non-zero ⇒ "achieved but no longer verifiable". SEPARATE from I4 (⛔ never merged): I4 is
+  // I5 checker (check --achieved-failing). An AC `status: achieved` whose `criterion` now FAILS
+  // (a real non-zero verdict, i.e. `verdictFromAcceptance` said `fail`) ⇒ "achieved but no longer
+  // verifiable". SEPARATE from I4 (⛔ never merged): I4 is
   // "active yet achieved" (GOAL ids, direction "not closed"), I5 is "achieved yet failing" (AC ids,
   // direction "no longer verifiable"). Produced ONLY by RUNNING the criterion — never a stored field.
+  // ⛔ "exited non-zero" is NOT the same as "fail": timeout / spawn failure / not-runnable / a
+  // criterion that DECLARES `exit 3` are all `not-evaluated` and land in their OWN bucket
+  // (`achievedNotEvaluated`), ⛔ never in `achievedButFailing` — the goal driver turns the latter into
+  // a filed standing gap, so folding them there files a phantom gap every round.
   // Scope: achieved ACs under ACTIVE goals ∪ achieved ACs with `long-term: true` (AC-216 — a
   // long-term AC stays in the reverify scope after its GOAL is achieved/closed). Empty/missing
   // criterion is SKIPPED: that is the separate `no-criterion` kind meta-driver reports, not "a
@@ -147,7 +152,7 @@ export function createGoalChecks(d: GoalCheckDeps) {
   // `check --staleness` is pure-read) means the 8 real achieved criteria that call
   // `check --staleness`/`list`/`get` never even reach this path; 乙 is defense-in-depth for a
   // future criterion that calls the criterion-runner itself.
-  function checkAchievedFailing(): { achievedButFailing: string[]; capabilityRefused: Array<{ id: string; code: string; reason: string }>; evaluated: boolean; scopeSize: number; inScope: string[] } {
+  function checkAchievedFailing(): { achievedButFailing: string[]; achievedNotEvaluated: Array<{ id: string; cause: string; reason: string }>; capabilityRefused: Array<{ id: string; code: string; reason: string }>; evaluated: boolean; scopeSize: number; inScope: string[] } {
     // Enumerate the in-scope set FIRST (pure-read — no criterion runs): achieved ACs under ACTIVE
     // goals with a non-empty criterion. `scopeSize` is that count, and it is what makes "empty
     // scope" (0 active goals / 0 achieved ACs under them) field-distinguishable from "ran N criteria
@@ -176,9 +181,17 @@ export function createGoalChecks(d: GoalCheckDeps) {
       // `evaluated: false` is the refusal — ⛔ and `capabilityRefused: []` here means "nothing was
       // judged", NOT "nothing was refused": the two readings are separated by `evaluated`, which is
       // exactly why the guard reports it rather than returning an empty-shaped result (hard rule 3b).
-      return { achievedButFailing: [], capabilityRefused: [], evaluated: false, scopeSize, inScope: inScopeIds };
+      return { achievedButFailing: [], achievedNotEvaluated: [], capabilityRefused: [], evaluated: false, scopeSize, inScope: inScopeIds };
     }
     const achievedButFailing: string[] = [];
+    // ⛔ THE THIRD BUCKET (gap-goal-achieved-failing-folds-not-evaluated-into-red). A criterion that
+    // TIMED OUT / could not be spawned / was not runnable / DECLARED `exit 3` never said "this is
+    // false" — it said "we could not measure this". Folding it into `achievedButFailing` asserts
+    // something about a criterion nobody evaluated, and (worse) the goal driver turns that bucket
+    // into `standingFailing`, i.e. a PHANTOM GAP filed every round. The mapping already exists —
+    // `verdictFromAcceptance` — and this path was the one consumer importing it without calling it.
+    // Same shape as `capabilityRefused` below: an independent, enumerated bucket.
+    const achievedNotEvaluated: Array<{ id: string; cause: string; reason: string }> = [];
     // The criteria this guard REFUSED to spawn — enumerated, ⛔ never folded into
     // `achievedButFailing`: "we would not run it" is a different fact from "we ran it and it is
     // false", and collapsing them would assert something about a criterion nobody executed
@@ -209,13 +222,21 @@ export function createGoalChecks(d: GoalCheckDeps) {
           continue;
         }
         const res = runAcceptance({ command: criterion, cwd, timeoutMs: t.timeoutMs, timeoutKnob: timeoutKnobHint(t) });
-        if (!res.ok) achievedButFailing.push(String(ac.id));
+        // THREE-STATE dispatch (⛔ never `if (!res.ok)`): `fail` is the only outcome that asserts the
+        // criterion is false. `not-evaluated` gets its own bucket carrying the CAUSE, so a timeout
+        // (raise the deadline) reads differently from a spawn failure (fix the host) or a self-declared
+        // `exit 3` (the criterion says "not measurable here"). `pass` lands in neither.
+        const verdict = verdictFromAcceptance(res);
+        if (verdict.verdict === "fail") achievedButFailing.push(String(ac.id));
+        else if (verdict.verdict === "not-evaluated") {
+          achievedNotEvaluated.push({ id: String(ac.id), cause: String(verdict.cause), reason: verdict.reason });
+        }
       }
     } finally {
       if (prev === undefined) delete process.env[GOAL_ACCEPTANCE_ACTIVE_ENV];
       else process.env[GOAL_ACCEPTANCE_ACTIVE_ENV] = prev;
     }
-    return { achievedButFailing, capabilityRefused, evaluated: scopeSize > 0, scopeSize, inScope: inScopeIds };
+    return { achievedButFailing, achievedNotEvaluated, capabilityRefused, evaluated: scopeSize > 0, scopeSize, inScope: inScopeIds };
   }
 
   // AC1/AC4 reading (gap-closed-goal-acs-leave-reverify-scope-standing-invariants-undeclared): the
