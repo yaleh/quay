@@ -111,6 +111,10 @@ fb7ac1841 tasks: gap-needs-human-park-overwritten-by-inflight-worker task_write 
 
 **AC5 — no regression.** `node --test` per file: `plugin/test/driver-filters.test.mjs` ⇒ 93 tests, pass 93, fail 0; `plugin/test/worker-driver.test.mjs` ⇒ 154 tests, pass 154, fail 0; `packages/quay-native/test/cas-write.test.mjs` ⇒ pass 1, fail 0. `bash scripts/test.sh --for-task gap-needs-human-park-overwritten-by-inflight-worker --allow-thin` ⇒ exit 0 (scoped gate recorded through `--write-scoped-gate-cache`).
 
+**Two incidental defects the scoped gate forced (same branch, commit `642c112fe` + this one).** Both were found BY the gate, not by me, and both are prerequisites for this task to land at all:
+1. `packages/quay-native/test/cas-write.test.mjs` kept its fixture at `<test dir>/.tmp-cas-test` — an entry created/deleted INSIDE the checked-in tree, which `checked-in-write-check.ts` judges (and the store resolved that path's git root, so every run appended to the live `.quay/task-status-events.jsonl`). Fixed: `os.tmpdir()` + `mkdtempSync`. Checker after: `PASS: no checked-in-tree writes: 114 write-verb call(s) across 2 executed input(s), 0 inside the tree`.
+2. `plugin/scripts/canonical-test-files.ts` realpath'd each test FILE but relativized against the caller's spelling of the ROOT. `/home/yale` is a symlink to `/data/home/yale`, so in a linked task worktree (the documented location) every path came back as `../../../../../data/home/...` — matching no baseline entry, so `test-isolation-check` reported all 21 entries as BOTH "current with no entry" AND "stale" and reddened fail-closed for every test-touching task in a worktree. Fixed: realpath the root too (the mirror of what the loop already does per file). The fix made one baseline entry genuinely stale, removed per the shrink-only rule (`plugin/test-isolation-violations.txt`, ceiling `# baseline-count: 51` unchanged). Checker after: `PASS: all 20 violation(s) are baselined … no stale entries`.
+
 **ADR-007 dark-axis record.**
 - L_D archguard: cycles=0 (package granularity, maxScc=1; 6178 entities / 15100 relations; head 33a2e19e0)
 - L_G archguard: new-dependency-edges=0 (the change adds one pure function + its call site inside an existing file; no new module, no new import edge)
@@ -122,6 +126,8 @@ fb7ac1841 tasks: gap-needs-human-park-overwritten-by-inflight-worker task_write 
 - plugin/scripts/worker-driver.ts（在飞 worker 侧的写回/派发路径）
 - plugin/scripts/driver-filters.ts（`markNeedsHuman` 与 `notNeedsHuman` 谓词）
 - plugin/scripts/promotion-driver.ts（同轮晋升判定）
+- plugin/scripts/canonical-test-files.ts（scoped 门逼出的前置修复：root 也 realpath，linked worktree 下路径不再错位）
+- plugin/test-isolation-violations.txt（上述修复使一条 baseline 条目变 STALE，按 shrink-only 删除）
 - plugin/test/driver-filters.test.mjs
 - plugin/test/worker-driver.test.mjs
 - plugin/test/needs-human-park-durability.test.mjs（新增：AC3 同轮晋升判定 + 取假对照）
