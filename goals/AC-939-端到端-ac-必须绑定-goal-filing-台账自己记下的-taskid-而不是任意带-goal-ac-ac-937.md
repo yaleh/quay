@@ -1,7 +1,7 @@
 ---
 id: AC-939
 title: "端到端 AC 必须绑定 goal-filing 台账自己记下的 taskId，而不是任意带 goal_ac: AC-937 的任务"
-status: active
+status: achieved
 kind: criterion
 goal: GOAL-914
 criterion: node -e "const fs=require('fs');const
@@ -36,6 +36,11 @@ statusLog:
     to: active
     actor: goal-driver
     reason: "triage: activate"
+  - at: 2026-11-06T17:22:13.844Z
+    from: active
+    to: achieved
+    actor: goal-driver
+    reason: "I2: criterion pass"
 supersedes:
   - AC-937
 fidelity:
