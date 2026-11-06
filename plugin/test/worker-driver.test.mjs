@@ -178,7 +178,7 @@ import {
 import { recordGoalMergeRequest } from "../../packages/quay/src/goal-merge.ts";
 // gap-goal-merge-execution-writes-no-step-trace：判别键从【写手】取（⛔ 不在测试里重打一份字面量——
 // 改了写手的取值而测试仍绿，测的就是一个不存在的形态）。
-import { GOAL_MERGE_TRACE_KIND, GOAL_UNMERGED_GAP_KIND } from "../scripts/worker-fan-in.ts";
+import { GOAL_MERGE_TRACE_KIND, GOAL_UNMERGED_GAP_KIND, parseNotEvaluatedCheckers } from "../scripts/worker-fan-in.ts";
 import { defaultLaneCount } from "../scripts/full-suite-runner.ts";
 import { spawnSuiteAndWait } from "../scripts/suite-driver.ts";
 import { suiteLockBase, suiteLockSlotPaths } from "../scripts/suite-lock-slots.ts";
@@ -625,6 +625,56 @@ test("D7 — mirrorMechanicalFanInSuiteState writes full-suite-state.json (finis
   });
   const still = JSON.parse(fs.readFileSync(stateFile, "utf8"));
   assert.equal(still.state, "running", "D7: in-flight full-suite state (finishedAt null) is NOT clobbered");
+});
+
+// gap-meta-extractnotevaluatedchecker — 机械 fan-in 的镜像载体必须带 `notEvaluatedCheckers` 这一维，
+// 且「未测量」⛔ 不得伪装成「测得零」：不传 = 字段缺席（且不覆盖一个已经带这一维的载体）；传 [] =
+// 明确测得零；传具名 = 逐名。三态的最后两态由 parseNotEvaluatedCheckers（复用 runner 的解析器）产出。
+test("gap-meta-extractnotevaluatedchecker — 镜像载体带惰性守卫这一维；未测量不覆盖更完整的载体", (t) => {
+  const root = makeRoot("inert-mirror");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const stateFile = path.join(root, ".quay", "full-suite-state.json");
+  const opts = (extra) => ({
+    task: "gap-inert", runId: "mf-run-inert", commit: "1".repeat(40),
+    startedAt: "2026-09-01T00:00:00.000Z", finishedAt: "2026-09-01T00:01:00.000Z", durationMs: 60000,
+    stateFile, ...extra,
+  });
+
+  // ① parseNotEvaluatedCheckers 复用 runner 的解析器（⛔ 不另造正则）。
+  const log = [
+    "[full-suite-runner] SUITE-RUN-START ts=… runId=x",
+    "STATIC_CHECK_NOT_EVALUATED: direct-to-develop-bypass-check",
+    "STATIC_CHECK_FAILED: threshold-scope-check exit=1",
+    "not ok 1 - boom",
+  ].join("\n");
+  assert.deepEqual(parseNotEvaluatedCheckers(log).map((c) => c.name), ["direct-to-develop-bypass-check"],
+    "只认 NOT-EVALUATED 行：fail-closed 行与测试失败行都不是惰性守卫");
+  assert.deepEqual(parseNotEvaluatedCheckers(""), [], "空日志 ⇒ 空数组（调用方读得到 ⇒ 测得零）");
+
+  // ② 测得零 ⇒ 载体里是 []（present）+ meta-driver 读到 evaluated:true/names:[]。
+  mirrorMechanicalFanInSuiteState(opts({ notEvaluatedCheckers: parseNotEvaluatedCheckers(log.replace(/^STATIC_CHECK_NOT_EVALUATED:.*$/m, "")) }));
+  const measuredZero = JSON.parse(fs.readFileSync(stateFile, "utf8"));
+  assert.deepEqual(measuredZero.notEvaluatedCheckers, [], "测得零 ⇒ 空数组（⛔ 不是字段缺席）");
+
+  // ③ 具名 ⇒ 逐名落进载体。
+  mirrorMechanicalFanInSuiteState(opts({ notEvaluatedCheckers: parseNotEvaluatedCheckers(log) }));
+  const named = JSON.parse(fs.readFileSync(stateFile, "utf8"));
+  assert.deepEqual(named.notEvaluatedCheckers.map((c) => c.name), ["direct-to-develop-bypass-check"],
+    "惰性守卫的名字必须落进镜像载体（旧行为：整维丢失 ⇒ meta-driver 读数恒为未测量）");
+
+  // ④ 未测量（不传）而盘上已带该维 ⇒ 不覆盖（⛔ 不用缺维度记录顶掉更完整的记录）。
+  mirrorMechanicalFanInSuiteState(opts({}));
+  const kept = JSON.parse(fs.readFileSync(stateFile, "utf8"));
+  assert.deepEqual(kept.notEvaluatedCheckers.map((c) => c.name), ["direct-to-develop-bypass-check"],
+    "未测量 ⛔ 不得抹掉既有载体上的这一维");
+
+  // ⑤ 未测量且盘上没有该维 ⇒ 照常写（字段缺席，⛔ 不写 [] 冒充测得零）。
+  fs.writeFileSync(stateFile, JSON.stringify({ state: "green", finishedAt: 1 }), "utf8");
+  mirrorMechanicalFanInSuiteState(opts({}));
+  const unmeasured = JSON.parse(fs.readFileSync(stateFile, "utf8"));
+  assert.equal(unmeasured.taskId, "gap-inert", "镜像照常写（best-effort 姿态不变）");
+  assert.equal("notEvaluatedCheckers" in unmeasured, false,
+    "未测量 ⇒ 字段缺席：meta-driver 据此报 evaluated:false（⛔ 不是「查过、零个」）");
 });
 
 test("computeOutcome — non-zero ⇒ failed; signal ⇒ killed; timedOut ⇒ timed-out (AC3 终态/失败原因)", () => {

@@ -217,6 +217,23 @@ export interface Divergence {
   lastRecommendation?: string | null;
 }
 
+/** 【惰性守卫读数】三态（硬规则 3b）。⛔ 不是 `string[]`。
+ *
+ *  缺陷本体（gap-meta-extractnotevaluatedchecker）：`full-suite-state.json` 有两个写者而形状不同——
+ *  full-suite-runner 的终态**总是**带 `notEvaluatedCheckers`（空数组 = 「本轮没有惰性守卫」），
+ *  而机械 fan-in 的镜像写（mirrorMechanicalFanInSuiteState）此前【不带】这一维。旧实现把「字段缺失」
+ *  与「空数组」都返回 `[]` ⇒ `readings.inertCheckers=[]` 既可读作「查过，一个都没有」，也可读作
+ *  「这个维度根本没被记录」——后者是**未测量**，与「一切正常」同形。
+ *  ⇒ 独立取值：`evaluated:false` + `names:[]` + 非空 `cause`，⛔ 不与测得为零共用输出。 */
+export interface InertCheckersReading {
+  /** true = 载体的 `notEvaluatedCheckers` **被读到**（哪怕它是空数组）；false = 这一维没被测到。 */
+  evaluated: boolean;
+  /** 惰性守卫的名字（保序）。`evaluated:true` 且 `names:[]` = 「查过，本轮一个都没有」。 */
+  names: string[];
+  /** `evaluated:false` 时的机器 token（缺失/读不出/维度未记录）；`evaluated:true` 时恒为 null。 */
+  cause: "carrier-absent-or-unreadable" | "dimension-missing" | null;
+}
+
 /** 一轮的完整读数（喂给语义半的输入，也是载体里那条记录的值面）。 */
 export interface MetaRoundReadings {
   goals: Array<{ id: string; title: string | null; status: string }>;
@@ -234,9 +251,9 @@ export interface MetaRoundReadings {
   /** gap-not-evaluated-checkers-never-persisted — the suite's INERT checkers (which run_static_checks
    *   checker "读不懂输入" this round, i.e. exited 3 = NOT-EVALUATED), enumerated by NAME (⛔ 不是计数 —
    *   SPEC §5.3: a bare scalar gates nothing; enumerate the names so the semantic half can name which
-   *   guard went inert). Read from full-suite-state.json's `notEvaluatedCheckers`. Empty array = "no
-   *   inert checker this round" (distinguishable from a missing dimension). */
-  inertCheckers: string[];
+   *   guard went inert). Read from full-suite-state.json's `notEvaluatedCheckers`. 三态见
+   *   `InertCheckersReading`：⛔ 「维度缺失（未测量）」不再伪装成「空数组（查过、一个都没有）」。 */
+  inertCheckers: InertCheckersReading;
   focus: string | null;
   /** 【时序派生层】跨轮派生量（streak）——⛔ 快照量里都不存在「连续 N 轮空转」这个信息
    *  （gap-meta-readings-no-timeseries-derivation）。count 每轮变 ⇒ ⛔ 不进 digest（进了会让摘要
@@ -1858,21 +1875,33 @@ export function collectSyncHealth(root: string, window = 200): SyncHealth {
 // gap-not-evaluated-checkers-never-persisted — 惰性守卫采集：从本轮 full-suite-state.json 提取
 // `notEvaluatedCheckers`（checker-cost-lib exit 3 = NOT-EVALUATED，非红非绿）逐条枚举名字。⛔ 不是
 // 计数——SPEC §5.3「原始工具输出的裸标量不得单独 gate 流水线；不枚举环/不给文件/不给修法，零指引
-// 价值」。取不到（state 缺失/还在 running/字段不存在）⇒ 空数组（⛔ 不是 undefined——「本轮没有未评估
-// 项」与「本轮没记录这个维度」必须可区分，硬规则 3b，与 full-suite-runner 侧 AC2 同形）。
-export function collectInertCheckers(root: string): string[] {
+// 价值」。
+//
+// gap-meta-extractnotevaluatedchecker — **三态**（硬规则 3b）：旧实现把「字段缺失」与「空数组」都返回
+// `[]`，于是生产上机械 fan-in 的镜像载体（不带该字段）让 readings 恒为 `[]` —— 那是**未测量**，却被
+// 读成「查过，一个惰性守卫都没有」。现在：
+//   载体读不出 / 不存在     ⇒ {evaluated:false, names:[], cause:"carrier-absent-or-unreadable"}
+//   字段缺失（维度没记录）  ⇒ {evaluated:false, names:[], cause:"dimension-missing"}
+//   字段是数组（含空数组）  ⇒ {evaluated:true,  names:[...], cause:null}
+export function collectInertCheckers(root: string): InertCheckersReading {
   const file = path.join(root, ".quay", "full-suite-state.json");
   let j: unknown;
-  try { j = JSON.parse(fs.readFileSync(file, "utf8")); } catch { return []; }
+  try { j = JSON.parse(fs.readFileSync(file, "utf8")); } catch {
+    // 载体不存在/不可解析 ⇒ 这一轮**没测到**（⛔ 不是「没有惰性守卫」）。
+    return { evaluated: false, names: [], cause: "carrier-absent-or-unreadable" };
+  }
   const arr = (j as { notEvaluatedCheckers?: unknown })?.notEvaluatedCheckers;
-  if (!Array.isArray(arr)) return [];
+  if (!Array.isArray(arr)) {
+    // 载体在、但这一维没被记录（`running` 态、或**镜像写**的缺维度载体）⇒ 未测量，⛔ 不是零。
+    return { evaluated: false, names: [], cause: "dimension-missing" };
+  }
   const out: string[] = [];
   for (const c of arr) {
     if (c && typeof (c as { name?: unknown }).name === "string" && ((c as { name: string }).name)) {
       out.push((c as { name: string }).name);
     }
   }
-  return out;
+  return { evaluated: true, names: out, cause: null };
 }
 
 // ── 停放读数（gap-meta-scanparkingboard）─────────────────────────────────────────────────────────
@@ -2286,7 +2315,11 @@ export function readingsDigest(readings: MetaRoundReadings): string {
     ...readings.metaRecords.map((m) => `meta:${m.id}:${m.status}`).sort(),
     // gap-not-evaluated-checkers-never-persisted — 惰性守卫的名字必须进摘要（⛔ 只进计数会让新出现的
     // 惰性守卫不改变摘要 ⇒ 语义半永不被唤醒；逐名进，某个 guard 从在→不在/不在→在都改变摘要）。
-    ...readings.inertCheckers.map((n) => `inert:${n}`).sort(),
+    // gap-meta-extractnotevaluatedchecker — **未测量**用独立 token（⛔ 不与「空数组=查过零个」同形）：
+    // 否则从「未测量」变成「测得零个」这种结论变更在摘要里不可见，语义半不会被唤醒去读它。
+    ...(readings.inertCheckers.evaluated
+      ? readings.inertCheckers.names.map((n) => `inert:${n}`)
+      : ["inert:not-evaluated"]).sort(),
     // 时序派生信号：只进「是否越阈」的位（⛔ 不进 count——count 每轮 +1，进了摘要恒变、闸失效；
     //  同 drivers 只取 running 位、divergences 不取 repeatCount 的纪律）。evaluated=false 单列 token
     //  "u"（⛔ 不与 crossed=false 同形，硬规则 3b）。⛔ `skippedAbortedRounds` 与 `value` 同理不进：

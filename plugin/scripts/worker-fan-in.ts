@@ -71,7 +71,8 @@ import { normalizeRel } from "./gate-script-base.ts";
 import { computeDocCheckFaceKey, readDocCheckCache, writeDocCheckCache, readGreenCache, writeGreenCache } from "./doc-check-cache.ts";
 import type { GreenCacheEntry } from "./doc-check-cache.ts";
 import { buildMirrorState, writeMirrorState, shouldSkipMirrorWrite, readCurrentState } from "./mirror-full-suite-state.ts";
-import { defaultLaneCount, readLoadAvg, passedFileSet } from "./full-suite-runner.ts";
+import { defaultLaneCount, readLoadAvg, passedFileSet, extractNotEvaluatedChecker } from "./full-suite-runner.ts";
+import type { NotEvaluatedChecker } from "./full-suite-runner-types.ts";
 import { SUITE_LOG_NOT_RUN_PREFIX, SUITE_LOG_RUN_START_PREFIX, SUITE_LOG_INCOMPLETE_PREFIX, SUITE_LOG_PLAN_PREFIX } from "./full-suite-runner.ts";
 import { buildPreVerifiedRoundRecord, appendPreVerifiedRound } from "./pre-verified-round-record.ts";
 import { splitTaskFile, statusFromFrontmatter, patchStatusField, commitTaskFile } from "./task-ops.ts";
@@ -3765,11 +3766,19 @@ export async function runMechanicalFanIn(opts: MechanicalFanInOptions): Promise<
       // 「suite red」，二者与「真跑且真红」措辞不可分 —— 硬规则 3b）。⛔ 顺序不可颠倒：拒绝行对
       // isFailureSignalLine 是噪声（它不是一条测试失败），只有下面的拒绝分支能认出它。
       let suiteLogText = "";
+      // gap-meta-extractnotevaluatedchecker — 这份日志**无条件**读（绿轮也要）：惰性守卫
+      // `STATIC_CHECK_NOT_EVALUATED:` 只存在于日志里，而本文件第 7.5 步的镜像写会覆盖 runner 自己写的
+      // 终态 ⇒ 镜像必须自己测到这一维（否则载体被降级成缺维度，meta-driver 的读数恒为「未测量」）。
+      // 三态：读不出/0 字节 ⇒ 未测量（⛔ 不用 `""` 冒充「读了、一个惰性守卫都没有」）。
+      let suiteLogReadable = false;
+      try {
+        suiteLogText = fs.readFileSync(suiteLogFile, "utf8");
+        suiteLogReadable = suiteLogText.length > 0;
+      } catch { /* 日志缺失 ⇒ 未测量；下面 refusal/firstFailure 的既有回退逐字不变 */ }
+      // 认证的恢复轮是**被记录的那一轮**（AC11）⇒ 惰性守卫也必须取它自己的日志，⛔ 不取原轮的。
+      let certifiedLogText: string | null = null;
       let refusalLine: string | null = null;
       if (sr.outcome !== "done") {
-        try {
-          suiteLogText = fs.readFileSync(suiteLogFile, "utf8");
-        } catch { /* 日志缺失 ⇒ fallback 通用文案 */ }
         refusalLine = extractSuiteNotRunLine(suiteLogText);
       }
       traceSuiteEvent("suite-end", {
@@ -4031,6 +4040,9 @@ export async function runMechanicalFanIn(opts: MechanicalFanInOptions): Promise<
           suitePid = certifiedRun.pid;
           if (exemptReading !== null) baselineEquivalence = exemptReading;
           recoveredCertified = true;
+          // gap-meta-extractnotevaluatedchecker — 被记录的轮次是恢复轮 ⇒ 它的日志才是本轮惰性守卫的
+          // 来源（原轮是 incomplete 的，它的 NOT-EVALUATED 行不代表最终给出的结论那把 suite）。
+          certifiedLogText = recLog.length > 0 ? recLog : null;
           traceSuiteEvent("suite-recovery-accepted", {
             exit: 0, wall_ms: 0, ok: true,
             concurrency: certifiedPlan?.laneCount ?? null,
@@ -4139,10 +4151,18 @@ export async function runMechanicalFanIn(opts: MechanicalFanInOptions): Promise<
       // bucket-run 与 full-run，⛔ 不伪造 full-green；finishedAt 与 mfi.suiteFinishedEpoch 同源 ⇒ 不陈旧）。
       // ⛔ runId 用 perSuiteRunId（非过程 runId）——runner 已用 perSuiteRunId 写 full-suite-state，镜像
       // 必须同键，否则 AC1「state/load/记录三者同键」被镜像最后一写破坏（gap-mechanical-fan-in-per-suite-runid-unified）。
+      // gap-meta-extractnotevaluatedchecker — 镜像必须把**本任务**惰性守卫这一维一起写下去，否则
+      // meta-driver 的 `collectInertCheckers` 在镜像载体上恒为「未测量」（旧行为：字段缺失 → `[]`）。
+      // 来源 = 被记录那一轮的日志：认证的恢复轮优先，其次原轮；日志读不出 ⇒ 不传（未测量，⛔ 不写 `[]`）。
+      const recordedSuiteLog =
+        recoveredCertified && certifiedLogText !== null ? certifiedLogText
+          : suiteLogReadable ? suiteLogText
+            : null;
       mirrorMechanicalFanInSuiteState({
         task, runId: perSuiteRunId, commit: suiteHead,
         startedAt: sr.startedAt, finishedAt: sr.finishedAt, durationMs: sr.durationMs,
         stateFile: suiteStateFile,
+        ...(recordedSuiteLog === null ? {} : { notEvaluatedCheckers: parseNotEvaluatedCheckers(recordedSuiteLog) }),
       });
     } else {
       writeSuiteCapture(suiteCapture, { full_suite_ran: "false", skip_reason: reuseSkip ? "develop-advance-doc-only-reuse" : "doc-only-delta", suite_exit: "0", suite_head: suiteHead });
@@ -4338,6 +4358,23 @@ export async function spawnMechanicalFanIn(opts: MechanicalFanInOptions): Promis
   return red("parse-mechanical-fan-in", `unparseable fresh mechanical fan-in output: ${(r.stderr || r.stdout || "").trim() || `exit ${r.status}`}`, r.status);
 }
 
+/** gap-meta-extractnotevaluatedchecker — 从**本轮** suite 日志里逐行解析惰性守卫
+ *  （`STATIC_CHECK_NOT_EVALUATED: <name>`，checker-cost-lib exit 3）。⛔ 不另造正则：复用
+ *  `full-suite-runner.ts` 的 `extractNotEvaluatedChecker`（它与 runner 终态写者同一个解析器 ⇒ 镜像
+ *  载体与 runner 载体对同一轮不会各说各话，硬规则 5b）。
+ *
+ *  三态由**调用方**表达：日志读得出 ⇒ 传返回值（空数组 = 本轮确实没有惰性守卫）；读不出 ⇒ ⛔ 不调用
+ *  （传 undefined），不要用 `[]` 冒充「测得零」。 */
+export function parseNotEvaluatedCheckers(logText: string): NotEvaluatedChecker[] {
+  const out: NotEvaluatedChecker[] = [];
+  if (typeof logText !== "string" || logText === "") return out;
+  for (const line of logText.split("\n")) {
+    const ne = extractNotEvaluatedChecker(line);
+    if (ne) out.push(ne);
+  }
+  return out;
+}
+
 /** D7：机械 fan-in 的 bucket suite 绿后，把本轮 suite 状态镜像到权威载体 full-suite-state.json。
  *  ⛔ 不伪造 full-green：scope=worktree + taskId + runner=inner 区分 bucket-run（本任务的 --buckets 子集）
  *  与 full-run（scope=main + runner=outer 无 taskId）——读面据此可分辨「退休已修 suite 绿」≠「全量 suite 绿」。
@@ -4378,15 +4415,29 @@ export function mirrorMechanicalFanInSuiteState(opts: {
   finishedAt: string;
   durationMs: number;
   stateFile: string;
+  /** 本轮 suite 日志里的惰性守卫（`STATIC_CHECK_NOT_EVALUATED:`，由 `parseNotEvaluatedCheckers`
+   *  从同一份日志解析）。**三态**（gap-meta-extractnotevaluatedchecker）：
+   *    `[]`          — 日志读到了、本轮一个惰性守卫都没有（**测得零**）；
+   *    `[{name,…}]`  — 逐名（测得非零）；
+   *    `undefined`   — 日志读不出 ⇒ **未测量**，载体里该字段缺席（⛔ 不写 `[]` 冒充「测得零」）。
+   *  ⛔ 缺省不是 `[]`：把「没测到」写成「测到零」正是本任务要消灭的同形。 */
+  notEvaluatedCheckers?: NotEvaluatedChecker[];
 }): void {
   try {
     const built = buildMirrorState({
       state: "green", startedAt: opts.startedAt, finishedAt: opts.finishedAt,
       durationMs: opts.durationMs, laneCount: defaultLaneCount(), commit: opts.commit,
       taskId: opts.task, runId: opts.runId, runner: "inner", scope: "worktree",
+      ...(opts.notEvaluatedCheckers === undefined ? {} : { notEvaluatedCheckers: opts.notEvaluatedCheckers }),
     });
     if (built.error) return;
-    if (shouldSkipMirrorWrite(readCurrentState(opts.stateFile))) return;
+    const current = readCurrentState(opts.stateFile);
+    if (shouldSkipMirrorWrite(current)) return;
+    // gap-meta-extractnotevaluatedchecker — 本轮**读不出**本任务的惰性守卫（未测量）而盘上载体
+    // 已经带着这一维（runner 自己写的完整终态）⇒ 跳过这次覆盖。⛔ 不用一个缺维度的记录去顶掉
+    // 一个维度完整的记录——那正是缺陷的另一半（「镜像把 runner 已经测过的完整载体覆盖成缺维度载体」）。
+    if (opts.notEvaluatedCheckers === undefined &&
+        current && Array.isArray((current as { notEvaluatedCheckers?: unknown }).notEvaluatedCheckers)) return;
     writeMirrorState(opts.stateFile, built.state);
   } catch {
     // best-effort：镜像写失败 ≠ fan-in 失败（mfi 仍是权威）。

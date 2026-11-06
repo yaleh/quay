@@ -716,7 +716,8 @@ const mkReadings = (verdict, noise = 'n1') => ({
   drivers: [{ kind: 'promotion', running: true, supervisorAlive: true, driverAlive: true, carrierRecords: noise.length, carrierLastTs: null, staleSecs: noise.length }],
   syncHealth: { window: 200, ffSynced: 1, notFf: 2, ffError: 0, semanticBegin: 0, semanticResolved: 0, semanticConflict: 0, semanticAlignFailed: 0, semanticFfFailed: 0, lastDocToDevelop: 'ok', lastEvent: 'doc-develop-sync-not-ff', lastTs: null },
   metaRecords: [],
-  inertCheckers: [],
+  // gap-meta-extractnotevaluatedchecker — 三态读数（⛔ 不是 string[]）：这里给「测得、本轮零个」。
+  inertCheckers: { evaluated: true, names: [], cause: null },
   focus: null,
   timeSeries: [],
   actionRecordFailures: MK_AFR_NONE,
@@ -1754,7 +1755,7 @@ test('collectDriverReadings: 载体存在但读不出 ⇒ carrierUnreadable 单�
 
 test('readingsDigest: carrierUnreadable 进摘要（读失败出现/消失都必须改变结论）；null 与 [] 不同形', () => {
   const mkReading = (carrierUnreadable) => ({
-    goals: [], criteria: [], divergences: [], metaRecords: [], inertCheckers: [], focus: null,
+    goals: [], criteria: [], divergences: [], metaRecords: [], inertCheckers: { evaluated: true, names: [], cause: null }, focus: null,
     timeSeries: [],
     actionRecordFailures: MK_AFR_NONE,
     drivers: [{ kind: 'meta', running: true, supervisorAlive: true, driverAlive: true, carrierRecords: 0, carrierLastTs: null, staleSecs: null, carrierUnreadable }],
@@ -1767,14 +1768,19 @@ test('readingsDigest: carrierUnreadable 进摘要（读失败出现/消失都必
     'null（观测没跑成）⛔ 不与 []（全都读完了）同形（硬规则 3b）');
 });
 
-// gap-not-evaluated-checkers-never-persisted — 惰性守卫读数：从 full-suite-state.json 的
-// notEvaluatedCheckers 逐条枚举名字（⛔ 不是计数），读不到 ⇒ 空数组而非 undefined。
-test('collectInertCheckers: 逐条枚举 notEvaluatedCheckers 的名字；字段缺失/非数组 ⇒ 空数组（⛔ 非 undefined）', () => {
+// gap-not-evaluated-checkers-never-persisted + gap-meta-extractnotevaluatedchecker — 惰性守卫读数：
+// 从 full-suite-state.json 的 notEvaluatedCheckers 逐条枚举名字（⛔ 不是计数）。**三态**：载体读不到
+// ⇒ evaluated:false（cause=carrier-absent-or-unreadable）；载体在但**这一维没被记录**（镜像写/ running 态）
+// ⇒ evaluated:false（cause=dimension-missing）；字段是数组 ⇒ evaluated:true（空数组 = 查过、本轮零个）。
+// ⛔ 「未测量」与「测得零」必须不同形——旧实现两者都返回 []，生产上镜像载体让读数恒为 []。
+test('collectInertCheckers: 三态 {evaluated,names,cause}——未测量 ⛔ 不与「测得零」同形', () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'meta-driver-inert-'));
   try {
     fs.mkdirSync(path.join(tmp, '.quay'), { recursive: true });
-    // 读不到 state ⇒ 空数组（⛔ 不是 undefined——「本轮没有未评估项」与「没记录这个维度」可区分）。
-    assert.deepEqual(collectInertCheckers(tmp), [], '无 state 文件 ⇒ 空数组，不是 undefined');
+    // 读不到 state ⇒ 未测量。
+    assert.deepEqual(collectInertCheckers(tmp),
+      { evaluated: false, names: [], cause: 'carrier-absent-or-unreadable' },
+      '无 state 文件 ⇒ evaluated:false（⛔ 不是 []）');
     // 喂一个含 notEvaluatedCheckers 的 state 文件，断言逐条出现。
     fs.writeFileSync(path.join(tmp, '.quay', 'full-suite-state.json'), JSON.stringify({
       state: 'green',
@@ -1783,14 +1789,18 @@ test('collectInertCheckers: 逐条枚举 notEvaluatedCheckers 的名字；字段
         { name: 'threshold-scope-check', line: 'STATIC_CHECK_NOT_EVALUATED: threshold-scope-check' },
       ],
     }), 'utf8');
-    assert.deepEqual(collectInertCheckers(tmp), ['direct-to-develop-bypass-check', 'threshold-scope-check'],
+    assert.deepEqual(collectInertCheckers(tmp),
+      { evaluated: true, names: ['direct-to-develop-bypass-check', 'threshold-scope-check'], cause: null },
       '逐条枚举名字（不是计数），且保序');
-    // 字段存在但为空数组 ⇒ 空数组（「本轮没有未评估项」）。
+    // 字段存在但为空数组 ⇒ **测得零**（这是判定，⛔ 不是未测量）。
     fs.writeFileSync(path.join(tmp, '.quay', 'full-suite-state.json'), JSON.stringify({ state: 'green', notEvaluatedCheckers: [] }), 'utf8');
-    assert.deepEqual(collectInertCheckers(tmp), [], '显式空数组 ⇒ 空数组');
-    // 字段不是数组（state 还在 running / 老字段）⇒ 空数组，⛔ 不抛、不当非空。
+    assert.deepEqual(collectInertCheckers(tmp), { evaluated: true, names: [], cause: null },
+      '显式空数组 ⇒ evaluated:true + names:[]（查过、一个都没有）');
+    // 字段不是数组（state 还在 running / 机械 fan-in 镜像写的缺维度载体）⇒ 未测量，⛔ 不抛、不当空。
     fs.writeFileSync(path.join(tmp, '.quay', 'full-suite-state.json'), JSON.stringify({ state: 'running' }), 'utf8');
-    assert.deepEqual(collectInertCheckers(tmp), [], 'running state（无该字段）⇒ 空数组');
+    assert.deepEqual(collectInertCheckers(tmp),
+      { evaluated: false, names: [], cause: 'dimension-missing' },
+      'running state（无该字段）⇒ evaluated:false，⛔ 不是「零个惰性守卫」');
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }
@@ -1805,17 +1815,23 @@ test('readingsDigest: inertCheckers 名字进摘要——某个 guard 从在→�
     drivers: [],
     syncHealth: { window: 200, ffSynced: 0, notFf: 0, ffError: 0, semanticBegin: 0, semanticResolved: 0, semanticConflict: 0, semanticAlignFailed: 0, semanticFfFailed: 0, lastEvent: null, lastTs: null },
   });
-  assert.equal(readingsDigest(mk([])), readingsDigest(mk([])), '空 = 空');
-  assert.notEqual(readingsDigest(mk([])), readingsDigest(mk(['direct-to-develop-bypass-check'])),
+  const measured = (names) => ({ evaluated: true, names, cause: null });
+  const unmeasured = { evaluated: false, names: [], cause: 'dimension-missing' };
+  assert.equal(readingsDigest(mk(measured([]))), readingsDigest(mk(measured([]))), '空 = 空');
+  assert.notEqual(readingsDigest(mk(measured([]))), readingsDigest(mk(measured(['direct-to-develop-bypass-check']))),
     '惰性守卫从无到有必须改变摘要');
-  assert.notEqual(readingsDigest(mk(['direct-to-develop-bypass-check'])), readingsDigest(mk(['threshold-scope-check'])),
+  assert.notEqual(readingsDigest(mk(measured(['direct-to-develop-bypass-check']))), readingsDigest(mk(measured(['threshold-scope-check']))),
     '不同的惰性守卫必须改变摘要（逐名进，⛔ 只进计数会让换 guard 不改变摘要）');
+  // gap-meta-extractnotevaluatedchecker — 「未测量」与「测得零」必须改变摘要：否则从「这一维没测到」
+  // 变成「查过、一个都没有」这种结论变更在摘要里不可见 ⇒ 语义半不会被唤醒去读它。
+  assert.notEqual(readingsDigest(mk(measured([]))), readingsDigest(mk(unmeasured)),
+    '未测量（evaluated:false）⛔ 不与「查过、零个」同形');
 });
 
 // 负控制：摘要必须对【每轮都变的量】免疫——staleSecs/记录数每轮都不同，若进摘要则闸失效。
 test('readingsDigest: 不随 staleSecs/carrierRecords 变（否则变化检测恒为真）', () => {
   const mk = (stale, records) => ({
-    goals: [], criteria: [], divergences: [], metaRecords: [], inertCheckers: [], focus: null,
+    goals: [], criteria: [], divergences: [], metaRecords: [], inertCheckers: { evaluated: true, names: [], cause: null }, focus: null,
     timeSeries: [],
     actionRecordFailures: MK_AFR_NONE,
     drivers: [{ kind: 'promotion', running: true, supervisorAlive: true, driverAlive: true, carrierRecords: records, carrierLastTs: null, staleSecs: stale }],
@@ -1890,7 +1906,7 @@ function largeReadings(n = 1500) {
       semanticFfFailed: 0, semanticTakeDevelopRefused: 0, lastEvent: null, lastTs: null,
     },
     metaRecords: [],
-    inertCheckers: [],
+    inertCheckers: { evaluated: true, names: [], cause: null },
     focus: null,
     timeSeries: [],
     actionRecordFailures: {
@@ -1972,7 +1988,7 @@ test('gap-meta-buildprobeprompt AC: prompt 点名的读数文件都存在/都 < 
   }));
   const readings = {
     goals: [{ id: 'GOAL-000', title: 't', status: 'active' }], criteria, divergences: [], drivers: [],
-    syncHealth: { lastEvent: 'none', lastDocToDevelop: 'ok' }, metaRecords: [], inertCheckers: [],
+    syncHealth: { lastEvent: 'none', lastDocToDevelop: 'ok' }, metaRecords: [], inertCheckers: { evaluated: true, names: [], cause: null },
     timeSeries: [], actionRecordFailures: { state: 'none', aggregates: [] }, parking: {}, focus: null,
   };
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'mdr-'));

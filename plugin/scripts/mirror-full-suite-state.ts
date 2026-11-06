@@ -11,7 +11,8 @@
 // use — so a fan-in run inside a worktree still lands in the MAIN repo's state file consumers read).
 //
 // State shape (full-suite-runner SuiteState-compatible): state/runner/startedAt/finishedAt/
-// durationMs/laneCount/scope/commit (+ optional taskId/runId/load/reason). `finishedAt` is EPOCH
+// durationMs/laneCount/scope/commit (+ optional taskId/runId/load/reason/notEvaluatedCheckers).
+// `finishedAt` is EPOCH
 // SECONDS (integer) — the same convention full-suite-runner writes (gap-batch-merge-gate-reads-stale-
 // green: the freshness gate parses epoch); `startedAt` stays ISO 8601. load is best-effort (the
 // /proc/loadavg 1min at the suite's end, already carried in the fan-in capture).
@@ -98,6 +99,27 @@ export function buildMirrorState(o) {
   const reason = o.reason != null ? String(o.reason).trim() : "";
   if (state === "red" && !reason) return { error: "--reason is required when --state red" };
 
+  // gap-meta-extractnotevaluatedchecker — the suite's INERT checkers (`STATIC_CHECK_NOT_EVALUATED:`)
+  // are a DIMENSION of the terminal state, and full-suite-runner ALWAYS writes it (empty array = "no
+  // inert checker this round" ≠ absent = "never measured"). The mirror used to drop it ⇒ the mirror
+  // overwrote a richer runner carrier with a dimension-less one and meta-driver's reading collapsed.
+  // Three-state, same discipline as the runner's: omitted ⇒ the field is ABSENT (未测量 — the caller
+  // could not read this round's suite log); `[]` ⇒ measured zero; entries ⇒ named.
+  let notEvaluatedCheckers;
+  if (o.notEvaluatedCheckers != null) {
+    if (!Array.isArray(o.notEvaluatedCheckers)) {
+      return { error: `--not-evaluated-checkers must be an array (got ${JSON.stringify(o.notEvaluatedCheckers)})` };
+    }
+    notEvaluatedCheckers = [];
+    for (const c of o.notEvaluatedCheckers) {
+      const name = c && typeof c.name === "string" ? c.name.trim() : "";
+      if (!name) return { error: `--not-evaluated-checkers entries must carry a non-empty name (got ${JSON.stringify(c)})` };
+      const rec: { name: string; line?: string } = { name };
+      if (typeof c.line === "string" && c.line.trim() !== "") rec.line = c.line;
+      notEvaluatedCheckers.push(rec);
+    }
+  }
+
   const record = {
     state,
     runner,
@@ -112,6 +134,9 @@ export function buildMirrorState(o) {
   if (o.taskId != null && String(o.taskId).trim()) record.taskId = String(o.taskId).trim();
   if (o.runId != null && String(o.runId).trim()) record.runId = String(o.runId).trim();
   if (reason) record.reason = reason;
+  // ⛔ 未测量（调用方读不出本轮 suite 日志）时**不写该字段**——absent 表示「这一维没测到」，与 `[]`
+  //（查过、一个都没有）不同形（硬规则 3b）。
+  if (notEvaluatedCheckers !== undefined) record.notEvaluatedCheckers = notEvaluatedCheckers;
   return { state: record };
 }
 

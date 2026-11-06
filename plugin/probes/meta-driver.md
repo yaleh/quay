@@ -130,14 +130,22 @@ your output and treat that dimension as unreadable, ⛔ do NOT fabricate a readi
   is NOT the same as saying `hasOpinion:false`. Your judgment is then written BACK onto the record
   (status → answered, reply embedded) by the mechanical half — so the sender reads your answer from
   the same git-visible object they wrote, without touching any `.quay/` file.
-- `inertCheckers`: the NAMES of the suite's inert checkers this round — checkers that could not read
-  their own input (exit 3 = NOT-EVALUATED) and therefore judged nothing. An inert guard is a
-  **failing instrument, not a passing one**: whatever it was meant to catch is UNMEASURED this round,
-  so "no divergence under it" carries no information at all. Enumerated by name on purpose (⛔ never a
-  bare count) so you can say WHICH guard went inert. `[]` means "no inert checker reported" — an
-  absent/unreadable `.quay/full-suite-state.json` also yields `[]`, so ⛔ never read `[]` as "every
-  guard ran". Disposition: name the guard and what it left unmeasured; repairing a guard is repair of
-  an EXISTING mechanism, so it is WORK (`autoDrive`) when you have the evidence, ⛔ never "it's green".
+- `inertCheckers`: the suite's inert checkers this round — checkers that could not read their own
+  input (exit 3 = NOT-EVALUATED) and therefore judged nothing. An inert guard is a **failing
+  instrument, not a passing one**: whatever it was meant to catch is UNMEASURED this round, so "no
+  divergence under it" carries no information at all. **This is a three-state object, ⛔ not an array**
+  (`gap-meta-extractnotevaluatedchecker`): `{evaluated, names, cause}`.
+  `evaluated:true` + `names:[...]` = the carrier was read and these guards went inert (enumerated by
+  name on purpose — ⛔ never a bare count — so you can say WHICH one);
+  `evaluated:true` + `names:[]` = the dimension WAS measured and this round had none;
+  `evaluated:false` = the dimension was NOT measured (`cause:"carrier-absent-or-unreadable"` or
+  `"dimension-missing"`) — ⛔ this is NOT "no inert checker": it means the reading itself is dark, and
+  saying "no inert guard fired" from it would be reading an unmeasured quantity as a pass. Disposition:
+  for `evaluated:true` + a name, name the guard and what it left unmeasured; repairing a guard is
+  repair of an EXISTING mechanism, so it is WORK (`autoDrive`) when you have the evidence, ⛔ never
+  "it's green". For `evaluated:false`, treat the reading as a hole in the instrument: report WHICH
+  carrier/writer dropped the dimension (the mechanical fan-in mirror is the known one) rather than
+  concluding anything about the guards.
 - `timeSeries`: the cross-round DERIVED layer — everything else in `readings` is a snapshot, and a
   snapshot structurally cannot say "this has been true for N rounds". Two signals per goal AC:
   `mode:"unchanged"` (how many CONSECUTIVE rounds the criterion's `verdict` has held one value —

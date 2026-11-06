@@ -112,6 +112,29 @@ test("AC1 — writeMirrorState OVERWRITES the single-state file (never appends)"
   assert.equal(parsed.finishedAt, 2);
 });
 
+test("gap-meta-extractnotevaluatedchecker — the mirror carries notEvaluatedCheckers (three-state: absent ≠ [])", () => {
+  // Measured zero ⇒ an EMPTY ARRAY, present (the runner's own convention).
+  const zero = buildMirrorState({ ...BASE, notEvaluatedCheckers: [] });
+  assert.equal(zero.error, undefined, `build must succeed: ${zero.error}`);
+  assert.deepEqual(zero.state.notEvaluatedCheckers, [], "measured zero is present as an empty array");
+  // Named ⇒ carried verbatim (name + the machine line).
+  const named = buildMirrorState({
+    ...BASE,
+    notEvaluatedCheckers: [{ name: "direct-to-develop-bypass-check", line: "STATIC_CHECK_NOT_EVALUATED: direct-to-develop-bypass-check" }],
+  }).state;
+  assert.deepEqual(named.notEvaluatedCheckers, [{
+    name: "direct-to-develop-bypass-check",
+    line: "STATIC_CHECK_NOT_EVALUATED: direct-to-develop-bypass-check",
+  }], "the inert checker is carried by name");
+  // UNMEASURED ⇒ the field stays ABSENT (⛔ never fabricated as []).
+  const absent = buildMirrorState(BASE).state;
+  assert.equal("notEvaluatedCheckers" in absent, false,
+    "unmeasured stays absent — writing [] would turn 'not measured' into 'measured zero' (硬规则 3b)");
+  // Fail-closed on a malformed dimension (⛔ not silently dropped).
+  assert.match(buildMirrorState({ ...BASE, notEvaluatedCheckers: "nope" }).error ?? "", /not-evaluated-checkers/);
+  assert.match(buildMirrorState({ ...BASE, notEvaluatedCheckers: [{ line: "x" }] }).error ?? "", /not-evaluated-checkers/);
+});
+
 test("AC1 — shouldSkipMirrorWrite: an in-flight round (finishedAt null) SKIPS; a terminal/absent state WRITES (never clobber the runner's generation)", () => {
   assert.equal(shouldSkipMirrorWrite(null), false, "absent state ⇒ write");
   assert.equal(shouldSkipMirrorWrite({ state: "running", finishedAt: null }), true, "running (finishedAt null) ⇒ skip");
