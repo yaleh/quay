@@ -2,7 +2,7 @@
 id: gap-meta-collectactionrecordfailures-3
 title: action-failure reading reports a clean state from a zero-record carrier
   that predates the extractor fix
-status: todo
+status: ready
 labels:
   - meta-driver
   - driver-candidate
