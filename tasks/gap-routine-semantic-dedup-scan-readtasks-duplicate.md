@@ -3,7 +3,7 @@ id: gap-routine-semantic-dedup-scan-readtasks-duplicate
 title: "semantic-dedup-scan: the first two carry the same tasks/<id>.md to
   {id,body} reader (vanished-id skip) while a canonical single-task parser
   already exists in task-schema.ts; the th"
-status: todo
+status: ready
 labels:
   - gap
   - routine-filed
