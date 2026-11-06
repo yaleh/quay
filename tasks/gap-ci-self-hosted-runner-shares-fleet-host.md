@@ -110,3 +110,11 @@ $ gh run list --limit 3
 - tasks/gap-ci-self-hosted-runner-shares-fleet-host.md
 
 > `plugin/test/ci-bounded-concurrency.test.mjs` 是对 workflow YAML 的静态断言（⛔ 不是新增 `plugin/scripts/*.ts`，故不触发 capability-catalog / outline / laydown 三道登记闸）；`full-suite-runner.ts` 是 fleet 侧宿主预算的声明点（本次按实情只加「CI 消费者不在此处收敛」的注释指针，指向 `docs/operations/host-budget.md`）。
+
+## Blocker
+
+**2026-11-06T10:55:40.417Z — worker 未落地（exited-not-landed）**
+
+- 未落地原因：step=suite: oom-killed (2) — recovery red set is NOT a subset of the develop baseline red set: added=plugin/test/ci-runner-env-prereqs.test.mjs changed=- — needs a code fix
+- run_id：wk-prod-anchor
+- session_id：af606876-fc38-431a-8ae8-2e8c6ea8d4f7
