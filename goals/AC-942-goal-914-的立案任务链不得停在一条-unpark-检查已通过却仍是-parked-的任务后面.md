@@ -1,7 +1,7 @@
 ---
 id: AC-942
 title: GOAL-914 的立案任务链不得停在一条「unpark 检查已通过却仍是 PARKED」的任务后面
-status: active
+status: achieved
 kind: criterion
 goal: GOAL-914
 criterion: "node -e \"const{execSync}=require('child_process');const
@@ -33,6 +33,11 @@ statusLog:
     to: active
     actor: goal-driver
     reason: "triage: activate"
+  - at: 2026-11-06T16:58:59.815Z
+    from: active
+    to: achieved
+    actor: goal-driver
+    reason: "I2: criterion pass"
 fidelity:
   verdict: faithful
   reason: "fidelity judge: faithful"
