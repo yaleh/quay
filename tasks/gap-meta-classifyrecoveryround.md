@@ -26,6 +26,7 @@ worker-fan-in.ts 的主路径已按 SUITE-NOT-RUN 标记区分「没跑」与「
 ## Touches
 - `plugin/scripts/worker-fan-in.ts`
 - `plugin/test/full-suite-runner-oom-policy.test.mjs`
+- `docs/carrier-registry.json`
 - `tasks/gap-meta-classifyrecoveryround.md`
 
 ## Evidence
@@ -64,13 +65,22 @@ worker-fan-in.ts 的主路径已按 SUITE-NOT-RUN 标记区分「没跑」与「
 ### 5. 门与静态读数
 - 全文件：`node --test plugin/test/full-suite-runner-oom-policy.test.mjs` ⇒ **26/26 pass**（含既有的 AC10/AC11/AC12/AC13(a)(b) 恢复阶梯用例，逐字无改动）。
 - 类型：`for d in packages/*/; do npx tsc --noEmit -p "$d" || exit 1; done` ⇒ exit 0。
-- scoped 门：`bash scripts/test.sh --for-task gap-meta-classifyrecoveryround --allow-thin` ⇒ **36 pass / 0 fail**（48.1s）。
-- anti-drift：`anti-drift-touches-check.ts --task gap-meta-classifyrecoveryround --worktree <wt> --merge-target develop` ⇒ `ANTI-DRIFT OK — 3 actual file(s), all within declared Touches (3 glob(s))`。
+- scoped 门：`bash scripts/test.sh --for-task gap-meta-classifyrecoveryround --allow-thin`（第二次落地时重跑，读数见 §7）。
+- anti-drift：`anti-drift-touches-check.ts --task gap-meta-classifyrecoveryround --worktree <wt> --merge-target develop` ⇒ `ANTI-DRIFT OK`（第二次落地时 4 个文件全部落在 ## Touches 内，读数见 §7）。
 - `fan-in-ac-completion-gate.ts --worktree <wt> --json` ⇒ `ok:true, status:"pass", 3/3`。
-- L_D archguard（`plugin/scripts/archguard-runner.ts --root <worktree>`，worktree HEAD `839046bb6`，2026-11-06）：6/6 scope `evaluated=true`，全部 `entitySccCount=0` ∧ `directoryCycleCount=0`（scripts scope：entities=4810 relations=10978；`PASS — no dependency cycles in any scope`）。
+- L_D archguard（`plugin/scripts/archguard-runner.ts --root <worktree>`，2026-11-06，第二次落地时的 worktree HEAD `78c120793`）：6/6 scope `evaluated=true`，全部 `entitySccCount=0` ∧ `directoryCycleCount=0`（scripts scope：entities=4856 relations=11086；`PASS — no dependency cycles in any scope`）。首次落地时（HEAD `839046bb6`）同形：6/6、`entitySccCount=0`、`directoryCycleCount=0`。
 
 ### 6. 顺带发现（⛔ 不在本任务 Touches 内，仅记录，未改）
 `packages/quay-native/src/store.ts` 的 execute→done 闸用 `sectionAfterHeading(body, ["AC","Acceptance Criteria"])`（kernel `extractSection` 要求**精确**标题），而驱动侧 `ready-pool-check.ts` 的 `extractSectionByShape` 认 `AC（draft）` 等 registered 变体 ⇒ 同一个 finding 形状任务在两侧可得出「3/3」与「0/0」两个读数（本任务当场复现）。本任务把标题改成 `## Acceptance Criteria` / `## Definition of Done`（内容一字未改）使两侧一致；两解析器的口径差本身是独立缺口，未在本任务内修。
+
+### 7. 第二次未落地（2026-11-06T13:13:48Z）的根因与修法：`baseline-red-rounds.jsonl` 未登记
+- **症状（真实 suite 日志，逐字）**：`plugin/test/carrier-registry-completeness.test.mjs` 的 completeness 用例红在
+  `baseline-red-rounds.jsonl (first seen plugin/scripts/worker-fan-in.ts:1541)`；A/B 判 `HARD RED (task-introduced-red) — added=plugin/test/carrier-registry-completeness.test.mjs`。
+- **⛔ 不是本任务新造的载体**：常量 `BASELINE_RED_ROUNDS_REL` 早于本任务存在（develop `plugin/scripts/worker-fan-in.ts:1495`，commit `3ad17ac26`），`.gitignore:704` 也早已有 `**/.quay/baseline-red-rounds.jsonl`。
+- **为什么本任务才把它暴露出来（实测，不是推测）**：那个测试的扫描器是「祖先 mask + 朴素引号扫描」。把该扫描逻辑**逐字**对 develop 版的 `worker-fan-in.ts` 跑一遍 ⇒ `baseline-red-rounds.jsonl found? undefined`，原因是扫描器在**第 1488 行**当作字符串开括号、一路吞到**第 1499 行**，把第 1495 行的常量整个当成「字符串内部」跳过；同一逻辑对本分支版文件 ⇒ 命中 `1546`（本任务在它之前新增的代码让扫描器重新对齐）。⇒ 缺的是**登记**，不是新载体；该未登记状态在 develop 上是**潜伏**的。
+- **修法（改动面 +1 文件，已进 ## Touches）**：`docs/carrier-registry.json` 增 `baseline-red-rounds.jsonl`：`kind: jsonl-log`、`owner: plugin/scripts/worker-fan-in.ts`（`appendBaselineRedRound`，内存该条唯一写手）、`readers: ["plugin/scripts/worker-fan-in.ts","plugin/scripts/worker-driver.ts"]`（`readBaselineRedRounds` 的读取侧 + `baselineRedDeadlockReading` 的调用侧 `worker-driver.ts:6298`）。
+- **读数**：本 worktree 内 `node --test plugin/test/carrier-registry-completeness.test.mjs` ⇒ 修复前 **6/7**（失败项逐字即上面那行），修复后 **7/7 pass**。
+- **另记（未修，超出 Touches）**：该测试的扫描器会被文件里更早的一处引号错配**整段**吞掉（硬规则 2：位置判定；这里是**位置判定的仪器本身**失准），它只会在「名字恰好落在被吞的那一段」时**漏报**。漏报方向不产生假红，但会让 completeness 门在某段代码上静默失效——独立缺口。
 
 ## Blocker
 
@@ -78,3 +88,4 @@ worker-fan-in.ts 的主路径已按 SUITE-NOT-RUN 标记区分「没跑」与「
 
 - 未落地原因：step=suite: AssertionError [ERR_ASSERTION]: 未登记的载体 / unregistered carriers (code has a carrier name that docs/carrier-registry.json does not declare — add an entry): [baseline A/B: HARD RED (task-introduced-red) — the task's red set is NOT a subset of the develop baseline red set: added=plugin/test/carrier-registry-completeness.test.mjs changed=-]
 - run_id：wk-prod-anchor
+- **后续**：已按 §7 修复（登记载体），同一测试 7/7 绿。
