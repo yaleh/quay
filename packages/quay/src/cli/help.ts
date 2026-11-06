@@ -545,6 +545,7 @@ Environment contract — when the default 'acceptance' gate spawns a command:
 Usage:
   quay goal list [--status <status>] [--kind <kind>] [--goal <goal-id>] [--no-evidence] [--no-body [--with-status-log]] [--since <ISO8601|epoch-ms>] [--json] [--root <path>]
   quay goal log [--since <ISO8601|epoch-ms>] [--json] [--root <path>]
+  quay goal next [--round-log <path>] [--json] [--root <path>]
   quay goal show <id> [--json] [--root <path>]
   quay goal write <id> --origin <text> [--title <title>] [--status <status>] [--goal <goal-id>] [--criterion <cmd>] [--branch true|false] [--json] [--root <path>]
   quay goal gate <id> [--timeout <ms>] [--dry-run] [--json] [--root <path>]
@@ -583,6 +584,21 @@ Usage:
                         ⛔ never a flag. It is created lazily from the develop tip when the goal
                         becomes active, and discarded (tip SHA recorded in statusLog) when the goal
                         is retired/superseded. The field is LOCKED once the branch exists.
+  next                  The NEXT-STEP projection read (tasks/gap-goal-next-projection, AC-935):
+                        prints ONE row per ACTIVE goal answering "what happens next, and whose is
+                        it" — {goal, ac, gapState, rank, owner, action, evidenceRefs}, sorted by
+                        needs-human → stalled → workable → gap → world-gated → not-evaluated (ties
+                        by AC id). owner ∈ {driver, worker, human, world}; action.kind ∈
+                        {file-task, resume-task, fix-artifacts, ask-human, wait}.
+                        It READS the newest 'goal-next' fact from the round carrier
+                        (<root>/.quay/goal-round.jsonl, or --round-log) and ⛔ never re-computes the
+                        projection — the driver and this surface share ONE implementation
+                        (core/goal-analysis.ts).
+                        ⛔ Three-state, never a false empty array: no round carries the fact ⇒
+                        {evaluated:false, reason} + exit 3 (NOT-EVALUATED); the fact exists but an
+                        ACTIVE goal has no row ⇒ {ok:false, cause:"missing-row", missing} + exit 1;
+                        full coverage ⇒ the rows array + exit 0 (an empty array there genuinely
+                        means "no active goals").
   log                   The CROSS-RECORD status-transition read: merges every record's own
                         append-only 'statusLog' into ONE stream, ascending by 'at', each row
                         {id, goal, kind, at, from, to, actor, reason}. 'goal' is the owning GOAL on

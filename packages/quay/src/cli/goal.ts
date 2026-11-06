@@ -17,6 +17,10 @@ import type { CliCtx } from "./context.ts";
 import type { CliFlags } from "./flags.ts";
 import type { GoalRecord } from "../abi.ts";
 import { runGoalStoreCli } from "../core/goal-store.ts";
+// The goal-next projection's VOCABULARY (AC-935). ⛔ Imported, never re-declared here: the goal-driver
+// writes the same rows through this module (via its Core import surface) — two copies of the state /
+// owner / action word-lists would be a second source that drifts (hard rule 5b).
+import { GAP_STATES, GOAL_NEXT_OWNERS, GOAL_NEXT_ACTION_KINDS } from "../core/goal-analysis.ts";
 import { loadConfig } from "../config.ts";
 import { resolveWorkspaceRootOrThrow } from "../gate/config/loader.ts";
 
@@ -263,6 +267,126 @@ function emitGoalReadNotEvaluated(reason: string, wantsJson: boolean): void {
   process.exitCode = 3;
 }
 
+// ── `goal next` — the next-step projection read surface (tasks/gap-goal-next-projection, AC-935) ───
+//
+// WHAT THIS ANSWERS: "for each active GOAL, what happens next and whose is it". The goal-driver
+// computes that projection every round and writes it as the `goal-next` fact (see
+// `packages/quay/src/core/goal-analysis.ts` — the ONE pure implementation, re-exported to the driver
+// through `plugin/scripts/driver-runtime.ts`). This surface only READS it.
+//
+// ⛔ IT MUST NOT RE-COMPUTE THE PROJECTION. A second implementation here would drift from the driver
+// the moment a state or an owner is added (hard rule 5b) — and the two answers would then disagree
+// about the same round, which is exactly what a "single source of truth" repo cannot have.
+//
+// ⛔ AND AN EMPTY ANSWER IS NEVER INVENTED (hard rule 3b). Three outcomes, three shapes:
+//   · no round carries a `goal-next` fact  ⇒ exit 3 NOT-EVALUATED (`{evaluated:false, reason}`)
+//   · the fact exists but an ACTIVE goal has no row ⇒ exit 1 (`{ok:false, cause:"missing-row"}`)
+//   · the fact exists and covers every active goal   ⇒ exit 0 (a JSON ARRAY of rows)
+// A reader that only looks at stdout can tell all three apart — "could not read a projection" never
+// wears the same shape as "there is nothing to do".
+
+/** The round carrier, relative to the workspace root (`GOAL_ROUND_REL` in the driver registry). */
+const GOAL_ROUND_LOG_REL = path.join(".quay", "goal-round.jsonl");
+
+/** How far back to read the round log. It is an append-only runtime log that grows unbounded (the
+ *  production carrier measured 367MB on 2026-11-07), so the read is a TAIL read, never a full parse.
+ *  The newest `goal-next` fact is at most a few rounds old once the mechanism has run at all, and one
+ *  round record measured ~0.2MB ⇒ 16MiB is ~80 rounds of headroom. A cap is honest: if the fact is
+ *  not in the tail we report NOT-EVALUATED (⛔ never "no next steps"), because we did not see it. */
+const GOAL_NEXT_TAIL_BYTES = 16 * 1024 * 1024;
+
+type GoalNextCarrier =
+  | { state: "present"; rows: Record<string, unknown>[]; round: unknown; ts: unknown; runId: unknown }
+  | { state: "not-evaluated"; reason: string };
+
+/** Read the tail of the round log as complete lines (the first line is dropped when the tail began
+ *  mid-line — a half-parsed record must never be read as a record). */
+function readRoundLogTail(file: string, maxBytes: number): { lines: string[]; bytes: number } {
+  const st = fs.statSync(file);
+  const start = Math.max(0, st.size - maxBytes);
+  const len = st.size - start;
+  const buf = Buffer.alloc(len);
+  const fd = fs.openSync(file, "r");
+  try {
+    fs.readSync(fd, buf, 0, len, start);
+  } finally {
+    fs.closeSync(fd);
+  }
+  const lines = buf.toString("utf8").split("\n");
+  if (start > 0) lines.shift(); // partial first line
+  return { lines, bytes: len };
+}
+
+/** Is this row one of the shape the fact promises? ⛔ A row we cannot validate makes the CARRIER
+ *  unreadable (NOT-EVALUATED), never a row we quietly drop — dropping it would let "this goal's row
+ *  is malformed" read as "this goal has nothing to do". */
+function goalNextRowProblem(row: unknown): string | null {
+  if (row === null || typeof row !== "object" || Array.isArray(row)) return "row is not an object";
+  const r = row as Record<string, unknown>;
+  if (typeof r.goal !== "string" || r.goal === "") return "row.goal is not a non-empty string";
+  if (typeof r.ac !== "string" || r.ac === "") return `row ${r.goal}: ac is not a non-empty string`;
+  if (!GAP_STATES.includes(r.gapState as never)) return `row ${r.goal}/${r.ac}: gapState ${JSON.stringify(r.gapState)} is not a GapState`;
+  if (!GOAL_NEXT_OWNERS.includes(r.owner as never)) return `row ${r.goal}/${r.ac}: owner ${JSON.stringify(r.owner)} is not an owner`;
+  const action = r.action as Record<string, unknown> | undefined;
+  if (!action || typeof action !== "object" || !GOAL_NEXT_ACTION_KINDS.includes(action.kind as never)) {
+    return `row ${r.goal}/${r.ac}: action.kind ${JSON.stringify(action?.kind)} is not an action`;
+  }
+  return null;
+}
+
+/** The newest round record that CARRIES a `goal-next` fact, plus its provenance.
+ *
+ *  ⛔ WHY "the newest one that carries it" and not "the last line": a round can be TRUNCATED by a
+ *  stop request (`stopped_mid_round: true`) — such a record legitimately has no facts from the
+ *  routines that never finished. Treating that as "no projection exists" would make the read surface
+ *  flap with the driver's stop window. A round that DID produce the projection is still a real
+ *  reading of a real round; the provenance (round / ts) travels on stderr so an operator can see how
+ *  old it is, while stdout stays exactly the rows array (the contract AC-935 checks). */
+function readGoalNextCarrier(root: string, roundLogOverride: string | null): GoalNextCarrier {
+  const file = roundLogOverride ?? path.join(root, GOAL_ROUND_LOG_REL);
+  let tail: { lines: string[]; bytes: number };
+  try {
+    tail = readRoundLogTail(file, GOAL_NEXT_TAIL_BYTES);
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException)?.code ?? "UNKNOWN";
+    return {
+      state: "not-evaluated",
+      reason: code === "ENOENT"
+        ? `no round carrier at ${file} — the goal-driver has not run here`
+        : `round carrier is unreadable (${code}): ${file}`,
+    };
+  }
+  for (let i = tail.lines.length - 1; i >= 0; i--) {
+    const line = tail.lines[i];
+    if (line.trim() === "") continue;
+    let rec: Record<string, unknown>;
+    try {
+      rec = JSON.parse(line) as Record<string, unknown>;
+    } catch {
+      continue; // an unparseable line is not a reading; keep looking further back
+    }
+    const facts = Array.isArray(rec.facts) ? (rec.facts as Array<Record<string, unknown>>) : [];
+    const fact = facts.find((f) => f && f.name === "goal-next");
+    if (!fact) continue;
+    const value = fact.value as Record<string, unknown> | undefined;
+    if (!value || value.evaluated !== true || !Array.isArray(value.rows)) {
+      // The round DID emit the fact, but as a NOT-EVALUATED reading — treat it as a real answer:
+      // "this round could not compute the projection" is not "look further back and pretend".
+      return { state: "not-evaluated", reason: `round ${String(rec.round ?? "?")} carries goal-next as not-evaluated: ${String(fact.reason ?? value?.cause ?? "no cause recorded")}` };
+    }
+    const rows = value.rows as unknown[];
+    for (const row of rows) {
+      const problem = goalNextRowProblem(row);
+      if (problem !== null) return { state: "not-evaluated", reason: `round ${String(rec.round ?? "?")}: malformed goal-next row — ${problem}` };
+    }
+    return { state: "present", rows: rows as Record<string, unknown>[], round: rec.round, ts: rec.ts, runId: rec.run_id };
+  }
+  return {
+    state: "not-evaluated",
+    reason: `no goal-next fact in the last ${Math.min(tail.bytes, GOAL_NEXT_TAIL_BYTES)} bytes of ${file} — no round has produced the projection yet`,
+  };
+}
+
 // ── store-level verbs: gate / check / batch (+ the store-only flags of `write`) ────────────────────
 //
 // WHY THESE DELEGATE (gap-ac262-goal-meta-driver-spawn-core-src-absent-from-plugin-cache):
@@ -472,6 +596,51 @@ export async function handleGoal({ sub, positional, flags, wantsJson, rest }: Cl
     if (r.state === "not-evaluated") process.exitCode = 3;
     return;
   }
+  if (sub === "next") {
+    // The projection read surface (AC-935). See the block comment above `readGoalNextCarrier` for the
+    // three outcomes and why the CLI never re-computes the projection itself.
+    const [rows, activeGoalIds] = await (async () => {
+      const carrier = readGoalNextCarrier(
+        (flags.root as string | undefined) ?? (storeWorkspaceRoot() as string),
+        typeof flags["round-log"] === "string" ? path.resolve(flags["round-log"]) : null,
+      );
+      if (carrier.state === "not-evaluated") {
+        if (wantsJson) printJson({ evaluated: false, cause: "no-projection", reason: carrier.reason });
+        console.error(`goal next NOT-EVALUATED: ${carrier.reason}`);
+        process.exitCode = 3;
+        return [null, null] as const;
+      }
+      // Provenance on stderr ONLY: stdout must stay the rows array (AC-935's criterion parses it).
+      console.error(`goal next: projection from round ${String(carrier.round ?? "?")} at ${String(carrier.ts ?? "?")} (run ${String(carrier.runId ?? "?")})`);
+      // Coverage is checked against the CURRENT active-GOAL set, not against whatever the fact says:
+      // a GOAL activated after that round is a REAL mismatch and must not read as a clean empty
+      // success (hard rule 3b). `null` = the provider read failed (withProvider already reported it
+      // and set the exit code) — ⛔ never conflated with "zero active goals".
+      let active: string[] | null = null;
+      await withProvider(async (client) => {
+        const records = (await client.goalList({ includeEvidence: false })) as GoalRecord[];
+        active = records
+          .filter((g) => String(g.id).startsWith("GOAL-") && g.status === "active")
+          .map((g) => String(g.id));
+      }, { providerId: flags.provider, root: flags.root });
+      return [carrier.rows, active] as const;
+    })();
+    if (rows === null || activeGoalIds === null) return; // already reported with its own exit code
+    const covered = new Set(rows.map((r) => String(r.goal)));
+    const missing = activeGoalIds.filter((id) => !covered.has(id));
+    if (missing.length > 0) {
+      if (wantsJson) printJson({ ok: false, cause: "missing-row", missing, reason: `no goal-next row for active goal(s): ${missing.join(", ")}` });
+      console.error(`goal next: the round's projection has no row for active goal(s): ${missing.join(", ")} — re-run the goal-driver, or read the round facts directly`);
+      process.exitCode = 1;
+      return;
+    }
+    if (wantsJson) printJson(rows);
+    else if (rows.length === 0) console.log("(no active goals)");
+    else for (const r of rows) {
+      console.log(`${String(r.goal)}\t${String(r.ac)}\t${String(r.rank)}\t${String(r.owner)}\t${String((r.action as Record<string, unknown>)?.kind)}\t${String((r.action as Record<string, unknown>)?.reason)}`);
+    }
+    return;
+  }
   if (sub === "list") {
     // AC1/AC2 — the thin projection and the incremental filter are the NEW read surfaces; the
     // default (`quay goal list --json`, no flags) is byte-identical to the pre-change output (AC5),
@@ -587,7 +756,7 @@ export async function handleGoal({ sub, positional, flags, wantsJson, rest }: Cl
     }, { providerId: flags.provider, root: flags.root });
     return;
   }
-  console.error(`unknown goal subcommand: ${sub} (try: list, log, show, write, gate, check, batch, merge, preview)`);
+  console.error(`unknown goal subcommand: ${sub} (try: list, log, show, write, gate, check, batch, merge, preview, next)`);
   process.exitCode = 1;
   return;
 }

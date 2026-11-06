@@ -13,6 +13,8 @@
 //   ⑤ 负控：冷却已过且未超日上限 ⇒ **仍可立案**（真跑 runGapSpawnPass）；
 //   ⑥ 与 `spawn_cap` 的叠加：**先节流、后切名额**（被节流的 AC ⛔ 不得占名额再空转）；
 //   ⑦ 负控：节流**不改变** `goal-gaps` 的状态取值；⑧ 轮 fact 里出现 `filing-throttled` 行。
+//   ⑨ (tasks/gap-goal-next-projection) 轮 fact 里出现 `goal-next` 行 —— 每 active GOAL 恰好一行，
+//      与 `goal-ring.value.next` 逐字等价，owner / action.kind 在枚举内。
 //
 // Run: node --test plugin/test/goal-driver.test.mjs
 
@@ -43,6 +45,9 @@ import {
   defaultGoalFilingConfig,
 } from "../scripts/driver-config.ts";
 import { repoRoot, writeStandingGoalFile } from "./helpers/goal-driver-harness.mjs";
+// The projection's vocabulary lives in ONE Core module (tasks/gap-goal-next-projection) — the driver
+// reaches it through `driver-runtime.ts`; the test asserts the round fact against the same enums.
+import { GAP_STATES, GOAL_NEXT_OWNERS, GOAL_NEXT_ACTION_KINDS } from "../../packages/quay/src/core/goal-analysis.ts";
 
 const HOUR = 60 * 60 * 1000;
 
@@ -414,6 +419,65 @@ test("⑧ 轮 fact 出现 `filing-throttled` 行（含 nextEligibleAt），且�
     const g = gf.value.gaps.find((x) => x.ac === "AC-002");
     assert.equal(g?.state, "gap", "被节流的 AC 在缺口视图里仍是 gap（⛔ 被节流 ≠ 缺口消失）");
     assert.equal(v.gaps.find((x) => x.ac === "AC-002")?.state, "gap", "goal-ring 的原读数同样不变");
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+// ── ⑨ 轮 fact：`goal-next` 下一步投影（tasks/gap-goal-next-projection, AC-935）──────────────
+
+test("⑨ 轮 fact 出现 `goal-next` 行：每 active GOAL 一行，且与 `value.next` 逐字等价", async () => {
+  const tmp = tmpdir("goal-next");
+  try {
+    fs.mkdirSync(path.join(tmp, "goals"), { recursive: true });
+    fs.mkdirSync(path.join(tmp, "tasks"), { recursive: true });
+    writeStandingGoalFile(tmp, { id: "GOAL-001", status: "active", kind: "goal" });
+    // 判据恒假 + 零关联任务 ⇒ GapState = `gap` ⇒ 投影 owner=driver / action=file-task
+    writeStandingGoalFile(tmp, { id: "AC-002", status: "active", kind: "criterion", goal: "GOAL-001", criterion: "exit 1" });
+    // 一条**非** active 的 GOAL：⛔ 不得出现在投影里（「恰好每个 active GOAL 一行」的另一半）
+    writeStandingGoalFile(tmp, { id: "GOAL-000", status: "achieved", kind: "goal" });
+    writeStandingGoalFile(tmp, { id: "AC-001", status: "achieved", kind: "criterion", goal: "GOAL-000", criterion: "true" });
+
+    const r = await runGoalRound(tmp, {
+      scriptRoot: repoRoot,
+      gapWorkerCmd: "true",
+      resourceGateArgv: ["true"],
+      spawnCap: 0, // ⛔ 本用例只读投影，不 spawn（`spawnCap: 0` = 名额为零，不是「读不到名额」）
+      now: () => new Date(T0),
+    });
+
+    // ① fact 本身：name 是 `goal-next`，恰好一条，state=verified（读数取到了）
+    assert.equal(r.nextFacts.length, 1, "恰好一条 goal-next fact");
+    const fact = r.nextFacts[0];
+    assert.equal(fact.name, "goal-next");
+    assert.equal(fact.state, "verified", "读数取到了 ⇒ verified（⛔ 不是 failed）");
+    assert.equal(fact.value.evaluated, true);
+    assert.equal(fact.value.cause, null);
+
+    // ② 每个 active GOAL 恰好一行；非 active 的 GOAL 没有行
+    const rows = fact.value.rows;
+    assert.equal(rows.length, 1, `只有 GOAL-001 是 active（实测：${JSON.stringify(rows.map((x) => x.goal))}）`);
+    assert.equal(rows[0].goal, "GOAL-001");
+    assert.equal(rows[0].ac, "AC-002");
+    assert.equal(rows[0].gapState, "gap", "缺口读数原样带出（⛔ 投影不是第二套缺口读数）");
+    assert.equal(rows[0].rank, "gap");
+    assert.equal(rows[0].owner, "driver");
+    assert.equal(rows[0].action.kind, "file-task");
+
+    // ③ 枚举：owner ∈ 四个、action.kind ∈ 五个、gapState ∈ GapState 词表（硬规则 3：不布尔）
+    assert.ok(GOAL_NEXT_OWNERS.includes(rows[0].owner), "owner 在枚举内");
+    assert.ok(GOAL_NEXT_ACTION_KINDS.includes(rows[0].action.kind), "action.kind 在枚举内");
+    assert.ok(GAP_STATES.includes(rows[0].gapState), "gapState 在枚举内");
+
+    // ④ 等价性（AC5）：轮 fact 的 goal-next 与 `value.next` 是**同一份来源**的两处落痕 ⇒ 逐字相等。
+    // ⛔ 这不是「自证」：两处分别是 `goal-next` fact 的 value.rows 与 `goal-ring` fact 的 value.next，
+    // 由同一个数组分别落进两条 fact（不同写入点）——相等说明两处没有各自重算/截断。
+    assert.deepEqual(fact.value.rows, r.fact.value.next, "fact.value.rows ≡ goal-ring.value.next");
+    assert.match(fact.reason, /active goal 1 个 ⇒ 1 行/, `reason 里带出分母（实测：${fact.reason}）`);
+
+    // ⑤ 负控：投影是**读面**，不改变任何既有判定 —— spawn 仍然只由 gaps 决定（spawnCap=0 ⇒ 0 次）
+    assert.equal(r.fact.value.spawned, 0, "投影存在与否都不改变 spawn");
+    assert.equal(r.fact.value.gaps.find((x) => x.ac === "AC-002")?.state, "gap", "原缺口读数不变");
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }

@@ -53,7 +53,7 @@ import { isDirectEntry } from "./gate-script-base.ts";
 // Core `criterion-capability.ts` 的单一实现，gap-meta-writegoalstatus）：⛔ 不从激活拒绝的散文里抠
 // 缺失载体——store 把它回传成**被截断到 200 字符**的 stderr，路径正好落在截断点之外（硬规则 4c：
 // 判据点名的量必须穿过所有中间层还取得到）；同一判定器在本进程重判得到的 `reasons[].detail` 才是。
-import { DRIVER_KINDS, runAsync, launchArgv, splitArgs, kernelSiblingArgv, kernelConfigPath, resolveQuayCodeRoot, parseBinaryVerdict, goalDriverChildTimeoutMs, GOAL_STORE_SIGTERM_GRACE_MS, readLockPid, judgeCriterionCapability, readCapabilityDeclaration, type Fact, type RoutineSpec } from "./driver-runtime.ts";
+import { DRIVER_KINDS, runAsync, launchArgv, splitArgs, kernelSiblingArgv, kernelConfigPath, resolveQuayCodeRoot, parseBinaryVerdict, goalDriverChildTimeoutMs, GOAL_STORE_SIGTERM_GRACE_MS, readLockPid, judgeCriterionCapability, readCapabilityDeclaration, goalNextProjection, type Fact, type RoutineSpec, type GapState, type GoalGap, type GoalNextRow } from "./driver-runtime.ts";
 // The ONE regex-literal escaper (kernel leaf via the plugin shim) — replaces an inline escape body at
 // the heading-literal site (finding `escaperegexp-sweep-missed-two`, routine `semantic-dedup-scan`).
 import { escapeRegExp } from "./regex-escape.ts";
@@ -2055,58 +2055,14 @@ export async function objectiveSufficiencyVerdict(
 // ── 缺口态族（G7 + G9 stalled + done-unresolved 三分，硬规则 3b：读不懂输入不得返回与「合格」同形——
 //    「缺口」/「无牵引」/「未评估」分离；硬规则 3：枚举不布尔——每一种成因一个不同形的取值）──
 
-/** 单条 AC 的缺口态（十态并存，not-evaluated 保留——读不到 tasks 输入与「缺口/无牵引」不同形，硬规则 3b）：
- *  in-progress       有任务推进（todo/ready/needs-human 有牵引）
- *  gap               真缺口：零关联任务（无任何 goal_ac==ac 的任务）⇒ 该 spawn 立案
- *  workable          **有关联任务、但全部为非牵引态**（done/superseded 等）而 AC 判据仍未达成，**且判据的
- *                    真值是一个仓库内的工作产物**（代码/文件/测试——`classifyCriterionKind` 判它**不**读
- *                    生产载体）⇒ 还有一个 worker 能改变它 ⇒ 该 spawn 立案。补上 standing-violated /
- *                    frozen-violated 已有的那道守卫的另一半：曾经 done 的关联任务**不覆盖回归**（那正是
- *                    「回归后再无人立案」的成因），只有 todo/ready/needs-human 才算有人接手
- *                    （gap-done-unresolved-conflates-workable-with-world-gated）。⛔ 与 `gap` 不同形：
- *                    这边有关联任务（taskCount ≥ 1），那边零关联（taskCount 0）。
- *  world-gated       **有关联任务、但全部为非牵引态**而判据仍未达成，**且判据读生产载体**
- *                    （`.quay/<file>`——由生产写入、不在仓库工作产物内，见 `readsProductionCarrier`）：
- *                    它的真值是**立案之后的未来生产事件**（CI 跑了一次、切了一个 release tag），
- *                    **没有任何 worker 能产出它** ⇒ ⛔ 不 spawn worker（派了也产不出该事件，是浪费名额），
- *                    改由「每轮 gate 复读 + 轮记录留痕的路由」接住（见 `worldGatedRoutes`）。
- *                    ⛔ 与 `workable` **不同形**：把两者压成一态（旧的 `done-unresolved`）会让 world-gated
- *                    落成终点黑洞——任务做完了、判据仍红、机制按设计不立案 ⇒ 永久静默、无人立案
- *                    （硬规则 3b：一个判定的输出词表里没有「谁去复读生产事件」这一态，就无法区分
- *                    「工作没做够」与「等世界变化」）。
- *  unclassified      **判别器读不到 / 解析不出判据载体**（criterion 缺失或为空 ⇒ 无法机械判定它读不读生产
- *                    载体）⇒ 独立取值。⛔ 既不与 `workable` 也不与 `world-gated` 同形，且**不消耗 spawn
- *                    名额**（硬规则 3b：读不懂不得冒充任一实质态；也⛔ 不得静默——静默会与「无工作可立」
- *                    同形）。
- *  stalled           有任务但都无法自行前进（G9 结构判据）
- *  not-evaluated     读不到 tasks 输入（taskFacts==null），或 **AC-216 复验域**读不到 I5 读数（standings==null）
- *  standing-ok       **AC-216 复验域**专有：常设不变式（achieved ∧ long-term ∧ GOAL 非 active）此刻
- *                    **成立**（I5 没把它列进 achievedButFailing）⇒ 无工作可立，⛔ 不 spawn
- *  standing-violated **AC-216 复验域**专有：常设不变式**此刻违反**（I5 列出了它）且**没有任何在飞任务**在
- *                    处理它 ⇒ 该 spawn 立案。⛔ 与 `workable` 不同形：曾经 done 的关联任务**不覆盖回归**
- *                    （那正是「回归后再无人立案」的成因），只有 todo/ready/needs-human 才算有人接手
- *                    （gap-meta-computegoalgaps；硬规则 3 同族——同一容器两类 population，
- *                    用只覆盖一类的工具判空会把「无人处理」读成「已解决」）。
- *  frozen-violated   **冻结population 专有**：AC 已 `achieved`、**已经离开复验域**（GOAL 非 active 且未声明
- *                    `long-term`），而台账尾读数说它**此刻为假**，且**没有任何在飞任务**在处理它 ⇒ 该 spawn
- *                    立案。⛔ 与 standing-violated 是**两个** population（域内/域外），故取值必须不同形——
- *                    合并会把「离开域后就没人管」这条正好要修的形态重新藏起来（硬规则 3b）。
- *                    ⛔ 与 `workable` 不同形：曾经 done 的关联任务**不覆盖**「此刻仍为假」，
- *                    只有 todo/ready/needs-human 才算有人接手。
- *  derived-routed    **AC-216 复验域内【真值派生自 ③ 主体population】的判据专有**（本任务缺陷①）：该常设
- *                    判据此刻**违反**，但它的 criterion 读的就是 ③ 的输入面（`check --stale-pass`，
- *                    见 `readsFrozenPopulation`）⇒ 它的真值 =「冻结population 中存在此刻为假的 AC」
- *                    这一命题，而 **③ 才是那个命题的唯一判据、且已在本轮为那条为假的 AC 产出路由**
- *                    （`frozen-violated` / in-progress / stalled）。⇒ ② **不得**再为它独立立案。
- *                    ⛔ 不是 standing-ok：它**此刻确实为假**（说它成立即硬规则 3b 的假绿）。
- *                    ⛔ 不是 not-evaluated：读数在、违反也在，只是成因已由另一个判官接管。
- *                    ⇒ 独立取值。判据 AC-242 本身**不动**（它保持诚实：有此刻为假的冻结 AC 就红）；
- *                    本态只回答「这条红该由谁来消」——归 ③ 的主体 AC，不归这条元判据
- *                    （为它立案会造出 DoD 结构上只能由**别的 AC 的 owner** 关闭的任务，每轮一条）。
- *                    ⚠️ 退路（⛔ 闸不恒开）：若 ③ 本轮读不到 / 未评估 / 并未判 violated，则派生条件
- *                    不成立 ⇒ 回落 `standing-violated` 照旧立案（成因不明时仍要有人看）。
- */
-export type GapState = "in-progress" | "gap" | "workable" | "world-gated" | "unclassified" | "stalled" | "not-evaluated" | "standing-ok" | "standing-violated" | "frozen-violated" | "derived-routed";
+/** 单条 AC 的缺口态（十态并存，not-evaluated 保留——读不到 tasks 输入与「缺口/无牵引」不同形，硬规则 3b）。
+ *  ⛔ **类型定义已上收 Core**：`packages/quay/src/core/goal-analysis.ts` 的 `GapState`（逐值语义写在那边，
+ *  包含 in-progress / gap / workable / world-gated / unclassified / stalled / not-evaluated / standing-ok /
+ *  standing-violated / frozen-violated / derived-routed）。理由是**同一套词表有两个消费者**：本 driver 写
+ *  `goal-next` fact，Core CLI `quay goal next` 读它——两处各写一份就是硬规则 5b 的漂移。
+ *  这里 re-export 只为保持既有导入面（本文件的消费方与单测都按 `goal-driver.ts` 的导出取符号）。
+ *  ⛔ 新增/改名一个态只能改 Core 那处，本文件不得重写一份词表。 */
+export type { GapState } from "./driver-runtime.ts";
 
 /** 生产载体（production carrier）路径的机械判别——**判据文本里出现的一个 `.quay/<file>` 路径 token**。
  *
@@ -2161,13 +2117,11 @@ export function classifyCriterionKind(criterion: unknown): CriterionKind {
   return readsProductionCarrier(s) ? "world-gated" : "workable";
 }
 
-/** 一条 AC 的缺口读数。taskCount 只在 not-evaluated 时为 null（⛔ 与 0 不同形）。 */
-export interface GoalGap {
-  goal: string;
-  ac: string;
-  state: GapState;
-  taskCount: number | null;
-}
+/** 一条 AC 的缺口读数。taskCount 只在 not-evaluated 时为 null（⛔ 与 0 不同形）。
+ *  ⛔ **定义已上收 Core**（`core/goal-analysis.ts` 的 `GoalGap`，`taskCount: number | null` 的语义写在
+ *  那边）：Core CLI 的 `goal-next` 读面与 `goalNextProjection` 也消费这个形状 ⇒ 只留一处定义。
+ *  这里 re-export 保持既有导入面（同上面的 `GapState`，硬规则 5b）。 */
+export type { GoalGap } from "./driver-runtime.ts";
 
 /** ready-pool-check 派生出的「任务能否自行前进」判定（G9 stalled 第四态的结构量，⛔ 不用计时器）。
  *  eligibleTodoIds = todo 任务里 ready-pool-check 判合格（candidates[].eligible===true，可被 promotion
@@ -3569,6 +3523,43 @@ export function gapViewFact(
   };
 }
 
+/** `goal-next` fact 的名字（tasks/gap-goal-next-projection, AC-935）——与 goal-ring / goal-gaps /
+ *  goal-sufficiency / goal-objective / goal-target-health 并列落进同一份轮记录。Core CLI
+ *  `quay goal next` 读的就是它（**唯一**投影载体，⛔ CLI 不自己再算一遍——那是第二处实现）。 */
+export const GOAL_NEXT_FACT_NAME = "goal-next";
+
+/** 组装 `goal-next` fact。⛔ 两个半边必须**可分**（硬规则 3b）：
+ *  · 算出过（`rows` 非 null）⇒ `value.rows` = 每 active GOAL 恰好一行；**空数组 = 查过且本轮零 active
+ *    GOAL**，是一个测量。
+ *  · 没算成（`rows === null`，成因在 `cause`）⇒ `value.rows` 恒为 `[]`，由 `evaluated:false` + `cause`
+ *    把它与「查过且零条」分开——⛔ 绝不让「算不出投影」长得像「没有下一步」。
+ *  ⛔ 本 fact **不参与任何判定**：它由 `gaps` 单向派生（`goalNextProjection` 是纯函数），spawn / flip
+ *  决策读的仍是原 gaps 数组——新增本 fact 前后那些判定逐字节相同。 */
+export function goalNextFact(
+  rows: Array<GoalNextRow> | null,
+  cause: string | null = null,
+  activeGoalCount: number | null = null,
+): Fact<Record<string, unknown>> {
+  if (rows === null) {
+    return {
+      name: GOAL_NEXT_FACT_NAME,
+      value: { rows: [], evaluated: false, cause: cause ?? "projection-not-computed" },
+      state: "not-evaluated",
+      reason: `未评估（cause=${cause ?? "projection-not-computed"}）——⛔ 不是「没有下一步」`,
+    };
+  }
+  return {
+    name: GOAL_NEXT_FACT_NAME,
+    value: { rows, evaluated: true, cause: null },
+    state: "verified",
+    // 分母（本轮 active GOAL 数）一并带出 ⇒ 「每个 active GOAL 是否恰好一行」当场可核（⛔ 不是只落在
+    // value 里让人自己数）。成因分布同样落进 reason，便于人一眼看出这一轮卡在哪一态。
+    reason:
+      `active goal ${activeGoalCount ?? "?"} 个 ⇒ ${rows.length} 行` +
+      (rows.length > 0 ? `：${rows.map((r) => `${r.goal}/${r.ac}/${r.rank}/${r.owner}/${r.action.kind}`).join(" ")}` : ""),
+  };
+}
+
 /** G9 缺口语义环的 spawn pass：可立案缺口（isFilingGapState）非空 ⇒ 过 halt + 资源门 + 每轮上限，
  *  逐条 spawn 短命 agent（一条 gap AC 一个 agent，经 quay-file-task 立案）。返回 spawned（实际 spawn 数）
  *  与 llmInvoked（派生自真实 argv，⛔ 不硬编码）。
@@ -4165,6 +4156,12 @@ export interface GoalRoundReadings {
   standingRecheck: PrefilingRecheckReading;
   /** ⑤ 缺口读数（G7 + G9 stalled）：每条 active AC 的四态；taskFacts==null ⇒ 逐条 not-evaluated。 */
   gaps: Array<GoalGap>;
+  /** ⑤b 下一步投影（tasks/gap-goal-next-projection, AC-935）：**每个 active GOAL 恰好一行**
+   *  `{goal, ac, gapState, rank, owner, action, evidenceRefs}`，按 `GOAL_NEXT_PRIORITY` 排序。
+   *  由 `goalNextProjection(records, gaps, taskFacts)` **纯派生**——⛔ 不改任何 spawn / flip 判定。
+   *  ⚠️ 它回答的是「下一步归谁做什么」，不是第二套缺口读数：`gapState` 逐字取自 `gaps`，`rank` 只在
+   *  AC 关联任务停在 `needs-human` 时把它提到最前（`owner: human` / `ask-human`）。 */
+  next: Array<GoalNextRow>;
   /** ⑥ G9 语义环：本轮实际 spawn 的 gap-filing agent 数（过 halt/资源门/上限后；0 = 未 spawn）。 */
   spawned: number;
   /** ⑥ G9 语义环：本轮 spawn 是否调用了 LLM（派生自真实 argv，⛔ 不硬编码）。 */
@@ -4334,6 +4331,10 @@ export interface GoalRoundResult {
    *  零条时**不是空数组**——`value.evaluated:false` + `cause` 与「查过且零条」分开（硬规则 3b）。
    *  （gap-goal-driver-computed-gaps-never-surfaced-as-a-round-fact） */
   gapFacts: Array<Fact<Record<string, unknown>>>;
+  /** ⑤b 下一步投影的 fact（name="goal-next"，恰好 1 条）。`value.rows` = 每 active GOAL 一行；
+   *  ⛔ 与 `goal-gaps` 同一条三态纪律：`evaluated:false` + `cause` 与「查过且零行」不同形（硬规则 3b）。
+   *  Core CLI `quay goal next` 读的就是它——⛔ CLI 不得自己再算一遍（第二处实现即漂移，硬规则 5b）。 */
+  nextFacts: Array<Fact<Record<string, unknown>>>;
 }
 
 /** 跑一轮 goal 机械环：枚举 active GOAL → 逐 AC 跑 criterion → 写 GateEvent（gate 自带；evidence
@@ -4363,6 +4364,8 @@ export async function runGoalRound(root: string, opts: GoalRoundOptions = {}): P
       objectiveFacts: [],
       // ⛔ gaps 从未算出 ⇒ 独立取值（evaluated:false + cause），绝不落成「零缺口」（硬规则 3b）。
       gapFacts: [gapViewFact(null, "quay-cli-unresolvable")],
+      // 投影从未算过 ⇒ 独立取值（evaluated:false + cause），⛔ 绝不落成「零下一步」（硬规则 3b）。
+      nextFacts: [goalNextFact(null, "quay-cli-unresolvable")],
     };
   }
 
@@ -4384,6 +4387,7 @@ export async function runGoalRound(root: string, opts: GoalRoundOptions = {}): P
       sufficiencyFacts: [],
       objectiveFacts: [],
       gapFacts: [gapViewFact(null, "goal-list-unreadable")],
+      nextFacts: [goalNextFact(null, "goal-list-unreadable")],
     };
   }
 
@@ -4738,6 +4742,13 @@ export async function runGoalRound(root: string, opts: GoalRoundOptions = {}): P
   const verdictByAc = new Map<string, "pass" | "fail" | "not-evaluated">(criteria.map((c) => [c.id, c.verdict]));
   const gaps = computeGoalGaps(records, taskFacts, judgment, achievedFailing, frozenFailing, frozenRecheck, standingRecheck, verdictByAc, preMergePhaseAcIds);
 
+  // ⑤b 下一步投影（tasks/gap-goal-next-projection, AC-935）：把「每个 active GOAL 的下一步归谁做什么」
+  // 从同一轮的 records / gaps / taskFacts 纯派生出来。⛔ 它是**读面**，不是判定：下面的 spawn / flip /
+  // 分诊读的仍是 `gaps` 与 `records`，投影改变不了任何一个既有结论（单测的负控制钉的就是这条）。
+  // 实现住在 Core（`core/goal-analysis.ts`，经 driver-runtime 取符号）——同一份口径供 Core CLI
+  // `quay goal next` 复用，⛔ 不在 driver 侧另算一份（硬规则 5b）。
+  const next = goalNextProjection(records, gaps, taskFacts);
+
   // ⑦ draft AC 分诊（GOAL-010 范围② / AC-210）：对 active GOAL 名下每条 draft AC 出四态判决并逐条
   // 落痕。分诊循环只【产出判决】，⛔ 不 flip 任何 AC status——判决的消费在 ⑧（仅 activate 一态被
   // 执行；re-anchor / needs-human / hold 仍只落痕不 flip；放弃 retired 归人，且分诊不再判 retire，
@@ -4893,6 +4904,8 @@ export async function runGoalRound(root: string, opts: GoalRoundOptions = {}): P
     frozenRecheck,
     standingRecheck,
     gaps,
+    // ⑤b 下一步投影（AC-935）：每 active GOAL 一行；`nextFacts` 是同一份数据的并列 fact。
+    next,
     triage,
     activationBlocked,
     unreachableDrafts,
@@ -4913,6 +4926,9 @@ export async function runGoalRound(root: string, opts: GoalRoundOptions = {}): P
   // 生产载体、去向是 round-gate-reread——本任务 AC 之一）。⛔ 单向派生、⛔ 不改任何 spawn/flip 判定
   // （spawn 读的仍是原 gaps）。
   const gapFacts = [gapViewFact(gaps, null, records)];
+  // ⑤b 的 fact：与 `value.next` 同一份数组（同一轮同一份来源，⛔ 不可能互相漂移）。分母 = 本轮 active GOAL
+  // 数（即投影的输入作用域），使「每个 active GOAL 恰好一行」当场可核。
+  const nextFacts = [goalNextFact(next, null, activeGoals.length)];
   if (staleness === null) {
     return {
       fact: {
@@ -4925,6 +4941,8 @@ export async function runGoalRound(root: string, opts: GoalRoundOptions = {}): P
       objectiveFacts,
       // ⚠️ 本路径上 gaps **已算出**（staleness 读不到不影响 ⑤）⇒ 照常落痕（⛔ 不因旁路读数坏掉而丢弃它）。
       gapFacts,
+      // 同理：投影只依赖 ⑤ 的输出，旁路读数坏掉不影响它 ⇒ 照常落痕。
+      nextFacts,
     };
   }
   return {
@@ -4965,6 +4983,7 @@ export async function runGoalRound(root: string, opts: GoalRoundOptions = {}): P
     sufficiencyFacts,
     objectiveFacts,
     gapFacts,
+    nextFacts,
   };
 }
 
@@ -5668,8 +5687,8 @@ export function goalDriverRoutines(root: string, opts: GoalRoundOptions = {}): R
     name: "goal-ring",
     schedule: EVERY_ROUND,
     run: async () => {
-      const { fact, sufficiencyFacts, objectiveFacts, gapFacts } = await runGoalRound(root, opts);
-      return [fact, ...sufficiencyFacts, ...objectiveFacts, ...gapFacts, targetHealthFact(root, opts)];
+      const { fact, sufficiencyFacts, objectiveFacts, gapFacts, nextFacts } = await runGoalRound(root, opts);
+      return [fact, ...sufficiencyFacts, ...objectiveFacts, ...gapFacts, ...nextFacts, targetHealthFact(root, opts)];
     },
   }];
 }
