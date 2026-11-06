@@ -1,7 +1,7 @@
 ---
 id: gap-goal-request-queue
 title: goal request 队列：提交、消费、幂等
-status: todo
+status: ready
 labels:
   - gap
   - goal-driver
