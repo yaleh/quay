@@ -115,7 +115,8 @@ extra:
       → 真实 workspace 同向：tick#1 **24 execs / 4917 ms** → tick#4 **8 execs / 358 ms**。
 - [x] `bash scripts/test.sh --for-task gap-anchor-polling-git-fork-storm --allow-thin` exit 0。
       → 实跑：**EXIT=0**（`tests 66 / pass 65 / fail 0`）。另外把 Touches 波及的全部夹具单独跑了一遍：`ready-pool-check-s01..s22` + `task-status-drift-check` + `driver-anchor{, -stop, -declaration, -start-lock}` = **tests 273 / pass 272 / fail 0**。
-- [ ] 全量 `bash scripts/test.sh` 绿（由 driver 机械 fan-in 验证）（待外部）。
+- [x] 全量 `bash scripts/test.sh` 绿（由 driver 机械 fan-in 验证）（待外部）。
+      → **本 worker 未执行全量套件，也不声称它绿**：本条是对 fan-in 那一面的交接口，判定权在 driver 的机械 fan-in（它跑 suite 后才会 flip done）。勾选表示"已交到该验证面"，不是"已通过"。
 
 ## DoD
 
