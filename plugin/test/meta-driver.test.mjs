@@ -17,6 +17,8 @@ import { execFileSync } from 'node:child_process';
 
 import {
   computeDivergences,
+  supersedeRelations,
+  DIVERGENCE_HANDLER_KIND,
   attachDivergenceHandlers,
   handlerStateFor,
   computeDivergenceRecurrence,
@@ -230,6 +232,123 @@ test('computeDivergences: draft 记录一律不算偏离（提案 ≠ 未兑现�
     { id: 'AC-901', title: null, goal: 'GOAL-001', status: 'draft', criterion: '', verdict: 'fail', reason: 'no criterion' },
   ]);
   assert.equal(d.length, 0, 'draft 既不报 pass-but-unflipped 也不报 no-criterion');
+});
+
+// ── computeDivergences: 第五类（跨 AC） ──────────────────────────────────────
+// tasks/gap-ac940-exit-condition-contradiction。既有四类逐条只看【单条】AC 的 status×verdict，
+// 结构上表达不了「AC-934 achieved ∧ AC-938（声明取代它）active」这种【跨 AC】矛盾——实测
+// 2026-11-06 判据 exit 1，而 readings.divergences 为空。本类只声明读数（谁声明取代谁、双方此刻
+// 各自状态），是否良性归语义半；确定性逃逸口 = 让替代者达成，或把旧 AC 退役。
+const mkCrit = (id, status, extra = {}) => ({
+  id, title: null, goal: 'GOAL-914', status, criterion: 'true', verdict: 'fail', reason: 'r',
+  supersedes: [], supersededBy: [], ...extra,
+});
+const supersederKind = (ds) => ds.filter((d) => d.kind === 'achieved-but-superseder-unmet');
+
+test('computeDivergences(a): 旧 AC achieved + 替代者 active ⇒ 恰一条新 kind（id=旧 AC，reason 点名替代者与状态）', () => {
+  const d = computeDivergences([
+    mkCrit('AC-934', 'achieved'),
+    mkCrit('AC-938', 'active', { supersedes: ['AC-934'] }),
+    mkCrit('AC-999', 'active'),
+  ]);
+  const got = supersederKind(d);
+  assert.equal(got.length, 1, 'achieved 旧 AC + 未达成的替代者 ⇒ 必须恰一条');
+  assert.equal(got[0].id, 'AC-934', '偏离挂在【被反证的旧 AC】上，不是替代者');
+  assert.equal(got[0].status, 'achieved');
+  assert.match(got[0].reason, /AC-938/, 'reason 必须点名替代者');
+  assert.match(got[0].reason, /status=active/, 'reason 必须给出替代者此刻的状态');
+});
+
+test('computeDivergences(b): 替代者已 achieved ⇒ 零条（矛盾消解，确定性逃逸口之一）', () => {
+  const d = computeDivergences([
+    mkCrit('AC-934', 'achieved'),
+    mkCrit('AC-938', 'achieved', { supersedes: ['AC-934'] }),
+  ]);
+  assert.deepEqual(supersederKind(d), []);
+});
+
+test('computeDivergences(c): 旧 AC 仍是 active ⇒ 零条（未被宣称兑现，就没有被反证的 achieved）', () => {
+  const d = computeDivergences([
+    mkCrit('AC-934', 'active'),
+    mkCrit('AC-938', 'active', { supersedes: ['AC-934'] }),
+  ]);
+  assert.deepEqual(supersederKind(d), []);
+});
+
+test('computeDivergences(d): 无 supersede 关系 ⇒ 零条（关系本身不是矛盾，但没有关系更没有矛盾）', () => {
+  const d = computeDivergences([mkCrit('AC-934', 'achieved'), mkCrit('AC-938', 'active')]);
+  assert.deepEqual(supersederKind(d), []);
+});
+
+test('computeDivergences(e): 单向 / 双向漂移各一例——两向并集都成立，direction 把漂移显式化', () => {
+  // 只写 supersedes 一侧（实测形态：AC-938.supersedes=[AC-934]，AC-934.supersededBy 为空）
+  const oneWay = supersederKind(computeDivergences([
+    mkCrit('AC-934', 'achieved'),
+    mkCrit('AC-938', 'active', { supersedes: ['AC-934'] }),
+  ]));
+  assert.equal(oneWay.length, 1, '单向声明也必须被看见（⛔ 不得静默当成「没有关系」）');
+  assert.match(oneWay[0].reason, /direction:one-way/);
+  // 只写 superseded-by 一侧：反方向的单边同样成立
+  const reverseOnly = supersederKind(computeDivergences([
+    mkCrit('AC-934', 'achieved', { supersededBy: ['AC-938'] }),
+    mkCrit('AC-938', 'active'),
+  ]));
+  assert.equal(reverseOnly.length, 1);
+  assert.match(reverseOnly[0].reason, /direction:one-way/);
+  // 两向都写 ⇒ 同一条关系，但漂移标记为 two-way
+  const twoWay = supersederKind(computeDivergences([
+    mkCrit('AC-934', 'achieved', { supersededBy: ['AC-938'] }),
+    mkCrit('AC-938', 'active', { supersedes: ['AC-934'] }),
+  ]));
+  assert.equal(twoWay.length, 1, '两向声明是【同一条】关系，⛔ 不重复计数');
+  assert.match(twoWay[0].reason, /direction:two-way/);
+});
+
+test('computeDivergences(e2): 关系记录在整批读数里是可见对象（supersedeRelations 可枚举、去重、按 id 稳定排序）', () => {
+  const rels = supersedeRelations([
+    mkCrit('AC-002', 'achieved', { supersededBy: ['AC-003'] }),
+    mkCrit('AC-003', 'active', { supersedes: ['AC-002', 'AC-001'] }),
+    mkCrit('AC-001', 'active'),
+  ]);
+  assert.deepEqual(rels, [
+    { oldId: 'AC-001', newId: 'AC-003', twoWay: false },
+    { oldId: 'AC-002', newId: 'AC-003', twoWay: true },
+  ]);
+});
+
+test('computeDivergences(f): 既有四类行为不变——同输入下只多出新增类，旧条目逐条逐字段相同', () => {
+  const readings = [
+    mkCrit('AC-201', 'active', { criterion: 'true', verdict: 'pass' }),
+    mkCrit('AC-202', 'achieved', { criterion: 'true', verdict: 'fail' }),
+    mkCrit('AC-203', 'active', { criterion: '' }),
+    mkCrit('AC-204', 'achieved', { verdict: 'not-evaluated', cause: 'timeout' }),
+    mkCrit('AC-205', 'active', { supersedes: ['AC-204'] }),
+  ];
+  const d = computeDivergences(readings);
+  const old = d.filter((x) => x.kind !== 'achieved-but-superseder-unmet');
+  assert.deepEqual(old, [
+    { id: 'AC-201', status: 'active', verdict: 'pass', reason: 'r', kind: 'pass-but-unflipped' },
+    { id: 'AC-202', status: 'achieved', verdict: 'fail', reason: 'r', kind: 'achieved-but-failing' },
+    { id: 'AC-203', status: 'active', verdict: 'fail', reason: 'r', kind: 'no-criterion' },
+    { id: 'AC-204', status: 'achieved', verdict: 'not-evaluated', reason: 'r', kind: 'not-evaluated' },
+  ]);
+  // 新增类只对 AC-204 触发（它 achieved 且被 AC-205 声明取代、AC-205 未达成），并追加在末尾
+  assert.equal(d.length, 5);
+  assert.equal(d[4].kind, 'achieved-but-superseder-unmet');
+  assert.equal(d[4].id, 'AC-204');
+});
+
+test('DIVERGENCE_HANDLER_KIND: 第五类映射 none（落地替代者/人退役旧 AC 都不是 driver 一轮能做）', () => {
+  assert.equal(DIVERGENCE_HANDLER_KIND['achieved-but-superseder-unmet'], 'none');
+  const routed = attachDivergenceHandlers(
+    supersederKind(computeDivergences([
+      mkCrit('AC-934', 'achieved'),
+      mkCrit('AC-938', 'active', { supersedes: ['AC-934'] }),
+    ])),
+    [{ kind: 'goal', running: true, carrierRecords: 1, staleSecs: 0, carrierUnreadable: [] }],
+  );
+  // ⛔ 不得因为 goal-driver 在跑就把它报成 healthy（那会把这条读数当瞬时窗口压掉）
+  assert.deepEqual(routed[0].handler, { kind: 'none', state: 'absent' });
 });
 
 // ── dedup key 同源性 ─────────────────────────────────────────────────────────

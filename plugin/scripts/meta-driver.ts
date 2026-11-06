@@ -138,15 +138,38 @@ export interface CriterionReading {
    *  2026-10-21 autoDrive task could only say "not-evaluated" and invented the rest. A reading that
    *  cannot say WHY it is not measurable cannot be routed OR refuted.) */
   cause: string | null;
+  /** 本 AC 声明自己取代哪些旧 AC（store 的 `supersedes` 投影）。⛔ 这是【声明】不是【处置】——
+   *  它不会翻转任何 AC 的 status（goal-store 的处置分支以 `isGoalRecord` 为闸，本 driver 只写 AC-*）。
+   *  `collectReadings` 总是填它；undefined = 【调用方没提供关系数据】，⛔ 不等于「没有关系」
+   *  （硬规则 3b：读不懂不得与「合格」同形——所以这里不用 `[]` 冒充「已查且为空」）。 */
+  supersedes?: string[];
+  /** 谁声明取代本 AC（store 的 `superseded-by` 投影）。⚠️ 实测存在【单向漂移】：AC-938 写了
+   *  `supersedes: ["AC-934"]` 而 AC-934 的 `supersededBy` 为空——所以第五类判定取两向【并集】，
+   *  并在 reason 里带 `direction:one-way` 让漂移本身可见（⛔ 不静默当成「没有关系」）。 */
+  supersededBy?: string[];
 }
 
-/** 机械算出的四类偏离（criterion 的真值 vs 记录的自述）。
+/** 机械算出的五类偏离（criterion 的真值 vs 记录的自述）。
  *  ⛔ `not-evaluated` is its OWN kind, never folded into pass/fail (hard rule 3b: "could not
  *  measure" and "is false" are different values). It exists so a standing unmeasured AC is
  *  ESCALATED instead of being silently absent from every divergence list
  *  (tasks/gap-meta-goaldriverchildtimeoutms: the 2026-10-21T04:08:39Z meta reading was
  *  `not-evaluated` and produced NO divergence — no handler was ever told it could not be measured). */
-export type DivergenceKind = "pass-but-unflipped" | "achieved-but-failing" | "no-criterion" | "not-evaluated";
+export type DivergenceKind =
+  | "pass-but-unflipped"
+  | "achieved-but-failing"
+  | "no-criterion"
+  | "not-evaluated"
+  /** 第五类（tasks/gap-ac940-exit-condition-contradiction）：一条已 `achieved` 的 AC，被【它自己声明的
+   *  替代者】反证——替代者存在且尚未 `achieved`。前四类逐条只看【单条】AC 的 status×verdict，
+   *  结构上表达不了「跨 AC」的矛盾，于是 AC-934（achieved）∧ AC-938（active，声明取代它）这个组合
+   *  在每轮 `readings.divergences` 里都是隐形的（实测：2026-11-06 判据 exit 1，divergences 为空）。
+   *
+   *  ⚠️ 误报纪律（⛔ 别把这条变成每轮都在的噪声）：`supersedes` 关系本身【不等于】矛盾——
+   *  「替代者尚未达成」在一个正常重构窗口里同样成立。本类只声明【读数】（谁声明取代谁、双方此刻
+   *  各自的状态），是否良性由语义半判定。确定性逃逸口有两条：让替代者达成，或把旧 AC 退役成
+   *  `superseded`（那时它已不在承诺态，本类只对 `achieved` 触发）。 */
+  | "achieved-but-superseder-unmet";
 
 /** 处理者的三态 + 「读不出」。⛔ 读不出 ≠ 不存在：读不懂不得与「合格」或其反面同形
  *  （硬规则 3b）。「不存在」是【确实没有处理者】，「读不出」是【读了但没读到】——两者处置相反
@@ -435,6 +458,92 @@ export function computeDivergences(readings: CriterionReading[]): Divergence[] {
     // ⛔ Not `achieved-but-failing`/`pass-but-unflipped`: the verdict is neither (hard rule 3b).
     if (c.verdict === "not-evaluated") { out.push({ ...base, kind: "not-evaluated" }); continue; }
   }
+  // 第二遍：跨 AC 判定（第五类）。⛔ 放在第一遍之后、且【不触碰】上面任何分支的判定与顺序——
+  // 既有四类在同样的输入下必须逐条逐字段不变（四条旧测试一条都不改）。
+  out.push(...computeSupersederDivergences(readings));
+  return out;
+}
+
+// ── 第五类：被自己声明的替代者反证（tasks/gap-ac940-exit-condition-contradiction）─────────────────
+// 一条 supersede 关系 = 【new 声明自己取代 old】。两个方向都可能写下这条声明（new 的 `supersedes`
+// 与 old 的 `superseded-by`），而实测存在单向漂移 ⇒ 取两向【并集】，并把 `twoWay=false` 记进
+// reason 让漂移可见（硬规则 5/3b：读不全不得与「没有关系」同形）。
+export interface SupersedeRelation {
+  oldId: string;
+  newId: string;
+  /** 两向声明都写了 ⇒ true；只有一侧写了（漂移）⇒ false。 */
+  twoWay: boolean;
+}
+
+function idList(v: unknown): string[] {
+  if (!Array.isArray(v)) return [];
+  return v.map((x) => String(x).trim()).filter((s) => s !== "");
+}
+
+/** 从整批读数机械算出 supersede 关系集（两向并集，去重）。⛔ 纯算术，无语义判断。
+ *  只在【两端都在本批读数里且同 goal】时成立：看不见的一端其 status 不可知，⛔ 不臆造
+ *  「它没达成」（硬规则 3b），也不臆造「关系不存在」——它只是不参与本类判定。 */
+export function supersedeRelations(readings: CriterionReading[]): SupersedeRelation[] {
+  const byId = new Map(readings.map((r) => [r.id, r]));
+  // key = `${oldId}\u0000${newId}`；两个布尔位分别记录哪一侧写了声明。
+  const pairs = new Map<string, { oldId: string; newId: string; viaSupersedes: boolean; viaSupersededBy: boolean }>();
+  const touch = (oldId: string, newId: string, side: "supersedes" | "supersededBy") => {
+    const key = `${oldId}\u0000${newId}`;
+    const row = pairs.get(key) ?? { oldId, newId, viaSupersedes: false, viaSupersededBy: false };
+    if (side === "supersedes") row.viaSupersedes = true;
+    else row.viaSupersededBy = true;
+    pairs.set(key, row);
+  };
+  for (const r of readings) {
+    // r 的 `supersedes` 列的是【被它取代的旧 id】⇒ old → new = (oldId, r.id)。
+    for (const oldId of idList(r.supersedes)) if (oldId !== r.id) touch(oldId, r.id, "supersedes");
+    // r 的 `supersededBy` 列的是【取代它的新 id】⇒ old = r.id, new = 每个 newId。
+    for (const newId of idList(r.supersededBy)) if (newId !== r.id) touch(r.id, newId, "supersededBy");
+  }
+  const out: SupersedeRelation[] = [];
+  for (const row of pairs.values()) {
+    const oldRec = byId.get(row.oldId);
+    const newRec = byId.get(row.newId);
+    // 看不见的一端 / 跨 goal 的关系 ⇒ 本类不判定（不是「无矛盾」，是「不可判」）。
+    if (!oldRec || !newRec) continue;
+    if (oldRec.goal == null || oldRec.goal !== newRec.goal) continue;
+    out.push({ oldId: row.oldId, newId: row.newId, twoWay: row.viaSupersedes && row.viaSupersededBy });
+  }
+  // 稳定顺序：先按旧 AC，再按新 AC —— 同一批输入必须产出同一顺序（载体/摘要可比）。
+  return out.sort((a, b) => (a.oldId === b.oldId ? a.newId.localeCompare(b.newId) : a.oldId.localeCompare(b.oldId)));
+}
+
+/** 第五类的判定（纯函数）。判定写全：
+ *  X.status === "achieved" ∧ ∃Y≠X 同 goal：Y 声明取代 X ∧ Y.status !== "achieved"
+ *  ⇒ 一条 divergence（id = X.id，reason 逐条枚举 Y 的 id 与 status）。 */
+function computeSupersederDivergences(readings: CriterionReading[]): Divergence[] {
+  const byId = new Map(readings.map((r) => [r.id, r]));
+  const unmet = new Map<string, Array<{ rel: SupersedeRelation; status: string; verdict: string }>>();
+  for (const rel of supersedeRelations(readings)) {
+    const oldRec = byId.get(rel.oldId)!;
+    const newRec = byId.get(rel.newId)!;
+    if (oldRec.status !== "achieved") continue; // 旧 AC 只在【已宣称兑现】时才会被反证
+    if (newRec.status === "achieved") continue; // 替代者已达成 ⇒ 矛盾消解（确定性逃逸口之一）
+    const list = unmet.get(rel.oldId) ?? [];
+    list.push({ rel, status: newRec.status, verdict: newRec.verdict });
+    unmet.set(rel.oldId, list);
+  }
+  const out: Divergence[] = [];
+  for (const [oldId, list] of [...unmet.entries()].sort((a, b) => a[0].localeCompare(b[0]))) {
+    const oldRec = byId.get(oldId)!;
+    const superseders = list
+      .map((x) => `${x.rel.newId} (status=${x.status}, verdict=${x.verdict})`)
+      .join(", ");
+    // 漂移本身就是读数：任一关系只有一侧写了声明 ⇒ one-way。⛔ 不把它折成「无事发生」。
+    const direction = list.every((x) => x.rel.twoWay) ? "two-way" : "one-way";
+    out.push({
+      id: oldRec.id,
+      kind: "achieved-but-superseder-unmet",
+      status: oldRec.status,
+      verdict: oldRec.verdict,
+      reason: `${oldRec.id} is achieved but its declared superseder is not: ${superseders}; direction:${direction}`,
+    });
+  }
   return out;
 }
 
@@ -459,6 +568,15 @@ export const DIVERGENCE_HANDLER_KIND: Record<DivergenceKind, string> = {
   // Mapping it to "goal" would report handler.state=healthy and the probe spec would suppress it
   // as a transient window — exactly the silence this task removes.
   "not-evaluated": "none",
+  // ⛔ "none" on purpose, and the reason is NOT "nobody cares": the two deterministic escapes are
+  // (a) LAND the superseder so it reaches `achieved` — that is worker/fan-in work on the superseder's
+  //     own task, not a goal-driver round; and (b) a PERSON retires the old AC (`superseded`), which
+  //     takes it out of the committed set. Mapping this kind to "goal" would claim that re-running
+  //     the goal-driver resolves it — it cannot: the goal-driver only re-gates criteria and flips an
+  //     AC whose criterion passes; it never lands code. It would also make handler.state=healthy
+  //     suppress the reading as a transient window, which is exactly the invisibility this kind
+  //     exists to remove (same reasoning as `not-evaluated` above).
+  "achieved-but-superseder-unmet": "none",
 };
 
 /** 由 drivers 读数派生一条偏离的处理者三态。纯函数、可枚举（⛔ 不是布尔/总数）：
@@ -1191,6 +1309,12 @@ export async function collectReadings(root: string, cliFocus: string | null): Pr
   const goalIds = new Set(goals.map((g) => g.id));
   const acs = all.filter((r) => String(r.id ?? "").startsWith("AC-") && goalIds.has(String(r.goal ?? "")));
 
+  // supersede 关系从【同一批】`all` 记录里取——⛔ 不新增第二次 store 读（那是白花一次读面成本，
+  // 且两次读可能落在不同时刻、拼出一个不存在的状态组合）。两向都取：实测存在单向漂移
+  // （AC-938.supersedes=[AC-934] 而 AC-934.supersededBy=[]），由 `supersedeRelations` 取并集
+  // 并在 reason 里标 direction:one-way。
+  const idArray = (v: unknown): string[] =>
+    Array.isArray(v) ? v.map((x) => String(x).trim()).filter((s) => s !== "") : [];
   const criteria: CriterionReading[] = [];
   for (const ac of acs) {
     const id = String(ac.id);
@@ -1205,6 +1329,10 @@ export async function collectReadings(root: string, cliFocus: string | null): Pr
       verdict,
       reason,
       cause,
+      // store 的投影字段：`supersedes` = 本 AC 取代谁，`supersededBy` = 谁取代本 AC。
+      // ⛔ 原样传两向，判定侧取并集——不在这里「归一化」成一个方向（那会把漂移抹掉）。
+      supersedes: idArray(ac.supersedes),
+      supersededBy: idArray(ac.supersededBy),
     });
   }
   const drivers = collectDriverReadings(root);

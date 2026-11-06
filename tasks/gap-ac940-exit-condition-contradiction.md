@@ -1,7 +1,7 @@
 ---
 id: gap-ac940-exit-condition-contradiction
 title: AC-940 退出条件矛盾可见化：跨 AC 反证成为第五类 divergence + GOAL-914 退出条件纳入 AC-938 + 判据回归锁
-status: ready
+status: done
 labels:
   - gap
   - meta-driver
