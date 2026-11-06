@@ -1,7 +1,7 @@
 ---
 id: gap-goal-driver-filing-throttle
 title: goal-driver 立案节流：每 AC 冷却与日上限，用台账算 lastFiledAt
-status: todo
+status: ready
 labels:
   - gap
   - goal-driver
