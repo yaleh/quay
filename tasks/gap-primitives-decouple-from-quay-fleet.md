@@ -31,11 +31,11 @@ depends_on: []
 
 ## AC
 
-- [ ] `node --test plugin/test/primitives-drift-check.test.mjs plugin/test/session-primitives-adoption.test.mjs` 退出码 0。
-- [ ] `rg -n 'fleetRepo|/data/home/yale/work/quay-fleet' plugin/scripts packages/quay` 在实现文件零命中；`PROVENANCE.md` 的历史来源段是唯一允许的提及，且显式标注为只读历史。
-- [ ] checker 只读仓库内基线；基线不可读 ⇒ exit 3；本地文件改动 ⇒ exit 1；恢复 ⇒ exit 0。
-- [ ] 静态门不再有"外部仓库缺失 ⇒ NOT-EVALUATED"的路径；`runner-static-gate.ts` 的注释与行为一致。
-- [ ] 负控：删掉一个 primitive ⇒ 红；把基线 sha256 改错 ⇒ 红；只改基线不改文件 ⇒ 红。
+- [x] `node --test plugin/test/primitives-drift-check.test.mjs plugin/test/session-primitives-adoption.test.mjs` 退出码 0。
+- [x] `rg -n 'fleetRepo|/data/home/yale/work/quay-fleet' plugin/scripts packages/quay` 在实现文件零命中；`PROVENANCE.md` 的历史来源段是唯一允许的提及，且显式标注为只读历史。
+- [x] checker 只读仓库内基线；基线不可读 ⇒ exit 3；本地文件改动 ⇒ exit 1；恢复 ⇒ exit 0。
+- [x] 静态门不再有"外部仓库缺失 ⇒ NOT-EVALUATED"的路径；`runner-static-gate.ts` 的注释与行为一致。
+- [x] 负控：删掉一个 primitive ⇒ 红；把基线 sha256 改错 ⇒ 红；只改基线不改文件 ⇒ 红。
 
 ## DoD
 
