@@ -1,4 +1,4 @@
-// @test-group product
+// @test-group serial
 // sea-build-node-version.test.mjs — gap-sea-binary-embeds-build-time-node-version-ci-vs-local-diverge.
 //
 // A SEA executable's BASE is a byte-copy of whatever `node` PATH resolves to at build time

@@ -507,6 +507,23 @@ npm 侧无需处理（`files` 是白名单，`archive/` 天然不在内）。
 `find -not -path '*/archive/*'` 行为等价）。**接线面清单点名文件时以承载该角色的文件为准**——
 判据/清单绑在 `.sh` 上会在每次重构后重新变假（AC-157 判据即因此取假）。
 
+### 12c-ii. 分析员指令面：探针规格的扫描面（§12c 的第六类面，2026-11-06 立）
+
+§12c 那五面都是**走树的代码**；还有一面不是代码——**发现例程的探针规格**（`plugin/probes/*.md`
+的 body 就是分析员收到的 prompt）。它一旦把 `archive/**` 当作可分析面，就会读出**结构上必然为真**
+的「重复」：冻结快照与它的活副本在活文件自捕获后未改动时**按构造逐字节相同**。
+
+**⇒ 规格必须显式声明 `archive/**` 出局**：`plugin/probes/architecture-analysis.md` 的
+`**`archive/**` IS OUT OF DUPLICATION SCOPE ...**` 段即该声明，判据钉在
+`plugin/test/archive-exclusion-wiring.test.mjs`（真规格经 `readProbeSpec` 取到的 objective 命中该段
+∧ 去掉该段的变异体不命中 ⇒ 谓词能取假）。
+
+**因实例而立**：finding `archive-retired-gate-scripts-still-byte-identical-to-live`（2026-11-06）
+把 6 对 `archive/`↔live 的逐字节相同文件报成 duplication，建议**删掉归档副本**——而
+`archive/INDEX.tsv` 早在 2026-10-28 就逐行记过 `byte_identical=yes`，且删一个归档文件即令
+`plugin/test/gate-scripts-retirement.test.mjs` 变红（实测 4 pass / 1 fail）。
+**⛔ 归档的完整性是判据，不是可回收的空间。**
+
 ### 12d. 退役判据（本次实测已产出可执行清单）
 
 **ARCHIVE-CANDIDATE ≡ 三天零执行（全三层） ∧ 无生产调用者。**

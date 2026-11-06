@@ -59,8 +59,9 @@ import { isStartLike, isEndLike } from "./kernel/start-end-like.ts";
 import { parseFrontmatter } from "./core/frontmatter-store-base.ts";
 import { TASK_STATUS, isTaskStatus, type TaskStatus } from "./abi.ts";
 import { resolvePluginScript, resolvePluginScriptExec, resolveOrchestrationFile } from "./core/plugin-root.ts";
-// Shared session read/write primitives — ONE copy of each, byte-identical to the pinned quay-fleet
-// blob (packages/quay/src/primitives/PROVENANCE.md; re-checked by plugin/scripts/primitives-drift-check.ts).
+// Shared session read/write primitives — ONE copy of each, canonical in this repo and pinned to
+// its local baseline (packages/quay/src/primitives/PROVENANCE.md; re-checked by
+// plugin/scripts/primitives-drift-check.ts).
 // ⛔ Do not re-implement either of these here: SPEC §3.3's only unacceptable outcome is a second
 // hand-written implementation of a session primitive.
 import { readTranscriptMtime } from "./primitives/session-liveness.mjs";

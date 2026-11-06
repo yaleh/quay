@@ -1958,7 +1958,7 @@ import { judgeCriterionCapability, executedArtifacts, splitShellCommands } from 
 /** The incident's two criteria, VERBATIM — split so that a literal copy of the incident is not
  *  byte-indistinguishable from the incident itself inside this scan set (the sibling lock's idiom).
  *  The RUNTIME value is exactly what was stored. */
-const REAL_AC020_CRITERION = ["node bin/quay-fleet.mjs cloudcli ", "delegate-smoke", " --json"].join("");
+const REAL_AC020_CRITERION = ["node bin/example-tool.mjs cloudcli ", "delegate-smoke", " --json"].join("");
 /** The criterion that RE-ARMED the storm 13 minutes after the first "fix" (explicit path). */
 const REAL_REARMED_CRITERION = ["node --test realchecks/", "wake-real-reachability.mjs"].join("");
 /** Fleet's退化后只读判据（负控）：读一份证据文档、断言关键字仍在 —— 零副作用。 */

@@ -307,6 +307,66 @@ function takeoverRecordFile(root: string): string {
   return path.join(root, ANCHOR_TAKEOVER_REL);
 }
 
+// ── ATOMIC START CLAIM (tasks/gap-anchor-polling-git-fork-storm AC4) ─────────────────────────────
+// WHY: the "another anchor is live" guard reads `.quay/anchor.pid` and then WRITES it — a
+// read-then-write window. Two anchors starting within the same instant both read "no incumbent" and
+// both start; from then on they coexist silently (the finding measured exactly that on the live host:
+// two anchors on ONE root, with no reading that said so — 硬规则 3b's forbidden shape).
+// `O_EXCL` on a dedicated lockfile is the atomic half: the kernel makes exactly one creator win.
+// The loser REFUSES BY NAME (the holder's pid is logged) instead of quietly running alongside.
+//
+// ⛔ The lock is NOT the anchor's liveness proof — `anchor.pid` + `pidAlive` remain the authoritative
+// pair (and the guard above still runs). This closes ONLY the simultaneous-start race; a stale lock
+// left by a crashed starter is stolen once its holder is dead, so it can never wedge a restart.
+export const ANCHOR_START_LOCK_REL = ".quay/anchor-start.lock";
+
+export function anchorStartLockFile(root: string): string {
+  return path.join(root, ANCHOR_START_LOCK_REL);
+}
+
+/** Try to become THE starter for `root`. Returns `{ ok, holder, reason }` — `reason` is
+ *  `"held"` (a live holder), `"contended"` (stale lock stolen twice, still not ours), or
+ *  `"unwritable"` (the lock cannot be created at all, e.g. a read-only root). */
+export function claimAnchorStartLock(
+  root: string,
+  selfPid: number = process.pid,
+  isAlive: (pid: number) => boolean = pidAlive,
+): { ok: boolean; holder: number | null; reason?: "held" | "contended" | "unwritable" } {
+  const file = anchorStartLockFile(root);
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const fd = fs.openSync(file, "wx"); // O_CREAT|O_EXCL — atomic
+      fs.writeSync(fd, `${selfPid}\n`);
+      fs.closeSync(fd);
+      return { ok: true, holder: selfPid };
+    } catch (e) {
+      const code = (e as { code?: string } | null)?.code;
+      if (code !== "EEXIST") return { ok: false, holder: null, reason: "unwritable" };
+      let holder: number | null = null;
+      try {
+        const raw = fs.readFileSync(file, "utf8").trim();
+        if (/^\d+$/.test(raw)) holder = Number(raw);
+      } catch { holder = null; }
+      if (holder !== null && holder !== selfPid && isAlive(holder)) return { ok: false, holder, reason: "held" };
+      // Stale (dead holder, or an unreadable/torn lock) ⇒ clear it and retry ONCE. Only once: a
+      // second failure means someone else is actively winning the race, and the answer then is
+      // "refuse", never an unbounded spin.
+      try { fs.rmSync(file, { force: true }); } catch { /* someone else may have removed it */ }
+    }
+  }
+  return { ok: false, holder: null, reason: "contended" };
+}
+
+/** Release the start claim — ONLY if we are the holder (a stale-claim steal by another process must
+ *  never be undone by us on the way out). */
+export function releaseAnchorStartLock(root: string, selfPid: number = process.pid): void {
+  const file = anchorStartLockFile(root);
+  try {
+    const raw = fs.readFileSync(file, "utf8").trim();
+    if (Number(raw) === selfPid) fs.rmSync(file, { force: true });
+  } catch { /* absent / unreadable ⇒ nothing of ours to release */ }
+}
+
 function writeTakeoverRecord(root: string, rec: TakeoverRecord): void {
   try {
     // 同一份原子写（硬规则 5b：`writeState` 不是本文件唯一的回读面载体写入点）。本处曾是裸
@@ -501,9 +561,25 @@ export async function runAnchor(opts: AnchorOptions): Promise<number> {
   }
 
   const paths = anchorPaths(opts.root);
+  // ── ATOMIC START CLAIM (gap-anchor-polling-git-fork-storm AC4) ────────────────────────────────
+  // The `anchor.pid` guard above is a TOCTOU check: two anchors starting at the same instant both
+  // read "no incumbent" and both start (the finding measured two anchors on ONE root on the live
+  // host — silent coexistence, exactly the shape 硬规则 3b forbids). `anchor.pid` cannot close that
+  // window because it is a plain write, not an exclusive create. A separate lockfile taken with
+  // `O_EXCL` is the atomic half: exactly one starter wins, the loser REFUSES BY NAME (holder pid in
+  // the log) instead of silently coexisting.
+  const claim = claimAnchorStartLock(opts.root);
+  if (!claim.ok) {
+    log(
+      `${ts()} anchor: another anchor ${claim.reason === "held" ? `is live (pid=${claim.holder})` : "is racing for"} this root ` +
+      `(lock ${anchorStartLockFile(opts.root)}, me=${process.pid}) — REFUSING to start (double-dispatch guard)`,
+    );
+    return 1;
+  }
   try {
     fs.writeFileSync(paths.pidFile, `${process.pid}\n`, "utf8");
   } catch (e) {
+    releaseAnchorStartLock(opts.root);
     process.stderr.write(`driver-anchor: cannot write ${paths.pidFile}: ${e instanceof Error ? e.message : String(e)}\n`);
     return 2;
   }
@@ -936,6 +1012,7 @@ export async function runAnchor(opts: AnchorOptions): Promise<number> {
   }
   try { fs.rmSync(paths.pidFile, { force: true }); } catch { /* ignore */ }
   try { fs.rmSync(paths.stateFile, { force: true }); } catch { /* ignore */ }
+  releaseAnchorStartLock(opts.root);
   log(`${ts()} anchor: exited (remaining loops=${active.size})`);
   return 0;
 }

@@ -69,7 +69,10 @@ import { snapshotTrackedChanges, probeWriteViolations } from "./probe-write-guar
 // routineGlobalCeiling 同属该配置面：driveItems 的真实全局天花板从这里读（本任务新增）。
 // routineWindowMs 亦同（gap-routine-quota-window-ms-parsed-but-inert）：rate 窗口从 drivers.yml
 // `routine_quota.window_ms` 读，⛔ 不再引用孤儿常量 FILING_WINDOW_MS（它曾让 window_ms 改了没用）。
-import { defaultDriverConfig, loadDriverConfig, routineGlobalCeiling, routineWindowMs } from "./driver-config.ts";
+// DRIVERS_CONFIG_REL 亦同源：`listGoalRecords` 的 wall-clock 上限按 drivers.yml
+// `kinds.goal.list_timeout_ms` 派生（gap-goal-driver-filing-ledger 的读面半边），读的必须是
+// `loadDriverConfig` 的同一个文件——⛔ 此处不另拼一份 `plugin/scripts/drivers.yml` 字面量（硬规则 5b）。
+import { defaultDriverConfig, loadDriverConfig, routineGlobalCeiling, routineWindowMs, DRIVERS_CONFIG_REL } from "./driver-config.ts";
 // stripEvidenceTimestamp 的单一真相源在 Core（goal-store）——本文件与 goal-store 的提交决策
 // 必须用同一判据「什么算实质变化」（gap-goal-gate-timestamp-commit-flood），⛔ 不各写一份。
 // meta 记录是第五种 store kind（gap-meta-records-should-be-a-first-class-store-kind-not-a-task-label）：
@@ -285,6 +288,65 @@ export function goalCliResolvable(scriptRoot: string | null): boolean {
   return fs.existsSync(path.join(resolveKernelPluginRoot(), "vendor", "quay", "dist", "quay.js"));
 }
 
+/** `goal list` 的 wall-clock 上限缺省（毫秒）。⛔ 不是「随便拍的数」：正源是 drivers.yml
+ *  `kinds.goal.list_timeout_ms`，本常量只在配置缺席时兜底。旧实现写死 `CRITERION_TIMEOUT_MS`
+ *  （120s）——那是一个**机械 spawn**（跑一条 criterion）的上限，被借给了「读整个 goal store」，
+ *  于是一次高负载 / 接管窗口下的长读被记成 store 读失败（`goal-ring state=failed`），
+ *  与「store 真的坏了」同形（硬规则 3b）。 */
+export const GOAL_LIST_TIMEOUT_MS_DEFAULT = 180_000;
+
+/** `goal list` 超时的三态读数（硬规则 3b：**「用了配置值」「用了缺省」「配置值非法」三者不同形**）。
+ *  `detail` 非 null 只在 source==="default" 且**配置里有值但被拒**时——「没配」与「配了但读不懂」
+ *  在 `source` 上同形（都是 default），靠 `detail` 区分，⛔ 不把两者折叠成一句「用了缺省」。 */
+export interface GoalListTimeoutReading {
+  timeoutMs: number;
+  source: "explicit" | "config" | "default";
+  /** config 值存在但非法时记录原值与拒绝理由（非法值回落缺省，⛔ 静默）。 */
+  detail: string | null;
+}
+
+/** `goal list` 的 wall-clock 上限：显式覆盖 → drivers.yml `kinds.goal.list_timeout_ms` → 缺省
+ *  `GOAL_LIST_TIMEOUT_MS_DEFAULT`。非法值（非正有限数）回落缺省并在 `detail` 记下原值。
+ *
+ *  基准是 **dataRoot**（workspace root）——与被驱动项目自己的声明同族（同 goalSpawnCap 的论证：
+ *  goal 的 spawn 上限/超时是【被驱动项目】的声明，不是本 kernel 安装位置的）。 */
+export function goalListTimeoutReading(dataRoot: string, explicit?: number): GoalListTimeoutReading {
+  if (explicit != null && Number.isFinite(explicit) && explicit > 0) {
+    return { timeoutMs: explicit, source: "explicit", detail: null };
+  }
+  let raw: unknown;
+  let present = false;
+  try {
+    const text = fs.readFileSync(path.join(dataRoot, DRIVERS_CONFIG_REL), "utf8");
+    const parsed = YAML(text) as { kinds?: { goal?: { list_timeout_ms?: unknown } } } | null;
+    raw = parsed?.kinds?.goal?.list_timeout_ms;
+    present = raw !== undefined && raw !== null;
+  } catch {
+    // drivers.yml 缺失 / 不可解析 ⇒ 缺省（同 loadDriverConfig 的 fail-open）。
+    return { timeoutMs: GOAL_LIST_TIMEOUT_MS_DEFAULT, source: "default", detail: null };
+  }
+  if (!present) return { timeoutMs: GOAL_LIST_TIMEOUT_MS_DEFAULT, source: "default", detail: null };
+  if (typeof raw === "number" && Number.isFinite(raw) && raw > 0) {
+    return { timeoutMs: raw, source: "config", detail: null };
+  }
+  return {
+    timeoutMs: GOAL_LIST_TIMEOUT_MS_DEFAULT,
+    source: "default",
+    detail: `kinds.goal.list_timeout_ms=${JSON.stringify(raw)} 不是正有限数 ⇒ 回落缺省 ${GOAL_LIST_TIMEOUT_MS_DEFAULT}ms`,
+  };
+}
+
+/** `goal list` 的 argv（单一构造点，⛔ 调用方各自拼一份）。`noEvidence` = 走 `--no-evidence`
+ *  的**无台账投影**：`evidence` 由 `.quay/gate-events.jsonl` 派生，实测 14.4s（206MB 载体），
+ *  而 pass 1 不消费它（唯一消费者 `ledgerTailVerdict` 在 pass 2）。 */
+export function goalListArgv(
+  scriptRoot: string | null,
+  dataRoot: string = scriptRoot ?? "",
+  opts: { noEvidence?: boolean } = {},
+): string[] {
+  return goalStoreArgv(scriptRoot, opts.noEvidence === true ? ["list", "--no-evidence"] : ["list"], dataRoot);
+}
+
 /** 读全部 goal 记录。解析不了 ⇒ 抛（fail-closed：读不到输入不得继续，⛔ 不返回空数组冒充"没有"）。
  *
  *  `scriptRoot` = 代码根（定位 goal-store 入口），`dataRoot` = goals/ 所在根。缺省 `dataRoot` 就是
@@ -292,9 +354,17 @@ export function goalCliResolvable(scriptRoot: string | null): boolean {
  *  goal-driver 的【测试缝】需要把两者分开时才显式传第二个参数。
  *  **单一实现**（routine semantic-dedup-scan finding `list-goal-records-duplicated`，runId
  *  `semantic-dedup-scan-1793162251891`）：goal-driver 从这里 import 并 re-export，⛔ 不再各带一份
- *  byte-identical 副本。 */
-export async function listGoalRecords(scriptRoot: string | null, dataRoot: string = scriptRoot ?? ""): Promise<Array<Record<string, unknown>>> {
-  const r = await runAsync(goalStoreArgv(scriptRoot, ["list"], dataRoot), { timeoutMs: CRITERION_TIMEOUT_MS, collectStderr: true });
+ *  byte-identical 副本。
+ *
+ *  `opts.noEvidence`：跳过 evidence 派生（pass 1 用，见 `goalListArgv`）。
+ *  `opts.timeoutMs`：显式覆盖 wall-clock 上限（测试缝）；缺省按 `goalListTimeoutReading(dataRoot)`。 */
+export async function listGoalRecords(
+  scriptRoot: string | null,
+  dataRoot: string = scriptRoot ?? "",
+  opts: { noEvidence?: boolean; timeoutMs?: number } = {},
+): Promise<Array<Record<string, unknown>>> {
+  const timeoutMs = goalListTimeoutReading(dataRoot, opts.timeoutMs).timeoutMs;
+  const r = await runAsync(goalListArgv(scriptRoot, dataRoot, opts), { timeoutMs, collectStderr: true });
   if (r.error || r.status !== 0) {
     throw new Error(`goal-store list failed (exit ${r.status}): ${(r.stderr || "").trim().slice(0, 300)}`);
   }

@@ -3,7 +3,7 @@ id: gap-routine-semantic-dedup-scan-readtasks-duplicate
 title: "semantic-dedup-scan: the first two carry the same tasks/<id>.md to
   {id,body} reader (vanished-id skip) while a canonical single-task parser
   already exists in task-schema.ts; the th"
-status: ready
+status: needs-human
 labels:
   - gap
   - routine-filed
@@ -93,3 +93,11 @@ extract
 - `plugin/scripts/capability-catalog-declarations.json`
 - `plugin/test/task-body-by-id.test.mjs`
 - `tasks/gap-routine-semantic-dedup-scan-readtasks-duplicate.md`
+
+## Blocker
+
+**2026-11-06T09:32:59.978Z — worker 未落地（exited-not-landed）**
+
+- 未落地原因：step=suite: incomplete suite (637/637 files) — recovery exhausted at floor concurrency 16 — no declared rung produced a complete verdict (16); needs a code/config fix, see plugin/scripts/full-suite-runner.ts
+- run_id：wk-prod-anchor
+- session_id：bb873060-7039-4624-8ee0-c1ace4c2fb26
