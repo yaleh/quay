@@ -1,7 +1,7 @@
 ---
 id: gap-meta-call-ac-936-needs-a-human-run-goal-request-in
 title: AC-936 needs a human-run goal request in the main checkout
-status: ready
+status: needs-human
 labels:
   - meta-human-call
   - meta-driver
@@ -26,7 +26,7 @@ AC-936 的判据要求主检出 `.quay/goal-requests.jsonl` 里至少一条被 d
 
 **这是读数与落地清单，⛔ 不是裁定。** 本 worker 会话**未勾任何 AC**：两条 AC 的内容都是「人作出选择并落实」，
 而 worker 既不能代替人选择，也不能执行选项 ① 的那条命令（写守卫把主检出当写目标 = 违规）。所以本轮只做三件
-worker 能真做的事：把现场读数摆齐、把每个选项的落地代价写成可执行清单、留一条**可直接跑的只读解停检查**。
+worker 能真做的事：把现场读数摆齐、把每个选项的落地代价写成可执行清单、留一条**人可直接跑的只读确认命令**。
 
 ### 1. 现场读数（直接量，本次采集于 2026-11-06T20:20Z 前后）
 
@@ -75,28 +75,57 @@ node --experimental-strip-types packages/quay/bin/quay.ts goal request GOAL-914 
 改 `goals/AC-936-*.md` 的 `criterion`，让它接受任意 root 下的载体；并同步修改 AC-938 / AC-941 的否证条件，
 否则同一份判据自己撤回了刚建立的纪律。
 
-### 4. 一条需要一并解释的既有事实：本任务曾被退回池子，且没有留下理由
+### 4. 本任务在同一小时内被两次从 needs-human 退回 todo，两次都没有理由
 
-本任务由 meta-driver 于 `2026-11-06T20:12:19Z` **以 `status: needs-human` 立案**（task-status-event seq 1335，
-actor `cli:49009`）；`94` 秒后（seq 1337，commit `7e24d0395`）由 `cli:221186` **退回到 `todo`**，diff 只有
-`status: needs-human → todo` 一行；下一轮 promotion-driver 机械晋升 `ready`（seq 1338），随后派到本 worker。
+| 时刻 | 事件 | 说明 |
+|---|---|---|
+| 20:12:19Z | seq 1335 **create** as `needs-human` | meta-driver 立案（actor `cli:49009`）——系统自己把这条判为「待人」 |
+| 20:13:53Z | seq 1337 `needs-human → todo`（retreat） | actor `cli:221186`，commit `7e24d0395`，diff = 仅 `status` 一行 |
+| 20:14:43Z | seq 1338 `todo → ready` | promotion-driver 机械晋升，随后派到本 worker |
+| 20:28:32Z | seq 1339 `ready → needs-human` | **本 worker** 的裁定请求（actor `mcp`，session `43003894…`） |
+| 20:29:26Z | seq 1340 `needs-human → todo`（retreat） | actor `cli:3369341`，commit `99fc96141`，diff = 仅 `status` 一行，**54 秒后** |
 
-**没有任何载体记录这次退回的理由，也没有任何裁定落进本任务体。** 本 worker 因此把任务放回 `needs-human`
-（= 系统立案时自己的分类），并明确声明：**不据此推断任何裁定内容**。若那次退回本身就是一次人的决定
-（「让它进池子做」），请把它写成裁定（选了哪条选项、为什么）——本节的读数、清单与解停检查都已备好，一步即可。
+两次退回的形态逐字相同（身体不变、只改 status 一行），且都在立案/停放后 1 分钟内发生 ⇒ 这更像**机制**而非两次人的决定：
 
-### 5. 什么条件下可以从 needs-human 放出来（只读、可直接跑）
+- `.quay/worker-round.jsonl` 在 `20:29:47Z` 的 round 把本任务列在 **`cold_start_inflight`** 里（`in_flight:2, pool:1`）。
+- `packages/quay-native/src/store.ts` 的 **PARK DURABILITY** 守卫（`parkGuardVerdict`，注释写明
+  「measured 2026-11-06 on this host」「the commit diff was exactly ONE frontmatter line
+  `-status: needs-human` / `+status: todo`」）在生产上**没有生效**：该文件 mtime 是 `2026-11-06 20:08`，
+  而两个实际被执行的构建产物里一次都搜不到 `parkGuardVerdict` / `PARK_GUARD_STATUS`——
+  `plugin/vendor/quay-native/dist/quay-native.js`（Oct 31）与
+  `~/.claude/plugins/cache/quay/quay/0.14.0/vendor/quay-native/dist/quay-native.js`（Oct 4）。
+  ⇒ 任何整任务写入只要带着自己早先读到的 `status: todo`，都能把停放静默改回去。
 
-- **unpark 检查（只读、可直接跑）**：`node -e "const fs=require('fs');const p='.quay/goal-requests.jsonl';if(!fs.existsSync(p)){console.log('AC-936-request-consumed=ledger-absent');process.exit(1)}const d=fs.readFileSync(p,'utf8').split('\n').filter(Boolean).map(s=>{try{return JSON.parse(s)}catch{return null}}).filter(r=>r&&['accepted','refused','not-evaluated'].includes(r.state)&&typeof r.consumedAt==='string'&&r.consumedAt);if(!d.length){console.log('AC-936-request-consumed=0');process.exit(1)}console.log('AC-936-request-consumed='+d.length)"` 输出 `AC-936-request-consumed=`
+这与已立案的 `tasks/gap-needs-human-park-overwritten-by-inflight-worker.md` 是**同一形态的再现**，且本任务是它的
+第三、第四个样本（该任务自己在 2026-11-06T10:28/10:35 也被退回两次）。⛔ 本 worker 不据此改判据、不改 store。
 
-两个方向本次都跑过（硬规则 2 的两半）：**主检出今天** = `AC-936-request-consumed=ledger-absent` / exit 1（恒假受控）；
+**没有任何载体记录这两次退回的理由，也没有任何裁定落进本任务体。** 本 worker 因此把任务放回 `needs-human`
+（= 系统立案时自己的分类），并明确声明：**不据此推断任何裁定内容**。若退回本身就是一次人的决定
+（「让它进池子做」），请把它写成裁定（选了哪条选项、为什么）——下面的读数、清单与确认命令都已备好，一步即可。
+
+### 5. 人用来一眼确认「该放出来了」的只读命令
+
+```
+node -e "const fs=require('fs');const p='.quay/goal-requests.jsonl';if(!fs.existsSync(p)){console.log('AC-936-request-consumed=ledger-absent');process.exit(1)}const d=fs.readFileSync(p,'utf8').split('\n').filter(Boolean).map(s=>{try{return JSON.parse(s)}catch{return null}}).filter(r=>r&&['accepted','refused','not-evaluated'].includes(r.state)&&typeof r.consumedAt==='string'&&r.consumedAt);if(!d.length){console.log('AC-936-request-consumed=0');process.exit(1)}console.log('AC-936-request-consumed='+d.length)"
+```
+
+在 `/data/home/yale/work/quay` 下跑：`AC-936-request-consumed=1` 或更大 ⇒ 选项 ① 已经生效；`ledger-absent` / `=0` ⇒ 还没生效。
+
+两个方向本次都跑过（硬规则 2 的两半）：**主检出今天** = `AC-936-request-consumed=ledger-absent` / exit 1（取假方向受控）；
 **正控**（worktree 里放一行带 `consumedAt` 的终态行）= `AC-936-request-consumed=1` / exit 0（谓词确实能命中）。
-该命令只读：`judgeCriterionCapability` 判为 `{"capability":"read-only","code":null}`，故 parking-recheck 每轮可安全复跑。
+该命令只读：`judgeCriterionCapability` 判为 `{"capability":"read-only","code":null}`。
+
+⛔ **它没有自动消费者（硬规则 4c，写下来免得后人误以为有）**：`needs-human-parking-recheck.ts` 的两个桶都不复跑它——
+`scanNeedsHumanParking` 只重跑阻碍原因里**点名的机械判据**（本任务不点名任何一条 ⇒ 该桶读数是 `no-registered-judge`，
+即「人的决定没有机械判据可复跑」，这是读数不是失败）；`scanParkedUnpark` 只扫**带行首 `**PARKED**` 标记**的任务。
+所以**解停这件事本身仍由人做**（`quay task edit <id> --status todo` 或直接完成本任务），这条命令只是让人不必重读全文。
 
 ### 6. 记录边界（硬规则 4b / 4c）
 
 - 本节的 52 轮、AC 集合、投影、消费者读数全部取自 `.quay/goal-round.jsonl` 的**生产轮记录**，不是 fixture。
 - 未验证的部分：主检出载体在候选人执行 ① 之后是否**真的**被下一轮消费——那要等执行之后才存在，本轮无从测量。
+- 未验证的部分（2）：第 4 节那两次退回的**具体写入者**没有定论。已核实的只有事件记录（actor/commit/diff）与
+  「两个构建产物都不含停放守卫」两件事；把二者连成单一因果链的那一步**没有做对照**，故只作假说。
 
 ## AC（draft）
 - [ ] 人在上述选项中作出选择，并把选择写进本任务体（或以 DIR 记录该裁定）
@@ -114,3 +143,9 @@ actor `cli:49009`）；`94` 秒后（seq 1337，commit `7e24d0395`）由 `cli:22
 - `plugin/scripts/goal-driver.ts`
 - `docs/evidence/2026-11-06-goal-request-queue.md`
 - `tasks/gap-meta-call-ac-936-needs-a-human-run-goal-request-in.md`
+
+## Needs-Human
+
+**执行 2026-11-07T04:28Z（worker 会话；不是重试上限触发）— 待人工裁定**
+
+- 阻碍原因：AC-936 是 GOAL-914 唯一未达成的 AC，判据要主检出 `.quay/goal-requests.jsonl` 里有一条被消费的请求；worker 写守卫禁止写主检出、goal-driver 又把该 AC 判为 world-gated 不派活 ⇒ 需人从 ①②③ 裁定由谁产生这份证据（现场读数与三条落地清单见本任务体 ## Worker Reading）
