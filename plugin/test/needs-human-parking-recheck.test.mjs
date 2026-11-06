@@ -298,3 +298,320 @@ test("AC1 — the REAL store: the reading partitions every needs-human task (no 
   const archived = path.join(REPO_ROOT, "archive/2026-09-07-zero-call-scripts/plugin/scripts/needs-human-recheck.ts");
   assert.ok(fs.existsSync(archived), "the archived time/survival-axis detector stays archived (not resurrected)");
 });
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════════
+// ARM 2 — body-PARKED tasks (tasks/gap-meta-needs-human-parking-recheck-2)
+//
+// THE DEFECT THIS PINS: `ready-pool-check.isParked` is only the EXCLUSION half. A task stamping a
+// line-start `**PARKED` drops out of the dispatch pool, and the un-park instruction printed in its own
+// body is re-run by NOTHING. Measured 2026-11-06: gap-goal-driver-filing-ledger's declared check had
+// been printing `landed` for hours while the five remaining GOAL-914 tasks sat behind its depends_on
+// edge, every round reading stalled/world-gated with nobody told the block had cleared.
+//
+// Coverage map:
+//   AC2(a) the DECLARED command is really RE-RUN — the falsifiable pair is two tasks carrying the
+//          byte-identical marker, one declaring `true` (reported) and one declaring `false` (not).
+//          A detector that echoed the declaration could not separate them.
+//   AC2(b) the declared EXPECTED TOKEN is part of the pass predicate: `echo offline` under
+//          `输出 online` is NOT a pass, though it exits 0. Without this arm, `gh api …` printing
+//          `offline` would report a stale park — a false un-park signal.
+//   AC2(c) prose-only / absent declarations are `no-unpark-check` (a condition only a human can
+//          judge), which is a DIFFERENT value from `not-evaluated`.
+//   AC2(d) an un-readable declaration is `not-evaluated`, never `no-unpark-check` and never a pass.
+//   AC2(e) the deadline is real: a hanging command is killed and reads `not-evaluated (timeout)`.
+//   AC2(f) the capability judge runs BEFORE execution: a declared write-capable command is refused
+//          and its side effect does not happen.
+//   AC2(g) a root without tasks/ is `parked.evaluated:false`, not an empty all-clear.
+//   AC2(h) promotion-driver is the LIVE per-round consumer of this arm too.
+//   AC2(i) nothing writes `status` and nothing deletes the marker.
+//   AC2(j) the REAL store partitions the parked population and reports only re-run-green checks.
+// ═══════════════════════════════════════════════════════════════════════════════════════════════
+
+/** Write a fixture task carrying a LINE-START `**PARKED` marker plus an optional declaration block. */
+function writeParkedTask(root, id, { status = "ready", declaration = null } = {}) {
+  const decl = declaration === null ? "" : `\n## Unpark\n\n${declaration}\n`;
+  const body =
+    `---\nid: ${id}\ntitle: "fixture ${id}"\nstatus: ${status}\nlabels:\n  - gap\nparent: null\nchildren: []\nextra: {}\n---\n` +
+    `**PARKED**（fixture, 2026-11-06 — execution suspended pending the check below）\n\n` +
+    `## Proposal\n\nFixture task for the body-PARKED arm of needs-human-parking-recheck (well over forty non-whitespace characters).\n` +
+    decl;
+  const file = path.join(root, "tasks", `${id}.md`);
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, body);
+  return file;
+}
+
+/** Run the detector and return the whole reading (both arms). `extraArgs` = CLI flags (e.g. a timeout). */
+function readBoard(root, ...extraArgs) {
+  const res = spawnSync(
+    "node",
+    ["--no-warnings", "--experimental-strip-types", CHECKER, "--root", root, "--json", ...extraArgs],
+    { encoding: "utf8" },
+  );
+  assert.equal(res.status, 0, `detector must exit 0, got ${res.status}:\n${res.stdout}${res.stderr}`);
+  return JSON.parse(res.stdout);
+}
+
+test("AC2(a) — the DECLARED unpark command is really RE-RUN (identical marker, opposite commands)", () => {
+  const root = makeRoot("unpark-run");
+  try {
+    writeParkedTask(root, "gap-fixture-unpark-ok", {
+      declaration: "- **unpark 检查（只读、可直接跑）**：`true`",
+    });
+    writeParkedTask(root, "gap-fixture-unpark-no", {
+      declaration: "- **unpark 检查（只读、可直接跑）**：`false`",
+    });
+    const out = readBoard(root).parked;
+
+    const ok = out.tasks.find((t) => t.id === "gap-fixture-unpark-ok");
+    const no = out.tasks.find((t) => t.id === "gap-fixture-unpark-no");
+    assert.equal(ok.command, "true", "the declared command is extracted verbatim from the inline code span");
+    assert.equal(ok.state, "unpark-passed", `a check that passes today MUST be reported: ${JSON.stringify(ok)}`);
+    assert.equal(ok.exitCode, 0, "the REAL exit code is carried");
+    assert.equal(no.command, "false");
+    assert.equal(no.state, "unpark-still-blocked", `a check that still fails must NOT be reported: ${JSON.stringify(no)}`);
+    assert.notEqual(no.exitCode, 0);
+    assert.deepEqual(out.entries.map((t) => t.id), ["gap-fixture-unpark-ok"], "only the passing one is reported");
+    assert.equal(out.reported_passed, 1);
+    assert.equal(out.counts["unpark-still-blocked"], 1);
+    assert.equal(out.parked_total, 2);
+    // The four states partition the parked population.
+    assert.equal(
+      Object.values(out.counts).reduce((a, b) => a + b, 0),
+      out.parked_total,
+      `counts must partition the PARKED store: ${JSON.stringify(out.counts)} vs ${out.parked_total}`,
+    );
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("AC2(b) — the declared EXPECTED TOKEN is part of the pass predicate (exit 0 alone is not enough)", () => {
+  const root = makeRoot("unpark-token");
+  try {
+    // Both declarations are shaped exactly like gap-ci-self-hosted-runner-shares-fleet-host's live one:
+    // the command exits 0 in BOTH cases; only the printed token differs.
+    writeParkedTask(root, "gap-fixture-token-hit", {
+      declaration: "- **unpark 检查（只读、可直接跑）**：`echo online` —— 输出 `online` 即解除 park。",
+    });
+    writeParkedTask(root, "gap-fixture-token-miss", {
+      declaration: "- **unpark 检查（只读、可直接跑）**：`echo offline` —— 输出 `online` 即解除 park。",
+    });
+    const out = readBoard(root).parked;
+    const hit = out.tasks.find((t) => t.id === "gap-fixture-token-hit");
+    const miss = out.tasks.find((t) => t.id === "gap-fixture-token-miss");
+    assert.equal(hit.expectedOutput, "online", "the declared expected token is parsed out of the prose");
+    assert.equal(hit.state, "unpark-passed", `output carries the token ⇒ reported: ${JSON.stringify(hit)}`);
+    assert.equal(miss.expectedOutput, "online");
+    assert.equal(miss.exitCode, 0, "precondition: the command DID exit 0 — the miss must come from the token");
+    assert.equal(
+      miss.state,
+      "unpark-still-blocked",
+      `exit 0 WITHOUT the declared token must NOT be reported as unparked: ${JSON.stringify(miss)}`,
+    );
+    assert.deepEqual(out.entries.map((t) => t.id), ["gap-fixture-token-hit"]);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("AC2(c) — no declaration / a prose-only declaration are no-unpark-check (distinct from not-evaluated)", () => {
+  const root = makeRoot("unpark-prose");
+  try {
+    writeParkedTask(root, "gap-fixture-no-decl");
+    // The live shape of gap-official-dist-delivery-…: a runnable-looking LABEL, but a condition only a
+    // human can judge ("a recorded authorization naming (i)…(ii)…(iii)…").
+    writeParkedTask(root, "gap-fixture-prose-decl", {
+      declaration: "Unpark condition: a recorded authorization naming (i) which host, and (ii) which artifact.",
+    });
+    const out = readBoard(root).parked;
+    for (const id of ["gap-fixture-no-decl", "gap-fixture-prose-decl"]) {
+      const t = out.tasks.find((x) => x.id === id);
+      assert.equal(t.state, "no-unpark-check", `${id} declares no runnable command: ${JSON.stringify(t)}`);
+      assert.equal(t.command, null);
+    }
+    assert.deepEqual(out.entries, [], "a prose condition is never reported as a satisfied check");
+    assert.equal(out.counts["no-unpark-check"], 2);
+    assert.equal(out.counts["not-evaluated"], 0, "「no runnable command」 must not be counted as 「could not read」");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("AC2(d) — an unreadable declaration is not-evaluated, never a pass (hard rule 3b)", () => {
+  const root = makeRoot("unpark-unreadable");
+  try {
+    // A declaration label that carries a code span which is plainly NOT a command (a CJK prose
+    // quotation). Reading it as `no-unpark-check` would silently drop the task; reading it as a pass
+    // would be the 3b inversion. It must be its own value.
+    writeParkedTask(root, "gap-fixture-bad-span", {
+      declaration: "- **unpark 检查（只读、可直接跑）**：`须由人工评审结论` —— 输出 `通过`。",
+    });
+    const out = readBoard(root).parked;
+    const t = out.tasks.find((x) => x.id === "gap-fixture-bad-span");
+    assert.equal(t.state, "not-evaluated", `unreadable declaration ⇒ not-evaluated: ${JSON.stringify(t)}`);
+    assert.ok(t.note.includes("not command-shaped"), `the note says WHY it could not be read: ${t.note}`);
+    assert.deepEqual(out.entries, [], "未评估 must never be reported as a satisfied check");
+    assert.equal(out.counts["not-evaluated"], 1);
+    assert.equal(out.counts["no-unpark-check"], 0);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("AC2(e) — the deadline is real: a hanging unpark command is killed and reads not-evaluated", () => {
+  const root = makeRoot("unpark-timeout");
+  try {
+    writeParkedTask(root, "gap-fixture-hangs", {
+      declaration: "- **unpark 检查（只读、可直接跑）**：`sleep 3`",
+    });
+    const started = Date.now();
+    const out = readBoard(root, "--unpark-timeout-ms", "400").parked;
+    const elapsed = Date.now() - started;
+    const t = out.tasks.find((x) => x.id === "gap-fixture-hangs");
+    assert.equal(t.state, "not-evaluated", `a killed command has NO verdict — ⛔ not 「still blocked」: ${JSON.stringify(t)}`);
+    assert.ok(t.note.includes("400ms deadline"), `the note names the deadline that fired: ${t.note}`);
+    assert.ok(elapsed < 3000, `the command must be killed at the deadline, not left to finish (took ${elapsed}ms)`);
+    assert.deepEqual(out.entries, [], "a timeout is never reported as a satisfied check");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("AC2(f) — the capability judge runs BEFORE execution: a write-capable command is refused, not run", () => {
+  const root = makeRoot("unpark-capability");
+  try {
+    // The workspace declares `touch ` write-capable (the SAME declaration file the goal paths read).
+    fs.mkdirSync(path.join(root, ".quay"), { recursive: true });
+    fs.writeFileSync(
+      path.join(root, ".quay", "criterion-capabilities.json"),
+      JSON.stringify({ writeCapableCommands: [{ id: "fixture-touch", pattern: "^touch\\s" }] }),
+    );
+    const canary = path.join(root, "created-by-unpark");
+    writeParkedTask(root, "gap-fixture-writes", {
+      declaration: `- **unpark 检查（只读、可直接跑）**：\`touch ${canary}\``,
+    });
+    const out = readBoard(root).parked;
+    const t = out.tasks.find((x) => x.id === "gap-fixture-writes");
+    assert.equal(t.state, "not-evaluated", `a refused command has no verdict: ${JSON.stringify(t)}`);
+    assert.ok(t.note.includes("criterion-side-effect"), `the capability judge's stable code is carried: ${t.note}`);
+    assert.equal(fs.existsSync(canary), false, "⛔ the refused command must NOT have run — its side effect is absent");
+    assert.deepEqual(out.entries, []);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("AC2(g) — a root without tasks/ is parked.evaluated:false, not an empty all-clear", () => {
+  const root = makeRoot("unpark-notasks");
+  try {
+    const out = readBoard(root).parked;
+    assert.equal(out.evaluated, false, "no tasks dir ⇒ the PARKED population was not read");
+    assert.equal(out.reason, "no-tasks-dir");
+    assert.deepEqual(out.entries, []);
+    assert.equal(out.parked_total, 0);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("AC2(i) — nothing writes status and the PARKED marker survives the scan", () => {
+  const root = makeRoot("unpark-readonly");
+  try {
+    const file = writeParkedTask(root, "gap-fixture-unpark-ok", {
+      declaration: "- **unpark 检查（只读、可直接跑）**：`true`",
+    });
+    const before = fs.readFileSync(file, "utf8");
+    const out = readBoard(root).parked;
+    assert.equal(out.reported_passed, 1, "precondition: this fixture IS a satisfied park (else the test proves nothing)");
+    assert.equal(fs.readFileSync(file, "utf8"), before, "a report must NOT rewrite the task file");
+    assert.ok(/^\*\*PARKED\b/m.test(before), "the marker is still there — deleting it stays the human/manager's act");
+    assert.ok(/^status:\s*ready\b/m.test(before), "status unchanged");
+    // ⛔ The detector alone persists nothing; only the driver writes the reading file.
+    assert.equal(fs.existsSync(path.join(root, READING_REL)), false);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("AC2(h) — promotion-driver is the LIVE consumer of the PARKED arm: every round carries it and persists it", () => {
+  const root = makeRoot("unpark-driver");
+  try {
+    writeParkedTask(root, "gap-fixture-unpark-ok", {
+      declaration: "- **unpark 检查（只读、可直接跑）**：`true`",
+    });
+    writeParkedTask(root, "gap-fixture-unpark-no", {
+      declaration: "- **unpark 检查（只读、可直接跑）**：`false`",
+    });
+    const fake = path.join(root, "fake-ready.mjs");
+    fs.writeFileSync(
+      fake,
+      'console.log(JSON.stringify({ pool: 0, should_apply: false, promotions: [], applied_promotions: [], candidates: [] }));\n',
+    );
+    const res = spawnSync(
+      process.execPath,
+      [
+        "--no-warnings", "--experimental-strip-types", DRIVER,
+        "--root", root, "--max-rounds", "2", "--interval", "0", "--json",
+        "--ready-pool-cmd", `${process.execPath} ${fake}`,
+        "--resource-gate-cmd", "node -e process.exit(0)",
+      ],
+      { encoding: "utf8", timeout: 120_000 },
+    );
+    assert.equal(res.status, 0, `driver --max-rounds 2 must exit 0:\nstdout=${res.stdout}\nstderr=${res.stderr}`);
+
+    const rounds = res.stdout.trim().split("\n").map((l) => JSON.parse(l)).filter((e) => e.event === "round");
+    assert.equal(rounds.length, 2, `two rounds must be driven:\n${res.stdout}`);
+    for (const r of rounds) {
+      assert.ok(r.parked_unpark, `round ${r.round} carries parked_unpark: ${JSON.stringify(r).slice(0, 400)}`);
+      assert.deepEqual(r.parked_unpark.entries.map((t) => t.id), ["gap-fixture-unpark-ok"], `round ${r.round} reports the satisfied park`);
+      assert.equal(r.parked_unpark.counts["unpark-still-blocked"], 1, "the still-failing one is counted, not reported");
+    }
+
+    // Durable carrier (the ONE file, both arms) — an external reader needs no stdout.
+    const persisted = JSON.parse(fs.readFileSync(path.join(root, READING_REL), "utf8"));
+    assert.ok(persisted.parked, "the reading file carries the PARKED arm");
+    assert.equal(persisted.parked.reported_passed, 1);
+    assert.deepEqual(persisted.parked.entries.map((t) => t.id), ["gap-fixture-unpark-ok"]);
+
+    // And the human-visible channel: the driver log says WHICH task.
+    assert.ok(
+      res.stderr.includes("gap-fixture-unpark-ok") && res.stderr.includes("body-PARKED task(s) whose DECLARED unpark check"),
+      `stderr names the satisfied park:\n${res.stderr}`,
+    );
+    // Still read-only end-to-end: neither task's marker nor status moved.
+    for (const f of ["gap-fixture-unpark-ok.md", "gap-fixture-unpark-no.md"]) {
+      const text = fs.readFileSync(path.join(root, "tasks", f), "utf8");
+      assert.ok(/^\*\*PARKED\b/m.test(text), `${f}: marker untouched by the driver`);
+      assert.ok(/^status:\s*ready\b/m.test(text), `${f}: status untouched by the driver`);
+    }
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("AC2(j) — the REAL store: the PARKED arm partitions the population and reports only re-run-green checks", (t) => {
+  const out = readBoard(REPO_ROOT).parked;
+  assert.equal(out.evaluated, true, "the real repo has a tasks/ dir");
+  assert.equal(
+    Object.values(out.counts).reduce((a, b) => a + b, 0),
+    out.parked_total,
+    `the four states partition the PARKED store: ${JSON.stringify(out.counts)} vs ${out.parked_total}`,
+  );
+  assert.equal(out.entries.length, out.counts["unpark-passed"]);
+  for (const e of out.entries) {
+    assert.ok(e.command, `a reported PARKED task must carry the command that passed: ${JSON.stringify(e)}`);
+    assert.equal(e.exitCode, 0, `a reported park's command exited 0: ${JSON.stringify(e)}`);
+    if (e.expectedOutput) {
+      assert.ok(e.output.includes(e.expectedOutput), `the declared token really appears in the output: ${JSON.stringify(e)}`);
+    }
+  }
+  // ⛔ Not vacuous: if the real board carries NO runnable declaration at all, this arm has no live
+  // subject and its `entries: []` would be indistinguishable from a broken detector. Say so honestly
+  // instead of passing silently (hard rule 3b).
+  if (out.counts["unpark-passed"] + out.counts["unpark-still-blocked"] === 0) {
+    t.skip("no body-PARKED task on the real board declares a runnable unpark check — the arm is not exercisable here");
+    return;
+  }
+  assert.ok(out.parked_total > 0, "the real board carries body-PARKED tasks");
+});

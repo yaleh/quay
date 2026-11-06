@@ -87,7 +87,13 @@ import { verifyIndependently } from "./driver-result.ts";
 // 每轮红，人无从察觉（AC-919 连续 42 轮）。本文件是那条读数的【每轮活消费者】：复跑记录里点名的判据，
 // 只把「今日已 clean 而任务仍停放」的那些报出来。⛔ 只读——不改 status（人 2026-09-20 裁定：needs-human
 // 没有可机械再入队的路径），故这里没有任何写回调用。
-import { scanNeedsHumanParking, writeParkingReading, type ParkingReading } from "./needs-human-parking-recheck.ts";
+//
+// 第二个人群（tasks/gap-meta-needs-human-parking-recheck-2）：body 上的 `**PARKED` 标记只有【排除半边】
+// —— ready-pool-check.isParked 把它挡出派发池，而任务体自己写明的 unpark 检查（`git merge-base
+// --is-ancestor <sha> develop && echo landed`）从来没有机件复跑。`scanParkingBoard` 是同一份读数里的
+// 两个臂（⛔ 不新建并行机制）：`parked.entries` 只装「声明的解停命令今日已通过而任务仍 PARKED」的。
+// 同样只读：删标记、翻 done 都是人/manager 的动作。
+import { scanParkingBoard, writeParkingReading, type ParkingReading } from "./needs-human-parking-recheck.ts";
 // AC153：re-export verifyIndependently 值——测试用「同一函数身份」证两 driver 共用单一实现（⛔ 非平行副本）。
 export { verifyIndependently } from "./driver-result.ts";
 
@@ -1014,7 +1020,7 @@ export async function runResidentPromotionLoop(opts: ResidentLoopOptions): Promi
     // 翻转【之后】，本轮新停的任务也在读数内。⛔ 只读：不改任何 status（needs-human 无机械再入队路径）。
     // 读数写盘（durable、可被外部读），并随 json 轮事件发出；非空 stale 同时打 stderr——驱动日志的
     // 读者不必再去查任何东西就能看到「判据已修好但任务还停着」。
-    const parking: ParkingReading = scanNeedsHumanParking(root);
+    const parking: ParkingReading = scanParkingBoard(root);
     try { writeParkingReading(root, parking); } catch { /* 读数写失败不致命（运行时日志），但 ⛔ 不吞掉下面的 stderr 报告 */ }
     if (parking.reported_stale > 0) {
       process.stderr.write(
@@ -1022,7 +1028,19 @@ export async function runResidentPromotionLoop(opts: ResidentLoopOptions): Promi
           `(parking reason expired, task still parked): ${parking.stale.map((t) => `${t.id}(${t.judge})`).join(", ")}\n`,
       );
     }
-    if (json) process.stdout.write(`${JSON.stringify({ event: "round", ...record, needs_human_parking: parking })}\n`);
+    // 第二个臂：body-PARKED 人群里「声明的解停命令今日已通过而任务仍停着」的那些。⛔ 只报不动作——
+    // 删 `**PARKED` 标记与翻 done 是人/manager 的裁定，本 driver 不写任何 status。
+    if (parking.parked.reported_passed > 0) {
+      process.stderr.write(
+        `promotion-driver: ${parking.parked.reported_passed} body-PARKED task(s) whose DECLARED unpark check already PASSES ` +
+          `(unpark condition met, task still parked): ${parking.parked.entries.map((t) => `${t.id}[${t.exitCode}]`).join(", ")}\n`,
+      );
+    }
+    if (json) {
+      process.stdout.write(
+        `${JSON.stringify({ event: "round", ...record, needs_human_parking: parking, parked_unpark: parking.parked })}\n`,
+      );
+    }
     if (once) break;
     if (maxRounds !== null && round >= maxRounds) break;
     await stopCtl.sleep(intervalMs);
