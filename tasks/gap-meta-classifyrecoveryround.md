@@ -71,3 +71,10 @@ worker-fan-in.ts 的主路径已按 SUITE-NOT-RUN 标记区分「没跑」与「
 
 ### 6. 顺带发现（⛔ 不在本任务 Touches 内，仅记录，未改）
 `packages/quay-native/src/store.ts` 的 execute→done 闸用 `sectionAfterHeading(body, ["AC","Acceptance Criteria"])`（kernel `extractSection` 要求**精确**标题），而驱动侧 `ready-pool-check.ts` 的 `extractSectionByShape` 认 `AC（draft）` 等 registered 变体 ⇒ 同一个 finding 形状任务在两侧可得出「3/3」与「0/0」两个读数（本任务当场复现）。本任务把标题改成 `## Acceptance Criteria` / `## Definition of Done`（内容一字未改）使两侧一致；两解析器的口径差本身是独立缺口，未在本任务内修。
+
+## Blocker
+
+**2026-11-06T13:13:48.833Z — worker 未落地（exited-not-landed）**
+
+- 未落地原因：step=suite: AssertionError [ERR_ASSERTION]: 未登记的载体 / unregistered carriers (code has a carrier name that docs/carrier-registry.json does not declare — add an entry): [baseline A/B: HARD RED (task-introduced-red) — the task's red set is NOT a subset of the develop baseline red set: added=plugin/test/carrier-registry-completeness.test.mjs changed=-]
+- run_id：wk-prod-anchor

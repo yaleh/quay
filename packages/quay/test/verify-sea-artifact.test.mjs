@@ -1,4 +1,4 @@
-// @test-group product
+// @test-group serial
 // verify-sea-artifact.test.mjs — gap-release-artifact-missing-plugin-ac16 (AC3 产物层验证).
 //
 // The v0.4.0 SEA release archive shipped without plugin/ and `strings` of the 6 mechanism names

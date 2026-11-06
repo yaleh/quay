@@ -650,11 +650,19 @@ run_scoped_static_checks_touches() { run_scoped_static_checks_sel --touches "$1"
 source "${repo_root}/plugin/scripts/suite-slot-lib.sh"
 
 # ── gap-suite-knobs-config-file-priority: config < env < CLI ──────────────────────────────────────
-# The suite: section in .quay/config.yml is the LOWEST-priority default for the 6 suite knobs. Read it
-# once and promote each present value into its env var via the `VAR="${VAR:-config}"` form — env wins
-# over config (an already-set env var is left untouched), and the existing CLI-flag logic stays above
-# env. A malformed suite: section makes the node helper exit non-zero ⇒ FAIL-CLOSED here (a broken
-# config must not silently degrade to env-only defaults — DIR-050 discipline, AC5).
+# The suite: section in .quay/config.yml is the LOWEST-priority default for the suite knobs. Read it
+# once and promote each present value into its env var via the `export VAR="${VAR:-config}"` form —
+# env wins over config (an already-set env var is left untouched), and the existing CLI-flag logic
+# stays above env. A malformed suite: section makes the node helper exit non-zero ⇒ FAIL-CLOSED here
+# (a broken config must not silently degrade to env-only defaults — DIR-050 discipline, AC5).
+#
+# ⛔ The `export` comes from suite-params.ts --shell, and it is LOAD-BEARING: this script runs with
+# `set -euo pipefail` and NO `set -a`, so a bare `VAR=…` would be a SHELL-LOCAL variable — the shell
+# below would see it while every node child spawned by the suite would read `undefined`
+# (gap-suite-config-knobs-not-exported-on-direct-test-sh-path: the config was read, printed and
+# silently invisible to the object under test, so the direct path still derived nproc lanes instead
+# of the configured ones). Don't "simplify" the emitter back to a bare assignment; the invariant is
+# pinned by plugin/test/suite-params.test.mjs.
 if ! suite_cfg="$(node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/suite-params.ts" --shell --root "${repo_root}" 2>&1)"; then
   echo "test.sh: FAIL-CLOSED reading suite: config — ${suite_cfg}" >&2
   exit 2

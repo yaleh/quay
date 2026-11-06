@@ -184,11 +184,15 @@ Usage:
   node --experimental-strip-types suite-params.ts --json [--root <dir>]
       print the typed SuiteParams as JSON ({} = no suite: section).
   node --experimental-strip-types suite-params.ts --shell [--root <dir>]
-      print shell assignment lines, one per PRESENT knob, of the form
-        QUAY_X="\${QUAY_X:-<value>}"
-      (env wins over config — the :- form leaves an already-set env var untouched). Safe to \`eval\`:
-      var names are the fixed 8-knob whitelist and values are schema-validated (numbers, plus the
-      size string for memory_max).
+      print shell EXPORT lines, one per PRESENT knob, of the form
+        export QUAY_X="\${QUAY_X:-<value>}"
+      (env wins over config — the :- form leaves an already-set env var untouched). ⛔ The \`export\`
+      is load-bearing, not decoration: the consumer (scripts/test.sh) evals this text in a shell
+      with \`set -euo pipefail\` but NO \`set -a\`, so a bare assignment would be a SHELL-LOCAL
+      variable — visible to the eval'ing shell, invisible to every process the suite spawns
+      (gap-suite-config-knobs-not-exported-on-direct-test-sh-path). Safe to \`eval\`: var names are
+      the fixed 10-knob whitelist and values are schema-validated (numbers, plus the size string
+      for memory_max).
 
 Exit codes: 0 ok; 1 FAIL-CLOSED (malformed suite: section — the suite must not silently degrade).`;
 
@@ -211,7 +215,11 @@ function main(argv: string[]): number {
     for (const key of Object.keys(SUITE_KNOBS) as SuiteKnobKey[]) {
       const v = params[key];
       if (v === undefined) continue;
-      process.stdout.write(`${SUITE_KNOBS[key]}="\${${SUITE_KNOBS[key]}:-${v}}"\n`);
+      // `export` — see the usage note: the consumer evals this WITHOUT `set -a`, so a bare
+      // assignment would leave the value shell-local and every suite child would read it as unset
+      // (gap-suite-config-knobs-not-exported-on-direct-test-sh-path, hard rule 3b: read, printed,
+      // and invisible to the object under test).
+      process.stdout.write(`export ${SUITE_KNOBS[key]}="\${${SUITE_KNOBS[key]}:-${v}}"\n`);
     }
     return 0;
   }

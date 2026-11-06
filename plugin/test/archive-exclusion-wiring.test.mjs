@@ -9,6 +9,12 @@
 // control — with the exclusion the face stays green, with the exclusion removed (or its archive
 // input removed) the archived object is flagged (red). A face with no test here is a face that
 // "forgot to wire" (AC3: 缺哪一条就说明那一面没真正接线).
+// §12c-ii (2026-11-06) adds the one face that is NOT tree-walking code: the DISCOVERY PROBE SPECS.
+// An analyst prompt that treats `archive/**` as an analysable surface reads identity that is true
+// BY CONSTRUCTION (a frozen snapshot vs a live file unchanged since capture) and proposes deleting
+// the historical record — finding `archive-retired-gate-scripts-still-byte-identical-to-live`. The
+// last test below pins that the architecture-analysis spec carries the exclusion, through the REAL
+// loader (readProbeSpec), so the clause actually reaches the spawned analyst.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
@@ -19,9 +25,11 @@ import { spawnSync } from "node:child_process";
 
 import { parseImports, enumerateScripts } from "../scripts/runtime-usage-inventory.ts";
 import { isArchivedPath } from "../../scripts/version-consistency-check.ts";
+import { readProbeSpec } from "../scripts/read-probe-spec.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "..", "..");
+const PLUGIN_ROOT = path.resolve(__dirname, "..");
 const SCRIPTS_DIR = path.join(REPO_ROOT, "plugin", "scripts");
 const TEST_SH = path.join(REPO_ROOT, "scripts", "test.sh");
 
@@ -207,4 +215,76 @@ test("scripts/test.sh build_deduped_files drops archive/** (negative control: fi
     "/repo/plugin/test/real.test.mjs\tserial",
     "/repo/packages/quay/test/other.test.mjs\tmain",
   ], "archive/** realpaths must be filtered out of the deduped glob");
+});
+
+// ── §12c-ii: the ANALYST-INSTRUCTION face — probe specs put archive/** out of scope ──────────
+// Why this is a real face and not prose-for-its-own-sake: the probe spec's BODY is the prompt a
+// fresh-context analyst receives. `identity-replication-check.ts` (findByteIdenticalPairs) pairs
+// `plugin/scripts/*` against `experiments/*/scripts/*` only, so the mechanical instruments CANNOT
+// see an archive/ pair — but a free-form analyst pass over the whole tree can, and that is exactly
+// what produced finding `archive-retired-gate-scripts-still-byte-identical-to-live` (2026-11-06):
+// 6 archive↔live byte-identical pairs, already recorded per-file as `byte_identical=yes` in
+// `archive/INDEX.tsv` nine days earlier, reported as duplication with a remedy (delete the archive
+// copies) that reddens `plugin/test/gate-scripts-retirement.test.mjs` (measured: 4 pass / 1 fail).
+// The clause is what stops the next analyst re-deriving it; this test is what stops the clause from
+// being silently paraphrased away (ADR-004).
+
+const ARCHIVE_SCOPE_ANCHOR =
+  "`archive/**` IS OUT OF DUPLICATION SCOPE — LIVE↔ARCHIVE BYTE-IDENTITY IS NOT A DEFECT.";
+
+/** Does this analyst objective surrender `archive/**` as a duplication surface — and name the
+ *  carriers that make the surrender checkable, rather than asserting it in the abstract? */
+function declaresArchiveOutOfDuplicationScope(objective) {
+  const text = String(objective ?? "");
+  if (!text.includes(ARCHIVE_SCOPE_ANCHOR)) return false;
+  return (
+    text.includes("archive/INDEX.tsv") &&
+    text.includes("NEVER propose deleting archive copies") &&
+    text.includes("gate-scripts-retirement.test.mjs")
+  );
+}
+
+/** The clause paragraph and its index, as it sits in the spec body (-1/-1 when absent). */
+function locateClause(objective) {
+  const text = String(objective ?? "");
+  const at = text.indexOf(ARCHIVE_SCOPE_ANCHOR);
+  if (at === -1) return { text, start: -1, end: -1 };
+  const start = text.lastIndexOf("\n\n", at) + 2;
+  const nl = text.indexOf("\n\n", at);
+  const end = nl === -1 ? text.length : nl;
+  return { text, start, end };
+}
+
+test("§12c-ii: the architecture-analysis probe spec puts archive/** out of duplication scope (negative control: the same predicate is FALSE on the pre-fix objective)", () => {
+  // Arm 1 — through the REAL loader. Asserting on the loaded `objective` (not on the file bytes)
+  // proves the clause actually reaches the spawned analyst, and would fail if readProbeSpec ever
+  // stopped returning the body it parses.
+  const spec = readProbeSpec("architecture-analysis", PLUGIN_ROOT);
+  assert.equal(typeof spec.objective, "string");
+  assert.ok(
+    declaresArchiveOutOfDuplicationScope(spec.objective),
+    "the architecture-analysis analyst prompt must carry the archive-exclusion clause (`archive/**` IS OUT OF DUPLICATION SCOPE …) naming archive/INDEX.tsv, the ⛔ no-delete remedy, and the executable pin gate-scripts-retirement.test.mjs — without it a frozen snapshot is re-reported as a live duplicate and the proposed remedy deletes the historical record",
+  );
+
+  // Arm 2 — the PRE-FIX objective (the clause paragraph cut out). The predicate must read FALSE, or
+  // arm 1 measures nothing but "the spec is non-empty" (hard rule 4: a check that cannot take a
+  // false value is not a measurement).
+  const { text, start, end } = locateClause(spec.objective);
+  assert.ok(start >= 0 && end > start, "the clause paragraph must be locatable in the objective");
+  const prefixed = text.slice(0, start) + text.slice(end).replace(/^\n+/, "");
+  assert.equal(
+    declaresArchiveOutOfDuplicationScope(prefixed), false,
+    "the predicate must be FALSE on the pre-fix objective (clause removed) — otherwise it is not measuring the clause",
+  );
+
+  // Arm 3 — the clause without its checkable carrier. Keeping the anchor but dropping the
+  // `archive/INDEX.tsv` pointer must also read FALSE: the exclusion has to name the record that
+  // makes "this pair is governed, not silent" verifiable.
+  const carrierless = text.slice(0, start) +
+    text.slice(start, end).replace(/archive\/INDEX\.tsv/g, "the archive index file") +
+    text.slice(end);
+  assert.equal(
+    declaresArchiveOutOfDuplicationScope(carrierless), false,
+    "the predicate must be FALSE when the clause no longer names archive/INDEX.tsv (each conjunct is load-bearing)",
+  );
 });

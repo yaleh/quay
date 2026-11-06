@@ -1,7 +1,7 @@
 ---
 id: gap-suite-config-knobs-not-exported-on-direct-test-sh-path
 title: "scripts/test.sh 的 suite: 配置提升没有 export，直接路径上 QUAY_* 旋钮对子进程不可见"
-status: ready
+status: done
 labels:
   - gap
 parent: null
@@ -109,13 +109,3 @@ undefined
 - plugin/scripts/suite-params.ts
 - plugin/test/suite-params.test.mjs
 - tasks/gap-suite-config-knobs-not-exported-on-direct-test-sh-path.md
-
-## Blocker
-
-**2026-11-06T10:13:15.655Z — worker 未落地（exited-not-landed）**
-
-- 未落地原因：step=ff: fan-in-ff-merge: suite 证书 — suite_head..tip 恰为本任务的单个 flip-done 提交（身份判定：仅 M tasks/gap-suite-config-knobs-not-exported-on-direct-test-sh-path.md）⇒ 判惰性，⛔ 未调分类器
-fan-in-ff-merge: FF FAILED — ! [rejected]            task/gap-suite-config-knobs-not-exported-on-direct-test-sh-path -> develop (non-fast-forward); not a fast-forward. Retry record written (attempt 1). Return to 无锁段 step 1 (merge develop again — 必须 merge 不得 rebase, AC75), re-judge the delta (step 2) and re-run.
-fan-in-ff-merge: measure ff_only_locked=false
-- run_id：wk-prod-anchor
-- session_id：126be5cd-cada-4157-ad7f-150c0ab57068
