@@ -3,7 +3,7 @@ id: gap-routine-semantic-dedup-scan-discovery-config-reader-template
 title: "semantic-dedup-scan: the three readers are one 1154-char template
   differing only in the loop key and parse callee, and each of the three
   routines carries about six more near-identi"
-status: ready
+status: needs-human
 labels:
   - gap
   - routine-filed
@@ -96,8 +96,8 @@ extract
 
 ## Blocker
 
-**2026-11-06T08:18:46.392Z — worker 未落地（exited-not-landed）**
+**2026-11-06T09:28:50.802Z — worker 未落地（exited-not-landed）**
 
-- 未落地原因：step=suite: oom-killed (2) — recovery red set is NOT a subset of the develop baseline red set: added=plugin/test/archive-exclusion-wiring.test.mjs changed=- — needs a code fix
+- 未落地原因：step=suite: incomplete suite (897/994 files) oomKill=1 — recovery baseline-equivalence not evaluable at concurrency 16 — needs a code fix
 - run_id：wk-prod-anchor
-- session_id：773208ce-65bb-4efb-83c0-f407058089c0
+- session_id：5b584620-f65e-41c0-b911-2ff71782169a

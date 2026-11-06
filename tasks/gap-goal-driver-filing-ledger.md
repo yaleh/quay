@@ -59,3 +59,11 @@ goal_ac: AC-934
 - docs/carrier-registry.json
 - docs/evidence/2026-11-06-goal-filing-ledger.md (new)
 - tasks/gap-goal-driver-filing-ledger.md
+
+## Blocker
+
+**2026-11-06T09:20:57.653Z — worker 未落地（exited-not-landed）**
+
+- 未落地原因：step=suite: incomplete suite (547/637 files) — recovery baseline-equivalence not evaluable at concurrency 16 — needs a code fix
+- run_id：wk-prod-anchor
+- session_id：fe5ebfa2-cd2c-4bc8-a1f0-0812ed282f50
