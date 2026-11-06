@@ -102,7 +102,8 @@ Node ≥22.6），因此它**不能** import 这个 `.ts`。于是：
 
 ## Blocker
 
-**2026-11-06T06:40:16.275Z — worker 未落地（exited-not-landed）**
+**2026-11-06T09:15:28.354Z — worker 未落地（exited-not-landed）**
 
-- 未落地原因：step=merge-develop: exit null
+- 未落地原因：step=suite: incomplete suite (513/636 files) oomKill=1 — recovery baseline-equivalence not evaluable at concurrency 64 — needs a code fix
 - run_id：wk-prod-anchor
+- session_id：202af39f-536b-40cf-9696-025017ebadcc
