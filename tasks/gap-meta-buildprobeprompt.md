@@ -2,7 +2,7 @@
 id: gap-meta-buildprobeprompt
 title: meta-driver readings carrier exceeds the probe's 256KB Read cap — the
   documented lazy-read path fails every round
-status: ready
+status: done
 labels:
   - meta-driver
   - driver-candidate
