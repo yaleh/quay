@@ -1,7 +1,7 @@
 ---
 id: gap-goal-next-projection
 title: goal-next 投影：每个 active GOAL 一行 owner/action，纯函数上收 Core
-status: todo
+status: ready
 labels:
   - gap
   - goal-driver
