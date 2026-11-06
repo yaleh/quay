@@ -87,7 +87,7 @@ import { parse as parseYaml } from "yaml";
 //
 // ⚠️ 从 driver-runtime（Layer 0）取这两个核心符号，⛔ 不在此处直接写 Core 源码树的 import 字面量：
 // 「Core 的源码树在哪」是布局知识，唯一落点是 Layer 0（driver-runtime 的 Core 导入面）。
-import { inAchievedReverifyScope, readsFrozenPopulation, GOAL_ACCEPTANCE_ACTIVE_ENV, goalCriterionWorktreeDir, goalBranchName, goalBranchRefExists, goalBranchTip, ensureGoalBranch, readGoalMergeResults, realpathOrSelf, snapshotQuayDirInto, stopPreviewServe, ensureWorktreeNodeModules, type GoalBranchAction, type QuaySnapshotReading, type PreviewStopReading, type WorktreeNodeModulesReading } from "./driver-runtime.ts";
+import { inAchievedReverifyScope, readsFrozenPopulation, GOAL_ACCEPTANCE_ACTIVE_ENV, goalCriterionWorktreeDir, goalBranchName, goalBranchRefExists, goalBranchTip, ensureGoalBranch, readGoalMergeResults, realpathOrSelf, snapshotQuayDirInto, stopPreviewServe, ensureWorktreeNodeModules, goalRequestLedgerPath, readGoalRequestLedger, openGoalRequests, terminalStateOfVerdict, settleGoalRequests, type GoalBranchAction, type QuaySnapshotReading, type PreviewStopReading, type WorktreeNodeModulesReading, type GoalRequestTerminalState, type GoalRequestSettlement } from "./driver-runtime.ts";
 
 // ⑨ CI run 载体的**生产调用点**（tasks/gap-develop-ci-first-decisive-green Requested action 2）。
 // ⛔ 本 driver 是 AC-265 的评估者，而 AC-265 读的是 `.quay/ci-runs.jsonl` 这个**本地载体**——
@@ -3717,6 +3717,120 @@ export function runGapSpawnPass(
   return { spawned: outcomes.length, llmInvoked, outcomes, filing, throttle };
 }
 
+// ── 请求队列消费（tasks/gap-goal-request-queue / GOAL-914 AC-936）─────────────────────────────────
+//
+// 缺口：goal 层此前只能「验收」——上层（manager / quay-fleet / 人）想说「请重新评估这条 AC」时，
+// 唯一的路是读 driver 内部状态或直接写 goal store。`quay goal request <goal> <ac> --reason` 写
+// `.quay/goal-requests.jsonl` 的 `submitted` 行；本 pass 就是那个队列的**唯一消费者**：每轮取出仍
+// open 的提交，用**既有** `gateCriterion` 重跑该 AC 的判据，写一条终态行（accepted / refused /
+// not-evaluated，带 consumedAt）。
+//
+// ⛔ 边界（GOAL-914 非目标）：本 pass **不**翻任何状态、**不**改缺口分类、**不**立案、**不**通知。
+// 它只回答「这次重新评估的结果是什么」。AC 的 achieved 翻转仍归 pass 1 的 I2——下一轮照常发生。
+//
+// 三态，⛔ 不是布尔（硬规则 3b）：判据没跑成（AC 已不在 / 判据读不懂）记 `not-evaluated`，
+// 与「跑了且失败」(`refused`) 不同形。幂等归 `settleGoalRequests`（它自己再核一次重复终态）。
+
+/** 本 pass 的读数（落进轮 fact 的 `value.requests`）。⛔ 恒非 null 且每轮都写：
+ *  `evaluated:true` + `openBefore:0` = 「查过且本轮零条待办」（一个测量）；
+ *  `evaluated:false` + `cause` = 「台账读不动」（没查成）——两者不同形（硬规则 3b）。 */
+export interface GoalRequestPassReading {
+  evaluated: boolean;
+  cause: string | null;
+  ledger: string;
+  /** 跳过并计数的坏行数（⛔ 一行坏数据不得让整份队列消失）。 */
+  badLines: number;
+  /** 本轮开始时仍 open 的 `submitted` 行数。 */
+  openBefore: number;
+  /** 本轮写终态之后仍 open 的行数（写失败的行仍算 open——⛔ 不假装已答）。 */
+  openAfter: number;
+  /** 本轮真正追加的终态行数。 */
+  appended: number;
+  /** 逐条本轮落定的结论（⛔ 不是计数：谁的、什么结论、为什么，逐条可读）。 */
+  settled: Array<{ requestId: string; goal: string; ac: string; state: GoalRequestTerminalState; verdict: "pass" | "fail" | "not-evaluated" | null; detail: string }>;
+  /** 到达时**已有**终态、因而本轮不重复写的 requestId（幂等的可核形态）。 */
+  alreadySettled: string[];
+  /** 写失败（⛔ 零诊断：失败必须留痕，且这些行仍计入 openAfter）。 */
+  errors: string[];
+}
+
+/** 消费请求队列里仍 open 的 `submitted` 行。
+ *
+ *  `records` 是本轮的 goal 快照（与 pass 1 同一份）：它回答「这条 AC 还在不在、还属不属于这个
+ *  GOAL」。不在 ⇒ 终态 `not-evaluated` + `detail:ac-not-found-under-goal`，⛔ **不 spawn 一个
+ *  判据**（对一条已不存在的 AC 跑 `goal gate` 只会得到一个读不懂的 usage 错误，那是仪器故障，
+ *  不是「这次请求被拒绝」）。 */
+export async function runGoalRequestPass(
+  scriptRoot: string | null,
+  dataRoot: string,
+  records: Array<Record<string, unknown>>,
+  opts: { ledgerPath?: string; now?: () => Date } = {},
+): Promise<GoalRequestPassReading> {
+  const ledger = opts.ledgerPath ?? goalRequestLedgerPath(dataRoot);
+  const base: GoalRequestPassReading = {
+    evaluated: false,
+    cause: null,
+    ledger,
+    badLines: 0,
+    openBefore: 0,
+    openAfter: 0,
+    appended: 0,
+    settled: [],
+    alreadySettled: [],
+    errors: [],
+  };
+  const read = readGoalRequestLedger(ledger);
+  if (!read.readable) return { ...base, cause: read.cause ?? "ledger-unreadable" };
+  base.badLines = read.badLines;
+  const open = openGoalRequests(read.rows);
+  base.openBefore = open.length;
+  base.openAfter = open.length;
+  if (open.length === 0) return { ...base, evaluated: true };
+
+  const byId = new Map(records.map((r) => [String(r.id ?? ""), r]));
+  const settlements: GoalRequestSettlement[] = [];
+  for (const req of open) {
+    const rec = byId.get(req.ac);
+    if (rec === undefined || String(rec.goal ?? "") !== req.goal) {
+      settlements.push({
+        requestId: req.requestId,
+        goal: req.goal,
+        ac: req.ac,
+        reason: req.reason,
+        submittedAt: req.at,
+        state: "not-evaluated",
+        verdict: null,
+        detail: `ac-not-found-under-goal: ${req.ac} is not a ${req.goal} criterion in this round's snapshot`,
+      });
+      continue;
+    }
+    // 复用 pass 1 的同一个判据执行面（⛔ 不另写一份 spawn / verdict 解析）。
+    const { verdict, reason } = await gateCriterion(scriptRoot, req.ac, dataRoot, { recordTimeoutMs: rec.timeoutMs });
+    settlements.push({
+      requestId: req.requestId,
+      goal: req.goal,
+      ac: req.ac,
+      reason: req.reason,
+      submittedAt: req.at,
+      state: terminalStateOfVerdict(verdict),
+      verdict,
+      detail: reason.slice(0, 500),
+    });
+  }
+  const w = settleGoalRequests(ledger, settlements, { now: opts.now });
+  const skipped = new Set(w.alreadySettled);
+  base.settled = settlements
+    .filter((s) => !skipped.has(s.requestId))
+    .map((s) => ({ requestId: s.requestId, goal: s.goal, ac: s.ac, state: s.state, verdict: s.verdict, detail: s.detail }));
+  base.alreadySettled = w.alreadySettled;
+  base.appended = w.appended;
+  base.errors = w.errors;
+  // 只有**真的写进去**的才算已答；写失败的那条仍是 open（⛔ 不假装成功）。
+  base.openAfter = open.length - w.appended;
+  return { ...base, evaluated: true };
+}
+
+
 // ── 充分性卡死信号（AC1~AC3 / gap-goal-sufficiency-insufficient-has-no-followup-signal）────────
 //
 // 缺口（2026-09-15，两个真实工作区各独立确认一次，⛔ 不是假说）：确定裁决 `insufficient` 写进
@@ -4272,6 +4386,11 @@ export interface GoalRoundReadings {
    *  ⛔ 它是把「本轮为什么没立案」从五种成因（halt / 资源门 / 冷却 / 日上限 / 全局名额）里区分出来的
    *  那一半：只报 `spawned: 0` 时五者同形。 */
   filing_throttled: GoalFilingThrottleReading;
+  /** 请求队列（`.quay/goal-requests.jsonl`）本轮消费读数（tasks/gap-goal-request-queue，AC-936）：
+   *  本轮落定的逐条 `{state, verdict, detail}` + 仍 open 的行数 + 被幂等跳过的 requestId。
+   *  ⛔ 恒非 null（**每轮都消费**）：`evaluated:false` + `cause` = 台账读不动，
+   *  ⛔ 不与「查过且零条待办」同形（硬规则 3b）。 */
+  requests: GoalRequestPassReading;
 }
 
 /** ⑩ 不可达的 draft：draft GOAL 及其名下的 draft AC（gap-goal-driver-draft-ac-invisible-yet-blocking
@@ -4364,6 +4483,8 @@ export interface GoalRoundOptions {
   roundTag?: string;
   /** 立案台账路径覆盖（测试缝）。缺省 `<root>/.quay/goal-filing.jsonl`。 */
   filingLedgerPath?: string;
+  /** 请求队列路径覆盖（测试缝）。缺省 `<root>/.quay/goal-requests.jsonl`。 */
+  requestLedgerPath?: string;
   /** 时钟（测试缝）。 */
   now?: () => Date;
   /** `goal list` 的调用注入（测试缝）。缺省 = meta-driver 的 listGoalRecords。
@@ -4659,6 +4780,15 @@ export async function runGoalRound(root: string, opts: GoalRoundOptions = {}): P
   // （读它的判据按这个口径断言），塞入 goal="" 的冻结 AC 会污染那个口径。轮转的**产物是台账**
   // ——判定与消费都从台账读，本轮的日志行只是可观测性。
   const frozenSweep = await sweepFrozenAcs(scriptRoot, dataRoot);
+
+  // pass 1d — 请求队列消费（tasks/gap-goal-request-queue / AC-936）。
+  // 位置有理由：在 pass 1（本轮判据集）之后、pass 2（刷新台账尾 + 判关闭）之前 —— 请求触发的这次
+  // 重跑写下的 verdict 因此进入**本轮**关闭判定读到的尾事件，而不是晚一轮（同 pass 1c 的排布理由）。
+  // ⛔ 纯消费：不翻状态、不改缺口分类、不 spawn（见 `runGoalRequestPass` 的注释）。
+  const requests = await runGoalRequestPass(scriptRoot, dataRoot, records, {
+    ledgerPath: opts.requestLedgerPath,
+    now: opts.now,
+  });
 
   // pass 2 — 刷新台账尾 verdict，再逐条判关闭。
   //
@@ -4982,6 +5112,8 @@ export async function runGoalRound(root: string, opts: GoalRoundOptions = {}): P
     filing_spawned: spawnPass.filing,
     // 立案节流（gap-goal-driver-filing-throttle）：本轮 per-AC 冷却/日上限的逐条读数。
     filing_throttled: spawnPass.throttle,
+    // 请求队列（gap-goal-request-queue）：本轮消费 `submitted` 行写下的终态读数。
+    requests,
   };
   // ⑥c 缺口可见性 fact（gap-goal-driver-computed-gaps-never-surfaced-as-a-round-fact）：`gaps` 在 ⑤ 算出后
   // 此前只喂 `runGapSpawnPass`，本 fact 把它（非安静态子集）落进轮记录 ⇒ 「哪条 AC 卡在 workable /

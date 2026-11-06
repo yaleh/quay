@@ -553,6 +553,7 @@ Usage:
   quay goal batch --json '<array-of-records>' [--root <path>]
   quay goal merge <GOAL-NNN> --reason '<why now>' [--override '<why the unmet ACs are acceptable>'] [--actor <who>] [--root <path>] [--json]
   quay goal preview <GOAL-NNN> start|stop|status [--port <n>] [--host <h>] [--root <path>] [--json]
+  quay goal request <GOAL-NNN> <AC-NNN> --reason '<why re-evaluate now>' [--root <path>] [--json]
 
   list / show / write   Read and write records through the Provider ABI (SPEC-goal-mechanism §5.2).
                         list --no-evidence  Skip the derived evidence projection (evidence /
@@ -670,6 +671,17 @@ Usage:
                         are discarded on the next refresh. ⛔ No preview serve running ⇒ a live-probe
                         AC reads not-evaluated ⇒ 'quay goal merge' refuses (that IS the "the human
                         really tried it" precondition — there is no separate flag for it).
+  request <GOAL-NNN> <AC-NNN> --reason '<why>'
+                        Ask the goal-driver to RE-EVALUATE one AC: append ONE 'submitted' row to
+                        <root>/.quay/goal-requests.jsonl; the driver re-runs that AC's criterion on
+                        its next round and appends ONE terminal row (accepted / refused /
+                        not-evaluated) carrying consumedAt. requestId is derived from
+                        (goal, ac, reason) ⇒ an identical resubmission writes nothing, and one
+                        requestId never gets a second terminal row. ⛔ It does NOT flip a status,
+                        file a task, or change the gap classification — it only asks.
+                        Refusals (named, ZERO writes): missing goal/ac; --reason under 8
+                        non-whitespace chars; no such goal; no such AC under that goal; goals/
+                        unreadable; the ledger exists but is unreadable; the ledger is unwritable.
 
 Options:
   --store               Run the goal-store dialect instead of the Provider ABI for list/show/write.

@@ -506,10 +506,84 @@ export async function handleGoal({ sub, positional, flags, wantsJson, rest }: Cl
   const storeOnlyWrite = (sub === "write" || sub === "new") &&
     STORE_ONLY_WRITE_FLAGS.some((f) => flags[f] !== undefined);
   const storeDialect = flags[STORE_DIALECT_FLAG] === true;
-  if (sub !== undefined && (STORE_VERBS.has(sub) || storeDialect || storeOnlyWrite)) {
+  // ⛔ `request` is a CORE-side verb with no goal-store counterpart (the queue lives in
+  // `.quay/goal-requests.jsonl`, not in `goals/`), so `--store` must not route it into the store's
+  // own dispatch — that would answer `unknown subcommand "request"` and read like a missing feature.
+  if (sub !== undefined && sub !== "request" && (STORE_VERBS.has(sub) || storeDialect || storeOnlyWrite)) {
     const argv = storeDelegationArgv(sub, rest ?? [], flags);
     if (argv === null) { process.exitCode = 1; return; }
     process.exitCode = await runGoalStoreCli(argv);
+    return;
+  }
+  if (sub === "request") {
+    // tasks/gap-goal-request-queue / GOAL-914 AC-936 — the REQUEST queue's submit face.
+    // 「重新评估这条 AC」 used to have no entry point at all: the layers above the driver had to read
+    // driver-internal state or write the goal store. This verb appends ONE `submitted` row to
+    // `<root>/.quay/goal-requests.jsonl`; goal-driver consumes it next round (see the driver's
+    // `runGoalRequestPass`). ⛔ It does NOT re-evaluate anything itself, does not flip a status and
+    // does not change the gap classification — the request only asks, the round answers.
+    //
+    // THE REFUSAL LADDER IS NOT RESTATED HERE: `submitGoalRequest` owns it (AC4's negative controls
+    // are asserted against that one function). This handler contributes only the two things the core
+    // module must not know — how to reach the workspace root, and how to read `goals/` (via
+    // goal-merge.ts's existing readers, ⛔ not a second frontmatter parser).
+    const [goalArg, acArg] = positional;
+    if (flags.root !== undefined && typeof flags.root !== "string") {
+      console.error("Error: --root requires a value (e.g., --root /path/to/workspace)");
+      process.exitCode = 1;
+      return;
+    }
+    const root = (flags.root as string | undefined) ?? (storeWorkspaceRoot() as string);
+    const { readGoalRecord, readGoalAcs } = await import("../goal-merge.ts");
+    const { submitGoalRequest } = await import("../core/goal-request.ts");
+    // THREE-STATE, ⛔ not a boolean: a `goals/` we cannot read must not turn into "no such AC"
+    // (硬规则 3b) — that would report an instrument failure as a substantive refusal.
+    const probe = (goalId: string, acId?: string): "exists" | "absent" | "unreadable" => {
+      let files: string[];
+      try {
+        files = fs.readdirSync(path.join(root, "goals"));
+      } catch (e) {
+        return (e as NodeJS.ErrnoException).code === "ENOENT" ? "absent" : "unreadable";
+      }
+      if (readGoalRecord(root, goalId) === null) {
+        // A file for this id that exists but does not parse is UNREADABLE, ⛔ not "no such goal".
+        const file = files.find((f) => f.startsWith(`${goalId}-`) && f.endsWith(".md"));
+        return file === undefined ? "absent" : "unreadable";
+      }
+      if (acId === undefined) return "exists";
+      return readGoalAcs(root, goalId).some((a) => a.id === acId) ? "exists" : "absent";
+    };
+    const r = submitGoalRequest({
+      root,
+      goal: goalArg,
+      ac: acArg,
+      reason: typeof flags.reason === "string" ? flags.reason : undefined,
+      probe,
+    });
+    if (wantsJson) {
+      printJson({
+        ok: r.ok,
+        state: r.state,
+        requestId: r.requestId,
+        goal: goalArg ?? null,
+        ac: acArg ?? null,
+        ledger: r.ledger,
+        settledAs: r.settledAs,
+        refusal: r.refusal,
+      });
+    } else if (r.ok) {
+      if (r.state === "submitted") {
+        console.log(`request submitted: ${r.requestId}`);
+        console.log(`  the goal-driver consumes it on its next round (${r.ledger})`);
+      } else if (r.state === "already-queued") {
+        console.log(`request already queued: ${r.requestId} (identical goal/ac/reason — nothing written)`);
+      } else {
+        console.log(`request already settled: ${r.requestId} → ${r.settledAs} (identical goal/ac/reason — nothing written)`);
+      }
+    } else {
+      console.error(`request refused (${r.refusal?.code}): ${r.refusal?.message}`);
+    }
+    process.exitCode = r.ok ? 0 : 1;
     return;
   }
   if (sub === "merge") {
@@ -772,7 +846,7 @@ export async function handleGoal({ sub, positional, flags, wantsJson, rest }: Cl
     }, { providerId: flags.provider, root: flags.root });
     return;
   }
-  console.error(`unknown goal subcommand: ${sub} (try: list, log, show, write, gate, check, batch, merge, preview, next)`);
+  console.error(`unknown goal subcommand: ${sub} (try: list, log, show, write, gate, check, batch, merge, preview, next, request)`);
   process.exitCode = 1;
   return;
 }

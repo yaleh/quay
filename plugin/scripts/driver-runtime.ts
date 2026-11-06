@@ -481,6 +481,33 @@ export { createMetaStore } from "../../packages/quay/src/meta-store.ts";
 // never a Core source-tree literal.
 export { judgeCriterionCapability, readCapabilityDeclaration } from "../../packages/quay/src/core/criterion-capability.ts";
 export type { CapabilityJudgment, CapabilityReason, CapabilityDeclaration } from "../../packages/quay/src/core/criterion-capability.ts";
+// gap-goal-request-queue (GOAL-914 / AC-936): the REQUEST QUEUE. The submit face is the Core CLI
+// (`quay goal request`, packages/quay/src/cli/goal.ts); the CONSUME face is goal-driver's per-round
+// `runGoalRequestPass`, which must read the SAME carrier with the SAME derivation / dedupe rules —
+// ⛔ a second reader in the driver would be the drift class hard rule 5b names (a requestId derived
+// two ways stops matching, and the idempotency the whole queue rests on silently disappears).
+// Surfaced through this module for the AC-262 reason stated above: the driver says "I need this
+// symbol", never a Core source-tree literal.
+export {
+  GOAL_REQUEST_BASENAME,
+  GOAL_REQUEST_REL,
+  goalRequestLedgerPath,
+  readGoalRequestLedger,
+  openGoalRequests,
+  settledRequestIds,
+  terminalStateOfVerdict,
+  settleGoalRequests,
+} from "../../packages/quay/src/core/goal-request.ts";
+export type {
+  GoalRequestRow,
+  GoalRequestState,
+  GoalRequestTerminalState,
+  GoalRequestSubmittedRow,
+  GoalRequestTerminalRow,
+  GoalRequestSettlement,
+  GoalRequestSettleReading,
+  GoalRequestLedgerRead,
+} from "../../packages/quay/src/core/goal-request.ts";
 // goal-branch (SPEC-goal-branch-2026-10-03 §5 B1, ruling ⑩): the goal-driver OWNS the criterion
 // worktree's lifecycle (create / refresh / delete, ruling ㉒) while the criterion's cwd is chosen by
 // the store. Both sides must name the SAME path, so the derivation lives in Core once

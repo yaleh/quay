@@ -239,6 +239,16 @@
       "readers": "unaudited"
     },
     {
+      "name": "goal-requests.jsonl",
+      "kind": "jsonl-log",
+      "owner": "packages/quay/src/core/goal-request.ts",
+      "readers": [
+        "packages/quay/src/core/goal-request.ts",
+        "packages/quay/src/cli/goal.ts",
+        "plugin/scripts/goal-driver.ts"
+      ]
+    },
+    {
       "name": "goal-round.jsonl",
       "kind": "jsonl-log",
       "owner": "plugin/scripts/goal-driver.ts",

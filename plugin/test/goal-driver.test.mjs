@@ -47,6 +47,15 @@ import {
   defaultGoalFilingConfig,
 } from "../scripts/driver-config.ts";
 import { repoRoot, writeStandingGoalFile } from "./helpers/goal-driver-harness.mjs";
+// The request queue's SUBMIT half (tasks/gap-goal-request-queue / AC-936). The consume half is what
+// this shard judges; seeding through the production submit function rather than by hand-writing JSON
+// keeps the two halves on ONE definition of the row shape and the requestId derivation (硬规则 5b).
+import {
+  goalRequestId,
+  goalRequestLedgerPath,
+  readGoalRequestLedger,
+  submitGoalRequest,
+} from "../../packages/quay/src/core/goal-request.ts";
 // The projection's vocabulary lives in ONE Core module (tasks/gap-goal-next-projection) — the driver
 // reaches it through `driver-runtime.ts`; the test asserts the round fact against the same enums.
 import { GAP_STATES, BLOCKED_GAP_STATES, GOAL_NEXT_OWNERS, GOAL_NEXT_ACTION_KINDS } from "../../packages/quay/src/core/goal-analysis.ts";
@@ -576,6 +585,168 @@ test("⑩ 轮 fact：blocked 三态各自出现（带 blocker + owner），且�
     for (const g of gaps) assert.notEqual(g.state, "stalled", "缺口视图不再出现 stalled");
     for (const row of next.value.rows) assert.notEqual(row.gapState, "stalled", "投影行不再出现 stalled");
     assert.doesNotMatch(JSON.stringify(next.value), /"stalled"/, "goal-next fact 的序列化里没有 stalled 取值");
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+// ── ⑪ 请求队列消费（tasks/gap-goal-request-queue / GOAL-914 AC-936）──────────────────────────
+//
+// 被判定的是 `runGoalRequestPass` ——**每轮**消费 `.quay/goal-requests.jsonl` 里仍 open 的 `submitted`
+// 行、用既有 `gateCriterion` 重跑该 AC、写一条终态行的那一半。本 shard 走**真轮**（`runGoalRound`
+// 真跑 goal-store CLI，`spawnCap: 0` 只挡立案 spawn，⛔ 不挡判据），⛔ 不注入 verdict。
+//
+// 四件事逐条钉住：①三种终态各自出现且**互不同形**（尤其 `not-evaluated` ⛔ 不是 `refused`）；
+// ②终态行带 `consumedAt`，且同一个 requestId 在**整个载体**上只有一条终态（AC-936 的判据原文）；
+// ③反复跑轮次不产生第二条终态（幂等）；④台账读不动 ⇒ `evaluated:false` + cause，⛔ 不与「零条待办」
+// 同形，且不把整轮判失败。
+
+const REQ_REASON = "re-evaluate after the landing criterion changed";
+
+/** 在夹具 root 上提交一条请求（走生产 submit 函数；`goals/` 的真存在性在本 shard 不是被测对象）。 */
+function seedRequest(root, goal, ac, reason = REQ_REASON) {
+  const r = submitGoalRequest({
+    root,
+    goal,
+    ac,
+    reason,
+    probe: () => "exists",
+    now: () => new Date(T0),
+  });
+  assert.equal(r.ok, true, `种子请求必须真的写进去（${JSON.stringify(r.refusal)}）`);
+  return r.requestId;
+}
+
+/** 夹具：一个 active GOAL + 给定 criterion 的 active AC（真跑判据，⛔ 不注入 verdict）。 */
+function seedGoalFixture(tag, criterion) {
+  const tmp = tmpdir(tag);
+  fs.mkdirSync(path.join(tmp, "goals"), { recursive: true });
+  fs.mkdirSync(path.join(tmp, "tasks"), { recursive: true });
+  writeStandingGoalFile(tmp, { id: "GOAL-001", status: "active", kind: "goal" });
+  writeStandingGoalFile(tmp, { id: "AC-002", status: "active", kind: "criterion", goal: "GOAL-001", criterion });
+  return tmp;
+}
+
+const roundOpts = (nowMs) => ({
+  scriptRoot: repoRoot,
+  gapWorkerCmd: "true",
+  resourceGateArgv: ["true"],
+  spawnCap: 0, // ⛔ 本 shard 只读请求消费，不立案
+  now: () => new Date(nowMs),
+});
+
+test("⑪ a PASSING criterion settles the request as `accepted` (real round, real carrier)", async () => {
+  const tmp = seedGoalFixture("req-accepted", "true");
+  try {
+    const ledger = goalRequestLedgerPath(tmp);
+    const requestId = seedRequest(tmp, "GOAL-001", "AC-002");
+    const nowMs = T0 + 60 * 1000;
+    const r = await runGoalRound(tmp, roundOpts(nowMs));
+
+    const requests = r.fact.value.requests;
+    assert.equal(requests.evaluated, true, `台账可读 ⇒ evaluated:true (cause: ${requests.cause})`);
+    assert.equal(requests.openBefore, 1, "本轮开始时一条待办");
+    assert.equal(requests.appended, 1, "本轮写了一条终态");
+    assert.equal(requests.openAfter, 0, "写完之后不再有 open 行");
+    assert.equal(requests.settled.length, 1, "逐条可读（⛔ 只给计数）");
+    const s = requests.settled[0];
+    assert.equal(s.requestId, requestId);
+    assert.equal(s.ac, "AC-002");
+    assert.equal(s.state, "accepted", `判据 pass ⇒ accepted（实测 verdict=${s.verdict}）`);
+    assert.equal(s.verdict, "pass", "原始 verdict 一并保留（⛔ 折进 state 就分不清『跑了且失败』与『没跑成』）");
+
+    // 载体本身：submitted + 一条终态，终态带 consumedAt。
+    const rows = readGoalRequestLedger(ledger).rows;
+    assert.equal(rows.length, 2, "一行提交 + 一行终态");
+    const terminal = rows.find((x) => x.requestId === requestId && x.state !== "submitted");
+    assert.equal(terminal.state, "accepted");
+    assert.equal(terminal.consumedAt, new Date(nowMs).toISOString(), "consumedAt = 消费那一刻");
+    assert.equal(terminal.reason, REQ_REASON, "理由随终态一起留在载体里");
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test("⑪ a FAILING criterion settles it as `refused` — a different terminal state, not a boolean", async () => {
+  const tmp = seedGoalFixture("req-refused", "exit 1");
+  try {
+    const requestId = seedRequest(tmp, "GOAL-001", "AC-002");
+    const r = await runGoalRound(tmp, roundOpts(T0 + 60 * 1000));
+    const s = r.fact.value.requests.settled[0];
+    assert.equal(s.requestId, requestId);
+    assert.equal(s.state, "refused", `判据 fail ⇒ refused（实测 verdict=${s.verdict}）`);
+    assert.equal(s.verdict, "fail");
+    assert.notEqual(s.state, "not-evaluated", "「跑了且失败」与「没跑成」⛔ 不同形");
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test("⑪ a request for an AC that is NOT in the round's snapshot settles as `not-evaluated` (no criterion run)", async () => {
+  const tmp = seedGoalFixture("req-missing-ac", "true");
+  try {
+    // AC-999 不存在于这份 goals/ —— 请求本身合法（提交时 AC 还在），消费时已不在。
+    const requestId = seedRequest(tmp, "GOAL-001", "AC-999");
+    const r = await runGoalRound(tmp, roundOpts(T0 + 60 * 1000));
+    const s = r.fact.value.requests.settled[0];
+    assert.equal(s.requestId, requestId);
+    assert.equal(s.state, "not-evaluated", "找不到 AC ⇒ 无法评估（⛔ 不是 refused）");
+    assert.equal(s.verdict, null, "判据根本没跑 ⇒ verdict 为 null，⛔ 不伪装成 fail");
+    assert.match(s.detail, /ac-not-found-under-goal/, `成因具名（实测：${s.detail}）`);
+
+    // 负控的另一半：这条请求 ⛔ 没有牵动 AC-002 的判据（载体里那条终态仍只有一条，且是 AC-999 的）。
+    const rows = readGoalRequestLedger(goalRequestLedgerPath(tmp)).rows;
+    assert.equal(rows.filter((x) => x.state !== "submitted").length, 1);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test("⑪ idempotency: three consecutive rounds leave exactly ONE terminal row (AC-936's uniqueness clause)", async () => {
+  const tmp = seedGoalFixture("req-idempotent", "true");
+  try {
+    const ledger = goalRequestLedgerPath(tmp);
+    const requestId = seedRequest(tmp, "GOAL-001", "AC-002");
+
+    const first = await runGoalRound(tmp, roundOpts(T0 + 60 * 1000));
+    assert.equal(first.fact.value.requests.appended, 1);
+
+    for (const offset of [120_000, 180_000]) {
+      const again = await runGoalRound(tmp, roundOpts(T0 + offset));
+      assert.equal(again.fact.value.requests.openBefore, 0, "已落定的请求不再 open");
+      assert.equal(again.fact.value.requests.appended, 0, "⛔ 不再写第二条终态");
+      assert.deepEqual(again.fact.value.requests.settled, [], "本轮零条落定");
+    }
+
+    // AC-936 的判据原文逐条重算一遍（⛔ 不复述它的实现，只断言它的三个条件在本载体上成立）：
+    //   ≥1 条终态；每个终态的 requestId 唯一；每个终态都带非空 consumedAt。
+    const rows = readGoalRequestLedger(ledger).rows;
+    const done = rows.filter((x) => x.state === "accepted" || x.state === "refused" || x.state === "not-evaluated");
+    assert.ok(done.length >= 1, "至少一条终态");
+    const ids = done.map((x) => x.requestId);
+    assert.equal(new Set(ids).size, ids.length, "同一 requestId 只有一条终态");
+    assert.deepEqual(ids, [requestId], "就那一条请求");
+    for (const row of done) {
+      assert.equal(typeof row.consumedAt, "string");
+      assert.ok(row.consumedAt.length > 0, "每条终态都带 consumedAt");
+    }
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test("⑪ an UNREADABLE request ledger is reported as evaluated:false + cause, and does NOT fail the round", async () => {
+  const tmp = seedGoalFixture("req-unreadable", "true");
+  try {
+    // 载体位置被一个目录占住 ⇒ readFileSync EISDIR。⛔ 这不是「零条待办」，也不是整轮失败。
+    fs.mkdirSync(goalRequestLedgerPath(tmp), { recursive: true });
+    const r = await runGoalRound(tmp, roundOpts(T0 + 60 * 1000));
+    const requests = r.fact.value.requests;
+    assert.equal(requests.evaluated, false, "没查成 ⇒ evaluated:false（⛔ 与『查过且零条』同形）");
+    assert.equal(typeof requests.cause, "string");
+    assert.ok(requests.cause.length > 0, `成因具名（实测：${requests.cause}）`);
+    assert.equal(r.fact.state, "verified", "旁路读数坏掉 ⛔ 不得把整轮判失败（它不参与任何 flip 判定）");
+    assert.equal(r.fact.value.requests.openBefore, 0, "读不动时 openBefore 是 0，但 evaluated:false 把它与真空区分开");
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }

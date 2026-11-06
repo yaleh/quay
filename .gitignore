@@ -140,6 +140,13 @@ packages/quay/plugin/
 # never git-tracked; same gitignored runtime-state family as worker-outcome.jsonl / gate-events.jsonl.
 # Per-carrier entry, deliberately: this repo has NO `.quay/` catch-all rule.
 **/.quay/relaxed-dispatch.jsonl
+# gap-goal-request-queue (GOAL-914 / AC-936, 2026-11-06): the goal-driver's REQUEST QUEUE
+# (.quay/goal-requests.jsonl) — one `submitted` row per `quay goal request` and one terminal row
+# (accepted / refused / not-evaluated, with consumedAt) per request the driver answered. Runtime state,
+# never git-tracked; same gitignored runtime-state family as goal-filing.jsonl / gate-events.jsonl.
+# ⚠️ It is ALSO the carrier AC-936's criterion reads, so it must live in the workspace the criterion
+# runs in — which is exactly why it is a runtime carrier and not a checked-in fixture.
+**/.quay/goal-requests.jsonl
 # gap-fan-in-workflow-lock-stale-runid-detached-holder (2026-08-28): the fan-in lock's
 # acquire/release event ledger (.quay/fan-in-lock-events.jsonl) + the fan-in lock's token
 # flag (.quay/fan-in-lock-token-*.json) + manager's fan-in failure classification
