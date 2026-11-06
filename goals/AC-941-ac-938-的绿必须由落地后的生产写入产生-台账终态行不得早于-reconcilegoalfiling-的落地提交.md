@@ -1,7 +1,7 @@
 ---
 id: AC-941
 title: AC-938 的绿必须由落地后的生产写入产生：台账终态行不得早于 reconcileGoalFiling 的落地提交
-status: active
+status: achieved
 kind: criterion
 goal: GOAL-914
 criterion: "node --experimental-strip-types --input-type=module -e \"import fs
@@ -39,6 +39,11 @@ statusLog:
     to: active
     actor: goal-driver
     reason: "triage: activate"
+  - at: 2026-11-06T13:10:47.287Z
+    from: active
+    to: achieved
+    actor: goal-driver
+    reason: "I2: criterion pass"
 fidelity:
   verdict: faithful
   reason: "fidelity judge: faithful"
