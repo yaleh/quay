@@ -1183,72 +1183,44 @@ export function judgeUnsatisfiableUnannotatedAc(body) {
 // `hasTouchAbsentFromRef` used to answer "is this path in the landing ref's tree?" with ONE
 // `git cat-file -e <ref>:<path>` PER DECLARED TOUCH (plus one `rev-parse` per ready task for the ref
 // itself) — O(ready tasks × touches) forks per tick, i.e. exactly the "per-task git derivation with
-// no cache" the finding describes. The ref's tree is CONTENT-ADDRESSED and immutable for the life of
-// one process, so ONE `git ls-tree -r --name-only <ref>` names every path and every later question is
-// a Set lookup. Fail-soft: an unreadable tree (non-git root / missing ref) caches null, which the
-// caller reads as "no veto" — the exact pre-fix behaviour when the ref did not resolve.
-const _refTreeCache = new Map(); // `${repoRoot}\0${ref}` -> Set<string> | null
+// no cache" the finding describes. The ref's tree is CONTENT-ADDRESSED, so ONE
+// `git ls-tree -r --name-only <ref>` names every path and every later question is a Set lookup.
+//
+// ⛔ The set is NOT memoized at module scope, and NOT keyed by the ref NAME: a ref name's content
+// moves between two calls in the same process (a promotion commits; a fixture commits), and a
+// name-keyed memo answers with the tree the ref had at the FIRST call. It is computed ONCE per
+// `analyzeTasks` pass and injected (`opts.refTree`) — the window in which the ref is provably
+// immutable — and every other caller pays one `ls-tree` for its own answer.
+// Fail-soft: an unreadable tree (non-git root / missing ref) is null, which the caller reads as
+// "no veto" — the exact pre-fix behaviour when the ref did not resolve.
 
-/** Every path in `ref`'s tree (repo-relative), or null when the tree could not be read. Memoized per
- *  (root, ref) — the ref cannot move under a single short-lived process, and a caller that needs a
- *  different ref gets its own entry. */
+/** Every path in `ref`'s tree (repo-relative), or null when the tree could not be read. */
 export function refTreePaths(repoRoot, ref) {
-  const key = `${repoRoot}\0${ref}`;
-  if (_refTreeCache.has(key)) return _refTreeCache.get(key);
-  let set = null;
   try {
     const out = gitExec("ref-tree", ["-C", repoRoot, "ls-tree", "-r", "--name-only", ref], {
       encoding: "utf8", maxBuffer: 256 * 1024 * 1024, timeout: 30_000, stdio: ["ignore", "pipe", "ignore"],
     });
-    set = new Set(out.split("\n").filter(Boolean));
+    return new Set(out.split("\n").filter(Boolean));
   } catch {
-    set = null;
+    return null;
   }
-  _refTreeCache.set(key, set);
-  return set;
 }
 
-/** True when `ref` resolves to a commit-ish. Memoized per (root, ref) — it was one `git rev-parse`
- *  per ready task. */
-const _refExistsCache = new Map(); // `${repoRoot}\0${ref}` -> boolean
-function gitRefExists(repoRoot, ref) {
-  const key = `${repoRoot}\0${ref}`;
-  if (_refExistsCache.has(key)) return _refExistsCache.get(key);
-  let ok = false;
-  try {
-    const out = gitExec("ref-exists", ["-C", repoRoot, "rev-parse", "--verify", "-q", ref], {
-      encoding: "utf8", stdio: ["ignore", "pipe", "ignore"],
-    });
-    ok = out.trim().length > 0;
-  } catch {
-    ok = false;
-  }
-  _refExistsCache.set(key, ok);
-  return ok;
-}
-
-/** Is `path` present in the landing ref's tree? Answered from the ONE memoized `refTreePaths` set.
- *  Kept as a function (and still exported-shape-compatible) so the judgment below reads unchanged. */
-function gitFileExistsAtRef(repoRoot, ref, pathName) {
-  const tree = refTreePaths(repoRoot, ref);
-  return tree === null ? true : tree.has(pathName); // unreadable tree ⇒ "present" ⇒ no veto (fail-soft)
-}
-
-/** True when a declared CODE-ROOT Touches file (specific, non-glob, non-`(delete)`) is ABSENT from the
- *  landing ref's tree — the veto that suppresses the landed arms. A `(delete)`-tagged touch is excluded
- *  (its absence from the ref is the DESIRED end state); bookkeeping paths (tasks/** etc.) are excluded
- *  (not implementation evidence); globs are excluded (can't `cat-file` a pattern). */
 function hasTouchAbsentFromRef(taskBody, repoRoot, opts) {
   const touchesSection = extractSection(taskBody, "Touches");
   if (!touchesSection) return false;
   const ref = landingRef(repoRoot, opts);
-  if (!gitRefExists(repoRoot, ref)) return false; // fail-soft: no ref ⇒ no veto
+  // Injected per-analysis set (see the block comment): the ref cannot move inside one `analyzeTasks`
+  // pass, so the whole scan shares ONE `ls-tree`. Absent ⇒ this caller pays its own.
+  const injected = opts && typeof opts === "object" && !Array.isArray(opts) ? opts.refTree : undefined;
+  const tree = injected !== undefined ? injected : refTreePaths(repoRoot, ref);
+  if (tree === null) return false; // fail-soft: no ref / unreadable tree ⇒ no veto
   return parseTouchEntriesWithTags(touchesSection)
     .filter((e) => e.tag !== "delete")
     .map((e) => e.path)
     .filter((p) => p && !p.includes("*") && !p.includes("?"))
     .filter((p) => isCodeTouchEntry(p))
-    .some((p) => !gitFileExistsAtRef(repoRoot, ref, p));
+    .some((p) => !tree.has(p));
 }
 
 /** True when the task is in the "this batch done, not yet flipped to done" state — the declared
@@ -2997,22 +2969,20 @@ export function isWriteFacePropagationFailure(rec) {
  *  per (root, ref) and the result is memoized for the life of the process. A task absent from the
  *  batch is 0 (the batch enumerated every path the range touches). */
 const _commitsAheadCache = new Map(); // `${root}\0${ref}\0${headOid}` -> Map<path, count> | null
-const _headOidCache = new Map(); // `head\0<root>` -> oid | null
+// ⛔ HEAD is NOT memoized at module scope: the write face moves between two calls in the same process
+// (a promotion commits; a fixture commits), and a root-keyed HEAD memo answered the SECOND call with
+// the FIRST call's HEAD — the ahead-measure then said 0 for a write face that was one commit ahead
+// (body-freshness AC2 fixture). Callers that ask many times in one pass resolve HEAD once and pass it
+// in (`headOid`); every other caller pays one `rev-parse`.
 function _headOidOf(root) {
-  const key = `head\0${root}`;
-  if (_headOidCache.has(key)) return _headOidCache.get(key);
-  let oid = null;
   try {
-    oid = gitExec("head-oid", ["-C", root, "rev-parse", "HEAD"], {
+    return gitExec("head-oid", ["-C", root, "rev-parse", "HEAD"], {
       encoding: "utf8", timeout: 30_000, stdio: ["ignore", "pipe", "ignore"],
     }).trim() || null;
-  } catch { oid = null; }
-  _headOidCache.set(key, oid);
-  return oid;
+  } catch { return null; }
 }
 
-function _commitsAheadMap(root, ref) {
-  const headOid = _headOidOf(root);
+function _commitsAheadMap(root, ref, headOid) {
   const key = `${root}\0${ref}\0${headOid}`;
   if (_commitsAheadCache.has(key)) return _commitsAheadCache.get(key);
   let map = null;
@@ -3033,9 +3003,9 @@ function _commitsAheadMap(root, ref) {
   return map;
 }
 
-export function commitsAheadOfRefForTask(root, ref, id) {
+export function commitsAheadOfRefForTask(root, ref, id, headOid = undefined) {
   if (!ref) return null;
-  const map = _commitsAheadMap(root, ref);
+  const map = _commitsAheadMap(root, ref, headOid === undefined ? _headOidOf(root) : headOid);
   if (map === null) return null; // unreadable range ⇒ "not measured", never a fabricated 0
   return map.get(`tasks/${id}.md`) || 0;
 }
@@ -3044,7 +3014,7 @@ export function commitsAheadOfRefForTask(root, ref, id) {
  *  "fresh" | "stale-suspected" | "unknown". `ref` is the ref the store was actually READ from
  *  (`taskReadRef`); null ⇒ the analysis read the disk, and the disk IS the write face, so nothing
  *  can be stale relative to it. */
-export function judgeBodyFreshness({ root, id, ref, lastRecords }) {
+export function judgeBodyFreshness({ root, id, ref, lastRecords, headOid = undefined }) {
   const rec = lastRecords ? lastRecords.get(id) : null;
   if (!rec) return { status: "fresh", reason: "no-propagation-record", evidence: null };
   const evidence = {
@@ -3058,7 +3028,7 @@ export function judgeBodyFreshness({ root, id, ref, lastRecords }) {
     return { status: "fresh", reason: "last-write-not-a-failed-propagate", evidence };
   }
   if (!ref) return { status: "fresh", reason: "no-ref-read", evidence };
-  const ahead = commitsAheadOfRefForTask(root, ref, id);
+  const ahead = commitsAheadOfRefForTask(root, ref, id, headOid);
   if (ahead === null) {
     // The trace says a write failed; the direction could not be measured ⇒ NOT the same value as a
     // measurement that came back clean (硬规则 3b).
@@ -3662,9 +3632,13 @@ export function analyzeTasks({ tasksDir, root, cap = CONCURRENCY_CAP_DEFAULT, fl
   // which IS the write face, so nothing can be stale relative to it.
   const lastPropagationRecords = readLastPropagationRecords(root);
   const bodyFreshnessMemo = new Map();
+  // HEAD is resolved AT MOST ONCE for the whole analysis (the write face cannot move under one pass),
+  // so N stale-bodied tasks cost ONE `rev-parse HEAD` + ONE batched `git log`, not N of each.
+  let headOidForFreshness;
   const bodyFreshnessOf = (id) => {
     if (!bodyFreshnessMemo.has(id)) {
-      bodyFreshnessMemo.set(id, judgeBodyFreshness({ root, id, ref: taskReadRef, lastRecords: lastPropagationRecords }));
+      if (headOidForFreshness === undefined) headOidForFreshness = _headOidOf(root);
+      bodyFreshnessMemo.set(id, judgeBodyFreshness({ root, id, ref: taskReadRef, lastRecords: lastPropagationRecords, headOid: headOidForFreshness }));
     }
     return bodyFreshnessMemo.get(id);
   };
@@ -3698,6 +3672,10 @@ export function analyzeTasks({ tasksDir, root, cap = CONCURRENCY_CAP_DEFAULT, fl
   // misjudges everything landed after it as unlanded. "Config source" = these CLI flags, which the
   // outer loop drives from .quay/config.yml's branch model (gap-quay-init-never-writes-branch-model-config).
   const landRef = landingRef(root, { candidates: [integration, develop, master] });
+  // ONE `ls-tree -r` for the whole scan: the touch-absent-from-ref veto asks "is this path in the
+  // landing ref's tree?" per ready task and per declared touch (see refTreePaths) — the ref cannot
+  // move inside one pass, so the answer is shared instead of re-forked.
+  const refTreeForVeto = readyCount > 0 ? refTreePaths(root, landRef) : undefined;
   // Cached + incremental (gap-ready-pool-check-is-o-pool-size-…): a full-history dump over 21,309
   // commits cost 9.1 s of EVERY call. Keyed by the landing ref's commit OID; a forward move pays a
   // `A..B` delta through the same builder, a rewrite falls back to a full rebuild.
@@ -3734,7 +3712,7 @@ export function analyzeTasks({ tasksDir, root, cap = CONCURRENCY_CAP_DEFAULT, fl
     if (isAcRecord(t)) reasons.push("ac-record");
     let acOpen = -1; // sentinel: not a not-yet-flipped exclusion (no ac_open field on the entry)
     let pendingVerification = false;
-    const nyf = notYetFlipped(t, root, gitIndex, { ref: landRef, commitTraceSubjects, worktrees, taskIds: taskIdSet });
+    const nyf = notYetFlipped(t, root, gitIndex, { ref: landRef, commitTraceSubjects, worktrees, taskIds: taskIdSet, refTree: refTreeForVeto });
     if (nyf) {
       reasons.push("not-yet-flipped");
       // gap-ready-pool-nyf-split-backlog-vs-contradiction (A9 population split): a not-yet-flipped
