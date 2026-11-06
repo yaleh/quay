@@ -752,6 +752,40 @@ export function extractSuiteNotRunLine(combined: string): string | null {
   return hit ?? null;
 }
 
+/** gap-meta-classifyrecoveryround — 上面那条标记行的**结构化**读数：`branch` 是生产者给的稳定机器名
+ *  （`resource-gate-wait` / `single-flight-refusal` / `crash` / …），判定方据此指名「被哪条闸拒的」。
+ *
+ *  三态（硬规则 3b/6）：**没有标记行** ⇒ `null`（⛔ 不伪造「跑过/没跑过」）；有行但字段读不出 ⇒ 该字段
+ *  `null`（⛔ 不猜、不把「读不出」压成某个具体分支名）。 */
+export interface SuiteNotRunReading {
+  /** 原始标记行（生产者已压平并截断到 300 字，可直接当证据串）。 */
+  line: string;
+  /** 稳定分支名；读不出 ⇒ null。 */
+  branch: string | null;
+  /** 生产者压平后的原因文本；读不出 ⇒ null。 */
+  reason: string | null;
+}
+
+export function extractSuiteNotRunMarker(combined: string): SuiteNotRunReading | null {
+  const line = extractSuiteNotRunLine(combined);
+  if (line === null) return null;
+  const branch = /(?:^|\s)branch=(\S+)/.exec(line)?.[1] ?? null;
+  // `reason=` 是 `JSON.stringify` 的产物（full-suite-runner.ts `recordSuiteNotRun`）：值里合法地含空格、
+  // 破折号与中文标点 ⇒ ⛔ 不能用 `(\S+)` 切（那会把原因截成第一个词）。按 JSON 字符串整体取，解析失败
+  // 时退回原始捕获（⛔ 不丢弃证据）。
+  const reasonRaw = /(?:^|\s)reason=("(?:[^"\\]|\\.)*")/.exec(line)?.[1] ?? null;
+  let reason: string | null = null;
+  if (reasonRaw !== null) {
+    try {
+      const v: unknown = JSON.parse(reasonRaw);
+      reason = typeof v === "string" ? v : String(v);
+    } catch {
+      reason = reasonRaw;
+    }
+  }
+  return { line, branch, reason };
+}
+
 /**
  * gap-suite-verdict-green-on-oom-killed-incomplete-run-lands-on-11-percent-of-files AC2/AC3/AC8 — 读
  * runner 写的**完整性 / OOM 标记行**（前缀与 full-suite-runner.ts 同源，⛔ 不各写一份前缀 = 漂移）。
@@ -854,10 +888,18 @@ export function extractSuitePlanMarker(combined: string): SuitePlanReading | nul
 export type RecoveryRoundReading =
   | { kind: "certified"; run: SuiteRunResult; plan: SuitePlanReading | null; concurrency: number }
   | { kind: "incomplete"; run: SuiteRunResult; marker: SuiteIncompleteReading; plan: SuitePlanReading | null; concurrency: number }
+  /**
+   * gap-meta-classifyrecoveryround — 本档**根本没跑**（runner 的一条「未跑就返回」分支写了 SUITE-NOT-RUN）。
+   * ⛔ 不是红（没有失败签名可比，喂给 A/B 会把一次过载拒绝指成受害任务的代码缺陷），
+   * ⛔ 不是绿（一个测试也没执行），⛔ 也不是 `no-conclusion`（那说的是「跑起来了但读不出结论」——
+   * 把「明知没跑」混进「读不懂」正是硬规则 3b 要禁止的平均化）。**没有 `plan` 字段**：没跑的轮次
+   * 结构上不会写出 SUITE-PLAN（runner 在写它之前就返回了），给它一个恒 null 的字段只会造出假读数。
+   */
+  | { kind: "not-run"; run: SuiteRunResult; refusal: SuiteNotRunReading; concurrency: number }
   | { kind: "complete-red"; run: SuiteRunResult; plan: SuitePlanReading | null; failures: FailedTestFilesReading; concurrency: number }
   | { kind: "no-conclusion"; run: SuiteRunResult; reason: string; concurrency: number };
 
-/** 把一轮恢复的结果判成上面四分形态。判据只看两处：run 的进程级三态位，与日志里的**结构化标记**。
+/** 把一轮恢复的结果判成上面**五分**形态。判据只看两处：run 的进程级三态位，与日志里的**结构化标记**。
  *  ⚠️ 判「没结论」**不是** `outcome !== "done"`：非零退出码是一轮**有**结论的真红，把它当「没结论」会把
  *  每一次真红都退化成「再降一档」，永远走不到 AC12 的 A/B（硬规则 3b 的镜像）。 */
 export function classifyRecoveryRound(
@@ -872,6 +914,15 @@ export function classifyRecoveryRound(
       reason: run.hungByWatchdog ? "watchdog-killed" : run.spawnFailed === true ? "spawn-failed" : "log-unreadable",
     };
   }
+  // ── 先判「跑没跑」，再判「为什么红」（与主路径 `extractSuiteNotRunLine` 的那条顺序同源）─────────────
+  // 生产实测（2026-11-06，gap-goal-driver-filing-ledger 的 recovery-16）：333 字节日志整份只有一行
+  // `SUITE-NOT-RUN branch=resource-gate-wait`，进程 3.4 秒后以 1 退出。旧分类器只看 watchdog/spawnFailed/
+  // 空日志三态 ⇒ 落进 `complete-red` ⇒ 被喂进 A/B ⇒ 判词 `baseline-equivalence not evaluable — needs a
+  // code fix`，把一次**过载拒绝**指到受害任务自己的代码上。反向同样坏：任何以 0 退出的拒绝分支都会被
+  // 判成 `certified`（没跑当绿 —— 硬规则 3b 更坏的那一半）。
+  // ⛔ 本判据**不看退出码**：拒绝分支今天恒返回 1，但「跑没跑」由标记行给出，不由退出码推断。
+  const refusal = extractSuiteNotRunMarker(logText);
+  if (refusal !== null) return { kind: "not-run", run, refusal, concurrency };
   const plan = extractSuitePlanMarker(logText);
   const marker = extractSuiteIncompleteMarker(logText);
   if (marker !== null) return { kind: "incomplete", run, marker, plan, concurrency };
@@ -3586,6 +3637,9 @@ export async function runMechanicalFanIn(opts: MechanicalFanInOptions): Promise<
           let certifiedPlan: SuitePlanReading | null = null;
           let exemptReading: BaselineEquivalenceReading | null = null;
           let blockedNextStep: string | null = null;
+          /** 最近一档**没跑**（被 runner 拒绝）的读数：整条梯子都没认证时，判词要指名「被哪条闸拒的」，
+           *  ⛔ 不能回落成 `needs a code fix`（那正是本任务要消灭的误指，见 classifyRecoveryRound 注释）。 */
+          let refusedSeen: { line: string; branch: string | null; concurrency: number } | null = null;
           for (const n of steps) {
             // 本档**自己的**日志路径：必须在本档 argv 之前定下来——它同时是 (a) runner argv 里
             // `--log-file` 的目标（结构化的 SUITE-PLAN/SUITE-INCOMPLETE/__PERFILE__ 落点）与 (b) 下面
@@ -3610,9 +3664,9 @@ export async function runMechanicalFanIn(opts: MechanicalFanInOptions): Promise<
             let recLog = "";
             try { recLog = fs.readFileSync(recLogFile, "utf8"); } catch { /* 日志读不出 ⇒ 下面判「无结论」 */ }
             const recWall = Date.now() - recT0;
-            // AC12 的**形状**闸：四分形态里只有 `complete-red` 带 `failures`；一条 OOM / missing 记录落进
-            // `incomplete` 变体，**结构上就没有签名字段**（⛔ 不靠一句「约定」），所以下面那台比较器根本
-            // 拿不到它。
+            // AC12 的**形状**闸：五分形态里只有 `complete-red` 带 `failures`；一条 OOM / missing 记录落进
+            // `incomplete` 变体、一条「没跑」记录落进 `not-run` 变体，**结构上都没有签名字段**
+            //（⛔ 不靠一句「约定」），所以下面那台比较器根本拿不到它们。
             const reading = classifyRecoveryRound(rec, recLog, n, worktree);
 
             if (reading.kind === "no-conclusion") {
@@ -3621,6 +3675,22 @@ export async function runMechanicalFanIn(opts: MechanicalFanInOptions): Promise<
               traceSuiteEvent("suite-recovery", {
                 exit: reading.run.exitCode, wall_ms: recWall, ok: false, concurrency: n, outcome: reading.run.outcome,
                 reason: `recovery round had no conclusion (${reading.reason}) — stepping down`,
+              });
+              continue;
+            }
+            if (reading.kind === "not-run") {
+              // gap-meta-classifyrecoveryround — 本档被 runner 的一条「未跑就返回」分支拒绝（实测：
+              // `resource-gate-wait`）⇒ **一个测试也没执行**。⛔ 不认证（没跑当绿）、⛔ 不进 A/B
+              //（没有失败签名可比 —— 拿它比对就是把 3b 违规上移一层）。与主路径
+              // `failSuite('suite NOT run (refused) …')` 同形：这是一个**重试即可**的阻塞，⛔ 不是代码缺陷。
+              // 记下来，供「整条梯子都没认证」时的判词指名被哪条闸拒的（⛔ 不回落成「needs a code fix」）。
+              refusedSeen = { line: reading.refusal.line, branch: reading.refusal.branch, concurrency: n };
+              traceSuiteEvent("suite-recovery", {
+                exit: reading.run.exitCode, wall_ms: recWall, ok: false, concurrency: n, outcome: reading.run.outcome,
+                refused: true, branch: reading.refusal.branch, refusal: reading.refusal.line,
+                reason:
+                  `recovery round NOT run (refused: ${reading.refusal.branch ?? "unknown-branch"}) — ` +
+                  `no test was executed by this round; stepping down`,
               });
               continue;
             }
@@ -3705,15 +3775,30 @@ export async function runMechanicalFanIn(opts: MechanicalFanInOptions): Promise<
 
           if (certifiedRun === null) {
             const detail =
+              // ⚠️ 括号不可省：`a ?? b ? c : d` 解析成 `(a ?? b) ? c : d`（`??` 优先级高于 `?:`）——
+              //    省掉这对括号会让「有 blockedNextStep（真结论）」的每一轮都去求值 `refusedSeen`，
+              //    而它此时恒为 null ⇒ 整条 fan-in 抛 TypeError（2026-11-06 本任务当场撞到，4 个既有测试红）。
               blockedNextStep ??
-              // ⛔ 措辞不得只说「仍然 incomplete/OOM」：走到这里的每一档可能是**没结论**（看门狗杀 / 没起来 /
-              //    日志读不出），那与「跑了且 incomplete」不是同一件事（硬规则 3b）。说**没产出完整判词**对
-              //    两种成因都成立，且仍指到地板与下一步。
-              `recovery exhausted at floor concurrency ${suiteRecoveryFloor()} — no declared rung produced a complete verdict ` +
-                `(${steps.join(",")}); needs a code/config fix, see plugin/scripts/full-suite-runner.ts`;
+              // gap-meta-classifyrecoveryround — 整条梯子一档都没认证、而至少一档是**被拒绝（没跑）**：
+              // 判词必须说「没跑」+ 被哪条闸拒的，⛔ 不得说 `needs a code fix`（实测代价：一次
+              // `resource-gate-wait` 过载拒绝被写成「baseline-equivalence not evaluable — needs a code fix」，
+              // 指向受害任务自己的代码）。⛔ 也不是 `no-conclusion`/`log-unreadable`：日志**读到了**，
+              // 它明确写着「本轮没跑」（硬规则 3b：明知没跑 ≠ 读不懂）。
+              (refusedSeen !== null
+                ? `recovery round NOT run (refused at concurrency ${refusedSeen.concurrency}) — ${refusedSeen.line}; ` +
+                  `⛔ no test was executed by this round, so this is NOT evidence of a code defect ` +
+                  `(branch=${refusedSeen.branch ?? "unknown"}, re-tick when the runner accepts; ` +
+                  `see plugin/scripts/full-suite-runner.ts)`
+                // ⛔ 措辞不得只说「仍然 incomplete/OOM」：走到这里的每一档可能是**没结论**（看门狗杀 / 没起来 /
+                //    日志读不出），那与「跑了且 incomplete」不是同一件事（硬规则 3b）。说**没产出完整判词**对
+                //    两种成因都成立，且仍指到地板与下一步。
+                : `recovery exhausted at floor concurrency ${suiteRecoveryFloor()} — no declared rung produced a complete verdict ` +
+                  `(${steps.join(",")}); needs a code/config fix, see plugin/scripts/full-suite-runner.ts`);
             traceSuiteEvent("suite-recovery-blocked", {
               exit: 0, wall_ms: 0, ok: false, reason: detail,
               originalConcurrency, steps: [...steps],
+              refused: refusedSeen !== null,
+              refusal: refusedSeen?.line ?? null,
             });
             return failSuite(`${reason} — ${detail}`, sr.exitCode);
           }

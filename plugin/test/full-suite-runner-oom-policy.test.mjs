@@ -1380,3 +1380,110 @@ test("AC12 — a COMPLETE-but-red recovery goes to the existing baseline-equival
   assert.equal(mixSteps.filter((e) => e.step === "baseline-red").length, 0, "⛔ an OOM record NEVER reaches the signature comparator (structural: the marker path `continue`s before the A/B)");
   assert.ok(mixSteps.some((e) => e.step === "suite-recovery" && e.reason === "oom-killed"), "the OOM marker IS what short-circuited (positive control for the zero above)");
 });
+
+// ════════════════════════════════════════════════════════════════════════════════════════════════════
+// gap-meta-classifyrecoveryround — 恢复阶梯的第五种形态：**本轮没跑**（被 runner 拒绝）。
+// 生产实测（2026-11-06T09:20:48Z，gap-goal-driver-filing-ledger 的 recovery-16）：333 字节的恢复轮日志
+// 整份只有一行 `SUITE-NOT-RUN branch=resource-gate-wait`，进程 3.4 秒后以 1 退出。旧分类器（只看
+// watchdog / spawnFailed / 空日志三态）把它判成 `complete-red` ⇒ 喂进 A/B ⇒
+// `baseline-equivalence not evaluable — needs a code fix`：一次**过载拒绝**被指成受害任务自己的代码缺陷。
+// ════════════════════════════════════════════════════════════════════════════════════════════════════
+
+test("gap-meta-classifyrecoveryround AC — a recovery log carrying ONLY SUITE-NOT-RUN is NEITHER complete-red NOR certified: it lands on a named `not-run` reading that carries the refusal branch (⛔ and the A/B comparator cannot reach it); the PRE-FIX classifier is re-run verbatim on the SAME log as the falsification arm", () => {
+  // 生产原文（逐字，仅截短了过载数字后的长句）——⛔ 不改成英文模板：这条标记的 reason 里合法地含
+  // 空格/破折号/中文标点，「(\\S+) 切」正是会让读数退化成第一个词的形态。
+  const prodLog =
+    '[full-suite-runner] SUITE-NOT-RUN branch=resource-gate-wait ts=2026-11-06T09:20:48.929Z ' +
+    'reason="resource gate says WAIT — => WAIT: 过载窗口（load 396.68 >= nproc×2≈256）" — no test was executed by this round\n';
+  const run = (exitCode) => ({ outcome: exitCode === 0 ? "done" : "red", exitCode, signalCode: null, hungByWatchdog: false, startedAt: "t", finishedAt: "t", durationMs: 3400, error: null, pid: 1 });
+
+  // ── ① 判据本体 ────────────────────────────────────────────────────────────────────────────────────
+  const r = classifyRecoveryRound(run(1), prodLog, 16, null);
+  assert.equal(r.kind, "not-run", "被拒轮必须落在一个**具名的**「本轮未运行」取值上（⛔ complete-red）");
+  assert.equal(r.refusal.branch, "resource-gate-wait", "…并**带出拒绝分支名**（判词据此指名被哪条闸拒的）");
+  assert.match(String(r.refusal.reason), /过载窗口/, "reason 取到整段（JSON 字符串里的空格/破折号不被 (\\S+) 截断）");
+  assert.ok(!("failures" in r), "⛔ `not-run` 变体没有签名字段 —— A/B 比较器**结构上**拿不到它（⛔ 不是靠约定）");
+  // 更坏的那一半（AC 明写）：一个**没跑**的轮次绝不能被当成绿。拒绝分支今天恒 exit 1，但分类不看退出码。
+  assert.equal(classifyRecoveryRound(run(0), prodLog, 16, null).kind, "not-run", "以 0 退出的拒绝轮也 ⛔ 不是 certified（没跑当绿）");
+
+  // ── ② 取假（硬规则 4 的对照臂）——同一份日志、同一份 run，交给**修复前**的分类器 ──────────────────
+  // 逐字 = 基线 098f2d178 的 `classifyRecoveryRound` 判定链（不含新加的 not-run 分支）。它的唯一职责是
+  // 让「修复前是红的」这个读数**当场可取出**，⛔ 不是靠一句历史断言。
+  const preFix = (rr, logText) => {
+    if (rr.hungByWatchdog || rr.spawnFailed === true || String(logText ?? "") === "") return "no-conclusion";
+    if (extractSuiteIncompleteMarker(logText) !== null) return "incomplete";
+    if (rr.exitCode === 0) return "certified";
+    return "complete-red";
+  };
+  assert.equal(preFix(run(1), prodLog), "complete-red", "修复前：一次**过载拒绝**被判成 complete-red（随后进 A/B ⇒ `not evaluable — needs a code fix`）");
+
+  // ── ③ 负控制：真红 / 真绿 / 真读不懂 都**不被**新取值吞掉 ─────────────────────────────────────────
+  const real = "__PERFILE__ duration_ms=10 plugin/test/existing-red.test.mjs passed=false end_ms=20";
+  assert.equal(
+    classifyRecoveryRound(run(1), `${planLine({ planned: 579, terminal: 579, missing: 0, oomKill: 0, laneCount: 48 })}\n${real}\n`, 48, null).kind,
+    "complete-red",
+    "跑了且真红 ⇒ 仍是 complete-red（⛔ 不把真红读成「没跑」）",
+  );
+  assert.equal(
+    classifyRecoveryRound(run(0), planLine({ planned: 579, terminal: 579, missing: 0, oomKill: 0, laneCount: 48 }), 48, null).kind,
+    "certified",
+    "跑了且全绿 ⇒ 仍是 certified",
+  );
+  // runner 连标记都没写出来（0 字节）⇒ 仍走既有的 `log-unreadable`：⛔ 「明知没跑」与「读不懂」不压平。
+  const unreadable = classifyRecoveryRound(run(1), "", 16, null);
+  assert.equal(unreadable.kind, "no-conclusion");
+  assert.equal(unreadable.reason, "log-unreadable");
+});
+
+test("gap-meta-classifyrecoveryround — the CONSUMER half: every rung of the recovery ladder being REFUSED by the resource gate must end as a `NOT run (refused)` verdict naming the branch, ⛔ never `needs a code fix` (and the ladder stays bounded)", async (t) => {
+  // 原轮：完整跑过但 OOM 掉 514/579 文件 ⇒ 进恢复阶梯（起点 = 它自己的 laneCount=64 ⇒ 档位 48/32/16）。
+  const m = makeMechRepo("rec-refused");
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "rec-refused-"));
+  const argvFile = path.join(dir, "argv.txt");
+  const firstLogFile = path.join(dir, "first.log");
+  const recoveryLogFile = path.join(dir, "recovery.log");
+  fs.writeFileSync(firstLogFile, [
+    planLine({ planned: 579, terminal: 65, missing: 514, oomKill: 4, laneCount: 64, completeness: "not-evaluated" }),
+    formatSuiteIncompleteMarker({ reason: "oom-killed", planned: 579, terminal: 65, missing: 514, oomKill: 4, files: [] }),
+    "",
+  ].join("\n"));
+  // **每一档**恢复轮都被资源闸拒绝：一行 SUITE-NOT-RUN，一个测试也没跑（退出码 1，与生产一致）。
+  fs.writeFileSync(recoveryLogFile, [
+    '[full-suite-runner] SUITE-NOT-RUN branch=resource-gate-wait ts=2026-11-06T09:20:48.929Z ' +
+      'reason="resource gate says WAIT — => WAIT: 过载窗口（load 396.68 >= nproc×2≈256）" — no test was executed by this round',
+    "",
+  ].join("\n"));
+  t.after(() => { rmSafe(m.base); fs.rmSync(dir, { recursive: true, force: true }); });
+
+  const r = await runMechanicalFanIn(mechOpts(m, "mfi-rec-refused", {
+    task: "gap-mfh", perSuiteRunId: "mfi-rec-refused",
+    ...concurrencyAwareSuite(m, { scriptFile: path.join(dir, "suite.sh"), argvFile, firstLogFile, recoveryLogFile, recoveryExit: 1 }),
+  }));
+
+  assert.equal(r.outcome, "red", "一个测试也没跑的恢复轮 ⛔ 不能落地（也没跑当绿）");
+  // 判词：说「没跑（被拒）」+ 分支名。⛔ 不得说「needs a code fix」——那正是本任务要消灭的误指。
+  assert.match(String(r.reason), /recovery round NOT run \(refused at concurrency \d+\)/, "the verdict says the rung did NOT run (its own token)");
+  assert.match(String(r.reason), /branch=resource-gate-wait/, "…and names the refusing branch");
+  assert.match(String(r.reason), /NOT evidence of a code defect/, "…and explicitly does not blame the task's code");
+  assert.doesNotMatch(String(r.reason), /needs a code(\/config)? fix/, "⛔ 不再把一次过载拒绝说成需要改代码");
+  // ⛔ 也不得与「跑了且红」同形（那会把 A/B 指向一个从没产生的失败签名）。
+  assert.doesNotMatch(String(r.reason), /baseline-equivalence not evaluable/, "⛔ 不进 A/B 判词（没有任何失败签名可比）");
+
+  // 梯子仍然有界：每一档恰好试一次、降序、然后停（⛔ 不用同一组参数无限重试）。
+  const seen = recoveryRoundsSeen(argvFile);
+  assert.deepEqual(laneCountsOf(seen), ["48", "32", "16"], "each declared rung is tried EXACTLY once, descending, then the sequence STOPS");
+
+  // 留痕：每一档一条 `suite-recovery` refused 事件（带分支名 + 原始标记行），终局一条 refused 的 blocked 事件。
+  const steps = trackedSteps(m.repo, "mfi-rec-refused");
+  const refusedSteps = steps.filter((e) => e.step === "suite-recovery" && e.refused === true);
+  assert.equal(refusedSteps.length, 3, "每一档的「没跑」都独立留痕（⛔ 只有终局一句总结）");
+  assert.deepEqual(refusedSteps.map((e) => e.concurrency), [48, 32, 16], "…各自记自己的档位");
+  for (const e of refusedSteps) {
+    assert.equal(e.branch, "resource-gate-wait", "…与拒绝分支名");
+    assert.match(String(e.refusal), /SUITE-NOT-RUN branch=resource-gate-wait/, "…与生产者写的原始标记行（证据面）");
+  }
+  const blocked = steps.find((e) => e.step === "suite-recovery-blocked");
+  assert.ok(blocked, "终局阻塞留痕");
+  assert.equal(blocked.refused, true, "…且标记为「被拒绝」而非「跑完没结论」");
+  assert.match(String(blocked.refusal), /SUITE-NOT-RUN/, "…带上拒绝证据");
+});
