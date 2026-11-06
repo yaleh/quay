@@ -161,3 +161,10 @@ node --experimental-strip-types packages/quay/bin/quay.ts goal request GOAL-914 
 **执行 2026-11-07T04:28Z（worker 会话；不是重试上限触发）— 待人工裁定**
 
 - 阻碍原因：AC-936 是 GOAL-914 唯一未达成的 AC，判据要主检出 `.quay/goal-requests.jsonl` 里有一条被消费的请求；worker 写守卫禁止写主检出、goal-driver 又把该 AC 判为 world-gated 不派活 ⇒ 需人从 ①②③ 裁定由谁产生这份证据（现场读数与三条落地清单见本任务体 ## Worker Reading）
+
+## Blocker
+
+**2026-11-06T20:36:38.013Z — worker 未落地（exited-not-landed）**
+
+- 未落地原因：AC 未全勾（checked 0/4，剩余未勾 4）——续做只需验证并勾选 AC
+- run_id：wk-prod-anchor
