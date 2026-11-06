@@ -138,3 +138,114 @@ $ node --test plugin/test/goal-driver-s14.test.mjs
 - 残留局限：**并发的其它 spawn** 也会让文件数增长，此时一次「agent 没落盘」的 spawn 会被判成
   `no-goal-ac` 而非 `no-task`。两者都是 `not-filed`，只影响成因细分，⛔ 不影响「立没立案」这个二值结论。
 - `spawned.at` 读不懂（时钟不可比）⇒ 独立取值 `spawn-time-unreadable`，⛔ 不与「确实没立案」同形。
+
+## 9. 落地与工作区树读数（`gap-goal-filing-ledger-landing`）
+
+§1–§8 是**实现分支**上的证据。本节是**落地**那一半：这条实现如何进入 develop 的载体、
+AC-938 判据在「落地前」与「落地树」上的两次输出，以及**本 worker 取不到、必须由外部事件产生**的读数。
+
+### 9.1 落地形态
+
+| 量 | 读数 |
+|---|---|
+| 落地分支 | `task/gap-goal-filing-ledger-landing` |
+| 落地 worktree | `/data/home/yale/work/quay-worktrees/gap-goal-filing-ledger-landing` |
+| **落地提交 sha** | `88a9882dc6459406527a2cf6bde973573ed6eb47`（`Merge branch 'task/gap-goal-driver-filing-ledger' into task/gap-goal-filing-ledger-landing`） |
+| 被并入的实现分支 tip | `64fe08b25ef966eaa15dc18aebb02d6e920e148d` |
+| 分叉基（落地前 develop） | `aab5db17abf05bd161a5957fc821e807115a6215` |
+| 主检出 HEAD（取读数时） | `aab5db17abf05bd161a5957fc821e807115a6215`，分支 `author`，`git rev-list --count develop..HEAD` = `0`、`HEAD..develop` = `0` ⇒ **取读数时主检出与 develop 同点，落地后的 ff 没有分叉要解决** |
+| develop 在本会话中前进 | `aab5db17a` → `ed0942e92`（`615d32345 routine(architecture-analysis)`、`6c4deda93 task_write`、`ed0942e92 …→ready`）。落地树上再合一次 develop 得 `b3ea5afffc068a586c0bad78775d7fc873b1d99b`；**落地 ff 以 fan-in 当时的 develop tip 为准**，不是上面这个分叉基 |
+| 落地前干跑 | `git merge-tree --write-tree develop task/gap-goal-driver-filing-ledger` ⇒ exit `0`、无 `CONFLICT` |
+| 改动面 | 6 文件、`+958 −22`：`plugin/scripts/goal-driver.ts`(+409)、`plugin/scripts/meta-driver.ts`(+78)、`plugin/test/goal-driver-s14.test.mjs`(+326, new)、`plugin/test/goal-driver-s06.test.mjs`(21)、`docs/carrier-registry.json`(6)、`docs/evidence/2026-11-06-goal-filing-ledger.md`(+140, new) |
+
+落地树上的实现读数（**不是** git 对象，是那棵将被 ff 合入 develop 的树）：
+
+```
+$ git -C <landing worktree> merge-base --is-ancestor 840956f44 HEAD ; echo $?
+0
+$ git -C <landing worktree> show HEAD:plugin/scripts/goal-driver.ts | grep -c "export function reconcileGoalFiling"
+1
+$ git -C <landing worktree> merge-base --is-ancestor task/gap-goal-driver-filing-ledger HEAD ; echo $?
+0        # 实现分支已是落地分支的祖先 ⇒ ff 进 develop 后它也是 develop 的祖先
+```
+
+### 9.2 AC-938 判据：负控（落地前）vs 正臂（落地树）
+
+判据逐字取自 `goals/AC-938-….md` 的 `criterion:`（只把 JS 内部的单引号规范成双引号，语义不变）：
+
+```
+node --experimental-strip-types --input-type=module -e "import fs from \"node:fs\"; import { reconcileGoalFiling } from \"./plugin/scripts/goal-driver.ts\"; if (typeof reconcileGoalFiling !== \"function\") { console.error(\"workspace goal-driver has no ledger writer\"); process.exit(1) } const rows = fs.readFileSync(\".quay/goal-filing.jsonl\",\"utf8\").split(\"\n\").filter(Boolean).map(s=>JSON.parse(s)); const term = rows.filter(r=>r.state===\"filed\"||r.state===\"not-filed\"); if (term.length < 1) { console.error(\"no terminal goal-filing row\"); process.exit(1) } console.log(JSON.stringify({writer:\"present\",terminal:term.length}));"
+```
+
+两次运行共用**同一份** `.quay/goal-filing.jsonl`（从主检出 `cp` 过去，2 行），所以两次之间唯一
+变量就是「有没有 `reconcileGoalFiling` 这个导出」：
+
+**负臂** — cwd = `/data/home/yale/work/quay-worktrees/neg-goal-filing-prelanding`（detached at 落地前
+develop `aab5db17a`，⛔ 不在 `/tmp`）：
+
+```
+SyntaxError: The requested module './plugin/scripts/goal-driver.ts' does not provide an export named 'reconcileGoalFiling'
+    at #asyncInstantiate (node:internal/modules/esm/module_job:455:21)
+NEG_EXIT=1
+```
+
+**正臂** — cwd = 落地 worktree：
+
+```
+{"writer":"present","terminal":1}
+POS_EXIT=0
+```
+
+⇒ 判据**能区分**有/无实现：同一个载体、同一份台账，落地前红、落地树绿。
+
+> **负臂的第一次尝试是仪器故障，逐字留痕（硬规则 4 推论二）**：第一次跑在新建的 neg worktree 里
+> 直接报 `ERR_MODULE_NOT_FOUND: Cannot find package 'yaml' imported from …/packages/quay/src/kernel/frontmatter.ts`
+> —— 那是 neg worktree 没有 `node_modules`（`dispatch-worktree-setup.sh` 没跑），**不是**「没有导出」。
+> 一个因错误原因而红的负控等于没做：给 neg worktree 补上 `node_modules` 符号链接后重跑，才得到上面那条
+> `SyntaxError: … does not provide an export named 'reconcileGoalFiling'`。
+
+### 9.3 判据涉及的两份测试，在落地树上
+
+```
+$ node --test plugin/test/goal-driver-s14.test.mjs
+ℹ tests 10   ℹ pass 10   ℹ fail 0        exit 0
+
+$ node --test plugin/test/goal-driver-s06.test.mjs
+ℹ tests 9    ℹ pass 9    ℹ fail 0        exit 0
+```
+
+### 9.4 本 worker 取不到的读数（NOT-EVALUATED，附可执行 unpark 检查）
+
+worker 在本会话里**不能**写 develop、不能写主检出、不能触发 goal-driver 轮次。因此下列读数依赖
+**外部事件**（fan-in 的 ff、promotion-driver 的 `syncDevelopToDoc`、goal-driver 的下一次 gap spawn）。
+按硬规则 3b/4c 它们记 `NOT-EVALUATED`，⛔ 不记成「通过」：
+
+| # | 待取的量 | 依赖的外部事件 | unpark 检查（只读，可直接跑） |
+|---|---|---|---|
+| A | `git -C /data/home/yale/work/quay merge-base --is-ancestor 840956f44 develop` = 0 且 `git show develop:plugin/scripts/goal-driver.ts \| grep -c "export function reconcileGoalFiling"` ≥ 1 | fan-in ff 落地提交到 develop | `git -C /data/home/yale/work/quay merge-base --is-ancestor 840956f44 develop && git -C /data/home/yale/work/quay show develop:plugin/scripts/goal-driver.ts \| grep -c "export function reconcileGoalFiling"` |
+| B | AC-938 判据 **以 cwd=`/data/home/yale/work/quay`** 退出 0、stdout `{"writer":"present","terminal":N}` | fan-in ff + `syncDevelopToDoc`（主检出追上 develop） | 在 `/data/home/yale/work/quay` 下原样执行 §9.2 的那条命令 |
+| C | `grep -c "export function reconcileGoalFiling" /data/home/yale/work/quay/plugin/scripts/goal-driver.ts` ≥ 1（读工作树文件） | 同上 | 就是这条 `grep` 本身 |
+| D | `.quay/goal-filing.jsonl` 中出现 `at` 晚于 `88a9882dc` 的行 | goal-driver 下一次产生 gap spawn 的生产轮次 | `awk -F'"' '/"at":"2026-11-06T1[12]:/{print}' /data/home/yale/work/quay/.quay/goal-filing.jsonl`（按实际时刻自行收紧） |
+| E | `node --test plugin/test/goal-driver-s14.test.mjs` / `-s06` 在**工作区树**退出 0 | 同 B | 在 `/data/home/yale/work/quay` 下跑这两条 |
+
+读数侧的现状（供 unpark 判读，同样是读数而非结论）：四类 driver 全部 `running=1`、worker/promotion
+control-state `halted:false`；`goal-driver` 最近一条 `goal-round.jsonl` 记录 `2026-11-06T11:37:03.375Z`；
+`.quay/goal-filing.jsonl` 现有 2 行（`spawned` 07:49:45Z / `filed` 07:57:41Z），**都早于**落地提交
+`88a9882dc` ⇒ ⛔ 不能拿来充 D。goal-driver 未 halted ⇒ 一旦落地生效，D 会在下一轮自然产生；
+若届时无新行，按任务 AC4 记 `NOT-EVALUATED` + `halted_by`/`halted_at` + `quay driver resume --kind worker`。
+
+### 9.5 为什么 D 这一项⛔ 不能被「台账已有 filed 行」顶替（AC-941）
+
+本会话期间 goal-driver 立案了新判据 **AC-941**（`goals/AC-941-….md`，status `draft`），它把本节的 D 项
+从「观察项」提升成了一条可执行判据：AC-938 只断言「导出存在」+「台账有终态行」，**不建立两者之间的因果**；
+一旦 `reconcileGoalFiling` 落地，AC-938 会拿**实现之前**就存在的 `filed` 行（`at=2026-11-06T07:57:41.597Z`）
+变绿——这正是 AC-938 自己标题要排除的「一次证据跑留下的静态文件」。AC-941 的判据把这条路封掉：
+
+```
+git log --format=%cI -S reconcileGoalFiling -- plugin/scripts/goal-driver.ts   # 取写入符号的落地提交时刻
+… 台账里必须存在 at > landedAt 的 filed/not-filed 行，否则 exit 1
+```
+
+⇒ 这**直接印证**了本节 §9.4 的 D 项与任务 AC4 的口径：本 worker ⛔ 不勾 AC4，也⛔ 不把
+`07:57:41Z` 那行当成「落地后的生产写入」。落地之后 factory 侧的正确读法是 AC-941 那条命令，
+不是 AC-938 那条（AC-938 落地后必然变绿，但它的绿在本例中是可被 AC-941 证伪的）。
