@@ -34,7 +34,7 @@ extra:
 
 - [ ] AC1: 负臂→正臂翻转——改前 `conflictAction('docs/proposals/quay-product-outline.md','UU').kind === "manual"`（给出逐字读数）；改后为 `"take-develop"`，且 `isTickDoc` 对 tick-core 仍为 true、对 outline 仍为 **false**（名字不漂移，单独断言）。
 - [ ] AC2: `resolveConflictMechanically` 对 outline 真跑 `git checkout develop -- docs/proposals/quay-product-outline.md`——测试用一个真 git 仓库夹具断言文件内容变回 develop 版（⛔ 不是断言返回字符串）。
-- [ ] AC3: prompt 与机械规则同源——`worker-driver.ts` 中 outline 路径字面量命中数为 **1**（只在注册表），且删除注册表里 outline 那一行后，`conflictAction` 与 prompt 生成两侧**同时**变化（负臂：给出删后的红读数）。
+- [ ] AC3: prompt 与机械规则同源——`grep -c 'quay-product-outline' plugin/scripts/worker-driver.ts` = **0**（prompt 从注册表渲染，worker-driver 不再持有字面量）；`grep -rn 'quay-product-outline' plugin/scripts/` = **1**（唯一命中的是 `conflict-resolution-rules.ts` 的注册表）；负臂：删除注册表中 outline 那一行后，`conflictAction('docs/proposals/quay-product-outline.md','UU')` 回到 `manual` **且**生成的 prompt 不再含 outline 规则（两侧同时变化）——给出两处逐字读数。
 
 ## Definition of Done
 
