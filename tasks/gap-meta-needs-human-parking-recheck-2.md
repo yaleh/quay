@@ -1,7 +1,7 @@
 ---
 id: gap-meta-needs-human-parking-recheck-2
 title: PARKED 只有排除半边：任务体里写明的 unpark 检查无人复跑，GOAL-914 全部剩余任务卡在同一条 PARKED 依赖后面
-status: todo
+status: ready
 labels:
   - meta-driver
   - driver-candidate
