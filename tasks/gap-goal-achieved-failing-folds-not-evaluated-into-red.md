@@ -88,6 +88,7 @@ extra:
     ```
     （第二行是**正控**：同一 fixture 换成真红照旧立案 ⇒ 负臂不是「一律不立」的恒真。）
   - 可复跑测试（1 passed）: `node --experimental-strip-types --test plugin/test/goal-driver-s03.test.mjs`（用例名 `H10 AC3`）
+  - 旁带（硬规则 5b，同一原则的兄弟实例）：`packages/quay/test/goal-criterion-timeout-resolution.test.mjs` 的 AC6(d) 原先**钉住了旧折叠**（`assert.deepEqual(s.achievedButFailing, ["AC-907"], "killed at 1000ms ⇒ currently failing")`）——已改为断言 `achievedButFailing=[]` ∧ `achievedNotEvaluated=[["AC-907","timeout"]]`。
 
 ## Definition of Done
 
@@ -107,6 +108,7 @@ extra:
 - packages/quay/src/core/goal-store.ts
 - packages/quay/src/cli/help.ts
 - packages/quay/test/goal-store.test.mjs
+- packages/quay/test/goal-criterion-timeout-resolution.test.mjs
 - plugin/scripts/goal-driver.ts
 - plugin/test/goal-driver-s03.test.mjs
 - tasks/gap-goal-achieved-failing-folds-not-evaluated-into-red.md
