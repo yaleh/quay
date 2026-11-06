@@ -33,7 +33,7 @@ goal_ac: AC-934
 
 ## AC
 
-- [ ] `node --test plugin/test/goal-driver.test.mjs` 退出码 0，新增用例覆盖 filed / not-filed / 坏行 / 重放。
+- [ ] `node --test plugin/test/goal-driver-s14.test.mjs` 退出码 0，新增用例覆盖 filed / not-filed / 坏行 / 重放（原写 `plugin/test/goal-driver.test.mjs`：该单体已被 gap-suite-split-15-over-30s-test-files 拆成 s01..s13，且 AC-279 的判据**要求它不存在** ⇒ 新用例落在 shard s14，见 Evidence 的「AC1 路径更正」）。
 - [ ] `runGapSpawnPass` 在 spawn 前写 `spawned` 行；下一轮对每条 open 的 spawned 写 `filed` 或 `not-filed`，两者是不同取值。
 - [ ] `not-filed` 的 reason 能区分 `no-task` / `no-goal-ac` / `deduped-by-skill`（枚举，不布尔）。
 - [ ] pass 1 的 `goal list` argv 含 `--no-evidence`；pass 2 仍带 evidence；`grep` 可核。
@@ -52,6 +52,8 @@ goal_ac: AC-934
 
 - plugin/scripts/goal-driver.ts
 - plugin/scripts/meta-driver.ts
-- plugin/test/goal-driver.test.mjs
+- plugin/test/goal-driver-s14.test.mjs (new)
+- plugin/test/goal-driver-s06.test.mjs
+- docs/carrier-registry.json
 - docs/evidence/2026-11-06-goal-filing-ledger.md (new)
 - tasks/gap-goal-driver-filing-ledger.md
