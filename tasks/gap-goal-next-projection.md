@@ -30,12 +30,12 @@ goal-driver 每轮算出大量缺口读数，但没有一条回答"这个 goal �
 
 ## AC
 
-- [ ] `node --test plugin/test/goal-driver.test.mjs packages/quay/test/goal-analysis.test.mjs` 退出码 0。
-- [ ] `goalNextProjection` 对每个 active GOAL 恰好一行；排序符合 needs-human→stalled→workable→gap→world-gated→not-evaluated，同态按 AC id。
-- [ ] `owner` 与 `action.kind` 都是枚举；缺值时用独立取值。
-- [ ] `quay goal next --root . --json` 在 fact 齐全时 exit 0 并输出数组；无 fact ⇒ exit 3；active GOAL 缺行 ⇒ exit 1。
-- [ ] 最新一轮 round fact 含 `goal-next` fact，且与 CLI 输出等价。
-- [ ] live 证据：GOAL-914 的一行投影与 CLI 输出逐字写入证据文档。
+- [x] `node --test plugin/test/goal-driver.test.mjs packages/quay/test/goal-analysis.test.mjs` 退出码 0。
+- [x] `goalNextProjection` 对每个 active GOAL 恰好一行；排序符合 needs-human→stalled→workable→gap→world-gated→not-evaluated，同态按 AC id。
+- [x] `owner` 与 `action.kind` 都是枚举；缺值时用独立取值。
+- [x] `quay goal next --root . --json` 在 fact 齐全时 exit 0 并输出数组；无 fact ⇒ exit 3；active GOAL 缺行 ⇒ exit 1。
+- [x] 最新一轮 round fact 含 `goal-next` fact，且与 CLI 输出等价。
+- [x] live 证据：GOAL-914 的一行投影与 CLI 输出逐字写入证据文档。
 
 ## DoD
 
@@ -49,6 +49,7 @@ goal-driver 每轮算出大量缺口读数，但没有一条回答"这个 goal �
 
 - packages/quay/src/core/goal-analysis.ts (new)
 - packages/quay/src/cli/goal.ts
+- packages/quay/src/cli/help.ts
 - packages/quay/src/core/types.ts
 - packages/quay/test/goal-analysis.test.mjs (new)
 - plugin/scripts/goal-driver.ts
