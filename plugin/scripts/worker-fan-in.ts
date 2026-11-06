@@ -3870,6 +3870,11 @@ export async function runMechanicalFanIn(opts: MechanicalFanInOptions): Promise<
           let certifiedPlan: SuitePlanReading | null = null;
           let exemptReading: BaselineEquivalenceReading | null = null;
           let blockedNextStep: string | null = null;
+          /** 被认证那一档**自己的**日志文本。⛔ 不能直接用循环体内的 `recLog`——它声明在
+           *  `for (const n of steps)` 块内，循环外引用会抛 ReferenceError（被 step 的 catch 吞成
+           *  `step=exception reason=recLog is not defined`）。认证点只有两处（干净轮 / baseline-equivalent +
+           *  Touches clean），都在循环体内、`recLog` 可见，所以在那里赋值、在这里声明。 */
+          let certifiedRecoveryLogText: string | null = null;
           /** 最近一档**没跑**（被 runner 拒绝）的读数：整条梯子都没认证时，判词要指名「被哪条闸拒的」，
            *  ⛔ 不能回落成 `needs a code fix`（那正是本任务要消灭的误指，见 classifyRecoveryRound 注释）。 */
           let refusedSeen: { line: string; branch: string | null; concurrency: number } | null = null;
@@ -3942,6 +3947,7 @@ export async function runMechanicalFanIn(opts: MechanicalFanInOptions): Promise<
               // **自己的** planned/terminal/oomKill 读数（⛔ 不是原轮的）。
               certifiedRun = reading.run;
               certifiedPlan = reading.plan;
+              certifiedRecoveryLogText = recLog.length > 0 ? recLog : null;
               traceSuiteEvent("suite-recovery-certified", {
                 exit: 0, wall_ms: recWall, ok: true, concurrency: n,
                 reason: `recovery round complete at concurrency ${n} (${steps.indexOf(n) + 1}/${steps.length}) — landing on ITS OWN verdict`,
@@ -3993,6 +3999,7 @@ export async function runMechanicalFanIn(opts: MechanicalFanInOptions): Promise<
                 certifiedRun = reading.run;
                 certifiedPlan = reading.plan;
                 exemptReading = be;
+                certifiedRecoveryLogText = recLog.length > 0 ? recLog : null;
               } else {
                 blockedNextStep = `recovery baseline-equivalent but the candidate's own Touches-relevant tests are not clean (${touchesDetail}) — needs a code fix`;
               }
@@ -4046,7 +4053,8 @@ export async function runMechanicalFanIn(opts: MechanicalFanInOptions): Promise<
           recoveredCertified = true;
           // gap-meta-extractnotevaluatedchecker — 被记录的轮次是恢复轮 ⇒ 它的日志才是本轮惰性守卫的
           // 来源（原轮是 incomplete 的，它的 NOT-EVALUATED 行不代表最终给出的结论那把 suite）。
-          recordedSuiteLogText = recLog.length > 0 ? recLog : null;
+          // 认证档的日志读不出 ⇒ null（未测量），⛔ 不回落成原轮的日志（那是另一轮的读数）。
+          recordedSuiteLogText = certifiedRecoveryLogText;
           traceSuiteEvent("suite-recovery-accepted", {
             exit: 0, wall_ms: 0, ok: true,
             concurrency: certifiedPlan?.laneCount ?? null,
