@@ -1,7 +1,7 @@
 ---
 id: gap-goal-next-unchanged-rounds-escalation
 title: goal next 行带 unchangedRounds：连续 ≥8 轮未变的 wait 行升级为人动作
-status: todo
+status: ready
 labels:
   - gap
   - goal-driver
