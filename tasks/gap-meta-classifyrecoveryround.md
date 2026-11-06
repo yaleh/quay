@@ -2,7 +2,7 @@
 id: gap-meta-classifyrecoveryround
 title: 恢复阶梯把 SUITE-NOT-RUN 轮折成 complete-red：被拒轮从未跑过任何测试，却判「baseline-equivalence
   not evaluable — needs a code fix」
-status: todo
+status: ready
 labels:
   - meta-driver
   - driver-candidate
