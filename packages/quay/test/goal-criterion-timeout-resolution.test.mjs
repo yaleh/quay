@@ -328,7 +328,7 @@ test("AC6(c) — 激活检查走同一解析来源：解析后的界（而非字
 
 // ── (d) the I5 achieved-but-failing reverify — goal-store.ts `checkAchievedFailing` ───────────────
 
-test("AC6(d) — 重新验证走同一解析来源：同一 achieved AC 在 1000ms 下报红、在 5000ms 下报绿", () => {
+test("AC6(d) — 重新验证走同一解析来源：同一 achieved AC 在 1000ms 下报 NOT-EVALUATED、在 5000ms 下报绿", () => {
   const ws = makeWorkspace("reverify");
   // In scope via the `long-term: true` branch of `inAchievedReverifyScope` (the other branch is
   // "under an ACTIVE goal"), so no active goal is needed to put it in front of I5.
@@ -338,7 +338,14 @@ test("AC6(d) — 重新验证走同一解析来源：同一 achieved AC 在 1000
   const s = JSON.parse(short.stdout);
   assert.equal(s.evaluated, true, `the guard must not have refused (⛔ an unevaluated run is not a reading):\n${short.stdout}${short.stderr}`);
   assert.deepEqual(s.inScope, ["AC-907"], "the AC is in the I5 reverify scope");
-  assert.deepEqual(s.achievedButFailing, ["AC-907"], "killed at 1000ms ⇒ currently failing");
+  // ⛔ A deadline kill is NOT "currently failing": the criterion never got to state anything.
+  // (gap-goal-achieved-failing-folds-not-evaluated-into-red — this assertion used to pin the fold.)
+  assert.deepEqual(s.achievedButFailing, [], "killed at 1000ms ⇒ NOT-EVALUATED, ⛔ not `failing`");
+  assert.deepEqual(
+    s.achievedNotEvaluated.map((e) => [e.id, e.cause]),
+    [["AC-907", "timeout"]],
+    "the timeout lands in its own bucket, with the cause that names the knob to turn",
+  );
 
   const long = goal(ws, ["check", "--achieved-failing"], { QUAY_ACCEPTANCE_TIMEOUT_MS: "5000" });
   const l = JSON.parse(long.stdout);

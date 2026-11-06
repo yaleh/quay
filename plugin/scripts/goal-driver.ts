@@ -417,8 +417,9 @@ export async function checkStaleness(
 }
 
 /** 读 I5 achieved-but-failing（复用 goal-store 的单一真相源 checkAchievedFailing，⛔ 不在本文件重算）。
- *  退出码 1 = 存在 achieved-but-failing AC（是发现不是错误），4 = 无红但有 NOT-EVALUATED，
- *  3 = 空作用域；三者都把 JSON 打到 stdout，故这里只看 stdout、只看 `r.error`（spawn/超时才是错误）。
+ *  退出码：0 = 全过；1 = 存在 achieved-but-failing AC **或**作用域为空（evaluated:false）；
+ *  4 = 无红但至少一条 NOT-EVALUATED（timeout / spawn / not-runnable / declared）。三种非 0 都把
+ *  JSON 打到 stdout，故这里只看 stdout、只看 `r.error`（spawn/超时才是错误）。
  *  读不懂 ⇒ null。
  *  scopeSize/evaluated 透传 goal-store 的取值（0 作用域 ⇒ evaluated:false、scopeSize:0——
  *  空作用域与「查过且全过」按字段区分，⛔ 同形，硬规则 3b）。
