@@ -52,10 +52,15 @@ depends_on: []
 - plugin/scripts/primitives-drift-check.ts
 - plugin/scripts/runner-static-gate.ts
 - plugin/scripts/capability-catalog-declarations.json
+- plugin/scripts/checker-mutation-cases/primitives-drift-check.sh
 - plugin/test/primitives-drift-check.test.mjs
 - plugin/test/session-primitives-adoption.test.mjs
 - packages/quay/src/serve/io/serve-send.ts
+- packages/quay/src/observation.ts
+- plugin/scripts/inner-blocked-signal.ts
 - packages/quay/test/goal-store.test.mjs
+- packages/quay/test/init.test.mjs
 - plugin/test/fixtures/spec-reporter-suite-log-bda3e2.txt
+- plugin/test/fixtures/spec-reporter-suite-log-bda3e2.provenance.md (new)
 - docs/evidence/2026-11-06-primitives-decouple.md (new)
 - tasks/gap-primitives-decouple-from-quay-fleet.md
