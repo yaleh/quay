@@ -96,11 +96,8 @@ extract
 
 ## Blocker
 
-**2026-11-06T08:18:46.392Z — worker 未落地（exited-not-landed）**
+**2026-11-06T09:28:50.802Z — worker 未落地（exited-not-landed）**
 
-- 未落地原因：step=suite: oom-killed (2) — recovery red set is NOT a subset of the develop baseline red set: added=plugin/test/archive-exclusion-wiring.test.mjs changed=- — needs a code fix
+- 未落地原因：step=suite: incomplete suite (897/994 files) oomKill=1 — recovery baseline-equivalence not evaluable at concurrency 16 — needs a code fix
 - run_id：wk-prod-anchor
-- session_id：773208ce-65bb-4efb-83c0-f407058089c0
-
-
-2026-11-06 人工暂停（宿主降载期间）：本任务上一轮已实现但在 merge-develop 步骤反复失败（worktree 内有未提交改动阻止 merge），本次运行中已被人工终止（suite 峰值 32.8 GB / ~60 核 esbuild）。恢复条件：先清干净该 worktree 的未提交改动，宿主 loadavg 回落后改回 ready 重派。
+- session_id：5b584620-f65e-41c0-b911-2ff71782169a
