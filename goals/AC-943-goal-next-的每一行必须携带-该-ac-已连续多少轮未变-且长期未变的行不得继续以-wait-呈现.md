@@ -1,7 +1,7 @@
 ---
 id: AC-943
 title: goal next 的每一行必须携带「该 AC 已连续多少轮未变」，且长期未变的行不得继续以 wait 呈现
-status: draft
+status: active
 kind: criterion
 goal: GOAL-914
 criterion: "node -e \"const{execSync}=require('child_process');const
@@ -30,4 +30,15 @@ origin: timeSeries `goal:AC-936:verdict` = unchanged / value=fail / count=53 /
   owner=world / kind=wait（同文件 :285），`readGoalNextCarrier` 只读最近一轮 fact ⇒ 第 1 轮与第
   53 轮的行逐字相同。既有 AC-935 / tasks/gap-goal-next-projection.md 只覆盖 owner/action
   的形状与排序，未覆盖「持续多久」，故本条件是追加而非重复。
+activatedAt: 2026-11-06T20:43:03.263Z
+statusLog:
+  - at: 2026-11-06T20:43:03.263Z
+    from: draft
+    to: active
+    actor: goal-driver
+    reason: "triage: activate"
+fidelity:
+  verdict: faithful
+  reason: "fidelity judge: faithful"
+  at: 2026-11-06T20:43:03.262Z
 ---
