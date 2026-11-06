@@ -2,7 +2,7 @@
 id: gap-meta-readingsdigestpartsforparking
 title: 语义半的读数契约缺了四个键：timeSeries / inertCheckers / actionRecordFailures / parking
   送到却无释义、无输出落点
-status: ready
+status: done
 labels:
   - meta-driver
   - driver-candidate
