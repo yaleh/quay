@@ -3776,7 +3776,11 @@ export async function runMechanicalFanIn(opts: MechanicalFanInOptions): Promise<
         suiteLogReadable = suiteLogText.length > 0;
       } catch { /* 日志缺失 ⇒ 未测量；下面 refusal/firstFailure 的既有回退逐字不变 */ }
       // 认证的恢复轮是**被记录的那一轮**（AC11）⇒ 惰性守卫也必须取它自己的日志，⛔ 不取原轮的。
-      let certifiedLogText: string | null = null;
+      // `recordedSuiteLogText` 就是「被记录那一轮」的那份日志（镜像载体里这一维的唯一来源）：先取原轮的，
+      // 恢复轮被认证时（下面的 `reading.kind === "certified"` 分支）整体替换成它自己的。
+      // ⛔ 不用 `recoveredCertified` 在这里做判断——它声明在红分支内部，绿轮路径上不在作用域里
+      // （2026-11-07 实测：ReferenceError 被 step 的 catch 吞成 `step=exception`，3 个 worker-fan-in 用例红）。
+      let recordedSuiteLogText: string | null = suiteLogReadable ? suiteLogText : null;
       let refusalLine: string | null = null;
       if (sr.outcome !== "done") {
         refusalLine = extractSuiteNotRunLine(suiteLogText);
@@ -4042,7 +4046,7 @@ export async function runMechanicalFanIn(opts: MechanicalFanInOptions): Promise<
           recoveredCertified = true;
           // gap-meta-extractnotevaluatedchecker — 被记录的轮次是恢复轮 ⇒ 它的日志才是本轮惰性守卫的
           // 来源（原轮是 incomplete 的，它的 NOT-EVALUATED 行不代表最终给出的结论那把 suite）。
-          certifiedLogText = recLog.length > 0 ? recLog : null;
+          recordedSuiteLogText = recLog.length > 0 ? recLog : null;
           traceSuiteEvent("suite-recovery-accepted", {
             exit: 0, wall_ms: 0, ok: true,
             concurrency: certifiedPlan?.laneCount ?? null,
@@ -4153,16 +4157,12 @@ export async function runMechanicalFanIn(opts: MechanicalFanInOptions): Promise<
       // 必须同键，否则 AC1「state/load/记录三者同键」被镜像最后一写破坏（gap-mechanical-fan-in-per-suite-runid-unified）。
       // gap-meta-extractnotevaluatedchecker — 镜像必须把**本任务**惰性守卫这一维一起写下去，否则
       // meta-driver 的 `collectInertCheckers` 在镜像载体上恒为「未测量」（旧行为：字段缺失 → `[]`）。
-      // 来源 = 被记录那一轮的日志：认证的恢复轮优先，其次原轮；日志读不出 ⇒ 不传（未测量，⛔ 不写 `[]`）。
-      const recordedSuiteLog =
-        recoveredCertified && certifiedLogText !== null ? certifiedLogText
-          : suiteLogReadable ? suiteLogText
-            : null;
+      // 来源 = 被记录那一轮的日志（认证的恢复轮已把它替换成自己的）；日志读不出 ⇒ 不传（未测量，⛔ 不写 `[]`）。
       mirrorMechanicalFanInSuiteState({
         task, runId: perSuiteRunId, commit: suiteHead,
         startedAt: sr.startedAt, finishedAt: sr.finishedAt, durationMs: sr.durationMs,
         stateFile: suiteStateFile,
-        ...(recordedSuiteLog === null ? {} : { notEvaluatedCheckers: parseNotEvaluatedCheckers(recordedSuiteLog) }),
+        ...(recordedSuiteLogText === null ? {} : { notEvaluatedCheckers: parseNotEvaluatedCheckers(recordedSuiteLogText) }),
       });
     } else {
       writeSuiteCapture(suiteCapture, { full_suite_ran: "false", skip_reason: reuseSkip ? "develop-advance-doc-only-reuse" : "doc-only-delta", suite_exit: "0", suite_head: suiteHead });
