@@ -88,6 +88,11 @@ import {
   readingsDigestPartsForActionFailures,
   collectParkingReadings,
   readingsDigestPartsForParking,
+  readingsTopLevelKeys,
+  undeclaredReadingsKeys,
+  probeKeyBlock,
+  declarationDensity,
+  META_ROUND_READINGS_INTERFACE,
   parseDurationMs,
   readActionRecordConfig,
   readActionRecordScan,
@@ -3175,4 +3180,100 @@ test('parking digest: 点名清单进摘要；计数/年龄不进（⛔ 每轮�
     'needs-human 停放理由失效也必须改变摘要');
   // ⑥纯函数：⛔ 不改输入、⛔ 不抛（缺字段的旧读数照样能算）
   assert.deepEqual(readingsDigestPartsForParking(undefined).length, 2);
+});
+
+// ── gap-meta-readingsdigestpartsforparking：readings 的每一个顶层键都必须在 probe 规格里被声明 ──
+//
+// 缺陷原样：`plugin/probes/meta-driver.md` 只声明了 readings 的**一部分**顶层键（goals/criteria/
+// divergences/drivers/syncHealth/metaRecords/focus），而 `timeSeries` / `inertCheckers` /
+// `actionRecordFailures` / `parking` 四个键每轮随 readings 一并送到语义半，却既无释义也无处置口径
+// ⇒ 读到了、但没有任何动作由它触发（兄弟实例 gap-meta-addressedtasks-input-without-output-channel）。
+//
+// ⛔ 键清单【不写死在测试里】：从 `MetaRoundReadings` 的接口体按位置取。写死一份清单会在下一次给
+// readings 加键时静默过期，而「静默过期」正是本缺陷的形态（硬规则 5b）。
+const META_DRIVER_SRC_PATH = path.join(repoRoot, 'plugin', 'scripts', 'meta-driver.ts');
+const META_DRIVER_SPEC_PATH = path.join(repoRoot, 'plugin', 'probes', 'meta-driver.md');
+const META_DRIVER_SRC = fs.readFileSync(META_DRIVER_SRC_PATH, 'utf8');
+const META_DRIVER_SPEC = fs.readFileSync(META_DRIVER_SPEC_PATH, 'utf8');
+
+/** 本任务点名的四个键——只用于「反空转」断言：证明键清单真的取全了，而不是覆盖判定漏读了它们。 */
+const UNDECLARED_READINGS_KEYS = ['timeSeries', 'inertCheckers', 'actionRecordFailures', 'parking'];
+
+/** 处置口径必须落到的输出通道词表（parking 的处置面是「人/manager」，故 manager 也在内）。 */
+const DISPOSITION_CHANNELS = ['divergences', 'proposals', 'autoDrive', 'decisions', 'metaRecordOpinions', 'manager'];
+
+/** 负控材料：造一份「从未声明该键」的规格——删掉声明块，并抹掉残留提及。
+ *  ⛔ 只删块不抹提及是不够的：`includes` 会被散文里的同名提及满足（`Unparking` 就含 `parking`），
+ *  那样负控永远取不到假，等于没做负控。 */
+function specWithoutDeclaration(text, key) {
+  const block = probeKeyBlock(text, key);
+  assert.ok(block, `${key}: 先决条件——当前规格里必须有声明块，否则这个负控测的是别的东西`);
+  return text.replace(block, '').split(key).join('〔removed〕');
+}
+
+test('AC1: readings 的每一个顶层键都在 probe 规格里被具名（键清单取自接口声明，⛔ 非手写清单）', () => {
+  const keys = readingsTopLevelKeys(META_DRIVER_SRC);
+  assert.notEqual(keys, null, `接口 ${META_ROUND_READINGS_INTERFACE} 的键清单必须能读出（⛔ 读不出不得当成"没有缺声明"）`);
+  assert.ok(keys.length > 0, '键清单不能为空');
+  // 反空转：清单里必须真有本任务点名的四个键 + 两个原本就在的老键——否则「零缺声明」可能只是清单没取全
+  for (const k of [...UNDECLARED_READINGS_KEYS, 'goals', 'focus']) {
+    assert.ok(keys.includes(k), `从接口取出的键清单缺 ${k}：${keys.join(',')}`);
+  }
+  const missing = undeclaredReadingsKeys(keys, META_DRIVER_SPEC);
+  assert.notEqual(missing, null, '键清单与规格都可读 ⇒ 必须给出判定（⛔ 不得停在未评估）');
+  assert.deepEqual(missing, [], `probe 规格里缺这些 readings 键的声明：${(missing ?? []).join(',')}`);
+});
+
+test('AC1 负控: 少声明一个键 ⇒ 判红并点名它（四个键逐个取假，且原规格必须为绿）', () => {
+  const keys = readingsTopLevelKeys(META_DRIVER_SRC);
+  for (const key of UNDECLARED_READINGS_KEYS) {
+    const damaged = specWithoutDeclaration(META_DRIVER_SPEC, key);
+    assert.deepEqual(undeclaredReadingsKeys(keys, damaged), [key],
+      `删掉 ${key} 的声明后判据必须点名它（否则这一条与「恒绿」同形）`);
+    // 另一个方向：原规格必须判绿——两个方向都断，防「判据恒红」这种同样无信息的形态
+    assert.deepEqual(undeclaredReadingsKeys(keys, META_DRIVER_SPEC), []);
+  }
+});
+
+test('AC1 未评估态: 接口读不出 / 规格为空 ⇒ null（⛔ 不与 [] =「查过、全声明」同形，硬规则 3b）', () => {
+  assert.equal(readingsTopLevelKeys('export interface MetaRoundReadings { }'), null, '空接口体 ⇒ 未评估');
+  assert.equal(readingsTopLevelKeys('no such interface here'), null, '没有该接口 ⇒ 未评估');
+  assert.equal(readingsTopLevelKeys(''), null);
+  const keys = readingsTopLevelKeys(META_DRIVER_SRC);
+  assert.equal(undeclaredReadingsKeys(null, META_DRIVER_SPEC), null, '键清单读不出 ⇒ 未评估');
+  assert.equal(undeclaredReadingsKeys([], META_DRIVER_SPEC), null, '空键清单 ⇒ 未评估（空清单判什么都恒绿）');
+  assert.equal(undeclaredReadingsKeys(keys, ''), null, '规格为空 ⇒ 未评估');
+  assert.equal(undeclaredReadingsKeys(keys, '   \n'), null);
+});
+
+test('AC2: 四个键各自的声明块有释义与处置口径（⛔ 不是只出现一个词）', () => {
+  for (const key of UNDECLARED_READINGS_KEYS) {
+    const block = probeKeyBlock(META_DRIVER_SPEC, key);
+    assert.notEqual(block, null, `${key}: 必须有一个属于它自己的项目符号声明块（⛔ 不是散文里的提及）`);
+    assert.ok(block.startsWith(`- \`${key}\``), `${key}: 块首必须点出键名`);
+    // 释义：块必须有实质内容，⛔ 不是 `- \`parking\`: see readings`
+    assert.ok(declarationDensity(block) >= 200,
+      `${key}: 声明块太薄（非空白字符 ${declarationDensity(block)}）——释义与处置口径都要在块里`);
+    // 处置口径：块必须把读数落到一条输出通道（或「人/manager」这类人处置面）上
+    assert.ok(DISPOSITION_CHANNELS.some((c) => block.includes(c)),
+      `${key}: 处置口径缺失——块里没有任何输出通道（${DISPOSITION_CHANNELS.join(' / ')}）`);
+  }
+  // parking 的处置口径是任务点名的那个具体口径（两条都断，缺任一条即红）
+  const parking = probeKeyBlock(META_DRIVER_SPEC, 'parking');
+  assert.match(parking, /unpark-passed/, 'parking 必须点名「解停检查已通过」那一群');
+  assert.match(parking, /human\/manager|人\/manager|manager/, 'parking 的点名 id 必须路由到人/manager');
+  assert.match(parking, /⛔[\s\S]{0,400}PARKED|PARKED[\s\S]{0,400}⛔/,
+    '⛔ 机件不自行删标记——这条禁令必须写在 parking 的声明块里');
+});
+
+test('AC2 负控: 把声明块削成一句「见 readings」⇒ 释义与处置口径都判红（判据能取假）', () => {
+  const thin = META_DRIVER_SPEC.replace(probeKeyBlock(META_DRIVER_SPEC, 'timeSeries'), '- `timeSeries`: see readings.');
+  const block = probeKeyBlock(thin, 'timeSeries');
+  assert.notEqual(block, null);
+  assert.ok(declarationDensity(block) < 200, `负控样本必须低于密度下限，否则这一条测的不是密度：${declarationDensity(block)}`);
+  assert.ok(!DISPOSITION_CHANNELS.some((c) => block.includes(c)), '负控样本必须不带任何输出通道');
+  // 另一个方向：真规格在同两条断言上必须通过
+  const real = probeKeyBlock(META_DRIVER_SPEC, 'timeSeries');
+  assert.ok(declarationDensity(real) >= 200);
+  assert.ok(DISPOSITION_CHANNELS.some((c) => real.includes(c)));
 });

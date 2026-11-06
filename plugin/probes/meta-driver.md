@@ -122,6 +122,55 @@ and treat that dimension as unreadable, ⛔ do NOT fabricate a reading.
   is NOT the same as saying `hasOpinion:false`. Your judgment is then written BACK onto the record
   (status → answered, reply embedded) by the mechanical half — so the sender reads your answer from
   the same git-visible object they wrote, without touching any `.quay/` file.
+- `inertCheckers`: the NAMES of the suite's inert checkers this round — checkers that could not read
+  their own input (exit 3 = NOT-EVALUATED) and therefore judged nothing. An inert guard is a
+  **failing instrument, not a passing one**: whatever it was meant to catch is UNMEASURED this round,
+  so "no divergence under it" carries no information at all. Enumerated by name on purpose (⛔ never a
+  bare count) so you can say WHICH guard went inert. `[]` means "no inert checker reported" — an
+  absent/unreadable `.quay/full-suite-state.json` also yields `[]`, so ⛔ never read `[]` as "every
+  guard ran". Disposition: name the guard and what it left unmeasured; repairing a guard is repair of
+  an EXISTING mechanism, so it is WORK (`autoDrive`) when you have the evidence, ⛔ never "it's green".
+- `timeSeries`: the cross-round DERIVED layer — everything else in `readings` is a snapshot, and a
+  snapshot structurally cannot say "this has been true for N rounds". Two signals per goal AC:
+  `mode:"unchanged"` (how many CONSECUTIVE rounds the criterion's `verdict` has held one value —
+  `value` says WHICH value) and `mode:"expected-absent"` (how many consecutive rounds the AC spawned
+  work that produced nothing). `count` is the streak, `threshold` the safety-net cut, and `crossed` is
+  the ONLY bit that means "this persisted". Three misreads, all forbidden: `evaluated:false` is "no
+  history / unreadable", ⛔ NOT "streak 0"; `value:null` on an `unchanged` signal means the repeated
+  value itself was unreadable, so ⛔ never narrate a bare `count` as "failing for N rounds"; and
+  `skippedAbortedRounds > 0` means the tail is NOT from the latest round (that many interrupted rounds
+  were skipped rather than counted as change). Disposition: a `crossed` streak IS the finding (a
+  mechanism has been spinning for N rounds) — interpret it in `divergences`, or route the repair as an
+  `autoDrive` when the streak belongs to a driver/mechanism rather than to an AC's own work; ⛔ do NOT
+  re-state a growing `count` that has not crossed as news.
+- `actionRecordFailures`: the ONE reading taken from the session CORPUS instead of a state carrier —
+  failing tool calls aggregated by normalized error `signature`, each with `sessions` (how many
+  DISTINCT sessions hit it — the dimension that matters) and an `example`. Four states, deliberately
+  not a boolean: `crossed` (≥1 signature passed the configured session threshold), `none` (scanned,
+  nothing over it), `unthresholded` (scanned and the list is given, but no threshold is configured ⇒
+  `crossed:null`, ⛔ not `false`), `not-evaluated` (`aggregates:null` + `reason` — corpus unreadable or
+  the scan failed; ⛔ NEVER "zero failures"). Disposition: a `crossed` signature means several
+  independent sessions hit the same wall and each fell back locally with nobody owning it — name the
+  signature and the mechanism that SHOULD own it; if the repair is work, `autoDrive`; if nothing owns
+  it, say "unowned" (that is the finding). ⛔ never report `not-evaluated`/`unthresholded` as clean.
+- `parking`: two populations of parked work whose stop-condition may have EXPIRED — read from the
+  promotion driver's own carrier (⛔ this is a CONSUMER of that judge, never a second judge):
+    - `parked.entries` — tasks carrying a `PARKED` marker whose DECLARATIVE unpark check (a command in
+      the task's own body) now PASSES. Each entry carries the `command` / `expectedOutput` / `exitCode`
+      / `output` that decided it, so the evidence travels with the id; `parked.counts` is the
+      four-state bucket of every parked task (`unpark-passed` / `unpark-still-blocked` /
+      `no-unpark-check` / `not-evaluated`).
+    - `needsHuman.stale` — needs-human tasks whose recorded parking reason no longer holds.
+  Both arms are tri-state: `evaluated:false` ⇒ `counts`/`entries`/`stale` are **null**, i.e. NOT
+  MEASURED (⛔ never "nothing parked"), and `carrierProblem` says why the carrier was not used.
+  DISPOSITION — a parked task is excluded from dispatch AND never flips `done`, so every task
+  depending on it starves; that is why this matters even though it is not a divergence. Unparking is a
+  PERSON's action: route each `unpark-passed` id (with its evidence) to the human/manager — when one of
+  them is what blocks a goal/AC you WERE given, name that id inside that divergence's `interpretation`
+  (the round record carries this reading verbatim, so the human sees the evidence and the causal
+  chain). ⛔ NEVER propose or file work that makes a mechanism delete the `PARKED` marker, re-admit the
+  task, or flip it itself: the marker is a human declaration, so it is not an `autoDrive` action.
+  `unpark-still-blocked` / `no-unpark-check` are normal states, not findings — do not report them.
 - `focus` (optional): the **覆盖段** of `orchestration/meta-driver-focus.md`, read mechanically EVERY
   round (NOT a one-shot CLI argument — `--focus` exists only for manual `--once` runs). It is the
   resident driver's human-steering channel: a human edits that file's 覆盖段, and the change reaches
