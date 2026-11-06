@@ -99,3 +99,10 @@ Node ≥22.6），因此它**不能** import 这个 `.ts`。于是：
 - `plugin/test/release-model-check.test.mjs`
 - `plugin/test/release-cut.test.mjs`
 - `tasks/gap-routine-semantic-dedup-scan-release-branch-prefix.md`
+
+## Blocker
+
+**2026-11-06T06:40:16.275Z — worker 未落地（exited-not-landed）**
+
+- 未落地原因：step=merge-develop: exit null
+- run_id：wk-prod-anchor
