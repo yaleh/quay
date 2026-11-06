@@ -56,6 +56,6 @@ goal_ac: AC-941
 
 ## Touches
 
-- plugin/test/ac941-filing-window-anchor.test.mjs
-- docs/evidence/2026-11-06-ac941-post-landing-window.md
+- plugin/test/ac941-filing-window-anchor.test.mjs (new)
+- docs/evidence/2026-11-06-ac941-post-landing-window.md (new)
 - tasks/gap-ac941-filing-window-anchor-post-landing-row.md
