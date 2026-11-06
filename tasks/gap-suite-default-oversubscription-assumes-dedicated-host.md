@@ -1,7 +1,7 @@
 ---
 id: gap-suite-default-oversubscription-assumes-dedicated-host
 title: suite 默认 max_oversubscription=1 假设独占宿主：每个新项目默认按 nproc 开满车道
-status: todo
+status: ready
 labels:
   - gap
 parent: null
