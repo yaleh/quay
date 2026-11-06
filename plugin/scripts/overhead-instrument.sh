@@ -74,6 +74,13 @@ _oh_install_partial_trap() {
   # already classifies as a signal-kill/abort — never a false green); EXIT is the backstop for a
   # set -e / any other non-SIGTERM truncation. _oh_done guards both paths so the emit runs exactly
   # once whether the exit is SIGTERM→EXIT or a plain EXIT.
-  trap '_oh_emit_partial; exit 143' SIGTERM
-  trap '_oh_emit_partial' EXIT
+  #
+  # ⛔ This trap REPLACES whatever EXIT/SIGTERM handler the caller had installed — bash has exactly
+  # one per signal. gap-test-harness-tmp-dir-leak: the suite's temp-root reaper is installed at the
+  # TOP of scripts/test.sh and this function is called much later on the full path, so a bare
+  # replacement silently dropped the reap exactly on the full-suite runs (the heavier leakers).
+  # Chain it instead of re-owning the signal: `declare -F` keeps this file usable by callers that
+  # never sourced suite-temp-root.sh (no undefined-command error, no behavior change).
+  trap '_oh_emit_partial; if declare -F suite_temp_root_cleanup >/dev/null 2>&1; then suite_temp_root_cleanup; fi; exit 143' SIGTERM
+  trap '_oh_emit_partial; if declare -F suite_temp_root_cleanup >/dev/null 2>&1; then suite_temp_root_cleanup; fi' EXIT
 }

@@ -149,6 +149,14 @@ import { scanFamily, kindForFile } from "./known-load-sensitive.ts";
 // (a PRODUCTION module, shipped in the npm-pack bundle), NOT the test helper: package.sh excludes
 // plugin/test/ from the bundle, so importing from there breaks build-plugin-dist (round 123/124).
 import { sweepRunNamespaces, sweepRunNamespace, killRegisteredServers } from "./run-namespace-sweep.mjs";
+// gap-test-harness-tmp-dir-leak — the bounded-age temp-root reaper (the SAME instrument
+// scripts/test.sh's exit path calls through its .sh wrapper, so there is one implementation of
+// "residue vs in-use" and one telemetry line shape). The runner owns the run's temp root on the
+// full-suite path: it creates it, exports TMPDIR/TMP/TEMP into the child's env, and reaps it at
+// teardown — the child (scripts/test.sh via plugin/scripts/suite-temp-root.sh) ADOPTS a root that
+// is already set rather than creating a second one, so runner-side bookkeeping (the quay-run-<id>
+// namespace, the server registry) and the tests agree on where <tmp> is.
+import { reapTempRoots, tempRootTelemetryLine, parseDurationMs, DEFAULT_EXCLUDES } from "./temp-root-reaper.ts";
 // gap-single-file-test-duration-trend-unwatched AC1/AC2 (fan-in 9edf2cb9, hand-merged into the
 // develop→integration convergence 2026-08-09): land the suite's per-file __PERFILE__ duration
 // history + compare against the last round (the trend dimension — per-file durations WATCHED round
@@ -3355,8 +3363,83 @@ export async function run(argv: string[]): Promise<number> {
       process.stderr.write(`full-suite-runner: pre-suite orphan-probe reap failed (continuing): ${e instanceof Error ? e.message : String(e)}\n`);
     }
   }
+  // ── gap-test-harness-tmp-dir-leak — the run's OWN temp root, created HERE and reaped at teardown ──
+  // Measured 2026-11-06: `find /tmp -maxdepth 1 -name 'quay-*' | wc -l` = 46218 (15,278 > 7 days).
+  // Every test mkdtemp()'s under <tmp> and NOTHING owned the exit path, so a slice survived each run
+  // — the 硬规则 3b shape (no reading reds because /tmp holds tens of thousands of dirs, so the leak
+  // is indistinguishable from "everything is fine"). The fix is structural, not a cleanup pass: each
+  // run gets a PRIVATE root (mkdtemp, empty at start), TMPDIR/TMP/TEMP point at it, and the exit path
+  // removes it — so "this run's residue" is a well-defined set that no other run can be inside of.
+  // ⛔ The root is created HERE (not by scripts/test.sh) on the full-suite path because runner-side
+  // bookkeeping resolves through os.tmpdir() too — the `quay-run-<id>` namespace created just below,
+  // and the server registry the post-suite kill reads. Child and runner must agree on where <tmp> is;
+  // making the CHILD create it would leave the runner reading /tmp while the tests wrote elsewhere
+  // (a silent divergence of exactly the class this task is about). scripts/test.sh therefore ADOPTS
+  // an already-exported QUAY_SUITE_TMP_ROOT (plugin/scripts/suite-temp-root.sh) instead of making a
+  // second one, and a DIRECT test.sh invocation (scoped gate / worktree fan-in) makes its own.
+  // ⛔ THE PRE-SUITE SWEEPS ABOVE RUN FIRST, ON PURPOSE: sweepRunNamespaces / killRegisteredServers
+  // must keep reading the AMBIENT /tmp — legacy `quay-run-*` residue lives there, and after the
+  // override below they would scan this fresh (empty) root instead and silently report 0.
+  const ambientTmpRoot = os.tmpdir();
+  let suiteTmpRoot: string | null = null;
+  if (process.env.QUAY_TEST_SKIP_SUITE_TMP_ROOT === "1") {
+    process.stderr.write("full-suite-runner: QUAY_TEST_SKIP_SUITE_TMP_ROOT=1 — the suite keeps the ambient tmp root\n");
+  } else {
+    try {
+      suiteTmpRoot = fs.mkdtempSync(path.join(ambientTmpRoot, `quay-suite-${shortRunId}-`));
+      process.env.QUAY_SUITE_TMP_ROOT = suiteTmpRoot;
+      process.env.TMPDIR = suiteTmpRoot;
+      process.env.TMP = suiteTmpRoot;
+      process.env.TEMP = suiteTmpRoot;
+      // Cross-run caches stay OUTSIDE the per-run root (they exist precisely to survive a run): the
+      // real-install shared build cache self-prunes at 48h and costs minutes to rebuild, so pointing
+      // it inside a root deleted at exit would pay that rebuild on EVERY round.
+      if (!process.env.QUAY_TEST_SHARED_BUILD_CACHE) {
+        process.env.QUAY_TEST_SHARED_BUILD_CACHE = path.join(ambientTmpRoot, "quay-real-install-build-cache");
+      }
+      // EXIT backstop, registered the moment the root exists: every early `return` between here and
+      // the teardown (resource-gate WAIT, provisioning failure, a thrown setup error) would otherwise
+      // leave a root behind until the next round's backlog sweep. It no-ops once the teardown ran
+      // (reclaimSuiteTmpRoot nulls suiteTmpRoot). A SIGKILL still leaks the root — that residue is
+      // exactly what the bounded-age backlog sweep below exists for.
+      process.once("exit", reclaimSuiteTmpRoot);
+      // Best-effort reclaim of PRE-EXISTING residue (runs that were SIGKILLed, runs older than this
+      // fix). Bounded age, live-cwd-safe, and it skips the `quay-run-*` family: those belong to
+      // run-namespace-sweep.mjs, whose criterion is a LIVE OWNER (a running tmux server) rather than
+      // age — deleting a live namespace dir would orphan the server by removing its socket.
+      if (process.env.QUAY_TEST_SKIP_TEMP_ROOT_BACKLOG_SWEEP !== "1") {
+        try {
+          const rawMaxAge = process.env.QUAY_TEMP_ROOT_MAX_AGE ?? "24h";
+          const maxAgeMs = parseDurationMs(rawMaxAge) ?? 24 * 3_600_000;
+          const swept = reapTempRoots({
+            root: ambientTmpRoot,
+            prefix: "quay-",
+            maxAgeMs,
+            excludes: [...DEFAULT_EXCLUDES, path.basename(suiteTmpRoot)],
+            excludePrefixes: ["quay-run-", "quay-suite-"],
+          });
+          if (swept.evaluated && swept.reaped.length > 0) {
+            process.stderr.write(
+              `full-suite-runner: pre-suite temp-root sweep removed ${swept.reaped.length} stale <tmp>/quay-* entr(ies) older than ${rawMaxAge}\n`,
+            );
+          } else if (!swept.evaluated) {
+            process.stderr.write(`full-suite-runner: pre-suite temp-root sweep NOT-EVALUATED (${swept.reason}) — removed nothing\n`);
+          }
+        } catch (e) {
+          process.stderr.write(`full-suite-runner: pre-suite temp-root sweep failed (continuing): ${e instanceof Error ? e.message : String(e)}\n`);
+        }
+      }
+    } catch (e) {
+      suiteTmpRoot = null;
+      process.stderr.write(
+        `full-suite-runner: could not create the run temp root (continuing with the ambient tmp): ${e instanceof Error ? e.message : String(e)}\n`,
+      );
+    }
+  }
   // Ensure this run's namespace exists so the suite-tail leak-scan's before-run snapshot has a
-  // stable subtree to scan (empty at start; the probes create under it).
+  // stable subtree to scan (empty at start; the probes create under it). `os.tmpdir()` is the SUITE
+  // ROOT on the path above, which is exactly what the child's leak-scan resolves — one reading, one
+  // place (see the block above for why the runner, not the child, owns it).
   try {
     fs.mkdirSync(path.join(os.tmpdir(), `quay-run-${shortRunId}`), { recursive: true });
   } catch { /* best-effort */ }
@@ -5230,6 +5313,45 @@ export async function run(argv: string[]): Promise<number> {
   } catch (e) {
     process.stderr.write(`full-suite-runner: post-suite registry kill failed (continuing): ${e instanceof Error ? e.message : String(e)}\n`);
   }
+  // gap-test-harness-tmp-dir-leak — reap THIS run's own temp root and print the telemetry line.
+  // ORDER IS LOAD-BEARING: sweepRunNamespace (own-subtree residue) and the registry kill just above
+  // both work INSIDE this root — the registry path resolves through os.tmpdir(), which is the run
+  // root while the suite runs — so the root may only be removed after them. What is NOT removed: an
+  // entry a live process has as its cwd. It stays, it is COUNTED into `leaked=`, and the final rmdir
+  // fails, so the line reports a dirty run instead of the run silently pretending to be clean — the
+  // 硬规则 3b distinction this task's AC4 is about (`leaked=0` vs `leaked=NOT-EVALUATED`).
+  // A function DECLARATION (hoisted) so the exit-path backstop can be registered the moment the root
+  // exists — earlier than this line, and before any early `return` between here and the teardown.
+  function reclaimSuiteTmpRoot(): void {
+    const root = suiteTmpRoot;
+    if (!root) return;
+    suiteTmpRoot = null; // idempotent: the exit-path backstop must not re-run the pass
+    try {
+      const report = reapTempRoots({ root, prefix: "", maxAgeMs: 0, excludes: [] });
+      process.stderr.write(
+        tempRootTelemetryLine({
+          root,
+          evaluated: report.evaluated,
+          reason: report.reason,
+          created: report.created,
+          reaped: report.reaped.length,
+          leaked: report.leaked.length,
+        }) + "\n",
+      );
+      if (report.evaluated && report.leaked.length === 0) {
+        try {
+          fs.rmdirSync(root);
+        } catch { /* a child re-created something after the scan: the backlog sweep gets it next round */ }
+      }
+    } catch (e) {
+      process.stderr.write(
+        `full-suite-runner: temp-root reap failed (continuing): ${e instanceof Error ? e.message : String(e)}\n`,
+      );
+    }
+  }
+  // Run the reap now (the exit hook registered at creation is the backstop — it no-ops after this,
+  // because reclaimSuiteTmpRoot nulls suiteTmpRoot).
+  reclaimSuiteTmpRoot();
   // The combined cleanup count + WHICH dirs (pre-suite stale namespaces + post-suite own residue),
   // for the round record. Capped so a pathological round cannot grow the record unboundedly.
   const allCleanedDirs = [...preCleaned.dirs, ...postCleaned.dirs];

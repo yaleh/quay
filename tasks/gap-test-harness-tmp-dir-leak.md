@@ -1,7 +1,7 @@
 ---
 id: gap-test-harness-tmp-dir-leak
 title: 测试 harness 泄漏临时目录：/tmp 积压 46,218 个 quay-*（15,278 个超 7 天）
-status: ready
+status: done
 labels:
   - gap
 parent: null
