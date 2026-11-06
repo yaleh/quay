@@ -1,7 +1,7 @@
 ---
 id: AC-945
 title: 请求消费半边的每轮活性：生产 round fact 必须携带已测的 goal-ring.requests，而不是靠一次性静态台账
-status: draft
+status: active
 kind: criterion
 goal: GOAL-914
 criterion: "node -e \"const fs=require('fs');const
@@ -25,4 +25,15 @@ origin: criteria.AC-936 的判据只读静态文件 .quay/goal-requests.jsonl：
   count=69 crossed=true 说明消费半边在生产上至今一次未被行使。生产 round fact 已每轮写
   goal-ring.requests（本轮实测 {evaluated:true,openBefore:0,appended:0}），但没有任何 AC
   读它——生产者有、消费者无。
+activatedAt: 2026-11-06T23:48:56.985Z
+statusLog:
+  - at: 2026-11-06T23:48:56.985Z
+    from: draft
+    to: active
+    actor: goal-driver
+    reason: "triage: activate"
+fidelity:
+  verdict: faithful
+  reason: "fidelity judge: faithful"
+  at: 2026-11-06T23:48:56.985Z
 ---
