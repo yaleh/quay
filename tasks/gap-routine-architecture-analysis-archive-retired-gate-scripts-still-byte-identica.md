@@ -3,7 +3,7 @@ id: gap-routine-architecture-analysis-archive-retired-gate-scripts-still-byte-id
 title: "architecture-analysis: md5 comparison run today: drain-scheduler.ts
   (6526 B), drain-dispose-corruption-check.ts (7355 B), it0-ceiling-check.sh
   (4036 B), it0-ceiling-line-budget-che"
-status: todo
+status: ready
 labels:
   - gap
   - routine-filed
