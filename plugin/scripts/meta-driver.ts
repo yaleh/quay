@@ -3262,8 +3262,9 @@ function reshardTighter(s: ReadingsShard, budget: number): ReadingsShard[] {
   shardValueAt(s.path, s.value, Math.max(256, Math.floor((budget - 1024) / 4)), out);
   if (s.range === null) return out;
   const base = s.range[0];
-  const esc = s.path.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const itemIdx = new RegExp(`^${esc}\\[(\\d+)\\]`);
+  // ⛔ 不本地重写转义体：单一实现在 kernel 叶（`packages/quay/src/kernel/regex-escape.ts`），
+  // 本文件经 plugin 侧入口 `./regex-escape.ts` 取同一个函数对象（`kernel-regex-escape.test.mjs` ①/④）。
+  const itemIdx = new RegExp(`^${escapeRegExp(s.path)}\\[(\\d+)\\]`);
   return out.map((n) => {
     const next: ReadingsShard = { ...n };
     if (next.kind === "value" && next.range === null) {
