@@ -410,3 +410,176 @@ test("AC4: --round-log overrides the carrier path (and a stopped-mid-round recor
   assert.deepEqual(JSON.parse(r.stdout), rows);
   assert.match(r.stderr, /projection from round 2/, "the provenance names the round that DID produce it");
 });
+
+// ── PERSISTENCE — how long has this row looked the same? ────────────────────────────────────────
+// (tasks/gap-goal-next-unchanged-rounds-escalation, AC-943)
+//
+// WHY THIS BLOCK EXISTS. Every other test here projects ONE round. A single round is a snapshot: the
+// `world-gated` row is byte-identical whether the wait just started or has been stuck for 53 rounds,
+// and production measured exactly that (2026-11-06: the same GOAL-914/AC-936 wait row across 6
+// consecutive rounds). The persistence dimension is the fix, and the two ways it goes WRONG are both
+// negative controls below:
+//   · counting the PRESENTED row ⇒ the escalation resets its own streak (escalate at 8, back to 1 at
+//     9, escalate again at 16) while every single-round reading still "looks right";
+//   · treating "history unreadable" as "first round" ⇒ an instrument failure wears the shape of a
+//     good reading (hard rule 3b).
+
+/** One earlier round's rows, as the round carrier stores them. */
+const histRound = (rows, round = 1) => ({ round, rows });
+
+/** A `world-gated` row exactly as the driver writes it — the fixture is the REAL row shape, so a
+ *  test that passes here is a statement about what production emits. */
+const waitRow = (over = {}) => ({
+  goal: "GOAL-001",
+  ac: "AC-001",
+  gapState: "world-gated",
+  rank: "world-gated",
+  owner: "world",
+  action: { kind: "wait", reason: "criterion reads a production carrier; the truth is a future production event" },
+  evidenceRefs: ["gap:AC-001"],
+  blocker: null,
+  streakKey: "AC-001|world-gated|world-gated|world|wait",
+  unchangedRounds: 1,
+  unchangedRoundsEvaluated: true,
+  escalated: false,
+  ...over,
+});
+
+/** `n` previous rounds that all carry the SAME waiting row (oldest → newest). */
+const waitHistory = (n, over = {}) => Array.from({ length: n }, (_, i) => histRound([waitRow(over)], i + 1));
+
+const WORLD_GATED = () => ({
+  records: [goalRec("GOAL-001")],
+  gaps: [gap("GOAL-001", "AC-001", "world-gated", 3)],
+});
+
+test("AC2 persistence: history=[] ⇒ every row is the FIRST round of its run (1 / evaluated)", () => {
+  const { records, gaps } = WORLD_GATED();
+  const rows = goalNextProjection(records, gaps, [], []);
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].unchangedRounds, 1, "no history ⇒ this round is the first of the run");
+  assert.equal(rows[0].unchangedRoundsEvaluated, true, "the history WAS read (it was empty) — ⛔ not 'not evaluated'");
+  assert.equal(rows[0].escalated, false);
+  assert.equal(rows[0].streakKey, "AC-001|world-gated|world-gated|world|wait", "the signature is the PRE-escalation one");
+  // Omitting the argument entirely is the same reading as passing `[]` (both = "read it, nothing back").
+  assert.deepEqual(goalNextProjection(records, gaps, []), rows, "the default is [] and it agrees");
+});
+
+test("AC2 persistence: 7 identical prior rounds + this one (= 8) is STILL a wait", () => {
+  const { records, gaps } = WORLD_GATED();
+  const rows = goalNextProjection(records, gaps, [], waitHistory(7));
+  assert.equal(rows[0].unchangedRounds, 8, "7 prior + this round");
+  assert.equal(rows[0].unchangedRoundsEvaluated, true);
+  assert.equal(rows[0].escalated, false, "⛔ the boundary: 8 is not yet over the threshold");
+  assert.equal(rows[0].owner, "world");
+  assert.equal(rows[0].action.kind, "wait");
+  assert.equal(rows[0].rank, "world-gated");
+});
+
+test("AC2 persistence: 8 identical prior rounds + this one (= 9) ESCALATES to ask-human/stuck-wait", () => {
+  const { records, gaps } = WORLD_GATED();
+  const rows = goalNextProjection(records, gaps, [], waitHistory(8));
+  const row = rows[0];
+  assert.equal(row.unchangedRounds, 9, "8 prior + this round");
+  assert.equal(row.escalated, true);
+  assert.equal(row.owner, "human");
+  assert.equal(row.action.kind, "ask-human");
+  assert.equal(row.rank, "stuck-wait");
+  assert.equal(row.gapState, "world-gated", "⛔ the honest reading is NOT rewritten — only who must act escalates");
+  assert.equal(row.streakKey, "AC-001|world-gated|world-gated|world|wait", "streakKey is the PRE-escalation signature, verbatim");
+  assert.match(row.action.reason, /9 consecutive rounds/, "the reason says HOW LONG, so the reader can judge it");
+  assert.match(row.action.reason, /waiting for the world/, "…and WHICH wait it is (⛔ not one generic 'still waiting')");
+  // The reason names the wait cause for EACH of the three wait states (no exemption for standing-ok).
+  const causes = [
+    ["derived-routed", /waiting for another AC/],
+    ["standing-ok", /standing invariant/],
+  ];
+  for (const [state, re] of causes) {
+    const r = goalNextProjection([goalRec("GOAL-001")], [gap("GOAL-001", "AC-001", state, 0)], [], waitHistory(8, {
+      gapState: state, rank: state, owner: "driver", streakKey: `AC-001|${state}|${state}|driver|wait`,
+    }))[0];
+    assert.equal(r.rank, "stuck-wait", `${state} waits are escalated too (the rule is "wait for ≥N rounds", not a state list)`);
+    assert.equal(r.action.kind, "ask-human");
+    assert.equal(r.gapState, state, `${state} keeps its honest reading`);
+    assert.match(r.action.reason, re, `the reason says which wait ${state} is`);
+  }
+});
+
+test("AC3 negative control 1: the ESCALATED row must NOT reset its own streak when it becomes history", () => {
+  const { records, gaps } = WORLD_GATED();
+  const escalated = goalNextProjection(records, gaps, [], waitHistory(8))[0];
+  assert.equal(escalated.escalated, true, "fixture precondition: round N was escalated");
+  // Round N+1 reads round N back from the carrier — INCLUDING its escalated presentation.
+  const history = [...waitHistory(8), histRound([escalated], 9)];
+  const nextRow = goalNextProjection(records, gaps, [], history)[0];
+  assert.equal(nextRow.unchangedRounds, 10, "the streak CONTINUES (⛔ never falls back to 1 — that is the 8-round oscillation)");
+  assert.equal(nextRow.escalated, true, "and the escalation stays on");
+  assert.equal(nextRow.rank, "stuck-wait");
+  // Control on the other side: if that round's signature really DID change, the streak resets — so the
+  // assertion above is a statement about the signature, not about "we never reset".
+  const changed = [...waitHistory(8), histRound([{ ...escalated, streakKey: "AC-001|world-gated|world-gated|world|waitX" }], 9)];
+  assert.equal(goalNextProjection(records, gaps, [], changed)[0].unchangedRounds, 1, "a one-character signature change resets to 1");
+});
+
+test("AC4 negative control 2: history===null ⇒ 0 + evaluated:false, and NOTHING escalates", () => {
+  const { records, gaps } = WORLD_GATED();
+  const rows = goalNextProjection(records, gaps, [], null);
+  for (const row of rows) {
+    assert.equal(row.unchangedRounds, 0, "⛔ 0, not 1: 'not measured' must not read like 'first round'");
+    assert.equal(row.unchangedRoundsEvaluated, false, "the flag is what carries 'this was NOT measured'");
+    assert.equal(row.escalated, false, "an unreadable history never manufactures a stuck-wait");
+    assert.equal(row.owner, "world", "and never manufactures a human action either");
+  }
+  // A round in the history whose own history was unreadable is UNMEASURED too ⇒ it breaks the count
+  // (⛔ it is not "unchanged" — that would launder one instrument failure into a longer streak).
+  const broken = [...waitHistory(4), histRound([waitRow({ unchangedRounds: 0, unchangedRoundsEvaluated: false })], 5)];
+  assert.equal(goalNextProjection(records, gaps, [], broken)[0].unchangedRounds, 1, "an unevaluated round interrupts the run");
+});
+
+test("AC7 CLI: a round from the PREVIOUS driver (no persistence fields) ⇒ exit 3, ⛔ never a 0-filled row", () => {
+  const { root } = seedWorkspace("legacy-round", { goals: ACTIVE_GOALS });
+  // Exactly what the pre-change projection emitted: the four persistence fields are ABSENT. The row
+  // is otherwise perfectly valid, which is the point — the CLI must refuse on the MISSING dimension,
+  // not because the row is malformed.
+  const legacyRow = {
+    goal: "GOAL-001", ac: "AC-001", gapState: "gap", rank: "gap", owner: "driver",
+    action: { kind: "file-task", reason: "no task is linked to this criterion; file one" },
+    evidenceRefs: ["gap:AC-001"], blocker: null,
+  };
+  writeRoundFact(root, { rows: [legacyRow] });
+
+  const r = runGoalNext(root, ["--json"]);
+  assert.equal(r.status, 3, `exit 3 (stderr: ${r.stderr.slice(0, 400)})`);
+  const parsed = JSON.parse(r.stdout);
+  assert.equal(parsed.evaluated, false, "the reading is NOT-EVALUATED, ⛔ not an array of rows");
+  assert.match(parsed.reason, /streakKey/, "the reason NAMES the missing field (a reader must know what to do)");
+  assert.match(parsed.reason, /run the current goal-driver/, "…and what fixes it");
+});
+
+test("AC7 CLI: a compliant round ⇒ exit 0 and every row carries a NUMERIC unchangedRounds", () => {
+  const { root } = seedWorkspace("persist-ok", { goals: ACTIVE_GOALS });
+  const rows = goalNextProjection(
+    [goalRec("GOAL-001"), acRec("AC-001", "GOAL-001")],
+    [gap("GOAL-001", "AC-001", "world-gated", 3)],
+    [],
+    waitHistory(8),
+  );
+  writeRoundFact(root, { rows });
+  const r = runGoalNext(root, ["--json"]);
+  assert.equal(r.status, 0, `exit 0 (stderr: ${r.stderr.slice(0, 400)})`);
+  const parsed = JSON.parse(r.stdout);
+  assert.ok(Array.isArray(parsed));
+  for (const row of parsed) {
+    assert.equal(typeof row.unchangedRounds, "number", "the AC's own criterion reads a NUMBER off this surface");
+    assert.equal(typeof row.unchangedRoundsEvaluated, "boolean");
+    assert.equal(typeof row.escalated, "boolean");
+    assert.ok(typeof row.streakKey === "string" && row.streakKey.length > 0);
+  }
+  assert.equal(parsed[0].unchangedRounds, 9, "the value survived the carrier round-trip (⛔ not recomputed by the CLI)");
+  assert.equal(parsed[0].rank, "stuck-wait");
+  // Text mode carries the same dimension (and says NOT-EVALUATED rather than a fake 0 when unreadable).
+  const text = spawnSync("node", ["--experimental-strip-types", QUAY_CLI, "goal", "next", "--root", root], { cwd: root, encoding: "utf8" });
+  assert.equal(text.status, 0);
+  assert.match(text.stdout, /rounds=9/, `text mode prints the round count (got: ${text.stdout})`);
+  assert.match(text.stdout, /escalated/, "…and marks the escalated row");
+});

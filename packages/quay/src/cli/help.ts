@@ -587,9 +587,10 @@ Usage:
                         is retired/superseded. The field is LOCKED once the branch exists.
   next                  The NEXT-STEP projection read (tasks/gap-goal-next-projection, AC-935):
                         prints ONE row per ACTIVE goal answering "what happens next, and whose is
-                        it" — {goal, ac, gapState, rank, owner, action, evidenceRefs, blocker},
-                        sorted by needs-human → blocked-needs-human → blocked-promotion →
-                        blocked-dispatch → stalled → workable → gap → world-gated → not-evaluated
+                        it" — {goal, ac, gapState, rank, owner, action, evidenceRefs, blocker,
+                        streakKey, unchangedRounds, unchangedRoundsEvaluated, escalated},
+                        sorted by needs-human → stuck-wait → blocked-needs-human → blocked-promotion
+                        → blocked-dispatch → stalled → workable → gap → world-gated → not-evaluated
                         (ties by AC id). owner ∈ {driver, worker, human, world}; action.kind ∈
                         {file-task, resume-task, fix-artifacts, fix-dispatch, ask-human, wait}.
                         A blocked-* row carries 'blocker': {cause, tasks:[{id, cause}]} — WHICH
@@ -597,6 +598,15 @@ Usage:
                         promotion ⇒ fix the four artifacts; dispatch ⇒ fix dependencies/worktree).
                         'stalled' survives only as an input literal for carriers written before
                         the 2026-11-07 split; the driver no longer emits it.
+                        PERSISTENCE (tasks/gap-goal-next-unchanged-rounds-escalation): every row
+                        also says HOW LONG it has looked the same. 'unchangedRounds' counts the
+                        consecutive rounds (this one included) with the same pre-escalation
+                        signature 'streakKey'; a 'wait' row at ≥8 rounds is no longer presented as
+                        "wait for the world" — rank becomes 'stuck-wait', owner 'human', action
+                        'ask-human', while gapState keeps saying what is TRUE and 'escalated:true'
+                        marks it. ⛔ 'unchangedRoundsEvaluated:false' means the round HISTORY could
+                        not be read and 'unchangedRounds' is then 0-meaning-UNMEASURED (never
+                        conflate it with "this is the first round").
                         It READS the newest 'goal-next' fact from the round carrier
                         (<root>/.quay/goal-round.jsonl, or --round-log) and ⛔ never re-computes the
                         projection — the driver and this surface share ONE implementation
@@ -605,7 +615,9 @@ Usage:
                         {evaluated:false, reason} + exit 3 (NOT-EVALUATED); the fact exists but an
                         ACTIVE goal has no row ⇒ {ok:false, cause:"missing-row", missing} + exit 1;
                         full coverage ⇒ the rows array + exit 0 (an empty array there genuinely
-                        means "no active goals").
+                        means "no active goals"). A row from a driver build that predates the
+                        persistence fields is ALSO exit 3 — ⛔ the reader never fills in 0/false to
+                        look like a measurement.
   log                   The CROSS-RECORD status-transition read: merges every record's own
                         append-only 'statusLog' into ONE stream, ascending by 'at', each row
                         {id, goal, kind, at, from, to, actor, reason}. 'goal' is the owning GOAL on

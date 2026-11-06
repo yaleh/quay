@@ -53,7 +53,7 @@ import { isDirectEntry } from "./gate-script-base.ts";
 // Core `criterion-capability.ts` 的单一实现，gap-meta-writegoalstatus）：⛔ 不从激活拒绝的散文里抠
 // 缺失载体——store 把它回传成**被截断到 200 字符**的 stderr，路径正好落在截断点之外（硬规则 4c：
 // 判据点名的量必须穿过所有中间层还取得到）；同一判定器在本进程重判得到的 `reasons[].detail` 才是。
-import { DRIVER_KINDS, runAsync, launchArgv, splitArgs, kernelSiblingArgv, kernelConfigPath, resolveQuayCodeRoot, parseBinaryVerdict, goalDriverChildTimeoutMs, GOAL_STORE_SIGTERM_GRACE_MS, readLockPid, judgeCriterionCapability, readCapabilityDeclaration, goalNextProjection, BLOCKED_GAP_STATES, type Fact, type RoutineSpec, type GapState, type GoalGap, type GoalNextRow, type BlockedGapState, type GoalBlocker, type GoalBlockerTask } from "./driver-runtime.ts";
+import { DRIVER_KINDS, runAsync, launchArgv, splitArgs, kernelSiblingArgv, kernelConfigPath, resolveQuayCodeRoot, parseBinaryVerdict, goalDriverChildTimeoutMs, GOAL_STORE_SIGTERM_GRACE_MS, readLockPid, judgeCriterionCapability, readCapabilityDeclaration, goalNextProjection, readGoalNextHistory, GOAL_NEXT_UNCHANGED_ESCALATE_THRESHOLD, BLOCKED_GAP_STATES, type Fact, type RoutineSpec, type GapState, type GoalGap, type GoalNextRow, type BlockedGapState, type GoalBlocker, type GoalBlockerTask } from "./driver-runtime.ts";
 // The ONE regex-literal escaper (kernel leaf via the plugin shim) — replaces an inline escape body at
 // the heading-literal site (finding `escaperegexp-sweep-missed-two`, routine `semantic-dedup-scan`).
 import { escapeRegExp } from "./regex-escape.ts";
@@ -3611,15 +3611,19 @@ export function goalNextFact(
       reason: `未评估（cause=${cause ?? "projection-not-computed"}）——⛔ 不是「没有下一步」`,
     };
   }
+  const escalated = rows.filter((r) => r.escalated === true);
   return {
     name: GOAL_NEXT_FACT_NAME,
     value: { rows, evaluated: true, cause: null },
     state: "verified",
     // 分母（本轮 active GOAL 数）一并带出 ⇒ 「每个 active GOAL 是否恰好一行」当场可核（⛔ 不是只落在
     // value 里让人自己数）。成因分布同样落进 reason，便于人一眼看出这一轮卡在哪一态。
+    // 升级行数（tasks/gap-goal-next-unchanged-rounds-escalation）同样逐轮带出：`0` 是一个**测量**
+    // （查过且本轮没有长驻等待），⛔ 不是「没查」——查不成时走的是上面 `rows === null` 分支。
     reason:
       `active goal ${activeGoalCount ?? "?"} 个 ⇒ ${rows.length} 行` +
-      (rows.length > 0 ? `：${rows.map((r) => `${r.goal}/${r.ac}/${r.rank}/${r.owner}/${r.action.kind}`).join(" ")}` : ""),
+      (rows.length > 0 ? `：${rows.map((r) => `${r.goal}/${r.ac}/${r.rank}/${r.owner}/${r.action.kind}`).join(" ")}` : "") +
+      `；升级 ${escalated.length} 行（连续 ≥${GOAL_NEXT_UNCHANGED_ESCALATE_THRESHOLD} 轮未变的 wait ⇒ ask-human）`,
   };
 }
 
@@ -4485,6 +4489,11 @@ export interface GoalRoundOptions {
   filingLedgerPath?: string;
   /** 请求队列路径覆盖（测试缝）。缺省 `<root>/.quay/goal-requests.jsonl`。 */
   requestLedgerPath?: string;
+  /** 轮载体路径覆盖（测试缝；tasks/gap-goal-next-unchanged-rounds-escalation）。
+   *  它同时是 `goal-next` 投影的 history 输入：缺省 `<root>/.quay/goal-round.jsonl`——与
+   *  `runResidentQualityGateLoop` 写轮记录的文件**同一份**（`--round-log` 覆盖时由 main 一并传进来，
+   *  ⛔ 否则读的与写的会是两个文件、持久度恒为「第一轮」）。 */
+  goalRoundCarrierPath?: string;
   /** 时钟（测试缝）。 */
   now?: () => Date;
   /** `goal list` 的调用注入（测试缝）。缺省 = meta-driver 的 listGoalRecords。
@@ -4940,7 +4949,15 @@ export async function runGoalRound(root: string, opts: GoalRoundOptions = {}): P
   // 分诊读的仍是 `gaps` 与 `records`，投影改变不了任何一个既有结论（单测的负控制钉的就是这条）。
   // 实现住在 Core（`core/goal-analysis.ts`，经 driver-runtime 取符号）——同一份口径供 Core CLI
   // `quay goal next` 复用，⛔ 不在 driver 侧另算一份（硬规则 5b）。
-  const next = goalNextProjection(records, gaps, taskFacts);
+  //
+  // 第 4 参 history（tasks/gap-goal-next-unchanged-rounds-escalation）：轮载体里**本轮之前**那些带可读
+  // `goal-next` 的轮（oldest→newest）。单轮快照上没有「持续多久」，只有跨轮载体有 ⇒ 投影的持久度维
+  // 只能从这里来。⛔ 读失败传 `null`，**绝不**传 `[]`：`[]` 的含义是「读到了，这是第一轮」，而读失败是
+  // 「没读到」——两者在行上是 `unchangedRoundsEvaluated` 的 true/false，传 `[]` 会让仪器故障伪装成
+  // 「一切正常且刚在等」（硬规则 3b）。⛔ 有界 tail 读（生产载体 368MB），⛔ 全量解析。
+  const goalNextCarrier = opts.goalRoundCarrierPath ?? path.join(dataRoot, GOAL_ROUND_REL);
+  const goalNextHistory = readGoalNextHistory(goalNextCarrier);
+  const next = goalNextProjection(records, gaps, taskFacts, goalNextHistory);
 
   // ⑦ draft AC 分诊（GOAL-010 范围② / AC-210）：对 active GOAL 名下每条 draft AC 出四态判决并逐条
   // 落痕。分诊循环只【产出判决】，⛔ 不 flip 任何 AC status——判决的消费在 ⑧（仅 activate 一态被
@@ -6054,6 +6071,9 @@ export async function main(argv: string[]): Promise<number> {
     sufficiencyFollowupTimeoutMs: sufficiencyFollowupTimeoutMs ?? undefined,
     // ⑥b stall 窗口推导式的第二项：把【生效的】轮间隔传进去（--interval 覆盖也一并跟着走）。
     roundIntervalMs: intervalMs,
+    // 持久度的读面必须与轮记录的写面是**同一个文件**：`--round-log` 覆盖时两处一起走，
+    // ⛔ 否则 readGoalNextHistory 读的是缺省路径、每轮都读到空的「第一轮」。
+    goalRoundCarrierPath: roundLogFile,
   };
 
   // 常驻（例程型）：复用通用例程型循环，⛔ 不另写一份。缺省 = 常驻（once=false）；--once 跑一轮即退。

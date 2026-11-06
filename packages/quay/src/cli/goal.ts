@@ -21,6 +21,10 @@ import { runGoalStoreCli } from "../core/goal-store.ts";
 // writes the same rows through this module (via its Core import surface) — two copies of the state /
 // owner / action word-lists would be a second source that drifts (hard rule 5b).
 import { GAP_STATES, BLOCKED_GAP_STATES, GOAL_NEXT_OWNERS, GOAL_NEXT_ACTION_KINDS } from "../core/goal-analysis.ts";
+// The bounded round-log tail reader. ⛔ ONE implementation (hard rule 5b): the goal-driver reads the
+// same file to build the projection's `history` input, so a second copy here would let the two
+// disagree about half-lines / caps while both "look right".
+import { readRoundLogTail } from "../core/goal-round-carrier.ts";
 import { loadConfig } from "../config.ts";
 import { resolveWorkspaceRootOrThrow } from "../gate/config/loader.ts";
 
@@ -299,23 +303,8 @@ type GoalNextCarrier =
   | { state: "present"; rows: Record<string, unknown>[]; round: unknown; ts: unknown; runId: unknown }
   | { state: "not-evaluated"; reason: string };
 
-/** Read the tail of the round log as complete lines (the first line is dropped when the tail began
- *  mid-line — a half-parsed record must never be read as a record). */
-function readRoundLogTail(file: string, maxBytes: number): { lines: string[]; bytes: number } {
-  const st = fs.statSync(file);
-  const start = Math.max(0, st.size - maxBytes);
-  const len = st.size - start;
-  const buf = Buffer.alloc(len);
-  const fd = fs.openSync(file, "r");
-  try {
-    fs.readSync(fd, buf, 0, len, start);
-  } finally {
-    fs.closeSync(fd);
-  }
-  const lines = buf.toString("utf8").split("\n");
-  if (start > 0) lines.shift(); // partial first line
-  return { lines, bytes: len };
-}
+/** Read the tail of the round log as complete lines — MOVED to `core/goal-round-carrier.ts` (the
+ *  goal-driver reads the same carrier for the projection's history input). ⛔ Not a local copy. */
 
 /** Is this row one of the shape the fact promises? ⛔ A row we cannot validate makes the CARRIER
  *  unreadable (NOT-EVALUATED), never a row we quietly drop — dropping it would let "this goal's row
@@ -330,6 +319,23 @@ function goalNextRowProblem(row: unknown): string | null {
   const action = r.action as Record<string, unknown> | undefined;
   if (!action || typeof action !== "object" || !GOAL_NEXT_ACTION_KINDS.includes(action.kind as never)) {
     return `row ${r.goal}/${r.ac}: action.kind ${JSON.stringify(action?.kind)} is not an action`;
+  }
+  // The PERSISTENCE dimension (tasks/gap-goal-next-unchanged-rounds-escalation). A row written by an
+  // OLDER driver carries none of these fields: it is a real reading of that round, but it does not
+  // answer the question this surface asks ("how long has this looked the same?"). ⛔ Substituting
+  // `0` / `false` would manufacture "measured, nothing to see" out of "not measured" (hard rule 3b) —
+  // so the carrier is reported NOT-EVALUATED and the caller must get a new driver round instead.
+  if (typeof r.streakKey !== "string" || r.streakKey === "") {
+    return `row ${r.goal}/${r.ac}: streakKey is not a non-empty string (row predates the persistence dimension — run the current goal-driver for one round)`;
+  }
+  if (typeof r.unchangedRounds !== "number" || !Number.isFinite(r.unchangedRounds) || r.unchangedRounds < 0) {
+    return `row ${r.goal}/${r.ac}: unchangedRounds ${JSON.stringify(r.unchangedRounds)} is not a finite non-negative number`;
+  }
+  if (typeof r.unchangedRoundsEvaluated !== "boolean") {
+    return `row ${r.goal}/${r.ac}: unchangedRoundsEvaluated ${JSON.stringify(r.unchangedRoundsEvaluated)} is not a boolean`;
+  }
+  if (typeof r.escalated !== "boolean") {
+    return `row ${r.goal}/${r.ac}: escalated ${JSON.stringify(r.escalated)} is not a boolean`;
   }
   // A `blocked-*` row MUST carry its blocker (gap-goal-driver-blocked-taxonomy): the whole point of
   // splitting `stalled` was that "which task blocks this, and why" is readable. ⛔ Absent blocker on a
@@ -727,7 +733,10 @@ export async function handleGoal({ sub, positional, flags, wantsJson, rest }: Cl
     if (wantsJson) printJson(rows);
     else if (rows.length === 0) console.log("(no active goals)");
     else for (const r of rows) {
-      console.log(`${String(r.goal)}\t${String(r.ac)}\t${String(r.rank)}\t${String(r.owner)}\t${String((r.action as Record<string, unknown>)?.kind)}\t${String((r.action as Record<string, unknown>)?.reason)}`);
+      // The persistence dimension rides at the END of the line: a row whose history could not be read
+      // prints NOT-EVALUATED, ⛔ never `rounds=0` (which would read as "measured, just started").
+      const rounds = r.unchangedRoundsEvaluated === true ? String(r.unchangedRounds) : "NOT-EVALUATED";
+      console.log(`${String(r.goal)}\t${String(r.ac)}\t${String(r.rank)}\t${String(r.owner)}\t${String((r.action as Record<string, unknown>)?.kind)}\t${String((r.action as Record<string, unknown>)?.reason)}\trounds=${rounds}${r.escalated === true ? "\t⬆escalated" : ""}`);
     }
     return;
   }
