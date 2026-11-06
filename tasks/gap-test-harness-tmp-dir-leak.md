@@ -52,7 +52,14 @@ $ find /tmp -maxdepth 1 -name 'quay-*' | wc -l
 - scripts/test.sh
 - plugin/scripts/full-suite-runner.ts
 - plugin/scripts/temp-root-reaper.ts (new)
+- plugin/scripts/temp-root-reaper.sh (new)
+- plugin/scripts/suite-temp-root.sh (new)
 - plugin/test/temp-root-reaper.test.mjs (new)
+- plugin/scripts/capability-catalog-declarations.json
+- plugin/scripts/overhead-instrument.sh
+- plugin/sh-census-baseline.json
 - tasks/gap-test-harness-tmp-dir-leak.md
 
 > Touches 里 `temp-root-reaper.ts` 是拟新增的载体；执行器若判定应复用/扩展现有的临时根 helper，按实情把真实路径登记进本节并留痕（⛔ 不要为了迁就本节另造一个文件）。
+>
+> **实际落地时的登记（留痕，2026-11-06）**：`temp-root-reaper.ts` 按原计划新增；但它不能由 `scripts/test.sh` 直接调用——`sh-census-check` 的 `embeddedInterpreterLines` 是【文件级】棘轮，`.sh` 里只要出现一个 `node` 就整文件计行，直接内联会是 +57。故拆成 `temp-root-reaper.sh`（2 行薄 wrapper，承担计数）+ `suite-temp-root.sh`（57 行逻辑，无内嵌解释器 ⇒ 不计入）。`capability-catalog-declarations.json`（新脚本必须声明）、`overhead-instrument.sh`（它的 `trap … EXIT` 会覆盖早先装的 trap，必须链式而非替换）、`sh-census-baseline.json`（+3 的 committed re-anchor）随之进入 Touches。
