@@ -231,6 +231,11 @@ fi
 copied=0
 skipped=0
 while IFS= read -r rel; do
+  # The decision is the DECLARATION, not a case list: a new carrier is copied automatically and
+  # only the declared exclusions are skipped. (Supersedes the interim hotfix bb23e77a1, which
+  # hard-coded two driver ledgers in this loop and left gate-events / verification-round /
+  # measure-history copied for want of the coverage this task adds — AC1-AC4 in
+  # plugin/test/refresh-worktree-quay.test.mjs now pin the whole class.)
   if _snapshot_policy_matches "${rel}" copy; then
     skipped=$((skipped + 1)); continue
   fi

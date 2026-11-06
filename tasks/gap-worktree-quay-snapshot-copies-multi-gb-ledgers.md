@@ -54,3 +54,6 @@ extra:
 - plugin/test/refresh-worktree-quay.test.mjs
 - plugin/scripts/capability-catalog-declarations.json — 仅当本任务新增 plugin/scripts 文件时（同时按 capability-catalog.sh 头部登记 outline 条目）
 - tasks/gap-worktree-quay-snapshot-copies-multi-gb-ledgers.md
+
+
+2026-11-06 部分落地（人直接授权热修，commit bb23e77a1，已 ff 进 develop）：① `refresh-worktree-quay.sh` 的 per-path case 增加 `.quay/meta-driver-round.jsonl` 与 `.quay/goal-round.jsonl` 排除（快照字节约 −59%）；② `cp -p` → `cp -p --reflink=auto`（/data 为 XFS reflink，实测拷 357 MB 只占 640 KB；worktree 内 `filefrag` 显示 extents shared）。**尚未做**：`gate-events.jsonl` / `verification-round.jsonl` / `measure-history.jsonl` 仍在拷贝（担心活检查器读它们，需要测试覆盖后再排除）；以及枚举仍有 8,125 条路径 ⇒ 单次 refresh 仍要 ~24 s / ~16k execs，本任务的「exec 数与台账字节解耦」那条 AC 仍未满足。

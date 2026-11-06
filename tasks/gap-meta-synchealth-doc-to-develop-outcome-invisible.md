@@ -1,7 +1,7 @@
 ---
 id: gap-meta-synchealth-doc-to-develop-outcome-invisible
 title: syncHealth/readingsDigest 无法区分「doc→develop 被拒」与「同步健康」——阻塞态进不了摘要，语义半永不被唤醒
-status: ready
+status: needs-human
 labels:
   - meta-driver
 parent: null
@@ -47,3 +47,5 @@ extra: {}
 2026-11-06 人工暂停（宿主降载期间）：本机 128 vCPU 被 quay 套件并发与 esbuild 子进程打满（loadavg 103→485，88 次 cgroup OOM）。本任务每次落地都要跑一整轮全量 suite（约 20 分钟、峰值 60+ 核），而它属于重复代码清理，**不是**当前的降载工作。恢复条件：gap-process-budget-in-use-undercounts-real-test-load 与 gap-anchor-polling-git-fork-storm 落地、宿主 loadavg 稳定低于核数后，把 status 改回 ready 重派。
 
 2026-11-06 人工暂停（宿主降载期间，第 2 次挂起）：上一轮挂 needs-human 后被在飞 worker 的 task_write 覆盖回 ready（17:28:47 的 todo→ready 提交）。本任务属 doc/sync 语义修复，每次落地要跑一整轮全量 suite，不是当前降载工作。恢复条件：gap-process-budget-in-use-undercounts-real-test-load 与 gap-anchor-polling-git-fork-storm 落地、宿主 loadavg 稳定低于核数后改回 ready。
+
+2026-11-06 人工暂停（第 3 次）：前两次都被在飞 worker 的 task_write 覆盖（17:34:24 cli:2771566 写回 todo，17:35:28 promotion-driver 随即 todo→ready）。本次挂起时该任务已无在飞 worker。恢复条件：宿主降载任务落地后改回 ready。
