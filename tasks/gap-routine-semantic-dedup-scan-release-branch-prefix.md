@@ -3,7 +3,7 @@ id: gap-routine-semantic-dedup-scan-release-branch-prefix
 title: "semantic-dedup-scan: the globs-to-prefix derivation is exported by the
   declared release-model authority yet release-cut.mjs hand-copies it although
   it already spawns that module fo"
-status: ready
+status: needs-human
 labels:
   - gap
   - routine-filed
@@ -107,3 +107,6 @@ Node ≥22.6），因此它**不能** import 这个 `.ts`。于是：
 - 未落地原因：step=suite: incomplete suite (513/636 files) oomKill=1 — recovery baseline-equivalence not evaluable at concurrency 64 — needs a code fix
 - run_id：wk-prod-anchor
 - session_id：202af39f-536b-40cf-9696-025017ebadcc
+
+
+2026-11-06 人工暂停（宿主降载期间）：本机 128 vCPU 被 quay 套件并发与 esbuild 子进程打满（loadavg 103→485，88 次 cgroup OOM）。本任务每次落地都要跑一整轮全量 suite（约 20 分钟、峰值 60+ 核），而它属于重复代码清理，**不是**当前的降载工作。恢复条件：gap-process-budget-in-use-undercounts-real-test-load 与 gap-anchor-polling-git-fork-storm 落地、宿主 loadavg 稳定低于核数后，把 status 改回 ready 重派。
