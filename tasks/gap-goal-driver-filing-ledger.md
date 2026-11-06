@@ -1,7 +1,7 @@
 ---
 id: gap-goal-driver-filing-ledger
 title: goal-driver 立案台账：spawn→filed/not-filed 的可核实生命周期
-status: todo
+status: ready
 labels:
   - gap
   - goal-driver
