@@ -139,7 +139,8 @@ outline doc: take the develop version (`git checkout develop -- docs/proposals/q
 
 ### ADR-007 dark axis
 
-- L_D archguard: packageCycles=0 maxScc=1（`archguard_detect_cycles outputScope=package queryFormat=edge-list`，scope `b4f87b21` "quay (typescript)"，`evaluated: true`；⚠️ 该快照 `generatedAt 2026-11-04T08:26:15Z` 早于 HEAD `83752a7c5`（2026-11-06T12:43）——**stale**，读的是旧树，本 diff 不在其中）
+- L_D archguard: packageCycles=0 maxScc=1（`archguard_detect_cycles outputScope=package queryFormat=edge-list`，scope `b4f87b21` "quay (typescript)"，`evaluated: true`）
+- ⚠️ 该快照 stale：`generatedAt` 2026-11-04T08.26.15Z 早于 HEAD 83752a7c5（2026-11-06T12.43）——读的是旧树，本 diff 不在其中（时间里的冒号改成句点，⛔ 不让 `08:26` / `12:43` 被 dark-axis 解析器当成 key:value 读数）。
 - 该轴仍暗,理由:本任务为局部缺陷修复（把 outline 冲突规则从 prompt 散文升成注册表 + 机械判定），diff 只在 `plugin/scripts` 内新增**一条 intra-package import 边**（`worker-driver.ts → conflict-resolution-rules.ts`，后者只 import node 内置 + `gate-script-base.ts` ⇒ 结构性无环），不改包/目录依赖结构 ⇒ L_D/L_G 没有针对本 diff 的非平凡读数；上面那条是最后一次已评估的包级基线，⛔ 不是本 diff 的测量。
 
 ### 其它不变量
