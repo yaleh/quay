@@ -1,7 +1,7 @@
 ---
 id: gap-meta-scanparkingboard
 title: 把 body-PARKED 的 unpark 读数接进 meta-driver 轮读数（当前只有探测器、没有消费者）
-status: todo
+status: ready
 labels:
   - meta-driver
   - driver-candidate
