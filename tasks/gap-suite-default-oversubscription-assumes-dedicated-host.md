@@ -1,7 +1,7 @@
 ---
 id: gap-suite-default-oversubscription-assumes-dedicated-host
 title: suite 默认 max_oversubscription=1 假设独占宿主：每个新项目默认按 nproc 开满车道
-status: ready
+status: needs-human
 labels:
   - gap
 parent: null
@@ -61,3 +61,6 @@ extra:
 - tasks/gap-suite-default-oversubscription-assumes-dedicated-host.md
 
 > Touches 里 `quay-init.sh` 是 init 侧的落点；若裁定走「init 模板带 `suite:` 段」而模板实际在别处（skill 模板 / provider 维护代码），执行器按实情把真实路径补进本节并留痕。
+
+
+2026-11-06 人工暂停（等待人的裁定）：本任务的修复形状未定 —— 宿主级「份额」默认值 / quay init 模板里带 suite: 段 / 新增显式 test_concurrency 键，三者取舍需要人决定（本任务 AC 已带（待外部）标注）。裁定后改回 ready 即可重派。
