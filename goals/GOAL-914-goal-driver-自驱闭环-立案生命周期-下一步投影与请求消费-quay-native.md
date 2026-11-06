@@ -37,3 +37,5 @@ quay 的 goal 层现在只能"验收"：每轮对 active AC 跑判据、机械�
 ## 退出条件
 
 AC-934..937 均 achieved，且每条都有实现落地之后的生产载体读数：AC-934 至少一条真实 `filed` 终态且不存在仍 open 的 spawned 行；AC-935 至少一个 active GOAL 的一行投影且出现在 round fact；AC-936 至少一条真实请求被 driver 消费；AC-937 至少一条 driver 自己立案的任务落地并使 AC 机械翻 achieved。sufficiency 判官对在域 AC 集合判 covered。既有 GOAL 的 AC/退出条件不回退。
+
+此外两条**否证条件**必须同时成立：AC-938（AC-934 的绿必须来自工作区树上真实存在的台账写入代码，而不是任务 worktree 一次证据跑留下的静态文件）——它未达成时，AC-934 的 achieved 不算证据；AC-940（本节不得被「AC-934 绿 ∧ AC-938 红」这一自相矛盾的组合满足）——两者冲突时 GOAL 不得退出。该冲突在每轮读数上可见（meta-driver 第五类 divergence `achieved-but-superseder-unmet`，reason 点名替代者与其状态），⛔ 不是只在人读导出时才看得见。
