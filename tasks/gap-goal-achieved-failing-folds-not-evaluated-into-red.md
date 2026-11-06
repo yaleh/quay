@@ -3,7 +3,7 @@ id: gap-goal-achieved-failing-folds-not-evaluated-into-red
 title: quay goal check --achieved-failing 把 not-evaluated
   折成红：verdictFromAcceptance 只 import 不调用，exit 3/timeout 落 achievedButFailing，会在
   goal standings 立 phantom gap
-status: done
+status: ready
 labels:
   - gap
   - defect
