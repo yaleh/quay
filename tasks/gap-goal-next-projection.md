@@ -55,5 +55,18 @@ goal-driver 每轮算出大量缺口读数，但没有一条回答"这个 goal �
 - plugin/scripts/goal-driver.ts
 - plugin/scripts/driver-runtime.ts
 - plugin/test/goal-driver.test.mjs
+- plugin/test/goal-driver-s01.test.mjs
 - docs/evidence/2026-11-06-goal-next-projection.md (new)
 - tasks/gap-goal-next-projection.md
+
+## Blocker
+
+**2026-11-06T17:54:31.586Z — worker 未落地（exited-not-landed）**
+
+- 未落地原因：step=suite: AssertionError [ERR_ASSERTION]: GapState 词表含 workable/world-gated/unclassified [baseline A/B: HARD RED (task-introduced-red) — the task's red set is NOT a subset of the develop baseline red set: added=plugin/test/goal-driver-s01.test.mjs,plugin/test/goal-driver-s06.test.mjs changed=-]
+- run_id：wk-prod-anchor
+
+**2026-11-07 — 两个红均为本任务 delta 的真因（已复现，非环境）**
+
+- `goal-driver-s06` AC3：`goal-driver.ts:2059` 的块注释写了 Core 源码树字面量（该谓词只剥 `//`，块注释存活）⇒ 改写为「Core 的 `goal-analysis.ts`」，去掉 `packages/quay/src` 字面量。
+- `goal-driver-s01` AC2：该 pin 在 `goal-driver.ts` 源文本里找 `export type GapState = …` 字面量；本任务把类型上收 Core（Plan 步骤 1，避免两处词表漂移）⇒ pin 的**目标已移动**，改为读 Core 唯一定义处 + pin driver 仍经 `driver-runtime.ts` re-export 既有导入面（断言强度不降）。故将 `plugin/test/goal-driver-s01.test.mjs` 纳入 Touches。
