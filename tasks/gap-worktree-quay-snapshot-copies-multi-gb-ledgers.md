@@ -1,7 +1,7 @@
 ---
 id: gap-worktree-quay-snapshot-copies-multi-gb-ledgers
 title: refresh-worktree-quay.sh 把约 4 GB 台账拷进每个 worktree —— 一轮 suite 就制造上千次 cp/mkdir
-status: ready
+status: done
 labels:
   - gap
 parent: null
@@ -85,12 +85,6 @@ extra:
 
 **suite 侧风险与实测**：`verification-round.jsonl` / `gate-events.jsonl` 不再进 worktree 快照 ⇒ `prod-data-audit.test.mjs` 在 worktree 里会走它自己写明的 `t.skip`（NOT-EVALUATED，与全新 CI checkout 同态），这是硬规则 3b 已设计的形态而非红。实跑核对：`prod-data-audit` / `accounting-emit` / `gate-staleness-check` / `stale-ready-audit` / `help-contract-incompatible-behaviors` 共 45 tests 全绿、0 skipped。
 
-**ADR-007 暗轴**：该轴仍暗,理由:本次改动只落在 `plugin/scripts/refresh-worktree-quay.sh`（bash）+ 它的测试，不改变 `packages/` 的模块依赖图，archguard 的 L_D/L_G 对此 delta 无读数可产出。
+**ADR-007 暗轴（L_D/L_G）**
 
-## Blocker
-
-**2026-11-06T10:15:24.068Z — worker 未落地（exited-not-landed）**
-
-- 未落地原因：step=suite: incomplete suite (636/636 files) — recovery exhausted at floor concurrency 16 — no declared rung produced a complete verdict (16); needs a code/config fix, see plugin/scripts/full-suite-runner.ts
-- run_id：wk-prod-anchor
-- session_id：cc569bb3-a203-4cec-97ec-cb27959d6296
+该轴仍暗,理由:本次改动只落在 `plugin/scripts/refresh-worktree-quay.sh`（bash）+ 它的测试，不改变 `packages/` 的模块依赖图，archguard 的 L_D/L_G 对此 delta 无读数可产出。

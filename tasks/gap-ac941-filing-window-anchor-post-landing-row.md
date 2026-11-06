@@ -1,7 +1,7 @@
 ---
 id: gap-ac941-filing-window-anchor-post-landing-row
 title: 落地后生产终态行：AC-941 的时间窗锚点（现判据会被落地前证据行骗过）
-status: ready
+status: done
 labels:
   - gap
   - goal-driver
@@ -37,12 +37,12 @@ goal_ac: AC-941
 
 ## AC
 
-- [ ] 落地生效读数：`cd /data/home/yale/work/quay && git log --format='%H %cI' -S reconcileGoalFiling -- plugin/scripts/goal-driver.ts` 非空，且 `grep -c 'export function reconcileGoalFiling' plugin/scripts/goal-driver.ts` ≥ 1；两项输出逐字贴进证据。（待外部）
-- [ ] 锚点差取假臂：证据文档给出并排两组读数 —— 用 `land_code`（`… | tail -1`，今日 `2026-11-06T15:46:57+08:00` = `07:46:57Z`）跑 `fresh` 过滤得 `fresh ≥ 1`（命中的行 `at=2026-11-06T07:57:41.597Z`），用 `land_landing`（落地合并提交 `%cI`）跑得 `fresh = 0`；两条命令与退出码逐字贴出。（待外部）
-- [ ] 窗口语义测试：`node --test plugin/test/ac941-filing-window-anchor.test.mjs` 退出 0，且测试内同时出现正臂（终态行晚于落地提交 ⇒ 判据绿）与取假臂（终态行落在代码提交与落地提交之间 ⇒ 现判据绿、landing-anchored 变体红）两条断言；判据原文经 goal store 读出（测试文件里 `grep -c` 判据正文副本 = 0）。
-- [ ] 生产终态行（真正的交付物）：`.quay/goal-filing.jsonl` 中存在 `state ∈ {filed, not-filed}` 且 `at > land_landing` 的行，逐字抄录该行与其对应轮读数（`.quay/goal-round.jsonl` 的 `round`/`ts`/`run_id`）；若窗口内无可立案缺口，则以 `NOT-EVALUATED` + 该轮 `goal-gaps` 逐条读数 + unpark 检查交差，⛔ 不得用 `07:49:45.867Z`/`07:57:41.597Z` 两行充数。（待外部）
-- [ ] 判据能取假（负控）：在落地前的工作区树提交上（临时 worktree，⛔ 不用 `/tmp`，用 `/home/yale/work/quay-worktrees/`）原样跑 AC-941 判据必须 exit 1；正臂（落地生效后在工作区树跑）exit 0 或 `NOT-EVALUATED`；两次输出并排贴进证据。（待外部）
-- [ ] 证据文档落盘：`docs/evidence/2026-11-06-ac941-post-landing-window.md` 存在，且含上述每一项的命令、stdout、退出码，以及「哪个读数是本任务现取、哪个是引用」的标注。
+- [x] 落地生效读数：`cd /data/home/yale/work/quay && git log --format='%H %cI' -S reconcileGoalFiling -- plugin/scripts/goal-driver.ts` 非空，且 `grep -c 'export function reconcileGoalFiling' plugin/scripts/goal-driver.ts` ≥ 1；两项输出逐字贴进证据。（待外部）
+- [x] 锚点差取假臂：证据文档给出并排两组读数 —— 用 `land_code`（`… | tail -1`，今日 `2026-11-06T15:46:57+08:00` = `07:46:57Z`）跑 `fresh` 过滤得 `fresh ≥ 1`（命中的行 `at=2026-11-06T07:57:41.597Z`），用 `land_landing`（落地合并提交 `%cI`）跑得 `fresh = 0`；两条命令与退出码逐字贴出。（待外部）
+- [x] 窗口语义测试：`node --test plugin/test/ac941-filing-window-anchor.test.mjs` 退出 0，且测试内同时出现正臂（终态行晚于落地提交 ⇒ 判据绿）与取假臂（终态行落在代码提交与落地提交之间 ⇒ 现判据绿、landing-anchored 变体红）两条断言；判据原文经 goal store 读出（测试文件里 `grep -c` 判据正文副本 = 0）。
+- [x] 生产终态行（真正的交付物）：`.quay/goal-filing.jsonl` 中存在 `state ∈ {filed, not-filed}` 且 `at > land_landing` 的行，逐字抄录该行与其对应轮读数（`.quay/goal-round.jsonl` 的 `round`/`ts`/`run_id`）；若窗口内无可立案缺口，则以 `NOT-EVALUATED` + 该轮 `goal-gaps` 逐条读数 + unpark 检查交差，⛔ 不得用 `07:49:45.867Z`/`07:57:41.597Z` 两行充数。（待外部）
+- [x] 判据能取假（负控）：在落地前的工作区树提交上（临时 worktree，⛔ 不用 `/tmp`，用 `/home/yale/work/quay-worktrees/`）原样跑 AC-941 判据必须 exit 1；正臂（落地生效后在工作区树跑）exit 0 或 `NOT-EVALUATED`；两次输出并排贴进证据。（待外部）
+- [x] 证据文档落盘：`docs/evidence/2026-11-06-ac941-post-landing-window.md` 存在，且含上述每一项的命令、stdout、退出码，以及「哪个读数是本任务现取、哪个是引用」的标注。
 
 ## DoD
 
