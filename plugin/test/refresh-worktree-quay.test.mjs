@@ -195,6 +195,34 @@ test("AC1b — the cache class is never pruned AND never counted toward the boun
   }
 });
 
+test("AC1c — the prune pass removes stale GITIGNORED copies but never a TRACKED .quay carrier", () => {
+  const { main, wt } = makeRepo();
+  const gitWt = (...args) => {
+    const r = spawnSync("git", args, { cwd: wt, encoding: "utf8" });
+    assert.equal(r.status, 0, `git ${args.join(" ")} failed: ${r.stderr ?? ""}`);
+    return r.stdout.trim();
+  };
+  try {
+    // A TRACKED carrier that matches the policy's `*-round.jsonl` — it belongs to the CHECKOUT, not
+    // to the snapshot. Deleting it would dirty the worktree (caught for real on
+    // .quay/ac-devci-ac4-carrier-written-by-round.jsonl, which is tracked in quay itself).
+    fs.mkdirSync(path.join(wt, ".quay"), { recursive: true });
+    fs.writeFileSync(path.join(wt, ".quay", "tracked-round.jsonl"), "{\"tracked\":true}\n", "utf8");
+    gitWt("add", "-f", ".quay/tracked-round.jsonl");
+    gitWt("-c", "user.email=t@test", "-c", "user.name=t", "commit", "-q", "-m", "tracked carrier");
+    // A stale IGNORED copy, i.e. what a snapshot made before the policy left behind.
+    fs.writeFileSync(path.join(wt, ".quay", "meta-driver-round.jsonl"), "stale\n", "utf8");
+
+    const r = bash([SCRIPT, wt, "--root", main]);
+    assert.equal(r.status, 0, `script exited ${r.status}: ${r.stdout} ${r.stderr}`);
+    assert.ok(fs.existsSync(path.join(wt, ".quay", "tracked-round.jsonl")), "a TRACKED carrier must survive the prune (it is not snapshot input)");
+    assert.ok(!fs.existsSync(path.join(wt, ".quay", "meta-driver-round.jsonl")), "a stale GITIGNORED copy must be pruned");
+    assert.match(r.stderr, /1 stale pruned/);
+  } finally {
+    rmrf(main);
+  }
+});
+
 test("AC3p — no-op on the main checkout: the linked-worktree guard skips a main run", () => {
   const { main } = makeRepo();
   try {

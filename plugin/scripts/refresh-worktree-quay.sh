@@ -148,6 +148,14 @@ _snapshot_pathspec_excludes=()
 for _raw in "${REFRESH_SNAPSHOT_EXCLUDE[@]}"; do
   _snapshot_pathspec_excludes+=(":(exclude).quay/${_raw#!}")
 done
+# The PRUNE pass enumerates the worktree's ignored paths and needs to SEE the excluded ones (they are
+# exactly what it deletes) — except the cache class, which it never touches and which is expensive to
+# walk. So it gets only the `!`-class excludes, not the whole declaration.
+_snapshot_prune_pathspec_excludes=()
+for _raw in "${REFRESH_SNAPSHOT_EXCLUDE[@]}"; do
+  [ "${_raw:0:1}" = "!" ] || continue
+  _snapshot_prune_pathspec_excludes+=(":(exclude).quay/${_raw#!}")
+done
 
 # Resolve the main checkout: --root / QUAY_MAIN_CHECKOUT / git-derived.
 # The git-derived form is ORDER-INDEPENDENT: the main checkout is the parent of the repo's shared
@@ -188,20 +196,17 @@ fi
 mkdir -p "${worktree}/.quay"
 pruned=0
 if [ -d "${worktree}/.quay" ]; then
-  # The walk must NOT descend into the cache class: a worktree that has run a suite holds its own
-  # NODE_COMPILE_CACHE (300K+ files) there, and walking it is exactly the cost this policy removed
-  # from the enumeration. `-path <cache> -prune -o` per `!`-class entry keeps the walk O(current).
-  _find_args=("${worktree}/.quay" -mindepth 1)
-  for _raw in "${REFRESH_SNAPSHOT_EXCLUDE[@]}"; do
-    [ "${_raw:0:1}" = "!" ] || continue
-    _g="${_raw#!}"; _g="${_g%/\*\*}"
-    _find_args+=(-path "${worktree}/.quay/${_g}" -prune -o)
-  done
-  _find_args+=(-type f -print)
+  # ONLY gitignored/untracked paths are candidates. The snapshot's INPUT class is exactly
+  # `git ls-files --others --ignored` (see the copy loop) — a TRACKED `.quay` carrier belongs to the
+  # checkout, not to the snapshot, and deleting it would dirty the worktree and change what the
+  # suite reads (caught for real: `.quay/ac-devci-ac4-carrier-written-by-round.jsonl` is tracked and
+  # matches `*-round.jsonl`). Enumerating through git also skips the cache class for free (the
+  # pathspec excludes are the same ones the copy loop derives).
   _stale=()
-  while IFS= read -r _p; do
-    _snapshot_policy_matches "${_p#"${worktree}/"}" prune && _stale+=("${_p}")
-  done < <(find "${_find_args[@]}" 2>/dev/null)
+  while IFS= read -r _rel; do
+    [ -n "${_rel}" ] || continue
+    _snapshot_policy_matches "${_rel}" prune && _stale+=("${worktree}/${_rel}")
+  done < <(git -C "${worktree}" ls-files --others --ignored --exclude-standard -- .quay/ "${_snapshot_prune_pathspec_excludes[@]}" 2>/dev/null)
   if [ "${#_stale[@]}" -gt 0 ]; then
     pruned="${#_stale[@]}"
     printf '%s\0' "${_stale[@]}" | xargs -0 -r rm -rf --
