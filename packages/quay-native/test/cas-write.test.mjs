@@ -137,11 +137,75 @@ function testNoExistingFileFailsClosed() {
   assert(!fs.existsSync(path.join(tasksDir, "CAS-5-NEW.md")), "no file was created on disk for the failed-closed case");
 }
 
+// ─── QN-015 sibling: PARK DURABILITY (gap-needs-human-park-overwritten-by-inflight-worker) ────────
+// Same family as the CAS cases above (a write whose premise is stale must not clobber state another
+// writer set), one step further: the stale writer does not even pass `expectedStatus` — the measured
+// incident was a worker's whole-task `task_write` replaying the status it had read before the park.
+//
+// Read the task from disk the way the worker held it in memory: body + frontmatter snapshot.
+function seedParkedTask(store, id) {
+  store.write(id, { title: "t", status: "ready", labels: ["gap"], body: "## AC\n- [ ] a\n" });
+  // The human/manager park — a status-only CAS write, exactly `task edit <id> --status needs-human
+  // --expect-status ready`.
+  const parked = store.write(id, { status: "needs-human", expectedStatus: "ready" });
+  assert(parked.status === "needs-human", `${id}: the park itself landed`);
+}
+
+// AC1 — the measured defect. The in-flight worker writes back the WHOLE task it read earlier
+// (body + status "ready"). After the fix the status is PRESERVED; before it, this asserted `ready`
+// and the promotion driver promoted it back into the pool within one round.
+function testParkSurvivesStaleWholeBodyWrite() {
+  const store = resetStore();
+  seedParkedTask(store, "PARK-1");
+  const t = store.write("PARK-1", { title: "t", status: "ready", labels: ["gap"], body: "## AC\n- [x] a\n" });
+  assert(t.status === "needs-human", "AC1: a stale whole-body write (body + pre-park status 'ready') does NOT revert the park — status is needs-human");
+  const onDisk = store.get("PARK-1");
+  assert(onDisk.status === "needs-human", "AC1: the on-disk status is needs-human after the stale write");
+  assert(onDisk.body.includes("- [x] a"), "AC1: the CONTENT half of the stale write still landed (the worker's AC tick is not lost)");
+  // The incident's exact status literal, too: the revert commit was needs-human → todo.
+  store.write("PARK-2", { title: "t2", status: "ready", labels: [], body: "## AC\n- [ ] b\n" });
+  store.write("PARK-2", { status: "needs-human", expectedStatus: "ready" });
+  const t2 = store.write("PARK-2", { title: "t2", status: "todo", labels: [], body: "## AC\n- [x] b\n" });
+  assert(t2.status === "needs-human", "AC1: the incident's literal shape (status 'todo' + body) does not revert the park either");
+}
+
+// AC2 negative control — the human-authorized unpark MUST still work. Status-only = a decision, not
+// a stale replay; it is the `quay task edit <id> --status ready` surface.
+function testStatusOnlyUnparkStillWorks() {
+  const store = resetStore();
+  seedParkedTask(store, "PARK-3");
+  const t = store.write("PARK-3", { status: "ready" });
+  assert(t.status === "ready", "AC2 negative control: a status-only write still unparks (needs-human → ready)");
+  assert(store.get("PARK-3").status === "ready", "AC2 negative control: the unpark reached disk");
+}
+
+// AC2 negative control (second deliberate exit) — an unpark that also edits content is allowed when
+// the caller CAS-asserts the park it is leaving.
+function testCasUnparkWithContentStillWorks() {
+  const store = resetStore();
+  seedParkedTask(store, "PARK-4");
+  const t = store.write("PARK-4", { status: "ready", expectedStatus: "needs-human", body: "## AC\n- [x] a\n" });
+  assert(t.status === "ready", "AC2 negative control: expectedStatus='needs-human' + content still unparks (explicit CAS decision)");
+}
+
+// Negative control for the guard's SCOPE — it must not freeze ordinary status writes. A whole-body
+// write on a NON-parked task still changes the status exactly as before.
+function testGuardDoesNotFreezeOrdinaryWrites() {
+  const store = resetStore();
+  store.write("PARK-5", { title: "t", status: "ready", labels: [], body: "## AC\n- [ ] a\n" });
+  const t = store.write("PARK-5", { title: "t", status: "done", body: "## AC\n- [x] a\n" });
+  assert(t.status === "done", "scope control: a whole-body write on a non-parked task still applies its status (ready → done)");
+}
+
 testPositiveCase();
 testNegativeCase();
 testNoExpectedStatusUnaffected();
 await testGenuineRace();
 testNoExistingFileFailsClosed();
+testParkSurvivesStaleWholeBodyWrite();
+testStatusOnlyUnparkStillWorks();
+testCasUnparkWithContentStillWorks();
+testGuardDoesNotFreezeOrdinaryWrites();
 
 fs.rmSync(tasksDir, { recursive: true, force: true });
 
