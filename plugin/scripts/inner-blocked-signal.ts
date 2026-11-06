@@ -143,9 +143,9 @@ import { writeJsonAtomic } from "./write-json-atomic.ts";
 // `arg-parsing-helper-family`, routine `semantic-dedup-scan`).
 import { isDirectEntry, flagValue } from "./gate-script-base.ts";
 import { SCHEMA_VERSION, validateEvent, emitEvent } from "./workflow-event-schema.mjs";
-// Shared session-liveness primitive — ONE copy, byte-identical to the pinned quay-fleet blob
-// (packages/quay/src/primitives/PROVENANCE.md). The main transcript's own mtime (the "never a
-// self-reported field" reading) now comes from here instead of a local `fs.statSync`.
+// Shared session-liveness primitive — ONE copy, canonical in this repo and pinned to its local
+// baseline (packages/quay/src/primitives/PROVENANCE.md). The main transcript's own mtime (the
+// "never a self-reported field" reading) now comes from here instead of a local `fs.statSync`.
 import { readTranscriptMtime } from "../../packages/quay/src/primitives/session-liveness.mjs";
 import {
   FAST_MODE_STAGE,

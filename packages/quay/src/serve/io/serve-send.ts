@@ -39,9 +39,10 @@ import { isValidSessionId, sessionTranscriptPath } from "../../observation.ts";
 import { html, escapeHtml, pageStyles, modernistStyles, renderSiteNav, renderMobileChrome } from "../view/serve-render.ts";
 import { resolvePluginScriptExec } from "../../core/plugin-root.ts";
 // Shared session read/write primitives — the socket delivery lanes (L1 message / L2 keys) and the
-// input-face audit ledger each exist exactly ONCE in this repo, byte-identical to the pinned
-// quay-fleet blob (packages/quay/src/primitives/PROVENANCE.md; re-checked by
-// plugin/scripts/primitives-drift-check.ts).
+// input-face audit ledger each exist exactly ONCE in this repo. These primitives are canonical here
+// (quay-fleet, the repo they were originally copied from, is retired); each file's bytes are pinned
+// to the local baseline in packages/quay/src/primitives/PROVENANCE.md and re-checked by
+// plugin/scripts/primitives-drift-check.ts.
 //
 // ⛔ This module NEVER opens a socket of its own — no `node:net` import survives here at all
 // (AC-253's strengthened criterion retires the hand-written duplicate in serve-send.ts /

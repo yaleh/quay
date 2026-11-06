@@ -1,7 +1,7 @@
 ---
 id: gap-primitives-decouple-from-quay-fleet
 title: quay 去 quay-fleet 依赖：primitives 改本地基线，静态门不再读外部仓库
-status: ready
+status: done
 labels:
   - gap
   - architecture
