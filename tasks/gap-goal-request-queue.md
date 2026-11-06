@@ -48,5 +48,9 @@ goal_ac: AC-936
 - packages/quay/test/goal-request.test.mjs (new)
 - plugin/scripts/goal-driver.ts
 - plugin/test/goal-driver.test.mjs
+- plugin/scripts/driver-runtime.ts
+- packages/quay/src/cli/help.ts
+- docs/carrier-registry.json
+- .gitignore
 - docs/evidence/2026-11-06-goal-request-queue.md (new)
 - tasks/gap-goal-request-queue.md
