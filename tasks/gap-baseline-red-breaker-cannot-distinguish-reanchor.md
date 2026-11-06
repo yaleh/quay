@@ -52,5 +52,6 @@ extra:
 ## Touches
 
 - plugin/scripts/worker-fan-in.ts
+- plugin/scripts/worker-driver.ts
 - plugin/test/worker-fan-in-baseline-red.test.mjs
 - tasks/gap-baseline-red-breaker-cannot-distinguish-reanchor.md
