@@ -36,21 +36,21 @@ extra: {}
 - `plugin/probes/meta-driver.md`
 - `tasks/gap-meta-synchealth-doc-to-develop-outcome-invisible.md`
 
-## Evidence（AC 实跑记录，2026-11-06）
+## Evidence（AC 实跑记录，2026-11-06，续做轮复算）
 
-工作树：`/home/yale/work/quay-worktrees/gap-meta-synchealth-doc-to-develop-outcome-invisible`，分支 `task/gap-meta-synchealth-doc-to-develop-outcome-invisible`，实现提交 `4cce808e7`。
+工作树：`/data/home/yale/work/quay-worktrees/gap-meta-synchealth-doc-to-develop-outcome-invisible`，分支 `task/gap-meta-synchealth-doc-to-develop-outcome-invisible`。实现提交 `4cce808e7`；本轮先把 `develop` 合并进来（`1f5bea0d2`，唯一冲突 `tasks/<id>.md` 按 per-hunk union 解：保留本分支 AC 勾与 Evidence + 保留 develop 的 Blocker 段），随后**独立复算**下列全部判据（⛔ 不是复述上一轮）。
 
 **AC1（三态派生）** — `node --experimental-strip-types --test --test-name-pattern="lastDocToDevelop" plugin/test/meta-driver.test.mjs`：
 ```
 ✔ collectSyncHealth: lastDocToDevelop 三态派生 —— ok / refused / unknown（三条同时断言）
 ```
-同一测试另断言：原生布尔 `false` ⇒ `refused`；`undefined/null/1/"yes"` ⇒ `unknown`；坏行在最后一条 bidirectional 之后 ⇒ `unknown`、在之前 ⇒ `ok`（按位置判定）；载体缺失 ⇒ `unknown`。
+同测试另断言：原生布尔 `false` ⇒ `refused`；`undefined/null/1/"yes"` ⇒ `unknown`；坏行在最后一条 bidirectional 之后 ⇒ `unknown`、在之前 ⇒ `ok`（按位置判定）；载体缺失 ⇒ `unknown`；并断言 `refused` 的 `lastEvent` 与健康态**同形**（正是本字段必须存在的理由）。
 
 **AC2（digest 正臂）**：
 ```
 ✔ readingsDigest 正臂: lastDocToDevelop ok vs refused ⇒ 摘要不同（阻塞开始/结束各判读一次）
 ```
-前提断言在内：两轮读数 `deepEqual`（除该字段），且字段缺失 ⇒ 与 `unknown` 同 token、⛔ 不与 `ok` 同形。
+前提断言在内：两轮读数 `deepEqual`（除该字段），且字段结构缺失 ⇒ 与 `unknown` 同 token、⛔ 不与 `ok` 同形。
 
 **AC3（digest 负臂 / 消抖）**：
 ```
@@ -58,37 +58,33 @@ extra: {}
 ```
 同测试内正向对照：追加一条 `docToDevelop:"true"` ⇒ 摘要必须变（证明负臂不是恒真）。
 
-**AC4（真实生产载体复算）** — 主检出 `git worktree list --porcelain | awk 'NR==1{print $2}'` = `/data/home/yale/work/quay`，从其真实 `.quay/doc-develop-sync.jsonl`（12066 行）切片，写进临时目录后调 `collectSyncHealth`：
+**AC4（真实生产载体复算）** — 主检出 `git worktree list --porcelain | awk 'NR==1{print $2}'` = `/data/home/yale/work/quay`；其真实 `.quay/doc-develop-sync.jsonl` 复算时 **12212 行**（上一轮 12066 行，载体在增长）。按 ts 窗口切片写入临时目录后调生产函数 `collectSyncHealth`：
 ```
-{"label":"blocked-20261031","from":"2026-10-31T09:16","to":"2026-10-31T09:41:59.999Z",
- "sliceLines":129,"bidirectionalEvents":21,"lastBidirectionalTs":"2026-10-31T09:41:12.337Z",
- "lastBidirectionalDocToDevelop":"false","ffSyncedInSlice":0,
- "collectSyncHealth.lastDocToDevelop":"refused","collectSyncHealth.lastEvent":"doc-develop-sync-semantic"}
-
-{"label":"healthy-20261106","from":"2026-11-06T05:10:13Z","to":null,
- "sliceLines":9,"bidirectionalEvents":3,"lastBidirectionalTs":"2026-11-06T05:52:20.312Z",
- "lastBidirectionalDocToDevelop":"true","ffSyncedInSlice":1,
- "collectSyncHealth.lastDocToDevelop":"ok","collectSyncHealth.lastEvent":"doc-develop-sync-bidirectional"}
+{"label":"blocked-20261031","sliceLines":129,"bidirectionalEvents":21,"lastBidirectionalTs":"2026-10-31T09:41:12.337Z","lastBidirectionalDocToDevelop":"false","ffSyncedInSlice":0,"collectSyncHealth.lastDocToDevelop":"refused","collectSyncHealth.lastEvent":"doc-develop-sync-semantic"}
+{"label":"healthy-20261106","sliceLines":155,"bidirectionalEvents":59,"lastBidirectionalTs":"2026-11-06T14:02:55.604Z","lastBidirectionalDocToDevelop":"true","ffSyncedInSlice":7,"collectSyncHealth.lastDocToDevelop":"ok","collectSyncHealth.lastEvent":"doc-develop-sync-bidirectional"}
 ```
 
-**改前/改后两次读数（同一份固定读数，只把 `syncHealth` 换成两份真实载体切片）**：
-| 切片 | lastEvent | lastDocToDevelop | 改前 digest（仅 lastEvent） | 改后 digest（带三态） |
+**改前/改后两次读数（同一份固定读数，只把 `syncHealth` 换成真实载体切片；摘要由 `readingsDigest` 实算）**：
+| 真实载体切片 | lastEvent | lastDocToDevelop | 改前 digest（token 只有 lastEvent） | 改后 digest（带三态） |
 |---|---|---|---|---|
-| 阻塞前 `06:00–09:15:59` | `doc-develop-sync-bidirectional` | `ok` | `bae0133d4431e1c1` | `ac29cf639ceb678b` |
-| 阻塞中 `09:16:00–09:16:36` | `doc-develop-sync-bidirectional` | `refused` | `bae0133d4431e1c1` | `f572ce9c76a8f9b3` |
+| 阻塞前 `2026-10-31T06:00–09:15:59` | `doc-develop-sync-bidirectional` | `ok` | `e32371a6970c67f2` | `fb5265052280cc79` |
+| 阻塞中 `2026-10-31T09:16:00–09:16:36` | `doc-develop-sync-bidirectional` | `refused` | `e32371a6970c67f2` | `67f23da4324b5f1c` |
+| 健康 `2026-11-06T05:10:13Z–14:59:59` | `doc-develop-sync-bidirectional` | `ok` | `e32371a6970c67f2` | `fb5265052280cc79` |
 
-⇒ 改前**阻塞开始前后摘要逐字相同**（`bae0133d4431e1c1`，这就是 30 分钟静默的机制）；改后不同。
+⇒ 改前**阻塞开始前后摘要逐字相同**（`e32371a6970c67f2`——这就是 2026-10-31 那 30 分钟静默的机制）；改后阻塞开始变一次（`fb52…` → `67f2…`）、阻塞持续不变、健康态回到与阻塞前相同的 token。
 
-**AC5（负控制，两次）**：
-1. 把派生改成恒 `"unknown"`（改的是真实源文件，跑完复原并核对 md5 `63a3ca88219577b5be7a77492d292c0e`）：
-   - `✖ collectSyncHealth: lastDocToDevelop 三态派生` — `AssertionError: docToDevelop:"true" ⇒ ok / actual: 'unknown' / expected: 'ok'`（`ℹ pass 1 / fail 1`）
-   - 真实载体复算两段同时变红：`blocked-20261031 ⇒ "unknown"`、`healthy-20261106 ⇒ "unknown"`。
+**AC5（负控制，本轮两次实跑）**：
+1. 把派生改成恒 `"unknown"`（改的是真实源文件，跑完 `git checkout --` 复原并核对 md5 `13b56a4b94616a852155a27ca9443694` 与改前一致）：
+   - `✖ collectSyncHealth: lastDocToDevelop 三态派生` — `AssertionError: docToDevelop:"true" ⇒ ok / actual: 'unknown', expected: 'ok'`（`ℹ pass 1 / fail 2`）
+   - `✖ readingsDigest 负臂（消抖）` — `actual: 'unknown', expected: 'refused'`
+   - 真实载体复算两段同时变红：`blocked-20261031 ⇒ "unknown"`、`healthy-20261106 ⇒ "unknown"`（即 AC4 的两条判据取不到假是不可能的——改坏它当场红）。
 2. 把新 token 从 digest 去掉：
-   - `✖ readingsDigest 正臂` — `actual: 'f64e379f3d29920c' / expected: 'f64e379f3d29920c'`（两者相等 ⇒ 正臂红）
-   - `✖ readingsDigest 负臂（消抖）` — `阻塞结束 ⇒ 摘要必须变`：`actual: 'e32371a6970c67f2' / expected: 'e32371a6970c67f2'`
+   - `✖ readingsDigest 正臂` — `doc→develop 从 ok 变 refused（阻塞开始）必须改变摘要`：`actual: 'f64e379f3d29920c', expected: 'f64e379f3d29920c'`（两者相等 ⇒ 正臂红）
+   - `✖ readingsDigest 负臂（消抖）` — `阻塞结束 ⇒ 摘要必须变`：`actual: 'e32371a6970c67f2', expected: 'e32371a6970c67f2'`
    - 同一次运行里 AC1 仍绿（`✔ 三态派生`），证明两条负控制各自只打中它该打中的那半。
+   - 真实切片摘要同时退化为三行同值 `e32371a6970c67f2`（见上表「改前」列）。
 
-**回归**：`node --experimental-strip-types --test plugin/test/meta-driver.test.mjs` ⇒ `ℹ tests 149 / pass 149 / fail 0`；`plugin/test/goal-invariants-standing.test.mjs` ⇒ `ℹ tests 19 / pass 19 / fail 0`；`fan-in-ts-typecheck-gate.ts` 对 `develop...HEAD` 判 ADMITTED（本任务不新增/移动 .ts，改的是既有文件）。
+**回归**：`node --experimental-strip-types --test plugin/test/meta-driver.test.mjs` ⇒ `ℹ tests 149 / pass 149 / fail 0`（合并 develop 之后重跑）。
 
 ## ADR-007 暗轴记录
 
