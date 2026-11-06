@@ -1,7 +1,7 @@
 ---
 id: AC-937
 title: 端到端：driver 自己立案的任务落地并使本 AC 机械翻 achieved
-status: draft
+status: active
 kind: criterion
 goal: GOAL-914
 criterion: node -e "const fs=require('fs');const rootRe=/^tasks$/;const
@@ -22,5 +22,16 @@ criterion: node -e "const fs=require('fs');const rootRe=/^tasks$/;const
 expect: "exit 0；.quay/goal-filing.jsonl 中有 AC-937 的 filed 行；tasks/ 中存在 goal_ac:
   AC-937 且 status: done 的任务；该任务不是预置（由 driver 的 gap-filing 产生）。"
 origin: 人 2026-11-06 授权；本条故意不预置任务，作为 driver 自己立案路径的直接量。
+activatedAt: 2026-11-06T07:24:51.179Z
+statusLog:
+  - at: 2026-11-06T07:24:51.179Z
+    from: draft
+    to: active
+    actor: goal-cli
+    reason: ""
+fidelity:
+  verdict: faithful
+  reason: "fidelity judge: faithful"
+  at: 2026-11-06T07:24:51.179Z
 ---
 本 AC 故意不分配实现任务：driver 必须在没有预置任务时自己立案，任务落地后由 driver 机械翻 achieved。
