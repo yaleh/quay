@@ -1,7 +1,7 @@
 ---
 id: gap-goal-driver-blocked-taxonomy
 title: stalled 拆分：blocked-needs-human / blocked-promotion / blocked-dispatch，各带 owner
-status: ready
+status: done
 labels:
   - gap
   - goal-driver
