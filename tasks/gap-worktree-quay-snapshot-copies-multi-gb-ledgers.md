@@ -89,8 +89,7 @@ extra:
 
 ## Blocker
 
-**2026-11-06T10:15:24.068Z — worker 未落地（exited-not-landed）**
+**2026-11-06T13:07:20.564Z — worker 未落地（exited-not-landed）**
 
-- 未落地原因：step=suite: incomplete suite (636/636 files) — recovery exhausted at floor concurrency 16 — no declared rung produced a complete verdict (16); needs a code/config fix, see plugin/scripts/full-suite-runner.ts
+- 未落地原因：step=dark-axis: dark-axis (ADR-007 per-milestone predicate) refused the flip — MISSING: MISSING — the task body records no L_D/L_G reading (a numeric quantity at an axis-anchored line) and carries no explicit "该轴仍暗,理由:<...>" declaration. ADR-007 requires one or the other before the task may be called done.
 - run_id：wk-prod-anchor
-- session_id：cc569bb3-a203-4cec-97ec-cb27959d6296
