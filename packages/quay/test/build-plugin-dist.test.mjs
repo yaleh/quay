@@ -1,4 +1,4 @@
-// @test-group engine
+// @test-group serial
 // build-plugin-dist.test.mjs — gap-delivery-laydown-dist-closure-gap: the rewrite surface that
 // keeps the PACKAGED quay-init's laydown derivation in sync with package.sh's dist rewrite.
 //

@@ -11,9 +11,11 @@
 
 import { test, after } from "node:test";
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 import { readSuiteParams, suiteParamsToEnv, SUITE_KNOBS } from "../scripts/suite-params.ts";
 
@@ -218,4 +220,87 @@ test("memory_max — a size string is the one non-numeric knob, and a malformed 
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
+});
+
+// ---------------------------------------------------------------------------
+// --shell must EXPORT — gap-suite-config-knobs-not-exported-on-direct-test-sh-path
+//
+// THE DEFECT: `--shell` used to print bare `VAR="${VAR:-config}"` assignments. scripts/test.sh
+// evaluates that text under `set -euo pipefail` and NO `set -a`, so the values became SHELL-LOCAL:
+// the eval'ing shell read `QUAY_MAX_OVERSUBSCRIPTION=0.1875` while every child the suite spawned
+// read `undefined` — config read, printed, and invisible to the object under test (hard rule 3b).
+// The consequence was not cosmetic: the direct `bash scripts/test.sh` path (including the scoped
+// `--for-task` gate) still derived nproc lanes (128) instead of the configured 24.
+//
+// These two tests run the emitter through the EXACT shell mode test.sh uses and read the value from
+// a CHILD process — the same vantage point as a suite's `node --test` child.
+// ---------------------------------------------------------------------------
+
+const HERE = path.dirname(fileURLToPath(import.meta.url));
+const REPO_ROOT = path.resolve(HERE, "..", "..");
+const SUITE_PARAMS_TS = path.join(REPO_ROOT, "plugin", "scripts", "suite-params.ts");
+
+/** Run `suite-params.ts --shell` through a shell configured exactly like scripts/test.sh
+ *  (`set -euo pipefail`, NO `set -a`), then read a knob from a CHILD process of that shell.
+ *  Returns the child's raw stdout, or the literal string "undefined" when the child cannot see it. */
+function readKnobFromChild(ws, envOverrides = {}) {
+  const env = { ...process.env, ...envOverrides };
+  // Ambient knobs would mask the promotion under test — clear every one of them except the
+  // deliberately-provided override (that is what the negative control supplies).
+  for (const envKey of Object.values(SUITE_KNOBS)) if (!(envKey in envOverrides)) delete env[envKey];
+  // The suite's per-file CPU/memory preload collects into a dir; irrelevant here and it can
+  // interleave with stdout — drop it so the reading is the reading.
+  delete env.NODE_OPTIONS;
+  delete env.QUAY_PERFILE_CPU_DIR;
+  const script = [
+    "set -euo pipefail",
+    'suite_cfg="$(node --no-warnings --experimental-strip-types "$SUITE_PARAMS" --shell --root "$WS")"',
+    'eval "${suite_cfg}"',
+    // A CHILD of the eval'ing shell — process.env only, never the shell's own view.
+    `node -e 'process.stdout.write(String(process.env.QUAY_MAX_OVERSUBSCRIPTION))'`,
+  ].join("\n");
+  return execFileSync("bash", ["-c", script], {
+    encoding: "utf8",
+    env: { ...env, SUITE_PARAMS: SUITE_PARAMS_TS, WS: ws },
+  });
+}
+
+test("--shell POSITIVE control: a config-ONLY value reaches a child of the eval'ing shell", () => {
+  const ws = tmpWs();
+  writeConfig(ws, "provider: native\nsuite:\n  max_oversubscription: 0.1875\n");
+  assert.equal(
+    readKnobFromChild(ws),
+    "0.1875",
+    "the emitted line must be an EXPORT: a bare assignment is shell-local and the child reads `undefined`",
+  );
+});
+
+test("--shell NEGATIVE control: an already-set env value still wins over the config", () => {
+  const ws = tmpWs();
+  writeConfig(ws, "provider: native\nsuite:\n  max_oversubscription: 0.1875\n");
+  assert.equal(
+    readKnobFromChild(ws, { QUAY_MAX_OVERSUBSCRIPTION: "3.5" }),
+    "3.5",
+    "the fix must not be an unconditional overwrite — env beats config",
+  );
+});
+
+test("direct path: `bash scripts/test.sh` exports every config-declared knob to the suite's children", (t) => {
+  const cfg = readSuiteParams(REPO_ROOT);
+  const declared = Object.entries(SUITE_KNOBS).filter(([key]) => cfg[key] !== undefined);
+  if (declared.length === 0) return t.skip("this workspace declares no suite: knobs — nothing to promote");
+  // This assertion measures scripts/test.sh's promotion, and THIS process is one of its children.
+  // Under a bare `node --test plugin/test/suite-params.test.mjs` there is no promotion to observe,
+  // so skip rather than red. test.sh pins TZ=UTC + LANG=C.UTF-8 for every child (scripts/test.sh:312).
+  if (!(process.env.TZ === "UTC" && process.env.LANG === "C.UTF-8")) {
+    return t.skip("not spawned by scripts/test.sh — ambient env carries no promotion to observe");
+  }
+  const missing = declared
+    .filter(([, envKey]) => !process.env[envKey])
+    .map(([key, envKey]) => `${key} → ${envKey} (config ${JSON.stringify(cfg[key])})`);
+  assert.deepEqual(
+    missing,
+    [],
+    `suite knobs declared in .quay/config.yml must be visible to a process spawned by scripts/test.sh; unset/empty: ${missing.join(", ")}`,
+  );
 });
