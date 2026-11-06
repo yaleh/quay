@@ -1,7 +1,7 @@
 ---
 id: AC-935
 title: 下一步投影：每个 active GOAL 一行 owner/action，并有 goal next 读面
-status: active
+status: achieved
 kind: criterion
 goal: GOAL-914
 criterion: node --experimental-strip-types packages/quay/bin/quay.ts goal next
@@ -18,6 +18,11 @@ statusLog:
     to: active
     actor: goal-cli
     reason: ""
+  - at: 2026-11-06T18:45:24.579Z
+    from: active
+    to: achieved
+    actor: goal-driver
+    reason: "I2: criterion pass"
 fidelity:
   verdict: faithful
   reason: "fidelity judge: faithful"
