@@ -1,7 +1,7 @@
 ---
 id: gap-anchor-polling-git-fork-storm
 title: driver-anchor 轮询脚本每轮几百次 git：全机 3,190 git/s、process-budget 16 次/秒
-status: todo
+status: ready
 labels:
   - gap
 parent: null
