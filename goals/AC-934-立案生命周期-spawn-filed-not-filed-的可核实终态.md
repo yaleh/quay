@@ -1,7 +1,7 @@
 ---
 id: AC-934
 title: 立案生命周期：spawn→filed/not-filed 的可核实终态
-status: active
+status: achieved
 kind: criterion
 goal: GOAL-914
 criterion: node -e "const fs=require('fs');const
@@ -25,6 +25,11 @@ statusLog:
     to: active
     actor: goal-cli
     reason: ""
+  - at: 2026-11-06T08:04:27.541Z
+    from: active
+    to: achieved
+    actor: goal-driver
+    reason: "I2: criterion pass"
 fidelity:
   verdict: faithful
   reason: "fidelity judge: faithful"

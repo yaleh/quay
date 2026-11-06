@@ -96,9 +96,8 @@ extract
 
 ## Blocker
 
-**2026-11-06T06:40:16.854Z — worker 未落地（exited-not-landed）**
+**2026-11-06T08:18:46.392Z — worker 未落地（exited-not-landed）**
 
-- 未落地原因：step=merge-develop: error: Your local changes to the following files would be overwritten by merge:
-  goals/AC-934-立案生命周期-spawn-filed-not-filed-的可核实终态.md goals/AC-935-下一步投影-每个-active-goal-一行-owner-action-并有-goal-next-读面.md goals/AC-936-goal-request-队列-提交-消费-幂等.md goals/AC-937-端到端-driver-自己立案的任务落地并使本-ac-机械翻-achieved.md goals/GOAL-914-goal-driver-自驱闭环-立案生命周期-下一步投影与请求消费-quay-native.md packages/quay/src/cli/help.ts packages/quay/src/core/goal-store-checks.ts packages/quay/src/core/goal-store.ts packages/quay/test/goal-criterion-timeout-resolution.test.mjs packages/quay/test/goal-store.test.mjs plugin/scripts/goal-driver.ts plugin/test/goal-driver-s03.test.mjs tasks/gap-goal-achieved-failing-folds-not-evaluated-into-red.md tasks/gap-goal-driver-blocked-taxonomy.md tasks/gap-goal-driver-filing-ledger.md tasks/gap-goal-driver-filing-throttle.md tasks/gap-goal-next-projection.md tasks/gap-goal-request-queue.md tasks/gap-primitives-decouple-from-quay-fleet.md
-Merge with strategy ort failed.
+- 未落地原因：step=suite: oom-killed (2) — recovery red set is NOT a subset of the develop baseline red set: added=plugin/test/archive-exclusion-wiring.test.mjs changed=- — needs a code fix
 - run_id：wk-prod-anchor
+- session_id：773208ce-65bb-4efb-83c0-f407058089c0
