@@ -2025,6 +2025,10 @@ export const BLOCKER_HEADING = "## Blocker";
  *  它在「先写了 Blocker 段」的任务上取到卡住原因、冒充 needs-human 的阻碍原因。 */
 const BLOCKER_REASON_LABEL = "未落地原因";
 
+/** 原因读不出时写进段里的哨兵文本。**不是一个原因**：读侧（`blockerRecordInBody`）据此回 null ⇒ 下游
+ *  not-evaluated，⛔ 不让一个「读不懂」在停放重判里冒充一个可识别的停放理由。写读两侧共用这一个常量。 */
+export const UNREADABLE_BLOCKER_REASON = "(原因读不出)";
+
 /** 从任务体切掉 `## Blocker` 段（标题行到下一个 `## ` 标题止）。无该段 ⇒ 原样返回（逐字不变，
  *  ⛔ 不做全局空白重排——那会顺手改动无关内容）。仅处理行首精确 `## Blocker`，⛔ 不匹配前缀相同的
  *  其它标题（如 `## BlockerNotes`）。 */
@@ -2061,6 +2065,44 @@ export function blockerReasonInBody(body: string): string | null {
   return m ? m[1].trim() : null;
 }
 
+/** 一条 `## Blocker` 记录在任务体里的位置：段标题行号 + 已记录的原因。段在而无原因行 ⇒ reason:null；
+ *  无段 ⇒ null（与「有段没原因」区分，硬规则 3b）。
+ *
+ *  ⛔ 这个【读】函数住在【写】它的模块里，和 buildBlockerSection / stripBlockerSection 共用同一个
+ *  BLOCKER_HEADING 与 BLOCKER_REASON_LABEL：行标签只在这里出现一次，消费者拿不到可以漂移的副本。
+ *  这正是本函数存在的理由 —— `needs-human-parking-recheck.ts` 的 readParkingRecord 曾经自己只认
+ *  `## Needs-Human` + `阻碍原因`，于是【本模块写的整个人群】每轮都落 not-evaluated，停放理由永不重判
+ *  （tasks/gap-meta-readparkingrecord）。
+ *
+ *  取【最后一个】段（本模块的 upsertBlockerSection 永远只留一个且追加在末尾；出现多个时后来的才是当前
+ *  记录）；围栏内的 `## Blocker` 是引用不是段（位置判定，硬规则 2）。 */
+export function blockerRecordInBody(body: string): { index: number; reason: string | null } | null {
+  const lines = String(body ?? "").split("\n");
+  let inFence = false;
+  let start = -1;
+  for (let i = 0; i < lines.length; i += 1) {
+    if (/^\s*(?:```|~~~)/.test(lines[i])) { inFence = !inFence; continue; }
+    if (!inFence && lines[i].trim() === BLOCKER_HEADING) start = i;
+  }
+  if (start < 0) return null;
+  const reasonRe = new RegExp(`^[-*]\\s*${BLOCKER_REASON_LABEL}[：:]\\s*(.*)$`);
+  let reason: string | null = null;
+  let reasonIndex = start;
+  let fence = false;
+  for (let i = start + 1; i < lines.length; i += 1) {
+    const line = lines[i];
+    if (/^\s*(?:```|~~~)/.test(line)) { fence = !fence; continue; }
+    if (!fence && /^## /.test(line)) break;
+    if (fence) continue;
+    const m = reasonRe.exec(line);
+    if (m) { reasonIndex = i; reason = m[1].trim(); }
+  }
+  // `(原因读不出)` 是 buildBlockerSection 写下的【读不懂】哨兵，不是一个原因：把它当成原因交出去，
+  // 就是「读不懂伪装成读懂了」。⇒ 如实回 null（下游落 not-evaluated）。
+  if (reason !== null && (reason === "" || reason === UNREADABLE_BLOCKER_REASON)) reason = null;
+  return { index: reason !== null ? reasonIndex : start, reason };
+}
+
 /** 由一次 exited-not-landed 构造 `## Blocker` 段文本。reason=null（读不懂）⇒ 如实写「(原因读不出)」，
  *  ⛔ 不伪造一个原因（硬规则 3b：读不懂不得与「合格/无原因」同形）。 */
 export function buildBlockerSection(
@@ -2073,7 +2115,7 @@ export function buildBlockerSection(
     "",
     `**${ts} — worker 未落地（exited-not-landed）**`,
     "",
-    `- ${BLOCKER_REASON_LABEL}：${reason && reason.trim() !== "" ? reason : "(原因读不出)"}`,
+    `- ${BLOCKER_REASON_LABEL}：${reason && reason.trim() !== "" ? reason : UNREADABLE_BLOCKER_REASON}`,
   ];
   if (meta.runId) lines.push(`- run_id：${meta.runId}`);
   if (meta.sessionId) lines.push(`- session_id：${meta.sessionId}`);
@@ -2120,7 +2162,7 @@ export function projectBlockerToTaskRecord(
   }
 
   // exited-not-landed：同一原因不重复重写（去重靠原因文本，⛔ 不靠时间戳——每轮新 ts 会让去重失效）。
-  const rendered = reason && reason.trim() !== "" ? reason : "(原因读不出)";
+  const rendered = reason && reason.trim() !== "" ? reason : UNREADABLE_BLOCKER_REASON;
   if (blockerReasonInBody(split.body) === rendered) {
     return { ok: true, changed: false, committed: false };
   }

@@ -25,6 +25,10 @@
 //           driver round (needs-human has no mechanical re-enqueue path, 人 2026-09-20).
 //   AC1 (g) a root without `tasks/` reads `evaluated:false` — an empty stale list must not read as
 //           「没有任何失效停放」.
+//   AC1 (h) EVERY producer of a parking record is read (tasks/gap-meta-readparkingrecord): the worker's
+//           `## Blocker` / `未落地原因` record (built by the producer itself), a hand-written dated
+//           `人工暂停` park, the LATEST record winning across producers, a fenced `## Blocker` being a
+//           citation rather than a record, and the producer's 「原因读不出」sentinel staying unreadable.
 //
 // Run: node --no-warnings --experimental-strip-types --test plugin/test/needs-human-parking-recheck.test.mjs
 
@@ -35,6 +39,10 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+// The `## Blocker` producer ITSELF (tasks/gap-meta-readparkingrecord): the fixture is built by the real
+// writer and the record is located by the real reader, so a drift between the two fails HERE — a
+// hand-copied paragraph in this file would keep passing while production silently stopped matching.
+import { buildBlockerSection, blockerRecordInBody, UNREADABLE_BLOCKER_REASON } from "../scripts/worker-driver.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "../..");
@@ -53,18 +61,28 @@ const RECORDED_UNSAT_REASON =
   "unsatisfiableUnannotatedAc=[AC1 人评审门：这条 AC 只能由人裁定]（连续 3 轮被结构上不可派的拦截挡住 ⇒ 作者/人改写；⛔ 不派 fix worker）";
 
 /** Write a task file. `acItems` are the raw `- [ ]` lines; `needsHumanReason` adds the
- *  `## Needs-Human` record exactly as driver-filters.markNeedsHuman writes it (null = no record). */
-function writeTask(root, id, { status = "needs-human", acItems = [], needsHumanReason = null, withAcSection = true } = {}) {
+ *  `## Needs-Human` record exactly as driver-filters.markNeedsHuman writes it (null = no record);
+ *  `blockerSection` adds a `## Blocker` record (raw text — callers pass buildBlockerSection's output so
+ *  the fixture is the PRODUCER's real shape); `tail` appends arbitrary body text after everything (the
+ *  hand-written `人工暂停` park line goes here). */
+function writeTask(
+  root,
+  id,
+  { status = "needs-human", acItems = [], needsHumanReason = null, withAcSection = true, blockerSection = null, tail = "" } = {},
+) {
   const ac = withAcSection ? `\n## Acceptance Criteria\n\n${acItems.join("\n")}\n` : "";
   const record =
     needsHumanReason === null
       ? ""
       : `\n## Needs-Human\n\n**执行 2026-10-22T10:21:50.889Z — 连续修满重试上限仍不合格（标 needs-human）**\n\n- 阻碍原因：${needsHumanReason}\n- 失败步/判词：step=suite: 1 failing\n`;
+  const blocker = blockerSection === null ? "" : `\n${blockerSection}\n`;
   const body =
     `---\nid: ${id}\ntitle: "fixture ${id}"\nstatus: ${status}\nlabels:\n  - gap\nparent: null\nchildren: []\nextra: {}\n---\n` +
     `## Proposal\n\nFixture task for needs-human-parking-recheck (well over forty non-whitespace characters).\n` +
     ac +
-    record;
+    record +
+    blocker +
+    tail;
   const file = path.join(root, "tasks", `${id}.md`);
   fs.mkdirSync(path.dirname(file), { recursive: true });
   fs.writeFileSync(file, body);
@@ -179,6 +197,114 @@ test("AC1(d) — unreadable input is not-evaluated, NEVER clean (hard rule 3b)",
       out.needs_human_total,
       `counts must partition the needs-human store: ${JSON.stringify(out.counts)} vs ${out.needs_human_total}`,
     );
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════════
+// AC1(h) — EVERY PRODUCER OF A PARKING RECORD IS READ (tasks/gap-meta-readparkingrecord)
+// ═══════════════════════════════════════════════════════════════════════════════════════════════
+// THE DEFECT THIS PINS: `readParkingRecord` knew only `## Needs-Human` + `阻碍原因`, while the worker
+// path parks a task via `## Blocker` + `未落地原因` (worker-driver.projectBlockerToTaskRecord) and a human
+// park is a hand-written dated `人工暂停` line. Measured 2026-11-06: 4 of 4 needs-human tasks read
+// `not-evaluated` while every one of them carried a readable parking reason — the reason was then never
+// re-judged, so a stale park could never be reported for those populations.
+//
+//   (a) the `## Blocker` record the WORKER writes is read — built by the producer itself, not by hand
+//   (b) the hand-written `人工暂停` record is read — a human park is a READING, not a failure to read
+//   (c) the LATEST record wins when one task was parked twice by DIFFERENT producers
+//   (d) a `## Blocker` quoted inside a fenced block is a CITATION, not a record (位置判定)
+//   (e) the producer's 「原因读不出」sentinel is NOT a reason ⇒ still `not-evaluated` (硬规则 3b)
+
+const RECORDED_WORKER_BLOCKER =
+  "step=suite: incomplete suite (897/994 files) oomKill=1 — recovery baseline-equivalence not evaluable at concurrency 16";
+const MANUAL_PARK_LINE =
+  "2026-11-06 人工暂停（宿主降载期间）：本机被套件并发打满，恢复条件：宿主 loadavg 稳定低于核数后改回 ready。";
+
+test("AC1(h)(a) — the `## Blocker` record the WORKER writes is read (not not-evaluated)", () => {
+  const root = makeRoot("blocker");
+  try {
+    writeTask(root, "gap-fixture-worker-parked", {
+      acItems: ["- [ ] AC1 贴出证据"],
+      blockerSection: buildBlockerSection(RECORDED_WORKER_BLOCKER, { ts: "2026-11-06T17:28:52.000Z", runId: "r-1" }),
+    });
+    const out = readReading(root);
+    const t = out.tasks.find((x) => x.id === "gap-fixture-worker-parked");
+    assert.notEqual(t.state, "not-evaluated", `the worker's own record must be READABLE: ${JSON.stringify(t)}`);
+    assert.equal(t.recordedReason, RECORDED_WORKER_BLOCKER, "the recorded 未落地原因 is carried verbatim");
+    // A suite-block reason names no registered mechanical judge — that is a READING, not a failure to read.
+    assert.equal(t.state, "no-registered-judge", `a readable non-mechanical reason: ${JSON.stringify(t)}`);
+    assert.equal(out.counts["not-evaluated"], 0, `the whole population must leave not-evaluated: ${JSON.stringify(out.counts)}`);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("AC1(h)(b) — a hand-written `人工暂停` park is read (a human park is a reading, not unreadable)", () => {
+  const root = makeRoot("manual");
+  try {
+    writeTask(root, "gap-fixture-human-paused", { acItems: ["- [ ] AC1 贴出证据"], tail: `\n${MANUAL_PARK_LINE}\n` });
+    const t = readReading(root).tasks.find((x) => x.id === "gap-fixture-human-paused");
+    assert.notEqual(t.state, "not-evaluated", `a dated 人工暂停 line IS the record: ${JSON.stringify(t)}`);
+    assert.equal(t.state, "no-registered-judge", `a human decision has no mechanical judge: ${JSON.stringify(t)}`);
+    assert.ok(t.recordedReason.includes("人工暂停"), `the pause line is carried verbatim: ${JSON.stringify(t)}`);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("AC1(h)(c) — the LATEST record wins when a task is parked twice by DIFFERENT producers", () => {
+  const root = makeRoot("latest");
+  try {
+    const id = "gap-fixture-reparked";
+    // (1) mechanical judge token first, (2) a LATER human pause ⇒ the live reason is the HUMAN one.
+    writeTask(root, id, {
+      acItems: ["- [ ] AC1 人评审门：只能由人裁定（待外部）"],
+      needsHumanReason: RECORDED_UNSAT_REASON,
+      tail: `\n${MANUAL_PARK_LINE}\n`,
+    });
+    const t = readReading(root).tasks.find((x) => x.id === id);
+    assert.equal(t.state, "no-registered-judge", `the LATER record (human pause) is the live one: ${JSON.stringify(t)}`);
+    assert.ok(t.recordedReason.includes("人工暂停"), `recorded reason is the pause line: ${JSON.stringify(t)}`);
+    // Negative control: the SAME mechanical record WITHOUT the later pause IS judged (else the arm
+    // above could pass because the Needs-Human record was never read at all).
+    writeTask(root, id, {
+      acItems: ["- [ ] AC1 人评审门：只能由人裁定（待外部）"],
+      needsHumanReason: RECORDED_UNSAT_REASON,
+    });
+    const t2 = readReading(root).tasks.find((x) => x.id === id);
+    assert.equal(t2.state, "parking-reason-stale", `without the later pause the mechanical judge is re-run: ${JSON.stringify(t2)}`);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("AC1(h)(d) — a `## Blocker` quoted inside a fenced block is a CITATION, not a record", () => {
+  const root = makeRoot("fenced");
+  try {
+    const quoted = ["```markdown", "## Blocker", "", `- 未落地原因：${RECORDED_WORKER_BLOCKER}`, "```"].join("\n");
+    writeTask(root, "gap-fixture-fenced", { acItems: ["- [ ] AC1 贴出证据"], tail: `\n${quoted}\n` });
+    const t = readReading(root).tasks.find((x) => x.id === "gap-fixture-fenced");
+    assert.equal(t.state, "not-evaluated", `a quoted record is not this task's parking record: ${JSON.stringify(t)}`);
+    assert.equal(t.recordedReason, null);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("AC1(h)(e) — the producer's 「原因读不出」sentinel is not a reason: still not-evaluated", () => {
+  const root = makeRoot("sentinel");
+  try {
+    // Written by the REAL producer with reason=null — exactly what an exited-not-landed round with an
+    // unreadable failure produces. Reading the sentinel as a reason would be 「读不懂伪装成读懂了」.
+    const section = buildBlockerSection(null, { ts: "2026-11-06T17:28:52.000Z" });
+    assert.ok(section.includes(UNREADABLE_BLOCKER_REASON), "precondition: the producer wrote its sentinel");
+    assert.equal(blockerRecordInBody(`## Proposal\n\n${section}\n`).reason, null, "the producer's own reader refuses the sentinel");
+    writeTask(root, "gap-fixture-sentinel", { acItems: ["- [ ] AC1 贴出证据"], blockerSection: section });
+    const t = readReading(root).tasks.find((x) => x.id === "gap-fixture-sentinel");
+    assert.equal(t.state, "not-evaluated", `an unreadable reason stays unreadable: ${JSON.stringify(t)}`);
+    assert.equal(t.recordedReason, null);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }

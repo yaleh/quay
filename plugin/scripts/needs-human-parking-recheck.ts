@@ -15,18 +15,32 @@
 // and still leave 「判据已修好、任务仍停」 invisible.
 //
 // WHAT IT DOES (a DETECTOR, never a gate; ⛔ it NEVER writes `status`):
-//   for every `status: needs-human` task it reads the LAST `## Needs-Human` record, identifies the
-//   mechanical judge NAMED in `- 阻碍原因：`, RE-RUNS that judge against the task's CURRENT body, and
+//   for every `status: needs-human` task it reads the LAST parking record, identifies the
+//   mechanical judge NAMED in it, RE-RUNS that judge against the task's CURRENT body, and
 //   reports ONLY the tasks whose criterion is clean today while the task is still parked. A task whose
 //   criterion still fires, a task parked for a non-mechanical reason, and a task whose input could not
 //   be read are all NOT reported — they are counted in their own buckets instead.
+//
+// ⛔ EVERY PRODUCER OF A PARKING RECORD MUST BE READ (tasks/gap-meta-readparkingrecord):
+//   a parking reason is written into the task body by more than one mechanism, and a reader that knows
+//   only ONE of them makes the OTHER mechanisms' entire population permanently `not-evaluated` — the
+//   reason is then never re-judged and a stale park can never be reported for it. That is EXACTLY what
+//   happened while this file read only `## Needs-Human`: the worker path parks via
+//   `- 未落地原因：` inside `## Blocker` (worker-driver.projectBlockerToTaskRecord), and a HUMAN park is
+//   written by hand as a dated `人工暂停` line — measured 2026-11-06: 4 of 4 needs-human tasks landed in
+//   `not-evaluated` while none of them was actually unreadable. ⇒ PARKING_RECORD_SOURCES is the
+//   registry of record SHAPES, and `readParkingRecord` takes the LAST record across ALL of them.
+//   ⛔ Adding a producer without adding its shape here re-creates the same defect, silently.
 //
 // FOUR STATES (硬规则 3b: 「读不懂」must never share a value with 「查过且干净」):
 //   parking-reason-stale  REPORTED — the recorded judge re-runs clean TODAY, task still needs-human
 //   still-blocked         not reported — the recorded judge still fires (parking is still justified)
 //   no-registered-judge   not reported — the recorded reason names no re-runnable mechanical judge
-//   not-evaluated         not reported — no `## Needs-Human` record / no 阻碍原因 line / the judge
-//                                       itself returned `evaluated:false` (could not read the body)
+//                                       (includes every HUMAN park: a human decision has no mechanical
+//                                       judge to re-run, which is a reading, not a failure to read)
+//   not-evaluated         not reported — NO record under ANY registered shape / a record with no
+//                                       readable reason line / the reason is the producer's own
+//                                       「读不出」哨兵 / the judge itself returned `evaluated:false`
 //
 // ⛔ WHY IT DOES NOT RE-ENQUEUE (人 2026-09-20 逐字裁定：「needs-human 本来就不应该有『可机械再入队』的
 // 路径。」): the missing product here is the REPORT — a human decision to un-park stays human. This
@@ -88,6 +102,10 @@ import { TASK_STATUS } from "./task-status.ts";
 // by the dispatch pool's own reader (line-start `**PARKED`, code spans/fences masked). ⛔ Re-deriving
 // the marker here would let this detector report on a population the pool does not actually exclude.
 import { judgeUnsatisfiableUnannotatedAc, isParked } from "./ready-pool-check.ts";
+// The `## Blocker` record's READER lives in the module that WRITES it (tasks/gap-meta-readparkingrecord):
+// the worker path parks tasks, and a consumer that re-spells `## Blocker` / `未落地原因` on its own is a
+// second vocabulary that silently drifts from the writer. ⛔ Not re-implemented here.
+import { blockerRecordInBody } from "./worker-driver.ts";
 // The TWO mechanisms ARM 2 borrows instead of re-inventing:
 //   * `runAcceptanceCapture` — THIS repo's single "run a shell command under a hard deadline" runner
 //     (SIGKILL on expiry, ETIMEDOUT mapped before anything else). ⛔ No hand-rolled spawnSync here.
@@ -128,12 +146,90 @@ export const PARKING_JUDGES: readonly ParkingJudge[] = Object.freeze([
   }),
 ]);
 
-/** A task's parking record: `found` = the `## Needs-Human` heading exists; `reason` = the 阻碍原因 line
- *  text (null when the section exists but carries no such line — 读不懂, ⛔ not "no parking reason"). */
+/** A task's parking record: `found` = SOME registered producer left a record; `reason` = its reason text
+ *  (null when the record carries no readable reason — 读不懂, ⛔ not "no parking reason"); `source` =
+ *  WHICH producer's shape it was read from (null when `found:false`), so a reader can see that e.g. a
+ *  human park was read rather than silently skipped. */
 export interface ParkingRecord {
   found: boolean;
   reason: string | null;
+  source: string | null;
 }
+
+/** One parking-record SHAPE — a producer that writes a parking reason into the task body. `locate` returns
+ *  the record's position in the body (line index; used to pick the LATEST record when a task was parked
+ *  more than once, possibly by DIFFERENT producers) plus its reason, or null when this producer left none.
+ *
+ *  ⛔ A producer whose shape is not registered here makes its whole population `not-evaluated` forever —
+ *  the defect this registry exists to prevent (see the header). */
+export interface ParkingRecordSource {
+  name: string;
+  locate: (body: string) => { index: number; reason: string | null } | null;
+}
+
+/** The `- 阻碍原因：` line inside the LAST `## Needs-Human` section (driver-filters.markNeedsHuman). */
+const NEEDS_HUMAN_REASON_RE = /^\s*[-*]\s*阻碍原因\s*[:：]\s*(.*)$/;
+
+/** A HUMAN park's record. `markNeedsHuman` / `projectBlockerToTaskRecord` are driver-only, so a human (or
+ *  a manager session) parks a task by writing the reason into the body BY HAND — the live form is a dated
+ *  line start: `2026-11-06 人工暂停（宿主降载期间）：… 恢复条件：…`. 位置判定 (硬规则 ②): only a LINE
+ *  START counts, so a body QUOTING someone else's pause line is not itself parked. */
+const MANUAL_PAUSE_RE = /^\s*(?:\*\*)?\d{4}-\d{2}-\d{2}\s*人工暂停/;
+
+/** One line, fence-masked: a `## Blocker` / `人工暂停` inside a fenced block is a CITATION, not a record. */
+function fenceMask(body: string): boolean[] {
+  const lines = String(body ?? "").split(/\r?\n/);
+  const masked: boolean[] = [];
+  let inFence = false;
+  for (const line of lines) {
+    if (/^\s*(?:```|~~~)/.test(line)) { masked.push(inFence); inFence = !inFence; continue; }
+    masked.push(inFence);
+  }
+  return masked;
+}
+
+/** The registered record SHAPES. Registering a shape = naming the SAME labels the producer writes; the
+ *  `## Blocker` entry delegates to `blockerRecordInBody` in worker-driver.ts so the label pair
+ *  (heading + `未落地原因`) is single-sourced with the writer (⛔ never a copied second vocabulary). */
+export const PARKING_RECORD_SOURCES: readonly ParkingRecordSource[] = Object.freeze([
+  Object.freeze({
+    // driver-filters.markNeedsHuman — the mechanical park path (the original population).
+    name: "markNeedsHuman(## Needs-Human / 阻碍原因)",
+    locate: (body: string) => {
+      const section = lastSection(body, "Needs-Human");
+      if (section === null) return null;
+      for (let i = 0; i < section.lines.length; i++) {
+        const m = NEEDS_HUMAN_REASON_RE.exec(section.lines[i]);
+        if (!m) continue;
+        const reason = m[1].trim();
+        return { index: section.start + 1 + i, reason: reason === "" ? null : reason };
+      }
+      // Section present, no reason line ⇒ a RECORD we could not read (⛔ not 「没有停放」).
+      return { index: section.start, reason: null };
+    },
+  }),
+  Object.freeze({
+    // worker-driver.projectBlockerToTaskRecord — the exited-not-landed path.
+    name: "projectBlockerToTaskRecord(## Blocker / 未落地原因)",
+    locate: (body: string) => blockerRecordInBody(body),
+  }),
+  Object.freeze({
+    // A human/manager park, written by hand into the body.
+    name: "manual(人工暂停 line)",
+    locate: (body: string) => {
+      const lines = String(body ?? "").split(/\r?\n/);
+      const masked = fenceMask(body);
+      let hit: { index: number; reason: string | null } | null = null;
+      for (let i = 0; i < lines.length; i++) {
+        if (masked[i]) continue;
+        if (!MANUAL_PAUSE_RE.test(lines[i])) continue;
+        const text = lines[i].replace(/^\s*(?:\*\*)?/, "").trim();
+        hit = { index: i, reason: text === "" ? null : text };
+      }
+      return hit;
+    },
+  }),
+]);
 
 /** One task's recheck verdict. `note` explains a non-stale state (never used to dress up `not-evaluated`
  *  as a pass); `currentHits` carries the judge's current offending items verbatim when it still fires. */
@@ -160,11 +256,11 @@ export interface NeedsHumanParkingReading {
   tasks: ParkingRecheck[];
 }
 
-/** The lines of the LAST `## <heading>` section (a task may carry several `## Needs-Human` blocks — one
- *  per park — and the LATEST one is the current parking reason). Fence-aware: a heading inside a fenced
- *  block is not a heading (位置判定, 硬规则 2). Returns null when the heading is absent. */
-function lastSectionLines(body: string, heading: string): string[] | null {
-  const lines = body.split(/\r?\n/);
+/** The LAST `## <heading>` section: its heading's line index + its body lines (a task may carry several
+ *  `## Needs-Human` blocks — one per park — and the LATEST one is the current parking reason). Fence-aware:
+ *  a heading inside a fenced block is not a heading (位置判定, 硬规则 2). Null when the heading is absent. */
+function lastSection(body: string, heading: string): { start: number; lines: string[] } | null {
+  const lines = String(body ?? "").split(/\r?\n/);
   const headingRe = new RegExp(`^##\\s+${heading}\\s*$`);
   let inFence = false;
   let start = -1;
@@ -180,19 +276,28 @@ function lastSectionLines(body: string, heading: string): string[] | null {
     if (!inFence && /^#{1,2}\s/.test(lines[i])) break;
     out.push(lines[i]);
   }
-  return out;
+  return { start, lines: out };
 }
 
-/** Read the LAST parking record out of a task body (the `## Needs-Human` block markNeedsHuman appends,
- *  driver-filters.ts). `found:false` (no section) and `found:true, reason:null` (section without a
- *  阻碍原因 line) are BOTH unreadable input and map to `not-evaluated` downstream. */
+/** Read the LAST parking record out of a task body, across EVERY registered producer shape — the record
+ *  written most recently in the body wins, whichever mechanism wrote it (a task re-parked by a different
+ *  path is parked for the NEWER reason). ⛔ Reading only one shape makes the other producers' entire
+ *  population permanently unreadable (the defect this registry fixes; see the header).
+ *
+ *  `found:false` (no shape matched ⇒ nobody recorded a reason) and `found:true, reason:null` (a record
+ *  exists but carries no readable reason) are BOTH unreadable input and map to `not-evaluated`. */
 export function readParkingRecord(body: string): ParkingRecord {
-  const lines = lastSectionLines(body, "Needs-Human");
-  if (lines === null) return { found: false, reason: null };
-  const bullet = lines.find((l) => /^\s*[-*]\s*阻碍原因\s*[:：]/.test(l));
-  if (!bullet) return { found: true, reason: null };
-  const reason = bullet.replace(/^\s*[-*]\s*阻碍原因\s*[:：]\s*/, "").trim();
-  return { found: true, reason: reason.length > 0 ? reason : null };
+  let best: { index: number; reason: string | null; source: string } | null = null;
+  for (const source of PARKING_RECORD_SOURCES) {
+    const hit = source.locate(body);
+    if (hit === null) continue;
+    // `>=`: on a tie the LATER registry entry wins — order-insensitive because a tie means two shapes
+    // landed on the same line, which only happens for a line that is simultaneously both, and either
+    // reading of it is the same line.
+    if (best === null || hit.index >= best.index) best = { ...hit, source: source.name };
+  }
+  if (best === null) return { found: false, reason: null, source: null };
+  return { found: true, reason: best.reason, source: best.source };
 }
 
 /** Identify + re-run the judge named in a recorded reason. Pure: reads only the two strings.
@@ -201,10 +306,17 @@ export function readParkingRecord(body: string): ParkingRecord {
 export function recheckOne(id: string, body: string): ParkingRecheck {
   const record = readParkingRecord(body);
   if (!record.found) {
-    return { id, state: "not-evaluated", judge: null, recordedReason: null, currentHits: [], note: "no ## Needs-Human record on a needs-human task" };
+    return {
+      id,
+      state: "not-evaluated",
+      judge: null,
+      recordedReason: null,
+      currentHits: [],
+      note: `no parking record under any registered shape on a needs-human task (shapes: ${PARKING_RECORD_SOURCES.map((s) => s.name).join(", ")})`,
+    };
   }
   if (record.reason === null) {
-    return { id, state: "not-evaluated", judge: null, recordedReason: null, currentHits: [], note: "## Needs-Human record carries no 阻碍原因 line" };
+    return { id, state: "not-evaluated", judge: null, recordedReason: null, currentHits: [], note: `parking record (${record.source}) carries no readable reason` };
   }
   const entry = PARKING_JUDGES.find((j) => record.reason!.includes(j.token)) ?? null;
   if (entry === null) {
@@ -214,7 +326,7 @@ export function recheckOne(id: string, body: string): ParkingRecheck {
       judge: null,
       recordedReason: record.reason,
       currentHits: [],
-      note: `recorded reason names no re-runnable mechanical judge (registry: ${PARKING_JUDGES.map((j) => j.name).join(", ")})`,
+      note: `recorded reason (via ${record.source}) names no re-runnable mechanical judge (registry: ${PARKING_JUDGES.map((j) => j.name).join(", ")})`,
     };
   }
   const verdict = entry.judge(body);
@@ -410,7 +522,7 @@ function unparkDeclarationBlock(lines: string[], startIdx: number): string[] {
 
 /**
  * Read the LAST un-park declaration out of a task body (a task may be re-parked with a rewritten
- * check; the LATEST one is the live instruction — same rule as `lastSectionLines`). Fence-aware: a
+ * check; the LATEST one is the live instruction — same rule as `lastSection`). Fence-aware: a
  * declaration quoted inside a fenced block is a CITATION, not a declaration (位置判定, 硬规则 ②).
  */
 export function readUnparkDeclaration(body: string): UnparkDeclaration {
