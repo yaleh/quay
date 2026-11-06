@@ -132,7 +132,7 @@ test("AC3 — pty-frame's production consumer after the amendment: the L2 keys l
   // AC-253 requirements are mutually exclusive). Every clause below CAN fail:
   //   1. the L2 lane still exists and IS the shared primitive (deleting the delegation ⇒ red),
   //   2. serve-send.ts opens no socket of its own (re-adding one ⇒ red — the duplicate AC-253 retired),
-  //   3. the module that calls the codec is byte-identical to the pin (a fork ⇒ red),
+  //   3. the module that calls the codec matches its recorded local baseline (a fork ⇒ red),
   //   4. the codec really lives in that module (an encoder moved elsewhere ⇒ red).
   const serveSend = fs.readFileSync(path.join(REPO_ROOT, "packages/quay/src/serve/io/serve-send.ts"), "utf8");
   assert.match(serveSend, /export function sendKeysToSession/, "the L2 keys lane is exported");
@@ -150,35 +150,27 @@ test("AC3 — pty-frame's production consumer after the amendment: the L2 keys l
   assert.equal(
     crypto.createHash("sha256").update(fs.readFileSync(auditPath)).digest("hex"),
     manifest.files["delivery-audit.mjs"],
-    "the module that calls the frame codec is byte-identical to the pinned fleet blob",
+    "the module that calls the frame codec matches its recorded local baseline",
   );
   const audit = fs.readFileSync(auditPath, "utf8");
   assert.match(audit, /encodeCtrl/, "the pinned module is the frame encoder (deliverKeys' auth + DATA)");
   assert.match(audit, /decodeFrames/, "…and the rejection decoder");
 });
 
-test("AC2 — every copy is byte-identical to the pinned quay-fleet blob (skipped, never faked, when the fleet repo is unreachable)", (t) => {
+test("AC2 — every copy matches its recorded LOCAL baseline (no external repo, no skip branch)", () => {
+  // Direction reversed by tasks/gap-primitives-decouple-from-quay-fleet: the four primitives are
+  // canonical in THIS repo, so the byte-identity assertion no longer has a second side to reach for.
+  // It used to `t.skip()` when an external checkout was absent — an honest NOT-EVALUATED, but one
+  // that made the invariant unevaluable on every machine that was not this one. The local baseline
+  // is always present, so this arm now either passes or fails; there is no third state to hide in.
   const manifest = JSON.parse(fs.readFileSync(MANIFEST_ABS, "utf8"));
-  if (!fs.existsSync(manifest.fleetRepo)) {
-    // Honest NOT-EVALUATED: the fleet checkout is not on this machine. ⛔ Do NOT pass — a green here
-    // would assert byte-identity for a comparison that never happened (硬规则 3b / 4 推论三).
-    t.skip(`fleet repo absent (${manifest.fleetRepo}) — byte-identity NOT-EVALUATED, not proven`);
-    return;
-  }
+  assert.equal("fleetRepo" in manifest, false, "the manifest carries no external repo pointer");
+  assert.equal("fleetSha" in manifest, false, "…and no pinned upstream commit to resolve");
   const recorded = manifest.files;
   assert.deepEqual(Object.keys(recorded).sort(), [...MODULES].sort(), "the manifest pins exactly the four modules");
   for (const m of MODULES) {
     const localSha = crypto.createHash("sha256").update(fs.readFileSync(path.join(PRIMITIVES_ABS, m))).digest("hex");
-    assert.equal(localSha, recorded[m], `${m}: local copy matches the manifest pin`);
-    let blob;
-    try {
-      blob = execFileSync("git", ["-C", manifest.fleetRepo, "show", `${manifest.fleetSha}:${manifest.fleetSourceDir}/${m}`], { maxBuffer: 16 * 1024 * 1024 });
-    } catch (err) {
-      t.skip(`pinned SHA ${manifest.fleetSha} unreadable in ${manifest.fleetRepo} — NOT-EVALUATED`);
-      return;
-    }
-    const fleetSha = crypto.createHash("sha256").update(blob).digest("hex");
-    assert.equal(fleetSha, recorded[m], `${m}: fleet blob at the pinned SHA matches the pin (no fork)`);
+    assert.equal(localSha, recorded[m], `${m}: local copy matches the recorded baseline`);
   }
 });
 

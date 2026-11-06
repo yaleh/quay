@@ -2339,7 +2339,7 @@ test("printNextSteps: 'Workspace ready at:' is the --root ITSELF, and agrees wit
   // literally `<root>/tasks` — i.e. the bug is INVISIBLE when `--root` is the CWD (init.ts's
   // `path.join(root, "tasks")` makes the two dirnames land back on root). So the fixture must make
   // `--root` a SUBDIR of the CWD, exactly as the reported cold start did
-  // (`/data/home/yale/work/quay-fleet` under `/data/home/yale/work` printed `/data/home/yale/work`).
+  // (`<parent>/<project>` under `<parent>` printed `<parent>`).
   const dir = tmpDir("ready-root"); // CWD: the PARENT
   const targetDir = path.join(dir, "subdir"); // --root: the workspace
   fs.mkdirSync(targetDir, { recursive: true });
