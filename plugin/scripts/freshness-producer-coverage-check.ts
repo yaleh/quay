@@ -57,6 +57,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { helpExit, isDirectEntrySafe, readJsonLines } from "./gate-script-base.ts";
+import { codeOnlyText } from "./source-text-lib.ts";
 
 export const DEFAULT_MAPPING_REL = "plugin/freshness-producers.json";
 
@@ -522,14 +523,206 @@ export function measureDeliveryFaceDistance(q: DeliveryFaceQuery): DeliveryFaceD
   };
 }
 
+// ── ⑬ 计数规则单实现守卫 (gap-arbitrary-semantics-unenforced-carriers AC1) ─────────────────────────
+//
+// THE DEFECT. The AC-214 freshness CLOCK's "commit-count → rate" rule lives in ONE implementation
+// (`measureDeliveryFaceDistance` above), declared ONCE in plugin/freshness-producers.json
+// `.delivery_face` (`command` argv + `rule` export + `implementation` path). The three consumers read
+// the DECLARATION, so a drift between a copied argv and the declaration is pinned (arm ⑤/⑥ of the
+// counting test). But NOTHING pins the IMPLEMENTATION COUNT: a second hand-written copy of the
+// counting rule would silently diverge and no check would red. This is the ⑬ risk — a semantics that
+// is only prose/drift is not executable (ADR-004), and the single-implementation constraint is the
+// whole reason the argv is declared once.
+//
+// THE GUARD (positional, 硬规则 2 — never a keyword grep): enumerate every source file whose CODE
+// (comments blanked via source-text-lib.codeOnlyText, so a comment that QUOTES the rule does not
+// count) carries the counting rule's structural signature, and require EXACTLY ONE — the file the
+// `delivery_face.command` names. The signature is the merge-classification shape that makes THIS rule
+// distinct from a naive `git rev-list --count`: `rev-list` + `--count` + `--no-merges` + `--merges` +
+// `merge-tree` + `--write-tree` (the per-merge positional judge). A second copy of the rule
+// necessarily re-implements that shape.
+//
+// THREE STATES (硬规则 3b): 0 = exactly one implementation AND it is the declared one; 1 = a second
+// implementation / the declared one is missing or inconsistent; the mapping-absent case is
+// `evaluated:false` (NOT-EVALUATED) rather than a false PASS.
+
+/** The `delivery_face` declaration a consumer needs (read out of the mapping, ⛔ not re-typed). */
+export interface DeliveryFaceDeclaration {
+  implementation: string;
+  rule: string;
+  command: string[];
+}
+
+/** Read `.delivery_face` from the mapping text. Returns null when it is missing/corrupt (NOT-EVALUATED). */
+export function readDeliveryFaceDeclaration(mappingText: string): DeliveryFaceDeclaration | null {
+  let obj: unknown;
+  try {
+    obj = JSON.parse(mappingText);
+  } catch {
+    return null;
+  }
+  if (typeof obj !== "object" || obj === null || Array.isArray(obj)) return null;
+  const df = (obj as Record<string, unknown>).delivery_face;
+  if (typeof df !== "object" || df === null || Array.isArray(df)) return null;
+  const d = df as Record<string, unknown>;
+  if (typeof d.implementation !== "string" || !d.implementation.trim()) return null;
+  if (typeof d.rule !== "string" || !d.rule.trim()) return null;
+  if (!Array.isArray(d.command) || !d.command.every((c) => typeof c === "string")) return null;
+  return { implementation: d.implementation.trim(), rule: d.rule.trim(), command: d.command as string[] };
+}
+
+/** The counting rule's structural code signature (see the section comment). Each token is a CODE
+ *  position requirement; a file whose comment quotes the rule has them blanked by `codeOnlyText`. */
+const COUNTING_RULE_CODE_TOKENS = ["rev-list", "--count", "--no-merges", "--merges", "merge-tree", "--write-tree"] as const;
+
+export function isCountingRuleCode(code: string): boolean {
+  const c = codeOnlyText(code);
+  return COUNTING_RULE_CODE_TOKENS.every((t) => c.includes(t));
+}
+
+export const COUNTING_RULE_SOURCE_EXTS = [".ts", ".js", ".mjs", ".cjs", ".sh"] as const;
+export const COUNTING_RULE_SKIP_DIRS = new Set(["node_modules", ".git", ".quay", "dist", "vendor", "archive", "coverage"]);
+
+/** Recursively list source files under `root` (no symlink follow; hidden/skip dirs excluded). */
+export function listSourceFiles(root: string, exts: readonly string[] = COUNTING_RULE_SOURCE_EXTS): string[] {
+  const out: string[] = [];
+  const walk = (dir: string): void => {
+    let entries: fs.Dirent[];
+    try {
+      entries = fs.readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const e of entries) {
+      if (e.isSymbolicLink()) continue;
+      const abs = path.join(dir, e.name);
+      if (e.isDirectory()) {
+        if (e.name.startsWith(".") || COUNTING_RULE_SKIP_DIRS.has(e.name)) continue;
+        walk(abs);
+        continue;
+      }
+      if (e.isFile() && exts.includes(path.extname(e.name).toLowerCase())) out.push(abs);
+    }
+  };
+  walk(path.resolve(root));
+  return out;
+}
+
+/** Enumerate the repo files whose CODE implements the counting rule (absolute paths). Test files are
+ *  excluded: the very test that pins this guard necessarily QUOTES the rule's tokens, and a test is a
+ *  consumer/asserter of the rule, never a second implementation point. */
+export function findCountingRuleImplementations(root: string): string[] {
+  const rootAbs = path.resolve(root);
+  return listSourceFiles(rootAbs).filter((abs) => {
+    const rel = path.relative(rootAbs, abs).split(path.sep).join("/");
+    if (/(^|\/)test(\/|$)/.test(rel)) return false;
+    if (/\.(?:test|spec)\.[^.]+$/.test(rel)) return false;
+    let text: string;
+    try {
+      text = fs.readFileSync(abs, "utf8");
+    } catch {
+      return false;
+    }
+    return isCountingRuleCode(text);
+  });
+}
+
+export interface CountingRuleSingleImplementationReport {
+  evaluated: boolean;
+  ok: boolean;
+  declaredImplementation: string | null;
+  declaredRule: string | null;
+  /** repo-relative paths of every CODE implementation found (sorted, `/` separators). */
+  implementations: string[];
+  findings: string[];
+  reason: string;
+}
+
+/** The ⑬ single-implementation judgment. Throws CoverageMappingError when the mapping is present but
+ *  its `delivery_face` declaration is unusable (fail-closed, 硬规则 3b — a broken declaration surface
+ *  must not read as "nothing to check"). */
+export function runCountingRuleSingleImplementationCheck(root: string, mappingRel?: string): CountingRuleSingleImplementationReport {
+  const rootAbs = path.resolve(root);
+  const rel = mappingRel ?? DEFAULT_MAPPING_REL;
+  const mappingAbs = path.isAbsolute(rel) ? rel : path.join(rootAbs, rel);
+  if (!fs.existsSync(mappingAbs)) {
+    return {
+      evaluated: false,
+      ok: true,
+      declaredImplementation: null,
+      declaredRule: null,
+      implementations: [],
+      findings: [],
+      reason: `NOT-EVALUATED: mapping absent at ${path.relative(rootAbs, mappingAbs) || mappingAbs} — nothing to judge (distinct from PASS)`,
+    };
+  }
+  const decl = readDeliveryFaceDeclaration(fs.readFileSync(mappingAbs, "utf8"));
+  if (decl === null) {
+    throw new CoverageMappingError("mapping.delivery_face is missing/corrupt (needs `implementation` + `rule` + `command`)");
+  }
+
+  const impls = findCountingRuleImplementations(rootAbs)
+    .map((abs) => path.relative(rootAbs, abs).split(path.sep).join("/"))
+    .sort();
+  const findings: string[] = [];
+  if (impls.length === 0) {
+    findings.push("no counting-rule implementation found in repo code (the declared implementation is missing or the signature drifted)");
+  } else if (impls.length > 1) {
+    findings.push(`${impls.length} counting-rule implementations found (exactly 1 required): ${impls.join(", ")}`);
+  } else if (impls[0] !== decl.implementation) {
+    findings.push(`the single counting-rule implementation ${impls[0]} is NOT the declared delivery_face.implementation ${decl.implementation}`);
+  }
+
+  const implAbs = path.join(rootAbs, decl.implementation);
+  if (!fs.existsSync(implAbs)) {
+    findings.push(`declared delivery_face.implementation '${decl.implementation}' does not exist`);
+  } else {
+    const src = fs.readFileSync(implAbs, "utf8");
+    // The declared rule name is matched as `export function <name>` / `export const <name>`, so it
+    // must be a JS identifier. A name that is NOT a valid identifier cannot be exported that way:
+    // report it directly instead of regex-escaping it into a pattern (an inline escape body would
+    // re-spell the kernel leaf packages/quay/src/kernel/regex-escape.ts — the exact duplication the
+    // kernel-regex-escape FAMILY check forbids).
+    const IDENT = /^[A-Za-z_$][A-Za-z0-9_$]*$/;
+    if (!IDENT.test(decl.rule)) {
+      findings.push(`declared delivery_face.rule '${decl.rule}' is not a valid JS identifier (cannot be an export name)`);
+    } else {
+      const ruleRe = new RegExp(`(?:^|\\n)\\s*export\\s+(?:function|const|let|var|async\\s+function)\\s+${decl.rule}\\b`);
+      if (!ruleRe.test(src)) {
+        findings.push(`declared delivery_face.rule '${decl.rule}' is not exported by ${decl.implementation}`);
+      }
+    }
+  }
+  if (!decl.command.includes(decl.implementation)) {
+    findings.push(`delivery_face.command does not name the declared implementation (argv: ${JSON.stringify(decl.command)})`);
+  }
+
+  const ok = findings.length === 0;
+  return {
+    evaluated: true,
+    ok,
+    declaredImplementation: decl.implementation,
+    declaredRule: decl.rule,
+    implementations: impls,
+    findings,
+    reason: ok
+      ? `exactly one counting-rule implementation (${impls[0]}), and it is the declared delivery_face implementation`
+      : `${findings.length} finding(s): ${findings.join("; ")}`,
+  };
+}
+
 const USAGE = `usage: freshness-producer-coverage-check.ts [--root <dir>] [--mapping <rel>] [--carrier <rel>] [--margin <rel>] [--json]
        freshness-producer-coverage-check.ts --delivery-face-distance [<from>] [--from <rev>] [--since <spec>] [--tip <ref>] [--root <dir>] [--json]
+       freshness-producer-coverage-check.ts --counting-rule-single-implementation [--root <dir>] [--mapping <rel>] [--json]
 Judges whether every carrier-observed freshness subject has a registered producer (AC7 of
 tasks/gap-ac214-upgrade-face-refresh-and-mechanical-freshness-trigger), and — with
 --delivery-face-distance — measures the AC-214 freshness clock under the ONE counting rule shared by
-that criterion and plugin/probes/freshness-refresh.md ③ (see the section comment above).
+that criterion and plugin/probes/freshness-refresh.md ③ (see the section comment above). With
+--counting-rule-single-implementation it guards that the counting rule has EXACTLY ONE implementation
+(gap-arbitrary-semantics-unenforced-carriers AC1).
 Exit (coverage mode): 0 = judged+consistent (or carrier absent ⇒ evaluated:false); 1 = findings; 2 = mapping missing/corrupt.
-Exit (distance mode): 0 = state:"computed" (distance is an integer); 3 = state:"empty-path-set" | "not-evaluated" (distance is null); 2 = usage.`;
+Exit (distance mode): 0 = state:"computed" (distance is an integer); 3 = state:"empty-path-set" | "not-evaluated" (distance is null); 2 = usage.
+Exit (single-implementation mode): 0 = exactly one implementation AND it is the declared one (or mapping absent ⇒ evaluated:false); 1 = findings; 2 = mapping corrupt/usage.`;
 
 function main(argv: string[]): number {
   let root = process.cwd();
@@ -539,6 +732,7 @@ function main(argv: string[]): number {
   let json = false;
   // ── delivery-face-distance mode (see the section comment above) ────────────────────────────────
   let distanceMode = false;
+  let singleImplMode = false;
   let from: string | undefined;
   let since: string | undefined;
   let tip: string | undefined;
@@ -554,6 +748,7 @@ function main(argv: string[]): number {
     else if (a.startsWith("--margin=")) marginRel = a.slice("--margin=".length);
     else if (a === "--json") json = true;
     else if (a === "--delivery-face-distance") distanceMode = true;
+    else if (a === "--counting-rule-single-implementation") singleImplMode = true;
     else if (a === "--from") from = argv[++i];
     else if (a.startsWith("--from=")) from = a.slice("--from=".length);
     else if (a === "--since") since = argv[++i];
@@ -563,6 +758,28 @@ function main(argv: string[]): number {
     else if (a === "-h" || a === "--help") helpExit(USAGE);
     else if (distanceMode && from === undefined && !a.startsWith("-")) from = a; // `--delivery-face-distance <rev>`
     else return helpExit(`unknown argument: ${a}\n${USAGE}`);
+  }
+
+  if (singleImplMode) {
+    let report: CountingRuleSingleImplementationReport;
+    try {
+      report = runCountingRuleSingleImplementationCheck(root, mappingRel);
+    } catch (e) {
+      const msg = e instanceof CoverageMappingError ? e.message : String(e);
+      if (json) process.stdout.write(JSON.stringify({ evaluated: false, ok: false, error: msg }, null, 2) + "\n");
+      else process.stderr.write(`freshness-producer-coverage-check: USAGE/ENV ERROR — ${msg}\n`);
+      return 2;
+    }
+    if (json) {
+      process.stdout.write(JSON.stringify(report, null, 2) + "\n");
+    } else if (!report.evaluated) {
+      process.stdout.write(`counting-rule-single-implementation: NOT-EVALUATED — ${report.reason}\n`);
+    } else {
+      process.stdout.write(`counting-rule-single-implementation: ${report.ok ? "PASS" : "FAIL"} — ${report.reason}\n`);
+      for (const f of report.findings) process.stdout.write(`  - ${f}\n`);
+    }
+    if (!report.evaluated) return 0;
+    return report.ok ? 0 : 1;
   }
 
   if (distanceMode) {

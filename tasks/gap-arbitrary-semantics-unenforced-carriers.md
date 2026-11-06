@@ -1,7 +1,7 @@
 ---
 id: gap-arbitrary-semantics-unenforced-carriers
 title: 武断实现语义缺可执行承接：⑬ 计数规则无单实现守卫 / ⑥⑦⑧ 冲突消解只活在 prompt 散文 / ⑫⑭ 载体未定位
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -34,9 +34,15 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1: ⑬ 单实现守卫落地且**能取假**——正臂：现状恰好 1 处实现、检查通过；负臂：注入第二份手写计数实现后该检查**必红**（任务体给出命令与红输出逐字）。
-- [ ] AC2: ⑥⑦⑧ 至少规则 (3)(4)(5) 有可执行承接——机械化或契约检查二选一；负臂：删掉/改错对应规则后检查**必红**（证明它不再只断言字符串在场）。
-- [ ] AC3: ⑫⑭ 的真载体在任务体 `## Evidence` 中逐个写明 `file:line` + 当前承接方式，并逐字纠正 `checker-io.ts` 与 `goal-merge.ts:177` 两处错误引用。
+- [x] AC1: ⑬ 单实现守卫落地且**能取假**——正臂：现状恰好 1 处实现、检查通过；负臂：注入第二份手写计数实现后该检查**必红**（任务体给出命令与红输出逐字）。
+  - 命令（正臂，绿）：`node --experimental-strip-types plugin/scripts/freshness-producer-coverage-check.ts --counting-rule-single-implementation --root <worktree> --json` ⇒ `"evaluated": true, "ok": true, "implementations": ["plugin/scripts/freshness-producer-coverage-check.ts"]`（exit 0）。
+  - 命令（负臂，红）：往 `<tmp>/plugin/scripts/second-counting-rule.ts` 注入含 `rev-list --count --no-merges --merges merge-tree --write-tree` 的第二份实现后重跑 ⇒ `"ok": false, "implementations": [2 个]`，`"reason": "1 finding(s): 2 counting-rule implementations found (exactly 1 required): plugin/scripts/freshness-producer-coverage-check.ts, plugin/scripts/second-counting-rule.ts"`（exit 1）。
+- [x] AC2: ⑥⑦⑧ 至少规则 (3)(4)(5) 有可执行承接——机械化或契约检查二选一；负臂：删掉/改错对应规则后检查**必红**（证明它不再只断言字符串在场）。
+  - 载体：新增 `plugin/scripts/conflict-resolution-rules.ts`（决策 `conflictAction` 按位置判 (3)(4)(5) + 真 git 执行 `resolveConflictMechanically` + CLI `--judge`/`--resolve`）；规则的可执行承接由该模块 + 行为测试承担，⛔ 不靠 prompt 字符串（`worker-driver.ts` 未改——避免 prompt 变长触发 `gap-worker-prompt-note-family-slimming` 的 25% 棘轮）。
+  - 命令（行为正臂，绿）：`node --experimental-strip-types --test plugin/test/worker-driver-resident-s07.test.mjs` ⇒ 8 pass / 0 fail，其中 3 条 AC2 用例：conflictAction 位置判定（dual-copy-sync / take-develop / delete-side / manual）、resolveConflictMechanically 真跑 `git checkout develop --` / `git rm` / 两副本 byte-identical 同步、负臂。
+  - 命令（负臂，红）：把 `conflict-resolution-rules.ts` 的 `new Set(["DU", "UD"])` 改成 `new Set([])` 后 `node --experimental-strip-types <mutated> --judge tasks/x.md DU --json` ⇒ `"kind": "manual"`（exit 1），不再 `"delete-side"`——证明检查验的是行为不是字符串在场。
+- [x] AC3: ⑫⑭ 的真载体在任务体 `## Evidence` 中逐个写明 `file:line` + 当前承接方式，并逐字纠正 `checker-io.ts` 与 `goal-merge.ts:177` 两处错误引用。
+  - 见 `## Evidence` 的 ⑫⑭ 两条：均已写明真 `file:line` + 当前承接方式，并逐字纠正两处错误引用。
 
 ## Definition of Done
 
@@ -55,7 +61,12 @@ extra:
 - ⑨ `propagateDocBranchToDevelop` 唯一定义：`plugin/scripts/driver-filters.ts:1301`
 - ⑩ sufficiency 人可见：`packages/quay/src/cli/goal.ts:409` / `:413`，说明在 `packages/quay/src/cli/help.ts:626`
 - ⑪ `activeGoalIdsOf`：`plugin/scripts/goal-driver.ts:2148-2155`（⛔ 注意 `:876-888` 的 `inScopeAcsOf` 是 `{active,achieved,needs-human}` 另一个口径，勿混）
+- ⑫ 真载体（同签名红 3 轮 ⇒ 先看被红 checker 自身 exit 0 ⇒ 欠 re-anchor）：`plugin/scripts/worker-fan-in.ts:1529-1559` `decideBaselineRedCircuitBreaker`（`LOOP DEADLOCK` 诊断在 `:1551`，`No other task in the carrier shares this signature yet` 分支在 `:1555`——「看似死锁」的形状）+ `plugin/scripts/sh-census-check.ts:874-877` `judge()`（`ok: over.length === 0 && shrink.raised.length === 0`）与 `:954-955`（`verdict.ok ? 0 : 1`）。区分信号：downward 普查移动（把文件移出 census 总体）时 checker 自身 exit 0（缩限合法），只有测试的 equality 断言红 ⇒ 是「欠 re-anchor」，不是 peer 死锁。
+- ⑭ 真载体（探针失败≠套件红，只落 Fact failed/not-evaluated）：`plugin/scripts/probe-routine.ts:95`（载体 `.quay/routine-findings.jsonl`）、`:31-32`（「⛔ NOT a hot-path gate … The ONLY caller is the quality driver's routine table」= 结构上不进 fan-in/套件）、`:1079-1080`（spawn error ⇒ `fact("failed")`）、`:1088-1089`（FILE-ONLY guard 读不懂 ⇒ `fact("not-evaluated")`）、`:1092-1094`（FILE-ONLY 违约 ⇒ `fact("failed")`）、`:1098-1110`（探针输出读不懂 ⇒ `fact("failed")`）。
+- ⛔ 纠错 1：`plugin/scripts/checker-io.ts` 是 `DriverResult` ↔ exit code 的三义映射（`driverResultToExit` `:48-57`：verified→0 / failed→1 / not-evaluated→2），**不是**「同签名红先看 checker 自身 exit 0」——那是 ⑫，真载体见上条。
+- ⛔ 纠错 2：`packages/quay/src/goal-merge.ts:177` 的 `not-evaluated` 是 `readGoalSufficiency`（⑩ sufficiency 人可见，`covered | insufficient | not-evaluated` 三态之一）的载体，**不是** ⑭——⑭ 是探针失败落 Fact failed/not-evaluated，真载体见上条。
 - 来源正本（只读，不在本仓）：`~/.claude/domain-semantic-induction/METHODOLOGY.md`、`~/.claude/domain-semantic-induction/gate-result-validity/D-slices-confirmed.md`
+- 该轴仍暗,理由:本任务新增一个纯库模块（conflict-resolution-rules.ts，只 import node 内建 + gate-script-base）+ 一个 checker 模式 + 测试，未改 packages/ 依赖结构、未新增跨层 import，未运行 archguard ⇒ 无本任务可归因的 L_D/L_G 数值读数。
 
 ## Touches
 
@@ -63,6 +74,8 @@ extra:
 - plugin/test/freshness-distance-counting.test.mjs
 - plugin/scripts/worker-driver.ts
 - plugin/test/worker-driver-resident-s07.test.mjs
+- plugin/scripts/conflict-resolution-rules.ts
+- plugin/scripts/capability-catalog-declarations.json
 - tasks/gap-arbitrary-semantics-unenforced-carriers.md
 
 ## Needs-Human
