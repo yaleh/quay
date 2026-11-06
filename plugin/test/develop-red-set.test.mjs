@@ -37,8 +37,11 @@ import {
   parseFailureSignatures,
   developRedPoints,
   developRedKey,
+  developRedSetView,
   maintainDevelopRedSet,
+  markDevelopRedNotEvaluated,
   readDevelopRedSet,
+  writeDevelopRedSet,
   DEVELOP_RED_SET_REL,
 } from "../scripts/worker-fan-in.ts";
 import { applyDevelopRedObservation } from "../scripts/worker-driver.ts";
@@ -68,7 +71,7 @@ function tmpRoot(tag) {
   return fs.mkdtempSync(path.join(os.tmpdir(), `devredset-${tag}-`));
 }
 function obs({ develop, evaluatedAt, task = "gap-fixture-task", points = [], evaluatedFiles = [] }) {
-  return { develop, evaluatedAt, task, points, evaluatedFiles };
+  return { state: "evaluated", develop, evaluatedAt, task, points, evaluatedFiles };
 }
 function pt(file, name, signature = name) {
   return { key: `${file}::${name}`, file, signature };
@@ -485,4 +488,310 @@ test("AC5 — a moved number in the assertion body keeps ONE key (no new key, fi
   assert.equal(s2.reds[0].firstSeenAt, "2026-10-27T00:00:00.000Z", "firstSeenAt must survive a signature change");
   assert.equal(s2.reds[0].lastSeenAt, "2026-10-27T01:00:00.000Z");
   assert.match(s2.reds[0].lastSignature, /1690/, "the raw signature is refreshed as the reference field");
+});
+
+// ════════════════════════════════════════════════════════════════════════════════════════════════════
+// gap-develop-red-set-empty-conflates-clean-with-not-evaluated
+// ════════════════════════════════════════════════════════════════════════════════════════════════════
+
+// ── AC1 ─────────────────────────────────────────────────────────────────────────────────────────────
+// 三条**互不相等**的落盘形态：not-evaluated / clean（正控制）/ reds（正控制）。
+// ⛔ 变异负控（见 Evidence）：删掉 `applyDevelopRedObservation` 里 `obs.state === "not-evaluated"`
+//    那条分支后，① 会退化成 `clean`（旧实现的折叠）⇒ 本测试必须变红。
+const NOT_EVAL_INPUTS = [
+  { reasonKind: "oom-killed", reason: "oom-killed: baseline rerun lost 514 of 579 planned files (oomKill=2, terminal=65)" },
+  { reasonKind: "incomplete", reason: "incomplete: baseline rerun is missing 3 of 40 planned files (terminal=37, oomKill=0)" },
+  { reasonKind: "watchdog-killed", reason: "watchdog-killed: baseline rerun aborted (spawn timeout after 300000ms (SIGKILL process group): bash)" },
+];
+
+function notEvalObs(input, { develop = "a".repeat(40), task = "gap-fixture-task" } = {}) {
+  return { state: "not-evaluated", task, evaluatedAt: "2026-11-06T00:00:00.000Z", ...input, develop };
+}
+
+function readCarrierBytes(root) {
+  return fs.readFileSync(path.join(root, DEVELOP_RED_SET_REL), "utf8");
+}
+
+test("AC1 ① — an incomplete / OOM-killed / watchdog-killed baseline evaluation writes an EXPLICIT not-evaluated carrier", () => {
+  for (const input of NOT_EVAL_INPUTS) {
+    const root = tmpRoot(`noteval-${input.reasonKind}`);
+    const res = applyDevelopRedObservation({ root, observation: notEvalObs(input) });
+    assert.equal(res.written, true, `[${input.reasonKind}] write failed: ${res.reason}`);
+    assert.equal(res.state, "not-evaluated");
+    const raw = JSON.parse(readCarrierBytes(root));
+    assert.equal(raw.state, "not-evaluated", `[${input.reasonKind}] the carrier must SAY it was not evaluated`);
+    assert.equal(raw.reasonKind, input.reasonKind);
+    // AC3: the reason lands in the carrier **verbatim**.
+    assert.equal(raw.reason, input.reason, `[${input.reasonKind}] the reason must be byte-preserved on disk`);
+    assert.ok(typeof raw.reason === "string" && raw.reason.trim() !== "", "reason must be non-empty");
+    assert.deepEqual(raw.reds, [], "a first-round not-evaluated carrier carries no invented reds");
+    // …and the reader reports the SAME state (it is not silently re-read as clean).
+    const read = readDevelopRedSet(root);
+    assert.equal(read.evaluated, true, "parsable is NOT the same axis as 'the baseline was evaluated'");
+    assert.equal(read.set.state, "not-evaluated");
+    assert.equal(read.set.reasonKind, input.reasonKind);
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+  // The three causes are distinguishable **by value** — not three spellings of one string, and none is null.
+  assert.equal(new Set(NOT_EVAL_INPUTS.map((i) => i.reasonKind)).size, 3);
+  assert.equal(new Set(NOT_EVAL_INPUTS.map((i) => i.reason)).size, 3);
+});
+
+test("AC1 ②③ — clean (complete + all green) vs reds (complete + real red) vs not-evaluated are THREE DIFFERENT carriers", () => {
+  const D = "b".repeat(40);
+  const mk = (tag) => tmpRoot(`three-state-${tag}`);
+
+  // ① not-evaluated
+  const rootNE = mk("ne");
+  applyDevelopRedObservation({ root: rootNE, observation: notEvalObs(NOT_EVAL_INPUTS[0], { develop: D }) });
+
+  // ② positive control: a COMPLETE evaluation that found nothing (the real "clean" world).
+  const rootClean = mk("clean");
+  const cleanRes = applyDevelopRedObservation({ root: rootClean, observation: obs({
+    develop: D, evaluatedAt: "2026-11-06T01:00:00.000Z", points: [], evaluatedFiles: ["plugin/test/a.test.mjs"],
+  }) });
+  assert.equal(cleanRes.written, true, `clean write failed: ${cleanRes.reason}`);
+
+  // ③ positive control: a COMPLETE evaluation that found a red.
+  const rootReds = mk("reds");
+  const redsRes = applyDevelopRedObservation({ root: rootReds, observation: obs({
+    develop: D, evaluatedAt: "2026-11-06T02:00:00.000Z",
+    points: [pt("plugin/test/a.test.mjs", "AC1 — a")], evaluatedFiles: ["plugin/test/a.test.mjs"],
+  }) });
+  assert.equal(redsRes.written, true, `reds write failed: ${redsRes.reason}`);
+
+  const ne = JSON.parse(readCarrierBytes(rootNE));
+  const clean = JSON.parse(readCarrierBytes(rootClean));
+  const reds = JSON.parse(readCarrierBytes(rootReds));
+
+  assert.equal(ne.state, "not-evaluated");
+  assert.equal(clean.state, "clean");
+  assert.equal(reds.state, "reds");
+
+  // ⛔ THE WHOLE POINT: the not-evaluated carrier has `reds: []` EXACTLY like the clean one, and is still
+  // distinguishable. Before this task those two worlds were the same JSON.
+  assert.deepEqual(ne.reds, [], "both worlds carry an empty reds array…");
+  assert.deepEqual(clean.reds, [], "…which is precisely why the array alone cannot be the reading");
+  assert.notDeepEqual(ne, clean, "not-evaluated MUST NOT be equal to the clean carrier");
+  assert.notDeepEqual(ne, reds, "not-evaluated MUST NOT be equal to the reds carrier");
+  assert.notDeepEqual(clean, reds, "clean MUST NOT be equal to the reds carrier");
+  // The reds are still written (the "a red disappeared" signal keeps its input).
+  assert.equal(reds.reds.length, 1);
+  assert.equal(reds.reason, null);
+  assert.equal(reds.reasonKind, null);
+  assert.equal(clean.reason, null);
+  assert.equal(clean.reasonKind, null);
+
+  // The pure maintainer produces the same two evaluated states without touching disk.
+  const pureClean = maintainDevelopRedSet(null, obs({
+    develop: D, evaluatedAt: "2026-11-06T01:00:00.000Z", points: [], evaluatedFiles: ["plugin/test/a.test.mjs"],
+  }), { developAdvanced: true });
+  assert.equal(pureClean.state, "clean");
+  const pureReds = maintainDevelopRedSet(null, obs({
+    develop: D, evaluatedAt: "2026-11-06T02:00:00.000Z",
+    points: [pt("plugin/test/a.test.mjs", "AC1 — a")], evaluatedFiles: ["plugin/test/a.test.mjs"],
+  }), { developAdvanced: true });
+  assert.equal(pureReds.state, "reds");
+  const pureNE = markDevelopRedNotEvaluated(null, notEvalObs(NOT_EVAL_INPUTS[1], { develop: D }));
+  assert.equal(pureNE.state, "not-evaluated");
+  assert.notDeepEqual(pureNE, pureClean);
+
+  for (const r of [rootNE, rootClean, rootReds]) fs.rmSync(r, { recursive: true, force: true });
+});
+
+test("AC1 — a not-evaluated round KEEPS the last known reds (no upsert, no remove) and never invents one", () => {
+  const D1 = "1".repeat(40);
+  const D2 = "2".repeat(40);
+  const root = tmpRoot("noteval-keep");
+  applyDevelopRedObservation({ root, observation: obs({
+    develop: D1, evaluatedAt: "2026-11-06T00:00:00.000Z",
+    points: [pt("plugin/test/a.test.mjs", "AC1 — a")], evaluatedFiles: ["plugin/test/a.test.mjs"],
+  }) });
+  assert.equal(JSON.parse(readCarrierBytes(root)).state, "reds");
+
+  // A round that could not be evaluated must not wipe the red set (that would be the "clean" world).
+  const res = applyDevelopRedObservation({ root, observation: notEvalObs(NOT_EVAL_INPUTS[0], { develop: D2 }) });
+  assert.equal(res.written, true);
+  const raw = JSON.parse(readCarrierBytes(root));
+  assert.equal(raw.state, "not-evaluated");
+  assert.deepEqual(raw.reds.map((e) => e.key), ["plugin/test/a.test.mjs::AC1 — a"], "the known red must survive");
+  assert.equal(raw.reds[0].lastSeenAt, "2026-11-06T00:00:00.000Z", "not-evaluated must not refresh lastSeenAt (nothing was seen)");
+
+  // …and it must never manufacture a red it did not observe.
+  const root2 = tmpRoot("noteval-nogrow");
+  const res2 = applyDevelopRedObservation({ root: root2, observation: notEvalObs(NOT_EVAL_INPUTS[2], { develop: D1 }) });
+  assert.equal(res2.written, true);
+  assert.deepEqual(JSON.parse(readCarrierBytes(root2)).reds, [], "not-evaluated cannot produce a red out of nothing");
+  fs.rmSync(root, { recursive: true, force: true });
+  fs.rmSync(root2, { recursive: true, force: true });
+});
+
+test("AC1/AC3 — a legacy carrier with no `state` field is NEVER read as clean", () => {
+  const root = tmpRoot("legacy");
+  fs.mkdirSync(path.join(root, ".quay"), { recursive: true });
+  fs.writeFileSync(path.join(root, DEVELOP_RED_SET_REL), JSON.stringify({
+    develop: "c".repeat(40), evaluatedAt: "2026-11-06T12:40:40.902Z", reds: [],
+  }), "utf8");
+  const read = readDevelopRedSet(root);
+  assert.equal(read.evaluated, true, "the file parses…");
+  assert.equal(read.set.state, "not-evaluated", "…but it cannot say it was evaluated, so it must not claim clean");
+  assert.equal(read.set.reasonKind, "legacy-carrier-no-state");
+  assert.ok(String(read.set.reason).length > 0);
+  assert.equal(developRedSetView(read).kind, "not-evaluated");
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+// ── AC3 ─────────────────────────────────────────────────────────────────────────────────────────────
+test("AC3 — the carrier still has exactly ONE production write call site, and it is worker-driver.ts", () => {
+  const callSites = [];
+  for (const name of fs.readdirSync(SCRIPTS).filter((f) => f.endsWith(".ts"))) {
+    const body = fs.readFileSync(path.join(SCRIPTS, name), "utf8");
+    body.split("\n").forEach((line, i) => {
+      if (!line.includes("writeDevelopRedSet(")) return;
+      if (/^\s*(export\s+)?function\s+writeDevelopRedSet\s*\(/.test(line)) return; // the definition
+      callSites.push(`${name}:${i + 1}`);
+    });
+  }
+  assert.equal(callSites.length, 1, `expected exactly ONE write call site, got:\n${callSites.join("\n")}`);
+  assert.match(callSites[0], /^worker-driver\.ts:/, `the sole writer must be worker-driver.ts, got ${callSites[0]}`);
+});
+
+// ── AC2 ─────────────────────────────────────────────────────────────────────────────────────────────
+// (a) ENUMERATE the production consumers — never assume the list. A new consumer reds this test.
+test("AC2 — the carrier's in-repo consumers are enumerated (a new reader must be classified here first)", () => {
+  const readers = [];
+  for (const name of fs.readdirSync(SCRIPTS).filter((f) => f.endsWith(".ts"))) {
+    const body = fs.readFileSync(path.join(SCRIPTS, name), "utf8");
+    body.split("\n").forEach((line, i) => {
+      if (!line.includes("readDevelopRedSet(")) return;
+      if (/^\s*export\s+function\s+readDevelopRedSet\s*\(/.test(line)) return; // the definition
+      readers.push(`${name}:${i + 1}`);
+    });
+  }
+  // Consumer 1 — worker-driver.ts, `applyDevelopRedObservation` (the write-side "read the previous carrier").
+  // Consumer 2 — worker-fan-in.ts, `runBaselineEquivalence`'s rerun-list builder.
+  assert.deepEqual(readers.map((s) => s.split(":")[0]).sort(), ["worker-driver.ts", "worker-fan-in.ts"],
+    `the consumer list changed — classify the new reader against BOTH directions before landing:\n${readers.join("\n")}`);
+  assert.equal(readers.length, 2, `expected exactly 2 consumers, got:\n${readers.join("\n")}`);
+});
+
+// (b) Consumer 2 — BOTH directions on the real fan-in. The carrier's state must have NO vote:
+//     ① it must not turn "not evaluated" into "this task introduced the red";
+//     ② it must not turn "not evaluated" into "the baseline is clean ⇒ exempt".
+//     The strongest form of both assertions is EQUALITY: identical suite/rerun output + three different
+//     carrier states ⇒ byte-identical verdict. Anything that let the carrier vote would break the equality.
+async function fanInWithCarrier(tag, carrier, extra = {}) {
+  const task = `gap-devredset-carrier-${tag}`;
+  const fx = makeFixture(`carrier-${tag}`, task);
+  const MINE_FILE = "plugin/test/mine.test.mjs";
+  const suiteLog = redLog(MINE_FILE, "my new test fails");
+  fs.mkdirSync(path.join(fx.repo, ".quay"), { recursive: true });
+  fs.writeFileSync(path.join(fx.repo, DEVELOP_RED_SET_REL), JSON.stringify(carrier, null, 2), "utf8");
+  const r = await runMechanicalFanIn({
+    task,
+    worktree: fx.worktree,
+    root: fx.repo,
+    runId: `devredset-carrier-${tag}`,
+    mergeTarget: "develop",
+    forceSuite: true,
+    scriptsDir: path.join(REPO, "plugin", "scripts"),
+    slotBase: fx.slotBase,
+    slotLib: SLOT_LIB,
+    silenceMs: 500,
+    ffMergeModule: FF_MERGE_MODULE,
+    suiteCapture: fx.capture,
+    suiteLogFile: path.join(fx.base, "suite.log"),
+    suiteCommand: emit(suiteLog, 1),
+    // On develop the task's file is green ⇒ nothing is red on the baseline.
+    rerunCommand: emit(redLog(MINE_FILE, "my new test fails"), 1),
+    baselineRerunCommand: emit(`__PERFILE__ duration_ms=1 ${MINE_FILE} passed=true end_ms=1\n`, 0),
+    baselineProvisionCommand: null,
+    scopedGateCommand: ["true"],
+    docCheckCommand: ["true"],
+    ...extra,
+  });
+  const view = r.baselineEquivalence?.verdict;
+  const observation = r.baselineEquivalence?.developRedObservation;
+  fs.rmSync(fx.base, { recursive: true, force: true });
+  return { r, view, observation };
+}
+
+test("AC2 ①+② — the carrier state has NO vote on the A/B verdict (not-evaluated ≠ hard-red, ≠ exempt)", async () => {
+  const D = "d".repeat(40);
+  const clean = await fanInWithCarrier("clean", {
+    develop: D, evaluatedAt: "2026-11-06T00:00:00.000Z", state: "clean", reasonKind: null, reason: null, reds: [],
+  });
+  const notEval = await fanInWithCarrier("noteval", {
+    develop: D, evaluatedAt: "2026-11-06T00:00:00.000Z", state: "not-evaluated",
+    reasonKind: "oom-killed", reason: "oom-killed: baseline rerun lost 3 of 4 planned files", reds: [],
+  });
+  // ② The not-evaluated carrier must NOT be read as "the baseline is clean" ⇒ the verdict must not be exempt.
+  assert.equal(notEval.view?.kind, "hard-red",
+    `not-evaluated must not exempt the task's red (direction ②), got ${JSON.stringify(notEval.view)}`);
+  assert.equal(notEval.view?.reason, "task-introduced-red");
+  // ① …and it must not be a *different* verdict from the clean carrier either: the carrier gets no vote at
+  //    all, because the decision comes from the FRESH rerun on the develop tree (which is identical here).
+  assert.deepEqual(notEval.view, clean.view,
+    "the carrier's state must not change the verdict — the fresh baseline rerun decides, not the carrier");
+  // Both runs really did evaluate the baseline (this is not "both failed to evaluate").
+  assert.equal(notEval.observation?.state, "evaluated");
+  assert.equal(clean.observation?.state, "evaluated");
+  assert.deepEqual(notEval.observation?.points, []);
+});
+
+test("AC2 — a not-evaluated carrier's LAST-KNOWN reds are still re-asked on develop (empty ≠ 'nothing to re-ask')", async () => {
+  const task = "gap-devredset-carrier-stale";
+  const fx = makeFixture("carrier-stale", task);
+  try {
+    const OLD_FILE = "plugin/test/old.test.mjs";
+    // The stale red must exist on DEVELOP (the baseline worktree is checked out there).
+    git(fx.repo, ["checkout", "-q", "develop"]);
+    write(fx.repo, OLD_FILE, "// pre-existing red, recorded in the carrier\n");
+    git(fx.repo, ["add", "-A"]);
+    git(fx.repo, ["commit", "-q", "-m", "add the pre-existing red file"]);
+    git(fx.repo, ["checkout", "-q", "author"]);
+    git(fx.worktree, ["merge", "--no-edit", "develop"]);
+    const before = git(fx.repo, ["rev-parse", "develop"]).trim();
+    fs.mkdirSync(path.join(fx.repo, ".quay"), { recursive: true });
+    fs.writeFileSync(path.join(fx.repo, DEVELOP_RED_SET_REL), JSON.stringify({
+      develop: before, evaluatedAt: "2026-11-06T00:00:00.000Z",
+      state: "not-evaluated", reasonKind: "watchdog-killed", reason: "watchdog-killed: baseline rerun aborted",
+      reds: [{
+        key: `${OLD_FILE}::`, files: [OLD_FILE],
+        firstSeenAt: "2026-11-01T00:00:00.000Z", lastSeenAt: "2026-11-05T00:00:00.000Z",
+        blockedTasks: ["gap-some-earlier-task"], lastSignature: "still broken on develop",
+      }],
+    }, null, 2), "utf8");
+
+    const MINE_FILE = "plugin/test/mine.test.mjs";
+    const r = await runMechanicalFanIn({
+      task,
+      worktree: fx.worktree,
+      root: fx.repo,
+      runId: "devredset-carrier-stale",
+      mergeTarget: "develop",
+      forceSuite: true,
+      scriptsDir: path.join(REPO, "plugin", "scripts"),
+      slotBase: fx.slotBase,
+      slotLib: SLOT_LIB,
+      silenceMs: 500,
+      ffMergeModule: FF_MERGE_MODULE,
+      suiteCapture: fx.capture,
+      suiteLogFile: path.join(fx.base, "suite.log"),
+      suiteCommand: emit(redLog(MINE_FILE, "my new test fails"), 1),
+      rerunCommand: emit(redLog(MINE_FILE, "my new test fails"), 1),
+      baselineRerunCommand: emit(`__PERFILE__ duration_ms=1 ${MINE_FILE} passed=true end_ms=1\n`, 0),
+      baselineProvisionCommand: null,
+      scopedGateCommand: ["true"],
+      docCheckCommand: ["true"],
+    });
+    const observation = r.baselineEquivalence?.developRedObservation;
+    assert.equal(observation?.state, "evaluated");
+    // The stale (last-known) red file was still put back on the baseline rerun — a not-evaluated carrier
+    // is not "nothing is red", so its files must keep being re-asked (otherwise the removal signal dies).
+    assert.deepEqual([...observation.evaluatedFiles].sort(), [MINE_FILE, OLD_FILE].sort(),
+      `the last-known red file must be re-asked, got ${JSON.stringify(observation.evaluatedFiles)}`);
+  } finally {
+    fs.rmSync(fx.base, { recursive: true, force: true });
+  }
 });

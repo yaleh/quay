@@ -136,14 +136,20 @@ else
 fi
 
 # ── (b) 6 mechanism names reverse-searchable in the artifact ──────────────────────────────────────
-# `grep -rlF` (recursive, literal, files-with-matches) scans the whole bundle including the SEA
-# binaries (a binary match is reported as a matching file by -l). This is the artifact-level
-# reverse-search archguard ran against v0.4.0 — the mechanism names must be reachable somewhere in
-# the extracted artifact (for the sidecar form: the plugin/ files; for an embed form: the binary).
+# `grep -rqF` (recursive, quiet, literal) scans the whole bundle including the SEA binaries and
+# stops at the FIRST match, which is all this check needs. This is the artifact-level reverse-search
+# archguard ran against v0.4.0 — the mechanism names must be reachable somewhere in the extracted
+# artifact (for the sidecar form: the plugin/ files; for an embed form: the binary).
+#
+# ⛔ It must NOT be `grep -rlF … | grep -q .`: this script runs under `set -o pipefail`, so once the
+# reader (`grep -q`) exits on the first line the producer grep is killed by SIGPIPE (RC=141) —
+# pipefail turns that into a failing pipeline, and an EXISTING match is reported as MISSING. That
+# false red was observed 2026-11-06 (6/13 of verify-sea-artifact.test.mjs red inside the suite,
+# 0/13 when the same file ran alone; the stale `@test-group product` version made it worse).
 MISSING=0
 MISSING_NAMES=()
 for m in "${MECHANISM_NAMES[@]}"; do
-  if ! grep -rlF -- "${m}" "${BUNDLE_DIR}" 2>/dev/null | grep -q .; then
+  if ! grep -rqF -- "${m}" "${BUNDLE_DIR}" 2>/dev/null; then
     echo "  MISSING: '${m}' is not reverse-searchable in the artifact" >&2
     MISSING=$((MISSING + 1))
     MISSING_NAMES+=("${m}")
