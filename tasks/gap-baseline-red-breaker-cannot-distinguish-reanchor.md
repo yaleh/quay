@@ -28,17 +28,18 @@ extra:
 ## Plan
 
 1. `decideBaselineRedCircuitBreaker` 保持**纯函数**，新增入参 `checkerProbes: Array<{ point: string; exit: number | null }>`（调用方测量后传入）。
-2. 判词三态（`CircuitBreakerVerdict` 加 `re-anchor` 分支）：
-   - `exit === 0` ⇒ 新判词 `{ kind: "re-anchor", … }`，诊断逐字写「欠 re-anchor，不是死锁」；
-   - `exit !== 0` ⇒ 维持 `stop-terminal` + 现有 LOOP DEADLOCK 诊断；
-   - `exit === null`（没跑成/超时）⇒ 维持 `stop-terminal`，但诊断**必须写「未评估」**，⛔ 不得与 `exit === 0` 同形（硬规则 3b）。
+2. 判词三态（`CircuitBreakerVerdict` 加 `re-anchor` 分支）。**`checkerProbes` 是被挡住的多个 red point 的数组，必须显式规定聚合**，按下列**优先级**给出**单个顶层判词**（逐 point 结果写进诊断，不另出顶层多值）：
+   - **① 任一 `exit === 0`** ⇒ `{ kind: "re-anchor", probes, … }`，诊断逐字写「欠 re-anchor，不是死锁」并点名哪些 point exit 0（只要有一个 red point 已不再红，红集就是陈旧的，死锁不成立）；
+   - **② 否则，`probes` 为空 或 任一 `exit === null`** ⇒ `stop-terminal`，但诊断**必须写「未评估」**且 ⛔ **不得出现「LOOP DEADLOCK」**（没测成不等于确认死锁；硬规则 3b）；
+   - **③ 否则（全部 `exit !== 0`，且至少一条）** ⇒ `stop-terminal` + 现有 LOOP DEADLOCK 诊断。
+   ⛔ 优先级不可调换：`0` 压过 `null`（陈旧已被证实，重锚是安全动作）；空数组按 `null` 处理，不得回落成 ③。
 3. 测量侧：在 cap 命中处调用，逐 red point 跑其 checker，**有界超时**（给出上限值并说明依据），⛔ 不得让断路器自己变成卡死点。
 4. 纯函数不读盘子；测量与 I/O 留在调用方。
 
 ## Acceptance Criteria
 
-- [ ] AC1: 正臂——`checkerProbes` 含 `exit: 0` 时返回 `kind: "re-anchor"`，诊断含「欠 re-anchor」；含非 0 时返回 `stop-terminal` 与现有 LOOP DEADLOCK 诊断（两条行为测试）。
-- [ ] AC2（**null 臂单独一条，不得并入 AC1**）: `exit: null` 时返回 `stop-terminal`，且诊断含「未评估」；断言其输出与 `exit: 0` 的输出**逐字不同形**（给出两侧逐字读数）。
+- [ ] AC1: 正臂 + **聚合优先级**——① 任一点 `exit: 0` ⇒ `kind: "re-anchor"`，诊断含「欠 re-anchor」并点名该 point（**多点混合**用例：一个 0 + 一个非 0 ⇒ 仍为 `re-anchor`）；③ 全部非 0 ⇒ `stop-terminal` 与现有 LOOP DEADLOCK 诊断。两条行为测试，且多点用例单独一条。
+- [ ] AC2（**null / 空臂单独一条，不得并入 AC1**）: ② 当 `probes` **为空**或含 `exit: null` 且无 `exit: 0` 时，返回 `stop-terminal`，诊断含「未评估」且**不含「LOOP DEADLOCK」**；断言它与 `exit: 0` 的输出**逐字不同形**、与全部非 0 的输出也**逐字不同形**（给出三侧逐字读数）。
 - [ ] AC3: 新鲜测量与有界超时——给出调用点的测量代码位置、超时上限值、以及「测量失败 ⇒ null 而非抛异常」的负臂读数（注入一个必然超时的 checker）。
 
 ## Definition of Done
