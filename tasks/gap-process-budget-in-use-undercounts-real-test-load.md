@@ -51,6 +51,6 @@ extra:
 
 - plugin/scripts/process-budget.sh
 - plugin/scripts/runner-concurrency.ts
-- plugin/test/resource-gate.test.mjs
 - plugin/test/process-budget-liveness.test.mjs (new)
+- plugin/test/resource-gate-s08.test.mjs
 - tasks/gap-process-budget-in-use-undercounts-real-test-load.md
