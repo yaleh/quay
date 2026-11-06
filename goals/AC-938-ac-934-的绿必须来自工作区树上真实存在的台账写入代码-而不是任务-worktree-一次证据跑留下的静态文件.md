@@ -1,7 +1,7 @@
 ---
 id: AC-938
 title: AC-934 的绿必须来自工作区树上真实存在的台账写入代码，而不是任务 worktree 一次证据跑留下的静态文件
-status: draft
+status: active
 kind: criterion
 goal: GOAL-914
 criterion: node --experimental-strip-types --input-type=module -e "import fs
@@ -25,6 +25,17 @@ origin: readings 里 AC-934 是 status=achieved / verdict=pass（唯一非红
   worker 07:35–09:20Z 的会话内。也就是说：AC-934 的判据只读一个静态、未跟踪、由未落地分支的证据跑写的文件，既不能察觉生产
   goal-driver 从不写它，也会在清除 .quay/ 或换机时无代码变更地翻红（硬规则 4
   推论三的反例判据）。本条只声明替代关系；是否退役旧判据仍由人裁定。
+activatedAt: 2026-11-06T11:02:28.369Z
+statusLog:
+  - at: 2026-11-06T11:02:28.369Z
+    from: draft
+    to: active
+    actor: goal-driver
+    reason: "triage: activate"
 supersedes:
   - AC-934
+fidelity:
+  verdict: faithful
+  reason: "fidelity judge: faithful"
+  at: 2026-11-06T11:02:28.369Z
 ---
