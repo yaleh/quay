@@ -237,6 +237,19 @@ unset FORCE_COLOR QUAY_GOAL_ACCEPTANCE_ACTIVE
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 cd "$repo_root"
 
+# ── gap-test-harness-tmp-dir-leak — the run's OWN temp root, removed on the EXIT path ────────────
+# Measured 2026-11-06 on this host: `find /tmp -maxdepth 1 -name 'quay-*' | wc -l` = 46218 (15,278 of
+# them older than 7 days), because EVERY run's fixtures were created straight into the shared tmp and
+# nothing owned the exit path. That is the 硬规则 3b shape — no reading ever reds because /tmp holds
+# tens of thousands of dirs, so the leak is indistinguishable from "everything is fine".
+# Sourcing this gives the run one PRIVATE temp root (mkdtemp, empty at start), re-points
+# TMPDIR/TMP/TEMP at it, and installs the EXIT trap that reaps it — covering SIGTERM as well as the
+# happy path (bash runs the EXIT trap on TERM). The full mechanism, the ownership rule (a runner-made
+# root is adopted, never reaped by the child) and the telemetry line are documented in the lib itself
+# and in plugin/scripts/temp-root-reaper.ts; ⛔ do not restate them here (comment lines are free, but
+# this file's code lines are a shrink-only sh-census ratchet — and a second copy is drift).
+source "${repo_root}/plugin/scripts/suite-temp-root.sh"
+
 # main_root derivation → plugin/scripts/runner-concurrency.ts deriveMainRoot() (SPEC P4 套件入口收进 TS).
 # QUAY_MAIN_CHECKOUT (empty-as-unset) → repo_root; then the git-derived FIRST worktree is ALWAYS
 # preferred when it differs from repo_root (full-suite-runner.ts launches with `--root <worktree>` and

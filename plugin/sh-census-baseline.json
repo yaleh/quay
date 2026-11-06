@@ -498,8 +498,25 @@
         "embeddedInterpreterLines": "+113 = plugin/scripts/codex-stage1-spawn-verify.sh codeLines 0 (not embedded before) -> 113 (embedded [node] after adding the two command-position `node … quay.ts init` / `node … quay.ts task create` calls). Residual = 0 BY CONSTRUCTION: this task's only tracked *.sh delta vs develop is this one file, and its census membership is what moved (embedded [] -> [node]).",
         "duplicateCopies": "0 — untouched (0 is the assertion, not an omission). No experiments/** mirror added and no byte-identical pair created."
       }
+    },
+    {
+      "when": "2026-11-06 (gap-test-harness-tmp-dir-leak)",
+      "from": {
+        "embeddedInterpreterLines": 6575,
+        "duplicateCopies": 0
+      },
+      "to": {
+        "embeddedInterpreterLines": 6578,
+        "duplicateCopies": 0
+      },
+      "why": "The suite's temp-root exit path needs a shell entry that can invoke the reaper. Three code lines, each named: +1 scripts/test.sh (ONE `source` line at the top — the library is sourced once and initialises itself), +2 plugin/scripts/temp-root-reaper.sh (the `*-check.sh wraps *-check.ts` thin wrapper). plugin/scripts/suite-temp-root.sh (57 code lines, the actual logic) carries NO embedded interpreter, so it is not counted — that split is the whole point of the wrapper: the logic goes in an uncounted library, the single `node` call into a 2-line counted shim, instead of +57 on the ratchet. Numbers are the checker's OWN reading on this tree (scratch: totals.embeddedInterpreterLines), never hand-fitted.",
+      "attribution": {
+        "embeddedInterpreterLines": "+3 = +1 scripts/test.sh (source line) + +2 plugin/scripts/temp-root-reaper.sh (new, node). suite-temp-root.sh: embedded=[] ⇒ 0. Residual = 0.",
+        "duplicateCopies": "0 (no experiments/** mirror of the new files)"
+      },
+      "structuralNote": "Same weakness the 2026-09-19 entry names: a task that must add ANY node/python3/jq-bearing .sh can only land via a committed re-anchor. Here the cost was deliberately minimised (57 lines of logic uncounted, 2 lines counted) rather than avoided — moving the `node` call into suite-temp-root.sh would have cost +59 instead of +3."
     }
   ],
-  "embeddedInterpreterLines": 6575,
+  "embeddedInterpreterLines": 6578,
   "duplicateCopies": 0
 }
