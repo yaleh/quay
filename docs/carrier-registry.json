@@ -224,6 +224,12 @@
       "readers": "unaudited"
     },
     {
+      "name": "goal-filing.jsonl",
+      "kind": "jsonl-log",
+      "owner": "plugin/scripts/goal-driver.ts",
+      "readers": "unaudited"
+    },
+    {
       "name": "goal-round.jsonl",
       "kind": "jsonl-log",
       "owner": "plugin/scripts/goal-driver.ts",
