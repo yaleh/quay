@@ -37,11 +37,11 @@ AC-937 的判据只做两次**互不相干**的存在性检查：`.quay/goal-fil
 
 ## AC
 
-- [ ] `node --test plugin/test/goal-filing-chain-audit.test.mjs` 退出码 0，用例覆盖 `landed` / `task-missing` / `goal-ac-mismatch` / `not-done` / `unfiled-claim` 五种取值。
-- [ ] 负控可在测试中逐条读到：`filed` 行指向 todo 任务 ⇒ 退出 1 且 verdict 是 `not-done`；存在 done 任务认领该 AC 但无 filed 行指向它 ⇒ 退出 1 且报 `unfiled-claim`（⛔ 不得因「另有 done 任务」被判 0）。
-- [ ] 未评估是独立取值：空台账、只有 `spawned` 行、`--ac` 指向从未立案的 AC，三种输入都退出 2（不是 0），且 `--json` 中 `evaluated:false` 并给出 `cause`。
-- [ ] `bash plugin/scripts/capability-catalog.sh --json` 退出码 0，新脚本的 `question` 非空（unclassified 计数不增加）。
-- [ ] live 证据：对真实工作区运行审计，`docs/evidence/2026-11-06-goal-filing-chain-audit.md` 逐字记录命令与输出，并解释取得的 verdict（不是只用 fixture）。
+- [x] `node --test plugin/test/goal-filing-chain-audit.test.mjs` 退出码 0，用例覆盖 `landed` / `task-missing` / `goal-ac-mismatch` / `not-done` / `unfiled-claim` 五种取值。
+- [x] 负控可在测试中逐条读到：`filed` 行指向 todo 任务 ⇒ 退出 1 且 verdict 是 `not-done`；存在 done 任务认领该 AC 但无 filed 行指向它 ⇒ 退出 1 且报 `unfiled-claim`（⛔ 不得因「另有 done 任务」被判 0）。
+- [x] 未评估是独立取值：空台账、只有 `spawned` 行、`--ac` 指向从未立案的 AC，三种输入都退出 2（不是 0），且 `--json` 中 `evaluated:false` 并给出 `cause`。
+- [x] `bash plugin/scripts/capability-catalog.sh --json` 退出码 0，新脚本的 `question` 非空（unclassified 计数不增加）。
+- [x] live 证据：对真实工作区运行审计，`docs/evidence/2026-11-06-goal-filing-chain-audit.md` 逐字记录命令与输出，并解释取得的 verdict（不是只用 fixture）。
 
 ## DoD
 
