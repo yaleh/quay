@@ -35,3 +35,10 @@ extra: {}
 - `plugin/test/meta-driver.test.mjs`
 - `plugin/probes/meta-driver.md`
 - `tasks/gap-meta-synchealth-doc-to-develop-outcome-invisible.md`
+
+## Blocker
+
+**2026-11-06T06:40:16.485Z — worker 未落地（exited-not-landed）**
+
+- 未落地原因：step=merge-develop: exit null
+- run_id：wk-prod-anchor
