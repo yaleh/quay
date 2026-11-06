@@ -1036,9 +1036,22 @@ export function errorSignature(text: string): string {
   return s.slice(0, 200);
 }
 
+/** 产出扫描载体的**抽取器身份**：抽取+归一化管线（记录解包 → 逐条错误正文 → 签名归一化）源码
+ *  的指纹。⚠️ 用源码指纹而**不是**手写版本号——手写号改了代码却忘记 bump 时，被取代的实现写的
+ *  旧载体仍会被当作新鲜读数服务出去，而那正是本任务的缺陷（2026-11-06：`error_text` 支路修好前
+ *  写下的零记录载体，18.8 h 后被当成「查过、干净」）。源码指纹自动跟随实现：管线任一环变了 ⇒
+ *  指纹变 ⇒ 旧载体不再被采信（保守方向只是一次多余重扫，⛔ 不会静默放行）。
+ *  `Function.prototype.toString()` 在同一构建里稳定（同一源码 ⇒ 同一指纹）。 */
+export const ACTION_RECORD_EXTRACTOR_ID: string = createHash("sha256")
+  .update([extractActionFailureRecords, mcpResultRecords, errorTextsFromRecord, flattenContentText, errorSignature]
+    .map((f) => f.toString()).join("\n"))
+  .digest("hex")
+  .slice(0, 16);
+
 /** 从 meta-cc `query_session_signals type=errors` 的查询结果里抽动作记录。
  *  ⛔ **返回 null 与返回 [] 不同义**（硬规则 3b）：null = 这坨结果我**读不懂**（形状不认识 /
- *  没有可解析的载荷），[] = 读懂了、里面**没有**错误记录。调用侧据此分走 not-evaluated / none。 */
+ *  没有可解析的载荷），[] = 读懂了、里面**没有**错误记录。⚠️ 调用侧（`aggregateActionFailures`）
+ *  对 [] 仍走 not-evaluated：见那里的注释——「读到零条」与「查过、干净」不可分。 */
 export function extractActionFailureRecords(queryResult: unknown): ActionFailureRecord[] | null {
   const records = mcpResultRecords(queryResult);
   if (records === null) return null;
@@ -1169,7 +1182,13 @@ function mcpResultRecords(queryResult: unknown): Array<Record<string, unknown>> 
 }
 
 /** 纯聚合：动作记录 → 按「同错误 × 跨会话」聚合的清单。⛔ 排序确定性（digest 稳定性靠它：
- *  同一份语料 ⇒ 同一份清单 ⇒ 同一份签名序列）。`records === null`（读不懂）⇒ not-evaluated。 */
+ *  同一份语料 ⇒ 同一份清单 ⇒ 同一份签名序列）。`records === null`（读不懂）⇒ not-evaluated。
+ *
+ *  ⚠️ **零记录同样 ⇒ not-evaluated**（硬规则 3b，2026-11-06 实证）：`[]` 与「查过、干净」同形，
+ *  但产生 `[]` 的成因至少两种——语料真的没有错误，**或者**抽取器一条都没认出（那一版只认
+ *  `message.content[].is_error`，而 meta-cc 实际交付的是投影形态 `error_text` ⇒ 逐条静默跳过）。
+ *  两者在读数上不可分，所以「零记录」不是一个可取假的测量，不能报成合格侧。它有自己的
+ *  reason（`empty-corpus:`），与「读不懂」（`corpus-unreadable:`）同 state 但成因可区分。 */
 export function aggregateActionFailures(
   records: ActionFailureRecord[] | null,
   opts: { minSessions: number | null; scannedAt?: string | null; scanMs?: number | null; since?: string | null; reason?: string | null },
@@ -1182,6 +1201,14 @@ export function aggregateActionFailures(
   };
   if (records === null) {
     return { state: "not-evaluated", aggregates: null, reason: opts.reason ?? "corpus-unreadable", ...meta, thresholdSessions: null };
+  }
+  if (records.length === 0) {
+    // ⛔ 不并入下面的 none 分支：零记录不是「查过、干净」的证据（见函数注释）。
+    return {
+      state: "not-evaluated", aggregates: null,
+      reason: opts.reason ?? "empty-corpus: scan yielded 0 records — indistinguishable from an extractor that recognized nothing",
+      ...meta, recordsScanned: 0,
+    };
   }
   const bySig = new Map<string, { sessions: Set<string>; count: number; example: string }>();
   for (const r of records) {
@@ -1295,8 +1322,18 @@ export async function callMetaCcTool(opts: {
   });
 }
 
-/** 扫描结果载体：`{scannedAt, scanMs, since, records}`。读不到 / 解析不了 ⇒ null（⛔ 不是「空语料」）。 */
-export function readActionRecordScan(root: string): { scannedAt: string; scanMs: number | null; since: string | null; records: ActionFailureRecord[] } | null {
+/** 扫描结果载体：`{scannedAt, scanMs, since, extractor, records}`。读不到 / 解析不了 ⇒ null
+ *  （⛔ 不是「空语料」）。`extractor` 是**产出该载体的抽取器身份**（见 `ACTION_RECORD_EXTRACTOR_ID`）；
+ *  早期载体没有这个键 ⇒ `null`（⛔ 不补一个当前值——那会把「不知谁写的」伪装成「我写的」）。 */
+export interface ActionRecordScan {
+  scannedAt: string;
+  scanMs: number | null;
+  since: string | null;
+  extractor: string | null;
+  records: ActionFailureRecord[];
+}
+
+export function readActionRecordScan(root: string): ActionRecordScan | null {
   let j: unknown;
   try { j = JSON.parse(fs.readFileSync(path.join(root, ACTION_RECORD_SCAN_REL), "utf8")); } catch { return null; }
   if (!j || typeof j !== "object") return null;
@@ -1309,7 +1346,12 @@ export function readActionRecordScan(root: string): { scannedAt: string; scanMs:
     if (typeof rr.sessionId !== "string" || typeof rr.signature !== "string") continue;
     records.push({ sessionId: rr.sessionId, signature: rr.signature, example: String(rr.example ?? ""), ts: typeof rr.ts === "string" ? rr.ts : null });
   }
-  return { scannedAt: o.scannedAt, scanMs: typeof o.scanMs === "number" ? o.scanMs : null, since: typeof o.since === "string" ? o.since : null, records };
+  return {
+    scannedAt: o.scannedAt, scanMs: typeof o.scanMs === "number" ? o.scanMs : null,
+    since: typeof o.since === "string" ? o.since : null,
+    extractor: typeof o.extractor === "string" ? o.extractor : null,
+    records,
+  };
 }
 
 /** 跑一次真实语料扫描并落载体。返回扫描结果或失败原因（⛔ 失败不写半成品载体）。 */
@@ -1317,7 +1359,7 @@ export async function scanActionRecords(
   root: string,
   cfg: ActionRecordConfig,
   opts: { now?: number; binary?: string | null } = {},
-): Promise<{ ok: true; scan: { scannedAt: string; scanMs: number; since: string | null; records: ActionFailureRecord[] } } | { ok: false; reason: string }> {
+): Promise<{ ok: true; scan: ActionRecordScan } | { ok: false; reason: string }> {
   const binary = opts.binary === undefined ? locateMetaCcMcp() : opts.binary;
   if (!binary) return { ok: false, reason: "meta-cc-mcp not found (set QUAY_META_CC_MCP or install meta-cc)" };
   const nowMs = opts.now ?? Date.now();
@@ -1331,7 +1373,9 @@ export async function scanActionRecords(
   const records = extractActionFailureRecords(r.result);
   if (records === null) return { ok: false, reason: `corpus-unreadable: meta-cc result shape unrecognized (${describeResultShape(r.result)})` };
   const scannedAt = new Date(nowMs).toISOString();
-  const scan = { scannedAt, scanMs, since, records };
+  // ⚠️ `extractor` 必须随载体落盘：没有它，读侧只能靠 `scannedAt` 判新鲜（TTL 内一律采信），
+  // 于是一个**被取代的实现**写下的载体在 TTL 内与本次实现写下的载体同形——正是本任务的缺陷。
+  const scan: ActionRecordScan = { scannedAt, scanMs, since, extractor: ACTION_RECORD_EXTRACTOR_ID, records };
   try {
     // 同一族载体的写侧也是原子的（硬规则 5b：`writeState` 之外，本文件还有这一处裸写；它同样是
     // 一个被并发读的 JSON 缓存载体，裸写会让读侧看到半写 ⇒ 当作「无缓存」再扫一次）。
@@ -1343,7 +1387,8 @@ export async function scanActionRecords(
 }
 
 /** 采第七类读数。成本控制【只靠缓存 + TTL】（见文件段注释：`since` 不降低成本）：
- *  载体新鲜（< `scan_ttl`）⇒ 直接聚合；过期/缺失且 `scan_ttl` 已配置 ⇒ 真扫一次再聚合。
+ *  载体新鲜（< `scan_ttl` **且**由本实现的抽取器产出）⇒ 直接聚合；过期/缺失/旧抽取器产出
+ *  且 `scan_ttl` 已配置 ⇒ 真扫一次再聚合。
  *  `scan_ttl` **未配置 ⇒ 从不自动扫**（⛔ 不写字面量默认 TTL）——此时有载体就用载体、
  *  没载体就 not-evaluated。这让「自动扫描」是一个**显式的运维选择**，而不是一个隐式开销。 */
 export async function collectActionRecordFailures(
@@ -1353,8 +1398,13 @@ export async function collectActionRecordFailures(
   const cfg = opts.cfg ?? readActionRecordConfig(root);
   const nowMs = opts.now ?? Date.now();
   let scan = readActionRecordScan(root);
+  // 「新鲜」= 两条判据同时成立：①年龄在 TTL 内；②载体由**本实现**的抽取器产出。
+  // ⛔ 只看 ①：一个被取代实现写的载体在 TTL 内与本次实现写的载体同形（硬规则 3b）——
+  // 2026-11-06 的现场正是这样：零记录载体出自修好 `error_text` 之前的实现，18.8 h 后被当作新鲜读数。
+  const currentExtractor = (s: ActionRecordScan | null): boolean => s !== null && s.extractor === ACTION_RECORD_EXTRACTOR_ID;
   const fresh = scan !== null && cfg.scanTtlMs !== null
-    && (nowMs - Date.parse(scan.scannedAt)) < cfg.scanTtlMs;
+    && (nowMs - Date.parse(scan.scannedAt)) < cfg.scanTtlMs
+    && currentExtractor(scan);
   const allowScan = opts.allowScan !== false;
   let staleReason: string | null = null;
   if (!fresh && allowScan && cfg.scanTtlMs !== null) {
@@ -1376,6 +1426,19 @@ export async function collectActionRecordFailures(
     return {
       state: "not-evaluated", aggregates: null, reason: "corpus-unreadable: no scan carrier present",
       scannedAt: null, scanMs: null, since: null, recordsScanned: null, thresholdSessions: null,
+    };
+  }
+  if (!currentExtractor(scan)) {
+    // 载体是本实现**产不出**的（旧抽取器写的，或早期无戳载体）⇒ ⛔ 绝不当读数服务出去。
+    // 这不是「读不到语料」而是「这份语料不是我认得的抽取器读出来的」——独立 reason，
+    // 处置不同：前者修 meta-cc 连接，后者重扫一次即可。`scan_ttl` 未配置时也会走到这里
+    // （那时从不自动扫 ⇒ 只能报未评估，等运维跑 `--scan-action-records`）。
+    return {
+      state: "not-evaluated", aggregates: null,
+      reason: `superseded-extractor: carrier extractor=${scan.extractor ?? "<unstamped>"} != current ${ACTION_RECORD_EXTRACTOR_ID}`
+        + ` (scannedAt=${scan.scannedAt})` + (staleReason ? `; ${staleReason}` : ""),
+      scannedAt: scan.scannedAt, scanMs: scan.scanMs, since: scan.since,
+      recordsScanned: scan.records.length, thresholdSessions: cfg.minSessions,
     };
   }
   // ⛔ `minSessions` 可以是 null（阈值尚未由人定值）——这时**照出清单**、只是不给越阈判定
@@ -3534,7 +3597,7 @@ export async function main(argv: string[]): Promise<number> {
     const agg = aggregateActionFailures(r.scan.records, { minSessions: cfg.minSessions, scannedAt: r.scan.scannedAt, scanMs: r.scan.scanMs, since: r.scan.since });
     process.stdout.write(JSON.stringify({
       ok: true, carrier: ACTION_RECORD_SCAN_REL, scannedAt: r.scan.scannedAt, scanMs: r.scan.scanMs,
-      since: r.scan.since, records: r.scan.records.length,
+      since: r.scan.since, extractor: r.scan.extractor, records: r.scan.records.length,
       state: agg.state, thresholdSessions: agg.thresholdSessions,
       aggregates: agg.aggregates,
     }, null, 2) + "\n");

@@ -97,8 +97,10 @@ import {
   readActionRecordConfig,
   readActionRecordScan,
   collectActionRecordFailures,
+  scanActionRecords,
   locateMetaCcMcp,
   ACTION_RECORD_SCAN_REL,
+  ACTION_RECORD_EXTRACTOR_ID,
   goalStoreArgv,
 } from '../scripts/meta-driver.ts';
 import { createMetaStore } from '../../packages/quay/src/meta-store.ts';
@@ -2644,10 +2646,15 @@ test('AC3: 三态互不同形——crossed / none / not-evaluated 各一条实�
     { signature: 'beta failed', sessions: 1, count: 1, crossed: false, example: 'beta failed' }],
     '查到了、无越阈 ⇒ 清单非 null（即使是空清单也必须是清单）');
   assert.notEqual(unreadable.aggregates, none.aggregates);
-  // 空语料（查过、零错误）⇒ none + 空清单，⛔ 不是 not-evaluated。
+  // 空语料 ⇒ **not-evaluated**（gap-meta-collectactionrecordfailures-3）：零记录与「抽取器一条
+  // 都没认出」不可分（2026-11-06：只认 `is_error` 的那版对投影形态逐条静默跳过，产出 []），
+  // 所以它不能报成合格侧。⛔ 不是 none、也不是 []。
   const empty = corpus([], 2);
-  assert.equal(empty.state, 'none');
-  assert.deepEqual(empty.aggregates, [], '零错误 = 查过且无命中 ⇒ []（⛔ 不与「读不到」的 null 同形）');
+  assert.equal(empty.state, 'not-evaluated', '零记录 ⛔ 不与「查过、干净」同形（硬规则 3b）');
+  assert.equal(empty.aggregates, null, '未评估 ⇒ aggregates 为 null（⛔ 不是空清单）');
+  assert.match(empty.reason, /^empty-corpus:/, `未评估必须命名成因，实际: ${empty.reason}`);
+  assert.notEqual(empty.reason, unreadable.reason, '「零记录」与「读不懂」同 state 但成因必须可分');
+  assert.equal(empty.recordsScanned, 0, '零记录仍如实报出记录数（不藏量）');
   // 第四态 unthresholded（未定阈值——见 ActionFailureReading 注释）也必须在四态里唯一。
   const unthr = aggregateActionFailures(extractActionFailureRecords(mkMetaCcResult([mkErrRow('a', 'alpha failed'), mkErrRow('b', 'alpha failed')])), { minSessions: null });
   assert.equal(unthr.state, 'unthresholded');
@@ -2852,7 +2859,7 @@ test('collectActionRecordFailures: 未定阈值 ⇒ unthresholded（清单照出
     assert.equal(r0.aggregates, null, '读不到 ⇒ null，⛔ 不是 []');
     // ② 未配置 min_sessions 但【有真实载体】⇒ unthresholded：清单照出、crossed 全为 null。
     fs.writeFileSync(path.join(tmp, ACTION_RECORD_SCAN_REL), JSON.stringify({
-      scannedAt: '2026-09-12T01:59:00Z', scanMs: 1234, since: null,
+      scannedAt: '2026-09-12T01:59:00Z', scanMs: 1234, since: null, extractor: ACTION_RECORD_EXTRACTOR_ID,
       records: [
         { sessionId: 's1', signature: 'Unknown skill: quay-file-task', example: 'x', ts: null },
         { sessionId: 's2', signature: 'Unknown skill: quay-file-task', example: 'x', ts: null },
@@ -2888,6 +2895,67 @@ test('collectActionRecordFailures: 未定阈值 ⇒ unthresholded（清单照出
     assert.ok(r4.reason.startsWith('scan-failed') || r4.reason.startsWith('corpus-unreadable'), r4.reason);
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+// gap-meta-collectactionrecordfailures-3 第二半：载体必须盖【产出它的抽取器身份】。
+// 只看 `scannedAt` 判新鲜时，一个**被取代的实现**写下的载体在 TTL 内与本次实现写的同形——
+// 2026-11-06 的现场：零记录载体出自 `error_text` 支路修好之前的实现，18.8 h 后被当成新鲜读数。
+test('载体抽取器身份：旧实现写的载体在 TTL 内 ⛔ 也不得被当新鲜读数', async () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'meta-afr-ext-'));
+  const binDir = fs.mkdtempSync(path.join(os.tmpdir(), 'meta-afr-bin-'));
+  try {
+    fs.mkdirSync(path.join(tmp, '.quay'), { recursive: true });
+    fs.writeFileSync(path.join(tmp, '.quay', 'config.yml'), 'action_record_failures:\n  min_sessions: 2\n  scan_ttl: 1h\n', 'utf8');
+    const now = Date.parse('2026-11-06T20:00:00Z');
+    const rows = [
+      { category: 'bash_exit_code', error_text: 'Exit code 1\nboom', session_id: 's1', timestamp: '2026-11-06T19:00:00Z', tool_name: 'Bash' },
+      { category: 'bash_exit_code', error_text: 'Exit code 1\nboom', session_id: 's2', timestamp: '2026-11-06T19:10:00Z', tool_name: 'Bash' },
+    ];
+    // 一个会说 JSON-RPC 的假 meta-cc：只回 `id:2`（tools/call），载荷是投影形态的记录。
+    const fake = path.join(binDir, 'meta-cc-mcp');
+    fs.writeFileSync(fake, '#!/usr/bin/env node\n'
+      + `const payload = ${JSON.stringify(JSON.stringify({ data: rows }))};\n`
+      + "let acc = '';\n"
+      + "process.stdin.on('data', (d) => { acc += d; if (acc.includes('\"id\":2')) {"
+      + " process.stdout.write(JSON.stringify({ jsonrpc: '2.0', id: 2, result: { content: [{ type: 'text', text: payload }] } }) + '\\n'); } });\n",
+      'utf8');
+    fs.chmodSync(fake, 0o755);
+
+    const sc = await scanActionRecords(tmp, readActionRecordConfig(tmp), { now, binary: fake });
+    assert.equal(sc.ok, true, `真扫应成功: ${sc.ok ? '' : sc.reason}`);
+    const onDisk = JSON.parse(fs.readFileSync(path.join(tmp, ACTION_RECORD_SCAN_REL), 'utf8'));
+    assert.equal(onDisk.extractor, ACTION_RECORD_EXTRACTOR_ID, '写侧必须把产出它的抽取器身份落进载体');
+    assert.equal(readActionRecordScan(tmp).extractor, ACTION_RECORD_EXTRACTOR_ID, '读侧必须把它读回来');
+
+    // 正臂：同一 TTL 内、身份相符 ⇒ 采信载体（binary 指向不存在的路径也不会触发扫描 ⇒ 证明没重扫）。
+    const missing = path.join(binDir, 'does-not-exist');
+    const good = await collectActionRecordFailures(tmp, { now: now + 60_000, binary: missing });
+    assert.equal(good.state, 'crossed', '当前抽取器写的载体应被采信');
+    assert.equal(good.reason, null, '被采信的载体不该带失败 reason');
+
+    // 反臂①：把载体改标成一个【被取代的】抽取器 ⇒ TTL 内也不得采信（扫描失败 ⇒ 未评估）。
+    fs.writeFileSync(path.join(tmp, ACTION_RECORD_SCAN_REL), JSON.stringify({ ...onDisk, extractor: 'superseded000000' }), 'utf8');
+    const superseded = await collectActionRecordFailures(tmp, { now: now + 60_000, binary: missing });
+    assert.equal(superseded.state, 'not-evaluated', '旧实现写的载体 ⛔ 不得冒充当前读数');
+    assert.equal(superseded.aggregates, null);
+    assert.match(superseded.reason, /^superseded-extractor:/, `必须命名成因，实际: ${superseded.reason}`);
+    assert.match(superseded.reason, /superseded000000/, 'reason 要点出载体上的旧身份');
+
+    // 反臂②：早期载体【无】extractor 键 ⇒ 同样不采信（⛔ 缺值不当成「就是我写的」）。
+    const { extractor: _drop, ...unstampedCarrier } = onDisk;
+    fs.writeFileSync(path.join(tmp, ACTION_RECORD_SCAN_REL), JSON.stringify(unstampedCarrier), 'utf8');
+    const unstamped = await collectActionRecordFailures(tmp, { now: now + 60_000, binary: missing });
+    assert.equal(unstamped.state, 'not-evaluated');
+    assert.match(unstamped.reason, /<unstamped>/);
+
+    // 取假控制：把身份改回当前实现 ⇒ 立刻又采信（结论由身份驱动，不是别的因素）。
+    fs.writeFileSync(path.join(tmp, ACTION_RECORD_SCAN_REL), JSON.stringify(onDisk), 'utf8');
+    const restored = await collectActionRecordFailures(tmp, { now: now + 60_000, binary: missing });
+    assert.equal(restored.state, 'crossed', '只把身份改回当前值，结论必须翻回来');
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+    fs.rmSync(binDir, { recursive: true, force: true });
   }
 });
 
