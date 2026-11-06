@@ -10,7 +10,7 @@ children: []
 extra:
   schema: execution
 depends_on:
-  - gap-goal-driver-filing-ledger
+  - gap-goal-driver-filing-throttle
 goal_ac: AC-935
 ---
 ## Proposal
