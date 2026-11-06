@@ -728,6 +728,21 @@ export interface TimeSeriesSignal {
   crossed: boolean;
   evaluated: boolean;
   threshold: number;
+  /** 窗口里有几轮**因「这一轮被停机打断、读数没取到」而被跳过**（gap-meta-derivegoalcarriersignals）。
+   *
+   *  ⛔ WHY THIS FIELD EXISTS: 一条被中止的轮（`stopped_mid_round`）**不是**「本轮该 AC 的取值变了」，
+   *  也不是「没有历史」——它是「这一轮没跑完、没读数」。此前派生层把它记成 `null`，而 `null` 同时
+   *  做两件坏事：① 打断 `unchangedStreak`/`absentStreak`（于是「连续 8 轮 verdict 不变」与
+   *  「spawn 了却零产出」两个安全网在中止轮附近量不出来）；② 作为尾值时让整条信号变
+   *  `evaluated:false`（把一个「跳过」伪装成「无历史」，硬规则 3b）。
+   *  实测（2026-11-06 生产 `.quay/goal-round.jsonl`）：最近 40 轮里 7 轮是中止轮，**最后一条**就是，
+   *  于是整份 timeSeries 全是 `evaluated:false`。
+   *
+   *  现在中止轮被**跳过**（既不打断连续、也不抹掉尾值），而跳过这件事以本字段**独立可见**：
+   *  `skippedAbortedRounds > 0` 就是告诉读者「这条 streak 的尾值不是最近一轮的，中间隔了这么多轮没读数」。
+   *  ⛔ 它**不进** readingsDigest（同 `count`/`value` 的道理：每出现一个中止轮它就 +1，
+   *  进了会让摘要恒不相等、变化检测闸失效，硬规则 4 推论一）。 */
+  skippedAbortedRounds: number;
   /** The REPEATED value for `mode: "unchanged"` — i.e. WHAT has been unchanged for `count` rounds.
    *  `null` for `mode: "expected-absent"` (that mode counts an absence, not a value) and when
    *  `evaluated` is false (no value was read).
@@ -785,6 +800,30 @@ export function goalRingValue(round: Record<string, unknown>): Record<string, un
   return null;
 }
 
+/** 该轮的 goal-ring 读数是否「因为**这一轮被停机打断**而根本没取到」
+ *  （gap-meta-derivegoalcarriersignals）。真 ⇒ 这一轮对任何 AC 都不提供信息，
+ *  派生层**跳过**它（⛔ 不记 `null`：`null` 会同时打断 streak 并抹掉尾值）。
+ *
+ *  判据按优先序（⛔ 只读结构化字段，**不匹配 reason 文本**——文本是给人看的，改一个措辞就会
+ *  让判据静默失效，硬规则 2）：
+ *   ① goal-ring 的 `value` 自带 `stopped_mid_round: true` —— 即 `abandonedMidRoundFact`
+ *      （quality-gate-driver.ts）写下的形状 `{stopped_mid_round:true, observed:false, grace_ms}`；
+ *      生产实测 73/20625 轮是这个形状，且**每一条**与记录级旗标同时为真。
+ *   ② goal-ring fact 缺失 / 无 value，而**记录级** `stopped_mid_round: true` ⇒ 兜底判为被打断。
+ *      ⛔ 记录级旗标**不能单独当判据**：它只说明「本轮有**某条**例程被打断」，
+ *      goal-ring 自己可能已经跑完（quality-gate-driver 是**按例程**置这个旗标的）。
+ *   ③ 反过来，`value` 带着 `criteria` 读数 ⇒ **算观测到了**（数据优先于旗标）：
+ *      真读到读数的一轮不该因为一个旗标被丢掉。
+ *   ④ `state:"failed"`（store 读失败，`value` 只有 `{phase:"list"}`）**不是**被打断：
+ *      那一轮**跑完了**、只是没读到 ⇒ 仍记 `null`。两者不同形（硬规则 3b：
+ *      「跑完了但没读到」会打断连续，「没跑完」不会）。 */
+export function goalRingRoundAborted(round: Record<string, unknown>): boolean {
+  const v = goalRingValue(round);
+  if (v !== null && Array.isArray(v.criteria)) return false; // ③ 有读数 ⇒ 算观测到
+  if (v !== null) return v.stopped_mid_round === true;       // ①
+  return round.stopped_mid_round === true;                   // ②
+}
+
 /** 「连续 N 轮 spawn 了但零产出」的阈值——安全网非调优值（⛔ 不是按成本/收益调出来的，硬规则 4 推论一）。
  *  实测分布（2026-09-09 生产 goal-round.jsonl，48 个 AC 的 spawn-zero-output streak 长度）：
  *    streak=1 占 36 条（正常时延：本轮 spawn、下轮 taskCount≥1）、2–7 共 9 条、尾部两条 21（AC-158）
@@ -801,7 +840,13 @@ export const VERDICT_UNCHANGED_THRESHOLD = 8;
  *  「spawn 了但零产出」= 该轮 gap_spawns 有该 AC（spawn 了）且 gaps 里它仍是 state==="gap"
  *  （taskCount 仍 0 ⇒ 那次 spawn 没产出新任务）。⛔ 不重改 computeGoalGaps 的牵引口径——那是
  *  gap-goal-gap-done-task-not-traction-respawns-every-round 已修好的实例，本函数只【读】它产出的
- *  gap_spawns/gaps 快照，做跨轮派生（DoD3）。 */
+ *  gap_spawns/gaps 快照，做跨轮派生（DoD3）。
+ *
+ *  ⚠️ 被停机打断的轮（`goalRingRoundAborted`）**整轮跳过**、⛔ 不记 `null`：它们既不算「取值变了」
+ *  也不算「没有历史」，记 null 会让安全网在中止轮附近全失效（gap-meta-derivegoalcarriersignals，
+ *  实测：最近 40 轮里 7 轮是中止轮，且最后一条就是 ⇒ 旧实现下整份 timeSeries 全是 evaluated:false）。
+ *  跳过的轮数由 `skippedAbortedRounds` 独立带出（⛔ 不折叠进 count/evaluated——那会把
+ *  「跳过 N 轮后仍有 8 轮读数」与「真有最近 8 轮读数」混成同一读数，硬规则 3b）。 */
 export function deriveGoalCarrierSignals(
   rounds: Array<Record<string, unknown>>,
   acIds: string[],
@@ -813,8 +858,14 @@ export function deriveGoalCarrierSignals(
   for (const ac of acIds) {
     const verdicts: Array<string | null> = [];
     const spawnZero: Array<boolean | null> = [];
+    /** 本 AC 的窗口里被跳过的中止轮数（⛔ 每条信号各自带一份，让信号自描述）。 */
+    let skippedAbortedRounds = 0;
     for (const round of rounds) {
       const v = goalRingValue(round);
+      // 被停机打断的一轮 = 这一轮没跑完、没读数（⛔ 不是「取值变了」也不是「没有历史」）
+      // ⇒ 整轮跳过：既不 push null（会打断连续、抹掉尾值），也不参与任何计数；
+      //   跳过的轮数单独记账，让「尾值不是最近一轮的」这件事在信号上可见。
+      if (goalRingRoundAborted(round)) { skippedAbortedRounds++; continue; }
       if (v === null) { verdicts.push(null); spawnZero.push(null); continue; }
       const criteria = Array.isArray(v.criteria) ? (v.criteria as Array<Record<string, unknown>>) : [];
       const c = criteria.find((x) => String(x.id ?? "") === ac);
@@ -832,6 +883,7 @@ export function deriveGoalCarrierSignals(
       key: `goal:${ac}:verdict`, mode: "unchanged",
       count: vr.count, crossed: vr.evaluated && vr.count >= verdictUnchangedThreshold,
       evaluated: vr.evaluated, threshold: verdictUnchangedThreshold,
+      skippedAbortedRounds,
       // WHAT was unchanged — `null` exactly when there is no evaluated tail (⛔ not "").
       value: vr.evaluated ? verdicts[verdicts.length - 1] : null,
     });
@@ -839,6 +891,7 @@ export function deriveGoalCarrierSignals(
       key: `goal:${ac}:spawn-zero-output`, mode: "expected-absent",
       count: sr.count, crossed: sr.evaluated && sr.count >= spawnZeroThreshold,
       evaluated: sr.evaluated, threshold: spawnZeroThreshold,
+      skippedAbortedRounds,
       // This mode counts an ABSENCE; it has no repeated value to report.
       value: null,
     });
@@ -2087,7 +2140,8 @@ export function readingsDigest(readings: MetaRoundReadings): string {
     ...readings.inertCheckers.map((n) => `inert:${n}`).sort(),
     // 时序派生信号：只进「是否越阈」的位（⛔ 不进 count——count 每轮 +1，进了摘要恒变、闸失效；
     //  同 drivers 只取 running 位、divergences 不取 repeatCount 的纪律）。evaluated=false 单列 token
-    //  "u"（⛔ 不与 crossed=false 同形，硬规则 3b）。
+    //  "u"（⛔ 不与 crossed=false 同形，硬规则 3b）。⛔ `skippedAbortedRounds` 与 `value` 同理不进：
+    //  每出现一个中止轮前者就 +1（进了摘要恒变），后者只在 streak 变时变、而那一刻 crossed/count 已变。
     ...readings.timeSeries.map((s) => `sig:${s.key}:${s.evaluated ? (s.crossed ? 1 : 0) : "u"}`).sort(),
     // 人工转向（覆盖段内容）：人编辑才变，进摘要 ⇒ 变了判读一次、不变不判读（「变了」而非「非空」）。
     // ⛔ 它恰是【人编辑才变】的量（与 staleSecs/记录数相反——那些每轮都变，进摘要会让变化检测恒为真）。

@@ -76,6 +76,7 @@ import {
   absentStreak,
   deriveGoalCarrierSignals,
   goalRingValue,
+  goalRingRoundAborted,
   readRoundCarrier,
   GOAL_ROUND_CARRIER_REL,
   SPAWN_ZERO_OUTPUT_THRESHOLD,
@@ -2471,6 +2472,118 @@ test('goalRingValue: 读不出 facts/name 不符 ⇒ null（⛔ 不抛）', () =
   assert.equal(goalRingValue({ facts: [] }), null);
   assert.equal(goalRingValue({ facts: [{ name: 'meta-driver', value: {} }] }), null);
   assert.deepEqual(goalRingValue({ facts: [{ name: 'goal-ring', value: { criteria: [] } }] }), { criteria: [] });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════
+// gap-meta-derivegoalcarriersignals —— 被停机打断的一轮不得把 streak 变成「无历史」
+// ═══════════════════════════════════════════════════════════════════════════════════════════
+
+// 真生产记录（.quay/goal-round.jsonl，2026-11-06T16:17:09.146Z，round 3）：**逐字**取自生产文件的
+// goal-ring fact——`abandonedMidRoundFact`（quality-gate-driver.ts:3938）在停机宽限内没等到例程收尾时
+// 写下的形状。生产实测 20625 轮里 73 轮是它，且最近 40 轮里 7 轮是它（最后一条就是）。
+const REAL_ABANDONED_ROUND = {
+  round: 3,
+  ts: '2026-11-06T16:17:09.146Z',
+  stopped_mid_round: true,
+  skipped_routines: [],
+  facts: [{
+    name: 'goal-ring',
+    value: { stopped_mid_round: true, observed: false, grace_ms: 5000 },
+    state: 'not-evaluated',
+    reason: 'stopped-mid-round: the routine did not observe the stop within 5000ms — abandoned by the caller-side stop grace. ⛔ This is NOT a completed round: the routine\'s own Facts are not recorded, and any write it still performs after this point may land on disk.',
+  }],
+};
+// 一轮**跑完了**、只是 store 读失败的记录（真生产同窗口的 157 条之一，形状逐字取自 value/state/reason）。
+const REAL_LIST_FAILED_ROUND = {
+  round: 1,
+  ts: '2026-11-06T06:42:20.913Z',
+  stopped_mid_round: false,
+  skipped_routines: [],
+  facts: [{ name: 'goal-ring', value: { phase: 'list' }, state: 'failed', reason: 'list failed: goal-store list failed (exit null): ' }],
+};
+
+test('AC gap-meta-derivegoalcarriersignals: 尾轮是被停机打断的记录 ⇒ 信号仍由最近带 criteria 读数的轮派生', () => {
+  // 判据即任务 AC 里那条命令的逐字等价物（[ok, ok, 中止]）。
+  const v = deriveGoalCarrierSignals([mkGoalRound(1, '2026-09-09T00:00:00.000Z'), mkGoalRound(2, '2026-09-09T00:05:00.000Z'), REAL_ABANDONED_ROUND], ['AC-214'])
+    .find((x) => x.key === 'goal:AC-214:verdict');
+  assert.equal(v.evaluated, true, '中止轮在尾部不得把信号打成 evaluated:false（旧实现正是如此）');
+  assert.ok(v.count >= 2, `应由最近两轮带读数的轮派生（count≥2），实得 ${v.count}`);
+  assert.equal(v.value, 'fail', '被重复的取值必须来自【真正的读数】，⛔ 不是 null');
+  // 被跳过的轮**独立可见**：⛔ 不折进 count，也⛔ 不伪装成「没有历史」。
+  assert.equal(v.skippedAbortedRounds, 1, '被跳过的那一轮必须在信号上留下独立读数');
+});
+
+test('gap-meta-derivegoalcarriersignals 负控制①: 跳过 ≠ 把中止轮算成一轮重复（count 不被灌水）', () => {
+  // 两轮读数 + 一轮中止：streak 必须是 2，⛔ 不是 3（把中止轮数进去就是自证恒真，硬规则 4）。
+  const v = deriveGoalCarrierSignals([mkGoalRound(1, '2026-09-09T00:00:00.000Z'), REAL_ABANDONED_ROUND], ['AC-214'])
+    .find((x) => x.key === 'goal:AC-214:verdict');
+  assert.equal(v.count, 1, '「读数 + 中止」只有 1 轮读数 ⇒ count=1');
+  assert.equal(v.evaluated, true);
+  assert.equal(v.skippedAbortedRounds, 1);
+
+  // 方向二：跳过之后，真正改变取值的轮仍能打断 streak（⛔ 不是「跳过一切、什么都不断」）。
+  const changed = {
+    ...mkGoalRound(3, '2026-09-09T00:10:00.000Z'),
+    facts: [{ ...mkGoalRound(3, 'x').facts[0], value: { ...mkGoalRound(3, 'x').facts[0].value, criteria: [{ id: 'AC-214', goal: 'GOAL-009', status: 'active', verdict: 'pass' }] } }],
+  };
+  const v2 = deriveGoalCarrierSignals([mkGoalRound(1, 'a'), mkGoalRound(2, 'b'), REAL_ABANDONED_ROUND, changed], ['AC-214'])
+    .find((x) => x.key === 'goal:AC-214:verdict');
+  assert.equal(v2.value, 'pass', '中止轮之后的真读数必须生效');
+  assert.equal(v2.count, 1, '取值 fail→pass ⇒ streak 被打断为 1');
+});
+
+test('gap-meta-derivegoalcarriersignals 负控制②: 「跑完了但没读到」≠「没跑完」（硬规则 3b）', () => {
+  // failed 轮（跑完了、store 读失败）**仍然**记 null 并打断连续——它带的信息是「这一轮查过、没查成」，
+  // 与「这一轮根本没跑完」不同形。⛔ 不顺手把整个 null 类都跳过（那会抹掉「查过没查成」这个区别）。
+  assert.equal(goalRingRoundAborted(REAL_LIST_FAILED_ROUND), false, 'failed 轮不是中止轮');
+  assert.equal(goalRingRoundAborted(REAL_ABANDONED_ROUND), true, '生产中止轮必须被判为中止轮');
+
+  const v = deriveGoalCarrierSignals([mkGoalRound(1, 'a'), mkGoalRound(2, 'b'), REAL_LIST_FAILED_ROUND], ['AC-214'])
+    .find((x) => x.key === 'goal:AC-214:verdict');
+  assert.equal(v.evaluated, false, '尾轮「查过没查成」⇒ evaluated:false（与中止轮不同形）');
+  assert.equal(v.skippedAbortedRounds, 0, 'failed 轮⛔ 不计入被跳过的中止轮数');
+});
+
+test('gap-meta-derivegoalcarriersignals 负控制③: 记录级 stopped_mid_round 单独不该丢掉真读数', () => {
+  // 记录级旗标只说明「本轮有**某条**例程被打断」；goal-ring 自己已跑完时它的读数必须照用。
+  const okRoundWithForeignStop = { ...mkGoalRound(9, '2026-09-09T00:20:00.000Z'), stopped_mid_round: true, skipped_routines: ['reflection'] };
+  assert.equal(goalRingRoundAborted(okRoundWithForeignStop), false, '带 criteria 读数 ⇒ 算观测到（数据优先于旗标）');
+  const v = deriveGoalCarrierSignals([mkGoalRound(1, 'a'), okRoundWithForeignStop], ['AC-214'])
+    .find((x) => x.key === 'goal:AC-214:verdict');
+  assert.equal(v.count, 2, '两轮都读到了 ⇒ streak=2');
+  assert.equal(v.skippedAbortedRounds, 0);
+});
+
+test('gap-meta-derivegoalcarriersignals: 全窗口都是中止轮 ⇒ evaluated:false 但「跳过 N 轮」独立可见', () => {
+  const v = deriveGoalCarrierSignals([REAL_ABANDONED_ROUND, REAL_ABANDONED_ROUND], ['AC-214'])
+    .find((x) => x.key === 'goal:AC-214:verdict');
+  assert.equal(v.evaluated, false, '一次读数都没有 ⇒ 不得冒充有成型的 streak');
+  assert.equal(v.skippedAbortedRounds, 2, '但「为什么没有」必须可区分于「载体本来就是空的」');
+  // 与「无历史」不同形：空窗口的 skippedAbortedRounds 是 0。
+  const empty = deriveGoalCarrierSignals([], ['AC-214']).find((x) => x.key === 'goal:AC-214:verdict');
+  assert.equal(empty.skippedAbortedRounds, 0);
+  assert.notDeepEqual(
+    { e: empty.evaluated, s: empty.skippedAbortedRounds },
+    { e: v.evaluated, s: v.skippedAbortedRounds },
+    '「没历史」与「全是中止轮」必须不共用同一输出（硬规则 3b）',
+  );
+});
+
+test('gap-meta-derivegoalcarriersignals: spawn-zero-output 同样跳过中止轮（两类信号同一口径）', () => {
+  const s = deriveGoalCarrierSignals([...AC214_WINDOW.slice(0, 2), REAL_ABANDONED_ROUND], ['AC-214'])
+    .find((x) => x.key === 'goal:AC-214:spawn-zero-output');
+  assert.equal(s.evaluated, true, '中止轮在尾部 ⇒ 零产出 streak 仍由最近 spawn 轮派生');
+  assert.equal(s.count, 2);
+  assert.equal(s.skippedAbortedRounds, 1);
+});
+
+test('gap-meta-derivegoalcarriersignals: 新字段不进 readingsDigest（否则每出现一个中止轮摘要就变）', () => {
+  const mk = (sig) => ({ ...mkReadings('pass', 'n1'), timeSeries: [{ key: 'k', mode: 'unchanged', count: 3, crossed: false, evaluated: true, threshold: 8, value: 'fail', ...sig }] });
+  assert.equal(
+    readingsDigest(mk({ skippedAbortedRounds: 0 })),
+    readingsDigest(mk({ skippedAbortedRounds: 7 })),
+    'skippedAbortedRounds 每轮都可能 +1 ⇒ 必须留在摘要之外（硬规则 4 推论一）',
+  );
 });
 
 // ═══════════════════════════════════════════════════════════════════════════════════════════
