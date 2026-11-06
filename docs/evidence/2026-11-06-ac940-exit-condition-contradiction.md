@@ -149,3 +149,32 @@ node --test plugin/test/ac940-exit-condition-contradiction.test.mjs
 # meta-driver 判定面（含 (a)-(f) 六条新用例 + 既有 149 条）
 node --test plugin/test/meta-driver.test.mjs
 ```
+
+## 6. DoD 逐条对照
+
+DoD 写的是四件真实对象。逐条对账（**含一条必须说清的口径差**）：
+
+1. **`readings.divergences` 在主检出上真的多出那条 id=AC-934 的 `achieved-but-superseder-unmet`。**
+   —— 落地时点变了：这条 id=AC-934 的读数在**立案时刻的真实记录**上确实存在（§2a，来自主检出自己的
+   git 对象 `3510aa8df^`），而**派发时刻**它已按设计消解（§2b，AC-938 翻 achieved ⇒ 第二个合取项
+   不成立）。⛔ 没有为了凑这条读数去改任何 AC 的 status/criterion——那会直接违反 AC-940 的立意。
+   机制本身的可取假证据由 `plugin/test/meta-driver.test.mjs` 的 (a)–(f) 六条用例承担（含正控、
+   三个负控、单向/双向漂移各一例、既有四类行为不变）。
+2. **`goals/GOAL-914-….md` 的 `## 退出条件` 真的点名 AC-938 / AC-940（diff 只此一节）** —— §3，
+   `git diff --numstat goals/` = `3 1`，只有那一个文件。
+3. **一把能取假的锁** —— `plugin/test/ac940-exit-condition-contradiction.test.mjs` 的变异负控：
+   把 `b!=='achieved'` 换成 `false` 后，同一 (achieved, active) fixture 从 exit 1 翻成 exit 0；
+   仍为 1 时测试打印 `lock is not measuring the conflict branch`。已实跑通过。
+4. **证据文档里 AC-940 判据的原始读数与 unpark 命令** —— §1a（立案时刻：exit 1 + stderr 全行）、
+   §1b（派发时刻：exit 0 + stdout）、§4（unpark 命令与两态的含义）。
+
+红线三条：① 未改 AC-934 / AC-938 / AC-940 的 `status` 或 `criterion`；② 未用任何替代品
+（没有另写一条扫全表的检查、没有拿别的 AC 顶替）；③ 没有把「本任务已完成」写成「AC-940 已被本任务
+翻绿」——它是被 `gap-goal-filing-ledger-landing` 的落地翻绿的（§0 的提交与时间戳）。
+
+## 7. 全量 suite 的归属（口径说明）
+
+本任务 AC 里的一条是 `bash scripts/test.sh` 退出码 0。按 per-task worker 契约，**全量 suite 由
+worker-driver 的机械 fan-in 阶段执行**，worker 会话不跑它；本会话已把同一套变更跑过**scoped 门**
+（`bash scripts/test.sh --for-task gap-ac940-exit-condition-contradiction --allow-thin`，exit 0，
+163 tests / 0 fail，含本任务新增的 6 条锁用例）并交给 fan-in 跑全量。若全量红，fan-in 不会落地本任务。
