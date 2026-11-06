@@ -576,7 +576,7 @@ const mkReadings = (verdict, noise = 'n1') => ({
   divergences: verdict === 'pass' ? [{ id: 'AC-001', kind: 'pass-but-unflipped', status: 'active', verdict, reason: noise }] : [],
   // 生态读数带上每轮都变的量（staleSecs/记录数），用来证明它们【不】进摘要。
   drivers: [{ kind: 'promotion', running: true, supervisorAlive: true, driverAlive: true, carrierRecords: noise.length, carrierLastTs: null, staleSecs: noise.length }],
-  syncHealth: { window: 200, ffSynced: 1, notFf: 2, ffError: 0, semanticBegin: 0, semanticResolved: 0, semanticConflict: 0, semanticAlignFailed: 0, semanticFfFailed: 0, lastEvent: 'doc-develop-sync-not-ff', lastTs: null },
+  syncHealth: { window: 200, ffSynced: 1, notFf: 2, ffError: 0, semanticBegin: 0, semanticResolved: 0, semanticConflict: 0, semanticAlignFailed: 0, semanticFfFailed: 0, lastDocToDevelop: 'ok', lastEvent: 'doc-develop-sync-not-ff', lastTs: null },
   metaRecords: [],
   inertCheckers: [],
   focus: null,
@@ -1452,6 +1452,129 @@ test('collectSyncHealth: take-develop-refused 必须单独计数（⛔ 不入桶
     assert.equal(collectSyncHealth(tmp).semanticTakeDevelopRefused, 0, '无拒绝事件 ⇒ 0（⛔ 硬编码 ⇒ 假）');
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+// gap-meta-synchealth-doc-to-develop-outcome-invisible — doc→develop 的【结局】必须三态可读：
+// 拒绝态藏在 bidirectional 事件的字段里，而 lastEvent 只取事件名 ⇒ 阻塞与健康同形 ⇒ 摘要不变 ⇒
+// 语义半永不被唤醒（2026-10-31 冻结 30+ 分钟全程静默）。⛔ 不用布尔：布尔的 false 会把
+// 「被拒」与「读不懂」压成同一个值（硬规则 3b/6）。
+test('collectSyncHealth: lastDocToDevelop 三态派生 —— ok / refused / unknown（三条同时断言）', () => {
+  const mk = (name, rows) => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), `meta-driver-d2d-${name}-`));
+    fs.mkdirSync(path.join(dir, '.quay'), { recursive: true });
+    if (rows) {
+      fs.writeFileSync(path.join(dir, '.quay', 'doc-develop-sync.jsonl'),
+        rows.map((x) => (typeof x === 'string' ? x : JSON.stringify(x))).join('\n') + '\n');
+    }
+    return dir;
+  };
+  const dirs = [];
+  try {
+    const dOk = mk('ok', [{ ts: '2026-11-06T05:52:20.312Z', event: 'doc-develop-sync-bidirectional', docToDevelop: 'true' }]);
+    const dRefused = mk('refused', [{ ts: '2026-10-31T09:41:12.337Z', event: 'doc-develop-sync-bidirectional', docToDevelop: 'false' }]);
+    // 第三个目录【有载体但没有该事件】（⛔ 不是「文件不存在」——那会顺带把 unknown 的来源混掉）。
+    const dNone = mk('none', [
+      { ts: '2026-11-06T05:52:20.000Z', event: 'doc-develop-sync-ff-synced' },
+      { ts: '2026-11-06T05:52:21.000Z', event: 'doc-develop-sync-not-ff', benign: true },
+    ]);
+    dirs.push(dOk, dRefused, dNone);
+    const hOk = collectSyncHealth(dOk);
+    const hRefused = collectSyncHealth(dRefused);
+    const hNone = collectSyncHealth(dNone);
+    assert.equal(hOk.lastDocToDevelop, 'ok', 'docToDevelop:"true" ⇒ ok');
+    assert.equal(hRefused.lastDocToDevelop, 'refused', 'docToDevelop:"false" ⇒ refused（阻塞中必须可从读数看出）');
+    assert.equal(hNone.lastDocToDevelop, 'unknown', '窗口内无该事件 ⇒ unknown（⛔ 不得与 ok 同形）');
+    // 前提：拒绝态的 lastEvent 与健康态的事件名同形——正是这个性质让本字段必须存在。
+    assert.equal(hRefused.lastEvent, 'doc-develop-sync-bidirectional');
+    // 原生布尔（旧/手工事件）两种形态都认。
+    const dBool = mk('bool', [{ ts: '2026-11-06T05:52:22.000Z', event: 'doc-develop-sync-bidirectional', docToDevelop: false }]);
+    dirs.push(dBool);
+    assert.equal(collectSyncHealth(dBool).lastDocToDevelop, 'refused', '原生布尔 false ⇒ refused');
+    // 值非布尔 ⇒ unknown（⛔ 不猜：缺键 / 数字 / 别的串都不是「健康」）。
+    for (const v of [undefined, 1, 'yes', null]) {
+      const dir = mk(`bad-${String(v)}`, [{ ts: '2026-11-06T05:52:23.000Z', event: 'doc-develop-sync-bidirectional', docToDevelop: v }]);
+      dirs.push(dir);
+      assert.equal(collectSyncHealth(dir).lastDocToDevelop, 'unknown', `docToDevelop=${JSON.stringify(v)} ⇒ unknown（⛔ 不得当成 ok/refused）`);
+    }
+    // 坏行【在】最后一条 bidirectional 之后 ⇒ unknown（那条坏行可能就是被吞掉的更新事件）。
+    const dBadAfter = mk('bad-after', [
+      { ts: '2026-11-06T05:52:24.000Z', event: 'doc-develop-sync-bidirectional', docToDevelop: 'true' },
+      'THIS IS NOT JSON',
+    ]);
+    // 坏行【在】之前 ⇒ 后面的好事件把判定覆盖回来（按位置判定，不按「有没有坏行」判定）。
+    const dBadBefore = mk('bad-before', [
+      'THIS IS NOT JSON',
+      { ts: '2026-11-06T05:52:25.000Z', event: 'doc-develop-sync-bidirectional', docToDevelop: 'true' },
+    ]);
+    dirs.push(dBadAfter, dBadBefore);
+    assert.equal(collectSyncHealth(dBadAfter).lastDocToDevelop, 'unknown', '坏行在其后 ⇒ 结局不可知 ⇒ unknown');
+    assert.equal(collectSyncHealth(dBadBefore).lastDocToDevelop, 'ok', '坏行在其前 ⇒ 后一条好事件决定结局');
+    // 载体整个不存在 ⇒ unknown（⛔ 不填 "ok"：缺值 = 未查，不是为假/为真）。
+    const dMissing = fs.mkdtempSync(path.join(os.tmpdir(), 'meta-driver-d2d-missing-'));
+    dirs.push(dMissing);
+    assert.equal(collectSyncHealth(dMissing).lastDocToDevelop, 'unknown', '载体缺失 ⇒ unknown');
+  } finally {
+    for (const d of dirs) fs.rmSync(d, { recursive: true, force: true });
+  }
+});
+
+// 正臂：其余读数完全相同、只有 lastDocToDevelop 不同 ⇒ 摘要必须不同（否则阻塞发生/结束不会被判读）。
+test('readingsDigest 正臂: lastDocToDevelop ok vs refused ⇒ 摘要不同（阻塞开始/结束各判读一次）', () => {
+  const withD2D = (v) => {
+    const r = mkReadings('pass', 'same');
+    r.syncHealth = { ...r.syncHealth, lastDocToDevelop: v };
+    return r;
+  };
+  const ok = withD2D('ok');
+  const refused = withD2D('refused');
+  // 前提：除该字段外两轮读数逐字相同（否则「摘要不同」可能来自别的变化，正臂就什么也没证明）。
+  assert.deepEqual({ ...ok.syncHealth, lastDocToDevelop: null }, { ...refused.syncHealth, lastDocToDevelop: null },
+    '前提：只有 lastDocToDevelop 不同');
+  assert.notEqual(readingsDigest(ok), readingsDigest(refused),
+    'doc→develop 从 ok 变 refused（阻塞开始）必须改变摘要 ⇒ 语义半被唤醒');
+  // 反方向同样成立（阻塞结束也要各判读一次）。
+  assert.notEqual(readingsDigest(refused), readingsDigest(ok));
+  // 字段结构性缺失（旧构建/手工读数）⇒ 与 unknown 同 token，⛔ 不与 ok 同形（硬规则 3b）。
+  const missing = mkReadings('pass', 'same');
+  delete missing.syncHealth.lastDocToDevelop;
+  assert.equal(readingsDigest(missing), readingsDigest(withD2D('unknown')), '缺字段 ⇒ 与 unknown 同形，不与 ok 同形');
+  assert.notEqual(readingsDigest(missing), readingsDigest(ok), '缺字段 ⛔ 不得与 ok 同形');
+});
+
+// 负臂（消抖）：阻塞持续期间摘要不得变——否则每轮一条同因拒绝都会把语义半叫醒一次（成本事故）。
+test('readingsDigest 负臂（消抖）: 同一 refused 阻塞再采集一轮（只多一条同值事件）⇒ 摘要相同', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'meta-driver-d2d-digest-'));
+  try {
+    const carrier = path.join(dir, '.quay', 'doc-develop-sync.jsonl');
+    fs.mkdirSync(path.join(dir, '.quay'), { recursive: true });
+    const refusal = (i) => JSON.stringify({
+      ts: `2026-10-31T09:${String(16 + i).padStart(2, '0')}:36.000Z`,
+      event: 'doc-develop-sync-bidirectional', phase: 'done', developToDoc: 'error', docToDevelop: 'false',
+    });
+    const write = (n) => fs.writeFileSync(carrier, Array.from({ length: n }, (_, i) => refusal(i)).join('\n') + '\n');
+    const readings = () => ({ ...mkReadings('pass', 'same'), syncHealth: collectSyncHealth(dir) });
+
+    write(3);
+    const r1 = readings();
+    write(4); // 下一轮：同因拒绝再落一条（窗口内只多一条同值 bidirectional 事件）
+    const r2 = readings();
+    const lineCount = fs.readFileSync(carrier, 'utf8').trim().split('\n').length;
+    assert.equal(lineCount, 4, '前提：载体确实多了一条记录（⛔ 不是同一份输入读两次）');
+    assert.equal(r1.syncHealth.lastDocToDevelop, 'refused');
+    assert.equal(r2.syncHealth.lastDocToDevelop, 'refused');
+    assert.equal(r1.syncHealth.lastEvent, r2.syncHealth.lastEvent, '前提：两轮 lastEvent 相同');
+    assert.equal(readingsDigest(r1), readingsDigest(r2), '阻塞持续期间摘要必须不变（否则每轮唤醒语义半一次）');
+
+    // 阻塞结束（下一条 bidirectional 的 docToDevelop 变为 true）⇒ 摘要必须变（正方向对照，证明负臂不是恒真）。
+    fs.appendFileSync(carrier, JSON.stringify({
+      ts: '2026-10-31T09:45:00.000Z', event: 'doc-develop-sync-bidirectional', phase: 'done', docToDevelop: 'true',
+    }) + '\n');
+    const r3 = readings();
+    assert.equal(r3.syncHealth.lastDocToDevelop, 'ok');
+    assert.notEqual(readingsDigest(r3), readingsDigest(r2), '阻塞结束 ⇒ 摘要必须变（语义半再判读一次）');
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
   }
 });
 

@@ -1,7 +1,7 @@
 ---
 id: gap-ac941-filing-window-anchor-post-landing-row
 title: 落地后生产终态行：AC-941 的时间窗锚点（现判据会被落地前证据行骗过）
-status: ready
+status: done
 labels:
   - gap
   - goal-driver

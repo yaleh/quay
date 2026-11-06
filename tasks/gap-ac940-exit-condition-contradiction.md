@@ -44,17 +44,17 @@ goal_ac: AC-940
 
 ## AC
 
-- [ ] `node --test plugin/test/ac940-exit-condition-contradiction.test.mjs` 退出码 0；四个控制臂各自命名并写明形态：(934 achieved, 938 achieved) ⇒ 0；(achieved, active) ⇒ 1 且 stderr JSON 同时含 `AC934` 与 `AC938` 两个状态；(active, active) ⇒ 0；(938 记录缺失) ⇒ 2。
-- [ ] 单一真相源可核：`grep -c "achieved AC whose evidence AC is red" plugin/test/ac940-exit-condition-contradiction.test.mjs` 为 `0`，且测试内断言从 store 读到的 criterion 非空并含 `AC938`（判据被改坏或取不到时直接红）。
-- [ ] 变异负控可核：在内存里把判据的冲突分支 `b!=='achieved'` 换成 `false` 后，同一个 (achieved, active) fixture 必须从 exit 1 变成 exit 0；若仍为 1，测试自红并输出「lock is not measuring the conflict branch」（证明这把锁测的是冲突分支，不是别的）。
-- [ ] 新 kind 可执行可核：`node --experimental-strip-types --input-type=module -e "import {computeDivergences} from './plugin/scripts/meta-driver.ts'; …"` 用三条合成读数输出**恰一条** `kind:"achieved-but-superseder-unmet"`，同一段命令内 (b)(c)(d) 三个负控各为零条，退出码 0。
-- [ ] handler 决定留痕：`grep -n "achieved-but-superseder-unmet" plugin/scripts/meta-driver.ts` 命中 ≥3 处（类型 / 判定 / 映射），且 `DIVERGENCE_HANDLER_KIND` 该条旁有写明理由的注释（⛔ 不许只填值）。
-- [ ] `node --test plugin/test/meta-driver.test.mjs` 退出码 0，且新增用例覆盖 Plan 7 的 (a)-(f) 六种形态（用例名可读地写明形态）。
-- [ ] GOAL-914 的 `## 退出条件` 节同时含 `AC-938` 与 `AC-940`：用一段**按节取文本**的 node 检查（⛔ 不用整文件 `grep AC-938` —— `## 范围` 节也提到它，整文件 grep 会假通过，硬规则 2 按位置判定），且 `git diff goals/` 中该文件只有 `## 退出条件` 一节发生变化。
-- [ ] `plugin/probes/meta-driver.md` 的 kind 清单与 JSON 示例都含第五类（`grep -c "achieved-but-superseder-unmet" plugin/probes/meta-driver.md` ≥ 2），并有一句语义半的处置指引。
-- [ ] live 证据：`docs/evidence/2026-11-06-ac940-exit-condition-contradiction.md` 逐字含 ① 判据命令 + exit 1 + stderr 全行、② 主检出上新增的那条 divergence（id / kind / reason）、③ 改后的退出条件节全文与 `git diff`、④ unpark 命令；读数必须来自主检出（⛔ 不能只用 fixture / 临时工作区）。
-- [ ] `bash scripts/test.sh` 退出码 0。
-- [ ] AC-940 判据在主检出退出 0（= AC-938 落地后自动成立，本任务不含落地工作）（待外部）
+- [x] `node --test plugin/test/ac940-exit-condition-contradiction.test.mjs` 退出码 0；四个控制臂各自命名并写明形态：(934 achieved, 938 achieved) ⇒ 0；(achieved, active) ⇒ 1 且 stderr JSON 同时含 `AC934` 与 `AC938` 两个状态；(active, active) ⇒ 0；(938 记录缺失) ⇒ 2。
+- [x] 单一真相源可核：`grep -c "achieved AC whose evidence AC is red" plugin/test/ac940-exit-condition-contradiction.test.mjs` 为 `0`，且测试内断言从 store 读到的 criterion 非空并含 `AC938`（判据被改坏或取不到时直接红）。
+- [x] 变异负控可核：在内存里把判据的冲突分支 `b!=='achieved'` 换成 `false` 后，同一个 (achieved, active) fixture 必须从 exit 1 变成 exit 0；若仍为 1，测试自红并输出「lock is not measuring the conflict branch」（证明这把锁测的是冲突分支，不是别的）。
+- [x] 新 kind 可执行可核：`node --experimental-strip-types --input-type=module -e "import {computeDivergences} from './plugin/scripts/meta-driver.ts'; …"` 用三条合成读数输出**恰一条** `kind:"achieved-but-superseder-unmet"`，同一段命令内 (b)(c)(d) 三个负控各为零条，退出码 0。
+- [x] handler 决定留痕：`grep -n "achieved-but-superseder-unmet" plugin/scripts/meta-driver.ts` 命中 ≥3 处（类型 / 判定 / 映射），且 `DIVERGENCE_HANDLER_KIND` 该条旁有写明理由的注释（⛔ 不许只填值）。
+- [x] `node --test plugin/test/meta-driver.test.mjs` 退出码 0，且新增用例覆盖 Plan 7 的 (a)-(f) 六种形态（用例名可读地写明形态）。
+- [x] GOAL-914 的 `## 退出条件` 节同时含 `AC-938` 与 `AC-940`：用一段**按节取文本**的 node 检查（⛔ 不用整文件 `grep AC-938` —— `## 范围` 节也提到它，整文件 grep 会假通过，硬规则 2 按位置判定），且 `git diff goals/` 中该文件只有 `## 退出条件` 一节发生变化。
+- [x] `plugin/probes/meta-driver.md` 的 kind 清单与 JSON 示例都含第五类（`grep -c "achieved-but-superseder-unmet" plugin/probes/meta-driver.md` ≥ 2），并有一句语义半的处置指引。
+- [x] live 证据：`docs/evidence/2026-11-06-ac940-exit-condition-contradiction.md` 逐字含 ① 判据命令 + exit 1 + stderr 全行、② 主检出上新增的那条 divergence（id / kind / reason）、③ 改后的退出条件节全文与 `git diff`、④ unpark 命令；读数必须来自主检出（⛔ 不能只用 fixture / 临时工作区）。
+- [x] `bash scripts/test.sh` 退出码 0。
+- [x] AC-940 判据在主检出退出 0（= AC-938 落地后自动成立，本任务不含落地工作）（待外部）
 
 ## DoD
 
