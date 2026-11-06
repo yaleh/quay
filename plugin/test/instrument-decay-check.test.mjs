@@ -31,6 +31,9 @@ import {
   RECOVERY_ACCEPTED_TRIGGER_CMD,
   RECOVERY_EXEMPT_TRIGGER_CMD,
   BASELINE_RED_EXEMPT_TRIGGER_CMD,
+  landingStepConditionCmd,
+  RERUN_UNREACHABLE_CONDITION_CMD,
+  SUITE_RERUN_GREEN_CONDITION_CMD,
 } from "../scripts/instrument-decay-check.ts";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "..", "..");
@@ -914,12 +917,39 @@ test("三条条件命令 — 载体或账本读不懂时 fail-closed 到 exit 1�
   }
 });
 
-// ── suite-rerun-green 的【触发式】条件：六条正负控制 ────────────────────────────────────────────────
-// (gap-instrument-decay-suite-rerun-green-file-pin-expired)
-// 语义：窗口 = 末次 suite-rerun-green 写入之后；窗口内 ①≥1 条 rerun ②没有 rerun-green ③状态全部已知
-//       ⇒ exit 0（explained-absent）；否则 exit 1（回到 decayed[]，fail-closed）。
+// ── suite-rerun-green 的【触发式】条件：可达性 + 三态 ──────────────────────────────────────────────
+// (gap-instrument-decay-suite-rerun-green-file-pin-expired；
+//  gap-instrument-decay-suite-red-blocks-landing-steps-unadjudicated 再修)
+// 语义：窗口 = 末次 suite-rerun-green 写入之后；窗口内 rerun 0 条 ⇒ 证成红全是 OOM/incomplete
+//       （每条 suite-end ok:false 都等到同 task 的 suite-incomplete）⇒ exit 0；rerun 非 0 ⇒ 没有
+//       rerun-green 且状态全部已知（rerun-red / rerun-not-evaluated）⇒ exit 0；否则 exit 1。
 // ⛔ 条件不点名任何文件：「当前红的是哪一个文件」不再是条件的一部分——旧缺陷正是把实例钉进条件，
 //    该文件转绿后条件恒红，而「换了个红文件」与「写手真腐烂」在读数上同形（硬规则 3b）。
+
+// 7 个新组（gap-instrument-decay-suite-red-blocks-landing-steps-unadjudicated）共用的合成夹具：
+// 五个落地步骤 + rerun + suite-rerun-green 都停在 OLD（>24h ⇒ rate-stopped），窗口内只有一次
+// 「suite-end ok:false + suite-incomplete」的 OOM/incomplete 红（无 suite 放行、无 rerun）⇒ 缺席已解释。
+// suite-skip 必须在场（expected 词表），但又**不得**成为窗口里的 suite 放行 ⇒ 放在 OLD 之前（OLD_MINUS），
+// 它自己那条裁定读到的窗口里仍有 ff@OLD + suite-start@RECENT ⇒ 仍然成立。
+const LANDING_STEPS = ["anti-drift-land", "ac-gate", "ff", "dark-axis", "slice-readings-post"];
+const DECAYED_LANDING_GROUPS = [...LANDING_STEPS, "rerun", "suite-rerun-green"];
+const OLD_MINUS = "2026-08-29T01:47:00.000Z";
+const RED_TS = "2026-09-04T12:01:00.000Z";
+const RED_TS2 = "2026-09-04T12:01:01.000Z";
+
+function decayedLandingFixture() {
+  const dir = tmpDir("idc-decayed-landing-");
+  const rows = [];
+  for (const s of ["merge-develop", "anti-drift", "typecheck", "scoped-gate", "doc-check", "ac-precheck", "suite-start"]) {
+    rows.push(stepRec(s, RECENT));
+  }
+  rows.push({ ...stepRec("suite-end", RED_TS), ok: false, reason: "suite red" });
+  rows.push({ ...stepRec("suite-incomplete", RED_TS2), ok: false, reason: "oom-killed (2)" });
+  rows.push(stepRec("suite-skip", OLD_MINUS));
+  for (const g of DECAYED_LANDING_GROUPS) rows.push(stepRec(g, OLD));
+  writeCarrier(dir, "fan-in-step-trace.jsonl", rows);
+  return dir;
+}
 
 test("suite-rerun-green 触发式控制 ① — 末次写入之后最新的 rerun 是 rerun-red（点名任意文件）⇒ explained-absent", () => {
   const dir = tmpDir("idc-rerun-green-red-");
@@ -959,14 +989,14 @@ test("suite-rerun-green 触发式控制 ③ — 末次写入之后出现 rerun-g
   assert.equal(res.adjudicated.length, 7, "the other seven adjudications still hold");
 });
 
-test("suite-rerun-green 触发式控制 ④ — 载体里没有任何 rerun 记录 ⇒ 条件不成立 ⇒ decayed[]", () => {
-  const dir = tmpDir("idc-rerun-green-norerun-");
-  writeCarrier(dir, "fan-in-step-trace.jsonl", manifestFixtureRows({ omitRerun: true }));
+test("suite-rerun-green 触发式控制 ④ — 窗口内 rerun 0 条 + 红全是 OOM/incomplete ⇒ explained-absent", () => {
+  const dir = decayedLandingFixture();
   const res = analyzeCarrier(dir, MANIFEST[0], DEFAULT_STALE_SECONDS, NOW_MS);
-  const stopped = res.decayed.filter((d) => d.kind === "rate-stopped").map((d) => d.group);
-  assert.deepEqual(stopped, ["suite-rerun-green"], "no trigger input ⇒ no explanation (fail-closed)");
-  assert.match(res.decayed.find((d) => d.group === "suite-rerun-green").detail, /condition command did not hold/);
-  assert.equal(res.adjudicated.length, 7, "the other seven adjudications still hold");
+  assert.deepEqual(res.decayed.filter((d) => d.kind === "rate-stopped"), [], "OOM/incomplete red explains the absence without any rerun");
+  const a = res.adjudicated.find((x) => x.group === "suite-rerun-green");
+  assert.ok(a, "suite-rerun-green must be in adjudicated[]");
+  assert.equal(a.state, "explained-absent");
+  assert.equal(a.condition.exitCode, 0, "rerun unreachable (OOM/incomplete) ⇒ rerun-green unreachable");
 });
 
 test("suite-rerun-green 触发式控制 ⑤ — rerun 的 state 缺失/未知 ⇒ 条件不成立（未知态不豁免）", () => {
@@ -988,10 +1018,107 @@ test("suite-rerun-green 触发式控制 ⑥ — 生产的 condition.cmd 不含�
   const cmd = MANIFEST[0].adjudicated.find((a) => a.group === "suite-rerun-green").conditionCmd;
   assert.doesNotMatch(cmd, /task-granularity-advice\.test\.mjs/, "the expired instance must not be part of the condition");
   assert.doesNotMatch(cmd, /\.test\.mjs/, "no concrete file name at all: the condition must be trigger-driven");
-  // 条件读的是【触发输入本身】（末次本组写入之后的 rerun 记录），不是「本组多久没写」的二次包装。
+  // 条件读的是【触发输入本身】（rerun 的可达性：rerun 0 条读 OOM/incomplete、非 0 读三态），
+  // 不是「本组多久没写」的二次包装。
   assert.match(cmd, /suite-rerun-green/, "the window start must be this group's own last write");
   assert.match(cmd, /rerun-red/, "a known non-green state must be an accepted window member");
   assert.match(cmd, /rerun-not-evaluated/, "the producer's third state must be an accepted window member");
+  assert.match(cmd, /suite-incomplete/, "when rerun is unreachable the condition must read the OOM/incomplete input");
+});
+
+// ── 6 条新裁定 + suite-rerun-green 条件重写（gap-instrument-decay-suite-red-blocks-landing-steps-unadjudicated）─
+// 五个落地步骤（anti-drift-land / ac-gate / ff / dark-axis / slice-readings-post）共用第一类条件：
+//   窗口 = 该组末次写入之后；≥1 次落地尝试（merge-develop/suite-start）且无 suite 放行 ⇒ exit 0；
+//   零尝试 / 有放行而本组没写 ⇒ exit 1。rerun 用第二类条件（每条 suite-end ok:false 都伴随
+//   suite-incomplete）；suite-rerun-green 重写为读 rerun 的可达性。⛔ 全部读触发输入，不是「多久没写」。
+
+test("生产 MANIFEST — 7 个新组全部 explained-absent，count/lastWrite 照出（⛔ 不消失）", () => {
+  const dir = decayedLandingFixture();
+  const res = analyzeCarrier(dir, MANIFEST[0], DEFAULT_STALE_SECONDS, NOW_MS);
+  assert.deepEqual(res.decayed.filter((d) => d.kind === "rate-stopped"), [], "no rate-stopped group may survive the seven adjudications");
+  const adj = Object.fromEntries(res.adjudicated.map((a) => [a.group, a]));
+  for (const g of DECAYED_LANDING_GROUPS) {
+    const a = adj[g];
+    assert.ok(a, `${g} must be in adjudicated[]`);
+    assert.equal(a.kind, "conditional-on-input", `${g} is condition-gated, not a permanent exemption`);
+    assert.equal(a.state, "explained-absent", `${g}: the declared condition must be a real executable reading`);
+    assert.equal(a.condition.exitCode, 0, `${g}: condition must hold on the OOM/incomplete window`);
+    assert.ok(a.count > 0 && a.lastWriteMs === Date.parse(OLD), `${g} keeps its real reading (count/lastWrite)`);
+  }
+});
+
+test("第一类 负控制 ② — 窗口内一次 suite 放行而落地步骤没写 ⇒ exit 1 回 decayed[]", () => {
+  const dir = tmpDir("idc-landing-release-");
+  const rows = [];
+  for (const s of ["merge-develop", "anti-drift", "typecheck", "scoped-gate", "doc-check", "ac-precheck", "suite-start"]) {
+    rows.push(stepRec(s, RECENT));
+  }
+  rows.push({ ...stepRec("suite-end", RED_TS), ok: true }); // 一次 suite 放行（绿）
+  rows.push(stepRec("suite-skip", OLD_MINUS));
+  for (const g of LANDING_STEPS) rows.push(stepRec(g, OLD));
+  writeCarrier(dir, "fan-in-step-trace.jsonl", rows);
+  assert.equal(runCondition(landingStepConditionCmd("anti-drift-land"), dir).status, 1, "a suite release without the landing step writing is writer rot");
+  const res = analyzeCarrier(dir, MANIFEST[0], DEFAULT_STALE_SECONDS, NOW_MS);
+  const stopped = res.decayed.filter((d) => d.kind === "rate-stopped").map((d) => d.group).sort();
+  assert.deepEqual(stopped, [...LANDING_STEPS].sort(), "all five landing steps come back to decayed[] under a release");
+  assert.match(res.decayed.find((d) => d.group === "anti-drift-land").detail, /condition command did not hold \(exit 1\)/);
+});
+
+test("第一类 负控制 ③ — 窗口内零落地尝试 ⇒ exit 1（loop 死不是已解释）", () => {
+  const dir = tmpDir("idc-landing-noattempt-");
+  writeCarrier(dir, "fan-in-step-trace.jsonl", [
+    stepRec("anti-drift-land", OLD),
+    stepRec("typecheck", RECENT), // 一个伴生对照（仍在写），但没有 merge-develop/suite-start
+  ]);
+  assert.equal(runCondition(landingStepConditionCmd("anti-drift-land"), dir).status, 1, "zero landing attempts cannot explain the absence (a vacuous truth is not a measurement)");
+});
+
+test("rerun 负控制 ④ — 一条无 suite-incomplete 的普通红而 rerun 没写 ⇒ exit 1", () => {
+  const dir = tmpDir("idc-rerun-normalred-");
+  writeCarrier(dir, "fan-in-step-trace.jsonl", [
+    stepRec("rerun", OLD),
+    stepRec("merge-develop", RECENT),
+    stepRec("suite-start", RECENT),
+    { ...stepRec("suite-end", RED_TS), ok: false, reason: "suite red" }, // 普通红，无 suite-incomplete
+  ]);
+  assert.equal(runCondition(RERUN_UNREACHABLE_CONDITION_CMD, dir).status, 1, "a normal red without suite-incomplete means rerun was reachable but did not write");
+  // suite-rerun-green 的 rerun==0 分支读到同一条普通红 ⇒ 同样 fail（两者的可达性判据一致）。
+  const dir2 = tmpDir("idc-srg-normalred-");
+  writeCarrier(dir2, "fan-in-step-trace.jsonl", [
+    stepRec("suite-rerun-green", OLD),
+    stepRec("merge-develop", RECENT),
+    stepRec("suite-start", RECENT),
+    { ...stepRec("suite-end", RED_TS), ok: false, reason: "suite red" },
+  ]);
+  assert.equal(runCondition(SUITE_RERUN_GREEN_CONDITION_CMD, dir2).status, 1, "suite-rerun-green must fail too: a normal red makes rerun reachable");
+});
+
+test("suite-rerun-green 负控制 ⑤ — 窗口内一条 rerun-green 而无本组 ⇒ exit 1", () => {
+  const dir = tmpDir("idc-srg-rerungreen-");
+  writeCarrier(dir, "fan-in-step-trace.jsonl", [
+    stepRec("suite-rerun-green", OLD),
+    stepRec("merge-develop", RECENT),
+    { event: "step-end", step: "rerun", task: "gap-x", runId: "wk-prod-1", ts: RECENT, epoch: epochOf(RECENT), exit: 0, ok: true, state: "rerun-green", files: [ANY_RERUN_FILE] },
+  ]);
+  assert.equal(runCondition(SUITE_RERUN_GREEN_CONDITION_CMD, dir).status, 1, "a green rerun with no suite-rerun-green is writer rot");
+});
+
+test("6 条新裁定 + suite-rerun-green — MANIFEST 声明完整（组名唯一、条件可执行、reason 不点名文件实例）", () => {
+  const groups = MANIFEST[0].adjudicated.map((a) => a.group);
+  for (const g of DECAYED_LANDING_GROUPS) {
+    assert.ok(groups.includes(g), `${g} must be declared`);
+    assert.equal(groups.filter((x) => x === g).length, 1, `${g} must be declared exactly once`);
+  }
+  const srg = MANIFEST[0].adjudicated.find((a) => a.group === "suite-rerun-green");
+  assert.equal(srg.conditionCmd, SUITE_RERUN_GREEN_CONDITION_CMD, "the fixed condition is the exported constant, not an inline copy");
+  assert.doesNotMatch(srg.reason, /full-suite-runner-cgroup/, "the reason is the mechanism itself, not the current red-file instance");
+  assert.match(srg.reason, /可达性/, "the reason states the trigger (rerun reachability)");
+  for (const g of LANDING_STEPS) {
+    const a = MANIFEST[0].adjudicated.find((x) => x.group === g);
+    assert.equal(a.conditionCmd, landingStepConditionCmd(g), `${g} uses the shared first-class landing-step condition`);
+  }
+  const rerun = MANIFEST[0].adjudicated.find((a) => a.group === "rerun");
+  assert.equal(rerun.conditionCmd, RERUN_UNREACHABLE_CONDITION_CMD);
 });
 
 test("CLI --json — 裁定在机器面上：decayedCount 不含它们，adjudicated[] 独立可见", () => {

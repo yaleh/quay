@@ -80,8 +80,19 @@ extra:
 
 ## Blocker
 
-**2026-11-05T16:20:11.478Z — worker 未落地（exited-not-landed）**
+**2026-11-05T16:44:43.624Z — worker 未落地（exited-not-landed）**
 
-- 未落地原因：step=suite: incomplete suite (636/636 files) — recovery exhausted at floor concurrency 16 — no declared rung produced a complete verdict (64,48,32,16); needs a code/config fix, see plugin/scripts/full-suite-runner.ts
+- 未落地原因：step=suite: oom-killed (2) — recovery red set is NOT a subset of the develop baseline red set: added=plugin/test/full-suite-runner-cgroup.test.mjs changed=- — needs a code fix
 - run_id：wk-prod-anchor
-- session_id：15463ffd-a477-4225-99ee-3f8de07c3db6
+- session_id：07da625a-d056-4975-b056-cc8f0153a06e
+
+## Needs-Human
+
+**执行 2026-11-05T16:44:45.467Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：worker-driver 连续 3 次 exited-not-landed 未落地（重试上限）
+- 失败步/判词：step=suite: oom-killed (2) — recovery red set is NOT a subset of the develop baseline red set: added=plugin/test/full-suite-runner-cgroup.test.mjs changed=- — needs a code fix
+- run_id：wk-prod-anchor
+- session_id：07da625a-d056-4975-b056-cc8f0153a06e
+- suite 日志：/data/home/yale/work/quay/.quay/fan-in-suite-gap-arbitrary-semantics-unenforced-carriers~wk-prod-anchor~1793896230415-427678.log
+- fan-in 日志：/data/home/yale/work/quay/.quay/fan-in-gap-arbitrary-semantics-unenforced-carriers-wk-prod-anchor.log
