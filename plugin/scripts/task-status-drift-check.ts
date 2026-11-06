@@ -451,19 +451,18 @@ export function taskIdFromTouches(touchesSection) {
  *  Reachability FROM the chosen ref is what keeps STRANDED-branch commits out — a commit on an
  *  unmerged task/* branch is not reachable from integration/develop/master, preserving the original
  *  "only MASTER-REACHABLE commits count" intent (AC3 negative control). */
-const _landingRefCache = new Map(); // `${repoRoot}\0${candidates.join(",")}` -> ref
 export function landingRef(repoRoot, opts = {}) {
   if (opts.ref) return opts.ref;
   const candidates = opts.candidates ?? ["integration", "develop", "master"];
-  // MEMOIZED per (root, candidate list): the resolution ran once per stranded-classification entry
-  // plus once for the scan, and each implausible candidate cost a `rev-parse` fork.
-  const cacheKey = `${repoRoot}\0${candidates.join(",")}`;
-  if (_landingRefCache.has(cacheKey)) return _landingRefCache.get(cacheKey);
+  // ⛔ NOT memoized: unlike the branch facts below, this answer is a function of the ref NAMES that
+  // currently exist, and a caller (and a test) may create/delete `integration` between two calls in
+  // the same process — memoizing it made `landingRef` answer "master" for a repo that had just grown
+  // an `integration` (task-status-drift-check.test.mjs, "integration is the first existing
+  // candidate"). The 2 forks it would save are not worth a stale ref name.
   for (const ref of candidates) {
     const r = gitTry(repoRoot, ["rev-parse", "--verify", "-q", ref], null, "landing-ref-exists");
-    if (r.ok && r.out.trim().length > 0) { _landingRefCache.set(cacheKey, ref); return ref; }
+    if (r.ok && r.out.trim().length > 0) return ref;
   }
-  _landingRefCache.set(cacheKey, "master");
   return "master";
 }
 
@@ -689,44 +688,13 @@ export function hasDoneChildren(rawTask, tasksDir) {
 // ═════════════════════════════════════════════════════════════════════════════════════════════════
 // GIT SUBPROCESS ACCOUNTING (tasks/gap-anchor-polling-git-fork-storm)
 //
-// Same instrument as ready-pool-check.ts's `gitExec()`: EVERY git spawn in this file goes through
-// `gitExec()`, which counts it (`gitExecCount()`) and — when `QUAY_GIT_EXEC_LOG` names a file —
-// appends one JSON line per spawn `{tag, argv}`. The log is the COUNTING FIXTURE's instrument
-// (`plugin/test/ready-pool-check-git-exec-count.test.mjs` counts REAL leaf spawns by line count,
-// never a wall-clock inference).
-//
-// ⛔ The log is a test/experiment seam, not a production knob: unset ⇒ one string compare per
-// spawn, no I/O, no behaviour change.
-let _gitExecCount = 0;
-const _gitExecTags = new Map(); // tag -> count
-
-function gitExec(tag, args, opts) {
-  _gitExecCount++;
-  _gitExecTags.set(tag, (_gitExecTags.get(tag) || 0) + 1);
-  const logFile = process.env.QUAY_GIT_EXEC_LOG;
-  if (logFile) {
-    try {
-      fs.appendFileSync(logFile, `${JSON.stringify({ tag, argv: args })}\n`);
-    } catch { /* the log is an instrument; a failed write must not change the run */ }
-  }
-  return execFileSync("git", args, opts);
-}
-
-/** How many git processes this module spawned in the current process. */
-export function gitExecCount() {
-  return _gitExecCount;
-}
-
-/** Per-tag breakdown of `gitExecCount()` — `{ tag: count }`. */
-export function gitExecTags() {
-  return Object.fromEntries(_gitExecTags);
-}
-
-/** Reset the in-process counters (tests; a CLI process starts at zero anyway). */
-export function resetGitExecCount() {
-  _gitExecCount = 0;
-  _gitExecTags.clear();
-}
+// EVERY git spawn in this file goes through `gitExec()` from checker-cost.ts: it counts the spawn and
+// — when `QUAY_GIT_EXEC_LOG` names a file — appends one JSON line per spawn `{tag, argv}`. The
+// implementation lives THERE and not here because this module is pinned to ZERO filesystem-write
+// primitives (AC6 of the drift detector: "no code path can mutate tasks/**"); the append must not
+// reintroduce one. The counter is re-exported so an in-process importer sees the same surface.
+import { gitExec, gitExecCount, gitExecTags, resetGitExecCount } from "./checker-cost.ts";
+export { gitExecCount, gitExecTags, resetGitExecCount };
 
 function gitTry(repoRoot, args, cwd, tag = "git-try") {
   try {
@@ -782,9 +750,16 @@ function _mergeAddedMissing(repoRoot, tipSha, landing = "master") {
 // IDENTICAL `worktree list` and 7 were the IDENTICAL full first-parent dump. They are memoized per
 // (root, landing) for the life of the process — the same short-lived-CLI lifetime argument the
 // branch-divergence cache below already relies on.
-const _worktreeListCache = new Map(); // repoRoot -> Map<refs/heads/x, worktreePath> | null
+// ⛔ SCOPED TO ONE `strandedBranches()` SCAN, not to the process. A process-lifetime memo here was
+// WRONG in a way the suite caught: a caller that mutates refs or worktrees between two scans in the
+// same process (every fixture does) would be answered from the FIRST scan's facts — the Gate-3
+// fixture commits inside a worktree and re-scans, and got the stale "has-uncommitted". The window
+// that is actually immutable is ONE scan: `landingRef` and the ref set are read once at its start,
+// and every `classifyBranch` in it sees the same repo state.
+let _scanCtx = null; // { repoRoot, landing, worktreeMap, refFacts, mergedSet, firstParentSet }
+
 function _worktreeMapForRepo(repoRoot) {
-  if (_worktreeListCache.has(repoRoot)) return _worktreeListCache.get(repoRoot);
+  if (_scanCtx && _scanCtx.repoRoot === repoRoot && _scanCtx.worktreeMap !== undefined) return _scanCtx.worktreeMap;
   const r = gitTry(repoRoot, ["worktree", "list", "--porcelain"], null, "worktree-list");
   let map = null;
   if (r.ok) {
@@ -795,13 +770,12 @@ function _worktreeMapForRepo(repoRoot) {
       if (line.startsWith("branch ") && cur) map.set(line.slice("branch ".length).trim(), cur);
     }
   }
-  _worktreeListCache.set(repoRoot, map);
+  if (_scanCtx && _scanCtx.repoRoot === repoRoot) _scanCtx.worktreeMap = map;
   return map;
 }
 
-const _refFactsCache = new Map(); // repoRoot -> Map<refname, {oid, isoDate}> | null
 function _refFacts(repoRoot) {
-  if (_refFactsCache.has(repoRoot)) return _refFactsCache.get(repoRoot);
+  if (_scanCtx && _scanCtx.repoRoot === repoRoot && _scanCtx.refFacts !== undefined) return _scanCtx.refFacts;
   const r = gitTry(repoRoot, ["for-each-ref", "--format=%(refname)%00%(objectname)%00%(committerdate:iso-strict)"], null, "for-each-ref");
   let map = null;
   if (r.ok) {
@@ -812,28 +786,24 @@ function _refFacts(repoRoot) {
       map.set(ref, { oid, isoDate: date || null });
     }
   }
-  _refFactsCache.set(repoRoot, map);
+  if (_scanCtx && _scanCtx.repoRoot === repoRoot) _scanCtx.refFacts = map;
   return map;
 }
 
-const _mergedIntoCache = new Map(); // `${repoRoot}\0${landing}` -> Set<branchShort> | null
 function _mergedInto(repoRoot, landing) {
-  const key = `${repoRoot}\0${landing}`;
-  if (_mergedIntoCache.has(key)) return _mergedIntoCache.get(key);
+  if (_scanCtx && _scanCtx.mergedSet !== undefined && _scanCtx.repoRoot === repoRoot && _scanCtx.landing === landing) return _scanCtx.mergedSet;
   const r = gitTry(repoRoot, ["branch", "--merged", landing, "--format=%(refname:short)"], null, "branch-merged");
   let set = null;
   if (r.ok) set = new Set(r.out.split("\n").map((l) => l.trim()).filter(Boolean));
-  _mergedIntoCache.set(key, set);
+  if (_scanCtx && _scanCtx.repoRoot === repoRoot && _scanCtx.landing === landing) _scanCtx.mergedSet = set;
   return set;
 }
 
-const _firstParentCache = new Map(); // `${repoRoot}\0${landing}` -> Set<oid> | null
 function _firstParentSet(repoRoot, landing) {
-  const key = `${repoRoot}\0${landing}`;
-  if (_firstParentCache.has(key)) return _firstParentCache.get(key);
+  if (_scanCtx && _scanCtx.firstParentSet !== undefined && _scanCtx.repoRoot === repoRoot && _scanCtx.landing === landing) return _scanCtx.firstParentSet;
   const r = gitTry(repoRoot, ["rev-list", "--first-parent", landing], null, "landing-first-parent");
   const set = r.ok ? new Set(r.out.split("\n").filter(Boolean)) : null;
-  _firstParentCache.set(key, set);
+  if (_scanCtx && _scanCtx.repoRoot === repoRoot && _scanCtx.landing === landing) _scanCtx.firstParentSet = set;
   return set;
 }
 
@@ -933,9 +903,19 @@ export function classifyBranch(repoRoot, branch, landing = "master") {
 // (has-commits, merged-then-reverted, has-uncommitted). merged-clean branches are excluded.
 export function strandedBranches(repoRoot, opts = {}) {
   const landing = landingRef(repoRoot, opts);
-  return listWorkBranches(repoRoot)
-    .map((b) => classifyBranch(repoRoot, b, landing))
-    .filter((c) => c.classification !== "merged-clean");
+  // ONE scan-scoped fact context (see _scanCtx): every branch in THIS scan shares the worktree list,
+  // the ref listing, the merged-set and the landing first-parent dump — four repo-wide questions that
+  // used to be re-asked per branch. Cleared in `finally` so the NEXT scan (which may run after the
+  // caller mutated refs/worktrees — every fixture does) reads the repo again.
+  const prevCtx = _scanCtx;
+  _scanCtx = { repoRoot, landing };
+  try {
+    return listWorkBranches(repoRoot)
+      .map((b) => classifyBranch(repoRoot, b, landing))
+      .filter((c) => c.classification !== "merged-clean");
+  } finally {
+    _scanCtx = prevCtx;
+  }
 }
 
 // For AC6: does ANY code-root Touches entry of a done task appear in the branch's DIVERGENT diff —

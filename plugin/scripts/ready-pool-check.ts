@@ -323,62 +323,18 @@ import { parseTouchEntriesWithTags } from "./touches-parser.ts";
 // ═════════════════════════════════════════════════════════════════════════════════════════════════
 // GIT SUBPROCESS ACCOUNTING (tasks/gap-anchor-polling-git-fork-storm)
 //
-// THE MEASUREMENT PROBLEM: "this checker forks too many git processes" was observed ONLY as a
-// host-wide bpftrace reading (31,918 git execs in a 10 s window, attribution table by parent
-// process). No per-call number existed, so every proposed fix ("cache it", "batch it") was
-// unfalsifiable from inside this file, and an optimisation could move the cost somewhere else and
-// still "pass".
+// EVERY git spawn in this file goes through `gitExec()` from checker-cost.ts (the module that already
+// owns "what did this criterion cost"): it counts the spawn and — when `QUAY_GIT_EXEC_LOG` names a
+// file — appends ONE JSON line per spawn `{tag, argv}`. That log is the COUNTING FIXTURE's
+// instrument (`plugin/test/ready-pool-check-git-exec-count.test.mjs` spawns the real CLI over a
+// synthetic N-task workspace and counts REAL leaf spawns by line count) — never a wall-clock
+// inference, never a monkey-patched `child_process`.
 //
-// THE INSTRUMENT: EVERY git spawn in this file goes through `gitExec()`. It counts the spawn
-// (`gitExecCount()`, for an in-process importer) and — when `QUAY_GIT_EXEC_LOG` names a file —
-// appends ONE JSON line per spawn `{argv, tag}`. The log is the COUNTING FIXTURE's instrument:
-// `plugin/test/ready-pool-check-git-exec-count.test.mjs` spawns the real CLI over a synthetic
-// N-task workspace and counts REAL leaf spawns by line count. Never a wall-clock inference (a
-// slow host would make that reading move on its own), never a monkey-patched child_process.
-//
-// ⛔ The log is a test/experiment seam, not a production knob: unset ⇒ one string compare per
-// spawn, no I/O, no behaviour change.
-let _gitExecCount = 0;
-const _gitExecTags = new Map(); // tag -> count (attribution without re-reading the log)
-
-/** How many git processes this module spawned in the current process. */
-export function gitExecCount() {
-  return _gitExecCount;
-}
-
-/** Per-tag breakdown of `gitExecCount()` — `{ tag: count }`. */
-export function gitExecTags() {
-  return Object.fromEntries(_gitExecTags);
-}
-
-/** Reset the in-process counters (tests; a CLI process starts at zero anyway). */
-export function resetGitExecCount() {
-  _gitExecCount = 0;
-  _gitExecTags.clear();
-}
-
-/**
- * Run one git subprocess. The ONLY sanctioned way this file may spawn git.
- * @param {string} tag  short attribution label ("merge-head", "ref-exists", …) — written to the log
- * @param {string[]} args git argv (WITHOUT the leading "git")
- * @param {object} [opts] execFileSync options, unchanged
- */
-function gitExec(tag, args, opts) {
-  _gitExecCount++;
-  _gitExecTags.set(tag, (_gitExecTags.get(tag) || 0) + 1);
-  const logFile = process.env.QUAY_GIT_EXEC_LOG;
-  if (logFile) {
-    try {
-      fs.appendFileSync(logFile, `${JSON.stringify({ tag, argv: args })}\n`);
-    } catch { /* the log is an instrument; a failed write must not change the run */ }
-  }
-  return execFileSync("git", args, opts);
-}
-
-/** True when `QUAY_GIT_EXEC_LOG` is set (the counting fixture's mode). */
-export function gitExecLogEnabled() {
-  return !!process.env.QUAY_GIT_EXEC_LOG;
-}
+// The implementation lives in checker-cost.ts, not here, because `task-status-drift-check.ts` needs
+// the SAME instrument and is pinned to zero filesystem-write primitives (its AC6) — one module, one
+// copy, and the append stays out of the detector.
+import { gitExec, gitExecCount, gitExecTags, resetGitExecCount, gitExecLogEnabled } from "./checker-cost.ts";
+export { gitExecCount, gitExecTags, resetGitExecCount, gitExecLogEnabled };
 
 /** Default concurrency cap (max in-flight subagents) — derived from driver-config's
  *  defaultDriverConfig().worker.cap (the DISPATCH single source, AC155), NOT a parallel literal.
@@ -3267,7 +3223,15 @@ function writeCacheJsonSerialized(file, text) {
 //     a time-derived verdict is exactly the "cached proxy for a direct quantity" failure (硬规则 4b).
 //   - The replay is for the PURE DETECTOR path only: `--apply` / `--revaluate-apply` always
 //     recompute (a write must never be decided by a replayed report).
+//   - The ANALYSIS OPTIONS are part of the key (`--targeted`, `--top`, `--in-flight`, `--cap`, …):
+//     two different questions over the same inputs must not share an answer.
 //   - `QUAY_READY_POOL_BACKOFF=0` disables it (the negative control); `..._BACKOFF_K` sets K.
+// ⛔ KNOWN RESIDUAL (deliberately not recomputed): the merge-worktree conflict surfaces carry a
+//     liveness judgment whose input (`INFLIGHT_WORKTREE_STALE_MS` vs the worktree's last commit time)
+//     drifts with the clock while no file changes. A replayed report can therefore keep naming a
+//     merge worktree that has since gone quiet. It is the SAFE direction (an extra `deferred` reason,
+//     never an over-dispatch), it self-heals on the first real change, and `replayed_report_age_ms`
+//     makes the staleness visible instead of silent (硬规则 3b).
 // ═════════════════════════════════════════════════════════════════════════════════════════════════
 
 /** K = the number of consecutive unchanged ticks after which a ticking report is labelled `quiescent`
@@ -3352,7 +3316,7 @@ function _probe(root, tag, argv) {
  * The COMPLETE input fingerprint for `analyzeTasks`, plus the enumerated probe list it cost.
  * @returns {{ key: string, probes: Array<{tag:string, argv:string[], value:(string|null)}> }}
  */
-export function computeChangeKey(root, { develop = "develop", integration = "integration", master = "master", landRef = null } = {}) {
+export function computeChangeKey(root, { develop = "develop", integration = "integration", master = "master", landRef = null, options = null } = {}) {
   const probes = [];
   const add = (tag, argv) => {
     const value = _probe(root, tag, argv);
@@ -3375,7 +3339,11 @@ export function computeChangeKey(root, { develop = "develop", integration = "int
     fileSignature(path.join(root, ".quay", "promotion-control.json")),
   ].join(",");
   const wtSig = worktreeSignature(root);
-  const payload = JSON.stringify({ v: 1, landing, landOid, headOid, refs, storeSig, ledgerSig, wtSig });
+  // ⛔ The ANALYSIS OPTIONS are part of the key: `--targeted <id>`, `--top N`, `--in-flight <ids>`,
+  // `--cap`, … all change the report while the INPUTS are identical. Omitting them would let a
+  // `--targeted` answer be replayed to a plain detector tick (and vice versa) — a cache that returns
+  // a value for a question nobody asked. Callers that pass options MUST include them here.
+  const payload = JSON.stringify({ v: 1, landing, landOid, headOid, refs, storeSig, ledgerSig, wtSig, options });
   let key;
   try {
     key = createHash("sha256").update(payload).digest("hex");
@@ -4554,7 +4522,14 @@ function main(argv) {
     // to analyse. Every input `analyzeTasks` reads is in it (see computeChangeKey), so "same key"
     // means "same report" — except for the WALL-CLOCK-derived fields, which are recomputed on the
     // replayed tick and patched in (`refreshClockFields`).
-    const { key, probes } = computeChangeKey(rootDir, { develop, integration, master });
+    const { key, probes } = computeChangeKey(rootDir, {
+      develop, integration, master,
+      // Every input the analysis takes from argv — see computeChangeKey's note.
+      options: {
+        cap, floorMult, floorCap: floorCap ?? null, topN, targetedId, inFlightIds, closedButLiveIds,
+        develop, integration, master, redWindowMin, landingStalenessMs, landingBehindThreshold, taskReadRef: develop,
+      },
+    });
     const K = backoffThresholdK();
     const prev = readBackoffState(rootDir);
     const streak = prev && prev.key === key ? prev.streak + 1 : 0;
