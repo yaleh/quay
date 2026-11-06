@@ -89,9 +89,10 @@ goal_ac: AC-943
 - driver 接线（`plugin/scripts/goal-driver.ts` + `driver-runtime.ts`）：`GoalRoundOptions.goalRoundCarrierPath` 测试缝；⑤b 读 history 传投影；`goal-next` fact 的 reason 带升级行数；`main()` 把 `--round-log` 同一个文件同时接给读面（否则读的与写的是两个文件）。
 - CLI（`packages/quay/src/cli/goal.ts` + `help.ts`）：行校验新增三字段（旧格式轮 ⇒ exit 3，⛔ 不补 0），文本模式行尾 `rounds=<N|NOT-EVALUATED>` 与 `⬆escalated`；help 同步。
 
-### 边界取值的一处口径说明（透明记录）
+### 两处口径说明（透明记录，二者都不改变任何 AC 的判据）
 
-Plan 写的是 `unchangedRounds >= 8` 触发升级，而 AC 的两半逐字钉住了另一条边界：7 个相同历史轮 + 本轮（= 8）**仍**是 `world/wait`，8 个 + 本轮（= 9）才升级。实现按 **AC** 落地（`unchangedRounds > GOAL_NEXT_UNCHANGED_ESCALATE_THRESHOLD`，即 8 个**先前**轮之后），常量注释里写明了禁止「简化」成 `>= 8`。
+1. **边界取值**：Plan 写的是 `unchangedRounds >= 8` 触发升级，而 AC 的两半逐字钉住了另一条边界——7 个相同历史轮 + 本轮（= 8）**仍**是 `world/wait`，8 个 + 本轮（= 9）才升级。实现按 **AC** 落地（`unchangedRounds > GOAL_NEXT_UNCHANGED_ESCALATE_THRESHOLD`，即 8 个**先前**轮之后），常量注释里写明了禁止「简化」成 `>= 8`。
+2. **AC8 的（待外部）位置**：作者原文该行结尾是 `…本轮执行者做不出来（待外部）。`（句号在注解之后），而 fan-in 的判据是 `/（待外部）\s*$/` —— 尾随句号使注解不命中，`fan-in-ac-completion-gate` 会判 `fail`（实测）。本轮只把作者**已经写下**的注解移到该行的最后一个位置（一个字未增删），随后该 gate 返回 `pass-external`（8/9）。⛔ 这不是 worker 自加豁免（见记忆 `awaiting-external-marker-must-end-item-first-line` 第三/第四坑）。
 
 ### AC 逐条（命令与读数，2026-11-07 于本 worktree）
 
@@ -100,9 +101,9 @@ Plan 写的是 `unchangedRounds >= 8` 触发升级，而 AC 的两半逐字钉�
 - AC5：`node --test packages/quay/test/goal-round-carrier.test.mjs` ⇒ exit 0，`tests 5 / pass 5`（8 轮 ⇒ 8 条；缺失 ⇒ `null` 且 `!== []`；`maxRounds` 取最新 N；无 fact 的轮被过滤；半行被丢弃）。
 - AC6：`plugin/test/goal-driver.test.mjs` 的 `⑫ …` ⇒ 真跑 4 轮 `runGoalRound`：载体不存在 ⇒ 每行 0/`evaluated:false`/无升级；空载体 ⇒ 1/true；8 个历史轮 ⇒ 第 9 轮 `unchangedRounds=9`、`stuck-wait`/`human`/`ask-human`、`gapState` 仍 `world-gated`、fact reason 带「升级 1 行」；1 个历史轮 ⇒ 2 且不升级。
 - AC7：同文件 `AC7 CLI: a round from the PREVIOUS driver …` ⇒ exit 3 + `{evaluated:false, reason:…streakKey…}`；`AC7 CLI: a compliant round …` ⇒ exit 0 且每行 `typeof unchangedRounds === "number"`，文本模式 `rounds=9` + `escalated`。
-- AC8（AC-943 判据本体）：**未勾**，本轮执行者结构上做不出来（需落地后主检出跑一轮新 goal-driver）——已按（待外部）标注。
+- AC8（AC-943 判据本体）：**未勾**，本轮执行者结构上做不出来（需落地后主检出跑一轮新 goal-driver）——注解位置见上面第 2 条口径说明。
 - AC9：`node --test plugin/test/goal-driver.test.mjs plugin/test/goal-driver-s01.test.mjs` ⇒ exit 0，`tests 46 / pass 46 / fail 0`。
-- 预合并门：`bash scripts/test.sh --for-task gap-goal-next-unchanged-rounds-escalation --allow-thin` ⇒ exit 0；`anti-drift-touches-check.ts --merge-target develop` ⇒ `ANTI-DRIFT OK … 9 actual file(s), all within declared Touches`。
+- 预合并门：`bash scripts/test.sh --for-task gap-goal-next-unchanged-rounds-escalation --allow-thin` ⇒ exit 0（develop 合并前后各一次）；`--verify-run` ⇒ `classification:"green"`, `mustFix:[]`；`anti-drift-touches-check.ts --merge-target develop` ⇒ `ANTI-DRIFT OK … 9 actual file(s), all within declared Touches`。
 
 ### 生产读数（DoD 的第二半：当前值 N 与还差几轮）
 
