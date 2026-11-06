@@ -1,7 +1,7 @@
 ---
 id: AC-934
 title: 立案生命周期：spawn→filed/not-filed 的可核实终态
-status: draft
+status: active
 kind: criterion
 goal: GOAL-914
 criterion: node -e "const fs=require('fs');const
@@ -18,5 +18,16 @@ expect: exit 0；.quay/goal-filing.jsonl 中至少 1 条真实 spawn 对应一�
 origin: 人 2026-11-06 授权；证据：goal-driver 只记
   gap_spawns[].exitCode，明写不验证立案（plugin/scripts/goal-driver.ts:3057），无法区分 agent
   未立案 / 未写 goal_ac / 已被去重。
+activatedAt: 2026-11-06T07:12:58.158Z
+statusLog:
+  - at: 2026-11-06T07:12:58.158Z
+    from: draft
+    to: active
+    actor: goal-cli
+    reason: ""
+fidelity:
+  verdict: faithful
+  reason: "fidelity judge: faithful"
+  at: 2026-11-06T07:12:58.157Z
 ---
 本 AC 由 gap-goal-driver-filing-ledger 与 gap-goal-driver-filing-throttle 两个任务实现。
