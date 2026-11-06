@@ -148,8 +148,14 @@ and treat that dimension as unreadable, ⛔ do NOT fabricate a reading.
   DISTINCT sessions hit it — the dimension that matters) and an `example`. Four states, deliberately
   not a boolean: `crossed` (≥1 signature passed the configured session threshold), `none` (scanned,
   nothing over it), `unthresholded` (scanned and the list is given, but no threshold is configured ⇒
-  `crossed:null`, ⛔ not `false`), `not-evaluated` (`aggregates:null` + `reason` — corpus unreadable or
-  the scan failed; ⛔ NEVER "zero failures"). Disposition: a `crossed` signature means several
+  `crossed:null`, ⛔ not `false`), `not-evaluated` (`aggregates:null` + `reason`; ⛔ NEVER "zero
+  failures"). Four causes, each named in `reason`: `corpus-unreadable:` (no carrier / shape not
+  understood), `scan-failed:` (meta-cc could not be reached), `empty-corpus:` (**a scan that yielded 0
+  records is NOT "clean"** — it is indistinguishable from an extractor that recognized nothing), and
+  `superseded-extractor:` (the carrier was written by a DIFFERENT/older extractor implementation, so it
+  is not served as fresh regardless of its age; `--scan-action-records` re-stamps it). A `reason` that
+  also says `served stale carrier` means the value came from an aged but same-extractor carrier.
+  Disposition: a `crossed` signature means several
   independent sessions hit the same wall and each fell back locally with nobody owning it — name the
   signature and the mechanism that SHOULD own it; if the repair is work, `autoDrive`; if nothing owns
   it, say "unowned" (that is the finding). ⛔ never report `not-evaluated`/`unthresholded` as clean.
