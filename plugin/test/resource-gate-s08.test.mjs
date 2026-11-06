@@ -196,7 +196,12 @@ test("AC1/AC3/AC4/AC6 — REAL host, ONE run: hung (0-CPU) test-shaped processes
     kids.push(busy);
     // Let every child exec and settle into its steady state before the snapshot (a not-yet-exec'd
     // child still carries its parent's cmdline and would otherwise race the classifier).
-    spawnSync("sleep", ["1.5"]);
+    // ⚠️ The settle must be COMFORTABLY longer than the default 1000 ms sampling window: since
+    // gap-process-budget-in-use-undercounts-real-test-load the liveness axis has a THIRD state
+    // ("starting" = 0 ticks but younger than the window), so a control that is only barely older than
+    // the window would be filed as `starting` instead of `hung`. 2.5 s is the age the hung verdict
+    // needs (AC3's "0 tick + 老年龄"), with 1.5 s of margin.
+    spawnSync("sleep", ["2.5"]);
 
     const r = spawnSync("bash", [PROCESS_BUDGET, "--json"], {
       cwd: REPO_ROOT,
