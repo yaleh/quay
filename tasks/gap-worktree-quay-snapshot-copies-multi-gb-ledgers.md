@@ -1,7 +1,7 @@
 ---
 id: gap-worktree-quay-snapshot-copies-multi-gb-ledgers
 title: refresh-worktree-quay.sh 把约 4 GB 台账拷进每个 worktree —— 一轮 suite 就制造上千次 cp/mkdir
-status: todo
+status: ready
 labels:
   - gap
 parent: null
