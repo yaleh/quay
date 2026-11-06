@@ -1,7 +1,7 @@
 ---
 id: AC-939
 title: "端到端 AC 必须绑定 goal-filing 台账自己记下的 taskId，而不是任意带 goal_ac: AC-937 的任务"
-status: draft
+status: active
 kind: criterion
 goal: GOAL-914
 criterion: node -e "const fs=require('fs');const
@@ -29,6 +29,17 @@ origin: "readings 的 criteria 里 AC-937 verdict=fail、reason=『driver-filed 
   AC-934 记录过同一类自欺（绿来自台账文件而非产出它的代码），本条是同一缺陷在相邻一条 AC 上的实例，所以它要的是【持续判据】而不是再做一次性的
   taskId 交叉核对（后者已由 gap-goal-filing-chain-audit
   承担，本提案不复做，只把它变成每轮都会失败的测量）。本条只声明替代关系；是否退役 AC-937 仍由人裁定。"
+activatedAt: 2026-11-06T11:19:25.817Z
+statusLog:
+  - at: 2026-11-06T11:19:25.817Z
+    from: draft
+    to: active
+    actor: goal-driver
+    reason: "triage: activate"
 supersedes:
   - AC-937
+fidelity:
+  verdict: faithful
+  reason: "fidelity judge: faithful"
+  at: 2026-11-06T11:19:25.817Z
 ---
