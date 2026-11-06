@@ -1,7 +1,7 @@
 ---
 id: gap-meta-call-author-develop-take-develop-30
 title: author↔develop 同步 take-develop 拒绝（脏工作树/不可弃提交）持续时无消抖、无升级——一个脏文件冻结同步 30+ 分钟
-status: needs-human
+status: done
 labels:
   - meta-human-call
   - meta-driver
@@ -46,6 +46,9 @@ extra: {}
 ## DoD（draft）
 - [x] 裁定已记录在可被后续读到的正本里，⛔ 不只存在于本任务的对话中
 - [x] 上面两条互相矛盾的立场中，落败的一方已被就地更正或标注，⛔ 不留着继续制造同一次冲突
+
+## Dark Axis（ADR-007）
+该轴仍暗,理由:本任务只写裁定与文档标注（任务体、CLAUDE.md、driver-filters.ts 注释），不改变包/依赖结构，L_D/L_G 无本任务可归因的结构读数。
 
 ## Touches
 - `plugin/scripts/driver-filters.ts`
