@@ -1,10 +1,17 @@
 ---
 id: GOAL-914
 title: goal-driver 自驱闭环：立案生命周期、下一步投影与请求消费（quay-native）
-status: draft
+status: active
 kind: goal
 origin: 人 2026-11-06 授权：按 1 goal + 4 AC + 6 task 的结构立案；先定位/修复 driver 读 store，再建
   goal 与任务，激活前核 Touches/依赖。
+activatedAt: 2026-11-06T07:25:14.586Z
+statusLog:
+  - at: 2026-11-06T07:25:14.586Z
+    from: draft
+    to: active
+    actor: goal-cli
+    reason: 人 2026-11-06 授权激活：1 goal + 4 AC + 6 task 结构；Touches/依赖已核
 ---
 ## 命题
 
