@@ -1,7 +1,7 @@
 ---
 id: gap-meta-synchealth-doc-to-develop-outcome-invisible
 title: syncHealth/readingsDigest 无法区分「doc→develop 被拒」与「同步健康」——阻塞态进不了摘要，语义半永不被唤醒
-status: needs-human
+status: ready
 labels:
   - meta-driver
 parent: null
