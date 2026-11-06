@@ -85,7 +85,9 @@ extra:
 
 **suite 侧风险与实测**：`verification-round.jsonl` / `gate-events.jsonl` 不再进 worktree 快照 ⇒ `prod-data-audit.test.mjs` 在 worktree 里会走它自己写明的 `t.skip`（NOT-EVALUATED，与全新 CI checkout 同态），这是硬规则 3b 已设计的形态而非红。实跑核对：`prod-data-audit` / `accounting-emit` / `gate-staleness-check` / `stale-ready-audit` / `help-contract-incompatible-behaviors` 共 45 tests 全绿、0 skipped。
 
-**ADR-007 暗轴**：该轴仍暗,理由:本次改动只落在 `plugin/scripts/refresh-worktree-quay.sh`（bash）+ 它的测试，不改变 `packages/` 的模块依赖图，archguard 的 L_D/L_G 对此 delta 无读数可产出。
+**ADR-007 暗轴（L_D/L_G）**
+
+该轴仍暗,理由:本次改动只落在 `plugin/scripts/refresh-worktree-quay.sh`（bash）+ 它的测试，不改变 `packages/` 的模块依赖图，archguard 的 L_D/L_G 对此 delta 无读数可产出。
 
 ## Blocker
 
