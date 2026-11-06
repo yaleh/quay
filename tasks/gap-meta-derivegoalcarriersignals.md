@@ -1,7 +1,7 @@
 ---
 id: gap-meta-derivegoalcarriersignals
 title: goal-round streak 信号必须跨「被中止的一轮」继续可评估
-status: todo
+status: ready
 labels:
   - meta-driver
   - driver-candidate
