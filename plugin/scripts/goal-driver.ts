@@ -2056,7 +2056,7 @@ export async function objectiveSufficiencyVerdict(
 //    「缺口」/「无牵引」/「未评估」分离；硬规则 3：枚举不布尔——每一种成因一个不同形的取值）──
 
 /** 单条 AC 的缺口态（十态并存，not-evaluated 保留——读不到 tasks 输入与「缺口/无牵引」不同形，硬规则 3b）。
- *  ⛔ **类型定义已上收 Core**：`packages/quay/src/core/goal-analysis.ts` 的 `GapState`（逐值语义写在那边，
+ *  ⛔ **类型定义已上收 Core**：Core 的 `goal-analysis.ts` 里的 `GapState`（逐值语义写在那边，
  *  包含 in-progress / gap / workable / world-gated / unclassified / stalled / not-evaluated / standing-ok /
  *  standing-violated / frozen-violated / derived-routed）。理由是**同一套词表有两个消费者**：本 driver 写
  *  `goal-next` fact，Core CLI `quay goal next` 读它——两处各写一份就是硬规则 5b 的漂移。

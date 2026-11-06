@@ -325,8 +325,14 @@ test('AC2：workable 进入 runGapSpawnPass 选取面；world-gated / unclassifi
 
 
 test('AC2 词表可区分：GapState 含 workable/world-gated/unclassified，与 gap/in-progress 两两不同（读源 + 行为判定）', () => {
-  const src = fs.readFileSync(new URL('../scripts/goal-driver.ts', import.meta.url), 'utf8');
-  assert.match(src, /export type GapState = "in-progress" \| "gap" \| "workable" \| "world-gated" \| "unclassified" \| "stalled" \| "not-evaluated"/, 'GapState 词表含 workable/world-gated/unclassified');
+  // 词表已上收 Core（gap-goal-next-projection：同一套词表有两个消费者——本 driver 写 `goal-next` fact、
+  // Core CLI `quay goal next` 读它；两处各写一份就是硬规则 5b 的漂移）。⇒ 「读源」半边读 Core 的**唯一
+  // 定义处**，driver 侧另 pin 一条「仍经 Layer 0 的导入面 re-export」，既有导入面不变。断言强度不降：
+  // 原来的字面量断言在 goal-driver.ts 上，现在拆成「Core 定义 + driver 取符号」两半。
+  const coreSrc = fs.readFileSync(new URL('../../packages/quay/src/core/goal-analysis.ts', import.meta.url), 'utf8');
+  assert.match(coreSrc, /export type GapState =\s*\|\s*"in-progress"\s*\|\s*"gap"\s*\|\s*"workable"\s*\|\s*"world-gated"\s*\|\s*"unclassified"\s*\|\s*"stalled"\s*\|\s*"not-evaluated"/, 'GapState 词表含 workable/world-gated/unclassified（Core 唯一定义处）');
+  const driverSrc = fs.readFileSync(new URL('../scripts/goal-driver.ts', import.meta.url), 'utf8');
+  assert.match(driverSrc, /export type \{ GapState \} from "\.\/driver-runtime\.ts"/, 'driver 仍经 driver-runtime 的 Core 导入面 re-export GapState（既有导入面不变）');
   const workRec = { id: 'AC-X', goal: 'GOAL-001', status: 'active', criterion: 'test -f src/x.ts' };
   const worldRec = { id: 'AC-X', goal: 'GOAL-001', status: 'active', criterion: 'cat .quay/ci-runs.jsonl' };
   const unkRec = { id: 'AC-X', goal: 'GOAL-001', status: 'active' };
