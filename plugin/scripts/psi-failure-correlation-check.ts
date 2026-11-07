@@ -98,7 +98,7 @@ import { canonicalTestFiles } from "./canonical-test-files.ts";
 import { classifyFile } from "./runner-grouping.ts";
 import { windowMeanStall } from "./psi-window-join.ts";
 import { resolveCarrierRoot } from "./perfile-failure-rate.ts";
-import { readJsonLines, parseArgs as baseParseArgs, printJson } from "./gate-script-base.ts";
+import { readJsonLines, parseArgs as baseParseArgs, printJson, sleep } from "./gate-script-base.ts";
 import { readCpuStall } from "./suite-load-sampler.ts";
 // The median — the ONE definition and its empty policy (routine `semantic-dedup-scan`, finding
 // `median-empty-policy-diverged`). This file's local `median` was `pct(sorted, 0.5)`; for n ≥ 2 the
@@ -315,7 +315,8 @@ function readTreeRunDelayNs(rootPid: number): number {
   return sum;
 }
 
-const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+// `sleep` is imported from gate-script-base (semantic-dedup-scan finding
+// `sleep-duplicates-existing-export`, 2026-11-07): this file carried a private copy of the same body.
 
 function mean(vals: number[]): number {
   if (vals.length === 0) return Number.NaN;

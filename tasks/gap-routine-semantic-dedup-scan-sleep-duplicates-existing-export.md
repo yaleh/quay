@@ -3,7 +3,7 @@ id: gap-routine-semantic-dedup-scan-sleep-duplicates-existing-export
 title: "semantic-dedup-scan: Three plugin copies are the same one-liner new
   Promise(r => setTimeout(r, ms)) while driver-runtime.ts:280 already EXPORTS
   the identical sleep, so they duplica"
-status: ready
+status: done
 labels:
   - gap
   - routine-filed

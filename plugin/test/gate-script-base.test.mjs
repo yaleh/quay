@@ -37,7 +37,9 @@ import {
   git,
   serializeSortedJson,
   toEpochSeconds,
+  sleep,
 } from "../scripts/gate-script-base.ts";
+import { codeOnlyText } from "../scripts/source-text-lib.ts";
 
 /** plugin/scripts — derived from THIS file's location so the source-scan control below cannot drift. */
 const SCRIPTS_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../scripts");
@@ -1544,6 +1546,106 @@ test("toEpochSeconds: shared ISO→epoch-seconds conversion, no private copy lef
     assert.match(src, IMPORT_RE, `${rel} must import toEpochSeconds from gate-script-base.ts`);
   }
   assert.match(sourceOf("gate-script-base.ts"), /export function toEpochSeconds\s*\(/, "the shared definition lives here");
+});
+
+// ── sleep: the ONE async sleep for plugin/scripts ───────────────────────────────────────────────────
+//
+// semantic-dedup-scan finding `sleep-duplicates-existing-export` (`.quay/routine-findings.jsonl`,
+// routine `semantic-dedup-scan`, runId `semantic-dedup-scan-1794036444725`, kind
+// `byte-identical-body`, verdict `real-duplication`, requested action `merge`). THREE carriers each
+// carried the same one-liner `new Promise(r => setTimeout(r, ms))` while `driver-runtime.ts` exported a
+// FOURTH copy of the same body — i.e. they duplicated an existing export, not an absent one.
+//
+// Disposition: the base is the single definition. All three carriers already imported
+// `gate-script-base`, and the base sits BELOW driver-runtime in the dependency graph (driver-runtime
+// imports the base; the reverse never happens) — so making the tiny `suite-load-sampler.ts` import the
+// 5k-line kernel would have inverted the layering. `driver-runtime.ts` now imports the base's function
+// and RE-EXPORTS it, because `sleep` is part of that kernel's public surface; a re-export is pinned
+// below to the SAME function object (a copy would be a different object).
+//
+// 硬规则 5b sweep — the same idiom grepped across `plugin/scripts/*.ts`: 8 hits (the 4 above + the base
+// + the 3 below), plus 1 outside the package. Recorded, NOT folded; each is a different
+// symbol/contract or outside the package boundary this task closes:
+//   • `start-drivers.ts:491` — one-liner with a different parameter name (`resolve`); the scanner did
+//     not group it into this byte-identical cluster.
+//   • `full-suite-runner.ts:2983` — `leakSweepDelay`, a distinct named bounded-wait contract.
+//   • `open-semantic-discovery-routine.ts:3922` — an inline `opts.sleepFn ??` fallback, no declaration.
+//   • `packages/quay/src/cli/server.ts:495` — a different package (Core cannot import plugin/scripts).
+// ⛔ If a later round rules those ARE the same concept, this list is where that sweep starts.
+
+/** The one-liner, whitespace-insensitive. Plain string compare beats a clever regex here: the copies
+ *  differed only by the parameter name and the optional `Promise<void>` type argument. */
+const SLEEP_ONELINERS = [
+  "newPromise((r)=>setTimeout(r,ms))",
+  "newPromise<void>((r)=>setTimeout(r,ms))",
+  "newPromise((resolve)=>setTimeout(resolve,ms))",
+  "newPromise<void>((resolve)=>setTimeout(resolve,ms))",
+];
+const SLEEP_NORMALIZE = (s) => s.replace(/\s+/g, "");
+const carriesSleepOneLiner = (code) => SLEEP_ONELINERS.some((one) => SLEEP_NORMALIZE(code).includes(one));
+
+/** `sleep` introduced as a binding (function/const/let/var). Position-based (硬规则 2): the argument is
+ *  already comment-blanked by `codeOnlyText`, so the doc comments naming `sleep` do not count. */
+const SLEEP_DECL_RE = /\b(?:function|const|let|var)\s+sleep\b/;
+
+/** Pre-extraction bodies, verbatim from `develop` at the commit before this finding was disposed.
+ *  Known-true samples: a predicate that stopped matching the real idiom must go RED here rather than
+ *  passing vacuously (硬规则 4c). */
+const SLEEP_PRE_EXTRACTION_SAMPLES = [
+  "const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));",
+  "const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));",
+  "  return new Promise((r) => setTimeout(r, ms));",
+  "const leakSweepDelay = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));",
+];
+/** A neighbour with a DIFFERENT contract that must NOT match, or the ratchet would red on legitimate
+ *  code and get "fixed" by weakening it. */
+const NOT_A_SLEEP_SAMPLE = "const delay = setTimeout(() => resolve(), ms);";
+
+/** The four carriers the finding named. */
+const SLEEP_FORMER_CARRIERS = [
+  "discovery-method-routine.ts",
+  "psi-failure-correlation-check.ts",
+  "suite-load-sampler.ts",
+  "driver-runtime.ts",
+];
+
+test("sleep: the body predicate MATCHES every pre-extraction copy (guards against a vacuous ratchet)", () => {
+  for (const [i, sample] of SLEEP_PRE_EXTRACTION_SAMPLES.entries()) {
+    assert.ok(carriesSleepOneLiner(sample), `the scan would have MISSED pre-extraction sleep sample #${i + 1} — the ratchet is vacuous`);
+  }
+  assert.equal(carriesSleepOneLiner(NOT_A_SLEEP_SAMPLE), false, "a different delay idiom must not match");
+});
+
+test("sleep: resolves after the requested delay (Promise, never a throw)", async () => {
+  const p = sleep(20);
+  assert.equal(typeof p.then, "function");
+  const started = Date.now();
+  await p;
+  // Lower bound only — an upper bound would be a load-sensitive assertion (this repo has been burned
+  // by those: a green suite on an idle host is not evidence about a loaded one).
+  assert.ok(Date.now() - started >= 10, "sleep returned before its delay");
+});
+
+test("sleep: no former carrier declares it, and each IMPORTS it from the base (extracted ≠ deleted)", () => {
+  const IMPORT_RE = /import\s*\{[^}]*\bsleep\b[^}]*\}\s*from\s*"\.\/gate-script-base\.ts"/;
+  for (const rel of SLEEP_FORMER_CARRIERS) {
+    const code = codeOnlyText(sourceOf(rel));
+    assert.equal(carriesSleepOneLiner(code), false, `${rel} still carries a copy of the sleep one-liner`);
+    assert.doesNotMatch(code, SLEEP_DECL_RE, `${rel} still declares sleep`);
+    // Deleting the private copy without importing the shared one would still link-check, so this half
+    // is not redundant — it distinguishes "extracted" from "deleted".
+    assert.match(sourceOf(rel), IMPORT_RE, `${rel} must import sleep from gate-script-base.ts`);
+  }
+  assert.match(
+    codeOnlyText(sourceOf("gate-script-base.ts")),
+    /export function sleep\s*\(/,
+    "the shared definition lives in gate-script-base.ts",
+  );
+});
+
+test("sleep: driver-runtime re-exports the SAME function object (a re-export, not a fourth copy)", async () => {
+  const { sleep: kernelSleep } = await import("../scripts/driver-runtime.ts");
+  assert.equal(kernelSleep, sleep, "driver-runtime.ts must re-export gate-script-base.sleep, not define its own");
 });
 
 // ── appendJsonlLineStrict: the FAIL-LOUD single-record appender is a single source ─────────────────
