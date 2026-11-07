@@ -1,7 +1,7 @@
 ---
 id: gap-touches-parser-a-self-describing
 title: Touches A：规则具名 + help 可枚举（s3-7 + sa5b-3/4）
-status: todo
+status: ready
 labels:
   - gap
   - touches-parser
