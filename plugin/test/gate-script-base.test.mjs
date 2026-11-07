@@ -32,6 +32,7 @@ import {
   readJsonLines,
   readJsonlLines,
   readJsonOrNull,
+  appendJsonlLineStrict,
   appendJsonlRecords,
   git,
   serializeSortedJson,
@@ -1543,4 +1544,153 @@ test("toEpochSeconds: shared ISO→epoch-seconds conversion, no private copy lef
     assert.match(src, IMPORT_RE, `${rel} must import toEpochSeconds from gate-script-base.ts`);
   }
   assert.match(sourceOf("gate-script-base.ts"), /export function toEpochSeconds\s*\(/, "the shared definition lives here");
+});
+
+// ── appendJsonlLineStrict: the FAIL-LOUD single-record appender is a single source ─────────────────
+//
+// semantic-dedup-scan finding `doc-develop-sync-vs-push-lag-event` (`.quay/routine-findings.jsonl`,
+// routine `semantic-dedup-scan`, runId `semantic-dedup-scan-1794036444725`, kind
+// `byte-identical-body`, verdict `real-duplication`, requested action `extract`) named
+// `driver-filters.writeDocDevelopSyncEvent` and `fan-in-push-lag-check.appendPushLagEvent` as
+// byte-identical bodies differing ONLY in their REL path constant. Both now delegate to
+// `appendJsonlLineStrict` and keep their historical exported names (their call sites and tests
+// import those names; `escalateToSemanticSync` additionally depends on the writer THROWING).
+//
+// ⚠️ SCOPE — deliberately the CLUSTER, not the whole tree. The same scan round filed (and the rate
+// gate rejected) `single-record-jsonl-appenders`, naming six MORE byte-identical appenders
+// (`dispatch-record`, `driver-runtime`, `pool-quality-judge`, `semantic-face-dispatch-record`,
+// `worker-driver`, `architecture-review-cluster`). Those are a DIFFERENT finding with their own
+// disposition; folding them in here would silently widen this task past its Touches. The ratchet
+// therefore pins the two carriers it actually extracted, exactly like the `toEpochSeconds` block.
+const STRICT_SINGLE_APPENDER_RE =
+  /fs\.mkdirSync\(path\.dirname\((\w+)\),\{recursive:true\}\);fs\.appendFileSync\(\1,JSON\.stringify\([^;]+?\)\+"\\n","utf8"\);return\1;/;
+const STRIP_ALL_WS = (s) => s.replace(/\s+/g, "");
+
+/** The two pre-extraction bodies, verbatim from `develop` at the commit before this finding was
+ *  disposed. Known-true samples for the predicate (硬规则 4c: a ratchet whose predicate stopped
+ *  matching the real idiom must go RED, not pass vacuously). */
+const STRICT_SINGLE_APPENDER_SAMPLES = [
+  `export function writeDocDevelopSyncEvent(root: string, record: Record<string, unknown>): string {
+  const file = path.join(root, DOC_DEVELOP_SYNC_EVENT_REL);
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.appendFileSync(file, JSON.stringify({ ts: new Date().toISOString(), ...record }) + "\\n", "utf8");
+  return file;
+}`,
+  `export function appendPushLagEvent(root: string, record: Record<string, unknown>): string {
+  const file = path.join(root, PUSH_LAG_EVENT_REL);
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.appendFileSync(file, JSON.stringify({ ts: new Date().toISOString(), ...record }) + "\\n", "utf8");
+  return file;
+}`,
+];
+
+/** Neighbours with DIFFERENT contracts that must NOT match, or the ratchet reds on legitimate code
+ *  and gets "fixed" by weakening it: the best-effort sibling (no `"utf8"`, swallows, returns void)
+ *  and the batch appender (map/join, count return). */
+const BEST_EFFORT_SINGLE_SAMPLE = `export function appendJsonlLine(file: string, entry: Record<string, unknown>): void {
+  try {
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.appendFileSync(file, JSON.stringify(entry) + "\\n");
+  } catch {
+  }
+}`;
+const BATCH_SAMPLE_FOR_STRICT_PREDICATE = `  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.appendFileSync(file, records.map((r) => JSON.stringify(r) + "\\n").join(""), "utf8");
+  return records.length;`;
+
+/** The two files the finding named (its "involved files"). */
+const STRICT_SINGLE_FORMER_CARRIERS = ["driver-filters.ts", "fan-in-push-lag-check.ts"];
+
+/** The public names each carrier must KEEP — sibling modules and tests import them by name. */
+const STRICT_SINGLE_KEPT_EXPORTS = {
+  "driver-filters.ts": "writeDocDevelopSyncEvent",
+  "fan-in-push-lag-check.ts": "appendPushLagEvent",
+};
+
+test("appendJsonlLineStrict: the predicate MATCHES both pre-extraction bodies (guards against a vacuous ratchet)", () => {
+  for (const [i, sample] of STRICT_SINGLE_APPENDER_SAMPLES.entries()) {
+    assert.match(
+      STRIP_ALL_WS(sample),
+      STRICT_SINGLE_APPENDER_RE,
+      `the scan would have MISSED pre-extraction carrier sample #${i + 1} — the ratchet is vacuous`,
+    );
+  }
+  assert.doesNotMatch(STRIP_ALL_WS(BEST_EFFORT_SINGLE_SAMPLE), STRICT_SINGLE_APPENDER_RE, "the best-effort sibling must not match");
+  assert.doesNotMatch(STRIP_ALL_WS(BATCH_SAMPLE_FOR_STRICT_PREDICATE), STRICT_SINGLE_APPENDER_RE, "the batch appender must not match");
+});
+
+test("appendJsonlLineStrict: no former carrier re-inlines the body, and each IMPORTS the shared one", () => {
+  for (const f of STRICT_SINGLE_FORMER_CARRIERS) {
+    const src = sourceOf(f);
+    assert.doesNotMatch(
+      STRIP_ALL_WS(src),
+      STRICT_SINGLE_APPENDER_RE,
+      `${f} must not re-inline the fail-loud appender body (import appendJsonlLineStrict instead)`,
+    );
+    // Deleting the private body without importing the shared one would still pass the line above, so
+    // this half is not redundant — it distinguishes "extracted" from "deleted".
+    assert.match(
+      src,
+      /import \{[^}]*\bappendJsonlLineStrict\b[^}]*\} from "\.\/gate-script-base\.ts"/,
+      `${f} does not import appendJsonlLineStrict from the base`,
+    );
+    assert.match(src, /\bappendJsonlLineStrict\(/, `${f} imports the shared appender but never calls it`);
+    assert.match(
+      src,
+      new RegExp(`export function ${STRICT_SINGLE_KEPT_EXPORTS[f]}\\b`),
+      `${f} dropped its exported name ${STRICT_SINGLE_KEPT_EXPORTS[f]}, which callers import`,
+    );
+  }
+  assert.match(sourceOf("gate-script-base.ts"), /export function appendJsonlLineStrict\s*\(/, "the shared definition lives here");
+});
+
+test("appendJsonlLineStrict: byte-identical to the pre-extraction body on a battery of records", () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "append-jsonl-strict-"));
+  try {
+    /** The pre-extraction body, kept verbatim as the oracle. */
+    const oracle = (root, rel, record) => {
+      const file = path.join(root, rel);
+      fs.mkdirSync(path.dirname(file), { recursive: true });
+      fs.appendFileSync(file, JSON.stringify({ ts: new Date().toISOString(), ...record }) + "\n", "utf8");
+      return file;
+    };
+    const records = [
+      { event: "escalate" },
+      { event: "aligned", ahead: 0, behind: 3 },
+      { event: "x", ts: "2026-01-01T00:00:00.000Z" }, // a record-level ts still WINS over the stamp
+      {},
+    ];
+    for (const [i, record] of records.entries()) {
+      const dirA = path.join(tmp, `oracle-${i}`, "nested");
+      const dirB = path.join(tmp, `shared-${i}`, "nested");
+      const fileA = oracle(dirA, path.join("carrier.jsonl"), record);
+      const fileB = appendJsonlLineStrict(path.join(dirB, "carrier.jsonl"), { ts: new Date().toISOString(), ...record });
+      const strip = (l) => l.replace(/"ts":"[^"]+"/, '"ts":"<stamp>"');
+      assert.equal(strip(fs.readFileSync(fileB, "utf8")), strip(fs.readFileSync(fileA, "utf8")), `record #${i} must be byte-identical`);
+      assert.equal(fileB, path.join(dirB, "carrier.jsonl"), "returns the file it wrote to");
+    }
+    // One record = one appended line, and the parent directories were created.
+    const multi = path.join(tmp, "multi", "deep", "carrier.jsonl");
+    appendJsonlLineStrict(multi, { a: 1 });
+    appendJsonlLineStrict(multi, { a: 2 });
+    assert.equal(fs.readFileSync(multi, "utf8").trimEnd().split("\n").length, 2, "two calls ⇒ two JSONL lines");
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test("appendJsonlLineStrict: a write failure THROWS (⛔ unlike the best-effort sibling, which swallows)", () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "append-jsonl-strict-fail-"));
+  try {
+    // A regular FILE where the appender needs a parent DIRECTORY: mkdirSync throws ENOTDIR.
+    const blocker = path.join(tmp, "blocker");
+    fs.writeFileSync(blocker, "not a directory");
+    assert.throws(
+      () => appendJsonlLineStrict(path.join(blocker, "carrier.jsonl"), { event: "x" }),
+      /EEXIST|ENOTDIR|already exists|not a directory/i,
+      "the fail-loud contract is what escalateToSemanticSync turns into {ok:false, ledger:null}",
+    );
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
 });
