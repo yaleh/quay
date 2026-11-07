@@ -589,6 +589,11 @@ import { isOverbroadDeclaration } from "./touches-orthogonality-check.ts";
 // SINGLE-SOURCE (gap-task-body-has-n-parsers-and-no-authority): the ONE Touches bullet parser.
 // The validator's glob extraction delegates here too — there is no separate inline parse.
 import { parseTouchEntries } from "./touches-parser.ts";
+// The judgement's CODE is named in ONE place (the kernel's JUDGEMENT table, rendered by
+// `quay task create --help`) — this validator emits it by reference instead of re-typing the
+// literal, so the code a task file fails on and the code the help documents cannot drift
+// (task gap-touches-judgement-codes-author-surface).
+import { TOUCHES_JUDGEMENT_CODE_OVERBROAD } from "../../packages/quay/src/kernel/touches-annotation.ts";
 
 // TYPE_EXEC_RE matches a `type: execution` line in the charter body (same regex as
 // concurrent-batch-scheduler.ts's parseCandidate, for determinism).
@@ -633,7 +638,7 @@ export function checkTouches(task, kind) {
   // Validate each glob: no overbroad declarations.
   const overbroad = globs.filter((g) => isOverbroadDeclaration(g));
   if (overbroad.length > 0) {
-    return { ok: false, code: "touches-overbroad", message: `## Touches has overbroad glob(s): ${overbroad.map((g) => `"${g}"`).join(", ")} — need >=2 concrete leading path segments before any wildcard, or an exact path`, globs };
+    return { ok: false, code: TOUCHES_JUDGEMENT_CODE_OVERBROAD, message: `## Touches has overbroad glob(s): ${overbroad.map((g) => `"${g}"`).join(", ")} — need >=2 concrete leading path segments before any wildcard, or an exact path`, globs };
   }
   // Validate no empty-expansion globs (globs ending in `/` with no wildcard resolve to nothing).
   const dubious = globs.filter((g) => g.endsWith("/") && !/[?*]/.test(g));

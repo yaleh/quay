@@ -91,6 +91,10 @@ import { execFileSync, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 // Touches「一条目一路径」judgment — the SAME judgment the static checker uses (no second parser).
 import { checkTaskOneEntryOnePath, readOneEntryBaseline } from "./touches-one-entry-one-path-check.ts";
+// The rejection code is named in ONE place (the kernel's JUDGEMENT table, rendered by
+// `quay task create --help`) — emitted by reference so the hook's reason and the documented code
+// cannot drift (task gap-touches-judgement-codes-author-surface).
+import { TOUCHES_JUDGEMENT_CODE_MULTI_PATH } from "../../packages/quay/src/kernel/touches-annotation.ts";
 import { repoRoot, mainCheckoutRoot } from "./repo-root.ts";
 // goal_ac write-surface judgment — the SAME pure functions the AC-190 detector and the STORE's
 // creation path use (no second string comparison; single source of the delivery-critical / goal_ac /
@@ -528,7 +532,7 @@ export function judge(
   if (!touchesResult.ok) {
     return {
       verdict: "reject",
-      reason: "touches-multi-path-bullet",
+      reason: TOUCHES_JUDGEMENT_CODE_MULTI_PATH,
       message:
         'pre-commit 守卫：Touches 多路径 bullet（touches-one-entry-one-path 判据1——每个 ## Touches ' +
         'bullet 只允许一个路径/glob 条目）。\n' +
