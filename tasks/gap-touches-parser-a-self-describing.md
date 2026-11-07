@@ -55,4 +55,4 @@ extra:
 - plugin/test/touches-parser-parity.test.mjs
 - plugin/test/touches-parser-rules-a.test.mjs (new)
 - plugin/test/touches-parser-help-surface.test.mjs (new)
-- tasks/gap-touches-parser-a-self-describing.md (new)
+- tasks/gap-touches-parser-a-self-describing.md
