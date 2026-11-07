@@ -1,7 +1,7 @@
 ---
 id: quay-dsi-consumer-snapshot
 title: "DSI: land pinned consumer snapshot"
-status: ready
+status: superseded
 labels:
   - dsi
   - integration
