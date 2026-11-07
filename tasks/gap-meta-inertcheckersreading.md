@@ -34,14 +34,6 @@ full-suite-runner writes the carrier with state:'running' and no notEvaluatedChe
 ## ADR-007 dark-axis
 - L_D archguard(package cycles): cycles=0 maxScc=1
 
-## Blocker
-
-**2026-11-07T05:00:15.258Z — worker 未落地（exited-not-landed）**
-
-- 未落地原因：step=suite: oom-killed (3) — new regression at lower concurrency: plugin/test/driver-runtime-control-plane.test.mjs (passed at the original concurrency 23, fails at 16) — needs a code fix
-- run_id：wk-prod-anchor
-- session_id：eda640de-edbd-43eb-be5d-26830e7b39fe
-
 ## Evidence
 
 **2026-11-07 续跑轮（同一工作树复用，未新建）**
