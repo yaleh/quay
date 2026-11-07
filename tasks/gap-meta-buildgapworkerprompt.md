@@ -1,7 +1,7 @@
 ---
 id: gap-meta-buildgapworkerprompt
 title: goal-driver 的 gap-filing prompt 用未限定名的 skill，filing agent 的 Skill 调用必然失败
-status: ready
+status: done
 labels:
   - meta-driver
   - driver-candidate
