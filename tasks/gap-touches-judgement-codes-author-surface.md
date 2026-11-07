@@ -3,7 +3,7 @@ id: gap-touches-judgement-codes-author-surface
 title: Touches 判据码进作者面：touches-overbroad 只活在
   task-schema-check、touches-multi-path-bullet 只在晋升被拒时出现；复用既有判据接到 --help grammar
   + ready-pool，不新增规则
-status: todo
+status: ready
 labels:
   - gap
   - touches-parser
