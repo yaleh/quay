@@ -154,3 +154,86 @@ export function parseTouchBulletPaths(touchesSection: string): string[] {
     .map(normalizeTouchEntry)
     .filter(Boolean);
 }
+
+// ── THE RULES, NAMED (task gap-touches-parser-a-self-describing) ─────────────────────────────────
+// The three rules below govern every `## Touches` declaration this repo reads. Until this block they
+// had NO name, NO agent-visible code, and NO way to tell one failure from another: an agent could
+// only learn them by reading this file or by hitting a downstream rejection, and a rejection could
+// not say WHICH rule fired (annotation-strip vs. section-selection vs. label-recognition). The two
+// tables are the naming point — PURE DATA, no imports, no logic (this file is a kernel leaf).
+//
+// ⛔ These tables are the ONE place the codes are written down. The `task create --help` grammar
+// section RENDERS them (`packages/quay/src/cli/help.ts`) and never re-types the list; the reader
+// that reports them (`diagnoseTouches`, plugin/scripts/touches-parser.ts) also reads them. A second
+// hand-written copy of a vocabulary is exactly the drift shape this repo keeps paying for.
+//
+// The three rules (ids are the historical probe ids they were named by; ⛔ never reuse an id):
+//   s3-7    annotation stripping — a trailing full-width （…） or half-width (…) is an ANNOTATION,
+//           not part of the path; the two spellings must commute (fixed-point strip).
+//   sa5b-3  section selection — WHICH heading out of possibly several `^touches` headings is the
+//           declaration (exact `Touches` first, then highest level, earliest among ties).
+//   sa5b-4  label recognition — the structural tags `(new)` / `(delete)` / `(deleted)` that exempt
+//           an entry from the exists-on-disk check, and only those exact spellings.
+
+/** The rule ids above, in report order. A caller that wants a COUNTERFACTUAL reading (what the
+ *  parser would say with rule X switched off) passes a subset of this list to `diagnoseTouches`. */
+export const TOUCHES_RULE_IDS = ["s3-7", "sa5b-3", "sa5b-4"] as const;
+
+/** PROBLEM codes — the diagnostics an author has to act on. Each carries the grammar `atom` it
+ *  reports on (`annotation` | `section` | `label`), the `rule` that governs it, and a one-line
+ *  `meaning` that is rendered verbatim in `quay task create --help`. */
+export const TOUCHES_PROBLEM_CODES = [
+  {
+    code: "touches-annotation-halfwidth-literal",
+    atom: "annotation",
+    rule: "s3-7",
+    meaning:
+      "a half-width (…) that is LITERAL text (more path follows the closing paren, e.g. `foo(bar).ts`) is stripped as if it were a trailing annotation — the tail after the paren is lost",
+  },
+  {
+    code: "touches-section-ambiguous",
+    atom: "section",
+    rule: "sa5b-3",
+    meaning:
+      "the body carries more than one heading matching ^touches — exactly ONE section is read, so the others are dead text that looks like a declaration",
+  },
+  {
+    code: "touches-label-unrecognized",
+    atom: "label",
+    rule: "sa5b-4",
+    meaning:
+      "a label-family annotation ((add)/(create)/(removed)/…) is not one of the recognized structural tags — it is treated as prose and the entry keeps NO exists-on-disk exemption",
+  },
+  {
+    code: "touches-label-fullwidth",
+    atom: "label",
+    rule: "sa5b-4",
+    meaning:
+      "a recognized structural tag written in FULL-WIDTH parens （new）/（delete） is not captured as a tag (only ASCII (…) is) — the entry silently loses its (new)/(delete) exemption",
+  },
+] as const;
+
+/** READING codes — the non-boolean observables of a declaration. A problem code says "something is
+ *  wrong"; a reading says "this is what the parser actually read", and it is what changes when a
+ *  rule is switched off (that is the arm that proves the rule is load-bearing rather than a label). */
+export const TOUCHES_READING_CODES = [
+  {
+    code: "touches-section-canonical",
+    atom: "section",
+    rule: "sa5b-3",
+    meaning:
+      "which selection path chose the section: 'exact' (a heading spelled exactly Touches), 'fallback' (highest level among ^touches headings), or 'absent'",
+  },
+  {
+    code: "touches-label-new",
+    atom: "label",
+    rule: "sa5b-4",
+    meaning: "how many declared entries carry the (new) structural tag (a file this task will CREATE)",
+  },
+  {
+    code: "touches-label-delete",
+    atom: "label",
+    rule: "sa5b-4",
+    meaning: "how many declared entries carry the (delete)/(deleted) structural tag (a file this task will DELETE)",
+  },
+] as const;
