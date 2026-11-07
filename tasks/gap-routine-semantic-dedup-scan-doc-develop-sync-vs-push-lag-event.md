@@ -3,7 +3,7 @@ id: gap-routine-semantic-dedup-scan-doc-develop-sync-vs-push-lag-event
 title: "semantic-dedup-scan: Byte-identical including the {ts, ...record} prefix
   and the 'utf8' arg; only the REL path constant differs, and
   fan-in-push-lag-check already calls driver-filt"
-status: todo
+status: ready
 labels:
   - gap
   - routine-filed
