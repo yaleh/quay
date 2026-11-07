@@ -139,6 +139,16 @@ $ node … --cap 3 --in-flight <3个id>   # in_flight=3
 - plugin/loop/fast-mode-loop-tick.md（派发步骤：tick 边界 → 事件驱动）
 - plugin/scripts/slot-refill.ts（新增：槽位回填决策 helper，事件驱动派发的机械承载）
 - tasks/gap-telemetry-brackets-vs-subagents-no-slot-visibility.md（AC6 交叉标注）
+
+## AC evidence（2026-08-05 草稿；逐条正式证据见上方 `## Acceptance Criteria`）
+
+> 本节是当年 AC 的首版证据草稿。⚠️ 它此前紧跟在 `## Touches` 的 bullet 列表之后、且**没有任何
+> 后续标题**，于是整块 AC 散文落进了 Touches 段落被当成 Touches 条目解析——其中一行
+> `证据：slot-refill 用 ... **reconcile 感知 realInFlight**（括号 ≠` 里的 `**reconcile…**` 让
+> `task-schema-check` 判出 `touches-overbroad`（tasks/gap-touches-judgement-codes-author-surface
+> AC3 迁移的那 1 条）。补上本标题后 Touches 段在真正的声明条目处结束，判据即消失（无豁免、
+> 无清单增项）。
+
 - [x] AC1: 实测确认当前形态——派发仅发生在 inner tick 边界（派发时间戳簇 + 槽位空置期）
   - 证据：任务体管理者 meta-cc 派发时间戳实测（3 簇 12:22:04/07/10、13:07:10/13/15、13:55:56/59/56:02，
     簇内 2-3s；簇间 15-55min 零派发；fast-mode-portability 完成释放槽位后 39min 不回填而

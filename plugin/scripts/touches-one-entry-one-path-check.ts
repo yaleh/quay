@@ -45,6 +45,11 @@ import { helpExit, isDirectEntry } from "./gate-script-base.ts";
 // The ONE Touches parser — extract the `## Touches` section the same way every other consumer does.
 import { extractTouchesSection } from "./touches-parser.ts";
 import { readRatchetBaseline } from "./ratchet-baseline.ts";
+// The stable code string + its help wording live in the kernel's JUDGEMENT table (the ONE naming
+// point these codes are written down in — rendered by `quay task create --help`). Imported rather
+// than re-typed here so the emitted code and the documented code cannot drift
+// (task gap-touches-judgement-codes-author-surface).
+import { TOUCHES_JUDGEMENT_CODE_MULTI_PATH } from "../../packages/quay/src/kernel/touches-annotation.ts";
 
 /** Repo-root-relative path of the shrink-only grandfather baseline (bare-dir-touches precedent). */
 export const ONE_ENTRY_BASELINE_REL = "docs/analysis/touches-one-entry-one-path-baseline.md";
@@ -217,7 +222,7 @@ export function checkTaskOneEntryOnePath(body, taskFileRel, grandfathered) {
   if (flagged.length === 0) return [];
   const entries = flagged.map((f) => `\`${f.path}\``).join(" · ");
   return [{
-    code: "touches-multi-path-bullet",
+    code: TOUCHES_JUDGEMENT_CODE_MULTI_PATH,
     what:
       `## Touches 含多路径 bullet（tasks/gap-touches-one-entry-one-path 判据1：Touches bullet 只允许一个` +
       `路径/glob 条目，含多路径分隔（" / " / " + " / "、" / "，" / ","）的多路径 bullet ⇒ 红——parseTouchEntriesWithTags 把整行当一个 entry，` +

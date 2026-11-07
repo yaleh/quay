@@ -234,6 +234,10 @@ import {
   // a candidate lacking its self-touch is rejected at the gate, not deferred after entering the pool.
   // Reused from slot-refill's step-4 (single source, no parallel copy).
   selfTouchCheck,
+  // OVERBROAD GLOB JUDGE (task gap-touches-judgement-codes-author-surface): the SAME semantic
+  // predicate the orthogonality pre-flight and `task-schema-check` use — ⛔ not a second
+  // implementation. See the promotion-boundary guard next to the multi-path one in applyPromotions.
+  isOverbroadDeclaration,
 } from "./touches-orthogonality-check.ts";
 // The dispatch gate's OWN declared-path expander (single-source — ready-pool-check must not carry a
 // parallel copy of "which files does a Touches declaration intend to touch?").
@@ -314,6 +318,18 @@ import {
 // record). Single source: checkTaskOneEntryOnePath — the SAME judge precommit-guard.ts uses (no
 // second Touches parser).
 import { checkTaskOneEntryOnePath, readOneEntryBaseline } from "./touches-one-entry-one-path-check.ts";
+// TOUCHES JUDGEMENT CODES — the ONE naming point (kernel JUDGEMENT table, rendered by `quay task
+// create --help`). The promotion guard below references these constants instead of re-typing the
+// literals, so the code an author sees in a block reason is byte-identical to the code the help
+// documents (task gap-touches-judgement-codes-author-surface).
+import {
+  TOUCHES_JUDGEMENT_CODE_OVERBROAD,
+  TOUCHES_JUDGEMENT_CODE_MULTI_PATH,
+} from "../../packages/quay/src/kernel/touches-annotation.ts";
+// The ONE Touches bullet parser — the overbroad guard reads the SAME entries `task-schema-check`
+// reads (no `**`-append shaping here: the judgement must agree with the checker that already
+// emits this code, not with the different `dir/` → `dir/**` reading the overlap expander uses).
+import { extractTouchesSection, parseTouchEntries } from "./touches-parser.ts";
 // TOUCH-ABSENT-FROM-REF VETO (gap-nyf-doneflipready-arm-bypasses-leftover-worktree-exemption): parse
 // the task's ## Touches with STRUCTURAL TAGS (`(new)`/`(delete)`) — the tag-aware read from the
 // touches-parser single source, so a `(delete)`-tagged touch (whose absence from the landing ref is
@@ -2573,6 +2589,16 @@ function buildCandidate(id, task, root, allTasks, poolParsed, inFlightParsed, ex
     touchesResolve,
     touchesNarrow: touchesNarrow.narrow,
     wideTouches: touchesNarrow.wideGlobs,
+    // TOUCHES JUDGEMENT CODES (task gap-touches-judgement-codes-author-surface AC2): the NAMED
+    // judgement rows for this candidate's `## Touches` — `[{code, what}]`, empty when no judgement
+    // fires. Before this field, a `src/*` declaration produced a bare `eligible:false` plus a
+    // positional `wideTouches` array: an author could see that SOMETHING was wrong but had no code
+    // to look up in `quay task create --help` and no sentence saying what to write instead.
+    // ⛔ NOT derived from `wideTouches`: that list ALSO carries `packages/quay/**` and `dir/`
+    // shapes (checkTouchesNarrow's own, stricter width rule), and reporting those as
+    // `touches-overbroad` would contradict the documented judgement (a ≥2-segment-anchored glob is
+    // NOT overbroad). The rows come from the ONE predicate, `isOverbroadDeclaration`.
+    touchesJudgement: checkTouchesNotOverbroad(task.body),
     depsReady,
     // gap-superseded-dependency-blocks-dispatch-forever (AC4, 硬规则 3b): the DEPENDENCY BREAKDOWN —
     // three disjoint sets so a reader (and the promotion ledger) can tell
@@ -2783,6 +2809,9 @@ export function buildTargetedPromotion(id, task, root, allTasks, develop = "deve
     touchesResolve,
     touchesNarrow: touchesNarrow.narrow,
     wideTouches: touchesNarrow.wideGlobs,
+    // Same NAMED judgement rows as the bulk candidate (AC2) — the targeted path is the other way a
+    // task enters ready, so the code must be nameable there too.
+    touchesJudgement: checkTouchesNotOverbroad(task.body),
     prosePrereqGap: prosePrereqGapIds,
     // EXECUTOR-UNSATISFIABLE AC, UNANNOTATED: the three-valued reading on the targeted path too —
     // `hits` names the offending item(s) verbatim.
@@ -4261,6 +4290,35 @@ function commitTaskStatus(root, id, from, to) {
   return committed;
 }
 
+/**
+ * The `touches-overbroad` judgement for ONE task body (task gap-touches-judgement-codes-author-surface,
+ * Plan §1/§3). Returns `[]` when the task has no `## Touches` (NOT-EVALUATED — 硬规则 3b: "no
+ * declaration" never shares a shape with "judged clean"), and `[{code, what}]` when at least one
+ * declared entry is too broad to constrain writes.
+ *
+ * ⛔ NOT a second implementation: the predicate is `isOverbroadDeclaration` (the ONE semantic judge —
+ * wildcard reachable with fewer than two CONCRETE leading path segments), and the entry list is
+ * `parseTouchEntries` from the ONE Touches parser, fed from `extractTouchesSection` — exactly the
+ * pipeline `task-schema-check` already uses to emit this same code. ⛔ The `dir/` → `dir/**`
+ * shaping `parseTouches` applies is deliberately NOT used here: that reading belongs to the
+ * overlap expander, and borrowing it would make the promotion gate reject declarations the
+ * schema checker calls well-formed (two surfaces disagreeing about one task).
+ */
+export function checkTouchesNotOverbroad(body) {
+  const { hasSection, section } = extractTouchesSection(body);
+  if (!hasSection) return [];
+  const overbroad = parseTouchEntries(section).filter((g) => isOverbroadDeclaration(g));
+  if (overbroad.length === 0) return [];
+  return [{
+    code: TOUCHES_JUDGEMENT_CODE_OVERBROAD,
+    what:
+      `## Touches 含过宽 glob 声明（判据 x3-1，${TOUCHES_JUDGEMENT_CODE_OVERBROAD}）：` +
+      `${overbroad.map((g) => `\`${g}\``).join(" · ")} — 通配符前需 ≥2 段具体路径，或写精确路径` +
+      `（例：\`src/*\` ⇒ 枚举具体文件，或锚定到 ≥2 段深：\`packages/quay/**\`）；` +
+      `过宽声明在在飞期间对任何 stray write 都不构成约束`,
+  }];
+}
+
 /** HEARTBEAT MODE entry: run the same analysis as `analyzeTasks` (all options pass through) and —
  *  when promotions non-empty — land the recommended promotions on disk. Returns the full analyzeTasks
  *  result plus `should_apply` (the AC1 condition) and `applied_promotions` (the per-candidate
@@ -4293,6 +4351,15 @@ export function applyPromotions(opts) {
     // fires here (production: e7be44a0 landed a `serve-handlers.ts + serve.ts` multi-path bullet).
     // Re-run the SAME judgment BEFORE writing anything — a multi-path candidate is NOT promoted
     // (stays todo, tree stays clean, block reason surfaces on the applied record).
+    //
+    // OVERBROAD TOUCHES GUARD (task gap-touches-judgement-codes-author-surface, Plan §3): the SAME
+    // shape judgement, applied to the OTHER named judgement code. `touches-overbroad` used to live
+    // only in `task-schema-check` / `prepare-admission-check`, neither of which runs on the
+    // promotion write boundary — a `src/*` declaration could therefore enter the ready pool and be
+    // dispatched with a Touches that constrains nothing. The predicate is REUSED
+    // (`isOverbroadDeclaration`), never re-implemented; the entry list is the SAME bullet parse
+    // `task-schema-check` uses (`parseTouchEntries`, no `**`-append) so the two surfaces cannot
+    // disagree about the same task.
     const { baseline } = readOneEntryBaseline(opts.root);
     for (const p of result.promotions) {
       const cand = candidateById.get(p.id);
@@ -4300,11 +4367,20 @@ export function applyPromotions(opts) {
       const rel = path.join("tasks", `${p.id}.md`);
       const file = path.join(opts.root, rel);
       const body = fs.existsSync(file) ? fs.readFileSync(file, "utf8") : "";
+      const overbroadBlock = checkTouchesNotOverbroad(body);
+      if (overbroadBlock.length > 0) {
+        applied.push({
+          id: p.id, ok: false, from: TASK_STATUS.TODO, to: null, deliveryCritical, committed: false,
+          reason: TOUCHES_JUDGEMENT_CODE_OVERBROAD,
+          detail: overbroadBlock.map((v) => v.what).join(" · "),
+        });
+        continue;
+      }
       const touchesBlock = checkTaskOneEntryOnePath(body, rel, baseline);
       if (touchesBlock.length > 0) {
         applied.push({
           id: p.id, ok: false, from: TASK_STATUS.TODO, to: null, deliveryCritical, committed: false,
-          reason: "touches-multi-path-bullet",
+          reason: TOUCHES_JUDGEMENT_CODE_MULTI_PATH,
           detail: touchesBlock.map((v) => v.what).join(" · "),
         });
         continue;

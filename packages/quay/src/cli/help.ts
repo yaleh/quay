@@ -30,7 +30,7 @@ import { SERVE_BINDING_FALLBACK } from "../serve/view/serve-binding.ts";
 // below is RENDERED from these tables — ⛔ never re-typed here (a hand-written second copy of a
 // vocabulary is the drift shape this file's own header forbids for VERBS/KINDS/ACTOR_KINDS). The
 // kernel leaf has zero imports, so this costs the per-spawn floor nothing.
-import { TOUCHES_PROBLEM_CODES, TOUCHES_READING_CODES } from "../kernel/touches-annotation.ts";
+import { TOUCHES_PROBLEM_CODES, TOUCHES_READING_CODES, TOUCHES_JUDGEMENT_CODES } from "../kernel/touches-annotation.ts";
 
 // ── the product-layer single naming point for the shipped init upgrade entry ─────────────────────
 // (gap-quay-init-sh-no-single-naming-point; same shape as `RESOURCE_GATE_REL` + `scriptBasename` in
@@ -68,16 +68,24 @@ export const INIT_BRANCH_MODEL_ONLY_PROSE =
   `  upgrade entry calls this): it never rewrites config, so an existing project's\n` +
   `  gates: / loop: / routines: survive.`;
 
-/** The `Touches grammar` section of `quay task create --help`, DERIVED from the kernel's two rule
+/** The `Touches grammar` section of `quay task create --help`, DERIVED from the kernel's rule
  *  tables (`packages/quay/src/kernel/touches-annotation.ts`) — one line per code, `code [problem|
- *  reading]  rule <id> — <meaning>`. `diagnoseTouches` (plugin/scripts/touches-parser.ts) emits
- *  exactly these codes, so an agent that sees a code in a diagnostic can look it up here, and a
- *  code added to the table appears here without anyone editing this file (⛔ the list is never
- *  copied: a second hand-written copy is what the header's VERBS/KINDS note forbids). */
+ *  reading|judgement]  rule <id> — <meaning>`. `diagnoseTouches` (plugin/scripts/touches-parser.ts)
+ *  emits exactly the problem/reading codes, so an agent that sees a code in a diagnostic can look it
+ *  up here, and a code added to a table appears here without anyone editing this file (⛔ the list is
+ *  never copied: a second hand-written copy is what the header's VERBS/KINDS note forbids).
+ *
+ *  The JUDGEMENT table (task gap-touches-judgement-codes-author-surface) is the answer to the DSI
+ *  triage's Q2 ("what happens if I write `src/*` in Touches?"). Before it, `touches-overbroad` was
+ *  emitted only by `task-schema-check` / `prepare-admission-check` and `touches-multi-path-bullet`
+ *  only appeared as a promotion-rejection reason, so neither was nameable from any author-facing
+ *  surface. They are NOT parser diagnostics — the parser read the declaration fine and the
+ *  declaration is still BAD — hence their own `[judgement]` kind and their own kernel table. */
 export function touchesGrammarLines() {
   const rows = [
     ...TOUCHES_PROBLEM_CODES.map((r) => ({ ...r, kind: "problem" })),
     ...TOUCHES_READING_CODES.map((r) => ({ ...r, kind: "reading" })),
+    ...TOUCHES_JUDGEMENT_CODES.map((r) => ({ ...r, kind: "judgement" })),
   ];
   const width = Math.max(...rows.map((r) => r.code.length));
   return [
@@ -88,7 +96,9 @@ export function touchesGrammarLines() {
     "  the exists-on-disk check (rule sa5b-4). Exactly ONE heading of the body is the declaration:",
     "  an exact `Touches` first, else the highest-level heading starting with the word Touches,",
     "  earliest among ties (rule sa5b-3). The rules are NAMED; these are the codes that report",
-    "  them, rendered from the kernel's rule tables (this help carries no second copy of the list):",
+    "  them, rendered from the kernel's rule tables (this help carries no second copy of the list).",
+    "  A [problem]/[reading] code is about the PARSER; a [judgement] code is about a declaration it",
+    "  read successfully and still rejects at the todo→ready promotion gate:",
     ...rows.map((r) => `    ${r.code.padEnd(width)}  [${r.kind}]  rule ${r.rule} — ${r.meaning}`),
   ].join("\n");
 }

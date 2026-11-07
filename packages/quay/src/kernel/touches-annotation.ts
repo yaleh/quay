@@ -159,8 +159,9 @@ export function parseTouchBulletPaths(touchesSection: string): string[] {
 // The three rules below govern every `## Touches` declaration this repo reads. Until this block they
 // had NO name, NO agent-visible code, and NO way to tell one failure from another: an agent could
 // only learn them by reading this file or by hitting a downstream rejection, and a rejection could
-// not say WHICH rule fired (annotation-strip vs. section-selection vs. label-recognition). The two
-// tables are the naming point — PURE DATA, no imports, no logic (this file is a kernel leaf).
+// not say WHICH rule fired (annotation-strip vs. section-selection vs. label-recognition). The
+// tables (PROBLEM, READING, and — appended below — JUDGEMENT) are the naming point: PURE DATA, no
+// imports, no logic (this file is a kernel leaf).
 //
 // ⛔ These tables are the ONE place the codes are written down. The `task create --help` grammar
 // section RENDERS them (`packages/quay/src/cli/help.ts`) and never re-types the list; the reader
@@ -235,5 +236,55 @@ export const TOUCHES_READING_CODES = [
     atom: "label",
     rule: "sa5b-4",
     meaning: "how many declared entries carry the (delete)/(deleted) structural tag (a file this task will DELETE)",
+  },
+] as const;
+
+// ── JUDGEMENT codes — the third table, and a DIFFERENT kind of code ──────────────────────────────
+// A PROBLEM code says "the parser could not read what you wrote"; a READING says "here is what the
+// parser read". Neither says "the declaration was read fine, and it is a BAD declaration" — that is
+// a JUDGEMENT, and until now the two judgements that exist had no name an author could see. One of
+// them (`touches-overbroad`) lived only inside `task-schema-check` and
+// `prepare-admission-check`; the other (`touches-multi-path-bullet`) appeared only as a promotion
+// rejection reason. An agent that wrote `src/*` learned nothing about it from any author-facing
+// surface (task gap-touches-judgement-codes-author-surface, the DSI triage's B slice / Q2).
+//
+// ⛔ These rows are NOT merged into `TOUCHES_PROBLEM_CODES`: a problem code is emitted by
+// `diagnoseTouches` (plugin/scripts/touches-parser.ts) and carries a parser `atom` + a rule id from
+// `TOUCHES_RULE_IDS` — the judgement codes are emitted by two separate judges and are NOT parser
+// rules, so putting them in the same table would give `diagnoseTouches` a row it can never produce
+// and `TOUCHES_RULE_IDS` an id with no counterfactual reading. Same naming point, separate table.
+//
+// ⛔ This is the ONE place these two codes are written down. `quay task create --help` renders the
+// table (packages/quay/src/cli/help.ts's `touchesGrammarLines`), and the two judges reference the
+// exported constants below rather than re-typing the literals — a second hand-written list is the
+// drift shape this file's header forbids.
+//
+// Rule ids are the historical probe ids, kept for traceability (⛔ never reuse an id):
+//   x3-1    overbroad glob — a declaration is overbroad when a wildcard is reachable with fewer than
+//           two CONCRETE leading path segments (`*`, `**`, `src/*`, `packages/**`), or it is empty.
+//           An exact path, or a glob anchored ≥2 segments deep (`packages/quay/**`), is fine.
+//   sa5b-5  one entry one path — a single Touches bullet must declare exactly ONE path/glob; a bullet
+//           joining several with " / ", " + ", "、", "，" or "," parses to one COMPOSITE entry that
+//           matches no file and hides every real path from the overlap judgment.
+
+/** `touches-overbroad` — the stable code string, exported so the judges name it without re-typing. */
+export const TOUCHES_JUDGEMENT_CODE_OVERBROAD = "touches-overbroad";
+/** `touches-multi-path-bullet` — ditto. */
+export const TOUCHES_JUDGEMENT_CODE_MULTI_PATH = "touches-multi-path-bullet";
+
+/** JUDGEMENT codes — shape judgements on a declaration the parser DID read. Rendered verbatim in
+ *  `quay task create --help` next to the problem/reading codes, with `kind` = `judgement`. */
+export const TOUCHES_JUDGEMENT_CODES = [
+  {
+    code: TOUCHES_JUDGEMENT_CODE_OVERBROAD,
+    rule: "x3-1",
+    meaning:
+      "a declared glob is too broad to constrain writes: a wildcard reachable with fewer than two concrete leading path segments (`*`, `**`, `src/*`, `packages/**`) — write an exact path or anchor the glob ≥2 segments deep (`packages/quay/**`); enforced at the todo→ready promotion gate and by task-schema-check",
+  },
+  {
+    code: TOUCHES_JUDGEMENT_CODE_MULTI_PATH,
+    rule: "sa5b-5",
+    meaning:
+      "one bullet declares SEVERAL paths joined by a separator (` / `, ` + `, `、`, `，`, `,`) — the parser reads the whole line as ONE composite entry that matches nothing and hides every real path from the overlap judgment; put one path per bullet; enforced at the todo→ready promotion gate and by the pre-commit hook",
   },
 ] as const;
