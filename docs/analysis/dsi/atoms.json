@@ -1,0 +1,2951 @@
+{
+  "schema": "dsi-atom/1",
+  "domains": {
+    "gate-result-validity": {
+      "schema": "dsi-atom/1",
+      "domain": "gate-result-validity",
+      "total": 33,
+      "atoms": [
+        {
+          "id": "d1-clean-tree-check",
+          "mechanism": "cleanTreeCheck 只在 merge 模式执行；push 模式（目标非当前检出）不要求干净树。",
+          "applies": [
+            "merge 模式（目标分支为当前检出）"
+          ],
+          "notApplies": [
+            "push 模式（目标分支非当前检出）"
+          ],
+          "carrier": "code",
+          "deletionCriterion": "删行后仍能从代码/类型/模块头推出",
+          "provenance": {
+            "carrierRef": "packages/quay/src/fan-in/ff-merge.ts:881-888"
+          }
+        },
+        {
+          "id": "d2-attempt-key",
+          "mechanism": "fan-in 重试计数键 = attemptKey（每次 fan-in 的 suite-runid 唯一），不是 runId。",
+          "applies": [
+            "fan-in 重试计数"
+          ],
+          "notApplies": [
+            "driver 轮次 id（runId）或共享 wk-prod"
+          ],
+          "carrier": "code",
+          "deletionCriterion": "删行后仍能从代码/类型/模块头推出",
+          "provenance": {
+            "carrierRef": "packages/quay/src/fan-in/ff-merge.ts:918-937"
+          }
+        },
+        {
+          "id": "d3-push-mode",
+          "mechanism": "ff 目标分支非当前检出时走 push 模式（`git push . ref:refs/heads/<target>` 纯 ref 更新），不 checkout。",
+          "applies": [
+            "目标分支非当前检出"
+          ],
+          "notApplies": [
+            "目标分支已检出（走 merge 模式）"
+          ],
+          "carrier": "code",
+          "deletionCriterion": "删行后仍能从代码/类型/模块头推出",
+          "provenance": {
+            "carrierRef": "packages/quay/src/fan-in/ff-merge.ts:881,960-962"
+          }
+        },
+        {
+          "id": "d4-lock-domain",
+          "mechanism": "fan-in 锁域按 mergeTarget 派生：goal/<id> 持 goal 锁、develop 持 fan-in.lock，互不阻塞。",
+          "applies": [
+            "goal 分支合并 / develop 落地"
+          ],
+          "notApplies": [
+            "同一锁域内的并发落地（串行）"
+          ],
+          "carrier": "code",
+          "deletionCriterion": "删行后仍能从代码/类型/模块头推出",
+          "provenance": {
+            "carrierRef": "plugin/scripts/worker-fan-in.ts:1847-1853"
+          }
+        },
+        {
+          "id": "d5-ac-precheck",
+          "mechanism": "ac-precheck 在 suite 前 fail-fast：AC 未全勾/AC-DoD 段缺失 ⇒ 拒翻跳过 suite。",
+          "applies": [
+            "fan-in 翻 done 前、suite 之前"
+          ],
+          "notApplies": [
+            "suite 后的 ac-gate（flip 闸是第二次判断）"
+          ],
+          "carrier": "code",
+          "deletionCriterion": "删行后仍能从代码/类型/模块头推出",
+          "provenance": {
+            "carrierRef": "plugin/scripts/worker-fan-in.ts:3281-3306"
+          }
+        },
+        {
+          "id": "w6-dual-copy",
+          "mechanism": "dual-copy 文件冲突取 develop 版再同步两份 byte-identical（不取 plugin 正本）。",
+          "applies": [
+            "dual-copy 文件冲突（.claude/workflows ↔ plugin/workflows）"
+          ],
+          "notApplies": [
+            "普通源码冲突 / 任务文件 per-hunk 并集"
+          ],
+          "carrier": "code",
+          "deletionCriterion": "删行后仍能从代码/类型/模块头推出",
+          "provenance": {
+            "carrierRef": "plugin/scripts/conflict-resolution-rules.ts:94-111"
+          }
+        },
+        {
+          "id": "w7-modify-delete",
+          "mechanism": "modify/delete 冲突先判哪边删：本分支故意删先吸收 develop 改动再 git rm，永不静默复活。",
+          "applies": [
+            "git status DU/UD 冲突"
+          ],
+          "notApplies": [
+            "outline/tick doc 的 take-develop 规则"
+          ],
+          "carrier": "code",
+          "deletionCriterion": "删行后仍能从代码/类型/模块头推出",
+          "provenance": {
+            "carrierRef": "plugin/scripts/conflict-resolution-rules.ts:97-99"
+          }
+        },
+        {
+          "id": "w8-outline-tick-doc",
+          "mechanism": "outline/tick doc 冲突直接取 develop、不 hand-merge。",
+          "applies": [
+            "orchestration/*-tick-core.md 与 docs/proposals/quay-product-outline.md"
+          ],
+          "notApplies": [
+            "任务文件 tasks/<id>.md 的 per-hunk 并集"
+          ],
+          "carrier": "code",
+          "deletionCriterion": "删行后仍能从代码/类型/模块头推出",
+          "provenance": {
+            "carrierRef": "plugin/scripts/conflict-resolution-rules.ts:106-111"
+          }
+        },
+        {
+          "id": "w9-doc-develop-root-cause",
+          "mechanism": "doc→develop 同步失败真因 = author 落后 develop + 脏树挡 semantic fallback。",
+          "applies": [
+            "author 落后 develop + 脏树挡 semantic fallback"
+          ],
+          "notApplies": [
+            "code 面 ff-not-fast-forward（develop 在长 suite 期间前进）"
+          ],
+          "carrier": "code",
+          "deletionCriterion": "删行后仍能从代码/类型/模块头推出",
+          "provenance": {
+            "carrierRef": "plugin/scripts/driver-filters.ts:1301-1311"
+          }
+        },
+        {
+          "id": "h10-underivable",
+          "mechanism": "判据读最新 run 派生字段、派生未算完 ⇒ underivable（NOT-EVALUATED 与红同形），不是假绿。",
+          "applies": [
+            "判据读最新 run 派生字段"
+          ],
+          "notApplies": [
+            "判据读静态文件/配置（无派生窗口）"
+          ],
+          "carrier": "code",
+          "deletionCriterion": "删行后仍能从代码/类型/模块头推出",
+          "provenance": {
+            "carrierRef": "packages/quay/src/core/goal-store-checks.ts:229-232"
+          }
+        },
+        {
+          "id": "h11-sufficiency-active",
+          "mechanism": "goal 充分性判官只遍历 active；achieved 离开集合不重判。",
+          "applies": [
+            "goal 充分性判官"
+          ],
+          "notApplies": [
+            "achieved goal 的终态重判（离开 active 集合）"
+          ],
+          "carrier": "code",
+          "deletionCriterion": "删行后仍能从代码/类型/模块头推出",
+          "provenance": {
+            "carrierRef": "plugin/scripts/goal-driver.ts:2149-2154"
+          }
+        },
+        {
+          "id": "h12-reanchor",
+          "mechanism": "同签名红 3 轮看似死锁，先看被红 checker 自身 exit 0（是则欠 re-anchor）。",
+          "applies": [
+            "同签名红连续多轮、checker 自身 exit 0"
+          ],
+          "notApplies": [
+            "checker 非 0 的真红（那不是 re-anchor）"
+          ],
+          "carrier": "code",
+          "deletionCriterion": "删行后仍能从代码/类型/模块头推出",
+          "provenance": {
+            "carrierRef": "plugin/scripts/worker-fan-in.ts:1585-1635"
+          }
+        },
+        {
+          "id": "p13-counting-rule",
+          "mechanism": "R 的提交数→速率计数规则只在 delivery_face.command 一个实现（手写第二个会漂移）。",
+          "applies": [
+            "delivery_face.command 的提交数→速率"
+          ],
+          "notApplies": [
+            "其它 git rev-list 计数用途"
+          ],
+          "carrier": "code",
+          "deletionCriterion": "删行后仍能从代码/类型/模块头推出",
+          "provenance": {
+            "carrierRef": "plugin/scripts/freshness-producer-coverage-check.ts:533-620"
+          }
+        },
+        {
+          "id": "p14-probe-failure",
+          "mechanism": "探针失败（读不懂/违约）≠套件红，只落 Fact failed/not-evaluated。",
+          "applies": [
+            "probe-routine 的 Fact 读态"
+          ],
+          "notApplies": [
+            "fan-in suite 红（另一条路径）"
+          ],
+          "carrier": "code",
+          "deletionCriterion": "删行后仍能从代码/类型/模块头推出",
+          "provenance": {
+            "carrierRef": "plugin/scripts/probe-routine.ts:1079-1110"
+          }
+        },
+        {
+          "id": "ff-attempt3-escalation",
+          "mechanism": "ff 重试达到第 3 次仍因目标分支前进失败 ⇒ 追加 ff-escalation 事件并以退出码 3 结束（anti-livelock），不再无限重试。",
+          "applies": [
+            "问机械 fan-in 的落分支步连续因目标分支前进失败、达到重试上限时的退出码/产物。"
+          ],
+          "notApplies": [
+            "问第一次 non-fast-forward 的重试路径（那仍回到 merge 目标分支，不升级）。"
+          ],
+          "carrier": "code",
+          "deletionCriterion": "删行后仍能从代码/类型/模块头推出",
+          "provenance": {
+            "carrierRef": "packages/quay/src/fan-in/ff-merge.ts:1009-1015"
+          }
+        },
+        {
+          "id": "ff-flip-identity",
+          "mechanism": "flip-identity 短路：suite_head..tip 恰为 1 个提交、唯一父提交 = suite_head、name-status 恰为一条 `M <tasks_dir>/<task>.md` ⇒ 判惰性，不调分类器。",
+          "applies": [
+            "问 suite 结束后仅多出本任务状态翻转提交时的证书判定。"
+          ],
+          "notApplies": [
+            "问 delta 分类器对其他 delta 的判定（那走 classifyDelta）。"
+          ],
+          "carrier": "code",
+          "deletionCriterion": "删行后仍能从代码/类型/模块头推出",
+          "provenance": {
+            "carrierRef": "packages/quay/src/fan-in/ff-merge.ts:439-520"
+          }
+        },
+        {
+          "id": "ff-benign-runtime-dirty",
+          "mechanism": "benign runtime dirty：porcelain 全为 `?? .quay/…` 或 runtime manifest 命中、且不在任务 Touches，touches-orthogonality-check --runtime-dirty 判 BENIGN ⇒ 放行（不 commit、不 gitignore）。",
+          "applies": [
+            "问落分支前工作树只有 .quay 运行时未跟踪文件时是否拒绝。"
+          ],
+          "notApplies": [
+            "问已跟踪文件被改动（那不是 benign，走干净树拒绝/自动收敛）。"
+          ],
+          "carrier": "code",
+          "deletionCriterion": "删行后仍能从代码/类型/模块头推出",
+          "provenance": {
+            "carrierRef": "packages/quay/src/fan-in/ff-merge.ts:287-324"
+          }
+        },
+        {
+          "id": "ff-post-head-sanity",
+          "mechanism": "ff 成功后 sanity check：mergeTarget 的 post-head 必须等于 source tip，否则 exit 1 需人（能取假）。",
+          "applies": [
+            "问 ff 命令返回成功后如何证明目标 ref 真的到了 source tip。"
+          ],
+          "notApplies": [
+            "问 suite 证书闸（那在 ff 之前）。"
+          ],
+          "carrier": "code",
+          "deletionCriterion": "删行后仍能从代码/类型/模块头推出",
+          "provenance": {
+            "carrierRef": "packages/quay/src/fan-in/ff-merge.ts:1028-1035"
+          }
+        },
+        {
+          "id": "fan-signature-changed-assertion",
+          "mechanism": "compareFailureSignatures：同一文件但断言文本变化（changed-assertion）先于 added 判 hard-red；签名键 = 文件+文本，不含计数/耗时。",
+          "applies": [
+            "问 A/B 比较两棵树失败签名时，同文件不同断言文本算什么。"
+          ],
+          "notApplies": [
+            "问任务独有新增文件红（added）或完全相同的既有红（exempt）。"
+          ],
+          "carrier": "code",
+          "deletionCriterion": "删行后仍能从代码/类型/模块头推出",
+          "provenance": {
+            "carrierRef": "plugin/scripts/worker-fan-in.ts:1450-1474"
+          }
+        },
+        {
+          "id": "fan-baseline-red-cap",
+          "mechanism": "baseline-red 断路器：同一任务连续 cap 轮撞同一签名 ⇒ stop-terminal；签名一变即重置连续计数。",
+          "applies": [
+            "问同签名连续多轮后的停派条件与签名变化的影响。"
+          ],
+          "notApplies": [
+            "问单轮 suite 红的重试上限（那是另一条 count-and-retry 路径）。"
+          ],
+          "carrier": "code",
+          "deletionCriterion": "删行后仍能从代码/类型/模块头推出",
+          "provenance": {
+            "carrierRef": "plugin/scripts/worker-fan-in.ts:1529-1559"
+          }
+        },
+        {
+          "id": "fan-goal-develop-lock-order",
+          "mechanism": "goal merge 落地分两把锁：先 acquire goal 分支锁（fan-in.goal-<GOAL>.lock），再 acquire develop 锁（fan-in.lock），各成一步。",
+          "applies": [
+            "问目标分支合并落地时两把互斥锁的获取顺序。"
+          ],
+          "notApplies": [
+            "问 develop 直落地（只有一把 fan-in.lock）或普通 task 落地。"
+          ],
+          "carrier": "code",
+          "deletionCriterion": "删行后仍能从代码/类型/模块头推出",
+          "provenance": {
+            "carrierRef": "plugin/scripts/worker-fan-in.ts:4386-4398"
+          }
+        },
+        {
+          "id": "drv-exited-not-landed-exit3",
+          "mechanism": "EXITED_NOT_LANDED_EXIT = 3：worker exit 0 但未落地，驱动以 3 表示 exited-not-landed；completed 必须 status=done 且无残留 worktree。",
+          "applies": [
+            "问 worker 正常退出但任务未落地时驱动的退出码。"
+          ],
+          "notApplies": [
+            "问 worker 自己进程的退出码（那是 worker 的，不是驱动的）。"
+          ],
+          "carrier": "code",
+          "deletionCriterion": "删行后仍能从代码/类型/模块头推出",
+          "provenance": {
+            "carrierRef": "plugin/scripts/worker-driver.ts:774"
+          }
+        },
+        {
+          "id": "drv-retry-exemption-states",
+          "mechanism": "重试豁免 verdict 六态：unrelated-flaky-exempt / own-defect-counted / insufficient-data-fallback / static-phase-attributed / ac-not-checked-shortcircuit / suite-oom；只有 insufficient-data-fallback（及停派上限）走 stop-terminal。",
+          "applies": [
+            "问「没有机械 fan-in 结果」的成因分类，尤其 AC 未全勾短路。"
+          ],
+          "notApplies": [
+            "问 suite 红的具体签名归因（那是 compareFailureSignatures）。"
+          ],
+          "carrier": "code",
+          "deletionCriterion": "删行后仍能从代码/类型/模块头推出",
+          "provenance": {
+            "carrierRef": "plugin/scripts/worker-driver.ts:3360-3385"
+          }
+        },
+        {
+          "id": "drv-exited-not-landed-action",
+          "mechanism": "decideExitedNotLandedAction：ac-not-checked-shortcircuit ⇒ count-and-retry；只有 insufficient-data-fallback ⇒ stop-terminal。",
+          "applies": [
+            "问 AC 未全勾短路任务应继续重派还是停派。"
+          ],
+          "notApplies": [
+            "问真 suite 红的归因判词。"
+          ],
+          "carrier": "code",
+          "deletionCriterion": "删行后仍能从代码/类型/模块头推出",
+          "provenance": {
+            "carrierRef": "plugin/scripts/worker-driver.ts:4362-4395"
+          }
+        },
+        {
+          "id": "drv-ac-short-circuit",
+          "mechanism": "acShortCircuitVerdict 读 worktree 里的任务文件，判断 AC 是否全勾；短路 = worker 退出但未 spawn 机械 fan-in。",
+          "applies": [
+            "问 worker 退出后如何判断是否 AC 短路、是否需要先跑 fan-in。"
+          ],
+          "notApplies": [
+            "问 AC 勾选本身怎么发生（那是 task_check/task_write）。"
+          ],
+          "carrier": "code",
+          "deletionCriterion": "删行后仍能从代码/类型/模块头推出",
+          "provenance": {
+            "carrierRef": "plugin/scripts/worker-driver.ts:5283"
+          }
+        },
+        {
+          "id": "probe-threshold-formula",
+          "mechanism": "freshness 探针触发阈值 THRESHOLD_fraction(p) = (W_p + I) × R / K；margin / K ≤ 阈值时触发。",
+          "applies": [
+            "问补测探针的触发阈值构成。"
+          ],
+          "notApplies": [
+            "问 freshness 读数本身（state/distance 先读哪个）。"
+          ],
+          "carrier": "code",
+          "deletionCriterion": "删行后仍能从代码/类型/模块头推出",
+          "provenance": {
+            "carrierRef": "plugin/probes/freshness-refresh.md:71"
+          }
+        },
+        {
+          "id": "probe-slug-derivation",
+          "mechanism": "探针任务 slug 派生：基名；同名被占 ⇒ 追加 sha1(findingKey)[0:8]；哈希后缀也被占 ⇒ 追加本轮 UTC 戳（COLLISION_ESCAPE_MAX）；永不覆盖既有任务正文。",
+          "applies": [
+            "问探针立案的 slug 冲突消解与覆盖规则。"
+          ],
+          "notApplies": [
+            "问普通 task_write 的 id/upsert 语义。"
+          ],
+          "carrier": "code",
+          "deletionCriterion": "删行后仍能从代码/类型/模块头推出",
+          "provenance": {
+            "carrierRef": "plugin/scripts/probe-routine.ts:653-665"
+          }
+        },
+        {
+          "id": "probe-plugin-path-priority",
+          "mechanism": "pluginPath 优先：resolve(pluginRoot, basename(declared)) 与 workspace 路径不同且存在 ⇒ 用 plugin 路径。",
+          "applies": [
+            "问探针规格的脚本在 workspace 与 plugin 根同名时用哪个。"
+          ],
+          "notApplies": [
+            "问 workspace 内相对路径的解析。"
+          ],
+          "carrier": "code",
+          "deletionCriterion": "删行后仍能从代码/类型/模块头推出",
+          "provenance": {
+            "carrierRef": "plugin/scripts/probe-routine.ts:720-721"
+          }
+        },
+        {
+          "id": "probe-file-only-prefix",
+          "mechanism": "FILE-ONLY 白名单只有 tasks/；探针写 tasks/ 之外即违约 ⇒ failed。",
+          "applies": [
+            "问探针运行期间允许的 tracked 文件改动面。"
+          ],
+          "notApplies": [
+            "问探针 spawn 失败/输出读不懂的 Fact 取值。"
+          ],
+          "carrier": "code",
+          "deletionCriterion": "删行后仍能从代码/类型/模块头推出",
+          "provenance": {
+            "carrierRef": "plugin/scripts/probe-routine.ts:110"
+          }
+        },
+        {
+          "id": "probe-title-slice-180",
+          "mechanism": "探针立案标题 = name + prefix + rationale，空白归一后 slice(0,180)。",
+          "applies": [
+            "问探针自动立案的标题组成与截断长度。"
+          ],
+          "notApplies": [
+            "问普通任务标题。"
+          ],
+          "carrier": "code",
+          "deletionCriterion": "删行后仍能从代码/类型/模块头推出",
+          "provenance": {
+            "carrierRef": "plugin/scripts/probe-routine.ts:1230"
+          }
+        },
+        {
+          "id": "fan2-1",
+          "mechanism": "横切步骤按声明阶段分成「状态改写前」与「状态改写后」两组，改写本身固定夹在两组之间且只执行一次；同组内按注册先后顺序执行。",
+          "applies": [
+            "步骤在注册时声明自己属于改写前还是改写后（阶段是注册数据，不是代码位置）",
+            "同一阶段有多个步骤时，先后由注册先后决定"
+          ],
+          "notApplies": [
+            "需要把某步骤排在改写「之中」或与改写并发的场景（阶段词汇只有改写前、改写后两项）",
+            "阶段表为空时，改写仍在原位置执行一次，没有可观察的顺序差异"
+          ],
+          "carrier": "code",
+          "deletionCriterion": "删行后仍能从代码/类型/模块头推出",
+          "provenance": {
+            "carrierRef": "plugin/scripts/worker-fan-in-hooks.ts:129-158"
+          }
+        },
+        {
+          "id": "fan2-2",
+          "mechanism": "同名横切步骤重复注册 ⇒ 立即抛错拒绝（⛔ 不静默覆盖）；注销只能通过注册时返回的句柄按名字移除，⛔ 不清空整张表。",
+          "applies": [
+            "注册名被当作步骤的稳定身份（拒绝时该名字用于归属失败步骤）",
+            "注册成功时返回可用的注销句柄"
+          ],
+          "notApplies": [
+            "需要替换已注册步骤的场景（当前没有替换语义，必须先注销再注册）",
+            "同一模块被重复加载（会因同名抛错，而不是幂等地重复安装）"
+          ],
+          "carrier": "code",
+          "deletionCriterion": "删行后仍能从代码/类型/模块头推出",
+          "provenance": {
+            "carrierRef": "plugin/scripts/worker-fan-in-hooks.ts:107-116"
+          }
+        },
+        {
+          "id": "prb2-1",
+          "mechanism": "探针 finding 必须同时带具体文件位置、函数/实体名与判定理由三者；缺任一条 ⇒ 该条被丢弃并计入 malformed，其余条目照常保留（只有整段 stdout 读不出任何 JSON 对象才判整轮 failed）。",
+          "applies": [
+            "探针 stdout 里能取出至少一个带发现数组的 JSON 对象",
+            "逐条判定：一条不合法只影响它自己，其余条目照常进入后续闸"
+          ],
+          "notApplies": [
+            "整段 stdout 取不出任何 JSON 对象 ⇒ 走整轮失败并落原文诊断，不进入逐条判定",
+            "产出者登记、去重、限流等后续闸不在这一步判定"
+          ],
+          "carrier": "code",
+          "deletionCriterion": "删行后仍能从代码/类型/模块头推出",
+          "provenance": {
+            "carrierRef": "/data/home/yale/work/quay/plugin/scripts/probe-routine.ts:290-332"
+          }
+        }
+      ]
+    },
+    "quay-dev": {
+      "schema": "dsi-atom/1",
+      "domain": "quay-dev",
+      "total": 143,
+      "atoms": [
+        {
+          "id": "ff-attempt3-escalation",
+          "mechanism": "ff 重试达到第 3 次仍因目标分支前进失败 ⇒ 追加 ff-escalation 事件并以退出码 3 结束（anti-livelock），不再无限重试。",
+          "applies": [
+            "问机械 fan-in 的落分支步连续因目标分支前进失败、达到重试上限时的退出码/产物。"
+          ],
+          "notApplies": [
+            "问第一次 non-fast-forward 的重试路径（那仍回到 merge 目标分支，不升级）。"
+          ],
+          "carrier": "code",
+          "deletionCriterion": "删行后仍能从代码/类型/模块头推出",
+          "provenance": {
+            "carrierRef": "packages/quay/src/fan-in/ff-merge.ts:1009-1015"
+          }
+        },
+        {
+          "id": "ff-flip-identity",
+          "mechanism": "flip-identity 短路：suite_head..tip 恰为 1 个提交、唯一父提交 = suite_head、name-status 恰为一条 `M <tasks_dir>/<task>.md` ⇒ 判惰性，不调分类器。",
+          "applies": [
+            "问 suite 结束后仅多出本任务状态翻转提交时的证书判定。"
+          ],
+          "notApplies": [
+            "问 delta 分类器对其他 delta 的判定（那走 classifyDelta）。"
+          ],
+          "carrier": "code",
+          "deletionCriterion": "删行后仍能从代码/类型/模块头推出",
+          "provenance": {
+            "carrierRef": "packages/quay/src/fan-in/ff-merge.ts:439-520"
+          }
+        },
+        {
+          "id": "ff-benign-runtime-dirty",
+          "mechanism": "benign runtime dirty：porcelain 全为 `?? .quay/…` 或 runtime manifest 命中、且不在任务 Touches，touches-orthogonality-check --runtime-dirty 判 BENIGN ⇒ 放行（不 commit、不 gitignore）。",
+          "applies": [
+            "问落分支前工作树只有 .quay 运行时未跟踪文件时是否拒绝。"
+          ],
+          "notApplies": [
+            "问已跟踪文件被改动（那不是 benign，走干净树拒绝/自动收敛）。"
+          ],
+          "carrier": "code",
+          "deletionCriterion": "删行后仍能从代码/类型/模块头推出",
+          "provenance": {
+            "carrierRef": "packages/quay/src/fan-in/ff-merge.ts:287-324"
+          }
+        },
+        {
+          "id": "ff-post-head-sanity",
+          "mechanism": "ff 成功后 sanity check：mergeTarget 的 post-head 必须等于 source tip，否则 exit 1 需人（能取假）。",
+          "applies": [
+            "问 ff 命令返回成功后如何证明目标 ref 真的到了 source tip。"
+          ],
+          "notApplies": [
+            "问 suite 证书闸（那在 ff 之前）。"
+          ],
+          "carrier": "code",
+          "deletionCriterion": "删行后仍能从代码/类型/模块头推出",
+          "provenance": {
+            "carrierRef": "packages/quay/src/fan-in/ff-merge.ts:1028-1035"
+          }
+        },
+        {
+          "id": "fan-signature-changed-assertion",
+          "mechanism": "compareFailureSignatures：同一文件但断言文本变化（changed-assertion）先于 added 判 hard-red；签名键 = 文件+文本，不含计数/耗时。",
+          "applies": [
+            "问 A/B 比较两棵树失败签名时，同文件不同断言文本算什么。"
+          ],
+          "notApplies": [
+            "问任务独有新增文件红（added）或完全相同的既有红（exempt）。"
+          ],
+          "carrier": "code",
+          "deletionCriterion": "删行后仍能从代码/类型/模块头推出",
+          "provenance": {
+            "carrierRef": "plugin/scripts/worker-fan-in.ts:1450-1474"
+          }
+        },
+        {
+          "id": "fan-baseline-red-cap",
+          "mechanism": "baseline-red 断路器：同一任务连续 cap 轮撞同一签名 ⇒ stop-terminal；签名一变即重置连续计数。",
+          "applies": [
+            "问同签名连续多轮后的停派条件与签名变化的影响。"
+          ],
+          "notApplies": [
+            "问单轮 suite 红的重试上限（那是另一条 count-and-retry 路径）。"
+          ],
+          "carrier": "code",
+          "deletionCriterion": "删行后仍能从代码/类型/模块头推出",
+          "provenance": {
+            "carrierRef": "plugin/scripts/worker-fan-in.ts:1529-1559"
+          }
+        },
+        {
+          "id": "fan-goal-develop-lock-order",
+          "mechanism": "goal merge 落地分两把锁：先 acquire goal 分支锁（fan-in.goal-<GOAL>.lock），再 acquire develop 锁（fan-in.lock），各成一步。",
+          "applies": [
+            "问目标分支合并落地时两把互斥锁的获取顺序。"
+          ],
+          "notApplies": [
+            "问 develop 直落地（只有一把 fan-in.lock）或普通 task 落地。"
+          ],
+          "carrier": "code",
+          "deletionCriterion": "删行后仍能从代码/类型/模块头推出",
+          "provenance": {
+            "carrierRef": "plugin/scripts/worker-fan-in.ts:4386-4398"
+          }
+        },
+        {
+          "id": "fan-reanchor-three-state",
+          "mechanism": "re-anchor 三态：判定时刻新鲜测被挡 red point 的 checker exit；0⇒re-anchor，≠0⇒stop-terminal，null/空⇒stop-terminal+未评估且不得写 LOOP DEADLOCK。",
+          "applies": [
+            "问同签名红在判定时刻重测发现某 red point 不再红、或测不成时的判词。"
+          ],
+          "notApplies": [
+            "问重试计数/停派上限（那是 baseline cap 本身）。"
+          ],
+          "carrier": "code",
+          "deletionCriterion": "删行后仍能从代码/类型/模块头推出",
+          "provenance": {
+            "carrierRef": "plugin/scripts/worker-fan-in.ts:1585-1635"
+          }
+        },
+        {
+          "id": "drv-exited-not-landed-exit3",
+          "mechanism": "EXITED_NOT_LANDED_EXIT = 3：worker exit 0 但未落地，驱动以 3 表示 exited-not-landed；completed 必须 status=done 且无残留 worktree。",
+          "applies": [
+            "问 worker 正常退出但任务未落地时驱动的退出码。"
+          ],
+          "notApplies": [
+            "问 worker 自己进程的退出码（那是 worker 的，不是驱动的）。"
+          ],
+          "carrier": "code",
+          "deletionCriterion": "删行后仍能从代码/类型/模块头推出",
+          "provenance": {
+            "carrierRef": "plugin/scripts/worker-driver.ts:774"
+          }
+        },
+        {
+          "id": "drv-retry-exemption-states",
+          "mechanism": "重试豁免 verdict 六态：unrelated-flaky-exempt / own-defect-counted / insufficient-data-fallback / static-phase-attributed / ac-not-checked-shortcircuit / suite-oom；只有 insufficient-data-fallback（及停派上限）走 stop-terminal。",
+          "applies": [
+            "问「没有机械 fan-in 结果」的成因分类，尤其 AC 未全勾短路。"
+          ],
+          "notApplies": [
+            "问 suite 红的具体签名归因（那是 compareFailureSignatures）。"
+          ],
+          "carrier": "code",
+          "deletionCriterion": "删行后仍能从代码/类型/模块头推出",
+          "provenance": {
+            "carrierRef": "plugin/scripts/worker-driver.ts:3360-3385"
+          }
+        },
+        {
+          "id": "drv-exited-not-landed-action",
+          "mechanism": "decideExitedNotLandedAction：ac-not-checked-shortcircuit ⇒ count-and-retry；只有 insufficient-data-fallback ⇒ stop-terminal。",
+          "applies": [
+            "问 AC 未全勾短路任务应继续重派还是停派。"
+          ],
+          "notApplies": [
+            "问真 suite 红的归因判词。"
+          ],
+          "carrier": "code",
+          "deletionCriterion": "删行后仍能从代码/类型/模块头推出",
+          "provenance": {
+            "carrierRef": "plugin/scripts/worker-driver.ts:4362-4395"
+          }
+        },
+        {
+          "id": "drv-ac-short-circuit",
+          "mechanism": "acShortCircuitVerdict 读 worktree 里的任务文件，判断 AC 是否全勾；短路 = worker 退出但未 spawn 机械 fan-in。",
+          "applies": [
+            "问 worker 退出后如何判断是否 AC 短路、是否需要先跑 fan-in。"
+          ],
+          "notApplies": [
+            "问 AC 勾选本身怎么发生（那是 task_check/task_write）。"
+          ],
+          "carrier": "code",
+          "deletionCriterion": "删行后仍能从代码/类型/模块头推出",
+          "provenance": {
+            "carrierRef": "plugin/scripts/worker-driver.ts:5283"
+          }
+        },
+        {
+          "id": "probe-threshold-formula",
+          "mechanism": "freshness 探针触发阈值 THRESHOLD_fraction(p) = (W_p + I) × R / K；margin / K ≤ 阈值时触发。",
+          "applies": [
+            "问补测探针的触发阈值构成。"
+          ],
+          "notApplies": [
+            "问 freshness 读数本身（state/distance 先读哪个）。"
+          ],
+          "carrier": "code",
+          "deletionCriterion": "删行后仍能从代码/类型/模块头推出",
+          "provenance": {
+            "carrierRef": "plugin/probes/freshness-refresh.md:71"
+          }
+        },
+        {
+          "id": "probe-slug-derivation",
+          "mechanism": "探针任务 slug 派生：基名；同名被占 ⇒ 追加 sha1(findingKey)[0:8]；哈希后缀也被占 ⇒ 追加本轮 UTC 戳（COLLISION_ESCAPE_MAX）；永不覆盖既有任务正文。",
+          "applies": [
+            "问探针立案的 slug 冲突消解与覆盖规则。"
+          ],
+          "notApplies": [
+            "问普通 task_write 的 id/upsert 语义。"
+          ],
+          "carrier": "code",
+          "deletionCriterion": "删行后仍能从代码/类型/模块头推出",
+          "provenance": {
+            "carrierRef": "plugin/scripts/probe-routine.ts:653-665"
+          }
+        },
+        {
+          "id": "probe-plugin-path-priority",
+          "mechanism": "pluginPath 优先：resolve(pluginRoot, basename(declared)) 与 workspace 路径不同且存在 ⇒ 用 plugin 路径。",
+          "applies": [
+            "问探针规格的脚本在 workspace 与 plugin 根同名时用哪个。"
+          ],
+          "notApplies": [
+            "问 workspace 内相对路径的解析。"
+          ],
+          "carrier": "code",
+          "deletionCriterion": "删行后仍能从代码/类型/模块头推出",
+          "provenance": {
+            "carrierRef": "plugin/scripts/probe-routine.ts:720-721"
+          }
+        },
+        {
+          "id": "probe-file-only-prefix",
+          "mechanism": "FILE-ONLY 白名单只有 tasks/；探针写 tasks/ 之外即违约 ⇒ failed。",
+          "applies": [
+            "问探针运行期间允许的 tracked 文件改动面。"
+          ],
+          "notApplies": [
+            "问探针 spawn 失败/输出读不懂的 Fact 取值。"
+          ],
+          "carrier": "code",
+          "deletionCriterion": "删行后仍能从代码/类型/模块头推出",
+          "provenance": {
+            "carrierRef": "plugin/scripts/probe-routine.ts:110"
+          }
+        },
+        {
+          "id": "probe-title-slice-180",
+          "mechanism": "探针立案标题 = name + prefix + rationale，空白归一后 slice(0,180)。",
+          "applies": [
+            "问探针自动立案的标题组成与截断长度。"
+          ],
+          "notApplies": [
+            "问普通任务标题。"
+          ],
+          "carrier": "code",
+          "deletionCriterion": "删行后仍能从代码/类型/模块头推出",
+          "provenance": {
+            "carrierRef": "plugin/scripts/probe-routine.ts:1230"
+          }
+        },
+        {
+          "id": "d1-clean-tree-check",
+          "mechanism": "cleanTreeCheck 只在 merge 模式执行；push 模式（目标非当前检出）不要求干净树。",
+          "applies": [
+            "merge 模式（目标分支为当前检出）"
+          ],
+          "notApplies": [
+            "push 模式（目标分支非当前检出）"
+          ],
+          "carrier": "code",
+          "deletionCriterion": "删行后仍能从代码/类型/模块头推出",
+          "provenance": {
+            "carrierRef": "packages/quay/src/fan-in/ff-merge.ts:881-888"
+          }
+        },
+        {
+          "id": "d2-attempt-key",
+          "mechanism": "fan-in 重试计数键 = attemptKey（每次 fan-in 的 suite-runid 唯一），不是 runId。",
+          "applies": [
+            "fan-in 重试计数"
+          ],
+          "notApplies": [
+            "driver 轮次 id（runId）或共享 wk-prod"
+          ],
+          "carrier": "code",
+          "deletionCriterion": "删行后仍能从代码/类型/模块头推出",
+          "provenance": {
+            "carrierRef": "packages/quay/src/fan-in/ff-merge.ts:918-937"
+          }
+        },
+        {
+          "id": "d3-push-mode",
+          "mechanism": "ff 目标分支非当前检出时走 push 模式（`git push . ref:refs/heads/<target>` 纯 ref 更新），不 checkout。",
+          "applies": [
+            "目标分支非当前检出"
+          ],
+          "notApplies": [
+            "目标分支已检出（走 merge 模式）"
+          ],
+          "carrier": "code",
+          "deletionCriterion": "删行后仍能从代码/类型/模块头推出",
+          "provenance": {
+            "carrierRef": "packages/quay/src/fan-in/ff-merge.ts:881,960-962"
+          }
+        },
+        {
+          "id": "d4-lock-domain",
+          "mechanism": "fan-in 锁域按 mergeTarget 派生：goal/<id> 持 goal 锁、develop 持 fan-in.lock，互不阻塞。",
+          "applies": [
+            "goal 分支合并 / develop 落地"
+          ],
+          "notApplies": [
+            "同一锁域内的并发落地（串行）"
+          ],
+          "carrier": "code",
+          "deletionCriterion": "删行后仍能从代码/类型/模块头推出",
+          "provenance": {
+            "carrierRef": "plugin/scripts/worker-fan-in.ts:1847-1853"
+          }
+        },
+        {
+          "id": "d5-ac-precheck",
+          "mechanism": "ac-precheck 在 suite 前 fail-fast：AC 未全勾/AC-DoD 段缺失 ⇒ 拒翻跳过 suite。",
+          "applies": [
+            "fan-in 翻 done 前、suite 之前"
+          ],
+          "notApplies": [
+            "suite 后的 ac-gate（flip 闸是第二次判断）"
+          ],
+          "carrier": "code",
+          "deletionCriterion": "删行后仍能从代码/类型/模块头推出",
+          "provenance": {
+            "carrierRef": "plugin/scripts/worker-fan-in.ts:3281-3306"
+          }
+        },
+        {
+          "id": "w6-dual-copy",
+          "mechanism": "dual-copy 文件冲突取 develop 版再同步两份 byte-identical（不取 plugin 正本）。",
+          "applies": [
+            "dual-copy 文件冲突（.claude/workflows ↔ plugin/workflows）"
+          ],
+          "notApplies": [
+            "普通源码冲突 / 任务文件 per-hunk 并集"
+          ],
+          "carrier": "code",
+          "deletionCriterion": "删行后仍能从代码/类型/模块头推出",
+          "provenance": {
+            "carrierRef": "plugin/scripts/conflict-resolution-rules.ts:94-111"
+          }
+        },
+        {
+          "id": "w7-modify-delete",
+          "mechanism": "modify/delete 冲突先判哪边删：本分支故意删先吸收 develop 改动再 git rm，永不静默复活。",
+          "applies": [
+            "git status DU/UD 冲突"
+          ],
+          "notApplies": [
+            "outline/tick doc 的 take-develop 规则"
+          ],
+          "carrier": "code",
+          "deletionCriterion": "删行后仍能从代码/类型/模块头推出",
+          "provenance": {
+            "carrierRef": "plugin/scripts/conflict-resolution-rules.ts:97-99"
+          }
+        },
+        {
+          "id": "w8-outline-tick-doc",
+          "mechanism": "outline/tick doc 冲突直接取 develop、不 hand-merge。",
+          "applies": [
+            "orchestration/*-tick-core.md 与 docs/proposals/quay-product-outline.md"
+          ],
+          "notApplies": [
+            "任务文件 tasks/<id>.md 的 per-hunk 并集"
+          ],
+          "carrier": "code",
+          "deletionCriterion": "删行后仍能从代码/类型/模块头推出",
+          "provenance": {
+            "carrierRef": "plugin/scripts/conflict-resolution-rules.ts:106-111"
+          }
+        },
+        {
+          "id": "w9-doc-develop-root-cause",
+          "mechanism": "doc→develop 同步失败真因 = author 落后 develop + 脏树挡 semantic fallback。",
+          "applies": [
+            "author 落后 develop + 脏树挡 semantic fallback"
+          ],
+          "notApplies": [
+            "code 面 ff-not-fast-forward（develop 在长 suite 期间前进）"
+          ],
+          "carrier": "code",
+          "deletionCriterion": "删行后仍能从代码/类型/模块头推出",
+          "provenance": {
+            "carrierRef": "plugin/scripts/driver-filters.ts:1301-1311"
+          }
+        },
+        {
+          "id": "h10-underivable",
+          "mechanism": "判据读最新 run 派生字段、派生未算完 ⇒ underivable（NOT-EVALUATED 与红同形），不是假绿。",
+          "applies": [
+            "判据读最新 run 派生字段"
+          ],
+          "notApplies": [
+            "判据读静态文件/配置（无派生窗口）"
+          ],
+          "carrier": "code",
+          "deletionCriterion": "删行后仍能从代码/类型/模块头推出",
+          "provenance": {
+            "carrierRef": "packages/quay/src/core/goal-store-checks.ts:229-232"
+          }
+        },
+        {
+          "id": "h11-sufficiency-active",
+          "mechanism": "goal 充分性判官只遍历 active；achieved 离开集合不重判。",
+          "applies": [
+            "goal 充分性判官"
+          ],
+          "notApplies": [
+            "achieved goal 的终态重判（离开 active 集合）"
+          ],
+          "carrier": "code",
+          "deletionCriterion": "删行后仍能从代码/类型/模块头推出",
+          "provenance": {
+            "carrierRef": "plugin/scripts/goal-driver.ts:2149-2154"
+          }
+        },
+        {
+          "id": "p13-counting-rule",
+          "mechanism": "R 的提交数→速率计数规则只在 delivery_face.command 一个实现（手写第二个会漂移）。",
+          "applies": [
+            "delivery_face.command 的提交数→速率"
+          ],
+          "notApplies": [
+            "其它 git rev-list 计数用途"
+          ],
+          "carrier": "code",
+          "deletionCriterion": "删行后仍能从代码/类型/模块头推出",
+          "provenance": {
+            "carrierRef": "plugin/scripts/freshness-producer-coverage-check.ts:533-620"
+          }
+        },
+        {
+          "id": "p14-probe-failure",
+          "mechanism": "探针失败（读不懂/违约）≠套件红，只落 Fact failed/not-evaluated。",
+          "applies": [
+            "probe-routine 的 Fact 读态"
+          ],
+          "notApplies": [
+            "fan-in suite 红（另一条路径）"
+          ],
+          "carrier": "code",
+          "deletionCriterion": "删行后仍能从代码/类型/模块头推出",
+          "provenance": {
+            "carrierRef": "plugin/scripts/probe-routine.ts:1079-1110"
+          }
+        },
+        {
+          "id": "ff2-1",
+          "mechanism": "delta 影子对照的一致性标签按两侧判为代码的文件数量比较得出：候选少于现行=candidate-narrower，多于=candidate-wider，数量相等=agree（即使两侧集合内容不同）；分类抛错时输出 classifyFailed=true 且不含任何代码路径字段。",
+          "applies": [
+            "两套规则在同一批路径上各自产出代码路径集合",
+            "对照标签是三态集合大小比较（更窄/更宽/一致）"
+          ],
+          "notApplies": [
+            "数量相同不等于两套规则等价，不能据此下「候选规则可安全跳过」的结论",
+            "不能替代逐路径原因字段对单个文件的判定"
+          ],
+          "carrier": "code",
+          "deletionCriterion": "删行后仍能从代码/类型/模块头推出",
+          "provenance": {
+            "carrierRef": "plugin/scripts/select-static-checks-for-touches.ts:566-600"
+          }
+        },
+        {
+          "id": "ff2-2",
+          "mechanism": "fan-in 的 delta 影子记录在影子分类失败/不可解析时的形态：candidate.classifyFailed=true、候选代码路径与可跳过集合为 null、ruleVersion/ruleName 记为 unknown、divergence 记为 not-evaluated，且影子失败不改变本轮 needSuite/reuseSkip。",
+          "applies": [
+            "影子记录与现行判定写在同一轮同一载体上",
+            "影子分类失败或输出不可解析时仍要留下可区分的读数"
+          ],
+          "notApplies": [
+            "影子失败不得改变现行放行/全量测试决定",
+            "不得把影子失败记成「空集合」——那是另一个断言"
+          ],
+          "carrier": "code",
+          "deletionCriterion": "删行后仍能从代码/类型/模块头推出",
+          "provenance": {
+            "carrierRef": "plugin/scripts/worker-fan-in.ts:2673-2712"
+          }
+        },
+        {
+          "id": "ff2-3",
+          "mechanism": "suite 证书闸的四个条件串联：suite_exit 严格等于 0、suite_head 非空、suite_head 是待 ff tip 的祖先（merge-base --is-ancestor 退出 0）、suite_head..tip 的 name-only delta 经分类器判惰性；分类器不可判单独记 not-evaluated 并按未知 delta fail-closed。",
+          "applies": [
+            "证书只覆盖测试时点到待落地提交这一段区间",
+            "区间内存在改动时必须经分类器或等价身份判定"
+          ],
+          "notApplies": [
+            "分类器不可用不等于该区间非惰性，两种读法必须可区分",
+            "非快进模式下的工作区干净检查不在此闸范围内"
+          ],
+          "carrier": "code",
+          "deletionCriterion": "删行后仍能从代码/类型/模块头推出",
+          "provenance": {
+            "carrierRef": "packages/quay/src/fan-in/ff-merge.ts:605-653"
+          }
+        },
+        {
+          "id": "ff2-5",
+          "mechanism": "证书镜像回退的启用条件与三元组校验：只有 capture 文件整个不存在时才读 full-suite-state.json；state 必须严格等于 green、taskId 严格等于本任务、commit 匹配 40 位十六进制，缺一即无证书（文件存在但字段缺失不触发回退）。",
+          "applies": [
+            "结果文件的写入是 fail-open，缺失不能直接当作测试失败",
+            "镜像需要证明它是本任务在本轮测试时点的通过记录"
+          ],
+          "notApplies": [
+            "镜像不得让别的任务的通过记录冒用成本任务的证书",
+            "镜像回退只解决文件缺失，不解决字段缺失或文件损坏"
+          ],
+          "carrier": "code",
+          "deletionCriterion": "删行后仍能从代码/类型/模块头推出",
+          "provenance": {
+            "carrierRef": "packages/quay/src/fan-in/ff-merge.ts:593-618"
+          }
+        },
+        {
+          "id": "ff2-8",
+          "mechanism": "escalation 消费方：按 taskId 取 epoch 最大的事件（epoch 相同则后出现的胜），只有最后事件为 ff-escalation 才算未解决；未解决任务即便无重试记录也强制有效失败次数 ≥3；收窄分档为 k<2 不收窄、k=2 收到 2、k≥3 收到 1，并与红窗上限取 min、永不放大。",
+          "applies": [
+            "两个账本都只追加，当前状态必须由最后事件重新推导",
+            "收窄是节流而非停派，触发消失后下一轮自动恢复原上限"
+          ],
+          "notApplies": [
+            "历史失败记录不属于当前轮，不能单独构成饥饿信号",
+            "收窄不得放大基础并发上限，即使红窗上限高于它"
+          ],
+          "carrier": "code",
+          "deletionCriterion": "删行后仍能从代码/类型/模块头推出",
+          "provenance": {
+            "carrierRef": "plugin/scripts/slot-refill.ts:334-395"
+          }
+        },
+        {
+          "id": "fan2-1",
+          "mechanism": "横切步骤按声明阶段分成「状态改写前」与「状态改写后」两组，改写本身固定夹在两组之间且只执行一次；同组内按注册先后顺序执行。",
+          "applies": [
+            "步骤在注册时声明自己属于改写前还是改写后（阶段是注册数据，不是代码位置）",
+            "同一阶段有多个步骤时，先后由注册先后决定"
+          ],
+          "notApplies": [
+            "需要把某步骤排在改写「之中」或与改写并发的场景（阶段词汇只有改写前、改写后两项）",
+            "阶段表为空时，改写仍在原位置执行一次，没有可观察的顺序差异"
+          ],
+          "carrier": "code",
+          "deletionCriterion": "删行后仍能从代码/类型/模块头推出",
+          "provenance": {
+            "carrierRef": "plugin/scripts/worker-fan-in-hooks.ts:129-158"
+          }
+        },
+        {
+          "id": "fan2-2",
+          "mechanism": "同名横切步骤重复注册 ⇒ 立即抛错拒绝（⛔ 不静默覆盖）；注销只能通过注册时返回的句柄按名字移除，⛔ 不清空整张表。",
+          "applies": [
+            "注册名被当作步骤的稳定身份（拒绝时该名字用于归属失败步骤）",
+            "注册成功时返回可用的注销句柄"
+          ],
+          "notApplies": [
+            "需要替换已注册步骤的场景（当前没有替换语义，必须先注销再注册）",
+            "同一模块被重复加载（会因同名抛错，而不是幂等地重复安装）"
+          ],
+          "carrier": "code",
+          "deletionCriterion": "删行后仍能从代码/类型/模块头推出",
+          "provenance": {
+            "carrierRef": "plugin/scripts/worker-fan-in-hooks.ts:107-116"
+          }
+        },
+        {
+          "id": "fan2-3",
+          "mechanism": "变更命中显式 hub 清单中的任一项（精确路径或 runner-grouping* 通配）⇒ 无条件跑全量套件，⛔ 不做扇出精算。",
+          "applies": [
+            "改动路径里有仓库级入口/编排文件（清单是显式数据，支持一项通配）",
+            "选择输入是任务声明的改动路径"
+          ],
+          "notApplies": [
+            "改动只落在清单之外的纯遥测/统计文件（走桶子集，不算 hub）",
+            "改动只碰测试文件因而触发不了任何桶（由另一条回退规则判全量，不经过 hub 清单）"
+          ],
+          "carrier": "code",
+          "deletionCriterion": "删行后仍能从代码/类型/模块头推出",
+          "provenance": {
+            "carrierRef": "plugin/scripts/suite-bucket-hub-list.ts:118-121"
+          }
+        },
+        {
+          "id": "fan2-4",
+          "mechanism": "变更触发不了任何桶（只碰测试文件或归类不出的路径），或任务声明整段缺失 ⇒ 退回全量套件（fail-closed），⛔ 不是「无测试可跑」。",
+          "applies": [
+            "选择器按任务声明的改动路径逐一归类，一个桶也归不出",
+            "任务文件或声明段缺失时改动路径集合为空"
+          ],
+          "notApplies": [
+            "至少一个源路径归入了某个桶（走桶子集，并始终并入无法归类的测试）",
+            "改动命中 hub 清单（前一步已无条件全量）"
+          ],
+          "carrier": "code",
+          "deletionCriterion": "删行后仍能从代码/类型/模块头推出",
+          "provenance": {
+            "carrierRef": "plugin/scripts/suite-bucket-select.ts:325-334"
+          }
+        },
+        {
+          "id": "fan2-5",
+          "mechanism": "计划集里任一文件没有逐文件终态记录 ⇒ 整轮判「没跑全」（not-evaluated），永不 green；最上级原因记为「中止」而非「失败」，且「没跑全」优先于内存耗尽成因。",
+          "applies": [
+            "执行前拿到了计划文件清单（测试入口自己列文件或选择器输出）",
+            "计划集与逐文件终态集按同一个受测根归一"
+          ],
+          "notApplies": [
+            "计划集不可得（该维度未评估，不会据此判红）",
+            "计划之外多出来的终态记录（只作观测项，不改变判定）"
+          ],
+          "carrier": "code",
+          "deletionCriterion": "删行后仍能从代码/类型/模块头推出",
+          "provenance": {
+            "carrierRef": "plugin/scripts/full-suite-runner.ts:4857-4880"
+          }
+        },
+        {
+          "id": "fan2-6",
+          "mechanism": "没跑全的轮次必须跳过「只重跑被点名的失败文件」与「基线 A/B」两条出口，改为把同一条套件命令降到严格低于原轮的档整条重跑（声明式梯子，地板 16）；已到地板或命令没有并发旋钮 ⇒ 阻塞并给具名下一步，⛔ 不以同一组参数无限重试。",
+          "applies": [
+            "套件命令是分桶 runner 形态，存在并发旋钮",
+            "原轮写出了自己的并发档读数"
+          ],
+          "notApplies": [
+            "原轮日志读不到并发档 ⇒ 使用整条梯子而不是空序列（空序列会被读成无需恢复）",
+            "命令没有已知并发旋钮 ⇒ 记一个独立的「不支持恢复」token，⛔ 不伪造已降档",
+            "恢复轮自己完整跑完但真红 ⇒ 它才可走既存红基线等价出口（原轮的没跑全不适用）"
+          ],
+          "carrier": "code",
+          "deletionCriterion": "删行后仍能从代码/类型/模块头推出",
+          "provenance": {
+            "carrierRef": "plugin/scripts/worker-fan-in.ts:893-910"
+          }
+        },
+        {
+          "id": "fan2-7",
+          "mechanism": "失败签名解析以 (文件, 文本) 为唯一身份归并三种日志形态：spec 形态必须由位置行与紧随的失败名行配对（测试名尾部耗时剥掉、行列号不入身份），同文件若另有测试级签名则丢弃文件级失败标记。",
+          "applies": [
+            "两侧日志都由同一个解析器按各自受测根归一文件身份",
+            "比对判据是逐字的 文件 + 文本"
+          ],
+          "notApplies": [
+            "文件级标记所在的文件没有任何测试级签名（该标记保留，不被吸收）",
+            "任何一条失败行的身份定位不出（整份解析未评估，⛔ 不是部分比对）"
+          ],
+          "carrier": "code",
+          "deletionCriterion": "删行后仍能从代码/类型/模块头推出",
+          "provenance": {
+            "carrierRef": "plugin/scripts/worker-fan-in.ts:1389-1414"
+          }
+        },
+        {
+          "id": "fan2-8",
+          "mechanism": "落地锁由非分离的直接子进程持 flock 并阻塞在读标准输入上；释放只靠持锁进程退出（内核关文件描述符），driver 被 SIGKILL 也走同一路径；排队等待无超时、无 TTL/stale 清理。",
+          "applies": [
+            "持锁子进程是非分离的直接子进程，继承父进程的管道写端",
+            "释放依赖操作系统关闭文件描述符，而非标志文件或外部信号"
+          ],
+          "notApplies": [
+            "需要按长时间持有强行夺锁的场景（该锁没有超时/夺锁语义）",
+            "持锁进程被改为分离/脱离父进程时，孤儿持锁不再自动释放"
+          ],
+          "carrier": "code",
+          "deletionCriterion": "删行后仍能从代码/类型/模块头推出",
+          "provenance": {
+            "carrierRef": "plugin/scripts/worker-fan-in.ts:1992-2053"
+          }
+        },
+        {
+          "id": "drv2-1",
+          "mechanism": "同一任务本轮与历史轮的整仓测试红若日志内容 sha256 完全相同 ⇒ kind=stop-terminal：直接停派并标 needs-human，理由写「重试可证明不会改变结果」；比较对象仅限窗口内 ts 严格更早、且当时 verdict 也是 insufficient-data-fallback 的轮次；ts 解析不出 ⇒ 不把当前轮算成自己的历史。",
+          "applies": [
+            "两次尝试都属于同一任务，且都落在 48 小时观察窗口内",
+            "当前轮与先前轮都经过同一套不可归因判定，结论一致",
+            "当前轮与先前轮的日志都读得出，内容指纹都可计算"
+          ],
+          "notApplies": [
+            "日志读不出或内容指纹算不出时，不能据此判「内容相同」",
+            "先前轮次已经归因到实现缺陷或已被豁免时，不参与这条比较"
+          ],
+          "carrier": "code",
+          "deletionCriterion": "删行后仍能从代码/类型/模块头推出",
+          "provenance": {
+            "carrierRef": "plugin/scripts/worker-driver.ts:4410-4419"
+          }
+        },
+        {
+          "id": "drv2-2",
+          "mechanism": "不可归因整仓测试红的停止判据：带 suite 步的 insufficient-data-fallback 只允许一次重试（第 1 次 ⇒ count-and-retry，第 2 次仍不可归因 ⇒ kind=stop-terminal 并标 needs-human，重试预算照扣）；ac-not-checked-shortcircuit 是读得懂的独立成因，永远走 count-and-retry、绝不进 stop-terminal；其它已归因的 verdict 也走既有重试上限。",
+          "applies": [
+            "失败终态是「跑完但没落地」，且失败经过机器合并的测试步",
+            "归因结论确实不可归因（读不到可判的失败文件或基线）",
+            "该任务在窗口内已有一轮同样不可归因的历史"
+          ],
+          "notApplies": [
+            "原因是验收项未勾选导致机器合并根本没启动时，不按本条停派，仍按重试上限计数重派",
+            "已经归因到本任务改动范围内的实现缺陷时，走既有重试上限，不在本条停派",
+            "第一次不可归因仍允许重试一次（瞬时原因仍可能）"
+          ],
+          "carrier": "code",
+          "deletionCriterion": "删行后仍能从代码/类型/模块头推出",
+          "provenance": {
+            "carrierRef": "plugin/scripts/worker-driver.ts:4372-4451"
+          }
+        },
+        {
+          "id": "drv2-3",
+          "mechanism": "停派判词的证据面必须由本轮判定字段复算：已归因到 ≥1 个失败文件 ⇒ 点名这些文件（最多 5 个，多出的写 +N more）并说「读到了但未能判为既存红」，禁止出现「一个文件也没归因出」；确实一个都没归因出 ⇒ 按失败行数 N 写 0 of N failing lines（N>0），N 缺失则说失败行数不可得；基线 A/B 读数缺失时不写任何 A/B 结论。",
+          "applies": [
+            "判词必须由本轮判定结果里的失败文件清单与失败行数复算",
+            "解析器本轮至少归因到一个失败文件"
+          ],
+          "notApplies": [
+            "一个失败文件都读不出时，只能报 0 of N 或「失败行数不可得」，不能点名文件",
+            "基线对照读数缺失时不写任何基线结论（缺值不等于已评估）"
+          ],
+          "carrier": "code",
+          "deletionCriterion": "删行后仍能从代码/类型/模块头推出",
+          "provenance": {
+            "carrierRef": "plugin/scripts/worker-driver.ts:4317-4328"
+          }
+        },
+        {
+          "id": "drv2-4",
+          "mechanism": "选择器输出解析：逐行取首个「首 token 命中候选 id」的行作为选择（不是只看首行）；一行都没命中 ⇒ 回落打散后的 candidates[0] 并在原因里写 fallback；但选择器子进程 exitCode 为 null（spawn 失败/超时）⇒ 返回 null（本轮不派发），不退化成 candidates[0]。",
+          "applies": [
+            "候选集非空，且选择器子进程正常退出并给出输出",
+            "输出约定为每行「任务编号 + 一句理由」"
+          ],
+          "notApplies": [
+            "子进程启动失败或超时（拿不到退出码）时，本轮不派发，不回落首候选",
+            "候选集为空时直接返回无选择，不进入解析回退"
+          ],
+          "carrier": "code",
+          "deletionCriterion": "删行后仍能从代码/类型/模块头推出",
+          "provenance": {
+            "carrierRef": "plugin/scripts/driver-runtime.ts:2932-2961"
+          }
+        },
+        {
+          "id": "drv2-5",
+          "mechanism": "派发并发上限的仲裁：连续红窗口活动 ⇒ 有效上限 = min(base, red_backlog_cap=2)（不再要求积压超过 50）；落分支饥饿按当前轮失败次数 k 分级缩：k=2 ⇒ min(cap,2)、k≥3 ⇒ min(cap,1)、k<2 不缩；两条件取最小，每轮重算不落盘；缩上限是节流不是停派。",
+          "applies": [
+            "连续红窗口处于活动状态即触发缩上限，不要求积压量超过阈值",
+            "存在落分支连续失败的活任务时按失败次数分级缩上限",
+            "缩上限后的值每轮从当前重试记录重新计算，不持久化"
+          ],
+          "notApplies": [
+            "失败次数小于 2 时不缩上限（单次失败属于正常重试）",
+            "缩上限只是节流：仍按缩小后的上限推荐，不是停派"
+          ],
+          "carrier": "code",
+          "deletionCriterion": "删行后仍能从代码/类型/模块头推出",
+          "provenance": {
+            "carrierRef": "plugin/scripts/slot-refill.ts:235-255"
+          }
+        },
+        {
+          "id": "drv2-6",
+          "mechanism": "并发满时的等待语义：派发环只在 running.length < cap 时 spawn；达 cap 后不新起、也从不主动杀在飞，而是等至少一个在飞 worker 结束后回环补位；无在飞但只是瞬时等待（池空/全被过滤/选择器基建故障/退避）⇒ 睡 intervalMs 重读，不 latch 停机；协调地板保证等待最多一个 reconcile 周期后必然重读一次。",
+          "applies": [
+            "每轮先判在飞数量是否小于并发上限，未满才派发",
+            "等待对象是任意一个在飞结束（不是等全部结束）",
+            "瞬时等待包括池空、候选全被过滤、选择器基建故障与退避中"
+          ],
+          "notApplies": [
+            "停机请求到达时走脱钩或只等不可脱钩条目，不用杀进程",
+            "无在飞且只是瞬时等待时不退出驱动，只按轮询间隔重读"
+          ],
+          "carrier": "code",
+          "deletionCriterion": "删行后仍能从代码/类型/模块头推出",
+          "provenance": {
+            "carrierRef": "plugin/scripts/worker-driver.ts:6836-6866"
+          }
+        },
+        {
+          "id": "drv2-7",
+          "mechanism": "快速死亡的成因分类与处置：两处已捕获文本（选择器拒绝原因 + worker 错误尾部）任一命中环境级签名 ⇒ environment-fatal（优先于限流）；否则按字面子串命中账号限额清单（session limit / rate limit / rate_limit / usage limit / quota exceeded / exceeded your current quota / too many requests）⇒ transient-external：不计入普通连续失败计数、也不复位它，退避到原文自带的 UTC 重置时刻（已过 ⇒ 次日同时刻），解析不出则指数退避；两处文本都读不懂 ⇒ unclassifiable（按普通计但取值可区分）。",
+          "applies": [
+            "判定面无新增探测，只读已捕获的两处文本：选择器拒绝原因与执行会话错误尾部",
+            "环境级签名优先于限流签名，避免把环境故障当限流"
+          ],
+          "notApplies": [
+            "两处文本都读不懂时归为不可分类，按普通快速死亡计，不当作可自愈",
+            "命中限流后也不复位普通连续失败计数（交错限流不得洗白普通失败序列）"
+          ],
+          "carrier": "code",
+          "deletionCriterion": "删行后仍能从代码/类型/模块头推出",
+          "provenance": {
+            "carrierRef": "plugin/scripts/worker-pool.ts:155-218"
+          }
+        },
+        {
+          "id": "drv2-8",
+          "mechanism": "needs-human 的内存 latch 与磁盘 status 每轮对账：对每个已 latch 的 id 重读 status，status 可读且不等于 needs-human ⇒ 从内存集合删除并把 counts 清零（给人干预后的全新预算）；status 为 null（读不懂）⇒ 保留 latch；清除结果写入 round 的 reconciled_needs_human；派发谓词 notNeedsHuman 对 status=null 也 fail-closed 滤掉。",
+          "applies": [
+            "内存里已标待人工处理的每个任务，每轮都重读磁盘状态",
+            "状态可读且已离开待人工处理 ⇒ 清内存标记并清连续失败计数",
+            "清除结果写入轮次记录，可作为观测读数"
+          ],
+          "notApplies": [
+            "状态读不出（null）时保留标记，不当成人已翻回",
+            "派发过滤对状态读不出的候选 fail-closed 滤掉（读不懂不等于合格）"
+          ],
+          "carrier": "code",
+          "deletionCriterion": "删行后仍能从代码/类型/模块头推出",
+          "provenance": {
+            "carrierRef": "plugin/scripts/driver-filters.ts:683-694"
+          }
+        },
+        {
+          "id": "prb2-1",
+          "mechanism": "探针 finding 必须同时带具体文件位置、函数/实体名与判定理由三者；缺任一条 ⇒ 该条被丢弃并计入 malformed，其余条目照常保留（只有整段 stdout 读不出任何 JSON 对象才判整轮 failed）。",
+          "applies": [
+            "探针 stdout 里能取出至少一个带发现数组的 JSON 对象",
+            "逐条判定：一条不合法只影响它自己，其余条目照常进入后续闸"
+          ],
+          "notApplies": [
+            "整段 stdout 取不出任何 JSON 对象 ⇒ 走整轮失败并落原文诊断，不进入逐条判定",
+            "产出者登记、去重、限流等后续闸不在这一步判定"
+          ],
+          "carrier": "code",
+          "deletionCriterion": "删行后仍能从代码/类型/模块头推出",
+          "provenance": {
+            "carrierRef": "/data/home/yale/work/quay/plugin/scripts/probe-routine.ts:290-332"
+          }
+        },
+        {
+          "id": "prb2-2",
+          "mechanism": "两种人可见升级在标题面不得同形：补救在本机不可执行 ⇒ 标题前缀 `[remedy-blocked]`；同一主体被限流闸连续拒下且补救可执行 ⇒ 前缀 `[repeat-rejected]`；两者都落 needs-human（不进派发池），成因相反不得共用一个前缀。",
+          "applies": [
+            "finding 的处置被判为升级（升级形态字段非空）才产任务",
+            "升级形态的任务状态固定为 needs-human 且不进派发候选"
+          ],
+          "notApplies": [
+            "寻常可达派发路径用普通分隔符而非升级前缀",
+            "被任一道闸拒绝的候选不产任务，因而不产生标题"
+          ],
+          "carrier": "code",
+          "deletionCriterion": "删行后仍能从代码/类型/模块头推出",
+          "provenance": {
+            "carrierRef": "/data/home/yale/work/quay/plugin/scripts/probe-routine.ts:1226-1251"
+          }
+        },
+        {
+          "id": "prb2-3",
+          "mechanism": "执行探针的判定三分：退出 0 ⇒ executable；非零且输出包含规格声明的拒绝串 ⇒ blocked；spawn 错误 / 超时 / 任何其他非零 ⇒ not-evaluated；绝不把任意非零退出 widened 成 blocked。",
+          "applies": [
+            "规格声明了执行探针，且本轮真的跑了它（只跑可达性命令，不执行产出者）",
+            "判定只用退出码与声明的拒绝串，输出前几行作为观测原文保留"
+          ],
+          "notApplies": [
+            "规格没有声明执行探针 ⇒ 记为未声明，既不等于可执行也不等于被挡",
+            "探针自报的取值只在机械读数落未评估时才被折叠采用"
+          ],
+          "carrier": "code",
+          "deletionCriterion": "删行后仍能从代码/类型/模块头推出",
+          "provenance": {
+            "carrierRef": "/data/home/yale/work/quay/plugin/scripts/routine-file-gate.ts:1082-1109"
+          }
+        },
+        {
+          "id": "prb2-4",
+          "mechanism": "探针规格声明的主仪器在本机不可用 ⇒ 本轮记 not-evaluated 且零 spawn，理由点名仪器、可用性细节与规格声明的 fallback；这既不是 spawn 报错，也不是「跑过、没发现问题」。",
+          "applies": [
+            "调用方注入了宿主仪器可用性前置，且它返回不可用",
+            "规格 frontmatter 声明了主仪器（instrument）"
+          ],
+          "notApplies": [
+            "可用性前置返回未知（本机没有该仪器的可用性探针）⇒ 不阻断，继续按原路径",
+            "规格没有声明主仪器"
+          ],
+          "carrier": "code",
+          "deletionCriterion": "删行后仍能从代码/类型/模块头推出",
+          "provenance": {
+            "carrierRef": "/data/home/yale/work/quay/plugin/scripts/probe-routine.ts:1032-1044"
+          }
+        },
+        {
+          "id": "prb2-5",
+          "mechanism": "探针 stdout 读不出约定 JSON 对象 ⇒ 本轮 failed，并把原始 stdout 写到 `<stateDir>/routine-probe-failed-<epoch-ms>.out`，该文件相对路径进 Fact 的 rawProbeOutput；诊断落盘失败不致命，理由里不出现路径。",
+          "applies": [
+            "stdout 有内容但解析器取不出任何 JSON 对象",
+            "状态目录可创建/可写"
+          ],
+          "notApplies": [
+            "解析成功 ⇒ 不落原文，正常记入载体",
+            "原文落盘自身失败 ⇒ 只报失败原因，不编造一个路径"
+          ],
+          "carrier": "code",
+          "deletionCriterion": "删行后仍能从代码/类型/模块头推出",
+          "provenance": {
+            "carrierRef": "/data/home/yale/work/quay/plugin/scripts/probe-routine.ts:1097-1111"
+          }
+        },
+        {
+          "id": "prb2-6",
+          "mechanism": "校验脚本三态判词与退出码的单点映射：pass→0、fail→1、not-evaluated→3；用法/环境错误保留 2；发射函数的返回码由共享基座决定，而不是每个脚本自写一套。",
+          "applies": [
+            "脚本使用共享的判词发射出口（人类可读行或单行 JSON）",
+            "需要把「读不懂输入」与「判不合格」输出成可区分结局的检查面"
+          ],
+          "notApplies": [
+            "记录写入类脚本的用法错误走另一条失败闭合（返回 2，不是判词）",
+            "业务进程自己的退出码语义（例如机械合并的反活锁退出 3）不由这张表定义"
+          ],
+          "carrier": "code",
+          "deletionCriterion": "删行后仍能从代码/类型/模块头推出",
+          "provenance": {
+            "carrierRef": "/data/home/yale/work/quay/plugin/scripts/gate-script-base.ts:690-755"
+          }
+        },
+        {
+          "id": "prb2-7",
+          "mechanism": "criterion capability 三态：命中工作区声明的写入命令 / 真实端点 / 被执行产物自带 `@real-infra` 标记 ⇒ side-effecting（code criterion-side-effect）；执行路径在判据 cwd 下不可解析（仅解释器臂）⇒ not-evaluated（code criterion-capability-unevaluable）；全不命中 ⇒ read-only；声明命中优先于不可评估，且声明从工作区根读、路径按判据 cwd 解析。",
+          "applies": [
+            "判据是自由文本 shell 字符串，判定是纯读，不执行任何东西",
+            "工作区可以在自己的状态目录里声明写入命令与真实端点"
+          ],
+          "notApplies": [
+            "直接执行臂缺文件 ⇒ 由 shell 的 126/127 走 not-runnable，本判定不预占该臂",
+            "声明文件缺失或读不懂 ⇒ 声明轴不生效，产物标记轴与不可解析轴照常工作"
+          ],
+          "carrier": "code",
+          "deletionCriterion": "删行后仍能从代码/类型/模块头推出",
+          "provenance": {
+            "carrierRef": "/data/home/yale/work/quay/packages/quay/src/core/criterion-capability.ts:411-463"
+          }
+        },
+        {
+          "id": "prb2-8",
+          "mechanism": "陈旧度扫描的 I3/I4 读数：lastProgressAt = 该目标名下所有验收项 evidence.at 的最大值（绝不读目标自身 updatedAt）；没有任何 evidence.at ⇒ notEvaluated 桶；超过 staleMs ⇒ stale；否则 fresh；active 但 isGoalAchieved ⇒ divergent；空范围用 scopeSize/evaluated 两字段与「全都健康」区分。",
+          "applies": [
+            "扫描对象是活跃目标及其名下验收项的账本证据时间",
+            "纯读：本判定绝不运行任何验收命令"
+          ],
+          "notApplies": [
+            "已达成目标不在活跃集内（divergent 只在目标处于活跃状态时才判）",
+            "进度时间不是目标自身的更新时间字段"
+          ],
+          "carrier": "code",
+          "deletionCriterion": "删行后仍能从代码/类型/模块头推出",
+          "provenance": {
+            "carrierRef": "/data/home/yale/work/quay/packages/quay/src/core/goal-store-checks.ts:85-129"
+          }
+        },
+        {
+          "id": "prb2-9",
+          "mechanism": "验收结果→三值判词的单点映射：ok ⇒ pass；超时先于 code===null 判 timeout；code null ⇒ spawn；126/127 ⇒ not-runnable；code 3 ⇒ declared；其余非零 ⇒ fail；verdictFromGateCheck 有 kind 用 kind、无 kind 才落 ok?pass:fail，not-evaluated 不被折叠成 fail。",
+          "applies": [
+            "闸检查返回成败与可选的第三态判词（验收闸会显式带出第三态）",
+            "只有本来就无第三答案的布尔型检查才使用成败兜底映射"
+          ],
+          "notApplies": [
+            "判据自报退出码 3 ⇒ 记为 declared，不是失败",
+            "退出码 126/127 ⇒ 记为 not-runnable，不是失败"
+          ],
+          "carrier": "code",
+          "deletionCriterion": "删行后仍能从代码/类型/模块头推出",
+          "provenance": {
+            "carrierRef": "/data/home/yale/work/quay/packages/quay/src/core/acceptance-runner.ts:121-149"
+          }
+        },
+        {
+          "id": "d3-1",
+          "mechanism": "孤儿派发记录的回收按进程存活实测三值分流：实测仍存活 ⇒ 拒绝收尾（不写终态、不清工作树、不清记录，留给下一轮接管）；进程表读不到 ⇒ 写一条明说「死亡未被测量」的失败记录释放在飞影子但不碰工作树；实测已退出 ⇒ 收尾清理，且工作树相对主开发线有提交时保留。",
+          "applies": [
+            "记录在本驱动的持久派发载体里、且不在本轮内存的在飞集合中",
+            "存活判定用与 worker 名无关的进程表存在性，而不是配置解析出的名字",
+            "工作树清理沿用异常死亡路径的判据：相对主开发线有提交即保留"
+          ],
+          "notApplies": [
+            "记录缺失（如手工起的 worker）不越权接管",
+            "进程号被复用成一个长命进程时仍按存活处理——宁可留残留也不误杀在飞 worker",
+            "读不到进程表时不得声称已死亡，也不得清理工作树（无法证明没人在写）"
+          ],
+          "carrier": "code",
+          "deletionCriterion": "删行后仍能从代码/类型/模块头推出",
+          "provenance": {
+            "carrierRef": "plugin/scripts/worker-driver.ts:4903-4963"
+          }
+        },
+        {
+          "id": "d3-2",
+          "mechanism": "reconcile 对「进程实测已退出 + 工作树目录仍在 + 任务分支相对开发线有提交」的死孤儿跑与正常退出相同的机械 fan-in，结果按任务质量记账（与正常 worker 同一归宿）；只有零产出（无提交/无工作树）的死孤儿才记 failed:orphaned，且该记录结构性不进重试预算——它是基建事件，不是任务质量信号。",
+          "applies": [
+            "三条判据都是直接量且缺一不可：进程实测已退出、工作树目录存在、任务分支相对开发线有提交",
+            "产出判据与工作树清理保留判据同源（清理会保留它 ⇔ 接管它），不新造第二个产出判定"
+          ],
+          "notApplies": [
+            "进程仍存活或存活未知 ⇒ 不接管，回落原收尾路径",
+            "有提交但工作树目录已不在 ⇒ 不接管（收集成要一个工作树才能跑）",
+            "零提交或提交数读不懂 ⇒ 回落记失败"
+          ],
+          "carrier": "code",
+          "deletionCriterion": "删行后仍能从代码/类型/模块头推出",
+          "provenance": {
+            "carrierRef": "plugin/scripts/worker-driver.ts:4965-4995"
+          }
+        },
+        {
+          "id": "d3-3",
+          "mechanism": "接管存活孤儿的超时监管沿用派发记录里的原始截止时刻与原始派发时刻，⛔ 不按接管时刻重置（防每次重启续命无限占位）；一旦接管方进入退出后收尾流水线，该条目即不可再脱钩，必须由跑它的循环收尾。",
+          "applies": [
+            "派发记录里带着原始派发时刻与超时截止时刻",
+            "接管方用轮询进程存活代替子进程退出事件（非本驱动子进程无退出事件）",
+            "脱钩只允许发生在收尾流水线开始之前"
+          ],
+          "notApplies": [
+            "无超时（截止为 0）的派发不做超时监管",
+            "已脱钩的条目不再按原始截止杀进程（超时监管交给下一个循环）",
+            "收尾流水线已开始的条目不能靠脱钩逃避单次收尾"
+          ],
+          "carrier": "code",
+          "deletionCriterion": "删行后仍能从代码/类型/模块头推出",
+          "provenance": {
+            "carrierRef": "plugin/scripts/worker-driver.ts:5143-5257"
+          }
+        },
+        {
+          "id": "d3-4",
+          "mechanism": "跨任务同错关联：selector_reason 与 worker stderr 尾部的末行经同一签名归一化（折叠进程号/路径/数字/哈希，保留措辞）得同一指纹，且窗口内 ≥2 个【不同任务】以它快速死亡 ⇒ 判 environment-fatal：driver 自己 halt、不翻转任何任务状态、不计入任何任务的快速死亡计数；同一任务重复、超出窗口、或指纹退化（折叠后不剩字母）都不算。",
+          "applies": [
+            "签名取错误文本最后一条非空行，归一化是唯一的签名归一化点",
+            "判据要求同一签名、不同任务、窗口内三者同时成立",
+            "环境级判定优先于按任务计数，且只在未命中已知限流签名时才走跨任务关联"
+          ],
+          "notApplies": [
+            "同一任务重复快速死亡是任务级缺陷，不构成跨任务关联",
+            "超过关联窗口后不再视为同一个环境",
+            "指纹折叠后除占位符外不剩字母（退化）时丢弃，不做关联",
+            "命中已知限流签名时不走跨任务判环境级（各等各的重置时刻）"
+          ],
+          "carrier": "code",
+          "deletionCriterion": "删行后仍能从代码/类型/模块头推出",
+          "provenance": {
+            "carrierRef": "plugin/scripts/worker-pool.ts:379-418"
+          }
+        },
+        {
+          "id": "d3-5",
+          "mechanism": "停机只停【新】派发、绝不杀在飞：派发前逐任务读停机控制态，已停机 ⇒ 为每个候选写一条 final_state=not-dispatched 的终态（原因写明未 spawn、在飞不受影响）再跳过；控制态文件缺失 ⇒ 视为未停机，但文件存在却读失败/解析失败 ⇒ 按已停机处理（fail-closed）。",
+          "applies": [
+            "停机控制态是 mcp halt 与派发环之间的单一真相源",
+            "派发前逐任务读控制态，已停机就写一条 final_state=not-dispatched 的 outcome 并跳过",
+            "在飞 worker 不因停机被信号杀掉"
+          ],
+          "notApplies": [
+            "控制态文件缺失是「从未写过」，不是读失败，按缺省未停机处理",
+            "读失败/解析失败才 fail-closed 按已停机处理",
+            "kind 停机是另一条通道，语义见其自身的失败方向"
+          ],
+          "carrier": "code",
+          "deletionCriterion": "删行后仍能从代码/类型/模块头推出",
+          "provenance": {
+            "carrierRef": "plugin/scripts/worker-driver.ts:4671-4703"
+          }
+        },
+        {
+          "id": "d3-6",
+          "mechanism": "kind 停机记录读不懂时的方向与 halt 控制态相反：读不懂 ⇒ ⛔ 不停（fail-open，只留一次告警），因为误停一个没人要求停的循环比漏一次停机更贵；真正会停的只有进程内登记或盘上明确判为已停机。",
+          "applies": [
+            "盘上停机记录是跨进程/跨发布产物唯一可达的停机通道",
+            "进程内登记或盘上明确判为已停机时才真正停",
+            "读不懂只告警一次，不每轮刷屏"
+          ],
+          "notApplies": [
+            "明确判为已停机或进程内已登记时照常停",
+            "这条 fail-open 只适用于停机请求，不适用于停派控制态（那条反向 fail-closed）",
+            "进程表/记录缺失不等于「判为已停机」"
+          ],
+          "carrier": "code",
+          "deletionCriterion": "删行后仍能从代码/类型/模块头推出",
+          "provenance": {
+            "carrierRef": "plugin/scripts/worker-driver.ts:6171-6182"
+          }
+        },
+        {
+          "id": "d3-7",
+          "mechanism": "选择器默认提示词把管理者维护的派发优先级文件当作 override：候选须服从其优先段，除非结构上不合格（Touches 冲突 / 依赖未满足）；若没有候选匹配该优先级 ⇒ 回落到选择器自身的语义判断，而不是拒绝选择；候选集先打散再交给它。",
+          "applies": [
+            "提示词明确要求先读优先级说明并服从其覆盖段",
+            "结构不合格的判据是文件改动范围冲突或依赖未满足",
+            "候选顺序在交给选择器前已被打散"
+          ],
+          "notApplies": [
+            "候选集为空 ⇒ 直接无选择，不进入提示词与回落",
+            "选择器子进程没跑起来 ⇒ 本轮不派发，这不是优先级回落的场景",
+            "输出解析是另一条约定：逐行找首个首 token 命中候选的行"
+          ],
+          "carrier": "code",
+          "deletionCriterion": "删行后仍能从代码/类型/模块头推出",
+          "provenance": {
+            "carrierRef": "plugin/scripts/driver-runtime.ts:2908-2918"
+          }
+        },
+        {
+          "id": "d3-8",
+          "mechanism": "worker round 记录每轮无条件写一条（池空/判停轮也写）作为心跳；action 四态：终态停机 ⇒ stop、瞬时拒绝 ⇒ wait、本轮实际 spawn>0 且本轮读过池 ⇒ dispatch、其余（满并发空转/无动作）⇒ idle；同一轮里「没跑该步」的读数留 null，「跑过且无」写空集合或 0。",
+          "applies": [
+            "round 记录每轮无条件写，含池空/判停轮，作为存活直接量",
+            "四态判定用本轮实际 spawn 计数与池是否读过",
+            "三态字段专门把「没跑该步」与「跑过且无」分开"
+          ],
+          "notApplies": [
+            "瞬时等待不是终态停机，不得写 stop",
+            "读过池但本轮零 spawn 不得写 dispatch",
+            "空集合不得替代空值表示「没跑该步」",
+            "判停轮的心跳仍要写，不能因无任务结果就停写轮记录"
+          ],
+          "carrier": "code",
+          "deletionCriterion": "删行后仍能从代码/类型/模块头推出",
+          "provenance": {
+            "carrierRef": "plugin/scripts/worker-driver.ts:2178-2337"
+          }
+        },
+        {
+          "id": "g3-1",
+          "mechanism": "I5 复核把已达成验收项的重跑结果分成三个独立桶：achievedButFailing（只有判词 fail 入）、achievedNotEvaluated（带 cause/reason）、capabilityRefused（带稳定 code）；pass 不入任何桶，未评估绝不折进失败桶。",
+          "applies": [
+            "判据确实启动了但被截止时间终止",
+            "判据在进程启动之前被能力闸拦下"
+          ],
+          "notApplies": [
+            "未评估的结果不能当作「判据为假」——下游会据此生成幽灵缺口",
+            "能力拒绝表达的是「我们不会跑它」，不是「跑了且为假」"
+          ],
+          "carrier": "code",
+          "deletionCriterion": "删行后仍能从代码/类型/模块头推出",
+          "provenance": {
+            "carrierRef": "packages/quay/src/core/goal-store-checks.ts:186-239"
+          }
+        },
+        {
+          "id": "g3-2",
+          "mechanism": "I5 重跑范围 = 已达成验收项 ∧ 判据非空 ∧（所属 GOAL 仍 active ∨ 显式 long-term:true）；空判据单独列入 no-criterion 而不是失败；分支模式目标的判据 cwd 取该目标的条件 worktree，分支已不存在时回落主检出。",
+          "applies": [
+            "验收项状态为已达成且其判据非空",
+            "目标已达成关闭，但验收项显式声明为长期保证"
+          ],
+          "notApplies": [
+            "长期声明不是判据本身，不改变判据返回什么",
+            "分支已不存在时不能仍用条件工作树，必须回落主检出"
+          ],
+          "carrier": "code",
+          "deletionCriterion": "删行后仍能从代码/类型/模块头推出",
+          "provenance": {
+            "carrierRef": "packages/quay/src/core/goal-store-checks.ts:162-224"
+          }
+        },
+        {
+          "id": "g3-3",
+          "mechanism": "跑判据期间在进程环境里设置守卫变量，子 shell 继承它；嵌套调用看到它即拒绝再跑任何判据并返回 evaluated:false（scopeSize 仍如实），不是空数组冒充「没有失败」。",
+          "applies": [
+            "外层正在通过子进程执行判据",
+            "子进程环境继承了外层设置的守卫标记"
+          ],
+          "notApplies": [
+            "拒绝态不能写成空数组——它与「跑过且全过」同形",
+            "无人值守路径不提供人为绕过开关"
+          ],
+          "carrier": "code",
+          "deletionCriterion": "删行后仍能从代码/类型/模块头推出",
+          "provenance": {
+            "carrierRef": "packages/quay/src/core/goal-store-checks.ts:180-238"
+          }
+        },
+        {
+          "id": "g3-4",
+          "mechanism": "能力判定的「声明」从拥有该目标的工作区根读取，而「被执行产物」按判据实际运行的 cwd 解析；已声明能力优先于不可读产物；只有解释器臂的缺失产物升级为不可判定，直接执行臂缺失交给 shell 的 126/127（已映射为不可运行）。",
+          "applies": [
+            "判据在分支模式目标的工作树中运行",
+            "工作区根与判据实际运行目录可能不是同一棵树"
+          ],
+          "notApplies": [
+            "声明缺失不等于声明一切安全",
+            "直接执行脚本缺失时不预先改判，交给 shell 既有的不可运行映射"
+          ],
+          "carrier": "code",
+          "deletionCriterion": "删行后仍能从代码/类型/模块头推出",
+          "provenance": {
+            "carrierRef": "packages/quay/src/core/criterion-capability.ts:440-497"
+          }
+        },
+        {
+          "id": "g3-5",
+          "mechanism": "人类合并请求只追加一条 goal-merge-request 事件而从不执行合并；六条拒绝按序判定且拒绝零写；--override 记录被放行的具体未达成验收项清单；附带的充分性读数仅展示（载体读不到或判决未知 ⇒ not-evaluated，绝不折算 covered）。",
+          "applies": [
+            "目标为活跃的分支模式且其分支存在",
+            "存在未达成的合并前验收项，并给出放行理由"
+          ],
+          "notApplies": [
+            "充分性不是合并步骤的阻塞条件（它仍约束目标达成）",
+            "任何拒绝路径都不得写入事件"
+          ],
+          "carrier": "code",
+          "deletionCriterion": "删行后仍能从代码/类型/模块头推出",
+          "provenance": {
+            "carrierRef": "packages/quay/src/goal-merge.ts:176-284"
+          }
+        },
+        {
+          "id": "g3-6",
+          "mechanism": "goal-store 写入接受显式意图 absent/existing：与磁盘现状不符时抛出专属冲突错误（不是带可解析消息的普通 Error），在文件锁内、任何变更之前中止；省略意图则保持补丁语义。",
+          "applies": [
+            "写入方在写前声明创建或更新意图"
+          ],
+          "notApplies": [
+            "省略意图时仍走补丁语义，不强制做存在性比对",
+            "冲突不能在变更之后才发现（那样已经写脏了）"
+          ],
+          "carrier": "code",
+          "deletionCriterion": "删行后仍能从代码/类型/模块头推出",
+          "provenance": {
+            "carrierRef": "packages/quay/src/core/goal-store.ts:720-737"
+          }
+        },
+        {
+          "id": "g3-7",
+          "mechanism": "任何进入 active 的写入都过判据激活闸：先做能力判定（--force 也越不过），再要求判据可评估——超时或 spawn 失败拒绝、非零退出算可评估；判定器未配置时放行但记录 not-evaluated；--force 跳过两闸并把 fidelity 记为 forced；GOAL 在 draft/active 名下零 AC 的拒绝不接受 --force。",
+          "applies": [
+            "记录从任意非活跃状态进入活跃",
+            "目标以草稿或活跃状态被写出"
+          ],
+          "notApplies": [
+            "活跃到活跃不算一次激活",
+            "超时不算可评估：要么提高声明的截止时间，要么显式强制"
+          ],
+          "carrier": "code",
+          "deletionCriterion": "删行后仍能从代码/类型/模块头推出",
+          "provenance": {
+            "carrierRef": "packages/quay/src/core/goal-store.ts:985-1140"
+          }
+        },
+        {
+          "id": "g3-8",
+          "mechanism": "帮助派发对未识别的命令名回落为一行 usage stub（stdout、正常返回 ⇒ 退出 0），既不报错误也不打印完整帮助；同名的裸调用才走 stderr 通用用法并退出 1。",
+          "applies": [
+            "命令名无法识别，但调用带有帮助开关"
+          ],
+          "notApplies": [
+            "该单行提示不是完整帮助文档",
+            "不带帮助开关的未知命令仍按用法错误处理"
+          ],
+          "carrier": "code",
+          "deletionCriterion": "删行后仍能从代码/类型/模块头推出",
+          "provenance": {
+            "carrierRef": "packages/quay/src/cli/help.ts:958-960"
+          }
+        },
+        {
+          "id": "h3-1",
+          "mechanism": "状态改写之后的观测钩子按「不阻塞落地」设计：无论脚本缺失、子进程启动失败还是非零退出，钩子都返回成功，并把读数与原因写进轨迹（与改写前可拒绝落地的钩子相对）。",
+          "applies": [
+            "该步骤位于状态改写之后，属于观测面而非判据面",
+            "脚本缺失、启动失败、非零退出都只影响读数，不影响本轮的落地判定"
+          ],
+          "notApplies": [
+            "步骤位于状态改写之前且其结论是落地的前置条件（此时失败必须拒绝改写）",
+            "需要读数的下游消费者把「未评估」当成通过（该场景应显式传播未评估态）"
+          ],
+          "carrier": "code",
+          "deletionCriterion": "删行后仍能从代码/类型/模块头推出",
+          "provenance": {
+            "carrierRef": "plugin/scripts/worker-fan-in-hooks.ts:342-362"
+          }
+        },
+        {
+          "id": "h3-2",
+          "mechanism": "状态改写前的判词必须先落进共享判定台账才允许改写：写不进台账即拒绝（无痕迹的判断等于没有判断）；输入读不到记为「未评估」，在台账里与「没有记录」保持两个不同取值。",
+          "applies": [
+            "判词的消费者是共享台账，且「有判断无记录」与「没有判断」必须可分辨",
+            "判定输入是不可读的文件（权限、缺失、IO 错误）"
+          ],
+          "notApplies": [
+            "判定发生在状态改写之后（此时写失败只影响观测，不得阻塞）",
+            "台账写入成功但结论为拒绝：这属于普通拒绝，不是写入失败分支"
+          ],
+          "carrier": "code",
+          "deletionCriterion": "删行后仍能从代码/类型/模块头推出",
+          "provenance": {
+            "carrierRef": "plugin/scripts/worker-fan-in-hooks.ts:200-285"
+          }
+        },
+        {
+          "id": "h3-3",
+          "mechanism": "套件作用域声明 OOM 后继续（OOMPolicy=continue）：单个成员被内存耗尽杀死不会 TERM 整个作用域（系统默认策略会），且这条属性与内存记账来自可用性探针和真实启动共用的唯一属性表——探针跑不成一律判不可用。",
+          "applies": [
+            "作用域内并发跑多个测试成员，其中一个可能被内存耗尽单独杀死",
+            "宿主 systemd 可能拒绝某条属性（例如在作用域上不接受该 OOM 策略），因此需要先探测"
+          ],
+          "notApplies": [
+            "宿主没有可用的用户级作用域包络：此时整轮走无包络路径并把读数记为未评估",
+            "期望的语义是整组随任一成员失败而终止（与当前声明的策略相反）"
+          ],
+          "carrier": "code",
+          "deletionCriterion": "删行后仍能从代码/类型/模块头推出",
+          "provenance": {
+            "carrierRef": "packages/quay/src/systemd-scope.ts:119-198"
+          }
+        },
+        {
+          "id": "h3-4",
+          "mechanism": "作用域内存上限取「宿主相对护栏 floor(有效总内存×0.5)」与「页对齐的 ceil(成员数×单文件内存高水位×1.25)」两者的较小者；单文件高水位缺失时只用宿主护栏，并记录是哪一边生效及具名原因。",
+          "applies": [
+            "上限从宿主总内存与运行期测量的单文件峰值推导，不使用绝对字面量",
+            "成员数来自本轮计划的并发 lane 数"
+          ],
+          "notApplies": [
+            "调用方已显式给出自己的宿主相对护栏（此时直接使用该值作为一边，不再重算）",
+            "调用方显式要求不限制内存（此时不应合成任何等价无限的数值）"
+          ],
+          "carrier": "code",
+          "deletionCriterion": "删行后仍能从代码/类型/模块头推出",
+          "provenance": {
+            "carrierRef": "packages/quay/src/systemd-scope.ts:316-370"
+          }
+        },
+        {
+          "id": "h3-5",
+          "mechanism": "静态归属结果为空（无法静态定位被测对象）的测试文件在每次桶运行中始终入选，绝不因为归不出桶而跳过。",
+          "applies": [
+            "改动至少触发了一个桶，本轮走桶子集而不是全量",
+            "测试文件的静态引用闭包为空，且镜像折叠后仍为空"
+          ],
+          "notApplies": [
+            "改动命中 hub 清单或触发不了任何桶（前一步已无条件全量）",
+            "测试文件有至少一个可静态归属的桶，此时按桶交集判定"
+          ],
+          "carrier": "code",
+          "deletionCriterion": "删行后仍能从代码/类型/模块头推出",
+          "provenance": {
+            "carrierRef": "plugin/scripts/suite-bucket-select.ts:336-350"
+          }
+        },
+        {
+          "id": "h3-6",
+          "mechanism": "任务声明的改动清单里列出的测试文件无条件并入本轮选中集（仅限套件宇宙内真实存在的文件）；非测试条目（源码、脚本、任务文件自身）不并入。",
+          "applies": [
+            "任务声明了它会改动的具体文件，且本轮走桶子集路径",
+            "声明的测试文件仍属于套件实际枚举的浅层文件集合"
+          ],
+          "notApplies": [
+            "本轮已因 hub 或零触发退回全量（无需再并集）",
+            "声明的测试路径不在套件枚举范围内（不得产生幻影路径）"
+          ],
+          "carrier": "code",
+          "deletionCriterion": "删行后仍能从代码/类型/模块头推出",
+          "provenance": {
+            "carrierRef": "plugin/scripts/suite-bucket-select.ts:352-361"
+          }
+        },
+        {
+          "id": "h3-7",
+          "mechanism": "执行前落盘的计划清单由套件自己的生产者提供；清单的每一行必须是单个无空白、且在受测根下真实存在的文件路径，任何一行不像路径或不存在 ⇒ 整份计划判「不可得」（不是空计划），完整性维度记未评估。",
+          "applies": [
+            "计划集由外部命令探针返回，探针可能不遵守输出约定",
+            "计划集与终态集按同一套受测根相对路径口径比较"
+          ],
+          "notApplies": [
+            "调用方显式提供计划清单（不经过探针解析）",
+            "探针返回空输出：这是空计划与不可得的区分点，需按该命令的成功语义处理"
+          ],
+          "carrier": "code",
+          "deletionCriterion": "删行后仍能从代码/类型/模块头推出",
+          "provenance": {
+            "carrierRef": "plugin/scripts/full-suite-runner.ts:2650-2675"
+          }
+        },
+        {
+          "id": "h3-8",
+          "mechanism": "纯遥测模块（套件记账、开销计时）被刻意排除在 hub 清单之外：改动它们只走桶路径；清单成员是决定跑哪些测试的脚手架、红色解析、并发、静态闸、树状态与状态写等 harness 关键文件。",
+          "applies": [
+            "被改动的模块只采集读数、不参与失败判定或测试选择",
+            "改动没有命中任何显式 hub 条目"
+          ],
+          "notApplies": [
+            "被改的是决定测试选择、失败解析、并发控制、静态闸、树状态或状态写的脚手架（这些属于 hub ⇒ 无条件全量）",
+            "变更同时命中了 hub 清单中的其它文件"
+          ],
+          "carrier": "code",
+          "deletionCriterion": "删行后仍能从代码/类型/模块头推出",
+          "provenance": {
+            "carrierRef": "plugin/scripts/suite-bucket-hub-list.ts:57-71"
+          }
+        },
+        {
+          "id": "s3-2",
+          "mechanism": "覆盖串三态：缺键/undefined ⇒ 宿主推导默认值；整串空白或 `MemoryMax=` ⇒ 显式不限制（不传该属性）；有值 ⇒ 用该值——空串不是「未提供」。",
+          "applies": [
+            "覆盖语法允许「一组属性都不设」这一独立语义",
+            "「不限制」必须通过省略该属性表达，而不是写一个等价无限制的字面值"
+          ],
+          "notApplies": [
+            "变量完全未设置（此时才使用宿主推导的默认值）",
+            "覆盖值是非空的大小字符串（此时直接采用该值）"
+          ],
+          "carrier": "code",
+          "deletionCriterion": "删行后仍能从代码/类型/模块头推出",
+          "provenance": {
+            "carrierRef": "/data/home/yale/work/quay/packages/quay/src/systemd-scope.ts:372-390"
+          }
+        },
+        {
+          "id": "s3-3",
+          "mechanism": "suite 内存遥测：当 memory.events 一次都没读到时 oom/oom_kill 落 \"unknown\" 并附具名原因，另设独立的 telemetry 维度记 ok/unknown；绝不把读不到写成 0（0 = 读到且无 OOM）。",
+          "applies": [
+            "计数来源可能整体不可读（控制组消失、无权限、没有作用域）",
+            "0 本身是合法且有意义的读数"
+          ],
+          "notApplies": [
+            "至少有一次采样成功读到（此时取各采样中的最大值）",
+            "字段级不可读但整块可读时（走逐字段的具名不可用表）"
+          ],
+          "carrier": "code",
+          "deletionCriterion": "删行后仍能从代码/类型/模块头推出",
+          "provenance": {
+            "carrierRef": "/data/home/yale/work/quay/plugin/scripts/full-suite-runner.ts:2218-2235"
+          }
+        },
+        {
+          "id": "s3-4",
+          "mechanism": "memory.stat 快照逐键取 MAX（一侧缺键直接取另一侧，缺键≠0）；memory.pressure 的 some/full 两行各自独立解析，缺行留 null，不因一行缺失判整块不可读。",
+          "applies": [
+            "快照的键集合可能因内核版本或读取失败而不完整",
+            "合并语义是「窗口内每个分项的最大值」"
+          ],
+          "notApplies": [
+            "两侧都没有该键（仍是缺失，不是 0）",
+            "压力读数整块读不出时（此时整块为 null 并登记原因）"
+          ],
+          "carrier": "code",
+          "deletionCriterion": "删行后仍能从代码/类型/模块头推出",
+          "provenance": {
+            "carrierRef": "/data/home/yale/work/quay/plugin/scripts/full-suite-runner.ts:1942-1963"
+          }
+        },
+        {
+          "id": "s3-5",
+          "mechanism": "帮助契约：argv 任意位置出现 --help/-h 即先于 minArgs 校验打印用法到 stdout 并 exit 0，且不执行业务动作/不写台账；另有「只置 help 标志、不结束进程」的返回模式（仍在缺参校验之前）。",
+          "applies": [
+            "帮助标志可以出现在参数任意位置且不附带业务参数",
+            "调用方可能要求解析器不结束进程、自己打印更长的用法"
+          ],
+          "notApplies": [
+            "参数拼写错误或环境不满足（走用法/环境错误路径）",
+            "正常带位置参数的调用"
+          ],
+          "carrier": "code",
+          "deletionCriterion": "删行后仍能从代码/类型/模块头推出",
+          "provenance": {
+            "carrierRef": "/data/home/yale/work/quay/plugin/scripts/gate-script-base.ts:175-201"
+          }
+        },
+        {
+          "id": "s3-6",
+          "mechanism": "worktree 分叉点检查三值：PASS（能证明正确）/ REFUSED（exit 2，有正向证据表明创建自严格落后于基线的线）/ NOT-EVALUATED（不阻塞）；「HEAD 是否包含基线顶端」只作 PASS 的充分条件，绝不能当拒绝条件（否则复用已前进的合法 worktree 会被全判死）。",
+          "applies": [
+            "同一工作副本会被重复供应（续做场景），分支可能已有自己的提交",
+            "基线分支会随时间前进"
+          ],
+          "notApplies": [
+            "能明确读出创建自哪条严格落后于基线的分支（此时拒绝）",
+            "基线引用在工作副本里根本不存在（此时未评估）"
+          ],
+          "carrier": "code",
+          "deletionCriterion": "删行后仍能从代码/类型/模块头推出",
+          "provenance": {
+            "carrierRef": "/data/home/yale/work/quay/plugin/scripts/dispatch-worktree-setup.sh:130-226"
+          }
+        },
+        {
+          "id": "s3-7",
+          "mechanism": "Touches 尾注剥离只对全角括号做从右向左的配对扫描（深度计数）；半角圆括号在尾注内部一律当字面文本，不参与配对，因此嵌套的半角尾注剥不掉。",
+          "applies": [
+            "尾注用全角括号包裹且内部可能再嵌套一对括号",
+            "条目以明确的路径 token 开头、尾注紧跟其后"
+          ],
+          "notApplies": [
+            "没有尾注的纯路径条目",
+            "全角括号不配对时保持原样、不截断"
+          ],
+          "carrier": "code",
+          "deletionCriterion": "删行后仍能从代码/类型/模块头推出",
+          "provenance": {
+            "carrierRef": "/data/home/yale/work/quay/packages/quay/src/kernel/touches-annotation.ts:23-51"
+          }
+        },
+        {
+          "id": "s3-8",
+          "mechanism": "status 所在的 frontmatter 由外层/ABI 独占写入；内层代理只能追加正文小节（appendBodySection），文件没有 frontmatter 时失败关闭（返回 ok:false），绝不为补元数据而整文件重写。",
+          "applies": [
+            "同一任务文件会被外层状态翻转与内层正文追加并发修改",
+            "追加操作必须让元数据块逐字节不变"
+          ],
+          "notApplies": [
+            "外层执行状态推进的显式生命周期动作（那是状态字段的合法写者）",
+            "新建任务时由立案接口一次性写入完整文件"
+          ],
+          "carrier": "code",
+          "deletionCriterion": "删行后仍能从代码/类型/模块头推出",
+          "provenance": {
+            "carrierRef": "/data/home/yale/work/quay/plugin/scripts/task-schema.ts:174-191"
+          }
+        },
+        {
+          "id": "x3-1",
+          "mechanism": "Touches 的 glob 通配符前需 ≥2 段具体路径；只含一段的 `src/*` 判 overbroad；精确路径任意深度都算 precise。",
+          "applies": [
+            "Touches 过宽判定"
+          ],
+          "notApplies": [
+            "精确文件路径"
+          ],
+          "carrier": "code",
+          "deletionCriterion": "删行后仍能从代码/类型/模块头推出",
+          "provenance": {
+            "carrierRef": "plugin/scripts/touches-orthogonality-check.ts:61-79"
+          }
+        },
+        {
+          "id": "x3-2",
+          "mechanism": "suite 宿主护栏按 provenance 决定：显式声明可绕过 shared-host split，shipped 默认不可绕过。",
+          "applies": [
+            "suite 并发护栏"
+          ],
+          "notApplies": [
+            "单机独占声明"
+          ],
+          "carrier": "code",
+          "deletionCriterion": "删行后仍能从代码/类型/模块头推出",
+          "provenance": {
+            "carrierRef": "plugin/scripts/full-suite-runner.ts:1406-1459"
+          }
+        },
+        {
+          "id": "x3-3",
+          "mechanism": "套件在临时副本里跑 install/lockfile 改写，主检出不被弄脏。",
+          "applies": [
+            "suite 安装/锁文件改写"
+          ],
+          "notApplies": [
+            "用户在主检出手动安装"
+          ],
+          "carrier": "code",
+          "deletionCriterion": "删行后仍能从代码/类型/模块头推出",
+          "provenance": {
+            "carrierRef": "plugin/scripts/full-suite-runner.ts:3072"
+          }
+        },
+        {
+          "id": "x3-4",
+          "mechanism": "worktree 依赖 provisioning 的 usage 错误或 install 失败/空 ⇒ exit 2（fail-closed），不回落 symlink。",
+          "applies": [
+            "worktree 依赖 provisioning"
+          ],
+          "notApplies": [
+            "已存在完整 node_modules"
+          ],
+          "carrier": "code",
+          "deletionCriterion": "删行后仍能从代码/类型/模块头推出",
+          "provenance": {
+            "carrierRef": "plugin/scripts/worktree-deps-provision.ts:22,92"
+          }
+        },
+        {
+          "id": "sa4a-1",
+          "mechanism": "例程触发文法与调度器退出码：触发只有 every(N)（N≥1 整数，轮次为正且整除 N）、interval:<N>m（N≥1 整数分钟，从未跑过即到期）、on(<event>)（事件名 [\\w-]+）三形；非法触发整条抛错；当前时刻不可解析 ⇒ 永不判到期；调度器只回答是否到期、从不派发；CLI 有到期 0 / 无到期 3 / 用法或解析错 2。",
+          "applies": [
+            "调度器只回答是否到期，从不派发或执行任何动作",
+            "触发表达式来自工作区配置，可能写错"
+          ],
+          "notApplies": [
+            "轮次计数型触发是遗留兼容形，不能被当作双层模式的主节奏",
+            "例程既没有探针也没有派发动作时按单条例程跳过，不是整轮失败"
+          ],
+          "carrier": "code",
+          "deletionCriterion": "删行后仍能从代码/类型/模块头推出",
+          "provenance": {
+            "carrierRef": "plugin/scripts/routine-scheduler.ts:36-110"
+          }
+        },
+        {
+          "id": "sa4a-2",
+          "mechanism": "引擎模块解析顺序固定为「脚本自身所在仓库根优先、被观测工作区根其次」；两个候选都不存在 ⇒ 加载器不抛，返回 null 并把两条尝试路径写进调用方的具名未解析清单；导入只经已解析绝对路径做运行时 import，并按该绝对路径在调用方传入的 Map 里 memoize；同一份清单最后汇总成一次拒绝。",
+          "applies": [
+            "引擎模块不在发布件内，必须在运行时从磁盘解析",
+            "同一轮里多个步骤可能请求同一个模块"
+          ],
+          "notApplies": [
+            "路径已解析且由调用方决定存在性时，加载器不重复检查",
+            "导入本身失败时由调用方决定拒绝措辞，加载器只记录原因"
+          ],
+          "carrier": "code",
+          "deletionCriterion": "删行后仍能从代码/类型/模块头推出",
+          "provenance": {
+            "carrierRef": "plugin/scripts/routine-engine-module-loader.ts:41-116"
+          }
+        },
+        {
+          "id": "sa4a-3",
+          "mechanism": "任务体来源归类档序固定：显式出处标签（主体须在标签名起 90 字符窗口内、取最左主体）先于具名主体+揭露动词，再先于无主语测量自述兜底；other 不入规则表，占比分母剔除它，分母为 0 时占比为 NaN 而非 0。",
+          "applies": [
+            "分类是纯文本函数，不读盘、不跑 git",
+            "同一批任务用同一输入可逐条重放"
+          ],
+          "notApplies": [
+            "归不出不等于某一个来源类，不能并入任何一类",
+            "具名证据存在时兜底档不得推翻它"
+          ],
+          "carrier": "code",
+          "deletionCriterion": "删行后仍能从代码/类型/模块头推出",
+          "provenance": {
+            "carrierRef": "plugin/scripts/discovery-path-classify.ts:302-420"
+          }
+        },
+        {
+          "id": "sa4a-4",
+          "mechanism": "倾向文件契约三段固定为 默认段/覆盖段/维护者字段——标题必须整行恰为 `## <段名>`（区分大小写、行尾空白裁掉后精确相等），内容取到下一个二级标题为止；空白以外的字符数 < 10 即判该段「内容过薄」而非「标题缺失」；文件缺失 ⇒ 三段全缺并以 exit 1 结束，未知参数 ⇒ exit 2。",
+          "applies": [
+            "倾向文件是人手编辑的，标题可能漂移",
+            "检查器同时被独立 CLI 和常驻驱动调用"
+          ],
+          "notApplies": [
+            "未知参数属于用法错误，不与内容红共用退出码",
+            "小节内容取到下一个二级标题，不按文件尾或关键词切"
+          ],
+          "carrier": "code",
+          "deletionCriterion": "删行后仍能从代码/类型/模块头推出",
+          "provenance": {
+            "carrierRef": "plugin/scripts/dispatch-preference-check.ts:43-118"
+          }
+        },
+        {
+          "id": "sa4a-5",
+          "mechanism": "记录写盘后走共享提交壳：工作树内容与 HEAD 逐字节相同 ⇒ 用 `git checkout HEAD -- <path>` 把索引与工作树还原、返回 unchanged 且零提交；新文件（HEAD 无此路径）永不判 unchanged；目录不在 git 工作树 ⇒ not-in-git 的静默 no-op；磁盘已写但提交失败 ⇒ 只向 stderr 报错、不抛。",
+          "applies": [
+            "同一记录会被常驻循环反复重写",
+            "写盘与提交必须作为一个可观察结果"
+          ],
+          "notApplies": [
+            "新建文件在版本库里没有旧版本，不能判 unchanged",
+            "提交失败不回滚已经成功的磁盘写，也不伪造提交成功"
+          ],
+          "carrier": "code",
+          "deletionCriterion": "删行后仍能从代码/类型/模块头推出",
+          "provenance": {
+            "carrierRef": "packages/quay/src/core/store-commit.ts:151-205"
+          }
+        },
+        {
+          "id": "sa4a-6",
+          "mechanism": "寄给驱动的消息逐条判定对齐：hasOpinion:true ⇒ 有意见（note 空则回退固定标记）、false ⇒ 无意见（也必须答复并翻 answered）；未提到该 id、id 为空、或有意见字段非布尔 ⇒ 未评估（不答复、留 proposed 下一轮）；探测多答的不存在 id 丢弃；同一 id 多条取第一条。",
+          "applies": [
+            "判定条数必须与真实输入消息集逐条对齐",
+            "未评估表示「没读到」，不是「看过且无话」"
+          ],
+          "notApplies": [
+            "多答的编号不在真实输入里，不能跟着扩出一个不存在的对象",
+            "未评估不写回，下一轮继续呈现给探针"
+          ],
+          "carrier": "code",
+          "deletionCriterion": "删行后仍能从代码/类型/模块头推出",
+          "provenance": {
+            "carrierRef": "plugin/scripts/meta-driver.ts:1922-1990"
+          }
+        },
+        {
+          "id": "sa4a-7",
+          "mechanism": "自动立案的派生 id 是机制关键词的确定性 slug、不带唯一化；撞上状态为 done/superseded 的既有任务 ⇒ 找第一个空位后缀（-2、-3…）改名重立，并在任务正文证据里记下旧 id；撞上未完成或状态读不出 ⇒ 拒，绝不覆盖。",
+          "applies": [
+            "派生编号是确定性的，重复运行会撞上既有任务",
+            "任务状态读不出时按占用处理（fail-closed）"
+          ],
+          "notApplies": [
+            "重立的正文必须带上旧编号作为证据，而不是静默换名",
+            "覆盖一条在办任务会静默吞掉它，因此冲突未完成必须拒绝"
+          ],
+          "carrier": "code",
+          "deletionCriterion": "删行后仍能从代码/类型/模块头推出",
+          "provenance": {
+            "carrierRef": "plugin/scripts/meta-driver.ts:2093-2124"
+          }
+        },
+        {
+          "id": "sa4a-8",
+          "mechanism": "24 小时模型调用预算用只追加台账：每次授予先落 reserve 行再允许 spawn，outcome 行不删也不抵消预订 ⇒ 窗口计数只数 reserve；窗口内任一行 ts 解析不出 ⇒ 抛错而不是丢弃（丢一行会把上限变成无上限）；取不到锁时用独立错误码，不折成预算耗尽；旧格式轮次的 model_calls 另计入，避免切换时窗口归零。",
+          "applies": [
+            "台账只追加，预订一旦写下就永远算已花",
+            "多个进程可能同时读同一窗口"
+          ],
+          "notApplies": [
+            "完成/失败/超时的结果行不改变已花数量",
+            "取不到锁是「读不出预算」，不是「预算不够」"
+          ],
+          "carrier": "code",
+          "deletionCriterion": "删行后仍能从代码/类型/模块头推出",
+          "provenance": {
+            "carrierRef": "plugin/scripts/discovery-method-routine.ts:779-835"
+          }
+        },
+        {
+          "id": "sa4b-1",
+          "mechanism": "Provider 客户端对 ADR/Goal/Meta 三类可选记录列表的读取是三态：真正的调用失败（isError）抛错；空结果与「该 Provider 不支持这一类」都返回空数组；「不支持」只由 SDK 的逐字文本 `MCP error -32602: Tool <name> not found` 且工具名完全匹配识别，签名漂移时失败方向是抛错（fail-loud），绝不静默空数组。",
+          "applies": [
+            "列表读取的是可选记录类（ADR/Goal/Meta），Provider 可以不实现该工具",
+            "「不支持」由 SDK 的逐字错误文本识别，且工具名必须完全匹配",
+            "空结果与不支持在返回值上同为 []，但在语义上都不等于失败"
+          ],
+          "notApplies": [
+            "任务列表读取不适用：真失败抛错，但单个任务文件解析失败是部分成功（见 sa4b-2）",
+            "单条 get 读取失败返回 null 而不是抛错，没有「不支持即空」的回退",
+            "write/check/gate 类动词失败一律抛错，不存在「不支持即空」的分支"
+          ],
+          "carrier": "code",
+          "deletionCriterion": "删行后仍能从代码/类型/模块头推出",
+          "provenance": {
+            "carrierRef": "packages/quay/src/provider-client.ts:205-223"
+          }
+        },
+        {
+          "id": "sa4b-2",
+          "mechanism": "任务列表读取的部分成功语义：单个任务文件的 frontmatter 解析失败不升级为调用失败，而是 isError=false 加一个 malformed 数组（坏文件名 + 解析器原始错误）；isError 只保留给真失败（后端不可达 / 存储不可用）。分页与扫描元数据逐字段只在 Provider 给出时才透传，字段缺失表示「Provider 没说」，绝不等于「分页查到 0 条」。",
+          "applies": [
+            "任务列表读取的返回可以携带部分成功与坏行清单",
+            "分页/扫描字段是可选契约，Provider 可以不实现",
+            "透传是逐字段按存在性进行的，不是整体布尔开关"
+          ],
+          "notApplies": [
+            "真失败（后端不可达、存储自身不可用）仍然抛错，不得折成空列表",
+            "其他记录类型的列表读取没有坏行清单契约",
+            "分页字段缺失不得被折算成分页结果、页码或总数"
+          ],
+          "carrier": "code",
+          "deletionCriterion": "删行后仍能从代码/类型/模块头推出",
+          "provenance": {
+            "carrierRef": "packages/quay/src/provider-client.ts:113-138"
+          }
+        },
+        {
+          "id": "sa4b-3",
+          "mechanism": "provider 环境变量值只在以 `./` 或 `../` 开头时才解析成相对 workspaceRoot 的绝对路径；其余值（绝对路径、`owner/repo` 这类标识、以及不以点斜杠开头的相对样式字符串）一律原样透传，不猜不改写。",
+          "applies": [
+            "Provider 声明了 env 映射，值按工作区根解析",
+            "只识别 ./ 与 ../ 两种前缀"
+          ],
+          "notApplies": [
+            "绝对路径不重写",
+            "owner/repo 这类标识原样保留",
+            "不以点斜杠开头的相对样式字符串不会被自动修正"
+          ],
+          "carrier": "code",
+          "deletionCriterion": "删行后仍能从代码/类型/模块头推出",
+          "provenance": {
+            "carrierRef": "packages/quay/src/provider-env.ts:22-32"
+          }
+        },
+        {
+          "id": "sa4b-4",
+          "mechanism": "provider switch 是「先按与 config validate 完全相同的判据校验候选全文，通过才写」：拒绝时配置文件字节不动；目标已是唯一启用者 ⇒ 幂等成功、零写入、零重新校验；文本级翻转无法表达时有三个具名原因（无 providers 段 / providers 是流式映射 / 找不到目标条目），每个原因各自成句并提示手改。",
+          "applies": [
+            "切换的是 .quay/config.yml 里哪个 Provider 的 enabled 标记",
+            "候选校验用的是与 config validate 同一份校验管线",
+            "翻转在文本层面进行，拒绝时不落盘"
+          ],
+          "notApplies": [
+            "migrate 是另一条轴：搬数据，不改哪个 Provider 启用",
+            "目标 Provider 未在配置中声明 ⇒ 先报错，不能凭空新增后切换",
+            "已有的 enabled 值已被别的进程改走时，以本次读取的配置为准"
+          ],
+          "carrier": "code",
+          "deletionCriterion": "删行后仍能从代码/类型/模块头推出",
+          "provenance": {
+            "carrierRef": "packages/quay/src/cli/provider.ts:97-144"
+          }
+        },
+        {
+          "id": "sa4b-5",
+          "mechanism": "验收运行器的环境钉住采用「显式覆盖优先、绝不覆盖预置值」的三段优先级：cwd = 显式 --cwd > 预先存在的同名环境变量 > 工作区根；超时 = 显式 --timeout > 预置环境变量 > 不设（交给默认）；env 文件 = Provider 的 acceptance_env 解析值 > 预置环境变量 > 不设。该钉住只在 complete / promote 两个生命周期动词跑验收前执行，adjudicate / retreat 不钉。",
+          "applies": [
+            "complete 与 promote 在跑验收前钉住运行目录/超时/env 文件",
+            "环境文件来源是启用 Provider 的配置键，相对工作区解析",
+            "三段优先级各自独立，不是同一套变量整体覆盖"
+          ],
+          "notApplies": [
+            "adjudicate / retreat 不跑验收，也不钉这些变量",
+            "配置未声明 env 文件 ⇒ 不设置该变量，保留预置值",
+            "预置值永远是第二优先，不得被工作区默认清掉"
+          ],
+          "carrier": "code",
+          "deletionCriterion": "删行后仍能从代码/类型/模块头推出",
+          "provenance": {
+            "carrierRef": "packages/quay/src/cli/shared.ts:103-167"
+          }
+        },
+        {
+          "id": "sa4b-6",
+          "mechanism": "anchor 接管预算 = 旧锚真实最坏退出（= 有界停机宽限本身，不再加第二段等待）+ 一个 reconcile 周期 + 20 秒余量，可被环境变量整体覆盖；超过预算只把交接「分类」改成异常并继续等旧 pid 退出，不是放弃——放弃只有观察窗（缺省 30 分钟）内旧 pid 始终不退时才发生，此时退出码 1。异常记录先写后等，三态互斥且「无文件 = 干净交接」；读方须对记录里的 pid 做 kill -0 才能区分「仍在等」与「已收敛」。",
+          "applies": [
+            "新锚经 --takeover <pid> 等旧锚退出后再起循环",
+            "异常记录写在单独的接管记录文件里，并在等待之前落盘",
+            "观察窗缺省 30 分钟，可用环境变量覆盖"
+          ],
+          "notApplies": [
+            "没有 --takeover 的普通启动不走等待预算",
+            "旧 pid 已死时直接接管，不写异常记录",
+            "记录文件缺失 = 干净交接（或没有发生接管），不等于「异常已收敛」"
+          ],
+          "carrier": "code",
+          "deletionCriterion": "删行后仍能从代码/类型/模块头推出",
+          "provenance": {
+            "carrierRef": "plugin/scripts/driver-anchor.ts:240-304,503-552"
+          }
+        },
+        {
+          "id": "sa4b-7",
+          "mechanism": "anchor 在事件循环层重启 kind 循环的判据：只有循环非预期返回或抛错才重启（每个 kind 独立错误边界，不波及其他 kind）；正常返回（已请求停机，或该 kind 已从期望态移除）⇒ 不重启，收尾并摘掉该 kind 的 pid 文件。退避 = 基准（缺省 5 秒，下限 1 秒）× 重启次数，封顶 60 秒；每轮重启前后都重读期望态。",
+          "applies": [
+            "多个 kind 的常驻循环在同一 anchor 进程的事件循环层并发运行",
+            "期望态是盘上的 kind 集合，重启前后各重读一次",
+            "请求停机后的正常返回是预期收尾"
+          ],
+          "notApplies": [
+            "已请求停机或该 kind 已被移出期望态 ⇒ 不重启",
+            "不可恢复的进程级故障（uncaughtException/unhandledRejection）不由该循环重启兜底，而是整进程退出",
+            "重启计数只增不减，不退避成固定周期"
+          ],
+          "carrier": "code",
+          "deletionCriterion": "删行后仍能从代码/类型/模块头推出",
+          "provenance": {
+            "carrierRef": "plugin/scripts/driver-anchor.ts:194-219"
+          }
+        },
+        {
+          "id": "sa4b-8",
+          "mechanism": "非 Claude 进程向会话发消息前的 HOLD 前置检测是三态：读到至少一个设置面且命中 `permissions.defaultMode=bypassPermissions` 或 `crossSessionInbound=accept` 任一 ⇒ direct；读到面但两键皆无 ⇒ will-hold；一个面都读不到 ⇒ unknown（≠ direct，只是不拒发）。读不到的设置文件不算「读了但没有键」，该面直接缺席；显式传 childToken 的 own-child 路径完全跳过该检测；will-hold 且未加 --allow-hold ⇒ 发送前拒发，退出码 5（与缺 key 的 3、连接失败的 4 互不同形）。",
+          "applies": [
+            "检测在读取会话密钥与建立连接之前运行",
+            "设置面来自目标进程 argv 与 home/cwd 下的设置文件",
+            "内联设置 JSON 与文件路径两种来源都要解析"
+          ],
+          "notApplies": [
+            "显式 childToken 的 own-child 路径不做该检测（文档规则下不 hold）",
+            "读不到设置面只是前置提示，不等于投递结论；真值仍由事后 transcript 读取端定",
+            "--allow-hold 时明知会被扣下仍发送，但前置结论要逐字打到 stderr"
+          ],
+          "carrier": "code",
+          "deletionCriterion": "删行后仍能从代码/类型/模块头推出",
+          "provenance": {
+            "carrierRef": "plugin/scripts/send-to-session.ts:74-186,296-327"
+          }
+        },
+        {
+          "id": "sa5a-1",
+          "mechanism": "验收命令失败时把子进程输出折进 reason：stderr 优先且保留头部、stdout 回退且保留尾部，截长处写显式省略标记，整条 reason 上限 500 字符，两路都空时明说命令未写输出。",
+          "applies": [
+            "判据以非零退出失败，且子进程可能把自己的原因写到输出流",
+            "判词是每轮持久化的单行摘要，不能携带控制字符或无限长"
+          ],
+          "notApplies": [
+            "判据通过时不折叠任何输出",
+            "判据超时或无法启动时走独立的原因分支，不进入输出折叠"
+          ],
+          "carrier": "code",
+          "deletionCriterion": "删行后仍能从代码/类型/模块头推出",
+          "provenance": {
+            "carrierRef": "packages/quay/src/core/acceptance-runner.ts:218-260"
+          }
+        },
+        {
+          "id": "sa5a-2",
+          "mechanism": "判定成本台账的两条写入路径形状不同：验收 runner 侧仅在环境开关为 1 且目标目录已存在时追加 {name,ms,n:0,load,exit,ts}（exit 为空记 -1，名字取命令里首个脚本基名、缺省 acceptance），从不建目录；gate 引擎侧在调用方给出工作区根时追加 {name:`gate:<gate>:<task>`,ms,n:1,load,at,verdict} 并递归建目录；两者都 fail-open。",
+          "applies": [
+            "按门或验收命令执行后要留下可读的成本流水",
+            "同一条流水要被趋势判据消费，因此两类记录必须能区分来源"
+          ],
+          "notApplies": [
+            "进程内直调判定函数且未给工作区根的测试路径不写门引擎侧行",
+            "环境开关关闭时验收 runner 侧不写任何行"
+          ],
+          "carrier": "code",
+          "deletionCriterion": "删行后仍能从代码/类型/模块头推出",
+          "provenance": {
+            "carrierRef": "packages/quay/src/core/acceptance-runner.ts:159-203; packages/quay/src/gate/engine.ts:44-53,118-120"
+          }
+        },
+        {
+          "id": "sa5a-3",
+          "mechanism": "checker 判定桥的三态退出码映射为 verified→0、failed→1、not-evaluated→2，其中无法评估与用法错误共用 2（legacy 表层）；共享发射基座的同一三态映射却是 pass→0、fail→1、not-evaluated→3，用法错误保留 2；两套映射并存。",
+          "applies": [
+            "判定函数返回三态结果、由 CLI 壳负责把判定态映射成退出码",
+            "调用方需要把『无法评估』与『调用方式错误』区分开"
+          ],
+          "notApplies": [
+            "直接执行臂的 126/127 仍映射为不可运行，不由这张表定义",
+            "业务进程自己的退出码语义（例如反活锁退出 3）不由这张表定义"
+          ],
+          "carrier": "code",
+          "deletionCriterion": "删行后仍能从代码/类型/模块头推出",
+          "provenance": {
+            "carrierRef": "plugin/scripts/checker-io.ts:47-69; plugin/scripts/gate-script-base.ts:691-755"
+          }
+        },
+        {
+          "id": "sa5a-4",
+          "mechanism": "越权完成通道：reason 至少 8 个非空白字符，不足则拒绝且零写零事件；通过时写 done 并在同一次调用里追加 complete pass 事件（payload 带 verifiedBy=reason、via=out-of-band）；调用方可用自己的 expectedStatus 覆盖读到的状态并仍按 CAS 失败闭合。",
+          "applies": [
+            "需要从正常提升路径拒绝的状态（例如待人工处理）强制完成",
+            "强制完成必须事后可审计，因此事件里要带理由"
+          ],
+          "notApplies": [
+            "正常的 ready→done 路径仍要求验收闸，不经过该通道",
+            "理由不足时不产生任何事件，也不做部分写入"
+          ],
+          "carrier": "code",
+          "deletionCriterion": "删行后仍能从代码/类型/模块头推出",
+          "provenance": {
+            "carrierRef": "packages/quay/src/gate/lifecycle.ts:428-500"
+          }
+        },
+        {
+          "id": "sa5a-5",
+          "mechanism": "回退的正文改写只发生在 done→ready 这一条边：把 AC 小节里已勾选框改回未勾，并在正文最前加一行 `> **RETREATED / 搁置（理由）**`；其它回退边不改正文；标记已存在时不重复添加；正文不变时不发送 body 字段。",
+          "applies": [
+            "回退把一个已完成任务退回重新验证，完成声明必须作废",
+            "检测方按行首的粗体标记识别被搁置、暂不派发的任务"
+          ],
+          "notApplies": [
+            "从就绪退回待办或从待人工处理退回待办时不改正文",
+            "验收小节标题形状不被识别时正文原样返回（失败开放）"
+          ],
+          "carrier": "code",
+          "deletionCriterion": "删行后仍能从代码/类型/模块头推出",
+          "provenance": {
+            "carrierRef": "packages/quay/src/gate/lifecycle.ts:579-685"
+          }
+        },
+        {
+          "id": "sa5a-6",
+          "mechanism": "门配置解析的两处武断：同一工作区里只要 .quay/config.yml 存在就完全遮蔽 legacy .quay/gates.yml（后者只作影子探针告警）；语法错误/非映射/非列表一律按『没有配置』处理，不注册任何门，于是上层据此读 ADR 声明时得到未声明、相关强制静默关闭。",
+          "applies": [
+            "工作区同时存在统一配置与遗留门配置",
+            "上层把门配置里的 ADR 声明当作强制开关"
+          ],
+          "notApplies": [
+            "只有遗留文件时，其顶层映射才被当作门表",
+            "统一配置没有门小节时按空门表处理，不把顶层其它键误认成门"
+          ],
+          "carrier": "code",
+          "deletionCriterion": "删行后仍能从代码/类型/模块头推出",
+          "provenance": {
+            "carrierRef": "packages/quay/src/gate/config/loader.ts:144-197,270-276,355-382"
+          }
+        },
+        {
+          "id": "sa5a-7",
+          "mechanism": "落地覆盖率的分母按状态转移取：每任务窗口内最后一次『非 done→done』的 frontmatter 转移，且 mergeTarget tip 上该任务终态仍为 done；分子要求同任务在 flip 时刻前 60 秒内或之后的 complete pass 事件；flip 早于载体中第一条 quay-driver complete 事件的落地算 bootstrap 例外并逐条打印；零落地判 not-evaluated 而非合格。",
+          "applies": [
+            "阅读门事件台账与合并目标的提交历史来核对落地记录",
+            "一次落地可能留下多条翻完成提交（重试后回滚再翻）"
+          ],
+          "notApplies": [
+            "台账读不到或 git 不可用时整体判未评估，不进入逐日聚合",
+            "启动期例外只覆盖早于第一条驱动完成事件的落地，不会随历史增长而变大"
+          ],
+          "carrier": "code",
+          "deletionCriterion": "删行后仍能从代码/类型/模块头推出",
+          "provenance": {
+            "carrierRef": "plugin/scripts/gate-event-coverage-check.ts:128-225,274-336"
+          }
+        },
+        {
+          "id": "sa5a-8",
+          "mechanism": "六类交付面自检：清单内嵌一份、SPEC 文档围栏里一份，文档在场时必须与内嵌版逐项（含顺序与 label/归属）相等，否则 spec_is_live=false；deliverables 为空的类目按『缺失集为空』恒算 covered 以保住 6/6 结构；source/laid 两套清单按 markers 自动判别（scripts/test.sh+plugin+package.json ⇒ source；orchestration/+docs/analysis/ ⇒ laid），都不匹配回落 source；laid 布局不要求 6/6，覆盖数 >0 即输出 consumer_surface_ok=1。",
+          "applies": [
+            "自检运行在可能带或不带规格文档的根上",
+            "同一份六类结构既要核对源码仓库，也要核对消费者铺设后的布局"
+          ],
+          "notApplies": [
+            "规格文档缺席时该项为 n/a，不判成假",
+            "被裁定排除的两类仍保留类目位以维持六类计数"
+          ],
+          "carrier": "code",
+          "deletionCriterion": "删行后仍能从代码/类型/模块头推出",
+          "provenance": {
+            "carrierRef": "plugin/scripts/verify-delivery-surface.ts:61-141,220-244,328-369,397-432,437-449"
+          }
+        },
+        {
+          "id": "sa5b-1",
+          "mechanism": "工作区根配置的 anti_drift.exempt 是扁平无序的 {glob, reason} 列表：从主检出（git-common-dir 的父目录）读、绝不读工作树副本；缺/空 reason、非列表、非映射 ⇒ 整表 malformed 并用自己的退出码 2（既非通过也非越界写）；匹配任一 glob 的文件在判定前被移出未判集并逐条枚举 exempted: <file> <- <glob>，首个匹配 glob 胜，豁免 glob 不受过宽规则约束。",
+          "applies": [
+            "项目在工作区根配置里声明了豁免表",
+            "判定是任务实际写入文件对声明的改动面",
+            "输出必须能区分被豁免与从未改动"
+          ],
+          "notApplies": [
+            "配置缺失或没有该键 ⇒ 无豁免，不是错误",
+            "豁免不进入目录忽略、glob 展开、跨构建重叠与过宽声明这几臂",
+            "无法解析出工作区根时退回无豁免（更严方向），绝不据此放行"
+          ],
+          "carrier": "code",
+          "deletionCriterion": "删行后仍能从代码/类型/模块头推出",
+          "provenance": {
+            "carrierRef": "plugin/scripts/anti-drift-touches-check.ts:11-157"
+          }
+        },
+        {
+          "id": "sa5b-2",
+          "mechanism": "anti-drift 的判集与退出码按目标线形态分派：目标线等于落地基线 ⇒ git diff --name-only <target>...HEAD；目标线是合格项目目标线（名字命中目标分支命名、能解析成提交、与落地基线有共同祖先）⇒ 取可达 HEAD 但从目标线与基线都不可达的提交所带文件的并集（合并提交不贡献文件），且 git 关闭路径转义以保留 UTF-8 原名；目标线既非基线延续也非合格目标线 ⇒ 报 BASELINE-MISMATCH、退出码 3，且不计入越界写条数。",
+          "applies": [
+            "任务分支落在非默认的目标线",
+            "目标线与落地基线分叉（含自带已落地提交）",
+            "判定是任务自有提交的文件面"
+          ],
+          "notApplies": [
+            "目标线就是落地基线时不走两线基",
+            "目标线名不命中目标分支命名、无法解析或无共同祖先 ⇒ 仍按基线不匹配",
+            "基线不匹配不得折进越界写计数或退出码 1"
+          ],
+          "carrier": "code",
+          "deletionCriterion": "删行后仍能从代码/类型/模块头推出",
+          "provenance": {
+            "carrierRef": "plugin/scripts/anti-drift-touches-check.ts:232-436"
+          }
+        },
+        {
+          "id": "sa5b-3",
+          "mechanism": "## Touches 小节选取规则：在所有以 touches 开头的标题中，正文完全等于规范拼写者优先（多个取最早），否则取级别最高者（同级别取最早）；小节正文在下一个任意级别标题处结束（刻意不按级别放宽，否则紧跟的笔记项目符号会被读成路径）。",
+          "applies": [
+            "正文可能含带说明文字的同名小标题与紧随其后的笔记小节",
+            "消费者把读出的条目当作路径声明"
+          ],
+          "notApplies": [
+            "没有同名标题 ⇒ 报无声明",
+            "同名标题里没有精确拼写者才按最高级别选",
+            "放宽级别已被实测否决（会把笔记里的散文项目符号读成路径）"
+          ],
+          "carrier": "code",
+          "deletionCriterion": "删行后仍能从代码/类型/模块头推出",
+          "provenance": {
+            "carrierRef": "plugin/scripts/touches-parser.ts:203-265"
+          }
+        },
+        {
+          "id": "sa5b-4",
+          "mechanism": "Touches 条目的结构标签只在半角括号里识别：优先取行尾最后一个 (...) 的内容，其次取紧邻全角尾注（之前的最后一个 (...)；只有 new / delete / deleted（归一大小写与首尾空白后）算标签，行中间或其它括号里的不算；标签提取不改变路径解析结果（两种注记仍都被剥掉）。",
+          "applies": [
+            "声明清单条目可能带行尾半角注、全角尾注或两者兼有",
+            "该结构标签被派发前的存在性检查用作豁免依据",
+            "标签提取与路径归一共享同一份注记剥离逻辑"
+          ],
+          "notApplies": [
+            "词不是这三个取值 ⇒ 无标签，仍按存在性检查",
+            "行中间或非末尾括号里的词不构成标签",
+            "标签不改变路径解析（两种注记仍都剥掉，路径归一照旧）"
+          ],
+          "carrier": "code",
+          "deletionCriterion": "删行后仍能从代码/类型/模块头推出",
+          "provenance": {
+            "carrierRef": "plugin/scripts/touches-parser.ts:86-123"
+          }
+        },
+        {
+          "id": "sa5b-5",
+          "mechanism": "Touches 一条目一路径的形态判据：先剥掉所有全角/半角圆括号注记与围绕引号，再去掉 {...} 花括号组，按五种分隔符（空格斜杠空格、空格加号空格、顿号、全角逗号、半角逗号）切分，切出 ≥2 个像路径的片段才判红；散文分隔符、时间戳/日期、单一路径、以及单个花括号展开都不判红。",
+          "applies": [
+            "单条项目符号可能声明多个路径",
+            "条目可能带全角或半角注记",
+            "通配可能用花括号展开在一个条目里列多个选项"
+          ],
+          "notApplies": [
+            "单个精确路径或单个通配 ⇒ 不判红",
+            "散文里的顿号/逗号、日期与时间戳不算路径分隔",
+            "没有该小节 ⇒ 未评估，不是违规"
+          ],
+          "carrier": "code",
+          "deletionCriterion": "删行后仍能从代码/类型/模块头推出",
+          "provenance": {
+            "carrierRef": "plugin/scripts/touches-one-entry-one-path-check.ts:85-129"
+          }
+        },
+        {
+          "id": "sa5b-6",
+          "mechanism": "单文件耗时趋势的比较判据：相对触发 curr/prev ≥ 2.0（恰好翻倍也算，且要求 prev>0），绝对触发 curr−prev > 30000ms（严格大于）；基线 prev < 5000ms 的小文件只走绝对触发；两触发都受历史方差豁免——curr ≤ 该文件此前所有轮的最大值即不报；耗时未增长一律不报；且这是报告不是闸。",
+          "applies": [
+            "比较相邻两轮的历史记录",
+            "每个文件有上一轮基线与更早轮次的历史最大值",
+            "文件耗时记录为正数"
+          ],
+          "notApplies": [
+            "首次轮（少于两轮）不比较",
+            "基线缺失或非正 ⇒ 跳过该文件",
+            "耗时下降或持平 ⇒ 永不报"
+          ],
+          "carrier": "code",
+          "deletionCriterion": "删行后仍能从代码/类型/模块头推出",
+          "provenance": {
+            "carrierRef": "plugin/scripts/measure-trend-check.ts:63-71,315-385"
+          }
+        },
+        {
+          "id": "sa5b-7",
+          "mechanism": "loop.touches_relax 的配置契约：模式缺省为 off；shadow/live 两档都强制要求显式给出 after_minutes（有限数 >0）与 max_relaxed_inflight（整数 ≥0），缺任一项即具名拒绝、绝不回填内置默认值；未声明与声明了但等于 off 是两种不同状态；模式值读不懂时不再叠加缺阈值的拒绝；auto_tighten 三个键各自可选且不回填。",
+          "applies": [
+            "配置块位于工作区配置的循环段下",
+            "启用档需要两个来自文件而非代码字面量的阈值",
+            "读取器必须把读不懂与合格区分开"
+          ],
+          "notApplies": [
+            "关闭档（或缺省）不要求两个阈值，但给出的值仍做形状检查",
+            "未知键不被拒绝（判定面止于已声明字段）",
+            "自动收紧子块整体缺省 ⇒ 不评估，而不是用默认值评估"
+          ],
+          "carrier": "code",
+          "deletionCriterion": "删行后仍能从代码/类型/模块头推出",
+          "provenance": {
+            "carrierRef": "plugin/scripts/touches-relax-config.ts:253-365"
+          }
+        },
+        {
+          "id": "sa5b-8",
+          "mechanism": "## Resolution 的判据顺序：同名二级标题 >1 即判重复；0 个即通过；去掉 HTML 注释后为空判空壳；若正文出现 outcome: 加五种状态词之一，扣除该行与空白后剩余非空白字符 <40 且不含任一证据关键词（evidence/audit/diffstat/net 数字/round-trip/verified/renders/commit/PR-号/log/GateEvent）⇒ 判裸状态镜像。",
+          "applies": [
+            "任务正文最多允许零个或一个同名结果小节",
+            "状态镜像是只抄状态、不附证据的缺陷形态",
+            "小节里可能只有 HTML 注释占位"
+          ],
+          "notApplies": [
+            "没有该小节 ⇒ 未解决状态合法，不是缺陷",
+            "折叠了真实证据（差异统计/审计/提交/日志等）的合法收尾应通过",
+            "五个状态词之外的值不触发裸镜像判据（但仍受空壳判据约束）"
+          ],
+          "carrier": "code",
+          "deletionCriterion": "删行后仍能从代码/类型/模块头推出",
+          "provenance": {
+            "carrierRef": "plugin/scripts/task-schema.ts:455-482"
+          }
+        },
+        {
+          "id": "s6a-1",
+          "mechanism": "Provider 聚合客户端的单记录读取（task/adr/goal/meta 的 get）在 Provider 应答 isError 时直接返回 null 而不抛错；同一客户端里写/删/检/gate 动词以及列表读取却一律抛错 ⇒ 「记录不存在」与「后端调用失败」对调用方同形，上层只能把两者都渲染成 no such task。",
+          "applies": [
+            "问按 id 取单条记录时后端失败会以什么形态交回",
+            "问「记录不存在」与「读取失败」在上层是否可区分",
+            "问同一客户端里哪一类动词抛错、哪一类不抛"
+          ],
+          "notApplies": [
+            "问列表读取的失败语义（那会抛错，且空结果与不支持都返回空数组）",
+            "问写/删除/检查/gate 动词的失败（那些一律抛错）",
+            "问 Provider 内部同名工具自身对缺记录的应答（那两层都是 isError）"
+          ],
+          "carrier": "code",
+          "deletionCriterion": "删行后仍能从代码/类型/模块头推出",
+          "provenance": {
+            "carrierRef": "packages/quay/src/provider-client.ts:140-144"
+          }
+        },
+        {
+          "id": "s6a-2",
+          "mechanism": "Provider 的静态自述不是工具而是 MCP 资源 provider://manifest（Provider 侧读自身 provider.yml、JSON 序列化返回）；Core 为每个已启用 Provider 注册一份真实资源 provider://manifest/<id>，另加 provider://manifest 别名解析到默认（配置顺序里第一个启用）的 Provider；读侧只有 readResource + JSON.parse，没有 isError 分支。",
+          "applies": [
+            "问声明/能力自述的获取通道",
+            "问多后端工作区如何逐份取声明",
+            "问不带 id 的形式解析到哪一个后端"
+          ],
+          "notApplies": [
+            "问运行时数据面（任务/ADR/目标/元记录）的读取",
+            "问 instrument 清单（那是工具）",
+            "问声明文件缺失时的行为（Provider 侧读取直接抛错）"
+          ],
+          "carrier": "code",
+          "deletionCriterion": "删行后仍能从代码/类型/模块头推出",
+          "provenance": {
+            "carrierRef": "packages/quay/src/mcp-server.ts:412-445"
+          }
+        },
+        {
+          "id": "s6a-3",
+          "mechanism": "driver-anchor 的启动互斥用专用锁文件 .quay/anchor-start.lock 的 O_CREAT|O_EXCL 原子创建并写入自身 pid；EEXIST 后按持有者分流——只有「活着的他人」⇒ held 拒绝（带 holder）、非 EEXIST（如只读根）⇒ unwritable、其余情形（持有者已死、锁内容坏/不完整、或竟是自己 pid）⇒ 删除并只重试一次，第二次仍失败 ⇒ contended 拒绝（绝不无限自旋）；释放仅当锁里仍是自己的 pid。",
+          "applies": [
+            "问同一根上并发启动两个锚的互斥",
+            "问锁持有者已死时陈旧锁的回收",
+            "问锁本身无法创建（只读目录）时的分类"
+          ],
+          "notApplies": [
+            "问锚存活本身如何证明（那是 anchor.pid 加 pid 活性）",
+            "问接管时的等待预算与放弃条件",
+            "问 serve 的同根准入锁（另一套三分法：读不懂的锁拒绝回收）"
+          ],
+          "carrier": "code",
+          "deletionCriterion": "删行后仍能从代码/类型/模块头推出",
+          "provenance": {
+            "carrierRef": "plugin/scripts/driver-anchor.ts:330-368"
+          }
+        },
+        {
+          "id": "s6a-4",
+          "mechanism": "私有套接字的终端复用器调用构造器无条件前置 -S <私有 socket> 并从子进程环境剥掉 $TMUX；调用方自带的 -S/-L 只在「子命令之前的全局选项前缀」里被识别并拒绝（前缀匹配，-L6mUZe 这类值也算），一旦遇到第一个非旗标 token 即停止扫描——子命令之后的同名片段是子命令参数或路径，必须放行。",
+          "applies": [
+            "问调用方自带套接字覆盖旗标时的处置",
+            "问该旗标出现在子命令之后是否算越权",
+            "问每次调用如何强制落在私有套接字上"
+          ],
+          "notApplies": [
+            "问环境中的会话变量如何影响套接字选择（那由剥离该变量处理）",
+            "问绕过包装直接调用的裸命令",
+            "问其它命令的通用旗标语法校验"
+          ],
+          "carrier": "code",
+          "deletionCriterion": "删行后仍能从代码/类型/模块头推出",
+          "provenance": {
+            "carrierRef": "plugin/scripts/tmux-session.ts:62-76"
+          }
+        },
+        {
+          "id": "s6a-5",
+          "mechanism": "驱动向管理者报告用 own-child 单向通知：解析随内核同装的 send-to-session 脚本，以 --pid <manager-pid> --token <管理者交给子进程的 childToken> <message> 走 spawnSync（10s 超时、stdout 管道、stderr 丢弃）；返回 ok 只代表子进程退出码 0（套接字写成功），没有任何回执、不代表对方真收到；脚本解析不到或非零退出 ⇒ 返回 {ok:false,error} 而不抛错。",
+          "applies": [
+            "问驱动→管理者的单向通知保证强度",
+            "问通知脚本缺失或失败时的处置",
+            "问子进程身份凭据从哪里来"
+          ],
+          "notApplies": [
+            "问给会话发消息前对收件方设置的预检三态",
+            "问会话代理之间的原生消息投递",
+            "问通知的频率与消息形态（接口只落地能力）"
+          ],
+          "carrier": "code",
+          "deletionCriterion": "删行后仍能从代码/类型/模块头推出",
+          "provenance": {
+            "carrierRef": "plugin/scripts/driver-runtime.ts:2204-2237"
+          }
+        },
+        {
+          "id": "s6a-6",
+          "mechanism": "盘上期望态读取只有两态却承载三义：文件缺失与内容解析失败共用 null；kinds:[] 是合法的「已声明零个」。调用点各自解释 null——冷启动把它当「没人声明」⇒ 取全部已知 kind 并回写盘（顺手覆盖坏文件）；kind 循环重启判定把它折成空集 ⇒ 该 kind 不再重启；声明状态判定把它报成 not-evaluated。",
+          "applies": [
+            "问期望态文件缺失/损坏/空集合的语义",
+            "问冷启动的运行集合从哪里来",
+            "问同一读取结果在不同调用点如何被解释"
+          ],
+          "notApplies": [
+            "问停机记录文件的读取（那有独立的三态）",
+            "问声明状态四态判定本身",
+            "问接管时对启动集合的交叉核对"
+          ],
+          "carrier": "code",
+          "deletionCriterion": "删行后仍能从代码/类型/模块头推出",
+          "provenance": {
+            "carrierRef": "plugin/scripts/driver-runtime.ts:1163-1194"
+          }
+        },
+        {
+          "id": "s6a-7",
+          "mechanism": "跨打包产物的 per-kind 停机探针只读盘上停机记录（.quay/anchor-kind-stops.json），三态：有本 kind 记录 ⇒ stopped；文件不存在或无本 kind 记录 ⇒ not-stopped；文件在但读不懂（坏 JSON / 非对象/数组）⇒ not-evaluated。消费方对 not-evaluated 取 fail-open（循环继续跑）但必须具名留痕一次；探针刻意不读期望态成员资格，以保住「显式停机」与「静默脱离」两态可分。",
+          "applies": [
+            "问跨打包产物的 per-kind 停机信号如何送达",
+            "问停机记录读不懂时的方向与留痕",
+            "问一个 kind 是否被显式停过"
+          ],
+          "notApplies": [
+            "问进程内登记表的语义（独立打包后它恒为空）",
+            "问期望态集合的读取与冷启动",
+            "问只读诊断里的声明状态四态（那是另一个判定）"
+          ],
+          "carrier": "code",
+          "deletionCriterion": "删行后仍能从代码/类型/模块头推出",
+          "provenance": {
+            "carrierRef": "plugin/scripts/driver-runtime.ts:1252-1272,1337-1350"
+          }
+        },
+        {
+          "id": "s6a-8",
+          "mechanism": "聚合服务器按 Provider id 惰性连接并缓存 connect 的 Promise 本身：键存在即复用，被拒的 Promise 也留在表里，没有清除/重试路径 ⇒ 一次连接失败会让该 Provider 在本进程生命周期内每次调用都撞上同一个拒绝；未知或未启用的 id 则同步抛错（不是拒绝的 Promise）；省略 provider 参数时默认=配置插入顺序里第一个启用的；退出时对表内所有 Promise（含已拒绝的）并行 best-effort 关闭。",
+          "applies": [
+            "问按后端惰性连接与连接复用的失败面",
+            "问省略后端参数时默认后端的选取顺序",
+            "问未启用后端 id 的报错形态"
+          ],
+          "notApplies": [
+            "问单个后端内部记录读取的失败形态",
+            "问 Provider switch（那改配置文件）",
+            "问 CLI 侧 provider 连接生命周期（另一份实现）"
+          ],
+          "carrier": "code",
+          "deletionCriterion": "删行后仍能从代码/类型/模块头推出",
+          "provenance": {
+            "carrierRef": "packages/quay/src/mcp-server.ts:399-410,601-612"
+          }
+        },
+        {
+          "id": "s6b-1",
+          "mechanism": "独立复核动词只读并记录：把机械勾选检查的结果写成一条审计事件（判词 + 观测到的任务状态），从不写状态；即便机械检查不通过，该动词仍返回成功并以退出码 0 结束（v0 record-only），判词只由检查通过与否二值映射。",
+          "applies": [
+            "问独立复核动词对任务状态的影响及其退出码",
+            "问复核留下的记录里判词取值来自哪里"
+          ],
+          "notApplies": [
+            "问完成/晋升路径的状态写入与验收闸（那是另一条会写状态的路径）",
+            "问复核动作是否钉住验收运行器的环境变量（那属于验收运行器的钉住规则）"
+          ],
+          "carrier": "code",
+          "deletionCriterion": "删行后仍能从代码/类型/模块头推出",
+          "provenance": {
+            "carrierRef": "packages/quay/src/gate/lifecycle.ts:502-530"
+          }
+        },
+        {
+          "id": "s6b-2",
+          "mechanism": "晋升/回退邻接表在模块加载期由声明的 5×5 生命周期边表派生：只取现行边并按方向映射（仅晋升、回退两类）；边起点不是已知状态、或同一状态在同一方向声明了第二条现行边 ⇒ 直接抛错（不静默丢弃、不首个胜出），畸形声明无法以缩小的表上线；升级/解决/取代类边与非现行边不求值。",
+          "applies": [
+            "问晋升/回退的合法下一步从哪张表、在什么时机得出",
+            "问生命周期边声明自相矛盾时的失败方向"
+          ],
+          "notApplies": [
+            "问回退时对任务正文的改写（那是另一条边上的语义）",
+            "问单步非法转移的拒绝消息文本（那发生在邻接表派生之后）"
+          ],
+          "carrier": "code",
+          "deletionCriterion": "删行后仍能从代码/类型/模块头推出",
+          "provenance": {
+            "carrierRef": "packages/quay/src/gate/lifecycle.ts:60-112"
+          }
+        },
+        {
+          "id": "s6b-3",
+          "mechanism": "门清单详表把内建门按名字硬分类：只有两个已知名字分别算作者门/验收门，其余所有内建门（含暗轴门与文档门）一律标为文档类并附「技能: 去掉 doc- 前缀的名字」；工作区门中与内建同名的行被整行过滤（内建遮蔽同名工作区门），工作区诊断随附返回。",
+          "applies": [
+            "问门清单详表对内建门的类别标注与同名行的去重",
+            "问详表里说明文字如何从一个门名生成"
+          ],
+          "notApplies": [
+            "问运行时门解析的优先级（那在解析/执行路径上，不在清单展示路径）",
+            "问工作区门自身的元数据是否产生诊断"
+          ],
+          "carrier": "code",
+          "deletionCriterion": "删行后仍能从代码/类型/模块头推出",
+          "provenance": {
+            "carrierRef": "packages/quay/src/gate/registry.ts:92-110"
+          }
+        },
+        {
+          "id": "s6b-4",
+          "mechanism": "覆盖率下限门把命令的合并输出按工作区配置的正则取第一个捕获组（缺省正则匹配「若干数字或小数点」后跟百分号），取不到或捕获组非数即失败；判定为实际值 ≥ 下限（恰好等于下限算通过）；超时、子进程启动失败、命令未配置均失败关闭。",
+          "applies": [
+            "问覆盖率下限门在未配置抽取模式时的默认取值方式与边界",
+            "问覆盖率数字与下限相等、或输出里无数时的判词"
+          ],
+          "notApplies": [
+            "问落地覆盖率的逐日聚合判据（那是另一个检查器，不是这个上限门）",
+            "问工作区门配置整体被遮蔽的规则"
+          ],
+          "carrier": "code",
+          "deletionCriterion": "删行后仍能从代码/类型/模块头推出",
+          "provenance": {
+            "carrierRef": "packages/quay/src/gate/factories/coverage-floor.ts:42-84"
+          }
+        },
+        {
+          "id": "s6b-6",
+          "mechanism": "门配置诊断出口每进程只解析一次，三种取值：未设/空串/显式标准错误 ⇒ 写标准错误；静默值 ⇒ 丢弃；其它值当文件路径以追加模式打开，写入前先把行放进缓冲；流打开或写入出错一次 ⇒ 把已缓冲行全部补写到标准错误并打一条降级说明，此后固定走标准错误。",
+          "applies": [
+            "问门配置诊断输出的取值形态与写文件失败时的降级路径",
+            "问同一进程内诊断出口是否会被重复解析"
+          ],
+          "notApplies": [
+            "问各门判据自身结果写到哪里（那是各检查器自己的输出与退出码）",
+            "问诊断行前缀标签的拼写"
+          ],
+          "carrier": "code",
+          "deletionCriterion": "删行后仍能从代码/类型/模块头推出",
+          "provenance": {
+            "carrierRef": "packages/quay/src/gate/config/loader.ts:52-97"
+          }
+        },
+        {
+          "id": "s6b-7",
+          "mechanism": "门台账新鲜度探针读工作区的门事件台账、取最大时间戳并与声称周期比较（年龄严格大于周期才判陈旧）；台账不存在或一条带时间戳的事件都没有 ⇒ 同样判陈旧触发（「机制从没跑过」本身是信号），不是「无信号即正常」；输出只是报告：正常静默退出 0，触发打印一行告警并退出 1；目录不是工作区时文本模式退出 2、机器可读模式仍以陈旧信号退出 1。",
+          "applies": [
+            "问门事件台账缺失或过旧时探针的判词与退出码",
+            "问声称周期边界（相等）与无台账两种输入的处理"
+          ],
+          "notApplies": [
+            "问单个门判据的通过/失败（该探针不看判据内容）",
+            "问台账里坏行的处理（坏行被跳过，不会使整份台账不可读）"
+          ],
+          "carrier": "code",
+          "deletionCriterion": "删行后仍能从代码/类型/模块头推出",
+          "provenance": {
+            "carrierRef": "plugin/scripts/gate-staleness-check.ts:63-146"
+          }
+        },
+        {
+          "id": "s6b-8",
+          "mechanism": "目标身份裸字面量检查器的合法值表只收协议固定项（四个固定引用名 + 一个固定任务目录名，值规范化后按空白/逗号拆 token、每个 token 都合法才算合法）；形如 goal/<ID> 的字面量改为查目标库：记录存在、声明分支模式、且状态不是取代/退役才合法；目标库读不到 ⇒ 该 token 记未评估，但已有确定违规时 RED 优先于未评估（退出 1 而不是 3）。",
+          "applies": [
+            "问身份裸字面量检查器的合法默认值与目标分支形态判定",
+            "问确定违规与未评估并存时的退出码优先级"
+          ],
+          "notApplies": [
+            "问命中位置判定（注释/字符串里的拼写不报）",
+            "问只读不挡开关对退出码的全局影响（那是开关语义，不是本条判据）"
+          ],
+          "carrier": "code",
+          "deletionCriterion": "删行后仍能从代码/类型/模块头推出",
+          "provenance": {
+            "carrierRef": "plugin/scripts/target-identity-literal-check.ts:66-69,114-152,281-290"
+          }
+        },
+        {
+          "id": "s6b-9",
+          "mechanism": "覆盖率缺口检查器的只报不挡开关把取值轴与阻断轴解耦：取值仍是 pass/red/not-evaluated（照常打印并追加写入去重台账），只关掉 RED 的退出码 1；not-evaluated 照旧退出 3。读侧把台账判成三态：台账缺席 ⇒ 未评估（绝不等于零未处置）、存在但所有行不可解析 ⇒ 不可读、门事件载体读不到 ⇒ 处置不可判；处置由事件推导——同任务存在 ts ≥ 条目记账时刻的完成通过事件即算已处置，时刻缺失/不可解析的条目留在未处置。",
+          "applies": [
+            "问该开关对取值与阻断两轴的影响及台账读侧的三态语义",
+            "问未处置条目如何被判定为已处置"
+          ],
+          "notApplies": [
+            "问该检查器覆盖率分子分母的取法（那是判据本体，不是开关语义）",
+            "问台账写侧的去重键与只追加纪律"
+          ],
+          "carrier": "code",
+          "deletionCriterion": "删行后仍能从代码/类型/模块头推出",
+          "provenance": {
+            "carrierRef": "plugin/scripts/gate-event-coverage-check.ts:33-67,338-530"
+          }
+        }
+      ]
+    }
+  }
+}

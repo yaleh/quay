@@ -1,0 +1,59 @@
+{
+  "schema": "quay-dsi-snapshot/1",
+  "generatedAt": "2026-11-07T00:00:00.000Z",
+  "storeFormatVersion": 1,
+  "producer": {
+    "tool": "@yalehwang/dsi-core",
+    "cliVersion": "0.0.0",
+    "specPath": "docs/STORE-FORMAT.md",
+    "specVersion": 1,
+    "producerCommit": "9c9826d6299927d961924eda1dffab8d26aebb67"
+  },
+  "source": {
+    "dsiRootLabel": "user-level",
+    "domains": [
+      "gate-result-validity",
+      "quay-dev"
+    ],
+    "storeFingerprint": "sha256:9ccc4815cdbe351bac50662eb64a3e9bc4966f8f111de52556b1cea7855a7df4",
+    "generatedBy": "@yalehwang/dsi-core@0.0.0 snapshot --dsi-root <redacted> --domains gate-result-validity,quay-dev --migrate-v0",
+    "perDomain": [
+      {
+        "domain": "gate-result-validity",
+        "manifestSha256": "12eb8a9e13de685317e0321d18fb32102d302c359f467897c912e227cd181014",
+        "ledgerSha256": "530b5b4613307f9874becbd79cf664c2946a2e5c0f2763a2ffddfc5d42d14e17"
+      },
+      {
+        "domain": "quay-dev",
+        "manifestSha256": "469d8a08503d05d0011ee563b17a8b118abb77cc4a30345857a0081c4d78f2de",
+        "ledgerSha256": "dd641bd6b6cf6477c8b07907d9ffc072c51288201fb6076afec0a801c1068c8f"
+      }
+    ],
+    "consumerCommit": "dc2fedec4c3934b578b341a5d05f6972c6e2194a",
+    "migratedFrom": "store-format-v0",
+    "migrationNotes": [
+      "stamped storeFormatVersion=1（盖章）",
+      "held-out aggregate 重塑为 {schema,overall,byCoverage}（aggregate 重塑）",
+      "coverage driftPp/ratioExceedsOne dropped",
+      "atoms 计数从当前原子段重算（atoms 重算）"
+    ],
+    "migratedDomains": [
+      "gate-result-validity",
+      "quay-dev"
+    ]
+  },
+  "files": {
+    "atoms.json": {
+      "schema": "dsi-atom/1",
+      "sha256": "a11f3f6d279575eb07feb29c1266cc44e63beb1fd709b811dd5c0f1f867c763f"
+    },
+    "coverage.json": {
+      "schema": "dsi-coverage/1",
+      "sha256": "7586b013437f5ff5d29f9f4fd2773de5cd3aea7242da8394cbfcf988f2bfb816"
+    },
+    "status.json": {
+      "schema": "dsi-status/1",
+      "sha256": "9e941c6d44b40f75c33af6111ebde8e38e096e3bc5cb57189fb540733f954e22"
+    }
+  }
+}

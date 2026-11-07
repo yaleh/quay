@@ -1,0 +1,119 @@
+{
+  "schema": "dsi-status/1",
+  "domains": {
+    "gate-result-validity": {
+      "schema": "dsi-status/1",
+      "domain": "gate-result-validity",
+      "status": "partial",
+      "targetCoverage": 0.8,
+      "gates": [
+        {
+          "id": "atoms",
+          "ok": true,
+          "reading": "role-assigned=14 schema=33 unassigned=19; 33 schema atom(s) with carrierRef + applies/notApplies"
+        },
+        {
+          "id": "noD",
+          "ok": true,
+          "reading": "probe-batch1-samples2.json samples=2 ever-residual=13"
+        },
+        {
+          "id": "withD",
+          "ok": true,
+          "reading": "probe-withd-batch1-v3.json deltaG models=2"
+        },
+        {
+          "id": "ablation",
+          "ok": true,
+          "reading": "D-min.md (1285 bytes)"
+        },
+        {
+          "id": "heldout",
+          "ok": true,
+          "reading": "held-out/aggregate.json models=2"
+        },
+        {
+          "id": "coverage",
+          "ok": false,
+          "reading": "ratio=0.3300 target=0.8 source=D-slices/code-coverage.md"
+        },
+        {
+          "id": "todo",
+          "ok": true,
+          "reading": "todo=0 exempt=0 (manifest.coverage.todoQueue)"
+        },
+        {
+          "id": "epoch",
+          "ok": false,
+          "reading": "manifest.epoch.converged=false; batch-yield last2=[16,3] threshold=1 => false"
+        },
+        {
+          "id": "commit",
+          "ok": true,
+          "reading": "binding=bound sha=4672ff49ff0d (repo not given: HEAD not compared)"
+        }
+      ],
+      "missing": [
+        "coverage",
+        "epoch"
+      ]
+    },
+    "quay-dev": {
+      "schema": "dsi-status/1",
+      "domain": "quay-dev",
+      "status": "partial",
+      "targetCoverage": 0.8,
+      "gates": [
+        {
+          "id": "atoms",
+          "ok": true,
+          "reading": "role-assigned=17 schema=143 unassigned=126; 143 schema atom(s) with carrierRef + applies/notApplies"
+        },
+        {
+          "id": "noD",
+          "ok": true,
+          "reading": "probe-batch1-samples2.json samples=2 ever-residual=15"
+        },
+        {
+          "id": "withd-unscored",
+          "ok": false,
+          "reading": "probe-withd-batch3-full.json withd-unscored luna answered=0/32"
+        },
+        {
+          "id": "ablation",
+          "ok": true,
+          "reading": "D-min.md (720 bytes)"
+        },
+        {
+          "id": "heldout",
+          "ok": true,
+          "reading": "held-out/aggregate.json models=2"
+        },
+        {
+          "id": "coverage",
+          "ok": true,
+          "reading": "ratio=1.0000 target=0.8 source=D-slices/code-coverage.md"
+        },
+        {
+          "id": "todo",
+          "ok": true,
+          "reading": "todo=0 exempt=0 (manifest.coverage.todoQueue)"
+        },
+        {
+          "id": "epoch",
+          "ok": false,
+          "reading": "batch-yield last2=[32,16] threshold=1 => false"
+        },
+        {
+          "id": "commit",
+          "ok": true,
+          "reading": "binding=bound sha=2fa4e49207f0 (repo not given: HEAD not compared)"
+        }
+      ],
+      "missing": [
+        "withd-unscored",
+        "epoch"
+      ]
+    }
+  }
+}

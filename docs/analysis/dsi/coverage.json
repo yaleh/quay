@@ -1,0 +1,37 @@
+{
+  "schema": "dsi-coverage/1",
+  "domains": {
+    "gate-result-validity": {
+      "schema": "dsi-coverage/1",
+      "domain": "gate-result-validity",
+      "rules": 739,
+      "driverRules": 545,
+      "probeRules": 194,
+      "arbitraryDetails": 100,
+      "arbitraryDriver": 60,
+      "arbitraryProbe": 40,
+      "captured": 33,
+      "capturedDriver": 28,
+      "capturedProbe": 5,
+      "ratio": 0.33,
+      "statedPercent": 33,
+      "todoQueue": []
+    },
+    "quay-dev": {
+      "schema": "dsi-coverage/1",
+      "domain": "quay-dev",
+      "rules": 739,
+      "driverRules": 545,
+      "probeRules": 194,
+      "arbitraryDetails": 143,
+      "arbitraryDriver": 103,
+      "arbitraryProbe": 40,
+      "captured": 143,
+      "capturedDriver": 138,
+      "capturedProbe": 5,
+      "ratio": 1,
+      "statedPercent": 100,
+      "todoQueue": []
+    }
+  }
+}
