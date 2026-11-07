@@ -4166,11 +4166,34 @@ export async function runMechanicalFanIn(opts: MechanicalFanInOptions): Promise<
       // gap-meta-extractnotevaluatedchecker — 镜像必须把**本任务**惰性守卫这一维一起写下去，否则
       // meta-driver 的 `collectInertCheckers` 在镜像载体上恒为「未测量」（旧行为：字段缺失 → `[]`）。
       // 来源 = 被记录那一轮的日志（认证的恢复轮已把它替换成自己的）；日志读不出 ⇒ 不传（未测量，⛔ 不写 `[]`）。
-      mirrorMechanicalFanInSuiteState({
+      const mirrorReading = mirrorMechanicalFanInSuiteState({
         task, runId: perSuiteRunId, commit: suiteHead,
         startedAt: sr.startedAt, finishedAt: sr.finishedAt, durationMs: sr.durationMs,
         stateFile: suiteStateFile,
         ...(recordedSuiteLogText === null ? {} : { notEvaluatedCheckers: parseNotEvaluatedCheckers(recordedSuiteLogText) }),
+      });
+      // gap-meta-parsenotevaluatedcheckers — 上面这次写是 `full-suite-state.json` 的**最后一写**
+      // （runner 先写自己的终态，镜像随后覆盖），所以「载体最后一维（notEvaluatedCheckers）在不在、
+      // 为什么不在」此前**在生产上没有任何读数**：mirror 是 `void` + 空 catch（best-effort，姿态本身是
+      // 对的），而唯一能看见它的地方是一个**事后**的字节比对。实测代价：一个缺维度的载体与「镜像按
+      // 设计拒绝了写入」在读者侧同形，meta-driver 只能报 `cause:"dimension-missing"`，追因要回放整轮
+      // （2026-11-07 那次实际是 fan-in 执行体加载的是主检出旧代码，载体因此缺维度——这一条从载体本身
+      // 结构上看不出来）。⇒ 把镜像的**决定**（而不是它的内容）作为一条单发决策事件落进 step-trace，
+      // 与 ac-precheck / suite-start / suite-end / suite-skip 同族（无 begin 的 end 事件，见本文件
+      // appendFanInStepTrace 的时长通道注释）。
+      // ⛔ 只加读数、不改写与不写的判定：best-effort 姿态、`shouldSkipMirrorWrite` 与「不覆盖更完整载体」
+      // 三条一条不动（把 fail-open 改成 fail-closed 会红掉真实绿的 suite，见 mirrorMechanicalFanInSuiteState
+      // 上方五点）。
+      // ⛔ `ok` 恒为 true：它表示「这一决策步跑完了」，⛔ 不表示「这一维测到了」——后者是 `dimension`
+      // 这个独立取值（硬规则 3b：两个问题不得共用一个布尔）。
+      traceSuiteEvent("suite-mirror", {
+        exit: 0, wall_ms: 0, ok: true,
+        ...(mirrorReading.written
+          ? { written: true, dimension: mirrorReading.dimension }
+          : { written: false, cause: mirrorReading.cause }),
+        // 载体是否带上这一维 = 「本轮是否有一次可读的 suite 日志 + 一次真正落盘的镜像写」的合取。
+        // 读者据此把 meta-driver 的 `dimension-missing` 直接归因到本轮（而不用回放整轮日志）。
+        dimensionOnCarrier: mirrorReading.written && mirrorReading.dimension === "measured",
       });
     } else {
       writeSuiteCapture(suiteCapture, { full_suite_ran: "false", skip_reason: reuseSkip ? "develop-advance-doc-only-reuse" : "doc-only-delta", suite_exit: "0", suite_head: suiteHead });
@@ -4366,6 +4389,20 @@ export async function spawnMechanicalFanIn(opts: MechanicalFanInOptions): Promis
   return red("parse-mechanical-fan-in", `unparseable fresh mechanical fan-in output: ${(r.stderr || r.stdout || "").trim() || `exit ${r.status}`}`, r.status);
 }
 
+/** gap-meta-parsenotevaluatedcheckers — {@link mirrorMechanicalFanInSuiteState} 的**决定**，三态
+ *  （硬规则 3b：输出词表里必须有独立取值，否则「写了」「按设计没写」「写挂了」同形）。
+ *
+ *  为什么把 `void` 改成返回值：本函数是 `full-suite-state.json` 的**最后一写**，而它的 fail-open 姿态
+ *  （不阻塞主执行，人 2026-08-30 裁定）让「载体最后一维在不在」在生产上**没有任何读数**——读者侧只能
+ *  看到 `cause:"dimension-missing"`，无法区分「本轮镜像按设计保留了更完整的载体」与「本轮镜像写了一个
+ *  缺维度的载体」与「本轮根本没走到镜像」。返回值只喂 trace，⛔ 不参与任何落盘判定：写与不写的条件表
+ *  在函数体里一字未改，best-effort 也不变（调用方忽略返回值仍然编译、仍然安全）。 */
+export type MirrorWriteReading =
+  /** 落盘了。`dimension`：这一维是否随本轮一起写下去（measured = 测得零或逐名；unmeasured = 日志读不出）。 */
+  | { written: true; dimension: "measured" | "unmeasured" }
+  /** 没落盘，且成因具名（⛔ 不是「没有」）。 */
+  | { written: false; cause: "build-error" | "in-flight" | "kept-richer-carrier" | "exception" };
+
 /** gap-meta-extractnotevaluatedchecker — 从**本轮** suite 日志里逐行解析惰性守卫
  *  （`STATIC_CHECK_NOT_EVALUATED: <name>`，checker-cost-lib exit 3）。⛔ 不另造正则：复用
  *  `full-suite-runner.ts` 的 `extractNotEvaluatedChecker`（它与 runner 终态写者同一个解析器 ⇒ 镜像
@@ -4430,7 +4467,7 @@ export function mirrorMechanicalFanInSuiteState(opts: {
    *    `undefined`   — 日志读不出 ⇒ **未测量**，载体里该字段缺席（⛔ 不写 `[]` 冒充「测得零」）。
    *  ⛔ 缺省不是 `[]`：把「没测到」写成「测到零」正是本任务要消灭的同形。 */
   notEvaluatedCheckers?: NotEvaluatedChecker[];
-}): void {
+}): MirrorWriteReading {
   try {
     const built = buildMirrorState({
       state: "green", startedAt: opts.startedAt, finishedAt: opts.finishedAt,
@@ -4438,17 +4475,22 @@ export function mirrorMechanicalFanInSuiteState(opts: {
       taskId: opts.task, runId: opts.runId, runner: "inner", scope: "worktree",
       ...(opts.notEvaluatedCheckers === undefined ? {} : { notEvaluatedCheckers: opts.notEvaluatedCheckers }),
     });
-    if (built.error) return;
+    if (built.error) return { written: false, cause: "build-error" };
     const current = readCurrentState(opts.stateFile);
-    if (shouldSkipMirrorWrite(current)) return;
+    if (shouldSkipMirrorWrite(current)) return { written: false, cause: "in-flight" };
     // gap-meta-extractnotevaluatedchecker — 本轮**读不出**本任务的惰性守卫（未测量）而盘上载体
     // 已经带着这一维（runner 自己写的完整终态）⇒ 跳过这次覆盖。⛔ 不用一个缺维度的记录去顶掉
     // 一个维度完整的记录——那正是缺陷的另一半（「镜像把 runner 已经测过的完整载体覆盖成缺维度载体」）。
     if (opts.notEvaluatedCheckers === undefined &&
-        current && Array.isArray((current as { notEvaluatedCheckers?: unknown }).notEvaluatedCheckers)) return;
+        current && Array.isArray((current as { notEvaluatedCheckers?: unknown }).notEvaluatedCheckers)) {
+      return { written: false, cause: "kept-richer-carrier" };
+    }
     writeMirrorState(opts.stateFile, built.state);
+    return { written: true, dimension: opts.notEvaluatedCheckers === undefined ? "unmeasured" : "measured" };
   } catch {
-    // best-effort：镜像写失败 ≠ fan-in 失败（mfi 仍是权威）。
+    // best-effort：镜像写失败 ≠ fan-in 失败（mfi 仍是权威）。⛔ 但**不是沉默**：异常作为独立取值
+    // 返回给调用方（trace 落痕），与「写了」「按设计没写」三者互不同形（硬规则 3b）。
+    return { written: false, cause: "exception" };
   }
 }
 

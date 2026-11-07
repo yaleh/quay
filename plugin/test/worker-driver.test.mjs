@@ -652,29 +652,44 @@ test("gap-meta-extractnotevaluatedchecker — 镜像载体带惰性守卫这一�
   assert.deepEqual(parseNotEvaluatedCheckers(""), [], "空日志 ⇒ 空数组（调用方读得到 ⇒ 测得零）");
 
   // ② 测得零 ⇒ 载体里是 []（present）+ meta-driver 读到 evaluated:true/names:[]。
-  mirrorMechanicalFanInSuiteState(opts({ notEvaluatedCheckers: parseNotEvaluatedCheckers(log.replace(/^STATIC_CHECK_NOT_EVALUATED:.*$/m, "")) }));
+  const r2 = mirrorMechanicalFanInSuiteState(opts({ notEvaluatedCheckers: parseNotEvaluatedCheckers(log.replace(/^STATIC_CHECK_NOT_EVALUATED:.*$/m, "")) }));
   const measuredZero = JSON.parse(fs.readFileSync(stateFile, "utf8"));
   assert.deepEqual(measuredZero.notEvaluatedCheckers, [], "测得零 ⇒ 空数组（⛔ 不是字段缺席）");
+  assert.deepEqual(r2, { written: true, dimension: "measured" },
+    "gap-meta-parsenotevaluatedcheckers — 落盘且该维随本轮写下去 ⇒ 读数 {written:true,dimension:measured}");
 
   // ③ 具名 ⇒ 逐名落进载体。
-  mirrorMechanicalFanInSuiteState(opts({ notEvaluatedCheckers: parseNotEvaluatedCheckers(log) }));
+  const r3 = mirrorMechanicalFanInSuiteState(opts({ notEvaluatedCheckers: parseNotEvaluatedCheckers(log) }));
   const named = JSON.parse(fs.readFileSync(stateFile, "utf8"));
   assert.deepEqual(named.notEvaluatedCheckers.map((c) => c.name), ["direct-to-develop-bypass-check"],
     "惰性守卫的名字必须落进镜像载体（旧行为：整维丢失 ⇒ meta-driver 读数恒为未测量）");
+  assert.deepEqual(r3, { written: true, dimension: "measured" }, "具名同样计入 measured");
 
   // ④ 未测量（不传）而盘上已带该维 ⇒ 不覆盖（⛔ 不用缺维度记录顶掉更完整的记录）。
-  mirrorMechanicalFanInSuiteState(opts({}));
+  const r4 = mirrorMechanicalFanInSuiteState(opts({}));
   const kept = JSON.parse(fs.readFileSync(stateFile, "utf8"));
   assert.deepEqual(kept.notEvaluatedCheckers.map((c) => c.name), ["direct-to-develop-bypass-check"],
     "未测量 ⛔ 不得抹掉既有载体上的这一维");
+  // gap-meta-parsenotevaluatedcheckers — 「按设计拒绝覆盖」必须是**具名取值**，⛔ 不是沉默：
+  // 载体最后一维没变时，读者要能分辨「镜像保留了更完整的载体」与「镜像写了一个缺维度的载体」。
+  assert.deepEqual(r4, { written: false, cause: "kept-richer-carrier" },
+    "保留更完整载体 ⇒ {written:false,cause:kept-richer-carrier}（⛔ 不是 void/静默）");
 
   // ⑤ 未测量且盘上没有该维 ⇒ 照常写（字段缺席，⛔ 不写 [] 冒充测得零）。
   fs.writeFileSync(stateFile, JSON.stringify({ state: "green", finishedAt: 1 }), "utf8");
-  mirrorMechanicalFanInSuiteState(opts({}));
+  const r5 = mirrorMechanicalFanInSuiteState(opts({}));
   const unmeasured = JSON.parse(fs.readFileSync(stateFile, "utf8"));
   assert.equal(unmeasured.taskId, "gap-inert", "镜像照常写（best-effort 姿态不变）");
   assert.equal("notEvaluatedCheckers" in unmeasured, false,
     "未测量 ⇒ 字段缺席：meta-driver 据此报 evaluated:false（⛔ 不是「查过、零个」）");
+  assert.deepEqual(r5, { written: true, dimension: "unmeasured" },
+    "写了但这一维没测到 ⇒ 独立取值（⛔ 不与 measured 同形）");
+
+  // ⑥ 在飞（载体 finishedAt 为 null）⇒ 不写，且成因具名（与 ⑤ 的「写了但未测量」互不同形）。
+  fs.writeFileSync(stateFile, JSON.stringify({ state: "running", finishedAt: null }), "utf8");
+  const r6 = mirrorMechanicalFanInSuiteState(opts({ notEvaluatedCheckers: [] }));
+  assert.equal(JSON.parse(fs.readFileSync(stateFile, "utf8")).state, "running", "在飞载体不被覆盖");
+  assert.deepEqual(r6, { written: false, cause: "in-flight" }, "in-flight 独立取值");
 });
 
 test("computeOutcome — non-zero ⇒ failed; signal ⇒ killed; timedOut ⇒ timed-out (AC3 终态/失败原因)", () => {
