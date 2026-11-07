@@ -138,12 +138,19 @@ your output and treat that dimension as unreadable, ⛔ do NOT fabricate a readi
   `evaluated:true` + `names:[...]` = the carrier was read and these guards went inert (enumerated by
   name on purpose — ⛔ never a bare count — so you can say WHICH one);
   `evaluated:true` + `names:[]` = the dimension WAS measured and this round had none;
-  `evaluated:false` = the dimension was NOT measured (`cause:"carrier-absent-or-unreadable"` or
-  `"dimension-missing"`) — ⛔ this is NOT "no inert checker": it means the reading itself is dark, and
-  saying "no inert guard fired" from it would be reading an unmeasured quantity as a pass. Disposition:
+  `evaluated:false` = the dimension was NOT measured — and the `cause` says WHICH kind of dark
+  (`gap-meta-inertcheckersreading`, ⛔ three causes are not one "not measured"):
+  `"carrier-absent-or-unreadable"` (no carrier / unparseable), `"suite-in-flight"` (the carrier is
+  there with `state:"running"`: the suite is still running and the dimension is simply not written
+  yet), or `"dimension-missing"` (the carrier reached a TERMINAL state without the field — a writer
+  dropped it). ⛔ This is NOT "no inert checker": it means the reading itself is dark, and saying "no
+  inert guard fired" from it would be reading an unmeasured quantity as a pass. Disposition:
   for `evaluated:true` + a name, name the guard and what it left unmeasured; repairing a guard is
   repair of an EXISTING mechanism, so it is WORK (`autoDrive`) when you have the evidence, ⛔ never
-  "it's green". For `evaluated:false`, treat the reading as a hole in the instrument: report WHICH
+  "it's green". For `evaluated:false`, the cause decides: `suite-in-flight` is a TRANSIENT — the
+  instrument has not run yet, so say nothing about the guards and ⛔ do not file a proposal against a
+  mirror (reporting it as a regression is a false alarm that burns a whole repair round);
+  `carrier-absent-or-unreadable` / `dimension-missing` are a hole in the instrument: report WHICH
   carrier/writer dropped the dimension (the mechanical fan-in mirror is the known one) rather than
   concluding anything about the guards.
 - `timeSeries`: the cross-round DERIVED layer — everything else in `readings` is a snapshot, and a
