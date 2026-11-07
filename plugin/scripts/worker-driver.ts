@@ -2428,11 +2428,17 @@ export interface WorkerCmdOptions {
 /** fan-in 归属说明（gap-fan-in-driver-mechanical-orchestration）：worker 只实现、实现后退出，
  *  driver 接手 worktree 机械跑 fan-in（锁/merge/delta/typecheck/scoped门/suite/ff）——worker 不再自己
  *  跑 suite、也不再以 scriptPath 调 fan-in-execute workflow（那套「子代理串行跑机械步骤」被 driver 取代，
- *  只作机械失败的语义兜底）。创建 prompt 与续做 prompt 共用（步骤序号由调用方填）。 */
+ *  只作机械失败的语义兜底）。创建 prompt 与续做 prompt 共用（步骤序号由调用方填）。
+ *
+ *  gap-prompt-string-assert-seven-rules-disposition（`driverFanInNote-2` = remove）：原来的括号步骤清单
+ *  `(merge develop → delta 判定 → typecheck → scoped门 → suite → ff)` 已删除。理由：它**不是一条可独立
+ *  违反的规则**，而是本函数的另一句（driver 接管并机械跑 fan-in）的机制细节复述——worker 无论读没读到
+ *  这一步清单，行为都不变；而它是**机制正本（`runMechanicalFanIn` 的 step 序列）的一份手抄副本**，
+ *  fan-in 增删步时它静默漂移，没有任何判据在盯这个同一性。判据面在 fan-in 自己的 step trace 上
+ *  （`fan-in-driver-mechanical-orchestration.test.mjs` 跑真 repo 读真 trace），不在提示词里。 */
 function driverFanInNote(): string {
   return [
-    `exit — the worker-driver takes over your worktree and mechanically runs fan-in`,
-    `(merge develop → delta 判定 → typecheck → scoped门 → suite → ff).`,
+    `exit — the worker-driver takes over your worktree and mechanically runs fan-in.`,
     `You do NOT run the suite and do NOT call the fan-in workflow yourself.`,
   ].join(" ");
 }
@@ -3374,7 +3380,16 @@ export function relatednessSignalsFor(root: string, task: string, failingTestRel
 }
 
 /** 把信号列表拼成续做提示文本。措辞明确「这不是结论，是提示，请重跑验证」，⛔ 不含「跳过/无需检查」等
- *  可被误读为自动放行的措辞（AC4）。 */
+ *  可被误读为自动放行的措辞（AC4）。
+ *
+ *  gap-prompt-string-assert-seven-rules-disposition：
+ *  · `formatRelatednessNote-1` = **remove**（并入 `-2`）。原来表头写 `(mechanical, not a verdict — verify
+ *    before acting)`，与表尾那句是**同一条规则**（「把这块标成非结论」）在两处复述——不是两条可各自违反
+ *    的规则。合并后只由表尾承载，表头只留 `(mechanical)`。
+ *  · `formatRelatednessNote-2` = **keep**：措辞给的是**给 agent 的解读约束**，机器判不了 agent 怎么读。
+ *    它**不是自动放行的依据**这一点由代码保证且可判：豁免判定 `judgeRetryExemption` 只读 delta 相关性 +
+ *    断言签名跨任务复发（耐久载体），⛔ 不读这段提示文本 ⇒ 一条 UNRELATED 提示本身永不免除重试计数
+ *    （行为守卫见 `worker-driver.test.mjs` 的 `formatRelatednessNote-2` 组）。 */
 export function formatRelatednessNote(signals: RelatednessSignal[]): string {
   if (signals.length === 0) return "";
   const lines = signals.map((s) => {
@@ -3386,7 +3401,7 @@ export function formatRelatednessNote(signals: RelatednessSignal[]): string {
     return `  - ${s.failingTest}: load-sensitive registry = ${v}`;
   });
   return [
-    "delta-relatedness check (mechanical, not a verdict — verify before acting):",
+    "delta-relatedness check (mechanical):",
     ...lines,
     "This is a hint, not a conclusion: it does not prove the failure is unrelated to this task. Re-run the suite once to verify before assuming it is environmental; if it reproduces, treat it as a real finding regardless of this note.",
   ].join("\n");

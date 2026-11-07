@@ -15,7 +15,10 @@ test("gap-fan-in-continue-prompt-not-migrated-to-mechanical — AC2: cold-start 
     failureReason: null, // 冷启动孤儿：worker-outcome 对该 task 无 exited-not-landed 记录 ⇒ 无 mechanical_fan_in
   });
   assert.match(p, /\(unknown\)/, "cold-start orphan: no prior failure record ⇒ (unknown)");
-  assert.match(p, /exit — the worker-driver takes over/, "AC2: still mechanical (driver re-runs fan-in), ⛔ not the workflow");
+  // gap-prompt-string-assert-seven-rules-disposition：原 `assert.match(p, /exit — the worker-driver takes
+  // over/)` 已删除 —— 它是 `driverFanInNote-1`，处置 = **enforce**（强制面 = `runMechanicalFanIn`，
+  // 行为读数见 fan-in-driver-mechanical-orchestration.test.mjs）⇒ ⛔ 不以措辞命中充当执行证据。
+  // 「⛔ 不走 workflow」这半边由下面的 doesNotMatch 棘轮 + 并发 fan-in 的锁串行覆盖。
   assert.doesNotMatch(p, /fan-in-execute\.js/, "AC2: no workflow mis-routing");
 });
 
@@ -35,7 +38,10 @@ test("gap-fan-in-continue-prompt-not-migrated-to-mechanical — AC3: workflow fa
   for (const [label, p] of [["create", create], ["continue", cont]]) {
     assert.doesNotMatch(p, /Workflow tool/, `AC3: ${label} prompt never says to call the Workflow tool`);
     assert.doesNotMatch(p, /fan-in-execute\.js/, `AC3: ${label} prompt has no workflow script path`);
-    assert.match(p, /do NOT call the fan-in workflow/, `AC3: ${label} prompt explicitly forbids calling the workflow`);
+    // gap-prompt-string-assert-seven-rules-disposition：原 `assert.match(p, /do NOT call the fan-in
+    // workflow/)` 已删除 —— 它是 `driverFanInNote-3` 的措辞针，处置 = **enforce**（并发 fan-in 由
+    // `acquireFanInLock` 串行；行为读数见 fan-in-driver-mechanical-orchestration.test.mjs
+    // 「排在持有者之后的机械 fan-in 排队等锁」）⇒ 上面两条 doesNotMatch 已覆盖「不调 workflow」的可判半边。
   }
 });
 

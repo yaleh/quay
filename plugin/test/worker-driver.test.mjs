@@ -1019,15 +1019,19 @@ test("resolveRun / splitArgs / defaultWorkerArgv / signalExitCode / parseTimeout
   assert.equal(resolveConcurrency(0, 2, 7), 7, "non-positive explicit is ignored ⇒ config cap");
 });
 
-test("gap-fan-in-driver-mechanical-orchestration — buildWorkerPrompt is implement-only: worker exits, driver takes over mechanical fan-in (⛔ no suite / no workflow call)", () => {
+// gap-prompt-string-assert-seven-rules-disposition：`driverFanInNote-1` / `-3` 的处置 = **enforce**，
+// `driverFanInNote-2` = **remove**（并入 -1）。原先这里用 4 条 assert.match 钉那句提示词的措辞
+// （exit — the worker-driver takes over / mechanically runs fan-in / You do NOT run the suite /
+// do NOT call the fan-in workflow）——它们证明的只是「提示词说过」，**不是「行为被保证」**（硬规则 9：
+// 可见性 ≠ 执行）⇒ 已删除。真正的强制面在代码：
+//   · 接管与机械执行 = `runMechanicalFanIn`（worker-fan-in.ts），行为读数见
+//     plugin/test/fan-in-driver-mechanical-orchestration.test.mjs（真 repo + 真 git：锁/merge 冲突
+//     ⇒ red at step=merge-develop、suite 红 ⇒ red at step=suite 不落地、并发 fan-in 排队等锁）；
+//   · 「⛔ 不调 fan-in workflow」= 锁使并发 fan-in 串行（同文件「排在持有者之后…排队等锁」）。
+// 本测试保留的唯一判据是 worker 侧义务「实现」，它不属于上面那 6 条。
+test("gap-fan-in-driver-mechanical-orchestration — worker 侧义务仍是「实现」（fan-in 强制面见 fan-in 行为测试）", () => {
   const prompt = buildWorkerPrompt("gap-x", "/r");
-  // worker 只实现、实现后退出；driver 接手 worktree 机械跑 fan-in（取代旧「worker 跑 suite + 以
-  // scriptPath 调 fan-in-execute workflow」全链式 prompt）。
   assert.match(prompt, /implement the task per its Proposal\/Plan\/AC\/DoD/, "worker implements the task");
-  assert.match(prompt, /exit — the worker-driver takes over/, "driver takes over fan-in (worker exits, not runs fan-in)");
-  assert.match(prompt, /mechanically runs fan-in/, "names the mechanical fan-in");
-  assert.match(prompt, /You do NOT run the suite/, "worker must NOT run the suite (driver does)");
-  assert.match(prompt, /do NOT call the fan-in workflow/, "worker must NOT call the fan-in workflow (retired as the worker path)");
 });
 
 test("gap-fan-in-driver-mechanical-orchestration — buildWorkerPrompt drops the old fan-in workflow signature (⛔ no fan-in-execute.js / generateRunId / scriptPath)", () => {
@@ -1240,7 +1244,11 @@ test("gap-worker-prompt-note-family-slimming — AC1: buildWorkerPrompt + buildC
   assert.ok(combined <= threshold, `combined normalized chars ${combined} must be ≤ ${threshold} (baseline ${WORKER_PROMPT_SLIM_BASELINE}, −25%)`);
 });
 
-test("gap-worker-prompt-note-family-slimming — AC2 (negative control): the four arbitration needles stay verbatim in BOTH prompts", () => {
+test("gap-worker-prompt-note-family-slimming — AC2 (negative control): the arbitration needles stay verbatim in BOTH prompts", () => {
+  // gap-prompt-string-assert-seven-rules-disposition：原「driver take-over exit needle」
+  // （`exit — the worker-driver takes over`）已删除 —— 它是 `driverFanInNote-1`，处置 = **enforce**
+  // （由 `runMechanicalFanIn` 强制，行为读数在 fan-in-driver-mechanical-orchestration.test.mjs），
+  // ⛔ 不以措辞命中断言充当它的执行证据（硬规则 9）。剩下的四条针不是那 7 条之一。
   const cases = [
     ["create", buildWorkerPrompt("gap-x", "/r")],
     ["continue", buildContinueWorkerPrompt("gap-x", "/r", {
@@ -1252,13 +1260,17 @@ test("gap-worker-prompt-note-family-slimming — AC2 (negative control): the fou
     assert.match(prompt, /task_write/, `${name}: task_write (ABI) needle`);
     assert.match(prompt, /do NOT hand-edit/, `${name}: not-hand-edit-checkbox needle`);
     assert.match(prompt, /anti-drift-touches-check\.ts --task gap-x --worktree/, `${name}: anti-drift argv needle`);
-    assert.ok(prompt.includes("exit — the worker-driver takes over"), `${name}: driver take-over exit needle (verbatim)`);
   }
 });
 
 // gap-worker-verify-condenser AC4：两个 prompt 构造点都指向 worker 验证入口（--verify-run / --verify-rerun），
-// 且仍逐字含「退出前跑完整 scoped gate」（preMergeNote），四根既有不变量（worktree 绝对路径 / task_write /
-// anti-drift argv / exit 指令）仍在。⛔ 按位置判定：命中必须在实现步骤内（worker-driver.ts 与 --verify-run 相邻）。
+// 且四根既有不变量（worktree 绝对路径 / task_write / anti-drift argv / 目标文件）仍在。
+// ⛔ 按位置判定：命中必须在实现步骤内（worker-driver.ts 与 --verify-run 相邻）。
+// gap-prompt-string-assert-seven-rules-disposition：本测试原还钉两句提示词措辞
+// （`before exiting, do the pre-merge + scoped-gate step` / `run the SAME scoped gate the driver's fan-in runs`）
+// 与 driver take-over 句 —— `preMergeNote-1` = **enforce**（fan-in 在自己的锁内**重做** merge 与 scoped 门，
+// 冲突/红则 fail-closed，行为读数见 fan-in-driver-mechanical-orchestration.test.mjs），`driverFanInNote-1` 同理
+// ⇒ 这三条措辞断言已删除，⛔ 不以「提示词说过」充当执行证据（硬规则 9）。
 test("gap-worker-verify-condenser AC4 — create 与 continue 两个构造点都指向 --verify-run / --verify-rerun 入口，且预退出完整 scoped 门仍在", (t) => {
   const root = makeRoot("verify-prompt");
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
@@ -1276,14 +1288,10 @@ test("gap-worker-verify-condenser AC4 — create 与 continue 两个构造点都
   for (const [name, prompt] of cases) {
     assert.match(prompt, /worker-driver\.(?:ts|js) --verify-run --task gap-x --worktree/, `${name}: points at the --verify-run entry (worker-driver + flag adjacent)`);
     assert.match(prompt, /--verify-rerun --task gap-x --worktree/, `${name}: points at the --verify-rerun entry`);
-    // 退出前完整 scoped 门仍是硬路径（preMergeNote 逐字保留）。
-    assert.match(prompt, /before exiting, do the pre-merge \+ scoped-gate step/, `${name}: before-exit full scoped gate step retained`);
-    assert.match(prompt, /run the SAME scoped gate the driver's fan-in runs/, `${name}: full scoped gate command retained`);
     // 四根既有不变量仍在。
     assert.match(prompt, /file_path MUST be .* absolute path/, `${name}: worktree absolute-path guard`);
     assert.match(prompt, /task_write/, `${name}: task_write (ABI)`);
     assert.match(prompt, /anti-drift-touches-check\.ts --task gap-x --worktree/, `${name}: anti-drift argv`);
-    assert.ok(prompt.includes("exit — the worker-driver takes over"), `${name}: driver take-over exit`);
   }
 });
 
@@ -1352,13 +1360,34 @@ test("AC3 (能取假) — 读不懂有独立取值 unknown，不与 unrelated/no
   assert.notEqual(classifyLoadSensitive(root, "plugin/test/missing.test.mjs"), "not-annotated", "unknown ≠ not-annotated");
 });
 
-test("AC4 (能取假) — 措辞含「不是结论/重跑验证」，⛔ 不含可误读为自动放行的「跳过/无需检查」", () => {
-  const note = formatRelatednessNote([{
-    signal: "delta-relatedness", failingTest: "packages/quay/test/obs.test.mjs", verdict: "unrelated", reason: "r",
-  }]);
-  assert.match(note, /not a verdict|not a conclusion/, "names 'not a verdict/conclusion'");
-  assert.match(note, /[Rr]e-run the suite once to verify/, "instructs re-run to verify");
-  assert.doesNotMatch(note, /\bskip\b|无需检查|可以跳过/, "no auto-skip wording (skip / 无需检查 / 可以跳过)");
+// gap-prompt-string-assert-seven-rules-disposition 的处置（本段）：
+//   · `formatRelatednessNote-1` = **remove**（并入 `-2`）。表头原理写 `(mechanical, not a verdict — verify
+//     before acting)`，与表尾 "This is a hint, not a conclusion …" 是**同一条规则**（把这块标成非结论）的
+//     两处复述 ⇒ 合并后只由表尾承载，表头只留 `(mechanical)`。
+//   · `formatRelatednessNote-2` = **keep**：措辞约束的是 **agent 的解读**，机器判不了 agent 怎么读；
+//     但「提示不是自动放行」这一点**有代码保证**：重试豁免判定 `judgeRetryExemption` 只读 delta 相关性 +
+//     断言签名跨任务复发（耐久载体），⛔ 不读这段文本（行为读数：worker-driver-fan-in-s03/s04 的
+//     「unrelated ∧ 未复发 ⇒ own-defect-counted（fail-closed 照常计数）」）。
+// 原三条措辞断言（/not a verdict|not a conclusion/、/re-run the suite once to verify/、不含 skip 词）
+// 已删除 —— 换成【输出是输入的函数】这条行为判据：换输入就换输出，措辞命中不再是判据。
+test("AC4 (能取假) — formatRelatednessNote 是信号列表的函数：逐条渲染、判词取自输入 verdict、空列表不产表头", () => {
+  const signals = [
+    { signal: "delta-relatedness", failingTest: "packages/quay/test/a.test.mjs", verdict: "unrelated", reason: "not in Touches/diff" },
+    { signal: "load-sensitive", failingTest: "packages/quay/test/a.test.mjs", verdict: "not-annotated", reason: "no @load-sensitive declaration" },
+    { signal: "delta-relatedness", failingTest: "packages/quay/test/b.test.mjs", verdict: "related", reason: "in Touches/diff" },
+  ];
+  const note = formatRelatednessNote(signals);
+  const rows = note.split("\n").filter((l) => l.startsWith("  - ")); // 信号行（表头与表尾不是）
+  assert.equal(rows.length, signals.length, "输出行数 = 输入信号数（逐条渲染，⛔ 固定文案）");
+  assert.deepEqual(
+    rows.map((r) => r.match(/(packages\/quay\/test\/[a-b]\.test\.mjs):/)?.[1]),
+    signals.map((s) => s.failingTest),
+    "每条按输入顺序点名其 failingTest（数据来自输入，不是写死的例子）",
+  );
+  assert.ok(rows[0].includes("= UNRELATED ("), "verdict 取自输入：unrelated ⇒ UNRELATED");
+  assert.ok(rows[2].includes("= RELATED ("), "verdict 取自输入：related ⇒ RELATED");
+  assert.ok(!rows[2].includes("UNRELATED"), "两个取自输入的判词可区分（⛔ 恒定输出）");
+  assert.equal(formatRelatednessNote([]), "", "空信号列表 ⇒ 空串（⛔ 只剩表头的空壳：那会把「无信号」伪装成「查过」）");
 });
 
 test("AC5 (能取假) — buildContinueWorkerPrompt 在 suite 红时拼入 continueRelatednessNote 输出", (t) => {
@@ -1375,15 +1404,20 @@ test("AC5 (能取假) — buildContinueWorkerPrompt 在 suite 红时拼入 conti
     failureReason: "suite red",
     attempts: [{ ts: "2026-09-01T00:00:00.000Z", runId: "r", sessionId: "s", step: "suite", reason: "suite red", fanInLog: null, suiteLog }],
   });
-  assert.match(withRed, /delta-relatedness check/, "suite-red continue prompt carries the relatedness note");
-  assert.match(withRed, /packages\/quay\/test\/obs\.test\.mjs/, "note names the failing test");
+  // 判据取【数据】而非提示词措辞（gap-prompt-string-assert-seven-rules-disposition）：每个失败测试产
+  // **两条**信号（delta-relatedness + load-sensitive），故该测试名在信号行里恰好出现两次；行的存在与
+  // 数量由 suite 日志里的失败测试决定，⛔ 不是「提示词里有某句话」。
+  const signalRowsFor = (prompt, file) =>
+    prompt.split("\n").filter((l) => l.trimStart().startsWith("- ") && l.includes(file)).length;
+  assert.equal(signalRowsFor(withRed, "packages/quay/test/obs.test.mjs"), 2,
+    "one signal row per signal (delta-relatedness + load-sensitive) for the failing test");
 
-  // 负控制：无 suite 红（attempts 无 suiteLog）⇒ 不注入。
+  // 负控制：无 suite 红（attempts 无 suiteLog）⇒ 该失败测试一行都不出现。
   const withoutRed = buildContinueWorkerPrompt("gap-x", root, {
     worktreePath: "/wt", branchCommits: 1, branchHeadSubject: "x", acChecked: 1, acTotal: 2, failureReason: "r",
     attempts: [],
   });
-  assert.doesNotMatch(withoutRed, /delta-relatedness check/, "no suite-red ⇒ no relatedness note");
+  assert.equal(signalRowsFor(withoutRed, "packages/quay/test/obs.test.mjs"), 0, "no suite-red ⇒ no signal rows for that test");
 });
 
 test("AC6 (能取假) — 真实案例回放：observation.test.mjs 判 unrelated + 未标注（⛔ 只在合成 fixture 上验证 ⇒ 假）", () => {
@@ -1416,7 +1450,11 @@ test("AC1 (gap-worker-premerge-scoped-gate-cache) — buildWorkerPrompt 含「�
   const scopedCmd = resolution.argv.join(" ");
   assert.ok(prompt.includes(scopedCmd), "prompt carries the exact resolveScopedGateCommand command string (single source, ⛔ 两套标准)");
   assert.match(prompt, /--for-task gap-x --allow-thin/, "command tail matches the fan-in scopedCmd form");
-  assert.match(prompt, /merge --no-edit develop/, "instructs the pre-merge of develop");
+  // gap-prompt-string-assert-seven-rules-disposition：原 `assert.match(prompt, /merge --no-edit develop/)`
+  // 已删除 —— 它钉的是 **preMergeNote-1** 的措辞。该规则处置 = **enforce**：fan-in 在自己的锁内**重做**
+  // 这次 merge（step("merge-develop")），冲突即 red（行为读数见 fan-in-driver-mechanical-orchestration.test.mjs
+  // 「merge develop 冲突 ⇒ 机械 fan-in red（step=merge-develop）」）⇒ 提示词里那句话是**优化提示**，
+  // 不是执行证据（硬规则 9）。
   assert.match(prompt, /--write-scoped-gate-cache/, "instructs the mechanical cache write");
 });
 
@@ -1435,7 +1473,7 @@ test("AC2 (gap-worker-premerge-scoped-gate-cache) — buildContinueWorkerPrompt 
   assert.equal(resolution.kind, "run", "声明了 scoped_command ⇒ run");
   const scopedCmd = resolution.argv.join(" ");
   assert.ok(cont.includes(scopedCmd), "continue prompt carries the exact resolveScopedGateCommand command (real worktree path)");
-  assert.match(cont, /merge --no-edit develop/, "continue prompt instructs the pre-merge");
+  // 同 AC1：preMergeNote-1 的措辞断言已删除（处置 = enforce，强制面在 fan-in 锁内重做的 merge-develop 步骤）。
   assert.match(cont, /--write-scoped-gate-cache/, "continue prompt instructs the cache write");
 });
 
@@ -5512,17 +5550,29 @@ test("AC4 (能取假) — buildWorkerPrompt and buildContinueWorkerPrompt both s
     assert.match(prompt, /dark-axis/, `${name}: the step that enforces it must be named`);
   }
 
-  // The continue prompt carries the ACTUAL prior refusal, so the worker knows which hole to close.
-  assert.match(cont, /refused BY THE dark-axis STEP/);
-  assert.match(cont, /MISSING: the task body records no L_D\/L_G reading/);
+  // gap-prompt-string-assert-seven-rules-disposition：`continueDarkAxisNote-1` 的处置 = **enforce**。
+  // 义务本身（缺 L_D/L_G 读数且无理由声明 ⇒ 拒翻）由 `classifyDarkAxisRecord`
+  // （packages/quay/src/gate/dark-axis-record.ts:179）强制，负臂在 plugin/test/dark-axis-record-check.test.mjs；
+  // 提示词只是**该判词的投影**。⇒ 原来的两条措辞断言（/refused BY THE dark-axis STEP/、逐字理由句）已删除，
+  // 换成【该子句是 failureReason 的函数】这条行为判据：
+  //   · 触发条件 = /dark-axis/i；命中 ⇒ 子句逐字回显该 reason（⛔ 固定文案）；
+  //   · 未命中 ⇒ 不产生该子句（否则每轮重试都在喊 dark-axis，噪音）。
+  // 观测手法：reason 在 prompt 里本就出现一次（模板的 `because: <reason>` 通用行），故【出现次数】就是判别器
+  // ——触发 2 次（通用行 + 子句逐字回显），未触发 1 次。⛔ 不用措辞命中。
+  const occurrences = (hay, needle) => hay.split(needle).length - 1;
+  const priorReason = "dark-axis (ADR-007 per-milestone predicate) refused the flip — MISSING: the task body records no L_D/L_G reading";
+  assert.equal(occurrences(cont, priorReason), 2,
+    "triggered: the reason appears twice — the generic `because:` line + the dark-axis clause echoing it verbatim");
 
   // Negative control: the clause is conditional — an unrelated prior failure must NOT be dressed up
   // as a dark-axis refusal (otherwise the note becomes noise on every retry).
+  const unrelatedReason = "suite red — 3 files failed";
   const unrelated = buildContinueWorkerPrompt("gap-x", "/r", {
     worktreePath: "/r-worktrees/gap-x", branchCommits: 1, branchHeadSubject: "wip",
-    acChecked: 1, acTotal: 1, failureReason: "suite red — 3 files failed", attempts: [],
+    acChecked: 1, acTotal: 1, failureReason: unrelatedReason, attempts: [],
   });
-  assert.doesNotMatch(unrelated, /refused BY THE dark-axis STEP/);
+  assert.equal(occurrences(unrelated, unrelatedReason), 1,
+    "untriggered: only the generic `because:` line — ⛔ no dark-axis clause dressed up on an unrelated failure");
 });
 
 // ── gap-goal-branch-merge-red-no-gap-filing-deadlock — SPEC §4.7 裁定⑫ 的 gap 立案半边 ──────────────

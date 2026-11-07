@@ -123,9 +123,10 @@ test("gap-fan-in-continue-prompt-not-migrated-to-mechanical — AC1: buildContin
   });
   // 续做 prompt 与创建 prompt 同源 driverFanInNote：worker 实现后退出、driver 接手机械跑 fan-in，
   // ⛔ 不再写旧 workflow 兜底签名（fan-in-execute.js / generateRunId / scriptPath）。
-  assert.match(p, /exit — the worker-driver takes over/, "AC1: continue prompt also lets the driver take over fan-in");
-  assert.match(p, /mechanically runs fan-in/, "AC1: names the mechanical fan-in");
-  assert.match(p, /do NOT call the fan-in workflow/, "AC1: worker never calls the workflow (driver decision)");
+  // gap-prompt-string-assert-seven-rules-disposition：`driverFanInNote-1`/-3 处置 = **enforce**，强制面在
+  // `runMechanicalFanIn`（行为读数见 fan-in-driver-mechanical-orchestration.test.mjs）⇒ 三条措辞断言
+  // （exit — the worker-driver takes over / mechanically runs fan-in / do NOT call the fan-in workflow）已删除，
+  // ⛔ 不以措辞命中充当执行证据。剩下的「不出现旧 workflow 签名」是**退役棘轮**（防旧形态回潮），不是那 3 条之一。
   assert.doesNotMatch(p, /fan-in-execute\.js/, "⛔ no fan-in-execute.js path (workflow retired from the worker prompt)");
   assert.doesNotMatch(p, /generateRunId/, "⛔ no generateRunId (worker no longer dispatches the workflow)");
   assert.doesNotMatch(p, /scriptPath/, "⛔ no scriptPath placeholder");
