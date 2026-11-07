@@ -64,4 +64,4 @@ extra:
 - plugin/scripts/worker-driver.ts
 - plugin/test/worker-driver.test.mjs
 - plugin/test/worker-driver-resident-s05.test.mjs
-- tasks/gap-prompt-string-assert-seven-rules-disposition.md (new)
+- tasks/gap-prompt-string-assert-seven-rules-disposition.md
