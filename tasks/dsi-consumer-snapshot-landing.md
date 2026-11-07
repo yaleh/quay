@@ -1,7 +1,7 @@
 ---
 id: dsi-consumer-snapshot-landing
 title: "DSI: land pinned consumer snapshot"
-status: ready
+status: done
 labels:
   - dsi
   - integration
