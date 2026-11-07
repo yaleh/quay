@@ -1,7 +1,7 @@
 ---
 id: gap-meta-goalringroundaborted
 title: AC-945 判据须按 goalRingRoundAborted 语义回退到最近一条未中止轮，而不是无条件读最后一行
-status: todo
+status: ready
 labels:
   - meta-driver
   - driver-candidate
