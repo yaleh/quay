@@ -1,7 +1,7 @@
 ---
 id: gap-meta-parsenotevaluatedcheckers
 title: 生产 fan-in 载体缺少 notEvaluatedCheckers：meta-driver 的惰性守卫维度每轮都被判为「未测量」
-status: ready
+status: done
 labels:
   - meta-driver
   - driver-candidate
