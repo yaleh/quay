@@ -2,7 +2,7 @@
 id: gap-meta-inertcheckersreading
 title: Inert-guard reading cannot distinguish an in-flight suite from a dropped
   notEvaluatedCheckers dimension
-status: ready
+status: done
 labels:
   - meta-driver
   - driver-candidate
