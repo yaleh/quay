@@ -114,8 +114,8 @@ src 前缀均为 `plugin/scripts/worker-driver.ts`。
 | `formatRelatednessNote-2` | 3378 → 3393 | `This is a hint, not a conclusion … Re-run the suite once to verify …` | **keep** | 措辞约束的是 **agent 的解读**，机器判不了 agent 怎么读（正当的 `keep` 情形）。行为级守卫：它**不是自动放行依据**这一点由 `judgeRetryExemption` 保证——豁免只读 delta 相关性 + 断言签名跨任务复发（耐久载体），⛔ 不读这段文本；一条 UNRELATED 提示本身永不免除重试计数（读数 E6）。 |
 
 ### E3 `string-assert` 清零（AC2）
-这 7 条对应的**措辞断言共删除 24 条**（`git diff -U0 -- plugin/test | grep '^-' | grep -E 'assert\.(match|ok|doesNotMatch)'`）：
-- `plugin/test/worker-driver.test.mjs`（19 条）：`/exit — the worker-driver takes over/`（3 处）、`/mechanically runs fan-in/`（2 处）、`/You do NOT run the suite/`、`/do NOT call the fan-in workflow/`、`/before exiting, do the pre-merge \+ scoped-gate step/`、`/run the SAME scoped gate the driver's fan-in runs/`、`/merge --no-edit develop/`（2 处）、`/not a verdict|not a conclusion/`、`/[Rr]e-run the suite once to verify/`、`doesNotMatch /\bskip\b|无需检查|可以跳过/`、`/delta-relatedness check/`（2 处）、`/refused BY THE dark-axis STEP/`（2 处）、`/MISSING: the task body records no L_D\/L_G reading/`。
+这 7 条对应的**措辞断言共删除 24 条**（`git diff -U0 -- plugin/test | grep '^-' | grep -E 'assert\\.(match|ok|doesNotMatch)'`）：
+- `plugin/test/worker-driver.test.mjs`（19 条）：`/exit — the worker-driver takes over/`（3 处）、`/mechanically runs fan-in/`（2 处）、`/You do NOT run the suite/`、`/do NOT call the fan-in workflow/`、`/before exiting, do the pre-merge \\+ scoped-gate step/`、`/run the SAME scoped gate the driver's fan-in runs/`、`/merge --no-edit develop/`（2 处）、`/not a verdict|not a conclusion/`、`/[Rr]e-run the suite once to verify/`、`doesNotMatch /\\bskip\\b|无需检查|可以跳过/`、`/delta-relatedness check/`（2 处）、`/refused BY THE dark-axis STEP/`（2 处）、`/MISSING: the task body records no L_D\\/L_G reading/`。
 - `plugin/test/worker-driver-resident-s05.test.mjs`（3 条）：`/exit — the worker-driver takes over/`、`/mechanically runs fan-in/`、`/do NOT call the fan-in workflow/`。
 - `plugin/test/worker-driver-resident-s06.test.mjs`（2 条）：`/exit — the worker-driver takes over/`、`/do NOT call the fan-in workflow/`。
 
@@ -189,3 +189,22 @@ SCOPED_EXIT=0
 - plugin/test/worker-driver-resident-s05.test.mjs
 - plugin/test/worker-driver-resident-s06.test.mjs
 - tasks/gap-prompt-string-assert-seven-rules-disposition.md
+
+## 追加记录（落地后核出，未处理）
+
+**发现**：`plugin/scripts/conflict-resolution-rules.ts:220` 的 `resolveConflictMechanically` 能真跑 `git checkout develop --` / `git rm` / dual-copy 字节同步，且有行为测试（`plugin/test/worker-driver-resident-s07.test.mjs:145/245`）。但全仓调用点只有**该文件的 CLI 入口**（`:296`）与测试——**worker/driver 生产路径没有调用者**。
+
+**影响**：`buildContinueWorkerPrompt` 的冲突消解块 = **1842 字符（continue prompt 的 34%）**，其中规则 (1) take-develop docs、(3) dual-copy 已是**机器可判**，prompt 却仍教 agent 手工执行同样的 git 命令。⇒ 生产路径绕过了可执行载体；这正是本任务「可见性 ≠ 执行」的同一形态，只是这次的载体**已经存在且已测试**。
+
+**为何本任务未处理**：本任务的 7 条只覆盖 `enforcement=string-assert` 的规则；冲突消解块不在其中，故未纳入 AC。
+
+**建议动作（未执行）**：把机械可判的两条改为让 worker 调用既有 CLI（`conflict-resolution-rules.ts --resolve <root> <rel> <status>`），prompt 只保留判断型规则 (2)(2b)(5)(6)+FF；预估 −~700 字符。
+
+**PARKED**：本条**不重派**本任务。解除条件（任选其一）：
+- 有人明确下令把机械消解接进 worker 路径；
+- 或出现第二次「prompt 教 agent 做代码已会做的事」的实例（incidence ≥2）。
+
+unpark 检查（为空 ⇒ 仍然未接线）：
+```
+grep -rn 'resolveConflictMechanically' plugin/scripts --include='*.ts' | grep -v conflict-resolution-rules.ts
+```
