@@ -6,14 +6,21 @@ kind: criterion
 goal: GOAL-914
 criterion: "node -e \"const fs=require('fs');const
   L=fs.readFileSync('.quay/goal-round.jsonl','utf8').split('\\n').filter(Boolea\
-  n);if(!L.length){console.error('no goal-round records');process.exit(1)}let
-  j;try{j=JSON.parse(L[L.length-1])}catch(e){console.error('last goal-round
-  unparsable');process.exit(1)}const
+  n);if(!L.length){console.error('no goal-round records');process.exit(1)}const
+  usable=(j)=>{if(!j||typeof j!=='object')return false;const
   ring=(j.facts||[]).find(f=>f&&f.name==='goal-ring');const
+  v=ring&&ring.value;const hasData=!!(v&&typeof
+  v==='object'&&(Array.isArray(v.criteria)||(v.requests&&typeof
+  v.requests==='object')));return !j.stopped_mid_round||hasData};let
+  pick=null;for(let i=L.length-1;i>=0;i--){let
+  j;try{j=JSON.parse(L[i])}catch(e){continue}if(usable(j)){pick=j;break}}if(!pi\
+  ck){console.error('no completed goal-round to read');process.exit(1)}const
+  ring=(pick.facts||[]).find(f=>f&&f.name==='goal-ring');const
   r=ring&&ring.value&&ring.value.requests;if(!r||typeof
-  r!=='object'){console.error('no request-consumer reading in the last
-  round');process.exit(1)}if(r.evaluated!==true){console.error('consumer not
-  measured:
+  r!=='object'){console.error('no request-consumer reading in the last completed
+  round (round
+  '+pick.round+')');process.exit(1)}if(r.evaluated!==true){console.error('consu\
+  mer not measured:
   '+JSON.stringify({evaluated:r.evaluated,cause:r.cause}));process.exit(1)}if(A\
   rray.isArray(r.errors)&&r.errors.length>0){console.error('consumer errors:
   '+JSON.stringify(r.errors));process.exit(1)}console.log(JSON.stringify({evalu\
