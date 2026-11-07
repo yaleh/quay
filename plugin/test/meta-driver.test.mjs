@@ -1770,9 +1770,13 @@ test('readingsDigest: carrierUnreadable 进摘要（读失败出现/消失都必
 
 // gap-not-evaluated-checkers-never-persisted + gap-meta-extractnotevaluatedchecker — 惰性守卫读数：
 // 从 full-suite-state.json 的 notEvaluatedCheckers 逐条枚举名字（⛔ 不是计数）。**三态**：载体读不到
-// ⇒ evaluated:false（cause=carrier-absent-or-unreadable）；载体在但**这一维没被记录**（镜像写/ running 态）
-// ⇒ evaluated:false（cause=dimension-missing）；字段是数组 ⇒ evaluated:true（空数组 = 查过、本轮零个）。
+// ⇒ evaluated:false（cause=carrier-absent-or-unreadable）；载体在但**这一维没被记录**
+// ⇒ evaluated:false（cause 分两支，见下）；字段是数组 ⇒ evaluated:true（空数组 = 查过、本轮零个）。
 // ⛔ 「未测量」与「测得零」必须不同形——旧实现两者都返回 []，生产上镜像载体让读数恒为 []。
+//
+// gap-meta-inertcheckersreading — 「这一维没被记录」必须**再分两支**：full-suite-runner 起跑就写
+// `{state:"running"}` 且不带这一维（full-suite-runner.ts:3608），所以「suite 在飞」与「终态载体丢了
+// 这一维（镜像回归）」此前共用一个 `dimension-missing` ⇒ 本轮该维度暗时无法归因到瞬态还是回归。
 test('collectInertCheckers: 三态 {evaluated,names,cause}——未测量 ⛔ 不与「测得零」同形', () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'meta-driver-inert-'));
   try {
@@ -1796,11 +1800,31 @@ test('collectInertCheckers: 三态 {evaluated,names,cause}——未测量 ⛔ �
     fs.writeFileSync(path.join(tmp, '.quay', 'full-suite-state.json'), JSON.stringify({ state: 'green', notEvaluatedCheckers: [] }), 'utf8');
     assert.deepEqual(collectInertCheckers(tmp), { evaluated: true, names: [], cause: null },
       '显式空数组 ⇒ evaluated:true + names:[]（查过、一个都没有）');
-    // 字段不是数组（state 还在 running / 机械 fan-in 镜像写的缺维度载体）⇒ 未测量，⛔ 不抛、不当空。
-    fs.writeFileSync(path.join(tmp, '.quay', 'full-suite-state.json'), JSON.stringify({ state: 'running' }), 'utf8');
-    assert.deepEqual(collectInertCheckers(tmp),
-      { evaluated: false, names: [], cause: 'dimension-missing' },
-      'running state（无该字段）⇒ evaluated:false，⛔ 不是「零个惰性守卫」');
+    // AC1 前半：**在飞**的载体（runner 起跑就落 state:running + finishedAt:null，维度尚未写）
+    // ⇒ 独立成因 "suite-in-flight"，⛔ 与回归同形，也 ⛔ 抛错/当成「零个惰性守卫」。
+    fs.writeFileSync(path.join(tmp, '.quay', 'full-suite-state.json'),
+      JSON.stringify({ state: 'running', finishedAt: null, durationMs: null }), 'utf8');
+    const inFlight = collectInertCheckers(tmp);
+    assert.deepEqual(inFlight,
+      { evaluated: false, names: [], cause: 'suite-in-flight' },
+      'running state（无该字段）⇒ evaluated:false + cause=suite-in-flight');
+    // AC1 后半：**终态**载体缺这一维（镜像写丢了维度）⇒ 仍是 "dimension-missing"（该追因的那一个）。
+    // 红态也是终态——镜像载体不写 running，所以红/绿不带字段都算「写者丢了维度」。
+    for (const st of ['green', 'red']) {
+      fs.writeFileSync(path.join(tmp, '.quay', 'full-suite-state.json'),
+        JSON.stringify({ state: st, finishedAt: '2026-11-07T00:00:00Z' }), 'utf8');
+      assert.deepEqual(collectInertCheckers(tmp),
+        { evaluated: false, names: [], cause: 'dimension-missing' },
+        `终态 ${st} 缺该维度 ⇒ cause=dimension-missing（⛔ 不是在飞）`);
+    }
+    // 负控制：两个未测量成因 **互不相同**——否则本任务要的归因能力等于没加。
+    const finished = collectInertCheckers(tmp);
+    assert.notEqual(inFlight.cause, finished.cause,
+      'suite-in-flight 与 dimension-missing 必须不同 token（否则瞬态与回归同形）');
+    // 载体没有 state 键（旧载体/手工载体）⇒ ⛔ 不猜成「在飞」：缺维度就读成回归，宁严不宽。
+    fs.writeFileSync(path.join(tmp, '.quay', 'full-suite-state.json'), JSON.stringify({ finishedAt: '2026-11-07T00:00:00Z' }), 'utf8');
+    assert.equal(collectInertCheckers(tmp).cause, 'dimension-missing',
+      '无 state 键 ⇒ ⛔ 不推断为在飞（宁严不宽）');
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }
@@ -1826,6 +1850,12 @@ test('readingsDigest: inertCheckers 名字进摘要——某个 guard 从在→�
   // 变成「查过、一个都没有」这种结论变更在摘要里不可见 ⇒ 语义半不会被唤醒去读它。
   assert.notEqual(readingsDigest(mk(measured([]))), readingsDigest(mk(unmeasured)),
     '未测量（evaluated:false）⛔ 不与「查过、零个」同形');
+  // gap-meta-inertcheckersreading — **两个未测量成因也必须改变摘要**：否则「suite 在飞」→「终态缺维度
+  // （镜像回归）」这次归因变更在摘要里不可见 ⇒ 语义半不被唤醒 ⇒ 本任务加的那一支等于到不了消费者。
+  const inFlight = { evaluated: false, names: [], cause: 'suite-in-flight' };
+  assert.notEqual(readingsDigest(mk(inFlight)), readingsDigest(mk(unmeasured)),
+    '「在飞」与「维度缺失（回归）」必须改变摘要');
+  assert.equal(readingsDigest(mk(inFlight)), readingsDigest(mk(inFlight)), '同一成因 = 同一摘要（⛔ 恒变）');
 });
 
 // 负控制：摘要必须对【每轮都变的量】免疫——staleSecs/记录数每轮都不同，若进摘要则闸失效。
