@@ -35,14 +35,14 @@ import path from "node:path";
 // arg (below) is now a one-line arity adapter over the shared `flagValue`; its algorithm was one of
 // the ~73 hand-written copies of the indexOf+next-arg idiom in plugin/scripts
 // (.quay/routine-findings.jsonl finding `arg-parsing-helper-family`, routine `semantic-dedup-scan`).
-import { flagValue } from "./gate-script-base.ts";
+// `sleep` rides the same base import (semantic-dedup-scan finding `sleep-duplicates-existing-export`,
+// 2026-11-07): this file carried a private byte-identical copy of it.
+import { flagValue, sleep } from "./gate-script-base.ts";
 // gap-resource-gate-reads-lagging-loadavg-not-instantaneous-rd — the INSTANTANEOUS run-queue
 // components (procs_running / procs_blocked / R+D) ride the sampler's curve beside `loadavg`, so the
 // same 口径 lands in the load curve AND in the suite round record (full-suite-runner.ts imports the
 // SAME function from this kernel leaf — one implementation, two call sites, 硬规则 5b).
 import { readRunQueue } from "../../packages/quay/src/kernel/load-avg.ts";
-
-const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
 
 /** /proc/loadavg field 1 (1-minute load average — runnable + uninterruptible queue depth). */
 function readLoadavg(): number | null {

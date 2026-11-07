@@ -1123,7 +1123,10 @@ export function runCli(cli: string, args: string[], cwd: string, timeoutMs = 180
   return { argv, exit: r.status ?? -1, stdout: r.stdout ?? "", stderr: r.stderr ?? "" };
 }
 
-/** Promise sleep, for the verifiers' polling windows. */
+/** Promise sleep, for the verifiers' polling windows. THE single definition for plugin/scripts:
+ *  `driver-runtime.ts` re-exports it and every former private copy imports it (semantic-dedup-scan
+ *  finding `sleep-duplicates-existing-export`, runId `semantic-dedup-scan-1794036444725`, 2026-11-07 —
+ *  three carriers carried this byte-identical body while `driver-runtime.ts` exported a fourth copy). */
 export function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
 }

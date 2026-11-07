@@ -47,7 +47,7 @@ import path from "node:path";
 import { StringDecoder } from "node:string_decoder";
 import { fileURLToPath } from "node:url";
 import { spawn, spawnSync } from "node:child_process";
-import { isDirectEntry, flagValue } from "./gate-script-base.ts";
+import { isDirectEntry, flagValue, sleep } from "./gate-script-base.ts";
 // Layer 0 · 主检出推导（order-independent，gap-main-checkout-root-derivation-recurs-three-sites）。
 import { mainCheckoutRoot, repoRoot } from "./repo-root.ts";
 // Layer 1a · filters（AC152 单一实现：可组合谓词列表，两 driver 共用）。
@@ -276,10 +276,11 @@ export function appendLog(file: string, line: string): void {
   }
 }
 
-/** 异步 sleep（⛔ 不用 Atomics.wait 阻塞事件循环；start/stop 的等待窗口用它）。 */
-export function sleep(ms: number): Promise<void> {
-  return new Promise((r) => setTimeout(r, ms));
-}
+/** 异步 sleep（⛔ 不用 Atomics.wait 阻塞事件循环；start/stop 的等待窗口用它）。
+ *  单一实现 = `gate-script-base.sleep`（semantic-dedup-scan finding `sleep-duplicates-existing-export`,
+ *  runId `semantic-dedup-scan-1794036444725`, 2026-11-07：本文件曾持有与该导出逐字相同的第四份拷贝）。
+ *  此处 re-export 保持本 kernel 的公开面与既有调用点不变。 */
+export { sleep };
 
 /** 本 kernel 文件的绝对路径（supervisor 自重启的 cmdline 载体：`node … driver-runtime.ts __supervise`）。
  *

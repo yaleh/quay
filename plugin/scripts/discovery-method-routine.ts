@@ -176,7 +176,9 @@ export { pidAlive };
 // ⛔ `writeLastRun` is deliberately NOT imported: the resident advance must land the stamp in the SAME
 // write as the timestamp, so this routine uses its own `writeLastRunStamped` (see that function).
 import { ROUTINE_LAST_RUN_REL, readLastRunMap } from "./probe-routine.ts";
-import { isDirectEntry } from "./gate-script-base.ts";
+// `sleep` rides the same base import (semantic-dedup-scan finding `sleep-duplicates-existing-export`,
+// 2026-11-07): the budget lock's wait window used a private byte-identical copy of `gate-script-base.sleep`.
+import { isDirectEntry, sleep } from "./gate-script-base.ts";
 // The batch-appender body is shared, not copied (semantic-dedup-scan finding `jsonl-batch-appenders`,
 // 硬规则 5b): this file had TWO copies (carrier + ledger) of the same ensure-dir / stringify+newline /
 // single-append / return-count body. Both exported names below stay — sibling routines
@@ -672,8 +674,6 @@ export interface BudgetLockHandle {
  *  are out of budget" must not be the same outcome (硬规则 3b). */
 export interface BudgetLockFailure { ok: false; code: "BUDGET_LOCK_TIMEOUT"; reason: string; waitedMs: number }
 export interface BudgetLock { acquire(lockPath: string): Promise<BudgetLockHandle | BudgetLockFailure> }
-
-const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
 
 /** Take the cross-process lock, with STALE-HOLDER RECOVERY. Two recoverable states:
  *    • the holder pid is DEAD (`pidAlive === false`) — recovered immediately;
