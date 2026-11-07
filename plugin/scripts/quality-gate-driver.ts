@@ -579,8 +579,11 @@ export function buildPackagingGapWorkerPrompt(root: string, drift: string[]): st
     `Repo root: ${root}.`,
     "Drift items:",
     ...drift.map((d) => `  - ${d}`),
-    "Read the named check (plugin/scripts/config-key-consumer-check.ts and/or plugin/test/shipped-entry-runnable.test.mjs) to understand the exact defect, then file ONE gap task that closes this drift via the `quay-file-task` skill (Skill tool).",
-    "The quay-file-task skill performs MECHANISM-BASED dedup. Apply the TWO rules below — an OPEN claim and a DONE claim are NOT the same case — and report every existing task id you matched:",
+    // ⛔ NAMESPACED: the registered name is `quay:quay-file-task`; a bare `quay-file-task` makes the
+    // Skill call return `Unknown skill: quay-file-task` and the filing silently never happens
+    // (gap-meta-buildgapworkerprompt — same defect cluster across all gap-filing prompts).
+    "Read the named check (plugin/scripts/config-key-consumer-check.ts and/or plugin/test/shipped-entry-runnable.test.mjs) to understand the exact defect, then file ONE gap task that closes this drift via the `quay:quay-file-task` skill (Skill tool).",
+    "The `quay:quay-file-task` skill performs MECHANISM-BASED dedup. Apply the TWO rules below — an OPEN claim and a DONE claim are NOT the same case — and report every existing task id you matched:",
     "  • OPEN claim (existing task in todo/ready/needs-human) — it claims the same drift ⇒ a real duplicate: do NOT file; report that task id instead.",
     "  • DONE/superseded claim — a done task claiming the same drift is NOT proof the drift is gone (a task can be closed while the drift is still visible in the current source; done ≠ absent, hard rule 5b). Verify against the CURRENT SOURCE before deciding: re-read the named check / file:line you named above. STILL visible ⇒ FILE the task, and carry the old task id in the body as traceability (`prior-claim: <id>`) — that is not a duplicate. GONE from the current source ⇒ do NOT file; report 'the old task already fixed it' together with the evidence you checked.",
   ].join("\n");
@@ -1030,8 +1033,8 @@ export function buildArchGapWorkerPrompt(root: string, conclusions: ArchReviewCl
       `      judge suggested action: ${c.suggestedAction}`,
     ]),
     "File exactly ONE gap task PER actionable conclusion above — do NOT merge two conclusions into one task, and do NOT file a task for anything not listed here.",
-    "Use the `quay-file-task` skill (Skill tool) to file each one; the task must carry runnable Acceptance Criteria and declare ## Touches.",
-    "The quay-file-task skill performs MECHANISM-BASED dedup. Apply the TWO rules below — an OPEN claim and a DONE claim are NOT the same case — and report every existing task id you matched:",
+    "Use the `quay:quay-file-task` skill (Skill tool) to file each one; the task must carry runnable Acceptance Criteria and declare ## Touches.",
+    "The `quay:quay-file-task` skill performs MECHANISM-BASED dedup. Apply the TWO rules below — an OPEN claim and a DONE claim are NOT the same case — and report every existing task id you matched:",
     "  • OPEN claim (existing task in todo/ready/needs-human) — it claims the same mechanism ⇒ a real duplicate: do NOT file; report that task id instead.",
     "  • DONE/superseded claim — a done task claiming the same mechanism is NOT proof the defect is gone (a task can be closed while the defect is still visible in the current source; done ≠ absent, hard rule 5b). Verify against the CURRENT SOURCE before deciding: grep/read the file:line you named above. STILL visible ⇒ FILE the task, and carry the old task id in the body as traceability (`prior-claim: <id>`) — that is not a duplicate. GONE from the current source ⇒ do NOT file; report 'the old task already fixed it' together with the file:line / grep hit you checked.",
     "⛔ Do NOT fix the defect here, and ⛔ do NOT touch the detector sources — filing the task is the whole deliverable.",
@@ -3275,7 +3278,7 @@ export function buildInstrumentDecayGapWorkerPrompt(
     }
   });
   lines.push(
-    "The quay-file-task skill performs MECHANISM-BASED dedup. Apply the TWO rules below — an OPEN claim and a DONE claim are NOT the same case — and report every existing task id you matched:",
+    "The `quay:quay-file-task` skill performs MECHANISM-BASED dedup. Apply the TWO rules below — an OPEN claim and a DONE claim are NOT the same case — and report every existing task id you matched:",
     "  • OPEN claim (existing task in todo/ready/needs-human) — it claims the same rot ⇒ a real duplicate: do NOT file; report that task id instead.",
     "  • DONE/superseded claim — a done task claiming the same rot is NOT proof the rot is gone (a task can be closed while the carrier still reads dark; done ≠ absent, hard rule 5b). Verify against the CURRENT CARRIER before deciding: re-read the carrier named above (and the writer path) at the current HEAD. STILL dark ⇒ FILE the task and carry the old task id in the body as traceability (`prior-claim: <id>`) — that is not a duplicate. NO LONGER dark ⇒ do NOT file; report 'the old task already fixed it' together with the evidence you checked.",
     "A finding that is rare-BY-DESIGN (a step only reachable on an exceptional path) is still worth a task ONLY if the writer path is gone or the trigger has not occurred in far longer than its own cadence; otherwise report the adjudication instead of filing. Name which of the two you concluded.",

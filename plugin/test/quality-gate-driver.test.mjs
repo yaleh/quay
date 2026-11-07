@@ -1087,6 +1087,14 @@ test("AC3 — 立案路径经 quay-file-task 的机制查重；节流不读任�
   const archPrompt = buildArchGapWorkerPrompt("/repo", []);
   for (const [name, p] of [["packaging", packagingPrompt], ["architecture-review", archPrompt]]) {
     assert.ok(p.includes("quay-file-task"), `${name} 的 prompt 要求走该技能`);
+    // gap-meta-buildgapworkerprompt：注册名含插件命名空间（`quay:quay-file-task`）；裸名让 Skill
+    // 调用返回 `Unknown skill: quay-file-task`，立案静默失败。⛔ 不许退回裸名。
+    assert.ok(p.includes("quay:quay-file-task"), `${name} 的 prompt 必须用含命名空间的技能名`);
+    assert.equal(
+      (p.match(/(?<!quay:)quay-file-task/g) || []).length,
+      0,
+      `${name} 的 prompt 出现裸 quay-file-task（Skill 调用必报 Unknown skill）`,
+    );
     assert.ok(/MECHANISM-BASED dedup/.test(p), `${name} 声明该技能自带机制查重（复用，不重造）`);
   }
   // 架构复核 prompt 还须把「⛔ 不许顺手修」写死（本任务 DoD：缺陷由立出来的任务去做）。
@@ -3488,6 +3496,9 @@ test("buildInstrumentDecayGapWorkerPrompt — names EVERY carrier+shape and carr
   assert.match(prompt, /artifact < commit/);
   assert.match(prompt, /OPEN claim/);
   assert.match(prompt, /done ≠ absent/);
+  // gap-meta-buildgapworkerprompt：技能名必须含命名空间（裸名 Skill 调用失败，见 AC3）。
+  assert.match(prompt, /quay:quay-file-task/);
+  assert.equal((prompt.match(/(?<!quay:)quay-file-task/g) || []).length, 0);
 });
 
 test("formatInstrumentDecayAssembly — malformed / disabled / running never look the same", () => {
