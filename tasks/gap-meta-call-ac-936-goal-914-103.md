@@ -22,6 +22,53 @@ AC-936 要求主检出 `.quay/goal-requests.jsonl` 里存在一条被 driver 消
 - `goals/GOAL-914-goal-driver-自驱闭环-立案生命周期-下一步投影与请求消费-quay-native.md`：「结果是：goal 的推进仍然依赖人读 round fact、人写任务、人恢复卡住的任务。」
 - `docs/evidence/2026-11-06-goal-request-queue.md`：「它由第一个真正调用该动词的人创建。worker 的写守卫禁止把主检出路径当作写目标」
 
+**PARKED**（2026-11-07，worker 会话；等人工裁定，见下 ## Worker Reading）：行首标记是本任务的机械停放信号（`ready-pool-check.isParked` 据此把它排除出待派池），目的是让一件【机器结构上做不到】的待人决策不再每轮烧掉一个 worker 会话。解除条件是一条可跑的只读检查，见 ## Worker Reading §4。⛔ 本标记不表示任何人已作出裁定。
+
+## Worker Reading (2026-11-07) — 本任务要的东西 worker 产不出来
+
+### 1. 现场读数（直接量，2026-11-07T06:2xZ 采集）
+
+| 读数 | 取值 | 采集方式 |
+|---|---|---|
+| 主检出 `.quay/goal-requests.jsonl` | **不存在** | `ls` |
+| AC-936 判据（§Finding 里的 criterion 逐字复跑，cwd=本任务 worktree） | `exit 1`，`no goal-requests ledger` | 逐字复跑 |
+| 同一判据的**正控**（临时目录放一条带 `consumedAt` 的终态行） | `exit 0`，`{"rows":1,"consumed":1,"last":"r1"}` | 同一段脚本换 cwd |
+| `goals/GOAL-915-*.md` | `status: draft` | frontmatter |
+| `goals/AC-944-*.md` | `status: draft` | frontmatter |
+| `quay goal next --root . --json` | 唯一一行 = `{goal:"GOAL-914", ac:"AC-936", gapState:"world-gated", owner:"human", action.kind:"ask-human", unchangedRounds:47, escalated:true}` | 同命令 |
+
+两个方向都跑过（硬规则 2）⇒ 判据**不是空转的**，它只是还没有输入。
+
+### 2. 为什么本 worker 消不掉它
+
+AC1 要的是「人选定 ①②③ 之一」。①②③ 的差别不是实现选择，而是『这条判据还要不要能取假』；
+选项 ① 还要求写入主检出，而 worker 的写守卫逐字禁止把主检出当写目标。⛔ 本轮未勾任何 AC/DoD 框，
+没有替人选边、没有改判据、没有改 goal-driver 的世界门控分支。
+
+### 3. 同一份裁定现在有 4 个载体（本 worker 直接计数）
+
+1. `quay goal next` 每轮机械产出的 `ask-human` 行（`owner:"human"`, `escalated:true`）——**唯一每轮重算、且不经 status 写路径的入口**；
+2. `goals/GOAL-915-*.md` + `goals/AC-944-*.md`（draft，`/goal?status=draft` 面；其 origin 自己写着「⛔ 不是再造一条同形任务」）；
+3. `tasks/gap-meta-call-ac-936-needs-a-human-run-goal-request-in.md`（`todo` + 行首 `PARKED`）；
+4. 本任务。
+
+⇒ 本 worker 的处置：把本任务停在 **PARKED**（不再进派发池），把裁定面指回 1 + 2，⛔ 不新建第 5 份长文。
+**这一条是载体簿记判断（「同一裁定的重复载体」），不是方向裁定**——①②③ 选哪一条仍然是人的事。
+
+### 4. 解除条件（只读、可直接跑）
+
+三个选项里任一条落地即应解除停放：GOAL-915 离开 `draft`（人已裁定），或主检出台账里出现了被消费的终态行（选项 ① 已执行）。
+
+- **unpark 检查（只读、可直接跑）**：`node -e "const fs=require('fs');const g=fs.readdirSync('goals').find(n=>/^GOAL-915-/.test(n));let ruled=false;if(g){const m=fs.readFileSync('goals/'+g,'utf8').match(/^status:\s*(\S+)\s*$/m);ruled=!!m&&m[1]!=='draft'}let consumed=0;const p='.quay/goal-requests.jsonl';if(fs.existsSync(p)){consumed=fs.readFileSync(p,'utf8').split('\n').filter(Boolean).map(s=>{try{return JSON.parse(s)}catch(e){return null}}).filter(r=>r&&['accepted','refused','not-evaluated'].includes(r.state)&&typeof r.consumedAt==='string'&&r.consumedAt).length}console.log(JSON.stringify({ruled,consumed}));process.exit(ruled||consumed>0?0:1)"`
+
+三个方向本 worker 都跑过：真状态 = `{"ruled":false,"consumed":0}` / exit 1（停放成立）；GOAL-915 `status: active` = exit 0；
+台账含一条 `consumedAt` 终态行 = exit 0。该命令只读，每轮复跑安全。
+
+### 5. 记录边界（硬规则 4b / 4c）
+
+上表每一项都取自生产载体（主检出文件系统 / goal 记录 / `goal next`），不是 fixture；「4 个载体」是 `ls` + `grep` 的直接计数。
+⛔ 未验证：人选 ② 或 ③ 之后 AC-936 是否仍能取假——那要人先选才有得测。
+
 ## AC（draft）
 - [ ] 人在上述选项中作出选择，并把选择写进本任务体（或以 DIR 记录该裁定）
 - [ ] 依该选择产生的后续工作已立案或已落地（⛔ 不以「已回答」本身充当完成）
@@ -29,6 +76,9 @@ AC-936 要求主检出 `.quay/goal-requests.jsonl` 里存在一条被 driver 消
 ## DoD（draft）
 - [ ] 裁定已记录在可被后续读到的正本里，⛔ 不只存在于本任务的对话中
 - [ ] 上面两条互相矛盾的立场中，落败的一方已被就地更正或标注，⛔ 不留着继续制造同一次冲突
+
+## Dark Axis（ADR-007）
+该轴仍暗,理由:本任务本轮只落停放与读数，未改 packages/、依赖或模块结构，L_D/L_G 无本任务可归因的结构读数；选项 ② 若被裁定执行会改 goal-driver 生产代码，届时应另采结构读数。
 
 ## Touches
 - `goals/GOAL-914-goal-driver-自驱闭环-立案生命周期-下一步投影与请求消费-quay-native.md`
