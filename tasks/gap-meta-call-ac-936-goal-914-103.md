@@ -84,3 +84,11 @@ AC1 要的是「人选定 ①②③ 之一」。①②③ 的差别不是实现�
 - `goals/GOAL-914-goal-driver-自驱闭环-立案生命周期-下一步投影与请求消费-quay-native.md`
 - `tasks/gap-meta-call-ac-936-needs-a-human-run-goal-request-in.md`
 - `tasks/gap-meta-call-ac-936-goal-914-103.md`
+
+## Blocker
+
+**2026-11-07T06:25:29.519Z — worker 未落地（exited-not-landed）**
+
+- 未落地原因：AC 未全勾（checked 0/4，剩余未勾 4）——续做只需验证并勾选 AC
+- run_id：wk-prod-anchor
+- session_id：9fc88f18-0869-4210-baae-9157a394f958
