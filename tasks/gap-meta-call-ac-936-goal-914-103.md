@@ -1,7 +1,7 @@
 ---
 id: gap-meta-call-ac-936-goal-914-103
 title: AC-936 的证据只能由人在主检出产生：GOAL-914 的收尾停在一次人工写动作上，103 轮未裁定
-status: needs-human
+status: todo
 labels:
   - meta-human-call
   - meta-driver
