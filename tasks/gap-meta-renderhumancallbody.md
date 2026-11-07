@@ -1,7 +1,7 @@
 ---
 id: gap-meta-renderhumancallbody
 title: human-call 任务必须带线首 **PARKED 标记，不得进入派发池
-status: todo
+status: ready
 labels:
   - meta-driver
   - driver-candidate
