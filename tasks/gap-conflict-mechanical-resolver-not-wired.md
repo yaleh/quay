@@ -58,4 +58,4 @@ depends_on:
 - plugin/scripts/worker-driver.ts
 - plugin/test/worker-driver.test.mjs
 - plugin/test/worker-driver-resident-s07.test.mjs
-- tasks/gap-conflict-mechanical-resolver-not-wired.md (new)
+- tasks/gap-conflict-mechanical-resolver-not-wired.md
