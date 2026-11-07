@@ -41,3 +41,19 @@ full-suite-runner writes the carrier with state:'running' and no notEvaluatedChe
 - 未落地原因：step=suite: oom-killed (3) — new regression at lower concurrency: plugin/test/driver-runtime-control-plane.test.mjs (passed at the original concurrency 23, fails at 16) — needs a code fix
 - run_id：wk-prod-anchor
 - session_id：eda640de-edbd-43eb-be5d-26830e7b39fe
+
+## Evidence
+
+**2026-11-07 续跑轮（同一工作树复用，未新建）**
+
+- AC 重跑（HEAD 已 merge develop `09629a9e9`）：输出 `{"running":"suite-in-flight","missing":"dimension-missing"}` ⇒ exit 0。
+- `--verify-run`（与 fan-in 逐字相同的 scoped 门：`scripts/test.sh --for-task gap-meta-inertcheckersreading --allow-thin`）⇒ `"classification":"green"`，exitCode 0，`wallMs`≈12s。
+- `anti-drift-touches-check --merge-target develop` ⇒ `ANTI-DRIFT OK: 3 actual file(s), all within declared Touches`。
+
+**上一轮 suite 红与本次 delta 无关（两轮日志逐字证据，⛔ 不是「猜是环境」）**
+
+- 原轮 `laneCount=23`：`SUITE-INCOMPLETE reason=oom-killed oomKill=3`；唯一 `__PERFILE__ passed=false` 是 `packages/quay/test/npm-pack-e2e.test.mjs`，错误 `build-plugin-dist failed: Error: The service was stopped`（esbuild 子进程被 OOM 杀）。该文件已登记 `@load-sensitive`。
+- 降并发恢复轮 `laneCount=16`（`…~wk-prod-anchor~recovery-16-….log`）：`oomKill=0` 且 `completeness=complete`，唯一失败是 `plugin/test/driver-runtime-control-plane.test.mjs` 的 `AC2/AC4 (production path)`，报 `[TypeError: fetch failed] [cause]: Error: bad port`（`fetching at StreamableHTTPClientTransport.send`）。
+- 该文件不 import 本任务改动的任何模块；本 delta 只落在 `plugin/scripts/meta-driver.ts`（`collectInertCheckers` / `readingsDigest`）。
+- 根因（可复现，一条命令）：`bad port` 是 WHATWG fetch 拒绝的端口族（6000/6666/2049/5060/10080 …）；本机 `/proc/sys/net/ipv4/ip_local_port_range = 1024 65535` ⇒ `serveKindControlPlane` 的 `port:0` 内核分配**可以**落到这些端口；实测 `await fetch('http://127.0.0.1:6000/')` ⇒ `fetch failed | cause: bad port`，同端口 32768 ⇒ 正常。⇒ 一个**独立**的偶发缺陷（控制面选端未避开 fetch 坏端口），⛔ 不是本任务引入，也不在本任务 Touches 内，故本轮不在此处修。
+- 单文件复跑：`node --test --experimental-strip-types plugin/test/driver-runtime-control-plane.test.mjs` ⇒ 6/6 pass（本机负载下不复现）。
