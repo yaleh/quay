@@ -40,6 +40,7 @@ extra:
 4. **前后读数**：用同一 fixture 重测两个基座的渲染长度，逐条记录每条处置对长度的贡献。
 5. **非独立规则的合并**：若复核发现某条不是可独立违反的规则（例如 `driverFanInNote-2` 只是 `-1` 的括号细节），合并并写明依据——⛔ 不得为凑 7 而保留。
 6. **已知冲突（必读，否则会红一条无关测试）**：`plugin/test/worker-driver.test.mjs:1236` 有 `gap-worker-prompt-note-family-slimming` 的**活棘轮**——`buildWorkerPrompt` + `buildContinueWorkerPrompt` 的归一化合并长度必须 ≤ **9102**（baseline 12137 的 −25%）。实测当前值 = **9064**，余量仅 **38 字符**。⇒ 任何 `keep` / 扩写必须由等量或更多的删除补偿；⛔ 不得擅自抬高 `WORKER_PROMPT_SLIM_BASELINE`（那是 re-anchor 行为，需单独裁定）。若某条规则确实必须保留且无法补偿，在 `## Evidence` 写明并提出 re-anchor 请求，⛔ 不要静默改基线。
+7. **度量区分（⛔ 不要把两个数混用）**：AC3 的 `4376 / 6573` 是 `gap-touches-parser-a-self-describing` fixture 的 **raw 渲染长度**；AC4 的 `9102 / 9064` 是 ratchet fixture（`gap-x` + 归一化 kernel 路径）的 **归一化合并长度**。两者不是同一个量——⛔ 不得用 `4376 + 6573` 与 `9102` 比较；AC3 报 raw，AC4 报归一化。
 
 ## Acceptance Criteria
 
