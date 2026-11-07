@@ -56,7 +56,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
-import { helpExit, isDirectEntrySafe, readJsonLines } from "./gate-script-base.ts";
+import { helpExit, isDirectEntrySafe, parseArgs as baseParseArgs, readJsonLines } from "./gate-script-base.ts";
 import { codeOnlyText } from "./source-text-lib.ts";
 
 export const DEFAULT_MAPPING_REL = "plugin/freshness-producers.json";
@@ -725,40 +725,54 @@ Exit (distance mode): 0 = state:"computed" (distance is an integer); 3 = state:"
 Exit (single-implementation mode): 0 = exactly one implementation AND it is the declared one (or mapping absent ⇒ evaluated:false); 1 = findings; 2 = mapping corrupt/usage.`;
 
 function main(argv: string[]): number {
-  let root = process.cwd();
-  let mappingRel: string | undefined;
-  let carrierRel: string | undefined;
-  let marginRel: string | undefined;
-  let json = false;
+  // Shared parser (gate-script-base.ts `parseArgs`) — this file's private token loop carried the same
+  // `--root`/`--root=`/`--json` arms as four sibling checkers, widened with the coverage / distance /
+  // single-implementation flags (semantic-dedup-scan finding `check-main-root-json-argv-loop`, runId
+  // `semantic-dedup-scan-1794036444725`). `help:"return"` lets the multi-line USAGE print here, and
+  // `errors:"return"` keeps this CLI's own unknown-flag door (stdout + helpExit, see below).
+  const parsed = baseParseArgs(["node", "freshness-producer-coverage-check", ...argv], {
+    minArgs: 0,
+    usage: "[--root <dir>] [--mapping <rel>] [--carrier <rel>] [--margin <rel>] [--json]",
+    help: "return",
+    errors: "return",
+    unknown: "reject",
+    flags: {
+      root: { type: "string" },
+      mapping: { type: "string" },
+      carrier: { type: "string" },
+      margin: { type: "string" },
+      json: { type: "boolean" },
+      "delivery-face-distance": { type: "boolean" },
+      "counting-rule-single-implementation": { type: "boolean" },
+      from: { type: "string" },
+      since: { type: "string" },
+      tip: { type: "string" },
+    },
+  });
+  if (parsed.help) return helpExit(USAGE);
+  const str = (v: string | boolean | undefined): string | undefined => (typeof v === "string" ? v : undefined);
+  const root = str(parsed.flags.root) ?? process.cwd();
+  const mappingRel = str(parsed.flags.mapping);
+  const carrierRel = str(parsed.flags.carrier);
+  const marginRel = str(parsed.flags.margin);
+  const json = parsed.flags.json === true;
   // ── delivery-face-distance mode (see the section comment above) ────────────────────────────────
-  let distanceMode = false;
-  let singleImplMode = false;
-  let from: string | undefined;
-  let since: string | undefined;
-  let tip: string | undefined;
-  for (let i = 0; i < argv.length; i++) {
-    const a = argv[i];
-    if (a === "--root") root = argv[++i] ?? root;
-    else if (a.startsWith("--root=")) root = a.slice("--root=".length);
-    else if (a === "--mapping") mappingRel = argv[++i];
-    else if (a.startsWith("--mapping=")) mappingRel = a.slice("--mapping=".length);
-    else if (a === "--carrier") carrierRel = argv[++i];
-    else if (a.startsWith("--carrier=")) carrierRel = a.slice("--carrier=".length);
-    else if (a === "--margin") marginRel = argv[++i];
-    else if (a.startsWith("--margin=")) marginRel = a.slice("--margin=".length);
-    else if (a === "--json") json = true;
-    else if (a === "--delivery-face-distance") distanceMode = true;
-    else if (a === "--counting-rule-single-implementation") singleImplMode = true;
-    else if (a === "--from") from = argv[++i];
-    else if (a.startsWith("--from=")) from = a.slice("--from=".length);
-    else if (a === "--since") since = argv[++i];
-    else if (a.startsWith("--since=")) since = a.slice("--since=".length);
-    else if (a === "--tip") tip = argv[++i];
-    else if (a.startsWith("--tip=")) tip = a.slice("--tip=".length);
-    else if (a === "-h" || a === "--help") helpExit(USAGE);
-    else if (distanceMode && from === undefined && !a.startsWith("-")) from = a; // `--delivery-face-distance <rev>`
-    else return helpExit(`unknown argument: ${a}\n${USAGE}`);
+  const distanceMode = parsed.flags["delivery-face-distance"] === true;
+  const singleImplMode = parsed.flags["counting-rule-single-implementation"] === true;
+  let from = str(parsed.flags.from);
+  const since = str(parsed.flags.since);
+  const tip = str(parsed.flags.tip);
+  // The ONE positional the CLI accepts: `--delivery-face-distance [<from>]`. Any other positional —
+  // including a second one, or anything when `--from` already named the base — is the same usage
+  // error the retired loop raised, still through helpExit (stdout, exit 0).
+  if (parsed.args.length > 0) {
+    const pos = parsed.args[0]!;
+    if (!(distanceMode && from === undefined && parsed.args.length === 1 && !pos.startsWith("-"))) {
+      return helpExit(`${parsed.error ?? `unknown argument: ${pos}`}\n${USAGE}`);
+    }
+    from = pos;
   }
+  if (parsed.error) return helpExit(`${parsed.error}\n${USAGE}`);
 
   if (singleImplMode) {
     let report: CountingRuleSingleImplementationReport;

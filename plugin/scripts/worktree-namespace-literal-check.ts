@@ -29,7 +29,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { isDirectEntrySafe } from "./gate-script-base.ts";
+import { isDirectEntrySafe, parseArgs as baseParseArgs } from "./gate-script-base.ts";
 // The recursive walk over SCAN_ROOTS lives in fs-walk.ts (was a byte-identical private copy here and
 // in registry-path-literal-check.ts / serve-binding-literal-check.ts — finding
 // `walkFiles-scan-surface-family`, routine `semantic-dedup-scan`, runId
@@ -119,14 +119,18 @@ export function checkWorktreeNamespaceLiteral(root: string): LiteralCheckReport 
 }
 
 function main(argv: string[]): number {
-  let root = process.cwd();
-  let json = false;
-  for (let i = 0; i < argv.length; i++) {
-    const a = argv[i];
-    if (a === "--root") root = argv[++i] ?? root;
-    else if (a.startsWith("--root=")) root = a.slice("--root=".length);
-    else if (a === "--json") json = true;
-  }
+  // Shared parser (gate-script-base.ts `parseArgs`) — replaces the byte-identical private
+  // `--root`/`--root=`/`--json` loop (semantic-dedup-scan finding `check-main-root-json-argv-loop`,
+  // runId `semantic-dedup-scan-1794036444725`). `unknown: "skip"` preserves the retired loop's
+  // unknown-flag behavior: drop the token, consume NOTHING after it.
+  const parsed = baseParseArgs(["node", "worktree-namespace-literal-check", ...argv], {
+    minArgs: 0,
+    usage: "[--root <dir>] [--json]",
+    unknown: "skip",
+    flags: { root: { type: "string" }, json: { type: "boolean" } },
+  });
+  const root = typeof parsed.flags.root === "string" ? parsed.flags.root : process.cwd();
+  const json = parsed.flags.json === true;
   const report = checkWorktreeNamespaceLiteral(root);
   if (json) {
     process.stdout.write(JSON.stringify(report, null, 2) + "\n");
