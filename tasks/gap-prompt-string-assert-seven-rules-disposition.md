@@ -1,7 +1,7 @@
 ---
 id: gap-prompt-string-assert-seven-rules-disposition
 title: 派发提示词 7 条 string-assert 规则逐条定处置（代码强制 / 删除 / 保留并说明），渲染长度 4376/6573 为前后基线
-status: todo
+status: ready
 labels:
   - gap
   - prompt
