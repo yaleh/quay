@@ -25,8 +25,9 @@ criterion: "node -e \"const fs=require('fs');const
   rray.isArray(r.errors)&&r.errors.length>0){console.error('consumer errors:
   '+JSON.stringify(r.errors));process.exit(1)}console.log(JSON.stringify({evalu\
   ated:r.evaluated,openBefore:r.openBefore,appended:r.appended}))\""
-expect: 最新一轮生产 goal-round 的 goal-ring.requests 为 evaluated:true 且 errors 为空 ⇒
-  消费通道本轮真的跑过并被测到；维度缺席、未测或写失败即红（三态，⛔ 不是布尔）
+expect: 最近一条【已完成】轮的生产 goal-round 的 goal-ring.requests 为 evaluated:true 且 errors
+  为空 ⇒ 消费通道本轮真的跑过并被测到；跳过 stopped_mid_round 存根轮（携带 criteria/requests
+  的中止轮按「数据优先于旗标」仍采用）；维度缺席、未测或写失败即红（三态，⛔ 不是布尔）；一条已完成轮都没有 ⇒ 红（不得把「无从判断」混成「合格」）。
 origin: criteria.AC-936 的判据只读静态文件 .quay/goal-requests.jsonl：一旦出现一条带 consumedAt
   的终态行就永久为绿，之后消费通道停摆/报错也无人发现（结构上此后取不了假）。timeSeries key goal:AC-936:verdict
   count=69 crossed=true 说明消费半边在生产上至今一次未被行使。生产 round fact 已每轮写
