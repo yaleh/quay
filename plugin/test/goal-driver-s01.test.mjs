@@ -16,7 +16,7 @@ import { CRITERION_KINDS, GAP_WORKER_TIMEOUT_MS_DEFAULT, GOAL_SPAWN_CAP_DEFAULT,
 // OUTER spawn bound (AC1) and the driver's pid-matched lock cleanup (AC4), taken directly from their
 // single implementations (⛔ no harness re-export — the harness is shared by every shard).
 import { goalDriverChildTimeoutMs } from "../scripts/driver-runtime.ts";
-import { writeGoalStatus, removeOrphanedGoalLock } from "../scripts/goal-driver.ts";
+import { buildSufficiencyFollowupPrompt, writeGoalStatus, removeOrphanedGoalLock } from "../scripts/goal-driver.ts";
 
 test('goalAchievedFromRecords: 零 AC ⇒ false；全 achieved ⇒ true；有未达成 ⇒ false', () => {
   assert.equal(goalAchievedFromRecords([], 'GOAL-001'), false, '零 AC 不可达成（与 goal-store.isGoalAchieved 同源）');
@@ -465,6 +465,28 @@ test('buildGapWorkerPrompt: 含 quay-file-task 去重指令 + 顶层 goal_ac 指
   assert.ok(p.includes('MECHANISM-BASED dedup'), 'prompt 必须含按机制去重指令');
   assert.ok(p.includes('goal_ac: AC-185'), 'prompt 必须要求顶层 goal_ac');
   assert.ok(p.includes('needs-human'), 'prompt 必须说明 needs-human 也不重复立案');
+});
+
+// gap-meta-buildgapworkerprompt：注册名是 `quay:quay-file-task`（插件命名空间），裸名 `quay-file-task`
+// 让被派发的 filing agent 的 Skill 调用返回 `Unknown skill: quay-file-task` —— 立案回路静默丢掉执行者
+// （driver 侧只看到「agent 没落盘」；corpus 读数 9 个不同会话命中）。与本文件上方 goal_get 全限定名
+// 是【同一个 prompt 上的兄弟实例】（硬规则 5b）：修了一个名字，同行另一个没修。
+test('gap-filing prompts: 任何状态分支都不得出现裸 quay-file-task（gap-meta-buildgapworkerprompt）', () => {
+  const prompts = [
+    ...['gap', 'workable', 'standing-violated', 'frozen-violated'].map((state) => [
+      `gap:${state}`,
+      buildGapWorkerPrompt({ goal: 'GOAL-001', ac: 'AC-185', state, taskCount: 0 }, 'g', 'a', 'e', '/repo'),
+    ]),
+    ['sufficiency-followup', buildSufficiencyFollowupPrompt({ id: 'GOAL-001', title: 't', body: '## 退出条件\nx' }, [], '/repo', 0)],
+  ];
+  for (const [name, prompt] of prompts) {
+    assert.ok(prompt.includes('quay:quay-file-task'), `${name} prompt 必须点名含命名空间的技能名`);
+    assert.equal(
+      (prompt.match(/(?<!quay:)quay-file-task/g) || []).length,
+      0,
+      `${name} prompt 出现裸 quay-file-task（Skill 调用必报 Unknown skill）`,
+    );
+  }
 });
 
 // gap-goal-get-meta-get-mcp-name-collision：gap-worker prompt 曾逐字写「(goal_get MCP)」——一个在

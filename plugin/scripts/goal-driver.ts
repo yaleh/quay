@@ -2850,10 +2850,15 @@ export function buildGapWorkerPrompt(gap: GoalGap, goalTitle: string, acTitle: s
     // nearest-sounding `meta_get` instead, got `no such META: AC-326`, and fell back to grep.
     // The tool now exists (registerGoalHandlers in Core's aggregator) AND the name is pinned so
     // no nearest-name substitution is possible.
-    "Read the AC record via the `goal_get` MCP tool (`mcp__plugin_quay_quay__goal_get`) to understand the work it demands, then file ONE child task that closes this gap via the `quay-file-task` skill (Skill tool).",
+    // ⛔ Same rule for the SKILL, and it failed the same way (gap-meta-buildgapworkerprompt —
+    // the sibling of the goal_get fix above, in the very same prompt, hard rule 5b): the registry
+    // name is `quay:quay-file-task`, and the bare `quay-file-task` this line used to carry made the
+    // filing agent's Skill call return `Unknown skill: quay-file-task` — so the gap silently lost
+    // its only executor (the driver only saw "the agent filed nothing").
+    "Read the AC record via the `goal_get` MCP tool (`mcp__plugin_quay_quay__goal_get`) to understand the work it demands, then file ONE child task that closes this gap via the `quay:quay-file-task` skill (Skill tool).",
     ...(regressed
       ? [
-          "The quay-file-task skill performs MECHANISM-BASED dedup: if a task claiming this AC via a top-level `goal_ac:` field is still IN FLIGHT (todo/ready/needs-human), do NOT file a duplicate — report the existing task id instead.",
+          "The `quay:quay-file-task` skill performs MECHANISM-BASED dedup: if a task claiming this AC via a top-level `goal_ac:` field is still IN FLIGHT (todo/ready/needs-human), do NOT file a duplicate — report the existing task id instead.",
           "⚠️ A `done`/`superseded` task claiming this AC is NOT a duplicate here — it is evidence the earlier fix did not hold. The criterion must be TRUE NOW, so file a NEW task that makes it true again (and say in the task body why the earlier fix did not hold).",
           // frozen-violated 的三条终态（DoD）：⛔ 声明 long-term 是【搬进复验域】而不是消解——它让
           // 「无主红」变成「每轮被重跑的红」，只在「这条保证今天仍必须为真」时才成立。
@@ -2864,7 +2869,7 @@ export function buildGapWorkerPrompt(gap: GoalGap, goalTitle: string, acTitle: s
             : []),
         ]
       : [
-          "The quay-file-task skill performs MECHANISM-BASED dedup: if a task already claims this AC via a top-level `goal_ac:` field (ANY status, including needs-human), do NOT file a duplicate — report the existing task id instead.",
+          "The `quay:quay-file-task` skill performs MECHANISM-BASED dedup: if a task already claims this AC via a top-level `goal_ac:` field (ANY status, including needs-human), do NOT file a duplicate — report the existing task id instead.",
         ]),
     `The filed task MUST carry top-level frontmatter \`goal_ac: ${gap.ac}\` so the driver's next round can independently verify it (readTaskFacts counts goal_ac).`,
   ].join("\n");
@@ -2941,7 +2946,9 @@ export function buildSufficiencyFollowupPrompt(
           `  (b) as the FIRST line of the \`## Proposal\` section: \`${mechanicalReason}\`.`,
         ]),
     "⛔ Do NOT write the goal store. ⛔ Do NOT mark any GOAL or AC achieved / active / draft / retired. ⛔ Do NOT edit `goals/*.md`. Your product is a TASK, not a state change — a human decides the AC set.",
-    "File ONE task via the `quay-file-task` skill (Skill tool). ⛔ Not more than one. If an in-flight task already proposes an AC / exit-condition change for this goal, do NOT file a duplicate — report that task's id instead.",
+    // ⛔ NAMESPACED, for the same reason as buildGapWorkerPrompt above (gap-meta-buildgapworkerprompt
+    // covers both prompt builders): a bare `quay-file-task` is not a registered skill name.
+    "File ONE task via the `quay:quay-file-task` skill (Skill tool). ⛔ Not more than one. If an in-flight task already proposes an AC / exit-condition change for this goal, do NOT file a duplicate — report that task's id instead.",
     "Then move it to `status: needs-human` (task_write MCP) so a human reviews the proposal before it is dispatched as work.",
   ].join("\n");
 }
