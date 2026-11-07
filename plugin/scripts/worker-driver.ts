@@ -124,7 +124,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { randomUUID, createHash } from "node:crypto";
 import { spawn, spawnSync } from "node:child_process";
 import { isDirectEntry, normalizeRel } from "./gate-script-base.ts";
-import { takeDevelopDocPromptRules } from "./conflict-resolution-rules.ts";
+import { RESOLVE_ALL_FLAG } from "./conflict-resolution-rules.ts";
 import { readProcCmdlineText } from "../../packages/quay/src/kernel/proc-identity.ts";
 import { TASK_STATUS } from "./task-status.ts";
 import { extractSection, countAcCheckboxes, fetchTaskStatusAtRef, parseFrontmatterCompletely, frontmatterGoalAc } from "./task-schema.ts";
@@ -3041,18 +3041,31 @@ export async function continueStateForTaskAsync(root: string, taskId: string): P
  *  dual-copy 文件两副本同步字节一致、modify/delete 判删除侧、ff-not-fast-forward 重 merge
  *  develop 再 ff，然后 `git commit --no-edit` 完成 merge——⛔ 禁止带着 unmerged paths（UU）退出，
  *  否则下一轮 fan-in 的 merge step 再失败。
- *  ⛔ 规则 (1) 的路径与文案**不在此处写**——它从 conflict-resolution-rules.ts 的
- *  TAKE_DEVELOP_DOC_RULES 注册表渲染（gap-conflict-outline-half-only-in-prompt-prose：同一「取
- *  develop 版」语义曾有机械与散文两份，散文那份（outline）没有执行承接；改注册表 ⇒ 决策与 prompt
- *  同时变化）。原 (4) tick-doc 一条已并入 (1)（同一注册表的 `tick-doc` 条目）——**编号 (4) 留空，
- *  ⛔ 不复用**（硬规则 8：编号不得复用）。 */
-function continueConflictResolutionNote(): string {
+ *
+ *  ── gap-conflict-mechanical-resolver-not-wired：机器可判的一半改成【跑一条命令】 ─────────────────
+ *  缺陷：规则 (1) take-develop / (3) dual-copy 的消解动作早已在 `conflict-resolution-rules.ts` 里
+ *  可执行（`resolveConflictMechanically` 真跑 `git checkout develop --` / 字节同步），且有行为测试；
+ *  但 worker/driver 的**生产路径零调用者** —— prompt 仍用 1842 字符教 agent 手跑同样的 git 命令
+ *  （硬规则 9：可见性 ≠ 执行）。修法：本段 (1) 只给**单一命令**（`--resolve-all <worktree>`，旗标
+ *  从 `RESOLVE_ALL_FLAG` 渲染，⛔ 不在此处写第二份字面），并要求「只处理它点名 MANUAL 的文件」；
+ *  判断型规则 (2) code 并集 / (2b) 任务文件 / (5) modify-delete 判删除侧 / (6) add+commit / FF
+ *  逐字保留（机器判不了）。
+ *  ⛔ 解析不出该 sibling（非源检出且无 dist bundle）⇒ **如实说明跑不了**，⛔ 不假装跳过（硬规则 3b）；
+ *  此时判断型规则仍完整给出，worker 照旧可手工消解。
+ *  ⛔ 编号 (3)、(4) 自本任务/gap-conflict-outline-half-only-in-prompt-prose 起【留空】
+ *  （(3) dual-copy 的手跑散文随机器承接一并删除；(4) tick-doc 已并入 (1) 同一注册表条目），
+ *  **不复用**（硬规则 8：编号不得复用）。 */
+function continueConflictResolutionNote(worktree: string): string {
+  const argv = kernelSiblingArgv("conflict-resolution-rules.ts", [RESOLVE_ALL_FLAG, worktree]);
+  const mechanical =
+    argv === null
+      ? `(1) the mechanical resolver (conflict-resolution-rules.ts ${RESOLVE_ALL_FLAG}) cannot be resolved from this kernel installation — it is NOT available here, so resolve every file per the rules below by hand.`
+      : `(1) run the mechanical resolver FIRST — ONE command: \`${argv.join(" ")}\` — it solves the machine-decidable conflicts (take-develop docs, dual-copy, modify/delete) and PRINTS what it left MANUAL; ⛔ hand-run nothing it covers — handle ONLY the files it names (rules 2/2b/5).`;
   return [
     `CONFLICT RESOLUTION — if the worktree has unmerged paths (UU in \`git status\`) or \`git merge develop\` reports CONFLICT, resolve it BEFORE continuing implementation; ⛔ never exit while unmerged paths remain.`,
-    `(1) take-develop docs: ${takeDevelopDocPromptRules().join(" ")}`,
+    mechanical,
     `(2) code files: read both sides and take the semantic union (keep both changes where they do not conflict).`,
     `(2b) task files (\`tasks/<id>.md\`): take the per-hunk union — keep develop's edits (\`## Touches\`/Needs-Human/\`status:\`) AND keep your branch's edits (\`- [x]\` AC ticks, \`## Evidence\`). ⛔ do NOT "take the develop version" (it silently drops your AC ticks). ⛔ do NOT write \`status:\` frontmatter yourself: on a \`status:\` conflict take develop's value verbatim.`,
-    `(3) dual-copy files (\`.claude/workflows/*\` ↔ \`plugin/workflows/*\`): take the develop version, then re-sync BOTH copies byte-identical; ⛔ do NOT take a semantic union.`,
     `(5) modify/delete CONFLICT: first judge WHICH side deleted — if your branch deleted intentionally (a replacement lives on the branch), read develop's version (\`git show develop:<file>\`) and absorb its changes, THEN \`git rm <file>\`; if develop deleted, \`git rm <file>\`. ⛔ never silently restore the deleted file.`,
     `(6) \`git add <resolved files>\` then \`git commit --no-edit\` to complete the merge.`,
     `FF NOT FAST-FORWARD — if the prior failure was \`step=ff: ... not fast-forward\` (develop advanced during the long suite): merge develop again (\`git merge develop\`, resolving any conflict per the rules above), \`git commit --no-edit\`, then re-exit — the driver re-runs fan-in and the ff will then succeed. ⛔ do NOT re-implement.`,
@@ -4568,7 +4581,7 @@ export function buildContinueWorkerPrompt(task: string, root: string, state: Con
     `${continueAttemptsNote(attempts)}`,
     `${continueSuiteLogNote(attempts)}`,
     `${continueRelatednessNote(root, task, attempts)}`,
-    `${continueConflictResolutionNote()}`,
+    `${continueConflictResolutionNote(wt)}`,
     `${continueDarkAxisNote(state)}`,
     `${darkAxisRecordNote()}`,
     `Re-provision the existing worktree (idempotent): \`${dispatchSetupSignature(root, wt, resolveTaskMergeTarget(task, root))}\`.`,

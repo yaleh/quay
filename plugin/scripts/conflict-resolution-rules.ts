@@ -37,14 +37,23 @@
 // `takeDevelopDocPromptRules` / `resolveConflictMechanically` directly for the contract check
 // (the test asserts the module's BEHAVIOR — real git operations — not a prompt string).
 // This module is the EXECUTABLE carrier for rules (3)/(4)/(5): the rules are decided here by
-// POSITION and EXECUTED by real git commands, then asserted by the behavior test. worker-driver.ts
-// imports `takeDevelopDocPromptRules` so the take-develop PROSE it puts in the worker prompt is
-// rendered from this same registry (gap-conflict-outline-half-only-in-prompt-prose: one rule, two
-// carriers, one source). The agent-executed half (code/task-file/ff) stays prose in worker-driver,
-// which must not grow past the gap-worker-prompt-note-family-slimming 25% baseline.
+// POSITION and EXECUTED by real git commands, then asserted by the behavior test.
+//
+// ── PRODUCTION WIRING (gap-conflict-mechanical-resolver-not-wired) ────────────────────────────────
+// THE DEFECT THAT TASK FIXED: `resolveConflictMechanically` had behavior tests but ZERO production
+// callers — the worker's continue prompt still spent 1842 chars teaching the agent to hand-run the
+// very `git checkout develop --` / `git rm` / dual-copy re-sync commands this module already
+// executes (硬规则 9: 可见性 ≠ 执行 — the executable carrier existed and was bypassed).
+// FIX: the BATCH entry point `resolveAllConflictsMechanically` + its CLI flag `RESOLVE_ALL_FLAG`.
+// The worker prompt (worker-driver.ts `continueConflictResolutionNote`) now names exactly ONE
+// command and tells the worker to handle only the files that command prints as MANUAL. The flag
+// NAME lives here (`RESOLVE_ALL_FLAG`) and the prompt renders it from here, so the CLI subcommand
+// and the prompt cannot drift apart. The agent-executed half (code / task-file / ff) stays prose in
+// worker-driver, which must not grow past the gap-worker-prompt-note-family-slimming 25% baseline.
 // Usage (CLI, for the worker / tests):
 //   node --experimental-strip-types plugin/scripts/conflict-resolution-rules.ts --judge <rel> <status> [--json]
 //   node --experimental-strip-types plugin/scripts/conflict-resolution-rules.ts --resolve <root> <rel> <status> [--json]
+//   node --experimental-strip-types plugin/scripts/conflict-resolution-rules.ts --resolve-all <root> [--json]
 // Exit: 0 = resolved (or a definite action for --judge); 1 = not machine-resolvable (manual); 2 = usage.
 
 import { spawnSync } from "node:child_process";
@@ -94,8 +103,11 @@ export interface TakeDevelopDocRule {
  * THE REGISTRY — every doc whose merge conflict is resolved by taking develop's version, and the ONLY
  * place those paths live. Both carriers render from it:
  *   • `conflictAction` → `take-develop` (mechanical, decided by POSITION), and
- *   • `takeDevelopDocPromptRules` → the worker prompt's conflict-resolution note.
- * Adding a doc here changes the decision AND the prose in one edit; there is no second list to drift.
+ *   • `renderTakeDevelopDocRule` / `takeDevelopDocPromptRules` → the human-readable rendering.
+ * ⚠️ Since gap-conflict-mechanical-resolver-not-wired the worker prompt NO LONGER copies this prose:
+ * it names the batch command instead (the registry is executed, not read). The rendering survives for
+ * `--render-prompt-rules` (tests read the loaded/mutated registry through it) and for the batch
+ * output's per-file reason. Adding a doc here still changes the decision in ONE edit.
  */
 export const TAKE_DEVELOP_DOC_RULES: ReadonlyArray<TakeDevelopDocRule> = [
   {
@@ -254,9 +266,120 @@ export function resolveConflictMechanically(root: string, rel: string, status: s
   }
 }
 
+// ── BATCH MODE (gap-conflict-mechanical-resolver-not-wired) ───────────────────────────────────────
+// WHY a batch entry point and not "the worker calls --resolve once per file": the worker prompt must
+// name ONE command (AC1: 单一命令). Telling the agent to enumerate `git status` and loop would put the
+// enumeration back in the agent's head — the exact bypass this task removes. ONE command ⇒ ONE place
+// that decides which files are machine-decidable, and ONE place that names the rest.
+
+/** The CLI flag of the batch mode — single source: the CLI parses it, and the worker prompt renders
+ *  the command from this constant (⛔ a second literal in the prompt would be a drift source). */
+export const RESOLVE_ALL_FLAG = "--resolve-all";
+
+/** Every `git status --porcelain` XY code that means "unmerged" (git's own list: DD/AU/UD/UA/DU/AA/UU). */
+export const UNMERGED_CODES: ReadonlySet<string> = new Set(["DD", "AU", "UD", "UA", "DU", "AA", "UU"]);
+
+export interface UnmergedFile {
+  /** repo-relative path, `/`-normalized */
+  rel: string;
+  /** the two-char porcelain code (`UU` / `DU` / …) — always one of `UNMERGED_CODES` */
+  status: string;
+}
+
+/** Enumerate the worktree's unmerged paths AND their porcelain codes in one read.
+ *  ⛔ `error` is a distinct value, not "no conflicts": a failing `git status` must never be reported
+ *  as "everything is clean" (硬规则 3b — 读不懂 ≠ 合格). */
+export function listUnmergedFiles(root: string): { files: UnmergedFile[]; error: string | null } {
+  const r = git(root, ["status", "--porcelain", "-z"]);
+  if (r.code !== 0) {
+    return { files: [], error: `git status --porcelain failed (exit ${r.code}): ${r.stderr.trim() || "(no stderr)"}` };
+  }
+  const files: UnmergedFile[] = [];
+  const records = r.stdout.split("\0");
+  for (let i = 0; i < records.length; i += 1) {
+    const rec = records[i];
+    // `<XY> <path>`: 2 code chars + 1 separating space + path (the final NUL yields an empty record).
+    if (rec.length < 4) continue;
+    const xy = rec.slice(0, 2);
+    // Rename/copy entries carry a SECOND NUL-separated path record; consuming it keeps that path from
+    // being mis-parsed as its own entry (硬规则 2: decide by position in the record stream, not by a
+    // prefix guess).
+    if (xy.startsWith("R") || xy.startsWith("C")) { i += 1; continue; }
+    if (!UNMERGED_CODES.has(xy)) continue;
+    files.push({ rel: rec.slice(3).split(path.sep).join("/"), status: xy });
+  }
+  return { files, error: null };
+}
+
+export interface BatchResolution {
+  root: string;
+  /** files the machine resolved (real git operations were performed) */
+  resolved: MechanicalResolution[];
+  /** files the machine did NOT touch and that still need the agent — every one of them is named */
+  manual: MechanicalResolution[];
+  /** `git status` unmerged count the batch started from (resolved + manual must equal it) */
+  total: number;
+}
+
+/**
+ * The batch the worker prompt names: enumerate every unmerged path, run the EXISTING per-file
+ * `resolveConflictMechanically` on each machine-decidable one, and leave every `manual` file
+ * ⛔ untouched while naming it in the returned list.
+ *
+ * AC1's negative arm lives here: a `manual` file is neither `git checkout`-ed nor `git rm`-ed, and
+ * it is reported (`manual`) rather than silently skipped — `resolved.length + manual.length === total`
+ * by construction, so "we handled N and there were N+1" cannot happen.
+ */
+export function resolveAllConflictsMechanically(root: string): { readError: string | null; batch: BatchResolution } {
+  const { files, error } = listUnmergedFiles(root);
+  const batch: BatchResolution = { root, resolved: [], manual: [], total: files.length };
+  if (error) return { readError: error, batch };
+  for (const f of files) {
+    const action = conflictAction(f.rel, f.status);
+    if (action.kind === "manual") {
+      batch.manual.push({ rel: f.rel, action: "manual", resolved: false, reason: `[${f.status}] ${action.reason}` });
+      continue;
+    }
+    const res = resolveConflictMechanically(root, f.rel, f.status);
+    // A failed mechanical action is a file that STILL needs the agent — it belongs in `manual`
+    // (⛔ not silently dropped, and ⛔ not counted as resolved).
+    if (res.resolved) batch.resolved.push(res);
+    else batch.manual.push(res);
+  }
+  return { readError: null, batch };
+}
+
+/** The human-readable batch report the worker reads (and the CLI prints). Every unmerged path appears
+ *  exactly once: under `machine-resolved` or under `MANUAL — handle these yourself`.
+ *
+ *  The delete-side footnote is NOT decoration: `git rm` is the mechanical half of rule (5), but rule
+ *  (5)'s other half ("if your branch deleted intentionally, absorb develop's changes first") is a
+ *  JUDGMENT the machine cannot make (deleting the conflicted file ‑ `git rm` ‑ leaves develop's
+ *  version reachable only through the ref). The batch therefore reports the accepted deletions and
+ *  names the ref that still holds develop's content, so the worker can apply rule (5)'s judgment
+ *  instead of losing it silently. */
+export function formatBatchResolution(batch: BatchResolution): string {
+  const lines = [
+    `conflict-resolve-all ${batch.root}: ${batch.total} unmerged path(s) — ${batch.resolved.length} machine-resolved, ${batch.manual.length} need your judgment`,
+  ];
+  for (const r of batch.resolved) lines.push(`  RESOLVED ${r.action}: ${r.rel} — ${r.reason}`);
+  for (const m of batch.manual) lines.push(`  MANUAL ${m.rel} — ${m.reason}`);
+  const deletions = batch.resolved.filter((r) => r.action === "delete-side");
+  if (deletions.length > 0) {
+    lines.push(
+      `  NOTE accepted deletion(s): ${deletions.map((d) => d.rel).join(", ")} — develop's version is still at \`git show develop:<file>\`; if your branch deleted it intentionally, apply rule (5)'s absorb-then-rm judgment.`,
+    );
+  }
+  if (batch.manual.length > 0) {
+    lines.push(`  ⇒ handle ONLY the MANUAL files above (code semantic union / task-file per-hunk union / modify-delete judgment), then \`git add\` + \`git commit --no-edit\`.`);
+  }
+  return lines.join("\n");
+}
+
 function usage(): string {
   return "usage: conflict-resolution-rules.ts --judge <rel> <status> [--json]\n" +
     "       conflict-resolution-rules.ts --resolve <root> <rel> <status> [--json]\n" +
+    "       conflict-resolution-rules.ts --resolve-all <root> [--json]\n" +
     "       conflict-resolution-rules.ts --render-prompt-rules\n" +
     "Exit: 0 = definite machine action / resolved; 1 = manual (not machine-resolvable) / resolution failed; 2 = usage";
 }
@@ -271,13 +394,29 @@ function main(argv: string[]): number {
   const rest = args.filter((a) => a !== "--json");
   const judgeIdx = rest.indexOf("--judge");
   const resolveIdx = rest.indexOf("--resolve");
+  const resolveAllIdx = rest.indexOf(RESOLVE_ALL_FLAG);
   const renderIdx = rest.indexOf("--render-prompt-rules");
-  if ([judgeIdx, resolveIdx, renderIdx].filter((i) => i !== -1).length > 1) { process.stderr.write(usage() + "\n"); return 2; }
+  if ([judgeIdx, resolveIdx, resolveAllIdx, renderIdx].filter((i) => i !== -1).length > 1) { process.stderr.write(usage() + "\n"); return 2; }
   if (renderIdx !== -1) {
     // The prompt half of THIS registry, rendered from the loaded module — the negative arm runs this
     // against a mutated copy to prove the prompt and the mechanical decision share one source.
     for (const line of takeDevelopDocPromptRules()) process.stdout.write(line + "\n");
     return 0;
+  }
+  if (resolveAllIdx !== -1) {
+    const root = rest[resolveAllIdx + 1];
+    if (!root) { process.stderr.write(usage() + "\n"); return 2; }
+    const { readError, batch } = resolveAllConflictsMechanically(root);
+    if (asJson) {
+      process.stdout.write(JSON.stringify({ readError, ...batch }, null, 2) + "\n");
+    } else if (readError) {
+      // ⛔ cannot read the conflict set ⇒ say so; ⛔ never print "0 unmerged" (硬规则 3b).
+      process.stdout.write(`conflict-resolve-all ${root}: NOT EVALUATED — ${readError}\n`);
+    } else {
+      process.stdout.write(formatBatchResolution(batch) + "\n");
+    }
+    if (readError) return 1;
+    return batch.manual.length === 0 ? 0 : 1;
   }
   if (judgeIdx !== -1) {
     const rel = rest[judgeIdx + 1];
