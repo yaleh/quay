@@ -3048,9 +3048,37 @@ export function carrierGate(root: string, item: DecisionItem): { ok: boolean; ca
   return { ok: true, carrier, reason: `needs-human-task: ${verified.length} 条逐字可核的冲突引用 + 不可逆性说明 + 授权面齐备` };
 }
 
-/** needs-human-task 的任务体。⛔ 机械渲染自结构化输出——不给 LLM 写文件的权力（同 autoDrive）。 */
+/** needs-human-task 的任务体。⛔ 机械渲染自结构化输出——不给 LLM 写文件的权力（同 autoDrive）。
+ *
+ *  ── 线首 `**PARKED` 标记是本函数的契约（gap-meta-renderhumancallbody，2026-11-07）───────────
+ *  裁定任务的 AC 只能由人勾——worker 结构上做不到——而 `ready-pool-check.isParked` 是派发池
+ *  **唯一**的排除半边。缺这一行，任务就走 needs-human →（停放被判失效，退回）todo → ready →
+ *  worker → exited-not-landed → ready 的循环：实测 victim `gap-meta-call-ac-936-goal-914-103`
+ *  2026-11-07 在 needs-human 停 31 分钟 → todo → 29 秒后 ready → 派给 worker，AC 4 条一条未勾；
+ *  而 worker kind 无重试上限 ⇒ 每轮重派，两条 meta-human-call 立案都没让裁定到达人。
+ *  这里用的是**既有**标记机制（与 SUPERSEDED/RETREATED 同为位置判定），⛔ 不新建并行机制。
+ *
+ *  只给标记是「停放的隐形半边」：`needs-human-parking-recheck` 的 ARM 2 每轮复跑任务体里声明的
+ *  unpark 检查，所以本函数同时给出**可跑**的只读检查，形状对准 `readUnparkDeclaration` 的读取面
+ *  （行首标签 + 块内第一个行内代码段 = 命令 + `输出 \`X\`` = 期望 token）：人在本任务体的
+ *  `## 人的裁定` 段写下选择，命令即输出 `ruled`——一条能取假、也能翻绿的读数。 */
 export function renderHumanCallBody(item: DecisionItem, evidence: unknown, at: string, taskId?: string): string {
+  // 标记里只留到「天」：`at` 是 ISO 时刻，秒级时间对读它的人没有增益。
+  const day = String(at ?? "").slice(0, 10);
+  // 无 taskId 时（非生产路径）不渲染路径命令：一条指向 `tasks/undefined.md` 的检查会恒红，
+  // 那会把「没渲染」伪装成「人还没裁定」（硬规则 3b）⇒ 退回散文条件 ⇒ 读作 `no-unpark-check`。
+  const selfFile = taskId ? `tasks/${taskId}.md` : null;
   return [
+    `**PARKED**（${day || "日期未知"}，meta-driver 机械立案；等人工裁定，见 ## Finding）`
+      + "：行首标记是机械停放信号——ready-pool-check.isParked 据此把本任务排除出待派池。"
+      + "本任务的 AC 只能由人勾（worker 结构上做不到），放进派发池只会每轮空烧一个 worker 会话。"
+      + "⛔ 本标记不表示任何人已作出裁定。",
+    "",
+    "## Unpark",
+    selfFile
+      ? `- **unpark 检查（只读、可直接跑）**：\`grep -q '^## 人的裁定' ${selfFile} && echo ruled\` —— 输出 \`ruled\` 即表示裁定已写进本任务体的 \`## 人的裁定\` 段；届时删掉上面的 PARKED 行并按 ## AC 处置。`
+      : "- **unpark 检查**：渲染时没有 taskId ⇒ 无法指向本任务自己的文件，故不提供可跑命令（人裁定后直接删掉上面的 PARKED 行）。",
+    "",
     "## Finding",
     `${item.question}`,
     "",
@@ -3064,7 +3092,7 @@ export function renderHumanCallBody(item: DecisionItem, evidence: unknown, at: s
     ...(item.conflict ?? []).map((c) => `- \`${c.source}\`：「${c.quote}」`),
     "",
     "## AC（draft）",
-    "- [ ] 人在上述选项中作出选择，并把选择写进本任务体（或以 DIR 记录该裁定）",
+    "- [ ] 人在上述选项中作出选择，并把选择写进本任务体的 `## 人的裁定` 段（若以 DIR 记录该裁定，同时在该段写一行指向该 DIR）—— 上面 unpark 检查读的就是这一段",
     "- [ ] 依该选择产生的后续工作已立案或已落地（⛔ 不以「已回答」本身充当完成）",
     "",
     "## DoD（draft）",

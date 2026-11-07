@@ -112,7 +112,10 @@ import {
 } from '../scripts/meta-driver.ts';
 import { createMetaStore } from '../../packages/quay/src/meta-store.ts';
 // 停放载体的路径单一真相源（⛔ 测试里不重拼字面量：重拼一份就等于允许生产方换路径而测试仍绿）。
-import { PARKING_READING_REL } from '../scripts/needs-human-parking-recheck.ts';
+import { PARKING_READING_REL, readUnparkDeclaration } from '../scripts/needs-human-parking-recheck.ts';
+// 派发池自己的 PARKED 读者（gap-meta-renderhumancallbody）：判「裁定任务会不会进待派池」必须用
+// 那个唯一的排除半边本身，⛔ 不在测试里重写一份正则（重写的判据测的是抄写，不是行为）。
+import { isParked } from '../scripts/ready-pool-check.ts';
 // 全局天花板的单一真相源：载体相对路径（probe-routine.ts）与配置读取面（driver-config.ts）。
 import { ROUTINE_FINDINGS_REL } from '../scripts/probe-routine.ts';
 import { routineGlobalCeiling, routineWindowMs } from '../scripts/driver-config.ts';
@@ -2359,6 +2362,59 @@ test('renderHumanCallBody: 逐字冲突引用与不可逆性都进任务体（�
   assert.ok(body.includes('改写后另一条路径的历史依据被抹掉'));
   assert.ok(body.includes('- `tasks/gap-meta-call-x.md`'), 'self-touch 机械补齐');
   assert.ok(body.includes('落败的一方已被就地更正或标注'), 'DoD 必须要求消解冲突源，⛔ 不留着再触发同一次');
+});
+
+// ── 裁定任务的机械停放（gap-meta-renderhumancallbody）──────────────────────────────────────────
+// 缺陷：renderHumanCallBody 产出的任务不带线首 PARKED 标记，而 isParked 是派发池**唯一**的排除
+// 半边 ⇒ 只能由人勾 AC 的裁定任务被推成 ready、派给 worker，每轮空烧一个会话（victim:
+// gap-meta-call-ac-936-goal-914-103，2026-11-07）。判据喂**真函数**、用派发池**自己的读者**
+// （isParked）判行为，⛔ 不判源码布局；并带取假臂（去掉标记 ⇒ 必须放行），否则它只是恒真装饰。
+const humanCallItem = () => ({
+  ...goodDecision, carrier: 'needs-human-task',
+  irreversible: '改写后另一条路径的历史依据被抹掉',
+  touches: 'plugin/scripts/meta-driver.ts',
+  conflict: [{ source: 'spec.md', quote: '语义判据允许留空' }, { source: 'ac.md', quote: '不存在无判据的活跃验收' }],
+});
+
+test('renderHumanCallBody: 产出的任务体被派发池自己的读者 isParked 判为已停放', () => {
+  const body = renderHumanCallBody(humanCallItem(), 41, '2026-09-06T00:00:00Z', 'gap-meta-call-probe');
+  assert.equal(isParked({ body }), true, '裁定任务必须被 isParked 挡出派发池（它只能由人勾 AC）');
+
+  // 取假臂：同一条判据换个输入必须换值。删掉线首标记行 ⇒ 读者放行 ⇒ 上面那条真的在测标记本身。
+  const withoutMarker = body.split('\n').filter((l) => !/^\*\*PARKED\b/.test(l)).join('\n');
+  assert.notEqual(withoutMarker, body, '前提：任务体里确实有一行线首 PARKED 标记');
+  assert.equal(isParked({ body: withoutMarker }), false, '没有标记时必须回到 false');
+});
+
+test('renderHumanCallBody: unpark 检查能被 ARM 2 的读取器读出、能跑、且两个方向都取值', (t) => {
+  const body = renderHumanCallBody(humanCallItem(), 41, '2026-09-06T00:00:00Z', 'gap-meta-call-probe');
+  const decl = readUnparkDeclaration(body);
+  assert.equal(decl.found, true, '停放必须带 unpark 声明（否则 ARM 2 只会报 no-unpark-check）');
+  assert.equal(decl.problem, null, `声明必须是可读的：${decl.problem}`);
+  assert.match(String(decl.command), /^[\w./~$-]/, '命令必须 command-shaped');
+  assert.ok(String(decl.command).includes('tasks/gap-meta-call-probe.md'), '检查必须指向本任务自己的文件');
+  assert.equal(decl.expectedOutput, 'ruled');
+
+  // 真跑：在临时根里按「人还没裁定 / 人已裁定」两态各跑一次 —— 一条恒红的检查不是读数。
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'meta-human-call-unpark-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  fs.mkdirSync(path.join(root, 'tasks'), { recursive: true });
+  const file = path.join(root, 'tasks', 'gap-meta-call-probe.md');
+  const run = () => {
+    try {
+      return { code: 0, out: String(execFileSync('bash', ['-c', decl.command], { cwd: root, encoding: 'utf8' })) };
+    } catch (e) {
+      return { code: e.status, out: String(e.stdout ?? '') };
+    }
+  };
+  fs.writeFileSync(file, '## Finding\n\nno ruling recorded\n', 'utf8');
+  const before = run();
+  assert.notEqual(before.code, 0, '人还没裁定 ⇒ 检查必须失败（否则它恒绿，等于没测）');
+
+  fs.writeFileSync(file, '## 人的裁定\n\n选定 (a)。\n', 'utf8');
+  const after = run();
+  assert.equal(after.code, 0, '裁定写入后检查必须通过');
+  assert.ok(after.out.includes('ruled'), `输出必须带声明里的 token：${after.out}`);
 });
 
 // ── 重复计数（divergences 是四条输出通道里唯一没有执行器的一条）────────────────────────
