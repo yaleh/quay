@@ -1271,7 +1271,7 @@ test("gap-worker-prompt-note-family-slimming — AC2 (negative control): the arb
 // 与 driver take-over 句 —— `preMergeNote-1` = **enforce**（fan-in 在自己的锁内**重做** merge 与 scoped 门，
 // 冲突/红则 fail-closed，行为读数见 fan-in-driver-mechanical-orchestration.test.mjs），`driverFanInNote-1` 同理
 // ⇒ 这三条措辞断言已删除，⛔ 不以「提示词说过」充当执行证据（硬规则 9）。
-test("gap-worker-verify-condenser AC4 — create 与 continue 两个构造点都指向 --verify-run / --verify-rerun 入口，且预退出完整 scoped 门仍在", (t) => {
+test("gap-worker-verify-condenser AC4 — create 与 continue 两个构造点都指向 --verify-run / --verify-rerun 入口（scoped 门的强制面见 fan-in 行为测试）", (t) => {
   const root = makeRoot("verify-prompt");
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   // 本仓库形态：声明了 scoped_command ⇒ preMergeNote 走「跑完整 scoped 门」分支（逐字含 run the SAME scoped gate）。
