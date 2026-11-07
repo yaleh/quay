@@ -43,7 +43,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { execFileSync, spawnSync } from "node:child_process";
 import YAML from "yaml";
-import { isDirectEntry } from "./gate-script-base.ts";
+import { appendJsonlLineStrict, isDirectEntry } from "./gate-script-base.ts";
 import { writeDocDevelopSyncEvent } from "./driver-filters.ts";
 import { resolveKernelShellSibling } from "./driver-runtime.ts";
 
@@ -388,12 +388,13 @@ export function pushOnce(root: string, opts: { branch: string; remote: string; p
   return { verdict: "unavailable", detail: `push script exit ${r.status}: ${out}`, script };
 }
 
-/** 追加一条滞后事件到载体（纯 I/O，create dir/file as needed）。 */
+/** 追加一条滞后事件到载体（纯 I/O，create dir/file as needed）。
+ *  ⛔ FAIL-LOUD（不吞异常）：落痕写失败必须可区分于「已落痕」（硬规则 3b）。
+ *  实现归一到 `gate-script-base.appendJsonlLineStrict`（semantic-dedup-scan finding
+ *  `doc-develop-sync-vs-push-lag-event`）——与 `driver-filters.writeDocDevelopSyncEvent`
+ *  是同一个原语的两个载体包装，本处保留历史导出名（调用点与测试按这个名字引用）。 */
 export function appendPushLagEvent(root: string, record: Record<string, unknown>): string {
-  const file = path.join(root, PUSH_LAG_EVENT_REL);
-  fs.mkdirSync(path.dirname(file), { recursive: true });
-  fs.appendFileSync(file, JSON.stringify({ ts: new Date().toISOString(), ...record }) + "\n", "utf8");
-  return file;
+  return appendJsonlLineStrict(path.join(root, PUSH_LAG_EVENT_REL), { ts: new Date().toISOString(), ...record });
 }
 
 /** 移交既有语义同步兜底（AC6）。**⛔ 不重新发明合并策略**：只做既有两个落点
