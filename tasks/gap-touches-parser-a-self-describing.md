@@ -37,7 +37,7 @@ extra:
 - [ ] AC2 区分矩阵：`node --test plugin/test/touches-parser-rules-a.test.mjs`——每个 problem code 有正/负臂；违反规则 X 的输入，`problems[]` 的 code 集合 === `{X}` 且**不含任何兄弟 code**；每个 reading code 有正臂（section 选择 / tag=new / tag=delete）。
 - [ ] AC3 正臂 + 负臂：**正臂**用真实注册表 + 真实 `--help` 渲染，断言 X 在场且含义一致；**负臂**用注入注册表删掉 X，断言 X 消失且同一输入的 section/tag/annotation 读数同时变化。两条都跑；⛔ 只做注入负臂不算测量（硬规则 4 推论三）。
 - [ ] AC4 单源不回退：`touches-parser.ts` 无第二份 strip/parse 定义；`plugin/test/touches-parser-parity.test.mjs` 仍绿。
-- [ ] AC5 DSI 侧（外部执行）：删掉 3 条 D 行后，A 的 guard 测试 + help 面仍能回答对应探针；A 只覆盖 30 题 Q3，**Q2 属 B**；section/label 没有对应题，用 guard 测试作读数，**不扩分母**。
+- [ ] AC5 DSI 侧（外部执行）：删掉 3 条 D 行后，A 的 guard 测试 + help 面仍能回答对应探针；A 只覆盖 30 题 Q3，**Q2 属 B**；section/label 没有对应题，用 guard 测试作读数，**不扩分母**。（待外部）
 
 ## Definition of Done
 
