@@ -46,7 +46,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
-import { isDirectEntrySafe } from "./gate-script-base.ts";
+import { isDirectEntrySafe, parseArgs as baseParseArgs } from "./gate-script-base.ts";
 import { parseFrontmatter } from "./read-probe-spec.ts";
 
 /** A FALLBACK declaration marker inside a probe body (case-insensitive). A BLOCKQUOTE line carrying
@@ -349,29 +349,39 @@ const USAGE = [
 ].join("\n");
 
 function main(argv: string[]): number {
-  let root = process.cwd();
-  let pluginRootArg = "";
-  let probe: string | undefined;
-  let runFixture = true;
-  let json = false;
-  for (let i = 0; i < argv.length; i++) {
-    const a = argv[i];
-    if (a === "--help" || a === "-h") {
-      process.stdout.write(USAGE);
-      return 0;
-    } else if (a === "--root") root = argv[++i] ?? root;
-    else if (a.startsWith("--root=")) root = a.slice("--root=".length);
-    else if (a === "--plugin-root") pluginRootArg = argv[++i] ?? pluginRootArg;
-    else if (a.startsWith("--plugin-root=")) pluginRootArg = a.slice("--plugin-root=".length);
-    else if (a === "--probe") probe = argv[++i];
-    else if (a.startsWith("--probe=")) probe = a.slice("--probe=".length);
-    else if (a === "--no-fixture") runFixture = false;
-    else if (a === "--json") json = true;
-    else {
-      process.stderr.write(`probe-fallback-path-check: unknown argument: ${a}\n${USAGE}`);
-      return 2;
-    }
+  // Shared parser (gate-script-base.ts `parseArgs`) — this file's private token loop carried the same
+  // `--root`/`--root=`/`--json` arms as four sibling checkers, only widened with `--plugin-root` /
+  // `--probe` / `--no-fixture` (semantic-dedup-scan finding `check-main-root-json-argv-loop`, runId
+  // `semantic-dedup-scan-1794036444725`). The two modes this CLI owners: `help:"return"` so the whole
+  // multi-line USAGE prints, `errors:"return"` so an unknown flag keeps its `exit 2` contract here.
+  const parsed = baseParseArgs(["node", "probe-fallback-path-check", ...argv], {
+    minArgs: 0,
+    usage: "[--root <repo>] [--plugin-root <plugin>] [--probe <name>] [--no-fixture] [--json]",
+    help: "return",
+    errors: "return",
+    unknown: "reject",
+    flags: {
+      root: { type: "string" },
+      "plugin-root": { type: "string" },
+      probe: { type: "string" },
+      "no-fixture": { type: "boolean" },
+      json: { type: "boolean" },
+    },
+  });
+  if (parsed.help) {
+    process.stdout.write(USAGE);
+    return 0;
   }
+  if (parsed.error) {
+    process.stderr.write(`probe-fallback-path-check: ${parsed.error}\n${USAGE}`);
+    return 2;
+  }
+  const str = (v: string | boolean | undefined): string | undefined => (typeof v === "string" ? v : undefined);
+  const root = str(parsed.flags.root) ?? process.cwd();
+  const pluginRootArg = str(parsed.flags["plugin-root"]) ?? "";
+  const probe = str(parsed.flags.probe);
+  const runFixture = parsed.flags["no-fixture"] !== true;
+  const json = parsed.flags.json === true;
   const pluginRoot = pluginRootArg ? path.resolve(pluginRootArg) : path.join(path.resolve(root), "plugin");
   const report = checkProbeFallbacks(pluginRoot, { probe, runFixture });
   if (json) {

@@ -3,7 +3,7 @@ id: gap-routine-semantic-dedup-scan-check-main-root-json-argv-loop
 title: "semantic-dedup-scan: The eight-line --root/--root=/--json loop is
   byte-identical in five check scripts that already import gate-script-base,
   whose parseArgs supports the same spec "
-status: ready
+status: done
 labels:
   - gap
   - routine-filed

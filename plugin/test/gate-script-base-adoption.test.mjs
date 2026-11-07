@@ -59,6 +59,15 @@ const CARRIERS = [
   "peer-identity-probe.ts",
   "slice-readings.ts",
   "suite-lpt-order.ts",
+  // finding `check-main-root-json-argv-loop` (runId semantic-dedup-scan-1794036444725) — five checkers
+  // that ALREADY imported this base kept a byte-identical private `--root` / `--root=` / `--json`
+  // token loop (two of them widened with extra flags). Same property, same ratchet: a private loop
+  // that reappears in any of them reds here without anyone remembering to look.
+  "serve-binding-literal-check.ts",
+  "worktree-namespace-literal-check.ts",
+  "registry-path-literal-check.ts",
+  "freshness-producer-coverage-check.ts",
+  "probe-fallback-path-check.ts",
 ];
 
 // A hand-rolled CLI parser is recognized STRUCTURALLY — by comparing a token against a `--`-prefixed

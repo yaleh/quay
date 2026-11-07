@@ -570,6 +570,31 @@ export function appendJsonlLine(file: string, entry: Record<string, unknown>): v
   }
 }
 
+// ── appendJsonlLineStrict ───────────────────────────────────────────────────────────────────────────
+// The FAIL-LOUD single-record sibling of `appendJsonlLine`: same carrier shape (create the parent
+// directory, one `JSON.stringify(entry) + "\n"`, `utf8`), but a write failure PROPAGATES and the
+// caller gets back the file it wrote to. Extracted — byte-identical from two private copies that
+// differed only in their REL path constant — by semantic-dedup-scan finding
+// `doc-develop-sync-vs-push-lag-event` (`.quay/routine-findings.jsonl`, routine
+// `semantic-dedup-scan`, runId `semantic-dedup-scan-1794036444725`, kind `byte-identical-body`,
+// verdict `real-duplication`, requested action `extract`), which named its two carriers:
+//   plugin/scripts/driver-filters.ts (`writeDocDevelopSyncEvent`)
+//   plugin/scripts/fan-in-push-lag-check.ts (`appendPushLagEvent`)
+//
+// WHY IT MUST THROW (⛔ 不要给它加 catch): both carriers record SYNC FAILURES. A swallowed write
+// error would make "the ledger says nothing went wrong" and "the ledger could not be written" the
+// same bytes on disk — the 硬规则 3b shape this repo forbids. fan-in-push-lag-check's
+// `escalateToSemanticSync` turns a throw from the writer into `{ ok:false, ledger:null }`; a
+// swallowing catch here would silently report a successful escalation that left no trace.
+//
+// `ts` is stamped by the CALLERS (their records are timestamped event records), not here — this
+// stays the plain "append exactly this object" primitive, symmetrical with `appendJsonlLine`.
+export function appendJsonlLineStrict(file: string, entry: Record<string, unknown>): string {
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.appendFileSync(file, JSON.stringify(entry) + "\n", "utf8");
+  return file;
+}
+
 // ── appendJsonlRecords ──────────────────────────────────────────────────────────────────────────────
 // The BATCH sibling of `appendJsonlLine`: N records → ONE `appendFileSync`, parent dir auto-created,
 // returning how many records were written. Extracted here — byte-identical apart from the parameter

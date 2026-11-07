@@ -36,7 +36,7 @@
 
 import fs from "node:fs";
 import path from "node:path";
-import { isDirectEntrySafe } from "./gate-script-base.ts";
+import { isDirectEntrySafe, parseArgs as baseParseArgs } from "./gate-script-base.ts";
 // The recursive walk over SCAN_ROOTS lives in fs-walk.ts (was a byte-identical private copy here and
 // in registry-path-literal-check.ts / worktree-namespace-literal-check.ts — finding
 // `walkFiles-scan-surface-family`, routine `semantic-dedup-scan`, runId
@@ -205,14 +205,21 @@ export function checkServeBindingLiteral(root: string): ServeBindingLiteralRepor
 }
 
 function main(argv: string[]): number {
-  let root = process.cwd();
-  let json = false;
-  for (let i = 0; i < argv.length; i++) {
-    const a = argv[i];
-    if (a === "--root") root = argv[++i] ?? root;
-    else if (a.startsWith("--root=")) root = a.slice("--root=".length);
-    else if (a === "--json") json = true;
-  }
+  // Parses through the ONE canonical parser (gate-script-base.ts `parseArgs`). This file carried a
+  // byte-identical private `--root`/`--root=`/`--json` token loop (semantic-dedup-scan finding
+  // `check-main-root-json-argv-loop`, runId `semantic-dedup-scan-1794036444725`) although it already
+  // imported this module — pure maintainability debt, since the shared parser's string/boolean spec
+  // form IS that input language. `unknown: "skip"` keeps the retired loop's unknown-flag behavior
+  // byte-for-byte: drop the token, consume NOTHING after it (an unknown flag's next token is not
+  // its value).
+  const parsed = baseParseArgs(["node", "serve-binding-literal-check", ...argv], {
+    minArgs: 0,
+    usage: "[--root <dir>] [--json]",
+    unknown: "skip",
+    flags: { root: { type: "string" }, json: { type: "boolean" } },
+  });
+  const root = typeof parsed.flags.root === "string" ? parsed.flags.root : process.cwd();
+  const json = parsed.flags.json === true;
   const report = checkServeBindingLiteral(root);
   if (json) {
     process.stdout.write(JSON.stringify(report, null, 2) + "\n");
