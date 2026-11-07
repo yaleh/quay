@@ -12,7 +12,7 @@ extra:
 ---
 ## Proposal
 
-来源：两份只读清单 `quay-dev/inventories/prompt-rules-2026-11-07.md` 与 `decision-surface-2026-11-07.md`（口径 commit `04d611e12`），已由对端独立抽验：12 处 `file:line` 全部命中，渲染长度 4376/6573 复现一致。
+来源：两份只读清单（**在 quay 仓之外**，绝对路径）：`/data/home/yale/.claude/domain-semantic-induction/quay-dev/inventories/prompt-rules-2026-11-07.md` 与 `/data/home/yale/.claude/domain-semantic-induction/quay-dev/inventories/decision-surface-2026-11-07.md`（口径 commit `04d611e12`），已由对端独立抽验：12 处 `file:line` 全部命中，渲染长度 4376/6573 复现一致。⚠️ 这两份文件不在 quay 仓内，worker 若读不到，**以本任务体列出的 7 条清单与基线为准**，⛔ 不因缺源文件而阻塞。
 
 现状：63 条 prompt 规则（下界）的 `enforcement` 分布为 code 37 / none 14 / **string-assert 7** / behavior-test 5。这 7 条是「prompt 说了、测试只断言文本、行为没有保证」——本仓硬规则 9（可见性 ≠ 执行）的直接实例：worker 读到规则后不照做，套件仍绿。
 
@@ -39,13 +39,14 @@ extra:
 3. **测试改造**：把对应字符串断言换成行为断言，或在 `remove`/`keep` 情况下删除断言并记录理由。
 4. **前后读数**：用同一 fixture 重测两个基座的渲染长度，逐条记录每条处置对长度的贡献。
 5. **非独立规则的合并**：若复核发现某条不是可独立违反的规则（例如 `driverFanInNote-2` 只是 `-1` 的括号细节），合并并写明依据——⛔ 不得为凑 7 而保留。
+6. **已知冲突（必读，否则会红一条无关测试）**：`plugin/test/worker-driver.test.mjs:1236` 有 `gap-worker-prompt-note-family-slimming` 的**活棘轮**——`buildWorkerPrompt` + `buildContinueWorkerPrompt` 的归一化合并长度必须 ≤ **9102**（baseline 12137 的 −25%）。实测当前值 = **9064**，余量仅 **38 字符**。⇒ 任何 `keep` / 扩写必须由等量或更多的删除补偿；⛔ 不得擅自抬高 `WORKER_PROMPT_SLIM_BASELINE`（那是 re-anchor 行为，需单独裁定）。若某条规则确实必须保留且无法补偿，在 `## Evidence` 写明并提出 re-anchor 请求，⛔ 不要静默改基线。
 
 ## Acceptance Criteria
 
 - [ ] AC1 逐条处置：7 条每条都有 `{src, rule, disposition: enforce|remove|keep, reason}` 记入任务体 `## Evidence`，无一条未分类；若合并了非独立规则，写明依据。
 - [ ] AC2 `string-assert` 清零：这 7 条对应的 `assert.match` 全部消失或换成行为断言；负臂：每条 `enforce` 的规则，注入违约后检查必红（逐字读数）；每条 `remove` 的规则，给出「删除后既有行为测试仍绿」的读数。
 - [ ] AC3 渲染长度前后读数：用固定 fixture 重测两个基座，贴出 before（4376 / 6573）与 after 的逐字数字，**逐条说明**每条处置对长度的贡献。⛔ 不设「必须变短」的目标；变长也可接受，但必须解释。
-- [ ] AC4 无回归：`node --test plugin/test/worker-driver.test.mjs plugin/test/worker-driver-resident-s05.test.mjs` 与 `scripts/test.sh --for-task gap-prompt-string-assert-seven-rules-disposition` 绿。
+- [ ] AC4 无回归：`node --test plugin/test/worker-driver.test.mjs plugin/test/worker-driver-resident-s05.test.mjs` 与 `scripts/test.sh --for-task gap-prompt-string-assert-seven-rules-disposition` 绿；其中 `gap-worker-prompt-note-family-slimming` 的**长度棘轮 ≤9102 必须保持绿**（当前 9064，余量 38 字符；若因本任务变红，按 Plan 第 6 条的补偿或 re-anchor 请求处理）。
 
 ## Definition of Done
 
