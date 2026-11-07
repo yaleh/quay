@@ -21,7 +21,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
-import { readFrontmatter } from "./gate-script-base.ts";
+import { appendJsonlLineStrict, readFrontmatter } from "./gate-script-base.ts";
 import { parseTask, readDependsOn, readTaskStatusAtRef } from "./task-schema.ts";
 // gap-task-ops-consolidate-driver-frontmatter-writers：frontmatter parse/patch + commit 单一真相源
 // 上收到 task-ops.ts（⛔ 本文件不再各写一份 regex+writeFileSync+git 序列）。
@@ -756,12 +756,14 @@ assertStatusPriorityCoversVocabulary();
  *  「已消解出胜者」与「输入读不懂」。 */
 export const UNKNOWN_STATUS_PREFIX = "unknown:";
 
-/** 追加一条 doc↔develop 同步事件（create dir/file as needed）。纯 I/O。 */
+/** 追加一条 doc↔develop 同步事件（create dir/file as needed）。纯 I/O。
+ *  ⛔ FAIL-LOUD（不吞异常）：这是「同步失败落痕」的写入面——写不进去必须冒泡，⛔ 不得让
+ *  「ledger 里没有失败记录」与「ledger 根本写不进去」在盘上同形（硬规则 3b）。
+ *  实现归一到 `gate-script-base.appendJsonlLineStrict`（semantic-dedup-scan finding
+ *  `doc-develop-sync-vs-push-lag-event`，runId `semantic-dedup-scan-1794036444725`）；
+ *  本处保留历史导出名，因为调用点与测试按这个名字引用。 */
 export function writeDocDevelopSyncEvent(root: string, record: Record<string, unknown>): string {
-  const file = path.join(root, DOC_DEVELOP_SYNC_EVENT_REL);
-  fs.mkdirSync(path.dirname(file), { recursive: true });
-  fs.appendFileSync(file, JSON.stringify({ ts: new Date().toISOString(), ...record }) + "\n", "utf8");
-  return file;
+  return appendJsonlLineStrict(path.join(root, DOC_DEVELOP_SYNC_EVENT_REL), { ts: new Date().toISOString(), ...record });
 }
 
 /** 确定性状态消解（AC2）：两状态分叉取优先级更高者（见 `STATUS_PRIORITY`）。纯函数，无 LLM、无 I/O。
