@@ -282,8 +282,8 @@ export const UNMERGED_CODES: ReadonlySet<string> = new Set(["DD", "AU", "UD", "U
 export interface UnmergedFile {
   /** repo-relative path, `/`-normalized */
   rel: string;
-  /** the two-char porcelain code (`UU` / `DU` / …), or null when it could not be read */
-  status: string | null;
+  /** the two-char porcelain code (`UU` / `DU` / …) — always one of `UNMERGED_CODES` */
+  status: string;
 }
 
 /** Enumerate the worktree's unmerged paths AND their porcelain codes in one read.
@@ -335,10 +335,6 @@ export function resolveAllConflictsMechanically(root: string): { readError: stri
   const batch: BatchResolution = { root, resolved: [], manual: [], total: files.length };
   if (error) return { readError: error, batch };
   for (const f of files) {
-    if (f.status === null) {
-      batch.manual.push({ rel: f.rel, action: "manual", resolved: false, reason: "unmerged status unreadable — resolve semantically" });
-      continue;
-    }
     const action = conflictAction(f.rel, f.status);
     if (action.kind === "manual") {
       batch.manual.push({ rel: f.rel, action: "manual", resolved: false, reason: `[${f.status}] ${action.reason}` });
