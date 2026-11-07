@@ -3052,8 +3052,9 @@ export async function continueStateForTaskAsync(root: string, taskId: string): P
  *  逐字保留（机器判不了）。
  *  ⛔ 解析不出该 sibling（非源检出且无 dist bundle）⇒ **如实说明跑不了**，⛔ 不假装跳过（硬规则 3b）；
  *  此时判断型规则仍完整给出，worker 照旧可手工消解。
- *  ⛔ 编号 (4) 自 gap-conflict-outline-half-only-in-prompt-prose 起【留空】（tick-doc 已并入 (1)
- *  同一注册表条目），**不复用**（硬规则 8：编号不得复用）。 */
+ *  ⛔ 编号 (3)、(4) 自本任务/gap-conflict-outline-half-only-in-prompt-prose 起【留空】
+ *  （(3) dual-copy 的手跑散文随机器承接一并删除；(4) tick-doc 已并入 (1) 同一注册表条目），
+ *  **不复用**（硬规则 8：编号不得复用）。 */
 function continueConflictResolutionNote(worktree: string): string {
   const argv = kernelSiblingArgv("conflict-resolution-rules.ts", [RESOLVE_ALL_FLAG, worktree]);
   const mechanical =
