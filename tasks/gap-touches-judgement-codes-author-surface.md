@@ -63,4 +63,4 @@ extra:
 - plugin/scripts/touches-orthogonality-check.ts
 - plugin/scripts/touches-one-entry-one-path-check.ts
 - plugin/test/touches-parser-help-surface.test.mjs
-- tasks/gap-touches-judgement-codes-author-surface.md (new)
+- tasks/gap-touches-judgement-codes-author-surface.md
