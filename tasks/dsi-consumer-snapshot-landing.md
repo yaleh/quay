@@ -41,10 +41,10 @@ node /data/home/yale/work/quay-dsi/integrations/quay/verify-consumer.mjs --quay 
 
 ## Acceptance Criteria
 
-- [ ] AC1 `docs/analysis/dsi/{SNAPSHOT,atoms,coverage,status}.json` 四个文件存在，且都在本任务的提交里。
-- [ ] AC2 `node /data/home/yale/work/quay-dsi/integrations/quay/verify-consumer.mjs --quay "$(pwd)"` exit 0，输出含 `PASS: 19/19 checks`。
-- [ ] AC3 `SNAPSHOT.json.storeFormatVersion` 等于 1（当前 `STORE_FORMAT_VERSION`）；快照目录 0 处出现用户级 store 路径字面量，`SNAPSHOT.json` 无 `dsiRoot` 键。
-- [ ] AC4 确定性：相同 `--now` 与 `--consumer-commit` 二次生成到临时目录，`diff -r` 为空。
+- [x] AC1 `docs/analysis/dsi/{SNAPSHOT,atoms,coverage,status}.json` 四个文件存在，且都在本任务的提交里。
+- [x] AC2 `node /data/home/yale/work/quay-dsi/integrations/quay/verify-consumer.mjs --quay "$(pwd)"` exit 0，输出含 `PASS: 19/19 checks`。
+- [x] AC3 `SNAPSHOT.json.storeFormatVersion` 等于 1（当前 `STORE_FORMAT_VERSION`）；快照目录 0 处出现用户级 store 路径字面量，`SNAPSHOT.json` 无 `dsiRoot` 键。
+- [x] AC4 确定性：相同 `--now` 与 `--consumer-commit` 二次生成到临时目录，`diff -r` 为空。
 
 ## Definition of Done
 
