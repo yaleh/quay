@@ -26,7 +26,7 @@ renderHumanCallBody 产出的 meta-human-call 任务不带线首 `**PARKED` 标�
 - 实现：`plugin/scripts/meta-driver.ts` 的 `renderHumanCallBody` 现在渲染①线首 `**PARKED**（<日期>，meta-driver 机械立案；等人工裁定）…`（`ready-pool-check.isParked` 用它把任务挡出待派池）与②按 `readUnparkDeclaration` 读取面写的**可跑只读** unpark 检查（`grep -q '^## 人的裁定' tasks/<id>.md && echo ruled`，期望输出 `ruled`）；同时把 AC 的裁定落点明确为任务体的 `## 人的裁定` 段，使「检查读的量」与「AC 要求人写的量」是同一个量（硬规则 4c）。无 taskId 时不渲染路径命令（指向 `tasks/undefined.md` 的检查会恒红，把「没渲染」伪装成「人还没裁定」）。
 - AC 判据逐字复跑（worktree 根）：`excluded-from-dispatch-pool`，exit 0。**负控**（把 `plugin/scripts/meta-driver.ts` 换回 develop 版本后跑同一条判据）：`renderHumanCallBody output WOULD enter the dispatch pool`，exit 1 ⇒ 判据能取假，不是恒真装饰。
 - 行为侧（用生产读取器，不看源码布局）：把渲染结果连同 frontmatter 落成 `tasks/gap-meta-call-probe.md` 后跑 `scanParkedUnpark` ⇒ `counts={"unpark-passed":0,"unpark-still-blocked":1,"no-unpark-check":0,"not-evaluated":0}`（人未裁定）；在任务体追加 `## 人的裁定` 段后复跑 ⇒ `unpark-passed`，note 为 `output has "ruled"`。能力判定器未拒（命令是只读读数），也没有落进 `no-unpark-check`。
-- ��测：`node --test plugin/test/meta-driver.test.mjs` ⇒ 183 pass / 0 fail，其中新增两条：①`isParked` 判真 + 删掉标记行后必须判假（取假臂）；②unpark 声明可被 `readUnparkDeclaration` 读出、命令 command-shaped、并在「未裁定 / 已裁定」两态各真跑一次。
+- 测试：`node --test plugin/test/meta-driver.test.mjs` ⇒ 183 pass / 0 fail，其中新增两条：①`isParked` 判真 + 删掉标记行后必须判假（取假臂）；②unpark 声明可被 `readUnparkDeclaration` 读出、命令 command-shaped、并在「未裁定 / 已裁定」两态各真跑一次。
 - L_D code:doc: docLines=0 codeLines=90 ratio=0.000 verdict=PASS flagged=false（`node experiments/quay-perpetual-stream/scripts/git-lens-instrument.mjs ld --numstat-file <(git diff --numstat develop...HEAD)`）
 
 ## Touches
