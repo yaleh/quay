@@ -41,7 +41,7 @@
 
 import fs from "node:fs";
 import path from "node:path";
-import { isDirectEntrySafe } from "./gate-script-base.ts";
+import { isDirectEntrySafe, parseArgs as baseParseArgs } from "./gate-script-base.ts";
 import { escapeRegExp } from "./regex-escape.ts";
 // The recursive walk over the scan roots lives in fs-walk.ts (was a byte-identical private copy here
 // and in serve-binding-literal-check.ts / worktree-namespace-literal-check.ts — finding
@@ -147,14 +147,18 @@ export function checkRegistryPathLiteral(root: string): RegistryLiteralReport {
 }
 
 function main(argv: string[]): number {
-  let root = process.cwd();
-  let json = false;
-  for (let i = 0; i < argv.length; i++) {
-    const a = argv[i];
-    if (a === "--root") root = argv[++i] ?? root;
-    else if (a.startsWith("--root=")) root = a.slice("--root=".length);
-    else if (a === "--json") json = true;
-  }
+  // Shared parser (gate-script-base.ts `parseArgs`) — replaces the byte-identical private
+  // `--root`/`--root=`/`--json` loop (semantic-dedup-scan finding `check-main-root-json-argv-loop`,
+  // runId `semantic-dedup-scan-1794036444725`). `unknown: "skip"` preserves the retired loop's
+  // unknown-flag behavior: drop the token, consume NOTHING after it.
+  const parsed = baseParseArgs(["node", "registry-path-literal-check", ...argv], {
+    minArgs: 0,
+    usage: "[--root <dir>] [--json]",
+    unknown: "skip",
+    flags: { root: { type: "string" }, json: { type: "boolean" } },
+  });
+  const root = typeof parsed.flags.root === "string" ? parsed.flags.root : process.cwd();
+  const json = parsed.flags.json === true;
   const report = checkRegistryPathLiteral(root);
   if (json) {
     process.stdout.write(JSON.stringify(report, null, 2) + "\n");
