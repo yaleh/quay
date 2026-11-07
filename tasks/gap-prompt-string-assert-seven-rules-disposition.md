@@ -51,7 +51,7 @@ extra:
 - [x] AC3 渲染长度前后读数：用固定 fixture 重测两个基座，贴出 before（4376 / 6573）与 after 的逐字数字，**逐条说明**每条处置对长度的贡献。⛔ 不设「必须变短」的目标；变长也可接受，但必须解释。
       读数（E1）：`BEFORE create=4376 continue=6573` → `AFTER create=4314 continue=6511`（各 −62）。逐条贡献见 E1 表。
 - [x] AC4 无回归：`node --test plugin/test/worker-driver.test.mjs plugin/test/worker-driver-resident-s05.test.mjs` 与 `scripts/test.sh --for-task gap-prompt-string-assert-seven-rules-disposition` 绿；其中 `gap-worker-prompt-note-family-slimming` 的**长度棘轮 ≤9102 必须保持绿**（当前 9064，余量 38 字符；若因本任务变红，按 Plan 第 6 条的补偿或 re-anchor 请求处理）。
-      读数（E7）：三文件（另加受影响的 resident-s06）`tests 166 / pass 166 / fail 0`；棘轮 `9064 → 8940`（阈值 9102，余量 162），`WORKER_PROMPT_SLIM_BASELINE` 未改；scoped 门读数见 E7。
+      读数（E7/E8）：三文件（另加受影响的 resident-s06）`tests 166 / pass 166 / fail 0`；棘轮 `9064 → 8940`（阈值 9102，余量 162），`WORKER_PROMPT_SLIM_BASELINE` 未改；scoped 门 `SCOPED_EXIT=0`、`tests 166 / pass 166 / fail 0`。
 
 ## Definition of Done
 
@@ -152,13 +152,32 @@ src 前缀均为 `plugin/scripts/worker-driver.ts`。
 - `node --test --test-name-pattern="judgeRetryExemption" plugin/test/worker-driver-fan-in-s03.test.mjs plugin/test/worker-driver-fan-in-s04.test.mjs` ⇒ `pass 2 / fail 0`。
 - 结论：一条 UNRELATED 提示本身永远换不来豁免——豁免要的是「断言签名在 48h 窗口里跨 ≥2 个不同任务复发」这一条耐久载体上的读数。提示措辞因此是**解读约束**，不是放行开关。
 
-### E7 无回归与棘轮（AC4）
+### E7 无回归与棘轮（AC4 前半）
 - 三文件：`tests 166 / pass 166 / fail 0`（含 `gap-worker-prompt-note-family-slimming` AC1/AC2）。
 - 长度棘轮：`RATCHET before=9064 after=8940 threshold=9102` ⇒ 绿，余量 **162**（原 38）。`WORKER_PROMPT_SLIM_BASELINE` **未改**（仍 12137）——本任务只靠删除补偿，⛔ 未做 re-anchor。
-- scoped 门：`bash <worktree>/scripts/test.sh --for-task gap-prompt-string-assert-seven-rules-disposition --allow-thin` ⇒ 读数见下方 E8（本行在提交前补齐）。
+- 最终树（提交 `86d476346`，仅测试名同步）复核：`node --test --test-name-pattern="gap-worker-verify-condenser" plugin/test/worker-driver.test.mjs` ⇒ `tests 1 / pass 1 / fail 0`。
 
 ### E8 scoped 门读数（AC4 后半）
-（提交前由本 worker 在本 worktree 实跑，逐字贴出。）
+命令（在本 worktree 内实跑）：
+```
+bash /data/home/yale/work/quay-worktrees/gap-prompt-string-assert-seven-rules-disposition/scripts/test.sh \
+  --for-task gap-prompt-string-assert-seven-rules-disposition --allow-thin
+```
+逐字读数（尾部）：
+```
+ℹ tests 166
+ℹ suites 0
+ℹ pass 166
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 46746.067613
+tmp-root-telemetry: root=/tmp/quay-suite-1507971-3Dhyc4 created=10 reaped=10 leaked=0 evaluated=true
+SCOPED_EXIT=0
+```
+该次运行还覆盖了 scoped 静态检查层（`== scoped static checks (change-relevant tier …) ==`，含 `task-contract-check` / `malformed-task-check` / `touches-one-entry-one-path-check` / `test-isolation-check` / `test-impl-census-check` 等）+ `build dist` + `sync-vendor --sync-dist`，全部通过（`SCOPED_EXIT=0`）。
+⚠️ 口径：该次门跑的是本任务在 develop 合并后的树；其后只有一次**测试名文案**同步（`86d476346`，不改断言与实现）与一次**任务体 Evidence** 写入 —— scoped 门的输入面（`plugin/scripts/**`、`plugin/test/**`）自该次运行起未再变化。
 
 ### ADR-007 dark-axis 记录
 该轴仍暗,理由:本任务只改提示词构造函数的文本与测试断言的种类（措辞命中 → 行为/代码判据），未新增或删除任何模块、导出或依赖边，L_D/L_G 没有新的可测读数。
