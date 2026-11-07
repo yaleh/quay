@@ -64,3 +64,11 @@ extra:
 - plugin/test/touches-parser-rules-a.test.mjs (new)
 - plugin/test/touches-parser-help-surface.test.mjs (new)
 - tasks/gap-touches-parser-a-self-describing.md
+
+## Blocker
+
+**2026-11-07T02:24:46.414Z — worker 未落地（exited-not-landed）**
+
+- 未落地原因：step=suite: oom-killed (1) — new regression at lower concurrency: packages/quay/test/cli.test.mjs (passed at the original concurrency 23, fails at 16) — needs a code fix
+- run_id：wk-prod-anchor
+- session_id：0c089a1c-0b84-4cc7-ba66-c8fdea168c0b
