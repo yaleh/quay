@@ -3,7 +3,7 @@ id: gap-conflict-mechanical-resolver-not-wired
 title: 把 conflict-resolution-rules 的机械消解接进 worker
   生产路径：resolveConflictMechanically 有行为测试但零生产调用，continue prompt 仍用 1842 字符教 agent
   手跑同样的 git 命令
-status: todo
+status: ready
 labels:
   - gap
   - defect
