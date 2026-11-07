@@ -26,6 +26,11 @@ import { TASK_STATUS_EVENT_ACTOR_KINDS } from "../kernel/task-transition.ts";
 // re-typed: the help text is a DERIVED surface, so the default it prints is the same value the
 // resolver uses — the two cannot drift (gap-serve-binding-defaults-three-copies-to-one-definition-point AC8).
 import { SERVE_BINDING_FALLBACK } from "../serve/view/serve-binding.ts";
+// The named `## Touches` rules (task gap-touches-parser-a-self-describing). The grammar section
+// below is RENDERED from these tables — ⛔ never re-typed here (a hand-written second copy of a
+// vocabulary is the drift shape this file's own header forbids for VERBS/KINDS/ACTOR_KINDS). The
+// kernel leaf has zero imports, so this costs the per-spawn floor nothing.
+import { TOUCHES_PROBLEM_CODES, TOUCHES_READING_CODES } from "../kernel/touches-annotation.ts";
 
 // ── the product-layer single naming point for the shipped init upgrade entry ─────────────────────
 // (gap-quay-init-sh-no-single-naming-point; same shape as `RESOURCE_GATE_REL` + `scriptBasename` in
@@ -62,6 +67,31 @@ export const INIT_BRANCH_MODEL_ONLY_PROSE =
   `  need the branch model established (the shipped ${QUAY_INIT_REL}\n` +
   `  upgrade entry calls this): it never rewrites config, so an existing project's\n` +
   `  gates: / loop: / routines: survive.`;
+
+/** The `Touches grammar` section of `quay task create --help`, DERIVED from the kernel's two rule
+ *  tables (`packages/quay/src/kernel/touches-annotation.ts`) — one line per code, `code [problem|
+ *  reading]  rule <id> — <meaning>`. `diagnoseTouches` (plugin/scripts/touches-parser.ts) emits
+ *  exactly these codes, so an agent that sees a code in a diagnostic can look it up here, and a
+ *  code added to the table appears here without anyone editing this file (⛔ the list is never
+ *  copied: a second hand-written copy is what the header's VERBS/KINDS note forbids). */
+export function touchesGrammarLines() {
+  const rows = [
+    ...TOUCHES_PROBLEM_CODES.map((r) => ({ ...r, kind: "problem" })),
+    ...TOUCHES_READING_CODES.map((r) => ({ ...r, kind: "reading" })),
+  ];
+  const width = Math.max(...rows.map((r) => r.code.length));
+  return [
+    "Touches grammar — the `## Touches` declaration (a bullet list of path/glob entries):",
+    "  Each bullet is a path or glob. A trailing annotation is NOT part of the path: full-width",
+    "  （…） or half-width (…), each spelling stripped to a fixed point (rule s3-7). A trailing",
+    "  ASCII (new) / (delete) / (deleted) is instead a STRUCTURAL TAG — it exempts the entry from",
+    "  the exists-on-disk check (rule sa5b-4). Exactly ONE heading of the body is the declaration:",
+    "  an exact `Touches` first, else the highest-level heading starting with the word Touches,",
+    "  earliest among ties (rule sa5b-3). The rules are NAMED; these are the codes that report",
+    "  them, rendered from the kernel's rule tables (this help carries no second copy of the list):",
+    ...rows.map((r) => `    ${r.code.padEnd(width)}  [${r.kind}]  rule ${r.rule} — ${r.meaning}`),
+  ].join("\n");
+}
 
 export function printHelp(sub) {
   if (!sub || sub === "task") {
@@ -154,6 +184,8 @@ Options for task create:
   --goal-ac <AC-NNN>   Owning goal AC id (top-level goal_ac)
   --extra <json>       Extra metadata as a JSON object string
   --json                Output the created task as JSON
+
+${touchesGrammarLines()}
 
 Options for task edit:
   --title <title>       New title (see note below: required and non-empty if <task-id> does not yet exist)

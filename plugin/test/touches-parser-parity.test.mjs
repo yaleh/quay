@@ -28,7 +28,14 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { parseTouchEntries, parseTouchEntriesWithTags, extractTouchesSection } from "../scripts/touches-parser.ts";
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+import { parseTouchEntries, parseTouchEntriesWithTags, extractTouchesSection, stripTouchAnnotation } from "../scripts/touches-parser.ts";
+// The kernel leaf — the ONE definition point. Imported here so the identity assertions below compare
+// FUNCTION OBJECTS (a re-introduced local copy is equal-bodied but not the same object).
+import * as kernelTouches from "../../packages/quay/src/kernel/touches-annotation.ts";
 import { parseTouches, checkTouchesPair, matchGlob } from "../scripts/touches-orthogonality-check.ts";
 import { parseBulletList } from "../scripts/select-tests-for-touches.ts";
 import { extractTouchesGlobs } from "../scripts/prepare-admission-check.ts";
@@ -478,4 +485,24 @@ test("AC1: the shared parser is the only parseTouchEntries definition in the rep
   assert.ok(typeof parseTouches === "function");
   assert.ok(typeof parseBulletList === "function");
   assert.ok(typeof extractTouchesGlobs === "function");
+});
+
+// ── AC4 (gap-touches-parser-a-self-describing): single-source is NOT regressed by the rules work ──
+// The task added `diagnoseTouches` (named-rule reporting) to touches-parser.ts. The risk that comes
+// with "the parser now also explains itself" is a SECOND strip/parse implementation growing inside
+// the same file — which would make the diagnostic disagree with the production readers exactly when
+// a rule is broken. Two mechanical assertions instead of a promise:
+//   (a) the file defines NONE of the kernel pipeline functions locally (it re-exports / delegates);
+//   (b) the re-exports are the SAME FUNCTION OBJECTS as the kernel's (identity, not equal output —
+//       an equal-bodied local copy passes (a) but fails here only if it also binds a different name).
+test("AC4: touches-parser.ts carries no second strip/parse definition", () => {
+  const src = fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "scripts", "touches-parser.ts"), "utf8");
+  const defined = [...src.matchAll(/^(?:export\s+)?function\s+([A-Za-z_$][\w$]*)/gm)].map((m) => m[1]);
+  for (const fn of ["stripTouchAnnotation", "stripTrailingFullWidthAnnotation", "stripTouchQuotes", "normalizeTouchEntry", "parseTouchBulletPaths", "parseTouchEntries", "parseTouchEntriesWithTags"]) {
+    if (fn === "parseTouchEntriesWithTags") continue; // this one IS defined here (the tag-aware reader)
+    assert.ok(!defined.includes(fn), `touches-parser.ts must NOT define ${fn} locally — the kernel leaf is the ONE definition (found: ${defined.join(", ")})`);
+  }
+  // The pipeline is the kernel's function OBJECT, not an equal-bodied copy.
+  assert.equal(parseTouchEntries, kernelTouches.parseTouchBulletPaths, "parseTouchEntries must BE the kernel's parseTouchBulletPaths");
+  assert.equal(stripTouchAnnotation, kernelTouches.stripTouchAnnotation, "stripTouchAnnotation must BE the kernel's");
 });
