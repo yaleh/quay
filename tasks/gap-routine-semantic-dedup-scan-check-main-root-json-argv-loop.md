@@ -53,4 +53,5 @@ extract
 - `plugin/scripts/registry-path-literal-check.ts`
 - `plugin/scripts/freshness-producer-coverage-check.ts`
 - `plugin/scripts/probe-fallback-path-check.ts`
+- `plugin/test/gate-script-base-adoption.test.mjs`
 - `tasks/gap-routine-semantic-dedup-scan-check-main-root-json-argv-loop.md`
