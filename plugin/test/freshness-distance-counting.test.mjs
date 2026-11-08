@@ -85,6 +85,35 @@ function mkTmp(prefix) {
   return d;
 }
 
+/**
+ * Copy the impl's TRANSITIVE local-import closure beside a transplanted copy of it.
+ *
+ * The mutants below are the real implementation written to a temp dir and executed there. Its
+ * `./x.ts` imports must resolve from THAT dir, so every local module it reaches has to be copied
+ * too. ⛔ Do NOT hand-list them: a hand-written dep list is correct until the impl grows one import,
+ * and then the mutant dies with ERR_MODULE_NOT_FOUND — which arm ③ reports as "the mutation did not
+ * go red", i.e. it fakes a *checker* defect when the fixture is what broke (硬规则 3b's mirror).
+ * That exact break happened when the impl learned `./fs-walk.ts` (2026-11-08,
+ * tasks/gap-routine-semantic-dedup-scan-hand-rolled-directory-walkers); the same fix already
+ * landed for the `checker-mutation-cases/*.sh` fixtures, and this was the sibling instance the
+ * per-case fix did not reach (硬规则 5b). Recurse over the real specifiers instead.
+ */
+function copyLocalImportClosure(entryAbs, destDir, seen = new Set()) {
+  const srcDir = path.dirname(entryAbs);
+  const text = fs.readFileSync(entryAbs, "utf8");
+  for (const m of text.matchAll(/^[ \t]*import[^;\n]*?"\.\/([^"]+)"/gm)) {
+    const rel = m[1];
+    if (seen.has(rel)) continue;
+    seen.add(rel);
+    const depAbs = path.join(srcDir, rel);
+    if (!fs.existsSync(depAbs)) continue; // leave a genuinely-missing import to surface as a real error
+    const destAbs = path.join(destDir, rel);
+    fs.mkdirSync(path.dirname(destAbs), { recursive: true });
+    fs.copyFileSync(depAbs, destAbs);
+    copyLocalImportClosure(depAbs, destDir, seen);
+  }
+}
+
 function git(root, args, opts = {}) {
   const r = spawnSync("git", [...GIT_ID, ...args], { cwd: root, encoding: "utf8", ...opts });
   return { code: r.status ?? 127, out: (r.stdout ?? "").trim(), err: (r.stderr ?? "").trim() };
@@ -250,15 +279,9 @@ test("③ MUTATION (the old rule restored) ⇒ the same fixture reads the phanto
 
   const dir = mkTmp("ac214-9th-mutant-");
   fs.writeFileSync(path.join(dir, "freshness-producer-coverage-check.ts"), mutated, "utf8");
-  // Its relative imports — copied beside it so the mutant is runnable without touching the tree.
-  fs.copyFileSync(
-    path.join(REPO_ROOT, "plugin", "scripts", "gate-script-base.ts"),
-    path.join(dir, "gate-script-base.ts"),
-  );
-  fs.copyFileSync(
-    path.join(REPO_ROOT, "plugin", "scripts", "source-text-lib.ts"),
-    path.join(dir, "source-text-lib.ts"),
-  );
+  // Its relative imports — copied beside it so the mutant is runnable without touching the tree
+  // (transitive closure: a hand-list goes stale the moment the impl gains an import).
+  copyLocalImportClosure(path.join(REPO_ROOT, IMPL_REL), dir);
 
   const r = spawnSync(
     process.execPath,
@@ -390,8 +413,7 @@ test("⑤ the criterion DERIVES its rule from `delivery_face.command` — mutate
   assert.notEqual(mutated, src, "mutation anchor drifted");
   const dir = mkTmp("ac214-9th-mutant5-");
   fs.writeFileSync(path.join(dir, "freshness-producer-coverage-check.ts"), mutated, "utf8");
-  fs.copyFileSync(path.join(REPO_ROOT, "plugin", "scripts", "gate-script-base.ts"), path.join(dir, "gate-script-base.ts"));
-  fs.copyFileSync(path.join(REPO_ROOT, "plugin", "scripts", "source-text-lib.ts"), path.join(dir, "source-text-lib.ts"));
+  copyLocalImportClosure(path.join(REPO_ROOT, IMPL_REL), dir);
   const red = criterionWorkspace((m) => {
     m.delivery_face.command = [
       process.execPath,

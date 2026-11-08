@@ -58,6 +58,32 @@ function cleanup(root) {
   try { fs.rmSync(root, { recursive: true, force: true }); } catch (_) { /* best-effort */ }
 }
 
+/**
+ * Copy a plugin/scripts module AND its transitive local-import closure into a fixture root's
+ * `plugin/scripts/`. The fixture executes the copy, so every `./x.ts` it reaches must exist there.
+ *
+ * ⛔ Do NOT hand-list the deps. A hand-list is right until the module gains an import, and then the
+ * copy dies with ERR_MODULE_NOT_FOUND — which in this file reads as "the catalog exited non-zero",
+ * i.e. the AC2 assertion *passes* on a broken fixture while the ghost-script check it claims to pin
+ * never ran (硬规则 3b's mirror: a broken instrument wearing the pass's shape). That is exactly what
+ * happened when capability-catalog.ts learned `./fs-walk.ts` (2026-11-08,
+ * tasks/gap-routine-semantic-dedup-scan-hand-rolled-directory-walkers); the two
+ * `checker-mutation-cases/*.sh` fixtures were fixed at the same time, and this was the third site
+ * of the identical defect (硬规则 5b: one fix ≠ every site).
+ */
+function copyModuleWithImports(root, rel) {
+  const src = path.join(REPO_ROOT, rel);
+  const dest = path.join(root, rel);
+  fs.mkdirSync(path.dirname(dest), { recursive: true });
+  fs.copyFileSync(src, dest);
+  for (const m of fs.readFileSync(src, "utf8").matchAll(/^[ \t]*import[^;\n]*?"\.\/([^"]+)"/gm)) {
+    const depRel = path.posix.join(path.posix.dirname(rel), m[1]);
+    if (fs.existsSync(path.join(root, depRel))) continue; // already carried by an earlier call
+    if (!fs.existsSync(path.join(REPO_ROOT, depRel))) continue; // a genuinely-missing import must surface
+    copyModuleWithImports(root, depRel);
+  }
+}
+
 function writeTask(root, id, body) {
   const f = path.join(root, "tasks", `${id}.md`);
   fs.mkdirSync(path.dirname(f), { recursive: true });
@@ -200,9 +226,12 @@ t("AC2 — a task declaring a new script NOT in the catalog QUESTION table makes
   fs.mkdirSync(path.join(root, "plugin", "scripts"), { recursive: true });
   fs.copyFileSync(CATALOG, path.join(root, "plugin", "scripts", "capability-catalog.sh"));
   fs.copyFileSync(path.join(REPO_ROOT, "plugin", "scripts", "repo-root.sh"), path.join(root, "plugin", "scripts", "repo-root.sh"));
+  // The renderer + its transitive local imports (repo-root.ts, fs-walk.ts, …) — the copy is EXECUTED,
+  // so a hand-listed dep set goes stale the moment the renderer gains an import.
+  copyModuleWithImports(root, "plugin/scripts/capability-catalog.ts");
   fs.copyFileSync(path.join(REPO_ROOT, "plugin", "scripts", "repo-root.ts"), path.join(root, "plugin", "scripts", "repo-root.ts"));
-  fs.copyFileSync(path.join(REPO_ROOT, "plugin", "scripts", "capability-catalog.ts"),
-    path.join(root, "plugin", "scripts", "capability-catalog.ts"));
+  fs.copyFileSync(path.join(REPO_ROOT, "plugin", "scripts", "capability-catalog-declarations.json"),
+    path.join(root, "plugin", "scripts", "capability-catalog-declarations.json"));
   fs.copyFileSync(path.join(REPO_ROOT, "plugin", "scripts", "capability-catalog-declarations.json"),
     path.join(root, "plugin", "scripts", "capability-catalog-declarations.json"));
   fs.writeFileSync(path.join(root, "plugin", "scripts", "ghost-check.sh"),
