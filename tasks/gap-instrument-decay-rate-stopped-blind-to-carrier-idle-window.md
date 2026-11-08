@@ -1,7 +1,7 @@
 ---
 id: gap-instrument-decay-rate-stopped-blind-to-carrier-idle-window
 title: instrument-decay 的 rate-stopped 把「载体级静默期」读成写手腐烂：一次恢复写入同时点亮前一次落地的 5 个收尾步
-status: todo
+status: ready
 labels:
   - gap
   - defect
