@@ -23,6 +23,13 @@
 //         body-brace heuristic must therefore exclude the return-type region; this is pinned
 //         directly so a regression cannot hide behind the noise it creates.
 //
+//   AC3 — CROSS-TREE STAGING (finding `ls-mutation-sandbox-misses-cross-tree-imports`): the sandbox
+//         stages the top-level entries REACHABLE by relative import, so a test (or target) importing
+//         `../../../plugin/...` still yields a non-null score instead of NOT-EVALUATED. Pinned three
+//         ways: end-to-end through the CLI on the repo-shaped `cross-tree` fixture; the staged set
+//         itself (both tops, and NOT the unreferenced `docs`); and the resolver's two honest nulls
+//         (a path above the root, a bare specifier).
+//
 // Run: scripts/test.sh plugin/test/ls-mutation-reading.test.mjs
 
 import { test } from "node:test";
@@ -34,8 +41,11 @@ import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
 
 import {
+  buildSandbox,
   collectMutantSites,
   findFunctionBody,
+  reachableTopLevels,
+  resolveStagedImport,
   runTestOnce,
 } from "../scripts/ls-mutation-reading.ts";
 
@@ -43,6 +53,9 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "..", "..");
 const RUNNER = path.join(REPO_ROOT, "plugin", "scripts", "ls-mutation-reading.ts");
 const FIXTURE_ROOT = path.join(__dirname, "fixtures", "ls-mutation");
+/** A repo-SHAPED fixture: `packages/quay/{src,test}` importing `../../../plugin/scripts/*` — the exact
+ *  layout of packages/quay/test/task-transition.test.mjs:36, the reported case. */
+const CROSS_TREE_ROOT = path.join(FIXTURE_ROOT, "cross-tree");
 
 /** Run the CLI against the fixture root and parse its --json record. */
 function runFixture(testFile) {
@@ -190,4 +203,105 @@ test("the mutation span is the BODY — a boolean literal in the signature's ret
   const sites = collectMutantSites(withBodyBool, ["g"], ["boolean-literal"]);
   assert.equal(sites.length, 1);
   assert.equal(sites[0].to, "true");
+});
+
+// ── cross-tree staging: an import across a TOP-LEVEL boundary must not void the reading ───────────
+//
+// The defect (finding `ls-mutation-sandbox-misses-cross-tree-imports`): the sandbox staged only
+// `top = rel.split('/')[0]` of the two NAMED paths, so a test importing `../../../plugin/...` ran with
+// no `plugin/` at all, died with ERR_MODULE_NOT_FOUND, and the instrument reported NOT-EVALUATED (exit 3)
+// although the unmutated file was green on its own. 77 of 344 packages/quay/test/*.mjs (22.4%) import
+// across a top-level boundary, so the instrument could no longer reproduce its own AC3 reference reading.
+
+test("AC3(a) — a test AND a target importing across a top-level boundary still produce a NON-NULL score", () => {
+  const carrierDir = fs.mkdtempSync(path.join(os.tmpdir(), "ls-cross-carrier-"));
+  try {
+    const carrier = path.join(carrierDir, "readings.jsonl");
+    const res = spawnSync(
+      process.execPath,
+      [
+        "--no-warnings",
+        "--experimental-strip-types",
+        RUNNER,
+        "--root",
+        CROSS_TREE_ROOT,
+        "--target",
+        "packages/quay/src/target.mjs",
+        "--functions",
+        "scale,describe",
+        "--test",
+        "packages/quay/test/check-cross-tree.mjs",
+        "--carrier",
+        carrier,
+        "--json",
+      ],
+      { encoding: "utf8", timeout: 180_000 },
+    );
+    assert.equal(
+      res.status,
+      0,
+      `a cross-top-level import is not a not-evaluated reading (exit 3 carries "baseline-not-green: ` +
+        `load-or-parse-failure"):\n${res.stderr}`,
+    );
+    const record = JSON.parse(res.stdout.trim());
+    assert.notEqual(record.score, null, `the score must be a real number, not null: ${JSON.stringify(record)}`);
+    assert.ok(record.mutants > 0, "the fixture really produced mutants");
+    assert.equal(
+      record.notEvaluated,
+      0,
+      `every mutant must be judged — a load failure anywhere would show up here: ${JSON.stringify(record)}`,
+    );
+    assert.ok(record.killed >= 1, `the check must still kill at least one mutant: ${JSON.stringify(record)}`);
+  } finally {
+    fs.rmSync(carrierDir, { recursive: true, force: true });
+  }
+});
+
+test("AC3(b) — the staged set follows relative imports (and only those), not the two seeds' own tops", () => {
+  const tops = reachableTopLevels(CROSS_TREE_ROOT, [
+    "packages/quay/src/target.mjs",
+    "packages/quay/test/check-cross-tree.mjs",
+  ]);
+  assert.deepEqual(
+    tops,
+    ["packages", "plugin"],
+    "`packages` is the seeds' own top; `plugin` is reachable ONLY by following their relative imports " +
+      `(the target's and the check's ../../../plugin/scripts/shared.mjs). Got: ${JSON.stringify(tops)}`,
+  );
+  // Negative control for over-staging: an entry nothing imports is NOT copied (this is the difference
+  // between "stage what is reachable" and "copy the whole tree").
+  assert.ok(!tops.includes("docs"), "an unreferenced top-level entry must not be staged");
+
+  // And the sandbox on disk really contains both, with the cross-tree module present as a FILE.
+  const sandbox = buildSandbox(CROSS_TREE_ROOT, [
+    "packages/quay/src/target.mjs",
+    "packages/quay/test/check-cross-tree.mjs",
+  ]);
+  try {
+    for (const rel of [
+      "packages/quay/src/target.mjs",
+      "packages/quay/test/check-cross-tree.mjs",
+      "plugin/scripts/shared.mjs",
+    ]) {
+      assert.ok(fs.existsSync(path.join(sandbox, rel)), `the sandbox must carry ${rel}`);
+    }
+    assert.ok(!fs.existsSync(path.join(sandbox, "docs")), "the unreferenced entry is absent from the sandbox");
+  } finally {
+    fs.rmSync(sandbox, { recursive: true, force: true });
+  }
+});
+
+test("AC3(c) — a specifier that escapes the root is UNRESOLVABLE (null), not staged-beyond-the-root", () => {
+  assert.equal(
+    resolveStagedImport(CROSS_TREE_ROOT, "packages/quay/src/target.mjs", "../../../../outside.mjs"),
+    null,
+    "a path above the root cannot be staged; it must read as unresolved",
+  );
+  // Positive control on the same call: the in-root specifier the target actually uses resolves.
+  assert.equal(
+    resolveStagedImport(CROSS_TREE_ROOT, "packages/quay/src/target.mjs", "../../../plugin/scripts/shared.mjs"),
+    "plugin/scripts/shared.mjs",
+  );
+  // A bare (node_modules) specifier is not a relative import and is never staged from the tree.
+  assert.equal(resolveStagedImport(CROSS_TREE_ROOT, "packages/quay/src/target.mjs", "node:test"), null);
 });
