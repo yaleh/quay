@@ -1362,3 +1362,285 @@ test("第 12 条 MANIFEST 声明 — 与 suite-recovery-baseline-exempt 是**两
   assert.ok(bre.reason.includes("⊆"), "the reason states the set-inclusion criterion (exempt ⇔ task red ⊆ baseline red)");
 });
 
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════
+// 形状 B 的第三态：载体级静默期（gap-instrument-decay-rate-stopped-blind-to-carrier-idle-window）
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════
+// 缺陷（受控重放，真实载体）：Shape B 的参照量 `freshest` 由同一个载体的写手产生 ⇒ 整个管线停摆时
+// 它跟着一起停。恢复轮写下第一条记录时 `freshest` 一次跳过 24h+，静默前**仍然新鲜**的分组同时越线
+// ⇒ 前一次落地的一批收尾步被读成「五个写手同时腐烂」。修法不是把它们豁免掉，而是给第三态：
+//   静默开始时该组还新鲜（from − lastWrite ≤ staleSeconds）
+//   且 静默结束 → 判定时刻的**墙钟**时间 < staleSeconds
+//   ⇒ 成因与「整个管线停摆」不可区分 ⇒ idleWindowExplained[]（不计 decayed，也不计 healthy）。
+// ⛔ 自过期：恢复期按墙钟写满 staleSeconds ⇒ 自动回到 decayed[]（不是永久豁免）。
+// ⛔ 负控制：某组停写而载体时间轴上没有 ≥staleSeconds 的间隔 ⇒ 照旧 rate-stopped（不得弄瞎）。
+
+// 载体级静默：10-20T06:00 → 10-21T07:00（25h ≥ 24h）。stopped 组的末次写入在其前 1h（仍然新鲜）。
+const IDLE_SILENCE_FROM = "2026-10-20T06:00:00.000Z";
+const IDLE_SILENCE_TO = "2026-10-21T07:00:00.000Z";
+const IDLE_GROUP_LAST = "2026-10-20T05:00:00.000Z";
+const IDLE_NOW = "2026-10-21T08:00:00.000Z"; // 恢复期 1h（< 24h）
+const IDLE_NOW_ALMOST_EXPIRED = "2026-10-22T06:59:59.000Z"; // 恢复期 24h − 1s
+const IDLE_NOW_EXPIRED = "2026-10-22T07:00:00.000Z"; // 恢复期 24h（= staleSeconds ⇒ 自过期）
+
+/** 恢复轮：静默结束后载体继续写（使 freshest 越过 stopped 组 24h 以上）。
+ *  ⚠️ 静默前后写入 MANIFEST 的**全部 expected 分组**：否则 Shape A 会给缺席的分组报 never-wrote，
+ *  把 `decayed[]` 弄脏成一个与本用例无关的读数（判据就不能取假成「第三态生效」了）。 */
+function idleWindowRows() {
+  const rows = [stepRec("stopped-group", IDLE_GROUP_LAST)];
+  const expected = [...COMPANION_STEPS, ...SUITE_STEPS];
+  for (const ts of [IDLE_SILENCE_FROM, IDLE_SILENCE_TO, "2026-10-21T07:30:00.000Z"]) {
+    for (const g of expected) rows.push(stepRec(g, ts));
+  }
+  return rows;
+}
+
+function idleWindowFixture() {
+  const dir = tmpDir("idc-idle-");
+  writeCarrier(dir, "fan-in-step-trace.jsonl", idleWindowRows());
+  return dir;
+}
+
+/** 第三态的判定只需要一个 Shape B 载体；expected 留空 ⇒ 读数里只剩 rate-stopped 这一族。 */
+function idleSpec(adjudicated) {
+  return {
+    file: "fan-in-step-trace.jsonl", groupBy: "step", expected: [], shapeB: true, note: "",
+    ...(adjudicated !== undefined ? { adjudicated } : {}),
+  };
+}
+
+test("AC2/第三态 — 静默开始时仍新鲜的分组 ⇒ idleWindowExplained[]（不计 decayed，也不计 healthy）", () => {
+  const dir = idleWindowFixture();
+  const spec = idleSpec();
+  const res = analyzeCarrier(dir, spec, DEFAULT_STALE_SECONDS, Date.parse(IDLE_NOW));
+  // ⛔ 先证它**确实**命中 Shape B（否则这个用例什么都没测到）。
+  const gapH = (Date.parse(IDLE_SILENCE_TO) - Date.parse(IDLE_GROUP_LAST)) / 3_600_000;
+  assert.ok(gapH > 24, `fixture precondition: the group is ${gapH}h behind freshest (> 24h)`);
+  assert.deepEqual(res.decayed, [], "the stop must NOT be reported as decay while the idle window is open");
+  assert.deepEqual(res.idleWindowExplained.map((e) => e.group), ["stopped-group"]);
+  const e = res.idleWindowExplained[0];
+  // 成因读数必须可读：哪段静默、多长、恢复期多长（⛔ 不是一句散文）。
+  assert.equal(e.idleWindow.from, IDLE_SILENCE_FROM);
+  assert.equal(e.idleWindow.to, IDLE_SILENCE_TO);
+  assert.equal(e.idleWindow.ms, 25 * 3_600_000);
+  assert.equal(e.recoveryMs, 3_600_000, "the recovery window elapsed is measured on the WALL CLOCK, not on the carrier's own freshest");
+  assert.equal(e.count, 1, "the real reading travels with the third state");
+  assert.equal(e.lastWriteMs, Date.parse(IDLE_GROUP_LAST));
+  assert.match(e.reason, /cannot be distinguished from a whole-pipeline stall/);
+  assert.match(e.reason, /NOT decay, and NOT healthy/);
+  // 载体级静默段本身也是读数（未解释任何分组时同样可见）。
+  assert.deepEqual(res.idleWindows.map((w) => w.ms), [25 * 3_600_000]);
+
+  const out = analyzeAll(dir, { staleSeconds: DEFAULT_STALE_SECONDS, nowMs: Date.parse(IDLE_NOW) }, [spec]);
+  assert.equal(out.decayedCount, 0);
+  assert.equal(out.idleWindowExplainedCount, 1);
+  assert.equal(out.healthyCount, 0, "undecidable is NOT healthy (硬规则 3b: the third state has its own value)");
+});
+
+test("AC3/负控制 — 一个分组停写、载体时间轴上没有 ≥staleSeconds 的间隔 ⇒ 仍然报 rate-stopped（不得弄瞎）", () => {
+  // 同样的「停止」形状，唯一差别：伴生分组**一路在写**，时间轴上最大间隔只有 4h。
+  const rows = [];
+  for (let h = 0; h <= 28; h += 4) {
+    const ts = new Date(Date.parse(IDLE_GROUP_LAST) + h * 3_600_000).toISOString();
+    for (const g of [...COMPANION_STEPS, ...SUITE_STEPS]) rows.push(stepRec(g, ts));
+  }
+  rows.push(stepRec("stopped-group", IDLE_GROUP_LAST));
+  const dir = tmpDir("idc-idle-neg-");
+  writeCarrier(dir, "fan-in-step-trace.jsonl", rows);
+  const nowMs = Date.parse("2026-10-21T09:00:00.000Z");
+  const res = analyzeCarrier(dir, idleSpec(), DEFAULT_STALE_SECONDS, nowMs);
+  assert.deepEqual(rateStoppedGroups(res), ["stopped-group"],
+    "with no carrier-level silence the group's stop is REAL rot — the new criterion must not blind the detector");
+  assert.deepEqual(res.idleWindowExplained, []);
+  assert.deepEqual(res.idleWindows, [], "no ≥24h gap on the timeline ⇒ no idle window exists");
+  assert.equal(res.decayed.find((d) => d.group === "stopped-group").detail, null, "no adjudication is declared for it ⇒ plain decay");
+
+  // 边界：间隔恰好比阈值少 1 秒 ⇒ 不算静默（阈值是真读数，不是恒真/恒假）。
+  const from = "2026-10-20T05:00:01.000Z";
+  const rows2 = [
+    // 该组 04:00 停写 ⇒ 与 freshest 相差 25h（> 阈值），但载体时间轴上没有 ≥24h 的间隔。
+    stepRec("stopped-group", "2026-10-20T04:00:00.000Z"),
+    stepRec("merge-develop", from),
+    stepRec("merge-develop", new Date(Date.parse(from) + DEFAULT_STALE_SECONDS * 1000 - 1000).toISOString()),
+  ];
+  const dir2 = tmpDir("idc-idle-edge-");
+  writeCarrier(dir2, "fan-in-step-trace.jsonl", rows2);
+  const res2 = analyzeCarrier(dir2, idleSpec(), DEFAULT_STALE_SECONDS, Date.parse("2026-10-21T04:00:00.000Z"));
+  assert.deepEqual(res2.idleWindows, [], "a 23h59m59s gap is not a >=24h silence");
+  assert.deepEqual(rateStoppedGroups(res2), ["stopped-group"]);
+});
+
+test("AC3/负控制（另一半）— 静默开始时该组**已经**陈旧 ⇒ 静默解释不了它，照旧报腐烂", () => {
+  // 同一段 25h 静默，但 stopped 组的末次写入在静默开始前 40h ⇒ 它在我停之前就停了。
+  const rows = idleWindowRows();
+  rows[0] = stepRec("stopped-group", new Date(Date.parse(IDLE_SILENCE_FROM) - 40 * 3_600_000).toISOString());
+  const dir = tmpDir("idc-idle-stale-");
+  writeCarrier(dir, "fan-in-step-trace.jsonl", rows);
+  const res = analyzeCarrier(dir, idleSpec(), DEFAULT_STALE_SECONDS, Date.parse(IDLE_NOW));
+  assert.deepEqual(res.idleWindowExplained, [],
+    "a group already stale 40h when the silence began was NOT explained by the silence");
+  assert.deepEqual(rateStoppedGroups(res), ["stopped-group"]);
+  assert.ok(res.idleWindows.length > 0, "the carrier silence itself is still reported (it just doesn't explain THIS group)");
+});
+
+test("AC4/自过期 — 恢复期写满 staleSeconds 而该组仍未写 ⇒ 从 idleWindowExplained[] 回到 decayed[]", () => {
+  const dir = idleWindowFixture();
+  const spec = idleSpec();
+  // 阈值两侧各取一次：差 1 秒仍解释，到点即失效（⛔ 不是永久豁免，也不是「恒解释」）。
+  const almost = analyzeCarrier(dir, spec, DEFAULT_STALE_SECONDS, Date.parse(IDLE_NOW_ALMOST_EXPIRED));
+  assert.deepEqual(almost.idleWindowExplained.map((e) => e.group), ["stopped-group"],
+    "1 second short of the threshold the cause is STILL undecidable");
+  assert.equal(almost.decayed.length, 0);
+
+  const expired = analyzeCarrier(dir, spec, DEFAULT_STALE_SECONDS, Date.parse(IDLE_NOW_EXPIRED));
+  assert.deepEqual(expired.idleWindowExplained, [], "the third state self-expires at exactly staleSeconds");
+  assert.deepEqual(rateStoppedGroups(expired), ["stopped-group"]);
+
+  // 自相矛盾的重放（判定时刻早于载体最新记录）不产生「恢复期 0」的豁免 ⇒ fail-closed 报腐烂。
+  const before = analyzeCarrier(dir, spec, DEFAULT_STALE_SECONDS, Date.parse("2026-10-21T06:00:00.000Z"));
+  assert.deepEqual(before.idleWindowExplained, [], "a judgement instant older than the carrier's newest record cannot explain anything");
+  assert.deepEqual(rateStoppedGroups(before), ["stopped-group"]);
+  // 同一份载体、同一个分组、同一条判定：唯一变化量是判定时刻 ⇒ 自过期读的是墙钟（⛔ 不是载体自报的量）。
+  assert.equal(fs.readFileSync(path.join(dir, ".quay", "fan-in-step-trace.jsonl"), "utf8"),
+    idleWindowRows().map((r) => JSON.stringify(r)).join("\n") + "\n");
+});
+
+test("第三态与裁定的先后 — 静默期内先说「分不清」，静默期过后裁定才生效（互不冒充）", () => {
+  const dir = idleWindowFixture();
+  const spec = idleSpec([
+    { group: "stopped-group", kind: "rare-by-design", reason: "only written on a rare exceptional path", reviewAfter: FUTURE },
+  ]);
+  const during = analyzeCarrier(dir, spec, DEFAULT_STALE_SECONDS, Date.parse(IDLE_NOW));
+  assert.deepEqual(during.idleWindowExplained.map((e) => e.group), ["stopped-group"]);
+  assert.deepEqual(during.adjudicated, [], "while the silence is undecidable the detector must not assert a specific cause");
+
+  const after = analyzeCarrier(dir, spec, DEFAULT_STALE_SECONDS, Date.parse(IDLE_NOW_EXPIRED));
+  assert.deepEqual(after.idleWindowExplained, []);
+  assert.deepEqual(after.adjudicated.map((a) => a.group), ["stopped-group"], "past the window the declaration takes over");
+  assert.equal(after.decayed.length, 0);
+});
+
+// ── 第 13 条：baseline-red / develop-red-set 的 conditional-on-input（AC5）─────────────────────────
+// 写手都在 runBaselineEquivalence 内，带 SUITE-INCOMPLETE 标记的红轮在恢复阶梯分支就走掉了、
+// 根本调用不到它（A/B 的调用点在 worker-fan-in.ts:4108）⇒ 条件读的是【窗口内红轮的形态】。
+const RED_LAST = "2026-10-20T00:00:00.000Z";
+
+/** 红轮时间线：每条 suite-end ok:false 是否都等到同 task 的 suite-incomplete。 */
+function suiteRedRows({ redWithoutIncomplete = false } = {}) {
+  const rows = [stepRec("baseline-red", RED_LAST), stepRec("develop-red-set", RED_LAST)];
+  // 伴生写入（⛔ 每 <24h 一笔：避免造出一段本用例无意测试的载体级静默）。
+  for (let h = 2; h <= 30; h += 6) {
+    rows.push(stepRec("merge-develop", new Date(Date.parse(RED_LAST) + h * 3_600_000).toISOString()));
+  }
+  rows.push({ ...stepRec("suite-end", "2026-10-20T02:00:00.000Z"), task: "task-a", ok: false });
+  rows.push({ ...stepRec("suite-incomplete", "2026-10-20T02:10:00.000Z"), task: "task-a" });
+  rows.push({ ...stepRec("suite-end", "2026-10-20T08:00:00.000Z"), task: redWithoutIncomplete ? "task-b-unnamed" : "task-b", ok: false });
+  if (!redWithoutIncomplete) {
+    rows.push({ ...stepRec("suite-incomplete", "2026-10-20T08:10:00.000Z"), task: "task-b" });
+  }
+  return rows;
+}
+
+/** 带**生产**那两条裁定的最小描述符（expected 留空：本用例只测裁定，不测 Shape A）。 */
+function redSpec() {
+  return {
+    file: "fan-in-step-trace.jsonl", groupBy: "step", expected: [], shapeB: true, note: "",
+    adjudicated: MANIFEST[0].adjudicated.filter((a) => a.group === "baseline-red" || a.group === "develop-red-set"),
+  };
+}
+
+test("AC5 — baseline-red / develop-red-set 的条件命令：红轮全进恢复阶梯 ⇒ exit 0 ⇒ explained-absent", () => {
+  const dir = tmpDir("idc-suite-red-");
+  writeCarrier(dir, "fan-in-step-trace.jsonl", suiteRedRows());
+  const nowMs = Date.parse("2026-10-21T08:00:00.000Z");
+  for (const group of ["baseline-red", "develop-red-set"]) {
+    const decl = MANIFEST[0].adjudicated.find((a) => a.group === group);
+    assert.ok(decl, `${group} must be declared in the production descriptor`);
+    assert.equal(decl.kind, "conditional-on-input");
+    assert.equal(runCondition(decl.conditionCmd, dir).status, 0, `${group}: every red in the window went to the recovery ladder`);
+  }
+  const res = analyzeCarrier(dir, redSpec(), DEFAULT_STALE_SECONDS, nowMs);
+  assert.deepEqual(res.decayed.filter((d) => d.kind === "rate-stopped"), []);
+  const adj = res.adjudicated.filter((a) => a.group === "baseline-red" || a.group === "develop-red-set");
+  assert.equal(adj.length, 2);
+  for (const a of adj) {
+    assert.equal(a.state, "explained-absent");
+    assert.equal(a.condition.exitCode, 0);
+    assert.equal(a.count, 1, "the real reading travels with the adjudication");
+    assert.equal(a.lastWriteMs, Date.parse(RED_LAST));
+  }
+});
+
+test("AC5/负控制 — 窗口内一条红没有任何 incomplete（本该走到 A/B）⇒ exit 1 ⇒ 该组仍报 rate-stopped", () => {
+  const dir = tmpDir("idc-suite-red-neg-");
+  writeCarrier(dir, "fan-in-step-trace.jsonl", suiteRedRows({ redWithoutIncomplete: true }));
+  const nowMs = Date.parse("2026-10-21T08:00:00.000Z");
+  for (const group of ["baseline-red", "develop-red-set"]) {
+    const decl = MANIFEST[0].adjudicated.find((a) => a.group === group);
+    assert.equal(runCondition(decl.conditionCmd, dir).status, 1,
+      `${group}: a plain red with no suite-incomplete means the A/B path WAS reachable ⇒ the declared cause is gone`);
+  }
+  const res = analyzeCarrier(dir, redSpec(), DEFAULT_STALE_SECONDS, nowMs);
+  const stopped = res.decayed.filter((d) => d.kind === "rate-stopped").map((d) => d.group).sort();
+  assert.deepEqual(stopped, ["baseline-red", "develop-red-set"]);
+  for (const d of res.decayed) assert.match(d.detail, /condition command did not hold \(exit 1\)/);
+});
+
+test("AC5/边界 — 本组从未写过 / 它之后载体一笔都没有 ⇒ exit 1（空转真值不是测量）", () => {
+  const noHistory = tmpDir("idc-suite-red-nohist-");
+  writeCarrier(noHistory, "fan-in-step-trace.jsonl", [stepRec("merge-develop", "2026-10-20T00:00:00.000Z")]);
+  for (const group of ["baseline-red", "develop-red-set"]) {
+    const decl = MANIFEST[0].adjudicated.find((a) => a.group === group);
+    assert.equal(runCondition(decl.conditionCmd, noHistory).status, 1, `${group}: no window anchor ⇒ cannot explain`);
+  }
+});
+
+test("AC5 — suite-recovery-exhausted 的 rare-by-design 声明带 reviewAfter（ladder-at-floor 是罕见例外，不是腐烂）", () => {
+  const decl = MANIFEST[0].adjudicated.find((a) => a.group === "suite-recovery-exhausted");
+  assert.ok(decl, "the exhaustion branch must be declared");
+  assert.equal(decl.kind, "rare-by-design");
+  assert.equal(decl.conditionCmd, undefined, "rare-by-design carries no condition command");
+  assert.ok(Number.isFinite(Date.parse(decl.reviewAfter)), "an adjudication must be expirable");
+  assert.ok(Date.parse(decl.reviewAfter) > Date.parse("2026-11-08T00:00:00.000Z"), "reviewAfter must be in the future when filed");
+  assert.match(decl.reason, /全历史 1 条|梯|阶梯/);
+});
+
+test("第三态 — Shape B 关掉的载体（shapeB:false）不产生静默读数（「不适用」不得伪装成「没有静默」）", () => {
+  const dir = idleWindowFixture();
+  const spec = { file: "fan-in-step-trace.jsonl", groupBy: "step", shapeB: false, note: "lock-event shaped" };
+  const res = analyzeCarrier(dir, spec, DEFAULT_STALE_SECONDS, Date.parse(IDLE_NOW));
+  assert.deepEqual(res.idleWindows, []);
+  assert.deepEqual(res.idleWindowExplained, []);
+  assert.deepEqual(res.decayed, [], "shapeB:false ⇒ shape B is not applied at all");
+});
+
+test("CLI --json / --now — 第三态在机器面上：idleWindowExplainedCount 与 decayedCount 分开，且重放可复现", () => {
+  const dir = idleWindowFixture();
+  const run = (extra) => spawnSync(process.execPath, [
+    "--no-warnings", "--experimental-strip-types", CHECKER,
+    "--root", dir, "--carrier", "fan-in-step-trace.jsonl", "--json", "--no-block", ...extra,
+  ], { encoding: "utf8" });
+
+  const open = run(["--now", IDLE_NOW]);
+  assert.equal(open.status, 0);
+  const openJson = JSON.parse(open.stdout);
+  assert.equal(openJson.decayedCount, 0);
+  assert.equal(openJson.idleWindowExplainedCount, 1);
+  assert.equal(openJson.healthyCount, 0);
+  const carrier = openJson.carriers[0];
+  assert.deepEqual(carrier.idleWindowExplained.map((e) => e.group), ["stopped-group"]);
+  assert.deepEqual(carrier.idleWindowExplained[0].idleWindow, { from: IDLE_SILENCE_FROM, to: IDLE_SILENCE_TO, ms: 25 * 3_600_000 });
+  assert.equal(carrier.idleWindows.length, 1);
+
+  // 同一个载体、同一条命令，只把判定时刻推到静默结束后 24h ⇒ 第三态自过期成腐烂（重放可复现）。
+  const expired = run(["--now", IDLE_NOW_EXPIRED]);
+  const expiredJson = JSON.parse(expired.stdout);
+  assert.equal(expiredJson.idleWindowExplainedCount, 0);
+  assert.equal(expiredJson.decayedCount, 1);
+  assert.deepEqual(expiredJson.carriers[0].decayed.map((d) => d.group), ["stopped-group"]);
+
+  // ⛔ --now 读不懂 ⇒ usage error（⛔ 不是悄悄退回墙钟）。
+  const bad = run(["--now", "not-a-date"]);
+  assert.equal(bad.status, 2);
+  assert.match(bad.stderr, /--now must be an ISO timestamp/);
+});
+
