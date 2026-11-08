@@ -43,6 +43,19 @@
 // walkers above, its callers' policies did NOT genuinely differ — so the set was unified rather than
 // parameterised. `listScriptBasenames` below records the measurements behind that call; ⛔ do not
 // re-add a per-caller extension set there.
+//
+// The `hand-rolled-directory-walkers` round (runId `semantic-dedup-scan-1794127147981`) swept the
+// REMAINING in-tree copies: six callers — capability-catalog.ts#deriveScripts,
+// crystallization-half-life.ts#buildRepoIndex, fan-in-materialize-check.ts#
+// findMaterializedWorkflowFiles, freshness-producer-coverage-check.ts#listSourceFiles,
+// profiles-role-coverage-check.ts#driverSources, task-file-bypass-check.ts#scanSurface — now reach
+// the traversal through `walkFiles`, each keeping its OWN prune/include closures (the same
+// per-caller-policy rule as above; the two axes that had to stay explicit per caller are recorded
+// at each site). ONE named site was deliberately LEFT: driver-runtime.ts#listSharedHostScopes, whose
+// walker enumerates DIRECTORIES and reports per-directory read failures — two things `walkFiles`
+// gives no channel for, and swallowing the failure would turn "cannot read" into "read, nothing
+// there" (硬规则 3b). Its declaration carries the reason. ⛔ Do not "finish the sweep" by folding it
+// in without adding that channel.
 
 import fs from "node:fs";
 import path from "node:path";

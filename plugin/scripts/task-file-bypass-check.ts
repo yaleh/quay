@@ -54,6 +54,7 @@ import { firstArgRegion } from "./source-text-lib.ts";
 // of the ~73 hand-written copies of the indexOf+next-arg idiom in plugin/scripts
 // (.quay/routine-findings.jsonl finding `arg-parsing-helper-family`, routine `semantic-dedup-scan`).
 import { helpExit, isDirectEntry, emitPass, emitFail, emitNotEvaluated, flagValue, resolveRoot } from "./gate-script-base.ts";
+import { walkFiles } from "./fs-walk.ts";
 
 // ── ALLOWLIST (the ratchet baseline) ───────────────────────────────────────────────────────────────
 // file (repo-relative) → { reason, expected }. One entry per line so shrinking it later (as the
@@ -212,25 +213,36 @@ export function scanShell(src: string): Array<{ line: number; snippet: string }>
 const CODE_EXT = /\.(ts|js|mjs)$/;
 const SH_EXT = /\.sh$/;
 
+/** Directories pruned on the bypass scan surface — DIRECTORIES only (a file named `test`/`vendor`
+ *  was still scanned). The set stays here: it is this checker's own policy. */
+const SURFACE_SKIP_DIRS: ReadonlySet<string> = new Set([
+  "node_modules", ".git", "test", "vendor", "checker-mutation-cases",
+]);
+
+/** The two sub-trees the bypass surface consists of, each reported under `rel` (which equals `dir`
+ *  today; kept as a pair because the walk is rooted at `dir` while hits are reported repo-relative). */
+const SURFACE_ROOTS: readonly { dir: string; rel: string }[] = [
+  { dir: "packages/quay/src", rel: "packages/quay/src" },
+  { dir: "plugin", rel: "plugin" },
+];
+
+/** Repo-relative POSIX paths of the code/shell files this checker reads, sorted.
+ *
+ *  Traversal is fs-walk.ts#walkFiles; the surface stays here (`.quay/routine-findings.jsonl` finding
+ *  `hand-rolled-directory-walkers`, routine `semantic-dedup-scan`, runId
+ *  `semantic-dedup-scan-1794127147981`). Preserved: dirent classification (a symlinked directory is
+ *  NOT descended — the original's `isDirectory()` was false for it), pruning is directories-only,
+ *  and the extension test carries NO `isFile()` guard (a symlink named `x.ts` was scanned and still
+ *  is — dropping it would silently shrink a gate's corpus). */
 export function scanSurface(root: string): string[] {
   const out: string[] = [];
-  const walk = (dir: string, base: string) => {
-    if (!fs.existsSync(dir)) return;
-    let entries: fs.Dirent[];
-    try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
-    for (const e of entries) {
-      const abs = path.join(dir, e.name);
-      const rel = base ? `${base}/${e.name}` : e.name;
-      if (e.isDirectory()) {
-        if (e.name === "node_modules" || e.name === ".git" || e.name === "test" || e.name === "vendor" || e.name === "checker-mutation-cases") continue;
-        walk(abs, rel);
-      } else if (CODE_EXT.test(e.name) || SH_EXT.test(e.name)) {
-        out.push(rel);
-      }
-    }
-  };
-  walk(path.join(root, "packages/quay/src"), "packages/quay/src");
-  walk(path.join(root, "plugin"), "plugin");
+  for (const { dir, rel } of SURFACE_ROOTS) {
+    const found = walkFiles(path.join(root, dir), {
+      prune: (name, isDir) => isDir && SURFACE_SKIP_DIRS.has(name),
+      include: (name) => CODE_EXT.test(name) || SH_EXT.test(name),
+    });
+    out.push(...found.map((p) => `${rel}/${p}`));
+  }
   return out.sort();
 }
 

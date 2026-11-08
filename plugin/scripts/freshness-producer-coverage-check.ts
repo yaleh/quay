@@ -58,6 +58,7 @@ import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { helpExit, isDirectEntrySafe, parseArgs as baseParseArgs, readJsonLines } from "./gate-script-base.ts";
 import { codeOnlyText } from "./source-text-lib.ts";
+import { walkFiles } from "./fs-walk.ts";
 
 export const DEFAULT_MAPPING_REL = "plugin/freshness-producers.json";
 
@@ -583,29 +584,24 @@ export function isCountingRuleCode(code: string): boolean {
 export const COUNTING_RULE_SOURCE_EXTS = [".ts", ".js", ".mjs", ".cjs", ".sh"] as const;
 export const COUNTING_RULE_SKIP_DIRS = new Set(["node_modules", ".git", ".quay", "dist", "vendor", "archive", "coverage"]);
 
-/** Recursively list source files under `root` (no symlink follow; hidden/skip dirs excluded). */
+/** Recursively list source files under `root` (no symlink follow; hidden/skip dirs excluded).
+ *
+ *  Traversal is fs-walk.ts#walkFiles; the policy stays here (`.quay/routine-findings.jsonl` finding
+ *  `hand-rolled-directory-walkers`, routine `semantic-dedup-scan`, runId
+ *  `semantic-dedup-scan-1794127147981`). The original's three axes are preserved explicitly:
+ *   • `isSymbolicLink()` was tested FIRST, so a symlink was dropped before classification — a
+ *     symlink-to-file is dropped by the `entry.isFile()` guard, and a symlink-to-DIRECTORY is not a
+ *     directory in dirent mode, so it is neither recorded nor descended. Same two outcomes.
+ *   • hidden / skip-set pruning applies to DIRECTORIES only (a file starting with `.` was scanned).
+ *   • the result is UNSORTED (traversal order) — `sort: false`, as the original returned `out`.
+ */
 export function listSourceFiles(root: string, exts: readonly string[] = COUNTING_RULE_SOURCE_EXTS): string[] {
-  const out: string[] = [];
-  const walk = (dir: string): void => {
-    let entries: fs.Dirent[];
-    try {
-      entries = fs.readdirSync(dir, { withFileTypes: true });
-    } catch {
-      return;
-    }
-    for (const e of entries) {
-      if (e.isSymbolicLink()) continue;
-      const abs = path.join(dir, e.name);
-      if (e.isDirectory()) {
-        if (e.name.startsWith(".") || COUNTING_RULE_SKIP_DIRS.has(e.name)) continue;
-        walk(abs);
-        continue;
-      }
-      if (e.isFile() && exts.includes(path.extname(e.name).toLowerCase())) out.push(abs);
-    }
-  };
-  walk(path.resolve(root));
-  return out;
+  return walkFiles(path.resolve(root), {
+    absolute: true,
+    sort: false,
+    prune: (name, isDir) => isDir && (name.startsWith(".") || COUNTING_RULE_SKIP_DIRS.has(name)),
+    include: (name, _ext, entry) => entry !== null && entry.isFile() && exts.includes(path.extname(name).toLowerCase()),
+  });
 }
 
 /** Enumerate the repo files whose CODE implements the counting rule (absolute paths). Test files are

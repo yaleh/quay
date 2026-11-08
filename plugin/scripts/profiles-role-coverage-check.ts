@@ -37,6 +37,7 @@ import { fileURLToPath } from "node:url";
 import { emitPass, emitFail, emitNotEvaluated, helpExit } from "./gate-script-base.ts";
 import { readProfilesConfig, resolveRole, type ProfilesConfig } from "./profile-policy.ts";
 import { repoRoot } from "./repo-root.ts";
+import { walkFiles } from "./fs-walk.ts";
 import { parse as parseYaml } from "yaml";
 
 /** Directories under plugin/scripts/ that are NOT driver sources (fixtures / archived copies). */
@@ -176,29 +177,20 @@ function maskComments(src: string): string {
     .replace(/[ \t]\/\/[^\n]*/g, (m) => " ".repeat(m.length));
 }
 
-/** Recursively collect *.ts under <pluginRoot>/scripts, minus the excluded subtrees. */
+/** Recursively collect *.ts under <pluginRoot>/scripts, minus the excluded subtrees.
+ *
+ *  Traversal is fs-walk.ts#walkFiles; the skip-set and extension policy stay here
+ *  (`.quay/routine-findings.jsonl` finding `hand-rolled-directory-walkers`, routine
+ *  `semantic-dedup-scan`, runId `semantic-dedup-scan-1794127147981`). Preserved: `CORPUS_EXCLUDES`
+ *  prunes DIRECTORIES only (a file carrying the same name was still scanned before), and
+ *  `entry.isFile()` keeps symlinks out — the original's `isDirectory()` / `isFile()` pair dropped a
+ *  symlink either way. Absolute paths, sorted. */
 function driverSources(pluginRoot: string): string[] {
-  const base = path.join(pluginRoot, "scripts");
-  const out: string[] = [];
-  const walk = (dir: string) => {
-    let entries: fs.Dirent[];
-    try {
-      entries = fs.readdirSync(dir, { withFileTypes: true });
-    } catch {
-      return;
-    }
-    for (const e of entries) {
-      const p = path.join(dir, e.name);
-      if (e.isDirectory()) {
-        if (CORPUS_EXCLUDES.includes(e.name)) continue;
-        walk(p);
-      } else if (e.isFile() && e.name.endsWith(".ts")) {
-        out.push(p);
-      }
-    }
-  };
-  walk(base);
-  return out.sort();
+  return walkFiles(path.join(pluginRoot, "scripts"), {
+    absolute: true,
+    prune: (name, isDir) => isDir && CORPUS_EXCLUDES.includes(name),
+    include: (name, _ext, entry) => entry !== null && entry.isFile() && name.endsWith(".ts"),
+  });
 }
 
 function roleSet(cfg: { roles?: Record<string, unknown> }): Set<string> {

@@ -76,6 +76,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { repoRoot } from "./repo-root.ts";
+import { walkFiles } from "./fs-walk.ts";
 
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
 const DECLARATIONS_BASENAME = "capability-catalog-declarations.json";
@@ -219,31 +220,25 @@ export function isExcludedDirRelPath(rel: string): boolean {
 }
 
 /** The derived check set: every `.sh`/`.ts`/`.mjs` under `dir`, basename-keyed, with the fixture
- *  dir and any `archive/` subtree skipped. Exported for the same reason as the predicate above. */
+ *  dir and any `archive/` subtree skipped. Exported for the same reason as the predicate above.
+ *
+ *  Traversal is fs-walk.ts#walkFiles; only the POLICY stays here (`.quay/routine-findings.jsonl`
+ *  finding `hand-rolled-directory-walkers`, routine `semantic-dedup-scan`, runId
+ *  `semantic-dedup-scan-1794127147981`). The two axes the original hand-rolled walker carried are
+ *  preserved explicitly, not re-decided:
+ *   • `entryKind` stays `"dirent"` + `entry.isFile()` — a SYMLINK (dangling or not) named `x.ts`
+ *     was never a script here and still is not.
+ *   • pruning by NAME at every level is equivalent to the old `rel`-path test because
+ *     `isExcludedDirRelPath`'s regex is segment-anchored (`(^|/)archive/`): a directory is excluded
+ *     exactly when its OWN basename is `archive`, so checking each level's basename prunes the same
+ *     subtrees at any depth. The predicate itself is reused verbatim — one exclusion, one source.
+ *  `.map(path.basename)` keeps the original BASENAME-keyed return (`rows` are keyed by it). */
 export function deriveScripts(dir: string): string[] {
-  const out: string[] = [];
-  const walk = (d: string, rel: string): void => {
-    let entries: fs.Dirent[];
-    try {
-      entries = fs.readdirSync(d, { withFileTypes: true });
-    } catch {
-      return;
-    }
-    for (const e of entries) {
-      const abs = path.join(d, e.name);
-      const relChild = rel === "" ? e.name : `${rel}/${e.name}`;
-      if (e.isDirectory()) {
-        if (isExcludedDirRelPath(relChild)) continue;
-        walk(abs, relChild);
-        continue;
-      }
-      if (!e.isFile()) continue;
-      if (!CHECK_EXT_RE.test(e.name)) continue;
-      out.push(e.name);
-    }
-  };
-  walk(dir, "");
-  return [...out].sort();
+  const scripts = walkFiles(dir, {
+    prune: (name, isDir) => isDir && isExcludedDirRelPath(name),
+    include: (name, _ext, entry) => entry !== null && entry.isFile() && CHECK_EXT_RE.test(name),
+  });
+  return scripts.map((p) => path.basename(p)).sort();
 }
 
 // ── superseded-capability check (AC5: 一个能力=一个实现, 被取代的实现不存在于仓库, 不被教学) ──

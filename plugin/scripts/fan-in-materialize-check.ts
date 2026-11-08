@@ -80,6 +80,7 @@ import { isDirectEntry, flagValue } from "./gate-script-base.ts";
 import { extractSection } from "./task-schema.ts";
 import { parseTouchEntriesWithTags } from "./touches-parser.ts";
 import { matchesObject, FAN_IN_ORCHESTRATION_FILES } from "./select-static-checks-for-touches.ts";
+import { walkFiles } from "./fs-walk.ts";
 
 /** The workflow basename this checker audits — the fan-in pipeline's own workflow file. */
 export const WORKFLOW_BASENAME = "fan-in-execute.js";
@@ -334,28 +335,19 @@ export function defaultProjectDir(root: string): string {
   return path.join(os.homedir(), ".claude", "projects", projectSlug(root));
 }
 
-/** Recursively find every `<session>/workflows/wf_*.json` under a project dir. */
+/** Recursively find every `<session>/workflows/wf_*.json` under a project dir.
+ *
+ *  Traversal is fs-walk.ts#walkFiles; the policy stays here (`.quay/routine-findings.jsonl` finding
+ *  `hand-rolled-directory-walkers`, routine `semantic-dedup-scan`, runId
+ *  `semantic-dedup-scan-1794127147981`). Preserved exactly: `node_modules` is pruned as a DIRECTORY
+ *  only, and the `.json`/`wf_` test applies to every non-directory entry WITHOUT an `isFile()`
+ *  guard — the original's `else` branch recorded a symlink named `wf_x.json`, and still does. */
 export function findMaterializedWorkflowFiles(projectDir: string): string[] {
-  const out: string[] = [];
-  const walk = (dir: string) => {
-    let entries: fs.Dirent[];
-    try {
-      entries = fs.readdirSync(dir, { withFileTypes: true });
-    } catch {
-      return;
-    }
-    for (const entry of entries) {
-      const full = path.join(dir, entry.name);
-      if (entry.isDirectory()) {
-        if (entry.name === "node_modules") continue;
-        walk(full);
-        continue;
-      }
-      if (entry.name.endsWith(".json") && entry.name.startsWith("wf_")) out.push(full);
-    }
-  };
-  walk(projectDir);
-  return out.sort();
+  return walkFiles(projectDir, {
+    absolute: true,
+    prune: (name, isDir) => isDir && name === "node_modules",
+    include: (name) => name.startsWith("wf_") && name.endsWith(".json"),
+  });
 }
 
 /**

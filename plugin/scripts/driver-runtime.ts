@@ -2053,7 +2053,16 @@ export function listSharedHostScopes(
   const unreadableDirs: string[] = [];
   let rootError: string | null = null;
 
-  /** `rel` = 从 `root` 起算的相对路径（祖先判定用它，⛔ 不用绝对路径——`cgroupRoot` 是可注入的测试缝）。 */
+  /** `rel` = 从 `root` 起算的相对路径（祖先判定用它，⛔ 不用绝对路径——`cgroupRoot` 是可注入的测试缝）。
+   *
+   *  ⛔ 本 walker 有意**不上收** fs-walk.ts#walkFiles（`.quay/routine-findings.jsonl` finding
+   *  `hand-rolled-directory-walkers`，routine `semantic-dedup-scan`，runId
+   *  `semantic-dedup-scan-1794127147981` 的第 7 处，处置=留在原地）。骨架相同，但这里要的两条
+   *  语义 walkFiles 结构上给不了：①它**记录目录本身**（`.scope` 单元是目录，`walkFiles` 只产出
+   *  非目录项）；②它**上报读不到的目录**（`unreadableDirs` / `rootError`，带 errno 文本），而
+   *  `walkFiles` 按设计吞掉 readdir 失败。把②交给"吞掉失败"的遍历，正是硬规则 3b 的形态：读不到
+   *  会与"读到了、一个都没有"同形 ⇒ `count: 0`。要收上来的话必须先给 walkFiles 加一个【目录项 +
+   *  按目录回报失败】的选项，那是给一个调用方加的第二套协议，不是共享骨架。 */
   const walk = (dir: string, depth: number, rel: string): void => {
     let entries: fs.Dirent[];
     try {

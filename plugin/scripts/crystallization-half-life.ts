@@ -64,6 +64,7 @@ import { fileURLToPath } from "node:url";
 // `median-empty-policy-diverged`). Its empty policy is `null` — which is already this report's type
 // for `interval.median`, so nothing here has to invent a number for an empty sample.
 import { median } from "./median.ts";
+import { walkFiles } from "./fs-walk.ts";
 
 // ── vocabulary ────────────────────────────────────────────────────────────────────────────────
 /** Per-ADR status. "无法判定" is an INDEPENDENT value (硬规则 3b), never a synonym of the others. */
@@ -334,29 +335,24 @@ function stemOf(p: string): string {
 
 export function buildRepoIndex(root: string): RepoIndex {
   const stems = new Map<string, string[]>();
-  const allPaths: string[] = [];
-  const walk = (dir: string, rel: string) => {
-    let entries: fs.Dirent[];
-    try {
-      entries = fs.readdirSync(path.join(root, dir), { withFileTypes: true });
-    } catch {
-      return;
-    }
-    for (const e of entries) {
-      if (WALK_SKIP.has(e.name)) continue;
-      if (e.name.startsWith("deliver-worktree-")) continue;
-      const r = rel ? `${rel}/${e.name}` : e.name;
-      if (e.isDirectory()) walk(r, r);
-      else {
-        allPaths.push(r);
-        const s = stemOf(r);
-        const arr = stems.get(s);
-        if (arr) arr.push(r);
-        else stems.set(s, [r]);
-      }
-    }
-  };
-  walk(".", "");
+  // Traversal is fs-walk.ts#walkFiles; the skip policy stays here (`.quay/routine-findings.jsonl`
+  // finding `hand-rolled-directory-walkers`, routine `semantic-dedup-scan`, runId
+  // `semantic-dedup-scan-1794127147981`). Both axes the original carried are preserved:
+  //   • prune is NAME-only, ignoring `isDir` — the original tested the skip set before the
+  //     directory branch, so a FILE named `.git`/`dist` is dropped too (dirent mode keeps the
+  //     symlink classification: a symlink-to-dir was a "file" there and still is).
+  //   • `sort: false` — the walk order is part of the contract here, because `stems` is built in
+  //     traversal order (readdir order, depth-first). Only `allPaths` is sorted, as before.
+  const allPaths = walkFiles(root, {
+    sort: false,
+    prune: (name) => WALK_SKIP.has(name) || name.startsWith("deliver-worktree-"),
+  });
+  for (const r of allPaths) {
+    const s = stemOf(r);
+    const arr = stems.get(s);
+    if (arr) arr.push(r);
+    else stems.set(s, [r]);
+  }
   allPaths.sort();
   return { stems, allPaths };
 }
