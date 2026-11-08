@@ -232,11 +232,12 @@ export interface InertCheckersReading {
   names: string[];
   /** `evaluated:false` 时的机器 token；`evaluated:true` 时恒为 null。
    *
-   *  gap-meta-inertcheckersreading — **三个取值，⛔ 不是一个「没测到」**：`state:"running"` 的载体
-   *  （suite 在飞，维度本来还没写）与「终态载体丢了这一维」（镜像回归）此前都落 `dimension-missing`
+   *  gap-meta-inertcheckersreading — **三个取值，⛔ 不是一个「没测到」**：在飞的载体
+   *  （suite 还没跑完，维度本来还没写）与「终态载体丢了这一维」（镜像回归）此前都落 `dimension-missing`
    *  ⇒ 本轮暗的惰性守卫维度无法归因到「等一等」还是「某个已修好的镜像又坏了」。
    *    `carrier-absent-or-unreadable` = 载体不存在/读不出（那一轮 suite 根本没跑，或盘坏了）
-   *    `suite-in-flight`              = 载体在且 `state:"running"`：这一维**还没轮到写**（非缺陷）
+   *    `suite-in-flight`              = 载体**非终态**（`finishedAt` 显式 null，或 `state:"running"`）：
+   *                                     这一维**还没轮到写**（非缺陷）
    *    `dimension-missing`            = 载体处于**终态**却没有这一维：写者丢了维度（镜像回归）
    *                                                                          —— 这才是该追因的那一个 */
   cause: "carrier-absent-or-unreadable" | "suite-in-flight" | "dimension-missing" | null;
@@ -1889,7 +1890,7 @@ export function collectSyncHealth(root: string, window = 200): SyncHealth {
 // `[]`，于是生产上机械 fan-in 的镜像载体（不带该字段）让 readings 恒为 `[]` —— 那是**未测量**，却被
 // 读成「查过，一个惰性守卫都没有」。现在：
 //   载体读不出 / 不存在     ⇒ {evaluated:false, names:[], cause:"carrier-absent-or-unreadable"}
-//   载体在 & state:running  ⇒ {evaluated:false, names:[], cause:"suite-in-flight"}
+//   载体在 & 非终态         ⇒ {evaluated:false, names:[], cause:"suite-in-flight"}
 //   终态但维度缺失          ⇒ {evaluated:false, names:[], cause:"dimension-missing"}
 //   字段是数组（含空数组）  ⇒ {evaluated:true,  names:[...], cause:null}
 //
@@ -1897,9 +1898,18 @@ export function collectSyncHealth(root: string, window = 200): SyncHealth {
 // 一格）：`full-suite-runner` 起跑时写 `{state:"running"}` 且**不带**这一维（full-suite-runner.ts:3608
 // 写 running，维度只在终态落盘），所以「suite 正在跑」与「已落地三次修好的镜像又丢了维度」在旧实现里
 // 同形 —— 一个**预期中的瞬态**和一**个回归**共用一个 token ⇒ 本轮该维度的暗无法归因，追因要么等下一轮
-// 要么回放整轮日志。判据不是 `finishedAt`：终态写者都带 `finishedAt` 而 running 写者置 null，但
-// `state` 是**写者自己声明的那一个量**，读它不需要推断第二个字段；⛔ 两者缺一不推断、⛔ 不按「没有
-// finishedAt 就算在飞」猜（旧载体/手工载体没有该键，猜错就把回归读成瞬态）。
+// 要么回放整轮日志。
+//
+// gap-meta-collectinertcheckers — 「非终态」的判别量 ⛔ **不能只有 `state`**：`full-suite-runner` 的
+// 早红写（full-suite-runner.ts:4585，SUITE-RED 事件要带文件归因）落的是
+// `{state:"red", reason:"failed", finishedAt:null, durationMs:null}`——**红套件运行期的整个窗口**
+// `state` 都不是 "running"，旧实现于是把「还没测到」读成「写者丢了这一维」（实测 durationMs=451212ms
+// 的整轮），每轮抓着人报一个不存在的镜像回归。
+// 载体自己的终态写者不变式就是现成的判别量：**在飞写 `finishedAt:null`**（起跑 / 早红 / 早红静态检查 /
+// abort / spawn-error 五处都置 null），**终态写 `finishedAt`（epoch 秒）**。两条信号取**并集**
+// （`finishedAt === null` ∨ `state === "running"`），因为 ⊕ 旧载体/手工载体可能只有 `state` 没有该键
+// （gap-meta-inertcheckersreading 的判据就是 `{state:"running"}` 单键），⊕ 反过来也成立。
+// ⛔ 缺键不推断：两个信号都没有 ⇒ 仍按终态缺维度处理（宁严不宽——猜成在飞就把真回归静音了）。
 export function collectInertCheckers(root: string): InertCheckersReading {
   const file = path.join(root, ".quay", "full-suite-state.json");
   let j: unknown;
@@ -1910,8 +1920,12 @@ export function collectInertCheckers(root: string): InertCheckersReading {
   const arr = (j as { notEvaluatedCheckers?: unknown })?.notEvaluatedCheckers;
   if (!Array.isArray(arr)) {
     // 载体在、但这一维没被记录：**在飞**（还没轮到写）与**终态缺维度**（写者丢了）不同形。
-    const state = (j as { state?: unknown })?.state;
-    if (state === "running") return { evaluated: false, names: [], cause: "suite-in-flight" };
+    // `finishedAt === null`（键在且显式 null）是写者的在飞不变式——红套件在飞时 `state` 已经是
+    // "red"（早红写），只看 `state` 会整段运行期误报 dimension-missing；
+    // `state === "running"` 保留为并集里的另一条信号（只带 state 的旧载体/手工载体）。
+    const rec = j && typeof j === "object" ? (j as { finishedAt?: unknown; state?: unknown }) : {};
+    const inFlight = ("finishedAt" in rec && rec.finishedAt === null) || rec.state === "running";
+    if (inFlight) return { evaluated: false, names: [], cause: "suite-in-flight" };
     return { evaluated: false, names: [], cause: "dimension-missing" };
   }
   const out: string[] = [];
