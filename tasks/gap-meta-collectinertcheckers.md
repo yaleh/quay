@@ -1,7 +1,7 @@
 ---
 id: gap-meta-collectinertcheckers
 title: inertCheckers 的「在飞 vs 写者丢维」判别只看 state==='running'，红套件运行中被误报为 dimension-missing
-status: todo
+status: ready
 labels:
   - meta-driver
   - driver-candidate
