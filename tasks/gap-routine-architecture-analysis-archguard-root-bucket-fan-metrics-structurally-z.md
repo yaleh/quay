@@ -3,7 +3,7 @@ id: gap-routine-architecture-analysis-archguard-root-bucket-fan-metrics-structur
 title: "architecture-analysis: archguard's god-package path builds fanIn/fanOut
   from extractPackageName(entityId), which returns `<file>.ts` for root-level
   entities (e.g. 'action.ts.delive"
-status: ready
+status: done
 labels:
   - gap
   - routine-filed

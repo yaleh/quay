@@ -154,7 +154,7 @@ import { isDue, parseTrigger } from "./routine-scheduler.ts";
 // failed: …" wording and its by-resolved-path cache used to be byte-identical here and in
 // discovery-method-routine.ts. One implementation now serves both; this file keeps only its own engine
 // FILE LIST, its own cache map and its own refusal prefix (硬规则 5b).
-import { importEngineModuleAt, makeEngineModuleLoader, resolveEngineModuleIn } from "./routine-engine-module-loader.ts";
+import { importEngineModuleAt, makeEngineModuleLoader, resolveEngineModuleIn, requestedModelFromArgv } from "./routine-engine-module-loader.ts";
 import { launchArgv, readAnchorStart, STOPPED_MID_ROUND, StoppedMidRoundError, isStoppedMidRound, type AnchorStartReading, type Fact, type RoutineSpec } from "./driver-runtime.ts";
 import { ROUTINE_LAST_RUN_REL, readLastRunMap } from "./probe-routine.ts";
 import { isDirectEntry } from "./gate-script-base.ts";
@@ -4312,13 +4312,9 @@ export async function runOpenSemanticDiscovery(root: string, opts: OpenSemanticD
   // The model the LAUNCHER was asked for, read off a throwaway argv built the same way a real call's is —
   // `launchArgv` bakes the resolved `--model` in, so this is the requested identity rather than a guess
   // copied from the stream (which is the ACTUAL one and is read per call).
-  const requestedModel = (() => {
-    try {
-      const probe = buildArgv("", root, { tools: "", maxTurns: BLIND_INVESTIGATOR_MAX_TURNS, outputFormat: null, model: null });
-      const i = probe.indexOf("--model");
-      return i >= 0 && typeof probe[i + 1] === "string" ? probe[i + 1] : null;
-    } catch { return null; }
-  })();
+  // ⛔ The probe itself is SHARED, not copied (semantic-dedup-scan finding `requested-model-byte-identical`,
+  // 硬规则 5b): cross-project-dogfood carried it byte-identically.
+  const requestedModel = requestedModelFromArgv(buildArgv, root, BLIND_INVESTIGATOR_MAX_TURNS);
   let midRound: { kind: ModelStepKind; used: number; cap: number } | null = null;
   let investigatorBlock: Record<string, unknown> = { ran: false };
   let clusters: Array<Record<string, unknown>> = [];

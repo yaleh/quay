@@ -2,6 +2,10 @@
 // disk, import it lazily, memoise it by RESOLVED path, and record a NAMED reason when it cannot be had",
 // shared by the two sibling routines that drive that engine.
 //
+// It carries a SECOND shared fact for the same two routines, for the same reason (硬规则 5b): the
+// `requestedModelFromArgv` probe at the bottom of this file — the model the launcher was ASKED for,
+// read off a throwaway argv. See that function's own header.
+//
 // THE DEFECT THIS CLOSES (routine `architecture-analysis`, finding `dup-discovery-module-loader`,
 // runId `architecture-analysis-1792752934532`, archguard dup hash d5a5945972ad7036 — 177 tokens / 17
 // lines): the `load` arrow below, its `unresolved.push` wording and its cache semantics were
@@ -113,6 +117,54 @@ export function makeEngineModuleLoader(
       return null;
     }
   };
+}
+
+// ── the REQUESTED-model probe ───────────────────────────────────────────────────────────────────────
+/** The shape of the per-round argv builder both routines drive (`hyp.hardenedArgv(launch, …)` at the
+ *  call sites). Declared here so the probe below can be typed without importing either routine. */
+export type HardenedBuildArgv = (
+  prompt: string,
+  root: string,
+  opts: { tools: string; maxTurns: number | null; outputFormat: string | null; model: string | null },
+) => string[];
+
+/** The model the LAUNCHER was asked for, read off a THROWAWAY argv built the same way a real call's is.
+ *
+ *  WHY THIS LIVES HERE — the SAME rule as everything else in this module (硬规则 5b). Routine
+ *  `semantic-dedup-scan` finding `requested-model-byte-identical` (runId
+ *  `semantic-dedup-scan-1794127147981`, dupKind `byte-identical-body`, verdict `real-duplication`)
+ *  measured this IIFE, byte-identical, in `cross-project-dogfood-routine.ts:994` and
+ *  `open-semantic-discovery-routine.ts:4315`. Both routines ALREADY import this module, and it is a
+ *  LEAF — it imports neither routine — so it is the one neutral home: placing the helper in either
+ *  routine would make one sibling the other's dependency for a fact neither owns (the two are
+ *  deliberate siblings, and the `--model` question is the launcher's, not a routine's).
+ *
+ *  ⛔ WHY `model: null` AND A THROWAWAY ARGV: it is the SAME shape a real call has BEFORE a model is
+ *  chosen, and `launchArgv` bakes the resolved `--model` in — so what comes back is the REQUESTED
+ *  identity, not the ACTUAL one served (which each routine reads off its own call's stream, per call).
+ *  Reading the requested identity from the stream instead would silently record the served model as
+ *  the requested one.
+ *
+ *  ⛔ `null` IS AN ANSWER, NOT A SILENT ZERO (硬规则 3b): a launcher that carries no `--model`, a
+ *  `--model` with no value after it, and a `buildArgv` that throws all return `null`. Callers record
+ *  that as `not-evaluated:model-unverified`, so "unknown" can never read as "verified".
+ *
+ *  @param buildArgv the caller's own hardened builder — this module never guesses one
+ *  @param root       the workspace the argv is for
+ *  @param maxTurns   the caller's tool-less turn cap; passed through so the probe argv has the same
+ *                    shape as the argv a real tool-less call would spawn with */
+export function requestedModelFromArgv(
+  buildArgv: HardenedBuildArgv,
+  root: string,
+  maxTurns: number | null,
+): string | null {
+  try {
+    const probe = buildArgv("", root, { tools: "", maxTurns, outputFormat: null, model: null });
+    const i = probe.indexOf("--model");
+    return i >= 0 && typeof probe[i + 1] === "string" ? probe[i + 1] : null;
+  } catch {
+    return null;
+  }
 }
 
 /** WHAT a throw-style caller says when the engine module cannot be resolved. Only these two values

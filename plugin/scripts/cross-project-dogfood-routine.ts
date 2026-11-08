@@ -60,7 +60,7 @@ import { isDirectEntry, flagValue } from "./gate-script-base.ts";
 import { isDue, parseTrigger } from "./routine-scheduler.ts";
 // ⛔ THE ENGINE-MODULE RESOLUTION AND RUNTIME IMPORT ARE SHARED, NOT COPIED (routine
 // `architecture-analysis` finding `dup-discovery-module-loader`, 硬规则 5b): see `loadEngineModule` below.
-import { importEngineModuleAt, resolveEngineModuleIn } from "./routine-engine-module-loader.ts";
+import { importEngineModuleAt, resolveEngineModuleIn, requestedModelFromArgv } from "./routine-engine-module-loader.ts";
 import {
   INVOKED_BY_DEFAULT,
   INVOKED_BY_MANUAL,
@@ -991,13 +991,9 @@ export async function runCrossProjectDogfood(root: string, opts: CrossProjectDog
   const buildArgv = (prompt: string, r: string, o: { tools: string; maxTurns: number | null; outputFormat: string | null; model: string | null }): string[] =>
     hyp.hardenedArgv(launch, prompt, r, o as Record<string, unknown>);
   // The model the LAUNCHER was asked for, read off a throwaway argv built the same way a real call's is.
-  const requestedModel = (() => {
-    try {
-      const probe = buildArgv("", root, { tools: "", maxTurns: BLIND_INVESTIGATOR_MAX_TURNS, outputFormat: null, model: null });
-      const i = probe.indexOf("--model");
-      return i >= 0 && typeof probe[i + 1] === "string" ? probe[i + 1] : null;
-    } catch { return null; }
-  })();
+  // ⛔ The probe itself is SHARED, not copied (semantic-dedup-scan finding `requested-model-byte-identical`,
+  // 硬规则 5b): this routine and open-semantic-discovery carried it byte-identically.
+  const requestedModel = requestedModelFromArgv(buildArgv, root, BLIND_INVESTIGATOR_MAX_TURNS);
 
   const callRecords: CallRecord[] = [];
   const captureDir = at(CALL_CAPTURE_DIR_REL);
