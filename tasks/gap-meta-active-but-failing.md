@@ -2,7 +2,7 @@
 id: gap-meta-active-but-failing
 title: computeDivergences has no branch for status=active ∧ verdict=fail — a
   committed, measurably-failing AC produces no divergence at all
-status: ready
+status: done
 labels:
   - meta-driver
   - driver-candidate
