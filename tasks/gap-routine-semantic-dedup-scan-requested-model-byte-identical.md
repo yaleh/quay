@@ -2,7 +2,7 @@
 id: gap-routine-semantic-dedup-scan-requested-model-byte-identical
 title: "semantic-dedup-scan: Byte-identical 7-line argv model probe; the two
   routines are deliberate siblings but no shared helper exists."
-status: ready
+status: done
 labels:
   - gap
   - routine-filed
