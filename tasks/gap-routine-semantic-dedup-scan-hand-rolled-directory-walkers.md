@@ -93,3 +93,11 @@ L_D import-graph-check: files=609 edges=1854 valueSccs=0 typeSccs=0 reverseEdges
 - `plugin/scripts/profiles-role-coverage-check.ts`
 - `plugin/scripts/task-file-bypass-check.ts`
 - `tasks/gap-routine-semantic-dedup-scan-hand-rolled-directory-walkers.md`
+
+## Blocker
+
+**2026-11-08T09:18:29.175Z — worker 未落地（exited-not-landed）**
+
+- 未落地原因：step=suite: incomplete suite (647/647 files) — recovery exhausted at floor concurrency 16 — no declared rung produced a complete verdict (16); needs a code/config fix, see plugin/scripts/full-suite-runner.ts
+- run_id：wk-prod-anchor
+- session_id：62b8d2a4-c07c-418c-8aba-f98ba11b9860
