@@ -23,15 +23,23 @@ import { fileURLToPath } from "node:url";
 import * as contract from "../../docs/analysis/semantic-admission-contract.mjs";
 import { CLUE_STATES, JUDGE_VERDICTS } from "../../docs/analysis/semantic-admission-contract.mjs";
 import { CONDITIONS, evaluateCarrier, runProposalCli } from "../../docs/analysis/ownership-active-limited-proposal.mjs";
-import { CLUE_KIND, analyzeSource, scanRoot, stripCommentsAndLiterals } from "../../plugin/scripts/unencapsulated-state-clue.ts";
+import {
+  CLUE_KIND,
+  analyzeSource,
+  loadContract as loadClueContract,
+  scanRoot,
+  stripCommentsAndLiterals,
+} from "../../plugin/scripts/unencapsulated-state-clue.ts";
 import {
   DEFAULT_CORPUS_REL,
   judgeCandidates,
+  loadContract as loadJudgeContract,
   loadCorpus,
   replayVerdict,
   semanticAdmissionFromJudge,
   verdictKey,
 } from "../../plugin/scripts/unencapsulated-state-judge.ts";
+import { makeThrowingEngineModuleLoader } from "../../plugin/scripts/routine-engine-module-loader.ts";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REPO = path.resolve(HERE, "..", "..");
@@ -254,4 +262,65 @@ test("AC924-6(clue-predicate): comments and literal text are not hits, and a bin
   // stripCommentsAndLiterals keeps line structure (line numbers in evidence_ref must stay meaningful)
   const src = "const a = 1; // tail\nconst b = 2;\n";
   assert.equal(stripCommentsAndLiterals(src).split("\n").length, src.split("\n").length);
+});
+
+// ── the loader: ONE implementation for both stages ─────────────────────────────────────────────────
+// Routine `semantic-dedup-scan`, finding `load-contract-byte-identical`, runId
+// `semantic-dedup-scan-1794127147981`: stage 1 and stage 2 each carried the same `loadContract` body
+// (same resolution, same null check, same refusal sentence, same runtime import), differing only in the
+// noun naming their own vocabulary. Both now delegate to `makeThrowingEngineModuleLoader`.
+//
+// ⛔ WHY THE SOURCE ARMS ARE NOT "A GREP FOR A WORD": they name the three statements that WERE the
+// duplicated body, and each predicate is dry-run against a pre-fix sample below, so a zero count means
+// "the copy is gone", never "the pattern does not match anything" (硬规则 2).
+test("dedup(loadContract): both stages load through the shared factory, which owns the refusal", async () => {
+  const clueSrc = fs.readFileSync(path.join(REPO, CLUE_REL), "utf8");
+  const judgeSrc = fs.readFileSync(path.join(REPO, JUDGE_REL), "utf8");
+
+  // each of these was a line of the duplicated body; none may survive in either stage
+  const WAS_THE_COPY = [
+    [/resolveEngineModuleIn\s*\(/, "the resolution call"],
+    [/importEngineModuleAt\s*\(/, "the runtime import"],
+    [/could not be found; tried/, "the refusal sentence"],
+  ];
+  const PRE_FIX_SAMPLE = [
+    "const r = resolveEngineModuleIn(root, CONTRACT_FILE, CONTRACT_DIR_REL);",
+    "return importEngineModuleAt(r.path, contractCache);",
+    "`CAUSE=x — the clue vocabulary lives in ${CONTRACT_FILE} and could not be found; tried ${r.tried.join(\" , \")}`",
+  ];
+  // negative control for the control: every predicate DOES fire on the body it is meant to detect
+  WAS_THE_COPY.forEach(([re, what], i) => {
+    assert.match(PRE_FIX_SAMPLE[i], re, `the ${what} predicate must fire on a pre-fix sample (硬规则 2)`);
+  });
+  for (const [name, src] of [["clue", clueSrc], ["judge", judgeSrc]]) {
+    for (const [re, what] of WAS_THE_COPY) {
+      assert.doesNotMatch(src, re, `${name}: ${what} must come from the shared factory, not a second copy`);
+    }
+    assert.match(src, /makeThrowingEngineModuleLoader\s*\(/, `${name}: loads through the shared factory`);
+  }
+  // the two stages still say which vocabulary THEY mean (the only thing that ever differed)
+  assert.match(clueSrc, /subject:\s*"the clue vocabulary"/);
+  assert.match(judgeSrc, /subject:\s*"the judge vocabulary"/);
+
+  // ── LIVE arms: the shared loader really resolves the one contract module for BOTH stages ─────────
+  const fromClue = await loadClueContract(REPO);
+  const fromJudge = await loadJudgeContract(REPO);
+  assert.equal(fromClue, contract, "both stages resolve the SAME module object (one cache rule, one file)");
+  assert.equal(fromJudge, contract);
+  assert.deepEqual(fromClue.CLUE_STATES, [...CLUE_STATES]);
+  assert.deepEqual(fromJudge.JUDGE_VERDICTS, [...JUDGE_VERDICTS]);
+
+  // ── and the refusal it now owns is NAMED, lists the candidates it tried, and never returns null ──
+  const neverThere = makeThrowingEngineModuleLoader(new Map(), "docs/analysis", "no-such-contract.mjs", {
+    cause: "test-cause-unresolved",
+    subject: "the test vocabulary",
+  });
+  await assert.rejects(
+    () => neverThere(REPO),
+    (e) => {
+      assert.match(e.message, /^CAUSE=test-cause-unresolved — the test vocabulary lives in no-such-contract\.mjs/);
+      assert.match(e.message, /tried .*, .*/, "a miss names EVERY candidate it tried (硬规则 3b)");
+      return true;
+    },
+  );
 });

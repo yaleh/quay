@@ -114,3 +114,57 @@ export function makeEngineModuleLoader(
     }
   };
 }
+
+/** WHAT a throw-style caller says when the engine module cannot be resolved. Only these two values
+ *  differed between the copies this factory replaced — the sentence itself did not. */
+export interface ThrownRefusalSpec {
+  /** The `CAUSE=` code the refusal starts with. A stable, greppable NAME (never a bare sentence), so a
+   *  caller can tell "the vocabulary is missing" from an unrelated crash. */
+  cause: string;
+  /** A noun phrase for WHAT this module is to the caller, used inside the refusal ("the clue vocabulary",
+   *  "the judge vocabulary"). It is a LABEL, not behaviour — which is why it is a parameter here and the
+   *  rest of the sentence is not. */
+  subject: string;
+}
+
+/** Build a THROW-style single-module loader — the sibling of `makeEngineModuleLoader` for callers whose
+ *  refusal is one thrown error rather than an accumulated `unresolved[]` out-parameter.
+ *
+ *  THE DEFECT THIS CLOSES (routine `semantic-dedup-scan`, finding `load-contract-byte-identical`,
+ *  runId `semantic-dedup-scan-1794127147981`): the two-stage admission pipeline's stage-1
+ *  (`unencapsulated-state-clue.ts`) and stage-2 (`unencapsulated-state-judge.ts`) each carried the same
+ *  `loadContract` body — the same `resolveEngineModuleIn` call, the same null check, the same
+ *  `CAUSE=…-unresolved` sentence, the same `importEngineModuleAt` — differing ONLY in the noun naming
+ *  their own vocabulary. That is 硬规则 5b's failure shape: a future fix to the refusal (a new candidate
+ *  path, an extra `tried` hint, a different cache rule) would have had to be made twice, and the copy
+ *  that was missed would keep the old behaviour silently.
+ *
+ *  ⛔ THE RESOLUTION AND THE RUNTIME IMPORT ARE THE SHARED PRIMITIVES (`resolveEngineModuleIn`,
+ *  `importEngineModuleAt`) — this factory only adds the ONE refusal shape the throw-style callers share.
+ *  A caller whose refusal sentence has a DIFFERENT shape (a different prefix or a different `tried`
+ *  joining) keeps its own two-line wrapper over the same primitives rather than growing this signature
+ *  a second time; that is why `subject`/`cause` are the only per-caller knobs.
+ *
+ *  @param cache   the CALLER's memo map, keyed by RESOLVED path (same contract as `makeEngineModuleLoader`)
+ *  @param dirRel  the engine directory relative to a repository root
+ *  @param file    the module file name to resolve
+ *  @param spec    the refusal's `CAUSE=` code and its subject noun
+ *  @returns       `(root) => Promise<module namespace>`; THROWS a named `Error` when the module cannot be
+ *                 resolved. It never returns a silent `null`: "I could not read the vocabulary" must not
+ *                 be shaped like "the vocabulary was empty" (硬规则 3b). */
+export function makeThrowingEngineModuleLoader(
+  cache: Map<string, unknown>,
+  dirRel: string,
+  file: string,
+  spec: ThrownRefusalSpec,
+): (root: string) => Promise<any> {
+  return async (root: string): Promise<any> => {
+    const r = resolveEngineModuleIn(root, file, dirRel);
+    if (r.path === null) {
+      throw new Error(
+        `CAUSE=${spec.cause} — ${spec.subject} lives in ${file} and could not be found; tried ${r.tried.join(" , ")}`,
+      );
+    }
+    return importEngineModuleAt(r.path, cache);
+  };
+}

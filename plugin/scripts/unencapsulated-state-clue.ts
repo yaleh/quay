@@ -64,7 +64,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { isDirectEntry } from "./gate-script-base.ts";
 import { escapeRegExp } from "./regex-escape.ts";
-import { resolveEngineModuleIn, importEngineModuleAt, SCRIPT_REPO_ROOT } from "./routine-engine-module-loader.ts";
+import { makeThrowingEngineModuleLoader, SCRIPT_REPO_ROOT } from "./routine-engine-module-loader.ts";
 
 export const EXIT_OK = 0;
 export const EXIT_USAGE = 2;
@@ -95,16 +95,16 @@ const contractCache = new Map<string, unknown>();
 /** Load `docs/analysis/semantic-admission-contract.mjs` for a given repo root.
  *
  *  Resolution order is the shared loader's: this script's own repo first, the given root second. A miss
- *  THROWS with the paths it tried — an unresolved vocabulary must never be read as "no candidates". */
-export async function loadContract(root: string): Promise<any> {
-  const r = resolveEngineModuleIn(root, CONTRACT_FILE, CONTRACT_DIR_REL);
-  if (r.path === null) {
-    throw new Error(
-      `CAUSE=semantic-admission-contract-unresolved — the clue vocabulary lives in ${CONTRACT_FILE} and could not be found; tried ${r.tried.join(" , ")}`,
-    );
-  }
-  return importEngineModuleAt(r.path, contractCache);
-}
+ *  THROWS with the paths it tried — an unresolved vocabulary must never be read as "no candidates".
+ *
+ *  ⛔ THE BODY LIVES IN THE SHARED FACTORY (routine `semantic-dedup-scan`, finding
+ *  `load-contract-byte-identical`, runId `semantic-dedup-scan-1794127147981`): stage 2's copy was
+ *  byte-identical to this one except for the noun in the refusal, so both now come from
+ *  `makeThrowingEngineModuleLoader` (硬规则 5b). Only the stage's own vocabulary NAME is local. */
+export const loadContract = makeThrowingEngineModuleLoader(contractCache, CONTRACT_DIR_REL, CONTRACT_FILE, {
+  cause: "semantic-admission-contract-unresolved",
+  subject: "the clue vocabulary",
+});
 
 // ── comment / literal stripping (position-based counting, hard rule 2) ───────────────────────────────
 /** Remove comments AND blank out string/template literal CONTENT, keeping line structure intact.

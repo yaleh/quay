@@ -46,7 +46,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { isDirectEntry } from "./gate-script-base.ts";
-import { resolveEngineModuleIn, importEngineModuleAt, SCRIPT_REPO_ROOT } from "./routine-engine-module-loader.ts";
+import { makeThrowingEngineModuleLoader, SCRIPT_REPO_ROOT } from "./routine-engine-module-loader.ts";
 
 export const EXIT_OK = 0;
 export const EXIT_USAGE = 2;
@@ -60,15 +60,17 @@ const CONTRACT_FILE = "semantic-admission-contract.mjs";
 
 const contractCache = new Map<string, unknown>();
 
-export async function loadContract(root: string): Promise<any> {
-  const r = resolveEngineModuleIn(root, CONTRACT_FILE, CONTRACT_DIR_REL);
-  if (r.path === null) {
-    throw new Error(
-      `CAUSE=semantic-admission-contract-unresolved — the judge vocabulary lives in ${CONTRACT_FILE} and could not be found; tried ${r.tried.join(" , ")}`,
-    );
-  }
-  return importEngineModuleAt(r.path, contractCache);
-}
+/** Load `docs/analysis/semantic-admission-contract.mjs` for a given repo root. A miss THROWS naming the
+ *  candidates it tried — a corpus that cannot be read must never look like one that acquitted nothing.
+ *
+ *  ⛔ THE BODY LIVES IN THE SHARED FACTORY (routine `semantic-dedup-scan`, finding
+ *  `load-contract-byte-identical`, runId `semantic-dedup-scan-1794127147981`): this was stage 1's copy
+ *  with one noun changed, so both stages now load through `makeThrowingEngineModuleLoader`
+ *  (硬规则 5b). Only the stage's own vocabulary NAME is local. */
+export const loadContract = makeThrowingEngineModuleLoader(contractCache, CONTRACT_DIR_REL, CONTRACT_FILE, {
+  cause: "semantic-admission-contract-unresolved",
+  subject: "the judge vocabulary",
+});
 
 /**
  * The corpus lookup key of a subject: its basename without extension.
