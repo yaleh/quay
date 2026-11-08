@@ -29,6 +29,7 @@ import {
   countsOf,
   decide,
   extractImports,
+  isExcludedPath,
   judge,
   readBaselineFile,
   readImportGraph,
@@ -209,6 +210,43 @@ test("a type-only closure is NOT a value cycle: valueSccs 0, typeSccs 1 (AC1's P
       assert.equal(judge(r, ZERO, ZERO, null).ok, false, "typeSccs is a ratcheted axis too — 1 > 0 is RED");
     },
   );
+});
+
+test("a .mjs module IS a node: the cycle it closes is reported", () => {
+  // routine finding `mjs-primitives-outside-both-dependency-graphs` (2026-11-08). Four RUNTIME
+  // primitives under packages/quay/src/primitives/ are `.mjs`; the node filter used to be
+  // `/\.(ts|mts|cts)$/` so every edge LEAVING one of them was invisible. This fixture is the
+  // red-before/green-after proof: with `.mjs` outside the node set `resolveSpecifier` finds no
+  // `src/b.mjs` node, the `a.ts → b.mjs` edge vanishes, and the reading is `valueSccs: 0` — green
+  // over a real value cycle.
+  withFixture(
+    {
+      "src/a.ts": 'import { b } from "./b.mjs";\nexport const a = b;\n',
+      "src/b.mjs": 'import { a } from "./a.ts";\nexport const b = a;\n',
+    },
+    {},
+    (root) => {
+      const r = readImportGraph(root);
+      assert.equal(r.evaluated, true);
+      assert.deepEqual(countsOf(r), { valueSccs: 1, typeSccs: 0, reverseEdges: 0 }, "a .mjs node was dropped from the graph");
+      assert.deepEqual(r.valueSccs[0].files, ["src/a.ts", "src/b.mjs"]);
+      assert.equal(judge(r, ZERO, ZERO, null).ok, false, "a cycle through a .mjs module must be OVER a 0 baseline");
+      // The honest-scope reading follows the widening: `.mjs` is no longer listed as un-analyzed.
+      assert.deepEqual(r.notAnalyzed, { js: 0 }, "`.mjs` is a node now — it must not also be reported as not-analyzed");
+    },
+  );
+});
+
+test("declaration files are NOT nodes, and .mjs is not excluded with them", () => {
+  // The exclusion regex used to cover `.d.ts` only, so `.d.mts`/`.d.cts` matched the node filter
+  // through their `mts`/`cts` tails. Enumerated per extension (硬规则 3), both directions.
+  assert.deepEqual(
+    [".d.ts", ".d.mts", ".d.cts"].filter((ext) => !isExcludedPath(`packages/quay/src/primitives/x${ext}`)),
+    [],
+    "a declaration file entered the node set",
+  );
+  assert.equal(isExcludedPath("packages/quay/src/primitives/x.mjs"), false, "a RUNTIME .mjs module must stay in the node set");
+  assert.equal(isExcludedPath("packages/quay/src/primitives/x.mts"), false);
 });
 
 test("a packages/ → plugin/ import is a reverse edge, and the comment-only twin is not", () => {
