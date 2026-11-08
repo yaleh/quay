@@ -11,11 +11,18 @@
 //
 // THE GRAPH (identical 口径 to AC-916's criterion, which was cross-checked against archguard's
 // package-scoped moduleGraph — 27/27 directory pairs matched):
-//   · nodes  = directories under `packages/quay/src` containing at least one `.ts` file
+//   · nodes  = directories under `packages/quay/src` containing at least one runtime source file
+//              (`.ts` / `.mts` / `.mjs`; declaration files excluded — see `walkSources`)
 //   · edges  = for every LINE-START `import` / `export … from` statement whose specifier is an
 //              in-repo relative path, `dirname(importer)` → `dirname(target)`; self-edges dropped
 //   · cycles = strongly connected components with ≥ 2 members (Tarjan)
 // Only statement POSITION counts (硬规则 2): a path mentioned in a comment or string is not an edge.
+//
+// ⛔ THE WALKER MUST SEE `.mjs` (routine finding `mjs-primitives-outside-both-dependency-graphs`,
+// 2026-11-08): 4 runtime primitives are `packages/quay/src/primitives/*.mjs` and carry live
+// cross-directory imports. While the walk was `/\.ts$/`-only, 3 real edges were invisible to this
+// guard — "zero directory cycles" was asserted over a graph missing 4 modules (硬规则 5). Arm 2c
+// pins that the class of cycle those edges can close is now reported.
 //
 // ⛔ THE THIRD ARM IS THE POINT (硬规则 3b): if the parser resolves ZERO cross-directory edges, that
 // is an INSTRUMENT FAILURE, not "0 cycles" — the two readings are different facts and must not share
@@ -54,12 +61,20 @@ const SRC_REL = "packages/quay/src";
 /** Statement-position import specifier, relative only — byte-for-byte the AC-916 criterion's regex. */
 const IMPORT_RE = /^\s*(?:import|export)\b[^'"]*?(?:from\s+)?['"]((?:\.{1,2}\/)[^'"]+)['"]/;
 
-/** Every `.ts` file under `dirAbs` (`.d.ts` excluded — declarations carry no runtime edge). */
-function walkTs(dirAbs, out = []) {
+/**
+ * Every RUNTIME source file under `dirAbs`: `.ts` / `.mts` / `.mjs`, with declaration files
+ * (`.d.ts` / `.d.mts` / `.d.cts`) excluded — decorations carry no runtime edge.
+ *
+ * ⛔ `.mjs` is NOT optional (routine finding `mjs-primitives-outside-both-dependency-graphs`,
+ * 2026-11-08): 4 runtime primitives live at `packages/quay/src/primitives/*.mjs` and carry live
+ * cross-directory import edges. A walker that skipped them made this guard's "zero cycles" a claim
+ * over a graph missing 4 real modules (硬规则 5: an incomplete source cannot prove absence).
+ */
+function walkSources(dirAbs, out = []) {
   for (const e of fs.readdirSync(dirAbs, { withFileTypes: true })) {
     const p = path.join(dirAbs, e.name);
-    if (e.isDirectory()) walkTs(p, out);
-    else if (/\.ts$/.test(e.name) && !/\.d\.ts$/.test(e.name)) out.push(p);
+    if (e.isDirectory()) walkSources(p, out);
+    else if (/\.(ts|mts|mjs)$/.test(e.name) && !/\.d\.(ts|mts|cts)$/.test(e.name)) out.push(p);
   }
   return out;
 }
@@ -75,7 +90,7 @@ function walkTs(dirAbs, out = []) {
  */
 export function analyzeDirectoryCycles(root, srcRel = SRC_REL) {
   const srcAbs = path.join(root, srcRel);
-  const files = fs.existsSync(srcAbs) ? walkTs(srcAbs) : [];
+  const files = fs.existsSync(srcAbs) ? walkSources(srcAbs) : [];
   const relDir = (absFile) => {
     const rel = path.relative(srcAbs, path.dirname(absFile));
     return rel === "" ? "." : rel;
@@ -165,6 +180,27 @@ test("arm 1 — the real packages/quay/src has ZERO directory cycles (AC-916)", 
   assert.ok(r.edges > 0, "a measured tree must have edges");
 });
 
+test("arm 1b — the real walker SEES the 4 runtime .mjs primitives (and not the .d.mts decorations)", () => {
+  // A reading of the PRODUCTION carrier, not a fixture (硬规则 4 推论三): the walker itself, pointed at
+  // the real tree. Before this fix it returned only `.ts` and every one of these four was absent —
+  // the exact coverage gap the routine finding names.
+  const walked = walkSources(path.join(REPO_ROOT, SRC_REL)).map((abs) =>
+    path.relative(REPO_ROOT, abs).split(path.sep).join("/"),
+  );
+  const witness = [
+    "packages/quay/src/primitives/delivery-audit.mjs",
+    "packages/quay/src/primitives/pty-frame.mjs",
+    "packages/quay/src/primitives/session-liveness.mjs",
+    "packages/quay/src/primitives/session-schema.mjs",
+  ];
+  const missing = witness.filter((p) => !walked.includes(p));
+  assert.deepEqual(missing, [], `the walker skips runtime module(s): ${JSON.stringify(missing)}`);
+  // Negative arm: a declaration file in the SAME directory must stay out — otherwise the fix traded a
+  // blind spot for noise. Enumerated (硬规则 3), not a boolean over "some .d.mts happened to be there".
+  const declarations = walked.filter((p) => /\.d\.(ts|mts|cts)$/.test(p));
+  assert.deepEqual(declarations, [], `declaration file(s) entered the node set: ${JSON.stringify(declarations)}`);
+});
+
 // ── arm 2: the guard can go red ────────────────────────────────────────────────────────────────────
 
 test("arm 2 — a synthetic two-directory cycle IS reported (the guard takes false)", (t) => {
@@ -189,6 +225,27 @@ test("arm 2b — a same-directory import is NOT a cross-directory edge (no false
   assert.equal(r.edges, 0);
   assert.equal(r.instrumentFailure, true);
   assert.deepEqual(r.sccs, []);
+});
+
+test("arm 2c — a cycle CLOSED THROUGH a .mjs module is reported (the walk must not skip .mjs)", (t) => {
+  // alpha/index.ts → primitives/x.mjs → beta/index.ts → alpha/index.ts. The MIDDLE edge leaves the
+  // `.mjs` file, so it exists only if the walker visits `.mjs`. While the walk was `/\.ts$/`-only the
+  // graph held alpha→primitives and beta→alpha but no primitives→beta, so this fixture read
+  // `evaluated:true, sccs:[]` — a silent green over a real three-directory cycle (硬规则 3b's exact
+  // failure shape: a walker that measures less reports the same value as a clean tree).
+  const root = makeFixture(t, {
+    [`${SRC_REL}/alpha/index.ts`]: 'import { x } from "../primitives/x.mjs";\nexport const a = x;\n',
+    [`${SRC_REL}/primitives/x.mjs`]: 'import { b } from "../beta/index.ts";\nexport const x = b;\n',
+    [`${SRC_REL}/beta/index.ts`]: 'import { a } from "../alpha/index.ts";\nexport const b = a;\n',
+  });
+  const r = analyzeDirectoryCycles(root);
+  assert.equal(r.evaluated, true);
+  assert.equal(r.instrumentFailure, false);
+  assert.deepEqual(
+    r.sccs,
+    [["alpha", "beta", "primitives"]],
+    `expected the alpha→primitives→beta SCC; got ${JSON.stringify(r.sccs)} — a .mjs edge was dropped`,
+  );
 });
 
 // ── arm 3: "read nothing" ≠ "0 cycles" ────────────────────────────────────────────────────────────

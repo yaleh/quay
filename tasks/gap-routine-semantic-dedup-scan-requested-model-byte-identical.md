@@ -79,3 +79,13 @@ gate-script-base 91/91，全绿。
 - `plugin/scripts/routine-engine-module-loader.ts`
 - `plugin/test/gap-routine-semantic-dedup-scan-requested-model-byte-identical.test.mjs`
 - `tasks/gap-routine-semantic-dedup-scan-requested-model-byte-identical.md`
+
+## Blocker
+
+**2026-11-08T09:18:26.696Z — worker 未落地（exited-not-landed）**
+
+- 未落地原因：step=merge-develop: Auto-merging plugin/scripts/routine-engine-module-loader.ts
+CONFLICT (content): Merge conflict in plugin/scripts/routine-engine-module-loader.ts
+Automatic merge failed; fix conflicts and then commit the result.
+- run_id：wk-prod-anchor
+- session_id：665cd323-9341-4c46-a8c9-777cf2e7203a

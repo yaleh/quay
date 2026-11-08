@@ -39,8 +39,9 @@
 // pretending they were killed — an unparsable mutant proves nothing about test strength.
 //
 // SOURCE IS NEVER TOUCHED: the target file is copied into a temp sandbox (`os.tmpdir()`) together
-// with its top-level ancestor directory and a symlink to `node_modules`; every mutant is written
-// ONLY there and removed on exit. AC4 checks that the real file's md5 is unchanged.
+// with every top-level entry its and the test's relative imports can reach (whole entries, not single
+// files — see `reachableTopLevels`) and a symlink to `node_modules`; every mutant is written ONLY
+// there and removed on exit. AC4 checks that the real file's md5 is unchanged.
 //
 // CARRIER (append-only, one JSON object per line):
 //   <root>/.quay/ls-readings.jsonl
@@ -69,6 +70,9 @@ import os from "node:os";
 import path from "node:path";
 import { execFileSync, spawnSync } from "node:child_process";
 import { isDirectEntrySafe, flagValue } from "./gate-script-base.ts";
+// Import specifiers are read by POSITION (comment/string masked) from the ONE existing extractor —
+// `extractImports` in the module graph — rather than a second regex family living here.
+import { extractImports, normalizeRelativeSpecifier } from "./import-graph-check.ts";
 import { escapeRegExp } from "./regex-escape.ts";
 // The 1-based newline counter lives ONCE in source-text-lib.ts (finding `lineof-lineat`):
 // a private copy here would re-open that family and red plugin/test/source-text-lib.test.mjs.
@@ -376,13 +380,96 @@ function copyTree(src: string, dst: string): void {
   });
 }
 
+/** Extensions a stage-time resolution may append when the specifier carries none (Node's ESM probe
+ *  order, plus the TypeScript-ESM `.js`→`.ts` rewrite handled in `resolveStagedImport`). */
+const IMPORT_EXTENSIONS = [".ts", ".mts", ".cts", ".tsx", ".js", ".mjs", ".cjs"] as const;
+
 /**
- * Materialize a throwaway workspace containing the target/test's top-level ancestor directories
- * plus the root `package.json` and a symlink to the real `node_modules`. Returns its path.
+ * Resolve ONE relative specifier from `fromRel` to a file that EXISTS on disk under `root`, or null
+ * for a bare/external specifier, a data import, or a path that escapes the root.
+ *
+ * This is a stage-time existence probe, NOT the module graph's `resolveSpecifier`: the graph resolves
+ * against a TRACKED node set (and covers `.ts` only), while the sandbox has to stage whatever the child
+ * process will actually load — including `.mjs` fixtures and untracked trees. The specifier
+ * normalization is shared with the graph (`normalizeRelativeSpecifier`) rather than re-derived.
+ */
+export function resolveStagedImport(root: string, fromRel: string, spec: string): string | null {
+  const base = normalizeRelativeSpecifier(fromRel, spec);
+  // `..`-prefixed = outside the root; staging outside the root is impossible, so it is unresolvable,
+  // not a silently-empty stage.
+  if (base === null || base === ".." || base.startsWith("../")) return null;
+  const candidates: string[] = [base];
+  const ext = /\.(ts|mts|cts|tsx|js|mjs|cjs)$/.exec(base);
+  if (ext) {
+    // TypeScript-ESM convention: a specifier written `./x.js` names the `./x.ts` source.
+    if (ext[1] === "js" || ext[1] === "mjs") candidates.push(base.replace(/\.m?js$/, ".ts"));
+  } else {
+    for (const e of IMPORT_EXTENSIONS) candidates.push(base + e);
+  }
+  for (const e of IMPORT_EXTENSIONS) candidates.push(`${base}/index${e}`);
+  for (const c of candidates) {
+    try {
+      if (fs.statSync(path.join(root, c)).isFile()) return c;
+    } catch {
+      /* absent candidate — try the next one */
+    }
+  }
+  return null;
+}
+
+/**
+ * The top-level entries the sandbox must stage for `seeds`: the seeds' own, plus every top-level entry
+ * reached by following their RELATIVE imports transitively (a child process resolves imports at RUN
+ * time, so a module a seed imports is as required as the seed itself).
+ *
+ * Why the closure and not just the seeds' two tops: `packages/quay/test/task-transition.test.mjs`
+ * imports `../../../plugin/scripts/source-text-lib.ts`, so staging only `packages` made the unmutated
+ * baseline die with ERR_MODULE_NOT_FOUND and the whole reading came back not-evaluated (the defect this
+ * function closes). 77 of 344 `packages/quay/test/*.mjs` import across a top-level boundary, so this
+ * was the common case, not an edge one.
+ *
+ * Deliberately an OVER-approximation of what is needed (whole top-level entries are copied, not single
+ * files: a test may read a sibling fixture by path at runtime, which no static scan can see) and a
+ * deliberate UNDER-approximation of the whole tree (an unreferenced top-level entry is not staged — a
+ * dynamic/computed import that no static scan can see stays unstaged, and the honest outcome there is
+ * still `not-evaluated`, never a fabricated score: 硬规则 3b).
+ */
+export function reachableTopLevels(root: string, seeds: readonly string[]): string[] {
+  const seen = new Set<string>();
+  const tops = new Set<string>();
+  const queue: string[] = seeds.map((s) => s.split(path.sep).join("/"));
+  while (queue.length > 0) {
+    const rel = queue.pop() as string;
+    if (seen.has(rel)) continue;
+    seen.add(rel);
+    const top = rel.split("/")[0];
+    // `.`/`..`/`` name the root itself and must never enter the staged set: `path.join(dir, ".")` is
+    // `dir`, so "staging" it would copy the WHOLE tree into the sandbox.
+    if (top && top !== "." && top !== "..") tops.add(top);
+    // Only CODE carries import statements; a fixture's `.json`/`.txt` sibling is staged by its top.
+    if (!/\.(ts|mts|cts|tsx|js|mjs|cjs)$/.test(rel)) continue;
+    let src: string;
+    try {
+      src = fs.readFileSync(path.join(root, rel), "utf8");
+    } catch {
+      continue; // unreadable seed — its top is staged anyway; the child reports the failure honestly
+    }
+    for (const imp of extractImports(src)) {
+      const resolved = resolveStagedImport(root, rel, imp.spec);
+      if (resolved !== null && !seen.has(resolved)) queue.push(resolved);
+    }
+  }
+  return [...tops].sort();
+}
+
+/**
+ * Materialize a throwaway workspace containing every top-level entry reachable from the target/test —
+ * their own plus the ones their relative imports reach (see `reachableTopLevels`) — plus the root
+ * `package.json` and a symlink to the real `node_modules`. Returns its path.
  */
 export function buildSandbox(root: string, rels: string[]): string {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ls-mutation-reading-"));
-  const tops = new Set(rels.map((r) => r.split("/")[0]));
+  const tops = new Set(reachableTopLevels(root, rels));
   for (const top of tops) {
     const from = path.join(root, top);
     const to = path.join(dir, top);
