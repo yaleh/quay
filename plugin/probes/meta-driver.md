@@ -48,10 +48,22 @@ your output and treat that dimension as unreadable, ⛔ do NOT fabricate a readi
   was killed at the driver's bound / could not start, `usage` = exit 2, `unreadable` = non-JSON
   stdout, or the store's own cause such as `timeout` / `capability` / `declared`; `null` for a
   definitive pass/fail). Cite the cause when you interpret a `not-evaluated` — ⛔ never invent one.
-- `divergences`: mechanically-computed mismatches between what a criterion says and what the record
-  says. Five kinds:
+- `divergences`: mechanically-computed findings derived ONLY from each AC's `status` × `verdict`.
+  Most are mismatches between what a criterion says and what the record says; the sixth kind below is
+  not a mismatch but an UNMET COMMITMENT (the record agrees with the criterion, and that is the
+  finding). Six kinds:
     - `pass-but-unflipped`  — criterion PASSES but the record is not `achieved`.
     - `achieved-but-failing` — record says `achieved` but the criterion FAILS.
+    - `active-but-failing`  — the record is `active` (a COMMITTED, not-yet-delivered AC) and the
+      criterion FAILS right now. NOT a lie and NOT an instrument problem: the criterion ran fine and
+      answered "no", so this is the goal sitting still — "we promised this and the thing that decides
+      it says it is not done". It is a divergence because it was previously INVISIBLE here: an active
+      AC whose criterion fails fell through every other kind (measured 2026-11-08: AC-936 held `fail`
+      for 290 consecutive rounds while `divergences` was `[]`). ⛔ Do NOT narrate it as "the criterion
+      is broken" — that would be `not-evaluated`; and ⛔ do NOT narrate it as "already achieved" —
+      that would be `achieved-but-failing`. `reason` carries the criterion's own execution result.
+      Pair it with `timeSeries` (`unchanged` with `value:"fail"`) to say HOW LONG it has been true;
+      the kind alone says only "now".
     - `no-criterion`        — the AC has no runnable criterion, so it fails closed (unenforceable).
     - `not-evaluated`       — the AC is committed (active/achieved) but its criterion could NOT BE
       RUN this round. This is NOT "the criterion is false" and NOT "the criterion passed" (hard rule
@@ -80,11 +92,19 @@ your output and treat that dimension as unreadable, ⛔ do NOT fabricate a readi
   not a verdict). It is the axis that decides what you output (see HANDLER ROUTING below):
     - `handler.kind` — the driver kind that owns this divergence: `goal` (pass-but-unflipped — the
       goal-driver flips `achieved` automatically), `worker` (no-criterion — the task→worker pipeline,
-      which needs an EXPLICIT trigger), or `none` (achieved-but-failing, not-evaluated, and
-      achieved-but-superseder-unmet — no mechanism owns them). ⛔ `not-evaluated` is `none` ON
-      PURPOSE: the goal-driver merely RE-RUNS an unmeasurable criterion every round — that is the
-      failing instrument, not a handler for it. Person-territory (raise the deadline / repair the
-      invocation / declare the capability). ⛔ `achieved-but-superseder-unmet` is `none` for the same
+      which needs an EXPLICIT trigger), or `none` (achieved-but-failing, active-but-failing,
+      not-evaluated, and achieved-but-superseder-unmet — no mechanism owns them). ⛔ `not-evaluated`
+      is `none` ON PURPOSE: the goal-driver merely RE-RUNS an unmeasurable criterion every round —
+      that is the failing instrument, not a handler for it. Person-territory (raise the deadline /
+      repair the invocation / declare the capability). ⛔ `active-but-failing` is `none` for the same
+      kind of reason, from the other side: the goal-driver flips an AC ONLY when its criterion
+      PASSES, so on a failing criterion it structurally does nothing — reporting it `healthy` would let
+      you suppress a divergence that is NOT a transient window (that suppression is the 290-round
+      silence this kind exists to remove). It is not `worker` either — the worker/fan-in pipeline
+      lands work for an AC that already has a TASK, and these readings carry no AC→task link, so
+      `worker` would assert a handler nobody verified. The real escapes are landing the work that
+      makes the criterion pass, or a PERSON re-scoping / retiring the AC. ⛔
+      `achieved-but-superseder-unmet` is `none` for the same
       kind of reason: re-gating the superseder does not LAND it — the goal-driver cannot do that.
       Two real handlers only: the worker/fan-in pipeline landing the superseder's own task, or a
       person retiring the old AC. Do not read `handler.kind: none` as "nobody cares".
@@ -404,7 +424,7 @@ RESTRAINT — this is the point of the mechanism, not an afterthought:
    one for the other. Cover EVERY record you were given; a missing entry is a gap, not a "no opinion".
 
 REPLY WITH ONLY a JSON object, no prose around it:
-{"divergences":[{"id":"AC-NNN","kind":"pass-but-unflipped|achieved-but-failing|no-criterion|not-evaluated|achieved-but-superseder-unmet",
+{"divergences":[{"id":"AC-NNN","kind":"pass-but-unflipped|achieved-but-failing|active-but-failing|no-criterion|not-evaluated|achieved-but-superseder-unmet",
   "interpretation":"<one line: what this actually means>",
   "recommendation":"<one line: what should happen, and by whom>"}],
  "proposals":[{"goal":"GOAL-NNN","title":"<one line>","criterion":"<runnable shell>",

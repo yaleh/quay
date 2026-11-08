@@ -162,7 +162,7 @@ export interface CriterionReading {
   supersededBy?: string[];
 }
 
-/** 机械算出的五类偏离（criterion 的真值 vs 记录的自述）。
+/** 机械算出的六类偏离（criterion 的真值 vs 记录的自述，外加一条：已承诺而判据不过）。
  *  ⛔ `not-evaluated` is its OWN kind, never folded into pass/fail (hard rule 3b: "could not
  *  measure" and "is false" are different values). It exists so a standing unmeasured AC is
  *  ESCALATED instead of being silently absent from every divergence list
@@ -182,7 +182,21 @@ export type DivergenceKind =
    *  「替代者尚未达成」在一个正常重构窗口里同样成立。本类只声明【读数】（谁声明取代谁、双方此刻
    *  各自的状态），是否良性由语义半判定。确定性逃逸口有两条：让替代者达成，或把旧 AC 退役成
    *  `superseded`（那时它已不在承诺态，本类只对 `achieved` 触发）。 */
-  | "achieved-but-superseder-unmet";
+  | "achieved-but-superseder-unmet"
+  /** 第六类（tasks/gap-meta-active-but-failing）：一条已承诺（`active`）的 AC，其判据【此刻为假】。
+   *
+   *  缺陷原样：本函数的每个分支都是「某一对 status×verdict」，而 `active` ∧ `fail` 这一对——
+   *  即一个【尚未兑现的承诺，且兑现它的判据此刻不过】——恰好落在所有分支之外：承诺态过滤放它进来、
+   *  `pass` 分支与 `achieved` 分支都只匹配各自的 status、`not-evaluated` 又不适用 ⇒ 静默穿透，
+   *  `divergences` 里什么都不留。实测 2026-11-08T10:45:02Z：AC-936（唯一活跃 goal 里唯一未达成的
+   *  AC）已在 `timeSeries` 上连续 290 轮 `fail`（crossed:true），而当轮 `divergences` 是 `[]`。
+   *
+   *  ⛔ 不并进 `achieved-but-failing`：那边的记录在【自述已兑现】，与判据矛盾；这边记录没撒谎
+   *  （active 而判据不过本来就是一回事），所以它不是「不一致」，是【承诺未兑现】。给它独立 kind
+   *  的用处正在于可路由：`handler` 那一维只按 kind 查表，没有 kind 就没有处理者三态。
+   *  ⛔ 也不是 `not-evaluated`：那条是「没测成」（仪器读数），这条是「测了、结果是否」——
+   *  硬规则 3b：两者不同形，混用会把「量出来了、没兑现」伪装成「量不出来」。 */
+  | "active-but-failing";
 
 /** 处理者的三态 + 「读不出」。⛔ 读不出 ≠ 不存在：读不懂不得与「合格」或其反面同形
  *  （硬规则 3b）。「不存在」是【确实没有处理者】，「读不出」是【读了但没读到】——两者处置相反
@@ -496,6 +510,15 @@ export function computeDivergences(readings: CriterionReading[]): Divergence[] {
     if (!c.criterion || c.criterion.trim() === "") { out.push({ ...base, kind: "no-criterion" }); continue; }
     if (c.verdict === "pass" && c.status !== "achieved") { out.push({ ...base, kind: "pass-but-unflipped" }); continue; }
     if (c.verdict === "fail" && c.status === "achieved") { out.push({ ...base, kind: "achieved-but-failing" }); continue; }
+    // A COMMITTED (`active`) AC whose criterion FAILS is the most common way a goal sits still — and
+    // before this branch it produced NOTHING: the commitment filter let it through, both verdict
+    // branches keyed on the other status, and `not-evaluated` did not apply ⇒ a silent fall-through.
+    // Measured 2026-11-08T10:45:02Z: AC-936 (the only unachieved AC of the only active goal) had held
+    // `fail` for 290 consecutive `timeSeries` rounds (crossed:true) and `divergences` was `[]`.
+    // ⛔ Its OWN kind, not `achieved-but-failing`/`not-evaluated`: the record is consistent here (an
+    // active AC whose criterion fails is not a lie) and the criterion WAS measured — the finding is
+    // an unmet commitment, and a kind of its own is what gives it a `handler` (hard rule 3b).
+    if (c.verdict === "fail" && c.status === "active") { out.push({ ...base, kind: "active-but-failing" }); continue; }
     // A committed AC whose criterion could NOT BE RUN this round is a divergence in its own right:
     // "we promised to measure this and we did not". Before this branch, `not-evaluated` fell through
     // every case and produced NOTHING — a standing unmeasured AC was indistinguishable from a healthy
@@ -593,7 +616,7 @@ function computeSupersederDivergences(readings: CriterionReading[]): Divergence[
 }
 
 // ── 处理者路由（gap-meta-divergences-not-routed-by-handler-existence）────────────────────────────
-// computeDivergences 按「AC 的 status × verdict」分类，产出三种 kind 却逐字段同形——而它们的处理者
+// computeDivergences 按「AC 的 status × verdict」分类，各类 kind 逐字段同形——而它们的处理者
 // 存在性截然不同（pass-but-unflipped → goal-driver 全自动翻；no-criterion → task→worker 但需显式触发；
 // achieved-but-failing → 无）。同形导致 259 次把「goal-driver 没在跑」报成 259 条 AC 症状，病因
 // （drivers.goal 没在跑）就在同一份读数里却一次也没被报出（硬规则 4b：AC 未翻是代理量，driver 活性
@@ -622,6 +645,19 @@ export const DIVERGENCE_HANDLER_KIND: Record<DivergenceKind, string> = {
   //     suppress the reading as a transient window, which is exactly the invisibility this kind
   //     exists to remove (same reasoning as `not-evaluated` above).
   "achieved-but-superseder-unmet": "none",
+  // ⛔ "none" on purpose, and NOT because "nobody cares": an active AC whose criterion fails is a
+  // commitment waiting for LANDED WORK, and no driver round lands work.
+  //   · "goal" would be the 290-round silence again: the goal-driver re-gates the criterion every
+  //     round and flips it only when it PASSES — a failing criterion is by definition not flipped by
+  //     it — so `handler.state` would read `healthy` and the probe spec suppresses healthy handlers
+  //     as a transient window. That is exactly the invisibility this kind exists to remove.
+  //   · "worker" would claim a handler this reading CANNOT verify: the worker/fan-in pipeline lands
+  //     work only for an AC that already has a TASK, and `readings` carries no AC→task link — so
+  //     asserting it exists would turn "I could not tell" into "it exists" (hard rule 3b). The
+  //     deterministic escapes are (a) land the work that makes the criterion pass (then the
+  //     goal-driver flips it), or (b) a PERSON re-scopes / retires the AC. Neither is one driver
+  //     round, so `none` + `handler.state: absent` is the honest routing: escalate it.
+  "active-but-failing": "none",
 };
 
 /** 由 drivers 读数派生一条偏离的处理者三态。纯函数、可枚举（⛔ 不是布尔/总数）：

@@ -256,6 +256,51 @@ test('computeDivergences: draft 记录一律不算偏离（提案 ≠ 未兑现�
   assert.equal(d.length, 0, 'draft 既不报 pass-but-unflipped 也不报 no-criterion');
 });
 
+// gap-meta-active-but-failing: an ACTIVE AC whose criterion FAILS is an unmet commitment, and it
+// used to fall through EVERY branch — the commitment filter let it in, the `pass` and `achieved`
+// branches each keyed on the other status, and `not-evaluated` did not apply ⇒ silent. Measured
+// 2026-11-08T10:45:02Z: AC-936 (the only unachieved AC of the only active goal) had held `fail`
+// for 290 consecutive `timeSeries` rounds (crossed:true) while `divergences` was `[]`.
+// ⛔ Its OWN kind: the record is consistent here (active + failing is not a lie) and the criterion
+// WAS measured — so neither `achieved-but-failing` nor `not-evaluated` (hard rule 3b).
+test('computeDivergences: active 但 criterion 失败 ⇒ 独立 kind "active-but-failing"（旧实现返回 []）', () => {
+  const d = computeDivergences([
+    { id: 'AC-T', title: null, goal: 'GOAL-T', status: 'active', criterion: 'false', verdict: 'fail', reason: 'exit 1' },
+  ]);
+  assert.equal(d.length, 1, 'active + fail ⇒ 必须产生一条偏离（否则「承诺未兑现」在 divergences 里隐形）');
+  assert.equal(d[0].kind, 'active-but-failing');
+  assert.equal(d[0].id, 'AC-T');
+  assert.equal(d[0].status, 'active');
+  assert.equal(d[0].verdict, 'fail');
+  assert.equal(d[0].reason, 'exit 1', 'reason 必须原样带出判据的执行结果');
+  // 负控（防放宽）：
+  // ① achieved + pass 一致 ⇒ 仍零条
+  assert.deepEqual(computeDivergences([
+    { id: 'AC-U', title: null, goal: 'GOAL-T', status: 'achieved', criterion: 'true', verdict: 'pass', reason: 'ok' },
+  ]), []);
+  // ② active + pass 仍是旧的 pass-but-unflipped（⛔ 不得被新分支抢走）
+  assert.equal(computeDivergences([
+    { id: 'AC-V', title: null, goal: 'GOAL-T', status: 'active', criterion: 'true', verdict: 'pass', reason: 'ok' },
+  ])[0]?.kind, 'pass-but-unflipped');
+  // ③ 非承诺态 + fail 仍不报——新 kind 不得成为 draft/retired/superseded 的入口
+  for (const status of ['draft', 'retired', 'superseded']) {
+    assert.deepEqual(computeDivergences([
+      { id: 'AC-W', title: null, goal: 'GOAL-T', status, criterion: 'false', verdict: 'fail', reason: 'exit 1' },
+    ]), [], `${status} + fail 不是「承诺未兑现」`);
+  }
+});
+
+test('DIVERGENCE_HANDLER_KIND: 第六类映射 none（goal 只在 pass 时翻、worker 要已有 task——两者都不成立）', () => {
+  assert.equal(DIVERGENCE_HANDLER_KIND['active-but-failing'], 'none');
+  const routed = attachDivergenceHandlers(computeDivergences([
+    { id: 'AC-T', title: null, goal: 'GOAL-T', status: 'active', criterion: 'false', verdict: 'fail', reason: 'exit 1' },
+  ]), [{ kind: 'goal', running: true, carrierRecords: 1, staleSecs: 0, carrierUnreadable: [] }]);
+  // ⛔ 不得因为 goal-driver 在跑就报成 healthy：goal-driver 只在判据 pass 时翻 achieved，
+  //    对一个 fail 的判据它结构上什么也不做；报 healthy 会让 probe 按瞬时窗口压掉这条读数，
+  //    正是那 290 轮沉默的成因。
+  assert.deepEqual(routed[0].handler, { kind: 'none', state: 'absent' });
+});
+
 // ── computeDivergences: 第五类（跨 AC） ──────────────────────────────────────
 // tasks/gap-ac940-exit-condition-contradiction。既有四类逐条只看【单条】AC 的 status×verdict，
 // 结构上表达不了「AC-934 achieved ∧ AC-938（声明取代它）active」这种【跨 AC】矛盾——实测
@@ -347,17 +392,21 @@ test('computeDivergences(f): 既有四类行为不变——同输入下只多出
     mkCrit('AC-205', 'active', { supersedes: ['AC-204'] }),
   ];
   const d = computeDivergences(readings);
-  const old = d.filter((x) => x.kind !== 'achieved-but-superseder-unmet');
+  const old = d.filter((x) => x.kind !== 'achieved-but-superseder-unmet' && x.kind !== 'active-but-failing');
   assert.deepEqual(old, [
     { id: 'AC-201', status: 'active', verdict: 'pass', reason: 'r', kind: 'pass-but-unflipped' },
     { id: 'AC-202', status: 'achieved', verdict: 'fail', reason: 'r', kind: 'achieved-but-failing' },
     { id: 'AC-203', status: 'active', verdict: 'fail', reason: 'r', kind: 'no-criterion' },
     { id: 'AC-204', status: 'achieved', verdict: 'not-evaluated', reason: 'r', kind: 'not-evaluated' },
   ]);
-  // 新增类只对 AC-204 触发（它 achieved 且被 AC-205 声明取代、AC-205 未达成），并追加在末尾
-  assert.equal(d.length, 5);
-  assert.equal(d[4].kind, 'achieved-but-superseder-unmet');
-  assert.equal(d[4].id, 'AC-204');
+  // 新增类只对 AC-204 触发（它 achieved 且被 AC-205 声明取代、AC-205 未达成）⇒ 追加在末尾
+  assert.equal(d.length, 6);
+  assert.equal(d[5].kind, 'achieved-but-superseder-unmet');
+  assert.equal(d[5].id, 'AC-204');
+  // 第六类只对 AC-205 触发（active 且判据 fail——本夹具用的是 mkCrit 的默认 verdict:fail），
+  // 且在第一遍里按输入顺序产出，故排在跨 AC 判定之前。
+  assert.equal(d[4].kind, 'active-but-failing');
+  assert.equal(d[4].id, 'AC-205');
 });
 
 test('DIVERGENCE_HANDLER_KIND: 第五类映射 none（落地替代者/人退役旧 AC 都不是 driver 一轮能做）', () => {
@@ -3671,4 +3720,63 @@ test('AC2 负控: 把声明块削成一句「见 readings」⇒ 释义与处置�
   const real = probeKeyBlock(META_DRIVER_SPEC, 'timeSeries');
   assert.ok(declarationDensity(real) >= 200);
   assert.ok(DISPOSITION_CHANNELS.some((c) => real.includes(c)));
+});
+
+// ── DivergenceKind ↔ probe 规格：每一个 kind 都必须在规格里被具名 ────────────────────────────────
+//
+// 缺陷形态（与上面的 readings 顶层键同形，只换了一维；tasks/gap-meta-active-but-failing）：
+// 给 `DivergenceKind` 加一个成员，而 `plugin/probes/meta-driver.md` 仍在教语义半「五类」「handler.kind
+// 只有这三种映射」——新 kind 就以【未声明的取值】抵达读者：读到了，但没有任何处置口径由它触发
+// （硬规则 3b 的反面：读者的词表里没有这个取值，它就无法区分「这是新读数」与「这是噪音」）。
+// `DIVERGENCE_HANDLER_KIND` 由 `Record<DivergenceKind, string>` 在类型层兜住；规格这一侧没有兜底，
+// 所以这里给一个。⛔ 成员清单【不写死】：从 `export type DivergenceKind` 的联合体按位置取
+// （写死清单会在下一次加 kind 时静默过期，而静默过期正是本缺陷的形态，硬规则 5b）。
+function divergenceKindMembers(src) {
+  const text = typeof src === 'string' ? src : '';
+  const at = text.indexOf('export type DivergenceKind');
+  if (at < 0) return null; // 读不出 ⇒ 未评估（⛔ 不与「没有缺声明」同形）
+  const kinds = [];
+  let closed = false;
+  for (const line of text.slice(at).split('\n').slice(1)) {
+    const m = line.match(/^\s*\|\s*"([a-z0-9-]+)"\s*(;?)\s*$/);
+    if (!m) continue;
+    kinds.push(m[1]);
+    if (m[2] === ';') { closed = true; break; }
+  }
+  // 没读到联合体结尾 / 一个成员都没读到 ⇒ 未评估，⛔ 不是「取全了」
+  return closed && kinds.length > 0 ? kinds : null;
+}
+
+test('DivergenceKind ↔ probe 规格: 每一个 kind 都在规格里被具名（清单取自类型联合，⛔ 非手写）', () => {
+  const kinds = divergenceKindMembers(META_DRIVER_SRC);
+  assert.notEqual(kinds, null, 'DivergenceKind 的成员清单必须能读出（⛔ 读不出不得当成「没有缺声明」）');
+  // 反空转：本任务新增的 kind 与五个既有 kind 都必须在清单里——否则「零缺声明」可能只是没取全
+  for (const k of ['active-but-failing', 'pass-but-unflipped', 'achieved-but-failing',
+    'no-criterion', 'not-evaluated', 'achieved-but-superseder-unmet']) {
+    assert.ok(kinds.includes(k), `从联合体取出的清单缺 ${k}：${kinds.join(',')}`);
+  }
+  const missing = kinds.filter((k) => !META_DRIVER_SPEC.includes(k));
+  assert.deepEqual(missing, [], `probe 规格里缺这些 divergence kind 的声明：${missing.join(',')}`);
+});
+
+test('DivergenceKind ↔ probe 规格 负控: 抹掉某个 kind 的全部提及 ⇒ 判据恰好点名它（判据能取假）', () => {
+  const kinds = divergenceKindMembers(META_DRIVER_SRC);
+  assert.notEqual(kinds, null);
+  for (const kind of kinds) {
+    // ⛔ 只删一处是不够的：同名的另一处提及（handler.kind 清单、输出 schema）会满足 `includes`，
+    //    那样负控永远取不到假，等于没做负控（同 specWithoutDeclaration 的道理）。
+    const damaged = META_DRIVER_SPEC.split(kind).join('〔removed〕');
+    assert.deepEqual(kinds.filter((k) => !damaged.includes(k)), [kind],
+      `抹掉 ${kind} 的全部提随后判据必须恰好点名它（否则这一条与「恒绿」同形）`);
+  }
+  // 另一个方向：原规格必须判绿——两个方向都断，防「判据恒红」这种同样无信息的形态
+  assert.deepEqual(kinds.filter((k) => !META_DRIVER_SPEC.includes(k)), []);
+});
+
+test('DivergenceKind ↔ probe 规格 未评估态: 联合体读不出 / 规格为空 ⇒ null（⛔ 不与「取全了」同形）', () => {
+  assert.equal(divergenceKindMembers('no such type here'), null);
+  assert.equal(divergenceKindMembers(''), null);
+  assert.equal(divergenceKindMembers(null), null);
+  // 有开头但没有结尾的 ';'（读了一半）⇒ 未评估，⛔ 不许把半份清单当成「取全了」
+  assert.equal(divergenceKindMembers('export type DivergenceKind =\n  | "a"\n  | "b"'), null);
 });
