@@ -125,6 +125,52 @@ STATIC_CHECK_FAILED: checker-mutation-check exit=1
 「一个测试都没跑」而不是「suite 跑到一半丢了」。把它记成「recovery 耗尽」会把一个**确定性**的静态红
 误判成**负载抖动**，于是 recovery 每一档都注定复现同一个红。
 
+### 2026-11-08 · 第 3 轮：同一缺陷的另外两个站点（硬规则 5b）
+
+第 2 轮的红报的是 `step=suite: oom-killed (2)`，且 recovery 红集**新增**
+`plugin/test/freshness-distance-counting.test.mjs`。逐字读该轮 suite log
+（`.quay/fan-in-suite-gap-routine-semantic-dedup-scan-hand-rolled-directory-walkers~wk-prod-anchor~1794130958100-b9632c.log`）
+后，红不是一个，而是**同一根因的另外两个站点** —— 第 2 轮只修了 `checker-mutation-cases/*.sh`，
+而「把实现 cp 进临时目录再执行」的写法在别处还有。**修好一处 ≠ 只在一处**（硬规则 5b）。
+
+1. `plugin/test/freshness-distance-counting.test.mjs`（suite 记录里那条 added）
+   - 两处把 `freshness-producer-coverage-check.ts`（含变异体）写进 tmp 目录后**执行**，依赖靠**手写清单**只 cp 了
+     `gate-script-base.ts` / `source-text-lib.ts`。本轮该 impl 新增 `import … "./fs-walk.ts"`
+     ⇒ `ERR_MODULE_NOT_FOUND` ⇒ 变异体根本没跑起来。
+   - **失败形态正是硬规则 3b 的镜子**：arm ③ 的断言是「变异后必须读回 phantom 3」，而报错文本是
+     `mutant CLI failed: … ERR_MODULE_NOT_FOUND` —— 一个**坏掉的夹具**戴着「判据没生效」的形状，
+     与「checker 抓不到缺陷」同形。
+   - 修法：新增 `copyLocalImportClosure()`，从 entry 自身 `^\s*import … "./x.ts"` 递归取传递闭包，
+     替掉两处手写 `copyFileSync` 清单。
+2. `plugin/test/select-static-checks-for-touches.test.mjs`（suite 记录里**没有**，是本轮扫描补出来的）
+   - 它把 `capability-catalog.ts` cp 进夹具根后跑 `bash capability-catalog.sh --json`，手写清单只补了
+     `repo-root.ts` / `.sh` / declarations ⇒ 同样缺 `fs-walk.ts`。
+   - **这里的伪装更彻底**：该测试的 AC2 断言是「catalog 必须 exit 非零」，而模块解析失败**也**是非零
+     ⇒ `assert.notEqual(gate.status, 0)` **通过**，直到下一行 `JSON.parse(gate.stdout)` 才炸。
+     若不修，将来任何一次「把解析改成宽松兜底」都会让它变成一个**永远绿**的假判据。
+   - 修法：新增 `copyModuleWithImports()`（同一条传递闭包规则），替换手写清单。
+
+**站点清点（硬规则 5b 的产物：命中数 + 前 3 条）**：全仓 `copyFileSync`/`cp` 且文件含本 delta 8 个模块名的
+载体共 **7** 个；其中**真的把模块 cp 进夹具并执行**的 3 个即上表 2 条 + 第 2 轮已修的 2 个 `.sh`；
+另外 3 个是**整目录**复制（`archive-exclusion-wiring.test.mjs` 复制整个 `plugin/scripts`、
+`capability-catalog.test.mjs` 复制 `derivedScripts()` 全集 ⇒ `fs-walk.ts` 天然在内），
+`worker-driver.test.mjs` 那条复制的是 `packages/quay/src/**`，与本 delta 无关；
+`driver-cli.test.mjs` 的 `KERNEL_DEPS` 虽同样是手写传递闭包，但 `driver-runtime.ts` 本轮**未**新增局部 import
+（`listSharedHostScopes` 按上表刻意留在原地）⇒ 它今天不断，**但它和上面是同一种债**，见范围外观察。
+
+**实跑读数（本 worktree）**：
+
+- `node --test plugin/test/freshness-distance-counting.test.mjs`：`pass 9 / fail 2` → **`pass 11 / fail 0`**
+  （arm ③ 与 arm ⑤ 由红转绿，且是**真的跑到变异体**，不是把断言放宽）
+- `node --test plugin/test/select-static-checks-for-touches.test.mjs`：`SyntaxError: Unexpected end of JSON input`
+  → **`pass 29 / fail 0`**
+- 负控制（能取假）：把 `copyLocalImportClosure` 临时改成空操作，arm ③ 立刻回到 `ERR_MODULE_NOT_FOUND`
+  —— 即这两处修复**确实**是它们转绿的原因，不是别的改动顺带盖住的。
+
+**范围外观察（⛔ 本任务未处置）**：`driver-cli.test.mjs` 的 `KERNEL_DEPS` 是一份**手写传递闭包**，与本轮修的
+三处同源；它今天没断只因 `driver-runtime.ts` 本轮没长新 import。它不在本任务 `## Touches` 内，
+故只记录不处置 —— 若要收口，需另立 finding。
+
 ## Touches
 - `plugin/scripts/fs-walk.ts`
 - `plugin/scripts/capability-catalog.ts`
@@ -136,6 +182,8 @@ STATIC_CHECK_FAILED: checker-mutation-check exit=1
 - `plugin/scripts/task-file-bypass-check.ts`
 - `plugin/scripts/checker-mutation-cases/capability-catalog.sh`
 - `plugin/scripts/checker-mutation-cases/rhythm-consumer-check.sh`
+- `plugin/test/freshness-distance-counting.test.mjs`
+- `plugin/test/select-static-checks-for-touches.test.mjs`
 - `tasks/gap-routine-semantic-dedup-scan-hand-rolled-directory-walkers.md`
 
 ## Blocker
