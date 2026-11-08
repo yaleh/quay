@@ -3,7 +3,7 @@ id: gap-routine-architecture-analysis-mjs-primitives-outside-both-dependency-gra
 title: "architecture-analysis: The AC-916 guard's walkTs matches only /\\.ts$/
   and import-graph-check's candidate filter is `/\\.(ts|mts|cts)$/`, while 4
   runtime primitives exist as .mjs — s"
-status: ready
+status: done
 labels:
   - gap
   - routine-filed
