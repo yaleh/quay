@@ -164,8 +164,16 @@ STATIC_CHECK_FAILED: checker-mutation-check exit=1
   （arm ③ 与 arm ⑤ 由红转绿，且是**真的跑到变异体**，不是把断言放宽）
 - `node --test plugin/test/select-static-checks-for-touches.test.mjs`：`SyntaxError: Unexpected end of JSON input`
   → **`pass 29 / fail 0`**
-- 负控制（能取假）：把 `copyLocalImportClosure` 临时改成空操作，arm ③ 立刻回到 `ERR_MODULE_NOT_FOUND`
-  —— 即这两处修复**确实**是它们转绿的原因，不是别的改动顺带盖住的。
+- **负控制（能取假，实跑）**：把 `copyLocalImportClosure` 临时改成 `return`（空操作）后重跑，
+  arm ③ 与 arm ⑤ **双双回到红**，报错逐字复现修复前的形态
+  `ERR_MODULE_NOT_FOUND: Cannot find module '/tmp/ac214-9th-mutant-…/gate-script-base.ts'`
+  —— 即这两处转绿**确实**由传递闭包造成，不是别的改动顺带盖住的；随后文件按备份原样还原
+  （`git diff` 为空，负控制未进入提交）。
+- **scoped 门（与 driver fan-in 同一条命令）**：
+  `bash scripts/test.sh --for-task gap-routine-semantic-dedup-scan-hand-rolled-directory-walkers --allow-thin` ⇒ `EXIT=0`，
+  delta 内两个测试文件均在精选集内跑绿（`✔ AC2 — a task declaring a new script NOT in the catalog QUESTION table …`、
+  `✔ ④ a computed 0 is distinct from a null distance …`）。
+- **anti-drift（硬前置）**：`ANTI-DRIFT OK — 12 actual file(s), all within declared Touches (13 glob(s))`。
 
 **范围外观察（⛔ 本任务未处置）**：`driver-cli.test.mjs` 的 `KERNEL_DEPS` 是一份**手写传递闭包**，与本轮修的
 三处同源；它今天没断只因 `driver-runtime.ts` 本轮没长新 import。它不在本任务 `## Touches` 内，
