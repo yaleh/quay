@@ -3,7 +3,7 @@ id: gap-routine-architecture-analysis-ls-mutation-sandbox-misses-cross-tree-impo
 title: "architecture-analysis: buildSandbox(root,[target,test]) stages only `top
   = rel.split('/')[0]` of the two named paths (one line, :385), so any test that
   imports across a top-level b"
-status: ready
+status: done
 labels:
   - gap
   - routine-filed
