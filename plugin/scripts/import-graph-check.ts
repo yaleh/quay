@@ -49,6 +49,12 @@
 //   · 棘轮形态照 plugin/scripts/quay-init-closure-ratchet.ts：基线是数据文件 plugin/import-graph-baseline.json；
 //     读数 > 基线 ⇒ exit 1；同时【工作树基线的值相对 git HEAD 基线只许降不许升】（防止「调高基线」绕过）。
 //     bootstrap（HEAD 尚无该文件）以当前为基线并在输出里注明 headBaseline:"absent-bootstrap"。
+//   · 节点集范围（2026-11-08，routine finding `mjs-primitives-outside-both-dependency-graphs`）: `.mjs` 也是节点。
+//     原过滤器只收 `/\.(ts|mts|cts)$/`，而 4 个【运行时】原语就是 `.mjs`（`packages/quay/src/primitives/`
+//     下 delivery-audit / pty-frame / session-liveness / session-schema），其中 session-liveness 还跨包边界被
+//     `plugin/scripts/orphan-session-check.ts` import。把它们排除在外 ⇒ 三个量都是对一个【少了 4 个真实模块】
+//     的图的断言（硬规则 5：来源不完备就不能证明缺席）。声明文件 `.d.ts/.d.mts/.d.cts` 仍排除（无运行时边）。
+//     `.js` 仍是范围外，由 `notAnalyzed.js` 如实报数。
 //
 // CLI:
 //   node --experimental-strip-types plugin/scripts/import-graph-check.ts [<root>] [--json] [--selftest]
@@ -93,7 +99,9 @@ export interface ReverseEdge {
 }
 
 export interface NotAnalyzed {
-  mjs: number;
+  /** `.js` is the ONE extension still outside the node set. `.mjs` used to be listed here too; it is
+   *  now a node (see the candidate filter in `readImportGraph`) — a field counting zero-by-construction
+   *  would be a reading that cannot take a false value (硬规则 4), so it is gone rather than pinned at 0. */
   js: number;
 }
 
@@ -320,7 +328,10 @@ export function isExcludedPath(rel: string): boolean {
   if (rel.split("/").some((seg) => EXCLUDED_SEGMENTS.includes(seg))) return true;
   const base = rel.slice(rel.lastIndexOf("/") + 1);
   if (/\.(test|spec)\.[cm]?[jt]sx?$/.test(base)) return true;
-  if (/\.d\.ts$/.test(base)) return true;
+  // A declaration file carries no runtime edge. `.d.ts` was the only form excluded, while `.d.mts` /
+  // `.d.cts` matched the node filter through their `mts`/`cts` tails and entered the graph as ordinary
+  // modules — the same defect class as the `.mjs` blind spot this file now closes, one level down.
+  if (/\.d\.(ts|mts|cts)$/.test(base)) return true;
   return false;
 }
 
@@ -517,7 +528,7 @@ export function readImportGraph(root: string): GraphReading {
     reverseEdges: [],
     kernelChecked: false,
     kernelViolations: [],
-    notAnalyzed: { mjs: 0, js: 0 },
+    notAnalyzed: { js: 0 },
     dangling: [],
     retiredShimHits: [],
     retiredShimsChecked: false,
@@ -544,12 +555,17 @@ export function readImportGraph(root: string): GraphReading {
   }));
 
   const notAnalyzed: NotAnalyzed = {
-    mjs: tracked.filter((p) => p.endsWith(".mjs") && !isExcludedPath(p)).length,
     js: tracked.filter((p) => p.endsWith(".js") && !isExcludedPath(p)).length,
   };
 
   // ── node set (canonical, realpath-deduped) ──
-  const candidates = tracked.filter((p) => /\.(ts|mts|cts)$/.test(p) && !isExcludedPath(p));
+  // `.mjs` is IN the node set: 4 runtime primitives under `packages/quay/src/primitives/` are `.mjs`
+  // and carry live import edges (`observation.ts` → session-liveness/session-schema, `serve-send.ts` →
+  // delivery-audit, `orphan-session-check.ts` → session-liveness across the package boundary). Omitting
+  // them made every reading below a claim over a graph that dropped 4 real modules (硬规则 5: an
+  // incomplete source cannot prove absence). Declaration forms (`.d.ts/.d.mts/.d.cts`) are excluded by
+  // `isExcludedPath`, as they carry no runtime edge.
+  const candidates = tracked.filter((p) => /\.(ts|mts|cts|mjs)$/.test(p) && !isExcludedPath(p));
   const dangling: string[] = []; // tracked path with no readable target (a broken symlink — a real state)
   const repOf = new Map<string, string>(); // canonical node id → the tracked path that reads it
   const nodes = new Set<string>();
@@ -1219,7 +1235,7 @@ function reportReading(reading: GraphReading, v: RatchetVerdict | null, baseline
     `  kernelChecked=${reading.kernelChecked}` +
       (reading.kernelChecked ? ` (violations=${reading.kernelViolations.length})` : " (packages/quay/src/kernel/ absent — not conflated with 'checked and clean')"),
   );
-  console.log(`  notAnalyzed (tracked non-test, outside this checker's TS scope): mjs=${reading.notAnalyzed.mjs} js=${reading.notAnalyzed.js}`);
+  console.log(`  notAnalyzed (tracked non-test, outside the node set — .js only now that .mjs is a node): js=${reading.notAnalyzed.js}`);
   console.log(
     `  retiredShimsChecked=${reading.retiredShimsChecked} retiredShimHits=${reading.retiredShimHits.length}` +
       (reading.retiredShimHits.length > 0

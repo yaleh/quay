@@ -54,19 +54,40 @@ extra:
 
 ## AC
 
-- [ ] AC1（受控重放，真实记录）把真实载体按时间戳截成两个前缀（A 截止 `2026-11-07T20:45:16.160Z`，B 再包含到 `2026-11-08T08:57:05.523Z` 为止的记录），分别跑 `node --experimental-strip-types plugin/scripts/instrument-decay-check.ts --root <tmp> --carrier fan-in-step-trace.jsonl --json --no-block`：A 的 `decayedCount=0`，B 的 `decayedCount≥5` 且 `decayed[]` 含 `suite-end` / `baseline-red` / `develop-red-set` / `suite-mirror`。贴出两条命令、两个 `freshest` 与两段 `decayed[]`。判据可假：若载体被清空或记录缺 `ts`，读数改变。
-- [ ] AC2（第三态：静默期成因与写手腐烂分开）实现后，在同一份真实载体上贴出读数：`decayed[]` 中不含任何「`lastWrite` 早于最近一次 ≥`staleSeconds` 载体级静默起点、且静默结束后持续写入 < `staleSeconds`」的分组；这些分组出现在独立读数（`idleWindowExplained[]` 或等价命名，每条带 `idleWindow.from` / `to` / `ms`），`decayedCount` 不计它们，`healthyCount` 也不计它们；`--json` 与人面输出各贴一段。
-- [ ] AC3（负控制：写真手腐烂仍必须报）在 `plugin/test/instrument-decay-check.test.mjs` 增加一条对偶用例并贴出用例名：同一载体里一个分组停写、其它分组持续写且时间轴上没有 ≥`staleSeconds` 的间隔 ⇒ 该分组仍进 `decayed[]`。贴出该用例的红-绿：把新判据关掉时红、打开时绿。
-- [ ] AC4（自过期，裁定不是隐身衣）贴出一条用例与一次读数：静默结束后载体持续写满 `staleSeconds` 而该分组仍未写 ⇒ 它从 `idleWindowExplained[]` 回到 `decayed[]`（⛔ 不存在永久豁免）。
-- [ ] AC5（两条裁定，条件可证伪）在真实载体上跑 `baseline-red` / `develop-red-set` 的 `conditional-on-input` 条件命令：`exit 0` ⇒ `explained-absent`；负控制把窗口内任一 `suite-end ok:false` 视为「没有 incomplete」⇒ `exit 1` ⇒ 该组仍报 `rate-stopped`（贴出两个方向）。`suite-recovery-exhausted` 的 `rare-by-design` 声明带 `reviewAfter`，且 `adjudicated[]` 里逐组可见，`count` / `lastWrite` 为真实值。
-- [ ] AC6（读数面可见）`quality-gate-driver` 的 `InstrumentDecayFactValue` 与 `reason` 带上新读数的计数（与 `adjudicatedCount` 同规矩）；贴出一次真实 root 上的 `runInstrumentDecayRound`（`halted:true`、零 spawn）读数片段。
-- [ ] AC7（回归）`bash scripts/test.sh --for-task gap-instrument-decay-rate-stopped-blind-to-carrier-idle-window` 通过并贴出输出。
+- [x] AC1（受控重放，真实记录）把真实载体按时间戳截成两个前缀（A 截止 `2026-11-07T20:45:16.160Z`，B 再包含到 `2026-11-08T08:57:05.523Z` 为止的记录），分别跑 `node --experimental-strip-types plugin/scripts/instrument-decay-check.ts --root <tmp> --carrier fan-in-step-trace.jsonl --json --no-block`：A 的 `decayedCount=0`，B 的 `decayedCount≥5` 且 `decayed[]` 含 `suite-end` / `baseline-red` / `develop-red-set` / `suite-mirror`。贴出两条命令、两个 `freshest` 与两段 `decayed[]`。判据可假：若载体被清空或记录缺 `ts`，读数改变。
+  - 证据（2026-11-08T09:30Z）：前缀由真实载体按 `ts` 截取（A=26424 行 / B=26436 行，两前缀只差 12 条记录）。⚠️ 修复后同一前缀 B 产出的是 AC2 的读数，故 AC1 用 **develop 上的修复前版本**（`git show develop:plugin/scripts/instrument-decay-check.ts` → `/tmp/ac-idle-gap-instrument/prefix-detector/instrument-decay-check.ts`，1696 行）重放缺陷本身：`node --experimental-strip-types <pre-fix>/instrument-decay-check.ts --root /tmp/ac-idle-gap-instrument/prefix{A,B} --carrier fan-in-step-trace.jsonl --json --no-block`。
+  - A：`freshest=2026-11-07T08:35:15.946Z`、`totalRecords=25579`、`decayedCount=0`、`decayed=[]`。
+  - B：`freshest=2026-11-08T08:57:05.523Z`、`totalRecords=25591`、`decayedCount=6`：`suite-end rate-stopped 1329 last=2026-11-07T08:26:43.287Z`；`baseline-red 233 2026-11-06T22:53:49.018Z`；`suite-incomplete 131 2026-11-07T08:26:43.300Z`；`develop-red-set 51 2026-11-06T22:53:49.022Z`；`suite-recovery-exhausted 1 2026-11-06T13:27:15.265Z`；`suite-mirror 10 2026-11-07T08:35:15.303Z`。判据可假：唯一变化量是 `freshest`（多出的 12 条记录把参照推高 24.36h）。
+- [x] AC2（第三态：静默期成因与写手腐烂分开）实现后，在同一份真实载体上贴出读数：`decayed[]` 中不含任何「`lastWrite` 早于最近一次 ≥`staleSeconds` 载体级静默起点、且静默结束后持续写入 < `staleSeconds`」的分组；这些分组出现在独立读数（`idleWindowExplained[]` 或等价命名，每条带 `idleWindow.from` / `to` / `ms`），`decayedCount` 不计它们，`healthyCount` 也不计它们；`--json` 与人面输出各贴一段。
+  - 证据（修复后，同一前缀 B，`--now 2026-11-08T09:00:00.000Z` 受控重放）：`decayedCount=0`、`idleWindowExplainedCount=19`、`healthyCount=0`、`adjudicatedCount=4`。`carrier.idleWindows=[{from:2026-11-03T08:11:28.741Z,to:2026-11-04T08:41:42.686Z,ms:88213945},{from:2026-11-07T08:35:15.946Z,to:2026-11-08T08:57:02.581Z,ms:87706635}]`。`idleWindowExplained[]` 含 AC1 那 6 组：`suite-end(1329,last 2026-11-07T08:26:43.287Z,recoveryMs=177419)`、`baseline-red(233,2026-11-06T22:53:49.018Z)`、`develop-red-set(51,2026-11-06T22:53:49.022Z)`、`suite-incomplete(131)`、`suite-recovery-exhausted(1)`、`suite-mirror(10)`——每组都带 `idleWindow:{from,to,ms}`。
+  - 人面输出（同一命令不加 `--json`）：`INSTRUMENT-IDLE-WINDOW: .quay/fan-in-step-trace.jsonl — 19 group(s) with an undecidable cause (NOT counted as decay, NOT counted as healthy)` + 两行 `carrier idle window: … → … (24.36h)`；末行 `instrument-decay-check: ok — no instrument decay (0 carrier(s) healthy, 4 adjudicated (not decay), 19 undecidable (carrier-level idle window — not decay, not healthy), 0 uncovered)`。
+  - 实时载体（2026-11-08T09:24Z，真实墙钟）：`decayedCount=0`、`idleWindowExplainedCount=6`（`suite-skip` / `rerun` / `baseline-red-exempt` / `suite-recovery-certified` / `suite-recovery-new-regression` / `suite-recovery-exhausted`），`healthyCount` 不含该载体。
+- [x] AC3（负控制：写真手腐烂仍必须报）在 `plugin/test/instrument-decay-check.test.mjs` 增加一条对偶用例并贴出用例名：同一载体里一个分组停写、其它分组持续写且时间轴上没有 ≥`staleSeconds` 的间隔 ⇒ 该分组仍进 `decayed[]`。贴出该用例的红-绿：把新判据关掉时红、打开时绿。
+  - 用例名：`AC3/负控制 — 一个分组停写、载体时间轴上没有 ≥staleSeconds 的间隔 ⇒ 仍然报 rate-stopped（不得弄瞎）`（另有对偶半边 `AC3/负控制（另一半）— 静默开始时该组**已经**陈旧 ⇒ 静默解释不了它，照旧报腐烂`）。
+  - 红-绿（同一份 fixture，两份检测器）：`ac3-neg`（伴生每 4h 一笔、最大间隔 4h）⇒ 修复前 `decayedCount=1 decayed=["stopped-group"]`，修复后 `decayedCount=1 decayed=["stopped-group"] idleWindowExplained=[]`（判据没把检测器弄瞎）；`ac3-idle`（同一停止形状 + 一段 25h 静默）⇒ 修复前 `decayed=["stopped-group"]`（新用例此时红），修复后 `decayed=[] idleWindowExplained=["stopped-group"]`（绿）。
+- [x] AC4（自过期，裁定不是隐身衣）贴出一条用例与一次读数：静默结束后载体持续写满 `staleSeconds` 而该分组仍未写 ⇒ 它从 `idleWindowExplained[]` 回到 `decayed[]`（⛔ 不存在永久豁免）。
+  - 用例名：`AC4/自过期 — 恢复期写满 staleSeconds 而该组仍未写 ⇒ 从 idleWindowExplained[] 回到 decayed[]`（阈值两侧：静默结束 +24h−1s 仍解释，+24h 整即失效；另测「判定时刻早于载体最新记录」⇒ fail-closed 报腐烂）。
+  - 真实载体读数（同一前缀 B，只改 `--now`）：`--now 2026-11-08T09:00:00Z` ⇒ `idleWindowExplainedCount=19, decayedCount=0`；`--now 2026-11-09T08:57:03.000Z`（静默结束 +24h）⇒ `idleWindowExplainedCount=0, decayedCount=3`（`suite-end` / `suite-incomplete` / `suite-mirror`），另 20 条裁定恢复生效。
+- [x] AC5（两条裁定，条件可证伪）在真实载体上跑 `baseline-red` / `develop-red-set` 的 `conditional-on-input` 条件命令：`exit 0` ⇒ `explained-absent`；负控制把窗口内任一 `suite-end ok:false` 视为「没有 incomplete」⇒ `exit 1` ⇒ 该组仍报 `rate-stopped`（贴出两个方向）。`suite-recovery-exhausted` 的 `rare-by-design` 声明带 `reviewAfter`，且 `adjudicated[]` 里逐组可见，`count` / `lastWrite` 为真实值。
+  - 方向一（真实载体 prefixB）：`baseline-red => exit 0`、`develop-red-set => exit 0`（窗口 = 各组末次写入之后；每条 `suite-end ok:false` 都等到同 task 的 `suite-incomplete`）。
+  - 方向二（负控制：把窗口内第一条红 `2026-11-07T02:16:16.697Z`（task `gap-touches-parser-a-self-describing`）的 `suite-incomplete` 的 task 改掉 ⇒ 视作「这条红没有 incomplete」）：`baseline-red => exit 1`、`develop-red-set => exit 1`；检测器读数 `decayedCount=7`，`baseline-red` / `develop-red-set` 回到 `decayed[]`，`detail="condition command did not hold (exit 1) — the declared cause is gone; the absence is unexplained"`。
+  - `adjudicated[]`（prefixB @ `--now 2026-11-09T08:57:03Z`）：`baseline-red explained-absent exit=0 count=233 last=2026-11-06T22:53:49.018Z`、`develop-red-set explained-absent exit=0 count=51 last=2026-11-06T22:53:49.022Z`、`suite-recovery-exhausted rare-by-design reviewAfter=2026-11-22T00:00:00.000Z count=1 last=2026-11-06T13:27:15.265Z`。
+- [x] AC6（读数面可见）`quality-gate-driver` 的 `InstrumentDecayFactValue` 与 `reason` 带上新读数的计数（与 `adjudicatedCount` 同规矩）；贴出一次真实 root 上的 `runInstrumentDecayRound`（`halted:true`、零 spawn）读数片段。
+  - 证据（真实 root `/data/home/yale/work/quay`，`halted:true`，`nowMs=2026-11-08T09:40:00Z`，gap-worker 前缀若被 spawn 会写 marker）：`value.idleWindowExplainedCount: 6`、`value.decayedCount: 1`（无关的 `arch-cycle-history.jsonl stale-evaluated`）、`adjudicatedCount: 3`、`healthyCount: 3`、`spawns: 0`；`reason` 片段 `…; 6 undecidable (carrier-level idle window; not decay, not healthy, self-expires) — fan-in-step-trace.jsonl: suite-skip (idle 2026-11-07T08:35:15.946Z → 2026-11-08T08:57:02.581Z), …`；`value.carriers[].idleWindows` 与 `.idleWindowExplained[]` 都随 value 输出。`filings` 全部 `deferred/halted`。
+- [x] AC7（回归）`bash scripts/test.sh --for-task gap-instrument-decay-rate-stopped-blind-to-carrier-idle-window` 通过并贴出输出。
+  - 证据：`bash scripts/test.sh --for-task gap-instrument-decay-rate-stopped-blind-to-carrier-idle-window --allow-thin` ⇒ EXIT=0；`instrument-decay-check.test.mjs` 75/75、`quality-gate-driver.test.mjs` 120/120（scoped run 合计 `tests 195 pass 195 fail 0`）。另 `npx tsc --noEmit -p tsconfig.json` ⇒ 0。
 
 ## DoD
 
-- [ ] 真实载体上同时取到三种读数的证据：`decayed[]`（真腐烂仍被抓，AC3）、独立静默读数（AC2）、`adjudicated[]`（AC5）；三者互不冒充，且静默读数不计入健康载体数。
-- [ ] `scripts/test.sh --for-task <id>` EXIT=0；新用例在把新判据关掉时红、打开时绿（AC3/AC4 的红-绿都贴出）。
+- [x] 真实载体上同时取到三种读数的证据：`decayed[]`（真腐烂仍被抓，AC3）、独立静默读数（AC2）、`adjudicated[]`（AC5）；三者互不冒充，且静默读数不计入健康载体数。
+  - 证据：同一份 prefixB 在两个判定时刻读出三种互斥状态——恢复后 1min：`idleWindowExplained=19 / decayed=0 / adjudicated=4`；恢复后 24h：`idleWindowExplained=0 / decayed=3 / adjudicated=20`；`healthyCount=0`（带静默读数的载体不计健康）。
+- [x] `scripts/test.sh --for-task <id>` EXIT=0；新用例在把新判据关掉时红、打开时绿（AC3/AC4 的红-绿都贴出）。
+  - 证据：AC7（EXIT=0、195/195）；AC3 红-绿（`ac3-idle` 修复前 decayed / 修复后 idleWindowExplained）；AC4 阈值两侧读数。
 - [ ] 落地后下一次真实 `instrument_decay` 质量轮次的 `reason` / `value` 里可见静默读数与裁定计数（待外部）
+
+## Dark axis (ADR-007)
+
+- L_G archguard detect_cycles（package 粒度，scope `b4f87b21`，snapshot `generatedAt=2026-11-08T08:46:21.132Z`）：cycles=0, maxScc=1, evaluated=true —— 本次改动只在 `plugin/scripts` 与 `plugin/test`（判定逻辑 + 单测），未新增包级依赖边、未引入环。⚠️ 该快照早于 HEAD `4054407b`（staleness.status=stale），这是读数（`evaluated:true` 且带 staleness 标注），不是推断。
 
 ## Touches
 
