@@ -2,7 +2,7 @@
 id: gap-routine-semantic-dedup-scan-hand-rolled-directory-walkers
 title: "semantic-dedup-scan: Twelve hand-rolled readdirSync walkers; none
   imports fs-walk.ts walkFiles although the traversal skeleton is the same."
-status: ready
+status: done
 labels:
   - gap
   - routine-filed
