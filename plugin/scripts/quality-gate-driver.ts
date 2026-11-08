@@ -3241,6 +3241,10 @@ export interface InstrumentDecayFactValue {
   /** 生效中的裁定数（描述符声明且未过期、条件成立）。⛔ 不计入 decayedCount，但**必须**出现在
    *  reason 与 value 里——「已裁定例外」不得因为「不算腐烂」就从读数里消失。 */
   adjudicatedCount: number;
+  /** 第三态：成因与**载体级静默**不可区分（静默开始时该组还新鲜、且恢复期仍 < staleSeconds）。
+   *  ⛔ 与 decayedCount / healthyCount 都分开计数：它既没被证明腐烂，也没被证明健康（硬规则 3b）。
+   *  静默结束按墙钟走过 staleSeconds 后自动回到 decayed[]（不是永久豁免）。 */
+  idleWindowExplainedCount: number;
   healthyCount: number;
   uncoveredCount: number;
   uncovered: InstrumentDecayOutcome["uncovered"];
@@ -3251,6 +3255,9 @@ export interface InstrumentDecayFactValue {
     staleEvaluated: InstrumentDecayOutcome["carriers"][number]["staleEvaluated"];
     decayed: InstrumentDecayFinding[];
     adjudicated: InstrumentDecayAdjudicatedFinding[];
+    /** 载体记录时间轴上的静默段（≥staleSeconds）——第三态的成因读数。 */
+    idleWindows: InstrumentDecayOutcome["carriers"][number]["idleWindows"];
+    idleWindowExplained: InstrumentDecayOutcome["carriers"][number]["idleWindowExplained"];
   }>;
   filings: InstrumentDecayFiling[];
   reportOnly: true;
@@ -3439,6 +3446,7 @@ export async function runInstrumentDecayRound(
     evaluated: outcome.anyEvaluated,
     decayedCount: outcome.decayedCount,
     adjudicatedCount: outcome.adjudicatedCount,
+    idleWindowExplainedCount: outcome.idleWindowExplainedCount,
     healthyCount: outcome.healthyCount,
     uncoveredCount: outcome.uncoveredCount,
     uncovered: outcome.uncovered,
@@ -3449,6 +3457,8 @@ export async function runInstrumentDecayRound(
       staleEvaluated: c.staleEvaluated,
       decayed: c.decayed,
       adjudicated: c.adjudicated,
+      idleWindows: c.idleWindows,
+      idleWindowExplained: c.idleWindowExplained,
     })),
     filings,
     reportOnly: true,
@@ -3468,16 +3478,26 @@ export async function runInstrumentDecayRound(
       .join(", ");
     return `${outcome.adjudicatedCount} adjudicated (not decay; reviewAfter-bounded) — ${named}`;
   };
+  // 第三态读数：载体级静默让这些组的缺席与「整个管线停摆」不可区分。
+  // ⛔ 同样不得从 reason 消失，且⛔ 不得与 adjudicated 合并成一个计数（成因不同、失效条件不同）。
+  const idleWindowNote = (): string => {
+    if (outcome.idleWindowExplainedCount === 0) return "";
+    const named = outcome.carriers
+      .flatMap((c) => c.idleWindowExplained.map((e) => `${c.file}: ${e.group} (idle ${e.idleWindow.from} → ${e.idleWindow.to})`))
+      .join(", ");
+    return `${outcome.idleWindowExplainedCount} undecidable (carrier-level idle window; not decay, not healthy, self-expires) — ${named}`;
+  };
   if (outcome.decayedCount === 0) {
     const adj = adjudicatedNote();
-    const parts = [adj, coverage].filter((p) => p !== "");
+    const idle = idleWindowNote();
+    const parts = [adj, idle, coverage].filter((p) => p !== "");
     return { name, value, state: "verified", reason: parts.length > 0 ? `no instrument decay; ${parts.join("; ")}` : null };
   }
   const filed = filings.filter((f) => f.filing === "filed").length;
   const already = filings.filter((f) => f.filing === "already-filed").length;
   const deferred = filings.filter((f) => f.filing === "deferred").length;
   const named = [...pairMap.values()].map((p) => `${p.file}: ${p.kind} (${p.findings.length})`).join("; ");
-  const adj = adjudicatedNote();
+  const adj = [adjudicatedNote(), idleWindowNote()].filter((s) => s !== "").join("; ");
   return {
     name,
     value,

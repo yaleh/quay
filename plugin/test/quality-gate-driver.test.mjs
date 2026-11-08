@@ -3451,8 +3451,79 @@ test("runInstrumentDecayRound — 裁定过期 ⇒ 回到 instrument-dark 并重
 });
 
 
-test("runInstrumentDecayRound — clean carrier ⇒ verified, but uncovered carriers are NOT silently healthy", async (t) => {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "qg-decay-clean-"));
+// ── 形状 B 的第三态接进生产轮次（gap-instrument-decay-rate-stopped-blind-to-carrier-idle-window）──
+// 载体级静默（记录时间轴上 ≥staleSeconds 的间隔）让「某组停写」与「整个管线停摆」不可区分 ⇒ 该组
+// 进 idleWindowExplained[]：⛔ 不算腐烂、⛔ 也不算健康，但**计数必须进 reason 与 value**（否则
+// 「分不清」就从读数里消失了，硬规则 3b 的镜像）；静默结束按墙钟写满 staleSeconds 后自过期回腐烂。
+const IDLE_FROM = "2026-10-20T06:00:00.000Z";
+const IDLE_TO = "2026-10-21T07:00:00.000Z";
+const IDLE_NOW_MS = Date.parse("2026-10-21T08:00:00.000Z");
+const IDLE_EXPIRED_MS = Date.parse("2026-10-22T08:00:00.000Z");
+
+function idleManifest() {
+  return [{ file: "idle-trace.jsonl", groupBy: "step", expected: ["merge-develop"], shapeB: true, note: "fixture" }];
+}
+
+function writeIdleCarrier(dir) {
+  writeJsonl(dir, "idle-trace.jsonl", [
+    { event: "step-end", step: "stopped-group", ts: "2026-10-20T05:00:00.000Z" },
+    { event: "step-end", step: "merge-develop", ts: IDLE_FROM },
+    { event: "step-end", step: "merge-develop", ts: IDLE_TO },
+    { event: "step-end", step: "merge-develop", ts: "2026-10-21T07:30:00.000Z" },
+  ]);
+}
+
+test("runInstrumentDecayRound — 载体级静默 ⇒ verified，但 idleWindowExplainedCount 与 decayedCount 分开、且进 reason/value", async (t) => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "qg-decay-idle-"));
+  t.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
+  writeIdleCarrier(tmp);
+  const worker = makeGapWorker(tmp);
+  const fact = await runInstrumentDecayRound(tmp, instDecayOpts({
+    manifest: idleManifest(),
+    nowMs: IDLE_NOW_MS,
+    gapWorkerCmd: worker.cmd,
+    priorFilings: [],
+    roundLogPath: path.join(tmp, "quality-round.jsonl"),
+  }));
+
+  assert.equal(fact.state, "verified", "an undecidable cause is NOT decay ⇒ no filing round");
+  assert.equal(fact.value.decayedCount, 0);
+  assert.equal(fact.value.idleWindowExplainedCount, 1);
+  assert.equal(fact.value.adjudicatedCount, 0, "the third state is not an adjudication — two counts, two meanings");
+  assert.equal(fact.value.healthyCount, 0, "undecidable is NOT healthy (⛔ 第三态有自己的取值)");
+  assert.equal(worker.calls().length, 0, "zero spawns while the cause is undecidable");
+  // ⛔ 不得从读数里消失：reason 点名条数与分组，value.carriers 带整条读数（含静默段本身）。
+  assert.match(fact.reason, /1 undecidable \(carrier-level idle window/);
+  assert.match(fact.reason, /stopped-group \(idle 2026-10-20T06:00:00.000Z → 2026-10-21T07:00:00.000Z\)/);
+  const carrier = fact.value.carriers.find((c) => c.file === "idle-trace.jsonl");
+  assert.equal(carrier.decayed.length, 0);
+  assert.deepEqual(carrier.idleWindowExplained.map((e) => e.group), ["stopped-group"]);
+  assert.equal(carrier.idleWindowExplained[0].count, 1, "the real reading travels with the third state");
+  assert.deepEqual(carrier.idleWindows.map((w) => w.ms), [25 * 3_600_000]);
+});
+
+test("runInstrumentDecayRound — 恢复期写满 staleSeconds ⇒ 第三态自过期，回到 instrument-dark 并立案（⛔ 不是永久豁免）", async (t) => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "qg-decay-idle-exp-"));
+  t.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
+  writeIdleCarrier(tmp);
+  const worker = makeGapWorker(tmp);
+  const fact = await runInstrumentDecayRound(tmp, instDecayOpts({
+    manifest: idleManifest(),
+    nowMs: IDLE_EXPIRED_MS,
+    gapWorkerCmd: worker.cmd,
+    priorFilings: [],
+    roundLogPath: path.join(tmp, "quality-round.jsonl"),
+  }));
+
+  assert.equal(fact.state, "instrument-dark");
+  assert.equal(fact.value.idleWindowExplainedCount, 0, "the third state expires at staleSeconds of wall clock");
+  assert.equal(fact.value.decayedCount, 1);
+  assert.equal(fact.value.filings.length, 1);
+  assert.equal(fact.value.filings[0].key, "idle-trace.jsonl|rate-stopped");
+  assert.equal(worker.calls().length, 1);
+});
+
+test("runInstrumentDecayRound — clean carrier ⇒ verified, but uncovered carriers are NOT silently healthy", async (t) => {  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "qg-decay-clean-"));
   t.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
   writeJsonl(tmp, "arch-coverage-history.jsonl", [
     { ts: "2026-10-20T07:02:50.500Z", runner: "arch-coverage-report.ts", evaluated: true, languages: [] },
