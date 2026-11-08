@@ -49,7 +49,7 @@ Widen both walkers to /\.(ts|mts|mjs)$/ (excluding .d.mts/.d.ts) and add a fixtu
 - `plugin/scripts/import-graph-check.ts` 的节点过滤器 = `/\.(ts|mts|cts)$/` ⇒ 真实树读数 **files=563 edges=1752**，`.mjs` 只以 `notAnalyzed.mjs=83` 的形式出现在「范围外」计数里。
 - 4 个 `.mjs` 是**运行时**模块而非声明：`packages/quay/src/primitives/{delivery-audit,pty-frame,session-liveness,session-schema}.mjs`（同目录的 4 个 `.d.mts` 才是声明）。
 
-**处置：修掉**（不是「已有机制在管」）。changed surface 三处：
+**处置：修掉**（不是「已有机制在管」）。changed surface 四处：
 
 1. `walkTs` → `walkSources`：`/\.(ts|mts|mjs)$/`，排除 `/\.d\.(ts|mts|cts)$/`。
 2. `import-graph-check.ts` 节点过滤器：`/\.(ts|mts|cts|mjs)$/`。
@@ -58,11 +58,12 @@ Widen both walkers to /\.(ts|mts|mjs)$/ (excluding .d.mts/.d.ts) and add a fixtu
 
 **修复后读数（可复核，一条命令）**：
 
-- `node --experimental-strip-types plugin/scripts/import-graph-check.ts` ⇒ `files=639 edges=1837 (value 1673 / type 164)`、`valueSccs=0 typeSccs=0 reverseEdges=0`、exit 0（修复前 563/1752，三个棘轮量同为 0）。
+- `node --experimental-strip-types plugin/scripts/import-graph-check.ts` ⇒ `files=639 edges=1838 (value 1674 / type 164)`、`valueSccs=0 typeSccs=0 reverseEdges=0`、exit 0（merge develop 前的一次同命令读数是 1837 边；修复前 563 节点 / 1752 边，三个棘轮量同为 0）。
   ⛔ **如实归因**：今天**没有**环被藏住，被修的是不变量的**覆盖范围**（finding 的 verdict 原文即「no cycle is hidden today, but the invariant does not cover 4 live files」）。三个量从 0 到 0 是**预期**，不是「没修成」。
 - 4 个原语现在是节点，且与外部共有 **7** 条可解析边：1 条发出（`delivery-audit.mjs:20 → pty-frame.mjs`）+ 6 条来自外部。6 条中 3 条在 `packages/quay/src/`（`observation.ts:67`、`:68`、`serve/io/serve-send.ts:53`），3 条在 `plugin/scripts/` —— finding 只列了 `orphan-session-check.ts:51`，实测还有 `inner-blocked-signal.ts:149` 与 `peer-identity-probe.ts:32`（同一跨包边界，finding 漏报）。
 - `node --test packages/quay/test/directory-cycle.test.mjs` ⇒ **7/7 pass**（`arm 1b` 直接读生产载体：真实树 walk 到那 4 个 `.mjs`，且没有任何 `.d.*` 混入）。
 - `node --test plugin/test/import-graph-check.test.mjs` ⇒ **33/33 pass**。
+- `bash scripts/test.sh --for-task gap-routine-architecture-analysis-mjs-primitives-outside-both-dependency-graphs --allow-thin` ⇒ **208/208 pass, exit 0**（fan-in 的同一个 scoped 门，在已 merge develop 的工作树上跑）。
 
 **判据能取假（负控制，先红后绿）**。新增的 4 条断言全部先在**修复前的代码**上实跑过并失败，再在修复后转绿：
 
@@ -77,7 +78,7 @@ Widen both walkers to /\.(ts|mts|mjs)$/ (excluding .d.mts/.d.ts) and add a fixtu
 
 **ADR-007 暗轴记录**
 
-- L_D import-graph-check (2026-11-08, .mjs 已入节点集): files=639 edges=1837 valueSccs=0 typeSccs=0 reverseEdges=0
+- L_D import-graph-check (2026-11-08, .mjs 已入节点集): files=639 edges=1838 valueSccs=0 typeSccs=0 reverseEdges=0
 - L_G archguard: cycles=0 （沿用本仓既有 readings；本任务未改 archguard 侧，其 sourceFiles vs `git ls-files` 对账差异仍由 `archguard-runner.ts` 如实点名，未静默吞）
 
 ## AC
