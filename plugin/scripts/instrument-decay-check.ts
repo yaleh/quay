@@ -20,6 +20,22 @@
 // 伴生对照是结构性的防误报：一个单分组（或全分组同旧）的载体，其唯一分组就是它自己的「最新」，
 // 结构上不可能满足「比某个伴生分组更旧」⇒ 永不误报（AC2 反向判据）。
 //
+// 形状 B 的**第三态**：载体级静默期（gap-instrument-decay-rate-stopped-blind-to-carrier-idle-window）。
+//   Shape B 的参照量 `freshest` 由**同一个载体的写手**产生 ⇒ 整个管线停摆时它跟着一起停（硬规则 4b：
+//   由被测对象自己产生的量不能用来判断被测对象是否活着）。于是恢复轮写下的第一条记录会把 `freshest`
+//   一次推高整个静默时长，而**静默前仍是新鲜的**分组（前一次落地的收尾步）同时越线 ⇒ 五个写手看起来
+//   同时腐烂，实则一个都没停。反过来静默期内读数干净（`freshest` 也停着），两个方向都不反映写手状态。
+//   修法：先算载体的**记录时间轴**上 ≥staleSeconds 的间隔（`idleWindows`）；某分组的末次写入若落在
+//   某间隔起点之前 staleSeconds 以内（静默开始时它还新鲜），且该间隔结束后经过的时间仍 <staleSeconds，
+//   则该组的 `rate-stopped` **成因无法与「整个管线停摆」区分** ⇒ 进 `idleWindowExplained[]`：
+//     • ⛔ 不计入 `decayedCount`（它没被证明是腐烂），
+//     • ⛔ 也不计入 `healthyCount`（它也没被证明健康——第三态必须有自己的取值，硬规则 3b）。
+//     • ⛔ **自过期**：静默结束后按**墙钟**（`nowMs`，不是载体自报的量）走过 staleSeconds，该组若仍未写
+//       ⇒ 自动回到 `decayed[]`。不存在永久豁免：`nowMs` 是外部直接量，停摆冻不住它。
+//     • 负控制：某组停写而载体时间轴上**没有** ≥staleSeconds 的间隔 ⇒ 照旧报 `rate-stopped`（不得弄瞎）。
+//   与裁定的先后：先判静默期，再判裁定。裁定断言的是**某个具体成因**（罕见路径/输入不可达），而在静默
+//   期里检测器还分不清成因是哪一类 ⇒ 先报「分不清」，静默期过后各条裁定照常生效（⛔ 两者互不冒充）。
+//
 // 形状 B 的裁定（adjudication，gap-fan-in-step-trace-rate-stopped-adjudication）：
 //   Shape B 只能看见「末次写入太旧」，它无法区分【按设计罕见/条件性不可达】与【写手腐烂】——两者
 //   在输出上同形（硬规则 3b）。描述符因此可以携带**机器可读**的裁定声明（`adjudicated`）：
@@ -47,11 +63,13 @@
 // ⛔ 不改本文件的判定逻辑（AC4 负控制测的就是这一点）。
 //
 // 用法:
-//   instrument-decay-check.ts [--root <dir>] [--stale-seconds <n>] [--carrier <file>] [--no-block] [--json] [--help]
+//   instrument-decay-check.ts [--root <dir>] [--stale-seconds <n>] [--carrier <file>] [--now <iso>] [--no-block] [--json]
 //     --root DIR          workspace root（默认：本脚本位置自动推导）。接 run_operational_checks 时传
 //                         main_root——.quay/*.jsonl 是主检出 gitignored 运行时态，verify worktree 无。
 //     --stale-seconds N   Shape B 伴生陈旧间隔秒（默认 86400 = 24h）。只影响形状 B。
 //     --carrier FILE      只检一个载体（basename 或 .quay/ 下相对路径）。
+//     --now ISO           判定时刻（默认墙钟）。受控重放用：第三态的自过期读的是「静默结束 → 判定时刻」
+//                         的墙钟时长，钉住它才能让同一份载体在任何一天复现同一条读数。
 //     --no-block          REPORT-ONLY：仍打印腐烂清单但 exit 0（接 run_operational_checks 的常驻路径）。
 //                         默认（不带）fail-closed：有腐烂 exit 1。
 //     --json              机器可读 JSON（与 --no-block 正交）。
@@ -407,6 +425,38 @@ export const SUITE_RERUN_GREEN_CONDITION_CMD =
   `else{for(const r of rerun)if(r.state!=="rerun-red"&&r.state!=="rerun-not-evaluated")process.exit(1)}` +
   `process.exit(0)'`;
 
+/** suite 红轮**没有**进入恢复阶梯时的 A/B 条件读数（gap-instrument-decay-rate-stopped-blind-to-
+ *  carrier-idle-window，本任务为 `baseline-red` / `develop-red-set` 新增）。
+ *
+ *  两个写手都在 `runBaselineEquivalence` 里（`worker-fan-in.ts:3295` / `:3456`），而该函数只在**普通红**
+ *  路径上被调用（调用点 `:4108`）：带 `SUITE-INCOMPLETE` 标记的红轮在 `:3823` 就走恢复阶梯，根本不进
+ *  这个函数 ⇒ 窗口内每条红都等到了同 task 的 `suite-incomplete` ⇒ 该组缺席是结构性的。
+ *
+ *  条件读的是【窗口内红轮的形态】，⛔ 不是「本组多久没写」的二次包装：
+ *    ① 窗口 = 本组末次写入之后；窗口内必须 ≥1 条记录（⛔ 载体在本组之后一笔都没有 = loop 死，空转
+ *       真值不是测量，exit 1）；
+ *    ② 窗口内每一条 `suite-end ok:false` 都必须等到**同 task** 的一条 `suite-incomplete`（ts 在其后）。
+ *       出现一条没有 incomplete 的红（本该走到 A/B 却没有）⇒ exit 1 ⇒ 该组仍报腐烂。
+ *  ⛔ 与检测器同口径排除 kind=goal-merge（那不是任务 fan-in 的步骤链）。 */
+export function suiteRedGoesToRecoveryConditionCmd(group: string): string {
+  const G = JSON.stringify(group);
+  return (
+    `node -e 'const fs=require("fs");const R=[];` +
+    `for(const l of fs.readFileSync(".quay/fan-in-step-trace.jsonl","utf8").split("\\n")){` +
+    `if(!l.trim())continue;let r;try{r=JSON.parse(l)}catch{continue}` +
+    `if(r.kind==="goal-merge")continue;R.push(r)}` +
+    `const G=${G};` +
+    `let last=null;` +
+    `for(const r of R)if(r.step===G&&r.ts&&(!last||r.ts>last))last=r.ts;` +
+    `if(!last)process.exit(1);` +
+    `const after=R.filter(r=>r.ts&&r.ts>last);` +
+    `if(after.length===0)process.exit(1);` +
+    `for(const r of after)if(r.step==="suite-end"&&r.ok===false){` +
+    `if(!after.some(c=>c.step==="suite-incomplete"&&c.task===r.task&&c.ts&&c.ts>r.ts))process.exit(1)}` +
+    `process.exit(0)'`
+  );
+}
+
 export const MANIFEST: CarrierSpec[] = [
   {
     file: "fan-in-step-trace.jsonl",
@@ -683,6 +733,47 @@ export const MANIFEST: CarrierSpec[] = [
         conditionCmd: BASELINE_RED_EXEMPT_TRIGGER_CMD,
         reviewAfter: "2026-11-22T00:00:00.000Z",
       },
+      // ── 3 条新增（gap-instrument-decay-rate-stopped-blind-to-carrier-idle-window）──────────────────
+      //    `baseline-red` / `develop-red-set` 的写手都在 `runBaselineEquivalence` 内，而带 SUITE-INCOMPLETE
+      //    标记的红轮在 `:3823` 就走恢复阶梯、根本不调用它（A/B 的调用点在 `:4108`）⇒ 输入不可达。
+      //    2026-11-08 实读：该组末次写入之后的 **6/6** 条 `suite-end ok:false` 都等到同 task 的
+      //    `suite-incomplete`（缺它的 = 0）⇒ 结构性缺席，不是写手停摆。
+      //    ⛔ 这与「静默期第三态」是两件事：第三态说「当下分不清」，裁定说「触发输入没到」。第三态先判，
+      //    静默期过后这两条裁定才轮到（见头注）。
+      {
+        group: "baseline-red",
+        kind: "conditional-on-input",
+        reason:
+          "写手 worker-fan-in.ts:3295 在 runBaselineEquivalence 内（A/B 等效性比较），该函数只在**普通红**" +
+          "路径被调用（:4108）；带 SUITE-INCOMPLETE 标记的红轮在 :3823 就走恢复阶梯、根本进不到它 ⇒ A/B " +
+          "结构上不可达。2026-11-08 实读：本组末次写入之后的 6/6 条 suite-end ok:false 都等到同 task 的 " +
+          "suite-incomplete（缺它的 = 0）。条件读的是【窗口内红轮的形态】：出现一条没有 incomplete 的红" +
+          "（本该走到 A/B）⇒ 本裁定立即失效、回到 decayed[]。⛔ 不是「本组多久没写」的二次包装。",
+        conditionCmd: suiteRedGoesToRecoveryConditionCmd("baseline-red"),
+        reviewAfter: "2026-11-22T00:00:00.000Z",
+      },
+      {
+        group: "develop-red-set",
+        kind: "conditional-on-input",
+        reason:
+          "写手 worker-fan-in.ts:3456，与 baseline-red 在**同一个** runBaselineEquivalence 里（:3295 写 baseline-red、" +
+          ":3456 写 develop-red-set）⇒ 同生同灭：带 SUITE-INCOMPLETE 标记的红轮在 :3823 走恢复阶梯、不调用该" +
+          "函数，两组的触发一起不可达。2026-11-08 实读：末次写入后的每一条 suite-end ok:false 都有同 task 的" +
+          "suite-incomplete。条件与 baseline-red 同一条读数（窗口内红轮是否都进了恢复阶梯），⛔ 不是「本组" +
+          "多久没写」。",
+        conditionCmd: suiteRedGoesToRecoveryConditionCmd("develop-red-set"),
+        reviewAfter: "2026-11-22T00:00:00.000Z",
+      },
+      {
+        group: "suite-recovery-exhausted",
+        kind: "rare-by-design",
+        reason:
+          "写手 worker-fan-in.ts:3862，只在恢复阶梯**耗尽**时写——即原轮并发已降到地板 16" +
+          "（SUITE_RECOVERY_CONCURRENCY_LADDER=[64,48,32,16]，recoveryConcurrencySteps 返回空 ⇒ :3860 分支）。" +
+          "全历史 1 条（2026-11-06T13:27:15.265Z）⇒ 按设计罕见，写手路径仍在（阶梯每次降档/耗尽都由同一段" +
+          "代码写 suite-recovery / suite-recovery-blocked，2026-11-08T09:18Z 仍在写）。不是腐烂。",
+        reviewAfter: "2026-11-22T00:00:00.000Z",
+      },
     ],
     note:
       "worker-driver.ts 机械 fan-in 步骤链。前 8 个经 step()/appendFanInStepTrace 写共享载体；" +
@@ -823,6 +914,34 @@ export interface Companion {
   lastWriteMs: number | null;
 }
 
+/** 载体记录时间轴上一段 ≥staleSeconds 的静默（两笔相邻记录之间的间隔）。
+ *
+ *  ⛔ 这是**成因读数**，不是腐烂：它回答「载体整体有没有停过」，而 Shape B 回答「某组比伴生组旧」。
+ *  两者叠在一起时，后者无法区分「这一组停了」与「整个管线停了」。 */
+export interface IdleWindow {
+  /** 静默段起点 = 间隔前那一笔记录的时刻。 */
+  fromMs: number;
+  /** 静默段终点 = 间隔后那一笔记录的时刻（恢复轮的第一笔）。 */
+  toMs: number;
+  ms: number;
+}
+
+/** 第三态：`rate-stopped` 命中，但成因无法与「载体级静默」区分。
+ *
+ *  ⛔ 不计入 `decayedCount`，⛔ 也不计入 `healthyCount`（「没被证明腐烂」与「被证明健康」是两件事）。
+ *  ⛔ 自过期：`recoveryMs`（静默结束至今的**墙钟**时间，不是载体自报的量）达到 staleSeconds 即失效，
+ *  该组自动回到 `decayed[]`——不是永久豁免。 */
+export interface IdleWindowExplainedFinding {
+  group: string;
+  count: number;
+  lastWriteMs: number | null;
+  /** 解释它的那段载体级静默（ISO 串便于人面阅读；`ms` 是原始间隔）。 */
+  idleWindow: { from: string | null; to: string | null; ms: number };
+  /** 静默结束 → 判定时刻的墙钟毫秒。≥ staleSeconds ⇒ 不再解释。 */
+  recoveryMs: number;
+  reason: string;
+}
+
 /** 形状 C 的四态（⛔ 不用布尔：读不懂/冷启动不得与「健康」同形——硬规则 3b）。 */
 export type ShapeCState = "dark" | "healthy" | "not-applicable" | "not-evaluated";
 
@@ -912,6 +1031,10 @@ export interface CarrierResult {
   decayed: DecayFinding[];
   /** 生效中的裁定（Shape B 命中但被解释）。⛔ 不计入 decayed，但必须可见。 */
   adjudicated: AdjudicatedFinding[];
+  /** 载体级静默段（记录时间轴上 ≥staleSeconds 的间隔）。⛔ 不是腐烂，是第三态的成因读数。 */
+  idleWindows: IdleWindow[];
+  /** 第三态：成因无法与载体级静默区分的 `rate-stopped` 分组。⛔ 不计 decayed，⛔ 也不计 healthy。 */
+  idleWindowExplained: IdleWindowExplainedFinding[];
   companions: Companion[];
   /** 形状 C（内容全暗）读数——`not-applicable` 是描述符的声明，不是「查不到」。 */
   contentDark: ShapeCReading;
@@ -1259,6 +1382,62 @@ export function evaluateAdjudication(
 }
 
 // ── 单载体分析 ──────────────────────────────────────────────────────────────────────────────────────
+/** 载体记录时间轴上 ≥staleSeconds 的静默段（成因读数，见头注「形状 B 的第三态」）。
+ *
+ *  ⛔ 只在 Shape B 开着时计算（`--stale-seconds 0` / `shapeB:false` 的载体不产生这个读数）：
+ *  没有阈值就没有「静默」这个量，凭空给一个 0 会把「不适用」伪装成「没有静默」（硬规则 3b）。
+ *  ⛔ 记录时刻读不出的行不参与（缺值 = 未查，硬规则 6）：它们既不算静默的起点，也不算终点。 */
+export function computeIdleWindows(records: Record<string, unknown>[], staleSeconds: number): IdleWindow[] {
+  if (staleSeconds <= 0) return [];
+  const gapMs = staleSeconds * 1000;
+  const ts: number[] = [];
+  for (const r of records) {
+    const t = extractTsMs(r);
+    if (t !== null) ts.push(t);
+  }
+  ts.sort((a, b) => a - b);
+  const out: IdleWindow[] = [];
+  for (let i = 1; i < ts.length; i++) {
+    const fromMs = ts[i - 1];
+    const toMs = ts[i];
+    if (toMs - fromMs >= gapMs) out.push({ fromMs, toMs, ms: toMs - fromMs });
+  }
+  return out;
+}
+
+/** 该分组的 `rate-stopped` 成因能否与载体级静默区分？给出解释它的那段静默 + 恢复期时长。
+ *
+ *  三个条件同时成立才算「分不清」（缺一即照常报腐烂，见头注）：
+ *    ① 某段静默的起点 ≥ 该组末次写入（该组在静默开始那一刻已经不再写）；
+ *    ② 静默起点 − 末次写入 ≤ staleSeconds（**静默开始时它还新鲜**——否则它在静默前就已经陈旧，
+ *       静默不是它缺席的解释，那种情况必须照常报腐烂）；
+ *    ③ 静默终点 → `nowMs` 的墙钟时间 < staleSeconds（恢复期还太短，不足以区分；过了就自过期）。
+ *
+ *  ⛔ 参照量是 `nowMs`（墙钟），**不是**载体的 `freshest`：后者由被测写手产生，停摆时它也停
+ *  （硬规则 4b），用它做恢复期会让「恢复后立刻又死掉」变成永久豁免。
+ *  ⛔ 多段静默都满足 ①② 时取**最近一段**（`toMs` 最大）：成因的最近一次发生才是当下读数的对手方。 */
+export function findExplainingIdleWindow(
+  lastWriteMs: number | null,
+  windows: IdleWindow[],
+  staleSeconds: number,
+  nowMs: number,
+): { window: IdleWindow; recoveryMs: number } | null {
+  if (lastWriteMs === null || staleSeconds <= 0) return null;
+  const gapMs = staleSeconds * 1000;
+  let chosen: IdleWindow | null = null;
+  for (const w of windows) {
+    if (w.fromMs < lastWriteMs) continue;
+    if (w.fromMs - lastWriteMs > gapMs) continue;
+    if (chosen === null || w.toMs > chosen.toMs) chosen = w;
+  }
+  if (chosen === null) return null;
+  const recoveryMs = nowMs - chosen.toMs;
+  // 自过期。⛔ 负值同样不解释：判定时刻早于载体的最新记录（`--now` 落在数据之前的自相矛盾重放）时
+  // 没有「恢复期」这个量可言 ⇒ fail-closed 报腐烂，而不是把它当成「恢复期 0」悄悄豁免。
+  if (!(Number.isFinite(recoveryMs) && recoveryMs >= 0 && recoveryMs < gapMs)) return null;
+  return { window: chosen, recoveryMs };
+}
+
 export function analyzeCarrier(
   root: string,
   spec: CarrierSpec,
@@ -1267,7 +1446,8 @@ export function analyzeCarrier(
 ): CarrierResult {
   const empty: CarrierResult = {
     file: spec.file, evaluated: false, reason: "carrier-missing",
-    totalRecords: 0, freshestMs: null, groupCount: 0, decayed: [], adjudicated: [], companions: [],
+    totalRecords: 0, freshestMs: null, groupCount: 0, decayed: [], adjudicated: [],
+    idleWindows: [], idleWindowExplained: [], companions: [],
     contentDark: { state: "not-evaluated", records: 0, falseRecords: 0, reason: "carrier-missing", darkInterval: null },
     staleEvaluated: { state: "not-evaluated", reason: "carrier-missing", recordTs: null, recordStale: null, scopes: [], artifactIndependentScopes: [] },
   };
@@ -1311,11 +1491,33 @@ export function analyzeCarrier(
     if (typeof a.group === "string" && a.group !== "" && !adjudications.has(a.group)) adjudications.set(a.group, a);
   }
   const adjudicated: AdjudicatedFinding[] = [];
+  // 载体级静默段 + 第三态读数（只在 Shape B 适用时有意义，见 computeIdleWindows）。
+  const idleWindows = spec.shapeB !== false ? computeIdleWindows(records, staleSeconds) : [];
+  const idleWindowExplained: IdleWindowExplainedFinding[] = [];
   if (spec.shapeB !== false && freshestMs !== null && staleSeconds > 0) {
     const gapMs = staleSeconds * 1000;
     for (const [k, g] of groups) {
       if (g.count === 0 || g.lastWriteMs === null) continue;
       if (freshestMs - g.lastWriteMs > gapMs) {
+        // ① 先问「这一组的缺席是不是整个载体停过」——静默期内两种成因不可区分，先说分不清。
+        const idle = findExplainingIdleWindow(g.lastWriteMs, idleWindows, staleSeconds, nowMs);
+        if (idle !== null) {
+          idleWindowExplained.push({
+            group: k,
+            count: g.count,
+            lastWriteMs: g.lastWriteMs,
+            idleWindow: { from: fmt(idle.window.fromMs), to: fmt(idle.window.toMs), ms: idle.window.ms },
+            recoveryMs: idle.recoveryMs,
+            reason:
+              `carrier-level silence ${fmt(idle.window.fromMs)} → ${fmt(idle.window.toMs)} ` +
+              `(${(idle.window.ms / 3_600_000).toFixed(2)}h ≥ ${staleSeconds}s) and this group was still fresh when it began ` +
+              `(last=${fmt(g.lastWriteMs)}); only ${(idle.recoveryMs / 60_000).toFixed(1)}min of the recovery window have elapsed ` +
+              `(< ${staleSeconds}s) ⇒ the stop cannot be distinguished from a whole-pipeline stall — NOT decay, and NOT healthy; ` +
+              `it returns to decayed[] once the recovery window reaches ${staleSeconds}s`,
+          });
+          continue;
+        }
+        // ② 再问描述符有没有对这一组的机器可读裁定（具体成因，静默期过后才轮得到它）。
         const decl = adjudications.get(k);
         if (decl !== undefined) {
           const verdict = evaluateAdjudication(root, decl, g.count, g.lastWriteMs, nowMs);
@@ -1375,7 +1577,8 @@ export function analyzeCarrier(
 
   return {
     file: spec.file, evaluated: true, reason: null,
-    totalRecords, freshestMs, groupCount: groups.size, decayed, adjudicated, companions,
+    totalRecords, freshestMs, groupCount: groups.size, decayed, adjudicated,
+    idleWindows, idleWindowExplained, companions,
     contentDark, staleEvaluated,
   };
 }
@@ -1387,10 +1590,13 @@ export interface AnalyzeOutcome {
   decayedCount: number;
   /** 生效中的裁定总数。⛔ 与 decayedCount 分开计数——它们不是腐烂，但也不得消失。 */
   adjudicatedCount: number;
+  /** 第三态总数（成因与载体级静默不可区分）。⛔ 既不进 decayedCount，也不进 healthyCount。 */
+  idleWindowExplainedCount: number;
   /** 未覆盖的载体（⛔ 不计入 healthyCount）。 */
   uncovered: UncoveredEntry[];
   uncoveredCount: number;
-  /** 已登记、可评估、且没有任何腐烂读数的载体数。 */
+  /** 已登记、可评估、没有任何腐烂读数、也**没有**第三态读数的载体数。
+   *  ⛔ 带 `idleWindowExplained[]` 的载体不算健康：它没被证明腐烂，也没被证明健康（硬规则 3b）。 */
   healthyCount: number;
 }
 
@@ -1408,10 +1614,17 @@ export function analyzeAll(
   const anyDecayed = carriers.some((c) => c.decayed.length > 0);
   const decayedCount = carriers.reduce((n, c) => n + c.decayed.length, 0);
   const adjudicatedCount = carriers.reduce((n, c) => n + c.adjudicated.length, 0);
+  const idleWindowExplainedCount = carriers.reduce((n, c) => n + c.idleWindowExplained.length, 0);
   // --carrier 是聚焦查询：覆盖面对它不是读数（只报它自己），⛔ 不因此把整个 .quay 扫一遍。
   const uncovered = opts.carrier ? [] : discoverUncovered(root, manifest);
-  const healthyCount = carriers.filter((c) => c.evaluated && c.decayed.length === 0).length;
-  return { carriers, anyEvaluated, anyDecayed, decayedCount, adjudicatedCount, uncovered, uncoveredCount: uncovered.length, healthyCount };
+  // ⛔ 第三态既不是腐烂也不是健康（硬规则 3b）：带 idleWindowExplained[] 的载体不计入健康数。
+  const healthyCount = carriers.filter(
+    (c) => c.evaluated && c.decayed.length === 0 && c.idleWindowExplained.length === 0,
+  ).length;
+  return {
+    carriers, anyEvaluated, anyDecayed, decayedCount, adjudicatedCount, idleWindowExplainedCount,
+    uncovered, uncoveredCount: uncovered.length, healthyCount,
+  };
 }
 
 // ── 时间戳抽取（通用：按字段优先级尝试，缺值 = 未查）───────────────────────────────────────────────
@@ -1496,6 +1709,20 @@ function printHuman(outcome: AnalyzeOutcome): void {
       );
     }
   }
+  // 第三态：成因与载体级静默不可区分。⛔ 既不进腐烂清单，也不进健康数——但必须在读数面上。
+  for (const c of outcome.carriers) {
+    if (c.idleWindowExplained.length === 0) continue;
+    console.log(
+      `INSTRUMENT-IDLE-WINDOW: .quay/${c.file} — ${c.idleWindowExplained.length} group(s) with an ` +
+      `undecidable cause (NOT counted as decay, NOT counted as healthy)`,
+    );
+    for (const w of c.idleWindows) {
+      console.log(`  carrier idle window: ${fmt(w.fromMs)} → ${fmt(w.toMs)} (${(w.ms / 3_600_000).toFixed(2)}h)`);
+    }
+    for (const e of c.idleWindowExplained) {
+      console.log(`  undecidable: ${e.group} (last=${fmt(e.lastWriteMs)}, ${e.count} records) — ${e.reason}`);
+    }
+  }
   // 已结束的暗区间（AC1）：修复落地后当前不再判暗，但「曾经从哪条起暗了多少条」必须仍然可见。
   for (const c of outcome.carriers) {
     const iv = c.contentDark.darkInterval;
@@ -1512,7 +1739,11 @@ function printHuman(outcome: AnalyzeOutcome): void {
   }
   if (!outcome.anyDecayed) {
     const adj = outcome.adjudicatedCount > 0 ? `, ${outcome.adjudicatedCount} adjudicated (not decay)` : "";
-    console.log(`instrument-decay-check: ok — no instrument decay (${outcome.healthyCount} carrier(s) healthy${adj}, ${outcome.uncoveredCount} uncovered)`);
+    // ⛔ 第三态不得被折进「健康」的括号里（硬规则 3b）：它单独计数、单独命名。
+    const idle = outcome.idleWindowExplainedCount > 0
+      ? `, ${outcome.idleWindowExplainedCount} undecidable (carrier-level idle window — not decay, not healthy)`
+      : "";
+    console.log(`instrument-decay-check: ok — no instrument decay (${outcome.healthyCount} carrier(s) healthy${adj}${idle}, ${outcome.uncoveredCount} uncovered)`);
   }
 }
 
@@ -1564,6 +1795,16 @@ function printDecayReport(outcome: AnalyzeOutcome): void {
       count: a.count,
       lastWrite: fmt(a.lastWriteMs),
     })),
+    // 第三态：载体的静默段（成因读数）+ 因此无法判定的分组（⛔ 既不进 decayedCount，也不进 healthyCount）。
+    idleWindows: c.idleWindows.map((w) => ({ from: fmt(w.fromMs), to: fmt(w.toMs), ms: w.ms })),
+    idleWindowExplained: c.idleWindowExplained.map((e) => ({
+      group: e.group,
+      count: e.count,
+      lastWrite: fmt(e.lastWriteMs),
+      idleWindow: e.idleWindow,
+      recoveryMs: e.recoveryMs,
+      reason: e.reason,
+    })),
     companions: c.companions.map((cp) => ({
       group: cp.group,
       count: cp.count,
@@ -1577,6 +1818,7 @@ function printDecayReport(outcome: AnalyzeOutcome): void {
     evaluated: outcome.anyEvaluated,
     decayedCount: outcome.decayedCount,
     adjudicatedCount: outcome.adjudicatedCount,
+    idleWindowExplainedCount: outcome.idleWindowExplainedCount,
     healthyCount: outcome.healthyCount,
     uncoveredCount: outcome.uncoveredCount,
     uncovered: outcome.uncovered,
@@ -1591,11 +1833,11 @@ function printDecayReport(outcome: AnalyzeOutcome): void {
 // model (`main` catches and prefixes the message). `argv` is the WHOLE `process.argv` (the retired
 // loop started at index 2 precisely because of that) — the shared parser does the `slice(2)`.
 function parseArgs(argv: string[]): {
-  root?: string; staleSeconds: number; carrier?: string; noBlock: boolean; json: boolean; help: boolean;
+  root?: string; staleSeconds: number; carrier?: string; noBlock: boolean; json: boolean; help: boolean; now?: string;
 } {
   const parsed = baseParseArgs(argv, {
     minArgs: 0,
-    usage: "[--root <dir>] [--stale-seconds <n>] [--carrier <file>] [--no-block] [--json]",
+    usage: "[--root <dir>] [--stale-seconds <n>] [--carrier <file>] [--now <iso>] [--no-block] [--json]",
     help: "return",
     errors: "return",
     unknown: "reject",
@@ -1603,6 +1845,7 @@ function parseArgs(argv: string[]): {
       root: { type: "string" },
       "stale-seconds": { type: "string" },
       carrier: { type: "string" },
+      now: { type: "string" },
       "no-block": { type: "boolean" },
       json: { type: "boolean" },
     },
@@ -1620,10 +1863,17 @@ function parseArgs(argv: string[]): {
     if (!Number.isFinite(v) || v < 0) throw new Error("--stale-seconds must be a non-negative integer (seconds)");
     staleSeconds = v;
   }
+  // `--now` 是**受控重放**的判定时刻（第三态的自过期依赖墙钟：静默结束至今是否已写满 staleSeconds）。
+  // ⛔ 不给它一个静默默认值：读不懂 ⇒ usage error，绝不悄悄退回到 Date.now()。
+  const now = str(parsed.flags.now);
+  if (now !== undefined && !Number.isFinite(Date.parse(now))) {
+    throw new Error(`--now must be an ISO timestamp (got ${JSON.stringify(now)})`);
+  }
   return {
     root: str(parsed.flags.root),
     staleSeconds,
     carrier: str(parsed.flags.carrier),
+    now,
     noBlock: parsed.flags["no-block"] === true,
     json: parsed.flags.json === true,
     help: parsed.help === true,
@@ -1640,7 +1890,7 @@ export function main(argv: string[]): number {
   }
   if (opts.help) {
     console.log(
-      "instrument-decay-check.ts [--root <dir>] [--stale-seconds <n>] [--carrier <file>] [--no-block] [--json] — " +
+      "instrument-decay-check.ts [--root <dir>] [--stale-seconds <n>] [--carrier <file>] [--now <iso>] [--no-block] [--json] — " +
       "instrument-decay detector: A never-wrote / B rate-stopped (companion contrast, not absolute rate), " +
       "C content-dark (every record evaluated:false, reported as a start/count/ended interval), " +
       "D stale-evaluated (artifact predates the newest commit touching its covered source), " +
@@ -1649,6 +1899,11 @@ export function main(argv: string[]): number {
       "conditional-on-input with an executable conditionCmd); an adjudication older than its reviewAfter, " +
       "or with no reason, exempts nothing — those groups come back as decay. Adjudicated groups are reported " +
       "in their own `adjudicated[]` and never counted in decayedCount. " +
+      "Shape B ALSO reports a third state (`idleWindowExplained[]`): a group whose stop cannot be told apart " +
+      "from a carrier-level silence ≥ staleSeconds (it was still fresh when the silence began and the " +
+      "recovery window after it is shorter than staleSeconds). Those are counted as neither decay nor " +
+      "healthy, and they self-expire back into decayed[] once the recovery window reaches staleSeconds. " +
+      "--now <iso> pins the evaluation instant (deterministic replay; default: wall clock). " +
       "0 = no decay, 1 = decay, 2 = usage/env error, 3 = NOT-EVALUATED (no carrier evaluable)."
     );
     return 0;
@@ -1664,7 +1919,11 @@ export function main(argv: string[]): number {
     return 2;
   }
 
-  const outcome = analyzeAll(root, { staleSeconds: opts.staleSeconds, carrier: opts.carrier });
+  const outcome = analyzeAll(root, {
+    staleSeconds: opts.staleSeconds,
+    carrier: opts.carrier,
+    ...(opts.now !== undefined ? { nowMs: Date.parse(opts.now) } : {}),
+  });
 
   if (!outcome.anyEvaluated) {
     // 全部清单载体都缺文件（verify worktree 无主检出运行时态，或载体尚未产生）——无法评估 ≠ 无腐烂。
