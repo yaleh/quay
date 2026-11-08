@@ -140,9 +140,7 @@ STATIC_CHECK_FAILED: checker-mutation-check exit=1
 
 ## Blocker
 
-**2026-11-08T09:18:29.175Z — worker 未落地（exited-not-landed）**
+**2026-11-08T09:42:37.647Z — worker 未落地（exited-not-landed）**
 
-- 未落地原因：step=suite: incomplete suite (647/647 files) — recovery exhausted at floor concurrency 16 — no declared rung produced a complete verdict (16); needs a code/config fix, see plugin/scripts/full-suite-runner.ts
+- 未落地原因：step=suite: oom-killed (2) — recovery red set is NOT a subset of the develop baseline red set: added=plugin/test/freshness-distance-counting.test.mjs,plugin/test/freshness-distance-counting.test.mjs changed=- — needs a code fix
 - run_id：wk-prod-anchor
-- session_id：62b8d2a4-c07c-418c-8aba-f98ba11b9860
-- 真因与修复：见上方 `## Evidence`（静态闸两红，已修复，非 suite/并发问题）
