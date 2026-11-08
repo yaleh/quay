@@ -2,7 +2,7 @@
 id: gap-routine-semantic-dedup-scan-load-contract-byte-identical
 title: "semantic-dedup-scan: Byte-identical body except the error noun;
   stage-1/stage-2 siblings that already share routine-engine-module-loader."
-status: todo
+status: ready
 labels:
   - gap
   - routine-filed
