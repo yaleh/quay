@@ -112,3 +112,35 @@ PY
 - `packages/quay/src/action.ts`
 - `plugin/probes/architecture-analysis.md`
 - `tasks/gap-routine-architecture-analysis-archguard-root-bucket-fan-metrics-structurally-z.md`
+
+## Blocker
+
+**2026-11-08T09:29:19.319Z — worker 未落地（exited-not-landed）**
+
+- 未落地原因：step=scoped-gate: TOUCHES-DIR-GLOB-HINT: 1 directory-level tasks/*.md glob(s) — enumerate concrete files or add（已知全局锁）(hint only, not a violation)
+✖ the installed tarball's bin resolves to dist/quay.js and it exists (0.640715ms)
+✖ installed `quay --help` runs and prints usage (Node 25 host — NOT a Node-20 proof) (0.093228ms)
+✖ installed `quay --version` prints the package version (0.045779ms)
+✖ installed `quay task list` does a real provider round-trip against a native workspace (0.048889ms)
+✖ the tarball carries the ENTIRE plugin bundle (bundle_in_pack > 0 — AC16) (0.060309ms)
+✖ the tarball ships the postinstall register script + the plugin's .claude-plugin manifests (0.041889ms)
+✖ register-plugin.mjs names the user-level enable key on comment lines only (STANDING AC-162) (0.036859ms)
+✖ register-plugin (global-install mode, temp HOME) writes settings.json pointing at the INSTALLED plugin dir (0.539737ms)
+✖ register-plugin's ENABLE channel is off by default (AC-161) — control: a `claude` shim that DOES write user scope is NOT reached (0.097538ms)
+✖ register-plugin skips silently on a NON-global install (dev `npm install` must not touch ~/.claude) (0.074478ms)
+✖ register-plugin FAILS CLOSED when the installed plugin bundle is incomplete (0.038379ms)
+ℹ fail 11
+✖ failing tests:
+✖ the installed tarball's bin resolves to dist/quay.js and it exists (0.640715ms)
+✖ installed `quay --help` runs and prints usage (Node 25 host — NOT a Node-20 proof) (0.093228ms)
+✖ installed `quay --version` prints the package version (0.045779ms)
+✖ installed `quay task list` does a real provider round-trip against a native workspace (0.048889ms)
+✖ the tarball carries the ENTIRE plugin bundle (bundle_in_pack > 0 — AC16) (0.060309ms)
+✖ the tarball ships the postinstall register script + the plugin's .claude-plugin manifests (0.041889ms)
+✖ register-plugin.mjs names the user-level enable key on comment lines only (STANDING AC-162) (0.036859ms)
+✖ register-plugin (global-install mode, temp HOME) writes settings.json pointing at the INSTALLED plugin dir (0.539737ms)
+✖ register-plugin's ENABLE channel is off by default (AC-161) — control: a `claude` shim that DOES write user scope is NOT reached (0.097538ms)
+✖ register-plugin skips silently on a NON-global install (dev `npm install` must not touch ~/.claude) (0.074478ms)
+✖ register-plugin FAILS CLOSED when the installed plugin bundle is incomplete (0.038379ms)
+- run_id：wk-prod-anchor
+- session_id：b8177c5b-da96-4f12-8fb3-a7d5f07d05a1
