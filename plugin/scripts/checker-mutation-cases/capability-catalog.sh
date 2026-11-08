@@ -26,6 +26,25 @@ cp "${checker_dir}/repo-root.ts" "${workdir}/plugin/scripts/repo-root.ts"
 cp "${checker_dir}/capability-catalog.ts" "${workdir}/plugin/scripts/capability-catalog.ts"
 cp "${checker_dir}/capability-catalog-declarations.json" "${workdir}/plugin/scripts/capability-catalog-declarations.json"
 
+# The entry's LOCAL `.ts` import graph is copied too — transitively, not as a hand-maintained list.
+# A hardcoded list is the same defect one level down: every new `import … from "./x.ts"` in the
+# checker turned this fixture's baseline phase ALWAYS-RED for a FIXTURE OMISSION, reported as
+# "checker always-red?" (2026-11-08: capability-catalog.ts#deriveScripts was routed through
+# fs-walk.ts#walkFiles and this case went red with nothing wrong with the checker). Recursing over
+# the entry's own relative specifiers means the next import is copied automatically.
+# ⛔ anchored at `^\s*import` so the doc-comment examples in repo-root.ts are NOT copied as deps.
+copy_local_imports() {
+  local dep
+  while read -r dep; do
+    [ -f "${checker_dir}/${dep}" ] || continue
+    [ -f "${workdir}/plugin/scripts/${dep}" ] && continue
+    cp "${checker_dir}/${dep}" "${workdir}/plugin/scripts/${dep}"
+    copy_local_imports "${dep}"
+  done < <(grep -E '^[[:space:]]*import .*"\./[^"]+"' "${checker_dir}/${1}" 2>/dev/null \
+             | sed -E 's/^[^"]*"\.\/([^"]+)".*$/\1/')
+}
+copy_local_imports capability-catalog.ts
+
 checker_cmd() {
   bash "${workdir}/plugin/scripts/capability-catalog.sh" --superseded-check >/dev/null 2>&1
 }

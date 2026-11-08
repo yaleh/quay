@@ -38,6 +38,28 @@ cp "${checker_dir}/repo-root.ts" "${workdir}/plugin/scripts/repo-root.ts"
 cp "${checker_dir}/capability-catalog.ts" "${workdir}/plugin/scripts/capability-catalog.ts"
 cp "${checker_dir}/capability-catalog-declarations.json" "${decls}"
 
+# …and the entry's LOCAL `.ts` import graph is copied too — transitively, not as a hand-maintained
+# list. A hardcoded dependency list is the same defect one level down: a new `import … from "./x.ts"`
+# in the catalog silently leaves this fixture with an entry that dies on module resolution, `--json`
+# yields zero rows, and 判据1 goes VACUOUSLY GREEN — the exact STAYED-GREEN shape this case exists to
+# catch, produced by the fixture (2026-11-08: capability-catalog.ts#deriveScripts was routed through
+# fs-walk.ts#walkFiles and this case reported `stayed-green` with nothing wrong with the checker).
+# Same helper, same reason, as capability-catalog.sh's case — kept as a copy rather than a shared lib
+# because a new file under plugin/scripts would need its own capability-catalog declaration, while
+# this cases/ dir is SKIPPED by the catalog and is not a registered checker.
+# ⛔ anchored at `^\s*import` so the doc-comment examples in repo-root.ts are NOT copied as deps.
+copy_local_imports() {
+  local dep
+  while read -r dep; do
+    [ -f "${checker_dir}/${dep}" ] || continue
+    [ -f "${workdir}/plugin/scripts/${dep}" ] && continue
+    cp "${checker_dir}/${dep}" "${workdir}/plugin/scripts/${dep}"
+    copy_local_imports "${dep}"
+  done < <(grep -E '^[[:space:]]*import .*"\./[^"]+"' "${checker_dir}/${1}" 2>/dev/null \
+             | sed -E 's/^[^"]*"\.\/([^"]+)".*$/\1/')
+}
+copy_local_imports capability-catalog.ts
+
 write_test_sh() { # <body...>
   printf '%s\n' "$@" > "${workdir}/scripts/test.sh"
 }
