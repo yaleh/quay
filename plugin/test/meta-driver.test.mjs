@@ -1812,7 +1812,8 @@ test('collectInertCheckers: 三态 {evaluated,names,cause}——未测量 ⛔ �
       { evaluated: false, names: [], cause: 'suite-in-flight' },
       'running state（无该字段）⇒ evaluated:false + cause=suite-in-flight');
     // AC1 后半：**终态**载体缺这一维（镜像写丢了维度）⇒ 仍是 "dimension-missing"（该追因的那一个）。
-    // 红态也是终态——镜像载体不写 running，所以红/绿不带字段都算「写者丢了维度」。
+    // 红态也是终态——但只在 `finishedAt` 有值时（gap-meta-collectinertcheckers：红套件在飞的早红写是
+    // `state:"red"` + `finishedAt:null`，见下一个 test，那不是终态）。
     for (const st of ['green', 'red']) {
       fs.writeFileSync(path.join(tmp, '.quay', 'full-suite-state.json'),
         JSON.stringify({ state: st, finishedAt: '2026-11-07T00:00:00Z' }), 'utf8');
@@ -1828,6 +1829,58 @@ test('collectInertCheckers: 三态 {evaluated,names,cause}——未测量 ⛔ �
     fs.writeFileSync(path.join(tmp, '.quay', 'full-suite-state.json'), JSON.stringify({ finishedAt: '2026-11-07T00:00:00Z' }), 'utf8');
     assert.equal(collectInertCheckers(tmp).cause, 'dimension-missing',
       '无 state 键 ⇒ ⛔ 不推断为在飞（宁严不宽）');
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+// gap-meta-collectinertcheckers — 「非终态」的判别量 ⛔ 不能只有 `state`：full-suite-runner 的**早红写**
+// （full-suite-runner.ts:4585，SUITE-RED 要带文件归因）落的是
+// `{state:"red", reason:"failed", finishedAt:null, durationMs:null}`，红套件运行期的**整个窗口** `state`
+// 都不是 "running"（实测那一轮 durationMs=451212ms）⇒ 旧实现把「还没测到」读成「写者丢了这一维」，
+// 每轮抓人报一个不存在的镜像回归。
+// 判别量 = 载体自己的终态写者不变式：在飞写 `finishedAt:null`，终态写 `finishedAt`(epoch 秒)。
+test('collectInertCheckers: finishedAt 是终态判别量——在飞的红快照 ⛔ 不报 dimension-missing', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'meta-driver-inert-red-'));
+  const write = (o) => fs.writeFileSync(path.join(tmp, '.quay', 'full-suite-state.json'), JSON.stringify(o), 'utf8');
+  try {
+    fs.mkdirSync(path.join(tmp, '.quay'), { recursive: true });
+    // ① 在飞的红快照（早红写）⇒ suite-in-flight（本任务要的那一格）。
+    write({ state: 'red', reason: 'failed', startedAt: '2026-01-01T00:00:00.000Z', finishedAt: null, durationMs: null, failures: [] });
+    const earlyRed = collectInertCheckers(tmp);
+    assert.deepEqual(earlyRed, { evaluated: false, names: [], cause: 'suite-in-flight' },
+      '红套件在飞（state:"red" + finishedAt:null）⇒ suite-in-flight（⛔ 不是 dimension-missing）');
+    // ② 负控制：同一 state:"red"、`finishedAt` 有值 ⇒ 终态缺维度，仍必须报 dimension-missing。
+    //    （防止实现把「一切 red」都翻成在飞——那会把真正的镜像回归静音。）
+    write({ state: 'red', reason: 'failed', startedAt: '2026-01-01T00:00:00.000Z', finishedAt: 1794129259, durationMs: 451212, failures: [] });
+    const terminalRed = collectInertCheckers(tmp);
+    assert.deepEqual(terminalRed, { evaluated: false, names: [], cause: 'dimension-missing' },
+      '终态红（finishedAt 有值）缺该维度 ⇒ dimension-missing');
+    assert.notEqual(earlyRed.cause, terminalRed.cause,
+      '同为 state:"red"，在飞与终态必须不同 token（否则本任务只是换了个同形）');
+    // ③ 在飞的红快照与在飞的 running 快照是**同一态**（都「还没跑完」）——⛔ 不新增第四个 token。
+    write({ state: 'running', finishedAt: null, durationMs: null });
+    assert.equal(collectInertCheckers(tmp).cause, earlyRed.cause,
+      'running 在飞与 early-red 在飞共享 suite-in-flight（同一件事：还没终态）');
+    // ④ 只带 `finishedAt:null`（无 state）⇒ 仍是在飞：终态写者不变式本身即充分信号。
+    write({ finishedAt: null });
+    assert.equal(collectInertCheckers(tmp).cause, 'suite-in-flight',
+      'finishedAt 显式 null ⇒ 在飞（不依赖 state）');
+    // ⑤ 旧载体只带 `state:"running"`（无 finishedAt 键）⇒ 保留在飞（gap-meta-inertcheckersreading 的判据）。
+    write({ state: 'running' });
+    assert.equal(collectInertCheckers(tmp).cause, 'suite-in-flight',
+      '只有 state:"running" 的旧载体 ⇒ 仍判在飞（两条信号取并集）');
+    // ⑥ 两个信号都没有（`{}` / 只有终态 state 但无 finishedAt 键）⇒ ⛔ 不猜成在飞，按终态缺维度（宁严不宽）。
+    write({});
+    assert.equal(collectInertCheckers(tmp).cause, 'dimension-missing',
+      '空载体 ⇒ 不推断为在飞（宁严不宽）');
+    write({ state: 'green' });
+    assert.equal(collectInertCheckers(tmp).cause, 'dimension-missing',
+      '无 finishedAt 键 ⇒ 不推断为在飞（宁严不宽）');
+    // ⑦ 维度在场时状态照常被读（字段优先于 state：数组分支在判别之前）。
+    write({ state: 'red', finishedAt: null, notEvaluatedCheckers: [{ name: 'x' }] });
+    assert.deepEqual(collectInertCheckers(tmp), { evaluated: true, names: ['x'], cause: null },
+      '字段在场 ⇒ evaluated:true（与在飞/终态无关）');
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }

@@ -141,9 +141,11 @@ your output and treat that dimension as unreadable, ⛔ do NOT fabricate a readi
   `evaluated:false` = the dimension was NOT measured — and the `cause` says WHICH kind of dark
   (`gap-meta-inertcheckersreading`, ⛔ three causes are not one "not measured"):
   `"carrier-absent-or-unreadable"` (no carrier / unparseable), `"suite-in-flight"` (the carrier is
-  there with `state:"running"`: the suite is still running and the dimension is simply not written
-  yet), or `"dimension-missing"` (the carrier reached a TERMINAL state without the field — a writer
-  dropped it). ⛔ This is NOT "no inert checker": it means the reading itself is dark, and saying "no
+  NOT terminal — `finishedAt` is explicitly null, or `state:"running"`: the suite is still running and
+  the dimension is simply not written yet — this covers the whole window of a RED suite still running,
+  whose early-red write carries `state:"red"` + `finishedAt:null`, ⛔ so `state` alone never implies
+  "terminal"), or `"dimension-missing"` (the carrier reached a TERMINAL state, i.e. `finishedAt` has a
+  value, without the field — a writer dropped it). ⛔ This is NOT "no inert checker": it means the reading itself is dark, and saying "no
   inert guard fired" from it would be reading an unmeasured quantity as a pass. Disposition:
   for `evaluated:true` + a name, name the guard and what it left unmeasured; repairing a guard is
   repair of an EXISTING mechanism, so it is WORK (`autoDrive`) when you have the evidence, ⛔ never
