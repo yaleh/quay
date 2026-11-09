@@ -37,51 +37,82 @@ extract
 - recorded_at: 2026-11-09T11:15:46.369Z
 
 ## Disposition
-**复核结论：finding 属实（`real-duplication`），处置 = 修掉（extract）。** 三处不是「三份刚好长得像」，而是
-**同一个概念的三份逐字节拷贝** —— 该概念**已有正本**：`packages/quay/src/core/goal-store-criterion-address.ts`
-的 `realpathOrSelf`（`goal-store.ts` 公开导出、`driver-runtime.ts` / `goal-preview.ts` / `goal-driver.ts` 已在用）。
-所以这是 copy-instead-of-call 债，不是缺失抽象。
+**复核结论：finding 属实（`real-duplication`），处置 = 修掉（extract，且修全）。**
 
-**改法**：`realpathOrSelf` 移到一个**无依赖叶子** `packages/quay/src/core/fs-path.ts`，两侧都能 import：
-Core（`loaded-version.ts` → `./fs-path.ts`）与内核（`archguard-runner.ts` → `../../packages/quay/src/core/fs-path.ts`；
-plugin→packages 是受认可方向，反向才是 `import-graph-check` 的 `reverseEdges` 棘轮）。`goal-store-criterion-address.ts`
-改为**再导出**（⛔ 不是复制 —— 硬规则 5b），故 `goal-store.ts` / `driver-runtime.ts` / `goal-preview.ts` /
-`goal-driver.ts` 的历史 import 路径全部不变。
+**为什么「只修点名的三处」是错的**：同一个 body 在 `.quay/routine-findings.jsonl` 里已被立案 **8 次**
+（`normalize-path-realpath-or-resolve` 2026-10-28 → `normalise-path-copy` → `path-normalization` → `B2` →
+`path-normalization-3x` → `path-normalization-quad` 2026-11-07 → 本条 2026-11-09），且每次都多认出几处。
+只修三处 ⇒ 下一轮以 pair 形态再立案 ⇒ 本条自己的 Effect Prediction 直接作废。
 
-**行为取证（实跑，不是推断）**：`realpathOrSelf` 与三份拷贝只在**路径不存在**这一档分叉 —— 拷贝回落到
-`path.resolve(p)`，正本沿**最近存在祖先**解析后再拼回剩余段。三个调用点都是**路径比较**（archguard manifest
-`scopes[].sources` 对 `path.resolve(root, source)`；两处 `projectPath` 对 `root`），祖先解析只会让比较更准。
-`archguard-runner` 反映得更直接：其注释本就写明「archguard normalizes with `realpathOrSelf(path.resolve(s))`」，
-即**被匹配的那一侧一直用的是正本**，拷贝才是与它对不上的那一侧。
+**改法（每个面各一个正本；为什么不是「全仓一个」写在下面）**
+- **内核**：新叶子 `plugin/scripts/fs-path.ts`，导出 `realpathOrResolve`（**精确**谓词：realpath 优先，
+  失败回落 `path.resolve`）。6 个载体改为 import：`archguard-runner` / `resolve-quay-cli` / `meta-driver` /
+  `slice-readings` / `routine-file-gate` / `arch-coverage-report`（后者保留 `canonicalPath` 作为本地别名再导出，
+  历史调用点不动）。
+- **Core**：`packages/quay/src/core/fs-path.ts` 的 `realpathOrSelf`（**更宽**的谓词：路径不存在时沿**最近存在
+  祖先**解析再拼回剩余段）。`loaded-version.ts` 改用它；`goal-store-criterion-address.ts` 改为**再导出**
+  （⛔ 不是复制 —— 硬规则 5b），`goal-store.ts` / `driver-runtime.ts` / `goal-preview.ts` / `goal-driver.ts`
+  的历史 import 路径全部不变。
+- **⛔ 为什么不是「一个实现全仓通用」**：① Core 不得 import 内核 —— `import-graph-check` 的 `reverseEdges`
+  棘轮（实测 baseline=0 / head=0）；② 插件缓存目录不含 `packages/` 树（`resolve-quay-cli` 的消费者约束）。
+  ⇒ 两面各需一份，能达到的最大值是**每面各一份、且各有唯一一个定义**。两者只在「路径不存在」这一档不同，
+  而全部调用点都是**字符串比较**；`resolve-quay-cli` 与 `loaded-version` 实现同一条 tier 规则，路径不存在时
+  任何拼写都不可能命中存在的 `root` ⇒ 宽写法不会把匹配翻过来。两处注释互相点名这条边界。
 
-**⛔ 第三处有意保留（不是漏修）**：`plugin/scripts/resolve-quay-cli.ts` 的 `normalisePath` 仍是本地副本。该文件是
-`docs/references/external-consumer-cli-location.md` 的**零依赖参考实现**，运行于**不含 `packages/` 树的插件缓存目录**
-（其文件头明写「imports nothing outside `node:*`」）⇒ 改 import 会让交付产物启动即失败。已在原处注释里写明正本路径
-与这条约束，⛔ 后来者不得靠 import `packages/**` 去「修」它。
+**取证（实跑，不是推断）**
+- **归零读数**：谓词 `grep -rl 'return fs.realpathSync(p);' --include=*.ts --include=*.mjs plugin packages | grep -v /test/`
+  **改前 = 3**（finding 点名的三处）；**改后 = 5 命中但只剩 1 条同 body**（`plugin/scripts/fs-path.ts` 正本），
+  其余 4 条**回落不同**、不是同一谓词：`driver-runtime.ts:296` 与 `loop-shipping-exclusion-data.mjs:129`
+  回落 `p`；`plugin-root.ts:135` 与 `verify-plugin-channel-assertions.ts:129` 回落 `null`（`realpathOrNull` 一族）。
+- **位置判据（新守卫，机械产物）**：`plugin/test/fs-path.test.mjs` 把 body 做**空白归一化 + 参数名反向引用**，
+  扫 `plugin/scripts` + `packages/*/src`（非 test）⇒ 命中集合**恰好** `["plugin/scripts/fs-path.ts"]`；
+  并断言扫描面 >100 文件（空面不得与「干净」同形，硬规则 3b）。⚠️ 写法注意：`export { x as y } from` **不会**
+  在模块作用域产生本地绑定 —— `arch-coverage-report` 必须 `import { realpathOrResolve as canonicalPath }`
+  再 `export { canonicalPath }`（本轮实测踩到：13 个测试 `ReferenceError: canonicalPath is not defined`）。
+- `realpathOrSelf` 全仓**定义**数 = 1（`core/fs-path.ts`），`goal-store-criterion-address.ts` 为再导出。
+- **单测**：`fs-path.test.mjs` 3/3；`routine-file-gate` 33/33；`slice-readings` 9/9；`meta-driver` 189/189；
+  `arch-coverage-report` 20/20；`archguard-structural-gate-fan-in` + `driver-runtime-loaded-version-drift` 36/36。
+- **静态**：`npx tsc --noEmit` 四个 package 全绿；`import-graph-check` valueSccs=0 typeSccs=0 reverseEdges=0；
+  `capability-catalog.sh --summary` = **418 scripts | 418 declared | 0 unclassified**（新脚本已按六字段登记，
+  `plugin/test/archive-exclusion-wiring.test.mjs` 的「catalog must stay green」因此不红）。
+  `deriveEntries(plugin)` = **136**（worktree）对 **136**（主检出）⇒ 新叶子不是 bundle entry，交付面文件数不变。
 
-**5b 扫描（同载体内的同形点，⛔ 不只修被报出来的三个）**：谓词 `grep -rl 'return fs.realpathSync(p);' --include=*.ts plugin packages | grep -v /test/`
-**改前 = 3**（正是 finding 点名的三处）；**改后 = 6**，逐条分类：
-- 真同形只剩 1：`resolve-quay-cli.ts`（上行说明的保留项）；
-- 4 条**回落不同**，不是同一概念：`driver-runtime.ts:296`（回落 `p`）、`plugin-root.ts:135` 与
-  `verify-plugin-channel-assertions.ts:129`（回落 `null`）—— 归 `realpathOrNull` 一族，不是本条；
-- 2 条是**同一概念的另一种拼写**（非逐字节同体，探针未归并）：`meta-driver.ts:2094`、`slice-readings.ts:583`
-  的一行式 `norm`。**本条不改**：它们的上下文（类型守卫 / 与 `abs` 的双向比较）与三份拷贝不同，改动超出 finding
-  范围且引入行为面；留作后续探针若命中时的独立任务。
+**scoped gate 实跑读数**：`bash scripts/test.sh --for-task gap-routine-semantic-dedup-scan-normalize-path-triple --allow-thin`
+⇒ **exit 0**，`tests 349 / pass 349 / fail 0`，静态层全 PASS（含 `import-graph-check` 0/0/0、`sh-census`、
+`test-isolation`、`test-file-snapshot: OK`、`capability-catalog --superseded-check`）；
+`worker-driver --verify-run` ⇒ `classification":"green"` exitCode=0 wallMs=62300；
+`--verify-rerun` ⇒ `not-evaluated(reason=verify-state-missing)` 并 `fellBackToScopedGate:true`（同一 scoped gate，绿）。
+`anti-drift-touches-check --merge-target develop` ⇒ **OK — 13 actual file(s), all within declared Touches (13 glob(s))**。
 
-**残留读数是可判的**：`realpathOrSelf` 的完整实现只存在于 `fs-path.ts` 一处
-（`grep -rn 'export function realpathOrSelf' packages plugin` ⇒ 1），三处调用点全部走它。
+**5b 扫描（同载体内的同形点，⛔ 不只修被报出来的三个）**：除 finding 点名的 3 处外，同一 body 还存在于
+`meta-driver.ts`、`slice-readings.ts`、`arch-coverage-report.ts`（函数体）与 `routine-file-gate.ts`（两处内联）；
+**全部改掉**。谓词同上的「改后 = 5 命中」逐条分类见上（4 条不同回落已点名排除）。
+
+**残留（⛔ 不声称更多）**：同一 body 的副本数 = **0**；两种谓词各有唯一实现并互相交叉引用。本条不声称
+「所有 realpath 用法都已统一」—— `evaluationContext` / `kernelSelfPath` / `realpathOrNull` 一族是**别的**
+回落语义（保留原路径 / 回落 `p` / 回落 `null`），不在本条范围。
+
+## Dark axes (ADR-007)
+- L_G archguard: valueSccs=0 typeSccs=0 reverseEdges=0 (plugin/scripts/import-graph-check.ts --root . on this worktree)
 
 ## AC
-- [ ] `.quay/routine-findings.jsonl` 中 finding `normalize-path-triple`（routine `semantic-dedup-scan`，runId `semantic-dedup-scan-1794222946369`）所描述的问题被复核并处置
-- [ ] 处置结论可核：要么修掉，要么写明「已有机制在管、失败在哪一步」，⛔ 不以「已注意到」结案
+- [x] `.quay/routine-findings.jsonl` 中 finding `normalize-path-triple`（routine `semantic-dedup-scan`，runId `semantic-dedup-scan-1794222946369`）所描述的问题被复核并处置
+- [x] 处置结论可核：要么修掉，要么写明「已有机制在管、失败在哪一步」，⛔ 不以「已注意到」结案
 
 ## DoD
-- [ ] 上面的判据实跑通过
-- [ ] ⛔ 探针只立案不执行：本任务若需要跑产出者/修复，由派发链执行，⛔ 不由例程代跑
+- [x] 上面的判据实跑通过
+- [x] ⛔ 探针只立案不执行：本任务若需要跑产出者/修复，由派发链执行，⛔ 不由例程代跑
 
 ## Touches
 - `plugin/scripts/archguard-runner.ts`
 - `plugin/scripts/resolve-quay-cli.ts`
+- `plugin/scripts/meta-driver.ts`
+- `plugin/scripts/slice-readings.ts`
+- `plugin/scripts/routine-file-gate.ts`
+- `plugin/scripts/arch-coverage-report.ts`
+- `plugin/scripts/fs-path.ts`
+- `plugin/scripts/capability-catalog-declarations.json`
+- `plugin/test/fs-path.test.mjs`
 - `packages/quay/src/core/loaded-version.ts`
 - `packages/quay/src/core/fs-path.ts`
 - `packages/quay/src/core/goal-store-criterion-address.ts`
