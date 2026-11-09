@@ -45,9 +45,26 @@ function runSelfcheck(script) {
 
 /** A shadow of the two dirs the selfcheck resolves relative to its own location:
  *  `<root>/experiments/quay-perpetual-stream/scripts/git-lens-selfcheck.sh` +
- *  `fixtures/git-lens/`, and — when `withProbes` — `<root>/plugin/scripts/{phase-declare,
- *  archguard-runner,gate-script-base}.ts`. Producing the shadow by COPYING is what lets a test
- *  rename/remove a probe without touching the checkout. */
+ *  `fixtures/git-lens/`, and — when `withProbes` — the probe entries plus their transitive
+ *  `./`-relative import closure under `<root>/plugin/scripts/`. Producing the shadow by COPYING is
+ *  what lets a test rename/remove a probe without touching the checkout.
+ *
+ *  ⛔ The closure is DERIVED, never a hand-written file list. A literal list breaks the moment a
+ *  copied probe gains an import, and it breaks as `probe-load-failed: Cannot find module …` —
+ *  i.e. it reports the CHECKER as broken for a defect that is entirely in this fixture. Exactly
+ *  that happened on 2026-11-09: `archguard-runner.ts` started importing `./fs-path.ts` (the
+ *  `realpathOrResolve` single leaf) and the 3-name list below silently stopped covering it. */
+function copyWithLocalDeps(name, destDir, seen = new Set()) {
+  if (seen.has(name)) return;
+  seen.add(name);
+  const src = path.join(REPO_ROOT, "plugin", "scripts", name);
+  const code = fs.readFileSync(src, "utf8");
+  fs.copyFileSync(src, path.join(destDir, name));
+  for (const m of code.matchAll(/^[ \t]*(?:import|export)[^;]*?from\s+"(\.\/[^"]+)"/gm)) {
+    copyWithLocalDeps(m[1].replace(/^\.\//, ""), destDir, seen);
+  }
+}
+
 function makeShadow({ withProbes = true } = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "git-lens-selfcheck-"));
   TMP_DIRS.push(root);
@@ -63,7 +80,7 @@ function makeShadow({ withProbes = true } = {}) {
     const pluginScripts = path.join(root, "plugin", "scripts");
     fs.mkdirSync(pluginScripts, { recursive: true });
     for (const f of ["phase-declare.ts", "archguard-runner.ts", "gate-script-base.ts"]) {
-      fs.copyFileSync(path.join(REPO_ROOT, "plugin", "scripts", f), path.join(pluginScripts, f));
+      copyWithLocalDeps(f, pluginScripts);
     }
   }
   return root;
