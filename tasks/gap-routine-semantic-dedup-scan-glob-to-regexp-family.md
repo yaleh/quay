@@ -51,4 +51,6 @@ extract
 - `plugin/scripts/release-model-check.ts`
 - `plugin/scripts/shipped-set-rules.ts`
 - `plugin/scripts/touches-orthogonality-check.ts`
+- `plugin/scripts/gate-script-base.ts`
+- `plugin/test/glob-dialects.test.mjs`
 - `tasks/gap-routine-semantic-dedup-scan-glob-to-regexp-family.md`
