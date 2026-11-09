@@ -32,18 +32,14 @@ import { resolve, dirname, relative } from "node:path";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { fileURLToPath } from "node:url";
-import { helpExit } from "./gate-script-base.ts";
+import { helpExit, createAssertionAccumulator } from "./gate-script-base.ts";
 
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 
-let failures = 0;
-function ok(cond: boolean, msg: string): void {
-  if (cond) console.log(`PASS: ${msg}`);
-  else {
-    failures++;
-    console.error(`FAIL: ${msg}`);
-  }
-}
+// The `ok(cond, msg)` PASS/FAIL printer and its failure tally live in gate-script-base.ts
+// (semantic-dedup-scan finding `ok-assertion-accumulator`, requested action `extract`): this file and
+// codex-stage1-live-proof-check.ts carried byte-identical copies.
+const { ok, report } = createAssertionAccumulator();
 
 // ── argv ────────────────────────────────────────────────────────────────────────
 const argv = process.argv.slice(2);
@@ -195,10 +191,7 @@ for (const m of mutations) {
 }
 
 // ── summary ──────────────────────────────────────────────────────────────────────
-console.log("");
-if (failures > 0) {
-  console.error(`AUDIT FAIL: ${failures} claimed object(s)/field(s) could not be read back from the authoritative store/Git or did not match.`);
-  process.exit(1);
-}
-console.log("AUDIT PASS: every claimed object was read back from the authoritative store/Git and matched the declared fields.");
-process.exit(0);
+process.exit(report({
+  pass: "AUDIT PASS: every claimed object was read back from the authoritative store/Git and matched the declared fields.",
+  fail: (n) => `AUDIT FAIL: ${n} claimed object(s)/field(s) could not be read back from the authoritative store/Git or did not match.`,
+}));

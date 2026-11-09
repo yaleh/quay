@@ -33,16 +33,12 @@
 
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { helpExit } from "./gate-script-base.ts";
+import { helpExit, createAssertionAccumulator } from "./gate-script-base.ts";
 
-let failures = 0;
-function ok(cond: boolean, msg: string): void {
-  if (cond) console.log(`PASS: ${msg}`);
-  else {
-    failures++;
-    console.error(`FAIL: ${msg}`);
-  }
-}
+// The `ok(cond, msg)` PASS/FAIL printer and its failure tally live in gate-script-base.ts
+// (semantic-dedup-scan finding `ok-assertion-accumulator`, requested action `extract`): this file and
+// codex-stage1-live-proof-audit.ts carried byte-identical copies.
+const { ok, report } = createAssertionAccumulator();
 
 const file = process.argv[2];
 if (file === "--help" || file === "-h") {
@@ -140,10 +136,7 @@ ok(cas.refused === true, "casNegative.refused: the stale write was REFUSED (isEr
 ok(isStr(cas.beforeHash) && cas.beforeHash === cas.afterHash, "casNegative: target content hash unchanged by the refused probe (before == after)");
 
 // --- summary -------------------------------------------------------------------
-console.log("");
-if (failures > 0) {
-  console.error(`SHAPE-ONLY FAIL: ${failures} required field(s)/consistency check(s) failed (SHAPE-ONLY — this is not a truth claim).`);
-  process.exit(1);
-}
-console.log("SHAPE-ONLY PASS: evidence record is structurally complete and internally consistent (NOT a truth claim — run codex-stage1-live-proof-audit.ts for authoritative store/Git readback).");
-process.exit(0);
+process.exit(report({
+  pass: "SHAPE-ONLY PASS: evidence record is structurally complete and internally consistent (NOT a truth claim — run codex-stage1-live-proof-audit.ts for authoritative store/Git readback).",
+  fail: (n) => `SHAPE-ONLY FAIL: ${n} required field(s)/consistency check(s) failed (SHAPE-ONLY — this is not a truth claim).`,
+}));
