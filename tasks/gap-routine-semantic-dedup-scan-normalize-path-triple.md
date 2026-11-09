@@ -117,3 +117,11 @@ extract
 - `packages/quay/src/core/fs-path.ts`
 - `packages/quay/src/core/goal-store-criterion-address.ts`
 - `tasks/gap-routine-semantic-dedup-scan-normalize-path-triple.md`
+
+## Blocker
+
+**2026-11-09T12:07:59.832Z — worker 未落地（exited-not-landed）**
+
+- 未落地原因：step=suite: AssertionError [ERR_ASSERTION]: The input did not match the regular expression /^NOT-EVALUATED\(reading-unavailable: .*moduleGraph.*\) l-g\/cycle-repo/m. Input: [baseline A/B: HARD RED (task-introduced-red) — the task's red set is NOT a subset of the develop baseline red set: added=plugin/test/git-lens-selfcheck.test.mjs changed=-]
+- run_id：wk-prod-anchor
+- session_id：9c639da6-dd9d-43b3-bf7b-5e1a530508c3
