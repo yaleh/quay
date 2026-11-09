@@ -17,7 +17,7 @@ import fs from "node:fs";
 import { repoRoot } from "./repo-root.ts";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { helpExit, isDirectEntry, normalizeRel } from "./gate-script-base.ts";
+import { helpExit, isDirectEntry, normalizeRel, compileGlobPattern, GLOB_DIALECTS } from "./gate-script-base.ts";
 import { acquireCoreSrc } from "./core-src-import.ts";
 import { walkFiles as walkFilesShared } from "./fs-walk.ts";
 // The ONE "is this path a quay runtime artifact?" implementation + the manifest reader (Core, shared
@@ -120,27 +120,12 @@ export function matchGlob(glob, filePath) {
   return re.test(filePath);
 }
 
+// `**` → any chars including separators (and it eats ONE optional following `/`, so `a/**/b` also
+// matches `a/b`); `*` → any chars except `/`; `?` is a LITERAL character here (a Touches entry that
+// spells `?` means that file), not a wildcard. That grammar is the `touches` dialect of the ONE
+// compiler in ./gate-script-base.ts (finding `glob-to-regexp-family`).
 function globToRegExp(glob) {
-  let re = "";
-  const g = String(glob);
-  for (let i = 0; i < g.length; i++) {
-    const c = g[i];
-    if (c === "*") {
-      if (g[i + 1] === "*") {
-        // `**` → any chars including separators; consume an optional trailing slash
-        i++;
-        if (g[i + 1] === "/") i++;
-        re += ".*";
-      } else {
-        re += "[^/]*"; // `*` → any chars except separator
-      }
-    } else if ("\\^$.|?+()[]{}".includes(c)) {
-      re += "\\" + c;
-    } else {
-      re += c;
-    }
-  }
-  return new RegExp("^" + re + "$");
+  return compileGlobPattern(String(glob), GLOB_DIALECTS.touches);
 }
 
 // ── walkFiles / expandGlobs ──────────────────────────────────────────────────────────────────────

@@ -93,7 +93,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { parse as parseYaml } from "yaml";
-import { isDirectEntry } from "./gate-script-base.ts";
+import { isDirectEntry, compileGlobPattern, GLOB_DIALECTS } from "./gate-script-base.ts";
 import { repoRoot as findRepoRoot } from "./repo-root.ts";
 // The ADR-008 phase declaration's OWN staleness (tasks/gap-adr008-phase-declaration-staleness-reading).
 // Attached to this round because this routine is already a read-only git reading that lands a
@@ -201,28 +201,11 @@ export function resolveCommit(root: string, rev: string): { sha: string | null; 
 }
 
 /** One glob per module pattern: `**` crosses directories, `*` does not, `?` is one non-slash char.
- *  ⛔ Not minimatch — deliberately small and dependency-free, and its semantics are stated here so a
- *  reader can re-derive a reading from the declaration. */
+ *  ⛔ Not minimatch — this is the `path` dialect of the ONE compiler in ./gate-script-base.ts
+ *  (`globToRegExp`, finding `glob-to-regexp-family`); the alias keeps the historical 1-arg
+ *  signature so callers and tests import it from here unchanged. */
 export function globToRegExp(glob: string): RegExp {
-  let out = "^";
-  for (let i = 0; i < glob.length; i++) {
-    const ch = glob[i];
-    if (ch === "*") {
-      if (glob[i + 1] === "*") {
-        out += ".*";
-        i++;
-      } else {
-        out += "[^/]*";
-      }
-    } else if (ch === "?") {
-      out += "[^/]";
-    } else if ("\\^$+.|()[]{}".includes(ch)) {
-      out += `\\${ch}`;
-    } else {
-      out += ch;
-    }
-  }
-  return new RegExp(out + "$");
+  return compileGlobPattern(glob, GLOB_DIALECTS.path);
 }
 
 /** All tracked paths at `rev`, or null when the tree cannot be listed (⛔ not `[]`). */

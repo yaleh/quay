@@ -657,6 +657,99 @@ export function normalizeRel(p: string): string {
   return out.join("/");
 }
 
+// ── compileGlobPattern (the ONE wildcard-glob compiler) ─────────────────────────────────────────────
+// `.quay/routine-findings.jsonl` finding `glob-to-regexp-family` (routine `semantic-dedup-scan`,
+// runId `semantic-dedup-scan-1794222946369`, verdict `divergent-implementation`, suggestedAction
+// `extract`) reported FOUR `globToRegExp` bodies under one symbol name. They are not four bugs —
+// they are four DIALECTS, and each was doing its job correctly. The defect was that the dialect was
+// implicit: nothing at a call site said which grammar it meant, so the four could drift apart (and
+// two of them already had — see the `**` and `?` rows below) with no shared authority to notice.
+//
+// The four dialects, named so a caller DECLARES which grammar it means:
+//
+//                        `*` crosses `/`   `**` behaviour              `?`
+//   path  (design-ev.)        no          `.*` (needs its trailing   one non-`/`
+//                                          `/`, so NOT zero dirs)     char
+//   branch (release-mo.)     YES          no globstar (two `*`      any char (may
+//                                          ≡ one)                     be `/`)
+//   rsync (shipped-set)       no          no globstar                one non-`/`
+//                                          (rules say `**` unused)    char
+//   touches (Touches)         no          `.*` + eats one following  LITERAL `?`
+//                                          `/` ⇒ matches zero dirs
+//
+// ⛔ These differences are LOAD-BEARING, not sloppiness: a branch name's `/` is part of the name
+// (`rel/*` must match `rel/1.0`), while a PATH's `/` is a separator `*` must not cross. Folding them
+// into one grammar would silently break one side. That is why the fix is a parameterised builder,
+// not one body with one grammar.
+//
+// ONE definition, drift is the defect (same disposition as `normalizeRel` / `reasonIsSubstantive`
+// above): the four carriers already import this module, so the shared body belongs here rather than
+// in a new file, and each carrier re-exports `globToRegExp(glob)` under its historical signature so
+// its own callers/tests are unchanged.
+
+/** How `?` compiles: one non-`/` char, ANY char (branch names may contain `/`), or a literal `?`. */
+export type GlobQuestionMark = "non-slash" | "any" | "literal";
+
+/** How `**` compiles: not at all (`none` — two `*` behave like one), as `.*` (`cross`), or as `.*`
+ *  that also eats ONE following `/` (`cross-and-slash` ⇒ the globstar may match zero directories). */
+export type GlobGlobstar = "none" | "cross" | "cross-and-slash";
+
+export interface GlobDialect {
+  /** `*` matches `/` too (branch/tag NAME patterns) instead of stopping at it (path patterns). */
+  starCrossesSlash: boolean;
+  globstar: GlobGlobstar;
+  questionMark: GlobQuestionMark;
+}
+
+/** The four dialects this repo has actually used. Pick one; ⛔ do not invent a fifth silently. */
+export const GLOB_DIALECTS = {
+  /** Repo-relative PATH patterns with a real globstar (design-evolution module patterns). */
+  path: { starCrossesSlash: false, globstar: "cross", questionMark: "non-slash" },
+  /** Ref/branch NAMES: `*` and `?` may both cross `/`; no globstar distinction. */
+  branch: { starCrossesSlash: true, globstar: "none", questionMark: "any" },
+  /** rsync's own grammar (plugin/shipped-set-rules.txt): neither `*` nor `?` crosses `/`. */
+  rsync: { starCrossesSlash: false, globstar: "none", questionMark: "non-slash" },
+  /** Milestone `## Touches` globs: `**` crosses AND eats one following `/`; `?` is a LITERAL char. */
+  touches: { starCrossesSlash: false, globstar: "cross-and-slash", questionMark: "literal" },
+} as const satisfies Record<string, GlobDialect>;
+
+/** Regex metacharacters the glob grammar treats as LITERALS (the wildcard chars are handled above;
+ *  `-` and `/` need no escape outside a character class). */
+const GLOB_LITERAL_METACHARS = "\\^$.|+()[]{}";
+
+/** Compile ONE glob to an ANCHORED RegExp in the given dialect. Deliberately small and
+ *  dependency-free — ⛔ not minimatch; the grammar is stated by the dialect, not inferred.
+ *
+ *  ⛔ The name is `compileGlobPattern`, NOT `globToRegExp`, deliberately: the four carriers keep
+ *  their historical 1-arg `globToRegExp(glob)` export as a THIN DELEGATION to this function with
+ *  their own dialect. A distinct name makes "who owns the body" mechanically greppable — the
+ *  single-definition ratchet can assert `compileGlobPattern` appears exactly once, while a
+ *  carrier's `globToRegExp` is required to be a one-line call. Sharing the name would make the
+ *  five occurrences indistinguishable. */
+export function compileGlobPattern(glob: string, dialect: GlobDialect): RegExp {
+  const g = String(glob);
+  let out = "^";
+  for (let i = 0; i < g.length; i++) {
+    const ch = g[i];
+    if (ch === "*") {
+      if (dialect.globstar !== "none" && g[i + 1] === "*") {
+        i++;
+        if (dialect.globstar === "cross-and-slash" && g[i + 1] === "/") i++;
+        out += ".*";
+      } else {
+        out += dialect.starCrossesSlash ? ".*" : "[^/]*";
+      }
+    } else if (ch === "?") {
+      out += dialect.questionMark === "any" ? "." : dialect.questionMark === "literal" ? "\\?" : "[^/]";
+    } else if (GLOB_LITERAL_METACHARS.includes(ch)) {
+      out += `\\${ch}`;
+    } else {
+      out += ch;
+    }
+  }
+  return new RegExp(`${out}$`);
+}
+
 // ── reasonIsSubstantive (the ONE dispatch-reason threshold) ──────────────────────────────────────────
 // A dispatch reason is PRESENT only when it has ≥ MIN_REASON_CHARS non-whitespace chars. The
 // empty-vs-absent conflation guard: without it a placeholder ("随便"/"无"/"x") slips through a
