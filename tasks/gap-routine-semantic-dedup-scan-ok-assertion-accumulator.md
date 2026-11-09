@@ -3,7 +3,7 @@ id: gap-routine-semantic-dedup-scan-ok-assertion-accumulator
 title: "semantic-dedup-scan: Both declare a module-level failures counter plus a
   byte-identical ok(cond,msg) PASS/FAIL printer and neither uses
   gate-script-base's emitPass/emitFail; the th"
-status: todo
+status: ready
 labels:
   - gap
   - routine-filed
