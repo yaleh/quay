@@ -3,7 +3,7 @@ id: gap-routine-semantic-dedup-scan-glob-to-regexp-family
 title: "semantic-dedup-scan: Four wildcard grammars: design supports ** and
   slash-scoped *, shipped-set omits **, release-model lets * cross '/', touches
   escapes '?' as a literal and lets "
-status: todo
+status: ready
 labels:
   - gap
   - routine-filed
