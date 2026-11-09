@@ -35,6 +35,7 @@ import { readProcCmdline } from "../kernel/proc-identity.ts";
 import { pidAlive } from "./server-state.ts";
 import { isQuayServe } from "../kernel/proc-identity.ts";
 import { resolvePluginRoot } from "./plugin-root.ts";
+import { realpathOrSelf } from "./fs-path.ts";
 
 /** 版本四态（`ahead` 是第四个取值：loaded ≠ installed 但**方向相反**——源树检出里宿主跑的是比
  *  注册表更新的一版（如本仓库 `plugin/VERSION` = `0.17.0-dev` vs 注册表 `0.16.0`）。
@@ -384,15 +385,11 @@ export interface ProjectScopedVersionReading {
   reason: string | null;
 }
 
-/** 一个路径的**符号链接已解析**形态（存在则 realpath，否则 resolve）。尾斜杠 / 符号链接差异会让字符串
- *  比较假阴性——`projectPath` 是 Claude Code 自己写的绝对路径，与 init 的 `root` 不能假设逐字相等。 */
-function normalizeProjectPath(p: string): string {
-  try {
-    return fs.realpathSync(p);
-  } catch {
-    return path.resolve(p);
-  }
-}
+// 一个路径的**符号链接已解析**形态（存在则 realpath；**不存在时沿最近存在祖先解析**再拼回剩余段）——
+// 尾斜杠 / 符号链接差异会让字符串比较假阴性：`projectPath` 是 Claude Code 自己写的绝对路径，与 init 的
+// `root` 不能假设逐字相等。⛔ 不再在本文件保留私有副本：正本是 `./fs-path.ts` 的 `realpathOrSelf`
+// （tasks/gap-routine-semantic-dedup-scan-normalize-path-triple）；它与原 `normalizeFsPath` 的三处
+// 逐字节拷贝只差「路径不存在时走不走祖先解析」这一档，而本处两侧都是路径比较，祖先解析只会更准。
 
 /** `projectPath` 匹配本项目的 project/local 作用域（会话层分层规则的「上层」）。 */
 const PROJECT_SCOPES: ReadonlySet<string> = new Set(["project", "local"]);
@@ -430,13 +427,13 @@ export function projectScopedVersionReading(
     );
   }
 
-  const rootNorm = normalizeProjectPath(root);
+  const rootNorm = realpathOrSelf(root);
   const projectEntries = entries.filter(
     (e) =>
       e.scope !== null &&
       PROJECT_SCOPES.has(e.scope) &&
       e.projectPath !== null &&
-      normalizeProjectPath(e.projectPath) === rootNorm,
+      realpathOrSelf(e.projectPath) === rootNorm,
   );
   const isProjectTier = projectEntries.length > 0;
   const winner = isProjectTier ? highestVersionEntry(projectEntries) : highestVersionEntry(entries.filter((e) => e.scope === "user"));

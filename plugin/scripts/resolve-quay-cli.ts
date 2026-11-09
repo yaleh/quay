@@ -190,7 +190,15 @@ export function readInstallRecord(homeDir: string): RecordRead {
 }
 
 /** realpath when it exists, else resolve — a `projectPath` written by Claude Code and a `--project`
- *  given by a caller need not be spelled identically (symlinks, trailing slashes, `/home` aliases). */
+ *  given by a caller need not be spelled identically (symlinks, trailing slashes, `/home` aliases).
+ *
+ *  ⚠️ This is the ONE remaining copy of the "realpath, else path.resolve" body
+ *  (tasks/gap-routine-semantic-dedup-scan-normalize-path-triple). The canonical implementation is
+ *  `packages/quay/src/core/fs-path.ts#realpathOrSelf`; this file is the zero-dependency reference
+ *  implementation of `docs/references/external-consumer-cli-location.md` and runs from a plugin
+ *  cache directory that carries NO `packages/` tree (see the file header), so importing it would
+ *  make the shipped artifact fail at load time. If a dependency-free kernel-local copy is ever
+ *  introduced, this is where it lands — ⛔ do not "fix" this by importing `packages/**`. */
 function normalisePath(p: string): string {
   try {
     return fs.realpathSync(p);
