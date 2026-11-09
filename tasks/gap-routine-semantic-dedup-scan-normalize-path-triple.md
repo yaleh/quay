@@ -77,13 +77,6 @@ extract
   `plugin/test/archive-exclusion-wiring.test.mjs` 的「catalog must stay green」因此不红）。
   `deriveEntries(plugin)` = **136**（worktree）对 **136**（主检出）⇒ 新叶子不是 bundle entry，交付面文件数不变。
 
-**scoped gate 实跑读数**：`bash scripts/test.sh --for-task gap-routine-semantic-dedup-scan-normalize-path-triple --allow-thin`
-⇒ **exit 0**，`tests 349 / pass 349 / fail 0`，静态层全 PASS（含 `import-graph-check` 0/0/0、`sh-census`、
-`test-isolation`、`test-file-snapshot: OK`、`capability-catalog --superseded-check`）；
-`worker-driver --verify-run` ⇒ `classification":"green"` exitCode=0 wallMs=62300；
-`--verify-rerun` ⇒ `not-evaluated(reason=verify-state-missing)` 并 `fellBackToScopedGate:true`（同一 scoped gate，绿）。
-`anti-drift-touches-check --merge-target develop` ⇒ **OK — 13 actual file(s), all within declared Touches (13 glob(s))**。
-
 **5b 扫描（同载体内的同形点，⛔ 不只修被报出来的三个）**：除 finding 点名的 3 处外，同一 body 还存在于
 `meta-driver.ts`、`slice-readings.ts`、`arch-coverage-report.ts`（函数体）与 `routine-file-gate.ts`（两处内联）；
 **全部改掉**。谓词同上的「改后 = 5 命中」逐条分类见上（4 条不同回落已点名排除）。
@@ -91,6 +84,31 @@ extract
 **残留（⛔ 不声称更多）**：同一 body 的副本数 = **0**；两种谓词各有唯一实现并互相交叉引用。本条不声称
 「所有 realpath 用法都已统一」—— `evaluationContext` / `kernelSelfPath` / `realpathOrNull` 一族是**别的**
 回落语义（保留原路径 / 回落 `p` / 回落 `null`），不在本条范围。
+
+## Evidence
+**2026-11-09 第三轮（worker 续做）：修掉本分支自己引入的一处 task-introduced red。**
+
+- **红在哪**：全量 suite 的**唯一**一条红 = `plugin/test/git-lens-selfcheck.test.mjs`，
+  `probe-load-failed: Cannot find module '…/plugin/scripts/fs-path.ts' imported from '…/plugin/scripts/archguard-runner.ts'`。
+- **为什么它属于本条**（⚠️ 机械 delta-relatedness 当时判 `UNRELATED`，**判错了**）：该测试的
+  `makeShadow()` 把探针**按手写文件名清单**拷进 tmp 影子树（3 个名字）。本条让
+  `archguard-runner.ts` 新增 `import { realpathOrResolve } from "./fs-path.ts"`，而清单没跟着长 ⇒
+  影子树里缺叶子 ⇒ 探针加载失败。**红在本条，不在 develop**（`git show develop:plugin/scripts/fs-path.ts` 不存在）。
+  delta-relatedness 的 one-hop 检查只看**测试文件自己的**直接 import，不看**被拷文件的**传递 import —— 这是它的已知盲区。
+- **改法（⛔ 不正是一行 `+ "fs-path.ts"`）**：`makeShadow()` 改为 `copyWithLocalDeps()`
+  —— 从 3 个探针入口**递归**展开 `^[ \t]*(?:import|export)…from "\./…"` 的传递闭包再拷。
+  理由：手写清单**下一次**再长一个 import 就会以同一形态重红，且症状是「把 fixture 的缺陷报成 checker 的缺陷」。
+- **实跑读数**：`node --test plugin/test/git-lens-selfcheck.test.mjs` ⇒ 修前 `pass 2 / fail 1`，
+  修后 **`tests 3 / pass 3 / fail 0`**（复现→修→复验，不是推断）。
+- **同载体 5b 扫描（⛔ 不只修被报出来的那一个）**：`grep` 全 `plugin/test/*.mjs` 找「把本条改过的脚本拷进 tmp」的
+  第二处 —— 候选 9 个文件逐一读过，**全部只是 `import` 真检出或 `readFileSync` 读源码文本**，`makeShadow()`
+  是**唯一**一个 tmp-拷贝型 fixture ⇒ 同形点计数 = **1**（已修）。
+
+**scoped gate 实跑读数**：`bash scripts/test.sh --for-task gap-routine-semantic-dedup-scan-normalize-path-triple --allow-thin`
+⇒ **exit 0**，`tests 349 / pass 349 / fail 0`，静态层全 PASS（含 `import-graph-check` 0/0/0、`sh-census`、
+`test-isolation`、`test-file-snapshot: OK`、`capability-catalog --superseded-check`）；
+`worker-driver --verify-run` ⇒ `classification":"green"` exitCode=0；
+`anti-drift-touches-check --merge-target develop` ⇒ 全部落在声明的 Touches 内。
 
 ## Dark axes (ADR-007)
 - L_G archguard: valueSccs=0 typeSccs=0 reverseEdges=0 (plugin/scripts/import-graph-check.ts --root . on this worktree)
@@ -113,15 +131,8 @@ extract
 - `plugin/scripts/fs-path.ts`
 - `plugin/scripts/capability-catalog-declarations.json`
 - `plugin/test/fs-path.test.mjs`
+- `plugin/test/git-lens-selfcheck.test.mjs`
 - `packages/quay/src/core/loaded-version.ts`
 - `packages/quay/src/core/fs-path.ts`
 - `packages/quay/src/core/goal-store-criterion-address.ts`
 - `tasks/gap-routine-semantic-dedup-scan-normalize-path-triple.md`
-
-## Blocker
-
-**2026-11-09T12:07:59.832Z — worker 未落地（exited-not-landed）**
-
-- 未落地原因：step=suite: AssertionError [ERR_ASSERTION]: The input did not match the regular expression /^NOT-EVALUATED\(reading-unavailable: .*moduleGraph.*\) l-g\/cycle-repo/m. Input: [baseline A/B: HARD RED (task-introduced-red) — the task's red set is NOT a subset of the develop baseline red set: added=plugin/test/git-lens-selfcheck.test.mjs changed=-]
-- run_id：wk-prod-anchor
-- session_id：9c639da6-dd9d-43b3-bf7b-5e1a530508c3
