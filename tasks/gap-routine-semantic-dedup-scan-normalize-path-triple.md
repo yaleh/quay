@@ -2,7 +2,7 @@
 id: gap-routine-semantic-dedup-scan-normalize-path-triple
 title: "semantic-dedup-scan: Three byte-identical 'realpathSync else
   path.resolve' helpers under three spellings across both surfaces."
-status: todo
+status: ready
 labels:
   - gap
   - routine-filed
