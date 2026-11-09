@@ -86,7 +86,7 @@ import path from "node:path";
 import { createRequire as nodeCreateRequire } from "node:module";
 import { spawnSync } from "node:child_process";
 import { isDirectEntry } from "./gate-script-base.ts";
-import { realpathOrSelf } from "../../packages/quay/src/core/fs-path.ts";
+import { realpathOrResolve } from "./fs-path.ts";
 
 // ── The six scopes archguard analyzes. Each scope carries an EXPLICIT label (NOT basename(sourceDir)):
 //    packages/quay-native|github|backlog all have a `src/` basename (and two dirs a `scripts/` basename),
@@ -534,11 +534,11 @@ function numeric(v: unknown): number | null {
 }
 
 // `normalizeFsPath` DELETED (tasks/gap-routine-semantic-dedup-scan-normalize-path-triple): it was one
-// of three byte-identical "realpath, else path.resolve" copies. The manifest's `sources` are
-// normalized by archguard itself with `realpathOrSelf(path.resolve(s))`, so calling the REAL
-// `realpathOrSelf` (canonical home: `packages/quay/src/core/fs-path.ts`) matches the manifest's own
-// spelling more exactly than the 3-line copy did — the copies also disagreed with archguard on a
-// not-yet-existing suffix, where archguard resolves the longest existing ancestor.
+// of the kernel's byte-identical "realpath, else path.resolve" copies, now `realpathOrResolve` in
+// `./fs-path.ts`. ⚠️ archguard itself normalizes the manifest's `sources` with its WIDER
+// `realpathOrSelf(path.resolve(s))` (longest-existing-ancestor walk); the two spellings agree on
+// every path that exists, which is every analyzed source. Kept on the EXACT predicate here so this
+// checker's behavior did not change with the extraction.
 
 /** Directory-granularity reading, taken from the query artifact that `archguard analyze` persists
  *  under `<workDir>/query/` (`manifest.json` + `<scope.key>/arch.json`).
@@ -649,9 +649,9 @@ function readDirectoryCycles(root: string, workDir: string, source: string): {
     return notEvaluated(`query manifest ${manifestFile} lists no scopes`);
   }
 
-  const wanted = realpathOrSelf(path.resolve(root, source));
+  const wanted = realpathOrResolve(path.resolve(root, source));
   const matches = entries.filter(
-    (e) => Array.isArray(e?.sources) && e.sources.some((s: unknown) => typeof s === "string" && realpathOrSelf(s) === wanted)
+    (e) => Array.isArray(e?.sources) && e.sources.some((s: unknown) => typeof s === "string" && realpathOrResolve(s) === wanted)
   );
   if (matches.length === 0) {
     return notEvaluated(

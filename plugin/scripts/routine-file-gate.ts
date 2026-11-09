@@ -14,6 +14,9 @@
 import fs from "node:fs";
 import path from "node:path";
 import { isDirectEntry } from "./gate-script-base.ts";
+// path 规范化的单一实现（realpath 优先、失败回落 path.resolve）—— ⛔ 不在此处内联第二份
+// （tasks/gap-routine-semantic-dedup-scan-normalize-path-triple）。
+import { realpathOrResolve } from "./fs-path.ts";
 import { DEFAULT_ROUTINE_QUOTA_K, DEFAULT_ROUTINE_QUOTA_WINDOW_MS } from "./driver-config.ts";
 
 // ⛔ 收口（gap-routine-quota-canonical-config-and-policy-gate）：此前这里的两条是【孤儿字面量】。
@@ -711,11 +714,11 @@ export function boardKeys(boardDir: string, excludePath: string | null = null): 
   let files;
   try { files = fs.readdirSync(boardDir).filter((f) => f.endsWith(".md")); } catch { return new BoardKeys(owners, false); }
   let skip = null;
-  if (excludePath) { try { skip = fs.realpathSync(path.resolve(excludePath)); } catch { skip = path.resolve(excludePath); } }
+  if (excludePath) skip = realpathOrResolve(excludePath);
   for (const f of files) {
     try {
       const abs = path.join(boardDir, f);
-      let absReal; try { absReal = fs.realpathSync(abs); } catch { absReal = path.resolve(abs); }
+      const absReal = realpathOrResolve(abs);
       if (skip && absReal === skip) continue;
       const text = fs.readFileSync(abs, "utf8");
       const k = findingKey(text);

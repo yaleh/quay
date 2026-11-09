@@ -29,13 +29,16 @@
 //                    different facts, and only the second one means the plugin is not installed.
 // Exit codes mirror the state 1:1 so a shell caller never parses prose: 0 / 2 / 3.
 //
-// WHY THIS FILE HAS NO DEPENDENCIES BEYOND NODE BUILTINS: a consumer runs it from a plugin cache
-// directory (`~/.claude/plugins/cache/<marketplace>/<plugin>/<version>/`) that carries no
-// `packages/` tree and no `node_modules`. It therefore imports nothing outside `node:*`, and it
-// reads no state of its own except the filesystem. (It is also bundled to
-// `scripts/dist/resolve-quay-cli.js` — the shipped artifact deletes raw `.ts` — so an installed
-// consumer runs the bundle, and a source checkout runs this file under
-// `node --experimental-strip-types`.)
+// WHY THIS FILE HAS NO DEPENDENCIES BEYOND `node:*` AND ITS OWN PLUGIN TREE: a consumer runs it from
+// a plugin cache directory (`~/.claude/plugins/cache/<marketplace>/<plugin>/<version>/`) that carries
+// no `packages/` tree and no `node_modules`. Its ONE non-`node:*` import is the sibling
+// `./fs-path.ts` (`realpathOrResolve`), which ships in the SAME plugin tree and is inlined into
+// `scripts/dist/resolve-quay-cli.js` by `build-plugin-dist.mjs` — the shipped artifact deletes raw
+// `.ts`, so an installed consumer runs that self-contained bundle, and a source checkout runs this
+// file under `node --experimental-strip-types` with the sibling present. ⛔ It still imports nothing
+// from `packages/**`: paths reaching outside `plugin/` do not survive install scopes (the row above
+// added a copy instead — tasks/gap-routine-semantic-dedup-scan-normalize-path-triple).
+// It reads no state of its own except the filesystem.
 //
 // THE TIER RULE (the session layer's, copied from the record that established it — NOT invented
 // here): a `project`/`local` record whose `projectPath` resolves to this project WINS; otherwise the
@@ -49,6 +52,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { realpathOrResolve } from "./fs-path.ts";
 
 /** One normalised `quay@<marketplace>` install record entry. Unknown/missing fields are `null` —
  *  ⛔ not `""` and not `false`: "the field was not there" is not a value of that field. */
@@ -189,23 +193,11 @@ export function readInstallRecord(homeDir: string): RecordRead {
   return { state: "ok", entries, recordPath, reason: null };
 }
 
-/** realpath when it exists, else resolve — a `projectPath` written by Claude Code and a `--project`
- *  given by a caller need not be spelled identically (symlinks, trailing slashes, `/home` aliases).
- *
- *  ⚠️ This is the ONE remaining copy of the "realpath, else path.resolve" body
- *  (tasks/gap-routine-semantic-dedup-scan-normalize-path-triple). The canonical implementation is
- *  `packages/quay/src/core/fs-path.ts#realpathOrSelf`; this file is the zero-dependency reference
- *  implementation of `docs/references/external-consumer-cli-location.md` and runs from a plugin
- *  cache directory that carries NO `packages/` tree (see the file header), so importing it would
- *  make the shipped artifact fail at load time. If a dependency-free kernel-local copy is ever
- *  introduced, this is where it lands — ⛔ do not "fix" this by importing `packages/**`. */
-function normalisePath(p: string): string {
-  try {
-    return fs.realpathSync(p);
-  } catch {
-    return path.resolve(p);
-  }
-}
+// `normalisePath` DELETED (tasks/gap-routine-semantic-dedup-scan-normalize-path-triple): it was one
+// of the byte-identical "realpath, else path.resolve" copies. It now calls the kernel's single
+// implementation, `realpathOrResolve` from `./fs-path.ts` — a SIBLING in the plugin tree, never
+// `packages/**` (see the file header). A `projectPath` written by Claude Code and a `--project` given
+// by a caller need not be spelled identically (symlinks, trailing slashes, `/home` aliases).
 
 /** `1.2.10` > `1.2.9`; unorderable ⇒ a deterministic lexical fallback (never "first one wins"). */
 function compareVersions(a: string, b: string): number {
@@ -247,9 +239,9 @@ export function selectTier(
   entries: readonly InstallRecordEntry[],
   projectDir: string,
 ): { tier: "project" | "user" | null; entries: InstallRecordEntry[]; reason: string | null } {
-  const projectNorm = normalisePath(projectDir);
+  const projectNorm = realpathOrResolve(projectDir);
   const projectMatches = entries.filter(
-    (e) => e.scope !== null && PROJECT_SCOPES.has(e.scope) && e.projectPath !== null && normalisePath(e.projectPath) === projectNorm,
+    (e) => e.scope !== null && PROJECT_SCOPES.has(e.scope) && e.projectPath !== null && realpathOrResolve(e.projectPath) === projectNorm,
   );
   if (projectMatches.length > 0) {
     const top = highestVersion(projectMatches);
@@ -377,7 +369,7 @@ export function resolveQuayCli(opts: { homeDir?: string; projectDir?: string } =
     };
   }
 
-  const installPath = normalisePath(winner.installPath);
+  const installPath = realpathOrResolve(winner.installPath);
   const resolvedEntry = { ...withEntry, installPath, rootVersion: readJsonVersion(installPath), orphanedAtMs: readOrphanedAt(installPath) };
 
   if (!exists(installPath)) {

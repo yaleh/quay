@@ -442,7 +442,8 @@
     "codex-mcp-sync.sh": "How does the Codex plugin's quay MCP dist get installed/synced to the stable version-independent location ~/.local/share/quay/ (and its .mcp.json tilde prefix expanded to the home directory so codex's direct node spawn resolves it)? Run on demand: publish-dist-branch.sh --push calls it with --install-only, and the user runs it once after install.",
     "sha256.ts": "Is the sha256 helper pair (sha256OfString / sha256OfBuffer) defined ONCE as a plugin-scripts leaf, so every caller imports it instead of each re-implementing the createHash(\"sha256\").update(...).digest(\"hex\") body — the seven independently-declared wrappers the semantic-dedup-scan routine found (finding B1, runId semantic-dedup-scan-1793491958069: experiment-manifest / proposal-convergence / execution-policy / stage-receipt / run-identity / primitives-drift-check)?",
     "dist-stats.ts": "What is the ONE implementation of the NOT-EVALUATED-string percentile summary dist (n/min/median/p90/max/mean) and its percentile helper, and what does an EMPTY sample answer — i.e. is the statistic declared in exactly one place (this module) with NOT-EVALUATED as the empty sentinel for every statistic field (n=0, min/median/p90/max/mean = NOT-EVALUATED), instead of the two byte-identical copies that duration-report.ts and fan-in-queueing-model.ts each hand-maintained — so a MEASURED zero can never be read as a sample that was never taken, and both consumers import (and re-export) the SAME function object rather than a parity-tested twin (routine semantic-dedup-scan, finding dist-stats, runId semantic-dedup-scan-1793780123988)?",
-    "conflict-resolution-rules.ts": "Does the fan-in merge-conflict protocol's machine-decidable rules — (3) dual-copy byte-identical sync, (4) take-develop docs (the TAKE_DEVELOP_DOC_RULES registry: tick docs + the outline — ONE source rendered by BOTH the mechanical decision and the worker prompt), (5) modify/delete deletion-side — live as ONE executable carrier (conflictAction decided by position + resolveConflictMechanically running the real git commands), so a worker resolving a conflict executes them instead of re-deriving them from prompt prose that a worker could ignore (gap-arbitrary-semantics-unenforced-carriers AC2)?"
+    "conflict-resolution-rules.ts": "Does the fan-in merge-conflict protocol's machine-decidable rules — (3) dual-copy byte-identical sync, (4) take-develop docs (the TAKE_DEVELOP_DOC_RULES registry: tick docs + the outline — ONE source rendered by BOTH the mechanical decision and the worker prompt), (5) modify/delete deletion-side — live as ONE executable carrier (conflictAction decided by position + resolveConflictMechanically running the real git commands), so a worker resolving a conflict executes them instead of re-deriving them from prompt prose that a worker could ignore (gap-arbitrary-semantics-unenforced-carriers AC2)?",
+    "fs-path.ts": "Is 'realpath when it resolves, else path.resolve' ONE kernel implementation (plugin/scripts/fs-path.ts, realpathOrResolve) shared by every plugin/scripts tool that compares a path another producer spelled, replacing the byte-identical copies semantic-dedup-scan filed (normalize-path-triple and the eight earlier filings of the same body)?"
   },
   "GUARD_OBJECT": {
     "manager-tick-log-check.sh": "runtime:orchestration/manager-tick-log.md",
@@ -871,7 +872,8 @@
     "codex-mcp-sync.sh": "按需",
     "sha256.ts": "按需",
     "dist-stats.ts": "按需",
-    "conflict-resolution-rules.ts": "按需"
+    "conflict-resolution-rules.ts": "按需",
+    "fs-path.ts": "按需"
   },
   "INVALIDATION": {
     "resolve-quay-cli.ts": "失效前提：① Claude Code still records plugin installs in ~/.claude/plugins/installed_plugins.json with the field set this resolver reads (scope / projectPath / installPath / version per plugin id quay@quay / quay@quay-dev) — measured 2026-10-26 on 2.1.310; a record-schema change makes readInstallRecord report not-evaluated, which is a NAMED refusal, not a silent wrong answer; ② the session layer's tier rule is unchanged (a projectPath-matching project/local entry wins over the user entry) — the SAME rule is implemented in packages/quay/src/loaded-version.ts (projectScopedVersionReading) and recorded in packages/quay/src/init.ts's plugin-link header, so a change must move all three together; ③ an installed plugin root still carries bin/quay and vendor/quay/dist/quay.js; ④ the retired <project>/.quay/plugin is never reintroduced as a resolution input (if it were, this resolver's refusal to read it would become wrong rather than conservative).",
@@ -1290,7 +1292,8 @@
     "codex-mcp-sync.sh": "负控制失效：dist 缺/空或 kernel anchor 缺失时脚本仍 exit 0（--install-only 只装不重写 .mcp.json）",
     "sha256.ts": "失效前提：sha256.ts 仍是这些调用者做 sha256 哈希时的唯一实现（它们 import 本模块的 sha256OfString / sha256OfBuffer）；若某个调用者改回自己手搓一份 createHash(\"sha256\") 副本、或这些原语被上收到别的包，本条退休",
     "dist-stats.ts": "失效前提：仍有多个消费者需要同一个 NOT-EVALUATED-string 的 dist/percentile（duration-report.ts / fan-in-queueing-model.ts 均 import 并 re-export 本模块），且空样本仍须与「测到的 0」可区分（NOT-EVALUATED ≠ 0）；若 dist 只剩一个消费者、或该统计量整体退役 ⇒ 本条退休",
-    "conflict-resolution-rules.ts": "失效前提：fan-in 的 merge develop 冲突仍按 (3)/(4)/(5) 规则消解，且这些规则的可执行承接仍是本模块 + 行为测试（契约检查，⛔ 不靠 prompt 字符串——take-develop 那半边的 prompt 文案也从本模块的 TAKE_DEVELOP_DOC_RULES 注册表渲染（gap-conflict-outline-half-only-in-prompt-prose），其余 agent-executed 半边（code/task-file/ff）散文仍在 worker-driver 以守住 gap-worker-prompt-note-family-slimming 的 25% 基线）；若冲突消解协议改写、或这些规则迁回 driver 原生执行，本条随迁"
+    "conflict-resolution-rules.ts": "失效前提：fan-in 的 merge develop 冲突仍按 (3)/(4)/(5) 规则消解，且这些规则的可执行承接仍是本模块 + 行为测试（契约检查，⛔ 不靠 prompt 字符串——take-develop 那半边的 prompt 文案也从本模块的 TAKE_DEVELOP_DOC_RULES 注册表渲染（gap-conflict-outline-half-only-in-prompt-prose），其余 agent-executed 半边（code/task-file/ff）散文仍在 worker-driver 以守住 gap-worker-prompt-note-family-slimming 的 25% 基线）；若冲突消解协议改写、或这些规则迁回 driver 原生执行，本条随迁",
+    "fs-path.ts": "失效前提：plugin/scripts 下仍有工具要把「别人写的路径」与「自己派生的路径」做字符串比较、且需要『realpath 优先、失败回落 path.resolve』；本模块是它的唯一实现（archguard-runner / resolve-quay-cli / meta-driver / slice-readings / routine-file-gate 的调用点 import realpathOrResolve）。若某个调用点改回自带副本，或该原语被上收进别处，本条退休。"
   },
   "LAST_REAFFIRMED": {
     "resolve-quay-cli.ts": "2026-10-26",
@@ -1709,7 +1712,8 @@
     "codex-mcp-sync.sh": "2026-10-31",
     "sha256.ts": "2026-11-01",
     "dist-stats.ts": "2026-11-04",
-    "conflict-resolution-rules.ts": "2026-11-06"
+    "conflict-resolution-rules.ts": "2026-11-06",
+    "fs-path.ts": "2026-11-09"
   },
   "MATCHING": {
     "resolve-quay-cli.ts": "enumerative",
@@ -2128,7 +2132,8 @@
     "codex-mcp-sync.sh": "keyword",
     "sha256.ts": "n/a",
     "dist-stats.ts": "n/a",
-    "conflict-resolution-rules.ts": "n/a"
+    "conflict-resolution-rules.ts": "n/a",
+    "fs-path.ts": "n/a"
   },
   "CONSUMER": {
     "resolve-quay-cli.ts": "谁按：外部消费者按 docs/references/external-consumer-cli-location.md §5.2 运行它（node --experimental-strip-types <plugin-root>/scripts/resolve-quay-cli.ts --project <dir> [--json|--field <name>]；安装形态跑 scripts/dist/resolve-quay-cli.js），并以退出码 0/2/3 判态；plugin/skills/init/SKILL.md 的 The project link 段指向它作为唯一参考实现。⛔ 不是 Core 运行时依赖——Core 用 packages/quay/src/core/plugin-root.ts 从自身安装位置解析，从不读插件安装记录。",
@@ -2345,7 +2350,8 @@
     "task-double-frontmatter-check.ts": "谁按：手动 node --experimental-strip-types plugin/scripts/task-double-frontmatter-check.ts [<task-file.md|dir> ...]；默认扫描 <repo-root>/tasks。当前未接入任何 registry，按需手动运行。",
     "sha256.ts": "谁按：plugin/scripts 下需要 sha256 hex 摘要的载体 —— experiment-manifest / proposal-convergence / execution-policy / stage-receipt / run-identity / primitives-drift-check（及任何新调用者）import sha256OfString / sha256OfBuffer；条件=需要字符串或缓冲的 sha256 hex 摘要，且希望全仓只有一个版本",
     "dist-stats.ts": "谁按：duration-report.ts（import + re-export 保持旧 import 面，供 relaxed-dispatch-ledger.ts / touches-relax-tighten.ts / duration-report.test.mjs 取用）/ fan-in-queueing-model.ts（import + re-export 保持旧 import 面，供 fan-in-queueing-model.test.mjs 取用）；条件=两处须 import 同一份实现（⛔ 非平行副本），且本模块不得 import 任一消费者（否则环复原）",
-    "conflict-resolution-rules.ts": "谁按：fan-in merge develop 冲突消解时 worker/agent 经 CLI 按（node --experimental-strip-types plugin/scripts/conflict-resolution-rules.ts --resolve <root> <rel> <status> [--json] 执行 (3)/(4)/(5) 的机械消解（(4) 的 take-develop 文档集合 = TAKE_DEVELOP_DOC_RULES 注册表：tick doc + outline；同一注册表也渲染 worker prompt 的 (1) 段）；--judge <rel> <status> 只给判定不动仓库）；--render-prompt-rules 只打印注册表渲染出的 prompt 规则（负臂用）；契约检查按 plugin/test/worker-driver-resident-s07.test.mjs（import conflictAction/dualCopyPeer/isDualCopyFile/isTickDoc/isTakeDevelopDoc/takeDevelopDocRule/takeDevelopDocPromptRules/resolveConflictMechanically 断言真实 git 行为，负臂把规则表改错后重跑 --judge 必 manual/exit 1，证明验的是行为不是 prompt 字符串在场）。条件=要机械消解 fan-in 冲突的 (3) dual-copy 两副本 byte-identical / (4) tick-doc 直取 develop / (5) modify-delete 删除侧三类规则，而不是从 worker prompt 散文重新推导"
+    "conflict-resolution-rules.ts": "谁按：fan-in merge develop 冲突消解时 worker/agent 经 CLI 按（node --experimental-strip-types plugin/scripts/conflict-resolution-rules.ts --resolve <root> <rel> <status> [--json] 执行 (3)/(4)/(5) 的机械消解（(4) 的 take-develop 文档集合 = TAKE_DEVELOP_DOC_RULES 注册表：tick doc + outline；同一注册表也渲染 worker prompt 的 (1) 段）；--judge <rel> <status> 只给判定不动仓库）；--render-prompt-rules 只打印注册表渲染出的 prompt 规则（负臂用）；契约检查按 plugin/test/worker-driver-resident-s07.test.mjs（import conflictAction/dualCopyPeer/isDualCopyFile/isTickDoc/isTakeDevelopDoc/takeDevelopDocRule/takeDevelopDocPromptRules/resolveConflictMechanically 断言真实 git 行为，负臂把规则表改错后重跑 --judge 必 manual/exit 1，证明验的是行为不是 prompt 字符串在场）。条件=要机械消解 fan-in 冲突的 (3) dual-copy 两副本 byte-identical / (4) tick-doc 直取 develop / (5) modify-delete 删除侧三类规则，而不是从 worker prompt 散文重新推导",
+    "fs-path.ts": "谁按：plugin/scripts 下把「别人写的路径」与「自己派生的路径」做字符串比较的工具 —— 本次读数 5 个载体（archguard-runner / resolve-quay-cli / meta-driver / slice-readings / routine-file-gate）import 本模块的 realpathOrResolve；条件=比较前要抹平符号链接与别名拼写差异、且路径可能不存在，⛔ 不是各自手搓一份 try-realpathSync-catch-path.resolve"
   },
   "SUPERSEDED": {
     "send-keys-verified.sh": "REMOVED 2026-08-10 (gap-retired-script-still-callable, human ruling) — superseded by send-keys-reliable.sh under outer ruling F (2026-08-04); its md5 pane-hash criterion is ADR-016-forbidden. Deleted with its test (send-keys-verified.test.mjs) and leak doc (send-keys-verified-test-leaks-tmux-servers.md). Crystallization residue poisons context — the implementation must NOT exist.",

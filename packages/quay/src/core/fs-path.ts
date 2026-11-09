@@ -7,18 +7,23 @@
 // `packages/quay/src/core/loaded-version.ts` (`normalizeProjectPath`) — all three comparing a path
 // Claude Code / archguard wrote against one this process derived. `realpathOrSelf` already existed
 // here (in `goal-store-criterion-address.ts`), so the copies were copy-instead-of-call debt, not a
-// missing abstraction. It now lives in this dependency-free leaf so BOTH surfaces can reach it:
-//   · Core (`loaded-version.ts`) imports `./fs-path.ts`;
-//   · the kernel (`plugin/scripts/*`) imports `../../packages/quay/src/core/fs-path.ts`
-//     (plugin → packages is the recognised direction; the reverse is the `reverseEdges` ratchet).
-// `goal-store-criterion-address.ts` re-exports it, so every historical importer keeps its path
-// (hard rule 5b: one implementation, not a re-write).
+// missing abstraction. It now lives in this dependency-free leaf so Core modules can import it
+// without dragging in the goal-store closure; `goal-store-criterion-address.ts` re-exports it, so
+// every historical importer keeps its path (hard rule 5b: one implementation, not a re-write).
 //
-// ⛔ It is deliberately NOT imported by `plugin/scripts/resolve-quay-cli.ts`: that file is the
-// zero-dependency reference implementation of `docs/references/external-consumer-cli-location.md`
-// and runs from a plugin cache directory that carries no `packages/` tree (see its own header).
-// That one residual copy is a packaging constraint, not an oversight — recorded in the task's
-// disposition.
+// ⚠️ TWO PREDICATES ON PURPOSE — this one and `plugin/scripts/fs-path.ts#realpathOrResolve`:
+//   · This one is the WIDER form (realpath; on ENOENT resolve the longest EXISTING ancestor and
+//     re-append the remaining segments) — used where a not-yet-created goal/criterion worktree path
+//     must compare equal to what git will record for it.
+//   · The kernel leaf is the EXACT `realpath, else path.resolve` fallback the kernel tools always
+//     used. It cannot live here-and-be-imported by the kernel alone: Core may not import the
+//     plugin, resolve-quay-cli ships into a plugin cache with no `packages/` tree, and the shipped
+//     kernel bundles only inline `packages/quay/src` at BUILD time. The two differ ONLY when the
+//     path does not exist, where both are used for string comparison.
+//   ⇒ `resolve-quay-cli.ts` and `loaded-version.ts` implement the SAME session-tier rule (the
+//     catalog records that they must move together); both compare project paths, and on a
+//     nonexistent projectPath neither spelling can match an existing `root`, so the wider form
+//     here cannot flip a match either way.
 
 import fs from "node:fs";
 import path from "node:path";

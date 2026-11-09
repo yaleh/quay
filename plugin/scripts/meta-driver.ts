@@ -102,6 +102,9 @@ import { extractSectionContent, OVERRIDE_SECTION } from "./dispatch-preference-c
 // 正则转义的单一真相源（同 24 个 plugin/scripts 消费者）——下面的 nextSequenceId 由字面前缀拼正则，
 // ⛔ 不在此处内联第二份 escaper（那正是本任务要消掉的重复的同类）。
 import { escapeRegExp } from "./regex-escape.ts";
+// path 规范化（realpath 优先、失败回落 path.resolve）的单一实现 —— ⛔ 不在此处内联第二份
+// （tasks/gap-routine-semantic-dedup-scan-normalize-path-triple）。
+import { realpathOrResolve } from "./fs-path.ts";
 
 /** 载体：每轮一条记录（与 quality-round.jsonl 同族，gitignored 运行时状态）。 */
 export const ROUND_CARRIER_REL = path.join(".quay", "meta-driver-round.jsonl");
@@ -2091,8 +2094,7 @@ function readArmTime(at: unknown, nowMs: number): { at: string | null; ageMs: nu
 /** 同一工作区？两次 realpath 都成功才比 realpath（worktree 常经 symlink），否则退回 path.resolve。
  *  载体描述的是**另一个**工作区时不能采用：那是「读数在，但不是这一轮的这块板」（硬规则 5）。 */
 function sameWorkspace(carrierRoot: string, root: string): boolean {
-  const norm = (p: string): string => { try { return fs.realpathSync(p); } catch { return path.resolve(p); } };
-  return norm(carrierRoot) === norm(root);
+  return realpathOrResolve(carrierRoot) === realpathOrResolve(root);
 }
 
 function unevaluatedArm(reason: string, carrierProblem: string | null): ParkingArmBase {

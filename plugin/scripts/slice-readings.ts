@@ -93,6 +93,9 @@ import {
 import type { SubsystemSpec } from "./design-evolution-readings.ts";
 // Touches 的唯一 bullet 解析器（⛔ 不写第二份正则）。
 import { extractTouchesSection, parseTouchEntries } from "./touches-parser.ts";
+// path 规范化的单一实现（realpath 优先、失败回落 path.resolve）—— ⛔ 不在此处内联第二份
+// （tasks/gap-routine-semantic-dedup-scan-normalize-path-triple）。
+import { realpathOrResolve } from "./fs-path.ts";
 
 // ── Carrier + schema ─────────────────────────────────────────────────────────────────────────────
 
@@ -581,14 +584,7 @@ export function readScopeArch(workDir: string, analyzedRoot: string, source: str
   } catch {
     /* not fatal — compare the literal spelling too */
   }
-  const norm = (p: unknown): string => {
-    if (typeof p !== "string") return "";
-    try {
-      return fs.realpathSync(p);
-    } catch {
-      return path.resolve(p);
-    }
-  };
+  const norm = (p: unknown): string => (typeof p !== "string" ? "" : realpathOrResolve(p));
   const matches = entries.filter(
     (e) => Array.isArray(e?.sources) && e.sources.some((s: unknown) => norm(s) === real || norm(s) === abs),
   );

@@ -278,14 +278,11 @@ export function parseManifestText(text: string): ManifestParse {
  * ⛔ NOT fixed by deleting `.archguard/` and regenerating: the analyzer would write the symlink
  * spelling again (that is the path it is invoked through), so the defect would only move later.
  */
-export function canonicalPath(p: string): string {
-  const resolved = path.resolve(p);
-  try {
-    return fs.realpathSync(resolved);
-  } catch {
-    return resolved;
-  }
-}
+import { realpathOrResolve as canonicalPath } from "./fs-path.ts";
+// 谓词与 `plugin/scripts/fs-path.ts` 的 `realpathOrResolve` 相同（realpath 优先，失败回落
+// `path.resolve`）—— 本名保留给本文件的历史调用点，实现只有一份（硬规则 5b；旧版在这里内联了第三份
+// try/realpathSync/catch/path.resolve，tasks/gap-routine-semantic-dedup-scan-normalize-path-triple）。
+export { canonicalPath };
 
 /**
  * Turn an absolute manifest source into a repo-relative `/`-separated path.
