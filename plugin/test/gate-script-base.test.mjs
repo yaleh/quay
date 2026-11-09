@@ -29,6 +29,7 @@ import {
   resolveRoot,
   parseJsonArg,
   createSelftest,
+  createAssertionAccumulator,
   readJsonLines,
   readJsonlLines,
   readJsonOrNull,
@@ -1795,4 +1796,242 @@ test("appendJsonlLineStrict: a write failure THROWS (⛔ unlike the best-effort 
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }
+});
+
+// ── createAssertionAccumulator: the non-fail-fast `ok(cond, msg)` printer is a single source ────────
+//
+// semantic-dedup-scan finding `ok-assertion-accumulator` (`.quay/routine-findings.jsonl`, routine
+// `semantic-dedup-scan`, runId `semantic-dedup-scan-1794222946369`, kind `byte-identical-body`,
+// verdict `real-duplication`, requested action `extract`) named two carriers that each declared a
+// module-level `let failures = 0` plus a byte-identical `ok(cond, msg)` PASS/FAIL printer:
+//   plugin/scripts/codex-stage1-live-proof-audit.ts:39
+//   plugin/scripts/codex-stage1-live-proof-check.ts:38
+// Both now delegate to `createAssertionAccumulator`. The finding's Effect Prediction is
+// `concept_recurs_after_merge: false`, so the ratchet below is FAMILY-WIDE: a third private copy
+// cannot reappear anywhere under plugin/scripts without reddening it.
+//
+// ⛔ The predicate is STRUCTURAL and POSITIONAL (硬规则 2): it matches the printer's BODY, not the
+// name `ok` — a name test would (a) miss a copy renamed `assertOk` and (b) red on the unrelated
+// `ok(payload)` MCP response helper. Comment/code-position is handled by codeOnlyText where a
+// declaration is what matters; the body predicate below runs on the raw source because the emitted
+// `PASS:`/`FAIL:` template literals ARE the idiom being detected.
+
+/** The printer's body, whitespace-insensitive: `if (cond) console.log(`PASS: ${msg}`); else
+ *  { failures++; console.error(`FAIL: ${msg}`); }`. */
+const OK_ASSERTION_PRINTER_RE =
+  /if\((\w+)\)console\.log\(`PASS:\$\{(\w+)\}`\);else\{(?:\w+\+\+|\w+\+=1);console\.error\(`FAIL:\$\{(\w+)\}`\);\}/;
+
+/** Pre-extraction bodies, verbatim from `develop` at the commit before this finding was disposed.
+ *  Known-true samples (硬规则 4c): a predicate that stopped matching the real idiom must go RED here
+ *  rather than passing vacuously. */
+const OK_ASSERTION_PRE_EXTRACTION_SAMPLES = [
+  `let failures = 0;
+function ok(cond: boolean, msg: string): void {
+  if (cond) console.log(\`PASS: \${msg}\`);
+  else {
+    failures++;
+    console.error(\`FAIL: \${msg}\`);
+  }
+}`,
+  // The same body with `failures += 1` — accepted so a future re-copy spelled that way is caught too.
+  `function ok(cond: boolean, msg: string): void {
+  if (cond) console.log(\`PASS: \${msg}\`);
+  else {
+    failures += 1;
+    console.error(\`FAIL: \${msg}\`);
+  }
+}`,
+];
+
+/** Neighbours with DIFFERENT contracts that must NOT match, or the ratchet reds on legitimate code
+ *  and gets "fixed" by weakening it. */
+const NOT_AN_OK_PRINTER_SAMPLES = [
+  // createSelftest's "counters" flavor: FAIL-only (a passing case prints nothing), no PASS arm.
+  `  if (condition) {
+      pass++;
+      return;
+    }
+    fail++;
+    console.error(\`FAIL: \${name}\${detail ? \` — \${detail}\` : ""}\`);`,
+  // makeCliFail: a usage/environment-error reporter, prefixes instead of PASS/FAIL, returns 2.
+  `    if (asJson) console.log(JSON.stringify({ ok: false, error: msg }));
+    else console.error(\`\${prefix}: \${msg}\`);
+    return 2;`,
+  // control-plane-http.ts:84 — an MCP RESPONSE helper (builds an object, prints nothing).
+  `  const ok = (payload: unknown) => ({
+    content: [{ type: "text", text: JSON.stringify(payload) }],
+  });`,
+];
+
+/** The two files the finding named (its "involved files"). */
+const OK_ASSERTION_FORMER_CARRIERS = [
+  "codex-stage1-live-proof-audit.ts",
+  "codex-stage1-live-proof-check.ts",
+];
+
+const OK_STRIP_WS = (s) => s.replace(/\s+/g, "");
+
+test("createAssertionAccumulator: the predicate MATCHES both pre-extraction bodies (guards against a vacuous ratchet)", () => {
+  for (const [i, sample] of OK_ASSERTION_PRE_EXTRACTION_SAMPLES.entries()) {
+    assert.match(
+      OK_STRIP_WS(sample),
+      OK_ASSERTION_PRINTER_RE,
+      `the scan would have MISSED pre-extraction printer sample #${i + 1} — the ratchet is vacuous`,
+    );
+  }
+  for (const [i, sample] of NOT_AN_OK_PRINTER_SAMPLES.entries()) {
+    assert.doesNotMatch(
+      OK_STRIP_WS(sample),
+      OK_ASSERTION_PRINTER_RE,
+      `neighbour #${i + 1} has a DIFFERENT contract and must not match`,
+    );
+  }
+});
+
+test("createAssertionAccumulator: the ok(cond,msg) printer is declared NOWHERE under plugin/scripts", () => {
+  const defs = scriptTsFiles().filter((f) => OK_ASSERTION_PRINTER_RE.test(OK_STRIP_WS(sourceOf(f))));
+  assert.deepEqual(
+    defs,
+    [],
+    `no module-level ok(cond,msg) PASS/FAIL printer may be declared (use createAssertionAccumulator); found in: ${defs.join(", ") || "none"}`,
+  );
+});
+
+test("createAssertionAccumulator: no former carrier re-inlines the printer, and each IMPORTS and CALLS the shared one", () => {
+  for (const f of OK_ASSERTION_FORMER_CARRIERS) {
+    const src = sourceOf(f);
+    assert.doesNotMatch(src, OK_ASSERTION_PRINTER_RE, `${f} must not re-inline the printer body`);
+    assert.doesNotMatch(
+      codeOnlyText(src),
+      /^\s*let\s+failures\b/m,
+      `${f} must not keep its own module-level failure tally`,
+    );
+    // Deleting the private copy without importing the shared one would still link-check, so this half
+    // is not redundant — it distinguishes "extracted" from "deleted".
+    assert.match(
+      src,
+      /import \{[^}]*\bcreateAssertionAccumulator\b[^}]*\} from "\.\/gate-script-base\.ts"/,
+      `${f} does not import createAssertionAccumulator from the base`,
+    );
+    assert.match(src, /\bcreateAssertionAccumulator\(\)/, `${f} imports the accumulator but never constructs one`);
+    assert.match(
+      src,
+      /\bprocess\.exit\(report\(/,
+      `${f} must hand the accumulator's exit code to process.exit (report() does not exit on its own)`,
+    );
+  }
+  assert.match(
+    codeOnlyText(sourceOf("gate-script-base.ts")),
+    /export function createAssertionAccumulator\s*\(/,
+    "the shared definition lives in gate-script-base.ts",
+  );
+});
+
+test("createAssertionAccumulator: PASS lines go to stdout, FAIL lines to stderr, and report() returns the exit code", () => {
+  // All-pass arm.
+  const passing = createAssertionAccumulator();
+  const green = captureBoth(() => {
+    passing.ok(true, "alpha");
+    passing.ok(true, "beta");
+    return passing.report({ pass: "SUMMARY PASS", fail: (n) => `SUMMARY FAIL: ${n}` });
+  });
+  assert.equal(green.value, 0, "an all-passed run reports exit 0");
+  assert.equal(passing.failures, 0);
+  assert.equal(green.err(), "", "no assertion failed ⇒ nothing on stderr");
+  assert.equal(
+    green.out(),
+    "PASS: alpha\nPASS: beta\n\nSUMMARY PASS\n",
+    "PASS lines and the summary both go to stdout, separated by the blank line the carriers printed",
+  );
+
+  // Mixed arm — the tally, the stream split, and the count interpolated into the sentence.
+  const mixed = createAssertionAccumulator();
+  const red = captureBoth(() => {
+    mixed.ok(true, "alpha");
+    mixed.ok(false, "beta");
+    mixed.ok(false, "gamma");
+    return mixed.report({ pass: "SUMMARY PASS", fail: (n) => `SUMMARY FAIL: ${n} assertion(s)` });
+  });
+  assert.equal(red.value, 1, "any failure reports exit 1");
+  assert.equal(mixed.failures, 2);
+  assert.equal(red.out(), "PASS: alpha\n\n", "the pass line is stdout; the blank separator is stdout");
+  assert.equal(
+    red.err(),
+    "FAIL: beta\nFAIL: gamma\nSUMMARY FAIL: 2 assertion(s)\n",
+    "FAIL lines AND the fail summary go to stderr (failures must not pollute the pass stream)",
+  );
+});
+
+test("createAssertionAccumulator: ok() never exits or throws, so every assertion in a run is evaluated", () => {
+  const acc = createAssertionAccumulator();
+  captureBoth(() => {
+    // A fail-fast printer would stop the world here; this one must keep going and tally.
+    acc.ok(false, "first failure");
+    acc.ok(false, "second failure");
+    acc.ok(true, "still evaluated");
+  });
+  assert.equal(acc.failures, 2, "both failures were counted — the run did not stop at the first");
+});
+
+test("createAssertionAccumulator: byte-identical to the pre-extraction printer on a battery of runs", () => {
+  /** The pre-extraction implementation, kept verbatim as the oracle for BOTH streams and the exit
+   *  path (the two carriers' summary block: blank line, then pass|fail sentence, then exit 1|0). */
+  const oracle = (cases, summary) => {
+    let failures = 0;
+    const out = [];
+    const err = [];
+    const log = (...a) => out.push(a.join(" ") + "\n");
+    const errlog = (...a) => err.push(a.join(" ") + "\n");
+    for (const [cond, msg] of cases) {
+      if (cond) log(`PASS: ${msg}`);
+      else {
+        failures++;
+        errlog(`FAIL: ${msg}`);
+      }
+    }
+    log("");
+    if (failures > 0) {
+      errlog(summary.fail(failures));
+      return { code: 1, out: out.join(""), err: err.join("") };
+    }
+    log(summary.pass);
+    return { code: 0, out: out.join(""), err: err.join("") };
+  };
+  const batteries = [
+    [],
+    [[true, "only one"]],
+    [[false, "only a failure"]],
+    // The exact verdict shapes the two carriers print, plus a msg containing spaces and punctuation.
+    [[true, "label: task read back from the authoritative store (quay task view exit 0)"],
+     [false, "label: edit actually changed content (before != after)"],
+     [true, "casNegative: target content hash unchanged (before == after)"]],
+  ];
+  for (const [i, cases] of batteries.entries()) {
+    const summary = { pass: `RUN ${i} PASS`, fail: (n) => `RUN ${i} FAIL: ${n}` };
+    const want = oracle(cases, summary);
+    const acc = createAssertionAccumulator();
+    const got = captureBoth(() => {
+      for (const [cond, msg] of cases) acc.ok(cond, msg);
+      return acc.report(summary);
+    });
+    assert.equal(got.out(), want.out, `battery #${i}: stdout drifted from the pre-extraction printer`);
+    assert.equal(got.err(), want.err, `battery #${i}: stderr drifted from the pre-extraction printer`);
+    assert.equal(got.value, want.code, `battery #${i}: exit code drifted`);
+  }
+});
+
+test("createAssertionAccumulator: deleting the shared export makes a carrier import fail (the mechanism is real)", () => {
+  withTempDir("assertion-accumulator-negctl-", (dir) => {
+    fs.writeFileSync(path.join(dir, "gate-script-base.ts"), "export const OTHER = 1;\n");
+    fs.writeFileSync(
+      path.join(dir, "consumer.ts"),
+      'import { createAssertionAccumulator } from "./gate-script-base.ts";\nconsole.log(createAssertionAccumulator);\n',
+    );
+    const missing = spawnSync("node", ["--experimental-strip-types", "consumer.ts"], { cwd: dir, encoding: "utf8" });
+    assert.notEqual(missing.status, 0, "a consumer importing an absent export must fail to link");
+
+    fs.writeFileSync(path.join(dir, "gate-script-base.ts"), "export function createAssertionAccumulator() { return {}; }\n");
+    const present = spawnSync("node", ["--experimental-strip-types", "consumer.ts"], { cwd: dir, encoding: "utf8" });
+    assert.equal(present.status, 0, "the same consumer links once the export is present");
+  });
 });
