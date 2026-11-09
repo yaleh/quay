@@ -791,6 +791,77 @@ export function emitNotEvaluated(message: string, detail?: unknown, opts?: EmitO
   return emitVerdict({ status: "not-evaluated", message, detail }, opts);
 }
 
+// ── createAssertionAccumulator (the NON-fail-fast `ok(cond, msg)` printer) ───────────────────────────
+// The ONE implementation of the "assert on every line, tally the failures, report once at the end"
+// printer that SHAPE/TALLY checkers need — as opposed to a gate, which stops at the first violation.
+// Extracted — byte-identical apart from the two summary sentences — by semantic-dedup-scan finding
+// `ok-assertion-accumulator` (`.quay/routine-findings.jsonl`, routine `semantic-dedup-scan`, runId
+// `semantic-dedup-scan-1794222946369`, kind `byte-identical-body`, verdict `real-duplication`,
+// requested action `extract`), which named its two carriers:
+//   plugin/scripts/codex-stage1-live-proof-audit.ts:39 (module-level `let failures` + `ok`)
+//   plugin/scripts/codex-stage1-live-proof-check.ts:38 (the same body)
+// The `ok()` at packages/quay/src/kernel/control-plane-http.ts:84 is NOT a copy — it builds an MCP
+// response object and prints nothing.
+//
+// ⛔ BUILT ON emitPass/emitFail, NOT REPLACED BY THEM. `emitFail` RETURNS exit code 1 per call, and a
+// checker that must report ALL violations cannot use that to announce each one: the exit code belongs
+// to the END of the run. So the per-assertion LINES go through the shared verdict emitter (the
+// `PASS: `/`FAIL: ` spelling and the stdout/stderr split stay single-sourced) while the TALLY and the
+// final exit code live here.
+//
+// ⛔ THREE-STATE (硬规则 3b): a NOT-EVALUATED reading must NOT be routed through `ok(false, …)` — that
+// renders it identically to a PROVEN failure. A caller with a third state emits it via
+// `emitNotEvaluated` (exit code 3 in `VERDICT_EXIT_CODE`) and does not put it through this accumulator.
+//
+// The caller keeps its own summary sentences (they are load-bearing: `AUDIT PASS:` / `SHAPE-ONLY
+// PASS:` say different things), so `report` prints them verbatim and takes only the exit code from the
+// shared mapping. Output is preserved EXACTLY, including the blank separator line on stdout.
+
+export interface AssertionSummary {
+  /** Printed on stdout when every assertion passed. */
+  pass: string;
+  /** Printed on stderr when at least one assertion failed. Receives the failure count, so the
+   *  sentence and the tally can never disagree. */
+  fail: (failures: number) => string;
+}
+
+export interface AssertionAccumulator {
+  /** Assert one condition. `true` prints `PASS: <msg>` on stdout; `false` prints `FAIL: <msg>` on
+   *  stderr and bumps the tally. Never exits and never throws. */
+  ok(cond: boolean, msg: string): void;
+  /** How many assertions have failed so far (final once every `ok()` call has run). */
+  readonly failures: number;
+  /** Print the blank separator line, then the pass/fail summary; return the exit code (0 | 1) from
+   *  `VERDICT_EXIT_CODE`. Does NOT call `process.exit` — the caller owns that. */
+  report(summary: AssertionSummary): number;
+}
+
+export function createAssertionAccumulator(): AssertionAccumulator {
+  let failures = 0;
+  const ok = (cond: boolean, msg: string): void => {
+    if (cond) {
+      emitPass(msg);
+      return;
+    }
+    failures++;
+    emitFail(msg, undefined, { stream: "stderr" });
+  };
+  const report = (summary: AssertionSummary): number => {
+    console.log("");
+    if (failures > 0) {
+      console.error(summary.fail(failures));
+      return VERDICT_EXIT_CODE.fail;
+    }
+    console.log(summary.pass);
+    return VERDICT_EXIT_CODE.pass;
+  };
+  return {
+    ok,
+    get failures() { return failures; },
+    report,
+  };
+}
+
 // ── requireArg ──────────────────────────────────────────────────────────────────────────────────────
 // Check that a value is present (not undefined, null, or empty string).
 // Exits with code 2 if the value is missing.
