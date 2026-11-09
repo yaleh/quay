@@ -56,7 +56,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { helpExit, isDirectEntry, flagValue } from "./gate-script-base.ts";
+import { helpExit, isDirectEntry, flagValue, compileGlobPattern, GLOB_DIALECTS } from "./gate-script-base.ts";
 import { countCodeLines } from "./sh-census-check.ts";
 import { checkBaselineShrinkOnly as checkBaselineShrinkOnlyShared } from "./ratchet-baseline.ts";
 
@@ -89,15 +89,11 @@ export function parseRules(text: string): ShippedSetRule[] {
   return rules;
 }
 
-/** rsync's glob, spelled once: `*` never crosses `/`, `?` is one non-`/` character. */
+/** rsync's glob, spelled once: `*` never crosses `/`, `?` is one non-`/` character. This is the
+ *  `rsync` dialect of the ONE compiler in ./gate-script-base.ts (finding `glob-to-regexp-family`);
+ *  the alias keeps the historical 1-arg signature so callers and tests import it from here. */
 export function globToRegExp(glob: string): RegExp {
-  let out = "";
-  for (const ch of glob) {
-    if (ch === "*") out += "[^/]*";
-    else if (ch === "?") out += "[^/]";
-    else out += ch.replace(/[.+^${}()|[\]\\]/g, "\\$&");
-  }
-  return new RegExp(`^${out}$`);
+  return compileGlobPattern(glob, GLOB_DIALECTS.rsync);
 }
 
 /** Does ONE rule match this artifact-relative path? `dirOnly` rules only ever match directories. */

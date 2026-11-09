@@ -43,7 +43,7 @@ import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { parse as parseYaml } from "yaml";
-import { isDirectEntry } from "./gate-script-base.ts";
+import { isDirectEntry, compileGlobPattern, GLOB_DIALECTS } from "./gate-script-base.ts";
 import { git, nonEmptyLines } from "./git-runner.ts";
 
 // ── the declared model (a shipped twin of packages/quay/src/core/config.ts's reader) ─────────────
@@ -161,15 +161,12 @@ export function readReleaseModel(startDir: string): ReleaseModelResolution {
 // ── glob → branch matching (shared by the carriers, so they cannot disagree) ─────────────────────
 
 /** Convert ONE shell-style glob (`*`, `?`) to an anchored RegExp. Kept deliberately small: the
- *  strings it sees are branch-name patterns, not arbitrary regexes. */
+ *  strings it sees are branch-name patterns, not arbitrary regexes — hence the `branch` dialect of
+ *  the ONE compiler in ./gate-script-base.ts (finding `glob-to-regexp-family`): both `*` and `?`
+ *  may cross `/`, because a `/` is part of a branch NAME (`rel/*` must match `rel/1.0`). The alias
+ *  keeps the historical 1-arg signature so callers and tests import it from here unchanged. */
 export function globToRegExp(glob: string): RegExp {
-  let out = "^";
-  for (const ch of glob) {
-    if (ch === "*") out += ".*";
-    else if (ch === "?") out += ".";
-    else out += ch.replace(/[.+^${}()|[\]\\]/g, "\\$&");
-  }
-  return new RegExp(out + "$");
+  return compileGlobPattern(glob, GLOB_DIALECTS.branch);
 }
 
 /** A predicate over branch names built from the DECLARED globs. */
