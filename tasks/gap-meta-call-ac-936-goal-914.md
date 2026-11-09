@@ -1,7 +1,7 @@
 ---
 id: gap-meta-call-ac-936-goal-914
 title: AC-936 的裁定：GOAL-914 的退出条件还要不要停在一个只有人能产生的载体上
-status: needs-human
+status: todo
 labels:
   - meta-human-call
   - meta-driver
