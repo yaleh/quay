@@ -2540,13 +2540,20 @@ function writeCarrier(root, lines) {
 }
 // 一条当前轮的机械 divergence（不含 repeatCount——由 computeDivergenceRecurrence 补上）。
 const recurDiv = (id, kind) => ({ id, kind, status: 'active', verdict: 'pass', reason: 'x' });
+// 读载体并**断言读全了**（readMetaCarrier 现返回三态结果：ok=false ⇔ 读不懂，⛔ 不与「没有历史」同形）。
+// 这里断言 ok 是刻意的：正常的夹具载体必须可读，读不懂就是红——⛔ 不让 `.records` 取到 undefined 后静默跑偏。
+function readMetaRecords(root) {
+  const r = readMetaCarrier(root);
+  assert.equal(r.ok, true, `fixture carrier must be readable (got code=${r.code})`);
+  return r.records;
+}
 
 test('重复计数: 同一 (id,kind) 连续 5 轮 ⇒ 计数 5，且 lastRecommendation 取最近一次', () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'meta-driver-recur-'));
   try {
     const interp = (rec) => [{ id: 'AC-177', kind: 'pass-but-unflipped', interpretation: 'x', recommendation: rec }];
     writeCarrier(tmp, ['rec-1', 'rec-2', 'rec-3', 'rec-4', 'rec-5'].map((r) => mkJudgeRecord(interp(r))));
-    const recurrence = computeDivergenceRecurrence(extractJudgeRounds(readMetaCarrier(tmp)), [recurDiv('AC-177', 'pass-but-unflipped')]);
+    const recurrence = computeDivergenceRecurrence(extractJudgeRounds(readMetaRecords(tmp)), [recurDiv('AC-177', 'pass-but-unflipped')]);
     const got = recurrence.get(divergenceKey('AC-177', 'pass-but-unflipped'));
     assert.equal(got.repeatCount, 5, '连续 5 轮 ⇒ 计数 5');
     assert.equal(got.lastRecommendation, 'rec-5', 'lastRecommendation 必须是最近（最晚）一轮的原文');
@@ -2559,7 +2566,7 @@ test('重复计数: 空载体 ⇒ 计数 0、lastRecommendation null（能取假
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'meta-driver-recur-empty-'));
   try {
     writeCarrier(tmp, []);
-    const recurrence = computeDivergenceRecurrence(extractJudgeRounds(readMetaCarrier(tmp)), [recurDiv('AC-177', 'pass-but-unflipped')]);
+    const recurrence = computeDivergenceRecurrence(extractJudgeRounds(readMetaRecords(tmp)), [recurDiv('AC-177', 'pass-but-unflipped')]);
     const got = recurrence.get(divergenceKey('AC-177', 'pass-but-unflipped'));
     assert.equal(got.repeatCount, 0, '空载体 ⇒ 0，⛔ 不冒充「读失败」');
     assert.equal(got.lastRecommendation, null);
@@ -2580,7 +2587,7 @@ test('重复计数: 连续 = 直到遇到一个不含该 (id,kind) 的判读轮�
       mkJudgeRecord(a('AC-177')),
       mkJudgeRecord(a('AC-177')),
     ]);
-    const recurrence = computeDivergenceRecurrence(extractJudgeRounds(readMetaCarrier(tmp)), [recurDiv('AC-177', 'pass-but-unflipped')]);
+    const recurrence = computeDivergenceRecurrence(extractJudgeRounds(readMetaRecords(tmp)), [recurDiv('AC-177', 'pass-but-unflipped')]);
     const got = recurrence.get(divergenceKey('AC-177', 'pass-but-unflipped'));
     assert.equal(got.repeatCount, 3, '中间一轮判读未提 177 ⇒ 连续被打破，只数 3');
     assert.equal(got.lastRecommendation, 'r-AC-177');
@@ -2597,9 +2604,82 @@ test('重复计数: 空心跳（facts=[]）与 skipped 轮不打断连续（它�
     const judge = mkJudgeRecord([{ id: 'AC-177', kind: 'pass-but-unflipped', interpretation: 'x', recommendation: 'r-177' }]);
     // 旧→新：判读(177) / 心跳 / skipped / 判读(177)
     writeCarrier(tmp, [judge, heartbeat, skipped, judge]);
-    const recurrence = computeDivergenceRecurrence(extractJudgeRounds(readMetaCarrier(tmp)), [recurDiv('AC-177', 'pass-but-unflipped')]);
+    const recurrence = computeDivergenceRecurrence(extractJudgeRounds(readMetaRecords(tmp)), [recurDiv('AC-177', 'pass-but-unflipped')]);
     const got = recurrence.get(divergenceKey('AC-177', 'pass-but-unflipped'));
     assert.equal(got.repeatCount, 2, '心跳/skipped 不产生建议 ⇒ 不打断连续，两轮判读都算');
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+// ── 载体超过 V8 最大字符串长度（gap-meta-readmetacarrier）─────────────────────────────────────
+// 缺陷现场（2026-11-10）：`.quay/meta-driver-round.jsonl` 实测 2,236,702,877 B（39,320 行）——大于 V8 的
+// 最大字符串长度 0x1fffffe8 ⇒ 旧 `readRoundCarrier` 的整文件 `fs.readFileSync(rel,"utf8")` 抛
+// ERR_STRING_TOO_LONG，被 `catch { return [] }` 吞成「没有历史」⇒ `computeDivergenceRecurrence` 对每条
+// (id,kind) 恒报 repeatCount=0（= 「本轮首次」）⇒ 重复建议的自纠机制整条失效。**读不懂 ≠ 没有历史**。
+//
+// 夹具是**稀疏**的：`ftruncate` 造洞，st_size 超过 V8 上限而盘上只占几 KB（⛔ 不在测试进程里造 512 MB
+// 字符串）。布局：[判读记录]\n[洞（无换行符）][判读记录]\n —— 洞构成一条超预算行，正是「读不动」的形态。
+// ⛔ `fs.writeSync(fd, string, ...)` 的 5 参数重载不按 (offset,length,position) 解释：尾部必须传 Buffer。
+const V8_MAX_STRING_LENGTH = 0x1fffffe8;
+function makeSparseRoundCarrier(root, size = V8_MAX_STRING_LENGTH + 4096) {
+  const p = path.join(root, '.quay', 'meta-driver-round.jsonl');
+  fs.mkdirSync(path.dirname(p), { recursive: true });
+  const head = Buffer.from(mkJudgeRecord([{ id: 'AC-177', kind: 'pass-but-unflipped', interpretation: 'x', recommendation: 'rec-1' }]) + '\n');
+  const tail = Buffer.from(mkJudgeRecord([{ id: 'AC-177', kind: 'pass-but-unflipped', interpretation: 'x', recommendation: 'rec-2' }]) + '\n');
+  const fd = fs.openSync(p, 'w');
+  fs.writeSync(fd, head);
+  fs.ftruncateSync(fd, size);
+  fs.writeSync(fd, tail, 0, tail.length, size - tail.length);
+  fs.closeSync(fd);
+  return p;
+}
+
+test('oversize carrier: readMetaCarrier streams (or reports a distinguishable not-evaluated), never a silent "no history"', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'meta-driver-oversize-'));
+  try {
+    const p = makeSparseRoundCarrier(tmp);
+    const size = fs.statSync(p).size;
+    assert.ok(size > V8_MAX_STRING_LENGTH, `fixture must exceed V8's max string length, got ${size}`);
+    assert.ok(fs.statSync(p).blocks * 512 < 1024 * 1024, 'fixture must be SPARSE (a few KB on disk, not 512 MB)');
+
+    // ── 负控制 = 被删掉的那一行本身 ────────────────────────────────────────────────────────────
+    // 旧的整文件读必须在这个夹具上真的抛；否则夹具什么也没证明（硬规则②：对已知为真的样本干跑）。
+    assert.throws(
+      () => fs.readFileSync(p, 'utf8'),
+      (e) => e.code === 'ERR_STRING_TOO_LONG',
+      'negative control: the removed whole-file read must fail on this fixture',
+    );
+
+    // ── 结构性判据：这条路径上一次都不许整文件读载体 ────────────────────────────────────────────
+    // 「把 readFileSync 包进 try/catch」不合格——那样它仍会读、仍会抛、只是被吞掉（正是旧缺陷）。
+    const realReadFileSync = fs.readFileSync;
+    const wholeFileReads = [];
+    fs.readFileSync = function (target, ...rest) {
+      if (String(target) === p) wholeFileReads.push(String(target));
+      return realReadFileSync.apply(this, [target, ...rest]);
+    };
+    let r;
+    try {
+      r = readMetaCarrier(tmp);
+    } finally {
+      fs.readFileSync = realReadFileSync;
+    }
+    assert.deepEqual(wholeFileReads, [], 'the whole-file read must be GONE from this path, not merely try/caught');
+
+    // ── AC 的析取：要么流式读出真实记录（非空），要么给出可区分的 unreadable/未评估信号 ──────────
+    const streamsRealRecords = r && r.ok === true && Array.isArray(r.records) && r.records.length > 0;
+    const distinguishableUnreadable = r && r.ok === false && typeof r.code === 'string' && r.code.length > 0;
+    assert.ok(
+      streamsRealRecords || distinguishableUnreadable,
+      `readMetaCarrier must not silently report "no history": got ${JSON.stringify(r)}`,
+    );
+    // 旧缺陷的形状（裸空数组 = 「没有历史」）必须不再出现——这就是本条要消灭的那个同形。
+    assert.ok(!Array.isArray(r), '⛔ must not return a bare [] (the silent "no history" shape)');
+
+    // 稀疏洞 > 单行读取预算（16 MiB）⇒ 这一行读不懂 ⇒ 明确记在 code 上，⛔ 不给偏小的记录集。
+    assert.equal(r.ok, false);
+    assert.equal(r.code, 'line-too-long');
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }

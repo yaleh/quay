@@ -105,6 +105,11 @@ import { escapeRegExp } from "./regex-escape.ts";
 // path 规范化（realpath 优先、失败回落 path.resolve）的单一实现 —— ⛔ 不在此处内联第二份
 // （tasks/gap-routine-semantic-dedup-scan-normalize-path-triple）。
 import { realpathOrResolve } from "./fs-path.ts";
+// 逐行流式读取的单一实现 —— `readRoundCarrier` 用它读 2.2 GB 的轮载体（整文件 readFileSync 会在
+// V8 最大字符串长度 0x1fffffe8 处抛 ERR_STRING_TOO_LONG）。⛔ 不在本文件再写一份逐行读取器
+// （gap-meta-readmetacarrier DoD：不新建并行机制；`streamLines` 来自
+// gap-prod-data-audit-whole-file-read-crashes-on-carrier-over-v8-string-limit 已落地的机制）。
+import { streamLines } from "./prod-data-audit.ts";
 
 /** 载体：每轮一条记录（与 quality-round.jsonl 同族，gitignored 运行时状态）。 */
 export const ROUND_CARRIER_REL = path.join(".quay", "meta-driver-round.jsonl");
@@ -227,11 +232,18 @@ export interface Divergence {
   /** 【重复计数】已连续多少轮产生同一 (id, kind) 的建议——从它自己的载体
    *  `.quay/meta-driver-round.jsonl` 机械算出，⛔ 不进 readingsDigest：它每轮都可能 +1，
    *  进了会让摘要恒不相等、变化检测闸失效（硬规则 4 推论一，同 staleSecs/记录数的道理）。
-   *  0 = 本轮首次，或载体里无此键（无历史）。这是【算术】不是判断——判断留给语义半。 */
-  repeatCount?: number;
+   *  0 = 本轮首次，或载体里无此键（无历史）。这是【算术】不是判断——判断留给语义半。
+   *  `null` = **未评估**（载体读不懂，见 recurrenceEvaluated）——⛔ 与 0（本轮首次）同形。 */
+  repeatCount?: number | null;
   /** 上次同一 (id, kind) 建议的 recommendation 原文（无历史 ⇒ null）。逐条带原文，
    *  ⛔ 不只给一个总数（SPEC §5.3：不枚举对象、零指引价值）。 */
   lastRecommendation?: string | null;
+  /** 重复计数这一维**是否被评估过**（硬规则 3b）：false ⇔ 载体读不懂 ⇒ repeatCount=null。
+   *  ⛔ 不是布尔化的「有/没有历史」——那是 repeatCount=0 的语义，两者必须分开。 */
+  recurrenceEvaluated?: boolean;
+  /** 未评估时的成因（载体读失败的错误码，如 `line-too-long` / `EACCES`）。
+   *  只在 recurrenceEvaluated=false 时出现；缺 ⇒ 不臆造一个（硬规则 6）。 */
+  recurrenceCause?: string;
 }
 
 /** 【惰性守卫读数】三态（硬规则 3b）。⛔ 不是 `string[]`。
@@ -725,24 +737,58 @@ export function extractJudgeRounds(records: Array<Record<string, unknown>>): Arr
   return out;
 }
 
-/** 通用轮载体读取：解析 jsonl（坏行跳过，⛔ 一行坏 JSON 不使机制失明）。读不到 ⇒ 空数组
- *  （「没有历史」——⛔ 不返回 null 冒充「读失败」，硬规则 6）。单一真相源：meta 载体与 goal 载体
- *  共用这一条读取逻辑（⛔ 不各写一份解析，硬规则 5b）。 */
-export function readRoundCarrier(root: string, rel: string): Array<Record<string, unknown>> {
-  let text: string;
-  try { text = fs.readFileSync(path.join(root, rel), "utf8"); } catch { return []; }
-  const out: Array<Record<string, unknown>> = [];
-  for (const line of text.split("\n")) {
-    const t = line.trim();
-    if (!t) continue;
-    try { out.push(JSON.parse(t) as Record<string, unknown>); } catch { /* 坏行跳过 */ }
+/** 轮载体读取的**三态**结果（硬规则 3b）。
+ *
+ *  缺陷本体（gap-meta-readmetacarrier）：旧实现整文件 `fs.readFileSync(rel,"utf8")`，而生产
+ *  `.quay/meta-driver-round.jsonl` 已达 2.2 GB > V8 的最大字符串长度 0x1fffffe8 ⇒ `ERR_STRING_TOO_LONG`
+ *  被 `catch { return [] }` 吞成「没有历史」⇒ `computeDivergenceRecurrence` 对每条 (id,kind) 恒报
+ *  repeatCount=0（= 「本轮首次」），重复建议的自纠机制整条失效。**读不懂输入与「没有历史」同形**。
+ *
+ *  ⇒ 独立取值：`ok:true` 才是「读全了」（文件不存在 = 真的没有历史，也是 ok:true + 空数组）；
+ *    `ok:false` = 载体【存在但读不懂】（I/O 错、单行超预算），调用方必须与「没有历史」分开处置。 */
+export type RoundCarrierRead =
+  | { ok: true; records: Array<Record<string, unknown>> }
+  | { ok: false; code: string };
+
+/** 通用轮载体读取：**流式**逐行解析 jsonl（坏行跳过，⛔ 一行坏 JSON 不使机制失明），
+ *  ⛔ 从不把整个载体物化成一条字符串（峰值内存与文件大小无关）。单一真相源：meta 载体与 goal 载体
+ *  共用这一条读取逻辑（⛔ 不各写一份解析，硬规则 5b）。
+ *
+ *  流式读取复用 `prod-data-audit.ts` 的 `streamLines`（gap-prod-data-audit-whole-file-read-crashes-on-
+ *  carrier-over-v8-string-limit 建立的既有机制）——⛔ 不在这里再写一份逐行读取器（DoD：不新建并行机制）。
+ *  单行超过 `MAX_LINE_CHARS` ⇒ 这一行读不懂 ⇒ 整次读取作废（`ok:false, code:"line-too-long"`），
+ *  ⛔ 不给一个偏小的记录集冒充实历史。 */
+export function readRoundCarrier(root: string, rel: string): RoundCarrierRead {
+  const file = path.join(root, rel);
+  // 不存在 = 「没有历史」（硬规则 3b 的合法一支），⛔ 不是读失败；其余 stat 错误 = 读不懂。
+  try { fs.statSync(file); } catch (e) {
+    const code = (e as NodeJS.ErrnoException)?.code;
+    if (code === "ENOENT" || code === "ENOTDIR") return { ok: true, records: [] };
+    return { ok: false, code: typeof code === "string" && code.length > 0 ? code : "stat-error" };
   }
-  return out;
+  const records: Array<Record<string, unknown>> = [];
+  let lineTooLong = false;
+  try {
+    streamLines(file, (line) => {
+      // `null` = 这一行超出读取预算（⛔ 不是空行）⇒ 提前停：已不可能给出完整历史。
+      if (line === null) { lineTooLong = true; return false; }
+      const t = line.trim();
+      if (!t) return undefined;
+      try { records.push(JSON.parse(t) as Record<string, unknown>); } catch { /* 坏行跳过 */ }
+      return undefined;
+    });
+  } catch (e) {
+    const code = (e as NodeJS.ErrnoException)?.code;
+    return { ok: false, code: typeof code === "string" && code.length > 0 ? code : "read-error" };
+  }
+  if (lineTooLong) return { ok: false, code: "line-too-long" };
+  return { ok: true, records };
 }
 
-/** 读自己的载体（解析不了的行跳过，⛔ 不因一行坏 JSON 使机制失明）。读不到 ⇒ 空数组
- *  （「没有历史」——与 computeDivergenceRecurrence 的 0 同义，⛔ 不返回 null 冒充「读失败」）。 */
-export function readMetaCarrier(root: string): Array<Record<string, unknown>> {
+/** 读自己的载体（解析不了的行跳过，⛔ 不因一行坏 JSON 使机制失明）。
+ *  ⛔ 返回**三态结果**而不是裸数组：旧签名在载体读不懂时返回 `[]`，与「没有历史」同形 ⇒
+ *  调用侧算出的 repeatCount=0（「本轮首次」）是假的。 */
+export function readMetaCarrier(root: string): RoundCarrierRead {
   return readRoundCarrier(root, ROUND_CARRIER_REL);
 }
 
@@ -1557,17 +1603,27 @@ export async function collectReadings(root: string, cliFocus: string | null): Pr
   // handler 必须在每条偏离上非空——它是 probe 决定「报不报、报谁」的分类轴。
   const divergences = attachDivergenceHandlers(computeDivergences(criteria), drivers);
   // 重复计数：从自己的载体机械算出（⛔ 不进摘要，见 readingsDigest），逐条附到 divergence 上。
-  const recurrence = computeDivergenceRecurrence(extractJudgeRounds(readMetaCarrier(root)), divergences);
+  // 载体读不懂（`ok:false`）⇒ repeatCount/recurrenceEvaluated 出**独立取值**（null/false），
+  // ⛔ 不报 0——0 是「本轮首次」这个可取假的读数，与「没读成」同形正是本任务要消除的缺陷（硬规则 3b）。
+  const metaCarrier = readMetaCarrier(root);
+  const recurrence = metaCarrier.ok
+    ? computeDivergenceRecurrence(extractJudgeRounds(metaCarrier.records), divergences)
+    : null;
   for (const d of divergences) {
-    const r = recurrence.get(divergenceKey(d.id, d.kind));
-    d.repeatCount = r?.repeatCount ?? 0;
-    d.lastRecommendation = r?.lastRecommendation ?? null;
+    const r = recurrence?.get(divergenceKey(d.id, d.kind)) ?? null;
+    d.repeatCount = recurrence === null ? null : (r?.repeatCount ?? 0);
+    d.lastRecommendation = recurrence === null ? null : (r?.lastRecommendation ?? null);
+    d.recurrenceEvaluated = recurrence !== null;
+    if (recurrence === null) d.recurrenceCause = metaCarrier.ok ? "unknown" : metaCarrier.code;
   }
   // CLI --focus（一次性）优先；否则每轮现读文件覆盖段（常驻的人给方向通道）。两者都缺 ⇒ null。
   const focus = cliFocus ?? readFocusFile(root);
   // 时序派生层：读 goal-round 载体一次，对当前 criteria 里每个 AC 派生存续信号（⛔ 只读一次载体，
   // 每个 AC 重读一遍会线性放大 IO）。载体读不到 ⇒ 每条信号 evaluated:false（⛔ 不冒充「streak=0」）。
-  const timeSeries = deriveGoalCarrierSignals(readRoundCarrier(root, GOAL_ROUND_CARRIER_REL), criteria.map((c) => c.id));
+  // 载体读不懂（ok:false）⇒ 空记录集 ⇒ 每条信号 evaluated:false（⛔ 不与「streak=0」同形）；
+  // 与「文件不存在（真的没有历史）」在这一层同处置是安全的：两者都不得冒充「测得零」。
+  const goalCarrier = readRoundCarrier(root, GOAL_ROUND_CARRIER_REL);
+  const timeSeries = deriveGoalCarrierSignals(goalCarrier.ok ? goalCarrier.records : [], criteria.map((c) => c.id));
   // 第七类读数：动作记录失败聚合。⚠️ 这是本函数里**唯一可能长时间阻塞**的一步（真扫语料
   // 实测 ≥15 分钟）——所以它自己带 TTL 缓存，且 `scan_ttl` 未配置时从不自动扫（见该函数注释）。
   const actionRecordFailures = await collectActionRecordFailures(root);
@@ -2362,7 +2418,10 @@ export function readingsDigest(readings: MetaRoundReadings): string {
     ...readings.criteria.map((c) => `${c.id}:${c.status}:${c.verdict}:${c.cause ?? "-"}`).sort(),
     // 偏离带处理者三态（handler.state）进摘要——三态变了结论就变（如 goal-driver 由跑变停）。
     // ⛔ 不取 handler 的秒数（staleSecs）与 repeatCount/lastRecommendation：那些每轮都变。
-    ...readings.divergences.map((d) => `${d.id}:${d.kind}:${d.handler?.state ?? "no-handler"}`).sort(),
+    // 重复计数这一维**是否被评估过**进摘要（`u`/`e`，硬规则 3b）：载体从「读得出」变「读不出」时
+    // repeatCount 由真值变 null，那是一次结论变更，不写进摘要语义半就不会被唤醒去读它
+    // （gap-meta-readmetacarrier）。它不每轮变（只在载体的可读性翻转时变）⇒ 不违反「计数/时间不进摘要」。
+    ...readings.divergences.map((d) => `${d.id}:${d.kind}:${d.handler?.state ?? "no-handler"}:${d.recurrenceEvaluated === false ? "u" : "e"}`).sort(),
     // driver 只取【在跑与否】这个会改变结论的位；⛔ 不取 staleSecs/记录数——它们每轮都变，
     // 取了会让摘要恒不相等、变化检测闸失效（同 reason 文本的道理）。running=null（读不出）
     // 单独一个 token "u"，⛔ 不与 false（停摆）同形（硬规则 3b）。
