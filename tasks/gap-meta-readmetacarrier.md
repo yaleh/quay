@@ -1,7 +1,7 @@
 ---
 id: gap-meta-readmetacarrier
 title: 修复 meta-driver 的重复计数仪器：整文件读超过 V8 上限的载体时 readMetaCarrier 静默返回「没有历史」
-status: todo
+status: ready
 labels:
   - meta-driver
   - driver-candidate
